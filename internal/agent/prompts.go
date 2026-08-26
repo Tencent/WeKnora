@@ -289,10 +289,12 @@ func sandboxArtifactReferenceGuidance() string {
 	var builder strings.Builder
 	builder.WriteString("  - To show a generated file inside your answer, reference it as ")
 	builder.WriteString("`![description](sandbox:<file name>)` using the exact file name and no directory path\n")
-	builder.WriteString("    - Images render inline; charts, tables, and documents render as a card the user clicks to preview\n")
-	builder.WriteString("    - Never reference a sandbox path (`/workspace/output/...`) or a bare file name directly — ")
-	builder.WriteString("neither resolves in the browser\n")
-	builder.WriteString("    - Prefer output file names without spaces or parentheses; they keep the reference unambiguous\n")
+	builder.WriteString("    - Images render inline; charts, tables, and documents ")
+	builder.WriteString("render as a card the user clicks to preview\n")
+	builder.WriteString("    - Never reference a sandbox path (`/workspace/output/...`) ")
+	builder.WriteString("or a bare file name directly — neither resolves in the browser\n")
+	builder.WriteString("    - Prefer output file names without spaces or parentheses; ")
+	builder.WriteString("they keep the reference unambiguous\n")
 	return builder.String()
 }
 
