@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -35,6 +36,11 @@ type KnowledgeBaseHandler struct {
 	// userService 仅在 list 类接口里用于批量回填 creator_name；
 	// 真正的鉴权由 RBAC 中间件 + Lookup 完成，这里不参与决策。
 	userService interfaces.UserService
+	// fileService and storageResolver back the optional `resource_urls=public`
+	// mode on hybrid-search. Both may be nil in tests, in which case only the
+	// default handle mode is available.
+	fileService     interfaces.FileService
+	storageResolver interfaces.StorageBackendResolver
 }
 
 // NewKnowledgeBaseHandler creates a new knowledge base handler instance
@@ -46,6 +52,8 @@ func NewKnowledgeBaseHandler(
 	asynqClient interfaces.TaskEnqueuer,
 	vectorStoreService interfaces.VectorStoreService,
 	userService interfaces.UserService,
+	fileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
 ) *KnowledgeBaseHandler {
 	return &KnowledgeBaseHandler{
 		service:            service,
@@ -55,7 +63,25 @@ func NewKnowledgeBaseHandler(
 		asynqClient:        asynqClient,
 		vectorStoreService: vectorStoreService,
 		userService:        userService,
+		fileService:        fileService,
+		storageResolver:    storageResolver,
 	}
+}
+
+// resolveResourceRewriter builds the storage-reference rewriter for one response
+// from the request's `resource_urls` parameter, falling back to the deployment
+// default. The returned error is already an AppError the caller can hand to
+// c.Error: a rejected scope is a 403, a typo in the parameter is a 400.
+func (h *KnowledgeBaseHandler) resolveResourceRewriter(c *gin.Context) (*storageurl.Rewriter, error) {
+	ctx := c.Request.Context()
+	mode, err := storageurl.ResolveMode(ctx, c.Query(storageurl.QueryParam))
+	if err != nil {
+		if stderrors.Is(err, storageurl.ErrPublicModeForbidden) {
+			return nil, apperrors.NewForbiddenError(err.Error())
+		}
+		return nil, apperrors.NewBadRequestError(err.Error())
+	}
+	return storageurl.NewRequestRewriter(ctx, mode, h.fileService, h.storageResolver), nil
 }
 
 // buildKBResponse turns a knowledge base into a JSON-ready response shape,
@@ -275,10 +301,11 @@ func (h *KnowledgeBaseHandler) resolveKBStoreView(
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string             true  "知识库ID"
-// @Param        request  body      types.SearchParams true  "搜索参数"
-// @Success      200      {object}  map[string]interface{}  "搜索结果"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        id             path      string             true   "知识库ID"
+// @Param        request        body      types.SearchParams true   "搜索参数"
+// @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
+// @Success      200            {object}  map[string]interface{}  "搜索结果"
+// @Failure      400            {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/hybrid-search [post]
@@ -311,6 +338,14 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	logger.Infof(ctx, "Executing hybrid search, knowledge base ID: %s, query: %s, effectiveTenantID: %d",
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.QueryText), effectiveTenantID)
 
+	// Resolve before retrieving so a typo or a rejected scope costs nothing.
+	rewriter, err := h.resolveResourceRewriter(c)
+	if err != nil {
+		logger.Warnf(ctx, "Rejected resource URL mode: %v", err)
+		_ = c.Error(err)
+		return
+	}
+
 	// Execute hybrid search with default search parameters
 	// Note: For shared KBs, the service uses effectiveTenantID internally via context
 	results, err := h.service.HybridSearch(ctx, id, req)
@@ -333,7 +368,7 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		secutils.SanitizeForLog(id), len(results))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    results,
+		"data":    rewriter.CopyReferences(ctx, results),
 	})
 }
 

@@ -9349,6 +9349,14 @@ paths:
         required: true
         schema:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SearchParams'
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
       produces:
       - application/json
       responses:
@@ -9383,6 +9391,14 @@ paths:
         required: true
         schema:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SearchParams'
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
       produces:
       - application/json
       responses:
