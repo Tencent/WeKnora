@@ -130,6 +130,7 @@ import { refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
+import { SKILL_ICON } from '@/types/mention';
 
 ensureMermaidInitialized();
 
@@ -141,7 +142,7 @@ const mentionTagClass = (item) => {
 const mentionTagIcon = (item) => {
     if (item.type === 'tag') return 'tag';
     if (item.type === 'mcp') return 'tools';
-    if (item.type === 'skill') return 'bookmark';
+    if (item.type === 'skill') return SKILL_ICON;
     return 'file';
 };
 
