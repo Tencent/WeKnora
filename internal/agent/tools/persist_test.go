@@ -119,13 +119,68 @@ func TestSandboxToolPersistenceStripsDuplicatePayloadsAndCompactsHistory(t *test
 		}
 	}
 	assert(len(result.Output) <= historicalSandboxOutputChars, "persisted shell output must be capped")
-	for _, key := range []string{"stdout", "stderr", "content", "content_base64"} {
+	assert(strings.Contains(result.Output, "shell output"),
+		"persisted output must keep the stream, not a one-line omit")
+	stdout, _ := result.Data["stdout"].(string)
+	stderr, _ := result.Data["stderr"].(string)
+	assert(stdout != "" && len(stdout) <= historicalSandboxOutputChars, "stdout should be kept and capped")
+	assert(stderr != "" && len(stderr) <= historicalSandboxOutputChars, "stderr should be kept and capped")
+	for _, key := range []string{"content", "content_base64"} {
 		_, exists := result.Data[key]
 		assert(!exists, key+" should be stripped")
 	}
 	assert(result.Data["exit_code"] == 0, "exit metadata should remain")
 	assert(len(CompactToolOutputForHistory(ToolShellExec, steps[0].ToolCalls[0].Result)) <= historicalSandboxOutputChars,
 		"historical replay must independently cap legacy raw output")
+}
+
+func TestSanitizeAgentStepsForStorage_shellExecKeepsStructuredOutput(t *testing.T) {
+	skillDir := "/opt/weknora/tenant/skills/smart-charts"
+	command := skillDir + "/.venv/bin/python " + skillDir + "/plot.py"
+	stdout := "README.md\ncharts.py\nrequirements.txt\n"
+	markdown := "=== Shell Exec ===\n**Command**: `" + command + "`\n" +
+		"**Work Dir**: " + skillDir + "\n**Exit Code**: 0\n\n" +
+		"## Stdout\n\n```\n" + stdout + "```\n"
+	steps := []types.AgentStep{{
+		ToolCalls: []types.ToolCall{{
+			Name: ToolShellExec,
+			Result: &types.ToolResult{
+				Success: true,
+				Output:  markdown,
+				Data: map[string]interface{}{
+					"display_type": "shell_exec",
+					"command":      command,
+					"work_dir":     skillDir,
+					"exit_code":    0,
+					"stdout":       stdout,
+					"stderr":       "",
+				},
+			},
+		}},
+	}}
+
+	sanitized := SanitizeAgentStepsForStorage(steps)
+	result := sanitized[0].ToolCalls[0].Result
+	if strings.Contains(result.Output, "omitted from history") {
+		t.Fatalf("structured shell_exec must not collapse to an omit line, got %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "README.md") {
+		t.Fatalf("persisted output should keep stdout structure, got %q", result.Output)
+	}
+	if got, _ := result.Data["stdout"].(string); got != stdout {
+		t.Fatalf("persisted stdout should remain for the UI card, got %#v", result.Data["stdout"])
+	}
+
+	history := CompactToolOutputForHistory(ToolShellExec, result)
+	if strings.Contains(history, "omitted from history") {
+		t.Fatalf("history replay must keep the streams, got %q", history)
+	}
+	if !strings.Contains(history, "README.md") {
+		t.Fatalf("history replay should keep stdout, got %q", history)
+	}
+	if !strings.Contains(history, "plot.py") {
+		t.Fatalf("history replay should keep the full command, got %q", history)
+	}
 }
 
 func TestSanitizeToolResultForClientKeepsShellStreams(t *testing.T) {
@@ -151,5 +206,27 @@ func TestSanitizeToolResultForClientKeepsShellStreams(t *testing.T) {
 	}
 	if meta["display_type"] != "shell_exec" {
 		t.Fatalf("display_type should remain, got %#v", meta["display_type"])
+	}
+}
+
+func TestCompactToolOutputForHistory_recoversStreamsFromPlaceholder(t *testing.T) {
+	history := CompactToolOutputForHistory(ToolShellExec, &types.ToolResult{
+		Success: true,
+		Output:  "shell_exec exit=0 command=ls (output omitted from history)",
+		Data: map[string]interface{}{
+			"display_type": "shell_exec",
+			"command":      "ls /opt/weknora/tenant/skills/smart-charts",
+			"exit_code":    0,
+			"stdout":       "SKILL.md\nplot.py\n",
+		},
+	})
+	if strings.Contains(history, "omitted from history") {
+		t.Fatalf("should rebuild from stdout instead of the omit placeholder, got %q", history)
+	}
+	if !strings.Contains(history, "SKILL.md") {
+		t.Fatalf("rebuilt history should keep stdout, got %q", history)
+	}
+	if !strings.Contains(history, "smart-charts") {
+		t.Fatalf("rebuilt history should keep the command, got %q", history)
 	}
 }
