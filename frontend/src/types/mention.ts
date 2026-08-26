@@ -1,5 +1,8 @@
 export type MentionItemType = 'kb' | 'file' | 'tag' | 'mcp' | 'skill';
 
+/** TDesign icon for Skills in the agent editor, @-mention menu, and chat chips. */
+export const SKILL_ICON = 'system-code';
+
 export interface MentionItem {
   id: string;
   name: string;

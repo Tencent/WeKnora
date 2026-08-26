@@ -1260,70 +1260,70 @@
                   </div>
                 </div>
 
-                <!-- Skills + 技能沙箱（仅 Agent 模式）：可用 Skills 取决于所选沙箱 -->
+                <!-- 技能：脚本跑在所选沙箱里，可用列表也来自这份配置 -->
                 <div v-show="currentSection === 'skills' && isAgentMode" class="section">
                   <div class="section-header">
-                    <div class="section-header-title">
-                      <h2>{{ $t('agent.editor.skillsConfig') }}</h2>
-                      <t-popup placement="bottom-start" trigger="hover" :overlay-inner-style="{ maxWidth: '380px' }">
-                        <button type="button" class="hint-trigger"
-                          :aria-label="$t('agent.editor.skillsInfoTitle')">
-                          <t-icon name="help-circle" size="16px" />
-                        </button>
-                        <template #content>
-                          <div class="hint-popover">
-                            <p class="hint-popover__title">{{ $t('agent.editor.skillsInfoTitle') }}</p>
-                            <p class="hint-popover__text">{{ $t('agent.editor.skillsInfoContent') }}</p>
-                          </div>
-                        </template>
-                      </t-popup>
-                    </div>
+                    <h2>{{ $t('agent.editor.skillsConfig') }}</h2>
                     <p class="section-description">{{ $t('agent.editor.skillsConfigDesc') }}</p>
                   </div>
 
                   <div class="settings-group">
-                    <!-- 沙箱配置：技能脚本运行环境，同时决定下方 Skills 列表 -->
                     <div class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.sandboxBackend') }}</label>
                         <p class="desc">{{ $t('agent.editor.sandboxBackendHint') }}</p>
                       </div>
-                      <div class="setting-control" style="flex-direction: column; align-items: flex-end;">
-                        <t-select v-model="formData.config.sandbox_config_id"
-                          :placeholder="$t('agent.editor.sandboxBackendDefault')" style="width: 280px">
+                      <div class="setting-control sandbox-select-control">
+                        <t-select
+                          v-model="formData.config.sandbox_config_id"
+                          :placeholder="$t('agent.editor.sandboxBackendDefault')"
+                          class="sandbox-config-select"
+                          filterable
+                          :popup-props="{ overlayClassName: 'sandbox-config-select-popup' }"
+                        >
                           <t-option value="" :label="$t('agent.editor.sandboxBackendDefault')" />
-                          <t-option v-for="cfg in sandboxConfigOptions" :key="cfg.id" :value="cfg.id"
-                            :label="`${cfg.name} (${backendLabel(cfg.sandbox_type)})`" />
+                          <t-option
+                            v-for="cfg in sandboxConfigOptions"
+                            :key="cfg.id"
+                            :value="cfg.id"
+                            :label="cfg.name"
+                          >
+                            <div class="sandbox-option">
+                              <span class="sandbox-option__name">{{ cfg.name }}</span>
+                              <span v-if="cfg.sandbox_type" class="sandbox-option__type">{{ backendLabel(cfg.sandbox_type) }}</span>
+                            </div>
+                          </t-option>
                         </t-select>
                         <a href="javascript:void(0)" class="go-settings-link"
                           @click.prevent="uiStore.openSettings('sandbox')">
                           {{ $t('agent.editor.goSandboxSettings') }}
                         </a>
+                        <p v-if="sandboxConfigOptions.length === 0" class="desc empty-hint">
+                          {{ $t('agent.editor.sandboxNoConfigs') }}
+                        </p>
                       </div>
                     </div>
 
-                    <div v-if="sandboxConfigOptions.length === 0" class="setting-row">
-                      <div class="setting-info">
-                        <p class="desc empty-hint">{{ $t('agent.editor.sandboxNoConfigs') }}</p>
-                      </div>
-                    </div>
-
-                    <!-- Skills 选择模式：未选沙箱时只能保持禁用，列表来自所选沙箱 -->
                     <div class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.skillsSelection') }}</label>
                         <p class="desc">{{ $t('agent.editor.skillsSelectionDesc') }}</p>
                       </div>
-                      <div class="setting-control">
+                      <div class="setting-control sandbox-select-control">
                         <t-radio-group v-model="skillsSelectionMode">
                           <t-radio-button value="all" :disabled="!hasSandboxSelected">{{ $t('agent.editor.skillsAll') }}</t-radio-button>
                           <t-radio-button value="selected" :disabled="!hasSandboxSelected">{{ $t('agent.editor.skillsSelected') }}</t-radio-button>
                           <t-radio-button value="none">{{ $t('agent.editor.skillsNone') }}</t-radio-button>
                         </t-radio-group>
+                        <p v-if="!hasSandboxSelected && sandboxConfigOptions.length > 0" class="desc empty-hint">
+                          {{ $t('agent.editor.skillsNeedSandbox') }}
+                        </p>
+                        <p v-else-if="hasSandboxSelected && skillOptions.length === 0" class="desc empty-hint">
+                          {{ $t('agent.editor.noSkillsAvailable') }}
+                        </p>
                       </div>
                     </div>
 
-                    <!-- 选择指定 Skills -->
                     <div v-if="skillsSelectionMode === 'selected' && skillOptions.length > 0"
                       class="setting-row setting-row-vertical">
                       <div class="setting-info">
@@ -1340,17 +1340,6 @@
                             </div>
                           </t-checkbox>
                         </t-checkbox-group>
-                      </div>
-                    </div>
-
-                    <div v-if="!hasSandboxSelected && sandboxConfigOptions.length > 0" class="setting-row">
-                      <div class="setting-info">
-                        <p class="desc empty-hint">{{ $t('agent.editor.skillsNeedSandbox') }}</p>
-                      </div>
-                    </div>
-                    <div v-else-if="hasSandboxSelected && skillOptions.length === 0" class="setting-row">
-                      <div class="setting-info">
-                        <p class="desc empty-hint">{{ $t('agent.editor.noSkillsAvailable') }}</p>
                       </div>
                     </div>
                   </div>
@@ -1750,6 +1739,7 @@ import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
 import KBParserSettings, { type ParserEngineRule } from '@/views/knowledge/settings/KBParserSettings.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
+import { SKILL_ICON } from '@/types/mention';
 import { listEmbedChannels } from '@/api/embed';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
 import { integrationSectionKey } from '@/config/settingsRoute';
@@ -2345,7 +2335,7 @@ const navItems = computed(() => {
   if (isAgentMode.value) {
     items.push({ key: 'tools', icon: 'tools', label: t('agent.editor.toolsConfig') });
     items.push({ key: 'mcp', icon: 'server', label: t('agentEditor.mcp.label') });
-    items.push({ key: 'skills', icon: 'lightbulb', label: t('agent.editor.skillsConfig') });
+    items.push({ key: 'skills', icon: SKILL_ICON, label: t('agent.editor.skillsConfig') });
   }
   // 发布（仅编辑模式）
   if (editorMode.value === 'edit' && editorAgent.value?.id && !editorAgent.value?.is_builtin && !authStore.isLiteMode) {
@@ -5018,6 +5008,37 @@ const handleSave = async () => {
   }
 }
 
+.sandbox-select-control {
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.sandbox-config-select {
+  width: 280px;
+}
+
+.sandbox-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.sandbox-option__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sandbox-option__type {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+}
+
 // 名称输入框带头像预览
 .name-input-wrapper {
   display: flex;
@@ -6092,6 +6113,13 @@ const handleSave = async () => {
     line-height: 1.4;
     padding: 8px 12px;
     white-space: normal;
+  }
+}
+
+.sandbox-config-select-popup {
+  .t-select-option {
+    height: auto;
+    padding: 6px 10px;
   }
 }
 
