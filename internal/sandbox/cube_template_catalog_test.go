@@ -436,7 +436,7 @@ func TestCubeRemoteClientReplaceStandardTemplateRebuildsInPlace(t *testing.T) {
 	require.Equal(t, true, payload["allowInternetAccess"])
 }
 
-func TestCubeRemoteClientReplaceStandardTemplateBuildsThenDeletesWhenRedoBlocked(t *testing.T) {
+func TestCubeRemoteClientReplaceStandardTemplateBuildsWithoutDeletingWhenRedoBlocked(t *testing.T) {
 	var deleted atomic.Int32
 	var payload map[string]any
 	client := newCubeTemplateClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -472,8 +472,45 @@ func TestCubeRemoteClientReplaceStandardTemplateBuildsThenDeletesWhenRedoBlocked
 	template, err := client.ReplaceStandardTemplate(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, "tpl-new", template.ID)
-	require.Equal(t, int32(1), deleted.Load(), "the old template is deleted only after the replacement has an ID")
+	require.Equal(t, "building", template.Status)
+	require.Equal(t, int32(0), deleted.Load(),
+		"replace must not retire the READY template while the replacement is still building")
 	require.Equal(t, DefaultCubeTemplateImage, payload["image"])
+}
+
+func TestCubeRemoteClientDeleteSupersededStandardTemplatesSkipsKeepID(t *testing.T) {
+	var deleted atomic.Int32
+	client := newCubeTemplateClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/templates" && r.Method == http.MethodGet:
+			writeJSON(w, http.StatusOK, []map[string]any{
+				{
+					"templateID": "tpl-old",
+					"status":     "READY",
+					"imageInfo":  DefaultDockerImage,
+					"aliases":    []string{StandardTemplateName},
+				},
+				{
+					"templateID": "tpl-new",
+					"status":     "READY",
+					"imageInfo":  DefaultDockerImage,
+					"aliases":    []string{StandardTemplateName},
+				},
+			})
+		case r.URL.Path == "/templates/tpl-old" && r.Method == http.MethodDelete:
+			deleted.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/templates/tpl-new" && r.Method == http.MethodDelete:
+			t.Fatal("keepID must not be deleted")
+		case r.URL.Path == "/snapshots" && r.Method == http.MethodGet:
+			writeJSON(w, http.StatusOK, []map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	require.NoError(t, client.DeleteSupersededStandardTemplates(context.Background(), "tpl-new"))
+	require.Equal(t, int32(1), deleted.Load())
 }
 
 // The plain and Cube images share a repository, so a template built from either

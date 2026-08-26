@@ -540,6 +540,9 @@ func (s *TenantSkillService) reapAbandonedBuilds(
 	if len(pending) == 0 {
 		return 0
 	}
+	if s.configHasInFlightSkill(ctx, cfg.TenantID, cfg.ID) {
+		return 0
+	}
 
 	lister := snapshotListerFrom(ctx, s.sandboxes, cfg.TenantID, cfg.ID)
 	deleter := snapshotDeleterFrom(ctx, s.sandboxes, cfg.TenantID, cfg.ID)
@@ -595,6 +598,30 @@ func abandonedBuild(row *types.TenantSkillSnapshotEntity, cutoff time.Time) bool
 		return false
 	}
 	return row.CreatedAt.Before(cutoff)
+}
+
+func (s *TenantSkillService) configHasInFlightSkill(
+	ctx context.Context, tenantID uint64, configID string,
+) bool {
+	if s == nil || s.skills == nil || strings.TrimSpace(configID) == "" {
+		return false
+	}
+	rows, err := s.skills.ListSkillsByConfig(ctx, tenantID, configID)
+	if err != nil {
+		logger.Warnf(ctx, "[skill] cannot read skills of config %s while reaping abandoned builds: %v",
+			configID, err)
+		return true
+	}
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		switch row.Status {
+		case types.SkillStatusInstalling, types.SkillStatusRemoving:
+			return true
+		}
+	}
+	return false
 }
 
 // buildStillRunning reports whether the run that opened this row is alive.

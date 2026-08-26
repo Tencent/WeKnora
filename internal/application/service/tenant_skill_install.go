@@ -351,21 +351,22 @@ func (s *TenantSkillService) runInstall(
 	if !owned {
 		return nil
 	}
-	// The generation comes from the config read at the top of this function,
-	// while switchImagePointer deliberately re-reads for everything else it
-	// writes. That asymmetry is sound because the two fields have different
-	// writers: SkillImage is written only by an install or a removal, and
-	// withConfigLock serialises every one of those per config, so no other
-	// writer can have advanced the generation while this run held the lock.
-	// The rest of the entity is written by the config service under its own
-	// cordon, which this lock says nothing about — hence the re-read there.
-	generation := currentGeneration(cfgEntity) + 1
+	// Generation is max(live pointer, ledger)+1 so a build that died after
+	// the commit but before the pointer moved cannot share a name with the
+	// next install. withConfigLock still serialises writers of SkillImage;
+	// the ledger read is what closes the crash window the lock cannot see.
+	ledger, err := s.skills.ListSnapshotsByConfig(ctx, tenantID, configID)
+	if err != nil {
+		return fmt.Errorf("list snapshots of config %s: %w", configID, err)
+	}
+	generation := nextSnapshotGeneration(currentGeneration(cfgEntity), ledger)
 	installRowID := uuid.NewString()
 	// The name is recorded with the row rather than derived at the call below,
 	// so a run that dies during the commit still leaves the ledger able to
 	// name what it was building. Without it the snapshot would be a provider
-	// resource nothing could ever address, let alone reclaim.
-	snapshotName := skillSnapshotBuildName(tenantID, configID, generation)
+	// resource nothing could ever address, let alone reclaim. The row id is
+	// in the name so two rows of the same generation cannot share a tag.
+	snapshotName := skillSnapshotBuildName(tenantID, configID, generation, installRowID)
 	if err := s.skills.CreateSnapshotRow(ctx, &types.TenantSkillSnapshotEntity{
 		ID: installRowID, TenantID: tenantID, SandboxConfigID: configID, SkillID: skillID,
 		ParentSnapshotID: currentSnapshotID(cfgEntity), Generation: generation,
@@ -1333,15 +1334,44 @@ func skillSnapshotNamePrefix(tenantID uint64, configID string) string {
 	return fmt.Sprintf("weknora-sk-t%d-%s", tenantID, compactConfigID(configID))
 }
 
+// nextSnapshotGeneration is one past both the live pointer and every ledger
+// row. An abandoned building row still occupies its generation; reusing it
+// would mint the same planned name and let the reaper delete a later install's
+// snapshot.
+func nextSnapshotGeneration(live int, rows []*types.TenantSkillSnapshotEntity) int {
+	highest := live
+	for _, row := range rows {
+		if row != nil && row.Generation > highest {
+			highest = row.Generation
+		}
+	}
+	if highest < 0 {
+		highest = 0
+	}
+	return highest + 1
+}
+
+func compactSnapshotToken(id string) string {
+	s := compactConfigID(id)
+	const n = 8
+	if len(s) > n {
+		return s[:n]
+	}
+	if s == "" {
+		return "row"
+	}
+	return s
+}
+
 // skillSnapshotBuildName is the name every generation of a config's image
-// chain is committed under. It is deterministic so the abandoned-build sweep
-// can match a provider listing against a ledger row that never learned its
-// snapshot ID. Tenant and the full config id are in the name because Cube,
-// E2B and Docker all list snapshots across a shared account or daemon; a
-// short config prefix would let two configs overwrite or reclaim each
-// other's images.
-func skillSnapshotBuildName(tenantID uint64, configID string, generation int) string {
-	return fmt.Sprintf("%s-g%d", skillSnapshotNamePrefix(tenantID, configID), generation)
+// chain is committed under. It is recorded on the ledger row before the
+// provider call so an abandoned build stays identifiable. Tenant and the
+// full config id are in the name because Cube, E2B and Docker all list
+// snapshots across a shared account or daemon; the row token stops two
+// builds of the same generation from sharing a tag.
+func skillSnapshotBuildName(tenantID uint64, configID string, generation int, rowID string) string {
+	prefix := skillSnapshotNamePrefix(tenantID, configID)
+	return fmt.Sprintf("%s-g%d-%s", prefix, generation, compactSnapshotToken(rowID))
 }
 
 func compactConfigID(id string) string {

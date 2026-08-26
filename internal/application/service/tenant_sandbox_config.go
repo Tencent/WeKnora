@@ -641,25 +641,27 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 		if !ok || standard == nil {
 			return nil, fmt.Errorf("sandbox: provider %q returned no standard template", effective.Type)
 		}
-		if in.ReplaceStandard {
-			// The listing above still contains the template we just replaced.
-			kept := result.Templates[:0]
-			for _, item := range result.Templates {
-				if !item.Standard || item.ID == standard.ID {
-					kept = append(kept, item)
-				}
-			}
-			result.Templates = kept
-		}
 		result.Templates = deduplicateSandboxTemplates(append(result.Templates, *standard))
-		if !sandbox.IsTemplateBuildFailed(standard.Status) {
+		if sandbox.IsTemplateReady(standard.Status) {
 			result.Provisioned = true
-			result.StandardTemplateID = standard.ID
 			if in.ReplaceStandard {
-				s.persistSpawnTemplateID(ctx, tenantID, merged, standard.ID, oldStandardIDs)
+				persistErr := s.persistSpawnTemplateID(ctx, tenantID, merged, standard.ID, oldStandardIDs)
+				if persistErr != nil {
+					logger.Warnf(ctx, "[sandbox] persist rebuilt template id: %v; keeping previous templates",
+						persistErr)
+				} else {
+					result.StandardTemplateID = standard.ID
+					result.Templates = hideSupersededStandardTemplates(result.Templates, standard.ID)
+					s.deleteSupersededStandardTemplates(ctx, catalog, standard.ID)
+				}
+			} else {
+				result.StandardTemplateID = standard.ID
 			}
-		} else if in.ReplaceStandard {
-			result.StandardTemplateID = ""
+		} else if !sandbox.IsTemplateBuildFailed(standard.Status) {
+			result.Provisioned = true
+			if result.StandardTemplateID == "" {
+				result.StandardTemplateID = standard.ID
+			}
 		}
 	}
 	sort.SliceStable(result.Templates, func(i, j int) bool {
@@ -669,6 +671,18 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 		return strings.ToLower(result.Templates[i].Name) < strings.ToLower(result.Templates[j].Name)
 	})
 	return result, nil
+}
+
+func hideSupersededStandardTemplates(items []sandbox.RemoteTemplate, keepID string) []sandbox.RemoteTemplate {
+	keepID = strings.TrimSpace(keepID)
+	kept := make([]sandbox.RemoteTemplate, 0, len(items))
+	for _, item := range items {
+		if item.Standard && strings.TrimSpace(item.ID) != keepID {
+			continue
+		}
+		kept = append(kept, item)
+	}
+	return kept
 }
 
 func standardTemplateIDs(items []sandbox.RemoteTemplate) []string {
@@ -736,10 +750,10 @@ func (s *TenantSandboxConfigService) persistSpawnTemplateID(
 	merged *types.TenantSandboxConfig,
 	newID string,
 	oldIDs []string,
-) {
+) error {
 	newID = strings.TrimSpace(newID)
 	if newID == "" || s == nil || s.repo == nil {
-		return
+		return nil
 	}
 	old := make(map[string]struct{}, len(oldIDs))
 	for _, id := range oldIDs {
@@ -750,9 +764,9 @@ func (s *TenantSandboxConfigService) persistSpawnTemplateID(
 	identity := sandbox.IdentityOf(merged)
 	list, err := s.repo.ListByTenant(ctx, tenantID)
 	if err != nil {
-		logger.Warnf(ctx, "[sandbox] persist rebuilt template id: list configs: %v", err)
-		return
+		return fmt.Errorf("list configs: %w", err)
 	}
+	var persistErr error
 	for _, entity := range list {
 		if entity == nil || entity.Config == nil || types.IsSandboxWorkspacePolicyRow(entity) {
 			continue
@@ -769,12 +783,27 @@ func (s *TenantSandboxConfigService) persistSpawnTemplateID(
 				continue
 			}
 		}
+		previous := current
 		setSpawnTemplateID(entity.Config, newID)
 		if err := s.repo.Update(ctx, entity); err != nil {
+			setSpawnTemplateID(entity.Config, previous)
 			logger.Warnf(ctx, "[sandbox] persist rebuilt template id on config %s: %v", entity.ID, err)
+			persistErr = err
 			continue
 		}
 		logger.Infof(ctx, "[sandbox] config %s spawn template is now %s after rebuild", entity.ID, newID)
+	}
+	return persistErr
+}
+
+func (s *TenantSandboxConfigService) deleteSupersededStandardTemplates(
+	ctx context.Context, catalog sandbox.RemoteTemplateCatalog, keepID string,
+) {
+	if catalog == nil || strings.TrimSpace(keepID) == "" {
+		return
+	}
+	if err := catalog.DeleteSupersededStandardTemplates(ctx, keepID); err != nil {
+		logger.Warnf(ctx, "[sandbox] delete superseded standard templates failed: %v", err)
 	}
 }
 

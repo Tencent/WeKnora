@@ -77,7 +77,6 @@ func (c *DockerRemoteClient) DeleteSnapshot(ctx context.Context, snapshotID stri
 		return dockerInvalidRequest("DeleteSnapshot", "snapshot ID is required")
 	}
 	_, err := c.api.ImageRemove(ctx, id, client.ImageRemoveOptions{
-		Force:         true,
 		PruneChildren: true,
 	})
 	if err != nil {
