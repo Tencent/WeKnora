@@ -501,6 +501,83 @@ func TestIngestItem_URLCreationAttachesDataSourceMetadata(t *testing.T) {
 	assert.Equal(t, "url:1", repo.metadataUpdates[0]["external_id"])
 }
 
+// TestIngestItem_ConflictStrategySkipKeepsExisting verifies the "skip"
+// conflict strategy: when an item with the same external_id already exists
+// in the KB, it is kept untouched — no deletion, no re-ingest.
+func TestIngestItem_ConflictStrategySkipKeepsExisting(t *testing.T) {
+	ds := &types.DataSource{
+		ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1",
+		ConflictStrategy: types.ConflictStrategySkip,
+	}
+	repo := &deletionLookupKnowledgeRepo{knowledge: &types.Knowledge{ID: "existing-1"}}
+	ks := &sweepFakeKS{repo: repo}
+	svc := &DataSourceService{knowledgeService: ks}
+
+	isUpdate, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "ext-1",
+		Title:      "doc.pdf",
+		Content:    []byte("body"),
+		FileName:   "doc.pdf",
+	}, nil)
+
+	assert.ErrorIs(t, err, errSkipExisting)
+	assert.False(t, isUpdate)
+	assert.Empty(t, ks.deleted, "skip must keep the existing knowledge untouched")
+	assert.Empty(t, repo.hardDeleted, "skip must not hard-delete the existing knowledge")
+}
+
+// TestIngestItem_ConflictStrategyOverwriteReplacesExisting verifies the
+// default "overwrite" strategy: an existing item is deleted and re-ingested
+// (counted as an update).
+func TestIngestItem_ConflictStrategyOverwriteReplacesExisting(t *testing.T) {
+	ds := &types.DataSource{
+		ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1",
+		ConflictStrategy: types.ConflictStrategyOverwrite,
+	}
+	repo := &deletionLookupKnowledgeRepo{knowledge: &types.Knowledge{ID: "existing-1"}}
+	ks := &sweepFakeKS{repo: repo}
+	svc := &DataSourceService{knowledgeService: ks}
+
+	isUpdate, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "ext-1",
+		Title:      "doc.pdf",
+		Content:    []byte("body"),
+		FileName:   "doc.pdf",
+	}, nil)
+
+	require.NoError(t, err)
+	assert.True(t, isUpdate)
+	assert.Equal(t, []string{"existing-1"}, ks.deleted)
+	assert.Equal(t, []string{"existing-1"}, repo.hardDeleted)
+}
+
+// TestApplyFetchedItem_ConflictStrategySkipCountsSkipped verifies the sync
+// counters: a skip-strategy item already present in the KB is counted as
+// Skipped, never as Failed or Created.
+func TestApplyFetchedItem_ConflictStrategySkipCountsSkipped(t *testing.T) {
+	ds := &types.DataSource{
+		ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1",
+		ConflictStrategy: types.ConflictStrategySkip,
+	}
+	repo := &deletionLookupKnowledgeRepo{knowledge: &types.Knowledge{ID: "existing-1"}}
+	ks := &sweepFakeKS{repo: repo}
+	svc := &DataSourceService{knowledgeService: ks}
+
+	result := &types.SyncResult{}
+	svc.applyFetchedItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "ext-1",
+		Title:      "doc.pdf",
+		Content:    []byte("body"),
+		FileName:   "doc.pdf",
+	}, nil, result)
+
+	assert.Equal(t, 1, result.Skipped)
+	assert.Equal(t, 0, result.Failed)
+	assert.Equal(t, 0, result.Created)
+	assert.Equal(t, 0, result.Updated)
+	assert.Empty(t, result.Errors)
+}
+
 func TestProcessSync_SyncDeletionsDeletesMatchingKnowledge(t *testing.T) {
 	h := newSyncDeletionHarness(t, true, "ds-delete-characterization", "log-delete-characterization", nil, nil)
 	updated, err := h.run(t)
