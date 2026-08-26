@@ -103,7 +103,7 @@ func TestConnectorFetchStreamPaginatesAndDeduplicates(t *testing.T) {
 				HasNextPage: true, NextCursor: "next",
 			}, nil
 		case "first:next":
-			return searchPage{Tweets: []tweet{{ID: "2", Text: "Shared post"}, {ID: "3", Text: "Third post"}}}, nil
+			return searchPage{Tweets: []tweet{{ID: "3", Text: "Third post"}}}, nil
 		case "second:":
 			return searchPage{Tweets: []tweet{{ID: "2", Text: "Shared post"}, {ID: "4", Text: "Fourth post"}}}, nil
 		default:
@@ -144,6 +144,37 @@ func TestConnectorFetchStreamPaginatesAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestConnectorCountsDuplicatesTowardEachQueryLimit(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	fake := &fakeAPI{}
+	fake.searchFn = func(request searchRequest) (searchPage, error) {
+		switch request.Query {
+		case "first":
+			return searchPage{Tweets: []tweet{{ID: "1"}, {ID: "2"}}}, nil
+		case "second":
+			return searchPage{
+				Tweets: []tweet{{ID: "1"}, {ID: "2"}}, HasNextPage: true, NextCursor: "extra",
+			}, nil
+		default:
+			return searchPage{}, errors.New("unexpected search")
+		}
+	}
+	config := testConfig("first\nsecond")
+	config.Settings["results_per_query"] = 2
+	handler := &recordingHandler{}
+
+	_, err := connectorWith(fake, now).FetchStream(context.Background(), config, nil, handler)
+	if err != nil {
+		t.Fatalf("FetchStream() error = %v", err)
+	}
+	if len(fake.requests) != 2 || fake.requests[1].Cursor != "" {
+		t.Fatalf("requests = %#v", fake.requests)
+	}
+	if len(handler.items) != 2 {
+		t.Fatalf("items = %d, want 2", len(handler.items))
+	}
+}
+
 func TestConnectorFetchIncrementalUsesBoundedOverlap(t *testing.T) {
 	lastSync := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
 	now := lastSync.Add(time.Hour)
@@ -174,7 +205,7 @@ func TestConnectorFetchStreamResumesFromCheckpoint(t *testing.T) {
 	started := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	resume := connectorCursor(cursorState{
 		InProgress: true, StartedAt: started, Query: "query", PageCursor: "next",
-		ResultsEmitted: 2, PagesFetched: 1,
+		ResultsFetched: 2, PagesFetched: 1,
 	}, false)
 	fake := &fakeAPI{searchFn: func(request searchRequest) (searchPage, error) {
 		return searchPage{Tweets: []tweet{{ID: "3", Text: "Resumed"}}}, nil
@@ -193,6 +224,32 @@ func TestConnectorFetchStreamResumesFromCheckpoint(t *testing.T) {
 	}
 	if len(handler.items) != 1 || !final.LastSyncTime.Equal(started) {
 		t.Fatalf("items = %d, final = %#v", len(handler.items), final)
+	}
+}
+
+func TestConnectorFetchStreamPreservesDeduplicationAcrossResume(t *testing.T) {
+	started := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	resume := connectorCursor(cursorState{
+		InProgress: true, StartedAt: started, QueryIndex: 1, SeenPostIDs: []string{"1"},
+	}, false)
+	fake := &fakeAPI{searchFn: func(request searchRequest) (searchPage, error) {
+		return searchPage{Tweets: []tweet{{ID: "1"}, {ID: "2"}}}, nil
+	}}
+	config := testConfig("first\nsecond")
+	config.Settings["results_per_query"] = 2
+	handler := &recordingHandler{}
+
+	_, err := connectorWith(fake, started.Add(time.Hour)).FetchStream(
+		context.Background(), config, resume, handler,
+	)
+	if err != nil {
+		t.Fatalf("FetchStream() error = %v", err)
+	}
+	if len(fake.requests) != 1 || fake.requests[0].Query != "second" {
+		t.Fatalf("requests = %#v", fake.requests)
+	}
+	if len(handler.items) != 1 || handler.items[0].ExternalID != "xquik:post:2" {
+		t.Fatalf("items = %#v", handler.items)
 	}
 }
 

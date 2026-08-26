@@ -8,6 +8,7 @@ import {
   XQUIK_MAX_RESULTS_PER_QUERY,
   validateXquikSettings,
   xquikQueries,
+  xquikSettingsSignature,
   xquikValidationCredentials,
 } from './xquikConfig.ts'
 
@@ -49,4 +50,14 @@ test('xquikValidationCredentials adds only validation-time settings', () => {
     xquikValidationCredentials({ api_key: 'secret' }, { queries: 'xquik' }),
     { api_key: 'secret', queries: 'xquik', results_per_query: XQUIK_DEFAULT_RESULTS_PER_QUERY },
   )
+})
+
+test('xquikSettingsSignature tracks semantic setting changes', () => {
+  const baseline = xquikSettingsSignature({ queries: 'xquik\nrag', results_per_query: 100 })
+  assert.equal(
+    xquikSettingsSignature({ queries: ' xquik \r\nrag\nxquik', results_per_query: '100' }),
+    baseline,
+  )
+  assert.notEqual(xquikSettingsSignature({ queries: 'xquik', results_per_query: 100 }), baseline)
+  assert.notEqual(xquikSettingsSignature({ queries: 'xquik\nrag', results_per_query: 200 }), baseline)
 })

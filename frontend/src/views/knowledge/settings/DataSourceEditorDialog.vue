@@ -23,6 +23,7 @@ import {
   XQUIK_DEFAULT_RESULTS_PER_QUERY,
   XQUIK_MAX_RESULTS_PER_QUERY,
   validateXquikSettings,
+  xquikSettingsSignature,
   xquikValidationCredentials,
 } from './xquikConfig'
 
@@ -162,6 +163,7 @@ function removeRssAuthHeader(idx: number) {
 }
 
 function needsConnectionTest(): boolean {
+  if (xquikSettingsChangedSinceValidation()) return true
   return !(isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value)
 }
 
@@ -214,6 +216,12 @@ const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
 const isGitLabConnector = (type: string) => type === 'gitlab'
 const isXquikConnector = (type: string) => type === 'xquik'
+const validatedXquikSettings = ref('')
+
+function xquikSettingsChangedSinceValidation(): boolean {
+  return isXquikConnector(form.value.type)
+    && xquikSettingsSignature(form.value.config.settings) !== validatedXquikSettings.value
+}
 
 interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
 const gitlabProjects = ref<GitLabProjectInput[]>([])
@@ -684,6 +692,7 @@ watch(visible, async (v) => {
   driveFolderToken.value = ''
   driveFolderTokenError.value = ''
   driveRootLoaded.value = false
+  validatedXquikSettings.value = ''
   rssAuthHeaders.value = []
   gitlabProjects.value = []
 
@@ -712,6 +721,9 @@ watch(visible, async (v) => {
       sync_deletions: props.dataSource.sync_deletions,
     }
     selectedResourceIds.value = form.value.config?.resource_ids || []
+    if (isXquikConnector(form.value.type)) {
+      validatedXquikSettings.value = xquikSettingsSignature(form.value.config.settings)
+    }
     if (isGitLabConnector(form.value.type)) {
       const savedProjects = Array.isArray(form.value.config.settings.projects) ? form.value.config.settings.projects : []
       gitlabProjects.value = savedProjects.map((project: any) => ({
@@ -783,7 +795,7 @@ watch(
 watch(
   () => [form.value.config.settings.queries, form.value.config.settings.results_per_query],
   () => {
-    if (needsConnectionTest()) {
+    if (xquikSettingsChangedSinceValidation()) {
       testResult.value = ''
       testErrorMsg.value = ''
     }
@@ -845,6 +857,9 @@ async function testConnection() {
       await validateCredentials(form.value.type, creds)
     }
     testResult.value = 'success'
+    if (isXquikConnector(form.value.type)) {
+      validatedXquikSettings.value = xquikSettingsSignature(form.value.config.settings)
+    }
     MessagePlugin.success(t('datasource.testSuccess'))
   } catch (e: any) {
     testResult.value = 'error'

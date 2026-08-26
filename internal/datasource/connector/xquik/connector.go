@@ -124,26 +124,29 @@ func (c *Connector) fetch(
 	if err != nil {
 		return nil, err
 	}
-	state := c.startState(old, queries)
+	state := c.startState(old, queries, cfg.ResultsPerQuery)
 	client := c.apiFactory(cfg.APIKey)
-	seen := make(map[string]struct{})
+	seen := make(map[string]struct{}, len(state.SeenPostIDs))
+	for _, id := range state.SeenPostIDs {
+		seen[id] = struct{}{}
+	}
 
 	for queryIndex := state.QueryIndex; queryIndex < len(queries); queryIndex++ {
 		query := queries[queryIndex]
 		pageCursor := ""
-		resultsEmitted := 0
+		resultsFetched := 0
 		pagesFetched := 0
 		if state.InProgress && queryIndex == state.QueryIndex && state.Query == query {
 			pageCursor = state.PageCursor
-			resultsEmitted = state.ResultsEmitted
+			resultsFetched = state.ResultsFetched
 			pagesFetched = state.PagesFetched
 		}
 
-		for resultsEmitted < cfg.ResultsPerQuery {
+		for resultsFetched < cfg.ResultsPerQuery {
 			if pagesFetched >= maxPagesPerQuery {
 				return nil, fmt.Errorf("Xquik query exceeded %d cursor pages", maxPagesPerQuery)
 			}
-			remaining := cfg.ResultsPerQuery - resultsEmitted
+			remaining := cfg.ResultsPerQuery - resultsFetched
 			page, err := client.search(ctx, searchRequest{
 				Query:     query,
 				Cursor:    pageCursor,
@@ -157,25 +160,26 @@ func (c *Connector) fetch(
 			pagesFetched++
 
 			for _, post := range page.Tweets {
-				if resultsEmitted >= cfg.ResultsPerQuery {
+				if resultsFetched >= cfg.ResultsPerQuery {
 					break
 				}
 				id := strings.TrimSpace(post.ID)
 				if !validPostID(id) {
 					return nil, fmt.Errorf("query %q returned a post with an invalid id", query)
 				}
+				resultsFetched++
 				if _, duplicate := seen[id]; duplicate {
 					continue
 				}
-				seen[id] = struct{}{}
 				item := c.postItem(post, query, state.StartedAt)
 				if err := handler.Emit(ctx, item); err != nil {
 					return nil, err
 				}
-				resultsEmitted++
+				seen[id] = struct{}{}
+				state.SeenPostIDs = append(state.SeenPostIDs, id)
 			}
 
-			if !page.hasMore() || resultsEmitted >= cfg.ResultsPerQuery {
+			if !page.hasMore() || resultsFetched >= cfg.ResultsPerQuery {
 				break
 			}
 			nextCursor := strings.TrimSpace(page.nextCursor())
@@ -190,7 +194,7 @@ func (c *Connector) fetch(
 			checkpoint.QueryIndex = queryIndex
 			checkpoint.Query = query
 			checkpoint.PageCursor = pageCursor
-			checkpoint.ResultsEmitted = resultsEmitted
+			checkpoint.ResultsFetched = resultsFetched
 			checkpoint.PagesFetched = pagesFetched
 			if err := handler.Checkpoint(ctx, connectorCursor(checkpoint, false)); err != nil {
 				return nil, err
@@ -201,7 +205,7 @@ func (c *Connector) fetch(
 		checkpoint.QueryIndex = queryIndex + 1
 		checkpoint.Query = ""
 		checkpoint.PageCursor = ""
-		checkpoint.ResultsEmitted = 0
+		checkpoint.ResultsFetched = 0
 		checkpoint.PagesFetched = 0
 		if err := handler.Checkpoint(ctx, connectorCursor(checkpoint, false)); err != nil {
 			return nil, err
@@ -211,12 +215,14 @@ func (c *Connector) fetch(
 	return connectorCursor(state, true), nil
 }
 
-func (c *Connector) startState(old *types.SyncCursor, queries []string) cursorState {
+func (c *Connector) startState(
+	old *types.SyncCursor,
+	queries []string,
+	resultsPerQuery int,
+) cursorState {
 	state := decodeCursor(old)
-	if state.InProgress && !state.StartedAt.IsZero() && state.QueryIndex <= len(queries) {
-		if state.QueryIndex == len(queries) || state.Query == "" || state.Query == queries[state.QueryIndex] {
-			return state
-		}
+	if state.canResume(queries, resultsPerQuery) {
+		return state
 	}
 
 	now := c.now().UTC()

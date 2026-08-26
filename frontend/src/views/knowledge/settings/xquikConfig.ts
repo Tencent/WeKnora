@@ -36,6 +36,13 @@ export function validateXquikSettings(settings: Record<string, unknown>): XquikV
   return null
 }
 
+export function xquikSettingsSignature(settings: Record<string, unknown>): string {
+  return JSON.stringify({
+    queries: xquikQueries(settings.queries),
+    resultsPerQuery: Number(settings.results_per_query ?? XQUIK_DEFAULT_RESULTS_PER_QUERY),
+  })
+}
+
 export function xquikValidationCredentials(
   credentials: Record<string, unknown>,
   settings: Record<string, unknown>,

@@ -310,8 +310,37 @@ type cursorState struct {
 	QueryIndex     int       `json:"query_index,omitempty"`
 	Query          string    `json:"query,omitempty"`
 	PageCursor     string    `json:"page_cursor,omitempty"`
-	ResultsEmitted int       `json:"results_emitted,omitempty"`
+	ResultsFetched int       `json:"results_fetched,omitempty"`
 	PagesFetched   int       `json:"pages_fetched,omitempty"`
+	SeenPostIDs    []string  `json:"seen_post_ids,omitempty"`
+}
+
+func (s cursorState) canResume(queries []string, resultsPerQuery int) bool {
+	if !s.InProgress || s.StartedAt.IsZero() || s.QueryIndex < 0 || s.QueryIndex > len(queries) {
+		return false
+	}
+	if s.ResultsFetched < 0 || s.ResultsFetched > resultsPerQuery ||
+		s.PagesFetched < 0 || s.PagesFetched > maxPagesPerQuery ||
+		len(s.SeenPostIDs) > len(queries)*resultsPerQuery {
+		return false
+	}
+	seen := make(map[string]struct{}, len(s.SeenPostIDs))
+	for _, id := range s.SeenPostIDs {
+		if !validPostID(id) {
+			return false
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return false
+		}
+		seen[id] = struct{}{}
+	}
+	if s.QueryIndex == len(queries) {
+		return s.Query == "" && s.PageCursor == "" && s.ResultsFetched == 0 && s.PagesFetched == 0
+	}
+	if s.Query == "" {
+		return s.PageCursor == "" && s.ResultsFetched == 0 && s.PagesFetched == 0
+	}
+	return s.Query == queries[s.QueryIndex] && s.PageCursor != ""
 }
 
 func decodeCursor(cursor *types.SyncCursor) cursorState {
@@ -335,8 +364,9 @@ func connectorCursor(state cursorState, complete bool) *types.SyncCursor {
 		state.QueryIndex = 0
 		state.Query = ""
 		state.PageCursor = ""
-		state.ResultsEmitted = 0
+		state.ResultsFetched = 0
 		state.PagesFetched = 0
+		state.SeenPostIDs = nil
 	}
 	data, _ := json.Marshal(state)
 	values := make(map[string]interface{})
