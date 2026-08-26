@@ -1461,7 +1461,7 @@ type snapshotReleaseClient struct {
 }
 
 func (c *snapshotReleaseClient) ListSnapshots(
-	ctx context.Context, sandboxID string,
+	ctx context.Context, _ string,
 ) ([]sandbox.RemoteSnapshotRef, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
