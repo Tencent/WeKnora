@@ -114,7 +114,10 @@ func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromp
 		opts.SkillsMetadata = e.skillsManager.GetAllMetadata()
 	}
 	if e.toolRegistry != nil {
-		_, err := e.toolRegistry.GetTool(agenttools.ToolShellExec)
+		_, err := e.toolRegistry.GetTool(agenttools.ToolExecuteSkillScript)
+		opts.SkillScriptEnabled = err == nil
+
+		_, err = e.toolRegistry.GetTool(agenttools.ToolShellExec)
 		opts.ShellExecEnabled = err == nil
 	}
 	return opts

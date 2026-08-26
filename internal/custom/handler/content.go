@@ -49,10 +49,10 @@ func (h *ContentHandler) loadVideo(c *gin.Context) (*model.Video, bool) {
 
 // RelatedKnowledgeResp 关联知识聚合响应（CP-T008）
 type RelatedKnowledgeResp struct {
-	VideoID    string                                    `json:"video_id"`
-	KBID       string                                    `json:"kb_id"`
+	VideoID    string                                             `json:"video_id"`
+	KBID       string                                             `json:"kb_id"`
 	Anchors    map[knowledge.KnowledgeType][]knowledge.AnchorItem `json:"anchors"`     // 5 类型分组
-	CrossVideo []knowledge.AnchorItem                    `json:"cross_video"`     // 跨视频边（CP-T008 后续接 Neo4j）
+	CrossVideo []knowledge.AnchorItem                             `json:"cross_video"` // 跨视频边（CP-T008 后续接 Neo4j）
 }
 
 // RelatedKnowledge 关联知识 Tab（CP-T008）
@@ -142,7 +142,7 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 // WikiPageResp 单页 Wiki 响应（CP-T009）
 type WikiPageResp struct {
 	VideoID     string         `json:"video_id"`
-	PageType    string         `json:"page_type"`            // outline / overview / summary / transcript_page
+	PageType    string         `json:"page_type"` // outline / overview / summary / transcript_page
 	WikiPageID  string         `json:"wiki_page_id"`
 	Content     string         `json:"content"`
 	Frontmatter map[string]any `json:"frontmatter,omitempty"`
@@ -165,7 +165,7 @@ func (h *ContentHandler) fetchWikiPageByVideoField(c *gin.Context, video *model.
 		c.JSON(http.StatusNotFound, gin.H{"error": "wiki_page_id not yet generated"})
 		return
 	}
-	page, err := h.Wiki.GetPage(c.Request.Context(), h.KBID, wikiID)
+	page, err := h.Wiki.GetPageByID(c.Request.Context(), h.KBID, wikiID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

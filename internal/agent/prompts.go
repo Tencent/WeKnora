@@ -229,7 +229,7 @@ func renderPromptPlaceholders(template string, knowledgeBases []*KnowledgeBaseIn
 
 // formatSkillsMetadata formats skills metadata for the system prompt (Level 1 - Progressive Disclosure)
 // This is a lightweight representation that only includes skill name and description
-func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata, shellExecEnabled bool) string {
+func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata, skillScriptEnabled, shellExecEnabled bool) string {
 	if len(skillsMetadata) == 0 {
 		return ""
 	}
@@ -255,10 +255,12 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata, shellExecEnabl
 
 	builder.WriteString("#### Tool Reference\n\n")
 	builder.WriteString("- `read_skill(skill_name)`: Load full skill instructions (MUST call before using a skill)\n")
-	builder.WriteString("- `execute_skill_script(skill_name, script_path, args, input)`: Run utility scripts bundled with a skill\n")
-	builder.WriteString("  - `input`: Pass data directly via stdin (use this when you have data in memory, e.g. JSON string)\n")
-	builder.WriteString("  - `args`: Command-line arguments; pass absolute `/workspace/input/...` paths from `<sandbox_attachments>` for user-uploaded files\n")
-	builder.WriteString("  - Treat `/workspace/input` as read-only and write generated files only to `$WEKNORA_SKILL_OUTPUT_DIR`\n")
+	if skillScriptEnabled {
+		builder.WriteString("- `execute_skill_script(skill_name, script_path, args, input)`: Run utility scripts bundled with a skill\n")
+		builder.WriteString("  - `input`: Pass data directly via stdin (use this when you have data in memory, e.g. JSON string)\n")
+		builder.WriteString("  - `args`: Command-line arguments; pass absolute `/workspace/input/...` paths from `<sandbox_attachments>` for user-uploaded files\n")
+		builder.WriteString("  - Treat `/workspace/input` as read-only and write generated files only to `$WEKNORA_SKILL_OUTPUT_DIR`\n")
+	}
 	if shellExecEnabled {
 		builder.WriteString("- `shell_exec(command, work_dir, timeout_sec, max_output_bytes, max_stderr_bytes, env)`: Freely execute shell commands and explore the current session's isolated Cube sandbox\n")
 		builder.WriteString("  - User-uploaded files are restored under `/workspace/input` and listed in `<sandbox_attachments>`\n")
@@ -266,7 +268,11 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata, shellExecEnabl
 		builder.WriteString("  - Use shell pipelines, redirects, scripts, package managers, compilers, and other installed commands whenever they are the most direct way to complete the task\n")
 		builder.WriteString("  - Increase `max_output_bytes` up to 65536 per stream for large text output, or use `sed`/`head`/`tail` for targeted sections\n")
 		builder.WriteString("  - Binary output is suppressed; write binary results under `/workspace/output` so ArtifactCollector attaches them for download\n")
-		builder.WriteString("  - Session state persists across later `shell_exec` and `execute_skill_script` calls\n")
+		if skillScriptEnabled {
+			builder.WriteString("  - Session state persists across later `shell_exec` and `execute_skill_script` calls\n")
+		} else {
+			builder.WriteString("  - Session state persists across later `shell_exec` calls\n")
+		}
 		builder.WriteString("  - Non-zero exit codes are normal results, not tool errors — inspect stderr and decide what to do next\n")
 	}
 
@@ -306,10 +312,11 @@ func renderPromptPlaceholdersWithStatus(
 
 // BuildSystemPromptOptions contains optional parameters for BuildSystemPrompt
 type BuildSystemPromptOptions struct {
-	SkillsMetadata   []*skills.SkillMetadata
-	ShellExecEnabled bool
-	Language         string         // User language name for {{language}} placeholder (e.g. "Chinese (Simplified)")
-	Config           *config.Config // Config for reading prompt templates; nil falls back to hardcoded defaults
+	SkillsMetadata     []*skills.SkillMetadata
+	SkillScriptEnabled bool
+	ShellExecEnabled   bool
+	Language           string         // User language name for {{language}} placeholder (e.g. "Chinese (Simplified)")
+	Config             *config.Config // Config for reading prompt templates; nil falls back to hardcoded defaults
 }
 
 // BuildSystemPrompt builds the progressive RAG system prompt
@@ -358,7 +365,7 @@ func BuildSystemPromptWithOptions(
 
 	// Append skills metadata if available (Level 1 - Progressive Disclosure)
 	if options != nil && len(options.SkillsMetadata) > 0 {
-		basePrompt += formatSkillsMetadata(options.SkillsMetadata, options.ShellExecEnabled)
+		basePrompt += formatSkillsMetadata(options.SkillsMetadata, options.SkillScriptEnabled, options.ShellExecEnabled)
 	}
 
 	return basePrompt
