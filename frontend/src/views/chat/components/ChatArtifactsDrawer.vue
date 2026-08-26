@@ -81,7 +81,7 @@
             </div>
             <div v-else class="artifact-drawer-header">
                 <div class="artifact-drawer-header-icon">
-                    <t-icon name="file" />
+                    <t-icon name="folder" />
                 </div>
                 <div class="artifact-drawer-header-title">{{ $t('agent.artifactDrawer.title') }}</div>
             </div>

@@ -57,13 +57,13 @@
                      Emptiness is the default: the button stays hidden for
                      conversational messages that never touched a skill. -->
                 <span v-if="hasArtifacts || artifactsCollecting" class="answer-toolbar__artifact"
-                    :class="{ 'is-collecting': artifactsCollecting && !hasArtifacts }">
+                    :class="{ 'is-collecting': artifactButtonCollecting }">
                     <t-button size="small" variant="outline" shape="round"
-                        :loading="artifactsCollecting && !hasArtifacts"
-                        :disabled="artifactsCollecting && !hasArtifacts"
+                        :disabled="artifactButtonCollecting"
                         :title="hasArtifacts ? $t('agent.artifactDrawer.buttonTitle') : $t('agent.artifactDrawer.collecting')"
                         @click.stop="openArtifactDrawer">
-                        <t-icon name="browse" />
+                        <t-icon v-if="artifactButtonCollecting" name="loading" class="answer-toolbar__artifact-spinner" />
+                        <t-icon v-else name="folder" />
                     </t-button>
                     <span v-if="hasArtifacts" class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
                 </span>
@@ -221,6 +221,7 @@ const artifactList = computed(() => {
 const hasArtifacts = computed(() => artifactList.value.length > 0);
 const artifactCount = computed(() => artifactList.value.length);
 const artifactsCollecting = computed(() => isCollectingSkillArtifacts(props.session));
+const artifactButtonCollecting = computed(() => artifactsCollecting.value && !hasArtifacts.value);
 const messageIdForArtifacts = computed(() => {
     // Prefer the persistent message ID; fall back to request_id for the
     // in-flight path where the SSE stream still identifies rows by request.

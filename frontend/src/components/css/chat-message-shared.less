@@ -89,8 +89,6 @@
   }
 }
 
-/* Count sits on the download glyph like the settings list badges: muted
-   surface + secondary type, not TDesign's brand-pink t-badge. */
 .answer-toolbar__artifact {
   position: relative;
   display: inline-flex;
@@ -99,12 +97,27 @@
 
 .answer-toolbar__artifact.is-collecting .t-button {
   color: var(--td-text-color-placeholder);
+  cursor: wait;
+}
+
+.answer-toolbar__artifact-spinner {
+  animation: answer-toolbar-artifact-spin 0.8s linear infinite;
+}
+
+@keyframes answer-toolbar-artifact-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .answer-toolbar__artifact-count {
   position: absolute;
-  top: 1px;
-  right: 1px;
+  top: -2px;
+  right: -2px;
   z-index: 1;
   display: inline-flex;
   align-items: center;
@@ -119,6 +132,7 @@
   font-size: 10px;
   font-weight: 600;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
 
