@@ -63,6 +63,12 @@ import {
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
 import { resolveKnowledgeDownloadFileName } from './knowledgeDownloadFileName';
 import {
+  beginDocumentPageRequest,
+  createDocumentPaginationState,
+  resetDocumentPagination,
+  settleDocumentPageRequest,
+} from './documentPagination';
+import {
   buildUploadFileName,
   canMoveFolderTo,
   childFolders,
@@ -402,11 +408,17 @@ const onCardMoreVisibleChange = (visible: boolean, item: KnowledgeCard) => {
 };
 let isCardDetails = ref(false);
 let timeout: ReturnType<typeof setTimeout> | null = null;
-let knowledgeScroll = ref()
-let page = 1;
+const knowledgeScroll = ref<HTMLElement | null>(null);
 let pageSize = 35;
-let scrollLoading = false;
-const resetPage = () => { page = 1; scrollLoading = false; };
+const documentLoadSentinel = ref<HTMLElement | null>(null);
+const documentPagination = createDocumentPaginationState();
+const documentPaginationLoadFailed = ref(false);
+let documentPaginationObserver: IntersectionObserver | null = null;
+const DOCUMENT_PAGE_PREFETCH_PX = 120;
+const resetPage = () => {
+  resetDocumentPagination(documentPagination);
+  documentPaginationLoadFailed.value = false;
+};
 
 // Move state — inline in card menu
 const moveMenuMode = ref<'normal' | 'targets' | 'confirm'>('normal');
@@ -756,23 +768,28 @@ const getTagName = (tagId?: string | number) => {
   return tagMap.value[key]?.name || '';
 };
 
-const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
-  if (!kbIdValue) return Promise.resolve();
+const loadKnowledgeFiles = async (kbIdValue: string): Promise<void> => {
+  if (!kbIdValue) return;
+  resetPage();
   if (!isFAQ.value) {
     docListLoading.value = true;
   }
-  return getKnowled(
-    {
+  let loaded = false;
+  try {
+    loaded = await getKnowled({
       page: 1,
       page_size: pageSize,
       ...filterParams.value,
-    },
-    kbIdValue,
-  ).finally(() => {
+    }, kbIdValue);
+  } finally {
     if (isCurrentKb(kbIdValue) && !isFAQ.value) {
       docListLoading.value = false;
     }
-  });
+  }
+  if (loaded && isCurrentKb(kbIdValue) && !isFAQ.value) {
+    await nextTick();
+    void loadNextDocumentPageIfNeeded();
+  }
 };
 
 const isCurrentKb = (targetKbId: string) => targetKbId === kbId.value;
@@ -1117,6 +1134,10 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
   loadKnowledgeBaseInfo(newKbId);
 }, { immediate: true });
 
+watch([kbId, isFAQ], () => {
+  void nextTick(setupDocumentPaginationObserver);
+});
+
 watch(selectedTagIds, (newVal, oldVal) => {
   if (oldVal === undefined) return;
   if (kbId.value) {
@@ -1281,6 +1302,7 @@ const handleOpenKnowledgeEvent = (e: Event) => {
 onMounted(() => {
   loadKnowledgeList();
   editorResources.ensureParserEngines();
+  void nextTick(setupDocumentPaginationObserver);
 
   window.addEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.addEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
@@ -1289,6 +1311,8 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  documentPaginationObserver?.disconnect();
+  documentPaginationObserver = null;
   window.removeEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.removeEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
   window.removeEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
@@ -1958,28 +1982,71 @@ const submitReparse = async (id: string, processConfig?: KnowledgeProcessOverrid
   }
 };
 
-const handleScroll = () => {
-  if (isFAQ.value) return;
-  if (docListLoading.value) return;
-  if (scrollLoading) return;
+function documentPaginationViewport() {
+  const element = knowledgeScroll.value as HTMLElement | undefined;
+  if (!element) return null;
+  return {
+    loadedCount: cardList.value.length,
+    totalCount: total.value,
+    pageSize,
+    scrollTop: element.scrollTop,
+    scrollHeight: element.scrollHeight,
+    clientHeight: element.clientHeight,
+    threshold: DOCUMENT_PAGE_PREFETCH_PX,
+  };
+}
+
+async function loadNextDocumentPageIfNeeded(force = false) {
+  if (isFAQ.value || docListLoading.value) return;
   const currentKbId = kbId.value;
   if (!currentKbId) return;
-  const element = knowledgeScroll.value;
-  if (element) {
-    let pageNum = Math.ceil(total.value / pageSize)
-    const { scrollTop, scrollHeight, clientHeight } = element;
-    if (scrollTop + clientHeight >= scrollHeight - 10) {
-      if (cardList.value.length < total.value && page < pageNum) {
-        page++;
-        scrollLoading = true;
-        getKnowled({ page, page_size: pageSize, ...filterParams.value }, currentKbId).finally(() => {
-          if (isCurrentKb(currentKbId)) {
-            scrollLoading = false;
-          }
-        });
-      }
-    }
+
+  const viewport = documentPaginationViewport();
+  if (!viewport) return;
+  const request = beginDocumentPageRequest(documentPagination, viewport, force);
+  if (!request) return;
+
+  documentPaginationLoadFailed.value = false;
+  const loaded = await getKnowled(
+    { page: request.page, page_size: pageSize, ...filterParams.value },
+    currentKbId,
+  );
+  const result = settleDocumentPageRequest(documentPagination, request, loaded && isCurrentKb(currentKbId));
+  if (result === 'stale') return;
+  if (result === 'failed') {
+    documentPaginationLoadFailed.value = true;
+    return;
   }
+
+  // 宽屏下新增一页后仍可能没有滚动条；继续检查，直到内容可滚动或全部加载完。
+  await nextTick();
+  if (isCurrentKb(currentKbId)) {
+    void loadNextDocumentPageIfNeeded();
+  }
+}
+
+function setupDocumentPaginationObserver() {
+  documentPaginationObserver?.disconnect();
+  documentPaginationObserver = null;
+  if (typeof IntersectionObserver === 'undefined') return;
+
+  const root = knowledgeScroll.value as HTMLElement | undefined;
+  const sentinel = documentLoadSentinel.value;
+  if (!root || !sentinel) return;
+
+  documentPaginationObserver = new IntersectionObserver((entries) => {
+    if (entries.some((entry) => entry.isIntersecting)) {
+      void loadNextDocumentPageIfNeeded(true);
+    }
+  }, {
+    root,
+    rootMargin: `0px 0px ${DOCUMENT_PAGE_PREFETCH_PX}px 0px`,
+  });
+  documentPaginationObserver.observe(sentinel);
+}
+
+const handleScroll = () => {
+  void loadNextDocumentPageIfNeeded();
 };
 const getDoc = (page: number) => {
   getfDetails(details.id, page)
@@ -2671,6 +2738,12 @@ async function createNewSession(value: string): Promise<void> {
                     <EmptyKnowledge v-else />
                   </div>
                 </template>
+                <div ref="documentLoadSentinel" class="doc-pagination-sentinel" aria-live="polite">
+                  <t-button v-if="documentPaginationLoadFailed && cardList.length < total" variant="text" size="small"
+                    @click="loadNextDocumentPageIfNeeded(true)">
+                    {{ $t('common.retry') }}
+                  </t-button>
+                </div>
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
@@ -3419,6 +3492,14 @@ async function createNewSession(value: string): Promise<void> {
   &.is-marquee-active {
     cursor: crosshair;
   }
+}
+
+.doc-pagination-sentinel {
+  display: flex;
+  min-height: 1px;
+  align-items: center;
+  justify-content: center;
+  padding-top: 8px;
 }
 
 .doc-marquee-box {
