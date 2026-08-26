@@ -698,7 +698,8 @@ definitions:
       cube_sandbox_ttl_seconds:
         type: integer
       dns_servers:
-        description: DNSServers are Cube template nameserver IPs. Empty uses Cubelet's default.
+        description: DNSServers are Cube template nameserver IPs. Empty uses Cubelet's
+          default.
         items:
           type: string
         type: array
@@ -3828,7 +3829,8 @@ definitions:
           place secrets here that scripts must not access."
         type: object
       sandbox_type:
-        description: SandboxType is cube, e2b, or docker; disabled is the hidden policy row.
+        description: SandboxType is cube, e2b, or docker; disabled is the hidden policy
+          row.
         type: string
       skill_image:
         allOf:
@@ -13995,6 +13997,47 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: Follow an install or removal
+      tags:
+      - SandboxConfig
+  /sandbox-configs/{id}/skills/{skillId}/reinstall:
+    post:
+      description: Retry a failed install from the stored archive; does not re-upload.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skillId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Reinstall accepted
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: The stored archive is gone
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Skill not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Retry a skill install
       tags:
       - SandboxConfig
   /sandbox-configs/{id}/skills/{skillId}/transcript:

@@ -56,13 +56,16 @@
                      assistant message actually recorded any generated files.
                      Emptiness is the default: the button stays hidden for
                      conversational messages that never touched a skill. -->
-                <span v-if="hasArtifacts" class="answer-toolbar__artifact">
+                <span v-if="hasArtifacts || artifactsCollecting" class="answer-toolbar__artifact"
+                    :class="{ 'is-collecting': artifactsCollecting && !hasArtifacts }">
                     <t-button size="small" variant="outline" shape="round"
-                        @click.stop="openArtifactDrawer"
-                        :title="$t('agent.artifactDrawer.buttonTitle')">
-                        <t-icon name="download" />
+                        :loading="artifactsCollecting && !hasArtifacts"
+                        :disabled="artifactsCollecting && !hasArtifacts"
+                        :title="hasArtifacts ? $t('agent.artifactDrawer.buttonTitle') : $t('agent.artifactDrawer.collecting')"
+                        @click.stop="openArtifactDrawer">
+                        <t-icon name="browse" />
                     </t-button>
-                    <span class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
+                    <span v-if="hasArtifacts" class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
                 </span>
                 <!-- Fallback 提示图标 -->
                 <t-tooltip v-if="session.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
@@ -107,6 +110,7 @@ import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
+import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -216,6 +220,7 @@ const artifactList = computed(() => {
 });
 const hasArtifacts = computed(() => artifactList.value.length > 0);
 const artifactCount = computed(() => artifactList.value.length);
+const artifactsCollecting = computed(() => isCollectingSkillArtifacts(props.session));
 const messageIdForArtifacts = computed(() => {
     // Prefer the persistent message ID; fall back to request_id for the
     // in-flight path where the SSE stream still identifies rows by request.

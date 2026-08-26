@@ -67,6 +67,7 @@ func RegisterSandboxConfigRoutes(
 		configs.GET("/:id/skills/:skillId", g.Admin(), skills.Get)
 		configs.GET("/:id/skills/:skillId/files", g.Admin(), skills.ListFiles)
 		configs.GET("/:id/skills/:skillId/files/content", g.Admin(), skills.GetFile)
+		configs.POST("/:id/skills/:skillId/reinstall", g.Admin(), skills.Reinstall)
 		configs.PATCH("/:id/skills/:skillId", g.Admin(), skills.Patch)
 		configs.DELETE("/:id/skills/:skillId", g.Admin(), skills.Delete)
 		configs.GET("/:id/skills/:skillId/install-events", g.Admin(), skills.InstallEvents)

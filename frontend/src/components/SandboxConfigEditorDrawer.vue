@@ -220,7 +220,7 @@
         </div>
         <t-form-item :label="requiredLabel('dockerImage')" :status="fieldStatus('image')"
           :tips="fieldTip('image')">
-          <t-input v-model="docker.image" placeholder="wechatopenai/weknora-sandbox:latest"
+          <t-input v-model="docker.image" :placeholder="defaultDockerImage"
             :disabled="retargetFrozen" @input="onFieldInput('image')" />
           <p v-if="retargetFrozen" class="section-help section-help--field">
             {{ hasSkillSnapshot
@@ -532,6 +532,11 @@ const { t } = useI18n()
 const secretPlaceholder = '***'
 const isMaskedSecret = (value?: string) => value === secretPlaceholder
 
+// Mirrors DefaultDockerImage on the server, including why it tracks main
+// instead of latest: the latest tag still carries an image whose /workspace
+// the sandbox account cannot write.
+const defaultDockerImage = 'wechatopenai/weknora-sandbox:main'
+
 const clusterGuideUrl = 'https://github.com/Tencent/WeKnora/blob/main/docs/sandbox-cluster.md'
 const e2bApiKeysUrl = 'https://e2b.dev/dashboard?tab=keys'
 
@@ -771,7 +776,7 @@ function reset() {
   Object.assign(docker, cfg.docker || {})
   if (!Array.isArray(cube.dns_servers)) cube.dns_servers = []
   if (backend.value === 'docker' && !docker.image) {
-    docker.image = 'wechatopenai/weknora-sandbox:latest'
+    docker.image = defaultDockerImage
   }
   storedSecrets.cube = isMaskedSecret(cube.api_key)
   storedSecrets.e2b = isMaskedSecret(e2b.api_key)
@@ -802,7 +807,7 @@ function selectBackend(value: string) {
   if (backend.value === value) return
   backend.value = value
   if (value === 'docker' && !docker.image) {
-    docker.image = 'wechatopenai/weknora-sandbox:latest'
+    docker.image = defaultDockerImage
   }
   onBackendChange()
 }

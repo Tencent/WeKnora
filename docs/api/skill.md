@@ -6,6 +6,7 @@
 | ---- | --------- | ------------------ |
 | GET  | `/skills` | 获取预装 Skills 列表 |
 | POST | `/sandbox-configs/{id}/skills` | 安装技能（zip 上传或托管平台 source） |
+| POST | `/sandbox-configs/{id}/skills/{skillId}/reinstall` | 用已保存的安装包重试安装 |
 | GET  | `/sandbox-configs/{id}/skills/{skillId}/files` | 列出已安装技能的文件 |
 | GET  | `/sandbox-configs/{id}/skills/{skillId}/files/content` | 读取已安装技能中的单个文件 |
 
@@ -90,6 +91,32 @@ curl --location 'http://localhost:8080/api/v1/sandbox-configs/{id}/skills' \
 --header 'X-API-Key: sk-xxxxx' \
 --header 'Content-Type: application/json' \
 --data '{"source":"@owner/slug"}'
+```
+
+**响应**（202）:
+
+```json
+{
+    "success": true,
+    "data": {
+        "skill_id": "..."
+    }
+}
+```
+
+## POST `/sandbox-configs/{id}/skills/{skillId}/reinstall` - 重试安装
+
+用服务端已保存的安装包重新跑一遍安装，无需重新上传 zip 或重新提供 source。适用于安装失败的原因与安装包本身无关的情况：沙箱不可达、依赖源超时、安装过程被中断等。
+
+与安装接口一样只负责受理，进度同样通过
+`GET /sandbox-configs/{id}/skills/{skillId}/install-events` 跟随。技能会复用同一个 `skill_id`，不会产生新记录。
+
+已经在当前镜像中正常服务、且安装包未变的技能会被跳过，不会重复构建快照。若该技能的安装包已不在存储中，返回 400，此时只能重新上传。
+
+```curl
+curl --location --request POST \
+'http://localhost:8080/api/v1/sandbox-configs/{id}/skills/{skillId}/reinstall' \
+--header 'X-API-Key: sk-xxxxx'
 ```
 
 **响应**（202）:

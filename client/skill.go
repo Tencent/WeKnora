@@ -119,6 +119,33 @@ func (c *Client) UploadSandboxSkill(
 	return response.Data.SkillID, nil
 }
 
+// ReinstallSandboxSkill runs the install of one skill again from the archive
+// the server already stores, so a failure that had nothing to do with the
+// bundle can be retried without re-uploading it. Like the install it is
+// accepted asynchronously. A skill already serving the current image is left
+// alone rather than rebuilt.
+func (c *Client) ReinstallSandboxSkill(
+	ctx context.Context, configID, skillID string,
+) (string, error) {
+	if configID == "" {
+		return "", fmt.Errorf("sandbox config ID is required")
+	}
+	if skillID == "" {
+		return "", fmt.Errorf("skill ID is required")
+	}
+	path := "/api/v1/sandbox-configs/" + url.PathEscape(configID) +
+		"/skills/" + url.PathEscape(skillID) + "/reinstall"
+	resp, err := c.doRequest(ctx, http.MethodPost, path, nil, nil)
+	if err != nil {
+		return "", err
+	}
+	var response SandboxSkillInstallResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return "", err
+	}
+	return response.Data.SkillID, nil
+}
+
 // SandboxSkillFile is one path in an installed skill's stored archive.
 type SandboxSkillFile struct {
 	Path string `json:"path"`

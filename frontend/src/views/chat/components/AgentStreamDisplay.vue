@@ -340,13 +340,16 @@
                      assistant message recorded any generated files. Agent
                      mode is the primary path for skills, so this is where
                      the button is most likely to appear. -->
-                <span v-if="hasArtifacts" class="answer-toolbar__artifact">
+                <span v-if="hasArtifacts || artifactsCollecting" class="answer-toolbar__artifact"
+                  :class="{ 'is-collecting': artifactsCollecting && !hasArtifacts }">
                   <t-button size="small" variant="outline" shape="round"
-                    @click.stop="openArtifactDrawer"
-                    :title="$t('agent.artifactDrawer.buttonTitle')">
-                    <t-icon name="download" />
+                    :loading="artifactsCollecting && !hasArtifacts"
+                    :disabled="artifactsCollecting && !hasArtifacts"
+                    :title="hasArtifacts ? $t('agent.artifactDrawer.buttonTitle') : $t('agent.artifactDrawer.collecting')"
+                    @click.stop="openArtifactDrawer">
+                    <t-icon name="browse" />
                   </t-button>
-                  <span class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
+                  <span v-if="hasArtifacts" class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
                 </span>
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
@@ -533,6 +536,7 @@ import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
+import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 import ChatMemoryStep from './ChatMemoryStep.vue';
 import { useChatMemoryRow, type UsedMemory } from '@/composables/useChatMemoryRow';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
@@ -926,6 +930,7 @@ const artifactList = computed(() => {
 });
 const hasArtifacts = computed(() => artifactList.value.length > 0);
 const artifactCount = computed(() => artifactList.value.length);
+const artifactsCollecting = computed(() => isCollectingSkillArtifacts(props.session as any));
 const sessionIdForArtifacts = computed(() => props.sessionId ?? '');
 const messageIdForArtifacts = computed(() =>
   String(props.session?.id || props.session?.request_id || ''),

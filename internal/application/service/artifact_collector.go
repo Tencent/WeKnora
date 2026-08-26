@@ -229,6 +229,33 @@ func (c *ArtifactCollector) Collect(
 	tenantID uint64,
 	outputDir string,
 ) (types.MessageArtifacts, error) {
+	return c.collect(ctx, sessionID, messageID, tenantID, outputDir, nil)
+}
+
+// CollectWithNotify is Collect plus a progress hook fired after the sandbox
+// listing is filtered, before any file is read or uploaded. The frontend uses
+// this to show a toolbar placeholder while object-storage uploads (often a
+// few seconds for HTML charts) finish. notify is skipped when nothing will
+// be persisted, so ordinary sandbox turns without new files stay quiet.
+func (c *ArtifactCollector) CollectWithNotify(
+	ctx context.Context,
+	sessionID string,
+	messageID string,
+	tenantID uint64,
+	outputDir string,
+	notify func(pending int),
+) (types.MessageArtifacts, error) {
+	return c.collect(ctx, sessionID, messageID, tenantID, outputDir, notify)
+}
+
+func (c *ArtifactCollector) collect(
+	ctx context.Context,
+	sessionID string,
+	messageID string,
+	tenantID uint64,
+	outputDir string,
+	notify func(pending int),
+) (types.MessageArtifacts, error) {
 	if c == nil || c.fileService == nil {
 		logger.Infof(ctx, "[ArtifactCollector] skipped: collector or dependencies nil (session=%s)", sessionID)
 		return nil, nil
@@ -281,7 +308,17 @@ func (c *ArtifactCollector) Collect(
 		logger.Infof(ctx, "[ArtifactCollector] known set size=%d (session=%s)", len(known), sessionID)
 	}
 
-	artifacts := make(types.MessageArtifacts, 0, len(entries))
+	pending := 0
+	for _, entry := range entries {
+		if c.acceptEntry(entry, known) {
+			pending++
+		}
+	}
+	if pending > 0 && notify != nil {
+		notify(pending)
+	}
+
+	artifacts := make(types.MessageArtifacts, 0, pending)
 	for _, entry := range entries {
 		art, ok := c.maybePersist(ctx, source, sessionID, messageID, tenantID, entry, known)
 		if !ok {
@@ -318,6 +355,22 @@ func (c *ArtifactCollector) loadKnownSet(ctx context.Context, sessionID string) 
 	return set
 }
 
+func (c *ArtifactCollector) acceptEntry(entry sandbox.RemoteDirEntry, known map[string]struct{}) bool {
+	if entry.Type != sandbox.RemoteEntryFile {
+		return false
+	}
+	if entry.Path == "" || entry.Name == "" {
+		return false
+	}
+	if entry.Size > c.config.MaxFileBytes {
+		return false
+	}
+	if _, seen := known[artifactKey(entry.Path, entry.ModTime)]; seen {
+		return false
+	}
+	return true
+}
+
 // maybePersist runs the per-file pipeline (filter → download → upload →
 // build metadata). Returns ok=false when the entry was skipped for any
 // reason (already known, too large, upload failed). All skip reasons are
@@ -331,24 +384,11 @@ func (c *ArtifactCollector) maybePersist(
 	entry sandbox.RemoteDirEntry,
 	known map[string]struct{},
 ) (types.MessageArtifact, bool) {
-	// Only files reach here (SessionBoundManager.listFilesRecursive filters
-	// directories), but we defensively double-check so callers passing an
-	// alternate SandboxArtifactSource don't break the assumption.
-	if entry.Type != sandbox.RemoteEntryFile {
-		return types.MessageArtifact{}, false
-	}
-	if entry.Path == "" || entry.Name == "" {
-		return types.MessageArtifact{}, false
-	}
-	if entry.Size > c.config.MaxFileBytes {
-		logger.Warnf(ctx, "[ArtifactCollector] skip oversize artifact: session=%s path=%s size=%d limit=%d",
-			sessionID, entry.Path, entry.Size, c.config.MaxFileBytes)
-		return types.MessageArtifact{}, false
-	}
-
-	modTime := entry.ModTime
-	key := artifactKey(entry.Path, modTime)
-	if _, seen := known[key]; seen {
+	if !c.acceptEntry(entry, known) {
+		if entry.Type == sandbox.RemoteEntryFile && entry.Size > c.config.MaxFileBytes {
+			logger.Warnf(ctx, "[ArtifactCollector] skip oversize artifact: session=%s path=%s size=%d limit=%d",
+				sessionID, entry.Path, entry.Size, c.config.MaxFileBytes)
+		}
 		return types.MessageArtifact{}, false
 	}
 
@@ -386,7 +426,7 @@ func (c *ArtifactCollector) maybePersist(
 		FileType:   strings.ToLower(filepath.Ext(entry.Name)),
 		FileSize:   int64(len(data)),
 		SourcePath: entry.Path,
-		ModTime:    modTime,
+		ModTime:    entry.ModTime,
 		CreatedAt:  time.Now().UTC(),
 	}, true
 }

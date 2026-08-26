@@ -259,6 +259,10 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata, shellExecEnabl
 	builder.WriteString("  - `input`: Pass data directly via stdin (use this when you have data in memory, e.g. JSON string)\n")
 	builder.WriteString("  - `args`: Command-line arguments; pass absolute `/workspace/input/...` paths from `<sandbox_attachments>` for user-uploaded files\n")
 	builder.WriteString("  - Treat `/workspace/input` as read-only and write generated files only to `$WEKNORA_SKILL_OUTPUT_DIR`\n")
+	builder.WriteString("  - Each skill keeps its dependencies to itself (virtualenv or node_modules); ")
+	builder.WriteString("this tool already runs scripts the right way. A bare `python3 -c` / `node -e` ")
+	builder.WriteString("sees none of them, so never conclude from that that a skill cannot run, and ")
+	builder.WriteString("never reinstall a skill's dependencies — they would live in this session only\n")
 	if shellExecEnabled {
 		builder.WriteString("- `shell_exec(command, work_dir, timeout_sec, max_output_bytes, max_stderr_bytes, env)`: Freely execute shell commands and explore the current session's isolated Cube sandbox\n")
 		builder.WriteString("  - User-uploaded files are restored under `/workspace/input` and listed in `<sandbox_attachments>`\n")

@@ -28,7 +28,6 @@ import (
 	"fmt"
 	"log"
 	"path"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +47,12 @@ const SessionOutputRoot = "/workspace/output"
 
 // skillOutputEnvVar matches the skills manager's WEKNORA_SKILL_OUTPUT_DIR.
 const skillOutputEnvVar = "WEKNORA_SKILL_OUTPUT_DIR"
+
+// sessionInputEnvVar matches the skills manager's WEKNORA_SESSION_INPUT_DIR.
+// Both names are injected into the sandbox environment itself, not only into
+// the skill-script Execute call, so an agent exploring with shell_exec reads
+// the same paths the skills framework uses.
+const sessionInputEnvVar = "WEKNORA_SESSION_INPUT_DIR"
 
 // SessionWorkspaceRoot is the writable workspace root inside remote sandboxes.
 // shell_exec work_dir must stay underneath this path.
@@ -80,10 +85,19 @@ type SessionBoundManager struct {
 	// activeType is the effective sandbox type callers observe.
 	activeType SandboxType
 
-	// mu guards Cleanup's idempotency flag.
+	// mu guards Cleanup's idempotency flag and the workspace bootstrap cache.
 	mu     sync.RWMutex
 	closed bool
+
+	// workspaceReady remembers which sandboxes this process already prepared,
+	// keyed by sandbox ID and artifact directory. See workspaceDirsReady.
+	workspaceReady map[string]struct{}
 }
+
+// maxWorkspaceReadyEntries bounds the bootstrap cache. Entries are never
+// individually invalidated — a sandbox ID is never reused — so the map is
+// dropped wholesale once it passes a size no single process needs.
+const maxWorkspaceReadyEntries = 1024
 
 // SessionBoundManagerConfig bundles the wired dependencies. Test helpers and
 // the production container use it so callers only have to name the moving
@@ -264,63 +278,133 @@ func (m *SessionBoundManager) Execute(ctx context.Context, cfg *ExecuteConfig) (
 	if err != nil {
 		return nil, err
 	}
-	m.ensureExecutionOutputDir(ctx, handle, cfg)
+	m.ensureSessionWorkspaceDirs(ctx, handle, executionOutputDir(cfg))
 	return m.ephemeral.ExecuteOnHandle(ctx, handle, cfg)
 }
 
-// ensureExecutionOutputDir creates the skill artifact directory and makes sure
-// DefaultSandboxExecUser can write to it before script execution.
+// ensureSessionWorkspaceDirs materialises the input and artifact directories
+// and makes sure DefaultSandboxExecUser can write to them. It runs before the
+// first operation on a sandbox rather than only before script execution: a
+// snapshot-derived image has no /workspace tree at all (skill install wipes it
+// before the snapshot), and an agent that explores with shell_exec first would
+// otherwise find neither directory.
 //
-// This runs AS that account, never as root. The directory sits inside the
-// session's own writable workspace, and chown/chmod follow symlinks, so a
+// This runs AS the sandbox account, never as root. The directories sit inside
+// the session's own writable workspace, and chown/chmod follow symlinks, so a
 // root-run bootstrap can be aimed at any directory in the container: a session
 // that swaps its artifact directory for a link to /etc gets handed ownership of
 // /etc, and from there uid 0 by rewriting passwd. Running as the sandbox
-// account makes that a no-op — chown succeeds on the directory MakeDir just
-// created for it and is refused by the kernel on anything else.
+// account makes that a no-op — the kernel refuses everything the account does
+// not already own.
 //
-// Best-effort: failures are logged and do not abort the upcoming execution.
-func (m *SessionBoundManager) ensureExecutionOutputDir(
+// Best-effort: failures are logged and do not abort the upcoming operation.
+func (m *SessionBoundManager) ensureSessionWorkspaceDirs(
 	ctx context.Context,
 	handle RemoteSandboxHandle,
-	cfg *ExecuteConfig,
+	outputDir string,
 ) {
-	if m == nil || m.client == nil || handle == nil {
+	if m == nil || m.client == nil || handle == nil || outputDir == "" {
 		return
 	}
-	outputDir := executionOutputDir(cfg)
-	if outputDir == "" {
+	if m.workspaceDirsReady(handle.ID(), outputDir) {
 		return
 	}
 	execUser := DefaultSandboxExecUser
-	if err := m.client.MakeDir(ctx, handle, outputDir); err != nil {
-		log.Printf("[sandbox] ensure output dir %s failed: %v", outputDir, err)
-		return
-	}
-	quoted := strconv.Quote(outputDir)
-	line := fmt.Sprintf(
-		"chown %s:%s %s && chmod 775 %s",
-		execUser, execUser, quoted, quoted,
-	)
 	result, err := m.client.Exec(ctx, handle, RemoteExecRequest{
 		Shell:   true,
-		Command: line,
+		Command: workspaceBootstrapCommand(SessionInputRoot, outputDir),
 		User:    execUser,
 		Timeout: sessionArtifactDirBootstrapTimeout,
 	})
-	if err != nil {
+	switch {
+	case err != nil:
 		log.Printf(
-			"[sandbox] grant output dir %s to %s failed: %v",
-			outputDir, execUser, err,
+			"[sandbox] prepare workspace dirs (%s, %s) for %s failed: %v",
+			SessionInputRoot, outputDir, execUser, err,
+		)
+		return
+	case result != nil && result.ExitCode != 0:
+		// The account cannot create or take over these directories, which
+		// means /workspace itself does not belong to it. No runtime step can
+		// repair that; the image or template has to be rebuilt from a base
+		// where /workspace is owned by the sandbox account.
+		log.Printf(
+			"[sandbox] prepare workspace dirs (%s, %s) for %s: exit=%d stderr=%s "+
+				"— rebuild the sandbox image/template so /workspace is owned by %s",
+			SessionInputRoot, outputDir, execUser,
+			result.ExitCode, strings.TrimSpace(result.Stderr), execUser,
 		)
 		return
 	}
-	if result != nil && result.ExitCode != 0 {
-		log.Printf(
-			"[sandbox] grant output dir %s to %s: exit=%d stderr=%s",
-			outputDir, execUser, result.ExitCode, strings.TrimSpace(result.Stderr),
-		)
+	m.markWorkspaceDirsReady(handle.ID(), outputDir)
+}
+
+// workspaceBootstrapCommand builds the repair script the sandbox account runs.
+//
+// Each directory is handled in three steps because all three states occur in
+// the field: missing (snapshot images carry no /workspace tree), present but
+// not a directory (a symlink an earlier turn left behind), and present but
+// owned by another account (a provider whose filesystem API creates
+// directories as root). The last one is repaired by moving the directory aside
+// instead of chowning it: deletion rights come from the parent, so the account
+// that owns /workspace can always replace a child it does not own, and nothing
+// here needs privileges.
+func workspaceBootstrapCommand(dirs ...string) string {
+	quoted := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		quoted = append(quoted, ShellQuote(dir))
 	}
+	return fmt.Sprintf(
+		`set -e; for d in %s; do `+
+			`if [ -L "$d" ] || { [ -e "$d" ] && [ ! -d "$d" ]; }; then rm -f "$d"; fi; `+
+			`[ -d "$d" ] || mkdir -p "$d"; `+
+			`if [ ! -w "$d" ]; then mv -f "$d" "$d.unwritable.$(date +%%s)"; mkdir "$d"; fi; `+
+			`chmod 775 "$d"; done`,
+		strings.Join(quoted, " "),
+	)
+}
+
+// workspaceDirsReady reports whether this process already prepared the given
+// sandbox. The bootstrap costs a remote round trip, and every shell_exec would
+// otherwise pay it. The cache is keyed by sandbox ID, so a replaced sandbox is
+// prepared again, and it is dropped wholesale once it grows past the size a
+// single process plausibly needs.
+func (m *SessionBoundManager) workspaceDirsReady(sandboxID, outputDir string) bool {
+	if sandboxID == "" {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.workspaceReady[sandboxID+"|"+outputDir]
+	return ok
+}
+
+func (m *SessionBoundManager) markWorkspaceDirsReady(sandboxID, outputDir string) {
+	if sandboxID == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.workspaceReady == nil || len(m.workspaceReady) >= maxWorkspaceReadyEntries {
+		m.workspaceReady = make(map[string]struct{}, 1)
+	}
+	m.workspaceReady[sandboxID+"|"+outputDir] = struct{}{}
+}
+
+// withWorkspaceEnvDefaults stamps the workspace paths onto the sandbox's own
+// environment. A tenant-configured value wins: an operator who points the
+// artifact directory somewhere else must not have it overwritten here.
+func withWorkspaceEnvDefaults(env map[string]string) map[string]string {
+	if env == nil {
+		env = make(map[string]string, 2)
+	}
+	if strings.TrimSpace(env[skillOutputEnvVar]) == "" {
+		env[skillOutputEnvVar] = SessionOutputRoot
+	}
+	if strings.TrimSpace(env[sessionInputEnvVar]) == "" {
+		env[sessionInputEnvVar] = SessionInputRoot
+	}
+	return env
 }
 
 // executionOutputDir resolves the artifact directory for this Execute call.
@@ -654,6 +738,11 @@ func (m *SessionBoundManager) ExecShellCommandWithOptions(
 	if err != nil {
 		return nil, err
 	}
+	// The model reaches the sandbox through this path too, and typically
+	// before any skill script runs. Without the same bootstrap it would find
+	// no artifact directory and no place to read attachments from, and would
+	// improvise somewhere the collector never looks.
+	m.ensureSessionWorkspaceDirs(ctx, handle, SessionOutputRoot)
 	if workDir != "" {
 		if mkErr := m.client.MakeDir(ctx, handle, workDir); mkErr != nil {
 			log.Printf("[sandbox] shell_exec: MakeDir %s failed (continuing): %v", workDir, mkErr)
@@ -962,7 +1051,7 @@ func cleanSessionWorkDir(workDir string, allowSkillsRoot bool) (string, error) {
 // authoritative source of identity — it selects the correct Config fields so
 // Cube and E2B never read each other's templates or TTLs.
 func buildSessionCreateRequest(provider RemoteProvider, cfg *Config) (RemoteCreateRequest, error) {
-	envVars := cloneMetadata(cfg.EnvVars)
+	envVars := withWorkspaceEnvDefaults(cloneMetadata(cfg.EnvVars))
 
 	switch provider {
 	case SandboxTypeCube:

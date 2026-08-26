@@ -43,14 +43,15 @@ type AgentQARequest struct {
 type AgentResponseType string
 
 const (
-	AgentResponseTypeThinking   AgentResponseType = "thinking"
-	AgentResponseTypeToolCall   AgentResponseType = "tool_call"
-	AgentResponseTypeToolResult AgentResponseType = "tool_result"
-	AgentResponseTypeReferences AgentResponseType = "references"
-	AgentResponseTypeAnswer     AgentResponseType = "answer"
-	AgentResponseTypeReflection AgentResponseType = "reflection"
-	AgentResponseTypeError      AgentResponseType = "error"
-	AgentResponseTypeComplete   AgentResponseType = "complete"
+	AgentResponseTypeThinking         AgentResponseType = "thinking"
+	AgentResponseTypeToolCall         AgentResponseType = "tool_call"
+	AgentResponseTypeToolResult       AgentResponseType = "tool_result"
+	AgentResponseTypeReferences       AgentResponseType = "references"
+	AgentResponseTypeAnswer           AgentResponseType = "answer"
+	AgentResponseTypeReflection       AgentResponseType = "reflection"
+	AgentResponseTypeError            AgentResponseType = "error"
+	AgentResponseTypeComplete         AgentResponseType = "complete"
+	AgentResponseTypeArtifactsPending AgentResponseType = "artifacts_pending"
 )
 
 // AgentStreamResponse agent streaming response

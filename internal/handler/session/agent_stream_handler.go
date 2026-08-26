@@ -659,12 +659,13 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		// produced — those cases must not disturb the completion path.
 		if h.artifactCollector != nil {
 			collectCtx := context.WithoutCancel(h.ctx)
-			artifacts, err := h.artifactCollector.Collect(
+			artifacts, err := h.artifactCollector.CollectWithNotify(
 				collectCtx,
 				h.sessionID,
 				h.assistantMessageID,
 				h.tenantID,
 				skills.ArtifactOutputDir(),
+				h.emitArtifactsPending,
 			)
 			if err != nil {
 				logger.GetLogger(h.ctx).Warnf(
@@ -754,6 +755,28 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	}
 
 	return nil
+}
+
+// emitArtifactsPending tells the live UI that sandbox files exist and are
+// being uploaded. It must not take h.mu — Collect calls it while
+// handleComplete already holds the lock.
+func (h *AgentStreamHandler) emitArtifactsPending(count int) {
+	if h == nil || h.streamManager == nil || count <= 0 {
+		return
+	}
+	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID:        fmt.Sprintf("artifacts-pending-%d", time.Now().UnixMilli()),
+		Type:      types.ResponseTypeArtifactsPending,
+		Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"count": count,
+		},
+	}); err != nil {
+		logger.GetLogger(h.ctx).Warnf(
+			"append artifacts_pending failed session=%s message=%s: %v",
+			h.sessionID, h.assistantMessageID, err,
+		)
+	}
 }
 
 // publicArtifactViews returns a redacted view of the artifact list suitable

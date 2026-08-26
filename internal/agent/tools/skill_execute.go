@@ -27,6 +27,11 @@ var executeSkillScriptTool = BaseTool{
   ` + "`args`" + ` when a script accepts an input file.
 - Treat ` + "`/workspace/input`" + ` as read-only. Write generated files only to
   ` + "`$WEKNORA_SKILL_OUTPUT_DIR`" + ` so they can be collected for download.
+- Scripts reach the dependencies their install put beside them: Python runs
+  with the skill's own virtualenv interpreter, Node resolves the skill's
+  node_modules from the script's location. A failed import under a bare
+  ` + "`python3 -c`" + ` or ` + "`node -e`" + ` says nothing about whether this
+  tool can run the script.
 
 ## When to Use
 - When a skill's instructions reference a utility script (e.g., "Run scripts/analyze_form.py")
