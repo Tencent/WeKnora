@@ -89,6 +89,35 @@
   }
 }
 
+/* Count sits on the download glyph like the settings list badges: muted
+   surface + secondary type, not TDesign's brand-pink t-badge. */
+.answer-toolbar__artifact {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.answer-toolbar__artifact-count {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  pointer-events: none;
+}
+
 .answer-toolbar__follow-up-loading {
   display: inline-flex;
   align-items: center;

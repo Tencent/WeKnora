@@ -77,8 +77,9 @@ type Manager struct {
 	sandboxMgr sandbox.Manager
 
 	// tenantSource holds the skills installed into this run's sandbox image.
-	// It is nil for every run whose workspace has none, which is why the
-	// preloaded path below is untouched by its existence.
+	// When set it is the only source the model is told about: the host
+	// skills/preloaded directory is not what execute_skill_script would find
+	// inside the sandbox.
 	tenantSource SkillSource
 
 	// Configuration
@@ -129,70 +130,25 @@ func (m *Manager) WithTenantSource(source SkillSource) *Manager {
 	return m
 }
 
-// resolveSource decides which source owns one skill name. An installed skill
-// shadows a preloaded one of the same name, because the sandbox boots the
-// image the install produced and that is the copy a script would run.
+// resolveSource decides which source owns one skill name. An installed image
+// is the only copy the sandbox can run: falling back to a host preloaded
+// skill would advertise files that are not in the image.
 func (m *Manager) resolveSource(skillName string) SkillSource {
 	if m.tenantSource != nil {
-		if _, err := m.tenantSource.GetSkillBasePath(skillName); err == nil {
-			return m.tenantSource
-		}
+		return m.tenantSource
 	}
 	return m.loader
 }
 
-// discoverAllSkills merges the two sources into the set the model is told
-// about.
+// discoverAllSkills returns the set the model is told about. When skills are
+// installed into the sandbox image, that image is the source of truth; the
+// deployment's skills/preloaded directory is not what execute_skill_script
+// would find inside the sandbox.
 func (m *Manager) discoverAllSkills() ([]*SkillMetadata, error) {
-	preloaded, err := m.loader.DiscoverSkills()
-	if err != nil {
-		return nil, err
+	if m.tenantSource != nil {
+		return m.tenantSource.DiscoverSkills()
 	}
-	return m.mergeWithTenantSkills(preloaded)
-}
-
-// mergeWithTenantSkills overlays the installed skills on a freshly discovered
-// preloaded set.
-func (m *Manager) mergeWithTenantSkills(preloaded []*SkillMetadata) ([]*SkillMetadata, error) {
-	if m.tenantSource == nil {
-		return preloaded, nil
-	}
-	tenant, err := m.tenantSource.DiscoverSkills()
-	if err != nil {
-		return nil, err
-	}
-	return mergeSkillMetadata(preloaded, tenant), nil
-}
-
-// mergeSkillMetadata overlays the installed skills on the preloaded ones,
-// keeping the preloaded ordering for the names both sources carry so the
-// system prompt does not reshuffle when a skill is installed.
-func mergeSkillMetadata(preloaded, tenant []*SkillMetadata) []*SkillMetadata {
-	byName := make(map[string]*SkillMetadata, len(tenant))
-	for _, meta := range tenant {
-		if meta != nil {
-			byName[meta.Name] = meta
-		}
-	}
-	merged := make([]*SkillMetadata, 0, len(preloaded)+len(tenant))
-	overridden := make(map[string]bool, len(tenant))
-	for _, meta := range preloaded {
-		if meta == nil {
-			continue
-		}
-		if installed, ok := byName[meta.Name]; ok {
-			merged = append(merged, installed)
-			overridden[meta.Name] = true
-			continue
-		}
-		merged = append(merged, meta)
-	}
-	for _, meta := range tenant {
-		if meta != nil && !overridden[meta.Name] {
-			merged = append(merged, meta)
-		}
-	}
-	return merged
+	return m.loader.Reload()
 }
 
 // Initialize discovers all skills and caches their metadata
@@ -491,11 +447,7 @@ func (m *Manager) Reload(ctx context.Context) error {
 		return nil
 	}
 
-	preloaded, err := m.loader.Reload()
-	if err != nil {
-		return err
-	}
-	metadata, err := m.mergeWithTenantSkills(preloaded)
+	metadata, err := m.discoverAllSkills()
 	if err != nil {
 		return err
 	}

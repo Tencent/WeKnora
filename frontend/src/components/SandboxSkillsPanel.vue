@@ -3,28 +3,37 @@
     <t-loading :loading="loading" size="small">
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.imageInfoTitle') }}</h4>
+        <p v-if="!hasSkillSnapshot" class="image-info-note">
+          {{ $t('settings.sandbox.imageInfoUsingBase') }}
+        </p>
         <ul class="image-info">
-          <li>
-            <span class="image-info__label">{{ $t('settings.sandbox.imageInfoBaseTemplate') }}</span>
+          <template v-if="hasSkillSnapshot">
+            <li>
+              <span class="image-info__label">{{ $t('settings.sandbox.imageInfoBaseTemplate') }}</span>
+              <span class="image-info__value image-info__value--id">
+                {{ skillImage?.base_template_id || runtimeTemplateId || $t('settings.sandbox.imageInfoUnset') }}
+              </span>
+            </li>
+            <li>
+              <span class="image-info__label">{{ $t('settings.sandbox.imageInfoSnapshot') }}</span>
+              <span class="image-info__value image-info__value--id">{{ skillImage?.snapshot_id }}</span>
+            </li>
+            <li>
+              <span class="image-info__label">{{ $t('settings.sandbox.imageInfoGeneration') }}</span>
+              <span class="image-info__value">
+                {{ skillImage?.generation ? String(skillImage.generation) : $t('settings.sandbox.imageInfoUnset') }}
+              </span>
+            </li>
+            <li>
+              <span class="image-info__label">{{ $t('settings.sandbox.imageInfoBuiltAt') }}</span>
+              <span class="image-info__value">{{ formatBuiltAt(skillImage?.built_at) }}</span>
+            </li>
+          </template>
+          <li v-else>
+            <span class="image-info__label">{{ $t('settings.sandbox.imageInfoRuntimeTemplate') }}</span>
             <span class="image-info__value image-info__value--id">
-              {{ skillImage?.base_template_id || $t('settings.sandbox.imageInfoEmpty') }}
+              {{ runtimeTemplateId || $t('settings.sandbox.imageInfoUnset') }}
             </span>
-          </li>
-          <li>
-            <span class="image-info__label">{{ $t('settings.sandbox.imageInfoSnapshot') }}</span>
-            <span class="image-info__value image-info__value--id">
-              {{ skillImage?.snapshot_id || $t('settings.sandbox.imageInfoEmpty') }}
-            </span>
-          </li>
-          <li>
-            <span class="image-info__label">{{ $t('settings.sandbox.imageInfoGeneration') }}</span>
-            <span class="image-info__value">
-              {{ skillImage?.generation ? String(skillImage.generation) : $t('settings.sandbox.imageInfoEmpty') }}
-            </span>
-          </li>
-          <li>
-            <span class="image-info__label">{{ $t('settings.sandbox.imageInfoBuiltAt') }}</span>
-            <span class="image-info__value">{{ formatBuiltAt(skillImage?.built_at) }}</span>
           </li>
         </ul>
       </section>
@@ -55,6 +64,28 @@
       </section>
 
       <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillInstallGroup') }}</h4>
+        <t-input-adornment class="skill-source-row">
+          <t-input
+            v-model="sourceInput"
+            :placeholder="$t('settings.sandbox.skillSourcePlaceholder')"
+            :disabled="installBusy"
+            @enter="installFromSource"
+          />
+          <template #append>
+            <t-button
+              theme="primary"
+              :loading="installingFromSource"
+              :disabled="!sourceInput.trim() || uploading"
+              @click="installFromSource"
+            >
+              {{ $t('settings.sandbox.skillSourceInstall') }}
+            </t-button>
+          </template>
+        </t-input-adornment>
+        <div class="skill-install-split">
+          <span>{{ $t('settings.sandbox.skillInstallOr') }}</span>
+        </div>
         <input
           ref="fileInputRef"
           type="file"
@@ -62,17 +93,16 @@
           class="file-input-hidden"
           @change="onFileInputChange"
         />
-
         <div
           class="file-upload-area"
-          :class="{ 'has-file': uploading }"
-          @click="fileInputRef?.click()"
+          :class="{ 'has-file': uploading, 'is-disabled': installBusy }"
+          @click="!installBusy && fileInputRef?.click()"
           @dragover.prevent
           @dragenter.prevent
           @drop.prevent="onFileDrop"
         >
           <div class="file-upload-content">
-            <t-icon name="upload" size="32px" class="upload-icon" />
+            <t-icon name="upload" size="18px" class="upload-icon" />
             <div class="upload-text">
               <span v-if="uploading" class="upload-file-name">
                 {{ $t('settings.sandbox.skillUploading', { percent: uploadPercent }) }}
@@ -86,156 +116,194 @@
           </div>
         </div>
         <p class="upload-hint">{{ uploadHint }}</p>
+      </section>
 
+      <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillInstalledGroup') }}</h4>
         <p v-if="!loading && skills.length === 0" class="skill-empty">
           {{ $t('settings.sandbox.skillEmpty') }}
         </p>
 
         <ul class="skill-list">
-          <li v-for="skill in skills" :key="skill.id" class="skill-item">
+          <li
+            v-for="skill in skills"
+            :key="skill.id"
+            :ref="(el) => bindSkillItem(skill.id, el)"
+            class="skill-item"
+            :class="{ 'skill-item--focused': focusedSkillId === skill.id }"
+          >
             <div class="skill-status-ring" :title="statusLabel(skill)">
               <t-progress
                 v-if="isBusy(skill)"
                 theme="circle"
                 :percentage="progressOf(skill)"
-                :size="32"
+                :size="16"
               />
               <t-icon
                 v-else-if="skill.status === 'failed'"
                 name="close-circle-filled"
+                size="16px"
                 class="skill-status-ring__failed"
               />
               <t-icon
                 v-else
                 name="check-circle-filled"
+                size="16px"
                 class="skill-status-ring__ready"
               />
             </div>
             <div class="skill-item__body">
-              <div class="skill-item__title">{{ skill.name || skill.id }}</div>
-              <p v-if="skill.description" class="skill-item__desc">{{ skill.description }}</p>
-              <p class="skill-item__meta">
-                <span>{{ statusLabel(skill) }}</span>
-                <span v-if="isBusy(skill)"> · {{ progressOf(skill) }}%</span>
-              </p>
-              <p v-if="skill.status === 'failed' && (skill.error || progressLog(skill))" class="skill-item__error">
-                {{ skill.error || progressLog(skill) }}
-              </p>
-            </div>
-            <div class="skill-item__actions">
-              <t-tooltip :content="$t('settings.sandbox.skillDisableHint')" placement="top">
-                <t-switch
-                  :value="skill.enabled"
-                  :disabled="isBusy(skill)"
-                  :loading="togglingId === skill.id"
-                  @change="(v: any) => toggleEnabled(skill, Boolean(v))"
-                />
-              </t-tooltip>
-              <t-tooltip
-                v-if="hasTranscript(skill)"
-                :content="
-                  expandedSkillId === skill.id
-                    ? $t('settings.sandbox.skillTranscriptHide')
-                    : $t('settings.sandbox.skillTranscript')
-                "
-                placement="top"
-              >
-                <t-button
-                  variant="text"
-                  shape="square"
-                  size="small"
-                  :class="{ 'skill-transcript-toggle--on': expandedSkillId === skill.id }"
-                  @click="toggleTranscript(skill)"
-                >
-                  <template #icon>
-                    <t-icon :name="expandedSkillId === skill.id ? 'chevron-up' : 'chat-bubble-history'" />
-                  </template>
-                </t-button>
-              </t-tooltip>
-              <t-tooltip :content="$t('settings.sandbox.skillView')" placement="top">
-                <t-button
-                  variant="text"
-                  shape="square"
-                  size="small"
-                  @click="openView(skill)"
-                >
-                  <template #icon><t-icon name="browse" /></template>
-                </t-button>
-              </t-tooltip>
-              <t-popconfirm
-                theme="warning"
-                :content="deleteHint"
-                :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
-                :cancel-btn="{ content: $t('common.cancel') }"
-                placement="top-right"
-                @confirm="removeSkill(skill)"
-              >
-                <t-tooltip :content="$t('common.delete')" placement="top">
-                  <t-button
-                    theme="danger"
-                    variant="text"
-                    shape="square"
-                    size="small"
-                    :disabled="isBusy(skill)"
-                    :loading="deletingId === skill.id"
+              <div class="skill-item__header">
+                <div class="skill-item__heading">
+                  <div class="skill-item__title">{{ skill.name || skill.id }}</div>
+                  <p class="skill-item__meta">
+                    <span v-if="skill.version">{{ skill.version }} · </span>
+                    <span>{{ statusLabel(skill) }}</span>
+                    <span v-if="isBusy(skill)"> · {{ progressOf(skill) }}%</span>
+                    <span v-if="isBusy(skill) && progressLog(skill)"> · {{ progressLog(skill) }}</span>
+                  </p>
+                </div>
+                <div class="skill-item__actions">
+                  <t-tooltip :content="$t('settings.sandbox.skillDisableHint')" placement="top">
+                    <t-switch
+                      size="small"
+                      :value="skill.enabled"
+                      :disabled="isBusy(skill)"
+                      :loading="togglingId === skill.id"
+                      @change="(v: any) => toggleEnabled(skill, Boolean(v))"
+                    />
+                  </t-tooltip>
+                  <span class="skill-item__actions-divider" />
+                  <t-tooltip :content="$t('settings.sandbox.skillFiles')" placement="top">
+                    <button
+                      type="button"
+                      class="skill-item__icon-btn"
+                      :class="{ 'is-on': filesDrawerVisible && filesSkillId === skill.id }"
+                      :aria-label="$t('settings.sandbox.skillFiles')"
+                      @click="openSkillFiles(skill)"
+                    >
+                      <t-icon name="folder" size="16px" />
+                    </button>
+                  </t-tooltip>
+                  <t-popup
+                    v-if="hasTranscript(skill)"
+                    :visible="expandedSkillId === skill.id"
+                    trigger="click"
+                    placement="bottom-right"
+                    attach="body"
+                    destroy-on-close
+                    overlay-class-name="skill-transcript-popup"
+                    :z-index="3200"
+                    :overlay-inner-style="{ padding: '0' }"
+                    @visible-change="(visible: boolean) => onTranscriptVisible(skill, visible)"
                   >
-                    <template #icon><t-icon name="delete" /></template>
-                  </t-button>
-                </t-tooltip>
-              </t-popconfirm>
+                    <button
+                      type="button"
+                      class="skill-item__icon-btn"
+                      :class="{ 'is-on': expandedSkillId === skill.id }"
+                      :aria-label="$t('settings.sandbox.skillTranscript')"
+                    >
+                      <t-icon name="chat-bubble-history" size="16px" />
+                    </button>
+                    <template #content>
+                      <div class="skill-transcript-popup__panel">
+                        <header class="skill-transcript-popup__head">
+                          <div class="skill-transcript-popup__head-text">
+                            <div class="skill-transcript-popup__title">{{ skill.name || skill.id }}</div>
+                            <div class="skill-transcript-popup__meta">
+                              <span
+                                class="skill-transcript-popup__status"
+                                :data-status="skill.status"
+                              >{{ statusLabel(skill) }}</span>
+                              <span>{{ $t('settings.sandbox.skillTranscriptTitle') }}</span>
+                            </div>
+                          </div>
+                          <t-button
+                            variant="text"
+                            shape="square"
+                            size="small"
+                            class="skill-transcript-popup__close"
+                            :title="$t('common.close')"
+                            @click.stop="onTranscriptVisible(skill, false)"
+                          >
+                            <template #icon><t-icon name="close" size="16px" /></template>
+                          </t-button>
+                        </header>
+                        <div class="skill-transcript-popup__body">
+                          <SkillInstallTimeline
+                            :key="`${skill.id}-${skill.install_session_id || ''}-${transcriptEpoch}`"
+                            compact
+                            :config-id="record?.id || ''"
+                            :skill-id="skill.id"
+                            :session-id="skill.install_session_id || ''"
+                            :message-id="skill.install_message_id || ''"
+                            :live="skill.status === 'installing'"
+                          />
+                        </div>
+                      </div>
+                    </template>
+                  </t-popup>
+                  <t-popconfirm
+                    theme="warning"
+                    :content="deleteHint"
+                    :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
+                    :cancel-btn="{ content: $t('common.cancel') }"
+                    placement="top-right"
+                    @confirm="removeSkill(skill)"
+                  >
+                    <t-tooltip :content="$t('common.delete')" placement="top">
+                      <button
+                        type="button"
+                        class="skill-item__icon-btn skill-item__icon-btn--danger"
+                        :disabled="isBusy(skill) || deletingId === skill.id"
+                        :aria-label="$t('common.delete')"
+                      >
+                        <t-icon name="delete" size="16px" />
+                      </button>
+                    </t-tooltip>
+                  </t-popconfirm>
+                </div>
+              </div>
+              <div v-if="skill.description" class="skill-item__copy">
+                <p
+                  class="skill-item__desc"
+                  :class="{ 'skill-item__desc--expanded': isCopyExpanded(skill.id) }"
+                >
+                  {{ skill.description }}
+                </p>
+                <button
+                  v-if="canToggleCopy(skill)"
+                  type="button"
+                  class="skill-item__toggle"
+                  @click="toggleCopy(skill.id)"
+                >
+                  {{ isCopyExpanded(skill.id) ? $t('common.collapse') : $t('common.expand') }}
+                </button>
+              </div>
+              <p v-if="failedError(skill)" class="skill-item__error">{{ failedError(skill) }}</p>
             </div>
-
-            <SkillInstallTimeline
-              v-if="expandedSkillId === skill.id"
-              :key="`${skill.id}-${skill.install_session_id || ''}-${transcriptEpoch}`"
-              class="skill-item__timeline"
-              :config-id="record?.id || ''"
-              :skill-id="skill.id"
-              :session-id="skill.install_session_id || ''"
-              :message-id="skill.install_message_id || ''"
-              :live="skill.status === 'installing'"
-            />
           </li>
         </ul>
       </section>
     </t-loading>
 
-    <t-dialog
-      v-model:visible="showView"
-      :header="viewing?.name || $t('settings.sandbox.skillView')"
-      :footer="false"
-      width="520px"
-      attach="body"
-    >
-      <ul v-if="viewing" class="skill-view">
-        <li>
-          <span class="skill-view__label">{{ $t('settings.sandbox.skillVersion') }}</span>
-          <span class="skill-view__value">{{ viewing.version || $t('settings.sandbox.skillVersionEmpty') }}</span>
-        </li>
-        <li>
-          <span class="skill-view__label">{{ $t('settings.sandbox.skillStatusLabel') }}</span>
-          <span class="skill-view__value">{{ statusLabel(viewing) }}</span>
-        </li>
-        <li v-if="viewing.description">
-          <span class="skill-view__label">{{ $t('settings.sandbox.configDescription') }}</span>
-          <span class="skill-view__value">{{ viewing.description }}</span>
-        </li>
-        <li v-if="viewing.error">
-          <span class="skill-view__label">{{ $t('settings.sandbox.skillError') }}</span>
-          <span class="skill-view__value skill-view__error">{{ viewing.error }}</span>
-        </li>
-      </ul>
-    </t-dialog>
+    <SkillFilesDrawer
+      v-model:visible="filesDrawerVisible"
+      :config-id="record?.id || ''"
+      :skill-id="filesSkillId"
+      :skill-name="filesSkillName"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import ModelSelector from '@/components/ModelSelector.vue'
 import SkillInstallTimeline from '@/components/SkillInstallTimeline.vue'
+import SkillFilesDrawer from '@/components/SkillFilesDrawer.vue'
 import {
   getAgentById,
   updateAgent,
@@ -249,6 +317,7 @@ import {
   listConfigSkills,
   patchConfigSkill,
   uploadConfigSkill,
+  installConfigSkillFromSource,
   type ConfigSkill,
   type ConfigSkillInstallEvent,
   type SandboxConfigRecord,
@@ -272,17 +341,24 @@ const { t, locale } = useI18n()
 
 const loading = ref(false)
 const uploading = ref(false)
+const installingFromSource = ref(false)
 const uploadPercent = ref(0)
+const sourceInput = ref('')
 const skills = ref<ConfigSkill[]>([])
 const skillImage = ref<SandboxSkillImage | null>(null)
 const togglingId = ref('')
 const deletingId = ref('')
-const showView = ref(false)
-const viewing = ref<ConfigSkill | null>(null)
 // Only one install timeline is open at a time: each one holds an SSE
 // connection, and two runs' worth of agent steps in a drawer is unreadable.
 const expandedSkillId = ref('')
+const filesSkillId = ref('')
+const filesSkillName = ref('')
+const filesDrawerVisible = ref(false)
+const expandedCopyIds = ref<Set<string>>(new Set())
 const transcriptEpoch = ref(0)
+const focusedSkillId = ref('')
+const skillItemEls = new Map<string, HTMLElement>()
+let focusTimer: number | null = null
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const progressById = ref<Record<string, ConfigSkillInstallEvent>>({})
 
@@ -307,11 +383,17 @@ const uploadHint = computed(() =>
     ? t('settings.sandbox.skillUploadHintNewSession')
     : t('settings.sandbox.skillUploadHint'),
 )
+const installBusy = computed(() => uploading.value || installingFromSource.value)
 const deleteHint = computed(() =>
   skillRollout.value === 'new_session'
     ? t('settings.sandbox.skillDeleteHintNewSession')
     : t('settings.sandbox.skillDeleteHint'),
 )
+const runtimeTemplateId = computed(() => {
+  const cfg = props.record?.config
+  return cfg?.cube?.template_id?.trim() || cfg?.e2b?.template_id?.trim() || ''
+})
+const hasSkillSnapshot = computed(() => Boolean(skillImage.value?.snapshot_id?.trim()))
 
 function readLastChatModelID(): string {
   try {
@@ -322,10 +404,10 @@ function readLastChatModelID(): string {
 }
 
 function formatBuiltAt(value?: string): string {
-  if (!value) return t('settings.sandbox.imageInfoEmpty')
+  if (!value) return t('settings.sandbox.imageInfoUnset')
   const date = new Date(value)
   if (Number.isNaN(date.getTime()) || date.getFullYear() <= 1) {
-    return t('settings.sandbox.imageInfoEmpty')
+    return t('settings.sandbox.imageInfoUnset')
   }
   return date.toLocaleString(locale.value)
 }
@@ -355,16 +437,51 @@ function hasTranscript(skill: ConfigSkill): boolean {
   return Boolean(skill.install_session_id && skill.install_message_id)
 }
 
-function toggleTranscript(skill: ConfigSkill) {
-  if (expandedSkillId.value === skill.id) {
-    expandedSkillId.value = ''
+function bindSkillItem(id: string, el: unknown) {
+  if (el instanceof HTMLElement) {
+    skillItemEls.set(id, el)
     return
   }
-  expandedSkillId.value = skill.id
-  // A run that finished while the timeline was open was tailed from the event
-  // log; reopening it should read the run again from the top rather than show
-  // whatever the closed stream left behind.
-  transcriptEpoch.value += 1
+  skillItemEls.delete(id)
+}
+
+function revealSkill(skillId: string) {
+  focusedSkillId.value = skillId
+  void nextTick(() => {
+    skillItemEls.get(skillId)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+  if (focusTimer != null) window.clearTimeout(focusTimer)
+  focusTimer = window.setTimeout(() => {
+    if (focusedSkillId.value === skillId) focusedSkillId.value = ''
+    focusTimer = null
+  }, 2400)
+}
+
+function onTranscriptVisible(skill: ConfigSkill, visible: boolean) {
+  if (visible) {
+    filesDrawerVisible.value = false
+    if (expandedSkillId.value !== skill.id) {
+      expandedSkillId.value = skill.id
+      // A run that finished while the popup was closed was tailed from the
+      // event log; reopening it should read the run again from the top.
+      transcriptEpoch.value += 1
+    }
+    return
+  }
+  if (expandedSkillId.value === skill.id) {
+    expandedSkillId.value = ''
+  }
+}
+
+function openSkillFiles(skill: ConfigSkill) {
+  expandedSkillId.value = ''
+  if (filesDrawerVisible.value && filesSkillId.value === skill.id) {
+    filesDrawerVisible.value = false
+    return
+  }
+  filesSkillId.value = skill.id
+  filesSkillName.value = skill.name || skill.id
+  filesDrawerVisible.value = true
 }
 
 function progressOf(skill: ConfigSkill): number {
@@ -377,6 +494,31 @@ function progressOf(skill: ConfigSkill): number {
 
 function progressLog(skill: ConfigSkill): string {
   return progressById.value[skill.id]?.log || ''
+}
+
+function failedError(skill: ConfigSkill): string {
+  if (skill.status !== 'failed') return ''
+  return skill.error || progressLog(skill)
+}
+
+function isCopyExpanded(skillId: string): boolean {
+  return expandedCopyIds.value.has(skillId)
+}
+
+function descriptionNeedsToggle(skill: ConfigSkill): boolean {
+  const desc = skill.description?.trim() || ''
+  return desc.length > 80 || desc.includes('\n')
+}
+
+function canToggleCopy(skill: ConfigSkill): boolean {
+  return descriptionNeedsToggle(skill) || isCopyExpanded(skill.id)
+}
+
+function toggleCopy(skillId: string) {
+  const next = new Set(expandedCopyIds.value)
+  if (next.has(skillId)) next.delete(skillId)
+  else next.add(skillId)
+  expandedCopyIds.value = next
 }
 
 function stopFollow(skillId: string) {
@@ -570,7 +712,7 @@ function isZipFile(file: File): boolean {
 }
 
 async function uploadFile(file: File) {
-  if (!props.record || uploading.value) return
+  if (!props.record || installBusy.value) return
   if (!installerModelId.value) {
     MessagePlugin.warning(t('settings.sandbox.skillInstallerModelRequired'))
     return
@@ -590,13 +732,44 @@ async function uploadFile(file: File) {
     const skillId = res?.data?.skill_id
     await loadSkills()
     await refreshImage()
-    if (skillId) followProgress(skillId)
+    if (skillId) {
+      followProgress(skillId)
+      revealSkill(skillId)
+    }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.sandbox.skillUploadFailed'))
   } finally {
     uploading.value = false
     uploadPercent.value = 0
     if (fileInputRef.value) fileInputRef.value.value = ''
+  }
+}
+
+async function installFromSource() {
+  if (!props.record || installBusy.value) return
+  const source = sourceInput.value.trim()
+  if (!source) return
+  if (!installerModelId.value) {
+    MessagePlugin.warning(t('settings.sandbox.skillInstallerModelRequired'))
+    return
+  }
+  installingFromSource.value = true
+  try {
+    await persistInstallerModel(installerModelId.value)
+    const res = await installConfigSkillFromSource(props.record.id, { source })
+    MessagePlugin.success(t('settings.sandbox.skillUploadAccepted'))
+    sourceInput.value = ''
+    const skillId = res?.data?.skill_id
+    await loadSkills()
+    await refreshImage()
+    if (skillId) {
+      followProgress(skillId)
+      revealSkill(skillId)
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('settings.sandbox.skillSourceFailed'))
+  } finally {
+    installingFromSource.value = false
   }
 }
 
@@ -607,6 +780,7 @@ function onFileInputChange(event: Event) {
 }
 
 function onFileDrop(event: DragEvent) {
+  if (installBusy.value) return
   const file = event.dataTransfer?.files?.[0]
   if (file) void uploadFile(file)
 }
@@ -643,11 +817,6 @@ async function removeSkill(skill: ConfigSkill) {
   }
 }
 
-function openView(skill: ConfigSkill) {
-  viewing.value = skill
-  showView.value = true
-}
-
 // The panel is mounted only while its wizard step is showing, so switching
 // steps tears the follows down and coming back re-reads the list.
 watch(
@@ -661,8 +830,7 @@ watch(
     stopPoll()
     skills.value = []
     progressById.value = {}
-    showView.value = false
-    viewing.value = null
+    expandedCopyIds.value = new Set()
     installerAgent.value = null
     installerModelId.value = ''
   },
@@ -672,10 +840,18 @@ watch(
 onUnmounted(() => {
   stopAllFollows()
   stopPoll()
+  if (focusTimer != null) window.clearTimeout(focusTimer)
 })
 </script>
 
 <style lang="less" scoped>
+.image-info-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+}
+
 .image-info {
   margin: 0;
   padding: 0;
@@ -736,17 +912,17 @@ onUnmounted(() => {
 .file-upload-area {
   position: relative;
   width: 100%;
-  min-height: 120px;
-  border: 2px dashed var(--td-component-stroke);
-  border-radius: 8px;
+  min-height: 44px;
+  border: 1px dashed var(--td-component-stroke);
+  border-radius: 6px;
   background: var(--td-bg-color-secondarycontainer);
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: border-color 0.2s ease, background 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
 
-  &:hover {
+  &:hover:not(.is-disabled) {
     border-color: var(--td-brand-color);
     background: var(--td-success-color-light);
   }
@@ -756,31 +932,37 @@ onUnmounted(() => {
     background: var(--td-success-color-light);
     border-style: solid;
   }
+
+  &.is-disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
 }
 
 .file-upload-content {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  gap: 8px;
   text-align: center;
-  padding: 16px;
+  padding: 8px 12px;
   width: 100%;
 }
 
 .upload-icon {
   color: var(--td-brand-color);
-  transition: transform 0.2s ease;
-}
-
-.file-upload-area:hover .upload-icon {
-  transform: translateY(-2px);
+  flex-shrink: 0;
 }
 
 .upload-text {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px 8px;
 }
 
 .upload-primary-text {
@@ -800,6 +982,10 @@ onUnmounted(() => {
   color: var(--td-brand-color);
 }
 
+.file-upload-content :deep(.t-progress) {
+  flex: 1 1 100%;
+}
+
 .upload-hint {
   margin: 8px 0 0;
   font-size: 12px;
@@ -807,14 +993,40 @@ onUnmounted(() => {
   line-height: 1.5;
 }
 
+.skill-source-row {
+  width: 100%;
+
+  :deep(.t-input-adornment__append .t-button) {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+  }
+}
+
+.skill-install-split {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+
+  &::before,
+  &::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--td-component-stroke);
+  }
+}
+
 .skill-empty {
-  margin: 12px 0 0;
+  margin: 0;
   font-size: 13px;
   color: var(--td-text-color-placeholder);
 }
 
 .skill-list {
-  margin: 12px 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
@@ -822,67 +1034,74 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-// A grid rather than a flex row so the expanded install timeline can span the
-// full width underneath the three columns of the row it belongs to.
+// The install timeline opens in a popup, so the card stays a two-column row.
 .skill-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: flex-start;
   gap: 12px;
   padding: 12px;
   border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   background: var(--td-bg-color-container);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.skill-item__timeline {
-  grid-column: 1 / -1;
-}
-
-.skill-transcript-toggle--on {
-  color: var(--td-brand-color);
+.skill-item--focused {
+  border-color: var(--td-brand-color);
+  box-shadow: 0 0 0 2px var(--td-brand-color-focus, rgba(0, 168, 112, 0.18));
 }
 
 .skill-status-ring {
-  width: 32px;
-  height: 32px;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   color: var(--td-text-color-secondary);
 
-  :deep(.t-progress) {
-    width: 32px;
-    height: 32px;
+  :deep(.t-progress),
+  :deep(.t-icon) {
+    width: 16px;
+    height: 16px;
   }
 
   &__ready {
     color: var(--td-success-color);
-    font-size: 22px;
   }
 
   &__failed {
     color: var(--td-error-color);
-    font-size: 22px;
   }
 }
 
 .skill-item__body {
-  flex: 1;
   min-width: 0;
+}
+
+.skill-item__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.skill-item__heading {
+  min-width: 0;
+  flex: 1;
 }
 
 .skill-item__title {
   font-size: 14px;
   font-weight: 600;
+  line-height: 22px;
   color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.skill-item__desc,
 .skill-item__meta {
   margin: 2px 0 0;
   font-size: 12px;
@@ -890,17 +1109,54 @@ onUnmounted(() => {
   color: var(--td-text-color-secondary);
 }
 
+.skill-item__desc,
+.skill-item__error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.skill-item__copy {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
 .skill-item__desc {
+  min-width: 0;
+  flex: 1;
+  color: var(--td-text-color-secondary);
+}
+
+.skill-item__desc:not(.skill-item__desc--expanded) {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .skill-item__error {
-  margin: 4px 0 0;
-  font-size: 12px;
-  line-height: 1.45;
+  margin-top: 6px;
   color: var(--td-error-color);
+}
+
+.skill-item__toggle {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+
+  &:hover {
+    color: var(--td-brand-color);
+  }
 }
 
 .skill-item__actions {
@@ -910,34 +1166,140 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.skill-view {
-  margin: 0;
+.skill-item__actions-divider {
+  width: 1px;
+  height: 12px;
+  margin: 0 4px;
+  background: var(--td-component-stroke);
+}
+
+.skill-item__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
   padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
 
-.skill-view li {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
+  &:hover:not(:disabled) {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
+  }
 
-.skill-view__label {
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-}
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
 
-.skill-view__value {
-  font-size: 13px;
-  color: var(--td-text-color-primary);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
+  &.is-on {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
+  }
 
-.skill-view__error {
-  color: var(--td-error-color);
+  &--danger:hover:not(:disabled) {
+    background: var(--td-error-color-1, var(--td-bg-color-secondarycontainer));
+    color: var(--td-error-color);
+  }
+}
+</style>
+
+<style lang="less">
+.skill-transcript-popup {
+  z-index: 3200 !important;
+
+  .t-popup__content {
+    padding: 0 !important;
+    width: 420px;
+    max-width: min(420px, calc(100vw - 32px));
+    border-radius: 10px !important;
+    background: var(--td-bg-color-container) !important;
+    border: 1px solid var(--td-component-stroke) !important;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.12) !important;
+    overflow: hidden;
+  }
+
+  &__panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  &__head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 8px 10px 14px;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  &__head-text {
+    min-width: 0;
+    flex: 1;
+  }
+
+  &__title {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--td-text-color-placeholder);
+  }
+
+  &__status {
+    color: var(--td-text-color-secondary);
+
+    &[data-status='installing'],
+    &[data-status='removing'] {
+      color: var(--td-brand-color);
+    }
+
+    &[data-status='failed'] {
+      color: var(--td-error-color);
+    }
+
+    &[data-status='ready'] {
+      color: var(--td-success-color);
+    }
+  }
+
+  &__close {
+    flex-shrink: 0;
+    color: var(--td-text-color-secondary);
+  }
+
+  &__body {
+    max-height: min(360px, 52vh);
+    overflow: auto;
+    background: var(--td-bg-color-secondarycontainer);
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: var(--td-bg-color-component-disabled);
+      border-radius: 3px;
+    }
+  }
 }
 </style>

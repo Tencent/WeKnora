@@ -566,11 +566,10 @@ func dedupPreservingOrder(values []string) []string {
 	return result
 }
 
-// configureSkillsFromAgent configures skills settings in AgentConfig based on CustomAgentConfig
-// Returns the skill directories and allowed skills based on the selection mode:
-//   - "all": uses all preloaded skills
-//   - "selected": uses the explicitly selected skills
-//   - "none" or "": skills are disabled
+// configureSkillsFromAgent turns the agent's skill picker into runtime flags.
+// The skills themselves come from the sandbox image (TenantSkills), not from
+// the deployment's skills/preloaded directory — that host copy is not what
+// execute_skill_script would find inside the sandbox.
 func (s *sessionService) configureSkillsFromAgent(
 	ctx context.Context,
 	agentConfig *types.AgentConfig,
@@ -580,19 +579,14 @@ func (s *sessionService) configureSkillsFromAgent(
 		return
 	}
 	agentConfig.SandboxConfigID = customAgent.Config.SandboxConfigID
-	dir := getPreloadedSkillsDir()
 	switch customAgent.Config.SkillsSelectionMode {
 	case "all":
-		// Enable all preloaded skills
 		agentConfig.SkillsEnabled = true
-		agentConfig.SkillDirs = []string{dir}
-		agentConfig.AllowedSkills = nil // Empty means all skills allowed
-		logger.Infof(ctx, "SkillsSelectionMode=all: enabled all preloaded skills")
+		agentConfig.AllowedSkills = nil
+		logger.Infof(ctx, "SkillsSelectionMode=all: using installed sandbox skills")
 	case "selected":
-		// Enable only selected skills
 		if len(customAgent.Config.SelectedSkills) > 0 {
 			agentConfig.SkillsEnabled = true
-			agentConfig.SkillDirs = []string{dir}
 			agentConfig.AllowedSkills = customAgent.Config.SelectedSkills
 			logger.Infof(ctx, "SkillsSelectionMode=selected: enabled %d selected skills: %v",
 				len(customAgent.Config.SelectedSkills), customAgent.Config.SelectedSkills)
@@ -601,11 +595,9 @@ func (s *sessionService) configureSkillsFromAgent(
 			logger.Infof(ctx, "SkillsSelectionMode=selected but no skills selected: skills disabled")
 		}
 	case "none", "":
-		// Skills disabled
 		agentConfig.SkillsEnabled = false
 		logger.Infof(ctx, "SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
 	default:
-		// Unknown mode, disable skills
 		agentConfig.SkillsEnabled = false
 		logger.Warnf(ctx, "Unknown SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
 	}

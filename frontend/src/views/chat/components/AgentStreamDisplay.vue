@@ -178,10 +178,10 @@
                     <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
                   </div>
 
-                  <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
+                    <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                     class="action-details">
-                    <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
-                      <ToolResultRenderer :display-type="event.display_type" :tool-data="event.tool_data"
+                    <div v-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
+                      <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
                         :output="event.output" :arguments="event.arguments" />
                     </div>
                     <div v-else-if="event.output" class="tool-output-wrapper">
@@ -340,19 +340,14 @@
                      assistant message recorded any generated files. Agent
                      mode is the primary path for skills, so this is where
                      the button is most likely to appear. -->
-                <t-badge
-                  v-if="hasArtifacts"
-                  :count="artifactCount"
-                  :offset="[-4, 4]"
-                  shape="round"
-                  size="small"
-                >
+                <span v-if="hasArtifacts" class="answer-toolbar__artifact">
                   <t-button size="small" variant="outline" shape="round"
                     @click.stop="openArtifactDrawer"
                     :title="$t('agent.artifactDrawer.buttonTitle')">
                     <t-icon name="download" />
                   </t-button>
-                </t-badge>
+                  <span class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
+                </span>
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
@@ -440,8 +435,8 @@
 
                 <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                   class="action-details">
-                  <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
-                    <ToolResultRenderer :display-type="event.display_type" :tool-data="event.tool_data"
+                  <div v-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
+                    <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
                       :output="event.output" :arguments="event.arguments" />
                   </div>
 
@@ -559,6 +554,8 @@ import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
+import { previewShellCommand } from '@/utils/shellExecResult';
+import type { DisplayType } from '@/types/tool-results';
 import { parseWikiToolReferences } from '@/utils/wikiToolReferences';
 import {
   buildManualMarkdown,
@@ -624,6 +621,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   query_knowledge_graph: 'agentStream.tools.queryKnowledgeGraph',
   read_skill: 'agentStream.tools.readSkill',
   execute_skill_script: 'agentStream.tools.executeSkillScript',
+  shell_exec: 'agentStream.tools.shellExec',
   data_analysis: 'agentStream.tools.dataAnalysis',
   data_schema: 'agentStream.tools.dataSchema',
   database_query: 'agentStream.tools.databaseQuery',
@@ -1042,6 +1040,12 @@ const formatToolResultContent = (value: unknown): string => {
 };
 
 const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
+
+const resolveToolDisplayType = (event: any): DisplayType | undefined => {
+  if (event?.display_type) return event.display_type as DisplayType
+  if (event?.tool_name === 'shell_exec') return 'shell_exec'
+  return undefined
+};
 
 const WIKI_EDIT_TOOL_NAMES = new Set([
   'wiki_write_page',
@@ -2605,6 +2609,9 @@ const getToolTitle = (event: any): string => {
     if (event.tool_name === 'wiki_search' || event.tool_name === 'wiki_read_page') {
       return `${getLocalizedToolName(event.tool_name)}...`;
     }
+    if (event.tool_name === 'shell_exec') {
+      return t('agentStream.toolStatus.shellExecRunning');
+    }
     const localizedName = getLocalizedToolName(event.tool_name);
     return t('agentStream.toolStatus.calling', { name: localizedName });
   }
@@ -2700,6 +2707,14 @@ const getToolTitle = (event: any): string => {
     return pageLabel ? `${baseTitle}：「${sanitizeForDisplay(pageLabel)}」` : baseTitle;
   }
 
+  if (toolName === 'shell_exec') {
+    const command = previewShellCommand(
+      String(event.tool_data?.command || event.arguments?.command || ''),
+    )
+    const baseTitle = getToolDescription(event)
+    return command ? `${baseTitle}：${command}` : baseTitle
+  }
+
   // Use tool summary if available
   const summary = getToolSummary(event);
   return summary || getToolDescription(event);
@@ -2716,6 +2731,9 @@ const getToolDescription = (event: any): string => {
     }
     if (event.tool_name === 'query_understand') {
       return t('agentStream.toolStatus.queryUnderstanding');
+    }
+    if (event.tool_name === 'shell_exec') {
+      return t('agentStream.toolStatus.shellExecRunning');
     }
     const localizedName = getLocalizedToolName(event.tool_name);
     return t('agentStream.toolStatus.calling', { name: localizedName });
@@ -2747,6 +2765,9 @@ const getToolDescription = (event: any): string => {
     return success ? t('agentStream.toolStatus.attachmentParsingDone') : t('agentStream.toolStatus.attachmentParsingFailed');
   } else if (toolName === 'query_understand') {
     return success ? t('agentStream.toolStatus.queryUnderstandDone') : t('agentStream.toolStatus.calledFailed', { name: getLocalizedToolName(toolName) });
+  } else if (toolName === 'shell_exec') {
+    const localizedName = getLocalizedToolName(toolName);
+    return success ? localizedName : t('agentStream.toolStatus.calledFailed', { name: localizedName });
   } else {
     const localizedName = getLocalizedToolName(toolName);
     return success ? t('agentStream.toolStatus.called', { name: localizedName }) : t('agentStream.toolStatus.calledFailed', { name: localizedName });

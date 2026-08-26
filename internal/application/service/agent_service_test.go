@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -253,6 +254,42 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolExecuteSkillScript))
 		require.NotNil(t, engine.(*agent.AgentEngine).GetSkillsManager())
 	})
+
+	t.Run("skills enabled with tenant skills and no host dirs still offers skill tools", func(t *testing.T) {
+		chatModel := &fakeAgentChatModel{}
+		svc := &agentService{
+			sandboxResolver: stubSandboxResolver{
+				mgr: &capableManager{
+					typ:   sandbox.SandboxTypeCube,
+					shell: &stubShellExecutor{},
+					files: stubSessionFileStore{},
+				},
+			},
+		}
+
+		engine, err := svc.CreateAgentEngine(ctx, &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   true,
+			TenantSkills: []*types.TenantSkillEntity{{
+				ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-remote",
+				Name: "pdf-tools", Description: "PDF helpers",
+				Status: types.SkillStatusReady, Enabled: true,
+			}},
+		}, chatModel, nil, nil, "sess-1", "msg-1")
+
+		require.NoError(t, err)
+		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
+		require.NoError(t, err)
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadSkill))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolExecuteSkillScript))
+		mgr := engine.(*agent.AgentEngine).GetSkillsManager()
+		require.NotNil(t, mgr)
+		var names []string
+		for _, meta := range mgr.GetAllMetadata() {
+			names = append(names, meta.Name)
+		}
+		require.Equal(t, []string{"pdf-tools"}, names)
+	})
 }
 
 func TestSkillToolsFollowSkillsEnabled(t *testing.T) {
@@ -320,6 +357,47 @@ func TestSkillsManagerOffersTheInjectedInstalledSkills(t *testing.T) {
 		}
 		return names
 	}
+
+	t.Run("injected rows are offered without a host skill directory", func(t *testing.T) {
+		mgr, err := newSvc().initializeSkillsManager(ctx, "sess-1", &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   true,
+			TenantSkills: []*types.TenantSkillEntity{{
+				ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-remote",
+				Name: "pdf-tools", Description: "PDF helpers",
+				Status: types.SkillStatusReady, Enabled: true,
+			}},
+		}, tools.NewToolRegistry())
+
+		require.NoError(t, err)
+		require.Equal(t, []string{"pdf-tools"}, skillNamesOf(mgr))
+	})
+
+	t.Run("host preloaded skills are not offered beside the sandbox image", func(t *testing.T) {
+		dir := t.TempDir()
+		skillDir := filepath.Join(dir, "document-analyzer")
+		require.NoError(t, os.MkdirAll(skillDir, 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(skillDir, "SKILL.md"),
+			[]byte("---\nname: document-analyzer\ndescription: old host copy\n---\n"),
+			0o644,
+		))
+
+		mgr, err := newSvc().initializeSkillsManager(ctx, "sess-1", &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   true,
+			SkillDirs:       []string{dir},
+			TenantSkills: []*types.TenantSkillEntity{{
+				ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-remote",
+				Name: "pdf-tools", Description: "PDF helpers",
+				Status: types.SkillStatusReady, Enabled: true,
+			}},
+		}, tools.NewToolRegistry())
+
+		require.NoError(t, err)
+		require.Equal(t, []string{"pdf-tools"}, skillNamesOf(mgr),
+			"the host skills/preloaded tree is not what the sandbox image carries")
+	})
 
 	t.Run("injected rows are offered", func(t *testing.T) {
 		mgr, err := newSvc().initializeSkillsManager(ctx, "sess-1", &types.AgentConfig{

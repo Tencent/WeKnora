@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/common/redislock"
@@ -19,9 +21,39 @@ import (
 // lock without renewing. Installs run for minutes, so the lease is renewed by
 // redislock rather than being set long.
 const (
-	skillImageLockLease  = 30 * time.Second
-	skillImageLockRenew  = 10 * time.Second
+	skillImageLockLease = 30 * time.Second
+	skillImageLockRenew = 10 * time.Second
+
+	// skillInstallStuckTTL is how long a run may go without a heartbeat
+	// before the reaper treats it as abandoned. It is a silence budget, not
+	// a duration budget: a legitimate install that spends two hours in the
+	// agent keeps beating and is left alone.
 	skillInstallStuckTTL = 60 * time.Minute
+
+	// skillInstallHeartbeatInterval is how often a running install stamps
+	// InstallingSince to say its process is still alive. Everything that has
+	// to tell "still working" from "died" reads that timestamp.
+	skillInstallHeartbeatInterval = 30 * time.Second
+
+	// skillInstallInFlightSkip is how much heartbeat silence makes a second
+	// upload of the same archive stop deferring to the run that owns the row.
+	// It is a multiple of the heartbeat so a slow install is never mistaken
+	// for a dead one, and short enough that a re-upload recovers a dead
+	// process in minutes instead of waiting for skillInstallStuckTTL.
+	skillInstallInFlightSkip = 3 * time.Minute
+
+	// skillSnapshotRetention is how long a superseded snapshot stays on the
+	// provider after the pointer has moved. Live sandboxes may still have
+	// been created from it (especially SkillRolloutNewSession); once they
+	// expire, the template is only a billed leftover. Twenty-four hours is
+	// well past every backend's default sandbox TTL. A config that sets a
+	// longer sandbox TTL extends this via snapshotRetentionFor.
+	skillSnapshotRetention = 24 * time.Hour
+
+	// skillSnapshotTTLMargin is added on top of a config's own sandbox TTL
+	// so an in-flight create that resolved the previous pointer still has
+	// a template to boot from.
+	skillSnapshotTTLMargin = time.Hour
 )
 
 // TenantSkillService owns the skill image lifecycle for sandbox configs.
@@ -48,13 +80,30 @@ type TenantSkillService struct {
 
 	now func() time.Time
 
+	// sourceHTTP pulls remote skill archives. Nil means the package SSRF-safe
+	// default; tests inject httptest clients.
+	sourceHTTP *http.Client
+
 	// cleanupTimeout bounds one piece of compensating work. Injectable so a
 	// test can let an install outlast it, which every real install does.
 	cleanupTimeout time.Duration
 
+	// snapshotRetention is how long a superseded snapshot is kept on the
+	// provider. Injectable so a prune test can age a row without waiting a day.
+	snapshotRetention time.Duration
+
+	// installHeartbeat is how often a running install restamps its liveness.
+	// Injectable so a test can observe a beat without waiting half a minute.
+	installHeartbeat time.Duration
+
 	// localLocks serialises installs when Redis is absent. It only guards this
 	// process; multi-replica deployments require Redis for cross-process safety.
 	localLocks *keyedMutex
+
+	// bundleCache keeps recently downloaded skill zips so the admin file
+	// browser (list + N reads) does not hit object storage on every click.
+	bundleCache *skillBundleArchiveCache
+	bundleLoad  singleflight.Group
 
 	cron    *cron.Cron
 	cronMu  sync.Mutex
@@ -79,21 +128,24 @@ func NewTenantSkillService(
 	messages interfaces.MessageRepository,
 ) *TenantSkillService {
 	return &TenantSkillService{
-		skills:          skillsRepo,
-		configs:         configsRepo,
-		resolver:        resolver,
-		sandboxes:       sandboxes,
-		sandboxPolicy:   sandboxPolicy,
-		agents:          agents,
-		installerAgents: customAgents,
-		sessions:        sessions,
-		models:          models,
-		redis:           redisClient,
-		streams:         streams,
-		messages:        messages,
-		now:             time.Now,
-		cleanupTimeout:  installCleanupTimeout,
-		localLocks:      newKeyedMutex(),
+		skills:            skillsRepo,
+		configs:           configsRepo,
+		resolver:          resolver,
+		sandboxes:         sandboxes,
+		sandboxPolicy:     sandboxPolicy,
+		agents:            agents,
+		installerAgents:   customAgents,
+		sessions:          sessions,
+		models:            models,
+		redis:             redisClient,
+		streams:           streams,
+		messages:          messages,
+		now:               time.Now,
+		cleanupTimeout:    installCleanupTimeout,
+		snapshotRetention: skillSnapshotRetention,
+		installHeartbeat:  skillInstallHeartbeatInterval,
+		localLocks:        newKeyedMutex(),
+		bundleCache:       newSkillBundleArchiveCache(),
 		cron: cron.New(cron.WithSeconds(), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
 		)),
@@ -125,6 +177,15 @@ func (s *TenantSkillService) withConfigLock(
 
 func skillImageLockKey(tenantID uint64, configID string) string {
 	return fmt.Sprintf("weknora-skill-image-lock:%d:%s", tenantID, configID)
+}
+
+// clock is this service's time source. Tests inject one; a service built
+// without NewTenantSkillService still gets a working default.
+func (s *TenantSkillService) clock() func() time.Time {
+	if s != nil && s.now != nil {
+		return s.now
+	}
+	return time.Now
 }
 
 // keyedMutex is the no-Redis fallback for withConfigLock.

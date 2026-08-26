@@ -156,6 +156,16 @@ Docker、Local、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接�
 
 **会话与配置的绑定是「随沙箱同生共死」的钉子。** 会话首次创建沙箱时，把当时用的配置 ID 记在 `sessions.sandbox_config_id` 上；此后该会话的附件上传、产物收集、沙箱销毁都锁定在这份配置上。改智能体的选择**只影响之后新建的沙箱**——否则管理员改一次配置，正在进行的会话就会去错误的账号里找产物，销毁也会打空，留下一个没人知道 ID 的 paused 沙箱持续计费。
 
+### 安装租户技能
+
+空间「技能沙箱」设置里可以把技能装进当前配置的镜像。除上传 zip 外，也支持从托管平台粘贴来源（每种写法只对应一种来源，不会猜测）：
+
+- ClawHub：`@owner/slug`，或不含 `/` 的 slug（如 `my-team--skill`）
+- 页面链接：ClawHub / [skillhub.cn](https://skillhub.cn) / 自托管 SkillHub、skills.sh、GitHub、GitLab
+- 直接的 zip / `SKILL.md` URL
+
+不要粘贴裸的 `owner/slug`：请改成 `@owner/slug` 或完整 `https://github.com/...` 链接。来源必须可匿名读取，服务端下载时不携带任何凭据；私有仓库请先导出 zip 再上传。安装仍走原有镜像快照流程。
+
 **有沙箱在跑时改不了身份字段。** 身份字段分两组，成因不同但后果都足够严重：
 
 | 组 | 字段 | 一改会怎样 |

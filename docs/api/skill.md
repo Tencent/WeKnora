@@ -5,6 +5,9 @@
 | 方法 | 路径      | 描述               |
 | ---- | --------- | ------------------ |
 | GET  | `/skills` | 获取预装 Skills 列表 |
+| POST | `/sandbox-configs/{id}/skills` | 安装技能（zip 上传或托管平台 source） |
+| GET  | `/sandbox-configs/{id}/skills/{skillId}/files` | 列出已安装技能的文件 |
+| GET  | `/sandbox-configs/{id}/skills/{skillId}/files/content` | 读取已安装技能中的单个文件 |
 
 ## GET `/skills` - 获取预装 Skills 列表
 
@@ -48,5 +51,99 @@ curl --location 'http://localhost:8080/api/v1/skills' \
     "data": [],
     "skills_available": false,
     "success": true
+}
+```
+
+## POST `/sandbox-configs/{id}/skills` - 安装技能
+
+把技能安装到指定沙箱配置的镜像上。安装会启动沙箱并运行数分钟，本接口只负责受理，随后通过
+`GET /sandbox-configs/{id}/skills/{skillId}/install-events` 跟随进度。
+
+两种请求体二选一：
+
+### 1. 上传 zip（multipart）
+
+```curl
+curl --location 'http://localhost:8080/api/v1/sandbox-configs/{id}/skills' \
+--header 'X-API-Key: sk-xxxxx' \
+--form 'file=@"skill.zip"'
+```
+
+### 2. 从托管平台安装（JSON）
+
+`source` 只接受一种明确写法，不会根据下载结果猜测：
+
+| 输入 | 含义 |
+| --- | --- |
+| `@owner/slug`、`@owner/slug@1.2.0` | ClawHub（默认 registry） |
+| `my-skill`、`my-skill@1.2.0`（不含 `/`） | ClawHub slug |
+| `https://clawhub.ai/...`、`https://skillhub.cn/...`、自托管 SkillHub 页面 | 对应 registry |
+| `https://github.com/...`、`https://gitlab.com/...`、`https://skills.sh/...` | Git 托管 |
+| `https://…/foo.zip` 或 `…/SKILL.md` | 直接下载 |
+
+`owner/slug`（无 `@`、无 URL）会 400：它既是 ClawHub id 也是 GitHub 仓库，请改成 `@owner/slug` 或粘贴完整链接。
+
+来源必须可匿名读取：服务端不会为这次下载附带任何凭据，因此私有仓库/私有 registry 需要先自行导出 zip 再上传。
+
+```curl
+curl --location 'http://localhost:8080/api/v1/sandbox-configs/{id}/skills' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{"source":"@owner/slug"}'
+```
+
+**响应**（202）:
+
+```json
+{
+    "success": true,
+    "data": {
+        "skill_id": "..."
+    }
+}
+```
+
+## GET `/sandbox-configs/{id}/skills/{skillId}/files` - 列出技能文件
+
+返回该技能存档里的文件路径与大小。路径相对技能根目录（`SKILL.md` 所在目录），不启动沙箱。
+
+```curl
+curl --location 'http://localhost:8080/api/v1/sandbox-configs/{id}/skills/{skillId}/files' \
+--header 'X-API-Key: sk-xxxxx'
+```
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": [
+        { "path": "SKILL.md", "size": 412 },
+        { "path": "scripts/extract.py", "size": 1280 }
+    ]
+}
+```
+
+## GET `/sandbox-configs/{id}/skills/{skillId}/files/content` - 读取技能文件
+
+`path` 为技能根目录相对路径。文本以 UTF-8 返回；较小的图片为 base64；其它二进制文件不返回正文，并设置 `binary: true`。
+
+```curl
+curl --location 'http://localhost:8080/api/v1/sandbox-configs/{id}/skills/{skillId}/files/content?path=SKILL.md' \
+--header 'X-API-Key: sk-xxxxx'
+```
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": {
+        "path": "SKILL.md",
+        "size": 412,
+        "encoding": "utf-8",
+        "media_type": "text/markdown",
+        "content": "---\nname: pdf-tools\n..."
+    }
 }
 ```

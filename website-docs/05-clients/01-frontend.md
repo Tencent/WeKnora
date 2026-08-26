@@ -127,7 +127,7 @@ flowchart TB
 | `/platform/settings` | `settings` | `src/views/settings/Settings.vue` | 设置中心（全屏模态形态），分区见下方「设置中心的分区与可见性」 |
 | `/platform/tenant` | — | 重定向 | 兼容旧路径 → `/platform/settings` |
 | `/platform/knowledge-search` | — | 重定向 | 旧全局搜索路径 → 知识库列表并通过 `?cmdk=` 打开全局命令面板（⌘K） |
-| `/platform/integrations` | — | 重定向 | → `/platform/settings?section=integrations`（API / Chrome 扩展 / Claw Skill 集成，视图在 `src/views/integrations/`） |
+| `/platform/integrations` | — | 重定向 | → `/platform/settings?section=integration-im`（旧 `?tab=` 会归一成 `integration-<tab>`；视图在 `src/views/integrations/`） |
 | `/platform/system`、`/platform/system/settings`、`/platform/system/admins` | `systemSettings` / `systemAdmins` | 重定向 | 系统管理旧路径 → `/platform/settings?section=system-global`，要求 `requiresSystemAdmin`（视图在 `src/views/system/`：`SystemSettings.vue`、`SystemAuditLog.vue`、`PlatformAPIKeys.vue` 等） |
 | `/platform/system/queues` | `systemQueues` | 重定向 | → `/platform/settings?section=runtime-queues`（运行时任务队列 `src/views/system/RuntimeQueues.vue`） |
 
@@ -144,7 +144,7 @@ flowchart TB
 | 账户 | `general`（个人偏好）、`userprofile` |
 | 空间 | `tenant`（空间信息）、`members`（成员）、`chathistory` |
 | 模型与运行 | `models`、`ollama`、`weknoracloud` |
-| 发布与集成 | IM 集成、网页嵌入、API、Chrome 扩展、Claw Skill |
+| 发布与集成 | `integration-im`、`integration-embed`、`integration-api`、`integration-chrome`、`integration-claw` |
 | 数据与扩展 | `vectorstore`、`parser`、`storage`、`websearch`、`mcp` |
 | 系统管理 | `system-global`、`runtime-queues`、`platform-api-keys`、`system-audit-log` |
 | 平台 | `system`（版本信息） |

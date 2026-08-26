@@ -838,6 +838,7 @@ import { shouldShowResourceOriginBadge } from '@/utils/card-list-badge'
 import { useAuthStore } from '@/stores/auth'
 import { useListUrlState } from '@/composables/useListUrlState'
 import { useResourcePins } from '@/composables/useResourcePins'
+import { integrationSectionKey } from '@/config/settingsRoute'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -1141,11 +1142,11 @@ const checkAndOpenEditModal = () => {
   const editId = route.query.edit as string
   const section = route.query.section as string
   const sourceTenantId = route.query.sourceTenantId as string | undefined
-  if (editId && (section === 'im' || section === 'embed' || section === 'integrations')) {
-    const tab = section === 'embed' ? 'embed' : 'im'
+  if (editId && (section === 'im' || section === 'embed' || section === 'integrations' || section === 'integration-im' || section === 'integration-embed')) {
+    const tab = section === 'embed' || section === 'integration-embed' ? 'embed' : 'im'
     router.replace({
       path: '/platform/settings',
-      query: { section: 'integrations', tab, agentId: editId },
+      query: { section: integrationSectionKey(tab), agentId: editId },
     })
     return
   }

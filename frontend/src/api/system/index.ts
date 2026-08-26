@@ -1073,6 +1073,15 @@ export function uploadConfigSkill(
   }, { timeout: 5 * 60 * 1000 })
 }
 
+export function installConfigSkillFromSource(
+  configId: string,
+  payload: { source: string },
+): Promise<{ data: { skill_id: string } }> {
+  return post(`/api/v1/sandbox-configs/${configId}/skills`, payload, {
+    timeout: 2 * 60 * 1000,
+  }) as unknown as Promise<{ data: { skill_id: string } }>
+}
+
 export function patchConfigSkill(
   configId: string,
   skillId: string,
@@ -1111,4 +1120,38 @@ export function configSkillInstallEventsUrl(configId: string, skillId: string): 
 // message history instead.
 export function configSkillTranscriptUrl(configId: string, skillId: string): string {
   return `/api/v1/sandbox-configs/${configId}/skills/${skillId}/transcript`
+}
+
+export interface ConfigSkillFileEntry {
+  path: string
+  size: number
+}
+
+export interface ConfigSkillFileContent {
+  path: string
+  size: number
+  encoding: 'utf-8' | 'base64' | 'binary' | string
+  content?: string
+  media_type?: string
+  truncated?: boolean
+  binary?: boolean
+}
+
+export function listConfigSkillFiles(
+  configId: string,
+  skillId: string,
+): Promise<{ data: ConfigSkillFileEntry[] }> {
+  return get(`/api/v1/sandbox-configs/${configId}/skills/${skillId}/files`) as unknown as Promise<{
+    data: ConfigSkillFileEntry[]
+  }>
+}
+
+export function getConfigSkillFile(
+  configId: string,
+  skillId: string,
+  path: string,
+): Promise<{ data: ConfigSkillFileContent }> {
+  return get(`/api/v1/sandbox-configs/${configId}/skills/${skillId}/files/content`, {
+    params: { path },
+  }) as unknown as Promise<{ data: ConfigSkillFileContent }>
 }

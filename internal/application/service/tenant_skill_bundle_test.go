@@ -208,6 +208,23 @@ Use scripts/extract.py to pull text out of a PDF.
 			"paths must be relative to the skill root, not to the archive root")
 	})
 
+	t.Run("remote options re-root a nested unique skill and drop extras", func(t *testing.T) {
+		data := zipBundle(t, map[string]string{
+			"repo-main/README.md":           "noise",
+			"repo-main/skills/pdf/SKILL.md": validSkillMD,
+			"repo-main/skills/pdf/run.py":   "print(1)\n",
+		})
+		bundle, err := ParseSkillBundleWithOptions(data, SkillBundleParseOptions{
+			Subdir:           "skills/pdf",
+			AllowExtraFiles:  true,
+			AllowNestedSkill: true,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "pdf-tools", bundle.Name)
+		require.Contains(t, bundle.Files, "run.py")
+		require.NotContains(t, bundle.Files, "README.md")
+	})
+
 	t.Run("rejects files outside the wrapped skill directory", func(t *testing.T) {
 		_, err := ParseSkillBundle(zipBundle(t, map[string]string{
 			"pdf-tools/SKILL.md": validSkillMD,
@@ -315,4 +332,25 @@ Use scripts/extract.py to pull text out of a PDF.
 		require.NoError(t, err)
 		require.Equal(t, a.SHA256, b.SHA256)
 	})
+}
+
+func TestListSkillZipFilesDoesNotInflateBodies(t *testing.T) {
+	data := zipBundle(t, map[string]string{
+		"pdf-tools/SKILL.md":           validSkillMD,
+		"pdf-tools/scripts/extract.py": "print('hi')\n",
+	})
+
+	files, err := listSkillZipFiles(data)
+	require.NoError(t, err)
+	require.Equal(t, []SkillFileEntry{
+		{Path: "SKILL.md", Size: int64(len(validSkillMD))},
+		{Path: "scripts/extract.py", Size: int64(len("print('hi')\n"))},
+	}, files)
+
+	body, err := readSkillZipFile(data, "scripts/extract.py")
+	require.NoError(t, err)
+	require.Equal(t, []byte("print('hi')\n"), body)
+
+	_, err = readSkillZipFile(data, "missing.txt")
+	require.ErrorIs(t, err, errSkillFileMissing)
 }

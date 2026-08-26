@@ -108,3 +108,21 @@ test('retrieval retention is offered to agents that actually have a knowledge ba
   const guard = settingRowGuard('agent.editor.retainRetrievalHistory')
   assert.match(guard, /isAgentMode && hasKnowledgeBase/)
 })
+
+test('skills and sandbox share one editor section', () => {
+  const navItems = source.match(/const navItems = computed\(\(\) => \{([\s\S]*?)^\}\);/m)?.[1]
+  assert.ok(navItems, 'expected to find the nav items computed')
+  assert.match(navItems, /key: 'skills'/)
+  assert.doesNotMatch(navItems, /key: 'sandbox'/)
+
+  const capabilityGroup = source.match(/pickItems\(\['multimodal', 'tools', 'mcp', 'skills'\]\)/)
+  assert.ok(capabilityGroup, 'expected the capability group to list skills without a separate sandbox tab')
+
+  assert.match(source, /v-show="currentSection === 'skills' && isAgentMode"/)
+  assert.doesNotMatch(source, /currentSection === 'sandbox' && isAgentMode/)
+  assert.match(source, /sandbox: 'skills'/)
+  assert.match(source, /formData\.config\.sandbox_config_id/)
+  assert.match(source, /:disabled="!hasSandboxSelected"/)
+  assert.match(source, /name="help-circle"/)
+  assert.doesNotMatch(source, /skill-info-box/)
+})

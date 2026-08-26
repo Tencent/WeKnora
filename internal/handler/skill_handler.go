@@ -41,7 +41,6 @@ type SkillInfoResponse struct {
 // @Produce      json
 // @Param        sandbox_config_id  query     string  false  "Sandbox config ID"
 // @Success      200  {object}  map[string]interface{}  "Skills列表"
-// @Failure      500  {object}  map[string]interface{}  "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /skills [get]

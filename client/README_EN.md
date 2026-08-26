@@ -15,6 +15,7 @@ The client includes the following main functional modules:
 7. **Message Management**: Retrieve and delete session messages
 8. **Model Management**: Create, retrieve, update, and delete models
 9. **Evaluation Function**: Start evaluation tasks and get evaluation results
+10. **Sandbox skills**: Install a skill onto a sandbox config (zip upload, or ClawHub / SkillHub / GitHub source)
 
 ## Usage
 
@@ -197,6 +198,34 @@ olderMessages, err := apiClient.GetMessagesBefore(context.Background(), sessionI
 if err != nil {
     // Handle error
 }
+```
+
+### Example: Install a sandbox skill from a registry
+
+`source` must be explicit: `@owner/slug` for ClawHub, or a full GitHub / SkillHub URL. Bare `owner/slug` is rejected.
+
+```go
+skillID, err := apiClient.InstallSandboxSkillFromSource(
+    context.Background(), sandboxConfigID, "@owner/slug")
+if err != nil {
+    // Handle error
+}
+_ = skillID // follow /sandbox-configs/{id}/skills/{skillID}/install-events
+```
+
+### Example: Browse files of an installed skill
+
+```go
+files, err := apiClient.ListSandboxSkillFiles(context.Background(), sandboxConfigID, skillID)
+if err != nil {
+    // Handle error
+}
+content, err := apiClient.GetSandboxSkillFile(context.Background(), sandboxConfigID, skillID, "SKILL.md")
+if err != nil {
+    // Handle error
+}
+_ = files
+_ = content
 ```
 
 ## Complete Example
