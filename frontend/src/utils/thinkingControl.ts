@@ -20,17 +20,6 @@ export function isDeepSeekThinkingModel(modelName: string): boolean {
   return lower === 'deepseek-v4-flash' || lower === 'deepseek-v4-pro'
 }
 
-/** Mirrors backend internal/models/provider.IsZhipuThinkingModel. */
-export function isZhipuThinkingModel(modelName: string): boolean {
-  const lower = modelName.trim().toLowerCase()
-  return (
-    lower.startsWith('glm-4.5')
-    || lower.startsWith('glm-4.6')
-    || lower.startsWith('glm-4.7')
-    || lower.startsWith('glm-5')
-  )
-}
-
 export type ThinkingControlValue =
   | 'none'
   | 'chat_template_kwargs'
@@ -69,10 +58,8 @@ export function defaultThinkingControl(
       return 'thinking_type'
     case 'deepseek':
       return isDeepSeekThinkingModel(model) ? 'thinking_type' : 'none'
-    case 'zhipu':
-      return isZhipuThinkingModel(model) ? 'thinking_type' : 'none'
     default:
-      // openai, azure_openai, anthropic, gemini, siliconflow,
+      // openai, azure_openai, anthropic, zhipu, gemini, siliconflow,
       // hunyuan, moonshot, openrouter, weknoracloud, … → baseProvider / noThinking
       return 'none'
   }

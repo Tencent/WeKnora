@@ -23,7 +23,6 @@ test('defaultThinkingControl matches backend provider adapters', () => {
     ['deepseek', 'deepseek-v4-pro-preview', 'none'],
     ['deepseek', 'deepseek-chat', 'none'],
     ['zhipu', 'glm-4', 'none'],
-    ['zhipu', 'glm-4.7', 'thinking_type'],
     ['gemini', 'gemini-2.0', 'none'],
     ['siliconflow', 'qwen3-8b', 'none'],
     ['hunyuan', 'hunyuan-turbo', 'none'],

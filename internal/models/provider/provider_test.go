@@ -51,14 +51,6 @@ func TestDeepSeekProviderInfoUsesCurrentOfficialChatPreset(t *testing.T) {
 	assert.Equal(t, []types.ModelType{types.ModelTypeKnowledgeQA}, info.ModelTypes)
 }
 
-func TestIsZhipuThinkingModel(t *testing.T) {
-	assert.True(t, IsZhipuThinkingModel("glm-4.5"))
-	assert.True(t, IsZhipuThinkingModel("glm-4.7"))
-	assert.True(t, IsZhipuThinkingModel("GLM-5.1-preview"))
-	assert.False(t, IsZhipuThinkingModel("glm-4"))
-	assert.False(t, IsZhipuThinkingModel("glm-4-plus"))
-}
-
 func TestDetectProvider(t *testing.T) {
 	tests := []struct {
 		url      string

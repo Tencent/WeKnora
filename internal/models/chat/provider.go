@@ -171,20 +171,6 @@ func (deepseekThinkingProvider) Thinking() ThinkingStrategy {
 	return thinkingTypeField{}
 }
 
-// --- Official Zhipu GLM 4.5+ / 5.x: thinking via thinking.type ---
-
-type zhipuThinkingProvider struct{ baseProvider }
-
-func (zhipuThinkingProvider) Name() provider.ProviderName { return provider.ProviderZhipu }
-
-func (zhipuThinkingProvider) Matches(model string) bool {
-	return provider.IsZhipuThinkingModel(model)
-}
-
-func (zhipuThinkingProvider) Thinking() ThinkingStrategy {
-	return thinkingTypeField{}
-}
-
 // --- Generic (vLLM) / NVIDIA: thinking via chat_template_kwargs ---
 
 type genericProvider struct{ baseProvider }
@@ -306,7 +292,6 @@ var providerRegistry = []providerAdapter{
 	lkeapProvider{},
 	deepseekThinkingProvider{},
 	deepseekProvider{},
-	zhipuThinkingProvider{},
 	genericProvider{},
 	geminiProvider{},
 	volcengineProvider{},
