@@ -29,13 +29,35 @@ curl "$BASE/api/v1/models/providers?model_type=chat" -H "Authorization: Bearer $
 | `type` | string | 是（`binding:"required"`） | 模型类型 |
 | `source` | string | 是（`binding:"required"`） | 来源（local/remote…） |
 | `description` | string | 否 | 描述 |
-| `parameters` | object | 是（`binding:"required"`） | 连接参数（base_url 等；密钥经 credentials 子资源管理） |
+| `parameters` | object | 是（`binding:"required"`） | 连接与扩展参数（`base_url`、`provider`、`extra_config` 等；密钥经 credentials 子资源管理） |
 
 响应：201 `{"success":true,"data":{ModelResponse}}`（`id,name,type,source,parameters,is_default,is_builtin,status,credentials,...`）
 
 ```bash
 curl -X POST $BASE/api/v1/models -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"name":"gpt-4o-mini","type":"chat","source":"remote","parameters":{"base_url":"https://api.openai.com/v1"}}'
+```
+
+### `parameters.extra_config.thinking_control`
+
+远程 Chat 模型可在 `parameters.extra_config` 中设置 `thinking_control`，用于选择思考开关对应的服务商请求字段格式：
+
+| 值 | 请求字段格式 |
+| --- | --- |
+| `none` | 不发送思考模式参数 |
+| `enable_thinking` | `enable_thinking: true/false` |
+| `thinking_type` | `thinking: { "type": "enabled" | "disabled" }` |
+| `chat_template_kwargs` | `chat_template_kwargs.enable_thinking: true/false` |
+
+该字段是请求格式选择，不是本次调用的思考开关；实际开关由调用选项中的 `thinking` 布尔值控制。未提供该字段时，后端使用对应服务商和模型的默认策略；提供的格式与默认策略相同时，后端仍保留服务商专有的默认值与流式请求约束。
+
+> **辅助召回问题生成的要求：** 文档入库处理时会为每个 chunk 生成辅助召回问题，以增强检索召回。该异步调用会显式请求关闭思考，并依赖 `thinking_control` 把关闭信号编码为模型支持的请求字段。对于具备思考能力的模型，必须为该模型设置正确的 `thinking_control` 格式；未设置或格式错误时，模型可能继续输出较长的思考内容，导致辅助召回问题生成超时并失败。
+
+例如，创建官方 DeepSeek V4 Chat 模型时可显式保存 `thinking_type`：
+
+```bash
+curl -X POST $BASE/api/v1/models -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"deepseek-v4-pro","type":"chat","source":"remote","parameters":{"base_url":"https://api.deepseek.com","provider":"deepseek","extra_config":{"thinking_control":"thinking_type"}}}'
 ```
 
 ### GET /api/v1/models

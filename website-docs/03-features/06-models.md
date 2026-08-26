@@ -68,7 +68,7 @@ type Provider interface {
 | `volcengine` | 火山引擎 Ark | |
 | `hunyuan` | 腾讯混元 | |
 | `siliconflow` | 硅基流动 | |
-| `deepseek` | DeepSeek | |
+| `deepseek` | DeepSeek | 默认地址 `https://api.deepseek.com`；`deepseek-v4-flash`、`deepseek-v4-pro` 使用 `thinking_type` 格式 |
 | `minimax` | MiniMax | |
 | `moonshot` | 月之暗面 Moonshot (Kimi) | |
 | `modelscope` | 魔搭 ModelScope | |
@@ -161,13 +161,28 @@ return wrapChatConcurrency(c, config.MaxConcurrency, err)
 | `embedding_parameters.supports_dimension_override` | bool | false | 是否支持请求级维度覆盖（`dimensions` 参数） |
 | `parameter_size` | string | 空 | Ollama 模型参数规模（如 "7B"），后端维护、前端不可改 |
 | `provider` | string | 空（按 BaseURL 自动检测） | 厂商标识 |
-| `extra_config` | map[string]string | nil | 厂商专属配置（如 Azure 的 `api_version`） |
+| `extra_config` | map[string]string | nil | 厂商专属配置（如 Azure 的 `api_version`、远程 Chat 模型的 `thinking_control`） |
 | `custom_headers` | map[string]string | nil | 附加自定义 HTTP 请求头（类似 OpenAI SDK `extra_headers`；`Authorization`、`api-key` 等保留头在运行期被忽略） |
 | `supports_vision` | bool | false | Chat 模型是否接受图片多模态输入 |
 | `max_concurrency` | int | 0（回落到全局 `model.max_concurrency`） | 该模型后台任务并发上限（仅 chat/vlm/embedding 生效） |
 | `app_id` / `app_secret` | string | 空 | WeKnoraCloud 专用凭证，`app_secret` AES 加密存储 |
 
 模型级字段还包括 `name`（运行期实际调用的模型名）、`display_name`、`type`、`source`、`is_default`（同一 `(tenant_id, type)` 桶内唯一默认）、`is_builtin`、`managed_by`、`status`（`active` / `downloading` / `download_failed`）。
+
+### 思考模式参数格式
+
+远程 Chat 模型可通过 `parameters.extra_config.thinking_control` 保存思考模式参数格式。该字段决定 WeKnora 如何把请求级的思考开关编码为服务商 HTTP 请求字段：
+
+| 值 | 请求字段格式 |
+| --- | --- |
+| `none` | 不发送思考模式参数 |
+| `enable_thinking` | `enable_thinking: true/false` |
+| `thinking_type` | `thinking: { "type": "enabled" | "disabled" }` |
+| `chat_template_kwargs` | `chat_template_kwargs.enable_thinking: true/false` |
+
+- 在「设置 → 模型」中新建远程 Chat 模型时，模型编辑器会按服务商和模型名预选该字段；手动选择后，保存值优先。
+- 该字段只选择请求参数格式，不直接决定本次调用是否开启思考；调用时的 `thinking` 布尔选项才是实际开关。
+- 当保存格式与服务商适配器默认格式相同时，运行时仍保留该服务商的默认值和流式请求约束；仅格式不同时才切换序列化策略。
 
 ### 管理 API（`internal/router/router.go`）
 
