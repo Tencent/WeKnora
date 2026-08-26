@@ -90,12 +90,22 @@ func TestRunInstallSucceedsOnDockerConfig(t *testing.T) {
 }
 
 func TestSkillSnapshotBuildNameIncludesTenantAndFullConfig(t *testing.T) {
-	a := skillSnapshotBuildName(7, "aaaaaaaa-bbbb-cccc-dddd-eeeeffff0001", 1)
-	b := skillSnapshotBuildName(8, "aaaaaaaa-bbbb-cccc-dddd-eeeeffff0001", 1)
-	c := skillSnapshotBuildName(7, "aaaaaaaa-bbbb-cccc-dddd-eeeeffff0002", 1)
-	require.Equal(t, "weknora-sk-t7-aaaaaaaabbbbccccddddeeeeffff0001-g1", a)
+	a := skillSnapshotBuildName(7, "aaaaaaaa-bbbb-cccc-dddd-eeeeffff0001", 1, "11111111-2222-3333-4444-555555555555")
+	b := skillSnapshotBuildName(8, "aaaaaaaa-bbbb-cccc-dddd-eeeeffff0001", 1, "11111111-2222-3333-4444-555555555555")
+	c := skillSnapshotBuildName(7, "aaaaaaaa-bbbb-cccc-dddd-eeeeffff0002", 1, "11111111-2222-3333-4444-555555555555")
+	d := skillSnapshotBuildName(7, "aaaaaaaa-bbbb-cccc-dddd-eeeeffff0001", 1, "aaaaaaaa-bbbb-cccc-dddd-eeeeffff0001")
+	require.Equal(t, "weknora-sk-t7-aaaaaaaabbbbccccddddeeeeffff0001-g1-11111111", a)
 	require.NotEqual(t, a, b, "the same config in another tenant must not share a tag")
 	require.NotEqual(t, a, c, "two configs must not share a tag")
+	require.NotEqual(t, a, d, "two builds of the same generation must not share a tag")
+}
+
+func TestNextSnapshotGenerationSkipsAbandonedLedgerRows(t *testing.T) {
+	require.Equal(t, 1, nextSnapshotGeneration(0, nil))
+	require.Equal(t, 4, nextSnapshotGeneration(2, []*types.TenantSkillSnapshotEntity{
+		{Generation: 3, State: types.SkillSnapshotStateBuilding},
+		{Generation: 1, State: types.SkillSnapshotStateActive},
+	}))
 }
 
 // TestRunInstallIssuesExactlyTheseCommands pins the order, not just the set.

@@ -218,16 +218,15 @@ func (s *TenantSkillService) runRemove(
 	if !owned {
 		return nil
 	}
-	// The generation comes from the config read at the top of this function
-	// while switchImagePointer re-reads for everything else, for the same
-	// reason it does in an install: SkillImage is written only by an install
-	// or a removal and this lock serialises both, whereas the rest of the
-	// entity is written by the config service under its own cordon.
-	generation := currentGeneration(cfgEntity) + 1
+	ledger, err := s.skills.ListSnapshotsByConfig(ctx, tenantID, configID)
+	if err != nil {
+		return fmt.Errorf("list snapshots of config %s: %w", configID, err)
+	}
+	generation := nextSnapshotGeneration(currentGeneration(cfgEntity), ledger)
 	// The ledger row is written before the snapshot: a snapshot with no ledger
 	// entry is a provider resource nobody knows exists.
 	removeRowID := uuid.NewString()
-	snapshotName := skillSnapshotBuildName(tenantID, configID, generation)
+	snapshotName := skillSnapshotBuildName(tenantID, configID, generation, removeRowID)
 	if err := s.skills.CreateSnapshotRow(ctx, &types.TenantSkillSnapshotEntity{
 		ID: removeRowID, TenantID: tenantID, SandboxConfigID: configID, SkillID: skillID,
 		ParentSnapshotID: currentSnapshotID(cfgEntity), Generation: generation,

@@ -166,6 +166,12 @@ func (c *DockerRemoteClient) ReplaceStandardTemplate(ctx context.Context) (*Remo
 	return c.EnsureStandardTemplate(ctx)
 }
 
+// DeleteSupersededStandardTemplates is a no-op: Docker has no cluster-side
+// template object, and skill snapshots live in a separate image namespace.
+func (c *DockerRemoteClient) DeleteSupersededStandardTemplates(context.Context, string) error {
+	return nil
+}
+
 func (c *DockerRemoteClient) pullInBackground(ctx context.Context, key, image string) {
 	pullCtx, cancel := context.WithTimeout(ctx, dockerImagePullBudget)
 	defer cancel()

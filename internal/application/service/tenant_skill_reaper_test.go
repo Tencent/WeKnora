@@ -509,6 +509,29 @@ func TestPruneLeavesABuildWhoseInstallIsStillBeating(t *testing.T) {
 		"a live install must not even cost a provider client")
 }
 
+func TestPruneLeavesAbandonedBuildWhileAnotherSkillIsInstalling(t *testing.T) {
+	fx := newReaperFixture(t)
+	fx.live("snap-live")
+	fx.installed("sk-1", "snap-live", "")
+	fx.building("sk-2", "weknora-sk-t7-cfg1-g2-aaaaaaaa", fx.now.Add(-skillInstallStuckTTL-time.Minute))
+	alive := fx.now.Add(-time.Minute)
+	fx.skills.put(&types.TenantSkillEntity{
+		ID: "sk-3", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: "xlsx", Status: types.SkillStatusInstalling, InstallingSince: &alive,
+	})
+	fx.provider.listed = []sandbox.RemoteSnapshotRef{
+		{ID: "snap-live"},
+		{ID: "snap-new", Names: []string{"weknora-sk-t7-cfg1-g2-aaaaaaaa"}},
+	}
+
+	n, err := fx.svc.PruneSupersededSnapshots(context.Background())
+
+	require.NoError(t, err)
+	require.Zero(t, n)
+	require.Empty(t, fx.provider.deleted,
+		"an in-flight install on the same config may have reused the abandoned name")
+}
+
 func TestPruneLeavesARecentBuildAlone(t *testing.T) {
 	fx := newReaperFixture(t)
 	fx.building("sk-2", "weknora-sk-cfg1-g2", fx.now.Add(-time.Minute))
@@ -783,8 +806,17 @@ func (r *reaperSkillStore) GetSkillByName(context.Context, uint64, string, strin
 	panic("GetSkillByName is outside the reaper surface")
 }
 
-func (r *reaperSkillStore) ListSkillsByConfig(context.Context, uint64, string) ([]*types.TenantSkillEntity, error) {
-	panic("ListSkillsByConfig is outside the reaper surface")
+func (r *reaperSkillStore) ListSkillsByConfig(
+	_ context.Context, tenantID uint64, configID string,
+) ([]*types.TenantSkillEntity, error) {
+	var out []*types.TenantSkillEntity
+	for _, e := range r.rows {
+		if e != nil && e.TenantID == tenantID && e.SandboxConfigID == configID {
+			cp := *e
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
 }
 
 func (r *reaperSkillStore) DeleteSkill(_ context.Context, tenantID uint64, configID, skillID string) error {

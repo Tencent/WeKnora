@@ -364,6 +364,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   updated: [record: SandboxConfigRecord]
   skillsChanged: []
+  inFlightChange: [busy: boolean]
 }>()
 
 const { t, locale } = useI18n()
@@ -459,6 +460,12 @@ function statusLabel(skill: ConfigSkill): string {
 function isBusy(skill: ConfigSkill): boolean {
   return skill.status === 'installing' || skill.status === 'removing'
 }
+
+watch(
+  () => skills.value.some(isBusy),
+  (busy) => emit('inFlightChange', busy),
+  { immediate: true },
+)
 
 // The locators are written only after the installer sandbox is up and the
 // agent has a message to stream into. The row itself is already "installing"

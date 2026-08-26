@@ -140,6 +140,7 @@
 
     <SandboxConfigEditorDrawer v-model:visible="showEditor" :record="editingRecord"
       :preset-type="activeType === 'all' ? '' : activeType" :initial-step="editorStep"
+      :has-in-flight-skill="editorHasInFlightSkill"
       @saved="load" @skills-changed="onSkillsChanged" />
 
     <!--
@@ -292,6 +293,16 @@ function skillTagTheme(skill: ConfigSkill): 'default' | 'warning' | 'primary' {
   if (skill.status === 'installing' || skill.status === 'removing') return 'primary'
   return 'default'
 }
+
+function skillInFlight(skill: ConfigSkill): boolean {
+  return skill.status === 'installing' || skill.status === 'removing'
+}
+
+const editorHasInFlightSkill = computed(() => {
+  const id = editingRecord.value?.id
+  if (!id) return false
+  return (skillsByConfig.value[id] || []).some(skillInFlight)
+})
 
 const filteredRecords = computed(() => {
   const base = activeType.value === 'all'

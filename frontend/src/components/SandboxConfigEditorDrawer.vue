@@ -86,7 +86,7 @@
         <t-form-item :label="$t('settings.sandbox.backendType')">
           <t-select :value="backend" :placeholder="$t('settings.sandbox.backendTypePlaceholder')"
             class="backend-select" :popup-props="{ overlayClassName: 'sandbox-backend-popup' }"
-            :disabled="hasSkillSnapshot"
+            :disabled="retargetFrozen"
             @change="(v: any) => selectBackend(String(v))">
             <t-option v-for="opt in backendOptions" :key="opt" :value="opt" :label="backendLabel(opt)">
               <span class="backend-choice">
@@ -117,29 +117,31 @@
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.sectionConnection') }}</h4>
         <t-alert v-if="hasSkillSnapshot" theme="info" class="identity-hint compact-alert"
           :message="$t('settings.sandbox.connectionLockedBySkills')" />
+        <t-alert v-else-if="hasInFlightSkill" theme="info" class="identity-hint compact-alert"
+          :message="$t('settings.sandbox.connectionLockedByInFlight')" />
         <t-alert v-else-if="record" theme="info" class="identity-hint compact-alert"
           :message="$t('settings.sandbox.identityFieldHint')" />
 
         <template v-if="backend === 'cube'">
           <t-form-item :label="requiredLabel('apiUrl')" :status="fieldStatus('api_url')" :tips="fieldTip('api_url')">
             <t-input v-model="cube.api_url" placeholder="http://cube.example.com:33000"
-              :disabled="hasSkillSnapshot" @input="onConnectionInput('api_url')" />
+              :disabled="retargetFrozen" @input="onConnectionInput('api_url')" />
           </t-form-item>
           <div class="form-grid form-grid--two">
             <t-form-item :label="requiredLabel('proxyUrl')" :status="fieldStatus('proxy_url')"
               :tips="fieldTip('proxy_url')">
               <t-input v-model="cube.proxy_url" placeholder="http://cube.example.com:80"
-                :disabled="hasSkillSnapshot" @input="onConnectionInput('proxy_url')" />
+                :disabled="retargetFrozen" @input="onConnectionInput('proxy_url')" />
             </t-form-item>
             <t-form-item :label="requiredLabel('sandboxDomain')" :status="fieldStatus('sandbox_domain')"
               :tips="fieldTip('sandbox_domain')">
               <t-input v-model="cube.sandbox_domain" placeholder="cube.app"
-                :disabled="hasSkillSnapshot" @input="onConnectionInput('sandbox_domain')" />
+                :disabled="retargetFrozen" @input="onConnectionInput('sandbox_domain')" />
             </t-form-item>
           </div>
           <t-form-item :label="$t('settings.sandbox.apiKey')">
             <t-input v-model="cube.api_key" type="password" :placeholder="secretInputPlaceholder('cube')"
-              :disabled="hasSkillSnapshot" @input="invalidateConnection" />
+              :disabled="retargetFrozen" @input="invalidateConnection" />
             <div class="field-hints">
               <p class="section-help">
                 {{ storedSecrets.cube
@@ -155,7 +157,7 @@
           <t-form-item :label="$t('settings.sandbox.cubeDnsServers')"
             :help="$t('settings.sandbox.cubeDnsServersHelp')">
             <t-tag-input v-model="cube.dns_servers" :placeholder="$t('settings.sandbox.cubeDnsServersPlaceholder')"
-              :disabled="hasSkillSnapshot" clearable @change="invalidateConnection" />
+              :disabled="retargetFrozen" clearable @change="invalidateConnection" />
           </t-form-item>
         </template>
 
@@ -163,7 +165,7 @@
           <t-form-item :label="requiredLabel('apiKey')" :status="fieldStatus('api_key')"
             :tips="fieldTip('api_key')">
             <t-input v-model="e2b.api_key" type="password" :placeholder="secretInputPlaceholder('e2b')"
-              :disabled="hasSkillSnapshot" @input="onConnectionInput('api_key')" />
+              :disabled="retargetFrozen" @input="onConnectionInput('api_key')" />
             <div class="field-hints">
               <p class="section-help">
                 {{ storedSecrets.e2b
@@ -179,16 +181,16 @@
           <div class="form-grid form-grid--two">
             <t-form-item :label="$t('settings.sandbox.apiUrl')" :help="$t('settings.sandbox.e2bApiUrlOptional')">
               <t-input v-model="e2b.api_url" placeholder="https://api.e2b.app"
-                :disabled="hasSkillSnapshot" @input="invalidateConnection" />
+                :disabled="retargetFrozen" @input="invalidateConnection" />
             </t-form-item>
             <t-form-item :label="$t('settings.sandbox.sandboxDomain')" :help="$t('settings.sandbox.e2bDomainOptional')">
               <t-input v-model="e2b.sandbox_domain" placeholder="e2b.app"
-                :disabled="hasSkillSnapshot" @input="invalidateConnection" />
+                :disabled="retargetFrozen" @input="invalidateConnection" />
             </t-form-item>
           </div>
           <t-form-item :label="$t('settings.sandbox.proxyUrl')" :help="$t('settings.sandbox.e2bProxyUrlOptional')">
             <t-input v-model="e2b.proxy_url" placeholder="http://sandbox-gateway.example.com"
-              :disabled="hasSkillSnapshot" @input="invalidateConnection" />
+              :disabled="retargetFrozen" @input="invalidateConnection" />
           </t-form-item>
         </template>
         <div class="private-endpoint-row">
@@ -198,7 +200,7 @@
           </div>
           <t-switch
             v-model="allowPrivateEndpoints"
-            :disabled="hasSkillSnapshot"
+            :disabled="retargetFrozen"
             @change="invalidateConnection"
           />
         </div>
@@ -220,19 +222,21 @@
           <t-form-item :label="requiredLabel('dockerImage')" :status="fieldStatus('image')"
             :tips="fieldTip('image')">
             <t-input v-model="docker.image" placeholder="wechatopenai/weknora-sandbox:latest"
-              :disabled="hasSkillSnapshot" @input="onFieldInput('image')" />
-            <p v-if="hasSkillSnapshot" class="section-help section-help--field">
-              {{ $t('settings.sandbox.templateLockedBySkills') }}
+              :disabled="retargetFrozen" @input="onFieldInput('image')" />
+            <p v-if="retargetFrozen" class="section-help section-help--field">
+              {{ hasSkillSnapshot
+                ? $t('settings.sandbox.templateLockedBySkills')
+                : $t('settings.sandbox.templateLockedByInFlight') }}
             </p>
           </t-form-item>
           <t-form-item :label="$t('settings.sandbox.dockerHost')" :help="$t('settings.sandbox.dockerHostHelp')">
             <t-input v-model="docker.host" placeholder="unix:///var/run/docker.sock"
-              :disabled="hasSkillSnapshot" @input="onFieldInput('host')" />
+              :disabled="retargetFrozen" @input="onFieldInput('host')" />
           </t-form-item>
           <t-form-item :label="$t('settings.sandbox.dockerTlsCertPath')"
             :help="$t('settings.sandbox.dockerTlsCertPathHelp')">
             <t-input v-model="docker.tls_cert_path" placeholder="/etc/weknora/docker-certs"
-              :disabled="hasSkillSnapshot" @input="onFieldInput('tls_cert_path')" />
+              :disabled="retargetFrozen" @input="onFieldInput('tls_cert_path')" />
           </t-form-item>
         </template>
         <t-alert v-else theme="warning" class="compact-alert" :message="$t('settings.sandbox.localRuntimeWarning')" />
@@ -248,6 +252,8 @@
         </div>
         <t-alert v-if="hasSkillSnapshot" theme="info" class="compact-alert"
           :message="$t('settings.sandbox.templateLockedBySkills')" />
+        <t-alert v-else-if="hasInFlightSkill" theme="info" class="compact-alert"
+          :message="$t('settings.sandbox.templateLockedByInFlight')" />
         <div v-if="templatesLoading && !templatesLoaded" class="template-loading">
           <t-loading size="small" />
           <span>{{ $t('settings.sandbox.loadingTemplates') }}</span>
@@ -276,12 +282,12 @@
             :class="{
               'is-active': currentTemplateId === item.id,
               'is-pending': isTemplatePending(item),
-              'is-disabled': !isTemplateSelectable(item) || (hasSkillSnapshot && currentTemplateId !== item.id),
+              'is-disabled': !isTemplateSelectable(item) || (retargetFrozen && currentTemplateId !== item.id),
             }"
             role="radio"
             :aria-checked="currentTemplateId === item.id"
-            :aria-disabled="!isTemplateSelectable(item) || (hasSkillSnapshot && currentTemplateId !== item.id)"
-            :tabindex="isTemplateSelectable(item) && !(hasSkillSnapshot && currentTemplateId !== item.id) ? 0 : -1"
+            :aria-disabled="!isTemplateSelectable(item) || (retargetFrozen && currentTemplateId !== item.id)"
+            :tabindex="isTemplateSelectable(item) && !(retargetFrozen && currentTemplateId !== item.id) ? 0 : -1"
             @click="onTemplateCardClick(item)"
             @keydown.enter.prevent="onTemplateCardClick(item)"
             @keydown.space.prevent="onTemplateCardClick(item)"
@@ -441,6 +447,7 @@
         :record="effectiveRecord"
         @updated="onSkillsConfigUpdated"
         @skills-changed="emit('skillsChanged')"
+        @in-flight-change="inFlightFromPanel = $event"
       />
       <p v-else class="skills-locked">{{ $t('settings.sandbox.stepSkillsLocked') }}</p>
     </template>
@@ -511,6 +518,7 @@ const props = defineProps<{
   // Which page to land on when opening an existing config, e.g. 'skills' from
   // the card's 管理技能 entry. Ignored while creating, where order is enforced.
   initialStep?: SandboxStepKey
+  hasInFlightSkill?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -573,7 +581,7 @@ const currentTemplateId = computed(() => (
 const selectedTemplate = computed(() => templates.value.find((item) => item.id === currentTemplateId.value))
 const clusterStandardTemplate = computed(() => templates.value.find((item) => item.standard && item.id))
 const canCreateStandard = computed(() => (
-  isRemoteBackend.value && templatesLoaded.value && !clusterStandardTemplate.value && !hasSkillSnapshot.value
+  isRemoteBackend.value && templatesLoaded.value && !clusterStandardTemplate.value && !retargetFrozen.value
 ))
 const wizardSteps = computed<Array<{ key: SandboxStepKey; title: string }>>(() => {
   const steps: Array<{ key: SandboxStepKey; title: string }> = [
@@ -627,6 +635,9 @@ const effectiveRecord = computed(() => savedRecord.value || props.record)
 const hasSkillSnapshot = computed(() => (
   Boolean(effectiveRecord.value?.config?.skill_image?.snapshot_id?.trim())
 ))
+const inFlightFromPanel = ref(false)
+const hasInFlightSkill = computed(() => Boolean(props.hasInFlightSkill) || inFlightFromPanel.value)
+const retargetFrozen = computed(() => hasSkillSnapshot.value || hasInFlightSkill.value)
 
 function onSkillsConfigUpdated(record: SandboxConfigRecord) {
   savedRecord.value = record
@@ -785,6 +796,7 @@ function reset() {
   templatesLoaded.value = false
   templatesError.value = ''
   savedRecord.value = null
+  inFlightFromPanel.value = false
   wizardStep.value = 0
   // "管理技能" opens this drawer straight on the skills step. It is a jump like
   // any other, so it only holds for a config that already exists.
@@ -807,6 +819,7 @@ watch(() => props.visible, (open) => {
   if (open) {
     reset()
   } else {
+    inFlightFromPanel.value = false
     stopTemplatePolling()
   }
 })
@@ -840,13 +853,13 @@ function clearTemplateSelection() {
 }
 
 function onTemplateCardClick(item: SandboxTemplate) {
-  if (hasSkillSnapshot.value && item.id !== currentTemplateId.value) return
+  if (retargetFrozen.value && item.id !== currentTemplateId.value) return
   if (!isTemplateSelectable(item)) return
   selectTemplate(item.id)
 }
 
 function canRebuildTemplate(item: SandboxTemplate): boolean {
-  return Boolean(item.standard && item.id) && !isTemplatePending(item) && !hasSkillSnapshot.value
+  return Boolean(item.standard && item.id) && !isTemplatePending(item) && !retargetFrozen.value
 }
 
 function templateDisplayName(item: SandboxTemplate): string {
@@ -987,7 +1000,7 @@ async function loadTemplates(ensureStandard = false, silent = false, replaceStan
     } else if (
       currentTemplateId.value
       && (!current || (!isTemplateSelectable(current) && !isTemplatePending(current)))
-      && !hasSkillSnapshot.value
+      && !retargetFrozen.value
     ) {
       if (standardID) {
         const next = templates.value.find((item) => item.id === standardID)
@@ -1023,7 +1036,7 @@ function createStandardTemplate() {
 }
 
 function replaceStandardTemplate() {
-  if (hasSkillSnapshot.value) return
+  if (retargetFrozen.value) return
   return loadTemplates(false, false, true)
 }
 

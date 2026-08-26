@@ -88,7 +88,8 @@ func TestDockerDeleteSnapshotPrunesUntaggedAncestors(t *testing.T) {
 
 	require.True(t, engine.removeImageOptions[0].PruneChildren,
 		"a delete that keeps untagged parents can never reclaim a retired chain")
-	require.True(t, engine.removeImageOptions[0].Force)
+	require.False(t, engine.removeImageOptions[0].Force,
+		"force-remove would untag an image a live session container still holds")
 }
 
 // A skill snapshot the ledger cannot name is unreachable: snapshots are always

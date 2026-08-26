@@ -250,9 +250,11 @@ func (c *CubeRemoteClient) EnsureStandardTemplate(ctx context.Context) (*RemoteT
 // template. Cube bakes DNS into the template, so a READY template only picks
 // up a settings change via rebuild (preferred: same ID) or a replacement.
 //
-// The old template is never deleted until a replacement with an ID exists:
-// deleting first left every config's stored template_id pointing at a
-// missing template for the duration of the build.
+// The previous template is left in the catalog. Deleting it here would race
+// persistSpawnTemplateID: sessions would target a missing ID for the rest of
+// the build, and a persist failure would leave every config pointing at a
+// template that no longer exists. Callers persist a READY replacement first,
+// then DeleteSupersededStandardTemplates.
 func (c *CubeRemoteClient) ReplaceStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
 	items, err := c.ListTemplates(ctx)
 	if err != nil {
@@ -281,15 +283,21 @@ func (c *CubeRemoteClient) ReplaceStandardTemplate(ctx context.Context) (*Remote
 			"cube in-place rebuild of standard template %s failed: %v; building a replacement",
 			current.ID, err)
 	}
-	created, err := c.buildStandardTemplate(ctx)
-	if err != nil {
-		return nil, err
+	return c.buildStandardTemplate(ctx)
+}
+
+// DeleteSupersededStandardTemplates drops WeKnora templates other than keepID.
+func (c *CubeRemoteClient) DeleteSupersededStandardTemplates(ctx context.Context, keepID string) error {
+	keepID = strings.TrimSpace(keepID)
+	if keepID == "" {
+		return cubeInvalidRequest("DeleteSupersededStandardTemplates", "template ID is required", nil)
 	}
-	if created == nil || strings.TrimSpace(created.ID) == "" || IsTemplateBuildFailed(created.Status) {
-		return created, nil
+	items, err := c.ListTemplates(ctx)
+	if err != nil {
+		return err
 	}
 	for _, item := range items {
-		if !item.Standard || strings.TrimSpace(item.ID) == "" || item.ID == created.ID {
+		if !item.Standard || strings.TrimSpace(item.ID) == "" || item.ID == keepID {
 			continue
 		}
 		logger.Infof(ctx, "cube deleting superseded standard template %s", item.ID)
@@ -299,7 +307,7 @@ func (c *CubeRemoteClient) ReplaceStandardTemplate(ctx context.Context) (*Remote
 			}
 		}
 	}
-	return created, nil
+	return nil
 }
 
 // rebuildStandardTemplate restarts the build of a template that already exists,
@@ -1194,5 +1202,6 @@ func cubeCredentialPresence(value string) string {
 var (
 	_ RemoteSandboxClient   = (*CubeRemoteClient)(nil)
 	_ RemoteSnapshotManager = (*CubeRemoteClient)(nil)
+	_ RemoteTemplateCatalog = (*CubeRemoteClient)(nil)
 	_ RemoteSandboxHandle   = (*cubeRemoteHandle)(nil)
 )

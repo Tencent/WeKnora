@@ -336,40 +336,26 @@ func (c *E2BRemoteClient) EnsureStandardTemplate(ctx context.Context) (*RemoteTe
 
 // ReplaceStandardTemplate starts a new WeKnora-template build from the current
 // spec. E2B resolves builds by name, so this is often a rebuild of the same
-// ID. Old standard templates are deleted only after a replacement with an ID
-// exists — deleting first left stored template_ids pointing at a missing
-// template for the duration of the build.
+// ID. The previous template stays listed until the caller has persisted a
+// spawnable replacement and called DeleteSupersededStandardTemplates: deleting
+// first left stored template_ids pointing at a missing template, and retrying
+// a refused rebuild by deleting the live ID did the same.
 func (c *E2BRemoteClient) ReplaceStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
+	return c.buildStandardTemplate(ctx)
+}
+
+// DeleteSupersededStandardTemplates drops WeKnora templates other than keepID.
+func (c *E2BRemoteClient) DeleteSupersededStandardTemplates(ctx context.Context, keepID string) error {
+	keepID = strings.TrimSpace(keepID)
+	if keepID == "" {
+		return e2bInvalidRequest("DeleteSupersededStandardTemplates", "template ID is required", nil)
+	}
 	items, err := c.ListTemplates(ctx)
 	if err != nil {
-		return nil, err
-	}
-	created, err := c.buildStandardTemplate(ctx)
-	if err != nil || created == nil || strings.TrimSpace(created.ID) == "" {
-		// A READY template may refuse a second build under the same name.
-		// Only then delete, and only to retry — if this retry also fails the
-		// old template is already gone, which is the original E2B limitation.
-		if err != nil {
-			logger.Warnf(ctx,
-				"e2b standard template rebuild without delete failed: %v; deleting then retrying",
-				err)
-		}
-		for _, item := range items {
-			if !item.Standard || strings.TrimSpace(item.ID) == "" {
-				continue
-			}
-			logger.Infof(ctx, "e2b replacing standard template %s", item.ID)
-			if delErr := c.client.DeleteTemplate(ctx, item.ID); delErr != nil {
-				var notFound *e2b.TemplateNotFoundError
-				if !errors.As(delErr, &notFound) {
-					return nil, normalizeE2BError("DeleteTemplate", delErr)
-				}
-			}
-		}
-		return c.buildStandardTemplate(ctx)
+		return err
 	}
 	for _, item := range items {
-		if !item.Standard || strings.TrimSpace(item.ID) == "" || item.ID == created.ID {
+		if !item.Standard || strings.TrimSpace(item.ID) == "" || item.ID == keepID {
 			continue
 		}
 		logger.Infof(ctx, "e2b deleting superseded standard template %s", item.ID)
@@ -380,7 +366,7 @@ func (c *E2BRemoteClient) ReplaceStandardTemplate(ctx context.Context) (*RemoteT
 			}
 		}
 	}
-	return created, nil
+	return nil
 }
 
 func (c *E2BRemoteClient) buildStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
@@ -1288,5 +1274,6 @@ func e2bRemoteEntryType(fileType string) RemoteDirEntryType {
 var (
 	_ RemoteSandboxClient   = (*E2BRemoteClient)(nil)
 	_ RemoteSnapshotManager = (*E2BRemoteClient)(nil)
+	_ RemoteTemplateCatalog = (*E2BRemoteClient)(nil)
 	_ RemoteSandboxHandle   = (*e2bRemoteHandle)(nil)
 )
