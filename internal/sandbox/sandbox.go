@@ -312,6 +312,11 @@ type Config struct {
 	// CubeHTTPTimeout bounds each HTTP call to CubeAPI. Zero uses the default.
 	CubeHTTPTimeout time.Duration
 
+	// CubeDNSServers are nameserver IPs included when WeKnora builds the
+	// standard Cube template. Empty omits the field so Cubelet uses its
+	// cluster default.
+	CubeDNSServers []string
+
 	// E2BAPIKey is the E2B API key sent via X-API-Key. Only used when
 	// Type == SandboxTypeE2B.
 	E2BAPIKey string

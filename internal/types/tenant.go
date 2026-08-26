@@ -689,6 +689,9 @@ type CubeSandboxConfig struct {
 	HTTPTimeoutSec int `json:"http_timeout_sec,omitempty"`
 
 	CubeSandboxTTLSeconds int `json:"cube_sandbox_ttl_seconds,omitempty"`
+
+	// DNSServers are Cube template nameserver IPs. Empty uses Cubelet's default.
+	DNSServers []string `json:"dns_servers,omitempty"`
 }
 
 // E2BSandboxConfig addresses one E2B-protocol control plane: E2B Cloud, a

@@ -17436,6 +17436,13 @@
                 "cube_sandbox_ttl_seconds": {
                     "type": "integer"
                 },
+                "dns_servers": {
+                    "description": "DNSServers are Cube template nameserver IPs. Empty uses Cubelet's default.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "http_timeout_sec": {
                     "description": "HTTPTimeoutSec bounds each HTTP call to the sandbox control plane.\n0 means use the built-in default (30s), never the deployment's value.",
                     "type": "integer"

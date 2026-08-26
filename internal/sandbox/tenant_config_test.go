@@ -101,6 +101,38 @@ func TestResolveEffectiveConfigRejectsIncompleteCube(t *testing.T) {
 	require.Contains(t, err.Error(), "template_id")
 }
 
+func TestResolveEffectiveConfigCopiesCubeDNSServers(t *testing.T) {
+	got, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType:           "cube",
+		AllowPrivateEndpoints: true,
+		Cube: &types.CubeSandboxConfig{
+			APIKey: "cube-key", APIURL: "https://203.0.113.20",
+			ProxyURL: "https://203.0.113.21", SandboxDomain: "cube.example",
+			TemplateID: "cube-template",
+			DNSServers: []string{" 8.8.8.8 ", "8.8.8.8", "1.1.1.1"},
+		},
+	}, globalTestConfig())
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"8.8.8.8", "1.1.1.1"}, got.CubeDNSServers)
+}
+
+func TestResolveEffectiveConfigRejectsInvalidCubeDNS(t *testing.T) {
+	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType:           "cube",
+		AllowPrivateEndpoints: true,
+		Cube: &types.CubeSandboxConfig{
+			APIKey: "cube-key", APIURL: "https://203.0.113.20",
+			ProxyURL: "https://203.0.113.21", SandboxDomain: "cube.example",
+			TemplateID: "cube-template",
+			DNSServers: []string{"dns.google"},
+		},
+	}, globalTestConfig())
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "dns.google")
+}
+
 func TestResolveEffectiveConfigRejectsIncompleteE2B(t *testing.T) {
 	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
 		SandboxType: "e2b",

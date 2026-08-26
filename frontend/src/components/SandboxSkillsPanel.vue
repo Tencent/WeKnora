@@ -185,64 +185,92 @@
                       <t-icon name="folder" size="16px" />
                     </button>
                   </t-tooltip>
-                  <t-popup
-                    v-if="hasTranscript(skill)"
-                    :visible="expandedSkillId === skill.id"
-                    trigger="click"
-                    placement="bottom-right"
-                    attach="body"
-                    destroy-on-close
-                    overlay-class-name="skill-transcript-popup"
-                    :z-index="3200"
-                    :overlay-inner-style="{ padding: '0' }"
-                    @visible-change="(visible: boolean) => onTranscriptVisible(skill, visible)"
+                  <t-tooltip
+                    v-if="hasTranscript(skill) || isBusy(skill)"
+                    :content="isBusy(skill)
+                      ? $t('settings.sandbox.skillTranscriptLiveHint')
+                      : $t('settings.sandbox.skillTranscript')"
+                    placement="top"
                   >
+                    <t-popup
+                      v-if="hasTranscript(skill)"
+                      :visible="expandedSkillId === skill.id"
+                      trigger="click"
+                      placement="bottom-right"
+                      attach="body"
+                      destroy-on-close
+                      overlay-class-name="skill-transcript-popup"
+                      :z-index="3200"
+                      :overlay-inner-style="{ padding: '0' }"
+                      @visible-change="(visible: boolean) => onTranscriptVisible(skill, visible)"
+                    >
+                      <button
+                        type="button"
+                        class="skill-item__icon-btn"
+                        :class="{
+                          'is-on': expandedSkillId === skill.id,
+                          'is-live': isBusy(skill),
+                          'is-live-chip': isBusy(skill),
+                        }"
+                        :aria-label="$t('settings.sandbox.skillTranscript')"
+                      >
+                        <span v-if="isBusy(skill)" class="skill-item__live-dot" aria-hidden="true" />
+                        <t-icon name="chat-bubble-history" size="16px" />
+                        <span v-if="isBusy(skill)" class="skill-item__live-label">
+                          {{ $t('settings.sandbox.skillTranscriptLive') }}
+                        </span>
+                      </button>
+                      <template #content>
+                        <div class="skill-transcript-popup__panel">
+                          <header class="skill-transcript-popup__head">
+                            <div class="skill-transcript-popup__head-text">
+                              <div class="skill-transcript-popup__title">{{ skill.name || skill.id }}</div>
+                              <div class="skill-transcript-popup__meta">
+                                <span
+                                  class="skill-transcript-popup__status"
+                                  :data-status="skill.status"
+                                >{{ statusLabel(skill) }}</span>
+                                <span>{{ $t('settings.sandbox.skillTranscriptTitle') }}</span>
+                              </div>
+                            </div>
+                            <t-button
+                              variant="text"
+                              shape="square"
+                              size="small"
+                              class="skill-transcript-popup__close"
+                              :title="$t('common.close')"
+                              @click.stop="onTranscriptVisible(skill, false)"
+                            >
+                              <template #icon><t-icon name="close" size="16px" /></template>
+                            </t-button>
+                          </header>
+                          <div class="skill-transcript-popup__body">
+                            <SkillInstallTimeline
+                              :key="`${skill.id}-${skill.install_session_id || ''}-${transcriptEpoch}`"
+                              compact
+                              :config-id="record?.id || ''"
+                              :skill-id="skill.id"
+                              :session-id="skill.install_session_id || ''"
+                              :message-id="skill.install_message_id || ''"
+                              :live="skill.status === 'installing'"
+                            />
+                          </div>
+                        </div>
+                      </template>
+                    </t-popup>
                     <button
+                      v-else
                       type="button"
-                      class="skill-item__icon-btn"
-                      :class="{ 'is-on': expandedSkillId === skill.id }"
+                      class="skill-item__icon-btn is-live is-live-chip"
                       :aria-label="$t('settings.sandbox.skillTranscript')"
                     >
+                      <span class="skill-item__live-dot" aria-hidden="true" />
                       <t-icon name="chat-bubble-history" size="16px" />
+                      <span class="skill-item__live-label">
+                        {{ $t('settings.sandbox.skillTranscriptLive') }}
+                      </span>
                     </button>
-                    <template #content>
-                      <div class="skill-transcript-popup__panel">
-                        <header class="skill-transcript-popup__head">
-                          <div class="skill-transcript-popup__head-text">
-                            <div class="skill-transcript-popup__title">{{ skill.name || skill.id }}</div>
-                            <div class="skill-transcript-popup__meta">
-                              <span
-                                class="skill-transcript-popup__status"
-                                :data-status="skill.status"
-                              >{{ statusLabel(skill) }}</span>
-                              <span>{{ $t('settings.sandbox.skillTranscriptTitle') }}</span>
-                            </div>
-                          </div>
-                          <t-button
-                            variant="text"
-                            shape="square"
-                            size="small"
-                            class="skill-transcript-popup__close"
-                            :title="$t('common.close')"
-                            @click.stop="onTranscriptVisible(skill, false)"
-                          >
-                            <template #icon><t-icon name="close" size="16px" /></template>
-                          </t-button>
-                        </header>
-                        <div class="skill-transcript-popup__body">
-                          <SkillInstallTimeline
-                            :key="`${skill.id}-${skill.install_session_id || ''}-${transcriptEpoch}`"
-                            compact
-                            :config-id="record?.id || ''"
-                            :skill-id="skill.id"
-                            :session-id="skill.install_session_id || ''"
-                            :message-id="skill.install_message_id || ''"
-                            :live="skill.status === 'installing'"
-                          />
-                        </div>
-                      </div>
-                    </template>
-                  </t-popup>
+                  </t-tooltip>
                   <t-popconfirm
                     theme="warning"
                     :content="deleteHint"
@@ -335,6 +363,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   updated: [record: SandboxConfigRecord]
+  skillsChanged: []
 }>()
 
 const { t, locale } = useI18n()
@@ -617,19 +646,33 @@ async function refreshImage() {
     const res = await getSandboxConfigById(props.record.id)
     skillImage.value = res?.data?.config?.skill_image || null
     skillRollout.value = normalizeSkillRollout(res?.data?.config?.skill_rollout)
+    if (res?.data) emit('updated', res.data)
   } catch {
-    skillImage.value = props.record.config?.skill_image || null
+    skillImage.value = skillImage.value || props.record.config?.skill_image || null
+    emit('skillsChanged')
   }
+}
+
+function skillsSignature(list: ConfigSkill[]): string {
+  return list.map((skill) => `${skill.id}:${skill.status}:${skill.enabled ? 1 : 0}`).join('|')
 }
 
 async function loadSkills(silent = false) {
   if (!props.record) return
   if (!silent) loading.value = true
+  const previous = skillsSignature(skills.value)
+  const wasBusy = skills.value.some(isBusy)
   try {
     const res = await listConfigSkills(props.record.id)
     skills.value = res?.data || []
     followBusySkills()
     ensurePoll()
+    if (skillsSignature(skills.value) !== previous) {
+      emit('skillsChanged')
+    }
+    if (wasBusy && !skills.value.some(isBusy)) {
+      void refreshImage()
+    }
   } catch (e: any) {
     if (!silent) {
       MessagePlugin.error(e?.message || t('settings.sandbox.skillLoadFailed'))
@@ -812,6 +855,7 @@ async function removeSkill(skill: ConfigSkill) {
     await deleteConfigSkill(props.record.id, skill.id)
     MessagePlugin.success(t('settings.sandbox.skillDeleteAccepted'))
     await loadSkills()
+    await refreshImage()
     followProgress(skill.id)
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('common.deleteFailed'))
@@ -1205,9 +1249,47 @@ onUnmounted(() => {
     color: var(--td-brand-color);
   }
 
+  &.is-live {
+    color: var(--td-brand-color);
+    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+  }
+
+  &.is-live-chip {
+    width: auto;
+    min-width: 26px;
+    padding: 0 8px;
+    gap: 5px;
+  }
+
   &--danger:hover:not(:disabled) {
     background: var(--td-error-color-1, var(--td-bg-color-secondarycontainer));
     color: var(--td-error-color);
+  }
+}
+
+.skill-item__live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--td-brand-color);
+  animation: skill-transcript-dot 2.4s ease-in-out infinite;
+}
+
+.skill-item__live-label {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+@keyframes skill-transcript-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.45;
   }
 }
 </style>

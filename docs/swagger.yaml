@@ -697,6 +697,11 @@ definitions:
         type: string
       cube_sandbox_ttl_seconds:
         type: integer
+      dns_servers:
+        description: DNSServers are Cube template nameserver IPs. Empty uses Cubelet's default.
+        items:
+          type: string
+        type: array
       http_timeout_sec:
         description: |-
           HTTPTimeoutSec bounds each HTTP call to the sandbox control plane.

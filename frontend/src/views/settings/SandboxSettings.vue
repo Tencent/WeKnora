@@ -139,7 +139,8 @@
     </t-loading>
 
     <SandboxConfigEditorDrawer v-model:visible="showEditor" :record="editingRecord"
-      :preset-type="activeType === 'all' ? '' : activeType" :initial-step="editorStep" @saved="load" />
+      :preset-type="activeType === 'all' ? '' : activeType" :initial-step="editorStep"
+      @saved="load" @skills-changed="onSkillsChanged" />
 
     <!--
       Occupancy is a list of sessions and agents, not a one-line status, and it
@@ -480,6 +481,13 @@ async function load() {
     MessagePlugin.error(e?.message || t('settings.sandbox.loadFailed'))
   } finally {
     loading.value = false
+  }
+  await loadSkills(records.value)
+}
+
+async function onSkillsChanged(record?: SandboxConfigRecord) {
+  if (record?.id) {
+    records.value = records.value.map((item) => (item.id === record.id ? { ...item, ...record } : item))
   }
   await loadSkills(records.value)
 }

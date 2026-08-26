@@ -136,6 +136,32 @@ func TestSkillSnapshotReleaseFailedMapsTo409WithRemaining(t *testing.T) {
 	require.Equal(t, []string{"snap-2"}, payload.Error.Data.SnapshotIDs)
 }
 
+func TestSkillSnapshotBlocksTemplateMapsTo409(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/sandbox-configs/templates/query", func(c *gin.Context) {
+		if !respondSandboxConfigRefusal(c, service.ErrSkillSnapshotBlocksTemplateChange) {
+			t.Fatal("expected skill snapshot template lock to map as a refusal")
+		}
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/sandbox-configs/templates/query", nil)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code)
+
+	var payload struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.Equal(t, "skill_snapshot_blocks_template", payload.Error.Code)
+	require.Contains(t, payload.Error.Message, "不能更换连接")
+}
+
 func TestSandboxConfigDeletePassesForceQuery(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
