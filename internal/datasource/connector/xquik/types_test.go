@@ -121,6 +121,28 @@ func TestSelectedQueries(t *testing.T) {
 	}
 }
 
+func TestCursorStateValidatesResumableQueryQueues(t *testing.T) {
+	queries := []string{"first", "second"}
+	valid := cursorState{
+		InProgress: true, StartedAt: time.Now().UTC(),
+		PendingQueries:  []queryCursorState{{Query: "second"}},
+		DeferredQueries: []queryCursorState{{Query: "first", PageCursor: "next"}},
+		QueryListHash:   queryListHash(queries),
+	}
+	if !valid.canResume(queries, 100) {
+		t.Fatal("valid query queues were rejected")
+	}
+	valid.DeferredQueries[0].Query = "second"
+	if valid.canResume(queries, 100) {
+		t.Fatal("duplicate queued query was accepted")
+	}
+	valid.DeferredQueries = nil
+	valid.PendingQueries[0].PageCursor = strings.Repeat("x", maxPageCursorBytes+1)
+	if valid.canResume(queries, 100) {
+		t.Fatal("oversized queued cursor was accepted")
+	}
+}
+
 func TestFlexibleTimeAliases(t *testing.T) {
 	var text flexibleTime
 	if err := json.Unmarshal([]byte(`"2026-08-26T10:11:12.123Z"`), &text); err != nil {

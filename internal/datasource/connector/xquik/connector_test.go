@@ -91,7 +91,9 @@ func TestConnectorMetadata(t *testing.T) {
 func TestConnectorResumesOnlyUnfinishedScheduledFullSync(t *testing.T) {
 	connector := NewConnector()
 	unfinished := connectorCursor(cursorState{
-		InProgress: true, StartedAt: time.Now().UTC(), QueryListHash: queryListHash([]string{"query"}),
+		InProgress: true, StartedAt: time.Now().UTC(),
+		PendingQueries: []queryCursorState{{Query: "query"}},
+		QueryListHash:  queryListHash([]string{"query"}),
 	}, false)
 	if !connector.ShouldResumeScheduledFullSync(unfinished) {
 		t.Fatal("unfinished cursor was not resumed")
@@ -149,8 +151,8 @@ func TestConnectorFetchStreamPaginatesAndDeduplicates(t *testing.T) {
 	if !strings.Contains(content, "> First post") || !strings.Contains(content, "View post on X") {
 		t.Fatalf("first content = %q", first.Content)
 	}
-	if len(handler.checkpoints) != 3 {
-		t.Fatalf("checkpoints = %d, want 3", len(handler.checkpoints))
+	if len(handler.checkpoints) != 2 {
+		t.Fatalf("checkpoints = %d, want 2", len(handler.checkpoints))
 	}
 	if !final.LastSyncTime.Equal(now) {
 		t.Fatalf("LastSyncTime = %s", final.LastSyncTime)
@@ -188,6 +190,77 @@ func TestConnectorCountsDuplicatesTowardEachQueryLimit(t *testing.T) {
 	}
 }
 
+func TestConnectorRunsLaterQueriesBeforeReturningContinuation(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	fake := &fakeAPI{searchFn: func(request searchRequest) (searchPage, error) {
+		switch request.Query + ":" + request.Cursor {
+		case "first:":
+			return searchPage{
+				Tweets: []tweet{{ID: "1"}, {ID: "2"}}, HasNextPage: true, NextCursor: "first-more",
+			}, nil
+		case "second:":
+			return searchPage{Tweets: []tweet{{ID: "3"}}}, nil
+		case "first:first-more":
+			return searchPage{Tweets: []tweet{{ID: "4"}}}, nil
+		default:
+			return searchPage{}, errors.New("unexpected search")
+		}
+	}}
+	config := testConfig("first\nsecond")
+	config.Settings["results_per_query"] = 2
+	connector := connectorWith(fake, now)
+
+	firstItems, continuation, err := connector.FetchIncremental(context.Background(), config, nil)
+	if err != nil {
+		t.Fatalf("first FetchIncremental() error = %v", err)
+	}
+	state := decodeCursor(continuation)
+	if len(firstItems) != 3 || len(fake.requests) != 2 || fake.requests[1].Query != "second" ||
+		len(state.PendingQueries) != 1 || state.PendingQueries[0].Query != "first" ||
+		state.PendingQueries[0].PageCursor != "first-more" {
+		t.Fatalf("first items=%d requests=%#v state=%#v", len(firstItems), fake.requests, state)
+	}
+
+	secondItems, final, err := connector.FetchIncremental(context.Background(), config, continuation)
+	if err != nil {
+		t.Fatalf("second FetchIncremental() error = %v", err)
+	}
+	if len(secondItems) != 1 || secondItems[0].ExternalID != "xquik:post:4" ||
+		!final.LastSyncTime.Equal(now) || len(fake.requests) != 3 {
+		t.Fatalf("second items=%#v final=%#v requests=%#v", secondItems, final, fake.requests)
+	}
+}
+
+func TestConnectorResumesRemainingQueriesBeforeDeferredWork(t *testing.T) {
+	started := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	resume := connectorCursor(cursorState{
+		InProgress: true, StartedAt: started,
+		PendingQueries:  []queryCursorState{{Query: "second"}},
+		DeferredQueries: []queryCursorState{{Query: "first", PageCursor: "first-more"}},
+		QueryListHash:   queryListHash([]string{"first", "second"}),
+	}, false)
+	fake := &fakeAPI{searchFn: func(request searchRequest) (searchPage, error) {
+		if request.Query != "second" || request.Cursor != "" {
+			return searchPage{}, errors.New("deferred query ran early")
+		}
+		return searchPage{Tweets: []tweet{{ID: "3"}}}, nil
+	}}
+	config := testConfig("first\nsecond")
+
+	_, continuation, err := connectorWith(fake, started.Add(time.Hour)).FetchIncremental(
+		context.Background(), config, resume,
+	)
+	if err != nil {
+		t.Fatalf("FetchIncremental() error = %v", err)
+	}
+	state := decodeCursor(continuation)
+	if len(fake.requests) != 1 || len(state.PendingQueries) != 1 ||
+		state.PendingQueries[0].Query != "first" ||
+		state.PendingQueries[0].PageCursor != "first-more" || len(state.DeferredQueries) != 0 {
+		t.Fatalf("requests=%#v state=%#v", fake.requests, state)
+	}
+}
+
 func TestConnectorFetchIncrementalUsesBoundedOverlap(t *testing.T) {
 	lastSync := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
 	now := lastSync.Add(time.Hour)
@@ -217,7 +290,8 @@ func TestConnectorFetchIncrementalUsesBoundedOverlap(t *testing.T) {
 func TestConnectorFetchStreamResumesFromCheckpoint(t *testing.T) {
 	started := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	resume := connectorCursor(cursorState{
-		InProgress: true, StartedAt: started, Query: "query", PageCursor: "next",
+		InProgress: true, StartedAt: started,
+		PendingQueries: []queryCursorState{{Query: "query", PageCursor: "next"}},
 		ResultsFetched: 2, PagesFetched: 1, QueryListHash: queryListHash([]string{"query"}),
 	}, false)
 	fake := &fakeAPI{searchFn: func(request searchRequest) (searchPage, error) {
@@ -243,7 +317,8 @@ func TestConnectorFetchStreamResumesFromCheckpoint(t *testing.T) {
 func TestConnectorFetchStreamPreservesDeduplicationAcrossResume(t *testing.T) {
 	started := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	resume := connectorCursor(cursorState{
-		InProgress: true, StartedAt: started, QueryIndex: 1, SeenPostIDs: []string{"1"},
+		InProgress: true, StartedAt: started,
+		PendingQueries: []queryCursorState{{Query: "second"}}, SeenPostIDs: []string{"1"},
 		QueryListHash: queryListHash([]string{"first", "second"}),
 	}, false)
 	fake := &fakeAPI{searchFn: func(request searchRequest) (searchPage, error) {
@@ -294,7 +369,8 @@ func TestConnectorContinuesOverflowWithoutAdvancingSyncTime(t *testing.T) {
 	}
 	state := decodeCursor(continuation)
 	if len(firstItems) != 2 || !continuation.LastSyncTime.Equal(previous) ||
-		!state.InProgress || state.PageCursor != "older" || state.ResultsFetched != 0 ||
+		!state.InProgress || len(state.PendingQueries) != 1 ||
+		state.PendingQueries[0].PageCursor != "older" || state.ResultsFetched != 0 ||
 		state.PagesFetched != 0 || state.QueryListHash != queryListHash([]string{"query"}) {
 		t.Fatalf("first items=%d cursor=%#v state=%#v", len(firstItems), continuation, state)
 	}
@@ -317,8 +393,9 @@ func TestConnectorContinuesOverflowWithoutAdvancingSyncTime(t *testing.T) {
 func TestConnectorResetsPageGuardAtOverflowCheckpoint(t *testing.T) {
 	started := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	resume := connectorCursor(cursorState{
-		InProgress: true, StartedAt: started, Query: "query", PageCursor: "current",
-		PagesFetched: maxPagesPerQuery - 1, QueryListHash: queryListHash([]string{"query"}),
+		InProgress: true, StartedAt: started,
+		PendingQueries: []queryCursorState{{Query: "query", PageCursor: "current"}},
+		PagesFetched:   maxPagesPerQuery - 1, QueryListHash: queryListHash([]string{"query"}),
 	}, false)
 	fake := &fakeAPI{searchFn: func(searchRequest) (searchPage, error) {
 		return searchPage{
@@ -336,7 +413,8 @@ func TestConnectorResetsPageGuardAtOverflowCheckpoint(t *testing.T) {
 		t.Fatalf("FetchIncremental() error = %v", err)
 	}
 	state := decodeCursor(continuation)
-	if state.PageCursor != "next-run" || state.PagesFetched != 0 || state.ResultsFetched != 0 {
+	if len(state.PendingQueries) != 1 || state.PendingQueries[0].PageCursor != "next-run" ||
+		state.PagesFetched != 0 || state.ResultsFetched != 0 {
 		t.Fatalf("state = %#v", state)
 	}
 }
@@ -369,8 +447,9 @@ func TestRememberPostIDKeepsBoundedExactWindow(t *testing.T) {
 func TestConnectorRejectsResumeAfterSelectedQueriesChange(t *testing.T) {
 	started := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	resume := connectorCursor(cursorState{
-		InProgress: true, StartedAt: started, QueryIndex: 1,
-		QueryListHash: queryListHash([]string{"first", "second"}),
+		InProgress: true, StartedAt: started,
+		PendingQueries: []queryCursorState{{Query: "second"}},
+		QueryListHash:  queryListHash([]string{"first", "second"}),
 	}, false)
 	fake := &fakeAPI{searchFn: func(searchRequest) (searchPage, error) {
 		return searchPage{}, nil
@@ -403,6 +482,20 @@ func TestConnectorFetchStreamRejectsRepeatedCursor(t *testing.T) {
 	}
 }
 
+func TestConnectorFetchStreamRejectsOversizedCursor(t *testing.T) {
+	fake := &fakeAPI{searchFn: func(searchRequest) (searchPage, error) {
+		return searchPage{HasNextPage: true, NextCursor: strings.Repeat("x", maxPageCursorBytes+1)}, nil
+	}}
+	connector := connectorWith(fake, time.Now().UTC())
+
+	_, err := connector.FetchStream(
+		context.Background(), testConfig("query"), nil, &recordingHandler{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "oversized cursor") {
+		t.Fatalf("FetchStream() error = %v", err)
+	}
+}
+
 func TestConnectorFetchStreamPropagatesHandlerErrors(t *testing.T) {
 	fake := &fakeAPI{searchFn: func(searchRequest) (searchPage, error) {
 		return searchPage{Tweets: []tweet{{ID: "1"}}}, nil
@@ -413,6 +506,21 @@ func TestConnectorFetchStreamPropagatesHandlerErrors(t *testing.T) {
 
 	_, err := connector.FetchStream(context.Background(), testConfig("query"), nil, handler)
 	if !errors.Is(err, emitErr) {
+		t.Fatalf("FetchStream() error = %v", err)
+	}
+}
+
+func TestConnectorFetchStreamPropagatesCheckpointErrors(t *testing.T) {
+	fake := &fakeAPI{searchFn: func(searchRequest) (searchPage, error) {
+		return searchPage{}, nil
+	}}
+	checkpointErr := errors.New("checkpoint failed")
+	handler := &recordingHandler{checkpointErr: checkpointErr}
+
+	_, err := connectorWith(fake, time.Now().UTC()).FetchStream(
+		context.Background(), testConfig("first\nsecond"), nil, handler,
+	)
+	if !errors.Is(err, checkpointErr) {
 		t.Fatalf("FetchStream() error = %v", err)
 	}
 }

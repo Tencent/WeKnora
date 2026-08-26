@@ -138,47 +138,39 @@ func (c *Connector) fetch(
 		seen[id] = struct{}{}
 	}
 
-	for queryIndex := state.QueryIndex; queryIndex < len(queries); queryIndex++ {
-		query := queries[queryIndex]
-		pageCursor := ""
-		resultsFetched := 0
-		pagesFetched := 0
-		if state.InProgress && queryIndex == state.QueryIndex && state.Query == query {
-			pageCursor = state.PageCursor
-			resultsFetched = state.ResultsFetched
-			pagesFetched = state.PagesFetched
-		}
-
-		for resultsFetched < cfg.ResultsPerQuery {
-			remaining := cfg.ResultsPerQuery - resultsFetched
+queriesLoop:
+	for len(state.PendingQueries) > 0 {
+		current := state.PendingQueries[0]
+		for state.ResultsFetched < cfg.ResultsPerQuery {
+			remaining := cfg.ResultsPerQuery - state.ResultsFetched
 			page, err := client.search(ctx, searchRequest{
-				Query:     query,
-				Cursor:    pageCursor,
+				Query:     current.Query,
+				Cursor:    current.PageCursor,
 				SinceTime: state.SinceTime,
 				UntilTime: state.StartedAt,
 				Limit:     remaining,
 			})
 			if err != nil {
-				return nil, fmt.Errorf("query %q: %w", query, err)
+				return nil, fmt.Errorf("query %q: %w", current.Query, err)
 			}
 			if len(page.Tweets) > remaining {
-				return nil, fmt.Errorf("query %q returned more posts than requested", query)
+				return nil, fmt.Errorf("query %q returned more posts than requested", current.Query)
 			}
-			pagesFetched++
+			state.PagesFetched++
 
 			for _, post := range page.Tweets {
-				if resultsFetched >= cfg.ResultsPerQuery {
+				if state.ResultsFetched >= cfg.ResultsPerQuery {
 					break
 				}
 				id := strings.TrimSpace(post.ID)
 				if !validPostID(id) {
-					return nil, fmt.Errorf("query %q returned a post with an invalid id", query)
+					return nil, fmt.Errorf("query %q returned a post with an invalid id", current.Query)
 				}
-				resultsFetched++
+				state.ResultsFetched++
 				if _, duplicate := seen[id]; duplicate {
 					continue
 				}
-				item := c.postItem(post, query, state.StartedAt)
+				item := c.postItem(post, current.Query, state.StartedAt)
 				if err := handler.Emit(ctx, item); err != nil {
 					return nil, err
 				}
@@ -186,49 +178,62 @@ func (c *Connector) fetch(
 			}
 
 			if !page.hasMore() {
-				break
+				state.PendingQueries = state.PendingQueries[1:]
+				state.ResultsFetched = 0
+				state.PagesFetched = 0
+				cursor, err := checkpointQueryTransition(ctx, &state, handler)
+				if err != nil {
+					return nil, err
+				}
+				if cursor != nil {
+					return cursor, nil
+				}
+				continue queriesLoop
 			}
-			nextCursor, err := validatedNextCursor(query, pageCursor, page)
+			nextCursor, err := validatedNextCursor(current.Query, current.PageCursor, page)
 			if err != nil {
 				return nil, err
 			}
-			if resultsFetched >= cfg.ResultsPerQuery || pagesFetched >= maxPagesPerQuery {
-				continuation := state
-				continuation.QueryIndex = queryIndex
-				continuation.Query = query
-				continuation.PageCursor = nextCursor
-				continuation.ResultsFetched = 0
-				continuation.PagesFetched = 0
-				cursor := connectorCursor(continuation, false)
-				if err := handler.Checkpoint(ctx, cursor); err != nil {
+			state.PendingQueries[0].PageCursor = nextCursor
+			if state.ResultsFetched >= cfg.ResultsPerQuery || state.PagesFetched >= maxPagesPerQuery {
+				state.DeferredQueries = append(state.DeferredQueries, state.PendingQueries[0])
+				state.PendingQueries = state.PendingQueries[1:]
+				state.ResultsFetched = 0
+				state.PagesFetched = 0
+				cursor, err := checkpointQueryTransition(ctx, &state, handler)
+				if err != nil {
 					return nil, err
 				}
-				return cursor, nil
+				if cursor != nil {
+					return cursor, nil
+				}
+				continue queriesLoop
 			}
-			pageCursor = nextCursor
-			checkpoint := state
-			checkpoint.QueryIndex = queryIndex
-			checkpoint.Query = query
-			checkpoint.PageCursor = pageCursor
-			checkpoint.ResultsFetched = resultsFetched
-			checkpoint.PagesFetched = pagesFetched
-			if err := handler.Checkpoint(ctx, connectorCursor(checkpoint, false)); err != nil {
+			if err := handler.Checkpoint(ctx, connectorCursor(state, false)); err != nil {
 				return nil, err
 			}
-		}
-
-		checkpoint := state
-		checkpoint.QueryIndex = queryIndex + 1
-		checkpoint.Query = ""
-		checkpoint.PageCursor = ""
-		checkpoint.ResultsFetched = 0
-		checkpoint.PagesFetched = 0
-		if err := handler.Checkpoint(ctx, connectorCursor(checkpoint, false)); err != nil {
-			return nil, err
+			current.PageCursor = nextCursor
 		}
 	}
 
 	return connectorCursor(state, true), nil
+}
+
+func checkpointQueryTransition(
+	ctx context.Context,
+	state *cursorState,
+	handler datasource.StreamHandler,
+) (*types.SyncCursor, error) {
+	if len(state.PendingQueries) == 0 {
+		if len(state.DeferredQueries) == 0 {
+			return connectorCursor(*state, true), nil
+		}
+		state.PendingQueries = state.DeferredQueries
+		state.DeferredQueries = nil
+		cursor := connectorCursor(*state, false)
+		return cursor, handler.Checkpoint(ctx, cursor)
+	}
+	return nil, handler.Checkpoint(ctx, connectorCursor(*state, false))
 }
 
 func rememberPostID(state *cursorState, seen map[string]struct{}, id string, limit int) {
@@ -251,6 +256,9 @@ func validatedNextCursor(query string, current string, page searchPage) (string,
 	}
 	if next == current {
 		return "", fmt.Errorf("query %q repeated its cursor", query)
+	}
+	if len(next) > maxPageCursorBytes {
+		return "", fmt.Errorf("query %q returned an oversized cursor", query)
 	}
 	return next, nil
 }
@@ -279,6 +287,7 @@ func (c *Connector) startState(
 		StartedAt:      now,
 		PreviousSyncAt: previous,
 		SinceTime:      since,
+		PendingQueries: queryQueue(queries),
 		QueryListHash:  queryListHash(queries),
 	}
 }

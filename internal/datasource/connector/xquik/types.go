@@ -21,6 +21,7 @@ const (
 	maxResultsPerQuery     = 1000
 	maxQueries             = 20
 	maxQueryRunes          = 512
+	maxPageCursorBytes     = 4096
 	maxPersistedPostIDs    = maxQueries * maxResultsPerQuery
 	syncOverlap            = 5 * time.Minute
 )
@@ -304,52 +305,78 @@ type searchRequest struct {
 	Limit     int
 }
 
+type queryCursorState struct {
+	Query      string `json:"query"`
+	PageCursor string `json:"page_cursor,omitempty"`
+}
+
 type cursorState struct {
-	InProgress     bool      `json:"in_progress"`
-	StartedAt      time.Time `json:"started_at"`
-	PreviousSyncAt time.Time `json:"previous_sync_at,omitempty"`
-	SinceTime      time.Time `json:"since_time,omitempty"`
-	QueryIndex     int       `json:"query_index,omitempty"`
-	Query          string    `json:"query,omitempty"`
-	PageCursor     string    `json:"page_cursor,omitempty"`
-	ResultsFetched int       `json:"results_fetched,omitempty"`
-	PagesFetched   int       `json:"pages_fetched,omitempty"`
-	SeenPostIDs    []string  `json:"seen_post_ids,omitempty"`
-	SeenPostOffset int       `json:"seen_post_offset,omitempty"`
-	QueryListHash  string    `json:"query_list_hash"`
+	InProgress      bool               `json:"in_progress"`
+	StartedAt       time.Time          `json:"started_at"`
+	PreviousSyncAt  time.Time          `json:"previous_sync_at,omitempty"`
+	SinceTime       time.Time          `json:"since_time,omitempty"`
+	PendingQueries  []queryCursorState `json:"pending_queries,omitempty"`
+	DeferredQueries []queryCursorState `json:"deferred_queries,omitempty"`
+	ResultsFetched  int                `json:"results_fetched,omitempty"`
+	PagesFetched    int                `json:"pages_fetched,omitempty"`
+	SeenPostIDs     []string           `json:"seen_post_ids,omitempty"`
+	SeenPostOffset  int                `json:"seen_post_offset,omitempty"`
+	QueryListHash   string             `json:"query_list_hash"`
 }
 
 func (s cursorState) canResume(queries []string, resultsPerQuery int) bool {
-	if !s.InProgress || s.StartedAt.IsZero() || s.QueryIndex < 0 || s.QueryIndex > len(queries) {
+	if !s.InProgress || s.StartedAt.IsZero() || len(s.PendingQueries) == 0 ||
+		s.QueryListHash != queryListHash(queries) {
 		return false
 	}
-	if s.QueryListHash != queryListHash(queries) {
-		return false
-	}
-	if s.ResultsFetched < 0 || s.ResultsFetched > resultsPerQuery ||
+	if s.ResultsFetched < 0 || s.ResultsFetched >= resultsPerQuery ||
 		s.PagesFetched < 0 || s.PagesFetched >= maxPagesPerQuery ||
+		((s.ResultsFetched > 0 || s.PagesFetched > 0) && s.PendingQueries[0].PageCursor == "") ||
 		len(s.SeenPostIDs) > maxPersistedPostIDs || s.SeenPostOffset < 0 ||
 		(len(s.SeenPostIDs) < maxPersistedPostIDs && s.SeenPostOffset != 0) ||
 		(len(s.SeenPostIDs) == maxPersistedPostIDs && s.SeenPostOffset >= maxPersistedPostIDs) {
 		return false
 	}
-	seen := make(map[string]struct{}, len(s.SeenPostIDs))
+	allowed := make(map[string]struct{}, len(queries))
+	for _, query := range queries {
+		allowed[query] = struct{}{}
+	}
+	seenQueries := make(map[string]struct{}, len(queries))
+	validQueue := func(queue []queryCursorState, requireCursor bool) bool {
+		for _, entry := range queue {
+			if _, ok := allowed[entry.Query]; !ok || len(entry.PageCursor) > maxPageCursorBytes ||
+				(requireCursor && entry.PageCursor == "") {
+				return false
+			}
+			if _, duplicate := seenQueries[entry.Query]; duplicate {
+				return false
+			}
+			seenQueries[entry.Query] = struct{}{}
+		}
+		return true
+	}
+	if !validQueue(s.PendingQueries, false) || !validQueue(s.DeferredQueries, true) {
+		return false
+	}
+	seenPosts := make(map[string]struct{}, len(s.SeenPostIDs))
 	for _, id := range s.SeenPostIDs {
 		if !validPostID(id) {
 			return false
 		}
-		if _, duplicate := seen[id]; duplicate {
+		if _, duplicate := seenPosts[id]; duplicate {
 			return false
 		}
-		seen[id] = struct{}{}
+		seenPosts[id] = struct{}{}
 	}
-	if s.QueryIndex == len(queries) {
-		return s.Query == "" && s.PageCursor == "" && s.ResultsFetched == 0 && s.PagesFetched == 0
+	return true
+}
+
+func queryQueue(queries []string) []queryCursorState {
+	queue := make([]queryCursorState, len(queries))
+	for index, query := range queries {
+		queue[index].Query = query
 	}
-	if s.Query == "" {
-		return s.PageCursor == "" && s.ResultsFetched == 0 && s.PagesFetched == 0
-	}
-	return s.Query == queries[s.QueryIndex] && s.PageCursor != ""
+	return queue
 }
 
 func queryListHash(queries []string) string {
@@ -376,9 +403,8 @@ func decodeCursor(cursor *types.SyncCursor) cursorState {
 func connectorCursor(state cursorState, complete bool) *types.SyncCursor {
 	state.InProgress = !complete
 	if complete {
-		state.QueryIndex = 0
-		state.Query = ""
-		state.PageCursor = ""
+		state.PendingQueries = nil
+		state.DeferredQueries = nil
 		state.ResultsFetched = 0
 		state.PagesFetched = 0
 		state.SeenPostIDs = nil
