@@ -48,7 +48,7 @@ export function useStream() {
     const apiUrl = getApiBaseUrl();
     
     const embedToken = params.embed_token;
-    const token = embedToken || localStorage.getItem('weknora_token');
+    const token = embedToken || localStorage.getItem('gridora_token');
     if (!token) {
       error.value = i18n.global.t('error.tokenNotFound');
       stopStream();
@@ -57,12 +57,12 @@ export function useStream() {
 
     // 跨空间访问请求头：只要 setSelectedTenant 写过激活空间，就附
     // X-Tenant-ID。早期版本会 short-circuit "selectedTenantId ===
-    // defaultTenantId 时不附" 来减少 header 体积，但任何把 weknora_tenant
+    // defaultTenantId 时不附" 来减少 header 体积，但任何把 gridora_tenant
     // 写成激活空间的代码（OIDC 同步 / UserMenu loadUserInfo / router
     // hydrate）都会让两者相等，使得后续流式请求悄悄丢 header、落到
     // home 空间上，导致 SSE 接口返回 404。直接附即可——后端
     // IsTenantAccessible 也允许 header 指向自家空间。
-    const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
+    const selectedTenantId = localStorage.getItem('gridora_selected_tenant_id');
     const tenantIdHeader: string | null = selectedTenantId || null;
 
     // TTFB instrumentation: record the moment we kick off the request so

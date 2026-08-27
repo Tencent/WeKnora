@@ -28,7 +28,7 @@ export function navigateAfterTenantSwitch(): void {
 // 切换成功后的 toast 跨 hard reload 传递：调用方在 reload 前把信息塞进
 // sessionStorage，App.vue 启动时 consume 一次再弹出。直接在 reload 前调
 // NotifyPlugin 会被刷掉，根本来不及看清。
-const PENDING_TOAST_KEY = 'weknora_pending_tenant_switch_toast'
+const PENDING_TOAST_KEY = 'gridora_pending_tenant_switch_toast'
 
 export interface PendingTenantSwitchToast {
   name: string

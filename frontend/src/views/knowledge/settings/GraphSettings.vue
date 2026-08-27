@@ -588,7 +588,7 @@ const loadSystemInfo = async (force = false) => {
 
 const graphGuideUrl =
   import.meta.env.VITE_KG_GUIDE_URL ||
-  'https://github.com/Tencent/WeKnora/blob/main/docs/KnowledgeGraph.md'
+  '#'
 
 // Open guide documentation to show how to enable graph database
 const handleOpenGraphGuide = () => {

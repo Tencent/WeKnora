@@ -24,7 +24,7 @@ test('defaultThinkingControl matches backend provider adapters', () => {
     ['siliconflow', 'qwen3-8b', 'none'],
     ['hunyuan', 'hunyuan-turbo', 'none'],
     ['moonshot', 'moonshot-v1-8k', 'none'],
-    ['weknoracloud', 'anything', 'none'],
+    ['gridoracloud', 'anything', 'none'],
   ]
   for (const [provider, model, want] of cases) {
     assert.equal(

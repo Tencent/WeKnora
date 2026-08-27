@@ -29,7 +29,7 @@
     <div v-for="field in fields" :key="field.key" class="credential-row">
       <!--
         Per-field label, rendered only when there is more than one credential
-        (e.g. WeKnora Cloud's api_key + app_secret) so a single-field card
+        (e.g. GRIDORA Cloud's api_key + app_secret) so a single-field card
         doesn't double up with the parent's outer .form-label. Single-field
         consumers (ModelEditorDialog API key, WebSearch provider api_key,
         McpService api_key) keep showing the parent label only.

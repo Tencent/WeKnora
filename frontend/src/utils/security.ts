@@ -386,10 +386,10 @@ const protectedFileCacheState = (() => {
   });
   if (typeof window === 'undefined') return fresh();
   const scope = window as typeof window & {
-    __weknoraProtectedFileCacheV1__?: ProtectedFileCacheState;
+    __gridoraProtectedFileCacheV1__?: ProtectedFileCacheState;
   };
-  scope.__weknoraProtectedFileCacheV1__ ||= fresh();
-  return scope.__weknoraProtectedFileCacheV1__;
+  scope.__gridoraProtectedFileCacheV1__ ||= fresh();
+  return scope.__gridoraProtectedFileCacheV1__;
 })();
 
 const protectedFileBlobCache = protectedFileCacheState.blobByRequest;

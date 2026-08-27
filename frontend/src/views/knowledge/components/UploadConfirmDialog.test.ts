@@ -62,7 +62,7 @@ test('calls out directory uploads via relative paths in the file list', () => {
 })
 
 test('routes global knowledge file drops through the upload confirmation flow', () => {
-  assert.match(platform, /weknora:knowledge-file-drop/)
+  assert.match(platform, /gridora:knowledge-file-drop/)
   assert.match(knowledgeBase, /handleKnowledgeFileDrop/)
   assert.match(knowledgeBase, /handleUploadSourceFiles\(files\)/)
 })

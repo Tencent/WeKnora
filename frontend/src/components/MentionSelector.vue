@@ -761,7 +761,7 @@ const scrollToItem = (index: number) => {
 }
 
 .mention-item.active .faq-icon {
-  color: var(--weknora-faq-color, #0052d9);
+  color: var(--gridora-faq-color, #0052d9);
 }
 
 .item-main {
@@ -880,7 +880,7 @@ const scrollToItem = (index: number) => {
 .mention-detail-content .detail-type-badge.faq {
   border-color: rgba(0, 82, 217, 0.16);
   background: rgba(0, 82, 217, 0.08);
-  color: var(--weknora-faq-color, #0052d9);
+  color: var(--gridora-faq-color, #0052d9);
 }
 .mention-detail-content .detail-desc {
   margin: 0 0 8px;

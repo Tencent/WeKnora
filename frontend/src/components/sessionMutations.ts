@@ -6,7 +6,7 @@ import {
   updateSession,
 } from '@/api/chat'
 
-export const SESSION_MUTATION_EVENT = 'weknora:session-mutation'
+export const SESSION_MUTATION_EVENT = 'gridora:session-mutation'
 
 export interface SessionMutationPatch {
   title?: string

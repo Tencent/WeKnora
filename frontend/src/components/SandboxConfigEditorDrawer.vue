@@ -208,19 +208,19 @@
 
       <section v-if="currentStepKey === 'connection' && !isRemoteBackend" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.sectionRuntimeEnvironment') }}</h4>
-        <div class="weknora-template-card is-active">
+        <div class="gridora-template-card is-active">
           <SandboxBackendBadge type="docker" />
-          <div class="weknora-template-card__content">
-            <div class="weknora-template-card__title-row">
-              <span class="weknora-template-card__title">{{ $t('settings.sandbox.weknoraDockerImage') }}</span>
+          <div class="gridora-template-card__content">
+            <div class="gridora-template-card__title-row">
+              <span class="gridora-template-card__title">{{ $t('settings.sandbox.gridoraDockerImage') }}</span>
               <t-tag theme="primary" variant="light" size="small">{{ $t('settings.sandbox.recommendedTag') }}</t-tag>
             </div>
-            <p>{{ $t('settings.sandbox.weknoraDockerImageHint') }}</p>
+            <p>{{ $t('settings.sandbox.gridoraDockerImageHint') }}</p>
           </div>
         </div>
         <t-form-item :label="requiredLabel('dockerImage')" :status="fieldStatus('image')"
           :tips="fieldTip('image')">
-          <t-input v-model="docker.image" placeholder="wechatopenai/weknora-sandbox:latest"
+          <t-input v-model="docker.image" placeholder="wechatopenai/gridora-sandbox:latest"
             :disabled="retargetFrozen" @input="onFieldInput('image')" />
           <p v-if="retargetFrozen" class="section-help section-help--field">
             {{ hasSkillSnapshot
@@ -234,7 +234,7 @@
         </t-form-item>
         <t-form-item :label="$t('settings.sandbox.dockerTlsCertPath')"
           :help="$t('settings.sandbox.dockerTlsCertPathHelp')">
-          <t-input v-model="docker.tls_cert_path" placeholder="/etc/weknora/docker-certs"
+          <t-input v-model="docker.tls_cert_path" placeholder="/etc/gridora/docker-certs"
             :disabled="retargetFrozen" @input="onFieldInput('tls_cert_path')" />
         </t-form-item>
       </section>
@@ -259,7 +259,7 @@
           <div v-if="canCreateStandard" class="template-row template-row--offer">
             <div class="template-row__main">
               <div class="template-row__head">
-                <span class="template-row__title">{{ $t('settings.sandbox.weknoraStandardTemplate') }}</span>
+                <span class="template-row__title">{{ $t('settings.sandbox.gridoraStandardTemplate') }}</span>
                 <t-tag theme="primary" variant="outline" size="small">
                   {{ $t('settings.sandbox.recommendedTag') }}
                 </t-tag>
@@ -370,7 +370,7 @@
           </template>
           <!--
             Docker has no provider-side timeout at all: an abandoned container
-            keeps its memory and CPU share on the daemon host until WeKnora
+            keeps its memory and CPU share on the daemon host until GRIDORA
             reclaims it, so the idle TTL and the resource caps are the only
             things bounding what one workspace can hold.
           -->
@@ -532,7 +532,7 @@ const { t } = useI18n()
 const secretPlaceholder = '***'
 const isMaskedSecret = (value?: string) => value === secretPlaceholder
 
-const clusterGuideUrl = 'https://github.com/Tencent/WeKnora/blob/main/docs/sandbox-cluster.md'
+const clusterGuideUrl = '#'
 const e2bApiKeysUrl = 'https://e2b.dev/dashboard?tab=keys'
 
 const backendOptions = [...NAMED_SANDBOX_BACKEND_TYPES]
@@ -771,7 +771,7 @@ function reset() {
   Object.assign(docker, cfg.docker || {})
   if (!Array.isArray(cube.dns_servers)) cube.dns_servers = []
   if (backend.value === 'docker' && !docker.image) {
-    docker.image = 'wechatopenai/weknora-sandbox:latest'
+    docker.image = 'wechatopenai/gridora-sandbox:latest'
   }
   storedSecrets.cube = isMaskedSecret(cube.api_key)
   storedSecrets.e2b = isMaskedSecret(e2b.api_key)
@@ -802,7 +802,7 @@ function selectBackend(value: string) {
   if (backend.value === value) return
   backend.value = value
   if (value === 'docker' && !docker.image) {
-    docker.image = 'wechatopenai/weknora-sandbox:latest'
+    docker.image = 'wechatopenai/gridora-sandbox:latest'
   }
   onBackendChange()
 }
@@ -1451,7 +1451,7 @@ onUnmounted(stopTemplatePolling)
   }
 }
 
-.weknora-template-card {
+.gridora-template-card {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1466,7 +1466,7 @@ onUnmounted(stopTemplatePolling)
   }
 }
 
-.weknora-template-card__content {
+.gridora-template-card__content {
   flex: 1;
   min-width: 0;
 
@@ -1478,13 +1478,13 @@ onUnmounted(stopTemplatePolling)
   }
 }
 
-.weknora-template-card__title-row {
+.gridora-template-card__title-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.weknora-template-card__title {
+.gridora-template-card__title {
   font-size: 13px;
   font-weight: 600;
 }
@@ -1862,7 +1862,7 @@ onUnmounted(stopTemplatePolling)
 
 @media (max-width: 720px) {
   .form-grid--two,
-  .weknora-template-card {
+  .gridora-template-card {
     align-items: flex-start;
     flex-wrap: wrap;
   }

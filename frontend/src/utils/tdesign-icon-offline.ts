@@ -61,7 +61,7 @@ export function installTDesignIconOfflineGuard(): void {
     stub.setAttribute("src", src);
     // 非标准 MIME 类型会让浏览器跳过脚本的 fetch/执行阶段
     stub.setAttribute("type", "text/no-load");
-    stub.setAttribute("data-weknora-blocked-cdn", "tdesign-icons");
+    stub.setAttribute("data-gridora-blocked-cdn", "tdesign-icons");
     body.appendChild(stub);
   });
 
@@ -75,7 +75,7 @@ export function installTDesignIconOfflineGuard(): void {
     stub.setAttribute("href", href);
     // 不声明 rel="stylesheet"，浏览器不会发起样式表请求
     stub.setAttribute("rel", "preload-blocked");
-    stub.setAttribute("data-weknora-blocked-cdn", "tdesign-icons");
+    stub.setAttribute("data-gridora-blocked-cdn", "tdesign-icons");
     document.head.appendChild(stub);
   });
 }

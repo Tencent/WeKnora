@@ -198,7 +198,7 @@
           <h4 class="setting-drawer__section-title">{{ t('settings.storageBackend.advancedSection') }}</h4>
           <div class="form-item">
             <label class="form-label">{{ t('settings.storageBackend.pathPrefixLabel') }}</label>
-            <t-input v-model="form.config.path_prefix" :disabled="!!editing" placeholder="weknora/" clearable />
+            <t-input v-model="form.config.path_prefix" :disabled="!!editing" placeholder="gridora/" clearable />
           </div>
           <div v-if="form.provider === 'minio'" class="form-item">
             <div class="vision-toggle">

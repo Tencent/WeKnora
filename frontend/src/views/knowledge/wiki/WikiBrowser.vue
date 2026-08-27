@@ -1567,7 +1567,7 @@ function handleGraphDrawerClick(e: MouseEvent) {
 // that ambiguity by mounting exactly one scroller at a time.
 const activeTab = ref<string>('')
 type SidebarViewMode = 'tree' | 'list'
-const SIDEBAR_VIEW_MODE_KEY = 'weknora.wiki.sidebar.viewMode'
+const SIDEBAR_VIEW_MODE_KEY = 'gridora.wiki.sidebar.viewMode'
 function initialSidebarViewMode(): SidebarViewMode {
   try {
     return localStorage.getItem(SIDEBAR_VIEW_MODE_KEY) === 'list' ? 'list' : 'tree'

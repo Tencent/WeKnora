@@ -31,7 +31,7 @@ async function bootstrap() {
 
   // 全局错误处理：捕获未处理的组件错误，防止白屏
   app.config.errorHandler = (err, instance, info) => {
-    console.error("[WeKnora] Unhandled Vue error:", err, "\nComponent:", instance, "\nInfo:", info);
+    console.error("[GRIDORA] Unhandled Vue error:", err, "\nComponent:", instance, "\nInfo:", info);
   };
 
   app.use(TDesign);
@@ -41,7 +41,7 @@ async function bootstrap() {
   // Capabilities (can_create_tenant, auto_accept_invitation) are not cached
   // in localStorage — reconcile once before first paint when a session exists.
   const authStore = useAuthStore();
-  if (localStorage.getItem("weknora_token")) {
+  if (localStorage.getItem("gridora_token")) {
     try {
       await authStore.refreshFromAuthMe();
     } catch {

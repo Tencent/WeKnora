@@ -225,7 +225,7 @@ function asEmbedAttachments(value: unknown): EmbedAttachment[] | undefined {
   return Array.isArray(value) ? value as EmbedAttachment[] : undefined
 }
 
-const embedWebSearchStorageKey = () => `weknora-embed-web-search:${props.channelId}`
+const embedWebSearchStorageKey = () => `gridora-embed-web-search:${props.channelId}`
 
 const readStoredWebSearchEnabled = () => {
   if (typeof localStorage === 'undefined') return false

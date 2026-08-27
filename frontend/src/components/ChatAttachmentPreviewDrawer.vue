@@ -5,7 +5,7 @@ import { useChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentP
 
 const drawer = useChatAttachmentPreviewDrawer()
 
-const MAIN_DRAWER_WIDTH_KEY = 'weknora-chat-attachment-drawer-width'
+const MAIN_DRAWER_WIDTH_KEY = 'gridora-chat-attachment-drawer-width'
 const MAIN_DRAWER_DEFAULT_WIDTH = 654
 const MAIN_DRAWER_MIN_WIDTH = 480
 

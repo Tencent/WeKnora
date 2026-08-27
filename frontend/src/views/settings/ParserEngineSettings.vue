@@ -167,11 +167,11 @@
         </section>
 
         <!--
-          Section 2 — 状态信息（DocReader 连接 / WeKnoraCloud 凭证）
+          Section 2 — 状态信息（DocReader 连接 / GRIDORACloud 凭证）
           只有有内容时才渲染，避免空 section 空底部分隔线。
         -->
         <section
-          v-if="currentEngine.Name === 'builtin' || currentEngine.Name === 'weknoracloud'"
+          v-if="currentEngine.Name === 'builtin' || currentEngine.Name === 'gridoracloud'"
           class="setting-drawer__section"
         >
           <h4 class="setting-drawer__section-title">{{ $t('settings.parser.statusSection', '状态信息') }}</h4>
@@ -196,27 +196,27 @@
           </div>
 
           <!--
-            weknoracloud: 凭证状态 — 不再用大块卡片。已配置 / 加载中 / 未配置
+            gridoracloud: 凭证状态 — 不再用大块卡片。已配置 / 加载中 / 未配置
             统一用 inline alert：图标 + 一行文案 + 行尾跳转 link，体量
             匹配"一条信息"该有的样子。
           -->
-          <template v-if="currentEngine.Name === 'weknoracloud'">
+          <template v-if="currentEngine.Name === 'gridoracloud'">
             <div v-if="wkcState === 'configured'" class="inline-alert inline-alert--ok">
               <t-icon name="check-circle-filled" class="inline-alert__icon" />
-              <span>{{ $t('settings.weknoraCloud.credentialConfigured') }}</span>
+              <span>{{ $t('settings.gridoraCloud.credentialConfigured') }}</span>
             </div>
             <div v-else-if="wkcState === 'loading'" class="inline-alert">
               <t-icon name="loading" class="inline-alert__icon spinning" />
-              <span>{{ $t('settings.weknoraCloud.checkingStatus') }}</span>
+              <span>{{ $t('settings.gridoraCloud.checkingStatus') }}</span>
             </div>
             <div v-else class="inline-alert inline-alert--warn">
               <t-icon name="error-circle-filled" class="inline-alert__icon" />
               <span class="inline-alert__text">
-                <span v-if="wkcState === 'expired'">{{ $t('settings.weknoraCloud.credentialExpired') }}</span>
-                <span v-else>{{ $t('settings.weknoraCloud.unconfigured') }}</span>
+                <span v-if="wkcState === 'expired'">{{ $t('settings.gridoraCloud.credentialExpired') }}</span>
+                <span v-else>{{ $t('settings.gridoraCloud.unconfigured') }}</span>
               </span>
               <a class="inline-alert__action" @click="goToWkcSettings">
-                {{ $t('settings.weknoraCloud.goToSettings') }}
+                {{ $t('settings.gridoraCloud.goToSettings') }}
                 <t-icon name="chevron-right" />
               </a>
             </div>
@@ -394,7 +394,7 @@ import {
   type ParserEngineInfo,
   type ParserEngineConfig,
 } from '@/api/system'
-import { getWeKnoraCloudStatus } from '@/api/model'
+import { getGRIDORACloudStatus } from '@/api/model'
 
 const { t } = useI18n()
 const uiStore = useUIStore()
@@ -404,7 +404,7 @@ const CONFIGURABLE_ENGINES = new Set(['mineru', 'mineru_cloud', 'paddleocr_vl', 
 
 /** 各解析引擎的项目/官方文档地址 */
 const ENGINE_DOC_LINKS: Record<string, string> = {
-  weknoracloud: 'https://developers.weixin.qq.com/doc/aispeech/knowledge/atomic_capability/atomic_interface.html',
+  gridoracloud: 'https://developers.weixin.qq.com/doc/aispeech/knowledge/atomic_capability/atomic_interface.html',
   markitdown: 'https://github.com/microsoft/markitdown',
   mineru: 'https://github.com/opendatalab/MinerU',
   mineru_cloud: 'https://mineru.net/apiManage/docs',
@@ -476,7 +476,7 @@ const needsTestButton = computed(() => {
 /** 固定展示顺序，未列出的引擎排在末尾按名称排序 */
 const ENGINE_ORDER: Record<string, number> = {
   builtin: 0,
-  weknoracloud: 1,
+  gridoracloud: 1,
   simple: 2,
   anydoc: 3,
   markitdown: 4,
@@ -688,13 +688,13 @@ async function onSave() {
   }
 }
 
-// ---- WeKnoraCloud 凭证状态 ----
+// ---- GRIDORACloud 凭证状态 ----
 const wkcState = ref<'loading' | 'unconfigured' | 'configured' | 'expired'>('loading')
 
 async function checkWkcStatus() {
   wkcState.value = 'loading'
   try {
-    const status = await getWeKnoraCloudStatus()
+    const status = await getGRIDORACloudStatus()
     if (status.needs_reinit) {
       wkcState.value = 'expired'
     } else if (status.has_models) {
@@ -712,7 +712,7 @@ async function goToWkcSettings() {
     uiStore.closeSettings()
     await nextTick()
   }
-  uiStore.openSettings('weknoracloud')
+  uiStore.openSettings('gridoracloud')
 }
 
 onMounted(loadAll)
@@ -820,7 +820,7 @@ onMounted(loadAll)
 
 // 解析引擎徽章配色 —— 内置/官方系绿，外部工具按性质各取一色。
 .engine-card--builtin .engine-card__badge,
-.engine-card--weknoracloud .engine-card__badge {
+.engine-card--gridoracloud .engine-card__badge {
   background: rgba(7, 192, 95, 0.12);
   color: #07C05F;
 }
@@ -916,7 +916,7 @@ onMounted(loadAll)
 }
 
 // ---- 抽屉内容 — 与 ModelEditorDialog 同款约定 ----
-// .form-item / .form-label / .form-desc / .weknoracloud-hint / .api-test
+// .form-item / .form-label / .form-desc / .gridoracloud-hint / .api-test
 // 参照 frontend/src/components/ModelEditorDialog.vue 的命名与字号/间距
 .form-item {
   margin-bottom: 0;
@@ -1014,7 +1014,7 @@ onMounted(loadAll)
   letter-spacing: 0.02em;
 }
 
-// ---- Inline alert（替代之前的 .weknoracloud-hint 卡片） ----
+// ---- Inline alert（替代之前的 .gridoracloud-hint 卡片） ----
 // 一行内表达 "状态信号 + 一句话 + 跳转 link"，无外框/无 3px 左边，
 // 视觉重量与一行文字相当，section 内不会再被一个独立卡片打断。
 .inline-alert {
@@ -1169,7 +1169,7 @@ onMounted(loadAll)
 -->
 <style lang="less">
 .parser-engine-drawer--builtin .setting-drawer__header-icon,
-.parser-engine-drawer--weknoracloud .setting-drawer__header-icon {
+.parser-engine-drawer--gridoracloud .setting-drawer__header-icon {
   background: rgba(7, 192, 95, 0.12);
   color: #07C05F;
 }

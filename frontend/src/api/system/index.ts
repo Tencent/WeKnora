@@ -924,8 +924,8 @@ export function getSandboxConfigInventory(id: string): Promise<{ data: SandboxIn
 
 /**
  * Fetch templates using the connection currently entered in the drawer.
- * `ensure_standard` starts a provider-side build when no WeKnora template is
- * present. `replace_standard` rebuilds the WeKnora template so a new spec
+ * `ensure_standard` starts a provider-side build when no GRIDORA template is
+ * present. `replace_standard` rebuilds the GRIDORA template so a new spec
  * (DNS, image) can take effect; it requires `config_id`. The returned
  * building item can be polled through the same endpoint.
  */

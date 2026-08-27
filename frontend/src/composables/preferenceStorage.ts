@@ -1,14 +1,14 @@
 /**
  * Shared localStorage utilities for per-user UI preferences (theme, fonts).
  *
- * Storage layout: WeKnora_${userId}_${suffix}, where userId is the active
+ * Storage layout: GRIDORA_${userId}_${suffix}, where userId is the active
  * user's id or "anon" before login. Read paths are intentionally narrow —
  * no cross-namespace fallbacks — so one user's preferences cannot bleed
  * into another user's session.
  *
  * One-shot migration adopts pre-existing values into the current user's
  * namespace at login time:
- *   - Legacy un-namespaced keys (WeKnora_${suffix}) from earlier branch
+ *   - Legacy un-namespaced keys (GRIDORA_${suffix}) from earlier branch
  *     versions are inherited and removed.
  *   - The "anon" namespace (used while no user is logged in) is also
  *     adopted and cleared, so the next user to log in cannot inherit it.
@@ -23,7 +23,7 @@ const PREFERENCE_SUFFIXES = [
 
 export function readUserId(): string {
   try {
-    const raw = localStorage.getItem('weknora_user')
+    const raw = localStorage.getItem('gridora_user')
     if (!raw) return 'anon'
     const parsed = JSON.parse(raw)
     return parsed?.id ? String(parsed.id) : 'anon'
@@ -46,7 +46,7 @@ export function safeSetItem(key: string, value: string): void {
   } catch (err) {
     // Quota exceeded, disabled storage, private mode — surface in DevTools
     // so the issue is at least diagnosable, but don't break the UI.
-    console.warn(`[WeKnora] failed to persist preference "${key}":`, err)
+    console.warn(`[GRIDORA] failed to persist preference "${key}":`, err)
   }
 }
 
@@ -59,7 +59,7 @@ export function safeRemoveItem(key: string): void {
 }
 
 export function userKey(suffix: string): string {
-  return `WeKnora_${readUserId()}_${suffix}`
+  return `GRIDORA_${readUserId()}_${suffix}`
 }
 
 export function loadPreference(suffix: string): string | null {
@@ -85,11 +85,11 @@ export function migratePreferencesIntoUser(): void {
   migratedForUser = userId
 
   for (const suffix of PREFERENCE_SUFFIXES) {
-    const target = `WeKnora_${userId}_${suffix}`
+    const target = `GRIDORA_${userId}_${suffix}`
     const targetExists = safeGetItem(target) !== null
 
-    const anonKey = `WeKnora_anon_${suffix}`
-    const legacyKey = `WeKnora_${suffix}`
+    const anonKey = `GRIDORA_anon_${suffix}`
+    const legacyKey = `GRIDORA_${suffix}`
 
     if (!targetExists) {
       const anonValue = safeGetItem(anonKey)

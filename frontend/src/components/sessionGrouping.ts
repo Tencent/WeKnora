@@ -2,7 +2,7 @@
 
 export type SessionGroupMode = 'none' | 'date'
 
-export const SESSION_GROUP_MODE_STORAGE_KEY = 'weknora:session-group-mode'
+export const SESSION_GROUP_MODE_STORAGE_KEY = 'gridora:session-group-mode'
 export const DEFAULT_SESSION_GROUP_MODE: SessionGroupMode = 'none'
 
 /** Mirrors backend types.EmbedSessionMarkerPrefix */

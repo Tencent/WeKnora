@@ -246,13 +246,13 @@ function formatUptime(totalSeconds: number): string {
 }
 
 const troubleshootingDocsURL =
-  'https://github.com/Tencent/WeKnora/blob/main/docs/migration-troubleshooting.md'
+  '#'
 
 // Pre-fills a new issue with the current migration error so users don't have to
 // paste it manually. Body is intentionally minimal — the bug template will fill
 // in the rest. Encode aggressively to survive newlines / quotes.
 const reportIssueURL = computed(() => {
-  const base = 'https://github.com/Tencent/WeKnora/issues/new'
+  const base = '#'
   const params = new URLSearchParams({
     template: 'bug_report.yml',
     title: '[Bug]: Database migration failed at startup',
@@ -262,7 +262,7 @@ const reportIssueURL = computed(() => {
   if (errMsg) {
     const body = [
       '### Environment',
-      `- WeKnora version: ${systemInfo.value?.version || 'unknown'}`,
+      `- GRIDORA version: ${systemInfo.value?.version || 'unknown'}`,
       `- Commit: ${systemInfo.value?.commit_id || 'unknown'}`,
       `- Frontend version: ${frontendVersion} (${frontendCommit})`,
       `- DB version reported: ${systemInfo.value?.db_version || 'unknown'}`,

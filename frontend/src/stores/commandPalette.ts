@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { useAuthStore } from './auth'
 
-const RECENT_KEY_PREFIX = 'weknora_cmdk_recent'
+const RECENT_KEY_PREFIX = 'gridora_cmdk_recent'
 const RECENT_LIMIT = 4
 
 // recentKey scopes "recent searches" to the active (user, tenant) pair.

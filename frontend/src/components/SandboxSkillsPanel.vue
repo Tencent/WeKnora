@@ -396,7 +396,7 @@ const abortBySkill = new Map<string, AbortController>()
 let pollTimer: number | null = null
 
 const INSTALLER_AGENT_ID = 'builtin-skill-installer'
-const LAST_CHAT_MODEL_KEY = 'weknora_last_chat_model_id'
+const LAST_CHAT_MODEL_KEY = 'gridora_last_chat_model_id'
 
 const installerAgent = ref<CustomAgent | null>(null)
 const installerModelId = ref('')
@@ -609,8 +609,8 @@ function followProgress(skillId: string) {
   const controller = new AbortController()
   abortBySkill.set(skillId, controller)
 
-  const token = localStorage.getItem('weknora_token')
-  const tenantId = localStorage.getItem('weknora_selected_tenant_id')
+  const token = localStorage.getItem('gridora_token')
+  const tenantId = localStorage.getItem('gridora_selected_tenant_id')
   const url = `${getApiBaseUrl()}${configSkillInstallEventsUrl(configId, skillId)}`
 
   void fetchEventSource(url, {

@@ -127,7 +127,7 @@ const capabilityIcons: Record<(typeof capabilityKeys)[number], string> = {
   browse: 'view-list',
 }
 
-const installCommand = 'openclaw skills install @lyingbug/weknora'
+const installCommand = 'openclaw skills install @lyingbug/gridora'
 
 const envExample = computed(() => {
   const base = apiBaseUrlDisplay.value || 'https://your-server.com/api/v1'

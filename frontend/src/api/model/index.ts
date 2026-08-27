@@ -212,15 +212,15 @@ export async function deleteModelCredentialField(
   await del(`/api/v1/models/${id}/credentials/${field}`)
 }
 
-export interface InitializeWeKnoraCloudRequest {
+export interface InitializeGRIDORACloudRequest {
   app_id: string
   app_secret: string
 }
 
-// 仅保存 WeKnoraCloud 凭证，不自动创建模型
-export function saveWeKnoraCloudCredentials(data: InitializeWeKnoraCloudRequest): Promise<{ success: boolean; message: string }> {
+// 仅保存 GRIDORACloud 凭证，不自动创建模型
+export function saveGRIDORACloudCredentials(data: InitializeGRIDORACloudRequest): Promise<{ success: boolean; message: string }> {
   return new Promise((resolve, reject) => {
-    post('/api/v1/weknoracloud/credentials', data)
+    post('/api/v1/gridoracloud/credentials', data)
       .then((response: any) => {
         if (response.success) {
           resolve(response)
@@ -229,21 +229,21 @@ export function saveWeKnoraCloudCredentials(data: InitializeWeKnoraCloudRequest)
         }
       })
       .catch((error: any) => {
-        console.error('Failed to save WeKnoraCloud credentials:', error)
+        console.error('Failed to save GRIDORACloud credentials:', error)
         reject(error)
       })
   })
 }
 
-export interface WeKnoraCloudStatusResult {
+export interface GRIDORACloudStatusResult {
   has_models: boolean
   needs_reinit: boolean
   reason?: string
 }
 
-export function getWeKnoraCloudStatus(): Promise<WeKnoraCloudStatusResult> {
+export function getGRIDORACloudStatus(): Promise<GRIDORACloudStatusResult> {
   return new Promise((resolve, reject) => {
-    get('/api/v1/models/weknoracloud/status')
+    get('/api/v1/models/gridoracloud/status')
       .then((response: any) => {
         // status 接口直接返回对象，不包在 success/data 中
         if (response && typeof response.has_models === 'boolean') {

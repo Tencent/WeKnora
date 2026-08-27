@@ -60,10 +60,10 @@ export type WidgetPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top
 export const EMBED_SESSION_TOKEN_PREFIX = 'ems_'
 
 /** localStorage key prefix for persisted embed chat sessions (per channel). */
-export const EMBED_CHAT_SESSION_STORAGE_PREFIX = 'weknora-embed-session:'
+export const EMBED_CHAT_SESSION_STORAGE_PREFIX = 'gridora-embed-session:'
 
 /** localStorage key prefix for anonymous embed visitor ids (per channel). */
-export const EMBED_VISITOR_STORAGE_PREFIX = 'weknora-embed-visitor:'
+export const EMBED_VISITOR_STORAGE_PREFIX = 'gridora-embed-visitor:'
 
 export function embedVisitorStorageKey(channelId: string): string {
   return `${EMBED_VISITOR_STORAGE_PREFIX}${channelId}`
@@ -436,8 +436,8 @@ export async function getEmbedMessageList(
   )
 }
 
-const EMBED_MSG_SOURCE = 'weknora-embed'
-const EMBED_HOST_SOURCE = 'weknora-host'
+const EMBED_MSG_SOURCE = 'gridora-embed'
+const EMBED_HOST_SOURCE = 'gridora-host'
 
 // The exact parent origin, learned from the first trusted host message
 // (trust-on-first-use). Once known, every inbound/outbound message is pinned to
@@ -613,7 +613,7 @@ export function buildWidgetSnippet(
   const base = safeBaseUrl(opts?.baseUrl)
   const position = opts?.position || 'bottom-right'
   const attrs = [
-    `src="${escapeHtmlAttr(`${base}/weknora-widget.js`)}"`,
+    `src="${escapeHtmlAttr(`${base}/gridora-widget.js`)}"`,
     `data-channel="${escapeHtmlAttr(channelId)}"`,
     `data-token="${escapeHtmlAttr(token)}"`,
     `data-position="${escapeHtmlAttr(position)}"`,
@@ -625,7 +625,7 @@ export function buildWidgetSnippet(
 }
 
 /** Default placeholder for the integrator's own token-minting endpoint. */
-export const SECURE_TOKEN_ENDPOINT_PLACEHOLDER = 'https://your-backend.example.com/weknora/embed-token'
+export const SECURE_TOKEN_ENDPOINT_PLACEHOLDER = 'https://your-backend.example.com/gridora/embed-token'
 
 /**
  * Secure-mode widget snippet: the page references an endpoint on the
@@ -640,7 +640,7 @@ export function buildSecureWidgetSnippet(
   const position = opts?.position || 'bottom-right'
   const endpoint = opts?.tokenEndpoint || SECURE_TOKEN_ENDPOINT_PLACEHOLDER
   const attrs = [
-    `src="${escapeHtmlAttr(`${base}/weknora-widget.js`)}"`,
+    `src="${escapeHtmlAttr(`${base}/gridora-widget.js`)}"`,
     `data-channel="${escapeHtmlAttr(channelId)}"`,
     `data-token-endpoint="${escapeHtmlAttr(endpoint)}"`,
     `data-position="${escapeHtmlAttr(position)}"`,
@@ -660,7 +660,7 @@ export function buildSecureServerNodeExample(channelId: string, opts?: { baseUrl
   const exchangeUrl = `${base}/api/v1/embed/${channelId}/exchange`
   return [
     `// Node/Express — keep WEKNORA_PUBLISH_TOKEN only on the server (env var).`,
-    `app.get('/weknora/embed-token', async (req, res) => {`,
+    `app.get('/gridora/embed-token', async (req, res) => {`,
     `  // Only mint for logged-in visitors — e.g. session cookie or Bearer token.`,
     `  const auth = req.headers.authorization || ''`,
     `  const hasSession = Boolean(req.cookies?.session_id)`,

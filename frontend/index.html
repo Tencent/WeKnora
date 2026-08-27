@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>WeKnora</title>
+    <title>GRIDORA</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, minimal-ui">
     <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
@@ -9,15 +9,15 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="keywords" content="知识问答、微信对话开放平台、对话开放平台、对话平台、人工智能定制、人机对话、智能问答、人机交互、自然语言处理、自然语言理解、NLP、人工智能产品、人工智能开源、人工智能算法、语音助手"/>
-    <meta name="description" content="WeKnora是一款基于大语言模型的文档理解与语义检索框架，专为结构复杂、内容异构的文档场景而打造。"/>
+    <meta name="keywords" content="知识问答、电力智能体、电网调度、变电站巡检、电力规范文档、电力AI、人机对话、智能问答、人机交互、自然语言处理、NLP、人工智能产品、人工智能开源、语音助手"/>
+    <meta name="description" content="GRIDORA是面向电力行业的智能体平台(Grid Agent Platform)，基于大语言模型，专为电力业务规范检索与Agent智能编排而打造。"/>
     <link rel="shortcut icon" type="image/png" href="./public/favicon.ico"/>
     <link rel="apple-touch-icon" sizes="120x120" type="image/png" href="./public/favicon.ico"/>
 </head>
 <body>
 <script>
 (function(){
-  var t=localStorage.getItem('WeKnora_theme')||'light';
+  var t=localStorage.getItem('GRIDORA_theme')||'light';
   if(t==='system')t=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';
   document.documentElement.setAttribute('theme-mode',t);
   /* 与 theme.css 中 --td-bg-color-page 一致，避免样式加载后整页背景从 #fff 跳到 #eee 触发重绘闪动 */
@@ -44,8 +44,8 @@
 <script>
 (function(){
   try {
-    if (localStorage.getItem('weknora_lite_mode') !== 'true') return;
-    var saved = sessionStorage.getItem('weknora_lite_last_path');
+    if (localStorage.getItem('gridora_lite_mode') !== 'true') return;
+    var saved = sessionStorage.getItem('gridora_lite_last_path');
     if (!saved || saved.indexOf('/platform/') !== 0 || saved.indexOf('/platform/organizations') === 0) return;
     var path = window.location.pathname;
     if (path !== '/' && path !== '/platform' && path !== '/platform/knowledge-bases') return;
@@ -66,7 +66,7 @@
 <div id="app"></div>
 <script>
 (function(){
-  var t=localStorage.getItem('WeKnora_theme')||'light';
+  var t=localStorage.getItem('GRIDORA_theme')||'light';
   if(t==='system')t=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';
   var bg=t==='dark'?'#181818':'#eee';
   var el=document.getElementById('app');

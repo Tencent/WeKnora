@@ -181,7 +181,7 @@ export const useSettingsStore = defineStore("settings", {
     saveSettings(settings: Settings) {
       this.settings = { ...settings };
       // 保存到localStorage
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
 
     // 获取设置
@@ -207,25 +207,25 @@ export const useSettingsStore = defineStore("settings", {
     // 启用/禁用 Agent
     toggleAgent(enabled: boolean) {
       this.settings.isAgentEnabled = enabled;
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
     
     // 更新 Agent 配置
     updateAgentConfig(config: Partial<AgentConfig>) {
       this.settings.agentConfig = { ...this.settings.agentConfig, ...config };
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
 
     updateConversationModels(models: Partial<ConversationModels>) {
       const current = this.settings.conversationModels || defaultSettings.conversationModels;
       this.settings.conversationModels = { ...current, ...models };
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
     
     // 更新模型配置
     updateModelConfig(config: Partial<ModelConfig>) {
       this.settings.modelConfig = { ...this.settings.modelConfig, ...config };
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
     
     // 添加模型
@@ -242,7 +242,7 @@ export const useSettingsStore = defineStore("settings", {
       }
       models.push(model);
       this.settings.modelConfig[key] = models as any;
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
     
     // 更新模型
@@ -257,7 +257,7 @@ export const useSettingsStore = defineStore("settings", {
         }
         models[index] = { ...models[index], ...updates };
         this.settings.modelConfig[key] = models as any;
-        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+        localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
       }
     },
     
@@ -272,7 +272,7 @@ export const useSettingsStore = defineStore("settings", {
         models[0].isDefault = true;
       }
       this.settings.modelConfig[key] = models as any;
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
     
     // 设置默认模型
@@ -281,26 +281,26 @@ export const useSettingsStore = defineStore("settings", {
       const models = [...this.settings.modelConfig[key]] as ModelItem[];
       models.forEach(m => m.isDefault = (m.id === modelId));
       this.settings.modelConfig[key] = models as any;
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
     
     // 更新 Ollama 配置
     updateOllamaConfig(config: Partial<OllamaConfig>) {
       this.settings.ollamaConfig = { ...this.settings.ollamaConfig, ...config };
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
     
     // 选择知识库（替换整个列表）
     selectKnowledgeBases(kbIds: string[]) {
       this.settings.selectedKnowledgeBases = kbIds;
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
     
     // 添加单个知识库
     addKnowledgeBase(kbId: string) {
       if (!this.settings.selectedKnowledgeBases.includes(kbId)) {
         this.settings.selectedKnowledgeBases.push(kbId);
-        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+        localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
       }
     },
     
@@ -308,13 +308,13 @@ export const useSettingsStore = defineStore("settings", {
     removeKnowledgeBase(kbId: string) {
       this.settings.selectedKnowledgeBases = 
         this.settings.selectedKnowledgeBases.filter((id: string) => id !== kbId);
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
     
     // 清空知识库选择
     clearKnowledgeBases() {
       this.settings.selectedKnowledgeBases = [];
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
     
     // 获取选中的知识库列表
@@ -325,13 +325,13 @@ export const useSettingsStore = defineStore("settings", {
     // 启用/禁用网络搜索
     toggleWebSearch(enabled: boolean) {
       this.settings.webSearchEnabled = enabled;
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
 
     // 启用/禁用自动检查更新
     toggleAutoCheckUpdate(enabled: boolean) {
       this.settings.autoCheckUpdate = enabled;
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
 
     // File selection actions
@@ -339,7 +339,7 @@ export const useSettingsStore = defineStore("settings", {
       if (!this.settings.selectedFiles) this.settings.selectedFiles = [];
       if (!this.settings.selectedFiles.includes(fileId)) {
         this.settings.selectedFiles.push(fileId);
-        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+        localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
       }
     },
 
@@ -347,71 +347,71 @@ export const useSettingsStore = defineStore("settings", {
       if (!this.settings.selectedFiles) return;
       this.settings.selectedFiles = this.settings.selectedFiles.filter((id: string) => id !== fileId);
       if (this.settings.selectedFileKbMap) delete this.settings.selectedFileKbMap[fileId];
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
 
     clearFiles() {
       this.settings.selectedFiles = [];
       this.settings.selectedFileKbMap = {};
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
 
     addTag(tag: { id: string; name: string; kbId: string; kbName?: string }) {
       if (!this.settings.selectedTags) this.settings.selectedTags = [];
       if (!this.settings.selectedTags.some(t => t.id === tag.id && t.kbId === tag.kbId)) {
         this.settings.selectedTags.push(tag);
-        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+        localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
       }
     },
 
     removeTag(tagId: string, kbId?: string) {
       if (!this.settings.selectedTags) return;
       this.settings.selectedTags = this.settings.selectedTags.filter(t => !(t.id === tagId && (!kbId || t.kbId === kbId)));
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
 
     clearTags() {
       this.settings.selectedTags = [];
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
 
     addMCPService(serviceId: string) {
       if (!this.settings.selectedMCPServices) this.settings.selectedMCPServices = [];
       if (!this.settings.selectedMCPServices.includes(serviceId)) {
         this.settings.selectedMCPServices.push(serviceId);
-        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+        localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
       }
     },
 
     removeMCPService(serviceId: string) {
       if (!this.settings.selectedMCPServices) return;
       this.settings.selectedMCPServices = this.settings.selectedMCPServices.filter(id => id !== serviceId);
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
 
     addSkill(skillName: string) {
       if (!this.settings.selectedSkills) this.settings.selectedSkills = [];
       if (!this.settings.selectedSkills.includes(skillName)) {
         this.settings.selectedSkills.push(skillName);
-        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+        localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
       }
     },
 
     removeSkill(skillName: string) {
       if (!this.settings.selectedSkills) return;
       this.settings.selectedSkills = this.settings.selectedSkills.filter(name => name !== skillName);
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
 
     setFileKbMap(updates: Record<string, string>) {
       if (!this.settings.selectedFileKbMap) this.settings.selectedFileKbMap = {};
       Object.assign(this.settings.selectedFileKbMap, updates);
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
 
     removeFileKbId(fileId: string) {
       if (this.settings.selectedFileKbMap) delete this.settings.selectedFileKbMap[fileId];
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
     
     getSelectedFiles(): string[] {
@@ -469,7 +469,7 @@ export const useSettingsStore = defineStore("settings", {
       this.settings.selectedTags = [];
       this.settings.selectedMCPServices = [];
       this.settings.selectedSkills = [];
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      localStorage.setItem("GRIDORA_settings", JSON.stringify(this.settings));
     },
     
     // 获取选中的智能体ID

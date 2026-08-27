@@ -1230,7 +1230,7 @@ const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'ko-KR', 'ru-RU'] as const
 export type EmbedLocale = (typeof SUPPORTED_LOCALES)[number]
 
 /** Isolated from the main app `locale` key so embed preview never hijacks admin UI language. */
-export const EMBED_LOCALE_STORAGE_KEY = 'weknora-embed-locale'
+export const EMBED_LOCALE_STORAGE_KEY = 'gridora-embed-locale'
 
 /** Map host-provided locale strings to a supported embed locale tag. */
 export function normalizeEmbedLocale(raw: string): EmbedLocale {

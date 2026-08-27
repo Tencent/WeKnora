@@ -106,9 +106,9 @@ const persistOIDCLoginResponse = async (response: any) => {
   await syncOIDCUserContext()
 
   // OIDC 跳转前暂存的邀请 token：拿到会话后兑换并进入对应空间。
-  const pendingInviteToken = sessionStorage.getItem('weknora_pending_invite_token')
+  const pendingInviteToken = sessionStorage.getItem('gridora_pending_invite_token')
   if (pendingInviteToken) {
-    sessionStorage.removeItem('weknora_pending_invite_token')
+    sessionStorage.removeItem('gridora_pending_invite_token')
     const result = await authStore.acceptInvitationByTokenAndRefresh(pendingInviteToken)
     await nextTick()
     if (result.ok) MessagePlugin.success(t('inviteRegister.joined'))

@@ -59,7 +59,7 @@ function tenantSegmentForKey(): string {
 }
 
 function recentsKey(): string {
-  return `WeKnora_${readUserId()}_${tenantSegmentForKey()}${RECENTS_SUFFIX}`
+  return `GRIDORA_${readUserId()}_${tenantSegmentForKey()}${RECENTS_SUFFIX}`
 }
 
 function readRecents(): PinEntry[] {

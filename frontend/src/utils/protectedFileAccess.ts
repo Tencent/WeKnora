@@ -50,10 +50,10 @@ const accessState: ProtectedFileAccessState = (() => {
   const fresh = (): ProtectedFileAccessState => ({ current: TENANT_ACCESS });
   if (typeof window === 'undefined') return fresh();
   const scope = window as typeof window & {
-    __weknoraProtectedFileAccessV1__?: ProtectedFileAccessState;
+    __gridoraProtectedFileAccessV1__?: ProtectedFileAccessState;
   };
-  scope.__weknoraProtectedFileAccessV1__ ||= fresh();
-  return scope.__weknoraProtectedFileAccessV1__;
+  scope.__gridoraProtectedFileAccessV1__ ||= fresh();
+  return scope.__gridoraProtectedFileAccessV1__;
 })();
 
 /**
@@ -109,18 +109,18 @@ export function isProtectedFileProxyPath(pathname: string): boolean {
 function tenantRequestHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   try {
-    const token = (localStorage.getItem('weknora_token') || '').trim();
+    const token = (localStorage.getItem('gridora_token') || '').trim();
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const selectedTenantId = (localStorage.getItem('weknora_selected_tenant_id') || '').trim();
+    const selectedTenantId = (localStorage.getItem('gridora_selected_tenant_id') || '').trim();
     if (selectedTenantId) {
       // Always attach when a selected tenant is set. Same rationale as
       // utils/request.ts / api/chat/streame.ts: the
       // "selectedTenantId === defaultTenantId → skip" short-circuit
       // silently drops the header whenever any code path writes the
-      // active tenant into weknora_tenant, leaving authenticated file
+      // active tenant into gridora_tenant, leaving authenticated file
       // fetches landing on the home tenant.
       headers['X-Tenant-ID'] = selectedTenantId;
     }

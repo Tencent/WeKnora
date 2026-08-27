@@ -52,7 +52,7 @@ export function defaultThinkingControl(
       return 'thinking_type'
     default:
       // openai, azure_openai, anthropic, zhipu, deepseek, gemini, siliconflow,
-      // hunyuan, moonshot, openrouter, weknoracloud, … → baseProvider / noThinking
+      // hunyuan, moonshot, openrouter, gridoracloud, … → baseProvider / noThinking
       return 'none'
   }
 }

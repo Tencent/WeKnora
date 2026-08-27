@@ -340,7 +340,7 @@ function closeTimeline() {
   timelineDrawerVisible.value = false;
 }
 
-const TRACE_DRAWER_WIDTH_KEY = 'weknora-trace-drawer-width';
+const TRACE_DRAWER_WIDTH_KEY = 'gridora-trace-drawer-width';
 const TRACE_DRAWER_DEFAULT_WIDTH = 820;
 const TRACE_DRAWER_MIN_WIDTH = 560;
 
@@ -412,7 +412,7 @@ function cleanupTraceDrawerResize() {
 }
 
 // ============== 主抽屉（文档详情）宽度可调 ==============
-const MAIN_DRAWER_WIDTH_KEY = 'weknora-doc-drawer-width';
+const MAIN_DRAWER_WIDTH_KEY = 'gridora-doc-drawer-width';
 const MAIN_DRAWER_DEFAULT_WIDTH = 654;
 const MAIN_DRAWER_MIN_WIDTH = 480;
 
