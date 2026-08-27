@@ -86,7 +86,8 @@ func newUserEnvFixture(t *testing.T) (*UserEnvService, *installSkillRepo) {
 	for _, skill := range []*types.TenantSkillEntity{
 		{
 			ID: "sk-ready", TenantID: userEnvTenantID, SandboxConfigID: "cfg-1",
-			Name: "pdf-tools", Enabled: true, Status: types.SkillStatusReady,
+			Name: "pdf-tools", Description: "Extracts text from PDFs",
+			Enabled: true, Status: types.SkillStatusReady,
 			Envs: types.SkillEnvVars{
 				{Name: "API_TOKEN", Description: "workspace token", Required: true, Value: "admin-secret"},
 				{Name: "USER_TOKEN", Description: "your own token", Required: true},
@@ -116,7 +117,7 @@ func newUserEnvFixture(t *testing.T) (*UserEnvService, *installSkillRepo) {
 		require.NoError(t, repo.CreateSkill(ctx, skill))
 	}
 	configs := &userEnvConfigRepo{rows: []*types.TenantSandboxConfigEntity{
-		{ID: "cfg-1", TenantID: userEnvTenantID, Name: "Production"},
+		{ID: "cfg-1", TenantID: userEnvTenantID, Name: "Production", Description: "Prod cluster"},
 		{ID: "cfg-2", TenantID: userEnvTenantID, Name: "Staging"},
 		{ID: "cfg-9", TenantID: 8, Name: "Theirs"},
 	}}
@@ -165,6 +166,7 @@ func TestListMineReportsTheThreeSourceStates(t *testing.T) {
 	require.NoError(t, err)
 	skill := skillByID(t, configByID(t, groups, "cfg-1"), "sk-ready")
 	require.Equal(t, "pdf-tools", skill.SkillName)
+	require.Equal(t, "Extracts text from PDFs", skill.Description)
 
 	workspace := viewByName(t, skill.Vars, "API_TOKEN")
 	require.Equal(t, EnvSourceWorkspace, workspace.Source)
@@ -188,7 +190,9 @@ func TestListMineListsEveryConfigWithItsName(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, groups, 2)
 	require.Equal(t, "Production", groups[0].SandboxConfigName)
+	require.Equal(t, "Prod cluster", groups[0].Description)
 	require.Equal(t, "Staging", groups[1].SandboxConfigName)
+	require.Empty(t, groups[1].Description)
 	require.Empty(t, configByID(t, groups, "cfg-2").Skills)
 }
 

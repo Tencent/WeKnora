@@ -242,10 +242,10 @@ builtin_agents:
         description: "Internal agent that installs an uploaded skill and its dependencies into the sandbox image"
       zh-CN:
         name: "技能安装器"
-        description: "把上传的技能及其依赖装进沙盒镜像的内部智能体"
+        description: "把上传的技能及其依赖装进沙箱镜像的内部智能体"
       zh-TW:
         name: "技能安裝器"
-        description: "把上傳的技能及其相依套件裝進沙盒鏡像的內部智能體"
+        description: "把上傳的技能及其相依套件裝進沙箱鏡像的內部智能體"
       ja-JP:
         name: "スキルインストーラー"
         description: "アップロードされたスキルとその依存関係をサンドボックスイメージにインストールする内部エージェント"

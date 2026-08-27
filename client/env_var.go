@@ -32,9 +32,10 @@ type EnvVarView struct {
 
 // SkillEnvGroup is one skill's declared credentials.
 type SkillEnvGroup struct {
-	SkillID   string       `json:"skill_id"`
-	SkillName string       `json:"skill_name"`
-	Vars      []EnvVarView `json:"vars"`
+	SkillID     string       `json:"skill_id"`
+	SkillName   string       `json:"skill_name"`
+	Description string       `json:"description,omitempty"`
+	Vars        []EnvVarView `json:"vars"`
 }
 
 // ConfigEnvGroup is one sandbox config: the caller's own config-wide variables
@@ -42,6 +43,7 @@ type SkillEnvGroup struct {
 type ConfigEnvGroup struct {
 	SandboxConfigID   string          `json:"sandbox_config_id"`
 	SandboxConfigName string          `json:"sandbox_config_name"`
+	Description       string          `json:"description,omitempty"`
 	Vars              []EnvVarView    `json:"vars"`
 	Skills            []SkillEnvGroup `json:"skills"`
 }

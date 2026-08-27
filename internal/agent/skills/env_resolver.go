@@ -42,7 +42,7 @@ func (e *MissingSkillEnvError) Error() string {
 		"skill %q needs the environment variable(s) %s, which nobody has set yet. "+
 			"Ask the user for them, then run the skill through shell_exec with "+
 			"skill_name=%q and the values in env — they are stored for that user "+
-			"afterwards. They can also be set under Settings → Environment variables.",
+			"afterwards. They can also be set under Settings → Sandbox secrets.",
 		e.SkillName, strings.Join(e.Names, ", "), e.SkillName,
 	)
 }

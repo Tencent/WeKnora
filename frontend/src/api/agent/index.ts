@@ -65,8 +65,8 @@ export interface CustomAgentConfig {
   skills_selection_mode?: 'all' | 'selected' | 'none';
   selected_skills?: string[];       // 选择的Skill名称列表
 
-  // ===== 沙盒设置 =====
-  // 该智能体的技能脚本运行在哪个沙盒配置上；为空表示不启用沙盒执行。
+  // ===== 沙箱设置 =====
+  // 该智能体的技能脚本运行在哪个沙箱配置上；为空表示不启用沙箱执行。
   // 指向逻辑配置而非某个具体版本，凭据轮换时无需重新指派每个智能体。
   sandbox_config_id?: string;
 

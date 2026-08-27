@@ -1,4 +1,4 @@
-import type { ConfigEnvGroup, EnvVarSource, EnvVarView } from '@/api/env-vars'
+import type { ConfigEnvGroup, EnvVarSource, EnvVarView, SkillEnvGroup } from '@/api/env-vars'
 
 /**
  * Pure state helpers for the environment variable UIs.
@@ -163,5 +163,49 @@ export function sortedConfigGroups(groups: ConfigEnvGroup[]): ConfigEnvGroup[] {
     const byName = configLabel(a).localeCompare(configLabel(b))
     if (byName !== 0) return byName
     return a.sandbox_config_id.localeCompare(b.sandbox_config_id)
+  })
+}
+
+/**
+ * Sandbox-wide extras the member already stored. Empty configs stay off the
+ * settings page — listing every backend as a blank card is noise.
+ */
+export function sandboxGroupsWithVars(groups: ConfigEnvGroup[]): ConfigEnvGroup[] {
+  return groups.filter((group) => (group.vars?.length ?? 0) > 0)
+}
+
+/** How many required declarations still have no user or workspace value. */
+export function blockingVarCount(vars: EnvVarView[] | undefined): number {
+  return (vars || []).filter((entry) => statusOf(entry).blocking).length
+}
+
+/**
+ * One skill's credentials, lifted out of the config group it was installed on.
+ * The settings page leads with these; sandbox-wide extras stay secondary.
+ */
+export interface SkillSecretCard {
+  sandbox_config_id: string
+  sandbox_config_name: string
+  skill: SkillEnvGroup
+}
+
+export function skillSecretCards(groups: ConfigEnvGroup[]): SkillSecretCard[] {
+  const cards: SkillSecretCard[] = []
+  for (const group of groups) {
+    for (const skill of group.skills || []) {
+      if (!skill.vars?.length) continue
+      cards.push({
+        sandbox_config_id: group.sandbox_config_id,
+        sandbox_config_name: configLabel(group),
+        skill,
+      })
+    }
+  }
+  return cards.sort((a, b) => {
+    const bySkill = (a.skill.skill_name || a.skill.skill_id).localeCompare(
+      b.skill.skill_name || b.skill.skill_id,
+    )
+    if (bySkill !== 0) return bySkill
+    return a.sandbox_config_name.localeCompare(b.sandbox_config_name)
   })
 }

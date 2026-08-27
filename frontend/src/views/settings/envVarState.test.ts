@@ -8,6 +8,7 @@ import {
   RESERVED_ENV_NAMES,
   addSkillEnvSaveInFlight,
   adminSkillEnvClearPayload,
+  blockingVarCount,
   canAddEnvVar,
   canClearAdminSkillEnv,
   clearSkillEnvSaveInFlight,
@@ -18,6 +19,8 @@ import {
   isValidEnvName,
   isValidEnvValueLength,
   skillHasDeclaredEnvs,
+  skillSecretCards,
+  sandboxGroupsWithVars,
   sortedConfigGroups,
   statusOf,
 } from './envVarState'
@@ -238,4 +241,41 @@ test('skill env save completion removes exactly its own in-flight entry', () => 
 
   assert.equal(isSkillEnvSaveInFlight(remaining, 'cfg-a', 'skill-s'), false)
   assert.equal(isSkillEnvSaveInFlight(remaining, 'cfg-b', 'skill-t'), true)
+})
+
+test('sandboxGroupsWithVars keeps only configs that already have stored values', () => {
+  const populated = sandboxGroupsWithVars([
+    config('c1', 'cube-TEST'),
+    config('c2', 'Docker-Test', [envVar({ name: 'PROXY', source: 'user' })]),
+    config('c3', 'Empty', []),
+  ])
+
+  assert.equal(populated.length, 1)
+  assert.equal(populated[0].sandbox_config_id, 'c2')
+})
+
+test('blockingVarCount counts only required names with no value at all', () => {
+  assert.equal(blockingVarCount(undefined), 0)
+  assert.equal(
+    blockingVarCount([
+      envVar({ name: 'A', required: true, source: 'unset' }),
+      envVar({ name: 'B', required: true, source: 'user' }),
+      envVar({ name: 'C', required: false, source: 'unset' }),
+    ]),
+    1,
+  )
+})
+
+test('skillSecretCards lifts declared skills out of config groups and skips empty ones', () => {
+  const cards = skillSecretCards([
+    config('c2', 'Docker-Test', [], [
+      skill('weknora', 'weknora', [envVar({ name: 'WEKNORA_API_KEY', required: true })]),
+    ]),
+    config('c1', 'cube-TEST'),
+    config('c3', 'Other', [], [skill('empty', 'empty', [])]),
+  ])
+
+  assert.equal(cards.length, 1)
+  assert.equal(cards[0].skill.skill_id, 'weknora')
+  assert.equal(cards[0].sandbox_config_name, 'Docker-Test')
 })

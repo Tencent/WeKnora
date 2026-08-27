@@ -1,7 +1,7 @@
 /**
- * 把回答正文里对「沙盒生成文件」的引用，接到 artifact 下载链路上。
+ * 把回答正文里对「沙箱生成文件」的引用，接到 artifact 下载链路上。
  *
- * 模型会用 Markdown 图片语法引用它在沙盒里生成的文件（提示词规定写成
+ * 模型会用 Markdown 图片语法引用它在沙箱里生成的文件（提示词规定写成
  * `![说明](sandbox:文件名)`），服务端在落库前把它改写成该文件的稳定句柄
  * `resource://<handle>` —— 与知识库图片、聊天附件同一种引用形式。两种写法
  * 都指向同一份 `Message.Artifacts`：
@@ -77,7 +77,7 @@ function parseArtifactRef(href: string): ArtifactRef | null {
 }
 
 /**
- * 该链接目标是否可能是沙盒产物引用。
+ * 该链接目标是否可能是沙箱产物引用。
  *
  * 句柄形式与知识库图片同形，因此这里为真只说明「值得交给产物解析试一次」，
  * 不代表本消息真有这个文件。
@@ -286,7 +286,7 @@ function renderImage(
 /**
  * 渲染一个 Markdown 图片/链接目标。
  *
- * 返回 null 表示这不是沙盒产物引用，调用方应回落到默认渲染（普通图片、
+ * 返回 null 表示这不是沙箱产物引用，调用方应回落到默认渲染（普通图片、
  * `resource://` 受保护图片、外链等一律不受影响）。
  */
 export function renderArtifactReference(args: {

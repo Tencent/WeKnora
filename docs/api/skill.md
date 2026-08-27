@@ -224,6 +224,7 @@ curl --location 'http://localhost:8080/api/v1/me/env-vars' \
         {
             "sandbox_config_id": "cfg-1",
             "sandbox_config_name": "默认沙箱",
+            "description": "日常对话用的沙箱",
             "vars": [
                 { "name": "HTTP_PROXY", "source": "user", "updated_at": "2026-08-27T10:00:00Z" }
             ],
@@ -231,6 +232,7 @@ curl --location 'http://localhost:8080/api/v1/me/env-vars' \
                 {
                     "skill_id": "sk-1",
                     "skill_name": "web-search",
+                    "description": "通过 Tavily 检索网页",
                     "vars": [
                         { "name": "TAVILY_API_KEY", "description": "Tavily 搜索密钥", "required": true, "source": "workspace" },
                         { "name": "REGION", "source": "unset" }

@@ -34,8 +34,8 @@ type SkillInfoResponse struct {
 }
 
 // ListSkills godoc
-// @Summary      获取当前沙盒配置上可执行的 Skills
-// @Description  返回指定沙盒配置镜像内、智能体实际能调用的已安装技能（ready 且启用）。不传 sandbox_config_id 时列表为空。
+// @Summary      获取当前沙箱配置上可执行的 Skills
+// @Description  返回指定沙箱配置镜像内、智能体实际能调用的已安装技能（ready 且启用）。不传 sandbox_config_id 时列表为空。
 // @Tags         Skills
 // @Accept       json
 // @Produce      json
