@@ -5969,6 +5969,21 @@ definitions:
       tenant_name:
         type: string
     type: object
+  internal_handler.meEnvVarRequest:
+    properties:
+      name:
+        type: string
+      sandbox_config_id:
+        type: string
+      skill_id:
+        type: string
+      value:
+        description: |-
+          Value is unused by the delete endpoints. Clearing a value is a delete
+          rather than a write of "", so a member always has one unambiguous way to
+          revoke.
+        type: string
+    type: object
   internal_handler.platformAPIKeyCreateRequest:
     properties:
       capabilities:
@@ -6019,9 +6034,17 @@ definitions:
     properties:
       enabled:
         description: |-
-          Enabled is a pointer because its absence is a bad request rather than a
-          request to disable the skill.
+          Enabled is a pointer because its absence is not a request to disable the
+          skill; a body may carry envs instead.
         type: boolean
+      envs:
+        additionalProperties:
+          type: string
+        description: |-
+          Envs is a pointer to a map because "sent an empty object" and "did not
+          mention envs" are different requests: the first clears what it names,
+          the second must leave every stored value alone.
+        type: object
     type: object
   internal_handler.skillSourceRequest:
     properties:
@@ -11996,6 +12019,149 @@ paths:
       summary: MCP OAuth 回调
       tags:
       - MCP服务
+  /me/env-vars:
+    get:
+      description: List every sandbox config of this workspace with the caller's own
+        config-wide variables and the credentials its skills declared, each reporting
+        whether it is unset, filled in workspace-wide, or filled in by the caller.
+        Values are never returned.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: One group per sandbox config
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: List my environment variables
+      tags:
+      - Me
+  /me/env-vars/sandbox:
+    delete:
+      consumes:
+      - application/json
+      description: Remove the caller's own value for one variable on a sandbox config.
+      parameters:
+      - description: Sandbox config and variable name
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.meEnvVarRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Deleted
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not set
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Delete one of my sandbox environment variables
+      tags:
+      - Me
+    put:
+      consumes:
+      - application/json
+      description: Store the caller's own value for one variable on a sandbox config.
+        It is injected into every skill script and shell command this caller's turns
+        run on that config.
+      parameters:
+      - description: Sandbox config, variable name and value
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.meEnvVarRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Stored
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Set one of my sandbox environment variables
+      tags:
+      - Me
+  /me/env-vars/skill:
+    delete:
+      consumes:
+      - application/json
+      description: Remove the caller's own value. The workspace-wide value, if there
+        is one, applies again afterwards.
+      parameters:
+      - description: Skill and variable name
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.meEnvVarRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Deleted
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not set
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Delete one of my skill credentials
+      tags:
+      - Me
+    put:
+      consumes:
+      - application/json
+      description: Store the caller's own value for one variable the skill declared.
+        It overrides the workspace-wide value for this caller only, and is injected
+        only into executions that name this skill.
+      parameters:
+      - description: Skill, variable name and value
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.meEnvVarRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Stored
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Set one of my skill credentials
+      tags:
+      - Me
   /me/invitations:
     get:
       description: 返回当前登录用户的待接受邀请（默认仅 pending），用于头像入口和 /invitations 收件箱页。
@@ -13830,8 +13996,9 @@ paths:
     patch:
       consumes:
       - application/json
-      description: Show or hide an installed skill. The files stay in the image either
-        way; removal is a separate flow.
+      description: Show or hide an installed skill and set the workspace-wide values
+        of the environment variables it declared. Either field may be sent, or both.
+        The files stay in the image either way; removal is a separate flow.
       parameters:
       - description: Sandbox config ID
         in: path
