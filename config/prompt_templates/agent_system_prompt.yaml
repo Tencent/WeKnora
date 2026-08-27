@@ -494,7 +494,7 @@ templates:
     i18n:
       zh-CN:
         name: "技能安装系统提示词"
-        description: "用于把上传的技能及其依赖装进沙盒镜像的系统提示词"
+        description: "用于把上传的技能及其依赖装进沙箱镜像的系统提示词"
       en-US:
         name: "Skill Installer System Prompt"
         description: "System prompt for installing an uploaded skill and its dependencies into the sandbox image"

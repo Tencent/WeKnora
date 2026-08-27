@@ -48,7 +48,7 @@ func TestMissingSkillEnvErrorMessageNamesSkillVarsAndWhereToSetThem(t *testing.T
 	require.Contains(t, msg, "web-search")
 	require.Contains(t, msg, "TAVILY_API_KEY")
 	require.Contains(t, msg, "SERP_TOKEN")
-	require.Contains(t, msg, "Environment variables")
+	require.Contains(t, msg, "Sandbox secrets")
 
 	var typed *MissingSkillEnvError
 	require.True(t, errors.As(err, &typed))

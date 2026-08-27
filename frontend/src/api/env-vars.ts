@@ -26,6 +26,8 @@ export interface EnvVarView {
 export interface SkillEnvGroup {
   skill_id: string
   skill_name: string
+  /** SKILL.md one-liner; not the instruction body. */
+  description?: string
   vars: EnvVarView[]
 }
 
@@ -36,6 +38,7 @@ export interface SkillEnvGroup {
 export interface ConfigEnvGroup {
   sandbox_config_id: string
   sandbox_config_name: string
+  description?: string
   vars: EnvVarView[]
   skills: SkillEnvGroup[]
 }

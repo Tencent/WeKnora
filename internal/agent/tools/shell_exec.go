@@ -432,7 +432,7 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 				Error: fmt.Sprintf(
 					"skill %q needs the environment variable(s) %s, which nobody has set yet. "+
 						"Ask the user for them and pass them in this call's env, "+
-						"or have them set the values under Settings → Environment variables.",
+						"or have them set the values under Settings → Sandbox secrets.",
 					input.SkillName, strings.Join(missing, ", ")),
 			}, nil
 		}

@@ -1940,7 +1940,7 @@ const showMcpServiceSelect = computed(() =>
 );
 const webSearchProviderList = ref<WebSearchProviderEntity[]>([]);
 const skillOptions = ref<{ name: string; description: string }[]>([]);
-// 是否允许启用 Skills（当前沙盒配置上有可执行技能时为 true；未选配置前为 false）
+// 是否允许启用 Skills（当前沙箱配置上有可执行技能时为 true；未选配置前为 false）
 const skillsAvailable = ref(false);
 const hasSandboxSelected = computed(() => !!formData.value.config.sandbox_config_id);
 

@@ -133,7 +133,7 @@
                     <MemorySettings />
                   </div>
 
-                  <!-- 技能凭据（成员自己的技能环境变量） -->
+                  <!-- 沙箱密钥（成员自己的技能 / 沙箱密钥） -->
                   <div v-if="currentSection === 'envvars'" class="section">
                     <EnvVarSettings />
                   </div>
@@ -379,7 +379,7 @@ const navItems = computed(() => {
     { key: 'system-audit-log', icon: 'history', label: t('system.globalSettings.audit.tabLabel') },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
     { key: 'mymemory', icon: 'bookmark', label: t('memorySettings.title') },
-    { key: 'envvars', icon: 'lock-on', label: t('envVarSettings.title') },
+    { key: 'envvars', icon: 'key', label: t('envVarSettings.title') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
     ...integrationItems,

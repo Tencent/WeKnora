@@ -36,12 +36,14 @@ type EnvVarView struct {
 }
 
 // SkillEnvGroup is one skill's declared credentials. It carries the skill's
-// identity and nothing else about it — not the instructions, not the bundle,
-// not the install state, all of which are Admin+ disclosure.
+// identity (name and the SKILL.md one-liner) and nothing else about it — not
+// the instructions, not the bundle, not the install state, all of which are
+// Admin+ disclosure.
 type SkillEnvGroup struct {
-	SkillID   string       `json:"skill_id"`
-	SkillName string       `json:"skill_name"`
-	Vars      []EnvVarView `json:"vars"`
+	SkillID     string       `json:"skill_id"`
+	SkillName   string       `json:"skill_name"`
+	Description string       `json:"description,omitempty"`
+	Vars        []EnvVarView `json:"vars"`
 }
 
 // ConfigEnvGroup is one sandbox config: the caller's own config-wide variables
@@ -49,6 +51,7 @@ type SkillEnvGroup struct {
 type ConfigEnvGroup struct {
 	SandboxConfigID   string          `json:"sandbox_config_id"`
 	SandboxConfigName string          `json:"sandbox_config_name"`
+	Description       string          `json:"description,omitempty"`
 	Vars              []EnvVarView    `json:"vars"`
 	Skills            []SkillEnvGroup `json:"skills"`
 }
@@ -145,14 +148,16 @@ func (s *UserEnvService) ListMine(ctx context.Context) ([]ConfigEnvGroup, error)
 		group := ConfigEnvGroup{
 			SandboxConfigID:   cfg.ID,
 			SandboxConfigName: cfg.Name,
+			Description:       cfg.Description,
 			Vars:              configWideViews(mineBySkill[""]),
 			Skills:            make([]SkillEnvGroup, 0, len(skillsByConfig[cfg.ID])),
 		}
 		for _, row := range skillsByConfig[cfg.ID] {
 			group.Skills = append(group.Skills, SkillEnvGroup{
-				SkillID:   row.ID,
-				SkillName: row.Name,
-				Vars:      declaredViews(row.Envs, mineBySkill[row.ID]),
+				SkillID:     row.ID,
+				SkillName:   row.Name,
+				Description: row.Description,
+				Vars:        declaredViews(row.Envs, mineBySkill[row.ID]),
 			})
 		}
 		// The repository orders skills by creation; sorting by name is what
