@@ -608,7 +608,7 @@ func (s *agentService) registerSandboxShellTool(
 		return
 	}
 	if executor := sessionSandboxShellExecutor(sandboxMgr); executor != nil {
-		resolver := s.userEnvResolver(ctx, config) // 现取，可能为 nil
+		resolver := s.userEnvResolver(ctx, config)
 		toolRegistry.RegisterTool(
 			tools.NewShellExecTool(executor, resolver).WithEnvCapture(s.skillEnvCapture(config)),
 		)

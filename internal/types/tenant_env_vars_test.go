@@ -142,6 +142,32 @@ func TestTenantUserEnvVarNeverSerialisesItsValue(t *testing.T) {
 	require.Contains(t, string(raw), "TAVILY_API_KEY")
 }
 
+// GORM runs BeforeSave and BeforeCreate one after the other on a create, and
+// both encrypt. Encrypting twice would store a value nothing can read back.
+func TestTenantUserEnvVarEncryptsOnceAcrossBothHooks(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", skillEnvAESKey)
+	row := &TenantUserEnvVar{Name: "TAVILY_API_KEY", Value: "tvly-super-secret"}
+
+	require.NoError(t, row.BeforeSave(nil))
+	require.NoError(t, row.BeforeCreate(nil))
+
+	require.NotEmpty(t, row.ID, "BeforeCreate still assigns the primary key")
+	require.True(t, strings.HasPrefix(row.Value, utils.EncPrefix))
+	plain, ok := utils.DecryptStoredSecretLenient(row.Value)
+	require.True(t, ok)
+	require.Equal(t, "tvly-super-secret", plain)
+}
+
+// Without a key configured there is nothing to encrypt with, which is the
+// deployment-wide degradation every secret column in this repo accepts.
+func TestTenantUserEnvVarKeepsTheValueWhenNoKeyIsConfigured(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", "")
+	row := &TenantUserEnvVar{Name: "TAVILY_API_KEY", Value: "tvly-super-secret"}
+
+	require.NoError(t, row.BeforeSave(nil))
+	require.Equal(t, "tvly-super-secret", row.Value)
+}
+
 func TestTenantUserEnvVarAfterFindTreatsUndecryptableValueAsUnset(t *testing.T) {
 	t.Setenv("SYSTEM_AES_KEY", skillEnvAESKey)
 	var logs bytes.Buffer

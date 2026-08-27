@@ -118,7 +118,12 @@ func (s *TenantSkillService) UpdateSkillAdmin(
 	if !changed {
 		return skill, nil
 	}
-	if err := s.skills.UpdateSkill(ctx, skill); err != nil {
+	// Only the two admin-owned columns are written: the row may be mid-install,
+	// and the status the installer is keeping there is none of this request's
+	// business.
+	if err := s.skills.UpdateSkillAdminState(
+		ctx, tenantID, configID, skillID, skill.Enabled, skill.Envs,
+	); err != nil {
 		return nil, err
 	}
 	return skill, nil

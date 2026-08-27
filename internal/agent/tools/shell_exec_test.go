@@ -211,12 +211,26 @@ func (r *recordedCapture) capture(_ context.Context, skillName string, pairs map
 	r.pairs = pairs
 }
 
+// stubEnvResolver stands in for the service-layer resolver: resolved is what
+// the workspace or this caller already has stored, missing is what a required
+// declaration still needs.
+type stubEnvResolver struct {
+	resolved map[string]string
+	missing  []string
+}
+
+func (r stubEnvResolver) ResolveEnv(
+	_ context.Context, _ string,
+) (map[string]string, []string, error) {
+	return r.resolved, r.missing, nil
+}
+
 func TestShellExecCapturesUsedEnvAfterSuccessfulCommand(t *testing.T) {
 	recorder := &recordedCapture{}
 	tool := NewShellExecTool(&fakeShellExecutor{}, nil).WithEnvCapture(recorder.capture)
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
-		`{"command":"export USER_TOKEN=from-command; cd /opt/weknora/tenant/skills/pdf-tools && python x.py","env":{"EXTRA_TOKEN":"from-tool"}}`,
+		`{"command":"export USER_TOKEN=from-command; python x.py","skill_name":"pdf-tools","env":{"EXTRA_TOKEN":"from-tool"}}`,
 	))
 
 	require.NoError(t, err)
@@ -227,13 +241,76 @@ func TestShellExecCapturesUsedEnvAfterSuccessfulCommand(t *testing.T) {
 	require.Equal(t, "from-tool", recorder.pairs["EXTRA_TOKEN"])
 }
 
+// Guessing the skill from a path would let any successful command that merely
+// mentions a skill directory write into that skill's credentials.
+func TestShellExecDoesNotCaptureWithoutAnExplicitSkillName(t *testing.T) {
+	recorder := &recordedCapture{}
+	tool := NewShellExecTool(&fakeShellExecutor{}, nil).WithEnvCapture(recorder.capture)
+
+	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
+		`{"command":"export USER_TOKEN=from-command; cd /opt/weknora/tenant/skills/pdf-tools && python x.py"}`,
+	))
+
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Zero(t, recorder.calls)
+}
+
+// A stored value belongs to whoever entered it. Capture may fill a blank, so a
+// name that resolved is never handed to the write path.
+func TestShellExecDoesNotCaptureAlreadyResolvedNames(t *testing.T) {
+	recorder := &recordedCapture{}
+	resolver := stubEnvResolver{resolved: map[string]string{"USER_TOKEN": "stored"}}
+	tool := NewShellExecTool(&fakeShellExecutor{}, resolver).WithEnvCapture(recorder.capture)
+
+	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
+		`{"command":"python x.py","skill_name":"pdf-tools","env":{"USER_TOKEN":"model-made-this-up","NEW_TOKEN":"fresh"}}`,
+	))
+
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, 1, recorder.calls)
+	require.NotContains(t, recorder.pairs, "USER_TOKEN")
+	require.Equal(t, "fresh", recorder.pairs["NEW_TOKEN"])
+}
+
+// Refusing a required variable the call itself carries would strand every user
+// without a settings page, since the value can only arrive through the chat.
+func TestShellExecRunsWhenTheCallSuppliesTheMissingRequiredValue(t *testing.T) {
+	recorder := &recordedCapture{}
+	resolver := stubEnvResolver{missing: []string{"USER_TOKEN"}}
+	tool := NewShellExecTool(&fakeShellExecutor{}, resolver).WithEnvCapture(recorder.capture)
+
+	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
+		`{"command":"python x.py","skill_name":"pdf-tools","env":{"USER_TOKEN":"typed-in-chat"}}`,
+	))
+
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, "typed-in-chat", recorder.pairs["USER_TOKEN"],
+		"the value that made the run possible is the one worth storing")
+}
+
+func TestShellExecStillRefusesAMissingRequiredValueNobodySupplied(t *testing.T) {
+	resolver := stubEnvResolver{missing: []string{"USER_TOKEN"}}
+	tool := NewShellExecTool(&fakeShellExecutor{}, resolver)
+
+	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
+		`{"command":"python x.py","skill_name":"pdf-tools"}`,
+	))
+
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Contains(t, result.Error, "USER_TOKEN")
+}
+
 func TestShellExecDoesNotCaptureWhenCommandFails(t *testing.T) {
 	recorder := &recordedCapture{}
 	tool := NewShellExecTool(&fakeShellExecutor{result: &sandbox.ExecuteResult{ExitCode: 1}}, nil).
 		WithEnvCapture(recorder.capture)
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
-		`{"command":"export USER_TOKEN=x; cd /opt/weknora/tenant/skills/pdf-tools && false"}`,
+		`{"command":"export USER_TOKEN=x; false","skill_name":"pdf-tools"}`,
 	))
 
 	require.NoError(t, err)
@@ -247,7 +324,7 @@ func TestShellExecDoesNotCaptureWhenExecutorErrors(t *testing.T) {
 		WithEnvCapture(recorder.capture)
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
-		`{"command":"export USER_TOKEN=x; cd /opt/weknora/tenant/skills/pdf-tools && true"}`,
+		`{"command":"export USER_TOKEN=x; true","skill_name":"pdf-tools"}`,
 	))
 
 	require.NoError(t, err)
@@ -260,7 +337,7 @@ func TestInstallShellExecDoesNotCapture(t *testing.T) {
 	tool := NewInstallShellExecTool(&fakeInstallShellExecutor{}).WithEnvCapture(recorder.capture)
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
-		`{"command":"export USER_TOKEN=x; cd /opt/weknora/tenant/skills/pdf-tools && pip install x"}`,
+		`{"command":"export USER_TOKEN=x; pip install x","skill_name":"pdf-tools"}`,
 	))
 
 	require.NoError(t, err)

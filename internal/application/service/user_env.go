@@ -223,10 +223,15 @@ func applyOwnValue(view *EnvVarView, own *types.TenantUserEnvVar) {
 }
 
 // CaptureSkillEnv stores values a successful skill run already used, for the
-// current principal only. It writes only names that skill declared; reserved
-// names and a value that already matches the stored user row or the workspace
-// admin value are skipped. Unknown or unusable skills are a no-op so a
-// mis-inferred name cannot create a row.
+// current principal only. It writes only names that skill declared, and only
+// names nothing has filled in yet: a value already stored by this caller or by
+// the workspace is left alone.
+//
+// Filling blanks is the whole contract. Rotation belongs to the settings page,
+// where a person chose the new value; a value read out of a command the model
+// composed is not that, and letting it overwrite a working credential would
+// turn one hallucinated `export KEY=test` into a permanently broken skill.
+// Unknown or unusable skills are a no-op.
 func (s *UserEnvService) CaptureSkillEnv(
 	ctx context.Context, configID, skillName string, pairs map[string]string,
 ) error {
@@ -269,10 +274,10 @@ func (s *UserEnvService) CaptureSkillEnv(
 		if !ok {
 			continue
 		}
-		if declared.Value != "" && declared.Value == value {
+		if declared.Value != "" {
 			continue
 		}
-		if existing := mine[name]; existing != nil && existing.Value == value {
+		if existing := mine[name]; existing != nil && existing.Value != "" {
 			continue
 		}
 		if err := s.upsertMine(ctx, tenantID, principal, configID, skill.ID, name, value); err != nil {

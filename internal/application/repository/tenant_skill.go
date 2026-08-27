@@ -25,8 +25,22 @@ type TenantSkillRepository interface {
 	// ListSkillsByTenant spans every sandbox config of one workspace, for the
 	// views that are about the user rather than about a config.
 	ListSkillsByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantSkillEntity, error)
-	// UpdateSkill writes the mutable projection fields after install/remove state changes.
+	// UpdateSkill writes the mutable projection fields after install/remove
+	// state changes. It never touches envs; see the implementation.
 	UpdateSkill(ctx context.Context, e *types.TenantSkillEntity) error
+	// UpdateSkillEnvs writes the declared environment variables alone.
+	UpdateSkillEnvs(
+		ctx context.Context, tenantID uint64, configID, skillID string, envs types.SkillEnvVars,
+	) error
+	// UpdateSkillAdminState writes visibility and declared values together, as
+	// one admin request.
+	UpdateSkillAdminState(
+		ctx context.Context,
+		tenantID uint64,
+		configID, skillID string,
+		enabled bool,
+		envs types.SkillEnvVars,
+	) error
 	// DeleteSkill soft-deletes the metadata row and, in the same transaction,
 	// hard-deletes the per-principal env values hanging off it. Image cleanup is
 	// represented by snapshots. When the scoped key matches no skill, nothing is
@@ -142,6 +156,13 @@ func (r *tenantSkillRepository) ListSkillsByTenant(
 
 // UpdateSkill writes the mutable columns explicitly so a zero-valued field on
 // the passed entity cannot silently wipe state written by a concurrent job.
+//
+// envs is deliberately absent: it is the one column an install-progress write
+// has no opinion about, and every such write is a read-modify-write of a row
+// the install heartbeat reloads every 30 seconds. Including it would let a
+// heartbeat that read the row a moment before a declaration was recorded put
+// the stale list — or a NULL — back. UpdateSkillEnvs and UpdateSkillAdminState
+// are the only writers of that column.
 func (r *tenantSkillRepository) UpdateSkill(ctx context.Context, e *types.TenantSkillEntity) error {
 	return r.db.WithContext(ctx).
 		Model(&types.TenantSkillEntity{}).
@@ -154,7 +175,6 @@ func (r *tenantSkillRepository) UpdateSkill(ctx context.Context, e *types.Tenant
 			"bundle_ref":            e.BundleRef,
 			"bundle_sha256":         e.BundleSHA256,
 			"enabled":               e.Enabled,
-			"envs":                  e.Envs,
 			"installed_snapshot_id": e.InstalledSnapshotID,
 			"install_session_id":    e.InstallSessionID,
 			"install_message_id":    e.InstallMessageID,
@@ -162,6 +182,37 @@ func (r *tenantSkillRepository) UpdateSkill(ctx context.Context, e *types.Tenant
 			"error":                 e.Error,
 			"installing_since":      e.InstallingSince,
 			"updated_at":            time.Now(),
+		}).Error
+}
+
+// UpdateSkillEnvs writes the declaration column alone, so recording what a
+// skill needs cannot disturb the install state written next to it.
+func (r *tenantSkillRepository) UpdateSkillEnvs(
+	ctx context.Context, tenantID uint64, configID, skillID string, envs types.SkillEnvVars,
+) error {
+	return r.db.WithContext(ctx).
+		Model(&types.TenantSkillEntity{}).
+		Where("tenant_id = ? AND sandbox_config_id = ? AND id = ?", tenantID, configID, skillID).
+		Updates(map[string]any{"envs": envs, "updated_at": time.Now()}).Error
+}
+
+// UpdateSkillAdminState writes the two columns an admin request owns, together,
+// so a rotation that disables the skill and clears its value is one statement
+// rather than two that can half apply.
+func (r *tenantSkillRepository) UpdateSkillAdminState(
+	ctx context.Context,
+	tenantID uint64,
+	configID, skillID string,
+	enabled bool,
+	envs types.SkillEnvVars,
+) error {
+	return r.db.WithContext(ctx).
+		Model(&types.TenantSkillEntity{}).
+		Where("tenant_id = ? AND sandbox_config_id = ? AND id = ?", tenantID, configID, skillID).
+		Updates(map[string]any{
+			"enabled":    enabled,
+			"envs":       envs,
+			"updated_at": time.Now(),
 		}).Error
 }
 

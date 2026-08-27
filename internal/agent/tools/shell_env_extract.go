@@ -3,9 +3,6 @@ package tools
 import (
 	"regexp"
 	"strings"
-	"unicode"
-
-	"github.com/Tencent/WeKnora/internal/sandbox"
 )
 
 // assignmentPattern finds NAME=value in a model-built shell command.
@@ -39,37 +36,16 @@ func collectUsedSkillEnv(command string, toolEnv map[string]string) map[string]s
 	return out
 }
 
-func inferSkillName(explicit, command string) string {
-	if sandbox.IsValidSkillName(strings.TrimSpace(explicit)) {
-		return strings.TrimSpace(explicit)
-	}
-	prefix := sandbox.SkillsImageRoot + "/"
-	from := 0
-	for {
-		idx := strings.Index(command[from:], prefix)
-		if idx < 0 {
-			return ""
+// maskCommandAssignments replaces the value of every NAME=value assignment with
+// a placeholder. A command is logged at Info, and passing a credential inline is
+// a documented way to hand a skill its key, so the raw string must never reach
+// the log.
+func maskCommandAssignments(command string) string {
+	return assignmentPattern.ReplaceAllStringFunc(command, func(match string) string {
+		eq := strings.Index(match, "=")
+		if eq < 0 {
+			return match
 		}
-		idx += from
-		name, ok := firstPathSegment(command[idx+len(prefix):])
-		if ok && sandbox.IsValidSkillName(name) {
-			return name
-		}
-		from = idx + len(prefix)
-	}
-}
-
-func firstPathSegment(rest string) (string, bool) {
-	end := 0
-	for end < len(rest) {
-		r := rune(rest[end])
-		if r == '/' || unicode.IsSpace(r) || r == '"' || r == '\'' || r == ';' || r == '&' || r == '|' {
-			break
-		}
-		end++
-	}
-	if end == 0 {
-		return "", false
-	}
-	return rest[:end], true
+		return match[:eq+1] + "***"
+	})
 }

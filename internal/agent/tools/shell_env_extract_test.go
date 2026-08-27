@@ -44,24 +44,15 @@ func TestCollectUsedSkillEnvOverlaysToolEnvOnExports(t *testing.T) {
 	assert.Equal(t, "e", got["EXTRA"])
 }
 
-func TestInferSkillNamePrefersExplicitToolField(t *testing.T) {
-	command := `cd /opt/weknora/tenant/skills/other-skill && python x.py`
+func TestMaskCommandAssignmentsHidesValues(t *testing.T) {
+	command := `export BIGMODEL_API_KEY="sk-abc.def"; TOKEN=plain ./run --model cogview-4`
 
-	assert.Equal(t, "pdf-tools", inferSkillName("pdf-tools", command))
-}
+	got := maskCommandAssignments(command)
 
-func TestInferSkillNameFromCdIntoSkillsRoot(t *testing.T) {
-	command := `cd /opt/weknora/tenant/skills/bigmodel-image-video && .venv/bin/python scripts/generate.py "草原"`
-
-	assert.Equal(t, "bigmodel-image-video", inferSkillName("", command))
-}
-
-func TestInferSkillNameFromScriptPath(t *testing.T) {
-	command := `/opt/weknora/tenant/skills/bigmodel-image-video/.venv/bin/python /opt/weknora/tenant/skills/bigmodel-image-video/scripts/generate.py`
-
-	assert.Equal(t, "bigmodel-image-video", inferSkillName("", command))
-}
-
-func TestInferSkillNameEmptyWhenCommandDoesNotTouchSkillsRoot(t *testing.T) {
-	assert.Empty(t, inferSkillName("", "ls /workspace"))
+	assert.NotContains(t, got, "sk-abc.def")
+	assert.NotContains(t, got, "plain")
+	assert.Contains(t, got, "BIGMODEL_API_KEY=***")
+	assert.Contains(t, got, "TOKEN=***")
+	// Ordinary flags stay readable: a masked log still has to be a usable one.
+	assert.Contains(t, got, "--model cogview-4")
 }
