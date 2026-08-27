@@ -5,7 +5,9 @@ import {
   ACTIVE_QUESTION_TOP_OFFSET_PX,
   QUESTION_MINIMAP_TRACK_MAX_PX,
   QUESTION_TICK_GAP_PX,
+  QUESTION_TICK_INSET_PX,
   QUESTION_TICK_MOUNTAIN_GAIN,
+  CURRENT_TICK_SCALE,
   activeQuestionId,
   answerPreviewText,
   collectUserQuestions,
@@ -16,6 +18,7 @@ import {
   questionDisplayText,
   questionMinimapTrackHeight,
   shouldShowQuestionMinimap,
+  tickDisplayScale,
   tickMountainScale,
   viewportBand,
 } from './chatQuestionMinimap.ts'
@@ -27,8 +30,8 @@ test('isChatOverflowing is false when content fits or matches the viewport', () 
 })
 
 test('questionMinimapTrackHeight packs ticks with a small gap instead of filling the rail', () => {
-  assert.equal(questionMinimapTrackHeight(1, 800), QUESTION_TICK_GAP_PX)
-  assert.equal(questionMinimapTrackHeight(3, 800), 2 * QUESTION_TICK_GAP_PX)
+  assert.equal(questionMinimapTrackHeight(1, 800), QUESTION_TICK_INSET_PX * 2)
+  assert.equal(questionMinimapTrackHeight(3, 800), 2 * QUESTION_TICK_GAP_PX + 2 * QUESTION_TICK_INSET_PX)
   assert.equal(questionMinimapTrackHeight(0, 800), 0)
   assert.equal(questionMinimapTrackHeight(3, 0), 0)
 })
@@ -38,8 +41,9 @@ test('questionMinimapTrackHeight still caps a long cluster to the centered rail'
   assert.equal(questionMinimapTrackHeight(100, 400), 200)
 })
 
-test('shouldShowQuestionMinimap requires overflow and at least one question', () => {
-  assert.equal(shouldShowQuestionMinimap(true, 1), true)
+test('shouldShowQuestionMinimap requires overflow and at least two questions', () => {
+  assert.equal(shouldShowQuestionMinimap(true, 1), false)
+  assert.equal(shouldShowQuestionMinimap(true, 2), true)
   assert.equal(shouldShowQuestionMinimap(true, 0), false)
   assert.equal(shouldShowQuestionMinimap(false, 4), false)
 })
@@ -61,20 +65,26 @@ test('collectUserQuestions keeps loaded user turns with ids, in list order', () 
   )
 })
 
-test('answerPreviewText strips markdown and uses the pending placeholder when empty', () => {
+test('answerPreviewText strips markdown and stays empty when there is no answer yet', () => {
   assert.equal(
-    answerPreviewText('## Hello\n**world** and [link](https://x)', '生成中'),
+    answerPreviewText('## Hello\n**world** and [link](https://x)'),
     'Hello world and link',
   )
-  assert.equal(answerPreviewText('   ', '生成中'), '生成中')
-  assert.equal(answerPreviewText(undefined, '生成中'), '生成中')
+  assert.equal(answerPreviewText('   '), '')
+  assert.equal(answerPreviewText(undefined), '')
 })
 
 test('tickMountainScale is 1 without a pointer and peaks at the hovered tick', () => {
   assert.equal(tickMountainScale(100, null), 1)
   assert.equal(tickMountainScale(100, 100), 1 + QUESTION_TICK_MOUNTAIN_GAIN)
-  assert.ok(tickMountainScale(100, 100) > tickMountainScale(135, 100))
-  assert.ok(tickMountainScale(135, 100) > tickMountainScale(200, 100))
+  assert.ok(tickMountainScale(100, 100) > tickMountainScale(108, 100))
+  assert.ok(tickMountainScale(108, 100) > tickMountainScale(200, 100))
+})
+
+test('tickDisplayScale lengthens the current tick at rest and follows the pointer when hovering', () => {
+  assert.equal(tickDisplayScale(100, null, false), 1)
+  assert.equal(tickDisplayScale(100, null, true), CURRENT_TICK_SCALE)
+  assert.equal(tickDisplayScale(100, 100, false), 1 + QUESTION_TICK_MOUNTAIN_GAIN)
 })
 
 test('nearestTickId picks the closest tick to the pointer', () => {
