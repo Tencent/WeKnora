@@ -757,7 +757,6 @@ func (s *agentService) registerTools(
 				s.chunkService,
 				config.SearchTargets,
 				rerankModel,
-				chatModel,
 				s.cfg,
 			)
 		case tools.ToolGrepChunks:
