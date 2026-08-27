@@ -367,6 +367,10 @@ func (s *TenantSkillService) runInstall(
 	if err := s.writeManifestEntry(ctx, mgr, sess.ID, skillID, bundle); err != nil {
 		return err
 	}
+	// Read before the scratch wipe. requirements.json lives under skillDir and
+	// is not scratch, but reading it first removes an implicit dependency on
+	// what cleanImageScratch happens to delete.
+	s.recordEnvDeclaration(ctx, mgr, sess.ID, tenantID, configID, skillID, bundle)
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{Percent: 90, Stage: "verified"})
 
 	// 6. Wipe the scratch state. It must happen BEFORE the snapshot, or the
@@ -1446,8 +1450,10 @@ func snapshotBelongsToOtherConfig(snap sandbox.RemoteSnapshotRef, prefix string)
 
 func buildInstallPrompt(skillDir string, bundle *SkillBundle, uvAvailable bool) string {
 	skillMD := ""
+	requirementsPath := ""
 	if bundle != nil {
 		skillMD = string(bundle.Files["SKILL.md"])
+		requirementsPath = sandbox.SkillRequirementsPath(bundle.Name)
 	}
 	return fmt.Sprintf(`Install this WeKnora skill into the sandbox image.
 
@@ -1461,6 +1467,15 @@ Hard requirements:
 - Use shell_exec only. You may set work_dir to %s.
 - Each command has a 10-minute budget; you do not need to set timeout_sec.
 - When finished, report what you installed and any global/system packages you changed.
+- Declare the environment variables this skill reads AT RUN TIME. Read its scripts to decide;
+  ignore anything only the installation itself needed. Run mkdir -p on the directory first, then
+  write the declaration to %s as JSON of this exact shape:
+  {"env":[{"name":"TAVILY_API_KEY","description":"what the skill uses it for","required":true}]}
+  Each name must be UPPER_SNAKE_CASE and must appear literally somewhere in the skill's own files.
+  Never write any value, placeholder or example credential: this file declares what is needed, and
+  a value you invent would be stored as this workspace's real credential. If one environment
+  variable is required, set required to true; if it is optional, set required to false. If the
+  skill needs no environment variables, write {"env":[]}.
 
 The server verifies the result itself before the image is kept, so report what
 you did rather than whether it passed. Verification parses every script with
@@ -1470,7 +1485,8 @@ venv. It never runs the skill's code, so nothing is expected to answer --help.
 
 SKILL.md:
 %s
-`, skillDir, uvAvailable, skillDir, skillDir, skillDir, skillMD)
+`, skillDir, uvAvailable, skillDir, skillDir, skillDir,
+		requirementsPath, skillMD)
 }
 
 func (s *TenantSkillService) probeUv(ctx context.Context, mgr sandbox.Manager, sessionID string) bool {
@@ -1617,6 +1633,75 @@ func (s *TenantSkillService) writeManifestEntry(
 	}
 	payload = append(payload, '\n')
 	return store.WriteSessionFile(ctx, sessionID, sandbox.SkillsManifestPath, payload)
+}
+
+// recordEnvDeclaration reads the environment variables the installer agent
+// declared and stores the ones that survive validation.
+//
+// It returns nothing because none of its failures is a failed install. The
+// agent may not have written the file, may have written prose, or may have
+// listed nothing that exists in the bundle; in every case the skill is
+// installed and working, and the missing declaration costs an admin one manual
+// entry in the settings page. Failing the install over it would throw away the
+// minutes of dependency installation that already succeeded.
+func (s *TenantSkillService) recordEnvDeclaration(
+	ctx context.Context, mgr sandbox.Manager, sessionID string,
+	tenantID uint64, configID, skillID string, bundle *SkillBundle,
+) {
+	if bundle == nil {
+		return
+	}
+	reader, ok := mgr.(sandbox.SessionFileReader)
+	if !ok {
+		logger.Warnf(ctx,
+			"[skill] sandbox backend cannot read files back; skill %s keeps no env declaration",
+			skillID)
+		return
+	}
+	requirementsPath := sandbox.SkillRequirementsPath(bundle.Name)
+	if requirementsPath == "" {
+		return
+	}
+	raw, err := reader.ReadSessionFile(ctx, sessionID, requirementsPath)
+	if err != nil {
+		// A skill that needs no credentials writes no file at all, so an
+		// absent one is normal. Any other read failure means a declaration
+		// may exist and was lost, which an operator has to be able to see.
+		if sandbox.IsRemoteNotFound(err) {
+			logger.Infof(ctx, "[skill] %s declared no environment variables (no %s)",
+				skillID, requirementsPath)
+			return
+		}
+		logger.Warnf(ctx, "[skill] %s: reading its env declaration at %s failed: %v",
+			skillID, requirementsPath, err)
+		return
+	}
+	declared, err := parseEnvDeclaration(raw)
+	if err != nil {
+		logger.Warnf(ctx, "[skill] %s wrote an unreadable env declaration: %v", skillID, err)
+		return
+	}
+	envs := validateEnvDeclarations(declared, bundle)
+	if len(envs) == 0 && len(declared) > 0 {
+		// The original count is the only clue an admin has for "why is my
+		// variable not in the list": every name was rejected, not ignored.
+		// Learning nothing usable must not erase a value already stored.
+		logger.Warnf(ctx,
+			"[skill] all %d environment variable(s) declared for %s were rejected "+
+				"(bad name, not mentioned anywhere in the bundle, or reserved)",
+			len(declared), skillID)
+		return
+	}
+
+	skill, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
+	if err != nil || skill == nil {
+		logger.Warnf(ctx, "[skill] load %s to store its env declaration failed: %v", skillID, err)
+		return
+	}
+	skill.Envs = mergeEnvDeclaration(skill.Envs, envs)
+	if err := s.skills.UpdateSkill(ctx, skill); err != nil {
+		logger.Warnf(ctx, "[skill] store the env declaration of %s failed: %v", skillID, err)
+	}
 }
 
 type skillImageManifest struct {

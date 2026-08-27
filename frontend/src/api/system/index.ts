@@ -1006,6 +1006,18 @@ export function parseSandboxConflict(err: unknown): SandboxConflict | null {
 
 export type ConfigSkillStatus = 'installing' | 'ready' | 'failed' | 'removing' | 'removed'
 
+/**
+ * One environment variable the skill's installer declared. `is_set` reports
+ * whether a workspace-wide value exists; the value itself is never returned,
+ * so an editor can show that something is stored but not what.
+ */
+export interface ConfigSkillEnv {
+  name: string
+  description?: string
+  required?: boolean
+  is_set: boolean
+}
+
 export interface ConfigSkill {
   id: string
   name: string
@@ -1023,6 +1035,9 @@ export interface ConfigSkill {
   install_message_id?: string
   created_at: string
   updated_at: string
+  // Absent for a skill whose installer declared nothing, which is how the
+  // panel decides whether to offer the environment variable editor at all.
+  envs?: ConfigSkillEnv[]
 }
 
 export interface ConfigSkillInstallEvent {
@@ -1069,10 +1084,15 @@ export function reinstallConfigSkill(
   ) as unknown as Promise<{ data: { skill_id: string } }>
 }
 
+/**
+ * Partial update: an absent field is left alone. `envs` names only the
+ * variables to write — an entry with an empty string clears the stored value
+ * while keeping the declaration, and undeclared names are ignored server-side.
+ */
 export function patchConfigSkill(
   configId: string,
   skillId: string,
-  payload: { enabled: boolean },
+  payload: { enabled?: boolean; envs?: Record<string, string> },
 ): Promise<{ data: ConfigSkill }> {
   return patch(`/api/v1/sandbox-configs/${configId}/skills/${skillId}`, payload) as unknown as Promise<{
     data: ConfigSkill

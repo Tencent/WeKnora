@@ -857,6 +857,30 @@ func (r *reaperSkillStore) MarkSnapshotState(
 func (r *reaperSkillStore) DeleteSnapshotRowsByConfig(context.Context, uint64, string) error {
 	panic("DeleteSnapshotRowsByConfig is outside the reaper surface")
 }
+func (r *reaperSkillStore) ListSkillsByTenant(context.Context, uint64) ([]*types.TenantSkillEntity, error) {
+	panic("ListSkillsByTenant is outside the reaper surface")
+}
+func (r *reaperSkillStore) ListUserEnvVars(
+	context.Context, uint64, types.Principal, string, string,
+) ([]*types.TenantUserEnvVar, error) {
+	panic("ListUserEnvVars is outside the reaper surface")
+}
+func (r *reaperSkillStore) ListUserEnvVarsByConfig(
+	context.Context, uint64, types.Principal, string,
+) ([]*types.TenantUserEnvVar, error) {
+	panic("ListUserEnvVarsByConfig is outside the reaper surface")
+}
+func (r *reaperSkillStore) UpsertUserEnvVar(context.Context, *types.TenantUserEnvVar) error {
+	panic("UpsertUserEnvVar is outside the reaper surface")
+}
+func (r *reaperSkillStore) DeleteUserEnvVar(
+	context.Context, uint64, types.Principal, string, string, string,
+) error {
+	panic("DeleteUserEnvVar is outside the reaper surface")
+}
+func (r *reaperSkillStore) DeleteUserEnvVarsByConfig(context.Context, uint64, string) error {
+	panic("DeleteUserEnvVarsByConfig is outside the reaper surface")
+}
 
 type reaperConfigStore struct {
 	entity *types.TenantSandboxConfigEntity

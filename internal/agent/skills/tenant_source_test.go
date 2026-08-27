@@ -292,11 +292,13 @@ func TestManagerKeepsPreloadedSkillExecutionWhenNoTenantSource(t *testing.T) {
 
 type recordingSandboxManager struct {
 	config *sandbox.ExecuteConfig
+	calls  int
 }
 
 func (m *recordingSandboxManager) Execute(
 	_ context.Context, config *sandbox.ExecuteConfig,
 ) (*sandbox.ExecuteResult, error) {
+	m.calls++
 	m.config = config
 	return &sandbox.ExecuteResult{ExitCode: 0}, nil
 }

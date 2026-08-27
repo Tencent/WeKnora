@@ -25,6 +25,9 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   members: 'viewer',
   mymemory: 'viewer',
   memory: 'admin',
+  // Every member fills in their own environment variables; the workspace-wide
+  // values stay in the Admin+ sandbox editor.
+  envvars: 'viewer',
 }
 
 /**

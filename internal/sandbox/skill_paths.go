@@ -49,6 +49,23 @@ func SkillDirFor(skillName string) (string, error) {
 	return path.Join(SkillsImageRoot, skillName), nil
 }
 
+// SkillRequirementsPath is where the installer agent writes what the skill
+// needs at run time. It lives inside the skill's own directory so it travels
+// with the skill into the snapshot, and it is a file rather than a tool call
+// on purpose: the agent reads a third-party SKILL.md, so nothing it produces
+// may reach the database except as bytes the server parses and validates.
+//
+// An invalid skill name yields an empty path, which every caller treats as
+// "no declaration": the name is already validated before an install starts,
+// and a best-effort read is not a place to fail an install.
+func SkillRequirementsPath(skillName string) string {
+	dir, err := SkillDirFor(skillName)
+	if err != nil {
+		return ""
+	}
+	return path.Join(dir, ".weknora", "requirements.json")
+}
+
 // SkillDirForImageScript returns the owning skill directory for an image script.
 // It anchors on SkillsImageRoot so nested script layouts still use the venv that
 // was installed beside the skill, not a shallower scripts directory.

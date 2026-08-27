@@ -44,5 +44,9 @@ export const SETTINGS_SECTION_CAPABILITY: Partial<Record<string, DeploymentCapab
   vectorstore: 'settings.vectorstore',
   storage: 'settings.storage',
   sandbox: 'settings.sandbox',
+  // Skill credentials exist only because sandboxes do: the values are injected
+  // into a skill script's process. A deployment without sandbox support has
+  // nowhere to inject them, so the page would only ever show its empty state.
+  envvars: 'settings.sandbox',
   mcp: 'settings.mcp',
 }
