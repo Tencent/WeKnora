@@ -329,7 +329,7 @@ export interface IMChannelOverview {
   id: string;
   tenant_id: number;
   agent_id: string;
-  agent_name: string; // empty string for built-in agents
+  agent_name: string; // localized built-in name when the agent is built-in
   platform: IMChannel['platform'];
   name: string;
   enabled: boolean;
