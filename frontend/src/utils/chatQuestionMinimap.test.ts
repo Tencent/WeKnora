@@ -5,14 +5,18 @@ import {
   ACTIVE_QUESTION_TOP_OFFSET_PX,
   QUESTION_MINIMAP_TRACK_MAX_PX,
   QUESTION_TICK_GAP_PX,
+  QUESTION_TICK_MOUNTAIN_GAIN,
   activeQuestionId,
+  answerPreviewText,
   collectUserQuestions,
   isChatOverflowing,
   mapQuestionTicks,
+  nearestTickId,
   offsetFromScrollContent,
   questionDisplayText,
   questionMinimapTrackHeight,
   shouldShowQuestionMinimap,
+  tickMountainScale,
   viewportBand,
 } from './chatQuestionMinimap.ts'
 
@@ -45,15 +49,43 @@ test('collectUserQuestions keeps loaded user turns with ids, in list order', () 
     { role: 'assistant', id: 'a1', content: 'hi' },
     { role: 'user', content: 'no id yet' },
     { role: 'user', id: 'u1', content: 'first', images: [{}] },
+    { role: 'assistant', id: 'a2', content: 'answer one' },
     { role: 'user', id: 'u2', content: '  ', attachments: [{}] },
   ])
   assert.deepEqual(
-    questions.map((q) => ({ id: q.id, hasAttachments: q.hasAttachments })),
+    questions.map((q) => ({ id: q.id, hasAttachments: q.hasAttachments, answerContent: q.answerContent })),
     [
-      { id: 'u1', hasAttachments: true },
-      { id: 'u2', hasAttachments: true },
+      { id: 'u1', hasAttachments: true, answerContent: 'answer one' },
+      { id: 'u2', hasAttachments: true, answerContent: '' },
     ],
   )
+})
+
+test('answerPreviewText strips markdown and uses the pending placeholder when empty', () => {
+  assert.equal(
+    answerPreviewText('## Hello\n**world** and [link](https://x)', '生成中'),
+    'Hello world and link',
+  )
+  assert.equal(answerPreviewText('   ', '生成中'), '生成中')
+  assert.equal(answerPreviewText(undefined, '生成中'), '生成中')
+})
+
+test('tickMountainScale is 1 without a pointer and peaks at the hovered tick', () => {
+  assert.equal(tickMountainScale(100, null), 1)
+  assert.equal(tickMountainScale(100, 100), 1 + QUESTION_TICK_MOUNTAIN_GAIN)
+  assert.ok(tickMountainScale(100, 100) > tickMountainScale(135, 100))
+  assert.ok(tickMountainScale(135, 100) > tickMountainScale(200, 100))
+})
+
+test('nearestTickId picks the closest tick to the pointer', () => {
+  const ticks = [
+    { id: 'u1', yPx: 10 },
+    { id: 'u2', yPx: 45 },
+    { id: 'u3', yPx: 80 },
+  ]
+  assert.equal(nearestTickId(ticks, 12), 'u1')
+  assert.equal(nearestTickId(ticks, 50), 'u2')
+  assert.equal(nearestTickId([], 10), null)
 })
 
 test('questionDisplayText uses trimmed content, else the placeholder', () => {

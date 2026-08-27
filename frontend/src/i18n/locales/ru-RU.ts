@@ -3255,6 +3255,7 @@ export default {
     questionMinimapTitle: 'Вопросы',
     questionMinimapAriaLabel: 'Содержание вопросов',
     questionMinimapAttachmentPlaceholder: '(Вложение)',
+    questionMinimapAnswerPending: 'Генерация',
     referenceChunkCount: '{count} фрагмент(ов)',
     fallbackHint: 'В базе знаний не найдено релевантного содержимого. Выше представлен прямой ответ модели.',
     requestInfoTitle: 'Request info',

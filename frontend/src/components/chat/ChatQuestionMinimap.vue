@@ -3,7 +3,7 @@
     v-if="visible"
     ref="rootRef"
     class="question-minimap"
-    :style="{ right: `${scrollbarGutterPx + RAIL_INSET_PX}px`, height: `${trackHeight}px` }"
+    :style="{ left: `${RAIL_INSET_PX}px`, height: `${trackHeight}px` }"
     :aria-label="t('chat.questionMinimapAriaLabel')"
     @mouseenter="handleMouseEnter"
     @mouseleave="handleMouseLeave"
@@ -13,19 +13,21 @@
       type="button"
       tabindex="0"
       :aria-label="t('chat.questionMinimapAriaLabel')"
-      aria-haspopup="listbox"
-      :aria-controls="listboxId"
+      aria-haspopup="dialog"
       :aria-expanded="panelOpen"
-      :aria-activedescendant="activeDescendantId"
       @click="handleRailClick"
       @keydown="handleRailKeydown"
+      @pointermove="handleRailPointerMove"
     >
       <span
         v-for="tick in ticks"
         :key="tick.id"
         class="question-minimap__tick"
-        :class="{ 'question-minimap__tick--active': tick.id === activeId || tick.id === hoveredId }"
-        :style="{ top: `${tick.yPx}px` }"
+        :class="{ 'question-minimap__tick--active': tick.id === peakId }"
+        :style="{
+          top: `${tick.yPx}px`,
+          transform: `translateY(-50%) scaleX(${tickMountainScale(tick.yPx, mountainPointerY)})`,
+        }"
       />
     </button>
 
@@ -36,50 +38,34 @@
     />
 
     <section
-      v-if="panelOpen"
-      ref="panelRef"
+      v-if="panelOpen && peakTurn"
       class="question-minimap__panel"
+      role="dialog"
       :aria-label="t('chat.questionMinimapTitle')"
+      :style="{ top: `${peakYPx}px` }"
+      @click="handleQuestionClick(peakTurn.id)"
     >
-      <div
-        :id="listboxId"
-        class="question-minimap__list"
-        role="listbox"
-        :aria-label="t('chat.questionMinimapTitle')"
-      >
-        <button
-          v-for="(question, index) in questions"
-          :key="question.id"
-          :id="optionId(question.id)"
-          class="question-minimap__row"
-          :class="{
-            'question-minimap__row--keyboard': index === keyboardIndex,
-          }"
-          type="button"
-          role="option"
-          :aria-selected="panelOpen && index === keyboardIndex"
-          :aria-disabled="!anchoredIds.has(question.id)"
-          :disabled="!anchoredIds.has(question.id)"
-          :title="displayText(question.content)"
-          :data-keyboard="index === keyboardIndex ? 'true' : undefined"
-          @click="handleQuestionClick(question.id)"
-          @mouseenter="hoveredId = question.id"
-          @mouseleave="hoveredId = null"
-        >
-          {{ displayText(question.content) }}
-        </button>
-      </div>
+      <p class="question-minimap__question" :title="questionText(peakTurn)">
+        {{ questionText(peakTurn) }}
+      </p>
+      <p class="question-minimap__answer">
+        {{ answerText(peakTurn) }}
+      </p>
     </section>
   </nav>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChatQuestionMinimap } from '@/composables/useChatQuestionMinimap'
 import {
+  answerPreviewText,
+  nearestTickId,
   questionDisplayText,
+  tickMountainScale,
   type ChatMessageLike,
+  type UserQuestion,
 } from '@/utils/chatQuestionMinimap'
 
 const CLOSE_DELAY_MS = 150
@@ -96,10 +82,10 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const rootRef = ref<HTMLElement | null>(null)
-const panelRef = ref<HTMLElement | null>(null)
 const hoverOpen = ref(false)
 const pinnedOpen = ref(false)
 const hoveredId = ref<string | null>(null)
+const pointerY = ref<number | null>(null)
 const keyboardIndex = ref(-1)
 const isCoarsePointer = ref(false)
 
@@ -109,28 +95,42 @@ const {
   ticks,
   activeId,
   anchoredIds,
-  scrollbarGutterPx,
   trackHeight,
 } = useChatQuestionMinimap({
   scrollContainer: toRef(props, 'scrollContainer'),
   messages: toRef(props, 'messages'),
 })
 
-const listboxId = 'question-minimap-list'
 const panelOpen = computed(() => hoverOpen.value || pinnedOpen.value)
 const anchoredQuestions = computed(() => (
   questions.value.filter((question) => anchoredIds.value.has(question.id))
 ))
-const optionId = (id: string) => `question-minimap-option-${id}`
-const activeDescendantId = computed(() => {
-  const question = questions.value[keyboardIndex.value]
-  return panelOpen.value && question ? optionId(question.id) : undefined
+const peakId = computed(() => {
+  if (keyboardIndex.value >= 0) {
+    return questions.value[keyboardIndex.value]?.id ?? null
+  }
+  return hoveredId.value
+})
+const peakTurn = computed(() => (
+  questions.value.find((question) => question.id === peakId.value) ?? null
+))
+const peakYPx = computed(() => {
+  const tick = ticks.value.find((item) => item.id === peakId.value)
+  return tick?.yPx ?? 0
+})
+const mountainPointerY = computed(() => {
+  if (keyboardIndex.value >= 0) return peakYPx.value
+  return pointerY.value
 })
 
 let closeTimer: number | null = null
 
-const displayText = (content: string) => (
-  questionDisplayText(content, t('chat.questionMinimapAttachmentPlaceholder'))
+const questionText = (question: UserQuestion) => (
+  questionDisplayText(question.content, t('chat.questionMinimapAttachmentPlaceholder'))
+)
+
+const answerText = (question: UserQuestion) => (
+  answerPreviewText(question.answerContent, t('chat.questionMinimapAnswerPending'))
 )
 
 const clearCloseTimer = () => {
@@ -151,6 +151,7 @@ const closePanel = () => {
   hoverOpen.value = false
   pinnedOpen.value = false
   hoveredId.value = null
+  pointerY.value = null
   keyboardIndex.value = -1
 }
 
@@ -159,16 +160,9 @@ const scheduleClose = () => {
   closeTimer = window.setTimeout(() => {
     hoverOpen.value = false
     hoveredId.value = null
+    pointerY.value = null
     closeTimer = null
   }, CLOSE_DELAY_MS)
-}
-
-const scrollKeyboardRowIntoView = async () => {
-  if (!panelOpen.value) return
-
-  await nextTick()
-  const keyboardRow = panelRef.value?.querySelector<HTMLElement>('[data-keyboard="true"]')
-  keyboardRow?.scrollIntoView({ block: 'nearest' })
 }
 
 const syncKeyboardIndexToActive = () => {
@@ -186,12 +180,27 @@ const handleMouseLeave = () => {
   scheduleClose()
 }
 
+const handleRailPointerMove = (event: PointerEvent) => {
+  if (isCoarsePointer.value) return
+
+  const target = event.currentTarget as HTMLElement
+  pointerY.value = event.clientY - target.getBoundingClientRect().top
+  hoveredId.value = nearestTickId(ticks.value, pointerY.value)
+}
+
 const handleRailClick = () => {
-  if (!isCoarsePointer.value) return
+  if (!isCoarsePointer.value) {
+    const id = peakId.value
+    if (id) handleQuestionClick(id)
+    return
+  }
 
   clearCloseTimer()
   pinnedOpen.value = !pinnedOpen.value
   hoverOpen.value = false
+  if (pinnedOpen.value) {
+    hoveredId.value = activeId.value ?? questions.value[0]?.id ?? null
+  }
 }
 
 const handleQuestionClick = (id: string) => {
@@ -223,11 +232,10 @@ const moveKeyboard = (direction: 1 | -1) => {
   )
   const nextQuestion = anchored[nextAnchoredIndex]
   keyboardIndex.value = questions.value.findIndex((question) => question.id === nextQuestion.id)
-  void scrollKeyboardRowIntoView()
 }
 
 const jumpKeyboardQuestion = () => {
-  const question = questions.value[keyboardIndex.value]
+  const question = peakTurn.value
   if (!question || !anchoredIds.value.has(question.id)) return
 
   closePanel()
@@ -267,12 +275,6 @@ const handleDocumentPointerDown = (event: PointerEvent) => {
   closePanel()
 }
 
-watch(panelOpen, (open) => {
-  if (open && keyboardIndex.value >= 0) {
-    void scrollKeyboardRowIntoView()
-  }
-})
-
 onMounted(() => {
   isCoarsePointer.value = window.matchMedia('(pointer: coarse)').matches
   document.addEventListener('pointerdown', handleDocumentPointerDown)
@@ -288,11 +290,10 @@ onBeforeUnmount(() => {
 .question-minimap {
   position: absolute;
   top: 50%;
-  right: 0;
+  left: 0;
   z-index: 11;
   display: flex;
-  flex-direction: row-reverse;
-  align-items: center;
+  align-items: stretch;
   transform: translateY(-50%);
   pointer-events: none;
 }
@@ -305,7 +306,7 @@ onBeforeUnmount(() => {
 
 .question-minimap__rail {
   position: relative;
-  width: 12px;
+  width: 28px;
   height: 100%;
   padding: 0;
   border: 0;
@@ -327,6 +328,8 @@ onBeforeUnmount(() => {
   background: var(--td-text-color-secondary);
   opacity: 0.55;
   transform: translateY(-50%);
+  transform-origin: left center;
+  transition: transform 120ms ease-out, background 120ms ease-out, opacity 120ms ease-out;
 }
 
 .question-minimap__tick--active {
@@ -335,55 +338,55 @@ onBeforeUnmount(() => {
 }
 
 .question-minimap__bridge {
-  align-self: stretch;
   width: 8px;
 }
 
 .question-minimap__panel {
+  position: absolute;
+  left: 36px;
   width: 240px;
   max-height: min(360px, 50vh);
-  overflow-y: auto;
+  padding: 8px 10px;
+  overflow: hidden;
   scrollbar-width: none;
   border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   background: var(--td-bg-color-container);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-50%);
+  cursor: pointer;
 }
 
 .question-minimap__panel::-webkit-scrollbar {
   display: none;
 }
 
-.question-minimap__list {
-  padding: 6px;
+.question-minimap__question,
+.question-minimap__answer {
+  margin: 0;
+  color: var(--td-text-color-secondary);
+  font: inherit;
 }
 
-.question-minimap__row {
-  display: block;
-  width: 100%;
-  padding: 7px 8px;
+.question-minimap__question {
   overflow: hidden;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--td-text-color-secondary);
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.question-minimap__row:hover {
-  color: var(--td-brand-color);
+.question-minimap__answer {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  opacity: 0.75;
 }
 
-.question-minimap__row--keyboard:not(:hover) {
-  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-}
-
-.question-minimap__row:disabled {
-  cursor: default;
-  opacity: 0.5;
+@media (prefers-reduced-motion: reduce) {
+  .question-minimap__tick {
+    transition: none;
+  }
 }
 </style>

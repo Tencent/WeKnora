@@ -1,5 +1,6 @@
 export const QUESTION_TICK_RADIUS_PX = 3
 export const QUESTION_TICK_GAP_PX = 35
+export const QUESTION_TICK_MOUNTAIN_GAIN = 2.2
 export const ACTIVE_QUESTION_TOP_OFFSET_PX = 72
 export const VIEWPORT_BAND_MIN_HEIGHT_PX = 16
 export const QUESTION_MINIMAP_TRACK_MAX_PX = 360
@@ -32,6 +33,7 @@ export type UserQuestion = {
   id: string
   content: string
   hasAttachments: boolean
+  answerContent: string
 }
 
 export type QuestionTick = {
@@ -54,14 +56,32 @@ export function shouldShowQuestionMinimap(overflowing: boolean, questionCount: n
 }
 
 export function collectUserQuestions(messages: ChatMessageLike[]): UserQuestion[] {
-  return messages
-    .filter((message) => message.role === 'user' && message.id)
-    .map((message) => ({
-      id: message.id!,
+  const questions: UserQuestion[] = []
+
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index]
+    if (message.role !== 'user' || !message.id) continue
+
+    let answerContent = ''
+    for (let next = index + 1; next < messages.length; next++) {
+      const following = messages[next]
+      if (following.role === 'user') break
+      if (following.role === 'assistant') {
+        answerContent = following.content ?? ''
+        break
+      }
+    }
+
+    questions.push({
+      id: message.id,
       content: message.content ?? '',
       hasAttachments:
         (message.images?.length ?? 0) > 0 || (message.attachments?.length ?? 0) > 0,
-    }))
+      answerContent,
+    })
+  }
+
+  return questions
 }
 
 export function questionDisplayText(
@@ -70,6 +90,45 @@ export function questionDisplayText(
 ): string {
   const normalized = (content ?? '').replace(/\s+/g, ' ').trim()
   return normalized.length > 0 ? normalized : attachmentPlaceholder
+}
+
+export function answerPreviewText(
+  content: string | undefined,
+  pendingPlaceholder: string,
+): string {
+  const normalized = (content ?? '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/[#>*_~-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return normalized.length > 0 ? normalized : pendingPlaceholder
+}
+
+export function tickMountainScale(tickY: number, pointerY: number | null): number {
+  if (pointerY === null) return 1
+  const dy = tickY - pointerY
+  const sigma = QUESTION_TICK_GAP_PX
+  return 1 + QUESTION_TICK_MOUNTAIN_GAIN * Math.exp(-0.5 * (dy / sigma) ** 2)
+}
+
+export function nearestTickId(
+  ticks: Array<{ id: string; yPx: number }>,
+  pointerY: number,
+): string | null {
+  if (ticks.length === 0) return null
+
+  let bestId = ticks[0].id
+  let bestDist = Math.abs(ticks[0].yPx - pointerY)
+  for (let index = 1; index < ticks.length; index++) {
+    const dist = Math.abs(ticks[index].yPx - pointerY)
+    if (dist < bestDist) {
+      bestDist = dist
+      bestId = ticks[index].id
+    }
+  }
+  return bestId
 }
 
 export function offsetFromScrollContent(

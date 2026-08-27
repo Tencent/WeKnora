@@ -3257,6 +3257,7 @@ export default {
     questionMinimapTitle: '提问',
     questionMinimapAriaLabel: '提问目录',
     questionMinimapAttachmentPlaceholder: '（附件）',
+    questionMinimapAnswerPending: '生成中',
     referenceChunkCount: '{count}个片段',
     fallbackHint: '未从知识库中检索到相关内容，以上为模型直接回答',
     requestInfoTitle: '请求信息',

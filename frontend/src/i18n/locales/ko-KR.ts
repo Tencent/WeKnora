@@ -3255,6 +3255,7 @@ export default {
     questionMinimapTitle: '질문',
     questionMinimapAriaLabel: '질문 목차',
     questionMinimapAttachmentPlaceholder: '(첨부)',
+    questionMinimapAnswerPending: '생성 중',
     referenceChunkCount: '{count}개 청크',
     fallbackHint: '지식 베이스에서 관련 내용을 찾지 못했습니다. 위는 모델의 직접 응답입니다.',
     requestInfoTitle: 'Request info',

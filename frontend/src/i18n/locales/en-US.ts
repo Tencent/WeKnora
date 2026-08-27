@@ -3238,6 +3238,7 @@ export default {
     questionMinimapTitle: 'Questions',
     questionMinimapAriaLabel: 'Question outline',
     questionMinimapAttachmentPlaceholder: '(Attachment)',
+    questionMinimapAnswerPending: 'Generating',
     referenceChunkCount: '{count} chunk(s)',
     fallbackHint: 'No relevant content found in knowledge base. Above is a direct response from the model.',
     requestInfoTitle: 'Request info',
