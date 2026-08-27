@@ -82,6 +82,11 @@ type Manager struct {
 	// inside the sandbox.
 	tenantSource SkillSource
 
+	// envResolver supplies the per-caller environment for one execution. It
+	// is nil when the run has no installed skills, in which case execution
+	// keeps exactly its previous behaviour.
+	envResolver SkillEnvResolver
+
 	// Configuration
 	skillDirs     []string
 	allowedSkills []string // Empty means all skills are allowed
@@ -127,6 +132,14 @@ func (m *Manager) IsEnabled() bool {
 // manager - so it takes no lock.
 func (m *Manager) WithTenantSource(source SkillSource) *Manager {
 	m.tenantSource = source
+	return m
+}
+
+// WithEnvResolver attaches the per-caller environment resolver. Like
+// WithTenantSource it is part of construction and must be invoked before
+// Initialize, so it takes no lock.
+func (m *Manager) WithEnvResolver(resolver SkillEnvResolver) *Manager {
+	m.envResolver = resolver
 	return m
 }
 
@@ -341,6 +354,29 @@ func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath strin
 				logger.Warnf(ctx, "[Tool][ExecuteScript] pre-create output dir %s failed: %v", outputDir, err)
 			}
 		}
+	}
+
+	// Per-caller values are resolved here rather than baked into the sandbox
+	// at creation: an IM thread can have several people sharing one sandbox,
+	// so each turn's values must belong to that turn's speaker and must not
+	// linger where the next person could read them with `env`.
+	//
+	// The resolver runs after the two artifact keys above are seeded, so
+	// applyResolvedEnv's skip-existing rule protects exactly those two. It is
+	// NOT a blanket guarantee over every WEKNORA_ key: sessionInputEnvVar is
+	// only seeded when a session file store exists, and skillDirEnvVar is set
+	// later inside buildSkillExecuteConfig and so relies on that unconditional
+	// write instead. The write-time WEKNORA_ prefix blacklist
+	// (service.validateUserEnvName) is what covers those two.
+	if m.envResolver != nil {
+		resolved, missing, err := m.envResolver.ResolveEnv(ctx, skillName)
+		if err != nil {
+			return nil, err
+		}
+		if len(missing) > 0 {
+			return nil, &MissingSkillEnvError{SkillName: skillName, Names: missing}
+		}
+		applyResolvedEnv(env, resolved)
 	}
 
 	config, err := buildSkillExecuteConfig(

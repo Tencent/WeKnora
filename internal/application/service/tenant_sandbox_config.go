@@ -222,6 +222,7 @@ type sandboxConfigSkillStore interface {
 	ListSkillsByConfig(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillEntity, error)
 	DeleteSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
 	DeleteSnapshotRowsByConfig(ctx context.Context, tenantID uint64, configID string) error
+	DeleteUserEnvVarsByConfig(ctx context.Context, tenantID uint64, configID string) error
 }
 
 // sandboxConfigBundleResolver locates the tenant file service so config
@@ -1286,6 +1287,12 @@ func (s *TenantSandboxConfigService) cleanupSkillMetadata(
 	}
 	if err := s.skills.DeleteSnapshotRowsByConfig(ctx, tenantID, configID); err != nil {
 		logger.Warnf(ctx, "[sandbox] delete snapshot ledger for config %s failed: %v",
+			configID, err)
+	}
+	// DeleteSkill only takes the values filed under a skill; the config-wide
+	// ones have no skill to hang off and would outlive the config.
+	if err := s.skills.DeleteUserEnvVarsByConfig(ctx, tenantID, configID); err != nil {
+		logger.Warnf(ctx, "[sandbox] delete member env vars for config %s failed: %v",
 			configID, err)
 	}
 }

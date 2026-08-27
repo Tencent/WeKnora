@@ -7,6 +7,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // TenantSkillRepository persists skills installed onto sandbox configs and the
@@ -21,9 +22,15 @@ type TenantSkillRepository interface {
 	GetSkillByName(ctx context.Context, tenantID uint64, configID, name string) (*types.TenantSkillEntity, error)
 	// ListSkillsByConfig returns the installed skill projection for one sandbox config.
 	ListSkillsByConfig(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillEntity, error)
+	// ListSkillsByTenant spans every sandbox config of one workspace, for the
+	// views that are about the user rather than about a config.
+	ListSkillsByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantSkillEntity, error)
 	// UpdateSkill writes the mutable projection fields after install/remove state changes.
 	UpdateSkill(ctx context.Context, e *types.TenantSkillEntity) error
-	// DeleteSkill soft-deletes metadata only; image cleanup is represented by snapshots.
+	// DeleteSkill soft-deletes the metadata row and, in the same transaction,
+	// hard-deletes the per-principal env values hanging off it. Image cleanup is
+	// represented by snapshots. When the scoped key matches no skill, nothing is
+	// deleted and the call succeeds.
 	DeleteSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
 	// ListStaleInstalling finds abandoned install/remove runs for the reaper.
 	ListStaleInstalling(ctx context.Context, olderThan time.Time) ([]*types.TenantSkillEntity, error)
@@ -38,6 +45,28 @@ type TenantSkillRepository interface {
 	// config is deleted and its provider-side snapshots are already gone; never
 	// call this during an ordinary image switch (old snapshots stay in the ledger).
 	DeleteSnapshotRowsByConfig(ctx context.Context, tenantID uint64, configID string) error
+
+	// ListUserEnvVars returns one principal's own values for one scope,
+	// decrypted. An empty skillID selects the config-wide variables.
+	ListUserEnvVars(
+		ctx context.Context, tenantID uint64, p types.Principal, configID, skillID string,
+	) ([]*types.TenantUserEnvVar, error)
+	// ListUserEnvVarsByConfig returns every scope at once, for the settings
+	// page that renders a whole config in one go.
+	ListUserEnvVarsByConfig(
+		ctx context.Context, tenantID uint64, p types.Principal, configID string,
+	) ([]*types.TenantUserEnvVar, error)
+	// UpsertUserEnvVar writes a principal's value, replacing any previous one
+	// for the same (tenant, principal, config, skill, name).
+	UpsertUserEnvVar(ctx context.Context, e *types.TenantUserEnvVar) error
+	// DeleteUserEnvVar removes one value, returning types.ErrEnvVarNotFound
+	// when there was nothing to remove.
+	DeleteUserEnvVar(
+		ctx context.Context, tenantID uint64, p types.Principal, configID, skillID, name string,
+	) error
+	// DeleteUserEnvVarsByConfig removes every principal's values for a config,
+	// including the config-wide ones DeleteSkill never sees.
+	DeleteUserEnvVarsByConfig(ctx context.Context, tenantID uint64, configID string) error
 }
 
 type tenantSkillRepository struct{ db *gorm.DB }
@@ -97,6 +126,20 @@ func (r *tenantSkillRepository) ListSkillsByConfig(
 	return list, nil
 }
 
+func (r *tenantSkillRepository) ListSkillsByTenant(
+	ctx context.Context, tenantID uint64,
+) ([]*types.TenantSkillEntity, error) {
+	var list []*types.TenantSkillEntity
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ?", tenantID).
+		Order("created_at ASC").
+		Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
 // UpdateSkill writes the mutable columns explicitly so a zero-valued field on
 // the passed entity cannot silently wipe state written by a concurrent job.
 func (r *tenantSkillRepository) UpdateSkill(ctx context.Context, e *types.TenantSkillEntity) error {
@@ -111,6 +154,7 @@ func (r *tenantSkillRepository) UpdateSkill(ctx context.Context, e *types.Tenant
 			"bundle_ref":            e.BundleRef,
 			"bundle_sha256":         e.BundleSHA256,
 			"enabled":               e.Enabled,
+			"envs":                  e.Envs,
 			"installed_snapshot_id": e.InstalledSnapshotID,
 			"install_session_id":    e.InstallSessionID,
 			"install_message_id":    e.InstallMessageID,
@@ -121,12 +165,30 @@ func (r *tenantSkillRepository) UpdateSkill(ctx context.Context, e *types.Tenant
 		}).Error
 }
 
+// DeleteSkill soft-deletes the skill and hard-deletes the user values that
+// belonged to it, in one transaction. The cleanup cannot be a cascading foreign
+// key: tenant_skills is soft-deleted, so ON DELETE CASCADE would never fire and
+// the credentials would outlive the skill they were entered for.
 func (r *tenantSkillRepository) DeleteSkill(
 	ctx context.Context, tenantID uint64, configID, skillID string,
 ) error {
-	return r.db.WithContext(ctx).
-		Where("tenant_id = ? AND sandbox_config_id = ? AND id = ?", tenantID, configID, skillID).
-		Delete(&types.TenantSkillEntity{}).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.
+			Where("tenant_id = ? AND sandbox_config_id = ? AND id = ?", tenantID, configID, skillID).
+			Delete(&types.TenantSkillEntity{})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return nil
+		}
+		if err := tx.
+			Where("tenant_id = ? AND skill_id = ?", tenantID, skillID).
+			Delete(&types.TenantUserEnvVar{}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func (r *tenantSkillRepository) ListStaleInstalling(
@@ -194,4 +256,84 @@ func (r *tenantSkillRepository) DeleteSnapshotRowsByConfig(
 	return r.db.WithContext(ctx).
 		Where("tenant_id = ? AND sandbox_config_id = ?", tenantID, configID).
 		Delete(&types.TenantSkillSnapshotEntity{}).Error
+}
+
+func (r *tenantSkillRepository) ListUserEnvVars(
+	ctx context.Context, tenantID uint64, p types.Principal, configID, skillID string,
+) ([]*types.TenantUserEnvVar, error) {
+	p = p.Normalize()
+	var list []*types.TenantUserEnvVar
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND principal_type = ? AND principal_id = ?"+
+			" AND sandbox_config_id = ? AND skill_id = ?",
+			tenantID, p.Type, p.ID, configID, skillID).
+		Order("name ASC").
+		Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+func (r *tenantSkillRepository) ListUserEnvVarsByConfig(
+	ctx context.Context, tenantID uint64, p types.Principal, configID string,
+) ([]*types.TenantUserEnvVar, error) {
+	p = p.Normalize()
+	var list []*types.TenantUserEnvVar
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND principal_type = ? AND principal_id = ? AND sandbox_config_id = ?",
+			tenantID, p.Type, p.ID, configID).
+		Order("skill_id ASC, name ASC").
+		Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// UpsertUserEnvVar conflicts on the unique index columns so a re-entered value
+// replaces the previous one instead of accumulating rows.
+func (r *tenantSkillRepository) UpsertUserEnvVar(
+	ctx context.Context, e *types.TenantUserEnvVar,
+) error {
+	// Persist a copy: BeforeSave encrypts the receiver in place, and the
+	// caller keeps holding the plaintext it passed in.
+	stored := *e
+	p := types.Principal{Type: stored.PrincipalType, ID: stored.PrincipalID}.Normalize()
+	stored.PrincipalType, stored.PrincipalID = p.Type, p.ID
+	return r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "tenant_id"}, {Name: "principal_type"}, {Name: "principal_id"},
+				{Name: "sandbox_config_id"}, {Name: "skill_id"}, {Name: "name"},
+			},
+			DoUpdates: clause.AssignmentColumns([]string{"value", "updated_at"}),
+		}).
+		Create(&stored).Error
+}
+
+func (r *tenantSkillRepository) DeleteUserEnvVar(
+	ctx context.Context, tenantID uint64, p types.Principal, configID, skillID, name string,
+) error {
+	p = p.Normalize()
+	res := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND principal_type = ? AND principal_id = ?"+
+			" AND sandbox_config_id = ? AND skill_id = ? AND name = ?",
+			tenantID, p.Type, p.ID, configID, skillID, name).
+		Delete(&types.TenantUserEnvVar{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return types.ErrEnvVarNotFound
+	}
+	return nil
+}
+
+func (r *tenantSkillRepository) DeleteUserEnvVarsByConfig(
+	ctx context.Context, tenantID uint64, configID string,
+) error {
+	return r.db.WithContext(ctx).
+		Where("tenant_id = ? AND sandbox_config_id = ?", tenantID, configID).
+		Delete(&types.TenantUserEnvVar{}).Error
 }

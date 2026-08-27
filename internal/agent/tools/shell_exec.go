@@ -39,6 +39,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -146,9 +147,6 @@ var shellExecTool = BaseTool{
   intermediate files for later commands or skills.
 
 ## When NOT to Use
-- DO NOT use this to run a skill's main script — use ` + "`execute_skill_script`" + `
-  which handles skill lookup, artifact collection, and proper interpreter
-  selection.
 - DO NOT judge a skill's dependencies with a bare ` + "`python3 -c`" + ` or
   ` + "`node -e`" + `: each skill keeps its dependencies in its own virtualenv or
   node_modules, which neither of those resolves from here. ` + "`read_skill`" + `
@@ -170,6 +168,10 @@ var shellExecTool = BaseTool{
   The complete visible result is always capped at 65536 bytes.
 - ` + "`env`" + ` (optional): extra environment variables merged on top of the
   sandbox's base env, e.g. ` + "`{\"PIP_INDEX_URL\": \"https://mirrors.tencent.com/pypi/simple\"}`" + `.
+- ` + "`skill_name`" + ` (optional): name of a skill whose environment variables should
+  be injected into this command's process only. Use when running a skill's
+  command by hand that needs its credentials; values are scoped to the current
+  caller and do not persist. Omit for ordinary commands.
 
 ## Returns
 - ` + "`exit_code`" + `: 0 on success, non-zero on failure. Non-zero is NOT a tool
@@ -214,6 +216,12 @@ type ShellExecInput struct {
 	MaxStderrBytes int `json:"max_stderr_bytes,omitempty" jsonschema:"Maximum bytes returned from stderr. Defaults to 8192, hard-capped at 16384."`
 	// Env carries extra environment variables merged into the shell's env.
 	Env map[string]string `json:"env,omitempty" jsonschema:"Optional extra environment variables, e.g. {\"PIP_INDEX_URL\":\"https://mirrors.example.com/pypi/simple\"}."`
+	// SkillName, when set, pulls that skill's scoped environment variables
+	// (API keys) into this one command's process only. Resolution
+	// reuses the same SkillEnvResolver path as execute_skill_script, so values
+	// are per-caller (taken from ctx) and never persist. Omitting it leaves
+	// shell_exec's behaviour unchanged.
+	SkillName string `json:"skill_name,omitempty" jsonschema:"Optional skill name. When set, that skill's environment variables are injected into this command's process only (same resolution as execute_skill_script). Omit for ordinary commands."`
 }
 
 // SandboxInstallCommandExecutor is the privileged counterpart of
@@ -266,15 +274,29 @@ type ShellExecTool struct {
 	// sessions keep the 120s default; install mode uses the 10-minute cap
 	// because dependency installs routinely exceed two minutes.
 	defaultTimeout time.Duration
+	// envResolver, when non-nil, lets a call carrying SkillName pull that
+	// skill's per-caller env into the one command it runs. Nil means no skill
+	// env is ever injected — identical to today's behaviour.
+	envResolver skills.SkillEnvResolver
+	// envCapture, when non-nil, records declared skill credentials a
+	// successful ordinary command already used so the next named run can
+	// inject them. Install-mode tools never invoke it.
+	envCapture SkillEnvCapture
 }
+
+// SkillEnvCapture records NAME=value pairs a successful shell_exec already
+// used for one skill. The tools package does not persist them; the agent
+// service supplies the write. Values must not be logged by the caller.
+type SkillEnvCapture func(ctx context.Context, skillName string, pairs map[string]string)
 
 // NewShellExecTool constructs the tool. `executor` MUST NOT be nil:
 // callers should feature-gate registration when the sandbox backend
 // does not support ad-hoc shell execution (i.e. is not Cube).
-func NewShellExecTool(executor SandboxCommandExecutor) *ShellExecTool {
+func NewShellExecTool(executor SandboxCommandExecutor, envResolver skills.SkillEnvResolver) *ShellExecTool {
 	return &ShellExecTool{
 		BaseTool:     shellExecTool,
 		executor:     executor,
+		envResolver:  envResolver,
 		workDirRoots: []string{defaultShellExecWorkDir},
 	}
 }
@@ -289,6 +311,15 @@ func NewInstallShellExecTool(executor SandboxInstallCommandExecutor) *ShellExecT
 		workDirRoots:   []string{defaultShellExecWorkDir, sandbox.SkillsImageRoot},
 		defaultTimeout: shellExecMaxTimeout,
 	}
+}
+
+// WithEnvCapture attaches an optional capture hook. A nil hook is a no-op so
+// callers can pass the wiring result through without a nil check.
+func (t *ShellExecTool) WithEnvCapture(capture SkillEnvCapture) *ShellExecTool {
+	if t != nil {
+		t.envCapture = capture
+	}
+	return t
 }
 
 // OutputLimitChars lets ToolRegistry preserve shell_exec's explicitly bounded,
@@ -375,7 +406,34 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	logger.Infof(ctx, "[Tool][ShellExec] session=%s work_dir=%s timeout=%s command=%q",
 		sessionID, workDir, timeout, command)
 
-	res, err := t.executor.ExecShellCommand(ctx, sessionID, command, workDir, timeout, input.Env)
+	// The caller's config-wide variables apply to every command; a skill's
+	// declared credentials are added only when the model names the skill.
+	// Values come from ctx (the current principal), live only for this process,
+	// and are overlaid without displacing anything the model passed via env.
+	env := input.Env
+	if t.envResolver != nil {
+		resolved, missing, rerr := t.envResolver.ResolveEnv(ctx, input.SkillName)
+		if rerr != nil {
+			return &types.ToolResult{
+				Success: false,
+				Error:   fmt.Sprintf("failed to resolve environment variables: %v", rerr),
+			}, nil
+		}
+		if len(missing) > 0 {
+			return &types.ToolResult{
+				Success: false,
+				Error: fmt.Sprintf(
+					"skill %q needs the environment variable(s) %s, which nobody has set yet. "+
+						"Set them under Settings → Environment variables and try again.",
+					input.SkillName, strings.Join(missing, ", ")),
+			}, nil
+		}
+		if len(resolved) > 0 && env == nil {
+			env = make(map[string]string)
+		}
+		overlayResolvedEnv(env, resolved)
+	}
+	res, err := t.executor.ExecShellCommand(ctx, sessionID, command, workDir, timeout, env)
 	if err != nil {
 		logger.Warnf(ctx, "[Tool][ShellExec] execution error: session=%s err=%v", sessionID, err)
 		errorText, _ := truncateShellStream(fmt.Sprintf("shell_exec failed: %v", err), maxShellExecErrorBytes)
@@ -384,6 +442,8 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 			Error:   errorText,
 		}, nil
 	}
+
+	t.maybeCaptureSkillEnv(ctx, input, res)
 
 	outputLimit := resolveShellOutputLimit(input.MaxOutputBytes)
 	stderrLimit := resolveShellStderrLimit(input.MaxStderrBytes)
@@ -478,6 +538,49 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		Output:  visibleOutput,
 		Data:    resultData,
 	}, nil
+}
+
+func (t *ShellExecTool) maybeCaptureSkillEnv(
+	ctx context.Context, input ShellExecInput, res *sandbox.ExecuteResult,
+) {
+	if t == nil || t.envCapture == nil || t.isInstallMode() {
+		return
+	}
+	if res == nil || res.ExitCode != 0 {
+		return
+	}
+	skillName := inferSkillName(input.SkillName, input.Command)
+	if skillName == "" {
+		return
+	}
+	pairs := collectUsedSkillEnv(input.Command, input.Env)
+	if len(pairs) == 0 {
+		return
+	}
+	t.envCapture(ctx, skillName, pairs)
+}
+
+func (t *ShellExecTool) isInstallMode() bool {
+	for _, root := range t.workDirRoots {
+		if root == sandbox.SkillsImageRoot {
+			return true
+		}
+	}
+	return false
+}
+
+// overlayResolvedEnv merges resolved skill-scoped variables into env WITHOUT
+// displacing any key env already carries. Model-supplied values (via the env
+// parameter) therefore take precedence over resolved ones, matching the
+// existing execute_skill_script contract. It mirrors skills.applyResolvedEnv,
+// duplicated here to avoid exporting that helper from the skills package.
+func overlayResolvedEnv(env, resolved map[string]string) {
+	for name, value := range resolved {
+		if _, taken := env[name]; taken {
+			continue
+		}
+		env[name] = value
+	}
 }
 
 // allowedWorkDirRoots defaults to /workspace so a zero-value tool (or one

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"os"
 	"path"
 	"path/filepath"
 	"sort"
@@ -29,6 +30,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -274,6 +276,204 @@ func TestRunInstallAbortsWhenTheSkillRowWasRemoved(t *testing.T) {
 	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
 	require.NoError(t, err)
 	require.Nil(t, skill)
+}
+
+// declareEnvFile presets the file the installer agent is asked to write, so
+// the fixture exercises the same air gap production uses: bytes in the
+// sandbox, parsing and storage server-side.
+func (f *installFixture) declareEnvFile(body string) {
+	f.t.Helper()
+	if f.sandboxMgr.files == nil {
+		f.sandboxMgr.files = map[string][]byte{}
+	}
+	f.sandboxMgr.files[sandbox.SkillRequirementsPath(f.bundle.Name)] = []byte(body)
+}
+
+// readsTavilyKey makes the bundle actually mention the variable, which is what
+// the bundle-match layer looks for.
+func (f *installFixture) readsTavilyKey() {
+	f.bundle.Files["scripts/extract.py"] = []byte("import os\nos.environ[\"TAVILY_API_KEY\"]\n")
+}
+
+func TestRunInstallRecordsTheDeclaredEnvVars(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.readsTavilyKey()
+	fx.declareEnvFile(`{"env":[
+		{"name":"TAVILY_API_KEY","description":"search key","required":true,"value":"tvly-invented"},
+		{"name":"OPENAI_API_KEY","required":true}
+	]}`)
+
+	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+
+	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillStatusReady, skill.Status)
+	require.Equal(t, types.SkillEnvVars{
+		{Name: "TAVILY_API_KEY", Description: "search key", Required: true},
+	}, skill.Envs,
+		"the hallucinated name is dropped and no agent-invented value is ever stored")
+}
+
+func TestRunInstallSucceedsWithoutAnEnvDeclaration(t *testing.T) {
+	fx := newInstallFixture(t)
+
+	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+
+	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillStatusReady, skill.Status,
+		"getting the skill into the image is the goal; a missing declaration is not a failure")
+	require.Empty(t, skill.Envs)
+}
+
+func TestRunInstallSucceedsWhenTheEnvDeclarationIsUnparseable(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.declareEnvFile("I installed the skill, boss!")
+
+	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+
+	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillStatusReady, skill.Status)
+	require.Empty(t, skill.Envs)
+}
+
+func TestRunInstallSucceedsWhenEveryDeclaredEnvVarIsRejected(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.declareEnvFile(`{"env":[{"name":"OPENAI_API_KEY"},{"name":"PATH"}]}`)
+
+	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+
+	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillStatusReady, skill.Status)
+	require.Empty(t, skill.Envs)
+}
+
+// Re-installing must not destroy a credential an admin typed in, and must not
+// keep asking for a variable the new version no longer reads.
+func TestRunInstallReinstallKeepsTheAdminValueAndDropsStaleVars(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.readsTavilyKey()
+	require.NoError(t, fx.svc.updateSkillFields(context.Background(), 7, "cfg-1", "sk-1",
+		func(e *types.TenantSkillEntity) {
+			e.Envs = types.SkillEnvVars{
+				{Name: "TAVILY_API_KEY", Description: "old text", Value: "tvly-typed-by-admin"},
+				{Name: "LEGACY_TOKEN", Required: true, Value: "stale"},
+			}
+		}))
+	fx.declareEnvFile(`{"env":[{"name":"TAVILY_API_KEY","description":"new text","required":true}]}`)
+
+	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+
+	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillEnvVars{{
+		Name: "TAVILY_API_KEY", Description: "new text", Required: true,
+		Value: "tvly-typed-by-admin",
+	}}, skill.Envs)
+}
+
+func TestRunInstallReinstallOnlyClearsEnvsForAnExplicitEmptyDeclaration(t *testing.T) {
+	cases := []struct {
+		name      string
+		body      string
+		writeFile bool
+		wantEnvs  types.SkillEnvVars
+	}{
+		{
+			name:     "missing declaration preserves stored value",
+			wantEnvs: storedAdminEnv(),
+		},
+		{
+			name:      "unparseable declaration preserves stored value",
+			body:      "I installed the skill, boss!",
+			writeFile: true,
+			wantEnvs:  storedAdminEnv(),
+		},
+		{
+			name:      "fully rejected declaration preserves stored value",
+			body:      `{"env":[{"name":"tavily_api_key"},{"name":"PATH"}]}`,
+			writeFile: true,
+			wantEnvs:  storedAdminEnv(),
+		},
+		{
+			name:      "explicit empty declaration clears stored value",
+			body:      `{"env":[]}`,
+			writeFile: true,
+			wantEnvs:  nil,
+		},
+		{
+			name:      "missing env field preserves stored value",
+			body:      `{}`,
+			writeFile: true,
+			wantEnvs:  storedAdminEnv(),
+		},
+		{
+			name:      "null env field preserves stored value",
+			body:      `{"env":null}`,
+			writeFile: true,
+			wantEnvs:  storedAdminEnv(),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newInstallFixture(t)
+			require.NoError(t, fx.svc.updateSkillFields(context.Background(), 7, "cfg-1", "sk-1",
+				func(e *types.TenantSkillEntity) {
+					e.Envs = storedAdminEnv()
+				}))
+			if tc.writeFile {
+				fx.declareEnvFile(tc.body)
+			}
+
+			require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+
+			skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+			require.NoError(t, err)
+			require.Equal(t, types.SkillStatusReady, skill.Status)
+			require.Equal(t, tc.wantEnvs, skill.Envs)
+		})
+	}
+}
+
+func storedAdminEnv() types.SkillEnvVars {
+	return types.SkillEnvVars{{
+		Name: "TAVILY_API_KEY", Description: "old text", Required: true,
+		Value: "tvly-typed-by-admin",
+	}}
+}
+
+func TestBuildInstallPromptAsksForADeclarationWithoutValues(t *testing.T) {
+	fx := newInstallFixture(t)
+
+	prompt := buildInstallPrompt(installSkillDir, fx.bundle, true)
+
+	require.Contains(t, prompt, sandbox.SkillRequirementsPath(fx.bundle.Name))
+	require.Contains(t, prompt, ".weknora/requirements.json")
+	require.Contains(t, prompt, `{"env":[]}`)
+	require.Contains(t, prompt, "Never write any value",
+		"a value the model invents would be stored as the workspace credential")
+}
+
+func TestInstallSkillRepoNormalizesStoredUserEnvPrincipal(t *testing.T) {
+	repo := &installSkillRepo{}
+	row := &types.TenantUserEnvVar{
+		TenantID: 7, PrincipalType: " web_user ", PrincipalID: " user-1 ",
+		SandboxConfigID: "cfg-1", SkillID: "sk-1", Name: "API_KEY", Value: "secret",
+	}
+
+	require.NoError(t, repo.UpsertUserEnvVar(context.Background(), row))
+
+	got, err := repo.ListUserEnvVars(
+		context.Background(), 7,
+		types.Principal{Type: types.PrincipalWebUser, ID: "user-1"}, "cfg-1", "sk-1",
+	)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, types.PrincipalWebUser, got[0].PrincipalType)
+	require.Equal(t, "user-1", got[0].PrincipalID)
 }
 
 func TestWriteReadySkillStateDoesNotStampANewerBundle(t *testing.T) {
@@ -1660,6 +1860,10 @@ type installSkillRepo struct {
 	// listing and one whose listing failed are different bugs, and the skill
 	// derivation tests turn on telling them apart.
 	listCalls int
+	// userEnvs is a real store rather than a stub: the env-var flows are about
+	// which principal's value wins, so a fake that cannot distinguish
+	// principals would let the interesting bugs through.
+	userEnvs []*types.TenantUserEnvVar
 }
 
 func newInstallSkillRepo() *installSkillRepo {
@@ -1775,7 +1979,24 @@ func (r *installSkillRepo) DeleteSkill(
 	if r.deleteSkillErr != nil {
 		return r.deleteSkillErr
 	}
-	delete(r.skills, skillKey(tenantID, configID, skillID))
+	key := skillKey(tenantID, configID, skillID)
+	if _, matched := r.skills[key]; !matched {
+		// Mirrors the real repository: when the scoped key matches no skill,
+		// nothing is deleted at all. Deleting the user values here anyway would
+		// hide the exact data-loss bug the real DeleteSkill was fixed to avoid.
+		return nil
+	}
+	delete(r.skills, key)
+	// Mirrors the real repository's transaction: a skill's user values go with
+	// it, because the soft delete means no cascade can do it for us.
+	kept := r.userEnvs[:0]
+	for _, e := range r.userEnvs {
+		if e.TenantID == tenantID && e.SkillID == skillID {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	r.userEnvs = kept
 	return nil
 }
 
@@ -1835,6 +2056,138 @@ func (r *installSkillRepo) DeleteSnapshotRowsByConfig(context.Context, uint64, s
 	return nil
 }
 
+func (r *installSkillRepo) ListSkillsByTenant(
+	ctx context.Context, tenantID uint64,
+) ([]*types.TenantSkillEntity, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*types.TenantSkillEntity
+	for _, e := range r.skills {
+		if e.TenantID == tenantID {
+			cp := *e
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+// userEnvMatches mirrors the real repository's unique index, minus the name,
+// which the per-row callers add.
+func userEnvMatches(
+	e *types.TenantUserEnvVar, tenantID uint64, p types.Principal, configID, skillID string,
+) bool {
+	p = p.Normalize()
+	return e.TenantID == tenantID && e.PrincipalType == p.Type &&
+		e.PrincipalID == p.ID && e.SandboxConfigID == configID && e.SkillID == skillID
+}
+
+func (r *installSkillRepo) ListUserEnvVars(
+	ctx context.Context, tenantID uint64, p types.Principal, configID, skillID string,
+) ([]*types.TenantUserEnvVar, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*types.TenantUserEnvVar
+	for _, e := range r.userEnvs {
+		if userEnvMatches(e, tenantID, p, configID, skillID) {
+			cp := *e
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func (r *installSkillRepo) ListUserEnvVarsByConfig(
+	ctx context.Context, tenantID uint64, p types.Principal, configID string,
+) ([]*types.TenantUserEnvVar, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p = p.Normalize()
+	var out []*types.TenantUserEnvVar
+	for _, e := range r.userEnvs {
+		if e.TenantID == tenantID && e.PrincipalType == p.Type &&
+			e.PrincipalID == p.ID && e.SandboxConfigID == configID {
+			cp := *e
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].SkillID != out[j].SkillID {
+			return out[i].SkillID < out[j].SkillID
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
+func (r *installSkillRepo) UpsertUserEnvVar(ctx context.Context, e *types.TenantUserEnvVar) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p := types.Principal{Type: e.PrincipalType, ID: e.PrincipalID}.Normalize()
+	for _, existing := range r.userEnvs {
+		if userEnvMatches(existing, e.TenantID, p, e.SandboxConfigID, e.SkillID) &&
+			existing.Name == e.Name {
+			existing.Value = e.Value
+			return nil
+		}
+	}
+	cp := *e
+	cp.PrincipalType, cp.PrincipalID = p.Type, p.ID
+	if cp.ID == "" {
+		cp.ID = uuid.NewString()
+	}
+	r.userEnvs = append(r.userEnvs, &cp)
+	return nil
+}
+
+func (r *installSkillRepo) DeleteUserEnvVar(
+	ctx context.Context, tenantID uint64, p types.Principal, configID, skillID, name string,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, e := range r.userEnvs {
+		if userEnvMatches(e, tenantID, p, configID, skillID) && e.Name == name {
+			r.userEnvs = append(r.userEnvs[:i], r.userEnvs[i+1:]...)
+			return nil
+		}
+	}
+	return types.ErrEnvVarNotFound
+}
+
+func (r *installSkillRepo) DeleteUserEnvVarsByConfig(
+	ctx context.Context, tenantID uint64, configID string,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	kept := r.userEnvs[:0]
+	for _, e := range r.userEnvs {
+		if e.TenantID == tenantID && e.SandboxConfigID == configID {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	r.userEnvs = kept
+	return nil
+}
+
 var _ repository.TenantSkillRepository = (*installSkillRepo)(nil)
 
 type installSandboxResolver struct {
@@ -1854,6 +2207,10 @@ type installSandboxManager struct {
 	writeContents map[string][]byte
 	// manifest is the file the image already carries at SkillsManifestPath.
 	manifest []byte
+	// files are the other files the image already carries, keyed by absolute
+	// path. The env declaration crosses from the sandbox to the server as one
+	// of these, never as a tool call.
+	files map[string][]byte
 }
 
 func (m *installSandboxManager) sortedWrites() []string {
@@ -1892,7 +2249,13 @@ func (m *installSandboxManager) ReadSessionFile(
 	if filePath == sandbox.SkillsManifestPath && m.manifest != nil {
 		return m.manifest, nil
 	}
-	return nil, nil
+	if content, ok := m.files[filePath]; ok {
+		return content, nil
+	}
+	// A miss is reported the way a real backend reports one. Returning empty
+	// bytes with no error would make "the agent wrote nothing" indistinguishable
+	// from "the agent wrote an empty file".
+	return nil, os.ErrNotExist
 }
 
 func (m *installSandboxManager) WriteSessionInputFile(

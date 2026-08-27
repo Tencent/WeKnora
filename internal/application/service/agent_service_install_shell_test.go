@@ -41,7 +41,7 @@ func TestInstallerAgentGetsTheRootShellWithTheSkillsRoot(t *testing.T) {
 	config.EnableSkillInstallMode(types.BuiltinSkillInstallerID)
 	registry := tools.NewToolRegistry()
 
-	registerSandboxShellTool(context.Background(), registry, mgr, config)
+	(&agentService{}).registerSandboxShellTool(context.Background(), registry, mgr, config)
 
 	result, err := registry.ExecuteTool(installShellToolContext(), tools.ToolShellExec,
 		json.RawMessage(`{"command":"pip install -r requirements.txt","work_dir":"`+
@@ -67,7 +67,7 @@ func TestOrdinaryAgentKeepsTheUnprivilegedShell(t *testing.T) {
 	}
 	registry := tools.NewToolRegistry()
 
-	registerSandboxShellTool(context.Background(), registry, mgr, &types.AgentConfig{})
+	(&agentService{}).registerSandboxShellTool(context.Background(), registry, mgr, &types.AgentConfig{})
 
 	rejected, err := registry.ExecuteTool(installShellToolContext(), tools.ToolShellExec,
 		json.RawMessage(`{"command":"pip install x","work_dir":"`+sandbox.SkillsImageRoot+`/sk-1"}`))

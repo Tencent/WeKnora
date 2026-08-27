@@ -79,6 +79,10 @@ type TenantSkillEntity struct {
 	InstallSessionID string `gorm:"type:varchar(36)"`
 	InstallMessageID string `gorm:"type:varchar(36)"`
 
+	// Envs is the installer agent's declaration of the environment variables
+	// this skill needs, each optionally carrying a workspace-wide admin value.
+	Envs SkillEnvVars `json:"envs,omitempty" gorm:"type:jsonb"`
+
 	Status string `gorm:"type:varchar(32);not null"`
 	Error  string `gorm:"type:text"`
 	// InstallingSince drives the stuck-run reaper for both install and remove.

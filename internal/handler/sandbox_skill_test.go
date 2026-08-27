@@ -71,7 +71,13 @@ type fakeSandboxSkillService struct {
 	removeConfig string
 	removeSkill  string
 	patchEnabled bool
-	closed       bool
+	// patchEnvs is nil until a request actually carried the field, so a test
+	// can tell "did not mention envs" from "sent an empty object".
+	patchEnvs map[string]string
+	// patchCalls counts service calls per request, so a handler that split
+	// one PATCH back into two read-modify-write cycles fails the test.
+	patchCalls int
+	closed     bool
 	// onGet runs on every read, so a test can model a row that disappears
 	// while the client is streaming.
 	onGet func(calls int)
@@ -113,18 +119,36 @@ func (f *fakeSandboxSkillService) GetSkill(
 	return skill, nil
 }
 
-func (f *fakeSandboxSkillService) SetSkillEnabled(
-	_ context.Context, tenantID uint64, configID, skillID string, enabled bool,
+// UpdateSkillAdmin mirrors the real service: only declared names are written,
+// and an unreachable skill is reported as nil rather than as an error. A fake
+// that accepted any name would let the handler stop being the layer that keeps
+// the declaration meaningful.
+func (f *fakeSandboxSkillService) UpdateSkillAdmin(
+	_ context.Context, tenantID uint64, configID, skillID string,
+	update service.SkillAdminUpdate,
 ) (*types.TenantSkillEntity, error) {
+	f.patchCalls++
 	if f.patchErr != nil {
 		return nil, f.patchErr
 	}
-	f.patchEnabled = enabled
+	if update.Enabled != nil {
+		f.patchEnabled = *update.Enabled
+	}
+	if update.EnvValues != nil {
+		f.patchEnvs = update.EnvValues
+	}
 	skill := f.skills[skillID]
 	if skill == nil || tenantID != testSkillTenantID || skill.SandboxConfigID != configID {
 		return nil, nil
 	}
-	skill.Enabled = enabled
+	if update.Enabled != nil {
+		skill.Enabled = *update.Enabled
+	}
+	for i := range skill.Envs {
+		if value, sent := update.EnvValues[skill.Envs[i].Name]; sent {
+			skill.Envs[i].Value = value
+		}
+	}
 	return skill, nil
 }
 
