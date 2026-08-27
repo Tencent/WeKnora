@@ -17,6 +17,7 @@ import {
   isSkillEnvSaveInFlight,
   isValidEnvName,
   isValidEnvValueLength,
+  skillHasDeclaredEnvs,
   sortedConfigGroups,
   statusOf,
 } from './envVarState'
@@ -172,6 +173,13 @@ test('canClearAdminSkillEnv is only true once a workspace value is stored', () =
   assert.equal(canClearAdminSkillEnv({ is_set: true }), true)
   assert.equal(canClearAdminSkillEnv({ is_set: false }), false)
   assert.equal(canClearAdminSkillEnv({}), false)
+})
+
+test('skillHasDeclaredEnvs is true only when the installer declared variables', () => {
+  assert.equal(skillHasDeclaredEnvs({}), false)
+  assert.equal(skillHasDeclaredEnvs({ envs: null }), false)
+  assert.equal(skillHasDeclaredEnvs({ envs: [] }), false)
+  assert.equal(skillHasDeclaredEnvs({ envs: [{ name: 'WEKNORA_API_KEY' }] }), true)
 })
 
 test('editedSkillEnvPayload includes only drafted names declared by the skill', () => {
