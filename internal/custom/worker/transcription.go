@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,13 +27,14 @@ const transcriptionPollTimeout = 30 * time.Minute
 
 // TranscriptionHandler 转写 job
 type TranscriptionHandler struct {
-	DB     *gorm.DB
-	Tongyi *tongyi.Client
+	DB                      *gorm.DB
+	Tongyi                  *tongyi.Client
+	InternalFrontendBaseURL string
 }
 
 // NewTranscriptionHandler 构造
-func NewTranscriptionHandler(db *gorm.DB, t *tongyi.Client) *TranscriptionHandler {
-	return &TranscriptionHandler{DB: db, Tongyi: t}
+func NewTranscriptionHandler(db *gorm.DB, t *tongyi.Client, internalFrontendBaseURL string) *TranscriptionHandler {
+	return &TranscriptionHandler{DB: db, Tongyi: t, InternalFrontendBaseURL: internalFrontendBaseURL}
 }
 
 // JobType job 类型
@@ -57,7 +59,18 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 
 	// 第一次跑：创建 external task
 	if job.ExternalTaskID == "" {
-		if err := h.Tongyi.ValidateSourceFile(ctx, video.FileURL); err != nil {
+		// hairpin NAT 修复：云服务器内部访问自身公网 IP 会 404，
+		// 用内部 Docker 服务名做源文件可达性校验，传给听悟的仍是公网 URL
+		sourceURL := video.FileURL
+		if h.InternalFrontendBaseURL != "" {
+			if u, parseErr := url.Parse(video.FileURL); parseErr == nil && u.Host != "" {
+				sourceURL = h.InternalFrontendBaseURL + u.Path
+				if u.RawQuery != "" {
+					sourceURL += "?" + u.RawQuery
+				}
+			}
+		}
+		if err := h.Tongyi.ValidateSourceFile(ctx, sourceURL); err != nil {
 			return fmt.Errorf("视频源文件不可供听悟访问: %w", err)
 		}
 		slog.Info("tingwu create task", "video_id", video.ID)
@@ -126,14 +139,15 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 
 	// 结果和下游任务必须同事务提交，避免字幕任务先入队却读不到转写结果。
 	subtitleJob := model.VideoProcessingJob{
-		ID:             uuid.NewString(),
-		VideoID:        video.ID,
-		JobType:        "subtitle_generate",
-		Provider:       "aliyun_tingwu",
-		Status:         "pending",
-		MaxAttempts:    3,
-		InputPayload:   fmt.Sprintf(`{"transcription_job_id":%q}`, job.ID),
-		IdempotencyKey: fmt.Sprintf("subtitle_generate:%s:%s", video.ID, job.ID),
+		ID:                   uuid.NewString(),
+		VideoID:              video.ID,
+		JobType:              "subtitle_generate",
+		TranscriptGeneration: job.TranscriptGeneration,
+		Provider:             "aliyun_tingwu",
+		Status:               "pending",
+		MaxAttempts:          3,
+		InputPayload:         fmt.Sprintf(`{"transcription_job_id":%q}`, job.ID),
+		IdempotencyKey:       fmt.Sprintf("subtitle_generate:%s:%s", video.ID, job.ID),
 	}
 	if err := h.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(job).Update("result_payload", string(payload)).Error; err != nil {

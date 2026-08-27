@@ -73,12 +73,13 @@ type UploadConfig struct {
 
 // TongyiConfig 通义听悟配置（视频转写）
 type TongyiConfig struct {
-	APIKey          string // 已废弃：听悟改用 AccessKey 签名 + AppKey，保留兼容
-	AccessKeyID     string // 阿里云 AccessKey ID（ROA 签名用）
-	AccessKeySecret string // 阿里云 AccessKey Secret（ROA 签名用）
-	AppKey          string // 听悟项目 AppKey（标识转写项目）
-	Endpoint        string // 默认 https://tingwu.cn-beijing.aliyuncs.com
-	CallbackURL     string // 转写完成回调地址（可选，留空走轮询）
+	APIKey                  string // 已废弃：听悟改用 AccessKey 签名 + AppKey，保留兼容
+	AccessKeyID             string // 阿里云 AccessKey ID（ROA 签名用）
+	AccessKeySecret         string // 阿里云 AccessKey Secret（ROA 签名用）
+	AppKey                  string // 听悟项目 AppKey（标识转写项目）
+	Endpoint                string // 默认 https://tingwu.cn-beijing.aliyuncs.com
+	CallbackURL             string // 转写完成回调地址（可选，留空走轮询）
+	InternalFrontendBaseURL string // hairpin NAT 修复：容器内部校验源文件可达性时的回环基址（Docker 服务名）
 }
 
 // WorkerConfig Worker 引擎配置（轮询周期 / 重试上限）
@@ -148,12 +149,13 @@ func Load() *Config {
 			SignTTLSeconds:          getEnvInt("CUSTOM_UPLOAD_SIGN_TTL_SECONDS", 3600),
 		},
 		Tongyi: TongyiConfig{
-			APIKey:          getEnv("TONGYI_API_KEY", ""),
-			AccessKeyID:     getEnv("TONGYI_ACCESS_KEY_ID", ""),
-			AccessKeySecret: getEnv("TONGYI_ACCESS_KEY_SECRET", ""),
-			AppKey:          getEnv("TONGYI_APP_KEY", ""),
-			Endpoint:        getEnv("TONGYI_ENDPOINT", "https://tingwu.cn-beijing.aliyuncs.com"),
-			CallbackURL:     getEnv("TONGYI_CALLBACK_URL", ""),
+			APIKey:                  getEnv("TONGYI_API_KEY", ""),
+			AccessKeyID:             getEnv("TONGYI_ACCESS_KEY_ID", ""),
+			AccessKeySecret:         getEnv("TONGYI_ACCESS_KEY_SECRET", ""),
+			AppKey:                  getEnv("TONGYI_APP_KEY", ""),
+			Endpoint:                getEnv("TONGYI_ENDPOINT", "https://tingwu.cn-beijing.aliyuncs.com"),
+			CallbackURL:             getEnv("TONGYI_CALLBACK_URL", ""),
+			InternalFrontendBaseURL: getEnv("INTERNAL_FRONTEND_BASE_URL", ""),
 		},
 		Worker: WorkerConfig{
 			PollIntervalSeconds: getEnvInt("CUSTOM_WORKER_POLL_INTERVAL", 5),
