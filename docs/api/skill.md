@@ -9,6 +9,12 @@
 | POST | `/sandbox-configs/{id}/skills/{skillId}/reinstall` | 用已保存的安装包重试安装 |
 | GET  | `/sandbox-configs/{id}/skills/{skillId}/files` | 列出已安装技能的文件 |
 | GET  | `/sandbox-configs/{id}/skills/{skillId}/files/content` | 读取已安装技能中的单个文件 |
+| PATCH | `/sandbox-configs/{id}/skills/{skillId}` | 启用/停用技能，或设置空间级环境变量 |
+| GET  | `/me/env-vars` | 列出自己的环境变量与各技能的声明 |
+| PUT  | `/me/env-vars/skill` | 设置自己在某个技能上的变量值 |
+| DELETE | `/me/env-vars/skill` | 删除自己在某个技能上的变量值 |
+| PUT  | `/me/env-vars/sandbox` | 设置自己在某个沙箱配置上的变量值 |
+| DELETE | `/me/env-vars/sandbox` | 删除自己在某个沙箱配置上的变量值 |
 
 ## GET `/skills` - 获取预装 Skills 列表
 
@@ -173,4 +179,96 @@ curl --location 'http://localhost:8080/api/v1/sandbox-configs/{id}/skills/{skill
         "content": "---\nname: pdf-tools\n..."
     }
 }
+```
+
+## 技能的环境变量
+
+技能安装时会声明自己需要哪些环境变量（名称、说明、是否必填）。变量的**值**分两层，执行时按「本人的值 → 空间级值」的顺序取，取不到必填项则拒绝执行：
+
+| 层级 | 谁能写 | 作用范围 | 接口 |
+| --- | --- | --- | --- |
+| 空间级 | Admin+ | 该空间所有人 | `PATCH /sandbox-configs/{id}/skills/{skillId}` |
+| 个人级 | 任何登录成员 | 仅本人 | `PUT /me/env-vars/skill` |
+
+任何接口都**不会**回读已保存的值，只返回 `unset` / `workspace` / `user` 三种状态。清空一个值用 DELETE，而不是写入空字符串——「没填」和「不需要」是两种状态。
+
+个人级的值按**调用身份**存放，而不是按用户 ID。用 API Key 驱动的调用与网页登录是不同身份：在网页 Settings 里填的值不会作用于 API Key 发起的执行，反之亦然。集成方若通过 API Key 运行需要凭据的技能，请让管理员配置空间级值。
+
+### PATCH `/sandbox-configs/{id}/skills/{skillId}` - 更新技能
+
+`enabled` 与 `envs` 都是可选的，可只送其一，但不能都不送（400）。`envs` 只写技能已声明的名称，未声明的名称会被忽略而不是报错；值为空字符串表示清空该值并保留声明。
+
+```curl
+curl --location --request PATCH \
+'http://localhost:8080/api/v1/sandbox-configs/{id}/skills/{skillId}' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{"enabled":true,"envs":{"TAVILY_API_KEY":"tvly-xxxxx"}}'
+```
+
+### GET `/me/env-vars` - 列出自己的环境变量
+
+按沙箱配置分组，返回本人的配置级变量，以及该配置下每个已启用技能声明的变量。`source` 表示这次执行实际会用哪一层的值。
+
+```curl
+curl --location 'http://localhost:8080/api/v1/me/env-vars' \
+--header 'Authorization: Bearer <token>'
+```
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": [
+        {
+            "sandbox_config_id": "cfg-1",
+            "sandbox_config_name": "默认沙箱",
+            "vars": [
+                { "name": "HTTP_PROXY", "source": "user", "updated_at": "2026-08-27T10:00:00Z" }
+            ],
+            "skills": [
+                {
+                    "skill_id": "sk-1",
+                    "skill_name": "web-search",
+                    "vars": [
+                        { "name": "TAVILY_API_KEY", "description": "Tavily 搜索密钥", "required": true, "source": "workspace" },
+                        { "name": "REGION", "source": "unset" }
+                    ]
+                }
+            ]
+        }
+    ]
+}
+```
+
+### PUT / DELETE `/me/env-vars/skill` - 设置或删除自己在技能上的值
+
+`name` 必须是该技能声明过的名称，否则 400。删除后该技能重新回落到空间级值（若有）。
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/me/env-vars/skill' \
+--header 'Authorization: Bearer <token>' \
+--header 'Content-Type: application/json' \
+--data '{"skill_id":"sk-1","name":"TAVILY_API_KEY","value":"tvly-xxxxx"}'
+```
+
+```curl
+curl --location --request DELETE 'http://localhost:8080/api/v1/me/env-vars/skill' \
+--header 'Authorization: Bearer <token>' \
+--header 'Content-Type: application/json' \
+--data '{"skill_id":"sk-1","name":"TAVILY_API_KEY"}'
+```
+
+删除一个本就没设过的值返回 404。
+
+### PUT / DELETE `/me/env-vars/sandbox` - 设置或删除自己的配置级变量
+
+配置级变量不依附于任何技能，名称自定，会注入本人在该沙箱配置上的每一次技能脚本与 shell 命令。`WEKNORA_` 前缀与 `PATH` 等保留名会被拒绝。
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/me/env-vars/sandbox' \
+--header 'Authorization: Bearer <token>' \
+--header 'Content-Type: application/json' \
+--data '{"sandbox_config_id":"cfg-1","name":"HTTP_PROXY","value":"http://127.0.0.1:7890"}'
 ```

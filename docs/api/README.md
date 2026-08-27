@@ -131,7 +131,7 @@ WeKnora API 按功能分为以下几类：
 | 系统管理 | 系统信息、解析引擎、存储引擎 | [system.md](./system.md) |
 | MCP 服务 | MCP 工具服务管理 | [mcp-service.md](./mcp-service.md) |
 | 组织管理 | 组织、成员、知识库/智能体共享 | [organization.md](./organization.md) |
-| Skills | 预装智能体技能 | [skill.md](./skill.md) |
+| Skills | 预装与已安装的智能体技能、技能环境变量 | [skill.md](./skill.md) |
 | 网络搜索 | 网络搜索服务商 | [web-search.md](./web-search.md) |
 | 向量存储 | 向量数据库连接管理 | [vector-store.md](./vector-store.md) |
 | 存储后端 | 对象/文件存储实例（多实例）管理 | [storage-backend.md](./storage-backend.md) |

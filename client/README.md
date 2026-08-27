@@ -15,7 +15,7 @@
 7. **分块管理**：查询、更新和删除知识分块
 8. **消息管理**：获取和删除会话消息
 9. **模型管理**：创建、获取、更新和删除模型
-10. **沙箱技能**：向沙箱配置安装技能（zip 上传，或从 ClawHub / SkillHub / GitHub 等来源）
+10. **沙箱技能**：向沙箱配置安装技能（zip 上传，或从 ClawHub / SkillHub / GitHub 等来源），并配置技能所需的环境变量
 
 ## 使用方法
 
@@ -425,6 +425,37 @@ if err != nil {
 }
 _ = files
 _ = content
+```
+
+### 示例：配置技能的环境变量
+
+技能安装时会声明它需要哪些环境变量。值分两层：空间级由管理员设置、对所有人生效；个人级只对**当前调用身份**生效，并覆盖空间级。任何接口都不会回读已保存的值，只报告是否已设置。
+
+用 API Key 调用与网页登录是两种不同身份：在网页里填的个人级值不会作用于 API Key 发起的执行。集成场景请优先用空间级值。
+
+```go
+// 空间级：对该空间所有人生效，需要 Admin 及以上权限
+skill, err := apiClient.SetSandboxSkillEnvValues(
+    context.Background(), sandboxConfigID, skillID,
+    map[string]string{"TAVILY_API_KEY": "tvly-xxxxx"})
+if err != nil {
+    // 处理错误
+}
+
+// 个人级：只对当前调用身份生效
+err = apiClient.SetMySkillEnvVar(
+    context.Background(), skillID, "TAVILY_API_KEY", "tvly-yyyyy")
+if err != nil {
+    // 处理错误
+}
+
+// 查看哪些变量还没填。清空一个值用 Delete，而不是写入空字符串
+groups, err := apiClient.ListMyEnvVars(context.Background())
+if err != nil {
+    // 处理错误
+}
+_ = skill
+_ = groups
 ```
 
 ## 完整示例
