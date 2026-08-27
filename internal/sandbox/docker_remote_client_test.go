@@ -1091,11 +1091,20 @@ func TestValidateDockerHost(t *testing.T) {
 	require.Error(t, ValidateDockerHost("tcp://10.0.0.5:2376", false),
 		"a private daemon address needs the explicit private-endpoint opt-in")
 	require.NoError(t, ValidateDockerHost("tcp://10.0.0.5:2376", true))
+
+	// Windows' local daemon. Without this the Docker backend is unusable on
+	// Windows: a blank host resolves through the docker CLI context to
+	// npipe://, and the config is refused before it can be saved.
+	require.NoError(t, ValidateDockerHost("npipe:////./pipe/docker_engine", false))
+	require.Error(t, ValidateDockerHost("npipe://", false),
+		"a scheme with no pipe path is not an endpoint")
 }
 
 func TestValidateDockerRemoteTLS(t *testing.T) {
 	require.NoError(t, ValidateDockerRemoteTLS("", ""))
 	require.NoError(t, ValidateDockerRemoteTLS("unix:///var/run/docker.sock", ""))
+	require.NoError(t, ValidateDockerRemoteTLS("npipe:////./pipe/docker_engine", ""),
+		"a named pipe is local to this host, same as a unix socket")
 	require.Error(t, ValidateDockerRemoteTLS("tcp://10.0.0.5:2376", ""),
 		"a remote daemon without TLS is a plaintext root socket")
 	require.NoError(t, ValidateDockerRemoteTLS("tcp://10.0.0.5:2376", "/etc/weknora/docker-certs"))
