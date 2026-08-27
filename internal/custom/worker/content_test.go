@@ -57,3 +57,17 @@ func TestWikiBaselinePersistsAcrossJobRetries(t *testing.T) {
 	require.Equal(t, firstBaseline.JobCreatedAt, secondBaseline.JobCreatedAt)
 	require.Equal(t, 1, listCalls)
 }
+
+func TestSkillQueryUsesTranscriptKnowledgeIDAsSourceDocument(t *testing.T) {
+	video := &model.Video{
+		ID:                    "video-1",
+		Title:                 "测试视频",
+		TranscriptKnowledgeID: "knowledge-1",
+	}
+
+	query := skillQuery(video, skill.SkillExtractKnowledge)
+
+	require.Contains(t, query, "$extract-video-knowledge")
+	require.Contains(t, query, "源文档知识 ID：knowledge-1")
+	require.Contains(t, query, "业务视频 ID：video-1")
+}

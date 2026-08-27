@@ -35,6 +35,13 @@ type BaseSkillHandler struct {
 
 const wikiBaselinePayloadKey = "wiki_page_versions_before_skill"
 
+func skillQuery(video *model.Video, skillName string) string {
+	return fmt.Sprintf(
+		"使用 $%s 处理视频。源文档知识 ID：%s。业务视频 ID：%s 仅用于产物归属。视频标题：%s。",
+		skillName, video.TranscriptKnowledgeID, video.ID, video.Title,
+	)
+}
+
 func (h *BaseSkillHandler) wikiBaseline(
 	ctx context.Context,
 	job *model.VideoProcessingJob,
@@ -100,7 +107,7 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
-	query := fmt.Sprintf("处理视频 %s（源文档知识 ID：%s，标题：%s）", video.ID, video.TranscriptKnowledgeID, video.Title)
+	query := skillQuery(video, contract.SkillName)
 	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query); err != nil {
 		return fmt.Errorf("trigger skill %s: %w", contract.SkillName, err)
 	}
@@ -179,7 +186,7 @@ func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	if err != nil {
 		return fmt.Errorf("graph create session: %w", err)
 	}
-	query := fmt.Sprintf("处理视频 %s（源文档知识 ID：%s，标题：%s）", video.ID, video.TranscriptKnowledgeID, video.Title)
+	query := skillQuery(video, contract.SkillName)
 	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query); err != nil {
 		return fmt.Errorf("graph trigger skill %s: %w", contract.SkillName, err)
 	}
