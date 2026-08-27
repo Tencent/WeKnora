@@ -178,6 +178,15 @@
                     <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
                   </div>
 
+                  <div v-if="!event.pending && getToolOriginalDocumentLinks(event).length && !embeddedMode"
+                    class="tool-original-documents">
+                    <span class="tool-original-documents__label">{{ $t('chat.originalDocuments') }}</span>
+                    <button v-for="source in getToolOriginalDocumentLinks(event)" :key="`${source.knowledgeBaseId}:${source.knowledgeId}`"
+                      type="button" class="tool-original-documents__link" @click.stop="openSourceDocumentPreview(source)">
+                      <t-icon name="file" size="13px" /><span>{{ source.title }}</span><t-icon name="chevron-right" size="13px" />
+                    </button>
+                  </div>
+
                     <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                     class="action-details">
                     <div v-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
@@ -326,6 +335,21 @@
                 <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
                 </div>
               </div>
+              <div v-if="event.done && !embeddedMode && getAnswerSourceDocuments(event.content).length"
+                class="answer-source-documents">
+                <div class="answer-source-documents__title">{{ $t('chat.originalDocuments') }}</div>
+                <button
+                  v-for="source in getAnswerSourceDocuments(event.content)"
+                  :key="`${source.knowledgeBaseId}:${source.knowledgeId}`"
+                  type="button"
+                  class="answer-source-documents__link"
+                  @click.stop="openSourceDocumentPreview(source)"
+                >
+                  <t-icon name="file" size="14px" />
+                  <span>{{ source.title }}</span>
+                  <t-icon name="chevron-right" size="14px" />
+                </button>
+              </div>
               <div v-if="answerFullyRendered && event.done && event.content && event.content.trim() && !embeddedMode"
                 class="answer-toolbar">
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
@@ -434,6 +458,15 @@
                 <div v-if="!event.pending && event.tool_name === 'attachment_parsing'"
                   class="search-results-summary-fixed attachment-parsing-summary">
                   <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
+                </div>
+
+                <div v-if="!event.pending && getToolOriginalDocumentLinks(event).length && !embeddedMode"
+                  class="tool-original-documents">
+                  <span class="tool-original-documents__label">{{ $t('chat.originalDocuments') }}</span>
+                  <button v-for="source in getToolOriginalDocumentLinks(event)" :key="`${source.knowledgeBaseId}:${source.knowledgeId}`"
+                    type="button" class="tool-original-documents__link" @click.stop="openSourceDocumentPreview(source)">
+                    <t-icon name="file" size="13px" /><span>{{ source.title }}</span><t-icon name="chevron-right" size="13px" />
+                  </button>
                 </div>
 
                 <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
@@ -545,6 +578,8 @@ import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
 import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
+import { useChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
+import { openKnowledgeDocumentPreview } from '@/utils/documentPreviewTarget';
 import type { KnowledgeReferenceLike, ReferenceHighlightTarget } from '@/utils/referenceSources';
 import { resolveCitationChunkId } from '@/utils/citationMarkdown';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
@@ -567,6 +602,7 @@ import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
 import { previewShellCommand } from '@/utils/shellExecResult';
 import type { DisplayType } from '@/types/tool-results';
 import { parseWikiToolReferences } from '@/utils/wikiToolReferences';
+import { isWikiSourceDocumentPreviewEnabled } from '@/utils/wikiSourceDocumentPreview';
 import {
   buildManualMarkdown,
   formatManualTitle,
@@ -598,6 +634,7 @@ const route = useRoute();
 const uiStore = useUIStore();
 const settingsStore = useSettingsStore();
 const authStore = useAuthStore();
+const attachmentPreviewDrawer = useChatAttachmentPreviewDrawer();
 const { t } = useI18n();
 
 ensureMermaidInitialized();
@@ -778,6 +815,17 @@ watch(wikiDrawerContent, async () => {
     await hydrateProtectedFileImages(wikiDrawerBodyRef.value, protectedFileAccess.value);
   }
 });
+
+type PreviewableSourceDocument = {
+  knowledgeBaseId: string;
+  knowledgeId: string;
+  title: string;
+  fileType?: string;
+};
+
+const openSourceDocumentPreview = (source: PreviewableSourceDocument) => {
+  openKnowledgeDocumentPreview(attachmentPreviewDrawer, source);
+};
 
 const openWikiDrawer = async (kbId: string, slug: string) => {
   if (!kbId || !slug) return;
@@ -983,16 +1031,22 @@ const getReferencesForDrawer = (
   const messageReferences = refsOverride?.length
     ? refsOverride
     : props.session?.knowledge_references;
-  if (messageReferences?.length) return messageReferences;
+  // Keep both the aggregated answer references and the completed Wiki tool
+  // references. The former is what citation highlighting needs, while the
+  // latter carries the server-confirmed source_documents metadata. Returning
+  // only messageReferences made a Wiki citation lose its original-document
+  // links as soon as the final answer emitted its normal references event.
+  const toolReferences = (props.session?.agentEventStream || []).flatMap((event) =>
+    getToolReferenceItems(event),
+  );
+  if (messageReferences?.length) return [...messageReferences, ...toolReferences];
 
   // Agent answers can already contain citation tags before the aggregated
   // knowledge_references event is emitted (and some restored conversations do
   // not have that aggregate at all). The completed retrieval tool events still
   // carry the same source data, so use them to keep citation clicks in the
   // references drawer instead of falling through to KB-page navigation.
-  return (props.session?.agentEventStream || []).flatMap((event) =>
-    getToolReferenceItems(event),
-  );
+  return toolReferences;
 };
 
 const openReferencesDrawer = (
@@ -1170,12 +1224,19 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
   if (!toolData) return [];
 
   if (toolName === 'wiki_search' || toolName === 'wiki_read_page') {
-    return parseWikiToolReferences(toolName, event.output, event.tool_call_id || toolName)
+    return parseWikiToolReferences(toolName, event.output, event.tool_call_id || toolName, toolData)
       .map((item) => ({
         id: item.id,
         chunk_type: 'tool_result',
         knowledge_title: item.title,
         content: item.content,
+        wiki_source_documents: item.sourceDocuments?.map((doc) => ({
+          knowledge_id: doc.knowledgeId,
+          knowledge_base_id: doc.knowledgeBaseId,
+          title: doc.title,
+          file_type: doc.fileType,
+          preview_enabled: true,
+        })),
         metadata: {
           title: item.title,
           source: getLocalizedToolName(toolName),
@@ -1277,14 +1338,29 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
 
   if (toolName === 'list_knowledge_chunks' || toolName === 'wiki_read_source_doc') {
     const chunks = Array.isArray(toolData.chunks) ? toolData.chunks : [];
+    // A Wiki source document becomes previewable only when the server
+    // explicitly authorizes it. Document identity alone is insufficient.
+    const sourceDocumentPreviewEnabled =
+      toolName !== 'wiki_read_source_doc' || isWikiSourceDocumentPreviewEnabled(toolData);
     if (chunks.length) {
       return mergeDocumentReferences(chunks
         .filter((item: any) => item?.content)
         .map((item: any, index: number) => ({
           id: item.chunk_id || item.id || `${toolData.knowledge_id || 'doc'}-${index + 1}`,
-          knowledge_id: item.knowledge_id || toolData.knowledge_id,
+          knowledge_id: sourceDocumentPreviewEnabled
+            ? item.knowledge_id || toolData.knowledge_id
+            : undefined,
           knowledge_title: toolData.faq_question || toolData.knowledge_title || toolData.knowledge_id,
-          knowledge_base_id: item.knowledge_base_id || toolData.knowledge_base_id,
+          knowledge_base_id: sourceDocumentPreviewEnabled
+            ? item.knowledge_base_id || item.knowledge_base || toolData.knowledge_base_id
+            : undefined,
+          file_type: sourceDocumentPreviewEnabled ? item.file_type || toolData.file_type : undefined,
+          preview_enabled: sourceDocumentPreviewEnabled,
+          metadata: toolName === 'wiki_read_source_doc' ? {
+            title: toolData.knowledge_title || toolData.knowledge_id || getToolDescription(event),
+            source: getLocalizedToolName(toolName),
+            tool: toolName,
+          } : undefined,
           chunk_index: item.chunk_index ?? item.index ?? index + 1,
           chunk_type: item.chunk_type || (toolData.faq_question ? 'faq' : undefined),
           content: item.content || '',
@@ -1292,12 +1368,32 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
     }
 
     const output = cleanToolOutputContent(event.output);
+    // Wiki source-doc results intentionally omit their bulky output during
+    // persistence. Keep a document card from the authorized top-level metadata.
+    if (toolName === 'wiki_read_source_doc' && toolData.knowledge_id) {
+      return [{
+        id: toolData.knowledge_id,
+        knowledge_id: sourceDocumentPreviewEnabled ? toolData.knowledge_id : undefined,
+        knowledge_title: toolData.knowledge_title || toolData.knowledge_id,
+        knowledge_base_id: sourceDocumentPreviewEnabled ? toolData.knowledge_base_id : undefined,
+        file_type: sourceDocumentPreviewEnabled ? toolData.file_type : undefined,
+        preview_enabled: sourceDocumentPreviewEnabled,
+        content: output,
+        metadata: {
+          title: toolData.knowledge_title || toolData.knowledge_id,
+          source: getLocalizedToolName(toolName),
+          tool: toolName,
+        },
+      }];
+    }
     if (!output) return [];
     return [{
       id: toolData.faq_id || toolData.knowledge_id || event.tool_call_id,
       knowledge_id: toolData.knowledge_id,
       knowledge_title: toolData.faq_question || toolData.knowledge_title || toolData.knowledge_id || getToolDescription(event),
       knowledge_base_id: toolData.knowledge_base_id,
+      file_type: toolData.file_type,
+      preview_enabled: toolData.preview_enabled,
       chunk_type: toolData.faq_question ? 'faq' : undefined,
       content: output,
     }];
@@ -1305,6 +1401,80 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
 
   return [];
 }
+
+const getToolOriginalDocumentLinks = (event: any): Array<{
+  knowledgeId: string;
+  knowledgeBaseId: string;
+  title: string;
+  fileType?: string;
+}> => {
+  if (!event || event.pending || (event.tool_name !== 'wiki_read_page' && event.tool_name !== 'wiki_read_source_doc')) {
+    return [];
+  }
+  const data = event.tool_data || {};
+  const candidates: any[] = [];
+  if (event.tool_name === 'wiki_read_source_doc' && data.knowledge_id) {
+    candidates.push(data);
+  }
+  if (event.tool_name === 'wiki_read_page' && Array.isArray(data.source_documents)) {
+    data.source_documents.forEach((page: any) => {
+      if (Array.isArray(page?.source_documents)) candidates.push(...page.source_documents);
+    });
+  }
+  const seen = new Set<string>();
+  return candidates.flatMap((source: any) => {
+    const knowledgeId = String(source?.knowledge_id || '').trim();
+    const knowledgeBaseId = String(source?.knowledge_base_id || '').trim();
+    const title = String(source?.title || source?.knowledge_title || '').trim();
+    const fileType = String(source?.file_type || '').trim();
+    if (
+      !knowledgeId ||
+      !knowledgeBaseId ||
+      !title ||
+      !isWikiSourceDocumentPreviewEnabled(source)
+    ) return [];
+    const key = `${knowledgeBaseId}:${knowledgeId}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ knowledgeId, knowledgeBaseId, title, ...(fileType ? { fileType } : {}) }];
+  });
+};
+
+const findPreviewableSourceDocument = (
+  title: string,
+  expectedKnowledgeId = '',
+  expectedKnowledgeBaseId = '',
+): PreviewableSourceDocument | null => {
+  const normalizedTitle = String(title || '').trim().toLocaleLowerCase();
+  const normalizedKnowledgeId = String(expectedKnowledgeId || '').trim();
+  const normalizedKnowledgeBaseId = String(expectedKnowledgeBaseId || '').trim();
+  if (!normalizedTitle && (!normalizedKnowledgeId || !normalizedKnowledgeBaseId)) return null;
+
+  const seen = new Set<string>();
+  for (const reference of getReferencesForDrawer()) {
+    const candidates = [
+      ...(Array.isArray(reference.wiki_source_documents) ? reference.wiki_source_documents : []),
+      reference,
+    ];
+    for (const source of candidates as any[]) {
+      if (!isWikiSourceDocumentPreviewEnabled(source)) continue;
+      const knowledgeId = String(source?.knowledge_id || '').trim();
+      const knowledgeBaseId = String(source?.knowledge_base_id || '').trim();
+      const sourceTitle = String(source?.title || source?.knowledge_title || source?.knowledge_filename || '').trim();
+      if (!knowledgeId || !knowledgeBaseId || !sourceTitle) continue;
+      const key = `${knowledgeBaseId}:${knowledgeId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const identityMatches = normalizedKnowledgeId && normalizedKnowledgeBaseId &&
+        knowledgeId === normalizedKnowledgeId && knowledgeBaseId === normalizedKnowledgeBaseId;
+      const titleMatches = normalizedTitle && sourceTitle.toLocaleLowerCase() === normalizedTitle;
+      if (!identityMatches && !titleMatches) continue;
+      const fileType = String(source?.file_type || '').trim();
+      return { knowledgeId, knowledgeBaseId, title: sourceTitle, ...(fileType ? { fileType } : {}) };
+    }
+  }
+  return null;
+};
 
 const canOpenToolReferences = (event: any): boolean => getToolReferenceItems(event).length > 0;
 
@@ -2221,6 +2391,23 @@ const onRootClick = (e: Event) => {
     }
   }
 
+  // Handle explicit source-document links such as `[paper](d1)`. The HTML
+  // carries server-verified identity metadata, but the click still resolves it
+  // against this turn's authorized structured tool results before previewing.
+  const sourceDocumentEl = target.closest?.('.wiki-source-document-link') as HTMLElement | null;
+  if (sourceDocumentEl) {
+    e.preventDefault();
+    e.stopPropagation();
+    const title = sourceDocumentEl.getAttribute('data-source-document-title') || '';
+    const knowledgeId = sourceDocumentEl.getAttribute('data-source-document-id') || '';
+    const knowledgeBaseId = sourceDocumentEl.getAttribute('data-source-document-kb-id') || '';
+    const source = findPreviewableSourceDocument(title, knowledgeId, knowledgeBaseId);
+    if (source) {
+      openSourceDocumentPreview(source);
+    }
+    return;
+  }
+
   // Handle web citation clicks
   const webEl = target.closest?.('.citation-web') as HTMLElement | null;
   if (webEl && webEl.getAttribute('data-url')) {
@@ -2260,16 +2447,13 @@ const onRootClick = (e: Event) => {
     return;
   }
 
-  // Handle wiki link clicks -> navigate to KB wiki browser page
+  // Handle wiki link clicks -> open the Wiki page drawer.
   const wikiEl = target.closest?.('.citation-wiki') as HTMLElement | null;
   if (wikiEl && wikiEl.getAttribute('data-slug')) {
     e.preventDefault();
     e.stopPropagation();
     const slug = wikiEl.getAttribute('data-slug');
-
-    // Determine the relevant KB ID
-    const kbId = getKbIdForWiki(slug || '');
-
+    const kbId = wikiEl.getAttribute('data-kb-id') || getKbIdForWiki(slug || '');
     if (kbId && slug) {
       openWikiDrawer(kbId, slug);
     } else {
@@ -2300,6 +2484,21 @@ const onRootKeydown = (e: KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       openArtifactDrawer(artifactIndex);
+    }
+    return;
+  }
+
+  // Handle explicit source-document links such as `[paper](d1)`.
+  const sourceDocumentEl = target.closest?.('.wiki-source-document-link') as HTMLElement | null;
+  if (sourceDocumentEl) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      e.stopPropagation();
+      const title = sourceDocumentEl.getAttribute('data-source-document-title') || '';
+      const knowledgeId = sourceDocumentEl.getAttribute('data-source-document-id') || '';
+      const knowledgeBaseId = sourceDocumentEl.getAttribute('data-source-document-kb-id') || '';
+      const source = findPreviewableSourceDocument(title, knowledgeId, knowledgeBaseId);
+      if (source) openSourceDocumentPreview(source);
     }
     return;
   }
@@ -2353,7 +2552,7 @@ const onRootKeydown = (e: KeyboardEvent) => {
       e.preventDefault();
       const slug = wikiEl.getAttribute('data-slug');
 
-      const kbId = getKbIdForWiki(slug || '');
+      const kbId = wikiEl.getAttribute('data-kb-id') || getKbIdForWiki(slug || '');
 
       if (kbId && slug) {
         openWikiDrawer(kbId, slug);
@@ -2461,10 +2660,76 @@ const renderMarkdownContent = (content: unknown): string => {
 // Renders an answer event's content. Strips final-answer wrappers
 // (e.g. <answer>…</answer>, "Final Answer:") that some models wrap their
 // plain-text answer in, then delegates to the standard markdown renderer.
+const collectVerifiedSourceDocuments = (answerContent: unknown): Array<{
+  knowledgeId: string;
+  knowledgeBaseId: string;
+  title: string;
+  fileType?: string;
+}> => {
+  if (props.embeddedMode) return [];
+  const answer = String(answerContent || '');
+  const citedWikiSlugs = new Set(
+    Array.from(answer.matchAll(/\[\[([^|\]]+)(?:\|[^\]]+)?\]\]/g), (match) => String(match[1] || '').trim())
+      .filter(Boolean),
+  );
+  const seen = new Set<string>();
+  const documents: Array<{
+    knowledgeId: string;
+    knowledgeBaseId: string;
+    title: string;
+    fileType?: string;
+  }> = [];
+
+  const appendSource = (source: any) => {
+    if (!isWikiSourceDocumentPreviewEnabled(source)) return;
+    const knowledgeId = String(source?.knowledge_id || '').trim();
+    const knowledgeBaseId = String(source?.knowledge_base_id || '').trim();
+    const title = String(source?.title || source?.knowledge_title || '').trim();
+    if (!knowledgeId || !knowledgeBaseId || !title) return;
+    const key = `${knowledgeBaseId}:${knowledgeId}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const fileType = String(source?.file_type || '').trim();
+    documents.push({ knowledgeId, knowledgeBaseId, title, ...(fileType ? { fileType } : {}) });
+  };
+
+  for (const reference of getReferencesForDrawer()) {
+    if (Array.isArray(reference.wiki_source_documents)) {
+      const slug = String(reference.metadata?.slug || '').trim();
+      const knowledgeBaseId = String(reference.metadata?.knowledge_base_id || '').trim();
+      if (
+        !slug ||
+        !citedWikiSlugs.has(slug) ||
+        !knowledgeBaseId ||
+        knowledgeBaseId !== getKbIdForWiki(slug)
+      ) continue;
+      reference.wiki_source_documents.forEach(appendSource);
+      continue;
+    }
+    const deepReadTitle = String(reference.knowledge_title || '').trim();
+    const deepReadID = String(reference.knowledge_id || '').trim();
+    if (
+      reference.metadata?.tool === 'wiki_read_source_doc' &&
+      ((deepReadTitle && answer.includes(deepReadTitle)) || (deepReadID && answer.includes(deepReadID)))
+    ) {
+      appendSource({
+        knowledge_id: reference.knowledge_id,
+        knowledge_base_id: reference.knowledge_base_id,
+        title: reference.knowledge_title || reference.knowledge_filename || '',
+        file_type: reference.file_type,
+        preview_enabled: reference.preview_enabled,
+      });
+    }
+  }
+  return documents;
+};
+
 const renderAnswerContent = (content: unknown): string => {
   const contentStr = typeof content === 'string' ? content : String(content || '');
   return renderMarkdownContent(unwrapFinalAnswerWrappers(contentStr));
 };
+
+const getAnswerSourceDocuments = (answerContent: unknown) => collectVerifiedSourceDocuments(answerContent);
 
 // Legacy Markdown rendering function (kept for summaries)
 const renderMarkdown = (content: unknown): string => {
@@ -3802,6 +4067,95 @@ const handleAddToKnowledge = (answerEvent: any) => {
     font-size: var(--agent-step-text-size);
     color: var(--td-text-color-secondary);
   }
+
+  .tool-original-documents {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 4px 0 0 34px;
+    color: var(--td-text-color-placeholder);
+    font-size: 12px;
+  }
+
+  .tool-original-documents__link {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    max-width: 280px;
+    padding: 0;
+    border: 0;
+    appearance: none;
+    background: transparent;
+    color: var(--td-brand-color);
+    font: inherit;
+    font-size: 12px;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .tool-original-documents__link span {
+    overflow: hidden;
+    border-bottom: 1px dashed var(--td-brand-color);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tool-original-documents__link:hover span,
+  .tool-original-documents__link:focus-visible span {
+    border-bottom-style: solid;
+  }
+
+  .tool-original-documents__link:focus-visible {
+    outline: none;
+  }
+
+  .answer-source-documents {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px 8px;
+    margin-top: 8px;
+    font-size: 14px;
+  }
+
+  .answer-source-documents__title {
+    flex-basis: 100%;
+    color: var(--td-text-color-primary);
+    line-height: 1.6;
+  }
+
+  .answer-source-documents__link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: min(100%, 720px);
+    padding: 0;
+    border: 0;
+    appearance: none;
+    background: transparent;
+    color: var(--td-brand-color);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .answer-source-documents__link span {
+    overflow: hidden;
+    border-bottom: 1px dashed var(--td-brand-color);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .answer-source-documents__link:hover span,
+  .answer-source-documents__link:focus-visible span {
+    border-bottom-style: solid;
+  }
+
+  .answer-source-documents__link:focus-visible {
+    outline: none;
+  }
+
 }
 </style>
 

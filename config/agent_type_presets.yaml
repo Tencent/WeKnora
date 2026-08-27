@@ -88,6 +88,7 @@ agent_type_presets:
         - "wiki_read_page"
         - "wiki_read_source_doc"
         - "wiki_flag_issue"
+        - "wiki_source_preview"
       retain_retrieval_history: false
       kb_selection_mode: "all"
     # kb_filter derived from allowed_tools: any_of = [wiki]
@@ -122,6 +123,7 @@ agent_type_presets:
         - "list_knowledge_chunks"
         - "get_document_info"
         - "wiki_flag_issue"
+        - "wiki_source_preview"
       retain_retrieval_history: false
       faq_priority_enabled: true
       kb_selection_mode: "all"

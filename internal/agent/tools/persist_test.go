@@ -69,6 +69,129 @@ func TestSanitizeAgentStepsForStorage_stripsLargeOutput(t *testing.T) {
 	}
 }
 
+func TestWikiReadPageDisabledPreviewRedactsClientAndStoredSources(t *testing.T) {
+	result := &types.ToolResult{
+		Success: true,
+		Output:  `<wiki_page><metadata><sources><source knowledge_id="doc-1">Paper.pdf</source></sources></metadata><content>Readable Wiki body.</content></wiki_page>`,
+		Data: map[string]interface{}{
+			"preview_enabled": false,
+		},
+	}
+
+	client := SanitizeToolResultForClient(ToolWikiReadPage, result)
+	clientOutput, _ := client["output"].(string)
+	if strings.Contains(clientOutput, "doc-1") || strings.Contains(clientOutput, "knowledge_id") {
+		t.Fatalf("disabled client output must redact model-only source handles: %q", clientOutput)
+	}
+	if !strings.Contains(clientOutput, "<sources>") || !strings.Contains(clientOutput, "Paper.pdf") {
+		t.Fatalf("source titles must remain visible: %q", clientOutput)
+	}
+	if !strings.Contains(clientOutput, "Readable Wiki body.") {
+		t.Fatalf("Wiki content must remain visible: %q", clientOutput)
+	}
+	if !strings.Contains(result.Output, "doc-1") {
+		t.Fatal("client sanitization must not mutate the in-memory model result")
+	}
+
+	stored := SanitizeAgentStepsForStorage([]types.AgentStep{{ToolCalls: []types.ToolCall{{
+		Name:   ToolWikiReadPage,
+		Result: result,
+	}}}})
+	if !strings.Contains(stored[0].ToolCalls[0].Result.Output, "doc-1") {
+		t.Fatal("persisted model history must retain the source handle")
+	}
+
+	messages := []*types.Message{{AgentSteps: types.AgentSteps(stored)}}
+	clientMessages := SanitizeMessagesForClient(messages)
+	clientHistoryOutput := clientMessages[0].AgentSteps[0].ToolCalls[0].Result.Output
+	if strings.Contains(clientHistoryOutput, "doc-1") || strings.Contains(clientHistoryOutput, "knowledge_id") {
+		t.Fatalf("history API copy must redact source handles: %q", clientHistoryOutput)
+	}
+	if !strings.Contains(clientHistoryOutput, "Paper.pdf") {
+		t.Fatalf("history API copy should retain the source title: %q", clientHistoryOutput)
+	}
+	if !strings.Contains(messages[0].AgentSteps[0].ToolCalls[0].Result.Output, "doc-1") {
+		t.Fatal("client history sanitization must not mutate the persisted message")
+	}
+}
+
+func TestWikiReadSourceDocArgumentsAreRedactedOnlyFromClientCopy(t *testing.T) {
+	liveArgs := SanitizeToolArgumentsForClient(ToolWikiReadSourceDoc, map[string]interface{}{
+		"knowledge_id": "doc-1",
+		"query":        "evidence",
+	})
+	if _, ok := liveArgs["knowledge_id"]; ok {
+		t.Fatal("live tool-call payload must not expose the source document ID")
+	}
+	if liveArgs["query"] != "evidence" {
+		t.Fatalf("live non-identity arguments must remain, got %#v", liveArgs)
+	}
+
+	messages := []*types.Message{{AgentSteps: types.AgentSteps{{ToolCalls: []types.ToolCall{{
+		Name: ToolWikiReadSourceDoc,
+		Args: map[string]interface{}{
+			"knowledge_id": "doc-1",
+			"query":        "evidence",
+		},
+	}}}}}}
+
+	client := SanitizeMessagesForClient(messages)
+	args := client[0].AgentSteps[0].ToolCalls[0].Args
+	if _, ok := args["knowledge_id"]; ok {
+		t.Fatal("history API copy must not expose the source document ID")
+	}
+	if args["query"] != "evidence" {
+		t.Fatalf("non-identity arguments must remain, got %#v", args)
+	}
+	if messages[0].AgentSteps[0].ToolCalls[0].Args["knowledge_id"] != "doc-1" {
+		t.Fatal("client sanitization must not mutate persisted model history")
+	}
+}
+
+func TestLegacyWikiResultsWithoutPreviewCapabilityFailClosed(t *testing.T) {
+	pageClient := SanitizeToolResultForClient(ToolWikiReadPage, &types.ToolResult{
+		Success: true,
+		Output:  `<sources><source knowledge_id="legacy-doc">Legacy.pdf</source></sources>`,
+		Data: map[string]interface{}{
+			"source_documents": []interface{}{map[string]interface{}{"knowledge_id": "legacy-doc"}},
+		},
+	})
+	if strings.Contains(pageClient["output"].(string), "legacy-doc") {
+		t.Fatal("legacy Wiki page output without explicit preview capability must redact document IDs")
+	}
+	if _, ok := pageClient["source_documents"]; ok {
+		t.Fatal("legacy Wiki page metadata without capability must be removed")
+	}
+
+	docClient := SanitizeToolResultForClient(ToolWikiReadSourceDoc, &types.ToolResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"knowledge_id":      "legacy-doc",
+			"knowledge_base_id": "kb-1",
+			"file_type":         "pdf",
+		},
+	})
+	for _, key := range []string{"knowledge_id", "knowledge_base_id", "file_type"} {
+		if _, ok := docClient[key]; ok {
+			t.Fatalf("legacy source-doc client metadata must remove %s", key)
+		}
+	}
+}
+
+func TestWikiReadPageEnabledPreviewKeepsClientSources(t *testing.T) {
+	result := &types.ToolResult{
+		Success: true,
+		Output:  `<sources><source knowledge_id="doc-1">Paper.pdf</source></sources>`,
+		Data: map[string]interface{}{
+			"preview_enabled": true,
+		},
+	}
+	client := SanitizeToolResultForClient(ToolWikiReadPage, result)
+	if !strings.Contains(client["output"].(string), "doc-1") {
+		t.Fatal("enabled client output should keep model source handles")
+	}
+}
+
 func TestSanitizeToolResultForClient_omitsOutput(t *testing.T) {
 	meta := SanitizeToolResultForClient(ToolListKnowledgeChunks, &types.ToolResult{
 		Success: true,

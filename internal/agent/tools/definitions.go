@@ -46,7 +46,21 @@ const (
 	ToolWikiFlagIssue     = "wiki_flag_issue"
 	ToolWikiReadIssue     = "wiki_read_issue"
 	ToolWikiUpdateIssue   = "wiki_update_issue"
+	// ToolWikiSourcePreview is a UI capability stored in allowed_tools. It
+	// controls source-document preview metadata but is not an LLM function.
+	ToolWikiSourcePreview = "wiki_source_preview"
 )
+
+// WikiSourcePreviewEnabled reports whether the client-side Wiki source
+// preview capability is present in the persisted tool allowlist.
+func WikiSourcePreviewEnabled(allowedTools []string) bool {
+	for _, name := range allowedTools {
+		if name == ToolWikiSourcePreview {
+			return true
+		}
+	}
+	return false
+}
 
 // AvailableTool defines a simple tool metadata used by settings APIs.
 type AvailableTool struct {

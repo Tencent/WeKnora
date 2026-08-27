@@ -3,10 +3,19 @@ export type ReferenceItemKind = 'web' | 'document' | 'tool'
 export type KnowledgeReferenceLike = {
   id?: string
   chunk_ids?: string[]
+  wiki_source_documents?: Array<{
+    knowledge_id: string
+    knowledge_base_id: string
+    title: string
+    file_type?: string
+    preview_enabled?: boolean
+  }>
   knowledge_id?: string
   knowledge_title?: string
   knowledge_filename?: string
   knowledge_base_id?: string
+  file_type?: string
+  preview_enabled?: boolean
   chunk_index?: number
   chunk_type?: string
   content?: string
@@ -26,7 +35,14 @@ export type ReferenceListItem = {
   chunkIds?: string[]
   knowledgeId?: string
   knowledgeBaseId?: string
+  fileType?: string
   content?: string
+  wikiSourceDocuments?: Array<{
+    knowledgeId: string
+    knowledgeBaseId: string
+    title: string
+    fileType?: string
+  }>
 }
 
 export type ReferenceDrawerSection = {
@@ -174,6 +190,7 @@ function buildDocumentItem(item: KnowledgeReferenceLike, index: number): Referen
     chunkIds: item.chunk_ids,
     knowledgeId: item.knowledge_id,
     knowledgeBaseId: item.knowledge_base_id,
+    fileType: item.file_type,
     snippet: truncateText(item.content || '', 220) || undefined,
     content: item.content,
   }
@@ -190,6 +207,19 @@ function buildToolItem(item: KnowledgeReferenceLike, index: number): ReferenceLi
     snippet: truncateText(item.content || '', 220) || undefined,
     chunkId: id,
     content: item.content,
+    wikiSourceDocuments: item.wiki_source_documents
+      ?.filter((source) => (
+        source.preview_enabled === true &&
+        Boolean(source.knowledge_id) &&
+        Boolean(source.knowledge_base_id) &&
+        Boolean(source.title)
+      ))
+      .map((source) => ({
+        knowledgeId: source.knowledge_id,
+        knowledgeBaseId: source.knowledge_base_id,
+        title: source.title,
+        fileType: source.file_type,
+      })),
   }
 }
 

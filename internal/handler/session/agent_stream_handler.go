@@ -203,7 +203,7 @@ func (h *AgentStreamHandler) handleToolCall(ctx context.Context, evt event.Event
 
 	metadata := map[string]interface{}{
 		"tool_name":    data.ToolName,
-		"arguments":    data.Arguments,
+		"arguments":    agenttools.SanitizeToolArgumentsForClient(data.ToolName, data.Arguments),
 		"tool_call_id": data.ToolCallID,
 	}
 

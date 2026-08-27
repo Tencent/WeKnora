@@ -18,6 +18,8 @@ import {
 import {
   collapseStandaloneCitationParagraphs,
   joinCitationTagsToPreviousLine,
+  normalizeWikiDocumentMarkdownLinks,
+  normalizeWikiMarkdownLinks,
   resolveCitationChunkId,
   stripIncompleteCitationTag,
 } from './citationMarkdown.ts'
@@ -66,6 +68,225 @@ test('normalizeFullwidthMarkdownImageParentheses repairs localized image delimit
 test('normalizeFullwidthMarkdownImageParentheses preserves literal examples in code', () => {
   const code = '`![]（resource://example）`\n```md\n![]（resource://example）\n```'
   assert.equal(normalizeFullwidthMarkdownImageParentheses(code), code)
+})
+
+test('normalizeWikiMarkdownLinks converts summary UUID links into Wiki drawer links', () => {
+  const slug = 'summary/9de7e0d1-345d-49f9-be08-f534246d2d49'
+  assert.equal(
+    normalizeWikiMarkdownLinks(`[论文标题](${slug})`),
+    `[[${slug}|论文标题]]`,
+  )
+})
+
+test('normalizeWikiMarkdownLinks leaves ordinary links and code examples unchanged', () => {
+  const slug = 'summary/9de7e0d1-345d-49f9-be08-f534246d2d49'
+  const input = `[外部](https://example.com) [相对](docs/paper.pdf)\n\n\`[代码](${slug})\`\n\n\`\`\`md\n[代码块](${slug})\n\`\`\``
+  assert.equal(normalizeWikiMarkdownLinks(input), input)
+})
+
+test('normalizeWikiDocumentMarkdownLinks converts an authorized dN link into a preview action', () => {
+  const html = normalizeWikiDocumentMarkdownLinks('[论文标题](d1)', [{
+    wiki_source_documents: [{
+      knowledge_id: 'doc-1',
+      knowledge_base_id: 'kb-1',
+      title: '论文标题',
+      file_type: 'pdf',
+      preview_enabled: true,
+    }],
+  }])
+
+  assert.match(html, /class="wiki-source-document-link"/)
+  assert.match(html, /data-source-document-title="论文标题"/)
+  assert.match(html, /data-source-document-id="doc-1"/)
+  assert.match(html, /data-source-document-kb-id="kb-1"/)
+  assert.doesNotMatch(html, /href="d1"/)
+})
+
+test('normalizeWikiDocumentMarkdownLinks removes unauthorized dN destinations', () => {
+  assert.equal(
+    normalizeWikiDocumentMarkdownLinks('[论文标题](d1)', [{
+      wiki_source_documents: [{
+        knowledge_id: 'doc-1',
+        knowledge_base_id: 'kb-1',
+        title: '其他论文',
+        preview_enabled: true,
+      }],
+    }]),
+    '论文标题',
+  )
+})
+
+test('normalizeWikiDocumentMarkdownLinks links a verified filename only in an original-file table column', () => {
+  const filename = '论文-SCI-新一代测序面板在新生儿筛查中的应用.pdf'
+  const markdown = [
+    '| 名字 | Wiki | 原文件链接 |',
+    '| --- | --- | --- |',
+    `| 脂肪酸氧化障碍 | [[summary/page-1|脂肪酸氧化障碍]] | ${filename} |`,
+    '',
+    `正文再次出现 ${filename} 时不应自动链接。`,
+  ].join('\n')
+  const normalized = normalizeWikiDocumentMarkdownLinks(markdown, [{
+    wiki_source_documents: [{
+      knowledge_id: 'doc-1',
+      knowledge_base_id: 'kb-1',
+      title: filename,
+      file_type: 'pdf',
+      preview_enabled: true,
+    }],
+  }])
+
+  assert.equal((normalized.match(/class="wiki-source-document-link"/g) || []).length, 1)
+  assert.match(normalized, /data-source-document-id="doc-1"/)
+  assert.match(normalized, new RegExp(`正文再次出现 ${filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} 时不应自动链接。`))
+})
+
+test('normalizeWikiDocumentMarkdownLinks leaves ambiguous plain filenames unlinked', () => {
+  const markdown = '| 名字 | 原文件链接 |\n| --- | --- |\n| 条目 | 同名论文.pdf |'
+  const refs = ['doc-1', 'doc-2'].map((knowledgeId) => ({
+    wiki_source_documents: [{
+      knowledge_id: knowledgeId,
+      knowledge_base_id: 'kb-1',
+      title: '同名论文.pdf',
+      preview_enabled: true,
+    }],
+  }))
+  assert.equal(normalizeWikiDocumentMarkdownLinks(markdown, refs), markdown)
+})
+
+test('renderChatMarkdown preserves a repaired original-file preview inside a table', () => {
+  const filename = '新生儿筛查研究.pdf'
+  const html = renderChatMarkdown(
+    `| 名字 | 原文件链接 |\n| --- | --- |\n| 条目 | ${filename} |`,
+    {
+      renderer: createChatMarkdownRenderer(),
+      escapeMarkdown: (text) => text,
+      sanitizeHtml: (value) => value,
+      streaming: false,
+      knowledgeReferences: [{
+        wiki_source_documents: [{
+          knowledge_id: 'doc-1',
+          knowledge_base_id: 'kb-1',
+          title: filename,
+          preview_enabled: true,
+        }],
+      }],
+    },
+  )
+
+  assert.match(html, /<table>/)
+  assert.match(html, /class="wiki-source-document-link"/)
+  assert.match(html, /data-source-document-id="doc-1"/)
+})
+
+test('original-file table columns win over summary Wiki-link normalization', () => {
+  const filename = '论文-SCI-博圣生物-新一代测序（NGS）面板在新生儿筛查中的应用可高效识别新生儿的先天性疾病.pdf'
+  const markdown = [
+    '| 名字 | Wiki | 原文件链接 |',
+    '| --- | --- | --- |',
+    `| 短链酰基辅酶A脱氢酶缺乏症 | [[summary/page-1|短链酰基辅酶A脱氢酶缺乏症]] | [${filename}](summary/9de7e0d1-345d-49f9-be08-f534246d2d49) |`,
+  ].join('\n')
+  const html = renderChatMarkdown(markdown, {
+    renderer: createChatMarkdownRenderer(),
+    escapeMarkdown: (text) => text,
+    sanitizeHtml: (value) => value,
+    streaming: false,
+    knowledgeReferences: [{
+      wiki_source_documents: [{
+        knowledge_id: 'doc-original',
+        knowledge_base_id: 'kb-1',
+        title: filename,
+        file_type: 'pdf',
+        preview_enabled: true,
+      }],
+    }],
+  })
+
+  assert.match(html, /class="wiki-source-document-link"/)
+  assert.match(html, /data-source-document-id="doc-original"/)
+  assert.doesNotMatch(html, /class="wiki-content-link citation-wiki"[^>]*>.*\.pdf/)
+})
+
+test('Wiki-style summary links in an original-file column open the source file', () => {
+  const filename = '论文-SCI-新一代测序面板.pdf'
+  const markdown = [
+    '| 名字 | Wiki | 原文件链接 |',
+    '| --- | --- | --- |',
+    `| 新生儿筛查 | [[summary/page-1|新生儿筛查]] | [[summary/9de7e0d1-345d-49f9-be08-f534246d2d49|${filename}]] |`,
+  ].join('\n')
+  const html = renderChatMarkdown(markdown, {
+    renderer: createChatMarkdownRenderer(),
+    escapeMarkdown: (text) => text,
+    sanitizeHtml: (value) => value,
+    streaming: false,
+    knowledgeReferences: [{
+      wiki_source_documents: [{
+        knowledge_id: 'doc-original',
+        knowledge_base_id: 'kb-1',
+        title: filename,
+        file_type: 'pdf',
+        preview_enabled: true,
+      }],
+    }],
+  })
+
+  assert.equal((html.match(/class="wiki-source-document-link"/g) || []).length, 1)
+  assert.match(html, /data-source-document-id="doc-original"/)
+  assert.doesNotMatch(html, /data-slug="summary\/9de7e0d1/)
+})
+
+test('renderChatMarkdown routes a Markdown summary link through the Wiki drawer', () => {
+  const slug = 'summary/9de7e0d1-345d-49f9-be08-f534246d2d49'
+  const html = renderChatMarkdown(`[论文标题](${slug})`, {
+    renderer: createChatMarkdownRenderer(),
+    escapeMarkdown: (text) => text,
+    sanitizeHtml: (value) => value,
+    streaming: false,
+    knowledgeReferences: [{
+      metadata: {
+        slug,
+        knowledge_base_id: 'kb-wiki-1',
+      },
+    }],
+  })
+
+  assert.match(html, /class="wiki-content-link citation-wiki"/)
+  assert.match(html, new RegExp(`data-slug="${slug}"`))
+  assert.match(html, /data-kb-id="kb-wiki-1"/)
+  assert.doesNotMatch(html, /href="summary\//)
+  assert.doesNotMatch(html, /platform\/chat\/summary\//)
+})
+
+test('renderChatMarkdown prefers the KB of the page actually read for a duplicate Wiki slug', () => {
+  const slug = 'summary/9de7e0d1-345d-49f9-be08-f534246d2d49'
+  const html = renderChatMarkdown(`[[${slug}|论文标题]]`, {
+    renderer: createChatMarkdownRenderer(),
+    escapeMarkdown: (text) => text,
+    sanitizeHtml: (value) => value,
+    streaming: false,
+    knowledgeReferences: [{
+      metadata: { slug, knowledge_base_id: 'kb-search-hit', tool: 'wiki_search' },
+    }, {
+      metadata: { slug, knowledge_base_id: 'kb-read-page', tool: 'wiki_read_page' },
+    }],
+  })
+
+  assert.match(html, /data-kb-id="kb-read-page"/)
+  assert.doesNotMatch(html, /data-kb-id="kb-search-hit"/)
+})
+
+test('renderChatMarkdown does not guess a KB for an ambiguous unread Wiki slug', () => {
+  const slug = 'summary/9de7e0d1-345d-49f9-be08-f534246d2d49'
+  const html = renderChatMarkdown(`[[${slug}|论文标题]]`, {
+    renderer: createChatMarkdownRenderer(),
+    escapeMarkdown: (text) => text,
+    sanitizeHtml: (value) => value,
+    streaming: false,
+    knowledgeReferences: ['kb-1', 'kb-2'].map((knowledgeBaseId) => ({
+      metadata: { slug, knowledge_base_id: knowledgeBaseId, tool: 'wiki_search' },
+    })),
+  })
+
+  assert.doesNotMatch(html, /data-kb-id=/)
 })
 
 test('renderChatMarkdown safely renders an image with fullwidth parentheses', () => {

@@ -24,20 +24,25 @@
                 <div class="doc-group-header" @click="toggleGroup(group.key)">
                     <div class="doc-group-left">
                         <t-icon name="file" size="14px" class="doc-group-icon" />
-                        <span class="doc-group-title" :title="group.title">{{ group.title }}</span>
+                        <button
+                            type="button"
+                            class="doc-group-title"
+                            :title="group.title"
+                            :disabled="embeddedMode || !group.knowledgeId"
+                            @click.stop="openDocumentPreview(group)"
+                        >{{ group.title }}</button>
                         <span class="doc-group-count">{{ $t('chat.referenceChunkCount', { count: group.chunks.length })
                             }}</span>
                     </div>
-                    <div class="doc-group-actions" v-if="!embeddedMode && group.knowledgeBaseId" @click.stop>
+                    <div class="doc-group-actions" v-if="!embeddedMode && group.knowledgeId" @click.stop>
                         <t-tooltip :content="$t('chat.navigateToDocument')">
-                            <a
+                            <button
+                                type="button"
                                 class="doc-group-navigate"
-                                :href="getDocumentHref(group)"
-                                target="_blank"
-                                rel="noopener noreferrer"
+                                @click="openDocumentPreview(group)"
                             >
-                                <t-icon name="jump" size="14px" />
-                            </a>
+                                <t-icon name="chevron-right" size="14px" />
+                            </button>
                         </t-tooltip>
                     </div>
                 </div>
@@ -61,15 +66,16 @@
 </template>
 <script setup>
 import { computed, ref, reactive } from "vue";
-import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { sanitizeHTML } from '@/utils/security';
 import ContentPopup from './tool-results/ContentPopup.vue';
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
+import { useChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
+import { openKnowledgeDocumentPreview } from '@/utils/documentPreviewTarget';
 
-const router = useRouter();
 const { t } = useI18n();
 const referencesDrawer = useChatReferencesDrawer();
+const attachmentPreviewDrawer = useChatAttachmentPreviewDrawer();
 
 const props = defineProps({
     content: {
@@ -133,6 +139,7 @@ const groupedKnowledgeRefs = computed(() => {
                 title: item.knowledge_title || item.knowledge_filename || key,
                 knowledgeId: item.knowledge_id,
                 knowledgeBaseId: item.knowledge_base_id,
+                fileType: item.file_type,
                 chunks: [],
             });
         }
@@ -170,16 +177,13 @@ const truncateContent = (content, maxLen) => {
     return text.slice(0, maxLen) + '...';
 };
 
-const getDocumentHref = (group) => {
-    if (!group.knowledgeBaseId) return '';
-    const query = {};
-    if (group.knowledgeId) {
-        query.knowledge_id = group.knowledgeId;
-    }
-    return router.resolve({
-        path: `/platform/knowledge-bases/${group.knowledgeBaseId}`,
-        query
-    }).href;
+const openDocumentPreview = (group) => {
+    if (!group.knowledgeId) return;
+    openKnowledgeDocumentPreview(attachmentPreviewDrawer, {
+        knowledgeId: group.knowledgeId,
+        title: group.title,
+        fileType: group.fileType,
+    });
 };
 
 const getWebSearchUrl = (item) => {
@@ -279,10 +283,24 @@ const getWebSearchDisplayText = (item) => {
         }
 
         .doc-group-title {
+            padding: 0;
+            border: 0;
+            background: transparent;
             color: var(--td-text-color-secondary);
+            font: inherit;
             font-weight: 400;
             font-size: 13px;
             max-width: min(520px, 100%);
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .doc-group-title:hover:not(:disabled) {
+            text-decoration: underline;
+        }
+
+        .doc-group-title:disabled {
+            cursor: default;
         }
 
         .doc-group-count,
@@ -296,7 +314,11 @@ const getWebSearchDisplayText = (item) => {
         }
 
         .doc-group-navigate {
+            padding: 0;
+            border: 0;
+            background: transparent;
             color: var(--td-text-color-placeholder);
+            cursor: pointer;
         }
 
         .doc {

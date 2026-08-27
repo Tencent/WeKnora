@@ -2017,8 +2017,9 @@ const defaultTemperature = ref(0.7);
 // 知识库相关工具列表（用于 watch(hasKnowledgeBase) 从"无"变"有"时 seed 默认工具）
 const knowledgeBaseTools = ['grep_chunks', 'knowledge_search', 'list_knowledge_chunks', 'query_knowledge_graph', 'get_document_info', 'database_query'];
 
-// Wiki 读取类工具（用于 watch(agentMode) 切到 smart-reasoning 时 seed 默认工具）
-const wikiReadTools = ['wiki_search', 'wiki_read_page', 'wiki_read_source_doc', 'wiki_flag_issue'];
+const wikiSourcePreviewTool = 'wiki_source_preview';
+// Wiki 默认能力（用于 watch(agentMode) 切到 smart-reasoning 时 seed 默认工具）
+const wikiDefaultTools = ['wiki_search', 'wiki_read_page', 'wiki_read_source_doc', 'wiki_flag_issue', wikiSourcePreviewTool];
 
 // 初始化标志，防止初始化时触发 watch 自动添加工具
 const isInitializing = ref(false);
@@ -2032,8 +2033,9 @@ const mcpSelectionMode = ref<'all' | 'selected' | 'none'>('none');
 // Skills 选择模式：all=全部, selected=指定, none=不使用
 const skillsSelectionMode = ref<'all' | 'selected' | 'none'>('none');
 
-// 可用工具列表（与后台 internal/agent/tools/definitions.go 保持一致）
-// group 决定 UI 分组：base / rag / wiki_read / wiki_edit / wiki_issue / data
+// 可用工具列表；wiki_source_preview 是存入 allowed_tools 的前端能力项，
+// 不属于后台向模型暴露的可调用 function tool。
+// group 决定 UI 分组：base / rag / wiki_read / wiki_edit / wiki_issue / data / wiki_source
 // danger: 写类破坏性工具，UI 上给出显著提示
 // 工具的 KB 能力依赖关系统一在 `@/utils/tool-capabilities` 声明，
 // `availableTools` 通过 `evaluateToolRequirement` 读取，不在这里重复维护。
@@ -2064,6 +2066,9 @@ const allTools = computed(() => [
   // 数据分析
   { value: 'data_analysis', label: t('agentEditor.tools.dataAnalysis'), description: t('agentEditor.tools.dataAnalysisDesc'), group: 'data' },
   { value: 'data_schema', label: t('agentEditor.tools.dataSchema'), description: t('agentEditor.tools.dataSchemaDesc'), group: 'data' },
+  // Client-side Wiki capability: stored in allowed_tools, but not exposed as
+  // an LLM function by the backend.
+  { value: wikiSourcePreviewTool, label: t('agentEditor.tools.wikiSourcePreviewLabel'), description: t('agentEditor.tools.wikiSourcePreviewDesc'), group: 'wiki_source' },
 ]);
 
 // 工具分组元信息
@@ -2074,6 +2079,7 @@ const toolGroups = computed(() => [
   { key: 'wiki_edit', label: t('agentEditor.tools.groupWikiEdit') },
   { key: 'wiki_issue', label: t('agentEditor.tools.groupWikiIssue') },
   { key: 'data', label: t('agentEditor.tools.groupData') },
+  { key: 'wiki_source', label: t('agentEditor.tools.wikiSourcePreviewLabel') },
 ]);
 
 // 知识库分组：我的 vs 共享的
@@ -3034,7 +3040,6 @@ watch(() => props.visible, async (val) => {
       if (agentData.config.thinking == null) {
         agentData.config.thinking = false;
       }
-
       agentData.config.question_suggestions = {
         starters: {
           ...defaultFormData.config.question_suggestions.starters,
@@ -3303,7 +3308,7 @@ watch(agentMode, (val, _oldVal) => {
         );
       }
       if (hasWikiKnowledgeBase.value) {
-        tools.push(...wikiReadTools);
+        tools.push(...wikiDefaultTools);
       }
       formData.value.config.allowed_tools = tools;
     }
@@ -5452,6 +5457,10 @@ const handleSave = async () => {
 
 .tool-group--data .tool-group-bar {
   background: var(--td-cyan-6, #09a3b7);
+}
+
+.tool-group--wiki_source .tool-group-bar {
+  background: var(--td-success-color, #2ba471);
 }
 
 // 统一两列网格；小屏退化单列

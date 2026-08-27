@@ -1,11 +1,14 @@
 import { inject, provide, ref, type InjectionKey, type Ref } from 'vue'
 
-export type ChatAttachmentPreviewTarget = {
-  sessionId: string
-  attachmentId: string
+type ChatPreviewFile = {
   fileName: string
   fileType: string
 }
+
+export type ChatAttachmentPreviewTarget = ChatPreviewFile & (
+  | { knowledgeId: string; sessionId?: never; attachmentId?: never }
+  | { knowledgeId?: never; sessionId: string; attachmentId: string }
+)
 
 export type ChatAttachmentPreviewDrawerContext = {
   visible: Ref<boolean>

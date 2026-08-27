@@ -39,6 +39,16 @@ export type CitationKnowledgeRef = {
   chunk_index?: number
   chunk_type?: string
   knowledge_base_id?: string
+  file_type?: string
+  preview_enabled?: boolean
+  metadata?: Record<string, string>
+  wiki_source_documents?: Array<{
+    knowledge_id: string
+    knowledge_base_id: string
+    title: string
+    file_type?: string
+    preview_enabled?: boolean
+  }>
 }
 
 function parseTagAttributes(attrString: string): Record<string, string> {
@@ -142,6 +152,25 @@ export function resolveCitationChunkId(
   return raw
 }
 
+function resolveWikiKnowledgeBaseId(
+  slug: string,
+  refs?: CitationKnowledgeRef[] | null,
+): string {
+  const readPageIds = new Set<string>()
+  const allIds = new Set<string>()
+  for (const ref of refs || []) {
+    const refSlug = String(ref.metadata?.slug || '').trim()
+    const kbId = String(ref.metadata?.knowledge_base_id || '').trim()
+    if (refSlug !== slug || !kbId) continue
+    allIds.add(kbId)
+    if (ref.metadata?.tool === 'wiki_read_page') readPageIds.add(kbId)
+  }
+  // A page actually read for this answer is more authoritative than earlier
+  // search hits for an identically named slug in another KB.
+  if (readPageIds.size === 1) return Array.from(readPageIds)[0]
+  return allIds.size === 1 ? Array.from(allIds)[0] : ''
+}
+
 /** Convert <web/> / <kb/> / [[wiki]] tags into inline citation HTML. */
 export function preprocessCitationTags(
   contentStr: string,
@@ -194,7 +223,9 @@ export function preprocessCitationTags(
         const parts = slug.split('/')
         display = parts.length > 1 ? parts.slice(1).join('/') : slug
       }
-      return `<a href="#" class="wiki-content-link citation-wiki" data-slug="${escapeHtml(slug)}">${escapeHtml(display)}</a>`
+      const kbId = resolveWikiKnowledgeBaseId(slug, refs)
+      const kbAttr = kbId ? ` data-kb-id="${escapeHtml(kbId)}"` : ''
+      return `<a href="#" class="wiki-content-link citation-wiki" data-slug="${escapeHtml(slug)}"${kbAttr}>${escapeHtml(display)}</a>`
     })
 }
 
@@ -225,6 +256,221 @@ export function restoreCitationHtmlPlaceholders(html: string, htmlSnippets: stri
 }
 
 /** Opening/closing fence for GFM fenced code blocks (up to 3 spaces indent). */
+const COMPLETE_MARKDOWN_CODE_RE = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g
+
+/**
+ * Repair a common model-generated Wiki link shape:
+ * `[title](summary/<uuid>)`.
+ *
+ * A summary slug is a Wiki page identity, not a relative web URL. If it is
+ * left as an ordinary Markdown link, the browser resolves it against the
+ * current chat route (for example `/platform/chat/summary/<uuid>`). Only the
+ * generated summary-page UUID form is normalized here; external links and
+ * ordinary relative Markdown links are left untouched. Code spans/fences are
+ * skipped so examples in the answer are not rewritten.
+ */
+export function normalizeWikiMarkdownLinks(content: string): string {
+  if (!content || !content.includes('summary/')) return content
+
+  const parts = content.split(COMPLETE_MARKDOWN_CODE_RE)
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = parts[i].replace(
+      /(?<!\!)\[([^\]\n]+)\]\(\s*(summary\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^\)\n]*\)))?\s*\)/gi,
+      (_match, label: string, slug: string) => `[[${slug}|${label.replace(/\|/g, '｜')}]]`,
+    )
+  }
+  return parts.join('')
+}
+
+function escapeAttribute(value: string): string {
+  return escapeHtml(value)
+}
+
+function sourceDocumentTitle(source: CitationKnowledgeRef | NonNullable<CitationKnowledgeRef['wiki_source_documents']>[number]): string {
+  return String(
+    ('title' in source ? source.title : '') ||
+    ('knowledge_title' in source ? source.knowledge_title : '') ||
+    ('knowledge_filename' in source ? source.knowledge_filename : '') ||
+    '',
+  ).trim()
+}
+
+function sourceDocumentIsPreviewable(source: CitationKnowledgeRef | NonNullable<CitationKnowledgeRef['wiki_source_documents']>[number]): boolean {
+  return source.preview_enabled === true &&
+    Boolean(String(source.knowledge_id || '').trim()) &&
+    Boolean(String(source.knowledge_base_id || '').trim())
+}
+
+type SourceDocumentCandidate = CitationKnowledgeRef | NonNullable<CitationKnowledgeRef['wiki_source_documents']>[number]
+
+function sourceDocumentCandidates(refs: CitationKnowledgeRef[] | null | undefined) {
+  const seen = new Set<string>()
+  const candidates: SourceDocumentCandidate[] = []
+  for (const ref of refs || []) {
+    for (const candidate of [
+      ...(ref.wiki_source_documents || []),
+      ref,
+    ]) {
+      if (!sourceDocumentIsPreviewable(candidate)) continue
+      const key = `${candidate.knowledge_base_id}:${candidate.knowledge_id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      candidates.push(candidate)
+    }
+  }
+  return candidates
+}
+
+function sourceDocumentMatchesLabel(source: SourceDocumentCandidate, label: string): boolean {
+  const normalizedLabel = String(label || '').trim().toLocaleLowerCase()
+  const title = sourceDocumentTitle(source).toLocaleLowerCase()
+  return Boolean(title) && (
+    normalizedLabel === title ||
+    normalizedLabel.includes(title) ||
+    title.includes(normalizedLabel)
+  )
+}
+
+function findUniqueSourceDocument(
+  candidates: SourceDocumentCandidate[],
+  label: string,
+): SourceDocumentCandidate | undefined {
+  const matches = candidates.filter((source) => sourceDocumentMatchesLabel(source, label))
+  return matches.length === 1 ? matches[0] : undefined
+}
+
+function renderSourceDocumentLink(label: string, source: SourceDocumentCandidate): string {
+  return `<a href="#" class="wiki-source-document-link" data-source-document-title="${escapeAttribute(sourceDocumentTitle(source))}" data-source-document-id="${escapeAttribute(String(source.knowledge_id || ''))}" data-source-document-kb-id="${escapeAttribute(String(source.knowledge_base_id || ''))}" role="button" tabindex="0">${escapeHtml(label)}</a>`
+}
+
+function splitMarkdownTableRow(line: string): string[] {
+  const cells: string[] = []
+  let current = ''
+  let wikiLinkDepth = 0
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+    const pair = line.slice(i, i + 2)
+    if (pair === '[[') {
+      wikiLinkDepth++
+      current += pair
+      i++
+      continue
+    }
+    if (pair === ']]' && wikiLinkDepth > 0) {
+      wikiLinkDepth--
+      current += pair
+      i++
+      continue
+    }
+    if (char === '|' && wikiLinkDepth === 0 && line[i - 1] !== '\\') {
+      cells.push(current)
+      current = ''
+      continue
+    }
+    current += char
+  }
+  cells.push(current)
+  return cells
+}
+
+function isMarkdownTableSeparator(cells: string[]): boolean {
+  const contentCells = cells.filter((cell, index) => {
+    if (index === 0 && !cell.trim()) return false
+    if (index === cells.length - 1 && !cell.trim()) return false
+    return true
+  })
+  return contentCells.length > 0 && contentCells.every((cell) => /^\s*:?-{3,}:?\s*$/.test(cell))
+}
+
+function isSourceDocumentColumn(header: string): boolean {
+  const value = header.replace(/[*_`]/g, '').replace(/\s+/g, '').toLocaleLowerCase()
+  return /^(原始?文件|源文件)(链接|预览)?$/.test(value) ||
+    /^(original|source)(file|document)(link|preview)?$/.test(value)
+}
+
+function sourceDocumentTableCellLabel(cell: string): string {
+  let label = cell.trim().replace(/^(?:\*\*|__)(.*)(?:\*\*|__)$/, '$1').trim()
+
+  // A model may put a Wiki-style summary link or a regular Markdown link in
+  // the original-file column. Resolve the visible label before the generic
+  // Wiki-link normalizer gets a chance to turn summary/<uuid> into a Wiki
+  // drawer link.
+  const wikiMatch = label.match(/^\[\[([^|\]]+)(?:\|([^\]]+))?\]\]$/)
+  if (wikiMatch) return (wikiMatch[2] || wikiMatch[1] || '').trim()
+
+  const markdownMatch = label.match(/^\[([^\]\n]+)\]\([^\n]*\)$/)
+  if (markdownMatch) return markdownMatch[1].trim()
+
+  return label
+}
+
+function linkSourceDocumentTableCells(
+  content: string,
+  candidates: SourceDocumentCandidate[],
+): string {
+  if (!candidates.length || !content.includes('|')) return content
+  const lines = content.split('\n')
+  for (let headerIndex = 0; headerIndex < lines.length - 1; headerIndex++) {
+    const headerCells = splitMarkdownTableRow(lines[headerIndex])
+    const separatorCells = splitMarkdownTableRow(lines[headerIndex + 1])
+    if (headerCells.length < 3 || headerCells.length !== separatorCells.length || !isMarkdownTableSeparator(separatorCells)) continue
+
+    const sourceColumns = headerCells
+      .map((header, index) => isSourceDocumentColumn(header) ? index : -1)
+      .filter((index) => index >= 0)
+    if (!sourceColumns.length) continue
+
+    for (let rowIndex = headerIndex + 2; rowIndex < lines.length; rowIndex++) {
+      const cells = splitMarkdownTableRow(lines[rowIndex])
+      if (cells.length !== headerCells.length) break
+      for (const columnIndex of sourceColumns) {
+        const cell = cells[columnIndex]
+        const leading = cell.match(/^\s*/)?.[0] || ''
+        const trailing = cell.match(/\s*$/)?.[0] || ''
+        const rawLabel = cell.trim()
+        if (!rawLabel || /^<a\b/i.test(rawLabel)) continue
+        const label = sourceDocumentTableCellLabel(rawLabel)
+        if (!label) continue
+        const source = findUniqueSourceDocument(candidates, label)
+        if (source) cells[columnIndex] = `${leading}${renderSourceDocumentLink(label, source)}${trailing}`
+      }
+      lines[rowIndex] = cells.join('|')
+    }
+  }
+  return lines.join('\n')
+}
+
+/**
+ * Convert explicit model document citations such as `[paper](d1)` into
+ * client-side preview actions. It also repairs a plain verified filename in a
+ * clearly labelled original-file table column. This narrowly scoped fallback
+ * avoids scanning or rewriting same-name prose elsewhere in the answer.
+ *
+ * `d1` is a request-local model handle, not a browser URL. Unresolved or
+ * ambiguous links become plain text so the browser cannot navigate to a route
+ * such as `/platform/chat/d1`.
+ */
+export function normalizeWikiDocumentMarkdownLinks(
+  content: string,
+  refs?: CitationKnowledgeRef[] | null,
+): string {
+  if (!content) return content
+
+  const candidates = sourceDocumentCandidates(refs)
+  const parts = content.split(COMPLETE_MARKDOWN_CODE_RE)
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = parts[i].replace(
+      /(?<!\!)\[([^\]\n]+)\]\(\s*(d[1-9][0-9]*)(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^\)\n]*\)))?\s*\)/gi,
+      (_match, label: string) => {
+        const source = findUniqueSourceDocument(candidates, label)
+        return source ? renderSourceDocumentLink(label, source) : escapeHtml(label)
+      },
+    )
+    parts[i] = linkSourceDocumentTableCells(parts[i], candidates)
+  }
+  return parts.join('')
+}
+
 const FENCED_CODE_DELIMITER_RE = /^ {0,3}(`{3,}|~{3,})(\s*\S.*)?\s*$/
 
 function isFencedCodeDelimiterLine(line: string): boolean {

@@ -67,13 +67,16 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 	"wiki_search":          {AllOf: []KBCapability{CapWiki}},
 	"wiki_read_page":       {AllOf: []KBCapability{CapWiki}},
 	"wiki_read_source_doc": {AllOf: []KBCapability{CapWiki}},
-	"wiki_flag_issue":      {AllOf: []KBCapability{CapWiki}},
-	"wiki_write_page":      {AllOf: []KBCapability{CapWiki}},
-	"wiki_replace_text":    {AllOf: []KBCapability{CapWiki}},
-	"wiki_rename_page":     {AllOf: []KBCapability{CapWiki}},
-	"wiki_delete_page":     {AllOf: []KBCapability{CapWiki}},
-	"wiki_read_issue":      {AllOf: []KBCapability{CapWiki}},
-	"wiki_update_issue":    {AllOf: []KBCapability{CapWiki}},
+	// Source preview is a client-side capability stored in allowed_tools, not
+	// a callable tool. It requires a Wiki-capable KB.
+	ToolWikiSourcePreview: {AllOf: []KBCapability{CapWiki}},
+	"wiki_flag_issue":     {AllOf: []KBCapability{CapWiki}},
+	"wiki_write_page":     {AllOf: []KBCapability{CapWiki}},
+	"wiki_replace_text":   {AllOf: []KBCapability{CapWiki}},
+	"wiki_rename_page":    {AllOf: []KBCapability{CapWiki}},
+	"wiki_delete_page":    {AllOf: []KBCapability{CapWiki}},
+	"wiki_read_issue":     {AllOf: []KBCapability{CapWiki}},
+	"wiki_update_issue":   {AllOf: []KBCapability{CapWiki}},
 
 	// ---- Data analysis (reads table summary/column chunks from RAG ingest) ----
 	"data_analysis": {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},

@@ -57,3 +57,20 @@ func TestAvailableToolDefinitionsDeclareModelHandlePolicies(t *testing.T) {
 		}
 	}
 }
+
+func TestWikiSourcePreviewIsAnAllowedCapabilityButNotAnLLMTool(t *testing.T) {
+	if !WikiSourcePreviewEnabled([]string{"wiki_read_page", ToolWikiSourcePreview}) {
+		t.Fatalf("allowlist containing %q must enable source preview", ToolWikiSourcePreview)
+	}
+	if WikiSourcePreviewEnabled([]string{"wiki_read_page"}) {
+		t.Fatalf("allowlist without %q must disable source preview", ToolWikiSourcePreview)
+	}
+	for _, definition := range AvailableToolDefinitions() {
+		if definition.Name == ToolWikiSourcePreview {
+			t.Fatalf("%q is a persisted UI capability and must not be exposed as a callable tool", ToolWikiSourcePreview)
+		}
+	}
+	if req, ok := ToolCapabilityRequirements[ToolWikiSourcePreview]; !ok || len(req.AllOf) != 1 || req.AllOf[0] != CapWiki {
+		t.Fatalf("%q must require a Wiki-capable knowledge base", ToolWikiSourcePreview)
+	}
+}

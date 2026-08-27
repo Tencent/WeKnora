@@ -14,17 +14,18 @@ import (
 
 type wikiReadSourceDocTool struct {
 	BaseTool
-	knowledgeService interfaces.KnowledgeService
-	chunkService     interfaces.ChunkService
-	searchTargets    types.SearchTargets
-	scopeEnforced    bool
+	knowledgeService  interfaces.KnowledgeService
+	chunkService      interfaces.ChunkService
+	searchTargets     types.SearchTargets
+	scopeEnforced     bool
+	sourceLinkEnabled bool
 }
 
 func NewWikiReadSourceDocTool(
 	knowledgeService interfaces.KnowledgeService,
 	chunkService interfaces.ChunkService,
 	searchTargets ...types.SearchTargets,
-) types.Tool {
+) *wikiReadSourceDocTool {
 	tool := &wikiReadSourceDocTool{
 		BaseTool: NewBaseTool(
 			ToolWikiReadSourceDoc,
@@ -64,7 +65,15 @@ If neither query nor range is provided, it returns the beginning of the document
 		tool.searchTargets = searchTargets[0]
 		tool.scopeEnforced = true
 	}
+	tool.sourceLinkEnabled = true
 	return tool
+}
+
+// WithSourceLink controls only document-preview metadata returned to the
+// client; authorization and model-facing document content are unchanged.
+func (t *wikiReadSourceDocTool) WithSourceLink(enabled bool) *wikiReadSourceDocTool {
+	t.sourceLinkEnabled = enabled
+	return t
 }
 
 // enrichChunkImageInfo populates chunk.ImageInfo for a batch of parent text
@@ -195,13 +204,10 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 			return
 		}
 		formattedChunks = append(formattedChunks, map[string]interface{}{
-			"chunk_id":        chunk.ID,
-			"chunk_index":     chunk.ChunkIndex,
-			"chunk_type":      chunk.ChunkType,
-			"content":         content,
-			"knowledge_id":    knowledgeID,
-			"knowledge_base":  knowledge.KnowledgeBaseID,
-			"knowledge_title": knowledge.Title,
+			"chunk_id":    chunk.ID,
+			"chunk_index": chunk.ChunkIndex,
+			"chunk_type":  chunk.ChunkType,
+			"content":     content,
 		})
 	}
 
@@ -354,16 +360,23 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 
 	sb.WriteString("</source_document>")
 
+	data := map[string]interface{}{
+		"display_type":    "knowledge_chunks_list",
+		"knowledge_title": knowledge.Title,
+		"total_chunks":    totalChunks,
+		"fetched_chunks":  len(formattedChunks),
+		"chunks":          formattedChunks,
+		"preview_enabled": t.sourceLinkEnabled,
+	}
+	if t.sourceLinkEnabled {
+		data["knowledge_id"] = knowledgeID
+		data["knowledge_base_id"] = knowledge.KnowledgeBaseID
+		data["file_type"] = knowledge.FileType
+	}
+
 	return &types.ToolResult{
 		Success: true,
 		Output:  sb.String(),
-		Data: map[string]interface{}{
-			"display_type":    "knowledge_chunks_list",
-			"knowledge_id":    knowledgeID,
-			"knowledge_title": knowledge.Title,
-			"total_chunks":    totalChunks,
-			"fetched_chunks":  len(formattedChunks),
-			"chunks":          formattedChunks,
-		},
+		Data:    data,
 	}, nil
 }

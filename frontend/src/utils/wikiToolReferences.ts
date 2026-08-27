@@ -1,9 +1,19 @@
+import { isWikiSourceDocumentPreviewEnabled } from './wikiSourceDocumentPreview.ts'
+
+export type WikiSourceDocument = {
+  knowledgeId: string
+  knowledgeBaseId: string
+  title: string
+  fileType?: string
+}
+
 export type WikiToolReference = {
   id: string
   title: string
   content: string
   knowledgeBaseId?: string
   slug?: string
+  sourceDocuments?: WikiSourceDocument[]
 }
 
 function extractBlocks(value: string, tag: string): string[] {
@@ -42,6 +52,7 @@ export function parseWikiToolReferences(
   toolName: string,
   output: unknown,
   toolCallId = toolName,
+  toolData?: unknown,
 ): WikiToolReference[] {
   if (typeof output !== 'string' || !output.trim()) return []
 
@@ -65,6 +76,41 @@ export function parseWikiToolReferences(
   }
 
   if (toolName === 'wiki_read_page') {
+    const sourceByPage = new Map<string, WikiSourceDocument[]>()
+    const sourceEntries = (toolData as any)?.source_documents
+    if (Array.isArray(sourceEntries)) {
+      for (const entry of sourceEntries) {
+        const kbId = String(entry?.knowledge_base_id || '').trim()
+        const slug = String(entry?.slug || '').trim()
+        if (!kbId || !slug || !Array.isArray(entry?.source_documents)) continue
+        const docs: WikiSourceDocument[] = []
+        for (const source of entry.source_documents) {
+          const knowledgeId = String(source?.knowledge_id || '').trim()
+          const sourceKbId = String(source?.knowledge_base_id || '').trim()
+          const title = String(source?.title || '').trim()
+          const fileType = String(source?.file_type || '').trim()
+          const previewEnabled = source?.preview_enabled === true
+          if (
+            !knowledgeId ||
+            !sourceKbId ||
+            !title ||
+            docs.some((doc) => doc.knowledgeId === knowledgeId) ||
+            !isWikiSourceDocumentPreviewEnabled({
+              knowledge_id: knowledgeId,
+              knowledge_base_id: sourceKbId,
+              preview_enabled: previewEnabled,
+            })
+          ) continue
+          docs.push({
+            knowledgeId,
+            knowledgeBaseId: sourceKbId,
+            title,
+            ...(fileType ? { fileType } : {}),
+          })
+        }
+        if (docs.length) sourceByPage.set(`${kbId}:${slug}`, docs)
+      }
+    }
     return extractBlocks(output, 'wiki_page').flatMap((page, index) => {
       const { slug, title } = parseWikiLink(extractTag(page, 'link'))
       // The page body commonly begins with the same introduction stored in
@@ -79,6 +125,7 @@ export function parseWikiToolReferences(
         content,
         knowledgeBaseId,
         slug: slug || undefined,
+        sourceDocuments: knowledgeBaseId && slug ? sourceByPage.get(`${knowledgeBaseId}:${slug}`) : undefined,
       }]
     })
   }

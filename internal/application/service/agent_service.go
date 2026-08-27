@@ -695,6 +695,7 @@ func (s *agentService) registerTools(
 			tools.ToolDataSchema:          true,
 			// Wiki tools also require at least one KB in scope.
 			tools.ToolWikiReadPage:      true,
+			tools.ToolWikiSourcePreview: true,
 			tools.ToolWikiSearch:        true,
 			tools.ToolWikiReadSourceDoc: true,
 			tools.ToolWikiFlagIssue:     true,
@@ -759,6 +760,7 @@ func (s *agentService) registerTools(
 	}
 	allWikiToolSet := map[string]bool{
 		tools.ToolWikiReadPage:      true,
+		tools.ToolWikiSourcePreview: true,
 		tools.ToolWikiSearch:        true,
 		tools.ToolWikiReadSourceDoc: true,
 		tools.ToolWikiFlagIssue:     true,
@@ -806,9 +808,11 @@ func (s *agentService) registerTools(
 
 	// Deduplicate while preserving original order.
 	allowedTools = dedupStrings(allowedTools)
+	sourcePreviewEnabled := tools.WikiSourcePreviewEnabled(allowedTools)
 
 	// logger.Infof(ctx, "Registering tools: %v, webSearchEnabled: %v", allowedTools, config.WebSearchEnabled)
-	// Register each allowed tool
+	// Register each allowed tool. ToolWikiSourcePreview is intentionally
+	// handled as a client-side capability and skipped by the switch below.
 	for _, toolName := range allowedTools {
 		var toolToRegister types.Tool
 
@@ -877,12 +881,17 @@ func (s *agentService) registerTools(
 			logger.Infof(ctx, "Registered data_schema tool")
 
 		// Wiki tools — only registered when wiki KBs are detected
+		case tools.ToolWikiSourcePreview:
+			// This is a persisted UI capability, not an LLM-callable function.
+			continue
 		case tools.ToolWikiReadPage:
-			toolToRegister = tools.NewWikiReadPageTool(s.wikiPageService, s.knowledgeService, wikiScopes, wikiRoutes)
+			toolToRegister = tools.NewWikiReadPageTool(s.wikiPageService, s.knowledgeService, wikiScopes, wikiRoutes).
+				WithSourceLinks(sourcePreviewEnabled, config.SearchTargets)
 		case tools.ToolWikiSearch:
 			toolToRegister = tools.NewWikiSearchTool(s.wikiPageService, s.knowledgeService, wikiScopes, wikiRoutes)
 		case tools.ToolWikiReadSourceDoc:
-			toolToRegister = tools.NewWikiReadSourceDocTool(s.knowledgeService, s.chunkService, config.SearchTargets)
+			toolToRegister = tools.NewWikiReadSourceDocTool(s.knowledgeService, s.chunkService, config.SearchTargets).
+				WithSourceLink(sourcePreviewEnabled)
 		case tools.ToolWikiFlagIssue:
 			toolToRegister = tools.NewWikiFlagIssueTool(s.wikiPageService, wikiKBIDs, wikiRoutes).
 				WithKnowledgeScope(s.knowledgeService, config.SearchTargets)

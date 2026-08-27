@@ -10,15 +10,24 @@ const legacyReferences = readFileSync(new URL('./docInfo.vue', import.meta.url),
 const agentStream = readFileSync(new URL('./AgentStreamDisplay.vue', import.meta.url), 'utf8')
 const chatView = readFileSync(new URL('../index.vue', import.meta.url), 'utf8')
 
-test('reference document links open in a new tab', () => {
+test('knowledge document references open the in-chat preview drawer', () => {
   assert.match(
     referenceDrawer,
-    /:href="getDocumentHref\(item\)"[\s\S]*?target="_blank"[\s\S]*?rel="noopener noreferrer"/,
+    /@click\.stop="openDocumentPreview\(item\)"/,
+  )
+  assert.match(
+    referenceDrawer,
+    /openKnowledgeDocumentPreview\(attachmentPreviewDrawer,[\s\S]*?knowledgeId: item\.knowledgeId/,
   )
   assert.match(
     legacyReferences,
-    /:href="getDocumentHref\(group\)"[\s\S]*?target="_blank"[\s\S]*?rel="noopener noreferrer"/,
+    /@click="openDocumentPreview\(group\)"/,
   )
+  assert.match(
+    legacyReferences,
+    /openKnowledgeDocumentPreview\(attachmentPreviewDrawer,[\s\S]*?knowledgeId: group\.knowledgeId/,
+  )
+  assert.doesNotMatch(legacyReferences, /:href="getDocumentHref\(group\)"/)
 })
 
 test('wiki drawer navigation and citation fallbacks open in a new tab', () => {
@@ -55,6 +64,17 @@ test('agent citations recover drawer references from retrieval tool events', () 
     agentStream.match(/documentTitle: title,[\s\S]*?knowledgeBaseId: kbId,/g)?.length,
     2,
   )
+})
+
+test('final answers expose verified original documents only in the fixed preview list', () => {
+  assert.match(agentStream, /class="answer-source-documents"/)
+  assert.match(agentStream, /getAnswerSourceDocuments\(event\.content\)/)
+  assert.match(agentStream, /@click\.stop="openSourceDocumentPreview\(source\)"/)
+  assert.match(agentStream, /wiki-source-document-link/)
+  assert.match(agentStream, /data-source-document-id/)
+  assert.match(agentStream, /data-source-document-kb-id/)
+  assert.match(agentStream, /wikiEl\.getAttribute\('data-kb-id'\) \|\| getKbIdForWiki/)
+  assert.doesNotMatch(agentStream, /citation-source-document/)
 })
 
 test('wiki tool results use the right-side references drawer', () => {
