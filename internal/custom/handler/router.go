@@ -91,7 +91,7 @@ func buildRouter(deps *Deps) *gin.Engine {
 	}
 
 	if deps.MinIO != nil && deps.MinIO.IsLocal() {
-		api.GET("/files/*objectKey", func(c *gin.Context) {
+		localFileHandler := func(c *gin.Context) {
 			objectKey := strings.TrimPrefix(c.Param("objectKey"), "/")
 			if objectKey == "" {
 				c.JSON(http.StatusNotFound, gin.H{"error": "object not found"})
@@ -104,9 +104,13 @@ func buildRouter(deps *Deps) *gin.Engine {
 			}
 			defer file.Close()
 			http.ServeFile(c.Writer, c.Request, file.Name())
-		})
+		}
+		// ValidateSourceFile 在创建听悟任务前发 HEAD 探活；Gin 不会自动将 HEAD 路由到 GET，
+		// 必须显式注册 HEAD，否则容器内部直连（hairpin NAT 修复后的内部服务名）会 404
+		api.GET("/files/*objectKey", localFileHandler)
+		api.HEAD("/files/*objectKey", localFileHandler)
 	} else if deps.MinIO != nil {
-		api.GET("/files/*objectKey", func(c *gin.Context) {
+		remoteFileHandler := func(c *gin.Context) {
 			objectKey := strings.TrimPrefix(c.Param("objectKey"), "/")
 			if objectKey == "" {
 				c.JSON(http.StatusNotFound, gin.H{"error": "object not found"})
@@ -124,7 +128,9 @@ func buildRouter(deps *Deps) *gin.Engine {
 				return
 			}
 			http.ServeContent(c.Writer, c.Request, filepath.Base(objectKey), info.LastModified, obj)
-		})
+		}
+		api.GET("/files/*objectKey", remoteFileHandler)
+		api.HEAD("/files/*objectKey", remoteFileHandler)
 	}
 
 	if deps.MinIO != nil {
@@ -193,6 +199,9 @@ func buildRouter(deps *Deps) *gin.Engine {
 	vh := NewVideoHandler(deps.DB)
 	api.GET("/videos", vh.List)
 	api.GET("/videos/:id", vh.Detail)
+	ph := NewProcessingHandler(deps.DB)
+	api.GET("/videos/:id/processing-status", ph.Status)
+	api.POST("/videos/:id/processing-jobs/:jobType/retry", ph.Retry)
 
 	if deps.Wiki != nil {
 		ch := NewContentHandler(deps.DB, deps.Wiki, deps.Cfg.WeKnora.KBID)
