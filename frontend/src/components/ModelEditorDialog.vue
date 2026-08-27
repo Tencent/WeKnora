@@ -573,6 +573,15 @@ const fallbackProviderOptions = computed(() => [
     modelTypes: ['chat', 'embedding', 'vllm']
   },
   {
+    value: 'synthorai',
+    label: t('model.editor.providers.synthorai.label'),
+    defaultUrls: {
+      chat: 'https://synthorai.io/v1'
+    },
+    description: t('model.editor.providers.synthorai.description'),
+    modelTypes: ['chat']
+  },
+  {
     value: 'requesty',
     label: t('model.editor.providers.requesty.label'),
     defaultUrls: {

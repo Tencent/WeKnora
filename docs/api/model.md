@@ -35,6 +35,7 @@ WeKnora 支持多种主流 AI 模型服务商，在创建模型时可通过 `par
 | `openrouter`   | OpenRouter                   | Chat, VLLM                      |
 | `litellm`      | LiteLLM (self-hosted proxy)  | Chat, Embedding, VLLM           |
 | `requesty`     | Requesty                     | Chat, Embedding, VLLM           |
+| `synthorai`    | Synthorai                    | Chat, VLLM                      |
 | `gemini`       | Google Gemini                | Chat                            |
 | `modelscope`   | 魔搭 ModelScope              | Chat, Embedding, VLLM           |
 | `moonshot`     | 月之暗面 Moonshot            | Chat, VLLM                      |

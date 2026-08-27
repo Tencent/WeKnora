@@ -2473,6 +2473,10 @@ export default {
           label: '사용자 정의 (OpenAI 호환)',
           description: 'Generic API endpoint'
         },
+        synthorai: {
+          label: 'Synthorai',
+          description: 'Claude, GPT, Gemini, DeepSeek, Qwen, GLM을 하나의 키로 제공하는 OpenAI 호환 게이트웨이.'
+        },
         requesty: {
           label: 'Requesty',
           description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5 등'

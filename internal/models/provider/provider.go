@@ -25,6 +25,8 @@ const (
 	ProviderOpenRouter ProviderName = "openrouter"
 	// ProviderLiteLLM is the LiteLLM self-hosted proxy (OpenAI-compatible gateway to 100+ providers).
 	ProviderLiteLLM ProviderName = "litellm"
+	// Synthorai
+	ProviderSynthorai ProviderName = "synthorai"
 	// Requesty
 	ProviderRequesty ProviderName = "requesty"
 	// 硅基流动
@@ -88,6 +90,7 @@ func AllProviders() []ProviderName {
 		ProviderGemini,
 		ProviderOpenRouter,
 		ProviderLiteLLM,
+		ProviderSynthorai,
 		ProviderRequesty,
 		ProviderJina,
 		ProviderMimo,
@@ -235,6 +238,8 @@ func DetectProvider(baseURL string) ProviderName {
 	// because they are SSRF-blocked unless explicitly whitelisted.
 	case containsAny(baseURL, "litellm"):
 		return ProviderLiteLLM
+	case containsAny(baseURL, "synthorai.io"):
+		return ProviderSynthorai
 	case containsAny(baseURL, "router.requesty.ai", "requesty.ai"):
 		return ProviderRequesty
 	case containsAny(baseURL, "siliconflow.cn"):

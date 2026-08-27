@@ -2473,6 +2473,10 @@ export default {
           label: 'Пользовательский (OpenAI-совместимый)',
           description: 'Generic API endpoint'
         },
+        synthorai: {
+          label: 'Synthorai',
+          description: 'OpenAI-совместимый шлюз: Claude, GPT, Gemini, DeepSeek, Qwen и GLM по одному ключу.'
+        },
         requesty: {
           label: 'Requesty',
           description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.'
