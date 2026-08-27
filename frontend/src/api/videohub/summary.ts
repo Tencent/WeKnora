@@ -1,5 +1,6 @@
-import { MOCK_VIDEOS } from './mockVideos'
+import { get } from '@/utils/request'
 import type { SummarySection, VideoCategory } from '@/types/videohub'
+import { parseSummaryWikiPage } from './contentParsing'
 
 export interface SummaryResponse {
   videoId: string
@@ -7,17 +8,7 @@ export interface SummaryResponse {
   sections: SummarySection[]
 }
 
-export async function fetchSummary(videoId: string): Promise<SummaryResponse> {
-  const video = MOCK_VIDEOS.find(item => item.id === videoId)
-  if (!video) throw new Error('视频不存在')
-
-  const sections = video.category === 'interview'
-    ? video.interviewSummary
-    : video.category === 'training'
-      ? video.trainingSummary
-      : video.category === 'salon'
-        ? video.salonSummary
-        : video.summarySections
-
-  return { videoId, category: video.category, sections: sections ?? [] }
+export async function fetchSummary(videoId: string, category: VideoCategory): Promise<SummaryResponse> {
+  const response: { content?: string } = await get(`/api/custom/videos/${videoId}/summary`)
+  return { videoId, category, sections: parseSummaryWikiPage(response.content || '') }
 }

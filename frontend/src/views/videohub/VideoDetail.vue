@@ -17,18 +17,21 @@
         </t-empty>
         <t-alert v-if="video.status === 'failed' && video.processing_error_summary" class="video-detail-page__error" theme="error" :message="video.processing_error_summary" />
       </div>
-      <div v-else class="video-detail-page__layout">
-        <section class="video-detail-page__left">
-          <VideoPlayer ref="player" :src="video.play_url || video.video_url" :poster="video.cover_url || video.poster_url" :duration-hint="video.durationSeconds" :subtitles="video.subtitles" @timeupdate="currentSeconds = $event" />
-          <ChapterNavigation :chapters="video.chapters" :current-seconds="currentSeconds" @seek="seekTo" />
-        </section>
-        <aside class="video-detail-page__right">
-          <t-tabs v-model="activeTab">
-            <t-tab-panel value="summary" label="智能总结"><SmartSummary :key="video.id" :video="video" @seek="seekTo" /></t-tab-panel>
-            <t-tab-panel value="related" label="关联知识"><RelatedKnowledge :key="video.id" :video="video" @seek="seekTo" @select-video-by-id="onSelectVideoById" /></t-tab-panel>
-          </t-tabs>
-        </aside>
-      </div>
+      <template v-else>
+        <ProcessingStatus :video-id="video.id" @retried="loadVideo(video.id)" />
+        <div class="video-detail-page__layout">
+          <section class="video-detail-page__left">
+            <VideoPlayer ref="player" :src="video.play_url || video.video_url" :poster="video.cover_url || video.poster_url" :duration-hint="video.durationSeconds" :subtitles="video.subtitles" @timeupdate="currentSeconds = $event" />
+            <ChapterNavigation :video="video" :current-seconds="currentSeconds" @seek="seekTo" />
+          </section>
+          <aside class="video-detail-page__right">
+            <t-tabs v-model="activeTab">
+              <t-tab-panel value="summary" label="智能总结"><SmartSummary :key="video.id" :video="video" @seek="seekTo" /></t-tab-panel>
+              <t-tab-panel value="related" label="关联知识"><RelatedKnowledge :key="video.id" :video="video" @seek="seekTo" @select-video-by-id="onSelectVideoById" /></t-tab-panel>
+            </t-tabs>
+          </aside>
+        </div>
+      </template>
       <AiAssistant :current-video="video" :current-time="currentSeconds" @seek="seekTo" @navigate="navigateToEvidence" />
     </template>
   </main>
@@ -44,6 +47,7 @@ import ChapterNavigation from '@/components/videohub/ChapterNavigation.vue'
 import AiAssistant from '@/components/videohub/AiAssistant.vue'
 import SmartSummary from '@/components/videohub/SmartSummary.vue'
 import RelatedKnowledge from '@/components/videohub/RelatedKnowledge.vue'
+import ProcessingStatus from '@/components/videohub/ProcessingStatus.vue'
 
 const route = useRoute()
 const router = useRouter()

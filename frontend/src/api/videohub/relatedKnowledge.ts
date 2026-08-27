@@ -1,5 +1,6 @@
-import { MOCK_VIDEOS } from './mockVideos'
+import { get } from '@/utils/request'
 import type { CrossVideoKnowledgeItem, CurrentKnowledgeAnchor, RelationOverview } from '@/types/videohub'
+import { mapRelatedKnowledgeResponse, type BackendRelatedKnowledgeResponse } from './contentParsing'
 
 export interface RelatedKnowledgePayload {
   videoId: string
@@ -9,12 +10,6 @@ export interface RelatedKnowledgePayload {
 }
 
 export async function fetchRelatedKnowledge(videoId: string): Promise<RelatedKnowledgePayload> {
-  const video = MOCK_VIDEOS.find(item => item.id === videoId)
-  if (!video) throw new Error('视频不存在')
-  return {
-    videoId,
-    overview: video.relationOverview ?? null,
-    anchors: video.currentAnchors ?? [],
-    crossVideoItems: video.crossVideoItems ?? [],
-  }
+  const response: BackendRelatedKnowledgeResponse = await get(`/api/custom/videos/${videoId}/related-knowledge`)
+  return mapRelatedKnowledgeResponse(videoId, response)
 }

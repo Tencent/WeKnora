@@ -7,7 +7,7 @@ const CATEGORY_MAP: Record<string, { category: VideoCategory; name: string }> = 
   case_analysis: { category: 'salon', name: '案例' },
 }
 
-const INITIAL_VIDEO_STATUSES = new Set(['uploaded', 'initializing', 'ready', 'processing', 'completed'])
+const INITIAL_VIDEO_STATUSES = new Set(['uploaded', 'initializing', 'ready', 'processing', 'completed', 'failed'])
 export function isVideoInitiallyAvailable(video: { status?: string; file_url?: string; play_url?: string; thumbnail_url?: string; initially_available?: boolean }): boolean {
   if (video.initially_available === true) return true
   const status = video.status || ''

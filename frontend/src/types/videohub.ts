@@ -100,6 +100,45 @@ export interface VideoData {
 
 export type VideoOption = Pick<VideoData, 'id' | 'title'>
 
+export type VideoProcessingState = 'ready' | 'processing' | 'partial_completed' | 'completed' | 'failed'
+
+export interface VideoProcessingFailure {
+  job_id: string
+  job_type: string
+  category: string
+  code: string
+  message: string
+  updated_at: string
+}
+
+export interface VideoProcessingJobStatus {
+  job_id: string
+  job_type: string
+  transcript_generation?: string
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  progress: number
+  attempt_count: number
+  max_attempts: number
+  error_category?: string
+  error_code?: string
+  error_message?: string
+  updated_at: string
+  started_at?: string
+  completed_at?: string
+}
+
+export interface VideoProcessingStatus {
+  video_id: string
+  status: VideoProcessingState
+  current_stage?: string
+  transcript_generation?: string
+  completed_stages: string[]
+  failure?: VideoProcessingFailure
+  retryable_job?: { job_id: string; job_type: string }
+  jobs: VideoProcessingJobStatus[]
+  updated_at: string
+}
+
 export interface EvidenceLink {
   label: string
   timestamp: string

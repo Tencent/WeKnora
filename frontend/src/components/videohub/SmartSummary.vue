@@ -1,8 +1,14 @@
 <template>
   <article class="smart-summary">
-    <t-empty v-if="sections.length === 0" description="暂无智能总结" />
+    <div v-if="loading" class="smart-summary__state"><t-loading text="正在加载智能总结" /></div>
+    <t-alert v-else-if="error" class="smart-summary__state" theme="error" :message="error">
+      <template #operation><t-button size="small" variant="outline" @click="load">刷新</t-button></template>
+    </t-alert>
+    <t-empty v-else-if="sections.length === 0" :description="notGenerated ? '智能总结尚未生成' : '暂无智能总结'">
+      <template #action><t-button size="small" variant="outline" @click="load">刷新</t-button></template>
+    </t-empty>
     <div v-else class="smart-summary__document">
-      <section v-for="section in renderedSections" :key="section.id" class="smart-summary__section">
+      <section v-for="section in sections" :key="section.id" class="smart-summary__section">
         <h2>{{ section.title }}</h2>
         <ul>
           <li
@@ -35,9 +41,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, watch } from 'vue'
+import { fetchSummary } from '@/api/videohub/summary'
 import EvidencePopover from './EvidencePopover.vue'
-import type { SummarySection, VideoCategory, VideoData } from '@/types/videohub'
+import type { SummarySection, VideoData } from '@/types/videohub'
 
 interface ContentLine {
   isSubItem: boolean
@@ -45,28 +52,31 @@ interface ContentLine {
   text: string
 }
 
-const CHAPTER_TITLES: Record<VideoCategory, readonly string[]> = {
-  interview: ['一、人物背景', '二、经历与决策', '三、核心观点', '四、原则与思维模型', '五、案例与证据', '六、反思与边界'] as const,
-  training: ['一、目标与受众', '二、知识地图', '三、核心概念', '四、方法与步骤', '五、示例与异常', '六、练习与应用'] as const,
-  salon: ['一、活动与参与者', '二、议题与观点', '三、观点交锋', '四、案例与问答', '五、共识与分歧', '六、探索方向'] as const,
-  general: ['一、定位与问题', '二、主张与论证', '三、证据与案例', '四、限定与反方', '五、影响与建议'] as const,
-}
-
 const props = defineProps<{ video: VideoData }>()
 const emit = defineEmits<{ seek: [seconds: number] }>()
+const sections = ref<SummarySection[]>([])
+const loading = ref(true)
+const error = ref('')
+const notGenerated = ref(false)
 
-const sections = computed(() => props.video.category === 'interview'
-  ? props.video.interviewSummary ?? []
-  : props.video.category === 'training'
-    ? props.video.trainingSummary ?? []
-    : props.video.category === 'salon'
-      ? props.video.salonSummary ?? []
-      : props.video.summarySections ?? [])
-
-const renderedSections = computed<SummarySection[]>(() => CHAPTER_TITLES[props.video.category].map((title, index) => {
-  const section = sections.value[index]
-  return section ? { ...section, title } : { id: `${props.video.id}-summary-missing-${index}`, title, content: '（本章节暂无内容）' }
-}))
+async function load() {
+  const videoId = props.video.id
+  loading.value = true
+  error.value = ''
+  notGenerated.value = false
+  try {
+    const response = await fetchSummary(videoId, props.video.category)
+    if (props.video.id !== videoId) return
+    sections.value = response.sections
+  } catch (reason: any) {
+    if (props.video.id !== videoId) return
+    sections.value = []
+    if (reason?.status === 404) notGenerated.value = true
+    else error.value = reason?.message || '智能总结加载失败'
+  } finally {
+    if (props.video.id === videoId) loading.value = false
+  }
+}
 
 function parseContent(content: string): ContentLine[] {
   return content.split('\n').filter(line => line.trim()).map((line) => {
@@ -83,11 +93,12 @@ function parseContent(content: string): ContentLine[] {
 function hasEvidence(section: SummarySection) {
   return Boolean(section.evidenceTimestamp && section.transcriptSnippet && section.evidenceSeconds !== undefined)
 }
+watch(() => [props.video.id, props.video.category] as const, () => void load(), { immediate: true })
 </script>
 
 <style scoped>
 .smart-summary { min-height: 360px; }
-.smart-summary > :deep(.t-empty) { min-height: 360px; display: grid; place-items: center; }
+.smart-summary__state, .smart-summary > :deep(.t-empty) { min-height: 360px; display: grid; place-items: center; }
 .smart-summary__document { padding: calc(var(--td-comp-margin-s) * 2) calc(var(--td-comp-margin-s) / 2) calc(var(--td-comp-margin-s) * 4); }
 .smart-summary__section + .smart-summary__section { margin-top: calc(var(--td-comp-margin-s) * 3.5); }
 .smart-summary h2 { display: flex; align-items: baseline; gap: var(--td-comp-margin-s); margin: 0 0 calc(var(--td-comp-margin-s) * 1.5); color: var(--td-text-color-primary); font-size: var(--td-font-size-title-medium); font-weight: 600; line-height: 1.4; }
