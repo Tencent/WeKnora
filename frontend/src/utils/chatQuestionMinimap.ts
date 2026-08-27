@@ -140,7 +140,7 @@ export function offsetFromScrollContent(
 }
 
 export function mapQuestionTicks(
-  items: Array<{ id: string }>,
+  items: Array<{ id: string; offsetTop?: number }>,
   trackHeight: number,
 ): QuestionTick[] {
   const n = items.length
