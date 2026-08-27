@@ -87,6 +87,9 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 	if !ok {
 		return fmt.Errorf("未注册的 job_type: %s", jobType)
 	}
+	if video.TranscriptKnowledgeID == "" {
+		return fmt.Errorf("视频 %s 缺少转写知识文档 ID", video.ID)
+	}
 	baseline, err := h.wikiBaseline(ctx, job, video.ID)
 	if err != nil {
 		return fmt.Errorf("snapshot wiki pages before %s: %w", contract.SkillName, err)
@@ -97,7 +100,7 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
-	query := fmt.Sprintf("处理视频 %s（标题：%s）", video.ID, video.Title)
+	query := fmt.Sprintf("处理视频 %s（源文档知识 ID：%s，标题：%s）", video.ID, video.TranscriptKnowledgeID, video.Title)
 	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query); err != nil {
 		return fmt.Errorf("trigger skill %s: %w", contract.SkillName, err)
 	}
@@ -163,6 +166,9 @@ func (h *GraphHandler) JobType() string { return skill.JobGraph }
 //  2. 回写 knowledge_base_wiki_page_id + 触发下一环节 outline
 func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
 	contract, _ := skill.Contract(skill.JobGraph)
+	if video.TranscriptKnowledgeID == "" {
+		return fmt.Errorf("视频 %s 缺少转写知识文档 ID", video.ID)
+	}
 	baseline, err := h.wikiBaseline(ctx, job, video.ID)
 	if err != nil {
 		return fmt.Errorf("snapshot wiki pages before %s: %w", contract.SkillName, err)
@@ -173,7 +179,7 @@ func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	if err != nil {
 		return fmt.Errorf("graph create session: %w", err)
 	}
-	query := fmt.Sprintf("处理视频 %s（标题：%s）", video.ID, video.Title)
+	query := fmt.Sprintf("处理视频 %s（源文档知识 ID：%s，标题：%s）", video.ID, video.TranscriptKnowledgeID, video.Title)
 	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query); err != nil {
 		return fmt.Errorf("graph trigger skill %s: %w", contract.SkillName, err)
 	}
