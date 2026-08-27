@@ -40,16 +40,24 @@ type fakeDockerEngine struct {
 	removeErr   error
 	inspect     map[string]container.InspectResponse
 	inspectErr  error
+	inspectHook func(id string) (container.InspectResponse, error)
 	list        []container.Summary
 	listFilters []client.Filters
 	listErr     error
+
+	// startLeavesState skips the default "start → running" inspect update so
+	// a test can drive waitUntilRunning itself.
+	startLeavesState bool
 
 	execOptions []client.ExecCreateOptions
 	execStdout  string
 	execStderr  string
 	execExit    int
 	execErr     error
-	execStdin   bytes.Buffer
+	// execNotRunningOnce makes the first ExecCreate fail the way the daemon
+	// does when the container has not reached State.Running yet.
+	execNotRunningOnce bool
+	execStdin          bytes.Buffer
 	// execStreamStalls hands back an output stream that never ends on its
 	// own, which is what a long-running exec looks like to a client that
 	// gives up on it. execStream is the stream handed to the last attach.
@@ -104,13 +112,39 @@ func (f *fakeDockerEngine) ContainerStart(
 	_ context.Context, id string, _ client.ContainerStartOptions,
 ) (client.ContainerStartResult, error) {
 	f.started = append(f.started, id)
-	return client.ContainerStartResult{}, f.startErr
+	if f.startErr != nil {
+		return client.ContainerStartResult{}, f.startErr
+	}
+	if !f.startLeavesState {
+		found := f.inspect[id]
+		if found.ID == "" {
+			found.ID = id
+		}
+		if found.State == nil {
+			found.State = &container.State{}
+		}
+		found.State.Status = "running"
+		if f.inspect == nil {
+			f.inspect = map[string]container.InspectResponse{}
+		}
+		f.inspect[id] = found
+	}
+	return client.ContainerStartResult{}, nil
 }
 
 func (f *fakeDockerEngine) ContainerUnpause(
 	_ context.Context, id string, _ client.ContainerUnpauseOptions,
 ) (client.ContainerUnpauseResult, error) {
 	f.unpaused = append(f.unpaused, id)
+	found := f.inspect[id]
+	if found.State == nil {
+		found.State = &container.State{}
+	}
+	found.State.Status = "running"
+	if f.inspect == nil {
+		f.inspect = map[string]container.InspectResponse{}
+	}
+	f.inspect[id] = found
 	return client.ContainerUnpauseResult{}, nil
 }
 
@@ -119,6 +153,13 @@ func (f *fakeDockerEngine) ContainerInspect(
 ) (client.ContainerInspectResult, error) {
 	if f.inspectErr != nil {
 		return client.ContainerInspectResult{}, f.inspectErr
+	}
+	if f.inspectHook != nil {
+		found, err := f.inspectHook(id)
+		if err != nil {
+			return client.ContainerInspectResult{}, err
+		}
+		return client.ContainerInspectResult{Container: found}, nil
 	}
 	found, ok := f.inspect[id]
 	if !ok {
@@ -148,6 +189,10 @@ func (f *fakeDockerEngine) ExecCreate(
 	_ context.Context, _ string, options client.ExecCreateOptions,
 ) (client.ExecCreateResult, error) {
 	f.execOptions = append(f.execOptions, options)
+	if f.execNotRunningOnce && len(f.execOptions) == 1 {
+		return client.ExecCreateResult{}, cerrdefs.ErrConflict.WithMessage(
+			"container is not running")
+	}
 	if f.execErr != nil {
 		return client.ExecCreateResult{}, f.execErr
 	}
@@ -470,6 +515,55 @@ func TestDockerClientCreateRemovesContainerThatCannotStart(t *testing.T) {
 	require.Equal(t, []string{"container-1"}, engine.removed)
 }
 
+// ContainerStart returning is not Running. A skill install used to exec
+// immediately and fail with 409 "container is not running"; waiting here is
+// what makes the first attempt succeed.
+func TestDockerClientCreateWaitsUntilTheContainerIsRunning(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.imagePresent["weknora/sandbox:test"] = true
+	engine.startLeavesState = true
+	var inspects int
+	engine.inspectHook = func(id string) (container.InspectResponse, error) {
+		inspects++
+		status := "created"
+		if inspects >= 2 {
+			status = "running"
+		}
+		return container.InspectResponse{
+			ID:    id,
+			State: &container.State{Status: container.ContainerState(status)},
+		}, nil
+	}
+	docker := newTestDockerClient(t, engine)
+
+	handle, err := docker.Create(context.Background(), RemoteCreateRequest{
+		TemplateID: "weknora/sandbox:test",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "container-1", handle.ID())
+	require.GreaterOrEqual(t, inspects, 2)
+}
+
+// PID 1 dying right after start is not a race: waiting will never help, and
+// the container has to be removed the same way a failed Start is.
+func TestDockerClientCreateRemovesContainerThatExitsImmediately(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.imagePresent["weknora/sandbox:test"] = true
+	engine.startLeavesState = true
+	engine.inspect["container-1"] = container.InspectResponse{
+		ID:    "container-1",
+		State: &container.State{Status: "exited"},
+	}
+	docker := newTestDockerClient(t, engine)
+
+	_, err := docker.Create(context.Background(), RemoteCreateRequest{
+		TemplateID: "weknora/sandbox:test",
+	})
+	require.Error(t, err)
+	require.Equal(t, []string{"container-1"}, engine.removed)
+	require.Contains(t, err.Error(), "not running")
+}
+
 func TestDockerClientCreateRefusesVolumeMounts(t *testing.T) {
 	docker := newTestDockerClient(t, newFakeDockerEngine())
 	_, err := docker.Create(context.Background(), RemoteCreateRequest{
@@ -736,6 +830,36 @@ func TestDockerClientExecWritesStdin(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "payload\n", engine.execStdin.String())
 	require.True(t, engine.execOptions[0].AttachStdin)
+}
+
+func TestDockerContainerNotRunning(t *testing.T) {
+	require.False(t, dockerContainerNotRunning(nil))
+	require.False(t, dockerContainerNotRunning(errors.New("already exists")))
+	require.True(t, dockerContainerNotRunning(
+		cerrdefs.ErrConflict.WithMessage("container abc is not running")))
+}
+
+// ExecCreate 409 "container is not running" is not a failed command: Connect
+// already resumes an exited container, and the first exec of a new sandbox
+// used to hit this before PID 1 was up. Resume once, then retry.
+func TestDockerClientExecResumesAStoppedContainerAndRetries(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.inspect["container-1"] = container.InspectResponse{
+		ID:    "container-1",
+		State: &container.State{Status: "exited"},
+	}
+	engine.execNotRunningOnce = true
+	engine.execStdout = "ok\n"
+	docker := newTestDockerClient(t, engine)
+
+	result, err := docker.Exec(context.Background(), testHandle("container-1"), RemoteExecRequest{
+		Command: "true",
+		Timeout: time.Second,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "ok\n", result.Stdout)
+	require.Equal(t, []string{"container-1"}, engine.started)
+	require.Len(t, engine.execOptions, 2)
 }
 
 // The archive endpoint would apply this write as root and resolve symlinks on
