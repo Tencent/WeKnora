@@ -43,6 +43,7 @@ import {
   reviewJoinRequest as reviewJoinRequestApi,
   requestRoleUpgrade as requestRoleUpgradeApi
 } from '@/api/organization'
+import { getCurrentLanguage } from '@/utils/request'
 import { createVersionedRequestCoordinator } from './versionedRequest'
 import {
   applyOrganizationResourceDelta,
@@ -71,6 +72,8 @@ export const useOrganizationStore = defineStore('organization', () => {
   const SEARCHABLE_ORGANIZATION_TTL_MS = 5 * 60_000
   let sharedKbLoadedAt = 0
   let sharedAgentsLoadedAt = 0
+  /** 共享智能体含按请求语言本地化的内置名称；切换 UI 语言后缓存随之失效 */
+  let sharedAgentsLoadedLocale = ''
   let searchableOrganizationsQuery = ''
   const searchableOrganizationCache = new Map<
     string,
@@ -496,6 +499,7 @@ export const useOrganizationStore = defineStore('organization', () => {
       if (response.success && response.data) {
         sharedAgents.value = response.data.filter(s => s.agent != null)
         sharedAgentsLoadedAt = Date.now()
+        sharedAgentsLoadedLocale = getCurrentLanguage()
       }
     }
   )
@@ -505,7 +509,8 @@ export const useOrganizationStore = defineStore('organization', () => {
     if (
       !force &&
       sharedAgentsLoadedAt > 0 &&
-      Date.now() - sharedAgentsLoadedAt < SHARED_RESOURCE_TTL_MS
+      Date.now() - sharedAgentsLoadedAt < SHARED_RESOURCE_TTL_MS &&
+      sharedAgentsLoadedLocale === getCurrentLanguage()
     ) {
       return sharedAgents.value
     }

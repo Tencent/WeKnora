@@ -6,6 +6,7 @@ import { listModels, type ModelConfig } from '@/api/model'
 import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider'
 import { isNamedSandboxBackend, listSandboxConfigs, type SandboxConfigRecord } from '@/api/system'
 import { useOrganizationStore } from '@/stores/organization'
+import { getCurrentLanguage } from '@/utils/request'
 
 /** 空间级资源缓存 TTL */
 const CACHE_TTL_MS = 60_000
@@ -49,9 +50,14 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
   const validKnowledgeBases = computed(() => rawKnowledgeBases.value.filter(isKbModelReady))
   const chatModels = computed(() => allModels.value.filter((m) => m.type === 'KnowledgeQA'))
 
+  // 内置智能体名称/描述由后端按 Accept-Language 本地化返回；切换 UI 语言后
+  // 旧缓存必须立即失效，否则要等 TTL 过期或强刷才能看到正确语言。
+  let agentsLoadedLocale = ''
+
   function isFresh(key: ResourceKey): boolean {
     const at = loadedAt.value[key]
-    return !!at && Date.now() - at < CACHE_TTL_MS
+    if (!at || Date.now() - at >= CACHE_TTL_MS) return false
+    return key !== 'agents' || agentsLoadedLocale === getCurrentLanguage()
   }
 
   async function runOnce(key: ResourceKey, force: boolean, loader: () => Promise<void>): Promise<void> {
@@ -142,6 +148,7 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
         agents.value = data
         disabledOwnAgentIds.value = res.disabled_own_agent_ids || []
         loadedAt.value.agents = Date.now()
+        agentsLoadedLocale = getCurrentLanguage()
         return { data, disabled_own_agent_ids: res.disabled_own_agent_ids || [] }
       } finally {
         if (agentsAllGen === gen) agentsAllInflight = null

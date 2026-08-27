@@ -311,8 +311,9 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 
 // updateBuiltinAgent updates a built-in agent's configuration (but not basic info)
 func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *types.CustomAgent, tenantID uint64) (*types.CustomAgent, error) {
-	// Get the default built-in agent from registry (i18n-aware)
-	defaultAgent := types.GetBuiltinAgentWithContext(ctx, agent.ID, tenantID)
+	// Persist locale-independent display fields (the YAML "default" locale) so
+	// read paths that skip builtin localization see a stable language.
+	defaultAgent := types.GetBuiltinAgent(agent.ID, tenantID)
 	if defaultAgent == nil {
 		return nil, ErrAgentNotFound
 	}
@@ -342,6 +343,7 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 		}
 
 		logger.Infof(ctx, "Built-in agent config updated successfully, ID: %s", agent.ID)
+		types.ApplyBuiltinAgentLocalization(ctx, existingAgent)
 		return existingAgent, nil
 	}
 
@@ -373,6 +375,7 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 	}
 
 	logger.Infof(ctx, "Built-in agent config record created successfully, ID: %s", agent.ID)
+	types.ApplyBuiltinAgentLocalization(ctx, newAgent)
 	return newAgent, nil
 }
 
