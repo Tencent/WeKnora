@@ -35,16 +35,17 @@ description: 从单个视频的源文档中，按统一知识本体提取实体�
 
 ### 三、写入 Wiki
 
-10. 每个知识原子 → **创建/覆盖 Wiki** 写入独立 Wiki 页面。
-11. 每个实体 → **创建/覆盖 Wiki** 写入独立 Wiki 页面（页面名 = `canonical_name`）。
-12. 视频索引页 → **创建/覆盖 Wiki** 写入知识库索引页（写工具 `page_type` 参数必须用 `index`、frontmatter `type` 必须为 `knowledge_base`），承担原 `wiki/index.md` 的导航职责。
-13. 页面之间引用使用 WeKnora 原生 Wiki 引用（`[[xxx]]`），页面契约见 [wiki-schema.md](references/wiki-schema.md)。
+10. 先为每个知识原子和实体确定最终页面名，并逐一通过 **创建/覆盖 Wiki** 写入独立 Wiki 页面；每次写入后用 **阅读 Wiki 页面** 按最终页面名确认页面已存在且正文非空。
+11. 页面落地前禁止在任何新页面正文中写入指向其他本轮新页面的 `[[xxx]]` 引用；不要引用尚未通过 **阅读 Wiki 页面** 确认存在的页面。创建/覆盖 Wiki 返回的实际页面名或 slug 必须原样记录并复用，禁止根据标题自行推导 `concept/*` 等路径。
+12. 所有知识原子和实体页面确认可读后，再用 **创建/覆盖 Wiki** 更新它们的正文，补齐 Wiki 原生双链；双链目标必须来自工具返回并经 **阅读 Wiki 页面** 确认的实际页面名。若某个目标页面创建失败，保留不带该链接的可审计正文，并在对应页面 **标记 Wiki 问题**，不得反复引用不存在的页面。
+13. 最后通过 **创建/覆盖 Wiki** 写入视频索引页（写工具 `page_type` 参数必须用 `index`、frontmatter `type` 必须为 `knowledge_base`），只引用已通过 **阅读 Wiki 页面** 确认存在的页面；索引页落地后再次读取确认正文非空。
+14. 页面之间引用使用 WeKnora 原生 Wiki 引用（`[[xxx]]`），页面契约见 [wiki-schema.md](references/wiki-schema.md)。
 
 ### 四、审计
 
-14. 按 [audit-rules.md](references/audit-rules.md) 完成提取审计与内容质量审计。
-15. 审计未通过时 **标记 Wiki 问题** 在对应页面记录详情，不得将产物标记为完成。
-16. 审计通过后 **更新 Wiki 问题** 关闭上游遗留问题。
+15. 按 [audit-rules.md](references/audit-rules.md) 完成提取审计与内容质量审计。
+16. 审计未通过时 **标记 Wiki 问题** 在对应页面记录详情，不得将产物标记为完成。
+17. 审计通过后 **更新 Wiki 问题** 关闭上游遗留问题。
 
 ## 边界
 
