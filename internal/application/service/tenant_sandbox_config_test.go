@@ -118,7 +118,7 @@ func TestSandboxIdentityChanged(t *testing.T) {
 			old:  cubeCfg("key-a", "https://cube.example.com", "https://proxy.example.com", "cube.app"),
 			new: func() *types.TenantSandboxConfig {
 				cfg := cubeCfg("key-a", "https://cube.example.com", "https://proxy.example.com", "cube.app")
-				cfg.Cube.DNSServers = []string{"192.0.2.53"}
+				cfg.Cube.DNSServers = []string{"8.8.8.8"}
 				return cfg
 			}(),
 			want: false,
