@@ -9,11 +9,12 @@ test('does not render the rail until the thread overflows', () => {
   assert.match(component, /v-if="visible"/)
 })
 
-test('opens a following Q&A card to the right of the left-side rail', () => {
+test('opens a following preview card to the right of the left-side rail', () => {
   assert.match(component, /question-minimap__panel/)
   assert.match(component, /question-minimap__bridge/)
   assert.match(component, /question-minimap__question/)
   assert.match(component, /question-minimap__answer/)
+  assert.doesNotMatch(component, /question-minimap__kicker/)
   assert.match(component, /CLOSE_DELAY_MS = 150/)
   assert.match(component, /left: `\$\{RAIL_INSET_PX\}px`/)
   assert.match(component, /top: `\$\{peakYPx\}px`/)
@@ -22,19 +23,19 @@ test('opens a following Q&A card to the right of the left-side rail', () => {
 })
 
 test('grows nearby ticks into a mountain under the pointer', () => {
-  assert.match(component, /tickMountainScale/)
+  assert.match(component, /tickDisplayScale/)
   assert.match(component, /nearestTickId/)
   assert.match(component, /scaleX\(/)
   assert.match(component, /handleRailPointerMove/)
 })
 
-test('centers the rail and panel in the thread instead of stretching top to bottom', () => {
+test('centers the rail in the thread instead of stretching top to bottom', () => {
   assert.match(component, /top: 50%/)
   assert.match(component, /transform: translateY\(-50%\)/)
+  assert.match(component, /RAIL_INSET_PX = 0/)
   assert.match(component, /height: `\$\{trackHeight\}px`/)
   assert.doesNotMatch(component, /inset-block: 0/)
   assert.doesNotMatch(component, /align-self: flex-start/)
-  assert.doesNotMatch(component, /height: min\(360px, 50%\)/)
   assert.match(composable, /questionMinimapTrackHeight\(measured\.length, el\.clientHeight\)/)
 })
 
@@ -47,7 +48,9 @@ test('uses chat question minimap i18n keys', () => {
   assert.match(component, /chat\.questionMinimapTitle/)
   assert.match(component, /chat\.questionMinimapAriaLabel/)
   assert.match(component, /chat\.questionMinimapAttachmentPlaceholder/)
-  assert.match(component, /chat\.questionMinimapAnswerPending/)
+  assert.doesNotMatch(component, /questionMinimapQuestionLabel/)
+  assert.doesNotMatch(component, /questionMinimapAnswerLabel/)
+  assert.doesNotMatch(component, /questionMinimapAnswerPending/)
 })
 
 test('wraps the overlay in navigation without overriding the rail button role', () => {
@@ -63,7 +66,7 @@ test('keeps scroll-driven active question changes from clobbering keyboard navig
 
 test('does not draw a second scrollbar thumb next to the native scrollbar', () => {
   assert.doesNotMatch(component, /question-minimap__viewport/)
-  assert.match(component, /RAIL_INSET_PX = 16/)
+  assert.match(component, /RAIL_INSET_PX = 0/)
   assert.match(component, /scrollbar-width: none/)
 })
 
@@ -78,9 +81,14 @@ test('highlights the matching tick for the peaked question', () => {
   assert.match(component, /tick\.id === peakId/)
 })
 
+test('keeps the preview card at 13px instead of inheriting the chat 20px type', () => {
+  assert.match(component, /font-size: 13px/)
+  assert.doesNotMatch(component, /font: inherit/)
+  assert.match(component, /--td-text-color-primary/)
+})
+
 test('uses only approved TDesign tokens in minimap styles', () => {
   assert.doesNotMatch(component, /--td-brand-color-light/)
   assert.doesNotMatch(component, /--td-border-level-2-color/)
   assert.doesNotMatch(component, /--td-shadow-2/)
-  assert.doesNotMatch(component, /--td-text-color-primary/)
 })

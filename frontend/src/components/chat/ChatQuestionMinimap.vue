@@ -26,7 +26,7 @@
         :class="{ 'question-minimap__tick--active': tick.id === peakId }"
         :style="{
           top: `${tick.yPx}px`,
-          transform: `translateY(-50%) scaleX(${tickMountainScale(tick.yPx, mountainPointerY)})`,
+          transform: `translateY(-50%) scaleX(${tickDisplayScale(tick.yPx, mountainPointerY, tick.id === peakId)})`,
         }"
       />
     </button>
@@ -48,7 +48,7 @@
       <p class="question-minimap__question" :title="questionText(peakTurn)">
         {{ questionText(peakTurn) }}
       </p>
-      <p class="question-minimap__answer">
+      <p v-if="answerText(peakTurn)" class="question-minimap__answer">
         {{ answerText(peakTurn) }}
       </p>
     </section>
@@ -63,13 +63,13 @@ import {
   answerPreviewText,
   nearestTickId,
   questionDisplayText,
-  tickMountainScale,
+  tickDisplayScale,
   type ChatMessageLike,
   type UserQuestion,
 } from '@/utils/chatQuestionMinimap'
 
 const CLOSE_DELAY_MS = 150
-const RAIL_INSET_PX = 16
+const RAIL_INSET_PX = 0
 
 const props = defineProps<{
   scrollContainer: HTMLElement | null
@@ -109,7 +109,7 @@ const peakId = computed(() => {
   if (keyboardIndex.value >= 0) {
     return questions.value[keyboardIndex.value]?.id ?? null
   }
-  return hoveredId.value
+  return hoveredId.value ?? activeId.value
 })
 const peakTurn = computed(() => (
   questions.value.find((question) => question.id === peakId.value) ?? null
@@ -130,7 +130,7 @@ const questionText = (question: UserQuestion) => (
 )
 
 const answerText = (question: UserQuestion) => (
-  answerPreviewText(question.answerContent, t('chat.questionMinimapAnswerPending'))
+  answerPreviewText(question.answerContent)
 )
 
 const clearCloseTimer = () => {
@@ -296,6 +296,8 @@ onBeforeUnmount(() => {
   align-items: stretch;
   transform: translateY(-50%);
   pointer-events: none;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .question-minimap__rail,
@@ -306,9 +308,10 @@ onBeforeUnmount(() => {
 
 .question-minimap__rail {
   position: relative;
-  width: 28px;
+  width: 24px;
   height: 100%;
   padding: 0;
+  overflow: visible;
   border: 0;
   background: transparent;
   cursor: pointer;
@@ -321,12 +324,12 @@ onBeforeUnmount(() => {
 
 .question-minimap__tick {
   position: absolute;
-  left: 2px;
+  left: 0;
   width: 8px;
   height: 2px;
   border-radius: 1px;
   background: var(--td-text-color-secondary);
-  opacity: 0.55;
+  opacity: 0.4;
   transform: translateY(-50%);
   transform-origin: left center;
   transition: transform 120ms ease-out, background 120ms ease-out, opacity 120ms ease-out;
@@ -334,7 +337,7 @@ onBeforeUnmount(() => {
 
 .question-minimap__tick--active {
   background: var(--td-brand-color);
-  opacity: 1;
+  opacity: 0.85;
 }
 
 .question-minimap__bridge {
@@ -343,16 +346,16 @@ onBeforeUnmount(() => {
 
 .question-minimap__panel {
   position: absolute;
-  left: 36px;
-  width: 240px;
-  max-height: min(360px, 50vh);
-  padding: 8px 10px;
+  left: 20px;
+  width: 220px;
+  max-height: min(280px, 40vh);
+  padding: 6px 8px;
   overflow: hidden;
   scrollbar-width: none;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--td-bg-color-container);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
   transform: translateY(-50%);
   cursor: pointer;
 }
@@ -364,13 +367,15 @@ onBeforeUnmount(() => {
 .question-minimap__question,
 .question-minimap__answer {
   margin: 0;
-  color: var(--td-text-color-secondary);
-  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
 }
 
 .question-minimap__question {
   overflow: hidden;
-  font-weight: 600;
+  color: var(--td-text-color-primary);
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -379,9 +384,10 @@ onBeforeUnmount(() => {
   display: -webkit-box;
   margin-top: 4px;
   overflow: hidden;
+  color: var(--td-text-color-secondary);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
-  opacity: 0.75;
+  opacity: 0.8;
 }
 
 @media (prefers-reduced-motion: reduce) {

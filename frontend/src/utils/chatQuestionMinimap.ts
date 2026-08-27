@@ -1,6 +1,7 @@
-export const QUESTION_TICK_RADIUS_PX = 3
-export const QUESTION_TICK_GAP_PX = 35
-export const QUESTION_TICK_MOUNTAIN_GAIN = 2.2
+export const QUESTION_TICK_INSET_PX = 8
+export const QUESTION_TICK_GAP_PX = 8
+export const QUESTION_TICK_MOUNTAIN_GAIN = 1.5
+export const CURRENT_TICK_SCALE = 1.7
 export const ACTIVE_QUESTION_TOP_OFFSET_PX = 72
 export const VIEWPORT_BAND_MIN_HEIGHT_PX = 16
 export const QUESTION_MINIMAP_TRACK_MAX_PX = 360
@@ -16,8 +17,8 @@ export function questionMinimapTrackHeight(
     clientHeight * QUESTION_MINIMAP_TRACK_RATIO,
   )
   const naturalHeight = questionCount === 1
-    ? QUESTION_TICK_GAP_PX
-    : (questionCount - 1) * QUESTION_TICK_GAP_PX
+    ? QUESTION_TICK_INSET_PX * 2
+    : (questionCount - 1) * QUESTION_TICK_GAP_PX + QUESTION_TICK_INSET_PX * 2
   return Math.min(naturalHeight, maxHeight)
 }
 
@@ -52,7 +53,7 @@ export function isChatOverflowing(scrollHeight: number, clientHeight: number): b
 }
 
 export function shouldShowQuestionMinimap(overflowing: boolean, questionCount: number): boolean {
-  return overflowing && questionCount >= 1
+  return overflowing && questionCount >= 2
 }
 
 export function collectUserQuestions(messages: ChatMessageLike[]): UserQuestion[] {
@@ -92,10 +93,7 @@ export function questionDisplayText(
   return normalized.length > 0 ? normalized : attachmentPlaceholder
 }
 
-export function answerPreviewText(
-  content: string | undefined,
-  pendingPlaceholder: string,
-): string {
+export function answerPreviewText(content: string | undefined): string {
   const normalized = (content ?? '')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`([^`]+)`/g, '$1')
@@ -103,7 +101,7 @@ export function answerPreviewText(
     .replace(/[#>*_~-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-  return normalized.length > 0 ? normalized : pendingPlaceholder
+  return normalized
 }
 
 export function tickMountainScale(tickY: number, pointerY: number | null): number {
@@ -111,6 +109,15 @@ export function tickMountainScale(tickY: number, pointerY: number | null): numbe
   const dy = tickY - pointerY
   const sigma = QUESTION_TICK_GAP_PX
   return 1 + QUESTION_TICK_MOUNTAIN_GAIN * Math.exp(-0.5 * (dy / sigma) ** 2)
+}
+
+export function tickDisplayScale(
+  tickY: number,
+  pointerY: number | null,
+  isCurrent: boolean,
+): number {
+  if (pointerY !== null) return tickMountainScale(tickY, pointerY)
+  return isCurrent ? CURRENT_TICK_SCALE : 1
 }
 
 export function nearestTickId(
@@ -157,7 +164,7 @@ export function mapQuestionTicks(
   }
 
   const preferredSpan = (n - 1) * QUESTION_TICK_GAP_PX
-  const minY = Math.min(QUESTION_TICK_RADIUS_PX, trackHeight / 2)
+  const minY = Math.min(QUESTION_TICK_INSET_PX, trackHeight / 2)
   const maxY = Math.max(minY, trackHeight - minY)
   const available = maxY - minY
   const span = preferredSpan <= trackHeight ? preferredSpan : available
