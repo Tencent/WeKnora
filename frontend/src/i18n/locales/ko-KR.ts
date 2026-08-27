@@ -5882,6 +5882,10 @@ export default {
       renameSuccess: '폴더 이름을 변경했습니다',
       renameFailed: '폴더 이름을 변경할 수 없습니다',
       renameInvalid: '폴더를 자기 하위로 이동할 수 없습니다',
+      delete: '폴더 삭제',
+      deleteConfirm: '「{name}」 폴더와 하위 폴더의 문서 {count}개를 삭제할까요? 이 작업은 되돌릴 수 없습니다.',
+      deleteSubmitted: '문서 {count}개 삭제 작업을 제출했습니다',
+      deleteFailed: '폴더를 삭제할 수 없습니다',
     },
     moveToFolder: {
       action: '폴더로 이동',

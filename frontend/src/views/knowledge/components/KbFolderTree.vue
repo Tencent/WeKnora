@@ -109,6 +109,19 @@
                       <t-icon name="edit" class="menu-icon" />
                       <span>{{ t('knowledgeBase.folderTree.rename') }}</span>
                     </div>
+                    <t-popconfirm
+                      theme="warning"
+                      :content="t('knowledgeBase.folderTree.deleteConfirm', { name: row.name, count: row.totalCount })"
+                      :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
+                      :cancel-btn="{ content: t('common.cancel') }"
+                      placement="left"
+                      @confirm="onFolderMenuDelete(row)"
+                    >
+                      <div class="popup-menu-item danger" @click.stop>
+                        <t-icon name="delete" class="menu-icon" />
+                        <span>{{ t('knowledgeBase.folderTree.delete') }}</span>
+                      </div>
+                    </t-popconfirm>
                   </div>
                 </template>
               </t-popup>
@@ -149,6 +162,7 @@ const emit = defineEmits<{
   select: [path: string]
   'update:collapsed': [collapsed: boolean]
   rename: [payload: { from: string; to: string }]
+  delete: [path: string]
 }>()
 
 const { t } = useI18n()
@@ -193,6 +207,11 @@ const onFolderMenuVisible = (path: string, visible: boolean) => {
 const onFolderMenuRename = async (row: FolderRow) => {
   menuOpenPath.value = null
   await startRename(row)
+}
+
+const onFolderMenuDelete = (row: FolderRow) => {
+  menuOpenPath.value = null
+  emit('delete', row.path)
 }
 
 const cancelRename = () => {

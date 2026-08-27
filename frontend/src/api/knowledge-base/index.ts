@@ -337,6 +337,10 @@ export function renameKnowledgeFolder(kbId: string, from: string, to: string) {
   return put(`/api/v1/knowledge-bases/${kbId}/knowledge/folders`, { from, to });
 }
 
+export function deleteKnowledgeFolder(kbId: string, folderPath: string) {
+  return del(`/api/v1/knowledge-bases/${kbId}/knowledge/folders?${new URLSearchParams({ folder_path: folderPath })}`);
+}
+
 export function getKnowledgeDetails(id: string, options?: { agent_id?: string; agent_source_tenant_id?: string }) {
   const query = new URLSearchParams();
   if (options?.agent_id) query.set('agent_id', options.agent_id);

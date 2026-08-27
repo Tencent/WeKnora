@@ -225,6 +225,14 @@ func (r *knowledgeRepository) ListKnowledgeFolderCounts(
 	return counts, nil
 }
 
+func (r *knowledgeRepository) ListKnowledgeIDsByFolderPath(ctx context.Context, tenantID uint64, kbID string, folderPath string) ([]string, error) {
+	var ids []string
+	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ? AND (folder_path = ? OR folder_path LIKE ? ESCAPE ?)", tenantID, kbID, types.ParseStatusDeleting, folderPath, escapeLikeKeyword(folderPath)+"/%", likeEscapeChar).
+		Pluck("id", &ids).Error
+	return ids, err
+}
+
 // UpdateKnowledgeFolderPath files the given knowledge entries under folderPath.
 // Only the display/navigation column is touched: chunks, embeddings and the
 // stored file are unaffected, which is why re-filing needs no re-processing.

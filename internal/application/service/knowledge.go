@@ -579,6 +579,14 @@ func (s *knowledgeService) ListKnowledgeFolderTree(ctx context.Context,
 	return types.BuildKnowledgeFolderTree(counts), nil
 }
 
+func (s *knowledgeService) ListKnowledgeIDsByFolderPath(ctx context.Context, kbID string, folderPath string) ([]string, error) {
+	normalized := types.NormalizeKnowledgeFolderPath(folderPath)
+	if normalized == "" {
+		return nil, werrors.NewBadRequestError("文件夹路径不能为空")
+	}
+	return s.repo.ListKnowledgeIDsByFolderPath(ctx, ctx.Value(types.TenantIDContextKey).(uint64), kbID, normalized)
+}
+
 // MoveKnowledgeToFolder re-files knowledge entries under folderPath. Since
 // folders are derived from the stored paths, a folder that does not exist yet is
 // created by this call; a folder whose last entry moves away disappears.

@@ -141,3 +141,25 @@ func TestListKnowledgeFolderCounts(t *testing.T) {
 	assert.Equal(t, "docs", tree.Folders[0].Path)
 	assert.Equal(t, int64(2), tree.Folders[0].TotalCount)
 }
+
+func TestListKnowledgeIDsByFolderPath(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+	const tenantID = uint64(1)
+	kbID := uuid.New().String()
+	root := insertKnowledgeInFolder(t, db, tenantID, kbID, "", "root.md")
+	docs := insertKnowledgeInFolder(t, db, tenantID, kbID, "docs", "intro.md")
+	child := insertKnowledgeInFolder(t, db, tenantID, kbID, "docs/spec", "design.md")
+	sibling := insertKnowledgeInFolder(t, db, tenantID, kbID, "docs-old", "old.md")
+	otherKB := insertKnowledgeInFolder(t, db, tenantID, uuid.New().String(), "docs/spec", "foreign.md")
+	deleting := insertKnowledgeInFolder(t, db, tenantID, kbID, "docs", "deleting.md")
+	require.NoError(t, db.Exec(`UPDATE knowledges SET parse_status = ? WHERE id = ?`, types.ParseStatusDeleting, deleting).Error)
+
+	ids, err := repo.ListKnowledgeIDsByFolderPath(ctx, tenantID, kbID, "docs")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{docs, child}, ids)
+	assert.NotContains(t, ids, root)
+	assert.NotContains(t, ids, sibling)
+	assert.NotContains(t, ids, otherKB)
+}

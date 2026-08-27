@@ -38,6 +38,7 @@ import {
   listKnowledgeFolders,
   moveKnowledgeToFolder,
   renameKnowledgeFolder,
+  deleteKnowledgeFolder,
   downKnowledgeDetails,
   type KnowledgeFolderTree,
 } from "@/api/knowledge-base/index";
@@ -866,6 +867,32 @@ const handleFolderRename = async ({ from, to }: { from: string; to: string }) =>
     await loadFolderTree(kbId.value);
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('knowledgeBase.folderTree.renameFailed'));
+  }
+};
+
+const handleFolderDelete = async (folderPath: string) => {
+  if (!kbId.value || !folderPath) return;
+  try {
+    const res: any = await deleteKnowledgeFolder(kbId.value, folderPath);
+    const count = res?.data?.deleted_count ?? 0;
+    if (!res?.success || count === 0) {
+      MessagePlugin.error(res?.message || t('knowledgeBase.folderTree.deleteFailed'));
+      return;
+    }
+    MessagePlugin.success(t('knowledgeBase.folderTree.deleteSubmitted', { count }));
+    if (selectedFolderPath.value === folderPath || selectedFolderPath.value.startsWith(`${folderPath}/`)) {
+      const parentEnd = folderPath.lastIndexOf('/');
+      selectedFolderPath.value = parentEnd < 0 ? ROOT_FOLDER_PATH : folderPath.slice(0, parentEnd);
+    }
+    resetPage();
+    for (let i = 0; i < 30; i++) {
+      await loadKnowledgeFiles(kbId.value);
+      await loadFolderTree(kbId.value);
+      if (!folderExistsInTree(folderTree.value?.folders || [], folderPath)) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 400));
+    }
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.folderTree.deleteFailed'));
   }
 };
 
@@ -2385,7 +2412,7 @@ async function createNewSession(value: string): Promise<void> {
           <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :tree="folderTree" :selected-path="selectedFolderPath"
             :loading="folderTreeLoading" :can-edit="canEdit"
             @select="handleFolderSelect" @update:collapsed="handleFolderTreeCollapsedChange"
-            @rename="handleFolderRename" />
+            @rename="handleFolderRename" @delete="handleFolderDelete" />
           <div class="tag-content">
             <div class="doc-card-area">
               <nav v-if="showFolderTree" class="doc-folder-path"

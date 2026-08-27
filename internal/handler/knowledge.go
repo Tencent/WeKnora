@@ -1211,6 +1211,62 @@ func (h *KnowledgeHandler) RenameKnowledgeFolder(c *gin.Context) {
 	})
 }
 
+// DeleteKnowledgeFolder deletes every document in a folder subtree through the
+// existing asynchronous delete pipeline. Folders are derived from folder_path,
+// so deleting the final document automatically removes the folder from the tree.
+func (h *KnowledgeHandler) DeleteKnowledgeFolder(c *gin.Context) {
+	ctx := c.Request.Context()
+	folderPath := types.NormalizeKnowledgeFolderPath(c.Query("folder_path"))
+	if folderPath == "" {
+		c.Error(errors.NewBadRequestError("folder_path cannot be empty"))
+		return
+	}
+
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to delete knowledge"))
+		return
+	}
+	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	ids, err := h.kgService.ListKnowledgeIDsByFolderPath(ctx, kbID, folderPath)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError("Failed to list folder documents"))
+		return
+	}
+	if len(ids) == 0 {
+		c.Error(errors.NewBadRequestError("folder has no documents to delete"))
+		return
+	}
+
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, ids)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to enqueue folder delete task: %v", err)
+		c.Error(errors.NewInternalServerError("Failed to enqueue folder delete task"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Folder delete task submitted",
+		"data": gin.H{
+			"task_id": taskID, "deleted_count": len(ids), "folder_path": folderPath,
+		},
+	})
+}
+
 // dedupeKnowledgeIDs trims, drops empty and de-duplicates a batch of IDs while
 // preserving the caller's order.
 func dedupeKnowledgeIDs(raw []string) []string {

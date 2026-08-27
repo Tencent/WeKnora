@@ -386,6 +386,10 @@ export default {
       renameSuccess: 'Folder renamed',
       renameFailed: 'Could not rename the folder',
       renameInvalid: 'A folder cannot be moved inside itself',
+      delete: 'Delete folder',
+      deleteConfirm: 'Delete “{name}” and {count} documents in this folder and its sub-folders? This cannot be undone.',
+      deleteSubmitted: 'Deletion submitted for {count} documents',
+      deleteFailed: 'Could not delete the folder',
     },
     moveToFolder: {
       action: 'Move to folder',

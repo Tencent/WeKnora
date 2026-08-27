@@ -5884,6 +5884,10 @@ export default {
       renameSuccess: '文件夹已重命名',
       renameFailed: '文件夹重命名失败',
       renameInvalid: '不能把文件夹移动到它自己的子目录下',
+      delete: '删除文件夹',
+      deleteConfirm: '确定删除文件夹“{name}”及其子目录中的 {count} 个文档吗？此操作不可撤销。',
+      deleteSubmitted: '已提交 {count} 个文档的删除任务',
+      deleteFailed: '文件夹删除失败',
     },
     moveToFolder: {
       action: '移动到目录',
