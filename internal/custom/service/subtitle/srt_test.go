@@ -35,3 +35,17 @@ func TestValidateParagraphsRejectsInvalidTimeline(t *testing.T) {
 		t.Fatal("ValidateParagraphs() error = nil, want invalid timeline error")
 	}
 }
+
+func TestParagraphsToSRTSupportsCrossHourTimeline(t *testing.T) {
+	paragraphs := []TranscriptParagraph{{
+		SpeakerID: "1",
+		Sentences: []TranscriptSentence{{Text: "跨小时内容", StartMs: 3_599_900, EndMs: 3_600_500}},
+	}}
+	if err := ValidateParagraphs(paragraphs); err != nil {
+		t.Fatalf("ValidateParagraphs() error = %v", err)
+	}
+	want := "1\n00:59:59,900 --> 01:00:00,500\n[说话人 1] 跨小时内容\n\n"
+	if got := ParagraphsToSRT(paragraphs); got != want {
+		t.Fatalf("ParagraphsToSRT() = %q, want %q", got, want)
+	}
+}

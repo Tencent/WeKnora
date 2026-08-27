@@ -135,14 +135,15 @@ func (h *SubtitleGenerateHandler) Run(ctx context.Context, job *model.VideoProce
 
 	// 触发 index job
 	indexJob := model.VideoProcessingJob{
-		ID:             uuid.NewString(),
-		VideoID:        video.ID,
-		JobType:        "index",
-		Provider:       "weknora",
-		Status:         "pending",
-		MaxAttempts:    3,
-		IdempotencyKey: fmt.Sprintf("index:%s:%x", video.ID, sha256.Sum256(storePayload)),
-		ResultPayload:  string(storePayload),
+		ID:                   uuid.NewString(),
+		VideoID:              video.ID,
+		JobType:              "index",
+		TranscriptGeneration: job.TranscriptGeneration,
+		Provider:             "weknora",
+		Status:               "pending",
+		MaxAttempts:          3,
+		IdempotencyKey:       fmt.Sprintf("index:%s:%x", video.ID, sha256.Sum256(storePayload)),
+		ResultPayload:        string(storePayload),
 	}
 	if err := h.DB.Transaction(func(tx *gorm.DB) error {
 		var locked model.Video
@@ -250,6 +251,10 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 		prepared = append(prepared, preparedChunk{Index: b.Metadata.ChunkIndex, Content: content, ContentHash: contentHash})
 	}
 	generation := fmt.Sprintf("%x", generationHash.Sum(nil))
+	if err := h.DB.Model(job).Update("transcript_generation", generation).Error; err != nil {
+		return fmt.Errorf("bind index job transcript generation: %w", err)
+	}
+	job.TranscriptGeneration = generation
 
 	var firstKnowledgeID string
 	for _, item := range prepared {

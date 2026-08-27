@@ -54,6 +54,11 @@ func NewEngine(db *gorm.DB, cfg *config.WorkerConfig, handlers ...Handler) *Engi
 
 // Start 启动 worker 协程池
 func (e *Engine) Start(parent context.Context) {
+	if recovered, err := RecoverInterruptedJobs(e.db); err != nil {
+		slog.Error("recover interrupted jobs", "component", "content-worker", "error", err)
+	} else if recovered > 0 {
+		slog.Warn("recovered interrupted jobs", "component", "content-worker", "job_count", recovered)
+	}
 	ctx, cancel := context.WithCancel(parent)
 	e.cancel = cancel
 	for i := 0; i < e.cfg.Concurrency; i++ {
@@ -61,6 +66,18 @@ func (e *Engine) Start(parent context.Context) {
 		go e.loop(ctx, i)
 	}
 	slog.Info("worker engine started", "concurrency", e.cfg.Concurrency, "poll_interval_sec", e.cfg.PollIntervalSeconds)
+}
+
+func RecoverInterruptedJobs(db *gorm.DB) (int64, error) {
+	result := db.Model(&model.VideoProcessingJob{}).
+		Where("status = ?", "running").
+		Updates(map[string]any{
+			"status":        "pending",
+			"attempt_count": gorm.Expr("CASE WHEN attempt_count > 0 THEN attempt_count - 1 ELSE 0 END"),
+			"started_at":    nil, "completed_at": nil,
+			"error_category": "", "error_code": "", "error_message": "",
+		})
+	return result.RowsAffected, result.Error
 }
 
 // Stop 优雅关闭
@@ -122,6 +139,8 @@ func (e *Engine) tick(ctx context.Context) error {
 		if job.ID == "" {
 			return nil
 		}
+		job.Status = "running"
+		job.AttemptCount++
 		e.dispatch(ctx, &job)
 	}
 }
@@ -149,25 +168,34 @@ func (e *Engine) dispatch(ctx context.Context, job *model.VideoProcessingJob) {
 	handler, ok := e.handlers[job.JobType]
 	if !ok {
 		slog.Warn("no handler for job_type", "job_type", job.JobType, "job_id", job.ID)
-		e.markFailed(job, "no_handler", "no handler registered", nil)
+		e.markFailed(job, ErrorCategoryConfigurationAuth, "no_handler", "no handler registered", nil)
 		return
 	}
 
 	var video model.Video
 	if err := e.db.First(&video, "id = ?", job.VideoID).Error; err != nil {
-		e.markFailed(job, "video_not_found", err.Error(), err)
+		e.markFailed(job, ErrorCategoryDatabase, "video_not_found", err.Error(), err)
 		return
+	}
+	if job.JobType != "thumbnail" {
+		_ = e.db.Model(&model.Video{}).Where("id = ?", job.VideoID).Updates(map[string]any{
+			"status": model.VideoStatusProcessing, "processing_error_summary": "",
+		}).Error
 	}
 
 	if err := handler.Run(ctx, job, &video); err != nil {
-		slog.Warn("job run failed", "job_id", job.ID, "job_type", job.JobType, "attempt", job.AttemptCount, "error", err)
+		category, code := ClassifyProcessingError(err)
+		slog.Warn("job run failed",
+			"component", "content-worker", "video_id", job.VideoID, "job_id", job.ID,
+			"job_type", job.JobType, "transcript_generation", job.TranscriptGeneration,
+			"attempt", job.AttemptCount, "error_category", category, "error_code", code, "error", err)
 		if job.AttemptCount >= job.MaxAttempts {
-			e.markFailed(job, "max_attempts", err.Error(), err)
+			e.markFailed(job, category, code, err.Error(), err)
 		} else {
 			// 退避：重置 pending 等下一轮 tick 重试
 			e.db.Model(job).Updates(map[string]any{
-				"status":        "pending",
-				"error_message": err.Error(),
+				"status": "pending", "error_category": category,
+				"error_code": code, "error_message": err.Error(),
 			})
 		}
 		return
@@ -179,21 +207,22 @@ func (e *Engine) dispatch(ctx context.Context, job *model.VideoProcessingJob) {
 func (e *Engine) markSucceeded(job *model.VideoProcessingJob) {
 	now := time.Now().UTC()
 	e.db.Model(job).Updates(map[string]any{
-		"status":       "succeeded",
-		"progress":     100,
-		"completed_at": now,
+		"status": "succeeded", "progress": 100, "completed_at": now,
+		"error_category": "", "error_code": "", "error_message": "",
 	})
+	slog.Info("job completed",
+		"component", "content-worker", "video_id", job.VideoID, "job_id", job.ID,
+		"job_type", job.JobType, "transcript_generation", job.TranscriptGeneration,
+		"status", "succeeded", "attempt", job.AttemptCount)
 }
 
-func (e *Engine) markFailed(job *model.VideoProcessingJob, code, msg string, cause error) {
+func (e *Engine) markFailed(job *model.VideoProcessingJob, category, code, msg string, cause error) {
 	now := time.Now().UTC()
 	e.db.Model(job).Updates(map[string]any{
-		"status":        "failed",
-		"error_code":    code,
-		"error_message": msg,
-		"completed_at":  now,
+		"status": "failed", "error_category": category,
+		"error_code": code, "error_message": msg, "completed_at": now,
 	})
-	updates := map[string]any{"processing_error_summary": msg}
+	updates := map[string]any{"status": model.VideoStatusFailed, "processing_error_summary": msg}
 	coverDegraded := false
 	if job.JobType == "thumbnail" {
 		var video model.Video
@@ -215,6 +244,10 @@ func (e *Engine) markFailed(job *model.VideoProcessingJob, code, msg string, cau
 	e.db.Model(&model.Video{}).
 		Where("id = ?", job.VideoID).
 		Updates(updates)
+	slog.Error("job failed",
+		"component", "content-worker", "video_id", job.VideoID, "job_id", job.ID,
+		"job_type", job.JobType, "transcript_generation", job.TranscriptGeneration,
+		"status", "failed", "error_category", category, "error_code", code, "error", cause)
 	if coverDegraded {
 		e.enqueueTranscriptionAfterCoverFallback(job.VideoID)
 	}

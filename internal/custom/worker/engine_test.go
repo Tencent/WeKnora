@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -194,11 +195,163 @@ func TestCoreFileUnavailableMarksVideoFailed(t *testing.T) {
 	}
 }
 
-type failingHandler struct {
-	err error
+func TestContentFailureStoresCategoryAndKeepsVideoPlayable(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&model.Video{}, &model.VideoProcessingJob{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	video := model.Video{ID: uuid.NewString(), Title: "video", Status: model.VideoStatusProcessing, FileURL: "https://cdn/video.mp4"}
+	job := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "summary", Status: "running", AttemptCount: 1, MaxAttempts: 1,
+		IdempotencyKey: "summary:" + video.ID,
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	engine := NewEngine(db, &config.WorkerConfig{}, &failingHandler{jobType: "summary", err: context.DeadlineExceeded})
+	engine.dispatch(context.Background(), &job)
+
+	var gotJob model.VideoProcessingJob
+	if err := db.First(&gotJob, "id = ?", job.ID).Error; err != nil {
+		t.Fatalf("load job: %v", err)
+	}
+	if gotJob.Status != "failed" || gotJob.ErrorCategory != "timeout" || gotJob.ErrorCode != "timeout" {
+		t.Fatalf("failed job = %#v", gotJob)
+	}
+	var gotVideo model.Video
+	if err := db.First(&gotVideo, "id = ?", video.ID).Error; err != nil {
+		t.Fatalf("load video: %v", err)
+	}
+	if gotVideo.Status != model.VideoStatusFailed || gotVideo.ProcessingErrorSummary == "" {
+		t.Fatalf("failed video = %#v", gotVideo)
+	}
+	if !model.VideoIsPlayable(gotVideo.Status, gotVideo.FileURL, gotVideo.ThumbnailURL) {
+		t.Fatal("content failure must not remove the existing playback entry")
+	}
 }
 
-func (h *failingHandler) JobType() string { return "thumbnail" }
+func TestClassifyProcessingError(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		category string
+		code     string
+	}{
+		{name: "timeout", err: context.DeadlineExceeded, category: "timeout", code: "timeout"},
+		{name: "configuration", err: errors.New("听悟 client 未配置"), category: "configuration_auth", code: "configuration_missing"},
+		{name: "authentication", err: errors.New("tingwu create status 401: InvalidAccessKeyId"), category: "configuration_auth", code: "authentication_failed"},
+		{name: "rate limit", err: errors.New("tingwu create status 429: rate limit exceeded"), category: "external_task", code: "external_task_failed"},
+		{name: "external failure", err: errors.New("听悟失败 Code=TaskFailed Msg=no audio"), category: "external_task", code: "external_task_failed"},
+		{name: "response parse", err: errors.New("decode tingwu get: invalid character"), category: "response_parse", code: "response_parse"},
+		{name: "empty transcript", err: errors.New("transcript contains no non-empty timed sentences"), category: "response_parse", code: "response_parse"},
+		{name: "object storage", err: errors.New("upload srt: put object failed"), category: "object_storage", code: "object_storage_operation"},
+		{name: "weknora", err: errors.New("knowledge abc parse failed"), category: "weknora", code: "weknora_operation"},
+		{name: "agent skill", err: errors.New("trigger skill generate-transcript-outline: upstream unavailable"), category: "weknora", code: "weknora_operation"},
+		{name: "wiki artifact", err: errors.New("未找到 job=outline 的 wiki 页"), category: "wiki_artifact", code: "wiki_artifact_missing"},
+		{name: "database", err: errors.New("save transcription result: database is locked"), category: "database", code: "database_operation"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			category, code := ClassifyProcessingError(tc.err)
+			if category != tc.category || code != tc.code {
+				t.Fatalf("classification = %q/%q, want %q/%q", category, code, tc.category, tc.code)
+			}
+		})
+	}
+}
+
+func TestEachContentStageFailureRemainsIndependentlyRetryable(t *testing.T) {
+	for _, jobType := range []string{"graph", "outline", "overview", "summary", "assemble"} {
+		t.Run(jobType, func(t *testing.T) {
+			db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+			if err != nil {
+				t.Fatalf("open db: %v", err)
+			}
+			if err := db.AutoMigrate(&model.Video{}, &model.VideoProcessingJob{}); err != nil {
+				t.Fatalf("migrate: %v", err)
+			}
+			video := model.Video{ID: uuid.NewString(), Title: "video", FileURL: "https://cdn/video.mp4", Status: model.VideoStatusProcessing, TranscriptGeneration: "generation-1"}
+			job := model.VideoProcessingJob{
+				ID: uuid.NewString(), VideoID: video.ID, JobType: jobType, TranscriptGeneration: video.TranscriptGeneration,
+				Status: "running", AttemptCount: 1, MaxAttempts: 1, IdempotencyKey: jobType + ":" + video.ID + ":" + video.TranscriptGeneration,
+			}
+			if err := db.Create(&video).Error; err != nil {
+				t.Fatalf("create video: %v", err)
+			}
+			if err := db.Create(&job).Error; err != nil {
+				t.Fatalf("create job: %v", err)
+			}
+			engine := NewEngine(db, &config.WorkerConfig{}, &failingHandler{jobType: jobType, err: errors.New("trigger skill: upstream unavailable")})
+			engine.dispatch(context.Background(), &job)
+
+			var failed model.VideoProcessingJob
+			if err := db.First(&failed, "id = ?", job.ID).Error; err != nil {
+				t.Fatalf("load failed job: %v", err)
+			}
+			if failed.Status != "failed" || failed.ErrorCategory != ErrorCategoryWeKnora || failed.ErrorMessage == "" {
+				t.Fatalf("failed job = %#v", failed)
+			}
+		})
+	}
+}
+
+func TestRecoverInterruptedJobsReusesExistingRows(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&model.VideoProcessingJob{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	jobs := []model.VideoProcessingJob{
+		{ID: "running-1", VideoID: "video-1", JobType: "summary", Status: "running", AttemptCount: 2, MaxAttempts: 3, IdempotencyKey: "summary:video-1"},
+		{ID: "succeeded-1", VideoID: "video-2", JobType: "summary", Status: "succeeded", AttemptCount: 1, MaxAttempts: 3, IdempotencyKey: "summary:video-2"},
+	}
+	if err := db.Create(&jobs).Error; err != nil {
+		t.Fatalf("create jobs: %v", err)
+	}
+
+	count, err := RecoverInterruptedJobs(db)
+	if err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("recovered = %d, want 1", count)
+	}
+	var running, succeeded model.VideoProcessingJob
+	if err := db.First(&running, "id = ?", "running-1").Error; err != nil {
+		t.Fatalf("load running job: %v", err)
+	}
+	if err := db.First(&succeeded, "id = ?", "succeeded-1").Error; err != nil {
+		t.Fatalf("load succeeded job: %v", err)
+	}
+	if running.Status != "pending" || running.AttemptCount != 1 {
+		t.Fatalf("recovered job = %#v", running)
+	}
+	if succeeded.Status != "succeeded" {
+		t.Fatalf("succeeded job changed: %#v", succeeded)
+	}
+}
+
+type failingHandler struct {
+	jobType string
+	err     error
+}
+
+func (h *failingHandler) JobType() string {
+	if h.jobType == "" {
+		return "thumbnail"
+	}
+	return h.jobType
+}
 
 func (h *failingHandler) Run(context.Context, *model.VideoProcessingJob, *model.Video) error {
 	return h.err

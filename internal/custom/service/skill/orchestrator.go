@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
@@ -59,7 +60,7 @@ func (o *Orchestrator) enqueueJob(ctx context.Context, db *gorm.DB, videoID, job
 			return existing.ID, nil
 		}
 		if err := db.WithContext(ctx).Model(&existing).Updates(map[string]any{
-			"status": "pending", "attempt_count": 0, "error_code": "", "error_message": "",
+			"status": "pending", "attempt_count": 0, "error_category": "", "error_code": "", "error_message": "",
 			"started_at": nil, "completed_at": nil, "updated_at": time.Now().UTC(),
 		}).Error; err != nil {
 			return "", fmt.Errorf("reset %s job: %w", jobType, err)
@@ -67,18 +68,29 @@ func (o *Orchestrator) enqueueJob(ctx context.Context, db *gorm.DB, videoID, job
 		return existing.ID, nil
 	}
 	job := model.VideoProcessingJob{
-		ID:             uuid.NewString(),
-		VideoID:        videoID,
-		JobType:        jobType,
-		Provider:       "weknora",
-		Status:         "pending",
-		MaxAttempts:    3,
-		IdempotencyKey: idemKey,
-		CreatedAt:      time.Now().UTC(),
-		UpdatedAt:      time.Now().UTC(),
+		ID:                   uuid.NewString(),
+		VideoID:              videoID,
+		JobType:              jobType,
+		TranscriptGeneration: video.TranscriptGeneration,
+		Provider:             "weknora",
+		Status:               "pending",
+		MaxAttempts:          3,
+		IdempotencyKey:       idemKey,
+		CreatedAt:            time.Now().UTC(),
+		UpdatedAt:            time.Now().UTC(),
 	}
-	if err := db.WithContext(ctx).Create(&job).Error; err != nil {
-		return "", fmt.Errorf("enqueue %s job: %w", jobType, err)
+	result := db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "idempotency_key"}},
+		DoNothing: true,
+	}).Create(&job)
+	if result.Error != nil {
+		return "", fmt.Errorf("enqueue %s job: %w", jobType, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		if err := db.WithContext(ctx).Where("idempotency_key = ?", idemKey).First(&existing).Error; err != nil {
+			return "", fmt.Errorf("load concurrent %s job: %w", jobType, err)
+		}
+		return existing.ID, nil
 	}
 	return job.ID, nil
 }
@@ -235,6 +247,22 @@ func (o *Orchestrator) AfterSkillCompleteWithID(ctx context.Context, videoID, jo
 			var err error
 			nextJobID, err = o.enqueueJob(ctx, tx, videoID, next)
 			return err
+		}
+		if jobType == JobAssemble {
+			var video model.Video
+			if err := tx.First(&video, "id = ?", videoID).Error; err != nil {
+				return fmt.Errorf("load assembled video: %w", err)
+			}
+			if video.KnowledgeBaseWikiPageID == "" || video.OutlineWikiPageID == "" ||
+				video.OverviewWikiPageID == "" || video.SummaryWikiPageID == "" ||
+				video.TranscriptPageWikiPageID == "" {
+				return fmt.Errorf("incomplete content artifacts after assemble")
+			}
+			if err := tx.Model(&video).Updates(map[string]any{
+				"status": model.VideoStatusCompleted, "processing_error_summary": "",
+			}).Error; err != nil {
+				return fmt.Errorf("mark video completed: %w", err)
+			}
 		}
 		return nil
 	})

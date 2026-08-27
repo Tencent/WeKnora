@@ -42,7 +42,7 @@ func TestVideoIsInitiallyAvailable(t *testing.T) {
 		{name: "completed without cover degrades to placeholder", status: VideoStatusCompleted, fileURL: "https://cdn/video.mp4", want: true},
 		{name: "ready without file", status: VideoStatusReady, want: false},
 		{name: "uploading with placeholder url", status: VideoStatusUploading, fileURL: "https://cdn/video.mp4", thumbnailURL: "https://cdn/cover.jpg", want: false},
-		{name: "failed with file and cover", status: VideoStatusFailed, fileURL: "https://cdn/video.mp4", thumbnailURL: "https://cdn/cover.jpg", want: false},
+		{name: "content failure with file remains playable", status: VideoStatusFailed, fileURL: "https://cdn/video.mp4", thumbnailURL: "https://cdn/cover.jpg", want: true},
 	}
 
 	for _, tc := range cases {
@@ -66,5 +66,14 @@ func TestVideoIsVisibleInListKeepsFailures(t *testing.T) {
 	}
 	if !VideoIsVisibleInList(VideoStatusReady, "https://cdn/video.mp4", "") {
 		t.Fatal("cover-degraded videos must remain visible with placeholder")
+	}
+}
+
+func TestVideoIsPlayableAfterContentFailure(t *testing.T) {
+	if !VideoIsPlayable(VideoStatusFailed, "https://cdn/video.mp4", "") {
+		t.Fatal("failed parsing must keep an uploaded video playable")
+	}
+	if VideoIsPlayable(VideoStatusFailed, "", "") {
+		t.Fatal("failed upload without a core file must not be playable")
 	}
 }

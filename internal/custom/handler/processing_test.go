@@ -1,0 +1,207 @@
+package handler
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+
+	"github.com/Tencent/WeKnora/internal/custom/model"
+)
+
+func TestProcessingStatusReportsFailedStageAndRetryableJob(t *testing.T) {
+	db := openTestVideoDB(t)
+	now := time.Now().UTC()
+	video := model.Video{
+		ID:                   uuid.NewString(),
+		Title:                "failed parsing",
+		FileURL:              "https://cdn.example.com/video.mp4",
+		Status:               model.VideoStatusProcessing,
+		TranscriptGeneration: "generation-1",
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	jobs := []model.VideoProcessingJob{
+		{ID: uuid.NewString(), VideoID: video.ID, JobType: "transcription", TranscriptGeneration: "generation-1", Status: "succeeded", ResultPayload: `{"task_id":"task-1"}`, IdempotencyKey: "transcription:" + video.ID + ":generation-1", UpdatedAt: now.Add(-time.Minute)},
+		{ID: uuid.NewString(), VideoID: video.ID, JobType: "subtitle_generate", TranscriptGeneration: "generation-1", Status: "failed", ErrorCategory: "object_storage", ErrorCode: "object_storage_upload", ErrorMessage: "upload srt failed", IdempotencyKey: "subtitle_generate:" + video.ID + ":generation-1", UpdatedAt: now},
+	}
+	if err := db.Create(&jobs).Error; err != nil {
+		t.Fatalf("create jobs: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/processing-status", nil)
+
+	NewProcessingHandler(db).Status(context)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	var payload ProcessingStatusResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if payload.Status != ProcessingStateFailed || payload.CurrentStage != "subtitle_generate" {
+		t.Fatalf("processing state = %#v", payload)
+	}
+	if payload.Failure == nil || payload.Failure.JobID != jobs[1].ID || payload.Failure.Category != "object_storage" {
+		t.Fatalf("failure = %#v", payload.Failure)
+	}
+	if payload.RetryableJob == nil || payload.RetryableJob.JobID != jobs[1].ID {
+		t.Fatalf("retryable job = %#v", payload.RetryableJob)
+	}
+	if len(payload.CompletedStages) != 1 || payload.CompletedStages[0] != "transcription" {
+		t.Fatalf("completed stages = %#v", payload.CompletedStages)
+	}
+	if len(payload.Jobs) != 2 || !payload.Jobs[0].ResultAvailable {
+		t.Fatalf("job input/output summary = %#v", payload.Jobs)
+	}
+}
+
+func TestRetryFailedStageReusesSameJob(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID:                   uuid.NewString(),
+		Title:                "retry parsing",
+		FileURL:              "https://cdn.example.com/video.mp4",
+		Status:               model.VideoStatusFailed,
+		TranscriptGeneration: "generation-2",
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	failedJob := model.VideoProcessingJob{
+		ID:                   uuid.NewString(),
+		VideoID:              video.ID,
+		JobType:              "outline",
+		TranscriptGeneration: video.TranscriptGeneration,
+		Status:               "failed",
+		AttemptCount:         3,
+		MaxAttempts:          3,
+		ErrorCategory:        "wiki_artifact",
+		ErrorCode:            "wiki_artifact_missing",
+		ErrorMessage:         "outline page missing",
+		IdempotencyKey:       "outline:" + video.ID + ":" + video.TranscriptGeneration,
+	}
+	if err := db.Create(&failedJob).Error; err != nil {
+		t.Fatalf("create failed job: %v", err)
+	}
+
+	handler := NewProcessingHandler(db)
+	for attempt := 0; attempt < 2; attempt++ {
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Params = gin.Params{{Key: "id", Value: video.ID}, {Key: "jobType", Value: "outline"}}
+		context.Request = httptest.NewRequest(http.MethodPost, "/api/custom/videos/"+video.ID+"/processing-jobs/outline/retry", nil)
+		handler.Retry(context)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("attempt %d status = %d, body = %s", attempt+1, recorder.Code, recorder.Body.String())
+		}
+	}
+
+	var jobs []model.VideoProcessingJob
+	if err := db.Where("video_id = ? AND job_type = ? AND transcript_generation = ?", video.ID, "outline", video.TranscriptGeneration).Find(&jobs).Error; err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("job count = %d, want 1", len(jobs))
+	}
+	if jobs[0].ID != failedJob.ID || jobs[0].Status != "pending" || jobs[0].AttemptCount != 0 {
+		t.Fatalf("retried job = %#v", jobs[0])
+	}
+	if jobs[0].ErrorCode != "" || jobs[0].ErrorMessage != "" || jobs[0].ErrorCategory != "" {
+		t.Fatalf("retry did not clear failure: %#v", jobs[0])
+	}
+	var gotVideo model.Video
+	if err := db.First(&gotVideo, "id = ?", video.ID).Error; err != nil {
+		t.Fatalf("load video: %v", err)
+	}
+	if gotVideo.Status != model.VideoStatusProcessing || gotVideo.ProcessingErrorSummary != "" {
+		t.Fatalf("video retry state = %#v", gotVideo)
+	}
+}
+
+func TestSucceededStageWithMissingArtifactBecomesRetryable(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "legacy incomplete result", FileURL: "https://cdn.example.com/video.mp4",
+		Status: model.VideoStatusProcessing, TranscriptGeneration: "generation-3",
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	job := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "summary", TranscriptGeneration: video.TranscriptGeneration,
+		Status: "succeeded", IdempotencyKey: "summary:" + video.ID + ":" + video.TranscriptGeneration,
+	}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	status := buildProcessingStatus(video, []model.VideoProcessingJob{job})
+	if status.Status != ProcessingStateFailed || status.Failure == nil || status.Failure.Code != "content_artifact_missing" {
+		t.Fatalf("processing status = %#v", status)
+	}
+	if status.RetryableJob == nil || status.RetryableJob.JobID != job.ID {
+		t.Fatalf("retryable job = %#v", status.RetryableJob)
+	}
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}, {Key: "jobType", Value: "summary"}}
+	context.Request = httptest.NewRequest(http.MethodPost, "/api/custom/videos/"+video.ID+"/processing-jobs/summary/retry", nil)
+	NewProcessingHandler(db).Retry(context)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("retry status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var retried model.VideoProcessingJob
+	if err := db.First(&retried, "id = ?", job.ID).Error; err != nil {
+		t.Fatalf("load retried job: %v", err)
+	}
+	if retried.Status != "pending" {
+		t.Fatalf("retried status = %q, want pending", retried.Status)
+	}
+}
+
+func TestProcessingStatusIgnoresFailedOldGeneration(t *testing.T) {
+	video := model.Video{
+		ID: uuid.NewString(), Status: model.VideoStatusProcessing, TranscriptGeneration: "generation-new",
+		SummaryWikiPageID: "summary-new",
+	}
+	jobs := []model.VideoProcessingJob{
+		{ID: "old", VideoID: video.ID, JobType: "summary", TranscriptGeneration: "generation-old", Status: "failed", ErrorMessage: "old failure", UpdatedAt: time.Now().Add(time.Minute)},
+		{ID: "new", VideoID: video.ID, JobType: "summary", TranscriptGeneration: "generation-new", Status: "succeeded", UpdatedAt: time.Now()},
+	}
+	status := buildProcessingStatus(video, jobs)
+	if status.Status == ProcessingStateFailed || status.Failure != nil {
+		t.Fatalf("old generation leaked into current status: %#v", status)
+	}
+	if len(status.CompletedStages) != 1 || status.CompletedStages[0] != "summary" {
+		t.Fatalf("completed stages = %#v", status.CompletedStages)
+	}
+}
+
+func TestProcessingStatusKeepsPartialSuccessWhenLaterStageFails(t *testing.T) {
+	video := model.Video{
+		ID: uuid.NewString(), Status: model.VideoStatusFailed, TranscriptGeneration: "generation-1",
+		OutlineWikiPageID: "outline-1",
+	}
+	jobs := []model.VideoProcessingJob{
+		{ID: "outline", VideoID: video.ID, JobType: "outline", TranscriptGeneration: video.TranscriptGeneration, Status: "succeeded", UpdatedAt: time.Now()},
+		{ID: "summary", VideoID: video.ID, JobType: "summary", TranscriptGeneration: video.TranscriptGeneration, Status: "failed", ErrorCategory: "wiki_artifact", ErrorCode: "wiki_artifact_missing", UpdatedAt: time.Now().Add(time.Second)},
+	}
+	status := buildProcessingStatus(video, jobs)
+	if status.Status != ProcessingStateFailed || status.CurrentStage != "summary" {
+		t.Fatalf("status = %#v", status)
+	}
+	if len(status.CompletedStages) != 1 || status.CompletedStages[0] != "outline" {
+		t.Fatalf("completed stages = %#v", status.CompletedStages)
+	}
+}

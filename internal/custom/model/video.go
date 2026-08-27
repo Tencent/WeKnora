@@ -56,25 +56,27 @@ type VideoTranscriptChunk struct {
 
 // VideoProcessingJob 视频处理任务状态机
 type VideoProcessingJob struct {
-	ID                 string     `gorm:"type:varchar(36);primaryKey" json:"id"`
-	VideoID            string     `gorm:"type:varchar(36);index:idx_video_job_status,priority:1" json:"video_id"`
-	JobType            string     `gorm:"type:varchar(50);index:idx_video_job_status,priority:2" json:"job_type"` // thumbnail/transcription/subtitle_generate/index/graph/outline/overview/summary/assemble
-	Provider           string     `gorm:"type:varchar(50)" json:"provider"`                                       // local/aliyun_tingwu/weknora
-	ExternalTaskID     string     `gorm:"type:varchar(128);index" json:"external_task_id"`
-	IdempotencyKey     string     `gorm:"type:varchar(128);uniqueIndex" json:"idempotency_key"`
-	Status             string     `gorm:"type:varchar(50);index:idx_video_job_status,priority:3" json:"status"` // pending/running/succeeded/failed/cancelled
-	Progress           int        `json:"progress"`
-	AttemptCount       int        `json:"attempt_count"`
-	MaxAttempts        int        `json:"max_attempts"`
-	InputPayload       string     `gorm:"type:text" json:"input_payload"`
-	ResultPayload      string     `gorm:"type:text" json:"result_payload"`
-	ErrorCode          string     `gorm:"type:varchar(100)" json:"error_code"`
-	ErrorMessage       string     `gorm:"type:text" json:"error_message"`
-	CallbackReceivedAt *time.Time `json:"callback_received_at"`
-	StartedAt          *time.Time `json:"started_at"`
-	CompletedAt        *time.Time `json:"completed_at"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	ID                   string     `gorm:"type:varchar(36);primaryKey" json:"id"`
+	VideoID              string     `gorm:"type:varchar(36);index:idx_video_job_status,priority:1;index:idx_video_job_generation,priority:1" json:"video_id"`
+	JobType              string     `gorm:"type:varchar(50);index:idx_video_job_status,priority:2;index:idx_video_job_generation,priority:2" json:"job_type"` // thumbnail/transcription/subtitle_generate/index/graph/outline/overview/summary/assemble
+	TranscriptGeneration string     `gorm:"type:varchar(64);index:idx_video_job_generation,priority:3" json:"transcript_generation"`
+	Provider             string     `gorm:"type:varchar(50)" json:"provider"` // local/aliyun_tingwu/weknora
+	ExternalTaskID       string     `gorm:"type:varchar(128);index" json:"external_task_id"`
+	IdempotencyKey       string     `gorm:"type:varchar(128);uniqueIndex" json:"idempotency_key"`
+	Status               string     `gorm:"type:varchar(50);index:idx_video_job_status,priority:3" json:"status"` // pending/running/succeeded/failed/cancelled
+	Progress             int        `json:"progress"`
+	AttemptCount         int        `json:"attempt_count"`
+	MaxAttempts          int        `json:"max_attempts"`
+	InputPayload         string     `gorm:"type:text" json:"input_payload"`
+	ResultPayload        string     `gorm:"type:text" json:"result_payload"`
+	ErrorCategory        string     `gorm:"type:varchar(50);index" json:"error_category"`
+	ErrorCode            string     `gorm:"type:varchar(100)" json:"error_code"`
+	ErrorMessage         string     `gorm:"type:text" json:"error_message"`
+	CallbackReceivedAt   *time.Time `json:"callback_received_at"`
+	StartedAt            *time.Time `json:"started_at"`
+	CompletedAt          *time.Time `json:"completed_at"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
 // VideoSummaryFramework 视频类型 → 总结框架路由

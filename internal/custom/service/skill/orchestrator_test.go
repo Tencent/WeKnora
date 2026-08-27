@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,7 +45,7 @@ func TestAfterSkillCompleteWithIDRollsBackVideoWriteWhenNextJobEnqueueFails(t *t
 
 func TestAfterSkillCompleteWithIDWritesVideoAndEnqueuesNextJobAtomically(t *testing.T) {
 	db := newOrchestratorTestDB(t)
-	video := model.Video{ID: "video-1", Title: "test"}
+	video := model.Video{ID: "video-1", Title: "test", TranscriptGeneration: "generation-1"}
 	require.NoError(t, db.Create(&video).Error)
 
 	orchestrator := NewOrchestrator(db, nil, "kb-1")
@@ -63,6 +64,51 @@ func TestAfterSkillCompleteWithIDWritesVideoAndEnqueuesNextJobAtomically(t *test
 	require.NoError(t, db.First(&nextJob, "id = ?", nextJobID).Error)
 	require.Equal(t, JobOutline, nextJob.JobType)
 	require.Equal(t, "pending", nextJob.Status)
+	require.Equal(t, video.TranscriptGeneration, nextJob.TranscriptGeneration)
+	require.Equal(t, "outline:video-1:generation-1", nextJob.IdempotencyKey)
+}
+
+func TestAssembleMarksVideoCompletedOnlyWhenAllArtifactsExist(t *testing.T) {
+	db := newOrchestratorTestDB(t)
+	video := model.Video{
+		ID: "video-complete", Title: "test", Status: model.VideoStatusProcessing,
+		TranscriptGeneration: "generation-1", KnowledgeBaseWikiPageID: "knowledge-base",
+		OutlineWikiPageID: "outline", OverviewWikiPageID: "overview", SummaryWikiPageID: "summary",
+	}
+	require.NoError(t, db.Create(&video).Error)
+
+	orchestrator := NewOrchestrator(db, nil, "kb-1")
+	_, nextJobID, err := orchestrator.AfterSkillCompleteWithID(
+		context.Background(), video.ID, JobAssemble, "transcript-page",
+	)
+	require.NoError(t, err)
+	require.Empty(t, nextJobID)
+
+	var stored model.Video
+	require.NoError(t, db.First(&stored, "id = ?", video.ID).Error)
+	require.Equal(t, model.VideoStatusCompleted, stored.Status)
+	require.Equal(t, "transcript-page", stored.TranscriptPageWikiPageID)
+}
+
+func TestAssembleRejectsIncompleteArtifactSet(t *testing.T) {
+	db := newOrchestratorTestDB(t)
+	video := model.Video{
+		ID: "video-incomplete", Title: "test", Status: model.VideoStatusProcessing,
+		TranscriptGeneration: "generation-1", KnowledgeBaseWikiPageID: "knowledge-base",
+		OutlineWikiPageID: "outline", OverviewWikiPageID: "overview",
+	}
+	require.NoError(t, db.Create(&video).Error)
+
+	orchestrator := NewOrchestrator(db, nil, "kb-1")
+	_, _, err := orchestrator.AfterSkillCompleteWithID(
+		context.Background(), video.ID, JobAssemble, "transcript-page",
+	)
+	require.ErrorContains(t, err, "incomplete content artifacts")
+
+	var stored model.Video
+	require.NoError(t, db.First(&stored, "id = ?", video.ID).Error)
+	require.Equal(t, model.VideoStatusProcessing, stored.Status)
+	require.Empty(t, stored.TranscriptPageWikiPageID)
 }
 
 func TestFindWikiPageDoesNotFallbackToTranscriptKnowledgeID(t *testing.T) {
@@ -249,4 +295,42 @@ func TestJobContractsCoverEntireChain(t *testing.T) {
 			require.Empty(t, NextJob(jobType))
 		}
 	}
+}
+
+func TestConcurrentEnqueueReusesOneEffectiveJob(t *testing.T) {
+	db := newOrchestratorTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	video := model.Video{ID: "video-concurrent", Title: "test", TranscriptGeneration: "generation-1"}
+	require.NoError(t, db.Create(&video).Error)
+	orchestrator := NewOrchestrator(db, nil, "kb-1")
+
+	const callers = 12
+	ids := make(chan string, callers)
+	errs := make(chan error, callers)
+	var group sync.WaitGroup
+	for range callers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			id, err := orchestrator.EnqueueJob(context.Background(), video.ID, JobOutline)
+			ids <- id
+			errs <- err
+		}()
+	}
+	group.Wait()
+	close(ids)
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	uniqueIDs := map[string]bool{}
+	for id := range ids {
+		uniqueIDs[id] = true
+	}
+	require.Len(t, uniqueIDs, 1)
+	var count int64
+	require.NoError(t, db.Model(&model.VideoProcessingJob{}).Where("video_id = ? AND job_type = ?", video.ID, JobOutline).Count(&count).Error)
+	require.EqualValues(t, 1, count)
 }

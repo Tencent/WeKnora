@@ -15,6 +15,7 @@ package handler
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -49,10 +50,15 @@ func (h *ContentHandler) loadVideo(c *gin.Context) (*model.Video, bool) {
 
 // RelatedKnowledgeResp 关联知识聚合响应（CP-T008）
 type RelatedKnowledgeResp struct {
-	VideoID    string                                             `json:"video_id"`
-	KBID       string                                             `json:"kb_id"`
-	Anchors    map[knowledge.KnowledgeType][]knowledge.AnchorItem `json:"anchors"`     // 5 类型分组
-	CrossVideo []knowledge.AnchorItem                             `json:"cross_video"` // 跨视频边（CP-T008 后续接 Neo4j）
+	Status       string                                             `json:"status"`
+	Stage        string                                             `json:"stage"`
+	ErrorCode    string                                             `json:"error_code"`
+	ErrorMessage string                                             `json:"error_message"`
+	UpdatedAt    time.Time                                          `json:"updated_at"`
+	VideoID      string                                             `json:"video_id"`
+	KBID         string                                             `json:"kb_id"`
+	Anchors      map[knowledge.KnowledgeType][]knowledge.AnchorItem `json:"anchors"`     // 5 类型分组
+	CrossVideo   []knowledge.AnchorItem                             `json:"cross_video"` // 跨视频边（CP-T008 后续接 Neo4j）
 }
 
 // RelatedKnowledge 关联知识 Tab（CP-T008）
@@ -66,12 +72,12 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 	// 第一源：WeKnora 原生 entity + concept
 	nativePages, err := h.Wiki.ListByVideo(ctx, h.KBID, video.ID, "entity")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "list native pages: " + err.Error()})
+		contentError(c, http.StatusInternalServerError, video.ID, "graph", "weknora_read_failed", "list native pages: "+err.Error(), video.UpdatedAt)
 		return
 	}
 	conceptPages, err := h.Wiki.ListByVideo(ctx, h.KBID, video.ID, "concept")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "list concept pages: " + err.Error()})
+		contentError(c, http.StatusInternalServerError, video.ID, "graph", "weknora_read_failed", "list concept pages: "+err.Error(), video.UpdatedAt)
 		return
 	}
 
@@ -104,7 +110,7 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 	// 第二源：skill 产物（page_type=index，含 case/method/insight + entity 6 类细分）
 	skillPages, err := h.Wiki.ListByVideo(ctx, h.KBID, video.ID, "index")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "list skill pages: " + err.Error()})
+		contentError(c, http.StatusInternalServerError, video.ID, "graph", "weknora_read_failed", "list skill pages: "+err.Error(), video.UpdatedAt)
 		return
 	}
 	skillAnchors := make([]knowledge.AnchorItem, 0, len(skillPages))
@@ -132,6 +138,9 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 
 	// 跨视频边（CP-T008 后续接 Neo4j；本版本返回空）
 	c.JSON(http.StatusOK, RelatedKnowledgeResp{
+		Status:     "completed",
+		Stage:      "graph",
+		UpdatedAt:  video.UpdatedAt,
 		VideoID:    video.ID,
 		KBID:       h.KBID,
 		Anchors:    merged,
@@ -141,11 +150,16 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 
 // WikiPageResp 单页 Wiki 响应（CP-T009）
 type WikiPageResp struct {
-	VideoID     string         `json:"video_id"`
-	PageType    string         `json:"page_type"` // outline / overview / summary / transcript_page
-	WikiPageID  string         `json:"wiki_page_id"`
-	Content     string         `json:"content"`
-	Frontmatter map[string]any `json:"frontmatter,omitempty"`
+	Status       string         `json:"status"`
+	Stage        string         `json:"stage"`
+	ErrorCode    string         `json:"error_code"`
+	ErrorMessage string         `json:"error_message"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	VideoID      string         `json:"video_id"`
+	PageType     string         `json:"page_type"` // outline / overview / summary / transcript_page
+	WikiPageID   string         `json:"wiki_page_id"`
+	Content      string         `json:"content"`
+	Frontmatter  map[string]any `json:"frontmatter,omitempty"`
 }
 
 // fetchWikiPageByVideoField 按 videos 表字段名取 Wiki 页
@@ -162,24 +176,38 @@ func (h *ContentHandler) fetchWikiPageByVideoField(c *gin.Context, video *model.
 		wikiID = video.TranscriptPageWikiPageID
 	}
 	if wikiID == "" {
-		c.JSON(http.StatusNotFound, gin.H{"error": "wiki_page_id not yet generated"})
+		contentError(c, http.StatusNotFound, video.ID, pageType, "not_generated", "wiki_page_id not yet generated", video.UpdatedAt)
 		return
 	}
 	page, err := h.Wiki.GetPageByID(c.Request.Context(), h.KBID, wikiID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		contentError(c, http.StatusInternalServerError, video.ID, pageType, "weknora_read_failed", err.Error(), video.UpdatedAt)
 		return
 	}
 	if page == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "wiki page not found"})
+		contentError(c, http.StatusNotFound, video.ID, pageType, "artifact_missing", "wiki page not found", video.UpdatedAt)
 		return
 	}
+	updatedAt := page.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = video.UpdatedAt
+	}
 	c.JSON(http.StatusOK, WikiPageResp{
+		Status:      "completed",
+		Stage:       pageType,
+		UpdatedAt:   updatedAt,
 		VideoID:     video.ID,
 		PageType:    pageType,
 		WikiPageID:  wikiID,
 		Content:     page.Content,
 		Frontmatter: page.ParsedFrontmatter(),
+	})
+}
+
+func contentError(c *gin.Context, httpStatus int, videoID, stage, code, message string, updatedAt time.Time) {
+	c.JSON(httpStatus, gin.H{
+		"status": "failed", "stage": stage, "error_code": code, "error_message": message,
+		"updated_at": updatedAt, "video_id": videoID, "error": message,
 	})
 }
 

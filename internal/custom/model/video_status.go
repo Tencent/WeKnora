@@ -26,10 +26,10 @@ func VideoIsReadyForHome(status string) bool {
 // VideoIsInitiallyAvailable 返回视频是否已完成上传并可在产品中使用。
 // 封面和时长属于异步增强信息，不应阻塞视频播放或列表展示。
 func VideoIsInitiallyAvailable(status, fileURL, thumbnailURL string) bool {
-	if !VideoIsReadyForHome(status) || strings.TrimSpace(fileURL) == "" {
+	if strings.TrimSpace(fileURL) == "" {
 		return false
 	}
-	return true
+	return VideoIsReadyForHome(status) || status == VideoStatusFailed
 }
 
 // VideoIsPlayable 是对业务语义更明确的别名：只要核心视频文件已合并即可播放。
