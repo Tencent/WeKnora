@@ -9,6 +9,7 @@
         <span class="video-detail-page__status">{{ statusLabel }}</span>
         <t-select v-model="selectedVideoId" :options="videoOptions" placeholder="切换视频" @change="switchVideo" />
       </header>
+      <ProcessingStatus :video-id="video.id" @retry-started="handleRetryStarted" @stage-completed="handleStageCompleted" />
       <div v-if="!isPlayable" class="video-detail-page__state">
         <t-empty :description="statusHint">
           <template #action>
@@ -18,16 +19,15 @@
         <t-alert v-if="video.status === 'failed' && video.processing_error_summary" class="video-detail-page__error" theme="error" :message="video.processing_error_summary" />
       </div>
       <template v-else>
-        <ProcessingStatus :video-id="video.id" @retried="loadVideo(video.id)" />
         <div class="video-detail-page__layout">
           <section class="video-detail-page__left">
             <VideoPlayer ref="player" :src="video.play_url || video.video_url" :poster="video.cover_url || video.poster_url" :duration-hint="video.durationSeconds" :subtitles="video.subtitles" @timeupdate="currentSeconds = $event" />
-            <ChapterNavigation :video="video" :current-seconds="currentSeconds" @seek="seekTo" />
+            <ChapterNavigation :video="video" :current-seconds="currentSeconds" :content-state="content.outline" @reload="reloadOutline" @seek="seekTo" />
           </section>
           <aside class="video-detail-page__right">
             <t-tabs v-model="activeTab">
-              <t-tab-panel value="summary" label="智能总结"><SmartSummary :key="video.id" :video="video" @seek="seekTo" /></t-tab-panel>
-              <t-tab-panel value="related" label="关联知识"><RelatedKnowledge :key="video.id" :video="video" @seek="seekTo" @select-video-by-id="onSelectVideoById" /></t-tab-panel>
+              <t-tab-panel value="summary" label="智能总结"><SmartSummary :key="video.id" :video="video" :content-state="content.summary" @reload="reloadSummary" @seek="seekTo" /></t-tab-panel>
+              <t-tab-panel value="related" label="关联知识"><RelatedKnowledge :key="video.id" :video="video" :content-state="content.relatedKnowledge" @reload="reloadRelatedKnowledge" @seek="seekTo" @select-video-by-id="onSelectVideoById" /></t-tab-panel>
             </t-tabs>
           </aside>
         </div>
@@ -40,7 +40,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { fetchVideoDetail, fetchVideoOptions, isVideoInitiallyAvailable } from '@/api/videohub'
+import { contentModuleForStage, createLoadingContentModuleState, createLoadingContentState, fetchVideoContent, fetchVideoContentModule, fetchVideoDetail, fetchVideoOptions, isVideoInitiallyAvailable, type VideoContentModule, type VideoContentState } from '@/api/videohub'
 import type { VideoData } from '@/types/videohub'
 import VideoPlayer from '@/components/videohub/VideoPlayer.vue'
 import ChapterNavigation from '@/components/videohub/ChapterNavigation.vue'
@@ -60,7 +60,10 @@ const currentSeconds = ref(0)
 const activeTab = ref('summary')
 const loading = ref(true)
 const error = ref('')
+const content = ref<VideoContentState>(createLoadingContentState())
 let loadSequence = 0
+let contentSequence = 0
+const moduleSequences: Record<VideoContentModule, number> = { outline: 0, summary: 0, relatedKnowledge: 0 }
 const isPlayable = computed(() => Boolean(video.value && isVideoInitiallyAvailable({
   status: video.value.status,
   file_url: video.value.video_url,
@@ -89,12 +92,15 @@ const statusHint = computed(() => {
 
 async function loadVideo(id: string) {
   const sequence = ++loadSequence
+  contentSequence++
   loading.value = true; error.value = ''; currentSeconds.value = 0
   try {
     const nextVideo = await fetchVideoDetail(id)
     if (sequence !== loadSequence) return
     video.value = nextVideo; selectedVideoId.value = id
     loading.value = false
+    content.value = createLoadingContentState()
+    void loadContent(nextVideo)
     await nextTick()
     page.value?.scrollTo({ top: 0 })
     const querySeconds = Number(route.query.t)
@@ -109,6 +115,47 @@ async function loadVideo(id: string) {
     if (sequence === loadSequence) loading.value = false
   }
 }
+async function loadContent(videoData: VideoData) {
+  const sequence = ++contentSequence
+  for (const module of Object.keys(moduleSequences) as VideoContentModule[]) moduleSequences[module]++
+  content.value = createLoadingContentState()
+  const nextContent = await fetchVideoContent(videoData.id, videoData.durationSeconds, videoData.category)
+  if (sequence === contentSequence && video.value?.id === videoData.id) content.value = nextContent
+}
+function markContentModuleLoading(module: VideoContentModule) {
+  moduleSequences[module]++
+  content.value = { ...content.value, [module]: createLoadingContentModuleState(module) } as VideoContentState
+}
+async function refreshContentModule(module: VideoContentModule, videoData: VideoData) {
+  const sequence = ++moduleSequences[module]
+  content.value = { ...content.value, [module]: createLoadingContentModuleState(module) } as VideoContentState
+  const nextState = await fetchVideoContentModule(videoData.id, videoData.durationSeconds, videoData.category, module)
+  if (sequence === moduleSequences[module] && video.value?.id === videoData.id) {
+    content.value = { ...content.value, [module]: nextState } as VideoContentState
+  }
+}
+function handleRetryStarted(stage: string) {
+  const module = contentModuleForStage(stage)
+  if (module === 'all') {
+    for (const contentModule of Object.keys(moduleSequences) as VideoContentModule[]) moduleSequences[contentModule]++
+    content.value = createLoadingContentState()
+    contentSequence++
+  } else if (module && video.value) {
+    markContentModuleLoading(module)
+  }
+}
+function handleStageCompleted(stage: string) {
+  if (!video.value) return
+  const module = contentModuleForStage(stage)
+  if (module === 'all') void loadContent(video.value)
+  else if (module) void refreshContentModule(module, video.value)
+}
+function reloadContentModule(module: VideoContentModule) {
+  if (video.value) void refreshContentModule(module, video.value)
+}
+function reloadOutline() { reloadContentModule('outline') }
+function reloadSummary() { reloadContentModule('summary') }
+function reloadRelatedKnowledge() { reloadContentModule('relatedKnowledge') }
 async function loadVideoOptions() {
   try {
     videoOptions.value = (await fetchVideoOptions()).map(item => ({ label: item.title, value: item.id }))

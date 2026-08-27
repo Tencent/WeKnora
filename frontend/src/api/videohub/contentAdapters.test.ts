@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { mapRelatedKnowledgeResponse, parseOutlineWikiPage, parseSummaryWikiPage } from './contentParsing'
+import { buildVideoContentState, classifyContentError, contentModuleForStage } from './contentState'
+import { mapRelatedKnowledgeResponse, parseOutlineWikiPage, parseSummaryWikiPage, parseTimestamp } from './contentParsing'
+import { getNewlyCompletedStages } from '../../components/videohub/processingStatusState'
 
 test('parses cross-hour outline timestamps and knowledge evidence', () => {
   const chapters = parseOutlineWikiPage(`---
@@ -66,9 +68,74 @@ test('maps grouped backend anchors without mock video data', () => {
   assert.deepEqual(payload.overview?.top_topics, ['张三', '复盘法'])
 })
 
+test('keeps cross-video-only responses visible', () => {
+  const payload = mapRelatedKnowledgeResponse('video-1', {
+    anchors: [],
+    cross_video: [{
+      id: 'relation-1',
+      anchor_id: 'anchor-1',
+      title: '关联知识',
+      type: 'concept',
+      video_id: 'video-2',
+      video_title: '另一个视频',
+      timestamp: '01:05',
+    }],
+  })
+
+  assert.equal(payload.crossVideoItems.length, 1)
+  assert.equal(payload.crossVideoItems[0].seconds, 65)
+  assert.equal(payload.overview?.relation_count, 1)
+})
+
 test('real content adapters do not import MOCK_VIDEOS', () => {
   for (const filename of ['summary.ts', 'relatedKnowledge.ts']) {
     const source = readFileSync(new URL(filename, import.meta.url), 'utf8')
     assert.equal(source.includes('MOCK_VIDEOS'), false, `${filename} still reads mock data`)
   }
+})
+
+test('content loader isolates failed content requests', () => {
+  const state = buildVideoContentState(
+    { status: 'fulfilled', value: [{ id: 'chapter-1' }] as any },
+    { status: 'rejected', reason: { status: 500, message: 'summary unavailable' } },
+    { status: 'fulfilled', value: { videoId: 'video-1', overview: null, anchors: [], crossVideoItems: [] } },
+  )
+
+  assert.equal(state.outline.status, 'ready')
+  assert.equal(state.summary.status, 'error')
+  assert.equal(state.relatedKnowledge.status, 'empty')
+  assert.equal(state.summary.error, 'summary unavailable')
+})
+
+test('content loader distinguishes not generated artifacts from failures', () => {
+  assert.equal(classifyContentError({ status: 404, error_code: 'not_generated' }), 'not_generated')
+  assert.equal(classifyContentError({ status: 502, error_code: 'weknora_read_failed' }), 'error')
+})
+
+test('maps completed processing stages to local content modules', () => {
+  assert.equal(contentModuleForStage('outline'), 'outline')
+  assert.equal(contentModuleForStage('summary'), 'summary')
+  assert.equal(contentModuleForStage('graph'), 'relatedKnowledge')
+  assert.equal(contentModuleForStage('assemble'), 'all')
+  assert.equal(contentModuleForStage('transcription'), null)
+})
+
+test('emits a processing stage only when it newly succeeds', () => {
+  const previous = new Map([['job-outline', 'running'], ['job-summary', 'succeeded']])
+  const jobs = [
+    { job_id: 'job-outline', job_type: 'outline', status: 'succeeded' },
+    { job_id: 'job-summary', job_type: 'summary', status: 'succeeded' },
+  ] as any
+  assert.deepEqual(getNewlyCompletedStages(previous, jobs), ['outline'])
+})
+
+test('outline parser clamps an overlong final chapter to video duration', () => {
+  const chapters = parseOutlineWikiPage('## 最后一章\n时间：58:00–1:20:00\n\n### 本章核心内容\n内容', 3600)
+  assert.equal(chapters[0].end_seconds, 3600)
+})
+
+test('timestamp parser rejects invalid minute and second fields', () => {
+  assert.throws(() => parseTimestamp('01:60'), /无效时间戳/)
+  assert.throws(() => parseTimestamp('01:02:60'), /无效时间戳/)
+  assert.equal(parseTimestamp('90:00'), 5400)
 })
