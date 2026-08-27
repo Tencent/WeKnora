@@ -30,27 +30,29 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import './filterTabs.css'
-import { fetchRelatedKnowledge } from '@/api/videohub/relatedKnowledge'
 import KnowledgeAnchorCard from './KnowledgeAnchorCard.vue'
 import RelationOverviewCard from './RelationOverviewCard.vue'
 import { KNOWLEDGE_TYPES, KNOWLEDGE_TYPE_STYLES } from './knowledgeTypeStyles'
-import type { CrossVideoKnowledgeItem, CurrentKnowledgeAnchor, KnowledgeType, RelationOverview, VideoData } from '@/types/videohub'
+import type { ContentState, CrossVideoKnowledgeItem, CurrentKnowledgeAnchor, KnowledgeType, RelationOverview, VideoData } from '@/types/videohub'
 
-const props = defineProps<{ video: VideoData }>()
-const emit = defineEmits<{ seek: [seconds: number]; selectVideoById: [videoId: string, seconds: number] }>()
+const props = defineProps<{ video: VideoData; contentState: ContentState<{ videoId: string; overview: RelationOverview | null; anchors: CurrentKnowledgeAnchor[]; crossVideoItems: CrossVideoKnowledgeItem[] }> }>()
+const emit = defineEmits<{ seek: [seconds: number]; reload: []; selectVideoById: [videoId: string, seconds: number] }>()
 const selectedType = ref<KnowledgeType | 'all'>('all')
-const loading = ref(true)
-const error = ref('')
-const notGenerated = ref(false)
-const overview = ref<RelationOverview | null>(null)
-const anchors = ref<CurrentKnowledgeAnchor[]>([])
-const crossVideoItems = ref<CrossVideoKnowledgeItem[]>([])
+const loading = computed(() => props.contentState.status === 'loading')
+const error = computed(() => props.contentState.status === 'error' ? props.contentState.error || '关联知识加载失败' : '')
+const notGenerated = computed(() => props.contentState.status === 'not_generated')
+const overview = computed(() => props.contentState.data.overview)
+const anchors = computed(() => props.contentState.data.anchors)
+const crossVideoItems = computed(() => props.contentState.data.crossVideoItems)
 
-const typeCounts = computed(() => Object.fromEntries(KNOWLEDGE_TYPES.map(type => [type, crossVideoItems.value.filter(item => item.knowledge_type === type).length])) as Record<KnowledgeType, number>)
+const typeCounts = computed(() => Object.fromEntries(KNOWLEDGE_TYPES.map(type => [type,
+  anchors.value.filter(anchor => anchor.knowledge_type === type).length
+  + crossVideoItems.value.filter(item => item.knowledge_type === type).length,
+])) as Record<KnowledgeType, number>)
 const visibleTabs = computed(() => [
-  { value: 'all' as const, label: '全部', count: crossVideoItems.value.length },
+  { value: 'all' as const, label: '全部', count: anchors.value.length + crossVideoItems.value.length },
   ...KNOWLEDGE_TYPES.filter(type => typeCounts.value[type] > 0).map(type => ({ value: type, label: KNOWLEDGE_TYPE_STYLES[type].label, count: typeCounts.value[type] })),
 ])
 const filteredAnchors = computed(() => selectedType.value === 'all' ? anchors.value : anchors.value.filter(anchor => anchor.knowledge_type === selectedType.value))
@@ -58,29 +60,10 @@ function filteredItems(anchorId: string) {
   return crossVideoItems.value.filter(item => item.anchorId === anchorId && (selectedType.value === 'all' || item.knowledge_type === selectedType.value))
 }
 function forwardSelection(videoId: string, seconds: number) { emit('selectVideoById', videoId, seconds) }
-async function load(videoId: string) {
-  loading.value = true
-  error.value = ''
-  notGenerated.value = false
+function load(_videoId?: string) {
   selectedType.value = 'all'
-  try {
-    const payload = await fetchRelatedKnowledge(videoId)
-    if (props.video.id !== videoId) return
-    overview.value = payload.overview
-    anchors.value = payload.anchors
-    crossVideoItems.value = payload.crossVideoItems
-  } catch (reason: any) {
-    if (props.video.id !== videoId) return
-    overview.value = null
-    anchors.value = []
-    crossVideoItems.value = []
-    if (reason?.status === 404) notGenerated.value = true
-    else error.value = reason?.message || '关联知识加载失败'
-  } finally {
-    if (props.video.id === videoId) loading.value = false
-  }
+  emit('reload')
 }
-watch(() => props.video.id, load, { immediate: true })
 </script>
 
 <style scoped>

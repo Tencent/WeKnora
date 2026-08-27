@@ -1,6 +1,9 @@
 package model
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestVideoIsReadyForHome(t *testing.T) {
 	cases := []struct {
@@ -54,17 +57,21 @@ func TestVideoIsInitiallyAvailable(t *testing.T) {
 	}
 }
 
-func TestVideoIsVisibleInListKeepsFailures(t *testing.T) {
-	if !VideoIsVisibleInList(VideoStatusFailed, "", "") {
-		t.Fatal("failed videos must remain visible for error reporting")
+func TestVideoIsVisibleInListRequiresCompletedUpload(t *testing.T) {
+	uploadedAt := time.Now().UTC()
+	if VideoIsVisibleInList(VideoStatusFailed, "https://cdn/video.mp4", "", nil) {
+		t.Fatal("failed upload without uploaded_at must stay out of the video library")
 	}
-	if VideoIsVisibleInList(VideoStatusUploading, "https://cdn/video.mp4", "https://cdn/cover.jpg") {
+	if !VideoIsVisibleInList(VideoStatusFailed, "https://cdn/video.mp4", "", &uploadedAt) {
+		t.Fatal("content failure after upload must remain visible")
+	}
+	if VideoIsVisibleInList(VideoStatusUploading, "https://cdn/video.mp4", "https://cdn/cover.jpg", nil) {
 		t.Fatal("active uploads must not appear before multipart completion")
 	}
-	if !VideoIsVisibleInList(VideoStatusInitializing, "https://cdn/video.mp4", "") {
+	if !VideoIsVisibleInList(VideoStatusInitializing, "https://cdn/video.mp4", "", &uploadedAt) {
 		t.Fatal("videos with a merged file must appear while the cover is generating")
 	}
-	if !VideoIsVisibleInList(VideoStatusReady, "https://cdn/video.mp4", "") {
+	if !VideoIsVisibleInList(VideoStatusReady, "https://cdn/video.mp4", "", &uploadedAt) {
 		t.Fatal("cover-degraded videos must remain visible with placeholder")
 	}
 }

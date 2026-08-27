@@ -22,14 +22,15 @@ func TestVideoListReturnsUploadedVideosWhileEnhancementsRun(t *testing.T) {
 	now := time.Now().UTC()
 	videos := []model.Video{
 		{ID: uuid.NewString(), Title: "uploading", Status: model.VideoStatusUploading, FileURL: "source", CreatedAt: now.Add(-8 * time.Minute)},
-		{ID: uuid.NewString(), Title: "uploaded without cover", Status: model.VideoStatusUploaded, FileURL: "source", CreatedAt: now.Add(-7 * time.Minute)},
-		{ID: uuid.NewString(), Title: "initializing without cover", Status: model.VideoStatusInitializing, FileURL: "source", CreatedAt: now.Add(-6 * time.Minute)},
-		{ID: uuid.NewString(), Title: "uploaded with cover", Status: model.VideoStatusUploaded, FileURL: "source", ThumbnailURL: "poster", CreatedAt: now.Add(-5 * time.Minute)},
-		{ID: uuid.NewString(), Title: "completed", Status: model.VideoStatusCompleted, FileURL: "source", ThumbnailURL: "poster", DurationSeconds: 30, CreatedAt: now.Add(-4 * time.Minute)},
-		{ID: uuid.NewString(), Title: "processing", Status: model.VideoStatusProcessing, FileURL: "source", ThumbnailURL: "poster", DurationSeconds: 20, CreatedAt: now.Add(-3 * time.Minute)},
-		{ID: uuid.NewString(), Title: "ready", Status: model.VideoStatusReady, FileURL: "source", ThumbnailURL: "poster", DurationSeconds: 10, CreatedAt: now.Add(-2 * time.Minute)},
-		{ID: uuid.NewString(), Title: "ready without cover", Status: model.VideoStatusReady, FileURL: "source", CreatedAt: now.Add(-1 * time.Minute)},
-		{ID: uuid.NewString(), Title: "failed", Status: model.VideoStatusFailed, ProcessingErrorSummary: "merge failed", CreatedAt: now},
+		{ID: uuid.NewString(), Title: "uploaded without cover", Status: model.VideoStatusUploaded, FileURL: "source", UploadedAt: &now, CreatedAt: now.Add(-7 * time.Minute)},
+		{ID: uuid.NewString(), Title: "initializing without cover", Status: model.VideoStatusInitializing, FileURL: "source", UploadedAt: &now, CreatedAt: now.Add(-6 * time.Minute)},
+		{ID: uuid.NewString(), Title: "uploaded with cover", Status: model.VideoStatusUploaded, FileURL: "source", ThumbnailURL: "poster", UploadedAt: &now, CreatedAt: now.Add(-5 * time.Minute)},
+		{ID: uuid.NewString(), Title: "completed", Status: model.VideoStatusCompleted, FileURL: "source", ThumbnailURL: "poster", DurationSeconds: 30, UploadedAt: &now, CreatedAt: now.Add(-4 * time.Minute)},
+		{ID: uuid.NewString(), Title: "processing", Status: model.VideoStatusProcessing, FileURL: "source", ThumbnailURL: "poster", DurationSeconds: 20, UploadedAt: &now, CreatedAt: now.Add(-3 * time.Minute)},
+		{ID: uuid.NewString(), Title: "ready", Status: model.VideoStatusReady, FileURL: "source", ThumbnailURL: "poster", DurationSeconds: 10, UploadedAt: &now, CreatedAt: now.Add(-2 * time.Minute)},
+		{ID: uuid.NewString(), Title: "ready without cover", Status: model.VideoStatusReady, FileURL: "source", UploadedAt: &now, CreatedAt: now.Add(-1 * time.Minute)},
+		{ID: uuid.NewString(), Title: "content failed", Status: model.VideoStatusFailed, FileURL: "source", UploadedAt: &now, ProcessingErrorSummary: "summary failed", CreatedAt: now},
+		{ID: uuid.NewString(), Title: "upload failed", Status: model.VideoStatusFailed, FileURL: "source", ProcessingErrorSummary: "merge failed", CreatedAt: now.Add(time.Minute)},
 	}
 	for i := range videos {
 		if err := db.Create(&videos[i]).Error; err != nil {
@@ -71,11 +72,11 @@ func TestVideoListReturnsUploadedVideosWhileEnhancementsRun(t *testing.T) {
 	if payload.Data[0].Status != model.VideoStatusFailed {
 		t.Fatalf("first video status = %q, want %q", payload.Data[0].Status, model.VideoStatusFailed)
 	}
-	if payload.Data[0].ProcessingErrorSummary != "merge failed" || payload.Data[0].InitiallyAvailable {
-		t.Fatalf("failed video metadata = %#v", payload.Data[0])
+	if payload.Data[0].Title != "content failed" || payload.Data[0].ProcessingErrorSummary != "summary failed" || !payload.Data[0].InitiallyAvailable {
+		t.Fatalf("content-failed video metadata = %#v", payload.Data[0])
 	}
 	seen := map[string]bool{}
-	for _, item := range payload.Data[1:] {
+	for _, item := range payload.Data {
 		seen[item.Title] = true
 		if item.FileURL == "" || item.PlayURL == "" || !item.InitiallyAvailable {
 			t.Fatalf("initially available video metadata = %#v", item)
@@ -93,6 +94,9 @@ func TestVideoListReturnsUploadedVideosWhileEnhancementsRun(t *testing.T) {
 	if seen["uploading"] {
 		t.Fatalf("active upload must stay hidden: %#v", payload.Data)
 	}
+	if seen["upload failed"] {
+		t.Fatalf("failed upload without uploaded_at must stay hidden: %#v", payload.Data)
+	}
 }
 
 func TestVideoDetailUsesInitialAvailability(t *testing.T) {
@@ -107,6 +111,7 @@ func TestVideoDetailUsesInitialAvailability(t *testing.T) {
 	}{
 		{name: "cover generating remains playable", status: model.VideoStatusInitializing, fileURL: "source", initiallyAvailable: true, visibleInList: true},
 		{name: "cover degraded to placeholder is available", status: model.VideoStatusReady, fileURL: "source", initiallyAvailable: true, visibleInList: true},
+		{name: "failed upload stays unavailable", status: model.VideoStatusFailed, fileURL: "source", initiallyAvailable: false, visibleInList: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -116,6 +121,10 @@ func TestVideoDetailUsesInitialAvailability(t *testing.T) {
 				Status:       tc.status,
 				FileURL:      tc.fileURL,
 				ThumbnailURL: tc.thumbnailURL,
+			}
+			if tc.initiallyAvailable {
+				uploadedAt := time.Now().UTC()
+				video.UploadedAt = &uploadedAt
 			}
 			if err := db.Create(&video).Error; err != nil {
 				t.Fatalf("create video: %v", err)

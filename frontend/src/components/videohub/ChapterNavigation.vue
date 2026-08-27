@@ -32,37 +32,18 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
-import { fetchOutline } from '@/api/videohub/outline'
-import type { Chapter, VideoData } from '@/types/videohub'
+import type { Chapter, ContentState, VideoData } from '@/types/videohub'
 
-const props = defineProps<{ video: VideoData; currentSeconds: number }>()
-defineEmits<{ seek: [seconds: number] }>()
-const chapters = ref<Chapter[]>([])
-const loading = ref(true)
-const error = ref('')
-const notGenerated = ref(false)
+const props = defineProps<{ video: VideoData; currentSeconds: number; contentState: ContentState<Chapter[]> }>()
+const emit = defineEmits<{ seek: [seconds: number]; reload: [] }>()
+const chapters = computed(() => props.contentState.data)
+const loading = computed(() => props.contentState.status === 'loading')
+const error = computed(() => props.contentState.status === 'error' ? props.contentState.error || '章节加载失败' : '')
+const notGenerated = computed(() => props.contentState.status === 'not_generated')
 const chapterRefs = new Map<string, HTMLElement>()
 const activeChapterId = computed(() => chapters.value.find(chapter => props.currentSeconds >= chapter.start_seconds && props.currentSeconds < chapter.end_seconds)?.id)
 
-async function load() {
-  const videoId = props.video.id
-  loading.value = true
-  error.value = ''
-  notGenerated.value = false
-  chapterRefs.clear()
-  try {
-    const next = await fetchOutline(videoId, props.video.durationSeconds)
-    if (props.video.id !== videoId) return
-    chapters.value = next
-  } catch (reason: any) {
-    if (props.video.id !== videoId) return
-    chapters.value = []
-    if (reason?.status === 404) notGenerated.value = true
-    else error.value = reason?.message || '章节加载失败'
-  } finally {
-    if (props.video.id === videoId) loading.value = false
-  }
-}
+function load() { emit('reload') }
 
 function setChapterRef(id: string, el: Element | ComponentPublicInstance | null) {
   if (el instanceof HTMLElement) chapterRefs.set(id, el)
@@ -72,7 +53,7 @@ watch(activeChapterId, async id => {
   await nextTick()
   if (id) chapterRefs.get(id)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
 })
-watch(() => props.video.id, () => void load(), { immediate: true })
+watch(() => props.video.id, () => chapterRefs.clear())
 </script>
 
 <style scoped>

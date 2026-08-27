@@ -45,6 +45,9 @@ export function parseTimestamp(value: string): number {
   if ((parts.length !== 2 && parts.length !== 3) || parts.some(part => !Number.isFinite(part) || part < 0)) {
     throw new Error(`无效时间戳：${value}`)
   }
+  if (parts[parts.length - 1] >= 60 || (parts.length === 3 && parts[1] >= 60)) {
+    throw new Error(`无效时间戳：${value}`)
+  }
   if (parts.length === 2) return parts[0] * 60 + parts[1]
   return parts[0] * 3600 + parts[1] * 60 + parts[2]
 }
@@ -107,7 +110,7 @@ export function parseOutlineWikiPage(content: string, durationSeconds = 0): Chap
       if (startSeconds >= durationSeconds) throw new Error(`章节“${section.title}”开始时间超过视频时长`)
       endSeconds = Math.min(endSeconds, durationSeconds)
     }
-    if (endSeconds <= startSeconds || startSeconds < previousStart) throw new Error(`章节“${section.title}”时间顺序无效`)
+    if (endSeconds <= startSeconds || startSeconds <= previousStart) throw new Error(`章节“${section.title}”时间顺序无效`)
     previousStart = startSeconds
 
     const summary = subsection(section.body, '本章核心内容')
@@ -181,23 +184,23 @@ export function mapRelatedKnowledgeResponse(videoId: string, response: BackendRe
       relation_type: RELATION_TYPES.has(item.relation_type as RelationType) ? item.relation_type as RelationType : '补充',
       knowledge_content: item.title || '关联知识',
       timestamp: item.timestamp || '00:00',
-      seconds: Number(item.seconds) || 0,
+      seconds: Number.isFinite(Number(item.seconds)) ? Number(item.seconds) : item.timestamp ? parseTimestamp(item.timestamp) : 0,
       video_id: item.video_id || '',
       video_title: item.video_title || '关联视频',
       video_category: item.video_type === 'interview' ? 'interview' : item.video_type === 'tutorial' ? 'training' : item.video_type === 'case_analysis' ? 'salon' : 'general',
       relation_description: item.relation_description || '与当前内容存在知识关联。',
     }))
-  const anchors: CurrentKnowledgeAnchor[] = grouped.map((item, index) => ({
+  const anchors: CurrentKnowledgeAnchor[] = grouped.map((item) => ({
     id: item.id,
     knowledge_type: item.type || 'concept',
     content: item.title || '未命名知识',
     timestamp: item.timestamp || '00:00',
-    seconds: Number(item.seconds) || 0,
+    seconds: Number.isFinite(Number(item.seconds)) ? Number(item.seconds) : item.timestamp ? parseTimestamp(item.timestamp) : 0,
     related_count: crossVideoItems.filter(cross => cross.anchorId === item.id).length || item.related_video_ids?.length || 0,
   }))
   const relatedVideoIDs = new Set(grouped.flatMap(item => item.related_video_ids || []))
   crossVideoItems.forEach(item => relatedVideoIDs.add(item.video_id))
-  const overview = response.overview ?? (anchors.length > 0 ? {
+  const overview = response.overview ?? (anchors.length > 0 || crossVideoItems.length > 0 ? {
     relation_overview: `已从当前视频提取 ${anchors.length} 个知识锚点，其中 ${crossVideoItems.length} 条已建立跨视频关联。`,
     related_video_count: relatedVideoIDs.size,
     relation_count: crossVideoItems.length,

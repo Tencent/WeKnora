@@ -9,7 +9,7 @@ const CATEGORY_MAP: Record<string, { category: VideoCategory; name: string }> = 
 
 const INITIAL_VIDEO_STATUSES = new Set(['uploaded', 'initializing', 'ready', 'processing', 'completed', 'failed'])
 export function isVideoInitiallyAvailable(video: { status?: string; file_url?: string; play_url?: string; thumbnail_url?: string; initially_available?: boolean }): boolean {
-  if (video.initially_available === true) return true
+	if (typeof video.initially_available === 'boolean') return video.initially_available
   const status = video.status || ''
   return INITIAL_VIDEO_STATUSES.has(status) && Boolean((video.play_url || video.file_url)?.trim())
 }

@@ -41,10 +41,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { fetchSummary } from '@/api/videohub/summary'
+import { computed } from 'vue'
 import EvidencePopover from './EvidencePopover.vue'
-import type { SummarySection, VideoData } from '@/types/videohub'
+import type { ContentState, SummarySection, VideoData } from '@/types/videohub'
 
 interface ContentLine {
   isSubItem: boolean
@@ -52,31 +51,13 @@ interface ContentLine {
   text: string
 }
 
-const props = defineProps<{ video: VideoData }>()
-const emit = defineEmits<{ seek: [seconds: number] }>()
-const sections = ref<SummarySection[]>([])
-const loading = ref(true)
-const error = ref('')
-const notGenerated = ref(false)
-
-async function load() {
-  const videoId = props.video.id
-  loading.value = true
-  error.value = ''
-  notGenerated.value = false
-  try {
-    const response = await fetchSummary(videoId, props.video.category)
-    if (props.video.id !== videoId) return
-    sections.value = response.sections
-  } catch (reason: any) {
-    if (props.video.id !== videoId) return
-    sections.value = []
-    if (reason?.status === 404) notGenerated.value = true
-    else error.value = reason?.message || '智能总结加载失败'
-  } finally {
-    if (props.video.id === videoId) loading.value = false
-  }
-}
+const props = defineProps<{ video: VideoData; contentState: ContentState<SummarySection[]> }>()
+const emit = defineEmits<{ seek: [seconds: number]; reload: [] }>()
+const sections = computed(() => props.contentState.data)
+const loading = computed(() => props.contentState.status === 'loading')
+const error = computed(() => props.contentState.status === 'error' ? props.contentState.error || '智能总结加载失败' : '')
+const notGenerated = computed(() => props.contentState.status === 'not_generated')
+function load() { emit('reload') }
 
 function parseContent(content: string): ContentLine[] {
   return content.split('\n').filter(line => line.trim()).map((line) => {
@@ -93,7 +74,6 @@ function parseContent(content: string): ContentLine[] {
 function hasEvidence(section: SummarySection) {
   return Boolean(section.evidenceTimestamp && section.transcriptSnippet && section.evidenceSeconds !== undefined)
 }
-watch(() => [props.video.id, props.video.category] as const, () => void load(), { immediate: true })
 </script>
 
 <style scoped>

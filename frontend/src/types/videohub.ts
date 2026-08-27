@@ -38,6 +38,14 @@ export interface SummarySection extends EvidenceRef {
   content: string
 }
 
+export type ContentLoadStatus = 'loading' | 'ready' | 'not_generated' | 'empty' | 'error'
+
+export interface ContentState<T> {
+  status: ContentLoadStatus
+  data: T
+  error?: string
+}
+
 export type KnowledgeType = 'entity' | 'concept' | 'case' | 'method' | 'insight'
 export type RelationType = '相同' | '相似' | '补充' | '对比' | '延伸'
 

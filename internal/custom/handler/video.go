@@ -25,8 +25,8 @@ func (h *VideoHandler) List(c *gin.Context) {
 	var videos []model.Video
 	if err := h.DB.
 		Where(
-			"((status IN ? AND TRIM(COALESCE(file_url, '')) <> '') OR status = ?)",
-			model.VideoInitiallyAvailableStatuses(), model.VideoStatusFailed,
+			"uploaded_at IS NOT NULL AND status IN ? AND TRIM(COALESCE(file_url, '')) <> ''",
+			append(model.VideoInitiallyAvailableStatuses(), model.VideoStatusFailed),
 		).
 		Order("created_at DESC").
 		Find(&videos).Error; err != nil {
@@ -50,6 +50,7 @@ func (h *VideoHandler) List(c *gin.Context) {
 	}
 	out := make([]item, 0, len(videos))
 	for _, v := range videos {
+		initiallyAvailable := model.VideoIsVisibleInList(v.Status, v.FileURL, v.ThumbnailURL, v.UploadedAt)
 		out = append(out, item{
 			ID:                     v.ID,
 			Title:                  v.Title,
@@ -61,7 +62,7 @@ func (h *VideoHandler) List(c *gin.Context) {
 			CoverURL:               v.ThumbnailURL,
 			PlayURL:                v.FileURL,
 			ProcessingErrorSummary: v.ProcessingErrorSummary,
-			InitiallyAvailable:     model.VideoIsInitiallyAvailable(v.Status, v.FileURL, v.ThumbnailURL),
+			InitiallyAvailable:     initiallyAvailable,
 			CreatedAt:              v.CreatedAt.Format("2006-01-02 15:04:05"),
 		})
 	}
@@ -76,12 +77,13 @@ func (h *VideoHandler) Detail(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 		return
 	}
+	initiallyAvailable := model.VideoIsVisibleInList(v.Status, v.FileURL, v.ThumbnailURL, v.UploadedAt)
 	c.JSON(http.StatusOK, gin.H{
 		"data":                videoDetailPayload(v),
 		"play_url":            v.FileURL,
 		"cover_url":           v.ThumbnailURL,
-		"initially_available": model.VideoIsInitiallyAvailable(v.Status, v.FileURL, v.ThumbnailURL),
-		"visible_in_list":     model.VideoIsVisibleInList(v.Status, v.FileURL, v.ThumbnailURL),
+		"initially_available": initiallyAvailable,
+		"visible_in_list":     initiallyAvailable,
 		"content_status": map[string]bool{
 			"knowledge_base":  v.KnowledgeBaseWikiPageID != "",
 			"outline":         v.OutlineWikiPageID != "",

@@ -1,6 +1,9 @@
 package model
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 const (
 	VideoStatusUploading    = "uploading"
@@ -50,9 +53,9 @@ func VideoIsCoverSettled(status string) bool {
 }
 
 // VideoIsVisibleInList 返回视频是否应出现在列表中。
-// 文件合并完成后立即展示，封面和时长由后台异步补齐。
-func VideoIsVisibleInList(status, fileURL, thumbnailURL string) bool {
-	return VideoIsInitiallyAvailable(status, fileURL, thumbnailURL) || status == VideoStatusFailed
+// uploadedAt 是文件完成合并的数据库事实；上传中断时预生成的 fileURL 不代表对象存在。
+func VideoIsVisibleInList(status, fileURL, thumbnailURL string, uploadedAt *time.Time) bool {
+	return uploadedAt != nil && VideoIsInitiallyAvailable(status, fileURL, thumbnailURL)
 }
 
 // VideoInitiallyAvailableStatuses 返回初始可用状态集合，供数据库查询复用。
