@@ -173,7 +173,10 @@ func resolveSandboxForExecution(
 	if err != nil || mgr == nil {
 		return mgr, configID, err
 	}
-	if mgr.GetType() != sandbox.SandboxTypeCube && mgr.GetType() != sandbox.SandboxTypeE2B {
+	// Named backends (Cube, E2B, Docker) all keep a session-scoped sandbox.
+	// Artifact collection and teardown resolve that sandbox from this pin, so
+	// skipping Docker here leaves /workspace/output files uncollected.
+	if !sandbox.IsNamedSandboxBackendType(string(mgr.GetType())) {
 		return mgr, configID, nil
 	}
 	if pinner == nil || strings.TrimSpace(sessionID) == "" {
