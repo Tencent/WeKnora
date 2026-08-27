@@ -451,6 +451,8 @@ func TestBuildInstallPromptAsksForADeclarationWithoutValues(t *testing.T) {
 	require.Contains(t, prompt, `{"env":[]}`)
 	require.Contains(t, prompt, "Never write any value",
 		"a value the model invents would be stored as the workspace credential")
+	require.Contains(t, prompt, "WEKNORA_API_KEY",
+		"the installer must be told credential names are declarable, or it writes {\"env\":[]}")
 }
 
 func TestInstallSkillRepoNormalizesStoredUserEnvPrincipal(t *testing.T) {
