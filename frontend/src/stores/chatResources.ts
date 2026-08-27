@@ -1,11 +1,17 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { listKnowledgeBases, getKnowledgeBaseById } from '@/api/knowledge-base'
 import { listAgents, type CustomAgent } from '@/api/agent'
 import { listModels, type ModelConfig } from '@/api/model'
 import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider'
 import { isNamedSandboxBackend, listSandboxConfigs, type SandboxConfigRecord } from '@/api/system'
 import { useOrganizationStore } from '@/stores/organization'
+import { getCurrentLanguage } from '@/utils/request'
+import {
+  isLocalizedCacheFresh,
+  shouldCommitLocalizedGeneration,
+  shouldReuseLocalizedInflight,
+} from './localizedResourceCache'
 
 /** 空间级资源缓存 TTL */
 const CACHE_TTL_MS = 60_000
@@ -49,10 +55,36 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
   const validKnowledgeBases = computed(() => rawKnowledgeBases.value.filter(isKbModelReady))
   const chatModels = computed(() => allModels.value.filter((m) => m.type === 'KnowledgeQA'))
 
+  // 内置智能体名称/描述由后端按 Accept-Language 本地化返回；切换 UI 语言后
+  // 旧缓存必须立即失效，否则要等 TTL 过期或强刷才能看到正确语言。
+  // agentsLoadedLocale 必须是「请求发起时」的语言，不能在 await 之后再读当前语言。
+  let agentsLoadedLocale = ''
+  let agentsAllInflightLocale = ''
+
   function isFresh(key: ResourceKey): boolean {
-    const at = loadedAt.value[key]
-    return !!at && Date.now() - at < CACHE_TTL_MS
+    const at = loadedAt.value[key] ?? 0
+    if (key === 'agents') {
+      return isLocalizedCacheFresh(at, agentsLoadedLocale, getCurrentLanguage(), CACHE_TTL_MS)
+    }
+    return at > 0 && Date.now() - at < CACHE_TTL_MS
   }
+
+  function bumpAgentsGeneration() {
+    agentsAllGen++
+    agentsAllInflight = null
+    agentsAllInflightLocale = ''
+  }
+
+  watch(
+    () => getCurrentLanguage(),
+    (locale) => {
+      if (agentsLoadedLocale && agentsLoadedLocale !== locale) {
+        delete loadedAt.value.agents
+        agentsLoadedLocale = ''
+        bumpAgentsGeneration()
+      }
+    },
+  )
 
   async function runOnce(key: ResourceKey, force: boolean, loader: () => Promise<void>): Promise<void> {
     if (!force && isFresh(key)) return
@@ -125,12 +157,20 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
       return { data: res.data || [], disabled_own_agent_ids: res.disabled_own_agent_ids || [] }
     }
 
+    const locale = getCurrentLanguage()
     if (!force && isFresh('agents')) {
       return { data: agents.value, disabled_own_agent_ids: disabledOwnAgentIds.value }
     }
-    if (!force && agentsAllInflight) return agentsAllInflight
+    if (
+      !force &&
+      shouldReuseLocalizedInflight(!!agentsAllInflight, agentsAllInflightLocale, locale)
+    ) {
+      return agentsAllInflight as Promise<{ data: CustomAgent[]; disabled_own_agent_ids: string[] }>
+    }
 
     const gen = ++agentsAllGen
+    const requestLocale = locale
+    agentsAllInflightLocale = requestLocale
     agentsAllInflight = (async () => {
       try {
         const [agentsRes] = await Promise.all([
@@ -139,12 +179,19 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
         ])
         const res = agentsRes as { data?: CustomAgent[]; disabled_own_agent_ids?: string[] }
         const data = res.data || []
-        agents.value = data
-        disabledOwnAgentIds.value = res.disabled_own_agent_ids || []
-        loadedAt.value.agents = Date.now()
-        return { data, disabled_own_agent_ids: res.disabled_own_agent_ids || [] }
+        const disabled = res.disabled_own_agent_ids || []
+        if (shouldCommitLocalizedGeneration(gen, agentsAllGen)) {
+          agents.value = data
+          disabledOwnAgentIds.value = disabled
+          loadedAt.value.agents = Date.now()
+          agentsLoadedLocale = requestLocale
+        }
+        return { data, disabled_own_agent_ids: disabled }
       } finally {
-        if (agentsAllGen === gen) agentsAllInflight = null
+        if (shouldCommitLocalizedGeneration(gen, agentsAllGen)) {
+          agentsAllInflight = null
+          agentsAllInflightLocale = ''
+        }
       }
     })()
     return agentsAllInflight
@@ -290,7 +337,8 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
       inflight.clear()
       agentKbInflight.clear()
       kbAllInflight = null
-      agentsAllInflight = null
+      agentsLoadedLocale = ''
+      bumpAgentsGeneration()
       invalidateKnowledgeBaseDetail()
       return
     }
@@ -305,7 +353,8 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
       invalidateKnowledgeBaseDetail()
     }
     if (keys.includes('agents')) {
-      agentsAllInflight = null
+      agentsLoadedLocale = ''
+      bumpAgentsGeneration()
     }
   }
 

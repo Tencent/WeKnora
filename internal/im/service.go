@@ -3009,11 +3009,11 @@ type ChannelWithAgent struct {
 }
 
 // ListChannelsByTenant returns all non-deleted IM channels in the given tenant,
-// joined with custom_agents.name. Built-in agent IDs (whose rows may not exist
-// in custom_agents) produce an empty AgentName — the frontend can substitute a
-// localized "builtin agent" label in that case. Channels whose custom agent was
-// soft-deleted are excluded so overview lists stay consistent after agent removal.
-func (s *Service) ListChannelsByTenant(tenantID uint64) ([]ChannelWithAgent, error) {
+// joined with custom_agents.name. Built-in agent names are re-localized from
+// YAML i18n using ctx (the DB column may be empty or frozen in the writer's
+// language). Channels whose custom agent was soft-deleted are excluded so
+// overview lists stay consistent after agent removal.
+func (s *Service) ListChannelsByTenant(ctx context.Context, tenantID uint64) ([]ChannelWithAgent, error) {
 	builtinIDs := types.GetBuiltinAgentIDs()
 	var rows []ChannelWithAgent
 	q := s.db.Table("im_channels AS c").
@@ -3033,7 +3033,18 @@ func (s *Service) ListChannelsByTenant(tenantID uint64) ([]ChannelWithAgent, err
 	if err != nil {
 		return nil, err
 	}
+	relocalizeBuiltinChannelAgentNames(ctx, rows)
 	return rows, nil
+}
+
+// relocalizeBuiltinChannelAgentNames overlays YAML i18n names onto overview
+// rows for built-in agents. Custom agents are left unchanged.
+func relocalizeBuiltinChannelAgentNames(ctx context.Context, rows []ChannelWithAgent) {
+	for i := range rows {
+		if a := types.GetBuiltinAgentWithContext(ctx, rows[i].AgentID, rows[i].TenantID); a != nil && a.Name != "" {
+			rows[i].AgentName = a.Name
+		}
+	}
 }
 
 // CreateChannel creates a new IM channel and optionally starts it.

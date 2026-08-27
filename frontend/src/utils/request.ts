@@ -21,7 +21,7 @@ const instance = axios.create({
 });
 
 // 获取当前用户语言（用于 Accept-Language header）
-function getCurrentLanguage(): string {
+export function getCurrentLanguage(): string {
   return i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN'
 }
 

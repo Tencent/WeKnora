@@ -104,6 +104,9 @@ func (s *agentShareService) sharedAgentInfo(
 		SharedAt:       share.CreatedAt,
 		SharedByUserID: share.SharedByUserID,
 	}
+	if share.Agent != nil {
+		types.ApplyBuiltinAgentLocalization(ctx, share.Agent)
+	}
 	if share.Organization != nil {
 		info.OrgName = share.Organization.Name
 	}
@@ -474,6 +477,7 @@ func (s *agentShareService) GetSharedAgentForTenant(
 		if err != nil || agent == nil {
 			return nil, ErrAgentNotFoundForShare
 		}
+		types.ApplyBuiltinAgentLocalization(ctx, agent)
 		_ = callerTenantRole
 		return agent, nil
 	}
@@ -491,6 +495,7 @@ func (s *agentShareService) GetSharedAgentForTenant(
 		}
 		return nil, err
 	}
+	types.ApplyBuiltinAgentLocalization(ctx, agent)
 	_ = callerTenantRole
 	return agent, nil
 }
