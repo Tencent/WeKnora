@@ -23,15 +23,26 @@ test('agent actions reuse the fully-rendered answer state', () => {
   assert.match(agentStream, /v-if="answerFullyRendered && event\.done/)
 })
 
-test('artifact download uses a muted count overlay instead of t-badge', () => {
+test('artifact count is a top-right overlay instead of t-badge', () => {
   assert.match(botMessage, /class="answer-toolbar__artifact"/)
   assert.match(agentStream, /class="answer-toolbar__artifact"/)
   assert.match(botMessage, /class="answer-toolbar__artifact-count"/)
   assert.match(agentStream, /class="answer-toolbar__artifact-count"/)
   assert.match(sharedStyles, /answer-toolbar__artifact-count/)
+  assert.match(sharedStyles, /position: absolute/)
   assert.match(sharedStyles, /td-bg-color-secondarycontainer/)
   assert.doesNotMatch(botMessage, /<t-badge/)
   assert.doesNotMatch(agentStream, /<t-badge/)
+})
+
+test('artifact toolbar uses a folder icon and replaces it while collecting', () => {
+  assert.match(botMessage, /answer-toolbar__artifact[\s\S]{0,800}name="folder"/)
+  assert.match(agentStream, /answer-toolbar__artifact[\s\S]{0,800}name="folder"/)
+  assert.match(botMessage, /class="answer-toolbar__artifact-spinner"/)
+  assert.match(agentStream, /class="answer-toolbar__artifact-spinner"/)
+  assert.match(sharedStyles, /answer-toolbar-artifact-spin/)
+  assert.doesNotMatch(botMessage, /answer-toolbar__artifact[\s\S]{0,800}:loading=/)
+  assert.doesNotMatch(agentStream, /answer-toolbar__artifact[\s\S]{0,800}:loading=/)
 })
 
 test('follow-up loading is shown compactly inside both answer toolbars', () => {

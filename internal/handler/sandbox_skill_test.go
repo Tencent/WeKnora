@@ -40,6 +40,7 @@ type fakeSandboxSkillService struct {
 	installErr    error
 	installSource string
 	sourceErr     error
+	reinstallErr  error
 	removeErr     error
 
 	files    []service.SkillFileEntry
@@ -61,11 +62,16 @@ type fakeSandboxSkillService struct {
 	installTenant uint64
 	installConfig string
 	installBytes  []byte
-	removeTenant  uint64
-	removeConfig  string
-	removeSkill   string
-	patchEnabled  bool
-	closed        bool
+
+	reinstallTenant uint64
+	reinstallConfig string
+	reinstallSkill  string
+
+	removeTenant uint64
+	removeConfig string
+	removeSkill  string
+	patchEnabled bool
+	closed       bool
 	// onGet runs on every read, so a test can model a row that disappears
 	// while the client is streaming.
 	onGet func(calls int)
@@ -170,6 +176,13 @@ func (f *fakeSandboxSkillService) InstallSkillFromSource(
 	return f.installID, f.sourceErr
 }
 
+func (f *fakeSandboxSkillService) ReinstallSkill(
+	_ context.Context, tenantID uint64, configID, skillID string,
+) (string, error) {
+	f.reinstallTenant, f.reinstallConfig, f.reinstallSkill = tenantID, configID, skillID
+	return f.installID, f.reinstallErr
+}
+
 func (f *fakeSandboxSkillService) RemoveSkill(
 	_ context.Context, tenantID uint64, configID, skillID string,
 ) error {
@@ -240,6 +253,7 @@ func newSkillTestRouter(h *SandboxSkillHandler) *gin.Engine {
 	r.GET("/sandbox-configs/:id/skills/:skillId", h.Get)
 	r.GET("/sandbox-configs/:id/skills/:skillId/files", h.ListFiles)
 	r.GET("/sandbox-configs/:id/skills/:skillId/files/content", h.GetFile)
+	r.POST("/sandbox-configs/:id/skills/:skillId/reinstall", h.Reinstall)
 	r.PATCH("/sandbox-configs/:id/skills/:skillId", h.Patch)
 	r.DELETE("/sandbox-configs/:id/skills/:skillId", h.Delete)
 	r.GET("/sandbox-configs/:id/skills/:skillId/install-events", h.InstallEvents)
@@ -536,6 +550,37 @@ func TestSandboxSkillDeleteIsAccepted(t *testing.T) {
 	require.Equal(t, testSkillTenantID, svc.removeTenant)
 	require.Equal(t, "cfg-a", svc.removeConfig)
 	require.Equal(t, "skill-1", svc.removeSkill)
+}
+
+// A retry boots a sandbox and runs for minutes, exactly like the upload it
+// stands in for, so it is accepted and followed rather than awaited.
+func TestSandboxSkillReinstallIsAccepted(t *testing.T) {
+	svc := &fakeSandboxSkillService{installID: "skill-1"}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost,
+		"/sandbox-configs/cfg-a/skills/skill-1/reinstall", nil))
+
+	require.Equal(t, http.StatusAccepted, w.Code)
+	require.Equal(t, testSkillTenantID, svc.reinstallTenant,
+		"a retry must be scoped to the caller's workspace")
+	require.Equal(t, "cfg-a", svc.reinstallConfig)
+	require.Equal(t, "skill-1", svc.reinstallSkill)
+	require.Contains(t, w.Body.String(), `"skill_id":"skill-1"`)
+}
+
+func TestSandboxSkillReinstallReportsAMissingSkill(t *testing.T) {
+	svc := &fakeSandboxSkillService{
+		reinstallErr: apperrors.NewNotFoundError("skill not found"),
+	}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost,
+		"/sandbox-configs/cfg-a/skills/nope/reinstall", nil))
+
+	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func decodeSSEEvents(t *testing.T, body string) []map[string]any {

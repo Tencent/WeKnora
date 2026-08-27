@@ -45,7 +45,7 @@ func TestRunInstallHappyPathSwitchesPointerLast(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{
 		"create-session", "prepare-skill-dir", "seed-files", "agent-execute",
-		"chmod", "verify-structure", "verify-smoke", "write-manifest",
+		"chmod", "verify-structure", "verify-python", "write-manifest",
 		"cleanup-workspace", "create-snapshot",
 		"switch-pointer", "mark-stale", "destroy-sandbox",
 	}, fx.events, "the pointer must move only after the snapshot exists")
@@ -60,8 +60,8 @@ func TestRunInstallHappyPathSwitchesPointerLast(t *testing.T) {
 		"the pointer switch must be exactly one config write")
 	require.Empty(t, fx.deletedSnapshots,
 		"a successful install deletes nothing; the previous image stays reachable")
-	require.False(t, fx.smokeRanAsRoot,
-		"smoke must run as the ordinary sandbox user, not install-mode root")
+	require.False(t, fx.loadCheckRanAsRoot,
+		"script verification must run as the ordinary sandbox user, not install-mode root")
 	require.Equal(t, []string{"Skill install"}, fx.sessionTitles)
 
 	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
@@ -112,7 +112,7 @@ func TestNextSnapshotGenerationSkipsAbandonedLedgerRows(t *testing.T) {
 // Ownership and permissions are normalised BEFORE verification on purpose: the
 // agent creates the tree as root, so a restrictive root umask would leave the
 // .venv interpreter unreadable and fail a perfectly good install in the
-// non-root smoke run. The smoke test must exercise the same permissions the
+// non-root verification pass, which must exercise the same permissions the
 // snapshot will carry.
 func TestRunInstallIssuesExactlyTheseCommands(t *testing.T) {
 	fx := newInstallFixture(t)
@@ -127,28 +127,20 @@ func TestRunInstallIssuesExactlyTheseCommands(t *testing.T) {
 		"chown -R root:root " + installSkillDir,
 		"test -f " + installSkillDir + "/SKILL.md",
 		"test -f " + installSkillDir + "/scripts/extract.py",
-		installSmokeCommand,
+		installPythonVerifyCommand,
 		"rm -rf /workspace/* /workspace/.[!.]* || true",
+		installWorkspaceRestoreCommand,
 		installCacheCleanupCommand,
 	}, fx.commands)
 }
 
-func TestRunInstallNormalisesPermissionsBeforeTheSmokeRun(t *testing.T) {
+func TestRunInstallNormalisesPermissionsBeforeVerifying(t *testing.T) {
 	fx := newInstallFixture(t)
 
 	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
 
-	require.Less(t, indexOfEvent(fx.events, "chmod"), indexOfEvent(fx.events, "verify-smoke"),
-		"the non-root smoke run must execute the permissions that get snapshotted")
-}
-
-func TestRunInstallSmokeCommandKeepsTheInterpreterArgv(t *testing.T) {
-	fx := newInstallFixture(t)
-
-	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
-
-	require.Contains(t, fx.commands, installSmokeCommand,
-		"--help must reach the script as its own argument, not /bin/sh -c's")
+	require.Less(t, indexOfEvent(fx.events, "chmod"), indexOfEvent(fx.events, "verify-python"),
+		"the non-root verification pass must execute the permissions that get snapshotted")
 }
 
 func TestRunInstallWipesThePreviousTreeBeforeSeeding(t *testing.T) {
@@ -191,9 +183,9 @@ func TestRunInstallReportsTransportFailureCause(t *testing.T) {
 		"the admin's only diagnostic is this row")
 }
 
-func TestRunInstallReportsSmokeFailureCause(t *testing.T) {
+func TestRunInstallReportsVerificationFailureCause(t *testing.T) {
 	fx := newInstallFixture(t)
-	fx.smokeResult = &sandbox.ExecuteResult{ExitCode: -1, Killed: true, Error: "sandbox unreachable"}
+	fx.loadCheckResult = &sandbox.ExecuteResult{ExitCode: -1, Killed: true, Error: "sandbox unreachable"}
 
 	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
 
@@ -402,6 +394,76 @@ func TestInstallSkillRetriesAFailedSkillWithTheSameArchive(t *testing.T) {
 	require.NoError(t, getErr)
 	require.Equal(t, types.SkillStatusInstalling, skill.Status,
 		"a failed skill is a retry even when the archive digest is unchanged")
+}
+
+// Most failed installs fail for a reason the archive cannot fix, so the retry
+// runs the bytes already stored rather than asking for them again.
+func TestReinstallSkillRerunsTheStoredArchive(t *testing.T) {
+	fx := newInstallFixture(t)
+	archive := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('hi')\n",
+	})
+	bundle, err := ParseSkillBundle(archive)
+	require.NoError(t, err)
+	fx.storedBundles = map[string][]byte{"file://bundle.zip": archive}
+	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: bundle.Name, BundleSHA256: bundle.SHA256, BundleRef: "file://bundle.zip",
+		Status: types.SkillStatusFailed, Error: "python verification failed",
+	}))
+
+	id, err := fx.svc.ReinstallSkill(context.Background(), 7, "cfg-1", "sk-1")
+
+	require.NoError(t, err)
+	require.Equal(t, "sk-1", id, "a retry upgrades the same row, it does not fork a second one")
+	require.Positive(t, fx.getFileCalls.Load(),
+		"the retry must come from the stored archive, not from a re-upload")
+}
+
+// A row that says "installing" while still naming the previous run's session
+// tells every reader that the finished conversation is this run's live output.
+// The frontend believed it and replayed the last attempt's report as though it
+// were the retry's own progress, before the retry's agent had even started.
+func TestTakingARowForInstallDropsThePreviousRunsTranscript(t *testing.T) {
+	row := &types.TenantSkillEntity{
+		ID: "sk-1", Name: "pdf-tools", Status: types.SkillStatusFailed,
+		Error:            "python verification failed",
+		InstallSessionID: "sess-old", InstallMessageID: "msg-old",
+	}
+
+	takeSkillRowForInstall(row, &SkillBundle{Name: "pdf-tools", Version: "2.0.0"}, time.Now())
+
+	require.Equal(t, types.SkillStatusInstalling, row.Status)
+	require.Empty(t, row.InstallSessionID, "the retry has no transcript of its own yet")
+	require.Empty(t, row.InstallMessageID, "the retry has no transcript of its own yet")
+	require.Empty(t, row.Error, "the previous failure is not this run's outcome")
+}
+
+// Nothing a retry does can recover a skill whose archive is gone, and the
+// operator has to be told to upload it rather than to press the button again.
+func TestReinstallSkillRefusesWhenTheArchiveIsGone(t *testing.T) {
+	fx := newInstallFixture(t)
+	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: "pdf-tools", Status: types.SkillStatusFailed, BundleRef: "",
+	}))
+
+	_, err := fx.svc.ReinstallSkill(context.Background(), 7, "cfg-1", "sk-1")
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "no longer stored")
+	require.Empty(t, fx.sessionCalls, "a retry that cannot run must not boot a billed sandbox")
+}
+
+func TestReinstallSkillRejectsAnUnknownSkill(t *testing.T) {
+	fx := newInstallFixture(t)
+
+	_, err := fx.svc.ReinstallSkill(context.Background(), 7, "cfg-1", "nope")
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "skill not found")
+	require.Empty(t, fx.sessionCalls)
 }
 
 func TestInstallSkillReinstallsWhenTheLiveImageNoLongerCarriesTheSkill(t *testing.T) {
@@ -734,14 +796,92 @@ func TestRunInstallRequiresVenvWhenRequirementsExist(t *testing.T) {
 	require.Nil(t, fx.configRepo.saved)
 }
 
-func TestPrimaryEntryScriptIsDeterministic(t *testing.T) {
+// Verification used to run one guessed "entry script" with --help. Nothing in
+// the runtime designates an entry script — the model names whichever path it
+// likes in execute_skill_script — so the guess left every other file unchecked
+// while failing installs over the one it happened to pick.
+func TestRunInstallVerifiesEveryScriptOfEveryLanguage(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.bundle.Files["scripts/__init__.py"] = []byte("from .helper import run\n")
+	fx.bundle.Files["scripts/helper.py"] = []byte("def run():\n    pass\n")
+	fx.bundle.Files["bin/render.mjs"] = []byte("export const x = 1;\n")
+	fx.bundle.Files["bin/setup.sh"] = []byte("echo hi\n")
+
+	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+
+	pythonPass := skillPythonVerifyCommand(installSkillDir, []string{
+		"scripts/__init__.py", "scripts/extract.py", "scripts/helper.py",
+	})
+	require.Contains(t, fx.commands, pythonPass,
+		"every python file must be checked, not the first one in sort order")
+	require.Contains(t, fx.commands,
+		skillNodeVerifyCommand(installSkillDir, []string{"bin/render.mjs"}, nil))
+	require.Contains(t, fx.commands,
+		skillShellVerifyCommand(installSkillDir, []string{"bin/setup.sh"}))
+}
+
+// The pick that broke a real install: "__" sorts before every lowercase
+// letter, so a package marker became the smoke target and was executed as a
+// script, which no relative import can survive.
+func TestRunInstallDoesNotExecuteAnyScriptToVerifyIt(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.bundle.Files["scripts/__init__.py"] = []byte("from .extract import main\n")
+
+	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+
+	for _, command := range fx.commands {
+		require.NotContains(t, command, "--help",
+			"verification must not invoke a skill script; %q does", command)
+	}
+}
+
+func TestSkillPythonVerifyCommandPrefersTheSkillVenv(t *testing.T) {
+	command := skillPythonVerifyCommand("/opt/skills/demo", []string{"scripts/a.py"})
+
+	require.Contains(t, command, "if [ -x /opt/skills/demo/.venv/bin/python ]; "+
+		"then py=/opt/skills/demo/.venv/bin/python; else py=python3; fi",
+		"the file must be checked by the interpreter that would run it")
+	require.True(t, strings.HasSuffix(command, `"$py" - /opt/skills/demo scripts/a.py`),
+		"the verifier reads from stdin, so the paths are its argv")
+}
+
+// A skill may ship a file whose name needs quoting; the command is assembled
+// by hand, so the shell must never see it as more than one word.
+func TestSkillVerifyCommandsQuoteAwkwardPaths(t *testing.T) {
+	python := skillPythonVerifyCommand("/opt/skills/demo", []string{"scripts/a b'c.py"})
+	require.Contains(t, python, `'scripts/a b'\''c.py'`)
+
+	shell := skillShellVerifyCommand("/opt/skills/demo", []string{"a b.sh"})
+	require.Equal(t, `for f in '/opt/skills/demo/a b.sh'; do sh -n "$f" || exit 1; done`, shell)
+}
+
+func TestSkillNodeVerifyCommandChecksDeclaredDependencies(t *testing.T) {
+	bundle := &SkillBundle{Files: map[string][]byte{
+		"package.json": []byte(`{"dependencies":{"echarts":"^5"},"devDependencies":{"jest":"^29"}}`),
+	}}
+
+	require.Equal(t, []string{"echarts"}, nodeDependencyNames(bundle),
+		"devDependencies are a build-time concern the image is not asked to carry")
+
+	command := skillNodeVerifyCommand("/opt/skills/demo", []string{"a.js"}, []string{"echarts"})
+	require.Contains(t, command, `[ -e /opt/skills/demo/node_modules/"$d" ]`)
+	require.Contains(t, command, `node --check "$f"`)
+}
+
+func TestSortedScriptPathsIsDeterministic(t *testing.T) {
 	bundle := &SkillBundle{Files: map[string][]byte{
 		"scripts/z-helper.py": []byte("x"),
 		"scripts/a-main.py":   []byte("x"),
 		"scripts/mid.js":      []byte("x"),
+		"SKILL.md":            []byte("x"),
+		"data/table.csv":      []byte("x"),
 	}}
-	require.Equal(t, "scripts/a-main.py", primaryEntryScript(bundle),
-		"python is preferred over js, and the name is sorted so the pick is stable")
+
+	require.Equal(t, []string{"scripts/a-main.py", "scripts/z-helper.py"},
+		sortedScriptPaths(bundle, ".py"))
+	require.Equal(t, []string{"scripts/a-main.py", "scripts/mid.js", "scripts/z-helper.py"},
+		sortedScriptPaths(bundle, allScriptExtensions...),
+		"only files the runtime can execute are scripts")
 }
 
 type stubWorkspaceSandboxPolicy struct {
@@ -915,12 +1055,12 @@ func TestRunInstallDoesNotFailASkillThatIsAlreadyServing(t *testing.T) {
 	require.Empty(t, skill.Error)
 }
 
-func TestRunInstallKeepsOldImageWhenSmokeTestFails(t *testing.T) {
+func TestRunInstallKeepsOldImageWhenVerificationFails(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.configRepo.entity.Config.SkillImage = &types.SkillImageConfig{
 		SnapshotID: "snap-old", Generation: 3, OwnerFingerprint: fx.fingerprint,
 	}
-	fx.smokeExitCode = 1
+	fx.loadCheckExitCode = 1
 
 	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
 
@@ -1142,16 +1282,27 @@ const (
 		" && chown user:user /opt/weknora/tenant/skills " + installSkillDir +
 		" && chmod 755 /opt/weknora/tenant/skills " + installSkillDir
 
+	// The scratch wipe removes the base image's own input/output directories,
+	// so the snapshot must carry them back with the ownership the session
+	// account needs. This is the only step of an install that runs with the
+	// privileges required to set that ownership.
+	installWorkspaceRestoreCommand = "mkdir -p /workspace/input /workspace/output" +
+		" && chown user:user /workspace/input /workspace/output" +
+		" && chmod 775 /workspace/input /workspace/output"
+
 	installCacheCleanupCommand = "rm -rf " +
 		"/root/.cache/pip /root/.cache/uv /root/.npm /root/.local/share/pnpm/store " +
 		"/home/user/.cache/pip /home/user/.cache/uv /home/user/.npm " +
 		"/home/user/.local/share/pnpm/store || true"
+)
 
-	installSmokeCommand = `/bin/sh -c 'if [ -x ` + installSkillDir + `/.venv/bin/python ]; ` +
-		`then exec ` + installSkillDir + `/.venv/bin/python ` +
-		installSkillDir + `/scripts/extract.py "$@"; ` +
-		`else exec python3 ` + installSkillDir + `/scripts/extract.py "$@"; fi' ` +
-		`weknora-skill --help`
+// installPythonVerifyCommand is built from the same helper the install path
+// uses. Pinning the literal text would mean re-encoding the embedded verifier
+// by hand on every edit to it, which is a test that fails for the wrong
+// reason; the properties worth stating verbatim are asserted separately in
+// TestSkillPythonVerifyCommand*.
+var installPythonVerifyCommand = skillPythonVerifyCommand(
+	installSkillDir, []string{"scripts/extract.py"},
 )
 
 func indexOfEvent(events []string, needle string) int {
@@ -1183,20 +1334,22 @@ type installFixture struct {
 	// events are the coarse milestones the ordering tests read; commands is
 	// the full, ordered shell transcript so a new command can never hide
 	// behind an older substring match.
-	events        []string
-	commands      []string
-	fingerprint   string
-	smokeExitCode int
-	smokeResult   *sandbox.ExecuteResult
+	events      []string
+	commands    []string
+	fingerprint string
+	// loadCheck* drive the per-language script verification pass, which is
+	// the last gate before the snapshot.
+	loadCheckExitCode int
+	loadCheckResult   *sandbox.ExecuteResult
 	// depsExitCode fails the declared-dependency check (venv / node_modules).
 	depsExitCode int
 	// execResult is scoped to execResultCommand: an unscoped stub result
 	// applies to the first command issued, which is not the command any of
 	// these tests is about.
-	execResultCommand string
-	execResult        *sandbox.ExecuteResult
-	smokeRanAsRoot    bool
-	agentErr          error
+	execResultCommand  string
+	execResult         *sandbox.ExecuteResult
+	loadCheckRanAsRoot bool
+	agentErr           error
 	// beforeExecute runs at the moment the engine would start, so a test can
 	// observe the state an attaching console would see mid-install.
 	beforeExecute func()
@@ -1856,13 +2009,15 @@ func (m *installSandboxManager) ExecShellCommandWithOptions(
 		if m.fx.depsExitCode != 0 {
 			return &sandbox.ExecuteResult{ExitCode: m.fx.depsExitCode, Stderr: "deps missing"}, nil
 		}
-	case command == installSmokeCommand:
-		m.fx.smokeRanAsRoot = opts.AsRoot
-		m.fx.record("verify-smoke")
-		if m.fx.smokeResult != nil {
-			return m.fx.smokeResult, nil
+	case command == installPythonVerifyCommand:
+		m.fx.loadCheckRanAsRoot = opts.AsRoot
+		m.fx.record("verify-python")
+		if m.fx.loadCheckResult != nil {
+			return m.fx.loadCheckResult, nil
 		}
-		return &sandbox.ExecuteResult{ExitCode: m.fx.smokeExitCode, Stderr: "smoke failed"}, nil
+		return &sandbox.ExecuteResult{
+			ExitCode: m.fx.loadCheckExitCode, Stderr: "scripts/extract.py imports pandas",
+		}, nil
 	case command == removeSkillDirCommand:
 		m.fx.record("remove-skill-dir")
 		if m.fx.removeDelay > 0 {

@@ -222,6 +222,7 @@ err = agentSession.Ask(context.Background(), "什么是深度学习?",
 | `AgentResponseTypeToolResult` | 工具执行结果 | 工具执行完成后 |
 | `AgentResponseTypeReferences` | 知识引用 | 检索到相关知识时 |
 | `AgentResponseTypeAnswer` | 最终答案 | Agent生成回答时（流式） |
+| `AgentResponseTypeArtifactsPending` | 生成文件上传中 | 回答结束后、文件写入对象存储完成前 |
 | `AgentResponseTypeReflection` | 自我反思 | Agent评估自己的回答时 |
 | `AgentResponseTypeError` | 错误 | 发生错误时 |
 
@@ -398,6 +399,17 @@ if err != nil {
     // 处理错误
 }
 _ = skillID // 用 skillID 订阅 /sandbox-configs/{id}/skills/{skillID}/install-events
+```
+
+### 示例：重试失败的安装
+
+安装失败的原因常与安装包无关（沙箱不可达、依赖源超时）。服务端保留着原始安装包，重试无需再传一次。
+
+```go
+skillID, err := apiClient.ReinstallSandboxSkill(context.Background(), sandboxConfigID, skillID)
+if err != nil {
+    // 处理错误
+}
 ```
 
 ### 示例：查看已安装技能的文件

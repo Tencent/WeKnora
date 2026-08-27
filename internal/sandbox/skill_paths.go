@@ -68,6 +68,14 @@ func SkillDirForImageScript(scriptPath string) (string, bool) {
 	return path.Join(cleanRoot, parts[0]), true
 }
 
+// SkillVenvPython is where a skill's own Python interpreter lives when the
+// install created one. It is exported because the model needs to be told: the
+// system python3 deliberately carries no skill dependencies, so anything that
+// inspects or debugs a Python skill has to name this path.
+func SkillVenvPython(skillDir string) string {
+	return path.Join(skillDir, ".venv", "bin", "python")
+}
+
 // SkillInterpreterCommand picks how to run one script of a skill.
 //
 // The interpreter is derived per script rather than stored per skill: one skill
@@ -80,7 +88,7 @@ func SkillDirForImageScript(scriptPath string) (string, bool) {
 func SkillInterpreterCommand(skillDir, scriptPath string) (string, []string) {
 	switch strings.ToLower(path.Ext(scriptPath)) {
 	case ".py":
-		venvPython := path.Join(skillDir, ".venv", "bin", "python")
+		venvPython := SkillVenvPython(skillDir)
 		script := ShellQuote(scriptPath)
 		return "/bin/sh", []string{"-c", fmt.Sprintf(
 			`if [ -x %s ]; then exec %s %s "$@"; else exec python3 %s "$@"; fi`,

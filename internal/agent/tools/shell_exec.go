@@ -149,6 +149,11 @@ var shellExecTool = BaseTool{
 - DO NOT use this to run a skill's main script — use ` + "`execute_skill_script`" + `
   which handles skill lookup, artifact collection, and proper interpreter
   selection.
+- DO NOT judge a skill's dependencies with a bare ` + "`python3 -c`" + ` or
+  ` + "`node -e`" + `: each skill keeps its dependencies in its own virtualenv or
+  node_modules, which neither of those resolves from here. ` + "`read_skill`" + `
+  reports the skill's directory and how to reach its environment; reinstalling
+  the packages here only fills a sandbox that is discarded with the session.
 - DO NOT try to background processes (` + "`&`" + ` at the end, ` + "`nohup`" + `). Sandbox
   execution is synchronous.
 
@@ -175,6 +180,11 @@ var shellExecTool = BaseTool{
   lines usually carry the crucial error message.
 - Binary output is never returned to the model. Store binary files under
   ` + "`/workspace/output`" + ` so ArtifactCollector can expose them for download.
+- To show one of those files in your answer, reference it as
+  ` + "`![description](sandbox:<file name>)`" + ` with the exact file name and no
+  directory path. Images render inline; charts, tables, and documents render as
+  a card the user clicks to preview. A bare file name or a
+  ` + "`/workspace/output/...`" + ` path does not resolve in the browser.
 - ` + "`duration_ms`" + `: wall-clock execution time.
 
 ## Safety

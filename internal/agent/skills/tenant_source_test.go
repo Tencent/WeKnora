@@ -248,6 +248,31 @@ func TestManagerRunsATenantSkillFromTheImageWithoutUploading(t *testing.T) {
 	require.Equal(t, "/workspace/output", sandboxMgr.config.Env[artifactOutputEnvVar])
 }
 
+// The in-sandbox directory is what read_skill shows the model so it can name
+// the skill's own interpreter instead of probing the system python3. A
+// preloaded skill has no such directory: its base path is on the WeKnora host,
+// which no command in the sandbox can reach.
+func TestSandboxSkillDirOnlyAnswersForInstalledSkills(t *testing.T) {
+	installed := NewManager(&ManagerConfig{Enabled: true}, nil)
+	installed.WithTenantSource(NewTenantSkillSource([]*types.TenantSkillEntity{{
+		ID: "sk-1", Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
+	}}, nil))
+	require.NoError(t, installed.Initialize(context.Background()))
+
+	dir, ok := installed.SandboxSkillDir("pdf")
+	require.True(t, ok)
+	require.Equal(t, sandbox.SkillsImageRoot+"/pdf", dir)
+
+	preloaded := NewManager(&ManagerConfig{
+		SkillDirs: []string{preloadedSkillDir(t, "pdf", "preloaded description")},
+		Enabled:   true,
+	}, nil)
+	require.NoError(t, preloaded.Initialize(context.Background()))
+
+	_, ok = preloaded.SandboxSkillDir("pdf")
+	require.False(t, ok)
+}
+
 // Preloaded skills keep uploading from the host and keep running in their own
 // directory; the tenant source must not change that path at all.
 func TestManagerKeepsPreloadedSkillExecutionWhenNoTenantSource(t *testing.T) {

@@ -635,5 +635,86 @@
     margin: 0;
   }
 
+  // A sandbox-generated file that is not an image (HTML chart, CSV, document)
+  // is referenced inline as a card instead of being embedded: the artifacts are
+  // self-contained pages up to a megabyte, and an iframe per reference would be
+  // both slow and an active-content risk. Clicking opens the artifact drawer's
+  // sandboxed preview. It must stay inline — Markdown wraps the reference in a
+  // paragraph, and a block element would be hoisted out of it by the parser.
+  :deep(.artifact-ref-card) {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    max-width: min(420px, 100%);
+    margin: 0.75em 0;
+    padding: 8px 14px 8px 10px;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 10px;
+    background: var(--td-bg-color-container);
+    cursor: pointer;
+    vertical-align: middle;
+    text-align: left;
+    transition: border-color 0.15s ease, background 0.15s ease;
+
+    &:hover {
+      border-color: var(--td-brand-color);
+      background: var(--td-bg-color-container-hover);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+    }
+  }
+
+  :deep(.artifact-ref-card--pending) {
+    cursor: default;
+    opacity: 0.7;
+
+    &:hover {
+      border-color: var(--td-component-stroke);
+      background: var(--td-bg-color-container);
+    }
+  }
+
+  :deep(.artifact-ref-card__icon) {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-secondary);
+  }
+
+  :deep(.artifact-ref-card__glyph) {
+    width: 17px;
+    height: 17px;
+  }
+
+  :deep(.artifact-ref-card__text) {
+    display: inline-flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  :deep(.artifact-ref-card__name) {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  :deep(.artifact-ref-card__hint) {
+    font-size: 12px;
+    line-height: 1.3;
+    color: var(--td-text-color-placeholder);
+  }
+
   .chat-markdown-hljs();
 }

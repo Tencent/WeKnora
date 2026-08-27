@@ -659,12 +659,13 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		// produced — those cases must not disturb the completion path.
 		if h.artifactCollector != nil {
 			collectCtx := context.WithoutCancel(h.ctx)
-			artifacts, err := h.artifactCollector.Collect(
+			artifacts, err := h.artifactCollector.CollectWithNotify(
 				collectCtx,
 				h.sessionID,
 				h.assistantMessageID,
 				h.tenantID,
 				skills.ArtifactOutputDir(),
+				h.emitArtifactsPending,
 			)
 			if err != nil {
 				logger.GetLogger(h.ctx).Warnf(
@@ -673,6 +674,13 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 				)
 			} else if len(artifacts) > 0 {
 				h.assistantMessage.Artifacts = artifacts
+				// The answer text names generated files the way the model saw
+				// them in the sandbox. Bind those names to artifact indices now
+				// that the index space is final, so a reloaded conversation
+				// renders them instead of showing a broken link.
+				h.assistantMessage.Content = rewriteArtifactReferences(
+					h.assistantMessage.Content, artifacts,
+				)
 				logger.GetLogger(h.ctx).Infof(
 					"artifact collect attached %d file(s) to message=%s session=%s",
 					len(artifacts), h.assistantMessageID, h.sessionID,
@@ -756,16 +764,39 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	return nil
 }
 
+// emitArtifactsPending tells the live UI that sandbox files exist and are
+// being uploaded. It must not take h.mu — Collect calls it while
+// handleComplete already holds the lock.
+func (h *AgentStreamHandler) emitArtifactsPending(count int) {
+	if h == nil || h.streamManager == nil || count <= 0 {
+		return
+	}
+	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID:        fmt.Sprintf("artifacts-pending-%d", time.Now().UnixMilli()),
+		Type:      types.ResponseTypeArtifactsPending,
+		Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"count": count,
+		},
+	}); err != nil {
+		logger.GetLogger(h.ctx).Warnf(
+			"append artifacts_pending failed session=%s message=%s: %v",
+			h.sessionID, h.assistantMessageID, err,
+		)
+	}
+}
+
 // publicArtifactViews returns a redacted view of the artifact list suitable
-// for direct serialization onto the SSE stream. The storage URL and any
-// other server-only fields are stripped; the frontend uses (index, name,
-// size, source_path, mod_time, created_at) to render the download drawer
-// and calls /artifacts/:index/download to fetch the bytes.
+// for direct serialization onto the SSE stream. The physical storage path is
+// stripped; the resource handle is kept because it is what the answer body
+// references, and the frontend needs it to tie an inline reference to the file
+// it names. Bytes are fetched through /artifacts/:index/download.
 func publicArtifactViews(list types.MessageArtifacts) []map[string]interface{} {
 	out := make([]map[string]interface{}, 0, len(list))
 	for i, a := range list {
 		out = append(out, map[string]interface{}{
 			"index":       i,
+			"handle":      artifactHandle(a),
 			"file_name":   a.FileName,
 			"file_type":   a.FileType,
 			"file_size":   a.FileSize,

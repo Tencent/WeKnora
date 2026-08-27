@@ -82,13 +82,7 @@ func (s *TenantSkillService) InstallSkill(
 	now := s.now()
 	if existing != nil {
 		skillID = existing.ID
-		existing.Version = bundle.Version
-		existing.Description = bundle.Description
-		existing.Instructions = bundle.Instructions
-		existing.BundleSHA256 = bundle.SHA256
-		existing.Status = types.SkillStatusInstalling
-		existing.Error = ""
-		existing.InstallingSince = &now
+		takeSkillRowForInstall(existing, bundle, now)
 		if err := s.skills.UpdateSkill(ctx, existing); err != nil {
 			return "", err
 		}
@@ -113,13 +107,7 @@ func (s *TenantSkillService) InstallSkill(
 				return "", err
 			}
 			skillID = winner.ID
-			winner.Version = bundle.Version
-			winner.Description = bundle.Description
-			winner.Instructions = bundle.Instructions
-			winner.BundleSHA256 = bundle.SHA256
-			winner.Status = types.SkillStatusInstalling
-			winner.Error = ""
-			winner.InstallingSince = &now
+			takeSkillRowForInstall(winner, bundle, now)
 			if err := s.skills.UpdateSkill(ctx, winner); err != nil {
 				return "", err
 			}
@@ -161,6 +149,62 @@ func (s *TenantSkillService) InstallSkill(
 	}()
 
 	return skillID, nil
+}
+
+// takeSkillRowForInstall hands an existing row to the run about to start.
+//
+// The transcript locators are cleared along with the error. They name the
+// session and message of the run that just ended, and a row that says
+// "installing" while still pointing at them tells every reader that the
+// finished conversation is this one's live output — which is how a retry came
+// to replay the previous attempt's report before its own agent had started.
+// They are rewritten by beginInstallTranscript once this run has a message of
+// its own; until then the honest answer is that there is nothing to show yet.
+func takeSkillRowForInstall(row *types.TenantSkillEntity, bundle *SkillBundle, now time.Time) {
+	row.Version = bundle.Version
+	row.Description = bundle.Description
+	row.Instructions = bundle.Instructions
+	row.BundleSHA256 = bundle.SHA256
+	row.Status = types.SkillStatusInstalling
+	row.Error = ""
+	row.InstallingSince = &now
+	row.InstallSessionID = ""
+	row.InstallMessageID = ""
+}
+
+// ReinstallSkill runs the install again from the archive already stored for
+// this skill. Most failed installs have nothing to do with the archive — an
+// unreachable sandbox, a package index that timed out, a checker that has
+// since been corrected — and making the operator find the original zip again
+// (or the registry URL it came from) is a poor answer to any of them.
+//
+// It deliberately goes through InstallSkill rather than jumping to runInstall.
+// That path owns the in-flight check, the row ownership handover and the
+// per-config lock, and a retry is exactly the moment two installs of one
+// config are most likely to overlap.
+func (s *TenantSkillService) ReinstallSkill(
+	ctx context.Context, tenantID uint64, configID, skillID string,
+) (string, error) {
+	skill, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
+	if err != nil {
+		return "", err
+	}
+	if skill == nil {
+		return "", apperrors.NewNotFoundError("skill not found")
+	}
+	// Reported apart from a generic read failure: nothing a retry does can
+	// recover a skill whose archive is gone, and the operator needs to be told
+	// to upload it rather than to press the button again.
+	if strings.TrimSpace(skill.BundleRef) == "" {
+		return "", apperrors.NewBadRequestError(
+			"the archive of this skill is no longer stored; install it again from the original bundle",
+		)
+	}
+	archive, err := s.skillBundleArchive(ctx, tenantID, configID, skillID)
+	if err != nil {
+		return "", err
+	}
+	return s.InstallSkill(ctx, tenantID, configID, archive)
 }
 
 func (s *TenantSkillService) runInstall(
@@ -306,10 +350,11 @@ func (s *TenantSkillService) runInstall(
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{Percent: 80, Stage: "agent_done"})
 
 	// 4. Hand the tree to the execution user BEFORE verifying it. The agent
-	//    created these files as root, and the smoke run below deliberately
-	//    runs as the ordinary user: verifying first would test permissions
-	//    that never reach the image, and a restrictive root umask would fail a
-	//    perfectly good install because the .venv interpreter was unreadable.
+	//    created these files as root, and the language passes below
+	//    deliberately run as the ordinary user: verifying first would test
+	//    permissions that never reach the image, and a restrictive root umask
+	//    would fail a perfectly good install because the .venv interpreter was
+	//    unreadable.
 	if err := s.normalizeSkillPermissions(ctx, mgr, sess.ID, skillDir); err != nil {
 		return err
 	}
@@ -673,69 +718,12 @@ func (s *TenantSkillService) driveInstallerAgent(
 	return nil
 }
 
-// verifySkill is the server's own check. Both structure and smoke run are
-// gates for the snapshot switch: a broken install must leave the old image live.
-func (s *TenantSkillService) verifySkill(
-	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
-) error {
-	if _, err := s.execInstall(ctx, mgr, sessionID,
-		fmt.Sprintf("test -f %s", sandbox.ShellQuote(path.Join(skillDir, "SKILL.md")))); err != nil {
-		return fmt.Errorf("skill directory is incomplete after install: %w", err)
-	}
-	for rel := range bundle.Files {
-		if !strings.HasSuffix(rel, ".py") && !strings.HasSuffix(rel, ".js") &&
-			!strings.HasSuffix(rel, ".mjs") && !strings.HasSuffix(rel, ".sh") {
-			continue
-		}
-		target := path.Join(skillDir, rel)
-		if _, err := s.execInstall(ctx, mgr, sessionID,
-			fmt.Sprintf("test -f %s", sandbox.ShellQuote(target))); err != nil {
-			return fmt.Errorf("script %s is missing after install: %w", rel, err)
-		}
-	}
-	if err := s.verifyDeclaredDependencies(ctx, mgr, sessionID, skillDir, bundle); err != nil {
-		return err
-	}
-	if entry := primaryEntryScript(bundle); entry != "" {
-		res, err := s.execSmoke(ctx, mgr, sessionID, skillDir, path.Join(skillDir, entry))
-		if err != nil {
-			return fmt.Errorf("smoke run %s: %w", entry, err)
-		}
-		if res.ExitCode != 0 {
-			return fmt.Errorf("smoke run %s failed (%s)", entry, describeExecFailure(res))
-		}
-	}
-	return nil
-}
-
-// verifyDeclaredDependencies checks that the isolated trees the installer was
-// told to create actually exist. Seeded source files surviving is not evidence
-// that pip/npm ran: those files were written server-side before the agent.
-func (s *TenantSkillService) verifyDeclaredDependencies(
-	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
-) error {
-	if bundleHasPythonDeps(bundle) {
-		venvPython := path.Join(skillDir, ".venv", "bin", "python")
-		if _, err := s.execInstall(ctx, mgr, sessionID,
-			fmt.Sprintf("test -x %s", sandbox.ShellQuote(venvPython))); err != nil {
-			return fmt.Errorf("python dependencies were not installed into %s/.venv: %w", skillDir, err)
-		}
-	}
-	if bundleHasNodeDeps(bundle) {
-		nodeModules := path.Join(skillDir, "node_modules")
-		if _, err := s.execInstall(ctx, mgr, sessionID,
-			fmt.Sprintf("test -d %s", sandbox.ShellQuote(nodeModules))); err != nil {
-			return fmt.Errorf("node dependencies were not installed into %s/node_modules: %w", skillDir, err)
-		}
-	}
-	return nil
-}
-
 // normalizeSkillPermissions makes the skill tree readable and executable by
 // the non-root execution user, and writable by nobody. Installs run as root,
 // so without the mode change the user that actually runs skills could not read
-// them at all — which is also why this runs before verification: the smoke
-// test has to exercise the permissions the snapshot will carry.
+// them at all — which is also why this runs before verification: the checks
+// read every script as that user, so they have to see the permissions the
+// snapshot will carry.
 //
 // Ownership stays with root rather than moving to the execution user because
 // this tree is baked into an image every session of the config inherits. A
@@ -763,8 +751,23 @@ func (s *TenantSkillService) normalizeSkillPermissions(
 func (s *TenantSkillService) cleanImageScratch(
 	ctx context.Context, mgr sandbox.Manager, sessionID string,
 ) error {
+	user := sandbox.DefaultSandboxExecUser
+	inputRoot := sandbox.ShellQuote(sandbox.SessionInputRoot)
+	outputRoot := sandbox.ShellQuote(sandbox.SessionOutputRoot)
 	cmds := []string{
 		"rm -rf /workspace/* /workspace/.[!.]* || true",
+		// The wipe above takes the base image's own input/output directories
+		// with it, so every session booting from this snapshot would start on
+		// a bare /workspace. Restoring them here is the only place with root:
+		// a provider whose filesystem API runs as root would otherwise
+		// recreate them root-owned, and the session account can neither write
+		// them nor take them over.
+		fmt.Sprintf(
+			"mkdir -p %s %s && chown %s:%s %s %s && chmod 775 %s %s",
+			inputRoot, outputRoot,
+			user, user, inputRoot, outputRoot,
+			inputRoot, outputRoot,
+		),
 		// Spelled out for both accounts on purpose: this runs as root, so "~"
 		// would only ever clear root's caches, while the agent's own installs
 		// populate the exec user's caches and those are what reach the image.
@@ -1459,46 +1462,15 @@ Hard requirements:
 - Each command has a 10-minute budget; you do not need to set timeout_sec.
 - When finished, report what you installed and any global/system packages you changed.
 
+The server verifies the result itself before the image is kept, so report what
+you did rather than whether it passed. Verification parses every script with
+the interpreter that would run it, resolves the imports each one executes on
+load, and checks every distribution named in requirements.txt is present in the
+venv. It never runs the skill's code, so nothing is expected to answer --help.
+
 SKILL.md:
 %s
 `, skillDir, uvAvailable, skillDir, skillDir, skillDir, skillMD)
-}
-
-func primaryEntryScript(bundle *SkillBundle) string {
-	if bundle == nil {
-		return ""
-	}
-	preferred := []string{".py", ".js", ".mjs", ".sh"}
-	for _, suffix := range preferred {
-		var matches []string
-		for rel := range bundle.Files {
-			if strings.HasPrefix(rel, "scripts/") && strings.HasSuffix(rel, suffix) {
-				matches = append(matches, rel)
-			}
-		}
-		if len(matches) > 0 {
-			sort.Strings(matches)
-			return matches[0]
-		}
-	}
-	return ""
-}
-
-func bundleHasPythonDeps(bundle *SkillBundle) bool {
-	if bundle == nil {
-		return false
-	}
-	_, req := bundle.Files["requirements.txt"]
-	_, pyproject := bundle.Files["pyproject.toml"]
-	return req || pyproject
-}
-
-func bundleHasNodeDeps(bundle *SkillBundle) bool {
-	if bundle == nil {
-		return false
-	}
-	_, ok := bundle.Files["package.json"]
-	return ok
 }
 
 func (s *TenantSkillService) probeUv(ctx context.Context, mgr sandbox.Manager, sessionID string) bool {
@@ -1606,35 +1578,6 @@ func (s *TenantSkillService) resolveInstallerModel(
 		}
 	}
 	return nil, fmt.Errorf("workspace %d has no active chat model for skill installer", tenantID)
-}
-
-func (s *TenantSkillService) execSmoke(
-	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir, scriptPath string,
-) (*sandbox.ExecuteResult, error) {
-	executor, err := installExecutor(mgr)
-	if err != nil {
-		return nil, err
-	}
-	// The interpreter argv must survive intact. For Python it is
-	// /bin/sh -c "<script referencing \"$@\">" <argv0>, so every element is
-	// quoted as one literal word and --help is appended AFTER argv0, where it
-	// becomes $1 of the inner script rather than a positional parameter of the
-	// outer shell that nothing ever reads.
-	cmd, args := sandbox.SkillInterpreterCommand(skillDir, scriptPath)
-	words := []string{sandbox.ShellQuote(cmd)}
-	for _, arg := range args {
-		words = append(words, sandbox.ShellQuote(arg))
-	}
-	words = append(words, "--help")
-	return executor.ExecShellCommandWithOptions(ctx, sessionID, strings.Join(words, " "),
-		sandbox.ShellExecOptions{
-			WorkDir: sandbox.SessionWorkspaceRoot,
-			Timeout: installCommandTimeout,
-			Env: map[string]string{
-				"WEKNORA_SKILL_DIR":        skillDir,
-				"WEKNORA_SKILL_OUTPUT_DIR": sandbox.SessionOutputRoot,
-			},
-		})
 }
 
 func (s *TenantSkillService) writeManifestEntry(

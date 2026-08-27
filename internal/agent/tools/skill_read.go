@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
@@ -148,6 +149,12 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		resultData["instructions"] = skill.Instructions
 		resultData["instructions_length"] = len(skill.Instructions)
 		resultData["files"] = files
+
+		if dir, ok := t.skillManager.SandboxSkillDir(skill.Name); ok {
+			builder.WriteString(skillEnvironmentSection(dir))
+			resultData["skill_dir"] = dir
+			resultData["skill_python"] = sandbox.SkillVenvPython(dir)
+		}
 	}
 
 	logger.Infof(ctx, "[Tool][ReadSkill] Successfully read skill: %s", input.SkillName)
@@ -157,6 +164,40 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		Output:  builder.String(),
 		Data:    resultData,
 	}, nil
+}
+
+// skillEnvironmentSection tells the model where the skill's dependencies are.
+//
+// Every skill keeps its dependencies to itself — Python in its own virtualenv,
+// Node in its own node_modules — so a bare interpreter started anywhere else
+// sees none of them. A model that probes with `python3 -c "import pandas"` or
+// `node -e "require('echarts')"` therefore reads the failure as "this skill
+// cannot run" and answers it by installing the packages again, into a session
+// sandbox that is thrown away: the image stays untouched and the next session
+// repeats the whole thing.
+//
+// The two languages fail for different reasons, which is why the advice below
+// is per-language. Python needs the virtualenv's own interpreter named
+// explicitly. Node resolves from the importing file's directory, so running a
+// script by absolute path already finds the skill's node_modules — it is only
+// `node -e` and friends, which have no file to resolve from, that need the
+// working directory moved into the skill.
+func skillEnvironmentSection(skillDir string) string {
+	return fmt.Sprintf(`
+
+## Execution Environment
+
+- This skill is installed at `+"`%s`"+` inside the sandbox, and its
+  dependencies live there with it, not in the sandbox's system interpreters.
+- `+"`execute_skill_script`"+` already runs its scripts the right way. Prefer
+  it over invoking them yourself.
+- Do NOT decide from a system interpreter whether this skill can run, and do
+  NOT reinstall its dependencies with `+"`pip install`"+` / `+"`npm install`"+`:
+  those packages land in this session only and are lost with it.
+- To inspect the environment yourself from `+"`shell_exec`"+`: for Python, run
+  `+"`%s`"+` instead of `+"`python3`"+`; for Node, run from `+"`%s`"+` as the
+  working directory so its `+"`node_modules`"+` resolves.
+`, skillDir, sandbox.SkillVenvPython(skillDir), skillDir)
 }
 
 // Cleanup releases any resources (implements Tool interface if needed)

@@ -57,6 +57,7 @@ type sandboxSkillService interface {
 	InstallSkillFromSource(
 		ctx context.Context, tenantID uint64, configID, source string,
 	) (string, error)
+	ReinstallSkill(ctx context.Context, tenantID uint64, configID, skillID string) (string, error)
 	RemoveSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
 	LastProgress(
 		ctx context.Context, tenantID uint64, configID, skillID string,
@@ -343,6 +344,31 @@ func (h *SandboxSkillHandler) installFromSource(c *gin.Context) {
 
 	skillID, err := h.service.InstallSkillFromSource(
 		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), source,
+	)
+	if err != nil {
+		respondSkillServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": gin.H{"skill_id": skillID}})
+}
+
+// Reinstall godoc
+// @Summary      Retry a skill install
+// @Description  Retry a failed install from the stored archive; does not re-upload.
+// @Tags         SandboxConfig
+// @Produce      json
+// @Param        id       path      string  true  "Sandbox config ID"
+// @Param        skillId  path      string  true  "Skill ID"
+// @Success      202      {object}  map[string]interface{}  "Reinstall accepted"
+// @Failure      400      {object}  apperrors.AppError      "The stored archive is gone"
+// @Failure      401      {object}  map[string]interface{}  "Unauthorized"
+// @Failure      404      {object}  apperrors.AppError      "Skill not found"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /sandbox-configs/{id}/skills/{skillId}/reinstall [post]
+func (h *SandboxSkillHandler) Reinstall(c *gin.Context) {
+	skillID, err := h.service.ReinstallSkill(
+		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), c.Param("skillId"),
 	)
 	if err != nil {
 		respondSkillServiceError(c, err)

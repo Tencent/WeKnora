@@ -45,7 +45,12 @@ const (
 	DefaultTimeout     = 60 * time.Second
 	DefaultMemoryLimit = 256 * 1024 * 1024 // 256MB
 	DefaultCPULimit    = 1.0               // 1 CPU core
-	DefaultDockerImage = "wechatopenai/weknora-sandbox:latest"
+	// DefaultDockerImage tracks main rather than latest. The latest tag only
+	// moves when a version is released, so it still carries the image from
+	// before /workspace and its input/output directories were handed to the
+	// sandbox account — a sandbox built from it cannot write its own artifact
+	// directory. Point this back at latest once a release ships that fix.
+	DefaultDockerImage = "wechatopenai/weknora-sandbox:main"
 
 	// DefaultCubeTemplateImage is the same environment with Cube's envd daemon
 	// baked in (target "cube" of docker/Dockerfile.sandbox).

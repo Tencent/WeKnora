@@ -133,11 +133,17 @@
             :class="{ 'skill-item--focused': focusedSkillId === skill.id }"
           >
             <div class="skill-status-ring" :title="statusLabel(skill)">
+              <!-- The percentage is spelled out in the meta line below, so the
+                   ring only has to show proportion: its own label is two digits
+                   crammed into 16px. The default 6px stroke is most of the
+                   radius at this size, which reads as a blob rather than a ring. -->
               <t-progress
                 v-if="isBusy(skill)"
                 theme="circle"
                 :percentage="progressOf(skill)"
                 :size="16"
+                :stroke-width="2"
+                :label="false"
               />
               <t-icon
                 v-else-if="skill.status === 'failed'"
@@ -271,6 +277,21 @@
                       </span>
                     </button>
                   </t-tooltip>
+                  <t-tooltip
+                    v-if="skill.status === 'failed'"
+                    :content="$t('settings.sandbox.skillRetryHint')"
+                    placement="top"
+                  >
+                    <button
+                      type="button"
+                      class="skill-item__icon-btn"
+                      :disabled="retryingId === skill.id"
+                      :aria-label="$t('settings.sandbox.skillRetry')"
+                      @click="retrySkill(skill)"
+                    >
+                      <t-icon name="refresh" size="16px" />
+                    </button>
+                  </t-tooltip>
                   <t-popconfirm
                     theme="warning"
                     :content="deleteHint"
@@ -308,7 +329,9 @@
                   {{ isCopyExpanded(skill.id) ? $t('common.collapse') : $t('common.expand') }}
                 </button>
               </div>
-              <p v-if="failedError(skill)" class="skill-item__error">{{ failedError(skill) }}</p>
+              <ul v-if="failedErrorLines(skill).length" class="skill-item__error">
+                <li v-for="(line, i) in failedErrorLines(skill)" :key="i">{{ line }}</li>
+              </ul>
             </div>
           </li>
         </ul>
@@ -344,6 +367,7 @@ import {
   updateSandboxConfigById,
   listConfigSkills,
   patchConfigSkill,
+  reinstallConfigSkill,
   uploadConfigSkill,
   installConfigSkillFromSource,
   type ConfigSkill,
@@ -378,6 +402,7 @@ const skills = ref<ConfigSkill[]>([])
 const skillImage = ref<SandboxSkillImage | null>(null)
 const togglingId = ref('')
 const deletingId = ref('')
+const retryingId = ref('')
 // Only one install timeline is open at a time: each one holds an SSE
 // connection, and two runs' worth of agent steps in a drawer is unreadable.
 const expandedSkillId = ref('')
@@ -535,9 +560,31 @@ function progressLog(skill: ConfigSkill): string {
   return progressById.value[skill.id]?.log || ''
 }
 
+// A re-run reuses the skill id, so the previous run's last event is still the
+// one cached here. Left in place it renders as this run's state: a retry would
+// open at 100% showing the failure it was started to fix, until the first new
+// event lands.
+function forgetProgress(skillId: string) {
+  if (!(skillId in progressById.value)) return
+  const next = { ...progressById.value }
+  delete next[skillId]
+  progressById.value = next
+}
+
 function failedError(skill: ConfigSkill): string {
   if (skill.status !== 'failed') return ''
   return skill.error || progressLog(skill)
+}
+
+// Script verification reports every problem it found rather than stopping at
+// the first, so one failure is often several lines. Run together they are
+// unreadable, and the list is what tells the operator whether this is one
+// missing package or a bundle that needs rebuilding.
+function failedErrorLines(skill: ConfigSkill): string[] {
+  return failedError(skill)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
 }
 
 function isCopyExpanded(skillId: string): boolean {
@@ -783,6 +830,9 @@ async function uploadFile(file: File) {
     })
     MessagePlugin.success(t('settings.sandbox.skillUploadAccepted'))
     const skillId = res?.data?.skill_id
+    // Re-uploading a skill by the same name reuses its row, so this may be a
+    // second run of a skill already on screen.
+    if (skillId) forgetProgress(skillId)
     await loadSkills()
     await refreshImage()
     if (skillId) {
@@ -813,6 +863,7 @@ async function installFromSource() {
     MessagePlugin.success(t('settings.sandbox.skillUploadAccepted'))
     sourceInput.value = ''
     const skillId = res?.data?.skill_id
+    if (skillId) forgetProgress(skillId)
     await loadSkills()
     await refreshImage()
     if (skillId) {
@@ -852,6 +903,25 @@ async function toggleEnabled(skill: ConfigSkill, enabled: boolean) {
     MessagePlugin.error(e?.message || t('settings.sandbox.skillToggleFailed'))
   } finally {
     togglingId.value = ''
+  }
+}
+
+// The server still holds the archive, so a retry needs nothing from the
+// operator. It reuses the same row, which is why the progress follow can be
+// re-attached under the id already on screen.
+async function retrySkill(skill: ConfigSkill) {
+  if (!props.record) return
+  retryingId.value = skill.id
+  forgetProgress(skill.id)
+  try {
+    await reinstallConfigSkill(props.record.id, skill.id)
+    MessagePlugin.success(t('settings.sandbox.skillRetryAccepted'))
+    await loadSkills()
+    followProgress(skill.id)
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('settings.sandbox.skillRetryFailed'))
+  } finally {
+    retryingId.value = ''
   }
 }
 
@@ -1116,10 +1186,16 @@ onUnmounted(() => {
   flex-shrink: 0;
   color: var(--td-text-color-secondary);
 
-  :deep(.t-progress),
   :deep(.t-icon) {
     width: 16px;
     height: 16px;
+  }
+
+  /* The ring is already sized to 16px by the component. The svg is inline by
+     default, so without this it sits on a text baseline and pushes the ring
+     a few pixels below the icon the other two states draw. */
+  :deep(.t-progress--circle svg) {
+    display: block;
   }
 
   &__ready {
@@ -1166,9 +1242,27 @@ onUnmounted(() => {
 .skill-item__desc,
 .skill-item__error {
   margin: 0;
+  padding: 0;
   font-size: 12px;
   line-height: 1.5;
   word-break: break-word;
+  list-style: none;
+}
+
+/* Verification reports every problem it found, so a failure is often several
+   lines. They are bulleted only when there is more than one: a lone problem
+   reads as a sentence, not as a one-item list. */
+.skill-item__error li:not(:only-child) {
+  padding-left: 10px;
+  text-indent: -10px;
+}
+
+.skill-item__error li:not(:only-child)::before {
+  content: '· ';
+}
+
+.skill-item__error li + li {
+  margin-top: 2px;
 }
 
 .skill-item__copy {
