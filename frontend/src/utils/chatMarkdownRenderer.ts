@@ -11,6 +11,8 @@ import {
   restoreCitationHtmlPlaceholders,
   restoreCitationTags,
   stripIncompleteCitationTag,
+  normalizeWikiMarkdownLinks,
+  normalizeWikiDocumentMarkdownLinks,
   type CitationKnowledgeRef,
 } from './citationMarkdown.ts'
 
@@ -485,10 +487,19 @@ export function renderChatMarkdown(rawMarkdown: unknown, options: RenderChatMark
     ? options.prepareMarkdown(balancedInline, options.cachedMermaidSvgHtml)
     : balancedInline
   const flankingSafeMarkdown = repairFlankingEmphasis(preparedMarkdown)
+  // Resolve explicit original-file columns before converting generated
+  // summary/<uuid> links into Wiki links. A summary slug is also a valid Wiki
+  // slug, so doing the Wiki normalization first would make a third-column
+  // original-file link open the Summary drawer instead of the source file.
+  const documentLinkSafeMarkdown = normalizeWikiDocumentMarkdownLinks(
+    flankingSafeMarkdown,
+    options.knowledgeReferences,
+  )
+  const wikiLinkSafeMarkdown = normalizeWikiMarkdownLinks(documentLinkSafeMarkdown)
   // Convert <kb>/<web>/wiki tags to HTML placeholders before escapeMarkdown so
   // agent sanitizers (e.g. UUID stripping) cannot damage chunk_id attributes.
   const { content: markdownWithPlaceholders, htmlSnippets } =
-    extractCitationHtmlPlaceholders(flankingSafeMarkdown, options.knowledgeReferences)
+    extractCitationHtmlPlaceholders(wikiLinkSafeMarkdown, options.knowledgeReferences)
   const escapedMarkdown = options.escapeMarkdown(markdownWithPlaceholders)
   const html = marked.parse(markdownWithPlaceholders, {
     renderer: options.renderer,

@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/storageurl"
@@ -131,9 +132,10 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 			"Successfully retrieved recent messages, session ID: %s, message count: %d",
 			sessionID, len(messages),
 		)
+		clientMessages := agenttools.SanitizeMessagesForClient(messages)
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
-			"data":    rewriter.RewriteMessagesResponse(ctx, messages),
+			"data":    rewriter.RewriteMessagesResponse(ctx, clientMessages),
 		})
 		return
 	}
@@ -171,9 +173,10 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		"Successfully retrieved messages before time, session ID: %s, message count: %d",
 		sessionID, len(messages),
 	)
+	clientMessages := agenttools.SanitizeMessagesForClient(messages)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    rewriter.RewriteMessagesResponse(ctx, messages),
+		"data":    rewriter.RewriteMessagesResponse(ctx, clientMessages),
 	})
 }
 

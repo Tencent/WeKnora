@@ -70,17 +70,15 @@
                     <div class="reference-item__document-main">
                       <div class="reference-item__title-row">
                         <h5 class="reference-item__title">{{ item.title }}</h5>
-                        <a
-                          v-if="item.knowledgeBaseId && !embeddedMode"
+                        <button
+                          v-if="item.knowledgeId && !embeddedMode"
+                          type="button"
                           class="reference-item__open"
-                          :href="getDocumentHref(item)"
-                          target="_blank"
-                          rel="noopener noreferrer"
                           :aria-label="t('chat.navigateToDocument')"
-                          @click.stop
+                          @click.stop="openDocumentPreview(item)"
                         >
-                          <t-icon name="jump" size="14px" />
-                        </a>
+                          <t-icon name="chevron-right" size="14px" />
+                        </button>
                       </div>
                       <p v-if="item.snippet && !expandedKeys.has(item.key)" class="reference-item__snippet">
                         {{ formatReferenceSnippet(item.snippet) }}
@@ -116,6 +114,19 @@
                   <div v-if="item.kind === 'tool' && item.content" class="reference-item__content">
                     {{ formatReferenceSnippet(item.content) }}
                   </div>
+                  <div v-if="item.wikiSourceDocuments?.length && !embeddedMode" class="reference-item__sources">
+                    <div class="reference-item__sources-label">{{ t('chat.originalDocuments') }}</div>
+                    <button
+                      v-for="source in item.wikiSourceDocuments"
+                      :key="`${source.knowledgeBaseId}:${source.knowledgeId}`"
+                      type="button"
+                      class="reference-item__source-link"
+                      @click.stop="openSourceDocumentPreview(source)"
+                    >
+                      <span>{{ source.title }}</span>
+                      <t-icon name="chevron-right" size="13px" />
+                    </button>
+                  </div>
                 </template>
               </component>
             </article>
@@ -137,8 +148,9 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
+import { useChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer'
+import { openKnowledgeDocumentPreview } from '@/utils/documentPreviewTarget'
 import {
   buildReferenceSections,
   formatReferenceSnippet,
@@ -152,8 +164,8 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
-const router = useRouter()
 const drawer = useChatReferencesDrawer()
+const attachmentPreviewDrawer = useChatAttachmentPreviewDrawer()
 
 const listElement = ref<HTMLElement | null>(null)
 const itemElements = new Map<string, HTMLElement>()
@@ -259,14 +271,17 @@ function toggleDocumentSnippet(item: ReferenceListItem, event?: MouseEvent) {
   expandedKeys.add(item.key)
 }
 
-function getDocumentHref(item: ReferenceListItem) {
-  if (!item.knowledgeBaseId) return ''
-  const query: Record<string, string> = {}
-  if (item.knowledgeId) query.knowledge_id = item.knowledgeId
-  return router.resolve({
-    path: `/platform/knowledge-bases/${item.knowledgeBaseId}`,
-    query,
-  }).href
+function openSourceDocumentPreview(source: { knowledgeBaseId: string; knowledgeId: string; title: string; fileType?: string }) {
+  openKnowledgeDocumentPreview(attachmentPreviewDrawer, source)
+}
+
+function openDocumentPreview(item: ReferenceListItem) {
+  if (!item.knowledgeId) return
+  openKnowledgeDocumentPreview(attachmentPreviewDrawer, {
+    knowledgeId: item.knowledgeId,
+    title: item.title,
+    fileType: item.fileType,
+  })
 }
 
 function shouldShowItemTitle(item: ReferenceListItem) {
@@ -547,6 +562,53 @@ watch(visible, (open) => {
 
 .reference-item__open:hover {
   color: var(--td-text-color-primary);
+}
+
+.reference-item__sources {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--td-component-stroke);
+}
+
+.reference-item__sources-label {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+}
+
+.reference-item__source-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+  padding: 3px 0;
+  border: 0;
+  appearance: none;
+  background: transparent;
+  color: var(--td-brand-color);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reference-item__source-link span {
+  min-width: 0;
+  overflow: hidden;
+  border-bottom: 1px dashed var(--td-brand-color);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-item__source-link:hover span,
+.reference-item__source-link:focus-visible span {
+  border-bottom-style: solid;
+}
+
+.reference-item__source-link:focus-visible {
+  outline: none;
 }
 
 .reference-item__snippet {

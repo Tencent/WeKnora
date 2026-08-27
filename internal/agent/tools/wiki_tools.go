@@ -343,6 +343,25 @@ type pendingWikiPage struct {
 	body     string
 }
 
+// wikiSourceDocument is the deliberately small, server-verified metadata
+// exposed to the UI. In particular, it contains no external data-source URL.
+type wikiSourceDocument struct {
+	KnowledgeID     string `json:"knowledge_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	Title           string `json:"title"`
+	FileType        string `json:"file_type"`
+}
+
+func sourceDocumentTitle(k *types.Knowledge) string {
+	if k == nil {
+		return ""
+	}
+	if title := strings.TrimSpace(k.Title); title != "" {
+		return title
+	}
+	return strings.TrimSpace(k.FileName)
+}
+
 func (p pendingWikiPage) render(body string) string {
 	return fmt.Sprintf(`<wiki_page>
 <metadata>
@@ -445,12 +464,14 @@ func renderWikiPagesWithinBudget(pages []pendingWikiPage, budget int) (string, [
 
 type wikiReadPageTool struct {
 	BaseTool
-	wikiService      interfaces.WikiPageService
-	knowledgeService interfaces.KnowledgeService
-	scopes           []WikiScope
-	routes           *WikiRouteResolver
-	seenLinks        map[string]bool
-	mu               sync.Mutex
+	wikiService         interfaces.WikiPageService
+	knowledgeService    interfaces.KnowledgeService
+	scopes              []WikiScope
+	routes              *WikiRouteResolver
+	sourceLinksEnabled  bool
+	sourceSearchTargets types.SearchTargets
+	seenLinks           map[string]bool
+	mu                  sync.Mutex
 }
 
 func NewWikiReadPageTool(
@@ -458,7 +479,7 @@ func NewWikiReadPageTool(
 	knowledgeService interfaces.KnowledgeService,
 	scopes []WikiScope,
 	routes *WikiRouteResolver,
-) types.Tool {
+) *wikiReadPageTool {
 	if routes == nil {
 		routes = NewWikiRouteResolver()
 	}
@@ -480,12 +501,61 @@ Knowledge-base routing is automatic. Known link/search provenance is preferred; 
   "required": ["slugs"]
 }`),
 		),
-		wikiService:      wikiService,
-		knowledgeService: knowledgeService,
-		scopes:           scopes,
-		routes:           routes,
-		seenLinks:        make(map[string]bool),
+		wikiService:        wikiService,
+		knowledgeService:   knowledgeService,
+		scopes:             scopes,
+		routes:             routes,
+		sourceLinksEnabled: true,
+		seenLinks:          make(map[string]bool),
 	}
+}
+
+// WithSourceLinks controls only client preview metadata. The model-facing
+// <sources> block is intentionally unaffected when preview is disabled.
+func (t *wikiReadPageTool) WithSourceLinks(enabled bool, searchTargets types.SearchTargets) *wikiReadPageTool {
+	t.sourceLinksEnabled = enabled
+	t.sourceSearchTargets = searchTargets
+	return t
+}
+
+// resolveSourceDocuments validates every source reference against the current
+// Agent scope and returns only live documents with a server-confirmed title.
+func (t *wikiReadPageTool) resolveSourceDocuments(ctx context.Context, pageKBID string, refs []string) []wikiSourceDocument {
+	if !t.sourceLinksEnabled || t.knowledgeService == nil || len(t.sourceSearchTargets) == 0 {
+		return nil
+	}
+	result := make([]wikiSourceDocument, 0, len(refs))
+	seen := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		id := strings.TrimSpace(strings.SplitN(ref, "|", 2)[0])
+		if id == "" {
+			continue
+		}
+		knowledge, err := authorizeKnowledgeInSearchTargets(ctx, t.sourceSearchTargets, id, t.knowledgeService)
+		if err != nil || knowledge == nil || knowledge.KnowledgeBaseID != pageKBID {
+			continue
+		}
+		if knowledge.DeletedAt.Valid || knowledge.ParseStatus == types.ParseStatusDeleting ||
+			knowledge.ParseStatus == types.ParseStatusFailed || knowledge.ParseStatus == types.ParseStatusCancelled ||
+			strings.EqualFold(strings.TrimSpace(knowledge.EnableStatus), "disabled") {
+			continue
+		}
+		title := sourceDocumentTitle(knowledge)
+		if title == "" {
+			continue
+		}
+		if _, ok := seen[knowledge.ID]; ok {
+			continue
+		}
+		seen[knowledge.ID] = struct{}{}
+		result = append(result, wikiSourceDocument{
+			KnowledgeID:     knowledge.ID,
+			KnowledgeBaseID: knowledge.KnowledgeBaseID,
+			Title:           title,
+			FileType:        knowledge.FileType,
+		})
+	}
+	return result
 }
 
 // seenLinkKey builds a dedupe key scoped to a knowledge base so that identical
@@ -735,15 +805,46 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}
 	}
 
+	data := map[string]interface{}{
+		"found_kbs":       foundKBs,
+		"ambiguous_slugs": ambiguous,
+		"truncated_slugs": truncatedSlugs,
+		"omitted_slugs":   omittedSlugs,
+		"preview_enabled": t.sourceLinksEnabled,
+	}
+	if t.sourceLinksEnabled {
+		// renderWikiPagesWithinBudget only omits a trailing suffix. Resolve
+		// source documents after budgeting so omitted pages neither incur
+		// authorization lookups nor expose sources the model did not read.
+		renderedCount := len(pending) - len(omittedSlugs)
+		sourceDocuments := make([]map[string]interface{}, 0, renderedCount)
+		for _, page := range pending[:renderedCount] {
+			documents := t.resolveSourceDocuments(ctx, page.kbID, page.page.SourceRefs)
+			if len(documents) == 0 {
+				continue
+			}
+			docs := make([]map[string]interface{}, 0, len(documents))
+			for _, doc := range documents {
+				docs = append(docs, map[string]interface{}{
+					"knowledge_id":      doc.KnowledgeID,
+					"knowledge_base_id": doc.KnowledgeBaseID,
+					"title":             doc.Title,
+					"file_type":         doc.FileType,
+					"preview_enabled":   true,
+				})
+			}
+			sourceDocuments = append(sourceDocuments, map[string]interface{}{
+				"knowledge_base_id": page.kbID,
+				"slug":              page.page.Slug,
+				"source_documents":  docs,
+			})
+		}
+		data["source_documents"] = sourceDocuments
+	}
 	return &types.ToolResult{
 		Success: true,
 		Output:  finalOutput,
-		Data: map[string]interface{}{
-			"found_kbs":       foundKBs,
-			"ambiguous_slugs": ambiguous,
-			"truncated_slugs": truncatedSlugs,
-			"omitted_slugs":   omittedSlugs,
-		},
+		Data:    data,
 	}, nil
 }
 

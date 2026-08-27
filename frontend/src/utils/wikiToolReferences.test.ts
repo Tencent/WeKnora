@@ -58,6 +58,57 @@ test('parses wiki page reads and keeps markdown content', () => {
   assert.equal(refs[0]?.content, '# RAG\n\nFull **Markdown** body.')
 })
 
+test('attaches verified source documents to the matching wiki page only', () => {
+  const refs = parseWikiToolReferences('wiki_read_page', `
+    <wiki_page>
+      <metadata><knowledge_base_id>kb-1</knowledge_base_id><link>[[concept/rag|RAG]]</link></metadata>
+      <content>Body</content>
+    </wiki_page>
+    <wiki_page>
+      <metadata><knowledge_base_id>kb-2</knowledge_base_id><link>[[concept/rag|Other RAG]]</link></metadata>
+      <content>Other body</content>
+    </wiki_page>
+  `, 'call-source', {
+    source_documents: [
+      { knowledge_base_id: 'kb-1', slug: 'concept/rag', source_documents: [
+        { knowledge_id: 'doc-1', knowledge_base_id: 'kb-doc', title: 'Source A', preview_enabled: true },
+        { knowledge_id: 'doc-1', knowledge_base_id: 'kb-doc', title: 'Duplicate' },
+      ] },
+      { knowledge_base_id: 'kb-2', slug: 'concept/rag', source_documents: [
+        { knowledge_id: 'doc-2', knowledge_base_id: 'kb-doc', title: 'Source B', preview_enabled: true },
+      ] },
+    ],
+  })
+
+  assert.deepEqual(refs.map((ref) => ref.sourceDocuments), [
+    [{ knowledgeId: 'doc-1', knowledgeBaseId: 'kb-doc', title: 'Source A' }],
+    [{ knowledgeId: 'doc-2', knowledgeBaseId: 'kb-doc', title: 'Source B' }],
+  ])
+})
+
+test('does not expose source documents when the server omitted navigation metadata', () => {
+  const refs = parseWikiToolReferences('wiki_read_page', `
+    <wiki_page>
+      <metadata><knowledge_base_id>kb-1</knowledge_base_id><link>[[concept/rag|RAG]]</link></metadata>
+      <content>Body remains readable.</content>
+    </wiki_page>
+  `, 'call-disabled', {
+    source_documents: [{
+      knowledge_base_id: 'kb-1',
+      slug: 'concept/rag',
+      source_documents: [{
+        knowledge_id: 'doc-1',
+        knowledge_base_id: 'kb-1',
+        title: 'Source.pdf',
+      }],
+    }],
+  })
+
+  assert.equal(refs.length, 1)
+  assert.equal(refs[0]?.content, 'Body remains readable.')
+  assert.equal(refs[0]?.sourceDocuments, undefined)
+})
+
 test('uses the wiki summary only when a page has no body', () => {
   const refs = parseWikiToolReferences('wiki_read_page', `
     <wiki_page>

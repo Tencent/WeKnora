@@ -136,6 +136,7 @@ onUnmounted(() => {
 
     <section v-if="target" class="chat-attachment-drawer-body">
       <DocumentPreview
+        :knowledge-id="target.knowledgeId"
         :session-id="target.sessionId"
         :attachment-id="target.attachmentId"
         :file-type="target.fileType"

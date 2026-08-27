@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -30,6 +31,8 @@ var clientStripFieldsByTool = map[string][]string{
 
 const historicalSandboxOutputChars = 4 * 1024
 
+var wikiSourceKnowledgeIDPattern = regexp.MustCompile(`(<source\b[^>]*?)\s+knowledge_id="[^"]*"`)
+
 // ShouldOmitRawToolOutput reports whether the raw XML/text Output should be
 // excluded from SSE replay and persisted agent_steps. The full Output remains
 // available in-memory for the current agent turn.
@@ -51,7 +54,53 @@ func sanitizeToolDataForClient(toolName string, data map[string]interface{}) map
 	if omit == nil {
 		omit = persistStripFieldsByTool[toolName]
 	}
-	return sanitizeToolData(data, omit)
+	out := sanitizeToolData(data, omit)
+	if out == nil {
+		return nil
+	}
+	previewEnabled, _ := out["preview_enabled"].(bool)
+	if !previewEnabled {
+		switch toolName {
+		case ToolWikiReadPage:
+			delete(out, "source_documents")
+		case ToolWikiReadSourceDoc:
+			delete(out, "knowledge_id")
+			delete(out, "knowledge_base_id")
+			delete(out, "file_type")
+		}
+	}
+	return out
+}
+
+// sanitizeToolOutputForClient removes model-only Wiki source handles when the
+// original-document preview feature was explicitly disabled. The in-memory
+// ToolResult remains unchanged, so the Agent can still call
+// wiki_read_source_doc with the full <sources> block.
+// SanitizeToolArgumentsForClient removes model-only document handles from UI
+// timeline payloads. The Agent's execution arguments and persisted model
+// history remain unchanged.
+func SanitizeToolArgumentsForClient(toolName string, args map[string]interface{}) map[string]interface{} {
+	if toolName != ToolWikiReadSourceDoc || args == nil {
+		return args
+	}
+	out := make(map[string]interface{}, len(args))
+	for key, value := range args {
+		if key != "knowledge_id" {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func sanitizeToolOutputForClient(toolName, output string, data map[string]interface{}) string {
+	if toolName != ToolWikiReadPage || output == "" || data == nil {
+		return output
+	}
+	previewEnabled, _ := data["preview_enabled"].(bool)
+	if previewEnabled {
+		return output
+	}
+	return wikiSourceKnowledgeIDPattern.ReplaceAllString(output, "$1")
 }
 
 func sanitizeToolData(data map[string]interface{}, extraOmit []string) map[string]interface{} {
@@ -84,7 +133,7 @@ func SanitizeToolResultForClient(toolName string, result *types.ToolResult) map[
 		}
 	}
 	if !ShouldOmitRawToolOutput("", result.Data) && result.Output != "" {
-		meta["output"] = result.Output
+		meta["output"] = sanitizeToolOutputForClient(toolName, result.Output, result.Data)
 	}
 	return meta
 }
@@ -104,6 +153,53 @@ func StreamContentForToolResult(toolName string, success bool, errMsg string, da
 }
 
 // SanitizeAgentStepsForStorage strips LLM-only payloads from persisted steps.
+// SanitizeMessagesForClient copies message history before removing model-only
+// Wiki document handles from Agent steps. Other immutable response fields may
+// remain shared because this function never mutates them.
+func SanitizeMessagesForClient(messages []*types.Message) []*types.Message {
+	if len(messages) == 0 {
+		return messages
+	}
+	out := make([]*types.Message, len(messages))
+	for i, message := range messages {
+		if message == nil {
+			continue
+		}
+		copy := *message
+		copy.AgentSteps = SanitizeAgentStepsForClient(message.AgentSteps)
+		out[i] = &copy
+	}
+	return out
+}
+
+// SanitizeAgentStepsForClient returns a UI-safe copy without mutating the
+// persisted steps used to replay tool calls to the model.
+func SanitizeAgentStepsForClient(steps types.AgentSteps) types.AgentSteps {
+	if len(steps) == 0 {
+		return steps
+	}
+	out := make(types.AgentSteps, len(steps))
+	for i, step := range steps {
+		out[i] = step
+		if len(step.ToolCalls) == 0 {
+			continue
+		}
+		calls := make([]types.ToolCall, len(step.ToolCalls))
+		for j, call := range step.ToolCalls {
+			calls[j] = call
+			calls[j].Args = SanitizeToolArgumentsForClient(call.Name, call.Args)
+			if call.Result != nil {
+				result := *call.Result
+				result.Output = sanitizeToolOutputForClient(call.Name, result.Output, result.Data)
+				result.Data = sanitizeToolDataForClient(call.Name, result.Data)
+				calls[j].Result = &result
+			}
+		}
+		out[i].ToolCalls = calls
+	}
+	return out
+}
+
 func SanitizeAgentStepsForStorage(steps []types.AgentStep) []types.AgentStep {
 	if len(steps) == 0 {
 		return steps
