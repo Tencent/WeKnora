@@ -108,7 +108,7 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 		return fmt.Errorf("create session: %w", err)
 	}
 	query := skillQuery(video, contract.SkillName)
-	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query); err != nil {
+	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query, []string{video.TranscriptKnowledgeID}); err != nil {
 		return fmt.Errorf("trigger skill %s: %w", contract.SkillName, err)
 	}
 
@@ -187,7 +187,7 @@ func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 		return fmt.Errorf("graph create session: %w", err)
 	}
 	query := skillQuery(video, contract.SkillName)
-	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query); err != nil {
+	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query, []string{video.TranscriptKnowledgeID}); err != nil {
 		return fmt.Errorf("graph trigger skill %s: %w", contract.SkillName, err)
 	}
 	wikiPageID, err := h.waitForWikiPage(ctx, video.ID, skill.JobGraph, baseline, time.Minute)

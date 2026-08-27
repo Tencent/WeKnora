@@ -76,15 +76,20 @@ func (a *AgentClient) CreateSession(ctx context.Context, title string) (string, 
 }
 
 // TriggerSkill 触发单个 skill（Agent Chat API + skill_names）
-func (a *AgentClient) TriggerSkill(ctx context.Context, sessionID, agentID, skillName, query string) error {
-	body, _ := json.Marshal(map[string]any{
+func (a *AgentClient) TriggerSkill(ctx context.Context, sessionID, agentID, skillName, query string, knowledgeIDs []string) error {
+	request := map[string]any{
 		"query":         query,
 		"agent_enabled": true,
 		"agent_id":      agentID,
 		"skill_names":   []string{skillName},
 		"channel":       "content_pipeline",
 		"disable_title": true,
-	})
+		"knowledge_ids": knowledgeIDs,
+	}
+	if a.cfg.KBID != "" {
+		request["knowledge_base_ids"] = []string{a.cfg.KBID}
+	}
+	body, _ := json.Marshal(request)
 	url := fmt.Sprintf("%s/api/v1/agent-chat/%s", a.cfg.BaseURL, sessionID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
