@@ -1056,6 +1056,19 @@ export function installConfigSkillFromSource(
   }) as unknown as Promise<{ data: { skill_id: string } }>
 }
 
+// Retries an install from the archive the server already stores, so a failure
+// that had nothing to do with the bundle does not send the operator looking
+// for the original zip or registry URL.
+export function reinstallConfigSkill(
+  configId: string,
+  skillId: string,
+): Promise<{ data: { skill_id: string } }> {
+  return post(
+    `/api/v1/sandbox-configs/${configId}/skills/${skillId}/reinstall`,
+    {},
+  ) as unknown as Promise<{ data: { skill_id: string } }>
+}
+
 export function patchConfigSkill(
   configId: string,
   skillId: string,

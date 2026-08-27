@@ -35,7 +35,7 @@ const artifactHistoryEnvVar = "WEKNORA_SKILL_HISTORY_ROOT"
 // skillDirEnvVar points a script at its own directory inside the sandbox
 // image. Installed skills run with /workspace as WorkDir, so this is how a
 // script reaches the data and helpers that were installed beside it. The
-// install-time smoke run exports the same name.
+// install-time verification pass exports the same name.
 const skillDirEnvVar = "WEKNORA_SKILL_DIR"
 
 // defaultArtifactOutputDir is used when neither the environment variable
@@ -269,6 +269,29 @@ func (m *Manager) ListSkillFiles(ctx context.Context, skillName string) ([]strin
 	return m.resolveSource(skillName).ListSkillFiles(skillName)
 }
 
+// SandboxSkillDir reports where a skill lives inside the sandbox image, and
+// whether that path means anything to say out loud.
+//
+// Only an installed skill has one. A preloaded skill is uploaded from the host
+// for the duration of a single call, so its base path names a directory on the
+// WeKnora machine that no shell command in the sandbox can reach — telling the
+// model about it would be worse than saying nothing.
+func (m *Manager) SandboxSkillDir(skillName string) (string, bool) {
+	if m == nil || !m.enabled || !m.isSkillAllowed(skillName) {
+		return "", false
+	}
+	image, ok := m.resolveSource(skillName).(imageSkillSource)
+	if !ok {
+		return "", false
+	}
+	dir, err := image.GetSkillBasePath(skillName)
+	if err != nil {
+		return "", false
+	}
+	dir = strings.TrimSpace(dir)
+	return dir, dir != ""
+}
+
 // ExecuteScript executes a script from a skill in the sandbox
 func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath string, args []string, stdin string) (*sandbox.ExecuteResult, error) {
 	if !m.enabled {
@@ -377,9 +400,9 @@ func buildSkillExecuteConfig(
 	if err != nil {
 		return nil, err
 	}
-	// The install-time smoke run exports the skill directory under this name,
-	// so a script that located its own resources through it during
-	// verification must be able to do the same when the agent calls it.
+	// The install-time verification pass exports the skill directory under
+	// this name, so the environment a script is checked in is the environment
+	// it is later called in.
 	env[skillDirEnvVar] = basePath
 	return &sandbox.ExecuteConfig{
 		RemoteScriptPath: remoteScript,

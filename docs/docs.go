@@ -12093,6 +12093,70 @@ const docTemplate = `{
                 }
             }
         },
+        "/sandbox-configs/{id}/skills/{skillId}/reinstall": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Retry a failed install from the stored archive; does not re-upload.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Retry a skill install",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Reinstall accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "The stored archive is gone",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/sandbox-configs/{id}/skills/{skillId}/transcript": {
             "get": {
                 "security": [

@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,18 +82,74 @@ func TestSessionBoundManagerExecuteEnsuresOutputDir(t *testing.T) {
 	require.NoError(t, err)
 
 	client.mu.Lock()
-	paths := append([]string(nil), client.makeDirPaths...)
 	execs := append([]RemoteExecRequest(nil), client.execRequests...)
 	client.mu.Unlock()
-	require.Contains(t, paths, SessionOutputRoot)
 	require.NotEmpty(t, execs)
 	require.True(t, execs[0].Shell)
-	require.Contains(t, execs[0].Command, "chown user:user")
 	require.Contains(t, execs[0].Command, SessionOutputRoot)
+	require.Contains(t, execs[0].Command, SessionInputRoot,
+		"the attachment directory is prepared alongside the artifact one; a "+
+			"snapshot-derived image carries neither")
 	require.Equal(t, DefaultSandboxExecUser, execs[0].User,
 		"chown follows symlinks, so a root-run bootstrap can be aimed at /etc by "+
 			"a session that swaps its artifact directory for a link; running as the "+
 			"sandbox account is what makes that attempt fail")
+}
+
+// A directory the sandbox account cannot write is the state an image built
+// before /workspace was handed to that account leaves behind, and the state a
+// provider whose filesystem API runs as root recreates. The bootstrap has to
+// repair it without privileges, which is why it replaces the directory rather
+// than chowning it.
+func TestWorkspaceBootstrapCommandRepairsUnwritableDirs(t *testing.T) {
+	t.Parallel()
+
+	cmd := workspaceBootstrapCommand(SessionInputRoot, SessionOutputRoot)
+	require.Contains(t, cmd, "for d in /workspace/input /workspace/output")
+	require.Contains(t, cmd, `mkdir -p "$d"`)
+	require.Contains(t, cmd, `[ -d "$d" ] && [ -w "$d" ] && [ ! -L "$d" ]`,
+		"directories that already belong to the account are left alone")
+	require.Contains(t, cmd, `[ -L "$d" ]`,
+		"a symlink left at the path must be removed, not followed")
+	require.Contains(t, cmd, `mv -f "$d"`,
+		"an unwritable directory is moved aside; the account owns the parent, "+
+			"so this needs no privileges")
+	require.NotContains(t, cmd, "chown",
+		"nothing here may depend on privileges the sandbox account lacks")
+}
+
+// The agent can delete /workspace/output between turns. Preparing only once
+// per process would leave later writes failing until WeKnora restarted.
+func TestSessionBoundManagerPreparesWorkspaceOnEveryCall(t *testing.T) {
+	client := newFakeRemoteClient(SandboxTypeCube)
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          client,
+		Store:           NewMemorySessionSandboxBindingStore(),
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	for i := 0; i < 3; i++ {
+		_, err := mgr.ExecShellCommand(ctx, "session-a", "echo hi", "", time.Second, nil)
+		require.NoError(t, err)
+	}
+
+	client.mu.Lock()
+	execs := append([]RemoteExecRequest(nil), client.execRequests...)
+	client.mu.Unlock()
+
+	bootstraps := 0
+	for _, exec := range execs {
+		if strings.Contains(exec.Command, SessionInputRoot) {
+			bootstraps++
+		}
+	}
+	require.Equal(t, 3, bootstraps)
 }
 
 // shell_exec carries a command line the model wrote, which makes it the exec

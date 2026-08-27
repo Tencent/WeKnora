@@ -82,6 +82,10 @@ func (s *stubResourceCatalog) Bind(context.Context, string, string, string, stri
 	panic("unexpected Bind")
 }
 
+func (s *stubResourceCatalog) Release(context.Context, string, string, string) (int64, error) {
+	panic("unexpected Release")
+}
+
 func (s *stubResourceCatalog) MarkDeleted(context.Context, string) error {
 	panic("unexpected MarkDeleted")
 }

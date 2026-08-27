@@ -424,7 +424,7 @@ func TestCubeRemoteClientReplaceStandardTemplateRebuildsInPlace(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	client.config.CubeDNSServers = []string{"192.0.2.53"}
+	client.config.CubeDNSServers = []string{"8.8.8.8"}
 
 	template, err := client.ReplaceStandardTemplate(context.Background())
 	require.NoError(t, err)
@@ -432,7 +432,7 @@ func TestCubeRemoteClientReplaceStandardTemplateRebuildsInPlace(t *testing.T) {
 	require.Equal(t, "building", template.Status)
 	require.Equal(t, int32(0), deleted.Load(), "in-place rebuild must keep the stored template ID")
 	require.Equal(t, int32(0), created.Load())
-	require.Equal(t, []any{"192.0.2.53"}, payload["dns"])
+	require.Equal(t, []any{"8.8.8.8"}, payload["dns"])
 	require.Equal(t, true, payload["allowInternetAccess"])
 }
 

@@ -165,6 +165,7 @@ curl --location 'http://localhost:8080/api/v1/agent-chat/ceb9babb-1e30-41d7-817d
 | `tool_result` | 工具调用结果 |
 | `references` | 知识库检索引用 |
 | `answer` | 最终回答内容 |
+| `artifacts_pending` | Skill/沙箱产物正在上传；`data.count` 为待保存文件数。回答可能已经 `done`，文件按钮会在此期间显示加载态，直至 `complete` 带上 `artifacts` |
 | `reflection` | Agent 反思内容 |
 | `session_title` | 自动生成的会话标题 |
 | `error` | 错误信息 |

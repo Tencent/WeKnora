@@ -259,6 +259,11 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata, shellExecEnabl
 	builder.WriteString("  - `input`: Pass data directly via stdin (use this when you have data in memory, e.g. JSON string)\n")
 	builder.WriteString("  - `args`: Command-line arguments; pass absolute `/workspace/input/...` paths from `<sandbox_attachments>` for user-uploaded files\n")
 	builder.WriteString("  - Treat `/workspace/input` as read-only and write generated files only to `$WEKNORA_SKILL_OUTPUT_DIR`\n")
+	builder.WriteString(sandboxArtifactReferenceGuidance())
+	builder.WriteString("  - Each skill keeps its dependencies to itself (virtualenv or node_modules); ")
+	builder.WriteString("this tool already runs scripts the right way. A bare `python3 -c` / `node -e` ")
+	builder.WriteString("sees none of them, so never conclude from that that a skill cannot run, and ")
+	builder.WriteString("never reinstall a skill's dependencies — they would live in this session only\n")
 	if shellExecEnabled {
 		builder.WriteString("- `shell_exec(command, work_dir, timeout_sec, max_output_bytes, max_stderr_bytes, env)`: Freely execute shell commands and explore the current session's isolated Cube sandbox\n")
 		builder.WriteString("  - User-uploaded files are restored under `/workspace/input` and listed in `<sandbox_attachments>`\n")
@@ -270,6 +275,26 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata, shellExecEnabl
 		builder.WriteString("  - Non-zero exit codes are normal results, not tool errors — inspect stderr and decide what to do next\n")
 	}
 
+	return builder.String()
+}
+
+// sandboxArtifactReferenceGuidance tells the model how to point at a file it
+// generated in the sandbox from its final answer.
+//
+// Without this, models improvise a Markdown image with the bare file name
+// (`![评分](市场画像评分.html)`), which the browser cannot resolve — the answer
+// renders a broken image icon. The `sandbox:` prefix makes the intent explicit
+// so the server can bind the name to the artifact index it hands the client.
+func sandboxArtifactReferenceGuidance() string {
+	var builder strings.Builder
+	builder.WriteString("  - To show a generated file inside your answer, reference it as ")
+	builder.WriteString("`![description](sandbox:<file name>)` using the exact file name and no directory path\n")
+	builder.WriteString("    - Images render inline; charts, tables, and documents ")
+	builder.WriteString("render as a card the user clicks to preview\n")
+	builder.WriteString("    - Never reference a sandbox path (`/workspace/output/...`) ")
+	builder.WriteString("or a bare file name directly — neither resolves in the browser\n")
+	builder.WriteString("    - Prefer output file names without spaces or parentheses; ")
+	builder.WriteString("they keep the reference unambiguous\n")
 	return builder.String()
 }
 

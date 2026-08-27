@@ -63,7 +63,7 @@ Cube 变体只发布 linux/amd64——envd 的来源镜像 `cubesandbox-base` �
 
 1. 按 [CubeSandbox Quick Start](https://github.com/TencentCloud/CubeSandbox/blob/master/docs/zh/guide/quickstart.md) 完成控制面、计算节点、CubeProxy 与域名解析。生产环境还需按官方文档完成鉴权、TLS、网络策略与多节点部署。
 2. 在 WeKnora 的空间设置中填写 CubeAPI、CubeProxy、sandbox domain 和可选 API Key。需要自定义 guest DNS 时填写「DNS 服务器」（须为 IP）；留空则使用集群默认。若这些端点位于 RFC1918/loopback 网络，显式打开“允许访问私网集群地址”。
-3. 点击“连接并继续”。WeKnora 先验证控制面地址与凭据，通过后才进入模板步骤并列出集群模板。**不会自动创建**。没有 WeKnora 标准模板时在占位卡片上点「创建」，会从 `wechatopenai/weknora-sandbox:latest-cube` 发起构建。改 DNS 或需要换镜像时在 weknora 卡片上点「重建」：优先对现有标准模板做 in-place rebuild（模板 ID 不变）；只有 redo 被拒绝时才先建新模板、成功后再删旧的。已安装 Skill 的配置（以及同一集群上其它已装 Skill 的配置）不能重建。失败模板同样用「重建」（CubeMaster 拒绝 redo、错误码 130400 时尤其需要）。
+3. 点击“连接并继续”。WeKnora 先验证控制面地址与凭据，通过后才进入模板步骤并列出集群模板。**不会自动创建**。没有 WeKnora 标准模板时在占位卡片上点「创建」，会从 `wechatopenai/weknora-sandbox:main-cube` 发起构建。改 DNS 或需要换镜像时在 weknora 卡片上点「重建」：优先对现有标准模板做 in-place rebuild（模板 ID 不变）；只有 redo 被拒绝时才先建新模板、成功后再删旧的。已安装 Skill 的配置（以及同一集群上其它已装 Skill 的配置）不能重建。失败模板同样用「重建」（CubeMaster 拒绝 redo、错误码 130400 时尤其需要）。
 4. 模板构建状态会自动刷新。状态变为 `READY` 后才可选择并进入运行配置；界面显示模板名称、状态和版本，配置内部才保存该集群自己的 `template_id`。
 
 模板镜像必须提供 uid 1000 的 `user` 账号：WeKnora 以该账号执行脚本与文件操作。写权限只保证在 `/workspace/output` 与 `/workspace/input` 下。

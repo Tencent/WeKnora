@@ -221,6 +221,11 @@ const (
 	ResponseTypeAgentQuery ResponseType = "agent_query"
 	// Complete response type (agent complete)
 	ResponseTypeComplete ResponseType = "complete"
+	// ResponseTypeArtifactsPending is sent while skill/sandbox output is being
+	// copied into persistent storage after the answer has already streamed.
+	// The UI shows a toolbar placeholder until ResponseTypeComplete carries
+	// the file list.
+	ResponseTypeArtifactsPending ResponseType = "artifacts_pending"
 	// ToolApprovalRequired: MCP tool marked dangerous — UI must collect user approval before execution continues
 	ResponseTypeToolApprovalRequired ResponseType = "tool_approval_required"
 	// ToolApprovalResolved: user approved/rejected (or timeout); informational for UI replay

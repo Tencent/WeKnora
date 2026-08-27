@@ -213,6 +213,19 @@ if err != nil {
 _ = skillID // follow /sandbox-configs/{id}/skills/{skillID}/install-events
 ```
 
+### Example: Retry a failed install
+
+Installs usually fail for reasons the bundle cannot fix — an unreachable
+sandbox, a package index that timed out. The server still holds the archive,
+so the retry needs nothing from you.
+
+```go
+skillID, err := apiClient.ReinstallSandboxSkill(context.Background(), sandboxConfigID, skillID)
+if err != nil {
+    // Handle error
+}
+```
+
 ### Example: Browse files of an installed skill
 
 ```go

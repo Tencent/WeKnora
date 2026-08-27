@@ -541,13 +541,15 @@ Docker 模式提供最强的隔离：
 
 ```bash
 # 方式一：直接拉取
-docker pull wechatopenai/weknora-sandbox:latest
+docker pull wechatopenai/weknora-sandbox:main
 
 # 方式二：本地构建
 sh scripts/build_images.sh -s
 ```
 
 > 如果未预拉取，创建第一个沙箱时会先拉取镜像，首次执行需要等待下载完成；也可以在设置页的模板步骤提前触发拉取。
+
+> 用 `main` 而非 `latest`：`latest` 只在发版时移动，目前仍停在 `/workspace` 及其 `input`/`output` 目录交给沙箱账号之前的版本，用它建出来的沙箱写不了自己的产物目录。发版带上该修复后即可换回 `latest`。
 
 **镜像内置环境**：
 - Python 3.11 + pip（requests、pyyaml、pandas、beautifulsoup4）
@@ -564,7 +566,7 @@ docker run --rm \
   --network=none \
   -v /path/to/skill:/skill:ro \
   -w /skill \
-  wechatopenai/weknora-sandbox:latest \
+  wechatopenai/weknora-sandbox:main \
   python scripts/analyze.py input.pdf
 ```
 
