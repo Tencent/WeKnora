@@ -54,6 +54,11 @@ export function canClearAdminSkillEnv(env: { is_set?: boolean }): boolean {
   return env.is_set === true
 }
 
+/** The key control only belongs on a skill that declared at least one variable. */
+export function skillHasDeclaredEnvs(skill: { envs?: readonly unknown[] | null }): boolean {
+  return (skill.envs?.length ?? 0) > 0
+}
+
 /**
  * Removes a submitted draft only if it still equals the sent value. New input
  * typed while the request was in flight always wins over response cleanup.
