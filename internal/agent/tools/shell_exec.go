@@ -361,7 +361,8 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		}, nil
 	}
 	if reason := checkShellExecBlacklist(command); reason != "" {
-		logger.Warnf(ctx, "[Tool][ShellExec] rejected by blacklist: %s command=%q", reason, command)
+		logger.Warnf(ctx, "[Tool][ShellExec] rejected by blacklist: %s command=%q",
+			reason, maskCommandAssignments(command))
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("command rejected by shell_exec safety guard: %s", reason),
@@ -404,13 +405,18 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	}
 
 	logger.Infof(ctx, "[Tool][ShellExec] session=%s work_dir=%s timeout=%s command=%q",
-		sessionID, workDir, timeout, command)
+		sessionID, workDir, timeout, maskCommandAssignments(command))
 
 	// The caller's config-wide variables apply to every command; a skill's
 	// declared credentials are added only when the model names the skill.
 	// Values come from ctx (the current principal), live only for this process,
 	// and are overlaid without displacing anything the model passed via env.
 	env := input.Env
+	// supplied carries the values this one call brings with it, from the env
+	// parameter and from NAME=value assignments in the command. They satisfy a
+	// required variable that is not stored yet, which is what makes "tell me
+	// the key in chat" work, and they are the only values capture may persist.
+	supplied := collectUsedSkillEnv(input.Command, input.Env)
 	if t.envResolver != nil {
 		resolved, missing, rerr := t.envResolver.ResolveEnv(ctx, input.SkillName)
 		if rerr != nil {
@@ -419,12 +425,14 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 				Error:   fmt.Sprintf("failed to resolve environment variables: %v", rerr),
 			}, nil
 		}
+		missing = stillMissing(missing, supplied)
 		if len(missing) > 0 {
 			return &types.ToolResult{
 				Success: false,
 				Error: fmt.Sprintf(
 					"skill %q needs the environment variable(s) %s, which nobody has set yet. "+
-						"Set them under Settings → Environment variables and try again.",
+						"Ask the user for them and pass them in this call's env, "+
+						"or have them set the values under Settings → Environment variables.",
 					input.SkillName, strings.Join(missing, ", ")),
 			}, nil
 		}
@@ -432,6 +440,10 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 			env = make(map[string]string)
 		}
 		overlayResolvedEnv(env, resolved)
+		// A name that already resolved is one the workspace or this caller has
+		// filled in. Capture must not touch it: otherwise a hallucinated
+		// `export KEY=test` would overwrite a working stored credential.
+		supplied = dropResolvedNames(supplied, resolved)
 	}
 	res, err := t.executor.ExecShellCommand(ctx, sessionID, command, workDir, timeout, env)
 	if err != nil {
@@ -443,7 +455,7 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		}, nil
 	}
 
-	t.maybeCaptureSkillEnv(ctx, input, res)
+	t.maybeCaptureSkillEnv(ctx, input.SkillName, supplied, res)
 
 	outputLimit := resolveShellOutputLimit(input.MaxOutputBytes)
 	stderrLimit := resolveShellStderrLimit(input.MaxStderrBytes)
@@ -540,8 +552,15 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	}, nil
 }
 
+// maybeCaptureSkillEnv persists the credentials this call brought with it, so
+// the next run of the same skill does not have to ask again.
+//
+// The skill must be named explicitly: inferring it from a path in the command
+// would let any successful command that merely mentions a skill directory write
+// into that skill's credentials. pairs has already had every resolved name
+// removed, so this only ever fills a blank.
 func (t *ShellExecTool) maybeCaptureSkillEnv(
-	ctx context.Context, input ShellExecInput, res *sandbox.ExecuteResult,
+	ctx context.Context, skillName string, pairs map[string]string, res *sandbox.ExecuteResult,
 ) {
 	if t == nil || t.envCapture == nil || t.isInstallMode() {
 		return
@@ -549,15 +568,40 @@ func (t *ShellExecTool) maybeCaptureSkillEnv(
 	if res == nil || res.ExitCode != 0 {
 		return
 	}
-	skillName := inferSkillName(input.SkillName, input.Command)
-	if skillName == "" {
-		return
-	}
-	pairs := collectUsedSkillEnv(input.Command, input.Env)
-	if len(pairs) == 0 {
+	skillName = strings.TrimSpace(skillName)
+	if !sandbox.IsValidSkillName(skillName) || len(pairs) == 0 {
 		return
 	}
 	t.envCapture(ctx, skillName, pairs)
+}
+
+// stillMissing removes from missing every name this call supplied itself.
+func stillMissing(missing []string, supplied map[string]string) []string {
+	if len(missing) == 0 || len(supplied) == 0 {
+		return missing
+	}
+	out := missing[:0:0]
+	for _, name := range missing {
+		if strings.TrimSpace(supplied[name]) == "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// dropResolvedNames returns the supplied values that nothing has stored yet.
+func dropResolvedNames(supplied, resolved map[string]string) map[string]string {
+	if len(supplied) == 0 || len(resolved) == 0 {
+		return supplied
+	}
+	out := make(map[string]string, len(supplied))
+	for name, value := range supplied {
+		if _, stored := resolved[name]; stored {
+			continue
+		}
+		out[name] = value
+	}
+	return out
 }
 
 func (t *ShellExecTool) isInstallMode() bool {

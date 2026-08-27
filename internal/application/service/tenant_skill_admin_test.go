@@ -93,10 +93,7 @@ func TestSetSkillEnabledReturnsNilForAnotherWorkspace(t *testing.T) {
 // finished install would have left it.
 func seedSkillEnvDeclaration(t *testing.T, fx *installFixture, envs types.SkillEnvVars) {
 	t.Helper()
-	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
-	require.NoError(t, err)
-	skill.Envs = envs
-	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), skill))
+	require.NoError(t, fx.skillRepo.UpdateSkillEnvs(context.Background(), 7, "cfg-1", "sk-1", envs))
 }
 
 // A name outside the declaration is ignored rather than rejected: a stale UI

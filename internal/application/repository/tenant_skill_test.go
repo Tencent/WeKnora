@@ -186,19 +186,16 @@ func userEnvRow(p types.Principal, skillID, name, value string) *types.TenantUse
 	}
 }
 
-func TestSkillRepoUpdatePersistsEnvs(t *testing.T) {
+func TestSkillRepoUpdateSkillEnvsPersistsTheDeclarationEncrypted(t *testing.T) {
 	t.Setenv("SYSTEM_AES_KEY", skillEnvTestAESKey)
 	repo, db := newSkillTestRepoWithDB(t)
 	ctx := context.Background()
 	require.NoError(t, repo.CreateSkill(ctx, skillRow("sk-a", "cfg-1", "pdf")))
 
-	row, err := repo.GetSkill(ctx, 7, "cfg-1", "sk-a")
-	require.NoError(t, err)
-	row.Envs = types.SkillEnvVars{
+	require.NoError(t, repo.UpdateSkillEnvs(ctx, 7, "cfg-1", "sk-a", types.SkillEnvVars{
 		{Name: "TAVILY_API_KEY", Description: "search key", Required: true, Value: "tvly-admin"},
 		{Name: "OPTIONAL_KEY"},
-	}
-	require.NoError(t, repo.UpdateSkill(ctx, row))
+	}))
 
 	got, err := repo.GetSkill(ctx, 7, "cfg-1", "sk-a")
 	require.NoError(t, err)
@@ -212,6 +209,47 @@ func TestSkillRepoUpdatePersistsEnvs(t *testing.T) {
 	require.NoError(t, db.Raw(`SELECT envs FROM tenant_skills WHERE id = ?`, "sk-a").Scan(&stored).Error)
 	require.NotContains(t, stored, "tvly-admin", "the admin value must be encrypted at rest")
 	require.Contains(t, stored, "TAVILY_API_KEY", "the declaration stays readable without a key")
+}
+
+// The install heartbeat rewrites the whole row from a copy it read seconds
+// earlier. If UpdateSkill carried envs, that copy would undo a declaration or
+// an admin value stored in between.
+func TestSkillRepoUpdateSkillLeavesEnvsAlone(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", skillEnvTestAESKey)
+	repo, _ := newSkillTestRepoWithDB(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateSkill(ctx, skillRow("sk-a", "cfg-1", "pdf")))
+
+	stale, err := repo.GetSkill(ctx, 7, "cfg-1", "sk-a")
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateSkillEnvs(ctx, 7, "cfg-1", "sk-a", types.SkillEnvVars{
+		{Name: "TAVILY_API_KEY", Required: true, Value: "tvly-admin"},
+	}))
+
+	stale.Status = types.SkillStatusInstalling
+	require.NoError(t, repo.UpdateSkill(ctx, stale))
+
+	got, err := repo.GetSkill(ctx, 7, "cfg-1", "sk-a")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillStatusInstalling, got.Status)
+	require.Len(t, got.Envs, 1)
+	require.Equal(t, "tvly-admin", got.Envs[0].Value)
+}
+
+func TestSkillRepoUpdateSkillAdminStateWritesBothColumns(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", skillEnvTestAESKey)
+	repo, _ := newSkillTestRepoWithDB(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateSkill(ctx, skillRow("sk-a", "cfg-1", "pdf")))
+
+	require.NoError(t, repo.UpdateSkillAdminState(ctx, 7, "cfg-1", "sk-a", false,
+		types.SkillEnvVars{{Name: "TAVILY_API_KEY", Value: "tvly-admin"}}))
+
+	got, err := repo.GetSkill(ctx, 7, "cfg-1", "sk-a")
+	require.NoError(t, err)
+	require.False(t, got.Enabled)
+	require.Len(t, got.Envs, 1)
+	require.Equal(t, "tvly-admin", got.Envs[0].Value)
 }
 
 func TestUpsertUserEnvIsIdempotentPerPrincipalSkillAndName(t *testing.T) {

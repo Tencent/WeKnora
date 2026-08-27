@@ -781,7 +781,31 @@ func (r *reaperSkillStore) GetSkill(
 
 func (r *reaperSkillStore) UpdateSkill(_ context.Context, e *types.TenantSkillEntity) error {
 	cp := *e
+	if stored := r.rows[e.ID]; stored != nil {
+		cp.Envs = stored.Envs
+	} else {
+		cp.Envs = nil
+	}
 	r.rows[e.ID] = &cp
+	return nil
+}
+
+func (r *reaperSkillStore) UpdateSkillEnvs(
+	_ context.Context, _ uint64, _, skillID string, envs types.SkillEnvVars,
+) error {
+	if stored := r.rows[skillID]; stored != nil {
+		stored.Envs = envs
+	}
+	return nil
+}
+
+func (r *reaperSkillStore) UpdateSkillAdminState(
+	_ context.Context, _ uint64, _, skillID string, enabled bool, envs types.SkillEnvVars,
+) error {
+	if stored := r.rows[skillID]; stored != nil {
+		stored.Enabled = enabled
+		stored.Envs = envs
+	}
 	return nil
 }
 

@@ -355,12 +355,10 @@ func TestRunInstallSucceedsWhenEveryDeclaredEnvVarIsRejected(t *testing.T) {
 func TestRunInstallReinstallKeepsTheAdminValueAndDropsStaleVars(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.readsTavilyKey()
-	require.NoError(t, fx.svc.updateSkillFields(context.Background(), 7, "cfg-1", "sk-1",
-		func(e *types.TenantSkillEntity) {
-			e.Envs = types.SkillEnvVars{
-				{Name: "TAVILY_API_KEY", Description: "old text", Value: "tvly-typed-by-admin"},
-				{Name: "LEGACY_TOKEN", Required: true, Value: "stale"},
-			}
+	require.NoError(t, fx.skillRepo.UpdateSkillEnvs(context.Background(), 7, "cfg-1", "sk-1",
+		types.SkillEnvVars{
+			{Name: "TAVILY_API_KEY", Description: "old text", Value: "tvly-typed-by-admin"},
+			{Name: "LEGACY_TOKEN", Required: true, Value: "stale"},
 		}))
 	fx.declareEnvFile(`{"env":[{"name":"TAVILY_API_KEY","description":"new text","required":true}]}`)
 
@@ -420,10 +418,8 @@ func TestRunInstallReinstallOnlyClearsEnvsForAnExplicitEmptyDeclaration(t *testi
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newInstallFixture(t)
-			require.NoError(t, fx.svc.updateSkillFields(context.Background(), 7, "cfg-1", "sk-1",
-				func(e *types.TenantSkillEntity) {
-					e.Envs = storedAdminEnv()
-				}))
+			require.NoError(t, fx.skillRepo.UpdateSkillEnvs(
+				context.Background(), 7, "cfg-1", "sk-1", storedAdminEnv()))
 			if tc.writeFile {
 				fx.declareEnvFile(tc.body)
 			}
@@ -839,6 +835,28 @@ func TestBeatInstallHeartbeatRestampsOnlyAnInstallingRow(t *testing.T) {
 	require.Equal(t, types.SkillStatusReady, skill.Status)
 	require.Nil(t, skill.InstallingSince,
 		"a row that left the installing status must not be stamped alive again")
+}
+
+// The heartbeat reloads and rewrites the whole row every 30 seconds while an
+// install runs, and a declaration or an admin value can be stored in between.
+// Writing envs from that stale copy would put the old list back.
+func TestBeatInstallHeartbeatLeavesTheDeclarationAlone(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	stale := fx.now().Add(-time.Hour)
+	require.NoError(t, fx.svc.updateSkillFields(ctx, 7, "cfg-1", "sk-1",
+		func(e *types.TenantSkillEntity) { e.InstallingSince = &stale }))
+
+	// Stands in for the beat that read the row before the declaration landed.
+	before, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.NoError(t, fx.skillRepo.UpdateSkillEnvs(ctx, 7, "cfg-1", "sk-1", storedAdminEnv()))
+	require.NoError(t, fx.skillRepo.UpdateSkill(ctx, before))
+
+	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Equal(t, storedAdminEnv(), skill.Envs,
+		"an install-progress write must not carry an old declaration back")
 }
 
 func TestStartInstallHeartbeatBeatsUntilStopped(t *testing.T) {
@@ -1959,8 +1977,54 @@ func (r *installSkillRepo) UpdateSkill(ctx context.Context, e *types.TenantSkill
 	if r.updateFailsWhen != nil && r.updateFailsWhen(e) {
 		return errUpdateBoom
 	}
+	key := skillKey(e.TenantID, e.SandboxConfigID, e.ID)
 	cp := *e
-	r.skills[skillKey(e.TenantID, e.SandboxConfigID, e.ID)] = &cp
+	// The real UpdateSkill leaves the envs column alone, so a stale in-memory
+	// copy cannot put an old declaration back. The fake has to model that or
+	// the tests would pass on behaviour production does not have.
+	if stored := r.skills[key]; stored != nil {
+		cp.Envs = stored.Envs
+	} else {
+		cp.Envs = nil
+	}
+	r.skills[key] = &cp
+	return nil
+}
+
+func (r *installSkillRepo) UpdateSkillEnvs(
+	ctx context.Context, tenantID uint64, configID, skillID string, envs types.SkillEnvVars,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	stored := r.skills[skillKey(tenantID, configID, skillID)]
+	if stored == nil {
+		return nil
+	}
+	stored.Envs = envs
+	return nil
+}
+
+func (r *installSkillRepo) UpdateSkillAdminState(
+	ctx context.Context,
+	tenantID uint64,
+	configID, skillID string,
+	enabled bool,
+	envs types.SkillEnvVars,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	stored := r.skills[skillKey(tenantID, configID, skillID)]
+	if stored == nil {
+		return nil
+	}
+	stored.Enabled = enabled
+	stored.Envs = envs
 	return nil
 }
 

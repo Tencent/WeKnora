@@ -1698,8 +1698,8 @@ func (s *TenantSkillService) recordEnvDeclaration(
 		logger.Warnf(ctx, "[skill] load %s to store its env declaration failed: %v", skillID, err)
 		return
 	}
-	skill.Envs = mergeEnvDeclaration(skill.Envs, envs)
-	if err := s.skills.UpdateSkill(ctx, skill); err != nil {
+	merged := mergeEnvDeclaration(skill.Envs, envs)
+	if err := s.skills.UpdateSkillEnvs(ctx, tenantID, configID, skillID, merged); err != nil {
 		logger.Warnf(ctx, "[skill] store the env declaration of %s failed: %v", skillID, err)
 	}
 }

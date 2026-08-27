@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -65,11 +66,15 @@ func (v SkillEnvVars) Value() (driver.Value, error) {
 	}
 	rows := make([]skillEnvVarRow, len(v))
 	for i, entry := range v {
+		encrypted, err := encryptEnvValue(entry.Value)
+		if err != nil {
+			return nil, fmt.Errorf("encrypt skill_env_vars.%s: %w", entry.Name, err)
+		}
 		rows[i] = skillEnvVarRow{
 			Name:        entry.Name,
 			Description: entry.Description,
 			Required:    entry.Required,
-			Value:       encryptEnvValue(entry.Value),
+			Value:       encrypted,
 		}
 	}
 	return json.Marshal(rows)
@@ -153,12 +158,22 @@ func (e *TenantUserEnvVar) BeforeCreate(tx *gorm.DB) error {
 	if e.ID == "" {
 		e.ID = uuid.New().String()
 	}
-	e.Value = encryptEnvValue(e.Value)
-	return nil
+	return e.encryptValue()
 }
 
 func (e *TenantUserEnvVar) BeforeSave(tx *gorm.DB) error {
-	e.Value = encryptEnvValue(e.Value)
+	return e.encryptValue()
+}
+
+// encryptValue is idempotent: EncryptAESGCM returns an already-prefixed string
+// unchanged, so the BeforeSave/BeforeCreate pair GORM runs on a create does not
+// encrypt twice.
+func (e *TenantUserEnvVar) encryptValue() error {
+	encrypted, err := encryptEnvValue(e.Value)
+	if err != nil {
+		return fmt.Errorf("encrypt tenant_user_env_vars.%s: %w", e.Name, err)
+	}
+	e.Value = encrypted
 	return nil
 }
 
@@ -168,16 +183,23 @@ func (e *TenantUserEnvVar) AfterFind(tx *gorm.DB) error {
 }
 
 // encryptEnvValue returns the ciphertext, or the input unchanged when there is
-// no key to encrypt with.
-func encryptEnvValue(value string) string {
+// no key configured to encrypt with — the same deployment-wide degradation
+// every other secret column accepts.
+//
+// A key that exists but fails to encrypt is different: it means something is
+// wrong with the cipher, and writing the plaintext into a queryable JSONB
+// column instead would turn that into a silent leak. The error aborts the
+// write, matching TenantAPIKey.BeforeSave.
+func encryptEnvValue(value string) (string, error) {
 	key := utils.GetAESKey()
 	if key == nil || value == "" {
-		return value
+		return value, nil
 	}
-	if encrypted, err := utils.EncryptAESGCM(value, key); err == nil {
-		return encrypted
+	encrypted, err := utils.EncryptAESGCM(value, key)
+	if err != nil {
+		return "", err
 	}
-	return value
+	return encrypted, nil
 }
 
 // decryptEnvValue reports an unreadable secret as unset rather than failing the

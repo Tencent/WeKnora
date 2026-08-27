@@ -453,7 +453,10 @@ func TestCaptureSkillEnvDoesNotCopyAdminValueIntoUserSlot(t *testing.T) {
 	require.Empty(t, repo.userEnvs)
 }
 
-func TestCaptureSkillEnvWritesUserOverrideOfAdminValue(t *testing.T) {
+// A workspace value is one an admin typed. A value read out of a command the
+// model composed must not displace it for this caller — that is what the
+// settings page is for.
+func TestCaptureSkillEnvLeavesTheAdminValueInPlace(t *testing.T) {
 	svc, repo := newUserEnvFixture(t)
 
 	require.NoError(t, svc.CaptureSkillEnv(
@@ -461,7 +464,7 @@ func TestCaptureSkillEnvWritesUserOverrideOfAdminValue(t *testing.T) {
 			"API_TOKEN": "alice-override",
 		}))
 
-	require.Equal(t, "alice-override", userEnvByName(t, repo.userEnvs, "API_TOKEN").Value)
+	require.Empty(t, repo.userEnvs)
 }
 
 func TestCaptureSkillEnvSkipsWhenUserValueAlreadyMatches(t *testing.T) {
@@ -478,7 +481,10 @@ func TestCaptureSkillEnvSkipsWhenUserValueAlreadyMatches(t *testing.T) {
 	require.Equal(t, "already-mine", repo.userEnvs[0].Value)
 }
 
-func TestCaptureSkillEnvRotatesADifferentUserValue(t *testing.T) {
+// Capture fills blanks and nothing else. A prompt injection, a hallucination or
+// one `export TOKEN=test` must not be able to replace a key its owner entered,
+// which nobody would notice until every later turn authenticated as nobody.
+func TestCaptureSkillEnvNeverOverwritesAStoredUserValue(t *testing.T) {
 	svc, repo := newUserEnvFixture(t)
 	ctx := userEnvCtx(userEnvTenantID, "alice")
 	require.NoError(t, svc.SetMineSkill(ctx, "sk-ready", "USER_TOKEN", "old-key"))
@@ -488,7 +494,7 @@ func TestCaptureSkillEnvRotatesADifferentUserValue(t *testing.T) {
 	}))
 
 	require.Len(t, repo.userEnvs, 1)
-	require.Equal(t, "new-key", repo.userEnvs[0].Value)
+	require.Equal(t, "old-key", repo.userEnvs[0].Value)
 }
 
 func TestCaptureSkillEnvIgnoresUnknownOrUnusableSkills(t *testing.T) {

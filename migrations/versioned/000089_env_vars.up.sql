@@ -7,14 +7,14 @@
 -- is injected into every execution on it; one with a skill_id is that skill's
 -- declared credential, injected only when a tool names the skill. The storage is
 -- shared because it is the same kind of thing — only the load timing differs.
-DO $$ BEGIN RAISE NOTICE '[Migration 000088] Adding tenant_skills.envs'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000089] Adding tenant_skills.envs'; END $$;
 
 ALTER TABLE tenant_skills ADD COLUMN IF NOT EXISTS envs JSONB;
 
 COMMENT ON COLUMN tenant_skills.envs IS
     'Installer-agent declaration [{name,description,required,value}]. value is the workspace-wide admin value and is AES-GCM encrypted; the rest is plaintext so the UI can render it without a key.';
 
-DO $$ BEGIN RAISE NOTICE '[Migration 000088] Creating tenant_user_env_vars'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000089] Creating tenant_user_env_vars'; END $$;
 
 CREATE TABLE IF NOT EXISTS tenant_user_env_vars (
     id                VARCHAR(36)  PRIMARY KEY,
