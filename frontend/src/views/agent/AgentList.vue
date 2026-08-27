@@ -8,30 +8,33 @@
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
             <h2 style="--wails-draggable: drag">{{ $t('agent.title') }}</h2>
-            <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('agent.createAgent')" placement="bottom">
-              <t-button variant="text" theme="default" size="small" class="header-action-btn"
-                data-guide="agent-list-create" style="--wails-draggable: no-drag" @click="handleCreateAgent">
-                <template #icon>
-                  <span class="btn-icon-wrapper">
-                    <svg class="sparkles-icon" width="19" height="19" viewBox="0 0 20 20" fill="none"
-                      xmlns="http://www.w3.org/2000/svg">
-                      <path
-                        d="M10 3L10.8 6.2C10.9 6.7 11.3 7.1 11.8 7.2L15 8L11.8 8.8C11.3 8.9 10.9 9.3 10.8 9.8L10 13L9.2 9.8C9.1 9.3 8.7 8.9 8.2 8.8L5 8L8.2 7.2C8.7 7.1 9.1 6.7 9.2 6.2L10 3Z"
-                        fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linecap="round"
-                        stroke-linejoin="round" />
-                      <path
-                        d="M15.5 4L15.8 5.2C15.85 5.45 16.05 5.65 16.3 5.7L17.5 6L16.3 6.3C16.05 6.35 15.85 6.55 15.8 6.8L15.5 8L15.2 6.8C15.15 6.55 14.95 6.35 14.7 6.3L13.5 6L14.7 5.7C14.95 5.65 15.15 5.45 15.2 5.2L15.5 4Z"
-                        fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linecap="round"
-                        stroke-linejoin="round" />
-                      <path
-                        d="M4.5 13L4.8 14.2C4.85 14.45 5.05 14.65 5.3 14.7L6.5 15L5.3 15.3C5.05 15.35 4.85 15.55 4.8 15.8L4.5 17L4.2 15.8C4.15 15.55 3.95 15.35 3.7 15.3L2.5 15L3.7 14.7C3.95 14.65 4.15 14.45 4.2 14.2L4.5 13Z"
-                        fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linecap="round"
-                        stroke-linejoin="round" />
-                    </svg>
-                  </span>
-                </template>
-              </t-button>
-            </t-tooltip>
+            <div class="header-actions" style="--wails-draggable: no-drag">
+              <ResourceSortControl v-model="selectedResourceSort" />
+              <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('agent.createAgent')" placement="bottom">
+                <t-button variant="text" theme="default" size="small" class="header-action-btn"
+                  data-guide="agent-list-create" style="--wails-draggable: no-drag" @click="handleCreateAgent">
+                  <template #icon>
+                    <span class="btn-icon-wrapper">
+                      <svg class="sparkles-icon" width="19" height="19" viewBox="0 0 20 20" fill="none"
+                        xmlns="http://www.w3.org/2000/svg">
+                        <path
+                          d="M10 3L10.8 6.2C10.9 6.7 11.3 7.1 11.8 7.2L15 8L11.8 8.8C11.3 8.9 10.9 9.3 10.8 9.8L10 13L9.2 9.8C9.1 9.3 8.7 8.9 8.2 8.8L5 8L8.2 7.2C8.7 7.1 9.1 6.7 9.2 6.2L10 3Z"
+                          fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linecap="round"
+                          stroke-linejoin="round" />
+                        <path
+                          d="M15.5 4L15.8 5.2C15.85 5.45 16.05 5.65 16.3 5.7L17.5 6L16.3 6.3C16.05 6.35 15.85 6.55 15.8 6.8L15.5 8L15.2 6.8C15.15 6.55 14.95 6.35 14.7 6.3L13.5 6L14.7 5.7C14.95 5.65 15.15 5.45 15.2 5.2L15.5 4Z"
+                          fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linecap="round"
+                          stroke-linejoin="round" />
+                        <path
+                          d="M4.5 13L4.8 14.2C4.85 14.45 5.05 14.65 5.3 14.7L6.5 15L5.3 15.3C5.05 15.35 4.85 15.55 4.8 15.8L4.5 17L4.2 15.8C4.15 15.55 3.95 15.35 3.7 15.3L2.5 15L3.7 14.7C3.95 14.65 4.15 14.45 4.2 14.2L4.5 13Z"
+                          fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linecap="round"
+                          stroke-linejoin="round" />
+                      </svg>
+                    </span>
+                  </template>
+                </t-button>
+              </t-tooltip>
+            </div>
           </div>
           <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('agent.subtitle') }}</p>
         </div>
@@ -832,6 +835,7 @@ import { markContextualGuideDone } from '@/config/contextualGuides'
 import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
 import { useUIStore } from '@/stores/ui'
 import AgentAvatar from '@/components/AgentAvatar.vue'
+import ResourceSortControl from '@/components/ResourceSortControl.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
 import { shouldShowResourceOriginBadge } from '@/utils/card-list-badge'
@@ -839,6 +843,12 @@ import { useAuthStore } from '@/stores/auth'
 import { useListUrlState } from '@/composables/useListUrlState'
 import { useResourcePins } from '@/composables/useResourcePins'
 import { integrationSectionKey } from '@/config/settingsRoute'
+import {
+  DEFAULT_RESOURCE_SORT,
+  sortResourcesWithinGroups,
+  type ResourceSortAccessors,
+  type ResourceSortValue,
+} from '@/utils/resourceSorting'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -848,6 +858,7 @@ const uiStore = useUIStore()
 const orgStore = useOrganizationStore()
 const chatResources = useChatResourcesStore()
 const { loaded: modelsReadyLoaded, isReadyForAgent } = useTenantModelReadiness()
+const selectedResourceSort = ref<ResourceSortValue>(DEFAULT_RESOURCE_SORT)
 
 interface AgentWithUI extends CustomAgent {
   showMore?: boolean
@@ -859,6 +870,32 @@ interface AgentWithUI extends CustomAgent {
  *  (isMine: false, org_name, source_tenant_id, share_id, permission, disabled_by_me?).
  *  `permission` drives the「可编辑 / 仅查看」分组，仅在 shared 分支携带。 */
 type DisplayAgent = (AgentWithUI & { isMine: true }) | (CustomAgent & { isMine: false; org_name: string; source_tenant_id: number; share_id: string; permission?: string; showMore?: boolean; disabled_by_me?: boolean })
+
+const flatAgentSortAccessors: ResourceSortAccessors<any> = {
+  getName: item => item?.name,
+  getUpdatedAt: item => item?.updated_at ?? item?.shared_at,
+  getCreatedAt: item => item?.created_at ?? item?.shared_at,
+}
+
+const sharedAgentSortAccessors: ResourceSortAccessors<OrganizationSharedAgentItem> = {
+  getName: item => item.agent?.name,
+  getUpdatedAt: item => item.agent?.updated_at ?? item.shared_at,
+  getCreatedAt: item => item.agent?.created_at ?? item.shared_at,
+}
+
+const displayAgentSortGroup = (item: DisplayAgent) => {
+  if (item.is_builtin) return 'builtin'
+  if (item.isMine) return isMyAgent(item) ? 'mine' : 'tenantOthers'
+  return isSharedAgentEditable(item.permission) ? 'sharedEditable' : 'sharedReadonly'
+}
+
+const sortDisplayAgents = (items: readonly DisplayAgent[]) => sortResourcesWithinGroups(
+  items,
+  selectedResourceSort.value,
+  displayAgentSortGroup,
+  ['builtin', 'mine', 'tenantOthers', 'sharedEditable', 'sharedReadonly'],
+  flatAgentSortAccessors,
+)
 
 // 左侧空间选择：默认根据当前角色决定。
 // 与 KnowledgeBaseList 同款逻辑：Viewer 在当前空间里通常没有自建智能体，
@@ -980,10 +1017,10 @@ const recentsAgentList = computed<DisplayAgent[]>(() => {
 })
 
 const filteredAgents = computed<DisplayAgent[]>(() => {
-  if (spaceSelection.value === 'favorites') return favoritesAgentList.value
-  if (spaceSelection.value === 'recents') return recentsAgentList.value
+  if (spaceSelection.value === 'favorites') return sortDisplayAgents(favoritesAgentList.value)
+  if (spaceSelection.value === 'recents') return sortDisplayAgents(recentsAgentList.value)
   if (spaceSelection.value === 'mine') {
-    return agents.value.map(a => ({ ...a, isMine: true as const }))
+    return sortDisplayAgents(agents.value.map(a => ({ ...a, isMine: true as const })))
   }
   if (spaceSelection.value !== 'all') return []
   const list: DisplayAgent[] = []
@@ -1024,34 +1061,31 @@ const filteredAgents = computed<DisplayAgent[]>(() => {
       showMore: false
     } as DisplayAgent)
   })
-  return list
+  return sortDisplayAgents(list)
 })
 
-// 「工作空间」视图下的稳定排序：本空间内「我创建」在前、「同事创建 / 内建」
-// 在后。给 contributor 视图把「本空间 · 仅查看」分组标题正好插在过渡处。
+// 「工作空间」固定保持“内置 → 我创建 → 同事创建”，用户选择只影响组内顺序。
 const sortedMineAgents = computed(() => {
-  // 内置 → 我创建 → 同事创建。与 filteredAgents 的"全部"视图保持同序。
-  const builtin: AgentWithUI[] = []
-  const own: AgentWithUI[] = []
-  const teammate: AgentWithUI[] = []
-  agents.value.forEach(a => {
-    if (a.is_builtin) builtin.push(a)
-    else if (isMyAgent(a)) own.push(a)
-    else teammate.push(a)
-  })
-  return [...builtin, ...own, ...teammate]
+  return sortResourcesWithinGroups(
+    agents.value,
+    selectedResourceSort.value,
+    item => item.is_builtin ? 'builtin' : isMyAgent(item) ? 'mine' : 'tenantOthers',
+    ['builtin', 'mine', 'tenantOthers'],
+    flatAgentSortAccessors,
+  )
 })
 
-// 空间视角下的稳定排序：我自己创建的（is_mine）放前面，其余按 permission 切分。
+// 空间视角固定保持“我共享的 → 可编辑 → 仅查看”，用户选择只影响组内顺序。
 const sortedSpaceAgentsList = computed(() => {
-  return [...spaceAgentsList.value].sort((a, b) => {
-    const aMine = a.is_mine ? 0 : 1
-    const bMine = b.is_mine ? 0 : 1
-    if (aMine !== bMine) return aMine - bMine
-    const aE = isSharedAgentEditable(a.permission) ? 0 : 1
-    const bE = isSharedAgentEditable(b.permission) ? 0 : 1
-    return aE - bE
-  })
+  return sortResourcesWithinGroups(
+    spaceAgentsList.value,
+    selectedResourceSort.value,
+    item => item.is_mine
+      ? 'sharedByMe'
+      : isSharedAgentEditable(item.permission) ? 'sharedEditable' : 'sharedReadonly',
+    ['sharedByMe', 'sharedEditable', 'sharedReadonly'],
+    sharedAgentSortAccessors,
+  )
 })
 const loading = ref(false)
 const deleteVisible = ref(false)
@@ -1738,6 +1772,13 @@ defineExpose({
   font-size: 14px;
   font-weight: 400;
   line-height: 20px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .header-action-btn {

@@ -927,6 +927,8 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 // @Param        end_time      query     string  false  "更新时间终点，RFC3339 格式"
 // @Param        folder_path      query     string  false  "文件夹路径筛选，空字符串表示知识库根目录；不传该参数则不按文件夹过滤"
 // @Param        folder_recursive query     bool    false  "为 true 时同时返回子文件夹内的文档"
+// @Param        sort_by      query     string  false  "排序字段: updated_at/created_at/file_name，默认 updated_at"
+// @Param        sort_order   query     string  false  "排序方向: asc/desc，默认 desc"
 // @Success      200        {object}  map[string]interface{}  "知识列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -961,6 +963,16 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		FileType:    c.Query("file_type"),
 		ParseStatus: c.Query("parse_status"),
 		Source:      c.Query("source"),
+		SortBy:      types.KnowledgeListSortField(c.DefaultQuery("sort_by", string(types.KnowledgeListSortByUpdatedAt))),
+		SortOrder:   types.KnowledgeListSortOrder(c.DefaultQuery("sort_order", string(types.KnowledgeListSortDescending))),
+	}
+	if !filter.SortBy.Valid() {
+		c.Error(errors.NewBadRequestError("invalid sort_by: must be updated_at, created_at, or file_name"))
+		return
+	}
+	if !filter.SortOrder.Valid() {
+		c.Error(errors.NewBadRequestError("invalid sort_order: must be asc or desc"))
+		return
 	}
 	if raw := c.Query("start_time"); raw != "" {
 		t, err := parseFilterTime(raw)
@@ -991,7 +1003,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 
 	logger.Infof(
 		ctx,
-		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s parse_status=%s source=%s start_time=%s end_time=%s folder_path=%s folder_scope=%s page=%d page_size=%d effectiveTenantID=%d",
+		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s parse_status=%s source=%s start_time=%s end_time=%s folder_path=%s folder_scope=%s sort_by=%s sort_order=%s page=%d page_size=%d effectiveTenantID=%d",
 		secutils.SanitizeForLog(kbID),
 		secutils.SanitizeForLog(strings.Join(filter.TagIDs, ",")),
 		secutils.SanitizeForLog(filter.Keyword),
@@ -1002,6 +1014,8 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		secutils.SanitizeForLog(c.Query("end_time")),
 		secutils.SanitizeForLog(filter.FolderPath),
 		string(filter.FolderScope),
+		string(filter.SortBy),
+		string(filter.SortOrder),
 		pagination.Page,
 		pagination.PageSize,
 		effectiveTenantID,

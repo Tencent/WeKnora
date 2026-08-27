@@ -8,12 +8,15 @@
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
             <h2 style="--wails-draggable: drag">{{ $t('knowledgeBase.title') }}</h2>
-            <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('knowledgeList.create')" placement="bottom">
-              <t-button variant="text" theme="default" size="small" class="header-action-btn"
-                data-guide="kb-list-create" style="--wails-draggable: no-drag" @click="handleCreateKnowledgeBase">
-                <template #icon><t-icon name="folder-add" size="16px" /></template>
-              </t-button>
-            </t-tooltip>
+            <div class="header-actions" style="--wails-draggable: no-drag">
+              <ResourceSortControl v-model="selectedResourceSort" />
+              <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('knowledgeList.create')" placement="bottom">
+                <t-button variant="text" theme="default" size="small" class="header-action-btn"
+                  data-guide="kb-list-create" style="--wails-draggable: no-drag" @click="handleCreateKnowledgeBase">
+                  <template #icon><t-icon name="folder-add" size="16px" /></template>
+                </t-button>
+              </t-tooltip>
+            </div>
           </div>
           <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('knowledgeList.subtitle') }}</p>
         </div>
@@ -798,11 +801,18 @@ import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
 import { shouldShowResourceOriginBadge } from '@/utils/card-list-badge'
 import ContextualGuide from '@/components/ContextualGuide.vue'
+import ResourceSortControl from '@/components/ResourceSortControl.vue'
 import { isContextualGuideDone, markContextualGuideDone } from '@/config/contextualGuides'
 import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
 import { useI18n } from 'vue-i18n'
 import { useListUrlState } from '@/composables/useListUrlState'
 import { useResourcePins } from '@/composables/useResourcePins'
+import {
+  DEFAULT_RESOURCE_SORT,
+  sortResourcesWithinGroups,
+  type ResourceSortAccessors,
+  type ResourceSortValue,
+} from '@/utils/resourceSorting'
 
 const router = useRouter()
 const route = useRoute()
@@ -812,6 +822,7 @@ const { loaded: modelsReadyLoaded, isReadyForDocumentKb } = useTenantModelReadin
 const orgStore = useOrganizationStore()
 const chatResources = useChatResourcesStore()
 const { t } = useI18n()
+const selectedResourceSort = ref<ResourceSortValue>(DEFAULT_RESOURCE_SORT)
 
 // 左侧空间选择：默认根据当前角色决定。
 // Viewer 在该空间里通常 0 KB owned，"我的"会显示空状态、又把共享 KB 藏起来，
@@ -869,6 +880,18 @@ interface KB {
   creator_name?: string;
 }
 
+const flatKnowledgeBaseSortAccessors: ResourceSortAccessors<any> = {
+  getName: item => item?.name,
+  getUpdatedAt: item => item?.updated_at ?? item?.shared_at,
+  getCreatedAt: item => item?.created_at ?? item?.shared_at,
+}
+
+const sharedKnowledgeBaseSortAccessors: ResourceSortAccessors<OrganizationSharedKnowledgeBaseItem> = {
+  getName: item => item.knowledge_base?.name,
+  getUpdatedAt: item => item.knowledge_base?.updated_at ?? item.shared_at,
+  getCreatedAt: item => item.knowledge_base?.created_at ?? item.shared_at,
+}
+
 const kbs = ref<KB[]>([])
 const loading = ref(false)
 const deleteVisible = ref(false)
@@ -916,49 +939,28 @@ const sharedKbsByOrg = computed(() => {
 const spaceKbsList = ref<OrganizationSharedKnowledgeBaseItem[]>([])
 const spaceKbsLoading = ref(false)
 
-// 「工作空间」视图下的稳定排序：本空间内「我创建」在前、「同事创建」在后；
-// 子段内保留服务端的置顶优先顺序。给 contributor 视图把「本空间 · 仅查看」
-// 分组标题正好插在过渡处；其他角色看不到标题，纯排序变化也无害。
-// Ordering for the 「本空间」 tab:
-//   1. pinned KBs (mine or teammate), newest pin first
-//   2. my non-pinned KBs
-//   3. teammate non-pinned KBs (rendered under the「本空间 · 仅查看」header)
-//
-// Pin is per-user as of migration 000050, so a teammate-created KB that
-// the caller has personally pinned must float into the pinned section
-// even though it would otherwise live in the teammate sub-group. The
-// previous version only bucketed by isMyKb and silently demoted these
-// pinned-but-teammate KBs.
+// 「工作空间」固定保持“置顶 → 我创建 → 同事创建”，用户选择只影响组内顺序。
 const sortedMineKbs = computed<KB[]>(() => {
-  return [...kbs.value].sort((a, b) => {
-    const ap = a.is_pinned ? 0 : 1
-    const bp = b.is_pinned ? 0 : 1
-    if (ap !== bp) return ap - bp
-    if (a.is_pinned && b.is_pinned) {
-      const at = a.pinned_at ? Date.parse(a.pinned_at as string) : 0
-      const bt = b.pinned_at ? Date.parse(b.pinned_at as string) : 0
-      if (at !== bt) return bt - at
-    }
-    const am = isMyKb(a) ? 0 : 1
-    const bm = isMyKb(b) ? 0 : 1
-    if (am !== bm) return am - bm
-    const ac = a.created_at ? Date.parse(a.created_at as string) : 0
-    const bc = b.created_at ? Date.parse(b.created_at as string) : 0
-    return bc - ac
-  })
+  return sortResourcesWithinGroups(
+    kbs.value,
+    selectedResourceSort.value,
+    kb => kb.is_pinned ? 'pinned' : isMyKb(kb) ? 'mine' : 'tenantOthers',
+    ['pinned', 'mine', 'tenantOthers'],
+    flatKnowledgeBaseSortAccessors,
+  )
 })
 
-// 空间视角下的稳定排序：我创建的（is_mine）放在前面，剩下的共享部分再按
-// 可编辑 / 仅查看 排序——这样空间列表跟「全部」视图的视觉顺序一致。
+// 空间视角固定保持“我共享的 → 可编辑 → 仅查看”，用户选择只影响组内顺序。
 const sortedSpaceKbsList = computed(() => {
-  return [...spaceKbsList.value].sort((a, b) => {
-    const aMine = a.is_mine ? 0 : 1
-    const bMine = b.is_mine ? 0 : 1
-    if (aMine !== bMine) return aMine - bMine
-    const aE = isSharedKbEditable(a.permission) ? 0 : 1
-    const bE = isSharedKbEditable(b.permission) ? 0 : 1
-    return aE - bE
-  })
+  return sortResourcesWithinGroups(
+    spaceKbsList.value,
+    selectedResourceSort.value,
+    item => item.is_mine
+      ? 'sharedByMe'
+      : isSharedKbEditable(item.permission) ? 'sharedEditable' : 'sharedReadonly',
+    ['sharedByMe', 'sharedEditable', 'sharedReadonly'],
+    sharedKnowledgeBaseSortAccessors,
+  )
 })
 const spaceCountByOrg = ref<Record<string, number>>({})
 
@@ -1151,21 +1153,28 @@ const spaceKbSectionCounts = computed<Record<KbSectionKey, number>>(() => {
   return c
 })
 
-// Filtered knowledge bases: 全部 = 我的 + 全部共享；我的 = 仅我的
-//
-// Favorites / Recents reuse the same render path as `all` — they're just
-// pre-filtered, pre-ordered slices, so the existing kb-card / shared
-// kb-card templates render them with zero extra markup. Order is
-// preserved via the upstream array (pins order is ts-desc).
+// 收藏、最近、全部和工作空间都使用同一排序选项，同时保持原有分组顺序。
 const filteredKnowledgeBases = computed(() => {
   if (spaceSelection.value === 'favorites') {
-    return favoritesList.value
+    return sortResourcesWithinGroups(
+      favoritesList.value,
+      selectedResourceSort.value,
+      kbSectionOf,
+      ['pinned', 'mine', 'tenantOthers', 'sharedEditable', 'sharedReadonly'],
+      flatKnowledgeBaseSortAccessors,
+    )
   }
   if (spaceSelection.value === 'recents') {
-    return recentsList.value
+    return sortResourcesWithinGroups(
+      recentsList.value,
+      selectedResourceSort.value,
+      kbSectionOf,
+      ['pinned', 'mine', 'tenantOthers', 'sharedEditable', 'sharedReadonly'],
+      flatKnowledgeBaseSortAccessors,
+    )
   }
   if (spaceSelection.value === 'mine') {
-    return kbs.value.map(kb => ({ ...kb, isMine: true as const }))
+    return sortedMineKbs.value.map(kb => ({ ...kb, isMine: true as const }))
   }
   if (spaceSelection.value !== 'all') {
     return []
@@ -1177,11 +1186,18 @@ const filteredKnowledgeBases = computed(() => {
   // ≥2 entries (#795). mergeAllScopeKnowledgeBases de-duplicates by KB id
   // (owned wins; most-privileged share kept) while preserving the existing
   // pinned → mine → teammate → shared(editable-first) ordering.
-  return mergeAllScopeKnowledgeBases(
+  const merged = mergeAllScopeKnowledgeBases(
     kbs.value as unknown as OwnedKnowledgeBase[],
     sharedKbs.value as unknown as SharedKnowledgeBaseLike[],
     authStore.user?.id,
   ) as unknown as Array<(KB & { isMine: true }) | (SharedKnowledgeBase['knowledge_base'] & { isMine: false; permission: string; shared_at: string; share_id: string } & any)>
+  return sortResourcesWithinGroups(
+    merged,
+    selectedResourceSort.value,
+    kbSectionOf,
+    ['pinned', 'mine', 'tenantOthers', 'sharedEditable', 'sharedReadonly'],
+    flatKnowledgeBaseSortAccessors,
+  )
 })
 
 const showKbListEmpty = computed(() => {
@@ -1884,6 +1900,13 @@ const handleUploadFinishedEvent = (event: Event) => {
   font-size: 14px;
   font-weight: 400;
   line-height: 20px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .header-action-btn {

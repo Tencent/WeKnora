@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -171,6 +172,25 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	return query
 }
 
+// knowledgeListOrderClause 只从固定白名单生成排序语句，避免将请求参数直接拼入 SQL。
+func knowledgeListOrderClause(filter types.KnowledgeListFilter) string {
+	// 零值保留仓储层原有的创建时间倒序，公开接口会显式传入更新时间默认值。
+	column := "created_at"
+	switch filter.SortBy {
+	case types.KnowledgeListSortByUpdatedAt:
+		column = "updated_at"
+	case types.KnowledgeListSortByFileName:
+		// 与前端展示名称保持一致：文件名为空时依次使用标题和来源。
+		column = "LOWER(COALESCE(NULLIF(file_name, ''), NULLIF(title, ''), source))"
+	}
+
+	direction := "DESC"
+	if filter.SortOrder == types.KnowledgeListSortAscending {
+		direction = "ASC"
+	}
+	return fmt.Sprintf("%s %s", column, direction)
+}
+
 // ListPagedKnowledgeByKnowledgeBaseID lists all knowledge in a knowledge base with pagination
 func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	ctx context.Context,
@@ -194,7 +214,9 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	}
 
 	if err := scope(r.db.WithContext(ctx)).
-		Order("created_at DESC").
+		Order(knowledgeListOrderClause(filter)).
+		// 相同排序值使用主键兜底，保证 OFFSET 分页顺序稳定。
+		Order("id ASC").
 		Offset(page.Offset()).
 		Limit(page.Limit()).
 		Find(&knowledges).Error; err != nil {
