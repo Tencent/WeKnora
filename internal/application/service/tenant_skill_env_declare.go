@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -52,10 +53,20 @@ var reservedEnvNames = map[string]bool{
 	"NODE_OPTIONS":    true,
 }
 
-// reservedEnvPrefix is reserved because skills.Manager uses it to hand the
-// skill its artifact directory. Letting it be overridden breaks output
-// collection for reasons nobody would think to look for.
-const reservedEnvPrefix = "WEKNORA_"
+func init() {
+	// The names ExecuteScript actually writes, not a guessed prefix. Output
+	// dir, history root and skill dir currently share WEKNORA_SKILL_, but
+	// SESSION_INPUT_DIR does not; pulling the list from skills keeps the
+	// blacklist aligned when a fifth injected name appears.
+	for _, name := range skills.InjectedSandboxEnvVars() {
+		reservedEnvNames[name] = true
+	}
+}
+
+// reservedEnvPrefix covers future WEKNORA_SKILL_* names the sandbox may start
+// injecting before the exact list above is updated. Credential names a skill
+// reads — WEKNORA_API_KEY, WEKNORA_BASE_URL, WEKNORA_HOST — are outside it.
+const reservedEnvPrefix = "WEKNORA_SKILL_"
 
 // declaredSkillEnv is one entry as the installer agent wrote it.
 //

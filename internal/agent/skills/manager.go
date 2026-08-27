@@ -38,6 +38,19 @@ const artifactHistoryEnvVar = "WEKNORA_SKILL_HISTORY_ROOT"
 // install-time verification pass exports the same name.
 const skillDirEnvVar = "WEKNORA_SKILL_DIR"
 
+// InjectedSandboxEnvVars is every name ExecuteScript writes into the sandbox
+// environment. The skill-env declaration blacklist must reject these so a
+// stored value cannot redirect artifacts, the skill directory, or the session
+// input tree. Credential names such as WEKNORA_API_KEY are not in this list.
+func InjectedSandboxEnvVars() []string {
+	return []string{
+		artifactOutputEnvVar,
+		sessionInputEnvVar,
+		artifactHistoryEnvVar,
+		skillDirEnvVar,
+	}
+}
+
 // defaultArtifactOutputDir is used when neither the environment variable
 // (WEKNORA_SKILL_OUTPUT_DIR) nor the ExecuteConfig.Env has an override.
 // /workspace/output sits inside the base sandbox image's writable tree and
@@ -361,13 +374,14 @@ func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath strin
 	// so each turn's values must belong to that turn's speaker and must not
 	// linger where the next person could read them with `env`.
 	//
-	// The resolver runs after the two artifact keys above are seeded, so
-	// applyResolvedEnv's skip-existing rule protects exactly those two. It is
-	// NOT a blanket guarantee over every WEKNORA_ key: sessionInputEnvVar is
-	// only seeded when a session file store exists, and skillDirEnvVar is set
-	// later inside buildSkillExecuteConfig and so relies on that unconditional
-	// write instead. The write-time WEKNORA_ prefix blacklist
-	// (service.validateUserEnvName) is what covers those two.
+	// The resolver runs after the artifact keys above are seeded, so
+	// applyResolvedEnv's skip-existing rule protects WEKNORA_SKILL_OUTPUT_DIR
+	// and WEKNORA_SKILL_HISTORY_ROOT (always) plus WEKNORA_SESSION_INPUT_DIR
+	// (when a session file store exists). skillDirEnvVar is set later inside
+	// buildSkillExecuteConfig by an unconditional write. The write-time
+	// blacklist of skills.InjectedSandboxEnvVars (service.validateUserEnvName)
+	// is what covers a name that was not seeded on this path. Other WEKNORA_*
+	// names (API keys, base URLs) are ordinary credentials a skill may declare.
 	if m.envResolver != nil {
 		resolved, missing, err := m.envResolver.ResolveEnv(ctx, skillName)
 		if err != nil {
