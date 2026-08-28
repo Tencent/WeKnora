@@ -731,10 +731,27 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       }
       case 'tool_result':
       case 'error': {
+        // An error event is now exclusively a flow-interrupting failure (model
+        // stream / pipeline error); tool failures arrive as tool_result with
+        // success=false. Handle fatal errors first, before attempting
+        // pending-tool-call matching (which can never match a flow error and
+        // would only emit a spurious warning).
+        if (responseType === 'error') {
+          const errorMsg = String(data.content || t('chat.processError'))
+          message.content = errorMsg
+          message.is_completed = true
+          isReplying.value = false
+          loading.value = false
+          fullContent.value = ''
+          currentAssistantMessageId.value = ''
+          reportError(errorMsg)
+          console.error('[Chat Error]', errorMsg)
+          break
+        }
         if (dataPayload) {
           const toolCallId = dataPayload.tool_call_id as string | undefined
           const toolName = dataPayload.tool_name as string | undefined
-          const success = responseType !== 'error' && dataPayload.success !== false
+          const success = dataPayload.success !== false
           log('[Tool Result]', {
             tool_call_id: toolCallId,
             tool_name: toolName,
@@ -760,9 +777,14 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           if (toolCallEvent) {
             toolCallEvent.pending = false
             toolCallEvent.success = success
+            // On failure, prefer the full tool Output (stdout/stderr/exit
+            // code) which the backend ships in dataPayload.output; only fall
+            // back to the short Error label when no Output was attached.
+            // Showing just "Script exited with code N" hides the detail a
+            // human needs to diagnose the failure.
             toolCallEvent.output = success
               ? dataPayload.output || data.content
-              : dataPayload.error || data.content
+              : dataPayload.output || dataPayload.error || data.content
             toolCallEvent.error = !success ? dataPayload.error || data.content : undefined
             const duration =
               dataPayload.duration_ms !== undefined ? dataPayload.duration_ms : dataPayload.duration
@@ -774,27 +796,6 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           } else {
             console.warn('[Tool Result] No pending tool call found for', toolCallId || toolName)
           }
-          if (responseType === 'error' && !toolName) {
-            const errorMsg = String(data.content || t('chat.processError'))
-            message.content = errorMsg
-            message.is_completed = true
-            isReplying.value = false
-            loading.value = false
-            fullContent.value = ''
-            currentAssistantMessageId.value = ''
-            reportError(errorMsg)
-            console.error('[Chat Error]', errorMsg)
-          }
-        } else if (responseType === 'error') {
-          const errorMsg = String(data.content || t('chat.processError'))
-          message.content = errorMsg
-          message.is_completed = true
-          isReplying.value = false
-          loading.value = false
-          fullContent.value = ''
-          currentAssistantMessageId.value = ''
-          reportError(errorMsg)
-          console.error('[Chat Error]', errorMsg)
         }
         break
       }
