@@ -134,6 +134,18 @@ func (r *ToolRegistry) ExecuteTool(
 	// This handles common LLM quirks like returning "true" instead of true.
 	args = CastParams(args, tool.Parameters())
 
+	// Clamp numeric parameters to the schema-declared [minimum, maximum] range
+	// before validation. LLMs occasionally request very large `limit` / `offset`
+	// values that exceed the tool's hard ceiling (e.g. list_knowledge_chunks
+	// limit <= 100), which would otherwise fail the whole agent chat call and
+	// abort downstream skills. We clamp silently on the tool boundary so the
+	// call can make forward progress; tools are expected to surface remaining
+	// rows via pagination / "remaining" hints in their output.
+	if clamped, changed := ClampParams(args, tool.Parameters()); changed {
+		logger.Infof(ctx, "[ToolRegistry] clamped params for tool=%s before=%s after=%s", name, string(args), string(clamped))
+		args = clamped
+	}
+
 	// Validate parameters against the tool's JSON Schema before execution.
 	// This catches invalid arguments early, avoiding a wasted tool execution + LLM round.
 	if validationErrs := ValidateParams(args, tool.Parameters()); len(validationErrs) > 0 {

@@ -4,12 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+// listKnowledgeChunksMaxLimit is the hard per-page ceiling enforced by the
+// tool schema (maximum: 100) and re-applied defensively inside Execute so any
+// caller that bypasses the JSON Schema validation layer (e.g. direct API or
+// sandbox) still cannot request unbounded chunk pages in a single call.
+const listKnowledgeChunksMaxLimit = 100
 
 var listKnowledgeChunksTool = BaseTool{
 	name: ToolListKnowledgeChunks,
@@ -129,7 +136,14 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 	effectiveTenantID := knowledge.TenantID
 
 	chunkLimit := 20
-	if input.Limit > 0 {
+	switch {
+	case input.Limit <= 0:
+		// keep default
+	case input.Limit > listKnowledgeChunksMaxLimit:
+		slog.InfoContext(ctx, "list_knowledge_chunks clamped limit",
+			"requested", input.Limit, "capped", listKnowledgeChunksMaxLimit)
+		chunkLimit = listKnowledgeChunksMaxLimit
+	default:
 		chunkLimit = input.Limit
 	}
 	offset := 0

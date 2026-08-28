@@ -2,6 +2,7 @@ package tools
 
 import (
 	"encoding/json"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -135,4 +136,110 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 	}
 
 	return val, false
+}
+
+// ClampParams coerces each numeric argument inside [minimum, maximum] declared
+// by the tool's JSON Schema. The coercion happens before validation so a single
+// over-sized `limit` / `offset` / page size cannot abort an otherwise valid
+// agent tool call. Bounds defined on `integer` properties are snapped to the
+// nearest int64; `number` properties keep float precision. `minLength` /
+// `maxLength` on strings are deliberately not clamped because truncation would
+// silently lose data (those still go through ValidateParams).
+//
+// Returns the clamped args JSON and a boolean indicating whether any value was
+// adjusted. If the schema or args cannot be parsed, the original args are
+// returned unchanged with changed=false.
+func ClampParams(args json.RawMessage, schema json.RawMessage) (json.RawMessage, bool) {
+	if len(schema) == 0 || len(args) == 0 {
+		return args, false
+	}
+
+	var schemaDef map[string]interface{}
+	if err := json.Unmarshal(schema, &schemaDef); err != nil {
+		return args, false
+	}
+	properties, ok := schemaDef["properties"].(map[string]interface{})
+	if !ok || len(properties) == 0 {
+		return args, false
+	}
+
+	var argsMap map[string]interface{}
+	if err := json.Unmarshal(args, &argsMap); err != nil {
+		return args, false
+	}
+
+	changed := false
+	for key, raw := range argsMap {
+		if raw == nil {
+			continue
+		}
+		propDef, exists := properties[key]
+		if !exists {
+			continue
+		}
+		prop, ok := propDef.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		targetType, _ := prop["type"].(string)
+		if targetType != "integer" && targetType != "number" {
+			continue
+		}
+		minVal, hasMin := getFloat(prop, "minimum")
+		maxVal, hasMax := getFloat(prop, "maximum")
+		if !hasMin && !hasMax {
+			continue
+		}
+
+		var num float64
+		switch v := raw.(type) {
+		case float64:
+			num = v
+		case int64:
+			num = float64(v)
+		case int:
+			num = float64(v)
+		case json.Number:
+			f, err := v.Float64()
+			if err != nil {
+				continue
+			}
+			num = f
+		case string:
+			f, err := strconv.ParseFloat(v, 64)
+			if err != nil {
+				continue
+			}
+			num = f
+		default:
+			continue
+		}
+
+		clamped := num
+		if hasMin && clamped < minVal {
+			clamped = minVal
+		}
+		if hasMax && clamped > maxVal {
+			clamped = maxVal
+		}
+		if clamped == num {
+			continue
+		}
+
+		if targetType == "integer" {
+			argsMap[key] = int64(math.Round(clamped))
+		} else {
+			argsMap[key] = clamped
+		}
+		changed = true
+	}
+
+	if !changed {
+		return args, false
+	}
+	out, err := json.Marshal(argsMap)
+	if err != nil {
+		return args, false
+	}
+	return out, true
 }
