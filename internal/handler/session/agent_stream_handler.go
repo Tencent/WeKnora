@@ -241,14 +241,15 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 	}
 	h.mu.Unlock()
 
-	// Send SSE response (both success and failure)
+	// Tool results — success or failure — always use the tool_result event
+	// type; the success flag in metadata distinguishes them. Reserve the
+	// error event type for flow-interrupting failures (model stream /
+	// pipeline errors), so the frontend can treat any error event as fatal
+	// without inspecting tool_name.
 	responseType := types.ResponseTypeToolResult
 	content := agenttools.StreamContentForToolResult(data.ToolName, data.Success, data.Error, data.Data)
-	if !data.Success {
-		responseType = types.ResponseTypeError
-		if content == "" && data.Error != "" {
-			content = data.Error
-		}
+	if !data.Success && content == "" && data.Error != "" {
+		content = data.Error
 	}
 
 	// Build metadata including tool result data for rich frontend rendering
