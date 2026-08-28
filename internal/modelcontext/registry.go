@@ -266,10 +266,19 @@ func (r *Registry) ModelToolResultForTool(toolName string, result *types.ToolRes
 		modelOutput = r.sources.ModelOutput(&copyResult)
 	} else if copyResult.Success {
 		modelOutput = copyResult.Output
-	} else if copyResult.Error != "" {
-		modelOutput = "Error: " + copyResult.Error
 	} else {
-		modelOutput = "Error: tool call failed"
+		// Failed: surface the error, and also include any diagnostic Output
+		// the tool produced on failure. Some tools (e.g. execute_skill_script)
+		// write stdout/stderr into Output on a non-zero exit; dropping it here
+		// would hide the exact detail the model needs to diagnose and recover.
+		if copyResult.Error != "" {
+			modelOutput = "Error: " + copyResult.Error
+		} else {
+			modelOutput = "Error: tool call failed"
+		}
+		if copyResult.Output != "" {
+			modelOutput += "\n\n" + copyResult.Output
+		}
 	}
 	// Even tools without structured source results can surface a known durable
 	// ID in validation errors or status text. Compact only explicitly declared

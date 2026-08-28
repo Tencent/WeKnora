@@ -295,6 +295,51 @@ func TestRegistryCompactsDatabaseQueryIDColumnsForBuiltInFollowUps(t *testing.T)
 	require.JSONEq(t, `{"knowledge_id":"doc-real"}`, calls[0].Function.Arguments)
 }
 
+// TestModelToolResultPreservesOutputOnFailure guards against a regression
+// where a failed tool call dropped ToolResult.Output, hiding the stdout/stderr
+// the model needs to diagnose the failure (e.g. execute_skill_script writes a
+// non-zero exit's stdout/stderr into Output, not Error).
+func TestModelToolResultPreservesOutputOnFailure(t *testing.T) {
+	registry := NewRegistry(true)
+
+	// execute_skill_script has no source/handle policy, so it routes through
+	// the non-sourceOutput failure branch.
+	got := registry.ModelToolResultForTool("execute_skill_script", &types.ToolResult{
+		Success: false,
+		Error:   "Script exited with code 1",
+		Output: "=== Script Execution: foo/bar ===\n## Standard Error\n\n" +
+			"```\nTraceback (most recent call last):\n  ValueError: boom\n```",
+	})
+	require.Contains(t, got, "Error: Script exited with code 1")
+	require.Contains(t, got, "Traceback (most recent call last)")
+	require.Contains(t, got, "ValueError: boom")
+}
+
+// TestModelToolResultFailureWithoutOutputOnlyReturnsError confirms that tools
+// which set only Error (the common case) are unaffected by the Output-merge.
+func TestModelToolResultFailureWithoutOutputOnlyReturnsError(t *testing.T) {
+	registry := NewRegistry(true)
+
+	got := registry.ModelToolResultForTool("wiki_write_page", &types.ToolResult{
+		Success: false,
+		Error:   "validation failed",
+	})
+	require.Equal(t, "Error: validation failed", got)
+}
+
+// TestModelToolResultFailureWithOutputOnly invents a default error heading
+// when the tool set Output but no Error.
+func TestModelToolResultFailureWithOutputOnly(t *testing.T) {
+	registry := NewRegistry(true)
+
+	got := registry.ModelToolResultForTool("execute_skill_script", &types.ToolResult{
+		Success: false,
+		Output:  "## Standard Error\n\n```\nboom\n```",
+	})
+	require.Contains(t, got, "Error: tool call failed")
+	require.Contains(t, got, "boom")
+}
+
 func TestRegistryDecodesCanonicalArgumentsForEveryBuiltInReferenceTool(t *testing.T) {
 	registry := NewRegistry(true)
 	registry.RegisterDocument("doc-real")
