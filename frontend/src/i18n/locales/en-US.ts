@@ -5330,10 +5330,22 @@ export default {
       queryKnowledgeGraph: 'Knowledge Graph Query',
       readSkill: 'Read Skill',
       executeSkillScript: 'Execute Skill Script',
+      listSandboxFiles: 'List sandbox files',
+      readSandboxFile: 'Read sandbox file',
       shellExec: 'Run sandbox command',
       dataAnalysis: 'Data Analysis',
       dataSchema: 'Data Schema',
       databaseQuery: 'Database Query'
+    },
+    skillFiles: {
+      heading: 'Skill files',
+      script: 'script',
+      instructions: 'Instructions'
+    },
+    sandboxFiles: {
+      found: 'Found {count} file(s)',
+      empty: 'No files',
+      truncated: 'List truncated'
     },
     shellExec: {
       workDir: 'Directory',

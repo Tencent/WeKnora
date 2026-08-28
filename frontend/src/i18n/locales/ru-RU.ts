@@ -1308,10 +1308,22 @@ export default {
       queryKnowledgeGraph: 'Запрос графа знаний',
       readSkill: 'Чтение навыка',
       executeSkillScript: 'Выполнение скрипта навыка',
+      listSandboxFiles: 'Список файлов песочницы',
+      readSandboxFile: 'Чтение файла песочницы',
       shellExec: 'Выполнение команды в песочнице',
       dataAnalysis: 'Анализ данных',
       dataSchema: 'Структура данных',
       databaseQuery: 'Запрос к базе данных'
+    },
+    skillFiles: {
+      heading: 'Файлы навыка',
+      script: 'скрипт',
+      instructions: 'Инструкции навыка'
+    },
+    sandboxFiles: {
+      found: 'Найдено файлов: {count}',
+      empty: 'Нет файлов',
+      truncated: 'Список обрезан'
     },
     shellExec: {
       workDir: 'Каталог',
