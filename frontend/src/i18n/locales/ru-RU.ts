@@ -2452,6 +2452,10 @@ export default {
           label: 'OpenRouter',
           description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.'
         },
+        litellm: {
+          label: 'LiteLLM',
+          description: 'Self-hosted proxy to 100+ providers (OpenAI, Anthropic, Gemini, Bedrock, etc.).'
+        },
         zhipu: {
           label: 'Zhipu BigModel',
           description: 'glm-4.7, embedding-3, rerank, etc.'

@@ -4272,6 +4272,10 @@ export default {
           label: 'OpenRouter',
           description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.'
         },
+        litellm: {
+          label: 'LiteLLM',
+          description: 'Self-hosted proxy to 100+ providers (OpenAI, Anthropic, Gemini, Bedrock, etc.).'
+        },
         requesty: {
           label: 'Requesty',
           description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.'

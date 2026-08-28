@@ -551,6 +551,16 @@ const fallbackProviderOptions = computed(() => [
     modelTypes: ['chat', 'embedding']
   },
   {
+    value: 'litellm',
+    label: t('model.editor.providers.litellm.label'),
+    defaultUrls: {
+      chat: 'http://localhost:4000/v1',
+      embedding: 'http://localhost:4000/v1'
+    },
+    description: t('model.editor.providers.litellm.description'),
+    modelTypes: ['chat', 'embedding']
+  },
+  {
     value: 'requesty',
     label: t('model.editor.providers.requesty.label'),
     defaultUrls: {

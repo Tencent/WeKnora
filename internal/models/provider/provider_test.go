@@ -38,6 +38,7 @@ func TestDetectProvider(t *testing.T) {
 		{"https://api.openai.com/v1", ProviderOpenAI},
 		{"https://api.anthropic.com/v1", ProviderAnthropic},
 		{"https://openrouter.ai/api/v1", ProviderOpenRouter},
+		{"https://litellm.example.com/v1", ProviderLiteLLM},
 		{"https://router.requesty.ai/v1", ProviderRequesty},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", ProviderAliyun},
 		{"https://open.bigmodel.cn/api/paas/v4", ProviderZhipu},
@@ -315,5 +316,35 @@ func TestListByModelType(t *testing.T) {
 		}
 
 		assert.True(t, found, "Gemini should support embedding via the native Gemini API")
+	})
+}
+
+func TestLiteLLMProviderValidation(t *testing.T) {
+	p := &LiteLLMProvider{}
+
+	t.Run("valid config", func(t *testing.T) {
+		config := &Config{
+			APIKey:    "test-key",
+			ModelName: "gpt-4.1-mini",
+		}
+		err := p.ValidateConfig(config)
+		assert.NoError(t, err)
+	})
+
+	t.Run("missing API key", func(t *testing.T) {
+		config := &Config{
+			ModelName: "gpt-4.1-mini",
+		}
+		err := p.ValidateConfig(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "API key")
+	})
+
+	t.Run("info", func(t *testing.T) {
+		info := p.Info()
+		assert.Equal(t, ProviderLiteLLM, info.Name)
+		assert.Equal(t, "LiteLLM", info.DisplayName)
+		assert.True(t, info.RequiresAuth)
+		assert.Equal(t, LiteLLMBaseURL, info.DefaultURLs[types.ModelTypeKnowledgeQA])
 	})
 }
