@@ -14,11 +14,15 @@ test('management shortcuts are stricter than read-only settings pages', () => {
   assert.equal(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.models, 'admin')
 })
 
+test('the skill catalog is admin-only like the sandbox it installs into', () => {
+  assert.equal(SETTINGS_SECTION_MIN_ROLE.skills, 'admin')
+  assert.equal(SETTINGS_SECTION_MIN_ROLE.skills, SETTINGS_SECTION_MIN_ROLE.sandbox)
+})
+
 test('personal skill environment variables are visible to every member', () => {
   assert.equal(SETTINGS_SECTION_MIN_ROLE.envvars, 'viewer')
-  // The workspace-wide values live in the sandbox config editor, which is
-  // already Admin+; a management shortcut on the avatar menu would only
-  // duplicate that entrance.
+  // Workspace-wide skill env values live on the Admin+ skills page; a
+  // management shortcut on the avatar menu would only duplicate that entrance.
   assert.equal(
     Object.prototype.hasOwnProperty.call(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE, 'envvars'),
     false,
