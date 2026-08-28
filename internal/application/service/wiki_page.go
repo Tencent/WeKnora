@@ -993,6 +993,12 @@ func (s *wikiPageService) FindSimilarPages(ctx context.Context, kbID string, que
 	return s.repo.FindSimilarPages(ctx, kbID, query, pageTypes, limit)
 }
 
+// FindPagesByNormalizedTitle looks up exact same-type title identities for
+// wiki ingest, independent of the trigram top-K used for semantic dedup.
+func (s *wikiPageService) FindPagesByNormalizedTitle(ctx context.Context, kbID, pageType, identity string) ([]*types.WikiPageLite, error) {
+	return s.repo.FindPagesByNormalizedTitle(ctx, kbID, pageType, identity)
+}
+
 // ListDistinctCategoryPaths returns the existing wiki folder paths. Used by
 // wiki ingest's taxonomy planner to ground folder reuse.
 func (s *wikiPageService) ListDistinctCategoryPaths(ctx context.Context, kbID string, maxPaths int) ([][]string, error) {

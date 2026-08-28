@@ -365,7 +365,7 @@ func TestStabilizeExtractedIdentitiesCoalescesEvidence(t *testing.T) {
 		},
 	}
 	got := svc.stabilizeExtractedIdentities(
-		context.Background(), "kb-1", types.WikiPageTypeEntity, items, nil, batch,
+		context.Background(), "kb-1", types.WikiPageTypeEntity, items, nil, nil, batch,
 	)
 	if len(got) != 1 {
 		t.Fatalf("stabilized item count = %d, want 1", len(got))
@@ -378,5 +378,156 @@ func TestStabilizeExtractedIdentitiesCoalescesEvidence(t *testing.T) {
 	}
 	if len(got[0].SourceChunks) != 2 {
 		t.Fatalf("source chunks were not unioned: %#v", got[0].SourceChunks)
+	}
+}
+
+func TestWikiIdentityClaimRedisOverridesStaleLocal(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+	svc := &wikiIngestService{redisClient: rdb}
+	ctx := context.Background()
+	batch := &WikiBatchContext{}
+	identity := normalizeWikiIdentityTitle("孔子")
+	batch.identityClaims.Store(types.WikiPageTypeEntity+"\x00"+identity, "entity/kong-zi")
+	if err := rdb.Set(ctx, wikiIdentityClaimPrefix+"kb-1:"+types.WikiPageTypeEntity+":"+identity, "entity/confucius", wikiIdentityClaimTTL).Err(); err != nil {
+		t.Fatalf("seed redis claim: %v", err)
+	}
+
+	got := svc.claimWikiIdentitySlug(ctx, "kb-1", types.WikiPageTypeEntity, "孔子", "entity/kongqiu", false, batch)
+	if got != "entity/confucius" {
+		t.Fatalf("redis claim should beat stale local map: got %q", got)
+	}
+	if stored, _ := batch.identityClaims.Load(types.WikiPageTypeEntity + "\x00" + identity); stored != "entity/confucius" {
+		t.Fatalf("local cache not refreshed from redis: %#v", stored)
+	}
+}
+
+func TestStabilizeLLMMergeDoesNotOverrideRedisClaim(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+	svc := &wikiIngestService{redisClient: rdb}
+	ctx := context.Background()
+	batch := &WikiBatchContext{}
+
+	first := svc.claimWikiIdentitySlug(ctx, "kb-1", types.WikiPageTypeEntity, "孔子", "entity/kong-zi", false, batch)
+	if first != "entity/kong-zi" {
+		t.Fatalf("provisional claim = %q, want entity/kong-zi", first)
+	}
+
+	got := svc.stabilizeExtractedIdentities(ctx, "kb-1", types.WikiPageTypeEntity, []extractedItem{
+		{Name: "孔子", Slug: "entity/confucius"},
+	}, map[string]string{"entity/confucius": "entity/kong-zi-institute"}, nil, batch)
+	if len(got) != 1 || got[0].Slug != "entity/kong-zi" {
+		t.Fatalf("LLM merge overwrote identity claim: %#v", got)
+	}
+}
+
+func TestStabilizeExactTargetIsAuthoritative(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+	svc := &wikiIngestService{redisClient: rdb}
+	ctx := context.Background()
+	batch := &WikiBatchContext{}
+
+	svc.claimWikiIdentitySlug(ctx, "kb-1", types.WikiPageTypeEntity, "孔子", "entity/kong-zi", false, batch)
+	got := svc.stabilizeExtractedIdentities(ctx, "kb-1", types.WikiPageTypeEntity, []extractedItem{
+		{Name: "孔子", Slug: "entity/kong-zi"},
+	}, nil, map[string]string{"entity/kong-zi": "entity/confucius"}, batch)
+	if len(got) != 1 || got[0].Slug != "entity/confucius" {
+		t.Fatalf("exact existing page should replace provisional claim: %#v", got)
+	}
+
+	follow := svc.claimWikiIdentitySlug(ctx, "kb-1", types.WikiPageTypeEntity, "孔子", "entity/kongqiu", false, &WikiBatchContext{})
+	if follow != "entity/confucius" {
+		t.Fatalf("authoritative exact hit did not stick in redis: %q", follow)
+	}
+}
+
+func TestWikiIdentityClaimLiteConcurrentSameBatch(t *testing.T) {
+	svc := &wikiIngestService{}
+	batch := &WikiBatchContext{}
+	ctx := context.Background()
+	proposals := []string{"entity/kong-zi", "entity/confucius", "entity/kongzi"}
+	results := make([]string, len(proposals))
+	var wg sync.WaitGroup
+	for i, proposal := range proposals {
+		i, proposal := i, proposal
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i] = svc.claimWikiIdentitySlug(ctx, "kb-1", types.WikiPageTypeEntity, "孔子", proposal, false, batch)
+		}()
+	}
+	wg.Wait()
+	for i := 1; i < len(results); i++ {
+		if results[i] != results[0] {
+			t.Fatalf("lite same-batch claims did not converge: %#v", results)
+		}
+	}
+}
+
+func TestRemapSlugUpdatesByIdentityConverges(t *testing.T) {
+	svc := &wikiIngestService{}
+	batch := &WikiBatchContext{}
+	ctx := context.Background()
+	svc.claimWikiIdentitySlug(ctx, "kb-1", types.WikiPageTypeEntity, "孔子", "entity/kong-zi", false, batch)
+
+	got := svc.remapSlugUpdatesByIdentity(ctx, "kb-1", map[string][]SlugUpdate{
+		"entity/kong-zi": {{
+			Slug: "entity/kong-zi", Type: types.WikiPageTypeEntity,
+			Item: extractedItem{Name: "孔子", Slug: "entity/kong-zi"},
+		}},
+		"entity/confucius": {{
+			Slug: "entity/confucius", Type: types.WikiPageTypeEntity,
+			Item: extractedItem{Name: "孔 子", Slug: "entity/confucius"},
+		}},
+		"summary/doc": {{Slug: "summary/doc", Type: types.WikiPageTypeSummary}},
+	}, batch)
+	if len(got["entity/kong-zi"]) != 2 {
+		t.Fatalf("entity updates should coalesce onto claimed slug: %#v", got)
+	}
+	if len(got["summary/doc"]) != 1 {
+		t.Fatalf("summary slug should stay untouched: %#v", got)
+	}
+	if _, ok := got["entity/confucius"]; ok {
+		t.Fatalf("unclaimed romanization should have been remapped away: %#v", got)
+	}
+}
+
+func TestReclaimExtractedIdentitiesCoalescesCitationSlugs(t *testing.T) {
+	svc := &wikiIngestService{}
+	batch := &WikiBatchContext{}
+	svc.claimWikiIdentitySlug(context.Background(), "kb-1", types.WikiPageTypeEntity, "孔子", "entity/kong-zi", false, batch)
+
+	entities, concepts := svc.reclaimExtractedIdentities(context.Background(), "kb-1", []extractedItem{
+		{Name: "孔子", Slug: "entity/kong-zi", SourceChunks: []string{"c1"}},
+		{Name: "孔 子", Slug: "entity/confucius", SourceChunks: []string{"c2"}},
+	}, nil, batch)
+	if len(entities) != 1 || entities[0].Slug != "entity/kong-zi" {
+		t.Fatalf("citation slugs did not reclaim onto identity: entities=%#v", entities)
+	}
+	if len(entities[0].SourceChunks) != 2 {
+		t.Fatalf("reclaim dropped citation evidence: %#v", entities[0])
+	}
+	if len(concepts) != 0 {
+		t.Fatalf("unexpected concepts: %#v", concepts)
 	}
 }

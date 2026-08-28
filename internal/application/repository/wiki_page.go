@@ -1055,6 +1055,46 @@ func (r *wikiPageRepository) FindSimilarPages(
 	return out, nil
 }
 
+func wikiNormalizedTitleSQL(db *gorm.DB) string {
+	if db != nil && db.Dialector != nil && db.Dialector.Name() == "sqlite" {
+		// SQLite has no POSIX [[:space:]]. Strip the common separators that
+		// model formatting drift actually produces; callers still re-check
+		// with the Go identity fold so extras cannot leak through.
+		return "lower(replace(replace(replace(replace(replace(replace(title, ' ', ''), char(9), ''), char(10), ''), char(13), ''), char(160), ''), char(12288), ''))"
+	}
+	return "regexp_replace(lower(title), '[[:space:]]+', '', 'g')"
+}
+
+// FindPagesByNormalizedTitle returns non-archived pages of pageType whose
+// whitespace-stripped, lowercased title equals identity.
+func (r *wikiPageRepository) FindPagesByNormalizedTitle(
+	ctx context.Context,
+	kbID, pageType, identity string,
+) ([]*types.WikiPageLite, error) {
+	identity = strings.TrimSpace(identity)
+	if kbID == "" || pageType == "" || identity == "" {
+		return nil, nil
+	}
+
+	var rows []types.WikiPageLite
+	if err := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Select("slug, title, page_type, status, aliases, out_links").
+		Where("knowledge_base_id = ? AND page_type = ? AND status <> ? AND "+wikiNormalizedTitleSQL(r.db)+" = ?",
+			kbID, pageType, types.WikiPageStatusArchived, identity).
+		Order("slug ASC").
+		Limit(50).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*types.WikiPageLite, len(rows))
+	for i := range rows {
+		row := rows[i]
+		out[i] = &row
+	}
+	return out, nil
+}
+
 // ListAll retrieves all non-archived wiki pages in a knowledge base.
 func (r *wikiPageRepository) ListAll(ctx context.Context, kbID string) ([]*types.WikiPage, error) {
 	var pages []*types.WikiPage

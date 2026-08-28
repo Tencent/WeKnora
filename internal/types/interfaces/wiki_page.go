@@ -153,6 +153,12 @@ type WikiPageService interface {
 	// merge targets server-side.
 	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
 
+	// FindPagesByNormalizedTitle returns non-archived pages of pageType whose
+	// display title matches identity after the same whitespace/case fold used
+	// by wiki ingest identity claims. Used so exact same-title pages are found
+	// even when they miss the trigram top-K.
+	FindPagesByNormalizedTitle(ctx context.Context, kbID, pageType, identity string) ([]*types.WikiPageLite, error)
+
 	// ListDistinctCategoryPaths returns the existing wiki folder paths (split
 	// into segments), capped at maxPaths. Used by wiki ingest's taxonomy
 	// planner as the pool of folders to reuse.
@@ -317,6 +323,10 @@ type WikiPageRepository interface {
 	// defaults to entity+concept. Used by the dedup pre-filter to
 	// surface candidate merge targets server-side.
 	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
+
+	// FindPagesByNormalizedTitle returns non-archived pages of pageType whose
+	// whitespace-stripped, lowercased title equals identity.
+	FindPagesByNormalizedTitle(ctx context.Context, kbID, pageType, identity string) ([]*types.WikiPageLite, error)
 
 	// ListDistinctCategoryPaths returns the materialized paths of existing
 	// wiki folders (split into segments), capped at maxPaths. Used by the

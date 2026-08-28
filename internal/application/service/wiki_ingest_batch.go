@@ -562,6 +562,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	_ = eg.Wait()
 
+	// Re-read identity claims after every map worker has chosen a slug so
+	// concurrent romanizations of the same title collapse before taxonomy
+	// planning and Reduce lock by slug.
+	slugUpdates = s.remapSlugUpdatesByIdentity(ctx, payload.KnowledgeBaseID, slugUpdates, batchCtx)
+
 	// Plan the directory once for the whole batch BEFORE reduce. Reduce writes
 	// pages in parallel, so it can't converge on shared folders on its own; this
 	// single pass assigns every new entity/concept slug a coherent category_path
@@ -1364,6 +1369,9 @@ func (s *wikiIngestService) mapOneDocument(
 	// citations simply keep their Description+Details fallback).
 	var uncited int
 	extractedEntities, extractedConcepts, uncited = mergeCitationsIntoItems(extractedEntities, extractedConcepts, citations, newSlugs)
+	extractedEntities, extractedConcepts = s.reclaimExtractedIdentities(
+		ctx, payload.KnowledgeBaseID, extractedEntities, extractedConcepts, batchCtx,
+	)
 
 	// Rebuild slugItems so stale entries (for slugs that did not survive the
 	// merge) and brand-new slugs discovered by the citation pass are both
