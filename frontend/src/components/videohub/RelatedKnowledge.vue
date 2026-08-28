@@ -14,6 +14,7 @@
           <span>{{ tab.label }}</span><small>{{ tab.count }}</small>
         </button>
       </nav>
+      <p v-if="anchors.length && !crossVideoItems.length" class="related-knowledge__relation-empty">当前暂无跨视频关联</p>
       <div v-if="filteredAnchors.length" class="related-knowledge__anchors">
         <KnowledgeAnchorCard
           v-for="anchor in filteredAnchors"
@@ -70,4 +71,5 @@ function load(_videoId?: string) {
 .related-knowledge { display: grid; gap: calc(var(--td-comp-margin-s) * 2); padding: calc(var(--td-comp-margin-s) * 2) calc(var(--td-comp-margin-s) / 2); }
 .related-knowledge__state, .related-knowledge > :deep(.t-empty) { min-height: 320px; display: grid; place-items: center; }
 .related-knowledge__anchors { display: grid; gap: calc(var(--td-comp-margin-s) * 2); }
+.related-knowledge__relation-empty { margin: 0; color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }
 </style>

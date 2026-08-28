@@ -45,6 +45,7 @@ export function mapVideo(v: any, response?: any): VideoData {
     poster_url: v.cover_url || v.thumbnail_url || '',
     cover_url: v.cover_url || v.thumbnail_url || '',
     processing_error_summary: v.processing_error_summary || '',
+    subtitle_file_url: v.subtitle_file_url || '',
     overview: '',
     chapters: [],
     subtitles: [],

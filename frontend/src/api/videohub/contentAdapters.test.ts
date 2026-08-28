@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { buildVideoContentState, classifyContentError, contentModuleForStage } from './contentState'
-import { mapRelatedKnowledgeResponse, parseOutlineWikiPage, parseSummaryWikiPage, parseTimestamp } from './contentParsing'
+import { mapRelatedKnowledgeResponse, parseOutlineWikiPage, parseOverviewWikiPage, parseSubtitleFile, parseSummaryWikiPage, parseTimestamp, parseTranscriptPageWikiPage } from './contentParsing'
 import { getNewlyCompletedStages } from '../../components/videohub/processingStatusState'
 
 test('parses cross-hour outline timestamps and knowledge evidence', () => {
@@ -52,6 +52,18 @@ type: typed_summary
   assert.deepEqual(sections.map(section => section.title), ['一、人物背景', '三、核心观点'])
   assert.equal(sections[0].evidenceSeconds, 605)
   assert.equal(sections[0].transcriptSnippet, '我们当时决定停止旧产品。')
+})
+
+test('parses real SRT subtitles into seekable cues', () => {
+  const cues = parseSubtitleFile('\uFEFF1\r\n00:00:01,200 --> 00:00:03,500\r\n第一句\r\n\r\n2\r\n00:01:02,000 --> 00:01:04,000\r\n第二句')
+  assert.deepEqual(cues, [
+    { start_seconds: 1.2, end_seconds: 3.5, text: '第一句' },
+    { start_seconds: 62, end_seconds: 64, text: '第二句' },
+  ])
+})
+
+test('extracts overview text without frontmatter or heading', () => {
+  assert.equal(parseOverviewWikiPage('---\ntype: overview\n---\n\n## 快速概览\n\n视频介绍核心问题和解决方法。'), '视频介绍核心问题和解决方法。')
 })
 
 test('maps grouped backend anchors without mock video data', () => {
@@ -109,15 +121,23 @@ test('content loader isolates failed content requests', () => {
 
 test('content loader distinguishes not generated artifacts from failures', () => {
   assert.equal(classifyContentError({ status: 404, error_code: 'not_generated' }), 'not_generated')
+  assert.equal(classifyContentError({ status: 404, error_code: 'artifact_missing' }), 'error')
+  assert.equal(classifyContentError({ status: 404, code: 'CONTENT_NOT_READY' }), 'not_generated')
+  assert.equal(classifyContentError({ status: 404, code: 'CONTENT_NOT_FOUND' }), 'error')
   assert.equal(classifyContentError({ status: 502, error_code: 'weknora_read_failed' }), 'error')
 })
 
 test('maps completed processing stages to local content modules', () => {
   assert.equal(contentModuleForStage('outline'), 'outline')
+  assert.equal(contentModuleForStage('overview'), 'overview')
   assert.equal(contentModuleForStage('summary'), 'summary')
   assert.equal(contentModuleForStage('graph'), 'relatedKnowledge')
   assert.equal(contentModuleForStage('assemble'), 'all')
   assert.equal(contentModuleForStage('transcription'), null)
+})
+
+test('keeps transcript page markdown available for the detail reader', () => {
+  assert.equal(parseTranscriptPageWikiPage('---\ntype: transcript_page\n---\n\n# 文字稿\n\n## 语义时间轴\n内容'), '# 文字稿\n\n## 语义时间轴\n内容')
 })
 
 test('emits a processing stage only when it newly succeeds', () => {

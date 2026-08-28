@@ -6,6 +6,7 @@ import type {
   RelationOverview,
   RelationType,
   SummarySection,
+  SubtitleCue,
 } from '@/types/videohub'
 
 interface MarkdownSection {
@@ -167,6 +168,44 @@ export function parseSummaryWikiPage(content: string): SummarySection[] {
       transcriptSnippet,
     }
   })
+}
+
+export function parseOverviewWikiPage(content: string): string {
+  const sections = splitLevelTwoSections(content)
+  if (sections.length > 0) return sections.map(section => section.body).filter(Boolean).join('\n\n').trim()
+  return stripFrontmatter(content).replace(/^#\s+.+$/m, '').trim()
+}
+
+export function parseTranscriptPageWikiPage(content: string): string {
+  return stripFrontmatter(content)
+}
+
+function parseSubtitleTimestamp(value: string): number {
+  const normalized = value.replace(',', '.')
+  const [hours, minutes, seconds] = normalized.split(':').map(Number)
+  if (![hours, minutes, seconds].every(Number.isFinite) || minutes < 0 || minutes >= 60 || seconds < 0 || seconds >= 60) {
+    throw new Error(`无效字幕时间戳：${value}`)
+  }
+  return hours * 3600 + minutes * 60 + seconds
+}
+
+export function parseSubtitleFile(content: string): SubtitleCue[] {
+  const normalized = content.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').trim()
+  if (!normalized) return []
+  const blocks = normalized.split(/\n{2,}/)
+  const cues = blocks.flatMap(block => {
+    const lines = block.split('\n').map(line => line.trim()).filter(Boolean)
+    const timeIndex = lines.findIndex(line => /\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,.]\d{3}/.test(line))
+    if (timeIndex < 0) return []
+    const match = lines[timeIndex].match(/(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})/)
+    if (!match) return []
+    const startSeconds = parseSubtitleTimestamp(match[1])
+    const endSeconds = parseSubtitleTimestamp(match[2])
+    if (endSeconds <= startSeconds) throw new Error('字幕时间顺序无效')
+    const text = lines.slice(timeIndex + 1).join('\n').replace(/<[^>]+>/g, '').trim()
+    return text ? [{ start_seconds: startSeconds, end_seconds: endSeconds, text }] : []
+  })
+  return cues.sort((left, right) => left.start_seconds - right.start_seconds)
 }
 
 export function mapRelatedKnowledgeResponse(videoId: string, response: BackendRelatedKnowledgeResponse) {

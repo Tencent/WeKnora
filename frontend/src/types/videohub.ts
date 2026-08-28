@@ -94,6 +94,7 @@ export interface VideoData {
   poster_url?: string
   cover_url?: string
   processing_error_summary?: string
+  subtitle_file_url?: string
   overview: string
   chapters: Chapter[]
   subtitles: SubtitleCue[]

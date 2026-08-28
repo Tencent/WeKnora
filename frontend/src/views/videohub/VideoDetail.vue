@@ -22,12 +22,14 @@
         <div class="video-detail-page__layout">
           <section class="video-detail-page__left">
             <VideoPlayer ref="player" :src="video.play_url || video.video_url" :poster="video.cover_url || video.poster_url" :duration-hint="video.durationSeconds" :subtitles="video.subtitles" @timeupdate="currentSeconds = $event" />
+            <OverviewContent :content-state="content.overview" @reload="reloadOverview" />
             <ChapterNavigation :video="video" :current-seconds="currentSeconds" :content-state="content.outline" @reload="reloadOutline" @seek="seekTo" />
           </section>
           <aside class="video-detail-page__right">
             <t-tabs v-model="activeTab">
               <t-tab-panel value="summary" label="智能总结"><SmartSummary :key="video.id" :video="video" :content-state="content.summary" @reload="reloadSummary" @seek="seekTo" /></t-tab-panel>
               <t-tab-panel value="related" label="关联知识"><RelatedKnowledge :key="video.id" :video="video" :content-state="content.relatedKnowledge" @reload="reloadRelatedKnowledge" @seek="seekTo" @select-video-by-id="onSelectVideoById" /></t-tab-panel>
+              <t-tab-panel value="transcript" label="完整文字稿"><TranscriptPageContent :key="video.id" :content-state="content.transcriptPage" @reload="reloadTranscriptPage" /></t-tab-panel>
             </t-tabs>
           </aside>
         </div>
@@ -40,7 +42,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { contentModuleForStage, createLoadingContentModuleState, createLoadingContentState, fetchVideoContent, fetchVideoContentModule, fetchVideoDetail, fetchVideoOptions, isVideoInitiallyAvailable, type VideoContentModule, type VideoContentState } from '@/api/videohub'
+import { contentModuleForStage, createLoadingContentModuleState, createLoadingContentState, fetchVideoContent, fetchVideoContentModule, fetchVideoDetail, fetchVideoOptions, fetchVideoSubtitles, isVideoInitiallyAvailable, type VideoContentModule, type VideoContentState } from '@/api/videohub'
 import type { VideoData } from '@/types/videohub'
 import VideoPlayer from '@/components/videohub/VideoPlayer.vue'
 import ChapterNavigation from '@/components/videohub/ChapterNavigation.vue'
@@ -48,6 +50,8 @@ import AiAssistant from '@/components/videohub/AiAssistant.vue'
 import SmartSummary from '@/components/videohub/SmartSummary.vue'
 import RelatedKnowledge from '@/components/videohub/RelatedKnowledge.vue'
 import ProcessingStatus from '@/components/videohub/ProcessingStatus.vue'
+import OverviewContent from '@/components/videohub/OverviewContent.vue'
+import TranscriptPageContent from '@/components/videohub/TranscriptPageContent.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -63,7 +67,7 @@ const error = ref('')
 const content = ref<VideoContentState>(createLoadingContentState())
 let loadSequence = 0
 let contentSequence = 0
-const moduleSequences: Record<VideoContentModule, number> = { outline: 0, summary: 0, relatedKnowledge: 0 }
+const moduleSequences: Record<VideoContentModule, number> = { outline: 0, overview: 0, summary: 0, relatedKnowledge: 0, transcriptPage: 0 }
 const isPlayable = computed(() => Boolean(video.value && isVideoInitiallyAvailable({
   status: video.value.status,
   file_url: video.value.video_url,
@@ -99,6 +103,7 @@ async function loadVideo(id: string) {
     if (sequence !== loadSequence) return
     video.value = nextVideo; selectedVideoId.value = id
     loading.value = false
+    void loadSubtitles(nextVideo)
     content.value = createLoadingContentState()
     void loadContent(nextVideo)
     await nextTick()
@@ -114,6 +119,11 @@ async function loadVideo(id: string) {
   finally {
     if (sequence === loadSequence) loading.value = false
   }
+}
+async function loadSubtitles(videoData: VideoData) {
+  if (!videoData.subtitle_file_url || video.value?.id !== videoData.id) return
+  const subtitles = await fetchVideoSubtitles(videoData.subtitle_file_url)
+  if (video.value?.id === videoData.id) video.value = { ...video.value, subtitles }
 }
 async function loadContent(videoData: VideoData) {
   const sequence = ++contentSequence
@@ -154,8 +164,10 @@ function reloadContentModule(module: VideoContentModule) {
   if (video.value) void refreshContentModule(module, video.value)
 }
 function reloadOutline() { reloadContentModule('outline') }
+function reloadOverview() { reloadContentModule('overview') }
 function reloadSummary() { reloadContentModule('summary') }
 function reloadRelatedKnowledge() { reloadContentModule('relatedKnowledge') }
+function reloadTranscriptPage() { reloadContentModule('transcriptPage') }
 async function loadVideoOptions() {
   try {
     videoOptions.value = (await fetchVideoOptions()).map(item => ({ label: item.title, value: item.id }))
