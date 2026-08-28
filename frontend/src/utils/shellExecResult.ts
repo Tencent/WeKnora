@@ -64,7 +64,9 @@ function extractFencedSection(output: string, heading: string): string {
 function stripLegacyShellHeader(output: string): string {
   return output
     .replace(/^=== Shell Exec[\s\S]*?\n\n/, '')
+    .replace(/^=== Script Execution[\s\S]*?\n\n/, '')
     .replace(/\*\*Command\*\*:[\s\S]*?(?:\n(?!\*\*)|$)/, '')
+    .replace(/\*\*Arguments\*\*:.*\n/, '')
     .replace(/\*\*Work Dir\*\*:.*\n/, '')
     .replace(/\*\*Exit Code\*\*:.*\n/, '')
     .replace(/\*\*Duration\*\*:.*\n/, '')
@@ -72,6 +74,21 @@ function stripLegacyShellHeader(output: string): string {
     .replace(/\*\*Truncated\*\*:.*\n/, '')
     .replace(/\*\*Binary Output Suppressed\*\*:.*\n/, '')
     .trim()
+}
+
+function skillScriptCommand(
+  data: Record<string, unknown>,
+  args: Record<string, unknown>,
+): string {
+  const skill = asString(data.skill_name) || asString(args.skill_name)
+  const script = asString(data.script_path) || asString(args.script_path)
+  if (!skill && !script) return ''
+  const path = [skill, script].filter(Boolean).join('/')
+  const extra = data.args ?? args.args
+  if (Array.isArray(extra) && extra.length) {
+    return [path, ...extra.map((item) => asString(item))].join(' ')
+  }
+  return path
 }
 
 export function buildShellExecView(
@@ -84,8 +101,12 @@ export function buildShellExecView(
   const rawOutput = asString(output)
   const stdoutFromData = asString(record.stdout)
   const stderrFromData = asString(record.stderr)
-  const parsedStdout = stdoutFromData ? '' : extractFencedSection(rawOutput, 'Stdout')
-  const parsedStderr = stderrFromData ? '' : extractFencedSection(rawOutput, 'Stderr')
+  const parsedStdout = stdoutFromData
+    ? ''
+    : extractFencedSection(rawOutput, 'Stdout') || extractFencedSection(rawOutput, 'Standard Output')
+  const parsedStderr = stderrFromData
+    ? ''
+    : extractFencedSection(rawOutput, 'Stderr') || extractFencedSection(rawOutput, 'Standard Error')
 
   let stdout = stdoutFromData || parsedStdout
   let stderr = stderrFromData || parsedStderr
@@ -94,7 +115,7 @@ export function buildShellExecView(
   }
 
   return {
-    command: asString(record.command) || asString(argumentsRecord.command),
+    command: asString(record.command) || asString(argumentsRecord.command) || skillScriptCommand(record, argumentsRecord),
     workDir: asString(record.work_dir) || asString(argumentsRecord.work_dir),
     exitCode: asNumber(record.exit_code),
     durationMs: asNumber(record.duration_ms),

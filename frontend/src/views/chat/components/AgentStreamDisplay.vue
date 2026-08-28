@@ -1071,7 +1071,9 @@ const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').
 
 const resolveToolDisplayType = (event: any): DisplayType | undefined => {
   if (event?.display_type) return event.display_type as DisplayType
-  if (event?.tool_name === 'shell_exec') return 'shell_exec'
+  if (event?.tool_name === 'shell_exec' || event?.tool_name === 'execute_skill_script') {
+    return 'shell_exec'
+  }
   return undefined
 };
 
@@ -2676,7 +2678,7 @@ const getToolTitle = (event: any): string => {
     if (event.tool_name === 'wiki_search' || event.tool_name === 'wiki_read_page') {
       return `${getLocalizedToolName(event.tool_name)}...`;
     }
-    if (event.tool_name === 'shell_exec') {
+    if (event.tool_name === 'shell_exec' || event.tool_name === 'execute_skill_script') {
       return t('agentStream.toolStatus.shellExecRunning');
     }
     const localizedName = getLocalizedToolName(event.tool_name);
@@ -2774,10 +2776,8 @@ const getToolTitle = (event: any): string => {
     return pageLabel ? `${baseTitle}：「${sanitizeForDisplay(pageLabel)}」` : baseTitle;
   }
 
-  if (toolName === 'shell_exec') {
-    const command = previewShellCommand(
-      String(event.tool_data?.command || event.arguments?.command || ''),
-    )
+  if (toolName === 'shell_exec' || toolName === 'execute_skill_script') {
+    const command = previewShellCommand(skillScriptCommandLabel(event))
     const baseTitle = getToolDescription(event)
     return command ? `${baseTitle}：${command}` : baseTitle
   }
@@ -2786,6 +2786,19 @@ const getToolTitle = (event: any): string => {
   const summary = getToolSummary(event);
   return summary || getToolDescription(event);
 };
+
+const skillScriptCommandLabel = (event: any): string => {
+  const fromData = String(event?.tool_data?.command || event?.arguments?.command || '').trim()
+  if (fromData) return fromData
+  const skill = String(event?.tool_data?.skill_name || event?.arguments?.skill_name || '').trim()
+  const script = String(event?.tool_data?.script_path || event?.arguments?.script_path || '').trim()
+  const path = [skill, script].filter(Boolean).join('/')
+  const args = event?.tool_data?.args || event?.arguments?.args
+  if (Array.isArray(args) && args.length) {
+    return [path, ...args.map((arg: unknown) => String(arg))].filter(Boolean).join(' ')
+  }
+  return path
+}
 
 // Tool description
 const getToolDescription = (event: any): string => {
@@ -2799,7 +2812,7 @@ const getToolDescription = (event: any): string => {
     if (event.tool_name === 'query_understand') {
       return t('agentStream.toolStatus.queryUnderstanding');
     }
-    if (event.tool_name === 'shell_exec') {
+    if (event.tool_name === 'shell_exec' || event.tool_name === 'execute_skill_script') {
       return t('agentStream.toolStatus.shellExecRunning');
     }
     const localizedName = getLocalizedToolName(event.tool_name);
@@ -2832,7 +2845,7 @@ const getToolDescription = (event: any): string => {
     return success ? t('agentStream.toolStatus.attachmentParsingDone') : t('agentStream.toolStatus.attachmentParsingFailed');
   } else if (toolName === 'query_understand') {
     return success ? t('agentStream.toolStatus.queryUnderstandDone') : t('agentStream.toolStatus.calledFailed', { name: getLocalizedToolName(toolName) });
-  } else if (toolName === 'shell_exec') {
+  } else if (toolName === 'shell_exec' || toolName === 'execute_skill_script') {
     const localizedName = getLocalizedToolName(toolName);
     return success ? localizedName : t('agentStream.toolStatus.calledFailed', { name: localizedName });
   } else {
