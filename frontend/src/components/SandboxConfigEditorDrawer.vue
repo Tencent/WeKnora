@@ -430,24 +430,16 @@
         </div>
         <div v-else class="env-empty">{{ $t('settings.sandbox.noEnvVars') }}</div>
       </section>
-    </t-form>
 
-    <!--
-      Skills need an image to be installed into, so this step is only reachable
-      once the config exists. During creation the wizard walks into it right
-      after the first successful save; the hint covers the one case left, a
-      config whose save was refused.
-    -->
-    <template v-if="currentStepKey === 'skills'">
-      <SandboxSkillsPanel
-        v-if="effectiveRecord"
-        :record="effectiveRecord"
-        @updated="onSkillsConfigUpdated"
-        @skills-changed="emit('skillsChanged')"
-        @in-flight-change="inFlightFromPanel = $event"
-      />
-      <p v-else class="skills-locked">{{ $t('settings.sandbox.stepSkillsLocked') }}</p>
-    </template>
+      <section v-if="currentStepKey === 'runtime'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillRollout') }}</h4>
+        <p class="section-help section-help--under-title">{{ $t('settings.sandbox.skillRolloutHint') }}</p>
+        <t-radio-group v-model="skillRollout" class="skill-rollout-group">
+          <t-radio value="next_turn">{{ $t('settings.sandbox.skillRolloutNextTurn') }}</t-radio>
+          <t-radio value="new_session">{{ $t('settings.sandbox.skillRolloutNewSession') }}</t-radio>
+        </t-radio-group>
+      </section>
+    </t-form>
 
     <div
       v-if="checkResult && showCheckResult"
@@ -486,13 +478,13 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
-import SandboxSkillsPanel from '@/components/SandboxSkillsPanel.vue'
 import {
   checkSandboxConfig,
   createSandboxConfig,
   parseSandboxConflict,
   updateSandboxConfigById,
   querySandboxTemplates,
+  listConfigSkills,
   type SandboxCheckItem,
   type SandboxCheckResult,
   type SandboxConfig,
@@ -506,22 +498,17 @@ import {
   NAMED_SANDBOX_BACKEND_TYPES,
 } from '@/api/system'
 
-type SandboxStepKey = 'connection' | 'template' | 'runtime' | 'skills'
+type SandboxStepKey = 'connection' | 'template' | 'runtime'
 
 const props = defineProps<{
   visible: boolean
   record: SandboxConfigRecord | null
   presetType?: string
-  // Which page to land on when opening an existing config, e.g. 'skills' from
-  // the card's 管理技能 entry. Ignored while creating, where order is enforced.
-  initialStep?: SandboxStepKey
-  hasInFlightSkill?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void
   (e: 'saved'): void
-  (e: 'skillsChanged', record?: SandboxConfigRecord): void
 }>()
 
 const { t } = useI18n()
@@ -566,6 +553,8 @@ const docker = reactive<SandboxDockerConfig>({})
 // mean "keep the saved key" instead of "no key configured".
 const storedSecrets = reactive({ cube: false, e2b: false })
 const envRows = ref<{ key: string; value: string; stored?: boolean }[]>([])
+const skillRollout = ref<'next_turn' | 'new_session'>('next_turn')
+const inFlightFromSkills = ref(false)
 const templates = ref<SandboxTemplate[]>([])
 const templatesLoading = ref(false)
 const templatesLoaded = ref(false)
@@ -593,7 +582,6 @@ const wizardSteps = computed<Array<{ key: SandboxStepKey; title: string }>>(() =
     steps.push({ key: 'template', title: t('settings.sandbox.stepTemplate') })
   }
   steps.push({ key: 'runtime', title: t('settings.sandbox.stepRuntime') })
-  steps.push({ key: 'skills', title: t('settings.sandbox.stepSkills') })
   return steps
 })
 const currentStepKey = computed<SandboxStepKey>(() => wizardSteps.value[wizardStep.value]?.key || 'connection')
@@ -601,14 +589,6 @@ const stepDescription = computed(() => t(`settings.sandbox.stepDescriptions.${cu
 const primaryText = computed(() => {
   if (currentStepKey.value === 'connection') return t('settings.sandbox.connectAndContinue')
   if (currentStepKey.value === 'template') return t('common.next')
-  // Nothing on the skills step is pending a save — each install, toggle and
-  // removal already went to the server on its own.
-  if (currentStepKey.value === 'skills') return t('common.finish')
-  // Runtime is the last page of settings. If skills follow, keep the wizard
-  // going after the save; otherwise this press closes the drawer.
-  if (wizardSteps.value.some((step) => step.key === 'skills')) {
-    return t('settings.sandbox.saveAndContinue')
-  }
   return t('common.save')
 })
 // Deep check needs the fields that actually get probed. Docker collects
@@ -625,29 +605,21 @@ const primaryDisabled = computed(() => (
 ))
 
 // savedRecord is the config this drawer is editing, including one it just
-// created: after the first save the wizard keeps going into the skills step,
-// which needs an ID, and a second press of save must update that config rather
-// than create another one.
+// created: a second press of save must update that config rather than create
+// another one if the admin walks back through the wizard before closing.
 const savedRecord = ref<SandboxConfigRecord | null>(null)
 const effectiveRecord = computed(() => savedRecord.value || props.record)
 const hasSkillSnapshot = computed(() => (
   Boolean(effectiveRecord.value?.config?.skill_image?.snapshot_id?.trim())
 ))
-const inFlightFromPanel = ref(false)
-const hasInFlightSkill = computed(() => Boolean(props.hasInFlightSkill) || inFlightFromPanel.value)
+const hasInFlightSkill = computed(() => inFlightFromSkills.value)
 const retargetFrozen = computed(() => hasSkillSnapshot.value || hasInFlightSkill.value)
-
-function onSkillsConfigUpdated(record: SandboxConfigRecord) {
-  savedRecord.value = record
-  emit('skillsChanged', record)
-}
 
 // Jumping is what separates editing from creating. A config that does not exist
 // yet has to be built in order — its connection has to check out before there
-// are templates to choose from, and it has no image to install skills into. Once
-// it exists, every step is just a page of its settings, so all of them open
-// directly; steps already visited stay clickable during creation so the rail
-// works as a way back.
+// are templates to choose from. Once it exists, every step is just a page of
+// its settings, so all of them open directly; steps already visited stay
+// clickable during creation so the rail works as a way back.
 function canJumpTo(index: number): boolean {
   if (index === wizardStep.value) return false
   return Boolean(effectiveRecord.value) || index < wizardStep.value
@@ -785,6 +757,7 @@ function reset() {
   envRows.value = Object.entries(cfg.env_vars || {}).map(([key, value]) => (
     isMaskedSecret(value) ? { key, value: '', stored: true } : { key, value }
   ))
+  skillRollout.value = cfg.skill_rollout === 'new_session' ? 'new_session' : 'next_turn'
   checkResult.value = null
   conflict.value = null
   nameError.value = ''
@@ -793,14 +766,7 @@ function reset() {
   templatesLoaded.value = false
   templatesError.value = ''
   savedRecord.value = null
-  inFlightFromPanel.value = false
   wizardStep.value = 0
-  // "管理技能" opens this drawer straight on the skills step. It is a jump like
-  // any other, so it only holds for a config that already exists.
-  if (props.initialStep && props.record) {
-    const index = wizardSteps.value.findIndex((step) => step.key === props.initialStep)
-    if (index >= 0) wizardStep.value = index
-  }
 }
 
 function selectBackend(value: string) {
@@ -812,12 +778,29 @@ function selectBackend(value: string) {
   onBackendChange()
 }
 
+async function refreshInFlightSkill() {
+  const id = props.record?.id
+  if (!id) {
+    inFlightFromSkills.value = false
+    return
+  }
+  try {
+    const res = await listConfigSkills(id)
+    inFlightFromSkills.value = (res?.data || []).some(
+      (skill) => skill.status === 'installing' || skill.status === 'removing',
+    )
+  } catch {
+    inFlightFromSkills.value = false
+  }
+}
+
 watch(() => props.visible, (open) => {
   if (open) {
     reset()
+    void refreshInFlightSkill()
   } else {
-    inFlightFromPanel.value = false
     stopTemplatePolling()
+    inFlightFromSkills.value = false
   }
 })
 
@@ -1056,7 +1039,7 @@ function collectPayload(): SandboxConfig {
     default_timeout_sec: defaultTimeoutSec.value || undefined,
     allow_private_endpoints: allowPrivateEndpoints.value || undefined,
     env_vars: envVars,
-    skill_rollout: effectiveRecord.value?.config?.skill_rollout,
+    skill_rollout: skillRollout.value,
   }
   // Send only the selected backend's block so an unused one cannot fail
   // validation (e.g. a stale private URL left in the other tab).
@@ -1108,10 +1091,6 @@ async function handlePrimaryAction() {
     wizardStep.value += 1
     return
   }
-  if (currentStepKey.value === 'skills') {
-    close()
-    return
-  }
   await save()
 }
 
@@ -1144,11 +1123,6 @@ async function save() {
     emit('saved')
     const saved = res?.data
     if (saved) savedRecord.value = saved
-    const skillsStep = wizardSteps.value.findIndex((step) => step.key === 'skills')
-    if (skillsStep >= 0 && savedRecord.value) {
-      wizardStep.value = skillsStep
-      return
-    }
     close()
   } catch (e: any) {
     const refusal = parseSandboxConflict(e)
@@ -1322,13 +1296,6 @@ onUnmounted(stopTemplatePolling)
   .is-done & {
     background: color-mix(in srgb, var(--td-brand-color) 35%, transparent);
   }
-}
-
-.skills-locked {
-  margin: 24px 0;
-  color: var(--td-text-color-placeholder);
-  font-size: 13px;
-  text-align: center;
 }
 
 .sandbox-editor-form {
@@ -1750,6 +1717,13 @@ onUnmounted(stopTemplatePolling)
   color: var(--td-text-color-placeholder);
   font-size: 12px;
   text-align: center;
+}
+
+.skill-rollout-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .section-help {

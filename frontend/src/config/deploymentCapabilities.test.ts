@@ -47,3 +47,8 @@ test('skill credentials follow the sandbox capability rather than a key of their
   assert.equal(SETTINGS_SECTION_CAPABILITY.envvars, 'settings.sandbox')
   assert.equal(SETTINGS_SECTION_CAPABILITY.envvars, SETTINGS_SECTION_CAPABILITY.sandbox)
 })
+
+test('the skill catalog follows the sandbox capability', () => {
+  assert.equal(SETTINGS_SECTION_CAPABILITY.skills, 'settings.sandbox')
+  assert.equal(SETTINGS_SECTION_CAPABILITY.skills, SETTINGS_SECTION_CAPABILITY.sandbox)
+})

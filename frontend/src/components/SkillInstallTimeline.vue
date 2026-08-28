@@ -135,7 +135,10 @@ async function follow(run: number): Promise<boolean> {
       throw new Error(`transcript stream refused: ${response.status}`)
     },
     onmessage(ev) {
-      if (run !== openRun || !props.live) return
+      // Live tail and post-refresh replay share this stream. The old guard
+      // dropped every frame when the skill was already ready, which is why
+      // reopening the popup after a refresh showed an empty transcript.
+      if (run !== openRun) return
       if (!ev.data) return
       let frame: any
       try {
@@ -172,11 +175,17 @@ async function open() {
   try {
     // A finished install already has durable rows. Replaying the event log
     // through processStreamChunk would animate every tool call again, which
-    // is what "view the run" must not do.
+    // is what "view the run" must not do. If the durable history is empty
+    // (which happens for maintenance sessions the chat message endpoint
+    // filters out), fall back to a one-shot transcript replay so the popup
+    // shows something on a refresh instead of the empty state.
     if (!props.live) {
       loading.value = true
       if (props.sessionId) {
         await loadPersisted(run)
+        if (!stale() && messages.length === 0 && props.messageId) {
+          await follow(run).catch(() => false)
+        }
       }
       return
     }

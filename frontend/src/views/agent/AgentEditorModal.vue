@@ -1298,6 +1298,14 @@
                           @click.prevent="uiStore.openSettings('sandbox')">
                           {{ $t('agent.editor.goSandboxSettings') }}
                         </a>
+                        <a
+                          v-if="hasSandboxSelected && canInstallSkills"
+                          href="javascript:void(0)"
+                          class="go-settings-link"
+                          @click.prevent="openSkillSettings"
+                        >
+                          {{ $t('agent.editor.goSkillSettings') }}
+                        </a>
                         <p v-if="sandboxConfigOptions.length === 0" class="desc empty-hint">
                           {{ $t('agent.editor.sandboxNoConfigs') }}
                         </p>
@@ -1319,7 +1327,15 @@
                           {{ $t('agent.editor.skillsNeedSandbox') }}
                         </p>
                         <p v-else-if="hasSandboxSelected && skillOptions.length === 0" class="desc empty-hint">
-                          {{ $t('agent.editor.noSkillsAvailable') }}
+                          <span>{{ $t('agent.editor.noSkillsAvailable') }}</span>
+                          <a
+                            v-if="canInstallSkills"
+                            href="javascript:void(0)"
+                            class="go-settings-link"
+                            @click.prevent="openSkillSettings"
+                          >
+                            {{ $t('agent.editor.goSkillSettings') }}
+                          </a>
                         </p>
                       </div>
                     </div>
@@ -1943,6 +1959,12 @@ const skillOptions = ref<{ name: string; description: string }[]>([]);
 // 是否允许启用 Skills（当前沙箱配置上有可执行技能时为 true；未选配置前为 false）
 const skillsAvailable = ref(false);
 const hasSandboxSelected = computed(() => !!formData.value.config.sandbox_config_id);
+const canInstallSkills = computed(() => authStore.hasRole('admin'));
+
+function openSkillSettings() {
+  const configId = formData.value.config.sandbox_config_id || ''
+  uiStore.openSettings('skills', configId || undefined)
+}
 
 function pruneSelectedSkills() {
   const configId = formData.value.config.sandbox_config_id || ''
@@ -5733,6 +5755,11 @@ const handleSave = async () => {
 .empty-hint {
   color: var(--td-text-color-placeholder);
   font-style: italic;
+
+  .go-settings-link {
+    display: inline-block;
+    font-style: normal;
+  }
 }
 
 
