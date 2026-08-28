@@ -267,6 +267,55 @@ func TestListPagedChunksByKnowledgeID_FiltersEnabledState(t *testing.T) {
 	assert.Len(t, allChunks, 2)
 }
 
+func TestListPagedChunksByKnowledgeID_WithoutChunkTypeReturnsAllTypes(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	chunks := []*types.Chunk{
+		makeChunk("kb-1", "doc-1", types.ChunkTypeText),
+		makeChunk("kb-1", "doc-1", types.ChunkTypeImageOCR),
+		makeChunk("kb-1", "doc-1", types.ChunkTypeImageCaption),
+		makeChunk("kb-1", "doc-2", types.ChunkTypeText),
+		makeChunk("kb-1", "doc-1", types.ChunkTypeText),
+	}
+	chunks[4].TenantID = 2
+	require.NoError(t, repo.CreateChunks(ctx, chunks))
+
+	got, total, err := repo.ListPagedChunksByKnowledgeID(
+		ctx, 1, "doc-1", &types.Pagination{Page: 1, PageSize: 20},
+		nil, nil, "", "", "", "", nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(3), total)
+	require.Len(t, got, 3)
+	assert.ElementsMatch(t,
+		[]string{types.ChunkTypeText, types.ChunkTypeImageOCR, types.ChunkTypeImageCaption},
+		[]string{got[0].ChunkType, got[1].ChunkType, got[2].ChunkType},
+	)
+}
+
+func TestListPagedChunksByKnowledgeID_WithChunkTypePreservesFilter(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{
+		makeChunk("kb-1", "doc-1", types.ChunkTypeText),
+		makeChunk("kb-1", "doc-1", types.ChunkTypeImageOCR),
+		makeChunk("kb-1", "doc-1", types.ChunkTypeImageCaption),
+	}))
+
+	got, total, err := repo.ListPagedChunksByKnowledgeID(
+		ctx, 1, "doc-1", &types.Pagination{Page: 1, PageSize: 20},
+		[]types.ChunkType{types.ChunkTypeImageOCR}, nil, "", "", "", "", nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, got, 1)
+	assert.Equal(t, types.ChunkTypeImageOCR, got[0].ChunkType)
+}
+
 func makeSuggestedFAQChunk(t *testing.T, kbID, knowledgeID, tagID, question string) *types.Chunk {
 	t.Helper()
 	chunk := makeChunk(kbID, knowledgeID, types.ChunkTypeFAQ)
