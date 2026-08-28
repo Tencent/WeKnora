@@ -1,8 +1,13 @@
 package service
 
 import (
+	"context"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -242,5 +247,136 @@ func TestDedupPairScore_UnrelatedCJKPair(t *testing.T) {
 	if s := dedupPairScore(a, b); s >= dedupCandidateScoreFloor {
 		t.Fatalf("expected unrelated CJK pair to score below floor %v, got %v",
 			dedupCandidateScoreFloor, s)
+	}
+}
+
+func TestNormalizeWikiIdentityTitlePreservesSemanticPunctuation(t *testing.T) {
+	if got := normalizeWikiIdentityTitle("  Acme  Corp "); got != "acmecorp" {
+		t.Fatalf("normalizeWikiIdentityTitle whitespace/case = %q, want acmecorp", got)
+	}
+	if normalizeWikiIdentityTitle("寓言") == normalizeWikiIdentityTitle("《寓言》") {
+		t.Fatal("concept title and work/chapter title must keep distinct identities")
+	}
+}
+
+func TestExactIdentityTargetSameTypeOnly(t *testing.T) {
+	item := extractedItem{Name: "孔子", Slug: "entity/kong-zi"}
+	pages := map[string]*types.WikiPageLite{
+		"entity/confucius": {
+			Slug:     "entity/confucius",
+			Title:    "孔 子",
+			PageType: types.WikiPageTypeEntity,
+		},
+		"concept/confucius": {
+			Slug:     "concept/confucius",
+			Title:    "孔子",
+			PageType: types.WikiPageTypeConcept,
+		},
+	}
+	candidates := map[string]bool{
+		"entity/confucius":  true,
+		"concept/confucius": true,
+	}
+	if got := exactIdentityTarget(item, types.WikiPageTypeEntity, candidates, pages); got != "entity/confucius" {
+		t.Fatalf("exactIdentityTarget = %q, want entity/confucius", got)
+	}
+}
+
+func TestWikiIdentityClaimConvergesDifferentSlugs(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+	svc := &wikiIngestService{redisClient: rdb}
+	ctx := context.Background()
+
+	proposals := []string{
+		"entity/kong-zi",
+		"entity/confucius",
+		"entity/kongzi",
+		"entity/kong-qiu",
+	}
+	results := make([]string, len(proposals))
+	var wg sync.WaitGroup
+	for i, proposal := range proposals {
+		i, proposal := i, proposal
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i] = svc.claimWikiIdentitySlug(
+				ctx, "kb-1", types.WikiPageTypeEntity, "孔 子", proposal, false, &WikiBatchContext{},
+			)
+		}()
+	}
+	wg.Wait()
+	for i := 1; i < len(results); i++ {
+		if results[i] != results[0] {
+			t.Fatalf("concurrent identity claims did not converge: %#v", results)
+		}
+	}
+
+	// A verified existing page is authoritative and replaces a provisional
+	// reservation left by an earlier map worker.
+	authoritative := svc.claimWikiIdentitySlug(
+		ctx, "kb-1", types.WikiPageTypeEntity, "孔子", "entity/confucius", true, &WikiBatchContext{},
+	)
+	third := svc.claimWikiIdentitySlug(
+		ctx, "kb-1", types.WikiPageTypeEntity, "孔子", "entity/kongzi", false, &WikiBatchContext{},
+	)
+	if authoritative != "entity/confucius" || third != authoritative {
+		t.Fatalf("authoritative identity did not replace claim: authoritative=%q third=%q", authoritative, third)
+	}
+}
+
+func TestWikiIdentityClaimKeepsDistinctTypesAndPunctuation(t *testing.T) {
+	batch := &WikiBatchContext{}
+	svc := &wikiIngestService{}
+	ctx := context.Background()
+
+	concept := svc.claimWikiIdentitySlug(
+		ctx, "kb-1", types.WikiPageTypeConcept, "寓言", "concept/fable-zhuangzi", false, batch,
+	)
+	chapter := svc.claimWikiIdentitySlug(
+		ctx, "kb-1", types.WikiPageTypeConcept, "《寓言》", "concept/yuyan-chapter", false, batch,
+	)
+	entity := svc.claimWikiIdentitySlug(
+		ctx, "kb-1", types.WikiPageTypeEntity, "寓言", "entity/yuyan-zhuangzi", false, batch,
+	)
+	if concept != "concept/fable-zhuangzi" || chapter != "concept/yuyan-chapter" || entity != "entity/yuyan-zhuangzi" {
+		t.Fatalf("distinct identities were collapsed: concept=%q chapter=%q entity=%q", concept, chapter, entity)
+	}
+}
+
+func TestStabilizeExtractedIdentitiesCoalescesEvidence(t *testing.T) {
+	svc := &wikiIngestService{}
+	batch := &WikiBatchContext{}
+	items := []extractedItem{
+		{
+			Name: "孔子", Slug: "entity/kong-zi", Aliases: []string{"孔丘"},
+			Description: "思想家", Details: "短", SourceChunks: []string{"chunk-1"},
+		},
+		{
+			Name: "孔 子", Slug: "entity/confucius", Aliases: []string{"Confucius"},
+			Description: "中国古代思想家、教育家", Details: "更完整的说明", SourceChunks: []string{"chunk-2"},
+		},
+	}
+	got := svc.stabilizeExtractedIdentities(
+		context.Background(), "kb-1", types.WikiPageTypeEntity, items, nil, batch,
+	)
+	if len(got) != 1 {
+		t.Fatalf("stabilized item count = %d, want 1", len(got))
+	}
+	if got[0].Slug != "entity/kong-zi" {
+		t.Fatalf("stabilized slug = %q, want first claimed slug", got[0].Slug)
+	}
+	if got[0].Description != "中国古代思想家、教育家" || got[0].Details != "更完整的说明" {
+		t.Fatalf("richer fallback text not preserved: %#v", got[0])
+	}
+	if len(got[0].SourceChunks) != 2 {
+		t.Fatalf("source chunks were not unioned: %#v", got[0].SourceChunks)
 	}
 }
