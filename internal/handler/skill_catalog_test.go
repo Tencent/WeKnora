@@ -19,11 +19,12 @@ import (
 )
 
 type fakeSkillCatalog struct {
-	list       []service.SkillCatalogView
-	registerID string
-	installs   map[string]string
-	deleteErr  error
-	source     string
+	list        []service.SkillCatalogView
+	registerID  string
+	installs    map[string]string
+	installErrs map[string]string
+	deleteErr   error
+	source      string
 }
 
 func (f *fakeSkillCatalog) ListCatalog(context.Context, uint64) ([]service.SkillCatalogView, error) {
@@ -45,8 +46,8 @@ func (f *fakeSkillCatalog) RegisterCatalogFromSource(
 
 func (f *fakeSkillCatalog) InstallCatalogToConfigs(
 	context.Context, uint64, string, []string,
-) (map[string]string, error) {
-	return f.installs, nil
+) (*service.CatalogInstallResult, error) {
+	return &service.CatalogInstallResult{Installs: f.installs, Errors: f.installErrs}, nil
 }
 
 func (f *fakeSkillCatalog) DeleteCatalog(context.Context, uint64, string) error {
@@ -129,6 +130,34 @@ func TestInstallCatalogAcceptsPerConfigIDs(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusAccepted, w.Code)
+}
+
+func TestInstallCatalogIncludesPerConfigErrors(t *testing.T) {
+	catalog := &fakeSkillCatalog{
+		installs:    map[string]string{"cfg-1": "sk-1"},
+		installErrs: map[string]string{"cfg-2": "sandbox config not found"},
+	}
+	router := newCatalogRouter(NewSkillHandler(&fakeUsableSkillLister{}, catalog))
+
+	body, err := json.Marshal(map[string][]string{"sandbox_config_ids": {"cfg-1", "cfg-2"}})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/skills/catalog/cat-1/install", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusAccepted, w.Code)
+
+	var payload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Installs map[string]string `json:"installs"`
+			Errors   map[string]string `json:"errors"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.False(t, payload.Success)
+	require.Equal(t, "sk-1", payload.Data.Installs["cfg-1"])
+	require.Equal(t, "sandbox config not found", payload.Data.Errors["cfg-2"])
 }
 
 func TestDeleteCatalogRefusesWhileInstalled(t *testing.T) {

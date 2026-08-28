@@ -100,8 +100,18 @@ func (s *TenantSkillService) skillBundleArchive(
 	if skill == nil {
 		return nil, apperrors.NewNotFoundError("skill not found")
 	}
+	hasRef := strings.TrimSpace(skill.BundleRef) != ""
 	if archive, ok := s.trySkillBundle(ctx, tenantID, skill); ok {
 		return archive, nil
+	}
+	if hasRef {
+		// The install named a blob that we could not read. Only substitute the
+		// catalog copy when it is the same digest — otherwise the admin would
+		// be looking at a different version than the image.
+		if archive, err := s.sameDigestCatalogArchive(ctx, tenantID, skill); err == nil && len(archive) > 0 {
+			return archive, nil
+		}
+		return nil, apperrors.NewNotFoundError("skill files are not available")
 	}
 	if cid := strings.TrimSpace(skill.CatalogID); cid != "" {
 		if archive, err := s.loadCatalogArchive(ctx, tenantID, cid); err == nil && len(archive) > 0 {
@@ -112,6 +122,26 @@ func (s *TenantSkillService) skillBundleArchive(
 		return archive, nil
 	}
 	return nil, apperrors.NewNotFoundError("skill files are not available")
+}
+
+func (s *TenantSkillService) sameDigestCatalogArchive(
+	ctx context.Context, tenantID uint64, skill *types.TenantSkillEntity,
+) ([]byte, error) {
+	if skill == nil || strings.TrimSpace(skill.BundleSHA256) == "" {
+		return nil, apperrors.NewNotFoundError("skill files are not available")
+	}
+	cid := strings.TrimSpace(skill.CatalogID)
+	if cid == "" {
+		cid = skill.ID
+	}
+	archive, err := s.loadCatalogArchive(ctx, tenantID, cid)
+	if err != nil {
+		return nil, err
+	}
+	if !archiveMatchesSHA(archive, skill.BundleSHA256) {
+		return nil, apperrors.NewNotFoundError("skill files are not available")
+	}
+	return archive, nil
 }
 
 func (s *TenantSkillService) trySkillBundle(

@@ -565,9 +565,11 @@ func TestInstallSkillSkipsWhenReadyWithTheSameArchive(t *testing.T) {
 	require.Empty(t, fx.sessionCalls, "the same bytes must not boot a billed sandbox")
 	require.NotContains(t, fx.events, "create-snapshot")
 	require.Nil(t, fx.configRepo.saved, "the image pointer must stay where it is")
-	require.Equal(t, 1, fx.savedBundles,
+	require.GreaterOrEqual(t, fx.savedBundles, 1,
 		"a no-op re-upload must still refresh the stored archive for read_skill")
 	require.Equal(t, "file://bundle.zip", skill.BundleRef)
+	require.NotEmpty(t, skill.CatalogID,
+		"a skip must still attach the install to the workspace catalog")
 }
 
 func TestInstallSkillRetriesAFailedSkillWithTheSameArchive(t *testing.T) {

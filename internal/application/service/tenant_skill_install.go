@@ -72,8 +72,19 @@ func (s *TenantSkillService) InstallSkill(
 		return "", err
 	}
 	if s.canSkipInstall(ctx, existing, bundle) {
+		catalog, catalogErr := s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, false)
+		if catalogErr != nil {
+			return "", fmt.Errorf("record skill catalog: %w", catalogErr)
+		}
 		if err := s.refreshSkippedBundle(ctx, existing, archive); err != nil {
 			return "", fmt.Errorf("store bundle for skill %s: %w", existing.ID, err)
+		}
+		if catalog != nil && existing.CatalogID != catalog.ID {
+			if err := s.updateSkillFields(ctx, tenantID, configID, existing.ID, func(e *types.TenantSkillEntity) {
+				e.CatalogID = catalog.ID
+			}); err != nil {
+				return "", err
+			}
 		}
 		return existing.ID, nil
 	}
@@ -100,7 +111,7 @@ func (s *TenantSkillService) InstallSkill(
 		if err := s.skills.CreateSkill(ctx, &types.TenantSkillEntity{
 			ID: skillID, TenantID: tenantID, SandboxConfigID: configID,
 			CatalogID: catalogID,
-			Name: bundle.Name, Version: bundle.Version,
+			Name:      bundle.Name, Version: bundle.Version,
 			Description: bundle.Description, Instructions: bundle.Instructions,
 			BundleSHA256: bundle.SHA256, Enabled: true,
 			Status: types.SkillStatusInstalling, InstallingSince: &now,

@@ -15,6 +15,7 @@ export interface SkillCatalogInstall {
   status: string;
   enabled: boolean;
   error?: string;
+  bundle_sha256?: string;
   updated_at: string;
 }
 
@@ -66,7 +67,7 @@ export function registerSkillCatalogFromFile(
 }
 
 export function installSkillCatalog(catalogId: string, sandboxConfigIds: string[]) {
-  return post<{ data: { installs: Record<string, string> } }>(
+  return post<{ data: { installs: Record<string, string>; errors?: Record<string, string> } }>(
     `/api/v1/skills/catalog/${catalogId}/install`,
     { sandbox_config_ids: sandboxConfigIds },
   );

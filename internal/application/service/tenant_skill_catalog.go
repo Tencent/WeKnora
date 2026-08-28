@@ -23,19 +23,20 @@ type SkillCatalogInstallView struct {
 	Status            string    `json:"status"`
 	Enabled           bool      `json:"enabled"`
 	Error             string    `json:"error,omitempty"`
+	BundleSHA256      string    `json:"bundle_sha256,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // SkillCatalogView is a tenant skill definition plus its sandbox installations.
 type SkillCatalogView struct {
-	ID            string                     `json:"id"`
-	Name          string                     `json:"name"`
-	Version       string                     `json:"version,omitempty"`
-	Description   string                     `json:"description,omitempty"`
-	BundleSHA256  string                     `json:"bundle_sha256,omitempty"`
-	CreatedAt     time.Time                  `json:"created_at"`
-	UpdatedAt     time.Time                  `json:"updated_at"`
-	Installations []SkillCatalogInstallView  `json:"installations"`
+	ID            string                    `json:"id"`
+	Name          string                    `json:"name"`
+	Version       string                    `json:"version,omitempty"`
+	Description   string                    `json:"description,omitempty"`
+	BundleSHA256  string                    `json:"bundle_sha256,omitempty"`
+	CreatedAt     time.Time                 `json:"created_at"`
+	UpdatedAt     time.Time                 `json:"updated_at"`
+	Installations []SkillCatalogInstallView `json:"installations"`
 }
 
 // ListCatalog returns every workspace skill definition and which sandbox
@@ -81,12 +82,23 @@ func (s *TenantSkillService) ListCatalog(
 
 	out := make([]SkillCatalogView, 0, len(catalogs)+len(unattached))
 	seenName := make(map[string]struct{}, len(catalogs))
+	seenCatalog := make(map[string]struct{}, len(catalogs))
 	for _, cat := range catalogs {
 		if cat == nil {
 			continue
 		}
 		seenName[cat.Name] = struct{}{}
+		seenCatalog[cat.ID] = struct{}{}
 		out = append(out, catalogView(cat, byCatalog[cat.ID], configByID))
+	}
+	// Installs whose catalog row was deleted (or never existed) would otherwise
+	// vanish: they are not unattached (catalog_id is set) and they are not
+	// rendered under any live definition.
+	for catalogID, rows := range byCatalog {
+		if _, ok := seenCatalog[catalogID]; ok {
+			continue
+		}
+		unattached = append(unattached, rows...)
 	}
 	// Rows that predate catalog_id (or tests that insert installs directly)
 	// still need to show up as definitions so the settings page is complete.
@@ -142,6 +154,7 @@ func installView(
 		Status:          row.Status,
 		Enabled:         row.Enabled,
 		Error:           row.Error,
+		BundleSHA256:    row.BundleSHA256,
 		UpdatedAt:       row.UpdatedAt,
 	}
 	if cfg := configByID[row.SandboxConfigID]; cfg != nil {
@@ -174,12 +187,20 @@ func (s *TenantSkillService) RegisterCatalogFromSource(
 	return s.RegisterCatalogFromArchive(ctx, tenantID, archive)
 }
 
+// CatalogInstallResult is the per-sandbox outcome of one catalog install call.
+// Partial success is a successful HTTP accept with Errors filled in, not a
+// silent 202: the caller has to be able to tell which configs never started.
+type CatalogInstallResult struct {
+	Installs map[string]string `json:"installs"`
+	Errors   map[string]string `json:"errors,omitempty"`
+}
+
 // InstallCatalogToConfigs copies a catalog skill onto each named sandbox using
 // the existing image-install pipeline. Missing configs are skipped with an
 // error; partial success is returned so the caller can show per-config status.
 func (s *TenantSkillService) InstallCatalogToConfigs(
 	ctx context.Context, tenantID uint64, catalogID string, configIDs []string,
-) (map[string]string, error) {
+) (*CatalogInstallResult, error) {
 	catalog, err := s.resolveCatalog(ctx, tenantID, catalogID)
 	if err != nil {
 		return nil, err
@@ -194,24 +215,31 @@ func (s *TenantSkillService) InstallCatalogToConfigs(
 		return nil, apperrors.NewBadRequestError("at least one sandbox is required")
 	}
 
-	accepted := make(map[string]string, len(ids))
+	result := &CatalogInstallResult{
+		Installs: make(map[string]string, len(ids)),
+		Errors:   make(map[string]string),
+	}
 	var firstErr error
 	for _, configID := range ids {
 		skillID, installErr := s.InstallSkill(ctx, tenantID, configID, archive)
 		if installErr != nil {
 			logger.Warnf(ctx, "[skill] install catalog %s onto config %s failed: %v",
 				catalogID, configID, installErr)
+			result.Errors[configID] = skillUserErrorMessage(installErr)
 			if firstErr == nil {
 				firstErr = installErr
 			}
 			continue
 		}
-		accepted[configID] = skillID
+		result.Installs[configID] = skillID
 	}
-	if len(accepted) == 0 {
-		return nil, firstErr
+	if len(result.Errors) == 0 {
+		result.Errors = nil
 	}
-	return accepted, nil
+	if len(result.Installs) == 0 {
+		return result, firstErr
+	}
+	return result, nil
 }
 
 // DeleteCatalog removes a definition that has no remaining installations.
@@ -229,13 +257,10 @@ func (s *TenantSkillService) DeleteCatalog(
 	if err != nil {
 		return err
 	}
-	live := 0
 	for _, row := range installs {
-		if row != nil && row.Status != types.SkillStatusRemoving {
-			live++
+		if row == nil {
+			continue
 		}
-	}
-	if live > 0 {
 		return apperrors.NewConflictError(
 			"remove this skill from every sandbox before deleting it from the catalog")
 	}
@@ -251,14 +276,18 @@ func (s *TenantSkillService) upsertCatalogFromBundle(
 	}
 	now := s.now()
 	if existing != nil {
+		stored, err := s.storeCatalogBundle(ctx, tenantID, existing, archive, requireStore)
+		if err != nil {
+			return nil, err
+		}
+		if !stored {
+			return existing, nil
+		}
 		existing.Version = bundle.Version
 		existing.Description = bundle.Description
 		existing.Instructions = bundle.Instructions
 		existing.BundleSHA256 = bundle.SHA256
 		existing.UpdatedAt = now
-		if err := s.storeCatalogBundle(ctx, tenantID, existing, archive, requireStore); err != nil {
-			return nil, err
-		}
 		if err := s.skills.UpdateCatalog(ctx, existing); err != nil {
 			return nil, err
 		}
@@ -268,11 +297,15 @@ func (s *TenantSkillService) upsertCatalogFromBundle(
 	row := &types.TenantSkillCatalogEntity{
 		ID: uuid.NewString(), TenantID: tenantID, Name: bundle.Name,
 		Version: bundle.Version, Description: bundle.Description,
-		Instructions: bundle.Instructions, BundleSHA256: bundle.SHA256,
-		CreatedAt: now, UpdatedAt: now,
+		Instructions: bundle.Instructions,
+		CreatedAt:    now, UpdatedAt: now,
 	}
-	if err := s.storeCatalogBundle(ctx, tenantID, row, archive, requireStore); err != nil {
+	stored, err := s.storeCatalogBundle(ctx, tenantID, row, archive, requireStore)
+	if err != nil {
 		return nil, err
+	}
+	if stored {
+		row.BundleSHA256 = bundle.SHA256
 	}
 	if err := s.skills.CreateCatalog(ctx, row); err != nil {
 		if !isSkillNameConflict(err) {
@@ -292,29 +325,40 @@ func (s *TenantSkillService) upsertCatalogFromBundle(
 
 func (s *TenantSkillService) storeCatalogBundle(
 	ctx context.Context, tenantID uint64, catalog *types.TenantSkillCatalogEntity, archive []byte, requireStore bool,
-) error {
+) (bool, error) {
 	if catalog == nil || len(archive) == 0 {
-		return nil
+		return false, nil
 	}
 	fs, err := s.fileServiceForTenant(ctx, tenantID)
 	if err != nil {
 		if requireStore {
-			return err
+			return false, err
 		}
 		logger.Warnf(ctx, "[skill] catalog bundle storage unavailable: %v", err)
-		return nil
+		return false, nil
 	}
 	ref, err := fs.SaveBytes(ctx, archive, tenantID,
 		fmt.Sprintf("tenant-skills/catalog/%s.zip", catalog.ID), false)
 	if err != nil {
 		if requireStore {
-			return fmt.Errorf("store catalog bundle: %w", err)
+			return false, fmt.Errorf("store catalog bundle: %w", err)
 		}
 		logger.Warnf(ctx, "[skill] catalog bundle store failed: %v", err)
-		return nil
+		return false, nil
 	}
 	catalog.BundleRef = ref
-	return nil
+	return true, nil
+}
+
+func skillUserErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	var app *apperrors.AppError
+	if errors.As(err, &app) && strings.TrimSpace(app.Message) != "" {
+		return app.Message
+	}
+	return err.Error()
 }
 
 func (s *TenantSkillService) resolveCatalog(
@@ -416,12 +460,16 @@ func (s *TenantSkillService) catalogBundleArchive(
 	if catalog == nil {
 		return nil, apperrors.NewNotFoundError("skill not found")
 	}
+	wantSHA := strings.TrimSpace(catalog.BundleSHA256)
 	tryRow := func(row *types.TenantSkillEntity) ([]byte, bool) {
 		if row == nil || strings.TrimSpace(row.BundleRef) == "" {
 			return nil, false
 		}
 		archive, err := s.downloadSkillBundle(ctx, tenantID, row)
 		if err != nil || len(archive) == 0 {
+			return nil, false
+		}
+		if wantSHA != "" && !archiveMatchesSHA(archive, wantSHA) {
 			return nil, false
 		}
 		return archive, true

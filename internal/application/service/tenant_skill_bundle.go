@@ -271,15 +271,30 @@ func skillBundleFromFiles(archive []byte, files map[string][]byte) (*SkillBundle
 		return nil, fmt.Errorf("%w: %v", ErrSkillBundleInvalid, err)
 	}
 
-	sum := sha256.Sum256(archive)
 	return &SkillBundle{
 		Name:         skill.Name,
 		Version:      version,
 		Description:  skill.Description,
 		Instructions: skill.Instructions,
-		SHA256:       hex.EncodeToString(sum[:]),
+		SHA256:       skillArchiveSHA256(archive),
 		Files:        files,
 	}, nil
+}
+
+func skillArchiveSHA256(archive []byte) string {
+	sum := sha256.Sum256(archive)
+	return hex.EncodeToString(sum[:])
+}
+
+// archiveMatchesSHA reports whether archive is the digest the row claims.
+// An empty expected digest is treated as unknown, not as a match against
+// whatever happens to be on disk — callers that want a fallback must opt in.
+func archiveMatchesSHA(archive []byte, want string) bool {
+	want = strings.TrimSpace(want)
+	if want == "" || len(archive) == 0 {
+		return false
+	}
+	return skillArchiveSHA256(archive) == want
 }
 
 // zipSkillFiles writes a deterministic skill-root zip so a remote archive that
