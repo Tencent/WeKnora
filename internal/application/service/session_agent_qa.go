@@ -435,8 +435,12 @@ func mergeResolvedTagKnowledgeIDs(
 	return uniqueNonEmptyStrings(merged)
 }
 
-// applyPerRequestSkillScope narrows the agent's skill whitelist to the @Skill
-// mentions for this turn and records the pinned set for the <must_use> hint.
+// applyPerRequestSkillScope records the @Skill mentions for this turn as the
+// pinned set that drives the <must_use> hint. It deliberately does NOT narrow
+// the allow-gate: an agent whose prompt requires a skill the user did not
+// @mention must still be able to read and execute it. Mentioning a skill only
+// prioritizes it, it never revokes access to the agent's configured set.
+//
 // It is a no-op when no skills were mentioned or skills are disabled.
 func applyPerRequestSkillScope(
 	ctx context.Context,
@@ -454,18 +458,11 @@ func applyPerRequestSkillScope(
 	if !agentConfig.SkillsEnabled {
 		return
 	}
-	switch skillsMode {
-	case "selected":
-		agentConfig.AllowedSkills = intersectPreservingRequestOrder(requested, agentConfig.AllowedSkills)
-		if len(agentConfig.AllowedSkills) == 0 {
-			agentConfig.SkillsEnabled = false
-		}
-	case "all":
-		agentConfig.AllowedSkills = dedupPreservingOrder(requested)
-	}
-	if agentConfig.SkillsEnabled && len(agentConfig.AllowedSkills) > 0 {
-		agentConfig.PinnedSkillNames = intersectPreservingRequestOrder(requested, agentConfig.AllowedSkills)
-	}
+	// PinnedSkillNames carries only mentioned skills that are currently
+	// allowed, so the <must_use> hint never directs the model at a skill it
+	// cannot load. An empty AllowedSkills means all skills are allowed,
+	// matching Manager.isSkillAllowed, so every mention is pinned in that case.
+	agentConfig.PinnedSkillNames = pinPreservingRequestOrder(requested, agentConfig.AllowedSkills)
 	logger.Infof(ctx, "Applied per-request @skill scope: requested=%v effective=%v pinned=%v",
 		requested, agentConfig.AllowedSkills, agentConfig.PinnedSkillNames)
 }
@@ -545,6 +542,33 @@ func intersectPreservingRequestOrder(requested []string, allowed []string) []str
 	seen := make(map[string]bool, len(requested))
 	for _, value := range requested {
 		if value == "" || seen[value] || !allowedSet[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
+
+// pinPreservingRequestOrder returns the requested skills that are allowed,
+// preserving request order. Unlike intersectPreservingRequestOrder, an empty
+// allowed list is treated as "all skills allowed" (matching
+// Manager.isSkillAllowed), so every requested skill is pinned.
+func pinPreservingRequestOrder(requested []string, allowed []string) []string {
+	allowedAll := len(allowed) == 0
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, value := range allowed {
+		if value != "" {
+			allowedSet[value] = true
+		}
+	}
+	result := make([]string, 0, len(requested))
+	seen := make(map[string]bool, len(requested))
+	for _, value := range requested {
+		if value == "" || seen[value] {
+			continue
+		}
+		if !allowedAll && !allowedSet[value] {
 			continue
 		}
 		seen[value] = true
