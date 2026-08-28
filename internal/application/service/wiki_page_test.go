@@ -634,4 +634,15 @@ func TestFindPagesByNormalizedTitleMatchesWhitespace(t *testing.T) {
 	none, err := svc.FindPagesByNormalizedTitle(ctx, "kb-id", types.WikiPageTypeConcept, "寓言")
 	require.NoError(t, err)
 	require.Empty(t, none, "punctuation-significant titles must stay distinct")
+
+	require.NoError(t, repo.Create(ctx, &types.WikiPage{
+		ID: "page-mencius", TenantID: 1, KnowledgeBaseID: "kb-id", Slug: "entity/mencius",
+		Title: "孟子", PageType: types.WikiPageTypeEntity, Status: types.WikiPageStatusPublished,
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}))
+	batched, err := svc.FindPagesByNormalizedTitles(ctx, "kb-id", types.WikiPageTypeEntity, []string{"孔子", "孟子", "孔子"})
+	require.NoError(t, err)
+	require.Len(t, batched, 2)
+	slugs := []string{batched[0].Slug, batched[1].Slug}
+	require.ElementsMatch(t, []string{"entity/confucius", "entity/mencius"}, slugs)
 }

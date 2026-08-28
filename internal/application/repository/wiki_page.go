@@ -1065,32 +1065,89 @@ func wikiNormalizedTitleSQL(db *gorm.DB) string {
 	return "regexp_replace(lower(title), '[[:space:]]+', '', 'g')"
 }
 
+const (
+	wikiNormalizedTitleQueryChunk = 100
+	wikiNormalizedTitleRowCap     = 500
+)
+
+func wikiNormalizedTitleLookupLimit(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	limit := n * 8
+	if limit < 50 {
+		limit = 50
+	}
+	if limit > wikiNormalizedTitleRowCap {
+		limit = wikiNormalizedTitleRowCap
+	}
+	return limit
+}
+
+func uniqNormalizedTitleIdentities(identities []string) []string {
+	if len(identities) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(identities))
+	out := make([]string, 0, len(identities))
+	for _, identity := range identities {
+		identity = strings.TrimSpace(identity)
+		if identity == "" {
+			continue
+		}
+		if _, ok := seen[identity]; ok {
+			continue
+		}
+		seen[identity] = struct{}{}
+		out = append(out, identity)
+	}
+	return out
+}
+
 // FindPagesByNormalizedTitle returns non-archived pages of pageType whose
 // whitespace-stripped, lowercased title equals identity.
 func (r *wikiPageRepository) FindPagesByNormalizedTitle(
 	ctx context.Context,
 	kbID, pageType, identity string,
 ) ([]*types.WikiPageLite, error) {
-	identity = strings.TrimSpace(identity)
-	if kbID == "" || pageType == "" || identity == "" {
+	return r.FindPagesByNormalizedTitles(ctx, kbID, pageType, []string{identity})
+}
+
+// FindPagesByNormalizedTitles returns non-archived pages of pageType whose
+// whitespace-stripped, lowercased title is in identities.
+func (r *wikiPageRepository) FindPagesByNormalizedTitles(
+	ctx context.Context,
+	kbID, pageType string,
+	identities []string,
+) ([]*types.WikiPageLite, error) {
+	identities = uniqNormalizedTitleIdentities(identities)
+	if kbID == "" || pageType == "" || len(identities) == 0 {
 		return nil, nil
 	}
 
-	var rows []types.WikiPageLite
-	if err := r.db.WithContext(ctx).
-		Model(&types.WikiPage{}).
-		Select("slug, title, page_type, status, aliases, out_links").
-		Where("knowledge_base_id = ? AND page_type = ? AND status <> ? AND "+wikiNormalizedTitleSQL(r.db)+" = ?",
-			kbID, pageType, types.WikiPageStatusArchived, identity).
-		Order("slug ASC").
-		Limit(50).
-		Scan(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]*types.WikiPageLite, len(rows))
-	for i := range rows {
-		row := rows[i]
-		out[i] = &row
+	normSQL := wikiNormalizedTitleSQL(r.db)
+	out := make([]*types.WikiPageLite, 0, len(identities))
+	for start := 0; start < len(identities); start += wikiNormalizedTitleQueryChunk {
+		end := start + wikiNormalizedTitleQueryChunk
+		if end > len(identities) {
+			end = len(identities)
+		}
+		chunk := identities[start:end]
+		var rows []types.WikiPageLite
+		if err := r.db.WithContext(ctx).
+			Model(&types.WikiPage{}).
+			Select("slug, title, page_type, status, aliases, out_links").
+			Where("knowledge_base_id = ? AND page_type = ? AND status <> ? AND "+normSQL+" IN ?",
+				kbID, pageType, types.WikiPageStatusArchived, chunk).
+			Order("slug ASC").
+			Limit(wikiNormalizedTitleLookupLimit(len(chunk))).
+			Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		for i := range rows {
+			row := rows[i]
+			out = append(out, &row)
+		}
 	}
 	return out, nil
 }

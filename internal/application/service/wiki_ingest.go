@@ -68,9 +68,10 @@ const (
 	// the same slug before summaries and page updates are materialized.
 	wikiIdentityClaimPrefix = "wiki:identity:"
 	wikiIdentityClaimTTL    = 2 * time.Hour
-	// wikiIdentityClaimScript atomically SetNX-or-GET (or overwrite when
-	// ARGV[3] is "1") so a lost SetNX cannot race a TTL expiry on a
-	// follow-up GET. KEYS[1]=claim key; ARGV = proposed slug, TTL seconds,
+	// wikiIdentityClaimScript atomically GET-or-SET (or overwrite when
+	// ARGV[3] is "1"). A valid existing slug wins and has its TTL refreshed.
+	// Missing or corrupt values are replaced so callers cannot diverge on a
+	// dirty key. KEYS[1]=claim key; ARGV = proposed slug, TTL seconds,
 	// authoritative ("0"/"1"), required slug prefix.
 	wikiIdentityClaimScript = `
 local proposed = ARGV[1]
@@ -80,14 +81,12 @@ if ARGV[3] == '1' then
   redis.call('SET', KEYS[1], proposed, 'EX', ttl)
   return proposed
 end
-if redis.call('SET', KEYS[1], proposed, 'NX', 'EX', ttl) then
-  return proposed
-end
 local existing = redis.call('GET', KEYS[1])
 if type(existing) == 'string' and string.sub(existing, 1, #prefix) == prefix then
   redis.call('EXPIRE', KEYS[1], ttl)
   return existing
 end
+redis.call('SET', KEYS[1], proposed, 'EX', ttl)
 return proposed
 `
 	// wikiSlugLockTTL bounds the per-slug lock so a crashed reducer can't
@@ -1335,6 +1334,12 @@ type WikiBatchContext struct {
 	// serializes batches, so they still need to converge before Reduce groups
 	// updates by slug. The map is batch-scoped and disappears with the batch.
 	identityClaims sync.Map
+
+	// identityPages memoizes exact title lookups for this batch so concurrent
+	// map workers probing the same (page type, normalized title) share one DB
+	// round-trip. Values are []*types.WikiPageLite, including empty slices
+	// for confirmed misses.
+	identityPages sync.Map
 }
 
 // SlugUpdate represents a single update operation for a specific slug
@@ -2281,10 +2286,6 @@ func xmlEscape(s string) string {
 }
 
 // deduplicateExtractedBatch deduplicates both entities and concepts against
-// existing wiki pages in a single LLM call. Uses pre-loaded allPages to avoid
-// redundant DB queries. This replaces the two separate deduplicateItems calls
-// that each queried ListAllPages + made a separate LLM call.
-// deduplicateExtractedBatch deduplicates both entities and concepts against
 // existing wiki pages in a single LLM call. Pre-filters candidates via the
 // pg_trgm trigram index on lower(title) — every new item issues a
 // FindSimilarPages probe and the union of top-K hits across all items is
@@ -2362,8 +2363,8 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	for _, c := range concepts {
 		probe(c)
 	}
-	s.attachExactIdentityPages(ctx, kbID, types.WikiPageTypeEntity, entities, candidatePages, itemCandidates)
-	s.attachExactIdentityPages(ctx, kbID, types.WikiPageTypeConcept, concepts, candidatePages, itemCandidates)
+	s.attachExactIdentityPages(ctx, kbID, types.WikiPageTypeEntity, entities, candidatePages, itemCandidates, batchCtx)
+	s.attachExactIdentityPages(ctx, kbID, types.WikiPageTypeConcept, concepts, candidatePages, itemCandidates, batchCtx)
 
 	// Resolve exact same-type, same-title candidates deterministically before
 	// asking the model about semantic/alias variants. Besides avoiding an LLM

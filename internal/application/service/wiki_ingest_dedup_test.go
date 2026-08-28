@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 func TestDedupMergeRejectReason(t *testing.T) {
@@ -356,11 +357,11 @@ func TestStabilizeExtractedIdentitiesCoalescesEvidence(t *testing.T) {
 	batch := &WikiBatchContext{}
 	items := []extractedItem{
 		{
-			Name: "孔子", Slug: "entity/kong-zi", Aliases: []string{"孔丘"},
+			Name: "孔 子", Slug: "entity/kong-zi", Aliases: []string{"孔丘"},
 			Description: "思想家", Details: "短", SourceChunks: []string{"chunk-1"},
 		},
 		{
-			Name: "孔 子", Slug: "entity/confucius", Aliases: []string{"Confucius"},
+			Name: "孔子", Slug: "entity/confucius", Aliases: []string{"Confucius"},
 			Description: "中国古代思想家、教育家", Details: "更完整的说明", SourceChunks: []string{"chunk-2"},
 		},
 	}
@@ -372,6 +373,9 @@ func TestStabilizeExtractedIdentitiesCoalescesEvidence(t *testing.T) {
 	}
 	if got[0].Slug != "entity/kong-zi" {
 		t.Fatalf("stabilized slug = %q, want first claimed slug", got[0].Slug)
+	}
+	if got[0].Name != "孔子" {
+		t.Fatalf("compact display name not preferred: %#v", got[0])
 	}
 	if got[0].Description != "中国古代思想家、教育家" || got[0].Details != "更完整的说明" {
 		t.Fatalf("richer fallback text not preserved: %#v", got[0])
@@ -504,6 +508,11 @@ func TestRemapSlugUpdatesByIdentityConverges(t *testing.T) {
 	if len(got["entity/kong-zi"]) != 2 {
 		t.Fatalf("entity updates should coalesce onto claimed slug: %#v", got)
 	}
+	for _, u := range got["entity/kong-zi"] {
+		if u.Item.Slug != "entity/kong-zi" {
+			t.Fatalf("remap left Item.Slug stale: %#v", u)
+		}
+	}
 	if len(got["summary/doc"]) != 1 {
 		t.Fatalf("summary slug should stay untouched: %#v", got)
 	}
@@ -529,5 +538,103 @@ func TestReclaimExtractedIdentitiesCoalescesCitationSlugs(t *testing.T) {
 	}
 	if len(concepts) != 0 {
 		t.Fatalf("unexpected concepts: %#v", concepts)
+	}
+}
+
+func TestWikiIdentityClaimReplacesInvalidRedisValue(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+	svc := &wikiIngestService{redisClient: rdb}
+	ctx := context.Background()
+	identity := normalizeWikiIdentityTitle("孔子")
+	if err := rdb.Set(ctx, wikiIdentityClaimPrefix+"kb-1:"+types.WikiPageTypeEntity+":"+identity, "garbage", wikiIdentityClaimTTL).Err(); err != nil {
+		t.Fatalf("seed invalid redis claim: %v", err)
+	}
+
+	first := svc.claimWikiIdentitySlug(ctx, "kb-1", types.WikiPageTypeEntity, "孔子", "entity/kong-zi", false, &WikiBatchContext{})
+	if first != "entity/kong-zi" {
+		t.Fatalf("invalid redis value should be replaced: got %q", first)
+	}
+	second := svc.claimWikiIdentitySlug(ctx, "kb-1", types.WikiPageTypeEntity, "孔子", "entity/confucius", false, &WikiBatchContext{})
+	if second != "entity/kong-zi" {
+		t.Fatalf("callers did not converge after replacing invalid value: %q", second)
+	}
+}
+
+type stubNormalizedTitleWiki struct {
+	interfaces.WikiPageService
+	mu    sync.Mutex
+	calls int
+	last  []string
+	pages []*types.WikiPageLite
+}
+
+func (s *stubNormalizedTitleWiki) FindPagesByNormalizedTitles(
+	_ context.Context, _, _ string, identities []string,
+) ([]*types.WikiPageLite, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls++
+	s.last = append([]string(nil), identities...)
+	want := make(map[string]bool, len(identities))
+	for _, id := range identities {
+		want[id] = true
+	}
+	out := make([]*types.WikiPageLite, 0, len(s.pages))
+	for _, p := range s.pages {
+		if p != nil && want[normalizeWikiIdentityTitle(p.Title)] {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+func TestAttachExactIdentityPagesBatchesAndCaches(t *testing.T) {
+	stub := &stubNormalizedTitleWiki{
+		pages: []*types.WikiPageLite{
+			{Slug: "entity/confucius", Title: "孔 子", PageType: types.WikiPageTypeEntity},
+		},
+	}
+	svc := &wikiIngestService{wikiService: stub}
+	batch := &WikiBatchContext{}
+	ctx := context.Background()
+	items := []extractedItem{
+		{Name: "孔子", Slug: "entity/kong-zi"},
+		{Name: "孔 子", Slug: "entity/kongqiu"},
+		{Name: "孟子", Slug: "entity/mencius"},
+	}
+
+	candidatePages := make(map[string]*types.WikiPageLite)
+	itemCandidates := make(map[string]map[string]bool)
+	svc.attachExactIdentityPages(ctx, "kb-1", types.WikiPageTypeEntity, items, candidatePages, itemCandidates, batch)
+	if stub.calls != 1 {
+		t.Fatalf("expected 1 batched lookup, got %d identities=%v", stub.calls, stub.last)
+	}
+	if !itemCandidates["entity/kong-zi"]["entity/confucius"] || !itemCandidates["entity/kongqiu"]["entity/confucius"] {
+		t.Fatalf("exact page not bound to both romanizations: %#v", itemCandidates)
+	}
+	if itemCandidates["entity/mencius"]["entity/confucius"] {
+		t.Fatalf("confucius page leaked onto 孟子: %#v", itemCandidates)
+	}
+
+	svc.attachExactIdentityPages(ctx, "kb-1", types.WikiPageTypeEntity, items, candidatePages, itemCandidates, batch)
+	if stub.calls != 1 {
+		t.Fatalf("batch cache should skip the second lookup, got %d", stub.calls)
+	}
+
+	svc.attachExactIdentityPages(ctx, "kb-1", types.WikiPageTypeEntity, append(items,
+		extractedItem{Name: "荀子", Slug: "entity/xunzi"},
+	), candidatePages, itemCandidates, batch)
+	if stub.calls != 2 {
+		t.Fatalf("cache miss should query only the new identity, got %d last=%v", stub.calls, stub.last)
+	}
+	if len(stub.last) != 1 || stub.last[0] != normalizeWikiIdentityTitle("荀子") {
+		t.Fatalf("second lookup should only ask for 荀子: %v", stub.last)
 	}
 }
