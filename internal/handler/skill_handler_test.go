@@ -47,7 +47,7 @@ func TestListSkillsHidesThePickerWhenNoSandboxConfigIsSelected(t *testing.T) {
 	lister := &fakeUsableSkillLister{
 		skills: []*types.TenantSkillEntity{{Name: "ppt-generator", Description: "make ppt"}},
 	}
-	router := newChatSkillRouter(NewSkillHandler(lister))
+	router := newChatSkillRouter(NewSkillHandler(lister, nil))
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/skills", nil))
@@ -71,7 +71,7 @@ func TestListSkillsReturnsUsableInstalledSkillsForTheSelectedConfig(t *testing.T
 			{Name: "ppt-generator", Description: "make ppt"},
 		},
 	}
-	router := newChatSkillRouter(NewSkillHandler(lister))
+	router := newChatSkillRouter(NewSkillHandler(lister, nil))
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(

@@ -429,6 +429,35 @@ func TestSandboxConfigRoutesRequireFullAccessOnly(t *testing.T) {
 	}
 }
 
+func TestSkillCatalogWriteRoutesRequireFullAccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+	RegisterSkillRoutes(v1, &handler.SkillHandler{}, g)
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/v1/skills/catalog"},
+		{http.MethodPost, "/api/v1/skills/catalog/:id/install"},
+		{http.MethodGet, "/api/v1/skills/catalog/:id/files"},
+		{http.MethodGet, "/api/v1/skills/catalog/:id/files/content"},
+		{http.MethodDelete, "/api/v1/skills/catalog/:id"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+			if !policy.RequireFullAccess {
+				t.Fatal("catalog writes bake into sandbox images and must require full access")
+			}
+			if len(policy.Capabilities) != 0 {
+				t.Fatalf("catalog writes must not be granted by a scoped capability: %#v", policy.Capabilities)
+			}
+		})
+	}
+}
+
 func TestTenantMemberRoutesDeclareManageMembersCapability(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	g := &rbacGuards{}

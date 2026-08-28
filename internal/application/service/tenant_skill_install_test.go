@@ -1858,6 +1858,7 @@ type installSkillRepo struct {
 	mu        sync.Mutex
 	skills    map[string]*types.TenantSkillEntity
 	snapshots map[string]*types.TenantSkillSnapshotEntity
+	catalogs  map[string]*types.TenantSkillCatalogEntity
 	// updateFailsWhen models a transient write failure for one kind of row
 	// state, so a test can fail the terminal bookkeeping write without
 	// disabling every other write the run makes.
@@ -1890,6 +1891,7 @@ func newInstallSkillRepo() *installSkillRepo {
 	return &installSkillRepo{
 		skills:    map[string]*types.TenantSkillEntity{},
 		snapshots: map[string]*types.TenantSkillSnapshotEntity{},
+		catalogs:  map[string]*types.TenantSkillCatalogEntity{},
 	}
 }
 
@@ -2252,6 +2254,84 @@ func (r *installSkillRepo) DeleteUserEnvVarsByConfig(
 	}
 	r.userEnvs = kept
 	return nil
+}
+
+func (r *installSkillRepo) CreateCatalog(_ context.Context, e *types.TenantSkillCatalogEntity) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.catalogs == nil {
+		r.catalogs = map[string]*types.TenantSkillCatalogEntity{}
+	}
+	cp := *e
+	r.catalogs[e.ID] = &cp
+	return nil
+}
+
+func (r *installSkillRepo) GetCatalog(_ context.Context, _ uint64, catalogID string) (*types.TenantSkillCatalogEntity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	stored := r.catalogs[catalogID]
+	if stored == nil {
+		return nil, nil
+	}
+	cp := *stored
+	return &cp, nil
+}
+
+func (r *installSkillRepo) GetCatalogByName(_ context.Context, tenantID uint64, name string) (*types.TenantSkillCatalogEntity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, row := range r.catalogs {
+		if row.TenantID == tenantID && row.Name == name {
+			cp := *row
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *installSkillRepo) ListCatalogsByTenant(_ context.Context, tenantID uint64) ([]*types.TenantSkillCatalogEntity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*types.TenantSkillCatalogEntity
+	for _, row := range r.catalogs {
+		if row.TenantID == tenantID {
+			cp := *row
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (r *installSkillRepo) UpdateCatalog(_ context.Context, e *types.TenantSkillCatalogEntity) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.catalogs == nil {
+		r.catalogs = map[string]*types.TenantSkillCatalogEntity{}
+	}
+	cp := *e
+	r.catalogs[e.ID] = &cp
+	return nil
+}
+
+func (r *installSkillRepo) DeleteCatalog(_ context.Context, _ uint64, catalogID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.catalogs, catalogID)
+	return nil
+}
+
+func (r *installSkillRepo) ListSkillsByCatalog(_ context.Context, tenantID uint64, catalogID string) ([]*types.TenantSkillEntity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*types.TenantSkillEntity
+	for _, row := range r.skills {
+		if row.TenantID == tenantID && row.CatalogID == catalogID {
+			cp := *row
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
 }
 
 var _ repository.TenantSkillRepository = (*installSkillRepo)(nil)

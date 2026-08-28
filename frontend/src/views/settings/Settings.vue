@@ -158,7 +158,7 @@
                     <SandboxSettings />
                   </div>
 
-                  <!-- 技能目录：安装到所选沙箱镜像，智能体只从中选用 -->
+                  <!-- 技能目录：登记后可装到多份沙箱，智能体只从当前沙箱的就绪集合选用 -->
                   <div v-if="currentSection === 'skills'" class="section">
                     <SkillSettings :initial-sandbox-id="currentSubSection" />
                   </div>

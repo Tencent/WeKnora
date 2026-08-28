@@ -50,6 +50,10 @@ type TenantSkillEntity struct {
 	ID              string `gorm:"type:varchar(36);primaryKey"`
 	TenantID        uint64
 	SandboxConfigID string `gorm:"type:varchar(36)"`
+	// CatalogID points at the tenant-level skill definition this install
+	// was created from. Empty on rows that predate the catalog migration
+	// and have not been backfilled yet.
+	CatalogID string `gorm:"type:varchar(36);index"`
 
 	// Name is the SKILL.md frontmatter name and the directory under
 	// /opt/weknora/tenant/skills. Same-name reinstalls keep this value so the
@@ -130,3 +134,23 @@ type TenantSkillSnapshotEntity struct {
 
 // TableName pins the table so GORM's pluralizer cannot drift.
 func (e *TenantSkillSnapshotEntity) TableName() string { return "tenant_skill_snapshots" }
+
+// TenantSkillCatalogEntity is one workspace skill definition. It does not
+// belong to a sandbox: installations onto a config's image are TenantSkillEntity
+// rows that point back here.
+type TenantSkillCatalogEntity struct {
+	ID           string `gorm:"type:varchar(36);primaryKey"`
+	TenantID     uint64
+	Name         string `gorm:"type:varchar(255);not null"`
+	Version      string `gorm:"type:varchar(64)"`
+	Description  string `gorm:"type:text"`
+	Instructions string `gorm:"type:text"`
+	BundleRef    string `gorm:"type:varchar(1024)"`
+	BundleSHA256 string `gorm:"type:varchar(64)"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    gorm.DeletedAt
+}
+
+// TableName pins the table so GORM's pluralizer cannot drift.
+func (e *TenantSkillCatalogEntity) TableName() string { return "tenant_skill_catalog" }

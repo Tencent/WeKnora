@@ -26,13 +26,16 @@ func newSkillTestRepoWithDB(t *testing.T) (TenantSkillRepository, *gorm.DB) {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
 		&types.TenantSkillEntity{}, &types.TenantSkillSnapshotEntity{},
-		&types.TenantUserEnvVar{},
+		&types.TenantUserEnvVar{}, &types.TenantSkillCatalogEntity{},
 	))
 	// AutoMigrate cannot express the partial unique index, so add it here to
 	// match the production migration.
 	require.NoError(t, db.Exec(
 		`CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_skills_config_name
 		 ON tenant_skills (sandbox_config_id, name) WHERE deleted_at IS NULL`).Error)
+	require.NoError(t, db.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_skill_catalog_name
+		 ON tenant_skill_catalog (tenant_id, name) WHERE deleted_at IS NULL`).Error)
 	return NewTenantSkillRepository(db), db
 }
 
@@ -441,4 +444,32 @@ func TestListSkillsByTenantSpansConfigsAndStopsAtTheTenant(t *testing.T) {
 	}
 	require.ElementsMatch(t, []string{"sk-a", "sk-b"}, ids,
 		"every config of the tenant, and nothing from another tenant")
+}
+
+func TestCatalogNameIsUniquePerTenant(t *testing.T) {
+	repo := newSkillTestRepo(t)
+	ctx := context.Background()
+
+	require.NoError(t, repo.CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
+		ID: "cat-a", TenantID: 7, Name: "pdf",
+	}))
+	got, err := repo.GetCatalogByName(ctx, 7, "pdf")
+	require.NoError(t, err)
+	require.Equal(t, "cat-a", got.ID)
+
+	err = repo.CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
+		ID: "cat-b", TenantID: 7, Name: "pdf",
+	})
+	require.Error(t, err, "same tenant cannot hold two catalog rows of one name")
+
+	require.NoError(t, repo.CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
+		ID: "cat-other", TenantID: 8, Name: "pdf",
+	}))
+
+	install := skillRow("sk-a", "cfg-1", "pdf")
+	install.CatalogID = "cat-a"
+	require.NoError(t, repo.CreateSkill(ctx, install))
+	list, err := repo.ListSkillsByCatalog(ctx, 7, "cat-a")
+	require.NoError(t, err)
+	require.Len(t, list, 1)
 }
