@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/base64"
+	"strings"
 	"sync"
 	"testing"
 
@@ -169,6 +170,32 @@ func TestProjectSkillFileContentMarksBinaryWithoutInlining(t *testing.T) {
 	require.True(t, got.Binary)
 	require.Equal(t, skillFileEncodingBinary, got.Encoding)
 	require.Empty(t, got.Content)
+}
+
+func TestListSkillFilesDoesNotFallbackToADifferentCatalogBundle(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	other := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('other')\n",
+	})
+	fx.storedBundles = map[string][]byte{"file://catalog.zip": other}
+	require.NoError(t, fx.skillRepo.CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
+		ID: "cat-1", TenantID: 7, Name: "pdf-tools",
+		BundleRef: "file://catalog.zip", BundleSHA256: skillArchiveSHA256(other),
+	}))
+	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	skill.CatalogID = "cat-1"
+	skill.BundleRef = "file://missing.zip"
+	skill.BundleSHA256 = strings.Repeat("a", 64)
+	require.NoError(t, fx.skillRepo.UpdateSkill(ctx, skill))
+
+	_, err = fx.svc.ListSkillFiles(ctx, 7, "cfg-1", "sk-1")
+	require.Error(t, err)
+	appErr, ok := apperrors.IsAppError(err)
+	require.True(t, ok)
+	require.Equal(t, 404, appErr.HTTPCode)
 }
 
 func (f *installFixture) seedStoredSkillBundle(t *testing.T) {

@@ -11,6 +11,7 @@ const manageBlock = source.slice(
 test('focused skill management expands env vars and transcript without a mid-page save button', () => {
   assert.match(manageBlock, /skillHasDeclaredEnvs\(managedSkill\)/)
   assert.match(manageBlock, /onEnvFieldBlur/)
+  assert.match(source, /isBusy\(skill\) \|\| !hasEnvEdits\(skill\)/)
   assert.match(manageBlock, /SkillInstallTimeline/)
   assert.match(manageBlock, /settings\.skills\.manageUninstall/)
   assert.match(manageBlock, /skill-manage__progress/)

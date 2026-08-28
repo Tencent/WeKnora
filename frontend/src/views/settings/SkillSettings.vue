@@ -100,9 +100,9 @@
                     :key="inst.skill_id"
                     type="button"
                     class="skill-card__chip"
-                    :class="installChipClass(inst)"
+                    :class="installChipClass(item, inst)"
                     :disabled="!recordFor(inst.sandbox_config_id)"
-                    :title="installTooltip(inst)"
+                    :title="installTooltip(item, inst)"
                     :aria-label="$t('settings.skills.manageOnSandbox', { name: installName(inst) })"
                     @click="openManage(item, inst)"
                   >
@@ -117,8 +117,8 @@
                       size="xs"
                     />
                     <span class="skill-card__chip-name">{{ installName(inst) }}</span>
-                    <span v-if="installChipStatus(inst)" class="skill-card__chip-status">
-                      {{ installChipStatus(inst) }}
+                    <span v-if="installChipStatus(item, inst)" class="skill-card__chip-status">
+                      {{ installChipStatus(item, inst) }}
                     </span>
                     <t-icon
                       v-else
@@ -577,6 +577,14 @@ function compactText(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
 }
 
+function installOutdated(item: SkillCatalogItem, inst: SkillCatalogInstall): boolean {
+  return Boolean(
+    item.bundle_sha256
+    && inst.bundle_sha256
+    && item.bundle_sha256 !== inst.bundle_sha256,
+  )
+}
+
 function installStatusText(inst: SkillCatalogInstall): string {
   if (inst.status === 'installing') return t('settings.sandbox.skillStatusInstalling')
   if (inst.status === 'removing') return t('settings.sandbox.skillStatusRemoving')
@@ -586,7 +594,10 @@ function installStatusText(inst: SkillCatalogInstall): string {
   return inst.status
 }
 
-function installChipStatus(inst: SkillCatalogInstall): string {
+function installChipStatus(item: SkillCatalogItem, inst: SkillCatalogInstall): string {
+  if (inst.status === 'ready' && inst.enabled && installOutdated(item, inst)) {
+    return t('settings.skills.installOutdated')
+  }
   if (inst.status === 'ready' && inst.enabled) return ''
   return installStatusText(inst)
 }
@@ -595,10 +606,11 @@ function isInstallBusy(inst: SkillCatalogInstall): boolean {
   return inst.status === 'installing' || inst.status === 'removing'
 }
 
-function installChipClass(inst: SkillCatalogInstall): string {
+function installChipClass(item: SkillCatalogItem, inst: SkillCatalogInstall): string {
   if (inst.status === 'failed') return 'skill-card__chip--failed'
   if (isInstallBusy(inst)) return 'skill-card__chip--busy'
   if (inst.status === 'ready' && !inst.enabled) return 'skill-card__chip--off'
+  if (installOutdated(item, inst)) return 'skill-card__chip--stale'
   return 'skill-card__chip--ready'
 }
 
@@ -606,11 +618,11 @@ function installName(inst: SkillCatalogInstall): string {
   return inst.sandbox_config_name || inst.sandbox_config_id
 }
 
-function installTooltip(inst: SkillCatalogInstall): string {
+function installTooltip(item: SkillCatalogItem, inst: SkillCatalogInstall): string {
   const parts = [
     inst.sandbox_config_name || inst.sandbox_config_id,
     inst.sandbox_type ? backendLabel(inst.sandbox_type) : '',
-    installStatusText(inst),
+    installChipStatus(item, inst) || installStatusText(inst),
   ].filter(Boolean)
   return parts.join(' · ')
 }
@@ -818,6 +830,10 @@ async function registerThenAdvance() {
   }
 }
 
+function catalogInstallFailedCount(res: { data?: { errors?: Record<string, string> } } | null | undefined): number {
+  return Object.keys(res?.data?.errors || {}).length
+}
+
 async function handleAddPrimary() {
   if (addPrimaryLoading.value || addPrimaryDisabled.value) return
   if (addStep.value === 0) {
@@ -835,8 +851,13 @@ async function handleAddPrimary() {
   installing.value = true
   try {
     await ensureInstallerModelIfNeeded(targets)
-    await installSkillCatalog(catalogId, targets)
-    MessagePlugin.success(t('settings.skills.installAccepted'))
+    const res = await installSkillCatalog(catalogId, targets)
+    const failed = catalogInstallFailedCount(res)
+    if (failed > 0) {
+      MessagePlugin.warning(t('settings.skills.installPartial', { failed }))
+    } else {
+      MessagePlugin.success(t('settings.skills.installAccepted'))
+    }
     showAdd.value = false
     await loadCatalog()
     revealCatalog(catalogId)
@@ -865,8 +886,13 @@ async function confirmInstall() {
   installing.value = true
   try {
     await ensureInstallerModelIfNeeded(installTargetIds.value)
-    await installSkillCatalog(item.id, [...installTargetIds.value])
-    MessagePlugin.success(t('settings.skills.installAccepted'))
+    const res = await installSkillCatalog(item.id, [...installTargetIds.value])
+    const failed = catalogInstallFailedCount(res)
+    if (failed > 0) {
+      MessagePlugin.warning(t('settings.skills.installPartial', { failed }))
+    } else {
+      MessagePlugin.success(t('settings.skills.installAccepted'))
+    }
     showInstall.value = false
     await loadCatalog()
     revealCatalog(item.id)
@@ -1282,6 +1308,12 @@ onUnmounted(() => {
 
   &--off {
     color: var(--td-text-color-placeholder);
+  }
+
+  &--stale {
+    color: var(--td-warning-color);
+    background: color-mix(in srgb, var(--td-warning-color) 10%, transparent);
+    border-color: color-mix(in srgb, var(--td-warning-color) 24%, transparent);
   }
 
   &--add {

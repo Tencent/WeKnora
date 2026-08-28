@@ -87,7 +87,7 @@
                 :value="managedSkill.enabled"
                 :disabled="isBusy(managedSkill)"
                 :loading="togglingId === managedSkill.id"
-                @change="(v: any) => toggleEnabled(managedSkill, Boolean(v))"
+                @change="(v: any) => managedSkill && toggleEnabled(managedSkill, Boolean(v))"
               />
               <t-tooltip
                 v-if="managedSkill.status === 'failed'"
@@ -157,7 +157,7 @@
                     type="password"
                     autocomplete="new-password"
                     :name="`wk-se-focus-${envIdx}`"
-                    :readonly="!isEnvInputUnlocked(managedSkill.id, env.name)"
+                    :readonly="isBusy(managedSkill) || !isEnvInputUnlocked(managedSkill.id, env.name)"
                     spellcheck="false"
                     :placeholder="
                       env.is_set
@@ -165,7 +165,7 @@
                         : $t('settings.sandbox.skillEnv.placeholderUnset')
                     "
                     @focus="unlockEnvInput(managedSkill.id, env.name)"
-                    @update:value="(v: string) => setEnvDraft(managedSkill.id, env.name, v)"
+                    @update:value="(v: string) => managedSkill && setEnvDraft(managedSkill.id, env.name, v)"
                     @enter="saveEnvs(managedSkill, true)"
                     @blur="onEnvFieldBlur(managedSkill)"
                   />
@@ -841,6 +841,7 @@ function envSaveInFlight(skill: ConfigSkill): boolean {
 }
 
 async function saveEnvs(skill: ConfigSkill, silent = false) {
+  if (isBusy(skill)) return
   const envs = envPayload(skill)
   if (Object.keys(envs).length === 0) return
   if (Object.values(envs).some((value) => !isValidEnvValueLength(value))) {
@@ -853,7 +854,7 @@ async function saveEnvs(skill: ConfigSkill, silent = false) {
 }
 
 function onEnvFieldBlur(skill: ConfigSkill) {
-  if (!hasEnvEdits(skill) || envSaveInFlight(skill)) return
+  if (isBusy(skill) || !hasEnvEdits(skill) || envSaveInFlight(skill)) return
   void saveEnvs(skill, true)
 }
 

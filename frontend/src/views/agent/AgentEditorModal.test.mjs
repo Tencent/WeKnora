@@ -135,6 +135,8 @@ test('agent skill picker uses the catalog and only enables ready installs', () =
   assert.match(source, /showCatalogSkillList/)
   assert.match(source, /skillsSelectionMode\.value !== 'none'/)
   assert.match(source, /:disabled="!skill\.selectable"/)
+  assert.match(source, /catalogPendingCount/)
+  assert.match(source, /installPartial/)
   assert.match(source, /installCatalogToCurrent/)
   assert.match(source, /agent\.editor\.installToThisSandbox/)
   assert.match(source, /skill-pick-list/)

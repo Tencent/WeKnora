@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -141,14 +142,24 @@ func (h *SkillHandler) InstallCatalog(c *gin.Context) {
 		_ = c.Error(apperrors.NewBadRequestError("invalid install request"))
 		return
 	}
-	accepted, err := h.catalog.InstallCatalogToConfigs(
+	result, err := h.catalog.InstallCatalogToConfigs(
 		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), req.SandboxConfigIDs,
 	)
 	if err != nil {
 		respondSkillServiceError(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": gin.H{"installs": accepted}})
+	if result == nil {
+		result = &service.CatalogInstallResult{}
+	}
+	data := gin.H{"installs": result.Installs}
+	if len(result.Errors) > 0 {
+		data["errors"] = result.Errors
+	}
+	c.JSON(http.StatusAccepted, gin.H{
+		"success": len(result.Errors) == 0,
+		"data":    data,
+	})
 }
 
 // DeleteCatalog godoc

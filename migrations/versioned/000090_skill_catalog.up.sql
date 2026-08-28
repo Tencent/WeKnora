@@ -29,9 +29,10 @@ ALTER TABLE tenant_skills ADD COLUMN IF NOT EXISTS catalog_id VARCHAR(36);
 CREATE INDEX IF NOT EXISTS idx_tenant_skills_catalog
     ON tenant_skills (catalog_id);
 
--- One catalog row per (tenant, name), using the oldest live install as the id
--- so existing rows keep a stable identity. Later installs of the same name
--- point at it via catalog_id.
+-- One catalog row per (tenant, name). Names are the workspace identity, so
+-- same-name installs on different sandboxes collapse here. Prefer a row that
+-- still has a stored archive, then the most recently updated one, so the
+-- definition matches what operators last wrote rather than the first upload.
 INSERT INTO tenant_skill_catalog (
     id, tenant_id, name, version, description, instructions,
     bundle_ref, bundle_sha256, created_at, updated_at
@@ -41,7 +42,10 @@ SELECT DISTINCT ON (tenant_id, name)
     bundle_ref, bundle_sha256, created_at, updated_at
 FROM tenant_skills
 WHERE deleted_at IS NULL
-ORDER BY tenant_id, name, created_at ASC
+ORDER BY tenant_id, name,
+    CASE WHEN bundle_ref IS NULL OR bundle_ref = '' THEN 1 ELSE 0 END,
+    updated_at DESC,
+    created_at DESC
 ON CONFLICT (id) DO NOTHING;
 
 UPDATE tenant_skills AS s

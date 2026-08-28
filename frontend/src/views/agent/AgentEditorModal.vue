@@ -2044,7 +2044,7 @@ const catalogReadyCount = computed(() =>
 )
 
 const catalogPendingCount = computed(() =>
-  catalogSkillRows.value.filter((skill) => !skill.installed || skill.installStatus === 'failed').length,
+  catalogSkillRows.value.filter((skill) => !skill.selectable).length,
 )
 
 const skillListSummary = computed(() => {
@@ -2117,8 +2117,13 @@ async function installCatalogToCurrent(skill: CatalogSkillRow) {
   if (!configId || installingCatalogId.value) return
   installingCatalogId.value = skill.id
   try {
-    await installSkillCatalog(skill.id, [configId])
-    MessagePlugin.success(t('settings.skills.installAccepted'))
+    const res = await installSkillCatalog(skill.id, [configId])
+    const failed = Object.keys(res?.data?.errors || {}).length
+    if (failed > 0) {
+      MessagePlugin.warning(t('settings.skills.installPartial', { failed }))
+    } else {
+      MessagePlugin.success(t('settings.skills.installAccepted'))
+    }
     await syncInstalledSkills(true)
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.sandbox.skillUploadFailed'))
