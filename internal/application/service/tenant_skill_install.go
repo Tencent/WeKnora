@@ -78,17 +78,28 @@ func (s *TenantSkillService) InstallSkill(
 		return existing.ID, nil
 	}
 
+	catalog, err := s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, false)
+	if err != nil {
+		return "", fmt.Errorf("record skill catalog: %w", err)
+	}
+	catalogID := ""
+	if catalog != nil {
+		catalogID = catalog.ID
+	}
+
 	skillID := uuid.NewString()
 	now := s.now()
 	if existing != nil {
 		skillID = existing.ID
 		takeSkillRowForInstall(existing, bundle, now)
+		existing.CatalogID = catalogID
 		if err := s.skills.UpdateSkill(ctx, existing); err != nil {
 			return "", err
 		}
 	} else {
 		if err := s.skills.CreateSkill(ctx, &types.TenantSkillEntity{
 			ID: skillID, TenantID: tenantID, SandboxConfigID: configID,
+			CatalogID: catalogID,
 			Name: bundle.Name, Version: bundle.Version,
 			Description: bundle.Description, Instructions: bundle.Instructions,
 			BundleSHA256: bundle.SHA256, Enabled: true,
@@ -108,6 +119,7 @@ func (s *TenantSkillService) InstallSkill(
 			}
 			skillID = winner.ID
 			takeSkillRowForInstall(winner, bundle, now)
+			winner.CatalogID = catalogID
 			if err := s.skills.UpdateSkill(ctx, winner); err != nil {
 				return "", err
 			}

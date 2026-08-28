@@ -906,6 +906,28 @@ func (r *reaperSkillStore) DeleteUserEnvVarsByConfig(context.Context, uint64, st
 	panic("DeleteUserEnvVarsByConfig is outside the reaper surface")
 }
 
+func (r *reaperSkillStore) CreateCatalog(context.Context, *types.TenantSkillCatalogEntity) error {
+	panic("CreateCatalog is outside the reaper surface")
+}
+func (r *reaperSkillStore) GetCatalog(context.Context, uint64, string) (*types.TenantSkillCatalogEntity, error) {
+	panic("GetCatalog is outside the reaper surface")
+}
+func (r *reaperSkillStore) GetCatalogByName(context.Context, uint64, string) (*types.TenantSkillCatalogEntity, error) {
+	panic("GetCatalogByName is outside the reaper surface")
+}
+func (r *reaperSkillStore) ListCatalogsByTenant(context.Context, uint64) ([]*types.TenantSkillCatalogEntity, error) {
+	panic("ListCatalogsByTenant is outside the reaper surface")
+}
+func (r *reaperSkillStore) UpdateCatalog(context.Context, *types.TenantSkillCatalogEntity) error {
+	panic("UpdateCatalog is outside the reaper surface")
+}
+func (r *reaperSkillStore) DeleteCatalog(context.Context, uint64, string) error {
+	panic("DeleteCatalog is outside the reaper surface")
+}
+func (r *reaperSkillStore) ListSkillsByCatalog(context.Context, uint64, string) ([]*types.TenantSkillEntity, error) {
+	panic("ListSkillsByCatalog is outside the reaper surface")
+}
+
 type reaperConfigStore struct {
 	entity *types.TenantSandboxConfigEntity
 }
