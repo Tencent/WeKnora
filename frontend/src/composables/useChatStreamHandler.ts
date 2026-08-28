@@ -760,9 +760,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           if (toolCallEvent) {
             toolCallEvent.pending = false
             toolCallEvent.success = success
-            toolCallEvent.output = success
-              ? dataPayload.output || data.content
-              : dataPayload.error || data.content
+            // Keep stdout/markdown on failure. The error field is often just
+            // "exited with code 1" plus a retry hint; the streams live on
+            // output / tool_data and are what the terminal card should show.
+            toolCallEvent.output = dataPayload.output || data.content
             toolCallEvent.error = !success ? dataPayload.error || data.content : undefined
             const duration =
               dataPayload.duration_ms !== undefined ? dataPayload.duration_ms : dataPayload.duration

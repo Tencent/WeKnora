@@ -144,16 +144,16 @@ func CompactToolOutputForHistory(toolName string, result *types.ToolResult) stri
 	if result == nil {
 		return ""
 	}
-	if !result.Success {
-		if result.Error != "" {
-			return "Error: " + result.Error
-		}
-		return "Error: tool call failed"
-	}
 	if isSandboxContentTool(toolName) {
 		if rebuilt := compactSandboxHistory(result); rebuilt != "" {
-			return rebuilt
+			if result.Success {
+				return rebuilt
+			}
+			return failedToolVisibleContent(rebuilt, result.Error)
 		}
+	}
+	if !result.Success {
+		return failedToolVisibleContent(result.Output, result.Error)
 	}
 	if result.Output != "" && !ShouldOmitRawToolOutput(toolName, result.Data) {
 		return result.Output
@@ -162,7 +162,25 @@ func CompactToolOutputForHistory(toolName string, result *types.ToolResult) stri
 }
 
 func isSandboxContentTool(toolName string) bool {
-	return toolName == ToolShellExec || toolName == ToolReadSandboxFile
+	return toolName == ToolShellExec || toolName == ToolReadSandboxFile || toolName == ToolExecuteSkillScript
+}
+
+// failedToolVisibleContent keeps stdout/stderr (in Output) when a tool fails.
+// Error is often a one-line exit status plus a retry hint; the streams are
+// what the model needs to change arguments instead of guessing.
+func failedToolVisibleContent(output, errMsg string) string {
+	output = strings.TrimSpace(output)
+	errMsg = strings.TrimSpace(errMsg)
+	switch {
+	case output == "" && errMsg == "":
+		return "Error: tool call failed"
+	case output == "":
+		return "Error: " + errMsg
+	case errMsg == "" || strings.Contains(output, errMsg):
+		return output
+	default:
+		return output + "\n\nError: " + errMsg
+	}
 }
 
 func compactHistoricalSandboxOutput(output string) string {

@@ -206,14 +206,16 @@ func (t *ExecuteSkillScriptTool) Execute(ctx context.Context, args json.RawMessa
 	success := result.IsSuccess()
 
 	resultData := map[string]interface{}{
-		"skill_name":  input.SkillName,
-		"script_path": input.ScriptPath,
-		"args":        input.Args,
-		"exit_code":   result.ExitCode,
-		"stdout":      result.Stdout,
-		"stderr":      result.Stderr,
-		"duration_ms": result.Duration.Milliseconds(),
-		"killed":      result.Killed,
+		"display_type": "shell_exec",
+		"command":      skillScriptCommand(input),
+		"skill_name":   input.SkillName,
+		"script_path":  input.ScriptPath,
+		"args":         input.Args,
+		"exit_code":    result.ExitCode,
+		"stdout":       result.Stdout,
+		"stderr":       result.Stderr,
+		"duration_ms":  result.Duration.Milliseconds(),
+		"killed":       result.Killed,
 	}
 
 	logger.Infof(ctx, "[Tool][ExecuteSkillScript] Script completed with exit code: %d", result.ExitCode)
@@ -232,6 +234,18 @@ func (t *ExecuteSkillScriptTool) Execute(ctx context.Context, args json.RawMessa
 			return ""
 		}(),
 	}, nil
+}
+
+func skillScriptCommand(input ExecuteSkillScriptInput) string {
+	parts := make([]string, 0, 1+len(input.Args))
+	switch {
+	case input.SkillName != "" && input.ScriptPath != "":
+		parts = append(parts, input.SkillName+"/"+input.ScriptPath)
+	case input.ScriptPath != "":
+		parts = append(parts, input.ScriptPath)
+	}
+	parts = append(parts, input.Args...)
+	return strings.Join(parts, " ")
 }
 
 // Cleanup releases any resources
