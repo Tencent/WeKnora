@@ -238,6 +238,39 @@ func TestContentFailureStoresCategoryAndKeepsVideoPlayable(t *testing.T) {
 	}
 }
 
+func TestDeterministicExternalFileErrorDoesNotRetry(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&model.Video{}, &model.VideoProcessingJob{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	video := model.Video{ID: uuid.NewString(), Title: "unsupported media", Status: model.VideoStatusProcessing, FileURL: "https://cdn/video.mp4"}
+	job := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "transcription", Status: "running", AttemptCount: 1, MaxAttempts: 3,
+		ExternalTaskID: "tingwu-task-file-error", IdempotencyKey: "transcription:" + video.ID,
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	engine := NewEngine(db, &config.WorkerConfig{}, &failingHandler{jobType: "transcription", err: errors.New("听悟失败 Code=TSC.FileError Msg=unsupported media codec")})
+	engine.dispatch(context.Background(), &job)
+
+	var got model.VideoProcessingJob
+	if err := db.First(&got, "id = ?", job.ID).Error; err != nil {
+		t.Fatalf("load job: %v", err)
+	}
+	if got.Status != "failed" || got.AttemptCount != 1 || got.ErrorCategory != ErrorCategoryExternalTask || got.ErrorCode != "source_file_rejected" {
+		t.Fatalf("deterministic file failure = %#v", got)
+	}
+}
+
 func TestClassifyProcessingError(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -250,6 +283,7 @@ func TestClassifyProcessingError(t *testing.T) {
 		{name: "authentication", err: errors.New("tingwu create status 401: InvalidAccessKeyId"), category: "configuration_auth", code: "authentication_failed"},
 		{name: "rate limit", err: errors.New("tingwu create status 429: rate limit exceeded"), category: "external_task", code: "external_task_failed"},
 		{name: "external failure", err: errors.New("听悟失败 Code=TaskFailed Msg=no audio"), category: "external_task", code: "external_task_failed"},
+		{name: "external file error", err: errors.New("听悟失败 Code=TSC.FileError Msg=unsupported media codec"), category: "external_task", code: "source_file_rejected"},
 		{name: "response parse", err: errors.New("decode tingwu get: invalid character"), category: "response_parse", code: "response_parse"},
 		{name: "empty transcript", err: errors.New("transcript contains no non-empty timed sentences"), category: "response_parse", code: "response_parse"},
 		{name: "object storage", err: errors.New("upload srt: put object failed"), category: "object_storage", code: "object_storage_operation"},

@@ -39,6 +39,8 @@ func ClassifyProcessingError(err error) (string, string) {
 		return ErrorCategoryObjectStorage, "object_storage_operation"
 	case containsAny(message, "weknora", "knowledge ", "知识库", "create session", "trigger skill", "agent chat"):
 		return ErrorCategoryWeKnora, "weknora_operation"
+	case containsAny(message, "tsc.fileerror", "source file rejected"):
+		return ErrorCategoryExternalTask, "source_file_rejected"
 	case containsAny(message, "parse ", "unmarshal", "decode ", "结果为空", "result payload is empty", "invalid timeline", "no non-empty timed sentences", "transcript contains no", "无有效文本"):
 		return ErrorCategoryResponseParse, "response_parse"
 	case containsAny(message, "tingwu", "听悟", "external task", "task failed", "rate limit", "限流"):

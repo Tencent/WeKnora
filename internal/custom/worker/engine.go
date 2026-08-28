@@ -189,7 +189,7 @@ func (e *Engine) dispatch(ctx context.Context, job *model.VideoProcessingJob) {
 			"component", "content-worker", "video_id", job.VideoID, "job_id", job.ID,
 			"job_type", job.JobType, "transcript_generation", job.TranscriptGeneration,
 			"attempt", job.AttemptCount, "error_category", category, "error_code", code, "error", err)
-		if job.AttemptCount >= job.MaxAttempts {
+		if code == "source_file_rejected" || job.AttemptCount >= job.MaxAttempts {
 			e.markFailed(job, category, code, err.Error(), err)
 		} else {
 			// 退避：重置 pending 等下一轮 tick 重试

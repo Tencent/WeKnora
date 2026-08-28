@@ -61,6 +61,8 @@ func TestEmbeddedMigrationsAreComplete(t *testing.T) {
 	for _, file := range []string{
 		"000008_processing_observability.up.sql",
 		"000008_processing_observability.down.sql",
+		"000009_transcription_source.up.sql",
+		"000009_transcription_source.down.sql",
 	} {
 		content, err := fs.ReadFile(FS, file)
 		if err != nil {

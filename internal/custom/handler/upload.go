@@ -83,11 +83,12 @@ func (h *UploadHandler) Presign(c *gin.Context) {
 
 	// 同步落 videos 记录（status=pending_upload），前端 confirm 后切到 uploaded
 	video := model.Video{
-		ID:              videoID,
-		Title:           strings.TrimSuffix(req.Filename, filepath.Ext(req.Filename)),
-		FileURL:         h.MinIO.PublicURL(objectKey),
-		Status:          model.VideoStatusUploading,
-		UploadObjectKey: objectKey,
+		ID:                     videoID,
+		Title:                  strings.TrimSuffix(req.Filename, filepath.Ext(req.Filename)),
+		FileURL:                h.MinIO.PublicURL(objectKey),
+		TranscriptionSourceURL: h.MinIO.PublicURL(objectKey),
+		Status:                 model.VideoStatusUploading,
+		UploadObjectKey:        objectKey,
 	}
 	if err := h.DB.Create(&video).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "create video record: " + err.Error()})
@@ -135,13 +136,14 @@ func (h *UploadHandler) Direct(c *gin.Context) {
 
 	now := time.Now().UTC()
 	video := model.Video{
-		ID:              videoID,
-		Title:           strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename)),
-		FileURL:         h.MinIO.PublicURL(objectKey),
-		Status:          model.VideoStatusUploaded,
-		UploadObjectKey: objectKey,
-		VideoType:       videoType,
-		UploadedAt:      &now,
+		ID:                     videoID,
+		Title:                  strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename)),
+		FileURL:                h.MinIO.PublicURL(objectKey),
+		TranscriptionSourceURL: h.MinIO.PublicURL(objectKey),
+		Status:                 model.VideoStatusUploaded,
+		UploadObjectKey:        objectKey,
+		VideoType:              videoType,
+		UploadedAt:             &now,
 	}
 	jobID, err := createUploadedVideoWithJob(h.DB, &video)
 	if err != nil {
@@ -184,6 +186,7 @@ func (h *UploadHandler) Confirm(c *gin.Context) {
 	jobID, err := finalizeUploadedVideo(h.DB, req.VideoID, req.ObjectKey, map[string]any{
 		"status":                   model.VideoStatusUploaded,
 		"file_url":                 h.MinIO.PublicURL(req.ObjectKey),
+		"transcription_source_url": h.MinIO.PublicURL(req.ObjectKey),
 		"duration_seconds":         req.DurationSeconds,
 		"video_type":               req.VideoType,
 		"uploaded_at":              now,
@@ -639,6 +642,7 @@ func (h *UploadHandler) MultipartComplete(c *gin.Context) {
 	jobID, err := finalizeUploadedVideo(h.DB, req.VideoID, req.ObjectKey, map[string]any{
 		"status":                   model.VideoStatusUploaded,
 		"file_url":                 h.MinIO.PublicURL(req.ObjectKey),
+		"transcription_source_url": h.MinIO.PublicURL(req.ObjectKey),
 		"uploaded_at":              now,
 		"processing_error_summary": "",
 	})
@@ -707,6 +711,7 @@ func (h *UploadHandler) RetryInitialProcessing(c *gin.Context) {
 		if err := tx.Model(&model.Video{}).Where("id = ?", videoID).Updates(map[string]any{
 			"status":                   model.VideoStatusUploaded,
 			"file_url":                 h.MinIO.PublicURL(current.UploadObjectKey),
+			"transcription_source_url": h.MinIO.PublicURL(current.UploadObjectKey),
 			"processing_error_summary": "",
 		}).Error; err != nil {
 			return err

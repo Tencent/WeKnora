@@ -119,7 +119,7 @@ func main() {
 		}
 		if contentWorkersEnabled {
 			handlers = append(handlers,
-				worker.NewTranscriptionHandler(db, tongyiCli, cfg.Tongyi.InternalFrontendBaseURL),
+				worker.NewTranscriptionHandler(db, tongyiCli),
 				worker.NewSubtitleGenerateHandler(db, minioCli, tongyiCli),
 				worker.NewIndexHandler(db, weknoraCli, orchestrator),
 				&worker.GraphHandler{BaseSkillHandler: base},

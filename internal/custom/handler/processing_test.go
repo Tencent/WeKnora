@@ -95,15 +95,22 @@ func TestRetryFailedStageReusesSameJob(t *testing.T) {
 	}
 
 	handler := NewProcessingHandler(db)
-	for attempt := 0; attempt < 2; attempt++ {
-		recorder := httptest.NewRecorder()
-		context, _ := gin.CreateTestContext(recorder)
-		context.Params = gin.Params{{Key: "id", Value: video.ID}, {Key: "jobType", Value: "outline"}}
-		context.Request = httptest.NewRequest(http.MethodPost, "/api/custom/videos/"+video.ID+"/processing-jobs/outline/retry", nil)
-		handler.Retry(context)
-		if recorder.Code != http.StatusOK {
-			t.Fatalf("attempt %d status = %d, body = %s", attempt+1, recorder.Code, recorder.Body.String())
-		}
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}, {Key: "jobType", Value: "outline"}}
+	context.Request = httptest.NewRequest(http.MethodPost, "/api/custom/videos/"+video.ID+"/processing-jobs/outline/retry", nil)
+	handler.Retry(context)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("first retry status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+
+	recorder = httptest.NewRecorder()
+	context, _ = gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}, {Key: "jobType", Value: "outline"}}
+	context.Request = httptest.NewRequest(http.MethodPost, "/api/custom/videos/"+video.ID+"/processing-jobs/outline/retry", nil)
+	handler.Retry(context)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("duplicate retry status = %d, want %d, body = %s", recorder.Code, http.StatusConflict, recorder.Body.String())
 	}
 
 	var jobs []model.VideoProcessingJob
@@ -128,6 +135,42 @@ func TestRetryFailedStageReusesSameJob(t *testing.T) {
 	}
 }
 
+func TestRetryRunningStageRejectsDuplicateExecution(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "running retry", FileURL: "https://cdn.example.com/video.mp4",
+		Status: model.VideoStatusProcessing, TranscriptGeneration: "generation-running",
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	runningJob := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "transcription", Provider: "aliyun_tingwu",
+		TranscriptGeneration: video.TranscriptGeneration, Status: "running", AttemptCount: 1, MaxAttempts: 3,
+		ExternalTaskID: "tingwu-task-running", IdempotencyKey: "transcription:" + video.ID,
+	}
+	if err := db.Create(&runningJob).Error; err != nil {
+		t.Fatalf("create running job: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}, {Key: "jobType", Value: "transcription"}}
+	context.Request = httptest.NewRequest(http.MethodPost, "/api/custom/videos/"+video.ID+"/processing-jobs/transcription/retry", nil)
+	NewProcessingHandler(db).Retry(context)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("retry status = %d, want %d, body = %s", recorder.Code, http.StatusConflict, recorder.Body.String())
+	}
+	var got model.VideoProcessingJob
+	if err := db.First(&got, "id = ?", runningJob.ID).Error; err != nil {
+		t.Fatalf("load running job: %v", err)
+	}
+	if got.Status != "running" || got.AttemptCount != 1 || got.ExternalTaskID != runningJob.ExternalTaskID {
+		t.Fatalf("running job changed after rejected retry: %#v", got)
+	}
+}
+
 func TestSucceededStageWithMissingArtifactBecomesRetryable(t *testing.T) {
 	db := openTestVideoDB(t)
 	video := model.Video{
@@ -148,6 +191,9 @@ func TestSucceededStageWithMissingArtifactBecomesRetryable(t *testing.T) {
 	status := buildProcessingStatus(video, []model.VideoProcessingJob{job})
 	if status.Status != ProcessingStateFailed || status.Failure == nil || status.Failure.Code != "content_artifact_missing" {
 		t.Fatalf("processing status = %#v", status)
+	}
+	if len(status.Jobs) != 1 || status.Jobs[0].Status != "failed" || status.Jobs[0].ErrorCode != "content_artifact_missing" {
+		t.Fatalf("stage status = %#v", status.Jobs)
 	}
 	if status.RetryableJob == nil || status.RetryableJob.JobID != job.ID {
 		t.Fatalf("retryable job = %#v", status.RetryableJob)

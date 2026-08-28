@@ -130,6 +130,9 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 		if retried.Status == "succeeded" && stageArtifactAvailable(video, retried) {
 			return errStageAlreadySucceeded
 		}
+		if retried.Status == "pending" || retried.Status == "running" {
+			return errStageInProgress
+		}
 		if retried.Status == "failed" || retried.Status == "cancelled" || retried.Status == "succeeded" {
 			updates := map[string]any{
 				"status": "pending", "progress": 0, "attempt_count": 0,
@@ -155,6 +158,10 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": "successful stage cannot be retried"})
 		return
 	}
+	if errors.Is(err, errStageInProgress) {
+		c.JSON(http.StatusConflict, gin.H{"error": "processing stage is already in progress"})
+		return
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -163,6 +170,7 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 }
 
 var errStageAlreadySucceeded = errors.New("processing stage already succeeded")
+var errStageInProgress = errors.New("processing stage is already in progress")
 
 func (h *ProcessingHandler) load(c *gin.Context) (model.Video, []model.VideoProcessingJob, bool) {
 	var video model.Video
@@ -209,7 +217,12 @@ func buildProcessingStatus(video model.Video, jobs []model.VideoProcessingJob) P
 		if !exists {
 			continue
 		}
-		response.Jobs = append(response.Jobs, processingJobStatus(job))
+		jobStatus := processingJobStatus(job)
+		if job.Status == "succeeded" && !stageArtifactAvailable(video, job) {
+			jobStatus.Status = "failed"
+			jobStatus.ErrorCategory, jobStatus.ErrorCode, jobStatus.ErrorMessage = missingStageArtifactError(stage)
+		}
+		response.Jobs = append(response.Jobs, jobStatus)
 		if job.UpdatedAt.After(response.UpdatedAt) {
 			response.UpdatedAt = job.UpdatedAt
 		}

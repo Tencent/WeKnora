@@ -14,11 +14,11 @@ package knowledge
 type KnowledgeType string
 
 const (
-	TypeEntity   KnowledgeType = "entity"
-	TypeConcept  KnowledgeType = "concept"
-	TypeCase     KnowledgeType = "case"
-	TypeMethod   KnowledgeType = "method"
-	TypeInsight  KnowledgeType = "insight"
+	TypeEntity  KnowledgeType = "entity"
+	TypeConcept KnowledgeType = "concept"
+	TypeCase    KnowledgeType = "case"
+	TypeMethod  KnowledgeType = "method"
+	TypeInsight KnowledgeType = "insight"
 )
 
 // SkillFrontmatterType skill 内部类型
@@ -80,13 +80,15 @@ func IsEntitySubType(t string) bool {
 
 // AnchorItem 关联知识条目（聚合 API 返回结构）
 type AnchorItem struct {
-	ID              string        `json:"id"`              // Wiki page id 或 knowledge id
+	ID              string        `json:"id"` // Wiki page id 或 knowledge id
 	Slug            string        `json:"slug"`
 	Title           string        `json:"title"`
-	Type            KnowledgeType `json:"type"`             // 5 类型之一
+	Type            KnowledgeType `json:"type"` // 5 类型之一
+	Timestamp       string        `json:"timestamp,omitempty"`
+	Seconds         int           `json:"seconds,omitempty"`
 	EntitySubType   string        `json:"entity_sub_type,omitempty"` // person / organization / ...
-	PageType        string        `json:"page_type"`        // WeKnora 原生 page_type
-	Source          string        `json:"source"`           // "native" / "skill"
+	PageType        string        `json:"page_type"`                 // WeKnora 原生 page_type
+	Source          string        `json:"source"`                    // "native" / "skill"
 	Confidence      float64       `json:"confidence,omitempty"`
 	RelatedVideoIDs []string      `json:"related_video_ids,omitempty"`
 }

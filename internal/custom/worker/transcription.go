@@ -4,6 +4,7 @@
 //   - 调听悟 CreateTask 拿 external_task_id 持久化
 //   - 轮询 GetTask；callback 启用时也可走回调（本版本先实现轮询）
 //   - 完成后把转写 JSON 暂存 result_payload，并触发 subtitle_generate job
+//   - 优先使用独立的持久化转写源，未配置时兼容回退到播放源
 //   - 失败按 attempt_count / max_attempts 重试
 package worker
 
@@ -12,7 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,14 +28,19 @@ const transcriptionPollTimeout = 30 * time.Minute
 
 // TranscriptionHandler 转写 job
 type TranscriptionHandler struct {
-	DB                      *gorm.DB
-	Tongyi                  *tongyi.Client
-	InternalFrontendBaseURL string
+	DB     *gorm.DB
+	Tongyi TongyiClient
+}
+
+type TongyiClient interface {
+	ValidateSourceFile(context.Context, string) error
+	CreateTask(context.Context, tongyi.CreateTaskRequest) (*tongyi.CreateTaskResponse, error)
+	GetTask(context.Context, string) (*tongyi.GetTaskResponse, error)
 }
 
 // NewTranscriptionHandler 构造
-func NewTranscriptionHandler(db *gorm.DB, t *tongyi.Client, internalFrontendBaseURL string) *TranscriptionHandler {
-	return &TranscriptionHandler{DB: db, Tongyi: t, InternalFrontendBaseURL: internalFrontendBaseURL}
+func NewTranscriptionHandler(db *gorm.DB, t TongyiClient, _ ...string) *TranscriptionHandler {
+	return &TranscriptionHandler{DB: db, Tongyi: t}
 }
 
 // JobType job 类型
@@ -48,8 +54,12 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 	if video == nil || video.ID == "" {
 		return fmt.Errorf("video is missing")
 	}
-	if video.FileURL == "" {
-		return fmt.Errorf("video file_url is empty")
+	sourceURL := strings.TrimSpace(video.TranscriptionSourceURL)
+	if sourceURL == "" {
+		sourceURL = strings.TrimSpace(video.FileURL)
+	}
+	if sourceURL == "" {
+		return fmt.Errorf("video transcription source url is empty")
 	}
 	if err := h.DB.Model(video).
 		Where("status IN ?", []string{model.VideoStatusReady, model.VideoStatusProcessing}).
@@ -59,23 +69,12 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 
 	// 第一次跑：创建 external task
 	if job.ExternalTaskID == "" {
-		// hairpin NAT 修复：云服务器内部访问自身公网 IP 会 404，
-		// 用内部 Docker 服务名做源文件可达性校验，传给听悟的仍是公网 URL
-		sourceURL := video.FileURL
-		if h.InternalFrontendBaseURL != "" {
-			if u, parseErr := url.Parse(video.FileURL); parseErr == nil && u.Host != "" {
-				sourceURL = h.InternalFrontendBaseURL + u.Path
-				if u.RawQuery != "" {
-					sourceURL += "?" + u.RawQuery
-				}
-			}
-		}
 		if err := h.Tongyi.ValidateSourceFile(ctx, sourceURL); err != nil {
 			return fmt.Errorf("视频源文件不可供听悟访问: %w", err)
 		}
 		slog.Info("tingwu create task", "video_id", video.ID)
 		task, err := h.Tongyi.CreateTask(ctx, tongyi.CreateTaskRequest{
-			FileURL:      video.FileURL,
+			FileURL:      sourceURL,
 			SpeakerCount: 0, // 0 = 自动识别
 		})
 		if err != nil {

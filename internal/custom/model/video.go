@@ -15,6 +15,7 @@ type Video struct {
 	VideoType                string         `gorm:"type:varchar(50);index" json:"video_type"` // interview/tutorial/lecture/case_analysis
 	DurationSeconds          int            `json:"duration_seconds"`
 	FileURL                  string         `gorm:"type:text" json:"file_url"`
+	TranscriptionSourceURL   string         `gorm:"type:text" json:"-"`
 	ThumbnailURL             string         `gorm:"type:text" json:"thumbnail_url"`
 	SubtitleFileURL          string         `gorm:"type:text" json:"subtitle_file_url"`
 	TranscriptKnowledgeID    string         `gorm:"type:varchar(64)" json:"transcript_knowledge_id"` // 兼容入口锚点；完整集合见 video_transcript_chunks

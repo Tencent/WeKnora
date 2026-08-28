@@ -15,6 +15,9 @@ package handler
 
 import (
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -30,6 +33,42 @@ type ContentHandler struct {
 	DB   *gorm.DB
 	Wiki *weknora.WikiClient
 	KBID string
+}
+
+var wikiTimestampPattern = regexp.MustCompile(`\b(\d{1,3}:\d{2}(?::\d{2})?)\b`)
+
+func wikiAnchorTimeline(content string) (string, int) {
+	match := wikiTimestampPattern.FindStringSubmatch(content)
+	if len(match) != 2 {
+		return "", 0
+	}
+	parts := strings.Split(match[1], ":")
+	values := make([]int, len(parts))
+	for index, part := range parts {
+		value, err := strconv.Atoi(part)
+		if err != nil || value < 0 {
+			return "", 0
+		}
+		values[index] = value
+	}
+	if values[len(values)-1] >= 60 || (len(values) == 3 && values[1] >= 60) {
+		return "", 0
+	}
+	if len(values) == 2 {
+		return match[1], values[0]*60 + values[1]
+	}
+	return match[1], values[0]*3600 + values[1]*60 + values[2]
+}
+
+func wikiAnchor(page weknora.WikiPage, knowledgeType knowledge.KnowledgeType, source string) knowledge.AnchorItem {
+	frontmatter := page.ParsedFrontmatter()
+	entitySubType, _ := frontmatter["entity_sub_type"].(string)
+	timestamp, seconds := wikiAnchorTimeline(page.Content)
+	return knowledge.AnchorItem{
+		ID: page.ID, Slug: page.Slug, Title: page.Title, Type: knowledgeType,
+		Timestamp: timestamp, Seconds: seconds, EntitySubType: entitySubType,
+		PageType: page.PageType, Source: source,
+	}
 }
 
 // NewContentHandler 构造
@@ -67,6 +106,10 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if strings.TrimSpace(video.KnowledgeBaseWikiPageID) == "" {
+		contentError(c, http.StatusNotFound, video.ID, "graph", "not_generated", "knowledge base wiki page not yet generated", video.UpdatedAt)
+		return
+	}
 	ctx := c.Request.Context()
 
 	// 第一源：WeKnora 原生 entity + concept
@@ -83,28 +126,12 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 
 	nativeAnchors := make([]knowledge.AnchorItem, 0, len(nativePages)+len(conceptPages))
 	for _, p := range nativePages {
-		fmType, _ := p.ParsedFrontmatter()["type"].(string)
-		subType, _ := p.ParsedFrontmatter()["entity_sub_type"].(string)
-		nativeAnchors = append(nativeAnchors, knowledge.AnchorItem{
-			ID:            p.ID,
-			Slug:          p.Slug,
-			Title:         p.Title,
-			Type:          knowledge.MapPageTypeToKnowledgeType(p.PageType, fmType),
-			EntitySubType: subType,
-			PageType:      p.PageType,
-			Source:        "native",
-		})
+		frontmatterType, _ := p.ParsedFrontmatter()["type"].(string)
+		nativeAnchors = append(nativeAnchors, wikiAnchor(p, knowledge.MapPageTypeToKnowledgeType(p.PageType, frontmatterType), "native"))
 	}
 	for _, p := range conceptPages {
-		fmType, _ := p.ParsedFrontmatter()["type"].(string)
-		nativeAnchors = append(nativeAnchors, knowledge.AnchorItem{
-			ID:       p.ID,
-			Slug:     p.Slug,
-			Title:    p.Title,
-			Type:     knowledge.MapPageTypeToKnowledgeType(p.PageType, fmType),
-			PageType: p.PageType,
-			Source:   "native",
-		})
+		frontmatterType, _ := p.ParsedFrontmatter()["type"].(string)
+		nativeAnchors = append(nativeAnchors, wikiAnchor(p, knowledge.MapPageTypeToKnowledgeType(p.PageType, frontmatterType), "native"))
 	}
 
 	// 第二源：skill 产物（page_type=index，含 case/method/insight + entity 6 类细分）
@@ -122,16 +149,7 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 			fmType == "typed_summary" || fmType == "transcript_page" {
 			continue
 		}
-		subType, _ := p.ParsedFrontmatter()["entity_sub_type"].(string)
-		skillAnchors = append(skillAnchors, knowledge.AnchorItem{
-			ID:            p.ID,
-			Slug:          p.Slug,
-			Title:         p.Title,
-			Type:          knowledge.MapSkillToKnowledgeType(fmType),
-			EntitySubType: subType,
-			PageType:      p.PageType,
-			Source:        "skill",
-		})
+		skillAnchors = append(skillAnchors, wikiAnchor(p, knowledge.MapSkillToKnowledgeType(fmType), "skill"))
 	}
 
 	merged := knowledge.MergeAnchors(nativeAnchors, skillAnchors)
