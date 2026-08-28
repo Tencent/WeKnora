@@ -293,7 +293,7 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 }
 
 func TestSkillToolsFollowSkillsEnabled(t *testing.T) {
-	t.Run("skills disabled: no skill tools, shell_exec still available", func(t *testing.T) {
+	t.Run("skills disabled: initializeSkillsManager registers no skill tools or shell", func(t *testing.T) {
 		registry := tools.NewToolRegistry()
 		svc := &agentService{
 			sandboxResolver: stubSandboxResolver{
@@ -311,11 +311,11 @@ func TestSkillToolsFollowSkillsEnabled(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, toolRegistered(registry, tools.ToolReadSkill))
 		require.False(t, toolRegistered(registry, tools.ToolExecuteSkillScript))
-		require.True(t, toolRegistered(registry, tools.ToolShellExec),
-			"the installer agent needs shell_exec without any skill tooling")
+		require.False(t, toolRegistered(registry, tools.ToolShellExec),
+			"shell_exec is registered by registerSandboxShellIfAllowed, not initializeSkillsManager")
 	})
 
-	t.Run("skills enabled: existing behaviour is unchanged", func(t *testing.T) {
+	t.Run("skills enabled: skill tools without shell", func(t *testing.T) {
 		registry := tools.NewToolRegistry()
 		svc := &agentService{
 			sandboxResolver: stubSandboxResolver{
@@ -333,7 +333,8 @@ func TestSkillToolsFollowSkillsEnabled(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, toolRegistered(registry, tools.ToolReadSkill))
 		require.True(t, toolRegistered(registry, tools.ToolExecuteSkillScript))
-		require.True(t, toolRegistered(registry, tools.ToolShellExec))
+		require.False(t, toolRegistered(registry, tools.ToolShellExec),
+			"shell_exec is registered separately from the skills manager")
 	})
 }
 
@@ -367,6 +368,12 @@ func TestCreateAgentEngineShellFollowsSkillsEnabledWithoutInstalledSkills(t *tes
 	require.NoError(t, err)
 	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec),
 		"an agent with skills enabled must have shell_exec even when no ready skill exists yet")
+	require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolReadSkill),
+		"an empty sandbox must not be offered skill tools that cannot succeed")
+	require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolExecuteSkillScript))
+	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles))
+	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadSandboxFile))
+	require.Nil(t, engine.(*agent.AgentEngine).GetSkillsManager())
 }
 
 // Whether an installed skill is invocable is decided when the AgentConfig is
