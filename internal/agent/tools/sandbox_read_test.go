@@ -20,9 +20,11 @@ type fakeSandboxFileSource struct {
 	entries   []sandbox.RemoteDirEntry
 	statCalls int
 	readCalls int
+	listedDir string
 }
 
-func (f *fakeSandboxFileSource) ListSessionFiles(context.Context, string, string) ([]sandbox.RemoteDirEntry, error) {
+func (f *fakeSandboxFileSource) ListSessionFiles(_ context.Context, _, dir string) ([]sandbox.RemoteDirEntry, error) {
+	f.listedDir = dir
 	return f.entries, nil
 }
 
@@ -152,4 +154,95 @@ func TestListSandboxFilesHardCapsEntries(t *testing.T) {
 	assert.Equal(t, maxListSandboxMaxEntries, result.Data["count"])
 	assert.Equal(t, true, result.Data["truncated"])
 	assert.Equal(t, maxListSandboxMaxEntries, strings.Count(result.Output, "\n- "))
+}
+
+func TestReadSandboxFileAllowsSessionInput(t *testing.T) {
+	content := []byte("uploaded report\n")
+	source := &fakeSandboxFileSource{
+		stat: &sandbox.RemoteStatEntry{
+			Path: "/workspace/input/ab12cd/report.txt",
+			Type: sandbox.RemoteEntryFile,
+			Size: int64(len(content)),
+		},
+		data: content,
+	}
+
+	result, err := NewReadSandboxFileTool(source).Execute(
+		sandboxFileTestContext(),
+		json.RawMessage(`{"path":"/workspace/input/ab12cd/report.txt"}`),
+	)
+
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	assert.Equal(t, 1, source.readCalls)
+	assert.Contains(t, result.Output, string(content))
+	assert.Equal(t, sandbox.SessionInputRoot, result.Data["root"])
+}
+
+func TestReadSandboxFileRefusesOutsideInspectableRoots(t *testing.T) {
+	source := &fakeSandboxFileSource{
+		data: []byte("must not be read"),
+		stat: &sandbox.RemoteStatEntry{Path: "/etc/passwd", Type: sandbox.RemoteEntryFile, Size: 4},
+	}
+
+	for _, path := range []string{"/etc/passwd", "/workspace/other/file.txt", "/workspace"} {
+		result, err := NewReadSandboxFileTool(source).Execute(
+			sandboxFileTestContext(),
+			json.RawMessage(`{"path":"`+path+`"}`),
+		)
+		require.NoError(t, err, path)
+		require.False(t, result.Success, path)
+		assert.Contains(t, result.Error, "outside the inspectable sandbox directories", path)
+	}
+	assert.Zero(t, source.readCalls)
+	assert.Zero(t, source.statCalls)
+}
+
+func TestListSandboxFilesDefaultsToOutput(t *testing.T) {
+	source := &fakeSandboxFileSource{}
+
+	result, err := NewListSandboxFilesTool(source).Execute(
+		sandboxFileTestContext(),
+		json.RawMessage(`{}`),
+	)
+
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	assert.Equal(t, sandboxInspectableRoots()[0], source.listedDir)
+	assert.Equal(t, sandboxInspectableRoots()[0], result.Data["path"])
+}
+
+func TestListSandboxFilesAllowsSessionInput(t *testing.T) {
+	source := &fakeSandboxFileSource{
+		entries: []sandbox.RemoteDirEntry{{
+			Name: "report.txt",
+			Path: "/workspace/input/ab12cd/report.txt",
+			Type: sandbox.RemoteEntryFile,
+		}},
+	}
+
+	result, err := NewListSandboxFilesTool(source).Execute(
+		sandboxFileTestContext(),
+		json.RawMessage(`{"path":"/workspace/input"}`),
+	)
+
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	assert.Equal(t, sandbox.SessionInputRoot, source.listedDir)
+	assert.Equal(t, sandbox.SessionInputRoot, result.Data["root"])
+	assert.Equal(t, 1, result.Data["count"])
+}
+
+func TestListSandboxFilesRefusesOutsideInspectableRoots(t *testing.T) {
+	source := &fakeSandboxFileSource{}
+
+	result, err := NewListSandboxFilesTool(source).Execute(
+		sandboxFileTestContext(),
+		json.RawMessage(`{"path":"/etc"}`),
+	)
+
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	assert.Contains(t, result.Error, "outside the inspectable sandbox directories")
+	assert.Empty(t, source.listedDir)
 }

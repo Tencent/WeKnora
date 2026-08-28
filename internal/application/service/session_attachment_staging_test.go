@@ -180,13 +180,11 @@ func TestBuildSandboxAttachmentsPromptEscapesMetadata(t *testing.T) {
 	assert.Contains(t, prompt, `name="a&lt;&amp;&gt;.txt"`)
 	assert.Contains(t, prompt, `path="/workspace/input/hash/a.txt"`)
 	assert.Contains(t, prompt, "read-only inputs")
+	assert.Contains(t, prompt, "read_sandbox_file")
 }
 
 func TestStageSessionAttachmentsResolvesURLFromTemporaryDocument(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.TemporaryDocument{}))
-
+	db := stagingTempDocDB(t)
 	docID := "doc-1"
 	resourceRef := "local://tenant/attachment-1"
 	require.NoError(t, db.Create(&types.TemporaryDocument{
@@ -240,4 +238,125 @@ func TestStageSessionAttachmentsResolvesURLFromTemporaryDocument(t *testing.T) {
 	assert.Equal(t, remotePath, staged[0].Path)
 	assert.Equal(t, []string{remotePath}, manager.writes)
 	assert.Equal(t, 1, fileService.getCalls[resourceRef])
+}
+
+func TestStageSessionAttachmentsSkipsMissingTemporaryDocument(t *testing.T) {
+	db := stagingTempDocDB(t)
+	manager := &stagingSandboxManager{sandboxType: sandbox.SandboxTypeCube}
+	fileService := &stagingFileService{files: map[string][]byte{}}
+	service := &agentService{
+		db:              db,
+		sandboxMgr:      manager,
+		fileService:     fileService,
+		sandboxResolver: stubSandboxResolver{mgr: manager},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	staged, err := service.stageSessionAttachments(
+		ctx,
+		"session-1",
+		"cfg-remote",
+		7,
+		types.MessageAttachments{{
+			ID: "missing-doc", FileName: "gone.pdf", FileType: ".pdf", FileSize: 7,
+		}},
+	)
+
+	require.NoError(t, err)
+	assert.Empty(t, staged)
+	assert.Empty(t, manager.writes)
+}
+
+func TestStageSessionAttachmentsIgnoresWrongTenant(t *testing.T) {
+	db := stagingTempDocDB(t)
+	resourceRef := "local://tenant/attachment-1"
+	require.NoError(t, db.Create(&types.TemporaryDocument{
+		ID:          "doc-1",
+		TenantID:    7,
+		SessionID:   "session-1",
+		ResourceRef: resourceRef,
+		FileName:    "report.pdf",
+		FileType:    ".pdf",
+		FileSize:    7,
+		Status:      types.TemporaryDocumentStatusReady,
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}).Error)
+
+	manager := &stagingSandboxManager{sandboxType: sandbox.SandboxTypeCube}
+	fileService := &stagingFileService{
+		files: map[string][]byte{resourceRef: []byte("content")},
+	}
+	service := &agentService{
+		db:              db,
+		sandboxMgr:      manager,
+		fileService:     fileService,
+		sandboxResolver: stubSandboxResolver{mgr: manager},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(99))
+
+	staged, err := service.stageSessionAttachments(
+		ctx,
+		"session-1",
+		"cfg-remote",
+		99, // session tenant must not see another tenant's temporary document
+		types.MessageAttachments{{
+			ID: "doc-1", FileName: "report.pdf", FileType: ".pdf", FileSize: 7,
+		}},
+	)
+
+	require.NoError(t, err)
+	assert.Empty(t, staged)
+	assert.Empty(t, manager.writes)
+	assert.Empty(t, fileService.getCalls)
+}
+
+func TestStageSessionAttachmentsKeepsExistingURLWithoutLookup(t *testing.T) {
+	db := stagingTempDocDB(t)
+	attachment := types.MessageAttachment{
+		ID:       "doc-1",
+		URL:      "local://tenant/already-present",
+		FileName: "notes.txt",
+		FileType: ".txt",
+		FileSize: 4,
+	}
+	require.NoError(t, db.Create(&types.TemporaryDocument{
+		ID:          "doc-1",
+		TenantID:    7,
+		SessionID:   "session-1",
+		ResourceRef: "local://tenant/must-not-be-used",
+		FileName:    "notes.txt",
+		FileType:    ".txt",
+		FileSize:    4,
+		Status:      types.TemporaryDocumentStatusReady,
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}).Error)
+
+	manager := &stagingSandboxManager{sandboxType: sandbox.SandboxTypeCube}
+	fileService := &stagingFileService{
+		files: map[string][]byte{attachment.URL: []byte("keep")},
+	}
+	service := &agentService{
+		db:              db,
+		sandboxMgr:      manager,
+		fileService:     fileService,
+		sandboxResolver: stubSandboxResolver{mgr: manager},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	staged, err := service.stageSessionAttachments(
+		ctx, "session-1", "cfg-remote", 7, types.MessageAttachments{attachment},
+	)
+
+	require.NoError(t, err)
+	require.Len(t, staged, 1)
+	assert.Equal(t, 1, fileService.getCalls[attachment.URL])
+	assert.Zero(t, fileService.getCalls["local://tenant/must-not-be-used"])
+}
+
+func stagingTempDocDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.TemporaryDocument{}))
+	return db
 }
