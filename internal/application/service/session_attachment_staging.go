@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -62,6 +63,7 @@ type sessionAttachmentStager interface {
 	) (sandbox.SessionFileStore, error)
 	stageSessionAttachments(
 		ctx context.Context, sessionID, agentSandboxConfigID string,
+		tenantID uint64,
 		attachments types.MessageAttachments,
 	) ([]stagedSessionAttachment, error)
 }
@@ -100,6 +102,7 @@ func (s *agentService) stageSessionAttachments(
 	ctx context.Context,
 	sessionID string,
 	agentSandboxConfigID string,
+	tenantID uint64,
 	attachments types.MessageAttachments,
 ) ([]stagedSessionAttachment, error) {
 	if s == nil {
@@ -116,7 +119,11 @@ func (s *agentService) stageSessionAttachments(
 		return nil, fmt.Errorf("file service is unavailable for session input staging")
 	}
 
-	attachments = deduplicateSessionAttachments(attachments)
+	resolved, err := s.resolveSessionAttachmentURLs(ctx, tenantID, sessionID, attachments)
+	if err != nil {
+		return nil, err
+	}
+	attachments = deduplicateSessionAttachments(resolved)
 	existingEntries, err := store.ListSessionFiles(ctx, sessionID, sandbox.SessionInputRoot)
 	if err != nil {
 		return nil, fmt.Errorf("list staged session inputs: %w", err)
@@ -178,6 +185,45 @@ func (s *agentService) stageSessionAttachments(
 
 	sort.SliceStable(staged, func(i, j int) bool { return staged[i].Path < staged[j].Path })
 	return staged, nil
+}
+
+// resolveSessionAttachmentURLs fills in the storage handle for attachments
+// whose URL was not persisted on the message row. MessageAttachment.URL is
+// deliberately excluded from DB serialization (json:"-") so a cross-session
+// downloadable reference cannot leak; the temporary-document row keyed by
+// attachment.ID is the authoritative source of the storage reference.
+// Attachments that already carry a URL, or that have no temporary-document ID,
+// pass through unchanged so callers with other attachment sources keep working.
+func (s *agentService) resolveSessionAttachmentURLs(
+	ctx context.Context,
+	tenantID uint64,
+	sessionID string,
+	attachments types.MessageAttachments,
+) (types.MessageAttachments, error) {
+	if len(attachments) == 0 || s == nil || s.db == nil {
+		return attachments, nil
+	}
+	repo := repository.NewTemporaryDocumentRepository(s.db)
+	out := make(types.MessageAttachments, 0, len(attachments))
+	for _, attachment := range attachments {
+		if strings.TrimSpace(attachment.URL) != "" || strings.TrimSpace(attachment.ID) == "" {
+			out = append(out, attachment)
+			continue
+		}
+		document, err := repo.GetScoped(ctx, tenantID, sessionID, attachment.ID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve attachment %q storage reference: %w", attachment.FileName, err)
+		}
+		if document == nil || strings.TrimSpace(document.ResourceRef) == "" {
+			// Expired or already-deleted temporary document: leave the URL
+			// empty so deduplicateSessionAttachments skips it instead of
+			// failing the whole staging pass.
+			continue
+		}
+		attachment.URL = document.ResourceRef
+		out = append(out, attachment)
+	}
+	return out, nil
 }
 
 func deduplicateSessionAttachments(attachments types.MessageAttachments) types.MessageAttachments {

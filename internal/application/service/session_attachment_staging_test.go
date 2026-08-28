@@ -7,11 +7,14 @@ import (
 	"mime/multipart"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 type stagingFileService struct {
@@ -132,6 +135,7 @@ func TestStageSessionAttachmentsReconcilesAndSkipsExisting(t *testing.T) {
 		ctx,
 		"session-1",
 		"cfg-remote",
+		7,
 		types.MessageAttachments{attachment, attachment},
 	)
 
@@ -144,7 +148,7 @@ func TestStageSessionAttachmentsReconcilesAndSkipsExisting(t *testing.T) {
 	assert.NotContains(t, manager.files, stalePath)
 
 	// The second reconciliation sees the same path and size and avoids storage IO.
-	_, err = service.stageSessionAttachments(ctx, "session-1", "cfg-remote", types.MessageAttachments{attachment})
+	_, err = service.stageSessionAttachments(ctx, "session-1", "cfg-remote", 7, types.MessageAttachments{attachment})
 	require.NoError(t, err)
 	assert.Equal(t, 1, fileService.getCalls[attachment.URL])
 }
@@ -159,7 +163,7 @@ func TestStageSessionAttachmentsSkipsWhenNoFilesystemCapability(t *testing.T) {
 	}
 	service := &agentService{sandboxMgr: manager, fileService: &stagingFileService{}}
 
-	staged, err := service.stageSessionAttachments(context.Background(), "session-1", "", types.MessageAttachments{{
+	staged, err := service.stageSessionAttachments(context.Background(), "session-1", "", 7, types.MessageAttachments{{
 		URL: "local://tenant/file", FileName: "file.txt",
 	}})
 
@@ -176,4 +180,64 @@ func TestBuildSandboxAttachmentsPromptEscapesMetadata(t *testing.T) {
 	assert.Contains(t, prompt, `name="a&lt;&amp;&gt;.txt"`)
 	assert.Contains(t, prompt, `path="/workspace/input/hash/a.txt"`)
 	assert.Contains(t, prompt, "read-only inputs")
+}
+
+func TestStageSessionAttachmentsResolvesURLFromTemporaryDocument(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.TemporaryDocument{}))
+
+	docID := "doc-1"
+	resourceRef := "local://tenant/attachment-1"
+	require.NoError(t, db.Create(&types.TemporaryDocument{
+		ID:          docID,
+		TenantID:    7,
+		SessionID:   "session-1",
+		ResourceRef: resourceRef,
+		FileName:    "report.pdf",
+		FileType:    ".pdf",
+		FileSize:    7,
+		Status:      types.TemporaryDocumentStatusReady,
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}).Error)
+
+	// The message row persists the temporary-document ID but NOT the URL
+	// (MessageAttachment.URL is json:"-"). Staging must recover it from the
+	// temporary_documents table and still stage the file into the sandbox.
+	attachment := types.MessageAttachment{
+		ID:       docID,
+		FileName: "report.pdf",
+		FileType: ".pdf",
+		FileSize: 7,
+	}
+	remotePath, err := sandboxAttachmentPath(types.MessageAttachment{
+		URL: resourceRef, FileName: "report.pdf",
+	})
+	require.NoError(t, err)
+
+	manager := &stagingSandboxManager{sandboxType: sandbox.SandboxTypeCube}
+	fileService := &stagingFileService{
+		files: map[string][]byte{resourceRef: []byte("content")},
+	}
+	service := &agentService{
+		db:              db,
+		sandboxMgr:      manager,
+		fileService:     fileService,
+		sandboxResolver: stubSandboxResolver{mgr: manager},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	staged, err := service.stageSessionAttachments(
+		ctx,
+		"session-1",
+		"cfg-remote",
+		7,
+		types.MessageAttachments{attachment},
+	)
+
+	require.NoError(t, err)
+	require.Len(t, staged, 1)
+	assert.Equal(t, remotePath, staged[0].Path)
+	assert.Equal(t, []string{remotePath}, manager.writes)
+	assert.Equal(t, 1, fileService.getCalls[resourceRef])
 }

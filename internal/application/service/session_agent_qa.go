@@ -171,7 +171,7 @@ func (s *sessionService) AgentQA(
 		if loadErr != nil {
 			return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
 		}
-		stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, agentConfig.SandboxConfigID, sessionAttachments)
+		stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, agentConfig.SandboxConfigID, req.Session.TenantID, sessionAttachments)
 		if err != nil {
 			return fmt.Errorf("restore session attachments into sandbox: %w", err)
 		}
