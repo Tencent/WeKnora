@@ -9,8 +9,6 @@ import (
 	"testing"
 )
 
-const wecomTestPKCS7BlockSize = 32
-
 func TestWebhookAdapterDecryptPadding(t *testing.T) {
 	key := []byte("0123456789abcdef0123456789abcdef")
 	corpID := "ww_corp_id"
@@ -51,6 +49,18 @@ func TestWebhookAdapterDecryptPadding(t *testing.T) {
 	}
 }
 
+func TestWebhookAdapterDecryptRejectsNonBlockAlignedCiphertext(t *testing.T) {
+	adapter := &WebhookAdapter{
+		aesKey: []byte("0123456789abcdef0123456789abcdef"),
+		corpID: "ww_corp_id",
+	}
+	encrypted := base64.StdEncoding.EncodeToString(make([]byte, aes.BlockSize+1))
+
+	if _, err := adapter.decrypt(encrypted); err == nil {
+		t.Fatal("decrypt() succeeded for ciphertext with a non-block-aligned length")
+	}
+}
+
 func encryptWeComTestPayload(t *testing.T, key []byte, corpID string, message []byte) (string, int) {
 	t.Helper()
 
@@ -61,7 +71,7 @@ func encryptWeComTestPayload(t *testing.T, key []byte, corpID string, message []
 	plaintext = append(plaintext, message...)
 	plaintext = append(plaintext, []byte(corpID)...)
 
-	padLen := wecomTestPKCS7BlockSize - len(plaintext)%wecomTestPKCS7BlockSize
+	padLen := wecomPKCS7BlockSize - len(plaintext)%wecomPKCS7BlockSize
 	plaintext = append(plaintext, bytes.Repeat([]byte{byte(padLen)}, padLen)...)
 
 	block, err := aes.NewCipher(key)

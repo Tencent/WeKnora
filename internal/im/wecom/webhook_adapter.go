@@ -459,6 +459,9 @@ func (a *WebhookAdapter) decrypt(encrypted string) ([]byte, error) {
 	if len(ciphertext) < aes.BlockSize {
 		return nil, fmt.Errorf("ciphertext too short")
 	}
+	if len(ciphertext)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("ciphertext length is not a multiple of AES block size")
+	}
 
 	iv := a.aesKey[:aes.BlockSize]
 	mode := cipher.NewCBCDecrypter(block, iv)
