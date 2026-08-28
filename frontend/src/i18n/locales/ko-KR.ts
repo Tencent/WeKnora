@@ -1308,10 +1308,22 @@ export default {
       queryKnowledgeGraph: '지식 그래프 조회',
       readSkill: '스킬 읽기',
       executeSkillScript: '스킬 스크립트 실행',
+      listSandboxFiles: '샌드박스 파일 목록',
+      readSandboxFile: '샌드박스 파일 읽기',
       shellExec: '샌드박스 명령 실행',
       dataAnalysis: '데이터 분석',
       dataSchema: '데이터 구조',
       databaseQuery: '데이터베이스 조회'
+    },
+    skillFiles: {
+      heading: '스킬 파일',
+      script: '스크립트',
+      instructions: '스킬 안내'
+    },
+    sandboxFiles: {
+      found: '파일 {count}개 발견',
+      empty: '파일 없음',
+      truncated: '목록이 잘림'
     },
     shellExec: {
       workDir: '디렉터리',

@@ -564,6 +564,13 @@ import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
+import {
+  formatToolTitleWithDetail,
+  getEventSkillName,
+  getReadSkillTarget,
+  getSandboxToolPath,
+  skillScriptTitleCommand,
+} from '@/utils/skillToolDisplay';
 import { previewShellCommand } from '@/utils/shellExecResult';
 import type { DisplayType } from '@/types/tool-results';
 import { parseWikiToolReferences } from '@/utils/wikiToolReferences';
@@ -631,6 +638,8 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   query_knowledge_graph: 'agentStream.tools.queryKnowledgeGraph',
   read_skill: 'agentStream.tools.readSkill',
   execute_skill_script: 'agentStream.tools.executeSkillScript',
+  list_sandbox_files: 'agentStream.tools.listSandboxFiles',
+  read_sandbox_file: 'agentStream.tools.readSandboxFile',
   shell_exec: 'agentStream.tools.shellExec',
   data_analysis: 'agentStream.tools.dataAnalysis',
   data_schema: 'agentStream.tools.dataSchema',
@@ -1073,6 +1082,12 @@ const resolveToolDisplayType = (event: any): DisplayType | undefined => {
   if (event?.display_type) return event.display_type as DisplayType
   if (event?.tool_name === 'shell_exec' || event?.tool_name === 'execute_skill_script') {
     return 'shell_exec'
+  }
+  if (event?.tool_name === 'list_sandbox_files' && event?.success !== false) {
+    return 'list_sandbox_files'
+  }
+  if (event?.tool_name === 'read_skill' && event?.success !== false) {
+    return 'read_skill'
   }
   return undefined
 };
@@ -2678,7 +2693,19 @@ const getToolTitle = (event: any): string => {
     if (event.tool_name === 'wiki_search' || event.tool_name === 'wiki_read_page') {
       return `${getLocalizedToolName(event.tool_name)}...`;
     }
-    if (event.tool_name === 'shell_exec' || event.tool_name === 'execute_skill_script') {
+    if (event.tool_name === 'read_skill') {
+      const name = getLocalizedToolName(event.tool_name);
+      return `${formatToolTitleWithDetail(name, getReadSkillTarget(event))}...`;
+    }
+    if (event.tool_name === 'execute_skill_script') {
+      const name = getLocalizedToolName(event.tool_name);
+      return `${formatToolTitleWithDetail(name, getEventSkillName(event))}...`;
+    }
+    if (event.tool_name === 'list_sandbox_files' || event.tool_name === 'read_sandbox_file') {
+      const name = getLocalizedToolName(event.tool_name);
+      return `${formatToolTitleWithDetail(name, getSandboxToolPath(event))}...`;
+    }
+    if (event.tool_name === 'shell_exec') {
       return t('agentStream.toolStatus.shellExecRunning');
     }
     const localizedName = getLocalizedToolName(event.tool_name);
@@ -2776,7 +2803,22 @@ const getToolTitle = (event: any): string => {
     return pageLabel ? `${baseTitle}：「${sanitizeForDisplay(pageLabel)}」` : baseTitle;
   }
 
-  if (toolName === 'shell_exec' || toolName === 'execute_skill_script') {
+  if (toolName === 'read_skill') {
+    return formatToolTitleWithDetail(getToolDescription(event), getReadSkillTarget(event));
+  }
+
+  if (toolName === 'list_sandbox_files' || toolName === 'read_sandbox_file') {
+    return formatToolTitleWithDetail(getToolDescription(event), getSandboxToolPath(event));
+  }
+
+  if (toolName === 'execute_skill_script') {
+    const command = previewShellCommand(skillScriptCommandLabel(event))
+    const baseTitle = formatToolTitleWithDetail(getToolDescription(event), getEventSkillName(event))
+    const rest = skillScriptTitleCommand(getEventSkillName(event), command)
+    return rest ? `${baseTitle}：${rest}` : baseTitle
+  }
+
+  if (toolName === 'shell_exec') {
     const command = previewShellCommand(skillScriptCommandLabel(event))
     const baseTitle = getToolDescription(event)
     return command ? `${baseTitle}：${command}` : baseTitle
@@ -2812,7 +2854,19 @@ const getToolDescription = (event: any): string => {
     if (event.tool_name === 'query_understand') {
       return t('agentStream.toolStatus.queryUnderstanding');
     }
-    if (event.tool_name === 'shell_exec' || event.tool_name === 'execute_skill_script') {
+    if (event.tool_name === 'read_skill') {
+      const name = getLocalizedToolName(event.tool_name);
+      return `${formatToolTitleWithDetail(name, getReadSkillTarget(event))}...`;
+    }
+    if (event.tool_name === 'execute_skill_script') {
+      const name = getLocalizedToolName(event.tool_name);
+      return `${formatToolTitleWithDetail(name, getEventSkillName(event))}...`;
+    }
+    if (event.tool_name === 'list_sandbox_files' || event.tool_name === 'read_sandbox_file') {
+      const name = getLocalizedToolName(event.tool_name);
+      return `${formatToolTitleWithDetail(name, getSandboxToolPath(event))}...`;
+    }
+    if (event.tool_name === 'shell_exec') {
       return t('agentStream.toolStatus.shellExecRunning');
     }
     const localizedName = getLocalizedToolName(event.tool_name);
@@ -2845,7 +2899,7 @@ const getToolDescription = (event: any): string => {
     return success ? t('agentStream.toolStatus.attachmentParsingDone') : t('agentStream.toolStatus.attachmentParsingFailed');
   } else if (toolName === 'query_understand') {
     return success ? t('agentStream.toolStatus.queryUnderstandDone') : t('agentStream.toolStatus.calledFailed', { name: getLocalizedToolName(toolName) });
-  } else if (toolName === 'shell_exec' || toolName === 'execute_skill_script') {
+  } else if (toolName === 'shell_exec' || toolName === 'execute_skill_script' || toolName === 'read_skill' || toolName === 'list_sandbox_files' || toolName === 'read_sandbox_file') {
     const localizedName = getLocalizedToolName(toolName);
     return success ? localizedName : t('agentStream.toolStatus.calledFailed', { name: localizedName });
   } else {

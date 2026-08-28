@@ -53,6 +53,16 @@
       :arguments="toolArguments"
     />
 
+    <SandboxFilesResult
+      v-else-if="displayType === 'list_sandbox_files'"
+      :data="toolData as ListSandboxFilesData"
+    />
+
+    <ReadSkillResult
+      v-else-if="displayType === 'read_skill'"
+      :data="toolData as ReadSkillData"
+    />
+
     <!-- Fallback: Display raw output -->
     <div v-else class="fallback-output">
       <div class="fallback-header">
@@ -83,7 +93,9 @@ import type {
   GrepResultsData,
   KnowledgeChunksListData,
   WikiEditData,
-  ShellExecData
+  ShellExecData,
+  ListSandboxFilesData,
+  ReadSkillData
 } from '@/types/tool-results';
 
 import SearchResults from './tool-results/SearchResults.vue';
@@ -101,6 +113,8 @@ import GrepResults from './tool-results/GrepResults.vue';
 import KnowledgeChunksList from './tool-results/KnowledgeChunksList.vue';
 import WikiEditResult from './tool-results/WikiEditResult.vue';
 import ShellExecResult from './tool-results/ShellExecResult.vue';
+import SandboxFilesResult from './tool-results/SandboxFilesResult.vue';
+import ReadSkillResult from './tool-results/ReadSkillResult.vue';
 
 interface Props {
   displayType?: DisplayType;

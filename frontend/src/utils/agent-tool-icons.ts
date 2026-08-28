@@ -39,8 +39,14 @@ export function getAgentToolIconName(
   if (toolName.startsWith('mcp_')) {
     return 'terminal'
   }
-  if (toolName === 'shell_exec' || toolName === 'list_sandbox_files' || toolName === 'read_sandbox_file') {
+  if (toolName === 'shell_exec') {
     return 'terminal'
+  }
+  if (toolName === 'list_sandbox_files') {
+    return 'folder'
+  }
+  if (toolName === 'read_sandbox_file' || toolName === 'read_skill') {
+    return 'file'
   }
   if (toolName === 'execute_skill_script') {
     return 'code'

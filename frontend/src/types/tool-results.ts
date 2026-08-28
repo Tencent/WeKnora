@@ -26,7 +26,9 @@ export type DisplayType =
     | 'wiki_replace_text'
     | 'wiki_rename_page'
     | 'wiki_delete_page'
-    | 'shell_exec';
+    | 'shell_exec'
+    | 'list_sandbox_files'
+    | 'read_skill';
 
 // Search result item
 export interface SearchResultItem {
@@ -338,6 +340,34 @@ export interface ShellExecData {
     stderr_truncated?: boolean;
 }
 
+export interface SandboxFileEntry {
+    name?: string;
+    path: string;
+    size?: number;
+    modified_at?: string;
+}
+
+export interface ListSandboxFilesData {
+    display_type?: 'list_sandbox_files';
+    session_id?: string;
+    path?: string;
+    root?: string;
+    entries?: SandboxFileEntry[];
+    count?: number;
+    truncated?: boolean;
+}
+
+export interface ReadSkillData {
+    display_type?: 'read_skill';
+    skill_name?: string;
+    file_path?: string;
+    description?: string;
+    instructions?: string;
+    content?: string;
+    files?: string[];
+    skill_dir?: string;
+}
+
 // Union type for all wiki edit data
 export type WikiEditData = WikiWritePageData | WikiReplaceTextData | WikiRenamePageData | WikiDeletePageData;
 
@@ -360,7 +390,9 @@ export type ToolResultData =
     | WikiReplaceTextData
     | WikiRenamePageData
     | WikiDeletePageData
-    | ShellExecData;
+    | ShellExecData
+    | ListSandboxFilesData
+    | ReadSkillData;
 
 // Action data (from index.vue)
 export interface ActionData {

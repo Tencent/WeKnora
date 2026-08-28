@@ -335,10 +335,22 @@ const messages = {
         "queryKnowledgeGraph": "知识图谱查询",
         "readSkill": "读取技能",
         "executeSkillScript": "执行技能脚本",
+        "listSandboxFiles": "列出沙箱文件",
+        "readSandboxFile": "读取沙箱文件",
         "shellExec": "执行沙箱命令",
         "dataAnalysis": "数据分析",
         "dataSchema": "数据结构",
         "databaseQuery": "数据库查询"
+      },
+      "skillFiles": {
+        "heading": "技能文件",
+        "script": "脚本",
+        "instructions": "技能说明"
+      },
+      "sandboxFiles": {
+        "found": "找到 {count} 个文件",
+        "empty": "暂无文件",
+        "truncated": "列表已截断"
       },
       "shellExec": {
         "workDir": "目录",
@@ -844,10 +856,22 @@ const messages = {
         "queryKnowledgeGraph": "Knowledge Graph Query",
         "readSkill": "Read Skill",
         "executeSkillScript": "Execute Skill Script",
+        "listSandboxFiles": "List sandbox files",
+        "readSandboxFile": "Read sandbox file",
         "shellExec": "Run sandbox command",
         "dataAnalysis": "Data Analysis",
         "dataSchema": "Data Schema",
         "databaseQuery": "Database Query"
+      },
+      "skillFiles": {
+        "heading": "Skill files",
+        "script": "script",
+        "instructions": "Instructions"
+      },
+      "sandboxFiles": {
+        "found": "Found {count} file(s)",
+        "empty": "No files",
+        "truncated": "List truncated"
       },
       "shellExec": {
         "workDir": "Directory",
