@@ -7,6 +7,10 @@
         <t-button variant="text" @click="router.push('/platform/videos')">← 返回</t-button>
         <h1>{{ video.title }}</h1>
         <span class="video-detail-page__status">{{ statusLabel }}</span>
+        <div class="video-detail-page__actions">
+          <input ref="transcriptInput" class="video-detail-page__file-input" type="file" accept=".srt,text/plain" @change="handleTranscriptSelected" />
+          <t-button size="small" variant="outline" :loading="importingTranscript" @click="openTranscriptPicker">导入 SRT</t-button>
+        </div>
         <t-select v-model="selectedVideoId" :options="videoOptions" placeholder="切换视频" @change="switchVideo" />
       </header>
       <ProcessingStatus :video-id="video.id" @retry-started="handleRetryStarted" @stage-completed="handleStageCompleted" />
@@ -42,7 +46,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { contentModuleForStage, createLoadingContentModuleState, createLoadingContentState, fetchVideoContent, fetchVideoContentModule, fetchVideoDetail, fetchVideoOptions, fetchVideoSubtitles, isVideoInitiallyAvailable, type VideoContentModule, type VideoContentState } from '@/api/videohub'
+import { MessagePlugin } from 'tdesign-vue-next'
+import { contentModuleForStage, createLoadingContentModuleState, createLoadingContentState, fetchVideoContent, fetchVideoContentModule, fetchVideoDetail, fetchVideoOptions, fetchVideoSubtitles, importVideoTranscript, isVideoInitiallyAvailable, type VideoContentModule, type VideoContentState } from '@/api/videohub'
 import type { VideoData } from '@/types/videohub'
 import VideoPlayer from '@/components/videohub/VideoPlayer.vue'
 import ChapterNavigation from '@/components/videohub/ChapterNavigation.vue'
@@ -57,6 +62,7 @@ const route = useRoute()
 const router = useRouter()
 const player = ref<InstanceType<typeof VideoPlayer> | null>(null)
 const page = ref<HTMLElement | null>(null)
+const transcriptInput = ref<HTMLInputElement | null>(null)
 const video = ref<VideoData | null>(null)
 const videoOptions = ref<Array<{ label: string; value: string }>>([])
 const selectedVideoId = ref('')
@@ -64,6 +70,7 @@ const currentSeconds = ref(0)
 const activeTab = ref('summary')
 const loading = ref(true)
 const error = ref('')
+const importingTranscript = ref(false)
 const content = ref<VideoContentState>(createLoadingContentState())
 let loadSequence = 0
 let contentSequence = 0
@@ -124,6 +131,29 @@ async function loadSubtitles(videoData: VideoData) {
   if (!videoData.subtitle_file_url || video.value?.id !== videoData.id) return
   const subtitles = await fetchVideoSubtitles(videoData.subtitle_file_url)
   if (video.value?.id === videoData.id) video.value = { ...video.value, subtitles }
+}
+function openTranscriptPicker() {
+  if (!importingTranscript.value) transcriptInput.value?.click()
+}
+async function handleTranscriptSelected(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || !video.value) return
+  if (!file.name.toLowerCase().endsWith('.srt')) {
+    MessagePlugin.warning('请选择 SRT 字幕文件')
+    return
+  }
+  importingTranscript.value = true
+  try {
+    const result = await importVideoTranscript(video.value.id, file)
+    await loadVideo(video.value.id)
+    MessagePlugin.success(result.reused ? '已复用这份 SRT 导入任务' : `SRT 已导入，共 ${result.subtitle_count || 0} 条字幕`)
+  } catch (reason: any) {
+    MessagePlugin.error(reason?.message || 'SRT 导入失败，请稍后重试')
+  } finally {
+    importingTranscript.value = false
+  }
 }
 async function loadContent(videoData: VideoData) {
   const sequence = ++contentSequence
@@ -195,13 +225,15 @@ onMounted(() => {
 
 <style scoped>
 .video-detail-page { height: 100%; overflow-y: auto; padding: 0 32px 40px; background: var(--td-bg-color-container); color: var(--td-text-color-primary); }
-.video-detail-page__header { position: sticky; top: 0; z-index: 4; display: grid; grid-template-columns: auto 1fr auto minmax(220px, 280px); align-items: center; gap: 12px; margin: 0 -32px 24px; padding: 12px 32px; border-bottom: 1px solid var(--td-border-level-1-color); background: color-mix(in srgb, var(--td-bg-color-container) 92%, transparent); backdrop-filter: blur(8px); }
+.video-detail-page__header { position: sticky; top: 0; z-index: 4; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto minmax(220px, 280px); align-items: center; gap: 12px; margin: 0 -32px 24px; padding: 12px 32px; border-bottom: 1px solid var(--td-border-level-1-color); background: color-mix(in srgb, var(--td-bg-color-container) 92%, transparent); backdrop-filter: blur(8px); }
 .video-detail-page__header h1 { margin: 0; overflow: hidden; color: var(--td-text-color-primary); font-size: 20px; font-weight: 400; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 .video-detail-page__status { justify-self: start; padding: 2px 8px; border-radius: var(--td-radius-medium); background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-secondary); font-size: 12px; line-height: 1.5; white-space: nowrap; }
+.video-detail-page__actions { position: relative; display: flex; justify-content: flex-end; }
+.video-detail-page__file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
 .video-detail-page__layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr); gap: 24px; max-width: 1440px; margin: 0 auto; }
 .video-detail-page__left { display: grid; align-content: start; gap: 16px; }
 .video-detail-page__right { min-height: 480px; padding: 0 16px; border: 1px solid var(--td-border-level-1-color); border-radius: var(--td-radius-extraLarge); background: var(--td-bg-color-container); }
 .video-detail-page__state { min-height: 420px; display: grid; place-items: center; }
 .video-detail-page__error { max-width: 640px; margin: 0 auto 24px; }
-@media (max-width: 1050px) { .video-detail-page { padding: 0 20px 40px; }.video-detail-page__layout { grid-template-columns: 1fr; }.video-detail-page__header { grid-template-columns: auto 1fr auto; margin-right: -20px; margin-left: -20px; padding: 12px 20px; }.video-detail-page__header :deep(.t-select) { grid-column: 1 / -1; } }
+@media (max-width: 1050px) { .video-detail-page { padding: 0 20px 40px; }.video-detail-page__layout { grid-template-columns: 1fr; }.video-detail-page__header { grid-template-columns: auto 1fr auto; margin-right: -20px; margin-left: -20px; padding: 12px 20px; }.video-detail-page__header :deep(.t-select) { grid-column: 1 / -1; }.video-detail-page__actions { justify-self: end; } }
 </style>
