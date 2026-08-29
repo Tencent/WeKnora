@@ -27,7 +27,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchVideoProcessingStatus, retryVideoProcessingStage } from '@/api/videohub'
-import type { VideoProcessingStatus } from '@/types/videohub'
+import type { VideoProcessingJobStatus, VideoProcessingStatus } from '@/types/videohub'
 import { getNewlyCompletedStages } from './processingStatusState'
 
 const props = defineProps<{ videoId: string }>()
