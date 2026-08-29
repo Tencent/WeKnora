@@ -11,11 +11,22 @@ export interface UploadConfirmManualSource {
   tagIds?: string[]
 }
 
+export interface UploadConfirmReparseDoc {
+  knowledgeId: string
+  fileName?: string
+  fileType?: string
+  processOverrides?: KnowledgeProcessOverrides | null
+}
+
 export interface UploadConfirmReparseSource {
   knowledgeId: string
   fileName?: string
   fileType?: string
   processOverrides?: KnowledgeProcessOverrides | null
+  /** Batch reparse: per-document entries edited independently in the dialog. */
+  docs?: UploadConfirmReparseDoc[]
+  /** Batch reparse confirm output: per-document configs keyed by knowledge ID. */
+  processConfigs?: Record<string, KnowledgeProcessOverrides>
 }
 
 export interface UploadConfirmResult {
