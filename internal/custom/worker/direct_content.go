@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"gorm.io/gorm"
@@ -145,6 +146,7 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 }
 
 func parseLLMJSONResponse(content string, target any) error {
+	content = stripLLMReasoning(content)
 	err := json.Unmarshal([]byte(content), target)
 	if err == nil {
 		return nil
@@ -172,6 +174,12 @@ func parseLLMJSONResponse(content string, target any) error {
 	}
 
 	return err
+}
+
+var llmReasoningBlockPattern = regexp.MustCompile(`(?is)<think>.*?</think>|<analysis>.*?</analysis>`)
+
+func stripLLMReasoning(content string) string {
+	return strings.TrimSpace(llmReasoningBlockPattern.ReplaceAllString(content, ""))
 }
 
 func (h *DirectContentHandler) addEnhancementContext(ctx context.Context, video *model.Video, prompt string) (string, error) {

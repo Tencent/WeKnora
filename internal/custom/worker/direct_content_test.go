@@ -14,6 +14,7 @@ func TestParseLLMJSONResponseSupportsFencedAndProseWrappedJSON(t *testing.T) {
 	for _, response := range []string{
 		"```json\n{\"title\":\"标题\",\"content\":\"正文\"}\n```",
 		"结果如下：{\"title\":\"标题\",\"content\":\"正文\"}谢谢。",
+		"<think>先分析，再返回 JSON。</think>\n{\"title\":\"标题\",\"content\":\"正文\"}",
 	} {
 		var output generatedContent
 		if err := parseLLMJSONResponse(response, &output); err != nil {
