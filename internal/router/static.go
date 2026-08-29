@@ -25,6 +25,12 @@ func serveFrontendStatic(r *gin.Engine) {
 	if _, err := os.Stat(indexPath); err != nil {
 		return
 	}
+	embedIndexPath := filepath.Join(absDir, "embed.html")
+	embedIndexInfo, embedIndexErr := os.Stat(embedIndexPath)
+	hasEmbedIndex := embedIndexErr == nil && !embedIndexInfo.IsDir()
+	if !hasEmbedIndex {
+		logger.Warnf(context.Background(), "[Router] Embed entry %s is unavailable; /embed/* requests will return 404", embedIndexPath)
+	}
 
 	logger.Infof(context.Background(), "[Router] Serving frontend static files from %s", absDir)
 
@@ -46,6 +52,17 @@ func serveFrontendStatic(r *gin.Engine) {
 		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
 			setFrontendCacheHeaders(c.Writer, path)
 			fileServer.ServeHTTP(c.Writer, c.Request)
+			c.Abort()
+			return
+		}
+		if strings.HasPrefix(path, "/embed/") {
+			if !hasEmbedIndex {
+				c.Status(http.StatusNotFound)
+				c.Abort()
+				return
+			}
+			setFrontendCacheHeaders(c.Writer, "/embed.html")
+			c.File(embedIndexPath)
 			c.Abort()
 			return
 		}
