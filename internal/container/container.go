@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,7 +22,7 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 	esv7 "github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v8"
-	_ "github.com/go-sql-driver/mysql" // 给 Doris (database/sql) 注册 MySQL 协议驱动
+	sqlmysql "github.com/go-sql-driver/mysql"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/panjf2000/ants/v2"
@@ -29,6 +30,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
 	"google.golang.org/grpc"
+	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -681,6 +683,19 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 			os.Getenv("DB_PORT"),
 			os.Getenv("DB_NAME"),
 		)
+	case "mysql":
+		mysqlConfig := sqlmysql.NewConfig()
+		mysqlConfig.User = os.Getenv("DB_USER")
+		mysqlConfig.Passwd = os.Getenv("DB_PASSWORD")
+		mysqlConfig.Net = "tcp"
+		mysqlConfig.Addr = net.JoinHostPort(strings.Trim(os.Getenv("DB_HOST"), "[]"), os.Getenv("DB_PORT"))
+		mysqlConfig.DBName = os.Getenv("DB_NAME")
+		mysqlConfig.ParseTime = true
+		mysqlConfig.Loc = time.UTC
+		mysqlConfig.Params = map[string]string{"charset": "utf8mb4"}
+		dialector = gormmysql.Open(mysqlConfig.FormatDSN())
+		logger.Infof(context.Background(), "DB Config: driver=mysql user=%s host=%s port=%s dbname=%s",
+			mysqlConfig.User, os.Getenv("DB_HOST"), os.Getenv("DB_PORT"), mysqlConfig.DBName)
 	case "sqlite":
 		dbPath := os.Getenv("DB_PATH")
 		if dbPath == "" {
@@ -715,7 +730,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	// different name (e.g., a wrapper dialect for managed PG) would silently
 	// fall back to the SQLite path, dropping the row-level X-lock. Catching
 	// the mismatch at startup is loud and inexpensive.
-	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" {
+	if name := db.Dialector.Name(); name != "postgres" && name != "mysql" && name != "sqlite" {
 		return nil, fmt.Errorf(
 			"unsupported gorm dialector %q; expected postgres or sqlite "+
 				"(see vectorStoreService.isPostgres for impact)", name)
@@ -736,22 +751,28 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	// To enable auto-recovery from dirty state, set AUTO_RECOVER_DIRTY=true
 	if os.Getenv("AUTO_MIGRATE") != "false" {
 		logger.Infof(context.Background(), "Running database migrations...")
+		if os.Getenv("DB_DRIVER") == "mysql" {
+			if err := migrateMySQLSchema(db); err != nil {
+				return nil, fmt.Errorf("failed to migrate MySQL schema: %w", err)
+			}
+		} else {
 
-		autoRecover := os.Getenv("AUTO_RECOVER_DIRTY") != "false"
-		migrationOpts := database.MigrationOptions{
-			AutoRecoverDirty: autoRecover,
-			SQLiteDBPath:     sqliteDBPath,
-		}
+			autoRecover := os.Getenv("AUTO_RECOVER_DIRTY") != "false"
+			migrationOpts := database.MigrationOptions{
+				AutoRecoverDirty: autoRecover,
+				SQLiteDBPath:     sqliteDBPath,
+			}
 
-		// Run base migrations (all versioned migrations including embeddings)
-		// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
-		if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
-			// Log warning but don't fail startup - migrations might be handled externally
-			logger.Warnf(context.Background(), "Database migration failed: %v", err)
-			logger.Warnf(
-				context.Background(),
-				"Continuing with application startup. Please run migrations manually if needed.",
-			)
+			// Run base migrations (all versioned migrations including embeddings)
+			// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
+			if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
+				// Log warning but don't fail startup - migrations might be handled externally
+				logger.Warnf(context.Background(), "Database migration failed: %v", err)
+				logger.Warnf(
+					context.Background(),
+					"Continuing with application startup. Please run migrations manually if needed.",
+				)
+			}
 		}
 
 		// Post-migration: resolve __pending_env__ storage provider markers for historical KBs.
@@ -788,6 +809,74 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	return db, nil
 }
 
+// migrateMySQLSchema keeps MySQL isolated from PostgreSQL-only migration SQL.
+// GORM uses the same persisted domain models as the repositories, so new
+// installations receive the current schema without translating jsonb, partial
+// indexes, or PostgreSQL procedural blocks at runtime.
+func migrateMySQLSchema(db *gorm.DB) error {
+	models := []any{
+		&types.Tenant{}, &types.Model{}, &types.KnowledgeBase{}, &types.Knowledge{},
+		&types.Session{}, &types.Message{}, &types.Chunk{}, &types.User{}, &types.AuthToken{},
+		&types.TenantMember{}, &types.AuditLog{}, &types.UserResourceFavorite{},
+		&types.TenantInvitation{}, &types.TenantAPIKey{}, &types.KnowledgeTag{},
+		&types.KnowledgeTagRelation{}, &types.MCPService{}, &types.MCPToolApproval{},
+		&types.MCPOAuthClient{}, &types.MCPOAuthToken{}, &types.CustomAgent{},
+		&types.Organization{}, &types.OrganizationTenantMember{}, &types.OrganizationJoinRequest{},
+		&types.KnowledgeBaseShare{}, &types.AgentShare{}, &types.TenantDisabledSharedAgent{},
+		&imPkg.IMChannel{}, &imPkg.ChannelSession{}, &types.EmbedChannel{},
+		&types.DataSource{}, &types.SyncLog{}, &types.WebSearchProviderEntity{},
+		&types.VectorStore{}, &types.SystemSetting{}, &types.TaskPendingOp{},
+		&types.TaskDeadLetter{}, &types.KnowledgeProcessingSpan{}, &types.WikiPage{},
+		&types.WikiFolder{}, &types.WikiPageIssue{}, &types.WikiLogEntry{},
+	}
+	// Several domain models retain explicit `type:jsonb` tags for historical
+	// PostgreSQL GORM usage. Production PostgreSQL uses SQL migrations, while
+	// MySQL AutoMigrate must map those logical JSON fields to MySQL's JSON type.
+	for _, model := range models {
+		stmt := &gorm.Statement{DB: db}
+		if err := stmt.Parse(model); err != nil {
+			return err
+		}
+		for _, field := range stmt.Schema.Fields {
+			dataType := strings.ToLower(string(field.DataType))
+			if strings.HasPrefix(dataType, "varchar(") && strings.HasSuffix(dataType, ")") {
+				size, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(dataType, "varchar("), ")"))
+				if size > 768 {
+					// utf8mb4 may consume four bytes per character and InnoDB's
+					// maximum index key is 3072 bytes.
+					field.Size = 768
+					field.DataType = "varchar(768)"
+				}
+			}
+			if strings.Contains(strings.ToLower(field.DefaultValue), "uuid_generate_v4") {
+				field.HasDefaultValue = false
+				field.DefaultValue = ""
+				field.DefaultValueInterface = nil
+			}
+			if strings.Contains(strings.ToLower(string(field.DataType)), "timestamp with time zone") ||
+				strings.EqualFold(string(field.DataType), "timestamptz") {
+				field.DataType = "datetime"
+				field.GORMDataType = "time"
+			}
+			if strings.HasPrefix(string(field.DataType), "jsonb") ||
+				strings.HasPrefix(string(field.DataType), "json,") {
+				field.DataType = "json"
+				field.GORMDataType = "json"
+			}
+			switch strings.ToLower(string(field.DataType)) {
+			case "json", "text", "longtext", "blob", "longblob":
+				// Some supported MySQL deployments reject defaults on LOB/JSON
+				// columns. Application zero values provide the same empty-value
+				// behavior without making schema creation version-dependent.
+				field.HasDefaultValue = false
+				field.DefaultValue = ""
+				field.DefaultValueInterface = nil
+			}
+		}
+	}
+	return db.AutoMigrate(models...)
+}
+
 // resolveStorageProviderPending replaces the "__pending_env__" sentinel in
 // knowledge_bases.storage_provider_config with the actual STORAGE_TYPE from the environment.
 // This runs once after SQL migrations to bind historical KBs to their real storage provider.
@@ -798,8 +887,12 @@ func resolveStorageProviderPending(db *gorm.DB) {
 	}
 	storageType = strings.ToLower(storageType)
 
+	providerExpr := "storage_provider_config->>'provider'"
+	if db.Dialector.Name() == "mysql" {
+		providerExpr = "JSON_UNQUOTE(JSON_EXTRACT(storage_provider_config, '$.provider'))"
+	}
 	result := db.Exec(
-		`UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND storage_provider_config->>'provider' = '__pending_env__'`,
+		`UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND `+providerExpr+` = '__pending_env__'`,
 		fmt.Sprintf(`{"provider":"%s"}`, storageType),
 	)
 	if result.Error != nil {
