@@ -64,6 +64,10 @@ var readSandboxFileTool = BaseTool{
 - When ` + "`<sandbox_attachments>`" + ` lists a user-uploaded file you need to
   read without running a shell command.
 
+## When NOT to Use
+- Skill files under ` + "`/opt/weknora/tenant/skills`" + `. Use ` + "`read_skill`" + `
+  with ` + "`skill_name`" + ` / ` + "`file_path`" + `.
+
 ## Path Rules
 - ` + "`path`" + ` MUST be an absolute path returned by ` + "`list_sandbox_files`" + `
   or listed in the current ` + "`<sandbox_attachments>`" + ` block.
@@ -156,10 +160,7 @@ func (t *ReadSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 	if !ok {
 		return &types.ToolResult{
 			Success: false,
-			Error: fmt.Sprintf(
-				"path %q is outside the inspectable sandbox directories (%s)",
-				input.Path, inspectableRootsDescription(),
-			),
+			Error:   inspectablePathError(input.Path),
 		}, nil
 	}
 

@@ -15,11 +15,36 @@ func TestSkillDirFor(t *testing.T) {
 	require.Equal(t, "/opt/weknora/tenant/skills/sk-1", dir)
 }
 
+func TestSessionSkillPackageDir(t *testing.T) {
+	require.Equal(t, "/workspace/.skill-packages/律师助手", SessionSkillPackageDir("律师助手"))
+	require.Equal(t, "/workspace/.skill-packages", SessionSkillPackageDir("../escape"))
+}
+
 func TestSkillDirForRejectsPathEscape(t *testing.T) {
 	for _, name := range []string{"", ".", "..", "../x", "foo/bar", `foo\bar`, "foo/../bar"} {
 		_, err := SkillDirFor(name)
 		require.ErrorIs(t, err, ErrInvalidSkillName, "name %q must not resolve under the skills root", name)
 	}
+}
+
+func TestSkillNameFromImagePath(t *testing.T) {
+	name, ok := SkillNameFromImagePath(SkillsImageRoot)
+	require.True(t, ok)
+	require.Empty(t, name)
+
+	name, ok = SkillNameFromImagePath(SkillsImageRoot + "/ppt-generator")
+	require.True(t, ok)
+	require.Equal(t, "ppt-generator", name)
+
+	name, ok = SkillNameFromImagePath(SkillsImageRoot + "/ppt-generator/scripts/generate_ppt.py")
+	require.True(t, ok)
+	require.Equal(t, "ppt-generator", name)
+
+	_, ok = SkillNameFromImagePath("/workspace/output/x.py")
+	require.False(t, ok)
+
+	_, ok = SkillNameFromImagePath("/etc/passwd")
+	require.False(t, ok)
 }
 
 func TestSkillDirForImageScript(t *testing.T) {
@@ -41,11 +66,77 @@ func TestSkillDirForImageScript(t *testing.T) {
 		require.Empty(t, skillDir)
 	})
 
+	t.Run("skill directory itself is not an image script", func(t *testing.T) {
+		skillDir, ok := SkillDirForImageScript(SkillsImageRoot + "/sk-1")
+		require.False(t, ok)
+		require.Empty(t, skillDir)
+	})
+
 	t.Run("dot-dot after clean that leaves the skills root is rejected", func(t *testing.T) {
 		skillDir, ok := SkillDirForImageScript(SkillsImageRoot + "/../workspace/run.py")
 		require.False(t, ok)
 		require.Empty(t, skillDir)
 	})
+}
+
+func TestRunnableWorkspaceScript(t *testing.T) {
+	okPath, ok := RunnableWorkspaceScript("/workspace/output/generate_ppt.py")
+	require.True(t, ok)
+	require.Equal(t, "/workspace/output/generate_ppt.py", okPath)
+
+	scratch, ok := RunnableWorkspaceScript("/workspace/scratch.py")
+	require.True(t, ok)
+	require.Equal(t, "/workspace/scratch.py", scratch)
+
+	for _, p := range []string{
+		"/workspace",
+		"/workspace/output",
+		"/workspace/input",
+		"/workspace/input/upload.py",
+		"/opt/weknora/tenant/skills/pdf/scripts/run.py",
+		"/etc/passwd",
+		"",
+	} {
+		_, ok := RunnableWorkspaceScript(p)
+		require.False(t, ok, "path %q must not be a runnable workspace script", p)
+	}
+}
+
+func TestValidatedImageSkillDir(t *testing.T) {
+	dir, ok := ValidatedImageSkillDir(SkillsImageRoot + "/pdf")
+	require.True(t, ok)
+	require.Equal(t, SkillsImageRoot+"/pdf", dir)
+
+	for _, p := range []string{
+		SkillsImageRoot,
+		SkillsImageRoot + "/pdf/scripts",
+		"/workspace/output",
+		"/opt/weknora/tenant/skills/../skills/pdf/x",
+		"",
+	} {
+		_, ok := ValidatedImageSkillDir(p)
+		require.False(t, ok, "dir %q must not validate as an image skill directory", p)
+	}
+}
+
+func TestInterpreterSkillDir(t *testing.T) {
+	imageDir, ok := InterpreterSkillDir(SkillsImageRoot+"/pdf/scripts/run.py", SkillsImageRoot+"/other")
+	require.True(t, ok)
+	require.Equal(t, SkillsImageRoot+"/pdf", imageDir,
+		"an image script must derive SkillDir from the path, not the caller field")
+
+	workspaceDir, ok := InterpreterSkillDir("/workspace/output/foo.py", SkillsImageRoot+"/pdf")
+	require.True(t, ok)
+	require.Equal(t, SkillsImageRoot+"/pdf", workspaceDir)
+
+	_, ok = InterpreterSkillDir("/workspace/output/foo.py", "")
+	require.False(t, ok, "workspace scripts require an explicit skill directory")
+
+	_, ok = InterpreterSkillDir("/workspace/input/x.py", SkillsImageRoot+"/pdf")
+	require.False(t, ok)
+
+	_, ok = InterpreterSkillDir("/etc/passwd", SkillsImageRoot+"/pdf")
+	require.False(t, ok)
 }
 
 func TestSkillInterpreterCommand(t *testing.T) {
@@ -63,9 +154,11 @@ func TestSkillInterpreterCommand(t *testing.T) {
 	})
 
 	t.Run("javascript uses node", func(t *testing.T) {
-		cmd, args := SkillInterpreterCommand(dir, dir+"/scripts/run.js")
-		require.Equal(t, "node", cmd)
-		require.Equal(t, []string{dir + "/scripts/run.js"}, args)
+		for _, name := range []string{"run.js", "run.mjs", "run.cjs"} {
+			cmd, args := SkillInterpreterCommand(dir, dir+"/scripts/"+name)
+			require.Equal(t, "node", cmd, name)
+			require.Equal(t, []string{dir + "/scripts/" + name}, args, name)
+		}
 	})
 
 	t.Run("shell scripts run with sh", func(t *testing.T) {

@@ -1310,6 +1310,8 @@ export default {
       executeSkillScript: 'Выполнение скрипта навыка',
       listSandboxFiles: 'Список файлов песочницы',
       readSandboxFile: 'Чтение файла песочницы',
+      writeSandboxFile: 'Запись файла песочницы',
+      editSandboxFile: 'Правка файла песочницы',
       shellExec: 'Выполнение команды в песочнице',
       dataAnalysis: 'Анализ данных',
       dataSchema: 'Структура данных',
@@ -1323,7 +1325,10 @@ export default {
     sandboxFiles: {
       found: 'Найдено файлов: {count}',
       empty: 'Нет файлов',
-      truncated: 'Список обрезан'
+      truncated: 'Список обрезан',
+      wrote: 'Записано',
+      edited: 'Изменено',
+      replacements: 'Замен: {count}'
     },
     shellExec: {
       workDir: 'Каталог',

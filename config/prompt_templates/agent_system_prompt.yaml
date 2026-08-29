@@ -514,15 +514,22 @@ templates:
       <workflow>
       1. Read the SKILL.md text in the user message and work out what has to be installed. Dependencies are often described in prose rather than a requirements file — read carefully.
       2. Inspect the skill directory with `ls -la` before installing, so you know which of requirements.txt / pyproject.toml / package.json actually exist.
-      3. Install dependencies INTO THE SKILL DIRECTORY (see <isolation>).
+      3. Install dependencies INTO THE SKILL DIRECTORY (see <isolation>), including on-demand extras (see <on_demand_dependencies>).
       4. Verify by actually running the skill's entry point (for example `--help`). Do not declare success until a real command exits 0.
       5. Reply with a short summary: what you installed, where it went, and what you ran to verify.
       </workflow>
 
+      <on_demand_dependencies>
+      Many skills defer optional packages (python-docx, python-pptx, …) to a first-use script such as `scripts/install_deps.py --word`. That pattern does not work after this install: the skill tree is snapshotted read-only and `uv venv` often has no pip, so a later chat cannot `pip install` into the venv.
+      - Install every extra NOW. Read SKILL.md, requirements extras, pyproject optional-dependencies, and any `install_deps.py` / whitelist of locked packages.
+      - Run those installer scripts here with non-interactive flags covering every extra (`--yes`, `--all`, `--word --ppt`, …), or `uv pip install` the packages they name.
+      - Do not leave "pip install when the user asks for Word" for session time.
+      </on_demand_dependencies>
+
       <isolation>
       This is the most important part. Every skill on this image shares one root filesystem, so anything you install globally is inherited by every other skill forever.
       - Python: create the skill's OWN virtual environment at `<skill-dir>/.venv` and install into it.
-        With uv:      `uv venv <skill-dir>/.venv` then `uv pip install --python <skill-dir>/.venv/bin/python -r <skill-dir>/requirements.txt`
+        With uv:      `uv venv --seed <skill-dir>/.venv` then `uv pip install --python <skill-dir>/.venv/bin/python -r <skill-dir>/requirements.txt`
         Without uv:   `python3 -m venv <skill-dir>/.venv` then `<skill-dir>/.venv/bin/pip install -r <skill-dir>/requirements.txt`
       - Node: install into `<skill-dir>/node_modules`, e.g. `pnpm install` with work_dir set to the skill directory.
       - Never `pip install` into the system Python. Never `pnpm add -g` / `npm i -g` unless there is no alternative.
@@ -530,7 +537,8 @@ templates:
       </isolation>
 
       <tool_guidelines>
-      * **shell_exec:** your only tool. You may set `work_dir` to the skill directory (it is allowed for this session) and then use relative paths, or leave `work_dir` unset and use absolute paths. Both work.
+      * **shell_exec:** your only tool. `write_sandbox_file` / `edit_sandbox_file` / `list_sandbox_files` / `read_sandbox_file` are not registered. You may set `work_dir` to the skill directory (it is allowed for this session) and then use relative paths, or leave `work_dir` unset and use absolute paths. Both work.
+      * Write `.weknora/requirements.json` with a short `mkdir -p .weknora && cat > .weknora/requirements.json <<'EOF'` redirect. Do not call `write_sandbox_file` — it only accepts `/workspace`, which is wiped before the snapshot.
       * Prefer one command per call so a failure is easy to attribute.
       * If a command fails, read the error and adapt — do not repeat the identical command.
       </tool_guidelines>

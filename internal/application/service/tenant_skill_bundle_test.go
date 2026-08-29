@@ -194,6 +194,69 @@ Use scripts/extract.py to pull text out of a PDF.
 		require.Equal(t, "1.2.3", bundle.Version)
 	})
 
+	t.Run("uses slug when name is a display title", func(t *testing.T) {
+		data := zipBundle(t, map[string]string{
+			"SKILL.md": `---
+name: Word / DOCX
+slug: word-docx
+version: 1.0.2
+description: Create and edit Microsoft Word documents.
+---
+Use this skill for .docx files.
+`,
+		})
+
+		bundle, err := ParseSkillBundle(data)
+
+		require.NoError(t, err)
+		require.Equal(t, "word-docx", bundle.Name)
+		require.Equal(t, "1.0.2", bundle.Version)
+	})
+
+	t.Run("repairs version and description nested under name", func(t *testing.T) {
+		data := zipBundle(t, map[string]string{
+			"SKILL.md": `---
+name: 命理大师
+  version: 1.2.6
+  description: |
+    全体系命理大师。
+---
+Use the scripts in this skill.
+`,
+		})
+
+		bundle, err := ParseSkillBundle(data)
+
+		require.NoError(t, err)
+		require.True(t, bundle.FrontmatterRepaired)
+		require.Equal(t, "命理大师", bundle.Name)
+		require.Equal(t, "1.2.6", bundle.Version)
+		require.Contains(t, bundle.Description, "全体系命理大师")
+	})
+
+	t.Run("rejects a SkillHub archive whose extra YAML is still invalid after repair", func(t *testing.T) {
+		data := zipBundle(t, map[string]string{
+			"SKILL.md": `---
+name: 命理大师
+  version: 1.2.6
+  description: |
+    全体系命理大师。
+metadata:
+  openclaw:
+    install:
+      - kind: node
+      package: iztro
+---
+Use the scripts in this skill.
+`,
+		})
+
+		_, err := ParseSkillBundle(data)
+
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrSkillBundleInvalid)
+	})
+
 	t.Run("tolerates a single top-level directory", func(t *testing.T) {
 		data := zipBundle(t, map[string]string{
 			"pdf-tools/SKILL.md":           validSkillMD,

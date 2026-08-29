@@ -33,13 +33,15 @@ RUN ln -s /usr/local/bin/uv /usr/local/bin/uvx
 RUN npm install -g pnpm
 
 # Install minimal CLI tools (bash/grep/sed/coreutils/findutils already in slim
-# image). curl is not optional: the sandbox connectivity check probes egress
-# with it, and skills that fetch a URL expect it to be there. The compression
-# tools are here because skill bundles and their assets arrive archived.
+# image). `file` is not in slim; models reach for it after a script-type error.
+# curl is not optional: the sandbox connectivity check probes egress with it,
+# and skills that fetch a URL expect it to be there. The compression tools are
+# here because skill bundles and their assets arrive archived.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     curl \
     ca-certificates \
+    file \
     zip \
     unzip \
     bzip2 \

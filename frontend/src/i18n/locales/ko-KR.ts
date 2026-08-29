@@ -1310,6 +1310,8 @@ export default {
       executeSkillScript: '스킬 스크립트 실행',
       listSandboxFiles: '샌드박스 파일 목록',
       readSandboxFile: '샌드박스 파일 읽기',
+      writeSandboxFile: '샌드박스 파일 쓰기',
+      editSandboxFile: '샌드박스 파일 편집',
       shellExec: '샌드박스 명령 실행',
       dataAnalysis: '데이터 분석',
       dataSchema: '데이터 구조',
@@ -1323,7 +1325,10 @@ export default {
     sandboxFiles: {
       found: '파일 {count}개 발견',
       empty: '파일 없음',
-      truncated: '목록이 잘림'
+      truncated: '목록이 잘림',
+      wrote: '씀',
+      edited: '편집함',
+      replacements: '{count}곳 치환'
     },
     shellExec: {
       workDir: '디렉터리',

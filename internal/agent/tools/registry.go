@@ -137,7 +137,14 @@ func (r *ToolRegistry) ExecuteTool(
 	// Validate parameters against the tool's JSON Schema before execution.
 	// This catches invalid arguments early, avoiding a wasted tool execution + LLM round.
 	if validationErrs := ValidateParams(args, tool.Parameters()); len(validationErrs) > 0 {
-		errMsg := FormatValidationErrors(validationErrs) + toolErrorHint
+		errMsg := FormatValidationErrors(validationErrs)
+		if name == ToolWriteSandboxFile {
+			errMsg += writeSandboxMissingFieldHint
+		}
+		if name == ToolEditSandboxFile {
+			errMsg += editSandboxMissingFieldHint
+		}
+		errMsg += toolErrorHint
 		common.PipelineWarn(ctx, "AgentTool", "validation_failed", map[string]interface{}{
 			"tool":   name,
 			"errors": errMsg,

@@ -246,6 +246,58 @@ func TestManagerRunsATenantSkillFromTheImageWithoutUploading(t *testing.T) {
 	require.Equal(t, sandbox.SkillsImageRoot+"/pdf",
 		sandboxMgr.config.Env["WEKNORA_SKILL_DIR"])
 	require.Equal(t, "/workspace/output", sandboxMgr.config.Env[artifactOutputEnvVar])
+	require.Equal(t, sandbox.SessionSkillPackageDir("pdf"),
+		sandboxMgr.config.Env["PYTHONPATH"])
+	require.Equal(t, sandbox.SessionSkillPackageDir("pdf"),
+		sandboxMgr.config.Env["NODE_PATH"])
+}
+
+func TestManagerRunsAWorkspaceScriptWithInstalledSkillInterpreter(t *testing.T) {
+	sandboxMgr := &recordingSandboxManager{}
+	mgr := NewManager(&ManagerConfig{SkillDirs: nil, Enabled: true}, sandboxMgr)
+	mgr.WithTenantSource(NewTenantSkillSource([]*types.TenantSkillEntity{{
+		ID: "sk-1", Name: "ppt-generator", Status: types.SkillStatusReady, Enabled: true,
+	}}, nil))
+	require.NoError(t, mgr.Initialize(context.Background()))
+
+	_, err := mgr.ExecuteScript(
+		types.WithSessionID(context.Background(), "sess-1"),
+		"ppt-generator", "/workspace/output/generate_rencui_ppt.py", []string{"--theme", "doraemon"}, "",
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, sandboxMgr.config)
+	require.Equal(t, "/workspace/output/generate_rencui_ppt.py", sandboxMgr.config.RemoteScriptPath)
+	require.Equal(t, sandbox.SkillsImageRoot+"/ppt-generator", sandboxMgr.config.SkillDir)
+	require.Empty(t, sandboxMgr.config.Script)
+	require.Equal(t, []string{"--theme", "doraemon"}, sandboxMgr.config.Args)
+	require.Equal(t, sandbox.SkillsImageRoot+"/ppt-generator",
+		sandboxMgr.config.Env["WEKNORA_SKILL_DIR"])
+}
+
+func TestManagerRejectsWorkspaceScriptForPreloadedSkill(t *testing.T) {
+	dir := preloadedSkillDir(t, "pdf", "preloaded description")
+	sandboxMgr := &recordingSandboxManager{}
+	mgr := NewManager(&ManagerConfig{SkillDirs: []string{dir}, Enabled: true}, sandboxMgr)
+	require.NoError(t, mgr.Initialize(context.Background()))
+
+	_, err := mgr.ExecuteScript(context.Background(), "pdf", "/workspace/output/custom.py", nil, "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "shell_exec")
+	require.Zero(t, sandboxMgr.calls)
+}
+
+func TestManagerRejectsWorkspaceInputAsSkillScript(t *testing.T) {
+	sandboxMgr := &recordingSandboxManager{}
+	mgr := NewManager(&ManagerConfig{SkillDirs: nil, Enabled: true}, sandboxMgr)
+	mgr.WithTenantSource(NewTenantSkillSource([]*types.TenantSkillEntity{{
+		ID: "sk-1", Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
+	}}, nil))
+	require.NoError(t, mgr.Initialize(context.Background()))
+
+	_, err := mgr.ExecuteScript(context.Background(), "pdf", "/workspace/input/upload.py", nil, "")
+	require.Error(t, err)
+	require.Zero(t, sandboxMgr.calls)
 }
 
 // The in-sandbox directory is what read_skill shows the model so it can name

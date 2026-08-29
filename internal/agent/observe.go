@@ -200,6 +200,18 @@ func isNaturalStopFinishReason(reason string) bool {
 	}
 }
 
+// isLengthFinishReason reports whether the provider stopped because the
+// completion-token cap was hit. Truncated tool-call JSON then fails
+// validation (missing path, unexpected end of JSON, etc.).
+func isLengthFinishReason(reason string) bool {
+	switch strings.ToLower(strings.TrimSpace(reason)) {
+	case "length", "max_tokens", "max_output_tokens":
+		return true
+	default:
+		return false
+	}
+}
+
 // analyzeResponse inspects the LLM response for stop conditions:
 //   - natural finish reason with no tool calls → agent is done (natural stop)
 //   - finish_reason == "content_filter" with no tool calls → agent is done (content filtered)

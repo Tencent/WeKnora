@@ -5332,6 +5332,8 @@ export default {
       executeSkillScript: 'Execute Skill Script',
       listSandboxFiles: 'List sandbox files',
       readSandboxFile: 'Read sandbox file',
+      writeSandboxFile: 'Write sandbox file',
+      editSandboxFile: 'Edit sandbox file',
       shellExec: 'Run sandbox command',
       dataAnalysis: 'Data Analysis',
       dataSchema: 'Data Schema',
@@ -5345,7 +5347,10 @@ export default {
     sandboxFiles: {
       found: 'Found {count} file(s)',
       empty: 'No files',
-      truncated: 'List truncated'
+      truncated: 'List truncated',
+      wrote: 'Wrote',
+      edited: 'Edited',
+      replacements: 'Replaced {count}'
     },
     shellExec: {
       workDir: 'Directory',

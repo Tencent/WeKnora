@@ -1312,6 +1312,8 @@ export default {
       executeSkillScript: '执行技能脚本',
       listSandboxFiles: '列出沙箱文件',
       readSandboxFile: '读取沙箱文件',
+      writeSandboxFile: '写入沙箱文件',
+      editSandboxFile: '编辑沙箱文件',
       shellExec: '执行沙箱命令',
       dataAnalysis: '数据分析',
       dataSchema: '数据结构',
@@ -1325,7 +1327,10 @@ export default {
     sandboxFiles: {
       found: '找到 {count} 个文件',
       empty: '暂无文件',
-      truncated: '列表已截断'
+      truncated: '列表已截断',
+      wrote: '已写入',
+      edited: '已编辑',
+      replacements: '替换 {count} 处'
     },
     shellExec: {
       workDir: '目录',

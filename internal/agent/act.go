@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -180,6 +181,8 @@ var toolDisplayNames = map[string]string{
 	agenttools.ToolReadSkill:           "读取技能",
 	agenttools.ToolListSandboxFiles:    "列出沙箱文件",
 	agenttools.ToolReadSandboxFile:     "读取沙箱文件",
+	agenttools.ToolWriteSandboxFile:    "写入沙箱文件",
+	agenttools.ToolEditSandboxFile:     "编辑沙箱文件",
 	agenttools.ToolShellExec:           "执行沙箱命令",
 }
 
@@ -235,6 +238,32 @@ func (e *AgentEngine) executeToolCalls(
 	for i, tc := range response.ToolCalls {
 		e.executeSingleToolCall(ctx, tc, i, step, iteration, round, sessionID, assistantMessageID)
 	}
+	annotateLengthTruncatedToolErrors(response.FinishReason, step.ToolCalls)
+}
+
+// truncatedOutputHint explains a failed tool call that the provider cut off at
+// the completion-token cap. It stays tool-neutral: any tool can be the one that
+// got truncated, and naming another tool's fields would send the model chasing
+// arguments the failing call does not have.
+const truncatedOutputHint = "\n\nThe previous model output was cut off at the completion-token limit " +
+	"(finish_reason=length), so these arguments are incomplete rather than wrong. " +
+	"Retry with a complete JSON object and a smaller payload."
+
+// annotateLengthTruncatedToolErrors appends that explanation to every failed
+// result in the round. Results carry a pointer, so mutating through the slice
+// reaches the caller's tool calls.
+func annotateLengthTruncatedToolErrors(finishReason string, toolCalls []types.ToolCall) {
+	if !isLengthFinishReason(finishReason) {
+		return
+	}
+	for i := range toolCalls {
+		result := toolCalls[i].Result
+		if result == nil || result.Success ||
+			strings.Contains(result.Error, "finish_reason=length") {
+			continue
+		}
+		result.Error += truncatedOutputHint
+	}
 }
 
 // executeToolCallsParallel runs all tool calls concurrently using errgroup,
@@ -263,6 +292,7 @@ func (e *AgentEngine) executeToolCallsParallel(
 	}
 
 	_ = g.Wait()
+	annotateLengthTruncatedToolErrors(response.FinishReason, results)
 
 	// Append results and emit events in original order
 	for _, toolCall := range results {
@@ -377,7 +407,9 @@ func (e *AgentEngine) runToolCall(
 					Success: false,
 					Error: fmt.Sprintf(
 						"Failed to parse tool arguments: %v", err,
-					) + "\n\n[Analyze the error above and try a different approach.]",
+					) + "\n\nIf the JSON looks cut off, the previous round likely hit the output token cap. " +
+						"Retry with complete JSON (required fields first) and a smaller payload.\n\n" +
+						"[Analyze the error above and try a different approach.]",
 				},
 			}
 		}

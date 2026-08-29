@@ -17,7 +17,7 @@
 //     Omitting `path` still lists output so a listing does not dump
 //     every attachment into context.
 //   - Read-only: this tool never creates, modifies or deletes anything
-//     inside the sandbox. Writes still go through skill scripts.
+//     inside the sandbox. Model-authored files go through write_sandbox_file.
 //   - Graceful "no sandbox": if the session has never spawned a sandbox
 //     yet (chat-only turn, or sandbox was reaped), the tool returns an
 //     empty listing with a helpful message rather than an error, so the
@@ -86,12 +86,19 @@ var listSandboxFilesTool = BaseTool{
 - You want to give the user a listing of everything the current session
   has produced.
 
+## When NOT to Use
+- Do NOT list skill install directories (` + "`/opt/weknora/tenant/skills/...`" + `).
+  Call ` + "`read_skill(skill_name=...)`" + ` instead: that returns SKILL.md and
+  the skill's file list (scripts, docs). Those trees also contain
+  ` + "`.venv`" + ` / ` + "`node_modules`" + `.
+- Do not list ` + "`/workspace`" + ` itself, ` + "`/etc`" + `, or other system paths.
+
 ## Path Rules
 - ` + "`path`" + ` is optional. When omitted, the tool lists the default artifact
   output directory (` + "`$WEKNORA_SKILL_OUTPUT_DIR`" + `, typically ` + "`/workspace/output`" + `).
 - When provided, ` + "`path`" + ` MUST sit under the artifact output directory or
   the session input directory (` + "`/workspace/input`" + `). Attempts to list
-  arbitrary sandbox paths (e.g. ` + "`/etc`" + `, ` + "`/home`" + `) are rejected.
+  arbitrary sandbox paths (e.g. ` + "`/etc`" + `, ` + "`/home`" + `, skill image dirs) are rejected.
 - Listing is recursive: sub-directories are traversed automatically and
   only files are returned in the flat listing.
 
@@ -175,10 +182,7 @@ func (t *ListSandboxFilesTool) Execute(ctx context.Context, args json.RawMessage
 	if !ok {
 		return &types.ToolResult{
 			Success: false,
-			Error: fmt.Sprintf(
-				"path %q is outside the inspectable sandbox directories (%s)",
-				input.Path, inspectableRootsDescription(),
-			),
+			Error:   inspectablePathError(input.Path),
 		}, nil
 	}
 
@@ -300,6 +304,50 @@ func inspectableRootsDescription() string {
 	return strings.Join(sandboxInspectableRoots(), ", ")
 }
 
+// inspectablePathError explains a refused list/read path. Skill image
+// paths are the common miss: the model sees /opt/weknora/tenant/skills/<name>
+// in read_skill's environment section and retries with this tool or ls.
+func inspectablePathError(requested string) string {
+	base := fmt.Sprintf(
+		"this tool only lists/reads session artifacts and attachments under %s. path %q is outside that scope",
+		inspectableRootsDescription(), requested,
+	)
+	clean := path.Clean(strings.TrimSpace(requested))
+	name, inImage := sandbox.SkillNameFromImagePath(clean)
+	if !inImage {
+		return base + ". Those tools only see session artifacts and attachments. Skill files: read_skill(skill_name=..., file_path=...)."
+	}
+	if name == "" {
+		return base + fmt.Sprintf(
+			". That path is the skill install root. Call read_skill(skill_name=...) for a listed skill instead of listing %s.",
+			sandbox.SkillsImageRoot,
+		)
+	}
+	hint := fmt.Sprintf(
+		". That path belongs to skill %q. Call read_skill(skill_name=%q) to load SKILL.md and list files",
+		name, name,
+	)
+	if rel := relativeSkillFileFromImagePath(clean, name); rel != "" {
+		hint += fmt.Sprintf(", or read_skill(skill_name=%q, file_path=%q) to read it", name, rel)
+	}
+	return base + hint + fmt.Sprintf(
+		". Do not ls %s (it includes .venv / node_modules).",
+		sandbox.SkillsImageRoot,
+	)
+}
+
+func relativeSkillFileFromImagePath(clean, skillName string) string {
+	dir, err := sandbox.SkillDirFor(skillName)
+	if err != nil || clean == dir {
+		return ""
+	}
+	prefix := dir + "/"
+	if strings.HasPrefix(clean, prefix) {
+		return strings.TrimPrefix(clean, prefix)
+	}
+	return ""
+}
+
 // matchingInspectableRoot returns the allowlisted root that contains
 // clean, or ("", false) when the path sits outside every root.
 func matchingInspectableRoot(clean string) (string, bool) {
@@ -312,9 +360,9 @@ func matchingInspectableRoot(clean string) (string, bool) {
 }
 
 // isUnderRoot reports whether clean sits at or underneath root. Both
-// arguments must already be cleaned. This guardrail keeps the LLM from
-// listing paths outside the inspectable directories: even if a rogue
-// prompt asks for `/etc/passwd`, the tool refuses.
+// arguments must already be cleaned. The list/read tools use this as a
+// scope check so they stay on artifacts and attachments; it is not a
+// privilege boundary (shell_exec can already reach the same files).
 func isUnderRoot(clean, root string) bool {
 	if clean == root {
 		return true

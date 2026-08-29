@@ -60,6 +60,12 @@ type SessionFileStore interface {
 	// session's remote sandbox, provisioning the sandbox on first call.
 	WriteSessionInputFile(ctx context.Context, sessionID, filePath string, content []byte) error
 
+	// WriteSessionWorkspaceFile writes a model-authored file under
+	// /workspace. /workspace/input stays read-only (attachments); everything
+	// else under /workspace is accepted so generated scripts do not have to
+	// travel through shell_exec heredocs.
+	WriteSessionWorkspaceFile(ctx context.Context, sessionID, filePath string, content []byte) error
+
 	// RemoveSessionInputPath deletes a staged attachment. No-op when the
 	// session has no live sandbox.
 	RemoveSessionInputPath(ctx context.Context, sessionID, targetPath string) error

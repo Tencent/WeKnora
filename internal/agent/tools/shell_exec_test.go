@@ -17,6 +17,7 @@ type fakeShellExecutor struct {
 	result  *sandbox.ExecuteResult
 	err     error
 	timeout time.Duration
+	calls   int
 }
 
 func (f *fakeShellExecutor) ExecShellCommand(
@@ -28,6 +29,7 @@ func (f *fakeShellExecutor) ExecShellCommand(
 	_ map[string]string,
 ) (*sandbox.ExecuteResult, error) {
 	f.timeout = timeout
+	f.calls++
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -70,13 +72,26 @@ func TestShellExecTimeoutHonorsAndCapsRequestedValue(t *testing.T) {
 
 type fakeInstallShellExecutor struct {
 	timeout time.Duration
+	calls   int
 }
 
 func (f *fakeInstallShellExecutor) ExecShellCommandWithOptions(
 	_ context.Context, _ string, _ string, opts sandbox.ShellExecOptions,
 ) (*sandbox.ExecuteResult, error) {
 	f.timeout = opts.Timeout
+	f.calls++
 	return &sandbox.ExecuteResult{ExitCode: 0}, nil
+}
+
+func TestInstallShellExecDescriptionDoesNotPointAtWriteSandboxFile(t *testing.T) {
+	description := NewInstallShellExecTool(&fakeInstallShellExecutor{}).Description()
+
+	assert.Contains(t, description, "only tool")
+	assert.Contains(t, description, "requirements.json")
+	assert.Contains(t, description, sandbox.SkillsImageRoot)
+	assert.NotContains(t, description, "Do NOT dump large files through")
+	assert.NotContains(t, NewShellExecTool(&fakeShellExecutor{}, nil).Description(),
+		"write_sandbox_file is not available")
 }
 
 func TestInstallShellExecDefaultsToTheTenMinuteBudget(t *testing.T) {
@@ -146,11 +161,19 @@ func TestShellExecSuppressesBinaryStreams(t *testing.T) {
 func TestShellExecDescriptionSupportsGeneralExploration(t *testing.T) {
 	description := NewShellExecTool(&fakeShellExecutor{}, nil).Description()
 
-	for _, command := range []string{"find", "file", "sed", "head", "tail", "cat", "grep", "awk"} {
+	for _, command := range []string{"find", "ls", "cat", "head", "tail", "sed", "grep", "awk"} {
 		assert.Contains(t, description, command)
 	}
 	assert.Contains(t, description, "Use freely to explore")
 	assert.Contains(t, description, "Binary output is never returned")
+	assert.Contains(t, description, "write_sandbox_file")
+	assert.Contains(t, description, "edit_sandbox_file")
+	assert.Contains(t, description, "/opt/weknora/tenant/skills")
+	assert.Contains(t, description, "python3 -c")
+	assert.Contains(t, description, "execute_skill_script")
+	assert.Contains(t, description, ".skill-packages")
+	assert.Contains(t, description, "Do not `apt-get install` inspection utilities")
+	assert.NotContains(t, description, "If a 'command not found' error occurs, attempt to resolve it")
 }
 
 func TestShellExecBoundsStdoutStderrErrorAndTotal(t *testing.T) {
@@ -343,4 +366,116 @@ func TestInstallShellExecDoesNotCapture(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.Success)
 	require.Zero(t, recorder.calls)
+}
+
+func TestShellExecOversizeCommandPointsAtWriteSandboxFile(t *testing.T) {
+	command := strings.Repeat("a", shellExecMaxCommandBytes+1)
+	raw, err := json.Marshal(map[string]string{"command": command})
+	require.NoError(t, err)
+
+	result, err := NewShellExecTool(&fakeShellExecutor{}, nil).Execute(
+		shellExecTestContext(), raw,
+	)
+
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	assert.Contains(t, result.Error, "command too long")
+	assert.Contains(t, result.Error, "write_sandbox_file")
+}
+
+func TestShellExecHintsWhenTreeCommandIsMissing(t *testing.T) {
+	tool := NewShellExecTool(&fakeShellExecutor{result: &sandbox.ExecuteResult{
+		ExitCode: 127,
+		Stderr:   "/bin/bash: line 1: tree: command not found\n",
+	}}, nil)
+
+	result, err := tool.Execute(
+		shellExecTestContext(),
+		json.RawMessage(`{"command":"tree -L 2 /workspace/output"}`),
+	)
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	assert.Equal(t, 127, result.Data["exit_code"])
+	assert.Contains(t, result.Output, "not in the default sandbox image")
+	assert.Contains(t, result.Output, "Use find/ls")
+	assert.Contains(t, result.Output, "Do not apt-get install")
+}
+
+func TestInferredMissingCommandFromBashStderr(t *testing.T) {
+	assert.Equal(t, "file", inferredMissingCommand(
+		"file /tmp/x",
+		"/bin/bash: line 1: file: command not found\n",
+	))
+	assert.Equal(t, "tree", inferredMissingCommand("tree -L 2", "tree: command not found"))
+}
+
+func TestShellExecHintsWhenSystemPythonMissesASkillModule(t *testing.T) {
+	script := `cd /workspace/output && python3 -c "
+from docx import Document
+doc = Document('brief.docx')
+print(len(doc.paragraphs))
+"`
+	tool := NewShellExecTool(&fakeShellExecutor{result: &sandbox.ExecuteResult{
+		ExitCode: 1,
+		Stderr:   "ModuleNotFoundError: No module named 'docx'\n",
+	}}, nil)
+
+	raw, err := json.Marshal(map[string]string{"command": script})
+	require.NoError(t, err)
+	result, err := tool.Execute(shellExecTestContext(), raw)
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	assert.Contains(t, result.Output, "Do not pip install")
+	assert.Contains(t, result.Output, "write_sandbox_file")
+	assert.Contains(t, result.Output, "execute_skill_script")
+	assert.Contains(t, result.Output, ".venv/bin/python -c")
+}
+
+func TestSkillNameFromShellCommandExtractsImageSkill(t *testing.T) {
+	assert.Equal(t, "meeting-and-brief", skillNameFromShellCommand(
+		`/opt/weknora/tenant/skills/meeting-and-brief/.venv/bin/python -c "print(1)"`,
+	))
+	assert.Empty(t, skillNameFromShellCommand(`python3 -c "print(1)"`))
+}
+
+func TestShellExecAllowsOverlayInstallThatMentionsTheSkillTree(t *testing.T) {
+	// Previously an up-front command blacklist rejected this recovery path
+	// because the line contained both `pip install` and the skills root.
+	executor := &fakeShellExecutor{result: &sandbox.ExecuteResult{ExitCode: 0}}
+	tool := NewShellExecTool(executor, nil)
+
+	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
+		`{"command":"python3 -m pip install --target /workspace/.skill-packages/foo -r /opt/weknora/tenant/skills/foo/requirements.txt"}`,
+	))
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+	assert.Equal(t, 1, executor.calls)
+}
+
+func TestInstallShellExecStillPipsIntoTheSkillTree(t *testing.T) {
+	inner := &fakeInstallShellExecutor{}
+	tool := NewInstallShellExecTool(inner)
+
+	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
+		`{"command":"pip install python-docx","work_dir":"/opt/weknora/tenant/skills/律师助手"}`,
+	))
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+	require.Equal(t, 1, inner.calls)
+}
+
+func TestShellExecHintsWhenVenvHasNoPip(t *testing.T) {
+	tool := NewShellExecTool(&fakeShellExecutor{result: &sandbox.ExecuteResult{
+		ExitCode: 1,
+		Stderr:   "/opt/weknora/tenant/skills/律师助手/.venv/bin/python: No module named pip\n",
+	}}, nil)
+
+	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
+		`{"command":"/opt/weknora/tenant/skills/律师助手/.venv/bin/python /opt/weknora/tenant/skills/律师助手/scripts/install_deps.py --word --yes"}`,
+	))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	assert.Contains(t, result.Output, "frozen")
+	assert.Contains(t, result.Output, "/workspace/.skill-packages/律师助手")
+	assert.NotContains(t, result.Output, "write_sandbox_file")
 }

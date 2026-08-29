@@ -123,7 +123,9 @@ type CustomAgentConfig struct {
 	RerankModelID string `yaml:"rerank_model_id" json:"rerank_model_id"`
 	// Temperature for LLM (0-1)
 	Temperature float64 `yaml:"temperature" json:"temperature"`
-	// Maximum completion tokens (only for normal mode)
+	// Maximum completion tokens. Quick-answer uses this for the RAG answer.
+	// Smart-reasoning ReAct rounds send this value as-is (zero becomes
+	// DefaultAgentMaxCompletionTokens at call time).
 	MaxCompletionTokens int `yaml:"max_completion_tokens" json:"max_completion_tokens"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `yaml:"thinking" json:"thinking"`
@@ -524,7 +526,11 @@ func (a *CustomAgent) EnsureDefaults() {
 		a.Config.FallbackStrategy = "model"
 	}
 	if a.Config.MaxCompletionTokens == 0 {
-		a.Config.MaxCompletionTokens = 2048
+		if a.Config.AgentMode == AgentModeSmartReasoning {
+			a.Config.MaxCompletionTokens = DefaultAgentMaxCompletionTokens
+		} else {
+			a.Config.MaxCompletionTokens = 2048
+		}
 	}
 	// Agent mode should always enable multi-turn conversation
 	if a.Config.AgentMode == AgentModeSmartReasoning {

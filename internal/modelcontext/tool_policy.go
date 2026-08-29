@@ -156,6 +156,8 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	"shell_exec":         {},
 	"list_sandbox_files": {},
 	"read_sandbox_file":  {},
+	"write_sandbox_file": {},
+	"edit_sandbox_file":  {},
 }
 
 // HasToolPolicy reports whether a tool has an explicit model-handle policy.

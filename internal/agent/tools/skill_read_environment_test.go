@@ -26,6 +26,13 @@ func TestSkillEnvironmentSectionNamesTheWayIntoBothEnvironments(t *testing.T) {
 	require.Contains(t, section, dir)
 	require.Contains(t, section, sandbox.SkillVenvPython(dir))
 	require.Contains(t, section, "node_modules")
+	require.Contains(t, section, "list_sandbox_files")
+	require.Contains(t, section, "read_skill")
+	require.Contains(t, section, "write_sandbox_file")
+	require.Contains(t, section, "python3 -c")
 	require.Contains(t, strings.ToLower(section), "pip install")
 	require.Contains(t, strings.ToLower(section), "npm install")
+	require.Contains(t, section, sandbox.SessionSkillPackageDir("smart-charts"))
+	require.Contains(t, section, "install_deps.py")
+	require.Contains(t, section, "frozen")
 }

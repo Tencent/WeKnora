@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -1487,7 +1488,9 @@ Hard requirements:
 - Install dependencies for exactly this one skill.
 - Python dependencies must go into %s/.venv. Do not install into system Python.
 - Node dependencies must go under %s/node_modules. Do not install global packages unless no local alternative exists.
-- Use shell_exec only. You may set work_dir to %s.
+- Use shell_exec only (write_sandbox_file is not available and cannot write
+  this tree). You may set work_dir to %s. Write .weknora/requirements.json
+  with a short shell redirect after mkdir -p.
 - Each command has a 10-minute budget; you do not need to set timeout_sec.
 - When finished, report what you installed and any global/system packages you changed.
 - Declare the environment variables this skill reads AT RUN TIME. Read its scripts to decide;
@@ -1503,16 +1506,70 @@ Hard requirements:
   WEKNORA_SESSION_INPUT_DIR: the sandbox injects those. Other WEKNORA_* names the skill reads
   (WEKNORA_API_KEY, WEKNORA_BASE_URL, WEKNORA_HOST, WEKNORA_TOKEN, WEKNORA_KB_ID) MUST be declared.
 
+On-demand / optional extras MUST be installed now. After you finish, this
+tree is made read-only and session agents cannot pip/npm into it (uv venv also
+has no pip). Skills that ship scripts/install_deps.py or say "pip install when
+the user needs Word/PPT" will fail at chat time unless those packages are
+already in the venv.
+- Create the venv with pip present: `+"`uv venv --seed %s/.venv`"+` (or `+"`python3 -m venv`"+`).
+- Install requirements.txt / pyproject.toml with `+"`uv pip install`"+`.
+- Read SKILL.md and any on-demand installer for extra packages (python-docx,
+  python-pptx, …) and `+"`uv pip install`"+` every extra, not only the default set.
+%s
+- If an installer script needs --yes / --all / every extra flag, pass them.
+%s
 The server verifies the result itself before the image is kept, so report what
 you did rather than whether it passed. Verification parses every script with
 the interpreter that would run it, resolves the imports each one executes on
 load, and checks every distribution named in requirements.txt is present in the
 venv. It never runs the skill's code, so nothing is expected to answer --help.
+Lazy imports and install_deps.py extras are invisible to that check — you still
+have to install them.
 
 SKILL.md:
 %s
 `, skillDir, uvAvailable, skillDir, skillDir, skillDir,
-		requirementsPath, skillMD)
+		requirementsPath, skillDir, formatOnDemandInstallers(bundle),
+		formatFrontmatterRepairNote(bundle), skillMD)
+}
+
+// formatOnDemandInstallers names bundle files that install extras at first
+// use, so the installer agent does not have to discover them by grepping.
+func formatOnDemandInstallers(bundle *SkillBundle) string {
+	names := bundleOnDemandInstallers(bundle)
+	if len(names) == 0 {
+		return "- Look for scripts named install_deps.py (or similar) even if they are not listed here."
+	}
+	quoted := make([]string, len(names))
+	for i, name := range names {
+		quoted[i] = "`" + name + "`"
+	}
+	return "- This archive ships on-demand installer(s): " + strings.Join(quoted, ", ") +
+		". Run each one now with non-interactive flags covering every extra."
+}
+
+func bundleOnDemandInstallers(bundle *SkillBundle) []string {
+	if bundle == nil {
+		return nil
+	}
+	var names []string
+	for rel := range bundle.Files {
+		if skills.IsOnDemandInstallerPath(rel) {
+			names = append(names, rel)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func formatFrontmatterRepairNote(bundle *SkillBundle) string {
+	if bundle == nil || !bundle.FrontmatterRepaired {
+		return ""
+	}
+	return "\nThe SKILL.md YAML frontmatter was automatically repaired " +
+		"(keys nested under name, or an unquoted colon). Extra or still-broken " +
+		"keys were not reconstructed. Mention this in your summary so the user " +
+		"can fix the file.\n"
 }
 
 func (s *TenantSkillService) probeUv(ctx context.Context, mgr sandbox.Manager, sessionID string) bool {

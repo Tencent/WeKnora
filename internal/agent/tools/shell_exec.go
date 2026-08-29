@@ -77,7 +77,8 @@ const (
 	// pin the session's sandbox for hours.
 	shellExecMaxTimeout = 10 * time.Minute
 	// shellExecMaxCommandBytes rejects excessively long command strings.
-	// Real skill setup scripts fit comfortably under 8 KiB.
+	// Real skill setup one-liners fit comfortably under 8 KiB. Generated
+	// scripts belong in write_sandbox_file, not inlined in the command.
 	shellExecMaxCommandBytes = 8 * 1024
 	// max_output_bytes controls stdout only. Stderr uses a smaller independent
 	// budget so verbose failures cannot consume the entire tool result.
@@ -130,15 +131,19 @@ var shellExecTool = BaseTool{
 ## Usage
 - Use freely to explore and operate inside the sandbox: inspect files, search
   content, transform data, run programs, manage dependencies, install system packages and verify outputs.
-- If a 'command not found' error occurs, attempt to resolve it by running ` + "`apt-get update && apt-get install -y <package>`" + `, or use any other appropriate method to install the missing command.
+- Prefer tools that already ship: ` + "`find`" + ` / ` + "`ls`" + ` to discover files;
+  ` + "`cat`" + ` / ` + "`head`" + ` / ` + "`tail`" + ` / ` + "`sed`" + ` to inspect text;
+  ` + "`grep`" + ` / ` + "`awk`" + ` to search; ` + "`file`" + ` for an unknown type.
+  Do not ` + "`apt-get install`" + ` inspection utilities (` + "`tree`" + `, editors)
+  after a 127 — those packages vanish with the session.
 - User-uploaded files listed in ` + "`<sandbox_attachments>`" + ` are restored under
   ` + "`/workspace/input`" + `. Treat them as read-only inputs; write generated files
   under ` + "`/workspace/output`" + `.
-- Prefer standard Unix tools for filesystem work: ` + "`find`" + ` / ` + "`file`" + ` to discover
-  files and types; ` + "`cat`" + ` / ` + "`head`" + ` / ` + "`tail`" + ` / ` + "`sed`" + ` to inspect
-  text; ` + "`grep`" + ` / ` + "`awk`" + ` to search and process it.
-- Install skill dependencies (` + "`pip install ...`" + `, ` + "`apt-get update && apt-get install -y ...`" + `,
-  ` + "`npm i ...`" + `) before calling ` + "`execute_skill_script`" + ` when required.
+- Install extra Python packages into the session overlay
+  (` + "`python3 -m pip install --target /workspace/.skill-packages/<skill> ...`" + `),
+  never into ` + "`/opt/weknora/tenant/skills`" + `. The skill venv is frozen after
+  install. ` + "`apt-get`" + ` is only for a system library this task actually needs,
+  not to recover from probing with a missing inspection command.
 
 ## When to Use
 - Whenever executing a command is the most direct way to complete the task.
@@ -148,16 +153,36 @@ var shellExecTool = BaseTool{
 
 ## When NOT to Use
 - DO NOT judge a skill's dependencies with a bare ` + "`python3 -c`" + ` or
-  ` + "`node -e`" + `: each skill keeps its dependencies in its own virtualenv or
-  node_modules, which neither of those resolves from here. ` + "`read_skill`" + `
-  reports the skill's directory and how to reach its environment; reinstalling
-  the packages here only fills a sandbox that is discarded with the session.
+  ` + "`node -e`" + `, and do NOT inspect a skill-generated docx/pptx/xlsx that way
+  either: system ` + "`python3`" + ` has none of the skill's packages (` + "`docx`" + `,
+  ` + "`pptx`" + `, pandas, …). Do not ` + "`pip install`" + ` them here, and do not
+  paste the same program into ` + "`.venv/bin/python -c`" + `. Write the script
+  with ` + "`write_sandbox_file`" + ` and run it with
+  ` + "`execute_skill_script(skill_name=..., script_path=/workspace/output/... )`" + `.
+  ` + "`read_skill`" + ` names the skill and how to reach its environment.
+- DO NOT ` + "`chown`" + ` / ` + "`chmod`" + ` / ` + "`ensurepip`" + ` / ` + "`pip install`" + ` a skill
+  under ` + "`/opt/weknora/tenant/skills`" + `. That tree is read-only after install
+  and ` + "`uv venv`" + ` often has no pip. On-demand extras go to
+  ` + "`python3 -m pip install --target /workspace/.skill-packages/<skill> <package>`" + `
+  (system python3), then ` + "`execute_skill_script`" + `. Or ask the user to
+  reinstall the skill so extras are baked in.
 - DO NOT try to background processes (` + "`&`" + ` at the end, ` + "`nohup`" + `). Sandbox
   execution is synchronous.
+- DO NOT write large files with ` + "`cat`" + `, heredocs, or ` + "`python -c`" + `. Use
+  ` + "`write_sandbox_file`" + ` for the file, then run it from here. To change a
+  few lines of an existing file, use ` + "`edit_sandbox_file`" + ` instead of
+  rewriting it.
+- DO NOT ` + "`ls`" + ` / ` + "`find`" + ` / ` + "`cat`" + ` / ` + "`file`" + ` a skill under
+  ` + "`/opt/weknora/tenant/skills`" + ` to discover or read its scripts.
+  ` + "`read_skill(skill_name)`" + ` already lists them; that tree also contains
+  ` + "`.venv`" + ` / ` + "`node_modules`" + `. A ` + "`.cjs`" + ` / ` + "`.js`" + ` / ` + "`.py`" + `
+  path is already a script — call ` + "`execute_skill_script`" + `.
 
 ## Parameters
 - ` + "`command`" + ` (required): the shell one-liner to run under ` + "`/bin/bash -l -c`" + `.
-  Supports pipes, redirects, ` + "`&&`" + ` / ` + "`||`" + ` chaining.
+  Supports pipes, redirects, ` + "`&&`" + ` / ` + "`||`" + ` chaining. Keep this short;
+  large scripts go through ` + "`write_sandbox_file`" + `; small edits go through
+  ` + "`edit_sandbox_file`" + `.
 - ` + "`work_dir`" + ` (optional): working directory, defaults to ` + "`/workspace`" + `.
   Created on demand if it doesn't exist.
 - ` + "`timeout_sec`" + ` (optional): per-call timeout in seconds. Defaults to 120,
@@ -305,12 +330,43 @@ func NewShellExecTool(executor SandboxCommandExecutor, envResolver skills.SkillE
 // root and may work inside the skills image root. It is registered only for
 // the built-in skill installer agent (see AgentConfig.SkillInstallMode).
 func NewInstallShellExecTool(executor SandboxInstallCommandExecutor) *ShellExecTool {
+	base := shellExecTool
+	base.description = installShellExecDescription()
 	return &ShellExecTool{
-		BaseTool:       shellExecTool,
+		BaseTool:       base,
 		executor:       installShellExecutor{inner: executor},
 		workDirRoots:   []string{defaultShellExecWorkDir, sandbox.SkillsImageRoot},
 		defaultTimeout: shellExecMaxTimeout,
 	}
+}
+
+// installShellExecDescription replaces the session-agent "use write_sandbox_file"
+// guidance. That tool is not registered in install mode, and the files this
+// agent must write sit under the skills image root, which write_sandbox_file
+// cannot accept.
+func installShellExecDescription() string {
+	return `Run a shell command as root inside the skill-install sandbox.
+
+## Usage
+- This is your only tool. write_sandbox_file / edit_sandbox_file /
+  list_sandbox_files / read_sandbox_file are not available.
+- work_dir may be the skill directory under ` + "`/opt/weknora/tenant/skills`" + `.
+- Write small files (including ` + "`.weknora/requirements.json`" + `) with a
+  short redirect: ` + "`mkdir -p .weknora && cat > .weknora/requirements.json <<'EOF'`" + `.
+  Do not try write_sandbox_file — it only accepts ` + "`/workspace`" + `, which
+  is wiped before the snapshot.
+- Install Python extras into the skill's ` + "`.venv`" + `, Node extras into
+  ` + "`node_modules`" + `. Prefer ` + "`uv pip install`" + ` / ` + "`python3 -m venv`" + `.
+
+## Parameters
+- ` + "`command`" + ` (required): the shell one-liner under ` + "`/bin/bash -l -c`" + `.
+- ` + "`work_dir`" + ` (optional): defaults to ` + "`/workspace`" + `; the skill
+  directory is allowed.
+- ` + "`timeout_sec`" + ` (optional): defaults to 600 seconds.
+
+## Returns
+- ` + "`exit_code`" + `, ` + "`stdout`" + `, ` + "`stderr`" + `. Non-zero is not a
+  tool error — read stderr and adapt.`
 }
 
 // WithEnvCapture attaches an optional capture hook. A nil hook is a no-op so
@@ -357,7 +413,10 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	if len(command) > shellExecMaxCommandBytes {
 		return &types.ToolResult{
 			Success: false,
-			Error:   fmt.Sprintf("command too long (%d bytes; max %d)", len(command), shellExecMaxCommandBytes),
+			Error: fmt.Sprintf(
+				"command too long (%d bytes; max %d). Put the file in write_sandbox_file, then run it with shell_exec",
+				len(command), shellExecMaxCommandBytes,
+			),
 		}, nil
 	}
 	if reason := checkShellExecBlacklist(command); reason != "" {
@@ -368,7 +427,6 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 			Error:   fmt.Sprintf("command rejected by shell_exec safety guard: %s", reason),
 		}, nil
 	}
-
 	sessionID := resolveSessionID(ctx)
 	if sessionID == "" {
 		return &types.ToolResult{
@@ -439,7 +497,9 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		if len(resolved) > 0 && env == nil {
 			env = make(map[string]string)
 		}
-		overlayResolvedEnv(env, resolved)
+		// Model-supplied env wins over resolved values, matching the
+		// execute_skill_script contract.
+		skills.ApplyResolvedEnv(env, resolved)
 		// A name that already resolved is one the workspace or this caller has
 		// filled in. Capture must not touch it: otherwise a hallucinated
 		// `export KEY=test` would overwrite a working stored credential.
@@ -501,6 +561,10 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	if errorText != "" {
 		b.WriteString("## Error\n\n")
 		b.WriteString(errorText)
+		b.WriteString("\n")
+	}
+	if hint := shellExecRecoveryHint(res.ExitCode, command, stderr); hint != "" {
+		b.WriteString(hint)
 		b.WriteString("\n")
 	}
 	visibleOutput := b.String()
@@ -613,20 +677,6 @@ func (t *ShellExecTool) isInstallMode() bool {
 	return false
 }
 
-// overlayResolvedEnv merges resolved skill-scoped variables into env WITHOUT
-// displacing any key env already carries. Model-supplied values (via the env
-// parameter) therefore take precedence over resolved ones, matching the
-// existing execute_skill_script contract. It mirrors skills.applyResolvedEnv,
-// duplicated here to avoid exporting that helper from the skills package.
-func overlayResolvedEnv(env, resolved map[string]string) {
-	for name, value := range resolved {
-		if _, taken := env[name]; taken {
-			continue
-		}
-		env[name] = value
-	}
-}
-
 // allowedWorkDirRoots defaults to /workspace so a zero-value tool (or one
 // built before install mode existed) keeps the ordinary contract.
 func (t *ShellExecTool) allowedWorkDirRoots() []string {
@@ -643,6 +693,128 @@ func (t *ShellExecTool) workDirAllowed(cleanWorkDir string) bool {
 		}
 	}
 	return false
+}
+
+func shellExecRecoveryHint(exitCode int, command, stderr string) string {
+	var parts []string
+	if h := shellCommandNotFoundHint(exitCode, command, stderr); h != "" {
+		parts = append(parts, h)
+	}
+	if isFrozenSkillVenvFailure(stderr) {
+		parts = append(parts, "Hint: "+frozenSkillTreeGuidance(skillNameFromShellCommand(command)))
+		return strings.Join(parts, "\n")
+	}
+	if h := shellMissingModuleHint(command, stderr); h != "" {
+		parts = append(parts, h)
+	} else if h := shellInlineEvalHint(command); h != "" {
+		parts = append(parts, h)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func shellMissingModuleHint(command, stderr string) string {
+	if !isMissingInterpreterModule(stderr) {
+		return ""
+	}
+	skill := skillNameFromShellCommand(command)
+	skillArg := "skill_name=<the skill that owns those packages>"
+	if skill != "" {
+		skillArg = fmt.Sprintf("skill_name=%q", skill)
+	}
+	return "Hint: system python3 / node do not see skill packages (docx, pptx, pandas, …). " +
+		"Do not pip install them into this session, and do not paste the same program into " +
+		"`.venv/bin/python -c`. Write it with write_sandbox_file, then " +
+		"execute_skill_script(" + skillArg + ", script_path=/workspace/output/inspect.py)."
+}
+
+func isMissingInterpreterModule(stderr string) bool {
+	if isFrozenSkillVenvFailure(stderr) {
+		return false
+	}
+	return strings.Contains(stderr, "ModuleNotFoundError") ||
+		strings.Contains(stderr, "No module named") ||
+		strings.Contains(stderr, "Cannot find module") ||
+		strings.Contains(stderr, "MODULE_NOT_FOUND")
+}
+
+func shellInlineEvalHint(command string) string {
+	if !isInlineInterpreterProgram(command) {
+		return ""
+	}
+	skill := skillNameFromShellCommand(command)
+	skillArg := "skill_name=..."
+	if skill != "" {
+		skillArg = fmt.Sprintf("skill_name=%q", skill)
+	}
+	return "Hint: do not pass a multi-line program through python -c / node -e " +
+		"(including a skill venv). Write it with write_sandbox_file, then " +
+		"execute_skill_script(" + skillArg + ", script_path=/workspace/output/inspect.py)."
+}
+
+func isInlineInterpreterProgram(command string) bool {
+	if !hasInlineEvalFlag(command) {
+		return false
+	}
+	return len(command) >= 280 || strings.Count(command, "\n") >= 2
+}
+
+func hasInlineEvalFlag(command string) bool {
+	lower := strings.ToLower(command)
+	pythonEval := strings.Contains(lower, "python") && strings.Contains(lower, " -c")
+	nodeEval := strings.Contains(lower, "node") &&
+		(strings.Contains(lower, " -e") || strings.Contains(lower, " --eval"))
+	return pythonEval || nodeEval
+}
+
+func skillNameFromShellCommand(command string) string {
+	idx := strings.Index(command, sandbox.SkillsImageRoot+"/")
+	if idx < 0 {
+		return ""
+	}
+	rest := command[idx:]
+	if end := strings.IndexAny(rest, " \t\"'"); end > 0 {
+		rest = rest[:end]
+	}
+	name, inImage := sandbox.SkillNameFromImagePath(rest)
+	if !inImage {
+		return ""
+	}
+	return name
+}
+
+// shellCommandNotFoundHint steers the model off apt-get install tree/editors
+// after a 127. Those packages are not in the slim image (`file` is), and a
+// session install is thrown away.
+func shellCommandNotFoundHint(exitCode int, command, stderr string) string {
+	if exitCode != 127 && !strings.Contains(strings.ToLower(stderr), "command not found") {
+		return ""
+	}
+	missing := inferredMissingCommand(command, stderr)
+	switch missing {
+	case "tree", "less", "more", "nano", "vim", "vi":
+		return "Hint: `" + missing + "` is not in the default sandbox image. Use find/ls, head, sed, and `file`. Skill scripts: `read_skill` / `execute_skill_script`. Do not apt-get install inspection tools — session packages are discarded."
+	default:
+		return "Hint: that command is not installed. Prefer find, ls, head, tail, cat, sed, grep, awk, file. apt-get install only for a package this task actually needs — session installs are discarded."
+	}
+}
+
+func inferredMissingCommand(command, stderr string) string {
+	lower := strings.ToLower(stderr)
+	const marker = ": command not found"
+	if i := strings.Index(lower, marker); i > 0 {
+		head := strings.TrimSpace(stderr[:i])
+		if j := strings.LastIndexAny(head, ": \t"); j >= 0 {
+			head = strings.TrimSpace(head[j+1:])
+		}
+		if head != "" {
+			return path.Base(head)
+		}
+	}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	return path.Base(fields[0])
 }
 
 func resolveShellOutputLimit(requested int) int {

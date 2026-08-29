@@ -184,12 +184,18 @@ type ExecuteConfig struct {
 	SessionID string
 
 	// RemoteScriptPath is an absolute path to a script that already exists
-	// inside the sandbox image (installed skills). When set, the executor
-	// skips the upload step and runs it in place. Only paths under a valid
-	// skill directory in SkillsImageRoot are accepted; script-content
-	// validation is skipped because the file is already on the image, so
-	// callers must have vetted the bundle at install time.
+	// inside the sandbox. When set, the executor skips the upload step and
+	// runs it in place. Accepted locations:
+	//   - an installed skill file under SkillsImageRoot (bundle vetted at install)
+	//   - a session-writable file under /workspace, not under /workspace/input,
+	//     which also requires SkillDir so the skill's interpreter is used
 	RemoteScriptPath string
+
+	// SkillDir is the installed skill directory whose venv/node_modules
+	// should run RemoteScriptPath. Required when RemoteScriptPath sits under
+	// /workspace. Image-skill paths derive the directory from the script and
+	// ignore this field.
+	SkillDir string
 }
 
 // ExecuteResult contains the result of script execution
