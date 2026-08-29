@@ -12,7 +12,7 @@ import (
 type Video struct {
 	ID                       string         `gorm:"type:varchar(36);primaryKey" json:"id"`
 	Title                    string         `gorm:"type:varchar(255);not null" json:"title"`
-	VideoType                string         `gorm:"type:varchar(50);index" json:"video_type"` // interview/tutorial/lecture/case_analysis
+	VideoType                string         `gorm:"type:varchar(50);index" json:"video_type"` // interview/training/salon/general
 	DurationSeconds          int            `json:"duration_seconds"`
 	FileURL                  string         `gorm:"type:text" json:"file_url"`
 	TranscriptionSourceURL   string         `gorm:"type:text" json:"-"`
@@ -23,9 +23,14 @@ type Video struct {
 	TranscriptRevision       int64          `json:"transcript_revision"`
 	TranscriptActiveRevision int64          `json:"transcript_active_revision"`
 	KnowledgeBaseWikiPageID  string         `gorm:"type:varchar(64)" json:"knowledge_base_wiki_page_id"` // extract-video-knowledge 产物「知识底座」索引页 ID
+	KnowledgeAuditStatus     string         `gorm:"type:varchar(16)" json:"knowledge_audit_status"`      // passed/conditional/failed
 	OutlineWikiPageID        string         `gorm:"type:varchar(64)" json:"outline_wiki_page_id"`
 	OverviewWikiPageID       string         `gorm:"type:varchar(64)" json:"overview_wiki_page_id"`
 	SummaryWikiPageID        string         `gorm:"type:varchar(64)" json:"summary_wiki_page_id"`
+	SummaryWikiPageVersion   int            `json:"summary_wiki_page_version"`
+	SummarySource            string         `gorm:"type:varchar(32)" json:"summary_source"` // initial/enhanced/user_edited
+	SummaryKnowledgeEnhanced bool           `json:"summary_knowledge_enhanced"`
+	SummaryUserEdited        bool           `json:"summary_user_edited"`
 	TranscriptPageWikiPageID string         `gorm:"type:varchar(64)" json:"transcript_page_wiki_page_id"`
 	Status                   string         `gorm:"type:varchar(50);index" json:"status"`
 	ProcessingErrorSummary   string         `gorm:"type:text" json:"processing_error_summary"`
@@ -59,7 +64,7 @@ type VideoTranscriptChunk struct {
 type VideoProcessingJob struct {
 	ID                   string     `gorm:"type:varchar(36);primaryKey" json:"id"`
 	VideoID              string     `gorm:"type:varchar(36);index:idx_video_job_status,priority:1;index:idx_video_job_generation,priority:1" json:"video_id"`
-	JobType              string     `gorm:"type:varchar(50);index:idx_video_job_status,priority:2;index:idx_video_job_generation,priority:2" json:"job_type"` // thumbnail/transcription/subtitle_generate/index/graph/outline/overview/summary/assemble
+	JobType              string     `gorm:"type:varchar(50);index:idx_video_job_status,priority:2;index:idx_video_job_generation,priority:2" json:"job_type"` // thumbnail/transcription/subtitle_generate/index/graph/outline/overview/summary/summary_enhance/assemble
 	TranscriptGeneration string     `gorm:"type:varchar(64);index:idx_video_job_generation,priority:3" json:"transcript_generation"`
 	Provider             string     `gorm:"type:varchar(50)" json:"provider"` // local/aliyun_tingwu/weknora
 	ExternalTaskID       string     `gorm:"type:varchar(128);index" json:"external_task_id"`
@@ -83,7 +88,7 @@ type VideoProcessingJob struct {
 // VideoSummaryFramework 视频类型 → 总结框架路由
 type VideoSummaryFramework struct {
 	ID        string    `gorm:"type:varchar(36);primaryKey" json:"id"`
-	VideoType string    `gorm:"type:varchar(50);uniqueIndex" json:"video_type"` // interview/tutorial/lecture/case_analysis
+	VideoType string    `gorm:"type:varchar(50);uniqueIndex" json:"video_type"` // interview/training/salon/general
 	Framework string    `gorm:"type:text" json:"framework"`                     // 总结框架定义（JSON）
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

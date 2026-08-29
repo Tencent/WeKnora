@@ -1,22 +1,16 @@
-// Package skill 内容生产 skill 链定义与编排常量（CP-T004）。
-//
-// 5 个 skill 顺序固定（spec §3.1），依赖关系如下：
-//   - extract-video-knowledge → 其他 4 个都依赖
-//   - generate-transcript-outline → 依赖知识原子
-//   - summarize-transcript-content → 依赖知识原子审计状态
-//   - generate-typed-transcript-summary → 依赖知识原子 + 实体 + 关系
-//   - assemble-transcript-page → 依赖前 4 个产物
+// Package skill defines the content jobs and their artifact contracts.
 package skill
 
 import "strings"
 
 // JobType 5 个内容生产 job 类型（写入 video_processing_jobs.job_type）
 const (
-	JobGraph    = "graph"    // extract-video-knowledge
-	JobOutline  = "outline"  // generate-transcript-outline
-	JobOverview = "overview" // summarize-transcript-content
-	JobSummary  = "summary"  // generate-typed-transcript-summary
-	JobAssemble = "assemble" // assemble-transcript-page
+	JobGraph          = "graph"    // extract-video-knowledge
+	JobOutline        = "outline"  // generate-transcript-outline
+	JobOverview       = "overview" // summarize-transcript-content
+	JobSummary        = "summary"  // generate-typed-transcript-summary
+	JobSummaryEnhance = "summary_enhance"
+	JobAssemble       = "assemble" // assemble-transcript-page
 )
 
 // SkillName WeKnora skill 名称（传给 Agent Chat API 的 skill_names）
@@ -67,6 +61,13 @@ var JobContracts = map[string]JobContract{
 		SlugPrefixes:  []string{"typed-summary", "summary"},
 		VideoField:    "summary_wiki_page_id",
 	},
+	JobSummaryEnhance: {
+		SkillName:     SkillTypedSummary,
+		ArtifactType:  "typed_summary",
+		WikiPageTypes: []string{"index"},
+		SlugPrefixes:  []string{"typed-summary", "summary"},
+		VideoField:    "summary_wiki_page_id",
+	},
 	JobAssemble: {
 		SkillName:     SkillAssemblePage,
 		ArtifactType:  "transcript_page",
@@ -76,8 +77,8 @@ var JobContracts = map[string]JobContract{
 	},
 }
 
-// ChainOrder 串行触发顺序（每个 job 完成后由 orchestrator 调度下一个）
-var ChainOrder = []string{JobGraph, JobOutline, JobOverview, JobSummary, JobAssemble}
+var FoundationJobs = []string{JobOutline, JobOverview, JobSummary}
+var EnhancementJobs = []string{JobGraph, JobSummaryEnhance}
 
 func Contract(jobType string) (JobContract, bool) {
 	contract, ok := JobContracts[jobType]
@@ -85,11 +86,7 @@ func Contract(jobType string) (JobContract, bool) {
 }
 
 func NextJob(currentJobType string) string {
-	for index, jobType := range ChainOrder {
-		if jobType == currentJobType && index+1 < len(ChainOrder) {
-			return ChainOrder[index+1]
-		}
-	}
+	// Jobs are independently triggered after the transcript generation is activated.
 	return ""
 }
 
@@ -100,6 +97,16 @@ func (c JobContract) MatchesPageType(pageType string) bool {
 		}
 	}
 	return false
+}
+
+func (c JobContract) WriteSlug(videoID string) string {
+	if c.MatchVideoSlug {
+		return "video/" + videoID
+	}
+	if len(c.SlugPrefixes) == 0 {
+		return ""
+	}
+	return c.SlugPrefixes[0] + "/" + videoID
 }
 
 func (c JobContract) MatchesSlug(slug, videoID string) bool {

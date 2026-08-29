@@ -1,0 +1,2 @@
+ALTER TABLE videos
+    ADD COLUMN IF NOT EXISTS knowledge_audit_status VARCHAR(16) NOT NULL DEFAULT '';

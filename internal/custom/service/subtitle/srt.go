@@ -32,6 +32,55 @@ func ValidateParagraphs(paragraphs []TranscriptParagraph) error {
 	return nil
 }
 
+// ValidateTranscriptQuality checks cross-sentence invariants before content is published.
+func ValidateTranscriptQuality(paragraphs []TranscriptParagraph, durationSeconds int) error {
+	var previousStart, previousEnd int
+	var firstStart, lastEnd int
+	validSentences := 0
+	for paragraphIndex, paragraph := range paragraphs {
+		for sentenceIndex, sentence := range paragraph.Sentences {
+			if strings.TrimSpace(sentence.Text) == "" {
+				continue
+			}
+			if sentence.StartMs < 0 || sentence.EndMs <= sentence.StartMs {
+				return fmt.Errorf("invalid transcript timeline at paragraph=%d sentence=%d", paragraphIndex, sentenceIndex)
+			}
+			if validSentences > 0 && (sentence.StartMs < previousStart || sentence.EndMs < previousEnd) {
+				return fmt.Errorf("transcript timestamps are not monotonic at paragraph=%d sentence=%d", paragraphIndex, sentenceIndex)
+			}
+			if validSentences == 0 {
+				firstStart = sentence.StartMs
+			}
+			if validSentences > 0 && sentence.StartMs-previousEnd > 30*60*1000 {
+				return fmt.Errorf("transcript contains an abnormal timeline gap before paragraph=%d sentence=%d", paragraphIndex, sentenceIndex)
+			}
+			previousEnd = sentence.EndMs
+			previousStart = sentence.StartMs
+			lastEnd = sentence.EndMs
+			validSentences++
+		}
+	}
+	if validSentences == 0 {
+		return fmt.Errorf("transcript quality gate found no non-empty sentences")
+	}
+	if durationSeconds > 0 && (firstStart > durationSeconds*1000+5*60*1000 || lastEnd > durationSeconds*1000+5*60*1000) {
+		return fmt.Errorf("transcript timeline exceeds video duration: first_start_ms=%d last_end_ms=%d duration_seconds=%d", firstStart, lastEnd, durationSeconds)
+	}
+	if durationSeconds > 0 {
+		tolerance := durationSeconds * 1000 / 10
+		if tolerance < 30*1000 {
+			tolerance = 30 * 1000
+		}
+		if tolerance > 5*60*1000 {
+			tolerance = 5 * 60 * 1000
+		}
+		if firstStart > tolerance || lastEnd < durationSeconds*1000-tolerance {
+			return fmt.Errorf("transcript does not cover video boundaries: first_start_ms=%d last_end_ms=%d duration_seconds=%d", firstStart, lastEnd, durationSeconds)
+		}
+	}
+	return nil
+}
+
 // TranscriptParagraph 听悟转写段落（最小可用字段）
 //
 // 实际字段以听悟协议为准；此处只取生成 SRT 必需的字段。

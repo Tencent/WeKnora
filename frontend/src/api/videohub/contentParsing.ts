@@ -226,7 +226,7 @@ export function mapRelatedKnowledgeResponse(videoId: string, response: BackendRe
       seconds: Number.isFinite(Number(item.seconds)) ? Number(item.seconds) : item.timestamp ? parseTimestamp(item.timestamp) : 0,
       video_id: item.video_id || '',
       video_title: item.video_title || '关联视频',
-      video_category: item.video_type === 'interview' ? 'interview' : item.video_type === 'tutorial' ? 'training' : item.video_type === 'case_analysis' ? 'salon' : 'general',
+      video_category: item.video_type === 'interview' ? 'interview' : item.video_type === 'tutorial' || item.video_type === 'training' ? 'training' : item.video_type === 'lecture' || item.video_type === 'salon' ? 'salon' : 'general',
       relation_description: item.relation_description || '与当前内容存在知识关联。',
     }))
   const anchors: CurrentKnowledgeAnchor[] = grouped.map((item) => ({

@@ -110,6 +110,9 @@ func (h *SubtitleGenerateHandler) Run(ctx context.Context, job *model.VideoProce
 	if err := subtitle.ValidateParagraphs(paragraphs); err != nil {
 		return err
 	}
+	if err := subtitle.ValidateTranscriptQuality(paragraphs, video.DurationSeconds); err != nil {
+		return fmt.Errorf("transcript quality gate: %w", err)
+	}
 
 	// 生成 SRT
 	srt := subtitle.ParagraphsToSRT(paragraphs)
@@ -133,18 +136,7 @@ func (h *SubtitleGenerateHandler) Run(ctx context.Context, job *model.VideoProce
 		return fmt.Errorf("marshal subtitle result: %w", err)
 	}
 
-	// 触发 index job
-	indexJob := model.VideoProcessingJob{
-		ID:                   uuid.NewString(),
-		VideoID:              video.ID,
-		JobType:              "index",
-		TranscriptGeneration: job.TranscriptGeneration,
-		Provider:             "weknora",
-		Status:               "pending",
-		MaxAttempts:          3,
-		IdempotencyKey:       fmt.Sprintf("index:%s:%x", video.ID, sha256.Sum256(storePayload)),
-		ResultPayload:        string(storePayload),
-	}
+	var indexJob model.VideoProcessingJob
 	if err := h.DB.Transaction(func(tx *gorm.DB) error {
 		var locked model.Video
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", video.ID).Error; err != nil {
@@ -153,6 +145,17 @@ func (h *SubtitleGenerateHandler) Run(ctx context.Context, job *model.VideoProce
 		revision := locked.TranscriptRevision + 1
 		if err := tx.Model(&locked).Update("transcript_revision", revision).Error; err != nil {
 			return fmt.Errorf("advance transcript revision: %w", err)
+		}
+		indexJob = model.VideoProcessingJob{
+			ID:                   uuid.NewString(),
+			VideoID:              video.ID,
+			JobType:              "index",
+			TranscriptGeneration: job.TranscriptGeneration,
+			Provider:             "weknora",
+			Status:               "pending",
+			MaxAttempts:          3,
+			IdempotencyKey:       fmt.Sprintf("index:%s:%d:%x", video.ID, revision, sha256.Sum256(storePayload)),
+			ResultPayload:        string(storePayload),
 		}
 		indexJob.InputPayload = fmt.Sprintf(`{"revision":%d}`, revision)
 		if err := tx.Model(&model.Video{}).Where("id = ?", video.ID).Update("subtitle_file_url", subtitleURL).Error; err != nil {
@@ -256,7 +259,7 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	}
 	job.TranscriptGeneration = generation
 
-	var firstKnowledgeID string
+	var compatibilityAnchorID string
 	for _, item := range prepared {
 		title := fmt.Sprintf("transcript/%s/%s/%06d", video.ID, generation, item.Index)
 		var checkpoint model.VideoTranscriptChunk
@@ -293,12 +296,12 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 				return fmt.Errorf("save transcript checkpoint %d: %w", item.Index, err)
 			}
 		}
-		if firstKnowledgeID == "" {
-			firstKnowledgeID = checkpoint.KnowledgeID
+		if compatibilityAnchorID == "" {
+			compatibilityAnchorID = checkpoint.KnowledgeID
 		}
 	}
 
-	if err := h.waitUntilSearchable(ctx, video.ID, generation); err != nil {
+	if err := h.waitUntilSearchable(ctx, video.ID, generation, len(prepared)); err != nil {
 		return err
 	}
 	// 先原子切换到已完成的新 generation；远端旧数据清理失败不能破坏当前可用版本。
@@ -307,8 +310,12 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 		result := tx.Model(&model.Video{}).
 			Where("id = ? AND transcript_active_revision < ?", video.ID, jobInput.Revision).
 			Updates(map[string]any{
-				"transcript_knowledge_id": firstKnowledgeID, "transcript_generation": generation,
+				"transcript_knowledge_id": compatibilityAnchorID, "transcript_generation": generation,
 				"transcript_active_revision": jobInput.Revision, "status": model.VideoStatusProcessing,
+				"knowledge_base_wiki_page_id": "", "knowledge_audit_status": "",
+				"outline_wiki_page_id": "", "overview_wiki_page_id": "", "summary_wiki_page_id": "",
+				"summary_wiki_page_version": 0, "summary_source": "", "summary_knowledge_enhanced": false,
+				"summary_user_edited": false, "transcript_page_wiki_page_id": "",
 			})
 		if result.Error != nil {
 			return result.Error
@@ -329,7 +336,7 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 			return fmt.Errorf("load active transcript generation: %w", err)
 		}
 		if current.TranscriptGeneration == generation && current.TranscriptActiveRevision == jobInput.Revision {
-			if err := h.enqueueGraph(ctx, video.ID); err != nil {
+			if err := h.enqueueContentPipeline(ctx, video.ID); err != nil {
 				return err
 			}
 			return h.deleteRetiredGenerations(ctx, video.ID)
@@ -346,27 +353,24 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	}
 
 	// 触发内容生产第一环：extract-video-knowledge（CP-T005）
-	if err := h.enqueueGraph(ctx, video.ID); err != nil {
+	if err := h.enqueueContentPipeline(ctx, video.ID); err != nil {
 		return err
 	}
-	slog.Info("transcript index completed", "video_id", video.ID, "job_id", job.ID, "generation", generation, "revision", jobInput.Revision, "chunk_count", len(prepared), "first_knowledge_id", firstKnowledgeID)
+	slog.Info("transcript index completed", "video_id", video.ID, "job_id", job.ID, "generation", generation, "revision", jobInput.Revision, "chunk_count", len(prepared))
 	if err := h.deleteRetiredGenerations(ctx, video.ID); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (h *IndexHandler) enqueueGraph(ctx context.Context, videoID string) error {
+func (h *IndexHandler) enqueueContentPipeline(ctx context.Context, videoID string) error {
 	if h.Orchestrator == nil {
 		return nil
 	}
-	if _, err := h.Orchestrator.EnqueueJob(ctx, videoID, skill.JobGraph); err != nil {
-		return fmt.Errorf("enqueue graph job: %w", err)
-	}
-	return nil
+	return h.Orchestrator.EnqueueContentPipeline(ctx, videoID)
 }
 
-func (h *IndexHandler) waitUntilSearchable(ctx context.Context, videoID, generation string) error {
+func (h *IndexHandler) waitUntilSearchable(ctx context.Context, videoID, generation string, expectedChunkCount int) error {
 	deadline := time.NewTimer(10 * time.Minute)
 	ticker := time.NewTicker(2 * time.Second)
 	defer deadline.Stop()
@@ -376,8 +380,14 @@ func (h *IndexHandler) waitUntilSearchable(ctx context.Context, videoID, generat
 		if err := h.DB.Where("video_id = ? AND generation = ?", videoID, generation).Order("chunk_index ASC").Find(&checkpoints).Error; err != nil {
 			return fmt.Errorf("list transcript checkpoints: %w", err)
 		}
-		allCompleted := len(checkpoints) > 0
+		if len(checkpoints) > expectedChunkCount {
+			return fmt.Errorf("转写分块数量超过预期: expected=%d actual=%d", expectedChunkCount, len(checkpoints))
+		}
+		allCompleted := len(checkpoints) == expectedChunkCount && expectedChunkCount > 0
 		for i := range checkpoints {
+			if checkpoints[i].ChunkIndex != i || strings.TrimSpace(checkpoints[i].KnowledgeID) == "" {
+				return fmt.Errorf("转写分块清单不完整: expected_index=%d actual_index=%d", i, checkpoints[i].ChunkIndex)
+			}
 			if checkpoints[i].Status == "completed" {
 				continue
 			}
@@ -387,6 +397,14 @@ func (h *IndexHandler) waitUntilSearchable(ctx context.Context, videoID, generat
 			}
 			switch knowledge.ParseStatus {
 			case "completed":
+				searchable, err := h.WeKnora.IsKnowledgeSearchable(ctx, h.WeKnora.KBID(), checkpoints[i].KnowledgeID)
+				if err != nil {
+					return fmt.Errorf("检索验证知识 %s: %w", checkpoints[i].KnowledgeID, err)
+				}
+				if !searchable {
+					allCompleted = false
+					continue
+				}
 				if err := h.DB.Model(&checkpoints[i]).Update("status", "completed").Error; err != nil {
 					return fmt.Errorf("complete transcript checkpoint: %w", err)
 				}

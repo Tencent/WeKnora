@@ -65,6 +65,14 @@ func TestProcessingStatusReportsFailedStageAndRetryableJob(t *testing.T) {
 	}
 }
 
+func TestSummaryEnhancementUsesSummaryArtifact(t *testing.T) {
+	video := model.Video{SummaryWikiPageID: "summary-page", KnowledgeBaseWikiPageID: ""}
+	job := model.VideoProcessingJob{JobType: "summary_enhance"}
+	if !stageArtifactAvailable(video, job) {
+		t.Fatal("summary enhancement should be complete when the summary page exists")
+	}
+}
+
 func TestRetryFailedStageReusesSameJob(t *testing.T) {
 	db := openTestVideoDB(t)
 	video := model.Video{
@@ -132,6 +140,51 @@ func TestRetryFailedStageReusesSameJob(t *testing.T) {
 	}
 	if gotVideo.Status != model.VideoStatusProcessing || gotVideo.ProcessingErrorSummary != "" {
 		t.Fatalf("video retry state = %#v", gotVideo)
+	}
+}
+
+func TestRetrySuccessfulTranscriptionCreatesNewJob(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "rerun parsing", Status: model.VideoStatusCompleted,
+		TranscriptGeneration: "generation-1",
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	previous := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "transcription", TranscriptGeneration: video.TranscriptGeneration,
+		Provider: "aliyun_tingwu", Status: "succeeded", ResultPayload: `{"raw_result":"real-result"}`,
+		IdempotencyKey: "transcription:" + video.ID,
+	}
+	if err := db.Create(&previous).Error; err != nil {
+		t.Fatalf("create previous job: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}, {Key: "jobType", Value: "transcription"}}
+	context.Request = httptest.NewRequest(http.MethodPost, "/api/custom/videos/"+video.ID+"/processing-jobs/transcription/retry", nil)
+	NewProcessingHandler(db).Retry(context)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("retry status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode retry response: %v", err)
+	}
+	if response.JobID == "" {
+		t.Fatal("retry response has no new job id")
+	}
+
+	var rerun model.VideoProcessingJob
+	if err := db.First(&rerun, "id = ?", response.JobID).Error; err != nil {
+		t.Fatalf("load rerun job: %v", err)
+	}
+	if rerun.ID == previous.ID || rerun.Status != "pending" || rerun.IdempotencyKey == previous.IdempotencyKey {
+		t.Fatalf("rerun job = %#v", rerun)
 	}
 }
 
@@ -249,5 +302,32 @@ func TestProcessingStatusKeepsPartialSuccessWhenLaterStageFails(t *testing.T) {
 	}
 	if len(status.CompletedStages) != 1 || status.CompletedStages[0] != "outline" {
 		t.Fatalf("completed stages = %#v", status.CompletedStages)
+	}
+}
+
+func TestProcessingStatusIsolatesGraphFailureFromFoundation(t *testing.T) {
+	video := model.Video{
+		ID: uuid.NewString(), Status: model.VideoStatusCompleted, TranscriptGeneration: "generation-1",
+		OutlineWikiPageID: "outline-1", OverviewWikiPageID: "overview-1", SummaryWikiPageID: "summary-1",
+		TranscriptPageWikiPageID: "transcript-page-1",
+	}
+	now := time.Now().UTC()
+	jobs := []model.VideoProcessingJob{
+		{ID: "outline", VideoID: video.ID, JobType: "outline", TranscriptGeneration: video.TranscriptGeneration, Status: "succeeded", UpdatedAt: now},
+		{ID: "overview", VideoID: video.ID, JobType: "overview", TranscriptGeneration: video.TranscriptGeneration, Status: "succeeded", UpdatedAt: now},
+		{ID: "summary", VideoID: video.ID, JobType: "summary", TranscriptGeneration: video.TranscriptGeneration, Status: "succeeded", UpdatedAt: now},
+		{ID: "assemble", VideoID: video.ID, JobType: "assemble", TranscriptGeneration: video.TranscriptGeneration, Status: "succeeded", UpdatedAt: now},
+		{ID: "graph", VideoID: video.ID, JobType: "graph", TranscriptGeneration: video.TranscriptGeneration, Status: "failed", ErrorCategory: "weknora", ErrorCode: "graph_failed", ErrorMessage: "graph unavailable", UpdatedAt: now.Add(time.Second)},
+	}
+
+	status := buildProcessingStatus(video, jobs)
+	if status.Status != ProcessingStateCompleted || status.Failure != nil {
+		t.Fatalf("overall status = %#v", status)
+	}
+	if status.FoundationStatus != ProcessingStateCompleted || status.EnhancementStatus != ProcessingStateFailed {
+		t.Fatalf("track status = %#v", status)
+	}
+	if status.EnhancementFailure == nil || status.EnhancementFailure.JobID != "graph" {
+		t.Fatalf("enhancement failure = %#v", status.EnhancementFailure)
 	}
 }

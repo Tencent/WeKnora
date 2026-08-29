@@ -168,16 +168,22 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 
 // WikiPageResp 单页 Wiki 响应（CP-T009）
 type WikiPageResp struct {
-	Status       string         `json:"status"`
-	Stage        string         `json:"stage"`
-	ErrorCode    string         `json:"error_code"`
-	ErrorMessage string         `json:"error_message"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	VideoID      string         `json:"video_id"`
-	PageType     string         `json:"page_type"` // outline / overview / summary / transcript_page
-	WikiPageID   string         `json:"wiki_page_id"`
-	Content      string         `json:"content"`
-	Frontmatter  map[string]any `json:"frontmatter,omitempty"`
+	Status                   string         `json:"status"`
+	Stage                    string         `json:"stage"`
+	ErrorCode                string         `json:"error_code"`
+	ErrorMessage             string         `json:"error_message"`
+	UpdatedAt                time.Time      `json:"updated_at"`
+	VideoID                  string         `json:"video_id"`
+	PageType                 string         `json:"page_type"` // outline / overview / summary / transcript_page
+	WikiPageID               string         `json:"wiki_page_id"`
+	TranscriptGeneration     string         `json:"transcript_generation"`
+	ArtifactVersion          int            `json:"artifact_version"`
+	SummarySource            string         `json:"summary_source,omitempty"`
+	SummaryKnowledgeEnhanced bool           `json:"summary_knowledge_enhanced,omitempty"`
+	SummaryUserEdited        bool           `json:"summary_user_edited,omitempty"`
+	KnowledgeAuditStatus     string         `json:"knowledge_audit_status,omitempty"`
+	Content                  string         `json:"content"`
+	Frontmatter              map[string]any `json:"frontmatter,omitempty"`
 }
 
 // fetchWikiPageByVideoField 按 videos 表字段名取 Wiki 页
@@ -206,19 +212,40 @@ func (h *ContentHandler) fetchWikiPageByVideoField(c *gin.Context, video *model.
 		contentError(c, http.StatusNotFound, video.ID, pageType, "artifact_missing", "wiki page not found", video.UpdatedAt)
 		return
 	}
+	frontmatter := page.ParsedFrontmatter()
+	expectedType := map[string]string{
+		"outline":         "outline",
+		"overview":        "overview",
+		"summary":         "typed_summary",
+		"transcript_page": "transcript_page",
+	}[pageType]
+	actualType, _ := frontmatter["type"].(string)
+	sourceVideoID, _ := frontmatter["source_video_id"].(string)
+	pageGeneration, _ := frontmatter["transcript_generation"].(string)
+	generationMismatch := strings.TrimSpace(video.TranscriptGeneration) != "" && strings.TrimSpace(pageGeneration) != video.TranscriptGeneration
+	if expectedType == "" || actualType != expectedType || sourceVideoID != video.ID || generationMismatch || strings.TrimSpace(page.Content) == "" {
+		contentError(c, http.StatusInternalServerError, video.ID, pageType, "artifact_contract_mismatch", "wiki page does not satisfy the content artifact contract", video.UpdatedAt)
+		return
+	}
 	updatedAt := page.UpdatedAt
 	if updatedAt.IsZero() {
 		updatedAt = video.UpdatedAt
 	}
 	c.JSON(http.StatusOK, WikiPageResp{
-		Status:      "completed",
-		Stage:       pageType,
-		UpdatedAt:   updatedAt,
-		VideoID:     video.ID,
-		PageType:    pageType,
-		WikiPageID:  wikiID,
-		Content:     page.Content,
-		Frontmatter: page.ParsedFrontmatter(),
+		Status:                   "completed",
+		Stage:                    pageType,
+		UpdatedAt:                updatedAt,
+		VideoID:                  video.ID,
+		PageType:                 pageType,
+		WikiPageID:               wikiID,
+		TranscriptGeneration:     video.TranscriptGeneration,
+		ArtifactVersion:          page.Version,
+		SummarySource:            video.SummarySource,
+		SummaryKnowledgeEnhanced: video.SummaryKnowledgeEnhanced,
+		SummaryUserEdited:        video.SummaryUserEdited,
+		KnowledgeAuditStatus:     video.KnowledgeAuditStatus,
+		Content:                  page.Content,
+		Frontmatter:              frontmatter,
 	})
 }
 

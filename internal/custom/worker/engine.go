@@ -224,6 +224,20 @@ func (e *Engine) markFailed(job *model.VideoProcessingJob, category, code, msg s
 	})
 	updates := map[string]any{"status": model.VideoStatusFailed, "processing_error_summary": msg}
 	coverDegraded := false
+	if isContentEnhancementJob(job.JobType) {
+		updates["status"] = model.VideoStatusProcessing
+		if job.JobType == "summary_enhance" {
+			updates["processing_error_summary"] = "总结增强失败，基础内容仍可用"
+		} else {
+			updates["processing_error_summary"] = "知识提取失败，基础内容仍可用"
+			updates["knowledge_audit_status"] = "failed"
+		}
+		var video model.Video
+		if err := e.db.Select("outline_wiki_page_id", "overview_wiki_page_id", "summary_wiki_page_id", "transcript_page_wiki_page_id").First(&video, "id = ?", job.VideoID).Error; err == nil &&
+			video.OutlineWikiPageID != "" && video.OverviewWikiPageID != "" && video.SummaryWikiPageID != "" && video.TranscriptPageWikiPageID != "" {
+			updates["status"] = model.VideoStatusCompleted
+		}
+	}
 	if job.JobType == "thumbnail" {
 		var video model.Video
 		if err := e.db.Select("file_url").First(&video, "id = ?", job.VideoID).Error; err != nil {
@@ -251,6 +265,10 @@ func (e *Engine) markFailed(job *model.VideoProcessingJob, category, code, msg s
 	if coverDegraded {
 		e.enqueueTranscriptionAfterCoverFallback(job.VideoID)
 	}
+}
+
+func isContentEnhancementJob(jobType string) bool {
+	return jobType == "graph" || jobType == "summary_enhance"
 }
 
 // enqueueTranscriptionAfterCoverFallback 封面降级后补投转写任务，避免内容链路死路。

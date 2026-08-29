@@ -2,9 +2,12 @@ import type { VideoData, VideoCategory } from '@/types/videohub'
 
 const CATEGORY_MAP: Record<string, { category: VideoCategory; name: string }> = {
   interview: { category: 'interview', name: '访谈' },
+  training: { category: 'training', name: '培训' },
+  salon: { category: 'salon', name: '研讨' },
+  general: { category: 'general', name: '通用' },
   tutorial: { category: 'training', name: '培训' },
-  lecture: { category: 'general', name: '讲座' },
-  case_analysis: { category: 'salon', name: '案例' },
+  lecture: { category: 'salon', name: '研讨' },
+  case_analysis: { category: 'general', name: '通用' },
 }
 
 const INITIAL_VIDEO_STATUSES = new Set(['uploaded', 'initializing', 'ready', 'processing', 'completed', 'failed'])
@@ -22,7 +25,7 @@ function formatDuration(seconds: number): string {
 }
 
 export function mapVideo(v: any, response?: any): VideoData {
-  const cat = CATEGORY_MAP[v.video_type] || { category: 'general' as VideoCategory, name: v.video_type || '通用' }
+  const cat = CATEGORY_MAP[v.video_type] || { category: 'general' as VideoCategory, name: '通用' }
   const durationSeconds = Number(v.duration_seconds) || 0
   return {
     id: v.id,
@@ -45,6 +48,10 @@ export function mapVideo(v: any, response?: any): VideoData {
     poster_url: v.cover_url || v.thumbnail_url || '',
     cover_url: v.cover_url || v.thumbnail_url || '',
     processing_error_summary: v.processing_error_summary || '',
+    summarySource: v.summary_source || '',
+    summaryKnowledgeEnhanced: Boolean(v.summary_knowledge_enhanced),
+    summaryUserEdited: Boolean(v.summary_user_edited),
+    knowledgeAuditStatus: v.knowledge_audit_status || '',
     subtitle_file_url: v.subtitle_file_url || '',
     overview: '',
     chapters: [],

@@ -37,10 +37,10 @@ const uploadPageHTML = `<!DOCTYPE html>
 <div class="field">
   <label>视频类型</label>
   <select id="type">
-    <option value="tutorial">tutorial（培训）</option>
+    <option value="training">training（培训）</option>
     <option value="interview">interview（访谈）</option>
-    <option value="lecture">lecture（讲座）</option>
-    <option value="case_analysis">case_analysis（案例）</option>
+    <option value="salon">salon（研讨）</option>
+    <option value="general">general（通用）</option>
   </select>
 </div>
 <div class="field">

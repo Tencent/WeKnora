@@ -38,7 +38,7 @@ description: 从已审计的文字稿时间轴和结构化知识生成前台可�
 
 ### 三、输出
 
-8. 所有章节内容就绪后，通过 **创建/覆盖 Wiki** 工具将大纲写入知识库的 Wiki 页面。写入契约：工具 `page_type` 用 `index`；页面 frontmatter 必须含 `type: outline` 与 `source_video_id: {视频ID}`。
+8. 所有章节内容就绪后，通过 **创建/覆盖 Wiki** 工具将大纲写入知识库的 Wiki 页面。写入契约：工具 `page_type` 用 `index`；页面 frontmatter 必须含 `type: outline`、`source_video_id: {视频ID}` 与 `transcript_generation: {转写代次}`。由 vidsage 内容流水线触发时，页面 slug 固定为 `outline/{视频ID}`，不得使用视频标题或其他产物 slug。
 
 ## 强制规则
 

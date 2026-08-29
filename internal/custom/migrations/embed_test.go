@@ -63,6 +63,10 @@ func TestEmbeddedMigrationsAreComplete(t *testing.T) {
 		"000008_processing_observability.down.sql",
 		"000009_transcription_source.up.sql",
 		"000009_transcription_source.down.sql",
+		"000010_content_pipeline_metadata.up.sql",
+		"000010_content_pipeline_metadata.down.sql",
+		"000011_knowledge_audit_status.up.sql",
+		"000011_knowledge_audit_status.down.sql",
 	} {
 		content, err := fs.ReadFile(FS, file)
 		if err != nil {

@@ -238,6 +238,47 @@ func TestContentFailureStoresCategoryAndKeepsVideoPlayable(t *testing.T) {
 	}
 }
 
+func TestSummaryEnhancementFailureDoesNotFailVideo(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&model.Video{}, &model.VideoProcessingJob{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	video := model.Video{
+		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusProcessing,
+		FileURL: "https://cdn/video.mp4", OutlineWikiPageID: "outline-page",
+		OverviewWikiPageID: "overview-page", SummaryWikiPageID: "summary-page",
+		TranscriptPageWikiPageID: "transcript-page",
+	}
+	job := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "summary_enhance", Status: "running",
+		AttemptCount: 1, MaxAttempts: 1, IdempotencyKey: "summary_enhance:" + video.ID,
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	engine := NewEngine(db, &config.WorkerConfig{}, &failingHandler{jobType: "summary_enhance", err: context.DeadlineExceeded})
+	engine.dispatch(context.Background(), &job)
+
+	var got model.Video
+	if err := db.First(&got, "id = ?", video.ID).Error; err != nil {
+		t.Fatalf("load video: %v", err)
+	}
+	if got.Status != model.VideoStatusCompleted {
+		t.Fatalf("video status = %q, want %q", got.Status, model.VideoStatusCompleted)
+	}
+	if got.ProcessingErrorSummary != "总结增强失败，基础内容仍可用" {
+		t.Fatalf("processing error = %q", got.ProcessingErrorSummary)
+	}
+}
+
 func TestDeterministicExternalFileErrorDoesNotRetry(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

@@ -43,14 +43,16 @@ func NewWikiClient(cfg config.WeKnoraConfig) *WikiClient {
 // 注意：WeKnora 原生 Wiki 页 API 不返回 frontmatter 字段——agent 写入的 YAML
 // frontmatter 存在 content 顶部。本侧通过 ParsedFrontmatter() 自行解析。
 type WikiPage struct {
-	ID        string    `json:"id"`
-	Slug      string    `json:"slug"`
-	Title     string    `json:"title"`
-	PageType  string    `json:"page_type"` // 6 值白名单之一
-	Content   string    `json:"content"`
-	Summary   string    `json:"summary,omitempty"`
-	Version   int       `json:"version"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID             string    `json:"id"`
+	Slug           string    `json:"slug"`
+	Title          string    `json:"title"`
+	PageType       string    `json:"page_type"` // 6 值白名单之一
+	Content        string    `json:"content"`
+	Summary        string    `json:"summary,omitempty"`
+	Version        int       `json:"version"`
+	LastEditSource string    `json:"last_edit_source"`
+	LastEditorID   string    `json:"last_editor_id"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // ParsedFrontmatter 从 content 顶部解析 YAML frontmatter（--- 包裹），返回 map。

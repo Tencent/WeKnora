@@ -25,6 +25,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/minio"
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/videotype"
 )
 
 // UploadHandler 上传相关路由
@@ -114,10 +115,7 @@ func (h *UploadHandler) Direct(c *gin.Context) {
 	}
 	defer file.Close()
 
-	videoType := c.PostForm("video_type")
-	if videoType == "" {
-		videoType = "tutorial"
-	}
+	videoType := videotype.Normalize(c.PostForm("video_type"))
 
 	videoID := uuid.NewString()
 	ext := strings.ToLower(filepath.Ext(header.Filename))
@@ -188,7 +186,7 @@ func (h *UploadHandler) Confirm(c *gin.Context) {
 		"file_url":                 h.MinIO.PublicURL(req.ObjectKey),
 		"transcription_source_url": h.MinIO.PublicURL(req.ObjectKey),
 		"duration_seconds":         req.DurationSeconds,
-		"video_type":               req.VideoType,
+		"video_type":               videotype.Normalize(req.VideoType),
 		"uploaded_at":              now,
 		"processing_error_summary": "",
 	})
@@ -288,7 +286,7 @@ func (h *UploadHandler) MultipartInit(c *gin.Context) {
 		Title:                strings.TrimSuffix(req.Filename, filepath.Ext(req.Filename)),
 		FileURL:              h.MinIO.PublicURL(objectKey),
 		Status:               model.VideoStatusUploading,
-		VideoType:            req.VideoType,
+		VideoType:            videotype.Normalize(req.VideoType),
 		UploadID:             handle.UploadID,
 		UploadIdempotencyKey: req.IdempotencyKey,
 		UploadObjectKey:      objectKey,

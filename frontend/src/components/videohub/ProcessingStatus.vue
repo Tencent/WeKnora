@@ -48,12 +48,18 @@ const stageLabels: Record<string, string> = {
   subtitle_generate: '字幕生成',
   index: '内容入库',
   graph: '知识提取',
-  outline: '章节生成',
-  overview: '概要生成',
+  summary_enhance: '总结增强',
+  outline: '章节导航',
+  overview: '概述',
   summary: '智能总结',
-  assemble: '内容组装',
+  related_knowledge: '相关知识',
+  assemble: '页面组装',
 }
-const stageOrder = ['transcription', 'subtitle_generate', 'index', 'graph', 'outline', 'overview', 'summary', 'assemble']
+const stageOrder = ['transcription', 'subtitle_generate', 'index', 'outline', 'overview', 'summary', 'assemble', 'graph', 'summary_enhance']
+// 向后兼容：related_knowledge 在旧版本中名为 assemble，找不到相关 job 时回退
+const stageFallback: Record<string, string> = {
+  related_knowledge: 'assemble',
+}
 const stageStateLabels: Record<string, string> = {
   waiting: '等待',
   pending: '排队中',
@@ -64,6 +70,7 @@ const stageStateLabels: Record<string, string> = {
 
 const alertTheme = computed<'info' | 'success' | 'warning' | 'error'>(() => {
   if (loadError.value || status.value?.status === 'failed') return 'error'
+  if (status.value?.enhancement_status === 'failed') return 'warning'
   if (status.value?.status === 'completed') return 'success'
   if (status.value?.status === 'partial_completed') return 'warning'
   return 'info'
@@ -72,7 +79,10 @@ const alertTheme = computed<'info' | 'success' | 'warning' | 'error'>(() => {
 const message = computed(() => {
   if (loadError.value) return `解析状态加载失败：${loadError.value}`
   if (!status.value) return '正在读取内容解析状态'
-  const stage = stageLabels[status.value.current_stage || ''] || status.value.current_stage || '等待开始'
+  if (status.value.enhancement_status === 'failed' && status.value.foundation_status === 'completed') return '基础内容已完成，知识增强失败，可单独重试知识提取'
+  const rawStage = status.value.current_stage || ''
+  const displayName = stageLabels[rawStage] || (stageFallback[rawStage] ? stageLabels[stageFallback[rawStage]] : rawStage) || '等待开始'
+  const stage = displayName
   switch (status.value.status) {
     case 'completed': return '内容解析已完成，章节、总结和关联内容均可使用'
     case 'failed': return `${stage}失败：${status.value.failure?.message || '可重试当前阶段'}`
@@ -82,8 +92,26 @@ const message = computed(() => {
   }
 })
 
+/** 按展示阶段名查找对应的 job：优先匹配新名，其次使用回退名查找 */
+function findJobForStage(stageName: string): VideoProcessingJobStatus | undefined {
+  if (!status.value) return undefined
+  const primary = status.value.jobs.find(item => item.job_type === stageName)
+  if (primary) return primary
+  const fallbackName = stageFallback[stageName]
+  if (fallbackName) return status.value.jobs.find(item => item.job_type === fallbackName)
+  return undefined
+}
+
+/** 判断某个展示阶段是否已完成：completed_stages 中包含新阶段名或其回退名 */
+function isStageCompleted(stageName: string): boolean {
+  if (!status.value) return false
+  if (status.value.completed_stages.includes(stageName)) return true
+  const fallbackName = stageFallback[stageName]
+  return !!(fallbackName && status.value.completed_stages.includes(fallbackName))
+}
+
 const stages = computed(() => stageOrder.map(name => {
-  const job = status.value?.jobs.find(item => item.job_type === name)
+  const job = findJobForStage(name)
   const state = job?.status === 'succeeded'
     ? 'succeeded'
     : job?.status === 'failed'
@@ -92,7 +120,7 @@ const stages = computed(() => stageOrder.map(name => {
         ? 'running'
         : job?.status === 'pending'
           ? 'pending'
-          : status.value?.completed_stages.includes(name) ? 'succeeded' : 'waiting'
+          : isStageCompleted(name) ? 'succeeded' : 'waiting'
   return { name, state }
 }))
 

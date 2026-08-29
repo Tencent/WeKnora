@@ -3,14 +3,16 @@
 // 5 个 handler 共享 BaseSkillHandler 的逻辑：
 //  1. 调 Agent Chat API 触发对应 skill
 //  2. 等 skill 完成
-//  3. 调 orchestrator.AfterSkillComplete：回写 wiki_page_id + 触发下一环节
+//  3. 调 orchestrator.AfterSkillComplete：回写 wiki_page_id，并按基础产物状态调度组装
 package worker
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -35,11 +37,52 @@ type BaseSkillHandler struct {
 
 const wikiBaselinePayloadKey = "wiki_page_versions_before_skill"
 
-func skillQuery(video *model.Video, skillName string) string {
-	return fmt.Sprintf(
-		"使用 $%s 处理视频。源文档知识 ID：%s。业务视频 ID：%s 仅用于产物归属。视频标题：%s。",
-		skillName, video.TranscriptKnowledgeID, video.ID, video.Title,
+func skillQuery(video *model.Video, contract skill.JobContract, jobType string) string {
+	query := fmt.Sprintf(
+		"使用 $%s 处理视频。当前转写代次：%s。兼容源文档知识 ID：%s；完整转写分块清单已通过调用上下文提供，必须覆盖全部分块。业务视频 ID：%s 仅用于产物归属。视频标题：%s。"+
+			"必须通过创建/覆盖 Wiki 写入唯一产物页：slug 严格使用 %q，不得使用其他产物的 slug，也不得覆盖其他类型页面；page_type 使用 index；frontmatter 必须含 type: %s、source_video_id: %s 和 transcript_generation: %s。读取上游产物时，必须使用 Wiki 工具返回的实际 slug，禁止根据视频标题或页面标题猜测 slug。",
+		contract.SkillName, video.TranscriptGeneration, video.TranscriptKnowledgeID, video.ID, video.Title,
+		contract.WriteSlug(video.ID), contract.ArtifactType, video.ID, video.TranscriptGeneration,
 	)
+	if jobType == skill.JobSummaryEnhance {
+		query += fmt.Sprintf(
+			"这是知识增强阶段，不是重新生成基础总结。必须先阅读知识底座索引页 ID：%s 及其可审计关联，再以当前转写代次为事实边界增强已有类型化总结；不得引入无法回指当前转写证据的事实。仅允许覆盖 %q 产物页，保留原有模板结构和用户编辑内容；若发现用户已编辑，停止写入并报告跳过。",
+			video.KnowledgeBaseWikiPageID, contract.WriteSlug(video.ID),
+		)
+	}
+	return query
+}
+
+func (h *BaseSkillHandler) transcriptKnowledgeIDs(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) ([]string, error) {
+	generation := strings.TrimSpace(job.TranscriptGeneration)
+	if generation == "" {
+		generation = strings.TrimSpace(video.TranscriptGeneration)
+	}
+	if generation == "" || generation != strings.TrimSpace(video.TranscriptGeneration) {
+		return nil, fmt.Errorf("视频 %s 的转写代次不可用或已过期", video.ID)
+	}
+	var chunks []model.VideoTranscriptChunk
+	if err := h.DB.WithContext(ctx).
+		Where("video_id = ? AND generation = ?", video.ID, generation).
+		Order("chunk_index ASC").Find(&chunks).Error; err != nil {
+		return nil, fmt.Errorf("读取完整转写分块清单: %w", err)
+	}
+	if len(chunks) == 0 {
+		return nil, fmt.Errorf("视频 %s 的转写分块清单为空", video.ID)
+	}
+	ids := make([]string, 0, len(chunks))
+	seen := make(map[string]struct{}, len(chunks))
+	for index, chunk := range chunks {
+		if chunk.ChunkIndex != index || chunk.Status != "completed" || strings.TrimSpace(chunk.KnowledgeID) == "" {
+			return nil, fmt.Errorf("视频 %s 的转写分块不完整: index=%d status=%s", video.ID, chunk.ChunkIndex, chunk.Status)
+		}
+		if _, exists := seen[chunk.KnowledgeID]; exists {
+			return nil, fmt.Errorf("视频 %s 的转写分块存在重复知识 ID", video.ID)
+		}
+		seen[chunk.KnowledgeID] = struct{}{}
+		ids = append(ids, chunk.KnowledgeID)
+	}
+	return ids, nil
 }
 
 func (h *BaseSkillHandler) wikiBaseline(
@@ -94,8 +137,24 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 	if !ok {
 		return fmt.Errorf("未注册的 job_type: %s", jobType)
 	}
-	if video.TranscriptKnowledgeID == "" {
-		return fmt.Errorf("视频 %s 缺少转写知识文档 ID", video.ID)
+	if jobType == skill.JobSummary || jobType == skill.JobSummaryEnhance {
+		protected, err := h.Orchestrator.IsSummaryUserEditProtected(ctx, video.ID)
+		if err != nil {
+			return fmt.Errorf("check summary user edit protection: %w", err)
+		}
+		if protected {
+			if err := h.DB.WithContext(ctx).Model(&model.Video{}).Where("id = ?", video.ID).Updates(map[string]any{
+				"summary_user_edited": true, "summary_source": "user_edited",
+			}).Error; err != nil {
+				return fmt.Errorf("persist summary user edit protection: %w", err)
+			}
+			slog.Info("skip automatic summary generation for user-edited summary", "video_id", video.ID, "job_id", job.ID)
+			return nil
+		}
+	}
+	knowledgeIDs, err := h.transcriptKnowledgeIDs(ctx, job, video)
+	if err != nil {
+		return err
 	}
 	baseline, err := h.wikiBaseline(ctx, job, video.ID)
 	if err != nil {
@@ -107,8 +166,8 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
-	query := skillQuery(video, contract.SkillName)
-	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query, []string{video.TranscriptKnowledgeID}); err != nil {
+	query := skillQuery(video, contract, jobType)
+	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query, knowledgeIDs); err != nil {
 		return fmt.Errorf("trigger skill %s: %w", contract.SkillName, err)
 	}
 
@@ -118,8 +177,8 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 		return fmt.Errorf("等待 wiki 产物页超时（type=%s）: %w", contract.ArtifactType, err)
 	}
 
-	// 回写 wiki_page_id + 触发下一环节（CP-T006 + CP-T005）
-	if _, _, oerr := h.Orchestrator.AfterSkillCompleteWithID(ctx, video.ID, jobType, wikiPageID); oerr != nil {
+	// 回写 wiki_page_id；基础内容齐备时由编排器调度组装
+	if _, _, oerr := h.Orchestrator.AfterSkillCompleteWithID(ctx, video.ID, jobType, wikiPageID); oerr != nil && !errors.Is(oerr, skill.ErrSummaryUserEditProtected) {
 		return fmt.Errorf("after skill complete: %w", oerr)
 	}
 	_ = wikiPageID // 回写已在 AfterSkillComplete 中完成
@@ -165,16 +224,17 @@ type GraphHandler struct{ BaseSkillHandler }
 
 func (h *GraphHandler) JobType() string { return skill.JobGraph }
 
-// Run graph：只有确认 knowledge_base Wiki 产物可读后才推进下游。
+// Run graph：知识提取独立执行，不推进基础内容任务。
 //
 // 流程：
 //  1. 尝试调 extract-video-knowledge skill（Agent 对话模式）；
 //     若成功但 1 分钟内没有检索到 knowledge_base 新产物，则任务失败
-//  2. 回写 knowledge_base_wiki_page_id + 触发下一环节 outline
+//  2. 回写 knowledge_base_wiki_page_id，不触发 outline/overview/summary
 func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
 	contract, _ := skill.Contract(skill.JobGraph)
-	if video.TranscriptKnowledgeID == "" {
-		return fmt.Errorf("视频 %s 缺少转写知识文档 ID", video.ID)
+	knowledgeIDs, err := h.transcriptKnowledgeIDs(ctx, job, video)
+	if err != nil {
+		return err
 	}
 	baseline, err := h.wikiBaseline(ctx, job, video.ID)
 	if err != nil {
@@ -186,8 +246,8 @@ func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	if err != nil {
 		return fmt.Errorf("graph create session: %w", err)
 	}
-	query := skillQuery(video, contract.SkillName)
-	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query, []string{video.TranscriptKnowledgeID}); err != nil {
+	query := skillQuery(video, contract, skill.JobGraph)
+	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query, knowledgeIDs); err != nil {
 		return fmt.Errorf("graph trigger skill %s: %w", contract.SkillName, err)
 	}
 	wikiPageID, err := h.waitForWikiPage(ctx, video.ID, skill.JobGraph, baseline, time.Minute)
@@ -227,18 +287,27 @@ func (h *SummaryHandler) Run(ctx context.Context, job *model.VideoProcessingJob,
 	return h.BaseSkillHandler.run(ctx, job, video, skill.JobSummary)
 }
 
+type SummaryEnhanceHandler struct{ BaseSkillHandler }
+
+func (h *SummaryEnhanceHandler) JobType() string { return skill.JobSummaryEnhance }
+func (h *SummaryEnhanceHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
+	return h.BaseSkillHandler.run(ctx, job, video, skill.JobSummaryEnhance)
+}
+
 // AssembleHandler assemble-transcript-page
 type AssembleHandler struct{ BaseSkillHandler }
 
 func (h *AssembleHandler) JobType() string { return skill.JobAssemble }
 func (h *AssembleHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
 	return h.BaseSkillHandler.run(ctx, job, video, skill.JobAssemble)
-	// 最后一步：assemble 完成后不触发新 job（NextJob 返回空）
 }
 
-// EnqueueFirstJob index job 成功后调用：入队 graph job
+// EnqueueFirstJob 在当前转写代次激活后入队基础内容与知识增强任务。
 func (h *BaseSkillHandler) EnqueueFirstJob(ctx context.Context, video *model.Video) (string, error) {
-	return h.Orchestrator.EnqueueJob(ctx, video.ID, skill.JobGraph)
+	if err := h.Orchestrator.EnqueueContentPipeline(ctx, video.ID); err != nil {
+		return "", err
+	}
+	return "", nil
 }
 
 // time 包占位（防止 import 报错）

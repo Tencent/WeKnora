@@ -32,6 +32,6 @@ description: 根据单篇文档，生成一段 150～300 个汉字的快速概�
 
 通过 **创建/覆盖 Wiki** 工具将快速概览写入知识库的 Wiki 页面。结构见 [references/overview-template.md](references/overview-template.md)。
 
-写入契约：工具 `page_type` 用 `index`；页面 frontmatter 必须含 `type: overview` 与 `source_video_id: {视频ID}`。
+写入契约：工具 `page_type` 用 `index`；页面 frontmatter 必须含 `type: overview`、`source_video_id: {视频ID}` 与 `transcript_generation: {转写代次}`。由 vidsage 内容流水线触发时，页面 slug 固定为 `overview/{视频ID}`，不得使用视频标题或其他产物 slug。
 
 禁止输出工作执行结果、筛选来源和字数要求；概览内容只能通过 **创建/覆盖 Wiki** 写入，不得落本地文件或仅以文字回复。

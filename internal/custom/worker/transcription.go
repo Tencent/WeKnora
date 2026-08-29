@@ -20,6 +20,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	objstore "github.com/Tencent/WeKnora/internal/custom/client/minio"
 	"github.com/Tencent/WeKnora/internal/custom/client/tongyi"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 )
@@ -28,8 +29,11 @@ const transcriptionPollTimeout = 30 * time.Minute
 
 // TranscriptionHandler 转写 job
 type TranscriptionHandler struct {
-	DB     *gorm.DB
-	Tongyi TongyiClient
+	DB                      *gorm.DB
+	Tongyi                  TongyiClient
+	MinIO                   *objstore.Client
+	InternalFrontendBaseURL string
+	SourcePreparer          SourcePreparer
 }
 
 type TongyiClient interface {
@@ -38,9 +42,17 @@ type TongyiClient interface {
 	GetTask(context.Context, string) (*tongyi.GetTaskResponse, error)
 }
 
+type SourcePreparer interface {
+	Prepare(context.Context, *model.Video) (string, error)
+}
+
 // NewTranscriptionHandler 构造
-func NewTranscriptionHandler(db *gorm.DB, t TongyiClient, _ ...string) *TranscriptionHandler {
-	return &TranscriptionHandler{DB: db, Tongyi: t}
+func NewTranscriptionHandler(db *gorm.DB, t TongyiClient, internalFrontendBaseURL ...string) *TranscriptionHandler {
+	internalURL := ""
+	if len(internalFrontendBaseURL) > 0 {
+		internalURL = strings.TrimRight(strings.TrimSpace(internalFrontendBaseURL[0]), "/")
+	}
+	return &TranscriptionHandler{DB: db, Tongyi: t, InternalFrontendBaseURL: internalURL}
 }
 
 // JobType job 类型
@@ -69,6 +81,20 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 
 	// 第一次跑：创建 external task
 	if job.ExternalTaskID == "" {
+		preparedURL, err := h.prepareSource(ctx, video, sourceURL)
+		if err != nil {
+			return fmt.Errorf("准备听悟兼容转写源失败: %w", err)
+		}
+		if preparedURL == "" {
+			return fmt.Errorf("准备听悟兼容转写源返回空地址")
+		}
+		if preparedURL != sourceURL {
+			if err := h.DB.Model(video).Update("transcription_source_url", preparedURL).Error; err != nil {
+				return fmt.Errorf("保存听悟转写源: %w", err)
+			}
+			video.TranscriptionSourceURL = preparedURL
+			sourceURL = preparedURL
+		}
 		if err := h.Tongyi.ValidateSourceFile(ctx, sourceURL); err != nil {
 			return fmt.Errorf("视频源文件不可供听悟访问: %w", err)
 		}
@@ -164,4 +190,14 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 	}
 
 	return nil
+}
+
+func (h *TranscriptionHandler) prepareSource(ctx context.Context, video *model.Video, sourceURL string) (string, error) {
+	if h.SourcePreparer != nil {
+		return h.SourcePreparer.Prepare(ctx, video)
+	}
+	if h.MinIO == nil {
+		return sourceURL, nil
+	}
+	return (&mediaSourcePreparer{MinIO: h.MinIO, InternalFrontendBaseURL: h.InternalFrontendBaseURL}).Prepare(ctx, video)
 }

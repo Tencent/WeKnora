@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc
+.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend acceptance-up acceptance-down acceptance-restart acceptance-status acceptance-logs docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc
 
 # Show help
 help:
@@ -60,6 +60,13 @@ help:
 	@echo "  dev-app           启动后端应用（本地运行，需先运行 dev-start）"
 	@echo "                    已 make anydoc-lib 时自动链接 anydoc 引擎"
 	@echo "  dev-frontend      启动前端（本地运行，需先运行 dev-start）"
+	@echo ""
+	@echo "视频本地验收（无交互）:"
+	@echo "  acceptance-up       启动本地视频验收服务"
+	@echo "  acceptance-restart  重启本地视频验收服务"
+	@echo "  acceptance-down     停止服务并保留数据卷"
+	@echo "  acceptance-status   查看本地验收状态"
+	@echo "  acceptance-logs     查看 custom-backend 日志"
 	@echo ""
 	@echo "Lite 模式（零外部依赖）:"
 	@echo "  build-lite        构建 Lite 版本（先构建前端到 web/，再构建 Go；SKIP_FRONTEND=1 跳过前端）"
@@ -346,6 +353,21 @@ dev-app:
 
 dev-frontend:
 	./scripts/dev.sh frontend
+
+acceptance-up:
+	./scripts/local-acceptance.sh up
+
+acceptance-down:
+	./scripts/local-acceptance.sh down
+
+acceptance-restart:
+	./scripts/local-acceptance.sh restart
+
+acceptance-status:
+	./scripts/local-acceptance.sh status
+
+acceptance-logs:
+	./scripts/local-acceptance.sh logs
 
 
 

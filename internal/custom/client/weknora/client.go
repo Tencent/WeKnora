@@ -62,6 +62,85 @@ type ManualKnowledgeResult struct {
 	ErrorMessage    string `json:"error_message"`
 }
 
+type SearchParams struct {
+	QueryText            string   `json:"query_text"`
+	VectorThreshold      float64  `json:"vector_threshold,omitempty"`
+	KeywordThreshold     float64  `json:"keyword_threshold,omitempty"`
+	MatchCount           int      `json:"match_count,omitempty"`
+	DisableKeywordsMatch bool     `json:"disable_keywords_match,omitempty"`
+	DisableVectorMatch   bool     `json:"disable_vector_match,omitempty"`
+	KnowledgeIDs         []string `json:"knowledge_ids,omitempty"`
+}
+
+type SearchResult struct {
+	ID          string `json:"id"`
+	KnowledgeID string `json:"knowledge_id"`
+	Content     string `json:"content"`
+}
+
+// HybridSearch 通过真实检索接口确认知识已进入可检索索引。
+func (c *Client) HybridSearch(ctx context.Context, kbID string, params SearchParams) ([]SearchResult, error) {
+	if kbID == "" {
+		kbID = c.kbID
+	}
+	if kbID == "" {
+		return nil, fmt.Errorf("weknora kb_id 未配置")
+	}
+	if strings.TrimSpace(params.QueryText) == "" {
+		return nil, fmt.Errorf("weknora search query 不能为空")
+	}
+	body, err := json.Marshal(params)
+	if err != nil {
+		return nil, fmt.Errorf("encode weknora search request: %w", err)
+	}
+	u := fmt.Sprintf("%s/api/v1/knowledge-bases/%s/hybrid-search", strings.TrimRight(c.baseURL, "/"), kbID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	c.setHeaders(req)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("weknora hybrid search: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		buf, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("weknora hybrid search status %d: %s", resp.StatusCode, string(buf))
+	}
+	var out struct {
+		Success bool           `json:"success"`
+		Data    []SearchResult `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode weknora search response: %w", err)
+	}
+	if !out.Success {
+		return nil, fmt.Errorf("weknora hybrid search returned unsuccessful response")
+	}
+	return out.Data, nil
+}
+
+func (c *Client) IsKnowledgeSearchable(ctx context.Context, kbID, knowledgeID string) (bool, error) {
+	results, err := c.HybridSearch(ctx, kbID, SearchParams{
+		QueryText:            "视频定位信息",
+		MatchCount:           5,
+		DisableVectorMatch:   true,
+		DisableKeywordsMatch: false,
+		KnowledgeIDs:         []string{knowledgeID},
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, result := range results {
+		if result.KnowledgeID == knowledgeID && strings.TrimSpace(result.Content) != "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // CreateManualKnowledge 通过 WeKnora 公开接口创建一条手工 Markdown 知识。
 func (c *Client) CreateManualKnowledge(ctx context.Context, kbID string, input ManualKnowledgeInput) (ManualKnowledgeResult, error) {
 	if kbID == "" {

@@ -22,11 +22,35 @@ func newOrchestratorTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoProcessingJob{}))
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoProcessingJob{}))
 	return db
 }
 
-func TestAfterSkillCompleteWithIDRollsBackVideoWriteWhenNextJobEnqueueFails(t *testing.T) {
+func TestEnqueueContentPipelinePersistsCurrentTranscriptManifest(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoProcessingJob{}))
+	video := model.Video{ID: "video-pipeline", Title: "test", TranscriptGeneration: "generation-1"}
+	require.NoError(t, db.Create(&video).Error)
+	require.NoError(t, db.Create([]model.VideoTranscriptChunk{
+		{VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 0, KnowledgeID: "knowledge-1", ContentHash: "hash-1", Status: "completed"},
+		{VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 1, KnowledgeID: "knowledge-2", ContentHash: "hash-2", Status: "completed"},
+	}).Error)
+
+	orchestrator := NewOrchestrator(db, nil, "kb-1")
+	require.NoError(t, orchestrator.EnqueueContentPipeline(t.Context(), video.ID))
+
+	var jobs []model.VideoProcessingJob
+	require.NoError(t, db.Where("video_id = ?", video.ID).Order("job_type ASC").Find(&jobs).Error)
+	require.Len(t, jobs, 4)
+	for _, job := range jobs {
+		require.Contains(t, job.InputPayload, "knowledge-1")
+		require.Contains(t, job.InputPayload, "knowledge-2")
+		require.Equal(t, video.TranscriptGeneration, job.TranscriptGeneration)
+	}
+}
+
+func TestAfterSkillCompleteWithIDDoesNotRequireDownstreamJobTable(t *testing.T) {
 	db := newOrchestratorTestDB(t)
 	video := model.Video{ID: "video-1", Title: "test"}
 	require.NoError(t, db.Create(&video).Error)
@@ -36,14 +60,14 @@ func TestAfterSkillCompleteWithIDRollsBackVideoWriteWhenNextJobEnqueueFails(t *t
 	_, _, err := orchestrator.AfterSkillCompleteWithID(
 		context.Background(), video.ID, JobGraph, "wiki-1",
 	)
-	require.Error(t, err)
+	require.NoError(t, err)
 
 	var stored model.Video
 	require.NoError(t, db.First(&stored, "id = ?", video.ID).Error)
-	require.Empty(t, stored.KnowledgeBaseWikiPageID)
+	require.Equal(t, "wiki-1", stored.KnowledgeBaseWikiPageID)
 }
 
-func TestAfterSkillCompleteWithIDWritesVideoAndEnqueuesNextJobAtomically(t *testing.T) {
+func TestAfterSkillCompleteWithIDWritesEnhancementWithoutEnqueuingFoundation(t *testing.T) {
 	db := newOrchestratorTestDB(t)
 	video := model.Video{ID: "video-1", Title: "test", TranscriptGeneration: "generation-1"}
 	require.NoError(t, db.Create(&video).Error)
@@ -54,18 +78,15 @@ func TestAfterSkillCompleteWithIDWritesVideoAndEnqueuesNextJobAtomically(t *test
 	)
 	require.NoError(t, err)
 	require.Equal(t, "wiki-1", wikiPageID)
-	require.NotEmpty(t, nextJobID)
+	require.Empty(t, nextJobID)
 
 	var stored model.Video
 	require.NoError(t, db.First(&stored, "id = ?", video.ID).Error)
 	require.Equal(t, "wiki-1", stored.KnowledgeBaseWikiPageID)
 
-	var nextJob model.VideoProcessingJob
-	require.NoError(t, db.First(&nextJob, "id = ?", nextJobID).Error)
-	require.Equal(t, JobOutline, nextJob.JobType)
-	require.Equal(t, "pending", nextJob.Status)
-	require.Equal(t, video.TranscriptGeneration, nextJob.TranscriptGeneration)
-	require.Equal(t, "outline:video-1:generation-1", nextJob.IdempotencyKey)
+	var jobCount int64
+	require.NoError(t, db.Model(&model.VideoProcessingJob{}).Where("video_id = ?", video.ID).Count(&jobCount).Error)
+	require.Zero(t, jobCount)
 }
 
 func TestAssembleMarksVideoCompletedOnlyWhenAllArtifactsExist(t *testing.T) {
@@ -76,6 +97,10 @@ func TestAssembleMarksVideoCompletedOnlyWhenAllArtifactsExist(t *testing.T) {
 		OutlineWikiPageID: "outline", OverviewWikiPageID: "overview", SummaryWikiPageID: "summary",
 	}
 	require.NoError(t, db.Create(&video).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptChunk{
+		VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 0,
+		KnowledgeID: "transcript-1", ContentHash: "hash-1", Status: "completed",
+	}).Error)
 
 	orchestrator := NewOrchestrator(db, nil, "kb-1")
 	_, nextJobID, err := orchestrator.AfterSkillCompleteWithID(
@@ -98,6 +123,10 @@ func TestAssembleRejectsIncompleteArtifactSet(t *testing.T) {
 		OutlineWikiPageID: "outline", OverviewWikiPageID: "overview",
 	}
 	require.NoError(t, db.Create(&video).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptChunk{
+		VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 0,
+		KnowledgeID: "transcript-1", ContentHash: "hash-1", Status: "completed",
+	}).Error)
 
 	orchestrator := NewOrchestrator(db, nil, "kb-1")
 	_, _, err := orchestrator.AfterSkillCompleteWithID(
@@ -183,13 +212,15 @@ func TestFindWikiPageAfterRejectsUnchangedPageFromBeforeSkillRun(t *testing.T) {
 		case "/api/v1/knowledgebase/kb-1/wiki/pages":
 			_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{
 				Pages: []weknora.WikiPage{{
-					ID: "outline-page", Slug: "outline/video-1", PageType: "index", Content: "video-1", Version: 3,
+					ID: "outline-page", Slug: "outline/video-1", PageType: "index",
+					Content: "---\ntype: outline\nsource_video_id: video-1\n---\nvideo-1", Version: 3,
 				}},
 				Total: 1, Page: 1, PageSize: 100, TotalPages: 1,
 			})
 		case "/api/v1/knowledgebase/kb-1/wiki/pages/outline/video-1":
 			_ = json.NewEncoder(writer).Encode(weknora.WikiPage{
-				ID: "outline-page", Slug: "outline/video-1", PageType: "index", Content: "video-1", Version: 3,
+				ID: "outline-page", Slug: "outline/video-1", PageType: "index",
+				Content: "---\ntype: outline\nsource_video_id: video-1\n---\nvideo-1", Version: 3,
 			})
 		default:
 			http.NotFound(writer, request)
@@ -216,13 +247,15 @@ func TestFindWikiPageAfterAcceptsUpdatedPage(t *testing.T) {
 		case "/api/v1/knowledgebase/kb-1/wiki/pages":
 			_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{
 				Pages: []weknora.WikiPage{{
-					ID: "outline-page", Slug: "outline/video-1", PageType: "index", Content: "video-1 updated", Version: 4,
+					ID: "outline-page", Slug: "outline/video-1", PageType: "index",
+					Content: "---\ntype: outline\nsource_video_id: video-1\n---\nvideo-1 updated", Version: 4,
 				}},
 				Total: 1, Page: 1, PageSize: 100, TotalPages: 1,
 			})
 		case "/api/v1/knowledgebase/kb-1/wiki/pages/outline/video-1":
 			_ = json.NewEncoder(writer).Encode(weknora.WikiPage{
-				ID: "outline-page", Slug: "outline/video-1", PageType: "index", Content: "video-1 updated", Version: 4,
+				ID: "outline-page", Slug: "outline/video-1", PageType: "index",
+				Content: "---\ntype: outline\nsource_video_id: video-1\n---\nvideo-1 updated", Version: 4,
 			})
 		default:
 			http.NotFound(writer, request)
@@ -251,14 +284,16 @@ func TestFindWikiPageAfterAcceptsPageWrittenByEarlierAttemptOfSameJob(t *testing
 		case "/api/v1/knowledgebase/kb-1/wiki/pages":
 			_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{
 				Pages: []weknora.WikiPage{{
-					ID: "outline-page", Slug: "outline/video-1", PageType: "index", Content: "video-1", Version: 3,
+					ID: "outline-page", Slug: "outline/video-1", PageType: "index",
+					Content: "---\ntype: outline\nsource_video_id: video-1\n---\nvideo-1", Version: 3,
 					UpdatedAt: pageUpdatedAt,
 				}},
 				Total: 1, Page: 1, PageSize: 100, TotalPages: 1,
 			})
 		case "/api/v1/knowledgebase/kb-1/wiki/pages/outline/video-1":
 			_ = json.NewEncoder(writer).Encode(weknora.WikiPage{
-				ID: "outline-page", Slug: "outline/video-1", PageType: "index", Content: "video-1", Version: 3,
+				ID: "outline-page", Slug: "outline/video-1", PageType: "index",
+				Content: "---\ntype: outline\nsource_video_id: video-1\n---\nvideo-1", Version: 3,
 				UpdatedAt: pageUpdatedAt,
 			})
 		default:
@@ -280,8 +315,40 @@ func TestFindWikiPageAfterAcceptsPageWrittenByEarlierAttemptOfSameJob(t *testing
 	require.Equal(t, 1, pageCount)
 }
 
-func TestJobContractsCoverEntireChain(t *testing.T) {
-	for index, jobType := range ChainOrder {
+func TestFindWikiPageAfterRejectsMismatchedFrontmatterTypeWithMatchingSlug(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/knowledgebase/kb-1/wiki/pages":
+			_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{
+				Pages: []weknora.WikiPage{{
+					ID: "outline-page", Slug: "outline/video-1", PageType: "index",
+					Content: "---\ntype: overview\nsource_video_id: video-1\n---\n概览内容", Version: 2,
+				}},
+				Total: 1, Page: 1, PageSize: 100, TotalPages: 1,
+			})
+		case "/api/v1/knowledgebase/kb-1/wiki/pages/outline/video-1":
+			_ = json.NewEncoder(writer).Encode(weknora.WikiPage{
+				ID: "outline-page", Slug: "outline/video-1", PageType: "index",
+				Content: "---\ntype: overview\nsource_video_id: video-1\n---\n概览内容", Version: 2,
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	wikiClient := weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL})
+	orchestrator := NewOrchestrator(nil, wikiClient, "kb-1")
+	wikiPageID, pageCount, err := orchestrator.FindWikiPageAfter(
+		t.Context(), "video-1", JobOutline, WikiPageBaseline{},
+	)
+	require.NoError(t, err)
+	require.Empty(t, wikiPageID)
+	require.Equal(t, 1, pageCount)
+}
+
+func TestJobContractsCoverParallelPipeline(t *testing.T) {
+	for _, jobType := range append(append([]string{}, FoundationJobs...), EnhancementJobs...) {
 		contract, ok := Contract(jobType)
 		require.True(t, ok)
 		require.NotEmpty(t, contract.SkillName)
@@ -289,11 +356,7 @@ func TestJobContractsCoverEntireChain(t *testing.T) {
 		require.NotEmpty(t, contract.WikiPageTypes)
 		require.NotEmpty(t, contract.VideoField)
 
-		if index+1 < len(ChainOrder) {
-			require.Equal(t, ChainOrder[index+1], NextJob(jobType))
-		} else {
-			require.Empty(t, NextJob(jobType))
-		}
+		require.Empty(t, NextJob(jobType))
 	}
 }
 

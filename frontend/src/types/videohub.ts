@@ -94,6 +94,10 @@ export interface VideoData {
   poster_url?: string
   cover_url?: string
   processing_error_summary?: string
+  summarySource?: 'initial' | 'enhanced' | 'user_edited' | ''
+  summaryKnowledgeEnhanced?: boolean
+  summaryUserEdited?: boolean
+  knowledgeAuditStatus?: 'passed' | 'conditional' | 'failed' | ''
   subtitle_file_url?: string
   overview: string
   chapters: Chapter[]
@@ -139,10 +143,13 @@ export interface VideoProcessingJobStatus {
 export interface VideoProcessingStatus {
   video_id: string
   status: VideoProcessingState
+  foundation_status: VideoProcessingState
+  enhancement_status: VideoProcessingState
   current_stage?: string
   transcript_generation?: string
   completed_stages: string[]
   failure?: VideoProcessingFailure
+  enhancement_failure?: VideoProcessingFailure
   retryable_job?: { job_id: string; job_type: string }
   jobs: VideoProcessingJobStatus[]
   updated_at: string

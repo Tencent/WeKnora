@@ -49,3 +49,23 @@ func TestParagraphsToSRTSupportsCrossHourTimeline(t *testing.T) {
 		t.Fatalf("ParagraphsToSRT() = %q, want %q", got, want)
 	}
 }
+
+func TestValidateTranscriptQualityRejectsNonMonotonicTimestamps(t *testing.T) {
+	paragraphs := []TranscriptParagraph{{Sentences: []TranscriptSentence{
+		{Text: "第一句", StartMs: 100, EndMs: 200},
+		{Text: "第二句", StartMs: 50, EndMs: 150},
+	}}}
+	if err := ValidateTranscriptQuality(paragraphs, 1); err == nil {
+		t.Fatal("ValidateTranscriptQuality() error = nil, want non-monotonic timeline error")
+	}
+}
+
+func TestValidateTranscriptQualityAcceptsCompleteTimeline(t *testing.T) {
+	paragraphs := []TranscriptParagraph{{Sentences: []TranscriptSentence{
+		{Text: "第一句", StartMs: 100, EndMs: 200},
+		{Text: "第二句", StartMs: 300, EndMs: 900},
+	}}}
+	if err := ValidateTranscriptQuality(paragraphs, 1); err != nil {
+		t.Fatalf("ValidateTranscriptQuality() error = %v", err)
+	}
+}

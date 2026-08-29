@@ -2,11 +2,13 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -25,11 +27,12 @@ var processingStageOrder = []string{
 	"transcription",
 	"subtitle_generate",
 	"index",
-	"graph",
 	"outline",
 	"overview",
 	"summary",
 	"assemble",
+	"graph",
+	"summary_enhance",
 }
 
 var retryableProcessingStages = map[string]bool{
@@ -37,6 +40,7 @@ var retryableProcessingStages = map[string]bool{
 	"subtitle_generate": true,
 	"index":             true,
 	"graph":             true,
+	"summary_enhance":   true,
 	"outline":           true,
 	"overview":          true,
 	"summary":           true,
@@ -80,10 +84,13 @@ type ProcessingJobStatus struct {
 type ProcessingStatusResponse struct {
 	VideoID              string                  `json:"video_id"`
 	Status               string                  `json:"status"`
+	FoundationStatus     string                  `json:"foundation_status"`
+	EnhancementStatus    string                  `json:"enhancement_status"`
 	CurrentStage         string                  `json:"current_stage,omitempty"`
 	TranscriptGeneration string                  `json:"transcript_generation,omitempty"`
 	CompletedStages      []string                `json:"completed_stages"`
 	Failure              *ProcessingFailure      `json:"failure,omitempty"`
+	EnhancementFailure   *ProcessingFailure      `json:"enhancement_failure,omitempty"`
 	RetryableJob         *RetryableProcessingJob `json:"retryable_job,omitempty"`
 	Jobs                 []ProcessingJobStatus   `json:"jobs"`
 	UpdatedAt            time.Time               `json:"updated_at"`
@@ -114,6 +121,7 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 	}
 
 	var retried model.VideoProcessingJob
+	recreated := false
 	err := h.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var video model.Video
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&video, "id = ?", videoID).Error; err != nil {
@@ -127,13 +135,22 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 		if err := query.Order("CASE WHEN transcript_generation = '' THEN 1 ELSE 0 END, updated_at DESC").First(&retried).Error; err != nil {
 			return err
 		}
-		if retried.Status == "succeeded" && stageArtifactAvailable(video, retried) {
+		if retried.Status == "succeeded" && jobType == "transcription" {
+			recreatedJob := model.VideoProcessingJob{
+				ID: uuid.NewString(), VideoID: videoID, JobType: "transcription", Provider: retried.Provider,
+				Status: "pending", MaxAttempts: 3,
+				IdempotencyKey: fmt.Sprintf("transcription:%s:rerun:%s", videoID, uuid.NewString()),
+			}
+			if err := tx.Create(&recreatedJob).Error; err != nil {
+				return err
+			}
+			retried = recreatedJob
+			recreated = true
+		} else if retried.Status == "succeeded" && stageArtifactAvailable(video, retried) {
 			return errStageAlreadySucceeded
-		}
-		if retried.Status == "pending" || retried.Status == "running" {
+		} else if retried.Status == "pending" || retried.Status == "running" {
 			return errStageInProgress
-		}
-		if retried.Status == "failed" || retried.Status == "cancelled" || retried.Status == "succeeded" {
+		} else if retried.Status == "failed" || retried.Status == "cancelled" || retried.Status == "succeeded" {
 			updates := map[string]any{
 				"status": "pending", "progress": 0, "attempt_count": 0,
 				"error_category": "", "error_code": "", "error_message": "",
@@ -145,6 +162,9 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 			if err := tx.Model(&retried).Updates(updates).Error; err != nil {
 				return err
 			}
+		}
+		if jobType == "graph" {
+			return nil
 		}
 		return tx.Model(&model.Video{}).Where("id = ?", videoID).Updates(map[string]any{
 			"status": model.VideoStatusProcessing, "processing_error_summary": "",
@@ -166,7 +186,7 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"job_id": retried.ID, "job_type": retried.JobType, "status": "pending", "reused": true})
+	c.JSON(http.StatusOK, gin.H{"job_id": retried.ID, "job_type": retried.JobType, "status": "pending", "reused": !recreated})
 }
 
 var errStageAlreadySucceeded = errors.New("processing stage already succeeded")
@@ -198,20 +218,27 @@ func buildProcessingStatus(video model.Video, jobs []model.VideoProcessingJob) P
 		previous, exists := latest[job.JobType]
 		candidateIsCurrent := video.TranscriptGeneration != "" && job.TranscriptGeneration == video.TranscriptGeneration
 		previousIsCurrent := video.TranscriptGeneration != "" && previous.TranscriptGeneration == video.TranscriptGeneration
-		if !exists || (candidateIsCurrent && !previousIsCurrent) || (candidateIsCurrent == previousIsCurrent && job.UpdatedAt.After(previous.UpdatedAt)) {
+		candidateIsNewTranscription := job.JobType == "transcription" && job.TranscriptGeneration == "" && (job.Status == "pending" || job.Status == "running")
+		previousIsNewTranscription := previous.JobType == "transcription" && previous.TranscriptGeneration == "" && (previous.Status == "pending" || previous.Status == "running")
+		if !exists || (candidateIsNewTranscription && !previousIsNewTranscription) ||
+			(candidateIsCurrent && !previousIsCurrent && !previousIsNewTranscription) ||
+			(candidateIsCurrent == previousIsCurrent && candidateIsNewTranscription == previousIsNewTranscription && job.UpdatedAt.After(previous.UpdatedAt)) {
 			latest[job.JobType] = job
 		}
 	}
 
 	response := ProcessingStatusResponse{
 		VideoID: video.ID, Status: ProcessingStateReady,
+		FoundationStatus: ProcessingStateReady, EnhancementStatus: ProcessingStateReady,
 		TranscriptGeneration: video.TranscriptGeneration,
 		CompletedStages:      make([]string, 0, len(latest)),
 		Jobs:                 make([]ProcessingJobStatus, 0, len(latest)),
 		UpdatedAt:            video.UpdatedAt,
 	}
-	var active *model.VideoProcessingJob
-	var failed *model.VideoProcessingJob
+	var foundationFailed *model.VideoProcessingJob
+	var enhancementFailed *model.VideoProcessingJob
+	var foundationActive *model.VideoProcessingJob
+	var enhancementActive *model.VideoProcessingJob
 	for _, stage := range processingStageOrder {
 		job, exists := latest[stage]
 		if !exists {
@@ -230,47 +257,110 @@ func buildProcessingStatus(video model.Video, jobs []model.VideoProcessingJob) P
 		case "succeeded":
 			if stageArtifactAvailable(video, job) {
 				response.CompletedStages = append(response.CompletedStages, stage)
-			} else if failed == nil {
+			} else if isEnhancementJob(job.JobType) && enhancementFailed == nil {
 				copy := job
 				copy.Status = "failed"
 				copy.ErrorCategory, copy.ErrorCode, copy.ErrorMessage = missingStageArtifactError(stage)
-				failed = &copy
+				enhancementFailed = &copy
+			} else if foundationFailed == nil {
+				copy := job
+				copy.Status = "failed"
+				copy.ErrorCategory, copy.ErrorCode, copy.ErrorMessage = missingStageArtifactError(stage)
+				foundationFailed = &copy
 			}
 		case "failed":
-			if failed == nil {
+			if isEnhancementJob(job.JobType) {
+				if enhancementFailed == nil {
+					copy := job
+					enhancementFailed = &copy
+				}
+			} else if foundationFailed == nil {
 				copy := job
-				failed = &copy
+				foundationFailed = &copy
 			}
 		case "pending", "running":
-			if active == nil {
+			if isEnhancementJob(job.JobType) {
+				if enhancementActive == nil {
+					copy := job
+					enhancementActive = &copy
+				}
+			} else if foundationActive == nil {
 				copy := job
-				active = &copy
+				foundationActive = &copy
 			}
 		}
 	}
 
-	if failed != nil {
+	if foundationFailed != nil {
 		response.Status = ProcessingStateFailed
-		response.CurrentStage = failed.JobType
+		response.FoundationStatus = ProcessingStateFailed
+		response.CurrentStage = foundationFailed.JobType
 		response.Failure = &ProcessingFailure{
-			JobID: failed.ID, JobType: failed.JobType, Category: fallbackCategory(failed.ErrorCategory),
-			Code: failed.ErrorCode, Message: failed.ErrorMessage, UpdatedAt: failed.UpdatedAt,
+			JobID: foundationFailed.ID, JobType: foundationFailed.JobType, Category: fallbackCategory(foundationFailed.ErrorCategory),
+			Code: foundationFailed.ErrorCode, Message: foundationFailed.ErrorMessage, UpdatedAt: foundationFailed.UpdatedAt,
 		}
-		response.RetryableJob = &RetryableProcessingJob{JobID: failed.ID, JobType: failed.JobType}
+		response.RetryableJob = &RetryableProcessingJob{JobID: foundationFailed.ID, JobType: foundationFailed.JobType}
 		return response
 	}
-	if active != nil {
+	if enhancementFailed != nil {
+		response.EnhancementStatus = ProcessingStateFailed
+		response.EnhancementFailure = &ProcessingFailure{
+			JobID: enhancementFailed.ID, JobType: enhancementFailed.JobType, Category: fallbackCategory(enhancementFailed.ErrorCategory),
+			Code: enhancementFailed.ErrorCode, Message: enhancementFailed.ErrorMessage, UpdatedAt: enhancementFailed.UpdatedAt,
+		}
+		if response.RetryableJob == nil {
+			response.RetryableJob = &RetryableProcessingJob{JobID: enhancementFailed.ID, JobType: enhancementFailed.JobType}
+		}
+	}
+	if enhancementFailed == nil && video.KnowledgeAuditStatus == "failed" {
+		response.EnhancementStatus = ProcessingStateFailed
+	} else if enhancementFailed == nil && video.KnowledgeAuditStatus == "conditional" {
+		response.EnhancementStatus = ProcessingStatePartial
+	}
+	if foundationActive != nil || enhancementActive != nil {
 		response.Status = ProcessingStateRunning
 		if len(response.CompletedStages) > 0 {
 			response.Status = ProcessingStatePartial
 		}
-		response.CurrentStage = active.JobType
+		if foundationActive != nil {
+			response.CurrentStage = foundationActive.JobType
+		} else {
+			response.CurrentStage = enhancementActive.JobType
+		}
+		if foundationActive != nil {
+			response.FoundationStatus = ProcessingStateRunning
+		} else if response.FoundationStatus == ProcessingStateReady {
+			response.FoundationStatus = ProcessingStateCompleted
+		}
+		if enhancementActive != nil {
+			response.EnhancementStatus = ProcessingStateRunning
+		}
 		return response
 	}
 	if assemble, ok := latest["assemble"]; ok && assemble.Status == "succeeded" && hasReadableContentReferences(video) {
 		response.Status = ProcessingStateCompleted
+		response.FoundationStatus = ProcessingStateCompleted
 		response.CurrentStage = "assemble"
+		if enhancementFailed == nil && enhancementActive == nil && video.KnowledgeAuditStatus != "failed" && video.KnowledgeAuditStatus != "conditional" {
+			response.EnhancementStatus = ProcessingStateCompleted
+		}
 		return response
+	}
+	if foundationArtifactsReady(video) {
+		response.FoundationStatus = ProcessingStateCompleted
+	} else if len(response.CompletedStages) > 0 {
+		response.FoundationStatus = ProcessingStatePartial
+	}
+	if enhancementFailed == nil && enhancementActive == nil {
+		if video.KnowledgeAuditStatus == "failed" {
+			response.EnhancementStatus = ProcessingStateFailed
+		} else if video.KnowledgeAuditStatus == "conditional" {
+			response.EnhancementStatus = ProcessingStatePartial
+		} else if strings.TrimSpace(video.KnowledgeBaseWikiPageID) != "" {
+			response.EnhancementStatus = ProcessingStateCompleted
+		} else {
+			response.EnhancementStatus = ProcessingStatePartial
+		}
 	}
 	if len(response.CompletedStages) > 0 {
 		response.Status = ProcessingStatePartial
@@ -310,6 +400,8 @@ func stageArtifactAvailable(video model.Video, job model.VideoProcessingJob) boo
 		return strings.TrimSpace(video.TranscriptGeneration) != "" && strings.TrimSpace(video.TranscriptKnowledgeID) != ""
 	case "graph":
 		return strings.TrimSpace(video.KnowledgeBaseWikiPageID) != ""
+	case "summary_enhance":
+		return strings.TrimSpace(video.SummaryWikiPageID) != ""
 	case "outline":
 		return strings.TrimSpace(video.OutlineWikiPageID) != ""
 	case "overview":
@@ -321,6 +413,10 @@ func stageArtifactAvailable(video model.Video, job model.VideoProcessingJob) boo
 	default:
 		return true
 	}
+}
+
+func isEnhancementJob(jobType string) bool {
+	return jobType == "graph" || jobType == "summary_enhance"
 }
 
 func missingStageArtifactError(jobType string) (string, string, string) {
@@ -337,11 +433,16 @@ func missingStageArtifactError(jobType string) (string, string, string) {
 }
 
 func hasReadableContentReferences(video model.Video) bool {
-	return strings.TrimSpace(video.KnowledgeBaseWikiPageID) != "" &&
-		strings.TrimSpace(video.OutlineWikiPageID) != "" &&
+	return strings.TrimSpace(video.OutlineWikiPageID) != "" &&
 		strings.TrimSpace(video.OverviewWikiPageID) != "" &&
 		strings.TrimSpace(video.SummaryWikiPageID) != "" &&
 		strings.TrimSpace(video.TranscriptPageWikiPageID) != ""
+}
+
+func foundationArtifactsReady(video model.Video) bool {
+	return strings.TrimSpace(video.OutlineWikiPageID) != "" &&
+		strings.TrimSpace(video.OverviewWikiPageID) != "" &&
+		strings.TrimSpace(video.SummaryWikiPageID) != ""
 }
 
 func fallbackCategory(category string) string {

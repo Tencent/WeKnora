@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/subtitle"
+	"github.com/Tencent/WeKnora/internal/custom/service/videotype"
 )
 
 // Splitter 句子级分块器
@@ -52,7 +53,7 @@ func (s *Splitter) Split(in SplitInputs) []SplitResult {
 			}
 			md := model.ChunkMetadata{
 				VideoID:         in.VideoID,
-				VideoType:       in.VideoType,
+				VideoType:       videotype.Normalize(in.VideoType),
 				SourceFilename:  filepath.Base(in.SourceFilename),
 				StartMs:         s.StartMs,
 				EndMs:           s.EndMs,

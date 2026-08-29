@@ -1,15 +1,17 @@
-// Package skill orchestrator：skill 完成后回写 wiki_page_id + 触发下一环节（CP-T005 + CP-T006）。
+// Package skill orchestrator records skill artifacts and schedules the foundation assembly job.
 //
 // 设计要点：
 //   - skill 完成后由各 worker handler 调 AfterSkillComplete
 //   - AfterSkillComplete 找到该视频「新生成的」wiki 页（按 frontmatter.type 过滤），
 //     回写 videos 表（CP-T006）
-//   - 然后按 ChainOrder 触发下一个 job（CP-T005 串行）
-//   - 最后一个 job（assemble）完成后不触发新 job
+//   - outline/overview/summary/graph are independently triggered by transcript activation
+//   - assemble is scheduled only after the three foundation artifacts exist
 package skill
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -37,6 +39,8 @@ type WikiPageBaseline struct {
 	JobCreatedAt time.Time               `json:"job_created_at"`
 }
 
+var ErrSummaryUserEditProtected = errors.New("summary user edit protected")
+
 // NewOrchestrator 构造
 func NewOrchestrator(db *gorm.DB, wiki *weknora.WikiClient, kbID string) *Orchestrator {
 	return &Orchestrator{DB: db, Wiki: wiki, KBID: kbID}
@@ -45,6 +49,103 @@ func NewOrchestrator(db *gorm.DB, wiki *weknora.WikiClient, kbID string) *Orches
 // EnqueueJob 入库一个 pending job（CP-T004 幂等键保证）
 func (o *Orchestrator) EnqueueJob(ctx context.Context, videoID, jobType string) (string, error) {
 	return o.enqueueJob(ctx, o.DB, videoID, jobType)
+}
+
+func (o *Orchestrator) EnqueueContentPipeline(ctx context.Context, videoID string) error {
+	return o.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		generation, inputPayload, err := o.transcriptSourceManifest(ctx, tx, videoID)
+		if err != nil {
+			return err
+		}
+		for _, jobType := range []string{JobGraph, JobOutline, JobOverview, JobSummary} {
+			jobID, err := o.enqueueJob(ctx, tx, videoID, jobType)
+			if err != nil {
+				return fmt.Errorf("enqueue %s job: %w", jobType, err)
+			}
+			if err := o.ensureTranscriptSourceManifest(ctx, tx, jobID, generation, inputPayload); err != nil {
+				return fmt.Errorf("persist %s source manifest: %w", jobType, err)
+			}
+		}
+		return nil
+	})
+}
+
+func (o *Orchestrator) transcriptSourceManifest(ctx context.Context, db *gorm.DB, videoID string) (string, string, error) {
+	var video model.Video
+	if err := db.WithContext(ctx).Select("id", "transcript_generation").First(&video, "id = ?", videoID).Error; err != nil {
+		return "", "", fmt.Errorf("load transcript generation: %w", err)
+	}
+	if strings.TrimSpace(video.TranscriptGeneration) == "" {
+		return "", "", fmt.Errorf("video %s has no active transcript generation", videoID)
+	}
+	var chunks []model.VideoTranscriptChunk
+	if err := db.WithContext(ctx).Where("video_id = ? AND generation = ?", videoID, video.TranscriptGeneration).
+		Order("chunk_index ASC").Find(&chunks).Error; err != nil {
+		return "", "", fmt.Errorf("load transcript chunk manifest: %w", err)
+	}
+	if len(chunks) == 0 {
+		return "", "", fmt.Errorf("video %s has no active transcript chunks", videoID)
+	}
+	knowledgeIDs := make([]string, 0, len(chunks))
+	seen := make(map[string]struct{}, len(chunks))
+	for index, chunk := range chunks {
+		if chunk.ChunkIndex != index || chunk.Status != "completed" || strings.TrimSpace(chunk.KnowledgeID) == "" {
+			return "", "", fmt.Errorf("video %s transcript chunk manifest is incomplete at index %d", videoID, index)
+		}
+		if _, exists := seen[chunk.KnowledgeID]; exists {
+			return "", "", fmt.Errorf("video %s transcript chunk manifest contains duplicate knowledge id", videoID)
+		}
+		seen[chunk.KnowledgeID] = struct{}{}
+		knowledgeIDs = append(knowledgeIDs, chunk.KnowledgeID)
+	}
+	inputPayload, err := json.Marshal(map[string]any{
+		"transcript_generation":    video.TranscriptGeneration,
+		"transcript_knowledge_ids": knowledgeIDs,
+		"transcript_chunk_count":   len(knowledgeIDs),
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("encode transcript source manifest: %w", err)
+	}
+	return video.TranscriptGeneration, string(inputPayload), nil
+}
+
+func (o *Orchestrator) ensureTranscriptSourceManifest(ctx context.Context, db *gorm.DB, jobID, generation, inputPayload string) error {
+	var job model.VideoProcessingJob
+	if err := db.WithContext(ctx).Select("id", "transcript_generation", "input_payload").First(&job, "id = ?", jobID).Error; err != nil {
+		return err
+	}
+	if job.TranscriptGeneration != "" && job.TranscriptGeneration != generation {
+		return fmt.Errorf("job %s transcript generation mismatch: %s != %s", jobID, job.TranscriptGeneration, generation)
+	}
+	updates := map[string]any{}
+	if job.TranscriptGeneration == "" {
+		updates["transcript_generation"] = generation
+	}
+	if strings.TrimSpace(job.InputPayload) == "" {
+		updates["input_payload"] = inputPayload
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	return db.WithContext(ctx).Model(&model.VideoProcessingJob{}).Where("id = ?", jobID).Updates(updates).Error
+}
+
+func (o *Orchestrator) IsSummaryUserEditProtected(ctx context.Context, videoID string) (bool, error) {
+	var video model.Video
+	if err := o.DB.WithContext(ctx).First(&video, "id = ?", videoID).Error; err != nil {
+		return false, fmt.Errorf("load summary state: %w", err)
+	}
+	if video.SummaryUserEdited {
+		return true, nil
+	}
+	if video.SummaryWikiPageID == "" {
+		return false, nil
+	}
+	_, editSource, _, err := o.findWikiPageVersion(ctx, videoID, video.SummaryWikiPageID)
+	if err != nil {
+		return false, err
+	}
+	return editSource == "user" || editSource == "revert", nil
 }
 
 func (o *Orchestrator) enqueueJob(ctx context.Context, db *gorm.DB, videoID, jobType string) (string, error) {
@@ -137,7 +238,14 @@ func (o *Orchestrator) FindWikiPageAfter(
 			continue
 		}
 
-		if ft != contract.ArtifactType && !contract.MatchesSlug(p.Slug, videoID) {
+		if ft != contract.ArtifactType || !contract.MatchesSlug(p.Slug, videoID) {
+			continue
+		}
+		current, err := o.isWikiPageCurrentGeneration(ctx, videoID, p)
+		if err != nil {
+			return "", len(pages), err
+		}
+		if !current {
 			continue
 		}
 		readable, err := o.isWikiPageEligible(ctx, p, baseline)
@@ -150,6 +258,51 @@ func (o *Orchestrator) FindWikiPageAfter(
 	}
 
 	return "", len(pages), nil
+}
+
+func (o *Orchestrator) isWikiPageCurrentGeneration(ctx context.Context, videoID string, candidate weknora.WikiPage) (bool, error) {
+	if o.DB == nil {
+		return true, nil
+	}
+	var video model.Video
+	if err := o.DB.WithContext(ctx).Select("transcript_generation").First(&video, "id = ?", videoID).Error; err != nil {
+		return false, fmt.Errorf("load transcript generation for wiki page: %w", err)
+	}
+	expected := strings.TrimSpace(video.TranscriptGeneration)
+	if expected == "" {
+		return false, nil
+	}
+	actual, _ := candidate.ParsedFrontmatter()["transcript_generation"].(string)
+	return strings.TrimSpace(actual) == expected, nil
+}
+
+func (o *Orchestrator) validateWikiPageSource(ctx context.Context, videoID, pageID string) error {
+	if o.DB == nil || o.Wiki == nil {
+		return nil
+	}
+	pages, err := o.Wiki.ListByVideo(ctx, o.KBID, videoID, "")
+	if err != nil {
+		return fmt.Errorf("list wiki page source: %w", err)
+	}
+	for _, page := range pages {
+		if page.ID != pageID {
+			continue
+		}
+		frontmatter := page.ParsedFrontmatter()
+		sourceVideoID, _ := frontmatter["source_video_id"].(string)
+		if sourceVideoID != videoID {
+			return fmt.Errorf("wiki page %s source_video_id mismatch", pageID)
+		}
+		current, err := o.isWikiPageCurrentGeneration(ctx, videoID, page)
+		if err != nil {
+			return err
+		}
+		if !current {
+			return fmt.Errorf("wiki page %s transcript generation mismatch", pageID)
+		}
+		return nil
+	}
+	return fmt.Errorf("wiki page %s does not belong to video %s", pageID, videoID)
 }
 
 func (o *Orchestrator) isWikiPageEligible(
@@ -173,11 +326,11 @@ func (o *Orchestrator) isWikiPageReadable(ctx context.Context, candidate weknora
 	return page != nil && page.ID == candidate.ID && strings.TrimSpace(page.Content) != "", nil
 }
 
-// AfterSkillComplete skill 完成后：找新 wiki 页 → 回写 videos → 触发下一环节
+// AfterSkillComplete skill 完成后：找新 wiki 页 → 回写 videos。
 //
 //   - expectedFrontmatterType: 例如 "knowledge_base" / "outline" / "overview" 等
 //
-// 返回回写是否成功 + 下一个 job_id（如果有）
+// 基础内容全部完成后，才会返回待组装的 job_id。
 func (o *Orchestrator) AfterSkillComplete(ctx context.Context, videoID, jobType string) (wikiPageID string, nextJobID string, err error) {
 	contract, ok := Contract(jobType)
 	if !ok {
@@ -230,9 +383,40 @@ func (o *Orchestrator) AfterSkillCompleteWithID(ctx context.Context, videoID, jo
 	if !ok || contract.VideoField == "" {
 		return "", "", fmt.Errorf("job_type %s 无映射字段", jobType)
 	}
+	if err := o.validateWikiPageSource(ctx, videoID, wikiPageID); err != nil {
+		return "", "", err
+	}
+	candidateVersion, _, auditStatus, err := o.findWikiPageVersion(ctx, videoID, wikiPageID)
+	if err != nil {
+		return "", "", err
+	}
+	if jobType == JobSummary || jobType == JobSummaryEnhance {
+		var current model.Video
+		if err := o.DB.WithContext(ctx).First(&current, "id = ?", videoID).Error; err != nil {
+			return "", "", fmt.Errorf("load summary state: %w", err)
+		}
+		currentSummaryVersion, currentSummaryEditSource, _, err := o.findWikiPageVersion(ctx, videoID, current.SummaryWikiPageID)
+		if err != nil {
+			return "", "", err
+		}
+		legacyEditDetected := currentSummaryEditSource == "" && current.SummaryWikiPageVersion > 0 && currentSummaryVersion > current.SummaryWikiPageVersion
+		if current.SummaryUserEdited || currentSummaryEditSource == "user" || currentSummaryEditSource == "revert" || legacyEditDetected {
+			if err := o.DB.WithContext(ctx).Model(&model.Video{}).Where("id = ?", videoID).Updates(map[string]any{
+				"summary_user_edited": true, "summary_source": "user_edited",
+				"processing_error_summary": "智能总结存在用户编辑，已跳过自动覆盖",
+			}).Error; err != nil {
+				return "", "", fmt.Errorf("persist summary edit protection: %w", err)
+			}
+			return wikiPageID, "", ErrSummaryUserEditProtected
+		}
+	}
 
 	var nextJobID string
-	err := o.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = o.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var video model.Video
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&video, "id = ?", videoID).Error; err != nil {
+			return fmt.Errorf("load video before artifact update: %w", err)
+		}
 		result := tx.Model(&model.Video{}).
 			Where("id = ?", videoID).
 			Update(contract.VideoField, wikiPageID)
@@ -243,19 +427,66 @@ func (o *Orchestrator) AfterSkillCompleteWithID(ctx context.Context, videoID, jo
 			return fmt.Errorf("video not found: %s", videoID)
 		}
 
-		if next := NextJob(jobType); next != "" {
-			var err error
-			nextJobID, err = o.enqueueJob(ctx, tx, videoID, next)
-			return err
+		if jobType == JobSummary || jobType == JobSummaryEnhance {
+			updates := map[string]any{"summary_source": "initial", "summary_knowledge_enhanced": false}
+			if jobType == JobSummaryEnhance {
+				updates["summary_source"] = "enhanced"
+				updates["summary_knowledge_enhanced"] = true
+			}
+			if candidateVersion > 0 {
+				updates["summary_wiki_page_version"] = candidateVersion
+			}
+			if err := tx.Model(&model.Video{}).Where("id = ?", videoID).Updates(updates).Error; err != nil {
+				return fmt.Errorf("persist summary metadata: %w", err)
+			}
+		}
+		if jobType == JobGraph {
+			mappedAuditStatus := mapAuditStatus(auditStatus)
+			if err := tx.Model(&model.Video{}).Where("id = ?", videoID).Update("knowledge_audit_status", mappedAuditStatus).Error; err != nil {
+				return fmt.Errorf("persist knowledge audit status: %w", err)
+			}
+		}
+		if jobType == JobOutline || jobType == JobOverview || jobType == JobSummary {
+			var updated model.Video
+			if err := tx.First(&updated, "id = ?", videoID).Error; err != nil {
+				return fmt.Errorf("reload foundation artifacts: %w", err)
+			}
+			if updated.OutlineWikiPageID != "" && updated.OverviewWikiPageID != "" && updated.SummaryWikiPageID != "" {
+				var err error
+				nextJobID, err = o.enqueueJob(ctx, tx, videoID, JobAssemble)
+				if err != nil {
+					return err
+				}
+				generation, inputPayload, err := o.transcriptSourceManifest(ctx, tx, videoID)
+				if err != nil {
+					return err
+				}
+				return o.ensureTranscriptSourceManifest(ctx, tx, nextJobID, generation, inputPayload)
+			}
+		}
+		if jobType == JobGraph || jobType == JobSummary {
+			var updated model.Video
+			if err := tx.First(&updated, "id = ?", videoID).Error; err != nil {
+				return fmt.Errorf("reload enhancement prerequisites: %w", err)
+			}
+			if updated.KnowledgeAuditStatus == "passed" && updated.SummaryWikiPageID != "" {
+				nextJobID, err = o.enqueueJob(ctx, tx, videoID, JobSummaryEnhance)
+				if err != nil {
+					return err
+				}
+				generation, inputPayload, err := o.transcriptSourceManifest(ctx, tx, videoID)
+				if err != nil {
+					return err
+				}
+				return o.ensureTranscriptSourceManifest(ctx, tx, nextJobID, generation, inputPayload)
+			}
 		}
 		if jobType == JobAssemble {
-			var video model.Video
 			if err := tx.First(&video, "id = ?", videoID).Error; err != nil {
-				return fmt.Errorf("load assembled video: %w", err)
+				return fmt.Errorf("reload assembled video: %w", err)
 			}
-			if video.KnowledgeBaseWikiPageID == "" || video.OutlineWikiPageID == "" ||
-				video.OverviewWikiPageID == "" || video.SummaryWikiPageID == "" ||
-				video.TranscriptPageWikiPageID == "" {
+			if video.OutlineWikiPageID == "" || video.OverviewWikiPageID == "" ||
+				video.SummaryWikiPageID == "" || video.TranscriptPageWikiPageID == "" {
 				return fmt.Errorf("incomplete content artifacts after assemble")
 			}
 			if err := tx.Model(&video).Updates(map[string]any{
@@ -270,4 +501,34 @@ func (o *Orchestrator) AfterSkillCompleteWithID(ctx context.Context, videoID, jo
 		return "", "", err
 	}
 	return wikiPageID, nextJobID, nil
+}
+
+func (o *Orchestrator) findWikiPageVersion(ctx context.Context, videoID, pageID string) (int, string, string, error) {
+	if pageID == "" || o.Wiki == nil {
+		return 0, "", "", nil
+	}
+	pages, err := o.Wiki.ListByVideo(ctx, o.KBID, videoID, "")
+	if err != nil {
+		return 0, "", "", fmt.Errorf("list wiki pages for version tracking: %w", err)
+	}
+	for _, page := range pages {
+		if page.ID == pageID {
+			auditStatus, _ := page.ParsedFrontmatter()["audit_status"].(string)
+			return page.Version, page.LastEditSource, auditStatus, nil
+		}
+	}
+	return 0, "", "", nil
+}
+
+func mapAuditStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "aligned", "passed":
+		return "passed"
+	case "conditional":
+		return "conditional"
+	case "failed":
+		return "failed"
+	default:
+		return "conditional"
+	}
 }

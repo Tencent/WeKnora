@@ -42,7 +42,7 @@ description: 根据已审计的文档分类、知识原子、实体、关系和�
 
 ### 三、输出
 
-6. 调用 **创建/覆盖 Wiki** 工具创建新 Wiki 页面承载总结，并写入知识库。Wiki 页面命名为"文档名称_知识总结"。写入契约：工具 `page_type` 用 `index`；页面 frontmatter 必须含 `type: typed_summary` 与 `source_video_id: {视频ID}`。
+6. 调用 **创建/覆盖 Wiki** 工具创建新 Wiki 页面承载总结，并写入知识库。Wiki 页面命名为"文档名称_知识总结"。写入契约：工具 `page_type` 用 `index`；页面 frontmatter 必须含 `type: typed_summary`、`source_video_id: {视频ID}` 与 `transcript_generation: {转写代次}`。由 vidsage 内容流水线触发时，页面 slug 固定为 `typed-summary/{视频ID}`，不得使用视频标题或其他产物 slug。
 
 ### 四、审计
 

@@ -47,6 +47,7 @@ export function contentModuleForStage(stage: string): VideoContentModule | 'all'
   if (stage === 'overview') return 'overview'
   if (stage === 'summary') return 'summary'
   if (stage === 'graph') return 'relatedKnowledge'
+  if (stage === 'related_knowledge') return 'relatedKnowledge'
   if (stage === 'assemble') return 'all'
   return null
 }

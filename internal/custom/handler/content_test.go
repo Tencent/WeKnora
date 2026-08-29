@@ -44,6 +44,57 @@ func TestSummaryNotGeneratedReturnsStructuredStageStatus(t *testing.T) {
 	}
 }
 
+func TestContentEndpointRejectsWrongArtifactPage(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusCompleted,
+		OutlineWikiPageID: "shared-page",
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/knowledgebase/kb-1/wiki/pages":
+			_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{
+				Pages: []weknora.WikiPage{{
+					ID: "shared-page", Slug: "outline/video-1", PageType: "index",
+				}},
+				Total: 1, TotalPages: 1,
+			})
+		case "/api/v1/knowledgebase/kb-1/wiki/pages/outline/video-1":
+			_ = json.NewEncoder(writer).Encode(weknora.WikiPage{
+				ID: "shared-page", Slug: "outline/video-1", PageType: "index",
+				Content: "---\ntype: overview\nsource_video_id: " + video.ID + "\n---\n概览内容",
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/outline", nil)
+	wiki := weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL})
+
+	NewContentHandler(db, wiki, "kb-1").Outline(context)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		ErrorCode string `json:"error_code"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.ErrorCode != "artifact_contract_mismatch" {
+		t.Fatalf("error_code = %q", payload.ErrorCode)
+	}
+}
+
 func TestRelatedKnowledgeNotGeneratedReturnsStructuredStageStatus(t *testing.T) {
 	db := openTestVideoDB(t)
 	video := model.Video{ID: uuid.NewString(), Title: "video", Status: model.VideoStatusProcessing}

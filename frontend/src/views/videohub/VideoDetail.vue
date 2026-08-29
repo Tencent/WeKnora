@@ -28,7 +28,7 @@
           <aside class="video-detail-page__right">
             <t-tabs v-model="activeTab">
               <t-tab-panel value="summary" label="智能总结"><SmartSummary :key="video.id" :video="video" :content-state="content.summary" @reload="reloadSummary" @seek="seekTo" /></t-tab-panel>
-              <t-tab-panel value="related" label="关联知识"><RelatedKnowledge :key="video.id" :video="video" :content-state="content.relatedKnowledge" @reload="reloadRelatedKnowledge" @seek="seekTo" @select-video-by-id="onSelectVideoById" /></t-tab-panel>
+              <t-tab-panel value="related" label="相关知识"><RelatedKnowledge :key="video.id" :video="video" :content-state="content.relatedKnowledge" @reload="reloadRelatedKnowledge" @seek="seekTo" @select-video-by-id="onSelectVideoById" /></t-tab-panel>
               <t-tab-panel value="transcript" label="完整文字稿"><TranscriptPageContent :key="video.id" :content-state="content.transcriptPage" @reload="reloadTranscriptPage" /></t-tab-panel>
             </t-tabs>
           </aside>

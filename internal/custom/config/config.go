@@ -79,7 +79,7 @@ type TongyiConfig struct {
 	AppKey                  string // 听悟项目 AppKey（标识转写项目）
 	Endpoint                string // 默认 https://tingwu.cn-beijing.aliyuncs.com
 	CallbackURL             string // 转写完成回调地址（可选，留空走轮询）
-	InternalFrontendBaseURL string // 已废弃：仅保留旧环境配置兼容，不得作为听悟任务源地址
+	InternalFrontendBaseURL string // worker 在容器网络内校验视频源时使用的前端服务地址
 }
 
 // WorkerConfig Worker 引擎配置（轮询周期 / 重试上限）

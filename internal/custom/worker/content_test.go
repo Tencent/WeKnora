@@ -65,9 +65,45 @@ func TestSkillQueryUsesTranscriptKnowledgeIDAsSourceDocument(t *testing.T) {
 		TranscriptKnowledgeID: "knowledge-1",
 	}
 
-	query := skillQuery(video, skill.SkillExtractKnowledge)
+	contract, ok := skill.Contract(skill.JobGraph)
+	require.True(t, ok)
+	query := skillQuery(video, contract, skill.JobGraph)
 
 	require.Contains(t, query, "$extract-video-knowledge")
 	require.Contains(t, query, "源文档知识 ID：knowledge-1")
 	require.Contains(t, query, "业务视频 ID：video-1")
+	require.Contains(t, query, `slug 严格使用 "video/video-1"`)
+	require.Contains(t, query, "type: knowledge_base")
+}
+
+func TestSkillQueryForSummaryEnhancementUsesKnowledgeBase(t *testing.T) {
+	video := &model.Video{
+		ID: "video-1", Title: "测试视频", TranscriptKnowledgeID: "knowledge-1",
+		TranscriptGeneration: "generation-1", KnowledgeBaseWikiPageID: "knowledge-base-1",
+	}
+	contract, ok := skill.Contract(skill.JobSummaryEnhance)
+	require.True(t, ok)
+
+	query := skillQuery(video, contract, skill.JobSummaryEnhance)
+
+	require.Contains(t, query, "知识底座索引页 ID：knowledge-base-1")
+	require.Contains(t, query, "不是重新生成基础总结")
+	require.Contains(t, query, `slug 严格使用 "typed-summary/video-1"`)
+}
+
+func TestTranscriptKnowledgeIDsUsesEveryCurrentChunk(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}))
+	video := model.Video{ID: "video-1", TranscriptGeneration: "generation-1", TranscriptKnowledgeID: "legacy-first"}
+	require.NoError(t, db.Create(&video).Error)
+	require.NoError(t, db.Create([]model.VideoTranscriptChunk{
+		{VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 0, KnowledgeID: "knowledge-1", ContentHash: "hash-1", Status: "completed"},
+		{VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 1, KnowledgeID: "knowledge-2", ContentHash: "hash-2", Status: "completed"},
+	}).Error)
+
+	handler := BaseSkillHandler{DB: db}
+	ids, err := handler.transcriptKnowledgeIDs(t.Context(), &model.VideoProcessingJob{TranscriptGeneration: video.TranscriptGeneration}, &video)
+	require.NoError(t, err)
+	require.Equal(t, []string{"knowledge-1", "knowledge-2"}, ids)
 }
