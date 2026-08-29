@@ -1,9 +1,6 @@
-// Package worker 内容生产 5 个 skill job handler（CP-T005）。
+// Package worker 内容生产 skill job handler。
 //
-// 5 个 handler 共享 BaseSkillHandler 的逻辑：
-//  1. 调 Agent Chat API 触发对应 skill
-//  2. 等 skill 完成
-//  3. 调 orchestrator.AfterSkillComplete：回写 wiki_page_id，并按基础产物状态调度组装
+// 知识提取和页面组装使用 Agent；基础内容由 direct_content.go 通过 LLM 生成。
 package worker
 
 import (
@@ -40,7 +37,7 @@ const wikiBaselinePayloadKey = "wiki_page_versions_before_skill"
 func skillQuery(video *model.Video, contract skill.JobContract, jobType string) string {
 	query := fmt.Sprintf(
 		"使用 $%s 处理视频。当前转写代次：%s。兼容源文档知识 ID：%s；完整转写分块清单已通过调用上下文提供，必须覆盖全部分块。业务视频 ID：%s 仅用于产物归属。视频标题：%s。"+
-			"必须通过创建/覆盖 Wiki 写入唯一产物页：slug 严格使用 %q，不得使用其他产物的 slug，也不得覆盖其他类型页面；page_type 使用 index；frontmatter 必须含 type: %s、source_video_id: %s 和 transcript_generation: %s。读取上游产物时，必须使用 Wiki 工具返回的实际 slug，禁止根据视频标题或页面标题猜测 slug。",
+			"必须通过创建/覆盖 Wiki 写入唯一产物页：slug 严格使用 %q，不得使用其他产物的 slug，也不得覆盖其他类型页面；page_type 使用 index；frontmatter 必须含 type: %s、source_video_id: %s 和 transcript_generation: %s。目标产物页可能尚不存在，首次生成时不要先读取目标 slug；读取返回 not found 不是失败，请继续直接写入。读取上游产物时，必须使用 Wiki 工具返回的实际 slug，禁止根据视频标题或页面标题猜测 slug。",
 		contract.SkillName, video.TranscriptGeneration, video.TranscriptKnowledgeID, video.ID, video.Title,
 		contract.WriteSlug(video.ID), contract.ArtifactType, video.ID, video.TranscriptGeneration,
 	)
@@ -168,7 +165,19 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 	}
 	query := skillQuery(video, contract, jobType)
 	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query, knowledgeIDs); err != nil {
-		return fmt.Errorf("trigger skill %s: %w", contract.SkillName, err)
+		if !isMissingWikiPageError(err) {
+			return fmt.Errorf("trigger skill %s: %w", contract.SkillName, err)
+		}
+		slog.Warn("skill stopped on an expected first-run missing wiki page; retrying with recovery instruction",
+			"video_id", video.ID, "job_type", jobType, "error", err)
+		recoverySessionID, sessionErr := h.AgentClient.CreateSession(ctx, fmt.Sprintf("content-pipeline/%s/%s-recovery", video.ID, jobType))
+		if sessionErr != nil {
+			return fmt.Errorf("trigger skill %s recovery session: %w (initial error: %v)", contract.SkillName, sessionErr, err)
+		}
+		recoveryQuery := query + " 这是首次生成恢复流程：目标产物页可能尚不存在，不要先读取目标 slug；请直接调用创建/覆盖 Wiki 写入。读取返回 not found 不是失败，继续完成写入。"
+		if retryErr := h.AgentClient.TriggerSkill(ctx, recoverySessionID, h.AgentID, contract.SkillName, recoveryQuery, knowledgeIDs); retryErr != nil {
+			return fmt.Errorf("trigger skill %s after missing-page recovery: %w (initial error: %v)", contract.SkillName, retryErr, err)
+		}
 	}
 
 	// 轮询等待 Wiki 产物页落地（WeKnora 写入到可检索有延迟），最多 10 分钟
@@ -183,6 +192,14 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 	}
 	_ = wikiPageID // 回写已在 AfterSkillComplete 中完成
 	return nil
+}
+
+func isMissingWikiPageError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "Wiki page '") && strings.Contains(message, "' not found")
 }
 
 // waitForWikiPage 轮询等待匹配的 Wiki 产物页出现；避免 skill 返回后 DB/索引延迟导致的误判

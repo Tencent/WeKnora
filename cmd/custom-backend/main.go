@@ -22,6 +22,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/custom/client/llm"
 	"github.com/Tencent/WeKnora/internal/custom/client/minio"
 	"github.com/Tencent/WeKnora/internal/custom/client/tongyi"
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
@@ -64,6 +65,7 @@ func main() {
 		}
 	}
 	weknoraCli := weknora.New(cfg.WeKnora)
+	llmCli := llm.NewClient(cfg.LLM)
 	tongyiCli := tongyi.New(cfg.Tongyi)
 	wikiClient := weknora.NewWikiClient(cfg.WeKnora)
 	agentClient := weknora.NewAgentClient(cfg.WeKnora)
@@ -85,26 +87,32 @@ func main() {
 		slog.Info("custom workers disabled")
 	} else {
 		contentAgentID := os.Getenv("CUSTOM_CONTENT_AGENT_ID")
-		missingContentConfig := make([]string, 0, 4)
-		if contentAgentID == "" {
-			missingContentConfig = append(missingContentConfig, "CUSTOM_CONTENT_AGENT_ID")
-		}
+		missingPipelineConfig := make([]string, 0, 4)
 		if cfg.Tongyi.AccessKeyID == "" {
-			missingContentConfig = append(missingContentConfig, "TONGYI_ACCESS_KEY_ID")
+			missingPipelineConfig = append(missingPipelineConfig, "TONGYI_ACCESS_KEY_ID")
 		}
 		if cfg.Tongyi.AccessKeySecret == "" {
-			missingContentConfig = append(missingContentConfig, "TONGYI_ACCESS_KEY_SECRET")
+			missingPipelineConfig = append(missingPipelineConfig, "TONGYI_ACCESS_KEY_SECRET")
 		}
 		if cfg.Tongyi.AppKey == "" {
-			missingContentConfig = append(missingContentConfig, "TONGYI_APP_KEY")
+			missingPipelineConfig = append(missingPipelineConfig, "TONGYI_APP_KEY")
 		}
 		if cfg.WeKnora.KBID == "" {
-			missingContentConfig = append(missingContentConfig, "WEKNORA_KB_ID")
+			missingPipelineConfig = append(missingPipelineConfig, "WEKNORA_KB_ID")
 		}
 
-		contentWorkersEnabled := len(missingContentConfig) == 0
+		contentWorkersEnabled := len(missingPipelineConfig) == 0
+		agentConfigured := contentAgentID != ""
+		llmConfigured := cfg.LLM.BaseURL != "" && cfg.LLM.APIKey != "" && cfg.LLM.Model != ""
 		if !contentWorkersEnabled {
-			slog.Warn("content workers disabled; thumbnail worker remains enabled", "missing_config", missingContentConfig)
+			slog.Warn("content workers disabled; thumbnail worker remains enabled", "missing_config", missingPipelineConfig)
+		}
+		if !agentConfigured {
+			slog.Warn("Agent knowledge extraction will fail until configured", "missing_config", []string{"CUSTOM_CONTENT_AGENT_ID"})
+		}
+		if !llmConfigured {
+			slog.Warn("direct content worker configuration incomplete; jobs will report configuration errors",
+				"missing_config", []string{"CUSTOM_LLM_BASE_URL", "CUSTOM_LLM_API_KEY", "CUSTOM_LLM_MODEL"})
 		}
 
 		base := worker.BaseSkillHandler{
@@ -124,13 +132,15 @@ func main() {
 				transcriptionHandler,
 				worker.NewSubtitleGenerateHandler(db, minioCli, tongyiCli),
 				worker.NewIndexHandler(db, weknoraCli, orchestrator),
-				&worker.GraphHandler{BaseSkillHandler: base},
-				&worker.OutlineHandler{BaseSkillHandler: base},
-				&worker.OverviewHandler{BaseSkillHandler: base},
-				&worker.SummaryHandler{BaseSkillHandler: base},
-				&worker.SummaryEnhanceHandler{BaseSkillHandler: base},
-				&worker.AssembleHandler{BaseSkillHandler: base},
 			)
+			handlers = append(handlers,
+				&worker.GraphHandler{BaseSkillHandler: base},
+				worker.NewDirectContentHandler(db, llmCli, weknoraCli, wikiClient, orchestrator, skill.JobOutline),
+				worker.NewDirectContentHandler(db, llmCli, weknoraCli, wikiClient, orchestrator, skill.JobOverview),
+				worker.NewDirectContentHandler(db, llmCli, weknoraCli, wikiClient, orchestrator, skill.JobSummary),
+				worker.NewDirectContentHandler(db, llmCli, weknoraCli, wikiClient, orchestrator, skill.JobSummaryEnhance),
+			)
+			handlers = append(handlers, worker.NewDeterministicAssembleHandler(db, wikiClient, orchestrator, cfg.WeKnora.KBID))
 		}
 		engine = worker.NewEngine(db, &cfg.Worker, handlers...)
 		engine.Start(context.Background())

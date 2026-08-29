@@ -10,6 +10,7 @@
 package weknora
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -53,6 +54,16 @@ type WikiPage struct {
 	LastEditSource string    `json:"last_edit_source"`
 	LastEditorID   string    `json:"last_editor_id"`
 	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type WikiPageWrite struct {
+	Slug     string
+	Title    string
+	PageType string
+	Status   string
+	Content  string
+	Summary  string
+	Version  int
 }
 
 // ParsedFrontmatter 从 content 顶部解析 YAML frontmatter（--- 包裹），返回 map。
@@ -192,6 +203,87 @@ func (w *WikiClient) GetPage(ctx context.Context, kbID, slug string) (*WikiPage,
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (w *WikiClient) UpsertPage(ctx context.Context, kbID string, input WikiPageWrite) (*WikiPage, error) {
+	if strings.TrimSpace(kbID) == "" {
+		kbID = w.cfg.KBID
+	}
+	if strings.TrimSpace(kbID) == "" || strings.TrimSpace(input.Slug) == "" || strings.TrimSpace(input.Content) == "" {
+		return nil, fmt.Errorf("wiki page kb_id, slug and content are required")
+	}
+	existing, err := w.GetPage(ctx, kbID, input.Slug)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		body, err := json.Marshal(map[string]any{
+			"slug":      input.Slug,
+			"title":     input.Title,
+			"page_type": input.PageType,
+			"status":    input.Status,
+			"content":   input.Content,
+			"summary":   input.Summary,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("encode wiki page: %w", err)
+		}
+		return w.writePage(ctx, http.MethodPost, fmt.Sprintf("%s/api/v1/knowledgebase/%s/wiki/pages", w.cfg.BaseURL, kbID), body, http.StatusCreated)
+	}
+	if input.Version == 0 {
+		input.Version = existing.Version
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"title":     input.Title,
+		"page_type": input.PageType,
+		"status":    input.Status,
+		"content":   input.Content,
+		"summary":   input.Summary,
+		"version":   input.Version,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode wiki page update: %w", err)
+	}
+	if input.Version == 0 {
+		body, err = json.Marshal(map[string]any{
+			"title":     input.Title,
+			"page_type": input.PageType,
+			"status":    input.Status,
+			"content":   input.Content,
+			"summary":   input.Summary,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("encode wiki page update: %w", err)
+		}
+	}
+	return w.writePage(ctx, http.MethodPut, fmt.Sprintf("%s/api/v1/knowledgebase/%s/wiki/pages/%s", w.cfg.BaseURL, kbID, url.PathEscape(input.Slug)), body, http.StatusOK)
+}
+
+func (w *WikiClient) writePage(ctx context.Context, method, endpoint string, body []byte, expectedStatus int) (*WikiPage, error) {
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	w.setHeaders(req)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := w.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("write wiki page: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != expectedStatus {
+		responseBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("write wiki page status %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+	}
+	var page WikiPage
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		return nil, fmt.Errorf("decode wiki page: %w", err)
+	}
+	if page.ID == "" {
+		return nil, fmt.Errorf("write wiki page returned empty id")
+	}
+	return &page, nil
 }
 
 // ListByVideo 列出某视频的关联 Wiki 页

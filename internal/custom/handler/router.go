@@ -62,6 +62,7 @@ func buildRouter(deps *Deps) *gin.Engine {
 
 	if deps.MinIO != nil {
 		uh := NewUploadHandler(deps.DB, deps.MinIO, deps.Cfg.Upload)
+		transcriptImport := NewTranscriptImportHandler(deps.DB, deps.MinIO)
 		uploads := api.Group("/uploads")
 		uploads.POST("/presign", uh.Presign)
 		uploads.POST("/confirm", uh.Confirm)
@@ -72,6 +73,7 @@ func buildRouter(deps *Deps) *gin.Engine {
 		uploads.POST("/multipart/complete", uh.MultipartComplete)
 		uploads.POST("/multipart/abort", uh.MultipartAbort)
 		api.POST("/videos/:id/retry-initial-processing", uh.RetryInitialProcessing)
+		api.POST("/videos/:id/transcript/import", transcriptImport.Import)
 		if deps.MinIO.IsLocal() {
 			uploads.PUT("/local/:uploadID/parts/:partNumber", func(c *gin.Context) {
 				partNumber, err := parsePositiveInt(c.Param("partNumber"))

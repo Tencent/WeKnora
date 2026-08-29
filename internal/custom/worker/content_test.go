@@ -74,6 +74,8 @@ func TestSkillQueryUsesTranscriptKnowledgeIDAsSourceDocument(t *testing.T) {
 	require.Contains(t, query, "业务视频 ID：video-1")
 	require.Contains(t, query, `slug 严格使用 "video/video-1"`)
 	require.Contains(t, query, "type: knowledge_base")
+	require.Contains(t, query, "目标产物页可能尚不存在")
+	require.Contains(t, query, "读取返回 not found 不是失败")
 }
 
 func TestSkillQueryForSummaryEnhancementUsesKnowledgeBase(t *testing.T) {

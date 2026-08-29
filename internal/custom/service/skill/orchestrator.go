@@ -173,7 +173,7 @@ func (o *Orchestrator) enqueueJob(ctx context.Context, db *gorm.DB, videoID, job
 		VideoID:              videoID,
 		JobType:              jobType,
 		TranscriptGeneration: video.TranscriptGeneration,
-		Provider:             "weknora",
+		Provider:             providerForJob(jobType),
 		Status:               "pending",
 		MaxAttempts:          3,
 		IdempotencyKey:       idemKey,
@@ -194,6 +194,15 @@ func (o *Orchestrator) enqueueJob(ctx context.Context, db *gorm.DB, videoID, job
 		return existing.ID, nil
 	}
 	return job.ID, nil
+}
+
+func providerForJob(jobType string) string {
+	switch jobType {
+	case JobOutline, JobOverview, JobSummary, JobSummaryEnhance:
+		return "llm"
+	default:
+		return "weknora"
+	}
 }
 
 // FindWikiPage 在该视频的 Wiki 页中找匹配 job 契约的产物页；

@@ -18,6 +18,7 @@ type Config struct {
 	MinIO    MinIOConfig
 	Upload   UploadConfig
 	Tongyi   TongyiConfig
+	LLM      LLMConfig
 	Worker   WorkerConfig
 }
 
@@ -80,6 +81,16 @@ type TongyiConfig struct {
 	Endpoint                string // 默认 https://tingwu.cn-beijing.aliyuncs.com
 	CallbackURL             string // 转写完成回调地址（可选，留空走轮询）
 	InternalFrontendBaseURL string // worker 在容器网络内校验视频源时使用的前端服务地址
+}
+
+type LLMConfig struct {
+	Provider       string
+	BaseURL        string
+	APIKey         string
+	Model          string
+	PromptVersion  string
+	TimeoutSeconds int
+	MaxTokens      int
 }
 
 // WorkerConfig Worker 引擎配置（轮询周期 / 重试上限）
@@ -156,6 +167,15 @@ func Load() *Config {
 			Endpoint:                getEnv("TONGYI_ENDPOINT", "https://tingwu.cn-beijing.aliyuncs.com"),
 			CallbackURL:             getEnv("TONGYI_CALLBACK_URL", ""),
 			InternalFrontendBaseURL: getEnv("INTERNAL_FRONTEND_BASE_URL", ""),
+		},
+		LLM: LLMConfig{
+			Provider:       getEnv("CUSTOM_LLM_PROVIDER", "openai-compatible"),
+			BaseURL:        getEnv("CUSTOM_LLM_BASE_URL", ""),
+			APIKey:         getEnv("CUSTOM_LLM_API_KEY", ""),
+			Model:          getEnv("CUSTOM_LLM_MODEL", ""),
+			PromptVersion:  getEnv("CUSTOM_LLM_PROMPT_VERSION", "direct-content-v1"),
+			TimeoutSeconds: getEnvInt("CUSTOM_LLM_TIMEOUT_SECONDS", 180),
+			MaxTokens:      getEnvInt("CUSTOM_LLM_MAX_TOKENS", 8192),
 		},
 		Worker: WorkerConfig{
 			PollIntervalSeconds: getEnvInt("CUSTOM_WORKER_POLL_INTERVAL", 5),

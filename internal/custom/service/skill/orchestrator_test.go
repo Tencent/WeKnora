@@ -360,6 +360,13 @@ func TestJobContractsCoverParallelPipeline(t *testing.T) {
 	}
 }
 
+func TestProviderForJobSeparatesDirectLLMAndAgentJobs(t *testing.T) {
+	for _, jobType := range []string{JobOutline, JobOverview, JobSummary, JobSummaryEnhance} {
+		require.Equal(t, "llm", providerForJob(jobType))
+	}
+	require.Equal(t, "weknora", providerForJob(JobGraph))
+}
+
 func TestConcurrentEnqueueReusesOneEffectiveJob(t *testing.T) {
 	db := newOrchestratorTestDB(t)
 	sqlDB, err := db.DB()

@@ -44,3 +44,18 @@ func TestLoadUsesCanonicalTongyiEndpointByDefault(t *testing.T) {
 		t.Fatalf("Tongyi.Endpoint = %q, want canonical default", cfg.Tongyi.Endpoint)
 	}
 }
+
+func TestLoadReadsDirectContentLLMConfig(t *testing.T) {
+	t.Setenv("CUSTOM_LLM_PROVIDER", "openai-compatible")
+	t.Setenv("CUSTOM_LLM_BASE_URL", "https://llm.example.test/v1")
+	t.Setenv("CUSTOM_LLM_API_KEY", "test-key")
+	t.Setenv("CUSTOM_LLM_MODEL", "model-1")
+	t.Setenv("CUSTOM_LLM_PROMPT_VERSION", "prompt-v2")
+	t.Setenv("CUSTOM_LLM_TIMEOUT_SECONDS", "90")
+	t.Setenv("CUSTOM_LLM_MAX_TOKENS", "4096")
+
+	cfg := Load()
+	if cfg.LLM.Provider != "openai-compatible" || cfg.LLM.BaseURL != "https://llm.example.test/v1" || cfg.LLM.APIKey != "test-key" || cfg.LLM.Model != "model-1" || cfg.LLM.PromptVersion != "prompt-v2" || cfg.LLM.TimeoutSeconds != 90 || cfg.LLM.MaxTokens != 4096 {
+		t.Fatalf("unexpected LLM config: %+v", cfg.LLM)
+	}
+}
