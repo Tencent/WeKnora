@@ -1,0 +1,26 @@
+{{/*
+Copyright 2025 Tencent
+SPDX-License-Identifier: MIT
+
+PersistentVolumeClaim for docreader shared artifacts (images, etc.).
+Only created when docreader.sharedVolume is enabled, type is "pvc",
+and no existing PVC name is provided.
+*/}}
+{{- if and .Values.docreader.enabled .Values.docreader.sharedVolume.enabled (eq .Values.docreader.sharedVolume.type "pvc") (not .Values.docreader.sharedVolume.pvcName) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "weknora.fullname" . }}-docreader-tmp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "docreader" "context" .) | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.docreader.sharedVolume.accessMode | default "ReadWriteMany" }}
+  resources:
+    requests:
+      storage: {{ .Values.docreader.sharedVolume.size | default "5Gi" }}
+  {{- with .Values.docreader.sharedVolume.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}
