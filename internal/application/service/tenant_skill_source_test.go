@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -23,7 +24,7 @@ func TestParseSkillSource(t *testing.T) {
 			in:   "@lyingbug/weknora",
 			want: parsedSkillSource{
 				Kind: skillSourceRegistry, Registry: defaultSkillRegistryOrigin,
-				Slug: "lyingbug/weknora",
+				Owner: "lyingbug", Slug: "weknora",
 			},
 		},
 		{
@@ -31,7 +32,7 @@ func TestParseSkillSource(t *testing.T) {
 			in:   "https://clawhub.ai/lyingbug/weknora",
 			want: parsedSkillSource{
 				Kind: skillSourceRegistry, Registry: "https://clawhub.ai",
-				Slug: "lyingbug/weknora",
+				Owner: "lyingbug", Slug: "weknora",
 			},
 		},
 		{
@@ -39,7 +40,15 @@ func TestParseSkillSource(t *testing.T) {
 			in:   "https://clawhub.ai/steipete/skills/github",
 			want: parsedSkillSource{
 				Kind: skillSourceRegistry, Registry: "https://clawhub.ai",
-				Slug: "steipete/github",
+				Owner: "steipete", Slug: "github",
+			},
+		},
+		{
+			name: "clawhub owner skills path",
+			in:   "https://clawhub.ai/jixinyi546-maker/skills/emar-ppt-skill",
+			want: parsedSkillSource{
+				Kind: skillSourceRegistry, Registry: "https://clawhub.ai",
+				Owner: "jixinyi546-maker", Slug: "emar-ppt-skill",
 			},
 		},
 		{
@@ -161,13 +170,33 @@ func TestParseSkillSourceAtSlugIsRegistryNotGitHub(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, skillSourceRegistry, got.Kind)
 	require.Equal(t, defaultSkillRegistryOrigin, got.Registry)
-	require.Equal(t, "clawhub_pskoett/self-improving-agent", got.Slug)
+	require.Equal(t, "clawhub_pskoett", got.Owner)
+	require.Equal(t, "self-improving-agent", got.Slug)
 }
 
 func TestFetchSkillArchiveRejectsAmbiguousShorthandWithoutFetching(t *testing.T) {
 	_, err := fetchSkillArchive(t.Context(), "owner/demo", http.DefaultClient)
 	require.ErrorIs(t, err, ErrSkillSourceInvalid)
 	require.ErrorContains(t, err, "ambiguous")
+}
+
+func TestClawHubOwnerSlugMapsToDownloadAPI(t *testing.T) {
+	cases := []string{
+		"@jixinyi546-maker/emar-ppt-skill",
+		"https://clawhub.ai/jixinyi546-maker/emar-ppt-skill",
+		"https://clawhub.ai/jixinyi546-maker/skills/emar-ppt-skill",
+	}
+	for _, in := range cases {
+		got, err := parseSkillSource(in)
+		require.NoError(t, err, in)
+		u, err := got.fetchURL()
+		require.NoError(t, err, in)
+		parsed, err := url.Parse(u)
+		require.NoError(t, err, in)
+		require.Equal(t, "https://clawhub.ai/api/v1/download", parsed.Scheme+"://"+parsed.Host+parsed.Path, in)
+		require.Equal(t, "emar-ppt-skill", parsed.Query().Get("slug"), in)
+		require.Equal(t, "jixinyi546-maker", parsed.Query().Get("ownerHandle"), in)
+	}
 }
 
 func TestSkillHubCNMapsToDownloadAPI(t *testing.T) {

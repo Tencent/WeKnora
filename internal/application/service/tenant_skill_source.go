@@ -53,7 +53,7 @@ type parsedSkillSource struct {
 	Registry  string // origin, e.g. https://clawhub.ai or a SkillHub host
 	Slug      string
 	Version   string
-	Owner     string
+	Owner     string // GitHub/GitLab owner, or ClawHub ownerHandle
 	Repo      string
 	Ref       string
 	Subdir    string
@@ -123,11 +123,12 @@ func fetchSkillArchive(ctx context.Context, source string, client *http.Client) 
 }
 
 // parseSkillSource maps one paste onto exactly one kind. It does not probe
-// the network to guess: owner/slug is both a ClawHub id and a GitHub repo,
-// so a slash without a URL or a leading @ is refused rather than fetched
-// twice.
+// the network to guess: owner/slug is both a ClawHub locator and a GitHub
+// repo, so a slash without a URL or a leading @ is refused rather than
+// fetched twice.
 //
-//	@owner/slug          ClawHub (default registry)
+//	@owner/slug          ClawHub (default registry). The API slug is the
+//	                     last segment; owner becomes ownerHandle.
 //	my-skill             ClawHub slug (no slash)
 //	my-skill@1.2.0       ClawHub slug + version
 //	https://…            host decides (GitHub / GitLab / ClawHub / SkillHub /
@@ -264,12 +265,16 @@ func parseRegistryURL(u *url.URL) (parsedSkillSource, error) {
 	if qVersion := strings.TrimSpace(u.Query().Get("version")); qVersion != "" {
 		version = qVersion
 	}
-	return parsedSkillSource{
+	src := parsedSkillSource{
 		Kind:     skillSourceRegistry,
 		Registry: origin,
 		Slug:     slug,
 		Version:  version,
-	}, nil
+	}
+	if isClawHubHost(u.Hostname()) {
+		src.Owner, src.Slug = splitClawHubOwnerSlug(slug)
+	}
+	return src, nil
 }
 
 func parseRegistrySlug(origin, spec string) (parsedSkillSource, error) {
@@ -281,12 +286,41 @@ func parseRegistrySlug(origin, spec string) (parsedSkillSource, error) {
 	if slug == "" {
 		return parsedSkillSource{}, fmt.Errorf("%w: skill slug is required", ErrSkillSourceInvalid)
 	}
-	return parsedSkillSource{
+	src := parsedSkillSource{
 		Kind:     skillSourceRegistry,
 		Registry: origin,
 		Slug:     slug,
 		Version:  version,
-	}, nil
+	}
+	if isClawHubOrigin(origin) {
+		src.Owner, src.Slug = splitClawHubOwnerSlug(slug)
+	}
+	return src, nil
+}
+
+func isClawHubOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	return isClawHubHost(u.Hostname())
+}
+
+// splitClawHubOwnerSlug turns a ClawHub locator into the API slug.
+// ClawHub pages and CLI refs look like owner/slug, but GET /api/v1/download
+// keys by the skill slug alone and takes the publisher as ownerHandle.
+func splitClawHubOwnerSlug(spec string) (owner, slug string) {
+	parts := splitPath(spec)
+	switch len(parts) {
+	case 0:
+		return "", spec
+	case 1:
+		return "", parts[0]
+	case 2:
+		return parts[0], parts[1]
+	default:
+		return "", spec
+	}
 }
 
 func slugAndVersionFromPath(trimmed, fragment string) (string, string, error) {
@@ -461,6 +495,9 @@ func (s parsedSkillSource) fetchURL() (string, error) {
 		}
 		q := u.Query()
 		q.Set("slug", s.Slug)
+		if s.Owner != "" {
+			q.Set("ownerHandle", s.Owner)
+		}
 		if s.Version != "" && !strings.EqualFold(s.Version, "latest") {
 			if semverLike.MatchString(s.Version) {
 				q.Set("version", s.Version)
