@@ -5,10 +5,9 @@ import "strings"
 
 // JobType 5 个内容生产 job 类型（写入 video_processing_jobs.job_type）
 const (
-	JobGraph          = "graph"    // extract-video-knowledge
-	JobOutline        = "outline"  // generate-transcript-outline
-	JobOverview       = "overview" // summarize-transcript-content
-	JobSummary        = "summary"  // generate-typed-transcript-summary
+	JobGraph          = "graph"   // extract-video-knowledge
+	JobOutline        = "outline" // generate-transcript-outline
+	JobSummary        = "summary" // generate-typed-transcript-summary
 	JobSummaryEnhance = "summary_enhance"
 	JobAssemble       = "assemble" // assemble-transcript-page
 )
@@ -17,7 +16,6 @@ const (
 const (
 	SkillExtractKnowledge = "extract-video-knowledge"
 	SkillGenerateOutline  = "generate-transcript-outline"
-	SkillSummarizeContent = "summarize-transcript-content"
 	SkillTypedSummary     = "generate-typed-transcript-summary"
 	SkillAssemblePage     = "assemble-transcript-page"
 )
@@ -47,13 +45,6 @@ var JobContracts = map[string]JobContract{
 		SlugPrefixes:  []string{"outline"},
 		VideoField:    "outline_wiki_page_id",
 	},
-	JobOverview: {
-		SkillName:     SkillSummarizeContent,
-		ArtifactType:  "overview",
-		WikiPageTypes: []string{"index"},
-		SlugPrefixes:  []string{"overview"},
-		VideoField:    "overview_wiki_page_id",
-	},
 	JobSummary: {
 		SkillName:     SkillTypedSummary,
 		ArtifactType:  "typed_summary",
@@ -77,7 +68,7 @@ var JobContracts = map[string]JobContract{
 	},
 }
 
-var FoundationJobs = []string{JobOutline, JobOverview, JobSummary}
+var FoundationJobs = []string{JobOutline, JobSummary}
 var EnhancementJobs = []string{JobGraph, JobSummaryEnhance}
 
 func Contract(jobType string) (JobContract, bool) {

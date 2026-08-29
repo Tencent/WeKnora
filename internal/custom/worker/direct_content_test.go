@@ -25,11 +25,11 @@ func TestParseLLMJSONResponseSupportsFencedAndProseWrappedJSON(t *testing.T) {
 }
 
 func TestBuildDirectContentPromptIncludesTranscriptEvidence(t *testing.T) {
-	prompt, err := buildDirectContentPrompt(&model.Video{Title: "视频一", VideoType: "training"}, skill.JobOverview, []transcript.Chunk{{ID: "chunk-1", Index: 0, Content: "原文内容"}})
+	prompt, err := buildDirectContentPrompt(&model.Video{Title: "视频一", VideoType: "training"}, skill.JobOutline, []transcript.Chunk{{ID: "chunk-1", Index: 0, Content: "原文内容"}})
 	if err != nil {
 		t.Fatalf("buildDirectContentPrompt returned error: %v", err)
 	}
-	for _, expected := range []string{"视频一", "training", "chunk-1", "原文内容", "150 到 300 个汉字"} {
+	for _, expected := range []string{"视频一", "training", "chunk-1", "原文内容", "章节大纲"} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("prompt does not contain %q: %s", expected, prompt)
 		}

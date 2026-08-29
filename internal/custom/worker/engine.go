@@ -233,8 +233,8 @@ func (e *Engine) markFailed(job *model.VideoProcessingJob, category, code, msg s
 			updates["knowledge_audit_status"] = "failed"
 		}
 		var video model.Video
-		if err := e.db.Select("outline_wiki_page_id", "overview_wiki_page_id", "summary_wiki_page_id", "transcript_page_wiki_page_id").First(&video, "id = ?", job.VideoID).Error; err == nil &&
-			video.OutlineWikiPageID != "" && video.OverviewWikiPageID != "" && video.SummaryWikiPageID != "" && video.TranscriptPageWikiPageID != "" {
+		if err := e.db.Select("outline_wiki_page_id", "summary_wiki_page_id", "transcript_page_wiki_page_id").First(&video, "id = ?", job.VideoID).Error; err == nil &&
+			video.OutlineWikiPageID != "" && video.SummaryWikiPageID != "" && video.TranscriptPageWikiPageID != "" {
 			updates["status"] = model.VideoStatusCompleted
 		}
 	}

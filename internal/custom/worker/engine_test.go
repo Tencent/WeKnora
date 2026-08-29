@@ -344,7 +344,7 @@ func TestClassifyProcessingError(t *testing.T) {
 }
 
 func TestEachContentStageFailureRemainsIndependentlyRetryable(t *testing.T) {
-	for _, jobType := range []string{"graph", "outline", "overview", "summary", "assemble"} {
+	for _, jobType := range []string{"graph", "outline", "summary", "assemble"} {
 		t.Run(jobType, func(t *testing.T) {
 			db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 			if err != nil {

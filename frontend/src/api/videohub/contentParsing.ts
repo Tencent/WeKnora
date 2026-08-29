@@ -1,5 +1,6 @@
 import type {
   Chapter,
+  ChapterAlignmentStatus,
   CrossVideoKnowledgeItem,
   CurrentKnowledgeAnchor,
   KnowledgeType,
@@ -99,11 +100,39 @@ function firstQuote(body: string): string | undefined {
     .find(line => line && !/^\*\*.+\*\*/.test(line) && !/`?\d{1,2}:\d{2}(?::\d{2})?/.test(line))
 }
 
+function parseAlignmentStatus(body: string): ChapterAlignmentStatus {
+  const match = body.match(/对齐状态[：:]\s*`?(verified|aligned|pending_alignment)`?/i)
+  return (match?.[1]?.toLowerCase() as ChapterAlignmentStatus | undefined) || 'pending_alignment'
+}
+
+function parseSourceContent(body: string) {
+  const source = subsection(body, '原文')
+  if (!source) return []
+  return source.split(/\n\s*\n/).flatMap((block) => {
+    const lines = block.split('\n').map(line => line.trim()).filter(Boolean)
+    const header = lines[0]?.match(/^>\s*\*\*(.+?)\*\*\s+`?(\d{1,2}:\d{2}(?::\d{2})?)`?\s*[–—-]\s*`?(\d{1,2}:\d{2}(?::\d{2})?)`?\s*$/)
+    if (!header) return []
+    const content = lines.slice(1).map(line => line.replace(/^>\s?/, '').trim()).filter(Boolean).join('\n')
+    if (!content) return []
+    const startSeconds = parseTimestamp(header[2])
+    const endSeconds = parseTimestamp(header[3])
+    if (endSeconds <= startSeconds) return []
+    return [{
+      speaker: header[1].trim(),
+      start_time: formatTimestamp(startSeconds),
+      start_seconds: startSeconds,
+      end_time: formatTimestamp(endSeconds),
+      end_seconds: endSeconds,
+      content,
+    }]
+  })
+}
+
 export function parseOutlineWikiPage(content: string, durationSeconds = 0): Chapter[] {
   const sections = splitLevelTwoSections(content)
   let previousStart = -1
   return sections.map((section, chapterIndex) => {
-    const range = section.body.match(/时间[：:]\s*`?(\d{1,2}:\d{2}(?::\d{2})?)`?\s*[–—-]\s*`?(\d{1,2}:\d{2}(?::\d{2})?)`?/)
+    const range = section.body.match(/时间[：:]\s*`?(\d{1,2}:\d{2}(?::\d{2})?)`?\s*[–—-]\s*`?(\d{1,2}:\d{2}(?::\d{2})?)`?/) || section.title.match(/[（(]\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[–—-]\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[）)]/)
     if (!range) throw new Error(`章节“${section.title}”缺少有效时间范围`)
     const startSeconds = parseTimestamp(range[1])
     let endSeconds = parseTimestamp(range[2])
@@ -119,7 +148,8 @@ export function parseOutlineWikiPage(content: string, durationSeconds = 0): Chap
       .map(line => line.trim())
       .filter(Boolean)
       .join('\n')
-    const evidence = firstQuote(subsection(section.body, '原文'))
+    const sourceContent = parseSourceContent(section.body)
+    const evidence = sourceContent[0]?.content || firstQuote(subsection(section.body, '原文'))
     const pointLines = subsection(section.body, '关键知识点').split('\n')
       .map(line => line.trim())
       .filter(line => /^[-*+]\s+/.test(line) && !/关键词/.test(line))
@@ -139,13 +169,15 @@ export function parseOutlineWikiPage(content: string, durationSeconds = 0): Chap
     return {
       id: `chapter-${chapterIndex + 1}`,
       chapter_index: String(chapterIndex + 1).padStart(2, '0'),
-      chapter_title: section.title,
+      chapter_title: section.title.replace(/[（(]\s*\d{1,2}:\d{2}(?::\d{2})?\s*[–—-]\s*\d{1,2}:\d{2}(?::\d{2})?\s*[）)]\s*$/, '').trim(),
       start_time: formatTimestamp(startSeconds),
       start_seconds: startSeconds,
       end_time: formatTimestamp(endSeconds),
       end_seconds: endSeconds,
       chapter_summary: summary,
       knowledge_points: knowledgePoints,
+      alignment_status: parseAlignmentStatus(section.body),
+      source_content: sourceContent,
     }
   })
 }

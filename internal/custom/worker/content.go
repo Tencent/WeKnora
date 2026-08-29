@@ -246,7 +246,7 @@ func (h *GraphHandler) JobType() string { return skill.JobGraph }
 // 流程：
 //  1. 尝试调 extract-video-knowledge skill（Agent 对话模式）；
 //     若成功但 1 分钟内没有检索到 knowledge_base 新产物，则任务失败
-//  2. 回写 knowledge_base_wiki_page_id，不触发 outline/overview/summary
+//  2. 回写 knowledge_base_wiki_page_id，不触发 outline/summary
 func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
 	contract, _ := skill.Contract(skill.JobGraph)
 	knowledgeIDs, err := h.transcriptKnowledgeIDs(ctx, job, video)
@@ -286,14 +286,6 @@ type OutlineHandler struct{ BaseSkillHandler }
 func (h *OutlineHandler) JobType() string { return skill.JobOutline }
 func (h *OutlineHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
 	return h.BaseSkillHandler.run(ctx, job, video, skill.JobOutline)
-}
-
-// OverviewHandler summarize-transcript-content
-type OverviewHandler struct{ BaseSkillHandler }
-
-func (h *OverviewHandler) JobType() string { return skill.JobOverview }
-func (h *OverviewHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
-	return h.BaseSkillHandler.run(ctx, job, video, skill.JobOverview)
 }
 
 // SummaryHandler generate-typed-transcript-summary

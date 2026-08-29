@@ -69,7 +69,7 @@ func (h *VideoHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
-// Detail 视频详情：完整元数据 + 内容产物状态（5 个 wiki_page_id 是否已生成）
+// Detail 视频详情：完整元数据 + 内容产物状态
 func (h *VideoHandler) Detail(c *gin.Context) {
 	id := c.Param("id")
 	var v model.Video
@@ -87,7 +87,6 @@ func (h *VideoHandler) Detail(c *gin.Context) {
 		"content_status": map[string]bool{
 			"knowledge_base":  v.KnowledgeBaseWikiPageID != "",
 			"outline":         v.OutlineWikiPageID != "",
-			"overview":        v.OverviewWikiPageID != "",
 			"summary":         v.SummaryWikiPageID != "",
 			"transcript_page": v.TranscriptPageWikiPageID != "",
 		},

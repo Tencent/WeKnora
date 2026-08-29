@@ -40,7 +40,7 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 	if h.LLM == nil || h.WeKnora == nil || h.Wiki == nil || h.Orchestrator == nil {
 		return fmt.Errorf("direct content handler dependencies are not configured")
 	}
-	if h.Job != skill.JobOutline && h.Job != skill.JobOverview && h.Job != skill.JobSummary && h.Job != skill.JobSummaryEnhance {
+	if h.Job != skill.JobOutline && h.Job != skill.JobSummary && h.Job != skill.JobSummaryEnhance {
 		return fmt.Errorf("unsupported direct content job: %s", h.Job)
 	}
 	if h.Job == skill.JobSummary || h.Job == skill.JobSummaryEnhance {
@@ -178,8 +178,6 @@ func buildDirectContentPrompt(video *model.Video, jobType string, chunks []trans
 	switch jobType {
 	case skill.JobOutline:
 		builder.WriteString("任务：生成章节大纲。每章包含标题、时间范围、核心内容、关键知识点和可定位的分块引用。\n")
-	case skill.JobOverview:
-		builder.WriteString("任务：生成 150 到 300 个汉字的快速概览，说明主题、主要推进和适合继续学习的方向。\n")
 	case skill.JobSummary:
 		builder.WriteString("任务：生成类型化智能总结。视频类型决定组织方式，但不能虚构模板字段；缺少证据时明确说明。\n")
 	case skill.JobSummaryEnhance:
@@ -203,7 +201,6 @@ func fallbackTitle(title, videoTitle, jobType string) string {
 	}
 	labels := map[string]string{
 		skill.JobOutline:        "大纲",
-		skill.JobOverview:       "概览",
 		skill.JobSummary:        "知识总结",
 		skill.JobSummaryEnhance: "知识总结",
 	}

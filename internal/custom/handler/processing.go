@@ -28,7 +28,6 @@ var processingStageOrder = []string{
 	"subtitle_generate",
 	"index",
 	"outline",
-	"overview",
 	"summary",
 	"assemble",
 	"graph",
@@ -42,7 +41,6 @@ var retryableProcessingStages = map[string]bool{
 	"graph":             true,
 	"summary_enhance":   true,
 	"outline":           true,
-	"overview":          true,
 	"summary":           true,
 	"assemble":          true,
 }
@@ -415,8 +413,6 @@ func stageArtifactAvailable(video model.Video, job model.VideoProcessingJob) boo
 		return strings.TrimSpace(video.SummaryWikiPageID) != ""
 	case "outline":
 		return strings.TrimSpace(video.OutlineWikiPageID) != ""
-	case "overview":
-		return strings.TrimSpace(video.OverviewWikiPageID) != ""
 	case "summary":
 		return strings.TrimSpace(video.SummaryWikiPageID) != ""
 	case "assemble":
@@ -445,14 +441,12 @@ func missingStageArtifactError(jobType string) (string, string, string) {
 
 func hasReadableContentReferences(video model.Video) bool {
 	return strings.TrimSpace(video.OutlineWikiPageID) != "" &&
-		strings.TrimSpace(video.OverviewWikiPageID) != "" &&
 		strings.TrimSpace(video.SummaryWikiPageID) != "" &&
 		strings.TrimSpace(video.TranscriptPageWikiPageID) != ""
 }
 
 func foundationArtifactsReady(video model.Video) bool {
 	return strings.TrimSpace(video.OutlineWikiPageID) != "" &&
-		strings.TrimSpace(video.OverviewWikiPageID) != "" &&
 		strings.TrimSpace(video.SummaryWikiPageID) != ""
 }
 

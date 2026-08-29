@@ -9,7 +9,6 @@ export interface RelatedKnowledgeContent {
 
 export interface VideoContentState {
   outline: ContentState<Chapter[]>
-  overview: ContentState<string>
   summary: ContentState<SummarySection[]>
   relatedKnowledge: ContentState<RelatedKnowledgeContent>
   transcriptPage: ContentState<string>
@@ -27,7 +26,6 @@ export const emptyRelatedKnowledge: RelatedKnowledgeContent = {
 export function createLoadingContentState(): VideoContentState {
   return {
     outline: { status: 'loading', data: [] },
-    overview: { status: 'loading', data: '' },
     summary: { status: 'loading', data: [] },
     relatedKnowledge: { status: 'loading', data: emptyRelatedKnowledge },
     transcriptPage: { status: 'loading', data: '' },
@@ -36,7 +34,6 @@ export function createLoadingContentState(): VideoContentState {
 
 export function createLoadingContentModuleState(module: VideoContentModule): VideoContentState[VideoContentModule] {
   if (module === 'outline') return { status: 'loading', data: [] }
-  if (module === 'overview') return { status: 'loading', data: '' }
   if (module === 'summary') return { status: 'loading', data: [] }
   if (module === 'relatedKnowledge') return { status: 'loading', data: emptyRelatedKnowledge }
   return { status: 'loading', data: '' }
@@ -44,7 +41,6 @@ export function createLoadingContentModuleState(module: VideoContentModule): Vid
 
 export function contentModuleForStage(stage: string): VideoContentModule | 'all' | null {
   if (stage === 'outline') return 'outline'
-  if (stage === 'overview') return 'overview'
   if (stage === 'summary') return 'summary'
   if (stage === 'graph') return 'relatedKnowledge'
   if (stage === 'related_knowledge') return 'relatedKnowledge'
@@ -96,12 +92,10 @@ export function buildVideoContentState(
   outline: PromiseSettledResult<Chapter[]>,
   summary: PromiseSettledResult<{ sections: SummarySection[] }>,
   relatedKnowledge: PromiseSettledResult<RelatedKnowledgeContent>,
-  overview: PromiseSettledResult<string> = { status: 'fulfilled', value: '' },
   transcriptPage: PromiseSettledResult<string> = { status: 'fulfilled', value: '' },
 ): VideoContentState {
   return {
     outline: settleContentState(outline, [], data => data.length === 0),
-    overview: settleContentState(overview, '', data => data.trim().length === 0),
     summary: summary.status === 'fulfilled'
       ? { status: summary.value.sections.length === 0 ? 'empty' : 'ready', data: summary.value.sections }
       : settleContentState(summary, [], () => true),

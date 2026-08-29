@@ -9,19 +9,24 @@
       <template #action><t-button size="small" variant="outline" @click="load">刷新</t-button></template>
     </t-empty>
     <div v-else class="chapters__list">
-      <article v-for="chapter in chapters" :key="chapter.id" :ref="el => setChapterRef(chapter.id, el)" :class="['chapter', { 'chapter--active': chapter.id === activeChapterId }]">
+      <article v-for="chapter in chapters" :key="chapter.id" :ref="el => setChapterRef(chapter.id, el)" :class="['chapter', { 'chapter--active': chapter.id === activeChapterId, 'chapter--pending': chapter.alignment_status === 'pending_alignment' }]">
         <button class="chapter__main" type="button" @click="$emit('seek', chapter.start_seconds)">
           <span class="chapter__index">{{ chapter.chapter_index }}</span>
           <span class="chapter__content">
             <strong>{{ chapter.chapter_title }}</strong>
             <small>{{ chapter.start_time }} – {{ chapter.end_time }}</small>
-            <span>{{ chapter.chapter_summary }}</span>
+            <span v-if="chapter.chapter_summary" class="chapter__summary">
+              <em>本章核心内容</em>
+              {{ chapter.chapter_summary }}
+            </span>
           </span>
+          <span v-if="chapter.alignment_status === 'pending_alignment'" class="chapter__alignment" title="章节时间待校准">待校准</span>
           <span v-if="chapter.id === activeChapterId" class="chapter__wave" aria-label="当前播放章节"><i /><i /><i /></span>
         </button>
-        <div class="chapter__points">
-          <button v-for="point in chapter.knowledge_points" :key="point.id" type="button" @click="$emit('seek', point.seconds)">
-            <span>{{ point.timestamp }}</span>{{ point.title }}
+        <div v-if="chapter.knowledge_points.length" class="chapter__points" aria-label="关键知识点">
+          <button v-for="point in chapter.knowledge_points" :key="point.id" :class="['chapter__point', { 'chapter__point--active': point.id === activeKnowledgePointId }]" type="button" @click="$emit('seek', point.seconds)">
+            <span class="chapter__point-title">{{ point.title }}</span>
+            <span class="chapter__point-time">{{ point.timestamp }}</span>
           </button>
         </div>
       </article>
@@ -42,6 +47,14 @@ const error = computed(() => props.contentState.status === 'error' ? props.conte
 const notGenerated = computed(() => props.contentState.status === 'not_generated')
 const chapterRefs = new Map<string, HTMLElement>()
 const activeChapterId = computed(() => chapters.value.find(chapter => props.currentSeconds >= chapter.start_seconds && props.currentSeconds < chapter.end_seconds)?.id)
+const activeKnowledgePointId = computed(() => {
+  const activeChapter = chapters.value.find(chapter => chapter.id === activeChapterId.value)
+  if (!activeChapter) return undefined
+  return activeChapter.knowledge_points.reduce<string | undefined>((activeId, point) => {
+    if (point.seconds <= props.currentSeconds) return point.id
+    return activeId
+  }, undefined)
+})
 
 function load() { emit('reload') }
 
@@ -68,15 +81,20 @@ watch(() => props.video.id, () => chapterRefs.clear())
 .chapter::before { position: absolute; inset: 0 auto 0 0; width: 3px; border-radius: var(--td-radius-round); background: transparent; content: ''; }
 .chapter--active { background: var(--td-brand-color-light); }
 .chapter--active::before { background: var(--td-brand-color); }
-.chapter__main { width: 100%; display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; padding: 12px; border: 0; background: transparent; color: var(--td-text-color-primary); text-align: left; cursor: pointer; }
+.chapter__main { width: 100%; display: grid; grid-template-columns: 28px 1fr auto auto; gap: 8px; padding: 12px; border: 0; background: transparent; color: var(--td-text-color-primary); text-align: left; cursor: pointer; }
 .chapter__index { color: var(--td-brand-color); font-weight: 600; }
 .chapter__content { display: grid; gap: 4px; }
 .chapter__content strong { font-size: 14px; font-weight: 600; line-height: 1.57; }
 .chapter__content small, .chapter__content > span { color: var(--td-text-color-secondary); font-size: 12px; line-height: 1.67; }
+.chapter__summary { display: grid; gap: 2px; }
+.chapter__summary em { color: var(--td-text-color-primary); font-size: 11px; font-style: normal; font-weight: 600; }
+.chapter__alignment { align-self: start; color: var(--td-error-color); font-size: 11px; line-height: 1.67; white-space: nowrap; }
 .chapter__points { display: grid; gap: 2px; padding: 0 12px 12px 48px; }
-.chapter__points button { padding: 6px 8px; border: 0; border-radius: var(--td-radius-medium); background: transparent; color: var(--td-text-color-secondary); font-size: 12px; line-height: 1.67; text-align: left; cursor: pointer; }
-.chapter__points button:hover { background: var(--td-bg-color-component-hover); color: var(--td-text-color-primary); }
-.chapter__points span { display: inline-block; margin-right: 8px; color: var(--td-brand-color); font-size: 12px; font-weight: 600; }
+.chapter__point { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 6px 8px; border: 0; border-radius: var(--td-radius-medium); background: transparent; color: var(--td-text-color-secondary); font-size: 12px; line-height: 1.67; text-align: left; cursor: pointer; }
+.chapter__point:hover, .chapter__point--active { background: var(--td-bg-color-component-hover); color: var(--td-text-color-primary); }
+.chapter__point--active { box-shadow: inset 2px 0 var(--td-brand-color); }
+.chapter__point-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.chapter__point-time { flex: 0 0 auto; color: var(--td-brand-color); font-size: 12px; font-weight: 600; }
 .chapter__wave { height: 18px; display: flex; align-items: center; gap: 2px; }
 .chapter__wave i { width: 2px; height: 7px; border-radius: var(--td-radius-round); background: var(--td-brand-color); animation: wave .8s ease-in-out infinite alternate; }
 .chapter__wave i:nth-child(2) { animation-delay: .2s; }.chapter__wave i:nth-child(3) { animation-delay: .4s; }

@@ -42,7 +42,7 @@ func TestEnqueueContentPipelinePersistsCurrentTranscriptManifest(t *testing.T) {
 
 	var jobs []model.VideoProcessingJob
 	require.NoError(t, db.Where("video_id = ?", video.ID).Order("job_type ASC").Find(&jobs).Error)
-	require.Len(t, jobs, 4)
+	require.Len(t, jobs, 3)
 	for _, job := range jobs {
 		require.Contains(t, job.InputPayload, "knowledge-1")
 		require.Contains(t, job.InputPayload, "knowledge-2")
@@ -361,7 +361,7 @@ func TestJobContractsCoverParallelPipeline(t *testing.T) {
 }
 
 func TestProviderForJobSeparatesDirectLLMAndAgentJobs(t *testing.T) {
-	for _, jobType := range []string{JobOutline, JobOverview, JobSummary, JobSummaryEnhance} {
+	for _, jobType := range []string{JobOutline, JobSummary, JobSummaryEnhance} {
 		require.Equal(t, "llm", providerForJob(jobType))
 	}
 	require.Equal(t, "weknora", providerForJob(JobGraph))

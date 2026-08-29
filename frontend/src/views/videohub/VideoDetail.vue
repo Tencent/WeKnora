@@ -26,7 +26,6 @@
         <div class="video-detail-page__layout">
           <section class="video-detail-page__left">
             <VideoPlayer ref="player" :src="video.play_url || video.video_url" :poster="video.cover_url || video.poster_url" :duration-hint="video.durationSeconds" :subtitles="video.subtitles" @timeupdate="currentSeconds = $event" />
-            <OverviewContent :content-state="content.overview" @reload="reloadOverview" />
             <ChapterNavigation :video="video" :current-seconds="currentSeconds" :content-state="content.outline" @reload="reloadOutline" @seek="seekTo" />
           </section>
           <aside class="video-detail-page__right">
@@ -55,7 +54,6 @@ import AiAssistant from '@/components/videohub/AiAssistant.vue'
 import SmartSummary from '@/components/videohub/SmartSummary.vue'
 import RelatedKnowledge from '@/components/videohub/RelatedKnowledge.vue'
 import ProcessingStatus from '@/components/videohub/ProcessingStatus.vue'
-import OverviewContent from '@/components/videohub/OverviewContent.vue'
 import TranscriptPageContent from '@/components/videohub/TranscriptPageContent.vue'
 
 const route = useRoute()
@@ -74,7 +72,7 @@ const importingTranscript = ref(false)
 const content = ref<VideoContentState>(createLoadingContentState())
 let loadSequence = 0
 let contentSequence = 0
-const moduleSequences: Record<VideoContentModule, number> = { outline: 0, overview: 0, summary: 0, relatedKnowledge: 0, transcriptPage: 0 }
+const moduleSequences: Record<VideoContentModule, number> = { outline: 0, summary: 0, relatedKnowledge: 0, transcriptPage: 0 }
 const isPlayable = computed(() => Boolean(video.value && isVideoInitiallyAvailable({
   status: video.value.status,
   file_url: video.value.video_url,
@@ -194,7 +192,6 @@ function reloadContentModule(module: VideoContentModule) {
   if (video.value) void refreshContentModule(module, video.value)
 }
 function reloadOutline() { reloadContentModule('outline') }
-function reloadOverview() { reloadContentModule('overview') }
 function reloadSummary() { reloadContentModule('summary') }
 function reloadRelatedKnowledge() { reloadContentModule('relatedKnowledge') }
 function reloadTranscriptPage() { reloadContentModule('transcriptPage') }

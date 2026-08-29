@@ -8,6 +8,17 @@ export interface KnowledgePoint {
   transcriptSnippet?: string
 }
 
+export type ChapterAlignmentStatus = 'verified' | 'aligned' | 'pending_alignment'
+
+export interface ChapterSourceSegment {
+  speaker: string
+  start_time: string
+  start_seconds: number
+  end_time: string
+  end_seconds: number
+  content: string
+}
+
 export interface Chapter {
   id: string
   chapter_index: string
@@ -18,6 +29,8 @@ export interface Chapter {
   end_seconds: number
   chapter_summary: string
   knowledge_points: KnowledgePoint[]
+  alignment_status?: ChapterAlignmentStatus
+  source_content?: ChapterSourceSegment[]
 }
 
 export interface SubtitleCue {

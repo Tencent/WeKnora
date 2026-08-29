@@ -136,7 +136,6 @@ func main() {
 			handlers = append(handlers,
 				&worker.GraphHandler{BaseSkillHandler: base},
 				worker.NewDirectContentHandler(db, llmCli, weknoraCli, wikiClient, orchestrator, skill.JobOutline),
-				worker.NewDirectContentHandler(db, llmCli, weknoraCli, wikiClient, orchestrator, skill.JobOverview),
 				worker.NewDirectContentHandler(db, llmCli, weknoraCli, wikiClient, orchestrator, skill.JobSummary),
 				worker.NewDirectContentHandler(db, llmCli, weknoraCli, wikiClient, orchestrator, skill.JobSummaryEnhance),
 			)

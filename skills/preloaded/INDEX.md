@@ -38,7 +38,6 @@ description: 视频内容生产 Skill 索引。先读取本文件，再按任务
 |---|---|---|---|
 | `extract-video-knowledge` | 提取实体、方法、案例、概念和洞察 | WeKnora Agent + 工具 | Wiki 知识页面 |
 | `generate-transcript-outline` | 生成章节导航 | 后端 + LLM | 结构化大纲 |
-| `summarize-transcript-content` | 生成快速概览 | 后端 + LLM | 结构化概览 |
 | `generate-typed-transcript-summary` | 生成类型化总结 | 后端 + LLM | 结构化总结 |
 
 ## 渐进式读取

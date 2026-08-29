@@ -4,8 +4,8 @@
 //   - skill 完成后由各 worker handler 调 AfterSkillComplete
 //   - AfterSkillComplete 找到该视频「新生成的」wiki 页（按 frontmatter.type 过滤），
 //     回写 videos 表（CP-T006）
-//   - outline/overview/summary/graph are independently triggered by transcript activation
-//   - assemble is scheduled only after the three foundation artifacts exist
+//   - outline/summary/graph are independently triggered by transcript activation
+//   - assemble is scheduled only after the two foundation artifacts exist
 package skill
 
 import (
@@ -57,7 +57,7 @@ func (o *Orchestrator) EnqueueContentPipeline(ctx context.Context, videoID strin
 		if err != nil {
 			return err
 		}
-		for _, jobType := range []string{JobGraph, JobOutline, JobOverview, JobSummary} {
+		for _, jobType := range []string{JobGraph, JobOutline, JobSummary} {
 			jobID, err := o.enqueueJob(ctx, tx, videoID, jobType)
 			if err != nil {
 				return fmt.Errorf("enqueue %s job: %w", jobType, err)
@@ -198,7 +198,7 @@ func (o *Orchestrator) enqueueJob(ctx context.Context, db *gorm.DB, videoID, job
 
 func providerForJob(jobType string) string {
 	switch jobType {
-	case JobOutline, JobOverview, JobSummary, JobSummaryEnhance:
+	case JobOutline, JobSummary, JobSummaryEnhance:
 		return "llm"
 	default:
 		return "weknora"
@@ -337,7 +337,7 @@ func (o *Orchestrator) isWikiPageReadable(ctx context.Context, candidate weknora
 
 // AfterSkillComplete skill 完成后：找新 wiki 页 → 回写 videos。
 //
-//   - expectedFrontmatterType: 例如 "knowledge_base" / "outline" / "overview" 等
+//   - expectedFrontmatterType: 例如 "knowledge_base" / "outline" 等
 //
 // 基础内容全部完成后，才会返回待组装的 job_id。
 func (o *Orchestrator) AfterSkillComplete(ctx context.Context, videoID, jobType string) (wikiPageID string, nextJobID string, err error) {
@@ -455,12 +455,12 @@ func (o *Orchestrator) AfterSkillCompleteWithID(ctx context.Context, videoID, jo
 				return fmt.Errorf("persist knowledge audit status: %w", err)
 			}
 		}
-		if jobType == JobOutline || jobType == JobOverview || jobType == JobSummary {
+		if jobType == JobOutline || jobType == JobSummary {
 			var updated model.Video
 			if err := tx.First(&updated, "id = ?", videoID).Error; err != nil {
 				return fmt.Errorf("reload foundation artifacts: %w", err)
 			}
-			if updated.OutlineWikiPageID != "" && updated.OverviewWikiPageID != "" && updated.SummaryWikiPageID != "" {
+			if updated.OutlineWikiPageID != "" && updated.SummaryWikiPageID != "" {
 				var err error
 				nextJobID, err = o.enqueueJob(ctx, tx, videoID, JobAssemble)
 				if err != nil {
@@ -494,8 +494,7 @@ func (o *Orchestrator) AfterSkillCompleteWithID(ctx context.Context, videoID, jo
 			if err := tx.First(&video, "id = ?", videoID).Error; err != nil {
 				return fmt.Errorf("reload assembled video: %w", err)
 			}
-			if video.OutlineWikiPageID == "" || video.OverviewWikiPageID == "" ||
-				video.SummaryWikiPageID == "" || video.TranscriptPageWikiPageID == "" {
+			if video.OutlineWikiPageID == "" || video.SummaryWikiPageID == "" || video.TranscriptPageWikiPageID == "" {
 				return fmt.Errorf("incomplete content artifacts after assemble")
 			}
 			if err := tx.Model(&video).Updates(map[string]any{

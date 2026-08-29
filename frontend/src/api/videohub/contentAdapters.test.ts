@@ -13,6 +13,7 @@ type: outline
 
 ## 关键决策
 - 时间：\`00:58:30–01:02:15\`
+- 对齐状态：\`verified\`
 
 ### 本章核心内容
 讲者解释跨小时决策过程。
@@ -31,6 +32,15 @@ type: outline
   assert.equal(chapters[0].end_seconds, 3735)
   assert.equal(chapters[0].knowledge_points[0].seconds, 3550)
   assert.equal(chapters[0].knowledge_points[0].transcriptSnippet, '这里是关键证据。')
+  assert.equal(chapters[0].alignment_status, 'verified')
+  assert.deepEqual(chapters[0].source_content, [{
+    speaker: '讲者',
+    start_time: '59:10',
+    start_seconds: 3550,
+    end_time: '59:30',
+    end_seconds: 3570,
+    content: '这里是关键证据。',
+  }])
 })
 
 test('summary uses only real headings without filling template placeholders', () => {
@@ -100,7 +110,7 @@ test('keeps cross-video-only responses visible', () => {
 })
 
 test('real content adapters do not import MOCK_VIDEOS', () => {
-  for (const filename of ['summary.ts', 'relatedKnowledge.ts']) {
+  for (const filename of ['outline.ts', 'summary.ts', 'relatedKnowledge.ts', 'transcriptPage.ts']) {
     const source = readFileSync(new URL(filename, import.meta.url), 'utf8')
     assert.equal(source.includes('MOCK_VIDEOS'), false, `${filename} still reads mock data`)
   }
@@ -129,7 +139,7 @@ test('content loader distinguishes not generated artifacts from failures', () =>
 
 test('maps completed processing stages to local content modules', () => {
   assert.equal(contentModuleForStage('outline'), 'outline')
-  assert.equal(contentModuleForStage('overview'), 'overview')
+  assert.equal(contentModuleForStage('overview'), null)
   assert.equal(contentModuleForStage('summary'), 'summary')
   assert.equal(contentModuleForStage('graph'), 'relatedKnowledge')
   assert.equal(contentModuleForStage('assemble'), 'all')
@@ -152,6 +162,14 @@ test('emits a processing stage only when it newly succeeds', () => {
 test('outline parser clamps an overlong final chapter to video duration', () => {
   const chapters = parseOutlineWikiPage('## 最后一章\n时间：58:00–1:20:00\n\n### 本章核心内容\n内容', 3600)
   assert.equal(chapters[0].end_seconds, 3600)
+})
+
+test('outline parser supports legacy title ranges and defaults missing alignment to pending', () => {
+  const chapters = parseOutlineWikiPage('## 第一章：视频引入（00:00 - 00:41）\n\n### 本章核心内容\n内容\n\n### 关键知识点\n- 关键观察（00:12）')
+  assert.equal(chapters[0].chapter_title, '第一章：视频引入')
+  assert.equal(chapters[0].start_time, '00:00')
+  assert.equal(chapters[0].end_time, '00:41')
+  assert.equal(chapters[0].alignment_status, 'pending_alignment')
 })
 
 test('timestamp parser rejects invalid minute and second fields', () => {

@@ -1,7 +1,6 @@
 import { fetchOutline } from './outline'
 import { fetchRelatedKnowledge } from './relatedKnowledge'
 import { fetchSummary } from './summary'
-import { fetchOverview } from './overview'
 import { fetchTranscriptPage } from './transcriptPage'
 import { buildVideoContentState, emptyRelatedKnowledge, settleContentState, type VideoContentModule, type VideoContentState } from './contentState'
 import type { VideoCategory } from '@/types/videohub'
@@ -18,10 +17,6 @@ export async function fetchVideoContentModule(
   if (module === 'outline') {
     const result = await Promise.allSettled([fetchOutline(videoId, durationSeconds)])
     return settleContentState(result[0], [], data => data.length === 0)
-  }
-  if (module === 'overview') {
-    const result = await Promise.allSettled([fetchOverview(videoId)])
-    return settleContentState(result[0], '', data => data.trim().length === 0)
   }
   if (module === 'summary') {
     const result = await Promise.allSettled([fetchSummary(videoId, category)])
@@ -43,13 +38,12 @@ export async function fetchVideoContent(
   durationSeconds: number,
   category: VideoCategory,
 ): Promise<VideoContentState> {
-  const [outline, overview, summary, relatedKnowledge, transcriptPage] = await Promise.allSettled([
+  const [outline, summary, relatedKnowledge, transcriptPage] = await Promise.allSettled([
     fetchOutline(videoId, durationSeconds),
-    fetchOverview(videoId),
     fetchSummary(videoId, category),
     fetchRelatedKnowledge(videoId),
     fetchTranscriptPage(videoId),
   ])
 
-  return buildVideoContentState(outline, summary, relatedKnowledge, overview, transcriptPage)
+  return buildVideoContentState(outline, summary, relatedKnowledge, transcriptPage)
 }

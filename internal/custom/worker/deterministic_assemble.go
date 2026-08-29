@@ -37,10 +37,6 @@ func (h *DeterministicAssembleHandler) Run(ctx context.Context, job *model.Video
 	if generation == "" || generation != strings.TrimSpace(video.TranscriptGeneration) {
 		return fmt.Errorf("视频 %s 的转写代次不可用或已过期", video.ID)
 	}
-	overview, err := h.readCurrentPage(ctx, video.OverviewWikiPageID, generation)
-	if err != nil {
-		return fmt.Errorf("read overview page: %w", err)
-	}
 	outline, err := h.readCurrentPage(ctx, video.OutlineWikiPageID, generation)
 	if err != nil {
 		return fmt.Errorf("read outline page: %w", err)
@@ -56,7 +52,7 @@ func (h *DeterministicAssembleHandler) Run(ctx context.Context, job *model.Video
 		}
 	}
 
-	content := composeTranscriptPage(video.Title, video.ID, generation, overview.Content, outline.Content, summary.Content, knowledge)
+	content := composeTranscriptPage(video.Title, video.ID, generation, outline.Content, summary.Content, knowledge)
 	page, err := h.Wiki.UpsertPage(ctx, h.KBID, weknora.WikiPageWrite{
 		Slug:     "transcript-page/" + video.ID,
 		Title:    video.Title,
@@ -97,8 +93,8 @@ func (h *DeterministicAssembleHandler) readCurrentPage(ctx context.Context, page
 	return page, nil
 }
 
-func composeTranscriptPage(title, videoID, generation, overview, outline, summary, knowledge string) string {
-	return fmt.Sprintf("---\ntype: transcript_page\nsource_video_id: %s\ntranscript_generation: %s\n---\n\n# %s\n\n## 快速概览\n\n%s\n\n## 语义时间轴\n\n当前页面内容均绑定转写代次 `%s`，视频引用以转写分块和时间范围为准。\n\n## 内容大纲\n\n%s\n\n## 智能总结\n\n%s\n\n## 相关知识\n\n%s\n\n## 相关文字稿与学习路径\n\n请先通过内容大纲定位章节，再通过智能总结深入学习；需要核对事实时回到对应转写分块。\n\n## 证据与质量说明\n\n本页由后端按已读取的内容产物确定性组装，视频 ID 为 `%s`。\n", videoID, generation, strings.TrimSpace(title), stripFrontmatter(overview), stripFrontmatter(outline), stripFrontmatter(summary), strings.TrimSpace(knowledge), generation, videoID)
+func composeTranscriptPage(title, videoID, generation, outline, summary, knowledge string) string {
+	return fmt.Sprintf("---\ntype: transcript_page\nsource_video_id: %s\ntranscript_generation: %s\n---\n\n# %s\n\n## 语义时间轴\n\n当前页面内容均绑定转写代次 `%s`，视频引用以转写分块和时间范围为准。\n\n## 内容大纲\n\n%s\n\n## 智能总结\n\n%s\n\n## 相关知识\n\n%s\n\n## 相关文字稿与学习路径\n\n请先通过内容大纲定位章节，再通过智能总结深入学习；需要核对事实时回到对应转写分块。\n\n## 证据与质量说明\n\n本页由后端按已读取的内容产物确定性组装，视频 ID 为 `%s`。\n", videoID, generation, strings.TrimSpace(title), generation, stripFrontmatter(outline), stripFrontmatter(summary), strings.TrimSpace(knowledge), videoID)
 }
 
 func stripFrontmatter(content string) string {

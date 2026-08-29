@@ -64,7 +64,7 @@ type VideoTranscriptChunk struct {
 type VideoProcessingJob struct {
 	ID                   string     `gorm:"type:varchar(36);primaryKey" json:"id"`
 	VideoID              string     `gorm:"type:varchar(36);index:idx_video_job_status,priority:1;index:idx_video_job_generation,priority:1" json:"video_id"`
-	JobType              string     `gorm:"type:varchar(50);index:idx_video_job_status,priority:2;index:idx_video_job_generation,priority:2" json:"job_type"` // thumbnail/transcription/subtitle_generate/index/graph/outline/overview/summary/summary_enhance/assemble
+	JobType              string     `gorm:"type:varchar(50);index:idx_video_job_status,priority:2;index:idx_video_job_generation,priority:2" json:"job_type"` // thumbnail/transcription/subtitle_generate/index/graph/outline/summary/summary_enhance/assemble
 	TranscriptGeneration string     `gorm:"type:varchar(64);index:idx_video_job_generation,priority:3" json:"transcript_generation"`
 	Provider             string     `gorm:"type:varchar(50)" json:"provider"` // local/aliyun_tingwu/weknora
 	ExternalTaskID       string     `gorm:"type:varchar(128);index" json:"external_task_id"`
