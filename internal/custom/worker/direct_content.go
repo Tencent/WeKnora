@@ -174,10 +174,12 @@ func (h *DirectContentHandler) addEnhancementContext(ctx context.Context, video 
 
 func buildDirectContentPrompt(video *model.Video, jobType string, chunks []transcript.Chunk) (string, error) {
 	var builder strings.Builder
-	builder.WriteString("你是视频内容生产模型。只能依据给定转写生成结果，不得补充转写中没有的事实。请只返回 JSON，字段为 title、summary、content。content 使用 Markdown。\n")
+	builder.WriteString("你是视频内容生产模型。只能依据给定转写生成结果，不得补充转写中没有的事实。请只返回一个 JSON 对象，字段为 title、summary、content；不要输出 Markdown 代码围栏、解释文字、HTML 或 XML。content 使用 Markdown。\n")
 	switch jobType {
 	case skill.JobOutline:
-		builder.WriteString("任务：生成章节大纲。每章包含标题、时间范围、核心内容、关键知识点和可定位的分块引用。\n")
+		builder.WriteString("任务：生成章节导航。content 必须按以下结构输出：每章使用二级标题；章节标题后写“时间：HH:MM:SS–HH:MM:SS”；使用“### 本章核心内容”和“### 关键知识点”两个三级标题；知识点使用列表项，并在每项末尾写一个可定位的时间戳。\n")
+		builder.WriteString("章节必须覆盖完整视频且按时间顺序排列。每章默认只保留 1～2 个全片关键知识点，只有存在独立结论、方法或动作时才增加，最多 3 个；全片优先控制在 8～16 个，不得为了覆盖每句转写而切碎。合并同义观点、例子和论据。\n")
+		builder.WriteString("知识点标题必须是 4～10 个汉字或 2～5 个英文单词的短语/结论式短标题，使用“方法名”“动作+对象”或“核心结论”结构，不写完整句。核心内容写成一段能独立理解的概括。可在“### 原文”下保留少量可追溯原文，但不得把原文当作知识点，也不得用原文替代核心内容。\n")
 	case skill.JobSummary:
 		builder.WriteString("任务：生成类型化智能总结。视频类型决定组织方式，但不能虚构模板字段；缺少证据时明确说明。\n")
 	case skill.JobSummaryEnhance:

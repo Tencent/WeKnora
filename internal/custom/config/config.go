@@ -173,7 +173,7 @@ func Load() *Config {
 			BaseURL:        getEnv("CUSTOM_LLM_BASE_URL", ""),
 			APIKey:         getEnv("CUSTOM_LLM_API_KEY", ""),
 			Model:          getEnv("CUSTOM_LLM_MODEL", ""),
-			PromptVersion:  getEnv("CUSTOM_LLM_PROMPT_VERSION", "direct-content-v1"),
+			PromptVersion:  getEnv("CUSTOM_LLM_PROMPT_VERSION", "direct-content-v2"),
 			TimeoutSeconds: getEnvInt("CUSTOM_LLM_TIMEOUT_SECONDS", 180),
 			MaxTokens:      getEnvInt("CUSTOM_LLM_MAX_TOKENS", 8192),
 		},
