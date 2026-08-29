@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,7 +13,9 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/outline"
 )
 
 const (
@@ -96,11 +99,23 @@ type ProcessingStatusResponse struct {
 }
 
 type ProcessingHandler struct {
-	DB *gorm.DB
+	DB   *gorm.DB
+	Wiki *weknora.WikiClient
+	KBID string
 }
 
-func NewProcessingHandler(db *gorm.DB) *ProcessingHandler {
-	return &ProcessingHandler{DB: db}
+type ProcessingDependencies struct {
+	Wiki *weknora.WikiClient
+	KBID string
+}
+
+func NewProcessingHandler(db *gorm.DB, dependencies ...ProcessingDependencies) *ProcessingHandler {
+	handler := &ProcessingHandler{DB: db}
+	if len(dependencies) > 0 {
+		handler.Wiki = dependencies[0].Wiki
+		handler.KBID = dependencies[0].KBID
+	}
+	return handler
 }
 
 func (h *ProcessingHandler) Status(c *gin.Context) {
@@ -145,7 +160,7 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 			}
 			retried = recreatedJob
 			recreated = true
-		} else if retried.Status == "succeeded" && stageArtifactAvailable(video, retried) {
+		} else if retried.Status == "succeeded" && h.stageArtifactAvailable(c.Request.Context(), video, retried) {
 			return errStageAlreadySucceeded
 		} else if retried.Status == "pending" || retried.Status == "running" {
 			return errStageInProgress
@@ -186,6 +201,33 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"job_id": retried.ID, "job_type": retried.JobType, "status": "pending", "reused": !recreated})
+}
+
+func (h *ProcessingHandler) stageArtifactAvailable(ctx context.Context, video model.Video, job model.VideoProcessingJob) bool {
+	if job.JobType != "outline" || h.Wiki == nil || strings.TrimSpace(h.KBID) == "" {
+		return stageArtifactAvailable(video, job)
+	}
+	if strings.TrimSpace(video.OutlineWikiPageID) == "" {
+		return false
+	}
+	page, err := h.Wiki.GetPageByID(ctx, h.KBID, video.OutlineWikiPageID)
+	if err != nil || page == nil || strings.TrimSpace(page.Content) == "" {
+		return false
+	}
+	frontmatter := page.ParsedFrontmatter()
+	actualType, _ := frontmatter["type"].(string)
+	sourceVideoID, _ := frontmatter["source_video_id"].(string)
+	pageGeneration, _ := frontmatter["transcript_generation"].(string)
+	if actualType != "outline" || sourceVideoID != video.ID ||
+		(strings.TrimSpace(video.TranscriptGeneration) != "" && pageGeneration != video.TranscriptGeneration) {
+		return false
+	}
+	document, parseErr := outline.Parse(page.Content)
+	if parseErr != nil {
+		return outline.IsLegacyMarkdown(page.Content)
+	}
+	pageSchemaVersion, ok := frontmatterInt(frontmatter, "schema_version")
+	return ok && pageSchemaVersion == outline.SchemaVersion && outline.Validate(document, video.DurationSeconds, nil) == nil
 }
 
 var errStageAlreadySucceeded = errors.New("processing stage already succeeded")

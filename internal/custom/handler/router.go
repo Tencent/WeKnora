@@ -201,7 +201,7 @@ func buildRouter(deps *Deps) *gin.Engine {
 	vh := NewVideoHandler(deps.DB)
 	api.GET("/videos", vh.List)
 	api.GET("/videos/:id", vh.Detail)
-	ph := NewProcessingHandler(deps.DB)
+	ph := NewProcessingHandler(deps.DB, ProcessingDependencies{Wiki: deps.Wiki, KBID: deps.Cfg.WeKnora.KBID})
 	api.GET("/videos/:id/processing-status", ph.Status)
 	api.POST("/videos/:id/processing-jobs/:jobType/retry", ph.Retry)
 

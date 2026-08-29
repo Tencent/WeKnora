@@ -10,6 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
+	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 )
 
@@ -86,6 +88,43 @@ func TestSummaryEnhancementUsesSummaryArtifact(t *testing.T) {
 	job := model.VideoProcessingJob{JobType: "summary_enhance"}
 	if !stageArtifactAvailable(video, job) {
 		t.Fatal("summary enhancement should be complete when the summary page exists")
+	}
+}
+
+func TestProcessingHandlerRetriesInvalidOutlineArtifact(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/knowledgebase/kb-1/wiki/pages":
+			_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{
+				Pages:      []weknora.WikiPage{{ID: "outline-page", Slug: "outline/video-1"}},
+				Total:      1,
+				Page:       1,
+				PageSize:   100,
+				TotalPages: 1,
+			})
+		case "/api/v1/knowledgebase/kb-1/wiki/pages/outline%2Fvideo-1":
+			_ = json.NewEncoder(writer).Encode(weknora.WikiPage{
+				ID:      "outline-page",
+				Content: "---\ntype: outline\nsource_video_id: video-1\ntranscript_generation: generation-1\n---\n\n...",
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	handler := NewProcessingHandler(nil, ProcessingDependencies{
+		Wiki: weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL}),
+		KBID: "kb-1",
+	})
+	video := model.Video{
+		ID:                   "video-1",
+		OutlineWikiPageID:    "outline-page",
+		TranscriptGeneration: "generation-1",
+	}
+	job := model.VideoProcessingJob{JobType: "outline", Status: "succeeded"}
+	if handler.stageArtifactAvailable(t.Context(), video, job) {
+		t.Fatal("invalid outline artifact must be retryable")
 	}
 }
 
