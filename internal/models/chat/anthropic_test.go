@@ -70,6 +70,25 @@ func TestAnthropicChat(t *testing.T) {
 	assert.Equal(t, 5, resp.Usage.TotalTokens)
 }
 
+func TestAnthropicBuildRequestMergesConsecutiveMessageRoles(t *testing.T) {
+	chat := &AnthropicChat{modelName: "claude-test"}
+
+	req := chat.buildRequest([]Message{
+		{Role: "system", Content: "System rules"},
+		{Role: "user", Content: "Retrieved evidence"},
+		{Role: "user", Content: "User question"},
+		{Role: "assistant", Content: "First answer"},
+		{Role: "assistant", Content: "Second answer"},
+		{Role: "user", Content: "Follow-up"},
+	}, nil)
+
+	require.Equal(t, "System rules", req.System)
+	require.Len(t, req.Messages, 3)
+	assert.Equal(t, anthropicMessage{Role: "user", Content: "Retrieved evidence\n\nUser question"}, req.Messages[0])
+	assert.Equal(t, anthropicMessage{Role: "assistant", Content: "First answer\n\nSecond answer"}, req.Messages[1])
+	assert.Equal(t, anthropicMessage{Role: "user", Content: "Follow-up"}, req.Messages[2])
+}
+
 func TestAnthropicChat_CacheUsage(t *testing.T) {
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
