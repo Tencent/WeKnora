@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/skills"
@@ -20,17 +21,25 @@ var readSkillTool = BaseTool{
 	description: `Read skill content on demand to learn specialized capabilities.
 
 ## Usage
-- Use this tool when a user request matches an available skill's description
-- Provide the skill_name to load the skill's full instructions (SKILL.md content)
-- Optionally provide file_path to read additional files within the skill directory
+- Call ` + "`read_skill(skill_name=...)`" + ` with no ` + "`file_path`" + ` to load
+  SKILL.md **and** the skill's file list (scripts, docs, references).
+  That listing is how you discover ` + "`scripts/generate_ppt.py`" + ` and similar.
+- Then call ` + "`read_skill(skill_name=..., file_path=\"scripts/...\")`" + ` to
+  read one file. ` + "`file_path`" + ` is relative inside the skill, not an
+  absolute ` + "`/opt/weknora/tenant/skills/...`" + ` path.
+- Do NOT use ` + "`list_sandbox_files`" + `, ` + "`read_sandbox_file`" + `, or
+  ` + "`ls`" + ` on the skill install directory. Those tools only see
+  ` + "`/workspace/output`" + ` and ` + "`/workspace/input`" + `; the skill tree also
+  contains ` + "`.venv`" + ` / ` + "`node_modules`" + `.
 
 ## When to Use
 - When the system prompt shows an available skill that matches the user's request
 - Before performing tasks that match a skill's description
-- To read additional documentation or reference files within a skill
+- To list or read documentation, templates, or scripts shipped with a skill
 
 ## Returns
-- Skill instructions and guidance for completing the task
+- Skill instructions, the available file list, and (for installed skills)
+  how to reach that skill's interpreter
 - File content if file_path is specified`,
 	schema: utils.GenerateSchema[ReadSkillInput](),
 }
@@ -38,7 +47,7 @@ var readSkillTool = BaseTool{
 // ReadSkillInput defines the input parameters for the read_skill tool
 type ReadSkillInput struct {
 	SkillName string `json:"skill_name" jsonschema:"Name of the skill to read"`
-	FilePath  string `json:"file_path,omitempty" jsonschema:"Optional relative path to a specific file within the skill directory"`
+	FilePath  string `json:"file_path,omitempty" jsonschema:"Optional relative path inside the skill (e.g. scripts/generate_ppt.py). Omit to load SKILL.md and list files. Do not pass /opt/weknora/tenant/skills/... or /workspace paths."`
 }
 
 // ReadSkillTool allows the agent to read skill content on demand
@@ -89,6 +98,23 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	var resultData = make(map[string]interface{})
 
 	if input.FilePath != "" {
+		rel, err := skillRelativeFilePath(input.SkillName, input.FilePath)
+		if err != nil {
+			return &types.ToolResult{
+				Success: false,
+				Error:   err.Error(),
+			}, nil
+		}
+		input.FilePath = rel
+		if input.FilePath == "" {
+			return &types.ToolResult{
+				Success: false,
+				Error: fmt.Sprintf(
+					"file_path is the skill directory; omit file_path and call read_skill(skill_name=%q) to list files",
+					input.SkillName,
+				),
+			}, nil
+		}
 		// Read a specific file from the skill directory
 		content, err := t.skillManager.ReadSkillFile(ctx, input.SkillName, input.FilePath)
 		if err != nil {
@@ -132,7 +158,7 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		// Add available files section
 		if len(files) > 1 { // More than just SKILL.md
 			builder.WriteString("\n\n## Available Files\n\n")
-			builder.WriteString("The following files are available in this skill directory. Use `read_skill` with `file_path` to read them:\n\n")
+			builder.WriteString("The following files are available in this skill directory. Use `read_skill` with `file_path` to read them (relative paths, e.g. scripts/foo.py). Do not list the skill directory with `list_sandbox_files` or `ls`:\n\n")
 			for _, file := range files {
 				if file != skills.SkillFileName { // Don't list SKILL.md again
 					if skills.IsScript(file) {
@@ -189,15 +215,64 @@ func skillEnvironmentSection(skillDir string) string {
 
 - This skill is installed at `+"`%s`"+` inside the sandbox, and its
   dependencies live there with it, not in the sandbox's system interpreters.
-- `+"`execute_skill_script`"+` already runs its scripts the right way. Prefer
-  it over invoking them yourself.
+- `+"`execute_skill_script`"+` already runs its scripts the right way, including
+  `+"`/workspace/...`"+` files you wrote that still need this skill's packages. Prefer
+  it over invoking them yourself with a bare interpreter.
+- Do NOT paste a program into `+"`python3 -c`"+` or into `+"`%s -c`"+`.
+  Write it with `+"`write_sandbox_file`"+`, then
+  `+"`execute_skill_script(skill_name=..., script_path=/workspace/output/....py)`"+`.
+- Do NOT list or read that directory with `+"`list_sandbox_files`"+` /
+  `+"`read_sandbox_file`"+` / `+"`ls`"+`: those tools only see `+"`/workspace/output`"+`
+  and `+"`/workspace/input`"+`, and the skill tree includes `+"`.venv`"+` /
+  `+"`node_modules`"+`. Call `+"`read_skill`"+` without `+"`file_path`"+` to list
+  files, or with `+"`file_path`"+` to read one.
 - Do NOT decide from a system interpreter whether this skill can run, and do
-  NOT reinstall its dependencies with `+"`pip install`"+` / `+"`npm install`"+`:
-  those packages land in this session only and are lost with it.
-- To inspect the environment yourself from `+"`shell_exec`"+`: for Python, run
-  `+"`%s`"+` instead of `+"`python3`"+`; for Node, run from `+"`%s`"+` as the
-  working directory so its `+"`node_modules`"+` resolves.
-`, skillDir, sandbox.SkillVenvPython(skillDir), skillDir)
+  NOT reinstall its dependencies with `+"`pip install`"+` / `+"`npm install`"+`
+  into `+"`%s`"+` (that tree is frozen; `+"`uv venv`"+` often has no pip):
+  `+"`chown`"+` / `+"`ensurepip`"+` / `+"`pip install`"+` there is rejected.
+  On-demand extras (`+"`install_deps.py --word`"+`, python-docx, …) go to
+  `+"`python3 -m pip install --target %s <package>`"+`, then
+  `+"`execute_skill_script`"+` (PYTHONPATH already includes that directory).
+  Or ask the user to reinstall the skill so extras are baked into the image.
+`, skillDir, sandbox.SkillVenvPython(skillDir), skillDir, sandbox.SessionSkillPackageDir(path.Base(skillDir)))
+}
+
+// skillRelativeFilePath maps a model-supplied path onto a relative path
+// inside skillName. Absolute /opt/weknora/tenant/skills/<name>/... paths and
+// a redundant "<name>/..." prefix are accepted so a copied ls line still
+// works. Workspace paths are rejected here; they belong to other tools.
+func skillRelativeFilePath(skillName, filePath string) (string, error) {
+	trimmed := strings.TrimSpace(filePath)
+	if trimmed == "" {
+		return "", nil
+	}
+	clean := path.Clean(trimmed)
+	if path.IsAbs(trimmed) {
+		dir, err := sandbox.SkillDirFor(skillName)
+		if err == nil {
+			if clean == dir {
+				return "", nil
+			}
+			if strings.HasPrefix(clean, dir+"/") {
+				return strings.TrimPrefix(clean, dir+"/"), nil
+			}
+		}
+		if other, inImage := sandbox.SkillNameFromImagePath(clean); inImage && other != "" && other != skillName {
+			return "", fmt.Errorf(
+				"file_path belongs to skill %q; call read_skill(skill_name=%q, file_path=...)",
+				other, other,
+			)
+		}
+		return "", fmt.Errorf(
+			"file_path must be relative inside the skill (e.g. scripts/generate_ppt.py), not %s",
+			filePath,
+		)
+	}
+	prefix := skillName + "/"
+	if strings.HasPrefix(clean, prefix) {
+		return strings.TrimPrefix(clean, prefix), nil
+	}
+	return clean, nil
 }
 
 // Cleanup releases any resources (implements Tool interface if needed)

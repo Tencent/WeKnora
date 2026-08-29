@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/Tencent/WeKnora/internal/sandbox"
 )
 
 // SkillEnvResolver produces the environment one execution gets. It is separate
@@ -47,8 +49,9 @@ func (e *MissingSkillEnvError) Error() string {
 	)
 }
 
-// applyResolvedEnv overlays resolved onto env WITHOUT displacing anything env
-// already carries.
+// ApplyResolvedEnv overlays resolved onto env WITHOUT displacing anything env
+// already carries. It is exported because shell_exec applies the same overlay
+// for its optional skill_name parameter and must not diverge from it.
 //
 // This is the second layer of reserved-name protection. Task 2's write-time
 // blacklist is the first, but a value written before that blacklist existed
@@ -56,11 +59,34 @@ func (e *MissingSkillEnvError) Error() string {
 // WEKNORA_SKILL_OUTPUT_DIR would silently redirect the turn's artifacts to a
 // directory nobody drains. Skipping existing keys makes that impossible
 // regardless of what is stored.
-func applyResolvedEnv(env, resolved map[string]string) {
+func ApplyResolvedEnv(env, resolved map[string]string) {
 	for name, value := range resolved {
 		if _, taken := env[name]; taken {
 			continue
 		}
 		env[name] = value
 	}
+}
+
+// applySessionPackagePath prepends the per-session extra-packages directory
+// so a frozen skill venv can still see `pip install --target` extras without
+// mutating the snapshot. Missing directories are ignored by the interpreters.
+func applySessionPackagePath(env map[string]string, skillName string) {
+	if env == nil {
+		return
+	}
+	dir := sandbox.SessionSkillPackageDir(skillName)
+	if dir == "" {
+		return
+	}
+	prependPathEnv(env, pythonPathEnvVar, dir)
+	prependPathEnv(env, nodePathEnvVar, dir)
+}
+
+func prependPathEnv(env map[string]string, key, dir string) {
+	if existing := strings.TrimSpace(env[key]); existing != "" {
+		env[key] = dir + ":" + existing
+		return
+	}
+	env[key] = dir
 }

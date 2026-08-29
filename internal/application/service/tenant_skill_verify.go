@@ -104,7 +104,7 @@ func (s *TenantSkillService) verifyScriptsLoad(
 			return err
 		}
 	}
-	if scripts := sortedScriptPaths(bundle, ".js", ".mjs"); len(scripts) > 0 {
+	if scripts := sortedScriptPaths(bundle, ".js", ".mjs", ".cjs"); len(scripts) > 0 {
 		if err := s.execVerify(ctx, mgr, sessionID, skillDir, "node",
 			skillNodeVerifyCommand(skillDir, scripts, nodeDependencyNames(bundle))); err != nil {
 			return err
@@ -206,7 +206,7 @@ func forEachScript(skillDir string, scripts []string, check string) string {
 
 // allScriptExtensions is every suffix the runtime knows how to execute, which
 // is what makes a bundle file a script the model can name.
-var allScriptExtensions = []string{".py", ".js", ".mjs", ".sh"}
+var allScriptExtensions = []string{".py", ".js", ".mjs", ".cjs", ".sh"}
 
 // sortedScriptPaths returns the bundle's files with any of the given suffixes,
 // in a stable order so the emitted command is deterministic.

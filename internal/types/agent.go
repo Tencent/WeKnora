@@ -11,6 +11,24 @@ import (
 // DefaultMaxContextTokens is the default context window budget for agent conversations (200k).
 const DefaultMaxContextTokens = 200000
 
+// DefaultAgentMaxCompletionTokens is the per-round completion budget for
+// ReAct / tool-calling agents. When MaxTokens is omitted, OpenAI-compatible
+// providers (and many Chinese gateways) default to 4096 — large tool-call JSON
+// such as write_sandbox_file is then truncated mid-stream (finish_reason=length),
+// which surfaces as missing required arguments. 32768 matches wiki ingest (#2604).
+const DefaultAgentMaxCompletionTokens = 32768
+
+// AgentRoundMaxCompletionTokens returns the completion-token budget for one
+// ReAct LLM round. Zero (unset) uses DefaultAgentMaxCompletionTokens. An
+// explicit configured value is honored as-is so a user who capped a small
+// local model at 4096 is not silently sent 32768.
+func AgentRoundMaxCompletionTokens(configured int) int {
+	if configured <= 0 {
+		return DefaultAgentMaxCompletionTokens
+	}
+	return configured
+}
+
 // AgentConfig represents the full agent configuration (used at tenant level and runtime)
 // This includes all configuration parameters for agent execution
 type AgentConfig struct {
@@ -70,6 +88,10 @@ type AgentConfig struct {
 	SharedAgentReadOnly bool `json:"-"`
 	// LLM call timeout in seconds (default: 120). Controls the maximum time for a single LLM call.
 	LLMCallTimeout int `json:"llm_call_timeout,omitempty"`
+
+	// Maximum completion tokens for each ReAct LLM round. Zero means
+	// DefaultAgentMaxCompletionTokens. Explicit values are sent as-is.
+	MaxCompletionTokens int `json:"max_completion_tokens,omitempty"`
 
 	// Maximum character length for tool output (default: 16000).
 	// Outputs exceeding this limit are truncated with head + tail preservation.

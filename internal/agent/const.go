@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 )
 
@@ -81,6 +82,17 @@ func (e *AgentEngine) getLLMCallTimeout() time.Duration {
 		return time.Duration(e.config.LLMCallTimeout) * time.Second
 	}
 	return defaultLLMCallTimeout
+}
+
+// getCompletionTokenBudget is the max_tokens / max_completion_tokens sent on
+// each ReAct LLM round. Leaving it unset lets providers default to 4096 and
+// truncate write_sandbox_file (and similar) tool-call JSON.
+func (e *AgentEngine) getCompletionTokenBudget() int {
+	configured := 0
+	if e.config != nil {
+		configured = e.config.MaxCompletionTokens
+	}
+	return types.AgentRoundMaxCompletionTokens(configured)
 }
 
 // generateEventID generates a unique event ID with type suffix for better traceability

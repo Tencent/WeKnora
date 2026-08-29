@@ -390,3 +390,36 @@ func TestBuildMustUseBlock_SanitizesNamesIntoSingleLine(t *testing.T) {
 	// The injected newline must be neutralized so it cannot forge a new line.
 	assert.NotContains(t, block, "evil\nMust call")
 }
+
+func TestIsLengthFinishReason(t *testing.T) {
+	assert.True(t, isLengthFinishReason("length"))
+	assert.True(t, isLengthFinishReason("max_tokens"))
+	assert.True(t, isLengthFinishReason("MAX_OUTPUT_TOKENS"))
+	assert.False(t, isLengthFinishReason("stop"))
+	assert.False(t, isLengthFinishReason("tool_calls"))
+}
+
+func TestAnnotateLengthTruncatedToolErrors(t *testing.T) {
+	step := &types.AgentStep{
+		ToolCalls: []types.ToolCall{
+			{Name: "write_sandbox_file", Result: &types.ToolResult{Success: false, Error: "required parameter 'path' is missing"}},
+			{Name: "ok", Result: &types.ToolResult{Success: true, Output: "wrote"}},
+		},
+	}
+	annotateLengthTruncatedToolErrors("length", step.ToolCalls)
+	assert.Contains(t, step.ToolCalls[0].Result.Error, "finish_reason=length")
+	assert.Contains(t, step.ToolCalls[0].Result.Error, "smaller payload")
+	assert.NotContains(t, step.ToolCalls[0].Result.Error, "`path`")
+	assert.Equal(t, "wrote", step.ToolCalls[1].Result.Output)
+
+	annotateLengthTruncatedToolErrors("length", step.ToolCalls)
+	assert.Equal(t, 1, strings.Count(step.ToolCalls[0].Result.Error, "finish_reason=length"))
+
+	okStep := &types.AgentStep{
+		ToolCalls: []types.ToolCall{
+			{Result: &types.ToolResult{Success: false, Error: "nope"}},
+		},
+	}
+	annotateLengthTruncatedToolErrors("stop", okStep.ToolCalls)
+	assert.Equal(t, "nope", okStep.ToolCalls[0].Result.Error)
+}

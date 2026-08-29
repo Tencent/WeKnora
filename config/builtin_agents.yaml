@@ -70,7 +70,7 @@ builtin_agents:
       agent_type: "rag-qa"
       system_prompt: ""
       temperature: 0.7
-      max_completion_tokens: 2048
+      max_completion_tokens: 32768
       max_iterations: 50
       kb_selection_mode: "all"
       retrieve_kb_only_when_mentioned: false
@@ -118,7 +118,7 @@ builtin_agents:
       agent_type: "data-analysis"
       system_prompt_id: "data_analyst"
       temperature: 0.3
-      max_completion_tokens: 4096
+      max_completion_tokens: 32768
       max_iterations: 30
       kb_selection_mode: "all"
       retrieve_kb_only_when_mentioned: false
@@ -163,7 +163,7 @@ builtin_agents:
       agent_type: "wiki-qa"
       system_prompt_id: "wiki_researcher"
       temperature: 0.7
-      max_completion_tokens: 4096
+      max_completion_tokens: 32768
       max_iterations: 30
       kb_selection_mode: "all"
       retrieve_kb_only_when_mentioned: false
@@ -207,7 +207,7 @@ builtin_agents:
       agent_type: "custom"
       system_prompt_id: "wiki_fixer"
       temperature: 0.7
-      max_completion_tokens: 4096
+      max_completion_tokens: 32768
       max_iterations: 30
       kb_selection_mode: "selected"
       retrieve_kb_only_when_mentioned: false
@@ -257,7 +257,7 @@ builtin_agents:
       agent_type: "custom"
       system_prompt_id: "skill_installer"
       temperature: 0.2
-      max_completion_tokens: 4096
+      max_completion_tokens: 32768
       max_iterations: 30
       kb_selection_mode: "none"
       retrieve_kb_only_when_mentioned: false

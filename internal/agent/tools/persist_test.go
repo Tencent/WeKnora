@@ -284,3 +284,34 @@ func TestSanitizeAgentStepsForStorage_skillScriptKeepsStreamsOnFailure(t *testin
 		t.Fatalf("persisted stdout should remain for the UI card, got %#v", result.Data["stdout"])
 	}
 }
+
+func TestCompactToolOutputForHistory_writeSandboxFileKeepsPath(t *testing.T) {
+	history := CompactToolOutputForHistory(ToolWriteSandboxFile, &types.ToolResult{
+		Success: true,
+		Output:  "=== Wrote sandbox file: /workspace/output/generate_ppt.py ===\n",
+		Data: map[string]interface{}{
+			"display_type": ToolWriteSandboxFile,
+			"path":         "/workspace/output/generate_ppt.py",
+			"size":         12345,
+		},
+	})
+	if history != "Wrote /workspace/output/generate_ppt.py (12345 bytes)" {
+		t.Fatalf("history should keep path and size, got %q", history)
+	}
+}
+
+func TestCompactToolOutputForHistory_editSandboxFileKeepsPath(t *testing.T) {
+	history := CompactToolOutputForHistory(ToolEditSandboxFile, &types.ToolResult{
+		Success: true,
+		Output:  "=== Edited sandbox file: /workspace/output/generate_ppt.py ===\n",
+		Data: map[string]interface{}{
+			"display_type": ToolEditSandboxFile,
+			"path":         "/workspace/output/generate_ppt.py",
+			"size":         12345,
+			"replacements": 1,
+		},
+	})
+	if history != "Edited /workspace/output/generate_ppt.py (1 replacement(s), 12345 bytes)" {
+		t.Fatalf("history should keep path, replacements, and size, got %q", history)
+	}
+}

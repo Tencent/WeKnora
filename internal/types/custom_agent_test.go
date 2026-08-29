@@ -40,6 +40,31 @@ func TestEnsureDefaults_ThinkingPreservesTrue(t *testing.T) {
 	}
 }
 
+func TestEnsureDefaults_MaxCompletionTokensByMode(t *testing.T) {
+	qa := &CustomAgent{Config: CustomAgentConfig{AgentMode: AgentModeQuickAnswer}}
+	qa.EnsureDefaults()
+	if qa.Config.MaxCompletionTokens != 2048 {
+		t.Fatalf("quick-answer default MaxCompletionTokens = %d, want 2048", qa.Config.MaxCompletionTokens)
+	}
+
+	sr := &CustomAgent{Config: CustomAgentConfig{AgentMode: AgentModeSmartReasoning}}
+	sr.EnsureDefaults()
+	if sr.Config.MaxCompletionTokens != DefaultAgentMaxCompletionTokens {
+		t.Fatalf("smart-reasoning default MaxCompletionTokens = %d, want %d",
+			sr.Config.MaxCompletionTokens, DefaultAgentMaxCompletionTokens)
+	}
+
+	explicit := &CustomAgent{Config: CustomAgentConfig{
+		AgentMode:           AgentModeSmartReasoning,
+		MaxCompletionTokens: 64000,
+	}}
+	explicit.EnsureDefaults()
+	if explicit.Config.MaxCompletionTokens != 64000 {
+		t.Fatalf("EnsureDefaults must preserve explicit MaxCompletionTokens, got %d",
+			explicit.Config.MaxCompletionTokens)
+	}
+}
+
 func TestEnsureDefaults_CitationsDefaultEnabledAndPreserveFalse(t *testing.T) {
 	legacy := &CustomAgent{Config: CustomAgentConfig{}}
 	legacy.EnsureDefaults()

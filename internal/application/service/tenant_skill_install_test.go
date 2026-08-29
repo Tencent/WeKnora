@@ -453,6 +453,31 @@ func TestBuildInstallPromptAsksForADeclarationWithoutValues(t *testing.T) {
 		"a value the model invents would be stored as the workspace credential")
 	require.Contains(t, prompt, "WEKNORA_API_KEY",
 		"the installer must be told credential names are declarable, or it writes {\"env\":[]}")
+	require.Contains(t, prompt, "On-demand / optional extras MUST be installed now")
+	require.Contains(t, prompt, "uv venv --seed")
+	require.Contains(t, prompt, "install_deps.py")
+	require.Contains(t, prompt, "write_sandbox_file is not available")
+	require.Contains(t, prompt, "short shell redirect")
+}
+
+func TestBuildInstallPromptNamesOnDemandInstallerInTheArchive(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.bundle.Files["scripts/install_deps.py"] = []byte("print(1)\n")
+
+	prompt := buildInstallPrompt(installSkillDir, fx.bundle, true)
+
+	require.Contains(t, prompt, "This archive ships on-demand installer(s)")
+	require.Contains(t, prompt, "scripts/install_deps.py")
+}
+
+func TestBuildInstallPromptMentionsRepairedFrontmatter(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.bundle.FrontmatterRepaired = true
+
+	prompt := buildInstallPrompt(installSkillDir, fx.bundle, true)
+
+	require.Contains(t, prompt, "YAML frontmatter was automatically repaired")
+	require.Contains(t, prompt, "Mention this in your summary")
 }
 
 func TestInstallSkillRepoNormalizesStoredUserEnvPrincipal(t *testing.T) {
@@ -2410,6 +2435,12 @@ func (m *installSandboxManager) WriteSessionInputFile(
 	_ context.Context, _ string, filePath string, content []byte,
 ) error {
 	return m.WriteSessionFile(context.Background(), "", filePath, content)
+}
+
+func (m *installSandboxManager) WriteSessionWorkspaceFile(
+	ctx context.Context, sessionID, filePath string, content []byte,
+) error {
+	return m.WriteSessionFile(ctx, sessionID, filePath, content)
 }
 
 func (m *installSandboxManager) WriteSessionFile(

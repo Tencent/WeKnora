@@ -44,7 +44,7 @@ export interface CustomAgentConfig {
   model_id?: string;
   rerank_model_id?: string;         // ReRank 模型 ID
   temperature?: number;
-  max_completion_tokens?: number;   // 最大生成token数（普通模式）
+  max_completion_tokens?: number;   // 最大生成 token 数；智能推理 ReAct 轮次会抬到至少 32768，避免工具 JSON 被网关默认 4096 截断
   thinking?: boolean;                      // 是否启用思考模式（支持扩展思考的模型）
   citation_enabled?: boolean;        // 是否在最终回答中输出知识库/网页来源引用（默认开启）
 

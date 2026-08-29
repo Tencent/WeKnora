@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,7 +18,7 @@ func TestApplyResolvedEnvAddsNewKeysAndKeepsExistingOnes(t *testing.T) {
 		artifactHistoryEnvVar: "/workspace/output",
 	}
 
-	applyResolvedEnv(env, map[string]string{
+	ApplyResolvedEnv(env, map[string]string{
 		"TAVILY_API_KEY":      "user-key",
 		artifactOutputEnvVar:  "/tmp/hijacked",
 		artifactHistoryEnvVar: "/tmp/hijacked",
@@ -28,12 +29,14 @@ func TestApplyResolvedEnvAddsNewKeysAndKeepsExistingOnes(t *testing.T) {
 	require.Equal(t, "/workspace/output", env[artifactHistoryEnvVar])
 }
 
-func TestApplyResolvedEnvToleratesNilResolved(t *testing.T) {
-	env := map[string]string{artifactOutputEnvVar: "/workspace/output"}
+func TestApplySessionPackagePathPrependsPythonAndNodePath(t *testing.T) {
+	env := map[string]string{pythonPathEnvVar: "/already"}
 
-	applyResolvedEnv(env, nil)
+	applySessionPackagePath(env, "律师助手")
 
-	require.Equal(t, map[string]string{artifactOutputEnvVar: "/workspace/output"}, env)
+	dir := sandbox.SessionSkillPackageDir("律师助手")
+	require.Equal(t, dir+":/already", env[pythonPathEnvVar])
+	require.Equal(t, dir, env[nodePathEnvVar])
 }
 
 // The message is read by the agent and relayed verbatim to a person, so it has

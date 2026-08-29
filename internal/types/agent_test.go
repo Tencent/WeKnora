@@ -75,3 +75,18 @@ func TestUseCustomSystemPromptFlag(t *testing.T) {
 		t.Errorf("expected 'custom prompt', got %q", got)
 	}
 }
+
+func TestAgentRoundMaxCompletionTokens(t *testing.T) {
+	if got := AgentRoundMaxCompletionTokens(0); got != DefaultAgentMaxCompletionTokens {
+		t.Fatalf("zero configured = %d, want %d", got, DefaultAgentMaxCompletionTokens)
+	}
+	if got := AgentRoundMaxCompletionTokens(2048); got != 2048 {
+		t.Fatalf("explicit 2048 = %d, want 2048", got)
+	}
+	if got := AgentRoundMaxCompletionTokens(4096); got != 4096 {
+		t.Fatalf("explicit 4096 = %d, want 4096", got)
+	}
+	if got := AgentRoundMaxCompletionTokens(64000); got != 64000 {
+		t.Fatalf("explicit high value = %d, want 64000", got)
+	}
+}

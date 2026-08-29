@@ -98,6 +98,9 @@ func (m *stagingSandboxManager) WriteSessionInputFile(_ context.Context, _ strin
 	m.writes = append(m.writes, filePath)
 	return nil
 }
+func (m *stagingSandboxManager) WriteSessionWorkspaceFile(ctx context.Context, sessionID, filePath string, content []byte) error {
+	return m.WriteSessionInputFile(ctx, sessionID, filePath, content)
+}
 func (m *stagingSandboxManager) RemoveSessionInputPath(_ context.Context, _ string, targetPath string) error {
 	for filePath := range m.files {
 		if filePath == targetPath || strings.HasPrefix(filePath, targetPath+"/") {
@@ -181,6 +184,8 @@ func TestBuildSandboxAttachmentsPromptEscapesMetadata(t *testing.T) {
 	assert.Contains(t, prompt, `path="/workspace/input/hash/a.txt"`)
 	assert.Contains(t, prompt, "read-only inputs")
 	assert.Contains(t, prompt, "read_sandbox_file")
+	assert.Contains(t, prompt, "write_sandbox_file")
+	assert.Contains(t, prompt, "edit_sandbox_file")
 }
 
 func TestStageSessionAttachmentsResolvesURLFromTemporaryDocument(t *testing.T) {

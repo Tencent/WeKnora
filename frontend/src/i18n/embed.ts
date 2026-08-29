@@ -337,6 +337,8 @@ const messages = {
         "executeSkillScript": "执行技能脚本",
         "listSandboxFiles": "列出沙箱文件",
         "readSandboxFile": "读取沙箱文件",
+        "writeSandboxFile": "写入沙箱文件",
+        "editSandboxFile": "编辑沙箱文件",
         "shellExec": "执行沙箱命令",
         "dataAnalysis": "数据分析",
         "dataSchema": "数据结构",
@@ -350,7 +352,10 @@ const messages = {
       "sandboxFiles": {
         "found": "找到 {count} 个文件",
         "empty": "暂无文件",
-        "truncated": "列表已截断"
+        "truncated": "列表已截断",
+        "wrote": "已写入",
+        "edited": "已编辑",
+        "replacements": "替换 {count} 处"
       },
       "shellExec": {
         "workDir": "目录",
@@ -858,6 +863,8 @@ const messages = {
         "executeSkillScript": "Execute Skill Script",
         "listSandboxFiles": "List sandbox files",
         "readSandboxFile": "Read sandbox file",
+        "writeSandboxFile": "Write sandbox file",
+        "editSandboxFile": "Edit sandbox file",
         "shellExec": "Run sandbox command",
         "dataAnalysis": "Data Analysis",
         "dataSchema": "Data Schema",
@@ -871,7 +878,10 @@ const messages = {
       "sandboxFiles": {
         "found": "Found {count} file(s)",
         "empty": "No files",
-        "truncated": "List truncated"
+        "truncated": "List truncated",
+        "wrote": "Wrote",
+        "edited": "Edited",
+        "replacements": "Replaced {count}"
       },
       "shellExec": {
         "workDir": "Directory",

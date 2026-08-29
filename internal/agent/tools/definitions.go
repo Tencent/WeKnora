@@ -23,13 +23,15 @@ const (
 	// Skills-related tools (only available when skills are enabled)
 	ToolExecuteSkillScript = "execute_skill_script"
 	ToolReadSkill          = "read_skill"
-	// Sandbox filesystem inspection (read-only; only available when the
-	// sandbox backend supports per-session file listing — currently the
-	// Cube SessionBoundManager). Lets the LLM discover and inspect files
-	// produced by prior skill executions in the same session so chained
-	// skills stop guessing paths.
+	// Sandbox filesystem tools (only available when the sandbox backend
+	// supports per-session files — Cube, E2B, Docker). list/read inspect
+	// output and staged attachments; write creates text files so generated
+	// scripts do not have to travel through a shell_exec heredoc; edit
+	// patches an existing file without regenerating it.
 	ToolListSandboxFiles = "list_sandbox_files"
 	ToolReadSandboxFile  = "read_sandbox_file"
+	ToolWriteSandboxFile = "write_sandbox_file"
+	ToolEditSandboxFile  = "edit_sandbox_file"
 	// ToolShellExec lets the LLM execute ad-hoc shell commands inside the
 	// current session's sandbox (dependency installs, environment probing).
 	// Registered only when the resolved backend advertises the session shell
@@ -78,6 +80,8 @@ func AvailableToolDefinitions() []AvailableTool {
 		{Name: ToolExecuteSkillScript, Label: "执行技能脚本", Description: "在沙箱环境中执行技能脚本"},
 		{Name: ToolListSandboxFiles, Label: "列出沙箱文件", Description: "列出当前会话沙箱产出目录下的文件"},
 		{Name: ToolReadSandboxFile, Label: "读取沙箱文件", Description: "读取当前会话沙箱中已生成的文件内容"},
+		{Name: ToolWriteSandboxFile, Label: "写入沙箱文件", Description: "向当前会话沙箱写入文本文件（脚本、报告等）"},
+		{Name: ToolEditSandboxFile, Label: "编辑沙箱文件", Description: "精确替换当前会话沙箱中已有文本文件的片段"},
 		{Name: ToolShellExec, Label: "执行沙箱命令", Description: "在当前会话沙箱中执行 shell 命令（如安装依赖、检查环境）"},
 		{Name: ToolWikiReadPage, Label: "读取Wiki页面", Description: "读取指定的Wiki页面内容"},
 		{Name: ToolWikiSearch, Label: "搜索Wiki", Description: "在Wiki中搜索页面"},

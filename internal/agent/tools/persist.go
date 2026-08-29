@@ -16,16 +16,20 @@ var persistStripFields = map[string][]string{
 // persistStripFieldsByTool drops binary / duplicate blobs. stdout/stderr stay
 // (compacted separately) so a history reload can still render the card.
 var persistStripFieldsByTool = map[string][]string{
-	ToolShellExec:       {"content", "content_base64"},
-	ToolReadSandboxFile: {"content", "content_base64"},
+	ToolShellExec:        {"content", "content_base64"},
+	ToolReadSandboxFile:  {"content", "content_base64"},
+	ToolWriteSandboxFile: {"content", "content_base64"},
+	ToolEditSandboxFile:  {"content", "content_base64"},
 }
 
 // clientStripFieldsByTool is the lighter omit list for live SSE. The UI
 // needs stdout/stderr to render a terminal card; those streams are already
 // capped by the tool. Persist still uses persistStripFieldsByTool.
 var clientStripFieldsByTool = map[string][]string{
-	ToolShellExec:       {"content", "content_base64"},
-	ToolReadSandboxFile: {"content", "content_base64"},
+	ToolShellExec:        {"content", "content_base64"},
+	ToolReadSandboxFile:  {"content", "content_base64"},
+	ToolWriteSandboxFile: {"content", "content_base64"},
+	ToolEditSandboxFile:  {"content", "content_base64"},
 }
 
 const historicalSandboxOutputChars = 4 * 1024
@@ -324,6 +328,19 @@ func compactToolSummary(success bool, errMsg string, data map[string]interface{}
 			return rebuilt
 		}
 		return compactShellExecHeadline(data)
+	case "write_sandbox_file":
+		path := stringField(data, "path")
+		size := intField(data, "size")
+		if path != "" {
+			return fmt.Sprintf("Wrote %s (%d bytes)", path, size)
+		}
+	case "edit_sandbox_file":
+		path := stringField(data, "path")
+		size := intField(data, "size")
+		n := intField(data, "replacements")
+		if path != "" {
+			return fmt.Sprintf("Edited %s (%d replacement(s), %d bytes)", path, n, size)
+		}
 	case "attachment_parsing":
 		parsed := intField(data, "parsed_count")
 		skipped := intField(data, "skipped_count")

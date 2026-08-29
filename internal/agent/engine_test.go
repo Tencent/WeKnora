@@ -42,13 +42,14 @@ type mockChat struct {
 	mu        sync.Mutex
 	responses []mockResponse
 	calls     [][]chat.Message
+	opts      []*chat.ChatOptions
 	callCount int
 }
 
 func (m *mockChat) ChatStream(
 	_ context.Context,
 	messages []chat.Message,
-	_ *chat.ChatOptions,
+	opts *chat.ChatOptions,
 ) (<-chan types.StreamResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -57,6 +58,7 @@ func (m *mockChat) ChatStream(
 	}
 	resp := m.responses[m.callCount]
 	m.calls = append(m.calls, append([]chat.Message(nil), messages...))
+	m.opts = append(m.opts, opts)
 	m.callCount++
 
 	ch := make(chan types.StreamResponse, len(resp.chunks))
@@ -244,6 +246,12 @@ func withCitationsEnabled(enabled bool) testEngineOption {
 	}
 }
 
+func withMaxCompletionTokens(n int) testEngineOption {
+	return func(cfg *types.AgentConfig) {
+		cfg.MaxCompletionTokens = n
+	}
+}
+
 func TestBuildSystemPromptUsesInternalCitationSetting(t *testing.T) {
 	model := &mockChat{}
 	enabledEngine := newTestEngine(t, model)
@@ -409,6 +417,53 @@ func TestStreamThinkingToEventBus_PropagatesFinishReason(t *testing.T) {
 			assert.Equal(t, tt.wantReason, resp.FinishReason)
 		})
 	}
+}
+
+func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
+	t.Run("honors an explicit 4096 budget", func(t *testing.T) {
+		mock := &mockChat{
+			responses: []mockResponse{
+				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
+			},
+		}
+		engine := newTestEngine(t, mock, withMaxCompletionTokens(4096))
+		_, err := engine.streamThinkingToEventBus(context.Background(),
+			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
+		require.NoError(t, err)
+		require.Len(t, mock.opts, 1)
+		assert.Equal(t, 4096, mock.opts[0].MaxTokens)
+		assert.Equal(t, 4096, mock.opts[0].MaxCompletionTokens)
+	})
+
+	t.Run("defaults when unset", func(t *testing.T) {
+		mock := &mockChat{
+			responses: []mockResponse{
+				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
+			},
+		}
+		engine := newTestEngine(t, mock)
+		_, err := engine.streamThinkingToEventBus(context.Background(),
+			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
+		require.NoError(t, err)
+		require.Len(t, mock.opts, 1)
+		assert.Equal(t, types.DefaultAgentMaxCompletionTokens, mock.opts[0].MaxTokens)
+		assert.Equal(t, types.DefaultAgentMaxCompletionTokens, mock.opts[0].MaxCompletionTokens)
+	})
+
+	t.Run("preserves explicit higher budget", func(t *testing.T) {
+		mock := &mockChat{
+			responses: []mockResponse{
+				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
+			},
+		}
+		engine := newTestEngine(t, mock, withMaxCompletionTokens(64000))
+		_, err := engine.streamThinkingToEventBus(context.Background(),
+			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
+		require.NoError(t, err)
+		require.Len(t, mock.opts, 1)
+		assert.Equal(t, 64000, mock.opts[0].MaxTokens)
+		assert.Equal(t, 64000, mock.opts[0].MaxCompletionTokens)
+	})
 }
 
 // TestStreamThinkingToEventBus_RoutesReasoningAndAnswerSeparately is the

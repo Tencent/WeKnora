@@ -200,7 +200,7 @@ func (s *agentService) CreateAgentEngine(
 	}
 	s.registerMCPTools(ctx, toolRegistry, config, eventBus, sessionID, assistantMessageID)
 
-	// File inspection tools are a pure sandbox capability independent of the
+	// File tools are a pure sandbox capability independent of the
 	// skill switch: register them whenever the workspace sandbox supports a
 	// session filesystem, even when skills are disabled.
 	s.registerSandboxFileTools(ctx, toolRegistry, sessionID, config)
@@ -381,27 +381,33 @@ func (s *agentService) resolveKBAndDocInfos(
 	return kbInfos, selectedDocs
 }
 
-// registerSandboxFileTools registers list_sandbox_files / read_sandbox_file.
+// registerSandboxFileTools registers list_sandbox_files / read_sandbox_file /
+// write_sandbox_file / edit_sandbox_file.
 //
-// These expose per-session filesystem inspection and are a pure sandbox
+// These expose per-session filesystem access and are a pure sandbox
 // capability, not a skill capability. They therefore do NOT follow
 // SkillsEnabled: an agent with skills disabled must still be able to read
-// staged attachments out of /workspace/input. The tools themselves allow
-// that directory (and /workspace/output). Registration only requires a
-// non-disabled sandbox whose manager advertises a SessionFileStore. The
-// skill installer agent also receives them (its remote sandbox advertises a
-// file store), which is harmless — a root shell can already list and read the
-// same tree.
+// staged attachments out of /workspace/input, and to write generated files
+// under /workspace. The tools themselves allow those directories (input is
+// read-only). Registration only requires a non-disabled sandbox whose
+// manager advertises a SessionFileStore.
 //
-// It resolves the sandbox independently of initializeSkillsManager so the
-// file tools are available even when skills are disabled and the skills
-// manager is never built.
+// The skill installer is the exception: write_sandbox_file only accepts
+// /workspace, the installer must write .weknora/requirements.json under
+// /opt/weknora/tenant/skills, and its prompt forbids touching /workspace
+// (that tree is wiped before the snapshot). Offering the file tools made
+// the first write of every install fail, then fall back to a shell heredoc.
+// Install mode uses shell_exec alone.
 func (s *agentService) registerSandboxFileTools(
 	ctx context.Context,
 	toolRegistry *tools.ToolRegistry,
 	sessionID string,
 	config *types.AgentConfig,
 ) {
+	if config != nil && config.SkillInstallMode() {
+		logger.Infof(ctx, "Skipping session file tools in skill install mode")
+		return
+	}
 	sandboxMgr, err := s.resolveWorkspaceSandbox(ctx, sessionID, config)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to resolve sandbox for file tools: %v", err)
@@ -413,10 +419,12 @@ func (s *agentService) registerSandboxFileTools(
 	if store := sessionSandboxFileStore(sandboxMgr); store != nil {
 		toolRegistry.RegisterTool(tools.NewListSandboxFilesTool(store))
 		toolRegistry.RegisterTool(tools.NewReadSandboxFileTool(store))
-		logger.Infof(ctx, "Registered list_sandbox_files and read_sandbox_file tools")
+		toolRegistry.RegisterTool(tools.NewWriteSandboxFileTool(store))
+		toolRegistry.RegisterTool(tools.NewEditSandboxFileTool(store))
+		logger.Infof(ctx, "Registered list_sandbox_files, read_sandbox_file, write_sandbox_file, and edit_sandbox_file tools")
 	} else {
 		logger.Infof(ctx, "Sandbox backend does not advertise session filesystem capability; "+
-			"list_sandbox_files/read_sandbox_file not registered")
+			"list_sandbox_files/read_sandbox_file/write_sandbox_file/edit_sandbox_file not registered")
 	}
 }
 
@@ -986,7 +994,8 @@ func (s *agentService) registerTools(
 			toolToRegister = tools.NewWikiDeletePageTool(s.wikiPageService, wikiKBIDs, wikiRoutes)
 
 		case tools.ToolShellExec, tools.ToolReadSkill, tools.ToolExecuteSkillScript,
-			tools.ToolListSandboxFiles, tools.ToolReadSandboxFile:
+			tools.ToolListSandboxFiles, tools.ToolReadSandboxFile, tools.ToolWriteSandboxFile,
+			tools.ToolEditSandboxFile:
 			// Bound to the resolved sandbox manager in registerSandboxFileTools
 			// / registerSandboxShellIfAllowed / initializeSkillsManager.
 			// Listing them here would warn "Unknown tool: shell_exec" on every
