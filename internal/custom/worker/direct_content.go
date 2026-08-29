@@ -97,6 +97,7 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		for _, chunk := range chunks {
 			knownChunkIDs[chunk.ID] = struct{}{}
 		}
+		normalizeOutlineEvidenceChunkIDs(&document, chunks)
 		if err := outline.Validate(document, video.DurationSeconds, knownChunkIDs); err != nil {
 			return fmt.Errorf("validate %s output: %w", h.Job, err)
 		}
@@ -143,6 +144,30 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		return err
 	}
 	return nil
+}
+
+func normalizeOutlineEvidenceChunkIDs(document *outline.Document, chunks []transcript.Chunk) {
+	aliases := make(map[string]string, len(chunks)*2)
+	for _, chunk := range chunks {
+		aliases[chunk.ID] = chunk.ID
+		aliases[fmt.Sprintf("%s|%06d", chunk.ID, chunk.Index)] = chunk.ID
+	}
+	for chapterIndex := range document.Chapters {
+		chapter := &document.Chapters[chapterIndex]
+		for index, chunkID := range chapter.EvidenceChunkIDs {
+			if normalized, ok := aliases[chunkID]; ok {
+				chapter.EvidenceChunkIDs[index] = normalized
+			}
+		}
+		for pointIndex := range chapter.KnowledgePoints {
+			point := &chapter.KnowledgePoints[pointIndex]
+			for index, chunkID := range point.EvidenceChunkIDs {
+				if normalized, ok := aliases[chunkID]; ok {
+					point.EvidenceChunkIDs[index] = normalized
+				}
+			}
+		}
+	}
 }
 
 func parseLLMJSONResponse(content string, target any) error {

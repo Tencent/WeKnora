@@ -49,6 +49,20 @@ func TestOutlineLLMResponseUsesSchemaV1(t *testing.T) {
 	}
 }
 
+func TestNormalizeOutlineEvidenceChunkIDs(t *testing.T) {
+	document := outline.Document{
+		SchemaVersion: 1,
+		Chapters: []outline.Chapter{{
+			EvidenceChunkIDs: []string{"chunk-1|000004"},
+			KnowledgePoints:  []outline.KnowledgePoint{{EvidenceChunkIDs: []string{"chunk-1|000004"}}},
+		}},
+	}
+	normalizeOutlineEvidenceChunkIDs(&document, []transcript.Chunk{{ID: "chunk-1", Index: 4}})
+	if document.Chapters[0].EvidenceChunkIDs[0] != "chunk-1" || document.Chapters[0].KnowledgePoints[0].EvidenceChunkIDs[0] != "chunk-1" {
+		t.Fatalf("evidence chunk IDs were not normalized: %+v", document)
+	}
+}
+
 func TestBuildDirectContentPromptRejectsOversizedTranscript(t *testing.T) {
 	_, err := buildDirectContentPrompt(&model.Video{Title: "视频一"}, skill.JobOutline, []transcript.Chunk{{ID: "chunk-1", Index: 0, Content: strings.Repeat("长文本", 50000)}})
 	if err == nil || !strings.Contains(err.Error(), "context limit") {
