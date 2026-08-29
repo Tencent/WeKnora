@@ -68,6 +68,7 @@ type ProcessingJobStatus struct {
 	Provider             string     `json:"provider,omitempty"`
 	ExternalTaskID       string     `json:"external_task_id,omitempty"`
 	Status               string     `json:"status"`
+	Phase                string     `json:"phase,omitempty"`
 	Progress             int        `json:"progress"`
 	AttemptCount         int        `json:"attempt_count"`
 	MaxAttempts          int        `json:"max_attempts"`
@@ -373,11 +374,21 @@ func processingJobStatus(job model.VideoProcessingJob) ProcessingJobStatus {
 	return ProcessingJobStatus{
 		JobID: job.ID, JobType: job.JobType, TranscriptGeneration: job.TranscriptGeneration,
 		Provider: job.Provider, ExternalTaskID: job.ExternalTaskID,
-		Status: job.Status, Progress: job.Progress, AttemptCount: job.AttemptCount, MaxAttempts: job.MaxAttempts,
+		Status: job.Status, Phase: processingJobPhase(job), Progress: job.Progress, AttemptCount: job.AttemptCount, MaxAttempts: job.MaxAttempts,
 		InputAvailable: strings.TrimSpace(job.InputPayload) != "", ResultAvailable: strings.TrimSpace(job.ResultPayload) != "",
 		ErrorCategory: job.ErrorCategory, ErrorCode: job.ErrorCode, ErrorMessage: job.ErrorMessage,
 		UpdatedAt: job.UpdatedAt, StartedAt: job.StartedAt, CompletedAt: job.CompletedAt,
 	}
+}
+
+func processingJobPhase(job model.VideoProcessingJob) string {
+	if job.JobType != "transcription" || (job.Status != "pending" && job.Status != "running") {
+		return ""
+	}
+	if strings.TrimSpace(job.ExternalTaskID) == "" {
+		return "source_preparing"
+	}
+	return "tingwu_running"
 }
 
 func nextIncompleteStage(latest map[string]model.VideoProcessingJob) string {

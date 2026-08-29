@@ -2,8 +2,10 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
@@ -123,6 +125,31 @@ func TestTranscriptionDoesNotCreateTaskWhenSourcePreparationFails(t *testing.T) 
 	}
 }
 
+func TestTranscriptionSourcePreparationTimeoutDoesNotCreateTask(t *testing.T) {
+	db := openTranscriptionTestDB(t)
+	video := model.Video{ID: uuid.NewString(), Title: "slow source", FileURL: "https://cdn.example.com/source.mp4", Status: model.VideoStatusReady}
+	job := model.VideoProcessingJob{ID: uuid.NewString(), VideoID: video.ID, JobType: "transcription", Status: "running", MaxAttempts: 3, IdempotencyKey: "transcription:" + video.ID}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	client := &recordingTongyiClient{}
+	handler := NewTranscriptionHandler(db, client)
+	handler.SourcePreparationTimeout = 10 * time.Millisecond
+	handler.SourcePreparer = &blockingSourcePreparer{}
+
+	err := handler.Run(context.Background(), &job, &video)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timeout error = %v, want deadline exceeded", err)
+	}
+	if client.validatedURL != "" || client.createdURL != "" {
+		t.Fatalf("tingwu called after preparation timeout: validated=%q created=%q", client.validatedURL, client.createdURL)
+	}
+}
+
 func TestProbedMediaCompatibilityRequiresH264AACMP4(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -143,14 +170,24 @@ func TestProbedMediaCompatibilityRequiresH264AACMP4(t *testing.T) {
 					CodecType string `json:"codec_type"`
 					CodecName string `json:"codec_name"`
 				}{{CodecType: "video", CodecName: test.videoCodec}, {CodecType: "audio", CodecName: test.audioCodec}},
-				Format: struct {
-					FormatName string `json:"format_name"`
-				}{FormatName: test.format},
+				Format: mediaFormat{FormatName: test.format},
 			}
 			if got := media.isCompatible(); got != test.want {
 				t.Fatalf("isCompatible() = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestMediaDurationAcceptsStringAndNumber(t *testing.T) {
+	for _, raw := range []string{`{"duration":"12.5"}`, `{"duration":12.5}`} {
+		var media mediaFormat
+		if err := json.Unmarshal([]byte(raw), &media); err != nil {
+			t.Fatalf("unmarshal %s: %v", raw, err)
+		}
+		if float64(media.Duration) != 12.5 {
+			t.Fatalf("duration from %s = %v, want 12.5", raw, media.Duration)
+		}
 	}
 }
 
@@ -186,6 +223,13 @@ func openTranscriptionTestDB(t *testing.T) *gorm.DB {
 type recordingSourcePreparer struct {
 	preparedURL string
 	prepareErr  error
+}
+
+type blockingSourcePreparer struct{}
+
+func (p *blockingSourcePreparer) Prepare(ctx context.Context, _ *model.Video) (string, error) {
+	<-ctx.Done()
+	return "", ctx.Err()
 }
 
 func (p *recordingSourcePreparer) Prepare(context.Context, *model.Video) (string, error) {

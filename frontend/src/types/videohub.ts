@@ -129,6 +129,7 @@ export interface VideoProcessingJobStatus {
   job_type: string
   transcript_generation?: string
   status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  phase?: 'source_preparing' | 'tingwu_running'
   progress: number
   attempt_count: number
   max_attempts: number

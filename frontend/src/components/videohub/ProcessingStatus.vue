@@ -83,6 +83,15 @@ const message = computed(() => {
   const rawStage = status.value.current_stage || ''
   const displayName = stageLabels[rawStage] || (stageFallback[rawStage] ? stageLabels[stageFallback[rawStage]] : rawStage) || '等待开始'
   const stage = displayName
+  const transcriptionJob = status.value.jobs.find(job => job.job_type === 'transcription' && (job.status === 'pending' || job.status === 'running'))
+  if (status.value.status === 'processing' && status.value.current_stage === 'transcription' && transcriptionJob?.phase === 'source_preparing') {
+    const progress = transcriptionJob.progress > 0 ? `（${transcriptionJob.progress}%）` : ''
+    return `正在准备兼容转写源${progress}`
+  }
+  if (status.value.status === 'processing' && status.value.current_stage === 'transcription' && transcriptionJob?.phase === 'tingwu_running') {
+    const progress = transcriptionJob.progress > 0 ? `（${transcriptionJob.progress}%）` : ''
+    return `听悟正在转写${progress}`
+  }
   switch (status.value.status) {
     case 'completed': return '内容解析已完成，章节、总结和关联内容均可使用'
     case 'failed': return `${stage}失败：${status.value.failure?.message || '可重试当前阶段'}`

@@ -1,12 +1,15 @@
 package worker
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,19 +26,45 @@ type mediaSourcePreparer struct {
 	InternalFrontendBaseURL string
 }
 
+type mediaFormat struct {
+	FormatName string        `json:"format_name"`
+	Duration   mediaDuration `json:"duration"`
+}
+
+type mediaDuration float64
+
+func (d *mediaDuration) UnmarshalJSON(data []byte) error {
+	raw := strings.Trim(strings.TrimSpace(string(data)), `"`)
+	if raw == "" || raw == "null" || raw == "N/A" {
+		*d = 0
+		return nil
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return fmt.Errorf("parse media duration: %w", err)
+	}
+	*d = mediaDuration(value)
+	return nil
+}
+
 type probedMedia struct {
 	Streams []struct {
 		CodecType string `json:"codec_type"`
 		CodecName string `json:"codec_name"`
 	} `json:"streams"`
-	Format struct {
-		FormatName string `json:"format_name"`
-	} `json:"format"`
+	Format mediaFormat `json:"format"`
 }
 
 func (p *mediaSourcePreparer) Prepare(ctx context.Context, video *model.Video) (string, error) {
+	return p.PrepareWithProgress(ctx, video, nil)
+}
+
+func (p *mediaSourcePreparer) PrepareWithProgress(ctx context.Context, video *model.Video, report func(SourcePreparationProgress)) (string, error) {
 	if video == nil || strings.TrimSpace(video.ID) == "" {
 		return "", fmt.Errorf("video is missing")
+	}
+	if report != nil {
+		report(SourcePreparationProgress{Phase: "source_checking", Percent: 0})
 	}
 
 	sourceURL, err := p.sourceURL(ctx, video)
@@ -48,6 +77,9 @@ func (p *mediaSourcePreparer) Prepare(ctx context.Context, video *model.Video) (
 		return "", fmt.Errorf("探测媒体格式: %w", err)
 	}
 	if media.isCompatible() {
+		if report != nil {
+			report(SourcePreparationProgress{Phase: "source_preparing", Percent: 100})
+		}
 		if strings.TrimSpace(video.TranscriptionSourceURL) != "" {
 			return strings.TrimSpace(video.TranscriptionSourceURL), nil
 		}
@@ -67,8 +99,14 @@ func (p *mediaSourcePreparer) Prepare(ctx context.Context, video *model.Video) (
 		}
 		cachedMedia, probeErr := probeMedia(ctx, cachedURL)
 		if probeErr == nil && cachedMedia.isCompatible() {
+			if report != nil {
+				report(SourcePreparationProgress{Phase: "source_transcoding", Percent: 100})
+			}
 			return p.MinIO.PublicURL(objectKey), nil
 		}
+	}
+	if report != nil {
+		report(SourcePreparationProgress{Phase: "source_transcoding", Percent: 0})
 	}
 
 	outputPath, err := os.CreateTemp("", "vidsage-transcription-*.mp4")
@@ -82,7 +120,11 @@ func (p *mediaSourcePreparer) Prepare(ctx context.Context, video *model.Video) (
 	}
 	defer os.Remove(outputPathName)
 
-	if err := transcodeToH264AAC(ctx, probeURL, outputPathName); err != nil {
+	if err := transcodeToH264AAC(ctx, probeURL, outputPathName, float64(media.Format.Duration), func(percent int) {
+		if report != nil {
+			report(SourcePreparationProgress{Phase: "source_transcoding", Percent: percent})
+		}
+	}); err != nil {
 		return "", err
 	}
 	converted, err := probeMedia(ctx, outputPathName)
@@ -91,6 +133,9 @@ func (p *mediaSourcePreparer) Prepare(ctx context.Context, video *model.Video) (
 	}
 	if !converted.isCompatible() {
 		return "", fmt.Errorf("转码结果仍不兼容：%s", converted.description())
+	}
+	if report != nil {
+		report(SourcePreparationProgress{Phase: "source_transcoding", Percent: 100})
 	}
 
 	file, err := os.Open(outputPathName)
@@ -150,7 +195,7 @@ func (p *mediaSourcePreparer) sourceURL(ctx context.Context, video *model.Video)
 }
 
 func probeMedia(ctx context.Context, source string) (probedMedia, error) {
-	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name", "-show_entries", "format=format_name", "-of", "json", source)
+	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name", "-show_entries", "format=format_name,duration", "-of", "json", source)
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
@@ -165,9 +210,9 @@ func probeMedia(ctx context.Context, source string) (probedMedia, error) {
 	return media, nil
 }
 
-func transcodeToH264AAC(ctx context.Context, source, destination string) error {
+func transcodeToH264AAC(ctx context.Context, source, destination string, durationSeconds float64, report func(int)) error {
 	args := []string{
-		"-hide_banner", "-loglevel", "error", "-y",
+		"-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y",
 		"-i", source,
 		"-map", "0:v:0", "-map", "0:a:0",
 		"-c:v", "libx264", "-preset", "veryfast", "-threads", "1", "-pix_fmt", "yuv420p",
@@ -175,9 +220,55 @@ func transcodeToH264AAC(ctx context.Context, source, destination string) error {
 		destination,
 	}
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	output, err := cmd.CombinedOutput()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("ffmpeg 转码失败: %w: %s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("ffmpeg 输出初始化失败: %w", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("ffmpeg 启动失败: %w", err)
+	}
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if durationSeconds <= 0 || report == nil || !strings.HasPrefix(line, "out_time_") {
+			continue
+		}
+		key, raw, ok := strings.Cut(line, "=")
+		if !ok || (key != "out_time_ms" && key != "out_time_us") {
+			continue
+		}
+		value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+		if err != nil {
+			continue
+		}
+		percent := int((value / 1_000_000) / durationSeconds * 100)
+		if percent < 0 {
+			percent = 0
+		}
+		if percent > 99 {
+			percent = 99
+		}
+		report(percent)
+	}
+	if err := scanner.Err(); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return fmt.Errorf("读取 ffmpeg 进度失败: %w", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("ffmpeg 转码终止: %w", ctx.Err())
+		}
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			return fmt.Errorf("ffmpeg 转码失败: %w", err)
+		}
+		return fmt.Errorf("ffmpeg 转码失败: %w: %s", err, message)
+	}
+	if report != nil {
+		report(100)
 	}
 	return nil
 }

@@ -65,6 +65,22 @@ func TestProcessingStatusReportsFailedStageAndRetryableJob(t *testing.T) {
 	}
 }
 
+func TestProcessingJobStatusReportsTranscriptionPhase(t *testing.T) {
+	preparing := processingJobStatus(model.VideoProcessingJob{
+		ID: "preparing", JobType: "transcription", Status: "running", Progress: 42,
+	})
+	if preparing.Phase != "source_preparing" {
+		t.Fatalf("preparing phase = %q, want source_preparing", preparing.Phase)
+	}
+
+	running := processingJobStatus(model.VideoProcessingJob{
+		ID: "running", JobType: "transcription", Status: "running", ExternalTaskID: "task-1",
+	})
+	if running.Phase != "tingwu_running" {
+		t.Fatalf("running phase = %q, want tingwu_running", running.Phase)
+	}
+}
+
 func TestSummaryEnhancementUsesSummaryArtifact(t *testing.T) {
 	video := model.Video{SummaryWikiPageID: "summary-page", KnowledgeBaseWikiPageID: ""}
 	job := model.VideoProcessingJob{JobType: "summary_enhance"}

@@ -25,15 +25,28 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/model"
 )
 
-const transcriptionPollTimeout = 30 * time.Minute
+const (
+	transcriptionSourcePrepareTimeout = 30 * time.Minute
+	transcriptionPollTimeout          = 30 * time.Minute
+)
+
+type SourcePreparationProgress struct {
+	Phase   string
+	Percent int
+}
+
+type ProgressSourcePreparer interface {
+	PrepareWithProgress(context.Context, *model.Video, func(SourcePreparationProgress)) (string, error)
+}
 
 // TranscriptionHandler 转写 job
 type TranscriptionHandler struct {
-	DB                      *gorm.DB
-	Tongyi                  TongyiClient
-	MinIO                   *objstore.Client
-	InternalFrontendBaseURL string
-	SourcePreparer          SourcePreparer
+	DB                       *gorm.DB
+	Tongyi                   TongyiClient
+	MinIO                    *objstore.Client
+	InternalFrontendBaseURL  string
+	SourcePreparationTimeout time.Duration
+	SourcePreparer           SourcePreparer
 }
 
 type TongyiClient interface {
@@ -52,7 +65,7 @@ func NewTranscriptionHandler(db *gorm.DB, t TongyiClient, internalFrontendBaseUR
 	if len(internalFrontendBaseURL) > 0 {
 		internalURL = strings.TrimRight(strings.TrimSpace(internalFrontendBaseURL[0]), "/")
 	}
-	return &TranscriptionHandler{DB: db, Tongyi: t, InternalFrontendBaseURL: internalURL}
+	return &TranscriptionHandler{DB: db, Tongyi: t, InternalFrontendBaseURL: internalURL, SourcePreparationTimeout: transcriptionSourcePrepareTimeout}
 }
 
 // JobType job 类型
@@ -81,13 +94,33 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 
 	// 第一次跑：创建 external task
 	if job.ExternalTaskID == "" {
-		preparedURL, err := h.prepareSource(ctx, video, sourceURL)
+		prepareTimeout := h.SourcePreparationTimeout
+		if prepareTimeout <= 0 {
+			prepareTimeout = transcriptionSourcePrepareTimeout
+		}
+		prepareCtx, cancelPrepare := context.WithTimeout(ctx, prepareTimeout)
+		prepareStartedAt := time.Now()
+		stopPreparationHeartbeat := h.startPreparationHeartbeat(job)
+		lastProgressAt := time.Time{}
+		lastProgress := -1
+		preparedURL, err := h.prepareSource(prepareCtx, video, sourceURL, func(progress SourcePreparationProgress) {
+			now := time.Now()
+			if progress.Percent == lastProgress && now.Sub(lastProgressAt) < 10*time.Second {
+				return
+			}
+			lastProgress = progress.Percent
+			lastProgressAt = now
+			h.reportSourcePreparationProgress(job, progress)
+		})
+		stopPreparationHeartbeat()
+		cancelPrepare()
 		if err != nil {
 			return fmt.Errorf("准备听悟兼容转写源失败: %w", err)
 		}
 		if preparedURL == "" {
 			return fmt.Errorf("准备听悟兼容转写源返回空地址")
 		}
+		slog.Info("transcription source prepared", "video_id", video.ID, "elapsed_ms", time.Since(prepareStartedAt).Milliseconds())
 		if preparedURL != sourceURL {
 			if err := h.DB.Model(video).Update("transcription_source_url", preparedURL).Error; err != nil {
 				return fmt.Errorf("保存听悟转写源: %w", err)
@@ -114,6 +147,7 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 			return fmt.Errorf("save external task id: %w", err)
 		}
 		job.ExternalTaskID = task.TaskID
+		h.updateJobProgress(job, 0)
 	}
 
 	// 循环轮询，直到听悟完成 / 失败 / 上下文取消。
@@ -136,6 +170,7 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 			"video_id", video.ID, "task_id", job.ExternalTaskID,
 			"status", task.Status, "progress", task.Progress,
 			"err_code", task.ErrorCode, "err_msg", task.ErrorMessage)
+		h.updateJobProgress(job, task.Progress)
 		if task.Status == "COMPLETED" || task.Status == "FAILED" {
 			break
 		}
@@ -192,12 +227,66 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 	return nil
 }
 
-func (h *TranscriptionHandler) prepareSource(ctx context.Context, video *model.Video, sourceURL string) (string, error) {
+func (h *TranscriptionHandler) prepareSource(ctx context.Context, video *model.Video, sourceURL string, report func(SourcePreparationProgress)) (string, error) {
 	if h.SourcePreparer != nil {
+		if preparer, ok := h.SourcePreparer.(ProgressSourcePreparer); ok {
+			return preparer.PrepareWithProgress(ctx, video, report)
+		}
 		return h.SourcePreparer.Prepare(ctx, video)
 	}
 	if h.MinIO == nil {
+		if report != nil {
+			report(SourcePreparationProgress{Phase: "source_preparing", Percent: 100})
+		}
 		return sourceURL, nil
 	}
-	return (&mediaSourcePreparer{MinIO: h.MinIO, InternalFrontendBaseURL: h.InternalFrontendBaseURL}).Prepare(ctx, video)
+	return (&mediaSourcePreparer{MinIO: h.MinIO, InternalFrontendBaseURL: h.InternalFrontendBaseURL}).PrepareWithProgress(ctx, video, report)
+}
+
+func (h *TranscriptionHandler) reportSourcePreparationProgress(job *model.VideoProcessingJob, progress SourcePreparationProgress) {
+	percent := progress.Percent
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 99 {
+		percent = 99
+	}
+	h.updateJobProgress(job, percent)
+	slog.Debug("transcription source preparation progress", "video_id", job.VideoID, "phase", progress.Phase, "progress", percent)
+}
+
+func (h *TranscriptionHandler) updateJobProgress(job *model.VideoProcessingJob, progress int) {
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 100 {
+		progress = 100
+	}
+	if job.Progress == progress {
+		return
+	}
+	if err := h.DB.Model(job).Update("progress", progress).Error; err != nil {
+		slog.Warn("update transcription progress failed", "video_id", job.VideoID, "job_id", job.ID, "error", err)
+		return
+	}
+	job.Progress = progress
+}
+
+func (h *TranscriptionHandler) startPreparationHeartbeat(job *model.VideoProcessingJob) func() {
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := h.DB.Model(job).Update("updated_at", time.Now().UTC()).Error; err != nil {
+					slog.Warn("update transcription heartbeat failed", "video_id", job.VideoID, "job_id", job.ID, "error", err)
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() { close(done) }
 }
