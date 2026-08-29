@@ -31,7 +31,7 @@ func TestBuildDirectContentPromptIncludesTranscriptEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildDirectContentPrompt returned error: %v", err)
 	}
-	for _, expected := range []string{"视频一", "training", "chunk-1", "原文内容", "章节导航", "schema_version", "chapter_index", "start_seconds", "knowledge_points", "1～2 个", "短标题", "不要输出 Markdown 代码围栏"} {
+	for _, expected := range []string{"视频一", "training", "chunk-1", "原文内容", "章节导航", "schema_version", "chapter_index", "start_seconds", "knowledge_points", "4～8 章", "1～2 个", "短标题", "不要拼接分块序号", "不要输出 Markdown 代码围栏"} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("prompt does not contain %q: %s", expected, prompt)
 		}

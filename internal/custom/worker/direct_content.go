@@ -238,8 +238,8 @@ func buildDirectContentPrompt(video *model.Video, jobType string, chunks []trans
 	switch jobType {
 	case skill.JobOutline:
 		builder.WriteString("任务：生成章节导航。只返回 JSON 对象：{\"schema_version\":1,\"chapters\":[{\"chapter_index\":1,\"chapter_title\":\"短标题\",\"start_seconds\":0,\"end_seconds\":41,\"chapter_summary\":\"本章核心内容\",\"knowledge_points\":[{\"title\":\"短语标题\",\"seconds\":12,\"evidence_chunk_ids\":[\"转写分块ID\"]}],\"evidence_chunk_ids\":[\"转写分块ID\"]}]}. 不要输出 Markdown、代码围栏、解释文字、HTML 或 XML。\n")
-		builder.WriteString("章节必须覆盖完整视频且按时间顺序排列；时间只填数字秒数，不要填格式化时间字符串。每章默认只保留 1～2 个全片关键知识点，只有存在独立结论、方法或动作时才增加，最多 3 个；全片最多 16 个，不得为了覆盖每句转写而切碎。合并同义观点、例子和论据。\n")
-		builder.WriteString("知识点标题必须是短语或结论式短标题，使用“方法名”“动作+对象”或“核心结论”结构，不写完整句。每个章节必须有核心内容和至少一个知识点；evidence_chunk_ids 必须使用给定转写分块 ID。\n")
+		builder.WriteString("章节必须覆盖完整视频且按时间顺序排列；优先生成 4～8 章，只有主题发生明显转折时才拆章。时间只填数字秒数，不要填格式化时间字符串。每章只保留 1～2 个全片关键知识点，只有存在独立结论、方法或动作时才增加，绝不为覆盖每句转写而切碎；全片最多 12 个。合并同义观点、例子和论据。\n")
+		builder.WriteString("章节核心内容控制在 80 个汉字以内，知识点标题控制在 10 个汉字以内。知识点标题必须是短语或结论式短标题，使用“方法名”“动作+对象”或“核心结论”结构，不写完整句。每个章节必须有核心内容和至少一个知识点；evidence_chunk_ids 必须使用给定转写分块 ID，不要拼接分块序号。\n")
 	case skill.JobSummary:
 		builder.WriteString("任务：生成类型化智能总结。视频类型决定组织方式，但不能虚构模板字段；缺少证据时明确说明。\n")
 	case skill.JobSummaryEnhance:
