@@ -9,7 +9,7 @@ description: 将已审计的文字稿概览、内容大纲、类型化智能总�
 
 ## 输入
 
-可用工具：**阅读 Wiki 页面**、**搜索 Wiki**、**查询知识图谱**、**查看 Wiki 问题**、**创建/覆盖 Wiki**
+由后端确定性组装。后端读取已完成的概览、大纲和总结页面；知识页面可选，缺失时显示占位。
 
 组装前完整阅读 [references/page-contract.md](references/page-contract.md)。
 
@@ -21,16 +21,16 @@ description: 将已审计的文字稿概览、内容大纲、类型化智能总�
 
 ### 一、输入校验
 
-1. 通过 **阅读 Wiki 页面** 核对所有输入 Wiki 页面的文字稿标识和版本一致性，确认时间轴与大纲章节数一致。
+1. 后端核对所有输入页面的文字稿标识和版本一致性，确认基础内容页面可读。
 
 ### 二、页面组装
 
 2. 保留上游产物的字段意义和审计警示，只做展示层排版。
-3. 只展示图谱中 `confirmed` 的关系，并给出一句关系理由；链接优先级见 [references/page-contract.md](references/page-contract.md)。
+3. 知识底座缺失时显示明确占位，不阻塞基础页面发布。
 
 ### 三、检查与输出
 
-4. 通过 **创建/覆盖 Wiki** 工具将组装后的完整页面写入知识库的 Wiki 页面。写入契约：工具 `page_type` 用 `index`；页面 frontmatter 必须含 `type: transcript_page`、`source_video_id: {视频ID}` 与 `transcript_generation: {转写代次}`。由 vidsage 内容流水线触发时，页面 slug 固定为 `transcript-page/{视频ID}`，不得使用视频标题或其他产物 slug；读取上游页面必须使用 Wiki 工具返回的实际 slug，不得自行推导。
+4. 后端将组装后的完整页面写入 WeKnora。写入契约：`page_type` 用 `index`；页面 frontmatter 必须含 `type: transcript_page`、`source_video_id: {视频ID}` 与 `transcript_generation: {转写代次}`。由 vidsage 内容流水线触发时，页面 slug 固定为 `transcript-page/{视频ID}`。
 5. 检查链接、标题层级、时间范围和降级提示。
 
 ## 降级规则
