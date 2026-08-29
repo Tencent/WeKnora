@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/llm"
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/outline"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
 	"github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
@@ -79,24 +80,50 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 	if err != nil {
 		return fmt.Errorf("generate %s: %w", h.Job, err)
 	}
-	var output generatedContent
-	if err := parseLLMJSONResponse(raw, &output); err != nil {
-		return fmt.Errorf("parse %s output: %w", h.Job, err)
-	}
-	if strings.TrimSpace(output.Content) == "" {
-		return fmt.Errorf("generate %s returned empty content", h.Job)
-	}
 	contract, ok := skill.Contract(h.Job)
 	if !ok {
 		return fmt.Errorf("unknown direct content job: %s", h.Job)
 	}
+	pageTitle := ""
+	pageSummary := ""
+	pageBody := ""
+	if h.Job == skill.JobOutline {
+		var document outline.Document
+		if err := parseLLMJSONResponse(raw, &document); err != nil {
+			return fmt.Errorf("parse %s output: %w", h.Job, err)
+		}
+		knownChunkIDs := make(map[string]struct{}, len(chunks))
+		for _, chunk := range chunks {
+			knownChunkIDs[chunk.ID] = struct{}{}
+		}
+		if err := outline.Validate(document, video.DurationSeconds, knownChunkIDs); err != nil {
+			return fmt.Errorf("validate %s output: %w", h.Job, err)
+		}
+		canonical, err := outline.Marshal(document)
+		if err != nil {
+			return fmt.Errorf("marshal %s output: %w", h.Job, err)
+		}
+		pageTitle = video.Title + "_大纲"
+		pageBody = canonical
+	} else {
+		var output generatedContent
+		if err := parseLLMJSONResponse(raw, &output); err != nil {
+			return fmt.Errorf("parse %s output: %w", h.Job, err)
+		}
+		if strings.TrimSpace(output.Content) == "" {
+			return fmt.Errorf("generate %s returned empty content", h.Job)
+		}
+		pageTitle = fallbackTitle(output.Title, video.Title, h.Job)
+		pageSummary = output.Summary
+		pageBody = output.Content
+	}
 	page, err := h.Wiki.UpsertPage(ctx, h.WeKnora.KBID(), weknora.WikiPageWrite{
 		Slug:     contract.WriteSlug(video.ID),
-		Title:    fallbackTitle(output.Title, video.Title, h.Job),
+		Title:    pageTitle,
 		PageType: "index",
 		Status:   "published",
-		Summary:  output.Summary,
-		Content:  pageContent(contract.ArtifactType, video.ID, generation, output.Content),
+		Summary:  pageSummary,
+		Content:  pageContent(contract.ArtifactType, video.ID, generation, pageBody),
 	})
 	if err != nil {
 		return fmt.Errorf("save %s page: %w", h.Job, err)
@@ -174,12 +201,12 @@ func (h *DirectContentHandler) addEnhancementContext(ctx context.Context, video 
 
 func buildDirectContentPrompt(video *model.Video, jobType string, chunks []transcript.Chunk) (string, error) {
 	var builder strings.Builder
-	builder.WriteString("你是视频内容生产模型。只能依据给定转写生成结果，不得补充转写中没有的事实。请只返回一个 JSON 对象，字段为 title、summary、content；不要输出 Markdown 代码围栏、解释文字、HTML 或 XML。content 使用 Markdown。\n")
+	builder.WriteString("你是视频内容生产模型。只能依据给定转写生成结果，不得补充转写中没有的事实。请只返回一个 JSON 对象；不要输出 Markdown 代码围栏、解释文字、HTML 或 XML。\n")
 	switch jobType {
 	case skill.JobOutline:
-		builder.WriteString("任务：生成章节导航。content 必须按以下结构输出：每章使用二级标题；章节标题后写“时间：HH:MM:SS–HH:MM:SS”；使用“### 本章核心内容”和“### 关键知识点”两个三级标题；知识点使用列表项，并在每项末尾写一个可定位的时间戳。\n")
-		builder.WriteString("章节必须覆盖完整视频且按时间顺序排列。每章默认只保留 1～2 个全片关键知识点，只有存在独立结论、方法或动作时才增加，最多 3 个；全片优先控制在 8～16 个，不得为了覆盖每句转写而切碎。合并同义观点、例子和论据。\n")
-		builder.WriteString("知识点标题必须是 4～10 个汉字或 2～5 个英文单词的短语/结论式短标题，使用“方法名”“动作+对象”或“核心结论”结构，不写完整句。核心内容写成一段能独立理解的概括。可在“### 原文”下保留少量可追溯原文，但不得把原文当作知识点，也不得用原文替代核心内容。\n")
+		builder.WriteString("任务：生成章节导航。只返回 JSON 对象：{\"schema_version\":1,\"chapters\":[{\"chapter_index\":1,\"chapter_title\":\"短标题\",\"start_seconds\":0,\"end_seconds\":41,\"chapter_summary\":\"本章核心内容\",\"knowledge_points\":[{\"title\":\"短语标题\",\"seconds\":12,\"evidence_chunk_ids\":[\"转写分块ID\"]}],\"evidence_chunk_ids\":[\"转写分块ID\"]}]}. 不要输出 Markdown、代码围栏、解释文字、HTML 或 XML。\n")
+		builder.WriteString("章节必须覆盖完整视频且按时间顺序排列；时间只填数字秒数，不要填格式化时间字符串。每章默认只保留 1～2 个全片关键知识点，只有存在独立结论、方法或动作时才增加，最多 3 个；全片最多 16 个，不得为了覆盖每句转写而切碎。合并同义观点、例子和论据。\n")
+		builder.WriteString("知识点标题必须是短语或结论式短标题，使用“方法名”“动作+对象”或“核心结论”结构，不写完整句。每个章节必须有核心内容和至少一个知识点；evidence_chunk_ids 必须使用给定转写分块 ID。\n")
 	case skill.JobSummary:
 		builder.WriteString("任务：生成类型化智能总结。视频类型决定组织方式，但不能虚构模板字段；缺少证据时明确说明。\n")
 	case skill.JobSummaryEnhance:
@@ -210,5 +237,9 @@ func fallbackTitle(title, videoTitle, jobType string) string {
 }
 
 func pageContent(pageType, videoID, generation, content string) string {
-	return fmt.Sprintf("---\ntype: %s\nsource_video_id: %s\ntranscript_generation: %s\n---\n\n%s", pageType, videoID, generation, strings.TrimSpace(content))
+	schema := ""
+	if pageType == "outline" {
+		schema = "schema_version: 1\n"
+	}
+	return fmt.Sprintf("---\ntype: %s\nsource_video_id: %s\ntranscript_generation: %s\n%s---\n\n%s", pageType, videoID, generation, schema, strings.TrimSpace(content))
 }

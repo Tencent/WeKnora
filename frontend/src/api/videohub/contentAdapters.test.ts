@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { buildVideoContentState, classifyContentError, contentModuleForStage } from './contentState'
-import { mapRelatedKnowledgeResponse, parseOutlineWikiPage, parseOverviewWikiPage, parseSubtitleFile, parseSummaryWikiPage, parseTimestamp, parseTranscriptPageWikiPage } from './contentParsing'
+import { mapRelatedKnowledgeResponse, parseOutlineResponse, parseOutlineWikiPage, parseOverviewWikiPage, parseSubtitleFile, parseSummaryWikiPage, parseTimestamp, parseTranscriptPageWikiPage } from './contentParsing'
 import { getNewlyCompletedStages } from '../../components/videohub/processingStatusState'
 
 test('parses cross-hour outline timestamps and knowledge evidence', () => {
@@ -170,6 +170,28 @@ test('outline parser supports legacy title ranges and defaults missing alignment
   assert.equal(chapters[0].start_time, '00:00')
   assert.equal(chapters[0].end_time, '00:41')
   assert.equal(chapters[0].alignment_status, 'pending_alignment')
+})
+
+test('outline response prefers canonical JSON Schema v1 chapters', () => {
+  const chapters = parseOutlineResponse({
+    schema_version: 1,
+    chapters: [{
+      chapter_index: 1,
+      chapter_title: '视频引入',
+      start_seconds: 0,
+      end_seconds: 41,
+      chapter_summary: '本章介绍视频主题。',
+      knowledge_points: [{ title: '观察场景', seconds: 12 }],
+    }],
+  }, 535)
+  assert.equal(chapters.length, 1)
+  assert.equal(chapters[0].chapter_title, '视频引入')
+  assert.equal(chapters[0].end_time, '00:41')
+  assert.equal(chapters[0].knowledge_points[0].timestamp, '00:12')
+})
+
+test('outline response rejects an invalid canonical payload instead of showing empty', () => {
+  assert.throws(() => parseOutlineResponse({ schema_version: 1, chapters: [] }), /JSON Schema v1 内容无效/)
 })
 
 test('timestamp parser rejects invalid minute and second fields', () => {

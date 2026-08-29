@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -12,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/outline"
 )
 
 func TestSummaryNotGeneratedReturnsStructuredStageStatus(t *testing.T) {
@@ -91,6 +93,118 @@ func TestContentEndpointRejectsWrongArtifactPage(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if payload.ErrorCode != "artifact_contract_mismatch" {
+		t.Fatalf("error_code = %q", payload.ErrorCode)
+	}
+}
+
+func TestOutlineEndpointReturnsCanonicalChaptersWithoutSourceContent(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusCompleted,
+		DurationSeconds: 60, TranscriptGeneration: "generation-1", OutlineWikiPageID: "outline-page",
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	document := outline.Document{
+		SchemaVersion: outline.SchemaVersion,
+		Chapters: []outline.Chapter{{
+			ChapterIndex: 1, ChapterTitle: "视频引入", StartSeconds: 0, EndSeconds: 60,
+			ChapterSummary: "本章介绍视频主题。", EvidenceChunkIDs: []string{"chunk-1"},
+			KnowledgePoints: []outline.KnowledgePoint{{Title: "观察场景", Seconds: 12, EvidenceChunkIDs: []string{"chunk-1"}}},
+		}},
+	}
+	canonical, err := outline.Marshal(document)
+	if err != nil {
+		t.Fatalf("marshal outline: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/knowledgebase/kb-1/wiki/pages":
+			_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{
+				Pages: []weknora.WikiPage{{ID: "outline-page", Slug: "outline/video-1", PageType: "index"}},
+				Total: 1, TotalPages: 1,
+			})
+		case "/api/v1/knowledgebase/kb-1/wiki/pages/outline/video-1":
+			_ = json.NewEncoder(writer).Encode(weknora.WikiPage{
+				ID: "outline-page", Slug: "outline/video-1", PageType: "index",
+				Content: "---\ntype: outline\nsource_video_id: " + video.ID + "\ntranscript_generation: generation-1\nschema_version: 1\n---\n\n" + canonical,
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/outline", nil)
+	wiki := weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL})
+
+	NewContentHandler(db, wiki, "kb-1").Outline(context)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		SchemaVersion int               `json:"schema_version"`
+		Chapters      []outline.Chapter `json:"chapters"`
+		Content       string            `json:"content"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.SchemaVersion != outline.SchemaVersion || len(payload.Chapters) != 1 || payload.Chapters[0].ChapterTitle != "视频引入" || !strings.Contains(payload.Content, "## 视频引入") {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+func TestOutlineEndpointRejectsPlaceholderArtifact(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusCompleted,
+		TranscriptGeneration: "generation-1", OutlineWikiPageID: "outline-page",
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/knowledgebase/kb-1/wiki/pages":
+			_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{
+				Pages: []weknora.WikiPage{{ID: "outline-page", Slug: "outline/video-1", PageType: "index"}},
+				Total: 1, TotalPages: 1,
+			})
+		case "/api/v1/knowledgebase/kb-1/wiki/pages/outline/video-1":
+			_ = json.NewEncoder(writer).Encode(weknora.WikiPage{
+				ID: "outline-page", Slug: "outline/video-1", PageType: "index",
+				Content: "---\ntype: outline\nsource_video_id: " + video.ID + "\ntranscript_generation: generation-1\n---\n\n...",
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/outline", nil)
+	wiki := weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL})
+
+	NewContentHandler(db, wiki, "kb-1").Outline(context)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		ErrorCode string `json:"error_code"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.ErrorCode != "artifact_invalid" {
 		t.Fatalf("error_code = %q", payload.ErrorCode)
 	}
 }

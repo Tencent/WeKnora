@@ -5,7 +5,7 @@ description: 从已审计的文字稿时间轴和结构化知识生成前台可�
 
 # 生成文字稿内容大纲
 
-大纲是前台导航层，不是新的知识提取层。
+大纲是前台导航层，不是新的知识提取层。正式输出使用 JSON Schema v1；Wiki 页面只保存经后端校验后的内容产物，前端通过标准 JSON 字段渲染。
 
 ## 输入
 
@@ -31,18 +31,20 @@ description: 从已审计的文字稿时间轴和结构化知识生成前台可�
 对每个章节依次执行步骤 3～7，章节之间相互独立：
 
 3. 使用转写证据和可选知识原子组织本章，不重复提取新结论。
-4. 生成每章 1～2 个全片关键知识点；只有存在独立结论、方法或动作时才新增点位。格式见 [references/outline-template.md](references/outline-template.md)。
+4. 生成每章 1～2 个全片关键知识点；只有存在独立结论、方法或动作时才新增点位。输出字段和约束见 [references/outline-template.md](references/outline-template.md)。
 5. 按说话人和段落顺序展示本章原文。
 6. 有真实原文定位链接时提供跳转；否则只显示时间范围。
 7. 显示该章的对齐状态和必要警示。
 
 ### 三、输出
 
-8. 所有章节内容就绪后，由后端将大纲保存为 WeKnora 内容页。写入契约：`page_type` 用 `index`；页面 frontmatter 必须含 `type: outline`、`source_video_id: {视频ID}` 与 `transcript_generation: {转写代次}`。由 vidsage 内容流水线触发时，页面 slug 固定为 `outline/{视频ID}`，不得使用视频标题或其他产物 slug。
+8. 所有章节内容就绪后，由后端校验 JSON Schema v1，再保存为 WeKnora 内容页。写入契约：`page_type` 用 `index`；页面 frontmatter 必须含 `type: outline`、`source_video_id: {视频ID}`、`transcript_generation: {转写代次}` 与 `schema_version: 1`。由 vidsage 内容流水线触发时，页面 slug 固定为 `outline/{视频ID}`，不得使用视频标题或其他产物 slug。
 
 ## 强制规则
 
 - 不得只输出 `P001–P008` 而不展示对应原文。
+- 正式章节输出必须是 JSON Schema v1；不得返回 `...`、空对象或只有 Markdown 的非结构化正文。
+- 时间字段只使用数字秒数；时间显示文本由后端或前端格式化，不由模型拼接。
 - 原文完整保存在 Wiki 产物中供追溯；章节导航前端展示章节内容和时间戳，不展示原文。
 - 不得改变原文的主体、语气、范围、因果和确定程度。
 - 知识点服务于全片复习，不为覆盖每句原文而切分；同义观点、例子和论据合并到同一个知识点。

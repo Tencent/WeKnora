@@ -26,6 +26,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
+	"github.com/Tencent/WeKnora/internal/custom/service/outline"
 )
 
 // ContentHandler 内容生产聚合 handler
@@ -168,22 +169,24 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 
 // WikiPageResp 单页 Wiki 响应（CP-T009）
 type WikiPageResp struct {
-	Status                   string         `json:"status"`
-	Stage                    string         `json:"stage"`
-	ErrorCode                string         `json:"error_code"`
-	ErrorMessage             string         `json:"error_message"`
-	UpdatedAt                time.Time      `json:"updated_at"`
-	VideoID                  string         `json:"video_id"`
-	PageType                 string         `json:"page_type"` // outline / overview / summary / transcript_page
-	WikiPageID               string         `json:"wiki_page_id"`
-	TranscriptGeneration     string         `json:"transcript_generation"`
-	ArtifactVersion          int            `json:"artifact_version"`
-	SummarySource            string         `json:"summary_source,omitempty"`
-	SummaryKnowledgeEnhanced bool           `json:"summary_knowledge_enhanced,omitempty"`
-	SummaryUserEdited        bool           `json:"summary_user_edited,omitempty"`
-	KnowledgeAuditStatus     string         `json:"knowledge_audit_status,omitempty"`
-	Content                  string         `json:"content"`
-	Frontmatter              map[string]any `json:"frontmatter,omitempty"`
+	Status                   string            `json:"status"`
+	Stage                    string            `json:"stage"`
+	ErrorCode                string            `json:"error_code"`
+	ErrorMessage             string            `json:"error_message"`
+	UpdatedAt                time.Time         `json:"updated_at"`
+	VideoID                  string            `json:"video_id"`
+	PageType                 string            `json:"page_type"` // outline / overview / summary / transcript_page
+	WikiPageID               string            `json:"wiki_page_id"`
+	TranscriptGeneration     string            `json:"transcript_generation"`
+	ArtifactVersion          int               `json:"artifact_version"`
+	SchemaVersion            int               `json:"schema_version,omitempty"`
+	Chapters                 []outline.Chapter `json:"chapters,omitempty"`
+	SummarySource            string            `json:"summary_source,omitempty"`
+	SummaryKnowledgeEnhanced bool              `json:"summary_knowledge_enhanced,omitempty"`
+	SummaryUserEdited        bool              `json:"summary_user_edited,omitempty"`
+	KnowledgeAuditStatus     string            `json:"knowledge_audit_status,omitempty"`
+	Content                  string            `json:"content"`
+	Frontmatter              map[string]any    `json:"frontmatter,omitempty"`
 }
 
 // fetchWikiPageByVideoField 按 videos 表字段名取 Wiki 页
@@ -227,6 +230,25 @@ func (h *ContentHandler) fetchWikiPageByVideoField(c *gin.Context, video *model.
 		contentError(c, http.StatusInternalServerError, video.ID, pageType, "artifact_contract_mismatch", "wiki page does not satisfy the content artifact contract", video.UpdatedAt)
 		return
 	}
+	var canonical outline.Document
+	responseContent := page.Content
+	if pageType == "outline" {
+		if document, parseErr := outline.Parse(page.Content); parseErr == nil {
+			if pageSchemaVersion, ok := frontmatterInt(frontmatter, "schema_version"); !ok || pageSchemaVersion != outline.SchemaVersion {
+				contentError(c, http.StatusInternalServerError, video.ID, pageType, "artifact_invalid", "outline page schema_version is unsupported", video.UpdatedAt)
+				return
+			}
+			if validateErr := outline.Validate(document, video.DurationSeconds, nil); validateErr != nil {
+				contentError(c, http.StatusInternalServerError, video.ID, pageType, "artifact_invalid", validateErr.Error(), video.UpdatedAt)
+				return
+			}
+			canonical = document
+			responseContent = outline.RenderMarkdown(document)
+		} else if !outline.IsLegacyMarkdown(page.Content) {
+			contentError(c, http.StatusInternalServerError, video.ID, pageType, "artifact_invalid", "outline page is neither JSON Schema v1 nor valid legacy Markdown", video.UpdatedAt)
+			return
+		}
+	}
 	updatedAt := page.UpdatedAt
 	if updatedAt.IsZero() {
 		updatedAt = video.UpdatedAt
@@ -240,13 +262,48 @@ func (h *ContentHandler) fetchWikiPageByVideoField(c *gin.Context, video *model.
 		WikiPageID:               wikiID,
 		TranscriptGeneration:     video.TranscriptGeneration,
 		ArtifactVersion:          page.Version,
+		SchemaVersion:            canonical.SchemaVersion,
+		Chapters:                 canonical.Chapters,
 		SummarySource:            video.SummarySource,
 		SummaryKnowledgeEnhanced: video.SummaryKnowledgeEnhanced,
 		SummaryUserEdited:        video.SummaryUserEdited,
 		KnowledgeAuditStatus:     video.KnowledgeAuditStatus,
-		Content:                  page.Content,
+		Content:                  responseContent,
 		Frontmatter:              frontmatter,
 	})
+}
+
+func frontmatterInt(frontmatter map[string]any, key string) (int, bool) {
+	value, ok := frontmatter[key]
+	if !ok {
+		return 0, false
+	}
+	switch number := value.(type) {
+	case int:
+		return number, true
+	case int8:
+		return int(number), true
+	case int16:
+		return int(number), true
+	case int32:
+		return int(number), true
+	case int64:
+		return int(number), true
+	case uint:
+		return int(number), true
+	case uint8:
+		return int(number), true
+	case uint16:
+		return int(number), true
+	case uint32:
+		return int(number), true
+	case uint64:
+		return int(number), true
+	case float64:
+		return int(number), number == float64(int(number))
+	default:
+		return 0, false
+	}
 }
 
 func contentError(c *gin.Context, httpStatus int, videoID, stage, code, message string, updatedAt time.Time) {

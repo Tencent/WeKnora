@@ -1,5 +1,36 @@
 # 内容大纲模板
 
+## JSON Schema v1
+
+完整 Schema 文件见 [outline-schema-v1.json](outline-schema-v1.json)。
+
+模型必须只返回一个 JSON 对象，不返回 Markdown、代码围栏或解释文字：
+
+```json
+{
+  "schema_version": 1,
+  "chapters": [
+    {
+      "chapter_index": 1,
+      "chapter_title": "短标题",
+      "start_seconds": 0,
+      "end_seconds": 41,
+      "chapter_summary": "本章核心内容",
+      "evidence_chunk_ids": ["转写分块ID"],
+      "knowledge_points": [
+        {
+          "title": "短语标题",
+          "seconds": 12,
+          "evidence_chunk_ids": ["转写分块ID"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+后端负责校验结构、时间范围、证据分块和占位符，再将合规产物写入 Wiki；前端通过接口返回的 `chapters` 渲染，不直接解析模型原文。
+
 ```markdown
 # 文字稿标题｜内容大纲
 

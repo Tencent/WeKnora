@@ -24,6 +24,27 @@ interface BackendAnchor {
   seconds?: number
 }
 
+interface CanonicalKnowledgePoint {
+  title?: string
+  seconds?: number
+}
+
+interface CanonicalChapter {
+  chapter_index?: number
+  chapter_title?: string
+  start_seconds?: number
+  end_seconds?: number
+  chapter_summary?: string
+  knowledge_points?: CanonicalKnowledgePoint[]
+  alignment_status?: Chapter['alignment_status']
+}
+
+export interface CanonicalOutlineResponse {
+  schema_version?: number
+  chapters?: CanonicalChapter[]
+  content?: string
+}
+
 interface BackendCrossVideoItem extends BackendAnchor {
   anchor_id?: string
   relation_type?: RelationType
@@ -54,7 +75,59 @@ export function parseTimestamp(value: string): number {
   return parts[0] * 3600 + parts[1] * 60 + parts[2]
 }
 
-function formatTimestamp(seconds: number): string {
+function parseCanonicalOutline(response: CanonicalOutlineResponse, durationSeconds: number): Chapter[] {
+  if (response.schema_version !== 1 || !Array.isArray(response.chapters) || response.chapters.length === 0) {
+    throw new Error('章节 JSON Schema v1 内容无效')
+  }
+  return response.chapters.map((chapter, chapterIndex) => {
+    const startSeconds = chapter.start_seconds
+    const endSeconds = chapter.end_seconds
+    if (typeof startSeconds !== 'number' || typeof endSeconds !== 'number' || !Number.isInteger(startSeconds) || !Number.isInteger(endSeconds) || endSeconds <= startSeconds) {
+      throw new Error(`章节 ${chapterIndex + 1} 时间范围无效`)
+    }
+    if (durationSeconds > 0 && (startSeconds < 0 || endSeconds > durationSeconds)) {
+      throw new Error(`章节 ${chapterIndex + 1} 超出视频时长`)
+    }
+    if (!chapter.chapter_title?.trim() || !chapter.chapter_summary?.trim() || !Array.isArray(chapter.knowledge_points)) {
+      throw new Error(`章节 ${chapterIndex + 1} 内容不完整`)
+    }
+    return {
+      id: `chapter-${chapterIndex + 1}`,
+      chapter_index: String(chapter.chapter_index ?? chapterIndex + 1).padStart(2, '0'),
+      chapter_title: chapter.chapter_title.trim(),
+      start_time: formatTimestamp(startSeconds),
+      start_seconds: startSeconds,
+      end_time: formatTimestamp(endSeconds),
+      end_seconds: endSeconds,
+      chapter_summary: chapter.chapter_summary.trim(),
+      knowledge_points: chapter.knowledge_points.map((point, pointIndex) => {
+        if (!point.title?.trim() || typeof point.seconds !== 'number' || !Number.isInteger(point.seconds)) {
+          throw new Error(`章节 ${chapterIndex + 1} 知识点 ${pointIndex + 1} 内容无效`)
+        }
+        if (point.seconds < startSeconds || point.seconds > endSeconds) {
+          throw new Error(`章节 ${chapterIndex + 1} 知识点 ${pointIndex + 1} 时间范围无效`)
+        }
+        return {
+          id: `chapter-${chapterIndex + 1}-point-${pointIndex + 1}`,
+          title: point.title.trim(),
+          timestamp: formatTimestamp(point.seconds),
+          seconds: point.seconds,
+        }
+      }),
+      alignment_status: chapter.alignment_status,
+    }
+  })
+}
+
+export function parseOutlineResponse(response: CanonicalOutlineResponse, durationSeconds = 0): Chapter[] {
+  if (response.schema_version !== undefined || response.chapters !== undefined) {
+    return parseCanonicalOutline(response, durationSeconds)
+  }
+  if (!response.content?.trim()) throw new Error('章节内容为空')
+  return parseOutlineWikiPage(response.content, durationSeconds)
+}
+
+export function formatTimestamp(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds))
   const hours = Math.floor(whole / 3600)
   const minutes = Math.floor((whole % 3600) / 60)

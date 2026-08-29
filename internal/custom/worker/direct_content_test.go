@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/outline"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
 	"github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
@@ -29,10 +30,21 @@ func TestBuildDirectContentPromptIncludesTranscriptEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildDirectContentPrompt returned error: %v", err)
 	}
-	for _, expected := range []string{"视频一", "training", "chunk-1", "原文内容", "章节导航", "本章核心内容", "关键知识点", "1～2 个", "8～16 个", "短标题", "不要输出 Markdown 代码围栏"} {
+	for _, expected := range []string{"视频一", "training", "chunk-1", "原文内容", "章节导航", "schema_version", "chapter_index", "start_seconds", "knowledge_points", "1～2 个", "短标题", "不要输出 Markdown 代码围栏"} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("prompt does not contain %q: %s", expected, prompt)
 		}
+	}
+}
+
+func TestOutlineLLMResponseUsesSchemaV1(t *testing.T) {
+	var document outline.Document
+	response := `{"schema_version":1,"chapters":[{"chapter_index":1,"chapter_title":"视频引入","start_seconds":0,"end_seconds":60,"chapter_summary":"本章介绍视频主题。","evidence_chunk_ids":["chunk-1"],"knowledge_points":[{"title":"观察场景","seconds":12,"evidence_chunk_ids":["chunk-1"]}]}]}`
+	if err := parseLLMJSONResponse(response, &document); err != nil {
+		t.Fatalf("parseLLMJSONResponse returned error: %v", err)
+	}
+	if err := outline.Validate(document, 60, map[string]struct{}{"chunk-1": {}}); err != nil {
+		t.Fatalf("outline.Validate returned error: %v", err)
 	}
 }
 

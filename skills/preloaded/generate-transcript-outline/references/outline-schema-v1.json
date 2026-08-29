@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://weknora.local/schemas/outline-v1.json",
+  "title": "WeKnora Transcript Outline v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "chapters"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "chapters": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/chapter"
+      }
+    }
+  },
+  "$defs": {
+    "evidenceChunkIds": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "shortTitle": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 60,
+      "pattern": "^[^。！？；;\\n]+$"
+    },
+    "knowledgePoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "seconds", "evidence_chunk_ids"],
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/shortTitle"
+        },
+        "seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "evidence_chunk_ids": {
+          "$ref": "#/$defs/evidenceChunkIds"
+        }
+      }
+    },
+    "chapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "chapter_index",
+        "chapter_title",
+        "start_seconds",
+        "end_seconds",
+        "chapter_summary",
+        "knowledge_points",
+        "evidence_chunk_ids"
+      ],
+      "properties": {
+        "chapter_index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "chapter_title": {
+          "$ref": "#/$defs/shortTitle"
+        },
+        "start_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_seconds": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "chapter_summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "knowledge_points": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/knowledgePoint"
+          }
+        },
+        "alignment_status": {
+          "enum": ["verified", "aligned", "pending_alignment"]
+        },
+        "evidence_chunk_ids": {
+          "$ref": "#/$defs/evidenceChunkIds"
+        }
+      }
+    }
+  }
+}

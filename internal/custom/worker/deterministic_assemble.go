@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	outlinecontract "github.com/Tencent/WeKnora/internal/custom/service/outline"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
 )
 
@@ -52,7 +53,8 @@ func (h *DeterministicAssembleHandler) Run(ctx context.Context, job *model.Video
 		}
 	}
 
-	content := composeTranscriptPage(video.Title, video.ID, generation, outline.Content, summary.Content, knowledge)
+	outlineContent := outlinecontract.RenderOrLegacy(outline.Content)
+	content := composeTranscriptPage(video.Title, video.ID, generation, outlineContent, summary.Content, knowledge)
 	page, err := h.Wiki.UpsertPage(ctx, h.KBID, weknora.WikiPageWrite{
 		Slug:     "transcript-page/" + video.ID,
 		Title:    video.Title,
