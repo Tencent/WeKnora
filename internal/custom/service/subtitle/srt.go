@@ -66,18 +66,6 @@ func ValidateTranscriptQuality(paragraphs []TranscriptParagraph, durationSeconds
 	if durationSeconds > 0 && (firstStart > durationSeconds*1000+5*60*1000 || lastEnd > durationSeconds*1000+5*60*1000) {
 		return fmt.Errorf("transcript timeline exceeds video duration: first_start_ms=%d last_end_ms=%d duration_seconds=%d", firstStart, lastEnd, durationSeconds)
 	}
-	if durationSeconds > 0 {
-		tolerance := durationSeconds * 1000 / 10
-		if tolerance < 30*1000 {
-			tolerance = 30 * 1000
-		}
-		if tolerance > 5*60*1000 {
-			tolerance = 5 * 60 * 1000
-		}
-		if firstStart > tolerance || lastEnd < durationSeconds*1000-tolerance {
-			return fmt.Errorf("transcript does not cover video boundaries: first_start_ms=%d last_end_ms=%d duration_seconds=%d", firstStart, lastEnd, durationSeconds)
-		}
-	}
 	return nil
 }
 

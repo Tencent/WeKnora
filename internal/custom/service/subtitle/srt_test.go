@@ -69,3 +69,24 @@ func TestValidateTranscriptQualityAcceptsCompleteTimeline(t *testing.T) {
 		t.Fatalf("ValidateTranscriptQuality() error = %v", err)
 	}
 }
+
+func TestValidateTranscriptQualityAllowsTrailingSilence(t *testing.T) {
+	paragraphs := []TranscriptParagraph{{Sentences: []TranscriptSentence{
+		{Text: "开场内容", StartMs: 0, EndMs: 12_000},
+		{Text: "主体内容", StartMs: 384_000, EndMs: 396_319},
+	}}}
+
+	if err := ValidateTranscriptQuality(paragraphs, 535); err != nil {
+		t.Fatalf("ValidateTranscriptQuality() error = %v, want trailing silence to be accepted", err)
+	}
+}
+
+func TestValidateTranscriptQualityRejectsTimelineBeyondVideoDuration(t *testing.T) {
+	paragraphs := []TranscriptParagraph{{Sentences: []TranscriptSentence{
+		{Text: "超出视频时长", StartMs: 0, EndMs: 310_001},
+	}}}
+
+	if err := ValidateTranscriptQuality(paragraphs, 10); err == nil {
+		t.Fatal("ValidateTranscriptQuality() error = nil, want timeline overflow error")
+	}
+}
