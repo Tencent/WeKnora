@@ -8,7 +8,6 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/custom/client/llm"
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
@@ -81,7 +80,7 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		return fmt.Errorf("generate %s: %w", h.Job, err)
 	}
 	var output generatedContent
-	if err := common.ParseLLMJsonResponse(raw, &output); err != nil {
+	if err := parseLLMJSONResponse(raw, &output); err != nil {
 		return fmt.Errorf("parse %s output: %w", h.Job, err)
 	}
 	if strings.TrimSpace(output.Content) == "" {
@@ -116,6 +115,36 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		return err
 	}
 	return nil
+}
+
+func parseLLMJSONResponse(content string, target any) error {
+	err := json.Unmarshal([]byte(content), target)
+	if err == nil {
+		return nil
+	}
+
+	if fenceStart := strings.Index(content, "```"); fenceStart >= 0 {
+		fenced := content[fenceStart+3:]
+		fenced = strings.TrimLeft(fenced, " \t\r\n")
+		if strings.HasPrefix(fenced, "json") {
+			fenced = strings.TrimLeft(fenced[4:], " \t\r\n")
+		}
+		if fenceEnd := strings.Index(fenced, "```"); fenceEnd >= 0 {
+			if fenceErr := json.Unmarshal([]byte(strings.TrimSpace(fenced[:fenceEnd])), target); fenceErr == nil {
+				return nil
+			}
+		}
+	}
+
+	objectStart := strings.IndexByte(content, '{')
+	objectEnd := strings.LastIndexByte(content, '}')
+	if objectStart >= 0 && objectEnd > objectStart {
+		if objectErr := json.Unmarshal([]byte(content[objectStart:objectEnd+1]), target); objectErr == nil {
+			return nil
+		}
+	}
+
+	return err
 }
 
 func (h *DirectContentHandler) addEnhancementContext(ctx context.Context, video *model.Video, prompt string) (string, error) {

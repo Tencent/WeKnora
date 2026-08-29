@@ -9,6 +9,21 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
 
+func TestParseLLMJSONResponseSupportsFencedAndProseWrappedJSON(t *testing.T) {
+	for _, response := range []string{
+		"```json\n{\"title\":\"标题\",\"content\":\"正文\"}\n```",
+		"结果如下：{\"title\":\"标题\",\"content\":\"正文\"}谢谢。",
+	} {
+		var output generatedContent
+		if err := parseLLMJSONResponse(response, &output); err != nil {
+			t.Fatalf("parseLLMJSONResponse returned error: %v", err)
+		}
+		if output.Title != "标题" || !strings.Contains(output.Content, "正文") {
+			t.Fatalf("unexpected parsed output: %+v", output)
+		}
+	}
+}
+
 func TestBuildDirectContentPromptIncludesTranscriptEvidence(t *testing.T) {
 	prompt, err := buildDirectContentPrompt(&model.Video{Title: "视频一", VideoType: "training"}, skill.JobOverview, []transcript.Chunk{{ID: "chunk-1", Index: 0, Content: "原文内容"}})
 	if err != nil {
