@@ -31,6 +31,7 @@ import {
   createKnowledgeFromURL,
   reparseKnowledge,
   cancelKnowledgeParse,
+  batchCancelKnowledgeParse,
   batchDeleteKnowledge,
   batchReparseKnowledge,
   getKnowledgeSpans,
@@ -39,6 +40,8 @@ import {
   moveKnowledgeToFolder,
   renameKnowledgeFolder,
   downKnowledgeDetails,
+  type KnowledgeBatchFilterPayload,
+  type KnowledgeBatchSelectionPayload,
   type KnowledgeFolderTree,
 } from "@/api/knowledge-base/index";
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
@@ -435,9 +438,23 @@ watch(viewMode, (v) => {
 // Multi-select state — shared between grid and list views.
 // Vue 3.5 tracks Set#add/delete natively, so direct mutation is reactive.
 const selectedIds = ref<Set<string>>(new Set());
+/** explicit = user-picked IDs; all_matching = select_all by current list filter. */
+type SelectionMode = 'explicit' | 'all_matching';
+const selectionMode = ref<SelectionMode>('explicit');
+const selectAllFilters = ref<KnowledgeBatchFilterPayload | null>(null);
+const excludedIds = ref<Set<string>>(new Set());
+const selectAllLoading = ref(false);
+const selectionCount = computed(() => {
+  if (selectionMode.value === 'all_matching') {
+    return Math.max(0, (total.value || 0) - excludedIds.value.size);
+  }
+  return selectedIds.value.size;
+});
+const hasSelection = computed(() => selectionCount.value > 0);
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
+const batchCancelParsing = ref(false);
 const batchTagging = ref(false);
 const batchTagDialogVisible = ref(false);
 const batchTagPreSelectedIds = computed(() => {
@@ -494,38 +511,194 @@ const awaitBatchReparseReflection = async (ids: string[]) => {
   pendingReparseAck.value.clear();
 };
 
-const confirmBatchReparse = async () => {
-  if (batchReparsing.value || batchDeleting.value || selectedIds.value.size === 0) return;
-  const allIds = Array.from(selectedIds.value);
-  const ids = allIds.filter((id) => {
-    const item = cardList.value.find((c) => c.id === id);
-    return !item || !isParseInFlight(item.parse_status);
-  });
-  const skipped = allIds.length - ids.length;
-  if (ids.length === 0) {
-    MessagePlugin.info(t('knowledgeBase.rebuildInProgress'));
-    return;
+const BATCH_REPARSE_MAX_IDS = 200;
+const chunkIds = (ids: string[], size: number): string[][] => {
+  if (size <= 0) return [ids];
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) {
+    chunks.push(ids.slice(i, i + size));
   }
-  if (skipped > 0) {
-    MessagePlugin.warning(t('knowledgeBase.batchReparseSkippedInFlight', { count: skipped }));
+  return chunks;
+};
+
+const buildSelectAllFilterPayload = (params: Record<string, any> = filterParams.value): KnowledgeBatchFilterPayload => {
+  const tagIds = typeof params.tag_ids === 'string' && params.tag_ids
+    ? params.tag_ids.split(',').map((s: string) => s.trim()).filter(Boolean)
+    : Array.isArray(params.tag_ids) ? params.tag_ids : undefined;
+  return {
+    tag_ids: tagIds?.length ? tagIds : undefined,
+    keyword: params.keyword || undefined,
+    file_type: params.file_type || undefined,
+    parse_status: params.parse_status || undefined,
+    source: params.source || undefined,
+    start_time: params.start_time || undefined,
+    end_time: params.end_time || undefined,
+    folder_path: params.folder_path ?? '',
+    folder_recursive: !!params.folder_recursive,
+  };
+};
+
+const buildBatchSelectionPayload = (): KnowledgeBatchSelectionPayload | undefined => {
+  if (selectionMode.value !== 'all_matching' || !selectAllFilters.value) return undefined;
+  return {
+    select_all: true,
+    exclude_ids: Array.from(excludedIds.value),
+    filter: selectAllFilters.value,
+  };
+};
+
+const applyOptimisticBatchCancel = (ids: string[]) => {
+  const idSet = new Set(ids);
+  for (const card of cardList.value) {
+    if (!idSet.has(card.id)) continue;
+    if (!isParseInFlight(card.parse_status)) continue;
+    card.parse_status = 'cancelled';
+    card.error_message = '用户已取消解析';
+  }
+};
+
+const confirmBatchReparse = async () => {
+  if (batchReparsing.value || batchDeleting.value || batchCancelParsing.value || !hasSelection.value) return;
+  const selection = buildBatchSelectionPayload();
+  let ids: string[] = [];
+  let skipped = 0;
+  if (!selection) {
+    const allIds = Array.from(selectedIds.value);
+    ids = allIds.filter((id) => {
+      const item = cardList.value.find((c) => c.id === id);
+      return !item || !isParseInFlight(item.parse_status);
+    });
+    skipped = allIds.length - ids.length;
+    if (ids.length === 0) {
+      MessagePlugin.info(t('knowledgeBase.rebuildInProgress'));
+      return;
+    }
+    if (skipped > 0) {
+      MessagePlugin.warning(t('knowledgeBase.batchReparseSkippedInFlight', { count: skipped }));
+    }
   }
   batchReparsing.value = true;
   try {
-    const res: any = await batchReparseKnowledge(kbId.value, ids);
-    if (res?.success) {
-      MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: ids.length }));
-      applyOptimisticBatchReparse(ids);
+    if (selection) {
+      const res: any = await batchReparseKnowledge(kbId.value, [], undefined, selection);
+      if (res?.success) {
+        const count = res?.data?.reparse_count ?? selectionCount.value;
+        MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count }));
+        applyOptimisticBatchReparse(Array.from(selectedIds.value).filter((id) => {
+          const item = cardList.value.find((c) => c.id === id);
+          return !item || !isParseInFlight(item.parse_status);
+        }));
+        clearSelection();
+        batchMode.value = false;
+        scheduleWikiStatusProbes();
+        void loadKnowledgeFiles(kbId.value);
+      } else {
+        MessagePlugin.error(t('knowledgeBase.batchReparseFailed'));
+      }
+      return;
+    }
+    const chunks = chunkIds(ids, BATCH_REPARSE_MAX_IDS);
+    const settled = await Promise.allSettled(
+      chunks.map((group) => batchReparseKnowledge(kbId.value, group)),
+    );
+    let submittedCount = 0;
+    let failedCount = 0;
+    const submittedIds: string[] = [];
+    settled.forEach((result, index) => {
+      const group = chunks[index];
+      if (result.status === 'fulfilled' && (result.value as any)?.success) {
+        submittedCount += group.length;
+        submittedIds.push(...group);
+      } else {
+        failedCount += group.length;
+      }
+    });
+    if (submittedCount > 0) {
+      MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: submittedCount }));
+      if (failedCount > 0) {
+        MessagePlugin.warning(t('knowledgeBase.batchReparsePartial', { succeeded: submittedCount, failed: failedCount }));
+      }
+      applyOptimisticBatchReparse(submittedIds);
       clearSelection();
       batchMode.value = false;
       scheduleWikiStatusProbes();
-      void awaitBatchReparseReflection(ids);
+      void awaitBatchReparseReflection(submittedIds);
     } else {
-      MessagePlugin.error(res?.message || t('knowledgeBase.batchReparseFailed'));
+      MessagePlugin.error(t('knowledgeBase.batchReparseFailed'));
     }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('knowledgeBase.batchReparseFailed'));
   } finally {
     batchReparsing.value = false;
+  }
+};
+
+const confirmBatchCancelParse = async () => {
+  if (batchCancelParsing.value || batchDeleting.value || batchReparsing.value || !hasSelection.value) return;
+  const selection = buildBatchSelectionPayload();
+  let ids: string[] = [];
+  let skippedKnownNotInFlight = 0;
+  if (!selection) {
+    const allIds = Array.from(selectedIds.value);
+    for (const id of allIds) {
+      const item = cardList.value.find((c) => c.id === id);
+      if (!item || isParseInFlight(item.parse_status)) {
+        ids.push(id);
+      } else {
+        skippedKnownNotInFlight++;
+      }
+    }
+    if (ids.length === 0) {
+      MessagePlugin.info(t('knowledgeBase.batchCancelParseNoInFlight'));
+      return;
+    }
+    if (skippedKnownNotInFlight > 0) {
+      MessagePlugin.warning(t('knowledgeBase.batchCancelParseSkippedNotInFlight', { count: skippedKnownNotInFlight }));
+    }
+  }
+  batchCancelParsing.value = true;
+  const submitCount = selection ? selectionCount.value : ids.length;
+  MessagePlugin.info(t('knowledgeBase.batchCancelParseSubmitting', { count: submitCount }));
+  try {
+    let cancelled = 0;
+    let failed = 0;
+    let skipped = 0;
+    if (selection) {
+      const res: any = await batchCancelKnowledgeParse(kbId.value, [], selection);
+      cancelled = res?.data?.cancelled ?? 0;
+      failed = res?.data?.failed ?? 0;
+      skipped = res?.data?.skipped ?? 0;
+    } else {
+      // Explicit mode still respects backend maxBatch=200.
+      const chunks = chunkIds(ids, BATCH_REPARSE_MAX_IDS);
+      for (const group of chunks) {
+        const res: any = await batchCancelKnowledgeParse(kbId.value, group);
+        cancelled += res?.data?.cancelled ?? 0;
+        failed += res?.data?.failed ?? 0;
+        skipped += res?.data?.skipped ?? 0;
+      }
+    }
+    if (cancelled > 0) {
+      MessagePlugin.success(t('knowledgeBase.batchCancelParseSuccess', { count: cancelled }));
+      applyOptimisticBatchCancel(Array.from(selectedIds.value));
+      clearSelection();
+      batchMode.value = false;
+      await loadKnowledgeFiles(kbId.value);
+      scheduleWikiStatusProbes();
+    }
+    if (failed > 0 || (cancelled === 0 && skipped > 0 && !selection)) {
+      MessagePlugin.error(t('knowledgeBase.batchCancelParsePartial', {
+        succeeded: cancelled,
+        failed: failed || skipped,
+      }));
+    }
+    if (cancelled === 0 && failed === 0 && selection) {
+      MessagePlugin.info(t('knowledgeBase.batchCancelParseNoInFlight'));
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.batchCancelParseFailed'));
+  } finally {
+    batchCancelParsing.value = false;
   }
 };
 
@@ -825,16 +998,55 @@ const folderOptions = computed(() => {
   return result;
 });
 
-const moveKnowledgeIntoFolder = async (ids: string[], folderPath: string) => {
-  if (!kbId.value || ids.length === 0) return;
+// honorSelectAll: only batch-bar "move" should use select_all. Per-row move must
+// stay id-scoped even while the table is in all_matching mode.
+const moveKnowledgeIntoFolder = async (
+  ids: string[],
+  folderPath: string,
+  options?: { honorSelectAll?: boolean },
+) => {
+  if (!kbId.value) return;
+  const selection = options?.honorSelectAll ? buildBatchSelectionPayload() : undefined;
+  if (!selection && ids.length === 0) return;
   try {
-    await moveKnowledgeToFolder(kbId.value, ids, folderPath);
-    MessagePlugin.success(t('knowledgeBase.moveToFolder.success', { count: ids.length }));
-    clearSelection();
-    batchMode.value = false;
-    resetPage();
-    await loadKnowledgeFiles(kbId.value);
-    await loadFolderTree(kbId.value);
+    if (selection) {
+      const res: any = await moveKnowledgeToFolder(kbId.value, [], folderPath, selection);
+      const count = res?.data?.moved_count ?? selectionCount.value;
+      MessagePlugin.success(t('knowledgeBase.moveToFolder.success', { count }));
+      clearSelection();
+      batchMode.value = false;
+      resetPage();
+      await loadKnowledgeFiles(kbId.value);
+      await loadFolderTree(kbId.value);
+      return;
+    }
+    const chunks = chunkIds(ids, BATCH_REPARSE_MAX_IDS);
+    const settled = await Promise.allSettled(
+      chunks.map((group) => moveKnowledgeToFolder(kbId.value, group, folderPath)),
+    );
+    let succeeded = 0;
+    let failed = 0;
+    settled.forEach((result, index) => {
+      const group = chunks[index];
+      if (result.status === 'fulfilled') {
+        succeeded += group.length;
+      } else {
+        failed += group.length;
+      }
+    });
+    if (succeeded > 0) {
+      MessagePlugin.success(t('knowledgeBase.moveToFolder.success', { count: succeeded }));
+      if (failed > 0) {
+        MessagePlugin.warning(t('knowledgeBase.moveToFolder.partial', { succeeded, failed }));
+      }
+      clearSelection();
+      batchMode.value = false;
+      resetPage();
+      await loadKnowledgeFiles(kbId.value);
+      await loadFolderTree(kbId.value);
+      return;
+    }
+    MessagePlugin.error(t('knowledgeBase.moveToFolder.failed'));
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('knowledgeBase.moveToFolder.failed'));
   }
@@ -2000,17 +2212,29 @@ const syncDocumentSummaryState = (state: { id?: string; summary_status?: string;
 const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {
   const items = cardList.value || [];
   const idx = items.findIndex((i: KnowledgeCard) => i.id === id);
+  const applyOne = (targetId: string, on: boolean) => {
+    if (selectionMode.value === 'all_matching') {
+      if (on) {
+        excludedIds.value.delete(targetId);
+        selectedIds.value.add(targetId);
+      } else {
+        excludedIds.value.add(targetId);
+        selectedIds.value.delete(targetId);
+      }
+      return;
+    }
+    if (on) selectedIds.value.add(targetId);
+    else selectedIds.value.delete(targetId);
+  };
   if (shiftKey && lastSelectedIndex >= 0 && idx >= 0) {
     const [s, e] = idx < lastSelectedIndex
       ? [idx, lastSelectedIndex]
       : [lastSelectedIndex, idx];
     for (let i = s; i <= e; i++) {
-      if (checked) selectedIds.value.add(items[i].id);
-      else selectedIds.value.delete(items[i].id);
+      applyOne(items[i].id, checked);
     }
   } else {
-    if (checked) selectedIds.value.add(id);
-    else selectedIds.value.delete(id);
+    applyOne(id, checked);
   }
   lastSelectedIndex = idx;
 };
@@ -2020,15 +2244,25 @@ const onCardGridCheckboxChange = (id: string, checked: boolean, ctx?: { e?: Even
   toggleSelectRow(id, checked, !!me?.shiftKey);
 };
 
+// 全选：按当前列表筛选进入 all_matching，由后端 batch API 的 select_all 解析目标集合。
+// 不再前端翻页拉取全部 ID。取消勾选个别文档写入 exclude_ids。
 const toggleSelectAll = (checked: boolean) => {
-  if (checked) {
-    for (const item of cardList.value || []) selectedIds.value.add(item.id);
-  } else {
-    for (const item of cardList.value || []) selectedIds.value.delete(item.id);
+  if (!checked) {
+    clearSelection();
+    return;
   }
+  selectionMode.value = 'all_matching';
+  selectAllFilters.value = buildSelectAllFilterPayload();
+  excludedIds.value.clear();
+  for (const item of cardList.value || []) selectedIds.value.add(item.id);
+  selectAllLoading.value = false;
 };
 
 const clearSelection = () => {
+  selectionMode.value = 'explicit';
+  selectAllFilters.value = null;
+  excludedIds.value.clear();
+  selectAllLoading.value = false;
   selectedIds.value.clear();
   lastSelectedIndex = -1;
 };
@@ -2049,7 +2283,7 @@ const handleBatchCancel = () => {
 // 切到卡片视图时，如果列表视图里已经勾选过文档，需要自动开启批量管理模式，
 // 否则卡片视图默认不渲染 checkbox，会看不到勾选态。
 watch(viewMode, (mode) => {
-  if (mode === 'grid' && selectedIds.value.size > 0) {
+  if (mode === 'grid' && hasSelection.value) {
     batchMode.value = true;
   }
 });
@@ -2072,7 +2306,9 @@ const {
   itemSelector: '.knowledge-card[data-select-id], .doc-list-row[data-select-id]',
   selectedIds,
   getItemId: (el) => el.dataset.selectId || null,
-  enabled: computed(() => canEdit.value && !isFAQ.value && cardList.value.length > 0),
+  // Marquee mutates selectedIds directly; disable under select_all so exclude_ids stays consistent.
+  enabled: computed(() =>
+    canEdit.value && !isFAQ.value && cardList.value.length > 0 && selectionMode.value === 'explicit'),
   onSelectionStart: () => {
     batchMode.value = true;
   },
@@ -2094,14 +2330,55 @@ const openKnowledgeItem = (item: KnowledgeCard) => {
 };
 
 const confirmBatchDelete = async () => {
-  if (batchDeleting.value || batchReparsing.value || selectedIds.value.size === 0) return;
-  const ids = Array.from(selectedIds.value);
-  const deletedIdSet = new Set(ids);
+  if (batchDeleting.value || batchReparsing.value || batchCancelParsing.value || !hasSelection.value) return;
+  const selection = buildBatchSelectionPayload();
+  const ids = selection ? [] : Array.from(selectedIds.value);
   batchDeleting.value = true;
   try {
-    const res: any = await batchDeleteKnowledge(kbId.value, ids);
-    if (res?.success) {
-      MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: ids.length }));
+    if (selection) {
+      const res: any = await batchDeleteKnowledge(kbId.value, [], selection);
+      if (res?.success) {
+        const count = res?.data?.deleted_count ?? selectionCount.value;
+        MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count }));
+        clearSelection();
+        batchMode.value = false;
+        resetPage();
+        const maxPolls = 30;
+        const delayMs = 400;
+        for (let i = 0; i < maxPolls; i++) {
+          await loadKnowledgeFiles(kbId.value);
+          await new Promise<void>((r) => setTimeout(r, delayMs));
+          // select_all deletes are async; brief poll then refresh tags/tree
+          if (i >= 2) break;
+        }
+        loadTags(kbId.value, true);
+        void loadFolderTree(kbId.value);
+      } else {
+        MessagePlugin.error(t('knowledgeBase.batchDeleteFailed'));
+      }
+      return;
+    }
+    const chunks = chunkIds(ids, BATCH_REPARSE_MAX_IDS);
+    const settled = await Promise.allSettled(
+      chunks.map((group) => batchDeleteKnowledge(kbId.value, group)),
+    );
+    let succeeded = 0;
+    let failed = 0;
+    const deletedIdSet = new Set<string>();
+    settled.forEach((result, index) => {
+      const group = chunks[index];
+      if (result.status === 'fulfilled' && (result.value as any)?.success) {
+        succeeded += group.length;
+        group.forEach((id) => deletedIdSet.add(id));
+      } else {
+        failed += group.length;
+      }
+    });
+    if (succeeded > 0) {
+      MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: succeeded }));
+      if (failed > 0) {
+        MessagePlugin.warning(t('knowledgeBase.batchDeletePartial', { succeeded, failed }));
+      }
       clearSelection();
       batchMode.value = false;
       resetPage();
@@ -2117,7 +2394,7 @@ const confirmBatchDelete = async () => {
       loadTags(kbId.value, true);
       void loadFolderTree(kbId.value);
     } else {
-      MessagePlugin.error(res?.message || t('knowledgeBase.batchDeleteFailed'));
+      MessagePlugin.error(t('knowledgeBase.batchDeleteFailed'));
     }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('knowledgeBase.batchDeleteFailed'));
@@ -2127,21 +2404,31 @@ const confirmBatchDelete = async () => {
 };
 
 const handleBatchTag = () => {
-  if (batchDeleting.value || batchReparsing.value || batchTagging.value || selectedIds.value.size === 0) return;
+  if (batchDeleting.value || batchReparsing.value || batchCancelParsing.value || batchTagging.value || !hasSelection.value) return;
   batchTagDialogVisible.value = true;
 };
 
 const onBatchTagConfirm = async (tagIds: string[]) => {
-  if (batchTagging.value || selectedIds.value.size === 0) return;
-  const ids = Array.from(selectedIds.value);
-  const updateMap: Record<string, string[]> = {};
-  for (const id of ids) {
-    updateMap[id] = tagIds;
-  }
+  if (batchTagging.value || !hasSelection.value) return;
+  const selection = buildBatchSelectionPayload();
   batchTagging.value = true;
   try {
-    await updateKnowledgeTagBatch({ updates: updateMap });
-    MessagePlugin.success(t('knowledgeBase.batchTagSuccess', { count: ids.length }));
+    if (selection) {
+      await updateKnowledgeTagBatch({
+        kb_id: kbId.value,
+        tag_ids: tagIds,
+        ...selection,
+      });
+      MessagePlugin.success(t('knowledgeBase.batchTagSuccess', { count: selectionCount.value }));
+    } else {
+      const ids = Array.from(selectedIds.value);
+      const updateMap: Record<string, string[]> = {};
+      for (const id of ids) {
+        updateMap[id] = tagIds;
+      }
+      await updateKnowledgeTagBatch({ updates: updateMap, kb_id: kbId.value });
+      MessagePlugin.success(t('knowledgeBase.batchTagSuccess', { count: ids.length }));
+    }
     batchTagDialogVisible.value = false;
     clearSelection();
     batchMode.value = false;
@@ -2239,6 +2526,14 @@ watch(cardList, () => {
   }
   if (moreIndex.value >= n) {
     moreIndex.value = -1;
+  }
+  if (selectionMode.value === 'all_matching') {
+    // Newly loaded rows are selected unless explicitly excluded.
+    for (const item of items) {
+      if (!excludedIds.value.has(item.id)) selectedIds.value.add(item.id);
+      else selectedIds.value.delete(item.id);
+    }
+    return;
   }
   if (selectedIds.value.size === 0) return;
   const visible = new Set(items.map((i: KnowledgeCard) => i.id));
@@ -2672,13 +2967,15 @@ async function createNewSession(value: string): Promise<void> {
                   </div>
                 </template>
               </div>
-              <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
-                <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
-                  :reparse-loading="batchReparsing" :tag-loading="batchTagging" :visible="batchMode || selectedIds.size > 0"
+              <div class="doc-batch-bar-anchor" v-show="batchMode || hasSelection">
+                <DocumentBatchBar :count="selectionCount" :delete-loading="batchDeleting"
+                  :reparse-loading="batchReparsing" :cancel-parse-loading="batchCancelParsing"
+                  :select-all-loading="selectAllLoading" :tag-loading="batchTagging" :visible="batchMode || hasSelection"
                   :show-move-to-folder="canEdit" :folder-options="folderOptions"
                   @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
+                  @cancel-parse="confirmBatchCancelParse"
                   @batch-tag="handleBatchTag"
-                  @move-to-folder="(path: string) => moveKnowledgeIntoFolder(Array.from(selectedIds), path)" />
+                  @move-to-folder="(path: string) => moveKnowledgeIntoFolder(Array.from(selectedIds), path, { honorSelectAll: true })" />
               </div>
             </div>
           </div>
@@ -2714,7 +3011,7 @@ async function createNewSession(value: string): Promise<void> {
 
   <!-- 批量打标签弹窗 -->
   <BatchTagDialog :visible="batchTagDialogVisible"
-    :count="selectedIds.size" :kb-id="kbId" :tag-list="tagList"
+    :count="selectionCount" :kb-id="kbId" :tag-list="tagList"
     :pre-selected-tag-ids="batchTagPreSelectedIds" :can-manage="canEdit"
     :confirm-loading="batchTagging"
     @update:visible="batchTagDialogVisible = $event" @confirm="onBatchTagConfirm"
