@@ -52,3 +52,9 @@ test('folder navigation cancels stale card hover popovers', () => {
   assert.match(cardView, /const onOpenFolder = \(path: string\)[\s\S]*?dismissCardPopover\(\)[\s\S]*?emit\('open-folder', path\)/)
   assert.match(cardView, /@click="onOpenFolder\(folder\.path\)"/)
 })
+
+test('document batch bar exposes batch parse cancellation', () => {
+  assert.match(batchBar, /cancelParseLoading/)
+  assert.match(batchBar, /cancellableCount/)
+  assert.match(batchBar, /@confirm="emit\('cancelParse'\)"/)
+})
