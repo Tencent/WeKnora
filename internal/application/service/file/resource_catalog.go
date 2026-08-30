@@ -8,11 +8,11 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -37,7 +37,7 @@ func NewResourceCatalogFileService(
 	return &resourceCatalogFileService{
 		inner:       inner,
 		catalog:     catalog,
-		externalURL: strings.TrimRight(strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL")), "/"),
+		externalURL: config.ConfiguredExternalURL(),
 	}
 }
 
