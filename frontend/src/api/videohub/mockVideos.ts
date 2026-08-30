@@ -121,10 +121,18 @@ function makeSummary(videoIndex: number, category: VideoCategory, duration: numb
     return {
       id: `v-${videoIndex + 1}-summary-${index + 1}`,
       title,
-      content: `${definitions[videoIndex].overview}\n\n本节从“${title.replace(/^.+、/, '')}”出发，提炼关键判断、论证过程与可执行启示。`,
-      evidenceTimestamp: formatTime(seconds),
-      evidenceSeconds: seconds,
-      transcriptSnippet: `讲者围绕${title.replace(/^.+、/, '')}展开说明，并结合《${definitions[videoIndex].title}》的主题给出具体依据。`,
+      blocks: [{
+        id: `v-${videoIndex + 1}-summary-${index + 1}-block-1`,
+        kind: 'paragraph',
+        text: `${definitions[videoIndex].overview} 本节从“${title.replace(/^.+、/, '')}”出发，提炼关键判断、论证过程与可执行启示。`,
+        evidence: [{
+          chunkId: `mock-${videoIndex + 1}-${index + 1}`,
+          startSeconds: seconds,
+          endSeconds: Math.min(seconds + 15, duration),
+          timestamp: formatTime(seconds),
+          transcriptSnippet: `讲者围绕${title.replace(/^.+、/, '')}展开说明，并结合《${definitions[videoIndex].title}》的主题给出具体依据。`,
+        }],
+      }],
     }
   })
 }

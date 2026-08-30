@@ -6,6 +6,8 @@ import type {
   KnowledgeType,
   RelationOverview,
   RelationType,
+  SummaryBlock,
+  SummaryEvidence,
   SummarySection,
   SubtitleCue,
 } from '@/types/videohub'
@@ -255,24 +257,76 @@ export function parseOutlineWikiPage(content: string, durationSeconds = 0): Chap
   })
 }
 
-export function parseSummaryWikiPage(content: string): SummarySection[] {
-  return splitLevelTwoSections(content).map((section, index) => {
-    const evidence = firstTimestamp(section.body)
-    const transcriptSnippet = firstQuote(section.body)
-    const renderedContent = section.body.split('\n')
-      .filter(line => !line.trim().startsWith('>'))
-      .map(line => line.trim())
-      .filter(Boolean)
-      .join('\n')
+const SUMMARY_TITLES: Record<string, readonly string[]> = {
+  interview: ['一、人物背景', '二、经历与决策', '三、核心观点', '四、原则与思维模型', '五、案例与证据', '六、反思与边界'],
+  training: ['一、目标与受众', '二、知识地图', '三、核心概念', '四、方法与步骤', '五、示例与异常', '六、练习与应用'],
+  salon: ['一、活动与参与者', '二、议题与观点', '三、观点交锋', '四、案例与问答', '五、共识与分歧', '六、探索方向'],
+  general: ['一、定位与问题', '二、主张与论证', '三、证据与案例', '四、限定与反方', '五、影响与建议'],
+}
+
+export interface StructuredSummaryResponse {
+  schemaVersion?: number
+  videoType?: string
+  sections?: unknown
+}
+
+export function parseStructuredSummary(response: StructuredSummaryResponse, category: string): SummarySection[] {
+  const titles = SUMMARY_TITLES[category]
+  if (response.schemaVersion !== 1 || response.videoType !== category || !Array.isArray(response.sections) || response.sections.length !== titles.length) {
+    throw new Error('智能总结结构不符合当前模板')
+  }
+  return response.sections.map((rawSection, sectionIndex) => {
+    if (!rawSection || typeof rawSection !== 'object') throw new Error(`智能总结第 ${sectionIndex + 1} 章无效`)
+    const section = rawSection as Record<string, unknown>
+    if (section.title !== titles[sectionIndex] || typeof section.id !== 'string' || !section.id.trim() || !Array.isArray(section.blocks) || section.blocks.length === 0) {
+      throw new Error(`智能总结章节标题或内容不符合模板：${titles[sectionIndex]}`)
+    }
     return {
-      id: `summary-${index + 1}`,
+      id: section.id,
       title: section.title,
-      content: renderedContent,
-      evidenceTimestamp: evidence?.label,
-      evidenceSeconds: evidence?.seconds,
-      transcriptSnippet,
+      blocks: section.blocks.map((rawBlock, blockIndex) => parseSummaryBlock(rawBlock, sectionIndex, blockIndex)),
     }
   })
+}
+
+function parseSummaryBlock(rawBlock: unknown, sectionIndex: number, blockIndex: number): SummaryBlock {
+  if (!rawBlock || typeof rawBlock !== 'object') throw new Error(`智能总结第 ${sectionIndex + 1} 章第 ${blockIndex + 1} 条无效`)
+  const block = rawBlock as Record<string, unknown>
+  const kind = block.kind
+  const text = typeof block.text === 'string' ? block.text.trim() : ''
+  if (typeof block.id !== 'string' || !block.id.trim() || (kind !== 'paragraph' && kind !== 'bullet') || !text || containsMarkdown(text) || !Array.isArray(block.evidenceChunkIds) || !Array.isArray(block.evidence) || block.evidence.length === 0 || block.evidenceChunkIds.length !== block.evidence.length) {
+    throw new Error(`智能总结第 ${sectionIndex + 1} 章第 ${blockIndex + 1} 条不符合渲染契约`)
+  }
+  const evidence = block.evidence.map((rawEvidence, evidenceIndex) => parseSummaryEvidence(rawEvidence, sectionIndex, blockIndex, evidenceIndex))
+  const evidenceChunkIds = block.evidenceChunkIds
+  if (evidenceChunkIds.some((chunkId, index) => typeof chunkId !== 'string' || !chunkId.trim() || chunkId !== evidence[index].chunkId)) {
+    throw new Error(`智能总结第 ${sectionIndex + 1} 章第 ${blockIndex + 1} 条出处与分块不一致`)
+  }
+  return {
+    id: block.id,
+    kind,
+    text,
+    evidence,
+  }
+}
+
+function parseSummaryEvidence(rawEvidence: unknown, sectionIndex: number, blockIndex: number, evidenceIndex: number): SummaryEvidence {
+  if (!rawEvidence || typeof rawEvidence !== 'object') throw new Error(`智能总结第 ${sectionIndex + 1} 章第 ${blockIndex + 1} 条出处无效`)
+  const evidence = rawEvidence as Record<string, unknown>
+  if (typeof evidence.chunkId !== 'string' || !evidence.chunkId.trim() || typeof evidence.startSeconds !== 'number' || typeof evidence.endSeconds !== 'number' || !Number.isFinite(evidence.startSeconds) || !Number.isFinite(evidence.endSeconds) || evidence.startSeconds < 0 || evidence.endSeconds <= evidence.startSeconds || typeof evidence.timestamp !== 'string' || !evidence.timestamp.trim() || typeof evidence.transcriptSnippet !== 'string' || !evidence.transcriptSnippet.trim()) {
+    throw new Error(`智能总结第 ${sectionIndex + 1} 章第 ${blockIndex + 1} 条出处 ${evidenceIndex + 1} 无效`)
+  }
+  return {
+    chunkId: evidence.chunkId,
+    startSeconds: evidence.startSeconds,
+    endSeconds: evidence.endSeconds,
+    timestamp: evidence.timestamp,
+    transcriptSnippet: evidence.transcriptSnippet.trim(),
+  }
+}
+
+function containsMarkdown(value: string): boolean {
+  return value.includes('```') || /(^|\n)\s{0,3}(#{1,6}|[-*+]\s|\d+[.)]\s)/.test(value)
 }
 
 export function parseOverviewWikiPage(content: string): string {

@@ -7,6 +7,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/outline"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
+	"github.com/Tencent/WeKnora/internal/custom/service/summary"
 	"github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
 
@@ -16,12 +17,23 @@ func TestParseLLMJSONResponseSupportsFencedAndProseWrappedJSON(t *testing.T) {
 		"结果如下：{\"title\":\"标题\",\"content\":\"正文\"}谢谢。",
 		"<think>先分析，再返回 JSON。</think>\n{\"title\":\"标题\",\"content\":\"正文\"}",
 	} {
-		var output generatedContent
+		var output map[string]string
 		if err := parseLLMJSONResponse(response, &output); err != nil {
 			t.Fatalf("parseLLMJSONResponse returned error: %v", err)
 		}
-		if output.Title != "标题" || !strings.Contains(output.Content, "正文") {
+		if output["title"] != "标题" || !strings.Contains(output["content"], "正文") {
 			t.Fatalf("unexpected parsed output: %+v", output)
+		}
+	}
+}
+
+func TestSummaryOutputRejectsFencedAndProseWrappedJSON(t *testing.T) {
+	for _, response := range []string{
+		"```json\n{}\n```",
+		"结果如下：{}",
+	} {
+		if _, err := summary.Parse(response); err == nil {
+			t.Fatalf("summary.Parse accepted non-JSON response: %q", response)
 		}
 	}
 }
@@ -35,6 +47,47 @@ func TestBuildDirectContentPromptIncludesTranscriptEvidence(t *testing.T) {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("prompt does not contain %q: %s", expected, prompt)
 		}
+	}
+}
+
+func TestBuildDirectContentPromptIncludesSummaryFrameworkAndJSONContract(t *testing.T) {
+	prompt, err := buildDirectContentPrompt(&model.Video{Title: "视频一", VideoType: "training"}, skill.JobSummary, []transcript.Chunk{{ID: "chunk-1", Index: 0, Content: "原文内容"}})
+	if err != nil {
+		t.Fatalf("buildDirectContentPrompt returned error: %v", err)
+	}
+	for _, expected := range []string{"schemaVersion", "videoType", "evidenceChunkIds", "一、目标与受众", "六、练习与应用", "不要输出 Markdown"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("summary prompt does not contain %q: %s", expected, prompt)
+		}
+	}
+}
+
+func TestSummaryContractResolvesEvidenceFromTranscriptChunks(t *testing.T) {
+	document := summary.Document{
+		SchemaVersion: 1,
+		VideoType:     "general",
+		Sections: []summary.Section{{
+			ID: "positioning-problem", Title: "一、定位与问题",
+			Blocks: []summary.Block{{ID: "block-1", Kind: summary.BlockKindParagraph, Text: "观点", EvidenceChunkIDs: []string{"chunk-1"}}},
+		}},
+	}
+	for _, section := range []summary.FrameworkSection{
+		{ID: "claims-reasoning", Title: "二、主张与论证"},
+		{ID: "evidence-cases", Title: "三、证据与案例"},
+		{ID: "limitations-counterarguments", Title: "四、限定与反方"},
+		{ID: "impact-recommendations", Title: "五、影响与建议"},
+	} {
+		document.Sections = append(document.Sections, summary.Section{ID: section.ID, Title: section.Title, Blocks: []summary.Block{{ID: section.ID + "-block", Kind: summary.BlockKindParagraph, Text: "内容", EvidenceChunkIDs: []string{"chunk-1"}}}})
+	}
+	chunks := []transcript.Chunk{{ID: "chunk-1", StartMs: 605000, EndMs: 620500, Content: "## 视频定位信息\n\n## 原文\n\n我们当时决定停止旧产品。"}}
+	if err := summary.Validate(document, "general", map[string]struct{}{"chunk-1": {}}); err != nil {
+		t.Fatalf("summary.Validate returned error: %v", err)
+	}
+	if err := summary.ResolveEvidence(&document, chunks); err != nil {
+		t.Fatalf("summary.ResolveEvidence returned error: %v", err)
+	}
+	if got := document.Sections[0].Blocks[0].Evidence[0].Timestamp; got != "10:05–10:20" {
+		t.Fatalf("unexpected evidence timestamp: %s", got)
 	}
 }
 

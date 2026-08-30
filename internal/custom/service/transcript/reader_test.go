@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
@@ -51,5 +52,48 @@ func TestSelectTimedChunkRejectsWhenNoTimedDuplicateExists(t *testing.T) {
 	_, _, err := selectTimedChunk([]weknora.SearchResult{{KnowledgeID: "chunk-18", Content: "摘要内容"}}, "chunk-18")
 	if err == nil {
 		t.Fatal("expected missing timing metadata error")
+	}
+}
+
+func TestSelectTimedKnowledgeChunksJoinsSplitMetadataAndOriginal(t *testing.T) {
+	chunks := []weknora.KnowledgeChunk{
+		{KnowledgeID: "knowledge-1", ChunkIndex: 2, Content: "  \"video_type\": \"tutorial\"\n}\n```\n\n## 原文\n\n完整原文。"},
+		{KnowledgeID: "knowledge-1", ChunkIndex: 0, Content: "## 视频定位信息\n\n"},
+		{KnowledgeID: "knowledge-1", ChunkIndex: 1, Content: "```json\n{\"start_ms\":31779,\"end_ms\":50875,\n"},
+	}
+
+	content, metadata, err := selectTimedKnowledgeChunks(chunks, "knowledge-1")
+	if err != nil {
+		t.Fatalf("selectTimedKnowledgeChunks returned error: %v", err)
+	}
+	if metadata.StartMs != 31779 || metadata.EndMs != 50875 {
+		t.Fatalf("unexpected metadata: %+v", metadata)
+	}
+	if content != "## 视频定位信息\n\n```json\n{\"start_ms\":31779,\"end_ms\":50875,\n  \"video_type\": \"tutorial\"\n}\n```\n\n## 原文\n\n完整原文。" {
+		t.Fatalf("unexpected joined content: %q", content)
+	}
+}
+
+func TestSelectTimedKnowledgeChunksDropsGeneratedSummaryTail(t *testing.T) {
+	chunks := []weknora.KnowledgeChunk{
+		{KnowledgeID: "knowledge-1", ChunkIndex: 0, Content: "## 视频定位信息\n\n```json\n{\"start_ms\":0,\"end_ms\":1000}\n```\n\n## 原文\n\n原文内容。\n# Summary\n\n生成摘要，不是原文。"},
+	}
+
+	content, _, err := selectTimedKnowledgeChunks(chunks, "knowledge-1")
+	if err != nil {
+		t.Fatalf("selectTimedKnowledgeChunks returned error: %v", err)
+	}
+	if strings.Contains(content, "生成摘要") || !strings.Contains(content, "原文内容") {
+		t.Fatalf("summary tail was not removed: %q", content)
+	}
+}
+
+func TestSelectTimedKnowledgeChunksRejectsGaps(t *testing.T) {
+	chunks := []weknora.KnowledgeChunk{
+		{KnowledgeID: "knowledge-1", ChunkIndex: 0, Content: "定位"},
+		{KnowledgeID: "knowledge-1", ChunkIndex: 2, Content: "内容"},
+	}
+	if _, _, err := selectTimedKnowledgeChunks(chunks, "knowledge-1"); err == nil {
+		t.Fatal("expected non-contiguous chunk error")
 	}
 }

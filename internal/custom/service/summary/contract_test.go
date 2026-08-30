@@ -1,0 +1,85 @@
+package summary
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/Tencent/WeKnora/internal/custom/service/transcript"
+)
+
+func TestValidateRequiresExactFramework(t *testing.T) {
+	document := Document{SchemaVersion: SchemaVersion, VideoType: "general", Sections: []Section{
+		{ID: "positioning-problem", Title: "一、定位与问题", Blocks: []Block{{ID: "b1", Kind: BlockKindParagraph, Text: "问题", EvidenceChunkIDs: []string{"chunk-1"}}}},
+		{ID: "claims-reasoning", Title: "二、主张与论证", Blocks: []Block{{ID: "b2", Kind: BlockKindParagraph, Text: "主张", EvidenceChunkIDs: []string{"chunk-1"}}}},
+		{ID: "evidence-cases", Title: "三、证据与案例", Blocks: []Block{{ID: "b3", Kind: BlockKindParagraph, Text: "证据", EvidenceChunkIDs: []string{"chunk-1"}}}},
+		{ID: "limitations-counterarguments", Title: "四、限定与反方", Blocks: []Block{{ID: "b4", Kind: BlockKindParagraph, Text: "限定", EvidenceChunkIDs: []string{"chunk-1"}}}},
+		{ID: "impact-recommendations", Title: "五、影响与建议", Blocks: []Block{{ID: "b5", Kind: BlockKindParagraph, Text: "建议", EvidenceChunkIDs: []string{"chunk-1"}}}},
+	}}
+	if err := Validate(document, "general", map[string]struct{}{"chunk-1": {}}); err != nil {
+		t.Fatalf("Validate returned error: %v", err)
+	}
+	document.Sections[0].Title = "自定义标题"
+	if err := Validate(document, "general", map[string]struct{}{"chunk-1": {}}); err == nil {
+		t.Fatal("Validate accepted a non-canonical section title")
+	}
+}
+
+func TestResolveEvidenceReturnsOriginalTextAndTimestamp(t *testing.T) {
+	document := Document{SchemaVersion: SchemaVersion, VideoType: "general", Sections: []Section{{
+		ID:     "positioning-problem",
+		Title:  "一、定位与问题",
+		Blocks: []Block{{ID: "b1", Kind: BlockKindParagraph, Text: "观点", EvidenceChunkIDs: []string{"chunk-1"}}},
+	}}}
+	for _, section := range frameworks["general"][1:] {
+		document.Sections = append(document.Sections, Section{
+			ID:    section.ID,
+			Title: section.Title,
+			Blocks: []Block{{
+				ID:               section.ID,
+				Kind:             BlockKindParagraph,
+				Text:             "内容",
+				EvidenceChunkIDs: []string{"chunk-1"},
+			}},
+		})
+	}
+	chunks := []transcript.Chunk{{ID: "chunk-1", StartMs: 605000, EndMs: 620500, Content: "## 视频定位信息\n\n## 原文\n\n真实原文"}}
+	if err := ResolveEvidence(&document, chunks); err != nil {
+		t.Fatalf("ResolveEvidence returned error: %v", err)
+	}
+	evidence := document.Sections[0].Blocks[0].Evidence[0]
+	if evidence.Timestamp != "10:05–10:20" || evidence.TranscriptSnippet != "真实原文" {
+		t.Fatalf("unexpected evidence: %+v", evidence)
+	}
+}
+
+func TestParseStoredSkipsWikiFrontmatter(t *testing.T) {
+	document := Document{SchemaVersion: SchemaVersion, VideoType: "general", Sections: make([]Section, 0, len(frameworks["general"]))}
+	for _, section := range frameworks["general"] {
+		document.Sections = append(document.Sections, Section{ID: section.ID, Title: section.Title, Blocks: []Block{{ID: section.ID, Kind: BlockKindParagraph, Text: "内容", EvidenceChunkIDs: []string{"chunk-1"}, Evidence: []Evidence{{ChunkID: "chunk-1", StartSeconds: 1, EndSeconds: 2, Timestamp: "00:01–00:02", TranscriptSnippet: "原文"}}}}})
+	}
+	payload, err := json.Marshal(document)
+	if err != nil {
+		t.Fatalf("marshal document: %v", err)
+	}
+	parsed, err := ParseStored("---\ntype: typed_summary\nsource_video_id: video-1\n---\n\n" + string(payload))
+	if err != nil {
+		t.Fatalf("ParseStored returned error: %v", err)
+	}
+	if err := ValidateStored(parsed, "general"); err != nil {
+		t.Fatalf("ValidateStored returned error: %v", err)
+	}
+}
+
+func TestValidateRejectsMarkdownBlockText(t *testing.T) {
+	document := Document{SchemaVersion: SchemaVersion, VideoType: "general", Sections: make([]Section, 0, len(frameworks["general"]))}
+	for index, section := range frameworks["general"] {
+		text := "内容"
+		if index == 0 {
+			text = "**不应渲染为 Markdown**"
+		}
+		document.Sections = append(document.Sections, Section{ID: section.ID, Title: section.Title, Blocks: []Block{{ID: section.ID, Kind: BlockKindParagraph, Text: text, EvidenceChunkIDs: []string{"chunk-1"}}}})
+	}
+	if err := Validate(document, "general", map[string]struct{}{"chunk-1": {}}); err == nil {
+		t.Fatal("Validate accepted Markdown block text")
+	}
+}

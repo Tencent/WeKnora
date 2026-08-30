@@ -39,16 +39,27 @@ export interface SubtitleCue {
   text: string
 }
 
-export interface EvidenceRef {
-  evidenceTimestamp?: string
-  evidenceSeconds?: number
-  transcriptSnippet?: string
+export interface SummaryEvidence {
+  chunkId: string
+  startSeconds: number
+  endSeconds: number
+  timestamp: string
+  transcriptSnippet: string
 }
 
-export interface SummarySection extends EvidenceRef {
+export type SummaryBlockKind = 'paragraph' | 'bullet'
+
+export interface SummaryBlock {
+  id: string
+  kind: SummaryBlockKind
+  text: string
+  evidence: SummaryEvidence[]
+}
+
+export interface SummarySection {
   id: string
   title: string
-  content: string
+  blocks: SummaryBlock[]
 }
 
 export type ContentLoadStatus = 'loading' | 'ready' | 'not_generated' | 'empty' | 'error'

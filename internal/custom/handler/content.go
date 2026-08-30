@@ -27,6 +27,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
 	"github.com/Tencent/WeKnora/internal/custom/service/outline"
+	"github.com/Tencent/WeKnora/internal/custom/service/summary"
 )
 
 // ContentHandler 内容生产聚合 handler
@@ -185,6 +186,7 @@ type WikiPageResp struct {
 	SummaryKnowledgeEnhanced bool              `json:"summary_knowledge_enhanced,omitempty"`
 	SummaryUserEdited        bool              `json:"summary_user_edited,omitempty"`
 	KnowledgeAuditStatus     string            `json:"knowledge_audit_status,omitempty"`
+	Summary                  *summary.Document `json:"summary,omitempty"`
 	Content                  string            `json:"content"`
 	Frontmatter              map[string]any    `json:"frontmatter,omitempty"`
 }
@@ -231,6 +233,7 @@ func (h *ContentHandler) fetchWikiPageByVideoField(c *gin.Context, video *model.
 		return
 	}
 	var canonical outline.Document
+	var summaryDocument *summary.Document
 	responseContent := page.Content
 	if pageType == "outline" {
 		if document, parseErr := outline.Parse(page.Content); parseErr == nil {
@@ -248,6 +251,19 @@ func (h *ContentHandler) fetchWikiPageByVideoField(c *gin.Context, video *model.
 			contentError(c, http.StatusInternalServerError, video.ID, pageType, "artifact_invalid", "outline page is neither JSON Schema v1 nor valid legacy Markdown", video.UpdatedAt)
 			return
 		}
+	}
+	if pageType == "summary" {
+		document, parseErr := summary.ParseStored(page.Content)
+		if parseErr != nil {
+			contentError(c, http.StatusInternalServerError, video.ID, pageType, "artifact_invalid", "summary page is not valid JSON", video.UpdatedAt)
+			return
+		}
+		if validateErr := summary.ValidateStored(document, video.VideoType); validateErr != nil {
+			contentError(c, http.StatusInternalServerError, video.ID, pageType, "artifact_invalid", validateErr.Error(), video.UpdatedAt)
+			return
+		}
+		summaryDocument = &document
+		responseContent = ""
 	}
 	updatedAt := page.UpdatedAt
 	if updatedAt.IsZero() {
@@ -268,6 +284,7 @@ func (h *ContentHandler) fetchWikiPageByVideoField(c *gin.Context, video *model.
 		SummaryKnowledgeEnhanced: video.SummaryKnowledgeEnhanced,
 		SummaryUserEdited:        video.SummaryUserEdited,
 		KnowledgeAuditStatus:     video.KnowledgeAuditStatus,
+		Summary:                  summaryDocument,
 		Content:                  responseContent,
 		Frontmatter:              frontmatter,
 	})

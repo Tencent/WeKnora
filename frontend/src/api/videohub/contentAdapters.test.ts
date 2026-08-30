@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { buildVideoContentState, classifyContentError, contentModuleForStage } from './contentState'
-import { mapRelatedKnowledgeResponse, parseOutlineResponse, parseOutlineWikiPage, parseOverviewWikiPage, parseSubtitleFile, parseSummaryWikiPage, parseTimestamp, parseTranscriptPageWikiPage } from './contentParsing'
+import { mapRelatedKnowledgeResponse, parseOutlineResponse, parseOutlineWikiPage, parseOverviewWikiPage, parseStructuredSummary, parseSubtitleFile, parseTimestamp, parseTranscriptPageWikiPage } from './contentParsing'
 import { getNewlyCompletedStages } from '../../components/videohub/processingStatusState'
 
 test('parses cross-hour outline timestamps and knowledge evidence', () => {
@@ -43,25 +43,34 @@ type: outline
   }])
 })
 
-test('summary uses only real headings without filling template placeholders', () => {
-  const sections = parseSummaryWikiPage(`---
-type: typed_summary
----
-# 总结
+test('summary accepts the typed JSON contract and preserves block evidence', () => {
+  const sections = parseStructuredSummary({
+    schemaVersion: 1,
+    videoType: 'interview',
+    sections: [
+      ...['一、人物背景', '二、经历与决策', '三、核心观点', '四、原则与思维模型', '五、案例与证据', '六、反思与边界'].map((title, index) => ({
+        id: `section-${index + 1}`,
+        title,
+        blocks: [{
+          id: `block-${index + 1}`,
+          kind: 'paragraph',
+          text: `第 ${index + 1} 节内容`,
+          evidence: [{ chunkId: `chunk-${index + 1}`, startSeconds: index, endSeconds: index + 1, timestamp: `00:0${index}`, transcriptSnippet: '真实原文' }],
+        }],
+      })),
+    ],
+  }, 'interview')
 
-## 一、人物背景
-创始人经历了产品转型。
+  assert.equal(sections[0].title, '一、人物背景')
+  assert.equal(sections[0].blocks[0].evidence[0].transcriptSnippet, '真实原文')
+})
 
-> \`00:10:05–00:10:20\`
-> 我们当时决定停止旧产品。
-
-## 三、核心观点
-- 聚焦真实用户问题。
-`)
-
-  assert.deepEqual(sections.map(section => section.title), ['一、人物背景', '三、核心观点'])
-  assert.equal(sections[0].evidenceSeconds, 605)
-  assert.equal(sections[0].transcriptSnippet, '我们当时决定停止旧产品。')
+test('summary rejects Markdown content and template deviations', () => {
+  assert.throws(() => parseStructuredSummary({
+    schemaVersion: 1,
+    videoType: 'interview',
+    sections: [{ id: 'section-1', title: '自定义标题', blocks: [] }],
+  }, 'interview'))
 })
 
 test('parses real SRT subtitles into seekable cues', () => {

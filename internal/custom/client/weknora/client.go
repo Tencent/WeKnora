@@ -78,6 +78,73 @@ type SearchResult struct {
 	Content     string `json:"content"`
 }
 
+type KnowledgeChunk struct {
+	ID          string `json:"id"`
+	KnowledgeID string `json:"knowledge_id"`
+	Content     string `json:"content"`
+	ChunkIndex  int    `json:"chunk_index"`
+	ChunkType   string `json:"chunk_type"`
+}
+
+// ListKnowledgeChunks 读取一条知识的完整文本分片，而不是依赖搜索结果。
+func (c *Client) ListKnowledgeChunks(ctx context.Context, knowledgeID string) ([]KnowledgeChunk, error) {
+	if strings.TrimSpace(knowledgeID) == "" {
+		return nil, fmt.Errorf("weknora knowledge id 不能为空")
+	}
+
+	const pageSize = 100
+	chunks := make([]KnowledgeChunk, 0, pageSize)
+	for page := 1; ; page++ {
+		query := url.Values{"page": {fmt.Sprintf("%d", page)}, "page_size": {fmt.Sprintf("%d", pageSize)}}
+		u := fmt.Sprintf("%s/api/v1/chunks/%s?%s", strings.TrimRight(c.baseURL, "/"), url.PathEscape(knowledgeID), query.Encode())
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(req)
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("weknora list knowledge chunks: %w", err)
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read weknora knowledge chunks: %w", readErr)
+		}
+		if resp.StatusCode >= 400 {
+			return nil, fmt.Errorf("weknora list knowledge chunks status %d: %s", resp.StatusCode, string(body))
+		}
+		var out struct {
+			Success  bool             `json:"success"`
+			Data     []KnowledgeChunk `json:"data"`
+			Total    int              `json:"total"`
+			PageSize int              `json:"page_size"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			return nil, fmt.Errorf("decode weknora knowledge chunks: %w", err)
+		}
+		if !out.Success {
+			return nil, fmt.Errorf("weknora list knowledge chunks returned unsuccessful response")
+		}
+		for _, chunk := range out.Data {
+			if chunk.KnowledgeID != "" && chunk.KnowledgeID != knowledgeID {
+				return nil, fmt.Errorf("weknora knowledge chunk %s belongs to another knowledge", chunk.ID)
+			}
+			if strings.TrimSpace(chunk.Content) == "" {
+				return nil, fmt.Errorf("weknora knowledge chunk %s has empty content", chunk.ID)
+			}
+			chunks = append(chunks, chunk)
+		}
+		if len(out.Data) == 0 || (out.Total > 0 && len(chunks) >= out.Total) || len(out.Data) < pageSize {
+			break
+		}
+	}
+	if len(chunks) == 0 {
+		return nil, fmt.Errorf("weknora knowledge %s has no text chunks", knowledgeID)
+	}
+	return chunks, nil
+}
+
 // HybridSearch 通过真实检索接口确认知识已进入可检索索引。
 func (c *Client) HybridSearch(ctx context.Context, kbID string, params SearchParams) ([]SearchResult, error) {
 	if kbID == "" {

@@ -48,3 +48,33 @@
 - 上述二级标题的文案和顺序必须原样保留。
 - 可在标准章节下增加三级标题，但不得用自拟二级标题取代模板章节。
 - 次类型框架只用于主类型章节内的局部表达。
+
+## JSON 渲染契约
+
+模板只定义总结结构，不写入 WeKnora。生成结果使用以下字段：
+
+```json
+{
+  "schemaVersion": 1,
+  "videoType": "training",
+  "sections": [
+    {
+      "id": "goals-audience",
+      "title": "一、目标与受众",
+      "blocks": [
+        {
+          "id": "block-1",
+          "kind": "paragraph",
+          "text": "可直接展示的纯文本",
+          "evidenceChunkIds": ["转写分块 ID"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+- `block.kind` 只能是 `paragraph` 或 `bullet`。
+- `block.text` 不得包含 Markdown 标题、列表符号、代码围栏或 HTML。
+- 后端根据 `evidenceChunkIds` 回填 `evidence`，包括原文、起止时间和时间戳；LLM 不得自行填写出处正文。
+- 每个展示 block 至少关联一个当前转写代次的证据分块。

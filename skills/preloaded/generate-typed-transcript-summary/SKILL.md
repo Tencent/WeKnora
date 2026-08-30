@@ -9,7 +9,7 @@ description: 根据视频类型和当前完整转写，按人物访谈、培训�
 
 ## 输入
 
-本 Skill 由后端直接调用 LLM，不读取本地文件，不调用 WeKnora Agent 工具，也不修改输入数据。
+本 Skill 由后端直接调用 LLM，不读取本地文件，不调用 WeKnora Agent 工具，也不修改输入数据。模板由本 Skill reference 统一定义，不写入 WeKnora。
 
 ### 通过后端输入获取
 
@@ -42,13 +42,14 @@ description: 根据视频类型和当前完整转写，按人物访谈、培训�
 
 ### 三、输出
 
-6. 后端将总结保存为 WeKnora 内容页。写入契约：`page_type` 用 `index`；页面 frontmatter 必须含 `type: typed_summary`、`source_video_id: {视频ID}` 与 `transcript_generation: {转写代次}`。由 vidsage 内容流水线触发时，页面 slug 固定为 `typed-summary/{视频ID}`，不得使用视频标题或其他产物 slug。
+6. LLM 只能返回结构化 JSON：`schemaVersion`、`videoType`、`sections`。`sections` 必须严格遵循 `references/summary-frameworks.md` 的标题和顺序；每个 block 必须是纯文本，并提供 `evidenceChunkIds`。
+7. 后端根据真实转写分块回填原文、起止时间和时间戳，校验通过后将带 `evidence` 的规范化 JSON 保存为 WeKnora 内容页。页面 frontmatter 必须含 `type: typed_summary`、`source_video_id` 与 `transcript_generation`。
 
 ### 四、审计
 
-7. 校验总结：确认主类型模板的二级标题和顺序完整；校验失败时不得将总结标记为完成。
-8. 审计发现事实缺失、来源不足或模板偏差时，通过 **标记 Wiki 问题** 在总结页面标记问题详情。
-9. 审计通过后，通过 **更新 Wiki 问题** 将上游遗留问题状态更新为已解决。
+8. 校验总结：确认 JSON Schema、主类型模板、证据分块和转写代次完整；校验失败时不得将总结标记为完成。
+9. 审计发现事实缺失、来源不足或模板偏差时，通过 **标记 Wiki 问题** 在总结页面标记问题详情。
+10. 审计通过后，通过 **更新 Wiki 问题** 将上游遗留问题状态更新为已解决。
 
 ## 强制规则
 

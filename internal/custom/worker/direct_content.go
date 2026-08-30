@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/outline"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
+	"github.com/Tencent/WeKnora/internal/custom/service/summary"
 	"github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
 
@@ -24,12 +25,6 @@ type DirectContentHandler struct {
 	Wiki         *weknora.WikiClient
 	Orchestrator *skill.Orchestrator
 	Job          string
-}
-
-type generatedContent struct {
-	Title   string `json:"title"`
-	Summary string `json:"summary"`
-	Content string `json:"content"`
 }
 
 func NewDirectContentHandler(db *gorm.DB, client *llm.Client, wk *weknora.Client, wiki *weknora.WikiClient, orchestrator *skill.Orchestrator, jobType string) *DirectContentHandler {
@@ -112,16 +107,26 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		pageTitle = video.Title + "_大纲"
 		pageBody = canonical
 	} else {
-		var output generatedContent
-		if err := parseLLMJSONResponse(raw, &output); err != nil {
+		document, err := summary.Parse(raw)
+		if err != nil {
 			return fmt.Errorf("parse %s output: %w", h.Job, err)
 		}
-		if strings.TrimSpace(output.Content) == "" {
-			return fmt.Errorf("generate %s returned empty content", h.Job)
+		knownChunkIDs := make(map[string]struct{}, len(chunks))
+		for _, chunk := range chunks {
+			knownChunkIDs[chunk.ID] = struct{}{}
 		}
-		pageTitle = fallbackTitle(output.Title, video.Title, h.Job)
-		pageSummary = output.Summary
-		pageBody = output.Content
+		if err := summary.Validate(document, video.VideoType, knownChunkIDs); err != nil {
+			return fmt.Errorf("validate %s output: %w", h.Job, err)
+		}
+		if err := summary.ResolveEvidence(&document, chunks); err != nil {
+			return fmt.Errorf("resolve %s evidence: %w", h.Job, err)
+		}
+		canonical, err := json.Marshal(document)
+		if err != nil {
+			return fmt.Errorf("marshal %s output: %w", h.Job, err)
+		}
+		pageTitle = video.Title + "_知识总结"
+		pageBody = string(canonical)
 	}
 	page, err := h.Wiki.UpsertPage(ctx, h.WeKnora.KBID(), weknora.WikiPageWrite{
 		Slug:     contract.WriteSlug(video.ID),
@@ -245,9 +250,9 @@ func buildDirectContentPrompt(video *model.Video, jobType string, chunks []trans
 		builder.WriteString("章节必须覆盖从 0 秒开始到最后一个有效转写时间点，并按时间顺序排列；视频末尾没有转写内容时，不得伪造章节或时间范围。优先生成 4～8 章，只有主题发生明显转折时才拆章。时间只填数字秒数，不要填格式化时间字符串。每章只保留 1～2 个全片关键知识点，只有存在独立结论、方法或动作时才增加，绝不为覆盖每句转写而切碎；全片最多 12 个。合并同义观点、例子和论据。\n")
 		builder.WriteString("章节核心内容控制在 80 个汉字以内，知识点标题控制在 10 个汉字以内。知识点标题必须是短语或结论式短标题，使用“方法名”“动作+对象”或“核心结论”结构，不写完整句。每个章节必须有核心内容和至少一个知识点；evidence_chunk_ids 必须使用给定转写分块 ID，不要拼接分块序号。\n")
 	case skill.JobSummary:
-		builder.WriteString("任务：生成类型化智能总结。视频类型决定组织方式，但不能虚构模板字段；缺少证据时明确说明。\n")
+		builder.WriteString(summaryPrompt(video.VideoType, false))
 	case skill.JobSummaryEnhance:
-		builder.WriteString("任务：生成类型化智能总结增强版。仅补充可由知识底座和转写共同证明的内容。\n")
+		builder.WriteString(summaryPrompt(video.VideoType, true))
 	default:
 		return "", fmt.Errorf("unsupported direct content job: %s", jobType)
 	}
@@ -259,6 +264,41 @@ func buildDirectContentPrompt(video *model.Video, jobType string, chunks []trans
 		return "", fmt.Errorf("transcript input exceeds direct llm context limit")
 	}
 	return builder.String(), nil
+}
+
+func summaryPrompt(videoType string, enhancement bool) string {
+	framework, ok := summary.Framework(videoType)
+	if !ok {
+		return fmt.Sprintf("视频类型 %q 没有可用的总结框架。\n", videoType)
+	}
+	sectionShape := make([]string, 0, len(framework))
+	for _, section := range framework {
+		sectionShape = append(sectionShape, fmt.Sprintf(`{"id":%q,"title":%q,"blocks":[{"id":"block-1","kind":"paragraph","text":"本节内容","evidenceChunkIds":["转写分块ID"]}]}`, section.ID, section.Title))
+	}
+	mode := "生成"
+	if enhancement {
+		mode = "生成增强版"
+	}
+	return fmt.Sprintf("任务：%s类型化智能总结。只返回一个 JSON 对象，不要输出 Markdown、代码围栏、解释文字、HTML 或 XML。\n"+
+		"JSON 契约：必须返回 {\"schemaVersion\":1,\"videoType\":%q,\"sections\":[%s]}。sections 必须严格按以下标题和顺序输出：%s。\n"+
+		"每个 section 必须包含至少一个 block；block.kind 只能是 paragraph 或 bullet，block.text 必须是可直接展示的纯文本，不得包含 Markdown 标记；每个 block 必须提供 evidenceChunkIds，且只能引用给定转写分块 ID。一个 block 可以引用多个分块。\n"+
+		"章节证据不足时保留章节并明确写出信息不足，不得删除、合并、改名或补充转写之外的事实。%s\n",
+		mode, videoType, strings.Join(sectionShape, ","), frameworkTitles(framework), enhancementInstruction(enhancement))
+}
+
+func frameworkTitles(framework []summary.FrameworkSection) string {
+	titles := make([]string, 0, len(framework))
+	for _, section := range framework {
+		titles = append(titles, section.Title)
+	}
+	return strings.Join(titles, "、")
+}
+
+func enhancementInstruction(enhancement bool) string {
+	if enhancement {
+		return "仅补充知识底座和转写共同证明的内容，并保持所有 section 的 id、title 和顺序不变。"
+	}
+	return "明确区分原文观点、忠实概括、跨段归纳和分析推断。"
 }
 
 func fallbackTitle(title, videoTitle, jobType string) string {
@@ -275,7 +315,7 @@ func fallbackTitle(title, videoTitle, jobType string) string {
 
 func pageContent(pageType, videoID, generation, content string) string {
 	schema := ""
-	if pageType == "outline" {
+	if pageType == "outline" || pageType == "typed_summary" {
 		schema = "schema_version: 1\n"
 	}
 	return fmt.Sprintf("---\ntype: %s\nsource_video_id: %s\ntranscript_generation: %s\n%s---\n\n%s", pageType, videoID, generation, schema, strings.TrimSpace(content))

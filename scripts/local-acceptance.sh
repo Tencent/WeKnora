@@ -14,6 +14,7 @@ FRONTEND_HOST="${LOCAL_ACCEPTANCE_FRONTEND_HOST:-127.0.0.1}"
 ACCEPTANCE_URL="${LOCAL_ACCEPTANCE_URL:-http://127.0.0.1/platform/videos}"
 BACKEND_CONTAINER="${LOCAL_ACCEPTANCE_BACKEND_CONTAINER:-vidsage-custom-backend}"
 FRONTEND_CONTAINER="${LOCAL_ACCEPTANCE_FRONTEND_CONTAINER:-WeKnora-frontend}"
+FRONTEND_IMAGE="${LOCAL_ACCEPTANCE_FRONTEND_IMAGE:-weknora/vidsage-ui:local-acceptance}"
 BACKEND_TARGET="${VITE_CUSTOM_BACKEND_TARGET:-http://127.0.0.1:${BACKEND_PORT}}"
 OFFICIAL_BACKEND_TARGET="${VITE_DEV_PROXY_TARGET:-${FRONTEND_BACKEND_URL:-http://127.0.0.1:8080}}"
 
@@ -53,11 +54,8 @@ container_is_healthy() {
 
 start_backend() {
     if container_exists "$BACKEND_CONTAINER"; then
-        if ! container_is_running "$BACKEND_CONTAINER"; then
-            docker start "$BACKEND_CONTAINER" >/dev/null
-        fi
-        printf '[INFO] 复用现有 custom-backend 容器: %s\n' "$BACKEND_CONTAINER"
-        return 0
+        printf '[INFO] 移除可能来自旧验收项目的 custom-backend 容器: %s\n' "$BACKEND_CONTAINER"
+        docker rm -f "$BACKEND_CONTAINER" >/dev/null
     fi
     compose up -d --build postgres minio custom-backend
 }
@@ -101,13 +99,25 @@ start_frontend() {
 }
 
 start_fixed_frontend() {
-    if ! container_exists "$FRONTEND_CONTAINER"; then
-        return 1
+    require_command npm
+    [ -d "$PROJECT_ROOT/frontend/node_modules" ] || die '前端依赖不存在，请先在 frontend 目录执行 npm install'
+    (
+        cd "$PROJECT_ROOT/frontend"
+        npm run build
+    )
+    docker build -t "$FRONTEND_IMAGE" "$PROJECT_ROOT/frontend"
+    if container_exists "$FRONTEND_CONTAINER"; then
+        docker rm -f "$FRONTEND_CONTAINER" >/dev/null
     fi
-    if ! container_is_running "$FRONTEND_CONTAINER"; then
-        docker start "$FRONTEND_CONTAINER" >/dev/null
-    fi
-    printf '[INFO] 复用固定验收前端容器: %s\n' "$FRONTEND_CONTAINER"
+    local network
+    network="$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' "$BACKEND_CONTAINER" 2>/dev/null || true)"
+    [ -n "$network" ] || die 'custom-backend 未加入验收网络，无法启动当前前端'
+    docker run -d \
+        --name "$FRONTEND_CONTAINER" \
+        --network "$network" \
+        -p "${LOCAL_ACCEPTANCE_HTTP_PORT:-80}:80" \
+        "$FRONTEND_IMAGE" >/dev/null
+    printf '[INFO] 已用当前源码构建并启动固定验收前端: %s\n' "$FRONTEND_CONTAINER"
     return 0
 }
 
@@ -134,14 +144,8 @@ up() {
     if ! wait_for_http "http://127.0.0.1:${BACKEND_PORT}/healthz" 60; then
         container_is_healthy "$BACKEND_CONTAINER" || die "custom-backend 未在 ${BACKEND_PORT} 就绪"
     fi
-    if ! wait_for_http "$ACCEPTANCE_URL" 10; then
-        if ! start_fixed_frontend || ! wait_for_http "$ACCEPTANCE_URL" 30; then
-            start_frontend
-            wait_for_http "http://${FRONTEND_HOST}:${FRONTEND_PORT}/platform/videos" 30 || die "前端未在 ${FRONTEND_PORT} 就绪"
-        fi
-    else
-        printf '[INFO] 复用现有固定验收前端: %s\n' "$FRONTEND_CONTAINER"
-    fi
+    start_fixed_frontend
+    wait_for_http "$ACCEPTANCE_URL" 30 || die "固定验收前端未在 ${ACCEPTANCE_URL} 就绪"
     printf '\n[SUCCESS] 本地验收服务已就绪\n'
     if wait_for_http "$ACCEPTANCE_URL" 3; then
         printf '前端验收地址: %s\n' "$ACCEPTANCE_URL"
@@ -158,7 +162,7 @@ down() {
         docker stop "$BACKEND_CONTAINER" >/dev/null 2>&1 || true
     fi
     if container_exists "$FRONTEND_CONTAINER"; then
-        docker stop "$FRONTEND_CONTAINER" >/dev/null 2>&1 || true
+        docker rm -f "$FRONTEND_CONTAINER" >/dev/null 2>&1 || true
     fi
     compose stop minio postgres >/dev/null 2>&1 || true
     printf '[SUCCESS] 本地验收服务已停止，数据卷保留\n'

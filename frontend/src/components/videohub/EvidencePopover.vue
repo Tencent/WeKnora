@@ -23,14 +23,17 @@
       <div class="video-evidence-popover" role="dialog" aria-label="视频内容出处" @click.stop>
         <div class="video-evidence-popover__title">
           <span>原文出处</span>
-          <span class="video-evidence-popover__time">{{ section.evidenceTimestamp }}</span>
+          <span>共 {{ evidence.length }} 条</span>
         </div>
-        <blockquote>{{ section.transcriptSnippet }}</blockquote>
-        <div class="video-evidence-popover__footer">
-          <button type="button" class="video-evidence-popover__timestamp" @click="seek">
-            <t-icon name="play-circle" size="14px" />
-            <span>定位到视频</span>
-          </button>
+        <div class="video-evidence-popover__list">
+          <div v-for="item in evidence" :key="item.chunkId" class="video-evidence-popover__item">
+            <div class="video-evidence-popover__time">{{ item.timestamp }}</div>
+            <blockquote>{{ item.transcriptSnippet }}</blockquote>
+            <button type="button" class="video-evidence-popover__timestamp" @click="seek(item.startSeconds)">
+              <t-icon name="play-circle" size="14px" />
+              <span>定位到视频</span>
+            </button>
+          </div>
         </div>
       </div>
     </template>
@@ -38,15 +41,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import type { SummarySection } from '@/types/videohub'
+import { computed, ref } from 'vue'
+import type { SummaryEvidence } from '@/types/videohub'
 
-const props = defineProps<{ section: SummarySection }>()
+const props = defineProps<{ evidence: SummaryEvidence[] }>()
 const emit = defineEmits<{ seek: [seconds: number] }>()
 const visible = ref(false)
+const evidence = computed(() => props.evidence)
 
-function seek() {
-  if (props.section.evidenceSeconds !== undefined) emit('seek', props.section.evidenceSeconds)
+function seek(seconds: number) {
+  emit('seek', seconds)
   visible.value = false
 }
 </script>
@@ -57,7 +61,9 @@ function seek() {
 .video-evidence-popover__trigger:focus-visible { box-shadow: 0 0 0 2px var(--td-brand-color-focus); }
 .video-evidence-popover { width: min(360px, calc(100vw - 32px)); padding: calc(var(--td-comp-margin-s) * 2); color: var(--td-text-color-primary); }
 .video-evidence-popover__title { display: flex; align-items: center; gap: var(--td-comp-margin-s); color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); font-weight: 600; }
-.video-evidence-popover blockquote { max-height: 160px; overflow-y: auto; margin: calc(var(--td-comp-margin-s) * 1.5) 0; padding: 0; color: var(--td-text-color-primary); font-size: var(--td-font-size-body-medium); line-height: 1.65; }
+.video-evidence-popover__list { display: grid; gap: calc(var(--td-comp-margin-s) * 1.5); max-height: 320px; overflow-y: auto; margin-top: calc(var(--td-comp-margin-s) * 1.5); }
+.video-evidence-popover__item + .video-evidence-popover__item { padding-top: calc(var(--td-comp-margin-s) * 1.5); border-top: var(--border-width-hairline, .5px) solid var(--td-component-stroke); }
+.video-evidence-popover blockquote { margin: calc(var(--td-comp-margin-s) / 2) 0 var(--td-comp-margin-s); padding: 0; color: var(--td-text-color-primary); font-size: var(--td-font-size-body-medium); line-height: 1.65; }
 .video-evidence-popover__footer { display: flex; align-items: center; justify-content: flex-end; }
 .video-evidence-popover__time { color: var(--td-brand-color); font-family: monospace; font-size: var(--td-font-size-body-small); font-weight: 500; }
 .video-evidence-popover__timestamp { display: inline-flex; align-items: center; gap: calc(var(--td-comp-margin-s) / 2); padding: calc(var(--td-comp-margin-s) / 2) var(--td-comp-margin-s); border: 0; border-radius: var(--td-radius-medium); background: var(--td-brand-color-light); color: var(--td-brand-color); font: inherit; font-size: var(--td-font-size-body-small); cursor: pointer; }

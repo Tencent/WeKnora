@@ -89,6 +89,52 @@ func TestHybridSearchScopesToKnowledgeAndRequiresSuccessfulResponse(t *testing.T
 	}
 }
 
+func TestListKnowledgeChunksReadsAllPagesAndPreservesChunkFields(t *testing.T) {
+	client := New(config.WeKnoraConfig{BaseURL: "http://weknora.test", APIKey: "secret", TenantID: "tenant-1"})
+	pageRequests := 0
+	client.http = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/chunks/knowledge-1" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("X-API-Key") != "secret" || r.Header.Get("X-Tenant-ID") != "tenant-1" {
+			t.Fatalf("headers missing: %#v", r.Header)
+		}
+		pageRequests++
+		if pageRequests == 1 && r.URL.Query().Get("page") != "1" {
+			t.Fatalf("first page = %q", r.URL.Query().Get("page"))
+		}
+		if pageRequests == 2 && r.URL.Query().Get("page") != "2" {
+			t.Fatalf("second page = %q", r.URL.Query().Get("page"))
+		}
+		pageChunks := make([]KnowledgeChunk, 1)
+		pageChunks[0] = KnowledgeChunk{ID: "chunk-1", KnowledgeID: "knowledge-1", Content: "a", ChunkIndex: 0, ChunkType: "text"}
+		if pageRequests == 1 {
+			pageChunks = make([]KnowledgeChunk, 100)
+			for index := range pageChunks {
+				pageChunks[index] = KnowledgeChunk{ID: "chunk-1", KnowledgeID: "knowledge-1", Content: "a", ChunkIndex: index, ChunkType: "text"}
+			}
+		} else {
+			pageChunks[0] = KnowledgeChunk{ID: "chunk-2", KnowledgeID: "knowledge-1", Content: "b", ChunkIndex: 100, ChunkType: "text"}
+		}
+		data, err := json.Marshal(pageChunks)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"success":true,"data":` + string(data) + `,"total":101}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	chunks, err := client.ListKnowledgeChunks(context.Background(), "knowledge-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pageRequests != 2 || len(chunks) != 101 || chunks[100].Content != "b" {
+		t.Fatalf("requests=%d chunks=%+v", pageRequests, chunks)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {

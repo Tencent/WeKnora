@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/outline"
+	"github.com/Tencent/WeKnora/internal/custom/service/summary"
 )
 
 const (
@@ -204,13 +205,17 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 }
 
 func (h *ProcessingHandler) stageArtifactAvailable(ctx context.Context, video model.Video, job model.VideoProcessingJob) bool {
-	if job.JobType != "outline" || h.Wiki == nil || strings.TrimSpace(h.KBID) == "" {
+	if (job.JobType != "outline" && job.JobType != "summary") || h.Wiki == nil || strings.TrimSpace(h.KBID) == "" {
 		return stageArtifactAvailable(video, job)
 	}
-	if strings.TrimSpace(video.OutlineWikiPageID) == "" {
+	pageID := video.OutlineWikiPageID
+	if job.JobType == "summary" {
+		pageID = video.SummaryWikiPageID
+	}
+	if strings.TrimSpace(pageID) == "" {
 		return false
 	}
-	page, err := h.Wiki.GetPageByID(ctx, h.KBID, video.OutlineWikiPageID)
+	page, err := h.Wiki.GetPageByID(ctx, h.KBID, pageID)
 	if err != nil || page == nil || strings.TrimSpace(page.Content) == "" {
 		return false
 	}
@@ -218,9 +223,17 @@ func (h *ProcessingHandler) stageArtifactAvailable(ctx context.Context, video mo
 	actualType, _ := frontmatter["type"].(string)
 	sourceVideoID, _ := frontmatter["source_video_id"].(string)
 	pageGeneration, _ := frontmatter["transcript_generation"].(string)
-	if actualType != "outline" || sourceVideoID != video.ID ||
+	expectedType := "outline"
+	if job.JobType == "summary" {
+		expectedType = "typed_summary"
+	}
+	if actualType != expectedType || sourceVideoID != video.ID ||
 		(strings.TrimSpace(video.TranscriptGeneration) != "" && pageGeneration != video.TranscriptGeneration) {
 		return false
+	}
+	if job.JobType == "summary" {
+		document, parseErr := summary.ParseStored(page.Content)
+		return parseErr == nil && summary.ValidateStored(document, video.VideoType) == nil
 	}
 	document, parseErr := outline.Parse(page.Content)
 	if parseErr != nil {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 
 	"gorm.io/gorm"
@@ -61,23 +63,48 @@ func (r *Reader) Read(ctx context.Context, videoID, generation string) ([]Chunk,
 		if checkpoint.ChunkIndex != index || checkpoint.Status != "completed" || strings.TrimSpace(checkpoint.KnowledgeID) == "" {
 			return nil, fmt.Errorf("transcript chunk manifest is incomplete at index %d", index)
 		}
-		results, err := r.WeKnora.HybridSearch(ctx, r.KBID, weknora.SearchParams{
-			QueryText:            "视频定位信息 原文",
-			MatchCount:           10,
-			DisableVectorMatch:   true,
-			DisableKeywordsMatch: false,
-			KnowledgeIDs:         []string{checkpoint.KnowledgeID},
-		})
+		knowledgeChunks, err := r.WeKnora.ListKnowledgeChunks(ctx, checkpoint.KnowledgeID)
 		if err != nil {
 			return nil, fmt.Errorf("read transcript chunk %d: %w", index, err)
 		}
-		content, metadata, err := selectTimedChunk(results, checkpoint.KnowledgeID)
+		content, metadata, err := selectTimedKnowledgeChunks(knowledgeChunks, checkpoint.KnowledgeID)
 		if err != nil {
 			return nil, fmt.Errorf("transcript chunk %d has invalid timing metadata: %w", index, err)
 		}
 		chunks = append(chunks, Chunk{ID: checkpoint.KnowledgeID, Index: index, Content: content, StartMs: metadata.StartMs, EndMs: metadata.EndMs})
 	}
 	return chunks, nil
+}
+
+func selectTimedKnowledgeChunks(chunks []weknora.KnowledgeChunk, knowledgeID string) (string, chunkMetadata, error) {
+	if len(chunks) == 0 {
+		return "", chunkMetadata{}, fmt.Errorf("转写内容缺失")
+	}
+	ordered := append([]weknora.KnowledgeChunk(nil), chunks...)
+	sort.SliceStable(ordered, func(left, right int) bool {
+		return ordered[left].ChunkIndex < ordered[right].ChunkIndex
+	})
+	var builder strings.Builder
+	for index, chunk := range ordered {
+		if chunk.KnowledgeID != "" && chunk.KnowledgeID != knowledgeID {
+			return "", chunkMetadata{}, fmt.Errorf("知识分片归属错误")
+		}
+		if chunk.ChunkIndex != index {
+			return "", chunkMetadata{}, fmt.Errorf("知识分片顺序不连续: expected=%d actual=%d", index, chunk.ChunkIndex)
+		}
+		builder.WriteString(chunk.Content)
+	}
+	content := trimGeneratedSummary(builder.String())
+	metadata, err := parseChunkMetadata(content)
+	if err != nil {
+		return "", chunkMetadata{}, err
+	}
+	originalMarker := "## 原文"
+	originalStart := strings.Index(content, originalMarker)
+	if originalStart < 0 || strings.TrimSpace(content[originalStart+len(originalMarker):]) == "" {
+		return "", chunkMetadata{}, fmt.Errorf("原文内容缺失")
+	}
+	return content, metadata, nil
 }
 
 func selectTimedChunk(results []weknora.SearchResult, knowledgeID string) (string, chunkMetadata, error) {
@@ -96,6 +123,13 @@ func selectTimedChunk(results []weknora.SearchResult, knowledgeID string) (strin
 		return "", chunkMetadata{}, fmt.Errorf("转写内容缺失")
 	}
 	return "", chunkMetadata{}, lastErr
+}
+
+func trimGeneratedSummary(content string) string {
+	if index := summaryHeadingPattern.FindStringIndex(content); index != nil {
+		return strings.TrimSpace(content[:index[0]])
+	}
+	return strings.TrimSpace(content)
 }
 
 func parseChunkMetadata(content string) (chunkMetadata, error) {
@@ -136,3 +170,5 @@ func EffectiveEndSeconds(chunks []Chunk) (int, error) {
 	}
 	return (maxEndMs + 999) / 1000, nil
 }
+
+var summaryHeadingPattern = regexp.MustCompile(`(?m)^# Summary\s*$`)

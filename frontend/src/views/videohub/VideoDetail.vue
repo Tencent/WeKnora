@@ -7,10 +7,6 @@
         <t-button variant="text" @click="router.push('/platform/videos')">← 返回</t-button>
         <h1>{{ video.title }}</h1>
         <span class="video-detail-page__status">{{ statusLabel }}</span>
-        <div class="video-detail-page__actions">
-          <input ref="transcriptInput" class="video-detail-page__file-input" type="file" accept=".srt,text/plain" @change="handleTranscriptSelected" />
-          <t-button size="small" variant="outline" :loading="importingTranscript" @click="openTranscriptPicker">导入 SRT</t-button>
-        </div>
         <t-select v-model="selectedVideoId" :options="videoOptions" placeholder="切换视频" @change="switchVideo" />
       </header>
       <ProcessingStatus :video-id="video.id" @retry-started="handleRetryStarted" @stage-completed="handleStageCompleted" />
@@ -45,8 +41,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MessagePlugin } from 'tdesign-vue-next'
-import { contentModuleForStage, createLoadingContentModuleState, createLoadingContentState, fetchVideoContent, fetchVideoContentModule, fetchVideoDetail, fetchVideoOptions, fetchVideoSubtitles, importVideoTranscript, isVideoInitiallyAvailable, type VideoContentModule, type VideoContentState } from '@/api/videohub'
+import { contentModuleForStage, createLoadingContentModuleState, createLoadingContentState, fetchVideoContent, fetchVideoContentModule, fetchVideoDetail, fetchVideoOptions, fetchVideoSubtitles, isVideoInitiallyAvailable, type VideoContentModule, type VideoContentState } from '@/api/videohub'
 import type { VideoData } from '@/types/videohub'
 import VideoPlayer from '@/components/videohub/VideoPlayer.vue'
 import ChapterNavigation from '@/components/videohub/ChapterNavigation.vue'
@@ -60,7 +55,6 @@ const route = useRoute()
 const router = useRouter()
 const player = ref<InstanceType<typeof VideoPlayer> | null>(null)
 const page = ref<HTMLElement | null>(null)
-const transcriptInput = ref<HTMLInputElement | null>(null)
 const video = ref<VideoData | null>(null)
 const videoOptions = ref<Array<{ label: string; value: string }>>([])
 const selectedVideoId = ref('')
@@ -68,7 +62,6 @@ const currentSeconds = ref(0)
 const activeTab = ref('summary')
 const loading = ref(true)
 const error = ref('')
-const importingTranscript = ref(false)
 const content = ref<VideoContentState>(createLoadingContentState())
 let loadSequence = 0
 let contentSequence = 0
@@ -129,29 +122,6 @@ async function loadSubtitles(videoData: VideoData) {
   if (!videoData.subtitle_file_url || video.value?.id !== videoData.id) return
   const subtitles = await fetchVideoSubtitles(videoData.subtitle_file_url)
   if (video.value?.id === videoData.id) video.value = { ...video.value, subtitles }
-}
-function openTranscriptPicker() {
-  if (!importingTranscript.value) transcriptInput.value?.click()
-}
-async function handleTranscriptSelected(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-  if (!file || !video.value) return
-  if (!file.name.toLowerCase().endsWith('.srt')) {
-    MessagePlugin.warning('请选择 SRT 字幕文件')
-    return
-  }
-  importingTranscript.value = true
-  try {
-    const result = await importVideoTranscript(video.value.id, file)
-    await loadVideo(video.value.id)
-    MessagePlugin.success(result.reused ? '已复用这份 SRT 导入任务' : `SRT 已导入，共 ${result.subtitle_count || 0} 条字幕`)
-  } catch (reason: any) {
-    MessagePlugin.error(reason?.message || 'SRT 导入失败，请稍后重试')
-  } finally {
-    importingTranscript.value = false
-  }
 }
 async function loadContent(videoData: VideoData) {
   const sequence = ++contentSequence
