@@ -71,23 +71,31 @@ func (r *Reader) Read(ctx context.Context, videoID, generation string) ([]Chunk,
 		if err != nil {
 			return nil, fmt.Errorf("read transcript chunk %d: %w", index, err)
 		}
-		content := ""
-		for _, result := range results {
-			if result.KnowledgeID == checkpoint.KnowledgeID && strings.TrimSpace(result.Content) != "" {
-				content = result.Content
-				break
-			}
-		}
-		if content == "" {
-			return nil, fmt.Errorf("transcript chunk %d is not readable", index)
-		}
-		metadata, err := parseChunkMetadata(content)
+		content, metadata, err := selectTimedChunk(results, checkpoint.KnowledgeID)
 		if err != nil {
 			return nil, fmt.Errorf("transcript chunk %d has invalid timing metadata: %w", index, err)
 		}
 		chunks = append(chunks, Chunk{ID: checkpoint.KnowledgeID, Index: index, Content: content, StartMs: metadata.StartMs, EndMs: metadata.EndMs})
 	}
 	return chunks, nil
+}
+
+func selectTimedChunk(results []weknora.SearchResult, knowledgeID string) (string, chunkMetadata, error) {
+	var lastErr error
+	for _, result := range results {
+		if result.KnowledgeID != knowledgeID || strings.TrimSpace(result.Content) == "" {
+			continue
+		}
+		metadata, err := parseChunkMetadata(result.Content)
+		if err == nil {
+			return result.Content, metadata, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		return "", chunkMetadata{}, fmt.Errorf("转写内容缺失")
+	}
+	return "", chunkMetadata{}, lastErr
 }
 
 func parseChunkMetadata(content string) (chunkMetadata, error) {
