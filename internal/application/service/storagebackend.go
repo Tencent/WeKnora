@@ -10,6 +10,7 @@ import (
 	"time"
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
+	"github.com/Tencent/WeKnora/internal/database"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -132,7 +133,7 @@ func (s *StorageBackendService) Delete(ctx context.Context, tenantID uint64, id 
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var backend types.StorageBackend
 		query := tx.Where("tenant_id = ? AND id = ?", tenantID, id)
-		if tx.Dialector.Name() == "postgres" {
+		if database.SupportsRowLock(tx.Dialector.Name()) {
 			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := query.First(&backend).Error; err != nil {
@@ -178,7 +179,7 @@ func (s *StorageBackendService) SetDefault(ctx context.Context, tenantID uint64,
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var backend types.StorageBackend
 		query := tx.Where("tenant_id = ? AND id = ?", tenantID, id)
-		if tx.Dialector.Name() == "postgres" {
+		if database.SupportsRowLock(tx.Dialector.Name()) {
 			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := query.First(&backend).Error; err != nil {

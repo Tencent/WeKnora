@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -698,7 +699,6 @@ func (r *knowledgeRepository) CountKnowledgeByStatus(
 // Only returns documents from document-type knowledge bases (excludes FAQ)
 // Returns (results, hasMore, error)
 // FindByMetadataKey finds a knowledge item by a key-value pair in the metadata JSON column.
-// Uses Postgres jsonb operator: metadata->>'key' = 'value'.
 func (r *knowledgeRepository) FindByMetadataKey(
 	ctx context.Context,
 	tenantID uint64,
@@ -707,9 +707,10 @@ func (r *knowledgeRepository) FindByMetadataKey(
 	value string,
 ) (*types.Knowledge, error) {
 	var knowledge types.Knowledge
+	expression, keyArgument := database.JSONScalarLookup(r.db.Dialector.Name(), "metadata", key)
 	err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
-		Where("metadata->>? = ?", key, value).
+		Where(expression+" = ?", keyArgument, value).
 		First(&knowledge).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -731,25 +732,31 @@ func (r *knowledgeRepository) FindByMetadataKeyPrefix(
 ) ([]*types.Knowledge, error) {
 	escaped := escapeLikeKeyword(prefix)
 	var items []*types.Knowledge
-	// The JSON key is embedded as a SQL literal (metadata->>'external_id'), NOT a
-	// bind parameter. PostgreSQL only uses the expression index
-	// idx_knowledges_kb_metadata_external_id (built on the literal expression
-	// (metadata->>'external_id')) when that exact expression appears in the query;
-	// a bound metadata->>$1 is a structurally different expression the planner
-	// cannot match, so it would silently fall back to a heap scan. key is an
-	// internal, caller-supplied field name (always "external_id"); single-quotes
-	// are doubled defensively so the literal is always well-formed.
-	//
-	// The prefix pattern stays a bind parameter: an unnamed prepared statement is
-	// custom-planned with the actual value, so LIKE 'prefix%' still extracts the
-	// prefix and drives the index. The explicit ESCAPE '\' keeps backslash-escaped
-	// wildcards (e.g. \_) literal on both PostgreSQL and SQLite.
-	keyExpr := "metadata->>'" + strings.ReplaceAll(key, "'", "''") + "'"
-	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
-		Where(keyExpr+" LIKE ? ESCAPE ?", escaped+"%", `\`).
-		Find(&items).Error
-	if err != nil {
+	query := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID)
+
+	switch r.db.Dialector.Name() {
+	case "postgres":
+		// Keep the key literal so PostgreSQL can match the expression index from
+		// migration 000076. The key is internal, but quote it defensively.
+		keyExpr := "metadata->>'" + strings.ReplaceAll(key, "'", "''") + "'"
+		query = query.Where(keyExpr+" LIKE ? ESCAPE ?", escaped+"%", `\`)
+	case "mysql":
+		if key == "external_id" {
+			// Migration 000076 materializes this JSON value in an indexed
+			// generated column. Querying the column directly lets LIKE-prefix
+			// scans use that index.
+			query = query.Where("metadata_external_id LIKE ? ESCAPE ?", escaped+"%", `\`)
+		} else {
+			expression, keyArgument := database.JSONScalarLookup("mysql", "metadata", key)
+			query = query.Where(expression+" LIKE ? ESCAPE ?", keyArgument, escaped+"%", `\`)
+		}
+	default:
+		expression, keyArgument := database.JSONScalarLookup(r.db.Dialector.Name(), "metadata", key)
+		query = query.Where(expression+" LIKE ? ESCAPE ?", keyArgument, escaped+"%", `\`)
+	}
+
+	if err := query.Find(&items).Error; err != nil {
 		return nil, err
 	}
 	return items, nil

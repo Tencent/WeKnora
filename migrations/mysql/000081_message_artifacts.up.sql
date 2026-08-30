@@ -1,0 +1,1 @@
+ALTER TABLE messages ADD COLUMN artifacts JSON DEFAULT (JSON_ARRAY());
