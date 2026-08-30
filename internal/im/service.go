@@ -1933,15 +1933,19 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	}
 
 	// Non-streaming fallback: collect full answer then send.
-	answer, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs, attachments, imageURLs, req.userKey, req.msg.Quote)
+	answer, references, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs, attachments, imageURLs, req.userKey, req.msg.Quote)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA failed: %v, sending fallback reply", err)
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
+		references = nil
 	}
 
 	reply := &ReplyMessage{
 		Content: formatIMOutboundAnswer(ctx, answer, req.tenant, s.defaultFileSvc, s.storageResolver),
 		IsFinal: true,
+	}
+	if req.msg.Platform == PlatformFeishu || req.msg.Platform == PlatformLark {
+		reply.Citations = BuildReplyCitations(answer, references)
 	}
 	if err := req.adapter.SendReply(ctx, req.msg, reply); err != nil {
 		logger.Errorf(ctx, "[IM] Send reply failed: %v", err)
@@ -2730,6 +2734,7 @@ loop:
 		parts.Answer = resolvedAnswer
 	}
 	answer := resolvedAnswer
+	references := append([]*types.SearchResult(nil), assistantMsg.KnowledgeReferences...)
 	finalErr := qaErr
 	noVisibleContent := !streamedAny && strings.TrimSpace(resolvedAnswer) == ""
 	authServices := append([]imMCPAuthService(nil), mcpAuthServices...)
@@ -2744,6 +2749,11 @@ loop:
 		finalDisplay = fallback
 		if answer == "" {
 			answer = fallback
+		}
+	}
+	if msg.Platform == PlatformFeishu || msg.Platform == PlatformLark {
+		if citationText := FormatReplyCitations(msg.Platform, BuildReplyCitations(answer, references)); citationText != "" {
+			finalDisplay += citationText
 		}
 	}
 	if notice := s.buildIMMCPAuthNotice(ctx, authServices); notice != "" {
@@ -2776,17 +2786,22 @@ loop:
 
 // fallbackNonStream is used when streaming initialization fails.
 func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, adapter Adapter, userKey string, tenant *types.Tenant) error {
-	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote)
+	answer, references, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA fallback failed: %v", err)
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
+		references = nil
 	}
 
-	return adapter.SendReply(ctx, msg, &ReplyMessage{Content: formatIMOutboundAnswer(ctx, answer, tenant, s.defaultFileSvc, s.storageResolver), IsFinal: true})
+	reply := &ReplyMessage{Content: formatIMOutboundAnswer(ctx, answer, tenant, s.defaultFileSvc, s.storageResolver), IsFinal: true}
+	if msg.Platform == PlatformFeishu || msg.Platform == PlatformLark {
+		reply.Citations = BuildReplyCitations(answer, references)
+	}
+	return adapter.SendReply(ctx, msg, reply)
 }
 
 // runQA executes the WeKnora QA pipeline and returns the full answer text.
-func (s *Service) runQA(ctx context.Context, session *types.Session, query string, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, userKey string, quote *QuotedMessage) (string, error) {
+func (s *Service) runQA(ctx context.Context, session *types.Session, query string, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, userKey string, quote *QuotedMessage) (string, []*types.SearchResult, error) {
 	// Cancellable context (no hard deadline): each agent round has its own
 	// LLMCallTimeout. The context can still be cancelled by /stop.
 	ctx, cancel := context.WithCancel(ctx)
@@ -2860,13 +2875,13 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	// Create user message so it appears in conversation history
 	userMsg, err := s.messageService.CreateMessage(ctx, createIMUserMessagePayload(session.ID, query, requestID, attachments))
 	if err != nil {
-		return "", fmt.Errorf("create user message: %w", err)
+		return "", nil, fmt.Errorf("create user message: %w", err)
 	}
 
 	// Create a placeholder assistant message
 	assistantMsg, err := s.messageService.CreateMessage(ctx, createIMAssistantMessagePayload(session.ID, requestID))
 	if err != nil {
-		return "", fmt.Errorf("create assistant message: %w", err)
+		return "", nil, fmt.Errorf("create assistant message: %w", err)
 	}
 
 	eventBus.On(event.EventAgentReferences, func(ctx context.Context, evt event.Event) error {
@@ -2946,17 +2961,18 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		if updateErr := s.messageService.UpdateMessage(context.WithoutCancel(ctx), assistantMsg); updateErr != nil {
 			logger.Warnf(ctx, "[IM] Failed to update cancelled assistant message: %v", updateErr)
 		}
-		return "", fmt.Errorf("QA cancelled: %w", ctx.Err())
+		return "", nil, fmt.Errorf("QA cancelled: %w", ctx.Err())
 	}
 
 	answerMu.Lock()
 	answer := answerBuilder.String()
 	qaError := qaErr
+	references := append([]*types.SearchResult(nil), assistantMsg.KnowledgeReferences...)
 	authServices := append([]imMCPAuthService(nil), mcpAuthServices...)
 	answerMu.Unlock()
 
 	if answer == "" && qaError != nil {
-		return "", qaError
+		return "", references, qaError
 	}
 	if answer == "" {
 		answer = "抱歉，我暂时无法回答这个问题。"
@@ -2973,7 +2989,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	}
 
 	// Return raw answer — callers apply cleanIMContent with the appropriate FileService.
-	return answer, nil
+	return answer, references, nil
 }
 
 // ── CRUD operations for IM channels ──
