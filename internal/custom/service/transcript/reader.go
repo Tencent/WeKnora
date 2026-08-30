@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -15,6 +16,13 @@ type Chunk struct {
 	ID      string
 	Index   int
 	Content string
+	StartMs int
+	EndMs   int
+}
+
+type chunkMetadata struct {
+	StartMs int `json:"start_ms"`
+	EndMs   int `json:"end_ms"`
 }
 
 type Reader struct {
@@ -73,7 +81,50 @@ func (r *Reader) Read(ctx context.Context, videoID, generation string) ([]Chunk,
 		if content == "" {
 			return nil, fmt.Errorf("transcript chunk %d is not readable", index)
 		}
-		chunks = append(chunks, Chunk{ID: checkpoint.KnowledgeID, Index: index, Content: content})
+		metadata, err := parseChunkMetadata(content)
+		if err != nil {
+			return nil, fmt.Errorf("transcript chunk %d has invalid timing metadata: %w", index, err)
+		}
+		chunks = append(chunks, Chunk{ID: checkpoint.KnowledgeID, Index: index, Content: content, StartMs: metadata.StartMs, EndMs: metadata.EndMs})
 	}
 	return chunks, nil
+}
+
+func parseChunkMetadata(content string) (chunkMetadata, error) {
+	const section = "## 视频定位信息"
+	const fence = "```json"
+	sectionStart := strings.Index(content, section)
+	if sectionStart < 0 {
+		return chunkMetadata{}, fmt.Errorf("定位信息段落缺失")
+	}
+	fenceStart := strings.Index(content[sectionStart+len(section):], fence)
+	if fenceStart < 0 {
+		return chunkMetadata{}, fmt.Errorf("定位信息 JSON 缺失")
+	}
+	fenceStart += sectionStart + len(section) + len(fence)
+	fenceEnd := strings.Index(content[fenceStart:], "```")
+	if fenceEnd < 0 {
+		return chunkMetadata{}, fmt.Errorf("定位信息 JSON 代码围栏未闭合")
+	}
+	var metadata chunkMetadata
+	if err := json.Unmarshal([]byte(strings.TrimSpace(content[fenceStart:fenceStart+fenceEnd])), &metadata); err != nil {
+		return chunkMetadata{}, fmt.Errorf("解析定位信息 JSON: %w", err)
+	}
+	if metadata.StartMs < 0 || metadata.EndMs <= metadata.StartMs {
+		return chunkMetadata{}, fmt.Errorf("时间范围无效: start_ms=%d end_ms=%d", metadata.StartMs, metadata.EndMs)
+	}
+	return metadata, nil
+}
+
+func EffectiveEndSeconds(chunks []Chunk) (int, error) {
+	maxEndMs := 0
+	for _, chunk := range chunks {
+		if chunk.EndMs > maxEndMs {
+			maxEndMs = chunk.EndMs
+		}
+	}
+	if maxEndMs <= 0 {
+		return 0, fmt.Errorf("transcript has no valid end timestamp")
+	}
+	return (maxEndMs + 999) / 1000, nil
 }

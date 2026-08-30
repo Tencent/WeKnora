@@ -57,6 +57,17 @@ func Marshal(document Document) (string, error) {
 }
 
 func Validate(document Document, durationSeconds int, knownChunkIDs map[string]struct{}) error {
+	return validate(document, durationSeconds, 0, knownChunkIDs)
+}
+
+func ValidateWithTranscriptEnd(document Document, durationSeconds, transcriptEndSeconds int, knownChunkIDs map[string]struct{}) error {
+	if transcriptEndSeconds <= 0 {
+		return fmt.Errorf("transcript end timestamp is required")
+	}
+	return validate(document, durationSeconds, transcriptEndSeconds, knownChunkIDs)
+}
+
+func validate(document Document, durationSeconds, transcriptEndSeconds int, knownChunkIDs map[string]struct{}) error {
 	if document.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("outline schema_version must be %d", SchemaVersion)
 	}
@@ -129,14 +140,14 @@ func Validate(document Document, durationSeconds int, knownChunkIDs map[string]s
 	if totalPoints > 16 {
 		return fmt.Errorf("outline contains too many knowledge points: %d", totalPoints)
 	}
-	if durationSeconds > 0 {
+	if transcriptEndSeconds > 0 {
 		first := document.Chapters[0]
 		last := document.Chapters[len(document.Chapters)-1]
 		if first.StartSeconds > 1 {
 			return fmt.Errorf("outline starts after video beginning")
 		}
-		if last.EndSeconds < durationSeconds-1 {
-			return fmt.Errorf("outline does not cover video end")
+		if last.EndSeconds < transcriptEndSeconds-1 {
+			return fmt.Errorf("outline does not cover effective transcript end: transcript_end_seconds=%d outline_end_seconds=%d", transcriptEndSeconds, last.EndSeconds)
 		}
 	}
 	return nil

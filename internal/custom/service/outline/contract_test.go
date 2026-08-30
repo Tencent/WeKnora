@@ -39,6 +39,30 @@ func TestValidateRejectsMissingEvidence(t *testing.T) {
 	}
 }
 
+func TestValidateWithTranscriptEndAllowsTrailingVideoContentWithoutTranscript(t *testing.T) {
+	document := validDocument()
+	document.Chapters[0].EndSeconds = 386
+	if err := ValidateWithTranscriptEnd(document, 535, 386, map[string]struct{}{"chunk-1": {}}); err != nil {
+		t.Fatalf("ValidateWithTranscriptEnd returned error: %v", err)
+	}
+}
+
+func TestValidateWithTranscriptEndRejectsUncoveredTranscript(t *testing.T) {
+	document := validDocument()
+	document.Chapters[0].EndSeconds = 300
+	if err := ValidateWithTranscriptEnd(document, 535, 386, map[string]struct{}{"chunk-1": {}}); err == nil {
+		t.Fatal("expected effective transcript end coverage error")
+	}
+}
+
+func TestValidateWithTranscriptEndStillRejectsChapterBeyondVideo(t *testing.T) {
+	document := validDocument()
+	document.Chapters[0].EndSeconds = 536
+	if err := ValidateWithTranscriptEnd(document, 535, 386, map[string]struct{}{"chunk-1": {}}); err == nil {
+		t.Fatal("expected video duration overflow error")
+	}
+}
+
 func TestMarshalAndParseRoundTrip(t *testing.T) {
 	document := validDocument()
 	content, err := Marshal(document)
