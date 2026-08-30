@@ -85,14 +85,16 @@ func (e *AgentEngine) getLLMCallTimeout() time.Duration {
 }
 
 // getCompletionTokenBudget is the max_tokens / max_completion_tokens sent on
-// each ReAct LLM round. Leaving it unset lets providers default to 4096 and
-// truncate write_sandbox_file (and similar) tool-call JSON.
+// each ReAct LLM round. Unset without a sandbox is 4096; unset with a
+// sandbox (write_sandbox_file / edit_sandbox_file) is 24576.
 func (e *AgentEngine) getCompletionTokenBudget() int {
 	configured := 0
+	sandboxID := ""
 	if e.config != nil {
 		configured = e.config.MaxCompletionTokens
+		sandboxID = e.config.SandboxConfigID
 	}
-	return types.AgentRoundMaxCompletionTokens(configured)
+	return types.AgentRoundMaxCompletionTokensFor(configured, sandboxID)
 }
 
 // generateEventID generates a unique event ID with type suffix for better traceability

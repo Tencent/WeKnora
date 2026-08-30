@@ -11,22 +11,54 @@ import (
 // DefaultMaxContextTokens is the default context window budget for agent conversations (200k).
 const DefaultMaxContextTokens = 200000
 
-// DefaultAgentMaxCompletionTokens is the per-round completion budget for
-// ReAct / tool-calling agents. When MaxTokens is omitted, OpenAI-compatible
-// providers (and many Chinese gateways) default to 4096 — large tool-call JSON
-// such as write_sandbox_file is then truncated mid-stream (finish_reason=length),
-// which surfaces as missing required arguments. 32768 matches wiki ingest (#2604).
-const DefaultAgentMaxCompletionTokens = 32768
+// DefaultSmartReasoningMaxCompletionTokens is the per-round budget when the
+// agent cannot emit write_sandbox_file / edit_sandbox_file. 4096 matches
+// typical OpenAI-compatible provider defaults and is enough for ordinary
+// tool-call JSON.
+const DefaultSmartReasoningMaxCompletionTokens = 4096
+
+// DefaultAgentMaxCompletionTokens is the per-round budget when the agent
+// can write or edit sandbox files. Those tool calls carry the file body in
+// JSON; a 4096 cap truncates mid-stream (finish_reason=length).
+const DefaultAgentMaxCompletionTokens = 24576
+
+// DefaultQuickAnswerMaxCompletionTokens is the RAG answer budget.
+const DefaultQuickAnswerMaxCompletionTokens = 2048
+
+// NeedsSandboxWriteCompletionBudget reports whether this agent may register
+// write_sandbox_file / edit_sandbox_file. Those tools follow the bound
+// sandbox, not the allowed_tools checklist.
+func NeedsSandboxWriteCompletionBudget(sandboxConfigID string) bool {
+	return strings.TrimSpace(sandboxConfigID) != ""
+}
+
+// DefaultMaxCompletionTokens is the unset-config default for one agent:
+// quick-answer 2048, smart-reasoning 4096, smart-reasoning with a sandbox 24576.
+func DefaultMaxCompletionTokens(agentMode, sandboxConfigID string) int {
+	if agentMode == AgentModeSmartReasoning {
+		if NeedsSandboxWriteCompletionBudget(sandboxConfigID) {
+			return DefaultAgentMaxCompletionTokens
+		}
+		return DefaultSmartReasoningMaxCompletionTokens
+	}
+	return DefaultQuickAnswerMaxCompletionTokens
+}
 
 // AgentRoundMaxCompletionTokens returns the completion-token budget for one
-// ReAct LLM round. Zero (unset) uses DefaultAgentMaxCompletionTokens. An
-// explicit configured value is honored as-is so a user who capped a small
-// local model at 4096 is not silently sent 32768.
+// ReAct LLM round when no sandbox is bound. Zero (unset) uses
+// DefaultSmartReasoningMaxCompletionTokens. An explicit configured value is
+// honored as-is.
 func AgentRoundMaxCompletionTokens(configured int) int {
-	if configured <= 0 {
-		return DefaultAgentMaxCompletionTokens
+	return AgentRoundMaxCompletionTokensFor(configured, "")
+}
+
+// AgentRoundMaxCompletionTokensFor is AgentRoundMaxCompletionTokens with
+// the agent's sandbox: unset + sandbox uses the large write-file budget.
+func AgentRoundMaxCompletionTokensFor(configured int, sandboxConfigID string) int {
+	if configured > 0 {
+		return configured
 	}
-	return configured
+	return DefaultMaxCompletionTokens(AgentModeSmartReasoning, sandboxConfigID)
 }
 
 // AgentConfig represents the full agent configuration (used at tenant level and runtime)
@@ -90,7 +122,8 @@ type AgentConfig struct {
 	LLMCallTimeout int `json:"llm_call_timeout,omitempty"`
 
 	// Maximum completion tokens for each ReAct LLM round. Zero means
-	// DefaultAgentMaxCompletionTokens. Explicit values are sent as-is.
+	// DefaultMaxCompletionTokens for this agent's mode and sandbox.
+	// Explicit values are sent as-is.
 	MaxCompletionTokens int `json:"max_completion_tokens,omitempty"`
 
 	// Maximum character length for tool output (default: 16000).
