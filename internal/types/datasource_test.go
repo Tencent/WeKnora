@@ -140,6 +140,17 @@ func TestDataSourceConfig_HasConfiguredCredentials_RSS(t *testing.T) {
 		assert.Nil(t, cfg.Credentials)
 		assert.False(t, cfg.HasCredentials())
 	})
+
+	t.Run("strip Xquik settings from credentials", func(t *testing.T) {
+		cfg := DataSourceConfig{Credentials: map[string]interface{}{
+			"api_key":           "secret",
+			"queries":           "xquik api",
+			"results_per_query": 100,
+		}}
+		cfg.StripNonSecretCredentials(ConnectorTypeXquik)
+		assert.Equal(t, map[string]interface{}{"api_key": "secret"}, cfg.Credentials)
+		assert.True(t, cfg.HasConfiguredCredentials(ConnectorTypeXquik))
+	})
 }
 
 // TestSubtreeChildID_MatchesPrefix locks the producer/consumer contract: a child

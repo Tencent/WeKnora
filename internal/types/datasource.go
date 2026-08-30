@@ -36,6 +36,7 @@ const (
 	ConnectorTypeSlack       = "slack"
 	ConnectorTypeIMAP        = "imap"
 	ConnectorTypeRSS         = "rss"
+	ConnectorTypeXquik       = "xquik"
 	ConnectorTypeGitLab      = "gitlab"
 	ConnectorTypeIMA         = "ima"
 
@@ -276,6 +277,9 @@ func (d *DataSourceConfig) StripNonSecretCredentials(connectorType string) {
 		if len(d.Credentials) == 0 {
 			d.Credentials = nil
 		}
+	case ConnectorTypeXquik:
+		delete(d.Credentials, "queries")
+		delete(d.Credentials, "results_per_query")
 	}
 }
 

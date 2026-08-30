@@ -19,6 +19,14 @@ import {
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import {
+  XQUIK_DEFAULT_RESULTS_PER_QUERY,
+  XQUIK_MAX_RESULTS_PER_QUERY,
+  validateXquikSettings,
+  xquikResourceList,
+  xquikSettingsSignature,
+  xquikValidationCredentials,
+} from './xquikConfig'
 
 const props = defineProps<{
   kbId: string
@@ -207,6 +215,13 @@ const driveFolderTokenError = ref('')
 const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
 const isGitLabConnector = (type: string) => type === 'gitlab'
+const isXquikConnector = (type: string) => type === 'xquik'
+const validatedXquikSettings = ref('')
+
+function xquikSettingsChangedSinceValidation(): boolean {
+  return isXquikConnector(form.value.type)
+    && xquikSettingsSignature(form.value.config.settings) !== validatedXquikSettings.value
+}
 
 interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
 const gitlabProjects = ref<GitLabProjectInput[]>([])
@@ -627,6 +642,17 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'xquik',
+    available: true,
+    docUrl: 'https://docs.xquik.com/api-reference/authentication',
+    permissionDocUrl: '',
+    permissionPageUrl: '',
+    requiredPermissions: [],
+    fields: [
+      { key: 'api_key', labelKey: 'datasource.field.xquikApiKey', placeholder: 'xq_...', secret: true, hintKey: 'datasource.field.xquikApiKeyHint' },
+    ],
+  },
+  {
     type: 'gitlab', available: true, docUrl: '', permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
     fields: [
       { key: 'base_url', labelKey: 'datasource.gitlab.baseUrl', placeholder: 'https://gitlab.example.com' },
@@ -666,6 +692,7 @@ watch(visible, async (v) => {
   driveFolderToken.value = ''
   driveFolderTokenError.value = ''
   driveRootLoaded.value = false
+  validatedXquikSettings.value = ''
   rssAuthHeaders.value = []
   gitlabProjects.value = []
 
@@ -694,6 +721,9 @@ watch(visible, async (v) => {
       sync_deletions: props.dataSource.sync_deletions,
     }
     selectedResourceIds.value = form.value.config?.resource_ids || []
+    if (isXquikConnector(form.value.type)) {
+      validatedXquikSettings.value = xquikSettingsSignature(form.value.config.settings)
+    }
     if (isGitLabConnector(form.value.type)) {
       const savedProjects = Array.isArray(form.value.config.settings.projects) ? form.value.config.settings.projects : []
       gitlabProjects.value = savedProjects.map((project: any) => ({
@@ -762,20 +792,38 @@ watch(
   },
 )
 
+watch(
+  () => [form.value.config.settings.queries, form.value.config.settings.results_per_query],
+  () => {
+    if (xquikSettingsChangedSinceValidation()) {
+      testResult.value = ''
+      testErrorMsg.value = ''
+    }
+  },
+)
+
 function selectType(def: ConnectorDef) {
   if (!def.available) return
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = {}
   if (isGitLabConnector(def.type)) addGitLabProject()
+  if (isXquikConnector(def.type)) {
+    form.value.config.settings = {
+      queries: '',
+      results_per_query: XQUIK_DEFAULT_RESULTS_PER_QUERY,
+    }
+  }
+  form.value.sync_deletions = !isXquikConnector(def.type)
   rssAuthHeaders.value = []
   step.value = 1
 }
 
-// --- Test connection (stateless, no DB write) ---
+// --- Test connection ---
 async function testConnection() {
   syncRssAuthHeadersToCredentials()
   if (!validateRssFeedUrls()) return
+  if (!validateXquikConfig()) return
   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
     const fields = currentDef.value?.fields || []
     for (const f of fields) {
@@ -791,11 +839,21 @@ async function testConnection() {
   testResult.value = ''
   testErrorMsg.value = ''
   try {
-    if (isEdit.value && tempDsId.value) {
-      await updateDataSource(tempDsId.value, {
-        ...form.value,
-        knowledge_base_id: props.kbId,
-      } as any)
+    const validatesProvidedXquikCredentials = isXquikConnector(form.value.type)
+      && (!isEdit.value || replaceCredentialsMode.value)
+    if (validatesProvidedXquikCredentials) {
+      const creds = xquikValidationCredentials(
+        { ...form.value.config.credentials },
+        form.value.config.settings,
+      )
+      await validateCredentials(form.value.type, creds)
+    } else if (isEdit.value && tempDsId.value) {
+      if (!isXquikConnector(form.value.type)) {
+        await updateDataSource(tempDsId.value, {
+          ...form.value,
+          knowledge_base_id: props.kbId,
+        } as any)
+      }
       await validateConnection(tempDsId.value)
     } else {
       const creds = { ...form.value.config.credentials }
@@ -806,6 +864,9 @@ async function testConnection() {
       await validateCredentials(form.value.type, creds)
     }
     testResult.value = 'success'
+    if (isXquikConnector(form.value.type)) {
+      validatedXquikSettings.value = xquikSettingsSignature(form.value.config.settings)
+    }
     MessagePlugin.success(t('datasource.testSuccess'))
   } catch (e: any) {
     testResult.value = 'error'
@@ -819,6 +880,10 @@ async function testConnection() {
 async function loadResources() {
   loadingResources.value = true
   try {
+    if (isEdit.value && isXquikConnector(form.value.type)) {
+      applyLoadedResources(xquikResourceList(form.value.config.settings))
+      return
+    }
     if (!tempDsId.value) {
       const res = await createDataSource({
         ...form.value,
@@ -835,36 +900,39 @@ async function loadResources() {
     }
 
     const res = await listResources(tempDsId.value)
-    resources.value = res?.data || res || []
-    // Any parent that already arrived with children (connectors returning the
-    // full tree, e.g. Notion) needs no further lazy fetch.
-    const parentsWithChildren = new Set<string>()
-    for (const r of resources.value) {
-      if (r.parent_id) parentsWithChildren.add(r.parent_id)
-    }
-    loadedChildrenIds.value = parentsWithChildren
-    loadingChildrenIds.value = new Set<string>()
-    // If any resource already has a parent, the connector returned the whole tree
-    // up front, so per-node lazy fetching is unnecessary.
-    treeFullyLoaded.value = parentsWithChildren.size > 0
-    // Auto-expand top-level nodes whose children are already loaded; lazy nodes
-    // (children not yet fetched) stay collapsed until the user expands them.
-    expandedResourceIds.value = new Set(
-      resources.value
-        .filter(r => !r.parent_id && r.has_children && parentsWithChildren.has(r.external_id))
-        .map(r => r.external_id),
-    )
-    // When editing a lazily-loaded source, reveal pre-existing selections that
-    // live below the (not-yet-loaded) tree so they are visible and checked.
-    if (isEdit.value && !treeFullyLoaded.value) {
-      const loaded = new Set(resources.value.map(r => r.external_id))
-      const hidden = selectedResourceIds.value.filter(id => !loaded.has(id))
-      if (hidden.length > 0) void revealExistingSelections(hidden)
-    }
+    applyLoadedResources(res?.data || res || [])
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+  } finally {
+    loadingResources.value = false
   }
-  loadingResources.value = false
+}
+
+function applyLoadedResources(next: Resource[]) {
+  resources.value = next
+  const parentsWithChildren = new Set<string>()
+  for (const resource of resources.value) {
+    if (resource.parent_id) parentsWithChildren.add(resource.parent_id)
+  }
+  loadedChildrenIds.value = parentsWithChildren
+  loadingChildrenIds.value = new Set<string>()
+  treeFullyLoaded.value = parentsWithChildren.size > 0
+  expandedResourceIds.value = new Set(
+    resources.value
+      .filter(resource => !resource.parent_id
+        && resource.has_children
+        && parentsWithChildren.has(resource.external_id))
+      .map(resource => resource.external_id),
+  )
+  if (isEdit.value && !treeFullyLoaded.value) {
+    const loaded = new Set(resources.value.map(resource => resource.external_id))
+    const hidden = selectedResourceIds.value.filter(id => !loaded.has(id))
+    if (isXquikConnector(form.value.type)) {
+      selectedResourceIds.value = selectedResourceIds.value.filter(id => loaded.has(id))
+    } else if (hidden.length > 0) {
+      void revealExistingSelections(hidden)
+    }
+  }
 }
 
 // revealExistingSelections asks the backend which ancestors must be expanded to
@@ -966,9 +1034,18 @@ function validateRssFeedUrls(): boolean {
   return true
 }
 
+function validateXquikConfig(): boolean {
+  if (!isXquikConnector(form.value.type)) return true
+  const error = validateXquikSettings(form.value.config.settings)
+  if (!error) return true
+  MessagePlugin.warning(t(`datasource.xquik.${error}`))
+  return false
+}
+
 function validateStep1Fields(): boolean {
   syncRssAuthHeadersToCredentials()
   if (!validateRssFeedUrls()) return false
+  if (!validateXquikConfig()) return false
   if (isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value) {
     return true
   }
@@ -1007,6 +1084,10 @@ async function nextStep() {
       MessagePlugin.warning(t('datasource.gitlab.projectRequired'))
       return
     }
+  }
+  if (step.value === 2 && isXquikConnector(form.value.type) && selectedResourceIds.value.length === 0) {
+    MessagePlugin.warning(t('datasource.xquik.querySelectionRequired'))
+    return
   }
   step.value++
   if (step.value === 2) {
@@ -1180,6 +1261,7 @@ const resourceTypeLabelMap: Record<string, string> = {
   wiki_space: 'datasource.resourceType.wikiSpace',
   doc_category: 'datasource.resourceType.docCategory',
   book: 'datasource.resourceType.book',
+  search_query: 'datasource.resourceType.searchQuery',
 }
 
 function resourceTypeLabel(type: string): string {
@@ -1414,6 +1496,32 @@ const drawerConfirmText = computed(() => {
             spellcheck="false"
           />
           <p class="form-desc">{{ t('datasource.field.feedUrlsHint') }}</p>
+        </div>
+      </section>
+
+      <section v-if="isXquikConnector(form.type)" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.xquik.searchesTitle') }}</h4>
+        <div class="form-item">
+          <label class="form-label required">{{ t('datasource.field.xquikQueries') }}</label>
+          <t-textarea
+            v-model="form.config.settings.queries"
+            :placeholder="t('datasource.field.xquikQueriesPlaceholder')"
+            :autosize="{ minRows: 3, maxRows: 8 }"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <p class="form-desc">{{ t('datasource.field.xquikQueriesHint') }}</p>
+        </div>
+        <div class="form-item">
+          <label class="form-label required">{{ t('datasource.field.xquikResultsPerQuery') }}</label>
+          <t-input-number
+            v-model="form.config.settings.results_per_query"
+            :min="1"
+            :max="XQUIK_MAX_RESULTS_PER_QUERY"
+            :step="10"
+            theme="normal"
+          />
+          <p class="form-desc">{{ t('datasource.field.xquikResultsPerQueryHint') }}</p>
         </div>
       </section>
 
@@ -1805,7 +1913,7 @@ const drawerConfirmText = computed(() => {
           </div>
         </div>
 
-        <div class="form-item form-item--flat">
+        <div v-if="!isXquikConnector(form.type)" class="form-item form-item--flat">
           <t-checkbox v-model="form.sync_deletions">{{ t('datasource.syncDeletions') }}</t-checkbox>
         </div>
       </section>

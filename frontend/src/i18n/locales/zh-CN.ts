@@ -684,7 +684,8 @@ export default {
     resourceType: {
       wikiSpace: '知识库空间',
       docCategory: '文档标签',
-      book: '语雀知识库'
+      book: '语雀知识库',
+      searchQuery: 'X 搜索查询'
     },
     scheduleHuman: {
       '30min': '每 30 分钟',
@@ -705,7 +706,22 @@ export default {
       feedUrls: '订阅源地址',
       feedUrlsHint: '每行一个 RSS / Atom 订阅源地址，支持同时填写多个',
       authHeaders: '自定义请求头（可选）',
-      authHeadersHint: '用于访问私有订阅源，每行一个，格式为「名称: 值」，例如 Authorization: Bearer xxxx'
+      authHeadersHint: '用于访问私有订阅源，每行一个，格式为「名称: 值」，例如 Authorization: Bearer xxxx',
+      xquikApiKey: 'Xquik API 密钥',
+      xquikApiKeyHint: '在 Xquik 中创建 API 密钥，然后粘贴到此处。',
+      xquikQueries: 'X 搜索查询',
+      xquikQueriesPlaceholder: 'from:weknora lang:zh',
+      xquikQueriesHint: '每行输入一个 X 搜索查询。Xquik 会在每次同步时运行这些查询。',
+      xquikResultsPerQuery: '每个查询的结果数',
+      xquikResultsPerQueryHint: '设置每次同步时从每个查询导入的帖子上限。'
+    },
+    xquik: {
+      searchesTitle: 'X 搜索设置',
+      queriesRequired: '请至少输入 1 个 X 搜索查询。',
+      querySelectionRequired: '请至少选择 1 个 X 搜索查询。',
+      tooManyQueries: '最多可输入 20 个 X 搜索查询。',
+      queryTooLong: '每个 X 搜索查询不得超过 512 个字符。',
+      resultsOutOfRange: '每个查询的结果数必须介于 1 到 1,000 之间。'
     },
     connectorDesc: {
       feishu: '同步飞书知识库中的文档、表格、文件',
@@ -716,6 +732,7 @@ export default {
       yuque: '同步语雀知识库中的文档',
       ima: '同步腾讯 IMA 知识库中的文档、笔记与文件（暂不支持 AI 会话与视频解析）',
       rss: '同步 RSS / Atom 订阅源中的文章',
+      xquik: '通过 Xquik 搜索查询同步公开的 X 帖子',
       gitlab: '同步 GitLab 项目中的文件'
     },
     connector: {
@@ -727,6 +744,7 @@ export default {
       yuque: '语雀',
       ima: '腾讯 IMA',
       rss: 'RSS / Atom 订阅',
+      xquik: 'Xquik',
       gitlab: 'GitLab'
     },
     logDetail: {
@@ -6113,6 +6131,7 @@ export default {
     channelNotion: 'Notion',
     channelYuque: '语雀',
     channelGitLab: 'GitLab',
+    channelXquik: 'Xquik',
     channelIma: '腾讯 IMA',
     channelUpload: '上传',
     channelManual: '手动',

@@ -966,18 +966,6 @@ func (s *DataSourceService) applyFetchedItem(
 	}
 }
 
-// streamStartCursor decides which cursor a streaming fetch should resume from.
-// A user-triggered full sync on its first attempt drops the cursor so every
-// item is re-fetched; a retried full sync (attempt > 0) and every incremental
-// sync resume from the last persisted checkpoint so a timed-out run converges
-// instead of restarting from scratch.
-func streamStartCursor(ds *types.DataSource, forceFull bool, attempt int) (*types.SyncCursor, error) {
-	if forceFull && attempt == 0 {
-		return nil, nil
-	}
-	return ds.ParseSyncCursor()
-}
-
 // streamSyncHandler adapts a streaming fetch to the knowledge-base ingest path.
 // Emit ingests each item as it arrives (bounding memory) and Checkpoint persists
 // the connector cursor plus live progress counts at page boundaries.
@@ -1055,7 +1043,11 @@ func (s *DataSourceService) processSyncStreaming(
 
 	forceFull := payload.ForceFull || ds.SyncMode == types.SyncModeFull
 	attempt, _ := asynq.GetRetryCount(ctx)
-	startCursor, err := streamStartCursor(ds, forceFull, attempt)
+	var scheduledFullResumer datasource.ScheduledFullSyncResumer
+	if !payload.ForceFull && ds.SyncMode == types.SyncModeFull {
+		scheduledFullResumer, _ = sc.(datasource.ScheduledFullSyncResumer)
+	}
+	startCursor, err := datasource.StreamStartCursor(ds, forceFull, attempt, scheduledFullResumer)
 	if err != nil {
 		logger.Errorf(ctx, "failed to parse sync cursor: %v", err)
 		s.updateSyncRunResult(ctx, ds, syncLog, &types.SyncResult{}, nil,
