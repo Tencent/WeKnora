@@ -27,7 +27,9 @@ func TestCompleteRetriesServerErrorsWithFreshRequestBody(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
 		}
-		if !strings.Contains(string(body), `"model":"model"`) {
+		if !strings.Contains(string(body), `"model":"model"`) ||
+			!strings.Contains(string(body), `"temperature":0`) ||
+			!strings.Contains(string(body), `"response_format":{"type":"json_object"}`) {
 			t.Fatalf("request body = %s", body)
 		}
 		if attempts < 3 {

@@ -28,9 +28,15 @@ type Message struct {
 }
 
 type completionRequest struct {
-	Model     string    `json:"model"`
-	Messages  []Message `json:"messages"`
-	MaxTokens int       `json:"max_tokens,omitempty"`
+	Model          string          `json:"model"`
+	Messages       []Message       `json:"messages"`
+	MaxTokens      int             `json:"max_tokens,omitempty"`
+	Temperature    float64         `json:"temperature"`
+	ResponseFormat *responseFormat `json:"response_format,omitempty"`
+}
+
+type responseFormat struct {
+	Type string `json:"type"`
 }
 
 type completionResponse struct {
@@ -62,7 +68,9 @@ func (c *Client) Complete(ctx context.Context, prompt string) (string, error) {
 	}
 
 	body, err := json.Marshal(completionRequest{
-		Model: c.cfg.Model,
+		Model:          c.cfg.Model,
+		Temperature:    0,
+		ResponseFormat: &responseFormat{Type: "json_object"},
 		Messages: []Message{{
 			Role:    "user",
 			Content: prompt,
