@@ -3878,6 +3878,10 @@ export default {
     },
     wiki: {
       title: 'Wiki 설정',
+      ingestModeLabel: 'Wiki 수집 모드',
+      ingestModeTip: '수동 모드는 Wiki REST/API 읽기 및 쓰기를 유지하지만 문서 업로드 시 페이지를 자동 생성하지 않습니다.',
+      ingestModeAuto: '자동',
+      ingestModeManual: '수동',
       synthesisModelLabel: '합성 모델',
       synthesisModelPlaceholder: 'Wiki 생성에 사용할 LLM 모델을 선택하세요',
       synthesisModelTip: '설정하지 않으면 요약 모델로 대체됩니다',

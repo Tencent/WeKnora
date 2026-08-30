@@ -2762,6 +2762,10 @@ export default {
     },
     wiki: {
       title: 'Wiki Settings',
+      ingestModeLabel: 'Wiki Ingest Mode',
+      ingestModeTip: 'Manual mode keeps Wiki REST/API read and write operations available but does not generate pages when documents are uploaded.',
+      ingestModeAuto: 'Automatic',
+      ingestModeManual: 'Manual',
       synthesisModelLabel: 'Wiki Synthesis Model',
       synthesisModelPlaceholder: 'Select the LLM model for Wiki generation',
       synthesisModelTip: 'Falls back to the summary model if not set',

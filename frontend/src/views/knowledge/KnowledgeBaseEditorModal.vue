@@ -113,6 +113,22 @@
                         </p>
                       </div>
 
+                      <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
+                        <label class="form-label">{{ $t('knowledgeEditor.wiki.ingestModeLabel') }}</label>
+                        <p class="form-tip">{{ $t('knowledgeEditor.wiki.ingestModeTip') }}</p>
+                        <t-radio-group
+                          v-model="formData.wikiConfig.ingestMode"
+                          class="granularity-radio-group"
+                        >
+                          <t-radio-button value="auto">
+                            {{ $t('knowledgeEditor.wiki.ingestModeAuto') }}
+                          </t-radio-button>
+                          <t-radio-button value="manual">
+                            {{ $t('knowledgeEditor.wiki.ingestModeManual') }}
+                          </t-radio-button>
+                        </t-radio-group>
+                      </div>
+
                       <!-- Wiki 提取粒度 (仅当 Wiki 启用时显示) -->
                       <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
                         <label class="form-label">{{ $t('knowledgeEditor.wiki.extractionGranularityLabel') }}</label>
@@ -778,6 +794,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       skipIfTagged: true
     },
     wikiConfig: {
+      ingestMode: 'auto' as 'auto' | 'manual',
       synthesisModelId: '',
       maxPagesPerIngest: 0,
       extractionGranularity: 'standard' as 'focused' | 'standard' | 'exhaustive',
@@ -906,6 +923,7 @@ const loadKBData = async (kbIdOverride?: string) => {
         skipIfTagged: kb.auto_tag_config?.skip_if_tagged ?? true
       },
       wikiConfig: {
+        ingestMode: kb.wiki_config?.ingest_mode === 'manual' ? 'manual' : 'auto',
         synthesisModelId: kb.wiki_config?.synthesis_model_id || '',
         maxPagesPerIngest: kb.wiki_config?.max_pages_per_ingest || 0,
         extractionGranularity: (
@@ -1277,6 +1295,7 @@ const buildSubmitData = () => {
   // wiki_config only holds wiki-specific tunables.
   if (formData.value.type !== 'faq') {
     data.wiki_config = {
+      ingest_mode: formData.value.wikiConfig?.ingestMode === 'manual' ? 'manual' : 'auto',
       synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
       max_pages_per_ingest: formData.value.wikiConfig?.maxPagesPerIngest || 0,
       extraction_granularity: formData.value.wikiConfig?.extractionGranularity || 'standard',
@@ -1382,6 +1401,7 @@ const doSubmit = async () => {
       }
       if (formData.value.wikiConfig && formData.value.type !== 'faq') {
         updateConfig.wiki_config = {
+          ingest_mode: formData.value.wikiConfig.ingestMode === 'manual' ? 'manual' : 'auto',
           synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
           max_pages_per_ingest: formData.value.wikiConfig.maxPagesPerIngest || 0,
           extraction_granularity: formData.value.wikiConfig.extractionGranularity || 'standard',

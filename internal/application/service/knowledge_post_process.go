@@ -164,7 +164,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	//    on its terminal exit; the row promotes itself to "completed" when
 	//    the counter hits zero (see knowledgeRepository.FinalizeSubtask).
 	//
-	//    Wiki ingest IS counted (as a single subtask): although it's a
+	//    Automatic Wiki ingest IS counted (as a single subtask): although it's a
 	//    KB-scoped debounced batch, each upload enqueues exactly one
 	//    per-knowledge op, and the batch worker calls FinalizeSubtask once
 	//    when that op reaches a terminal state (mapped successfully or
@@ -176,7 +176,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	willSpawnSummary := len(textChunks) > 0
 	willSpawnQuestion := willSpawnSummary && kb.NeedsEmbeddingModel() &&
 		eff.QuestionGenerationConfig.Enabled
-	willSpawnWiki := kb.IndexingStrategy.WikiEnabled && len(textChunks) > 0
+	willSpawnWiki := kb.IsWikiAutoIngestEnabled() && len(textChunks) > 0
 	willSpawnAutoTag := kb.Type == types.KnowledgeBaseTypeDocument &&
 		kb.AutoTagConfig != nil && kb.AutoTagConfig.Enabled && len(textChunks) > 0
 	enqueuedAutoTag := false
@@ -221,13 +221,14 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	expectedSubtasks += graphChunkCount
 
 	// enteredFinalizing is set only when the processing-to-finalizing handoff
-	// actually seeded the counter. For Wiki-enabled knowledge, that handoff
+	// actually seeded the counter. For knowledge with automatic Wiki ingest
+	// enabled, that handoff
 	// also persists the pending Wiki op in the same transaction.
 	enteredFinalizing := false
 	wikiSlotOwned := false
 
 	switch {
-	case knowledge.ParseStatus == types.ParseStatusFinalizing && kb.IndexingStrategy.WikiEnabled:
+	case knowledge.ParseStatus == types.ParseStatusFinalizing && kb.IsWikiAutoIngestEnabled():
 		// A previous delivery may have persisted the Wiki op but failed to
 		// enqueue its KB-scoped trigger. Retry only the trigger: appending a
 		// second pending op would duplicate durable work and its finalizer.
