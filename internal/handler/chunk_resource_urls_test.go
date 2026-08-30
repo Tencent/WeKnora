@@ -63,7 +63,9 @@ func newChunkListTestContext(t *testing.T, query string) (*gin.Context, *httptes
 }
 
 func TestListKnowledgeChunksEnrichesAndRewritesImageInfo(t *testing.T) {
-	const resourceHandle = "resource://image-1"
+	// Use a valid 22-character resource handle so the resolver exercises the
+	// resource:// branch instead of treating the fixture as an unknown scheme.
+	const resourceHandle = "resource://image-0000000000000000"
 	textChunk := &types.Chunk{
 		ID:        "text-1",
 		Content:   "流程图：![diagram](" + resourceHandle + ")",
