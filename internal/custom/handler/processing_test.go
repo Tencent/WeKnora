@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/skill"
 )
 
 func TestProcessingStatusReportsFailedStageAndRetryableJob(t *testing.T) {
@@ -321,6 +322,9 @@ func TestSucceededStageWithMissingArtifactBecomesRetryable(t *testing.T) {
 	}
 	if retried.Status != "pending" {
 		t.Fatalf("retried status = %q, want pending", retried.Status)
+	}
+	if !skill.IsExplicitSummaryRegeneration(retried.InputPayload) {
+		t.Fatalf("summary retry did not mark explicit regeneration: %q", retried.InputPayload)
 	}
 }
 

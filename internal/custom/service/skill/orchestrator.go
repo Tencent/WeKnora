@@ -382,6 +382,17 @@ func (o *Orchestrator) AfterSkillComplete(ctx context.Context, videoID, jobType 
 // AfterSkillCompleteWithID 跳过 FindWikiPage 直接用给定 pageID 执行回写 + 触发下一环节。
 // 用于 Worker 已确认产物页，或外部已知 page_id 的场景。
 func (o *Orchestrator) AfterSkillCompleteWithID(ctx context.Context, videoID, jobType, wikiPageID string) (string, string, error) {
+	return o.afterSkillCompleteWithID(ctx, videoID, jobType, wikiPageID, false)
+}
+
+func (o *Orchestrator) AfterExplicitSummaryRegeneration(ctx context.Context, videoID, jobType, wikiPageID string) (string, string, error) {
+	if jobType != JobSummary && jobType != JobSummaryEnhance {
+		return "", "", fmt.Errorf("explicit summary regeneration does not support job_type %s", jobType)
+	}
+	return o.afterSkillCompleteWithID(ctx, videoID, jobType, wikiPageID, true)
+}
+
+func (o *Orchestrator) afterSkillCompleteWithID(ctx context.Context, videoID, jobType, wikiPageID string, allowSummaryOverwrite bool) (string, string, error) {
 	if wikiPageID == "" {
 		return "", "", fmt.Errorf("AfterSkillCompleteWithID: page_id is empty (job=%s, video=%s)", jobType, videoID)
 	}
@@ -399,7 +410,7 @@ func (o *Orchestrator) AfterSkillCompleteWithID(ctx context.Context, videoID, jo
 	if err != nil {
 		return "", "", err
 	}
-	if jobType == JobSummary || jobType == JobSummaryEnhance {
+	if (jobType == JobSummary || jobType == JobSummaryEnhance) && !allowSummaryOverwrite {
 		var current model.Video
 		if err := o.DB.WithContext(ctx).First(&current, "id = ?", videoID).Error; err != nil {
 			return "", "", fmt.Errorf("load summary state: %w", err)
@@ -438,6 +449,9 @@ func (o *Orchestrator) AfterSkillCompleteWithID(ctx context.Context, videoID, jo
 
 		if jobType == JobSummary || jobType == JobSummaryEnhance {
 			updates := map[string]any{"summary_source": "initial", "summary_knowledge_enhanced": false}
+			if allowSummaryOverwrite {
+				updates["summary_user_edited"] = false
+			}
 			if jobType == JobSummaryEnhance {
 				updates["summary_source"] = "enhanced"
 				updates["summary_knowledge_enhanced"] = true

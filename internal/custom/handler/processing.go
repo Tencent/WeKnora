@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/outline"
+	"github.com/Tencent/WeKnora/internal/custom/service/skill"
 	"github.com/Tencent/WeKnora/internal/custom/service/summary"
 )
 
@@ -173,6 +174,13 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 			}
 			if jobType == "transcription" && retried.ErrorCategory == "external_task" {
 				updates["external_task_id"] = ""
+			}
+			if jobType == "summary" || jobType == "summary_enhance" {
+				inputPayload, payloadErr := skill.MarkExplicitSummaryRegeneration(retried.InputPayload)
+				if payloadErr != nil {
+					return fmt.Errorf("mark explicit summary regeneration: %w", payloadErr)
+				}
+				updates["input_payload"] = inputPayload
 			}
 			if err := tx.Model(&retried).Updates(updates).Error; err != nil {
 				return err

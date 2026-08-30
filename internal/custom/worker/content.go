@@ -134,12 +134,13 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 	if !ok {
 		return fmt.Errorf("未注册的 job_type: %s", jobType)
 	}
+	explicitRegeneration := skill.IsExplicitSummaryRegeneration(job.InputPayload)
 	if jobType == skill.JobSummary || jobType == skill.JobSummaryEnhance {
 		protected, err := h.Orchestrator.IsSummaryUserEditProtected(ctx, video.ID)
 		if err != nil {
 			return fmt.Errorf("check summary user edit protection: %w", err)
 		}
-		if protected {
+		if protected && !explicitRegeneration {
 			if err := h.DB.WithContext(ctx).Model(&model.Video{}).Where("id = ?", video.ID).Updates(map[string]any{
 				"summary_user_edited": true, "summary_source": "user_edited",
 			}).Error; err != nil {
@@ -164,6 +165,9 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 		return fmt.Errorf("create session: %w", err)
 	}
 	query := skillQuery(video, contract, jobType)
+	if explicitRegeneration {
+		query += "这是用户明确发起的历史总结重生成：允许覆盖旧的用户编辑总结，必须按当前类型化 JSON 契约重新写入；不要跳过写入。"
+	}
 	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query, knowledgeIDs); err != nil {
 		if !isMissingWikiPageError(err) {
 			return fmt.Errorf("trigger skill %s: %w", contract.SkillName, err)
@@ -187,7 +191,13 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 	}
 
 	// 回写 wiki_page_id；基础内容齐备时由编排器调度组装
-	if _, _, oerr := h.Orchestrator.AfterSkillCompleteWithID(ctx, video.ID, jobType, wikiPageID); oerr != nil && !errors.Is(oerr, skill.ErrSummaryUserEditProtected) {
+	var oerr error
+	if explicitRegeneration {
+		_, _, oerr = h.Orchestrator.AfterExplicitSummaryRegeneration(ctx, video.ID, jobType, wikiPageID)
+	} else {
+		_, _, oerr = h.Orchestrator.AfterSkillCompleteWithID(ctx, video.ID, jobType, wikiPageID)
+	}
+	if oerr != nil && !errors.Is(oerr, skill.ErrSummaryUserEditProtected) {
 		return fmt.Errorf("after skill complete: %w", oerr)
 	}
 	_ = wikiPageID // 回写已在 AfterSkillComplete 中完成

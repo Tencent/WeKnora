@@ -41,11 +41,12 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		return fmt.Errorf("unsupported direct content job: %s", h.Job)
 	}
 	if h.Job == skill.JobSummary || h.Job == skill.JobSummaryEnhance {
+		explicitRegeneration := skill.IsExplicitSummaryRegeneration(job.InputPayload)
 		protected, err := h.Orchestrator.IsSummaryUserEditProtected(ctx, video.ID)
 		if err != nil {
 			return fmt.Errorf("check summary user edit protection: %w", err)
 		}
-		if protected {
+		if protected && !explicitRegeneration {
 			return nil
 		}
 	}
@@ -71,6 +72,9 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		if err != nil {
 			return err
 		}
+	}
+	if skill.IsExplicitSummaryRegeneration(job.InputPayload) {
+		prompt += "\n这是用户明确发起的历史总结重生成：允许覆盖旧总结，必须重新生成符合当前 JSON 契约且带观点级原文证据的内容。"
 	}
 	raw, err := h.LLM.Complete(ctx, prompt)
 	if err != nil {
@@ -149,8 +153,14 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 	if err := h.DB.WithContext(ctx).Model(job).Update("result_payload", string(result)).Error; err != nil {
 		return fmt.Errorf("save %s result: %w", h.Job, err)
 	}
-	if _, _, err := h.Orchestrator.AfterSkillCompleteWithID(ctx, video.ID, h.Job, page.ID); err != nil {
-		return err
+	var completeErr error
+	if skill.IsExplicitSummaryRegeneration(job.InputPayload) {
+		_, _, completeErr = h.Orchestrator.AfterExplicitSummaryRegeneration(ctx, video.ID, h.Job, page.ID)
+	} else {
+		_, _, completeErr = h.Orchestrator.AfterSkillCompleteWithID(ctx, video.ID, h.Job, page.ID)
+	}
+	if completeErr != nil {
+		return completeErr
 	}
 	return nil
 }
