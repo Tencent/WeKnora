@@ -79,6 +79,7 @@ func validate(document Document, durationSeconds, transcriptEndSeconds int, know
 	}
 
 	previousStart := -1
+	previousEnd := 0
 	totalPoints := 0
 	for index, chapter := range document.Chapters {
 		if chapter.ChapterIndex != index+1 {
@@ -99,10 +100,14 @@ func validate(document Document, durationSeconds, transcriptEndSeconds int, know
 		if chapter.StartSeconds <= previousStart {
 			return fmt.Errorf("chapter %d is out of chronological order", chapter.ChapterIndex)
 		}
+		if index > 0 && chapter.StartSeconds < previousEnd {
+			return fmt.Errorf("chapter %d overlaps previous chapter", chapter.ChapterIndex)
+		}
 		if durationSeconds > 0 && chapter.EndSeconds > durationSeconds {
 			return fmt.Errorf("chapter %d exceeds video duration", chapter.ChapterIndex)
 		}
 		previousStart = chapter.StartSeconds
+		previousEnd = chapter.EndSeconds
 
 		if len(chapter.KnowledgePoints) == 0 || len(chapter.KnowledgePoints) > 3 {
 			return fmt.Errorf("chapter %d must contain 1 to 3 knowledge points", chapter.ChapterIndex)

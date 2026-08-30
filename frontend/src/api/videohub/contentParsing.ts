@@ -81,18 +81,25 @@ function parseCanonicalOutline(response: CanonicalOutlineResponse, durationSecon
   if (response.schema_version !== 1 || !Array.isArray(response.chapters) || response.chapters.length === 0) {
     throw new Error('章节 JSON Schema v1 内容无效')
   }
+  let previousStart = -1
+  let previousEnd = 0
   return response.chapters.map((chapter, chapterIndex) => {
     const startSeconds = chapter.start_seconds
     const endSeconds = chapter.end_seconds
-    if (typeof startSeconds !== 'number' || typeof endSeconds !== 'number' || !Number.isInteger(startSeconds) || !Number.isInteger(endSeconds) || endSeconds <= startSeconds) {
+    if (typeof startSeconds !== 'number' || typeof endSeconds !== 'number' || !Number.isInteger(startSeconds) || !Number.isInteger(endSeconds) || startSeconds < 0 || endSeconds <= startSeconds) {
       throw new Error(`章节 ${chapterIndex + 1} 时间范围无效`)
     }
     if (durationSeconds > 0 && (startSeconds < 0 || endSeconds > durationSeconds)) {
       throw new Error(`章节 ${chapterIndex + 1} 超出视频时长`)
     }
-    if (!chapter.chapter_title?.trim() || !chapter.chapter_summary?.trim() || !Array.isArray(chapter.knowledge_points)) {
+    if (startSeconds <= previousStart || (chapterIndex > 0 && startSeconds < previousEnd)) {
+      throw new Error(`章节 ${chapterIndex + 1} 时间顺序无效`)
+    }
+    if (!chapter.chapter_title?.trim() || !chapter.chapter_summary?.trim() || !Array.isArray(chapter.knowledge_points) || chapter.knowledge_points.length === 0 || chapter.knowledge_points.length > 3) {
       throw new Error(`章节 ${chapterIndex + 1} 内容不完整`)
     }
+    previousStart = startSeconds
+    previousEnd = endSeconds
     return {
       id: `chapter-${chapterIndex + 1}`,
       chapter_index: String(chapter.chapter_index ?? chapterIndex + 1).padStart(2, '0'),
@@ -205,7 +212,9 @@ function parseSourceContent(body: string) {
 
 export function parseOutlineWikiPage(content: string, durationSeconds = 0): Chapter[] {
   const sections = splitLevelTwoSections(content)
+  if (sections.length === 0) throw new Error('章节内容缺少章节标题')
   let previousStart = -1
+  let previousEnd = 0
   return sections.map((section, chapterIndex) => {
     const range = section.body.match(/时间[：:]\s*`?(\d{1,2}:\d{2}(?::\d{2})?)`?\s*[–—-]\s*`?(\d{1,2}:\d{2}(?::\d{2})?)`?/) || section.title.match(/[（(]\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[–—-]\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[）)]/)
     if (!range) throw new Error(`章节“${section.title}”缺少有效时间范围`)
@@ -215,8 +224,9 @@ export function parseOutlineWikiPage(content: string, durationSeconds = 0): Chap
       if (startSeconds >= durationSeconds) throw new Error(`章节“${section.title}”开始时间超过视频时长`)
       endSeconds = Math.min(endSeconds, durationSeconds)
     }
-    if (endSeconds <= startSeconds || startSeconds <= previousStart) throw new Error(`章节“${section.title}”时间顺序无效`)
+    if (endSeconds <= startSeconds || startSeconds <= previousStart || (chapterIndex > 0 && startSeconds < previousEnd)) throw new Error(`章节“${section.title}”时间顺序无效`)
     previousStart = startSeconds
+    previousEnd = endSeconds
 
     const summary = subsection(section.body, '本章核心内容')
       .split('\n')

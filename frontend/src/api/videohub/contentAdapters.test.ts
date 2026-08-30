@@ -238,8 +238,44 @@ test('outline response prefers canonical JSON Schema v1 chapters', () => {
   assert.equal(chapters[0].knowledge_points[0].timestamp, '00:12')
 })
 
+test('outline parsers reject overlapping chapter ranges', () => {
+  assert.throws(() => parseOutlineResponse({
+    schema_version: 1,
+    chapters: [
+      { chapter_index: 1, chapter_title: '第一章', start_seconds: 0, end_seconds: 60, chapter_summary: '第一章内容', knowledge_points: [{ title: '观察', seconds: 12 }] },
+      { chapter_index: 2, chapter_title: '第二章', start_seconds: 30, end_seconds: 90, chapter_summary: '第二章内容', knowledge_points: [{ title: '延伸', seconds: 45 }] },
+    ],
+  }, 90), /章节 2 时间顺序无效/)
+
+  const legacyContent = [
+    '## 第一章',
+    '时间：00:00–01:00',
+    '',
+    '### 本章核心内容',
+    '内容',
+    '',
+    '### 关键知识点',
+    '- 观察（00:12）',
+    '',
+    '## 第二章',
+    '时间：00:30–01:30',
+    '',
+    '### 本章核心内容',
+    '内容',
+    '',
+    '### 关键知识点',
+    '- 延伸（00:45)',
+  ].join('\n')
+  assert.throws(() => parseOutlineWikiPage(legacyContent), /章节“第二章”时间顺序无效/)
+})
+
 test('outline response rejects an invalid canonical payload instead of showing empty', () => {
   assert.throws(() => parseOutlineResponse({ schema_version: 1, chapters: [] }), /JSON Schema v1 内容无效/)
+  assert.throws(() => parseOutlineResponse({
+    schema_version: 1,
+    chapters: [{ chapter_index: 1, chapter_title: '第一章', start_seconds: -1, end_seconds: 10, chapter_summary: '内容', knowledge_points: [{ title: '观察', seconds: 1 }] }],
+  }), /章节 1 时间范围无效/)
+  assert.throws(() => parseOutlineWikiPage('只有正文，没有章节标题'), /章节内容缺少章节标题/)
 })
 
 test('timestamp parser rejects invalid minute and second fields', () => {

@@ -63,6 +63,22 @@ func TestValidateWithTranscriptEndStillRejectsChapterBeyondVideo(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsOverlappingChapters(t *testing.T) {
+	document := validDocument()
+	document.Chapters = append(document.Chapters, Chapter{
+		ChapterIndex:     2,
+		ChapterTitle:     "第二章",
+		StartSeconds:     30,
+		EndSeconds:       90,
+		ChapterSummary:   "本章继续介绍视频主题。",
+		EvidenceChunkIDs: []string{"chunk-2"},
+		KnowledgePoints:  []KnowledgePoint{{Title: "延伸内容", Seconds: 45, EvidenceChunkIDs: []string{"chunk-2"}}},
+	})
+	if err := Validate(document, 90, map[string]struct{}{"chunk-1": {}, "chunk-2": {}}); err == nil {
+		t.Fatal("expected overlapping chapter ranges to be rejected")
+	}
+}
+
 func TestMarshalAndParseRoundTrip(t *testing.T) {
 	document := validDocument()
 	content, err := Marshal(document)

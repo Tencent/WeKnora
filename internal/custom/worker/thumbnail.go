@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -185,7 +186,7 @@ func probeDuration(ctx context.Context, videoURL string) int {
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		slog.Warn("ffprobe duration", "url", videoURL, "error", err)
+		slog.Warn("ffprobe duration", "error", err)
 		return 0
 	}
 	raw := strings.TrimSpace(out.String())
@@ -196,7 +197,14 @@ func probeDuration(ctx context.Context, videoURL string) int {
 	if err != nil || f <= 0 {
 		return 0
 	}
-	return int(f)
+	return durationSecondsFromFloat(f)
+}
+
+func durationSecondsFromFloat(duration float64) int {
+	if duration <= 0 || math.IsNaN(duration) || math.IsInf(duration, 0) {
+		return 0
+	}
+	return int(math.Ceil(duration))
 }
 
 // uploadBytes 把字节上传到 MinIO

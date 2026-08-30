@@ -28,6 +28,12 @@ interface GeneratedPoster {
   durationSeconds: number
 }
 
+export function durationSecondsForUpload(durationSeconds: number): number {
+  return Number.isFinite(durationSeconds) && durationSeconds > 0
+    ? Math.ceil(durationSeconds)
+    : 0
+}
+
 export class UploadCancelledError extends Error {
   constructor() {
     super('上传已取消')
@@ -587,7 +593,7 @@ export async function uploadPartWithRetry<T>(
 
 async function uploadVideoPoster(videoId: string, poster: GeneratedPoster, trace: UploadTrace): Promise<void> {
   const query = poster.durationSeconds > 0
-    ? `?duration_seconds=${encodeURIComponent(Math.floor(poster.durationSeconds))}`
+    ? `?duration_seconds=${encodeURIComponent(durationSecondsForUpload(poster.durationSeconds))}`
     : ''
   const request = await fetchWithUploadDiagnostics(
     `/api/custom/videos/${videoId}/poster${query}`,
@@ -707,7 +713,7 @@ async function generateVideoPoster(file: File): Promise<GeneratedPoster> {
           resolve({
             blob,
             durationSeconds: Number.isFinite(video.duration) && video.duration > 0
-              ? Math.floor(video.duration)
+              ? durationSecondsForUpload(video.duration)
               : 0,
           })
         }, 'image/jpeg', 0.9)

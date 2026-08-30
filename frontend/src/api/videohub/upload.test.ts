@@ -7,8 +7,15 @@ import {
   PART_SIZE,
   runAdaptivePool,
   UploadCancelledError,
+  durationSecondsForUpload,
   uploadPartWithRetry,
 } from './upload'
+
+test('video duration rounds up for second-based chapter boundaries', () => {
+  assert.equal(durationSecondsForUpload(386.2), 387)
+  assert.equal(durationSecondsForUpload(0), 0)
+  assert.equal(durationSecondsForUpload(Number.NaN), 0)
+})
 
 test('multipart complete parts are emitted in ascending part number order', () => {
   const parts = buildMultipartCompleteParts(new Map([
