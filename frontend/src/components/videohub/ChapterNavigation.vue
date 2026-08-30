@@ -9,6 +9,7 @@
       <template #action><t-button size="small" variant="outline" @click="load">刷新</t-button></template>
     </t-empty>
     <div v-else class="chapters__list">
+      <t-alert v-if="hasUntranscribedTail" theme="warning" class="chapters__notice" :message="`章节导航覆盖至 ${lastChapterEndTime}；视频尾部暂无可用转写内容`" />
       <article v-for="chapter in chapters" :key="chapter.id" :ref="el => setChapterRef(chapter.id, el)" :class="['chapter', { 'chapter--active': chapter.id === activeChapterId, 'chapter--pending': chapter.alignment_status === 'pending_alignment' }]">
         <button class="chapter__main" type="button" @click="$emit('seek', chapter.start_seconds)">
           <span class="chapter__index">{{ chapter.chapter_index }}</span>
@@ -37,6 +38,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
+import { formatTimestamp } from '@/api/videohub/contentParsing'
 import type { Chapter, ContentState, VideoData } from '@/types/videohub'
 
 const props = defineProps<{ video: VideoData; currentSeconds: number; contentState: ContentState<Chapter[]> }>()
@@ -45,6 +47,9 @@ const chapters = computed(() => props.contentState.data)
 const loading = computed(() => props.contentState.status === 'loading')
 const error = computed(() => props.contentState.status === 'error' ? props.contentState.error || '章节加载失败' : '')
 const notGenerated = computed(() => props.contentState.status === 'not_generated')
+const lastChapterEndSeconds = computed(() => chapters.value[chapters.value.length - 1]?.end_seconds ?? 0)
+const lastChapterEndTime = computed(() => formatTimestamp(lastChapterEndSeconds.value))
+const hasUntranscribedTail = computed(() => props.video.durationSeconds > 0 && lastChapterEndSeconds.value < props.video.durationSeconds - 1)
 const chapterRefs = new Map<string, HTMLElement>()
 const activeChapterId = computed(() => chapters.value.find(chapter => props.currentSeconds >= chapter.start_seconds && props.currentSeconds < chapter.end_seconds)?.id)
 const activeKnowledgePointId = computed(() => {
