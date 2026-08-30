@@ -111,20 +111,39 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		pageTitle = video.Title + "_大纲"
 		pageBody = canonical
 	} else {
-		var document summary.Document
-		if err := parseLLMJSONResponse(raw, &document); err != nil {
-			return fmt.Errorf("parse %s output: %w", h.Job, err)
-		}
 		knownChunkIDs := make(map[string]struct{}, len(chunks))
 		for _, chunk := range chunks {
 			knownChunkIDs[chunk.ID] = struct{}{}
 		}
-		summary.NormalizeEvidenceChunkIDs(&document, chunks)
-		if err := summary.Validate(document, video.VideoType, knownChunkIDs); err != nil {
-			return fmt.Errorf("validate %s output: %w", h.Job, err)
+		var document summary.Document
+		var validationErr error
+		for attempt := 0; attempt < 2; attempt++ {
+			if attempt > 0 {
+				retryPrompt := prompt + "\n上一轮总结未通过严格校验，必须修正后重新输出完整 JSON。校验错误：" + validationErr.Error() + "。只能从上文转写分块列表复制 evidenceChunkIds，不得创造、猜测或引用不存在的 ID；可以使用纯知识 ID或带 |分片序号的显示 ID，系统会归一化。"
+				raw, err = h.LLM.Complete(ctx, retryPrompt)
+				if err != nil {
+					return fmt.Errorf("generate %s retry: %w", h.Job, err)
+				}
+			}
+			document = summary.Document{}
+			if err := parseLLMJSONResponse(raw, &document); err != nil {
+				validationErr = fmt.Errorf("parse %s output: %w", h.Job, err)
+				continue
+			}
+			summary.NormalizeEvidenceChunkIDs(&document, chunks)
+			if err := summary.Validate(document, video.VideoType, knownChunkIDs); err != nil {
+				validationErr = fmt.Errorf("validate %s output: %w", h.Job, err)
+				continue
+			}
+			if err := summary.ResolveEvidence(&document, chunks); err != nil {
+				validationErr = fmt.Errorf("resolve %s evidence: %w", h.Job, err)
+				continue
+			}
+			validationErr = nil
+			break
 		}
-		if err := summary.ResolveEvidence(&document, chunks); err != nil {
-			return fmt.Errorf("resolve %s evidence: %w", h.Job, err)
+		if validationErr != nil {
+			return validationErr
 		}
 		canonical, err := json.Marshal(document)
 		if err != nil {

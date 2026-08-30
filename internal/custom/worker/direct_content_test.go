@@ -64,6 +64,17 @@ func TestParseLLMJSONResponseRejectsHTMLWithoutJSON(t *testing.T) {
 	}
 }
 
+func TestSummaryRetryPromptRejectsInventedEvidenceIDs(t *testing.T) {
+	prompt := "原始提示"
+	errorMessage := `validate summary output: summary section "一、目标与受众" references unknown evidence chunk "unknown"`
+	retryPrompt := prompt + "\n上一轮总结未通过严格校验，必须修正后重新输出完整 JSON。校验错误：" + errorMessage + "。只能从上文转写分块列表复制 evidenceChunkIds，不得创造、猜测或引用不存在的 ID；可以使用纯知识 ID或带 |分片序号的显示 ID，系统会归一化。"
+	for _, expected := range []string{"上一轮总结未通过严格校验", "unknown", "不得创造、猜测或引用不存在的 ID", "系统会归一化"} {
+		if !strings.Contains(retryPrompt, expected) {
+			t.Fatalf("retry prompt does not contain %q: %s", expected, retryPrompt)
+		}
+	}
+}
+
 func TestBuildDirectContentPromptIncludesTranscriptEvidence(t *testing.T) {
 	prompt, err := buildDirectContentPrompt(&model.Video{Title: "视频一", VideoType: "training"}, skill.JobOutline, []transcript.Chunk{{ID: "chunk-1", Index: 0, Content: "原文内容"}})
 	if err != nil {
