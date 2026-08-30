@@ -91,6 +91,25 @@ func Framework(videoType string) ([]FrameworkSection, bool) {
 	return framework, ok
 }
 
+func NormalizeEvidenceChunkIDs(document *Document, chunks []transcript.Chunk) {
+	aliases := make(map[string]string, len(chunks)*2)
+	for _, chunk := range chunks {
+		aliases[chunk.ID] = chunk.ID
+		aliases[fmt.Sprintf("%s|%06d", chunk.ID, chunk.Index)] = chunk.ID
+	}
+	for sectionIndex := range document.Sections {
+		section := &document.Sections[sectionIndex]
+		for blockIndex := range section.Blocks {
+			block := &section.Blocks[blockIndex]
+			for evidenceIndex, chunkID := range block.EvidenceChunkIDs {
+				if normalized, ok := aliases[chunkID]; ok {
+					block.EvidenceChunkIDs[evidenceIndex] = normalized
+				}
+			}
+		}
+	}
+}
+
 func Parse(content string) (Document, error) {
 	var document Document
 	if err := json.Unmarshal([]byte(strings.TrimSpace(content)), &document); err != nil {

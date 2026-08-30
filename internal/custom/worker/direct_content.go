@@ -119,6 +119,7 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		for _, chunk := range chunks {
 			knownChunkIDs[chunk.ID] = struct{}{}
 		}
+		summary.NormalizeEvidenceChunkIDs(&document, chunks)
 		if err := summary.Validate(document, video.VideoType, knownChunkIDs); err != nil {
 			return fmt.Errorf("validate %s output: %w", h.Job, err)
 		}

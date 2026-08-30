@@ -106,6 +106,24 @@ func TestCanonicalJSONUsesFrontendWireContractForEveryVideoType(t *testing.T) {
 	}
 }
 
+func TestNormalizeEvidenceChunkIDsAcceptsPromptAliases(t *testing.T) {
+	document := Document{
+		SchemaVersion: SchemaVersion,
+		VideoType:     "general",
+		Sections: []Section{{
+			ID: "positioning-problem", Title: "一、定位与问题",
+			Blocks: []Block{{EvidenceChunkIDs: []string{"chunk-1|000004", "unknown|000004"}}},
+		}},
+	}
+	NormalizeEvidenceChunkIDs(&document, []transcript.Chunk{{ID: "chunk-1", Index: 4}})
+	if got := document.Sections[0].Blocks[0].EvidenceChunkIDs[0]; got != "chunk-1" {
+		t.Fatalf("normalized evidence chunk ID = %q", got)
+	}
+	if got := document.Sections[0].Blocks[0].EvidenceChunkIDs[1]; got != "unknown|000004" {
+		t.Fatalf("unknown evidence chunk ID should remain unchanged, got %q", got)
+	}
+}
+
 func TestValidateRejectsMarkdownBlockText(t *testing.T) {
 	document := Document{SchemaVersion: SchemaVersion, VideoType: "general", Sections: make([]Section, 0, len(frameworks["general"]))}
 	for index, section := range frameworks["general"] {
