@@ -38,6 +38,32 @@ func TestSummaryOutputRejectsFencedAndProseWrappedJSON(t *testing.T) {
 	}
 }
 
+func TestSummaryLLMResponseStripsReasoningBeforeStrictValidation(t *testing.T) {
+	for _, response := range []string{
+		`<think>先分析，再返回 JSON。</think>
+{"schemaVersion":1,"videoType":"general","sections":[]}`,
+		`<think>推理中断，仍然返回结果
+{"schemaVersion":1,"videoType":"general","sections":[]}`,
+		`<think>推理中包含示例 {"invalid": true}</think>
+{"schemaVersion":1,"videoType":"general","sections":[]}`,
+	} {
+		var document summary.Document
+		if err := parseLLMJSONResponse(response, &document); err != nil {
+			t.Fatalf("parseLLMJSONResponse returned error: %v", err)
+		}
+		if document.SchemaVersion != 1 || document.VideoType != "general" {
+			t.Fatalf("unexpected summary document: %+v", document)
+		}
+	}
+}
+
+func TestParseLLMJSONResponseRejectsHTMLWithoutJSON(t *testing.T) {
+	var output map[string]string
+	if err := parseLLMJSONResponse("<!DOCTYPE html><html><body>gateway error</body></html>", &output); err == nil {
+		t.Fatal("parseLLMJSONResponse accepted HTML without JSON")
+	}
+}
+
 func TestBuildDirectContentPromptIncludesTranscriptEvidence(t *testing.T) {
 	prompt, err := buildDirectContentPrompt(&model.Video{Title: "视频一", VideoType: "training"}, skill.JobOutline, []transcript.Chunk{{ID: "chunk-1", Index: 0, Content: "原文内容"}})
 	if err != nil {

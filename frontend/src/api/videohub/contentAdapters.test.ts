@@ -55,6 +55,7 @@ test('summary accepts the typed JSON contract and preserves block evidence', () 
           id: `block-${index + 1}`,
           kind: 'paragraph',
           text: `第 ${index + 1} 节内容`,
+          evidenceChunkIds: [`chunk-${index + 1}`],
           evidence: [{ chunkId: `chunk-${index + 1}`, startSeconds: index, endSeconds: index + 1, timestamp: `00:0${index}`, transcriptSnippet: '真实原文' }],
         }],
       })),
@@ -63,6 +64,44 @@ test('summary accepts the typed JSON contract and preserves block evidence', () 
 
   assert.equal(sections[0].title, '一、人物背景')
   assert.equal(sections[0].blocks[0].evidence[0].transcriptSnippet, '真实原文')
+})
+
+test('summary renders every category using the backend wire contract', () => {
+  const titles: Record<string, string[]> = {
+    interview: ['一、人物背景', '二、经历与决策', '三、核心观点', '四、原则与思维模型', '五、案例与证据', '六、反思与边界'],
+    training: ['一、目标与受众', '二、知识地图', '三、核心概念', '四、方法与步骤', '五、示例与异常', '六、练习与应用'],
+    salon: ['一、活动与参与者', '二、议题与观点', '三、观点交锋', '四、案例与问答', '五、共识与分歧', '六、探索方向'],
+    general: ['一、定位与问题', '二、主张与论证', '三、证据与案例', '四、限定与反方', '五、影响与建议'],
+  }
+
+  for (const [category, categoryTitles] of Object.entries(titles)) {
+    const sections = parseStructuredSummary({
+      schemaVersion: 1,
+      videoType: category,
+      sections: categoryTitles.map((title, index) => ({
+        id: `${category}-section-${index + 1}`,
+        title,
+        blocks: [{
+          id: `${category}-block-${index + 1}`,
+          kind: index % 2 === 0 ? 'paragraph' : 'bullet',
+          text: `第 ${index + 1} 节内容\n保留换行`,
+          evidenceChunkIds: [`chunk-${index + 1}`],
+          evidence: [{
+            chunkId: `chunk-${index + 1}`,
+            startSeconds: index + 1,
+            endSeconds: index + 2,
+            timestamp: `00:0${index + 1}–00:0${index + 2}`,
+            transcriptSnippet: '真实原文',
+          }],
+        }],
+      })),
+    }, category)
+
+    assert.equal(sections.length, categoryTitles.length)
+    assert.equal(sections[1]?.blocks[0]?.kind, categoryTitles.length > 1 ? 'bullet' : 'paragraph')
+    assert.equal(sections[0]?.blocks[0]?.text, '第 1 节内容\n保留换行')
+    assert.equal(sections.at(-1)?.blocks[0]?.evidence[0]?.startSeconds, categoryTitles.length)
+  }
 })
 
 test('summary rejects Markdown content and template deviations', () => {

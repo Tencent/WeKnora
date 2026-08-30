@@ -2,6 +2,7 @@ package summary
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/custom/service/transcript"
@@ -67,6 +68,41 @@ func TestParseStoredSkipsWikiFrontmatter(t *testing.T) {
 	}
 	if err := ValidateStored(parsed, "general"); err != nil {
 		t.Fatalf("ValidateStored returned error: %v", err)
+	}
+}
+
+func TestCanonicalJSONUsesFrontendWireContractForEveryVideoType(t *testing.T) {
+	chunk := transcript.Chunk{ID: "chunk-1", StartMs: 1000, EndMs: 2500, Content: "真实原文"}
+	for videoType, framework := range frameworks {
+		document := Document{SchemaVersion: SchemaVersion, VideoType: videoType, Sections: make([]Section, 0, len(framework))}
+		for _, section := range framework {
+			document.Sections = append(document.Sections, Section{
+				ID: section.ID, Title: section.Title,
+				Blocks: []Block{{
+					ID: "block-1", Kind: BlockKindBullet, Text: "可直接展示的内容",
+					EvidenceChunkIDs: []string{chunk.ID},
+				}},
+			})
+		}
+		if err := Validate(document, videoType, map[string]struct{}{chunk.ID: {}}); err != nil {
+			t.Fatalf("Validate(%s) returned error: %v", videoType, err)
+		}
+		if err := ResolveEvidence(&document, []transcript.Chunk{chunk}); err != nil {
+			t.Fatalf("ResolveEvidence(%s) returned error: %v", videoType, err)
+		}
+		payload, err := json.Marshal(document)
+		if err != nil {
+			t.Fatalf("json.Marshal(%s) returned error: %v", videoType, err)
+		}
+		wire := string(payload)
+		for _, field := range []string{"schemaVersion", "videoType", "evidenceChunkIds", "chunkId", "startSeconds", "endSeconds", "transcriptSnippet"} {
+			if !strings.Contains(wire, `"`+field+`"`) {
+				t.Fatalf("%s payload is missing frontend field %q: %s", videoType, field, wire)
+			}
+		}
+		if strings.Contains(wire, `"schema_version"`) || strings.Contains(wire, `"evidence_chunk_ids"`) {
+			t.Fatalf("%s payload contains backend-only field names: %s", videoType, wire)
+		}
 	}
 }
 

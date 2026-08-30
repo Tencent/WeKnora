@@ -111,8 +111,8 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		pageTitle = video.Title + "_大纲"
 		pageBody = canonical
 	} else {
-		document, err := summary.Parse(raw)
-		if err != nil {
+		var document summary.Document
+		if err := parseLLMJSONResponse(raw, &document); err != nil {
 			return fmt.Errorf("parse %s output: %w", h.Job, err)
 		}
 		knownChunkIDs := make(map[string]struct{}, len(chunks))
@@ -190,34 +190,63 @@ func normalizeOutlineEvidenceChunkIDs(document *outline.Document, chunks []trans
 }
 
 func parseLLMJSONResponse(content string, target any) error {
-	content = stripLLMReasoning(content)
-	err := json.Unmarshal([]byte(content), target)
-	if err == nil {
+	content = strings.TrimPrefix(strings.TrimSpace(content), "\ufeff")
+	if err := json.Unmarshal([]byte(content), target); err == nil {
 		return nil
 	}
 
-	if fenceStart := strings.Index(content, "```"); fenceStart >= 0 {
-		fenced := content[fenceStart+3:]
-		fenced = strings.TrimLeft(fenced, " \t\r\n")
-		if strings.HasPrefix(fenced, "json") {
-			fenced = strings.TrimLeft(fenced[4:], " \t\r\n")
-		}
-		if fenceEnd := strings.Index(fenced, "```"); fenceEnd >= 0 {
-			if fenceErr := json.Unmarshal([]byte(strings.TrimSpace(fenced[:fenceEnd])), target); fenceErr == nil {
-				return nil
-			}
-		}
-	}
-
-	objectStart := strings.IndexByte(content, '{')
-	objectEnd := strings.LastIndexByte(content, '}')
-	if objectStart >= 0 && objectEnd > objectStart {
-		if objectErr := json.Unmarshal([]byte(content[objectStart:objectEnd+1]), target); objectErr == nil {
+	cleaned := stripLLMReasoning(content)
+	if cleaned != content {
+		if err := json.Unmarshal([]byte(cleaned), target); err == nil {
 			return nil
 		}
 	}
 
-	return err
+	for _, candidate := range balancedJSONObjectCandidates(cleaned) {
+		if err := json.Unmarshal([]byte(candidate), target); err == nil {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("response does not contain a valid JSON object")
+}
+
+func balancedJSONObjectCandidates(content string) []string {
+	candidates := make([]string, 0, 1)
+	for start := 0; start < len(content); start++ {
+		if content[start] != '{' {
+			continue
+		}
+		depth := 0
+		inString := false
+		escaped := false
+		for index := start; index < len(content); index++ {
+			character := content[index]
+			if inString {
+				if escaped {
+					escaped = false
+				} else if character == '\\' {
+					escaped = true
+				} else if character == '"' {
+					inString = false
+				}
+				continue
+			}
+			switch character {
+			case '"':
+				inString = true
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					candidates = append(candidates, content[start:index+1])
+					index = len(content)
+				}
+			}
+		}
+	}
+	return candidates
 }
 
 var llmReasoningBlockPattern = regexp.MustCompile(`(?is)<think>.*?</think>|<analysis>.*?</analysis>`)
