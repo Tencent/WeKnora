@@ -610,14 +610,25 @@
                       </div>
                     </div>
 
-                    <!-- 最大生成Token数（仅普通模式） -->
-                    <div v-if="!isAgentMode" class="setting-row">
+                    <!-- 最大生成Token数：0 表示跟随系统默认；自定义后按输入值保存 -->
+                    <div class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.maxCompletionTokens') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.maxTokens') }}</p>
+                        <p class="desc">{{ isAgentMode ? $t('agentEditor.desc.maxTokensAgent') :
+                          $t('agentEditor.desc.maxTokens') }}
+                        </p>
                       </div>
-                      <div class="setting-control">
-                        <t-input-number v-model="formData.config.max_completion_tokens" :min="100" :max="100000"
+                      <div class="setting-control max-tokens-control">
+                        <t-radio-group v-model="maxCompletionTokensMode">
+                          <t-radio-button value="default">{{ $t('agent.editor.maxCompletionTokensDefault')
+                            }}</t-radio-button>
+                          <t-radio-button value="custom">{{ $t('agent.editor.maxCompletionTokensCustom')
+                            }}</t-radio-button>
+                        </t-radio-group>
+                        <span v-if="maxCompletionTokensMode === 'default'" class="max-tokens-value">
+                          {{ effectiveDefaultMaxCompletionTokens }}
+                        </span>
+                        <t-input-number v-else v-model="formData.config.max_completion_tokens" :min="100" :max="100000"
                           :step="100" theme="column" />
                       </div>
                     </div>
@@ -2202,8 +2213,19 @@ const defaultKeywordThreshold = ref(0.3);
 const defaultVectorThreshold = ref(0.5);
 const defaultRerankTopK = ref(5);
 const defaultRerankThreshold = ref(0.5);
-const defaultMaxCompletionTokens = ref(2048);
+const defaultQuickAnswerMaxCompletionTokens = 2048;
+const defaultSmartReasoningMaxCompletionTokens = 4096;
+const defaultSandboxWriteMaxCompletionTokens = 24576;
 const defaultTemperature = ref(0.7);
+
+const defaultMaxCompletionTokensFor = (mode: string, sandboxConfigId?: string) => {
+  if (mode === 'smart-reasoning') {
+    return sandboxConfigId
+      ? defaultSandboxWriteMaxCompletionTokens
+      : defaultSmartReasoningMaxCompletionTokens;
+  }
+  return defaultQuickAnswerMaxCompletionTokens;
+};
 
 // 知识库相关工具列表（用于 watch(hasKnowledgeBase) 从"无"变"有"时 seed 默认工具）
 const knowledgeBaseTools = ['grep_chunks', 'knowledge_search', 'list_knowledge_chunks', 'query_knowledge_graph', 'get_document_info', 'database_query'];
@@ -2575,7 +2597,7 @@ const defaultFormData = {
     model_id: '',
     rerank_model_id: '',
     temperature: 0.7,
-    max_completion_tokens: 2048,
+    max_completion_tokens: 0,
     thinking: false, // 默认禁用思考模式
     citation_enabled: true, // 默认输出知识库/网页来源引用
     // Agent模式设置
@@ -2718,6 +2740,23 @@ const agentMode = computed({
 });
 
 const isAgentMode = computed(() => agentMode.value === 'smart-reasoning');
+
+const effectiveDefaultMaxCompletionTokens = computed(() =>
+  defaultMaxCompletionTokensFor(agentMode.value, formData.value.config.sandbox_config_id),
+);
+
+const maxCompletionTokensMode = computed({
+  get: () => (formData.value.config.max_completion_tokens > 0 ? 'custom' : 'default'),
+  set: (mode: 'default' | 'custom') => {
+    if (mode === 'default') {
+      formData.value.config.max_completion_tokens = 0;
+      return;
+    }
+    if (!formData.value.config.max_completion_tokens) {
+      formData.value.config.max_completion_tokens = effectiveDefaultMaxCompletionTokens.value;
+    }
+  },
+});
 
 const currentIntentTemplate = computed(() =>
   intentPromptTemplates.value.find((template) => template.id === selectedIntent.value),
@@ -3250,6 +3289,7 @@ watch(() => props.visible, async (val) => {
       // 附件解析调优字段：旧数据缺省时置 0（表示使用全局默认）
       if (agentData.config.attachment_ocr_max_pages == null) agentData.config.attachment_ocr_max_pages = 0;
       if (agentData.config.attachment_parse_wait_timeout_sec == null) agentData.config.attachment_parse_wait_timeout_sec = 0;
+      if (agentData.config.max_completion_tokens == null) agentData.config.max_completion_tokens = 0;
       // 长期记忆：后端用 omitempty，跟随空间设置的智能体不带这个字段。
       // 不补成 true 的话开关会显示为"关"，用户随手一存就真的把记忆关了。
       if (agentData.config.memory_enabled == null) agentData.config.memory_enabled = true;
@@ -3285,7 +3325,7 @@ watch(() => props.visible, async (val) => {
       newFormData.config.vector_threshold = defaultVectorThreshold.value;
       newFormData.config.rerank_top_k = defaultRerankTopK.value;
       newFormData.config.rerank_threshold = defaultRerankThreshold.value;
-      newFormData.config.max_completion_tokens = defaultMaxCompletionTokens.value;
+      newFormData.config.max_completion_tokens = 0;
       newFormData.config.temperature = defaultTemperature.value;
       // 应用系统默认提示词（根据模式填充）
       const isAgent = newFormData.config.agent_mode === 'smart-reasoning';
@@ -5126,6 +5166,16 @@ const handleSave = async () => {
     justify-content: flex-start;
   }
 
+  &.max-tokens-control {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+
+    :deep(.t-input-number) {
+      width: 140px;
+    }
+  }
+
   // 让 select 和 input 占满控件区域
   :deep(.t-select),
   :deep(.t-input),
@@ -5477,6 +5527,13 @@ const handleSave = async () => {
   font-family: var(--app-font-family-mono);
   font-size: 14px;
   color: var(--td-text-color-primary);
+}
+
+.max-tokens-value {
+  font-family: var(--app-font-family-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
 }
 
 // 推荐问题列表

@@ -43,15 +43,16 @@ func TestEnsureDefaults_ThinkingPreservesTrue(t *testing.T) {
 func TestEnsureDefaults_MaxCompletionTokensByMode(t *testing.T) {
 	qa := &CustomAgent{Config: CustomAgentConfig{AgentMode: AgentModeQuickAnswer}}
 	qa.EnsureDefaults()
-	if qa.Config.MaxCompletionTokens != 2048 {
-		t.Fatalf("quick-answer default MaxCompletionTokens = %d, want 2048", qa.Config.MaxCompletionTokens)
+	if qa.Config.MaxCompletionTokens != 0 {
+		t.Fatalf("unset max_completion_tokens must stay 0 (follow default at call time), got %d",
+			qa.Config.MaxCompletionTokens)
 	}
 
 	sr := &CustomAgent{Config: CustomAgentConfig{AgentMode: AgentModeSmartReasoning}}
 	sr.EnsureDefaults()
-	if sr.Config.MaxCompletionTokens != DefaultAgentMaxCompletionTokens {
-		t.Fatalf("smart-reasoning default MaxCompletionTokens = %d, want %d",
-			sr.Config.MaxCompletionTokens, DefaultAgentMaxCompletionTokens)
+	if sr.Config.MaxCompletionTokens != 0 {
+		t.Fatalf("unset smart-reasoning max_completion_tokens must stay 0, got %d",
+			sr.Config.MaxCompletionTokens)
 	}
 
 	explicit := &CustomAgent{Config: CustomAgentConfig{

@@ -446,6 +446,23 @@ func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
 			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
 		require.NoError(t, err)
 		require.Len(t, mock.opts, 1)
+		assert.Equal(t, types.DefaultSmartReasoningMaxCompletionTokens, mock.opts[0].MaxTokens)
+		assert.Equal(t, types.DefaultSmartReasoningMaxCompletionTokens, mock.opts[0].MaxCompletionTokens)
+	})
+
+	t.Run("defaults to the write-file budget when a sandbox is bound", func(t *testing.T) {
+		mock := &mockChat{
+			responses: []mockResponse{
+				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
+			},
+		}
+		engine := newTestEngine(t, mock, func(cfg *types.AgentConfig) {
+			cfg.SandboxConfigID = "cfg-a"
+		})
+		_, err := engine.streamThinkingToEventBus(context.Background(),
+			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
+		require.NoError(t, err)
+		require.Len(t, mock.opts, 1)
 		assert.Equal(t, types.DefaultAgentMaxCompletionTokens, mock.opts[0].MaxTokens)
 		assert.Equal(t, types.DefaultAgentMaxCompletionTokens, mock.opts[0].MaxCompletionTokens)
 	})

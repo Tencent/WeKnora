@@ -77,14 +77,20 @@ func TestUseCustomSystemPromptFlag(t *testing.T) {
 }
 
 func TestAgentRoundMaxCompletionTokens(t *testing.T) {
-	if got := AgentRoundMaxCompletionTokens(0); got != DefaultAgentMaxCompletionTokens {
-		t.Fatalf("zero configured = %d, want %d", got, DefaultAgentMaxCompletionTokens)
+	if got := AgentRoundMaxCompletionTokens(0); got != DefaultSmartReasoningMaxCompletionTokens {
+		t.Fatalf("zero configured = %d, want %d", got, DefaultSmartReasoningMaxCompletionTokens)
+	}
+	if got := AgentRoundMaxCompletionTokensFor(0, "cfg-a"); got != DefaultAgentMaxCompletionTokens {
+		t.Fatalf("unset with sandbox = %d, want %d", got, DefaultAgentMaxCompletionTokens)
 	}
 	if got := AgentRoundMaxCompletionTokens(2048); got != 2048 {
 		t.Fatalf("explicit 2048 = %d, want 2048", got)
 	}
 	if got := AgentRoundMaxCompletionTokens(4096); got != 4096 {
 		t.Fatalf("explicit 4096 = %d, want 4096", got)
+	}
+	if got := AgentRoundMaxCompletionTokensFor(4096, "cfg-a"); got != 4096 {
+		t.Fatalf("explicit 4096 with sandbox must stay 4096, got %d", got)
 	}
 	if got := AgentRoundMaxCompletionTokens(64000); got != 64000 {
 		t.Fatalf("explicit high value = %d, want 64000", got)
