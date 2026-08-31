@@ -133,7 +133,7 @@ class MHTMLParser(BaseParser):
             part.get("Content-ID", ""),
             part.get("X-Attachment-Id", ""),
         ):
-            raw = raw.strip()
+            raw = str(raw).strip()
             if not raw:
                 continue
             values = {raw, html.unescape(raw), unquote(html.unescape(raw))}
@@ -163,7 +163,7 @@ class MHTMLParser(BaseParser):
     ) -> str:
         """Choose a stable image path when the MHTML part exposes a filename."""
         ext = cls._image_extension(content_type)
-        location = (part.get("Content-Location", "") or "").strip()
+        location = str(part.get("Content-Location", "") or "").strip()
         filename = cls._filename_from_content_location(location)
         if not filename:
             return f"images/{uuid.uuid4().hex}{ext}"
