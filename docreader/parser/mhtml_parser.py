@@ -8,6 +8,7 @@ import email
 import html
 import logging
 import os
+from email.header import decode_header
 from urllib.parse import unquote, urljoin, urlparse
 import uuid
 from typing import Dict
@@ -27,6 +28,52 @@ _AD_DOMAINS = (
     "analytics",
     "pixel",
 )
+
+_UNKNOWN_8BIT = frozenset({"unknown-8bit", "unknown"})
+
+
+def _header_str(value) -> str:
+    """Normalize a MIME header to str, recovering 8-bit UTF-8 bytes.
+
+    ``email.message_from_bytes`` uses compat32 by default. Browser-saved
+    ``.mhtml`` files often store raw UTF-8 in headers such as Content-Location.
+    Those values come back as ``email.header.Header`` with charset
+    ``unknown-8bit``: ``.strip()`` / ``.lower()`` raise AttributeError, and
+    ``str(Header)`` replaces the bytes with U+FFFD so image aliases no longer
+    match the HTML body.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        try:
+            return value.encode("ascii", "surrogateescape").decode("utf-8")
+        except UnicodeError:
+            return value
+    try:
+        chunks = decode_header(value)
+    except (TypeError, ValueError, LookupError, UnicodeError):
+        return str(value)
+
+    parts: list[str] = []
+    for chunk, charset in chunks:
+        if isinstance(chunk, bytes):
+            encoding = (charset or "utf-8").lower()
+            if encoding in _UNKNOWN_8BIT:
+                encoding = "utf-8"
+            try:
+                parts.append(chunk.decode(encoding, errors="replace"))
+            except LookupError:
+                parts.append(chunk.decode("utf-8", errors="replace"))
+        elif chunk:
+            try:
+                parts.append(
+                    chunk.encode("ascii", "surrogateescape").decode("utf-8")
+                )
+            except UnicodeError:
+                parts.append(chunk)
+    return "".join(parts)
 
 
 class MHTMLParser(BaseParser):
@@ -49,7 +96,7 @@ class MHTMLParser(BaseParser):
 
         for part in msg.walk():
             content_type = part.get_content_type()
-            location = part.get("Content-Location", "")
+            location = _header_str(part.get("Content-Location", ""))
 
             if content_type == "text/html":
                 payload = part.get_payload(decode=True)
@@ -103,9 +150,10 @@ class MHTMLParser(BaseParser):
             return {}
 
         def is_ad(location: str) -> bool:
-            if not location:
+            loc = _header_str(location)
+            if not loc:
                 return False
-            loc = location.lower()
+            loc = loc.lower()
             return any(ad in loc for ad in _AD_DOMAINS)
 
         non_ad = sorted(
@@ -133,7 +181,7 @@ class MHTMLParser(BaseParser):
             part.get("Content-ID", ""),
             part.get("X-Attachment-Id", ""),
         ):
-            raw = str(raw).strip()
+            raw = _header_str(raw).strip()
             if not raw:
                 continue
             values = {raw, html.unescape(raw), unquote(html.unescape(raw))}
@@ -163,7 +211,7 @@ class MHTMLParser(BaseParser):
     ) -> str:
         """Choose a stable image path when the MHTML part exposes a filename."""
         ext = cls._image_extension(content_type)
-        location = str(part.get("Content-Location", "") or "").strip()
+        location = _header_str(part.get("Content-Location", "")).strip()
         filename = cls._filename_from_content_location(location)
         if not filename:
             return f"images/{uuid.uuid4().hex}{ext}"
@@ -185,7 +233,7 @@ class MHTMLParser(BaseParser):
 
     @staticmethod
     def _filename_from_content_location(location: str) -> str:
-        decoded = unquote(html.unescape(location.strip()))
+        decoded = unquote(html.unescape(_header_str(location).strip()))
         if not decoded or decoded.lower().startswith("cid:"):
             return ""
         path = urlparse(decoded).path or decoded
