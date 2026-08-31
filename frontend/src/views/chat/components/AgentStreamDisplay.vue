@@ -579,8 +579,9 @@ import {
   formatManualTitle,
   replaceIncompleteMermaidWithPlaceholder,
   prepareStreamingMermaidMarkdown,
-  extractFirstMermaidCode,
+  extractMermaidCodes,
   injectCachedMermaidSvg,
+  type CachedMermaidSvgHtml,
 } from '@/utils/chatMessageShared';
 import { copyWithToast } from '@/utils/clipboard';
 import {
@@ -589,10 +590,10 @@ import {
   wrapChatMarkdownTables,
 } from '@/utils/chatMarkdownRenderer';
 import {
+  appendMermaidSvgCache,
   createMermaidCodeRenderer,
   ensureMermaidInitialized,
   enhanceMarkdownContainer,
-  renderMermaidToSvg,
 } from '@/utils/mermaidShared';
 import { attachMarkdownEnhancementListeners, refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
 import { useTypewriter } from '@/composables/useTypewriter';
@@ -1496,9 +1497,8 @@ const isConversationDone = computed(() => {
   return !!doneAnswer;
 });
 
-const streamingMermaidSvgCache = ref<string | null>(null);
+const streamingMermaidSvgCache = ref<string[]>([]);
 let streamingMermaidRenderTask: Promise<void> | null = null;
-let streamingMermaidRenderId = 0;
 
 const activeAnswerMarkdown = computed(() => {
   const stream = eventStream.value;
@@ -1526,25 +1526,31 @@ const { displayed: typedAnswer } = useTypewriter(
 );
 
 const cacheStreamingMermaidSvg = async () => {
-  if (streamingMermaidSvgCache.value) return;
-  const code = extractFirstMermaidCode(activeAnswerMarkdown.value);
-  if (!code) return;
+  const codes = extractMermaidCodes(activeAnswerMarkdown.value);
+  if (codes.length <= streamingMermaidSvgCache.value.length) return;
 
   if (!streamingMermaidRenderTask) {
     streamingMermaidRenderTask = (async () => {
-      const svg = await renderMermaidToSvg(code, `mermaid-agent-stream-${++streamingMermaidRenderId}`);
-      if (svg) streamingMermaidSvgCache.value = svg;
+      streamingMermaidSvgCache.value = await appendMermaidSvgCache(
+        extractMermaidCodes(activeAnswerMarkdown.value),
+        streamingMermaidSvgCache.value,
+        'mermaid-agent-stream',
+      );
     })().finally(() => {
       streamingMermaidRenderTask = null;
     });
   }
 
   await streamingMermaidRenderTask;
+
+  if (extractMermaidCodes(activeAnswerMarkdown.value).length > streamingMermaidSvgCache.value.length) {
+    await cacheStreamingMermaidSvg();
+  }
 };
 
 watch(isConversationDone, (done) => {
   if (!done) {
-    streamingMermaidSvgCache.value = null;
+    streamingMermaidSvgCache.value = [];
     streamingMermaidRenderTask = null;
   }
 });
@@ -1554,7 +1560,6 @@ watch(streamingMermaidSvgCache, () => {
 });
 
 watch(activeAnswerMarkdown, () => {
-  if (isConversationDone.value || streamingMermaidSvgCache.value) return;
   void cacheStreamingMermaidSvg();
 });
 
@@ -1579,6 +1584,7 @@ watch(answerFullyRendered, (ready) => {
   clearProtectedFileFailureCache();
   nextTick(async () => {
     await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
+    await enhanceMarkdownContainer(rootElement.value);
   });
 }, { immediate: true });
 
@@ -2452,9 +2458,18 @@ agentRenderer.image = function agentImageRenderer(token) {
   return defaultImageRenderer.call(this, token);
 };
 
-const prepareAgentMarkdown = (markdown: string, cachedSvgHtml?: string | null): string => {
-  const mermaidSafe = !isConversationDone.value
-    ? prepareStreamingMermaidMarkdown(markdown, cachedSvgHtml ?? streamingMermaidSvgCache.value)
+const hasCachedMermaidSvg = (cached: CachedMermaidSvgHtml): boolean => {
+  if (!cached) return false;
+  if (typeof cached === 'string') return cached.length > 0;
+  return cached.some((svg) => Boolean(svg));
+};
+
+const prepareAgentMarkdown = (markdown: string, cachedSvgHtml?: CachedMermaidSvgHtml): string => {
+  const cache = cachedSvgHtml ?? streamingMermaidSvgCache.value;
+  // Keep masking after the turn ends when SVG is already cached so v-html /
+  // v-stable-html cannot replace a painted diagram with mermaid source.
+  const mermaidSafe = !isConversationDone.value || hasCachedMermaidSvg(cache)
+    ? prepareStreamingMermaidMarkdown(markdown, cache)
     : replaceIncompleteMermaidWithPlaceholder(markdown);
   return mermaidSafe.replace(/<(?:kb|web)\b[^>]*$/i, '');
 };
