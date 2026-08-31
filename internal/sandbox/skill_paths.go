@@ -189,7 +189,17 @@ func SkillInterpreterCommand(skillDir, scriptPath string) (string, []string) {
 	case ".js", ".mjs", ".cjs":
 		return "node", []string{scriptPath}
 	case ".sh":
-		return "/bin/sh", []string{scriptPath}
+		// bash, with sh only as a fallback. Skill shell scripts carry a
+		// `#!/bin/bash` shebang almost exclusively, and /bin/sh is dash on
+		// Debian: an array literal, `function f()`, a C-style for loop and
+		// process substitution are all syntax errors there, so running these
+		// files with sh breaks scripts that are perfectly valid. The
+		// install-time check parses them with the same shell.
+		script := ShellQuote(scriptPath)
+		return "/bin/sh", []string{"-c", fmt.Sprintf(
+			`if command -v bash >/dev/null 2>&1; then exec bash %s "$@"; else exec sh %s "$@"; fi`,
+			script, script,
+		), skillShellArgv0}
 	default:
 		return "/bin/sh", []string{scriptPath}
 	}

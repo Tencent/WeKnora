@@ -1043,9 +1043,9 @@ func TestRunInstallRequiresVenvWhenRequirementsExist(t *testing.T) {
 	require.Nil(t, fx.configRepo.saved)
 }
 
-// Verification used to run one guessed "entry script" with --help. Nothing in
-// the runtime designates an entry script — the model names whichever path it
-// likes in execute_skill_script — so the guess left every other file unchecked
+// Verification used to run one guessed "entry script" with --help. A skill is
+// not one entry point: it is every file the tree ships, some run as scripts
+// and some imported as packages. The guess left every other file unchecked
 // while failing installs over the one it happened to pick.
 func TestRunInstallVerifiesEveryScriptOfEveryLanguage(t *testing.T) {
 	fx := newInstallFixture(t)
@@ -1058,7 +1058,7 @@ func TestRunInstallVerifiesEveryScriptOfEveryLanguage(t *testing.T) {
 
 	pythonPass := skillPythonVerifyCommand(installSkillDir, []string{
 		"scripts/__init__.py", "scripts/extract.py", "scripts/helper.py",
-	})
+	}, nil)
 	require.Contains(t, fx.commands, pythonPass,
 		"every python file must be checked, not the first one in sort order")
 	require.Contains(t, fx.commands,
@@ -1083,7 +1083,7 @@ func TestRunInstallDoesNotExecuteAnyScriptToVerifyIt(t *testing.T) {
 }
 
 func TestSkillPythonVerifyCommandPrefersTheSkillVenv(t *testing.T) {
-	command := skillPythonVerifyCommand("/opt/skills/demo", []string{"scripts/a.py"})
+	command := skillPythonVerifyCommand("/opt/skills/demo", []string{"scripts/a.py"}, nil)
 
 	require.Contains(t, command, "if [ -x /opt/skills/demo/.venv/bin/python ]; "+
 		"then py=/opt/skills/demo/.venv/bin/python; else py=python3; fi",
@@ -1095,11 +1095,68 @@ func TestSkillPythonVerifyCommandPrefersTheSkillVenv(t *testing.T) {
 // A skill may ship a file whose name needs quoting; the command is assembled
 // by hand, so the shell must never see it as more than one word.
 func TestSkillVerifyCommandsQuoteAwkwardPaths(t *testing.T) {
-	python := skillPythonVerifyCommand("/opt/skills/demo", []string{"scripts/a b'c.py"})
+	python := skillPythonVerifyCommand("/opt/skills/demo", []string{"scripts/a b'c.py"}, nil)
 	require.Contains(t, python, `'scripts/a b'\''c.py'`)
 
 	shell := skillShellVerifyCommand("/opt/skills/demo", []string{"a b.sh"})
-	require.Equal(t, `for f in '/opt/skills/demo/a b.sh'; do sh -n "$f" || exit 1; done`, shell)
+	require.Equal(t,
+		`if command -v bash >/dev/null 2>&1; then parser=bash; else parser=sh; fi; `+
+			`for f in '/opt/skills/demo/a b.sh'; do "$parser" -n "$f" || exit 1; done`,
+		shell)
+}
+
+// A skill's shell scripts carry a bash shebang almost exclusively, and
+// SkillInterpreterCommand runs them with bash. Checking them with sh — dash on
+// Debian — refused installs over array literals, `function f()`, C-style for
+// loops and process substitution, none of which dash can parse.
+func TestSkillShellVerifyCommandParsesWithBash(t *testing.T) {
+	command := skillShellVerifyCommand("/opt/skills/demo", []string{"bin/setup.sh"})
+
+	require.Contains(t, command, "parser=bash")
+	require.Contains(t, command, `"$parser" -n "$f"`)
+	require.Contains(t, command, "else parser=sh",
+		"an image without bash must still get a syntax check")
+	require.NotContains(t, command, `sh -n "$f"`,
+		"the check must not hard-code the shell that cannot parse these files")
+}
+
+// The Python pass is the only one whose verdict depends on what the image
+// carries, so it is the only one that can fail an install over a file nothing
+// the skill offers ever loads. Those files are named separately.
+func TestSkillPythonVerifyCommandSeparatesAuxiliaryFiles(t *testing.T) {
+	command := skillPythonVerifyCommand("/opt/skills/demo",
+		[]string{"scripts/run.py"}, []string{"tests/test_run.py"})
+
+	require.True(t, strings.HasSuffix(command,
+		`- /opt/skills/demo scripts/run.py --optional tests/test_run.py`),
+		"got %q", command)
+}
+
+// The split follows the conventions the language ecosystems already share. A
+// bundled tests/ directory imports pytest and an examples/ script imports
+// whatever it illustrates; neither is reachable from anything the skill
+// exposes, and neither may decide whether the skill installs.
+func TestSkillAuxiliaryScriptFollowsEcosystemConventions(t *testing.T) {
+	for _, rel := range []string{
+		"tests/test_run.py", "test/helpers.py", "examples/demo.py",
+		"scripts/__tests__/a.py", "benchmarks/bench.py", "docs/conf.py",
+		"conftest.py", "setup.py", "scripts/extract_test.py",
+		"scripts/test_extract.py",
+	} {
+		require.True(t, skillAuxiliaryScript(rel), "%s must be auxiliary", rel)
+	}
+	for _, rel := range []string{
+		"scripts/extract.py", "scripts/office/validators/base.py",
+		"recalc.py", "scripts/latest.py", "scripts/contest.py",
+	} {
+		require.False(t, skillAuxiliaryScript(rel), "%s is part of what the skill offers", rel)
+	}
+
+	entry, auxiliary := splitAuxiliaryScripts([]string{
+		"scripts/a.py", "tests/test_a.py", "scripts/b.py",
+	})
+	require.Equal(t, []string{"scripts/a.py", "scripts/b.py"}, entry)
+	require.Equal(t, []string{"tests/test_a.py"}, auxiliary)
 }
 
 func TestSkillNodeVerifyCommandChecksDeclaredDependencies(t *testing.T) {
@@ -1307,7 +1364,8 @@ func TestRunInstallKeepsOldImageWhenVerificationFails(t *testing.T) {
 	fx.configRepo.entity.Config.SkillImage = &types.SkillImageConfig{
 		SnapshotID: "snap-old", Generation: 3, OwnerFingerprint: fx.fingerprint,
 	}
-	fx.loadCheckExitCode = 1
+	fx.loadCheckExitCodes = []int{1}
+	fx.loadCheckStderr = "scripts/extract.py has a syntax error on line 1: invalid syntax"
 
 	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
 
@@ -1320,6 +1378,98 @@ func TestRunInstallKeepsOldImageWhenVerificationFails(t *testing.T) {
 	skill, _ := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
 	require.Equal(t, types.SkillStatusFailed, skill.Status)
 	require.NotEmpty(t, skill.Error)
+}
+
+// The failure this closes: the installer derives what to install from SKILL.md
+// prose, and the gate derives what must resolve from the imports every file
+// executes. Those disagree on any skill whose library modules import something
+// its documentation never names — the official office toolkit imports
+// defusedxml and lxml at module level and mentions neither — so the install
+// died with the answer already in hand, and a retry replayed the same prompt to
+// the same effect. The gate's own lines are the repair round's brief.
+func TestRunInstallHandsVerificationFindingsBackToTheInstaller(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.loadCheckExitCodes = []int{skillVerifyRepairableExit, 0}
+	fx.loadCheckStderr = "scripts/office/validators/base.py imports defusedxml, " +
+		"which is not available in this image\n" +
+		"scripts/recalc.py imports openpyxl, which is not available in this image"
+
+	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+
+	require.Len(t, fx.agentPrompts, 2, "a fixable failure must reach the installer again")
+	repair := fx.agentPrompts[1]
+	require.Contains(t, repair, "imports defusedxml",
+		"the repair round is driven by the gate's own findings, not by a second guess")
+	require.Contains(t, repair, "imports openpyxl")
+	require.Contains(t, repair, installSkillDir+"/.venv",
+		"the round has to be told where the packages belong")
+	require.Contains(t, repair, "Do NOT edit",
+		"a repair must not be allowed to edit the tree into passing")
+
+	require.Equal(t, 2, fx.loadCheckPasses, "the repair has to be verified, not trusted")
+	require.Contains(t, fx.events, "create-snapshot")
+	require.NotNil(t, fx.configRepo.saved, "a repaired install must reach the image pointer")
+
+	skill, _ := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.Equal(t, types.SkillStatusReady, skill.Status)
+	require.Empty(t, skill.Error)
+}
+
+// A repair round has to be able to write into .venv again, which the
+// verification pass just locked down: the checks run as the ordinary user, so
+// the tree is handed over at 555 and root-owned before every one of them.
+func TestRunInstallReopensTheTreeBeforeARepairRound(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.loadCheckExitCodes = []int{skillVerifyRepairableExit, 0}
+
+	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+
+	reopen := indexOfCommandContaining(fx.commands, "chmod -R u+rwX,go+rX "+installSkillDir)
+	require.GreaterOrEqual(t, reopen, 0, "the tree must be writable again for the repair")
+
+	firstLock := indexOfCommandContaining(fx.commands, "chmod -R 555 "+installSkillDir)
+	require.GreaterOrEqual(t, firstLock, 0)
+	require.Greater(t, reopen, firstLock,
+		"the tree is reopened after the pass that locked it, not before")
+
+	// And locked again for the pass that checks the repair, so the final image
+	// carries the modes every verification ran against.
+	require.Greater(t, lastIndexOfCommandContaining(fx.commands, "chmod -R 555 "+installSkillDir),
+		reopen, "the repaired tree must be locked down again before it is verified")
+}
+
+// Installing a package cannot fix a file that does not parse, and the bundle
+// has to change instead. Spending another agent round on it would only delay
+// the same failure by minutes.
+func TestRunInstallDoesNotRetryAFailureInstallingCannotFix(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.loadCheckExitCodes = []int{1}
+	fx.loadCheckStderr = "scripts/extract.py has a syntax error on line 1: invalid syntax"
+
+	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "syntax error")
+	require.Len(t, fx.agentPrompts, 1, "an unfixable finding must not buy another round")
+	require.Equal(t, 1, fx.loadCheckPasses)
+}
+
+// The loop is bounded. An installer that cannot satisfy the gate in one repair
+// is not going to satisfy it in ten, and a skill install must not become an
+// open-ended retry against a billed sandbox.
+func TestRunInstallStopsAfterOneRepairRound(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.loadCheckExitCodes = []int{skillVerifyRepairableExit}
+
+	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "imports pandas",
+		"the failure must name what the gate found, not just that it failed")
+	require.Len(t, fx.agentPrompts, skillInstallVerifyRounds)
+	require.Equal(t, skillInstallVerifyRounds, fx.loadCheckPasses)
+	require.NotContains(t, fx.events, "create-snapshot")
+	require.Nil(t, fx.configRepo.saved)
 }
 
 func TestRunInstallDeletesTheSnapshotWhenSwitchFails(t *testing.T) {
@@ -1549,12 +1699,33 @@ const (
 // reason; the properties worth stating verbatim are asserted separately in
 // TestSkillPythonVerifyCommand*.
 var installPythonVerifyCommand = skillPythonVerifyCommand(
-	installSkillDir, []string{"scripts/extract.py"},
+	installSkillDir, []string{"scripts/extract.py"}, nil,
 )
 
 func indexOfEvent(events []string, needle string) int {
 	for i, event := range events {
 		if event == needle {
+			return i
+		}
+	}
+	return -1
+}
+
+// indexOfCommandContaining and its Last variant locate one shell command in the
+// ordered transcript. A repair round issues the same commands twice, so the
+// tests that care about ordering need both ends.
+func indexOfCommandContaining(commands []string, needle string) int {
+	for i, command := range commands {
+		if strings.Contains(command, needle) {
+			return i
+		}
+	}
+	return -1
+}
+
+func lastIndexOfCommandContaining(commands []string, needle string) int {
+	for i := len(commands) - 1; i >= 0; i-- {
+		if strings.Contains(commands[i], needle) {
 			return i
 		}
 	}
@@ -1584,10 +1755,17 @@ type installFixture struct {
 	events      []string
 	commands    []string
 	fingerprint string
-	// loadCheck* drive the per-language script verification pass, which is
-	// the last gate before the snapshot.
-	loadCheckExitCode int
-	loadCheckResult   *sandbox.ExecuteResult
+	// loadCheck* drive the per-language script verification pass, which is the
+	// last gate before the snapshot. exitCodes is consumed one entry per python
+	// pass and its last entry repeats, so a test about a single round writes one
+	// value and a test about the repair round writes two. Exit 2 is the
+	// checker's "everything I found is a missing dependency", which is what
+	// earns another installer round.
+	loadCheckExitCodes []int
+	loadCheckStdout    string
+	loadCheckStderr    string
+	loadCheckPasses    int
+	loadCheckResult    *sandbox.ExecuteResult
 	// depsExitCode fails the declared-dependency check (venv / node_modules).
 	depsExitCode int
 	// execResult is scoped to execResultCommand: an unscoped stub result
@@ -1597,6 +1775,10 @@ type installFixture struct {
 	execResult         *sandbox.ExecuteResult
 	loadCheckRanAsRoot bool
 	agentErr           error
+	// agentPrompts is every prompt the installer engine was handed, in order.
+	// A repair round is a second entry, and what it says is the whole point of
+	// having one.
+	agentPrompts []string
 	// beforeExecute runs at the moment the engine would start, so a test can
 	// observe the state an attaching console would see mid-install.
 	beforeExecute func()
@@ -1657,6 +1839,10 @@ func newInstallFixture(t *testing.T) *installFixture {
 
 	fx := &installFixture{t: t}
 	fx.fingerprint = sandbox.SkillImageFingerprint("e2b", "key-1", "https://e2b.example")
+	// The checker's own wording for a missing dependency, so a test reading the
+	// repair prompt sees what a real run would put in it.
+	fx.loadCheckStderr = "scripts/extract.py imports pandas, " +
+		"which is not available in this image"
 	fx.bundle = &SkillBundle{
 		Name:         "pdf-tools",
 		Version:      "1.0.0",
@@ -1719,6 +1905,19 @@ func newInstallFixture(t *testing.T) *installFixture {
 
 func (f *installFixture) record(event string) {
 	f.events = append(f.events, event)
+}
+
+// nextLoadCheckExit returns the code for this verification pass, repeating the
+// last configured entry once they run out.
+func (f *installFixture) nextLoadCheckExit() int {
+	f.loadCheckPasses++
+	if len(f.loadCheckExitCodes) == 0 {
+		return 0
+	}
+	if f.loadCheckPasses > len(f.loadCheckExitCodes) {
+		return f.loadCheckExitCodes[len(f.loadCheckExitCodes)-1]
+	}
+	return f.loadCheckExitCodes[f.loadCheckPasses-1]
 }
 
 // now is the fixture's clock, so a test can express "one heartbeat ago"
@@ -2558,7 +2757,9 @@ func (m *installSandboxManager) ExecShellCommandWithOptions(
 			return m.fx.loadCheckResult, nil
 		}
 		return &sandbox.ExecuteResult{
-			ExitCode: m.fx.loadCheckExitCode, Stderr: "scripts/extract.py imports pandas",
+			ExitCode: m.fx.nextLoadCheckExit(),
+			Stdout:   m.fx.loadCheckStdout,
+			Stderr:   m.fx.loadCheckStderr,
 		}, nil
 	case command == removeSkillDirCommand:
 		m.fx.record("remove-skill-dir")
@@ -2741,16 +2942,17 @@ type installAgentEngine struct {
 }
 
 func (e *installAgentEngine) Execute(
-	context.Context,
-	string,
-	string,
-	string,
-	[]chat.Message,
-	...[]string,
+	_ context.Context,
+	_ string,
+	_ string,
+	prompt string,
+	_ []chat.Message,
+	_ ...[]string,
 ) (*types.AgentState, error) {
 	if e.fx.beforeExecute != nil {
 		e.fx.beforeExecute()
 	}
+	e.fx.agentPrompts = append(e.fx.agentPrompts, prompt)
 	e.fx.record("agent-execute")
 	if e.fx.agentDelay > 0 {
 		time.Sleep(e.fx.agentDelay)

@@ -44,6 +44,17 @@ const (
 	// files. Writing each file with MakeDir+WriteFile is two round trips per
 	// entry, which is why a 50-file skill crawled through "seeding 12/56".
 	skillSeedArchivePath = sandbox.SkillsImageRoot + "/.weknora-seed.tar"
+
+	// skillInstallVerifyRounds bounds the installer conversation.
+	//
+	// The first round works from SKILL.md. A second is driven by the gate's own
+	// findings, and exists because those are two different descriptions of what
+	// a skill needs: the official office toolkit imports defusedxml and lxml at
+	// module level while its SKILL.md names neither, so an installer working
+	// from prose alone cannot know to install them. One round of reconciliation
+	// closes that gap; more would only be a retry loop over an answer that is
+	// not going to change.
+	skillInstallVerifyRounds = 2
 )
 
 // InstallSkill validates an uploaded archive, records it, and kicks off the
@@ -367,25 +378,16 @@ func (s *TenantSkillService) runInstall(
 	}
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{Percent: 35, Stage: "seeded"})
 
-	// 3. Let the installer agent install dependencies.
-	if err := s.driveInstallerAgent(ctx, tenantID, skillID, sess, transcript, prompt); err != nil {
-		return err
-	}
-	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{Percent: 80, Stage: "agent_done"})
-
-	// 4. Hand the tree to the execution user BEFORE verifying it. The agent
-	//    created these files as root, and the language passes below
-	//    deliberately run as the ordinary user: verifying first would test
-	//    permissions that never reach the image, and a restrictive root umask
-	//    would fail a perfectly good install because the .venv interpreter was
-	//    unreadable.
-	if err := s.normalizeSkillPermissions(ctx, mgr, sess.ID, skillDir); err != nil {
-		return err
-	}
-
-	// 5. Verify ourselves. "The agent said it worked" is a sentence, not
-	//    evidence, and this is the last gate before the image is switched.
-	if err := s.verifySkill(ctx, mgr, sess.ID, skillDir, bundle); err != nil {
+	// 3-5. Install dependencies and verify the result. "The agent said it
+	//      worked" is a sentence, not evidence, and this is the last gate
+	//      before the image is switched — but the gate and the agent must not
+	//      answer "what does this skill need" separately, so a failure it can
+	//      still fix goes back to the same agent before the run is failed.
+	if err := s.installDependenciesAndVerify(ctx, installerJob{
+		tenantID: tenantID, configID: configID, skillID: skillID,
+		sess: sess, mgr: mgr, transcript: transcript,
+		prompt: prompt, skillDir: skillDir, bundle: bundle,
+	}); err != nil {
 		return err
 	}
 	if err := s.writeManifestEntry(ctx, mgr, sess.ID, skillID, bundle); err != nil {
@@ -690,19 +692,114 @@ func (s *TenantSkillService) beginInstallTranscript(
 	return transcript, prompt
 }
 
-// driveInstallerAgent runs one installer conversation. It calls the engine
-// directly instead of going through sessionService.AgentQA, because AgentQA
-// swallows engine failures (it emits an error event and returns nil) and we
-// need a reliable signal before switching the image.
-func (s *TenantSkillService) driveInstallerAgent(
-	ctx context.Context, tenantID uint64, skillID string, sess *types.Session,
-	transcript *installTranscript, prompt string,
-) error {
+// installerJob is everything the install-and-verify step needs. It is a struct
+// because the step takes the union of what the agent side and the image side
+// each need, and a nine-parameter call tells the reader nothing.
+type installerJob struct {
+	tenantID   uint64
+	configID   string
+	skillID    string
+	sess       *types.Session
+	mgr        sandbox.Manager
+	transcript *installTranscript
+	prompt     string
+	skillDir   string
+	bundle     *SkillBundle
+}
+
+// installDependenciesAndVerify runs the installer conversation and the gate as
+// one decision.
+//
+// They used to be two, and that is what let a working skill be rejected: the
+// installer derived what to install from SKILL.md prose while the gate derived
+// what must resolve from the imports every file executes. Those disagree on any
+// skill whose library modules import something its documentation never names,
+// and the install died with the answer already in hand. The gate is the only
+// authority here, so its own findings become the next round's instruction, and
+// nothing in this path derives that list a second time.
+//
+// A failure the gate marked unrepairable — a syntax error, a file the execution
+// user cannot read — ends the run immediately. Another round cannot change it,
+// and the bundle has to change instead.
+func (s *TenantSkillService) installDependenciesAndVerify(
+	ctx context.Context, job installerJob,
+) (err error) {
+	run, err := s.openInstallerRun(ctx, job.tenantID, job.sess, job.transcript)
+	if err != nil {
+		job.transcript.Finish(context.WithoutCancel(ctx), err)
+		return err
+	}
+	// Detached from cancellation: when the install lock's renewal fails the
+	// context dies, and the transcript of the run that just died is precisely
+	// what someone will want to read.
+	defer func() { job.transcript.Finish(context.WithoutCancel(ctx), err) }()
+
+	prompt := job.prompt
+	for round := 1; ; round++ {
+		if err = run.round(ctx, prompt); err != nil {
+			return err
+		}
+		s.publishProgress(ctx, job.tenantID, job.configID, job.skillID,
+			SkillProgress{Percent: 80, Stage: "agent_done"})
+
+		// The tree is handed to the execution user BEFORE it is verified. The
+		// agent created these files as root, and the language passes
+		// deliberately run as the ordinary user: verifying first would test
+		// permissions that never reach the image, and a restrictive root umask
+		// would fail a perfectly good install because the .venv interpreter
+		// was unreadable.
+		if err = s.normalizeSkillPermissions(ctx, job.mgr, job.sess.ID, job.skillDir); err != nil {
+			return err
+		}
+
+		notes, verifyErr := s.verifySkill(ctx, job.mgr, job.sess.ID, job.skillDir, job.bundle)
+		s.reportVerificationNotes(ctx, job, notes)
+		if verifyErr == nil {
+			return nil
+		}
+
+		var gate *skillVerificationError
+		if round >= skillInstallVerifyRounds || !errors.As(verifyErr, &gate) || !gate.Repairable {
+			err = verifyErr
+			return err
+		}
+
+		logger.Infof(ctx, "[skill] %s failed %s verification with %d fixable finding(s); "+
+			"handing them back to the installer", job.skillID, gate.Language, len(gate.Problems))
+		s.publishProgress(ctx, job.tenantID, job.configID, job.skillID, SkillProgress{
+			Percent: 82, Stage: "repairing",
+			Log: fmt.Sprintf("%s verification found %d missing dependency/dependencies; "+
+				"asking the installer to add them", gate.Language, len(gate.Problems)),
+		})
+		if err = s.reopenSkillDirForRepair(ctx, job.mgr, job.sess.ID, job.skillDir); err != nil {
+			return err
+		}
+		prompt = buildRepairPrompt(job.skillDir, gate)
+		job.transcript.RecordPrompt(prompt)
+	}
+}
+
+// installerRun is one installer conversation, held open across rounds. A repair
+// has to reach the same root shell, in the same sandbox, and be readable in the
+// same transcript as the install it is repairing.
+type installerRun struct {
+	engine     interfaces.AgentEngine
+	transcript *installTranscript
+	sessionID  string
+}
+
+// openInstallerRun builds the engine the conversation runs on. It calls the
+// engine directly instead of going through sessionService.AgentQA, because
+// AgentQA swallows engine failures (it emits an error event and returns nil)
+// and we need a reliable signal before switching the image.
+func (s *TenantSkillService) openInstallerRun(
+	ctx context.Context, tenantID uint64, sess *types.Session, transcript *installTranscript,
+) (*installerRun, error) {
 	if s.installerAgents == nil {
-		return errors.New("custom agent service is not configured")
+		return nil, errors.New("custom agent service is not configured")
 	}
 	if transcript == nil {
-		return errors.New("install transcript was not seeded")
+		return nil, errors.New("install transcript was not seeded")
 	}
 	// The record is tenant-writable: updateBuiltinAgent lets a tenant persist a
 	// Config for any built-in ID, this one included. It is therefore read for
@@ -710,40 +807,127 @@ func (s *TenantSkillService) driveInstallerAgent(
 	// platform's own registry entry.
 	record, err := s.installerAgents.GetAgentByID(ctx, types.BuiltinSkillInstallerID)
 	if err != nil {
-		return fmt.Errorf("load installer agent: %w", err)
+		return nil, fmt.Errorf("load installer agent: %w", err)
 	}
 	agentConfig := installerAgentConfig(installerAgentDefaults(ctx, tenantID), sess.SandboxConfigID)
 
 	chatModel, err := s.resolveInstallerModel(ctx, tenantID, record)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	engine, err := s.agents.CreateAgentEngine(
 		ctx, agentConfig, chatModel, nil, transcript.bus, sess.ID, transcript.assistantMessageID,
 	)
 	if err != nil {
-		runErr := fmt.Errorf("create installer engine: %w", err)
-		transcript.Finish(ctx, runErr)
-		return runErr
+		return nil, fmt.Errorf("create installer engine: %w", err)
 	}
+	return &installerRun{
+		engine: engine, transcript: transcript, sessionID: sess.ID,
+	}, nil
+}
 
-	state, err := engine.Execute(ctx, sess.ID, transcript.assistantMessageID, prompt, nil)
-	runErr := err
-	if runErr == nil && (state == nil || !state.IsComplete) {
-		runErr = errors.New("installer agent stopped without completing")
+// round runs one installer turn.
+//
+// No conversation history is replayed. The engine is stateless across turns, so
+// a repair round could be handed the first round's transcript — but what the
+// gate reported is both shorter and more exact than anything that could be
+// inferred from it, and re-reading the round that already missed a dependency
+// is not what makes the next one find it.
+func (r *installerRun) round(ctx context.Context, prompt string) error {
+	state, err := r.engine.Execute(ctx, r.sessionID, r.transcript.assistantMessageID, prompt, nil)
+	if err != nil {
+		return fmt.Errorf("installer agent failed: %w", err)
 	}
-	// Detached from cancellation: when the install lock's renewal fails the
-	// context dies, and the transcript of the run that just died is precisely
-	// what someone will want to read.
-	transcript.Finish(context.WithoutCancel(ctx), runErr)
-	if runErr != nil {
-		if err != nil {
-			return fmt.Errorf("installer agent failed: %w", err)
-		}
-		return runErr
+	if state == nil || !state.IsComplete {
+		return errors.New("installer agent stopped without completing")
 	}
 	return nil
+}
+
+// reportVerificationNotes surfaces what the gate noticed but did not refuse: an
+// auxiliary file that cannot load, a requirement whose environment marker
+// cannot be evaluated here, an import that resolves only from a directory the
+// skill ships no script in. None is evidence of a broken install, and all of
+// them are what someone debugging this skill later will wish they had been
+// told, so they are logged and streamed rather than discarded.
+func (s *TenantSkillService) reportVerificationNotes(
+	ctx context.Context, job installerJob, notes []string,
+) {
+	if len(notes) == 0 {
+		return
+	}
+	for _, note := range notes {
+		logger.Infof(ctx, "[skill] %s verification note: %s", job.skillID, note)
+	}
+	// One event, not one per note. Progress keeps only the latest value, so
+	// publishing them separately would leave a late subscriber holding whichever
+	// note happened to be last.
+	s.publishProgress(ctx, job.tenantID, job.configID, job.skillID, SkillProgress{
+		Percent: 80, Stage: "verify_note", Log: strings.Join(notes, "\n"),
+	})
+}
+
+// reopenSkillDirForRepair undoes normalizeSkillPermissions for another round.
+//
+// Verification runs as the ordinary user, so the tree is locked to 555 and root
+// before it; a repair then has to install into .venv again. Install commands
+// run as root and would get away with writing through those modes, but relying
+// on that makes the next reader work out whether it still holds — restoring the
+// state the seed left is the same two commands and needs no such argument.
+func (s *TenantSkillService) reopenSkillDirForRepair(
+	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string,
+) error {
+	if err := guardSkillDir(skillDir); err != nil {
+		return err
+	}
+	dir := sandbox.ShellQuote(skillDir)
+	user := sandbox.DefaultSandboxExecUser
+	cmd := fmt.Sprintf("chown -R %s:%s %s && chmod -R u+rwX,go+rX %s", user, user, dir, dir)
+	if _, err := s.execInstall(ctx, mgr, sessionID, cmd); err != nil {
+		return fmt.Errorf("reopen skill directory %s for a repair round: %w", skillDir, err)
+	}
+	return nil
+}
+
+// buildRepairPrompt turns the gate's own findings into the next round's brief.
+//
+// It carries no analysis of its own, deliberately. The reason a first round can
+// fail on a working skill is that SKILL.md and the imports its files execute are
+// two different descriptions of what the skill needs; a third description
+// written here would reintroduce exactly that gap. The only thing added is the
+// import-name-to-distribution mapping, which is a property of PyPI rather than
+// of this skill.
+func buildRepairPrompt(skillDir string, gate *skillVerificationError) string {
+	var findings strings.Builder
+	for _, problem := range gate.Problems {
+		findings.WriteString("- ")
+		findings.WriteString(problem)
+		findings.WriteString("\n")
+	}
+	return fmt.Sprintf(`Verification of the skill you just installed failed. Fix only this and stop.
+
+The %s check reported:
+%s
+Every line above is a dependency this image cannot resolve. The names were read
+from the imports the skill's own files execute when they load, which is why some
+of them appear nowhere in SKILL.md — install them anyway.
+
+- Python packages go into %s/.venv (`+"`uv pip install`"+`, or
+  %s/.venv/bin/python -m pip install). Node packages go under %s/node_modules.
+- The name in each line is an IMPORT name; install the distribution that
+  provides it. Common cases where they differ: PIL -> pillow, yaml -> pyyaml,
+  docx -> python-docx, pptx -> python-pptx, cv2 -> opencv-python-headless,
+  bs4 -> beautifulsoup4, sklearn -> scikit-learn, fitz -> pymupdf.
+- Do NOT edit, move or delete any of the skill's own files, and do NOT edit
+  SKILL.md or requirements.txt to make the check pass. The uploaded archive is
+  what read_skill serves, so a source edit here makes the installed skill differ
+  from what everyone else sees.
+- If a package genuinely cannot be installed in this image, say so plainly in
+  your summary rather than working around it.
+
+The same verification runs again as soon as you finish.
+`, gate.Language, findings.String(), skillDir, skillDir, skillDir)
 }
 
 // normalizeSkillPermissions makes the skill tree readable and executable by
@@ -1525,6 +1709,13 @@ load, and checks every distribution named in requirements.txt is present in the
 venv. It never runs the skill's code, so nothing is expected to answer --help.
 Lazy imports and install_deps.py extras are invisible to that check — you still
 have to install them.
+
+SKILL.md is not the dependency list. What the check resolves is the set of
+top-level imports the skill's files actually execute, and a library module
+routinely imports something the documentation never mentions. Read every .py in
+the tree (grep '^import\|^from' over it) and install what those lines need, not
+only what the Dependencies section names. If verification does fail on a missing
+package, you get its exact findings back and one round to install them.
 
 SKILL.md:
 %s

@@ -38,11 +38,17 @@ type installTranscript struct {
 	sessionID          string
 	assistantMessageID string
 
-	mu       sync.Mutex
-	message  *types.Message
-	answers  []*installAnswerSegment
-	starts   map[string]time.Time
-	finished bool
+	mu      sync.Mutex
+	message *types.Message
+	answers []*installAnswerSegment
+	starts  map[string]time.Time
+	// closed guards the terminal event and the final write, both of which say
+	// "this install is over" and must be said once.
+	closed bool
+	// Totals accumulated across the run's engine turns, reported on the one
+	// terminal event Finish emits.
+	totalSteps      int
+	totalDurationMs int64
 }
 
 // installAnswerSegment accumulates the prose streamed under one final-answer
@@ -142,11 +148,18 @@ func (tr *installTranscript) Subscribe() {
 	tr.bus.On(event.EventAgentComplete, tr.onComplete)
 }
 
-// Finish closes the record. runErr is the engine's verdict: the engine emits
-// no complete event when it fails, and a failed install is the one people
-// actually come to read, so the failure is written here rather than hoped for.
+// Finish closes the record. runErr is the install's verdict, not just the
+// engine's: verification runs after the agent stops, and a failure there is the
+// one people actually come to read, so it is written here rather than hoped for.
 func (tr *installTranscript) Finish(ctx context.Context, runErr error) {
 	if tr == nil {
+		return
+	}
+	tr.mu.Lock()
+	alreadyClosed := tr.closed
+	tr.closed = true
+	tr.mu.Unlock()
+	if alreadyClosed {
 		return
 	}
 	if runErr != nil {
@@ -173,20 +186,39 @@ func (tr *installTranscript) Finish(ctx context.Context, runErr error) {
 	}
 
 	tr.mu.Lock()
-	alreadyComplete := tr.finished
-	tr.finished = true
+	steps, duration := tr.totalSteps, tr.totalDurationMs
 	tr.mu.Unlock()
-
-	if !alreadyComplete {
-		tr.append(interfaces.StreamEvent{
-			ID:        uuid.NewString(),
-			Type:      types.ResponseTypeComplete,
-			Done:      true,
-			Timestamp: time.Now(),
-			Data:      map[string]interface{}{},
-		})
-	}
+	tr.append(interfaces.StreamEvent{
+		ID:        uuid.NewString(),
+		Type:      types.ResponseTypeComplete,
+		Done:      true,
+		Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"total_steps":       steps,
+			"total_duration_ms": duration,
+		},
+	})
 	tr.save(ctx)
+}
+
+// RecordPrompt logs a follow-up instruction the installer was given mid-run.
+//
+// The transcript exists so one replay of the event log is the whole
+// conversation. A repair round whose instruction is missing reads as the agent
+// spontaneously deciding to install more packages, which is precisely the
+// moment someone is reading this to find out why.
+func (tr *installTranscript) RecordPrompt(prompt string) {
+	if tr == nil {
+		return
+	}
+	tr.append(interfaces.StreamEvent{
+		ID:        uuid.NewString(),
+		Type:      types.ResponseTypeInstallPrompt,
+		Content:   prompt,
+		Done:      true,
+		Timestamp: time.Now(),
+		Data:      map[string]interface{}{},
+	})
 }
 
 func (tr *installTranscript) onThought(_ context.Context, evt event.Event) error {
@@ -326,13 +358,16 @@ func (tr *installTranscript) onError(_ context.Context, evt event.Event) error {
 	return nil
 }
 
+// onComplete records what the round finished with. It deliberately emits no
+// terminal event: an install may run another installer round after
+// verification, and a console that saw "complete" would stop following before
+// that round began. Only Finish closes the stream.
 func (tr *installTranscript) onComplete(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentCompleteData)
 	if !ok {
 		return nil
 	}
 	tr.mu.Lock()
-	tr.finished = true
 	if data.MessageID == tr.assistantMessageID {
 		msg := tr.ensureMessageLocked()
 		msg.IsCompleted = true
@@ -347,18 +382,11 @@ func (tr *installTranscript) onComplete(_ context.Context, evt event.Event) erro
 	if tr.composeAnswerLocked() == "" && data.FinalAnswer != "" {
 		tr.segmentLocked(evt.ID).content = data.FinalAnswer
 	}
+	// Summed rather than overwritten: an install that needed a repair round ran
+	// two engine turns, and its cost is both of them.
+	tr.totalSteps += data.TotalSteps
+	tr.totalDurationMs += data.TotalDurationMs
 	tr.mu.Unlock()
-
-	tr.append(interfaces.StreamEvent{
-		ID:        evt.ID,
-		Type:      types.ResponseTypeComplete,
-		Done:      true,
-		Timestamp: time.Now(),
-		Data: map[string]interface{}{
-			"total_steps":       data.TotalSteps,
-			"total_duration_ms": data.TotalDurationMs,
-		},
-	})
 	return nil
 }
 
