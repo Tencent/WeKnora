@@ -12,8 +12,6 @@ export interface SearchResult {
   knowledge_filename?: string
   score?: number
   match_type?: number | string
-  /** JSON string of `{url, caption, ocr_text}` figures attached to the chunk. */
-  image_info?: string
   [key: string]: unknown
 }
 
@@ -31,7 +29,6 @@ export interface ChunkRecord {
   content?: string
   chunk_index?: number
   knowledge_id?: string
-  image_info?: string
   [key: string]: unknown
 }
 

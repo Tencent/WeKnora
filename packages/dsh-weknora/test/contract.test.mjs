@@ -128,7 +128,6 @@ test('the plugin only reads response fields the fixture declares', async () => {
       score: result.score ?? 0,
       content: result.content ?? '',
       truncated: false,
-      images: [],
     })),
     documents: [],
   })

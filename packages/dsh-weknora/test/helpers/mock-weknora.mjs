@@ -26,14 +26,7 @@ const DOCUMENTS = [
     knowledge_base_id: 'kb-product',
     description: '检索与生成两层的系统架构示意图。',
     chunks: [
-      {
-        content: '系统由检索与生成两层组成，整体结构见架构图。\n\n![系统架构](resource://AbCdEfGhIjKlMnOpQrStUv)',
-        image_info: JSON.stringify([{
-          url: 'resource://AbCdEfGhIjKlMnOpQrStUv',
-          caption: '系统架构',
-          ocr_text: 'Retriever → Rerank → LLM',
-        }]),
-      },
+      '系统由检索与生成两层组成，整体结构见架构图。\n\n![系统架构](resource://AbCdEfGhIjKlMnOpQrStUv)',
     ],
   },
   {
@@ -77,14 +70,6 @@ const KNOWLEDGE_BASES = [
 const ARCH_HANDLE = 'resource://AbCdEfGhIjKlMnOpQrStUv'
 const ARCH_PUBLIC = 'https://cdn.example.com/architecture.png'
 
-function passageOf(chunk) {
-  return typeof chunk === 'string' ? chunk : chunk.content
-}
-
-function imageInfoOf(chunk) {
-  return typeof chunk === 'string' ? undefined : chunk.image_info
-}
-
 /** Mirror WeKnora's `resource_urls=public` rewrite of `resource://` handles. */
 function rewriteResources(value, publicMode) {
   if (!publicMode) return value
@@ -112,23 +97,18 @@ function searchResults(query, knowledgeBaseIds, knowledgeIds) {
     (knowledgeIds.length === 0 || knowledgeIds.includes(document.knowledge_id))
     && (knowledgeBaseIds.length === 0 || knowledgeBaseIds.includes(document.knowledge_base_id)))
   return documents
-    .flatMap(document => document.chunks.map((chunk, index) => {
-      const content = passageOf(chunk)
-      const imageInfo = imageInfoOf(chunk)
-      return {
-        id: `${document.knowledge_id}-chunk-${index}`,
-        content,
-        knowledge_id: document.knowledge_id,
-        knowledge_title: document.knowledge_title,
-        chunk_index: index,
-        score: scoreOf(query, content),
-        match_type: 2,
-        start_at: 0,
-        end_at: content.length,
-        metadata: {},
-        ...imageInfo === undefined ? {} : { image_info: imageInfo },
-      }
-    }))
+    .flatMap(document => document.chunks.map((content, index) => ({
+      id: `${document.knowledge_id}-chunk-${index}`,
+      content,
+      knowledge_id: document.knowledge_id,
+      knowledge_title: document.knowledge_title,
+      chunk_index: index,
+      score: scoreOf(query, content),
+      match_type: 2,
+      start_at: 0,
+      end_at: content.length,
+      metadata: {},
+    })))
     .filter(result => result.score > 0.4)
     .sort((left, right) => right.score - left.score)
 }
@@ -152,10 +132,7 @@ function documentRecord(document) {
 function answerFor(query, results) {
   if (results.length === 0) return `没有检索到与「${query}」相关的内容。`
   const cited = results.slice(0, 2).map(result => result.content).join(' ')
-  const figures = results.flatMap(result => result.content.match(/!\[[^\]]*\]\([^)]+\)/g) ?? [])
-  const unique = [...new Set(figures)]
-  const imageBlock = unique.length === 0 ? '' : `\n\n${unique.join('\n\n')}`
-  return `根据知识库内容：${cited}（问题：${query}）${imageBlock}`
+  return `根据知识库内容：${cited}（问题：${query}）`
 }
 
 /**
@@ -296,15 +273,14 @@ export async function startMockWeknora(options = {}) {
         const start = (page - 1) * pageSize
         json(200, {
           success: true,
-          data: rewriteResources(document.chunks.slice(start, start + pageSize).map((chunk, index) => ({
+          data: document.chunks.slice(start, start + pageSize).map((content, index) => ({
             id: `${knowledgeId}-chunk-${start + index}`,
             knowledge_id: knowledgeId,
             knowledge_base_id: 'kb-product',
-            content: passageOf(chunk),
+            content,
             chunk_index: start + index,
             is_enabled: true,
-            ...imageInfoOf(chunk) === undefined ? {} : { image_info: imageInfoOf(chunk) },
-          })), publicMode),
+          })),
           total: document.chunks.length,
           page,
           page_size: pageSize,

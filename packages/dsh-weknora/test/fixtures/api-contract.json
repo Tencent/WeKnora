@@ -94,10 +94,9 @@
       "chunk_index",
       "knowledge_title",
       "knowledge_filename",
-      "score",
-      "image_info"
+      "score"
     ],
-    "types.Chunk": ["id", "content", "chunk_index", "knowledge_id", "image_info"],
+    "types.Chunk": ["id", "content", "chunk_index", "knowledge_id"],
     "types.Knowledge": [
       "id",
       "title",

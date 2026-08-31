@@ -71,9 +71,9 @@ patch 是整块替换该行的 `config`，所以要保留的字段需要一并�
 | 工具 | WeKnora 接口 | 模型拿到什么 |
 |---|---|---|
 | `weknora_list_knowledge_bases` | `GET /knowledge-bases` | 知识库名称与 id，用于说明有哪些库，或为后续检索缩小范围 |
-| `weknora_search` | `POST /knowledge-search` + `GET /knowledge/search` | 原文片段与排序，每条带 `knowledge_id`、得分、分块序号和 Markdown 图片，外加查询点名的文档 |
-| `weknora_read_document` | `GET /chunks/:knowledge_id` + `GET /knowledge/:id` | 单个文档按序拼回的正文，开头给出标题与摘要，支持翻页，并带上图 |
-| `weknora_ask` | `POST /sessions` + `POST /knowledge-chat/:id` 或 `POST /agent-chat/:id` | WeKnora 自己的答案、引用、图、服务端用过的工具，以及可续聊的 `session_id` |
+| `weknora_search` | `POST /knowledge-search` + `GET /knowledge/search` | 原文片段与排序，每条带 `knowledge_id`、得分、分块序号，外加查询点名的文档 |
+| `weknora_read_document` | `GET /chunks/:knowledge_id` + `GET /knowledge/:id` | 单个文档按序拼回的正文，开头给出标题与摘要，支持翻页 |
+| `weknora_ask` | `POST /sessions` + `POST /knowledge-chat/:id` 或 `POST /agent-chat/:id` | WeKnora 自己的答案、引用、服务端用过的工具，以及可续聊的 `session_id` |
 
 `weknora_search` 是主力：它把原文交给 Agent 自己推理，Agent 的结论因此是可审计的。它在同一次调用里同时匹配片段内容和
 文档名，因为模型常常分不清自己要找的是「哪里讲了这件事」还是「那份叫 X 的文档在哪」。当查询读起来像个标题时，结果里会额外
@@ -102,9 +102,11 @@ Key 通过 `X-API-Key` 发送。如果用的是平台级 API Key，还需要配 
 只包含 HTTP 状态码和 WeKnora 自己给出的原因，不会带上 Key。
 
 片段内容在进入模型前会按 `maxChunkChars` 截断，避免一份超大文档吃掉整个上下文窗口；截断这件事会明确告知模型
-（`truncated: true`），而不是悄悄丢文本。被截掉的图会以 Markdown 图片（`![说明](url)`）补回截断点之后，避免把 URL 拦腰
-切断。默认 `resourceUrls: public` 时这些 URL 是可直接加载的 http(s) 直链——把它们写进回复，dsh 网页端就会把图画出来。
-限定知识库的 API Key 拿不到直链（WeKnora 会 403），插件会把这次调用改回 handle 模式，之后也一直用 handle。
+（`truncated: true`），而不是悄悄丢文本。
+
+默认 `resourceUrls: public` 时，WeKnora 会把片段里的 `resource://` 图改写成可直接加载的 http(s) 直链——把这些 Markdown
+图片写进回复，dsh 网页端就会把图画出来。限定知识库的 API Key 拿不到直链（WeKnora 会 403），插件会把这次调用改回
+handle 模式，之后也一直用 handle。
 
 配置层还会读 `WEKNORA_RESOURCE_URLS`（`public` 或 `handle`）。
 
