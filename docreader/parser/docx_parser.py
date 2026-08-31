@@ -39,6 +39,7 @@ from docx.image.exceptions import (
     UnexpectedEndOfFileError,
     UnrecognizedImageError,
 )
+from docx.oxml.ns import qn
 from PIL import Image
 
 from docreader.config import CONFIG
@@ -47,6 +48,41 @@ from docreader.parser.base_parser import BaseParser
 from docreader.utils import endecode
 
 logger = logging.getLogger(__name__)
+
+_W_P = qn("w:p")
+_W_TBL = qn("w:tbl")
+
+
+def _gfm_cell_text(text: Optional[str]) -> str:
+    """Collapse whitespace and escape pipes so a cell stays one GFM column."""
+    return re.sub(r"\s+", " ", text or "").strip().replace("|", "\\|")
+
+
+def table_to_gfm_markdown(table: Any) -> str:
+    """Render a python-docx Table as GFM Markdown.
+
+    ``row.cells`` already expands merged regions to one entry per grid slot
+    (repeating the same Cell object). Emitting every slot keeps column
+    alignment; comparing cell text would collapse adjacent equal/empty cells.
+    """
+    rows: List[List[str]] = []
+    for row in table.rows:
+        cells = [_gfm_cell_text(cell.text) for cell in row.cells]
+        if cells:
+            rows.append(cells)
+    if not rows:
+        return ""
+    width = max(len(row) for row in rows)
+    if width == 0:
+        return ""
+    padded = [row + [""] * (width - len(row)) for row in rows]
+    lines = [
+        "| " + " | ".join(padded[0]) + " |",
+        "| " + " | ".join("---" for _ in padded[0]) + " |",
+    ]
+    for row in padded[1:]:
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines)
 
 
 class ImageData:
@@ -142,7 +178,7 @@ class DocxParser(BaseParser):
                 enable_multimodal=True,
                 upload_file=_inline_upload,
             )
-            all_lines, tables = docx_processor(
+            all_lines, ordered_text = docx_processor(
                 binary=content,
                 max_workers=max_workers,
                 to_page=self.max_pages,
@@ -150,7 +186,7 @@ class DocxParser(BaseParser):
             processing_time = time.time() - start_time
             logger.info(
                 f"Docx processing completed in {processing_time:.2f}s, "
-                f"extracted {len(all_lines)} sections and {len(tables)} tables"
+                f"extracted {len(all_lines)} sections"
             )
 
             logger.info("Processing document sections")
@@ -187,14 +223,11 @@ class DocxParser(BaseParser):
                 f"Section processing completed in {section_processing_time:.2f}s"
             )
             logger.info("Combining all text parts")
-            text = "\n\n".join([part for part in text_parts if part])
-
-            # The Docx processor returns tables separately from the text
-            # lines. Render them as GFM Markdown so table content is not
-            # silently dropped from the parsed text.
-            tables_markdown = self._tables_to_gfm_markdown(tables)
-            if tables_markdown:
-                text = f"{text}\n\n{tables_markdown}" if text else tables_markdown
+            # Prefer body-order markdown (paragraphs interleaved with tables).
+            # Fall back to page-section text if composition produced nothing.
+            text = (ordered_text or "").strip()
+            if not text:
+                text = "\n\n".join([part for part in text_parts if part])
 
             # Check if the generated text is empty
             if not text:
@@ -213,40 +246,6 @@ class DocxParser(BaseParser):
             logger.error(f"Error parsing DOCX document: {str(e)}")
             logger.error(f"Detailed stack trace: {traceback.format_exc()}")
             return self._parse_using_simple_method(content)
-
-    def _tables_to_gfm_markdown(self, tables: List[Any]) -> str:
-        """Render extracted DOCX tables as GFM Markdown.
-
-        ``Docx.__call__`` returns each table as an ``((None, table_html), "")``
-        tuple whose HTML comes from :meth:`_convert_table_to_html`. Rendering
-        those tables into the parsed text prevents silent content loss.
-
-        Args:
-            tables: List of tables returned by Docx.__call__
-
-        Returns:
-            str: GFM Markdown table blocks, or "" when there are none
-        """
-        blocks = []
-        for (_, table_html), _ in tables:
-            if not table_html:
-                continue
-            cell_rows = []
-            for tr in re.findall(r"<tr>(.*?)</tr>", table_html, re.S):
-                cells = [
-                    re.sub(r"\s+", " ", cell).strip().replace("|", "\\|")
-                    for cell in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)
-                ]
-                if cells:
-                    cell_rows.append(cells)
-            if not cell_rows:
-                continue
-            header = cell_rows[0]
-            rows = [header, ["---"] * len(header)] + cell_rows[1:]
-            blocks.append(
-                "\n".join("| " + " | ".join(cells) + " |" for cells in rows)
-            )
-        return "\n\n".join(blocks)
 
     def _parse_using_simple_method(self, content: bytes) -> DocumentModel:
         """Parse document using a simplified method, as a fallback
@@ -522,7 +521,7 @@ class Docx:
         from_page: int = 0,
         to_page: int = 100000,
         max_workers: Optional[int] = None,
-    ) -> Tuple[List[LineData], List[Any]]:
+    ) -> Tuple[List[LineData], str]:
         """
         Process DOCX document, supporting concurrent processing of each page
 
@@ -533,7 +532,8 @@ class Docx:
             max_workers: Maximum number of workers, default to None (system decides)
 
         Returns:
-            tuple: (List of LineData objects with document content, List of tables)
+            tuple: (List of LineData objects with document content,
+            body-order markdown with tables interleaved)
         """
         logger.info("Processing DOCX document")
 
@@ -544,7 +544,7 @@ class Docx:
         # Load document
         self.doc = self._load_document(binary)
         if not self.doc:
-            return [], []
+            return [], ""
 
         # Identify page structure
         self.para_page_mapping = self._identify_page_paragraph_mapping(to_page)
@@ -558,7 +558,7 @@ class Docx:
         )
         if not pages_to_process:
             logger.warning("No pages to process after applying page limits!")
-            return [], []
+            return [], ""
 
         # Initialize shared resources
         self._init_shared_resources()
@@ -572,17 +572,17 @@ class Docx:
             max_workers,
         )
 
-        # Process tables
-        tbls = self._process_tables()
+        ordered_text = self._compose_ordered_markdown(pages_to_process)
 
         # Clean up document resources
         self.doc = None
 
         logger.info(
             f"Document processing complete, "
-            f"extracted {len(self.all_lines)} text sections and {len(tbls)} tables"
+            f"extracted {len(self.all_lines)} text sections, "
+            f"{len(ordered_text)} characters of body-order markdown"
         )
-        return self.all_lines, tbls
+        return self.all_lines, ordered_text
 
     def _load_document(self, binary):
         """Load document
@@ -1068,60 +1068,52 @@ class Docx:
             except Exception as e:
                 logger.error(f"Failed to remove temporary file: {str(e)}")
 
-    def _process_tables(self):
-        """Process tables in the document
+    def _compose_ordered_markdown(self, pages_to_process: List[int]) -> str:
+        """Walk body paragraphs and tables in document order and emit GFM.
 
-        Returns:
-            list: List of tables
+        Paragraph processing is page-limited; tables are included only when they
+        sit within that same paragraph range so max_pages does not leak later
+        tables into the parsed text.
         """
-        tbls = []
-        table_count = len(self.doc.tables)
-        if table_count > 0:
-            logger.info(f"Processing {table_count} tables")
-            for tb_idx, tb in enumerate(self.doc.tables):
-                if tb_idx % 10 == 0:  # Log only every 10 tables to reduce log volume
-                    logger.info(f"Processing table {tb_idx + 1}/{table_count}")
+        allowed = set()
+        for page in pages_to_process:
+            allowed.update(self.para_page_mapping.get(page, []))
+        min_allowed = min(allowed) if allowed else 0
+        max_allowed = max(allowed) if allowed else -1
 
-                # Optimize: Check if table is empty
-                if len(tb.rows) == 0 or all(len(r.cells) == 0 for r in tb.rows):
-                    logger.info(f"Skipping empty table {tb_idx + 1}")
-                    continue
+        parts: List[str] = []
+        para_i = 0
+        tbl_i = 0
+        paragraphs = self.doc.paragraphs
+        tables = self.doc.tables
 
-                table_html = self._convert_table_to_html(tb)
-                # Still using tuple format for tables as they are handled differently
-                tbls.append(((None, table_html), ""))
+        for child in self.doc.element.body:
+            if child.tag == _W_P:
+                if para_i in allowed and para_i < len(paragraphs):
+                    text = (paragraphs[para_i].text or "").strip()
+                    if text:
+                        parts.append(text)
+                para_i += 1
+                continue
+            if child.tag != _W_TBL:
+                continue
+            include_table = False
+            if not allowed:
+                include_table = True
+            elif min_allowed <= para_i <= max_allowed + 1:
+                include_table = True
+            if include_table and tbl_i < len(tables):
+                table = tables[tbl_i]
+                if not (
+                    len(table.rows) == 0
+                    or all(len(row.cells) == 0 for row in table.rows)
+                ):
+                    markdown = table_to_gfm_markdown(table)
+                    if markdown:
+                        parts.append(markdown)
+            tbl_i += 1
 
-        return tbls
-
-    def _convert_table_to_html(self, table):
-        """Convert table to HTML
-
-        Args:
-            table: Table object
-
-        Returns:
-            str: HTML formatted table
-        """
-        html = "<table>"
-        for r in table.rows:
-            html += "<tr>"
-            i = 0
-            while i < len(r.cells):
-                span = 1
-                c = r.cells[i]
-                for j in range(i + 1, len(r.cells)):
-                    if c.text == r.cells[j].text:
-                        span += 1
-                        i = j
-                i += 1
-                html += (
-                    f"<td>{c.text}</td>"
-                    if span == 1
-                    else f"<td colspan='{span}'>{c.text}</td>"
-                )
-            html += "</tr>"
-        html += "</table>"
-        return html
+        return "\n\n".join(parts)
 
     def _safe_concat_images(self, images):
         """Safely concatenate image lists
