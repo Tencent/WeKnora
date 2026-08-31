@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/moby/moby/client"
 )
 
@@ -78,8 +79,11 @@ func (s *dockerIdleSweeper) trigger(ctx context.Context) {
 		return
 	}
 	go func() {
+		// Drop the chat-trace parent: Engine API list/stat/delete from a
+		// sweep must not appear as siblings of agent.round after the tool
+		// that triggered the sweep has already finished its span.
 		sweepCtx, cancel := context.WithTimeout(
-			context.WithoutCancel(ctx), dockerSweepBudget,
+			logger.CloneContextWithoutTrace(ctx), dockerSweepBudget,
 		)
 		defer cancel()
 		if reclaimed, err := s.sweep(sweepCtx); err != nil {
