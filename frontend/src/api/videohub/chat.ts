@@ -2,7 +2,7 @@ import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { get, post } from '@/utils/request'
 import { getApiBaseUrl } from '@/utils/api-base'
 import type { ChatMessage, ChatSession, EvidenceLink, VideoData } from '@/types/videohub'
-import { parseWeKnoraStreamChunk } from './chatStream'
+import { displayQuestionFromStoredContent, mergeLocalTurnWithStoredMessages, parseWeKnoraStreamChunk } from './chatStream'
 
 type ChatScope = 'global' | 'video'
 
@@ -156,10 +156,11 @@ function unwrapData<T>(response: ApiEnvelope<T> | T): T {
 function mapMessage(message: WeKnoraMessage, evidenceByKnowledgeID = new Map<string, EvidenceLookupItem>()): ChatMessage {
   const evidenceLinks = evidenceLinksFromReferences(message.knowledge_references || [], evidenceByKnowledgeID)
   const firstEvidence = evidenceLinks.find(item => item.videoId)
+  const rawContent = message.content || ''
   return {
     id: message.id || messageId(),
     sender: message.role === 'user' ? 'user' : 'assistant',
-    text: cleanAnswer(message.content || ''),
+    text: message.role === 'user' ? displayQuestionFromStoredContent(rawContent) : cleanAnswer(rawContent),
     timestamp: formatRelativeTime(message.created_at || message.updated_at),
     relatedVideoId: firstEvidence?.videoId,
     relatedVideoTitle: firstEvidence?.videoTitle,
@@ -581,11 +582,7 @@ export async function createChatTurn(question: string, options: TurnOptions = {}
   options.onMessage?.(userMessage)
   const { answer, streamMessage } = await streamAnswer(session.id, question, scope, { onChunk: options.onStreamMessage })
   const messages = await mapMessages(await loadSessionMessages(session.id))
-  const fallbackMessages = [userMessage, { ...streamMessage, id: messageId(), text: answer, timestamp: nowLabel() }]
-  const lastAssistantIndex = findLastAssistantAnswerIndex(messages)
-  const finalMessages = lastAssistantIndex >= 0
-    ? messages.map((message, index) => index === lastAssistantIndex ? { ...message, ...streamMessage, id: message.id, timestamp: message.timestamp } : message)
-    : fallbackMessages
+  const finalMessages = mergeLocalTurnWithStoredMessages(messages, userMessage, { ...streamMessage, id: messageId(), text: answer, timestamp: nowLabel() })
   return sessionFromScope(session, scope, finalMessages, question)
 }
 

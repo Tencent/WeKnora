@@ -12,6 +12,55 @@ export interface ParsedStreamChunk {
   done?: boolean
 }
 
+export interface MergeableChatMessage {
+  id: string
+  sender: 'user' | 'assistant'
+  text: string
+  timestamp: string
+}
+
+export function displayQuestionFromStoredContent(content: string) {
+  const marker = '用户问题：'
+  const index = content.lastIndexOf(marker)
+  if (index < 0) return content
+  return content.slice(index + marker.length).trim() || content
+}
+
+export function mergeLocalTurnWithStoredMessages<T extends MergeableChatMessage>(
+  storedMessages: T[],
+  localUserMessage: T,
+  localAssistantMessage: T,
+) {
+  const finalMessages = [...storedMessages]
+  let currentUserIndex = -1
+  for (let index = finalMessages.length - 1; index >= 0; index -= 1) {
+    const message = finalMessages[index]
+    if (message.sender === 'user' && message.text.trim() === localUserMessage.text.trim()) {
+      currentUserIndex = index
+      break
+    }
+  }
+  if (currentUserIndex < 0) {
+    finalMessages.push(localUserMessage)
+    currentUserIndex = finalMessages.length - 1
+  }
+
+  const assistantIndex = finalMessages.findIndex((message, index) =>
+    index > currentUserIndex && message.sender === 'assistant' && message.text.trim(),
+  )
+  if (assistantIndex >= 0) {
+    finalMessages[assistantIndex] = {
+      ...finalMessages[assistantIndex],
+      ...localAssistantMessage,
+      id: finalMessages[assistantIndex].id,
+      timestamp: finalMessages[assistantIndex].timestamp,
+    }
+  } else {
+    finalMessages.push(localAssistantMessage)
+  }
+  return finalMessages
+}
+
 function chunkType(data: WeKnoraStreamChunk) {
   return String(data.response_type || data.type || '').trim()
 }

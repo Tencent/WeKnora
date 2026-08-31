@@ -16,3 +16,7 @@ test('video assistant input unlocks after chat turn finalizes', () => {
   assert.match(componentSource, /finally\s*\{[^}]*isGenerating\.value\s*=\s*false/s)
   assert.match(componentSource, /finally\s*\{[^}]*streamingAssistantId\.value\s*=\s*''/s)
 })
+
+test('video assistant disables protected image hydration in native agent display', () => {
+  assert.match(componentSource, /:hydrate-protected-images="false"/)
+})

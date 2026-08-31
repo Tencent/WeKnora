@@ -484,7 +484,12 @@
   <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose" :on-leave="scheduleCitationClose" />
 
   <!-- Image Preview -->
-  <picturePreview :reviewImg="imagePreviewVisible" :reviewUrl="imagePreviewUrl" @closePreImg="closeImagePreview" />
+  <picturePreview
+    v-if="imagePreviewVisible && imagePreviewUrl"
+    :reviewImg="imagePreviewVisible"
+    :reviewUrl="imagePreviewUrl"
+    @closePreImg="closeImagePreview"
+  />
 
   <!-- Wiki Page Detail Drawer -->
   <t-drawer v-model:visible="wikiDrawerVisible" :header="wikiDrawerPage?.title || ''" size="480px" :footer="false"
@@ -841,6 +846,7 @@ const props = defineProps<{
   session: SessionData;
   sessionId?: string;
   userQuery?: string;
+  hydrateProtectedImages?: boolean;
   embeddedMode?: boolean;
   embedChannelId?: string;
   embedToken?: string;
@@ -866,6 +872,8 @@ const embedAuthProps = computed(() => ({
 const showRequestInfo = computed(
   () => !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
 );
+
+const shouldHydrateProtectedImages = computed(() => props.hydrateProtectedImages !== false);
 
 const {
   memoryItems,
@@ -908,6 +916,7 @@ watch(
     if (!scopeKey || scopeKey === previousScopeKey) return;
     clearProtectedFileFailureCache();
     nextTick(async () => {
+      if (!shouldHydrateProtectedImages.value) return;
       await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
     });
   },
@@ -1344,7 +1353,9 @@ watch(eventStream, (stream) => {
   activeThinkingVersion.value++;
 
   nextTick(async () => {
-    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
+    if (shouldHydrateProtectedImages.value) {
+      await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
+    }
     await enhanceMarkdownContainer(rootElement.value);
     // Auto-scroll thinking detail content to bottom during streaming
     if (newActiveIds.size > 0 && rootElement.value) {
@@ -1521,6 +1532,7 @@ watch(answerFullyRendered, (ready) => {
   // suppressed by the missing-source cache.
   clearProtectedFileFailureCache();
   nextTick(async () => {
+    if (!shouldHydrateProtectedImages.value) return;
     await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
   });
 }, { immediate: true });
@@ -2003,7 +2015,7 @@ const getEventKey = (event: any, index: number): string => {
 const toggleIntermediateSteps = () => {
   showIntermediateSteps.value = !showIntermediateSteps.value;
   nextTick(async () => {
-    if (rootElement.value) {
+    if (rootElement.value && shouldHydrateProtectedImages.value) {
       await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
     }
   });
@@ -2324,6 +2336,7 @@ onMounted(() => {
     (root as any).__citationKeydown__ = keydownListener;
     root.addEventListener('keydown', keydownListener, true);
     rebindCitations();
+    if (!shouldHydrateProtectedImages.value) return;
     await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
   });
 });
@@ -2342,6 +2355,7 @@ onBeforeUnmount(() => {
 onUpdated(() => {
   nextTick(async () => {
     rebindCitations();
+    if (!shouldHydrateProtectedImages.value) return;
     // Hydrate protected-file images (e.g. local:// exports) as soon as the
     // typewriter reveals their <img> into the DOM, so they show in real time
     // mid-stream instead of waiting for the turn to finish. Hydration is cheap

@@ -1,6 +1,61 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseWeKnoraStreamChunk } from './chatStream'
+import { displayQuestionFromStoredContent, mergeLocalTurnWithStoredMessages, parseWeKnoraStreamChunk } from './chatStream'
+
+test('shows only the user question when a video-scoped prompt is loaded from WeKnora history', () => {
+  const stored = [
+    '用户正在视频详情页围绕《个人知识库，还得是Obsidian+AI Agent》提问。当前视频 ID：49068459-82f3-4acd-9dba-0adb821f7607。',
+    '请优先检索并引用当前视频的转写内容；如果当前视频信息不足，必须允许使用同一知识库中的其他视频或全局知识补充。',
+    '引用当前视频之外的内容时，必须明确标注来源视频，不要让用户误以为全部来自当前视频。',
+    '用户问题：总结这段视频的核心观点',
+  ].join('\n')
+
+  assert.equal(displayQuestionFromStoredContent(stored), '总结这段视频的核心观点')
+})
+
+test('keeps previous rounds and appends the current local round when stored history lags', () => {
+  const merged = mergeLocalTurnWithStoredMessages(
+    [
+      { id: 'u1', sender: 'user', text: '第一问', timestamp: '10:00' },
+      { id: 'a1', sender: 'assistant', text: '第一答', timestamp: '10:01' },
+    ],
+    { id: 'u2-local', sender: 'user', text: '第二问', timestamp: '10:02' },
+    { id: 'a2-local', sender: 'assistant', text: '第二答', timestamp: '10:03' },
+  )
+
+  assert.deepEqual(merged.map(message => message.text), ['第一问', '第一答', '第二问', '第二答'])
+})
+
+test('appends the streamed assistant answer after the stored current user message', () => {
+  const merged = mergeLocalTurnWithStoredMessages(
+    [
+      { id: 'u1', sender: 'user', text: '第一问', timestamp: '10:00' },
+      { id: 'a1', sender: 'assistant', text: '第一答', timestamp: '10:01' },
+      { id: 'u2-stored', sender: 'user', text: '第二问', timestamp: '10:02' },
+    ],
+    { id: 'u2-local', sender: 'user', text: '第二问', timestamp: '10:02' },
+    { id: 'a2-local', sender: 'assistant', text: '第二答', timestamp: '10:03' },
+  )
+
+  assert.deepEqual(merged.map(message => message.id), ['u1', 'a1', 'u2-stored', 'a2-local'])
+})
+
+test('updates the stored current assistant with the streamed answer while preserving its identity', () => {
+  const merged = mergeLocalTurnWithStoredMessages(
+    [
+      { id: 'u1', sender: 'user', text: '第一问', timestamp: '10:00' },
+      { id: 'a1', sender: 'assistant', text: '第一答', timestamp: '10:01' },
+      { id: 'u2-stored', sender: 'user', text: '第二问', timestamp: '10:02' },
+      { id: 'a2-stored', sender: 'assistant', text: '正在整合知识', timestamp: '10:03' },
+    ],
+    { id: 'u2-local', sender: 'user', text: '第二问', timestamp: '10:02' },
+    { id: 'a2-local', sender: 'assistant', text: '第二答', timestamp: '10:04' },
+  )
+
+  assert.equal(merged[3].id, 'a2-stored')
+  assert.equal(merged[3].timestamp, '10:03')
+  assert.equal(merged[3].text, '第二答')
+})
 
 test('parses WeKnora agent answer chunks that use type instead of response_type', () => {
   assert.deepEqual(parseWeKnoraStreamChunk(JSON.stringify({ type: 'answer', content: '结果' })), {
