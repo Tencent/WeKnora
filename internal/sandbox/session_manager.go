@@ -32,6 +32,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -170,8 +171,10 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 		)
 	}
 
+	client := wrapLangfuseRemoteClient(deps.Client)
+
 	lifecycle, err := newRemoteSessionLifecycle(
-		deps.Client,
+		client,
 		deps.Store,
 		deps.Checker,
 		createRequest,
@@ -185,11 +188,11 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 	m := &SessionBoundManager{
 		config:     cfg,
 		validator:  NewScriptValidator(),
-		client:     deps.Client,
+		client:     client,
 		bindings:   deps.Store,
 		checker:    deps.Checker,
 		lifecycle:  lifecycle,
-		ephemeral:  NewRemoteSandbox(deps.Client, createRequest),
+		ephemeral:  NewRemoteSandbox(client, createRequest),
 		activeType: provider,
 	}
 
@@ -301,12 +304,22 @@ func (m *SessionBoundManager) ensureSessionWorkspaceDirs(
 		return
 	}
 	execUser := DefaultSandboxExecUser
+	ctx, span := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+		Name: "sandbox.ensure_workspace",
+		Input: map[string]interface{}{
+			"input_dir":  SessionInputRoot,
+			"output_dir": outputDir,
+			"user":       execUser,
+		},
+		Metadata: sandboxHandleMeta(handle),
+	})
 	result, err := m.client.Exec(ctx, handle, RemoteExecRequest{
 		Shell:   true,
 		Command: workspaceBootstrapCommand(SessionInputRoot, outputDir),
 		User:    execUser,
 		Timeout: sessionArtifactDirBootstrapTimeout,
 	})
+	span.Finish(nil, nil, err)
 	switch {
 	case err != nil:
 		log.Printf(
