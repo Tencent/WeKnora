@@ -25,6 +25,10 @@
   </div>
 </template>
 
+<script lang="ts">
+const assistantSessionCache = new Map<string, unknown>()
+</script>
+
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { marked } from 'marked'
@@ -57,6 +61,8 @@ const streamingAssistantVisible = computed(() => messages.value.some(message =>
 const answerRenderer = new marked.Renderer()
 configureMarkedForChatMarkdown()
 
+const sessionCacheKey = computed(() => props.globalMode ? 'global' : `video:${props.currentVideo.id}`)
+
 function welcome(video: VideoData, global: boolean): StreamingChatMessage {
   return {
     id: `welcome-${video.id}`,
@@ -66,6 +72,7 @@ function welcome(video: VideoData, global: boolean): StreamingChatMessage {
   }
 }
 messages.value = [welcome(props.currentVideo, props.globalMode)]
+restoreCachedSession()
 function splitTimestamps(text: string, evidenceLinks: ChatMessage['evidenceLinks'] = []): TimestampPart[] {
   return text.split(/(\[\d{2}:\d{2}\])/g).filter(Boolean).map(part => {
     const match = part.match(/^\[(\d{2}):(\d{2})\]$/)
@@ -112,6 +119,16 @@ function handleRenderedAnswerClick(event: MouseEvent) {
   const [part] = splitTimestamps(text)
   selectTimestamp(part)
 }
+function restoreCachedSession() {
+  const cached = assistantSessionCache.get(sessionCacheKey.value) as ChatSession | undefined
+  activeSession.value = cached || null
+  messages.value = cached ? [welcome(props.currentVideo, props.globalMode), ...cached.messages] : [welcome(props.currentVideo, props.globalMode)]
+}
+
+function cacheSession(session: ChatSession) {
+  assistantSessionCache.set(sessionCacheKey.value, session)
+}
+
 function selectTimestamp(part: TimestampPart) {
   if (part.seconds === undefined) return
   // 全局模式下导航由 evidenceLinks 里的 videoId 决定，此处只走 navigate 事件 + currentVideo
@@ -140,6 +157,7 @@ async function send(value: string) {
     }
     const session = await createChatTurn(question, { currentVideo: props.currentVideo, currentTime: props.currentTime, globalMode: props.globalMode, session: activeSession.value || undefined, onStreamMessage: updateStreamingMessage })
     activeSession.value = session
+    cacheSession(session)
     messages.value = [welcome(props.currentVideo, props.globalMode), ...session.messages]
   }
   catch (error) {
@@ -148,7 +166,7 @@ async function send(value: string) {
     MessagePlugin.error(text)
   } finally { isGenerating.value = false; streamingAssistantId.value = ''; await scrollBottom() }
 }
-watch([() => props.currentVideo.id, () => props.globalMode], () => { activeSession.value = null; messages.value = [welcome(props.currentVideo, props.globalMode)]; input.value = ''; isGenerating.value = false; streamingAssistantId.value = '' })
+watch([() => props.currentVideo.id, () => props.globalMode], () => { input.value = ''; isGenerating.value = false; streamingAssistantId.value = ''; restoreCachedSession() })
 watch(() => props.externalQuery, value => { if (value && value !== consumedExternalQuery) { consumedExternalQuery = value; void send(value) } }, { immediate: true })
 </script>
 

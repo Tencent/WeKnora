@@ -19,12 +19,19 @@
       <div ref="messageArea" class="conversation__messages">
         <article v-for="message in activeSession.messages" :key="message.id" :class="['message', `message--${message.sender}`]">
           <div v-if="message.sender === 'assistant'" class="message__identity"><span>AI</span><strong>WeKnora AI</strong></div>
-          <div class="message__bubble"><p>{{ message.text }}</p>
+          <div class="message__bubble">
+            <AgentStreamDisplay
+              v-if="message.sender === 'assistant'"
+              :session="toNativeAgentSession(message)"
+              :session-id="activeSession.id"
+              :user-query="lastUserQuery"
+            />
+            <p v-else>{{ message.text }}</p>
             <button v-if="message.relatedVideoId" type="button" class="video-reference" @click="openReference(message)"><span class="video-reference__poster"><t-icon name="play-circle" /></span><span><strong>{{ message.relatedVideoTitle }}</strong><small>点击跳转至 {{ formatTime(message.relatedTime || 0) }} 位置</small></span><t-icon name="jump" /></button>
             <button v-if="message.sender === 'assistant'" class="copy" type="button" @click="copyMessage(message)"><t-icon :name="copiedId === message.id ? 'check' : 'file-copy'" /> {{ copiedId === message.id ? '已复制' : '复制' }}</button>
           </div>
         </article>
-        <div v-if="isGenerating" class="generating"><t-loading size="small" /> AI 正在整合视频知识回答中...</div>
+        <div v-if="isGenerating && !streamingAssistantVisible" class="generating"><t-loading size="small" /> AI 正在整合视频知识回答中...</div>
       </div>
       <form class="conversation-composer" @submit.prevent="continueSession">
         <textarea v-model="followUp" rows="2" placeholder="继续追问" :disabled="isGenerating" @keydown.enter.exact.prevent="continueSession" />
@@ -35,43 +42,86 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { createChatTurn, fetchSessions, loadChatSession } from '@/api/videohub/chat'
+import type { StreamingChatMessage } from '@/api/videohub/chat'
 import type { ChatMessage, ChatSession } from '@/types/videohub'
+import AgentStreamDisplay from '@/views/chat/components/AgentStreamDisplay.vue'
 
 const router = useRouter()
 const question = ref(''), followUp = ref(''), sessions = ref<ChatSession[]>([]), activeSession = ref<ChatSession | null>(null)
 const loadingSessions = ref(true), isGenerating = ref(false), copiedId = ref(''), messageArea = ref<HTMLElement | null>(null)
+const streamingAssistantId = ref('')
+const lastUserQuery = ref('')
 let copyTimer: number | undefined
+type RenderableChatMessage = ChatMessage & Partial<StreamingChatMessage>
+const streamingAssistantVisible = computed(() => Boolean(streamingAssistantId.value && activeSession.value?.messages.some(message => {
+  const item = message as RenderableChatMessage
+  return item.id === streamingAssistantId.value && Boolean(item.text || item.activityText || item.agentEventStream?.length)
+})))
+
 async function scrollBottom() { await nextTick(); if (messageArea.value) messageArea.value.scrollTop = messageArea.value.scrollHeight }
+function toNativeAgentSession(message: ChatMessage) {
+  const item = message as RenderableChatMessage
+  return {
+    id: item.id,
+    assistant_message_id: item.assistant_message_id || item.id,
+    request_id: item.request_id || item.id,
+    role: 'assistant',
+    content: item.content || item.text,
+    isAgentMode: true,
+    is_completed: item.is_completed ?? true,
+    agentEventStream: item.agentEventStream?.length
+      ? item.agentEventStream
+      : [{ type: 'answer', content: item.text, done: true }, { type: 'agent_complete', total_duration_ms: 0, total_steps: 0 }],
+    knowledge_references: [],
+  }
+}
+function updateStreamingMessage(messageId: string, message: StreamingChatMessage) {
+  if (!activeSession.value) return
+  const target = activeSession.value.messages.find(item => item.id === messageId) as RenderableChatMessage | undefined
+  if (!target) return
+  Object.assign(target, message, { id: messageId })
+  void scrollBottom()
+}
+function pushStreamingPlaceholder(target: ChatSession) {
+  const assistantId = `assistant-${Date.now()}`
+  streamingAssistantId.value = assistantId
+  target.messages.push({ id: assistantId, sender: 'assistant', text: '', timestamp: '刚刚' } as StreamingChatMessage)
+  return assistantId
+}
 async function startSession() {
   const value = question.value.trim(); if (!value || isGenerating.value) return
+  lastUserQuery.value = value
   question.value = ''
   const session: ChatSession = { id: `pending-${Date.now()}`, title: value.slice(0, 24), type: 'chat', time: '刚刚', messages: [{ id: `user-${Date.now()}`, sender: 'user', text: value, timestamp: '刚刚' }], scope: 'global' }
+  const assistantId = pushStreamingPlaceholder(session)
   sessions.value.unshift(session); activeSession.value = session; isGenerating.value = true; await scrollBottom()
   try {
-    const created = await createChatTurn(value, { globalMode: true })
+    const created = await createChatTurn(value, { globalMode: true, onStreamMessage: message => updateStreamingMessage(assistantId, message) })
     sessions.value = sessions.value.map(item => item.id === session.id ? created : item)
     activeSession.value = created
   } catch (error) {
     session.messages.push({ id: `error-${Date.now()}`, sender: 'assistant', text: error instanceof Error ? error.message : '问答生成失败，请稍后重试', timestamp: '刚刚' })
-  } finally { isGenerating.value = false; await scrollBottom() }
+  } finally { isGenerating.value = false; streamingAssistantId.value = ''; await scrollBottom() }
 }
 async function continueSession() {
   const value = followUp.value.trim(); if (!value || isGenerating.value || !activeSession.value) return
   const target = activeSession.value
+  lastUserQuery.value = value
   followUp.value = ''
   target.messages.push({ id: `user-${Date.now()}`, sender: 'user', text: value, timestamp: '刚刚' })
+  const assistantId = pushStreamingPlaceholder(target)
   isGenerating.value = true; await scrollBottom()
   try {
-    const updated = await createChatTurn(value, { globalMode: target.scope !== 'video', currentVideo: target.videoId ? { id: target.videoId, title: target.videoTitle || '指定视频', category: 'general', categoryName: '通用分享', duration: '', durationSeconds: 0, created_at: '', video_url: '', poster_url: target.videoCoverUrl, overview: '', chapters: [], subtitles: [] } : undefined, session: target })
+    const updated = await createChatTurn(value, { globalMode: target.scope !== 'video', currentVideo: target.videoId ? { id: target.videoId, title: target.videoTitle || '指定视频', category: 'general', categoryName: '通用分享', duration: '', durationSeconds: 0, created_at: '', video_url: '', poster_url: target.videoCoverUrl, overview: '', chapters: [], subtitles: [] } : undefined, session: target, onStreamMessage: message => updateStreamingMessage(assistantId, message) })
     activeSession.value = updated
     sessions.value = [updated, ...sessions.value.filter(item => item.id !== updated.id)]
   } catch (error) {
     target.messages.push({ id: `error-${Date.now()}`, sender: 'assistant', text: error instanceof Error ? error.message : '问答生成失败，请稍后重试', timestamp: '刚刚' })
-  } finally { isGenerating.value = false; await scrollBottom() }
+  } finally { isGenerating.value = false; streamingAssistantId.value = ''; await scrollBottom() }
 }
 async function openSession(session: ChatSession) {
   activeSession.value = session
