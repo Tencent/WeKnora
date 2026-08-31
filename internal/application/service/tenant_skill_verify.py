@@ -85,11 +85,27 @@ def is_importable(name, script_dir):
     is reported without the side effects of loading a present one. script_dir
     leads the path because that is where the interpreter puts the directory of
     the script it was handed, which is how sibling modules resolve at runtime.
+
+    A file is rarely the entry point, though. Python puts the executed
+    script's directory on sys.path, and every module reached through the
+    import graph from there resolves against that same entry — so a module
+    several levels down can legitimately import a package that sits beside
+    its own directory, whenever some entry script above it runs first. The
+    module's own directory cannot see that neighbour, so each ancestor of
+    the checked file up to the skill root gets the same chance to resolve
+    a name that the script's own directory gets; a name that none of them
+    can resolve is still reported as missing.
     """
     if name in own_modules:
         return True
+    candidates = [script_dir]
+    parent = os.path.dirname(script_dir)
+    while under_root(parent) and parent not in candidates:
+        candidates.append(parent)
+        parent = os.path.dirname(parent)
     saved = sys.path[:]
-    sys.path.insert(0, script_dir)
+    for candidate in reversed(candidates):
+        sys.path.insert(0, candidate)
     try:
         return importlib.util.find_spec(name) is not None
     except Exception:

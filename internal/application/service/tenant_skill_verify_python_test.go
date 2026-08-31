@@ -52,6 +52,32 @@ func TestSkillPythonVerifier(t *testing.T) {
 			"scripts/README.txt": "not python\n",
 		},
 	}, {
+		// The shape that failed a real install of Anthropic's xlsx skill:
+		// the entry point lives in scripts/ecmadoc/, so when it runs, its
+		// directory is on sys.path for the whole import graph. The auditors
+		// subpackage it imports reaches for the sibling partkit package
+		// through exactly that path entry. A check that only sees the
+		// auditors directory cannot resolve it and rejected a working skill.
+		name: "a subpackage module importing a sibling package of an ancestor directory",
+		files: map[string]string{
+			"scripts/ecmadoc/partkit/__init__.py":  "def helper():\n    return 1\n",
+			"scripts/ecmadoc/auditors/__init__.py": "from .deck_auditor import audit\n",
+			"scripts/ecmadoc/auditors/deck_auditor.py": "from partkit import helper\n\n" +
+				"def audit():\n    return helper()\n",
+			"scripts/ecmadoc/doc_audit.py": "from auditors import audit\n",
+		},
+	}, {
+		// The ancestor walk must not reach sideways: a module vendored under
+		// a child directory of an ancestor is not on any entry point's path,
+		// so it is still a dependency the installer has to provide.
+		name: "a nested vendored module is still a missing dependency",
+		files: map[string]string{
+			"scripts/run.py":                        "import vendored_absent_pkg\n",
+			"scripts/vendor/vendored_absent_pkg.py": "x = 1\n",
+		},
+		wantProblem: "scripts/run.py imports vendored_absent_pkg, " +
+			"which is not available in this image",
+	}, {
 		name: "an optional dependency behind try/except",
 		files: map[string]string{
 			"scripts/run.py": "try:\n    import matplotlib\nexcept ImportError:\n" +
