@@ -262,6 +262,7 @@ export async function getOIDCConfig(): Promise<OIDCConfigResponse> {
 export interface AuthConfigResponse {
   success: boolean
   registration_mode: 'self_serve' | 'invite_only' | string
+  bootstrap_available?: boolean
 }
 
 export async function getAuthConfig(): Promise<AuthConfigResponse> {
@@ -280,6 +281,24 @@ export async function register(data: RegisterRequest): Promise<RegisterResponse>
   try {
     const response = await post('/api/v1/auth/register', data)
     return response as unknown as RegisterResponse
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('error.auth.registerFailed')
+    }
+  }
+}
+
+/**
+ * 创建首次部署的系统管理员。
+ *
+ * 后端仅在 WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL 与请求邮箱匹配、且
+ * 当前还没有系统管理员时开放此入口，因此不受 invite_only 注册开关影响。
+ */
+export async function bootstrapSystemAdmin(data: RegisterRequest): Promise<LoginResponse> {
+  try {
+    const response = await post('/api/v1/auth/bootstrap', data)
+    return response as unknown as LoginResponse
   } catch (error: any) {
     return {
       success: false,

@@ -10,18 +10,21 @@ WeKnora 的 `/auth/*` 端点本身**不需要 X-API-Key**，但部分端点需�
 
 | 端点 | 鉴权方式 |
 | --- | --- |
-| `/auth/register` `/auth/login` | 无 |
+| `/auth/register` `/auth/login` `/auth/bootstrap` | 无 |
 | `/auth/oidc/config` `/auth/oidc/url` `/auth/oidc/callback` | 无 |
 | `/auth/refresh` | refresh_token（请求体携带） |
 | `/auth/validate` `/auth/me` `/auth/logout` `/auth/change-password` | Bearer JWT |
 
-注册接口可通过环境变量 `DISABLE_REGISTRATION=true` 关闭。
+注册接口可通过环境变量 `DISABLE_REGISTRATION=true` 关闭。首次部署若同时设置
+`WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL`，可通过登录页的“配置系统管理员”入口，或
+调用 `/auth/bootstrap` 创建该邮箱对应的首个系统管理员；该入口只在系统尚无系统管理员时开放。
 
 ## 端点一览
 
 | 方法 | 路径                       | 描述                                       |
 | ---- | -------------------------- | ------------------------------------------ |
 | POST | `/auth/register`           | 用户注册                                   |
+| POST | `/auth/bootstrap`          | 首次部署创建系统管理员                     |
 | POST | `/auth/login`              | 用户登录                                   |
 | GET  | `/auth/oidc/config`        | 获取 OIDC 配置元数据                       |
 | GET  | `/auth/oidc/url`           | 获取 OIDC 授权链接                         |
@@ -31,6 +34,33 @@ WeKnora 的 `/auth/*` 端点本身**不需要 X-API-Key**，但部分端点需�
 | POST | `/auth/logout`             | 退出登录                                   |
 | GET  | `/auth/me`                 | 获取当前用户信息                           |
 | POST | `/auth/change-password`    | 修改密码                                   |
+
+---
+
+## POST `/auth/bootstrap` - 首次部署创建系统管理员
+
+此接口不受 `DISABLE_REGISTRATION=true` 影响，但只有同时满足以下条件时才可用：
+
+1. `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL` 已配置；
+2. 请求中的 `email` 与该环境变量一致（不区分大小写）；
+3. 当前系统还没有任何系统管理员。
+
+请求体使用 `username`、`email`、`password` 三个字段。密码要求 8-32 个字符，且包含
+字母和数字。接口成功后会直接返回登录令牌；如果该邮箱已有普通账户，必须提交该账户
+的正确密码，接口才会将其提升为系统管理员。
+
+```bash
+curl --location 'http://localhost:8080/api/v1/auth/bootstrap' \
+--header 'Content-Type: application/json' \
+--data '{
+    "username": "alice",
+    "email": "admin@example.com",
+    "password": "secret123"
+}'
+```
+
+首次创建返回 `201 Created`，已有账户提升返回 `200 OK`；响应结构与 `/auth/login`
+一致。
 
 ---
 

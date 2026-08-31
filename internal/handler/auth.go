@@ -795,10 +795,12 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 	// Same source-of-truth as Register's gate, so the UI hide-the-button
 	// signal can never disagree with the API enforcement signal.
-	mode := h.resolveRegistrationMode(c.Request.Context())
+	ctx := c.Request.Context()
+	mode := h.resolveRegistrationMode(ctx)
 	c.JSON(http.StatusOK, gin.H{
-		"success":           true,
-		"registration_mode": mode,
+		"success":             true,
+		"registration_mode":   mode,
+		"bootstrap_available": h.bootstrapSystemAdminAvailable(ctx),
 	})
 }
 

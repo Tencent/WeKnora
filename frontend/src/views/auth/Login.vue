@@ -225,6 +225,16 @@
                 </t-button>
               </div>
 
+              <div class="register-cta bootstrap-cta" v-if="bootstrapAvailable">
+                <div class="register-cta__divider">
+                  <span>{{ $t('auth.bootstrapFirstTime') }}</span>
+                </div>
+                <t-button theme="default" variant="outline" size="large" block class="register-cta__button"
+                  :disabled="loading" @click="startBootstrapMode">
+                  {{ $t('auth.bootstrapAdmin') }}
+                </t-button>
+              </div>
+
               <div v-if="oidcEnabled" class="oidc-divider">
                 <span>{{ $t('auth.orContinueWith') }}</span>
               </div>
@@ -257,7 +267,7 @@
              AND either self-service registration is enabled OR they
              arrived with a valid share-link token (which bypasses the
              invite_only gate). -->
-        <div class="form-card" v-if="isRegisterMode && (registrationEnabled || inviteLookup)">
+        <div class="form-card" v-if="isRegisterMode && (registrationEnabled || inviteLookup || bootstrapMode)">
           <!-- Share-link banner: shown only when ?token= resolved to a
                real invitation row. Sits above the form header so the
                invitee instantly sees who invited them and into which
@@ -277,8 +287,10 @@
             {{ inviteLookupError }}
           </div>
           <div class="form-header">
-            <h2 class="form-title">{{ $t('auth.createAccount') }}</h2>
-            <p class="form-subtitle">{{ $t('auth.registerSubtitle') }}</p>
+            <h2 class="form-title">{{ bootstrapMode ? $t('auth.bootstrapAdmin') : $t('auth.createAccount') }}</h2>
+            <p class="form-subtitle">
+              {{ bootstrapMode ? $t('auth.bootstrapHint') : $t('auth.registerSubtitle') }}
+            </p>
           </div>
 
           <div class="form-content">
@@ -305,7 +317,7 @@
               </t-form-item>
 
               <t-button type="submit" theme="primary" size="large" block :loading="loading" class="submit-button">
-                {{ loading ? $t('auth.registering') : $t('auth.register') }}
+                {{ loading ? (bootstrapMode ? $t('auth.bootstrapping') : $t('auth.registering')) : (bootstrapMode ? $t('auth.bootstrapAdmin') : $t('auth.register')) }}
               </t-button>
             </t-form>
 
@@ -356,6 +368,7 @@ import {
   getOIDCConfig,
   autoSetup,
   getAuthConfig,
+  bootstrapSystemAdmin,
   userInfoFromApi,
   getInvitationByToken,
   registerByInvite,
@@ -418,6 +431,8 @@ const oidcProviderName = ref('')
 // link is visible; the actual mode is fetched from /auth/config in onMounted.
 // In invite_only mode the link/card are hidden.
 const registrationEnabled = ref(true)
+const bootstrapAvailable = ref(false)
+const bootstrapMode = ref(false)
 
 // invite-link state. When the URL carries ?token=xxx we resolve it to
 // the originating tenant + role and switch the form into a "register
@@ -512,7 +527,16 @@ const registerRules = computed(() => ({
 // Toggle login/register mode
 const toggleMode = () => {
   isRegisterMode.value = !isRegisterMode.value
+  bootstrapMode.value = false
 
+  Object.keys(registerData).forEach(key => {
+    (registerData as any)[key] = ''
+  })
+}
+
+const startBootstrapMode = () => {
+  isRegisterMode.value = true
+  bootstrapMode.value = true
   Object.keys(registerData).forEach(key => {
     (registerData as any)[key] = ''
   })
@@ -623,8 +647,10 @@ const loadAuthConfig = async () => {
   try {
     const response = await getAuthConfig()
     registrationEnabled.value = response.registration_mode !== 'invite_only'
+    bootstrapAvailable.value = response.bootstrap_available === true
   } catch {
     registrationEnabled.value = true
+    bootstrapAvailable.value = false
   }
 }
 
@@ -715,6 +741,22 @@ const handleRegister = async () => {
 
     loading.value = true
 
+    if (bootstrapMode.value) {
+      const response = await bootstrapSystemAdmin({
+        username: registerData.username,
+        email: registerData.email,
+        password: registerData.password,
+      })
+      if (!response.success) {
+        MessagePlugin.error(response.message || t('auth.bootstrapFailed'))
+        return
+      }
+      bootstrapAvailable.value = false
+      MessagePlugin.success(t('auth.bootstrapSuccess'))
+      await persistLoginResponse(response)
+      return
+    }
+
     if (inviteToken.value) {
       const response = await registerByInvite({
         token: inviteToken.value,
@@ -745,6 +787,7 @@ const handleRegister = async () => {
 
       // Switch to login mode and fill in email
       isRegisterMode.value = false
+      bootstrapMode.value = false
       formData.email = registerData.email
 
       // Clear register form
@@ -806,6 +849,7 @@ onMounted(async () => {
     const cfg = await getAuthConfig()
     const inviteOnly = cfg.registration_mode === 'invite_only'
     registrationEnabled.value = !inviteOnly
+    bootstrapAvailable.value = cfg.bootstrap_available === true
     isRegisterMode.value = !inviteOnly
     loadOIDCConfig()
     return
