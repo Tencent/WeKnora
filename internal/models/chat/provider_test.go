@@ -26,6 +26,7 @@ func TestResolveProvider(t *testing.T) {
 		{"lkeap r1 falls back", provider.ProviderLKEAP, "deepseek-r1", baseProvider{}},
 		{"qwen thinking", provider.ProviderAliyun, "qwen3-32b", qwenThinkingProvider{}},
 		{"generic", provider.ProviderGeneric, "anything", genericProvider{}},
+		{"generic GPT-5 reasoning", provider.ProviderGeneric, "gpt-5.6-sol", genericOpenAIReasoningProvider{}},
 		{"gemini", provider.ProviderGemini, "gemini-3-flash-preview", geminiProvider{}},
 		{"nvidia", provider.ProviderNvidia, "anything", nvidiaProvider{}},
 		{"volcengine", provider.ProviderVolcengine, "doubao", volcengineProvider{}},
@@ -142,6 +143,21 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 // to live inline in BuildChatCompletionRequest.
 func TestBuildOutbound_ShapeRequest(t *testing.T) {
 	msgs := []Message{{Role: "user", Content: "hi"}}
+
+	t.Run("generic GPT-5 does not add vLLM thinking kwargs", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderGeneric), "gpt-5.6-sol", nil)
+		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{
+			Thinking:  ptrBool(true),
+			MaxTokens: 128,
+		}, true)
+		require.NoError(t, err)
+		require.False(t, useRaw)
+		req, ok := body.(*openai.ChatCompletionRequest)
+		require.True(t, ok)
+		assert.Nil(t, req.ChatTemplateKwargs)
+		assert.Zero(t, req.MaxTokens)
+		assert.Equal(t, 128, req.MaxCompletionTokens)
+	})
 
 	t.Run("deepseek strips tool_choice", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderDeepSeek), "deepseek-chat", nil)
