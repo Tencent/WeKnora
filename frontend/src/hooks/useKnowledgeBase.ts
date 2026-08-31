@@ -8,6 +8,7 @@ import {
   getKnowledgeDetails,
   delKnowledgeDetails,
   getKnowledgeDetailsCon,
+  type ListKnowledgeFilesParams,
 } from "@/api/knowledge-base/index";
 import { knowledgeStore } from "@/stores/knowledge";
 import { useUIStore } from "@/stores/ui";
@@ -43,19 +44,7 @@ export default function (knowledgeBaseId?: string) {
   let chunkRequestGeneration = 0;
   let activeKnowledgeId = '';
   const getKnowled = (
-    query: {
-      page: number;
-      page_size: number;
-      tag_ids?: string;
-      keyword?: string;
-      file_type?: string;
-      parse_status?: string;
-      source?: string;
-      start_time?: string;
-      end_time?: string;
-      folder_path?: string;
-      folder_recursive?: boolean;
-    } = { page: 1, page_size: 35 },
+    query: ListKnowledgeFilesParams = { page: 1, page_size: 35 },
     kbId?: string,
   ): Promise<void> => {
     const targetKbId = kbId || knowledgeBaseId;
