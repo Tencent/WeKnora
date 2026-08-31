@@ -4,7 +4,8 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMPOSE_FILE="$PROJECT_ROOT/docker-compose.dev.yml"
+COMPOSE_FILE="$PROJECT_ROOT/docker-compose.acceptance.yml"
+OFFICIAL_COMPOSE_FILE="$PROJECT_ROOT/docker-compose.yml"
 STATE_DIR="$PROJECT_ROOT/tmp/local-acceptance"
 FRONTEND_PID_FILE="$STATE_DIR/frontend.pid"
 FRONTEND_LOG="$PROJECT_ROOT/logs/local-acceptance-frontend.log"
@@ -52,12 +53,63 @@ container_is_healthy() {
     [ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$1" 2>/dev/null || true)" = healthy ]
 }
 
+ensure_official_container() {
+    local container="$1"
+    local service="$2"
+    if container_exists "$container"; then
+        if ! container_is_running "$container"; then
+            docker start "$container" >/dev/null
+        fi
+        return 0
+    fi
+    docker compose -p weknora -f "$OFFICIAL_COMPOSE_FILE" up -d "$service"
+}
+
+wait_for_container_health() {
+    local container="$1"
+    local timeout_seconds="$2"
+    local elapsed=0
+    while [ "$elapsed" -lt "$timeout_seconds" ]; do
+        container_is_healthy "$container" && return 0
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    return 1
+}
+
+wait_for_container_http() {
+    local container="$1"
+    local url="$2"
+    local timeout_seconds="$3"
+    local elapsed=0
+    while [ "$elapsed" -lt "$timeout_seconds" ]; do
+        if docker exec "$container" wget -qO- --timeout=2 "$url" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    return 1
+}
+
 start_backend() {
     if container_exists "$BACKEND_CONTAINER"; then
         printf '[INFO] 移除可能来自旧验收项目的 custom-backend 容器: %s\n' "$BACKEND_CONTAINER"
         docker rm -f "$BACKEND_CONTAINER" >/dev/null
     fi
-    compose up -d --build postgres minio custom-backend
+    # 固定验收必须使用官方 WeKnora 数据栈中的真实库、对象存储和 app。
+    # 仅停止本地开发 MinIO 容器释放宿主端口，数据卷不删除。
+    docker stop WeKnora-minio-dev >/dev/null 2>&1 || true
+    ensure_official_container WeKnora-postgres postgres
+    ensure_official_container WeKnora-redis redis
+    ensure_official_container WeKnora-docreader docreader
+    ensure_official_container WeKnora-minio minio
+    ensure_official_container WeKnora-app app
+    wait_for_container_health WeKnora-postgres 90 || die '官方 PostgreSQL 未就绪'
+    wait_for_container_health WeKnora-minio 90 || die '官方 MinIO 未就绪'
+    wait_for_container_health WeKnora-docreader 90 || die '官方 docreader 未就绪'
+    wait_for_container_http WeKnora-app http://127.0.0.1:8080/health 90 || die '官方 WeKnora app 未就绪'
+    compose up -d --build custom-backend
 }
 
 pid_is_running() {
@@ -164,7 +216,6 @@ down() {
     if container_exists "$FRONTEND_CONTAINER"; then
         docker rm -f "$FRONTEND_CONTAINER" >/dev/null 2>&1 || true
     fi
-    compose stop minio postgres >/dev/null 2>&1 || true
     printf '[SUCCESS] 本地验收服务已停止，数据卷保留\n'
 }
 

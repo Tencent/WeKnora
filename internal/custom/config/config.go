@@ -45,6 +45,7 @@ type WeKnoraConfig struct {
 	APIKey   string
 	KBID     string // 字幕分块默认入库的目标 KB
 	TenantID string // WeKnora 多租户场景
+	AgentID  string // 视频问答使用的自定义智能体
 }
 
 // MinIOConfig 对象存储配置（presigned 直传 + 分片）
@@ -139,6 +140,7 @@ func Load() *Config {
 			APIKey:   getEnv("WEKNORA_API_KEY", ""),
 			KBID:     getEnv("WEKNORA_KB_ID", ""),
 			TenantID: getEnv("WEKNORA_TENANT_ID", ""),
+			AgentID:  getEnv("CUSTOM_CONTENT_AGENT_ID", ""),
 		},
 		MinIO: MinIOConfig{
 			Backend:   getEnv("CUSTOM_STORAGE_BACKEND", "minio"),

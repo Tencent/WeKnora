@@ -300,6 +300,86 @@ func TestRelatedKnowledgeReturnsAnchorTimelineFromWikiContent(t *testing.T) {
 	}
 }
 
+func TestRelatedKnowledgeReturnsTypeFrameworkDetails(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusCompleted,
+		KnowledgeBaseWikiPageID: "knowledge-base-1",
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/knowledgebase/kb-1/wiki/pages/video/"+video.ID {
+			_ = json.NewEncoder(writer).Encode(weknora.WikiPage{
+				ID: "knowledge-base-1", Slug: "video/" + video.ID, PageType: "index",
+				Content: "---\ntype: knowledge_base\nsource_video_id: " + video.ID + "\n---\n# 视频知识底座\n\n- [[操作方法]]",
+			})
+			return
+		}
+		if request.URL.Path != "/api/v1/knowledgebase/kb-1/wiki/pages" {
+			http.NotFound(writer, request)
+			return
+		}
+		pages := []weknora.WikiPage{
+			{ID: "knowledge-base-1", Slug: "video/" + video.ID, PageType: "index"},
+			{ID: "method-1", Slug: "methodology/method-1", PageType: "methodology", Title: "操作方法", Content: "---\ntype: methodology\nsource_video_id: " + video.ID + "\n---\n# 操作方法\n\n核心内容：通过异常数据定位原因。\n\n### 方法论结构\n\n- 输入：留存曲线\n- 步骤：按渠道拆分；对比异常渠道\n- 判断标准：变更时间与留存拐点接近\n- 输出：导致留存下降的变更项\n- 适用条件：单指标异常归因\n\n时间范围：00:03:00-00:04:00\n证据 ID：E001、E002\n信息性质：归纳"},
+		}
+		_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{Pages: pages, TotalPages: 1})
+	}))
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/related-knowledge", nil)
+	wiki := weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL})
+
+	NewContentHandler(db, wiki, "kb-1").RelatedKnowledge(context)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Anchors map[string][]struct {
+			CoreContent       string   `json:"core_content"`
+			InformationNature string   `json:"information_nature"`
+			EvidenceIDs       []string `json:"evidence_ids"`
+			StructureFields   []struct {
+				Key   string `json:"key"`
+				Label string `json:"label"`
+				Value string `json:"value"`
+			} `json:"structure_fields"`
+		} `json:"anchors"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	methods := payload.Anchors["method"]
+	if len(methods) != 1 {
+		t.Fatalf("method anchors = %#v", methods)
+	}
+	method := methods[0]
+	if method.CoreContent != "通过异常数据定位原因。" || method.InformationNature != "归纳" || strings.Join(method.EvidenceIDs, ",") != "E001,E002" {
+		t.Fatalf("method detail = %#v", method)
+	}
+	if len(method.StructureFields) != 5 || method.StructureFields[0].Key != "input" || method.StructureFields[0].Value != "留存曲线" || method.StructureFields[2].Key != "criteria" {
+		t.Fatalf("structure fields = %#v", method.StructureFields)
+	}
+}
+
+func TestWikiKnowledgeDetailParsesMarkdownTableFields(t *testing.T) {
+	content := "---\ntype: concept\nsource_video_id: video-1\n---\n# 网络效应\n\n核心内容：用户越多，产品价值越高。\n\n### 概念结构\n\n| 字段 | 内容 |\n|---|---|\n| 定义 | 产品价值随用户数量增加而增加 |\n| 构成要素 | 用户基数、连接密度 |\n| 运行机制 | 新用户增加可连接节点 |\n| 相邻区别 | 区别于规模效应 |\n\n证据 ID：E003\n"
+	detail := wikiKnowledgeDetail(content, "concept", "")
+
+	if detail.CoreContent != "用户越多，产品价值越高。" || strings.Join(detail.EvidenceIDs, ",") != "E003" {
+		t.Fatalf("detail = %#v", detail)
+	}
+	if len(detail.StructureFields) != 4 || detail.StructureFields[0].Key != "definition" || detail.StructureFields[0].Value != "产品价值随用户数量增加而增加" {
+		t.Fatalf("structure fields = %#v", detail.StructureFields)
+	}
+}
+
 func TestKnowledgeBaseWikiPageRequiresExtractionContract(t *testing.T) {
 	valid := &weknora.WikiPage{
 		PageType: "index",

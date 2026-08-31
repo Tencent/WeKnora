@@ -22,6 +22,10 @@ interface BackendAnchor {
   title?: string
   type?: KnowledgeType
   related_video_ids?: string[]
+  core_content?: string
+  structure_fields?: Array<{ key?: string; label?: string; value?: string }>
+  evidence_ids?: string[]
+  information_nature?: string
   timestamp?: string
   seconds?: number
 }
@@ -410,6 +414,12 @@ export function mapRelatedKnowledgeResponse(videoId: string, response: BackendRe
     id: item.id,
     knowledge_type: item.type,
     content: item.title || '未命名知识',
+    coreContent: item.core_content?.trim() || '',
+    structureFields: (item.structure_fields || [])
+      .filter(field => field.key?.trim() && field.label?.trim() && field.value?.trim())
+      .map(field => ({ key: field.key!.trim(), label: field.label!.trim(), value: field.value!.trim() })),
+    evidenceIds: (item.evidence_ids || []).filter(id => id.trim()),
+    informationNature: item.information_nature?.trim() || '',
     timestamp: item.timestamp || '00:00',
     seconds: Number.isFinite(Number(item.seconds)) ? Number(item.seconds) : item.timestamp ? parseTimestamp(item.timestamp) : 0,
     related_count: crossVideoItems.filter(cross => cross.anchorId === item.id).length || item.related_video_ids?.length || 0,

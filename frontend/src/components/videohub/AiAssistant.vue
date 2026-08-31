@@ -4,7 +4,7 @@
       <header><div><strong>AI Assistant</strong></div><t-button variant="text" shape="square" aria-label="收起" @click="expanded = false"><t-icon name="chevron-down" /></t-button></header>
       <div ref="messageArea" class="assistant-messages">
         <div v-for="message in messages" :key="message.id" :class="['assistant-message', `assistant-message--${message.sender}`]">
-          <p><template v-for="(part, index) in splitTimestamps(message.text)" :key="index"><button v-if="part.seconds !== undefined" class="timestamp" type="button" @click="selectTimestamp(part)">{{ part.text }}</button><template v-else>{{ part.text }}</template></template></p>
+          <p><template v-for="(part, index) in splitTimestamps(message.text, message.evidenceLinks)" :key="index"><button v-if="part.seconds !== undefined" class="timestamp" type="button" @click="selectTimestamp(part)">{{ part.text }}</button><template v-else>{{ part.text }}</template></template></p>
         </div>
         <div v-if="isGenerating" class="assistant-loading"><t-loading size="small" /> 正在整合视频知识...</div>
       </div>
@@ -18,15 +18,17 @@
 
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
-import { sendAssistantQuery } from '@/api/videohub/chat'
-import type { ChatMessage, VideoData } from '@/types/videohub'
+import { MessagePlugin } from 'tdesign-vue-next'
+import { createChatTurn } from '@/api/videohub/chat'
+import type { ChatMessage, ChatSession, VideoData } from '@/types/videohub'
 
-type TimestampPart = { text: string; seconds?: number }
+type TimestampPart = { text: string; seconds?: number; videoId?: string }
 
 const props = withDefaults(defineProps<{ currentVideo: VideoData; currentTime?: number; externalQuery?: string; globalMode?: boolean }>(), { currentTime: 0, externalQuery: '', globalMode: false })
 const emit = defineEmits<{ seek: [seconds: number]; navigate: [videoId: string, seconds: number] }>()
 const expanded = ref(false), input = ref(''), isGenerating = ref(false), messageArea = ref<HTMLElement | null>(null)
 const messages = ref<ChatMessage[]>([])
+const activeSession = ref<ChatSession | null>(null)
 const globalSuggestions = ['帮我总结一下全部视频的核心观点', '最近上传了哪些重要视频？', '帮我找关于培训内容的视频']
 const singleSuggestions = ['总结这段视频的核心观点', '有哪些值得记录的知识点？', '给出三个可执行建议']
 const suggestions = props.globalMode ? globalSuggestions : singleSuggestions
@@ -41,20 +43,22 @@ function welcome(video: VideoData, global: boolean): ChatMessage {
   }
 }
 messages.value = [welcome(props.currentVideo, props.globalMode)]
-function splitTimestamps(text: string): TimestampPart[] {
+function splitTimestamps(text: string, evidenceLinks: ChatMessage['evidenceLinks'] = []): TimestampPart[] {
   return text.split(/(\[\d{2}:\d{2}\])/g).filter(Boolean).map(part => {
     const match = part.match(/^\[(\d{2}):(\d{2})\]$/)
-    return match ? { text: part, seconds: Number(match[1]) * 60 + Number(match[2]) } : { text: part }
+    if (!match) return { text: part }
+    const seconds = Number(match[1]) * 60 + Number(match[2])
+    const evidence = evidenceLinks.find(item => item.seconds === seconds || item.timestamp === `${match[1]}:${match[2]}`)
+    return { text: part, seconds, videoId: evidence?.videoId }
   })
 }
 function selectTimestamp(part: TimestampPart) {
   if (part.seconds === undefined) return
   // 全局模式下导航由 evidenceLinks 里的 videoId 决定，此处只走 navigate 事件 + currentVideo
   if (props.globalMode) {
-    emit('navigate', props.currentVideo.id, part.seconds)
+    if (part.videoId) emit('navigate', part.videoId, part.seconds)
   } else {
     emit('seek', part.seconds)
-    emit('navigate', props.currentVideo.id, part.seconds)
   }
 }
 async function scrollBottom() { await nextTick(); if (messageArea.value) messageArea.value.scrollTop = messageArea.value.scrollHeight }
@@ -62,9 +66,18 @@ async function send(value: string) {
   const question = value.trim(); if (!question || isGenerating.value) return
   expanded.value = true; input.value = ''
   messages.value.push({ id: `user-${Date.now()}`, sender: 'user', text: question, timestamp: '' }); isGenerating.value = true; await scrollBottom()
-  try { messages.value.push(await sendAssistantQuery(question, props.currentVideo, props.currentTime)) } finally { isGenerating.value = false; await scrollBottom() }
+  try {
+    const session = await createChatTurn(question, { currentVideo: props.currentVideo, currentTime: props.currentTime, globalMode: props.globalMode, session: activeSession.value || undefined })
+    activeSession.value = session
+    messages.value = [welcome(props.currentVideo, props.globalMode), ...session.messages]
+  }
+  catch (error) {
+    const text = error instanceof Error ? error.message : '问答生成失败，请稍后重试'
+    messages.value.push({ id: `error-${Date.now()}`, sender: 'assistant', text, timestamp: '' })
+    MessagePlugin.error(text)
+  } finally { isGenerating.value = false; await scrollBottom() }
 }
-watch([() => props.currentVideo.id, () => props.globalMode], () => { messages.value = [welcome(props.currentVideo, props.globalMode)]; input.value = ''; isGenerating.value = false })
+watch([() => props.currentVideo.id, () => props.globalMode], () => { activeSession.value = null; messages.value = [welcome(props.currentVideo, props.globalMode)]; input.value = ''; isGenerating.value = false })
 watch(() => props.externalQuery, value => { if (value && value !== consumedExternalQuery) { consumedExternalQuery = value; void send(value) } }, { immediate: true })
 </script>
 

@@ -92,17 +92,29 @@ func IsEntitySubType(t string) bool {
 
 // AnchorItem 关联知识条目（聚合 API 返回结构）
 type AnchorItem struct {
-	ID              string        `json:"id"` // Wiki page id 或 knowledge id
-	Slug            string        `json:"slug"`
-	Title           string        `json:"title"`
-	Type            KnowledgeType `json:"type"` // 5 类型之一
-	Timestamp       string        `json:"timestamp,omitempty"`
-	Seconds         int           `json:"seconds,omitempty"`
-	EntitySubType   string        `json:"entity_sub_type,omitempty"` // person / organization / ...
-	PageType        string        `json:"page_type"`                 // WeKnora 原生 page_type
-	Source          string        `json:"source"`                    // "native" / "skill"
-	Confidence      float64       `json:"confidence,omitempty"`
-	RelatedVideoIDs []string      `json:"related_video_ids,omitempty"`
+	ID                string        `json:"id"` // Wiki page id 或 knowledge id
+	Slug              string        `json:"slug"`
+	Title             string        `json:"title"`
+	Type              KnowledgeType `json:"type"` // 5 类型之一
+	CoreContent       string        `json:"core_content,omitempty"`
+	StructureFields   []DetailField `json:"structure_fields,omitempty"`
+	EvidenceIDs       []string      `json:"evidence_ids,omitempty"`
+	InformationNature string        `json:"information_nature,omitempty"`
+	Timestamp         string        `json:"timestamp,omitempty"`
+	Seconds           int           `json:"seconds,omitempty"`
+	EntitySubType     string        `json:"entity_sub_type,omitempty"` // person / organization / ...
+	PageType          string        `json:"page_type"`                 // WeKnora 原生 page_type
+	Source            string        `json:"source"`                    // "native" / "skill"
+	Confidence        float64       `json:"confidence,omitempty"`
+	RelatedVideoIDs   []string      `json:"related_video_ids,omitempty"`
+}
+
+// DetailField carries the type-framework structure fields extracted from a Wiki
+// page. Labels are frontend-facing Chinese labels from extract-video-knowledge.
+type DetailField struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Value string `json:"value"`
 }
 
 // MergeAnchors 双源合并：按 ID 去重，5 类型映射，实体 6 类聚合为 entity

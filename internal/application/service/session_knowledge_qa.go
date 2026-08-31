@@ -522,8 +522,10 @@ func (s *sessionService) buildSearchTargets(
 			return targets, nil // Return what we have, don't fail
 		}
 
-		// Group knowledge IDs by their KB, excluding those already covered by full KB search
-		// Also track KB tenant IDs from knowledge items
+		// Group knowledge IDs by their KB. Even when the full KB is searched,
+		// keep explicit document targets so request-scoped content can bypass
+		// recall thresholds and remain visible to downstream ranking.
+		// Also track KB tenant IDs from knowledge items.
 		for _, k := range knowledgeList {
 			if k == nil || k.KnowledgeBaseID == "" {
 				continue
@@ -531,10 +533,6 @@ func (s *sessionService) buildSearchTargets(
 			// Track KB -> TenantID mapping from knowledge items
 			if kbTenantMap[k.KnowledgeBaseID] == 0 {
 				kbTenantMap[k.KnowledgeBaseID] = k.TenantID
-			}
-			// Skip if this KB is already fully searched without a tag scope.
-			if fullKBSet[k.KnowledgeBaseID] && len(tagIDsByKB[k.KnowledgeBaseID]) == 0 {
-				continue
 			}
 			kbToKnowledgeIDs[k.KnowledgeBaseID] = append(kbToKnowledgeIDs[k.KnowledgeBaseID], k.ID)
 		}

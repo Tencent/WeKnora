@@ -1,0 +1,92 @@
+# 固定验收编排：
+# 复用官方 WeKnora Compose 已运行的真实数据服务，只单独构建当前 custom-backend。
+services:
+  custom-db-init:
+    image: paradedb/paradedb:v0.22.2-pg17
+    container_name: vidsage-custom-db-init-acceptance
+    environment:
+      PGPASSWORD: ${DB_PASSWORD:-postgres}
+      DB_USER: ${DB_USER:-postgres}
+      CUSTOM_DB_NAME: ${CUSTOM_DB_NAME:-vidsage}
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -eu
+        case "$$CUSTOM_DB_NAME" in
+          *[!A-Za-z0-9_]*|'')
+            echo "[custom-db-init] CUSTOM_DB_NAME must contain only letters, numbers, and underscores" >&2
+            exit 1
+            ;;
+        esac
+        if psql -h postgres -U "$$DB_USER" -d postgres -tAc \
+          "SELECT 1 FROM pg_database WHERE datname='$$CUSTOM_DB_NAME'" | grep -q 1; then
+          echo "[custom-db-init] database '$$CUSTOM_DB_NAME' already exists."
+        else
+          psql -h postgres -U "$$DB_USER" -d postgres \
+            -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$$CUSTOM_DB_NAME\" TEMPLATE template0;"
+          echo "[custom-db-init] database '$$CUSTOM_DB_NAME' created."
+        fi
+    networks:
+      - acceptance-network
+    restart: "no"
+
+  custom-backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.custom-backend
+    image: weknora/custom-backend:acceptance
+    container_name: vidsage-custom-backend
+    depends_on:
+      custom-db-init:
+        condition: service_completed_successfully
+    environment:
+      CUSTOM_SERVER_HOST: 0.0.0.0
+      CUSTOM_SERVER_PORT: 8090
+      CUSTOM_DB_HOST: postgres
+      CUSTOM_DB_PORT: 5432
+      CUSTOM_DB_USER: ${DB_USER:-postgres}
+      CUSTOM_DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      CUSTOM_DB_NAME: ${CUSTOM_DB_NAME:-vidsage}
+      WEKNORA_BASE_URL: http://app:8080
+      WEKNORA_API_KEY: ${WEKNORA_API_KEY:-}
+      WEKNORA_KB_ID: ${WEKNORA_KB_ID:-}
+      WEKNORA_TENANT_ID: ${WEKNORA_TENANT_ID:-}
+      MINIO_ENDPOINT: WeKnora-minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY_ID:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_ACCESS_KEY:-minioadmin}
+      MINIO_BUCKET: ${CUSTOM_MINIO_BUCKET:-vidsage}
+      MINIO_USE_SSL: "false"
+      MINIO_PUBLIC_URL: ${CUSTOM_MINIO_PUBLIC_URL:-http://localhost/api/custom/files}
+      TONGYI_API_KEY: ${TONGYI_API_KEY:-}
+      TONGYI_ACCESS_KEY_ID: ${TONGYI_ACCESS_KEY_ID:-}
+      TONGYI_ACCESS_KEY_SECRET: ${TONGYI_ACCESS_KEY_SECRET:-}
+      TONGYI_APP_KEY: ${TONGYI_APP_KEY:-}
+      TONGYI_ENDPOINT: ${TONGYI_ENDPOINT:-https://tingwu.cn-beijing.aliyuncs.com}
+      CUSTOM_CONTENT_AGENT_ID: ${CUSTOM_CONTENT_AGENT_ID:-}
+      CUSTOM_LLM_PROVIDER: ${CUSTOM_LLM_PROVIDER:-openai-compatible}
+      CUSTOM_LLM_BASE_URL: ${CUSTOM_LLM_BASE_URL:-}
+      CUSTOM_LLM_API_KEY: ${CUSTOM_LLM_API_KEY:-}
+      CUSTOM_LLM_MODEL: ${CUSTOM_LLM_MODEL:-}
+      CUSTOM_LLM_PROMPT_VERSION: ${CUSTOM_LLM_PROMPT_VERSION:-direct-content-v1}
+      CUSTOM_LLM_TIMEOUT_SECONDS: ${CUSTOM_LLM_TIMEOUT_SECONDS:-180}
+      CUSTOM_LLM_MAX_TOKENS: ${CUSTOM_LLM_MAX_TOKENS:-8192}
+      CUSTOM_WORKER_POLL_INTERVAL: ${CUSTOM_WORKER_POLL_INTERVAL:-5}
+      CUSTOM_WORKER_MAX_ATTEMPTS: ${CUSTOM_WORKER_MAX_ATTEMPTS:-3}
+      CUSTOM_WORKER_CONCURRENCY: ${CUSTOM_WORKER_CONCURRENCY:-2}
+      CUSTOM_LOG_LEVEL: ${CUSTOM_LOG_LEVEL:-info}
+    ports:
+      - "${CUSTOM_SERVER_PORT:-8090}:8090"
+    networks:
+      - acceptance-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+
+networks:
+  acceptance-network:
+    name: ${LOCAL_ACCEPTANCE_OFFICIAL_NETWORK:-weknora_WeKnora-network}
+    external: true

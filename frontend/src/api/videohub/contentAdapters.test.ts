@@ -138,6 +138,35 @@ test('maps grouped backend anchors without mock video data', () => {
   assert.deepEqual(payload.overview?.top_topics, ['张三', '复盘法'])
 })
 
+test('maps type-framework fields from backend anchors', () => {
+  const payload = mapRelatedKnowledgeResponse('video-1', {
+    anchors: {
+      method: [{
+        id: 'method-1',
+        title: '复盘法',
+        type: 'method',
+        core_content: '通过异常数据定位原因。',
+        structure_fields: [
+          { key: 'input', label: '输入', value: '留存曲线' },
+          { key: 'criteria', label: '判断标准', value: '拐点接近' },
+        ],
+        evidence_ids: ['E001', 'E002'],
+        information_nature: '归纳',
+      }],
+    },
+    cross_video: [],
+  })
+
+  const [anchor] = payload.anchors
+  assert.equal(anchor.coreContent, '通过异常数据定位原因。')
+  assert.deepEqual(anchor.structureFields, [
+    { key: 'input', label: '输入', value: '留存曲线' },
+    { key: 'criteria', label: '判断标准', value: '拐点接近' },
+  ])
+  assert.deepEqual(anchor.evidenceIds, ['E001', 'E002'])
+  assert.equal(anchor.informationNature, '归纳')
+})
+
 test('does not misclassify unsupported knowledge types as concepts', () => {
   const payload = mapRelatedKnowledgeResponse('video-1', {
     anchors: [{ id: 'unknown-1', title: '未知类型', type: 'unsupported' as any }],

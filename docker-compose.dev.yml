@@ -575,6 +575,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      custom-db-init:
+        condition: service_completed_successfully
       minio:
         condition: service_healthy
     environment:
@@ -614,13 +616,44 @@ services:
       CUSTOM_WORKER_MAX_ATTEMPTS: ${CUSTOM_WORKER_MAX_ATTEMPTS:-3}
       CUSTOM_WORKER_CONCURRENCY: ${CUSTOM_WORKER_CONCURRENCY:-2}
       CUSTOM_LOG_LEVEL: ${CUSTOM_LOG_LEVEL:-info}
-    volumes:
-      # 首次启动时自动创建库；初始化逻辑可由 init 容器替代
-      - ./scripts/init-custom-db.sql:/docker-entrypoint-initdb.d/00-custom-db.sql:ro
     ports:
       - "${CUSTOM_SERVER_PORT:-8090}:8090"
     networks:
       - WeKnora-network-dev
+
+  # PostgreSQL 的 /docker-entrypoint-initdb.d 只在数据卷第一次初始化时执行，
+  # 因此独立库必须由一次性服务在后端启动前幂等创建。
+  custom-db-init:
+    image: paradedb/paradedb:v0.22.2-pg17
+    container_name: vidsage-custom-db-init-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${DB_PASSWORD:-postgres}
+      DB_USER: ${DB_USER:-postgres}
+      CUSTOM_DB_NAME: ${CUSTOM_DB_NAME:-vidsage}
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -eu
+        case "$$CUSTOM_DB_NAME" in
+          *[!A-Za-z0-9_]*|'')
+            echo "[custom-db-init] CUSTOM_DB_NAME must contain only letters, numbers, and underscores" >&2
+            exit 1
+            ;;
+        esac
+        if psql -h postgres -U "$$DB_USER" -d postgres -tAc \
+          "SELECT 1 FROM pg_database WHERE datname='$$CUSTOM_DB_NAME'" | grep -q 1; then
+          echo "[custom-db-init] database '$$CUSTOM_DB_NAME' already exists."
+        else
+          psql -h postgres -U "$$DB_USER" -d postgres \
+            -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$$CUSTOM_DB_NAME\" TEMPLATE template0;"
+          echo "[custom-db-init] database '$$CUSTOM_DB_NAME' created."
+        fi
+    networks:
+      - WeKnora-network-dev
+    restart: "no"
 
 
 networks:

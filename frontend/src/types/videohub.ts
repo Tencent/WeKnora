@@ -80,10 +80,20 @@ export interface RelationOverview {
   top_topics: string[]
 }
 
+export interface KnowledgeStructureField {
+  key: string
+  label: string
+  value: string
+}
+
 export interface CurrentKnowledgeAnchor {
   id: string
   knowledge_type: KnowledgeType
   content: string
+  coreContent?: string
+  structureFields?: KnowledgeStructureField[]
+  evidenceIds?: string[]
+  informationNature?: string
   timestamp: string
   seconds: number
   related_count: number
@@ -184,6 +194,8 @@ export interface EvidenceLink {
   label: string
   timestamp: string
   seconds: number
+  videoId?: string
+  videoTitle?: string
 }
 
 export interface ChatMessage {
@@ -200,9 +212,13 @@ export interface ChatMessage {
 export interface ChatSession {
   id: string
   title: string
-  type: 'chat' | 'doc'
+  type: 'chat' | 'doc' | 'video'
   time: string
   messages: ChatMessage[]
+  scope?: 'global' | 'video'
+  videoId?: string
+  videoTitle?: string
+  videoCoverUrl?: string
 }
 
 export interface UploadForm {
