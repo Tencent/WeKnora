@@ -93,6 +93,13 @@ function pushStreamingPlaceholder(target: ChatSession) {
   target.messages.push({ id: assistantId, sender: 'assistant', text: '', timestamp: '刚刚' } as StreamingChatMessage)
   return assistantId
 }
+
+function materializePendingSession(pendingSession: ChatSession, createdSession: ChatSession) {
+  const materialized = { ...createdSession, messages: pendingSession.messages }
+  sessions.value = sessions.value.map(item => item.id === pendingSession.id ? materialized : item)
+  if (activeSession.value?.id === pendingSession.id) activeSession.value = materialized
+  return materialized
+}
 async function startSession() {
   const value = question.value.trim(); if (!value || isGenerating.value) return
   lastUserQuery.value = value
@@ -101,8 +108,8 @@ async function startSession() {
   const assistantId = pushStreamingPlaceholder(session)
   sessions.value.unshift(session); activeSession.value = session; isGenerating.value = true; await scrollBottom()
   try {
-    const created = await createChatTurn(value, { globalMode: true, onStreamMessage: message => updateStreamingMessage(assistantId, message) })
-    sessions.value = sessions.value.map(item => item.id === session.id ? created : item)
+    const created = await createChatTurn(value, { globalMode: true, onSessionCreated: createdSession => materializePendingSession(session, createdSession), onStreamMessage: message => updateStreamingMessage(assistantId, message) })
+    sessions.value = sessions.value.map(item => item.id === session.id || item.id === created.id ? created : item)
     activeSession.value = created
   } catch (error) {
     session.messages.push({ id: `error-${Date.now()}`, sender: 'assistant', text: error instanceof Error ? error.message : '问答生成失败，请稍后重试', timestamp: '刚刚' })

@@ -20,3 +20,8 @@ test('video assistant input unlocks after chat turn finalizes', () => {
 test('video assistant disables protected image hydration in native agent display', () => {
   assert.match(componentSource, /:hydrate-protected-images="false"/)
 })
+
+test('video assistant keeps the created session before streaming finishes', () => {
+  assert.match(componentSource, /function materializeActiveSession\(session: ChatSession\)/)
+  assert.match(componentSource, /onSessionCreated: materializeActiveSession/)
+})

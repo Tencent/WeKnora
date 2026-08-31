@@ -130,6 +130,12 @@ function cacheSession(session: ChatSession) {
   assistantSessionCache.set(sessionCacheKey.value, session)
 }
 
+function materializeActiveSession(session: ChatSession) {
+  const currentMessages = messages.value.filter(message => !message.id.startsWith('welcome-'))
+  activeSession.value = { ...session, messages: currentMessages }
+  cacheSession(activeSession.value)
+}
+
 function selectTimestamp(part: TimestampPart) {
   if (part.seconds === undefined) return
   // 全局模式下导航由 evidenceLinks 里的 videoId 决定，此处只走 navigate 事件 + currentVideo
@@ -156,7 +162,7 @@ async function send(value: string) {
       Object.assign(target, message, { id: assistantId })
       void scrollBottom()
     }
-    const session = await createChatTurn(question, { currentVideo: props.currentVideo, currentTime: props.currentTime, globalMode: props.globalMode, session: activeSession.value || undefined, onStreamMessage: updateStreamingMessage })
+    const session = await createChatTurn(question, { currentVideo: props.currentVideo, currentTime: props.currentTime, globalMode: props.globalMode, session: activeSession.value || undefined, onSessionCreated: materializeActiveSession, onStreamMessage: updateStreamingMessage })
     activeSession.value = session
     cacheSession(session)
     messages.value = [welcome(props.currentVideo, props.globalMode), ...session.messages]

@@ -13,3 +13,8 @@ test('chat page lays out assistant identity separately from the answer body', ()
   assert.match(componentSource, /\.message--assistant\s*\{[^}]*display:\s*grid/s)
   assert.match(componentSource, /\.message--assistant \.message__bubble\s*\{[^}]*width:\s*100%/s)
 })
+
+test('chat page materializes pending sessions as soon as the backend creates them', () => {
+  assert.match(componentSource, /function materializePendingSession\(pendingSession: ChatSession, createdSession: ChatSession\)/)
+  assert.match(componentSource, /onSessionCreated: createdSession => materializePendingSession\(session, createdSession\)/)
+})

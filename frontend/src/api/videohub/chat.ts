@@ -63,6 +63,7 @@ interface SendOptions {
   globalMode?: boolean
   onMessage?: (message: ChatMessage) => void
   onStreamMessage?: (message: StreamingChatMessage) => void
+  onSessionCreated?: (session: ChatSession) => void
 }
 
 interface TurnOptions extends SendOptions {
@@ -578,6 +579,9 @@ export async function createChatTurn(question: string, options: TurnOptions = {}
       updated_at: undefined,
     }
     : await createSession(question, scope)
+  if (!options.session?.id || options.session.id.startsWith('pending-')) {
+    options.onSessionCreated?.(sessionFromScope(session, scope, [], question))
+  }
   const userMessage: ChatMessage = { id: messageId(), sender: 'user', text: question, timestamp: nowLabel() }
   options.onMessage?.(userMessage)
   const { answer, streamMessage } = await streamAnswer(session.id, question, scope, { onChunk: options.onStreamMessage })
