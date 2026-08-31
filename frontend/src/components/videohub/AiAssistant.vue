@@ -4,9 +4,11 @@
       <header><div><strong>AI Assistant</strong></div><t-button variant="text" shape="square" aria-label="收起" @click="expanded = false"><t-icon name="chevron-down" /></t-button></header>
       <div ref="messageArea" class="assistant-messages">
         <div v-for="message in messages" :key="message.id" :class="['assistant-message', `assistant-message--${message.sender}`]">
-          <p><template v-for="(part, index) in splitTimestamps(message.text, message.evidenceLinks)" :key="index"><button v-if="part.seconds !== undefined" class="timestamp" type="button" @click="selectTimestamp(part)">{{ part.text }}</button><template v-else>{{ part.text }}</template></template></p>
+          <div v-if="message.thinkingText" class="assistant-thinking"><strong>思考过程</strong><p>{{ message.thinkingText }}</p></div>
+          <p v-if="message.text"><template v-for="(part, index) in splitTimestamps(message.text, message.evidenceLinks)" :key="index"><button v-if="part.seconds !== undefined" class="timestamp" type="button" @click="selectTimestamp(part)">{{ part.text }}</button><template v-else>{{ part.text }}</template></template></p>
+          <small v-else-if="message.activityText" class="assistant-activity">{{ message.activityText }}</small>
         </div>
-        <div v-if="isGenerating" class="assistant-loading"><t-loading size="small" /> 正在整合视频知识...</div>
+        <div v-if="isGenerating && !streamingAssistantVisible" class="assistant-loading"><t-loading size="small" /> 正在整合视频知识...</div>
       </div>
       <div class="assistant-suggestions"><button v-for="item in suggestions" :key="item" type="button" @click="send(item)">{{ item }}</button></div>
     </section>
@@ -17,9 +19,10 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { createChatTurn } from '@/api/videohub/chat'
+import type { StreamingChatMessage } from '@/api/videohub/chat'
 import type { ChatMessage, ChatSession, VideoData } from '@/types/videohub'
 
 type TimestampPart = { text: string; seconds?: number; videoId?: string }
@@ -27,14 +30,19 @@ type TimestampPart = { text: string; seconds?: number; videoId?: string }
 const props = withDefaults(defineProps<{ currentVideo: VideoData; currentTime?: number; externalQuery?: string; globalMode?: boolean }>(), { currentTime: 0, externalQuery: '', globalMode: false })
 const emit = defineEmits<{ seek: [seconds: number]; navigate: [videoId: string, seconds: number] }>()
 const expanded = ref(false), input = ref(''), isGenerating = ref(false), messageArea = ref<HTMLElement | null>(null)
-const messages = ref<ChatMessage[]>([])
+const messages = ref<StreamingChatMessage[]>([])
 const activeSession = ref<ChatSession | null>(null)
 const globalSuggestions = ['帮我总结一下全部视频的核心观点', '最近上传了哪些重要视频？', '帮我找关于培训内容的视频']
 const singleSuggestions = ['总结这段视频的核心观点', '有哪些值得记录的知识点？', '给出三个可执行建议']
 const suggestions = props.globalMode ? globalSuggestions : singleSuggestions
 let consumedExternalQuery = ''
+const streamingAssistantId = ref('')
 
-function welcome(video: VideoData, global: boolean): ChatMessage {
+const streamingAssistantVisible = computed(() => messages.value.some(message =>
+  message.id === streamingAssistantId.value && Boolean(message.text || message.thinkingText || message.activityText),
+))
+
+function welcome(video: VideoData, global: boolean): StreamingChatMessage {
   return {
     id: `welcome-${video.id}`,
     sender: 'assistant',
@@ -65,9 +73,21 @@ async function scrollBottom() { await nextTick(); if (messageArea.value) message
 async function send(value: string) {
   const question = value.trim(); if (!question || isGenerating.value) return
   expanded.value = true; input.value = ''
-  messages.value.push({ id: `user-${Date.now()}`, sender: 'user', text: question, timestamp: '' }); isGenerating.value = true; await scrollBottom()
+  messages.value.push({ id: `user-${Date.now()}`, sender: 'user', text: question, timestamp: '' })
+  const assistantId = `assistant-${Date.now()}`
+  streamingAssistantId.value = assistantId
+  messages.value.push({ id: assistantId, sender: 'assistant', text: '', timestamp: '' })
+  isGenerating.value = true; await scrollBottom()
   try {
-    const session = await createChatTurn(question, { currentVideo: props.currentVideo, currentTime: props.currentTime, globalMode: props.globalMode, session: activeSession.value || undefined })
+    const updateStreamingMessage = (message: StreamingChatMessage) => {
+      const target = messages.value.find(item => item.id === assistantId)
+      if (!target) return
+      target.text = message.text
+      target.thinkingText = message.thinkingText
+      target.activityText = message.activityText
+      void scrollBottom()
+    }
+    const session = await createChatTurn(question, { currentVideo: props.currentVideo, currentTime: props.currentTime, globalMode: props.globalMode, session: activeSession.value || undefined, onStreamMessage: updateStreamingMessage })
     activeSession.value = session
     messages.value = [welcome(props.currentVideo, props.globalMode), ...session.messages]
   }
@@ -75,9 +95,9 @@ async function send(value: string) {
     const text = error instanceof Error ? error.message : '问答生成失败，请稍后重试'
     messages.value.push({ id: `error-${Date.now()}`, sender: 'assistant', text, timestamp: '' })
     MessagePlugin.error(text)
-  } finally { isGenerating.value = false; await scrollBottom() }
+  } finally { isGenerating.value = false; streamingAssistantId.value = ''; await scrollBottom() }
 }
-watch([() => props.currentVideo.id, () => props.globalMode], () => { activeSession.value = null; messages.value = [welcome(props.currentVideo, props.globalMode)]; input.value = ''; isGenerating.value = false })
+watch([() => props.currentVideo.id, () => props.globalMode], () => { activeSession.value = null; messages.value = [welcome(props.currentVideo, props.globalMode)]; input.value = ''; isGenerating.value = false; streamingAssistantId.value = '' })
 watch(() => props.externalQuery, value => { if (value && value !== consumedExternalQuery) { consumedExternalQuery = value; void send(value) } }, { immediate: true })
 </script>
 

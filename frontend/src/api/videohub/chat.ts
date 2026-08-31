@@ -2,6 +2,7 @@ import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { get, post } from '@/utils/request'
 import { getApiBaseUrl } from '@/utils/api-base'
 import type { ChatMessage, ChatSession, EvidenceLink, VideoData } from '@/types/videohub'
+import { parseWeKnoraStreamChunk } from './chatStream'
 
 type ChatScope = 'global' | 'video'
 
@@ -61,10 +62,20 @@ interface SendOptions {
   currentTime?: number
   globalMode?: boolean
   onMessage?: (message: ChatMessage) => void
+  onStreamMessage?: (message: StreamingChatMessage) => void
 }
 
 interface TurnOptions extends SendOptions {
   session?: ChatSession
+}
+
+interface StreamAnswerOptions {
+  onChunk?: (message: StreamingChatMessage) => void
+}
+
+export interface StreamingChatMessage extends ChatMessage {
+  thinkingText?: string
+  activityText?: string
 }
 
 const VIDEOHUB_META_PREFIX = 'videohub:'
@@ -211,12 +222,22 @@ async function mapMessages(messages: WeKnoraMessage[]) {
   return messages.filter(message => message.role === 'user' || message.role === 'assistant').map(message => mapMessage(message, evidence))
 }
 
-async function streamAnswer(sessionID: string, question: string, scope: ScopeResponse): Promise<string> {
+async function streamAnswer(sessionID: string, question: string, scope: ScopeResponse, options: StreamAnswerOptions = {}): Promise<string> {
   const token = localStorage.getItem('weknora_token')
   if (!token) throw new Error('登录已失效，请重新登录后再提问')
   const apiBase = getApiBaseUrl()
   const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id')
   let answer = ''
+  let thinkingText = ''
+  let activityText = ''
+  const emitChunk = () => options.onChunk?.({
+    id: `stream-${sessionID}`,
+    sender: 'assistant',
+    text: cleanAnswer(answer),
+    thinkingText: thinkingText.trim(),
+    activityText,
+    timestamp: nowLabel(),
+  })
   const endpoint = scope.agent_id ? 'agent-chat' : 'knowledge-chat'
   await fetchEventSource(`${apiBase}/api/v1/${endpoint}/${sessionID}`, {
     method: 'POST',
@@ -242,15 +263,29 @@ async function streamAnswer(sessionID: string, question: string, scope: ScopeRes
       if (!response.ok) throw new Error(`问答请求失败：HTTP ${response.status}`)
     },
     onmessage: event => {
-      if (!event.data || event.data === '[DONE]') return
-      let data: { response_type?: string; content?: string; data?: { error?: string }; done?: boolean }
-      try {
-        data = JSON.parse(event.data)
-      } catch {
-        return
+      const chunk = parseWeKnoraStreamChunk(event.data)
+      if (chunk.kind === 'answer') {
+        answer += chunk.content || ''
+        activityText = ''
+        emitChunk()
       }
-      if (data.response_type === 'answer' && data.content) answer += String(data.content)
-      if (data.response_type === 'error') throw new Error(data.content || data?.data?.error || '问答生成失败')
+      if (chunk.kind === 'thinking') {
+        thinkingText += chunk.content || ''
+        activityText = '正在思考'
+        emitChunk()
+      }
+      if (chunk.kind === 'activity') {
+        activityText = chunk.content || ''
+        emitChunk()
+      }
+      if (chunk.kind === 'complete' && !answer && chunk.content) {
+        answer = chunk.content
+        activityText = ''
+        emitChunk()
+      }
+      if (chunk.kind === 'error') {
+        throw new Error(chunk.content || '问答生成失败')
+      }
     },
     onerror: error => {
       throw error
@@ -317,7 +352,7 @@ export async function loadChatSession(session: ChatSession): Promise<ChatSession
 export async function sendChatMessage(question: string, options: SendOptions = {}): Promise<ChatMessage> {
   const scope = await getScope(options)
   const session = await createSession(question, scope)
-  const answer = await streamAnswer(session.id, question, scope)
+  const answer = await streamAnswer(session.id, question, scope, { onChunk: options.onStreamMessage })
   const assistant = await hydrateLastAssistant(session, answer)
   options.onMessage?.(assistant)
   return assistant
@@ -335,10 +370,11 @@ export async function createChatTurn(question: string, options: TurnOptions = {}
     : await createSession(question, scope)
   const userMessage: ChatMessage = { id: messageId(), sender: 'user', text: question, timestamp: nowLabel() }
   options.onMessage?.(userMessage)
-  const answer = await streamAnswer(session.id, question, scope)
+  const answer = await streamAnswer(session.id, question, scope, { onChunk: options.onStreamMessage })
   const messages = await mapMessages(await loadSessionMessages(session.id))
   const fallbackMessages = [userMessage, { id: messageId(), sender: 'assistant' as const, text: answer, timestamp: nowLabel() }]
-  return sessionFromScope(session, scope, messages.length ? messages : fallbackMessages, question)
+  const hasAssistantAnswer = messages.some(message => message.sender === 'assistant' && message.text.trim())
+  return sessionFromScope(session, scope, hasAssistantAnswer ? messages : fallbackMessages, question)
 }
 
 export async function sendAssistantQuery(question: string, currentVideo: VideoData, currentTime: number, globalMode = false): Promise<ChatMessage> {
