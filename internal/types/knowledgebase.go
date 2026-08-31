@@ -249,7 +249,8 @@ type ChunkingConfig struct {
 	// Separators
 	Separators []string `yaml:"separators"    json:"separators"`
 	// ParserEngineRules configures which parser engine to use for each file type.
-	// When empty, the builtin engine is used for all types.
+	// When empty, DefaultParserEngine is used (builtin/simple routing, except
+	// types that only a specific engine can parse, e.g. ppt/pptx → markitdown).
 	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty"`
 	// EnableParentChild enables two-level parent-child chunking strategy.
 	// When enabled, large parent chunks provide context while small child chunks
@@ -278,14 +279,28 @@ type ChunkingConfig struct {
 	TableMetadataInstructions string `yaml:"table_metadata_instructions,omitempty" json:"table_metadata_instructions,omitempty"`
 }
 
+// defaultParserEngineByType maps file types the builtin/simple engines cannot
+// parse to the only engine that can. Types omitted here keep empty-string
+// routing (Go simple formats, otherwise docreader builtin).
+var defaultParserEngineByType = map[string]string{
+	"ppt":  "markitdown",
+	"pptx": "markitdown",
+}
+
+// DefaultParserEngine returns the engine used when no parser_engine_rules
+// match. Empty string means builtin (docreader) or Go simple-format routing.
+func DefaultParserEngine(fileType string) string {
+	return defaultParserEngineByType[normalizeParserFileType(fileType)]
+}
+
 // ResolveParserEngine returns the engine name for the given file type
-// based on the configured rules. Returns empty string (builtin) when
-// no rule matches.
+// based on the configured rules. When no rule matches it returns the
+// type-level default (see DefaultParserEngine).
 func (c ChunkingConfig) ResolveParserEngine(fileType string) string {
 	if rule := c.ResolveParserEngineRule(fileType); rule != nil {
 		return rule.Engine
 	}
-	return ""
+	return DefaultParserEngine(fileType)
 }
 
 // ResolveParserEngineRule returns the parser rule for a file type.

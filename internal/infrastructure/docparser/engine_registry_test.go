@@ -16,7 +16,7 @@ func TestListAllEnginesBuiltinIncludesDocumentFormats(t *testing.T) {
 		for _, fileType := range engine.FileTypes {
 			fileTypes[fileType] = true
 		}
-		for _, want := range []string{"html", "htm", "xmind"} {
+		for _, want := range []string{"html", "htm", "xmind", "ppt", "pptx"} {
 			if !fileTypes[want] {
 				t.Errorf("builtin engine file types do not include %q: %v", want, engine.FileTypes)
 			}
