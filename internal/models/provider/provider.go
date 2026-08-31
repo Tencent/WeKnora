@@ -23,7 +23,7 @@ const (
 	ProviderZhipu ProviderName = "zhipu"
 	// OpenRouter
 	ProviderOpenRouter ProviderName = "openrouter"
-	// LiteLLM (self-hosted proxy)
+	// ProviderLiteLLM is the LiteLLM self-hosted proxy (OpenAI-compatible gateway to 100+ providers).
 	ProviderLiteLLM ProviderName = "litellm"
 	// Requesty
 	ProviderRequesty ProviderName = "requesty"
