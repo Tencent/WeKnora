@@ -525,6 +525,10 @@ func (c *ImageProcessingConfig) Scan(value interface{}) error {
 type VLMConfig struct {
 	Enabled bool   `yaml:"enabled"  json:"enabled"`
 	ModelID string `yaml:"model_id" json:"model_id"`
+	// FallbackModelIDs is the ordered fallback chain. When the primary ModelID
+	// call fails or returns an empty response, the parser tries these models in
+	// order; only when every candidate fails does the image processing error out.
+	FallbackModelIDs []string `yaml:"fallback_model_ids" json:"fallback_model_ids"`
 	// DescriptionLanguage controls the language used for generated image
 	// captions. Empty means follow the document/request language.
 	DescriptionLanguage string `yaml:"description_language,omitempty" json:"description_language,omitempty"`
@@ -558,6 +562,61 @@ func (c VLMConfig) IsEnabled() bool {
 	return false
 }
 
+// MaxVLMModelChainLength caps the total number of VLM models in the ordered
+// fallback chain (primary model plus fallbacks).
+const MaxVLMModelChainLength = 5
+
+// NormalizeModelChain trims and de-duplicates the configured VLM model chain,
+// keeping ModelID as the first (primary) entry.
+func (c *VLMConfig) NormalizeModelChain() {
+	if c == nil {
+		return
+	}
+	c.ModelID = strings.TrimSpace(c.ModelID)
+	if c.ModelID == "" {
+		c.FallbackModelIDs = nil
+		return
+	}
+
+	seen := map[string]bool{c.ModelID: true}
+	fallbacks := make([]string, 0, MaxVLMModelChainLength-1)
+	for _, raw := range c.FallbackModelIDs {
+		id := strings.TrimSpace(raw)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		fallbacks = append(fallbacks, id)
+		if len(fallbacks) >= MaxVLMModelChainLength-1 {
+			break
+		}
+	}
+	c.FallbackModelIDs = fallbacks
+}
+
+// ClearModelChain removes configured model IDs while leaving legacy inline
+// endpoint fields untouched for backward compatibility.
+func (c *VLMConfig) ClearModelChain() {
+	if c == nil {
+		return
+	}
+	c.ModelID = ""
+	c.FallbackModelIDs = nil
+}
+
+// ModelChainIDs returns the effective ordered model chain. The first element
+// is the primary model_id; subsequent elements are fallbacks tried in order.
+func (c VLMConfig) ModelChainIDs() []string {
+	c.NormalizeModelChain()
+	if c.ModelID == "" {
+		return nil
+	}
+	ids := make([]string, 0, 1+len(c.FallbackModelIDs))
+	ids = append(ids, c.ModelID)
+	ids = append(ids, c.FallbackModelIDs...)
+	return ids
+}
+
 // QuestionGenerationConfig represents the question generation configuration for document knowledge bases
 // When enabled, the system will use LLM to generate questions for each chunk during document parsing
 // These generated questions will be indexed separately to improve recall
@@ -589,6 +648,7 @@ func (c *QuestionGenerationConfig) Scan(value interface{}) error {
 
 // Value implements the driver.Valuer interface, used to convert VLMConfig to database value
 func (c VLMConfig) Value() (driver.Value, error) {
+	c.NormalizeModelChain()
 	return json.Marshal(c)
 }
 
@@ -601,7 +661,11 @@ func (c *VLMConfig) Scan(value interface{}) error {
 	if !ok {
 		return nil
 	}
-	return json.Unmarshal(b, c)
+	if err := json.Unmarshal(b, c); err != nil {
+		return err
+	}
+	c.NormalizeModelChain()
+	return nil
 }
 
 // ASRConfig represents the ASR (Automatic Speech Recognition) configuration

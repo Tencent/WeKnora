@@ -850,7 +850,7 @@ interface KB {
   summary_model_id?: string;
   type?: 'document' | 'faq';
   showMore?: boolean;
-  vlm_config?: { enabled?: boolean; model_id?: string };
+  vlm_config?: { enabled?: boolean; model_id?: string; fallback_model_ids?: string[] };
   extract_config?: { enabled?: boolean };
   storage_provider_config?: { provider?: string };
   storage_config?: { provider?: string; bucket_name?: string }; // legacy

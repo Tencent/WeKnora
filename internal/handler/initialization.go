@@ -295,17 +295,21 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 
 	// 处理多模态模型配置
 	kb.VLMConfig = types.VLMConfig{}
-	if req.VLMConfig != nil && req.Multimodal.Enabled && req.VLMConfig.ModelID != "" {
-		vllmModel, err := h.modelService.GetModelByID(ctx, req.VLMConfig.ModelID)
-		if err != nil || vllmModel == nil {
-			logger.Warn(ctx, "VLM model not found")
-		} else {
-			kb.VLMConfig.Enabled = req.VLMConfig.Enabled
-			kb.VLMConfig.ModelID = req.VLMConfig.ModelID
+	if req.VLMConfig != nil && req.Multimodal.Enabled {
+		cfg := *req.VLMConfig
+		cfg.NormalizeModelChain()
+		if cfg.ModelID != "" {
+			vllmModel, err := h.modelService.GetModelByID(ctx, cfg.ModelID)
+			if err != nil || vllmModel == nil {
+				logger.Warn(ctx, "VLM model not found")
+			} else {
+				cfg.Enabled = req.VLMConfig.Enabled
+				kb.VLMConfig = cfg
+			}
 		}
 	}
 	if !kb.VLMConfig.Enabled {
-		kb.VLMConfig.ModelID = ""
+		kb.VLMConfig.ClearModelChain()
 	}
 
 	// 处理ASR语音识别配置
@@ -359,7 +363,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	if req.Multimodal.Enabled {
 		// VLM model already set above
 	} else {
-		kb.VLMConfig.ModelID = ""
+		kb.VLMConfig.ClearModelChain()
 	}
 	if req.VLMConfig != nil {
 		kb.VLMConfig.DescriptionLanguage = strings.TrimSpace(req.VLMConfig.DescriptionLanguage)
@@ -1387,6 +1391,7 @@ func (h *InitializationHandler) GetCurrentConfigByKB(c *gin.Context) {
 		kb.SummaryModelID,
 		kb.VLMConfig.ModelID,
 	}
+	modelIDs = append(modelIDs, kb.VLMConfig.FallbackModelIDs...)
 
 	for _, modelID := range modelIDs {
 		if modelID != "" {
@@ -1500,13 +1505,13 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	} else {
 		config["multimodal"].(map[string]interface{})["enabled"] = hasMultimodal
 	}
+	multimodal := config["multimodal"].(map[string]interface{})
+	multimodal["vlm_config"] = map[string]interface{}{
+		"enabled":            kb.VLMConfig.Enabled,
+		"model_id":           kb.VLMConfig.ModelID,
+		"fallback_model_ids": kb.VLMConfig.FallbackModelIDs,
+	}
 	if kb.VLMConfig.DescriptionLanguage != "" || kb.VLMConfig.CustomInstructions != "" {
-		if config["multimodal"] == nil {
-			config["multimodal"] = map[string]interface{}{
-				"enabled": hasMultimodal,
-			}
-		}
-		multimodal := config["multimodal"].(map[string]interface{})
 		if kb.VLMConfig.DescriptionLanguage != "" {
 			multimodal["descriptionLanguage"] = kb.VLMConfig.DescriptionLanguage
 		}
