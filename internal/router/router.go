@@ -228,7 +228,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		// so that sub-groups inherit it.
 		v1.Use(rbacGuards.apiKeyAuthorizer.Middleware())
 
-		RegisterAuthRoutes(v1, params.AuthHandler, rbacGuards)
+		RegisterAuthRoutes(v1, params.AuthHandler, rbacGuards, params.RedisClient, params.Config)
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)

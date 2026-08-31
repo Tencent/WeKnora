@@ -2,9 +2,12 @@ package router
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -203,7 +206,7 @@ func RegisterMyEnvVarRoutes(r *gin.RouterGroup, h *handler.MeEnvVarHandler) {
 }
 
 // RegisterAuthRoutes registers authentication routes
-func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rbacGuards) {
+func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rbacGuards, redisClient *redis.Client, cfg *config.Config) {
 	r.POST("/auth/register", handler.Register)
 	// Share-link surfaces are unauthenticated and accept a plaintext
 	// token from the caller; rate-limit by IP to bound brute-force /
@@ -213,7 +216,16 @@ func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rba
 	publicAuthRL := middleware.PublicAuthRateLimit()
 	r.POST("/auth/register-by-invite", publicAuthRL, handler.RegisterByInvite)
 	r.POST("/auth/invitations/lookup", publicAuthRL, handler.LookupInvitationByToken)
-	r.POST("/auth/login", handler.Login)
+	loginMax, loginWindow := 10, 10*time.Minute
+	if cfg != nil && cfg.Auth != nil {
+		if cfg.Auth.LoginRateLimitMax > 0 {
+			loginMax = cfg.Auth.LoginRateLimitMax
+		}
+		if cfg.Auth.LoginRateLimitWindowMinutes > 0 {
+			loginWindow = time.Duration(cfg.Auth.LoginRateLimitWindowMinutes) * time.Minute
+		}
+	}
+	r.POST("/auth/login", middleware.LoginRateLimit(redisClient, loginMax, loginWindow), handler.Login)
 	r.POST("/auth/auto-setup", handler.AutoSetup)
 	r.GET("/auth/config", handler.GetAuthConfig)
 	r.POST("/auth/switch-tenant", handler.SwitchTenant)

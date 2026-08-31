@@ -203,17 +203,22 @@
               label-align="top">
               <t-form-item :label="$t('auth.email')" name="email">
                 <t-input v-model="formData.email" :placeholder="$t('auth.emailPlaceholder')" type="text"
-                  autocomplete="email" size="large" :disabled="loading" />
+                  autocomplete="email" size="large" :disabled="loading || loginLocked" />
               </t-form-item>
 
               <t-form-item :label="$t('auth.password')" name="password">
                 <t-input v-model="formData.password" :placeholder="$t('auth.passwordPlaceholder')" type="password"
-                  autocomplete="current-password" size="large" :disabled="loading" @enter="handleLogin" />
+                  autocomplete="current-password" size="large" :disabled="loading || loginLocked" @enter="handleLogin" />
               </t-form-item>
 
-              <t-button type="submit" theme="primary" size="large" block :loading="loading" class="submit-button">
-                {{ loading ? $t('auth.loggingIn') : $t('auth.login') }}
+              <t-button type="submit" theme="primary" size="large" block :loading="loading" :disabled="loginLocked" class="submit-button">
+                {{ loading ? $t('auth.loggingIn') : (loginLocked ? $t('auth.loginRetryCountdown', { seconds: loginRetryAfterSeconds }) : $t('auth.login')) }}
               </t-button>
+
+              <div v-if="loginLocked" class="login-rate-limit-notice" role="alert" aria-live="polite">
+                <t-icon name="time" />
+                <span>{{ $t('auth.loginRateLimited', { seconds: loginRetryAfterSeconds }) }}</span>
+              </div>
 
               <div class="register-cta" v-if="registrationEnabled">
                 <div class="register-cta__divider">
@@ -418,6 +423,29 @@ const oidcProviderName = ref('')
 // link is visible; the actual mode is fetched from /auth/config in onMounted.
 // In invite_only mode the link/card are hidden.
 const registrationEnabled = ref(true)
+const loginRetryAfterSeconds = ref(0)
+let loginRetryTimer: ReturnType<typeof setInterval> | undefined
+const loginLocked = computed(() => loginRetryAfterSeconds.value > 0)
+
+const clearLoginRetryTimer = () => {
+  if (loginRetryTimer) {
+    clearInterval(loginRetryTimer)
+    loginRetryTimer = undefined
+  }
+}
+
+const startLoginRetryCountdown = (retryAfter: string | number | undefined) => {
+  const seconds = Number.parseInt(String(retryAfter), 10)
+  loginRetryAfterSeconds.value = Number.isFinite(seconds) && seconds > 0 ? seconds : 60
+  clearLoginRetryTimer()
+  loginRetryTimer = setInterval(() => {
+    loginRetryAfterSeconds.value -= 1
+    if (loginRetryAfterSeconds.value <= 0) {
+      loginRetryAfterSeconds.value = 0
+      clearLoginRetryTimer()
+    }
+  }, 1000)
+}
 
 // invite-link state. When the URL carries ?token=xxx we resolve it to
 // the originating tenant + role and switch the form into a "register
@@ -546,6 +574,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
+  clearLoginRetryTimer()
 })
 
 const persistLoginResponse = async (response: any, skipRedirect = false) => {
@@ -673,6 +702,7 @@ const acceptAndEnter = async (token: string) => {
 
 // Handle login
 const handleLogin = async () => {
+  if (loginLocked.value) return
   try {
     const valid = await formRef.value?.validate()
     if (valid !== true) return
@@ -694,6 +724,10 @@ const handleLogin = async () => {
       await persistLoginResponse(response)
       notifyLoginSuccess(response, t, tm, formatRole, roleIcon)
     } else {
+      if (response.status === 429) {
+        startLoginRetryCountdown(response.retryAfter)
+        return
+      }
       MessagePlugin.error(response.message || t('auth.loginError'))
     }
   } catch (error: any) {
@@ -1541,6 +1575,20 @@ onMounted(async () => {
   font-weight: 500;
   font-family: var(--app-font-family);
   margin: 20px 0 16px 0;
+}
+
+.login-rate-limit-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  color: var(--td-error-color-7);
+  background: var(--td-error-color-1);
+  border: 1px solid var(--td-error-color-3);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 20px;
 }
 
 .oidc-divider {

@@ -4545,6 +4545,8 @@ export default {
     passwordMismatch: '두 비밀번호가 일치하지 않습니다',
     loginError: '로그인 오류, 이메일 또는 비밀번호를 확인해주세요',
     loginErrorRetry: '로그인 오류, 나중에 다시 시도해주세요',
+    loginRateLimited: '로그인 시도가 너무 많습니다. {seconds}초 후에 다시 시도하세요.',
+    loginRetryCountdown: '{seconds}초 후 재시도',
     registerError: '가입 오류, 나중에 다시 시도해주세요',
     workspaceOnboarding: {
       title: '작업 공간 선택',

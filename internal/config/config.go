@@ -280,6 +280,13 @@ type AuthConfig struct {
 	// tenantless creates only the identity and waits for an invitation or an
 	// explicit self-service tenant creation.
 	DefaultTenantMode string `yaml:"default_tenant_mode" json:"default_tenant_mode"`
+	// LoginRateLimitMax is the maximum number of password-login requests that
+	// one client IP may make during LoginRateLimitWindowMinutes. It is enabled by
+	// default to bound online password guessing.
+	LoginRateLimitMax int `yaml:"login_rate_limit_max" json:"login_rate_limit_max"`
+	// LoginRateLimitWindowMinutes is the rolling window for
+	// LoginRateLimitMax, expressed in whole minutes.
+	LoginRateLimitWindowMinutes int `yaml:"login_rate_limit_window_minutes" json:"login_rate_limit_window_minutes"`
 }
 
 // AuthRegistrationMode constants used by handlers and middleware.
@@ -637,6 +644,12 @@ func ValidateConfig(cfg *Config) error {
 			errs = append(errs, fmt.Sprintf("auth.default_tenant_mode must be %q or %q, got %q",
 				AuthDefaultTenantModeCreatePersonal, AuthDefaultTenantModeTenantless, tenantMode))
 		}
+		if cfg.Auth.LoginRateLimitMax < 0 {
+			errs = append(errs, "auth.login_rate_limit_max must be >= 0")
+		}
+		if cfg.Auth.LoginRateLimitWindowMinutes < 0 {
+			errs = append(errs, "auth.login_rate_limit_window_minutes must be >= 0")
+		}
 	}
 
 	if cfg.Audit != nil && cfg.Audit.RetentionDays < 0 {
@@ -849,6 +862,12 @@ func applyAuthAndTenantDefaults(cfg *Config) {
 	}
 	if strings.TrimSpace(cfg.Auth.DefaultTenantMode) == "" {
 		cfg.Auth.DefaultTenantMode = AuthDefaultTenantModeCreatePersonal
+	}
+	if cfg.Auth.LoginRateLimitMax == 0 {
+		cfg.Auth.LoginRateLimitMax = 10
+	}
+	if cfg.Auth.LoginRateLimitWindowMinutes == 0 {
+		cfg.Auth.LoginRateLimitWindowMinutes = 10
 	}
 
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_ENABLE_RBAC")); value != "" {
