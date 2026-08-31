@@ -102,6 +102,8 @@ curl $BASE/api/v1/auth/config
 
 响应：200，同 Login。
 
+换签成功后服务端会把目标空间记入「最近活跃租户」偏好，下次登录（密码/OIDC/换设备）自动回到该空间，客户端无需再补发 `PUT /auth/me/preferences` 请求。
+
 ```bash
 curl -X POST $BASE/api/v1/auth/switch-tenant -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"tenant_id":2}'

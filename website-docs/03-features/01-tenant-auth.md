@@ -310,7 +310,7 @@ refreshClaims := jwt.MapClaims{
 3. 查 `auth_tokens` 表检查 `IsRevoked`（登出 = 撤销记录）；
 4. 从 claims 提取 `user_id` 加载用户、`tenant_id` 作为激活租户。
 
-**租户切换即换发 token**：`SwitchTenant` 校验目标租户的 active 成员资格（跨租户超级用户除外）后，签发携带新 `tenant_id` claim 的新 token 对，并尽力撤销旧 refresh token。
+**租户切换即换发 token**：`SwitchTenant` 校验目标租户的 active 成员资格（跨租户超级用户除外）后，签发携带新 `tenant_id` claim 的新 token 对，并 best-effort 撤销旧 refresh token。换签成功后还会把目标空间记入「最近活跃租户」偏好（`Preferences.LastActiveTenantID`），下次登录即落在最近激活的空间。
 
 ## 4. API Key 体系
 
