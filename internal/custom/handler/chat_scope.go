@@ -10,9 +10,10 @@ import (
 )
 
 type ChatScopeHandler struct {
-	db      *gorm.DB
-	kbID    string
-	agentID string
+	db       *gorm.DB
+	kbID     string
+	agentID  string
+	tenantID string
 }
 
 type ChatScopeResponse struct {
@@ -21,17 +22,26 @@ type ChatScopeResponse struct {
 	VideoTitle       string            `json:"video_title,omitempty"`
 	VideoCoverURL    string            `json:"video_cover_url,omitempty"`
 	AgentID          string            `json:"agent_id,omitempty"`
+	TenantID         string            `json:"tenant_id,omitempty"`
 	KnowledgeBaseIDs []string          `json:"knowledge_base_ids"`
 	KnowledgeIDs     []string          `json:"knowledge_ids"`
 	SessionMeta      map[string]string `json:"session_meta"`
 }
 
-func NewChatScopeHandler(db *gorm.DB, kbID, agentID string) *ChatScopeHandler {
+func NewChatScopeHandler(db *gorm.DB, kbID, agentID, tenantID string) *ChatScopeHandler {
 	return &ChatScopeHandler{
-		db:      db,
-		kbID:    strings.TrimSpace(kbID),
-		agentID: strings.TrimSpace(agentID),
+		db:       db,
+		kbID:     strings.TrimSpace(kbID),
+		agentID:  strings.TrimSpace(agentID),
+		tenantID: strings.TrimSpace(tenantID),
 	}
+}
+
+func (h *ChatScopeHandler) sessionMeta(values map[string]string) map[string]string {
+	if h.tenantID != "" {
+		values["tenant_id"] = h.tenantID
+	}
+	return values
 }
 
 func (h *ChatScopeHandler) Global(c *gin.Context) {
@@ -42,11 +52,12 @@ func (h *ChatScopeHandler) Global(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": ChatScopeResponse{
 		Scope:            "global",
 		AgentID:          h.agentID,
+		TenantID:         h.tenantID,
 		KnowledgeBaseIDs: []string{h.kbID},
 		KnowledgeIDs:     []string{},
-		SessionMeta: map[string]string{
+		SessionMeta: h.sessionMeta(map[string]string{
 			"scope": "global",
-		},
+		}),
 	}})
 }
 
@@ -83,14 +94,15 @@ func (h *ChatScopeHandler) Video(c *gin.Context) {
 		VideoTitle:       video.Title,
 		VideoCoverURL:    video.ThumbnailURL,
 		AgentID:          h.agentID,
+		TenantID:         h.tenantID,
 		KnowledgeBaseIDs: []string{h.kbID},
 		KnowledgeIDs:     knowledgeIDs,
-		SessionMeta: map[string]string{
+		SessionMeta: h.sessionMeta(map[string]string{
 			"scope":           "video",
 			"video_id":        video.ID,
 			"video_title":     video.Title,
 			"video_cover_url": video.ThumbnailURL,
-		},
+		}),
 	}})
 }
 

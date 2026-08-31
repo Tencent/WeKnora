@@ -224,6 +224,7 @@ export interface ChatSession {
   time: string
   messages: ChatMessage[]
   scope?: 'global' | 'video'
+  tenantId?: string
   videoId?: string
   videoTitle?: string
   videoCoverUrl?: string

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { buildChatRequest, normalizeChatError } from './chatRequest'
+import { appendSelectedTenantHeader } from '../../utils/tenantHeaders'
 import { displayQuestionFromStoredContent, mergeLocalTurnWithStoredMessages, parseWeKnoraStreamChunk } from './chatStream'
 
 test('shows only the user question when a video-scoped prompt is loaded from WeKnora history', () => {
@@ -104,4 +106,45 @@ test('treats SSE DONE marker as completion', () => {
     kind: 'complete',
     done: true,
   })
+})
+
+test('uses the configured resource tenant for Agent requests', () => {
+  const request = buildChatRequest(
+    {
+      scope: 'global',
+      agent_id: 'agent-1',
+      knowledge_base_ids: ['kb-1'],
+      knowledge_ids: [],
+      tenant_id: '10000',
+    },
+    '请介绍一下视频内容',
+    'jwt-token',
+    '10003',
+  )
+
+  assert.equal(request.headers.Authorization, 'Bearer jwt-token')
+  assert.equal(request.headers['X-Tenant-ID'], '10000')
+  assert.equal(request.body.agent_id, 'agent-1')
+  assert.equal(request.body.agent_enabled, true)
+})
+
+test('preserves an explicit tenant header instead of replacing it with the selected tenant', () => {
+  const headers = { 'X-Tenant-ID': '10000' }
+  appendSelectedTenantHeader(headers, '10003')
+  assert.equal(headers['X-Tenant-ID'], '10000')
+
+  const lowerCaseHeaders = { 'x-tenant-id': '10000' }
+  appendSelectedTenantHeader(lowerCaseHeaders, '10003')
+  assert.equal(lowerCaseHeaders['x-tenant-id'], '10000')
+
+  const emptyHeaders: Record<string, string> = {}
+  appendSelectedTenantHeader(emptyHeaders, '10003')
+  assert.equal(emptyHeaders['X-Tenant-ID'], '10003')
+})
+
+test('turns a workspace permission failure into an actionable chat error', () => {
+  assert.equal(
+    normalizeChatError({ status: 403, message: 'forbidden' }).message,
+    '当前账号没有访问视频知识库所属工作空间的权限，请联系管理员加入该工作空间',
+  )
 })

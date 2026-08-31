@@ -3,6 +3,7 @@ import axios from "axios";
 import { generateRandomString, MAX_FILE_SIZE_MB } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
+import { appendSelectedTenantHeader } from './tenantHeaders';
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -55,7 +56,7 @@ instance.interceptors.request.use(
     if (!isEmbedAuth && !isEmbedPath) {
       const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
       if (selectedTenantId) {
-        config.headers["X-Tenant-ID"] = selectedTenantId;
+        appendSelectedTenantHeader(config.headers, selectedTenantId);
       }
     }
     

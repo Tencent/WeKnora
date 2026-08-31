@@ -3,17 +3,12 @@ import { get, post } from '@/utils/request'
 import { getApiBaseUrl } from '@/utils/api-base'
 import type { ChatMessage, ChatSession, EvidenceLink, VideoData } from '@/types/videohub'
 import { displayQuestionFromStoredContent, mergeLocalTurnWithStoredMessages, parseWeKnoraStreamChunk } from './chatStream'
+import { buildChatRequest, normalizeChatError, normalizeTenantId, type ChatRequestScope } from './chatRequest'
 
-type ChatScope = 'global' | 'video'
-
-interface ScopeResponse {
-  scope: ChatScope
+interface ScopeResponse extends ChatRequestScope {
   video_id?: string
   video_title?: string
   video_cover_url?: string
-  agent_id?: string
-  knowledge_base_ids: string[]
-  knowledge_ids: string[]
   session_meta: Record<string, string>
 }
 
@@ -223,12 +218,20 @@ async function createSession(question: string, scope: ScopeResponse): Promise<We
   const res = await post<ApiEnvelope<WeKnoraSession>>('/api/v1/sessions', {
     title,
     description: sessionDescription(scope.session_meta || { scope: scope.scope }),
-  })
+  }, tenantRequestConfig(scope.tenant_id))
   return unwrapData(res)
 }
 
-async function loadSessionMessages(sessionID: string): Promise<WeKnoraMessage[]> {
-  const res = await get<ApiEnvelope<WeKnoraMessage[]>>(`/api/v1/messages/${sessionID}/load?limit=100`)
+function tenantRequestConfig(tenantID?: string | number | null) {
+  const normalized = normalizeTenantId(tenantID)
+  return normalized ? { headers: { 'X-Tenant-ID': normalized } } : undefined
+}
+
+async function loadSessionMessages(sessionID: string, tenantID?: string | number | null): Promise<WeKnoraMessage[]> {
+  const res = await get<ApiEnvelope<WeKnoraMessage[]>>(
+    `/api/v1/messages/${sessionID}/load?limit=100`,
+    tenantRequestConfig(tenantID),
+  )
   return unwrapData(res) || []
 }
 
@@ -405,7 +408,12 @@ async function streamAnswer(sessionID: string, question: string, scope: ScopeRes
   const token = localStorage.getItem('weknora_token')
   if (!token) throw new Error('登录已失效，请重新登录后再提问')
   const apiBase = getApiBaseUrl()
-  const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id')
+  const request = buildChatRequest(
+    scope,
+    questionForScope(question, scope),
+    token,
+    localStorage.getItem('weknora_selected_tenant_id'),
+  )
   let answer = ''
   let thinkingText = ''
   let activityText = ''
@@ -432,26 +440,15 @@ async function streamAnswer(sessionID: string, question: string, scope: ScopeRes
   await fetchEventSource(`${apiBase}/api/v1/${endpoint}/${sessionID}`, {
     method: 'POST',
     signal: streamController.signal,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...(selectedTenantId ? { 'X-Tenant-ID': selectedTenantId } : {}),
-    },
-    body: JSON.stringify({
-      query: questionForScope(question, scope),
-      knowledge_base_ids: scope.knowledge_base_ids,
-      // Video scope deliberately leaves knowledge_ids empty so the agent can
-      // fall back to other global knowledge when the current video is not
-      // sufficient.
-      ...(scope.scope === 'global' || !scope.agent_id ? { knowledge_ids: scope.knowledge_ids } : {}),
-      agent_enabled: Boolean(scope.agent_id),
-      ...(scope.agent_id ? { agent_id: scope.agent_id } : {}),
-      disable_title: true,
-      channel: 'web',
-    }),
+    headers: request.headers,
+    body: JSON.stringify(request.body),
     openWhenHidden: true,
     onopen: async response => {
-      if (!response.ok) throw new Error(`问答请求失败：HTTP ${response.status}`)
+      if (!response.ok) {
+        const error = new Error(`问答请求失败：HTTP ${response.status}`) as Error & { status?: number }
+        error.status = response.status
+        throw error
+      }
     },
     onmessage: event => {
       const payload = parseStreamPayload(event.data)
@@ -515,8 +512,12 @@ function cleanAnswer(text: string) {
     .trim()
 }
 
-async function hydrateLastAssistant(session: WeKnoraSession, fallbackText: string): Promise<ChatMessage> {
-  const messages = await loadSessionMessages(session.id)
+async function hydrateLastAssistant(
+  session: WeKnoraSession,
+  fallbackText: string,
+  tenantID?: string | number | null,
+): Promise<ChatMessage> {
+  const messages = await loadSessionMessages(session.id, tenantID)
   const mapped = await mapMessages(messages)
   const assistant = [...mapped].reverse().find(message => message.sender === 'assistant' && message.text.trim())
   return assistant || { id: messageId(), sender: 'assistant', text: fallbackText, timestamp: nowLabel() }
@@ -530,6 +531,7 @@ function sessionFromScope(session: WeKnoraSession, scope: ScopeResponse, message
     time: formatRelativeTime(session.updated_at || session.created_at) || '刚刚',
     messages,
     scope: scope.scope,
+    tenantId: normalizeTenantId(scope.tenant_id) || undefined,
     videoId: scope.video_id,
     videoTitle: scope.video_title,
     videoCoverUrl: scope.video_cover_url,
@@ -537,57 +539,84 @@ function sessionFromScope(session: WeKnoraSession, scope: ScopeResponse, message
 }
 
 export async function fetchSessions(): Promise<ChatSession[]> {
-  const res = await get<ApiEnvelope<WeKnoraSession[]>>('/api/v1/sessions?page=1&page_size=20')
-  return (unwrapData(res) || []).filter(isVideohubSession).map(session => {
-    const meta = parseSessionMeta(session.description)
-    const scope = meta.scope === 'video' ? 'video' : 'global'
-    return {
-      id: session.id,
-      title: session.title || '未命名会话',
-      type: scope === 'video' ? 'video' : 'chat',
-      time: formatRelativeTime(session.updated_at || session.created_at),
-      messages: [],
-      scope,
-      videoId: meta.video_id,
-      videoTitle: meta.video_title,
-      videoCoverUrl: meta.video_cover_url,
-    }
-  })
+  try {
+    const scope = await getScope({ globalMode: true })
+    const res = await get<ApiEnvelope<WeKnoraSession[]>>(
+      '/api/v1/sessions?page=1&page_size=20',
+      tenantRequestConfig(scope.tenant_id),
+    )
+    const resourceTenantId = normalizeTenantId(scope.tenant_id) || undefined
+    return (unwrapData(res) || []).filter(isVideohubSession).map(session => {
+      const meta = parseSessionMeta(session.description)
+      const sessionTenantId = normalizeTenantId(meta.tenant_id) || resourceTenantId
+      const scopeType = meta.scope === 'video' ? 'video' : 'global'
+      return {
+        id: session.id,
+        title: session.title || '未命名会话',
+        type: scopeType === 'video' ? 'video' : 'chat',
+        time: formatRelativeTime(session.updated_at || session.created_at),
+        messages: [],
+        scope: scopeType,
+        tenantId: sessionTenantId,
+        videoId: meta.video_id,
+        videoTitle: meta.video_title,
+        videoCoverUrl: meta.video_cover_url,
+      }
+    })
+  } catch (error) {
+    throw normalizeChatError(error)
+  }
 }
 
 export async function loadChatSession(session: ChatSession): Promise<ChatSession> {
-  const messages = await mapMessages(await loadSessionMessages(session.id))
-  return { ...session, messages }
+  try {
+    const tenantID = normalizeTenantId(session.tenantId)
+      || normalizeTenantId((await getScope({ globalMode: true })).tenant_id)
+    const messages = await mapMessages(await loadSessionMessages(session.id, tenantID))
+    return { ...session, tenantId: tenantID || undefined, messages }
+  } catch (error) {
+    throw normalizeChatError(error)
+  }
 }
 
 export async function sendChatMessage(question: string, options: SendOptions = {}): Promise<ChatMessage> {
-  const scope = await getScope(options)
-  const session = await createSession(question, scope)
-  const { answer } = await streamAnswer(session.id, question, scope, { onChunk: options.onStreamMessage })
-  const assistant = await hydrateLastAssistant(session, answer)
-  options.onMessage?.(assistant)
-  return assistant
+  try {
+    const scope = await getScope(options)
+    const session = await createSession(question, scope)
+    const { answer } = await streamAnswer(session.id, question, scope, { onChunk: options.onStreamMessage })
+    const assistant = await hydrateLastAssistant(session, answer, scope.tenant_id)
+    options.onMessage?.(assistant)
+    return assistant
+  } catch (error) {
+    throw normalizeChatError(error)
+  }
 }
 
 export async function createChatTurn(question: string, options: TurnOptions = {}): Promise<ChatSession> {
-  const scope = await getScope(options)
-  const session = options.session?.id && !options.session.id.startsWith('pending-')
-    ? {
-      id: options.session.id,
-      title: options.session.title,
-      created_at: undefined,
-      updated_at: undefined,
+  try {
+    const scope = await getScope(options)
+    const tenantID = normalizeTenantId(options.session?.tenantId) || normalizeTenantId(scope.tenant_id)
+    const effectiveScope = tenantID && !scope.tenant_id ? { ...scope, tenant_id: tenantID } : scope
+    const session = options.session?.id && !options.session.id.startsWith('pending-')
+      ? {
+        id: options.session.id,
+        title: options.session.title,
+        created_at: undefined,
+        updated_at: undefined,
+      }
+      : await createSession(question, effectiveScope)
+    if (!options.session?.id || options.session.id.startsWith('pending-')) {
+      options.onSessionCreated?.(sessionFromScope(session, effectiveScope, [], question))
     }
-    : await createSession(question, scope)
-  if (!options.session?.id || options.session.id.startsWith('pending-')) {
-    options.onSessionCreated?.(sessionFromScope(session, scope, [], question))
+    const userMessage: ChatMessage = { id: messageId(), sender: 'user', text: question, timestamp: nowLabel() }
+    options.onMessage?.(userMessage)
+    const { answer, streamMessage } = await streamAnswer(session.id, question, effectiveScope, { onChunk: options.onStreamMessage })
+    const messages = await mapMessages(await loadSessionMessages(session.id, tenantID))
+    const finalMessages = mergeLocalTurnWithStoredMessages(messages, userMessage, { ...streamMessage, id: messageId(), text: answer, timestamp: nowLabel() })
+    return sessionFromScope(session, effectiveScope, finalMessages, question)
+  } catch (error) {
+    throw normalizeChatError(error)
   }
-  const userMessage: ChatMessage = { id: messageId(), sender: 'user', text: question, timestamp: nowLabel() }
-  options.onMessage?.(userMessage)
-  const { answer, streamMessage } = await streamAnswer(session.id, question, scope, { onChunk: options.onStreamMessage })
-  const messages = await mapMessages(await loadSessionMessages(session.id))
-  const finalMessages = mergeLocalTurnWithStoredMessages(messages, userMessage, { ...streamMessage, id: messageId(), text: answer, timestamp: nowLabel() })
-  return sessionFromScope(session, scope, finalMessages, question)
 }
 
 export async function sendAssistantQuery(question: string, currentVideo: VideoData, currentTime: number, globalMode = false): Promise<ChatMessage> {

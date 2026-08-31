@@ -203,7 +203,7 @@ func buildRouter(deps *Deps) *gin.Engine {
 	vh := NewVideoHandler(deps.DB)
 	api.GET("/videos", vh.List)
 	api.GET("/videos/:id", vh.Detail)
-	chatScope := NewChatScopeHandler(deps.DB, deps.Cfg.WeKnora.KBID, deps.Cfg.WeKnora.AgentID)
+	chatScope := NewChatScopeHandler(deps.DB, deps.Cfg.WeKnora.KBID, deps.Cfg.WeKnora.AgentID, deps.Cfg.WeKnora.TenantID)
 	api.GET("/chat/scope/global", chatScope.Global)
 	chatEvidence := NewChatEvidenceHandler(deps.DB)
 	api.GET("/chat/evidence", chatEvidence.Lookup)
