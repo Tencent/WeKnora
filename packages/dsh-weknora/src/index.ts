@@ -17,6 +17,8 @@ export const inject = ['tools'] as const
 export type { Config } from './config.ts'
 export { ConfigError, normalizeBaseUrl, resolveConfig } from './config.ts'
 export { WeknoraApiError, WeknoraClient } from './client.ts'
+export { clip, collectImages, formatImagesMarkdown } from './render.ts'
+export type { ImageRef } from './render.ts'
 export { createTools } from './tools.ts'
 
 /**

@@ -25,6 +25,7 @@ Then point it at your deployment. The shipped configuration layer reads environm
 export WEKNORA_BASE_URL=https://weknora.example.com   # or http://localhost:8080
 export WEKNORA_API_KEY=sk-...                          # a WeKnora API key with `retrieve` (+ `chat` for ask)
 export WEKNORA_KNOWLEDGE_BASE_IDS=kb-123,kb-456        # optional default scope
+export WEKNORA_RESOURCE_URLS=public                    # default; `handle` keeps internal file refs
 dsh web
 ```
 
@@ -43,7 +44,7 @@ For anything beyond that, override the row from your profile's `cordis.patch.yml
     maxChunkChars: 1200
     requestTimeoutMs: 30000
     chatTimeoutMs: 300000
-    resourceUrls: handle   # `public` asks WeKnora for directly loadable file URLs in citations
+    resourceUrls: handle   # default is `public` so cited images are directly loadable; `handle` keeps internal refs
     toolPrefix: weknora    # rename the tools, e.g. to mount two deployments side by side
     tools:
       listKnowledgeBases: true
@@ -72,9 +73,9 @@ Mounting two deployments is two rows with two prefixes:
 | Tool | WeKnora endpoint | What the model gets |
 |---|---|---|
 | `weknora_list_knowledge_bases` | `GET /knowledge-bases` | Knowledge base names and ids, to report what exists or to narrow a later search |
-| `weknora_search` | `POST /knowledge-search` + `GET /knowledge/search` | Ranked passages verbatim, each with a `knowledge_id`, score and chunk index, plus any document the query names |
-| `weknora_read_document` | `GET /chunks/:knowledge_id` + `GET /knowledge/:id` | One document's passages reassembled in order, led by its title and summary, with paging |
-| `weknora_ask` | `POST /sessions` + `POST /knowledge-chat/:id` or `POST /agent-chat/:id` | WeKnora's own answer, its citations, the server-side tools it used, and a resumable `session_id` |
+| `weknora_search` | `POST /knowledge-search` + `GET /knowledge/search` | Ranked passages verbatim, each with a `knowledge_id`, score, chunk index and any cited figures as Markdown images, plus any document the query names |
+| `weknora_read_document` | `GET /chunks/:knowledge_id` + `GET /knowledge/:id` | One document's passages reassembled in order, led by its title and summary, with paging and figures |
+| `weknora_ask` | `POST /sessions` + `POST /knowledge-chat/:id` or `POST /agent-chat/:id` | WeKnora's own answer, its citations and figures, the server-side tools it used, and a resumable `session_id` |
 
 `weknora_search` is the workhorse: it returns the source text for the agent to reason over, which keeps the agent's own
 reasoning auditable. It answers two questions the model cannot always tell apart — *where is this discussed* and *where
@@ -110,7 +111,13 @@ The key is sent as `X-API-Key`. Set `tenantId` as well if you use a platform-sco
 select a workspace. Errors are reported with the HTTP status and WeKnora's own reason, never with the key.
 
 Passage content is clipped to `maxChunkChars` before it reaches the model, so one oversized document cannot eat the
-context window. The clip is reported to the model (`truncated: true`) instead of silently hiding text.
+context window. The clip is reported to the model (`truncated: true`) instead of silently hiding text. Figures cited
+in a passage are restored after the clip as Markdown images (`![caption](url)`), so a truncated URL never reaches the
+model. With the default `resourceUrls: public`, those URLs are directly loadable `http(s)` links — copy them into the
+assistant reply and the dsh web UI will render the picture. A knowledge-base-restricted API key cannot receive public
+URLs (WeKnora answers 403); the plugin retries that call in handle mode and keeps using handles afterwards.
+
+The shipped configuration layer also reads `WEKNORA_RESOURCE_URLS` (`public` or `handle`).
 
 ## Configuration reference
 
@@ -125,7 +132,7 @@ context window. The clip is reported to the model (`truncated: true`) instead of
 | `maxChunkChars` | `1200` | Per-passage character budget |
 | `requestTimeoutMs` | `30000` | Retrieval and document reads |
 | `chatTimeoutMs` | `300000` | `weknora_ask`, which waits on WeKnora's own model calls |
-| `resourceUrls` | `handle` | `public` returns directly loadable file URLs |
+| `resourceUrls` | `public` | `public` returns directly loadable file URLs; `handle` keeps internal `resource://` refs. A knowledge-base-restricted API key is retried as `handle`. Override with `WEKNORA_RESOURCE_URLS`. |
 | `toolPrefix` | `weknora` | Tool-name prefix, `^[a-z][a-z0-9_]*$` |
 | `tools.*` | all `true` | Register fewer tools to spend fewer prompt tokens |
 

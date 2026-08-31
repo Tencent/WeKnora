@@ -6,7 +6,7 @@ import { resolveConfig } from '../dist/config.js'
 import { apply } from '../dist/index.js'
 import { createTools } from '../dist/tools.js'
 import { assertLosslessJson, assertSupportedSchema, validate } from './helpers/json-schema.mjs'
-import { startMockWeknora } from './helpers/mock-weknora.mjs'
+import { startMockWeknora, ARCH_PUBLIC } from './helpers/mock-weknora.mjs'
 
 const never = new AbortController().signal
 const exec = { signal: never }
@@ -335,4 +335,40 @@ test('apply registers into ctx.tools and honours the prefix and toggles', () => 
 test('apply fails the plugin load on an invalid row', () => {
   const ctx = { tools: { register: () => () => undefined } }
   assert.throws(() => apply(ctx, { baseUrl: 'ftp://kb.example.com' }), /dsh-weknora configuration is invalid/)
+})
+
+test('search returns cited figures as loadable Markdown images', async () => {
+  const { byName } = await toolset({ knowledgeBaseIds: ['kb-product'] })
+  const { value, text } = await call(byName.get('weknora_search'), { query: '系统架构图' })
+  const hit = value.results.find(result => result.knowledge_id === 'doc-architecture')
+  assert.ok(hit, 'the architecture document must be in the ranked hits')
+  assert.equal(hit.images[0].url, ARCH_PUBLIC)
+  assert.equal(hit.images[0].caption, '系统架构')
+  assert.ok(text.includes(`![系统架构](${ARCH_PUBLIC})`))
+  assert.match(text, /\*\*Image caption:\*\* 系统架构/)
+})
+
+test('read_document includes figures from image_info', async () => {
+  const { byName } = await toolset({ maxChunkChars: 4000 })
+  const { value, text } = await call(byName.get('weknora_read_document'), {
+    knowledge_id: 'doc-architecture',
+  })
+  assert.equal(value.images[0].url, ARCH_PUBLIC)
+  assert.match(text, /!\[系统架构\]/)
+  assert.match(text, /cdn\.example\.com\/architecture\.png/)
+})
+
+test('ask surfaces figures from the answer and its citations', async () => {
+  const { byName } = await toolset({ knowledgeBaseIds: ['kb-product'] })
+  const { value, text } = await call(byName.get('weknora_ask'), { query: '系统架构图长什么样' })
+  assert.ok(value.images.some(image => image.url === ARCH_PUBLIC))
+  assert.match(text, /!\[系统架构\]/)
+  assert.match(text, /cdn\.example\.com\/architecture\.png/)
+})
+
+test('handle mode keeps internal resource handles instead of public URLs', async () => {
+  const { byName } = await toolset({ knowledgeBaseIds: ['kb-product'], resourceUrls: 'handle' })
+  const { value } = await call(byName.get('weknora_search'), { query: '系统架构图' })
+  const hit = value.results.find(result => result.knowledge_id === 'doc-architecture')
+  assert.match(hit.images[0].url, /^resource:\/\//)
 })

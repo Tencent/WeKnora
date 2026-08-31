@@ -3,7 +3,32 @@
 import type { ChunkRecord, DocumentRecord, SearchResult, WeknoraClient } from './client.ts'
 import type { ResolvedConfig } from './config.ts'
 import type { JsonSchemaNode, TextContentBlock, ToolDefinition } from './harness.ts'
-import { clip, describeScope, formatScore } from './render.ts'
+import {
+  appendImages,
+  clip,
+  clipPassage,
+  collectContentImages,
+  collectImages,
+  describeScope,
+  formatScore,
+  mergeImages,
+  type ImageRef,
+} from './render.ts'
+
+const IMAGE_ITEM: JsonSchemaNode = {
+  type: 'object',
+  properties: {
+    url: { type: 'string' },
+    caption: { type: 'string' },
+    ocr_text: { type: 'string' },
+  },
+  required: ['url', 'caption', 'ocr_text'],
+  additionalProperties: false,
+}
+const IMAGE_ARRAY: JsonSchemaNode = { type: 'array', items: IMAGE_ITEM }
+
+/** Cap figures on a composed answer so one illustrated document cannot flood the turn. */
+const MAX_ANSWER_IMAGES = 16
 
 /** A retrieval hit projected onto the fields the model and follow-up calls need. */
 interface SearchHit {
@@ -15,6 +40,7 @@ interface SearchHit {
   score: number
   content: string
   truncated: boolean
+  images: ImageRef[]
 }
 
 /** A document whose name matched, which passage retrieval alone would miss. */
@@ -49,6 +75,7 @@ interface DocumentValue {
   has_more: boolean
   truncated: boolean
   content: string
+  images: ImageRef[]
 }
 
 interface AskValue {
@@ -56,7 +83,14 @@ interface AskValue {
   session_id: string
   pipeline: 'rag' | 'agent'
   tool_calls: string[]
-  references: { knowledge_id: string, document: string, chunk_index: number, content: string }[]
+  images: ImageRef[]
+  references: {
+    knowledge_id: string
+    document: string
+    chunk_index: number
+    content: string
+    images: ImageRef[]
+  }[]
 }
 
 const text = (value: string): TextContentBlock[] => [{ type: 'text', text: value }]
@@ -103,7 +137,9 @@ function documentLabel(result: SearchResult): string {
 }
 
 function projectHit(result: SearchResult, rank: number, maxChunkChars: number): SearchHit {
-  const clipped = clip(typeof result.content === 'string' ? result.content : '', maxChunkChars)
+  const content = typeof result.content === 'string' ? result.content : ''
+  const images = collectImages(result)
+  const clipped = clipPassage(content, maxChunkChars)
   return {
     rank,
     chunk_id: typeof result.id === 'string' ? result.id : '',
@@ -114,6 +150,7 @@ function projectHit(result: SearchResult, rank: number, maxChunkChars: number): 
     score: typeof result.score === 'number' && Number.isFinite(result.score) ? result.score : 0,
     content: clipped.text,
     truncated: clipped.truncated,
+    images,
   }
 }
 
@@ -247,7 +284,8 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
         + 'retrieval, no model summarization). Use this to ground an answer in the organization\'s own documents, and '
         + 'also to locate a document by name — a query that reads like a title additionally returns the documents it '
         + 'names.' + scopeNote
-        + ` Every hit carries a knowledge_id you can pass to ${name('read_document')} for the full document.`,
+        + ` Every hit carries a knowledge_id you can pass to ${name('read_document')} for the full document.`
+        + ' Figures from the source document are Markdown images; copy them into your reply so the user can see them.',
       parameters: {
         type: 'object',
         properties: {
@@ -281,8 +319,12 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
                   score: { type: 'number' },
                   content: { type: 'string' },
                   truncated: { type: 'boolean' },
+                  images: IMAGE_ARRAY,
                 },
-                required: ['rank', 'chunk_id', 'knowledge_id', 'document', 'chunk_index', 'score', 'content', 'truncated'],
+                required: [
+                  'rank', 'chunk_id', 'knowledge_id', 'document', 'chunk_index',
+                  'score', 'content', 'truncated', 'images',
+                ],
                 additionalProperties: false,
               },
             },
@@ -321,7 +363,8 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
           }
           const blocks = result.results.map(hit =>
             `[${hit.rank}] ${hit.document} · score ${formatScore(hit.score)} · chunk ${hit.chunk_index} `
-            + `· knowledge_id: ${hit.knowledge_id}\n${hit.content}${hit.truncated ? '\n(passage truncated)' : ''}`)
+            + `· knowledge_id: ${hit.knowledge_id}\n`
+            + `${appendImages(hit.content, hit.images)}${hit.truncated ? '\n(passage truncated)' : ''}`)
           return text(`${result.count} passage(s) for "${result.query}" `
             + `(searched: ${describeScope(result.knowledge_base_ids)}):\n\n${blocks.join('\n\n')}${named}`)
         },
@@ -391,10 +434,11 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
             has_more: { type: 'boolean' },
             truncated: { type: 'boolean' },
             content: { type: 'string' },
+            images: IMAGE_ARRAY,
           },
           required: [
             'knowledge_id', 'title', 'summary', 'page', 'page_size',
-            'total_chunks', 'returned_chunks', 'has_more', 'truncated', 'content',
+            'total_chunks', 'returned_chunks', 'has_more', 'truncated', 'content', 'images',
           ],
           additionalProperties: false,
         },
@@ -411,7 +455,7 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
           const more = result.has_more ? `\n\n(more passages available: request page ${result.page + 1})` : ''
           const cut = result.truncated ? '\n(content truncated)' : ''
           return text(`Document ${label}, passages ${result.returned_chunks} of ${result.total_chunks} `
-            + `(page ${result.page}):${summary}\n\n${result.content}${cut}${more}`)
+            + `(page ${result.page}):${summary}\n\n${appendImages(result.content, result.images)}${cut}${more}`)
         },
       },
       async execute(args, exec): Promise<DocumentValue> {
@@ -431,7 +475,8 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
         ])
         const ordered = [...result.chunks].sort(orderByChunkIndex)
         const joined = ordered.map(chunk => typeof chunk.content === 'string' ? chunk.content : '').join('\n\n')
-        const clipped = clip(joined, config.maxChunkChars * Math.max(1, Math.min(ordered.length, 10)))
+        const images = mergeImages(...ordered.map(chunk => collectImages(chunk)))
+        const clipped = clipPassage(joined, config.maxChunkChars * Math.max(1, Math.min(ordered.length, 10)))
         const title = typeof metadata.title === 'string' && metadata.title.trim() !== ''
           ? metadata.title.trim()
           : typeof metadata.file_name === 'string' ? metadata.file_name.trim() : ''
@@ -446,6 +491,7 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
           has_more: result.page * result.pageSize < result.total,
           truncated: clipped.truncated,
           content: clipped.text,
+          images,
         }
       },
     })
@@ -459,7 +505,8 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
         + 'server-side: query rewriting, retrieval, reranking and summarization). Reserve it for broad or '
         + 'synthesis questions whose answer spans many documents, where retrieving passages yourself would take '
         + `several rounds. For anything you can answer from specific passages, prefer ${name('search')}: it is far `
-        + 'faster and leaves you the evidence to reason over rather than another model\'s conclusion.',
+        + 'faster and leaves you the evidence to reason over rather than another model\'s conclusion. '
+        + 'Cited figures are Markdown images; copy them into your reply so the user can see them.',
       parameters: {
         type: 'object',
         properties: {
@@ -481,6 +528,7 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
             session_id: { type: 'string' },
             pipeline: { type: 'string', enum: ['rag', 'agent'] },
             tool_calls: STRING_ARRAY,
+            images: IMAGE_ARRAY,
             references: {
               type: 'array',
               items: {
@@ -490,13 +538,14 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
                   document: { type: 'string' },
                   chunk_index: { type: 'integer' },
                   content: { type: 'string' },
+                  images: IMAGE_ARRAY,
                 },
-                required: ['knowledge_id', 'document', 'chunk_index', 'content'],
+                required: ['knowledge_id', 'document', 'chunk_index', 'content', 'images'],
                 additionalProperties: false,
               },
             },
           },
-          required: ['answer', 'session_id', 'pipeline', 'tool_calls', 'references'],
+          required: ['answer', 'session_id', 'pipeline', 'tool_calls', 'images', 'references'],
           additionalProperties: false,
         },
         render: (_args, value) => {
@@ -504,7 +553,7 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
           const parts: string[] = []
           parts.push(result.answer === ''
             ? 'WeKnora returned an empty answer. Retry with a more specific question, or retrieve passages instead.'
-            : result.answer)
+            : appendImages(result.answer, result.images))
           if (result.references.length > 0) {
             const cited = result.references.map((reference, index) =>
               `[${index + 1}] ${reference.document} · chunk ${reference.chunk_index} · knowledge_id: ${reference.knowledge_id}`)
@@ -535,17 +584,26 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
         const sessionId = optionalStringArg(args, 'session_id')
           ?? await client.createSession(`dsh: ${clip(query, 60).text}`, exec.signal)
         const streamed = await client.ask({ sessionId, query, knowledgeBaseIds, agentId, webSearch }, exec.signal)
+        const references = streamed.references.slice(0, config.maxResults).map(reference => {
+          const content = typeof reference.content === 'string' ? reference.content : ''
+          return {
+            knowledge_id: typeof reference.knowledge_id === 'string' ? reference.knowledge_id : '',
+            document: documentLabel(reference),
+            chunk_index: typeof reference.chunk_index === 'number' ? reference.chunk_index : -1,
+            content: clipPassage(content, config.maxChunkChars).text,
+            images: collectImages(reference),
+          }
+        })
         return {
           answer: streamed.answer.trim(),
           session_id: streamed.sessionId,
           pipeline: agentId === undefined ? 'rag' : 'agent',
           tool_calls: streamed.toolCalls,
-          references: streamed.references.slice(0, config.maxResults).map(reference => ({
-            knowledge_id: typeof reference.knowledge_id === 'string' ? reference.knowledge_id : '',
-            document: documentLabel(reference),
-            chunk_index: typeof reference.chunk_index === 'number' ? reference.chunk_index : -1,
-            content: clip(typeof reference.content === 'string' ? reference.content : '', config.maxChunkChars).text,
-          })),
+          images: mergeImages(
+            collectContentImages(streamed.answer),
+            ...references.map(reference => reference.images),
+          ).slice(0, MAX_ANSWER_IMAGES),
+          references,
         }
       },
     })

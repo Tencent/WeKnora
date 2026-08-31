@@ -21,6 +21,22 @@ const DOCUMENTS = [
     ],
   },
   {
+    knowledge_id: 'doc-architecture',
+    knowledge_title: '系统架构图.md',
+    knowledge_base_id: 'kb-product',
+    description: '检索与生成两层的系统架构示意图。',
+    chunks: [
+      {
+        content: '系统由检索与生成两层组成，整体结构见架构图。\n\n![系统架构](resource://AbCdEfGhIjKlMnOpQrStUv)',
+        image_info: JSON.stringify([{
+          url: 'resource://AbCdEfGhIjKlMnOpQrStUv',
+          caption: '系统架构',
+          ocr_text: 'Retriever → Rerank → LLM',
+        }]),
+      },
+    ],
+  },
+  {
     knowledge_id: 'doc-deployment',
     knowledge_title: 'WeKnora 部署手册.md',
     knowledge_base_id: 'kb-ops',
@@ -58,6 +74,23 @@ const KNOWLEDGE_BASES = [
   { id: 'kb-ops', name: 'Ops runbooks', description: '部署与运维手册' },
 ]
 
+const ARCH_HANDLE = 'resource://AbCdEfGhIjKlMnOpQrStUv'
+const ARCH_PUBLIC = 'https://cdn.example.com/architecture.png'
+
+function passageOf(chunk) {
+  return typeof chunk === 'string' ? chunk : chunk.content
+}
+
+function imageInfoOf(chunk) {
+  return typeof chunk === 'string' ? undefined : chunk.image_info
+}
+
+/** Mirror WeKnora's `resource_urls=public` rewrite of `resource://` handles. */
+function rewriteResources(value, publicMode) {
+  if (!publicMode) return value
+  return JSON.parse(JSON.stringify(value).replaceAll(ARCH_HANDLE, ARCH_PUBLIC))
+}
+
 /**
  * Score a passage by character-bigram overlap. The real backend scores with
  * embeddings plus keyword match; bigrams are enough to make the fixture rank
@@ -79,18 +112,23 @@ function searchResults(query, knowledgeBaseIds, knowledgeIds) {
     (knowledgeIds.length === 0 || knowledgeIds.includes(document.knowledge_id))
     && (knowledgeBaseIds.length === 0 || knowledgeBaseIds.includes(document.knowledge_base_id)))
   return documents
-    .flatMap(document => document.chunks.map((content, index) => ({
-      id: `${document.knowledge_id}-chunk-${index}`,
-      content,
-      knowledge_id: document.knowledge_id,
-      knowledge_title: document.knowledge_title,
-      chunk_index: index,
-      score: scoreOf(query, content),
-      match_type: 2,
-      start_at: 0,
-      end_at: content.length,
-      metadata: {},
-    })))
+    .flatMap(document => document.chunks.map((chunk, index) => {
+      const content = passageOf(chunk)
+      const imageInfo = imageInfoOf(chunk)
+      return {
+        id: `${document.knowledge_id}-chunk-${index}`,
+        content,
+        knowledge_id: document.knowledge_id,
+        knowledge_title: document.knowledge_title,
+        chunk_index: index,
+        score: scoreOf(query, content),
+        match_type: 2,
+        start_at: 0,
+        end_at: content.length,
+        metadata: {},
+        ...imageInfo === undefined ? {} : { image_info: imageInfo },
+      }
+    }))
     .filter(result => result.score > 0.4)
     .sort((left, right) => right.score - left.score)
 }
@@ -114,7 +152,10 @@ function documentRecord(document) {
 function answerFor(query, results) {
   if (results.length === 0) return `没有检索到与「${query}」相关的内容。`
   const cited = results.slice(0, 2).map(result => result.content).join(' ')
-  return `根据知识库内容：${cited}（问题：${query}）`
+  const figures = results.flatMap(result => result.content.match(/!\[[^\]]*\]\([^)]+\)/g) ?? [])
+  const unique = [...new Set(figures)]
+  const imageBlock = unique.length === 0 ? '' : `\n\n${unique.join('\n\n')}`
+  return `根据知识库内容：${cited}（问题：${query}）${imageBlock}`
 }
 
 /**
@@ -122,6 +163,8 @@ function answerFor(query, results) {
  * @param options.apiKey - when set, requests must carry it as `X-API-Key`.
  * @param options.streamError - make the chat routes stream an `error` event.
  * @param options.streamTruncated - end the chat stream mid-answer, with no `complete`.
+ * @param options.forbidPublicResourceUrls - reject `resource_urls=public` with the
+ *   403 WeKnora returns for a knowledge-base-restricted API key.
  * @returns the base URL, the recorded requests, and a close function.
  */
 export async function startMockWeknora(options = {}) {
@@ -160,6 +203,16 @@ export async function startMockWeknora(options = {}) {
         json(401, { success: false, error: { message: 'invalid api key' } })
         return
       }
+
+      if (options.forbidPublicResourceUrls === true && url.searchParams.get('resource_urls') === 'public') {
+        json(403, {
+          success: false,
+          error: { message: 'resource_urls=public is not available for a knowledge-base-restricted API key' },
+        })
+        return
+      }
+
+      const publicMode = url.searchParams.get('resource_urls') === 'public'
 
       const forced = failures.get(url.pathname)
       if (forced !== undefined) {
@@ -223,7 +276,10 @@ export async function startMockWeknora(options = {}) {
         }
         json(200, {
           success: true,
-          data: searchResults(body.query, body.knowledge_base_ids ?? [], body.knowledge_ids ?? []),
+          data: rewriteResources(
+            searchResults(body.query, body.knowledge_base_ids ?? [], body.knowledge_ids ?? []),
+            publicMode,
+          ),
         })
         return
       }
@@ -240,14 +296,15 @@ export async function startMockWeknora(options = {}) {
         const start = (page - 1) * pageSize
         json(200, {
           success: true,
-          data: document.chunks.slice(start, start + pageSize).map((content, index) => ({
+          data: rewriteResources(document.chunks.slice(start, start + pageSize).map((chunk, index) => ({
             id: `${knowledgeId}-chunk-${start + index}`,
             knowledge_id: knowledgeId,
             knowledge_base_id: 'kb-product',
-            content,
+            content: passageOf(chunk),
             chunk_index: start + index,
             is_enabled: true,
-          })),
+            ...imageInfoOf(chunk) === undefined ? {} : { image_info: imageInfoOf(chunk) },
+          })), publicMode),
           total: document.chunks.length,
           page,
           page_size: pageSize,
@@ -280,9 +337,12 @@ export async function startMockWeknora(options = {}) {
         // Retrieving here anyway would hide an unscoped ask from the tests. The
         // agent route does have a server-side default, its KBSelectionMode.
         const scoped = (body.knowledge_base_ids ?? []).length > 0 || (body.knowledge_ids ?? []).length > 0
-        const results = route === 'agent-chat' || scoped
-          ? searchResults(body.query ?? '', body.knowledge_base_ids ?? [], [])
-          : []
+        const results = rewriteResources(
+          route === 'agent-chat' || scoped
+            ? searchResults(body.query ?? '', body.knowledge_base_ids ?? [], [])
+            : [],
+          publicMode,
+        )
         if (route === 'agent-chat') {
           send({
             id: 't1',
@@ -329,4 +389,4 @@ export async function startMockWeknora(options = {}) {
   }
 }
 
-export { DOCUMENTS, KNOWLEDGE_BASES }
+export { ARCH_HANDLE, ARCH_PUBLIC, DOCUMENTS, KNOWLEDGE_BASES }
