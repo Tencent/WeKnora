@@ -183,10 +183,11 @@ func compactToolMessage(msg chat.Message, maxTokens int, estimator *agenttoken.E
 // responseVerdict captures the result of analyzing an LLM response to determine
 // whether the agent loop should stop and what the final answer is (if any).
 type responseVerdict struct {
-	isDone       bool
-	finalAnswer  string
-	emptyContent bool // LLM returned stop with no tool calls and empty content
-	step         types.AgentStep
+	isDone           bool
+	finalAnswer      string
+	emptyContent     bool // LLM returned stop with no tool calls and empty content
+	leakedToolMarkup bool // provider tool-call envelope arrived as plain content
+	step             types.AgentStep
 }
 
 // isNaturalStopFinishReason reports whether a provider finish reason means the
@@ -273,6 +274,20 @@ func (e *AgentEngine) analyzeResponse(
 		// Strip <think>…</think> blocks that some models embed in content
 		// (DeepSeek, Qwen, etc.) before processing or displaying.
 		response.Content = agenttools.StripThinkBlocks(response.Content)
+		if looksLikeLeakedToolMarkup(response.Content) {
+			logger.Warnf(ctx, "[Agent][Round-%d] Rejecting leaked tool-call markup as final answer (%d chars)",
+				iteration+1, len(response.Content))
+			common.PipelineWarn(ctx, "Agent", "leaked_tool_markup_rejected", map[string]interface{}{
+				"iteration":   iteration,
+				"round":       iteration + 1,
+				"content_len": len(response.Content),
+			})
+			return responseVerdict{
+				isDone:           true,
+				leakedToolMarkup: true,
+				step:             step,
+			}
+		}
 		logger.Infof(ctx, "[Agent][Round-%d] Agent finished naturally: answer=%d chars, duration=%dms",
 			iteration+1, len(response.Content), time.Since(roundStart).Milliseconds())
 		common.PipelineInfo(ctx, "Agent", "round_final_answer", map[string]interface{}{
