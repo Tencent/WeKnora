@@ -9,7 +9,7 @@
 //
 // 设计要点：
 //   - 数据源均在 WeKnora Wiki，后端代理 + 字段映射
-//   - 关联知识 Tab 走双源（原生 entity/concept + skill case/method/insight）
+//   - 关联知识 Tab 读取五类知识页面，兼容原生页面与 extract-video-knowledge 产物
 //   - 其他 Tab 走单源（对应 *_wiki_page_id 指向的页面）
 package handler
 
@@ -38,6 +38,8 @@ type ContentHandler struct {
 }
 
 var wikiTimestampPattern = regexp.MustCompile(`\b(\d{1,3}:\d{2}(?::\d{2})?)\b`)
+
+const relatedKnowledgePageTypes = "entity,concept,case,methodology,insight,index"
 
 func wikiAnchorTimeline(content string) (string, int) {
 	match := wikiTimestampPattern.FindStringSubmatch(content)
@@ -109,24 +111,29 @@ func isKnowledgeBaseWikiPage(page *weknora.WikiPage, videoID string) bool {
 	frontmatter := page.ParsedFrontmatter()
 	pageType, _ := frontmatter["type"].(string)
 	sourceVideoID, _ := frontmatter["source_video_id"].(string)
-	return pageType == "knowledge_base" && sourceVideoID == videoID
+	if pageType == "knowledge_base" && sourceVideoID == videoID {
+		return true
+	}
+	return len(frontmatter) == 0 &&
+		page.Slug == "video/"+videoID &&
+		strings.Contains(page.Content, videoID)
 }
 
-func (h *ContentHandler) requireKnowledgeBase(c *gin.Context, video *model.Video) bool {
+func (h *ContentHandler) requireKnowledgeBase(c *gin.Context, video *model.Video) (*weknora.WikiPage, bool) {
 	if strings.TrimSpace(video.KnowledgeBaseWikiPageID) == "" {
 		contentError(c, http.StatusNotFound, video.ID, "graph", "not_generated", "knowledge_base wiki page not yet generated", video.UpdatedAt)
-		return false
+		return nil, false
 	}
 	page, err := h.Wiki.GetPageByID(c.Request.Context(), h.KBID, video.KnowledgeBaseWikiPageID)
 	if err != nil {
 		contentError(c, http.StatusInternalServerError, video.ID, "graph", "weknora_read_failed", "read knowledge_base wiki page: "+err.Error(), video.UpdatedAt)
-		return false
+		return nil, false
 	}
 	if !isKnowledgeBaseWikiPage(page, video.ID) {
 		contentError(c, http.StatusNotFound, video.ID, "graph", "artifact_missing", "knowledge_base wiki page is invalid or belongs to another video", video.UpdatedAt)
-		return false
+		return nil, false
 	}
-	return true
+	return page, true
 }
 
 // RelatedKnowledge 关联知识 Tab（CP-T008）
@@ -135,25 +142,24 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !h.requireKnowledgeBase(c, video) {
+	knowledgeBasePage, ok := h.requireKnowledgeBase(c, video)
+	if !ok {
 		return
 	}
 	ctx := c.Request.Context()
 
-	// 第一源：WeKnora 原生 entity + concept
-	nativePages, err := h.Wiki.ListByVideo(ctx, h.KBID, video.ID, "entity")
+	// 一次读取当前知识底座涉及的全部页面，再映射到五类知识。
+	pages, err := h.Wiki.ListByVideoOwned(ctx, h.KBID, video.ID, relatedKnowledgePageTypes, knowledgeBasePage)
 	if err != nil {
-		contentError(c, http.StatusInternalServerError, video.ID, "graph", "weknora_read_failed", "list native pages: "+err.Error(), video.UpdatedAt)
-		return
-	}
-	conceptPages, err := h.Wiki.ListByVideo(ctx, h.KBID, video.ID, "concept")
-	if err != nil {
-		contentError(c, http.StatusInternalServerError, video.ID, "graph", "weknora_read_failed", "list concept pages: "+err.Error(), video.UpdatedAt)
+		contentError(c, http.StatusInternalServerError, video.ID, "graph", "weknora_read_failed", "list knowledge pages: "+err.Error(), video.UpdatedAt)
 		return
 	}
 
-	nativeAnchors := make([]knowledge.AnchorItem, 0, len(nativePages)+len(conceptPages))
-	for _, p := range nativePages {
+	anchors := make([]knowledge.AnchorItem, 0, len(pages))
+	for _, p := range pages {
+		if p.ID == knowledgeBasePage.ID {
+			continue
+		}
 		frontmatter := p.ParsedFrontmatter()
 		fmType, _ := frontmatter["type"].(string)
 		subType, _ := frontmatter["entity_sub_type"].(string)
@@ -164,50 +170,16 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 		if !knowledge.IsKnowledgeType(mappedType) {
 			continue
 		}
-		anchor := wikiAnchor(p, mappedType, "native")
-		anchor.EntitySubType = subType
-		nativeAnchors = append(nativeAnchors, anchor)
-	}
-	for _, p := range conceptPages {
-		frontmatter := p.ParsedFrontmatter()
-		fmType, _ := frontmatter["type"].(string)
-		mappedType := knowledge.MapPageTypeToKnowledgeType(p.PageType, fmType)
-		if !knowledge.IsKnowledgeType(mappedType) {
-			continue
+		source := "skill"
+		if p.PageType == "entity" || p.PageType == "concept" {
+			source = "native"
 		}
-		nativeAnchors = append(nativeAnchors, wikiAnchor(p, mappedType, "native"))
+		anchor := wikiAnchor(p, mappedType, source)
+		anchor.EntitySubType = subType
+		anchors = append(anchors, anchor)
 	}
 
-	// 第二源：skill 产物（page_type=index，按 Skill frontmatter.type 映射五类知识）
-	skillPages, err := h.Wiki.ListByVideo(ctx, h.KBID, video.ID, "index")
-	if err != nil {
-		contentError(c, http.StatusInternalServerError, video.ID, "graph", "weknora_read_failed", "list skill pages: "+err.Error(), video.UpdatedAt)
-		return
-	}
-	skillAnchors := make([]knowledge.AnchorItem, 0, len(skillPages))
-	for _, p := range skillPages {
-		frontmatter := p.ParsedFrontmatter()
-		fmType, _ := frontmatter["type"].(string)
-		// 跳过 4 类知识原子页面（methodology/case/insight/concept）和实体 6 类细分页
-		// 不包括「知识底座索引页」自身（type=knowledge_base）
-		if fmType == "knowledge_base" || fmType == "outline" || fmType == "overview" ||
-			fmType == "typed_summary" || fmType == "transcript_page" {
-			continue
-		}
-		mappedType := knowledge.MapSkillToKnowledgeType(fmType)
-		if !knowledge.IsKnowledgeType(mappedType) {
-			continue
-		}
-		subType, _ := frontmatter["entity_sub_type"].(string)
-		if subType == "" && knowledge.IsEntitySubType(fmType) {
-			subType = fmType
-		}
-		anchor := wikiAnchor(p, mappedType, "skill")
-		anchor.EntitySubType = subType
-		skillAnchors = append(skillAnchors, anchor)
-	}
-
-	merged := knowledge.MergeAnchors(nativeAnchors, skillAnchors)
+	merged := knowledge.MergeAnchors(anchors, nil)
 
 	// 跨视频边（CP-T008 后续接 Neo4j；本版本返回空）
 	c.JSON(http.StatusOK, RelatedKnowledgeResp{

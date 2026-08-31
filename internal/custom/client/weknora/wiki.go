@@ -74,10 +74,13 @@ func (p *WikiPage) ParsedFrontmatter() map[string]any {
 // parseFrontmatter 解析 content 顶部的 YAML frontmatter（--- 包裹）。
 func parseFrontmatter(content string) map[string]any {
 	trimmed := strings.TrimSpace(content)
-	if !strings.HasPrefix(trimmed, "---") {
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[0]), "```") {
+		lines = lines[1:]
+	}
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
 		return map[string]any{}
 	}
-	lines := strings.Split(trimmed, "\n")
 	var fm []string
 	for i, line := range lines {
 		if i == 0 {
@@ -286,11 +289,10 @@ func (w *WikiClient) writePage(ctx context.Context, method, endpoint string, bod
 	return &page, nil
 }
 
-// ListByVideo 列出某视频的关联 Wiki 页
+// ListByVideo 列出某视频的关联 Wiki 页。
 //
-// 匹配优先级：frontmatter.source_video_id > content 包含 videoID。
-// 部分 skill（如 summary）不写 YAML frontmatter，回退到 content 包含匹配。
-// pageType 为空时查所有 page_type；非空时加 API 过减少传输量。
+// 该方法保留旧的正文包含匹配，供内容编排器兼容历史产物使用。
+// 面向用户展示的知识聚合必须使用 ListByVideoOwned，避免跨视频页面混入。
 func (w *WikiClient) ListByVideo(ctx context.Context, kbID, videoID string, pageType string) ([]WikiPage, error) {
 	const pageSize = 100
 	out := make([]WikiPage, 0)
@@ -311,6 +313,101 @@ func (w *WikiClient) ListByVideo(ctx context.Context, kbID, videoID string, page
 		}
 	}
 	return out, nil
+}
+
+// ListByVideoOwned 列出能被确定属于某视频的 Wiki 页。
+//
+// 页面归属按以下顺序判断：
+//   - frontmatter.source_video_id 精确匹配；
+//   - 页面被该视频知识底座索引页通过 Wiki 双链显式引用；
+//   - 历史知识底座索引页使用固定 slug video/{videoID} 且正文包含视频 ID。
+//
+// 对缺少 frontmatter 的历史知识页面，仅在五类知识 page_type 内接受正文中的精确视频 ID。
+// 其他页面类型不接受正文提及作为归属依据。
+func (w *WikiClient) ListByVideoOwned(ctx context.Context, kbID, videoID, pageType string, knowledgeBasePage *WikiPage) ([]WikiPage, error) {
+	const pageSize = 100
+	out := make([]WikiPage, 0)
+	for page := 1; ; page++ {
+		resp, err := w.listPages(ctx, kbID, pageType, page, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		for _, candidate := range resp.AllPages() {
+			if wikiPageBelongsToVideo(candidate, videoID, knowledgeBasePage) {
+				out = append(out, candidate)
+			}
+		}
+		pages := resp.AllPages()
+		if len(pages) == 0 ||
+			(resp.TotalPages > 0 && page >= resp.TotalPages) ||
+			(resp.TotalPages == 0 && len(pages) < pageSize) {
+			break
+		}
+	}
+	return out, nil
+}
+
+func wikiPageBelongsToVideo(page WikiPage, videoID string, knowledgeBasePage *WikiPage) bool {
+	frontmatter := page.ParsedFrontmatter()
+	if sourceVideoID, ok := frontmatter["source_video_id"].(string); ok && strings.TrimSpace(sourceVideoID) != "" {
+		return strings.TrimSpace(sourceVideoID) == strings.TrimSpace(videoID)
+	}
+
+	if knowledgeBasePage != nil && pageReferencedByWikiPage(page, *knowledgeBasePage) {
+		return true
+	}
+
+	if page.PageType == "index" &&
+		page.Slug == "video/"+videoID &&
+		strings.TrimSpace(page.Content) != "" &&
+		strings.Contains(page.Content, videoID) {
+		return true
+	}
+
+	return isKnowledgePageType(page.PageType) &&
+		strings.TrimSpace(page.Content) != "" &&
+		strings.Contains(page.Content, videoID)
+}
+
+func isKnowledgePageType(pageType string) bool {
+	switch pageType {
+	case "entity", "concept", "case", "methodology", "insight":
+		return true
+	default:
+		return false
+	}
+}
+
+func pageReferencedByWikiPage(page WikiPage, knowledgeBasePage WikiPage) bool {
+	for _, target := range wikiLinkTargets(knowledgeBasePage.Content) {
+		if target == page.Slug || target == page.Title {
+			return true
+		}
+	}
+	return false
+}
+
+func wikiLinkTargets(content string) []string {
+	targets := make([]string, 0)
+	for {
+		start := strings.Index(content, "[[")
+		if start < 0 {
+			return targets
+		}
+		content = content[start+2:]
+		end := strings.Index(content, "]]")
+		if end < 0 {
+			return targets
+		}
+		target := content[:end]
+		if separator := strings.IndexByte(target, '|'); separator >= 0 {
+			target = target[:separator]
+		}
+		if target = strings.TrimSpace(target); target != "" {
+			targets = append(targets, target)
+		}
+		content = content[end+2:]
+	}
 }
 
 const maxWikiPageSize = 100

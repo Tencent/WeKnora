@@ -102,3 +102,36 @@ func TestGetPageByIDStopsForLegacyResponseWithoutPaginationMetadata(t *testing.T
 	require.Nil(t, page)
 	require.Equal(t, 1, listCalls)
 }
+
+func TestParsedFrontmatterAcceptsMarkdownFence(t *testing.T) {
+	page := WikiPage{Content: "```markdown\n---\ntype: person\nsource_video_id: video-1\n---\n# 张三"}
+	require.Equal(t, "person", page.ParsedFrontmatter()["type"])
+	require.Equal(t, "video-1", page.ParsedFrontmatter()["source_video_id"])
+}
+
+func TestListByVideoOwnedUsesExplicitOwnershipAndKnowledgeBaseLinks(t *testing.T) {
+	videoID := "video-1"
+	knowledgeBasePage := &WikiPage{
+		Slug:    "video/" + videoID,
+		Content: "知识索引：[[entity/linked]]",
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "entity,concept,case,methodology,insight,index", request.URL.Query().Get("page_type"))
+		_ = json.NewEncoder(writer).Encode(ListPagesResp{
+			Pages: []WikiPage{
+				{ID: "owned", Slug: "entity/owned", PageType: "entity", Content: "---\nsource_video_id: " + videoID + "\n---\nowned"},
+				{ID: "linked", Slug: "entity/linked", PageType: "entity", Content: "linked without frontmatter"},
+				{ID: "content-owned", Slug: "concept/content-owned", PageType: "concept", Content: "来源视频 ID：" + videoID},
+				{ID: "foreign", Slug: "summary/foreign", PageType: "summary", Content: "正文提及 " + videoID},
+				{ID: "legacy", Slug: "video/" + videoID, PageType: "index", Content: "历史索引 " + videoID},
+			},
+			TotalPages: 1,
+		})
+	}))
+	defer server.Close()
+
+	client := NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL})
+	pages, err := client.ListByVideoOwned(t.Context(), "kb-1", videoID, "entity,concept,case,methodology,insight,index", knowledgeBasePage)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"owned", "linked", "content-owned", "legacy"}, []string{pages[0].ID, pages[1].ID, pages[2].ID, pages[3].ID})
+}

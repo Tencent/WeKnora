@@ -1,13 +1,13 @@
-// Package knowledge 双源合并 + 5 类型映射（CP-T007）。
+// Package knowledge Wiki 页面到 5 类型知识的映射（CP-T007）。
 //
 // 设计要点（spec §2.1 / §2.2）：
 //   - 原型 KnowledgeType（前端枚举）: entity / concept / case / method / insight
-//   - WeKnora page_type 白名单:      entity / concept / index / summary / synthesis / comparison
-//   - 真实类型存 frontmatter `type`，映射在聚合 API 内部做，前端不感知 6 类细分
+//   - 页面类型既可能由 WeKnora 原生 page_type 表示，也可能由 skill frontmatter.type 表示
+//   - 真实类型统一映射在聚合 API 内部做，前端不感知实体 6 类细分
 //
-// 双源合并：
-//   - 第一源（WeKnora 原生 Wiki）：page_type ∈ {entity, concept} → 真实类型 entity / concept
-//   - 第二源（skill 产物）：        page_type = index，frontmatter.type ∈ {methodology, case, concept, insight, entity 及实体子类型}
+// 页面来源：
+//   - WeKnora 原生 Wiki：page_type 为 entity / concept
+//   - extract-video-knowledge skill：page_type 为 case / methodology / insight，或 page_type=index 且 frontmatter.type 为五类知识
 package knowledge
 
 // KnowledgeType 前端五类型枚举（与 spec §2.1 对齐）
@@ -62,8 +62,15 @@ func MapPageTypeToKnowledgeType(pageType string, frontmatterType string) Knowled
 			return TypeConcept
 		}
 		return MapSkillToKnowledgeType(frontmatterType)
+	case "case":
+		return TypeCase
+	case "methodology":
+		return TypeMethod
+	case "insight":
+		return TypeInsight
+	case "index":
+		return MapSkillToKnowledgeType(frontmatterType)
 	default:
-		// index / summary / synthesis / comparison 等不由本聚合处理
 		return ""
 	}
 }
@@ -100,8 +107,8 @@ type AnchorItem struct {
 
 // MergeAnchors 双源合并：按 ID 去重，5 类型映射，实体 6 类聚合为 entity
 //
-//   - nativePages: WeKnora 原生 Wiki 页面（page_type ∈ {entity, concept}）
-//   - skillPages: skill 产出的 Wiki 页（page_type=index，frontmatter.type ∈ {concept, methodology, insight, case, entity 及实体子类型}）
+//   - nativePages: WeKnora 原生 Wiki 页面或已映射的知识页面
+//   - skillPages: skill 产出的 Wiki 页（兼容 page_type=index 与直接使用五类 page_type 的历史数据）
 //
 // 返回：按类型分组的 AnchorItem 列表
 func MergeAnchors(nativePages []AnchorItem, skillPages []AnchorItem) map[KnowledgeType][]AnchorItem {

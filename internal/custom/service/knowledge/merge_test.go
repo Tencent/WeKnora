@@ -36,3 +36,15 @@ func TestMergeAnchorsDropsUnsupportedTypes(t *testing.T) {
 		t.Fatalf("unsupported type should not be returned: %#v", merged)
 	}
 }
+
+func TestMapPageTypeToKnowledgeTypeDoesNotUseFrontmatterForUnsupportedPageTypes(t *testing.T) {
+	if got := MapPageTypeToKnowledgeType("summary", "concept"); got != "" {
+		t.Fatalf("unsupported page type mapped to %q", got)
+	}
+	if got := MapPageTypeToKnowledgeType("index", "concept"); got != TypeConcept {
+		t.Fatalf("index concept mapped to %q", got)
+	}
+	if got := MapPageTypeToKnowledgeType("case", "case"); got != TypeCase {
+		t.Fatalf("case page mapped to %q", got)
+	}
+}

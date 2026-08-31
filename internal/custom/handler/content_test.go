@@ -261,22 +261,12 @@ func TestRelatedKnowledgeReturnsAnchorTimelineFromWikiContent(t *testing.T) {
 			http.NotFound(writer, request)
 			return
 		}
-		var pages []weknora.WikiPage
-		switch request.URL.Query().Get("page_type") {
-		case "":
-			pages = []weknora.WikiPage{{
-				ID: "knowledge-base-1", Title: "知识底座", Slug: "knowledge-base/video-1", PageType: "index",
-			}}
-		case "entity":
-			pages = []weknora.WikiPage{{
-				ID: "entity-1", Title: "张三", PageType: "entity",
-				Content: "---\ntype: person\nsource_video_id: " + video.ID + "\n---\n# 张三\n\n时间范围：00:01:02–00:01:10",
-			}}
-		case "index":
-			pages = []weknora.WikiPage{{
-				ID: "case-1", Title: "复盘案例", PageType: "index",
-				Content: "---\ntype: case\nsource_video_id: " + video.ID + "\n---\n# 复盘案例\n\n时间范围：00:02:03–00:02:30",
-			}}
+		pages := []weknora.WikiPage{
+			{ID: "knowledge-base-1", Title: "知识底座", Slug: "knowledge-base/video-1", PageType: "index"},
+			{ID: "entity-1", Title: "张三", PageType: "entity",
+				Content: "---\ntype: person\nsource_video_id: " + video.ID + "\n---\n# 张三\n\n时间范围：00:01:02–00:01:10"},
+			{ID: "case-1", Title: "复盘案例", PageType: "index",
+				Content: "---\ntype: case\nsource_video_id: " + video.ID + "\n---\n# 复盘案例\n\n时间范围：00:02:03–00:02:30"},
 		}
 		_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{Pages: pages, TotalPages: 1})
 	}))
@@ -325,5 +315,94 @@ func TestKnowledgeBaseWikiPageRequiresExtractionContract(t *testing.T) {
 	}
 	if isKnowledgeBaseWikiPage(invalid, "video-1") {
 		t.Fatal("knowledge base page from another video was accepted")
+	}
+
+	legacy := &weknora.WikiPage{
+		PageType: "index",
+		Slug:     "video/video-1",
+		Content:  "# 视频知识底座\n\n业务视频 ID：video-1",
+	}
+	if !isKnowledgeBaseWikiPage(legacy, "video-1") {
+		t.Fatal("legacy knowledge base page was rejected")
+	}
+
+	legacyWrongSlug := *legacy
+	legacyWrongSlug.Slug = "video/another-video"
+	if isKnowledgeBaseWikiPage(&legacyWrongSlug, "video-1") {
+		t.Fatal("legacy knowledge base page with another slug was accepted")
+	}
+
+	wrongType := &weknora.WikiPage{
+		PageType: "index",
+		Slug:     "video/video-1",
+		Content:  "---\ntype: overview\n---\n正文包含 video-1",
+	}
+	if isKnowledgeBaseWikiPage(wrongType, "video-1") {
+		t.Fatal("non-knowledge-base page was accepted as a legacy index")
+	}
+}
+
+func TestRelatedKnowledgeReadsAllFiveKnowledgePageTypesAndLegacyIndex(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusCompleted,
+		KnowledgeBaseWikiPageID: "knowledge-base-1",
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+
+	pages := []weknora.WikiPage{
+		{ID: "knowledge-base-1", Slug: "video/" + video.ID, PageType: "index"},
+		{ID: "entity-1", Slug: "entity/person-1", PageType: "entity", Title: "张三", Content: "---\ntype: person\nsource_video_id: " + video.ID + "\n---\n# 张三"},
+		{ID: "concept-1", Slug: "concept/concept-1", PageType: "concept", Title: "核心概念", Content: "---\ntype: concept\nsource_video_id: " + video.ID + "\n---\n# 核心概念"},
+		{ID: "case-1", Slug: "case/case-1", PageType: "case", Title: "真实案例", Content: "---\ntype: case\nsource_video_id: " + video.ID + "\n---\n# 真实案例"},
+		{ID: "method-1", Slug: "methodology/method-1", PageType: "methodology", Title: "操作方法", Content: "---\ntype: methodology\nsource_video_id: " + video.ID + "\n---\n# 操作方法"},
+		{ID: "insight-1", Slug: "insight/insight-1", PageType: "insight", Title: "关键洞察", Content: "---\ntype: insight\nsource_video_id: " + video.ID + "\n---\n# 关键洞察"},
+		{ID: "legacy-entity-1", Slug: "entity/legacy", PageType: "entity", Title: "历史实体", Content: "# 历史实体\n\n视频 ID：" + video.ID},
+		{ID: "foreign-1", Slug: "concept/foreign-1", PageType: "concept", Title: "跨视频概念", Content: "---\ntype: concept\nsource_video_id: another-video\n---\n正文提及视频 ID：" + video.ID},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/knowledgebase/kb-1/wiki/pages/video/"+video.ID {
+			_ = json.NewEncoder(writer).Encode(weknora.WikiPage{
+				ID: "knowledge-base-1", Slug: "video/" + video.ID, PageType: "index",
+				Content: "# 视频知识底座\n\n业务视频 ID：" + video.ID,
+			})
+			return
+		}
+		if request.URL.Path != "/api/v1/knowledgebase/kb-1/wiki/pages" {
+			http.NotFound(writer, request)
+			return
+		}
+		_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{Pages: pages, TotalPages: 1})
+	}))
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/related-knowledge", nil)
+	wiki := weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL})
+
+	NewContentHandler(db, wiki, "kb-1").RelatedKnowledge(context)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Anchors map[string][]json.RawMessage `json:"anchors"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, knowledgeType := range []string{"entity", "concept", "case", "method", "insight"} {
+		expectedCount := 1
+		if knowledgeType == "entity" {
+			expectedCount = 2
+		}
+		if len(payload.Anchors[knowledgeType]) != expectedCount {
+			t.Fatalf("%s anchors = %#v", knowledgeType, payload.Anchors[knowledgeType])
+		}
 	}
 }
