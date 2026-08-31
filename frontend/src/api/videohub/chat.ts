@@ -76,6 +76,28 @@ interface StreamAnswerOptions {
 export interface StreamingChatMessage extends ChatMessage {
   thinkingText?: string
   activityText?: string
+  role?: 'assistant' | 'user'
+  content?: string
+  isAgentMode?: boolean
+  is_completed?: boolean
+  request_id?: string
+  assistant_message_id?: string
+  agentEventStream?: Record<string, unknown>[]
+}
+
+interface StreamingAnswerResult {
+  answer: string
+  streamMessage: StreamingChatMessage
+}
+
+interface WeKnoraStreamPayload {
+  response_type?: string
+  type?: string
+  id?: string
+  assistant_message_id?: string
+  content?: string
+  data?: Record<string, unknown>
+  done?: boolean
 }
 
 const VIDEOHUB_META_PREFIX = 'videohub:'
@@ -222,7 +244,162 @@ async function mapMessages(messages: WeKnoraMessage[]) {
   return messages.filter(message => message.role === 'user' || message.role === 'assistant').map(message => mapMessage(message, evidence))
 }
 
-async function streamAnswer(sessionID: string, question: string, scope: ScopeResponse, options: StreamAnswerOptions = {}): Promise<string> {
+function cloneAgentEventStream(events: Record<string, unknown>[]) {
+  return events.map(event => ({ ...event }))
+}
+
+function parseStreamPayload(raw: string): WeKnoraStreamPayload | null {
+  if (!raw || raw === '[DONE]') return null
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function streamType(payload: WeKnoraStreamPayload) {
+  return String(payload.response_type || payload.type || '').trim()
+}
+
+function appendNativeAgentEvent(
+  events: Record<string, unknown>[],
+  eventMap: Map<string, Record<string, unknown>>,
+  pendingToolCalls: Map<string, Record<string, unknown>>,
+  payload: WeKnoraStreamPayload,
+  answer: string,
+) {
+  const type = streamType(payload)
+  const data = payload.data || {}
+  if (type === 'thinking' || type === 'reflection') {
+    const eventID = String(data.event_id || payload.id || 'thinking')
+    let event = eventMap.get(eventID)
+    if (!event) {
+      event = { type: 'thinking', event_id: eventID, content: '', done: false, startTime: Date.now(), thinking: true }
+      events.push(event)
+      eventMap.set(eventID, event)
+    }
+    if (payload.content && !payload.done) event.content = String(event.content || '') + payload.content
+    if (payload.done) {
+      event.done = true
+      event.thinking = false
+      event.duration_ms = data.duration_ms || Date.now() - Number(event.startTime || Date.now())
+      event.completed_at = data.completed_at || Date.now()
+    }
+    return
+  }
+
+  if (type === 'tool_call') {
+    const toolName = String(data.tool_name || data.name || '')
+    if (toolName === 'final_answer') return
+    const toolCallID = String(data.tool_call_id || (toolName ? `${toolName}-${events.length}` : payload.id || `tool-${events.length}`))
+    let event = pendingToolCalls.get(toolCallID) || events.find(item => item.type === 'tool_call' && item.tool_call_id === toolCallID)
+    if (!event) {
+      event = { type: 'tool_call', tool_call_id: toolCallID, timestamp: Date.now(), pending: true }
+      events.push(event)
+    }
+    event.tool_name = toolName || event.tool_name
+    event.arguments = data.arguments || event.arguments
+    event.pending = true
+    event.tool_data = data
+    pendingToolCalls.set(toolCallID, event)
+    return
+  }
+
+  if (type === 'tool_result' || (type === 'error' && (data.tool_call_id || data.tool_name))) {
+    const toolCallID = String(data.tool_call_id || '')
+    const toolName = String(data.tool_name || data.name || '')
+    let event = toolCallID ? pendingToolCalls.get(toolCallID) : undefined
+    if (!event && toolName) {
+      event = [...pendingToolCalls.values()].find(item => item.tool_name === toolName)
+    }
+    if (!event) {
+      event = { type: 'tool_call', tool_call_id: toolCallID || `${toolName || 'tool'}-${events.length}`, tool_name: toolName, timestamp: Date.now() }
+      events.push(event)
+    }
+    event.pending = false
+    event.success = type !== 'error' && data.success !== false
+    event.output = event.success ? data.output || payload.content : undefined
+    event.error = event.success ? undefined : data.error || payload.content
+    event.duration = data.duration_ms || data.duration
+    event.duration_ms = data.duration_ms || data.duration
+    event.display_type = data.display_type
+    event.tool_data = data
+    if (toolCallID) pendingToolCalls.delete(toolCallID)
+    return
+  }
+
+  if (type === 'answer') {
+    const eventID = String(data.event_id || '')
+    const eventKey = eventID || 'answer'
+    let event = eventMap.get(eventKey)
+    if (!event) {
+      event = { type: 'answer', event_id: eventID || undefined, content: '', done: false }
+      events.push(event)
+      eventMap.set(eventKey, event)
+    }
+    event.content = cleanAnswer(answer)
+    if (payload.done) event.done = true
+    if (data.is_fallback) event.is_fallback = true
+    return
+  }
+
+  if (type === 'complete' || (!type && payload.done)) {
+    let answerEvent = eventMap.get('answer')
+    const cleanedAnswer = cleanAnswer(answer)
+    if (!answerEvent && cleanedAnswer) {
+      answerEvent = { type: 'answer', content: cleanedAnswer, done: false }
+      events.push(answerEvent)
+      eventMap.set('answer', answerEvent)
+    }
+    if (answerEvent) {
+      answerEvent.content = cleanedAnswer || answerEvent.content || ''
+      answerEvent.done = true
+    }
+    if (!events.some(event => event.type === 'agent_complete')) {
+      events.push({
+        type: 'agent_complete',
+        total_duration_ms: data.total_duration_ms || 0,
+        total_steps: data.total_steps || events.filter(event => event.type !== 'answer').length,
+      })
+    }
+  }
+}
+
+function finalizeNativeAgentStream(
+  events: Record<string, unknown>[],
+  eventMap: Map<string, Record<string, unknown>>,
+  answer: string,
+) {
+  const cleanedAnswer = cleanAnswer(answer)
+  if (cleanedAnswer) {
+    let answerEvent = eventMap.get('answer')
+    if (!answerEvent) {
+      answerEvent = { type: 'answer', content: cleanedAnswer, done: false }
+      events.push(answerEvent)
+      eventMap.set('answer', answerEvent)
+    }
+    answerEvent.content = cleanedAnswer
+    answerEvent.done = true
+  }
+  if (!events.some(event => event.type === 'agent_complete')) {
+    events.push({
+      type: 'agent_complete',
+      total_duration_ms: 0,
+      total_steps: events.filter(event => event.type !== 'answer').length,
+    })
+  }
+}
+
+function findLastAssistantAnswerIndex(messages: ChatMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.sender === 'assistant' && message.text.trim()) return index
+  }
+  return -1
+}
+
+async function streamAnswer(sessionID: string, question: string, scope: ScopeResponse, options: StreamAnswerOptions = {}): Promise<StreamingAnswerResult> {
   const token = localStorage.getItem('weknora_token')
   if (!token) throw new Error('登录已失效，请重新登录后再提问')
   const apiBase = getApiBaseUrl()
@@ -230,10 +407,20 @@ async function streamAnswer(sessionID: string, question: string, scope: ScopeRes
   let answer = ''
   let thinkingText = ''
   let activityText = ''
+  let completed = false
+  const agentEventStream: Record<string, unknown>[] = []
+  const eventMap = new Map<string, Record<string, unknown>>()
+  const pendingToolCalls = new Map<string, Record<string, unknown>>()
   const emitChunk = () => options.onChunk?.({
     id: `stream-${sessionID}`,
     sender: 'assistant',
     text: cleanAnswer(answer),
+    role: 'assistant',
+    content: cleanAnswer(answer),
+    isAgentMode: Boolean(scope.agent_id) || agentEventStream.length > 0,
+    is_completed: completed,
+    request_id: sessionID,
+    agentEventStream: cloneAgentEventStream(agentEventStream),
     thinkingText: thinkingText.trim(),
     activityText,
     timestamp: nowLabel(),
@@ -263,35 +450,54 @@ async function streamAnswer(sessionID: string, question: string, scope: ScopeRes
       if (!response.ok) throw new Error(`问答请求失败：HTTP ${response.status}`)
     },
     onmessage: event => {
+      const payload = parseStreamPayload(event.data)
       const chunk = parseWeKnoraStreamChunk(event.data)
       if (chunk.kind === 'answer') {
         answer += chunk.content || ''
         activityText = ''
-        emitChunk()
       }
       if (chunk.kind === 'thinking') {
         thinkingText += chunk.content || ''
         activityText = '正在思考'
-        emitChunk()
       }
       if (chunk.kind === 'activity') {
         activityText = chunk.content || ''
-        emitChunk()
       }
       if (chunk.kind === 'complete' && !answer && chunk.content) {
         answer = chunk.content
         activityText = ''
-        emitChunk()
+      }
+      if (payload) {
+        appendNativeAgentEvent(agentEventStream, eventMap, pendingToolCalls, payload, answer)
+        if (streamType(payload) === 'complete' || (!streamType(payload) && payload.done)) completed = true
       }
       if (chunk.kind === 'error') {
         throw new Error(chunk.content || '问答生成失败')
       }
+      if (chunk.kind !== 'ignore' || payload) emitChunk()
     },
     onerror: error => {
       throw error
     },
   })
-  return cleanAnswer(answer)
+  completed = true
+  finalizeNativeAgentStream(agentEventStream, eventMap, answer)
+  emitChunk()
+  const streamMessage: StreamingChatMessage = {
+    id: `stream-${sessionID}`,
+    sender: 'assistant',
+    text: cleanAnswer(answer),
+    role: 'assistant',
+    content: cleanAnswer(answer),
+    isAgentMode: Boolean(scope.agent_id) || agentEventStream.length > 0,
+    is_completed: true,
+    request_id: sessionID,
+    agentEventStream: cloneAgentEventStream(agentEventStream),
+    thinkingText: thinkingText.trim(),
+    activityText: '',
+    timestamp: nowLabel(),
+  }
+  return { answer: cleanAnswer(answer), streamMessage }
 }
 
 function cleanAnswer(text: string) {
@@ -352,7 +558,7 @@ export async function loadChatSession(session: ChatSession): Promise<ChatSession
 export async function sendChatMessage(question: string, options: SendOptions = {}): Promise<ChatMessage> {
   const scope = await getScope(options)
   const session = await createSession(question, scope)
-  const answer = await streamAnswer(session.id, question, scope, { onChunk: options.onStreamMessage })
+  const { answer } = await streamAnswer(session.id, question, scope, { onChunk: options.onStreamMessage })
   const assistant = await hydrateLastAssistant(session, answer)
   options.onMessage?.(assistant)
   return assistant
@@ -370,11 +576,14 @@ export async function createChatTurn(question: string, options: TurnOptions = {}
     : await createSession(question, scope)
   const userMessage: ChatMessage = { id: messageId(), sender: 'user', text: question, timestamp: nowLabel() }
   options.onMessage?.(userMessage)
-  const answer = await streamAnswer(session.id, question, scope, { onChunk: options.onStreamMessage })
+  const { answer, streamMessage } = await streamAnswer(session.id, question, scope, { onChunk: options.onStreamMessage })
   const messages = await mapMessages(await loadSessionMessages(session.id))
-  const fallbackMessages = [userMessage, { id: messageId(), sender: 'assistant' as const, text: answer, timestamp: nowLabel() }]
-  const hasAssistantAnswer = messages.some(message => message.sender === 'assistant' && message.text.trim())
-  return sessionFromScope(session, scope, hasAssistantAnswer ? messages : fallbackMessages, question)
+  const fallbackMessages = [userMessage, { ...streamMessage, id: messageId(), text: answer, timestamp: nowLabel() }]
+  const lastAssistantIndex = findLastAssistantAnswerIndex(messages)
+  const finalMessages = lastAssistantIndex >= 0
+    ? messages.map((message, index) => index === lastAssistantIndex ? { ...message, ...streamMessage, id: message.id, timestamp: message.timestamp } : message)
+    : fallbackMessages
+  return sessionFromScope(session, scope, finalMessages, question)
 }
 
 export async function sendAssistantQuery(question: string, currentVideo: VideoData, currentTime: number, globalMode = false): Promise<ChatMessage> {
