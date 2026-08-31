@@ -16,22 +16,36 @@ type PromptTemplateStructured struct {
 }
 
 type GraphNode struct {
-	Name       string   `json:"name,omitempty"`
-	Chunks     []string `json:"chunks,omitempty"`
-	Attributes []string `json:"attributes,omitempty"`
+	Name        string   `json:"name,omitempty"`
+	KnowledgeID string   `json:"knowledge_id,omitempty"`
+	Chunks      []string `json:"chunks,omitempty"`
+	Attributes  []string `json:"attributes,omitempty"`
 }
 
 // GraphRelation represents the relation of the graph
 type GraphRelation struct {
-	Node1 string `json:"node1,omitempty"`
-	Node2 string `json:"node2,omitempty"`
-	Type  string `json:"type,omitempty"`
+	Node1             string   `json:"node1,omitempty"`
+	Node2             string   `json:"node2,omitempty"`
+	SourceKnowledgeID string   `json:"source_knowledge_id,omitempty"`
+	TargetKnowledgeID string   `json:"target_knowledge_id,omitempty"`
+	ChunkIDs          []string `json:"chunk_ids,omitempty"`
+	Type              string   `json:"type,omitempty"`
 }
 
 type GraphData struct {
 	Text     string           `json:"text,omitempty"`
 	Node     []*GraphNode     `json:"node,omitempty"`
 	Relation []*GraphRelation `json:"relation,omitempty"`
+}
+
+type GraphQuery struct {
+	Limit      int
+	Attributes []string
+}
+
+type GraphQueryResult struct {
+	GraphData
+	TotalNodes int
 }
 
 // NameSpace represents the name space of the knowledge base and knowledge

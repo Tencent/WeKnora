@@ -140,3 +140,30 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return f(request)
 }
+
+func TestGetEntityGraphReadsOfficialGraphEndpoint(t *testing.T) {
+	client := New(config.WeKnoraConfig{BaseURL: "http://weknora.test", APIKey: "secret", TenantID: "tenant-1", KBID: "kb-1"})
+	client.http = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/knowledgebase/kb-1/graph" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if r.URL.Query().Get("limit") != "20" || r.URL.Query().Get("attributes") != "concept,entity" {
+			t.Fatalf("query = %s", r.URL.RawQuery)
+		}
+		if r.Header.Get("X-API-Key") != "secret" || r.Header.Get("X-Tenant-ID") != "tenant-1" {
+			t.Fatalf("headers missing: %#v", r.Header)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"success":true,"data":{"nodes":[{"name":"概念","knowledge_id":"knowledge-1"}],"edges":[],"meta":{"total":1,"returned":1}}}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	graph, err := client.GetEntityGraph(context.Background(), "", 20, []string{"concept", "entity"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graph.Nodes) != 1 || graph.Nodes[0].KnowledgeID != "knowledge-1" {
+		t.Fatalf("graph = %#v", graph)
+	}
+}

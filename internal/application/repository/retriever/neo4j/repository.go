@@ -98,6 +98,7 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 				"target":        rel.Node2,
 				"knowledge_id":  namespace.Knowledge,
 				"type":          rel.Type,
+				"attributes":    map[string]interface{}{"chunk_ids": rel.ChunkIDs},
 				"source_labels": n.Labels(namespace),
 				"target_labels": n.Labels(namespace),
 			})
@@ -225,6 +226,166 @@ func (n *Neo4jRepository) SearchNode(
 		return nil, err
 	}
 	return result.(*types.GraphData), nil
+}
+
+func (n *Neo4jRepository) GetGraph(
+	ctx context.Context,
+	namespace types.NameSpace,
+	query types.GraphQuery,
+) (*types.GraphQueryResult, error) {
+	if n.driver == nil {
+		logger.Warnf(ctx, "NOT SUPPORT RETRIEVE GRAPH")
+		return &types.GraphQueryResult{}, nil
+	}
+	if namespace.KnowledgeBase == "" {
+		return nil, fmt.Errorf("knowledge base is required")
+	}
+	limit := query.Limit
+	if limit <= 0 || limit > 2000 {
+		limit = 500
+	}
+
+	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
+
+	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		labelExpr := n.Label(types.NameSpace{KnowledgeBase: namespace.KnowledgeBase})
+		params := map[string]interface{}{"knowledge_base_id": namespace.KnowledgeBase, "limit": limit}
+		attributeClause := ""
+		if len(query.Attributes) > 0 {
+			attributeClause = " AND ANY(attribute IN coalesce(n.attributes, []) WHERE attribute IN $attributes)"
+			params["attributes"] = query.Attributes
+		}
+
+		countResult, err := tx.Run(ctx, "MATCH (n:"+labelExpr+") WHERE n.kg IS NOT NULL"+attributeClause+" RETURN count(n) AS total", params)
+		if err != nil {
+			return nil, fmt.Errorf("count graph nodes: %w", err)
+		}
+		var total int
+		if countResult.Next(ctx) {
+			if value, ok := countResult.Record().Get("total"); ok {
+				switch number := value.(type) {
+				case int64:
+					total = int(number)
+				case int:
+					total = number
+				}
+			}
+		}
+		if err := countResult.Err(); err != nil {
+			return nil, fmt.Errorf("read graph node count: %w", err)
+		}
+
+		nodeResult, err := tx.Run(ctx, "MATCH (n:"+labelExpr+") WHERE n.kg IS NOT NULL"+attributeClause+" RETURN n ORDER BY size(coalesce(n.chunks, [])) DESC, n.name LIMIT $limit", params)
+		if err != nil {
+			return nil, fmt.Errorf("load graph nodes: %w", err)
+		}
+		data := &types.GraphQueryResult{TotalNodes: total}
+		keys := make([]string, 0, limit)
+		seen := make(map[string]struct{}, limit)
+		for nodeResult.Next(ctx) {
+			value, ok := nodeResult.Record().Get("n")
+			if !ok {
+				continue
+			}
+			node, ok := value.(neo4j.Node)
+			if !ok {
+				continue
+			}
+			name := propertyString(node.Props, "name")
+			knowledgeID := propertyString(node.Props, "kg")
+			if name == "" || knowledgeID == "" {
+				continue
+			}
+			key := knowledgeID + "|" + name
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			keys = append(keys, key)
+			data.Node = append(data.Node, &types.GraphNode{
+				Name:        name,
+				KnowledgeID: knowledgeID,
+				Chunks:      propertyStrings(node.Props, "chunks"),
+				Attributes:  propertyStrings(node.Props, "attributes"),
+			})
+		}
+		if err := nodeResult.Err(); err != nil {
+			return nil, fmt.Errorf("read graph nodes: %w", err)
+		}
+		if len(keys) == 0 {
+			return data, nil
+		}
+
+		edgeResult, err := tx.Run(ctx, "MATCH (source:"+labelExpr+")-[r]->(target:"+labelExpr+") WHERE (source.kg + '|' + source.name) IN $keys AND (target.kg + '|' + target.name) IN $keys RETURN source, r, target", map[string]interface{}{"keys": keys})
+		if err != nil {
+			return nil, fmt.Errorf("load graph relations: %w", err)
+		}
+		seenRelations := make(map[string]struct{})
+		for edgeResult.Next(ctx) {
+			record := edgeResult.Record()
+			sourceValue, sourceOK := record.Get("source")
+			targetValue, targetOK := record.Get("target")
+			relationValue, relationOK := record.Get("r")
+			if !sourceOK || !targetOK || !relationOK {
+				continue
+			}
+			source, sourceOK := sourceValue.(neo4j.Node)
+			target, targetOK := targetValue.(neo4j.Node)
+			relation, relationOK := relationValue.(neo4j.Relationship)
+			if !sourceOK || !targetOK || !relationOK {
+				continue
+			}
+			sourceName := propertyString(source.Props, "name")
+			targetName := propertyString(target.Props, "name")
+			sourceKnowledgeID := propertyString(source.Props, "kg")
+			targetKnowledgeID := propertyString(target.Props, "kg")
+			key := sourceKnowledgeID + "|" + sourceName + "|" + relation.Type + "|" + targetKnowledgeID + "|" + targetName
+			if _, exists := seenRelations[key]; exists {
+				continue
+			}
+			seenRelations[key] = struct{}{}
+			data.Relation = append(data.Relation, &types.GraphRelation{
+				Node1:             sourceName,
+				Node2:             targetName,
+				SourceKnowledgeID: sourceKnowledgeID,
+				TargetKnowledgeID: targetKnowledgeID,
+				Type:              relation.Type,
+				ChunkIDs:          propertyStrings(relation.Props, "chunk_ids"),
+			})
+		}
+		if err := edgeResult.Err(); err != nil {
+			return nil, fmt.Errorf("read graph relations: %w", err)
+		}
+		return data, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.(*types.GraphQueryResult), nil
+}
+
+func propertyString(properties map[string]interface{}, key string) string {
+	value, ok := properties[key]
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%v", value)
+}
+
+func propertyStrings(properties map[string]interface{}, key string) []string {
+	value, ok := properties[key]
+	if !ok {
+		return nil
+	}
+	switch values := value.(type) {
+	case []string:
+		return append([]string(nil), values...)
+	case []interface{}:
+		return listI2listS(values)
+	default:
+		return []string{fmt.Sprintf("%v", value)}
+	}
 }
 
 func listI2listS(list []any) []string {

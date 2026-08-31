@@ -225,6 +225,17 @@ export interface GraphNode {
   seconds?: number
   link_count?: number
   type?: string
+  knowledge_id?: string
+  evidence?: GraphEvidence[]
+}
+
+export interface GraphEvidence {
+  video_id: string
+  video_title: string
+  start_ms: number
+  end_ms: number
+  chunk_index: number
+  chunk_ids?: string[]
 }
 
 export interface GraphEdge {

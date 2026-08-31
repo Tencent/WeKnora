@@ -5,6 +5,7 @@
       <span v-if="payload" class="knowledge-graph__count">{{ filteredNodes.length }} 个节点 · {{ filteredEdges.length }} 条关系</span>
     </header>
     <div v-if="loading" class="knowledge-graph__state"><t-loading text="正在加载知识图谱" /></div>
+    <t-alert v-else-if="error" theme="error" :message="error" />
     <t-empty v-else-if="!payload || !payload.nodes.length" description="暂无知识图谱" />
     <template v-else>
       <AttributeFilterTabs v-model="selectedAttribute" :attributes="payload.attributes" :counts="attributeCounts" :total="payload.nodes.length" />
@@ -37,6 +38,7 @@ import type { KnowledgeGraphPayload } from '@/types/videohub'
 const router = useRouter()
 const route = useRoute()
 const loading = ref(true)
+const error = ref('')
 const payload = ref<KnowledgeGraphPayload | null>(null)
 const selectedAttribute = ref('all')
 const selectedNodeId = ref<string | null>(null)
@@ -53,8 +55,10 @@ const relatedNodes = computed(() => payload.value?.nodes.filter(node => relatedN
 async function load() {
   loading.value = true
   const requestedLimit = Number(route.query.limit)
-  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.floor(requestedLimit) : 20
+  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.floor(requestedLimit) : 500
+  error.value = ''
   try { payload.value = await fetchKnowledgeGraph({ mode: 'overview', limit }) }
+  catch (cause) { error.value = cause instanceof Error ? cause.message : '知识图谱加载失败' }
   finally { loading.value = false }
 }
 function openVideo(videoId: string, seconds: number) {

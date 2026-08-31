@@ -53,6 +53,8 @@ type VideoTranscriptChunk struct {
 	Generation  string    `gorm:"type:varchar(64);primaryKey" json:"generation"`
 	Revision    int64     `gorm:"not null;index" json:"revision"`
 	ChunkIndex  int       `gorm:"primaryKey" json:"chunk_index"`
+	StartMs     int       `gorm:"not null;default:0" json:"start_ms"`
+	EndMs       int       `gorm:"not null;default:0" json:"end_ms"`
 	KnowledgeID string    `gorm:"type:varchar(64);uniqueIndex" json:"knowledge_id"`
 	ContentHash string    `gorm:"type:varchar(64);not null" json:"content_hash"`
 	Status      string    `gorm:"type:varchar(32);not null" json:"status"`

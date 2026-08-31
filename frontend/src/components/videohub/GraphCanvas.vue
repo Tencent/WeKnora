@@ -46,7 +46,8 @@ function render() {
       blur: { itemStyle: { opacity: .2 }, lineStyle: { opacity: .08 }, label: { opacity: .2 } },
       data: props.nodes.map(node => ({
         id: node.id, name: node.label,
-        itemStyle: { color: color(KNOWN_ATTRIBUTES[node.attributes[0]] ?? FALLBACK_ATTRIBUTE_COLOR) },
+        symbolSize: Math.min(52, 22 + Math.sqrt(node.link_count ?? 0) * 6),
+        itemStyle: { color: color(KNOWN_ATTRIBUTES[node.type || node.attributes[0]] ?? FALLBACK_ATTRIBUTE_COLOR) },
       })),
       links: props.edges.map(edge => {
         const style = KNOWN_RELATION_TYPES[edge.type] ?? FALLBACK_RELATION_STYLE

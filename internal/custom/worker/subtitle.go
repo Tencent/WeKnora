@@ -238,6 +238,8 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	kbID := h.WeKnora.KBID()
 	type preparedChunk struct {
 		Index       int
+		StartMs     int
+		EndMs       int
 		Content     string
 		ContentHash string
 	}
@@ -251,7 +253,7 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 		content := fmt.Sprintf("## 视频定位信息\n\n```json\n%s\n```\n\n## 原文\n\n%s", metadataJSON, b.Content)
 		contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
 		_, _ = generationHash.Write([]byte(contentHash))
-		prepared = append(prepared, preparedChunk{Index: b.Metadata.ChunkIndex, Content: content, ContentHash: contentHash})
+		prepared = append(prepared, preparedChunk{Index: b.Metadata.ChunkIndex, StartMs: b.Metadata.StartMs, EndMs: b.Metadata.EndMs, Content: content, ContentHash: contentHash})
 	}
 	generation := fmt.Sprintf("%x", generationHash.Sum(nil))
 	if err := h.DB.Model(job).Update("transcript_generation", generation).Error; err != nil {
@@ -287,13 +289,20 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 			}
 			checkpoint = model.VideoTranscriptChunk{
 				VideoID: video.ID, Generation: generation, Revision: jobInput.Revision, ChunkIndex: item.Index, KnowledgeID: created.ID,
+				StartMs: item.StartMs, EndMs: item.EndMs,
 				ContentHash: item.ContentHash, Status: "created",
 			}
 			if err := h.DB.Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "video_id"}, {Name: "generation"}, {Name: "chunk_index"}},
-				DoUpdates: clause.AssignmentColumns([]string{"knowledge_id", "content_hash", "status", "updated_at"}),
+				DoUpdates: clause.AssignmentColumns([]string{"knowledge_id", "start_ms", "end_ms", "content_hash", "status", "updated_at"}),
 			}).Create(&checkpoint).Error; err != nil {
 				return fmt.Errorf("save transcript checkpoint %d: %w", item.Index, err)
+			}
+		} else if checkpoint.StartMs != item.StartMs || checkpoint.EndMs != item.EndMs {
+			if err := h.DB.Model(&model.VideoTranscriptChunk{}).
+				Where("video_id = ? AND generation = ? AND chunk_index = ?", video.ID, generation, item.Index).
+				Updates(map[string]any{"start_ms": item.StartMs, "end_ms": item.EndMs}).Error; err != nil {
+				return fmt.Errorf("backfill transcript timing %d: %w", item.Index, err)
 			}
 		}
 		if compatibilityAnchorID == "" {

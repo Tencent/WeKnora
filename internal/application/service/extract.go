@@ -367,6 +367,11 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	for _, node := range graph.Node {
 		node.Chunks = []string{chunk.ID}
 	}
+	for _, relation := range graph.Relation {
+		relation.SourceKnowledgeID = chunk.KnowledgeID
+		relation.TargetKnowledgeID = chunk.KnowledgeID
+		relation.ChunkIDs = []string{chunk.ID}
+	}
 	if err = s.graphEngine.AddGraph(ctx,
 		types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID},
 		[]*types.GraphData{graph},

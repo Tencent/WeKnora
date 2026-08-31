@@ -332,3 +332,12 @@ func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHan
 		wiki.PUT("/issues/:issue_id/status", g.OwnedWikiKBOrAdmin(), g.KBAccessWrite("kb_id"), wikiHandler.UpdateIssueStatus)
 	}
 }
+
+func RegisterEntityGraphRoutes(r *gin.RouterGroup, graphHandler *handler.EntityGraphHandler, g *rbacGuards) {
+	if graphHandler == nil {
+		return
+	}
+	graph := g.apiKeyGroup(r.Group("/knowledgebase/:kb_id/graph"), apiKeyIngest(apiKeyFullAccess()))
+	graphRead := graph.With(apiKeyRetrieve(apiKeyFullAccess()))
+	graphRead.GET("", g.Viewer(), g.KBAccessRead("kb_id"), graphHandler.GetGraph)
+}

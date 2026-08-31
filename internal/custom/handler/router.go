@@ -24,10 +24,11 @@ import (
 
 // Deps 路由依赖
 type Deps struct {
-	DB    *gorm.DB
-	Cfg   *config.Config
-	MinIO *objstore.Client
-	Wiki  *weknora.WikiClient
+	DB      *gorm.DB
+	Cfg     *config.Config
+	MinIO   *objstore.Client
+	Wiki    *weknora.WikiClient
+	WeKnora *weknora.Client
 }
 
 // NewRouter 构建自研后端路由。
@@ -39,6 +40,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		deps.MinIO = m
 	}
 	deps.Wiki = weknora.NewWikiClient(cfg.WeKnora)
+	deps.WeKnora = weknora.New(cfg.WeKnora)
 	return buildRouter(deps)
 }
 
@@ -204,6 +206,8 @@ func buildRouter(deps *Deps) *gin.Engine {
 	ph := NewProcessingHandler(deps.DB, ProcessingDependencies{Wiki: deps.Wiki, KBID: deps.Cfg.WeKnora.KBID})
 	api.GET("/videos/:id/processing-status", ph.Status)
 	api.POST("/videos/:id/processing-jobs/:jobType/retry", ph.Retry)
+	graphHandler := NewEntityGraphHandler(deps.DB, deps.WeKnora, deps.Cfg.WeKnora.KBID)
+	api.GET("/graph", graphHandler.Get)
 
 	if deps.Wiki != nil {
 		ch := NewContentHandler(deps.DB, deps.Wiki, deps.Cfg.WeKnora.KBID)

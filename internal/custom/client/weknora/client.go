@@ -86,6 +86,77 @@ type KnowledgeChunk struct {
 	ChunkType   string `json:"chunk_type"`
 }
 
+type EntityGraphNode struct {
+	Name        string   `json:"name"`
+	KnowledgeID string   `json:"knowledge_id"`
+	Chunks      []string `json:"chunks"`
+	Attributes  []string `json:"attributes"`
+}
+
+type EntityGraphEdge struct {
+	Node1             string `json:"node1"`
+	Node2             string `json:"node2"`
+	SourceKnowledgeID string `json:"source_knowledge_id"`
+	TargetKnowledgeID string `json:"target_knowledge_id"`
+	Type              string `json:"type"`
+}
+
+type EntityGraphData struct {
+	Nodes []*EntityGraphNode `json:"nodes"`
+	Edges []*EntityGraphEdge `json:"edges"`
+	Meta  struct {
+		Mode      string `json:"mode"`
+		Total     int    `json:"total"`
+		Returned  int    `json:"returned"`
+		Truncated bool   `json:"truncated"`
+	} `json:"meta"`
+}
+
+func (c *Client) GetEntityGraph(ctx context.Context, kbID string, limit int, attributes []string) (*EntityGraphData, error) {
+	if strings.TrimSpace(kbID) == "" {
+		kbID = c.kbID
+	}
+	if strings.TrimSpace(kbID) == "" {
+		return nil, fmt.Errorf("weknora kb_id 未配置")
+	}
+	query := url.Values{}
+	if limit > 0 {
+		query.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	if len(attributes) > 0 {
+		query.Set("attributes", strings.Join(attributes, ","))
+	}
+	endpoint := fmt.Sprintf("%s/api/v1/knowledgebase/%s/graph", strings.TrimRight(c.baseURL, "/"), url.PathEscape(kbID))
+	if encoded := query.Encode(); encoded != "" {
+		endpoint += "?" + encoded
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.setHeaders(req)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("weknora entity graph: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("weknora entity graph status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var out struct {
+		Success bool            `json:"success"`
+		Data    EntityGraphData `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode weknora entity graph: %w", err)
+	}
+	if !out.Success {
+		return nil, fmt.Errorf("weknora entity graph returned unsuccessful response")
+	}
+	return &out.Data, nil
+}
+
 // ListKnowledgeChunks 读取一条知识的完整文本分片，而不是依赖搜索结果。
 func (c *Client) ListKnowledgeChunks(ctx context.Context, knowledgeID string) ([]KnowledgeChunk, error) {
 	if strings.TrimSpace(knowledgeID) == "" {

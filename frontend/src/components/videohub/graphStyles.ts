@@ -6,11 +6,11 @@ export interface RelationStyle {
 }
 
 export const KNOWN_ATTRIBUTES: Record<string, string> = {
-  '人物': '--td-brand-color',
-  '地点': '--td-warning-color',
+  '实体': '--td-brand-color',
   '概念': '--td-text-color-link',
-  '事件': '--td-error-color',
+  '案例': '--td-error-color',
   '方法': '--td-success-color',
+  '洞察': '--td-warning-color',
 }
 
 export const FALLBACK_ATTRIBUTE_COLOR = '--td-brand-color'

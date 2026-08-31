@@ -41,6 +41,9 @@ func skillQuery(video *model.Video, contract skill.JobContract, jobType string) 
 		contract.SkillName, video.TranscriptGeneration, video.TranscriptKnowledgeID, video.ID, video.Title,
 		contract.WriteSlug(video.ID), contract.ArtifactType, video.ID, video.TranscriptGeneration,
 	)
+	if jobType == skill.JobGraph {
+		query += "图谱理解必须以连续语义窗口处理转写：先按章节或相邻分块组织上下文，再提取跨分块成立的实体、概念、案例、方法和洞察；实体与关系仍必须绑定最小充分证据分块，禁止把单个分块的偶然关键词直接当作关系。"
+	}
 	if jobType == skill.JobSummaryEnhance {
 		query += fmt.Sprintf(
 			"这是知识增强阶段，不是重新生成基础总结。必须先阅读知识底座索引页 ID：%s 及其可审计关联，再以当前转写代次为事实边界增强已有类型化总结；不得引入无法回指当前转写证据的事实。仅允许覆盖 %q 产物页，保留原有模板结构和用户编辑内容；若发现用户已编辑，停止写入并报告跳过。",

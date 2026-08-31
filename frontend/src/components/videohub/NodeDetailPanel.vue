@@ -18,7 +18,17 @@
         </section>
         <section>
           <h3>来源视频</h3>
-          <template v-if="node.video_id">
+          <template v-if="node.evidence?.length">
+            <ul class="node-panel__evidence">
+              <li v-for="evidence in node.evidence" :key="`${evidence.video_id}-${evidence.chunk_index}`">
+                <span>{{ evidence.video_title || node.video_title || '未命名视频' }}</span>
+                <button class="node-panel__time" type="button" @click="selectVideo(evidence.video_id, evidence.start_ms / 1000)">
+                  {{ formatRange(evidence.start_ms, evidence.end_ms) }}
+                </button>
+              </li>
+            </ul>
+          </template>
+          <template v-else-if="node.video_id">
             <p>{{ node.video_title }}</p>
             <button class="node-panel__time" type="button" @click="selectVideo(node.video_id, node.seconds)">{{ formatTime(node.seconds) }}</button>
           </template>
@@ -52,6 +62,7 @@ const relatedVideos = computed(() => {
   return props.relatedNodes.filter(item => item.video_id && item.video_id !== props.node.video_id && !seen.has(item.video_id) && Boolean(seen.add(item.video_id)))
 })
 function formatTime(seconds = 0) { const value = Math.max(0, Math.floor(seconds)); return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}` }
+function formatRange(startMs: number, endMs: number) { return `${formatTime(startMs / 1000)} - ${formatTime(endMs / 1000)}` }
 function selectVideo(videoId: string, seconds = 0) { emit('selectVideoById', videoId, seconds) }
 onMounted(() => nextTick(() => document.querySelector<HTMLElement>('.node-panel')?.focus()))
 </script>
@@ -69,6 +80,9 @@ onMounted(() => nextTick(() => document.querySelector<HTMLElement>('.node-panel'
 .node-panel ul { margin: 0; padding-left: calc(var(--td-comp-margin-s) * 2); color: var(--td-text-color-secondary); }
 .node-panel__time, .node-panel__videos button { padding: 0; border: 0; background: transparent; color: var(--td-brand-color); font: inherit; cursor: pointer; }
 .node-panel__videos { display: grid; gap: var(--td-comp-margin-s); padding: 0 !important; list-style: none; }
+.node-panel__evidence { display: grid; gap: var(--td-comp-margin-s); padding: 0 !important; list-style: none; }
+.node-panel__evidence li { display: flex; align-items: center; justify-content: space-between; gap: var(--td-comp-margin-s); }
+.node-panel__evidence span { overflow: hidden; color: var(--td-text-color-primary); text-overflow: ellipsis; white-space: nowrap; }
 .node-panel__videos li { display: flex; align-items: center; justify-content: space-between; gap: var(--td-comp-margin-s); }
 .node-panel__videos span { overflow: hidden; color: var(--td-text-color-primary); text-overflow: ellipsis; white-space: nowrap; }
 .node-panel__muted { color: var(--td-text-color-placeholder) !important; }
