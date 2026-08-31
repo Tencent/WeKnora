@@ -2,6 +2,8 @@
 
 English | [简体中文](./README_CN.md)
 
+[npm](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora)
+
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) plugin that gives the harness agent
 first-class access to a [WeKnora](https://github.com/Tencent/WeKnora) knowledge base: hybrid retrieval, full document
 reading, and WeKnora's own composed answers with citations.
