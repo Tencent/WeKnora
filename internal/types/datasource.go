@@ -309,6 +309,10 @@ type Resource struct {
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
+// MetadataKeySourceURL is the metadata key carrying the original source URL
+// into search results and persisted message references.
+const MetadataKeySourceURL = "source_url"
+
 // FetchedItem represents a single document/content item fetched from external source
 type FetchedItem struct {
 	// Unique ID in the external system

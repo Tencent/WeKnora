@@ -136,6 +136,62 @@ func TestSendReply_EndToEnd_UsesRegionCloud(t *testing.T) {
 	}
 }
 
+func TestSendReply_EndToEnd_UsesMarkdownCardForCitations(t *testing.T) {
+	useTestHTTPClient(t)
+	fake := &fakeOpenPlatform{}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	a, _ := NewAdapter(testRegion(srv.URL), "cli_app", "secret", "", "", "")
+	incoming := &im.IncomingMessage{
+		Platform:  im.PlatformLark,
+		UserID:    "ou_user1",
+		ChatType:  im.ChatTypeDirect,
+		MessageID: "om_msg1",
+	}
+
+	err := a.SendReply(context.Background(), incoming, &im.ReplyMessage{
+		Content: "answer **with formatting**",
+		Citations: []im.ReplyCitation{{
+			Label: "S1",
+			Title: "Product Guide",
+			URL:   "https://larksuite.com/wiki/doc-1",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("SendReply: %v", err)
+	}
+
+	if got := fake.replyBody["msg_type"]; got != "interactive" {
+		t.Fatalf("msg_type = %v, want interactive", got)
+	}
+	content, ok := fake.replyBody["content"].(string)
+	if !ok {
+		t.Fatalf("content = %T, want JSON string", fake.replyBody["content"])
+	}
+	var card struct {
+		Schema string `json:"schema"`
+		Body   struct {
+			Elements []struct {
+				Tag     string `json:"tag"`
+				Content string `json:"content"`
+			} `json:"elements"`
+		} `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(content), &card); err != nil {
+		t.Fatalf("interactive content is not a card: %v", err)
+	}
+	if card.Schema != "2.0" || len(card.Body.Elements) != 1 {
+		t.Fatalf("card = %#v, want schema 2.0 with one element", card)
+	}
+	if card.Body.Elements[0].Tag != "markdown" {
+		t.Fatalf("card element tag = %q, want markdown", card.Body.Elements[0].Tag)
+	}
+	if !strings.Contains(card.Body.Elements[0].Content, "[S1] [Product Guide](https://larksuite.com/wiki/doc-1)") {
+		t.Fatalf("card markdown does not contain clickable citation: %q", card.Body.Elements[0].Content)
+	}
+}
+
 // A group that rejects reply-in-thread (230071) must still receive the answer
 // via the plain send-message API, addressed to the chat.
 func TestSendReply_EndToEnd_FallsBackToSendAPI(t *testing.T) {

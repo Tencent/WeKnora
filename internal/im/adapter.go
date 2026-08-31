@@ -114,12 +114,25 @@ const (
 type ReplyMessage struct {
 	// Content is the text content (Markdown).
 	Content string
+	// Citations contains source links that can be rendered as platform-native
+	// links. Adapters that do not support structured citations may ignore it.
+	Citations []ReplyCitation
 	// IsStreaming indicates whether this is a streaming chunk.
 	IsStreaming bool
 	// IsFinal marks the last chunk of a streaming reply.
 	IsFinal bool
 	// Extra holds platform-specific fields.
 	Extra map[string]string
+}
+
+// ReplyCitation is a source link attached to an IM reply.
+//
+// Label is the stable citation label shown to the user (for example, "S1").
+// Title is the human-readable source title and URL is the original source URL.
+type ReplyCitation struct {
+	Label string
+	Title string
+	URL   string
 }
 
 // Adapter is the interface every IM platform must implement.

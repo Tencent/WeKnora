@@ -1254,6 +1254,12 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 	for k, v := range item.Metadata {
 		metadata[k] = v
 	}
+	// Preserve the user-facing source URL for search results and IM citations.
+	// Put it after connector metadata so the canonical FetchedItem URL cannot be
+	// accidentally shadowed by a stale source_url value.
+	if sourceURL := strings.TrimSpace(item.URL); sourceURL != "" {
+		metadata[types.MetadataKeySourceURL] = sourceURL
+	}
 
 	// Check if a knowledge item with this external_id already exists → delete it first (update)
 	isUpdate := false

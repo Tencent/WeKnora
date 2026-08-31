@@ -499,6 +499,7 @@ func TestIngestItem_URLCreationAttachesDataSourceMetadata(t *testing.T) {
 	require.Len(t, repo.metadataUpdates, 1)
 	assert.Equal(t, ds.ID, repo.metadataUpdates[0]["datasource_id"])
 	assert.Equal(t, "url:1", repo.metadataUpdates[0]["external_id"])
+	assert.Equal(t, "https://example.com/doc", repo.metadataUpdates[0][types.MetadataKeySourceURL])
 }
 
 func TestProcessSync_SyncDeletionsDeletesMatchingKnowledge(t *testing.T) {

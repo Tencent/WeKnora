@@ -503,12 +503,11 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 		return fmt.Errorf("get access token: %w", err)
 	}
 
-	// Build text message content
-	content, _ := json.Marshal(map[string]string{"text": reply.Content})
+	msgType, content := buildReplyMessageContent(a.region.Platform, reply)
 
 	// Reply payload (no receive_id — the path message_id locates the chat)
 	replyPayload := map[string]interface{}{
-		"msg_type": "text",
+		"msg_type": msgType,
 		"content":  string(content),
 	}
 
@@ -516,11 +515,48 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 	receiveIDType, receiveID := a.resolveReceiveID(incoming)
 	fallbackPayload := map[string]interface{}{
 		"receive_id": receiveID,
-		"msg_type":   "text",
+		"msg_type":   msgType,
 		"content":    string(content),
 	}
 
 	return a.sendWithFallback(ctx, accessToken, incoming, replyPayload, fallbackPayload, receiveIDType)
+}
+
+// buildReplyMessageContent keeps ordinary replies as text messages. When the
+// service attaches citations, use a static CardKit markdown card so the answer
+// keeps its Markdown formatting and the source links remain clickable in
+// Feishu/Lark clients.
+func buildReplyMessageContent(platform im.Platform, reply *im.ReplyMessage) (msgType string, content []byte) {
+	if reply == nil {
+		reply = &im.ReplyMessage{}
+	}
+	if len(reply.Citations) == 0 {
+		content, _ = json.Marshal(map[string]string{"text": reply.Content})
+		return "text", content
+	}
+
+	citationText := im.FormatReplyCitations(platform, reply.Citations)
+	if citationText == "" {
+		content, _ = json.Marshal(map[string]string{"text": reply.Content})
+		return "text", content
+	}
+
+	card := map[string]interface{}{
+		"schema": "2.0",
+		"config": map[string]interface{}{
+			"wide_screen_mode": true,
+		},
+		"body": map[string]interface{}{
+			"elements": []map[string]interface{}{
+				{
+					"tag":     "markdown",
+					"content": reply.Content + citationText,
+				},
+			},
+		},
+	}
+	content, _ = json.Marshal(card)
+	return "interactive", content
 }
 
 // resolveReceiveID computes the (receive_id_type, receive_id) pair used by the
