@@ -1097,7 +1097,9 @@ func (s *userService) generateTokensForTenant(
 // SwitchTenant verifies that user has an active membership in
 // targetTenantID and issues a new token pair scoped to that tenant.
 // The previous refresh token (if provided) is revoked so the old session
-// can no longer roll forward into the source tenant.
+// can no longer roll forward into the source tenant. On success the
+// target is recorded (best-effort) as the user's last-active-tenant
+// preference.
 //
 // Returns ErrMembershipNotFound when the user is not a member of the
 // target tenant. Cross-tenant superuser access (CanAccessAllTenants)
@@ -1141,6 +1143,8 @@ func (s *userService) SwitchTenant(
 		return nil, fmt.Errorf("generate tokens: %w", err)
 	}
 
+	s.recordLastActiveTenant(ctx, user, targetTenantID)
+
 	// Best-effort revoke of the previous refresh token. Failure is
 	// logged but not fatal — the new tokens are already issued and the
 	// old refresh token will expire naturally.
@@ -1161,6 +1165,26 @@ func (s *userService) SwitchTenant(
 		Token:        accessToken,
 		RefreshToken: refreshToken,
 	}, nil
+}
+
+// recordLastActiveTenant records tenantID as the user's last-active-
+// tenant preference so fresh logins land in the last activated
+// workspace. A home pointer resolves the same as no preference, so
+// switching home just records home. Best-effort: errors are logged.
+func (s *userService) recordLastActiveTenant(ctx context.Context, user *types.User, tenantID uint64) {
+	if user == nil || tenantID == 0 {
+		return
+	}
+	patch := types.UserPreferences{LastActiveTenantID: &tenantID}
+	merged, err := s.UpdateUserPreferences(ctx, user.ID, patch)
+	if err != nil {
+		logger.Warnf(ctx,
+			"SwitchTenant: failed to record last-active-tenant preference for user %s tenant %d: %v",
+			user.ID, tenantID, err)
+		return
+	}
+	// Reflect the persisted preferences in the switch response.
+	user.Preferences = merged
 }
 
 // ValidateToken validates an access token. The second return value is

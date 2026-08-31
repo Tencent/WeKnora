@@ -672,11 +672,13 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 // (preserve existing value) from "explicit false". See
 // types.UserPreferences for the persistence-layer counterpart.
 type updateMyPreferencesRequest struct {
-	// LastActiveTenantID lets the SPA persist "after a fresh login,
-	// drop me back into this workspace" across devices. Send a positive
-	// workspace id to set / replace, or 0 to clear. Membership is validated
-	// at next login, not here. Nil = field omitted from the PATCH and
-	// stays untouched.
+	// LastActiveTenantID lets clients persist "after a fresh login,
+	// drop me back into this workspace" across devices. The SPA sends
+	// this after every tenant switch; POST /auth/switch-tenant records
+	// the same preference server-side. Send a positive workspace id to
+	// set / replace, or 0 to clear. Membership is validated at next
+	// login, not here. Nil = field omitted from the PATCH and stays
+	// untouched.
 	LastActiveTenantID *uint64 `json:"last_active_tenant_id"`
 }
 
