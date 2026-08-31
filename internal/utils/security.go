@@ -353,6 +353,16 @@ func IsPublicIP(ip net.IP) bool {
 	return !restricted
 }
 
+func publicIPs(ips []net.IP) []net.IP {
+	public := make([]net.IP, 0, len(ips))
+	for _, ip := range ips {
+		if IsPublicIP(ip) {
+			public = append(public, ip)
+		}
+	}
+	return public
+}
+
 // isZeros checks if a byte slice is all zeros
 func isZeros(b []byte) bool {
 	for _, v := range b {
@@ -470,11 +480,17 @@ func isSSRFSafeURL(rawURL string) (bool, string) {
 		return false, fmt.Sprintf("DNS resolution failed for hostname %s: cannot verify if it resolves to safe IP", hostname)
 	}
 
-	// Check if any resolved IP is restricted
-	for _, resolvedIP := range ips {
-		if restricted, reason := isRestrictedIP(resolvedIP); restricted {
-			return false, fmt.Sprintf("hostname %s resolves to restricted IP %s: %s", hostname, resolvedIP.String(), reason)
+	// A hostname can legitimately have both public and private DNS answers
+	// (for example, split-horizon DNS). The dial-time guard below pins the
+	// connection to a public answer, so reject only hosts that have no public
+	// answer at all. This keeps the validation and the final TCP sink aligned.
+	if len(publicIPs(ips)) == 0 {
+		for _, resolvedIP := range ips {
+			if restricted, reason := isRestrictedIP(resolvedIP); restricted {
+				return false, fmt.Sprintf("hostname %s resolves to restricted IP %s: %s", hostname, resolvedIP.String(), reason)
+			}
 		}
+		return false, fmt.Sprintf("hostname %s has no public DNS address", hostname)
 	}
 
 	// Check for suspicious port numbers
@@ -930,22 +946,34 @@ func SSRFSafeDialContext(ctx context.Context, network, addr string) (net.Conn, e
 		return nil, fmt.Errorf("DNS resolution returned no addresses for %s", host)
 	}
 
-	// Validate all resolved IPs
+	// Split-horizon DNS may return both public and private addresses. Never dial
+	// the restricted answers, but allow the host when at least one public address
+	// is available. This preserves the DNS-rebinding protection at the TCP sink.
+	publicAddresses := make([]net.IP, 0, len(ips))
 	for _, ipAddr := range ips {
-		if restricted, reason := isRestrictedIP(ipAddr.IP); restricted {
-			return nil, fmt.Errorf("connection blocked: %s resolves to restricted IP %s (%s)", host, ipAddr.IP.String(), reason)
+		if IsPublicIP(ipAddr.IP) {
+			publicAddresses = append(publicAddresses, ipAddr.IP)
 		}
 	}
+	if len(publicAddresses) == 0 {
+		for _, ipAddr := range ips {
+			if restricted, reason := isRestrictedIP(ipAddr.IP); restricted {
+				return nil, fmt.Errorf("connection blocked: %s resolves to restricted IP %s (%s)", host, ipAddr.IP.String(), reason)
+			}
+		}
+		return nil, fmt.Errorf("connection blocked: %s has no public DNS address", host)
+	}
 
-	// If we get here, all IPs are safe. Pin the connection to the validated DNS
-	// answers; TLS still uses the request hostname for SNI/certificate checks.
+	// If we get here, at least one public IP is available. Pin the connection to
+	// the validated DNS answers; TLS still uses the request hostname for
+	// SNI/certificate checks.
 	dialer := &net.Dialer{
 		Timeout:   30 * time.Second,
 		KeepAlive: 30 * time.Second,
 	}
 	var lastErr error
-	for _, ipAddr := range ips {
-		pinnedAddr := net.JoinHostPort(ipAddr.IP.String(), port)
+	for _, ip := range publicAddresses {
+		pinnedAddr := net.JoinHostPort(ip.String(), port)
 		conn, dialErr := dialer.DialContext(ctx, network, pinnedAddr)
 		if dialErr == nil {
 			return conn, nil

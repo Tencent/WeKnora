@@ -237,12 +237,11 @@ func (f *Fetcher) pinnedDialContext() func(context.Context, string, string) (net
 		if len(ips) == 0 {
 			return nil, fmt.Errorf("DNS resolution failed: no addresses for %s", host)
 		}
-		for _, ip := range ips {
-			if !utils.IsPublicIP(ip) {
-				return nil, fmt.Errorf("connection blocked: %s resolves to restricted IP %s", host, ip)
-			}
+		publicIPs := filterPublicIPs(ips)
+		if len(publicIPs) == 0 {
+			return nil, fmt.Errorf("connection blocked: %s resolves only to restricted IPs", host)
 		}
-		pinnedAddress := net.JoinHostPort(ips[0].String(), port)
+		pinnedAddress := net.JoinHostPort(publicIPs[0].String(), port)
 		if f.dialContext != nil {
 			return f.dialContext(ctx, network, pinnedAddress)
 		}
@@ -278,13 +277,23 @@ func (f *Fetcher) resolvePinnedTarget(ctx context.Context, rawURL string) (pinne
 		return pinnedTarget{}, newFetchError(ErrorDNS, true, "DNS lookup returned no addresses for %s", parsedURL.Hostname())
 	}
 	if !utils.IsSSRFWhitelisted(parsedURL.Hostname()) {
-		for _, ip := range ips {
-			if !utils.IsPublicIP(ip) {
-				return pinnedTarget{}, newFetchError(ErrorSSRFRejected, false, "host resolves to restricted IP %s", ip)
-			}
+		publicIPs := filterPublicIPs(ips)
+		if len(publicIPs) == 0 {
+			return pinnedTarget{}, newFetchError(ErrorSSRFRejected, false, "host resolves only to restricted IPs")
 		}
+		return pinnedTarget{URL: parsedURL, Host: parsedURL.Hostname(), Port: port, IP: publicIPs[0]}, nil
 	}
 	return pinnedTarget{URL: parsedURL, Host: parsedURL.Hostname(), Port: port, IP: ips[0]}, nil
+}
+
+func filterPublicIPs(ips []net.IP) []net.IP {
+	public := make([]net.IP, 0, len(ips))
+	for _, ip := range ips {
+		if utils.IsPublicIP(ip) {
+			public = append(public, ip)
+		}
+	}
+	return public
 }
 
 func lookupPublicDNS(ctx context.Context, host string) ([]net.IP, error) {
