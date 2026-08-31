@@ -265,3 +265,56 @@ func TestInstallTranscriptCreateOpensTheLogWithThePrompt(t *testing.T) {
 	require.Equal(t, []types.ResponseType{types.ResponseTypeInstallPrompt}, streams.types())
 	require.Equal(t, "install pdf-tools", streams.events[0].Content)
 }
+
+// An install may run a second installer round, because verification happens
+// after the agent stops and a dependency it names is something the agent can
+// still fix. The engine reports "complete" at the end of every turn, so the
+// transcript must not treat the first one as the end of the install — a console
+// that saw it would stop following before the repair round began.
+func TestInstallTranscriptStaysOpenAcrossInstallerRounds(t *testing.T) {
+	tr, bus, streams, messages := newTranscriptForTest(t)
+	ctx := context.Background()
+
+	finishRound := func(steps int, ms int64) {
+		require.NoError(t, bus.Emit(ctx, event.Event{
+			ID: "done", Type: event.EventAgentComplete,
+			Data: event.AgentCompleteData{
+				MessageID: "msg-1", TotalSteps: steps, TotalDurationMs: ms,
+			},
+		}))
+	}
+
+	finishRound(3, 1000)
+	tr.RecordPrompt("Verification failed. Install defusedxml into the venv.")
+	finishRound(2, 500)
+	tr.Finish(ctx, nil)
+
+	kinds := streams.types()
+	require.Equal(t, []types.ResponseType{
+		types.ResponseTypeInstallPrompt,
+		types.ResponseTypeComplete,
+	}, kinds, "the repair instruction has to be in the log, and the install ends once")
+	require.Contains(t, streams.events[0].Content, "Install defusedxml")
+
+	terminal := streams.events[len(streams.events)-1]
+	require.EqualValues(t, 5, terminal.Data["total_steps"],
+		"an install that needed a repair round cost both turns")
+	require.EqualValues(t, 1500, terminal.Data["total_duration_ms"])
+	require.Len(t, messages.updated, 1)
+}
+
+// Finish is deferred by the install path and also called on the error path that
+// gives up before that defer is armed. Saying "this install is over" twice would
+// duplicate the verdict in the record people read.
+func TestInstallTranscriptFinishIsIdempotent(t *testing.T) {
+	tr, _, streams, messages := newTranscriptForTest(t)
+
+	tr.Finish(context.Background(), errors.New("python verification failed: boom"))
+	tr.Finish(context.Background(), errors.New("python verification failed: boom"))
+
+	require.Equal(t, []types.ResponseType{
+		types.ResponseTypeError,
+		types.ResponseTypeComplete,
+	}, streams.types())
+	require.Len(t, messages.updated, 1)
+}

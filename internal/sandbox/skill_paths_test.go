@@ -161,10 +161,34 @@ func TestSkillInterpreterCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("shell scripts run with sh", func(t *testing.T) {
+	// Skills ship `#!/bin/bash` almost exclusively, and on Debian /bin/sh is
+	// dash: an array literal, `function f()`, a C-style for loop and process
+	// substitution are syntax errors there. Running these files with sh broke
+	// scripts that are perfectly valid, and made the install-time `sh -n` check
+	// refuse them on the way in.
+	t.Run("shell scripts prefer bash", func(t *testing.T) {
 		cmd, args := SkillInterpreterCommand(dir, dir+"/scripts/run.sh")
 		require.Equal(t, "/bin/sh", cmd)
-		require.Equal(t, []string{dir + "/scripts/run.sh"}, args)
+		require.Len(t, args, 3)
+		require.Equal(t, "-c", args[0])
+		require.Contains(t, args[1], "exec bash "+dir+"/scripts/run.sh")
+		require.Contains(t, args[1], "else", "there must be a fallback when bash is absent")
+		require.Equal(t, "weknora-skill", args[2])
+	})
+
+	t.Run("a shell script receives the caller's arguments", func(t *testing.T) {
+		if _, err := os.Stat("/bin/sh"); err != nil {
+			t.Skipf("shell is not available: %v", err)
+		}
+		scriptDir := t.TempDir()
+		script := filepath.Join(scriptDir, "echo-args.sh")
+		require.NoError(t, os.WriteFile(script, []byte("printf '%s\\n' \"$@\"\n"), 0o755))
+
+		cmd, baseArgs := SkillInterpreterCommand(scriptDir, script)
+		out, err := exec.Command(cmd, append(append([]string{}, baseArgs...),
+			"--first", "value")...).CombinedOutput()
+		require.NoError(t, err, string(out))
+		require.Equal(t, "--first\nvalue\n", string(out))
 	})
 
 	t.Run("unknown extension falls back to sh", func(t *testing.T) {
