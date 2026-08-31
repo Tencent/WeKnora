@@ -9,6 +9,7 @@ interface WeKnoraStreamChunk {
 export interface ParsedStreamChunk {
   kind: 'answer' | 'thinking' | 'activity' | 'complete' | 'error' | 'ignore'
   content?: string
+  done?: boolean
 }
 
 function chunkType(data: WeKnoraStreamChunk) {
@@ -54,8 +55,13 @@ function activityFromChunk(type: string, data: WeKnoraStreamChunk) {
   return ''
 }
 
+function markDone<T extends ParsedStreamChunk>(chunk: T, data: WeKnoraStreamChunk): T {
+  return data.done === true ? { ...chunk, done: true } : chunk
+}
+
 export function parseWeKnoraStreamChunk(raw: string): ParsedStreamChunk {
-  if (!raw || raw === '[DONE]') return { kind: 'ignore' }
+  if (!raw) return { kind: 'ignore' }
+  if (raw === '[DONE]') return { kind: 'complete', done: true }
   let data: WeKnoraStreamChunk
   try {
     data = JSON.parse(raw)
@@ -64,11 +70,11 @@ export function parseWeKnoraStreamChunk(raw: string): ParsedStreamChunk {
   }
 
   const type = chunkType(data)
-  if (type === 'error') return { kind: 'error', content: streamErrorMessage(data) }
-  if (type === 'answer') return { kind: 'answer', content: String(data.content || '') }
-  if (type === 'thinking' || type === 'reflection') return { kind: 'thinking', content: String(data.content || '') }
-  if (type === 'complete' || (!type && data.done)) return { kind: 'complete', content: completeAnswer(data) }
+  if (type === 'error') return markDone({ kind: 'error', content: streamErrorMessage(data) }, data)
+  if (type === 'answer') return markDone({ kind: 'answer', content: String(data.content || '') }, data)
+  if (type === 'thinking' || type === 'reflection') return markDone({ kind: 'thinking', content: String(data.content || '') }, data)
+  if (type === 'complete' || (!type && data.done)) return { kind: 'complete', content: completeAnswer(data), done: true }
 
   const activity = activityFromChunk(type, data)
-  return activity ? { kind: 'activity', content: activity } : { kind: 'ignore' }
+  return activity ? markDone({ kind: 'activity', content: activity }, data) : markDone({ kind: 'ignore' }, data)
 }

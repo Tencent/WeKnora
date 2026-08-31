@@ -24,6 +24,7 @@ test('keeps error chunks red even when they also mark the stream done', () => {
   assert.deepEqual(parseWeKnoraStreamChunk(JSON.stringify({ response_type: 'error', content: 'agent unavailable', done: true })), {
     kind: 'error',
     content: 'agent unavailable',
+    done: true,
   })
 })
 
@@ -31,5 +32,21 @@ test('uses final_answer from complete event when the agent did not emit answer c
   assert.deepEqual(parseWeKnoraStreamChunk(JSON.stringify({ response_type: 'complete', data: { final_answer: '最终答案' }, done: true })), {
     kind: 'complete',
     content: '最终答案',
+    done: true,
+  })
+})
+
+test('marks done answer chunks as complete enough for video assistant unlock', () => {
+  assert.deepEqual(parseWeKnoraStreamChunk(JSON.stringify({ response_type: 'answer', content: '可执行建议', done: true })), {
+    kind: 'answer',
+    content: '可执行建议',
+    done: true,
+  })
+})
+
+test('treats SSE DONE marker as completion', () => {
+  assert.deepEqual(parseWeKnoraStreamChunk('[DONE]'), {
+    kind: 'complete',
+    done: true,
   })
 })

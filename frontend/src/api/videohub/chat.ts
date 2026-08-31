@@ -411,6 +411,7 @@ async function streamAnswer(sessionID: string, question: string, scope: ScopeRes
   const agentEventStream: Record<string, unknown>[] = []
   const eventMap = new Map<string, Record<string, unknown>>()
   const pendingToolCalls = new Map<string, Record<string, unknown>>()
+  const streamController = new AbortController()
   const emitChunk = () => options.onChunk?.({
     id: `stream-${sessionID}`,
     sender: 'assistant',
@@ -428,6 +429,7 @@ async function streamAnswer(sessionID: string, question: string, scope: ScopeRes
   const endpoint = scope.agent_id ? 'agent-chat' : 'knowledge-chat'
   await fetchEventSource(`${apiBase}/api/v1/${endpoint}/${sessionID}`, {
     method: 'POST',
+    signal: streamController.signal,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
@@ -475,6 +477,7 @@ async function streamAnswer(sessionID: string, question: string, scope: ScopeRes
         throw new Error(chunk.content || '问答生成失败')
       }
       if (chunk.kind !== 'ignore' || payload) emitChunk()
+      if (chunk.done) streamController.abort()
     },
     onerror: error => {
       throw error
