@@ -163,6 +163,20 @@ type genericProvider struct{ baseProvider }
 func (genericProvider) Name() provider.ProviderName { return provider.ProviderGeneric }
 func (genericProvider) Thinking() ThinkingStrategy  { return chatTemplateKwargs{} }
 
+// genericOpenAIReasoningProvider handles OpenAI-compatible deployments of
+// GPT-5 and o-series models. These models reject the vLLM-specific
+// chat_template_kwargs field, even when the deployment is configured as the
+// generic provider.
+type genericOpenAIReasoningProvider struct{ baseProvider }
+
+func (genericOpenAIReasoningProvider) Name() provider.ProviderName { return provider.ProviderGeneric }
+func (genericOpenAIReasoningProvider) Matches(model string) bool {
+	return provider.IsOpenAIReasoningOrGPT5Model(model)
+}
+func (genericOpenAIReasoningProvider) ShapeRequest(req *openai.ChatCompletionRequest, _ *ChatOptions, _ bool) {
+	shapeOpenAIReasoning(req)
+}
+
 type nvidiaProvider struct{ baseProvider }
 
 func (nvidiaProvider) Name() provider.ProviderName { return provider.ProviderNvidia }
@@ -276,6 +290,7 @@ var providerRegistry = []providerAdapter{
 	qwenThinkingProvider{},
 	lkeapProvider{},
 	deepseekProvider{},
+	genericOpenAIReasoningProvider{},
 	genericProvider{},
 	geminiProvider{},
 	volcengineProvider{},
