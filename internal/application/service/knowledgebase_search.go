@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -41,7 +42,38 @@ func (s *knowledgeBaseService) GetQueryEmbedding(ctx context.Context, kbID strin
 		return nil, err
 	}
 
-	return embeddingModel.Embed(ctx, queryText)
+	vector, err := embeddingModel.Embed(ctx, queryText)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateQueryEmbeddingDimension(embeddingModel, len(vector)); err != nil {
+		logger.Errorf(ctx, "GetQueryEmbedding: %v", err)
+		return nil, err
+	}
+	return vector, nil
+}
+
+// validateQueryEmbeddingDimension catches provider/model configuration drift
+// before a malformed query reaches the vector store. Without this check, a
+// provider returning a different vector size is reported as the misleading
+// generic 2201 "bound store unavailable" error (or, for dimension-partitioned
+// stores, silently produces no matches).
+func validateQueryEmbeddingDimension(model embedding.Embedder, actual int) error {
+	if model == nil || actual == 0 {
+		return nil
+	}
+	expected := model.GetDimensions()
+	if expected <= 0 || expected == actual {
+		return nil
+	}
+	return apperrors.NewVectorStoreUnavailableError(
+		"embedding vector dimension does not match the configured model",
+	).WithDetails(map[string]any{
+		"model":              model.GetModelName(),
+		"expected_dimension": expected,
+		"actual_dimension":   actual,
+		"hint":               fmt.Sprintf("check the embedding model configuration and rebuild the affected index (%d dimensions)", expected),
+	})
 }
 
 // ResolveEmbeddingModelKeys resolves embedding model IDs to their actual model
@@ -477,6 +509,10 @@ func (s *knowledgeBaseService) resolveQueryEmbedding(
 	queryEmbedding, err := embeddingModel.Embed(ctx, params.QueryText)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to embed query text, query text: %s, error: %v", params.QueryText, err)
+		return nil, err
+	}
+	if err := validateQueryEmbeddingDimension(embeddingModel, len(queryEmbedding)); err != nil {
+		logger.Errorf(ctx, "resolveQueryEmbedding: %v", err)
 		return nil, err
 	}
 	logger.Infof(ctx, "Query embedding generated successfully, embedding vector length: %d", len(queryEmbedding))
