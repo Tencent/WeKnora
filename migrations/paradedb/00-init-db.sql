@@ -148,6 +148,8 @@ CREATE TABLE IF NOT EXISTS messages (
     knowledge_references JSONB NOT NULL DEFAULT '[]',
     agent_steps JSONB DEFAULT NULL,
     is_completed BOOLEAN NOT NULL DEFAULT false,
+    feedback_id VARCHAR(128) NOT NULL DEFAULT '',
+    feedback JSONB DEFAULT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE
@@ -157,6 +159,7 @@ COMMENT ON COLUMN messages.agent_steps IS 'Agent execution steps (reasoning proc
 
 -- Create Index for messages
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id); 
+CREATE INDEX IF NOT EXISTS idx_messages_feedback_id ON messages(feedback_id);
 
 
 CREATE TABLE IF NOT EXISTS chunks (

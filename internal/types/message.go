@@ -218,6 +218,42 @@ func (m *MessageArtifacts) Scan(value interface{}) error {
 	return json.Unmarshal(b, m)
 }
 
+// MessageFeedback records a user's feedback for an assistant message.
+// It mirrors the feedback_event payload sent by the WeCom intelligent bot.
+type MessageFeedback struct {
+	ID                   string    `json:"id"`
+	Type                 int       `json:"type"`
+	Content              string    `json:"content,omitempty"`
+	InaccurateReasonList []int     `json:"inaccurate_reason_list,omitempty"`
+	ReceivedAt           time.Time `json:"received_at"`
+}
+
+// Value implements driver.Valuer for the message feedback JSONB column.
+func (m *MessageFeedback) Value() (driver.Value, error) {
+	if m == nil {
+		return nil, nil
+	}
+	return json.Marshal(m)
+}
+
+// Scan implements sql.Scanner for the message feedback JSONB column.
+func (m *MessageFeedback) Scan(value interface{}) error {
+	if value == nil {
+		*m = MessageFeedback{}
+		return nil
+	}
+	var data []byte
+	switch v := value.(type) {
+	case []byte:
+		data = v
+	case string:
+		data = []byte(v)
+	default:
+		return nil
+	}
+	return json.Unmarshal(data, m)
+}
+
 // MentionedItems is a slice of MentionedItem for database storage
 type MentionedItems []MentionedItem
 
@@ -295,6 +331,12 @@ type Message struct {
 	RenderedContent string `json:"-" gorm:"type:text;column:rendered_content;default:''"`
 	// Channel indicates the source channel of this message (e.g., "web", "api", "im")
 	Channel string `json:"channel,omitempty" gorm:"type:varchar(50);default:''"`
+	// FeedbackID is the platform feedback identifier used to associate a
+	// WeCom feedback_event with the assistant message that enabled feedback.
+	// It is kept out of API responses; Feedback contains the user-visible data.
+	FeedbackID string `json:"-" gorm:"type:varchar(128);default:'';index"`
+	// Feedback stores the latest user feedback for this assistant message.
+	Feedback *MessageFeedback `json:"feedback,omitempty" gorm:"type:jsonb;column:feedback"`
 	// AgentID is the agent used for this individual assistant turn. Unlike the
 	// session's last_request_state it remains stable when users switch agents.
 	AgentID string `json:"agent_id,omitempty" gorm:"type:varchar(36);default:'';index"`

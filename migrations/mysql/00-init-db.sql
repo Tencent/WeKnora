@@ -128,6 +128,8 @@ CREATE TABLE messages (
     agent_tenant_id INTEGER NOT NULL DEFAULT 0,
     model_id VARCHAR(64) NOT NULL DEFAULT '',
     execution_context JSON NOT NULL,
+    feedback_id VARCHAR(128) NOT NULL DEFAULT '',
+    feedback JSON DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL
@@ -135,6 +137,7 @@ CREATE TABLE messages (
 
 CREATE INDEX idx_messages_session_role ON messages(session_id, role); 
 CREATE INDEX idx_messages_agent_id ON messages(agent_id);
+CREATE INDEX idx_messages_feedback_id ON messages(feedback_id);
 
 CREATE TABLE message_suggestion_sets (
     id VARCHAR(36) PRIMARY KEY,

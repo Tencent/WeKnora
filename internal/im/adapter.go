@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -39,9 +40,10 @@ const (
 type MessageType string
 
 const (
-	MessageTypeText  MessageType = "text"
-	MessageTypeFile  MessageType = "file"
-	MessageTypeImage MessageType = "image"
+	MessageTypeText     MessageType = "text"
+	MessageTypeFile     MessageType = "file"
+	MessageTypeImage    MessageType = "image"
+	MessageTypeFeedback MessageType = "feedback"
 )
 
 // IncomingMessage is the unified message parsed from an IM callback.
@@ -82,6 +84,10 @@ type IncomingMessage struct {
 	Quote *QuotedMessage
 	// Extra holds platform-specific fields (e.g., WeCom stream ID).
 	Extra map[string]string
+	// Feedback is populated for platform feedback events. Feedback events do
+	// not enter the QA pipeline; the IM service persists them against the
+	// assistant message identified by Feedback.ID.
+	Feedback *types.MessageFeedback
 }
 
 // QuotedMessage holds the content and metadata of a quoted/replied message.

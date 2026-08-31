@@ -262,6 +262,20 @@ func (s *messageService) UpdateMessageRenderedContent(ctx context.Context, sessi
 	return s.messageRepo.UpdateMessageRenderedContent(ctx, sessionID, messageID, renderedContent)
 }
 
+// UpdateMessageFeedback persists a platform feedback event without requiring
+// an interactive session context. The authenticated IM adapter already scopes
+// the event to its configured channel; the repository further restricts the
+// update to an assistant message from the IM channel.
+func (s *messageService) UpdateMessageFeedback(ctx context.Context, feedbackID string, feedback *types.MessageFeedback) error {
+	updater, ok := s.messageRepo.(interface {
+		UpdateMessageFeedback(context.Context, string, *types.MessageFeedback) error
+	})
+	if !ok {
+		return errors.New("message repository does not support feedback updates")
+	}
+	return updater.UpdateMessageFeedback(ctx, feedbackID, feedback)
+}
+
 // DeleteMessage removes a message from a session, also cleaning up its Knowledge entry in the chat history KB.
 func (s *messageService) DeleteMessage(ctx context.Context, sessionID string, messageID string) error {
 	logger.Info(ctx, "Start deleting message")

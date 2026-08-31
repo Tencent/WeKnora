@@ -554,6 +554,13 @@ func createIMUserMessagePayload(sessionID, content, requestID string, attachment
 	}
 }
 
+func imFeedbackID(msg *IncomingMessage) string {
+	if msg == nil || msg.Platform != PlatformWeCom || msg.Extra == nil {
+		return ""
+	}
+	return strings.TrimSpace(msg.Extra["req_id"])
+}
+
 type imDownloadedAttachment struct {
 	fileName string
 	content  []byte
@@ -657,7 +664,11 @@ func truncateUTF8ByBytes(content string, maxBytes int) string {
 	return content[:end]
 }
 
-func createIMAssistantMessagePayload(sessionID, requestID string) *types.Message {
+func createIMAssistantMessagePayload(sessionID, requestID string, feedbackID ...string) *types.Message {
+	platformFeedbackID := ""
+	if len(feedbackID) > 0 {
+		platformFeedbackID = strings.TrimSpace(feedbackID[0])
+	}
 	return &types.Message{
 		SessionID:   sessionID,
 		Role:        "assistant",
@@ -665,6 +676,7 @@ func createIMAssistantMessagePayload(sessionID, requestID string) *types.Message
 		CreatedAt:   time.Now(),
 		IsCompleted: false,
 		Channel:     "im",
+		FeedbackID:  platformFeedbackID,
 	}
 }
 
@@ -1629,6 +1641,12 @@ func (s *Service) isDuplicate(ctx context.Context, messageID string) bool {
 
 // HandleMessage processes an incoming IM message end-to-end using channel config.
 func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, channelID string) error {
+	if msg == nil {
+		return errors.New("incoming IM message is nil")
+	}
+	if msg.MessageType == MessageTypeFeedback {
+		return s.handleMessageFeedback(ctx, msg)
+	}
 	// Dedup: skip if this message was already processed (IM platforms may retry)
 	if msg.MessageID != "" {
 		if s.isDuplicate(ctx, msg.MessageID) {
@@ -1848,6 +1866,28 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	return nil
 }
 
+func (s *Service) handleMessageFeedback(ctx context.Context, msg *IncomingMessage) error {
+	if msg.Feedback == nil || strings.TrimSpace(msg.Feedback.ID) == "" {
+		logger.Warnf(ctx, "[IM] Ignoring feedback event without feedback ID")
+		return nil
+	}
+	updater, ok := s.messageService.(interface {
+		UpdateMessageFeedback(context.Context, string, *types.MessageFeedback) error
+	})
+	if !ok {
+		return errors.New("message service does not support feedback updates")
+	}
+	if err := updater.UpdateMessageFeedback(ctx, msg.Feedback.ID, msg.Feedback); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			logger.Warnf(ctx, "[IM] Feedback target not found: %s", msg.Feedback.ID)
+			return nil
+		}
+		return fmt.Errorf("persist feedback %s: %w", msg.Feedback.ID, err)
+	}
+	logger.Infof(ctx, "[IM] Stored feedback: id=%s type=%d", msg.Feedback.ID, msg.Feedback.Type)
+	return nil
+}
+
 func emptyIncomingMessageReply(msg *IncomingMessage) (string, bool) {
 	if msg == nil || strings.TrimSpace(msg.Content) != "" {
 		return "", false
@@ -1933,7 +1973,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	}
 
 	// Non-streaming fallback: collect full answer then send.
-	answer, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs, attachments, imageURLs, req.userKey, req.msg.Quote)
+	answer, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs, attachments, imageURLs, req.userKey, req.msg.Quote, imFeedbackID(req.msg))
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA failed: %v, sending fallback reply", err)
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
@@ -2633,7 +2673,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	}
 
 	// Create placeholder assistant message
-	assistantMsg, err = s.messageService.CreateMessage(qaCtx, createIMAssistantMessagePayload(session.ID, requestID))
+	assistantMsg, err = s.messageService.CreateMessage(qaCtx, createIMAssistantMessagePayload(session.ID, requestID, imFeedbackID(msg)))
 	if err != nil {
 		return fmt.Errorf("create assistant message: %w", err)
 	}
@@ -2776,7 +2816,7 @@ loop:
 
 // fallbackNonStream is used when streaming initialization fails.
 func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, adapter Adapter, userKey string, tenant *types.Tenant) error {
-	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote)
+	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote, imFeedbackID(msg))
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA fallback failed: %v", err)
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
@@ -2786,7 +2826,7 @@ func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, s
 }
 
 // runQA executes the WeKnora QA pipeline and returns the full answer text.
-func (s *Service) runQA(ctx context.Context, session *types.Session, query string, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, userKey string, quote *QuotedMessage) (string, error) {
+func (s *Service) runQA(ctx context.Context, session *types.Session, query string, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, userKey string, quote *QuotedMessage, feedbackID ...string) (string, error) {
 	// Cancellable context (no hard deadline): each agent round has its own
 	// LLMCallTimeout. The context can still be cancelled by /stop.
 	ctx, cancel := context.WithCancel(ctx)
@@ -2864,7 +2904,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	}
 
 	// Create a placeholder assistant message
-	assistantMsg, err := s.messageService.CreateMessage(ctx, createIMAssistantMessagePayload(session.ID, requestID))
+	assistantMsg, err := s.messageService.CreateMessage(ctx, createIMAssistantMessagePayload(session.ID, requestID, feedbackID...))
 	if err != nil {
 		return "", fmt.Errorf("create assistant message: %w", err)
 	}

@@ -22,6 +22,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	ws "github.com/gorilla/websocket"
 )
@@ -96,9 +97,60 @@ type botMessage struct {
 		MsgItem []botMixedItem `json:"msg_item"`
 	} `json:"mixed"`
 	Quote *botMessage `json:"quote,omitempty"` // quoted message (optional)
-	Event struct {
-		EventType string `json:"eventtype"`
-	} `json:"event"`
+	Event botEvent    `json:"event"`
+	// Some WeCom deployments put feedback fields beside eventtype instead of
+	// nesting them under event. Keep both forms compatible.
+	EventType            string `json:"eventtype,omitempty"`
+	FeedbackID           string `json:"feedback_id,omitempty"`
+	FeedbackType         int    `json:"type,omitempty"`
+	FeedbackContent      string `json:"content,omitempty"`
+	InaccurateReasonList []int  `json:"inaccurate_reason_list,omitempty"`
+}
+
+type botEvent struct {
+	EventType            string `json:"eventtype"`
+	FeedbackID           string `json:"feedback_id"`
+	FeedbackType         int    `json:"type"`
+	FeedbackContent      string `json:"content"`
+	InaccurateReasonList []int  `json:"inaccurate_reason_list"`
+}
+
+func (m botMessage) feedback() *types.MessageFeedback {
+	feedbackID := m.Event.FeedbackID
+	feedbackType := m.Event.FeedbackType
+	feedbackContent := m.Event.FeedbackContent
+	reasons := m.Event.InaccurateReasonList
+	if feedbackID == "" {
+		feedbackID = m.FeedbackID
+		feedbackType = m.FeedbackType
+		feedbackContent = m.FeedbackContent
+		reasons = m.InaccurateReasonList
+	}
+	if strings.TrimSpace(feedbackID) == "" {
+		return nil
+	}
+	return &types.MessageFeedback{
+		ID:                   feedbackID,
+		Type:                 feedbackType,
+		Content:              feedbackContent,
+		InaccurateReasonList: append([]int(nil), reasons...),
+		ReceivedAt:           time.Now(),
+	}
+}
+
+func (m botMessage) eventType() string {
+	if m.Event.EventType != "" {
+		return m.Event.EventType
+	}
+	if m.EventType != "" {
+		return m.EventType
+	}
+	// Older WeCom gateways may use the event name as msgtype instead of
+	// wrapping it in an event object.
+	if m.MsgType == "feedback_event" {
+		return m.MsgType
+	}
+	return ""
 }
 
 // botMixedItem is one element in a mixed (text+image) message.
@@ -121,6 +173,22 @@ type streamReplyBody struct {
 		Finish  bool   `json:"finish"`
 		Content string `json:"content"`
 	} `json:"stream"`
+	Feedback *streamReplyFeedback `json:"feedback,omitempty"`
+}
+
+type streamReplyFeedback struct {
+	ID string `json:"id"`
+}
+
+func newStreamReplyBody(streamID, content string, finish bool, feedbackID string) streamReplyBody {
+	body := streamReplyBody{MsgType: "stream"}
+	body.Stream.ID = streamID
+	body.Stream.Finish = finish
+	body.Stream.Content = content
+	if finish && strings.TrimSpace(feedbackID) != "" {
+		body.Feedback = &streamReplyFeedback{ID: feedbackID}
+	}
+	return body
 }
 
 // MessageHandler is called when an IM message is received via long connection.
@@ -235,10 +303,7 @@ func (c *LongConnClient) SendReply(ctx context.Context, incoming *im.IncomingMes
 	// Generate a unique stream ID for this reply
 	streamID := fmt.Sprintf("stream_%d", c.reqSeq.Add(1))
 
-	body := streamReplyBody{MsgType: "stream"}
-	body.Stream.ID = streamID
-	body.Stream.Finish = true
-	body.Stream.Content = reply.Content
+	body := newStreamReplyBody(streamID, reply.Content, true, reqID)
 
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
@@ -346,10 +411,7 @@ func (c *LongConnClient) sendStreamFrame(incoming *im.IncomingMessage, streamID,
 		return fmt.Errorf("missing req_id in incoming message extra")
 	}
 
-	body := streamReplyBody{MsgType: "stream"}
-	body.Stream.ID = streamID
-	body.Stream.Finish = finish
-	body.Stream.Content = content
+	body := newStreamReplyBody(streamID, content, finish, reqID)
 
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
@@ -514,13 +576,41 @@ func (c *LongConnClient) handleCallback(ctx context.Context, conn *ws.Conn, fram
 		msg.Text.Content, msg.Image.URL, msg.File.URL, msg.Voice.Content, len(msg.Mixed.MsgItem))
 
 	// Handle server-side events (e.g. disconnected_event) before normal messages.
-	if msg.MsgType == "event" {
-		switch msg.Event.EventType {
+	if msg.MsgType == "event" || msg.MsgType == "feedback_event" {
+		eventType := msg.eventType()
+		switch eventType {
 		case "disconnected_event":
 			logger.Warnf(ctx, "[WeCom] Server sent disconnected_event, closing connection to trigger reconnect")
 			c.closeConnIf(conn)
+		case "feedback_event":
+			feedback := msg.feedback()
+			if feedback == nil {
+				logger.Warnf(ctx, "[WeCom] Feedback event did not include feedback_id")
+				return
+			}
+			reqID := ""
+			if frame.Headers != nil {
+				reqID = frame.Headers["req_id"]
+			}
+			feedbackMessage := &im.IncomingMessage{
+				Platform:    im.PlatformWeCom,
+				MessageType: im.MessageTypeFeedback,
+				UserID:      msg.From.UserID,
+				ChatID:      msg.ChatID,
+				MessageID:   msg.MsgID,
+				Feedback:    feedback,
+				Extra:       map[string]string{"req_id": reqID},
+			}
+			if msg.ChatType == "group" {
+				feedbackMessage.ChatType = im.ChatTypeGroup
+			} else {
+				feedbackMessage.ChatType = im.ChatTypeDirect
+			}
+			if err := c.handler(ctx, feedbackMessage); err != nil {
+				logger.Errorf(ctx, "[WeCom] Handle feedback error: %v", err)
+			}
 		default:
-			logger.Infof(ctx, "[WeCom] Ignoring event type: %s", msg.Event.EventType)
+			logger.Infof(ctx, "[WeCom] Ignoring event type: %s", eventType)
 		}
 		return
 	}
