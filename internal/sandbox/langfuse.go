@@ -215,8 +215,22 @@ func (c *langfuseSnapshotClient) DeleteSnapshot(ctx context.Context, snapshotID 
 		"snapshot_id": snapshotID,
 	}, nil)
 	err := inner.DeleteSnapshot(ctx, snapshotID)
-	span.Finish(nil, nil, err)
+	out, spanErr := snapshotDeleteSpanResult(err)
+	span.Finish(out, nil, spanErr)
 	return err
+}
+
+// snapshotDeleteSpanResult keeps an in-use Conflict off the ERROR status.
+// Session sandboxes pause against the template they booted from, so the skill
+// reaper hitting this every few minutes is expected retry, not a fault.
+func snapshotDeleteSpanResult(err error) (map[string]interface{}, error) {
+	if !IsRemoteConflict(err) {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"deferred": true,
+		"reason":   "in_use",
+	}, nil
 }
 
 func (c *langfuseSnapshotClient) ListSnapshots(

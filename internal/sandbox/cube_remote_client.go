@@ -1123,6 +1123,7 @@ func normalizeCubeError(op string, err error) error {
 			kind = RemoteErrorKindUnavailable
 		}
 	}
+	kind = snapshotDeleteKind(op, kind, err.Error())
 	remoteErr := NewRemoteError(SandboxTypeCube, op, kind, err.Error(), err)
 	remoteErr.StatusCode = status
 	return remoteErr

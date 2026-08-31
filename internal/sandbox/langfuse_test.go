@@ -61,3 +61,18 @@ func TestTruncateSandboxPreview(t *testing.T) {
 	require.True(t, strings.HasSuffix(got, "…"))
 	require.Equal(t, sandboxSpanPreviewRunes+1, utf8.RuneCountInString(got))
 }
+
+func TestSnapshotDeleteSpanResultDefersConflict(t *testing.T) {
+	out, spanErr := snapshotDeleteSpanResult(NewRemoteError(
+		SandboxTypeE2B, "DeleteSnapshot", RemoteErrorKindConflict,
+		"paused sandboxes using it", nil,
+	))
+	require.NoError(t, spanErr, "in-use must not mark the Langfuse span ERROR")
+	require.Equal(t, true, out["deferred"])
+	require.Equal(t, "in_use", out["reason"])
+
+	boom := NewRemoteError(SandboxTypeE2B, "DeleteSnapshot", RemoteErrorKindInternal, "boom", nil)
+	out, spanErr = snapshotDeleteSpanResult(boom)
+	require.Equal(t, boom, spanErr)
+	require.Nil(t, out)
+}

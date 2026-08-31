@@ -1253,6 +1253,7 @@ func normalizeE2BError(op string, err error) error {
 			}
 		}
 	}
+	kind = snapshotDeleteKind(op, kind, err.Error())
 	remoteErr := NewRemoteError(SandboxTypeE2B, op, kind, err.Error(), err)
 	remoteErr.StatusCode = status
 	return remoteErr
