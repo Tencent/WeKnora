@@ -38,6 +38,9 @@ import (
 )
 
 const (
+	imNoAnswerFallback = "抱歉，我暂时无法回答这个问题。"
+	imErrorFallback    = "抱歉，处理您的问题时出现了异常，请稍后再试。"
+
 	// dedupTTL is how long processed message IDs are retained.
 	dedupTTL = 5 * time.Minute
 	// dedupCleanupInterval is how often the dedup map is cleaned.
@@ -139,6 +142,23 @@ func holdbackCutoff(chunk string) int {
 // formatIMOutboundAnswer strips thinking/tool blocks and applies IM content cleanup.
 func formatIMOutboundAnswer(ctx context.Context, raw string, tenant *types.Tenant, defaultFileSvc interfaces.FileService, storageResolvers ...interfaces.StorageBackendResolver) string {
 	return cleanIMContent(ctx, FormatIMDisplayContent(raw, StreamDisplayFinal), tenant, defaultFileSvc, storageResolvers...)
+}
+
+// formatIMOutboundAnswerOrFallback guarantees that cleanup cannot turn a
+// non-empty model payload (for example, a think-only response) into an empty IM
+// message. Callers may pass imErrorFallback as raw when QA itself failed.
+func formatIMOutboundAnswerOrFallback(
+	ctx context.Context,
+	raw string,
+	tenant *types.Tenant,
+	defaultFileSvc interfaces.FileService,
+	storageResolvers ...interfaces.StorageBackendResolver,
+) string {
+	content := formatIMOutboundAnswer(ctx, raw, tenant, defaultFileSvc, storageResolvers...)
+	if strings.TrimSpace(content) == "" {
+		return imNoAnswerFallback
+	}
+	return content
 }
 
 // cleanIMContent applies all IM-specific content transformations:
@@ -1922,14 +1942,29 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	// Determine output mode from channel config.
 	streamDisabled := req.channel.OutputMode == "full"
 
-	// If the adapter supports streaming and output is not "full", use streaming.
-	if !streamDisabled {
-		if streamer, ok := req.adapter.(StreamSender); ok {
-			if err := s.handleMessageStream(ctx, req.msg, req.session, req.agent, kbIDs, attachments, imageURLs, streamer, req.adapter, req.userKey, req.tenant); err != nil {
-				logger.Errorf(ctx, "[IM] Stream QA failed: %v", err)
+	if streamDisabled {
+		if progressSender, ok := req.adapter.(FullOutputProgressSender); ok &&
+			progressSender.SupportsFullOutputProgress() {
+			// Full output still starts the platform stream so users immediately see
+			// its thinking placeholder. No intermediate reasoning/tool content is
+			// sent; the placeholder is replaced only after QA completes.
+			if err := s.handleMessageFullOutput(
+				ctx, req.msg, req.session, req.agent, kbIDs, attachments, imageURLs,
+				progressSender, req.adapter, req.userKey, req.tenant,
+			); err != nil {
+				logger.Errorf(ctx, "[IM] Full-output QA failed: %v", err)
 			}
 			return
 		}
+	} else if streamer, ok := req.adapter.(StreamSender); ok {
+		// Stream mode sends intermediate reasoning and answer updates.
+		if err := s.handleMessageStream(
+			ctx, req.msg, req.session, req.agent, kbIDs, attachments, imageURLs,
+			streamer, req.adapter, req.userKey, req.tenant,
+		); err != nil {
+			logger.Errorf(ctx, "[IM] Stream QA failed: %v", err)
+		}
+		return
 	}
 
 	// Non-streaming fallback: collect full answer then send.
@@ -1950,6 +1985,66 @@ func (s *Service) executeQARequest(req *qaRequest) {
 
 	logger.Infof(ctx, "[IM] Reply sent: channel=%s platform=%s user=%s answer_len=%d",
 		req.channelID, req.msg.Platform, req.msg.UserID, len(answer))
+}
+
+// handleMessageFullOutput keeps the channel's full-output semantics while
+// providing immediate progress feedback on adapters that support replaceable
+// stream messages. StartStream creates the platform placeholder; no intermediate
+// updates are sent, and the final answer replaces it exactly once.
+func (s *Service) handleMessageFullOutput(
+	ctx context.Context,
+	msg *IncomingMessage,
+	session *types.Session,
+	customAgent *types.CustomAgent,
+	kbIDs []string,
+	attachments types.MessageAttachments,
+	imageURLs []string,
+	streamer FullOutputProgressSender,
+	adapter Adapter,
+	userKey string,
+	tenant *types.Tenant,
+) error {
+	streamID, err := streamer.StartStream(ctx, msg)
+	if err != nil {
+		logger.Warnf(ctx, "[IM] StartStream failed for full output, falling back to plain reply: %v", err)
+		return s.fallbackNonStream(
+			ctx, msg, session, customAgent, kbIDs, attachments, imageURLs, adapter, userKey, tenant,
+		)
+	}
+
+	answer, qaErr := s.runQA(
+		ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote,
+	)
+	if qaErr != nil {
+		logger.Errorf(ctx, "[IM] Full-output QA failed: %v, sending fallback reply", qaErr)
+		answer = imErrorFallback
+	}
+	finalContent := formatIMOutboundAnswerOrFallback(ctx, answer, tenant, s.defaultFileSvc, s.storageResolver)
+
+	finalizeErr := streamer.FinalizeStream(ctx, msg, streamID, finalContent)
+	if finalizeErr != nil {
+		logger.Warnf(ctx, "[IM] FinalizeStream failed for full output: %v", finalizeErr)
+	}
+	endErr := streamer.EndStream(ctx, msg, streamID)
+	if endErr != nil {
+		logger.Warnf(ctx, "[IM] EndStream failed for full output: %v", endErr)
+	}
+
+	// If the placeholder could not be replaced, send a plain final reply so the
+	// user still receives the answer instead of being left on "thinking".
+	var fallbackErr error
+	if finalizeErr != nil {
+		fallbackErr = adapter.SendReply(ctx, msg, &ReplyMessage{Content: finalContent, IsFinal: true})
+		if fallbackErr != nil {
+			logger.Errorf(ctx, "[IM] Plain reply fallback after full-output finalize failure failed: %v", fallbackErr)
+		}
+	}
+
+	logger.Infof(
+		ctx, "[IM] Full-output reply sent: platform=%s user=%s answer_len=%d",
+		msg.Platform, msg.UserID, len(answer),
+	)
+	return errors.Join(finalizeErr, endErr, fallbackErr)
 }
 
 // handleCommand executes a slash-command and sends the result back to the user.

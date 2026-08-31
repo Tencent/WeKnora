@@ -36,8 +36,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Compile-time check that Adapter implements im.StreamSender and im.FileDownloader.
+// Compile-time checks for the optional IM capabilities implemented by Adapter.
 var _ im.StreamSender = (*Adapter)(nil)
+var _ im.FullOutputProgressSender = (*Adapter)(nil)
 var _ im.FileDownloader = (*Adapter)(nil)
 
 var httpClient = utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
@@ -154,6 +155,12 @@ func StopStreamReaper() {
 // Platform returns the platform identifier.
 func (a *Adapter) Platform() im.Platform {
 	return a.region.Platform
+}
+
+// SupportsFullOutputProgress reports that StartStream immediately sends a
+// visible, replaceable thinking card suitable for full-output mode.
+func (a *Adapter) SupportsFullOutputProgress() bool {
+	return true
 }
 
 // VerifyCallback verifies the Feishu event callback by checking the verification token.
