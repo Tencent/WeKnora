@@ -330,10 +330,10 @@ func TestDefaultParserEngine(t *testing.T) {
 func TestDefaultParserEnginePrefersRegisteredEngineForFallbackTypes(t *testing.T) {
 	t.Cleanup(func() { SetPreferParserEngine(nil) })
 	SetPreferParserEngine(func(fileType string) string {
-		if fileType == "pptx" || fileType == "ppt" {
+		if fileType == "pptx" || fileType == "ppt" || fileType == "pdf" || fileType == "docx" {
 			return "anydoc"
 		}
-		return "should-not-apply"
+		return ""
 	})
 	if got := DefaultParserEngine("pptx"); got != "anydoc" {
 		t.Fatalf("DefaultParserEngine(pptx) = %q, want anydoc", got)
@@ -341,8 +341,14 @@ func TestDefaultParserEnginePrefersRegisteredEngineForFallbackTypes(t *testing.T
 	if got := DefaultParserEngine("ppt"); got != "anydoc" {
 		t.Fatalf("DefaultParserEngine(ppt) = %q, want anydoc", got)
 	}
-	if got := DefaultParserEngine("pdf"); got != "" {
-		t.Fatalf("DefaultParserEngine(pdf) = %q, want empty (no type-level fallback)", got)
+	if got := DefaultParserEngine("pdf"); got != "anydoc" {
+		t.Fatalf("DefaultParserEngine(pdf) = %q, want anydoc", got)
+	}
+	if got := DefaultParserEngine("docx"); got != "anydoc" {
+		t.Fatalf("DefaultParserEngine(docx) = %q, want anydoc", got)
+	}
+	if got := DefaultParserEngine("txt"); got != "" {
+		t.Fatalf("DefaultParserEngine(txt) = %q, want empty", got)
 	}
 }
 
