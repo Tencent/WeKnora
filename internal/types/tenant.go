@@ -374,18 +374,17 @@ func ResolveMinerUParseMethod(method string, legacyOCREnabled *bool) string {
 }
 
 func (c *ParserEngineConfig) ResolveChatParserEngine(fileType string) string {
-	if c == nil {
-		return ""
-	}
-	fileType = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), ".")
-	for _, rule := range c.ChatParserEngineRules {
-		for _, candidate := range rule.FileTypes {
-			if strings.TrimPrefix(strings.ToLower(strings.TrimSpace(candidate)), ".") == fileType {
-				return strings.TrimSpace(rule.Engine)
+	if c != nil {
+		normalized := normalizeParserFileType(fileType)
+		for _, rule := range c.ChatParserEngineRules {
+			for _, candidate := range rule.FileTypes {
+				if normalizeParserFileType(candidate) == normalized {
+					return strings.TrimSpace(rule.Engine)
+				}
 			}
 		}
 	}
-	return ""
+	return DefaultParserEngine(fileType)
 }
 
 // ToOverridesMap returns a map suitable for ParserEngineOverrides in parse requests.
