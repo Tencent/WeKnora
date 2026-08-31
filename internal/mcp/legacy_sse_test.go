@@ -31,6 +31,6 @@ func TestLegacySSETransportSendsPostAndReadsEvent(t *testing.T) {
 		Method:  "initialize",
 	})
 	require.NoError(t, err)
-	require.Equal(t, "1", response.ID.String())
+	require.Equal(t, int64(1), response.ID.Value())
 	require.JSONEq(t, `{"ok":true}`, string(response.Result))
 }
