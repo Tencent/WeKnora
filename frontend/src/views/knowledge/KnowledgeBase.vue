@@ -42,6 +42,7 @@ import {
   type KnowledgeFolderTree,
 } from "@/api/knowledge-base/index";
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
+import { getApiErrorMessage } from '@/utils/apiError';
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
@@ -1687,12 +1688,8 @@ const executeUploadBatch = async (
       } else {
         failCount++;
         if (totalCount === 1) {
-          let errorMessage = t('knowledgeBase.uploadFailed');
-          if (responseData?.error?.message) {
-            errorMessage = responseData.error.message;
-          } else if (responseData?.message) {
-            errorMessage = responseData.message;
-          }
+          let errorMessage = getApiErrorMessage(responseData, t('knowledgeBase.uploadFailed'))
+            || t('knowledgeBase.uploadFailed');
           if (responseData?.code === 'duplicate_file' || responseData?.error?.code === 'duplicate_file') {
             errorMessage = t('knowledgeBase.fileExists');
           }
@@ -1702,7 +1699,8 @@ const executeUploadBatch = async (
     } catch (error: any) {
       failCount++;
       if (totalCount === 1) {
-        let errorMessage = error?.error?.message || error?.message || t('knowledgeBase.uploadFailed');
+        let errorMessage = getApiErrorMessage(error, t('knowledgeBase.uploadFailed'))
+          || t('knowledgeBase.uploadFailed');
         if (error?.code === 'duplicate_file') {
           errorMessage = t('knowledgeBase.fileExists');
         }

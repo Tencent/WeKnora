@@ -3,6 +3,7 @@ import axios from "axios";
 import { generateRandomString, MAX_FILE_SIZE_MB } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
+import { getApiErrorMessage } from './apiError';
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -226,18 +227,7 @@ instance.interceptors.response.use(
     // 将HTTP状态码一并抛出，方便上层判断401等场景
     // 后端返回格式: { success: false, error: { code, message, details } }
     // 提取 error.message 作为顶层 message，方便前端使用 error?.message 获取
-    let errorMessage: string | undefined;
-    if (typeof data === 'object') {
-      if (typeof data?.error === 'string') {
-        errorMessage = data.error;
-      } else if (data?.error?.message) {
-        errorMessage = data.error.message;
-      } else {
-        errorMessage = data?.message;
-      }
-    } else if (typeof data === 'string') {
-      errorMessage = data;
-    }
+    const errorMessage = getApiErrorMessage(data);
     return Promise.reject({ 
       status, 
       message: errorMessage,
