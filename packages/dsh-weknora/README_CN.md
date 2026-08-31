@@ -2,6 +2,8 @@
 
 [English](./README.md) | 简体中文
 
+[npm](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora)
+
 一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）插件，让 harness 里的 Agent 直接用上
 [WeKnora](https://github.com/Tencent/WeKnora) 知识库：混合检索、按文档通读、以及 WeKnora 自己带引用的成稿答案。
 
