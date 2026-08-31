@@ -86,6 +86,11 @@ export interface KnowledgeStructureField {
   value: string
 }
 
+export interface WikiDetailLink {
+  title: string
+  slug?: string
+}
+
 export interface CurrentKnowledgeAnchor {
   id: string
   knowledge_type: KnowledgeType
@@ -94,6 +99,9 @@ export interface CurrentKnowledgeAnchor {
   structureFields?: KnowledgeStructureField[]
   evidenceIds?: string[]
   informationNature?: string
+  timeRange?: string
+  relatedKnowledge?: WikiDetailLink[]
+  relatedEntities?: WikiDetailLink[]
   timestamp: string
   seconds: number
   related_count: number
@@ -250,6 +258,8 @@ export interface GraphKnowledgeDetail {
   id: string
   slug?: string
   title: string
+  video_id?: string
+  video_title?: string
   knowledge_type: KnowledgeType
   entity_sub_type?: 'person' | 'organization' | 'product' | 'technology' | 'industry' | 'place' | string
   page_type?: string
@@ -257,6 +267,9 @@ export interface GraphKnowledgeDetail {
   structure_fields?: KnowledgeStructureField[]
   evidence_ids?: string[]
   information_nature?: string
+  time_range?: string
+  related_knowledge?: WikiDetailLink[]
+  related_entities?: WikiDetailLink[]
 }
 
 export interface GraphEvidence {
@@ -299,6 +312,7 @@ export interface WikiGraphRequest {
 export interface KnowledgeGraphPayload {
   nodes: GraphNode[]
   edges: GraphEdge[]
+  wiki_pages?: GraphKnowledgeDetail[]
   meta: WikiGraphMeta
   attributes: string[]
 }

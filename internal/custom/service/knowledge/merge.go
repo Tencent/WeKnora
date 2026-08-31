@@ -100,6 +100,9 @@ type AnchorItem struct {
 	StructureFields   []DetailField `json:"structure_fields,omitempty"`
 	EvidenceIDs       []string      `json:"evidence_ids,omitempty"`
 	InformationNature string        `json:"information_nature,omitempty"`
+	TimeRange         string        `json:"time_range,omitempty"`
+	RelatedKnowledge  []DetailLink  `json:"related_knowledge,omitempty"`
+	RelatedEntities   []DetailLink  `json:"related_entities,omitempty"`
 	Timestamp         string        `json:"timestamp,omitempty"`
 	Seconds           int           `json:"seconds,omitempty"`
 	EntitySubType     string        `json:"entity_sub_type,omitempty"` // person / organization / ...
@@ -115,6 +118,13 @@ type DetailField struct {
 	Key   string `json:"key"`
 	Label string `json:"label"`
 	Value string `json:"value"`
+}
+
+// DetailLink is a Wiki double-link extracted from the page contract sections
+// such as related_atom_ids / related_entity_ids.
+type DetailLink struct {
+	Title string `json:"title"`
+	Slug  string `json:"slug,omitempty"`
 }
 
 // MergeAnchors 双源合并：按 ID 去重，5 类型映射，实体 6 类聚合为 entity

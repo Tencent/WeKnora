@@ -31,6 +31,8 @@ type EntityGraphKnowledgeDetail struct {
 	ID                string                  `json:"id"`
 	Slug              string                  `json:"slug,omitempty"`
 	Title             string                  `json:"title"`
+	VideoID           string                  `json:"video_id,omitempty"`
+	VideoTitle        string                  `json:"video_title,omitempty"`
 	KnowledgeType     knowledge.KnowledgeType `json:"knowledge_type"`
 	EntitySubType     string                  `json:"entity_sub_type,omitempty"`
 	PageType          string                  `json:"page_type,omitempty"`
@@ -38,6 +40,9 @@ type EntityGraphKnowledgeDetail struct {
 	StructureFields   []knowledge.DetailField `json:"structure_fields,omitempty"`
 	EvidenceIDs       []string                `json:"evidence_ids,omitempty"`
 	InformationNature string                  `json:"information_nature,omitempty"`
+	TimeRange         string                  `json:"time_range,omitempty"`
+	RelatedKnowledge  []knowledge.DetailLink  `json:"related_knowledge,omitempty"`
+	RelatedEntities   []knowledge.DetailLink  `json:"related_entities,omitempty"`
 }
 
 type EntityGraphNode struct {
@@ -66,9 +71,10 @@ type EntityGraphEdge struct {
 }
 
 type entityGraphResponse struct {
-	Nodes      []EntityGraphNode `json:"nodes"`
-	Edges      []EntityGraphEdge `json:"edges"`
-	Attributes []string          `json:"attributes"`
+	Nodes      []EntityGraphNode            `json:"nodes"`
+	Edges      []EntityGraphEdge            `json:"edges"`
+	WikiPages  []EntityGraphKnowledgeDetail `json:"wiki_pages,omitempty"`
+	Attributes []string                     `json:"attributes"`
 	Meta       struct {
 		Mode      string `json:"mode"`
 		Total     int    `json:"total"`
@@ -166,16 +172,32 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *weknora.
 			}
 		}
 	}
+	if h.db != nil && h.wiki != nil {
+		var wikiVideos []model.Video
+		if err := h.db.WithContext(ctx).
+			Where("knowledge_base_wiki_page_id <> ?", "").
+			Limit(200).
+			Find(&wikiVideos).Error; err != nil {
+			return nil, fmt.Errorf("load graph wiki videos: %w", err)
+		}
+		for _, video := range wikiVideos {
+			if _, exists := videoByID[video.ID]; !exists {
+				videoByID[video.ID] = video
+			}
+		}
+	}
 	detailByNode := make(map[string]*EntityGraphKnowledgeDetail)
+	wikiPages := make([]EntityGraphKnowledgeDetail, 0)
 	if h.wiki != nil && strings.TrimSpace(h.kbID) != "" && len(videoByID) > 0 {
 		var err error
-		detailByNode, err = h.loadKnowledgeDetails(ctx, videoByID)
+		detailByNode, wikiPages, err = h.loadKnowledgeDetails(ctx, videoByID)
 		if err != nil {
 			return nil, fmt.Errorf("load graph knowledge details: %w", err)
 		}
 	}
 
 	result := &entityGraphResponse{}
+	result.WikiPages = wikiPages
 	result.Meta.Mode = "overview"
 	allNodes := make([]EntityGraphNode, 0, len(source.Nodes))
 	nodeIDByKey := make(map[string]string, len(source.Nodes))
@@ -276,22 +298,24 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *weknora.
 	return result, nil
 }
 
-func (h *EntityGraphHandler) loadKnowledgeDetails(ctx context.Context, videos map[string]model.Video) (map[string]*EntityGraphKnowledgeDetail, error) {
+func (h *EntityGraphHandler) loadKnowledgeDetails(ctx context.Context, videos map[string]model.Video) (map[string]*EntityGraphKnowledgeDetail, []EntityGraphKnowledgeDetail, error) {
 	details := make(map[string]*EntityGraphKnowledgeDetail)
+	wikiPages := make([]EntityGraphKnowledgeDetail, 0)
+	seenPageIDs := make(map[string]struct{})
 	for _, video := range videos {
 		if strings.TrimSpace(video.ID) == "" || strings.TrimSpace(video.KnowledgeBaseWikiPageID) == "" {
 			continue
 		}
 		knowledgeBasePage, err := h.wiki.GetPageByID(ctx, h.kbID, video.KnowledgeBaseWikiPageID)
 		if err != nil {
-			return nil, fmt.Errorf("read knowledge_base wiki page for video %s: %w", video.ID, err)
+			return nil, nil, fmt.Errorf("read knowledge_base wiki page for video %s: %w", video.ID, err)
 		}
 		if !isKnowledgeBaseWikiPage(knowledgeBasePage, video.ID) {
 			continue
 		}
 		pages, err := h.wiki.ListByVideoOwned(ctx, h.kbID, video.ID, relatedKnowledgePageTypes, knowledgeBasePage)
 		if err != nil {
-			return nil, fmt.Errorf("list knowledge pages for video %s: %w", video.ID, err)
+			return nil, nil, fmt.Errorf("list knowledge pages for video %s: %w", video.ID, err)
 		}
 		for _, page := range pages {
 			if page.ID == knowledgeBasePage.ID {
@@ -300,6 +324,12 @@ func (h *EntityGraphHandler) loadKnowledgeDetails(ctx context.Context, videos ma
 			detail := graphKnowledgeDetail(page)
 			if detail == nil {
 				continue
+			}
+			detail.VideoID = video.ID
+			detail.VideoTitle = video.Title
+			if _, exists := seenPageIDs[detail.ID]; !exists {
+				seenPageIDs[detail.ID] = struct{}{}
+				wikiPages = append(wikiPages, *detail)
 			}
 			for _, name := range graphDetailNames(page) {
 				key := graphDetailKey(video.ID, name)
@@ -312,7 +342,7 @@ func (h *EntityGraphHandler) loadKnowledgeDetails(ctx context.Context, videos ma
 			}
 		}
 	}
-	return details, nil
+	return details, wikiPages, nil
 }
 
 func graphKnowledgeDetail(page weknora.WikiPage) *EntityGraphKnowledgeDetail {
@@ -331,6 +361,7 @@ func graphKnowledgeDetail(page weknora.WikiPage) *EntityGraphKnowledgeDetail {
 	return &EntityGraphKnowledgeDetail{
 		ID: page.ID, Slug: page.Slug, Title: title, KnowledgeType: mappedType, EntitySubType: entitySubType, PageType: page.PageType,
 		CoreContent: parsed.CoreContent, StructureFields: parsed.StructureFields, EvidenceIDs: parsed.EvidenceIDs, InformationNature: parsed.InformationNature,
+		TimeRange: parsed.TimeRange, RelatedKnowledge: parsed.RelatedKnowledge, RelatedEntities: parsed.RelatedEntities,
 	}
 }
 

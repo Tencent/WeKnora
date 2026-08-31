@@ -26,6 +26,9 @@ interface BackendAnchor {
   structure_fields?: Array<{ key?: string; label?: string; value?: string }>
   evidence_ids?: string[]
   information_nature?: string
+  time_range?: string
+  related_knowledge?: Array<{ title?: string; slug?: string }>
+  related_entities?: Array<{ title?: string; slug?: string }>
   timestamp?: string
   seconds?: number
 }
@@ -75,6 +78,12 @@ function isKnowledgeType(value: unknown): value is KnowledgeType {
 
 function hasKnowledgeType<T extends BackendAnchor>(item: T): item is T & { type: KnowledgeType } {
   return isKnowledgeType(item.type)
+}
+
+function normalizeWikiLinks(items: Array<{ title?: string; slug?: string }> | undefined) {
+  return (items || [])
+    .map(item => ({ title: item.title?.trim() || item.slug?.trim() || '', slug: item.slug?.trim() || undefined }))
+    .filter(item => item.title)
 }
 
 export function parseTimestamp(value: string): number {
@@ -420,6 +429,9 @@ export function mapRelatedKnowledgeResponse(videoId: string, response: BackendRe
       .map(field => ({ key: field.key!.trim(), label: field.label!.trim(), value: field.value!.trim() })),
     evidenceIds: (item.evidence_ids || []).filter(id => id.trim()),
     informationNature: item.information_nature?.trim() || '',
+    timeRange: item.time_range?.trim() || '',
+    relatedKnowledge: normalizeWikiLinks(item.related_knowledge),
+    relatedEntities: normalizeWikiLinks(item.related_entities),
     timestamp: item.timestamp || '00:00',
     seconds: Number.isFinite(Number(item.seconds)) ? Number(item.seconds) : item.timestamp ? parseTimestamp(item.timestamp) : 0,
     related_count: crossVideoItems.filter(cross => cross.anchorId === item.id).length || item.related_video_ids?.length || 0,

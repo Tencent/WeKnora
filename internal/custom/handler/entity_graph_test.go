@@ -54,7 +54,7 @@ func TestEntityGraphReturnsSkillKnowledgeDetail(t *testing.T) {
 		if strings.TrimSpace(request.URL.Query().Get("page_type")) != "" {
 			pages = append(pages, weknora.WikiPage{
 				ID: "method-page-1", Slug: "methodology/abnormal-attribution", PageType: "methodology", Title: "异常归因方法",
-				Content: "---\nid: V001-K001\ntype: methodology\nsource_video_id: " + videoID + "\ntitle: 异常归因方法\n---\n# 异常归因方法\n\n核心内容：通过异常数据定位业务原因。\n\n## 方法论结构\n\n- 输入：留存曲线和渠道维度\n- 步骤：按渠道拆分；对比异常渠道；排查产品变更\n- 判断标准：变更时间与留存拐点接近\n- 输出：导致留存下降的变更项\n- 适用条件：单指标异常归因\n\n时间范围：00:03:00-00:04:00\n证据 ID：E001、E002\n信息性质：归纳",
+				Content: "---\nid: V001-K001\ntype: methodology\nsource_video_id: " + videoID + "\ntitle: 异常归因方法\n---\n# 异常归因方法\n\n核心内容：通过异常数据定位业务原因。\n\n## 方法论结构\n\n- 输入：留存曲线和渠道维度\n- 步骤：按渠道拆分；对比异常渠道；排查产品变更\n- 判断标准：变更时间与留存拐点接近\n- 输出：导致留存下降的变更项\n- 适用条件：单指标异常归因\n\n时间范围：00:03:00-00:04:00\n证据 ID：E001、E002\n信息性质：归纳\n关联知识：[[留存诊断|留存诊断方法]]\n关联实体：[[增长团队]]",
 			})
 		}
 		_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{Pages: pages, TotalPages: 1})
@@ -96,6 +96,9 @@ func TestEntityGraphReturnsSkillKnowledgeDetail(t *testing.T) {
 	}
 	if strings.Join(detail.EvidenceIDs, ",") != "E001,E002" || detail.InformationNature != "归纳" {
 		t.Fatalf("evidence detail = %#v", detail)
+	}
+	if detail.TimeRange != "00:03:00-00:04:00" || len(detail.RelatedKnowledge) != 1 || detail.RelatedKnowledge[0].Title != "留存诊断方法" || detail.RelatedKnowledge[0].Slug != "留存诊断" || len(detail.RelatedEntities) != 1 || detail.RelatedEntities[0].Title != "增长团队" {
+		t.Fatalf("wiki links = %#v", detail)
 	}
 	if len(detail.StructureFields) != 5 || detail.StructureFields[0].Key != "input" || detail.StructureFields[2].Key != "criteria" {
 		t.Fatalf("structure fields = %#v", detail.StructureFields)

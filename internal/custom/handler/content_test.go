@@ -380,6 +380,25 @@ func TestWikiKnowledgeDetailParsesMarkdownTableFields(t *testing.T) {
 	}
 }
 
+func TestWikiKnowledgeDetailParsesContractSections(t *testing.T) {
+	content := "---\ntype: insight\nsource_video_id: video-1\n---\n# 智能会通胀，智慧仍然稀缺\n\n核心内容：模型能力普及后，人的判断和反思更稀缺。\n\n## 洞察结构\n\n- 核心判断：智能工具会变便宜，但高质量判断不会自动增加\n- 推导依据：工具降低了执行门槛，却没有替代经验和反思\n\n## 时间范围\n\n00:01:02-00:01:40\n\n## 证据 ID\n\nE003、E004\n\n## 信息性质\n\n判断\n\n## 关联知识\n\n- [[智能通胀]]\n- [[人文教育|创造力教育]]\n\n## 关联实体\n\n- [[程乐松]]\n"
+
+	detail := wikiKnowledgeDetail(content, "insight", "")
+
+	if detail.CoreContent != "模型能力普及后，人的判断和反思更稀缺。" || detail.TimeRange != "00:01:02-00:01:40" || detail.InformationNature != "判断" || strings.Join(detail.EvidenceIDs, ",") != "E003,E004" {
+		t.Fatalf("detail = %#v", detail)
+	}
+	if len(detail.StructureFields) != 2 || detail.StructureFields[0].Key != "claim" || detail.StructureFields[1].Key != "reasoning" {
+		t.Fatalf("structure fields = %#v", detail.StructureFields)
+	}
+	if len(detail.RelatedKnowledge) != 2 || detail.RelatedKnowledge[0].Title != "智能通胀" || detail.RelatedKnowledge[1].Title != "创造力教育" || detail.RelatedKnowledge[1].Slug != "人文教育" {
+		t.Fatalf("related knowledge = %#v", detail.RelatedKnowledge)
+	}
+	if len(detail.RelatedEntities) != 1 || detail.RelatedEntities[0].Title != "程乐松" {
+		t.Fatalf("related entities = %#v", detail.RelatedEntities)
+	}
+}
+
 func TestKnowledgeBaseWikiPageRequiresExtractionContract(t *testing.T) {
 	valid := &weknora.WikiPage{
 		PageType: "index",

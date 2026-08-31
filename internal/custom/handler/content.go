@@ -79,6 +79,9 @@ func wikiAnchor(page weknora.WikiPage, knowledgeType knowledge.KnowledgeType, so
 		StructureFields:   detail.StructureFields,
 		EvidenceIDs:       detail.EvidenceIDs,
 		InformationNature: detail.InformationNature,
+		TimeRange:         detail.TimeRange,
+		RelatedKnowledge:  detail.RelatedKnowledge,
+		RelatedEntities:   detail.RelatedEntities,
 		Timestamp:         timestamp, Seconds: seconds, EntitySubType: entitySubType,
 		PageType: page.PageType, Source: source,
 	}
@@ -89,6 +92,9 @@ type wikiKnowledgeDetailData struct {
 	StructureFields   []knowledge.DetailField
 	EvidenceIDs       []string
 	InformationNature string
+	TimeRange         string
+	RelatedKnowledge  []knowledge.DetailLink
+	RelatedEntities   []knowledge.DetailLink
 }
 
 type frameworkField struct {
@@ -173,6 +179,9 @@ func wikiKnowledgeDetail(content string, knowledgeType knowledge.KnowledgeType, 
 		StructureFields:   fields,
 		EvidenceIDs:       splitEvidenceIDs(firstLabeledValue(values, "evidence_ids")),
 		InformationNature: firstLabeledValue(values, "information_nature"),
+		TimeRange:         firstLabeledValue(values, "time_range"),
+		RelatedKnowledge:  parseWikiDetailLinks(firstLabeledValue(values, "related_knowledge")),
+		RelatedEntities:   parseWikiDetailLinks(firstLabeledValue(values, "related_entities")),
 	}
 }
 
@@ -195,7 +204,19 @@ func parseLabeledValues(content string) map[string]string {
 	var currentKey string
 	for _, rawLine := range strings.Split(content, "\n") {
 		line := normalizeWikiDetailLine(rawLine)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "|") {
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			label := strings.TrimSpace(strings.TrimLeft(line, "# "))
+			if key := wikiDetailKey(label); key != "" {
+				currentKey = key
+				continue
+			}
+			currentKey = ""
+			continue
+		}
+		if strings.HasPrefix(line, "|") {
 			if label, value, ok := splitWikiTableRow(rawLine); ok {
 				if key := wikiDetailKey(label); key != "" {
 					values[key] = appendWikiDetailValue(values[key], value)
@@ -281,6 +302,12 @@ func wikiDetailKey(label string) string {
 		return "evidence_ids"
 	case "信息性质", "information_nature":
 		return "information_nature"
+	case "时间范围", "time_range":
+		return "time_range"
+	case "关联知识", "related_atom_ids", "related_knowledge":
+		return "related_knowledge"
+	case "关联实体", "related_entity_ids", "source_atom_ids", "related_entities":
+		return "related_entities"
 	}
 	return structureFieldAliases[label]
 }
@@ -322,6 +349,55 @@ func splitEvidenceIDs(value string) []string {
 		out = append(out, part)
 	}
 	return out
+}
+
+func parseWikiDetailLinks(value string) []knowledge.DetailLink {
+	links := make([]knowledge.DetailLink, 0)
+	seen := map[string]struct{}{}
+	add := func(title, slug string) {
+		title = strings.TrimSpace(title)
+		slug = strings.TrimSpace(slug)
+		if title == "" && slug != "" {
+			title = slug
+		}
+		if title == "" {
+			return
+		}
+		key := strings.ToLower(slug + "\x00" + title)
+		if _, exists := seen[key]; exists {
+			return
+		}
+		seen[key] = struct{}{}
+		links = append(links, knowledge.DetailLink{Title: title, Slug: slug})
+	}
+
+	for _, match := range regexp.MustCompile(`\[\[([^\]]+)\]\]`).FindAllStringSubmatch(value, -1) {
+		target := strings.TrimSpace(match[1])
+		if target == "" {
+			continue
+		}
+		parts := strings.SplitN(target, "|", 2)
+		slug := strings.TrimSpace(parts[0])
+		title := slug
+		if len(parts) == 2 && strings.TrimSpace(parts[1]) != "" {
+			title = strings.TrimSpace(parts[1])
+		}
+		add(title, slug)
+	}
+	if len(links) > 0 {
+		return links
+	}
+
+	cleaned := strings.NewReplacer("，", ",", "、", ",", "；", ",", ";", ",").Replace(value)
+	for _, part := range strings.Split(cleaned, ",") {
+		part = strings.TrimSpace(strings.Trim(part, "`[]()"))
+		part = strings.TrimLeft(part, "-+* ")
+		if part == "" || part == "无" || part == "暂无" {
+			continue
+		}
+		add(part, "")
+	}
+	return links
 }
 
 // NewContentHandler 构造
