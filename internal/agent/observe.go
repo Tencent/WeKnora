@@ -281,6 +281,17 @@ func (e *AgentEngine) analyzeResponse(
 			"answer_len": len(response.Content),
 		})
 
+		// An empty natural stop is not a terminal answer. The caller retries this
+		// response with a nudge, so emitting Done here would make downstream
+		// consumers (notably IM) finalize and cancel the still-running retry.
+		if response.Content == "" {
+			return responseVerdict{
+				isDone:       true,
+				emptyContent: true,
+				step:         step,
+			}
+		}
+
 		// Emit the final answer. The answer text reaches the UI by one of two
 		// paths:
 		//   (a) Already streamed live during the think phase — the common case
@@ -320,10 +331,9 @@ func (e *AgentEngine) analyzeResponse(
 		})
 
 		return responseVerdict{
-			isDone:       true,
-			finalAnswer:  response.Content,
-			emptyContent: response.Content == "",
-			step:         step,
+			isDone:      true,
+			finalAnswer: response.Content,
+			step:        step,
 		}
 	}
 
