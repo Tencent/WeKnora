@@ -15,9 +15,13 @@ test('an empty config resolves to documented defaults', () => {
   assert.equal(config.baseUrl, 'http://localhost:8080/api/v1')
   assert.equal(config.maxResults, 8)
   assert.equal(config.toolPrefix, 'weknora')
-  assert.equal(config.resourceUrls, 'handle')
+  assert.equal(config.resourceUrls, 'public')
   assert.deepEqual(config.knowledgeBaseIds, [])
   assert.deepEqual(config.tools, { listKnowledgeBases: true, search: true, readDocument: true, ask: true })
+})
+
+test('resourceUrls handle remains an explicit opt-out', () => {
+  assert.equal(resolveConfig({ resourceUrls: 'handle' }).resourceUrls, 'handle')
 })
 
 test('a bad row fails the load and names every violation', () => {
