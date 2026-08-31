@@ -40,6 +40,7 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
 export const SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE = {
   members: 'owner',
   models: 'admin',
+  skills: 'admin',
 } as const satisfies Record<string, SettingsRoleKey>
 
 export const SYSTEM_ADMIN_SETTINGS_SECTIONS = new Set([
