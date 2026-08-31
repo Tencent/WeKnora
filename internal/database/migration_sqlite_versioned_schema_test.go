@@ -2,8 +2,11 @@ package database
 
 import (
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,7 +36,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"mcp_oauth_tokens":   {"principal_type", "principal_id"}, // 000064
 }
 
-const expectedSQLiteMigrationVersion = 12
+const expectedSQLiteMigrationVersion = 13
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -66,6 +69,43 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	assertSQLiteMCPOAuthPrincipalUpsertWorks(t, db)
 	require.False(t, sqliteColumnExists(t, db, "knowledges", "tag_id"),
 		"SQLite migrations must drop legacy knowledges.tag_id after multi-tag migration")
+
+	insertSQLiteKnowledgeBaseWithDefault(t, db, "fresh-kb-1", "fresh")
+	assertSQLiteChunkingConfig(t, db, "fresh-kb-1", 512, 80, []string{"\n\n", "\n", "。"})
+}
+
+func TestSQLiteMigrationsUpgradeV12NormalizesChunkingConfig(t *testing.T) {
+	repoRoot := sqliteRepoRoot(t)
+
+	legacyRoot := copySQLiteMigrationsThrough(t, repoRoot, 12)
+	chdirAndRestore(t, legacyRoot)
+
+	dbPath := filepath.Join(t.TempDir(), "chunking-config-upgrade.db")
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+
+	db := openSQLiteDB(t, dbPath)
+	versionBefore, dirtyBefore := sqliteMigrationState(t, db)
+	require.Equal(t, 12, versionBefore)
+	require.False(t, dirtyBefore)
+
+	legacyChunkingConfig := `{"chunk_size": 700, "chunk_overlap": 50,
+"split_markers": ["\n", "。"], "keep_separator": true}`
+	insertSQLiteKnowledgeBase(t, db, "legacy-kb-1", "legacy-1", legacyChunkingConfig)
+
+	mixedChunkingConfig := `{"chunk_size": 900, "chunk_overlap": 25,
+"split_markers": ["old"], "separators": ["new"], "keep_separator": true}`
+	insertSQLiteKnowledgeBase(t, db, "legacy-kb-2", "legacy-2", mixedChunkingConfig)
+
+	chdirAndRestore(t, repoRoot)
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+
+	db = openSQLiteDB(t, dbPath)
+	versionAfter, dirtyAfter := sqliteMigrationState(t, db)
+	require.Equal(t, expectedSQLiteMigrationVersion, versionAfter)
+	require.False(t, dirtyAfter)
+
+	assertSQLiteChunkingConfig(t, db, "legacy-kb-1", 700, 50, []string{"\n", "。"})
+	assertSQLiteChunkingConfig(t, db, "legacy-kb-2", 900, 25, []string{"new"})
 }
 
 func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
@@ -180,6 +220,55 @@ func sqliteColumnExists(t *testing.T, db *sql.DB, table, column string) bool {
 	return n == 1
 }
 
+func insertSQLiteKnowledgeBase(t *testing.T, db *sql.DB, id, name, chunkingConfig string) {
+	t.Helper()
+	_, err := db.Exec(
+		"INSERT INTO knowledge_bases (id, name, tenant_id, chunking_config, embedding_model_id, summary_model_id) "+
+			"VALUES (?, ?, 1, ?, 'embedding-model', 'summary-model')",
+		id, name, chunkingConfig,
+	)
+	require.NoError(t, err)
+}
+
+func insertSQLiteKnowledgeBaseWithDefault(t *testing.T, db *sql.DB, id, name string) {
+	t.Helper()
+	_, err := db.Exec(
+		"INSERT INTO knowledge_bases (id, name, tenant_id, embedding_model_id, summary_model_id) "+
+			"VALUES (?, ?, 1, 'embedding-model', 'summary-model')",
+		id, name,
+	)
+	require.NoError(t, err)
+}
+
+func assertSQLiteChunkingConfig(
+	t *testing.T,
+	db *sql.DB,
+	id string,
+	expectedSize, expectedOverlap int,
+	expectedSeparators []string,
+) {
+	t.Helper()
+	var raw string
+	require.NoError(t, db.QueryRow(
+		"SELECT chunking_config FROM knowledge_bases WHERE id = ?", id,
+	).Scan(&raw))
+
+	var config struct {
+		ChunkSize    int      `json:"chunk_size"`
+		ChunkOverlap int      `json:"chunk_overlap"`
+		Separators   []string `json:"separators"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(raw), &config))
+	require.Equal(t, expectedSize, config.ChunkSize)
+	require.Equal(t, expectedOverlap, config.ChunkOverlap)
+	require.Equal(t, expectedSeparators, config.Separators)
+
+	var keys map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(raw), &keys))
+	require.NotContains(t, keys, "split_markers")
+	require.NotContains(t, keys, "keep_separator")
+}
+
 func assertSQLiteShareLinkInvitationsWork(t *testing.T, db *sql.DB) {
 	t.Helper()
 	_, err := db.Exec("INSERT INTO tenants (name, business) VALUES (?, ?)", "share-link-tenant", "share-link-test")
@@ -241,20 +330,28 @@ func assertSQLiteMCPOAuthPrincipalUpsertWorks(t *testing.T, db *sql.DB) {
 }
 
 func copySQLiteMigrationsV4(t *testing.T, repoRoot string) string {
+	return copySQLiteMigrationsThrough(t, repoRoot, 4)
+}
+
+func copySQLiteMigrationsThrough(t *testing.T, repoRoot string, maxVersion int) string {
 	t.Helper()
 	dest := t.TempDir()
 	srcDir := filepath.Join(repoRoot, "migrations", "sqlite")
 	destDir := filepath.Join(dest, "migrations", "sqlite")
 	require.NoError(t, os.MkdirAll(destDir, 0o755))
 
-	legacy := []string{
-		"000000_init.up.sql",
-		"000001_remove_wiki_log.up.sql",
-		"000002_knowledge_folder_path.up.sql",
-		"000003_knowledge_base_auto_tag_config.up.sql",
-		"000004_memory.up.sql",
-	}
-	for _, name := range legacy {
+	entries, err := os.ReadDir(srcDir)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".up.sql") || len(name) < 6 {
+			continue
+		}
+		version, err := strconv.Atoi(name[:6])
+		require.NoError(t, err)
+		if version > maxVersion {
+			continue
+		}
 		data, err := os.ReadFile(filepath.Join(srcDir, name))
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(filepath.Join(destDir, name), data, 0o600))
