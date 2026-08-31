@@ -86,58 +86,118 @@
               <p v-if="item.description" class="skill-card__desc" :title="item.description">
                 {{ compactText(item.description) }}
               </p>
-              <div class="skill-card__installs">
-                <span class="skill-card__installs-label">
-                  {{
-                    liveInstalls(item).length > 0
-                      ? $t('settings.skills.installedOn')
-                      : $t('settings.skills.noInstalls')
-                  }}
+              <div
+                v-for="view in [installsView(item)]"
+                :key="'installs'"
+                class="skill-card__installs"
+              >
+                <span
+                  v-if="view.installs.length === 0 && !view.canAdd"
+                  class="skill-card__installs-label"
+                >
+                  {{ $t('settings.skills.noInstalls') }}
                 </span>
-                <div class="skill-card__chips">
+                <button
+                  v-else-if="!view.needsPanel"
+                  type="button"
+                  class="skill-card__chip"
+                  :class="view.installs[0] ? installEntryClass(item, view.installs[0]) : undefined"
+                  :disabled="Boolean(view.installs[0] && !recordFor(view.installs[0].sandbox_config_id))"
+                  :title="installSummaryTooltip(item, view)"
+                  :aria-label="installSummary(item, view)"
+                  @click="onInstallChipClick(item, view)"
+                >
+                  <span
+                    v-if="view.installs.some(isInstallBusy)"
+                    class="skill-card__entry-dot"
+                    aria-hidden="true"
+                  />
+                  <span class="skill-card__chip-text">{{ installSummary(item, view) }}</span>
+                  <t-icon
+                    v-if="installSummaryIcon(item, view)"
+                    :name="installSummaryIcon(item, view)"
+                    size="14px"
+                    class="skill-card__entry-status"
+                  />
+                  <t-icon name="chevron-right" size="14px" class="skill-card__chip-go" />
+                </button>
+                <t-popup
+                  v-else
+                  :visible="openPanelId === item.id"
+                  trigger="click"
+                  placement="bottom-left"
+                  attach="body"
+                  destroy-on-close
+                  overlay-class-name="skill-install-panel-overlay"
+                  :overlay-inner-style="{ padding: 0 }"
+                  @visible-change="(visible: boolean) => setInstallPanel(item.id, visible)"
+                >
                   <button
-                    v-for="inst in liveInstalls(item)"
-                    :key="inst.skill_id"
                     type="button"
                     class="skill-card__chip"
-                    :class="installChipClass(item, inst)"
-                    :disabled="!recordFor(inst.sandbox_config_id)"
-                    :title="installTooltip(item, inst)"
-                    :aria-label="$t('settings.skills.manageOnSandbox', { name: installName(inst) })"
-                    @click="openManage(item, inst)"
+                    :title="installSummaryTooltip(item, view)"
+                    :aria-label="installSummary(item, view)"
+                    :aria-expanded="openPanelId === item.id"
                   >
                     <span
-                      v-if="isInstallBusy(inst)"
-                      class="skill-card__chip-dot"
+                      v-if="view.installs.some(isInstallBusy)"
+                      class="skill-card__entry-dot"
                       aria-hidden="true"
                     />
-                    <SandboxBackendBadge
-                      v-else-if="inst.sandbox_type"
-                      :type="inst.sandbox_type"
-                      size="xs"
-                    />
-                    <span class="skill-card__chip-name">{{ installName(inst) }}</span>
-                    <span v-if="installChipStatus(item, inst)" class="skill-card__chip-status">
-                      {{ installChipStatus(item, inst) }}
-                    </span>
+                    <span class="skill-card__chip-text">{{ installSummary(item, view) }}</span>
                     <t-icon
-                      v-else
-                      name="chevron-right"
+                      v-if="installSummaryIcon(item, view)"
+                      :name="installSummaryIcon(item, view)"
                       size="14px"
-                      class="skill-card__chip-go"
+                      class="skill-card__entry-status"
                     />
+                    <t-icon name="chevron-down" size="14px" class="skill-card__chip-go" />
                   </button>
-                  <button
-                    v-if="targetsFor(item).length > 0"
-                    type="button"
-                    class="skill-card__chip skill-card__chip--add"
-                    :title="$t('settings.skills.installToSandbox')"
-                    :aria-label="$t('settings.skills.installToSandbox')"
-                    @click="openInstall(item)"
-                  >
-                    <t-icon name="add" size="14px" />
-                  </button>
-                </div>
+                  <template #content>
+                    <div class="skill-install-panel">
+                      <p class="skill-install-panel__group">{{ $t('settings.skills.installPanelGroup') }}</p>
+                      <button
+                        v-for="inst in view.installs"
+                        :key="inst.skill_id"
+                        type="button"
+                        class="skill-install-panel__item"
+                        :class="installEntryClass(item, inst)"
+                        :disabled="!recordFor(inst.sandbox_config_id)"
+                        :title="installTooltip(item, inst)"
+                        @click="openManageFromPanel(item, inst)"
+                      >
+                        <SandboxBackendBadge
+                          v-if="inst.sandbox_type"
+                          :type="inst.sandbox_type"
+                          size="xs"
+                        />
+                        <span class="skill-install-panel__name">{{ installName(inst) }}</span>
+                        <span
+                          v-if="isInstallBusy(inst)"
+                          class="skill-card__entry-dot"
+                          aria-hidden="true"
+                        />
+                        <t-icon
+                          v-else-if="installChipStatusIcon(item, inst)"
+                          :name="installChipStatusIcon(item, inst)"
+                          size="14px"
+                          class="skill-card__entry-status"
+                        />
+                      </button>
+                      <template v-if="view.canAdd">
+                        <div class="skill-install-panel__split" role="separator" />
+                        <button
+                          type="button"
+                          class="skill-install-panel__item"
+                          @click="openInstallFromPanel(item)"
+                        >
+                          <t-icon name="add" size="16px" />
+                          <span class="skill-install-panel__name">{{ $t('settings.skills.installToSandbox') }}</span>
+                        </button>
+                      </template>
+                    </div>
+                  </template>
+                </t-popup>
               </div>
             </div>
           </div>
@@ -277,7 +337,7 @@
           <t-checkbox-group v-model="addTargetIds" class="sandbox-pick-list">
             <t-checkbox v-for="cfg in skillConfigs" :key="cfg.id" :value="cfg.id" class="sandbox-pick">
               <span class="sandbox-pick__main">
-                <SandboxBackendBadge :type="cfg.sandbox_type" size="xs" />
+                <SandboxBackendBadge :type="cfg.sandbox_type" size="sm" />
                 <span class="sandbox-pick__text">
                   <span class="sandbox-pick__name">{{ cfg.name }}</span>
                   <span class="sandbox-pick__meta">{{ sandboxMetaLine(cfg) }}</span>
@@ -320,7 +380,7 @@
         <t-checkbox-group v-model="installTargetIds" class="sandbox-pick-list">
           <t-checkbox v-for="cfg in installTargets" :key="cfg.id" :value="cfg.id" class="sandbox-pick">
             <span class="sandbox-pick__main">
-              <SandboxBackendBadge :type="cfg.sandbox_type" size="xs" />
+              <SandboxBackendBadge :type="cfg.sandbox_type" size="sm" />
               <span class="sandbox-pick__text">
                 <span class="sandbox-pick__name">{{ cfg.name }}</span>
                 <span class="sandbox-pick__meta">{{ sandboxMetaLine(cfg) }}</span>
@@ -434,6 +494,7 @@ const manageTitle = ref('')
 const filesDrawerVisible = ref(false)
 const filesCatalogId = ref('')
 const filesCatalogName = ref('')
+const openPanelId = ref('')
 const sourceInput = ref('')
 const uploading = ref(false)
 const addingFromSource = ref(false)
@@ -602,16 +663,92 @@ function installChipStatus(item: SkillCatalogItem, inst: SkillCatalogInstall): s
   return installStatusText(inst)
 }
 
+function installChipStatusIcon(item: SkillCatalogItem, inst: SkillCatalogInstall): string {
+  if (inst.status === 'failed') return 'close-circle'
+  if (inst.status === 'ready' && inst.enabled && installOutdated(item, inst)) return 'error-circle'
+  if (inst.status === 'ready' && inst.enabled) return 'check-circle-filled'
+  return ''
+}
+
 function isInstallBusy(inst: SkillCatalogInstall): boolean {
   return inst.status === 'installing' || inst.status === 'removing'
 }
 
-function installChipClass(item: SkillCatalogItem, inst: SkillCatalogInstall): string {
-  if (inst.status === 'failed') return 'skill-card__chip--failed'
-  if (isInstallBusy(inst)) return 'skill-card__chip--busy'
-  if (inst.status === 'ready' && !inst.enabled) return 'skill-card__chip--off'
-  if (installOutdated(item, inst)) return 'skill-card__chip--stale'
-  return 'skill-card__chip--ready'
+function installPriority(item: SkillCatalogItem, inst: SkillCatalogInstall): number {
+  if (inst.status === 'failed') return 0
+  if (isInstallBusy(inst)) return 1
+  if (installOutdated(item, inst)) return 2
+  if (inst.status === 'ready' && !inst.enabled) return 3
+  return 4
+}
+
+function installsView(item: SkillCatalogItem) {
+  const installs = [...liveInstalls(item)].sort((a, b) => {
+    const diff = installPriority(item, a) - installPriority(item, b)
+    if (diff !== 0) return diff
+    return installName(a).localeCompare(installName(b), undefined, { sensitivity: 'base' })
+  })
+  const canAdd = targetsFor(item).length > 0
+  return {
+    installs,
+    canAdd,
+    needsPanel: installs.length > 1 || (installs.length > 0 && canAdd),
+  }
+}
+
+function installSummary(item: SkillCatalogItem, view: ReturnType<typeof installsView>): string {
+  if (view.installs.length === 0) return t('settings.skills.installToSandbox')
+  if (view.installs.length === 1) {
+    return t('settings.skills.installedOnName', { name: installName(view.installs[0]) })
+  }
+  return t('settings.skills.installedCount', { count: view.installs.length })
+}
+
+function installSummaryIcon(item: SkillCatalogItem, view: ReturnType<typeof installsView>): string {
+  for (const inst of view.installs) {
+    const icon = installChipStatusIcon(item, inst)
+    if (icon && icon !== 'check-circle-filled') return icon
+  }
+  return ''
+}
+
+function installSummaryTooltip(item: SkillCatalogItem, view: ReturnType<typeof installsView>): string {
+  if (view.installs.length === 0) return t('settings.skills.installToSandbox')
+  return view.installs.map((inst) => installTooltip(item, inst)).join('\n')
+}
+
+function onInstallChipClick(item: SkillCatalogItem, view: ReturnType<typeof installsView>) {
+  if (view.installs[0]) {
+    openManage(item, view.installs[0])
+    return
+  }
+  if (view.canAdd) openInstall(item)
+}
+
+function setInstallPanel(id: string, visible: boolean) {
+  if (visible) {
+    openPanelId.value = id
+    return
+  }
+  if (openPanelId.value === id) openPanelId.value = ''
+}
+
+function openManageFromPanel(item: SkillCatalogItem, inst: SkillCatalogInstall) {
+  openPanelId.value = ''
+  openManage(item, inst)
+}
+
+function openInstallFromPanel(item: SkillCatalogItem) {
+  openPanelId.value = ''
+  openInstall(item)
+}
+
+function installEntryClass(item: SkillCatalogItem, inst: SkillCatalogInstall): string {
+  if (inst.status === 'failed') return 'skill-card__entry--failed'
+  if (isInstallBusy(inst)) return 'skill-card__entry--busy'
+  if (inst.status === 'ready' && !inst.enabled) return 'skill-card__entry--off'
+  if (installOutdated(item, inst)) return 'skill-card__entry--stale'
+  return 'skill-card__entry--ready'
 }
 
 function installName(inst: SkillCatalogInstall): string {
@@ -972,11 +1109,20 @@ watch(showManage, (open) => {
     void loadCatalog()
     manageSkillId.value = ''
     manageRecord.value = null
+  } else {
+    openPanelId.value = ''
   }
 })
 
+watch(showInstall, (open) => {
+  if (open) openPanelId.value = ''
+})
+
 watch(showAdd, (open) => {
-  if (open) return
+  if (open) {
+    openPanelId.value = ''
+    return
+  }
   const catalogId = registeredCatalog.value?.id
   resetAddWizard()
   void loadCatalog()
@@ -1034,6 +1180,18 @@ onUnmounted(() => {
 :global(.skill-settings__help-tooltip .t-popup__content) {
   max-width: 340px;
   line-height: 1.55;
+}
+
+:global(.skill-install-panel-overlay) {
+  z-index: 3050 !important;
+}
+
+:global(.skill-install-panel-overlay .t-popup__content) {
+  padding: 0 !important;
+  border-radius: 6px !important;
+  border: 1px solid var(--td-component-stroke) !important;
+  background: var(--td-bg-color-container) !important;
+  box-shadow: var(--td-shadow-2, 0 3px 14px 2px rgba(0, 0, 0, 0.05)) !important;
 }
 
 .loading-container {
@@ -1108,6 +1266,11 @@ onUnmounted(() => {
       border-color: var(--td-brand-color);
       background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
       box-shadow: none;
+
+      .skill-card--add__icon {
+        background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+        color: var(--td-brand-color);
+      }
     }
 
     &__icon {
@@ -1117,8 +1280,8 @@ onUnmounted(() => {
       width: 32px;
       height: 32px;
       border-radius: 8px;
-      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-      color: var(--td-brand-color);
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-text-color-secondary);
       font-size: 18px;
     }
 
@@ -1146,8 +1309,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-  color: var(--td-brand-color);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
 }
 
 .skill-card__body {
@@ -1248,45 +1411,37 @@ onUnmounted(() => {
 
 .skill-card__installs {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
+  align-items: center;
+  min-width: 0;
 }
 
 .skill-card__installs-label {
   font-size: 12px;
-  line-height: 18px;
+  line-height: 20px;
   color: var(--td-text-color-placeholder);
-}
-
-.skill-card__chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
 }
 
 .skill-card__chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
+  min-width: 0;
   max-width: 100%;
   margin: 0;
-  padding: 3px 6px 3px 5px;
-  border: 1px solid transparent;
-  border-radius: 999px;
+  padding: 3px 8px 3px 10px;
+  border: 0;
+  border-radius: 8px;
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  line-height: 18px;
+  line-height: 20px;
   text-align: left;
 
   &:hover:not(:disabled) {
     color: var(--td-text-color-primary);
-    border-color: var(--td-brand-color);
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
+    background: var(--td-bg-color-container-hover);
   }
 
   &:disabled {
@@ -1294,58 +1449,48 @@ onUnmounted(() => {
     opacity: 0.6;
   }
 
-  &--busy {
-    color: var(--td-warning-color);
-    background: color-mix(in srgb, var(--td-warning-color) 12%, transparent);
-    border-color: color-mix(in srgb, var(--td-warning-color) 28%, transparent);
-  }
-
-  &--failed {
-    color: var(--td-error-color);
-    background: color-mix(in srgb, var(--td-error-color) 10%, transparent);
-    border-color: color-mix(in srgb, var(--td-error-color) 28%, transparent);
-  }
-
   &--off {
     color: var(--td-text-color-placeholder);
   }
 
-  &--stale {
+  &.skill-card__entry--stale .skill-card__entry-status {
     color: var(--td-warning-color);
-    background: color-mix(in srgb, var(--td-warning-color) 10%, transparent);
-    border-color: color-mix(in srgb, var(--td-warning-color) 24%, transparent);
   }
 
-  &--add {
-    padding: 3px 7px;
-    border: 1px dashed var(--td-component-stroke);
-    background: transparent;
-    color: var(--td-text-color-placeholder);
+  &.skill-card__entry--failed .skill-card__entry-status {
+    color: var(--td-error-color);
+  }
 
-    &:hover:not(:disabled) {
-      color: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
-    }
+  &.skill-card__entry--busy .skill-card__entry-dot {
+    background: var(--td-warning-color);
   }
 }
 
-.skill-card__chip-status {
+.skill-card__chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-card__chip-go,
+.skill-card__entry-status {
   flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 500;
+}
+
+.skill-card__entry--ready .skill-card__entry-status {
+  color: var(--td-success-color, var(--td-brand-color));
 }
 
 .skill-card__chip-go {
-  flex-shrink: 0;
   color: var(--td-text-color-placeholder);
 }
 
 .skill-card__chip:hover:not(:disabled) .skill-card__chip-go {
-  color: var(--td-brand-color);
+  color: currentColor;
 }
 
-.skill-card__chip-dot {
+.skill-card__entry-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -1353,17 +1498,80 @@ onUnmounted(() => {
   animation: skill-chip-dot 1.2s ease-in-out infinite;
 }
 
-@keyframes skill-chip-dot {
-  0%,
-  100% { opacity: 1; }
-  50% { opacity: 0.35; }
+.skill-install-panel {
+  display: flex;
+  flex-direction: column;
+  width: 200px;
+  max-width: calc(100vw - 32px);
+  padding: 4px 0;
 }
 
-.skill-card__chip-name {
+.skill-install-panel__group {
+  margin: 0;
+  padding: 6px 12px 4px;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--td-text-color-placeholder);
+}
+
+.skill-install-panel__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  margin: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--td-text-color-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 22px;
+  text-align: left;
+
+  &:hover:not(:disabled) {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+
+  &.skill-card__entry--stale .skill-card__entry-status {
+    color: var(--td-warning-color);
+  }
+
+  &.skill-card__entry--failed .skill-card__entry-status {
+    color: var(--td-error-color);
+  }
+
+  &.skill-card__entry--busy .skill-card__entry-dot {
+    background: var(--td-warning-color);
+  }
+}
+
+.skill-install-panel__name {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.skill-install-panel__split {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--td-component-stroke);
+}
+
+@keyframes skill-chip-dot {
+  0%,
+  100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
 .installer-model-hint {
@@ -1491,7 +1699,7 @@ onUnmounted(() => {
     width: 100%;
     margin: 0;
     align-items: center;
-    padding: 8px 10px;
+    padding: 10px 12px;
     border: 1px solid var(--td-component-stroke);
     border-radius: 10px;
     background: var(--td-bg-color-container);
@@ -1526,7 +1734,7 @@ onUnmounted(() => {
 .sandbox-pick__main {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
