@@ -57,17 +57,17 @@ export default function (knowledgeBaseId?: string) {
       folder_recursive?: boolean;
     } = { page: 1, page_size: 35 },
     kbId?: string,
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const targetKbId = kbId || knowledgeBaseId;
-    if (!targetKbId) return Promise.resolve();
+    if (!targetKbId) return Promise.resolve(false);
     const requestGeneration = query.page === 1 ? ++knowledgeListGeneration : knowledgeListGeneration;
 
     return listKnowledgeFiles(targetKbId, query)
       .then((result: any) => {
-        if (requestGeneration !== knowledgeListGeneration) return;
+        if (requestGeneration !== knowledgeListGeneration) return false;
 
         const currentRouteKbId = (route.params as any)?.kbId as string | undefined;
-        if (currentRouteKbId && currentRouteKbId !== targetKbId) return;
+        if (currentRouteKbId && currentRouteKbId !== targetKbId) return false;
 
         const { data, total: totalResult } = result;
     const cardList_ = data.map((item: any) => {
@@ -93,8 +93,9 @@ export default function (knowledgeBaseId?: string) {
           cardList.value.push(...cardList_);
         }
         total.value = totalResult;
+        return true;
       })
-      .catch(() => {});
+      .catch(() => false);
   };
   const delKnowledge = (index: number, item: any, onSuccess?: () => void) => {
     cardList.value[index].isMore = false;

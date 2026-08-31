@@ -62,6 +62,7 @@ import {
 } from './wikiStatusRefresh';
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
 import { resolveKnowledgeDownloadFileName } from './knowledgeDownloadFileName';
+import { getNextDocumentPage } from './documentPagination';
 import {
   buildUploadFileName,
   canMoveFolderTo,
@@ -402,11 +403,12 @@ const onCardMoreVisibleChange = (visible: boolean, item: KnowledgeCard) => {
 };
 let isCardDetails = ref(false);
 let timeout: ReturnType<typeof setTimeout> | null = null;
-let knowledgeScroll = ref()
-let page = 1;
+const knowledgeScroll = ref<HTMLElement | null>(null);
 let pageSize = 35;
-let scrollLoading = false;
-const resetPage = () => { page = 1; scrollLoading = false; };
+let documentLoadGeneration = 0;
+const resetPage = () => {
+  documentLoadGeneration += 1;
+};
 
 // Move state — inline in card menu
 const moveMenuMode = ref<'normal' | 'targets' | 'confirm'>('normal');
@@ -756,23 +758,39 @@ const getTagName = (tagId?: string | number) => {
   return tagMap.value[key]?.name || '';
 };
 
-const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
-  if (!kbIdValue) return Promise.resolve();
+const loadKnowledgeFiles = async (kbIdValue: string): Promise<void> => {
+  if (!kbIdValue) return;
+  resetPage();
+  const loadGeneration = documentLoadGeneration;
   if (!isFAQ.value) {
     docListLoading.value = true;
   }
-  return getKnowled(
-    {
-      page: 1,
+  let page = 1;
+  let loaded = false;
+  try {
+    loaded = await getKnowled({
+      page,
       page_size: pageSize,
       ...filterParams.value,
-    },
-    kbIdValue,
-  ).finally(() => {
+    }, kbIdValue);
+  } finally {
     if (isCurrentKb(kbIdValue) && !isFAQ.value) {
       docListLoading.value = false;
     }
-  });
+  }
+
+  // 每批加载完成后检查后端总数，仍有文件时继续请求下一页。
+  while (loaded && loadGeneration === documentLoadGeneration && isCurrentKb(kbIdValue) && !isFAQ.value) {
+    const nextPage = getNextDocumentPage(cardList.value.length, total.value, page, pageSize);
+    if (!nextPage) return;
+
+    loaded = await getKnowled({
+      page: nextPage,
+      page_size: pageSize,
+      ...filterParams.value,
+    }, kbIdValue);
+    if (loaded) page = nextPage;
+  }
 };
 
 const isCurrentKb = (targetKbId: string) => targetKbId === kbId.value;
@@ -1958,29 +1976,6 @@ const submitReparse = async (id: string, processConfig?: KnowledgeProcessOverrid
   }
 };
 
-const handleScroll = () => {
-  if (isFAQ.value) return;
-  if (docListLoading.value) return;
-  if (scrollLoading) return;
-  const currentKbId = kbId.value;
-  if (!currentKbId) return;
-  const element = knowledgeScroll.value;
-  if (element) {
-    let pageNum = Math.ceil(total.value / pageSize)
-    const { scrollTop, scrollHeight, clientHeight } = element;
-    if (scrollTop + clientHeight >= scrollHeight - 10) {
-      if (cardList.value.length < total.value && page < pageNum) {
-        page++;
-        scrollLoading = true;
-        getKnowled({ page, page_size: pageSize, ...filterParams.value }, currentKbId).finally(() => {
-          if (isCurrentKb(currentKbId)) {
-            scrollLoading = false;
-          }
-        });
-      }
-    }
-  }
-};
 const getDoc = (page: number) => {
   getfDetails(details.id, page)
 };
@@ -2586,7 +2581,7 @@ async function createNewSession(value: string): Promise<void> {
                   'is-empty': !cardList.length && !currentChildFolders.length && !docListLoading,
                   'is-marquee-active': docMarqueeVisible,
                 }"
-                ref="knowledgeScroll" @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
+                ref="knowledgeScroll" @mousedown="onDocMarqueeMouseDown">
                 <div v-if="docMarqueeVisible" class="doc-marquee-box"
                   :class="{ 'is-add': docMarqueeMode === 'add', 'is-subtract': docMarqueeMode === 'subtract' }"
                   :style="docMarqueeBoxStyle" aria-hidden="true" />
