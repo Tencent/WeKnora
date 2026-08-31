@@ -264,12 +264,28 @@ func ValidateDockerHost(host string, allowPrivate bool) error {
 	scheme, address, found := strings.Cut(trimmed, "://")
 	if !found {
 		return fmt.Errorf(
-			"sandbox: docker host %q must include a scheme (unix:// or tcp://)", host)
+			"sandbox: docker host %q must include a scheme (unix://, npipe:// or tcp://)", host)
 	}
 	switch strings.ToLower(scheme) {
 	case "unix":
 		if !strings.HasPrefix(address, "/") {
 			return fmt.Errorf("sandbox: docker unix socket path %q must be absolute", address)
+		}
+		return nil
+	case "npipe":
+		// Windows' local daemon endpoint, the named-pipe counterpart of the
+		// unix socket: npipe:////./pipe/docker_engine. It is local to this
+		// machine and carries no address to check, so it needs no outbound
+		// guard — the same reasoning as "unix" above.
+		//
+		// Without this case a Windows host cannot use the Docker backend at
+		// all: leaving the host blank makes DetectLocalDockerHost read the
+		// docker CLI context, which returns npipe://, and the config is then
+		// refused with "unsupported docker host scheme". The moby client this
+		// package builds already dials npipe (client.go handles the scheme),
+		// so validation was the only thing in the way.
+		if address == "" {
+			return fmt.Errorf("sandbox: docker npipe host %q has no pipe path", host)
 		}
 		return nil
 	case "tcp", "http", "https":
