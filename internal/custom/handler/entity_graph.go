@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -26,19 +27,33 @@ type EntityGraphEvidence struct {
 	ChunkIDs   []string `json:"chunk_ids,omitempty"`
 }
 
+type EntityGraphKnowledgeDetail struct {
+	ID                string                  `json:"id"`
+	Slug              string                  `json:"slug,omitempty"`
+	Title             string                  `json:"title"`
+	KnowledgeType     knowledge.KnowledgeType `json:"knowledge_type"`
+	EntitySubType     string                  `json:"entity_sub_type,omitempty"`
+	PageType          string                  `json:"page_type,omitempty"`
+	CoreContent       string                  `json:"core_content,omitempty"`
+	StructureFields   []knowledge.DetailField `json:"structure_fields,omitempty"`
+	EvidenceIDs       []string                `json:"evidence_ids,omitempty"`
+	InformationNature string                  `json:"information_nature,omitempty"`
+}
+
 type EntityGraphNode struct {
-	ID          string                `json:"id"`
-	Name        string                `json:"name"`
-	Label       string                `json:"label"`
-	Type        string                `json:"type"`
-	Attributes  []string              `json:"attributes"`
-	KnowledgeID string                `json:"knowledge_id,omitempty"`
-	VideoID     string                `json:"video_id,omitempty"`
-	VideoTitle  string                `json:"video_title,omitempty"`
-	VideoType   string                `json:"video_category,omitempty"`
-	Seconds     int                   `json:"seconds,omitempty"`
-	LinkCount   int                   `json:"link_count"`
-	Evidence    []EntityGraphEvidence `json:"evidence,omitempty"`
+	ID              string                      `json:"id"`
+	Name            string                      `json:"name"`
+	Label           string                      `json:"label"`
+	Type            string                      `json:"type"`
+	Attributes      []string                    `json:"attributes"`
+	KnowledgeID     string                      `json:"knowledge_id,omitempty"`
+	VideoID         string                      `json:"video_id,omitempty"`
+	VideoTitle      string                      `json:"video_title,omitempty"`
+	VideoType       string                      `json:"video_category,omitempty"`
+	Seconds         int                         `json:"seconds,omitempty"`
+	LinkCount       int                         `json:"link_count"`
+	Evidence        []EntityGraphEvidence       `json:"evidence,omitempty"`
+	KnowledgeDetail *EntityGraphKnowledgeDetail `json:"knowledge_detail,omitempty"`
 }
 
 type EntityGraphEdge struct {
@@ -65,11 +80,16 @@ type entityGraphResponse struct {
 type EntityGraphHandler struct {
 	db    *gorm.DB
 	graph graphSource
+	wiki  *weknora.WikiClient
 	kbID  string
 }
 
-func NewEntityGraphHandler(db *gorm.DB, graph *weknora.Client, kbID string) *EntityGraphHandler {
-	return &EntityGraphHandler{db: db, graph: graph, kbID: strings.TrimSpace(kbID)}
+func NewEntityGraphHandler(db *gorm.DB, graph *weknora.Client, kbID string, wiki ...*weknora.WikiClient) *EntityGraphHandler {
+	var wikiClient *weknora.WikiClient
+	if len(wiki) > 0 {
+		wikiClient = wiki[0]
+	}
+	return &EntityGraphHandler{db: db, graph: graph, wiki: wikiClient, kbID: strings.TrimSpace(kbID)}
 }
 
 func (h *EntityGraphHandler) Get(c *gin.Context) {
@@ -146,6 +166,14 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *weknora.
 			}
 		}
 	}
+	detailByNode := make(map[string]*EntityGraphKnowledgeDetail)
+	if h.wiki != nil && strings.TrimSpace(h.kbID) != "" && len(videoByID) > 0 {
+		var err error
+		detailByNode, err = h.loadKnowledgeDetails(ctx, videoByID)
+		if err != nil {
+			return nil, fmt.Errorf("load graph knowledge details: %w", err)
+		}
+	}
 
 	result := &entityGraphResponse{}
 	result.Meta.Mode = "overview"
@@ -175,6 +203,9 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *weknora.
 			item.VideoID = video.ID
 			item.VideoTitle = video.Title
 			item.VideoType = video.VideoType
+		}
+		if hasChunk {
+			item.KnowledgeDetail = detailByNode[graphDetailKey(chunk.VideoID, node.Name)]
 		}
 		if hasChunk {
 			item.Seconds = chunk.StartMs / 1000
@@ -243,6 +274,152 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *weknora.
 		}
 	}
 	return result, nil
+}
+
+func (h *EntityGraphHandler) loadKnowledgeDetails(ctx context.Context, videos map[string]model.Video) (map[string]*EntityGraphKnowledgeDetail, error) {
+	details := make(map[string]*EntityGraphKnowledgeDetail)
+	for _, video := range videos {
+		if strings.TrimSpace(video.ID) == "" || strings.TrimSpace(video.KnowledgeBaseWikiPageID) == "" {
+			continue
+		}
+		knowledgeBasePage, err := h.wiki.GetPageByID(ctx, h.kbID, video.KnowledgeBaseWikiPageID)
+		if err != nil {
+			return nil, fmt.Errorf("read knowledge_base wiki page for video %s: %w", video.ID, err)
+		}
+		if !isKnowledgeBaseWikiPage(knowledgeBasePage, video.ID) {
+			continue
+		}
+		pages, err := h.wiki.ListByVideoOwned(ctx, h.kbID, video.ID, relatedKnowledgePageTypes, knowledgeBasePage)
+		if err != nil {
+			return nil, fmt.Errorf("list knowledge pages for video %s: %w", video.ID, err)
+		}
+		for _, page := range pages {
+			if page.ID == knowledgeBasePage.ID {
+				continue
+			}
+			detail := graphKnowledgeDetail(page)
+			if detail == nil {
+				continue
+			}
+			for _, name := range graphDetailNames(page) {
+				key := graphDetailKey(video.ID, name)
+				if key == "" {
+					continue
+				}
+				if _, exists := details[key]; !exists {
+					details[key] = detail
+				}
+			}
+		}
+	}
+	return details, nil
+}
+
+func graphKnowledgeDetail(page weknora.WikiPage) *EntityGraphKnowledgeDetail {
+	frontmatter := page.ParsedFrontmatter()
+	fmType, _ := frontmatter["type"].(string)
+	entitySubType, _ := frontmatter["entity_sub_type"].(string)
+	if entitySubType == "" && knowledge.IsEntitySubType(fmType) {
+		entitySubType = fmType
+	}
+	mappedType := knowledge.MapPageTypeToKnowledgeType(page.PageType, fmType)
+	if !knowledge.IsKnowledgeType(mappedType) {
+		return nil
+	}
+	parsed := wikiKnowledgeDetail(page.Content, mappedType, entitySubType)
+	title := firstNonEmpty(page.Title, frontmatterString(frontmatter, "title"), frontmatterString(frontmatter, "canonical_name"), firstMarkdownHeading(page.Content), page.Slug)
+	return &EntityGraphKnowledgeDetail{
+		ID: page.ID, Slug: page.Slug, Title: title, KnowledgeType: mappedType, EntitySubType: entitySubType, PageType: page.PageType,
+		CoreContent: parsed.CoreContent, StructureFields: parsed.StructureFields, EvidenceIDs: parsed.EvidenceIDs, InformationNature: parsed.InformationNature,
+	}
+}
+
+func graphDetailNames(page weknora.WikiPage) []string {
+	frontmatter := page.ParsedFrontmatter()
+	candidates := []string{page.Title, frontmatterString(frontmatter, "title"), frontmatterString(frontmatter, "canonical_name"), frontmatterString(frontmatter, "id"), firstMarkdownHeading(page.Content), slugBase(page.Slug)}
+	if aliases, ok := frontmatter["aliases"].([]any); ok {
+		for _, alias := range aliases {
+			if value, ok := alias.(string); ok {
+				candidates = append(candidates, value)
+			}
+		}
+	}
+	return uniqueNonEmpty(candidates)
+}
+
+func firstMarkdownHeading(content string) string {
+	body := stripWikiFrontmatter(content)
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "# ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "# "))
+		}
+	}
+	return ""
+}
+
+func frontmatterString(frontmatter map[string]any, key string) string {
+	value, _ := frontmatter[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func uniqueNonEmpty(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := normalizeGraphDetailName(value)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func slugBase(slug string) string {
+	slug = strings.TrimSpace(strings.Trim(slug, "/"))
+	if slug == "" {
+		return ""
+	}
+	parts := strings.Split(slug, "/")
+	return parts[len(parts)-1]
+}
+
+func graphDetailKey(videoID, name string) string {
+	if videoID = strings.TrimSpace(videoID); videoID == "" {
+		return ""
+	}
+	name = normalizeGraphDetailName(name)
+	if name == "" {
+		return ""
+	}
+	return videoID + "|" + name
+}
+
+func normalizeGraphDetailName(name string) string {
+	name = strings.TrimSpace(name)
+	name = strings.TrimPrefix(name, "[[")
+	name = strings.TrimSuffix(name, "]]")
+	if separator := strings.IndexByte(name, '|'); separator >= 0 {
+		name = name[:separator]
+	}
+	name = strings.ReplaceAll(name, "　", " ")
+	name = strings.Join(strings.Fields(name), " ")
+	return strings.ToLower(name)
 }
 
 func splitQueryValues(value string) []string {

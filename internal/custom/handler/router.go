@@ -211,7 +211,7 @@ func buildRouter(deps *Deps) *gin.Engine {
 	ph := NewProcessingHandler(deps.DB, ProcessingDependencies{Wiki: deps.Wiki, KBID: deps.Cfg.WeKnora.KBID})
 	api.GET("/videos/:id/processing-status", ph.Status)
 	api.POST("/videos/:id/processing-jobs/:jobType/retry", ph.Retry)
-	graphHandler := NewEntityGraphHandler(deps.DB, deps.WeKnora, deps.Cfg.WeKnora.KBID)
+	graphHandler := NewEntityGraphHandler(deps.DB, deps.WeKnora, deps.Cfg.WeKnora.KBID, deps.Wiki)
 	api.GET("/graph", graphHandler.Get)
 
 	if deps.Wiki != nil {

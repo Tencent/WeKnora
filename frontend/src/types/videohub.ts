@@ -243,6 +243,20 @@ export interface GraphNode {
   type?: string
   knowledge_id?: string
   evidence?: GraphEvidence[]
+  knowledge_detail?: GraphKnowledgeDetail
+}
+
+export interface GraphKnowledgeDetail {
+  id: string
+  slug?: string
+  title: string
+  knowledge_type: KnowledgeType
+  entity_sub_type?: 'person' | 'organization' | 'product' | 'technology' | 'industry' | 'place' | string
+  page_type?: string
+  core_content?: string
+  structure_fields?: KnowledgeStructureField[]
+  evidence_ids?: string[]
+  information_nature?: string
 }
 
 export interface GraphEvidence {
