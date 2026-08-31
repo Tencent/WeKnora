@@ -47,6 +47,32 @@ type Document struct {
 	Sections      []Section `json:"sections"`
 }
 
+func (document *Document) UnmarshalJSON(data []byte) error {
+	var payload struct {
+		SchemaVersion       *int      `json:"schemaVersion"`
+		LegacySchemaVersion *int      `json:"schema_version"`
+		VideoType           string    `json:"videoType"`
+		Sections            []Section `json:"sections"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	if payload.SchemaVersion != nil && payload.LegacySchemaVersion != nil && *payload.SchemaVersion != *payload.LegacySchemaVersion {
+		return fmt.Errorf("summary schema version fields conflict")
+	}
+	schemaVersion := payload.SchemaVersion
+	if schemaVersion == nil {
+		schemaVersion = payload.LegacySchemaVersion
+	}
+	document.SchemaVersion = 0
+	if schemaVersion != nil {
+		document.SchemaVersion = *schemaVersion
+	}
+	document.VideoType = payload.VideoType
+	document.Sections = payload.Sections
+	return nil
+}
+
 type FrameworkSection struct {
 	ID    string
 	Title string

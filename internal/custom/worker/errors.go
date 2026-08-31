@@ -41,7 +41,7 @@ func ClassifyProcessingError(err error) (string, string) {
 		return ErrorCategoryWeKnora, "weknora_operation"
 	case containsAny(message, "tsc.fileerror", "source file rejected"):
 		return ErrorCategoryExternalTask, "source_file_rejected"
-	case containsAny(message, "parse ", "unmarshal", "decode ", "结果为空", "result payload is empty", "invalid timeline", "no non-empty timed sentences", "transcript contains no", "无有效文本"):
+	case containsAny(message, "parse ", "unmarshal", "decode ", "validate outline output", "outline schema_version", "outline must ", "chapter ", "response does not contain a valid json object", "结果为空", "result payload is empty", "invalid timeline", "no non-empty timed sentences", "transcript contains no", "无有效文本"):
 		return ErrorCategoryResponseParse, "response_parse"
 	case containsAny(message, "tingwu", "听悟", "external task", "task failed", "rate limit", "限流"):
 		return ErrorCategoryExternalTask, "external_task_failed"

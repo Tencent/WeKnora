@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -71,6 +72,15 @@ func TestSummaryRetryPromptRejectsInventedEvidenceIDs(t *testing.T) {
 	for _, expected := range []string{"上一轮总结未通过严格校验", "unknown", "不得创造、猜测或引用不存在的 ID", "系统会归一化"} {
 		if !strings.Contains(retryPrompt, expected) {
 			t.Fatalf("retry prompt does not contain %q: %s", expected, retryPrompt)
+		}
+	}
+}
+
+func TestOutlineRetryPromptIncludesContractCorrections(t *testing.T) {
+	prompt := outlineRetryPrompt("原始提示", errors.New("validate outline output: chapter 2 overlaps previous chapter"))
+	for _, expected := range []string{"上一轮章节导航未通过严格校验", "schema_version", "evidence_chunk_ids", "不得重叠", "覆盖最后一个有效转写时间点"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("outline retry prompt does not contain %q: %s", expected, prompt)
 		}
 	}
 }

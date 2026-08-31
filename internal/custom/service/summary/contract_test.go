@@ -71,6 +71,23 @@ func TestParseStoredSkipsWikiFrontmatter(t *testing.T) {
 	}
 }
 
+func TestParseAcceptsLegacySnakeCaseSchemaVersion(t *testing.T) {
+	parsed, err := Parse(`{"schema_version":1,"videoType":"general","sections":[]}`)
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	if parsed.SchemaVersion != SchemaVersion {
+		t.Fatalf("expected schema version %d, got %d", SchemaVersion, parsed.SchemaVersion)
+	}
+	encoded, err := json.Marshal(parsed)
+	if err != nil {
+		t.Fatalf("marshal parsed summary: %v", err)
+	}
+	if strings.Contains(string(encoded), `"schema_version"`) || !strings.Contains(string(encoded), `"schemaVersion":1`) {
+		t.Fatalf("legacy schema field leaked into canonical output: %s", encoded)
+	}
+}
+
 func TestCanonicalJSONUsesFrontendWireContractForEveryVideoType(t *testing.T) {
 	chunk := transcript.Chunk{ID: "chunk-1", StartMs: 1000, EndMs: 2500, Content: "真实原文"}
 	for videoType, framework := range frameworks {

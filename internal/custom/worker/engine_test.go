@@ -326,6 +326,7 @@ func TestClassifyProcessingError(t *testing.T) {
 		{name: "external failure", err: errors.New("听悟失败 Code=TaskFailed Msg=no audio"), category: "external_task", code: "external_task_failed"},
 		{name: "external file error", err: errors.New("听悟失败 Code=TSC.FileError Msg=unsupported media codec"), category: "external_task", code: "source_file_rejected"},
 		{name: "response parse", err: errors.New("decode tingwu get: invalid character"), category: "response_parse", code: "response_parse"},
+		{name: "outline validation", err: errors.New("validate outline output: chapter 2 overlaps previous chapter"), category: "response_parse", code: "response_parse"},
 		{name: "empty transcript", err: errors.New("transcript contains no non-empty timed sentences"), category: "response_parse", code: "response_parse"},
 		{name: "object storage", err: errors.New("upload srt: put object failed"), category: "object_storage", code: "object_storage_operation"},
 		{name: "weknora", err: errors.New("knowledge abc parse failed"), category: "weknora", code: "weknora_operation"},
