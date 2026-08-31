@@ -18,6 +18,14 @@ import (
 // just as surely as one that is too loose passes broken ones. Every case here
 // is a shape a real skill ships.
 func TestSkillPythonVerifier(t *testing.T) {
+	// A false environment marker is silent when packaging can evaluate it, and
+	// a note when it cannot. The install must succeed in both environments;
+	// only the note is conditional.
+	unevaluableMarkerNote := ""
+	if !pythonCanEvaluateMarkers(t) {
+		unevaluableMarkerNote = "requirements.txt declares pywin32 but it is not installed"
+	}
+
 	cases := []struct {
 		name  string
 		files map[string]string
@@ -144,15 +152,16 @@ func TestSkillPythonVerifier(t *testing.T) {
 		// pip skips a line whose marker is false here, so refusing the install
 		// over it rejects a skill whose requirements are all present. Markers
 		// compare versions with version semantics, so they are evaluated by
-		// `packaging` or not at all - and a bare venv has no `packaging`, which
-		// is why "cannot evaluate" has to mean "report", not "enforce".
+		// `packaging` or not at all. CI's system Python usually has it (the
+		// marker is false, the line is silent); a bare skill venv does not
+		// (the line is a note, not a failure). Either way the install proceeds.
 		name: "a requirement gated by an environment marker",
 		files: map[string]string{
 			"requirements.txt": "pywin32; sys_platform == \"win32\"\n" +
 				"totally_absent_package; extra == \"dev\"\n",
 			"scripts/run.py": "x = 1\n",
 		},
-		wantNote: "requirements.txt declares pywin32 but it is not installed",
+		wantNote: unevaluableMarkerNote,
 	}, {
 		// An extras-gated dependency is never installed unless the extra is
 		// requested, so it is not even worth a note.
@@ -400,6 +409,18 @@ func pythonFiles(files map[string]string) []string {
 	}
 	sort.Strings(scripts)
 	return scripts
+}
+
+// pythonCanEvaluateMarkers reports whether this interpreter has packaging, the
+// library the checker uses for PEP 508 markers. Without it a false marker is a
+// note rather than a skip, which is the contract a bare venv relies on.
+func pythonCanEvaluateMarkers(t *testing.T) bool {
+	t.Helper()
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		return false
+	}
+	return exec.Command(python, "-c", "from packaging.markers import Marker").Run() == nil
 }
 
 // runSkillPythonVerifier feeds the embedded checker to a real interpreter the
