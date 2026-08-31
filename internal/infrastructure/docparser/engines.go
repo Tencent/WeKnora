@@ -43,9 +43,11 @@ func init() {
 
 // preferAnydocWhenAvailable is the type-level default override: when the
 // anydoc binding is linked and converts this file type, use it instead of
-// the markitdown fallback. Types without a fallback (pdf, docx, …) never
-// consult this — DefaultParserEngine short-circuits first.
+// builtin or the markitdown fallback. Simple formats stay on the Go reader.
 func preferAnydocWhenAvailable(fileType string) string {
+	if IsSimpleFormat(fileType) {
+		return ""
+	}
 	if anydoc.Available() && anydoc.Supports(fileType, "") {
 		return AnydocEngineName
 	}

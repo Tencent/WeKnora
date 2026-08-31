@@ -214,8 +214,9 @@ function pickDefaultEngineName(
   extensions: string[],
 ): string {
   const available = engines.filter(e => e.available)
-  const prefersAnydoc = extensions.some(ext => ext === 'ppt' || ext === 'pptx')
-  if (prefersAnydoc) {
+  const simpleExts = new Set(['md', 'markdown', 'txt', 'csv', 'json'])
+  const allSimple = extensions.length > 0 && extensions.every(ext => simpleExts.has(ext))
+  if (!allSimple) {
     const anydoc = available.find(e => e.name === 'anydoc')
     if (anydoc) return anydoc.name
   }
