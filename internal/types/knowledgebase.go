@@ -250,7 +250,8 @@ type ChunkingConfig struct {
 	Separators []string `yaml:"separators"    json:"separators"`
 	// ParserEngineRules configures which parser engine to use for each file type.
 	// When empty, DefaultParserEngine is used (builtin/simple routing, except
-	// types that only a specific engine can parse, e.g. ppt/pptx → markitdown).
+	// types that only a specific engine can parse: ppt/pptx prefer anydoc
+	// when that binding is linked, otherwise markitdown).
 	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty"`
 	// EnableParentChild enables two-level parent-child chunking strategy.
 	// When enabled, large parent chunks provide context while small child chunks
@@ -280,17 +281,42 @@ type ChunkingConfig struct {
 }
 
 // defaultParserEngineByType maps file types the builtin/simple engines cannot
-// parse to the only engine that can. Types omitted here keep empty-string
-// routing (Go simple formats, otherwise docreader builtin).
+// parse to a docreader engine that can. Types omitted here keep empty-string
+// routing (Go simple formats, otherwise docreader builtin). Anydoc, when
+// linked into the binary, is preferred over these fallbacks — see
+// SetPreferParserEngine.
 var defaultParserEngineByType = map[string]string{
 	"ppt":  "markitdown",
 	"pptx": "markitdown",
 }
 
+// preferParserEngine, if set, may override DefaultParserEngine for types that
+// have a type-level fallback. The docparser package registers anydoc here so
+// types does not import the engine catalog.
+var preferParserEngine func(fileType string) string
+
+// SetPreferParserEngine registers a build-time preference used by
+// DefaultParserEngine. Pass nil to clear. Intended to be called from init().
+func SetPreferParserEngine(fn func(fileType string) string) {
+	preferParserEngine = fn
+}
+
 // DefaultParserEngine returns the engine used when no parser_engine_rules
 // match. Empty string means builtin (docreader) or Go simple-format routing.
+// For ppt/pptx the preference is anydoc when that binding is available,
+// otherwise markitdown.
 func DefaultParserEngine(fileType string) string {
-	return defaultParserEngineByType[normalizeParserFileType(fileType)]
+	ft := normalizeParserFileType(fileType)
+	fallback := defaultParserEngineByType[ft]
+	if fallback == "" {
+		return ""
+	}
+	if preferParserEngine != nil {
+		if engine := preferParserEngine(ft); engine != "" {
+			return engine
+		}
+	}
+	return fallback
 }
 
 // ResolveParserEngine returns the engine name for the given file type

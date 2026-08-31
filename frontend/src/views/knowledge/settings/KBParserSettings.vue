@@ -199,7 +199,7 @@ function getEngineOptions(extensions: string[]): EngineOption[] {
       })
     }
   }
-  const defaultName = raw.find(e => e.available)?.name ?? ''
+  const defaultName = pickDefaultEngineName(raw, extensions)
   return raw
     .filter(e => e.available)
     .map(e => ({
@@ -207,6 +207,19 @@ function getEngineOptions(extensions: string[]): EngineOption[] {
       selectLabel: buildOptionLabel(e.name, defaultName !== '' && e.name === defaultName),
       isDefault: defaultName !== '' && e.name === defaultName,
     }))
+}
+
+function pickDefaultEngineName(
+  engines: { name: string; available: boolean }[],
+  extensions: string[],
+): string {
+  const available = engines.filter(e => e.available)
+  const prefersAnydoc = extensions.some(ext => ext === 'ppt' || ext === 'pptx')
+  if (prefersAnydoc) {
+    const anydoc = available.find(e => e.name === 'anydoc')
+    if (anydoc) return anydoc.name
+  }
+  return available[0]?.name ?? ''
 }
 
 function hasAvailableEngine(extensions: string[]): boolean {

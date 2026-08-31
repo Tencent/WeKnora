@@ -1,6 +1,11 @@
 package docparser
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser/anydoc"
+	"github.com/Tencent/WeKnora/internal/types"
+)
 
 func TestListAllEnginesBuiltinIncludesDocumentFormats(t *testing.T) {
 	engines := ListAllEngines(true, nil, nil)
@@ -25,4 +30,23 @@ func TestListAllEnginesBuiltinIncludesDocumentFormats(t *testing.T) {
 	}
 
 	t.Fatal("builtin engine not found")
+}
+
+func TestDefaultParserEnginePrefersAnydocWhenLinked(t *testing.T) {
+	if types.DefaultParserEngine("pdf") != "" {
+		t.Fatalf("DefaultParserEngine(pdf) should stay empty so builtin routing is unchanged")
+	}
+	got := types.DefaultParserEngine("pptx")
+	if anydoc.Available() {
+		if got != AnydocEngineName {
+			t.Fatalf("DefaultParserEngine(pptx) = %q, want anydoc when the binding is linked", got)
+		}
+		if types.DefaultParserEngine("ppt") != AnydocEngineName {
+			t.Fatalf("DefaultParserEngine(ppt) = %q, want anydoc", types.DefaultParserEngine("ppt"))
+		}
+		return
+	}
+	if got != "markitdown" {
+		t.Fatalf("DefaultParserEngine(pptx) = %q, want markitdown when anydoc is unavailable", got)
+	}
 }

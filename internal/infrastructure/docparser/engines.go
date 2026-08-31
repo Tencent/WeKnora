@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser/anydoc"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
@@ -29,6 +30,7 @@ const (
 )
 
 func init() {
+	types.SetPreferParserEngine(preferAnydocWhenAvailable)
 	RegisterEngine(&builtinEngine{})
 	RegisterEngine(&simpleEngine{})
 	RegisterEngine(&anydocEngine{})
@@ -37,6 +39,17 @@ func init() {
 	RegisterEngine(&mineruCloudEngine{})
 	RegisterEngine(&paddleOCRVLEngine{})
 	RegisterEngine(&paddleOCRVLCloudEngine{})
+}
+
+// preferAnydocWhenAvailable is the type-level default override: when the
+// anydoc binding is linked and converts this file type, use it instead of
+// the markitdown fallback. Types without a fallback (pdf, docx, …) never
+// consult this — DefaultParserEngine short-circuits first.
+func preferAnydocWhenAvailable(fileType string) string {
+	if anydoc.Available() && anydoc.Supports(fileType, "") {
+		return AnydocEngineName
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
