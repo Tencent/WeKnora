@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -106,6 +108,44 @@ func TestSQLiteMigrationsUpgradeV12NormalizesChunkingConfig(t *testing.T) {
 
 	assertSQLiteChunkingConfig(t, db, "legacy-kb-1", 700, 50, []string{"\n", "。"})
 	assertSQLiteChunkingConfig(t, db, "legacy-kb-2", 900, 25, []string{"new"})
+}
+
+func TestChunkingConfigDatabaseDefaultsMatchRuntime(t *testing.T) {
+	repoRoot := sqliteRepoRoot(t)
+	runtimeConfig := chunker.DefaultConfig()
+	defaultPattern := regexp.MustCompile(
+		`(?m)^\s*chunking_config\s+\w+\s+NOT NULL DEFAULT '([^']+)'`,
+	)
+
+	files := []string{
+		"migrations/versioned/000000_init.up.sql",
+		"migrations/paradedb/00-init-db.sql",
+		"migrations/sqlite/000000_init.up.sql",
+	}
+	for _, file := range files {
+		t.Run(file, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(repoRoot, file))
+			require.NoError(t, err)
+
+			matches := defaultPattern.FindStringSubmatch(string(data))
+			require.Len(t, matches, 2, "expected one chunking_config default in %s", file)
+
+			var config struct {
+				ChunkSize    int      `json:"chunk_size"`
+				ChunkOverlap int      `json:"chunk_overlap"`
+				Separators   []string `json:"separators"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(matches[1]), &config))
+			require.Equal(t, runtimeConfig.ChunkSize, config.ChunkSize)
+			require.Equal(t, runtimeConfig.ChunkOverlap, config.ChunkOverlap)
+			require.Equal(t, runtimeConfig.Separators, config.Separators)
+
+			var keys map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal([]byte(matches[1]), &keys))
+			require.NotContains(t, keys, "split_markers")
+			require.NotContains(t, keys, "keep_separator")
+		})
+	}
 }
 
 func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
