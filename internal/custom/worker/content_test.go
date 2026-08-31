@@ -72,13 +72,17 @@ func TestSkillQueryUsesTranscriptKnowledgeIDAsSourceDocument(t *testing.T) {
 	require.Contains(t, query, "$extract-video-knowledge")
 	require.Contains(t, query, "源文档知识 ID：knowledge-1")
 	require.Contains(t, query, "业务视频 ID：video-1")
+	require.Contains(t, query, "每个实体和每个知识原子都要写入独立 Wiki 页面")
+	require.Contains(t, query, "references/type-frameworks.md")
+	require.Contains(t, query, "对应结构维度")
 	require.Contains(t, query, `slug 严格使用 "video/video-1"`)
 	require.Contains(t, query, "type: knowledge_base")
-	require.Contains(t, query, "目标产物页可能尚不存在")
+	require.Contains(t, query, "索引页目标可能尚不存在")
 	require.Contains(t, query, "读取返回 not found 不是失败")
 	require.Contains(t, query, "连续语义窗口")
 	require.Contains(t, query, "实体、概念、案例、方法论和洞察五类知识")
 	require.Contains(t, query, "不得用示例、占位内容或 mock 数据")
+	require.NotContains(t, query, "写入唯一产物页")
 }
 
 func TestSkillQueryForSummaryEnhancementUsesKnowledgeBase(t *testing.T) {
