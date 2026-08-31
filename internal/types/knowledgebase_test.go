@@ -327,6 +327,33 @@ func TestDefaultParserEngine(t *testing.T) {
 	}
 }
 
+func TestDefaultParserEnginePrefersRegisteredEngineForFallbackTypes(t *testing.T) {
+	t.Cleanup(func() { SetPreferParserEngine(nil) })
+	SetPreferParserEngine(func(fileType string) string {
+		if fileType == "pptx" || fileType == "ppt" {
+			return "anydoc"
+		}
+		return "should-not-apply"
+	})
+	if got := DefaultParserEngine("pptx"); got != "anydoc" {
+		t.Fatalf("DefaultParserEngine(pptx) = %q, want anydoc", got)
+	}
+	if got := DefaultParserEngine("ppt"); got != "anydoc" {
+		t.Fatalf("DefaultParserEngine(ppt) = %q, want anydoc", got)
+	}
+	if got := DefaultParserEngine("pdf"); got != "" {
+		t.Fatalf("DefaultParserEngine(pdf) = %q, want empty (no type-level fallback)", got)
+	}
+}
+
+func TestDefaultParserEngineIgnoresEmptyPreference(t *testing.T) {
+	t.Cleanup(func() { SetPreferParserEngine(nil) })
+	SetPreferParserEngine(func(string) string { return "" })
+	if got := DefaultParserEngine("pptx"); got != "markitdown" {
+		t.Fatalf("DefaultParserEngine(pptx) = %q, want markitdown when preference is empty", got)
+	}
+}
+
 func TestChunkingConfigResolveParserEngineDefaults(t *testing.T) {
 	var empty ChunkingConfig
 	if got := empty.ResolveParserEngine("pptx"); got != "markitdown" {
