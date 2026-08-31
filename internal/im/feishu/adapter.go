@@ -712,7 +712,7 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 //  1. POST  /cardkit/v1/cards                                      — create card entity
 //  2. POST  /im/v1/messages  content={"type":"card","data":{"card_id":"…"}} — send card
 //  3. PUT   /cardkit/v1/cards/{id}/elements/{eid}/content          — stream element content
-//  4. PATCH /cardkit/v1/cards/{id}/settings                        — set streaming_mode=false
+//  4. PATCH /cardkit/v1/cards/{id}/settings                        — finalize streaming and summary
 //
 // Reference: https://github.com/larksuite/openclaw-lark (official Lark plugin)
 //            https://open.feishu.cn/document/cardkit-v1/streaming-updates-openapi-overview
@@ -727,6 +727,7 @@ const (
 type feishuStreamState struct {
 	mu         sync.Mutex
 	content    strings.Builder
+	contentSeq int64     // sequence of the last successfully sent content
 	seq        int64     // strictly incrementing sequence for CardKit API
 	createdAt  time.Time // for orphan stream detection
 	firstChunk bool      // true after the first real content chunk clears the placeholder
@@ -751,6 +752,15 @@ var (
 func (s *feishuStreamState) nextSeq() int {
 	s.seq++
 	return int(s.seq)
+}
+
+func cardSummaryPreview(content string) string {
+	content = feishuMarkdownImageRe.ReplaceAllString(content, "${1}")
+	preview := []rune(strings.Join(strings.Fields(content), " "))
+	if len(preview) > 120 {
+		preview = preview[:120]
+	}
+	return string(preview)
 }
 
 // buildStreamingCardJSON builds a Card JSON 2.0 with streaming_mode enabled.
@@ -824,11 +834,6 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 	}
 
 	state.mu.Lock()
-	if !state.firstChunk {
-		state.firstChunk = true
-	}
-	state.content.Reset()
-	state.content.WriteString(fullContent)
 	seq := state.nextSeq()
 	state.mu.Unlock()
 
@@ -842,7 +847,19 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 	// (uploading on demand) so the card update does not fail with 200570.
 	content := a.resolveMarkdownImages(ctx, accessToken, fullContent)
 
-	return a.cardkitUpdateElement(ctx, accessToken, streamID, streamingElementID, content, seq)
+	if err := a.cardkitUpdateElement(ctx, accessToken, streamID, streamingElementID, content, seq); err != nil {
+		return err
+	}
+
+	state.mu.Lock()
+	if int64(seq) > state.contentSeq {
+		state.firstChunk = true
+		state.content.Reset()
+		state.content.WriteString(fullContent)
+		state.contentSeq = int64(seq)
+	}
+	state.mu.Unlock()
+	return nil
 }
 
 // FinalizeStream replaces the card with answer-only content.
@@ -855,7 +872,7 @@ func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMess
 	return a.UpdateStreamContent(ctx, incoming, streamID, content)
 }
 
-// EndStream disables streaming_mode and cleans up state.
+// EndStream disables streaming_mode, replaces the temporary summary, and cleans up state.
 func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {
 	feishuStreamsMu.Lock()
 	state, ok := feishuStreams[streamID]
@@ -868,14 +885,17 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 	}
 
 	var seq int
+	var finalSummary *string
 	if ok {
 		state.mu.Lock()
 		seq = state.nextSeq()
+		preview := cardSummaryPreview(state.content.String())
+		finalSummary = &preview
 		state.mu.Unlock()
 	}
 
-	// Turn off streaming_mode to remove loading indicator
-	if err := a.cardkitSetStreaming(ctx, accessToken, streamID, false, seq); err != nil {
+	// Turn off streaming_mode and replace the temporary conversation summary.
+	if err := a.cardkitSetStreaming(ctx, accessToken, streamID, false, finalSummary, seq); err != nil {
 		logger.Warnf(ctx, "[%s] Failed to disable streaming_mode: %v", a.region.Label, err)
 	}
 
@@ -1164,12 +1184,22 @@ func (a *Adapter) uploadImageFromURL(ctx context.Context, accessToken, rawURL st
 	return result.Data.ImageKey, nil
 }
 
-// cardkitSetStreaming updates the card's streaming_mode setting.
+// cardkitSetStreaming updates streaming_mode and, when available, the final summary.
 // PATCH /open-apis/cardkit/v1/cards/:card_id/settings
-func (a *Adapter) cardkitSetStreaming(ctx context.Context, accessToken, cardID string, streaming bool, sequence int) error {
+func (a *Adapter) cardkitSetStreaming(
+	ctx context.Context, accessToken, cardID string, streaming bool, finalSummary *string, sequence int,
+) error {
 	settings, _ := json.Marshal(map[string]interface{}{
 		"streaming_mode": streaming,
 	})
+	if finalSummary != nil {
+		settings, _ = json.Marshal(map[string]interface{}{
+			"config": map[string]interface{}{
+				"streaming_mode": streaming,
+				"summary":        map[string]string{"content": *finalSummary},
+			},
+		})
+	}
 	payload, _ := json.Marshal(map[string]interface{}{
 		"settings": string(settings),
 		"sequence": sequence,
