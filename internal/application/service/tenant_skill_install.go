@@ -676,7 +676,7 @@ func (s *TenantSkillService) beginInstallTranscript(
 	sess *types.Session, mgr sandbox.Manager, skillDir string, bundle *SkillBundle,
 ) (*installTranscript, string) {
 	assistantMessageID := uuid.NewString()
-	prompt := buildInstallPrompt(skillDir, bundle, s.probeUv(ctx, mgr, sess.ID))
+	prompt := buildInstallPrompt(skillDir, bundle, s.probeInstallTools(ctx, mgr, sess.ID))
 	transcript := newInstallTranscript(ctx, event.NewEventBus(), s.streams, s.messages, sess.ID, assistantMessageID)
 	if err := transcript.Create(ctx, prompt); err != nil {
 		logger.Warnf(ctx, "[skill] seed install transcript for %s failed: %v", skillID, err)
@@ -946,59 +946,114 @@ The same verification runs again as soon as you finish.
 func (s *TenantSkillService) normalizeSkillPermissions(
 	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string,
 ) error {
-	cmds := []string{
-		fmt.Sprintf("chmod -R 555 %s", sandbox.ShellQuote(skillDir)),
-		fmt.Sprintf("chown -R root:root %s", sandbox.ShellQuote(skillDir)),
-	}
-	for _, cmd := range cmds {
-		if _, err := s.execInstall(ctx, mgr, sessionID, cmd); err != nil {
-			return fmt.Errorf("normalize skill permissions (%s): %w", cmd, err)
-		}
+	dir := sandbox.ShellQuote(skillDir)
+	cmd := fmt.Sprintf("chmod -R 555 %s && chown -R root:root %s", dir, dir)
+	if _, err := s.execInstall(ctx, mgr, sessionID, cmd); err != nil {
+		return fmt.Errorf("normalize skill permissions (%s): %w", cmd, err)
 	}
 	return nil
 }
 
-// cleanImageScratch wipes the state that must not reach the snapshot: the
-// per-session workspace and the package download caches.
+// skillCacheBudgetMB caps the package download caches one image carries into
+// its next generation, as one total across both accounts. Retaining the caches
+// lets a future install resolve a package a previous install already fetched
+// without touching the network — minutes of the agent phase. Letting them grow
+// unbounded would bake every version ever downloaded into every future
+// snapshot, so the total is measured and anything over the budget is wiped
+// whole.
+const skillCacheBudgetMB = 256
+
+// cleanImageScratch resets the state that must not reach the snapshot and
+// trims what may. The per-session workspace is wiped unconditionally: a
+// snapshot carrying it would hand every future session this run's scratch
+// files, and the wipe takes the base image's own input/output directories with
+// it, so the same command restores them with the ownership the session account
+// needs — the only step of an install that runs with the privileges to do it.
+// That half is strict; failing it fails the install.
+//
+// The package download caches are the other half, and they are retained rather
+// than wiped: pip, uv, npm and pnpm caches are first trimmed with the tools'
+// own collectors, then measured as one total across both accounts and wiped
+// whole when they exceed skillCacheBudgetMB. That half is best-effort by
+// construction — every statement in it is guarded, and a prune that failed or
+// a size that could not be measured only means a larger image, never a failed
+// install.
 func (s *TenantSkillService) cleanImageScratch(
 	ctx context.Context, mgr sandbox.Manager, sessionID string,
 ) error {
-	user := sandbox.DefaultSandboxExecUser
-	inputRoot := sandbox.ShellQuote(sandbox.SessionInputRoot)
-	outputRoot := sandbox.ShellQuote(sandbox.SessionOutputRoot)
-	cmds := []string{
-		"rm -rf /workspace/* /workspace/.[!.]* || true",
-		// The wipe above takes the base image's own input/output directories
-		// with it, so every session booting from this snapshot would start on
-		// a bare /workspace. Restoring them here is the only place with root:
-		// a provider whose filesystem API runs as root would otherwise
-		// recreate them root-owned, and the session account can neither write
-		// them nor take them over.
-		fmt.Sprintf(
-			"mkdir -p %s %s && chown %s:%s %s %s && chmod 775 %s %s",
-			inputRoot, outputRoot,
-			user, user, inputRoot, outputRoot,
-			inputRoot, outputRoot,
-		),
-		// Spelled out for both accounts on purpose: this runs as root, so "~"
-		// would only ever clear root's caches, while the agent's own installs
-		// populate the exec user's caches and those are what reach the image.
-		"rm -rf " + strings.Join(append(
-			packageCachePaths("/root"),
-			packageCachePaths(path.Join("/home", sandbox.DefaultSandboxExecUser))...,
-		), " ") + " || true",
+	res, err := s.execInstall(ctx, mgr, sessionID, cleanImageScratchCommand())
+	if err != nil {
+		return fmt.Errorf("clean image scratch: %w", err)
 	}
-	for _, cmd := range cmds {
-		if _, err := s.execInstall(ctx, mgr, sessionID, cmd); err != nil {
-			return fmt.Errorf("clean image scratch (%s): %w", cmd, err)
-		}
+	// The retention half reports what the image will actually carry. Logged so
+	// the budget constant is tuned from data rather than guesses.
+	if res != nil && strings.TrimSpace(res.Stdout) != "" {
+		logger.Infof(ctx, "[skill] cache retention: %s", strings.TrimSpace(res.Stdout))
 	}
 	return nil
 }
 
+// cleanImageScratchCommand folds the workspace reset and the cache retention
+// into one command, one round trip. The workspace half decides the exit code:
+// its status is captured right after it runs and is what the command exits
+// with, so merging cannot soften the old semantics. The retention half follows
+// and cannot change that code — it is written to always succeed, and the shell
+// it lands in has no set -e to turn a swallowed prune failure into an abort.
+func cleanImageScratchCommand() string {
+	user := sandbox.DefaultSandboxExecUser
+	inputRoot := sandbox.ShellQuote(sandbox.SessionInputRoot)
+	outputRoot := sandbox.ShellQuote(sandbox.SessionOutputRoot)
+	var b strings.Builder
+	b.WriteString("rm -rf /workspace/* /workspace/.[!.]* || true")
+	fmt.Fprintf(&b, "; mkdir -p %s %s && chown %s:%s %s %s && chmod 775 %s %s; status=$?",
+		inputRoot, outputRoot,
+		user, user, inputRoot, outputRoot,
+		inputRoot, outputRoot,
+	)
+	// The prunes run as root, so they only ever trim root's caches. The budget
+	// guard below covers both accounts on purpose — it needs nothing but du and
+	// rm, and this runs as root.
+	for _, prune := range []struct{ tool, subcommand string }{
+		{"uv", "cache prune"},
+		{"npm", "cache verify"},
+		{"pnpm", "store prune"},
+	} {
+		fmt.Fprintf(&b, "; command -v %s >/dev/null 2>&1 && %s %s >/dev/null 2>&1 || true",
+			prune.tool, prune.tool, prune.subcommand)
+	}
+	paths := append(
+		packageCachePaths("/root"),
+		packageCachePaths(path.Join("/home", sandbox.DefaultSandboxExecUser))...,
+	)
+	b.WriteString("; ")
+	b.WriteString(cacheBudgetGuardCommand(paths, skillCacheBudgetMB*1024))
+	b.WriteString("; exit $status")
+	return b.String()
+}
+
+// cacheBudgetGuardCommand emits the shell that measures the given cache
+// directories as one total and wipes them whole when they exceed budgetKB.
+// Keeping the caches is the point, so every way the measurement can fail keeps
+// them: no du, no directories, an unreadable size — all leave the caches in
+// place. The total is echoed in both cases so the install log records what the
+// image carries, which is the data the budget is tuned from.
+func cacheBudgetGuardCommand(paths []string, budgetKB int) string {
+	quoted := make([]string, 0, len(paths))
+	for _, p := range paths {
+		quoted = append(quoted, sandbox.ShellQuote(p))
+	}
+	list := strings.Join(quoted, " ")
+	return fmt.Sprintf(
+		"total=$(du -skc %s 2>/dev/null | tail -n1 | cut -f1); "+
+			"echo \"cache total: ${total:-0}KB\"; "+
+			"[ \"${total:-0}\" -gt %d ] && { rm -rf %s; echo 'cache wiped: over budget'; }; true",
+		list, budgetKB, list)
+}
+
 // packageCachePaths lists the download caches the three package managers we
-// support keep under a home directory. They are scratch by definition and
-// would otherwise be snapshotted into every future session's image.
+// support keep under a home directory. Retained up to the budget these days,
+// but still capped: a cache is a means to a faster install, never the payload
+// of the image.
 func packageCachePaths(home string) []string {
 	return []string{
 		path.Join(home, ".cache", "pip"),
@@ -1656,7 +1711,7 @@ func snapshotBelongsToOtherConfig(snap sandbox.RemoteSnapshotRef, prefix string)
 	return sawForeign
 }
 
-func buildInstallPrompt(skillDir string, bundle *SkillBundle, uvAvailable bool) string {
+func buildInstallPrompt(skillDir string, bundle *SkillBundle, tools map[string]string) string {
 	skillMD := ""
 	requirementsPath := ""
 	if bundle != nil {
@@ -1666,7 +1721,7 @@ func buildInstallPrompt(skillDir string, bundle *SkillBundle, uvAvailable bool) 
 	return fmt.Sprintf(`Install this WeKnora skill into the sandbox image.
 
 Skill directory: %s
-uv available: %t
+%s
 
 Hard requirements:
 - Install dependencies for exactly this one skill.
@@ -1677,9 +1732,9 @@ Hard requirements:
   with a short shell redirect after mkdir -p.
 - Each command has a 10-minute budget; you do not need to set timeout_sec.
 - When finished, report what you installed and any global/system packages you changed.
-- Declare the environment variables this skill reads AT RUN TIME. Read its scripts to decide;
-  ignore anything only the installation itself needed. Run mkdir -p on the directory first, then
-  write the declaration to %s as JSON of this exact shape:
+- Declare the environment variables this skill needs AT RUN TIME. Decide from the SKILL.md text
+  at the end of this message: declare what it documents as needed to run the skill. Ignore 
+  anything only the installation itself needed. Run mkdir -p on the directory first, then write the declaration to %s as JSON of this exact shape:
   {"env":[{"name":"TAVILY_API_KEY","description":"what the skill uses it for","required":true}]}
   Each name must be UPPER_SNAKE_CASE and must appear literally somewhere in the skill's own files.
   Never write any value, placeholder or example credential: this file declares what is needed, and
@@ -1706,20 +1761,13 @@ The server verifies the result itself before the image is kept, so report what
 you did rather than whether it passed. Verification parses every script with
 the interpreter that would run it, resolves the imports each one executes on
 load, and checks every distribution named in requirements.txt is present in the
-venv. It never runs the skill's code, so nothing is expected to answer --help.
+venv. It never runs the skill's code.
 Lazy imports and install_deps.py extras are invisible to that check — you still
 have to install them.
 
-SKILL.md is not the dependency list. What the check resolves is the set of
-top-level imports the skill's files actually execute, and a library module
-routinely imports something the documentation never mentions. Read every .py in
-the tree (grep '^import\|^from' over it) and install what those lines need, not
-only what the Dependencies section names. If verification does fail on a missing
-package, you get its exact findings back and one round to install them.
-
 SKILL.md:
 %s
-`, skillDir, uvAvailable, skillDir, skillDir, skillDir,
+`, skillDir, formatToolchainSection(tools), skillDir, skillDir, skillDir,
 		requirementsPath, skillDir, formatOnDemandInstallers(bundle),
 		formatFrontmatterRepairNote(bundle), skillMD)
 }
@@ -1763,9 +1811,79 @@ func formatFrontmatterRepairNote(bundle *SkillBundle) string {
 		"can fix the file.\n"
 }
 
-func (s *TenantSkillService) probeUv(ctx context.Context, mgr sandbox.Manager, sessionID string) bool {
-	_, err := s.execInstall(ctx, mgr, sessionID, "uv --version")
-	return err == nil
+// installProbeTools are the executables the installer agent reaches for. The
+// probe resolves each one's absolute path so the prompt can hand them over
+// instead of leaving the agent to burn a turn on `which` — or to gamble that
+// the shell_exec PATH contains, say, /root/.local/bin.
+var installProbeTools = []string{"uv", "npm", "pnpm", "pip3", "pip", "python3", "node"}
+
+// installToolsProbeCommand locates every probe tool in one shell pass. The if
+// guards the not-found case so the loop exits 0 whatever is missing: a tool
+// that is absent is a fact for the prompt, not an error.
+func installToolsProbeCommand() string {
+	var b strings.Builder
+	b.WriteString("for t in")
+	for _, t := range installProbeTools {
+		b.WriteByte(' ')
+		b.WriteString(t)
+	}
+	b.WriteString(`; do if p=$(command -v "$t" 2>/dev/null); then printf '%s=%s\n' "$t" "$p"; fi; done`)
+	return b.String()
+}
+
+// parseToolProbeOutput reads the probe's `name=path` lines. Anything else on
+// stdout is ignored: a tool line is the only thing the command emits, but the
+// prompt is better served by dropping noise than by failing the probe over it.
+func parseToolProbeOutput(stdout string) map[string]string {
+	tools := make(map[string]string)
+	for _, line := range strings.Split(stdout, "\n") {
+		name, p, found := strings.Cut(strings.TrimSpace(line), "=")
+		if found && name != "" && p != "" {
+			tools[name] = p
+		}
+	}
+	return tools
+}
+
+// probeInstallTools resolves the absolute paths of the package managers the
+// installer may reach for. One command, one round trip — the same probe
+// `uv available` used to cost, carrying every tool instead of one bit. A
+// failed probe is not an install failure: the prompt falls back to telling
+// the agent to discover the toolchain itself.
+func (s *TenantSkillService) probeInstallTools(
+	ctx context.Context, mgr sandbox.Manager, sessionID string,
+) map[string]string {
+	res, err := s.execInstall(ctx, mgr, sessionID, installToolsProbeCommand())
+	if err != nil || res == nil {
+		return nil
+	}
+	return parseToolProbeOutput(res.Stdout)
+}
+
+// formatToolchainSection renders the probe result for the prompt: one line
+// per tool with its absolute path, one line grouping whatever is missing.
+// An empty result — a probe that failed, or an image with none of the tools —
+// reads the same to the agent: locate them yourself before relying on PATH.
+func formatToolchainSection(tools map[string]string) string {
+	if len(tools) == 0 {
+		return "Toolchain: could not be probed in advance; " +
+			"locate tools with `command -v <tool>` before relying on PATH."
+	}
+	var b strings.Builder
+	b.WriteString("Toolchain (absolute paths as resolved in this image; prefer them over PATH):")
+	var missing []string
+	for _, t := range installProbeTools {
+		if p, ok := tools[t]; ok {
+			fmt.Fprintf(&b, "\n- %s: %s", t, p)
+		} else {
+			missing = append(missing, t)
+		}
+	}
+	if len(missing) > 0 {
+		b.WriteString("\nnot found: ")
+		b.WriteString(strings.Join(missing, ", "))
+	}
+	return b.String()
 }
 
 // installerAgentDefaults returns the platform's own definition of the installer
