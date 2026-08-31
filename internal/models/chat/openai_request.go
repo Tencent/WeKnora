@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -196,6 +197,9 @@ func (c *RemoteAPIChat) buildProviderOpenAIRequest(
 	var out map[string]any
 	if err := json.Unmarshal(data, &out); err != nil {
 		return nil, fmt.Errorf("unmarshal provider request: %w", err)
+	}
+	if c.provider == provider.ProviderGemini {
+		normalizeGeminiToolSchemas(out)
 	}
 
 	providerMessages := make([]map[string]any, 0, len(openAIMessages))
