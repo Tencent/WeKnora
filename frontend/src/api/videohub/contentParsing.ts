@@ -65,6 +65,14 @@ export interface BackendRelatedKnowledgeResponse {
 const KNOWLEDGE_TYPES: KnowledgeType[] = ['entity', 'concept', 'case', 'method', 'insight']
 const RELATION_TYPES = new Set<RelationType>(['相同', '相似', '补充', '对比', '延伸'])
 
+function isKnowledgeType(value: unknown): value is KnowledgeType {
+  return typeof value === 'string' && KNOWLEDGE_TYPES.includes(value as KnowledgeType)
+}
+
+function hasKnowledgeType<T extends BackendAnchor>(item: T): item is T & { type: KnowledgeType } {
+  return isKnowledgeType(item.type)
+}
+
 export function parseTimestamp(value: string): number {
   const parts = value.trim().split(':').map(Number)
   if ((parts.length !== 2 && parts.length !== 3) || parts.some(part => !Number.isFinite(part) || part < 0)) {
@@ -384,11 +392,11 @@ export function mapRelatedKnowledgeResponse(videoId: string, response: BackendRe
     : KNOWLEDGE_TYPES.flatMap(type => ((rawAnchors as Partial<Record<KnowledgeType, BackendAnchor[]>> | undefined)?.[type] || [])
         .map((item: BackendAnchor) => ({ ...item, type: item.type || type })))
   const crossVideoItems: CrossVideoKnowledgeItem[] = (response.cross_video || [])
-    .filter(item => item.video_id && item.video_id !== videoId)
+    .filter(item => item.video_id && item.video_id !== videoId && hasKnowledgeType(item))
     .map((item, index) => ({
       id: item.id || `cross-video-${index + 1}`,
       anchorId: item.anchor_id || item.id,
-      knowledge_type: item.type || 'concept',
+      knowledge_type: item.type as KnowledgeType,
       relation_type: RELATION_TYPES.has(item.relation_type as RelationType) ? item.relation_type as RelationType : '补充',
       knowledge_content: item.title || '关联知识',
       timestamp: item.timestamp || '00:00',
@@ -398,9 +406,9 @@ export function mapRelatedKnowledgeResponse(videoId: string, response: BackendRe
       video_category: item.video_type === 'interview' ? 'interview' : item.video_type === 'tutorial' || item.video_type === 'training' ? 'training' : item.video_type === 'lecture' || item.video_type === 'salon' ? 'salon' : 'general',
       relation_description: item.relation_description || '与当前内容存在知识关联。',
     }))
-  const anchors: CurrentKnowledgeAnchor[] = grouped.map((item) => ({
+  const anchors: CurrentKnowledgeAnchor[] = grouped.filter(hasKnowledgeType).map((item) => ({
     id: item.id,
-    knowledge_type: item.type || 'concept',
+    knowledge_type: item.type,
     content: item.title || '未命名知识',
     timestamp: item.timestamp || '00:00',
     seconds: Number.isFinite(Number(item.seconds)) ? Number(item.seconds) : item.timestamp ? parseTimestamp(item.timestamp) : 0,

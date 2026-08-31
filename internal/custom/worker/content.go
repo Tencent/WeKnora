@@ -37,7 +37,7 @@ const wikiBaselinePayloadKey = "wiki_page_versions_before_skill"
 func skillQuery(video *model.Video, contract skill.JobContract, jobType string) string {
 	query := fmt.Sprintf(
 		"使用 $%s 处理视频。当前转写代次：%s。兼容源文档知识 ID：%s；完整转写分块清单已通过调用上下文提供，必须覆盖全部分块。业务视频 ID：%s 仅用于产物归属。视频标题：%s。"+
-			"必须通过创建/覆盖 Wiki 写入唯一产物页：slug 严格使用 %q，不得使用其他产物的 slug，也不得覆盖其他类型页面；page_type 使用 index；frontmatter 必须含 type: %s、source_video_id: %s 和 transcript_generation: %s。目标产物页可能尚不存在，首次生成时不要先读取目标 slug；读取返回 not found 不是失败，请继续直接写入。读取上游产物时，必须使用 Wiki 工具返回的实际 slug，禁止根据视频标题或页面标题猜测 slug。",
+			"必须按 Skill 约定从源文档提取实体、概念、案例、方法论和洞察五类知识，并通过创建/覆盖 Wiki 写入唯一产物页：slug 严格使用 %q，不得使用其他产物的 slug，也不得覆盖其他类型页面；page_type 使用 index；frontmatter 必须含 type: %s、source_video_id: %s 和 transcript_generation: %s。目标产物页可能尚不存在，首次生成时不要先读取目标 slug；读取返回 not found 不是失败，请继续直接写入。读取上游产物时，必须使用 Wiki 工具返回的实际 slug，禁止根据视频标题或页面标题猜测 slug；不得用示例、占位内容或 mock 数据代替真实 Wiki 产物。",
 		contract.SkillName, video.TranscriptGeneration, video.TranscriptKnowledgeID, video.ID, video.Title,
 		contract.WriteSlug(video.ID), contract.ArtifactType, video.ID, video.TranscriptGeneration,
 	)

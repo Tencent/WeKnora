@@ -27,8 +27,7 @@
           <aside class="video-detail-page__right">
             <t-tabs v-model="activeTab">
               <t-tab-panel value="summary" label="智能总结"><SmartSummary :key="video.id" :video="video" :content-state="content.summary" @reload="reloadSummary" @seek="seekTo" /></t-tab-panel>
-              <t-tab-panel value="related" label="相关知识"><RelatedKnowledge :key="video.id" :video="video" :content-state="content.relatedKnowledge" @reload="reloadRelatedKnowledge" @seek="seekTo" @select-video-by-id="onSelectVideoById" /></t-tab-panel>
-              <t-tab-panel value="transcript" label="完整文字稿"><TranscriptPageContent :key="video.id" :content-state="content.transcriptPage" @reload="reloadTranscriptPage" /></t-tab-panel>
+              <t-tab-panel v-if="showRelatedKnowledgeTab" value="related" label="关联知识"><RelatedKnowledge :key="video.id" :video="video" :content-state="content.relatedKnowledge" @reload="reloadRelatedKnowledge" @seek="seekTo" @select-video-by-id="onSelectVideoById" /></t-tab-panel>
             </t-tabs>
           </aside>
         </div>
@@ -41,7 +40,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { contentModuleForStage, createLoadingContentModuleState, createLoadingContentState, fetchVideoContent, fetchVideoContentModule, fetchVideoDetail, fetchVideoOptions, fetchVideoSubtitles, isVideoInitiallyAvailable, type VideoContentModule, type VideoContentState } from '@/api/videohub'
+import { contentModuleForStage, createLoadingContentModuleState, createLoadingContentState, fetchVideoContent, fetchVideoContentModule, fetchVideoDetail, fetchVideoOptions, fetchVideoSubtitles, isVideoInitiallyAvailable, shouldShowRelatedKnowledgeTab, type VideoContentModule, type VideoContentState } from '@/api/videohub'
 import type { VideoData } from '@/types/videohub'
 import VideoPlayer from '@/components/videohub/VideoPlayer.vue'
 import ChapterNavigation from '@/components/videohub/ChapterNavigation.vue'
@@ -49,7 +48,6 @@ import AiAssistant from '@/components/videohub/AiAssistant.vue'
 import SmartSummary from '@/components/videohub/SmartSummary.vue'
 import RelatedKnowledge from '@/components/videohub/RelatedKnowledge.vue'
 import ProcessingStatus from '@/components/videohub/ProcessingStatus.vue'
-import TranscriptPageContent from '@/components/videohub/TranscriptPageContent.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -66,6 +64,7 @@ const content = ref<VideoContentState>(createLoadingContentState())
 let loadSequence = 0
 let contentSequence = 0
 const moduleSequences: Record<VideoContentModule, number> = { outline: 0, summary: 0, relatedKnowledge: 0, transcriptPage: 0 }
+const showRelatedKnowledgeTab = computed(() => shouldShowRelatedKnowledgeTab(content.value.relatedKnowledge))
 const isPlayable = computed(() => Boolean(video.value && isVideoInitiallyAvailable({
   status: video.value.status,
   file_url: video.value.video_url,
@@ -95,7 +94,7 @@ const statusHint = computed(() => {
 async function loadVideo(id: string) {
   const sequence = ++loadSequence
   contentSequence++
-  loading.value = true; error.value = ''; currentSeconds.value = 0
+  loading.value = true; error.value = ''; currentSeconds.value = 0; activeTab.value = 'summary'
   try {
     const nextVideo = await fetchVideoDetail(id)
     if (sequence !== loadSequence) return
@@ -164,7 +163,6 @@ function reloadContentModule(module: VideoContentModule) {
 function reloadOutline() { reloadContentModule('outline') }
 function reloadSummary() { reloadContentModule('summary') }
 function reloadRelatedKnowledge() { reloadContentModule('relatedKnowledge') }
-function reloadTranscriptPage() { reloadContentModule('transcriptPage') }
 async function loadVideoOptions() {
   try {
     videoOptions.value = (await fetchVideoOptions()).map(item => ({ label: item.title, value: item.id }))
@@ -184,6 +182,9 @@ function onSelectVideoById(videoId: string, seconds: number) {
 }
 function switchVideo(value: string | number | Array<string | number>) { if (typeof value === 'string') router.push(`/platform/videos/${value}`) }
 watch(() => route.params.videoId, value => { if (typeof value === 'string') loadVideo(value) })
+watch(showRelatedKnowledgeTab, visible => {
+  if (!visible && activeTab.value === 'related') activeTab.value = 'summary'
+})
 onMounted(() => {
   void loadVideoOptions()
   if (typeof route.params.videoId === 'string') void loadVideo(route.params.videoId)

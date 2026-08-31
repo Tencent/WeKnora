@@ -77,6 +77,8 @@ func TestSkillQueryUsesTranscriptKnowledgeIDAsSourceDocument(t *testing.T) {
 	require.Contains(t, query, "目标产物页可能尚不存在")
 	require.Contains(t, query, "读取返回 not found 不是失败")
 	require.Contains(t, query, "连续语义窗口")
+	require.Contains(t, query, "实体、概念、案例、方法论和洞察五类知识")
+	require.Contains(t, query, "不得用示例、占位内容或 mock 数据")
 }
 
 func TestSkillQueryForSummaryEnhancementUsesKnowledgeBase(t *testing.T) {

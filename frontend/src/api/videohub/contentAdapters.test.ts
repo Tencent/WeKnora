@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { buildVideoContentState, classifyContentError, contentModuleForStage } from './contentState'
+import { buildVideoContentState, classifyContentError, contentModuleForStage, shouldShowRelatedKnowledgeTab } from './contentState'
 import { mapRelatedKnowledgeResponse, parseOutlineResponse, parseOutlineWikiPage, parseOverviewWikiPage, parseStructuredSummary, parseSubtitleFile, parseTimestamp, parseTranscriptPageWikiPage } from './contentParsing'
 import { getNewlyCompletedStages } from '../../components/videohub/processingStatusState'
 
@@ -138,6 +138,16 @@ test('maps grouped backend anchors without mock video data', () => {
   assert.deepEqual(payload.overview?.top_topics, ['张三', '复盘法'])
 })
 
+test('does not misclassify unsupported knowledge types as concepts', () => {
+  const payload = mapRelatedKnowledgeResponse('video-1', {
+    anchors: [{ id: 'unknown-1', title: '未知类型', type: 'unsupported' as any }],
+    cross_video: [],
+  })
+
+  assert.deepEqual(payload.anchors, [])
+  assert.equal(payload.overview, null)
+})
+
 test('keeps cross-video-only responses visible', () => {
   const payload = mapRelatedKnowledgeResponse('video-1', {
     anchors: [],
@@ -183,6 +193,13 @@ test('content loader distinguishes not generated artifacts from failures', () =>
   assert.equal(classifyContentError({ status: 404, code: 'CONTENT_NOT_READY' }), 'not_generated')
   assert.equal(classifyContentError({ status: 404, code: 'CONTENT_NOT_FOUND' }), 'error')
   assert.equal(classifyContentError({ status: 502, error_code: 'weknora_read_failed' }), 'error')
+})
+
+test('hides related knowledge tab after an empty result', () => {
+  const emptyData = { videoId: 'video-1', overview: null, anchors: [], crossVideoItems: [] }
+  assert.equal(shouldShowRelatedKnowledgeTab({ status: 'loading', data: emptyData }), true)
+  assert.equal(shouldShowRelatedKnowledgeTab({ status: 'empty', data: emptyData }), false)
+  assert.equal(shouldShowRelatedKnowledgeTab({ status: 'ready', data: emptyData }), false)
 })
 
 test('maps completed processing stages to local content modules', () => {

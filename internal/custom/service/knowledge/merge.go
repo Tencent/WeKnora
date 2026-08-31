@@ -7,7 +7,7 @@
 //
 // 双源合并：
 //   - 第一源（WeKnora 原生 Wiki）：page_type ∈ {entity, concept} → 真实类型 entity / concept
-//   - 第二源（skill 产物）：        page_type = index，frontmatter.type ∈ {methodology, case, insight, concept}
+//   - 第二源（skill 产物）：        page_type = index，frontmatter.type ∈ {methodology, case, concept, insight, entity 及实体子类型}
 package knowledge
 
 // KnowledgeType 前端五类型枚举（与 spec §2.1 对齐）
@@ -41,11 +41,13 @@ func MapSkillToKnowledgeType(frontmatterType string) KnowledgeType {
 		return TypeInsight
 	case SkillTypeEntity:
 		return TypeEntity
-	case SkillTypeConcept, "":
+	case SkillTypeConcept:
 		return TypeConcept
 	default:
-		// 未知类型降级为 concept（不丢数据）
-		return TypeConcept
+		if IsEntitySubType(frontmatterType) {
+			return TypeEntity
+		}
+		return ""
 	}
 }
 
@@ -56,6 +58,9 @@ func MapPageTypeToKnowledgeType(pageType string, frontmatterType string) Knowled
 		return TypeEntity
 	case "concept":
 		// 概念页可能是 skill 挂靠的 concept（真实类型在 frontmatter）
+		if frontmatterType == "" {
+			return TypeConcept
+		}
 		return MapSkillToKnowledgeType(frontmatterType)
 	default:
 		// index / summary / synthesis / comparison 等不由本聚合处理
@@ -96,7 +101,7 @@ type AnchorItem struct {
 // MergeAnchors 双源合并：按 ID 去重，5 类型映射，实体 6 类聚合为 entity
 //
 //   - nativePages: WeKnora 原生 Wiki 页面（page_type ∈ {entity, concept}）
-//   - skillPages: skill 产出的 Wiki 页（page_type=index，frontmatter.type ∈ {concept, methodology, insight, case, entity}）
+//   - skillPages: skill 产出的 Wiki 页（page_type=index，frontmatter.type ∈ {concept, methodology, insight, case, entity 及实体子类型}）
 //
 // 返回：按类型分组的 AnchorItem 列表
 func MergeAnchors(nativePages []AnchorItem, skillPages []AnchorItem) map[KnowledgeType][]AnchorItem {
@@ -111,6 +116,9 @@ func MergeAnchors(nativePages []AnchorItem, skillPages []AnchorItem) map[Knowled
 	seen := make(map[string]bool)
 	add := func(items []AnchorItem) {
 		for _, it := range items {
+			if !IsKnowledgeType(it.Type) {
+				continue
+			}
 			if seen[it.ID] {
 				continue
 			}
@@ -121,4 +129,13 @@ func MergeAnchors(nativePages []AnchorItem, skillPages []AnchorItem) map[Knowled
 	add(nativePages)
 	add(skillPages)
 	return out
+}
+
+func IsKnowledgeType(t KnowledgeType) bool {
+	switch t {
+	case TypeEntity, TypeConcept, TypeCase, TypeMethod, TypeInsight:
+		return true
+	default:
+		return false
+	}
 }

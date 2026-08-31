@@ -17,6 +17,7 @@ export {
 
 export { isVideoInitiallyAvailable, mapVideo } from './videoMapping'
 export { parseSubtitleFile } from './contentParsing'
+export { shouldShowRelatedKnowledgeTab } from './contentState'
 
 export async function fetchVideoList(): Promise<VideoData[]> {
   const resp: any = await get('/api/custom/videos')

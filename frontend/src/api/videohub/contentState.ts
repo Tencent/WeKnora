@@ -16,6 +16,11 @@ export interface VideoContentState {
 
 export type VideoContentModule = keyof VideoContentState
 
+export function shouldShowRelatedKnowledgeTab(state: ContentState<RelatedKnowledgeContent>): boolean {
+  if (state.status === 'loading' || state.status === 'error') return true
+  return state.data.anchors.length > 0 || state.data.crossVideoItems.length > 0
+}
+
 export const emptyRelatedKnowledge: RelatedKnowledgeContent = {
   videoId: '',
   overview: null,

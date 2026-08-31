@@ -250,12 +250,23 @@ func TestRelatedKnowledgeReturnsAnchorTimelineFromWikiContent(t *testing.T) {
 		t.Fatalf("create video: %v", err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if strings.HasSuffix(request.URL.Path, "/knowledge-base/video-1") {
+			_ = json.NewEncoder(writer).Encode(weknora.WikiPage{
+				ID: "knowledge-base-1", Slug: "knowledge-base/video-1", PageType: "index",
+				Content: "---\ntype: knowledge_base\nsource_video_id: " + video.ID + "\n---\n知识底座",
+			})
+			return
+		}
 		if request.URL.Path != "/api/v1/knowledgebase/kb-1/wiki/pages" {
 			http.NotFound(writer, request)
 			return
 		}
 		var pages []weknora.WikiPage
 		switch request.URL.Query().Get("page_type") {
+		case "":
+			pages = []weknora.WikiPage{{
+				ID: "knowledge-base-1", Title: "知识底座", Slug: "knowledge-base/video-1", PageType: "index",
+			}}
 		case "entity":
 			pages = []weknora.WikiPage{{
 				ID: "entity-1", Title: "张三", PageType: "entity",
@@ -296,5 +307,23 @@ func TestRelatedKnowledgeReturnsAnchorTimelineFromWikiContent(t *testing.T) {
 	}
 	if len(payload.Anchors["case"]) != 1 || payload.Anchors["case"][0].Timestamp != "00:02:03" || payload.Anchors["case"][0].Seconds != 123 {
 		t.Fatalf("case anchors = %#v", payload.Anchors["case"])
+	}
+}
+
+func TestKnowledgeBaseWikiPageRequiresExtractionContract(t *testing.T) {
+	valid := &weknora.WikiPage{
+		PageType: "index",
+		Content:  "---\ntype: knowledge_base\nsource_video_id: video-1\n---\n知识底座",
+	}
+	if !isKnowledgeBaseWikiPage(valid, "video-1") {
+		t.Fatal("valid knowledge base page was rejected")
+	}
+
+	invalid := &weknora.WikiPage{
+		PageType: "index",
+		Content:  "---\ntype: knowledge_base\nsource_video_id: video-2\n---\n知识底座",
+	}
+	if isKnowledgeBaseWikiPage(invalid, "video-1") {
+		t.Fatal("knowledge base page from another video was accepted")
 	}
 }
