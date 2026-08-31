@@ -33,6 +33,7 @@ import {
   cancelKnowledgeParse,
   batchDeleteKnowledge,
   batchReparseKnowledge,
+  batchUpdateKnowledgeMetadata,
   getKnowledgeSpans,
   getKnowledgeDetails,
   listKnowledgeFolders,
@@ -50,6 +51,7 @@ import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import KbFolderTree from './components/KbFolderTree.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
 import BatchTagDialog from './components/BatchTagDialog.vue';
+import BatchMetadataDialog from './components/BatchMetadataDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
@@ -440,6 +442,8 @@ const batchDeleting = ref(false);
 const batchReparsing = ref(false);
 const batchTagging = ref(false);
 const batchTagDialogVisible = ref(false);
+const batchMetadataUpdating = ref(false);
+const batchMetadataDialogVisible = ref(false);
 const batchTagPreSelectedIds = computed(() => {
   const ids = Array.from(selectedIds.value);
   if (ids.length === 0) return [];
@@ -2155,6 +2159,35 @@ const onBatchTagConfirm = async (tagIds: string[]) => {
   }
 };
 
+const handleBatchMetadata = () => {
+  if (batchDeleting.value || batchReparsing.value || batchTagging.value || batchMetadataUpdating.value
+    || selectedIds.value.size === 0) return;
+  batchMetadataDialogVisible.value = true;
+};
+
+const onBatchMetadataConfirm = async (customMetadata: Record<string, unknown>) => {
+  if (batchMetadataUpdating.value || selectedIds.value.size === 0) return;
+  const ids = Array.from(selectedIds.value);
+  batchMetadataUpdating.value = true;
+  try {
+    const res: any = await batchUpdateKnowledgeMetadata(kbId.value, ids, customMetadata);
+    if (!res?.success) {
+      MessagePlugin.error(res?.message || t('knowledgeBase.batchMetadataFailed'));
+      return;
+    }
+    MessagePlugin.success(t('knowledgeBase.batchMetadataSuccess', { count: ids.length }));
+    batchMetadataDialogVisible.value = false;
+    clearSelection();
+    batchMode.value = false;
+    resetPage();
+    await loadKnowledgeFiles(kbId.value);
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.batchMetadataFailed'));
+  } finally {
+    batchMetadataUpdating.value = false;
+  }
+};
+
 const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
   if (!item?.id) return;
   try {
@@ -2674,10 +2707,12 @@ async function createNewSession(value: string): Promise<void> {
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
-                  :reparse-loading="batchReparsing" :tag-loading="batchTagging" :visible="batchMode || selectedIds.size > 0"
+                  :reparse-loading="batchReparsing" :tag-loading="batchTagging"
+                  :metadata-loading="batchMetadataUpdating" :visible="batchMode || selectedIds.size > 0"
                   :show-move-to-folder="canEdit" :folder-options="folderOptions"
                   @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
                   @batch-tag="handleBatchTag"
+                  @batch-metadata="handleBatchMetadata"
                   @move-to-folder="(path: string) => moveKnowledgeIntoFolder(Array.from(selectedIds), path)" />
               </div>
             </div>
@@ -2719,6 +2754,11 @@ async function createNewSession(value: string): Promise<void> {
     :confirm-loading="batchTagging"
     @update:visible="batchTagDialogVisible = $event" @confirm="onBatchTagConfirm"
     @tag-created="loadTags(kbId, true)" @open-manage="openTagManageFromBatchDialog" />
+
+  <!-- 批量编辑文档自定义元数据弹窗 -->
+  <BatchMetadataDialog :visible="batchMetadataDialogVisible" :count="selectedIds.size"
+    :confirm-loading="batchMetadataUpdating"
+    @update:visible="batchMetadataDialogVisible = $event" @confirm="onBatchMetadataConfirm" />
 
   <KbTagManageDrawer
     v-if="!isFAQ"
