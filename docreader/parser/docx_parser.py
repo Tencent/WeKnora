@@ -189,6 +189,13 @@ class DocxParser(BaseParser):
             logger.info("Combining all text parts")
             text = "\n\n".join([part for part in text_parts if part])
 
+            # The Docx processor returns tables separately from the text
+            # lines. Render them as GFM Markdown so table content is not
+            # silently dropped from the parsed text.
+            tables_markdown = self._tables_to_gfm_markdown(tables)
+            if tables_markdown:
+                text = f"{text}\n\n{tables_markdown}" if text else tables_markdown
+
             # Check if the generated text is empty
             if not text:
                 logger.warning("Generated text is empty, trying alternative method")
@@ -206,6 +213,40 @@ class DocxParser(BaseParser):
             logger.error(f"Error parsing DOCX document: {str(e)}")
             logger.error(f"Detailed stack trace: {traceback.format_exc()}")
             return self._parse_using_simple_method(content)
+
+    def _tables_to_gfm_markdown(self, tables: List[Any]) -> str:
+        """Render extracted DOCX tables as GFM Markdown.
+
+        ``Docx.__call__`` returns each table as an ``((None, table_html), "")``
+        tuple whose HTML comes from :meth:`_convert_table_to_html`. Rendering
+        those tables into the parsed text prevents silent content loss.
+
+        Args:
+            tables: List of tables returned by Docx.__call__
+
+        Returns:
+            str: GFM Markdown table blocks, or "" when there are none
+        """
+        blocks = []
+        for (_, table_html), _ in tables:
+            if not table_html:
+                continue
+            cell_rows = []
+            for tr in re.findall(r"<tr>(.*?)</tr>", table_html, re.S):
+                cells = [
+                    re.sub(r"\s+", " ", cell).strip().replace("|", "\\|")
+                    for cell in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)
+                ]
+                if cells:
+                    cell_rows.append(cells)
+            if not cell_rows:
+                continue
+            header = cell_rows[0]
+            rows = [header, ["---"] * len(header)] + cell_rows[1:]
+            blocks.append(
+                "\n".join("| " + " | ".join(cells) + " |" for cells in rows)
+            )
+        return "\n\n".join(blocks)
 
     def _parse_using_simple_method(self, content: bytes) -> DocumentModel:
         """Parse document using a simplified method, as a fallback
