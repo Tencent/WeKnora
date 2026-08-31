@@ -186,5 +186,22 @@ export default withMermaid(
         fontSize: '14px',
       },
     },
+
+    // vitepress-plugin-mermaid loads mermaid chunks via dynamic import, so
+    // Vite's dep scanner misses their `import "fastdom"` references at
+    // startup and serves fastdom@1.0.12's raw UMD file as an ES module —
+    // which has no `default` export (its IIFE only sets `module.exports`
+    // when `typeof module === 'object'`, which is false in browser ESM).
+    // Force pre-bundling so esbuild's CJS→ESM interop wraps the module and
+    // exposes `default`. `fastdom-promised` is the second piece mermaid's
+    // core chunk imports the same way.
+    vite: {
+      optimizeDeps: {
+        include: [
+          'fastdom',
+          'fastdom/extensions/fastdom-promised.js',
+        ],
+      },
+    },
   }),
 )
