@@ -127,3 +127,15 @@ export function parseWeKnoraStreamChunk(raw: string): ParsedStreamChunk {
   const activity = activityFromChunk(type, data)
   return activity ? markDone({ kind: 'activity', content: activity }, data) : markDone({ kind: 'ignore' }, data)
 }
+
+export function shouldAbortStream(raw: string) {
+  if (raw === '[DONE]') return true
+  if (!raw) return false
+  try {
+    const data = JSON.parse(raw) as WeKnoraStreamChunk
+    const type = chunkType(data)
+    return type === 'complete' || (!type && data.done === true)
+  } catch {
+    return false
+  }
+}

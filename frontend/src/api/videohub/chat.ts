@@ -2,7 +2,12 @@ import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { get, post } from '@/utils/request'
 import { getApiBaseUrl } from '@/utils/api-base'
 import type { ChatMessage, ChatSession, EvidenceLink, VideoData } from '@/types/videohub'
-import { displayQuestionFromStoredContent, mergeLocalTurnWithStoredMessages, parseWeKnoraStreamChunk } from './chatStream'
+import {
+  displayQuestionFromStoredContent,
+  mergeLocalTurnWithStoredMessages,
+  parseWeKnoraStreamChunk,
+  shouldAbortStream,
+} from './chatStream'
 import { buildChatRequest, normalizeChatError, normalizeTenantId, type ChatRequestScope } from './chatRequest'
 
 interface ScopeResponse extends ChatRequestScope {
@@ -476,7 +481,7 @@ async function streamAnswer(sessionID: string, question: string, scope: ScopeRes
         throw new Error(chunk.content || '问答生成失败')
       }
       if (chunk.kind !== 'ignore' || payload) emitChunk()
-      if (chunk.done) streamController.abort()
+      if (shouldAbortStream(event.data)) streamController.abort()
     },
     onerror: error => {
       throw error

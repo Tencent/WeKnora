@@ -2,7 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildChatRequest, normalizeChatError } from './chatRequest'
 import { appendSelectedTenantHeader } from '../../utils/tenantHeaders'
-import { displayQuestionFromStoredContent, mergeLocalTurnWithStoredMessages, parseWeKnoraStreamChunk } from './chatStream'
+import {
+  displayQuestionFromStoredContent,
+  mergeLocalTurnWithStoredMessages,
+  parseWeKnoraStreamChunk,
+  shouldAbortStream,
+} from './chatStream'
 
 test('shows only the user question when a video-scoped prompt is loaded from WeKnora history', () => {
   const stored = [
@@ -99,6 +104,25 @@ test('marks done answer chunks as complete enough for video assistant unlock', (
     content: '可执行建议',
     done: true,
   })
+})
+
+test('does not abort the SSE stream when the agent query event itself is done', () => {
+  assert.equal(
+    shouldAbortStream(JSON.stringify({ response_type: 'agent_query', done: true })),
+    false,
+  )
+  assert.equal(
+    shouldAbortStream(JSON.stringify({ response_type: 'answer', content: '答案', done: true })),
+    false,
+  )
+})
+
+test('aborts the SSE stream only on a terminal completion marker', () => {
+  assert.equal(
+    shouldAbortStream(JSON.stringify({ response_type: 'complete', done: true })),
+    true,
+  )
+  assert.equal(shouldAbortStream('[DONE]'), true)
 })
 
 test('treats SSE DONE marker as completion', () => {
