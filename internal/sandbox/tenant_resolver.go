@@ -175,6 +175,9 @@ func (r *tenantSandboxResolver) Resolve(
 	if err != nil {
 		return nil, err
 	}
+	if err := EnsureDockerBackendAllowed(effective.Type); err != nil {
+		return nil, err
+	}
 
 	switch effective.Type {
 	case SandboxTypeDisabled:
@@ -248,6 +251,9 @@ func NewRemoteClientForCheck(cfg *Config) (RemoteSandboxClient, error) {
 		return NewE2BRemoteClientWithPool(cfg, NewSandboxGatewayTransportPoolWithPolicy(nil,
 			OutboundURLPolicy{AllowPrivate: cfg.AllowPrivateEndpoints}))
 	case SandboxTypeDocker:
+		if err := EnsureDockerBackendAllowed(SandboxTypeDocker); err != nil {
+			return nil, err
+		}
 		return NewDockerRemoteClientForCheck(cfg)
 	default:
 		return nil, fmt.Errorf("sandbox: provider %q cannot be probed", cfg.Type)

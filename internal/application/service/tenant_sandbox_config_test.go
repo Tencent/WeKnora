@@ -1428,6 +1428,9 @@ func TestSanitizeSandboxConfigRefusesSecretsWithoutAESKey(t *testing.T) {
 	require.Error(t, err)
 
 	// A config without secrets is still allowed in that deployment.
+	sandbox.ClearDockerBackendEnabledOverride()
+	t.Cleanup(sandbox.ClearDockerBackendEnabledOverride)
+	t.Setenv(sandbox.DockerBackendEnabledEnv, "true")
 	_, err = SanitizeSandboxConfig(&types.TenantSandboxConfig{
 		SandboxType: "docker",
 		Docker:      &types.DockerSandboxConfig{Image: "weknora:test"},
@@ -1442,6 +1445,9 @@ func TestSandboxesStillLiveErrorSupportsErrorsIs(t *testing.T) {
 }
 
 func TestCreateAcceptsDockerNamedSandboxBackend(t *testing.T) {
+	sandbox.ClearDockerBackendEnabledOverride()
+	t.Cleanup(sandbox.ClearDockerBackendEnabledOverride)
+	t.Setenv(sandbox.DockerBackendEnabledEnv, "true")
 	repo := &fakeConfigRepo{}
 	svc := newTestConfigService(t, repo, nil, stubAgentRepo{})
 
@@ -1467,6 +1473,9 @@ func TestCreateRejectsRemovedLocalBackend(t *testing.T) {
 }
 
 func TestCreateRejectsDockerWithoutImage(t *testing.T) {
+	sandbox.ClearDockerBackendEnabledOverride()
+	t.Cleanup(sandbox.ClearDockerBackendEnabledOverride)
+	t.Setenv(sandbox.DockerBackendEnabledEnv, "true")
 	svc := newTestConfigService(t, &fakeConfigRepo{}, nil, stubAgentRepo{})
 
 	_, err := svc.Create(context.Background(), 7, CreateSandboxConfigInput{
@@ -1475,6 +1484,22 @@ func TestCreateRejectsDockerWithoutImage(t *testing.T) {
 	})
 
 	require.ErrorIs(t, err, sandbox.ErrSandboxConfigIncomplete)
+}
+
+func TestCreateRejectsDockerWhenDisabled(t *testing.T) {
+	sandbox.ClearDockerBackendEnabledOverride()
+	t.Cleanup(sandbox.ClearDockerBackendEnabledOverride)
+	t.Setenv(sandbox.DockerBackendEnabledEnv, "")
+	svc := newTestConfigService(t, &fakeConfigRepo{}, nil, stubAgentRepo{})
+
+	_, err := svc.Create(context.Background(), 7, CreateSandboxConfigInput{
+		Name: "docker-dev",
+		Config: &types.TenantSandboxConfig{
+			SandboxType: "docker",
+			Docker:      &types.DockerSandboxConfig{Image: "weknora:test"},
+		},
+	})
+	require.ErrorIs(t, err, sandbox.ErrDockerBackendDisabled)
 }
 
 func TestWorkspaceScriptsDisabledPolicy(t *testing.T) {

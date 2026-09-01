@@ -337,7 +337,11 @@ func SanitizeSandboxConfig(
 	merged := types.MergeSandboxConfigForUpdate(incoming, existing)
 
 	if merged.SandboxType != "" {
-		if _, err := sandbox.ParseSandboxType(merged.SandboxType); err != nil {
+		parsed, err := sandbox.ParseSandboxType(merged.SandboxType)
+		if err != nil {
+			return nil, err
+		}
+		if err := sandbox.EnsureDockerBackendAllowed(parsed); err != nil {
 			return nil, err
 		}
 	}
@@ -393,7 +397,7 @@ func validateNamedSandboxBackend(cfg *types.TenantSandboxConfig) error {
 	if !sandbox.IsNamedSandboxBackendType(cfg.SandboxType) {
 		return fmt.Errorf("%w", ErrNamedSandboxBackendUnsupported)
 	}
-	return nil
+	return sandbox.EnsureDockerBackendAllowed(sandbox.SandboxType(cfg.SandboxType))
 }
 
 func filterPublicSandboxConfigs(
@@ -575,6 +579,9 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 			merged.E2B.TemplateID = "__catalog__"
 		}
 	case string(sandbox.SandboxTypeDocker):
+		if err := sandbox.EnsureDockerBackendAllowed(sandbox.SandboxTypeDocker); err != nil {
+			return nil, err
+		}
 		// Docker's template is an image, and the catalog step is where the
 		// admin picks one. The standard image stands in until they do, so the
 		// effective-config validation below has something to accept.

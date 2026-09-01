@@ -20,6 +20,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/limiter"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -125,6 +126,14 @@ var registry = map[string]settingSpec{
 		Category: "security",
 		Description: "SSRF 防护白名单。可填入 example.com / *.foo.com / 10.0.0.0/8 / 2001:db8::1。" +
 			"修改后立即生效。SSRF_WHITELIST_EXTRA 环境变量仍由部署方维护，不在此处覆盖。",
+	},
+	"sandbox.docker_enabled": {
+		Type:     "bool",
+		EnvName:  sandbox.DockerBackendEnabledEnv,
+		Default:  false,
+		Category: "security",
+		Description: "是否允许 Docker 沙箱后端。本机 docker.sock 等同宿主机 root，默认关闭。" +
+			"仅系统管理员可打开；打开后立即生效，无需重启。私有化单机且已挂载 daemon socket，或配置了带 TLS 的远程 tcp:// 时再启用。",
 	},
 	"auth.registration_mode": {
 		Type:     "string",
@@ -395,6 +404,7 @@ func (s *systemSettingService) preload(ctx context.Context) {
 	// Add new bridges here as more env vars get migrated.
 	s.applySSRFWhitelist(ctx)
 	s.applyModelMaxConcurrency(ctx)
+	s.applyDockerBackendEnabled(ctx)
 }
 
 // encodeDefault produces the JSONB encoding for a spec's built-in
@@ -488,6 +498,8 @@ func (s *systemSettingService) dispatchSideEffects(ctx context.Context, changedK
 		s.applySSRFWhitelist(ctx)
 	case "model.max_concurrency":
 		s.applyModelMaxConcurrency(ctx)
+	case sandbox.DockerBackendEnabledSettingKey:
+		s.applyDockerBackendEnabled(ctx)
 	}
 }
 
@@ -529,6 +541,12 @@ func (s *systemSettingService) applyModelMaxConcurrency(ctx context.Context) {
 	limit := int(s.GetInt(ctx, "model.max_concurrency", "WEKNORA_MODEL_MAX_CONCURRENCY", 32))
 	limiter.SetGlobalLimit(limit)
 	logger.Infof(ctx, "[system_settings] model.max_concurrency applied (limit=%d)", limit)
+}
+
+func (s *systemSettingService) applyDockerBackendEnabled(ctx context.Context) {
+	enabled := s.GetBool(ctx, sandbox.DockerBackendEnabledSettingKey, sandbox.DockerBackendEnabledEnv, false)
+	sandbox.SetDockerBackendEnabled(enabled)
+	logger.Infof(ctx, "[system_settings] sandbox.docker_enabled applied (enabled=%v)", enabled)
 }
 
 // publishChange fans the change out to peers. Best-effort: a Redis

@@ -104,6 +104,12 @@
             {{ $t(`settings.sandbox.backendDescriptions.${backend}`) }}
           </p>
         </t-form-item>
+        <t-alert v-if="backend === 'docker' && !dockerBackendEnabled" theme="warning" class="compact-alert"
+          :message="$t('settings.sandbox.dockerDisabledAlert')">
+          <template #description>
+            <p>{{ $t('settings.sandbox.dockerDisabledHint') }}</p>
+          </template>
+        </t-alert>
         <t-form-item :label="$t('settings.sandbox.configName')" :status="nameError ? 'error' : undefined"
           :tips="nameError || undefined">
           <t-input v-model="name" :placeholder="$t('settings.sandbox.configNamePlaceholder')" />
@@ -237,6 +243,18 @@
           <t-input v-model="docker.tls_cert_path" placeholder="/etc/weknora/docker-certs"
             :disabled="retargetFrozen" @input="onFieldInput('tls_cert_path')" />
         </t-form-item>
+        <t-alert theme="warning" class="compact-alert" :message="$t('settings.sandbox.dockerHostRisk')" />
+        <div class="private-endpoint-row">
+          <div>
+            <p class="private-endpoint-row__title">{{ $t('settings.sandbox.allowPrivateEndpoints') }}</p>
+            <p class="section-help">{{ $t('settings.sandbox.allowPrivateEndpointsHint') }}</p>
+          </div>
+          <t-switch
+            v-model="allowPrivateEndpoints"
+            :disabled="retargetFrozen"
+            @change="invalidateConnection"
+          />
+        </div>
       </section>
 
       <section v-if="currentStepKey === 'template'" class="setting-drawer__section">
@@ -478,6 +496,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import {
   checkSandboxConfig,
   createSandboxConfig,
@@ -512,6 +531,10 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const deploymentCapabilities = useDeploymentCapabilitiesStore()
+const dockerBackendEnabled = computed(() =>
+  deploymentCapabilities.isSupported('settings.sandbox.docker'),
+)
 
 // The backend echoes stored secrets as this placeholder. It never leaves the
 // form as visible text: inputs stay empty and say "configured", and the
@@ -527,7 +550,11 @@ const defaultDockerImage = 'wechatopenai/weknora-sandbox:main'
 const clusterGuideUrl = 'https://github.com/Tencent/WeKnora/blob/main/docs/sandbox-cluster.md'
 const e2bApiKeysUrl = 'https://e2b.dev/dashboard?tab=keys'
 
-const backendOptions = [...NAMED_SANDBOX_BACKEND_TYPES]
+const backendOptions = computed(() => {
+  const types = [...NAMED_SANDBOX_BACKEND_TYPES]
+  if (dockerBackendEnabled.value || backend.value === 'docker') return types
+  return types.filter((type) => type !== 'docker')
+})
 
 const saving = ref(false)
 const checking = ref(false)
@@ -595,13 +622,17 @@ const primaryText = computed(() => {
 // the image on the connection step; Cube/E2B still have an empty template_id
 // there, so the action waits until the template step.
 const canDeepCheck = computed(() => {
+  if (backend.value === 'docker' && !dockerBackendEnabled.value) return false
   if (currentStepKey.value === 'template') return true
   return currentStepKey.value === 'connection' && !isRemoteBackend.value
 })
 const showCheckResult = computed(() => canDeepCheck.value)
 const primaryDisabled = computed(() => (
-  currentStepKey.value === 'template'
-  && (!selectedTemplate.value || !isTemplateSelectable(selectedTemplate.value))
+  (backend.value === 'docker' && !dockerBackendEnabled.value)
+  || (
+    currentStepKey.value === 'template'
+    && (!selectedTemplate.value || !isTemplateSelectable(selectedTemplate.value))
+  )
 ))
 
 // savedRecord is the config this drawer is editing, including one it just
@@ -796,6 +827,7 @@ async function refreshInFlightSkill() {
 
 watch(() => props.visible, (open) => {
   if (open) {
+    void deploymentCapabilities.ensureLoaded()
     reset()
     void refreshInFlightSkill()
   } else {
@@ -1064,6 +1096,7 @@ function validateName(): boolean {
 }
 
 async function handlePrimaryAction() {
+  if (backend.value === 'docker' && !dockerBackendEnabled.value) return
   if (currentStepKey.value === 'connection') {
     if (!validateName() || !validateRequiredFields(false)) return
     if (!(await runCheck(false))) return
