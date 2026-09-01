@@ -59,3 +59,28 @@ func TestLoadReadsDirectContentLLMConfig(t *testing.T) {
 		t.Fatalf("unexpected LLM config: %+v", cfg.LLM)
 	}
 }
+
+func TestLoadReadsTencentMPSProviderConfig(t *testing.T) {
+	t.Setenv("CUSTOM_TRANSCRIPTION_PROVIDER", "tencent_mps")
+	t.Setenv("TENCENTCLOUD_SECRET_ID", "secret-id")
+	t.Setenv("TENCENTCLOUD_SECRET_KEY", "secret-key")
+	t.Setenv("TENCENTCLOUD_REGION", "ap-shanghai")
+	t.Setenv("TENCENTCLOUD_MPS_OUTPUT_BUCKET", "subtitle-123456")
+
+	cfg := Load()
+	if cfg.TranscriptionProvider != "tencent_mps" || cfg.MPS.Region != "ap-shanghai" || cfg.MPS.OutputBucket != "subtitle-123456" || cfg.MPS.TemplateID != 307 {
+		t.Fatalf("unexpected MPS config: provider=%s mps=%+v", cfg.TranscriptionProvider, cfg.MPS)
+	}
+}
+
+func TestNormalizeTranscriptionProviderCompatibility(t *testing.T) {
+	for input, want := range map[string]string{"": "aliyun_tingwu", "tingwu": "aliyun_tingwu", "aliyun_tingwu": "aliyun_tingwu", "mps": "tencent_mps", "tencent_mps": "tencent_mps"} {
+		got, err := NormalizeTranscriptionProvider(input)
+		if err != nil || got != want {
+			t.Fatalf("NormalizeTranscriptionProvider(%q)=(%q,%v), want %q", input, got, err, want)
+		}
+	}
+	if _, err := NormalizeTranscriptionProvider("unknown"); err == nil {
+		t.Fatal("invalid provider must be rejected")
+	}
+}

@@ -172,7 +172,10 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 				"error_category": "", "error_code": "", "error_message": "",
 				"started_at": nil, "completed_at": nil,
 			}
-			if jobType == "transcription" && retried.ErrorCategory == "external_task" {
+			// A failed external task is terminal at the provider. Retrying must
+			// create a fresh provider task so a newly prepared source URL is used;
+			// otherwise the worker would keep polling the old failed task.
+			if jobType == "transcription" {
 				updates["external_task_id"] = ""
 			}
 			if jobType == "summary" || jobType == "summary_enhance" {
@@ -213,12 +216,22 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 }
 
 func (h *ProcessingHandler) stageArtifactAvailable(ctx context.Context, video model.Video, job model.VideoProcessingJob) bool {
+	if job.ResultStage == "draft" {
+		return stageArtifactAvailable(video, job)
+	}
 	if (job.JobType != "outline" && job.JobType != "summary") || h.Wiki == nil || strings.TrimSpace(h.KBID) == "" {
 		return stageArtifactAvailable(video, job)
 	}
 	pageID := video.OutlineWikiPageID
 	if job.JobType == "summary" {
 		pageID = video.SummaryWikiPageID
+	}
+	if job.ResultStage == "draft" {
+		if job.JobType == "outline" {
+			pageID = video.OutlineDraftWikiPageID
+		} else if job.JobType == "summary" {
+			pageID = video.SummaryDraftWikiPageID
+		}
 	}
 	if strings.TrimSpace(pageID) == "" {
 		return false
@@ -274,7 +287,8 @@ func buildProcessingStatus(video model.Video, jobs []model.VideoProcessingJob) P
 		if !retryableProcessingStages[job.JobType] {
 			continue
 		}
-		if video.TranscriptGeneration != "" && job.TranscriptGeneration != "" && job.TranscriptGeneration != video.TranscriptGeneration {
+		isUpstreamStage := job.JobType == "transcription" || job.JobType == "subtitle_generate"
+		if !isUpstreamStage && video.TranscriptGeneration != "" && job.TranscriptGeneration != "" && job.TranscriptGeneration != video.TranscriptGeneration {
 			continue
 		}
 		previous, exists := latest[job.JobType]
@@ -449,6 +463,9 @@ func processingJobPhase(job model.VideoProcessingJob) string {
 	if strings.TrimSpace(job.ExternalTaskID) == "" {
 		return "source_preparing"
 	}
+	if job.Provider == "tencent_mps" {
+		return "mps_running"
+	}
 	return "tingwu_running"
 }
 
@@ -475,8 +492,14 @@ func stageArtifactAvailable(video model.Video, job model.VideoProcessingJob) boo
 	case "summary_enhance":
 		return strings.TrimSpace(video.SummaryWikiPageID) != ""
 	case "outline":
+		if job.ResultStage == "draft" {
+			return strings.TrimSpace(video.OutlineDraftWikiPageID) != ""
+		}
 		return strings.TrimSpace(video.OutlineWikiPageID) != ""
 	case "summary":
+		if job.ResultStage == "draft" {
+			return strings.TrimSpace(video.SummaryDraftWikiPageID) != ""
+		}
 		return strings.TrimSpace(video.SummaryWikiPageID) != ""
 	case "assemble":
 		return hasReadableContentReferences(video)

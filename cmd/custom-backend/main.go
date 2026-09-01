@@ -24,6 +24,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/custom/client/llm"
 	"github.com/Tencent/WeKnora/internal/custom/client/minio"
+	"github.com/Tencent/WeKnora/internal/custom/client/mps"
 	"github.com/Tencent/WeKnora/internal/custom/client/tongyi"
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/config"
@@ -67,6 +68,13 @@ func main() {
 	weknoraCli := weknora.New(cfg.WeKnora)
 	llmCli := llm.NewClient(cfg.LLM)
 	tongyiCli := tongyi.New(cfg.Tongyi)
+	var mpsCli *mps.Client
+	if cfg.MPS.SecretID != "" && cfg.MPS.SecretKey != "" {
+		mpsCli, err = mps.New(cfg.MPS)
+		if err != nil {
+			slog.Warn("tencent mps client unavailable", "error", err)
+		}
+	}
 	wikiClient := weknora.NewWikiClient(cfg.WeKnora)
 	agentClient := weknora.NewAgentClient(cfg.WeKnora)
 	kbClient := weknora.NewKBClient(cfg.WeKnora)
@@ -88,14 +96,26 @@ func main() {
 	} else {
 		contentAgentID := os.Getenv("CUSTOM_CONTENT_AGENT_ID")
 		missingPipelineConfig := make([]string, 0, 4)
-		if cfg.Tongyi.AccessKeyID == "" {
-			missingPipelineConfig = append(missingPipelineConfig, "TONGYI_ACCESS_KEY_ID")
-		}
-		if cfg.Tongyi.AccessKeySecret == "" {
-			missingPipelineConfig = append(missingPipelineConfig, "TONGYI_ACCESS_KEY_SECRET")
-		}
-		if cfg.Tongyi.AppKey == "" {
-			missingPipelineConfig = append(missingPipelineConfig, "TONGYI_APP_KEY")
+		if cfg.TranscriptionProvider == "aliyun_tingwu" {
+			if cfg.Tongyi.AccessKeyID == "" {
+				missingPipelineConfig = append(missingPipelineConfig, "TONGYI_ACCESS_KEY_ID")
+			}
+			if cfg.Tongyi.AccessKeySecret == "" {
+				missingPipelineConfig = append(missingPipelineConfig, "TONGYI_ACCESS_KEY_SECRET")
+			}
+			if cfg.Tongyi.AppKey == "" {
+				missingPipelineConfig = append(missingPipelineConfig, "TONGYI_APP_KEY")
+			}
+		} else {
+			if cfg.MPS.SecretID == "" {
+				missingPipelineConfig = append(missingPipelineConfig, "TENCENTCLOUD_SECRET_ID")
+			}
+			if cfg.MPS.SecretKey == "" {
+				missingPipelineConfig = append(missingPipelineConfig, "TENCENTCLOUD_SECRET_KEY")
+			}
+			if cfg.MPS.OutputBucket == "" {
+				missingPipelineConfig = append(missingPipelineConfig, "TENCENTCLOUD_MPS_OUTPUT_BUCKET")
+			}
 		}
 		if cfg.WeKnora.KBID == "" {
 			missingPipelineConfig = append(missingPipelineConfig, "WEKNORA_KB_ID")
@@ -123,11 +143,19 @@ func main() {
 		}
 
 		handlers := []worker.Handler{
-			worker.NewThumbnailHandler(db, minioCli, contentWorkersEnabled),
+			worker.NewThumbnailHandler(db, minioCli, contentWorkersEnabled, cfg.TranscriptionProvider),
 		}
 		if contentWorkersEnabled {
 			transcriptionHandler := worker.NewTranscriptionHandler(db, tongyiCli, cfg.Tongyi.InternalFrontendBaseURL)
 			transcriptionHandler.MinIO = minioCli
+			transcriptionHandler.MPS = mpsCli
+			if mpsCli != nil {
+				if preparer, prepErr := worker.NewTencentMPSInputPreparer(cfg.MPS, minioCli); prepErr != nil {
+					slog.Warn("tencent mps input staging unavailable", "error", prepErr)
+				} else {
+					transcriptionHandler.MPSInputPreparer = preparer
+				}
+			}
 			handlers = append(handlers,
 				transcriptionHandler,
 				worker.NewSubtitleGenerateHandler(db, minioCli, tongyiCli),
@@ -142,6 +170,7 @@ func main() {
 			handlers = append(handlers, worker.NewDeterministicAssembleHandler(db, wikiClient, orchestrator, cfg.WeKnora.KBID))
 		}
 		engine = worker.NewEngine(db, &cfg.Worker, handlers...)
+		engine.SetTranscriptionProvider(cfg.TranscriptionProvider)
 		engine.Start(context.Background())
 		defer engine.Stop()
 	}

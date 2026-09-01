@@ -30,11 +30,12 @@ type Handler interface {
 
 // Engine 任务引擎
 type Engine struct {
-	db       *gorm.DB
-	cfg      *config.WorkerConfig
-	handlers map[string]Handler
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
+	db                    *gorm.DB
+	cfg                   *config.WorkerConfig
+	handlers              map[string]Handler
+	cancel                context.CancelFunc
+	wg                    sync.WaitGroup
+	transcriptionProvider string
 }
 
 const stuckUploadTimeout = 30 * time.Minute
@@ -42,14 +43,19 @@ const stuckUploadTimeout = 30 * time.Minute
 // NewEngine 构造引擎
 func NewEngine(db *gorm.DB, cfg *config.WorkerConfig, handlers ...Handler) *Engine {
 	e := &Engine{
-		db:       db,
-		cfg:      cfg,
-		handlers: make(map[string]Handler, len(handlers)),
+		db:                    db,
+		cfg:                   cfg,
+		handlers:              make(map[string]Handler, len(handlers)),
+		transcriptionProvider: "aliyun_tingwu",
 	}
 	for _, h := range handlers {
 		e.handlers[h.JobType()] = h
 	}
 	return e
+}
+
+func (e *Engine) SetTranscriptionProvider(provider string) {
+	e.transcriptionProvider = normalizeProvider(provider)
 }
 
 // Start 启动 worker 协程池
@@ -116,7 +122,18 @@ func (e *Engine) tick(ctx context.Context) error {
 			err := tx.Raw(`
 				SELECT * FROM video_processing_jobs
 				WHERE status = 'pending'
-				ORDER BY created_at ASC
+				ORDER BY CASE job_type
+					WHEN 'thumbnail' THEN 0
+					WHEN 'transcription' THEN 1
+					WHEN 'subtitle_generate' THEN 2
+					WHEN 'index' THEN 3
+					WHEN 'outline' THEN 4
+					WHEN 'summary' THEN 5
+					WHEN 'assemble' THEN 6
+					WHEN 'graph' THEN 7
+					WHEN 'summary_enhance' THEN 8
+					ELSE 9
+				END, created_at ASC
 				FOR UPDATE SKIP LOCKED
 				LIMIT 1
 			`).Scan(&job).Error
@@ -278,7 +295,7 @@ func (e *Engine) enqueueTranscriptionAfterCoverFallback(videoID string) {
 		return
 	}
 	job := model.VideoProcessingJob{
-		ID: uuid.NewString(), VideoID: videoID, JobType: "transcription", Provider: "aliyun_tingwu",
+		ID: uuid.NewString(), VideoID: videoID, JobType: "transcription", Provider: normalizeProvider(e.transcriptionProvider),
 		Status: "pending", MaxAttempts: 3, IdempotencyKey: fmt.Sprintf("transcription:%s", videoID),
 	}
 	if err := e.db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "idempotency_key"}}, DoNothing: true}).Create(&job).Error; err != nil {

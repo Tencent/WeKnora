@@ -14,6 +14,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -22,6 +24,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	objstore "github.com/Tencent/WeKnora/internal/custom/client/minio"
+	"github.com/Tencent/WeKnora/internal/custom/client/mps"
 	"github.com/Tencent/WeKnora/internal/custom/client/tongyi"
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
@@ -47,11 +50,9 @@ func (h *SubtitleGenerateHandler) JobType() string { return "subtitle_generate" 
 
 // Run 从 transcription.result_payload 读听悟 JSON，下载、转 SRT、入对象、触发 index
 func (h *SubtitleGenerateHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
-	if h.Tongyi == nil {
+	provider := normalizeProvider(job.Provider)
+	if provider != mps.Provider && h.Tongyi == nil {
 		return fmt.Errorf("听悟 client 未配置")
-	}
-	if h.MinIO == nil {
-		return fmt.Errorf("对象存储 client 未配置")
 	}
 	if video == nil || video.ID == "" {
 		return fmt.Errorf("video is missing")
@@ -75,11 +76,21 @@ func (h *SubtitleGenerateHandler) Run(ctx context.Context, job *model.VideoProce
 	}
 
 	var payload struct {
-		TaskID    string `json:"task_id"`
-		RawResult string `json:"raw_result"`
+		TaskID    string      `json:"task_id"`
+		RawResult string      `json:"raw_result"`
+		Provider  string      `json:"provider"`
+		MPSResult *mps.Result `json:"mps_result"`
 	}
 	if err := json.Unmarshal([]byte(prev.ResultPayload), &payload); err != nil {
 		return fmt.Errorf("parse transcription result: %w", err)
+	}
+	if provider == mps.Provider && payload.MPSResult != nil {
+		paragraphs := mpsSegmentsToParagraphs(payload.MPSResult.Segments)
+		directURL := accessibleSubtitleURL(ctx, payload.MPSResult.SubtitlePath)
+		return h.persistSubtitleAndEnqueueIndex(ctx, job, video, prev, paragraphs, directURL)
+	}
+	if h.MinIO == nil {
+		return fmt.Errorf("对象存储 client 未配置")
 	}
 	if strings.TrimSpace(payload.RawResult) == "" {
 		return fmt.Errorf("transcription result payload is empty")
@@ -114,17 +125,50 @@ func (h *SubtitleGenerateHandler) Run(ctx context.Context, job *model.VideoProce
 		return fmt.Errorf("transcript quality gate: %w", err)
 	}
 
-	// 生成 SRT
-	srt := subtitle.ParagraphsToSRT(paragraphs)
+	return h.persistSubtitleAndEnqueueIndex(ctx, job, video, prev, paragraphs, "")
+}
 
-	// 入对象存储
-	objectKey := fmt.Sprintf("subtitles/%s/transcript.srt", video.ID)
-	if err := uploadBytes(ctx, h.MinIO, objectKey, []byte(srt), "application/x-subrip"); err != nil {
-		return fmt.Errorf("upload srt: %w", err)
+func mpsSegmentsToParagraphs(segments []mps.Segment) []subtitle.TranscriptParagraph {
+	paragraphs := make([]subtitle.TranscriptParagraph, 0, len(segments))
+	for _, seg := range segments {
+		if strings.TrimSpace(seg.Text) == "" || seg.EndMs <= seg.StartMs {
+			continue
+		}
+		paragraphs = append(paragraphs, subtitle.TranscriptParagraph{
+			ParagraphID: seg.SourceSegmentID, SpeakerID: seg.SpeakerID, StartMs: seg.StartMs, EndMs: seg.EndMs,
+			Sentences: []subtitle.TranscriptSentence{{SentenceID: seg.SourceSegmentID, Text: seg.Text, StartMs: seg.StartMs, EndMs: seg.EndMs}},
+		})
 	}
-	subtitleURL := h.MinIO.PublicURL(objectKey)
-	if strings.TrimSpace(subtitleURL) == "" {
-		return fmt.Errorf("subtitle public url empty")
+	return paragraphs
+}
+
+func (h *SubtitleGenerateHandler) persistSubtitleAndEnqueueIndex(ctx context.Context, job *model.VideoProcessingJob, video *model.Video, prev model.VideoProcessingJob, paragraphs []subtitle.TranscriptParagraph, directSubtitleURL string) error {
+	if len(paragraphs) == 0 {
+		return fmt.Errorf("转写结果不含有效字幕片段")
+	}
+	if err := subtitle.ValidateParagraphs(paragraphs); err != nil {
+		return err
+	}
+	if err := subtitle.ValidateTranscriptQuality(paragraphs, video.DurationSeconds); err != nil {
+		return fmt.Errorf("transcript quality gate: %w", err)
+	}
+
+	subtitleURL := strings.TrimSpace(directSubtitleURL)
+	srt := ""
+	if subtitleURL == "" {
+		if h.MinIO == nil {
+			return fmt.Errorf("对象存储 client 未配置")
+		}
+		// 听悟和 MPS COS 地址不可访问时的兼容回退。
+		srt = subtitle.ParagraphsToSRT(paragraphs)
+		objectKey := fmt.Sprintf("subtitles/%s/transcript.srt", video.ID)
+		if err := uploadBytes(ctx, h.MinIO, objectKey, []byte(srt), "application/x-subrip"); err != nil {
+			return fmt.Errorf("upload srt: %w", err)
+		}
+		subtitleURL = h.MinIO.PublicURL(objectKey)
+		if strings.TrimSpace(subtitleURL) == "" {
+			return fmt.Errorf("subtitle public url empty")
+		}
 	}
 
 	// 把段落结果暂存到本 job 的 result_payload，供 index 读取
@@ -173,6 +217,29 @@ func (h *SubtitleGenerateHandler) Run(ctx context.Context, job *model.VideoProce
 	}
 	slog.Info("subtitle generation completed", "video_id", video.ID, "job_id", job.ID, "transcription_job_id", prev.ID, "paragraph_count", len(paragraphs), "subtitle_bytes", len(srt), "index_job_id", indexJob.ID)
 	return nil
+}
+
+func accessibleSubtitleURL(ctx context.Context, raw string) string {
+	raw = strings.TrimSpace(raw)
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "http" && parsed.Scheme != "https" || parsed.Host == "" {
+		return ""
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
+	if err != nil {
+		return ""
+	}
+	request.Header.Set("Range", "bytes=0-32")
+	client := &http.Client{Timeout: 8 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return ""
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return ""
+	}
+	return raw
 }
 
 // IndexHandler 句子级分块 + 12 字段 metadata + 入 WeKnora KB（VP-T009 + CP-T005）
@@ -237,11 +304,12 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	// 内容生成号、本地 checkpoint 与稳定标题共同保证重试只补缺项并支持重转写。
 	kbID := h.WeKnora.KBID()
 	type preparedChunk struct {
-		Index       int
-		StartMs     int
-		EndMs       int
-		Content     string
-		ContentHash string
+		Index           int
+		SourceSegmentID string
+		StartMs         int
+		EndMs           int
+		Content         string
+		ContentHash     string
 	}
 	prepared := make([]preparedChunk, 0, len(results))
 	generationHash := sha256.New()
@@ -253,7 +321,7 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 		content := fmt.Sprintf("## 视频定位信息\n\n```json\n%s\n```\n\n## 原文\n\n%s", metadataJSON, b.Content)
 		contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
 		_, _ = generationHash.Write([]byte(contentHash))
-		prepared = append(prepared, preparedChunk{Index: b.Metadata.ChunkIndex, StartMs: b.Metadata.StartMs, EndMs: b.Metadata.EndMs, Content: content, ContentHash: contentHash})
+		prepared = append(prepared, preparedChunk{Index: b.Metadata.ChunkIndex, SourceSegmentID: b.Metadata.SentenceID, StartMs: b.Metadata.StartMs, EndMs: b.Metadata.EndMs, Content: content, ContentHash: contentHash})
 	}
 	generation := fmt.Sprintf("%x", generationHash.Sum(nil))
 	if err := h.DB.Model(job).Update("transcript_generation", generation).Error; err != nil {
@@ -289,12 +357,13 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 			}
 			checkpoint = model.VideoTranscriptChunk{
 				VideoID: video.ID, Generation: generation, Revision: jobInput.Revision, ChunkIndex: item.Index, KnowledgeID: created.ID,
-				StartMs: item.StartMs, EndMs: item.EndMs,
+				SourceSegmentID: item.SourceSegmentID,
+				StartMs:         item.StartMs, EndMs: item.EndMs,
 				ContentHash: item.ContentHash, Status: "created",
 			}
 			if err := h.DB.Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "video_id"}, {Name: "generation"}, {Name: "chunk_index"}},
-				DoUpdates: clause.AssignmentColumns([]string{"knowledge_id", "start_ms", "end_ms", "content_hash", "status", "updated_at"}),
+				DoUpdates: clause.AssignmentColumns([]string{"knowledge_id", "source_segment_id", "start_ms", "end_ms", "content_hash", "status", "updated_at"}),
 			}).Create(&checkpoint).Error; err != nil {
 				return fmt.Errorf("save transcript checkpoint %d: %w", item.Index, err)
 			}

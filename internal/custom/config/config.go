@@ -8,18 +8,21 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config 自研后端总配置
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	WeKnora  WeKnoraConfig
-	MinIO    MinIOConfig
-	Upload   UploadConfig
-	Tongyi   TongyiConfig
-	LLM      LLMConfig
-	Worker   WorkerConfig
+	Server                ServerConfig
+	Database              DatabaseConfig
+	WeKnora               WeKnoraConfig
+	MinIO                 MinIOConfig
+	Upload                UploadConfig
+	Tongyi                TongyiConfig
+	MPS                   MPSConfig
+	TranscriptionProvider string
+	LLM                   LLMConfig
+	Worker                WorkerConfig
 }
 
 // ServerConfig HTTP 服务配置
@@ -84,6 +87,23 @@ type TongyiConfig struct {
 	InternalFrontendBaseURL string // worker 在容器网络内校验视频源时使用的前端服务地址
 }
 
+// MPSConfig 腾讯云媒体处理智能字幕配置。
+type MPSConfig struct {
+	SecretID            string
+	SecretKey           string
+	Region              string
+	Endpoint            string
+	OutputBucket        string
+	OutputRegion        string
+	OutputDir           string
+	InputBucket         string
+	InputRegion         string
+	InputDir            string
+	TemplateID          uint64
+	PollIntervalSeconds int
+	TimeoutSeconds      int
+}
+
 type LLMConfig struct {
 	Provider       string
 	BaseURL        string
@@ -121,6 +141,10 @@ func (d DatabaseConfig) MigrateURL() string {
 
 // Load 从环境变量加载配置，未设置时用默认值
 func Load() *Config {
+	provider, err := NormalizeTranscriptionProvider(getEnv("CUSTOM_TRANSCRIPTION_PROVIDER", "tingwu"))
+	if err != nil {
+		provider = "aliyun_tingwu"
+	}
 	return &Config{
 		Server: ServerConfig{
 			Host: getEnv("CUSTOM_SERVER_HOST", "0.0.0.0"),
@@ -170,6 +194,14 @@ func Load() *Config {
 			CallbackURL:             getEnv("TONGYI_CALLBACK_URL", ""),
 			InternalFrontendBaseURL: getEnv("INTERNAL_FRONTEND_BASE_URL", ""),
 		},
+		MPS: MPSConfig{
+			SecretID: getEnv("TENCENTCLOUD_SECRET_ID", ""), SecretKey: getEnv("TENCENTCLOUD_SECRET_KEY", ""),
+			Region: getEnv("TENCENTCLOUD_REGION", "ap-guangzhou"), Endpoint: getEnv("TENCENTCLOUD_MPS_ENDPOINT", "mps.tencentcloudapi.com"),
+			OutputBucket: getEnv("TENCENTCLOUD_MPS_OUTPUT_BUCKET", ""), OutputRegion: getEnv("TENCENTCLOUD_MPS_OUTPUT_REGION", ""), OutputDir: getEnv("TENCENTCLOUD_MPS_OUTPUT_DIR", "/subtitles/"),
+			InputBucket: getEnv("TENCENTCLOUD_MPS_INPUT_BUCKET", ""), InputRegion: getEnv("TENCENTCLOUD_MPS_INPUT_REGION", ""), InputDir: getEnv("TENCENTCLOUD_MPS_INPUT_DIR", "vidsage-mps-input/"),
+			TemplateID: uint64(getEnvInt64("TENCENTCLOUD_MPS_TEMPLATE_ID", 307)), PollIntervalSeconds: getEnvInt("TENCENTCLOUD_MPS_POLL_INTERVAL_SECONDS", 5), TimeoutSeconds: getEnvInt("TENCENTCLOUD_MPS_TIMEOUT_SECONDS", 1800),
+		},
+		TranscriptionProvider: provider,
 		LLM: LLMConfig{
 			Provider:       getEnv("CUSTOM_LLM_PROVIDER", "openai-compatible"),
 			BaseURL:        getEnv("CUSTOM_LLM_BASE_URL", ""),
@@ -184,6 +216,17 @@ func Load() *Config {
 			MaxAttempts:         getEnvInt("CUSTOM_WORKER_MAX_ATTEMPTS", 3),
 			Concurrency:         getEnvInt("CUSTOM_WORKER_CONCURRENCY", 2),
 		},
+	}
+}
+
+func NormalizeTranscriptionProvider(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "tingwu", "aliyun_tingwu":
+		return "aliyun_tingwu", nil
+	case "tencent_mps", "mps":
+		return "tencent_mps", nil
+	default:
+		return "", fmt.Errorf("CUSTOM_TRANSCRIPTION_PROVIDER must be tingwu or tencent_mps")
 	}
 }
 

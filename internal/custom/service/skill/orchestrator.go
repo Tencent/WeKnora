@@ -174,6 +174,7 @@ func (o *Orchestrator) enqueueJob(ctx context.Context, db *gorm.DB, videoID, job
 		JobType:              jobType,
 		TranscriptGeneration: video.TranscriptGeneration,
 		Provider:             providerForJob(jobType),
+		ResultStage:          "final",
 		Status:               "pending",
 		MaxAttempts:          3,
 		IdempotencyKey:       idemKey,

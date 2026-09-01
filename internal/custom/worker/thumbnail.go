@@ -32,6 +32,7 @@ type ThumbnailHandler struct {
 	DB                    *gorm.DB
 	MinIO                 *objstore.Client
 	ContentWorkersEnabled bool
+	TranscriptionProvider string
 }
 
 type CoreFileUnavailableError struct {
@@ -43,8 +44,12 @@ func (e *CoreFileUnavailableError) Error() string {
 }
 
 // NewThumbnailHandler 构造
-func NewThumbnailHandler(db *gorm.DB, m *objstore.Client, contentWorkersEnabled bool) *ThumbnailHandler {
-	return &ThumbnailHandler{DB: db, MinIO: m, ContentWorkersEnabled: contentWorkersEnabled}
+func NewThumbnailHandler(db *gorm.DB, m *objstore.Client, contentWorkersEnabled bool, provider ...string) *ThumbnailHandler {
+	selected := "aliyun_tingwu"
+	if len(provider) > 0 {
+		selected = normalizeProvider(provider[0])
+	}
+	return &ThumbnailHandler{DB: db, MinIO: m, ContentWorkersEnabled: contentWorkersEnabled, TranscriptionProvider: selected}
 }
 
 // JobType 返回 job 类型标识
@@ -128,7 +133,7 @@ func (h *ThumbnailHandler) Run(ctx context.Context, job *model.VideoProcessingJo
 
 		if h.ContentWorkersEnabled {
 			transcriptionJob := model.VideoProcessingJob{
-				ID: uuid.NewString(), VideoID: video.ID, JobType: "transcription", Provider: "aliyun_tingwu",
+				ID: uuid.NewString(), VideoID: video.ID, JobType: "transcription", Provider: normalizeProvider(h.TranscriptionProvider),
 				Status: "pending", MaxAttempts: 3, IdempotencyKey: fmt.Sprintf("transcription:%s", video.ID),
 			}
 			if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "idempotency_key"}}, DoNothing: true}).Create(&transcriptionJob).Error; err != nil {

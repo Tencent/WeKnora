@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/custom/client/llm"
+	"github.com/Tencent/WeKnora/internal/custom/client/mps"
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/outline"
@@ -55,11 +56,19 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 	if generation == "" {
 		generation = strings.TrimSpace(video.TranscriptGeneration)
 	}
-	if generation == "" || generation != strings.TrimSpace(video.TranscriptGeneration) {
+	if generation == "" {
 		return fmt.Errorf("视频 %s 的转写代次不可用或已过期", video.ID)
 	}
-	reader := transcript.NewReader(h.DB, h.WeKnora)
-	chunks, err := reader.Read(ctx, video.ID, generation)
+	var chunks []transcript.Chunk
+	var err error
+	if job.ResultStage == "draft" {
+		chunks, err = h.readDraftChunks(ctx, video.ID, generation, job)
+	} else if generation != strings.TrimSpace(video.TranscriptGeneration) {
+		return fmt.Errorf("视频 %s 的转写代次不可用或已过期", video.ID)
+	} else {
+		reader := transcript.NewReader(h.DB, h.WeKnora)
+		chunks, err = reader.Read(ctx, video.ID, generation)
+	}
 	if err != nil {
 		return err
 	}
@@ -169,8 +178,12 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		pageTitle = video.Title + "_知识总结"
 		pageBody = string(canonical)
 	}
+	pageSlug := contract.WriteSlug(video.ID)
+	if job.ResultStage == "draft" {
+		pageSlug += "/draft"
+	}
 	page, err := h.Wiki.UpsertPage(ctx, h.WeKnora.KBID(), weknora.WikiPageWrite{
-		Slug:     contract.WriteSlug(video.ID),
+		Slug:     pageSlug,
 		Title:    pageTitle,
 		PageType: "index",
 		Status:   "published",
@@ -186,9 +199,21 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		"prompt_version":        h.LLM.PromptVersion(),
 		"wiki_page_id":          page.ID,
 		"transcript_generation": generation,
+		"result_stage":          job.ResultStage,
 	})
 	if err := h.DB.WithContext(ctx).Model(job).Update("result_payload", string(result)).Error; err != nil {
 		return fmt.Errorf("save %s result: %w", h.Job, err)
+	}
+	if job.ResultStage == "draft" {
+		field := "outline_draft_wiki_page_id"
+		stageField := "outline_result_stage"
+		if h.Job == skill.JobSummary {
+			field, stageField = "summary_draft_wiki_page_id", "summary_result_stage"
+		}
+		if err := h.DB.WithContext(ctx).Model(&model.Video{}).Where("id = ? AND ("+stageField+" IS NULL OR "+stageField+" <> ?)", video.ID, "final_ready").Updates(map[string]any{field: page.ID, stageField: "draft_ready"}).Error; err != nil {
+			return err
+		}
+		return nil
 	}
 	var completeErr error
 	if skill.IsExplicitSummaryRegeneration(job.InputPayload) {
@@ -199,7 +224,48 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 	if completeErr != nil {
 		return completeErr
 	}
+	stageField := "outline_result_stage"
+	if h.Job == skill.JobSummary || h.Job == skill.JobSummaryEnhance {
+		stageField = "summary_result_stage"
+	}
+	if err := h.DB.WithContext(ctx).Model(&model.Video{}).Where("id = ?", video.ID).Update(stageField, "final_ready").Error; err != nil {
+		return err
+	}
 	return nil
+}
+
+func (h *DirectContentHandler) readDraftChunks(ctx context.Context, videoID, generation string, job *model.VideoProcessingJob) ([]transcript.Chunk, error) {
+	var input struct {
+		TranscriptionJobID string `json:"transcription_job_id"`
+	}
+	if err := json.Unmarshal([]byte(job.InputPayload), &input); err != nil || input.TranscriptionJobID == "" {
+		return nil, fmt.Errorf("draft transcription job reference is missing")
+	}
+	var source model.VideoProcessingJob
+	if err := h.DB.WithContext(ctx).First(&source, "id = ? AND video_id = ?", input.TranscriptionJobID, videoID).Error; err != nil {
+		return nil, fmt.Errorf("load draft transcription result: %w", err)
+	}
+	var payload struct {
+		MPSResult *mps.Result `json:"mps_result"`
+	}
+	if err := json.Unmarshal([]byte(source.ResultPayload), &payload); err != nil || payload.MPSResult == nil {
+		return nil, fmt.Errorf("draft MPS result is unavailable")
+	}
+	chunks := make([]transcript.Chunk, 0, len(payload.MPSResult.Segments))
+	for i, segment := range payload.MPSResult.Segments {
+		if strings.TrimSpace(segment.Text) == "" || segment.EndMs <= segment.StartMs {
+			continue
+		}
+		id := segment.SourceSegmentID
+		if id == "" {
+			id = fmt.Sprintf("mps:%s:%06d", source.ExternalTaskID, i)
+		}
+		chunks = append(chunks, transcript.Chunk{ID: id, Index: len(chunks), Content: segment.Text, StartMs: segment.StartMs, EndMs: segment.EndMs})
+	}
+	if len(chunks) == 0 {
+		return nil, fmt.Errorf("draft transcript has no timed segments")
+	}
+	return chunks, nil
 }
 
 func normalizeOutlineEvidenceChunkIDs(document *outline.Document, chunks []transcript.Chunk) {

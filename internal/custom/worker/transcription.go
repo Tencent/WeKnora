@@ -21,6 +21,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	objstore "github.com/Tencent/WeKnora/internal/custom/client/minio"
+	"github.com/Tencent/WeKnora/internal/custom/client/mps"
 	"github.com/Tencent/WeKnora/internal/custom/client/tongyi"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 )
@@ -43,10 +44,12 @@ type ProgressSourcePreparer interface {
 type TranscriptionHandler struct {
 	DB                       *gorm.DB
 	Tongyi                   TongyiClient
+	MPS                      MPSClient
 	MinIO                    *objstore.Client
 	InternalFrontendBaseURL  string
 	SourcePreparationTimeout time.Duration
 	SourcePreparer           SourcePreparer
+	MPSInputPreparer         MPSInputPreparer
 }
 
 type TongyiClient interface {
@@ -55,8 +58,22 @@ type TongyiClient interface {
 	GetTask(context.Context, string) (*tongyi.GetTaskResponse, error)
 }
 
+type MPSClient interface {
+	CreateTask(context.Context, string, string) (string, error)
+	GetTask(context.Context, string) (*mps.Task, error)
+	Timeout() time.Duration
+	PollInterval() time.Duration
+}
+
 type SourcePreparer interface {
 	Prepare(context.Context, *model.Video) (string, error)
+}
+
+// MPSInputPreparer ensures a source can be fetched by Tencent MPS. It is kept
+// separate from the Tingwu source preparer so switching providers never
+// changes historical Tingwu behavior.
+type MPSInputPreparer interface {
+	Prepare(context.Context, *model.Video, string) (string, error)
 }
 
 // NewTranscriptionHandler 构造
@@ -73,6 +90,9 @@ func (h *TranscriptionHandler) JobType() string { return "transcription" }
 
 // Run 编排：发起 → 轮询 → 下载 → 写 result → 触发下游
 func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
+	if normalizeProvider(job.Provider) == mps.Provider {
+		return h.runMPS(ctx, job, video)
+	}
 	if h.Tongyi == nil {
 		return fmt.Errorf("听悟 client 未配置")
 	}
@@ -203,7 +223,7 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 		VideoID:              video.ID,
 		JobType:              "subtitle_generate",
 		TranscriptGeneration: job.TranscriptGeneration,
-		Provider:             "aliyun_tingwu",
+		Provider:             normalizeProvider(job.Provider),
 		Status:               "pending",
 		MaxAttempts:          3,
 		InputPayload:         fmt.Sprintf(`{"transcription_job_id":%q}`, job.ID),
@@ -225,6 +245,126 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 	}
 
 	return nil
+}
+
+// runMPS 保留独立的 MPS 任务状态机；结果直接使用 SegmentSet，避免下载/解析听悟 JSON。
+func (h *TranscriptionHandler) runMPS(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
+	if h.MPS == nil {
+		return fmt.Errorf("腾讯云 MPS client 未配置")
+	}
+	if video == nil || video.ID == "" {
+		return fmt.Errorf("video is missing")
+	}
+	sourceURL := strings.TrimSpace(video.TranscriptionSourceURL)
+	if sourceURL == "" {
+		sourceURL = strings.TrimSpace(video.FileURL)
+	}
+	if sourceURL == "" {
+		return fmt.Errorf("video transcription source url is empty")
+	}
+	if err := h.DB.Model(video).Where("status IN ?", []string{model.VideoStatusReady, model.VideoStatusProcessing}).Update("status", model.VideoStatusProcessing).Error; err != nil {
+		return fmt.Errorf("mark video processing: %w", err)
+	}
+	if job.ExternalTaskID == "" {
+		if h.MPSInputPreparer != nil {
+			preparedURL, prepareErr := h.MPSInputPreparer.Prepare(ctx, video, sourceURL)
+			if prepareErr != nil {
+				return fmt.Errorf("prepare mps input: %w", prepareErr)
+			}
+			if strings.TrimSpace(preparedURL) == "" {
+				return fmt.Errorf("prepare mps input returned empty url")
+			}
+			sourceURL = preparedURL
+		}
+		taskID, err := h.MPS.CreateTask(ctx, sourceURL, mpsSessionID(job.ID))
+		if err != nil {
+			return fmt.Errorf("create mps task: %w", err)
+		}
+		if err := h.DB.Model(job).Updates(map[string]any{"external_task_id": taskID, "provider": mps.Provider}).Error; err != nil {
+			return fmt.Errorf("save mps task id: %w", err)
+		}
+		job.ExternalTaskID = taskID
+		job.Provider = mps.Provider
+	}
+	pollTimeout := h.MPS.Timeout()
+	if pollTimeout <= 0 {
+		pollTimeout = transcriptionPollTimeout
+	}
+	pollCtx, cancel := context.WithTimeout(ctx, pollTimeout)
+	defer cancel()
+	interval := h.MPS.PollInterval()
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	for {
+		task, err := h.MPS.GetTask(pollCtx, job.ExternalTaskID)
+		if err != nil {
+			return err
+		}
+		h.updateJobProgress(job, task.Progress)
+		switch task.Status {
+		case "FINISH":
+			if task.ErrorCode != "" {
+				return fmt.Errorf("MPS 任务失败 Code=%s Msg=%s", task.ErrorCode, task.ErrorMsg)
+			}
+			if len(task.Result.Segments) == 0 {
+				return fmt.Errorf("MPS 结果不含转写片段")
+			}
+			resultJSON, err := task.Result.JSON()
+			if err != nil {
+				return fmt.Errorf("marshal mps result: %w", err)
+			}
+			if strings.TrimSpace(job.TranscriptGeneration) == "" {
+				job.TranscriptGeneration = "mps:" + job.ExternalTaskID
+			}
+			payload, _ := json.Marshal(map[string]any{"task_id": job.ExternalTaskID, "provider": mps.Provider, "mps_result": json.RawMessage(resultJSON), "completed_at": time.Now().UTC()})
+			subtitleJob := model.VideoProcessingJob{ID: uuid.NewString(), VideoID: video.ID, JobType: "subtitle_generate", TranscriptGeneration: job.TranscriptGeneration, Provider: mps.Provider, Status: "pending", MaxAttempts: 3, InputPayload: fmt.Sprintf(`{"transcription_job_id":%q}`, job.ID), IdempotencyKey: fmt.Sprintf("subtitle_generate:%s:%s", video.ID, job.ID)}
+			draftInput := fmt.Sprintf(`{"transcription_job_id":%q,"transcript_generation":%q}`, job.ID, job.TranscriptGeneration)
+			draftOutline := model.VideoProcessingJob{ID: uuid.NewString(), VideoID: video.ID, JobType: "outline", TranscriptGeneration: job.TranscriptGeneration, Provider: "llm", ResultStage: "draft", Status: "pending", MaxAttempts: 3, InputPayload: draftInput, IdempotencyKey: fmt.Sprintf("outline:draft:%s:%s", video.ID, job.TranscriptGeneration)}
+			draftSummary := model.VideoProcessingJob{ID: uuid.NewString(), VideoID: video.ID, JobType: "summary", TranscriptGeneration: job.TranscriptGeneration, Provider: "llm", ResultStage: "draft", Status: "pending", MaxAttempts: 3, InputPayload: draftInput, IdempotencyKey: fmt.Sprintf("summary:draft:%s:%s", video.ID, job.TranscriptGeneration)}
+			if err := h.DB.Transaction(func(tx *gorm.DB) error {
+				if err := tx.Model(job).Updates(map[string]any{"result_payload": string(payload), "transcript_generation": job.TranscriptGeneration}).Error; err != nil {
+					return err
+				}
+				if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "idempotency_key"}}, DoNothing: true}).Create(&subtitleJob).Error; err != nil {
+					return err
+				}
+				if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "idempotency_key"}}, DoNothing: true}).Create(&draftOutline).Error; err != nil {
+					return err
+				}
+				return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "idempotency_key"}}, DoNothing: true}).Create(&draftSummary).Error
+			}); err != nil {
+				return fmt.Errorf("save mps result/enqueue subtitle: %w", err)
+			}
+			return nil
+		case "WAITING", "PROCESSING", "":
+			select {
+			case <-pollCtx.Done():
+				return fmt.Errorf("等待 MPS 任务完成超时: %w", pollCtx.Err())
+			case <-time.After(interval):
+			}
+		default:
+			return fmt.Errorf("MPS 返回未知任务状态: %s", task.Status)
+		}
+	}
+}
+
+func mpsSessionID(jobID string) string {
+	value := strings.NewReplacer(":", "-", "/", "-", " ", "-").Replace(strings.TrimSpace(jobID))
+	value = "transcription-" + value
+	if len(value) > 50 {
+		value = value[:50]
+	}
+	return value
+}
+
+func normalizeProvider(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case mps.Provider, "mps":
+		return mps.Provider
+	default:
+		return "aliyun_tingwu"
+	}
 }
 
 func (h *TranscriptionHandler) prepareSource(ctx context.Context, video *model.Video, sourceURL string, report func(SourcePreparationProgress)) (string, error) {

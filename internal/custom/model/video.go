@@ -25,8 +25,12 @@ type Video struct {
 	KnowledgeBaseWikiPageID  string         `gorm:"type:varchar(64)" json:"knowledge_base_wiki_page_id"` // extract-video-knowledge 产物「知识底座」索引页 ID
 	KnowledgeAuditStatus     string         `gorm:"type:varchar(16)" json:"knowledge_audit_status"`      // passed/conditional/failed
 	OutlineWikiPageID        string         `gorm:"type:varchar(64)" json:"outline_wiki_page_id"`
+	OutlineDraftWikiPageID   string         `gorm:"type:varchar(64)" json:"outline_draft_wiki_page_id"`
+	OutlineResultStage       string         `gorm:"type:varchar(16)" json:"outline_result_stage"`
 	OverviewWikiPageID       string         `gorm:"type:varchar(64)" json:"overview_wiki_page_id"`
 	SummaryWikiPageID        string         `gorm:"type:varchar(64)" json:"summary_wiki_page_id"`
+	SummaryDraftWikiPageID   string         `gorm:"type:varchar(64)" json:"summary_draft_wiki_page_id"`
+	SummaryResultStage       string         `gorm:"type:varchar(16)" json:"summary_result_stage"`
 	SummaryWikiPageVersion   int            `json:"summary_wiki_page_version"`
 	SummarySource            string         `gorm:"type:varchar(32)" json:"summary_source"` // initial/enhanced/user_edited
 	SummaryKnowledgeEnhanced bool           `json:"summary_knowledge_enhanced"`
@@ -49,17 +53,18 @@ type Video struct {
 // VideoTranscriptChunk 保存方案 A 中每个字幕块对应的 WeKnora Knowledge。
 // (video_id, generation, chunk_index) 唯一，作为跨 HTTP 重试的持久化检查点。
 type VideoTranscriptChunk struct {
-	VideoID     string    `gorm:"type:varchar(36);primaryKey" json:"video_id"`
-	Generation  string    `gorm:"type:varchar(64);primaryKey" json:"generation"`
-	Revision    int64     `gorm:"not null;index" json:"revision"`
-	ChunkIndex  int       `gorm:"primaryKey" json:"chunk_index"`
-	StartMs     int       `gorm:"not null;default:0" json:"start_ms"`
-	EndMs       int       `gorm:"not null;default:0" json:"end_ms"`
-	KnowledgeID string    `gorm:"type:varchar(64);uniqueIndex" json:"knowledge_id"`
-	ContentHash string    `gorm:"type:varchar(64);not null" json:"content_hash"`
-	Status      string    `gorm:"type:varchar(32);not null" json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	VideoID         string    `gorm:"type:varchar(36);primaryKey" json:"video_id"`
+	Generation      string    `gorm:"type:varchar(64);primaryKey" json:"generation"`
+	Revision        int64     `gorm:"not null;index" json:"revision"`
+	ChunkIndex      int       `gorm:"primaryKey" json:"chunk_index"`
+	SourceSegmentID string    `gorm:"type:varchar(192);index" json:"source_segment_id"`
+	StartMs         int       `gorm:"not null;default:0" json:"start_ms"`
+	EndMs           int       `gorm:"not null;default:0" json:"end_ms"`
+	KnowledgeID     string    `gorm:"type:varchar(64);uniqueIndex" json:"knowledge_id"`
+	ContentHash     string    `gorm:"type:varchar(64);not null" json:"content_hash"`
+	Status          string    `gorm:"type:varchar(32);not null" json:"status"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // VideoProcessingJob 视频处理任务状态机
@@ -68,7 +73,8 @@ type VideoProcessingJob struct {
 	VideoID              string     `gorm:"type:varchar(36);index:idx_video_job_status,priority:1;index:idx_video_job_generation,priority:1" json:"video_id"`
 	JobType              string     `gorm:"type:varchar(50);index:idx_video_job_status,priority:2;index:idx_video_job_generation,priority:2" json:"job_type"` // thumbnail/transcription/subtitle_generate/index/graph/outline/summary/summary_enhance/assemble
 	TranscriptGeneration string     `gorm:"type:varchar(64);index:idx_video_job_generation,priority:3" json:"transcript_generation"`
-	Provider             string     `gorm:"type:varchar(50)" json:"provider"` // local/aliyun_tingwu/weknora
+	Provider             string     `gorm:"type:varchar(50)" json:"provider"`           // local/aliyun_tingwu/weknora
+	ResultStage          string     `gorm:"type:varchar(16);index" json:"result_stage"` // draft/final
 	ExternalTaskID       string     `gorm:"type:varchar(128);index" json:"external_task_id"`
 	IdempotencyKey       string     `gorm:"type:varchar(128);uniqueIndex" json:"idempotency_key"`
 	Status               string     `gorm:"type:varchar(50);index:idx_video_job_status,priority:3" json:"status"` // pending/running/succeeded/failed/cancelled

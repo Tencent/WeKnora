@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/config"
@@ -66,6 +67,31 @@ func TestProcessingStatusReportsFailedStageAndRetryableJob(t *testing.T) {
 	if len(payload.Jobs) != 2 || !payload.Jobs[0].ResultAvailable {
 		t.Fatalf("job input/output summary = %#v", payload.Jobs)
 	}
+}
+
+func TestDraftContentStagesUseDraftArtifacts(t *testing.T) {
+	video := model.Video{OutlineDraftWikiPageID: "outline-draft", SummaryDraftWikiPageID: "summary-draft"}
+	require.True(t, stageArtifactAvailable(video, model.VideoProcessingJob{JobType: "outline", ResultStage: "draft"}))
+	require.True(t, stageArtifactAvailable(video, model.VideoProcessingJob{JobType: "summary", ResultStage: "draft"}))
+	require.False(t, stageArtifactAvailable(video, model.VideoProcessingJob{JobType: "outline"}))
+}
+
+func TestProcessingJobPhaseReportsMPSProvider(t *testing.T) {
+	job := model.VideoProcessingJob{JobType: "transcription", Provider: "tencent_mps", Status: "running", ExternalTaskID: "mps-task"}
+	require.Equal(t, "mps_running", processingJobPhase(job))
+}
+
+func TestProcessingStatusKeepsMPSUpstreamStagesAfterIndexGenerationChanges(t *testing.T) {
+	video := model.Video{ID: "video-1", TranscriptGeneration: "content-hash", SubtitleFileURL: "https://cos.example/subtitle.vtt", TranscriptKnowledgeID: "knowledge-1"}
+	jobs := []model.VideoProcessingJob{
+		{ID: "transcription", JobType: "transcription", Provider: "tencent_mps", TranscriptGeneration: "mps:task-1", Status: "succeeded", ResultPayload: `{"mps_result":{}}`},
+		{ID: "subtitle", JobType: "subtitle_generate", Provider: "tencent_mps", TranscriptGeneration: "mps:task-1", Status: "succeeded", ResultPayload: `{"paragraphs":[{}]}`},
+		{ID: "index", JobType: "index", Provider: "weknora", TranscriptGeneration: "content-hash", Status: "succeeded"},
+	}
+	status := buildProcessingStatus(video, jobs)
+	require.Contains(t, status.CompletedStages, "transcription")
+	require.Contains(t, status.CompletedStages, "subtitle_generate")
+	require.Contains(t, status.CompletedStages, "index")
 }
 
 func TestProcessingJobStatusReportsTranscriptionPhase(t *testing.T) {
@@ -242,6 +268,24 @@ func TestRetrySuccessfulTranscriptionCreatesNewJob(t *testing.T) {
 	if rerun.ID == previous.ID || rerun.Status != "pending" || rerun.IdempotencyKey == previous.IdempotencyKey {
 		t.Fatalf("rerun job = %#v", rerun)
 	}
+}
+
+func TestRetryFailedTranscriptionClearsExternalTask(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{ID: uuid.NewString(), Title: "failed transcription", Status: model.VideoStatusFailed}
+	require.NoError(t, db.Create(&video).Error)
+	job := model.VideoProcessingJob{ID: uuid.NewString(), VideoID: video.ID, JobType: "transcription", Provider: "tencent_mps", Status: "failed", ExternalTaskID: "old-mps-task", ErrorCategory: "processing_failed", IdempotencyKey: "transcription:" + video.ID}
+	require.NoError(t, db.Create(&job).Error)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: video.ID}, {Key: "jobType", Value: "transcription"}}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/custom/videos/"+video.ID+"/processing-jobs/transcription/retry", nil)
+	NewProcessingHandler(db).Retry(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var retried model.VideoProcessingJob
+	require.NoError(t, db.First(&retried, "id = ?", job.ID).Error)
+	require.Empty(t, retried.ExternalTaskID)
+	require.Equal(t, "pending", retried.Status)
 }
 
 func TestRetryRunningStageRejectsDuplicateExecution(t *testing.T) {
