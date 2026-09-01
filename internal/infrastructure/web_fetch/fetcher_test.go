@@ -193,11 +193,30 @@ func TestPinnedDialUsesValidatedIPAndPreservesPort(t *testing.T) {
 	assert.EqualError(t, err, "stop dial")
 }
 
-func TestPinnedDialRejectsRebindingToRestrictedIP(t *testing.T) {
-	dialCalled := false
+func TestPinnedDialSkipsRestrictedIPWhenPublicAnswerExists(t *testing.T) {
+	var dialedAddress string
 	fetcher := &Fetcher{
 		resolveIPs: func(context.Context, string) ([]net.IP, error) {
 			return []net.IP{net.ParseIP("93.184.216.34"), net.ParseIP("127.0.0.1")}, nil
+		},
+		dialContext: func(_ context.Context, _, address string) (net.Conn, error) {
+			dialedAddress = address
+			return nil, errors.New("stop dial")
+		},
+	}
+
+	_, err := fetcher.pinnedDialContext()(context.Background(), "tcp", "example.com:443")
+
+	require.Error(t, err)
+	assert.Equal(t, "93.184.216.34:443", dialedAddress)
+	assert.EqualError(t, err, "stop dial")
+}
+
+func TestPinnedDialRejectsWhenAllDNSAnswersAreRestricted(t *testing.T) {
+	dialCalled := false
+	fetcher := &Fetcher{
+		resolveIPs: func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("10.0.0.1")}, nil
 		},
 		dialContext: func(context.Context, string, string) (net.Conn, error) {
 			dialCalled = true
@@ -208,7 +227,7 @@ func TestPinnedDialRejectsRebindingToRestrictedIP(t *testing.T) {
 	_, err := fetcher.pinnedDialContext()(context.Background(), "tcp", "example.com:443")
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "connection blocked")
+	assert.Contains(t, err.Error(), "restricted IPs")
 	assert.False(t, dialCalled)
 }
 
