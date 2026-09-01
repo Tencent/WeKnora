@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
+	"strings"
 	"sync"
 
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -70,6 +74,8 @@ type QueryKnowledgeGraphTool struct {
 	BaseTool
 	knowledgeService      interfaces.KnowledgeBaseService
 	scopeKnowledgeService interfaces.KnowledgeService
+	chunkService          interfaces.ChunkService
+	chatModel             chat.Chat
 	searchTargets         types.SearchTargets
 	scopeEnforced         bool
 }
@@ -84,14 +90,23 @@ func (t *QueryKnowledgeGraphTool) WithKnowledgeScope(
 	return t
 }
 
-// NewQueryKnowledgeGraphTool creates a new query knowledge graph tool
+// NewQueryKnowledgeGraphTool creates a new query knowledge graph tool.
+//
+// chunkService backfills the chunks referenced by matched graph nodes, and
+// chatModel extracts the entity names to traverse from the raw query. Both are
+// optional: without a chat model (or when extraction fails) the tool skips the
+// graph traversal and keeps its retrieval-only behavior.
 func NewQueryKnowledgeGraphTool(
 	knowledgeService interfaces.KnowledgeBaseService,
+	chunkService interfaces.ChunkService,
+	chatModel chat.Chat,
 	searchTargets ...types.SearchTargets,
 ) *QueryKnowledgeGraphTool {
 	tool := &QueryKnowledgeGraphTool{
 		BaseTool:         queryKnowledgeGraphTool,
 		knowledgeService: knowledgeService,
+		chunkService:     chunkService,
+		chatModel:        chatModel,
 	}
 	// Presence of the variadic argument — not its length — enables the Agent
 	// authorization boundary, so an empty scope fails closed.
@@ -100,6 +115,32 @@ func NewQueryKnowledgeGraphTool(
 		tool.scopeEnforced = true
 	}
 	return tool
+}
+
+// maxGraphChunkResults caps how many graph-referenced chunks are returned per
+// knowledge base, mirroring the MatchCount budget of the retrieval path so one
+// hub entity with hundreds of references cannot flood the context window.
+const maxGraphChunkResults = 10
+
+// maxQueryEntities caps the entity list sent to the graph backend so a chatty
+// extraction cannot turn into an unbounded Cypher OR-chain.
+const maxQueryEntities = 8
+
+// graphBackendEnabled reports whether the Neo4j-backed graph store is active.
+// It mirrors the gate the chat pipeline uses in extract_entity.go; without a
+// graph store there is nothing to traverse and the tool must stay on its
+// retrieval-only path.
+var graphBackendEnabled = func() bool {
+	return strings.ToLower(os.Getenv("NEO4J_ENABLE")) == "true"
+}
+
+// perKBGraphResult carries what one knowledge base's graph traversal produced.
+type perKBGraphResult struct {
+	entities  []string
+	nodes     []*types.GraphNode
+	relations []*types.GraphRelation
+	chunks    []*types.SearchResult
+	skipped   string // human-readable reason when traversal did not run
 }
 
 // Execute performs the knowledge graph query with concurrent KB processing
@@ -142,11 +183,20 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		}, fmt.Errorf("invalid query")
 	}
 
+	// Extract entities from the query once — every KB in scope traverses the
+	// graph with the same entity list, exactly like the chat pipeline's
+	// QUERY_UNDERSTAND -> ENTITY_SEARCH handoff.
+	entities := t.extractQueryEntities(ctx, query)
+	if len(entities) > 0 {
+		logger.Infof(ctx, "[Tool][QueryKnowledgeGraph] Extracted %d entities for graph traversal: %v", len(entities), entities)
+	}
+
 	// Concurrently query all knowledge bases
 	type graphQueryResult struct {
 		kbID    string
 		kb      *types.KnowledgeBase
 		results []*types.SearchResult
+		graph   perKBGraphResult
 		err     error
 	}
 
@@ -181,28 +231,40 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 				return
 			}
 
-			// Query graph
+			// Traverse the knowledge graph first. Every failure here is
+			// non-fatal: the hybrid retrieval below still answers, just
+			// without graph-shaped recall.
+			graphRes := t.traverseGraph(ctx, id, entities)
+
+			// Hybrid retrieval keeps recall breadth: the graph pins chunks
+			// that are topically tied to the extracted entities, while this
+			// path catches relevant chunks whose entities were not extracted.
 			results, err := t.knowledgeService.HybridSearch(ctx, id, searchParams)
 			if err != nil {
 				mu.Lock()
-				kbResults[id] = &graphQueryResult{kbID: id, kb: kb, err: fmt.Errorf("query failed: %v", err)}
+				kbResults[id] = &graphQueryResult{kbID: id, kb: kb, graph: graphRes, err: fmt.Errorf("query failed: %v", err)}
 				mu.Unlock()
 				return
 			}
+
+			// Merge: graph-sourced chunks rank ahead of retrieval chunks
+			// (entity-name matches are exact), deduplicated by chunk ID.
+			results = mergeGraphAndHybridResults(graphRes.chunks, results)
+
 			if t.scopeEnforced {
 				results, err = filterSearchResultsInSearchTargets(
 					ctx, t.searchTargets, id, results, t.scopeKnowledgeService,
 				)
 				if err != nil {
 					mu.Lock()
-					kbResults[id] = &graphQueryResult{kbID: id, kb: kb, err: err}
+					kbResults[id] = &graphQueryResult{kbID: id, kb: kb, graph: graphRes, err: err}
 					mu.Unlock()
 					return
 				}
 			}
 
 			mu.Lock()
-			kbResults[id] = &graphQueryResult{kbID: id, kb: kb, results: results}
+			kbResults[id] = &graphQueryResult{kbID: id, kb: kb, results: results, graph: graphRes}
 			mu.Unlock()
 		}(kbID)
 	}
@@ -214,6 +276,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	var errors []string
 	graphConfigs := make(map[string]graphConfigSummary)
 	kbCounts := make(map[string]int)
+	graphStats := make(map[string]map[string]interface{})
 
 	for _, kbID := range input.KnowledgeBaseIDs {
 		result := kbResults[kbID]
@@ -227,6 +290,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		}
 
 		kbCounts[kbID] = len(result.results)
+		graphStats[kbID] = graphResultToData(result.graph)
 		for _, r := range result.results {
 			if _, seen := seenChunks[r.ID]; !seen {
 				seenChunks[r.ID] = r
@@ -240,8 +304,14 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		allResults = append(allResults, result)
 	}
 
-	sort.Slice(allResults, func(i, j int) bool {
-		return allResults[i].Score > allResults[j].Score
+	// Sort by score with a deterministic chunk-ID tie-break: the dedup map
+	// above iterates in random order, and equal-score results (e.g. several
+	// graph-matched chunks at 1.0) would otherwise shuffle between calls.
+	sort.SliceStable(allResults, func(i, j int) bool {
+		if allResults[i].Score != allResults[j].Score {
+			return allResults[i].Score > allResults[j].Score
+		}
+		return allResults[i].ID < allResults[j].ID
 	})
 
 	if len(allResults) == 0 {
@@ -251,9 +321,11 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			Data: map[string]interface{}{
 				"knowledge_base_ids": input.KnowledgeBaseIDs,
 				"query":              query,
+				"entities":           entities,
 				"results":            []interface{}{},
 				"graph_configs":      graphConfigsToData(graphConfigs),
 				"graph_config":       aggregateGraphConfig(graphConfigs),
+				"graph_traversal":    graphStats,
 				"errors":             errors,
 			},
 		}, nil
@@ -263,6 +335,9 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	output := "=== Knowledge Graph Query ===\n\n"
 	output += fmt.Sprintf("📊 Query: %s\n", query)
 	output += fmt.Sprintf("🎯 Target Knowledge Bases: %v\n", input.KnowledgeBaseIDs)
+	if len(entities) > 0 {
+		output += fmt.Sprintf("🔎 Extracted Entities: %v\n", entities)
+	}
 	output += fmt.Sprintf("✓ Found %d relevant results (deduplicated)\n\n", len(allResults))
 
 	if len(errors) > 0 {
@@ -299,6 +374,56 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		output += "💡 Hint: Configure entity and relationship types in knowledge base settings\n\n"
 	}
 
+	// Display the graph traversal outcome — matched entities, nodes and the
+	// relations between them are the actual graph answer for the model.
+	output += "=== 🕸️ Graph Traversal ===\n\n"
+	traversedAny := false
+	visibleRelations := make([]*types.GraphRelation, 0)
+	for _, kbID := range input.KnowledgeBaseIDs {
+		stats, ok := graphStats[kbID]
+		if !ok {
+			continue
+		}
+		skipped, _ := stats["skipped"].(string)
+		if skipped != "" {
+			output += fmt.Sprintf("Knowledge Base [%s]: traversal skipped (%s)\n", kbID, skipped)
+			continue
+		}
+		nodes, _ := stats["nodes_matched"].(int)
+		relations, _ := stats["relations_matched"].(int)
+		chunks, _ := stats["graph_chunks"].(int)
+		if nodes == 0 && relations == 0 {
+			output += fmt.Sprintf("Knowledge Base [%s]: no graph nodes matched the extracted entities\n", kbID)
+			continue
+		}
+		traversedAny = true
+		output += fmt.Sprintf("Knowledge Base [%s]: matched %d graph nodes, %d relations, %d referenced chunks\n",
+			kbID, nodes, relations, chunks)
+		if result := kbResults[kbID]; result != nil {
+			visibleRelations = append(visibleRelations, result.graph.relations...)
+		}
+	}
+	if len(visibleRelations) > 0 {
+		output += "\nMatched relations:\n"
+		limit := len(visibleRelations)
+		if limit > 10 {
+			limit = 10
+		}
+		for _, rel := range visibleRelations[:limit] {
+			if rel == nil {
+				continue
+			}
+			output += fmt.Sprintf("  - %s --[%s]--> %s\n", rel.Node1, rel.Type, rel.Node2)
+		}
+		if len(visibleRelations) > limit {
+			output += fmt.Sprintf("  ... and %d more relations\n", len(visibleRelations)-limit)
+		}
+	}
+	if !traversedAny && len(visibleRelations) == 0 {
+		output += "⚠️ No graph traversal results available for the extracted entities\n"
+	}
+	output += "\n"
+
 	// Display result counts by KB
 	if len(kbCounts) > 0 {
 		output += "=== 📚 Knowledge Base Coverage ===\n"
@@ -312,6 +437,8 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	output += "=== 🔍 Query Results ===\n\n"
 	if !hasGraphConfig {
 		output += "💡 Returning relevant document chunks (knowledge base has no graph configuration)\n\n"
+	} else if traversedAny {
+		output += "💡 Results combine graph-traversed chunks (graph match) with hybrid retrieval\n\n"
 	} else {
 		output += "💡 Content retrieval based on graph configuration\n\n"
 	}
@@ -361,8 +488,15 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	}
 	output += "- ⏳ Full graph query language (Cypher) support is under development\n"
 
-	// Build structured graph data for frontend visualization
-	graphData := buildGraphVisualizationData(allResults)
+	// Build structured graph data for frontend visualization from what the
+	// traversal actually matched.
+	traversals := make([]perKBGraphResult, 0, len(input.KnowledgeBaseIDs))
+	for _, kbID := range input.KnowledgeBaseIDs {
+		if result := kbResults[kbID]; result != nil {
+			traversals = append(traversals, result.graph)
+		}
+	}
+	graphData := buildGraphVisualizationData(traversals, allResults)
 
 	return &types.ToolResult{
 		Success: true,
@@ -370,17 +504,308 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		Data: map[string]interface{}{
 			"knowledge_base_ids": input.KnowledgeBaseIDs,
 			"query":              query,
+			"entities":           entities,
 			"results":            formattedResults,
 			"count":              len(allResults),
 			"kb_counts":          kbCounts,
 			"graph_configs":      graphConfigsToData(graphConfigs),
 			"graph_config":       aggregateGraphConfig(graphConfigs),
+			"graph_traversal":    graphStats,
 			"graph_data":         graphData,
 			"has_graph_config":   hasGraphConfig,
 			"errors":             errors,
 			"display_type":       "graph_query_results",
 		},
 	}, nil
+}
+
+// traverseGraph runs the entity-name graph traversal for one knowledge base
+// and backfills the chunks referenced by the matched nodes. Any precondition
+// miss or backend error degrades to a skipped marker instead of failing the
+// tool — retrieval still runs afterwards.
+func (t *QueryKnowledgeGraphTool) traverseGraph(
+	ctx context.Context,
+	kbID string,
+	entities []string,
+) perKBGraphResult {
+	res := perKBGraphResult{entities: entities}
+	if !graphBackendEnabled() {
+		res.skipped = "graph backend disabled (NEO4J_ENABLE is not true)"
+		return res
+	}
+	if len(entities) == 0 {
+		res.skipped = "no entities extracted from query"
+		return res
+	}
+
+	graph, err := t.knowledgeService.SearchGraphNodes(ctx, kbID, entities)
+	if err != nil {
+		logger.Warnf(ctx, "[Tool][QueryKnowledgeGraph] Graph traversal failed for KB %s, falling back to retrieval only: %v", kbID, err)
+		res.skipped = fmt.Sprintf("graph traversal failed: %v", err)
+		return res
+	}
+	if graph == nil || (len(graph.Node) == 0 && len(graph.Relation) == 0) {
+		res.skipped = "no graph nodes or relations matched"
+		return res
+	}
+
+	res.nodes = graph.Node
+	res.relations = graph.Relation
+	res.chunks = t.graphChunkSearchResults(ctx, graph)
+	return res
+}
+
+// graphChunkSearchResults backfills search results for the chunks referenced
+// by the matched graph nodes. Missing chunk lookups are skipped silently: the
+// chunk may have been deleted after graph extraction, and one stale reference
+// must not sink the whole traversal.
+func (t *QueryKnowledgeGraphTool) graphChunkSearchResults(
+	ctx context.Context,
+	graph *types.GraphData,
+) []*types.SearchResult {
+	if t.chunkService == nil || graph == nil || len(graph.Node) == 0 {
+		return nil
+	}
+
+	orderedIDs := make([]string, 0, len(graph.Node))
+	seen := make(map[string]struct{})
+	for _, node := range graph.Node {
+		if node == nil {
+			continue
+		}
+		for _, chunkID := range node.Chunks {
+			if chunkID == "" {
+				continue
+			}
+			if _, ok := seen[chunkID]; ok {
+				continue
+			}
+			seen[chunkID] = struct{}{}
+			orderedIDs = append(orderedIDs, chunkID)
+			if len(orderedIDs) >= maxGraphChunkResults {
+				break
+			}
+		}
+		if len(orderedIDs) >= maxGraphChunkResults {
+			break
+		}
+	}
+	if len(orderedIDs) == 0 {
+		return nil
+	}
+
+	// Graph nodes carry chunk IDs verbatim from the graph store, which is
+	// tenant-agnostic; the Only variant resolves shared-KB chunks too.
+	chunks, err := t.chunkService.GetRepository().ListChunksByIDOnly(ctx, orderedIDs)
+	if err != nil {
+		logger.Warnf(ctx, "[Tool][QueryKnowledgeGraph] Failed to backfill graph chunks: %v", err)
+		return nil
+	}
+
+	knowledgeByID := make(map[string]*types.Knowledge)
+	if t.scopeKnowledgeService != nil {
+		knowledgeIDs := make([]string, 0, len(chunks))
+		knowledgeSeen := make(map[string]struct{})
+		for _, chunk := range chunks {
+			if chunk == nil {
+				continue
+			}
+			if _, ok := knowledgeSeen[chunk.KnowledgeID]; ok {
+				continue
+			}
+			knowledgeSeen[chunk.KnowledgeID] = struct{}{}
+			knowledgeIDs = append(knowledgeIDs, chunk.KnowledgeID)
+		}
+		if len(knowledgeIDs) > 0 {
+			var tenantID uint64
+			if id, ok := types.TenantIDFromContext(ctx); ok {
+				tenantID = id
+			}
+			if knowledges, kerr := t.scopeKnowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs); kerr == nil {
+				for _, knowledge := range knowledges {
+					if knowledge != nil {
+						knowledgeByID[knowledge.ID] = knowledge
+					}
+				}
+			} else {
+				logger.Warnf(ctx, "[Tool][QueryKnowledgeGraph] Failed to resolve knowledge titles for graph chunks: %v", kerr)
+			}
+		}
+	}
+
+	// Preserve the graph's reference order and cap the chunk count.
+	byID := make(map[string]*types.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		if chunk != nil {
+			byID[chunk.ID] = chunk
+		}
+	}
+	results := make([]*types.SearchResult, 0, len(orderedIDs))
+	for _, id := range orderedIDs {
+		chunk, ok := byID[id]
+		if !ok {
+			continue
+		}
+		knowledge := knowledgeByID[chunk.KnowledgeID]
+		result := &types.SearchResult{
+			ID:              chunk.ID,
+			Content:         chunk.Content,
+			ContentRevision: chunk.ContentRevision,
+			KnowledgeID:     chunk.KnowledgeID,
+			ChunkIndex:      chunk.ChunkIndex,
+			Seq:             chunk.ChunkIndex,
+			Score:           1.0,
+			MatchType:       types.MatchTypeGraph,
+			ChunkType:       string(chunk.ChunkType),
+			ParentChunkID:   chunk.ParentChunkID,
+			ImageInfo:       chunk.ImageInfo,
+			ChunkMetadata:   chunk.Metadata,
+		}
+		if knowledge != nil {
+			result.KnowledgeTitle = knowledge.Title
+			result.Metadata = knowledge.GetMetadata()
+			result.KnowledgeFilename = knowledge.FileName
+			result.KnowledgeSource = knowledge.Source
+			result.KnowledgeChannel = knowledge.Channel
+			result.KnowledgeBaseID = knowledge.KnowledgeBaseID
+		}
+		results = append(results, result)
+	}
+	return results
+}
+
+// mergeGraphAndHybridResults places graph-sourced chunks first and drops the
+// retrieval duplicates of chunks the graph already surfaced.
+func mergeGraphAndHybridResults(graphResults, hybridResults []*types.SearchResult) []*types.SearchResult {
+	if len(graphResults) == 0 {
+		return hybridResults
+	}
+	seen := make(map[string]struct{}, len(graphResults))
+	for _, r := range graphResults {
+		seen[r.ID] = struct{}{}
+	}
+	merged := make([]*types.SearchResult, 0, len(graphResults)+len(hybridResults))
+	merged = append(merged, graphResults...)
+	for _, r := range hybridResults {
+		if _, ok := seen[r.ID]; ok {
+			continue
+		}
+		merged = append(merged, r)
+	}
+	return merged
+}
+
+// extractQueryEntities asks the agent's chat model to pull the entity names
+// out of the raw query — the same handoff the chat pipeline performs between
+// QUERY_UNDERSTAND and ENTITY_SEARCH. Failures return nil so the caller stays
+// on its retrieval-only path instead of erroring out.
+func (t *QueryKnowledgeGraphTool) extractQueryEntities(ctx context.Context, query string) []string {
+	if t.chatModel == nil {
+		return nil
+	}
+
+	think := false
+	opts := &chat.ChatOptions{
+		Temperature: 0.1,
+		MaxTokens:   256,
+		Thinking:    &think,
+	}
+	messages := []chat.Message{
+		{Role: "system", Content: queryEntityExtractionSystemPrompt},
+		{Role: "user", Content: query},
+	}
+	modelCtx := types.WithLLMCallMetadata(ctx, "graph_query_entity_extraction", "")
+	response, err := t.chatModel.Chat(modelCtx, messages, opts)
+	if err != nil {
+		logger.Warnf(ctx, "[Tool][QueryKnowledgeGraph] Entity extraction failed, skipping graph traversal: %v", err)
+		return nil
+	}
+	if response == nil {
+		return nil
+	}
+
+	entities := parseEntityList(response.Content)
+	if len(entities) == 0 {
+		logger.Infof(ctx, "[Tool][QueryKnowledgeGraph] Entity extraction returned no usable entities")
+	}
+	return entities
+}
+
+const queryEntityExtractionSystemPrompt = `Extract the entities from the user's question that could appear as nodes in a knowledge graph.
+
+Rules:
+1. Output ONLY a JSON array of strings. No explanations, no markdown fences.
+2. Each string is one entity name, kept exactly as it appears in the question and in its original language.
+3. Include named people, organizations, products, technologies, concepts and other entities relevant to the question.
+4. Prefer 1 to 6 precise entities; skip vague or generic words.
+5. If no entity can be extracted, output [].
+
+Example:
+Question: "What is the relationship between Docker and Kubernetes?"
+Output: ["Docker", "Kubernetes"]`
+
+// parseEntityList parses the model's JSON array output, tolerating markdown
+// code fences and non-string noise, and caps the result for the graph backend.
+func parseEntityList(content string) []string {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return nil
+	}
+	// Strip a single markdown fence wrapper if present.
+	if strings.HasPrefix(trimmed, "```") {
+		if idx := strings.Index(trimmed, "\n"); idx >= 0 {
+			trimmed = trimmed[idx+1:]
+		}
+		trimmed = strings.TrimSuffix(strings.TrimSpace(trimmed), "```")
+		trimmed = strings.TrimSpace(trimmed)
+	}
+	// Tolerate a leading prose sentence by anchoring on the first '['.
+	if start := strings.Index(trimmed, "["); start > 0 {
+		trimmed = trimmed[start:]
+	}
+	if end := strings.LastIndex(trimmed, "]"); end >= 0 {
+		trimmed = trimmed[:end+1]
+	}
+
+	var raw []string
+	if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(raw))
+	entities := make([]string, 0, len(raw))
+	for _, entity := range raw {
+		entity = strings.TrimSpace(entity)
+		if entity == "" {
+			continue
+		}
+		if _, ok := seen[entity]; ok {
+			continue
+		}
+		seen[entity] = struct{}{}
+		entities = append(entities, entity)
+		if len(entities) >= maxQueryEntities {
+			break
+		}
+	}
+	if len(entities) == 0 {
+		return nil
+	}
+	return entities
+}
+
+// graphResultToData summarizes one KB's traversal for the structured output.
+func graphResultToData(result perKBGraphResult) map[string]interface{} {
+	data := map[string]interface{}{
+		"entities":          result.entities,
+		"nodes_matched":     len(result.nodes),
+		"relations_matched": len(result.relations),
+		"graph_chunks":      len(result.chunks),
+	}
+	if result.skipped != "" {
+		data["skipped"] = result.skipped
+	}
+	return data
 }
 
 func summarizeGraphConfig(config *types.ExtractConfig) graphConfigSummary {
@@ -477,16 +902,55 @@ func uniqueStrings(values []string) []string {
 	return result
 }
 
-// buildGraphVisualizationData builds structured data for graph visualization
-func buildGraphVisualizationData(results []*types.SearchResult) map[string]interface{} {
-	// Build a simple graph structure for frontend visualization
+// buildGraphVisualizationData builds structured data for graph visualization.
+// Entity nodes and relation edges come from what the traversal actually
+// matched; chunk nodes are appended so the frontend can still anchor result
+// previews when traversal was skipped.
+func buildGraphVisualizationData(traversals []perKBGraphResult, results []*types.SearchResult) map[string]interface{} {
 	nodes := make([]map[string]interface{}, 0)
 	edges := make([]map[string]interface{}, 0)
 
-	// Create nodes from results
 	seenEntities := make(map[string]bool)
+	seenEdges := make(map[string]bool)
+	for _, traversal := range traversals {
+		for _, node := range traversal.nodes {
+			if node == nil || node.Name == "" || seenEntities[node.Name] {
+				continue
+			}
+			seenEntities[node.Name] = true
+			entityNode := map[string]interface{}{
+				"id":     node.Name,
+				"label":  node.Name,
+				"chunks": len(node.Chunks),
+				"type":   "entity",
+			}
+			if len(node.Attributes) > 0 {
+				entityNode["attributes"] = node.Attributes
+			}
+			nodes = append(nodes, entityNode)
+		}
+		for _, rel := range traversal.relations {
+			if rel == nil || rel.Node1 == "" || rel.Node2 == "" {
+				continue
+			}
+			key := fmt.Sprintf("%s\x00%s\x00%s", rel.Node1, rel.Node2, rel.Type)
+			if seenEdges[key] {
+				continue
+			}
+			seenEdges[key] = true
+			edges = append(edges, map[string]interface{}{
+				"source": rel.Node1,
+				"target": rel.Node2,
+				"label":  rel.Type,
+				"type":   "relation",
+			})
+		}
+	}
+
+	// Chunk nodes keep the previous visualization anchor behavior.
+	seenChunks := make(map[string]bool)
 	for i, result := range results {
-		if !seenEntities[result.ID] {
+		if !seenChunks[result.ID] {
 			nodes = append(nodes, map[string]interface{}{
 				"id":       result.ID,
 				"label":    fmt.Sprintf("Chunk %d", i+1),
@@ -496,7 +960,7 @@ func buildGraphVisualizationData(results []*types.SearchResult) map[string]inter
 				"score":    result.Score,
 				"type":     "chunk",
 			})
-			seenEntities[result.ID] = true
+			seenChunks[result.ID] = true
 		}
 	}
 
