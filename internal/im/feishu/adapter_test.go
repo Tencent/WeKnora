@@ -215,12 +215,9 @@ func TestEndStreamFinalizesCardSummary(t *testing.T) {
 	if len(requests) != 4 {
 		t.Fatalf("request count after missing state = %d, want 4", len(requests))
 	}
-	var fallbackSettings map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(requests[3].settings), &fallbackSettings); err != nil {
-		t.Fatalf("decode fallback settings: %v", err)
-	}
-	if requests[3].sequence != 0 || fallbackSettings["streaming_mode"] == nil || fallbackSettings["config"] != nil {
-		t.Errorf("missing-state settings changed: sequence=%d settings=%s", requests[3].sequence, requests[3].settings)
+	assertStreamingClosed(t, requests[3].settings, "")
+	if requests[3].sequence != 0 {
+		t.Errorf("missing-state sequence = %d, want 0", requests[3].sequence)
 	}
 }
 
@@ -292,6 +289,94 @@ func TestEndStreamSummaryUsesLastSuccessfulContent(t *testing.T) {
 	}
 }
 
+func TestEndStreamFinalizeOnlyUsesFinalContent(t *testing.T) {
+	useTestHTTPClient(t)
+	const cardID = "card-full-output"
+	var finalSettings string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0, "tenant_access_token": "test-token", "expire": 7200,
+			})
+			return
+		}
+		var body struct {
+			Settings string `json:"settings"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode %s: %v", r.URL.Path, err)
+			return
+		}
+		if r.Method == http.MethodPatch {
+			finalSettings = body.Settings
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "ok"})
+	}))
+	defer srv.Close()
+
+	adapter, _ := NewAdapter(testRegion(srv.URL), "app", "secret", "", "", "")
+	feishuStreamsMu.Lock()
+	feishuStreams[cardID] = &feishuStreamState{}
+	feishuStreamsMu.Unlock()
+	t.Cleanup(func() {
+		feishuStreamsMu.Lock()
+		delete(feishuStreams, cardID)
+		feishuStreamsMu.Unlock()
+	})
+
+	ctx := context.Background()
+	if err := adapter.FinalizeStream(ctx, nil, cardID, "最终答案"); err != nil {
+		t.Fatalf("FinalizeStream: %v", err)
+	}
+	if err := adapter.EndStream(ctx, nil, cardID); err != nil {
+		t.Fatalf("EndStream: %v", err)
+	}
+	assertStreamingClosed(t, finalSettings, "最终答案")
+}
+
+func TestEndStreamOmitsEmptySummary(t *testing.T) {
+	useTestHTTPClient(t)
+	const cardID = "card-empty-summary"
+	var finalSettings string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0, "tenant_access_token": "test-token", "expire": 7200,
+			})
+			return
+		}
+		var body struct {
+			Settings string `json:"settings"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode %s: %v", r.URL.Path, err)
+			return
+		}
+		if r.Method == http.MethodPatch {
+			finalSettings = body.Settings
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "ok"})
+	}))
+	defer srv.Close()
+
+	adapter, _ := NewAdapter(testRegion(srv.URL), "app", "secret", "", "", "")
+	feishuStreamsMu.Lock()
+	feishuStreams[cardID] = &feishuStreamState{}
+	feishuStreamsMu.Unlock()
+	t.Cleanup(func() {
+		feishuStreamsMu.Lock()
+		delete(feishuStreams, cardID)
+		feishuStreamsMu.Unlock()
+	})
+
+	if err := adapter.EndStream(context.Background(), nil, cardID); err != nil {
+		t.Fatalf("EndStream: %v", err)
+	}
+	assertStreamingClosed(t, finalSettings, "")
+}
+
 func TestCardSummaryPreview(t *testing.T) {
 	tests := []struct {
 		name string
@@ -300,6 +385,7 @@ func TestCardSummaryPreview(t *testing.T) {
 	}{
 		{name: "collapse whitespace", in: "  最终\n回答\t✅  ", want: "最终 回答 ✅"},
 		{name: "image keeps alt only", in: "![架构图](https://cdn.example/a.png?sig=secret) 说明", want: "架构图 说明"},
+		{name: "link keeps text only", in: "见 [文档](https://cdn.example/a.png?sig=secret) 说明", want: "见 文档 说明"},
 		{name: "unicode limit", in: strings.Repeat("界", 121), want: strings.Repeat("界", 120)},
 		{name: "empty", in: " \n\t ", want: ""},
 	}
@@ -309,5 +395,47 @@ func TestCardSummaryPreview(t *testing.T) {
 				t.Errorf("cardSummaryPreview() = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+type cardSettings struct {
+	Config *struct {
+		StreamingMode *bool `json:"streaming_mode"`
+		Summary       *struct {
+			Content string `json:"content"`
+		} `json:"summary"`
+	} `json:"config"`
+}
+
+func decodeCardSettings(t *testing.T, raw string) cardSettings {
+	t.Helper()
+	var settings cardSettings
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		t.Fatalf("decode settings %q: %v", raw, err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &top); err != nil {
+		t.Fatalf("decode settings map %q: %v", raw, err)
+	}
+	if _, ok := top["streaming_mode"]; ok {
+		t.Fatalf("streaming_mode must be nested under config: %s", raw)
+	}
+	return settings
+}
+
+func assertStreamingClosed(t *testing.T, raw, wantSummary string) {
+	t.Helper()
+	settings := decodeCardSettings(t, raw)
+	if settings.Config == nil || settings.Config.StreamingMode == nil || *settings.Config.StreamingMode {
+		t.Fatalf("settings did not disable streaming under config: %s", raw)
+	}
+	if wantSummary == "" {
+		if settings.Config.Summary != nil {
+			t.Fatalf("settings included empty summary: %s", raw)
+		}
+		return
+	}
+	if settings.Config.Summary == nil || settings.Config.Summary.Content != wantSummary {
+		t.Fatalf("summary = %v, want %q in %s", settings.Config.Summary, wantSummary, raw)
 	}
 }

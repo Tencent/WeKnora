@@ -730,7 +730,6 @@ type feishuStreamState struct {
 	contentSeq int64     // sequence of the last successfully sent content
 	seq        int64     // strictly incrementing sequence for CardKit API
 	createdAt  time.Time // for orphan stream detection
-	firstChunk bool      // true after the first real content chunk clears the placeholder
 }
 
 const (
@@ -756,6 +755,7 @@ func (s *feishuStreamState) nextSeq() int {
 
 func cardSummaryPreview(content string) string {
 	content = feishuMarkdownImageRe.ReplaceAllString(content, "${1}")
+	content = feishuMarkdownLinkRe.ReplaceAllString(content, "${1}")
 	preview := []rune(strings.Join(strings.Fields(content), " "))
 	if len(preview) > 120 {
 		preview = preview[:120]
@@ -853,7 +853,6 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 
 	state.mu.Lock()
 	if int64(seq) > state.contentSeq {
-		state.firstChunk = true
 		state.content.Reset()
 		state.content.WriteString(fullContent)
 		state.contentSeq = int64(seq)
@@ -890,11 +889,16 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 		state.mu.Lock()
 		seq = state.nextSeq()
 		preview := cardSummaryPreview(state.content.String())
-		finalSummary = &preview
+		if preview != "" {
+			finalSummary = &preview
+		}
 		state.mu.Unlock()
 	}
 
-	// Turn off streaming_mode and replace the temporary conversation summary.
+	// Always close streaming_mode under config (CardKit rejects a top-level
+	// streaming_mode field). Attach a summary only when we have delivered text;
+	// an empty summary would leave the create-time "thinking" preview in place
+	// or blank the chat list unexpectedly.
 	if err := a.cardkitSetStreaming(ctx, accessToken, streamID, false, finalSummary, seq); err != nil {
 		logger.Warnf(ctx, "[%s] Failed to disable streaming_mode: %v", a.region.Label, err)
 	}
@@ -1030,6 +1034,10 @@ func (a *Adapter) cardkitUpdateElement(ctx context.Context, accessToken, cardID,
 
 // feishuMarkdownImageRe matches a markdown image whose target is an http(s) URL.
 var feishuMarkdownImageRe = regexp.MustCompile(`!\[([^\]]*)\]\((https?://[^)\s]+)\)`)
+
+// feishuMarkdownLinkRe matches a markdown link whose target is an http(s) URL.
+// Applied after image stripping so signed image URLs are not left as links.
+var feishuMarkdownLinkRe = regexp.MustCompile(`\[([^\]]*)\]\((https?://[^)\s]+)\)`)
 
 // feishuMaxImageBytes caps the download size of an image before uploading to
 // Feishu (Feishu's limit is 10MB; keep a small margin).
@@ -1189,17 +1197,13 @@ func (a *Adapter) uploadImageFromURL(ctx context.Context, accessToken, rawURL st
 func (a *Adapter) cardkitSetStreaming(
 	ctx context.Context, accessToken, cardID string, streaming bool, finalSummary *string, sequence int,
 ) error {
-	settings, _ := json.Marshal(map[string]interface{}{
+	config := map[string]interface{}{
 		"streaming_mode": streaming,
-	})
-	if finalSummary != nil {
-		settings, _ = json.Marshal(map[string]interface{}{
-			"config": map[string]interface{}{
-				"streaming_mode": streaming,
-				"summary":        map[string]string{"content": *finalSummary},
-			},
-		})
 	}
+	if finalSummary != nil && strings.TrimSpace(*finalSummary) != "" {
+		config["summary"] = map[string]string{"content": *finalSummary}
+	}
+	settings, _ := json.Marshal(map[string]interface{}{"config": config})
 	payload, _ := json.Marshal(map[string]interface{}{
 		"settings": string(settings),
 		"sequence": sequence,
