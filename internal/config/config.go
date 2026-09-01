@@ -279,7 +279,8 @@ type AuthConfig struct {
 	// create_personal preserves the historical one-user-one-workspace default;
 	// tenantless creates only the identity and waits for an invitation or an
 	// explicit self-service tenant creation.
-	DefaultTenantMode string `yaml:"default_tenant_mode" json:"default_tenant_mode"`
+	DefaultTenantMode      string `yaml:"default_tenant_mode" json:"default_tenant_mode"`
+	ComplexPasswordEnabled bool   `yaml:"complex_password_enabled" json:"complex_password_enabled"`
 }
 
 // AuthRegistrationMode constants used by handlers and middleware.
@@ -633,6 +634,7 @@ func ValidateConfig(cfg *Config) error {
 			errs = append(errs, fmt.Sprintf("auth.registration_mode must be %q or %q, got %q",
 				AuthRegistrationModeSelfServe, AuthRegistrationModeInviteOnly, mode))
 		}
+
 		tenantMode := strings.TrimSpace(cfg.Auth.DefaultTenantMode)
 		if tenantMode != "" && tenantMode != AuthDefaultTenantModeCreatePersonal && tenantMode != AuthDefaultTenantModeTenantless {
 			errs = append(errs, fmt.Sprintf("auth.default_tenant_mode must be %q or %q, got %q",
@@ -810,6 +812,7 @@ func applyAgentEnvOverrides(cfg *Config) {
 //
 // Env overrides (when set and non-empty):
 //   - WEKNORA_AUTH_DEFAULT_TENANT_MODE ("create_personal"/"tenantless")
+//   - WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED (boolean)
 //   - WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED (boolean)
 //   - WEKNORA_TENANT_ENABLE_RBAC      ("true"/"false", case-insensitive)
 //   - WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS ("true"/"false", case-insensitive).
@@ -848,6 +851,13 @@ func applyAuthAndTenantDefaults(cfg *Config) {
 	if strings.TrimSpace(cfg.Auth.RegistrationMode) == "" {
 		cfg.Auth.RegistrationMode = AuthRegistrationModeSelfServe
 	}
+
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED")); value != "" {
+		if parsed, err := strconv.ParseBool(value); err == nil {
+			cfg.Auth.ComplexPasswordEnabled = parsed
+		}
+	}
+
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_DEFAULT_TENANT_MODE")); value != "" {
 		cfg.Auth.DefaultTenantMode = value
 	}

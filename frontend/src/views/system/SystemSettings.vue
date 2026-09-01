@@ -495,7 +495,11 @@ import {
   resetUserPassword,
   type SystemSettingItem,
 } from '@/api/system'
+import {
+  getAuthConfig,
+} from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import { newPasswordRules, PASSWORD_SPECIAL_CHARS } from '@/utils/passwordPolicy'
 import { isSettingValueDirty, resolveCurrentSetting } from './systemSettingsEdit'
 
 const authStore = useAuthStore()
@@ -516,7 +520,12 @@ function keyLabel(k: string): string {
 // user-facing copy lives in i18n (system.globalSettings.keyDescriptions.*).
 function settingDescription(item: { key: string; description?: string }): string {
   const path = `system.globalSettings.keyDescriptions.${item.key}`
-  if (te(path)) return t(path) as string
+  if (te(path)) {
+    if (path === 'system.globalSettings.keyDescriptions.auth.complex_password_enabled') {
+      return t(path, { specialChars: PASSWORD_SPECIAL_CHARS }) as string
+    }
+    return t(path) as string
+  }
   return item.description ?? ''
 }
 
@@ -621,6 +630,7 @@ type SettingsSection = 'access' | 'tenant' | 'runtime' | 'security' | 'other'
 const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other'>, readonly string[]> = {
   access: [
     'auth.registration_mode',
+    'auth.complex_password_enabled',
     'auth.default_tenant_mode',
     'tenant.self_service_creation_enabled',
     'tenant.max_owned_per_user',
@@ -708,26 +718,33 @@ const passwordResetForm = reactive({
   newPassword: '',
   confirmPassword: '',
 })
-const passwordResetRules: Record<string, FormRule[]> = {
+const passwordResetRules = computed(() => ({
   email: [
-    { required: true, message: t('system.globalSettings.passwordReset.validation.emailRequired'), trigger: 'blur' },
-    { email: true, message: t('system.globalSettings.passwordReset.validation.emailInvalid'), trigger: 'blur' },
+    { required: true, message: t('auth.emailRequired'), type: 'error' },
+    { email: true, message: t('auth.emailInvalid'), type: 'error' }
   ],
-  newPassword: [
-    { required: true, message: t('system.globalSettings.passwordReset.validation.passwordRequired'), trigger: 'blur' },
-    { min: 8, message: t('system.globalSettings.passwordReset.validation.passwordLength'), trigger: 'blur' },
-    { max: 32, message: t('system.globalSettings.passwordReset.validation.passwordLength'), trigger: 'blur' },
-    { pattern: /[a-zA-Z]/, message: t('system.globalSettings.passwordReset.validation.passwordLetter'), trigger: 'blur' },
-    { pattern: /\d/, message: t('system.globalSettings.passwordReset.validation.passwordNumber'), trigger: 'blur' },
-  ],
+  newPassword: newPasswordRules(t, complexPasswordEnabled.value),
   confirmPassword: [
-    { required: true, message: t('system.globalSettings.passwordReset.validation.confirmRequired'), trigger: 'blur' },
+    { required: true, message: t('auth.confirmPasswordRequired'), trigger: 'blur' },
     {
       validator: (value: string) => value === passwordResetForm.newPassword,
-      message: t('system.globalSettings.passwordReset.validation.passwordMismatch'),
+      message: t('auth.passwordMismatch'),
       trigger: 'blur',
     },
   ],
+}))
+
+const complexPasswordEnabled = ref(false)
+
+const loadAuthConfig = async () => {
+  try {
+    const resp = await getAuthConfig()
+    complexPasswordEnabled.value = !!resp.complex_password_enabled
+  } catch (err: any) {
+    const msg = err?.message || t('system.globalSettings.messages.loadFailed')
+    MessagePlugin.error(msg)
+    complexPasswordEnabled.value = false
+  }
 }
 
 function resetPasswordResetForm() {
@@ -738,6 +755,7 @@ function resetPasswordResetForm() {
 }
 
 async function openPasswordResetDialog() {
+  await loadAuthConfig()
   resetPasswordResetForm()
   passwordResetVisible.value = true
   await nextTick()

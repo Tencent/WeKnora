@@ -344,6 +344,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
+import { newPasswordRules } from '@/utils/passwordPolicy'
 import { Swiper, SwiperSlide } from 'swiper/vue'
 import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
 import 'swiper/css'
@@ -418,6 +419,7 @@ const oidcProviderName = ref('')
 // link is visible; the actual mode is fetched from /auth/config in onMounted.
 // In invite_only mode the link/card are hidden.
 const registrationEnabled = ref(true)
+const complexPasswordEnabled = ref(false)
 
 // invite-link state. When the URL carries ?token=xxx we resolve it to
 // the originating tenant + role and switch the form into a "register
@@ -470,10 +472,8 @@ const formRules = computed(() => ({
   password: [
     { required: true, message: t('auth.passwordRequired'), type: 'error' },
     { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-    { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
-    { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' }
-  ]
+    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' }
+  ],
 }))
 
 // Register form validation rules
@@ -492,13 +492,7 @@ const registerRules = computed(() => ({
     { required: true, message: t('auth.emailRequired'), type: 'error' },
     { email: true, message: t('auth.emailInvalid'), type: 'error' }
   ],
-  password: [
-    { required: true, message: t('auth.passwordRequired'), type: 'error' },
-    { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-    { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
-    { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' }
-  ],
+  password: newPasswordRules(t, complexPasswordEnabled.value),
   confirmPassword: [
     { required: true, message: t('auth.confirmPasswordRequired'), type: 'error' },
     {
@@ -623,8 +617,10 @@ const loadAuthConfig = async () => {
   try {
     const response = await getAuthConfig()
     registrationEnabled.value = response.registration_mode !== 'invite_only'
+    complexPasswordEnabled.value = response.complex_password_enabled
   } catch {
     registrationEnabled.value = true
+    complexPasswordEnabled.value = false
   }
 }
 

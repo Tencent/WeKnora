@@ -234,7 +234,7 @@ export default {
       currentPlaceholder: '请输入当前密码',
       currentRequired: '请输入当前密码',
       newLabel: '新密码',
-      newPlaceholder: '8-32 个字符，需包含字母和数字',
+      newPlaceholder: '请输入新密码',
       confirmLabel: '确认新密码',
       confirmPlaceholder: '再次输入新密码',
       submit: '更新密码',
@@ -2724,22 +2724,12 @@ export default {
         emailLabel: '用户邮箱',
         emailPlaceholder: '输入需要重置密码的用户邮箱',
         newPasswordLabel: '新密码',
-        newPasswordPlaceholder: '8-32 个字符，包含字母和数字',
+        newPasswordPlaceholder: '请输入新密码',
         confirmPasswordLabel: '确认新密码',
         confirmPasswordPlaceholder: '再次输入新密码',
         confirmBtn: '确认重置',
         success: '密码已重置，该用户的现有会话已失效',
         failed: '重置密码失败',
-        validation: {
-          emailRequired: '请输入用户邮箱',
-          emailInvalid: '请输入有效的邮箱地址',
-          passwordRequired: '请输入新密码',
-          passwordLength: '密码长度必须为 8-32 个字符',
-          passwordLetter: '密码必须包含字母',
-          passwordNumber: '密码必须包含数字',
-          confirmRequired: '请再次输入新密码',
-          passwordMismatch: '两次输入的密码不一致'
-        }
       },
       admins: {
         label: '系统管理员',
@@ -2831,7 +2821,8 @@ export default {
         },
         auth: {
           registration_mode: '自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，仅 Owner/Admin 可邀请。修改后立即生效，但谨慎对待 self_serve（公网会接受 spam）。',
-          default_tenant_mode: '公开注册后的空间初始化策略。create_personal 会自动创建个人空间并授予 Owner；tenantless 仅创建账户，用户需要接受邀请或主动创建空间。只影响之后注册的用户。'
+          default_tenant_mode: '公开注册后的空间初始化策略。create_personal 会自动创建个人空间并授予 Owner；tenantless 仅创建账户，用户需要接受邀请或主动创建空间。只影响之后注册的用户。',
+          complex_password_enabled: '是否启用复杂密码。开启后密码必须包含大小写字母、数字和特殊字符。修改后立即生效，只影响新注册用户或新密码修改/重置操作。特殊字符包含：{specialChars}'
         }
       },
       keyLabels: {
@@ -2857,7 +2848,8 @@ export default {
         },
         auth: {
           registration_mode: '自助注册模式',
-          default_tenant_mode: '注册默认空间策略'
+          default_tenant_mode: '注册默认空间策略',
+          complex_password_enabled: '启用复杂密码'
         }
       },
       runtime: {
@@ -4529,7 +4521,7 @@ export default {
     subtitle: 'RAG 问答、ReAct 智能体与 Wiki 知识库，大模型驱动的企业级知识框架',
     registerSubtitle: '创建账户并开始使用 WeKnora',
     emailPlaceholder: '输入邮箱地址',
-    passwordPlaceholder: '输入密码（8-32个字符，包含字母和数字）',
+    passwordPlaceholder: '输入密码',
     confirmPasswordPlaceholder: '再次输入密码',
     usernamePlaceholder: '输入用户名',
     emailRequired: '请输入邮箱地址',
@@ -4538,7 +4530,10 @@ export default {
     passwordMinLength: '密码至少8个字符',
     passwordMaxLength: '密码不能超过32个字符',
     passwordMustContainLetter: '密码必须包含字母',
+    passwordMustContainLowercaseLetter: '密码必须包含小写字母',
+    passwordMustContainUppercaseLetter: '密码必须包含大写字母',
     passwordMustContainNumber: '密码必须包含数字',
+    passwordMustContainSpecialChar: '密码必须包含特殊字符：{specialChars}',
     usernameRequired: '请输入用户名',
     usernameMinLength: '用户名至少2个字符',
     usernameMaxLength: '用户名不能超过20个字符',
