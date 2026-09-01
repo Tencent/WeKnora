@@ -43,11 +43,10 @@ const (
 	skillInstallInFlightSkip = 3 * time.Minute
 
 	// skillSnapshotRetention is how long a superseded snapshot stays on the
-	// provider after the pointer has moved. Live sandboxes may still have
-	// been created from it (especially SkillRolloutNewSession); once they
-	// expire, the template is only a billed leftover. Twenty-four hours is
-	// well past every backend's default sandbox TTL. A config that sets a
-	// longer sandbox TTL extends this via snapshotRetentionFor.
+	// provider after the pointer has moved before prune even tries. Paused
+	// session sandboxes can pin the template past this window; prune retries
+	// on Conflict. A config that sets a longer sandbox TTL extends this via
+	// snapshotRetentionFor.
 	skillSnapshotRetention = 24 * time.Hour
 
 	// skillSnapshotTTLMargin is added on top of a config's own sandbox TTL

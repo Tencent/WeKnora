@@ -500,6 +500,7 @@ import {
 } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { newPasswordRules, PASSWORD_SPECIAL_CHARS } from '@/utils/passwordPolicy'
+import { isSettingValueDirty, resolveCurrentSetting } from './systemSettingsEdit'
 
 const authStore = useAuthStore()
 const currentUserId = computed(() => authStore.currentUserId)
@@ -652,7 +653,7 @@ const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other'>, readonly 
 
 const activeSettingsSection = ref<SettingsSection>('access')
 const knownSettingKeys = new Set(Object.values(SETTINGS_SECTION_KEYS).flat())
-const settingsByKey = computed(() => new Map(settings.value.map((item) => [item.key, item])))
+const settingsByKey = computed<Map<string, SystemSettingItem>>(() => new Map(settings.value.map((item) => [item.key, item])))
 const unknownSettings = computed(() => settings.value.filter((item) => !knownSettingKeys.has(item.key)))
 const hasUnknownSettings = computed(() => unknownSettings.value.length > 0)
 
@@ -884,16 +885,7 @@ async function snapSsrfWhitelistToSaved(item: SystemSettingItem) {
 }
 
 function isDirty(item: SystemSettingItem): boolean {
-  const cur = editValues[item.key]
-  const orig = item.value
-  if (Array.isArray(cur) && Array.isArray(orig)) {
-    if (cur.length !== orig.length) return true
-    for (let i = 0; i < cur.length; i++) {
-      if (cur[i] !== orig[i]) return true
-    }
-    return false
-  }
-  return cur !== orig
+  return isSettingValueDirty(editValues[item.key], item.value)
 }
 
 function formatDate(isoString: string): string {
@@ -947,7 +939,9 @@ async function loadSettings() {
 // onChange persists non-SSRF settings. SSRF whitelist and system admins
 // have dedicated handlers with inline popconfirm.
 async function onChange(item: SystemSettingItem) {
-  if (!isDirty(item)) return
+  const currentItem = resolveCurrentSetting(settingsByKey.value, item.key)
+  if (!currentItem) return
+  if (!isDirty(currentItem)) return
 
   // SSRF whitelist gets the per-entry confirm flow — same shape as the
   // admin tag-input above. Adding or removing each host/CIDR is its
@@ -955,19 +949,21 @@ async function onChange(item: SystemSettingItem) {
   // the egress firewall), so we ask once per delta instead of once
   // per "save". This matches the operator's mental model: every tag
   // they touch is acknowledged on its own.
-  await persistSetting(item)
+  await persistSetting(currentItem)
 }
 
 async function onHighRiskSelectChange(item: SystemSettingItem) {
+  const currentItem = resolveCurrentSetting(settingsByKey.value, item.key)
+  if (!currentItem) return
   const newValue = editValues[item.key]
-  if (newValue === item.value) return
+  if (!isDirty(currentItem)) return
 
   // Revert the select immediately so cancel leaves the saved value
   // visible; re-apply only after the inline popconfirm is confirmed.
-  editValues[item.key] = item.value
+  editValues[item.key] = currentItem.value
 
   const ok = await highRiskPopconfirm.ask({
-    content: highRiskConfirmBody(item, newValue),
+    content: highRiskConfirmBody(currentItem, newValue),
     theme: 'danger',
     confirmBtn: {
       content: t('system.globalSettings.confirm.confirmBtn'),
@@ -977,7 +973,7 @@ async function onHighRiskSelectChange(item: SystemSettingItem) {
   if (!ok) return
 
   editValues[item.key] = newValue
-  await persistSetting(item)
+  await persistSetting(currentItem)
 }
 
 function confirmSsrfListEntryChange(

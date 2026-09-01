@@ -24,6 +24,9 @@
     <a href="https://clawhub.ai/lyingbug/weknora" target="_blank">
         <img alt="ClawHub Skill" src="https://img.shields.io/badge/ClawHub_Skill-WeKnora-ff6b35">
     </a>
+    <a href="https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora" target="_blank">
+        <img alt="npm @wxg-prc-cpg/dsh-weknora" src="https://img.shields.io/npm/v/@wxg-prc-cpg/dsh-weknora?label=dsh-weknora">
+    </a>
     <a href="https://github.com/Tencent/WeKnora/blob/main/LICENSE">
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
@@ -185,7 +188,7 @@ Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지�
 
 ## 🐋 DeepSeek Harness 플러그인
 
-[**`@wxg-prc-cpg/dsh-weknora`**](./packages/dsh-weknora/README.md)는 공식 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)(`dsh`) 플러그인입니다. harness 자체에는 검색·임베딩·지식베이스 기능이 없으므로, 이 플러그인이 코딩 에이전트에 사내 문서를 제공합니다. `dsh plugin --profile web add @wxg-prc-cpg/dsh-weknora`로 설치하고 배포 주소를 지정하면 네 개의 읽기 전용 도구가 에이전트 도구 목록에 나타납니다.
+[**`@wxg-prc-cpg/dsh-weknora`**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora)는 공식 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)(`dsh`) 플러그인입니다([문서](./packages/dsh-weknora/README.md)). harness 자체에는 검색·임베딩·지식베이스 기능이 없으므로, 이 플러그인이 코딩 에이전트에 사내 문서를 제공합니다. `dsh plugin --profile web add @wxg-prc-cpg/dsh-weknora`로 설치하고 배포 주소를 지정하면 네 개의 읽기 전용 도구가 에이전트 도구 목록에 나타납니다.
 
 - **`weknora_search`** — 하이브리드 검색. 원문 구절을 그대로 반환하며 각 항목에 재사용 가능한 `knowledge_id` 포함
 - **`weknora_read_document`** — 한 문서의 청크를 순서대로 재조합, 페이징 지원

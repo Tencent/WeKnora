@@ -26,6 +26,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -255,7 +256,7 @@ func (c *ArtifactCollector) collect(
 	tenantID uint64,
 	outputDir string,
 	notify func(pending int),
-) (types.MessageArtifacts, error) {
+) (artifacts types.MessageArtifacts, err error) {
 	if c == nil || c.fileService == nil {
 		logger.Infof(ctx, "[ArtifactCollector] skipped: collector or dependencies nil (session=%s)", sessionID)
 		return nil, nil
@@ -280,6 +281,20 @@ func (c *ArtifactCollector) collect(
 		logger.Infof(ctx, "[ArtifactCollector] skipped: empty outputDir (session=%s)", sessionID)
 		return nil, nil
 	}
+
+	ctx, span := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+		Name: "sandbox.collect_artifacts",
+		Input: map[string]interface{}{
+			"session_id": sessionID,
+			"message_id": messageID,
+			"output_dir": outputDir,
+		},
+	})
+	defer func() {
+		span.Finish(map[string]interface{}{
+			"artifact_count": len(artifacts),
+		}, nil, err)
+	}()
 
 	logger.Infof(ctx, "[ArtifactCollector] begin session=%s dir=%s", sessionID, outputDir)
 
@@ -318,7 +333,7 @@ func (c *ArtifactCollector) collect(
 		notify(pending)
 	}
 
-	artifacts := make(types.MessageArtifacts, 0, pending)
+	artifacts = make(types.MessageArtifacts, 0, pending)
 	for _, entry := range entries {
 		art, ok := c.maybePersist(ctx, source, sessionID, messageID, tenantID, entry, known)
 		if !ok {

@@ -177,3 +177,88 @@ func TestIsRemoteDirAlreadyExists(t *testing.T) {
 		})
 	}
 }
+
+func TestIsRemoteConflict(t *testing.T) {
+	t.Parallel()
+
+	if IsRemoteConflict(nil) {
+		t.Fatal("nil is not a conflict")
+	}
+	conflict := NewRemoteError(SandboxTypeE2B, "DeleteSnapshot", RemoteErrorKindConflict, "busy", nil)
+	if !IsRemoteConflict(conflict) {
+		t.Fatal("Conflict kind must match")
+	}
+	invalid := NewRemoteError(
+		SandboxTypeE2B, "DeleteSnapshot", RemoteErrorKindInvalidRequest, "bad id", nil,
+	)
+	if IsRemoteConflict(invalid) {
+		t.Fatal("InvalidRequest must not match")
+	}
+}
+
+func TestSnapshotDeleteKindPromotesInUseToConflict(t *testing.T) {
+	t.Parallel()
+
+	inUse := "cannot delete template 'upfvuzpq0q6foo1mkpbkl' because there are paused sandboxes using it"
+	jsonBody := `e2b: status 400: {"code":400,"message":"` + inUse + `"}`
+
+	tests := []struct {
+		name string
+		op   string
+		kind RemoteErrorKind
+		msg  string
+		want RemoteErrorKind
+	}{
+		{
+			name: "e2b paused sandboxes 400",
+			op:   "DeleteSnapshot",
+			kind: RemoteErrorKindInvalidRequest,
+			msg:  inUse,
+			want: RemoteErrorKindConflict,
+		},
+		{
+			name: "json-wrapped e2b 400",
+			op:   "DeleteSnapshot",
+			kind: RemoteErrorKindInvalidRequest,
+			msg:  jsonBody,
+			want: RemoteErrorKindConflict,
+		},
+		{
+			name: "cube delete template",
+			op:   "DeleteTemplate",
+			kind: RemoteErrorKindInvalidRequest,
+			msg:  "cannot delete template x because there are sandboxes using it",
+			want: RemoteErrorKindConflict,
+		},
+		{
+			name: "already conflict stays conflict",
+			op:   "DeleteSnapshot",
+			kind: RemoteErrorKindConflict,
+			msg:  "image is in use",
+			want: RemoteErrorKindConflict,
+		},
+		{
+			name: "generic 400 stays invalid",
+			op:   "DeleteSnapshot",
+			kind: RemoteErrorKindInvalidRequest,
+			msg:  "invalid snapshot id",
+			want: RemoteErrorKindInvalidRequest,
+		},
+		{
+			name: "other ops are unchanged",
+			op:   "Create",
+			kind: RemoteErrorKindInvalidRequest,
+			msg:  inUse,
+			want: RemoteErrorKindInvalidRequest,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := snapshotDeleteKind(tt.op, tt.kind, tt.msg); got != tt.want {
+				t.Fatalf("snapshotDeleteKind() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

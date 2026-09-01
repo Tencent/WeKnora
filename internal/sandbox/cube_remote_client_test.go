@@ -470,6 +470,14 @@ func TestNormalizeCubeError(t *testing.T) {
 		{"bad gateway", "List", &cubesandbox.APIError{StatusCode: http.StatusBadGateway}, RemoteErrorKindUnavailable},
 		{"deadline", "Exec", context.DeadlineExceeded, RemoteErrorKindTimeout},
 		{"unknown", "List", errors.New("unknown"), RemoteErrorKindInternal},
+		{"delete snapshot in use", "DeleteSnapshot", &cubesandbox.APIError{
+			StatusCode: http.StatusBadRequest,
+			Message:    "cannot delete template x because there are paused sandboxes using it",
+		}, RemoteErrorKindConflict},
+		{"delete snapshot bad id", "DeleteSnapshot", &cubesandbox.APIError{
+			StatusCode: http.StatusBadRequest,
+			Message:    "invalid snapshot id",
+		}, RemoteErrorKindInvalidRequest},
 	}
 
 	for _, tt := range tests {

@@ -1391,6 +1391,14 @@ func TestNormalizeE2BError(t *testing.T) {
 		{"connect data loss", "List", connect.NewError(connect.CodeDataLoss, errors.New("data loss")), RemoteErrorKindInternal},
 		{"connect unknown", "List", connect.NewError(connect.CodeUnknown, errors.New("unknown")), RemoteErrorKindInternal},
 		{"unknown", "List", errors.New("mystery"), RemoteErrorKindInternal},
+		{"delete snapshot in use", "DeleteSnapshot", &e2b.Error{
+			StatusCode: http.StatusBadRequest,
+			Message:    "cannot delete template 'tpl-1' because there are paused sandboxes using it",
+		}, RemoteErrorKindConflict},
+		{"delete snapshot bad id", "DeleteSnapshot", &e2b.Error{
+			StatusCode: http.StatusBadRequest,
+			Message:    "invalid snapshot id",
+		}, RemoteErrorKindInvalidRequest},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

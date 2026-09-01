@@ -8,7 +8,8 @@ func TestCustomAgentConfigResolveChatParserEngine(t *testing.T) {
 		{FileTypes: []string{"png", "jpg"}, Engine: "paddleocr_vl"},
 	}}
 	for input, expected := range map[string]string{
-		"PDF": "mineru", ".pptx": "mineru", "png": "paddleocr_vl", "txt": "",
+		"PDF": "mineru", ".pptx": "mineru", "png": "paddleocr_vl",
+		"txt": "", "ppt": "markitdown",
 	} {
 		if actual := config.ResolveChatParserEngine(input); actual != expected {
 			t.Fatalf("ResolveChatParserEngine(%q) = %q, want %q", input, actual, expected)
@@ -17,6 +18,9 @@ func TestCustomAgentConfigResolveChatParserEngine(t *testing.T) {
 	var nilConfig *CustomAgentConfig
 	if actual := nilConfig.ResolveChatParserEngine("pdf"); actual != "" {
 		t.Fatalf("nil config resolved %q", actual)
+	}
+	if actual := nilConfig.ResolveChatParserEngine("pptx"); actual != "markitdown" {
+		t.Fatalf("nil config pptx resolved %q, want markitdown", actual)
 	}
 }
 

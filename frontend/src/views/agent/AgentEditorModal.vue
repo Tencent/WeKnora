@@ -1342,7 +1342,6 @@
                           <t-radio-button value="selected" :disabled="!canEnableSkills">{{ $t('agent.editor.skillsSelected') }}</t-radio-button>
                           <t-radio-button value="none">{{ $t('agent.editor.skillsNone') }}</t-radio-button>
                         </t-radio-group>
-                        <p v-if="showCatalogSkillList" class="skill-ready-stat">{{ skillListSummary }}</p>
                         <p v-if="!hasSandboxSelected && sandboxConfigOptions.length > 1" class="desc empty-hint">
                           {{ $t('agent.editor.skillsNeedSandbox') }}
                         </p>
@@ -1366,47 +1365,77 @@
                           v-model="formData.config.selected_skills"
                           class="skill-pick-list"
                         >
-                          <article
-                            v-for="skill in catalogSkillRows"
-                            :key="skill.name"
-                            class="skill-pick"
-                            :class="{
-                              'skill-pick--ready': skill.selectable,
-                              'skill-pick--pending': !skill.selectable,
-                            }"
+                          <section
+                            v-for="group in catalogSkillGroups"
+                            :key="group.key"
+                            class="skill-pick-group"
+                            :class="`skill-pick-group--${group.key}`"
                           >
-                            <t-checkbox
-                              v-if="skillsSelectionMode === 'selected'"
-                              :value="skill.name"
-                              :disabled="!skill.selectable"
-                              class="skill-pick__check"
-                            />
-                            <div class="skill-pick__body">
-                              <div class="skill-pick__title-row">
-                                <span class="skill-name" :title="skill.name">{{ skill.name }}</span>
-                                <span
-                                  v-if="!skill.selectable && skill.installed"
-                                  class="skill-pick__hint"
-                                >{{ skillStatusHint(skill) }}</span>
-                              </div>
-                              <p
-                                v-if="skill.description"
-                                class="skill-desc"
-                                :title="skill.description"
-                              >{{ skill.description }}</p>
-                            </div>
-                            <t-button
-                              v-if="canInstallSkillRow(skill)"
-                              size="small"
-                              variant="text"
-                              theme="primary"
-                              :loading="installingCatalogId === skill.id"
-                              :title="$t('agent.editor.installToThisSandbox')"
-                              @click.stop="installCatalogToCurrent(skill)"
+                            <header class="skill-pick-group__header">
+                              <span class="skill-pick-group__bar" />
+                              <span class="skill-pick-group__title">{{ group.label }}</span>
+                              <span class="skill-pick-group__count">{{ group.skills.length }}</span>
+                            </header>
+                            <article
+                              v-for="skill in group.skills"
+                              :key="skill.name"
+                              class="skill-pick"
+                              :class="{
+                                'skill-pick--ready': skill.selectable,
+                                'skill-pick--pending': !skill.selectable,
+                                'skill-pick--busy': isSkillBusy(skill),
+                              }"
                             >
-                              {{ $t('agent.editor.installShort') }}
-                            </t-button>
-                          </article>
+                              <t-checkbox
+                                v-if="skillsSelectionMode === 'selected'"
+                                :value="skill.name"
+                                :disabled="!skill.selectable"
+                                class="skill-pick__check"
+                              />
+                              <div class="skill-pick__badge" aria-hidden="true">
+                                <t-icon :name="SKILL_ICON" size="16px" />
+                              </div>
+                              <div class="skill-pick__body">
+                                <div class="skill-pick__title-row">
+                                  <span class="skill-name" :title="skill.name">{{ skill.name }}</span>
+                                  <span
+                                    v-if="!skill.selectable"
+                                    class="skill-pick__hint"
+                                    :class="{ 'skill-pick__hint--busy': isSkillBusy(skill) }"
+                                  >
+                                    <t-icon :name="skillStatusIcon(skill)" size="14px" />
+                                    {{ skillStatusHint(skill) }}
+                                  </span>
+                                </div>
+                                <p
+                                  v-if="skill.description"
+                                  class="skill-desc"
+                                  :title="skill.description"
+                                >{{ skill.description }}</p>
+                              </div>
+                              <t-button
+                                v-if="canInstallSkillRow(skill)"
+                                size="small"
+                                variant="text"
+                                theme="primary"
+                                :loading="installingCatalogId === skill.id"
+                                :title="$t('agent.editor.installToThisSandbox')"
+                                @click.stop="installCatalogToCurrent(skill)"
+                              >
+                                {{ $t('agent.editor.installShort') }}
+                              </t-button>
+                              <t-button
+                                v-else-if="isSkillBusy(skill)"
+                                size="small"
+                                variant="text"
+                                theme="primary"
+                                :title="$t('agent.editor.viewInstallProgress')"
+                                @click.stop="openSkillInstallProgress(skill)"
+                              >
+                                {{ $t('agent.editor.viewInstallProgress') }}
+                              </t-button>
+                            </article>
+                          </section>
                         </t-checkbox-group>
                       </div>
                     </div>
@@ -1760,6 +1789,28 @@
     </Transition>
   </Teleport>
 
+  <SettingDrawer
+    v-model:visible="showSkillProgress"
+    :title="skillProgressTitle"
+    :description="skillProgressDesc"
+    :icon="SKILL_ICON"
+    width="680px"
+    :min-width="560"
+    :max-width="920"
+    storage-key="setting-drawer:width:skill-catalog-manage"
+    :hide-footer="true"
+  >
+    <SandboxSkillsPanel
+      v-if="showSkillProgress && skillProgressRecord && skillProgressId"
+      :record="skillProgressRecord"
+      mode="list"
+      hide-add
+      :focus-skill-id="skillProgressId"
+      @updated="onSkillProgressUpdated"
+      @skills-changed="onSkillProgressChanged"
+    />
+  </SettingDrawer>
+
   <AgentCreateContextualGuide :when="visible && editorMode === 'create'" :is-agent-mode="isAgentMode" />
 </template>
 
@@ -1805,6 +1856,8 @@ import { useEditorResourcesStore } from '@/stores/editorResources';
 import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
+import SandboxSkillsPanel from '@/components/SandboxSkillsPanel.vue';
+import SettingDrawer from '@/components/settings/SettingDrawer.vue';
 import KBParserSettings, { type ParserEngineRule } from '@/views/knowledge/settings/KBParserSettings.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import { SKILL_ICON } from '@/types/mention';
@@ -2050,19 +2103,25 @@ const skillsSelectionHint = computed(() => {
   return t('agent.editor.skillsSelectionDesc')
 })
 
-const catalogReadyCount = computed(() =>
-  catalogSkillRows.value.filter((skill) => skill.selectable).length,
-)
-
-const catalogPendingCount = computed(() =>
-  catalogSkillRows.value.filter((skill) => !skill.selectable).length,
-)
-
-const skillListSummary = computed(() => {
-  const ready = catalogReadyCount.value
-  const pending = catalogPendingCount.value
-  if (pending > 0) return t('agent.editor.skillsListSummary', { ready, pending })
-  return t('agent.editor.skillsListSummaryReadyOnly', { ready })
+const catalogSkillGroups = computed(() => {
+  const ready = catalogSkillRows.value.filter((skill) => skill.selectable)
+  const pending = catalogSkillRows.value.filter((skill) => !skill.selectable)
+  const groups: { key: 'ready' | 'pending'; label: string; skills: CatalogSkillRow[] }[] = []
+  if (ready.length) {
+    groups.push({
+      key: 'ready',
+      label: t('agent.editor.skillsGroupAvailable'),
+      skills: ready,
+    })
+  }
+  if (pending.length) {
+    groups.push({
+      key: 'pending',
+      label: t('agent.editor.skillsGroupUnavailable'),
+      skills: pending,
+    })
+  }
+  return groups
 })
 
 function skillStatusHint(skill: CatalogSkillRow): string {
@@ -2074,6 +2133,17 @@ function skillStatusHint(skill: CatalogSkillRow): string {
     return t('agent.editor.skillDisabledOnSandbox')
   }
   return t('agent.editor.skillNotReady')
+}
+
+function skillStatusIcon(skill: CatalogSkillRow): string {
+  if (!skill.installed || skill.installStatus === 'failed') return 'download'
+  if (skill.installStatus === 'installing' || skill.installStatus === 'removing') return 'refresh'
+  if (skill.installStatus === 'ready' && !skill.installEnabled) return 'close-circle'
+  return 'time'
+}
+
+function isSkillBusy(skill: CatalogSkillRow): boolean {
+  return skill.installStatus === 'installing' || skill.installStatus === 'removing'
 }
 
 function canInstallSkillRow(skill: CatalogSkillRow): boolean {
@@ -2097,6 +2167,55 @@ function autoBindSoleSandbox() {
 function openSkillSettings() {
   const configId = formData.value.config.sandbox_config_id || ''
   uiStore.openSettings('skills', configId || undefined)
+}
+
+const showSkillProgress = ref(false)
+const skillProgressRecord = ref<SandboxConfigRecord | null>(null)
+const skillProgressId = ref('')
+const skillProgressTitle = ref('')
+const skillProgressDesc = computed(() => {
+  const record = skillProgressRecord.value
+  if (!record) return ''
+  return t('settings.skills.manageDrawerDesc', { name: record.name })
+})
+
+function sandboxRecordById(configId: string): SandboxConfigRecord | undefined {
+  return chatResources.sandboxConfigs.find((cfg) => cfg.id === configId)
+}
+
+function installOnCurrentSandbox(skill: CatalogSkillRow, configId: string) {
+  return (skill.installations || []).find((row) => row.sandbox_config_id === configId)
+}
+
+async function openSkillInstallProgress(skill: CatalogSkillRow) {
+  const configId = formData.value.config.sandbox_config_id || ''
+  const record = sandboxRecordById(configId)
+  if (!record) {
+    openSkillSettings()
+    return
+  }
+  let inst = installOnCurrentSandbox(skill, configId)
+  if (!inst?.skill_id) {
+    await syncInstalledSkills(true)
+    const latest = catalogSkillRows.value.find((row) => row.id === skill.id)
+    inst = latest ? installOnCurrentSandbox(latest, configId) : undefined
+  }
+  if (!inst?.skill_id) {
+    openSkillSettings()
+    return
+  }
+  skillProgressRecord.value = record
+  skillProgressId.value = inst.skill_id
+  skillProgressTitle.value = skill.name
+  showSkillProgress.value = true
+}
+
+function onSkillProgressUpdated() {
+  void syncInstalledSkills(true)
+}
+
+function onSkillProgressChanged() {
+  void syncInstalledSkills(true)
 }
 
 function pruneSelectedSkills() {
@@ -3391,6 +3510,9 @@ watch(() => props.visible, async (val) => {
     clearFieldHighlight();
     agentIMChannelCount.value = 0;
     agentEmbedChannelCount.value = 0;
+    showSkillProgress.value = false;
+    skillProgressRecord.value = null;
+    skillProgressId.value = '';
   }
 });
 
@@ -5298,15 +5420,6 @@ const handleSave = async () => {
   align-items: flex-end;
 }
 
-.skill-ready-stat {
-  margin: 6px 0 0;
-  max-width: 280px;
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-  line-height: 1.45;
-  text-align: right;
-}
-
 .sandbox-config-select {
   width: 280px;
 }
@@ -5970,15 +6083,51 @@ const handleSave = async () => {
 .skill-pick-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 16px;
   width: 100%;
+}
 
-  :deep(.t-checkbox-group) {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    width: 100%;
-  }
+.skill-pick-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skill-pick-group__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 2px;
+}
+
+.skill-pick-group__bar {
+  display: inline-block;
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--td-brand-color);
+}
+
+.skill-pick-group--pending .skill-pick-group__bar {
+  background: var(--td-text-color-placeholder);
+}
+
+.skill-pick-group__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+  letter-spacing: 0.2px;
+}
+
+.skill-pick-group__count {
+  min-width: 20px;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
+  border-radius: 999px;
+  text-align: center;
+  line-height: 18px;
 }
 
 .skill-pick {
@@ -5998,6 +6147,28 @@ const handleSave = async () => {
 
 .skill-pick__check {
   flex-shrink: 0;
+}
+
+.skill-pick__badge {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+}
+
+.skill-pick--ready .skill-pick__badge {
+  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
+  color: var(--td-brand-color);
+}
+
+.skill-pick--pending .skill-pick__badge {
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-placeholder);
 }
 
 .skill-pick__body {
@@ -6023,9 +6194,29 @@ const handleSave = async () => {
 }
 
 .skill-pick__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
   font-size: 12px;
   color: var(--td-text-color-placeholder);
+
+  .t-icon {
+    flex-shrink: 0;
+  }
+}
+
+.skill-pick__hint--busy {
+  color: var(--td-brand-color);
+
+  .t-icon {
+    animation: skill-pick-spin 1s linear infinite;
+  }
+}
+
+@keyframes skill-pick-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .skill-desc {

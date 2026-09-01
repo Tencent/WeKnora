@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/storageurl"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
@@ -437,14 +438,15 @@ func buildMessageExecutionContext(
 	locale := types.LanguageFromContextOrDefault(ctx)
 
 	snapshot := types.MessageExecutionContext{
-		KnowledgeBaseIDs: knowledgeBaseIDs,
-		KnowledgeIDs:     knowledgeIDs,
-		TagIDs:           tagIDs,
-		TagScopes:        cloneTagScopes(tagScopes),
-		MCPServiceIDs:    mcpServiceIDs,
-		SkillNames:       skillNames,
-		WebSearchEnabled: webSearchEnabled,
-		Locale:           locale,
+		KnowledgeBaseIDs:    knowledgeBaseIDs,
+		KnowledgeIDs:        knowledgeIDs,
+		TagIDs:              tagIDs,
+		TagScopes:           cloneTagScopes(tagScopes),
+		MCPServiceIDs:       mcpServiceIDs,
+		SkillNames:          skillNames,
+		WebSearchEnabled:    webSearchEnabled,
+		Locale:              locale,
+		LangfuseTraceparent: langfuse.TraceparentFromContext(ctx),
 	}
 	if agent == nil {
 		return snapshot, "", effectiveTenantID, modelOverride

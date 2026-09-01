@@ -337,6 +337,12 @@ type MessageExecutionContext struct {
 	WebSearchEnabled      bool                      `json:"web_search_enabled"`
 	Locale                string                    `json:"locale,omitempty"`
 	SuggestionAttribution *SuggestionAttribution    `json:"suggestion_attribution,omitempty"`
+	// LangfuseTraceparent is the W3C traceparent of the originating chat
+	// request. Follow-up suggestion generation often runs on a later HTTP
+	// call (or after the SSE handler has already finished the root span);
+	// without this the LLM wrapper auto-creates an orphan chat.completion
+	// trace instead of nesting under the agent turn.
+	LangfuseTraceparent string `json:"langfuse_traceparent,omitempty"`
 }
 
 func (c MessageExecutionContext) Value() (driver.Value, error) {

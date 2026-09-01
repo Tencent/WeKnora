@@ -421,21 +421,20 @@ func oneOf(value string, allowed ...string) bool {
 }
 
 // ResolveChatParserEngine returns the agent-configured parser engine for a
-// chat attachment file type, or "" when no rule matches. Mirrors the tenant
-// resolver in ParserEngineConfig.ResolveChatParserEngine.
+// chat attachment file type, or the type-level default when no rule matches.
+// Mirrors ParserEngineConfig.ResolveChatParserEngine.
 func (c *CustomAgentConfig) ResolveChatParserEngine(fileType string) string {
-	if c == nil {
-		return ""
-	}
-	fileType = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), ".")
-	for _, rule := range c.ChatParserEngineRules {
-		for _, candidate := range rule.FileTypes {
-			if strings.TrimPrefix(strings.ToLower(strings.TrimSpace(candidate)), ".") == fileType {
-				return strings.TrimSpace(rule.Engine)
+	if c != nil {
+		normalized := normalizeParserFileType(fileType)
+		for _, rule := range c.ChatParserEngineRules {
+			for _, candidate := range rule.FileTypes {
+				if normalizeParserFileType(candidate) == normalized {
+					return strings.TrimSpace(rule.Engine)
+				}
 			}
 		}
 	}
-	return ""
+	return DefaultParserEngine(fileType)
 }
 
 // Value implements driver.Valuer interface for CustomAgentConfig
