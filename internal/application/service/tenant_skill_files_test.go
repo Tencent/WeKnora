@@ -46,6 +46,31 @@ func TestListSkillFilesReportsMissingBundle(t *testing.T) {
 	require.Equal(t, 404, appErr.HTTPCode)
 }
 
+func TestListSkillFilesUsesCatalogWhenInstallHasNoRef(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	archive, err := zipSkillFiles(map[string][]byte{
+		"SKILL.md":           []byte(validSkillMD),
+		"scripts/extract.py": []byte("print('hi')\n"),
+	})
+	require.NoError(t, err)
+	fx.storedBundles = map[string][]byte{"file://catalog.zip": archive}
+	require.NoError(t, fx.skillRepo.CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
+		ID: "cat-1", TenantID: 7, Name: "pdf-tools",
+		BundleRef: "file://catalog.zip", BundleSHA256: skillArchiveSHA256(archive),
+	}))
+	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	skill.CatalogID = "cat-1"
+	skill.BundleRef = ""
+	skill.Status = types.SkillStatusReady
+	require.NoError(t, fx.skillRepo.UpdateSkill(ctx, skill))
+
+	files, err := fx.svc.ListSkillFiles(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+}
+
 func TestReadSkillFileReturnsTextContent(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.seedStoredSkillBundle(t)
@@ -56,6 +81,38 @@ func TestReadSkillFileReturnsTextContent(t *testing.T) {
 	require.Equal(t, skillFileEncodingUTF8, file.Encoding)
 	require.Equal(t, "print('hi')\n", file.Content)
 	require.False(t, file.Binary)
+}
+
+func TestSkillBundleArchiveCacheKeepsOversizeAsSoleOccupant(t *testing.T) {
+	c := &skillBundleArchiveCache{slots: 4, maxBytes: 8}
+	c.put("small", []byte("abcd"))
+	c.put("big", []byte("0123456789"))
+
+	require.Equal(t, []byte("0123456789"), c.get("big"))
+	require.Nil(t, c.get("small"),
+		"a zip over the keep-around budget must not sit next to other entries")
+}
+
+func TestSkillBundleArchiveCacheEvictsToStayUnderBudget(t *testing.T) {
+	c := &skillBundleArchiveCache{slots: 4, maxBytes: 8}
+	c.put("a", []byte("aaaa"))
+	c.put("b", []byte("bbbb"))
+	c.put("c", []byte("cccc"))
+
+	require.Equal(t, []byte("cccc"), c.get("c"))
+	require.Equal(t, []byte("bbbb"), c.get("b"))
+	require.Nil(t, c.get("a"))
+}
+
+func TestSkillBundleArchiveCacheRespectsSlotCount(t *testing.T) {
+	c := &skillBundleArchiveCache{slots: 2, maxBytes: 100}
+	c.put("a", []byte("a"))
+	c.put("b", []byte("b"))
+	c.put("c", []byte("c"))
+
+	require.Nil(t, c.get("a"))
+	require.Equal(t, []byte("c"), c.get("c"))
+	require.Equal(t, []byte("b"), c.get("b"))
 }
 
 func TestListAndReadSkillFilesDownloadTheBundleOnce(t *testing.T) {

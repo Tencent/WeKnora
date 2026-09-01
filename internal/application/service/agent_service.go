@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
@@ -569,9 +570,36 @@ func (s *agentService) tenantSkillSource(
 	// a caller ever creates the engine under a shorter-lived context, bundle
 	// downloads start failing for installed skills only, and loadBundle needs
 	// a ctx parameter.
-	return skills.NewTenantSkillSource(rows, func(ref string) ([]byte, error) {
+	return skills.NewTenantSkillSource(rows, func(row *types.TenantSkillEntity) ([]byte, error) {
+		ref, err := s.skillBundleRef(ctx, ownerTenantID, row)
+		if err != nil {
+			return nil, err
+		}
 		return s.readSkillBundle(ctx, ownerTenantID, ref)
 	})
+}
+
+func (s *agentService) skillBundleRef(
+	ctx context.Context, tenantID uint64, row *types.TenantSkillEntity,
+) (string, error) {
+	if row == nil {
+		return "", errors.New("skill is required")
+	}
+	if ref := strings.TrimSpace(row.BundleRef); ref != "" {
+		return ref, nil
+	}
+	cid := strings.TrimSpace(row.CatalogID)
+	if cid == "" || s.db == nil {
+		return "", fmt.Errorf("skill %s has no stored bundle; its files cannot be read", row.Name)
+	}
+	cat, err := repository.NewTenantSkillRepository(s.db).GetCatalog(ctx, tenantID, cid)
+	if err != nil {
+		return "", err
+	}
+	if cat == nil || strings.TrimSpace(cat.BundleRef) == "" {
+		return "", fmt.Errorf("skill %s has no stored bundle; its files cannot be read", row.Name)
+	}
+	return strings.TrimSpace(cat.BundleRef), nil
 }
 
 // userEnvResolver builds the per-caller environment resolver for this run, or

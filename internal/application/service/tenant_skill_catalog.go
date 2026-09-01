@@ -180,11 +180,11 @@ func (s *TenantSkillService) RegisterCatalogFromArchive(
 func (s *TenantSkillService) RegisterCatalogFromSource(
 	ctx context.Context, tenantID uint64, source string,
 ) (*types.TenantSkillCatalogEntity, error) {
-	archive, err := fetchSkillArchive(ctx, source, s.sourceHTTP)
+	bundle, archive, err := fetchNormalizedSkillBundle(ctx, source, s.sourceHTTP)
 	if err != nil {
 		return nil, err
 	}
-	return s.RegisterCatalogFromArchive(ctx, tenantID, archive)
+	return s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, true)
 }
 
 // CatalogInstallResult is the per-sandbox outcome of one catalog install call.
@@ -337,6 +337,14 @@ func (s *TenantSkillService) storeCatalogBundle(
 	if catalog == nil || len(archive) == 0 {
 		return false, nil
 	}
+	digest := skillArchiveSHA256(archive)
+	if strings.TrimSpace(catalog.BundleRef) != "" &&
+		strings.TrimSpace(catalog.BundleSHA256) != "" &&
+		catalog.BundleSHA256 == digest {
+		// Same bytes already on the definition. Installing onto another
+		// sandbox must not mint a second object.
+		return true, nil
+	}
 	fs, err := s.fileServiceForTenant(ctx, tenantID)
 	if err != nil {
 		if requireStore {
@@ -345,6 +353,7 @@ func (s *TenantSkillService) storeCatalogBundle(
 		logger.Warnf(ctx, "[skill] catalog bundle storage unavailable: %v", err)
 		return false, nil
 	}
+	oldRef := strings.TrimSpace(catalog.BundleRef)
 	ref, err := fs.SaveBytes(ctx, archive, tenantID,
 		fmt.Sprintf("tenant-skills/catalog/%s.zip", catalog.ID), false)
 	if err != nil {
@@ -355,6 +364,9 @@ func (s *TenantSkillService) storeCatalogBundle(
 		return false, nil
 	}
 	catalog.BundleRef = ref
+	if oldRef != "" && oldRef != ref {
+		s.deleteBundleBestEffort(ctx, tenantID, oldRef)
+	}
 	return true, nil
 }
 

@@ -75,6 +75,15 @@ func (s *TenantSkillService) InstallSkill(
 	if err != nil {
 		return "", err
 	}
+	return s.installParsedSkill(ctx, tenantID, configID, bundle, archive)
+}
+
+func (s *TenantSkillService) installParsedSkill(
+	ctx context.Context, tenantID uint64, configID string, bundle *SkillBundle, archive []byte,
+) (string, error) {
+	if bundle == nil {
+		return "", fmt.Errorf("skill bundle is required")
+	}
 
 	// Re-uploading a skill by the same name is an upgrade of that skill, not a
 	// second row: the unique (config, name) index would reject the insert, and
@@ -132,8 +141,7 @@ func (s *TenantSkillService) InstallSkill(
 
 	// The zip lives on the catalog, not on this sandbox: uninstalling from
 	// the last config must not take the definition's files with it. The
-	// install row only copies the catalog ref so read_skill / retry can
-	// find the same object.
+	// install row only stores CatalogID; readers follow that to the zip.
 	catalog, err := s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, true)
 	if err != nil {
 		failCtx, cancelFail := s.cleanupContext(ctx)
@@ -1142,9 +1150,9 @@ func (s *TenantSkillService) fileServiceForTenant(
 	return fs, nil
 }
 
-// pointInstallAtCatalog copies the catalog's stored zip onto the install row.
-// The bytes themselves stay on the definition: this is only a locator so a
-// sandbox-scoped read can find the same object after the catalog id is set.
+// pointInstallAtCatalog attaches the sandbox row to the definition that owns
+// the zip. The install does not copy BundleRef: readers follow CatalogID, and
+// uninstalling this sandbox must not be able to delete the definition object.
 func (s *TenantSkillService) pointInstallAtCatalog(
 	ctx context.Context, skill *types.TenantSkillEntity, catalog *types.TenantSkillCatalogEntity,
 ) error {
@@ -1157,7 +1165,7 @@ func (s *TenantSkillService) pointInstallAtCatalog(
 	return s.updateSkillFields(ctx, skill.TenantID, skill.SandboxConfigID, skill.ID,
 		func(e *types.TenantSkillEntity) {
 			e.CatalogID = catalog.ID
-			e.BundleRef = catalog.BundleRef
+			e.BundleRef = ""
 		})
 }
 
