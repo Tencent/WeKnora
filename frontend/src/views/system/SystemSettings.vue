@@ -495,12 +495,18 @@ import {
   resetUserPassword,
   type SystemSettingItem,
 } from '@/api/system'
+import {
+  getAuthConfig,
+} from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
 const currentUserId = computed(() => authStore.currentUserId)
 
 const { t, tm, te, locale } = useI18n()
+
+const specialCharRegex = /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/
+const specialChars = '!@#$%^&*()_+-=[]{}|;:,.<>?'
 
 // Friendly labels per key live in i18n (system.globalSettings.keyLabels.*).
 // Adding a new entry there must accompany every new key registered in
@@ -515,7 +521,12 @@ function keyLabel(k: string): string {
 // user-facing copy lives in i18n (system.globalSettings.keyDescriptions.*).
 function settingDescription(item: { key: string; description?: string }): string {
   const path = `system.globalSettings.keyDescriptions.${item.key}`
-  if (te(path)) return t(path) as string
+  if (te(path)) {
+    if (path == 'system.globalSettings.keyDescriptions.auth.complex_password_enabled') {
+      return t(path, {specialChars}) as string
+    }
+    return t(path) as string
+  }
   return item.description ?? ''
 }
 
@@ -620,6 +631,7 @@ type SettingsSection = 'access' | 'tenant' | 'runtime' | 'security' | 'other'
 const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other'>, readonly string[]> = {
   access: [
     'auth.registration_mode',
+    'auth.complex_password_enabled',
     'auth.default_tenant_mode',
     'tenant.self_service_creation_enabled',
     'tenant.max_owned_per_user',
@@ -707,26 +719,52 @@ const passwordResetForm = reactive({
   newPassword: '',
   confirmPassword: '',
 })
-const passwordResetRules: Record<string, FormRule[]> = {
+const passwordResetRules = computed(() => ({
   email: [
-    { required: true, message: t('system.globalSettings.passwordReset.validation.emailRequired'), trigger: 'blur' },
-    { email: true, message: t('system.globalSettings.passwordReset.validation.emailInvalid'), trigger: 'blur' },
+    { required: true, message: t('auth.emailRequired'), type: 'error' },
+    { email: true, message: t('auth.emailInvalid'), type: 'error' }
   ],
-  newPassword: [
-    { required: true, message: t('system.globalSettings.passwordReset.validation.passwordRequired'), trigger: 'blur' },
-    { min: 8, message: t('system.globalSettings.passwordReset.validation.passwordLength'), trigger: 'blur' },
-    { max: 32, message: t('system.globalSettings.passwordReset.validation.passwordLength'), trigger: 'blur' },
-    { pattern: /[a-zA-Z]/, message: t('system.globalSettings.passwordReset.validation.passwordLetter'), trigger: 'blur' },
-    { pattern: /\d/, message: t('system.globalSettings.passwordReset.validation.passwordNumber'), trigger: 'blur' },
-  ],
+  newPassword: complexPasswordEnabled.value
+    ? [
+      { required: true, message: t('auth.passwordRequired'), type: 'error' },
+      { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
+      { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
+      { pattern: /[a-z]/, message: t('auth.passwordMustContainLowercaseLetter'), type: 'error' },
+      { pattern: /[A-Z]/, message: t('auth.passwordMustContainUppercaseLetter'), type: 'error' },
+      { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' },
+      { pattern: specialCharRegex, message: t('auth.passwordMustContainSpecialChar', {specialChars}), type: 'error' },
+    ]
+    : [
+      { required: true, message: t('auth.passwordRequired'), type: 'error' },
+      { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
+      { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
+      { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
+      { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' },
+    ],
   confirmPassword: [
-    { required: true, message: t('system.globalSettings.passwordReset.validation.confirmRequired'), trigger: 'blur' },
+    { required: true, message: t('auth.confirmPasswordRequired'), trigger: 'blur' },
     {
       validator: (value: string) => value === passwordResetForm.newPassword,
-      message: t('system.globalSettings.passwordReset.validation.passwordMismatch'),
+      message: t('auth.passwordMismatch'),
       trigger: 'blur',
     },
   ],
+}))
+
+const complexPasswordEnabled = ref(false)
+
+const loadAuthConfig = async () => {
+  try {
+    loading.value = true
+    const resp = await getAuthConfig()
+    complexPasswordEnabled.value = resp.complex_password_enabled
+  } catch (err: any) {
+    const msg = err?.message || t('system.globalSettings.messages.loadFailed')
+    MessagePlugin.error(msg)
+    complexPasswordEnabled.value = false
+  } finally {
+    loading.value = false
+  }
 }
 
 function resetPasswordResetForm() {
@@ -737,6 +775,7 @@ function resetPasswordResetForm() {
 }
 
 async function openPasswordResetDialog() {
+  await loadAuthConfig()
   resetPasswordResetForm()
   passwordResetVisible.value = true
   await nextTick()

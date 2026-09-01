@@ -200,6 +200,16 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		c.Error(appErr)
 		return
 	}
+
+	// Validate password
+	complexPasswordEnabled := resolveAuthComplexPasswordEnabled(ctx, h.configInfo, h.systemSettingSvc)
+	if err := service.ValidatePasswordPolicy(req.Password, complexPasswordEnabled); err != nil {
+		logger.Error(ctx, "Invalid password policy")
+		appErr := errors.NewValidationError(err.Error())
+		c.Error(appErr)
+		return
+	}
+
 	req.Username = secutils.SanitizeForLog(req.Username)
 	req.Email = secutils.SanitizeForLog(req.Email)
 	req.TenantProvisioning = h.resolveDefaultTenantMode(ctx)
@@ -745,15 +755,20 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
+	// Validate password
+	complexPasswordEnabled := resolveAuthComplexPasswordEnabled(ctx, h.configInfo, h.systemSettingSvc)
+	err = service.ValidatePasswordPolicy(req.NewPassword, complexPasswordEnabled)
+	if err != nil {
+		logger.Errorf(ctx, "Faield to validate password policy: %v", err)
+		appErr := errors.NewValidationError("Password policy violation").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+
 	// Change password
 	err = h.userService.ChangePassword(ctx, user.ID, req.OldPassword, req.NewPassword)
 	if err != nil {
 		switch {
-		case stderrors.Is(err, service.ErrPasswordPolicy):
-			appErr := errors.NewValidationError("Password policy violation").
-				WithDetails(service.DetailPasswordPolicy)
-			c.Error(appErr)
-			return
 		case stderrors.Is(err, service.ErrInvalidOldPassword):
 			appErr := errors.NewBadRequestError("Current password is incorrect").
 				WithDetails(service.DetailInvalidOldPassword)
@@ -796,9 +811,16 @@ func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 	// Same source-of-truth as Register's gate, so the UI hide-the-button
 	// signal can never disagree with the API enforcement signal.
 	mode := h.resolveRegistrationMode(c.Request.Context())
+
+	complexPasswordEnabled := resolveAuthComplexPasswordEnabled(
+		c.Request.Context(),
+		h.configInfo,
+		h.systemSettingSvc,
+	)
 	c.JSON(http.StatusOK, gin.H{
-		"success":           true,
-		"registration_mode": mode,
+		"success":                  true,
+		"registration_mode":        mode,
+		"complex_password_enabled": complexPasswordEnabled,
 	})
 }
 

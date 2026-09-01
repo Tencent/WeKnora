@@ -144,6 +144,14 @@ var registry = map[string]settingSpec{
 		Description: "公开注册成功后的默认空间策略。create_personal = 自动创建个人空间并设为 Owner；" +
 			"tenantless = 仅创建用户，等待接受邀请或主动创建空间。修改后只影响新注册用户。",
 	},
+	"auth.complex_password_enabled": {
+		Type:     "bool",
+		EnvName:  "WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED",
+		Default:  false,
+		Category: "auth",
+		Description: "是否允许复杂密码，开启后密码必须包含大小写字母、数字和特殊字符。" +
+			"修改后立即生效，只影响新注册用户或新密码修改/重置操作。特殊字符包含：!@#$%^&*()_+-=[]{}|;:,.<>?",
+	},
 	// tenant.max_owned_per_user caps how many tenants a single non-superuser
 	// can create (and Own) via self-service POST /tenants. Read on every
 	// request — UI edits take effect immediately, no restart required. The

@@ -234,7 +234,7 @@ export default {
       currentPlaceholder: '현재 비밀번호를 입력하세요',
       currentRequired: '현재 비밀번호를 입력하세요',
       newLabel: '새 비밀번호',
-      newPlaceholder: '8-32자, 문자와 숫자 포함',
+      newPlaceholder: '새 비밀번호 입력',
       confirmLabel: '새 비밀번호 확인',
       confirmPlaceholder: '새 비밀번호를 다시 입력하세요',
       submit: '비밀번호 업데이트',
@@ -2722,22 +2722,12 @@ export default {
         emailLabel: '사용자 이메일',
         emailPlaceholder: '비밀번호를 재설정할 사용자의 이메일 입력',
         newPasswordLabel: '새 비밀번호',
-        newPasswordPlaceholder: '8~32자, 문자와 숫자 포함',
+        newPasswordPlaceholder: '새 비밀번호 입력',
         confirmPasswordLabel: '새 비밀번호 확인',
         confirmPasswordPlaceholder: '새 비밀번호를 다시 입력',
         confirmBtn: '재설정 확인',
         success: '비밀번호가 재설정되고 기존 세션이 만료되었습니다',
         failed: '비밀번호 재설정 실패',
-        validation: {
-          emailRequired: '사용자 이메일을 입력하세요',
-          emailInvalid: '올바른 이메일 주소를 입력하세요',
-          passwordRequired: '새 비밀번호를 입력하세요',
-          passwordLength: '비밀번호는 8~32자여야 합니다',
-          passwordLetter: '비밀번호에 문자가 포함되어야 합니다',
-          passwordNumber: '비밀번호에 숫자가 포함되어야 합니다',
-          confirmRequired: '새 비밀번호를 다시 입력하세요',
-          passwordMismatch: '비밀번호가 일치하지 않습니다'
-        }
       },
       admins: {
         label: '시스템 관리자',
@@ -2829,7 +2819,8 @@ export default {
         },
         auth: {
           registration_mode: '셀프 가입 모드입니다. self_serve = 누구나 계정을 만들 수 있음; invite_only = 공개 가입을 끄고 Owner/Admin만 초대 가능. 저장 즉시 적용되며, self_serve는 스팸 가입이 들어올 수 있으니 신중히 사용하세요.',
-          default_tenant_mode: '공개 가입 후 공간 초기화 정책입니다. create_personal은 개인 공간을 만들고 Owner를 부여하며, tenantless는 초대 수락 또는 직접 공간 생성 전까지 계정만 만듭니다.'
+          default_tenant_mode: '공개 가입 후 공간 초기화 정책입니다. create_personal은 개인 공간을 만들고 Owner를 부여하며, tenantless는 초대 수락 또는 직접 공간 생성 전까지 계정만 만듭니다.',
+          complex_password_enabled: '복잡한 비밀번호를 허용할지 여부입니다. 활성화하면 비밀번호에 대문자, 소문자, 숫자 및 특수 문자가 포함되어야 합니다. 변경 사항은 즉시 적용되며, 새로 가입하는 사용자 또는 비밀번호를 새로 변경하거나 재설정하는 경우에만 적용됩니다. 특수 문자는 다음을 포함합니다: {specialChars}'
         }
       },
       keyLabels: {
@@ -2855,7 +2846,8 @@ export default {
         },
         auth: {
           registration_mode: '셀프 가입 모드',
-          default_tenant_mode: '기본 공간 프로비저닝'
+          default_tenant_mode: '기본 공간 프로비저닝',
+          complex_password_enabled: '복잡한 비밀번호 허용'
         }
       },
       runtime: {
@@ -4527,7 +4519,7 @@ export default {
     subtitle: 'RAG Q&A, ReAct 에이전트, Wiki 지식베이스 — 대규모 언어 모델 기반 엔터프라이즈 지식 프레임워크',
     registerSubtitle: '계정을 만들고 WeKnora를 시작하세요',
     emailPlaceholder: '이메일 주소 입력',
-    passwordPlaceholder: '비밀번호 입력 (8-32자, 문자와 숫자 포함)',
+    passwordPlaceholder: '비밀번호 입력',
     confirmPasswordPlaceholder: '비밀번호 다시 입력',
     usernamePlaceholder: '사용자명 입력',
     emailRequired: '이메일 주소를 입력해주세요',
@@ -4536,7 +4528,10 @@ export default {
     passwordMinLength: '비밀번호는 최소 8자여야 합니다',
     passwordMaxLength: '비밀번호는 32자를 초과할 수 없습니다',
     passwordMustContainLetter: '비밀번호에 문자가 포함되어야 합니다',
+    passwordMustContainLowercaseLetter: '비밀번호에는 소문자가 포함되어야 합니다',
+    passwordMustContainUppercaseLetter: '비밀번호에는 대문자가 포함되어야 합니다',
     passwordMustContainNumber: '비밀번호에 숫자가 포함되어야 합니다',
+    passwordMustContainSpecialChar: '비밀번호에는 특수문자가 포함되어야 합니다: {specialChars}',
     usernameRequired: '사용자명을 입력해주세요',
     usernameMinLength: '사용자명은 최소 2자여야 합니다',
     usernameMaxLength: '사용자명은 20자를 초과할 수 없습니다',

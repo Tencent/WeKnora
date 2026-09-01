@@ -206,17 +206,23 @@ func TestAdminResetPasswordHashesPasswordAndRevokesSessions(t *testing.T) {
 	}
 }
 
-func TestAdminResetPasswordRejectsWeakPasswordBeforeWrite(t *testing.T) {
-	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
-	svc := newAuthTestUserService(tokenRepo)
-	repo := svc.userRepo.(*stubUserRepoForAuth)
-
-	err := svc.AdminResetPassword(context.Background(), "user-1", "password")
+func TestValidatePasswordPolicy(t *testing.T) {
+	err := ValidatePasswordPolicy("password", false)
 	if !errors.Is(err, ErrPasswordPolicy) {
-		t.Fatalf("AdminResetPassword() err = %v, want ErrPasswordPolicy", err)
+		t.Fatalf("ValidatePasswordPolicy() err = %v, want ErrPasswordPolicy", err)
 	}
-	if repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
-		t.Fatalf("weak password caused side effects: updates=%d revocations=%v", repo.updateCalls, tokenRepo.revokedUserIDs)
+	err = ValidatePasswordPolicy("password1", false)
+	if err != nil {
+		t.Fatalf("ValidatePasswordPolicy() err = %v, want nil", err)
+	}
+	err = ValidatePasswordPolicy("NewSecure9", true)
+	if !errors.Is(err, ErrComplexPasswordPolicy) {
+		t.Fatalf("ValidatePasswordPolicy() err = %v, want ErrComplexPasswordPolicy", err)
+	}
+
+	err = ValidatePasswordPolicy("NewSecure9!", true)
+	if err != nil {
+		t.Fatalf("ValidatePasswordPolicy() err = %v, want nil", err)
 	}
 }
 
@@ -231,13 +237,6 @@ func TestChangePasswordRequiresPolicyAndRevokesSessions(t *testing.T) {
 		t.Fatalf("hash old password: %v", err)
 	}
 	repo.users["user-1"].PasswordHash = string(hashed)
-
-	if err := svc.ChangePassword(ctx, "user-1", "OldSecure9", "weak"); !errors.Is(err, ErrPasswordPolicy) {
-		t.Fatalf("ChangePassword(weak) err = %v, want ErrPasswordPolicy", err)
-	}
-	if repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
-		t.Fatalf("weak password caused side effects: updates=%d revocations=%v", repo.updateCalls, tokenRepo.revokedUserIDs)
-	}
 
 	if err := svc.ChangePassword(ctx, "user-1", "wrong-pass", "NewSecure9"); !errors.Is(err, ErrInvalidOldPassword) {
 		t.Fatalf("ChangePassword(wrong old) err = %v, want ErrInvalidOldPassword", err)

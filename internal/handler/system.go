@@ -1551,7 +1551,10 @@ func (h *SystemHandler) ResetUserPassword(c *gin.Context) {
 		return
 	}
 	req.Email = strings.TrimSpace(req.Email)
-	if err := service.ValidatePasswordPolicy(req.NewPassword); err != nil {
+
+	// Validate password
+	complexPasswordEnabled := resolveAuthComplexPasswordEnabled(ctx, h.cfg, h.systemSettingSvc)
+	if err := service.ValidatePasswordPolicy(req.NewPassword, complexPasswordEnabled); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -1568,10 +1571,6 @@ func (h *SystemHandler) ResetUserPassword(c *gin.Context) {
 	}
 
 	if err := h.userSvc.AdminResetPassword(ctx, user.ID, req.NewPassword); err != nil {
-		if errors.Is(err, service.ErrPasswordPolicy) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
 		logger.Errorf(ctx, "Failed to reset password for user %s: %v", user.ID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reset user password"})
 		return

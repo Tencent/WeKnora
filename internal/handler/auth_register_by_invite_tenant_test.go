@@ -71,7 +71,7 @@ func TestRegisterByInviteRestoresTenantlessAccountWhenInviteExpiresDuringRegistr
 	r.Use(errorCapture())
 	r.POST("/auth/register-by-invite", h.RegisterByInvite)
 
-	body := []byte(`{"token":"invite-token","email":"alice@example.com","username":"alice","password":"supersecret"}`)
+	body := []byte(`{"token":"invite-token","email":"alice@example.com","username":"alice","password":"supersecret1"}`)
 	req := httptest.NewRequest(http.MethodPost, "/auth/register-by-invite", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -104,7 +104,7 @@ func TestRegisterByInviteUsesInvitedTenantWithoutPersonalTenant(t *testing.T) {
 	r.Use(errorCapture())
 	r.POST("/auth/register-by-invite", h.RegisterByInvite)
 
-	body := []byte(`{"token":"invite-token","email":"alice@example.com","username":"alice","password":"supersecret"}`)
+	body := []byte(`{"token":"invite-token","email":"alice@example.com","username":"alice","password":"supersecret1"}`)
 	req := httptest.NewRequest(http.MethodPost, "/auth/register-by-invite", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
