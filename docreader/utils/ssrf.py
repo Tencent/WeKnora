@@ -176,6 +176,23 @@ def _is_restricted_ip(ip: Union[ipaddress.IPv4Address, ipaddress.IPv6Address]) -
                 reason = _is_restricted_ip(embedded_ip)
                 if reason:
                     return f"Teredo {label} embeds {reason}"
+        # NAT64's well-known prefix (64:ff9b::/96, RFC 6052) and the deprecated
+        # IPv4-compatible form (::a.b.c.d) also carry a plain IPv4 address, but
+        # ipaddress exposes no accessor for either, so is_private and
+        # .sixtofour never see the payload. Without these two branches
+        # ::169.254.169.254 reads as an ordinary public IPv6 address.
+        # Mirrors internal/ipclass on the Go side.
+        packed = ip.packed
+        if packed[0:4] == b"\x00\x64\xff\x9b" and packed[4:12] == bytes(8):
+            reason = _is_restricted_ip(ipaddress.IPv4Address(packed[12:16]))
+            if reason:
+                return f"NAT64-embedded {reason}"
+        if packed[0:12] == bytes(12):
+            # :: and ::1 already returned above; ::ffff:a.b.c.d is handled by
+            # the ipv4_mapped branch.
+            reason = _is_restricted_ip(ipaddress.IPv4Address(packed[12:16]))
+            if reason:
+                return f"IPv4-compatible {reason}"
         # Site-local (fec0::/10)
         if (ip.packed[0] == 0xFE) and (ip.packed[1] & 0xC0) == 0xC0:
             return "site-local IPv6 address"

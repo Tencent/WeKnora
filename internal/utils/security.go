@@ -18,6 +18,8 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/net/http/httpproxy"
+
+	"github.com/Tencent/WeKnora/internal/ipclass"
 )
 
 // XSS 防护相关正则表达式
@@ -225,35 +227,6 @@ var restrictedHostSuffixes = []string{
 	".pod.cluster.local",
 }
 
-// restrictedIPv4Ranges contains CIDR ranges that should be blocked
-// These are additional ranges not covered by Go's IsPrivate(), IsLoopback(), etc.
-var restrictedIPv4Ranges = []*net.IPNet{
-	// 100.64.0.0/10 - Carrier-grade NAT (RFC 6598)
-	mustParseCIDR("100.64.0.0/10"),
-	// 198.18.0.0/15 - Network device benchmark testing (RFC 2544)
-	mustParseCIDR("198.18.0.0/15"),
-	// 198.51.100.0/24 - TEST-NET-2 for documentation (RFC 5737)
-	mustParseCIDR("198.51.100.0/24"),
-	// 203.0.113.0/24 - TEST-NET-3 for documentation (RFC 5737)
-	mustParseCIDR("203.0.113.0/24"),
-	// 192.0.0.0/24 - IETF Protocol Assignments (RFC 6890)
-	mustParseCIDR("192.0.0.0/24"),
-	// 192.0.2.0/24 - TEST-NET-1 for documentation (RFC 5737)
-	mustParseCIDR("192.0.2.0/24"),
-	// 0.0.0.0/8 - "This" network (RFC 1122)
-	mustParseCIDR("0.0.0.0/8"),
-	// 240.0.0.0/4 - Reserved for future use (RFC 1112)
-	mustParseCIDR("240.0.0.0/4"),
-	// 255.255.255.255/32 - Limited broadcast
-	mustParseCIDR("255.255.255.255/32"),
-	// Docker bridge network (default range)
-	mustParseCIDR("172.17.0.0/16"),
-	// Docker user-defined bridge networks (commonly used range)
-	mustParseCIDR("172.18.0.0/16"),
-	mustParseCIDR("172.19.0.0/16"),
-	mustParseCIDR("172.20.0.0/16"),
-}
-
 // restrictedPorts contains non-HTTP service ports that user-controlled URLs
 // must not reach. It is checked both during URL validation and again at dial
 // time so dynamically discovered URLs cannot bypass the input boundary.
@@ -274,76 +247,18 @@ var restrictedPorts = map[string]bool{
 	"4001":  true, // etcd (old)
 }
 
-// mustParseCIDR parses a CIDR string and panics on error
-func mustParseCIDR(s string) *net.IPNet {
-	_, ipNet, err := net.ParseCIDR(s)
-	if err != nil {
-		panic(fmt.Sprintf("invalid CIDR: %s", s))
-	}
-	return ipNet
-}
-
-// isRestrictedIP checks if an IP address falls within any restricted range
+// isRestrictedIP checks if an IP address falls within any restricted range.
+//
+// The URLs guarded here come from end users, who get no opt-in for internal
+// targets, so every class except ipclass.Public is restricted. Documentation
+// ranges are included in that: they are unroutable, and a user-supplied URL
+// has no legitimate reason to name one.
 func isRestrictedIP(ip net.IP) (bool, string) {
-	// Check Go's built-in methods first
-	if ip.IsPrivate() {
-		return true, "private IP address"
+	class, reason := ipclass.Classify(ip)
+	if class == ipclass.Public {
+		return false, ""
 	}
-	if ip.IsLoopback() {
-		return true, "loopback address"
-	}
-	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-		return true, "link-local address"
-	}
-	if ip.IsMulticast() {
-		return true, "multicast address"
-	}
-	if ip.IsUnspecified() {
-		return true, "unspecified address"
-	}
-
-	// Check IPv4-specific restricted ranges
-	if ip4 := ip.To4(); ip4 != nil {
-		for _, cidr := range restrictedIPv4Ranges {
-			if cidr.Contains(ip4) {
-				return true, fmt.Sprintf("restricted range %s", cidr.String())
-			}
-		}
-	}
-
-	// Check IPv6-specific restrictions
-	if ip.To4() == nil && len(ip) == 16 {
-		// Site-local (deprecated but still blocked): fec0::/10
-		if ip[0] == 0xfe && (ip[1]&0xc0) == 0xc0 {
-			return true, "site-local IPv6 address"
-		}
-		// Unique local address (ULA): fc00::/7 (already covered by IsPrivate for Go 1.17+)
-		if (ip[0] & 0xfe) == 0xfc {
-			return true, "unique local IPv6 address"
-		}
-		// IPv4-mapped IPv6 addresses: ::ffff:x.x.x.x
-		if isZeros(ip[0:10]) && ip[10] == 0xff && ip[11] == 0xff {
-			mappedIP := ip[12:16]
-			if restricted, reason := isRestrictedIP(net.IP(mappedIP)); restricted {
-				return true, fmt.Sprintf("IPv4-mapped %s", reason)
-			}
-		}
-		// Teredo tunneling addresses: 2001:0000::/32
-		// Embed arbitrary IPv4 in the payload; can reach internal hosts via relay.
-		if ip[0] == 0x20 && ip[1] == 0x01 && ip[2] == 0x00 && ip[3] == 0x00 {
-			return true, "Teredo tunneling address"
-		}
-		// 6to4 addresses: 2002::/16
-		// Bits 16-47 carry an IPv4 address; block when embedded IPv4 is restricted.
-		if ip[0] == 0x20 && ip[1] == 0x02 {
-			embeddedIP := net.IP(ip[2:6])
-			if restricted, reason := isRestrictedIP(embeddedIP); restricted {
-				return true, fmt.Sprintf("6to4 embedded %s", reason)
-			}
-		}
-	}
-
-	return false, ""
+	return true, reason
 }
 
 // IsPublicIP returns true if the IP is safe for outbound fetch (not private, loopback, link-local, etc.).
@@ -351,16 +266,6 @@ func isRestrictedIP(ip net.IP) (bool, string) {
 func IsPublicIP(ip net.IP) bool {
 	restricted, _ := isRestrictedIP(ip)
 	return !restricted
-}
-
-// isZeros checks if a byte slice is all zeros
-func isZeros(b []byte) bool {
-	for _, v := range b {
-		if v != 0 {
-			return false
-		}
-	}
-	return true
 }
 
 // ipLikePatterns contains regex patterns for detecting IP-like hostnames
