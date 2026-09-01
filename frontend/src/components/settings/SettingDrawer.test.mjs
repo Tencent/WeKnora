@@ -12,3 +12,9 @@ test('the title row hosts compact header actions without replacing the step rail
   assert.match(source, /setting-drawer__header-actions/)
   assert.match(source, /&:empty/)
 })
+
+test('drawer width never exceeds the viewport', () => {
+  assert.match(source, /viewportWidth/)
+  assert.match(source, /window.innerWidth/)
+  assert.match(source, /max-width: 100vw/)
+})

@@ -20,6 +20,8 @@ test('focused skill management expands env vars and transcript without a mid-pag
   assert.match(source, /SETTING_DRAWER_HEADER_ACTIONS_ID/)
   assert.match(source, /skill\.status === 'installing'/)
   assert.match(manageBlock, /skill-manage__section--remove/)
+  assert.match(manageBlock, /theme="circle"/)
+  assert.doesNotMatch(manageBlock, /stroke-width="6"/)
   assert.match(manageBlock, /t-popconfirm/)
   assert.doesNotMatch(manageBlock, /askRemove/)
   assert.doesNotMatch(manageBlock, /skill-manage__section--danger/)

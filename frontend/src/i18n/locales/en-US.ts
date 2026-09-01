@@ -1445,6 +1445,8 @@ export default {
       installedOnName: 'Installed on {name}',
       installedCount: 'Installed on {count} sandboxes',
       installPanelGroup: 'Installed',
+      installPanelAvailable: 'Not installed',
+      viewInstallProgress: 'View progress',
       manageOnSandbox: 'Manage this skill on “{name}”',
       manageDrawerDesc: 'Manage enablement, variables, and uninstall on sandbox “{name}”.',
       manageEnable: 'Enable',

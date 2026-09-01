@@ -7,7 +7,7 @@
       <div class="setting-drawer-resize-line" />
     </div>
   </teleport>
-  <t-drawer v-model:visible="drawerVisible" v-bind="drawerPassthroughAttrs" :size="effectiveWidth" :z-index="2500" placement="right"
+  <t-drawer v-model:visible="drawerVisible" v-bind="drawerPassthroughAttrs" :size="effectiveWidth" :z-index="zIndex" placement="right"
     attach="body" destroy-on-close :footer="!hideFooter"
     :class="drawerClass" @before-close="blurActiveElementBeforeClose">
     <!--
@@ -104,6 +104,7 @@ interface Props {
   confirmText?: string
   cancelText?: string
   hideFooter?: boolean
+  zIndex?: number
 }
 
 defineOptions({ inheritAttrs: false })
@@ -120,7 +121,8 @@ const props = withDefaults(defineProps<Props>(), {
   confirmDisabled: false,
   confirmText: '',
   cancelText: '',
-  hideFooter: false
+  hideFooter: false,
+  zIndex: 2500,
 })
 
 const emit = defineEmits<{
@@ -153,8 +155,15 @@ const resolvedStorageKey = computed(
   () => props.storageKey || `setting-drawer:width:${props.title || 'default'}`
 )
 
-const clampWidth = (n: number) =>
-  Math.max(props.minWidth, Math.min(props.maxWidth, Math.round(n)))
+const viewportWidth = ref(
+  typeof window === 'undefined' ? props.maxWidth : window.innerWidth,
+)
+
+const clampWidth = (n: number) => {
+  const cap = Math.min(props.maxWidth, viewportWidth.value)
+  const floor = Math.min(props.minWidth, cap)
+  return Math.max(floor, Math.min(cap, Math.round(n)))
+}
 
 const parseWidthToPx = (width: string) => {
   const n = parseInt(width, 10)
@@ -177,13 +186,11 @@ const loadStoredWidth = (): number | null => {
 // User's persisted width (px) wins over the prop default.
 const userWidthPx = ref<number | null>(loadStoredWidth())
 
-const effectiveWidth = computed(() =>
-  userWidthPx.value != null ? `${userWidthPx.value}px` : props.width
+const drawerWidthPx = computed(() =>
+  clampWidth(userWidthPx.value ?? parseWidthToPx(props.width)),
 )
 
-const drawerWidthPx = computed(() =>
-  userWidthPx.value ?? parseWidthToPx(props.width)
-)
+const effectiveWidth = computed(() => `${drawerWidthPx.value}px`)
 
 const persistWidth = (width: number) => {
   const next = clampWidth(width)
@@ -241,9 +248,7 @@ function cleanupResize() {
 }
 
 function onWindowResize() {
-  if (userWidthPx.value != null) {
-    userWidthPx.value = clampWidth(userWidthPx.value)
-  }
+  viewportWidth.value = window.innerWidth
 }
 
 onMounted(() => {
@@ -467,6 +472,14 @@ const handleCancel = () => {
 -->
 <style lang="less">
 .setting-drawer {
+  max-width: 100vw;
+
+  .t-drawer__content {
+    min-width: 0;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
   .t-drawer__header {
     padding: 14px 18px;
     border-bottom: 1px solid var(--td-component-stroke);

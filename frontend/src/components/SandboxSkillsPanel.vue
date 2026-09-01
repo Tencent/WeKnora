@@ -106,9 +106,17 @@
           <section class="skill-manage__section skill-manage__section--remove">
             <div class="skill-manage__section-head">
               <h4>{{ $t('settings.sandbox.skillRemoveInProgress') }}</h4>
-              <span class="skill-manage__progress-label">{{ progressOf(managedSkill) }}%</span>
+              <div class="skill-manage__progress">
+                <t-progress
+                  theme="circle"
+                  :percentage="progressOf(managedSkill)"
+                  :size="18"
+                  :stroke-width="2"
+                  :label="false"
+                />
+                <span>{{ progressOf(managedSkill) }}%</span>
+              </div>
             </div>
-            <t-progress :percentage="progressOf(managedSkill)" :stroke-width="6" />
             <p class="skill-manage__remove-stage">{{ progressStageText(managedSkill) }}</p>
           </section>
         </template>
@@ -1680,12 +1688,6 @@ onUnmounted(() => {
     border-top: 0;
     padding-top: 0;
   }
-}
-
-.skill-manage__progress-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--td-brand-color);
 }
 
 .skill-manage__remove-stage {

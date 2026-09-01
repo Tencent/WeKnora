@@ -5365,6 +5365,8 @@ export default {
       installedOnName: 'Установлен в {name}',
       installedCount: 'Установлен в {count} песочницах',
       installPanelGroup: 'Установлено',
+      installPanelAvailable: 'Не установлено',
+      viewInstallProgress: 'Смотреть ход',
       manageOnSandbox: 'Управление в песочнице «{name}»',
       manageDrawerDesc: 'В песочнице «{name}» можно включать навык, править переменные и удалять установку.',
       manageEnable: 'Включить',
