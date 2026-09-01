@@ -31,6 +31,12 @@ const (
 	ErrTenantInvalidStatus    ErrorCode = 2004
 	ErrTenantCreationDisabled ErrorCode = 2005
 
+	// ErrLastWorkspaceDeleteDenied guards a user from deleting the only
+	// workspace they still belong to, which would strand the account on the
+	// tenantless onboarding screen (and, where self-service creation is
+	// disabled, leave no way back without an invitation).
+	ErrLastWorkspaceDeleteDenied ErrorCode = 2006
+
 	// Agent related error codes (2100-2199)
 	ErrAgentMissingThinkingModel ErrorCode = 2100
 	ErrAgentMissingAllowedTools  ErrorCode = 2101
@@ -191,6 +197,16 @@ func NewTenantCreationDisabledError() *AppError {
 	return &AppError{
 		Code:     ErrTenantCreationDisabled,
 		Message:  "self-service workspace creation is disabled; join a workspace by invitation",
+		HTTPCode: http.StatusForbidden,
+	}
+}
+
+// NewLastWorkspaceDeleteDeniedError reports that deleting the workspace would
+// leave the caller with no remaining workspace membership.
+func NewLastWorkspaceDeleteDeniedError() *AppError {
+	return &AppError{
+		Code:     ErrLastWorkspaceDeleteDenied,
+		Message:  "cannot delete your last workspace; join or create another workspace before deleting this one",
 		HTTPCode: http.StatusForbidden,
 	}
 }
