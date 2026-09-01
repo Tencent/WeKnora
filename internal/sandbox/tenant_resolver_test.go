@@ -109,6 +109,8 @@ func TestResolveBuildsSessionBoundManagerForDocker(t *testing.T) {
 	// machine running the tests points its docker CLI at: a developer on a
 	// tcp:// daemon would otherwise trip the TLS requirement.
 	t.Setenv("DOCKER_HOST", "unix:///var/run/docker.sock")
+	isolateDockerEnabled(t)
+	t.Setenv(DockerBackendEnabledEnv, "true")
 
 	resolver, fallback := newTestResolver(t, &stubTenantConfigLoader{
 		result: ResolvedTenantSandboxConfig{
@@ -132,6 +134,29 @@ func TestResolveBuildsSessionBoundManagerForDocker(t *testing.T) {
 	require.True(t, ok, "docker must expose session-scoped capabilities")
 	require.NotNil(t, capabilities.SessionShellExecutor())
 	require.NotNil(t, capabilities.SessionFileStore())
+}
+
+func TestResolveRefusesDockerWhenDisabled(t *testing.T) {
+	isolateDockerEnabled(t)
+	t.Setenv(DockerBackendEnabledEnv, "false")
+	t.Setenv("DOCKER_HOST", "unix:///var/run/docker.sock")
+
+	resolver, _ := newTestResolver(t, &stubTenantConfigLoader{
+		result: ResolvedTenantSandboxConfig{
+			Config: &types.TenantSandboxConfig{
+				SandboxType: "docker",
+				Docker: &types.DockerSandboxConfig{
+					Image: "wechatopenai/weknora-sandbox:test",
+				},
+			},
+			Found: true,
+		},
+	})
+
+	mgr, err := resolver.Resolve(context.Background(), 42, "cfg-docker")
+
+	require.Nil(t, mgr)
+	require.ErrorIs(t, err, ErrDockerBackendDisabled)
 }
 
 // The image is this backend's template. Without it there is nothing to create a

@@ -2788,7 +2788,8 @@ export default {
         confirmBtn: '确认保存',
         cancelBtn: '取消',
         emptyValue: '（空）',
-        bodyAuthRegistrationMode: '即将把「{label}」改为：{value}\n\n如果切到 self_serve，公网任何人都可以注册账号 — 务必确认是预期行为。'
+        bodyAuthRegistrationMode: '即将把「{label}」改为：{value}\n\n如果切到 self_serve，公网任何人都可以注册账号 — 务必确认是预期行为。',
+        bodySandboxDockerEnabled: '打开后，空间管理员可以把沙箱指到本机 Docker。本机 docker.sock 等同宿主机 root，只适合已挂载 daemon 或配了 TLS 远程 tcp:// 的私有化单机。'
       },
       enumLabels: {
         auth: {
@@ -2818,10 +2819,14 @@ export default {
           max_owned_per_user: '每个非超管用户通过自助创建可拥有的最大空间数。每次创建空间时实时读取，修改后立即生效。0 表示使用内置默认值 10；负数表示完全关闭限制（不建议在公开部署使用）。',
           self_service_creation_enabled: '是否允许非超管用户主动创建空间。关闭后，普通用户只能通过邀请加入已有空间；跨空间超管仍可创建。修改后立即生效。',
           default_storage_quota_gb: '新建空间时默认分配的存储配额（GB），包含向量、原文、文本、索引等。仅在创建时读取，修改后只对之后新建的空间生效，不会回写已存在的空间。0 或负数表示使用内置默认值 10GB。',
-          auto_create_api_key: '为新空间自动生成 full_access API Key，并在创建响应中返回明文 token。仅用于兼容依赖旧行为的集成；默认关闭，建议通过 API Key 管理显式创建。'
+          auto_create_api_key: '为新空间自动生成 full_access API Key，并在创建响应中返回明文 token。仅用于兼容依赖旧行为的集成；默认关闭，建议通过 API Key 管理显式创建。',
+          auto_accept_invitation: '开启后，空间管理员通过邮箱邀请已注册用户时，对方会立即成为成员，不再经过收件箱确认。关闭时保持「发出邀请 → 被邀请人确认」流程。修改后立即生效。'
         },
         ssrf: {
           whitelist: 'SSRF 防护白名单。可填入 example.com / *.foo.com / 10.0.0.0/8 / 2001:db8::1。修改后立即生效。SSRF_WHITELIST_EXTRA 环境变量仍由部署方维护，不在此处覆盖。'
+        },
+        sandbox: {
+          docker_enabled: '是否允许 Docker 沙箱后端。本机 docker.sock 等同宿主机 root，默认关闭。仅系统管理员可打开；打开后立即生效，无需重启。私有化单机且已挂载 daemon socket，或配置了带 TLS 的远程 tcp:// 时再启用。'
         },
         auth: {
           registration_mode: '自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，仅 Owner/Admin 可邀请。修改后立即生效，但谨慎对待 self_serve（公网会接受 spam）。',
@@ -2845,10 +2850,14 @@ export default {
           max_owned_per_user: '每用户最大空间数',
           self_service_creation_enabled: '允许用户自助创建空间',
           default_storage_quota_gb: '新空间默认存储配额 (GB)',
-          auto_create_api_key: '创建空间时自动生成 API Key'
+          auto_create_api_key: '创建空间时自动生成 API Key',
+          auto_accept_invitation: '邀请已注册用户时自动加入'
         },
         ssrf: {
           whitelist: 'SSRF 防护白名单'
+        },
+        sandbox: {
+          docker_enabled: '启用 Docker 沙箱'
         },
         auth: {
           registration_mode: '自助注册模式',
@@ -3076,7 +3085,7 @@ export default {
         security: {
           tab: '网络安全 {count}',
           title: '网络安全',
-          description: '管理可绕过 SSRF 防护的受信主机、IP 与网段。'
+          description: '管理 SSRF 白名单，以及是否允许 Docker 沙箱（本机 docker.sock 等同宿主机 root）。'
         },
         runtime: {
           tab: '运行与并发 {count}',
@@ -5017,6 +5026,10 @@ export default {
         e2b: 'E2B 托管服务或兼容 E2B 的集群',
         docker: '在本机 Docker 上为每个会话保留一个长驻容器，脚本和文件都落在同一容器里',
       },
+      dockerDisabledAlert: '当前部署未启用 Docker 沙箱',
+      dockerDisabledHint: '本机 docker.sock 等同宿主机 root。仅私有化单机需要时，由系统管理员在「设置 → 系统设置 → 网络安全」中打开。',
+      dockerDisabledCard: '部署未启用 Docker 沙箱，此配置不会再创建容器',
+      dockerHostRisk: '留空或 unix:// 会使用 WeKnora 所在机器的 Docker 守护进程，权限等同该机 root，只适合私有化单机。多租户请改用 Cube 或 E2B。远程 tcp:// 必须填写 TLS 证书目录。',
       addConfig: '添加沙箱',
       viewClusterGuide: '集群搭建指南',
       configName: '配置名称',

@@ -124,7 +124,7 @@ type AgentConfig struct {
 
 ### Sandbox 配置入口
 
-Sandbox 不再读取 `WEKNORA_SANDBOX_*` 环境变量。后端、凭据、模板、执行超时、TTL 和私网访问策略均在「设置 → 沙箱后端」按空间保存；智能体没有选择空间配置时，脚本执行保持禁用。
+Sandbox 不再把凭据和模板放进 `WEKNORA_SANDBOX_*`。后端、凭据、模板、执行超时、TTL 和私网访问策略均在「设置 → 沙箱后端」按空间保存；智能体没有选择空间配置时，脚本执行保持禁用。Docker 后端默认关闭，由系统管理员在「设置 → 系统设置」打开，或设置 `WEKNORA_SANDBOX_DOCKER_ENABLED=true`。
 
 ### Sandbox 模式
 

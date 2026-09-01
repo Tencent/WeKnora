@@ -64,7 +64,21 @@
     </div>
 
     <t-loading :loading="loading" size="small" class="sandbox-list-loading">
-      <div v-if="!loading" class="sandbox-grid">
+      <t-alert
+        v-if="!loading && dockerTabDisabled && filteredRecords.length > 0"
+        theme="warning"
+        class="sandbox-docker-banner"
+        :message="$t('settings.sandbox.dockerDisabledAlert')"
+      >
+        <template #description>
+          <p>{{ $t('settings.sandbox.dockerDisabledHint') }}</p>
+        </template>
+      </t-alert>
+      <div v-if="!loading && dockerTabDisabled && filteredRecords.length === 0" class="sandbox-docker-disabled">
+        <t-empty :description="$t('settings.sandbox.dockerDisabledAlert')" />
+        <p class="sandbox-empty-hint">{{ $t('settings.sandbox.dockerDisabledHint') }}</p>
+      </div>
+      <div v-else-if="!loading" class="sandbox-grid">
         <div v-for="record in filteredRecords" :key="record.id" class="sandbox-card"
           :class="[`sandbox-card--${record.sandbox_type}`, { 'sandbox-card--clickable': !isLegacyRecord(record) }]"
           :role="isLegacyRecord(record) ? undefined : 'button'"
@@ -109,18 +123,18 @@
             </ul>
           </div>
         </div>
-        <button type="button" class="sandbox-card sandbox-card--add" @click="openCreate">
+        <button v-if="canCreateOnTab" type="button" class="sandbox-card sandbox-card--add" @click="openCreate">
           <span class="sandbox-card--add__icon" aria-hidden="true"><t-icon name="add" /></span>
           <span class="sandbox-card--add__label">{{ $t('settings.sandbox.addConfig') }}</span>
         </button>
       </div>
-      <p v-if="!loading && records.length === 0" class="sandbox-empty-hint">
+      <p v-if="!loading && !dockerTabDisabled && records.length === 0" class="sandbox-empty-hint">
         {{ $t('settings.sandbox.noConfigs') }}
       </p>
     </t-loading>
 
     <SandboxConfigEditorDrawer v-model:visible="showEditor" :record="editingRecord"
-      :preset-type="activeType === 'all' ? '' : activeType"
+      :preset-type="createPresetType"
       @saved="load" />
 
     <!--
@@ -203,6 +217,7 @@ import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { getSession } from '@/api/chat/index'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import {
   deleteSandboxConfig,
   getSandboxConfigInventory,
@@ -218,10 +233,26 @@ import {
 const { t } = useI18n()
 const router = useRouter()
 const confirmDelete = useConfirmDelete()
+const deploymentCapabilities = useDeploymentCapabilitiesStore()
+const dockerBackendEnabled = computed(() =>
+  deploymentCapabilities.isSupported('settings.sandbox.docker'),
+)
 
 const sandboxGuideUrl = 'https://github.com/Tencent/WeKnora/blob/main/docs/sandbox-cluster.md'
 
-const backendTypes = NAMED_SANDBOX_BACKEND_TYPES
+const backendTypes = [...NAMED_SANDBOX_BACKEND_TYPES]
+
+const dockerTabDisabled = computed(() =>
+  activeType.value === 'docker' && !dockerBackendEnabled.value,
+)
+
+const canCreateOnTab = computed(() => !dockerTabDisabled.value)
+
+const createPresetType = computed(() => {
+  if (activeType.value === 'all') return ''
+  if (dockerTabDisabled.value) return ''
+  return activeType.value
+})
 
 const loading = ref(false)
 const policySaving = ref(false)
@@ -350,6 +381,7 @@ async function onDeleteConfirmOpen(visible: boolean, record: SandboxConfigRecord
 }
 
 function openCreate() {
+  if (!canCreateOnTab.value) return
   editingRecord.value = null
   showEditor.value = true
 }
@@ -410,6 +442,12 @@ function buildCardWarnings(record: SandboxConfigRecord): CardWarning[] {
         text: t('settings.sandbox.cardCredentialMissing'),
       })
     }
+  }
+  if (record.sandbox_type === 'docker' && !dockerBackendEnabled.value) {
+    warnings.push({
+      key: 'docker-disabled',
+      text: t('settings.sandbox.dockerDisabledCard'),
+    })
   }
   if (record.sandbox_type === 'docker' && !config.docker?.image?.trim()) {
     warnings.push({
@@ -531,7 +569,10 @@ async function forceRemove(record: SandboxConfigRecord) {
   await removeRecord(record, true)
 }
 
-onMounted(load)
+onMounted(() => {
+  void deploymentCapabilities.ensureLoaded()
+  load()
+})
 </script>
 
 <style lang="less" scoped>
@@ -910,10 +951,23 @@ onMounted(load)
   opacity: 1;
 }
 
+.sandbox-docker-banner {
+  margin-bottom: 12px;
+}
+
+.sandbox-docker-disabled {
+  padding: 48px 16px 24px;
+  text-align: center;
+}
+
 .sandbox-empty-hint {
   margin: 16px 0 0;
   font-size: 13px;
   color: var(--td-text-color-placeholder);
+}
+
+.sandbox-docker-disabled .sandbox-empty-hint {
+  margin-top: 8px;
 }
 
 .inventory-banner {
