@@ -40,6 +40,24 @@ type Engine struct {
 
 const stuckUploadTimeout = 30 * time.Minute
 
+// pendingJobOrderClause keeps the two foundation artifacts at the same
+// priority. They are independent outputs from the active transcript and can
+// therefore use separate worker slots immediately after indexing completes.
+func pendingJobOrderClause() string {
+	return `CASE job_type
+		WHEN 'thumbnail' THEN 0
+		WHEN 'transcription' THEN 1
+		WHEN 'subtitle_generate' THEN 2
+		WHEN 'index' THEN 3
+		WHEN 'outline' THEN 4
+		WHEN 'summary' THEN 4
+		WHEN 'assemble' THEN 6
+		WHEN 'graph' THEN 7
+		WHEN 'summary_enhance' THEN 8
+		ELSE 9
+	END`
+}
+
 // NewEngine 构造引擎
 func NewEngine(db *gorm.DB, cfg *config.WorkerConfig, handlers ...Handler) *Engine {
 	e := &Engine{
@@ -119,24 +137,13 @@ func (e *Engine) tick(ctx context.Context) error {
 	for {
 		var job model.VideoProcessingJob
 		err := e.db.Transaction(func(tx *gorm.DB) error {
-			err := tx.Raw(`
+			err := tx.Raw(fmt.Sprintf(`
 				SELECT * FROM video_processing_jobs
 				WHERE status = 'pending'
-				ORDER BY CASE job_type
-					WHEN 'thumbnail' THEN 0
-					WHEN 'transcription' THEN 1
-					WHEN 'subtitle_generate' THEN 2
-					WHEN 'index' THEN 3
-					WHEN 'outline' THEN 4
-					WHEN 'summary' THEN 5
-					WHEN 'assemble' THEN 6
-					WHEN 'graph' THEN 7
-					WHEN 'summary_enhance' THEN 8
-					ELSE 9
-				END, created_at ASC
+				ORDER BY %s, created_at ASC
 				FOR UPDATE SKIP LOCKED
 				LIMIT 1
-			`).Scan(&job).Error
+			`, pendingJobOrderClause())).Scan(&job).Error
 			if err != nil {
 				return err
 			}

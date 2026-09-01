@@ -72,6 +72,37 @@ func TestCleanupStuckUploadsMarksOnlyOrphanedRecordsFailed(t *testing.T) {
 	}
 }
 
+func TestPendingJobOrderDoesNotBlockSummaryBehindLaterOutlines(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&model.VideoProcessingJob{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	createdAt := time.Now().UTC()
+	jobs := []model.VideoProcessingJob{
+		{ID: "outline-first", VideoID: "video-1", JobType: "outline", Status: "pending", IdempotencyKey: "outline-first", CreatedAt: createdAt},
+		{ID: "summary-second", VideoID: "video-1", JobType: "summary", Status: "pending", IdempotencyKey: "summary-second", CreatedAt: createdAt.Add(time.Second)},
+		{ID: "outline-third", VideoID: "video-2", JobType: "outline", Status: "pending", IdempotencyKey: "outline-third", CreatedAt: createdAt.Add(2 * time.Second)},
+	}
+	if err := db.Create(&jobs).Error; err != nil {
+		t.Fatalf("create jobs: %v", err)
+	}
+
+	var ordered []model.VideoProcessingJob
+	if err := db.Raw("SELECT * FROM video_processing_jobs WHERE status = 'pending' ORDER BY " + pendingJobOrderClause() + ", created_at ASC").Scan(&ordered).Error; err != nil {
+		t.Fatalf("order pending jobs: %v", err)
+	}
+	if len(ordered) != 3 {
+		t.Fatalf("ordered jobs = %d, want 3", len(ordered))
+	}
+	if got := []string{ordered[0].ID, ordered[1].ID, ordered[2].ID}; got[0] != "outline-first" || got[1] != "summary-second" || got[2] != "outline-third" {
+		t.Fatalf("pending order = %v, want outline-first, summary-second, outline-third", got)
+	}
+}
+
 func TestThumbnailEnhancementFailureKeepsPlayableVideoAvailable(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
