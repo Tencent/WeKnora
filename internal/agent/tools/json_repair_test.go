@@ -116,6 +116,35 @@ func TestRepairJSON(t *testing.T) {
 		assert.Equal(t, once, twice)
 	})
 
+	t.Run("stray fragment after empty object", func(t *testing.T) {
+		// Streaming providers sometimes append a lone `""` fragment after the
+		// arguments are already complete.
+		result := RepairJSON(`{}""`)
+		assert.Equal(t, "{}", result)
+	})
+
+	t.Run("stray fragment after complete object", func(t *testing.T) {
+		result := RepairJSON(`{"path": "/workspace/output"}""`)
+		assert.True(t, json.Valid([]byte(result)), "result: %s", result)
+
+		var parsed struct {
+			Path string `json:"path"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(result), &parsed))
+		assert.Equal(t, "/workspace/output", parsed.Path)
+	})
+
+	t.Run("duplicated payload keeps first value", func(t *testing.T) {
+		result := RepairJSON(`{"a": 1}{"a": 1}`)
+		assert.Equal(t, `{"a": 1}`, result)
+	})
+
+	t.Run("brace inside string does not trigger trim", func(t *testing.T) {
+		input := `{"query": "}", "limit": 1}`
+		result := RepairJSON(input)
+		assert.Equal(t, input, result)
+	})
+
 	t.Run("valid escapes are preserved", func(t *testing.T) {
 		// Valid JSON escapes must pass through untouched.
 		input := `{"path": "C:\\Users\\x", "line": "a\nb", "quote": "say \"hi\""}`
