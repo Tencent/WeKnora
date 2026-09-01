@@ -84,30 +84,14 @@ func (s *TenantSkillService) InstallSkill(
 		return "", err
 	}
 	if s.canSkipInstall(ctx, existing, bundle) {
-		catalog, catalogErr := s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, false)
+		catalog, catalogErr := s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, true)
 		if catalogErr != nil {
-			return "", fmt.Errorf("record skill catalog: %w", catalogErr)
+			return "", fmt.Errorf("store bundle for skill %s: %w", existing.ID, catalogErr)
 		}
-		if err := s.refreshSkippedBundle(ctx, existing, archive); err != nil {
+		if err := s.pointInstallAtCatalog(ctx, existing, catalog); err != nil {
 			return "", fmt.Errorf("store bundle for skill %s: %w", existing.ID, err)
 		}
-		if catalog != nil && existing.CatalogID != catalog.ID {
-			if err := s.updateSkillFields(ctx, tenantID, configID, existing.ID, func(e *types.TenantSkillEntity) {
-				e.CatalogID = catalog.ID
-			}); err != nil {
-				return "", err
-			}
-		}
 		return existing.ID, nil
-	}
-
-	catalog, err := s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, false)
-	if err != nil {
-		return "", fmt.Errorf("record skill catalog: %w", err)
-	}
-	catalogID := ""
-	if catalog != nil {
-		catalogID = catalog.ID
 	}
 
 	skillID := uuid.NewString()
@@ -115,15 +99,13 @@ func (s *TenantSkillService) InstallSkill(
 	if existing != nil {
 		skillID = existing.ID
 		takeSkillRowForInstall(existing, bundle, now)
-		existing.CatalogID = catalogID
 		if err := s.skills.UpdateSkill(ctx, existing); err != nil {
 			return "", err
 		}
 	} else {
 		if err := s.skills.CreateSkill(ctx, &types.TenantSkillEntity{
 			ID: skillID, TenantID: tenantID, SandboxConfigID: configID,
-			CatalogID: catalogID,
-			Name:      bundle.Name, Version: bundle.Version,
+			Name: bundle.Name, Version: bundle.Version,
 			Description: bundle.Description, Instructions: bundle.Instructions,
 			BundleSHA256: bundle.SHA256, Enabled: true,
 			Status: types.SkillStatusInstalling, InstallingSince: &now,
@@ -142,18 +124,17 @@ func (s *TenantSkillService) InstallSkill(
 			}
 			skillID = winner.ID
 			takeSkillRowForInstall(winner, bundle, now)
-			winner.CatalogID = catalogID
 			if err := s.skills.UpdateSkill(ctx, winner); err != nil {
 				return "", err
 			}
 		}
 	}
 
-	// Store the archive before the long-running part: read_skill serves file
-	// contents from it, and a re-install after a crash needs it too. A missing
-	// archive is a failed install, not a warning — otherwise the row says
-	// "installing" and later reads have nothing to serve.
-	ref, err := s.saveBundle(ctx, tenantID, skillID, archive)
+	// The zip lives on the catalog, not on this sandbox: uninstalling from
+	// the last config must not take the definition's files with it. The
+	// install row only copies the catalog ref so read_skill / retry can
+	// find the same object.
+	catalog, err := s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, true)
 	if err != nil {
 		failCtx, cancelFail := s.cleanupContext(ctx)
 		defer cancelFail()
@@ -163,9 +144,17 @@ func (s *TenantSkillService) InstallSkill(
 		s.failSkill(failCtx, tenantID, configID, skillID, bundle, storeErr)
 		return "", fmt.Errorf("store bundle for skill %s: %w", skillID, err)
 	}
-	_ = s.updateSkillFields(ctx, tenantID, configID, skillID, func(e *types.TenantSkillEntity) {
-		e.BundleRef = ref
-	})
+	if err := s.pointInstallAtCatalog(ctx, &types.TenantSkillEntity{
+		ID: skillID, TenantID: tenantID, SandboxConfigID: configID,
+	}, catalog); err != nil {
+		failCtx, cancelFail := s.cleanupContext(ctx)
+		defer cancelFail()
+		storeErr := fmt.Errorf("store bundle: %w", err)
+		logger.Errorf(ctx, "[skill] store bundle failed tenant=%d config=%s skill=%s name=%s: %v",
+			tenantID, configID, skillID, bundle.Name, err)
+		s.failSkill(failCtx, tenantID, configID, skillID, bundle, storeErr)
+		return "", fmt.Errorf("store bundle for skill %s: %w", skillID, err)
+	}
 
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
 		Percent: 10, Stage: "accepted", Status: types.SkillStatusInstalling,
@@ -227,17 +216,17 @@ func (s *TenantSkillService) ReinstallSkill(
 	if skill == nil {
 		return "", apperrors.NewNotFoundError("skill not found")
 	}
-	// Reported apart from a generic read failure: nothing a retry does can
-	// recover a skill whose archive is gone, and the operator needs to be told
-	// to upload it rather than to press the button again.
-	if strings.TrimSpace(skill.BundleRef) == "" {
-		return "", apperrors.NewBadRequestError(
-			"the archive of this skill is no longer stored; install it again from the original bundle",
-		)
-	}
+	// The zip is owned by the catalog. An empty install BundleRef is not
+	// itself a failure — fall through to skillBundleArchive, which is what
+	// reports a definition whose files are actually gone.
 	archive, err := s.skillBundleArchive(ctx, tenantID, configID, skillID)
 	if err != nil {
 		return "", err
+	}
+	if len(archive) == 0 {
+		return "", apperrors.NewBadRequestError(
+			"the archive of this skill is no longer stored; install it again from the original bundle",
+		)
 	}
 	return s.InstallSkill(ctx, tenantID, configID, archive)
 }
@@ -1153,14 +1142,23 @@ func (s *TenantSkillService) fileServiceForTenant(
 	return fs, nil
 }
 
-func (s *TenantSkillService) saveBundle(
-	ctx context.Context, tenantID uint64, skillID string, archive []byte,
-) (string, error) {
-	fs, err := s.fileServiceForTenant(ctx, tenantID)
-	if err != nil {
-		return "", err
+// pointInstallAtCatalog copies the catalog's stored zip onto the install row.
+// The bytes themselves stay on the definition: this is only a locator so a
+// sandbox-scoped read can find the same object after the catalog id is set.
+func (s *TenantSkillService) pointInstallAtCatalog(
+	ctx context.Context, skill *types.TenantSkillEntity, catalog *types.TenantSkillCatalogEntity,
+) error {
+	if skill == nil {
+		return nil
 	}
-	return fs.SaveBytes(ctx, archive, tenantID, fmt.Sprintf("tenant-skills/%s.zip", skillID), false)
+	if catalog == nil || strings.TrimSpace(catalog.BundleRef) == "" {
+		return fmt.Errorf("catalog archive is missing")
+	}
+	return s.updateSkillFields(ctx, skill.TenantID, skill.SandboxConfigID, skill.ID,
+		func(e *types.TenantSkillEntity) {
+			e.CatalogID = catalog.ID
+			e.BundleRef = catalog.BundleRef
+		})
 }
 
 // updateSkillFields loads, mutates and writes back one skill row. It logs on
@@ -1402,27 +1400,6 @@ func (s *TenantSkillService) beatInstallHeartbeat(
 	if err := s.skills.UpdateSkill(ctx, current); err != nil {
 		logger.Warnf(ctx, "[skill] install heartbeat for %s failed: %v", skillID, err)
 	}
-}
-
-// refreshSkippedBundle stores the uploaded archive even when the image work
-// is skipped. read_skill serves file contents from it, so a re-upload of a
-// ready skill is how a missing object-store blob gets repaired without
-// growing a new snapshot. A failure here is returned to the caller rather
-// than turning the ready row into a failed install.
-func (s *TenantSkillService) refreshSkippedBundle(
-	ctx context.Context, existing *types.TenantSkillEntity, archive []byte,
-) error {
-	if existing == nil {
-		return nil
-	}
-	ref, err := s.saveBundle(ctx, existing.TenantID, existing.ID, archive)
-	if err != nil {
-		return err
-	}
-	return s.updateSkillFields(ctx, existing.TenantID, existing.SandboxConfigID, existing.ID,
-		func(e *types.TenantSkillEntity) {
-			e.BundleRef = ref
-		})
 }
 
 // startMaintenanceSession opens the session one image operation runs in. The

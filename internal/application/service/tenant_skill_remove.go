@@ -378,11 +378,11 @@ func (s *TenantSkillService) clearImagePointer(
 	return s.configs.Update(ctx, cfgEntity)
 }
 
-// finishRemoval drops the DB row and the stored archive, then invalidates
-// bound sandboxes. It runs only once the image no longer contains the skill,
-// which is also why the delete is retried rather than reported as a failed
-// removal: the files are gone and re-running the whole flow to fix a row would
-// be absurd.
+// finishRemoval drops the DB row, then invalidates bound sandboxes. The
+// catalog archive is left alone: uninstalling from a sandbox must not
+// destroy the definition. It runs only once the image no longer contains
+// the skill, which is also why the row delete is retried rather than
+// reported as a failed removal.
 func (s *TenantSkillService) finishRemoval(
 	cleanupBase context.Context, tenantID uint64, configID, skillID string, imageChanged bool,
 ) error {
@@ -397,21 +397,11 @@ func (s *TenantSkillService) finishRemoval(
 		return nil
 	}
 
-	skill, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
-	if err != nil {
-		return err
-	}
-	// The row goes first. A surviving row whose BundleRef names a deleted
-	// object is a broken record - read_skill would serve nothing - whereas an
-	// archive whose row is gone is only unreferenced bytes.
 	if err := s.retrySkillBookkeeping(ctx, func() error {
 		return s.skills.DeleteSkill(ctx, tenantID, configID, skillID)
 	}); err != nil {
 		return fmt.Errorf("skill %s no longer exists in the image but its row remains: %w",
 			skillID, err)
-	}
-	if skill != nil && skill.BundleRef != "" {
-		s.deleteBundleBestEffort(ctx, tenantID, skill.BundleRef)
 	}
 	// Only an image that actually changed can leave a bound sandbox out of
 	// date. Marking after a removal that moved no pointer would destroy and
