@@ -2049,6 +2049,7 @@ export default {
     description: 'Configure entity-relationship extraction to automatically build a knowledge graph from text (note: this is different from the "page-link graph" inside the Wiki — that one shows references between Wiki pages, while this one is an LLM-extracted entity-relationship graph)',
     enableLabel: 'Enable Entity-Relationship Extraction',
     enableDescription: 'Automatically extract entities and relationships from text when enabled',
+    completeConfigRequired: 'Complete the required knowledge graph configuration: sample text, relationship types, entities, and relationships.',
     tagsLabel: 'Relationship Types',
     tagsDescription: 'Define relationship type tags to extract, separated by commas',
     tagsPlaceholder: 'Enter relationship types, e.g., works_at, colleague, friend',

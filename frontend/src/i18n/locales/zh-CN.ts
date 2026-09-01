@@ -4637,6 +4637,7 @@ export default {
     description: '配置实体-关系提取功能，自动从文本中抽取实体和关系构建知识图谱（注意：这与 Wiki 知识库中的「页面链接图谱」是两回事——前者是基于 LLM 的实体-关系图，后者是 Wiki 页面之间的引用关系图）',
     enableLabel: '启用实体关系提取',
     enableDescription: '开启后将自动从文本中提取实体和关系',
+    completeConfigRequired: '请完善知识图谱必填配置：示例文本、关系类型、实体和关系。',
     tagsLabel: '关系类型',
     tagsDescription: '定义要提取的关系类型标签，多个标签用逗号分隔',
     tagsPlaceholder: '输入关系类型，如：工作于、同事、朋友等',

@@ -4635,6 +4635,7 @@ export default {
     description: '엔티티-관계 추출 기능을 구성하여 텍스트에서 자동으로 엔티티와 관계를 추출하여 지식 그래프를 구축합니다 (참고: Wiki의 \'페이지 링크 그래프\'와는 다릅니다. 후자는 Wiki 페이지 간의 참조 관계를 보여주며, 이쪽은 LLM이 추출한 엔티티-관계 그래프입니다)',
     enableLabel: '엔티티 관계 추출 활성화',
     enableDescription: '활성화하면 텍스트에서 자동으로 엔티티와 관계를 추출합니다',
+    completeConfigRequired: '필수 지식 그래프 설정을 완료하세요: 샘플 텍스트, 관계 유형, 엔티티 및 관계.',
     tagsLabel: '관계 유형',
     tagsDescription: '추출할 관계 유형 태그 정의, 여러 태그는 쉼표로 구분',
     tagsPlaceholder: '관계 유형 입력, 예: 근무처, 동료, 친구 등',

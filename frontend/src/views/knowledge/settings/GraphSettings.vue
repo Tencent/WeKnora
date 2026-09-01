@@ -61,7 +61,10 @@
       <!-- 关系类型配置 -->
       <div v-if="localGraphExtract.enabled" class="setting-row vertical">
         <div class="setting-info">
-          <label>{{ t('graphSettings.tagsLabel') }}</label>
+          <label>
+            {{ t('graphSettings.tagsLabel') }}
+            <span class="required">*</span>
+          </label>
           <p class="desc">{{ t('graphSettings.tagsDescription') }}</p>
         </div>
         <div class="setting-control full-width">
@@ -98,7 +101,10 @@
       <!-- 示例文本 -->
       <div v-if="localGraphExtract.enabled" class="setting-row vertical">
         <div class="setting-info">
-          <label>{{ t('graphSettings.sampleTextLabel') }}</label>
+          <label>
+            {{ t('graphSettings.sampleTextLabel') }}
+            <span class="required">*</span>
+          </label>
           <p class="desc">{{ t('graphSettings.sampleTextDescription') }}</p>
         </div>
         <div class="setting-control full-width">
@@ -189,7 +195,10 @@
       <!-- 添加实体按钮 -->
       <div v-if="localGraphExtract.enabled" class="setting-row">
         <div class="setting-info">
-          <label>{{ t('graphSettings.manageEntitiesLabel') }}</label>
+          <label>
+            {{ t('graphSettings.manageEntitiesLabel') }}
+            <span class="required">*</span>
+          </label>
           <p class="desc">{{ t('graphSettings.manageEntitiesDescription') }}</p>
         </div>
         <div class="setting-control">
@@ -270,7 +279,10 @@
       <!-- 添加关系按钮 -->
       <div v-if="localGraphExtract.enabled" class="setting-row">
         <div class="setting-info">
-          <label>{{ t('graphSettings.manageRelationsLabel') }}</label>
+          <label>
+            {{ t('graphSettings.manageRelationsLabel') }}
+            <span class="required">*</span>
+          </label>
           <p class="desc">{{ t('graphSettings.manageRelationsDescription') }}</p>
         </div>
         <div class="setting-control">
@@ -323,9 +335,10 @@
 import { ref, watch, onMounted, computed } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
-import { extractTextRelations, fabriText, fabriTag, type Node, type Relation } from '@/api/initialization'
+import { extractTextRelations, fabriText, fabriTag } from '@/api/initialization'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useAuthStore } from '@/stores/auth'
+import type { GraphExtractConfig } from '../graphExtractValidation'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -334,15 +347,6 @@ const authStore = useAuthStore()
 // text-relation} 的 g.Admin() 守卫——这三个都是会调用大模型 + 写库的 admin
 // 工具。Contributor 看到按钮点了只会撞 403。
 const canRunGraphExtract = computed(() => authStore.hasRole('admin'))
-
-interface GraphExtractConfig {
-  enabled: boolean
-  text: string
-  tags: string[]
-  nodes: Node[]
-  relations: Relation[]
-  customInstructions?: string
-}
 
 interface Props {
   graphExtract: GraphExtractConfig
@@ -711,6 +715,11 @@ onMounted(async () => {
   .tip-icon {
     color: var(--td-brand-color);
   }
+}
+
+.required {
+  margin-left: 2px;
+  color: var(--td-error-color);
 }
 
 .node-list {
