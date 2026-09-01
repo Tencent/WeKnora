@@ -145,7 +145,10 @@ Debian 系基础镜像天然带 find 和 timeout。
 
 WeKnora 自己跑在容器里时，要把 **实际的** docker socket 挂进 app 容器（并接受它等同宿主机 root 的事实），
 或者改用远程 daemon。Linux 上通常是 `/var/run/docker.sock`；macOS 上 Colima / Docker Desktop / OrbStack
-各自有 `$HOME` 下的 socket，以 `docker context show` 为准。
+各自有 `$HOME` 下的 socket，以 `docker context show` 为准。入口脚本在 `gosu` 降权前会按
+socket 的 GID 把 `appuser` 加入对应组；不要依赖 compose `group_add`，也不要 `chmod 666`
+宿主机 socket。若 socket 是 `root:root` 且仅所有者可写，容器内无法安全补权，需在宿主机把
+socket 改成非 root 组的 `660`。
 
 ## 边界
 
