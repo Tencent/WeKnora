@@ -38,8 +38,9 @@ import (
 )
 
 const (
-	imNoAnswerFallback = "抱歉，我暂时无法回答这个问题。"
-	imErrorFallback    = "抱歉，处理您的问题时出现了异常，请稍后再试。"
+	imNoAnswerFallback  = "抱歉，我暂时无法回答这个问题。"
+	imErrorFallback     = "抱歉，处理您的问题时出现了异常，请稍后再试。"
+	imCancelledFallback = "抱歉，回答已被取消。"
 
 	// dedupTTL is how long processed message IDs are retained.
 	dedupTTL = 5 * time.Minute
@@ -146,7 +147,8 @@ func formatIMOutboundAnswer(ctx context.Context, raw string, tenant *types.Tenan
 
 // formatIMOutboundAnswerOrFallback guarantees that cleanup cannot turn a
 // non-empty model payload (for example, a think-only response) into an empty IM
-// message. Callers may pass imErrorFallback as raw when QA itself failed.
+// message. Callers may pass imErrorFallback or imCancelledFallback as raw when
+// QA itself failed or was stopped.
 func formatIMOutboundAnswerOrFallback(
 	ctx context.Context,
 	raw string,
@@ -159,6 +161,24 @@ func formatIMOutboundAnswerOrFallback(
 		return imNoAnswerFallback
 	}
 	return content
+}
+
+// imOutboundContext keeps values from ctx but drops cancellation. /stop cancels
+// the QA request; Feishu CardKit calls honor that deadline and would otherwise
+// leave the thinking placeholder on screen.
+func imOutboundContext(ctx context.Context) context.Context {
+	return context.WithoutCancel(ctx)
+}
+
+// imQAFailureReply maps a QA error onto the user-visible IM fallback text.
+func imQAFailureReply(err error) string {
+	if err == nil {
+		return imNoAnswerFallback
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return imCancelledFallback
+	}
+	return imErrorFallback
 }
 
 // cleanIMContent applies all IM-specific content transformations:
@@ -1971,14 +1991,15 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	answer, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs, attachments, imageURLs, req.userKey, req.msg.Quote)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA failed: %v, sending fallback reply", err)
-		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
+		answer = imQAFailureReply(err)
 	}
 
+	outCtx := imOutboundContext(ctx)
 	reply := &ReplyMessage{
-		Content: formatIMOutboundAnswer(ctx, answer, req.tenant, s.defaultFileSvc, s.storageResolver),
+		Content: formatIMOutboundAnswerOrFallback(outCtx, answer, req.tenant, s.defaultFileSvc, s.storageResolver),
 		IsFinal: true,
 	}
-	if err := req.adapter.SendReply(ctx, req.msg, reply); err != nil {
+	if err := req.adapter.SendReply(outCtx, req.msg, reply); err != nil {
 		logger.Errorf(ctx, "[IM] Send reply failed: %v", err)
 		return
 	}
@@ -2017,15 +2038,19 @@ func (s *Service) handleMessageFullOutput(
 	)
 	if qaErr != nil {
 		logger.Errorf(ctx, "[IM] Full-output QA failed: %v, sending fallback reply", qaErr)
-		answer = imErrorFallback
+		answer = imQAFailureReply(qaErr)
 	}
-	finalContent := formatIMOutboundAnswerOrFallback(ctx, answer, tenant, s.defaultFileSvc, s.storageResolver)
 
-	finalizeErr := streamer.FinalizeStream(ctx, msg, streamID, finalContent)
+	// QA (and /stop) may have cancelled ctx. Platform updates must still run so
+	// the thinking card is replaced instead of hanging forever.
+	outCtx := imOutboundContext(ctx)
+	finalContent := formatIMOutboundAnswerOrFallback(outCtx, answer, tenant, s.defaultFileSvc, s.storageResolver)
+
+	finalizeErr := streamer.FinalizeStream(outCtx, msg, streamID, finalContent)
 	if finalizeErr != nil {
 		logger.Warnf(ctx, "[IM] FinalizeStream failed for full output: %v", finalizeErr)
 	}
-	endErr := streamer.EndStream(ctx, msg, streamID)
+	endErr := streamer.EndStream(outCtx, msg, streamID)
 	if endErr != nil {
 		logger.Warnf(ctx, "[IM] EndStream failed for full output: %v", endErr)
 	}
@@ -2034,16 +2059,19 @@ func (s *Service) handleMessageFullOutput(
 	// user still receives the answer instead of being left on "thinking".
 	var fallbackErr error
 	if finalizeErr != nil {
-		fallbackErr = adapter.SendReply(ctx, msg, &ReplyMessage{Content: finalContent, IsFinal: true})
+		fallbackErr = adapter.SendReply(outCtx, msg, &ReplyMessage{Content: finalContent, IsFinal: true})
 		if fallbackErr != nil {
 			logger.Errorf(ctx, "[IM] Plain reply fallback after full-output finalize failure failed: %v", fallbackErr)
 		}
 	}
 
-	logger.Infof(
-		ctx, "[IM] Full-output reply sent: platform=%s user=%s answer_len=%d",
-		msg.Platform, msg.UserID, len(answer),
-	)
+	if finalizeErr == nil || fallbackErr == nil {
+		logger.Infof(
+			ctx, "[IM] Full-output reply sent: platform=%s user=%s answer_len=%d",
+			msg.Platform, msg.UserID, len(answer),
+		)
+		return nil
+	}
 	return errors.Join(finalizeErr, endErr, fallbackErr)
 }
 
@@ -2832,9 +2860,9 @@ loop:
 
 	finalDisplay := cleanIMContent(ctx, FormatIMFinalFromParts(parts), tenant, s.defaultFileSvc, s.storageResolver)
 	if noVisibleContent || finalDisplay == "" {
-		fallback := "抱歉，我暂时无法回答这个问题。"
+		fallback := imNoAnswerFallback
 		if finalErr != nil {
-			fallback = "抱歉，处理您的问题时出现了异常，请稍后再试。"
+			fallback = imQAFailureReply(finalErr)
 		}
 		finalDisplay = fallback
 		if answer == "" {
@@ -2856,7 +2884,7 @@ loop:
 	}
 
 	if answer == "" {
-		answer = "抱歉，我暂时无法回答这个问题。"
+		answer = imNoAnswerFallback
 	}
 
 	assistantMsg.Content = answer
@@ -2874,10 +2902,14 @@ func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, s
 	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA fallback failed: %v", err)
-		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
+		answer = imQAFailureReply(err)
 	}
 
-	return adapter.SendReply(ctx, msg, &ReplyMessage{Content: formatIMOutboundAnswer(ctx, answer, tenant, s.defaultFileSvc, s.storageResolver), IsFinal: true})
+	outCtx := imOutboundContext(ctx)
+	return adapter.SendReply(outCtx, msg, &ReplyMessage{
+		Content: formatIMOutboundAnswerOrFallback(outCtx, answer, tenant, s.defaultFileSvc, s.storageResolver),
+		IsFinal: true,
+	})
 }
 
 // runQA executes the WeKnora QA pipeline and returns the full answer text.
@@ -3035,7 +3067,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		}
 	case <-ctx.Done():
 		// Mark assistant message as completed to avoid dangling incomplete records
-		assistantMsg.Content = "抱歉，回答已被取消。"
+		assistantMsg.Content = imCancelledFallback
 		assistantMsg.IsCompleted = true
 		// Use a fresh context since the original is cancelled
 		if updateErr := s.messageService.UpdateMessage(context.WithoutCancel(ctx), assistantMsg); updateErr != nil {
@@ -3054,7 +3086,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		return "", qaError
 	}
 	if answer == "" {
-		answer = "抱歉，我暂时无法回答这个问题。"
+		answer = imNoAnswerFallback
 	}
 	if notice := s.buildIMMCPAuthNotice(ctx, authServices); notice != "" {
 		answer = appendIMAuthNotice(answer, notice)
