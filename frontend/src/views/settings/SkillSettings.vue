@@ -3,16 +3,9 @@
     <div class="section-header">
       <div class="section-header__title-row">
         <h2>{{ $t('settings.skills.title') }}</h2>
-        <t-tooltip
-          :content="$t('settings.skills.helpTooltip')"
-          placement="right"
-          overlay-class-name="skill-settings__help-tooltip"
-        >
-          <t-icon
-            name="help-circle"
-            class="section-header__help"
-            :aria-label="$t('settings.skills.helpTooltip')"
-          />
+        <t-tooltip :content="$t('settings.skills.helpTooltip')" placement="right"
+          overlay-class-name="skill-settings__help-tooltip">
+          <t-icon name="help-circle" class="section-header__help" :aria-label="$t('settings.skills.helpTooltip')" />
         </t-tooltip>
       </div>
       <p class="section-description">{{ $t('settings.skills.description') }}</p>
@@ -32,28 +25,19 @@
           <t-button theme="primary" @click="openAdd">
             {{ $t('settings.skills.addSkill') }}
           </t-button>
-          <t-button
-            v-if="skillConfigs.length === 0"
-            theme="default"
-            variant="outline"
-            @click="uiStore.openSettings('sandbox')"
-          >
+          <t-button v-if="skillConfigs.length === 0" theme="default" variant="outline"
+            @click="uiStore.openSettings('sandbox')">
             {{ $t('settings.skills.goSandboxSettings') }}
           </t-button>
         </div>
       </div>
 
       <div v-else class="skill-list">
-        <article
-          v-for="item in catalog"
-          :key="item.id"
-          class="skill-card"
-          :class="{
-            'skill-card--focused': focusedCatalogId === item.id,
-            'skill-card--installed': liveInstalls(item).length > 0,
-            'skill-card--idle': liveInstalls(item).length === 0,
-          }"
-        >
+        <article v-for="item in catalog" :key="item.id" class="skill-card" :class="{
+          'skill-card--focused': focusedCatalogId === item.id,
+          'skill-card--installed': liveInstalls(item).length > 0,
+          'skill-card--idle': liveInstalls(item).length === 0,
+        }">
           <div class="skill-card__main">
             <div class="skill-card__badge" aria-hidden="true">
               <t-icon :name="SKILL_ICON" size="16px" />
@@ -65,24 +49,13 @@
                   <span v-if="item.version" class="skill-card__type">{{ item.version }}</span>
                 </div>
                 <div class="skill-card__actions">
-                  <button
-                    type="button"
-                    class="skill-card__icon-btn"
-                    :title="$t('settings.sandbox.skillFiles')"
-                    :aria-label="$t('settings.sandbox.skillFiles')"
-                    @click="openCatalogFiles(item)"
-                  >
+                  <button type="button" class="skill-card__icon-btn" :title="$t('settings.sandbox.skillFiles')"
+                    :aria-label="$t('settings.sandbox.skillFiles')" @click="openCatalogFiles(item)">
                     <folder-icon size="14px" />
                   </button>
-                  <button
-                    v-if="canDelete(item)"
-                    type="button"
-                    class="skill-card__icon-btn skill-card__icon-btn--danger"
-                    :disabled="deletingId === item.id"
-                    :title="$t('settings.skills.deleteCatalog')"
-                    :aria-label="$t('settings.skills.deleteCatalog')"
-                    @click="askDelete(item)"
-                  >
+                  <button v-if="canDelete(item)" type="button" class="skill-card__icon-btn skill-card__icon-btn--danger"
+                    :disabled="deletingId === item.id" :title="$t('settings.skills.deleteCatalog')"
+                    :aria-label="$t('settings.skills.deleteCatalog')" @click="askDelete(item)">
                     <delete-icon size="14px" />
                   </button>
                 </div>
@@ -90,102 +63,54 @@
               <p v-if="item.description" class="skill-card__desc" :title="item.description">
                 {{ compactText(item.description) }}
               </p>
-              <div
-                v-for="view in [installsView(item)]"
-                :key="'installs'"
-                class="skill-card__installs"
-              >
-                <span
-                  v-if="view.installs.length === 0 && !view.canAdd"
-                  class="skill-card__installs-label"
-                >
+              <div v-for="view in [installsView(item)]" :key="'installs'" class="skill-card__installs">
+                <span v-if="view.installs.length === 0 && !view.canAdd" class="skill-card__installs-label">
                   {{ $t('settings.skills.noInstalls') }}
                 </span>
-                <button
-                  v-else-if="!view.needsPanel"
-                  type="button"
-                  class="skill-card__chip"
+                <button v-else-if="!view.needsPanel" type="button" class="skill-card__chip"
                   :class="chipClass(item, view)"
                   :disabled="Boolean(view.installs[0] && !recordFor(view.installs[0].sandbox_config_id))"
-                  :title="installSummaryTooltip(item, view)"
-                  :aria-label="installSummary(item, view)"
-                  @click="onInstallChipClick(item, view)"
-                >
-                  <span
-                    v-if="view.installs.some(isInstallBusy)"
-                    class="skill-card__entry-dot"
-                    aria-hidden="true"
-                  />
+                  :title="installSummaryTooltip(item, view)" :aria-label="installSummary(item, view)"
+                  @click="onInstallChipClick(item, view)">
+                  <span v-if="view.installs.some(isInstallBusy)" class="skill-card__entry-dot" aria-hidden="true" />
                   <span class="skill-card__chip-text">{{ installSummary(item, view) }}</span>
                   <t-icon name="chevron-right" size="14px" class="skill-card__chip-go" />
                 </button>
-                <t-popup
-                  v-else
-                  :visible="openPanelId === item.id"
-                  trigger="click"
-                  placement="bottom-left"
-                  attach="body"
-                  destroy-on-close
-                  overlay-class-name="skill-install-panel-overlay"
+                <t-popup v-else :visible="openPanelId === item.id" trigger="click" placement="bottom-left" attach="body"
+                  destroy-on-close overlay-class-name="skill-install-panel-overlay"
                   :overlay-inner-style="{ padding: 0 }"
-                  @visible-change="(visible: boolean) => setInstallPanel(item.id, visible)"
-                >
-                  <button
-                    type="button"
-                    class="skill-card__chip"
-                    :class="chipClass(item, view)"
-                    :title="installSummaryTooltip(item, view)"
-                    :aria-label="installSummary(item, view)"
-                    :aria-expanded="openPanelId === item.id"
-                  >
-                    <span
-                      v-if="view.installs.some(isInstallBusy)"
-                      class="skill-card__entry-dot"
-                      aria-hidden="true"
-                    />
+                  @visible-change="(visible: boolean) => setInstallPanel(item.id, visible)">
+                  <button type="button" class="skill-card__chip" :class="chipClass(item, view)"
+                    :title="installSummaryTooltip(item, view)" :aria-label="installSummary(item, view)"
+                    :aria-expanded="openPanelId === item.id">
+                    <span v-if="view.installs.some(isInstallBusy)" class="skill-card__entry-dot" aria-hidden="true" />
                     <span class="skill-card__chip-text">{{ installSummary(item, view) }}</span>
                     <t-icon name="chevron-down" size="14px" class="skill-card__chip-go" />
                   </button>
                   <template #content>
                     <div class="skill-install-panel">
-                      <p class="skill-install-panel__group">{{ $t('settings.skills.installPanelGroup') }}</p>
-                      <button
-                        v-for="inst in view.installs"
-                        :key="inst.skill_id"
-                        type="button"
-                        class="skill-install-panel__item"
-                        :class="installEntryClass(item, inst)"
-                        :disabled="!recordFor(inst.sandbox_config_id)"
-                        :title="installTooltip(item, inst)"
-                        @click="openManageFromPanel(item, inst)"
-                      >
-                        <SandboxBackendBadge
-                          v-if="inst.sandbox_type"
-                          :type="inst.sandbox_type"
-                          size="xs"
-                        />
-                        <span class="skill-install-panel__name">{{ installName(inst) }}</span>
-                        <span
-                          v-if="isInstallBusy(inst)"
-                          class="skill-card__entry-dot"
-                          aria-hidden="true"
-                        />
-                        <t-icon
-                          v-else-if="installChipStatusIcon(item, inst)"
-                          :name="installChipStatusIcon(item, inst)"
-                          size="14px"
-                          class="skill-card__entry-status"
-                        />
-                      </button>
-                      <template v-if="view.canAdd">
-                        <div class="skill-install-panel__split" role="separator" />
-                        <button
-                          type="button"
-                          class="skill-install-panel__item"
-                          @click="openInstallFromPanel(item)"
-                        >
-                          <t-icon name="add" size="16px" />
-                          <span class="skill-install-panel__name">{{ $t('settings.skills.installToSandbox') }}</span>
+                      <template v-if="view.installs.length > 0">
+                        <p class="skill-install-panel__group">{{ $t('settings.skills.installPanelGroup') }}</p>
+                        <button v-for="inst in view.installs" :key="inst.skill_id" type="button"
+                          class="skill-install-panel__item" :class="installEntryClass(item, inst)"
+                          :disabled="!recordFor(inst.sandbox_config_id)" :title="installTooltip(item, inst)"
+                          @click="openManageFromPanel(item, inst)">
+                          <SandboxBackendBadge v-if="inst.sandbox_type" :type="inst.sandbox_type" size="xs" />
+                          <span class="skill-install-panel__name">{{ installName(inst) }}</span>
+                          <span v-if="isInstallBusy(inst)" class="skill-card__entry-dot" aria-hidden="true" />
+                          <t-icon v-else-if="installChipStatusIcon(item, inst)"
+                            :name="installChipStatusIcon(item, inst)" size="14px" class="skill-card__entry-status" />
+                        </button>
+                      </template>
+                      <template v-if="view.available.length > 0">
+                        <div v-if="view.installs.length > 0" class="skill-install-panel__split" role="separator" />
+                        <p class="skill-install-panel__group">{{ $t('settings.skills.installPanelAvailable') }}</p>
+                        <button v-for="cfg in view.available" :key="cfg.id" type="button"
+                          class="skill-install-panel__item skill-install-panel__item--available"
+                          :title="sandboxMetaLine(cfg)" @click="openInstallTo(item, cfg)">
+                          <SandboxBackendBadge :type="cfg.sandbox_type" size="xs" />
+                          <span class="skill-install-panel__name">{{ cfg.name }}</span>
+                          <t-icon name="add" size="14px" class="skill-install-panel__add" />
                         </button>
                       </template>
                     </div>
@@ -204,35 +129,18 @@
       </div>
     </template>
 
-    <SettingDrawer
-      v-model:visible="showAdd"
-      :title="$t('settings.skills.addSkill')"
-      :description="addStepDescription"
-      :icon="SKILL_ICON"
-      width="680px"
-      :min-width="560"
-      :max-width="920"
-      storage-key="setting-drawer:width:skill-catalog-add"
-      :confirm-loading="addPrimaryLoading"
-      :confirm-disabled="addPrimaryDisabled"
-      :confirm-text="addPrimaryText"
-      @confirm="handleAddPrimary"
-    >
+    <SettingDrawer v-model:visible="showAdd" :title="$t('settings.skills.addSkill')" :description="addStepDescription"
+      :icon="SKILL_ICON" width="680px" :min-width="560" :max-width="920"
+      storage-key="setting-drawer:width:skill-catalog-add" :confirm-loading="addPrimaryLoading"
+      :confirm-disabled="addPrimaryDisabled" :confirm-text="addPrimaryText" @confirm="handleAddPrimary">
       <template #header-extra>
         <nav class="skill-add-steps" :aria-label="$t('settings.skills.addProgress')">
-          <component
-            :is="canJumpAddStep(index) ? 'button' : 'div'"
-            v-for="(item, index) in addSteps"
-            :key="item.key"
-            :type="canJumpAddStep(index) ? 'button' : undefined"
-            :class="['skill-add-step', {
+          <component :is="canJumpAddStep(index) ? 'button' : 'div'" v-for="(item, index) in addSteps" :key="item.key"
+            :type="canJumpAddStep(index) ? 'button' : undefined" :class="['skill-add-step', {
               'is-active': addStep === index,
               'is-done': addStep > index,
               'is-clickable': canJumpAddStep(index),
-            }]"
-            :aria-current="addStep === index ? 'step' : undefined"
-            @click="goToAddStep(index)"
-          >
+            }]" :aria-current="addStep === index ? 'step' : undefined" @click="goToAddStep(index)">
             <span class="skill-add-step__marker">
               <t-icon v-if="addStep > index" name="check" />
               <template v-else>{{ index + 1 }}</template>
@@ -268,33 +176,22 @@
       <template v-if="addStep === 0">
         <section class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillSourceSection') }}</h4>
-          <p class="installer-model-hint">{{ $t('settings.sandbox.skillSourceSectionHint', { size: maxSkillBundleMB }) }}</p>
-          <t-input
-            v-model="sourceInput"
-            :placeholder="$t('settings.sandbox.skillSourcePlaceholder')"
-            :disabled="addBusy || !!registeredCatalog"
-            @enter="handleAddPrimary"
-          />
+          <p class="installer-model-hint">{{ $t('settings.sandbox.skillSourceSectionHint', { size: maxSkillBundleMB })
+          }}</p>
+          <t-input v-model="sourceInput" :placeholder="$t('settings.sandbox.skillSourcePlaceholder')"
+            :disabled="addBusy || !!registeredCatalog" @enter="handleAddPrimary" />
         </section>
 
         <section class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillUploadSection') }}</h4>
-          <p class="installer-model-hint">{{ $t('settings.sandbox.skillUploadSectionHint', { size: maxSkillBundleMB }) }}</p>
-          <input
-            ref="fileInputRef"
-            type="file"
-            accept=".zip,application/zip"
-            class="file-input-hidden"
-            @change="onFileInputChange"
-          />
-          <div
-            class="file-upload-area file-upload-area--large"
+          <p class="installer-model-hint">{{ $t('settings.sandbox.skillUploadSectionHint', { size: maxSkillBundleMB })
+          }}</p>
+          <input ref="fileInputRef" type="file" accept=".zip,application/zip" class="file-input-hidden"
+            @change="onFileInputChange" />
+          <div class="file-upload-area file-upload-area--large"
             :class="{ 'has-file': !!pendingFile, 'is-disabled': addBusy || !!registeredCatalog }"
-            @click="!addBusy && !registeredCatalog && fileInputRef?.click()"
-            @dragover.prevent
-            @dragenter.prevent
-            @drop.prevent="onFileDrop"
-          >
+            @click="!addBusy && !registeredCatalog && fileInputRef?.click()" @dragover.prevent @dragenter.prevent
+            @drop.prevent="onFileDrop">
             <div class="file-upload-content">
               <div class="file-upload-icon-wrap" aria-hidden="true">
                 <t-icon name="cloud-upload" size="32px" class="upload-icon" />
@@ -311,13 +208,8 @@
               <t-progress v-if="uploading" :percentage="uploadPercent" size="small" />
             </div>
           </div>
-          <t-button
-            v-if="pendingFile && !registeredCatalog"
-            variant="text"
-            size="small"
-            :disabled="addBusy"
-            @click="pendingFile = null"
-          >
+          <t-button v-if="pendingFile && !registeredCatalog" variant="text" size="small" :disabled="addBusy"
+            @click="pendingFile = null">
             {{ $t('settings.skills.addClearFile') }}
           </t-button>
         </section>
@@ -327,101 +219,109 @@
         <section v-if="skillConfigs.length > 0" class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('settings.skills.pickSandboxes') }}</h4>
           <p class="installer-model-hint">{{ $t('settings.skills.pickSandboxesHint') }}</p>
-          <t-checkbox-group v-model="addTargetIds" class="sandbox-pick-list">
-            <t-checkbox v-for="cfg in skillConfigs" :key="cfg.id" :value="cfg.id" class="sandbox-pick">
-              <span class="sandbox-pick__main">
-                <SandboxBackendBadge :type="cfg.sandbox_type" size="sm" />
-                <span class="sandbox-pick__text">
-                  <span class="sandbox-pick__name">{{ cfg.name }}</span>
-                  <span class="sandbox-pick__meta">{{ sandboxMetaLine(cfg) }}</span>
+          <div class="sandbox-pick-list">
+            <div v-for="row in addPickRows" :key="row.cfg.id" class="sandbox-pick-row"
+              :class="{ 'is-busy': row.busy, 'is-ready': row.ready }">
+              <t-checkbox v-if="row.selectable" :checked="addTargetIds.includes(row.cfg.id)" :disabled="installing"
+                class="sandbox-pick" @change="(checked: boolean) => setAddPick(row.cfg.id, checked)">
+                <span class="sandbox-pick__main">
+                  <SandboxBackendBadge :type="row.cfg.sandbox_type" size="sm" />
+                  <span class="sandbox-pick__text">
+                    <span class="sandbox-pick__name">{{ row.cfg.name }}</span>
+                    <span class="sandbox-pick__meta">{{ sandboxMetaLine(row.cfg) }}</span>
+                  </span>
                 </span>
-              </span>
-            </t-checkbox>
-          </t-checkbox-group>
+              </t-checkbox>
+              <div v-else class="sandbox-pick sandbox-pick--status">
+                <span class="sandbox-pick__main">
+                  <SandboxBackendBadge :type="row.cfg.sandbox_type" size="sm" />
+                  <span class="sandbox-pick__text">
+                    <span class="sandbox-pick__name">{{ row.cfg.name }}</span>
+                    <span class="sandbox-pick__meta">{{ sandboxPickStatus(row) }}</span>
+                  </span>
+                </span>
+                <div v-if="row.busy" class="sandbox-pick__progress">
+                  <t-progress theme="circle" :percentage="sandboxPickPercent(row) ?? 0" :size="18" :stroke-width="2"
+                    :label="false" />
+                  <span v-if="sandboxPickPercent(row) != null">{{ sandboxPickPercent(row) }}%</span>
+                </div>
+                <t-button v-if="row.busy && row.install" size="small" variant="text" theme="primary"
+                  @click="openManageFromPick(registeredCatalog?.id, row.install)">
+                  {{ $t('settings.skills.viewInstallProgress') }}
+                </t-button>
+              </div>
+            </div>
+          </div>
         </section>
         <p v-else class="installer-model-hint">{{ $t('settings.skills.emptyNoSandboxHint') }}</p>
 
         <section v-if="addTargetIds.length > 0" class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillInstallerModel') }}</h4>
           <p class="installer-model-hint">{{ $t('settings.sandbox.skillInstallerModelHint') }}</p>
-          <ModelSelector
-            model-type="KnowledgeQA"
-            :selected-model-id="installerModelId"
-            :disabled="savingInstallerModel || installing"
-            @update:selected-model-id="onInstallerModelChange"
-          />
+          <ModelSelector model-type="KnowledgeQA" :selected-model-id="installerModelId"
+            :disabled="savingInstallerModel || installing" @update:selected-model-id="onInstallerModelChange" />
         </section>
       </template>
     </SettingDrawer>
 
-    <SettingDrawer
-      v-model:visible="showInstall"
-      :title="$t('settings.skills.installToSandbox')"
-      :description="installDrawerDesc"
-      :icon="SKILL_ICON"
-      width="560px"
-      :min-width="480"
-      :max-width="760"
-      storage-key="setting-drawer:width:skill-catalog-install"
-      :confirm-loading="installing"
-      :confirm-disabled="installTargetIds.length === 0"
-      :confirm-text="$t('settings.skills.installToSandbox')"
-      @confirm="confirmInstall"
-    >
+    <SettingDrawer v-model:visible="showInstall" :title="$t('settings.skills.installToSandbox')"
+      :description="installDrawerDesc" :icon="SKILL_ICON" width="560px" :min-width="480" :max-width="760"
+      storage-key="setting-drawer:width:skill-catalog-install" :confirm-loading="installing"
+      :confirm-disabled="installConfirmDisabled" :confirm-text="installConfirmText" @confirm="onInstallDrawerConfirm">
       <p class="installer-model-hint">{{ $t('settings.skills.installToSandboxDesc') }}</p>
-      <section v-if="installTargets.length > 0" class="setting-drawer__section">
-        <t-checkbox-group v-model="installTargetIds" class="sandbox-pick-list">
-          <t-checkbox v-for="cfg in installTargets" :key="cfg.id" :value="cfg.id" class="sandbox-pick">
-            <span class="sandbox-pick__main">
-              <SandboxBackendBadge :type="cfg.sandbox_type" size="sm" />
-              <span class="sandbox-pick__text">
-                <span class="sandbox-pick__name">{{ cfg.name }}</span>
-                <span class="sandbox-pick__meta">{{ sandboxMetaLine(cfg) }}</span>
+      <section v-if="installPickRows.length > 0" class="setting-drawer__section">
+        <div class="sandbox-pick-list">
+          <div v-for="row in installPickRows" :key="row.cfg.id" class="sandbox-pick-row"
+            :class="{ 'is-busy': row.busy, 'is-ready': row.ready }">
+            <t-checkbox v-if="row.selectable" :checked="installTargetIds.includes(row.cfg.id)" :disabled="installing"
+              class="sandbox-pick" @change="(checked: boolean) => setInstallPick(row.cfg.id, checked)">
+              <span class="sandbox-pick__main">
+                <SandboxBackendBadge :type="row.cfg.sandbox_type" size="sm" />
+                <span class="sandbox-pick__text">
+                  <span class="sandbox-pick__name">{{ row.cfg.name }}</span>
+                  <span class="sandbox-pick__meta">{{ sandboxMetaLine(row.cfg) }}</span>
+                </span>
               </span>
-            </span>
-          </t-checkbox>
-        </t-checkbox-group>
+            </t-checkbox>
+            <div v-else class="sandbox-pick sandbox-pick--status">
+              <span class="sandbox-pick__main">
+                <SandboxBackendBadge :type="row.cfg.sandbox_type" size="sm" />
+                <span class="sandbox-pick__text">
+                  <span class="sandbox-pick__name">{{ row.cfg.name }}</span>
+                  <span class="sandbox-pick__meta">{{ sandboxPickStatus(row) }}</span>
+                </span>
+              </span>
+              <div v-if="row.busy" class="sandbox-pick__progress">
+                <t-progress theme="circle" :percentage="sandboxPickPercent(row) ?? 0" :size="18" :stroke-width="2"
+                  :label="false" />
+                <span v-if="sandboxPickPercent(row) != null">{{ sandboxPickPercent(row) }}%</span>
+              </div>
+              <t-button v-if="row.busy && row.install" size="small" variant="text" theme="primary"
+                @click="openManageFromPick(installCatalog?.id, row.install)">
+                {{ $t('settings.skills.viewInstallProgress') }}
+              </t-button>
+            </div>
+          </div>
+        </div>
       </section>
       <p v-else class="installer-model-hint">{{ $t('settings.skills.noSandboxToInstall') }}</p>
       <section v-if="installTargetIds.length > 0" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillInstallerModel') }}</h4>
         <p class="installer-model-hint">{{ $t('settings.sandbox.skillInstallerModelHint') }}</p>
-        <ModelSelector
-          model-type="KnowledgeQA"
-          :selected-model-id="installerModelId"
-          :disabled="savingInstallerModel || installing"
-          @update:selected-model-id="onInstallerModelChange"
-        />
+        <ModelSelector model-type="KnowledgeQA" :selected-model-id="installerModelId"
+          :disabled="savingInstallerModel || installing" @update:selected-model-id="onInstallerModelChange" />
       </section>
     </SettingDrawer>
 
-    <SettingDrawer
-      v-model:visible="showManage"
-      :title="manageTitle"
-      :description="manageDesc"
-      :icon="SKILL_ICON"
-      width="680px"
-      :min-width="560"
-      :max-width="920"
-      storage-key="setting-drawer:width:skill-catalog-manage"
-      :hide-footer="true"
-    >
-      <SandboxSkillsPanel
-        v-if="showManage && manageRecord && manageSkillId"
-        :record="manageRecord"
-        mode="list"
-        hide-add
-        :focus-skill-id="manageSkillId"
-        @updated="onPanelUpdated"
-        @skills-changed="loadCatalog"
-      />
+    <SettingDrawer v-model:visible="showManage" :title="manageTitle" :description="manageDesc" :icon="SKILL_ICON"
+      width="680px" :min-width="560" :max-width="920" storage-key="setting-drawer:width:skill-catalog-manage"
+      :hide-footer="true" :z-index="2600">
+      <SandboxSkillsPanel v-if="showManage && manageRecord && manageSkillId" :record="manageRecord" mode="list" hide-add
+        :focus-skill-id="manageSkillId" @updated="onPanelUpdated" @skills-changed="loadCatalog" />
     </SettingDrawer>
 
-    <SkillFilesDrawer
-      v-model:visible="filesDrawerVisible"
-      :catalog-id="filesCatalogId"
-      :skill-name="filesCatalogName"
-    />
+    <SkillFilesDrawer v-model:visible="filesDrawerVisible" :catalog-id="filesCatalogId"
+      :skill-name="filesCatalogName" />
   </div>
 </template>
 
@@ -436,6 +336,7 @@ import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
+import { useConfigSkillInstallProgress } from '@/composables/useConfigSkillInstallProgress'
 import { SKILL_ICON } from '@/types/mention'
 import { useUIStore } from '@/stores/ui'
 import { MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils'
@@ -480,7 +381,9 @@ const addStep = ref(0)
 const registeredCatalog = ref<SkillCatalogRegisterResult | null>(null)
 const pendingFile = ref<File | null>(null)
 const addTargetIds = ref<string[]>([])
+const addSessionIds = ref<string[]>([])
 const installTargetIds = ref<string[]>([])
+const installSessionIds = ref<string[]>([])
 const installCatalog = ref<SkillCatalogItem | null>(null)
 const manageRecord = ref<SandboxConfigRecord | null>(null)
 const manageSkillId = ref('')
@@ -501,6 +404,16 @@ const savingInstallerModel = ref(false)
 
 const INSTALLER_AGENT_ID = 'builtin-skill-installer'
 const LAST_CHAT_MODEL_KEY = 'weknora_last_chat_model_id'
+
+const {
+  percentOf: installEventPercent,
+  sync: syncInstallProgress,
+  stopAll: stopInstallProgress,
+} = useConfigSkillInstallProgress({
+  onDone() {
+    void loadCatalog(true)
+  },
+})
 
 let pollTimer: number | null = null
 let focusTimer: number | null = null
@@ -542,11 +455,23 @@ const addPrimaryText = computed(() => {
   return t('settings.skills.addFinish')
 })
 
-const installTargets = computed(() => {
-  const item = installCatalog.value
-  if (!item) return skillConfigs.value
-  return targetsFor(item)
-})
+const installConfirmText = computed(() =>
+  installTargetIds.value.length > 0
+    ? t('settings.skills.installToSandbox')
+    : t('settings.skills.addFinish'),
+)
+
+const installConfirmDisabled = computed(() =>
+  installing.value || (installTargetIds.value.length > 0 && !installerModelId.value),
+)
+
+const installPickRows = computed(() =>
+  sandboxPickRows(catalogItemById(installCatalog.value?.id), 'remaining', installSessionIds.value),
+)
+
+const addPickRows = computed(() =>
+  sandboxPickRows(catalogItemById(registeredCatalog.value?.id), 'all', addSessionIds.value),
+)
 
 const installDrawerDesc = computed(() => {
   const item = installCatalog.value
@@ -603,6 +528,89 @@ function sandboxMetaLine(record: SandboxConfigRecord): string {
   const type = backendLabel(record.sandbox_type)
   const target = sandboxTargetLine(record)
   return target ? `${type} · ${target}` : type
+}
+
+type SandboxPickRow = {
+  cfg: SandboxConfigRecord
+  install?: SkillCatalogInstall
+  selectable: boolean
+  busy: boolean
+  ready: boolean
+}
+
+function catalogItemById(id: string | undefined | null): SkillCatalogItem | null {
+  const key = (id || '').trim()
+  if (!key) return null
+  return catalog.value.find((row) => row.id === key) || null
+}
+
+function sandboxPickRows(
+  item: SkillCatalogItem | null,
+  mode: 'remaining' | 'all',
+  sessionIds: string[],
+): SandboxPickRow[] {
+  const byId = new Map(
+    (item ? liveInstalls(item) : []).map((inst) => [inst.sandbox_config_id, inst]),
+  )
+  const session = new Set(sessionIds)
+  return skillConfigs.value
+    .filter((cfg) => {
+      if (mode === 'all') return true
+      const inst = byId.get(cfg.id)
+      if (session.has(cfg.id)) return true
+      if (inst && isInstallBusy(inst)) return true
+      if (!inst || inst.status === 'failed') return true
+      return false
+    })
+    .map((cfg) => {
+      const install = byId.get(cfg.id)
+      const busy = Boolean(install && isInstallBusy(install))
+      const ready = install?.status === 'ready'
+      return {
+        cfg,
+        install,
+        selectable: !busy && !ready,
+        busy,
+        ready,
+      }
+    })
+}
+
+function sandboxPickPercent(row: SandboxPickRow): number | null {
+  if (!row.busy || !row.install) return null
+  return installEventPercent(row.cfg.id, row.install.skill_id)
+}
+
+function sandboxPickStatus(row: SandboxPickRow): string {
+  if (row.install && isInstallBusy(row.install)) return installStatusText(row.install)
+  if (row.ready) return t('settings.sandbox.skillStatusReady')
+  return sandboxMetaLine(row.cfg)
+}
+
+function setAddPick(id: string, checked: boolean) {
+  setPickId(addTargetIds, id, checked)
+}
+
+function setInstallPick(id: string, checked: boolean) {
+  setPickId(installTargetIds, id, checked)
+}
+
+function setPickId(ids: { value: string[] }, id: string, checked: boolean) {
+  const on = Boolean(checked)
+  if (on) {
+    if (!ids.value.includes(id)) ids.value = [...ids.value, id]
+    return
+  }
+  ids.value = ids.value.filter((item) => item !== id)
+}
+
+function prunePicks(ids: { value: string[] }, rows: SandboxPickRow[]) {
+  const allowed = new Set(rows.filter((row) => row.selectable).map((row) => row.cfg.id))
+  ids.value = ids.value.filter((id) => allowed.has(id))
+}
+
+function rememberSession(session: { value: string[] }, ids: string[]) {
+  session.value = [...new Set([...session.value, ...ids])]
 }
 
 function catalogFromRegister(data: SkillCatalogRegisterResult | undefined, fallbackName: string): SkillCatalogRegisterResult | null {
@@ -677,17 +685,25 @@ function installPriority(item: SkillCatalogItem, inst: SkillCatalogInstall): num
   return 4
 }
 
+function unusedTargets(item: SkillCatalogItem): SandboxConfigRecord[] {
+  const live = new Set(liveInstalls(item).map((inst) => inst.sandbox_config_id))
+  return skillConfigs.value
+    .filter((cfg) => !live.has(cfg.id))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+}
+
 function installsView(item: SkillCatalogItem) {
   const installs = [...liveInstalls(item)].sort((a, b) => {
     const diff = installPriority(item, a) - installPriority(item, b)
     if (diff !== 0) return diff
     return installName(a).localeCompare(installName(b), undefined, { sensitivity: 'base' })
   })
-  const canAdd = targetsFor(item).length > 0
+  const available = unusedTargets(item)
   return {
     installs,
-    canAdd,
-    needsPanel: installs.length > 1 || (installs.length > 0 && canAdd),
+    available,
+    canAdd: available.length > 0,
+    needsPanel: installs.length + available.length > 1,
   }
 }
 
@@ -707,8 +723,17 @@ function chipClass(item: SkillCatalogItem, view: ReturnType<typeof installsView>
 }
 
 function installSummaryTooltip(item: SkillCatalogItem, view: ReturnType<typeof installsView>): string {
-  if (view.installs.length === 0) return t('settings.skills.installToSandbox')
-  return view.installs.map((inst) => installTooltip(item, inst)).join('\n')
+  const lines = view.installs.map((inst) => installTooltip(item, inst))
+  for (const cfg of view.available) {
+    const meta = sandboxMetaLine(cfg)
+    lines.push(
+      meta
+        ? `${cfg.name} · ${t('settings.skills.installPanelAvailable')} · ${meta}`
+        : `${cfg.name} · ${t('settings.skills.installPanelAvailable')}`,
+    )
+  }
+  if (lines.length === 0) return t('settings.skills.installToSandbox')
+  return lines.join('\n')
 }
 
 function onInstallChipClick(item: SkillCatalogItem, view: ReturnType<typeof installsView>) {
@@ -732,9 +757,19 @@ function openManageFromPanel(item: SkillCatalogItem, inst: SkillCatalogInstall) 
   openManage(item, inst)
 }
 
-function openInstallFromPanel(item: SkillCatalogItem) {
+function openInstallTo(item: SkillCatalogItem, cfg: SandboxConfigRecord) {
   openPanelId.value = ''
-  openInstall(item)
+  installCatalog.value = item
+  installSessionIds.value = []
+  installTargetIds.value = [cfg.id]
+  void loadInstallerModel()
+  showInstall.value = true
+}
+
+function openManageFromPick(catalogId: string | undefined, inst: SkillCatalogInstall) {
+  const item = catalogItemById(catalogId)
+  if (!item) return
+  openManage(item, inst)
 }
 
 function installEntryClass(item: SkillCatalogItem, inst: SkillCatalogInstall): string {
@@ -797,6 +832,7 @@ function resetAddWizard() {
   pendingFile.value = null
   sourceInput.value = ''
   addTargetIds.value = []
+  addSessionIds.value = []
   uploadPercent.value = 0
   if (fileInputRef.value) fileInputRef.value.value = ''
 }
@@ -824,6 +860,7 @@ function addPreviousStep() {
 
 function openInstall(item: SkillCatalogItem) {
   installCatalog.value = item
+  installSessionIds.value = []
   const remaining = targetsFor(item)
   installTargetIds.value = remaining.length === 1 ? [remaining[0].id] : []
   void loadInstallerModel()
@@ -1012,9 +1049,9 @@ async function handleAddPrimary() {
     } else {
       MessagePlugin.success(t('settings.skills.installAccepted'))
     }
-    showAdd.value = false
+    rememberSession(addSessionIds, targets)
     await loadCatalog()
-    revealCatalog(catalogId)
+    prunePicks(addTargetIds, addPickRows.value)
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.sandbox.skillUploadFailed'))
   } finally {
@@ -1034,22 +1071,31 @@ function onFileDrop(event: DragEvent) {
   if (file) acceptPendingFile(file)
 }
 
+function onInstallDrawerConfirm() {
+  if (installTargetIds.value.length === 0) {
+    showInstall.value = false
+    return
+  }
+  void confirmInstall()
+}
+
 async function confirmInstall() {
   const item = installCatalog.value
-  if (!item || installTargetIds.value.length === 0) return
+  const targets = [...installTargetIds.value]
+  if (!item || targets.length === 0) return
   installing.value = true
   try {
-    await ensureInstallerModelIfNeeded(installTargetIds.value)
-    const res = await installSkillCatalog(item.id, [...installTargetIds.value])
+    await ensureInstallerModelIfNeeded(targets)
+    const res = await installSkillCatalog(item.id, targets)
     const failed = catalogInstallFailedCount(res)
     if (failed > 0) {
       MessagePlugin.warning(t('settings.skills.installPartial', { failed }))
     } else {
       MessagePlugin.success(t('settings.skills.installAccepted'))
     }
-    showInstall.value = false
+    rememberSession(installSessionIds, targets)
     await loadCatalog()
-    revealCatalog(item.id)
+    prunePicks(installTargetIds, installPickRows.value)
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.sandbox.skillUploadFailed'))
   } finally {
@@ -1132,7 +1178,11 @@ watch(showManage, (open) => {
 })
 
 watch(showInstall, (open) => {
-  if (open) openPanelId.value = ''
+  if (open) {
+    openPanelId.value = ''
+    return
+  }
+  installSessionIds.value = []
 })
 
 watch(showAdd, (open) => {
@@ -1146,9 +1196,31 @@ watch(showAdd, (open) => {
   if (catalogId) revealCatalog(catalogId)
 })
 
+const busyPickTargets = computed(() => {
+  const seen = new Set<string>()
+  const targets: { configId: string; skillId: string }[] = []
+  const consider = (rows: SandboxPickRow[]) => {
+    for (const row of rows) {
+      if (!row.busy || !row.install?.skill_id) continue
+      const key = `${row.cfg.id}:${row.install.skill_id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      targets.push({ configId: row.cfg.id, skillId: row.install.skill_id })
+    }
+  }
+  if (showInstall.value) consider(installPickRows.value)
+  if (showAdd.value && addStep.value === 1) consider(addPickRows.value)
+  return targets
+})
+
+watch(busyPickTargets, (targets) => {
+  syncInstallProgress(targets)
+}, { immediate: true })
+
 onMounted(load)
 onUnmounted(() => {
   stopPoll()
+  stopInstallProgress()
   if (focusTimer != null) window.clearTimeout(focusTimer)
 })
 </script>
@@ -1558,8 +1630,10 @@ onUnmounted(() => {
 .skill-install-panel {
   display: flex;
   flex-direction: column;
-  width: 200px;
+  width: 240px;
   max-width: calc(100vw - 32px);
+  max-height: min(360px, 70vh);
+  overflow-y: auto;
   padding: 4px 0;
 }
 
@@ -1611,12 +1685,25 @@ onUnmounted(() => {
   }
 }
 
+.skill-install-panel__item--available {
+  color: var(--td-text-color-secondary);
+}
+
 .skill-install-panel__name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.skill-install-panel__add {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+}
+
+.skill-install-panel__item--available:hover .skill-install-panel__add {
+  color: var(--td-brand-color);
 }
 
 .skill-install-panel__split {
@@ -1626,9 +1713,15 @@ onUnmounted(() => {
 }
 
 @keyframes skill-chip-dot {
+
   0%,
-  100% { opacity: 1; }
-  50% { opacity: 0.35; }
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.35;
+  }
 }
 
 .installer-model-hint {
@@ -1740,9 +1833,13 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 8px;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 
   :deep(.t-checkbox) {
     width: 100%;
+    max-width: 100%;
     margin: 0;
     align-items: center;
     padding: 10px 12px;
@@ -1750,6 +1847,7 @@ onUnmounted(() => {
     border-radius: 10px;
     background: var(--td-bg-color-container);
     cursor: pointer;
+    box-sizing: border-box;
 
     &:hover:not(.t-is-disabled) {
       border-color: color-mix(in srgb, var(--td-brand-color) 40%, transparent);
@@ -1764,6 +1862,7 @@ onUnmounted(() => {
 
   :deep(.t-checkbox__label) {
     width: 100%;
+    min-width: 0;
     margin: 0;
     padding-left: 8px;
     white-space: normal;
@@ -1774,6 +1873,39 @@ onUnmounted(() => {
     flex-shrink: 0;
     margin-top: 0;
     align-self: center;
+  }
+}
+
+.sandbox-pick-row {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.sandbox-pick--status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
+
+  .sandbox-pick__main {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .sandbox-pick__progress,
+  :deep(.t-button) {
+    flex-shrink: 0;
+  }
+
+  .sandbox-pick-row.is-busy & {
+    border-color: color-mix(in srgb, var(--td-warning-color) 35%, transparent);
   }
 }
 
@@ -1796,12 +1928,32 @@ onUnmounted(() => {
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sandbox-pick__meta {
   font-size: 12px;
   color: var(--td-text-color-secondary);
   line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sandbox-pick__progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--td-brand-color);
+
+  :deep(.t-progress--circle svg) {
+    display: block;
+  }
 }
 
 .skill-source-row {

@@ -5365,6 +5365,8 @@ export default {
       installedOnName: '{name}에 설치됨',
       installedCount: '{count}개 샌드박스에 설치됨',
       installPanelGroup: '설치됨',
+      installPanelAvailable: '미설치',
+      viewInstallProgress: '진행 상황',
       manageOnSandbox: '「{name}」 샌드박스에서 관리',
       manageDrawerDesc: '샌드박스 「{name}」에서 사용 여부, 변수, 제거를 관리합니다.',
       manageEnable: '사용',

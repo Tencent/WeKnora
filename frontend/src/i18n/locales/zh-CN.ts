@@ -5367,6 +5367,8 @@ export default {
       installedOnName: '已安装到 {name}',
       installedCount: '已安装到 {count} 个沙箱',
       installPanelGroup: '已安装',
+      installPanelAvailable: '未安装',
+      viewInstallProgress: '查看进度',
       manageOnSandbox: '管理沙箱「{name}」上的安装',
       manageDrawerDesc: '在沙箱「{name}」上管理启用、变量和卸载。',
       manageEnable: '启用',
