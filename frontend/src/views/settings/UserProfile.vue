@@ -176,18 +176,21 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import type { FormInstanceFunctions, FormRule } from 'tdesign-vue-next'
 import {
   getCurrentUser,
+  getAuthConfig,
   changePassword,
   logout as logoutApi,
   type UserInfo,
 } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
+import { newPasswordRules } from '@/utils/passwordPolicy'
 
 const { t, locale } = useI18n()
 const router = useRouter()
 const authStore = useAuthStore()
 
 const userInfo = ref<UserInfo | null>(null)
+const complexPasswordEnabled = ref(false)
 const loading = ref(true)
 const error = ref('')
 
@@ -200,32 +203,39 @@ const passwordForm = reactive({
   confirmPassword: '',
 })
 
+const loadPasswordPolicy = async () => {
+  try {
+    const resp = await getAuthConfig()
+    complexPasswordEnabled.value = !!resp.complex_password_enabled
+  } catch {
+    complexPasswordEnabled.value = false
+  }
+}
+
 const oidcOnlyLogin = computed(
   () => userInfo.value?.preferences?.oidc_only_login === true,
 )
 
 watch(passwordPopupVisible, (open) => {
-  if (open) {
+  if (!open) {
     resetPasswordForm()
+    return
   }
+  resetPasswordForm()
+  void loadPasswordPolicy()
 })
 
 const passwordRules = computed<Record<string, FormRule[]>>(() => ({
   oldPassword: [
     { required: true, message: t('userProfile.changePassword.currentRequired'), type: 'error' },
   ],
-  newPassword: [
-    { required: true, message: t('auth.passwordRequired'), type: 'error' },
-    { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-    { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
-    { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' },
+  newPassword: newPasswordRules(t, complexPasswordEnabled.value, [
     {
       validator: (val: string) => val !== passwordForm.oldPassword,
       message: t('userProfile.changePassword.sameAsCurrent'),
       type: 'error',
     },
-  ],
+  ]),
   confirmPassword: [
     { required: true, message: t('auth.confirmPasswordRequired'), type: 'error' },
     {

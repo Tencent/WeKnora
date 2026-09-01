@@ -26,6 +26,7 @@ func TestResolveProvider(t *testing.T) {
 		{"lkeap r1 falls back", provider.ProviderLKEAP, "deepseek-r1", baseProvider{}},
 		{"qwen thinking", provider.ProviderAliyun, "qwen3-32b", qwenThinkingProvider{}},
 		{"generic", provider.ProviderGeneric, "anything", genericProvider{}},
+		{"litellm", provider.ProviderLiteLLM, "anything", liteLLMProvider{}},
 		{"gemini", provider.ProviderGemini, "gemini-3-flash-preview", geminiProvider{}},
 		{"nvidia", provider.ProviderNvidia, "anything", nvidiaProvider{}},
 		{"volcengine", provider.ProviderVolcengine, "doubao", volcengineProvider{}},

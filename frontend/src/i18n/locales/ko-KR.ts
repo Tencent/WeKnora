@@ -234,7 +234,7 @@ export default {
       currentPlaceholder: '현재 비밀번호를 입력하세요',
       currentRequired: '현재 비밀번호를 입력하세요',
       newLabel: '새 비밀번호',
-      newPlaceholder: '8-32자, 문자와 숫자 포함',
+      newPlaceholder: '새 비밀번호 입력',
       confirmLabel: '새 비밀번호 확인',
       confirmPlaceholder: '새 비밀번호를 다시 입력하세요',
       submit: '비밀번호 업데이트',
@@ -2452,6 +2452,10 @@ export default {
           label: 'OpenRouter',
           description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview 등'
         },
+        litellm: {
+          label: 'LiteLLM',
+          description: '자체 호스팅 프록시로 OpenAI, Anthropic, Gemini, Bedrock 등 100+ 공급자를 연결합니다. 플레이스홀더 URL을 실제 주소로 바꾸세요. localhost는 SSRF_WHITELIST에 추가해야 합니다.'
+        },
         zhipu: {
           label: 'Zhipu BigModel',
           description: 'glm-4.7, embedding-3, rerank, etc.'
@@ -2722,22 +2726,12 @@ export default {
         emailLabel: '사용자 이메일',
         emailPlaceholder: '비밀번호를 재설정할 사용자의 이메일 입력',
         newPasswordLabel: '새 비밀번호',
-        newPasswordPlaceholder: '8~32자, 문자와 숫자 포함',
+        newPasswordPlaceholder: '새 비밀번호 입력',
         confirmPasswordLabel: '새 비밀번호 확인',
         confirmPasswordPlaceholder: '새 비밀번호를 다시 입력',
         confirmBtn: '재설정 확인',
         success: '비밀번호가 재설정되고 기존 세션이 만료되었습니다',
         failed: '비밀번호 재설정 실패',
-        validation: {
-          emailRequired: '사용자 이메일을 입력하세요',
-          emailInvalid: '올바른 이메일 주소를 입력하세요',
-          passwordRequired: '새 비밀번호를 입력하세요',
-          passwordLength: '비밀번호는 8~32자여야 합니다',
-          passwordLetter: '비밀번호에 문자가 포함되어야 합니다',
-          passwordNumber: '비밀번호에 숫자가 포함되어야 합니다',
-          confirmRequired: '새 비밀번호를 다시 입력하세요',
-          passwordMismatch: '비밀번호가 일치하지 않습니다'
-        }
       },
       admins: {
         label: '시스템 관리자',
@@ -2829,7 +2823,8 @@ export default {
         },
         auth: {
           registration_mode: '셀프 가입 모드입니다. self_serve = 누구나 계정을 만들 수 있음; invite_only = 공개 가입을 끄고 Owner/Admin만 초대 가능. 저장 즉시 적용되며, self_serve는 스팸 가입이 들어올 수 있으니 신중히 사용하세요.',
-          default_tenant_mode: '공개 가입 후 공간 초기화 정책입니다. create_personal은 개인 공간을 만들고 Owner를 부여하며, tenantless는 초대 수락 또는 직접 공간 생성 전까지 계정만 만듭니다.'
+          default_tenant_mode: '공개 가입 후 공간 초기화 정책입니다. create_personal은 개인 공간을 만들고 Owner를 부여하며, tenantless는 초대 수락 또는 직접 공간 생성 전까지 계정만 만듭니다.',
+          complex_password_enabled: '복잡한 비밀번호를 사용할지 여부입니다. 활성화하면 비밀번호에 대문자, 소문자, 숫자 및 특수 문자가 포함되어야 합니다. 변경 사항은 즉시 적용되며, 새로 가입하는 사용자 또는 비밀번호를 새로 변경하거나 재설정하는 경우에만 적용됩니다. 특수 문자는 다음을 포함합니다: {specialChars}'
         }
       },
       keyLabels: {
@@ -2855,7 +2850,8 @@ export default {
         },
         auth: {
           registration_mode: '셀프 가입 모드',
-          default_tenant_mode: '기본 공간 프로비저닝'
+          default_tenant_mode: '기본 공간 프로비저닝',
+          complex_password_enabled: '복잡한 비밀번호 사용'
         }
       },
       runtime: {
@@ -4527,7 +4523,7 @@ export default {
     subtitle: 'RAG Q&A, ReAct 에이전트, Wiki 지식베이스 — 대규모 언어 모델 기반 엔터프라이즈 지식 프레임워크',
     registerSubtitle: '계정을 만들고 WeKnora를 시작하세요',
     emailPlaceholder: '이메일 주소 입력',
-    passwordPlaceholder: '비밀번호 입력 (8-32자, 문자와 숫자 포함)',
+    passwordPlaceholder: '비밀번호 입력',
     confirmPasswordPlaceholder: '비밀번호 다시 입력',
     usernamePlaceholder: '사용자명 입력',
     emailRequired: '이메일 주소를 입력해주세요',
@@ -4536,7 +4532,10 @@ export default {
     passwordMinLength: '비밀번호는 최소 8자여야 합니다',
     passwordMaxLength: '비밀번호는 32자를 초과할 수 없습니다',
     passwordMustContainLetter: '비밀번호에 문자가 포함되어야 합니다',
+    passwordMustContainLowercaseLetter: '비밀번호에는 소문자가 포함되어야 합니다',
+    passwordMustContainUppercaseLetter: '비밀번호에는 대문자가 포함되어야 합니다',
     passwordMustContainNumber: '비밀번호에 숫자가 포함되어야 합니다',
+    passwordMustContainSpecialChar: '비밀번호에는 특수문자가 포함되어야 합니다: {specialChars}',
     usernameRequired: '사용자명을 입력해주세요',
     usernameMinLength: '사용자명은 최소 2자여야 합니다',
     usernameMaxLength: '사용자명은 20자를 초과할 수 없습니다',
@@ -4985,10 +4984,10 @@ export default {
     parserEngine: '파싱 엔진',
     storageEngine: '스토리지 엔진',
     sandbox: {
-      title: '샌드박스',
+      title: '샌드박스 설정',
       description: '에이전트 스킬 스크립트의 격리 실행 환경을 구성합니다. 각 에이전트는 설정을 하나 선택합니다.',
       pageHintTitle: '샌드박스란?',
-      pageHint: '샌드박스는 에이전트 스킬 스크립트가 실행되는 격리 환경입니다. 워크스페이스에 Docker, E2B, CubeSandbox 설정을 여러 개 둘 수 있고, 각 에이전트가 하나를 선택합니다. 스킬은 「스킬」 페이지에서 선택한 설정의 이미지에 설치됩니다. 선택하지 않으면 스크립트는 실행되지 않습니다.',
+      pageHint: '샌드박스는 에이전트 스킬 스크립트가 실행되는 격리 환경입니다. 워크스페이스에 Docker, E2B, CubeSandbox 설정을 여러 개 둘 수 있고, 각 에이전트가 하나를 선택합니다. 스킬은 「스킬 관리」 페이지에서 선택한 설정의 이미지에 설치됩니다. 선택하지 않으면 스크립트는 실행되지 않습니다.',
       editorDescription: 'Configure a workspace runtime. Docker, CubeSandbox, and E2B use the same management flow.',
       stepConnection: 'Connect',
       stepTemplate: 'Template',
@@ -5310,7 +5309,7 @@ export default {
       },
     },
     skills: {
-      title: '스킬',
+      title: '스킬 관리',
       description: '스킬은 워크스페이스 카탈로그에 속합니다. 먼저 등록한 뒤 하나 이상의 샌드박스에 설치할 수 있습니다. 에이전트는 현재 샌드박스에서 준비된 스킬만 사용할 수 있습니다.',
       helpTooltip: '카탈로그 스킬은 아무 샌드박스에도 설치하지 않아도 됩니다. 스크립트를 실행하려면 에이전트가 쓰는 샌드박스 이미지에 설치해야 합니다. Docker, Cube, E2B 이미지는 호환되지 않으므로 샌드박스마다 따로 설치합니다.',
       goSandboxSettings: '샌드박스 구성',
@@ -5337,6 +5336,9 @@ export default {
       noSandboxToInstall: '설치할 수 있는 샌드박스가 없습니다.',
       noInstalls: '어떤 샌드박스에도 설치되지 않음',
       installedOn: '설치됨',
+      installedOnName: '{name}에 설치됨',
+      installedCount: '{count}개 샌드박스에 설치됨',
+      installPanelGroup: '설치됨',
       manageOnSandbox: '「{name}」 샌드박스에서 관리',
       manageDrawerDesc: '샌드박스 「{name}」에서 사용 여부, 변수, 제거를 관리합니다.',
       manageEnable: '사용',
@@ -5746,24 +5748,25 @@ export default {
       fallbackPrompt: '폴백 프롬프트',
       fallbackPromptPlaceholder: '시스템 기본 프롬프트를 사용하려면 비워 두세요.',
       skillsConfig: '스킬',
-      skillsConfigDesc: '스킬 스크립트가 실행될 샌드박스를 고른 뒤, 워크스페이스 카탈로그에서 선택합니다. 해당 샌드박스에 설치되지 않은 스킬은 보이지만 설치 전에는 선택할 수 없습니다.',
-      skillsSelection: '사용 가능한 스킬',
-      skillsSelectionDesc: '목록은 워크스페이스 스킬 카탈로그에서 가져옵니다. 선택한 샌드박스에서 준비된 스킬만 사용할 수 있습니다.',
+      skillsConfigDesc: '먼저 실행 샌드박스를 선택한 뒤 아래 목록에서 스킬을 고르세요. 해당 샌드박스에 없는 스킬은 「설치」가 보이며, 설치한 뒤에만 선택할 수 있습니다.',
+      skillsSelection: '스킬 목록',
+      skillsSelectionDesc: '워크스페이스 카탈로그의 스킬이 모두 표시됩니다. 이 샌드박스에 설치된 것은 바로 쓸 수 있고, 나머지는 먼저 「설치」해야 합니다.',
       skillsAll: '전체',
       skillsSelected: '지정',
       skillsNone: '비활성화',
       selectSkills: '스킬 선택',
-      selectSkillsDesc: '사용할 스킬을 선택하세요. 설치되지 않았거나 아직 준비되지 않은 스킬은 선택할 수 없습니다.',
-      skillsAllListHint: '이 샌드박스에서 준비된 스킬이 사용됩니다. 설치되지 않은 스킬은 설치해야 「전체」에 포함됩니다.',
-      skillsListSummary: '준비됨 {ready}개, 이 샌드박스에서 아직 사용 불가 {pending}개',
-      skillsListSummaryReadyOnly: '준비됨 {ready}개',
+      selectSkillsDesc: '이 에이전트에서 쓸 스킬을 선택하세요. 설치되지 않은 스킬은 선택할 수 없으며, 오른쪽 「설치」를 먼저 누르세요.',
+      skillsAllListHint: '「전체」에는 이 샌드박스에 이미 설치된 스킬만 포함됩니다. 설치되지 않은 스킬은 「설치」한 뒤에야 포함됩니다.',
+      skillsGroupAvailable: '사용 가능',
+      skillsGroupUnavailable: '사용 불가',
       noSkillsAvailable: '워크스페이스 카탈로그에 스킬이 없습니다.',
       skillsNeedSandbox: '먼저 실행 샌드박스를 선택하세요.',
       goSandboxSettings: '샌드박스 관리',
       goSkillSettings: '스킬 관리',
       installToThisSandbox: '이 샌드박스에 설치',
       installShort: '설치',
-      skillNotInstalled: '현재 샌드박스에 설치되지 않음',
+      viewInstallProgress: '진행 상황',
+      skillNotInstalled: '미설치',
       skillNotReady: '아직 준비되지 않음',
       skillDisabledOnSandbox: '이 샌드박스에서 비활성화됨',
       sandboxBackend: '실행 샌드박스',
