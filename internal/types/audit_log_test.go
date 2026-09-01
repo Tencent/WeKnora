@@ -124,6 +124,8 @@ func TestAuditAction_NoCollisionsAcrossNamespaces(t *testing.T) {
 	register("AuditActionSystemSettingChanged", AuditActionSystemSettingChanged)
 	register("AuditActionSystemAdminPromoted", AuditActionSystemAdminPromoted)
 	register("AuditActionSystemAdminRevoked", AuditActionSystemAdminRevoked)
+	register("AuditActionCrossTenantAccessGranted", AuditActionCrossTenantAccessGranted)
+	register("AuditActionCrossTenantAccessRevoked", AuditActionCrossTenantAccessRevoked)
 	register("AuditActionSystemUserPasswordReset", AuditActionSystemUserPasswordReset)
 	register("AuditActionSystemUserCreated", AuditActionSystemUserCreated)
 	register("AuditActionSystemQueueTaskRetried", AuditActionSystemQueueTaskRetried)
@@ -144,6 +146,8 @@ func TestAuditAction_SystemNamespacePrefix(t *testing.T) {
 		AuditActionSystemSettingChanged,
 		AuditActionSystemAdminPromoted,
 		AuditActionSystemAdminRevoked,
+		AuditActionCrossTenantAccessGranted,
+		AuditActionCrossTenantAccessRevoked,
 		AuditActionSystemUserPasswordReset,
 		AuditActionSystemUserCreated,
 		AuditActionSystemQueueTaskRetried,
@@ -172,6 +176,8 @@ func TestAuditAction_SystemWireValues(t *testing.T) {
 		{AuditActionSystemSettingChanged, "system.setting_changed"},
 		{AuditActionSystemAdminPromoted, "system.admin_promoted"},
 		{AuditActionSystemAdminRevoked, "system.admin_revoked"},
+		{AuditActionCrossTenantAccessGranted, "system.cross_tenant_access_granted"},
+		{AuditActionCrossTenantAccessRevoked, "system.cross_tenant_access_revoked"},
 		{AuditActionSystemUserPasswordReset, "system.user_password_reset"},
 		{AuditActionSystemUserCreated, "system.user_created"},
 		{AuditActionSystemQueueTaskRetried, "system.queue_task_retried"},

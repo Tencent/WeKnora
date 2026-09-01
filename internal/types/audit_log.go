@@ -116,6 +116,12 @@ const (
 	// reader can distinguish a real revoke from a noop attempt.
 	// TenantID=0 because the change is system-scope.
 	AuditActionSystemAdminRevoked AuditAction = "system.admin_revoked"
+	// AuditActionCrossTenantAccessGranted fires when a privileged SystemAdmin
+	// grants a user access to every tenant.
+	AuditActionCrossTenantAccessGranted AuditAction = "system.cross_tenant_access_granted"
+	// AuditActionCrossTenantAccessRevoked fires when a privileged SystemAdmin
+	// removes a user's access to every tenant.
+	AuditActionCrossTenantAccessRevoked AuditAction = "system.cross_tenant_access_revoked"
 
 	// AuditActionSystemUserPasswordReset fires when a SystemAdmin replaces
 	// another user's local password. Details identify the target and record

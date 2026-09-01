@@ -3968,6 +3968,24 @@ export default {
           }
         }
       },
+      crossTenantAccess: {
+        label: 'All-workspace access accounts',
+        description: 'Users who can access every workspace. Only system administrators who already have all-workspace access can manage this list. Your own account is hidden and cannot be revoked here.',
+        placeholder: 'Type a user email and press Enter',
+        loadFailed: 'Failed to load all-workspace access accounts',
+        saveSuccess: 'All-workspace access accounts updated',
+        saveFailed: 'Failed to update all-workspace access accounts',
+        confirm: {
+          grant: {
+            body: 'Grant {email} access to every workspace?',
+            confirmBtn: 'Grant access'
+          },
+          revoke: {
+            body: 'Revoke all-workspace access from {email}?',
+            confirmBtn: 'Revoke access'
+          }
+        }
+      },
       passwordReset: {
         label: 'Reset user password',
         description: 'Set a new password for another user who cannot sign in. A successful reset invalidates all of that user\'s current sessions, so they must sign in again with the new password.',
@@ -4029,6 +4047,8 @@ export default {
         action: {
           'system.setting_changed': 'System setting changed',
           'system.admin_promoted': 'System admin granted',
+          'system.cross_tenant_access_granted': 'All-workspace access granted',
+          'system.cross_tenant_access_revoked': 'All-workspace access revoked',
           'system.api_key_created': 'Platform API key created',
           'system.api_key_revoked': 'Platform API key revoked',
           'system.admin_revoked': 'System admin revoked',

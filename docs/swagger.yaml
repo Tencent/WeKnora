@@ -307,6 +307,8 @@ definitions:
     - system.setting_changed
     - system.admin_promoted
     - system.admin_revoked
+    - system.cross_tenant_access_granted
+    - system.cross_tenant_access_revoked
     - system.user_password_reset
     - system.user_created
     - system.api_key_created
@@ -371,6 +373,8 @@ definitions:
     - AuditActionSystemSettingChanged
     - AuditActionSystemAdminPromoted
     - AuditActionSystemAdminRevoked
+    - AuditActionCrossTenantAccessGranted
+    - AuditActionCrossTenantAccessRevoked
     - AuditActionSystemUserPasswordReset
     - AuditActionSystemUserCreated
     - AuditActionSystemAPIKeyCreated
@@ -5022,6 +5026,13 @@ definitions:
       version:
         type: string
     type: object
+  internal_handler.GrantCrossTenantAccessRequest:
+    properties:
+      email:
+        type: string
+      user_id:
+        type: string
+    type: object
   internal_handler.InitializationRequest:
     properties:
       documentSplitting:
@@ -5264,6 +5275,15 @@ definitions:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig'
     required:
     - llmModelId
+    type: object
+  internal_handler.ListCrossTenantAccessUsersResponse:
+    properties:
+      next_cursor:
+        type: string
+      users:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo'
+        type: array
     type: object
   internal_handler.ListSystemAdminsResponse:
     properties:
@@ -5529,6 +5549,13 @@ definitions:
     required:
     - email
     - new_password
+    type: object
+  internal_handler.RevokeCrossTenantAccessRequest:
+    properties:
+      user_id:
+        type: string
+    required:
+    - user_id
     type: object
   internal_handler.RevokeSystemAdminRequest:
     properties:
@@ -15247,6 +15274,121 @@ paths:
       summary: 获取平台审计日志
       tags:
       - 审计日志
+  /system/admin/cross-tenant-access/grant:
+    post:
+      consumes:
+      - application/json
+      description: Enable can_access_all_tenants for a user. The caller must be both
+        a system administrator and a cross-tenant user.
+      parameters:
+      - description: Cross-tenant access grant request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.GrantCrossTenantAccessRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Grant access to all tenants
+      tags:
+      - System Admin
+  /system/admin/cross-tenant-access/list:
+    get:
+      description: List users where can_access_all_tenants=true. The caller must hold
+        both platform flags.
+      parameters:
+      - description: Opaque cursor returned by the previous page
+        in: query
+        name: cursor
+        type: string
+      - default: 50
+        description: Page size (max 200)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.ListCrossTenantAccessUsersResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+      summary: List users with access to all tenants
+      tags:
+      - System Admin
+  /system/admin/cross-tenant-access/revoke:
+    post:
+      consumes:
+      - application/json
+      description: Disable can_access_all_tenants for another user. The caller must
+        hold both platform flags and cannot revoke themselves.
+      parameters:
+      - description: Cross-tenant access revoke request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.RevokeCrossTenantAccessRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Revoke access to all tenants
+      tags:
+      - System Admin
   /system/admin/list:
     get:
       description: |-
@@ -15317,6 +15459,11 @@ paths:
           schema:
             additionalProperties: true
             type: object
+        "500":
+          description: User lookup or privilege update failed
+          schema:
+            additionalProperties: true
+            type: object
       summary: Promote a user to system administrator
       tags:
       - System Admin
@@ -15326,10 +15473,9 @@ paths:
       - application/json
       description: |-
         Remove system administrator privileges from a user (SystemAdmin only).
-        Two safety guards: the caller cannot revoke their own privileges,
-        and revoking the last remaining system admin is rejected — both
-        prevent a SystemAdmin from accidentally locking the platform out
-        of system-level administration. Idempotent on already-non-admin users.
+        Safety guards reject self-revocation, removal of the last system admin,
+        and removal of the last system admin with cross-tenant access.
+        Idempotent on already-non-admin users.
       parameters:
       - description: User revocation request
         in: body

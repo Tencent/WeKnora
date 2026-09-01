@@ -60,6 +60,12 @@ var (
 	// one so callers can reject no-op rotations that would still revoke
 	// every session.
 	ErrSamePassword = errors.New("new password must differ from current password")
+
+	// ErrUserInactive is returned when an existing session belongs to an
+	// account that has since been disabled. Authentication must re-check the
+	// database state so disabling an account takes effect without waiting for
+	// already-issued tokens to expire.
+	ErrUserInactive = errors.New("user account is disabled")
 )
 
 // Machine-readable change-password failure reasons for HTTP details fields.
@@ -596,10 +602,15 @@ func (s *userService) GetUserByTenantID(ctx context.Context, tenantID uint64) (*
 	return s.userRepo.GetUserByTenantID(ctx, tenantID)
 }
 
-// UpdateUser updates user information
+// UpdateUser updates ordinary user information without changing platform privileges.
 func (s *userService) UpdateUser(ctx context.Context, user *types.User) error {
 	user.UpdatedAt = time.Now()
 	return s.userRepo.UpdateUser(ctx, user)
+}
+
+// GrantSystemAdmin grants system-administrator privileges idempotently.
+func (s *userService) GrantSystemAdmin(ctx context.Context, userID string) (*types.User, bool, error) {
+	return s.userRepo.GrantSystemAdmin(ctx, userID)
 }
 
 // ListSystemAdmins lists users with IsSystemAdmin=true. Thin pass-through
@@ -609,6 +620,35 @@ func (s *userService) ListSystemAdmins(
 	ctx context.Context, offset, limit int,
 ) ([]*types.User, int64, error) {
 	return s.userRepo.ListSystemAdmins(ctx, offset, limit)
+}
+
+// CountActiveSystemAdmins counts enabled system administrators for bootstrap recovery.
+func (s *userService) CountActiveSystemAdmins(ctx context.Context) (int64, error) {
+	return s.userRepo.CountActiveSystemAdmins(ctx)
+}
+
+// ListCrossTenantAccessUsers lists users who can access every tenant.
+func (s *userService) ListCrossTenantAccessUsers(
+	ctx context.Context, cursor *types.UserListCursor, limit int,
+) ([]*types.User, *types.UserListCursor, error) {
+	return s.userRepo.ListCrossTenantAccessUsers(ctx, cursor, limit)
+}
+
+// CountCrossTenantAccessManagers counts users that hold both platform privileges.
+func (s *userService) CountCrossTenantAccessManagers(ctx context.Context) (int64, error) {
+	return s.userRepo.CountCrossTenantAccessManagers(ctx)
+}
+
+// GrantCrossTenantAccess enables cross-tenant access for a user.
+func (s *userService) GrantCrossTenantAccess(ctx context.Context, userID string) (*types.User, bool, error) {
+	return s.userRepo.GrantCrossTenantAccess(ctx, userID)
+}
+
+// RevokeCrossTenantAccess disables cross-tenant access for another user.
+func (s *userService) RevokeCrossTenantAccess(
+	ctx context.Context, userID, actorID string,
+) (*types.User, bool, error) {
+	return s.userRepo.RevokeCrossTenantAccess(ctx, userID, actorID)
 }
 
 // RevokeSystemAdmin removes system-admin privileges through the
@@ -1215,6 +1255,9 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	if err != nil {
 		return nil, 0, err
 	}
+	if err := validateAuthenticatedUser(user); err != nil {
+		return nil, 0, err
+	}
 
 	// Extract active tenant from the JWT. Anything missing or unparseable
 	// falls back to the user's home tenant so old tokens (and tokens issued
@@ -1222,6 +1265,16 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	activeTenantID := tenantIDFromClaims(claims, user.TenantID)
 
 	return user, activeTenantID, nil
+}
+
+func validateAuthenticatedUser(user *types.User) error {
+	if user == nil {
+		return errors.New("user not found")
+	}
+	if !user.IsActive {
+		return ErrUserInactive
+	}
+	return nil
 }
 
 func isRefreshTokenClaims(claims jwt.MapClaims) bool {
@@ -1325,6 +1378,9 @@ func (s *userService) RefreshToken(
 	// Get user
 	user, err := s.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
+		return "", "", err
+	}
+	if err := validateAuthenticatedUser(user); err != nil {
 		return "", "", err
 	}
 

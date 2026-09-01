@@ -33,7 +33,11 @@ var versionedSQLiteColumns = map[string][]string{
 	"mcp_oauth_tokens":   {"principal_type", "principal_id"}, // 000064
 }
 
-const expectedSQLiteMigrationVersion = 12
+var versionedSQLiteIndexes = []string{
+	"idx_users_cross_tenant_access_list",
+}
+
+const expectedSQLiteMigrationVersion = 13
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -60,6 +64,9 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 				column,
 			)
 		}
+	}
+	for _, index := range versionedSQLiteIndexes {
+		require.Truef(t, sqliteIndexExists(t, db, index), "SQLite migrations must create index %s", index)
 	}
 
 	assertSQLiteShareLinkInvitationsWork(t, db)
@@ -116,6 +123,9 @@ func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
 			)
 		}
 	}
+	for _, index := range versionedSQLiteIndexes {
+		require.Truef(t, sqliteIndexExists(t, db, index), "upgraded SQLite DB must have index %s", index)
+	}
 
 	var sentinelName string
 	require.NoError(t, db.QueryRow("SELECT name FROM tenants WHERE business = ?", "migration-test").Scan(&sentinelName))
@@ -165,6 +175,16 @@ func sqliteTableExists(t *testing.T, db *sql.DB, table string) bool {
 	require.NoError(t, db.QueryRow(
 		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
 		table,
+	).Scan(&n))
+	return n == 1
+}
+
+func sqliteIndexExists(t *testing.T, db *sql.DB, index string) bool {
+	t.Helper()
+	var n int
+	require.NoError(t, db.QueryRow(
+		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?",
+		index,
 	).Scan(&n))
 	return n == 1
 }

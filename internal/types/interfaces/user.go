@@ -31,7 +31,7 @@ type UserService interface {
 	GetUserByUsername(ctx context.Context, username string) (*types.User, error)
 	// GetUserByTenantID gets the first user (owner) of a tenant
 	GetUserByTenantID(ctx context.Context, tenantID uint64) (*types.User, error)
-	// UpdateUser updates user information
+	// UpdateUser updates ordinary user information without changing platform privileges.
 	UpdateUser(ctx context.Context, user *types.User) error
 	// DeleteUser deletes a user
 	DeleteUser(ctx context.Context, id string) error
@@ -79,6 +79,20 @@ type UserService interface {
 	// callers pass offset/limit to page through results. Used by the
 	// /api/v1/system/admin/list endpoint, gated to SystemAdmin callers.
 	ListSystemAdmins(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
+	// CountActiveSystemAdmins counts enabled users with IsSystemAdmin=true.
+	CountActiveSystemAdmins(ctx context.Context) (int64, error)
+	// GrantSystemAdmin grants system-administrator privileges idempotently.
+	GrantSystemAdmin(ctx context.Context, userID string) (*types.User, bool, error)
+	// ListCrossTenantAccessUsers lists users with CanAccessAllTenants=true using keyset pagination.
+	ListCrossTenantAccessUsers(
+		ctx context.Context, cursor *types.UserListCursor, limit int,
+	) ([]*types.User, *types.UserListCursor, error)
+	// CountCrossTenantAccessManagers counts enabled users that hold both platform privileges.
+	CountCrossTenantAccessManagers(ctx context.Context) (int64, error)
+	// GrantCrossTenantAccess grants platform-wide tenant access idempotently.
+	GrantCrossTenantAccess(ctx context.Context, userID string) (*types.User, bool, error)
+	// RevokeCrossTenantAccess revokes platform-wide tenant access idempotently.
+	RevokeCrossTenantAccess(ctx context.Context, userID, actorID string) (*types.User, bool, error)
 	// AdminCreateUser provisions a new local user on behalf of a
 	// SystemAdmin. When req.Password is nil, a random password is generated
 	// and returned exactly once as the second result. provisioning is
@@ -110,7 +124,7 @@ type UserRepository interface {
 	GetUserByUsername(ctx context.Context, username string) (*types.User, error)
 	// GetUserByTenantID gets the first user (owner) of a tenant
 	GetUserByTenantID(ctx context.Context, tenantID uint64) (*types.User, error)
-	// UpdateUser updates a user
+	// UpdateUser updates ordinary user fields and preserves platform privileges.
 	UpdateUser(ctx context.Context, user *types.User) error
 	// DeleteUser deletes a user
 	DeleteUser(ctx context.Context, id string) error
@@ -121,6 +135,20 @@ type UserRepository interface {
 	// the slice plus the total count for pagination metadata. Used by
 	// the system-admin management endpoint.
 	ListSystemAdmins(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
+	// CountActiveSystemAdmins counts enabled users where is_system_admin=true.
+	CountActiveSystemAdmins(ctx context.Context) (int64, error)
+	// GrantSystemAdmin grants system-administrator privileges atomically.
+	GrantSystemAdmin(ctx context.Context, userID string) (*types.User, bool, error)
+	// ListCrossTenantAccessUsers lists users where can_access_all_tenants=true using keyset pagination.
+	ListCrossTenantAccessUsers(
+		ctx context.Context, cursor *types.UserListCursor, limit int,
+	) ([]*types.User, *types.UserListCursor, error)
+	// CountCrossTenantAccessManagers counts enabled users that are both system admins and cross-tenant users.
+	CountCrossTenantAccessManagers(ctx context.Context) (int64, error)
+	// GrantCrossTenantAccess enables can_access_all_tenants for a user.
+	GrantCrossTenantAccess(ctx context.Context, userID string) (*types.User, bool, error)
+	// RevokeCrossTenantAccess disables can_access_all_tenants for a user.
+	RevokeCrossTenantAccess(ctx context.Context, userID, actorID string) (*types.User, bool, error)
 	// RevokeSystemAdmin removes system-admin privileges with the
 	// last-admin/self-revoke checks performed atomically.
 	RevokeSystemAdmin(ctx context.Context, userID, actorID string) (*types.User, error)

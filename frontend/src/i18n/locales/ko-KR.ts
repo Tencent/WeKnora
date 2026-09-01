@@ -2680,6 +2680,8 @@ export default {
         action: {
           'system.setting_changed': '시스템 설정 변경',
           'system.admin_promoted': '시스템 관리자 부여',
+          'system.cross_tenant_access_granted': '전체 워크스페이스 접근 권한 부여',
+          'system.cross_tenant_access_revoked': '전체 워크스페이스 접근 권한 회수',
           'system.api_key_created': '플랫폼 API 키 생성',
           'system.api_key_revoked': '플랫폼 API 키 폐기',
           'system.admin_revoked': '시스템 관리자 회수',
@@ -2756,6 +2758,24 @@ export default {
             header: '시스템 관리자로 승격',
             body: '{email} 사용자를 시스템 관리자로 승격하시겠습니까? 이 사용자는 모든 워크스페이스 접근, 시스템 설정 변경, 관리자 명단 관리 등 플랫폼 수준의 권한을 갖게 됩니다.',
             confirmBtn: '승격 확인'
+          }
+        }
+      },
+      crossTenantAccess: {
+        label: '전체 워크스페이스 접근 계정',
+        description: '모든 워크스페이스에 접근할 수 있는 사용자입니다. 시스템 관리자이면서 전체 워크스페이스 접근 권한이 있는 사용자만 이 목록을 관리할 수 있습니다. 현재 계정은 표시되지 않으며 자신의 권한을 회수할 수 없습니다.',
+        placeholder: '사용자 이메일을 입력하고 엔터를 누르세요',
+        loadFailed: '전체 워크스페이스 접근 계정을 불러오지 못했습니다',
+        saveSuccess: '전체 워크스페이스 접근 계정이 업데이트되었습니다',
+        saveFailed: '전체 워크스페이스 접근 계정 업데이트 실패',
+        confirm: {
+          grant: {
+            body: '{email} 사용자에게 모든 워크스페이스 접근 권한을 부여하시겠습니까?',
+            confirmBtn: '권한 부여'
+          },
+          revoke: {
+            body: '{email} 사용자의 모든 워크스페이스 접근 권한을 회수하시겠습니까?',
+            confirmBtn: '권한 회수'
           }
         }
       },

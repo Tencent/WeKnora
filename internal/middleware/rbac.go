@@ -185,6 +185,44 @@ func RequireSystemAdmin(cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
+// RequireCrossTenantAccessManager protects the small set of endpoints that
+// can grant or revoke platform-wide tenant access. This permission is more
+// sensitive than ordinary system settings: callers must hold both platform
+// flags on an active account, and API keys are never accepted for human
+// privilege management.
+func RequireCrossTenantAccessManager(cfg *config.Config) gin.HandlerFunc {
+	warnOnNilConfig(cfg)
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": "Forbidden: API keys cannot manage cross-tenant access",
+			})
+			c.Abort()
+			return
+		}
+
+		user, ok := ctx.Value(types.UserContextKey).(*types.User)
+		if types.IsSystemAdminFromContext(ctx) && ok && user != nil && user.IsActive && user.CanAccessAllTenants {
+			c.Next()
+			return
+		}
+
+		uid, _ := types.UserIDFromContext(ctx)
+		logger.Warnf(ctx,
+			"[rbac] cross-tenant access manager required: user=%s path=%s",
+			uid, c.Request.URL.Path)
+		if svc := AuditServiceFromContext(c); svc != nil {
+			tenantID, _ := types.TenantIDFromContext(ctx)
+			_ = svc.LogDenied(ctx, c, tenantID, uid, "user", "cross_tenant_access_manager")
+		}
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Forbidden: system administrator with cross-tenant access required",
+		})
+		c.Abort()
+	}
+}
+
 // RequireOwnershipOrRole guards endpoints whose access is allowed for
 // either (a) callers whose role is at least min, or (b) the original
 // creator of the resource being touched.

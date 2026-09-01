@@ -2682,6 +2682,8 @@ export default {
         action: {
           'system.setting_changed': '系统设置变更',
           'system.admin_promoted': '授予系统管理员',
+          'system.cross_tenant_access_granted': '授予全空间访问',
+          'system.cross_tenant_access_revoked': '撤销全空间访问',
           'system.api_key_created': '创建平台 API Key',
           'system.api_key_revoked': '吊销平台 API Key',
           'system.admin_revoked': '回收系统管理员',
@@ -2758,6 +2760,24 @@ export default {
             header: '提升为系统管理员',
             body: '确认将 {email} 提升为系统管理员？该用户将获得平台级权限，可访问所有空间、修改系统设置、管理其他管理员。',
             confirmBtn: '确认提升'
+          }
+        }
+      },
+      crossTenantAccess: {
+        label: '全空间访问账号',
+        description: '可访问所有空间的用户。仅同时拥有系统管理员和全空间访问权限的账号可以维护此列表；当前账号不在列表中显示，也不能撤销自己的权限。',
+        placeholder: '输入用户邮箱并回车',
+        loadFailed: '加载全空间访问账号失败',
+        saveSuccess: '已更新全空间访问账号',
+        saveFailed: '更新全空间访问账号失败',
+        confirm: {
+          grant: {
+            body: '确认授予 {email} 全空间访问权限？',
+            confirmBtn: '确认授予'
+          },
+          revoke: {
+            body: '确认撤销 {email} 的全空间访问权限？',
+            confirmBtn: '确认撤销'
           }
         }
       },

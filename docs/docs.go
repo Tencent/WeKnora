@@ -13990,6 +13990,172 @@ const docTemplate = `{
                 }
             }
         },
+        "/system/admin/cross-tenant-access/grant": {
+            "post": {
+                "description": "Enable can_access_all_tenants for a user. The caller must be both a system administrator and a cross-tenant user.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Grant access to all tenants",
+                "parameters": [
+                    {
+                        "description": "Cross-tenant access grant request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.GrantCrossTenantAccessRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/cross-tenant-access/list": {
+            "get": {
+                "description": "List users where can_access_all_tenants=true. The caller must hold both platform flags.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "List users with access to all tenants",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Opaque cursor returned by the previous page",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Page size (max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.ListCrossTenantAccessUsersResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/cross-tenant-access/revoke": {
+            "post": {
+                "description": "Disable can_access_all_tenants for another user. The caller must hold both platform flags and cannot revoke themselves.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Revoke access to all tenants",
+                "parameters": [
+                    {
+                        "description": "Cross-tenant access revoke request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.RevokeCrossTenantAccessRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/system/admin/list": {
             "get": {
                 "description": "Retrieve a paginated list of users with system administrator\nprivileges (SystemAdmin only). Supports ` + "`" + `offset` + "`" + ` (default 0)\nand ` + "`" + `limit` + "`" + ` (default 50, max 200) query parameters. Walks the\npartial-friendly idx_users_is_system_admin index.",
@@ -14084,13 +14250,20 @@ const docTemplate = `{
                             "type": "object",
                             "additionalProperties": true
                         }
+                    },
+                    "500": {
+                        "description": "User lookup or privilege update failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
                     }
                 }
             }
         },
         "/system/admin/revoke": {
             "post": {
-                "description": "Remove system administrator privileges from a user (SystemAdmin only).\nTwo safety guards: the caller cannot revoke their own privileges,\nand revoking the last remaining system admin is rejected — both\nprevent a SystemAdmin from accidentally locking the platform out\nof system-level administration. Idempotent on already-non-admin users.",
+                "description": "Remove system administrator privileges from a user (SystemAdmin only).\nSafety guards reject self-revocation, removal of the last system admin,\nand removal of the last system admin with cross-tenant access.\nIdempotent on already-non-admin users.",
                 "consumes": [
                     "application/json"
                 ],
@@ -17295,6 +17468,8 @@ const docTemplate = `{
                 "system.setting_changed",
                 "system.admin_promoted",
                 "system.admin_revoked",
+                "system.cross_tenant_access_granted",
+                "system.cross_tenant_access_revoked",
                 "system.user_password_reset",
                 "system.user_created",
                 "system.api_key_created",
@@ -17359,6 +17534,8 @@ const docTemplate = `{
                 "AuditActionSystemSettingChanged",
                 "AuditActionSystemAdminPromoted",
                 "AuditActionSystemAdminRevoked",
+                "AuditActionCrossTenantAccessGranted",
+                "AuditActionCrossTenantAccessRevoked",
                 "AuditActionSystemUserPasswordReset",
                 "AuditActionSystemUserCreated",
                 "AuditActionSystemAPIKeyCreated",
@@ -23239,6 +23416,17 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.GrantCrossTenantAccessRequest": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.InitializationRequest": {
             "type": "object",
             "required": [
@@ -23593,6 +23781,20 @@ const docTemplate = `{
                 },
                 "vlm_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
+                }
+            }
+        },
+        "internal_handler.ListCrossTenantAccessUsersResponse": {
+            "type": "object",
+            "properties": {
+                "next_cursor": {
+                    "type": "string"
+                },
+                "users": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo"
+                    }
                 }
             }
         },
@@ -23957,6 +24159,17 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "new_password": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.RevokeCrossTenantAccessRequest": {
+            "type": "object",
+            "required": [
+                "user_id"
+            ],
+            "properties": {
+                "user_id": {
                     "type": "string"
                 }
             }

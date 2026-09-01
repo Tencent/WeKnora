@@ -77,6 +77,26 @@ func (s *stubUserRepoForAuth) ListUsers(context.Context, int, int) ([]*types.Use
 func (s *stubUserRepoForAuth) ListSystemAdmins(context.Context, int, int) ([]*types.User, int64, error) {
 	return nil, 0, nil
 }
+func (s *stubUserRepoForAuth) CountActiveSystemAdmins(context.Context) (int64, error) {
+	return 0, nil
+}
+func (s *stubUserRepoForAuth) GrantSystemAdmin(context.Context, string) (*types.User, bool, error) {
+	return nil, false, nil
+}
+func (s *stubUserRepoForAuth) ListCrossTenantAccessUsers(
+	context.Context, *types.UserListCursor, int,
+) ([]*types.User, *types.UserListCursor, error) {
+	return nil, nil, nil
+}
+func (s *stubUserRepoForAuth) CountCrossTenantAccessManagers(context.Context) (int64, error) {
+	return 0, nil
+}
+func (s *stubUserRepoForAuth) GrantCrossTenantAccess(context.Context, string) (*types.User, bool, error) {
+	return nil, false, nil
+}
+func (s *stubUserRepoForAuth) RevokeCrossTenantAccess(context.Context, string, string) (*types.User, bool, error) {
+	return nil, false, nil
+}
 func (s *stubUserRepoForAuth) RevokeSystemAdmin(context.Context, string, string) (*types.User, error) {
 	return nil, nil
 }
@@ -88,7 +108,7 @@ func newAuthTestUserService(tokenRepo *stubAuthTokenRepo) *userService {
 	return &userService{
 		userRepo: &stubUserRepoForAuth{
 			users: map[string]*types.User{
-				"user-1": {ID: "user-1", TenantID: 1},
+				"user-1": {ID: "user-1", TenantID: 1, IsActive: true},
 			},
 		},
 		tokenRepo: tokenRepo,
@@ -141,6 +161,29 @@ func TestValidateTokenRejectsRefreshToken(t *testing.T) {
 	}
 }
 
+func TestValidateTokenRejectsDisabledUser(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	svc.userRepo.(*stubUserRepoForAuth).users["user-1"].IsActive = false
+
+	accessJWT := signTestJWT(jwt.MapClaims{
+		"user_id": "user-1",
+		"type":    "access",
+		"exp":     time.Now().Add(time.Hour).Unix(),
+	})
+	tokenRepo.tokens[accessJWT] = &types.AuthToken{
+		UserID:    "user-1",
+		Token:     accessJWT,
+		TokenType: "access_token",
+	}
+
+	_, _, err := svc.ValidateToken(ctx, accessJWT)
+	if !errors.Is(err, ErrUserInactive) {
+		t.Fatalf("ValidateToken(disabled user) err = %v, want ErrUserInactive", err)
+	}
+}
+
 func TestRefreshTokenRejectsAccessTokenRecord(t *testing.T) {
 	ctx := context.Background()
 	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
@@ -160,6 +203,33 @@ func TestRefreshTokenRejectsAccessTokenRecord(t *testing.T) {
 	_, _, err := svc.RefreshToken(ctx, refreshJWT)
 	if err == nil || err.Error() != "not a refresh token" {
 		t.Fatalf("RefreshToken(access token record) err = %v, want not a refresh token", err)
+	}
+}
+
+func TestRefreshTokenRejectsDisabledUser(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	svc.userRepo.(*stubUserRepoForAuth).users["user-1"].IsActive = false
+
+	refreshJWT := signTestJWT(jwt.MapClaims{
+		"user_id": "user-1",
+		"type":    "refresh",
+		"exp":     time.Now().Add(time.Hour).Unix(),
+	})
+	tokenRecord := &types.AuthToken{
+		UserID:    "user-1",
+		Token:     refreshJWT,
+		TokenType: "refresh_token",
+	}
+	tokenRepo.tokens[refreshJWT] = tokenRecord
+
+	_, _, err := svc.RefreshToken(ctx, refreshJWT)
+	if !errors.Is(err, ErrUserInactive) {
+		t.Fatalf("RefreshToken(disabled user) err = %v, want ErrUserInactive", err)
+	}
+	if tokenRecord.IsRevoked {
+		t.Fatal("disabled user refresh token was mutated before rejection")
 	}
 }
 
