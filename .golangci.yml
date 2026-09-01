@@ -8,6 +8,10 @@ linters:
     lll:
       line-length: 120
       tab-width: 4
+  exclusions:
+    paths:
+      # swag embeds OpenAPI as single-line JSON strings; line-length is not meaningful.
+      - docs/docs\.go$
 formatters:
   enable:
     - gofmt

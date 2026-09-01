@@ -13,7 +13,7 @@ WeKnora 的 `/auth/*` 端点本身**不需要 X-API-Key**，但部分端点需�
 | `/auth/register` `/auth/login` `/auth/config` | 无 |
 | `/auth/oidc/config` `/auth/oidc/url` `/auth/oidc/callback` | 无 |
 | `/auth/refresh` | refresh_token（请求体携带） |
-| `/auth/validate` `/auth/me` `/auth/logout` `/auth/change-password` | Bearer JWT |
+| `/auth/validate` `/auth/me` `/auth/logout` `/auth/change-password` `/auth/switch-tenant` `/auth/me/preferences` | Bearer JWT |
 
 注册接口可通过环境变量 `DISABLE_REGISTRATION=true` 关闭。密码策略默认 8–32 位且同时包含字母与数字；部署可通过环境变量 `WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED` 或系统设置 `auth.complex_password_enabled` 要求额外包含大小写字母与特殊字符。当前策略见 `GET /auth/config`。
 
@@ -31,6 +31,8 @@ WeKnora 的 `/auth/*` 端点本身**不需要 X-API-Key**，但部分端点需�
 | GET  | `/auth/validate`           | 验证 JWT 有效性                            |
 | POST | `/auth/logout`             | 退出登录                                   |
 | GET  | `/auth/me`                 | 获取当前用户信息                           |
+| PUT  | `/auth/me/preferences`     | 更新最近活跃空间等个人偏好                 |
+| POST | `/auth/switch-tenant`      | 切换激活空间并换发 token                   |
 | POST | `/auth/change-password`    | 修改密码                                   |
 
 ---
@@ -353,6 +355,63 @@ curl --location 'http://localhost:8080/api/v1/auth/me' \
 | ---- | ---- |
 | `can_create_tenant` | 当前用户是否可自助创建空间 |
 | `auto_accept_invitation` | 全局 `tenant.auto_accept_invitation`：邮箱邀请已注册用户时是否直接加入（无需收件箱确认） |
+
+---
+
+## POST `/auth/switch-tenant` - 切换激活空间
+
+为当前用户在目标空间重新签发 access / refresh token 对。调用者须在目标空间有 **active** 成员关系（`CanAccessAllTenants` 超级用户切到非 home 空间除外）。
+
+成功换签会把目标空间写入账号级「最近活跃租户」偏好（`users.preferences.last_active_tenant_id`）。refresh JWT **不含** `tenant_id`，因此 **下次登录与 refresh 都按该偏好落点**；一次换签会改变该用户所有设备的落点。偏好写入失败则整次换签失败，**不会**发出新 token。
+
+切回 home 时服务端写入 home ID（与 SPA 发送 `0` 清偏好在当前落点语义上等价）。Web UI 切空间走 `X-Tenant-ID` + `PUT /auth/me/preferences`，不调用本接口。
+
+**参数说明（请求体）**:
+
+| 字段          | 类型   | 必填 | 说明                         |
+| ------------- | ------ | ---- | ---------------------------- |
+| tenant_id     | uint64 | 是   | 目标空间 ID                  |
+| refresh_token | string | 否   | 当前 refresh token，成功后撤销 |
+
+**请求**:
+
+```curl
+curl --location --request POST 'http://localhost:8080/api/v1/auth/switch-tenant' \
+--header 'Authorization: Bearer eyJhbGciOi...' \
+--header 'Content-Type: application/json' \
+--data '{
+    "tenant_id": 2
+}'
+```
+
+**响应**: 与登录相同的 `LoginResponse`（`user` / `active_tenant` / `memberships` / `token` / `refresh_token`）。`user.preferences.last_active_tenant_id` 与目标空间一致。
+
+**错误**: 无成员关系或偏好写入失败 → 403；参数校验失败 → 400。
+
+---
+
+## PUT `/auth/me/preferences` - 更新个人偏好
+
+按 PATCH 语义合并 `users.preferences`（仅覆盖请求体里出现的字段）。SPA 在 UI 切空间后用此接口记住落点；`POST /auth/switch-tenant` 会在服务端写同一字段，API 客户端不必再补发本请求。
+
+**参数说明（请求体）**:
+
+| 字段                   | 类型    | 必填 | 说明 |
+| ---------------------- | ------- | ---- | ---- |
+| last_active_tenant_id  | *uint64 | 否   | 正整数 = 设置/替换；`0` = 清除（下次登录回 home）；省略 = 不改 |
+
+**请求**:
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/auth/me/preferences' \
+--header 'Authorization: Bearer eyJhbGciOi...' \
+--header 'Content-Type: application/json' \
+--data '{
+    "last_active_tenant_id": 2
+}'
+```
+
+**响应**: `{ "success": true, "data": { "last_active_tenant_id": 2 } }`
 
 ---
 
