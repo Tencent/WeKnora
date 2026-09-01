@@ -1817,7 +1817,7 @@ func (s *userService) fetchOIDCJWKS(ctx context.Context, jwksURI string) (*oidcJ
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 2048))
 		return nil, fmt.Errorf("JWKS request failed: status=%d", resp.StatusCode)
