@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -69,7 +70,7 @@ func newTranscriptForTest(t *testing.T) (
 	bus := event.NewEventBus()
 	streams := &transcriptStreams{}
 	messages := &transcriptMessages{}
-	tr := newInstallTranscript(context.Background(), bus, streams, messages, "sess-1", "msg-1")
+	tr := newInstallTranscript(context.Background(), bus, streams, messages, "sess-1", "msg-1", nil)
 	tr.Subscribe()
 	return tr, bus, streams, messages
 }
@@ -225,7 +226,7 @@ func TestInstallTranscriptSwallowsItsOwnFailures(t *testing.T) {
 	bus := event.NewEventBus()
 	streams := &transcriptStreams{err: errors.New("redis down")}
 	messages := &transcriptMessages{err: errors.New("db down")}
-	tr := newInstallTranscript(context.Background(), bus, streams, messages, "sess-1", "msg-1")
+	tr := newInstallTranscript(context.Background(), bus, streams, messages, "sess-1", "msg-1", nil)
 	tr.Subscribe()
 
 	require.NoError(t, bus.Emit(context.Background(), event.Event{
@@ -239,7 +240,7 @@ func TestInstallTranscriptCreateSeedsTheAssistantRow(t *testing.T) {
 	streams := &transcriptStreams{}
 	messages := &transcriptMessages{}
 	tr := newInstallTranscript(
-		context.Background(), event.NewEventBus(), streams, messages, "sess-1", "msg-1",
+		context.Background(), event.NewEventBus(), streams, messages, "sess-1", "msg-1", nil,
 	)
 
 	require.NoError(t, tr.Create(context.Background(), "install pdf-tools"))
@@ -257,7 +258,7 @@ func TestInstallTranscriptCreateSeedsTheAssistantRow(t *testing.T) {
 func TestInstallTranscriptCreateOpensTheLogWithThePrompt(t *testing.T) {
 	streams := &transcriptStreams{}
 	tr := newInstallTranscript(
-		context.Background(), event.NewEventBus(), streams, &transcriptMessages{}, "sess-1", "msg-1",
+		context.Background(), event.NewEventBus(), streams, &transcriptMessages{}, "sess-1", "msg-1", nil,
 	)
 
 	require.NoError(t, tr.Create(context.Background(), "install pdf-tools"))
@@ -317,4 +318,98 @@ func TestInstallTranscriptFinishIsIdempotent(t *testing.T) {
 		types.ResponseTypeComplete,
 	}, streams.types())
 	require.Len(t, messages.updated, 1)
+}
+
+func TestAsymptoticInstallPercent(t *testing.T) {
+	require.Equal(t, 35, asymptoticInstallPercent(0))
+	require.Equal(t, 35, asymptoticInstallPercent(-3), "no commands yet means the seeded anchor")
+
+	// The first command lifts the bar visibly; the exact value pins the curve.
+	require.Equal(t, 39, asymptoticInstallPercent(1))
+	require.Equal(t, 42, asymptoticInstallPercent(2))
+
+	// Monotonic for any round count, always below the agent_done anchor at 80,
+	// and converged to the ceiling once a run exhausts max_iterations.
+	prev := 0
+	for k := 1; k <= 200; k++ {
+		p := asymptoticInstallPercent(k)
+		require.GreaterOrEqual(t, p, prev)
+		require.LessOrEqual(t, p, 79)
+		prev = p
+	}
+	require.Equal(t, 79, asymptoticInstallPercent(200))
+	// A run that exhausts max_iterations=30 tops out around 75 — the ceiling
+	// belongs to the stage anchor, not to any finite command count.
+	require.Equal(t, 75, asymptoticInstallPercent(30))
+}
+
+// The progress card watches the same bus the transcript does, so every command
+// the installer runs is one step forward — with a one-line summary of what it
+// was — and muting after the first round stops the flow entirely.
+func TestInstallTranscriptPublishesActivityProgressOnToolCalls(t *testing.T) {
+	bus := event.NewEventBus()
+	streams := &transcriptStreams{}
+	messages := &transcriptMessages{}
+	type activity struct {
+		steps   int
+		lastCmd string
+	}
+	var got []activity
+	tr := newInstallTranscript(context.Background(), bus, streams, messages, "sess-1", "msg-1",
+		func(steps int, lastCmd string) { got = append(got, activity{steps, lastCmd}) })
+	tr.Subscribe()
+	ctx := context.Background()
+
+	emitCall := func(id string, data event.AgentToolCallData) {
+		data.ToolCallID = id
+		require.NoError(t, bus.Emit(ctx, event.Event{
+			ID: id, Type: event.EventAgentToolCall, Data: data,
+		}))
+	}
+	emitCall("c-1", event.AgentToolCallData{
+		ToolName: "shell_exec", Arguments: map[string]any{"command": "uv venv .venv"},
+	})
+	emitCall("c-2", event.AgentToolCallData{
+		ToolName: "shell_exec", Hint: `shell_exec: apt-get install -y libgl1`,
+	})
+	emitCall("c-3", event.AgentToolCallData{
+		ToolName: "shell_exec",
+		Arguments: map[string]any{"command": "uv pip install --python .venv/bin/python " +
+			strings.Repeat("very-long-package-name-", 12)},
+	})
+
+	require.Len(t, got, 3)
+	require.Equal(t, 1, got[0].steps)
+	require.Equal(t, "shell_exec: uv venv .venv", got[0].lastCmd)
+	require.Equal(t, `shell_exec: apt-get install -y libgl1`, got[1].lastCmd,
+		"the engine's hint is preferred when it has one")
+	require.Equal(t, 3, got[2].steps)
+	require.Less(t, len([]rune(got[2].lastCmd)), 90, "a long command is truncated to one line")
+
+	// A repair round must not drag the bar back below the stage anchors, so
+	// muting after the first round ends the activity publishes for good.
+	tr.muteActivityProgress()
+	emitCall("c-4", event.AgentToolCallData{
+		ToolName: "shell_exec", Arguments: map[string]any{"command": "uv pip install defusedxml"},
+	})
+	require.Len(t, got, 3)
+}
+
+// A transcript without a publisher (remove path, most tests) counts nothing
+// and calls nothing.
+func TestInstallTranscriptWithoutActivityPublisherStaysSilent(t *testing.T) {
+	tr, bus, streams, _ := newTranscriptForTest(t)
+
+	require.NoError(t, bus.Emit(context.Background(), event.Event{
+		ID: "c-1", Type: event.EventAgentToolCall,
+		Data: event.AgentToolCallData{
+			ToolName: "shell_exec", ToolCallID: "call-1",
+			Arguments: map[string]any{"command": "uv venv .venv"},
+		},
+	}))
+	tr.muteActivityProgress()
+
+	require.NotPanics(t, func() { tr.Finish(context.Background(), nil) })
+	require.Equal(t, []types.ResponseType{types.ResponseTypeToolCall, types.ResponseTypeComplete},
+		streams.types(), "the transcript itself is unchanged by progress being unwired")
 }

@@ -677,7 +677,17 @@ func (s *TenantSkillService) beginInstallTranscript(
 ) (*installTranscript, string) {
 	assistantMessageID := uuid.NewString()
 	prompt := buildInstallPrompt(skillDir, bundle, s.probeInstallTools(ctx, mgr, sess.ID))
-	transcript := newInstallTranscript(ctx, event.NewEventBus(), s.streams, s.messages, sess.ID, assistantMessageID)
+	transcript := newInstallTranscript(ctx, event.NewEventBus(), s.streams, s.messages, sess.ID, assistantMessageID,
+		// Asymptotic activity progress: every installer command advances the
+		// bar within the 35→79 span, so the number the admin watches moves
+		// while the agent works instead of sitting at seeded until agent_done.
+		func(steps int, lastCmd string) {
+			s.publishProgress(ctx, tenantID, sess.SandboxConfigID, skillID, SkillProgress{
+				Percent: asymptoticInstallPercent(steps),
+				Stage:   "agent",
+				Log:     lastCmd,
+			})
+		})
 	if err := transcript.Create(ctx, prompt); err != nil {
 		logger.Warnf(ctx, "[skill] seed install transcript for %s failed: %v", skillID, err)
 	}
@@ -741,6 +751,11 @@ func (s *TenantSkillService) installDependenciesAndVerify(
 		}
 		s.publishProgress(ctx, job.tenantID, job.configID, job.skillID,
 			SkillProgress{Percent: 80, Stage: "agent_done"})
+		// The agent's part of this round is over: mute the asymptotic activity
+		// progress so verification and any repair round — which publish their
+		// own stage anchors (80 / 82) — cannot be dragged back below them by
+		// the next round's tool calls.
+		job.transcript.muteActivityProgress()
 
 		// The tree is handed to the execution user BEFORE it is verified. The
 		// agent created these files as root, and the language passes
