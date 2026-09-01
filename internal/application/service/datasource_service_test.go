@@ -105,6 +105,10 @@ func (s *processSyncKBService) HybridSearch(context.Context, string, types.Searc
 	return nil, nil
 }
 
+func (s *processSyncKBService) SearchGraphNodes(context.Context, string, []string) (*types.GraphData, error) {
+	return nil, nil
+}
+
 func (s *processSyncKBService) GetQueryEmbedding(context.Context, string, string) ([]float32, error) {
 	return nil, nil
 }

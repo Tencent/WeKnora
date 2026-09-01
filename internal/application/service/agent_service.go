@@ -1169,7 +1169,7 @@ func (s *agentService) registerTools(
 		case tools.ToolListDocuments:
 			toolToRegister = tools.NewListDocumentsTool(s.knowledgeService, config.SearchTargets)
 		case tools.ToolQueryKnowledgeGraph:
-			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService, config.SearchTargets).
+			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService, s.chunkService, chatModel, config.SearchTargets).
 				WithKnowledgeScope(s.knowledgeService)
 		case tools.ToolSearchConversations:
 			// The owner is captured from the caller's identity here, not read
