@@ -234,7 +234,7 @@ export default {
       currentPlaceholder: 'Введите текущий пароль',
       currentRequired: 'Введите текущий пароль',
       newLabel: 'Новый пароль',
-      newPlaceholder: '8–32 символа, буквы и цифры',
+      newPlaceholder: 'Введите новый пароль',
       confirmLabel: 'Подтвердите новый пароль',
       confirmPlaceholder: 'Введите новый пароль ещё раз',
       submit: 'Обновить пароль',
@@ -2452,6 +2452,10 @@ export default {
           label: 'OpenRouter',
           description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.'
         },
+        litellm: {
+          label: 'LiteLLM',
+          description: 'Self-hosted прокси к 100+ провайдерам (OpenAI, Anthropic, Gemini, Bedrock и др.). Замените URL-заглушку; localhost нужно добавить в SSRF_WHITELIST.'
+        },
         zhipu: {
           label: 'Zhipu BigModel',
           description: 'glm-4.7, embedding-3, rerank, etc.'
@@ -2722,22 +2726,12 @@ export default {
         emailLabel: 'Email пользователя',
         emailPlaceholder: 'Введите email пользователя',
         newPasswordLabel: 'Новый пароль',
-        newPasswordPlaceholder: '8–32 символа, включая буквы и цифры',
+        newPasswordPlaceholder: 'Введите новый пароль',
         confirmPasswordLabel: 'Подтвердите новый пароль',
         confirmPasswordPlaceholder: 'Введите новый пароль ещё раз',
         confirmBtn: 'Подтвердить сброс',
         success: 'Пароль сброшен, существующие сеансы пользователя завершены',
         failed: 'Не удалось сбросить пароль',
-        validation: {
-          emailRequired: 'Введите email пользователя',
-          emailInvalid: 'Введите корректный email',
-          passwordRequired: 'Введите новый пароль',
-          passwordLength: 'Пароль должен содержать от 8 до 32 символов',
-          passwordLetter: 'Пароль должен содержать букву',
-          passwordNumber: 'Пароль должен содержать цифру',
-          confirmRequired: 'Введите новый пароль ещё раз',
-          passwordMismatch: 'Пароли не совпадают'
-        }
       },
       admins: {
         label: 'Системные администраторы',
@@ -2829,7 +2823,8 @@ export default {
         },
         auth: {
           registration_mode: 'Режим самостоятельной регистрации. self_serve = любой может создать аккаунт; invite_only = открытая регистрация отключена, приглашать могут только Owner/Admin. Вступает в силу сразу после сохранения; используйте self_serve осторожно (в публичном интернете появятся спам-регистрации).',
-          default_tenant_mode: 'Политика пространства после открытой регистрации. create_personal создаёт личное пространство с ролью Owner; tenantless создаёт только аккаунт до принятия приглашения или самостоятельного создания пространства.'
+          default_tenant_mode: 'Политика пространства после открытой регистрации. create_personal создаёт личное пространство с ролью Owner; tenantless создаёт только аккаунт до принятия приглашения или самостоятельного создания пространства.',
+          complex_password_enabled: 'Определяет, требуется ли сложный пароль. При включении пароль должен содержать прописные и строчные буквы, цифры и специальные символы. Изменение вступает в силу немедленно и применяется только к новым пользователям при регистрации, а также при изменении или сбросе пароля. Специальные символы включают: {specialChars}'
         }
       },
       keyLabels: {
@@ -2855,7 +2850,8 @@ export default {
         },
         auth: {
           registration_mode: 'Режим самостоятельной регистрации',
-          default_tenant_mode: 'Создание пространства по умолчанию'
+          default_tenant_mode: 'Создание пространства по умолчанию',
+          complex_password_enabled: 'Включить сложные пароли'
         }
       },
       runtime: {
@@ -4527,7 +4523,7 @@ export default {
     subtitle: 'RAG, ReAct-агент и Wiki — корпоративный фреймворк знаний на основе больших моделей',
     registerSubtitle: 'Создайте аккаунт и начните работу с WeKnora',
     emailPlaceholder: 'Введите адрес электронной почты',
-    passwordPlaceholder: 'Введите пароль (8-32 символа, включая буквы и цифры)',
+    passwordPlaceholder: 'Введите пароль',
     confirmPasswordPlaceholder: 'Введите пароль ещё раз',
     usernamePlaceholder: 'Введите имя пользователя',
     emailRequired: 'Введите адрес электронной почты',
@@ -4536,7 +4532,10 @@ export default {
     passwordMinLength: 'Пароль должен быть не менее 8 символов',
     passwordMaxLength: 'Пароль не может превышать 32 символа',
     passwordMustContainLetter: 'Пароль должен содержать буквы',
+    passwordMustContainLowercaseLetter: 'Пароль должен содержать строчные буквы',
+    passwordMustContainUppercaseLetter: 'Пароль должен содержать прописные буквы',
     passwordMustContainNumber: 'Пароль должен содержать цифры',
+    passwordMustContainSpecialChar: 'Пароль должен содержать специальные символы: {specialChars}',
     usernameRequired: 'Введите имя пользователя',
     usernameMinLength: 'Имя пользователя должно быть не менее 2 символов',
     usernameMaxLength: 'Имя пользователя не может превышать 20 символов',
@@ -5749,24 +5748,25 @@ export default {
       fallbackPrompt: 'Fallback Prompt',
       fallbackPromptPlaceholder: 'Leave empty to use default prompt',
       skillsConfig: 'Навыки',
-      skillsConfigDesc: 'Выберите песочницу для скриптов, затем выберите навыки из каталога пространства. Навыки, не установленные в эту песочницу, видны, но их нельзя включить до установки.',
-      skillsSelection: 'Доступные навыки',
-      skillsSelectionDesc: 'Список берётся из каталога навыков пространства. Включить можно только навыки, готовые в выбранной песочнице.',
+      skillsConfigDesc: 'Сначала выберите песочницу, затем навыки из списка ниже. Неустановленные навыки показывают «Установить» и их нельзя отметить до установки.',
+      skillsSelection: 'Список навыков',
+      skillsSelectionDesc: 'Здесь все навыки каталога пространства. Установленные в эту песочницу можно использовать сразу; остальные сначала нужно установить.',
       skillsAll: 'Все',
       skillsSelected: 'Выбранные',
       skillsNone: 'Отключено',
       selectSkills: 'Выбрать навыки',
-      selectSkillsDesc: 'Отметьте навыки, которые нужно включить. Неустановленные или неготовые навыки выбрать нельзя.',
-      skillsAllListHint: 'Будут включены готовые навыки в этой песочнице. Неустановленные не попадут в «Все», пока их не установить.',
-      skillsListSummary: '{ready} готовы, {pending} ещё нельзя включить в этой песочнице',
-      skillsListSummaryReadyOnly: '{ready} готовы',
+      selectSkillsDesc: 'Отметьте навыки для этого агента. Неустановленные выбрать нельзя — сначала нажмите «Установить» справа.',
+      skillsAllListHint: '«Все» включает только навыки, уже установленные в этой песочнице. Неустановленные не попадут в список, пока вы их не установите.',
+      skillsGroupAvailable: 'Доступны',
+      skillsGroupUnavailable: 'Недоступны',
       noSkillsAvailable: 'В каталоге пространства ещё нет навыков.',
       skillsNeedSandbox: 'Сначала выберите песочницу.',
       goSandboxSettings: 'Управление песочницами',
       goSkillSettings: 'Управление навыками',
       installToThisSandbox: 'Установить в эту песочницу',
       installShort: 'Установить',
-      skillNotInstalled: 'Не установлен в текущую песочницу',
+      viewInstallProgress: 'Смотреть ход',
+      skillNotInstalled: 'Не установлен',
       skillNotReady: 'Ещё не готов',
       skillDisabledOnSandbox: 'Отключён в этой песочнице',
       sandboxBackend: 'Песочница',

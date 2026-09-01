@@ -495,7 +495,12 @@ import {
   resetUserPassword,
   type SystemSettingItem,
 } from '@/api/system'
+import {
+  getAuthConfig,
+} from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import { newPasswordRules, PASSWORD_SPECIAL_CHARS } from '@/utils/passwordPolicy'
+import { isSettingValueDirty, resolveCurrentSetting } from './systemSettingsEdit'
 
 const authStore = useAuthStore()
 const currentUserId = computed(() => authStore.currentUserId)
@@ -515,7 +520,12 @@ function keyLabel(k: string): string {
 // user-facing copy lives in i18n (system.globalSettings.keyDescriptions.*).
 function settingDescription(item: { key: string; description?: string }): string {
   const path = `system.globalSettings.keyDescriptions.${item.key}`
-  if (te(path)) return t(path) as string
+  if (te(path)) {
+    if (path === 'system.globalSettings.keyDescriptions.auth.complex_password_enabled') {
+      return t(path, { specialChars: PASSWORD_SPECIAL_CHARS }) as string
+    }
+    return t(path) as string
+  }
   return item.description ?? ''
 }
 
@@ -620,6 +630,7 @@ type SettingsSection = 'access' | 'tenant' | 'runtime' | 'security' | 'other'
 const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other'>, readonly string[]> = {
   access: [
     'auth.registration_mode',
+    'auth.complex_password_enabled',
     'auth.default_tenant_mode',
     'tenant.self_service_creation_enabled',
     'tenant.max_owned_per_user',
@@ -642,7 +653,7 @@ const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other'>, readonly 
 
 const activeSettingsSection = ref<SettingsSection>('access')
 const knownSettingKeys = new Set(Object.values(SETTINGS_SECTION_KEYS).flat())
-const settingsByKey = computed(() => new Map(settings.value.map((item) => [item.key, item])))
+const settingsByKey = computed<Map<string, SystemSettingItem>>(() => new Map(settings.value.map((item) => [item.key, item])))
 const unknownSettings = computed(() => settings.value.filter((item) => !knownSettingKeys.has(item.key)))
 const hasUnknownSettings = computed(() => unknownSettings.value.length > 0)
 
@@ -707,26 +718,33 @@ const passwordResetForm = reactive({
   newPassword: '',
   confirmPassword: '',
 })
-const passwordResetRules: Record<string, FormRule[]> = {
+const passwordResetRules = computed(() => ({
   email: [
-    { required: true, message: t('system.globalSettings.passwordReset.validation.emailRequired'), trigger: 'blur' },
-    { email: true, message: t('system.globalSettings.passwordReset.validation.emailInvalid'), trigger: 'blur' },
+    { required: true, message: t('auth.emailRequired'), type: 'error' },
+    { email: true, message: t('auth.emailInvalid'), type: 'error' }
   ],
-  newPassword: [
-    { required: true, message: t('system.globalSettings.passwordReset.validation.passwordRequired'), trigger: 'blur' },
-    { min: 8, message: t('system.globalSettings.passwordReset.validation.passwordLength'), trigger: 'blur' },
-    { max: 32, message: t('system.globalSettings.passwordReset.validation.passwordLength'), trigger: 'blur' },
-    { pattern: /[a-zA-Z]/, message: t('system.globalSettings.passwordReset.validation.passwordLetter'), trigger: 'blur' },
-    { pattern: /\d/, message: t('system.globalSettings.passwordReset.validation.passwordNumber'), trigger: 'blur' },
-  ],
+  newPassword: newPasswordRules(t, complexPasswordEnabled.value),
   confirmPassword: [
-    { required: true, message: t('system.globalSettings.passwordReset.validation.confirmRequired'), trigger: 'blur' },
+    { required: true, message: t('auth.confirmPasswordRequired'), trigger: 'blur' },
     {
       validator: (value: string) => value === passwordResetForm.newPassword,
-      message: t('system.globalSettings.passwordReset.validation.passwordMismatch'),
+      message: t('auth.passwordMismatch'),
       trigger: 'blur',
     },
   ],
+}))
+
+const complexPasswordEnabled = ref(false)
+
+const loadAuthConfig = async () => {
+  try {
+    const resp = await getAuthConfig()
+    complexPasswordEnabled.value = !!resp.complex_password_enabled
+  } catch (err: any) {
+    const msg = err?.message || t('system.globalSettings.messages.loadFailed')
+    MessagePlugin.error(msg)
+    complexPasswordEnabled.value = false
+  }
 }
 
 function resetPasswordResetForm() {
@@ -737,6 +755,7 @@ function resetPasswordResetForm() {
 }
 
 async function openPasswordResetDialog() {
+  await loadAuthConfig()
   resetPasswordResetForm()
   passwordResetVisible.value = true
   await nextTick()
@@ -866,16 +885,7 @@ async function snapSsrfWhitelistToSaved(item: SystemSettingItem) {
 }
 
 function isDirty(item: SystemSettingItem): boolean {
-  const cur = editValues[item.key]
-  const orig = item.value
-  if (Array.isArray(cur) && Array.isArray(orig)) {
-    if (cur.length !== orig.length) return true
-    for (let i = 0; i < cur.length; i++) {
-      if (cur[i] !== orig[i]) return true
-    }
-    return false
-  }
-  return cur !== orig
+  return isSettingValueDirty(editValues[item.key], item.value)
 }
 
 function formatDate(isoString: string): string {
@@ -929,7 +939,9 @@ async function loadSettings() {
 // onChange persists non-SSRF settings. SSRF whitelist and system admins
 // have dedicated handlers with inline popconfirm.
 async function onChange(item: SystemSettingItem) {
-  if (!isDirty(item)) return
+  const currentItem = resolveCurrentSetting(settingsByKey.value, item.key)
+  if (!currentItem) return
+  if (!isDirty(currentItem)) return
 
   // SSRF whitelist gets the per-entry confirm flow — same shape as the
   // admin tag-input above. Adding or removing each host/CIDR is its
@@ -937,19 +949,21 @@ async function onChange(item: SystemSettingItem) {
   // the egress firewall), so we ask once per delta instead of once
   // per "save". This matches the operator's mental model: every tag
   // they touch is acknowledged on its own.
-  await persistSetting(item)
+  await persistSetting(currentItem)
 }
 
 async function onHighRiskSelectChange(item: SystemSettingItem) {
+  const currentItem = resolveCurrentSetting(settingsByKey.value, item.key)
+  if (!currentItem) return
   const newValue = editValues[item.key]
-  if (newValue === item.value) return
+  if (!isDirty(currentItem)) return
 
   // Revert the select immediately so cancel leaves the saved value
   // visible; re-apply only after the inline popconfirm is confirmed.
-  editValues[item.key] = item.value
+  editValues[item.key] = currentItem.value
 
   const ok = await highRiskPopconfirm.ask({
-    content: highRiskConfirmBody(item, newValue),
+    content: highRiskConfirmBody(currentItem, newValue),
     theme: 'danger',
     confirmBtn: {
       content: t('system.globalSettings.confirm.confirmBtn'),
@@ -959,7 +973,7 @@ async function onHighRiskSelectChange(item: SystemSettingItem) {
   if (!ok) return
 
   editValues[item.key] = newValue
-  await persistSetting(item)
+  await persistSetting(currentItem)
 }
 
 function confirmSsrfListEntryChange(

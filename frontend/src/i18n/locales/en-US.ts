@@ -1016,24 +1016,25 @@ export default {
       fallbackPrompt: 'Fallback Prompt',
       fallbackPromptPlaceholder: 'Leave empty to use default prompt',
       skillsConfig: 'Skills',
-      skillsConfigDesc: 'Choose the sandbox that runs skill scripts, then pick from the workspace catalog. Skills not installed on that sandbox are visible but cannot be enabled until they are installed.',
-      skillsSelection: 'Available skills',
-      skillsSelectionDesc: 'The list comes from the workspace skill catalog. Only skills that are ready on the selected sandbox can be enabled.',
+      skillsConfigDesc: 'Select a running sandbox, then pick skills below. Skills not on that sandbox show Install and can only be checked after they are installed.',
+      skillsSelection: 'Skill list',
+      skillsSelectionDesc: 'All workspace skills are listed here. Installed ones can be used now; others need Install first.',
       skillsAll: 'All',
       skillsSelected: 'Selected',
       skillsNone: 'Disabled',
       selectSkills: 'Select skills',
-      selectSkillsDesc: 'Choose which skills to enable. Uninstalled or not-ready skills cannot be checked.',
-      skillsAllListHint: 'Ready skills on this sandbox will be enabled. Uninstalled ones are not included until you install them.',
-      skillsListSummary: '{ready} ready, {pending} not ready on this sandbox',
-      skillsListSummaryReadyOnly: '{ready} ready',
+      selectSkillsDesc: 'Check the skills this agent should use. Uninstalled skills cannot be checked — click Install on the right first.',
+      skillsAllListHint: 'All only includes skills already installed on this sandbox. Uninstalled skills are not added until you install them.',
+      skillsGroupAvailable: 'Available',
+      skillsGroupUnavailable: 'Unavailable',
       noSkillsAvailable: 'The workspace catalog has no skills yet.',
       skillsNeedSandbox: 'Select a sandbox first.',
       goSandboxSettings: 'Manage sandboxes',
       goSkillSettings: 'Manage skills',
       installToThisSandbox: 'Install onto this sandbox',
       installShort: 'Install',
-      skillNotInstalled: 'Not installed on this sandbox',
+      viewInstallProgress: 'View progress',
+      skillNotInstalled: 'Not installed',
       skillNotReady: 'Not ready yet',
       skillDisabledOnSandbox: 'Disabled on this sandbox',
       sandboxBackend: 'Sandbox',
@@ -2123,7 +2124,7 @@ export default {
     subtitle: 'RAG Q&A, ReAct Agent and Wiki — an LLM-powered enterprise knowledge framework',
     registerSubtitle: 'Create your account and start using WeKnora',
     emailPlaceholder: 'Enter email address',
-    passwordPlaceholder: 'Enter password (8-32 characters, including letters and numbers)',
+    passwordPlaceholder: 'Enter password',
     confirmPasswordPlaceholder: 'Enter password again',
     usernamePlaceholder: 'Enter username',
     emailRequired: 'Enter email address',
@@ -2132,7 +2133,10 @@ export default {
     passwordMinLength: 'Password must be at least 8 characters',
     passwordMaxLength: 'Password cannot exceed 32 characters',
     passwordMustContainLetter: 'Password must contain letters',
+    passwordMustContainLowercaseLetter: 'Password must contain lowercase letters',
+    passwordMustContainUppercaseLetter: 'Password must contain uppercase letters',
     passwordMustContainNumber: 'Password must contain numbers',
+    passwordMustContainSpecialChar: 'Password must contain special characters: {specialChars}',
     usernameRequired: 'Enter username',
     usernameMinLength: 'Username must be at least 2 characters',
     usernameMaxLength: 'Username cannot exceed 20 characters',
@@ -3851,7 +3855,8 @@ export default {
       keyLabels: {
         auth: {
           registration_mode: 'Self-service registration mode',
-          default_tenant_mode: 'Default workspace provisioning'
+          default_tenant_mode: 'Default workspace provisioning',
+          complex_password_enabled: 'Require complex password'
         },
         ssrf: {
           whitelist: 'SSRF protection allowlist'
@@ -3877,7 +3882,8 @@ export default {
       keyDescriptions: {
         auth: {
           registration_mode: 'Self-service registration mode. self_serve = anyone can register an account; invite_only = public registration is disabled and only Owners/Admins can invite. Takes effect immediately after saving, but use self_serve with care (the public internet will send spam sign-ups).',
-          default_tenant_mode: 'Workspace provisioning after public registration. create_personal creates an Owner workspace; tenantless creates only the account until the user accepts an invitation or creates a workspace. Applies to new users only.'
+          default_tenant_mode: 'Workspace provisioning after public registration. create_personal creates an Owner workspace; tenantless creates only the account until the user accepts an invitation or creates a workspace. Applies to new users only.',
+          complex_password_enabled: 'Whether to require complex passwords. When enabled, passwords must contain uppercase and lowercase letters, numbers, and special characters. Changes take effect immediately and only apply to newly registered users or new password changes/resets. Special characters include {specialChars}'
         },
         ssrf: {
           whitelist: 'SSRF protection allowlist. Accepts entries such as example.com / *.foo.com / 10.0.0.0/8 / 2001:db8::1. Takes effect immediately after saving. The SSRF_WHITELIST_EXTRA environment variable is still maintained by the deployer and is not overridden here.'
@@ -3976,22 +3982,12 @@ export default {
         emailLabel: 'User email',
         emailPlaceholder: 'Enter the email of the user to reset',
         newPasswordLabel: 'New password',
-        newPasswordPlaceholder: '8-32 characters, including letters and numbers',
+        newPasswordPlaceholder: 'Enter new password',
         confirmPasswordLabel: 'Confirm new password',
         confirmPasswordPlaceholder: 'Enter the new password again',
         confirmBtn: 'Confirm reset',
         success: 'Password reset; the user\'s existing sessions were revoked',
         failed: 'Failed to reset password',
-        validation: {
-          emailRequired: 'Enter the user email',
-          emailInvalid: 'Enter a valid email address',
-          passwordRequired: 'Enter a new password',
-          passwordLength: 'Password must be 8-32 characters',
-          passwordLetter: 'Password must contain a letter',
-          passwordNumber: 'Password must contain a number',
-          confirmRequired: 'Enter the new password again',
-          passwordMismatch: 'The passwords do not match'
-        }
       },
       bulkApply: {
         label: 'Apply to all existing workspaces',
@@ -4275,6 +4271,10 @@ export default {
         openrouter: {
           label: 'OpenRouter',
           description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.'
+        },
+        litellm: {
+          label: 'LiteLLM',
+          description: 'Self-hosted proxy to 100+ providers (OpenAI, Anthropic, Gemini, Bedrock, etc.). Replace the placeholder URL; loopback hosts need SSRF_WHITELIST.'
         },
         requesty: {
           label: 'Requesty',
@@ -6421,7 +6421,7 @@ export default {
       currentPlaceholder: 'Enter your current password',
       currentRequired: 'Enter your current password',
       newLabel: 'New password',
-      newPlaceholder: '8-32 characters, include letters and numbers',
+      newPlaceholder: 'Enter new password',
       confirmLabel: 'Confirm new password',
       confirmPlaceholder: 'Enter the new password again',
       submit: 'Update password',

@@ -234,7 +234,7 @@ export default {
       currentPlaceholder: '请输入当前密码',
       currentRequired: '请输入当前密码',
       newLabel: '新密码',
-      newPlaceholder: '8-32 个字符，需包含字母和数字',
+      newPlaceholder: '请输入新密码',
       confirmLabel: '确认新密码',
       confirmPlaceholder: '再次输入新密码',
       submit: '更新密码',
@@ -2454,6 +2454,10 @@ export default {
           label: 'OpenRouter',
           description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.'
         },
+        litellm: {
+          label: 'LiteLLM',
+          description: '自托管代理，统一接入 OpenAI、Anthropic、Gemini、Bedrock 等 100+ 厂商。请将占位 URL 换成可访问地址；localhost 需加入 SSRF_WHITELIST。'
+        },
         zhipu: {
           label: '智谱 BigModel',
           description: 'glm-4.7, embedding-3, rerank, etc.'
@@ -2724,22 +2728,12 @@ export default {
         emailLabel: '用户邮箱',
         emailPlaceholder: '输入需要重置密码的用户邮箱',
         newPasswordLabel: '新密码',
-        newPasswordPlaceholder: '8-32 个字符，包含字母和数字',
+        newPasswordPlaceholder: '请输入新密码',
         confirmPasswordLabel: '确认新密码',
         confirmPasswordPlaceholder: '再次输入新密码',
         confirmBtn: '确认重置',
         success: '密码已重置，该用户的现有会话已失效',
         failed: '重置密码失败',
-        validation: {
-          emailRequired: '请输入用户邮箱',
-          emailInvalid: '请输入有效的邮箱地址',
-          passwordRequired: '请输入新密码',
-          passwordLength: '密码长度必须为 8-32 个字符',
-          passwordLetter: '密码必须包含字母',
-          passwordNumber: '密码必须包含数字',
-          confirmRequired: '请再次输入新密码',
-          passwordMismatch: '两次输入的密码不一致'
-        }
       },
       admins: {
         label: '系统管理员',
@@ -2831,7 +2825,8 @@ export default {
         },
         auth: {
           registration_mode: '自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，仅 Owner/Admin 可邀请。修改后立即生效，但谨慎对待 self_serve（公网会接受 spam）。',
-          default_tenant_mode: '公开注册后的空间初始化策略。create_personal 会自动创建个人空间并授予 Owner；tenantless 仅创建账户，用户需要接受邀请或主动创建空间。只影响之后注册的用户。'
+          default_tenant_mode: '公开注册后的空间初始化策略。create_personal 会自动创建个人空间并授予 Owner；tenantless 仅创建账户，用户需要接受邀请或主动创建空间。只影响之后注册的用户。',
+          complex_password_enabled: '是否启用复杂密码。开启后密码必须包含大小写字母、数字和特殊字符。修改后立即生效，只影响新注册用户或新密码修改/重置操作。特殊字符包含：{specialChars}'
         }
       },
       keyLabels: {
@@ -2857,7 +2852,8 @@ export default {
         },
         auth: {
           registration_mode: '自助注册模式',
-          default_tenant_mode: '注册默认空间策略'
+          default_tenant_mode: '注册默认空间策略',
+          complex_password_enabled: '启用复杂密码'
         }
       },
       runtime: {
@@ -4529,7 +4525,7 @@ export default {
     subtitle: 'RAG 问答、ReAct 智能体与 Wiki 知识库，大模型驱动的企业级知识框架',
     registerSubtitle: '创建账户并开始使用 WeKnora',
     emailPlaceholder: '输入邮箱地址',
-    passwordPlaceholder: '输入密码（8-32个字符，包含字母和数字）',
+    passwordPlaceholder: '输入密码',
     confirmPasswordPlaceholder: '再次输入密码',
     usernamePlaceholder: '输入用户名',
     emailRequired: '请输入邮箱地址',
@@ -4538,7 +4534,10 @@ export default {
     passwordMinLength: '密码至少8个字符',
     passwordMaxLength: '密码不能超过32个字符',
     passwordMustContainLetter: '密码必须包含字母',
+    passwordMustContainLowercaseLetter: '密码必须包含小写字母',
+    passwordMustContainUppercaseLetter: '密码必须包含大写字母',
     passwordMustContainNumber: '密码必须包含数字',
+    passwordMustContainSpecialChar: '密码必须包含特殊字符：{specialChars}',
     usernameRequired: '请输入用户名',
     usernameMinLength: '用户名至少2个字符',
     usernameMaxLength: '用户名不能超过20个字符',
@@ -5751,24 +5750,25 @@ export default {
       fallbackPrompt: '兜底提示词',
       fallbackPromptPlaceholder: '留空使用系统默认提示词',
       skillsConfig: '技能',
-      skillsConfigDesc: '先选择运行沙箱，再从空间目录中选用。未装到该沙箱的技能可以看见，但要先安装才能勾选。',
-      skillsSelection: '可用技能',
-      skillsSelectionDesc: '列表来自空间技能目录。只能启用当前沙箱上已就绪的技能。',
+      skillsConfigDesc: '先选择运行沙箱，再从下面列表选用技能。没装到该沙箱的会显示「安装」，装好后才能勾选。',
+      skillsSelection: '技能列表',
+      skillsSelectionDesc: '这里列出空间目录中的技能。已装到当前沙箱的可以直接用；没装的请先点「安装」。',
       skillsAll: '全部',
       skillsSelected: '指定',
       skillsNone: '禁用',
       selectSkills: '选择技能',
-      selectSkillsDesc: '勾选要启用的技能。未安装或未就绪的不能勾选。',
-      skillsAllListHint: '将启用此沙箱上已就绪的技能。未安装的不会自动带上，装好后才会纳入「全部」。',
-      skillsListSummary: '{ready} 个已就绪，{pending} 个尚未可在此沙箱启用',
-      skillsListSummaryReadyOnly: '{ready} 个已就绪',
+      selectSkillsDesc: '勾选要给这个智能体用的技能。没装到当前沙箱的不能勾选，请先点右侧「安装」。',
+      skillsAllListHint: '「全部」只包含已装到此沙箱的技能。没装的不会自动带上，点「安装」装好后才会算进去。',
+      skillsGroupAvailable: '可用',
+      skillsGroupUnavailable: '不可用',
       noSkillsAvailable: '空间目录里还没有技能。',
       skillsNeedSandbox: '请先选择运行沙箱。',
       goSandboxSettings: '管理沙箱',
       goSkillSettings: '管理技能',
       installToThisSandbox: '安装到此沙箱',
       installShort: '安装',
-      skillNotInstalled: '未安装到当前沙箱',
+      viewInstallProgress: '查看进度',
+      skillNotInstalled: '未安装',
       skillNotReady: '尚未就绪',
       skillDisabledOnSandbox: '已在沙箱中停用',
       sandboxBackend: '运行沙箱',

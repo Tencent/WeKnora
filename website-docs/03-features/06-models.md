@@ -57,7 +57,7 @@ type Provider interface {
 
 ### 支持的厂商清单
 
-`AllProviders()`（`provider/provider.go`）返回的完整列表（共 26 个，每个厂商在自己的文件里 `init()` 注册）。表格最后一行的 Ollama 不在其中，它走 `source=local` 这条独立路径，列在这里只为方便对照：
+`AllProviders()`（`provider/provider.go`）返回的完整列表（共 27 个，每个厂商在自己的文件里 `init()` 注册）。表格最后一行的 Ollama 不在其中，它走 `source=local` 这条独立路径，列在这里只为方便对照：
 
 | Provider 标识 | 名称 | 说明 |
 |---------------|------|------|
@@ -78,6 +78,7 @@ type Provider interface {
 | `anthropic` | Anthropic Claude | 独立 Messages 协议实现 |
 | `gemini` | Google Gemini | Embedding 走专用 API |
 | `openrouter` | OpenRouter | |
+| `litellm` | LiteLLM（自托管 OpenAI 兼容代理） | 默认 URL 为占位符，loopback 需加入 `SSRF_WHITELIST` |
 | `requesty` | Requesty | |
 | `jina` | Jina AI | Embedding 与 Rerank |
 | `mimo` | 小米 MiMo | |
