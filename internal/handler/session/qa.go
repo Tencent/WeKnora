@@ -613,6 +613,26 @@ type sseStreamContext struct {
 	assistantMessage *types.Message
 }
 
+func emitQAErrorEvent(ctx context.Context, eventBus *event.EventBus, sessionID, stage string, serviceErr error) {
+	if serviceErr == nil {
+		return
+	}
+	if err := eventBus.Emit(ctx, event.Event{
+		Type:      event.EventError,
+		SessionID: sessionID,
+		Data: event.ErrorData{
+			Error:     serviceErr.Error(),
+			Stage:     stage,
+			SessionID: sessionID,
+		},
+	}); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"session_id": sessionID,
+			"stage":      stage,
+		})
+	}
+}
+
 // setupSSEStream sets up the SSE streaming context
 func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *sseStreamContext {
 	// Set SSE headers
@@ -1009,9 +1029,11 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				if mode == qaModeAgent {
 					stageName = "Agent QA"
 				}
+				panicErr := fmt.Errorf("%s service panicked: %v", stageName, r)
 				logger.ErrorWithFields(streamCtx.asyncCtx,
-					errors.NewInternalServerError(fmt.Sprintf("%s service panicked: %v\n%s", stageName, r, string(buf))),
+					errors.NewInternalServerError(fmt.Sprintf("%s\n%s", panicErr.Error(), string(buf))),
 					map[string]interface{}{"session_id": sessionID})
+				emitQAErrorEvent(streamCtx.asyncCtx, streamCtx.eventBus, sessionID, stageName, panicErr)
 			}
 			// Agent mode: complete the assistant message in defer (normal mode does it via event handler)
 			if mode == qaModeAgent {
@@ -1058,15 +1080,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				logger.Infof(streamCtx.asyncCtx, "QA cancelled by user stop for session: %s", sessionID)
 			} else {
 				logger.ErrorWithFields(streamCtx.asyncCtx, serviceErr, nil)
-				streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
-					Type:      event.EventError,
-					SessionID: sessionID,
-					Data: event.ErrorData{
-						Error:     serviceErr.Error(),
-						Stage:     stageName,
-						SessionID: sessionID,
-					},
-				})
+				emitQAErrorEvent(streamCtx.asyncCtx, streamCtx.eventBus, sessionID, stageName, serviceErr)
 			}
 		}
 	}()
