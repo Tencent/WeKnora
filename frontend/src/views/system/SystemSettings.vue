@@ -642,7 +642,7 @@ const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other'>, readonly 
 
 const activeSettingsSection = ref<SettingsSection>('access')
 const knownSettingKeys = new Set(Object.values(SETTINGS_SECTION_KEYS).flat())
-const settingsByKey = computed(() => new Map(settings.value.map((item) => [item.key, item])))
+const settingsByKey = computed<Map<string, SystemSettingItem>>(() => new Map(settings.value.map((item) => [item.key, item])))
 const unknownSettings = computed(() => settings.value.filter((item) => !knownSettingKeys.has(item.key)))
 const hasUnknownSettings = computed(() => unknownSettings.value.length > 0)
 
@@ -929,7 +929,9 @@ async function loadSettings() {
 // onChange persists non-SSRF settings. SSRF whitelist and system admins
 // have dedicated handlers with inline popconfirm.
 async function onChange(item: SystemSettingItem) {
-  if (!isDirty(item)) return
+  const currentItem = settingsByKey.value.get(item.key)
+  if (!currentItem) return
+  if (!isDirty(currentItem)) return
 
   // SSRF whitelist gets the per-entry confirm flow — same shape as the
   // admin tag-input above. Adding or removing each host/CIDR is its
@@ -937,7 +939,7 @@ async function onChange(item: SystemSettingItem) {
   // the egress firewall), so we ask once per delta instead of once
   // per "save". This matches the operator's mental model: every tag
   // they touch is acknowledged on its own.
-  await persistSetting(item)
+  await persistSetting(currentItem)
 }
 
 async function onHighRiskSelectChange(item: SystemSettingItem) {
