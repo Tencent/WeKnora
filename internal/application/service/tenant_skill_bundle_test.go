@@ -112,6 +112,35 @@ func zipBundleWithDeclaredSize(t *testing.T, name string, size uint64) []byte {
 	return buf.Bytes()
 }
 
+func zipGitHubStyleWithOversizeExtra(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+
+	f, err := w.Create("repo-main/skills/pdf/SKILL.md")
+	require.NoError(t, err)
+	_, err = f.Write([]byte(validSkillMD))
+	require.NoError(t, err)
+
+	f, err = w.Create("repo-main/skills/pdf/run.py")
+	require.NoError(t, err)
+	_, err = f.Write([]byte("print(1)\n"))
+	require.NoError(t, err)
+
+	header := &zip.FileHeader{
+		Name:               "repo-main/vendor/huge.bin",
+		Method:             zip.Store,
+		UncompressedSize64: uint64(maxSkillBundleFileBytes + 1),
+		CompressedSize64:   0,
+		CRC32:              0,
+	}
+	_, err = w.CreateRaw(header)
+	require.NoError(t, err)
+
+	require.NoError(t, w.Close())
+	return buf.Bytes()
+}
+
 type repeatedByteReader byte
 
 func (r repeatedByteReader) Read(p []byte) (int, error) {
@@ -342,6 +371,16 @@ Use the scripts in this skill.
 		require.NotContains(t, bundle.Files, "README.md")
 	})
 
+	t.Run("remote options ignore oversize files outside the skill subtree", func(t *testing.T) {
+		bundle, err := ParseSkillBundleWithOptions(zipGitHubStyleWithOversizeExtra(t), SkillBundleParseOptions{
+			AllowExtraFiles:  true,
+			AllowNestedSkill: true,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "pdf-tools", bundle.Name)
+		require.Contains(t, bundle.Files, "run.py")
+	})
+
 	t.Run("directory entries do not count toward the file cap", func(t *testing.T) {
 		bundle, err := ParseSkillBundle(zipBundleWithDirEntries(t, 3000))
 		require.NoError(t, err)
@@ -349,10 +388,10 @@ Use the scripts in this skill.
 		require.Len(t, bundle.Files, 1)
 	})
 
-	t.Run("rejects too many entries", func(t *testing.T) {
+	t.Run("rejects too many skill files", func(t *testing.T) {
 		_, err := ParseSkillBundle(zipBundleWithNFiles(t, maxSkillBundleFiles))
 		require.ErrorIs(t, err, ErrSkillBundleInvalid)
-		require.ErrorContains(t, err, "archive holds more than")
+		require.ErrorContains(t, err, "skill directory holds more than")
 	})
 
 	t.Run("rejects per-entry oversize", func(t *testing.T) {

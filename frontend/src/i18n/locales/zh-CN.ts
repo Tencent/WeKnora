@@ -5256,6 +5256,7 @@ export default {
       skillUploadFailed: '技能上传失败',
       skillBundleTooLarge: '技能压缩包不能超过 {size} MB。',
       skillBundleTooManyFiles: '技能目录里的文件不能超过 {count} 个。',
+      skillBundleTooManyZipEntries: '压缩包条目不能超过 {count} 个。',
       skillUploading: '正在上传 {percent}%',
       skillUploadAccepted: '已开始安装技能',
       skillStatusInstalling: '安装中',

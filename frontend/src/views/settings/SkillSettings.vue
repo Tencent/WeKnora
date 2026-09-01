@@ -438,7 +438,7 @@ import ModelSelector from '@/components/ModelSelector.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { SKILL_ICON } from '@/types/mention'
 import { useUIStore } from '@/stores/ui'
-import { MAX_FILE_SIZE_BYTES, MAX_FILE_SIZE_MB } from '@/utils'
+import { MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils'
 import {
   deleteSkillCatalog,
   installSkillCatalog,
@@ -510,7 +510,7 @@ const skillConfigs = computed(() =>
 )
 
 const addBusy = computed(() => uploading.value || addingFromSource.value)
-const maxSkillBundleMB = MAX_FILE_SIZE_MB
+const maxSkillBundleMB = MAX_SKILL_BUNDLE_SIZE_MB
 
 const addSteps = computed(() => [
   { key: 'register', title: t('settings.skills.addStepRegister') },
@@ -911,7 +911,7 @@ function acceptPendingFile(file: File) {
     MessagePlugin.error(t('settings.sandbox.skillUploadFailed'))
     return
   }
-  if (file.size > MAX_FILE_SIZE_BYTES) {
+  if (file.size > MAX_SKILL_BUNDLE_SIZE_BYTES) {
     MessagePlugin.error(t('settings.sandbox.skillBundleTooLarge', { size: maxSkillBundleMB }))
     return
   }
@@ -923,9 +923,17 @@ function skillRegisterErrorMessage(err: any, fromFile: boolean): string {
   if (/cannot exceed \d+\s*MB/i.test(raw)) {
     return t('settings.sandbox.skillBundleTooLarge', { size: maxSkillBundleMB })
   }
-  const tooMany = raw.match(/archive holds more than (\d+) files/i)
-  if (tooMany) {
-    return t('settings.sandbox.skillBundleTooManyFiles', { count: tooMany[1] })
+  const tooManyFiles = raw.match(/skill directory holds more than (\d+) files/i)
+  if (tooManyFiles) {
+    return t('settings.sandbox.skillBundleTooManyFiles', { count: tooManyFiles[1] })
+  }
+  const tooManyEntries = raw.match(/archive has more than (\d+) zip entries/i)
+  if (tooManyEntries) {
+    return t('settings.sandbox.skillBundleTooManyZipEntries', { count: tooManyEntries[1] })
+  }
+  const legacyTooMany = raw.match(/archive holds more than (\d+) files/i)
+  if (legacyTooMany) {
+    return t('settings.sandbox.skillBundleTooManyFiles', { count: legacyTooMany[1] })
   }
   if (raw) return raw
   return fromFile

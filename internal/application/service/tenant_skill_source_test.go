@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -400,4 +401,21 @@ func TestFetchSkillArchiveRejectsNonSkillHTML(t *testing.T) {
 	require.ErrorIs(t, err, ErrSkillSourceInvalid)
 	require.True(t, strings.Contains(err.Error(), "skill archive") ||
 		strings.Contains(err.Error(), "zip skill bundle"))
+}
+
+func TestFetchSkillArchiveRejectsOversizeBody(t *testing.T) {
+	t.Setenv("MAX_FILE_SIZE_MB", "1")
+	t.Setenv("MAX_SKILL_BUNDLE_SIZE_MB", "1")
+	payload := strings.Repeat("z", 2<<20)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
+		_, _ = w.Write([]byte(payload))
+	}))
+	t.Cleanup(server.Close)
+	allowLoopbackSkillFetch(t)
+
+	_, err := fetchSkillArchive(t.Context(), server.URL+"/demo.zip", server.Client())
+	require.ErrorIs(t, err, ErrSkillSourceInvalid)
+	require.ErrorContains(t, err, "1 MB")
 }
