@@ -91,7 +91,9 @@ func (f *fakeSvc) OpenKnowledgeFile(_ context.Context, id string) (string, io.Re
 	f.calls.openDocID = id
 	return f.openDocName, f.openDocBody, f.openDocErr
 }
-func (f *fakeSvc) HybridSearch(_ context.Context, kbID string, p *sdk.SearchParams, _ ...sdk.ResourceURLOptions) ([]*sdk.SearchResult, error) {
+func (f *fakeSvc) HybridSearch(
+	_ context.Context, kbID string, p *sdk.SearchParams, _ ...sdk.ResourceURLOptions,
+) ([]*sdk.SearchResult, error) {
 	f.calls.hybridKBID, f.calls.hybridParams = kbID, p
 	return f.hybridResults, f.hybridErr
 }
