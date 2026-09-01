@@ -31,6 +31,7 @@
               <slot name="subtitle">{{ description }}</slot>
             </div>
           </div>
+          <div :id="headerActionsId" class="setting-drawer__header-actions"><slot name="header-actions" /></div>
         </div>
         <div v-if="$slots['header-extra']" class="setting-drawer__header-extra">
           <slot name="header-extra" />
@@ -61,8 +62,16 @@
   </t-drawer>
 </template>
 
+<script lang="ts">
+import type { InjectionKey } from 'vue'
+
+// Skill manage (and similar) panels teleport compact header actions here so
+// they sit on the title row without each drawer re-declaring the chrome.
+export const SETTING_DRAWER_HEADER_ACTIONS_ID: InjectionKey<string> = Symbol('settingDrawerHeaderActionsId')
+</script>
+
 <script setup lang="ts">
-import { ref, computed, useAttrs, onMounted, onUnmounted } from 'vue'
+import { ref, computed, provide, useAttrs, useId, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 interface Props {
@@ -122,6 +131,8 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const attrs = useAttrs()
+const headerActionsId = `sdha${useId().replace(/\W/g, '')}`
+provide(SETTING_DRAWER_HEADER_ACTIONS_ID, `#${headerActionsId}`)
 
 const drawerPassthroughAttrs = computed(() => {
   const { class: _class, ...rest } = attrs
@@ -299,6 +310,27 @@ const handleCancel = () => {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-drawer__header-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+
+  &:empty {
+    display: none;
+  }
+
+  :deep(.t-button) {
+    white-space: nowrap;
+  }
+}
+
+.setting-drawer__header-extra {
+  width: 100%;
   min-width: 0;
 }
 

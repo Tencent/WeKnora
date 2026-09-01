@@ -5369,6 +5369,7 @@ export default {
       manageDrawerDesc: '샌드박스 「{name}」에서 사용 여부, 변수, 제거를 관리합니다.',
       manageEnable: '사용',
       manageUninstall: '샌드박스에서 제거',
+      manageUninstallConfirm: '샌드박스에서 「{name}」을(를) 제거할까요?',
       deleteCatalog: '카탈로그에서 삭제',
       deleteCatalogConfirm: '「{name}」을 카탈로그에서 삭제할까요? 모든 샌드박스에서 먼저 제거하세요.',
       deleteCatalogBlocked: '모든 샌드박스에서 이 스킬을 먼저 제거하세요.',
