@@ -2822,7 +2822,7 @@ export default {
         auth: {
           registration_mode: '自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，仅 Owner/Admin 可邀请。修改后立即生效，但谨慎对待 self_serve（公网会接受 spam）。',
           default_tenant_mode: '公开注册后的空间初始化策略。create_personal 会自动创建个人空间并授予 Owner；tenantless 仅创建账户，用户需要接受邀请或主动创建空间。只影响之后注册的用户。',
-          complex_password_enabled: '是否允许复杂密码，开启后密码必须包含大小写字母、数字和特殊字符。修改后立即生效，只影响新注册用户或新密码修改/重置操作。特殊字符包含：{specialChars}'
+          complex_password_enabled: '是否启用复杂密码。开启后密码必须包含大小写字母、数字和特殊字符。修改后立即生效，只影响新注册用户或新密码修改/重置操作。特殊字符包含：{specialChars}'
         }
       },
       keyLabels: {
@@ -2849,7 +2849,7 @@ export default {
         auth: {
           registration_mode: '自助注册模式',
           default_tenant_mode: '注册默认空间策略',
-          complex_password_enabled: '允许复杂密码'
+          complex_password_enabled: '启用复杂密码'
         }
       },
       runtime: {

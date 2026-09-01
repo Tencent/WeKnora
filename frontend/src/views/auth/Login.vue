@@ -344,6 +344,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
+import { newPasswordRules } from '@/utils/passwordPolicy'
 import { Swiper, SwiperSlide } from 'swiper/vue'
 import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
 import 'swiper/css'
@@ -462,9 +463,6 @@ const registerData = reactive<{ [key: string]: any }>({
   confirmPassword: ''
 })
 
-const specialCharRegex = /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/
-const specialChars = '!@#$%^&*()_+-=[]{}|;:,.<>?'
-
 // Login form validation rules
 const formRules = computed(() => ({
   email: [
@@ -494,23 +492,7 @@ const registerRules = computed(() => ({
     { required: true, message: t('auth.emailRequired'), type: 'error' },
     { email: true, message: t('auth.emailInvalid'), type: 'error' }
   ],
-  password: complexPasswordEnabled.value
-    ? [
-      { required: true, message: t('auth.passwordRequired'), type: 'error' },
-      { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-      { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-      { pattern: /[a-z]/, message: t('auth.passwordMustContainLowercaseLetter'), type: 'error' },
-      { pattern: /[A-Z]/, message: t('auth.passwordMustContainUppercaseLetter'), type: 'error' },
-      { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' },
-      { pattern: specialCharRegex, message: t('auth.passwordMustContainSpecialChar', {specialChars}), type: 'error' }
-    ]
-    : [
-      { required: true, message: t('auth.passwordRequired'), type: 'error' },
-      { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-      { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-      { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
-      { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' }
-    ],
+  password: newPasswordRules(t, complexPasswordEnabled.value),
   confirmPassword: [
     { required: true, message: t('auth.confirmPasswordRequired'), type: 'error' },
     {

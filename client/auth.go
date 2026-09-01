@@ -199,3 +199,26 @@ func (c *Client) ChangePassword(ctx context.Context, req ChangePasswordRequest) 
 	}
 	return &out, nil
 }
+
+// AuthConfigResponse is returned by GET /api/v1/auth/config.
+// The endpoint is unauthenticated so the SPA can decide whether to show
+// the register tab and which password complexity rules to apply.
+type AuthConfigResponse struct {
+	Success                bool   `json:"success"`
+	RegistrationMode       string `json:"registration_mode"`
+	ComplexPasswordEnabled bool   `json:"complex_password_enabled"`
+}
+
+// GetAuthConfig fetches public authentication settings.
+// Maps to GET /api/v1/auth/config.
+func (c *Client) GetAuthConfig(ctx context.Context) (*AuthConfigResponse, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/auth/config", nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get auth config: %w", err)
+	}
+	var out AuthConfigResponse
+	if err := parseResponse(resp, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

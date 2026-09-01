@@ -15,8 +15,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -72,56 +70,6 @@ const (
 	DetailSamePassword       = "same_password"
 )
 
-const (
-	upperChars   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	lowerChars   = "abcdefghijklmnopqrstuvwxyz"
-	digitChars   = "0123456789"
-	specialChars = "!@#$%^&*()_+-=[]{}|;:,.<>?"
-	allChars     = upperChars + lowerChars + digitChars + specialChars
-)
-
-// ValidatePasswordPolicy keeps administrative password resets aligned with
-// the registration form's documented policy. Password bytes are never logged
-// or included in the returned error.
-func ValidatePasswordPolicy(password string, complexPasswordEnabled bool) error {
-	length := utf8.RuneCountInString(password)
-	if length < 8 || length > 32 {
-		return ErrPasswordPolicy
-	}
-
-	var (
-		hasUpper   bool
-		hasLower   bool
-		hasDigit   bool
-		hasSpecial bool
-	)
-
-	for _, char := range password {
-		switch {
-		case unicode.IsUpper(char):
-			hasUpper = true
-		case unicode.IsLower(char):
-			hasLower = true
-		case unicode.IsDigit(char):
-			hasDigit = true
-		case strings.ContainsRune(specialChars, char):
-			hasSpecial = true
-		}
-	}
-
-	if complexPasswordEnabled {
-		if !(hasUpper && hasLower && hasDigit && hasSpecial) {
-			return ErrComplexPasswordPolicy
-		}
-	} else {
-		if !(hasUpper || hasLower) || !hasDigit {
-			return ErrPasswordPolicy
-		}
-	}
-
-	return nil
-}
-
 // getJwtSecret retrieves the JWT secret from the environment, falling back to a securely generated random secret.
 func getJwtSecret() string {
 	jwtSecretOnce.Do(func() {
@@ -142,11 +90,12 @@ func getJwtSecret() string {
 
 // userService implements the UserService interface
 type userService struct {
-	userRepo      interfaces.UserRepository
-	tokenRepo     interfaces.AuthTokenRepository
-	tenantService interfaces.TenantService
-	memberService interfaces.TenantMemberService
-	config        *config.Config
+	userRepo         interfaces.UserRepository
+	tokenRepo        interfaces.AuthTokenRepository
+	tenantService    interfaces.TenantService
+	memberService    interfaces.TenantMemberService
+	config           *config.Config
+	systemSettingSvc interfaces.SystemSettingService
 }
 
 // NewUserService creates a new user service instance
@@ -156,14 +105,20 @@ func NewUserService(
 	tokenRepo interfaces.AuthTokenRepository,
 	tenantService interfaces.TenantService,
 	memberService interfaces.TenantMemberService,
+	systemSettingSvc interfaces.SystemSettingService,
 ) interfaces.UserService {
 	return &userService{
-		userRepo:      userRepo,
-		tokenRepo:     tokenRepo,
-		tenantService: tenantService,
-		memberService: memberService,
-		config:        configInfo,
+		userRepo:         userRepo,
+		tokenRepo:        tokenRepo,
+		tenantService:    tenantService,
+		memberService:    memberService,
+		config:           configInfo,
+		systemSettingSvc: systemSettingSvc,
 	}
+}
+
+func (s *userService) complexPasswordEnabled(ctx context.Context) bool {
+	return ResolveComplexPasswordEnabled(ctx, s.config, s.systemSettingSvc)
 }
 
 // Register creates a new user account
@@ -712,6 +667,10 @@ func (s *userService) ChangePassword(ctx context.Context, userID, oldPassword, n
 		return ErrSamePassword
 	}
 
+	if err := ValidatePasswordPolicy(newPassword, s.complexPasswordEnabled(ctx)); err != nil {
+		return err
+	}
+
 	// Hash new password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
@@ -739,6 +698,10 @@ func (s *userService) ChangePassword(ctx context.Context, userID, oldPassword, n
 // admin HTTP boundary; this service owns the security-critical persistence and
 // session invalidation so no caller can accidentally update only one of them.
 func (s *userService) AdminResetPassword(ctx context.Context, userID, newPassword string) error {
+	if err := ValidatePasswordPolicy(newPassword, s.complexPasswordEnabled(ctx)); err != nil {
+		return err
+	}
+
 	user, err := s.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
 		return err
@@ -775,10 +738,7 @@ func (s *userService) AdminCreateUser(
 
 	password := ""
 	generated := false
-	complexPasswordEnabled := false
-	if s.config != nil && s.config.Auth != nil {
-		complexPasswordEnabled = s.config.Auth.ComplexPasswordEnabled
-	}
+	complexPasswordEnabled := s.complexPasswordEnabled(ctx)
 
 	if req.Password == nil {
 		randomPassword, err := generatePolicyCompliantPassword(complexPasswordEnabled)
@@ -1720,7 +1680,7 @@ func generateComplexPassword(length int) (string, error) {
 	}
 	password = append(password, c)
 
-	c, err = getRandomChar(specialChars)
+	c, err = getRandomChar(passwordSpecialChars)
 	if err != nil {
 		return "", err
 	}

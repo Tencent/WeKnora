@@ -150,13 +150,16 @@ func TestGeneratePolicyCompliantPasswordAlwaysComplies(t *testing.T) {
 		}
 	}
 
-	// Complex policies are satisfied in a single pass.
-	pw, err := generatePolicyCompliantPassword(true)
-	if err != nil {
-		t.Fatalf("failed to generate complex password: %v", err)
-	}
-	if err := ValidatePasswordPolicy(pw, true); err != nil {
-		t.Fatalf("generated complex password %q violates the policy: %v", pw, err)
+	// Complex policies are constructed to comply in a single pass; still
+	// sample many draws so a shuffle regression cannot hide.
+	for i := range 200 {
+		pw, err := generatePolicyCompliantPassword(true)
+		if err != nil {
+			t.Fatalf("iteration %d: failed to generate complex password: %v", i, err)
+		}
+		if err := ValidatePasswordPolicy(pw, true); err != nil {
+			t.Fatalf("iteration %d: generated complex password %q violates the policy: %v", i, pw, err)
+		}
 	}
 }
 
@@ -177,6 +180,35 @@ func TestAdminCreateUserRejectsWeakPasswordBeforePersisting(t *testing.T) {
 		if repo.created != nil {
 			t.Fatalf("password=%q reached persistence", pw)
 		}
+	}
+}
+
+func TestAdminCreateUserHonoursRuntimeComplexPolicy(t *testing.T) {
+	repo := &adminCreateUserRepo{}
+	svc := &userService{
+		userRepo:         repo,
+		systemSettingSvc: &stubComplexPasswordSettings{enabled: true},
+	}
+
+	user, generated, err := svc.AdminCreateUser(context.Background(), &types.AdminCreateUserRequest{
+		Username: "alice", Email: "alice@example.com",
+	}, types.TenantProvisioningTenantless)
+	if err != nil {
+		t.Fatalf("AdminCreateUser generate: %v", err)
+	}
+	if user == nil || generated == "" {
+		t.Fatal("expected a generated complex password")
+	}
+	if err := ValidatePasswordPolicy(generated, true); err != nil {
+		t.Fatalf("generated password %q violates complex policy: %v", generated, err)
+	}
+
+	simple := "PlainPass9"
+	_, _, err = svc.AdminCreateUser(context.Background(), &types.AdminCreateUserRequest{
+		Username: "bob", Email: "bob@example.com", Password: &simple,
+	}, types.TenantProvisioningTenantless)
+	if !errors.Is(err, ErrComplexPasswordPolicy) {
+		t.Fatalf("explicit simple password err=%v, want ErrComplexPasswordPolicy", err)
 	}
 }
 

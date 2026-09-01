@@ -149,7 +149,7 @@ var registry = map[string]settingSpec{
 		EnvName:  "WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED",
 		Default:  false,
 		Category: "auth",
-		Description: "是否允许复杂密码，开启后密码必须包含大小写字母、数字和特殊字符。" +
+		Description: "是否启用复杂密码。开启后密码必须包含大小写字母、数字和特殊字符。" +
 			"修改后立即生效，只影响新注册用户或新密码修改/重置操作。特殊字符包含：!@#$%^&*()_+-=[]{}|;:,.<>?",
 	},
 	// tenant.max_owned_per_user caps how many tenants a single non-superuser

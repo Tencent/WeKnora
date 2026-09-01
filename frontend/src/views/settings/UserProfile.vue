@@ -183,6 +183,7 @@ import {
 } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
+import { newPasswordRules } from '@/utils/passwordPolicy'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -202,50 +203,39 @@ const passwordForm = reactive({
   confirmPassword: '',
 })
 
+const loadPasswordPolicy = async () => {
+  try {
+    const resp = await getAuthConfig()
+    complexPasswordEnabled.value = !!resp.complex_password_enabled
+  } catch {
+    complexPasswordEnabled.value = false
+  }
+}
+
 const oidcOnlyLogin = computed(
   () => userInfo.value?.preferences?.oidc_only_login === true,
 )
 
 watch(passwordPopupVisible, (open) => {
-  if (open) {
+  if (!open) {
     resetPasswordForm()
+    return
   }
+  resetPasswordForm()
+  void loadPasswordPolicy()
 })
-
-const specialCharRegex = /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/
-const specialChars = '!@#$%^&*()_+-=[]{}|;:,.<>?'
 
 const passwordRules = computed<Record<string, FormRule[]>>(() => ({
   oldPassword: [
     { required: true, message: t('userProfile.changePassword.currentRequired'), type: 'error' },
   ],
-  newPassword: complexPasswordEnabled.value
-    ? [
-      { required: true, message: t('auth.passwordRequired'), type: 'error' },
-      { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-      { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-      { pattern: /[a-z]/, message: t('auth.passwordMustContainLowercaseLetter'), type: 'error' },
-      { pattern: /[A-Z]/, message: t('auth.passwordMustContainUppercaseLetter'), type: 'error' },
-      { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' },
-      { pattern: specialCharRegex, message: t('auth.passwordMustContainSpecialChar', {specialChars}), type: 'error' },
-      {
-        validator: (val: string) => val !== passwordForm.oldPassword,
-        message: t('userProfile.changePassword.sameAsCurrent'),
-        type: 'error',
-      },
-    ]
-    : [
-      { required: true, message: t('auth.passwordRequired'), type: 'error' },
-      { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-      { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-      { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
-      { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' },
-      {
-        validator: (val: string) => val !== passwordForm.oldPassword,
-        message: t('userProfile.changePassword.sameAsCurrent'),
-        type: 'error',
-      },
-    ],
+  newPassword: newPasswordRules(t, complexPasswordEnabled.value, [
+    {
+      validator: (val: string) => val !== passwordForm.oldPassword,
+      message: t('userProfile.changePassword.sameAsCurrent'),
+      type: 'error',
+    },
+  ]),
   confirmPassword: [
     { required: true, message: t('auth.confirmPasswordRequired'), type: 'error' },
     {
@@ -269,20 +259,6 @@ const loadInfo = async () => {
     }
   } catch (err: any) {
     error.value = err?.message || t('tenant.messages.networkError')
-  } finally {
-    loading.value = false
-  }
-}
-
-const loadAuthConfig = async () => {
-  try {
-    loading.value = true
-    error.value = ''
-    const resp = await getAuthConfig()
-    complexPasswordEnabled.value = resp.complex_password_enabled
-  } catch (err: any) {
-    error.value = err?.message || t('tenant.messages.networkError')
-    complexPasswordEnabled.value = false
   } finally {
     loading.value = false
   }
@@ -354,10 +330,7 @@ const submitPasswordChange = async () => {
   }
 }
 
-onMounted(() => {
-  loadInfo()
-  loadAuthConfig()
-})
+onMounted(loadInfo)
 </script>
 
 <style lang="less" scoped>

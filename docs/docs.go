@@ -825,7 +825,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；成功后所有会话被撤销，需重新登录。",
+                "description": "修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；开启复杂密码后还需包含大小写与特殊字符。成功后所有会话被撤销，需重新登录。",
                 "consumes": [
                     "application/json"
                 ],
@@ -874,7 +874,7 @@ const docTemplate = `{
         },
         "/auth/config": {
             "get": {
-                "description": "返回当前部署的注册模式等公开认证配置，供前端决定是否展示注册入口",
+                "description": "返回当前部署的注册模式与密码复杂度开关，供前端决定是否展示注册入口以及密码校验规则",
                 "consumes": [
                     "application/json"
                 ],

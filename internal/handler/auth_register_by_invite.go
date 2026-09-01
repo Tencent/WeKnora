@@ -170,11 +170,7 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 		return
 	}
 
-	complexPasswordEnabled := false
-	if h.configInfo != nil && h.configInfo.Auth != nil {
-		complexPasswordEnabled = h.configInfo.Auth.ComplexPasswordEnabled
-	}
-	if err := service.ValidatePasswordPolicy(req.Password, complexPasswordEnabled); err != nil {
+	if err := service.ValidatePasswordPolicy(req.Password, h.complexPasswordEnabled(ctx)); err != nil {
 		logger.Error(ctx, "Invalid password policy")
 		c.Error(apperrors.NewValidationError(err.Error()))
 		return

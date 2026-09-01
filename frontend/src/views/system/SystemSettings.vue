@@ -499,14 +499,12 @@ import {
   getAuthConfig,
 } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import { newPasswordRules, PASSWORD_SPECIAL_CHARS } from '@/utils/passwordPolicy'
 
 const authStore = useAuthStore()
 const currentUserId = computed(() => authStore.currentUserId)
 
 const { t, tm, te, locale } = useI18n()
-
-const specialCharRegex = /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/
-const specialChars = '!@#$%^&*()_+-=[]{}|;:,.<>?'
 
 // Friendly labels per key live in i18n (system.globalSettings.keyLabels.*).
 // Adding a new entry there must accompany every new key registered in
@@ -522,8 +520,8 @@ function keyLabel(k: string): string {
 function settingDescription(item: { key: string; description?: string }): string {
   const path = `system.globalSettings.keyDescriptions.${item.key}`
   if (te(path)) {
-    if (path == 'system.globalSettings.keyDescriptions.auth.complex_password_enabled') {
-      return t(path, {specialChars}) as string
+    if (path === 'system.globalSettings.keyDescriptions.auth.complex_password_enabled') {
+      return t(path, { specialChars: PASSWORD_SPECIAL_CHARS }) as string
     }
     return t(path) as string
   }
@@ -724,23 +722,7 @@ const passwordResetRules = computed(() => ({
     { required: true, message: t('auth.emailRequired'), type: 'error' },
     { email: true, message: t('auth.emailInvalid'), type: 'error' }
   ],
-  newPassword: complexPasswordEnabled.value
-    ? [
-      { required: true, message: t('auth.passwordRequired'), type: 'error' },
-      { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-      { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-      { pattern: /[a-z]/, message: t('auth.passwordMustContainLowercaseLetter'), type: 'error' },
-      { pattern: /[A-Z]/, message: t('auth.passwordMustContainUppercaseLetter'), type: 'error' },
-      { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' },
-      { pattern: specialCharRegex, message: t('auth.passwordMustContainSpecialChar', {specialChars}), type: 'error' },
-    ]
-    : [
-      { required: true, message: t('auth.passwordRequired'), type: 'error' },
-      { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-      { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-      { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
-      { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' },
-    ],
+  newPassword: newPasswordRules(t, complexPasswordEnabled.value),
   confirmPassword: [
     { required: true, message: t('auth.confirmPasswordRequired'), trigger: 'blur' },
     {
@@ -755,15 +737,12 @@ const complexPasswordEnabled = ref(false)
 
 const loadAuthConfig = async () => {
   try {
-    loading.value = true
     const resp = await getAuthConfig()
-    complexPasswordEnabled.value = resp.complex_password_enabled
+    complexPasswordEnabled.value = !!resp.complex_password_enabled
   } catch (err: any) {
     const msg = err?.message || t('system.globalSettings.messages.loadFailed')
     MessagePlugin.error(msg)
     complexPasswordEnabled.value = false
-  } finally {
-    loading.value = false
   }
 }
 

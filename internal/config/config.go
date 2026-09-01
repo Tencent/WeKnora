@@ -849,11 +849,10 @@ func applyAuthAndTenantDefaults(cfg *Config) {
 	}
 
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED")); value != "" {
-		v := strings.EqualFold(value, "true")
-		cfg.Auth.ComplexPasswordEnabled = v
+		if parsed, err := strconv.ParseBool(value); err == nil {
+			cfg.Auth.ComplexPasswordEnabled = parsed
+		}
 	}
-
-	fmt.Println("***********", cfg.Auth.ComplexPasswordEnabled)
 
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_DEFAULT_TENANT_MODE")); value != "" {
 		cfg.Auth.DefaultTenantMode = value
