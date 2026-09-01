@@ -1926,6 +1926,7 @@ func installerAgentDefaults(ctx context.Context, tenantID uint64) *types.CustomA
 // resolveInstallerModel.
 func installerAgentConfig(defaults *types.CustomAgent, configID string) *types.AgentConfig {
 	memoryOff := false
+	thinkingOff := false
 	cfg := &types.AgentConfig{
 		MaxIterations:    30,
 		AllowedTools:     []string{tools.ToolShellExec},
@@ -1934,6 +1935,10 @@ func installerAgentConfig(defaults *types.CustomAgent, configID string) *types.A
 		MCPSelectionMode: "none",
 		MemoryEnabled:    &memoryOff,
 		SandboxConfigID:  configID,
+		// Installs are short shell-command rounds, not reasoning tasks: pin
+		// thinking off instead of deferring to the model's own default, which
+		// burns latency and completion tokens on every ReAct round.
+		Thinking: &thinkingOff,
 	}
 	if defaults == nil {
 		return cfg
