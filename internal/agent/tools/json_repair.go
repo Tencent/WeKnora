@@ -13,6 +13,7 @@ import (
 //   - Unquoted keys
 //   - Invalid backslash escapes inside strings (e.g. regex patterns like
 //     "C\+\+", "\d+", "\.log$") where the LLM forgot to double-escape.
+//   - Extra tokens after the top-level value (e.g. `{}""`, `{"a":1}{"a":1}`)
 //
 // Returns the repaired JSON string. If repair is not possible,
 // returns the original string unchanged (caller should handle parse errors).
@@ -35,6 +36,9 @@ func RepairJSON(s string) string {
 	// Fix invalid backslash escapes before anything else, because unbalanced
 	// strings confuse the comma/bracket trackers below.
 	s = fixInvalidEscapes(s)
+
+	// Drop anything after the first complete top-level value
+	s = trimAfterTopLevelValue(s)
 
 	// Fix trailing commas: ,} or ,]
 	s = fixTrailingCommas(s)
@@ -100,6 +104,51 @@ func fixInvalidEscapes(s string) string {
 		}
 	}
 	return out.String()
+}
+
+// trimAfterTopLevelValue cuts everything that follows the first balanced
+// top-level object/array. Streaming providers occasionally emit a stray
+// argument fragment after the arguments are already complete — a lone `""`
+// or a repeat of the whole payload — and the concatenated result (`{}""`)
+// fails to parse even though the leading value is perfectly good.
+// Input that never closes its top-level value is returned unchanged so that
+// balanceBrackets can still recover a truncated payload.
+func trimAfterTopLevelValue(s string) string {
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i, r := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inString {
+			switch r {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch r {
+		case '"':
+			inString = true
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+			if depth == 0 {
+				end := i + len(string(r))
+				if strings.TrimSpace(s[end:]) == "" {
+					return s
+				}
+				return s[:end]
+			}
+		}
+	}
+	return s
 }
 
 // fixTrailingCommas removes trailing commas before closing brackets/braces.
