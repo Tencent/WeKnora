@@ -17,7 +17,7 @@
 
       <section v-if="mode === 'install'" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillSourceSection') }}</h4>
-        <p class="installer-model-hint">{{ $t('settings.sandbox.skillSourceSectionHint', { size: MAX_FILE_SIZE_MB }) }}</p>
+        <p class="installer-model-hint">{{ $t('settings.sandbox.skillSourceSectionHint', { size: MAX_SKILL_BUNDLE_SIZE_MB }) }}</p>
         <t-input-adornment class="skill-source-row">
           <t-input
             v-model="sourceInput"
@@ -40,7 +40,7 @@
 
       <section v-if="mode === 'install'" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillUploadSection') }}</h4>
-        <p class="installer-model-hint">{{ $t('settings.sandbox.skillUploadSectionHint', { size: MAX_FILE_SIZE_MB }) }}</p>
+        <p class="installer-model-hint">{{ $t('settings.sandbox.skillUploadSectionHint', { size: MAX_SKILL_BUNDLE_SIZE_MB }) }}</p>
         <input
           ref="fileInputRef"
           type="file"
@@ -576,7 +576,7 @@ import {
   type SandboxConfigRecord,
 } from '@/api/system'
 import { getApiBaseUrl } from '@/utils/api-base'
-import { generateRandomString, MAX_FILE_SIZE_BYTES, MAX_FILE_SIZE_MB } from '@/utils/index'
+import { generateRandomString, MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils/index'
 import i18n from '@/i18n'
 import {
   MAX_ENV_VALUE_BYTES,
@@ -699,10 +699,13 @@ function statusLabel(skill: ConfigSkill): string {
 }
 
 function isBusy(skill: ConfigSkill): boolean {
-  return skill.status === 'installing' || skill.status === 'removing'
+  return skill.status === 'installing' || isRemoving(skill)
 }
 
 function isRemoving(skill: ConfigSkill): boolean {
+  if (uninstallingId.value === skill.id && !uninstallDone.value) {
+    if (progressById.value[skill.id]?.stage !== 'failed') return true
+  }
   return skill.status === 'removing' || deletingId.value === skill.id
 }
 
@@ -1113,6 +1116,19 @@ function skillsSignature(list: ConfigSkill[]): string {
   return list.map((skill) => `${skill.id}:${skill.status}:${skill.enabled ? 1 : 0}`).join('|')
 }
 
+function overlayUninstallStatus(list: ConfigSkill[]): ConfigSkill[] {
+  const id = uninstallingId.value
+  if (!id || uninstallDone.value) return list
+  if (progressById.value[id]?.stage === 'failed') return list
+  return list.map((item) => {
+    if (item.id !== id) return item
+    if (item.status === 'removed' || item.status === 'failed' || item.status === 'removing') {
+      return item
+    }
+    return { ...item, status: 'removing' }
+  })
+}
+
 async function loadSkills(silent = false) {
   if (!props.record) return
   if (!silent) loading.value = true
@@ -1120,7 +1136,7 @@ async function loadSkills(silent = false) {
   const wasBusy = skills.value.some(isBusy)
   try {
     const res = await listConfigSkills(props.record.id)
-    skills.value = res?.data || []
+    skills.value = overlayUninstallStatus(res?.data || [])
     followBusySkills()
     ensurePoll()
     if (skillsSignature(skills.value) !== previous) {
@@ -1199,11 +1215,19 @@ function isZipFile(file: File): boolean {
 function skillBundleErrorMessage(err: any, fallbackKey: string): string {
   const raw = String(err?.message || '')
   if (/cannot exceed \d+\s*MB/i.test(raw)) {
-    return t('settings.sandbox.skillBundleTooLarge', { size: MAX_FILE_SIZE_MB })
+    return t('settings.sandbox.skillBundleTooLarge', { size: MAX_SKILL_BUNDLE_SIZE_MB })
   }
-  const tooMany = raw.match(/archive holds more than (\d+) files/i)
-  if (tooMany) {
-    return t('settings.sandbox.skillBundleTooManyFiles', { count: tooMany[1] })
+  const tooManyFiles = raw.match(/skill directory holds more than (\d+) files/i)
+  if (tooManyFiles) {
+    return t('settings.sandbox.skillBundleTooManyFiles', { count: tooManyFiles[1] })
+  }
+  const tooManyEntries = raw.match(/archive has more than (\d+) zip entries/i)
+  if (tooManyEntries) {
+    return t('settings.sandbox.skillBundleTooManyZipEntries', { count: tooManyEntries[1] })
+  }
+  const legacyTooMany = raw.match(/archive holds more than (\d+) files/i)
+  if (legacyTooMany) {
+    return t('settings.sandbox.skillBundleTooManyFiles', { count: legacyTooMany[1] })
   }
   return raw || t(fallbackKey)
 }
@@ -1218,8 +1242,8 @@ async function uploadFile(file: File) {
     MessagePlugin.error(t('settings.sandbox.skillUploadFailed'))
     return
   }
-  if (file.size > MAX_FILE_SIZE_BYTES) {
-    MessagePlugin.error(t('settings.sandbox.skillBundleTooLarge', { size: MAX_FILE_SIZE_MB }))
+  if (file.size > MAX_SKILL_BUNDLE_SIZE_BYTES) {
+    MessagePlugin.error(t('settings.sandbox.skillBundleTooLarge', { size: MAX_SKILL_BUNDLE_SIZE_MB }))
     return
   }
   uploading.value = true
@@ -1344,6 +1368,9 @@ async function removeSkill(skill: ConfigSkill) {
     await refreshImage()
     followProgress(skill.id)
   } catch (e: any) {
+    uninstallingId.value = ''
+    uninstallingName.value = ''
+    sawRemoving.value = false
     MessagePlugin.error(e?.message || t('common.deleteFailed'))
   } finally {
     deletingId.value = ''

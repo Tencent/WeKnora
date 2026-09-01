@@ -304,6 +304,7 @@ func skillUploadRequest(t *testing.T, configID string, archive []byte) *http.Req
 // layer, before the whole body is buffered for the parser.
 func TestSandboxSkillUploadOverLimitReturns400(t *testing.T) {
 	t.Setenv("MAX_FILE_SIZE_MB", "1")
+	t.Setenv("MAX_SKILL_BUNDLE_SIZE_MB", "1")
 	svc := &fakeSandboxSkillService{installID: "skill-1"}
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 

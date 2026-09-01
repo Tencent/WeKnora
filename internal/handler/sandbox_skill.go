@@ -299,7 +299,7 @@ func (h *SandboxSkillHandler) GetFile(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /sandbox-configs/{id}/skills [post]
 func (h *SandboxSkillHandler) Upload(c *gin.Context) {
-	maxBytes := secutils.GetMaxFileSize()
+	maxBytes := secutils.GetMaxSkillBundleSize()
 	// The cap is applied to the body before it is parsed: multipart parsing
 	// buffers the whole request, spilling to temp files, so checking only the
 	// declared part size would let an unbounded body through first.
@@ -409,7 +409,7 @@ func (h *SandboxSkillHandler) Reinstall(c *gin.Context) {
 
 func skillTooLargeError() error {
 	return apperrors.NewBadRequestError(
-		fmt.Sprintf("skill bundle cannot exceed %d MB", secutils.GetMaxFileSizeMB()))
+		fmt.Sprintf("skill bundle cannot exceed %d MB", secutils.GetMaxSkillBundleSizeMB()))
 }
 
 type skillPatchRequest struct {

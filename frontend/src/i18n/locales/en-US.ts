@@ -1334,6 +1334,7 @@ export default {
       skillUploadFailed: 'Failed to upload the skill',
       skillBundleTooLarge: 'The skill bundle cannot exceed {size} MB.',
       skillBundleTooManyFiles: 'The skill directory cannot hold more than {count} files.',
+      skillBundleTooManyZipEntries: 'The archive cannot have more than {count} zip entries.',
       skillUploading: 'Uploading {percent}%',
       skillUploadAccepted: 'Skill install started',
       skillStatusInstalling: 'Installing',

@@ -138,7 +138,7 @@ func skillZipEntries(archive []byte, opts SkillBundleParseOptions) ([]skillZipEn
 		return nil, fmt.Errorf("%w: not a readable zip archive: %v", ErrSkillBundleInvalid, err)
 	}
 	if len(reader.File) > maxSkillBundleZipEntries {
-		return nil, fmt.Errorf("%w: archive holds more than %d files",
+		return nil, fmt.Errorf("%w: archive has more than %d zip entries",
 			ErrSkillBundleInvalid, maxSkillBundleZipEntries)
 	}
 
@@ -184,7 +184,7 @@ func skillZipEntries(archive []byte, opts SkillBundleParseOptions) ([]skillZipEn
 		totalBytes += item.size
 		out = append(out, item)
 		if len(out) > maxSkillBundleFiles {
-			return nil, fmt.Errorf("%w: archive holds more than %d files",
+			return nil, fmt.Errorf("%w: skill directory holds more than %d files",
 				ErrSkillBundleInvalid, maxSkillBundleFiles)
 		}
 	}

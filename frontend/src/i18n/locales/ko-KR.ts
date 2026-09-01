@@ -5254,6 +5254,7 @@ export default {
       skillUploadFailed: 'Failed to upload the skill',
       skillBundleTooLarge: '스킬 압축 파일은 {size} MB를 넘을 수 없습니다.',
       skillBundleTooManyFiles: '스킬 디렉터리의 파일은 {count}개를 넘을 수 없습니다.',
+      skillBundleTooManyZipEntries: '압축 파일 항목은 {count}개를 넘을 수 없습니다.',
       skillUploading: 'Uploading {percent}%',
       skillUploadAccepted: 'Skill install started',
       skillStatusInstalling: 'Installing',

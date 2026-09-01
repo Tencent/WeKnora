@@ -5254,6 +5254,7 @@ export default {
       skillUploadFailed: 'Failed to upload the skill',
       skillBundleTooLarge: 'Архив навыка не может превышать {size} МБ.',
       skillBundleTooManyFiles: 'В каталоге навыка не может быть больше {count} файлов.',
+      skillBundleTooManyZipEntries: 'В архиве не может быть больше {count} записей.',
       skillUploading: 'Uploading {percent}%',
       skillUploadAccepted: 'Skill install started',
       skillStatusInstalling: 'Installing',

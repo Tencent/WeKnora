@@ -31,7 +31,7 @@ const (
 
 	// The settings drawer lists the tree then immediately opens SKILL.md, and
 	// every later click is another read of the same zip. A handful of recent
-	// archives covers that without holding a 256 MiB upload in RAM.
+	// archives covers that without holding a 512 MiB upload in RAM.
 	skillBundleArchiveCacheSlots = 8
 	skillBundleArchiveCacheBytes = 64 << 20 // 64 MiB across cached zips
 )

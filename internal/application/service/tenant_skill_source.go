@@ -26,7 +26,7 @@ var ErrSkillSourceInvalid = errors.New("skill source is invalid")
 const (
 	defaultSkillRegistryOrigin = "https://clawhub.ai"
 	skillSourceUserAgent       = "WeKnora-SkillInstaller (+https://github.com/Tencent/WeKnora)"
-	skillSourceFetchTimeout    = 60 * time.Second
+	skillSourceFetchTimeout    = 5 * time.Minute
 	skillSourceMaxHops         = 3
 )
 
@@ -630,10 +630,10 @@ func getSkillURL(
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	maxBytes := secutils.GetMaxFileSize()
+	maxBytes := secutils.GetMaxSkillBundleSize()
 	if resp.ContentLength > maxBytes {
 		return nil, "", fmt.Errorf("%w: skill bundle cannot exceed %d MB",
-			ErrSkillSourceInvalid, secutils.GetMaxFileSizeMB())
+			ErrSkillSourceInvalid, secutils.GetMaxSkillBundleSizeMB())
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		preview, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
@@ -650,7 +650,7 @@ func getSkillURL(
 	}
 	if int64(len(body)) > maxBytes {
 		return nil, "", fmt.Errorf("%w: skill bundle cannot exceed %d MB",
-			ErrSkillSourceInvalid, secutils.GetMaxFileSizeMB())
+			ErrSkillSourceInvalid, secutils.GetMaxSkillBundleSizeMB())
 	}
 	if len(body) == 0 {
 		return nil, "", fmt.Errorf("%w: remote returned an empty body", ErrSkillSourceInvalid)

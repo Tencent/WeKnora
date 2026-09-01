@@ -50,7 +50,7 @@ func (h *SkillHandler) RegisterCatalog(c *gin.Context) {
 		_ = c.Error(apperrors.NewInternalServerError("skill catalog is not configured"))
 		return
 	}
-	maxBytes := secutils.GetMaxFileSize()
+	maxBytes := secutils.GetMaxSkillBundleSize()
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes+skillUploadEnvelopeSlack)
 
 	if strings.HasPrefix(c.ContentType(), "application/json") {

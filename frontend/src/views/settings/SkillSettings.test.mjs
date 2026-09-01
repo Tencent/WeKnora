@@ -43,6 +43,8 @@ test('catalog cards can install onto sandboxes and manage one install', () => {
   assert.match(source, /skillSourceSectionHint/)
   assert.match(source, /skillUploadSectionHint/)
   assert.match(source, /maxSkillBundleMB/)
+  assert.match(source, /MAX_SKILL_BUNDLE_SIZE_MB/)
+  assert.match(source, /skillBundleTooManyZipEntries/)
   assert.match(source, /align-items: stretch/)
   assert.match(source, /margin-top: auto/)
   assert.match(source, /installsView/)
