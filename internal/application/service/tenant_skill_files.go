@@ -30,10 +30,13 @@ const (
 	skillFileEncodingBinary = "binary"
 
 	// The settings drawer lists the tree then immediately opens SKILL.md, and
-	// every later click is another read of the same zip. A handful of recent
-	// archives covers that without holding a 512 MiB upload in RAM.
+	// every later click is another read of the same zip. Keep a modest
+	// process-wide budget: 512 MiB is the install/decompress cap, not RAM
+	// this cache is allowed to pin. A zip larger than the budget is still
+	// cached so a large skill's drawer does not re-download on every click,
+	// but it is the only occupant until something else is opened.
 	skillBundleArchiveCacheSlots = 8
-	skillBundleArchiveCacheBytes = 64 << 20 // 64 MiB across cached zips
+	skillBundleArchiveCacheBytes = 64 << 20
 )
 
 // SkillFileEntry is one path in an installed skill's stored archive.
@@ -221,8 +224,10 @@ func (s *TenantSkillService) storeSkillBundle(key string, archive []byte) {
 }
 
 type skillBundleArchiveCache struct {
-	mu      sync.Mutex
-	entries []cachedSkillArchive
+	mu       sync.Mutex
+	entries  []cachedSkillArchive
+	slots    int
+	maxBytes int
 }
 
 type cachedSkillArchive struct {
@@ -231,7 +236,10 @@ type cachedSkillArchive struct {
 }
 
 func newSkillBundleArchiveCache() *skillBundleArchiveCache {
-	return &skillBundleArchiveCache{}
+	return &skillBundleArchiveCache{
+		slots:    skillBundleArchiveCacheSlots,
+		maxBytes: skillBundleArchiveCacheBytes,
+	}
 }
 
 func (c *skillBundleArchiveCache) get(key string) []byte {
@@ -252,10 +260,7 @@ func (c *skillBundleArchiveCache) get(key string) []byte {
 }
 
 func (c *skillBundleArchiveCache) put(key string, archive []byte) {
-	if c == nil || key == "" {
-		return
-	}
-	if len(archive) > skillBundleArchiveCacheBytes {
+	if c == nil || key == "" || len(archive) == 0 {
 		return
 	}
 	c.mu.Lock()
@@ -268,7 +273,14 @@ func (c *skillBundleArchiveCache) put(key string, archive []byte) {
 		break
 	}
 	c.entries = append([]cachedSkillArchive{{key: key, archive: archive}}, c.entries...)
-	for len(c.entries) > skillBundleArchiveCacheSlots || c.cachedBytes() > skillBundleArchiveCacheBytes {
+	slots, maxBytes := c.slots, c.maxBytes
+	if slots <= 0 {
+		slots = skillBundleArchiveCacheSlots
+	}
+	if maxBytes <= 0 {
+		maxBytes = skillBundleArchiveCacheBytes
+	}
+	for len(c.entries) > 1 && (len(c.entries) > slots || c.cachedBytes() > maxBytes) {
 		c.entries = c.entries[:len(c.entries)-1]
 	}
 }

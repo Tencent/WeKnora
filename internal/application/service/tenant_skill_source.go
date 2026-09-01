@@ -90,11 +90,11 @@ func (s *TenantSkillService) InstallSkillFromSource(
 		return "", apperrors.NewNotFoundError("sandbox config not found")
 	}
 
-	archive, err := fetchSkillArchive(ctx, source, s.sourceHTTP)
+	bundle, archive, err := fetchNormalizedSkillBundle(ctx, source, s.sourceHTTP)
 	if err != nil {
 		return "", err
 	}
-	return s.InstallSkill(ctx, tenantID, configID, archive)
+	return s.installParsedSkill(ctx, tenantID, configID, bundle, archive)
 }
 
 func skillSourceHTTPClient(override *http.Client) *http.Client {
@@ -110,16 +110,23 @@ func skillSourceHTTPClient(override *http.Client) *http.Client {
 }
 
 func fetchSkillArchive(ctx context.Context, source string, client *http.Client) ([]byte, error) {
+	_, archive, err := fetchNormalizedSkillBundle(ctx, source, client)
+	return archive, err
+}
+
+func fetchNormalizedSkillBundle(
+	ctx context.Context, source string, client *http.Client,
+) (*SkillBundle, []byte, error) {
 	parsed, err := parseSkillSource(source)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	httpClient := skillSourceHTTPClient(client)
 	fetched, err := fetchSkillSourceBytes(ctx, httpClient, parsed, 0)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return normalizeFetchedSkillArchive(fetched.body, fetched.contentType, fetched.subdir)
+	return normalizeFetchedSkill(fetched.body, fetched.contentType, fetched.subdir)
 }
 
 // parseSkillSource maps one paste onto exactly one kind. It does not probe
@@ -659,15 +666,26 @@ func getSkillURL(
 }
 
 func normalizeFetchedSkillArchive(body []byte, contentType, subdir string) ([]byte, error) {
+	_, archive, err := normalizeFetchedSkill(body, contentType, subdir)
+	return archive, err
+}
+
+func normalizeFetchedSkill(body []byte, contentType, subdir string) (*SkillBundle, []byte, error) {
 	if looksLikeSkillMarkdown(body) {
 		files := map[string][]byte{"SKILL.md": body}
-		if _, err := skillBundleFromFiles(body, files); err != nil {
-			return nil, err
+		bundle, err := skillBundleFromFiles(body, files)
+		if err != nil {
+			return nil, nil, err
 		}
-		return zipSkillFiles(files)
+		archive, err := zipSkillFiles(files)
+		if err != nil {
+			return nil, nil, err
+		}
+		bundle.SHA256 = skillArchiveSHA256(archive)
+		return bundle, archive, nil
 	}
 	if !isZipPayload(contentType, body) {
-		return nil, fmt.Errorf("%w: remote did not return a zip skill bundle", ErrSkillSourceInvalid)
+		return nil, nil, fmt.Errorf("%w: remote did not return a zip skill bundle", ErrSkillSourceInvalid)
 	}
 	opts := SkillBundleParseOptions{
 		Subdir:           subdir,
@@ -676,9 +694,14 @@ func normalizeFetchedSkillArchive(body []byte, contentType, subdir string) ([]by
 	}
 	bundle, err := ParseSkillBundleWithOptions(body, opts)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return zipSkillFiles(bundle.Files)
+	archive, err := zipSkillFiles(bundle.Files)
+	if err != nil {
+		return nil, nil, err
+	}
+	bundle.SHA256 = skillArchiveSHA256(archive)
+	return bundle, archive, nil
 }
 
 func isZipMagic(body []byte) bool {

@@ -132,13 +132,17 @@ func TestInstallSkillStoresTheArchiveOnTheCatalog(t *testing.T) {
 	cat, err := fx.skillRepo.GetCatalogByName(ctx, 7, "pdf-tools")
 	require.NoError(t, err)
 	require.NotNil(t, cat)
-	require.Equal(t, "file://bundle.zip", cat.BundleRef)
+	require.NotEmpty(t, cat.BundleRef)
+	require.Equal(t, 1, fx.savedBundles)
 
 	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", id)
 	require.NoError(t, err)
 	require.Equal(t, cat.ID, skill.CatalogID)
-	require.Equal(t, cat.BundleRef, skill.BundleRef,
-		"the install row locates the same catalog object; it must not own a sandbox-scoped copy")
+	require.Empty(t, skill.BundleRef,
+		"the install row must not copy the catalog object; uninstall must not be able to delete it")
+	files, err := fx.svc.ListSkillFiles(ctx, 7, "cfg-1", id)
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
 }
 
 func TestRemovingLastSandboxInstallKeepsTheCatalogArchive(t *testing.T) {
@@ -170,7 +174,7 @@ func TestRemovingLastSandboxInstallKeepsTheCatalogArchive(t *testing.T) {
 	require.Nil(t, gone)
 
 	require.NoError(t, fx.svc.DeleteCatalog(ctx, 7, cat.ID))
-	require.Equal(t, []string{"file://bundle.zip"}, fx.deletedBundles,
+	require.Equal(t, []string{cat.BundleRef}, fx.deletedBundles,
 		"only deleting the skill from the catalog drops the stored zip")
 }
 
@@ -210,4 +214,30 @@ func TestInstallCatalogToConfigsReportsPartialFailure(t *testing.T) {
 	require.NotNil(t, result)
 	require.Contains(t, result.Installs, "cfg-1")
 	require.Equal(t, "sandbox config not found", result.Errors["missing"])
+	require.Equal(t, 1, fx.savedBundles,
+		"installing onto a sandbox must reuse the zip already stored on the catalog")
+}
+
+func TestRegisterCatalogReplacesThePreviousZip(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	first := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('v1')\n",
+	})
+	cat, err := fx.svc.RegisterCatalogFromArchive(ctx, 7, first)
+	require.NoError(t, err)
+	firstRef := cat.BundleRef
+	require.Equal(t, 1, fx.savedBundles)
+
+	second := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('v2')\n",
+	})
+	cat, err = fx.svc.RegisterCatalogFromArchive(ctx, 7, second)
+	require.NoError(t, err)
+	require.Equal(t, 2, fx.savedBundles)
+	require.NotEqual(t, firstRef, cat.BundleRef)
+	require.Equal(t, []string{firstRef}, fx.deletedBundles,
+		"replacing the definition zip must drop the previous object")
 }

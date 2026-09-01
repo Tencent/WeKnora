@@ -69,7 +69,7 @@ func TestTenantSkillSourceBasePathIsTheImageDir(t *testing.T) {
 func TestTenantSkillSourceHidesUnusableSkillsFromEveryLookup(t *testing.T) {
 	src := NewTenantSkillSource([]*types.TenantSkillEntity{
 		{ID: "sk-2", Name: "ready-disabled", Status: types.SkillStatusReady, Enabled: false},
-	}, func(string) ([]byte, error) { return nil, errors.New("must not be called") })
+	}, func(*types.TenantSkillEntity) ([]byte, error) { return nil, errors.New("must not be called") })
 
 	_, err := src.GetSkillBasePath("ready-disabled")
 	require.Error(t, err)
@@ -90,7 +90,7 @@ func TestTenantSkillSourceLoadsInstructionsFromTheRow(t *testing.T) {
 		ID: "sk-1", Name: "pdf", Description: "PDF helpers",
 		Instructions: "Run scripts/extract.py.",
 		Status:       types.SkillStatusReady, Enabled: true,
-	}}, func(string) ([]byte, error) { return nil, errors.New("must not be called") })
+	}}, func(*types.TenantSkillEntity) ([]byte, error) { return nil, errors.New("must not be called") })
 
 	skill, err := src.LoadSkillInstructions("pdf")
 
@@ -113,8 +113,8 @@ func TestTenantSkillSourceReadsLevel3FilesFromTheBundle(t *testing.T) {
 	src := NewTenantSkillSource([]*types.TenantSkillEntity{{
 		ID: "sk-1", Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
 		BundleRef: "local://sk-1.zip", BundleSHA256: "sha-1",
-	}}, func(ref string) ([]byte, error) {
-		require.Equal(t, "local://sk-1.zip", ref)
+	}}, func(row *types.TenantSkillEntity) ([]byte, error) {
+		require.Equal(t, "local://sk-1.zip", row.BundleRef)
 		return archive, nil
 	})
 
@@ -143,7 +143,7 @@ func TestTenantSkillSourceDownloadsEachBundleOnce(t *testing.T) {
 	src := NewTenantSkillSource([]*types.TenantSkillEntity{{
 		ID: "sk-1", Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
 		BundleRef: "local://sk-1.zip", BundleSHA256: "sha-1",
-	}}, func(string) ([]byte, error) {
+	}}, func(*types.TenantSkillEntity) ([]byte, error) {
 		downloads++
 		return archive, nil
 	})
@@ -161,7 +161,7 @@ func TestTenantSkillSourceRefusesPathsOutsideTheSkill(t *testing.T) {
 	src := NewTenantSkillSource([]*types.TenantSkillEntity{{
 		ID: "sk-1", Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
 		BundleRef: "local://sk-1.zip",
-	}}, func(string) ([]byte, error) {
+	}}, func(*types.TenantSkillEntity) ([]byte, error) {
 		return nil, errors.New("must not be called")
 	})
 
@@ -371,6 +371,16 @@ func preloadedSkillDir(t *testing.T, name, description string) string {
 	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "scripts", "run.py"),
 		[]byte("print('preloaded')\n"), 0o644))
 	return root
+}
+
+func TestTenantSkillSourceCacheKeepsOneOversizeArchive(t *testing.T) {
+	src := NewTenantSkillSource(nil, nil)
+	src.store("small", bytes.Repeat([]byte("s"), 32))
+	src.store("big", bytes.Repeat([]byte("b"), cachedBundleBytes+1))
+
+	require.Equal(t, bytes.Repeat([]byte("b"), cachedBundleBytes+1), src.cached("big"))
+	require.Nil(t, src.cached("small"),
+		"a zip over the keep-around budget must not sit next to other entries")
 }
 
 func zipArchive(t *testing.T, files map[string]string) []byte {
