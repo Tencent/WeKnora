@@ -336,9 +336,9 @@ func buildDirectContentPrompt(video *model.Video, jobType string, chunks []trans
 	default:
 		return "", fmt.Errorf("unsupported direct content job: %s", jobType)
 	}
-	builder.WriteString(fmt.Sprintf("视频标题：%s\n视频类型：%s\n转写分块：\n", video.Title, video.VideoType))
+	builder.WriteString(fmt.Sprintf("视频标题：%s\n视频类型：%s\n转写分块：每个分块使用 ID=转写分块ID、TIME_MS=开始毫秒-结束毫秒；evidence chunk ID 只复制 ID= 后的值。\n", video.Title, video.VideoType))
 	for _, chunk := range chunks {
-		builder.WriteString(fmt.Sprintf("转写分块 ID：%s\n分片序号：%06d\n%s\n\n", chunk.ID, chunk.Index, chunk.Content))
+		builder.WriteString(fmt.Sprintf("ID=%s\nTIME_MS=%d-%d\n%s\n\n", chunk.ID, chunk.StartMs, chunk.EndMs, transcript.OriginalText(chunk.Content)))
 	}
 	if builder.Len() > 240000 {
 		return "", fmt.Errorf("transcript input exceeds direct llm context limit")

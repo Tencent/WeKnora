@@ -88,6 +88,13 @@ func TestSelectTimedKnowledgeChunksDropsGeneratedSummaryTail(t *testing.T) {
 	}
 }
 
+func TestOriginalTextRemovesPositioningMetadataAndGeneratedSummary(t *testing.T) {
+	content := "## 视频定位信息\n\n```json\n{\"start_ms\":0,\"end_ms\":1000}\n```\n\n## 原文\n\n真实原文。\n# Summary\n\n生成摘要。"
+	if got := OriginalText(content); got != "真实原文。" {
+		t.Fatalf("OriginalText() = %q", got)
+	}
+}
+
 func TestSelectTimedKnowledgeChunksRejectsGaps(t *testing.T) {
 	chunks := []weknora.KnowledgeChunk{
 		{KnowledgeID: "knowledge-1", ChunkIndex: 0, Content: "定位"},

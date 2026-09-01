@@ -240,7 +240,7 @@ func ResolveEvidence(document *Document, chunks []transcript.Chunk) error {
 					StartSeconds:      float64(chunk.StartMs) / 1000,
 					EndSeconds:        float64(chunk.EndMs) / 1000,
 					Timestamp:         formatRange(chunk.StartMs, chunk.EndMs),
-					TranscriptSnippet: transcriptText(chunk.Content),
+					TranscriptSnippet: transcript.OriginalText(chunk.Content),
 				})
 			}
 		}
@@ -273,14 +273,6 @@ func formatTimestamp(milliseconds int) string {
 		return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, remainingSeconds)
 	}
 	return fmt.Sprintf("%02d:%02d", minutes, remainingSeconds)
-}
-
-func transcriptText(content string) string {
-	const marker = "## 原文"
-	if index := strings.Index(content, marker); index >= 0 {
-		return strings.TrimSpace(content[index+len(marker):])
-	}
-	return strings.TrimSpace(content)
 }
 
 func stripFrontmatter(content string) string {

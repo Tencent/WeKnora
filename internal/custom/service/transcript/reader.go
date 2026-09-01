@@ -132,6 +132,15 @@ func trimGeneratedSummary(content string) string {
 	return strings.TrimSpace(content)
 }
 
+func OriginalText(content string) string {
+	content = trimGeneratedSummary(content)
+	const marker = "## 原文"
+	if index := strings.Index(content, marker); index >= 0 {
+		return strings.TrimSpace(content[index+len(marker):])
+	}
+	return strings.TrimSpace(content)
+}
+
 func parseChunkMetadata(content string) (chunkMetadata, error) {
 	const section = "## 视频定位信息"
 	const fence = "```json"

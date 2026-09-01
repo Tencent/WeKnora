@@ -2,6 +2,7 @@ package worker
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -167,6 +168,32 @@ func TestBuildDirectContentPromptRejectsOversizedTranscript(t *testing.T) {
 	_, err := buildDirectContentPrompt(&model.Video{Title: "视频一"}, skill.JobOutline, []transcript.Chunk{{ID: "chunk-1", Index: 0, Content: strings.Repeat("长文本", 50000)}})
 	if err == nil || !strings.Contains(err.Error(), "context limit") {
 		t.Fatalf("expected context limit error, got %v", err)
+	}
+}
+
+func TestBuildDirectContentPromptAcceptsLongTranscriptWithoutRepeatedMetadata(t *testing.T) {
+	chunks := make([]transcript.Chunk, 0, 961)
+	for index := 0; index < 961; index++ {
+		chunks = append(chunks, transcript.Chunk{
+			ID:      fmt.Sprintf("knowledge-%04d", index),
+			Index:   index,
+			StartMs: index * 5600,
+			EndMs:   (index + 1) * 5600,
+			Content: "## 视频定位信息\n\n```json\n" + strings.Repeat("重复定位信息", 60) + "\n```\n\n## 原文\n\n一句原文。",
+		})
+	}
+
+	prompt, err := buildDirectContentPrompt(&model.Video{Title: "长视频", VideoType: "training"}, skill.JobOutline, chunks)
+	if err != nil {
+		t.Fatalf("buildDirectContentPrompt rejected compressible transcript: %v", err)
+	}
+	for _, expected := range []string{"knowledge-0000", "knowledge-0960", "一句原文。"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("prompt does not contain %q", expected)
+		}
+	}
+	if strings.Contains(prompt, "重复定位信息") {
+		t.Fatal("prompt retained repeated transcript metadata")
 	}
 }
 
