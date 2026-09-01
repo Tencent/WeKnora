@@ -19,9 +19,9 @@ import (
 // archive read here is the same one that was accepted then, and a corrupted or
 // hostile object in storage must not be able to exhaust this process.
 const (
-	maxBundleEntries    = 2000
+	maxBundleEntries    = 20_000
 	maxBundleEntryBytes = 32 << 20  // 32 MiB per entry
-	maxBundleBytes      = 256 << 20 // 256 MiB across the archive
+	maxBundleBytes      = 512 << 20 // 512 MiB across the archive
 )
 
 // cachedBundleCount bounds the unpacked archives one source keeps. A source

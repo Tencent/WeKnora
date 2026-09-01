@@ -48,7 +48,11 @@
           v-for="item in catalog"
           :key="item.id"
           class="skill-card"
-          :class="{ 'skill-card--focused': focusedCatalogId === item.id }"
+          :class="{
+            'skill-card--focused': focusedCatalogId === item.id,
+            'skill-card--installed': liveInstalls(item).length > 0,
+            'skill-card--idle': liveInstalls(item).length === 0,
+          }"
         >
           <div class="skill-card__main">
             <div class="skill-card__badge" aria-hidden="true">
@@ -68,7 +72,7 @@
                     :aria-label="$t('settings.sandbox.skillFiles')"
                     @click="openCatalogFiles(item)"
                   >
-                    <t-icon name="folder" size="16px" />
+                    <folder-icon size="14px" />
                   </button>
                   <button
                     v-if="canDelete(item)"
@@ -79,7 +83,7 @@
                     :aria-label="$t('settings.skills.deleteCatalog')"
                     @click="askDelete(item)"
                   >
-                    <t-icon name="delete" size="16px" />
+                    <delete-icon size="14px" />
                   </button>
                 </div>
               </div>
@@ -101,7 +105,7 @@
                   v-else-if="!view.needsPanel"
                   type="button"
                   class="skill-card__chip"
-                  :class="view.installs[0] ? installEntryClass(item, view.installs[0]) : undefined"
+                  :class="chipClass(item, view)"
                   :disabled="Boolean(view.installs[0] && !recordFor(view.installs[0].sandbox_config_id))"
                   :title="installSummaryTooltip(item, view)"
                   :aria-label="installSummary(item, view)"
@@ -113,12 +117,6 @@
                     aria-hidden="true"
                   />
                   <span class="skill-card__chip-text">{{ installSummary(item, view) }}</span>
-                  <t-icon
-                    v-if="installSummaryIcon(item, view)"
-                    :name="installSummaryIcon(item, view)"
-                    size="14px"
-                    class="skill-card__entry-status"
-                  />
                   <t-icon name="chevron-right" size="14px" class="skill-card__chip-go" />
                 </button>
                 <t-popup
@@ -135,6 +133,7 @@
                   <button
                     type="button"
                     class="skill-card__chip"
+                    :class="chipClass(item, view)"
                     :title="installSummaryTooltip(item, view)"
                     :aria-label="installSummary(item, view)"
                     :aria-expanded="openPanelId === item.id"
@@ -145,12 +144,6 @@
                       aria-hidden="true"
                     />
                     <span class="skill-card__chip-text">{{ installSummary(item, view) }}</span>
-                    <t-icon
-                      v-if="installSummaryIcon(item, view)"
-                      :name="installSummaryIcon(item, view)"
-                      size="14px"
-                      class="skill-card__entry-status"
-                    />
                     <t-icon name="chevron-down" size="14px" class="skill-card__chip-go" />
                   </button>
                   <template #content>
@@ -275,7 +268,7 @@
       <template v-if="addStep === 0">
         <section class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillSourceSection') }}</h4>
-          <p class="installer-model-hint">{{ $t('settings.sandbox.skillSourceSectionHint') }}</p>
+          <p class="installer-model-hint">{{ $t('settings.sandbox.skillSourceSectionHint', { size: maxSkillBundleMB }) }}</p>
           <t-input
             v-model="sourceInput"
             :placeholder="$t('settings.sandbox.skillSourcePlaceholder')"
@@ -286,7 +279,7 @@
 
         <section class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillUploadSection') }}</h4>
-          <p class="installer-model-hint">{{ $t('settings.sandbox.skillUploadSectionHint') }}</p>
+          <p class="installer-model-hint">{{ $t('settings.sandbox.skillUploadSectionHint', { size: maxSkillBundleMB }) }}</p>
           <input
             ref="fileInputRef"
             type="file"
@@ -435,7 +428,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { AddIcon } from 'tdesign-icons-vue-next'
+import { AddIcon, DeleteIcon, FolderIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import SandboxSkillsPanel from '@/components/SandboxSkillsPanel.vue'
 import SkillFilesDrawer from '@/components/SkillFilesDrawer.vue'
@@ -445,6 +438,7 @@ import ModelSelector from '@/components/ModelSelector.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { SKILL_ICON } from '@/types/mention'
 import { useUIStore } from '@/stores/ui'
+import { MAX_FILE_SIZE_BYTES, MAX_FILE_SIZE_MB } from '@/utils'
 import {
   deleteSkillCatalog,
   installSkillCatalog,
@@ -516,6 +510,7 @@ const skillConfigs = computed(() =>
 )
 
 const addBusy = computed(() => uploading.value || addingFromSource.value)
+const maxSkillBundleMB = MAX_FILE_SIZE_MB
 
 const addSteps = computed(() => [
   { key: 'register', title: t('settings.skills.addStepRegister') },
@@ -704,12 +699,11 @@ function installSummary(item: SkillCatalogItem, view: ReturnType<typeof installs
   return t('settings.skills.installedCount', { count: view.installs.length })
 }
 
-function installSummaryIcon(item: SkillCatalogItem, view: ReturnType<typeof installsView>): string {
-  for (const inst of view.installs) {
-    const icon = installChipStatusIcon(item, inst)
-    if (icon && icon !== 'check-circle-filled') return icon
-  }
-  return ''
+function chipClass(item: SkillCatalogItem, view: ReturnType<typeof installsView>): (string | undefined)[] {
+  return [
+    view.installs.length === 0 ? 'skill-card__chip--idle' : 'skill-card__chip--installed',
+    view.installs[0] ? installEntryClass(item, view.installs[0]) : undefined,
+  ]
 }
 
 function installSummaryTooltip(item: SkillCatalogItem, view: ReturnType<typeof installsView>): string {
@@ -917,7 +911,26 @@ function acceptPendingFile(file: File) {
     MessagePlugin.error(t('settings.sandbox.skillUploadFailed'))
     return
   }
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    MessagePlugin.error(t('settings.sandbox.skillBundleTooLarge', { size: maxSkillBundleMB }))
+    return
+  }
   pendingFile.value = file
+}
+
+function skillRegisterErrorMessage(err: any, fromFile: boolean): string {
+  const raw = String(err?.message || '')
+  if (/cannot exceed \d+\s*MB/i.test(raw)) {
+    return t('settings.sandbox.skillBundleTooLarge', { size: maxSkillBundleMB })
+  }
+  const tooMany = raw.match(/archive holds more than (\d+) files/i)
+  if (tooMany) {
+    return t('settings.sandbox.skillBundleTooManyFiles', { count: tooMany[1] })
+  }
+  if (raw) return raw
+  return fromFile
+    ? t('settings.sandbox.skillUploadFailed')
+    : t('settings.sandbox.skillSourceFailed')
 }
 
 async function registerThenAdvance() {
@@ -954,11 +967,7 @@ async function registerThenAdvance() {
     await loadCatalog()
     syncRegisteredFromCatalog()
   } catch (e: any) {
-    MessagePlugin.error(
-      e?.message || (pendingFile.value
-        ? t('settings.sandbox.skillUploadFailed')
-        : t('settings.sandbox.skillSourceFailed')),
-    )
+    MessagePlugin.error(skillRegisterErrorMessage(e, Boolean(pendingFile.value)))
   } finally {
     uploading.value = false
     addingFromSource.value = false
@@ -1226,7 +1235,7 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 10px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .skill-card {
@@ -1240,10 +1249,16 @@ onUnmounted(() => {
   background: var(--td-bg-color-container);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
   min-width: 0;
+  height: 100%;
 
   &--focused {
     border-color: var(--td-brand-color);
     box-shadow: 0 0 0 2px var(--td-brand-color-focus, rgba(0, 168, 112, 0.18));
+  }
+
+  &--installed .skill-card__badge {
+    background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
+    color: var(--td-brand-color);
   }
 
   &--add {
@@ -1251,7 +1266,7 @@ onUnmounted(() => {
     align-items: center;
     justify-content: center;
     gap: 6px;
-    min-height: 88px;
+    height: 100%;
     padding: 16px 12px;
     border-style: dashed;
     background: transparent;
@@ -1295,14 +1310,16 @@ onUnmounted(() => {
 
 .skill-card__main {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 10px;
-  padding: 10px 12px 10px 10px;
+  padding: 10px 12px;
   min-width: 0;
+  flex: 1;
 }
 
 .skill-card__badge {
   flex-shrink: 0;
+  align-self: flex-start;
   width: 28px;
   height: 28px;
   border-radius: 7px;
@@ -1369,8 +1386,13 @@ onUnmounted(() => {
   border: 0;
   border-radius: 6px;
   background: none;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
   cursor: pointer;
+
+  :deep(svg) {
+    display: block;
+    overflow: visible;
+  }
 
   &:hover:not(:disabled) {
     color: var(--td-text-color-primary);
@@ -1413,6 +1435,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   min-width: 0;
+  margin-top: auto;
 }
 
 .skill-card__installs-label {
@@ -1449,16 +1472,42 @@ onUnmounted(() => {
     opacity: 0.6;
   }
 
-  &--off {
+  &--idle {
+    color: var(--td-brand-color);
+    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+
+    &:hover:not(:disabled) {
+      color: var(--td-brand-color);
+      background: color-mix(in srgb, var(--td-brand-color) 16%, transparent);
+    }
+
+    .skill-card__chip-go {
+      color: var(--td-brand-color);
+    }
+  }
+
+  &.skill-card__entry--off {
     color: var(--td-text-color-placeholder);
   }
 
-  &.skill-card__entry--stale .skill-card__entry-status {
-    color: var(--td-warning-color);
+  &--installed .skill-card__entry-status {
+    color: var(--td-success-color, var(--td-brand-color));
   }
 
-  &.skill-card__entry--failed .skill-card__entry-status {
-    color: var(--td-error-color);
+  &.skill-card__entry--stale {
+    background: color-mix(in srgb, var(--td-warning-color) 10%, transparent);
+
+    .skill-card__entry-status {
+      color: var(--td-warning-color);
+    }
+  }
+
+  &.skill-card__entry--failed {
+    background: color-mix(in srgb, var(--td-error-color) 10%, transparent);
+
+    .skill-card__entry-status {
+      color: var(--td-error-color);
+    }
   }
 
   &.skill-card__entry--busy .skill-card__entry-dot {
@@ -1575,9 +1624,9 @@ onUnmounted(() => {
 }
 
 .installer-model-hint {
-  margin: 0 0 10px;
+  margin: 0;
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.5;
   color: var(--td-text-color-secondary);
 }
 
@@ -1676,17 +1725,6 @@ onUnmounted(() => {
   .is-done & {
     background: color-mix(in srgb, var(--td-brand-color) 35%, transparent);
   }
-}
-
-.setting-drawer__section {
-  margin-bottom: 20px;
-}
-
-.setting-drawer__section-title {
-  margin: 0 0 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--td-text-color-primary);
 }
 
 .sandbox-pick-list {
