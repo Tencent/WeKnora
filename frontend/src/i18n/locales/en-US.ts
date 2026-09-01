@@ -4274,7 +4274,7 @@ export default {
         },
         litellm: {
           label: 'LiteLLM',
-          description: 'Self-hosted proxy to 100+ providers (OpenAI, Anthropic, Gemini, Bedrock, etc.).'
+          description: 'Self-hosted proxy to 100+ providers (OpenAI, Anthropic, Gemini, Bedrock, etc.). Replace the placeholder URL; loopback hosts need SSRF_WHITELIST.'
         },
         requesty: {
           label: 'Requesty',

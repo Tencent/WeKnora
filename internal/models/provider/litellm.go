@@ -7,8 +7,12 @@ import (
 )
 
 const (
-	// LiteLLMBaseURL is the default endpoint for a self-hosted LiteLLM proxy.
-	LiteLLMBaseURL = "http://localhost:4000/v1"
+	// LiteLLMBaseURL is a placeholder the user must replace with a reachable
+	// LiteLLM proxy. Loopback defaults (localhost:4000) are rejected by SSRF
+	// unless the host is added to SSRF_WHITELIST; Docker also cannot reach a
+	// proxy on the host via localhost. The hostname contains "litellm" so
+	// DetectProvider recognises the catalog default.
+	LiteLLMBaseURL = "http://your_litellm_proxy/v1"
 )
 
 // LiteLLMProvider implements the Provider interface for LiteLLM

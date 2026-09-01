@@ -2454,7 +2454,7 @@ export default {
         },
         litellm: {
           label: 'LiteLLM',
-          description: 'Self-hosted proxy to 100+ providers (OpenAI, Anthropic, Gemini, Bedrock, etc.).'
+          description: 'Self-hosted прокси к 100+ провайдерам (OpenAI, Anthropic, Gemini, Bedrock и др.). Замените URL-заглушку; localhost нужно добавить в SSRF_WHITELIST.'
         },
         zhipu: {
           label: 'Zhipu BigModel',

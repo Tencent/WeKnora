@@ -39,6 +39,8 @@ func TestDetectProvider(t *testing.T) {
 		{"https://api.anthropic.com/v1", ProviderAnthropic},
 		{"https://openrouter.ai/api/v1", ProviderOpenRouter},
 		{"https://litellm.example.com/v1", ProviderLiteLLM},
+		{LiteLLMBaseURL, ProviderLiteLLM},
+		{"http://localhost:4000/v1", ProviderGeneric},
 		{"https://router.requesty.ai/v1", ProviderRequesty},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", ProviderAliyun},
 		{"https://open.bigmodel.cn/api/paas/v4", ProviderZhipu},
@@ -346,5 +348,34 @@ func TestLiteLLMProviderValidation(t *testing.T) {
 		assert.Equal(t, "LiteLLM", info.DisplayName)
 		assert.True(t, info.RequiresAuth)
 		assert.Equal(t, LiteLLMBaseURL, info.DefaultURLs[types.ModelTypeKnowledgeQA])
+		assert.Equal(t, LiteLLMBaseURL, info.DefaultURLs[types.ModelTypeEmbedding])
+		assert.Equal(t, LiteLLMBaseURL, info.DefaultURLs[types.ModelTypeVLLM])
+		assert.Contains(t, info.ModelTypes, types.ModelTypeKnowledgeQA)
+		assert.Contains(t, info.ModelTypes, types.ModelTypeEmbedding)
+		assert.Contains(t, info.ModelTypes, types.ModelTypeVLLM)
+	})
+
+	t.Run("registered and listed", func(t *testing.T) {
+		got, ok := Get(ProviderLiteLLM)
+		require.True(t, ok)
+		require.NotNil(t, got)
+
+		foundChat := false
+		for _, info := range ListByModelType(types.ModelTypeKnowledgeQA) {
+			if info.Name == ProviderLiteLLM {
+				foundChat = true
+				break
+			}
+		}
+		assert.True(t, foundChat, "LiteLLM should appear for chat models")
+
+		foundEmbed := false
+		for _, info := range ListByModelType(types.ModelTypeEmbedding) {
+			if info.Name == ProviderLiteLLM {
+				foundEmbed = true
+				break
+			}
+		}
+		assert.True(t, foundEmbed, "LiteLLM should appear for embedding models")
 	})
 }

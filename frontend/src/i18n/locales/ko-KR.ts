@@ -2454,7 +2454,7 @@ export default {
         },
         litellm: {
           label: 'LiteLLM',
-          description: 'Self-hosted proxy to 100+ providers (OpenAI, Anthropic, Gemini, Bedrock, etc.).'
+          description: '자체 호스팅 프록시로 OpenAI, Anthropic, Gemini, Bedrock 등 100+ 공급자를 연결합니다. 플레이스홀더 URL을 실제 주소로 바꾸세요. localhost는 SSRF_WHITELIST에 추가해야 합니다.'
         },
         zhipu: {
           label: 'Zhipu BigModel',

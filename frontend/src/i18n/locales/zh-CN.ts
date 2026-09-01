@@ -2456,7 +2456,7 @@ export default {
         },
         litellm: {
           label: 'LiteLLM',
-          description: 'Self-hosted proxy to 100+ providers (OpenAI, Anthropic, Gemini, Bedrock, etc.).'
+          description: '自托管代理，统一接入 OpenAI、Anthropic、Gemini、Bedrock 等 100+ 厂商。请将占位 URL 换成可访问地址；localhost 需加入 SSRF_WHITELIST。'
         },
         zhipu: {
           label: '智谱 BigModel',

@@ -230,6 +230,9 @@ func DetectProvider(baseURL string) ProviderName {
 		return ProviderZhipu
 	case containsAny(baseURL, "openrouter.ai"):
 		return ProviderOpenRouter
+	// Hostname/path containing "litellm" (including the catalog placeholder
+	// your_litellm_proxy). Loopback URLs such as localhost:4000 stay generic
+	// because they are SSRF-blocked unless explicitly whitelisted.
 	case containsAny(baseURL, "litellm"):
 		return ProviderLiteLLM
 	case containsAny(baseURL, "router.requesty.ai", "requesty.ai"):
