@@ -86,7 +86,7 @@ type knowledgeService interface {
 	ListKnowledgeWithFilter(ctx context.Context, kbID string, page, pageSize int, filter sdk.KnowledgeListFilter) ([]sdk.Knowledge, int64, error)
 	GetKnowledge(ctx context.Context, knowledgeID string) (*sdk.Knowledge, error)
 	OpenKnowledgeFile(ctx context.Context, knowledgeID string) (string, io.ReadCloser, error)
-	HybridSearch(ctx context.Context, kbID string, params *sdk.SearchParams) ([]*sdk.SearchResult, error)
+	HybridSearch(ctx context.Context, kbID string, params *sdk.SearchParams, opts ...sdk.ResourceURLOptions) ([]*sdk.SearchResult, error)
 }
 
 type chatService interface {
