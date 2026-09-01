@@ -1449,6 +1449,7 @@ export default {
       manageDrawerDesc: 'Manage enablement, variables, and uninstall on sandbox “{name}”.',
       manageEnable: 'Enable',
       manageUninstall: 'Uninstall from sandbox',
+      manageUninstallConfirm: 'Uninstall “{name}” from this sandbox?',
       deleteCatalog: 'Remove from catalog',
       deleteCatalogConfirm: 'Remove “{name}” from the catalog? Uninstall it from every sandbox first.',
       deleteCatalogBlocked: 'Uninstall this skill from every sandbox first.',

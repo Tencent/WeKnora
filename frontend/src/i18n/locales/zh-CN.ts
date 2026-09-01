@@ -5371,6 +5371,7 @@ export default {
       manageDrawerDesc: '在沙箱「{name}」上管理启用、变量和卸载。',
       manageEnable: '启用',
       manageUninstall: '从沙箱卸载',
+      manageUninstallConfirm: '确定从该沙箱卸载「{name}」？',
       deleteCatalog: '从目录删除',
       deleteCatalogConfirm: '确定从目录删除「{name}」？请先从所有沙箱卸载。',
       deleteCatalogBlocked: '请先从所有沙箱卸载此技能。',

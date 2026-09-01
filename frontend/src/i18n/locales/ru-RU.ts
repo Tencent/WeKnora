@@ -5369,6 +5369,7 @@ export default {
       manageDrawerDesc: 'В песочнице «{name}» можно включать навык, править переменные и удалять установку.',
       manageEnable: 'Включить',
       manageUninstall: 'Удалить из песочницы',
+      manageUninstallConfirm: 'Удалить «{name}» из этой песочницы?',
       deleteCatalog: 'Удалить из каталога',
       deleteCatalogConfirm: 'Удалить «{name}» из каталога? Сначала снимите установку со всех песочниц.',
       deleteCatalogBlocked: 'Сначала снимите этот навык со всех песочниц.',

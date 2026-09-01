@@ -76,6 +76,28 @@
       </section>
 
       <section v-if="mode === 'list' && focusSkillId" class="skill-manage">
+        <Teleport v-if="headerActionsTarget && showHeaderUninstall" :to="headerActionsTarget" defer>
+          <t-popconfirm
+            theme="warning"
+            attach="body"
+            :content="$t('settings.skills.manageUninstallConfirm', { name: managedSkill?.name || '' })"
+            :confirm-btn="{ content: $t('settings.skills.manageUninstall'), theme: 'danger' }"
+            :cancel-btn="{ content: $t('common.cancel') }"
+            placement="bottom-right"
+            @confirm="managedSkill && removeSkill(managedSkill)"
+          >
+            <t-button
+              class="skill-header-uninstall"
+              theme="danger"
+              variant="outline"
+              size="small"
+              :disabled="!managedSkill || isBusy(managedSkill)"
+              :loading="!!managedSkill && deletingId === managedSkill.id"
+            >
+              {{ $t('settings.skills.manageUninstall') }}
+            </t-button>
+          </t-popconfirm>
+        </Teleport>
         <div v-if="uninstallDone" class="skill-manage__done">
           <t-icon name="check-circle-filled" size="22px" />
           <p>{{ $t('settings.sandbox.skillRemoveDone', { name: uninstallingName }) }}</p>
@@ -123,6 +145,9 @@
           </div>
           <ul v-if="failedErrorLines(managedSkill).length" class="skill-card__error">
             <li v-for="(line, i) in failedErrorLines(managedSkill)" :key="i">{{ line }}</li>
+          </ul>
+          <ul v-if="removalErrorLines(managedSkill).length" class="skill-card__error">
+            <li v-for="(line, i) in removalErrorLines(managedSkill)" :key="i">{{ line }}</li>
           </ul>
           <section v-if="skillHasDeclaredEnvs(managedSkill)" class="skill-manage__section">
             <h4>{{ $t('settings.sandbox.skillEnv.toggle') }}</h4>
@@ -210,25 +235,6 @@
               :message-id="managedSkill.install_message_id || ''"
               :live="managedSkill.status === 'installing'"
             />
-          </section>
-          <section
-            v-if="managedSkill.status !== 'installing'"
-            class="skill-manage__section skill-manage__section--danger"
-          >
-            <h4>{{ $t('settings.skills.manageUninstall') }}</h4>
-            <p class="skill-envs__hint">{{ deleteHint }}</p>
-            <ul v-if="removalErrorLines(managedSkill).length" class="skill-card__error">
-              <li v-for="(line, i) in removalErrorLines(managedSkill)" :key="i">{{ line }}</li>
-            </ul>
-            <t-button
-              theme="danger"
-              variant="outline"
-              :disabled="isBusy(managedSkill)"
-              :loading="deletingId === managedSkill.id"
-              @click="askRemove(managedSkill)"
-            >
-              {{ $t('settings.skills.manageUninstall') }}
-            </t-button>
           </section>
         </template>
       </section>
@@ -502,16 +508,25 @@
                       <t-icon name="refresh" size="14px" />
                     </button>
                   </t-tooltip>
-                  <button
+                  <t-popconfirm
                     v-if="!isBusy(skill)"
-                    type="button"
-                    class="skill-card__icon-btn skill-card__icon-btn--danger"
-                    :disabled="deletingId === skill.id"
-                    :aria-label="$t('settings.skills.manageUninstall')"
-                    @click="askRemove(skill)"
+                    theme="warning"
+                    attach="body"
+                    :content="deleteHint"
+                    :confirm-btn="{ content: $t('settings.skills.manageUninstall'), theme: 'danger' }"
+                    :cancel-btn="{ content: $t('common.cancel') }"
+                    placement="top-right"
+                    @confirm="removeSkill(skill)"
                   >
-                    <t-icon name="delete" size="14px" />
-                  </button>
+                    <button
+                      type="button"
+                      class="skill-card__icon-btn skill-card__icon-btn--danger"
+                      :disabled="deletingId === skill.id"
+                      :aria-label="$t('settings.skills.manageUninstall')"
+                    >
+                      <t-icon name="delete" size="14px" />
+                    </button>
+                  </t-popconfirm>
                 </div>
               </div>
               <div v-if="skill.version && !focusSkillId" class="skill-card__type">{{ skill.version }}</div>
@@ -548,14 +563,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, inject, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import ModelSelector from '@/components/ModelSelector.vue'
 import SkillInstallTimeline from '@/components/SkillInstallTimeline.vue'
-import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
+import { SETTING_DRAWER_HEADER_ACTIONS_ID } from '@/components/settings/SettingDrawer.vue'
 import { SKILL_ICON } from '@/types/mention'
 import {
   getAgentById,
@@ -615,7 +630,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const confirmDelete = useConfirmDelete()
+const headerActionsTarget = inject(SETTING_DRAWER_HEADER_ACTIONS_ID, '')
 
 const loading = ref(false)
 const uploading = ref(false)
@@ -734,6 +749,13 @@ const visibleSkills = computed(() => {
 const managedSkill = computed(() =>
   props.focusSkillId ? (visibleSkills.value[0] || null) : null,
 )
+
+const showHeaderUninstall = computed(() => {
+  if (!props.focusSkillId || uninstallDone.value) return false
+  const skill = managedSkill.value
+  if (!skill || skill.status === 'installing') return false
+  return !isRemoving(skill)
+})
 
 watch(managedSkill, (skill) => {
   if (skill && skillHasDeclaredEnvs(skill)) ensureEnvDrafts(skill.id)
@@ -1336,16 +1358,6 @@ async function retrySkill(skill: ConfigSkill) {
   }
 }
 
-function askRemove(skill: ConfigSkill) {
-  if (!props.record || isBusy(skill) || deletingId.value) return
-  confirmDelete({
-    title: t('settings.skills.manageUninstall'),
-    body: deleteHint.value,
-    confirmText: t('settings.skills.manageUninstall'),
-    onConfirm: () => removeSkill(skill),
-  })
-}
-
 async function removeSkill(skill: ConfigSkill) {
   if (!props.record || isBusy(skill) || deletingId.value) return
   deletingId.value = skill.id
@@ -1585,6 +1597,10 @@ onUnmounted(() => {
   min-height: 0;
 }
 
+.skill-header-uninstall {
+  white-space: nowrap;
+}
+
 .skill-manage {
   display: flex;
   flex-direction: column;
@@ -1632,10 +1648,6 @@ onUnmounted(() => {
   padding-top: 12px;
   border-top: 1px solid var(--td-component-stroke);
 
-  > .t-button {
-    align-self: flex-start;
-  }
-
   h4 {
     margin: 0;
     font-size: 13px;
@@ -1662,10 +1674,6 @@ onUnmounted(() => {
     :deep(.t-progress--circle svg) {
       display: block;
     }
-  }
-
-  &--danger h4 {
-    color: var(--td-error-color);
   }
 
   &--remove {
