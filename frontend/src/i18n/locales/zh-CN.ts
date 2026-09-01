@@ -5029,7 +5029,7 @@ export default {
       dockerDisabledAlert: '当前部署未启用 Docker 沙箱',
       dockerDisabledHint: '本机 docker.sock 等同宿主机 root。仅私有化单机需要时，由系统管理员在「设置 → 系统设置 → 网络安全」中打开。',
       dockerDisabledCard: '部署未启用 Docker 沙箱，此配置不会再创建容器',
-      dockerHostRisk: '留空或 unix:// 会使用 WeKnora 所在机器的 Docker 守护进程，权限等同该机 root，只适合私有化单机。多租户请改用 Cube 或 E2B。远程 tcp:// 必须填写 TLS 证书目录。',
+      dockerHostRisk: '留空或 unix:// 会使用 WeKnora 所在机器的 Docker 守护进程，权限等同该机 root，只适合私有化单机。多套空间共用同一主机时请改用 Cube 或 E2B。远程 tcp:// 必须填写 TLS 证书目录。',
       addConfig: '添加沙箱',
       viewClusterGuide: '集群搭建指南',
       configName: '配置名称',

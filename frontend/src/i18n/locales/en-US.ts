@@ -1107,7 +1107,7 @@ export default {
       dockerDisabledAlert: 'Docker sandbox is not enabled on this deployment',
       dockerDisabledHint: 'A local docker.sock is equivalent to root on the host. For a single-machine private install, a system admin can enable it under Settings → System settings → Network security.',
       dockerDisabledCard: 'Docker sandbox is disabled on this deployment; this config will not create containers',
-      dockerHostRisk: 'Empty or unix:// uses the Docker daemon on the WeKnora host, which is equivalent to root on that machine. Use this only for a private single-node install. Prefer Cube or E2B for multi-tenant setups. Remote tcp:// endpoints require a TLS certificate directory.',
+      dockerHostRisk: 'Empty or unix:// uses the Docker daemon on the WeKnora host, which is equivalent to root on that machine. Use this only for a private single-node install. Prefer Cube or E2B when multiple workspaces share a host. Remote tcp:// endpoints require a TLS certificate directory.',
       addConfig: 'Add sandbox',
       viewClusterGuide: 'Cluster setup guide',
       configName: 'Config name',
