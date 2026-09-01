@@ -1538,7 +1538,8 @@ func TestDeleteReleasesSkillSnapshotsBeforeSoftDelete(t *testing.T) {
 	require.NotContains(t, fx.skills.marks, "row-0:"+types.SkillSnapshotStateDeleted)
 	require.Empty(t, fx.skills.skills, "tenant_skills rows must be dropped before SoftDelete")
 	require.True(t, fx.skills.ledgerCleared)
-	require.Equal(t, []string{"bundle://skill-a.zip"}, fx.files.deleted)
+	require.Empty(t, fx.files.deleted,
+		"deleting a sandbox must not drop the catalog archive")
 	// DeleteSkill only takes values filed under a skill; the config-wide ones
 	// would outlive the config without this.
 	require.Equal(t, []string{"7:cfg-a"}, fx.skills.envVarsClearedFor)

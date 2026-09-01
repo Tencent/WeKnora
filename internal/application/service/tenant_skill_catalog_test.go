@@ -118,6 +118,62 @@ func TestDeleteCatalogRefusesWhileARemovalIsInFlight(t *testing.T) {
 	require.Equal(t, 409, appErr.HTTPCode)
 }
 
+func TestInstallSkillStoresTheArchiveOnTheCatalog(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	archive := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('hi')\n",
+	})
+
+	id, err := fx.svc.InstallSkill(ctx, 7, "cfg-1", archive)
+	require.NoError(t, err)
+
+	cat, err := fx.skillRepo.GetCatalogByName(ctx, 7, "pdf-tools")
+	require.NoError(t, err)
+	require.NotNil(t, cat)
+	require.Equal(t, "file://bundle.zip", cat.BundleRef)
+
+	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", id)
+	require.NoError(t, err)
+	require.Equal(t, cat.ID, skill.CatalogID)
+	require.Equal(t, cat.BundleRef, skill.BundleRef,
+		"the install row locates the same catalog object; it must not own a sandbox-scoped copy")
+}
+
+func TestRemovingLastSandboxInstallKeepsTheCatalogArchive(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	archive := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('hi')\n",
+	})
+	id, err := fx.svc.InstallSkill(ctx, 7, "cfg-1", archive)
+	require.NoError(t, err)
+	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", id)
+	require.NoError(t, err)
+	skill.Status = types.SkillStatusRemoving
+	require.NoError(t, fx.skillRepo.UpdateSkill(ctx, skill))
+
+	require.NoError(t, fx.svc.runRemove(ctx, 7, "cfg-1", id))
+
+	cat, err := fx.skillRepo.GetCatalogByName(ctx, 7, "pdf-tools")
+	require.NoError(t, err)
+	require.NotNil(t, cat)
+	files, err := fx.svc.ListCatalogFiles(ctx, 7, cat.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	require.Empty(t, fx.deletedBundles,
+		"uninstalling from the last sandbox must not delete the definition zip")
+	gone, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", id)
+	require.NoError(t, err)
+	require.Nil(t, gone)
+
+	require.NoError(t, fx.svc.DeleteCatalog(ctx, 7, cat.ID))
+	require.Equal(t, []string{"file://bundle.zip"}, fx.deletedBundles,
+		"only deleting the skill from the catalog drops the stored zip")
+}
+
 func TestUpsertCatalogDoesNotStampSHAWhenStoreFails(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.saveErr = errors.New("disk full")

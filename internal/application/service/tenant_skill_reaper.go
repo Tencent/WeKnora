@@ -134,9 +134,10 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 			}
 			reaped++
 		case types.SkillStatusRemoving:
-			// Deleting the row and its bundle is the one irreversible thing
-			// the reaper does, so a run it cannot judge is left for the next
-			// sweep rather than guessed at.
+			// Deleting the leftover install row is irreversible, so a run the
+			// reaper cannot judge is left for the next sweep rather than
+			// guessed at. The catalog archive is not touched: this is a
+			// sandbox install, not a definition delete.
 			if !known {
 				continue
 			}
@@ -159,9 +160,6 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 			if err := s.skills.DeleteSkill(ctx, row.TenantID, row.SandboxConfigID, row.ID); err != nil {
 				logger.Warnf(ctx, "[skill] drop abandoned removal %s failed: %v", row.ID, err)
 				continue
-			}
-			if row.BundleRef != "" {
-				s.deleteBundleBestEffort(ctx, row.TenantID, row.BundleRef)
 			}
 			reaped++
 		}

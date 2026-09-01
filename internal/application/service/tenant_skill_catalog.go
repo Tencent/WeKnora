@@ -242,7 +242,8 @@ func (s *TenantSkillService) InstallCatalogToConfigs(
 	return result, nil
 }
 
-// DeleteCatalog removes a definition that has no remaining installations.
+// DeleteCatalog removes a definition that has no remaining installations
+// and drops the stored zip. Sandbox uninstalls never delete that zip.
 func (s *TenantSkillService) DeleteCatalog(
 	ctx context.Context, tenantID uint64, catalogID string,
 ) error {
@@ -264,7 +265,14 @@ func (s *TenantSkillService) DeleteCatalog(
 		return apperrors.NewConflictError(
 			"remove this skill from every sandbox before deleting it from the catalog")
 	}
-	return s.skills.DeleteCatalog(ctx, tenantID, catalogID)
+	ref := strings.TrimSpace(catalog.BundleRef)
+	if err := s.skills.DeleteCatalog(ctx, tenantID, catalogID); err != nil {
+		return err
+	}
+	if ref != "" {
+		s.deleteBundleBestEffort(ctx, tenantID, ref)
+	}
+	return nil
 }
 
 func (s *TenantSkillService) upsertCatalogFromBundle(

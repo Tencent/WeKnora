@@ -289,9 +289,9 @@ type TenantSandboxConfigService struct {
 	globalCfg *sandbox.Config
 	now       func() time.Time
 
-	// skills and files are used only when deleting a config, to destroy the
-	// snapshot ledger and drop skill archives. Either may be nil in tests
-	// that never delete a config that owns skills.
+	// skills is used when deleting a config, to destroy the snapshot ledger
+	// and drop install rows. Catalog archives are owned by the skill
+	// definition and are not deleted here.
 	skills sandboxConfigSkillStore
 	files  sandboxConfigBundleResolver
 
@@ -1286,7 +1286,6 @@ func (s *TenantSandboxConfigService) cleanupSkillMetadata(
 		if skill == nil {
 			continue
 		}
-		s.deleteSkillBundleBestEffort(ctx, tenantID, skill.BundleRef)
 		if err := s.skills.DeleteSkill(ctx, tenantID, configID, skill.ID); err != nil {
 			logger.Warnf(ctx, "[sandbox] delete skill %s on config %s failed: %v",
 				skill.ID, configID, err)
@@ -1301,23 +1300,6 @@ func (s *TenantSandboxConfigService) cleanupSkillMetadata(
 	if err := s.skills.DeleteUserEnvVarsByConfig(ctx, tenantID, configID); err != nil {
 		logger.Warnf(ctx, "[sandbox] delete member env vars for config %s failed: %v",
 			configID, err)
-	}
-}
-
-func (s *TenantSandboxConfigService) deleteSkillBundleBestEffort(
-	ctx context.Context, tenantID uint64, bundleRef string,
-) {
-	if s.files == nil || strings.TrimSpace(bundleRef) == "" {
-		return
-	}
-	fs, _, err := s.files.ResolveFileService(ctx, &types.Tenant{ID: tenantID}, "", "", "")
-	if err != nil || fs == nil {
-		logger.Warnf(ctx, "[sandbox] resolve file service to delete bundle %s failed: %v",
-			bundleRef, err)
-		return
-	}
-	if err := fs.DeleteFile(ctx, bundleRef); err != nil {
-		logger.Warnf(ctx, "[sandbox] delete bundle %s failed: %v", bundleRef, err)
 	}
 }
 

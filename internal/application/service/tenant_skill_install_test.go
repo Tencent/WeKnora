@@ -849,7 +849,7 @@ func TestReinstallSkillRefusesWhenTheArchiveIsGone(t *testing.T) {
 	_, err := fx.svc.ReinstallSkill(context.Background(), 7, "cfg-1", "sk-1")
 
 	require.Error(t, err)
-	require.ErrorContains(t, err, "no longer stored")
+	require.ErrorContains(t, err, "not available")
 	require.Empty(t, fx.sessionCalls, "a retry that cannot run must not boot a billed sandbox")
 }
 
