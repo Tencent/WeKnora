@@ -1,0 +1,25 @@
+{
+  "release_date": "2026-09-01",
+  "commit": "13847dae",
+  "branch": "fix/long-transcript-context",
+  "services": ["custom-backend"],
+  "image": "lizi586586/vidsage-custom-backend:custom-v0.7.2-20260901184433-13847dae",
+  "deployment_path": "/opt/vidsage",
+  "compose_backup": "/opt/vidsage/docker-compose.cloud.yml.bak-mps-13847dae-20260901184615",
+  "env_backup": "/opt/vidsage/.env.bak-mps-13847dae-20260901184615",
+  "mps_provider": "tencent_mps",
+  "mps_output_bucket": "mps-poc-1303151795",
+  "mps_input_bucket": "mps-poc-1303151795",
+  "migration_version": 14,
+  "verification": {
+    "architecture": "linux/amd64",
+    "backend_health": "passed",
+    "proxy_ping_local": "passed",
+    "proxy_ping_public": "passed",
+    "container_health": "passed",
+    "database_migration": "14|f",
+    "frontend_restarted": false,
+    "official_app_image_changed": false
+  },
+  "rollback": "cd /opt/vidsage && cp docker-compose.cloud.yml.bak-mps-13847dae-20260901184615 docker-compose.cloud.yml && cp .env.bak-mps-13847dae-20260901184615 .env && sudo docker compose --env-file .env -f docker-compose.yml -f docker-compose.cloud.yml up -d --no-build custom-backend"
+}
