@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
 	"os"
@@ -1383,6 +1385,8 @@ type oidcDiscoveryDocument struct {
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
 	UserInfoEndpoint      string `json:"userinfo_endpoint"`
+	JwksURI               string `json:"jwks_uri"`
+	Issuer                string `json:"issuer"`
 }
 
 type oidcTokenResponse struct {
@@ -1477,6 +1481,9 @@ func (s *userService) populateOIDCEndpoints(ctx context.Context, cfg *config.OID
 	if cfg.UserInfoEndpoint == "" {
 		cfg.UserInfoEndpoint = doc.UserInfoEndpoint
 	}
+	if cfg.JwksURI == "" {
+		cfg.JwksURI = doc.JwksURI
+	}
 	if cfg.AuthorizationEndpoint == "" || cfg.TokenEndpoint == "" {
 		return errors.New("OIDC discovery document missing required endpoints")
 	}
@@ -1526,13 +1533,34 @@ func (s *userService) resolveOIDCUserInfo(ctx context.Context, cfg *config.OIDCA
 	claims := map[string]interface{}{}
 
 	if strings.TrimSpace(tokenResp.IDToken) != "" {
-		idTokenClaims, err := decodeJWTClaims(tokenResp.IDToken)
-		if err != nil {
-			logger.Warnf(ctx, "Failed to decode OIDC id_token claims: %v", err)
-		} else {
+		// Verify the id_token signature (JWKS) and standard claims before
+		// trusting anything it carries. If a jwks_uri is available we require a
+		// valid signature; a token that fails verification is discarded rather
+		// than silently trusted. When no jwks_uri is configured we fall back to
+		// the previous unverified decode only if there is another claim source
+		// (userinfo endpoint) to cross-check against.
+		if strings.TrimSpace(cfg.JwksURI) != "" {
+			idTokenClaims, err := s.verifyOIDCIDToken(ctx, cfg, tokenResp.IDToken)
+			if err != nil {
+				return nil, fmt.Errorf("OIDC id_token verification failed: %w", err)
+			}
 			for k, v := range idTokenClaims {
 				claims[k] = v
 			}
+		} else if strings.TrimSpace(cfg.UserInfoEndpoint) != "" &&
+			strings.TrimSpace(tokenResp.AccessToken) != "" {
+			logger.Warnf(ctx, "OIDC id_token signature not verified: no jwks_uri configured; "+
+				"relying on userinfo endpoint for claims")
+			idTokenClaims, err := decodeJWTClaims(tokenResp.IDToken)
+			if err != nil {
+				logger.Warnf(ctx, "Failed to decode OIDC id_token claims: %v", err)
+			} else {
+				for k, v := range idTokenClaims {
+					claims[k] = v
+				}
+			}
+		} else {
+			return nil, errors.New("cannot verify OIDC id_token: no jwks_uri and no userinfo endpoint configured")
 		}
 	}
 
@@ -1691,6 +1719,135 @@ func decodeJWTClaims(token string) (map[string]interface{}, error) {
 		return nil, err
 	}
 	return claims, nil
+}
+
+// oidcJWK / oidcJWKS model the subset of a JWKS document we need to rebuild an
+// RSA signing key. Only RSA keys are supported (the overwhelmingly common OIDC
+// id_token signing type); other key types are skipped during lookup.
+type oidcJWK struct {
+	Kty string `json:"kty"`
+	Kid string `json:"kid"`
+	Alg string `json:"alg"`
+	Use string `json:"use"`
+	N   string `json:"n"`
+	E   string `json:"e"`
+}
+
+type oidcJWKS struct {
+	Keys []oidcJWK `json:"keys"`
+}
+
+// rsaPublicKey rebuilds an *rsa.PublicKey from the base64url modulus/exponent of
+// a JWK (RFC 7518 §6.3.1).
+func (k oidcJWK) rsaPublicKey() (*rsa.PublicKey, error) {
+	if !strings.EqualFold(k.Kty, "RSA") {
+		return nil, fmt.Errorf("unsupported JWK key type: %s", k.Kty)
+	}
+	nBytes, err := base64.RawURLEncoding.DecodeString(k.N)
+	if err != nil {
+		return nil, fmt.Errorf("invalid JWK modulus: %w", err)
+	}
+	eBytes, err := base64.RawURLEncoding.DecodeString(k.E)
+	if err != nil {
+		return nil, fmt.Errorf("invalid JWK exponent: %w", err)
+	}
+	if len(nBytes) == 0 || len(eBytes) == 0 {
+		return nil, errors.New("empty JWK modulus or exponent")
+	}
+	e := 0
+	for _, b := range eBytes {
+		e = e<<8 | int(b)
+	}
+	if e <= 0 {
+		return nil, errors.New("invalid JWK exponent value")
+	}
+	return &rsa.PublicKey{N: new(big.Int).SetBytes(nBytes), E: e}, nil
+}
+
+// fetchOIDCJWKS loads the provider's JWKS document over the SSRF-safe client.
+func (s *userService) fetchOIDCJWKS(ctx context.Context, jwksURI string) (*oidcJWKS, error) {
+	if err := validateOIDCEndpoint("jwks", jwksURI, true); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksURI, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := newOIDCHTTPClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("JWKS request failed: status=%d", resp.StatusCode)
+	}
+
+	var jwks oidcJWKS
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&jwks); err != nil {
+		return nil, fmt.Errorf("failed to decode JWKS document: %w", err)
+	}
+	if len(jwks.Keys) == 0 {
+		return nil, errors.New("JWKS document contains no keys")
+	}
+	return &jwks, nil
+}
+
+// verifyOIDCIDToken cryptographically verifies an OIDC id_token: it checks the
+// RSA signature against the provider's JWKS (matched by kid) and validates the
+// issuer, audience (client_id) and expiry. It returns the verified claims.
+//
+// Previously the id_token payload was base64-decoded without any signature
+// check (decodeJWTClaims), so a forged token could inject arbitrary identity
+// claims. Verification requires a jwks_uri (from discovery or explicit config).
+func (s *userService) verifyOIDCIDToken(
+	ctx context.Context, cfg *config.OIDCAuthConfig, idToken string,
+) (map[string]interface{}, error) {
+	if strings.TrimSpace(cfg.JwksURI) == "" {
+		return nil, errors.New("cannot verify OIDC id_token: no jwks_uri configured")
+	}
+
+	jwks, err := s.fetchOIDCJWKS(ctx, cfg.JwksURI)
+	if err != nil {
+		return nil, err
+	}
+
+	keyFunc := func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, fmt.Errorf("unexpected id_token signing method: %v", token.Header["alg"])
+		}
+		kid, _ := token.Header["kid"].(string)
+		for _, k := range jwks.Keys {
+			if k.Kty != "" && !strings.EqualFold(k.Kty, "RSA") {
+				continue
+			}
+			if kid != "" && k.Kid != "" && k.Kid != kid {
+				continue
+			}
+			if pub, err := k.rsaPublicKey(); err == nil {
+				return pub, nil
+			}
+		}
+		return nil, errors.New("no matching JWKS key for id_token")
+	}
+
+	parserOpts := []jwt.ParserOption{
+		jwt.WithValidMethods([]string{"RS256", "RS384", "RS512"}),
+	}
+	if iss := strings.TrimSpace(cfg.IssuerURL); iss != "" {
+		parserOpts = append(parserOpts, jwt.WithIssuer(iss))
+	}
+	if aud := strings.TrimSpace(cfg.ClientID); aud != "" {
+		parserOpts = append(parserOpts, jwt.WithAudience(aud))
+	}
+
+	claims := jwt.MapClaims{}
+	if _, err := jwt.NewParser(parserOpts...).ParseWithClaims(idToken, claims, keyFunc); err != nil {
+		return nil, fmt.Errorf("id_token verification failed: %w", err)
+	}
+	return map[string]interface{}(claims), nil
 }
 
 func extractClaimAsString(claims map[string]interface{}, key string) string {
