@@ -16,6 +16,7 @@ The client includes the following main functional modules:
 8. **Model Management**: Create, retrieve, update, and delete models
 9. **Evaluation Function**: Start evaluation tasks and get evaluation results
 10. **Sandbox skills**: Install a skill onto a sandbox config (zip upload, or ClawHub / SkillHub / GitHub source) and configure the environment variables it needs
+11. **Auth**: Login, refresh tokens, and switch the active workspace (`SwitchTenant` records the last-active-tenant preference)
 
 ## Usage
 

@@ -102,7 +102,7 @@ curl $BASE/api/v1/auth/config
 
 响应：200，同 Login。
 
-换签成功后服务端会把目标空间记入「最近活跃租户」偏好，下次登录（密码/OIDC/换设备）自动回到该空间，客户端无需再补发 `PUT /auth/me/preferences` 请求。
+换签成功会把目标空间写入账号级「最近活跃租户」偏好，下次登录（密码/OIDC/换设备）与 refresh 都回到该空间。refresh JWT 不含 `tenant_id`，因此偏好写入失败则整次换签失败、不会发出新 token。API 客户端无需再补发 `PUT /auth/me/preferences`。Web UI 切空间不走本接口。一次换签会改变该用户所有设备的下次落点。
 
 ```bash
 curl -X POST $BASE/api/v1/auth/switch-tenant -H "Authorization: Bearer $TOKEN" \
@@ -195,7 +195,7 @@ curl $BASE/api/v1/auth/me -H "X-API-Key: $API_KEY"
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `last_active_tenant_id` | *uint64 | 否 | 最近活跃空间 ID，null 清除 |
+| `last_active_tenant_id` | *uint64 | 否 | 正整数设置/替换；`0` 清除（下次登录回 home）；省略则不改。`POST /auth/switch-tenant` 成功时服务端会写同一字段。 |
 
 响应：200 `{"success":true,"data":{UserPreferences}}`
 
