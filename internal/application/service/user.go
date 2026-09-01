@@ -1383,6 +1383,8 @@ type oidcDiscoveryDocument struct {
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
 	UserInfoEndpoint      string `json:"userinfo_endpoint"`
+	JWKSURI               string `json:"jwks_uri"`
+	Issuer                string `json:"issuer"`
 }
 
 type oidcTokenResponse struct {
@@ -1419,6 +1421,9 @@ func validateOIDCEndpoints(cfg *config.OIDCAuthConfig) error {
 		return err
 	}
 	if err := validateOIDCEndpoint("userinfo", cfg.UserInfoEndpoint, false); err != nil {
+		return err
+	}
+	if err := validateOIDCEndpoint("jwks", cfg.JWKSURI, false); err != nil {
 		return err
 	}
 	return nil
@@ -1477,6 +1482,12 @@ func (s *userService) populateOIDCEndpoints(ctx context.Context, cfg *config.OID
 	if cfg.UserInfoEndpoint == "" {
 		cfg.UserInfoEndpoint = doc.UserInfoEndpoint
 	}
+	if cfg.JWKSURI == "" {
+		cfg.JWKSURI = doc.JWKSURI
+	}
+	if cfg.IssuerURL == "" {
+		cfg.IssuerURL = doc.Issuer
+	}
 	if cfg.AuthorizationEndpoint == "" || cfg.TokenEndpoint == "" {
 		return errors.New("OIDC discovery document missing required endpoints")
 	}
@@ -1526,10 +1537,33 @@ func (s *userService) resolveOIDCUserInfo(ctx context.Context, cfg *config.OIDCA
 	claims := map[string]interface{}{}
 
 	if strings.TrimSpace(tokenResp.IDToken) != "" {
+		if strings.TrimSpace(cfg.JWKSURI) != "" {
+			// Signature verification is strictly enforced whenever a JWKS
+			// endpoint is available: an id_token that cannot be proven to be
+			// signed by the IdP is rejected rather than merged in. Only a
+			// transport-level inability to load the JWKS document itself
+			// degrades to legacy behavior below.
+			if err := verifyOIDCIDToken(ctx, cfg, tokenResp.IDToken); err != nil {
+				if isOIDCJWKSUnavailable(err) {
+					logger.Warnf(ctx,
+						"OIDC id_token accepted without signature verification: JWKS unavailable (%v)", err)
+				} else {
+					return nil, err
+				}
+			}
+		} else {
+			logger.Warnf(ctx,
+				"OIDC id_token claims accepted without signature verification (no jwks_uri; set oidc_auth.jwks_uri to verify)")
+		}
 		idTokenClaims, err := decodeJWTClaims(tokenResp.IDToken)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to decode OIDC id_token claims: %v", err)
 		} else {
+			// Even without a verifiable signature, an already-expired token
+			// is never acceptable as an identity source.
+			if err := validateIDTokenExpiry(idTokenClaims); err != nil {
+				return nil, err
+			}
 			for k, v := range idTokenClaims {
 				claims[k] = v
 			}
