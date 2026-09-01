@@ -203,7 +203,7 @@ if err != nil {
 
 ### Example: Install a sandbox skill from a registry
 
-`source` must be explicit: `@owner/slug` for ClawHub, or a full GitHub / SkillHub URL. Bare `owner/slug` is rejected.
+`source` must be explicit: `@owner/slug` for ClawHub, a full `https://clawhub.ai/skills-sh/owner/repo/slug` (or `skills-sh:owner/repo/slug`) for federated skills.sh listings, or a full GitHub / SkillHub URL. Bare `owner/slug` is rejected.
 
 ```go
 skillID, err := apiClient.InstallSandboxSkillFromSource(

@@ -160,6 +160,7 @@ Docker、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接检查和
 空间「技能沙箱」设置里可以把技能装进当前配置的镜像。除上传 zip 外，也支持从托管平台粘贴来源（每种写法只对应一种来源，不会猜测）：
 
 - ClawHub：`@owner/slug`，或不含 `/` 的 slug（如 `my-team--skill`）
+- ClawHub skills.sh 联邦页：`https://clawhub.ai/skills-sh/owner/repo/slug` 或 `skills-sh:owner/repo/slug`（服务端向 ClawHub 解析钉死的 GitHub commit，不会把 URL 最后一段当成仓库子目录）
 - 页面链接：ClawHub / [skillhub.cn](https://skillhub.cn) / 自托管 SkillHub、skills.sh、GitHub、GitLab
 - 直接的 zip / `SKILL.md` URL
 

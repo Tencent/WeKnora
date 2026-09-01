@@ -84,8 +84,9 @@ curl --location 'http://localhost:8080/api/v1/sandbox-configs/{id}/skills' \
 | --- | --- |
 | `@owner/slug`、`@owner/slug@1.2.0` | ClawHub（默认 registry） |
 | `my-skill`、`my-skill@1.2.0`（不含 `/`） | ClawHub slug |
+| `https://clawhub.ai/skills-sh/owner/repo/slug`、`skills-sh:owner/repo/slug` | ClawHub 上的 skills.sh 联邦条目（经 ClawHub install API 解析到钉死的 GitHub commit；仓库内路径可能比 URL slug 更深） |
 | `https://clawhub.ai/...`、`https://skillhub.cn/...`、自托管 SkillHub 页面 | 对应 registry |
-| `https://github.com/...`、`https://gitlab.com/...`、`https://skills.sh/...` | Git 托管 |
+| `https://github.com/...`、`https://gitlab.com/...`、`https://skills.sh/...` | Git 托管；`skills.sh` 的 `owner/repo/slug` 页面同样走 ClawHub resolver |
 | `https://…/foo.zip` 或 `…/SKILL.md` | 直接下载 |
 
 `owner/slug`（无 `@`、无 URL）会 400：它既是 ClawHub id 也是 GitHub 仓库，请改成 `@owner/slug` 或粘贴完整链接。

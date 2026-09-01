@@ -53,9 +53,11 @@ func (c *Client) ListSkills(ctx context.Context, sandboxConfigID string) ([]Skil
 
 // InstallSandboxSkillFromSource installs a skill onto a sandbox config from a
 // public locator. Use "@owner/slug" (ClawHub), a github.com / gitlab.com /
-// skills.sh / skillhub URL, or a direct zip/SKILL.md URL. Bare "owner/slug"
-// is rejected as ambiguous. The call is accepted asynchronously; follow
-// progress on the skill ID.
+// skills.sh / skillhub URL, a ClawHub skills-sh catalog page
+// (https://clawhub.ai/skills-sh/owner/repo/slug), a skills-sh:owner/repo/slug
+// locator, or a direct zip/SKILL.md URL. Bare "owner/slug" is rejected as
+// ambiguous. The call is accepted asynchronously; follow progress on the
+// skill ID.
 func (c *Client) InstallSandboxSkillFromSource(
 	ctx context.Context, configID, source string,
 ) (string, error) {

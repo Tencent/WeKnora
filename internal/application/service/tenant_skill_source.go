@@ -41,10 +41,13 @@ type skillSourceKind string
 
 const (
 	skillSourceRegistry skillSourceKind = "registry"
+	skillSourceSkillsSh skillSourceKind = "skills-sh"
 	skillSourceGitHub   skillSourceKind = "github"
 	skillSourceGitLab   skillSourceKind = "gitlab"
 	skillSourceDirect   skillSourceKind = "direct"
 )
+
+const skillsShRefPrefix = "skills-sh:"
 
 // parsedSkillSource is one install input after host-specific URL/slug rules
 // have been applied, and before any bytes are fetched.
@@ -61,11 +64,29 @@ type parsedSkillSource struct {
 }
 
 type skillSourceHandoff struct {
-	SourceRef   string `json:"sourceRef"`
-	Repo        string `json:"repo"`
-	Commit      string `json:"commit"`
-	Path        string `json:"path"`
-	ArchiveURL  string `json:"archiveUrl"`
+	OK          *bool                      `json:"ok"`
+	Message     string                     `json:"message"`
+	Reason      string                     `json:"reason"`
+	InstallKind string                     `json:"installKind"`
+	SourceRef   string                     `json:"sourceRef"`
+	Repo        string                     `json:"repo"`
+	Commit      string                     `json:"commit"`
+	Path        string                     `json:"path"`
+	ArchiveURL  string                     `json:"archiveUrl"`
+	DownloadURL string                     `json:"downloadUrl"`
+	GitHub      *skillSourceGitHubHandoff  `json:"github"`
+	Archive     *skillSourceArchiveHandoff `json:"archive"`
+}
+
+type skillSourceGitHubHandoff struct {
+	Repo      string `json:"repo"`
+	Path      string `json:"path"`
+	Commit    string `json:"commit"`
+	SourceURL string `json:"sourceUrl"`
+}
+
+type skillSourceArchiveHandoff struct {
+	Version     string `json:"version"`
 	DownloadURL string `json:"downloadUrl"`
 }
 
@@ -131,6 +152,11 @@ func fetchSkillArchive(ctx context.Context, source string, client *http.Client) 
 //	                     last segment; owner becomes ownerHandle.
 //	my-skill             ClawHub slug (no slash)
 //	my-skill@1.2.0       ClawHub slug + version
+//	skills-sh:owner/repo/slug
+//	                     ClawHub federated skills.sh listing. Resolved
+//	                     through ClawHub's install API to a pinned GitHub
+//	                     commit; the GitHub path is often deeper than the
+//	                     URL slug (e.g. tools/image/ai-image-generation).
 //	https://…            host decides (GitHub / GitLab / ClawHub / SkillHub /
 //	                     skills.sh / zip|SKILL.md / self-hosted registry)
 func parseSkillSource(raw string) (parsedSkillSource, error) {
@@ -142,6 +168,9 @@ func parseSkillSource(raw string) (parsedSkillSource, error) {
 
 	if strings.Contains(input, "://") {
 		return parseSkillSourceURL(input)
+	}
+	if payload, ok := skillsShBarePayload(input); ok {
+		return parseSkillsShLocator(defaultSkillRegistryOrigin, splitPath(payload))
 	}
 	if strings.HasPrefix(input, "@") {
 		return parseRegistrySlug(defaultSkillRegistryOrigin, strings.TrimPrefix(input, "@"))
@@ -257,6 +286,10 @@ func parseRegistryURL(u *url.URL) (parsedSkillSource, error) {
 			Registry:  origin,
 			DirectURL: u.String(),
 		}, nil
+	}
+	parts := splitPath(trimmed)
+	if len(parts) > 0 && strings.EqualFold(parts[0], "skills-sh") {
+		return parseSkillsShLocator(origin, parts[1:])
 	}
 	slug, version, err := slugAndVersionFromPath(trimmed, u.Fragment)
 	if err != nil {
@@ -427,16 +460,59 @@ func parseSkillsShURL(u *url.URL) (parsedSkillSource, error) {
 	if len(parts) < 2 {
 		return parsedSkillSource{}, fmt.Errorf("%w: skills.sh URL must be owner/repo", ErrSkillSourceInvalid)
 	}
+	if len(parts) >= 3 {
+		// Catalog pages are owner/repo/slug. ClawHub's install resolver is
+		// what names the GitHub subdir (often not the slug itself).
+		return parseSkillsShLocator(defaultSkillRegistryOrigin, parts)
+	}
 	src := parsedSkillSource{
 		Kind:  skillSourceGitHub,
 		Owner: parts[0],
 		Repo:  strings.TrimSuffix(parts[1], ".git"),
 		Ref:   "HEAD",
 	}
-	if len(parts) > 2 {
-		src.Subdir = strings.Join(parts[2:], "/")
-	}
 	return src, nil
+}
+
+func skillsShBarePayload(input string) (string, bool) {
+	lower := strings.ToLower(input)
+	switch {
+	case strings.HasPrefix(lower, skillsShRefPrefix):
+		return strings.TrimSpace(input[len(skillsShRefPrefix):]), true
+	case strings.HasPrefix(lower, "skills-sh/"):
+		return strings.TrimSpace(input[len("skills-sh/"):]), true
+	default:
+		return "", false
+	}
+}
+
+// parseSkillsShLocator maps a ClawHub/OpenClaw skills-sh reference onto the
+// install resolver. The locator is always owner/repo/slug — three segments.
+// The GitHub folder is not assumed to equal the slug; fetch asks ClawHub.
+func parseSkillsShLocator(registry string, parts []string) (parsedSkillSource, error) {
+	if len(parts) != 3 {
+		return parsedSkillSource{}, fmt.Errorf(
+			"%w: skills.sh locator must be owner/repo/slug", ErrSkillSourceInvalid)
+	}
+	owner := strings.ToLower(strings.TrimSpace(parts[0]))
+	repo := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(parts[1]), ".git"))
+	slug := strings.ToLower(strings.TrimSpace(parts[2]))
+	slug, _ = splitTrailingVersion(slug)
+	if owner == "" || repo == "" || slug == "" ||
+		strings.Contains(owner, "..") || strings.Contains(repo, "..") || strings.Contains(slug, "..") {
+		return parsedSkillSource{}, fmt.Errorf(
+			"%w: skills.sh locator must be owner/repo/slug", ErrSkillSourceInvalid)
+	}
+	if registry == "" {
+		registry = defaultSkillRegistryOrigin
+	}
+	return parsedSkillSource{
+		Kind:     skillSourceSkillsSh,
+		Registry: registry,
+		Owner:    owner,
+		Repo:     repo,
+		Slug:     slug,
+	}, nil
 }
 
 func splitTrailingVersion(spec string) (slug, version string) {
@@ -507,6 +583,19 @@ func (s parsedSkillSource) fetchURL() (string, error) {
 		}
 		u.RawQuery = q.Encode()
 		return u.String(), nil
+	case skillSourceSkillsSh:
+		registry := strings.TrimRight(s.Registry, "/")
+		if registry == "" {
+			registry = defaultSkillRegistryOrigin
+		}
+		u, err := url.Parse(registry + "/api/v1/skills/" + url.PathEscape(s.Slug) + "/install")
+		if err != nil {
+			return "", fmt.Errorf("%w: invalid registry origin", ErrSkillSourceInvalid)
+		}
+		q := u.Query()
+		q.Set("reference", skillsShRefPrefix+s.Owner+"/"+s.Repo+"/"+s.Slug)
+		u.RawQuery = q.Encode()
+		return u.String(), nil
 	case skillSourceGitHub:
 		ref := s.Ref
 		if ref == "" {
@@ -575,13 +664,53 @@ func fetchSkillSourceBytes(
 }
 
 func sourceFromHandoff(prev parsedSkillSource, handoff skillSourceHandoff) (parsedSkillSource, error) {
+	if handoff.OK != nil && !*handoff.OK {
+		msg := strings.TrimSpace(handoff.Message)
+		if msg == "" {
+			msg = strings.TrimSpace(handoff.Reason)
+		}
+		if msg == "" {
+			msg = "registry refused the skill"
+		}
+		return parsedSkillSource{}, fmt.Errorf("%w: %s", ErrSkillSourceInvalid, truncateSkillError(msg))
+	}
+
 	archiveURL := strings.TrimSpace(handoff.ArchiveURL)
 	if archiveURL == "" {
 		archiveURL = strings.TrimSpace(handoff.DownloadURL)
 	}
-	if archiveURL == "" {
-		return parsedSkillSource{}, fmt.Errorf("%w: registry response has no archive URL", ErrSkillSourceInvalid)
+	if archiveURL == "" && handoff.Archive != nil {
+		archiveURL = strings.TrimSpace(handoff.Archive.DownloadURL)
 	}
+	if archiveURL != "" {
+		return sourceFromArchiveHandoff(prev, handoff, archiveURL)
+	}
+	if gh := handoffGitHub(handoff); gh != nil {
+		return sourceFromGitHubHandoff(*gh)
+	}
+	return parsedSkillSource{}, fmt.Errorf("%w: registry response has no archive URL", ErrSkillSourceInvalid)
+}
+
+func handoffGitHub(handoff skillSourceHandoff) *skillSourceGitHubHandoff {
+	if handoff.GitHub != nil {
+		return handoff.GitHub
+	}
+	if !strings.EqualFold(strings.TrimSpace(handoff.InstallKind), "github") {
+		return nil
+	}
+	if strings.TrimSpace(handoff.Repo) == "" && strings.TrimSpace(handoff.Commit) == "" {
+		return nil
+	}
+	return &skillSourceGitHubHandoff{
+		Repo:   handoff.Repo,
+		Path:   handoff.Path,
+		Commit: handoff.Commit,
+	}
+}
+
+func sourceFromArchiveHandoff(
+	prev parsedSkillSource, handoff skillSourceHandoff, archiveURL string,
+) (parsedSkillSource, error) {
 	if strings.HasPrefix(archiveURL, "/") {
 		if prev.Registry == "" {
 			return parsedSkillSource{}, fmt.Errorf(
@@ -598,13 +727,70 @@ func sourceFromHandoff(prev parsedSkillSource, handoff skillSourceHandoff) (pars
 		return parsedSkillSource{}, fmt.Errorf(
 			"%w: registry archive URL is not usable: %v", ErrSkillSourceInvalid, err)
 	}
-	if next.Subdir == "" && strings.TrimSpace(handoff.Path) != "" {
-		next.Subdir = strings.Trim(handoff.Path, "/")
+	path := strings.TrimSpace(handoff.Path)
+	if path == "" && handoff.GitHub != nil {
+		path = strings.TrimSpace(handoff.GitHub.Path)
 	}
-	if next.Kind == skillSourceGitHub && next.Ref == "HEAD" && strings.TrimSpace(handoff.Commit) != "" {
-		next.Ref = handoff.Commit
+	if next.Subdir == "" && path != "" {
+		next.Subdir = strings.Trim(path, "/")
+	}
+	commit := strings.TrimSpace(handoff.Commit)
+	if commit == "" && handoff.GitHub != nil {
+		commit = strings.TrimSpace(handoff.GitHub.Commit)
+	}
+	if next.Kind == skillSourceGitHub && next.Ref == "HEAD" && commit != "" {
+		next.Ref = commit
 	}
 	return next, nil
+}
+
+func sourceFromGitHubHandoff(gh skillSourceGitHubHandoff) (parsedSkillSource, error) {
+	srcURL := strings.TrimSpace(gh.SourceURL)
+	if srcURL != "" {
+		next, err := parseSkillSourceURL(srcURL)
+		if err == nil && next.Kind == skillSourceGitHub {
+			applyGitHubHandoffMeta(&next, gh)
+			return next, nil
+		}
+	}
+	owner, repo, ok := splitGitHubRepo(gh.Repo)
+	if !ok {
+		return parsedSkillSource{}, fmt.Errorf(
+			"%w: registry github handoff is missing repo", ErrSkillSourceInvalid)
+	}
+	src := parsedSkillSource{
+		Kind:   skillSourceGitHub,
+		Owner:  owner,
+		Repo:   repo,
+		Ref:    strings.TrimSpace(gh.Commit),
+		Subdir: strings.Trim(strings.TrimSpace(gh.Path), "/"),
+	}
+	if src.Ref == "" {
+		src.Ref = "HEAD"
+	}
+	return src, nil
+}
+
+func applyGitHubHandoffMeta(next *parsedSkillSource, gh skillSourceGitHubHandoff) {
+	if next.Kind != skillSourceGitHub {
+		return
+	}
+	if commit := strings.TrimSpace(gh.Commit); commit != "" {
+		next.Ref = commit
+	}
+	if next.Subdir == "" && strings.TrimSpace(gh.Path) != "" {
+		next.Subdir = strings.Trim(gh.Path, "/")
+	}
+}
+
+func splitGitHubRepo(spec string) (owner, repo string, ok bool) {
+	spec = strings.TrimSpace(spec)
+	spec = strings.TrimSuffix(spec, ".git")
+	owner, repo, found := strings.Cut(spec, "/")
+	if !found || owner == "" || repo == "" || strings.Contains(repo, "/") {
+		return "", "", false
+	}
+	return owner, repo, true
 }
 
 func getSkillURL(
