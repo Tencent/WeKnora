@@ -172,7 +172,7 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 
 	if err := service.ValidatePasswordPolicy(req.Password, h.complexPasswordEnabled(ctx)); err != nil {
 		logger.Error(ctx, "Invalid password policy")
-		c.Error(apperrors.NewValidationError(err.Error()))
+		_ = c.Error(apperrors.NewValidationError(err.Error()))
 		return
 	}
 

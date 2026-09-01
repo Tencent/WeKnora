@@ -49,8 +49,13 @@ var (
 	// meet the product's public 8-32 character, letter-and-number contract.
 	// It is exported so HTTP handlers can translate the failure to a 400
 	// without exposing bcrypt or persistence errors.
-	ErrPasswordPolicy        = errors.New("password must be 8-32 characters and contain at least one letter and one number")
-	ErrComplexPasswordPolicy = errors.New("password must be 8-32 characters and must contain uppercase and lowercase letters, numbers, and special characters.")
+	ErrPasswordPolicy = errors.New(
+		"password must be 8-32 characters and contain at least one letter and one number")
+	// ErrComplexPasswordPolicy is returned when the runtime complex-password
+	// switch is on and the new password is missing a required character class.
+	ErrComplexPasswordPolicy = errors.New(
+		"password must be 8-32 characters and must contain uppercase and lowercase " +
+			"letters, numbers, and special characters")
 
 	// ErrInvalidOldPassword is returned by ChangePassword when the supplied
 	// current password does not match the stored hash. Handlers map this to

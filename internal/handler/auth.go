@@ -215,7 +215,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	if err := service.ValidatePasswordPolicy(req.Password, h.complexPasswordEnabled(ctx)); err != nil {
 		logger.Error(ctx, "Invalid password policy")
 		appErr := errors.NewValidationError(err.Error())
-		c.Error(appErr)
+		_ = c.Error(appErr)
 		return
 	}
 
