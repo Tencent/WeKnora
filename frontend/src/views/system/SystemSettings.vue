@@ -496,6 +496,7 @@ import {
   type SystemSettingItem,
 } from '@/api/system'
 import { useAuthStore } from '@/stores/auth'
+import { isSettingValueDirty, resolveCurrentSetting } from './systemSettingsEdit'
 
 const authStore = useAuthStore()
 const currentUserId = computed(() => authStore.currentUserId)
@@ -866,16 +867,7 @@ async function snapSsrfWhitelistToSaved(item: SystemSettingItem) {
 }
 
 function isDirty(item: SystemSettingItem): boolean {
-  const cur = editValues[item.key]
-  const orig = item.value
-  if (Array.isArray(cur) && Array.isArray(orig)) {
-    if (cur.length !== orig.length) return true
-    for (let i = 0; i < cur.length; i++) {
-      if (cur[i] !== orig[i]) return true
-    }
-    return false
-  }
-  return cur !== orig
+  return isSettingValueDirty(editValues[item.key], item.value)
 }
 
 function formatDate(isoString: string): string {
@@ -929,7 +921,7 @@ async function loadSettings() {
 // onChange persists non-SSRF settings. SSRF whitelist and system admins
 // have dedicated handlers with inline popconfirm.
 async function onChange(item: SystemSettingItem) {
-  const currentItem = settingsByKey.value.get(item.key)
+  const currentItem = resolveCurrentSetting(settingsByKey.value, item.key)
   if (!currentItem) return
   if (!isDirty(currentItem)) return
 
@@ -943,15 +935,17 @@ async function onChange(item: SystemSettingItem) {
 }
 
 async function onHighRiskSelectChange(item: SystemSettingItem) {
+  const currentItem = resolveCurrentSetting(settingsByKey.value, item.key)
+  if (!currentItem) return
   const newValue = editValues[item.key]
-  if (newValue === item.value) return
+  if (!isDirty(currentItem)) return
 
   // Revert the select immediately so cancel leaves the saved value
   // visible; re-apply only after the inline popconfirm is confirmed.
-  editValues[item.key] = item.value
+  editValues[item.key] = currentItem.value
 
   const ok = await highRiskPopconfirm.ask({
-    content: highRiskConfirmBody(item, newValue),
+    content: highRiskConfirmBody(currentItem, newValue),
     theme: 'danger',
     confirmBtn: {
       content: t('system.globalSettings.confirm.confirmBtn'),
@@ -961,7 +955,7 @@ async function onHighRiskSelectChange(item: SystemSettingItem) {
   if (!ok) return
 
   editValues[item.key] = newValue
-  await persistSetting(item)
+  await persistSetting(currentItem)
 }
 
 function confirmSsrfListEntryChange(
