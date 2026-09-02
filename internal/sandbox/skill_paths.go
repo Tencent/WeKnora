@@ -84,6 +84,23 @@ func RunnableWorkspaceScript(scriptPath string) (string, bool) {
 	return clean, true
 }
 
+// ValidatedSessionOutputDir normalises a configured artifact directory and
+// reports whether it may be used.
+//
+// It is the single gate for every WEKNORA_SKILL_OUTPUT_DIR override, wherever
+// it comes from: the host environment the app reads at startup, or a tenant's
+// sandbox config. Without it the two disagreed — execution validated the path
+// and fell back to SessionOutputRoot, while the tools and the artifact
+// collector took the host value as-is, so an override pointing outside
+// /workspace moved the readers somewhere the writers never wrote.
+func ValidatedSessionOutputDir(dir string) (string, bool) {
+	clean, err := cleanSessionWorkDir(dir, false)
+	if err != nil {
+		return "", false
+	}
+	return clean, true
+}
+
 // ValidatedImageSkillDir reports whether skillDir is exactly one installed
 // skill directory under SkillsImageRoot (for example /opt/weknora/tenant/skills/pdf).
 func ValidatedImageSkillDir(skillDir string) (string, bool) {
