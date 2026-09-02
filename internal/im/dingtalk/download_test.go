@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/im"
 )
 
@@ -170,5 +171,68 @@ func TestIsAllowedDingTalkDownloadHost(t *testing.T) {
 		if got := isAllowedDingTalkDownloadHost(tc.url); got != tc.allow {
 			t.Errorf("isAllowedDingTalkDownloadHost(%q) = %v, want %v", tc.url, got, tc.allow)
 		}
+	}
+}
+
+// TestDownloadFile_URLRewrite covers the 专属钉 dedicated-line adaptation:
+// the fake OpenAPI returns a dedicated-line downloadUrl which the adapter
+// rewrites to the configured intranet base (here: the local test server).
+// The real validateFileDownloadURL stays active, proving the rewritten
+// target bypasses SSRF validation by design (operator-configured host).
+func TestDownloadFile_URLRewrite(t *testing.T) {
+	useTestHTTPClient(t)
+	fileBytes := []byte("rewritten intranet file bytes")
+
+	fileSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/temp/file" {
+			_, _ = w.Write(fileBytes)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer fileSrv.Close()
+
+	var api *httptest.Server
+	api = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1.0/oauth2/accessToken":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"accessToken": "tok", "expireIn": 7200})
+		case "/v1.0/robot/messageFiles/download":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"downloadUrl": "https://dingtalk-file.111.111.111.111:15443/temp/file?sig=abc",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+
+	orig := apiBaseURL
+	apiBaseURL = api.URL
+	defer func() { apiBaseURL = orig }()
+
+	cfg := &config.DingTalkConfig{
+		DownloadURLRewrite: &config.DingTalkURLRewriteConfig{
+			From: "https://dingtalk-file.111.111.111.111:15443,https://111.111.111.111:15443",
+			To:   fileSrv.URL,
+		},
+	}
+	a := NewWebhookAdapter("cid", "sec", "", cfg)
+	msg := &im.IncomingMessage{FileKey: "DL-CODE", FileName: "x.pdf", Extra: map[string]string{"robot_code": "rc"}}
+
+	reader, name, err := a.DownloadFile(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("DownloadFile error: %v", err)
+	}
+	defer reader.Close()
+	got, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if string(got) != string(fileBytes) {
+		t.Errorf("downloaded bytes = %q, want %q", got, fileBytes)
+	}
+	if name != "x.pdf" {
+		t.Errorf("resolved name = %q, want %q", name, "x.pdf")
 	}
 }

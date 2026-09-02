@@ -2,7 +2,10 @@ package dingtalk
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -72,4 +75,39 @@ func (r *downloadRewrite) apply(rawURL string) (rewritten, matchedPrefix string,
 		return r.to + rest, prefix, true
 	}
 	return rawURL, "", false
+}
+
+// downloadRewriteTimeout matches the timeout of the shared package httpClient.
+const downloadRewriteTimeout = 15 * time.Second
+
+// downloadMaxRedirects caps redirects for the trusted download client,
+// mirroring MaxRedirects of the shared SSRF-safe client.
+const downloadMaxRedirects = 5
+
+// newTrustedDownloadClient builds the HTTP client used for download URLs
+// that were rewritten to the operator-configured intranet base. The target
+// host is admin-controlled (same trust level as SSRF_WHITELIST entries), so
+// the SSRF dial guard and validating round-tripper are intentionally
+// omitted — they would reject private intranet addresses. Redirects are
+// capped but not re-validated: the source is a trusted intranet mirror
+// serving DingTalk-signed URLs.
+func newTrustedDownloadClient() *http.Client {
+	return &http.Client{
+		Timeout:   downloadRewriteTimeout,
+		Transport: &http.Transport{},
+		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
+			if len(via) >= downloadMaxRedirects {
+				return fmt.Errorf("stopped after %d redirects", downloadMaxRedirects)
+			}
+			return nil
+		},
+	}
+}
+
+// logSnippet truncates s to at most max bytes for log output.
+func logSnippet(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "...(truncated)"
 }
