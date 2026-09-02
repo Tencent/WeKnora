@@ -43,10 +43,10 @@ func (s *TenantSkillService) RemoveSkill(
 
 	// Like the install, the removal outlives the HTTP request and must not
 	// inherit its cancellation. It is not durable across a restart either;
-	// that is the stuck-run reaper's job (Task 17).
+	// StopSkill rewrites the row, and the stuck-run reaper is the backup.
 	go func() {
 		bgCtx := context.WithoutCancel(ctx)
-		if err := s.withConfigLock(bgCtx, tenantID, configID, func(lockCtx context.Context) error {
+		if err := s.withSkillRunLock(bgCtx, tenantID, configID, skillID, func(lockCtx context.Context) error {
 			return s.runRemove(lockCtx, tenantID, configID, skillID)
 		}); err != nil {
 			logger.Errorf(bgCtx, "[skill] remove %s failed: %v", skillID, err)
@@ -102,6 +102,7 @@ func (s *TenantSkillService) runRemove(
 	// detached here — each consumer calls cleanupContext so its budget starts
 	// when its work does, because a removal can run for minutes.
 	cleanupBase := context.WithoutCancel(ctx)
+	handle := s.lookupSkillRun(tenantID, configID, skillID)
 
 	// imageChanged marks the point of no return. Past it the skill is gone
 	// from the image every new session boots, so restoring the row to ready
@@ -115,6 +116,9 @@ func (s *TenantSkillService) runRemove(
 			logger.Errorf(cleanupBase,
 				"[skill] %s is gone from the image but its bookkeeping is incomplete: %v",
 				skillID, err)
+			return
+		}
+		if !s.skillRunStillBound(tenantID, configID, skillID, handle) {
 			return
 		}
 		// A half-removed skill is worse than a kept one: the image still has
@@ -378,11 +382,11 @@ func (s *TenantSkillService) clearImagePointer(
 	return s.configs.Update(ctx, cfgEntity)
 }
 
-// finishRemoval drops the DB row and the stored archive, then invalidates
-// bound sandboxes. It runs only once the image no longer contains the skill,
-// which is also why the delete is retried rather than reported as a failed
-// removal: the files are gone and re-running the whole flow to fix a row would
-// be absurd.
+// finishRemoval drops the DB row, then invalidates bound sandboxes. The
+// catalog archive is left alone: uninstalling from a sandbox must not
+// destroy the definition. It runs only once the image no longer contains
+// the skill, which is also why the row delete is retried rather than
+// reported as a failed removal.
 func (s *TenantSkillService) finishRemoval(
 	cleanupBase context.Context, tenantID uint64, configID, skillID string, imageChanged bool,
 ) error {
@@ -397,22 +401,21 @@ func (s *TenantSkillService) finishRemoval(
 		return nil
 	}
 
-	skill, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
-	if err != nil {
-		return err
+	// Read before the delete: past it the only record of what this row named is
+	// gone, and a pinned archive would be left behind with nothing to reclaim it.
+	pinned := ""
+	if row, err := s.skills.GetSkill(ctx, tenantID, configID, skillID); err == nil && row != nil {
+		pinned = strings.TrimSpace(row.BundleRef)
 	}
-	// The row goes first. A surviving row whose BundleRef names a deleted
-	// object is a broken record - read_skill would serve nothing - whereas an
-	// archive whose row is gone is only unreferenced bytes.
 	if err := s.retrySkillBookkeeping(ctx, func() error {
 		return s.skills.DeleteSkill(ctx, tenantID, configID, skillID)
 	}); err != nil {
 		return fmt.Errorf("skill %s no longer exists in the image but its row remains: %w",
 			skillID, err)
 	}
-	if skill != nil && skill.BundleRef != "" {
-		s.deleteBundleBestEffort(ctx, tenantID, skill.BundleRef)
-	}
+	// The definition's archive survives this; only an object no catalog and no
+	// other install names is reclaimed.
+	s.releaseInstallBundle(ctx, tenantID, pinned)
 	// Only an image that actually changed can leave a bound sandbox out of
 	// date. Marking after a removal that moved no pointer would destroy and
 	// rebuild every live sandbox of the config - throwing away each session's
@@ -468,6 +471,45 @@ func (s *TenantSkillService) removeStillOwnsTheRow(
 		return false, nil
 	}
 	return current.Status == types.SkillStatusRemoving, nil
+}
+
+// releaseInstallBundle drops an archive an install row has stopped naming,
+// unless something else still names it.
+//
+// The reference is not owned by one row. A definition's own object is shared by
+// every install of it, and one replaced archive is pinned by each install that
+// was built from it, so "this row let go" is not the same question as "nobody
+// needs these bytes". Both tables are checked before the object is deleted, and
+// an unreadable table means it is kept: a leaked archive costs storage, a
+// deleted one costs an install its files.
+func (s *TenantSkillService) releaseInstallBundle(
+	ctx context.Context, tenantID uint64, bundleRef string,
+) {
+	ref := strings.TrimSpace(bundleRef)
+	if ref == "" {
+		return
+	}
+	catalogs, err := s.skills.ListCatalogsByTenant(ctx, tenantID)
+	if err != nil {
+		logger.Warnf(ctx, "[skill] list catalogs before releasing bundle %s failed: %v", ref, err)
+		return
+	}
+	for _, cat := range catalogs {
+		if cat != nil && strings.TrimSpace(cat.BundleRef) == ref {
+			return
+		}
+	}
+	installs, err := s.skills.ListSkillsByTenant(ctx, tenantID)
+	if err != nil {
+		logger.Warnf(ctx, "[skill] list installs before releasing bundle %s failed: %v", ref, err)
+		return
+	}
+	for _, row := range installs {
+		if row != nil && strings.TrimSpace(row.BundleRef) == ref {
+			return
+		}
+	}
+	s.deleteBundleBestEffort(ctx, tenantID, ref)
 }
 
 func (s *TenantSkillService) deleteBundleBestEffort(

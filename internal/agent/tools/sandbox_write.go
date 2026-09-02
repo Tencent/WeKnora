@@ -180,7 +180,7 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 	logger.Infof(ctx, "[Tool][WriteSandboxFile] session=%s path=%s bytes=%d",
 		sessionID, clean, len(content))
 
-	if hint := pythonScriptSyntaxHint(clean, input.Content); hint != "" {
+	if hint := pythonScriptSyntaxHint(clean, input.Content, ToolEditSandboxFile); hint != "" {
 		return &types.ToolResult{
 			Success: false,
 			Error:   hint,

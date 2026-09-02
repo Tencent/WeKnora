@@ -622,10 +622,44 @@ func TestBuildInstallPromptAsksForADeclarationWithoutValues(t *testing.T) {
 	require.Contains(t, prompt, "On-demand / optional extras MUST be installed now")
 	require.Contains(t, prompt, "uv venv --seed")
 	require.Contains(t, prompt, "install_deps.py")
-	require.Contains(t, prompt, "write_sandbox_file is not available")
-	require.Contains(t, prompt, "short shell redirect")
+	require.Contains(t, prompt, "write_skill_file",
+		"a heredoc truncates at the command-length cap; the file tools are the writer")
+	require.Contains(t, prompt, "write_sandbox_file only writes /workspace",
+		"the installer must be told why the workspace writer cannot help it")
 	require.Contains(t, prompt, "- uv: /root/.local/bin/uv",
 		"the prompt hands over absolute paths instead of a PATH gamble")
+}
+
+// shell_exec used to default to /workspace, so the installer opened command
+// after command with `cd <skill-dir> &&` — the one spelling guaranteed to land
+// somewhere useful. The default is now the skill directory, and the prompt has
+// to say so, because a model that is not told keeps paying for the prefix.
+func TestBuildInstallPromptSaysCommandsAlreadyStartInTheSkillDirectory(t *testing.T) {
+	fx := newInstallFixture(t)
+
+	prompt := buildInstallPrompt(installSkillDir, fx.bundle, nil)
+
+	require.Contains(t, prompt, "shell_exec already starts every command in "+installSkillDir)
+	require.Contains(t, prompt, "do NOT prefix")
+	require.Contains(t, prompt, "cd <skill-dir> &&")
+}
+
+// Import resolution is the agent's job because it is nobody else's: the server
+// parses files without executing them, so it never learns whether an import
+// would have worked. The prompt has to say so, or the one party holding a real
+// interpreter reasons about imports instead of running them.
+func TestBuildInstallPromptDemandsImportsBeProvenByRunningThem(t *testing.T) {
+	fx := newInstallFixture(t)
+
+	prompt := buildInstallPrompt(installSkillDir, fx.bundle, nil)
+
+	require.Contains(t, prompt, "PROVE the skill's imports resolve")
+	require.Contains(t, prompt, "Do not reason about it")
+	require.Contains(t, prompt, installSkillDir+"/.venv/bin/python -c 'import x'")
+	require.Contains(t, prompt, "never judges an import",
+		"the agent must not expect the server to catch an unresolved import")
+	require.Contains(t, prompt, "edit_skill_file",
+		"a shipped module Python cannot find is fixed in the script, not with pip")
 }
 
 func TestBuildInstallPromptNamesOnDemandInstallerInTheArchive(t *testing.T) {
@@ -762,9 +796,10 @@ func TestInstallSkillSkipsWhenReadyWithTheSameArchive(t *testing.T) {
 	require.Empty(t, fx.sessionCalls, "the same bytes must not boot a billed sandbox")
 	require.NotContains(t, fx.events, "create-snapshot")
 	require.Nil(t, fx.configRepo.saved, "the image pointer must stay where it is")
-	require.GreaterOrEqual(t, fx.savedBundles, 1,
-		"a no-op re-upload must still refresh the stored archive for read_skill")
-	require.Equal(t, "file://bundle.zip", skill.BundleRef)
+	require.Equal(t, 1, fx.savedBundles,
+		"a no-op re-upload must not mint a second catalog object")
+	require.Empty(t, skill.BundleRef,
+		"the install row must not own a zip; readers follow CatalogID")
 	require.NotEmpty(t, skill.CatalogID,
 		"a skip must still attach the install to the workspace catalog")
 }
@@ -849,7 +884,7 @@ func TestReinstallSkillRefusesWhenTheArchiveIsGone(t *testing.T) {
 	_, err := fx.svc.ReinstallSkill(context.Background(), 7, "cfg-1", "sk-1")
 
 	require.Error(t, err)
-	require.ErrorContains(t, err, "no longer stored")
+	require.ErrorContains(t, err, "not available")
 	require.Empty(t, fx.sessionCalls, "a retry that cannot run must not boot a billed sandbox")
 }
 
@@ -1486,10 +1521,19 @@ func TestInstallSessionIgnoresATenantOverrideOfTheInstallerAgent(t *testing.T) {
 	require.Equal(t, platform.Config.SystemPrompt, fx.engineConfig.SystemPrompt,
 		"the prompt that drives a root shell is the platform's, not the tenant's")
 	require.NotContains(t, fx.engineConfig.SystemPrompt, "/root/.ssh")
-	require.Equal(t, platform.Config.AllowedTools, fx.engineConfig.AllowedTools)
+	require.Subset(t, fx.engineConfig.AllowedTools, platform.Config.AllowedTools,
+		"the tool set is the platform's, plus what an install structurally needs")
 	require.NotContains(t, fx.engineConfig.AllowedTools, tools.ToolWebSearch)
+	require.NotContains(t, fx.engineConfig.AllowedTools, tools.ToolReadSkill)
+	// Unioned in rather than read off the registry entry: an install that
+	// cannot write its own skill directory cannot record what it did, and a
+	// deployment whose platform YAML predates these tools must not lose them.
+	require.Contains(t, fx.engineConfig.AllowedTools, tools.ToolWriteSkillFile)
+	require.Contains(t, fx.engineConfig.AllowedTools, tools.ToolEditSkillFile)
 	require.Equal(t, platform.Config.MaxIterations, fx.engineConfig.MaxIterations)
 	require.True(t, fx.engineConfig.SkillInstallMode())
+	require.Equal(t, installSkillDir, fx.engineConfig.SkillInstallDir(),
+		"the file tools must be scoped to this install's own skill directory")
 	require.Equal(t, "model-agent", fx.engineModel.GetModelID(),
 		"the model is the one choice the tenant record still makes")
 }
@@ -2257,8 +2301,14 @@ type installSkillRepo struct {
 	listSnapshotsErr error
 	// deleteSkillErr models the row delete failing past the point of no
 	// return.
-	deleteSkillErr      error
-	createErr           error
+	deleteSkillErr error
+	createErr      error
+	// updateCatalogErr models the definition row failing to commit after its
+	// new archive is already stored.
+	updateCatalogErr error
+	// createCatalogHook stands in for the insert so a test can have the unique
+	// index reject this row because another request won the name first.
+	createCatalogHook   func(*types.TenantSkillCatalogEntity) error
 	getByNameMisses     int
 	readyWriteAttempts  int
 	deleteSkillAttempts int
@@ -2647,6 +2697,9 @@ func (r *installSkillRepo) CreateCatalog(_ context.Context, e *types.TenantSkill
 	if r.catalogs == nil {
 		r.catalogs = map[string]*types.TenantSkillCatalogEntity{}
 	}
+	if r.createCatalogHook != nil {
+		return r.createCatalogHook(e)
+	}
 	cp := *e
 	r.catalogs[e.ID] = &cp
 	return nil
@@ -2691,6 +2744,9 @@ func (r *installSkillRepo) ListCatalogsByTenant(_ context.Context, tenantID uint
 func (r *installSkillRepo) UpdateCatalog(_ context.Context, e *types.TenantSkillCatalogEntity) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.updateCatalogErr != nil {
+		return r.updateCatalogErr
+	}
 	if r.catalogs == nil {
 		r.catalogs = map[string]*types.TenantSkillCatalogEntity{}
 	}
@@ -3322,7 +3378,9 @@ func (s installFileService) SaveBytes(_ context.Context, data []byte, _ uint64, 
 		}
 		copied := make([]byte, len(data))
 		copy(copied, data)
-		s.fx.storedBundles["file://bundle.zip"] = copied
+		ref := fmt.Sprintf("file://bundle-%d.zip", s.fx.savedBundles)
+		s.fx.storedBundles[ref] = copied
+		return ref, nil
 	}
 	return "file://bundle.zip", nil
 }

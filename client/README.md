@@ -391,7 +391,7 @@ if err != nil {
 
 ### 示例：从托管平台安装沙箱技能
 
-`source` 必须写明确：ClawHub 用 `@owner/slug`，GitHub / SkillHub 粘贴完整 URL。不要传裸的 `owner/slug`。
+`source` 必须写明确：ClawHub 用 `@owner/slug`，ClawHub 上的 skills.sh 条目用完整 `https://clawhub.ai/skills-sh/owner/repo/slug` 或 `skills-sh:owner/repo/slug`，GitHub / SkillHub 粘贴完整 URL。不要传裸的 `owner/slug`。
 
 ```go
 skillID, err := apiClient.InstallSandboxSkillFromSource(
@@ -400,6 +400,18 @@ if err != nil {
     // 处理错误
 }
 _ = skillID // 用 skillID 订阅 /sandbox-configs/{id}/skills/{skillID}/install-events
+```
+
+### 示例：停止卡住的安装
+
+服务重启后安装行可能一直停在 `installing`，界面无法重试或卸载。停止会立刻改写该行（进程内若还有 goroutine 也会取消），之后可以再调重试或卸载。
+
+```go
+skill, err := apiClient.StopSandboxSkill(context.Background(), sandboxConfigID, skillID)
+if err != nil {
+    // 处理错误
+}
+_ = skill
 ```
 
 ### 示例：重试失败的安装

@@ -8,10 +8,9 @@
 //   - Session-scoped: path must belong to the current session's sandbox,
 //     enforced by delegating to SandboxFileSource.ReadSessionFile which
 //     itself takes the session ID from context.
-//   - Directory guardrail: path must sit underneath the artifact output
-//     directory or /workspace/input. Output is a companion to
-//     ArtifactCollector; input is where chat attachments are staged.
-//     Skills that need to peek elsewhere should print via stdout.
+//   - Directory guardrail: path must sit underneath /workspace, matching
+//     what this session may write. Skills that need to peek outside it
+//     should print via stdout.
 //   - Stat-first size cap: files over 64 KiB are never downloaded. The
 //     model receives metadata and uses shell_exec with sed/head/tail/grep/awk
 //     to inspect only the relevant text section.
@@ -69,12 +68,10 @@ var readSandboxFileTool = BaseTool{
   with ` + "`skill_name`" + ` / ` + "`file_path`" + `.
 
 ## Path Rules
-- ` + "`path`" + ` MUST be an absolute path returned by ` + "`list_sandbox_files`" + `
-  or listed in the current ` + "`<sandbox_attachments>`" + ` block.
-- ` + "`path`" + ` MUST sit underneath the session's artifact output directory
-  (` + "`$WEKNORA_SKILL_OUTPUT_DIR`" + `, typically ` + "`/workspace/output`" + `) or the
-  session input directory (` + "`/workspace/input`" + `). Reads outside those
-  directories are rejected.
+- ` + "`path`" + ` MUST be an absolute path under ` + "`/workspace`" + `: an
+  artifact under ` + "`/workspace/output`" + `, an attachment listed in
+  ` + "`<sandbox_attachments>`" + `, or a scratch file you wrote yourself with
+  ` + "`write_sandbox_file`" + `. Reads outside ` + "`/workspace`" + ` are rejected.
 
 ## Size Handling
 - Files larger than 64 KiB are NOT downloaded or returned.
@@ -92,8 +89,8 @@ var readSandboxFileTool = BaseTool{
 // ReadSandboxFileInput defines the input parameters for read_sandbox_file.
 type ReadSandboxFileInput struct {
 	// Path is the absolute path inside the sandbox to read. Required.
-	// Must sit underneath the artifact output directory or /workspace/input.
-	Path string `json:"path" jsonschema:"Absolute path inside the sandbox. Must sit under the session's artifact output directory (typically /workspace/output) or /workspace/input. Get valid paths from list_sandbox_files or the current sandbox_attachments block."`
+	// Must sit underneath /workspace.
+	Path string `json:"path" jsonschema:"Absolute path under /workspace: an artifact, an attachment, or a file you wrote yourself. Get paths from list_sandbox_files or sandbox_attachments."` //nolint:lll // one-line struct tag
 	// MaxBytes is the largest file the tool may download. Zero uses 64 KiB;
 	// callers may lower but never raise the hard 64 KiB ceiling.
 	MaxBytes int64 `json:"max_bytes,omitempty" jsonschema:"Optional maximum file size to read. Defaults to 65536 bytes and is hard-capped at 65536. Larger files are not downloaded; use shell_exec with sed/head/tail/grep/awk."`

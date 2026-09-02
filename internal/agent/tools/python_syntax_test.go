@@ -49,8 +49,11 @@ func TestFirstBrokenPythonQuoteReportsUnclosed(t *testing.T) {
 
 func TestPythonScriptSyntaxHintOnlyForPy(t *testing.T) {
 	src := "(\"这不是一个\"大干快上\"的夜晚\")\n"
-	assert.NotEmpty(t, pythonScriptSyntaxHint("/workspace/output/x.py", src))
-	assert.Empty(t, pythonScriptSyntaxHint("/workspace/output/x.md", src))
+	assert.Contains(t, pythonScriptSyntaxHint("/workspace/output/x.py", src, ToolEditSandboxFile),
+		ToolEditSandboxFile, "the hint must name the tool that can repair this file")
+	assert.Contains(t, pythonScriptSyntaxHint(testSkillDir+"/run.py", src, ToolEditSkillFile),
+		ToolEditSkillFile, "a skill-tree file is not repairable with edit_sandbox_file")
+	assert.Empty(t, pythonScriptSyntaxHint("/workspace/output/x.md", src, ToolEditSandboxFile))
 }
 
 func TestPythonSyntaxErrorHint(t *testing.T) {

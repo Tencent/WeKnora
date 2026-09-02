@@ -28,7 +28,10 @@ var pythonKeywords = map[string]bool{
 	"while": true, "with": true, "yield": true,
 }
 
-func pythonScriptSyntaxHint(filePath, src string) string {
+// pythonScriptSyntaxHint reports the nested-quote failure, if any, in a file
+// just written. editTool names the tool that can repair it: the same guidance
+// serves /workspace writes and skill-tree writes, which have different editors.
+func pythonScriptSyntaxHint(filePath, src, editTool string) string {
 	switch strings.ToLower(path.Ext(filePath)) {
 	case ".py":
 	default:
@@ -42,9 +45,9 @@ func pythonScriptSyntaxHint(filePath, src string) string {
 		"Python syntax looks broken around line %d: an ASCII quote inside a "+
 			"string of the same kind closed the literal early "+
 			"(e.g. (\"这不是一个\"大干快上\"...\")). The file was written. "+
-			"Fix it with edit_sandbox_file: wrap that text in the other quote, "+
+			"Fix it with %s: wrap that text in the other quote, "+
 			"or use 「」 / \\\" for the inner quotation. Do not execute the script until it parses.",
-		line,
+		line, editTool,
 	)
 }
 

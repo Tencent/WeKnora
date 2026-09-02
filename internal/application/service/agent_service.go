@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
@@ -397,7 +398,9 @@ func (s *agentService) resolveKBAndDocInfos(
 // /opt/weknora/tenant/skills, and its prompt forbids touching /workspace
 // (that tree is wiped before the snapshot). Offering the file tools made
 // the first write of every install fail, then fall back to a shell heredoc.
-// Install mode uses shell_exec alone.
+// Install mode gets write_skill_file / edit_skill_file instead, which write
+// the image tree and are scoped to the one skill being installed —
+// see registerSkillFileTools.
 func (s *agentService) registerSandboxFileTools(
 	ctx context.Context,
 	toolRegistry *tools.ToolRegistry,
@@ -406,6 +409,7 @@ func (s *agentService) registerSandboxFileTools(
 ) {
 	if config != nil && config.SkillInstallMode() {
 		logger.Infof(ctx, "Skipping session file tools in skill install mode")
+		s.registerSkillFileTools(ctx, toolRegistry, sessionID, config)
 		return
 	}
 	sandboxMgr, err := s.resolveWorkspaceSandbox(ctx, sessionID, config)
@@ -426,6 +430,55 @@ func (s *agentService) registerSandboxFileTools(
 		logger.Infof(ctx, "Sandbox backend does not advertise session filesystem capability; "+
 			"list_sandbox_files/read_sandbox_file/write_sandbox_file/edit_sandbox_file not registered")
 	}
+}
+
+// registerSkillFileTools registers write_skill_file / edit_skill_file for the
+// built-in skill installer, and for nothing else.
+//
+// The installer's shell already runs as root inside the skills image root, so
+// these tools grant no reach it does not have. They exist because its only
+// writer was `cat` with a heredoc: every file went through the shell's
+// command-length cap and two levels of quoting, which truncated or mangled
+// anything larger than a few lines.
+//
+// Two conditions gate registration, and both are checked here rather than
+// trusted from the caller. SkillInstallMode is settable only through
+// EnableSkillInstallMode, which refuses every agent but the built-in
+// installer. The skill directory is re-validated against the image path rules,
+// so a run that somehow carried a bad scope gets no writer at all instead of
+// one pointed somewhere unintended.
+func (s *agentService) registerSkillFileTools(
+	ctx context.Context,
+	toolRegistry *tools.ToolRegistry,
+	sessionID string,
+	config *types.AgentConfig,
+) {
+	if config == nil || !config.SkillInstallMode() {
+		return
+	}
+	skillDir, ok := sandbox.ValidatedImageSkillDir(config.SkillInstallDir())
+	if !ok {
+		logger.Warnf(ctx, "Install mode carries no valid skill directory (%q); "+
+			"write_skill_file/edit_skill_file not registered", config.SkillInstallDir())
+		return
+	}
+	sandboxMgr, err := s.resolveWorkspaceSandbox(ctx, sessionID, config)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to resolve sandbox for skill file tools: %v", err)
+		return
+	}
+	if sandboxMgr == nil {
+		return
+	}
+	store, ok := sandboxMgr.(tools.SkillFileStore)
+	if !ok {
+		logger.Infof(ctx, "Sandbox backend cannot write the skills image root; "+
+			"write_skill_file/edit_skill_file not registered")
+		return
+	}
+	toolRegistry.RegisterTool(tools.NewWriteSkillFileTool(store, skillDir))
+	toolRegistry.RegisterTool(tools.NewEditSkillFileTool(store, skillDir))
+	logger.Infof(ctx, "Registered write_skill_file and edit_skill_file scoped to %s", skillDir)
 }
 
 // registerSandboxShellIfAllowed registers shell_exec when this run is
@@ -569,9 +622,51 @@ func (s *agentService) tenantSkillSource(
 	// a caller ever creates the engine under a shorter-lived context, bundle
 	// downloads start failing for installed skills only, and loadBundle needs
 	// a ctx parameter.
-	return skills.NewTenantSkillSource(rows, func(ref string) ([]byte, error) {
-		return s.readSkillBundle(ctx, ownerTenantID, ref)
+	return skills.NewTenantSkillSource(rows, func(row *types.TenantSkillEntity) ([]byte, error) {
+		return s.loadInstalledSkillBundle(ctx, ownerTenantID, row)
 	})
+}
+
+// loadInstalledSkillBundle reads the archive one installed skill was built
+// from. An object named by the row itself is that archive. A row that only
+// names a catalog is answered from the definition's zip, but the definition is
+// mutable — registering the same skill again stores a new object and updates
+// the catalog ref, while this sandbox goes on running the image built from the
+// previous bytes. read_skill is documented as serving what was installed, so a
+// definition that has moved on is reported rather than substituted.
+func (s *agentService) loadInstalledSkillBundle(
+	ctx context.Context, tenantID uint64, row *types.TenantSkillEntity,
+) ([]byte, error) {
+	if row == nil {
+		return nil, errors.New("skill is required")
+	}
+	if ref := strings.TrimSpace(row.BundleRef); ref != "" {
+		return s.readSkillBundle(ctx, tenantID, ref)
+	}
+	cid := strings.TrimSpace(row.CatalogID)
+	if cid == "" || s.db == nil {
+		return nil, fmt.Errorf("skill %s has no stored bundle; its files cannot be read", row.Name)
+	}
+	cat, err := repository.NewTenantSkillRepository(s.db).GetCatalog(ctx, tenantID, cid)
+	if err != nil {
+		return nil, err
+	}
+	if cat == nil || strings.TrimSpace(cat.BundleRef) == "" {
+		return nil, fmt.Errorf("skill %s has no stored bundle; its files cannot be read", row.Name)
+	}
+	archive, err := s.readSkillBundle(ctx, tenantID, strings.TrimSpace(cat.BundleRef))
+	if err != nil {
+		return nil, err
+	}
+	// The bytes are checked, not the catalog's recorded digest: a reference and
+	// a digest that disagree is exactly the case a stamped-but-unstored archive
+	// leaves behind.
+	if want := strings.TrimSpace(row.BundleSHA256); want != "" && !archiveMatchesSHA(archive, want) {
+		return nil, fmt.Errorf(
+			"skill %s was registered again from a different archive; "+
+				"reinstall it on this sandbox before reading its files", row.Name)
+	}
+	return archive, nil
 }
 
 // userEnvResolver builds the per-caller environment resolver for this run, or
@@ -692,8 +787,10 @@ func (s *agentService) registerSandboxShellTool(
 ) {
 	if config.SkillInstallMode() {
 		if executor := sessionSandboxInstallShellExecutor(sandboxMgr); executor != nil {
-			toolRegistry.RegisterTool(tools.NewInstallShellExecTool(executor))
-			logger.Infof(ctx, "Registered install-mode shell_exec tool")
+			skillDir := config.SkillInstallDir()
+			toolRegistry.RegisterTool(tools.NewInstallShellExecTool(executor, skillDir))
+			logger.Infof(ctx, "Registered install-mode shell_exec tool (work_dir defaults to %s)",
+				skillDir)
 		} else {
 			logger.Warnf(ctx, "Sandbox backend does not advertise install-mode shell; skill install cannot run")
 		}

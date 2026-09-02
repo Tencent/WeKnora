@@ -19,16 +19,30 @@ import (
 // archive read here is the same one that was accepted then, and a corrupted or
 // hostile object in storage must not be able to exhaust this process.
 const (
-	maxBundleEntries    = 2000
+	// maxBundleZipEntries bounds central-directory iteration on the raw
+	// archive, mirroring maxSkillBundleZipEntries. A GitHub zipball carries
+	// the whole repository, so it sits well above the count of files kept as
+	// the skill.
+	maxBundleZipEntries = 100_000
+	// maxBundleEntries caps the files kept as the skill, mirroring
+	// maxSkillBundleFiles. It is counted after directory entries and the
+	// zipball's extra trees are dropped, exactly as the install counts them:
+	// applying it to the raw entry count instead would reject archives the
+	// install accepted, taking read_skill down for a working install.
+	maxBundleEntries    = 20_000
 	maxBundleEntryBytes = 32 << 20  // 32 MiB per entry
-	maxBundleBytes      = 256 << 20 // 256 MiB across the archive
+	maxBundleBytes      = 512 << 20 // 512 MiB across one archive (install cap)
 )
 
-// cachedBundleCount bounds the unpacked archives one source keeps. A source
-// lives for a single agent run, and within that run read_skill is typically
-// called several times against the same skill, so a handful of entries removes
-// the repeated download without holding archives past the turn.
-const cachedBundleCount = 4
+// A source lives for a single agent run. read_skill is typically called
+// several times against the same skill, so a handful of compressed zips
+// removes the repeated download. 64 MiB is the keep-around budget; a zip
+// larger than that can stay as the sole occupant so a large skill does not
+// re-download on every file, without pinning several 100+ MiB archives.
+const (
+	cachedBundleCount = 4
+	cachedBundleBytes = 64 << 20
+)
 
 // TenantSkillSource exposes the skills an administrator installed into one
 // sandbox config's snapshot image.
@@ -44,27 +58,29 @@ type TenantSkillSource struct {
 	// between turns.
 	order []string
 
-	// loadBundle fetches an uploaded archive by its stored reference. It may
-	// be nil when the deployment cannot serve bundles, in which case only the
-	// levels backed by the row are available.
-	loadBundle func(ref string) ([]byte, error)
+	// loadBundle fetches the skill zip. It may be nil when the deployment
+	// cannot serve bundles, in which case only the levels backed by the row
+	// are available. Callers that leave install.BundleRef empty should resolve
+	// the catalog object here.
+	loadBundle func(row *types.TenantSkillEntity) ([]byte, error)
 
 	mu sync.Mutex
-	// cache holds unpacked archives, most recently used first, keyed by
-	// bundle_sha256: the archive is immutable under that key, so a hit can
-	// never serve a stale tree.
+	// cache holds downloaded archives, most recently used first, keyed by
+	// bundle_sha256 (or the storage ref). The zip stays compressed: list and
+	// read_skill inflate one entry at a time so a 13k-file skill cannot pin
+	// hundreds of megabytes unpacked for the rest of the turn.
 	cache []cachedBundle
 }
 
 type cachedBundle struct {
-	key   string
-	files map[string][]byte
+	key     string
+	archive []byte
 }
 
 // NewTenantSkillSource builds a source over the rows of one sandbox config.
 // Callers pass every row; the source itself decides which are usable.
 func NewTenantSkillSource(
-	rows []*types.TenantSkillEntity, loadBundle func(ref string) ([]byte, error),
+	rows []*types.TenantSkillEntity, loadBundle func(row *types.TenantSkillEntity) ([]byte, error),
 ) *TenantSkillSource {
 	src := &TenantSkillSource{
 		byName:     make(map[string]*types.TenantSkillEntity, len(rows)),
@@ -154,13 +170,21 @@ func (s *TenantSkillSource) LoadSkillFile(name, relativePath string) (*SkillFile
 	if err != nil {
 		return nil, err
 	}
-	files, err := s.bundleFiles(row)
+	archive, err := s.bundleArchive(row)
 	if err != nil {
 		return nil, err
 	}
-	content, ok := files[clean]
+	index, err := skillBundleFileIndex(archive)
+	if err != nil {
+		return nil, err
+	}
+	item, ok := index[clean]
 	if !ok {
 		return nil, fmt.Errorf("file not found in skill %s: %s", name, relativePath)
+	}
+	content, err := readLimitedSkillZipFile(item)
+	if err != nil {
+		return nil, err
 	}
 	basePath, err := sandbox.SkillDirFor(row.Name)
 	if err != nil {
@@ -183,12 +207,16 @@ func (s *TenantSkillSource) ListSkillFiles(name string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	files, err := s.bundleFiles(row)
+	archive, err := s.bundleArchive(row)
 	if err != nil {
 		return nil, err
 	}
-	names := make([]string, 0, len(files))
-	for rel := range files {
+	index, err := skillBundleFileIndex(archive)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(index))
+	for rel := range index {
 		names = append(names, rel)
 	}
 	sort.Strings(names)
@@ -250,42 +278,42 @@ func safeSkillRelPath(relativePath string) (string, error) {
 	return clean, nil
 }
 
-// bundleFiles returns the unpacked archive of one skill, downloading it at
+// bundleArchive returns the compressed zip of one skill, downloading it at
 // most once per cache lifetime.
-func (s *TenantSkillSource) bundleFiles(
+func (s *TenantSkillSource) bundleArchive(
 	row *types.TenantSkillEntity,
-) (map[string][]byte, error) {
-	ref := strings.TrimSpace(row.BundleRef)
-	if ref == "" {
-		return nil, fmt.Errorf(
-			"skill %s has no stored bundle; its files cannot be read", row.Name)
-	}
+) ([]byte, error) {
 	if s.loadBundle == nil {
 		return nil, fmt.Errorf("skill bundles are not available in this deployment")
 	}
 
 	key := strings.TrimSpace(row.BundleSHA256)
 	if key == "" {
-		// Without a checksum the reference is the only stable key we have.
-		key = ref
+		key = strings.TrimSpace(row.BundleRef)
 	}
-	if files := s.cached(key); files != nil {
-		return files, nil
+	if key == "" {
+		key = strings.TrimSpace(row.CatalogID)
+	}
+	if key == "" {
+		key = strings.TrimSpace(row.ID)
+	}
+	if archive := s.cached(key); archive != nil {
+		return archive, nil
 	}
 
-	archive, err := s.loadBundle(ref)
+	archive, err := s.loadBundle(row)
 	if err != nil {
 		return nil, fmt.Errorf("download bundle of skill %s: %w", row.Name, err)
 	}
-	files, err := unpackSkillBundle(archive)
-	if err != nil {
-		return nil, fmt.Errorf("read bundle of skill %s: %w", row.Name, err)
+	if len(archive) == 0 {
+		return nil, fmt.Errorf(
+			"skill %s has no stored bundle; its files cannot be read", row.Name)
 	}
-	s.store(key, files)
-	return files, nil
+	s.store(key, archive)
+	return archive, nil
 }
 
-func (s *TenantSkillSource) cached(key string) map[string][]byte {
+func (s *TenantSkillSource) cached(key string) []byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, entry := range s.cache {
@@ -294,35 +322,51 @@ func (s *TenantSkillSource) cached(key string) map[string][]byte {
 		}
 		s.cache = append(s.cache[:i], s.cache[i+1:]...)
 		s.cache = append([]cachedBundle{entry}, s.cache...)
-		return entry.files
+		return entry.archive
 	}
 	return nil
 }
 
-func (s *TenantSkillSource) store(key string, files map[string][]byte) {
+func (s *TenantSkillSource) store(key string, archive []byte) {
+	if key == "" || len(archive) == 0 || len(archive) > maxBundleBytes {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.cache = append([]cachedBundle{{key: key, files: files}}, s.cache...)
-	if len(s.cache) > cachedBundleCount {
-		s.cache = s.cache[:cachedBundleCount]
+	for i, entry := range s.cache {
+		if entry.key != key {
+			continue
+		}
+		s.cache = append(s.cache[:i], s.cache[i+1:]...)
+		break
+	}
+	s.cache = append([]cachedBundle{{key: key, archive: archive}}, s.cache...)
+	for len(s.cache) > 1 &&
+		(len(s.cache) > cachedBundleCount || s.cachedBytes() > cachedBundleBytes) {
+		s.cache = s.cache[:len(s.cache)-1]
 	}
 }
 
-// unpackSkillBundle reads a skill archive into skill-root-relative paths. It
-// re-roots the archive at the directory holding SKILL.md, because an archive
-// wrapped in a single top-level directory is accepted at upload time and the
-// relative paths the model is given must match either shape.
-func unpackSkillBundle(archive []byte) (map[string][]byte, error) {
+func (s *TenantSkillSource) cachedBytes() int {
+	total := 0
+	for _, entry := range s.cache {
+		total += len(entry.archive)
+	}
+	return total
+}
+
+// skillBundleFileIndex maps skill-root-relative paths to zip entries without
+// inflating file bodies.
+func skillBundleFileIndex(archive []byte) (map[string]*zip.File, error) {
 	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
 	if err != nil {
 		return nil, fmt.Errorf("not a readable zip archive: %w", err)
 	}
-	if len(reader.File) > maxBundleEntries {
-		return nil, fmt.Errorf("archive holds more than %d files", maxBundleEntries)
+	if len(reader.File) > maxBundleZipEntries {
+		return nil, fmt.Errorf("archive holds more than %d entries", maxBundleZipEntries)
 	}
 
-	raw := make(map[string][]byte, len(reader.File))
-	var total int64
+	raw := make(map[string]*zip.File, len(reader.File))
 	for _, entry := range reader.File {
 		info := entry.FileInfo()
 		if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
@@ -333,32 +377,34 @@ func unpackSkillBundle(archive []byte) (map[string][]byte, error) {
 			name == ".." || strings.HasPrefix(name, "../") {
 			return nil, fmt.Errorf("entry %q escapes the archive root", entry.Name)
 		}
-		rc, err := entry.Open()
-		if err != nil {
-			return nil, fmt.Errorf("cannot read %q: %w", entry.Name, err)
-		}
-		content, err := io.ReadAll(io.LimitReader(rc, maxBundleEntryBytes+1))
-		_ = rc.Close()
-		if err != nil {
-			return nil, fmt.Errorf("cannot read %q: %w", entry.Name, err)
-		}
-		if len(content) > maxBundleEntryBytes {
-			return nil, fmt.Errorf("entry %q is too large", entry.Name)
-		}
-		total += int64(len(content))
-		if total > maxBundleBytes {
-			return nil, fmt.Errorf("archive is too large")
-		}
-		raw[name] = content
+		raw[name] = entry
 	}
-	return reRootSkillBundle(raw)
+	prefix, err := skillZipRootPrefix(raw)
+	if err != nil {
+		return nil, err
+	}
+	out := raw
+	if prefix != "" {
+		out = make(map[string]*zip.File, len(raw))
+		for name, entry := range raw {
+			if !strings.HasPrefix(name, prefix+"/") {
+				continue
+			}
+			out[strings.TrimPrefix(name, prefix+"/")] = entry
+		}
+		if _, ok := out[SkillFileName]; !ok {
+			return nil, fmt.Errorf("%s is missing from the archive", SkillFileName)
+		}
+	}
+	if len(out) > maxBundleEntries {
+		return nil, fmt.Errorf("archive holds more than %d files", maxBundleEntries)
+	}
+	return out, nil
 }
 
-// reRootSkillBundle strips a single wrapping directory when SKILL.md is not at
-// the archive root.
-func reRootSkillBundle(raw map[string][]byte) (map[string][]byte, error) {
+func skillZipRootPrefix(raw map[string]*zip.File) (string, error) {
 	if _, ok := raw[SkillFileName]; ok {
-		return raw, nil
+		return "", nil
 	}
 	prefix := ""
 	for name := range raw {
@@ -370,19 +416,28 @@ func reRootSkillBundle(raw map[string][]byte) (map[string][]byte, error) {
 			continue
 		}
 		if prefix != "" && prefix != dir {
-			return nil, fmt.Errorf("archive holds more than one skill")
+			return "", fmt.Errorf("archive holds more than one skill")
 		}
 		prefix = dir
 	}
 	if prefix == "" {
-		return nil, fmt.Errorf("%s is missing from the archive", SkillFileName)
+		return "", fmt.Errorf("%s is missing from the archive", SkillFileName)
 	}
-	out := make(map[string][]byte, len(raw))
-	for name, content := range raw {
-		if !strings.HasPrefix(name, prefix+"/") {
-			continue
-		}
-		out[strings.TrimPrefix(name, prefix+"/")] = content
+	return prefix, nil
+}
+
+func readLimitedSkillZipFile(entry *zip.File) ([]byte, error) {
+	rc, err := entry.Open()
+	if err != nil {
+		return nil, fmt.Errorf("cannot read %q: %w", entry.Name, err)
 	}
-	return out, nil
+	content, err := io.ReadAll(io.LimitReader(rc, maxBundleEntryBytes+1))
+	_ = rc.Close()
+	if err != nil {
+		return nil, fmt.Errorf("cannot read %q: %w", entry.Name, err)
+	}
+	if len(content) > maxBundleEntryBytes {
+		return nil, fmt.Errorf("entry %q is too large", entry.Name)
+	}
+	return content, nil
 }

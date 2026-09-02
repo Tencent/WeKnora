@@ -24,9 +24,17 @@ var ErrSkillBundleInvalid = errors.New("skill bundle is invalid")
 // The skill bundle limits bound decompression so a zip bomb cannot exhaust
 // memory before we ever reach the sandbox.
 const (
-	maxSkillBundleFiles      = 2000
+	// maxSkillBundleFiles is the cap on files kept as the skill itself
+	// (after dropping GitHub zipball extras and directory entries).
+	// Real skills vendor assets: hugohe3/ppt-master's skills/ppt-master
+	// tree is ~13k files, almost all under templates/.
+	maxSkillBundleFiles = 20_000
+	// maxSkillBundleZipEntries bounds central-directory iteration on the
+	// raw archive. GitHub zipballs include the whole repository, so this
+	// is higher than maxSkillBundleFiles.
+	maxSkillBundleZipEntries = 100_000
 	maxSkillBundleFileBytes  = 32 << 20  // 32 MiB per entry
-	maxSkillBundleTotalBytes = 256 << 20 // 256 MiB across the archive
+	maxSkillBundleTotalBytes = 512 << 20 // 512 MiB across the kept skill files
 )
 
 // SkillBundle is a validated, in-memory skill archive.
@@ -72,7 +80,7 @@ func ParseSkillBundle(archive []byte) (*SkillBundle, error) {
 // ParseSkillBundleWithOptions is ParseSkillBundle with the extra knobs remote
 // installs need. SHA256 is still over the input bytes, not the re-rooted view.
 func ParseSkillBundleWithOptions(archive []byte, opts SkillBundleParseOptions) (*SkillBundle, error) {
-	raw, err := unzipSkillArchive(archive)
+	raw, err := unzipSkillArchive(archive, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -83,8 +91,8 @@ func ParseSkillBundleWithOptions(archive []byte, opts SkillBundleParseOptions) (
 	return skillBundleFromFiles(archive, files)
 }
 
-func unzipSkillArchive(archive []byte) (map[string][]byte, error) {
-	entries, err := skillZipEntries(archive)
+func unzipSkillArchive(archive []byte, opts SkillBundleParseOptions) (map[string][]byte, error) {
+	entries, err := skillZipEntries(archive, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -124,42 +132,68 @@ type skillZipEntry struct {
 	size int64
 }
 
-func skillZipEntries(archive []byte) ([]skillZipEntry, error) {
+func skillZipEntries(archive []byte, opts SkillBundleParseOptions) ([]skillZipEntry, error) {
 	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
 	if err != nil {
 		return nil, fmt.Errorf("%w: not a readable zip archive: %v", ErrSkillBundleInvalid, err)
 	}
-	if len(reader.File) > maxSkillBundleFiles {
-		return nil, fmt.Errorf("%w: archive holds more than %d files",
-			ErrSkillBundleInvalid, maxSkillBundleFiles)
+	if len(reader.File) > maxSkillBundleZipEntries {
+		return nil, fmt.Errorf("%w: archive has more than %d zip entries",
+			ErrSkillBundleInvalid, maxSkillBundleZipEntries)
 	}
 
-	out := make([]skillZipEntry, 0, len(reader.File))
-	var totalBytes int64
+	pending := make([]skillZipEntry, 0, len(reader.File))
+	names := make(map[string][]byte, len(reader.File))
 	for _, entry := range reader.File {
-		name, skip, err := inspectSkillZipEntry(entry)
+		name, skip, err := inspectSkillZipPath(entry)
 		if err != nil {
 			return nil, err
 		}
 		if skip {
 			continue
 		}
-		size := entry.FileInfo().Size()
-		if totalBytes+size > maxSkillBundleTotalBytes {
+		pending = append(pending, skillZipEntry{
+			file: entry,
+			name: name,
+			size: entry.FileInfo().Size(),
+		})
+		names[name] = nil
+	}
+
+	prefix, err := skillRootPrefix(names, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]skillZipEntry, 0, len(pending))
+	var totalBytes int64
+	for _, item := range pending {
+		if prefix != "" && !strings.HasPrefix(item.name, prefix+"/") {
+			if opts.AllowExtraFiles {
+				continue
+			}
+			return nil, fmt.Errorf("%w: archive holds files outside the skill directory %q",
+				ErrSkillBundleInvalid, prefix)
+		}
+		if err := inspectKeptSkillZipEntry(item); err != nil {
+			return nil, err
+		}
+		if totalBytes+item.size > maxSkillBundleTotalBytes {
 			return nil, fmt.Errorf("%w: archive is too large", ErrSkillBundleInvalid)
 		}
-		totalBytes += size
-		out = append(out, skillZipEntry{file: entry, name: name, size: size})
+		totalBytes += item.size
+		out = append(out, item)
+		if len(out) > maxSkillBundleFiles {
+			return nil, fmt.Errorf("%w: skill directory holds more than %d files",
+				ErrSkillBundleInvalid, maxSkillBundleFiles)
+		}
 	}
 	return out, nil
 }
 
-func inspectSkillZipEntry(entry *zip.File) (name string, skip bool, err error) {
+func inspectSkillZipPath(entry *zip.File) (name string, skip bool, err error) {
 	if entry.FileInfo().IsDir() {
 		return "", true, nil
-	}
-	if entry.FileInfo().Mode()&os.ModeSymlink != 0 {
-		return "", false, fmt.Errorf("%w: entry %q is a symlink", ErrSkillBundleInvalid, entry.Name)
 	}
 	name = path.Clean(entry.Name)
 	if name == "." || strings.HasPrefix(name, "..") ||
@@ -167,13 +201,20 @@ func inspectSkillZipEntry(entry *zip.File) (name string, skip bool, err error) {
 		return "", false, fmt.Errorf("%w: entry %q escapes the archive root",
 			ErrSkillBundleInvalid, entry.Name)
 	}
-	if err := validateSkillEntryName(name); err != nil {
-		return "", false, err
-	}
-	if entry.FileInfo().Size() > maxSkillBundleFileBytes {
-		return "", false, fmt.Errorf("%w: entry %q is too large", ErrSkillBundleInvalid, entry.Name)
-	}
 	return name, false, nil
+}
+
+func inspectKeptSkillZipEntry(item skillZipEntry) error {
+	if item.file.FileInfo().Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%w: entry %q is a symlink", ErrSkillBundleInvalid, item.file.Name)
+	}
+	if err := validateSkillEntryName(item.name); err != nil {
+		return err
+	}
+	if item.size > maxSkillBundleFileBytes {
+		return fmt.Errorf("%w: entry %q is too large", ErrSkillBundleInvalid, item.file.Name)
+	}
+	return nil
 }
 
 func readLimitedZipEntry(entry *zip.File) ([]byte, error) {
@@ -226,7 +267,7 @@ func readSkillZipFile(archive []byte, rel string) ([]byte, error) {
 }
 
 func skillZipFileIndex(archive []byte) (map[string]skillZipEntry, error) {
-	entries, err := skillZipEntries(archive)
+	entries, err := skillZipEntries(archive, SkillBundleParseOptions{})
 	if err != nil {
 		return nil, err
 	}

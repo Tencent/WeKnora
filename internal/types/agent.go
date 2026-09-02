@@ -146,22 +146,45 @@ type AgentConfig struct {
 	// assign it. EnableSkillInstallMode is the only way in and it refuses
 	// every agent except the built-in skill installer.
 	skillInstallMode bool
+
+	// skillInstallDir is the one skill directory this install owns. The skill
+	// file tools are scoped to it, so an installer cannot write a neighbouring
+	// skill in the shared image. Unexported for the same reason as
+	// skillInstallMode: the scope of a privilege must not be settable by
+	// anything a tenant can store or send.
+	skillInstallDir string
 }
 
 // EnableSkillInstallMode grants install-mode shell execution to the built-in
-// skill installer agent and to nothing else. The agent ID is checked here
-// rather than at the call site so there is exactly one place to audit.
-func (c *AgentConfig) EnableSkillInstallMode(agentID string) {
+// skill installer agent and to nothing else, scoped to the skill directory it
+// was started for. The agent ID is checked here rather than at the call site
+// so there is exactly one place to audit.
+//
+// The privilege and its scope are granted together: a caller cannot obtain the
+// root shell without naming the directory the file tools will be confined to.
+// skillDir is stored verbatim and validated where the tools are constructed —
+// types cannot import the sandbox package that owns the path rules.
+func (c *AgentConfig) EnableSkillInstallMode(agentID, skillDir string) {
 	if c == nil || agentID != BuiltinSkillInstallerID {
 		return
 	}
 	c.skillInstallMode = true
+	c.skillInstallDir = skillDir
 }
 
 // SkillInstallMode reports whether this run may use the privileged
 // install-mode shell.
 func (c *AgentConfig) SkillInstallMode() bool {
 	return c != nil && c.skillInstallMode
+}
+
+// SkillInstallDir is the skill directory this install may write, or "" when
+// this run is not an install.
+func (c *AgentConfig) SkillInstallDir() string {
+	if c == nil || !c.skillInstallMode {
+		return ""
+	}
+	return c.skillInstallDir
 }
 
 // CitationsEnabled preserves citation output for legacy runtime configs that

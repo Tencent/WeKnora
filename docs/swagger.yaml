@@ -6060,7 +6060,8 @@ definitions:
       source:
         description: |-
           Source is exactly one of: "@owner/slug" or a slash-free slug (ClawHub),
-          a github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, or
+          a github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, a
+          ClawHub skills-sh catalog page or "skills-sh:owner/repo/slug" locator, or
           a direct zip/SKILL.md URL. Bare "owner/slug" is rejected: it is both a
           ClawHub id and a GitHub repo. The fetch carries no credential.
         type: string
@@ -13888,7 +13889,9 @@ paths:
         as multipart form field "file", or JSON {"source":"..."} to
         pull a public skill. source is one of: "@owner/slug" or a
         slash-free slug (ClawHub), a github.com / gitlab.com /
-        skills.sh / clawhub / skillhub URL, or a direct zip/SKILL.md
+        skills.sh / clawhub / skillhub URL, a ClawHub skills-sh
+        catalog page (https://clawhub.ai/skills-sh/owner/repo/slug),
+        a skills-sh:owner/repo/slug locator, or a direct zip/SKILL.md
         URL. Bare "owner/slug" is rejected as ambiguous. The source
         must be readable anonymously. The install boots a sandbox and
         runs for minutes, so the request is only accepted; follow it

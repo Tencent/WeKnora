@@ -31,11 +31,6 @@ const (
 	// and a connection that waits for that forever is a leak, so the stream
 	// stops following and says so.
 	skillEventMaxDuration = 60 * time.Minute
-
-	// skillUploadEnvelopeSlack is the multipart framing allowed on top of the
-	// file itself, so the body cap refuses a genuinely oversized upload
-	// without rejecting a legal one for its boundary lines.
-	skillUploadEnvelopeSlack = 1 << 20
 )
 
 // sandboxSkillService is the skill surface the admin endpoints need. Reads and
@@ -59,6 +54,7 @@ type sandboxSkillService interface {
 		ctx context.Context, tenantID uint64, configID, source string,
 	) (string, error)
 	ReinstallSkill(ctx context.Context, tenantID uint64, configID, skillID string) (string, error)
+	StopSkill(ctx context.Context, tenantID uint64, configID, skillID string) (*types.TenantSkillEntity, error)
 	RemoveSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
 	LastProgress(
 		ctx context.Context, tenantID uint64, configID, skillID string,
@@ -279,7 +275,9 @@ func (h *SandboxSkillHandler) GetFile(c *gin.Context) {
 // @Description  as multipart form field "file", or JSON {"source":"..."} to
 // @Description  pull a public skill. source is one of: "@owner/slug" or a
 // @Description  slash-free slug (ClawHub), a github.com / gitlab.com /
-// @Description  skills.sh / clawhub / skillhub URL, or a direct zip/SKILL.md
+// @Description  skills.sh / clawhub / skillhub URL, a ClawHub skills-sh
+// @Description  catalog page (https://clawhub.ai/skills-sh/owner/repo/slug),
+// @Description  a skills-sh:owner/repo/slug locator, or a direct zip/SKILL.md
 // @Description  URL. Bare "owner/slug" is rejected as ambiguous. The source
 // @Description  must be readable anonymously. The install boots a sandbox and
 // @Description  runs for minutes, so the request is only accepted; follow it
@@ -299,11 +297,8 @@ func (h *SandboxSkillHandler) GetFile(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /sandbox-configs/{id}/skills [post]
 func (h *SandboxSkillHandler) Upload(c *gin.Context) {
-	maxBytes := secutils.GetMaxFileSize()
-	// The cap is applied to the body before it is parsed: multipart parsing
-	// buffers the whole request, spilling to temp files, so checking only the
-	// declared part size would let an unbounded body through first.
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes+skillUploadEnvelopeSlack)
+	maxBytes := secutils.GetMaxSkillBundleSize()
+	limitSkillUploadBody(c, maxBytes)
 
 	if strings.HasPrefix(c.ContentType(), "application/json") {
 		h.installFromSource(c)
@@ -312,8 +307,7 @@ func (h *SandboxSkillHandler) Upload(c *gin.Context) {
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if stderrors.As(err, &tooLarge) {
+		if isRequestBodyTooLarge(err) {
 			_ = c.Error(skillTooLargeError())
 			return
 		}
@@ -349,7 +343,8 @@ func (h *SandboxSkillHandler) Upload(c *gin.Context) {
 
 type skillSourceRequest struct {
 	// Source is exactly one of: "@owner/slug" or a slash-free slug (ClawHub),
-	// a github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, or
+	// a github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, a
+	// ClawHub skills-sh catalog page or "skills-sh:owner/repo/slug" locator, or
 	// a direct zip/SKILL.md URL. Bare "owner/slug" is rejected: it is both a
 	// ClawHub id and a GitHub repo. The fetch carries no credential.
 	Source string `json:"source"`
@@ -360,7 +355,7 @@ func (h *SandboxSkillHandler) installFromSource(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		var tooLarge *http.MaxBytesError
 		if stderrors.As(err, &tooLarge) {
-			_ = c.Error(skillTooLargeError())
+			_ = c.Error(skillSourceRequestTooLargeError())
 			return
 		}
 		_ = c.Error(apperrors.NewBadRequestError("invalid skill source request"))
@@ -407,9 +402,46 @@ func (h *SandboxSkillHandler) Reinstall(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": gin.H{"skill_id": skillID}})
 }
 
+// Stop godoc
+// @Summary      Stop a skill install
+// @Description  Abort an in-flight install so the operator can retry or uninstall. After a process restart the row may still say installing with no live process; this rewrites it immediately instead of waiting for the stuck-run reaper. Removal is not stopped.
+// @Tags         SandboxConfig
+// @Produce      json
+// @Param        id       path      string  true  "Sandbox config ID"
+// @Param        skillId  path      string  true  "Skill ID"
+// @Success      200      {object}  map[string]interface{}  "Stopped skill"
+// @Failure      400      {object}  apperrors.AppError      "Skill is not installing"
+// @Failure      401      {object}  map[string]interface{}  "Unauthorized"
+// @Failure      404      {object}  apperrors.AppError      "Skill not found"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /sandbox-configs/{id}/skills/{skillId}/stop [post]
+func (h *SandboxSkillHandler) Stop(c *gin.Context) {
+	skill, err := h.service.StopSkill(
+		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), c.Param("skillId"),
+	)
+	if err != nil {
+		respondSkillServiceError(c, err)
+		return
+	}
+	if skill == nil {
+		_ = c.Error(apperrors.NewNotFoundError("skill not found"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": toSkillResponse(skill)})
+}
+
 func skillTooLargeError() error {
 	return apperrors.NewBadRequestError(
-		fmt.Sprintf("skill bundle cannot exceed %d MB", secutils.GetMaxFileSizeMB()))
+		fmt.Sprintf("skill bundle cannot exceed %d MB", secutils.GetMaxSkillBundleSizeMB()))
+}
+
+func skillSourceRequestTooLargeError() error {
+	return apperrors.NewBadRequestError("skill source request is too large")
+}
+
+func skillJSONRequestTooLargeError() error {
+	return apperrors.NewBadRequestError("skill request is too large")
 }
 
 type skillPatchRequest struct {
@@ -439,8 +471,13 @@ type skillPatchRequest struct {
 // @Security     ApiKeyAuth
 // @Router       /sandbox-configs/{id}/skills/{skillId} [patch]
 func (h *SandboxSkillHandler) Patch(c *gin.Context) {
+	limitJSONBody(c, skillSourceJSONMaxBytes)
 	var req skillPatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(skillJSONRequestTooLargeError())
+			return
+		}
 		_ = c.Error(apperrors.NewBadRequestError(err.Error()))
 		return
 	}
