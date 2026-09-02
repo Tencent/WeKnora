@@ -141,6 +141,25 @@ func TestWriteSandboxFileRegistryHintsWhenPathMissing(t *testing.T) {
 	assert.Contains(t, result.Error, "put `path` first")
 }
 
+// The sandbox and skill tools are registered from the capability itself
+// (registerSandboxFileTools / registerSandboxShellIfAllowed /
+// initializeSkillsManager), never from the agent's tool allowlist. Offering
+// them as checkboxes told the operator they could withhold a tool that would
+// be registered anyway.
+func TestSandboxCapabilityToolsAreNotToolListCheckboxes(t *testing.T) {
+	for _, name := range []string{
+		ToolListSandboxFiles, ToolReadSandboxFile,
+		ToolWriteSandboxFile, ToolEditSandboxFile, ToolShellExec,
+		ToolReadSkill, ToolExecuteSkillScript,
+	} {
+		require.NotContains(t, DefaultAllowedTools(), name)
+		for _, definition := range AvailableToolDefinitions() {
+			require.NotEqual(t, name, definition.Name,
+				"%s follows the sandbox switch, so a tool checkbox for it would do nothing", name)
+		}
+	}
+}
+
 func mustWriteSandboxArgs(path, content string) json.RawMessage {
 	raw, err := json.Marshal(map[string]string{"path": path, "content": content})
 	if err != nil {

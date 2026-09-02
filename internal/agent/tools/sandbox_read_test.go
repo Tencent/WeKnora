@@ -179,13 +179,43 @@ func TestReadSandboxFileAllowsSessionInput(t *testing.T) {
 	assert.Equal(t, sandbox.SessionInputRoot, result.Data["root"])
 }
 
+// A file the agent wrote itself with write_sandbox_file must be readable
+// again. The writers accept anything under /workspace outside the attachment
+// tree, so readers that stopped at /workspace/output left the agent unable to
+// re-read its own scratch script.
+func TestReadSandboxFileAllowsWorkspaceScratchFile(t *testing.T) {
+	content := []byte("print('hi')\n")
+	source := &fakeSandboxFileSource{
+		stat: &sandbox.RemoteStatEntry{
+			Path: "/workspace/report.py",
+			Type: sandbox.RemoteEntryFile,
+			Size: int64(len(content)),
+		},
+		data: content,
+	}
+
+	result, err := NewReadSandboxFileTool(source).Execute(
+		sandboxFileTestContext(),
+		json.RawMessage(`{"path":"/workspace/report.py"}`),
+	)
+
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	assert.Contains(t, result.Output, string(content))
+	assert.Equal(t, sandbox.SessionWorkspaceRoot, result.Data["root"])
+}
+
 func TestReadSandboxFileRefusesOutsideInspectableRoots(t *testing.T) {
 	source := &fakeSandboxFileSource{
 		data: []byte("must not be read"),
 		stat: &sandbox.RemoteStatEntry{Path: "/etc/passwd", Type: sandbox.RemoteEntryFile, Size: 4},
 	}
 
-	for _, path := range []string{"/etc/passwd", "/workspace/other/file.txt", "/workspace"} {
+	for _, path := range []string{
+		"/etc/passwd",
+		"/home/user/.ssh/id_rsa",
+		"/opt/weknora/tenant/skills/pdf/SKILL.md",
+	} {
 		result, err := NewReadSandboxFileTool(source).Execute(
 			sandboxFileTestContext(),
 			json.RawMessage(`{"path":"`+path+`"}`),

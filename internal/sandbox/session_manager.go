@@ -389,7 +389,7 @@ func withWorkspaceEnvDefaults(env map[string]string) map[string]string {
 func executionOutputDir(cfg *ExecuteConfig) string {
 	if cfg != nil && cfg.Env != nil {
 		if dir := strings.TrimSpace(cfg.Env[skillOutputEnvVar]); dir != "" {
-			if clean, err := cleanSessionWorkDir(dir, false); err == nil {
+			if clean, ok := ValidatedSessionOutputDir(dir); ok {
 				return clean
 			}
 		}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
 	"strings"
 	"sync"
 
@@ -71,15 +70,24 @@ const defaultArtifactOutputDir = "/workspace/output"
 // callers such as ArtifactCollector can list the same directory when
 // draining artifacts after Execute returns.
 //
-// Resolution order (first non-empty wins):
-//  1. WEKNORA_SKILL_OUTPUT_DIR from the host environment (ops override).
+// Resolution order (first usable wins):
+//  1. WEKNORA_SKILL_OUTPUT_DIR from the host environment (ops override), when
+//     it names a directory inside the session workspace.
 //  2. defaultArtifactOutputDir.
+//
+// The override goes through sandbox.ValidatedSessionOutputDir, the same gate
+// the sandbox applies to a tenant's override. An operator who points this
+// outside /workspace would otherwise send the readers (this function feeds the
+// sandbox file tools and ArtifactCollector) to a directory no skill can write,
+// since execution refuses the same path and falls back.
 //
 // Callers are expected to treat the returned string as read-only: the path
 // is normalised (no trailing slash) so it can be joined safely.
 func ArtifactOutputDir() string {
 	if v := strings.TrimSpace(os.Getenv(artifactOutputEnvVar)); v != "" {
-		return path.Clean(v)
+		if clean, ok := sandbox.ValidatedSessionOutputDir(v); ok {
+			return clean
+		}
 	}
 	return defaultArtifactOutputDir
 }
