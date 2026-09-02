@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -25,6 +26,12 @@ var skillPythonVerifier string
 // "another installer round can fix this" from "the bundle has to change", which
 // is the only distinction that decides what the install flow does next.
 const skillVerifyRepairableExit = 2
+
+// skillTreeVerifyDirExit is the exit code the tree check uses when the skill
+// directory itself is gone, so no file inside it can be probed. Exit 1 is the
+// shared "every finding is one stderr line" code; exit 0 means everything the
+// bundle names is still in place.
+const skillTreeVerifyDirExit = 3
 
 // skillVerifyNotePrefix marks a line the checker reports without refusing the
 // install. Notes travel on stdout so a non-zero exit stays unambiguous.
@@ -87,21 +94,64 @@ func (s *TenantSkillService) verifySkill(
 // verifySkillTree confirms the files the agent was given are still the files
 // the image carries. The agent has a root shell in this directory, so "we
 // wrote it before the agent ran" is not evidence that it survived.
+//
+// The whole check is one command and one round trip, however many files the
+// bundle carries: a missing file costs one remote exec per call otherwise, and
+// a skill with dozens of scripts was spending minutes on that round-trip tax.
+// Every missing file is reported on its own stderr line and the check keeps
+// going, so one round trip returns every finding instead of stopping at the
+// first — an install that fails anyway may as well fail completely.
 func (s *TenantSkillService) verifySkillTree(
 	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
 ) error {
-	if _, err := s.execInstall(ctx, mgr, sessionID,
-		fmt.Sprintf("test -f %s", sandbox.ShellQuote(path.Join(skillDir, "SKILL.md")))); err != nil {
-		return fmt.Errorf("skill directory is incomplete after install: %w", err)
+	res, err := s.execInstall(ctx, mgr, sessionID,
+		skillTreeVerifyCommand(skillDir, sortedScriptPaths(bundle, allScriptExtensions...)))
+	if err == nil {
+		return nil
 	}
-	for _, rel := range sortedScriptPaths(bundle, allScriptExtensions...) {
-		target := path.Join(skillDir, rel)
-		if _, err := s.execInstall(ctx, mgr, sessionID,
-			fmt.Sprintf("test -f %s", sandbox.ShellQuote(target))); err != nil {
-			return fmt.Errorf("script %s is missing after install: %w", rel, err)
+	if res != nil {
+		switch res.ExitCode {
+		case skillTreeVerifyDirExit:
+			// The directory itself is gone; nothing inside it could be probed
+			// and the command already said exactly that.
+			return errors.New("skill directory is incomplete after install")
+		case 1:
+			// The command's own protocol: exit 1 means every finding is one
+			// stderr line, and those lines are the final message. Any other
+			// non-zero exit has no protocol behind it and falls through to
+			// the transport wrapping below rather than promoting arbitrary
+			// stderr noise to a verdict.
+			if lines := verificationProblems(res.Stderr); len(lines) > 0 {
+				return errors.New(strings.Join(lines, "; "))
+			}
 		}
 	}
-	return nil
+	return fmt.Errorf("skill tree verification failed: %w", err)
+}
+
+// skillTreeVerifyCommand folds the structural check into one command: the
+// SKILL.md probe plus one test per bundled script, each missing file reported
+// without stopping the rest. It cds into the skill directory and iterates
+// relative paths, which makes every stderr line the final user-facing message
+// — the Go side never has to reassemble one. Paths reach the command only
+// through ShellQuote: a file name comes from an uploaded archive, and a
+// metacharacter in one must stay a literal.
+func skillTreeVerifyCommand(skillDir string, scripts []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "cd %s || { echo 'skill directory is incomplete after install' >&2; exit %d; }",
+		sandbox.ShellQuote(skillDir), skillTreeVerifyDirExit)
+	b.WriteString("; status=0")
+	b.WriteString("; [ -f 'SKILL.md' ] || { echo 'SKILL.md is missing after install' >&2; status=1; }")
+	if len(scripts) > 0 {
+		b.WriteString("; for f in")
+		for _, rel := range scripts {
+			b.WriteByte(' ')
+			b.WriteString(sandbox.ShellQuote(rel))
+		}
+		b.WriteString(`; do [ -f "$f" ] || { echo "script $f is missing after install" >&2; status=1; }; done`)
+	}
+	b.WriteString("; exit $status")
+	return b.String()
 }
 
 // verifyDeclaredDependencies checks that the isolated trees the installer was

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +50,16 @@ type installTranscript struct {
 	// terminal event Finish emits.
 	totalSteps      int
 	totalDurationMs int64
+
+	// Activity progress fills the long stretch between the seeded anchor (35%)
+	// and agent_done (80%) while the installer is actually working. Every tool
+	// call the bus already delivers advances an asymptotic percent, so the bar
+	// moves without knowing how many rounds the agent will run. onActivity is
+	// wired only by the install path; the remove path and most tests leave it
+	// nil and nothing publishes.
+	onActivity    func(steps int, lastCmd string)
+	toolCalls     int
+	progressMuted bool
 }
 
 // installAnswerSegment accumulates the prose streamed under one final-answer
@@ -73,6 +84,7 @@ func newInstallTranscript(
 	streams interfaces.StreamManager,
 	messages interfaces.MessageRepository,
 	sessionID, assistantMessageID string,
+	onActivity func(steps int, lastCmd string),
 ) *installTranscript {
 	return &installTranscript{
 		ctx:                ctx,
@@ -82,6 +94,7 @@ func newInstallTranscript(
 		sessionID:          sessionID,
 		assistantMessageID: assistantMessageID,
 		starts:             map[string]time.Time{},
+		onActivity:         onActivity,
 	}
 }
 
@@ -251,6 +264,14 @@ func (tr *installTranscript) onToolCall(_ context.Context, evt event.Event) erro
 			seg.superseded = true
 		}
 	}
+	// One command is one step of the asymptotic progress. Muted runs (after
+	// the first round ends) stop counting so a repair round cannot drag the
+	// bar back under the stage anchors that govern it by then.
+	steps, lastCmd := 0, ""
+	if !tr.progressMuted {
+		tr.toolCalls++
+		steps, lastCmd = tr.toolCalls, installToolCallSummary(data)
+	}
 	tr.mu.Unlock()
 
 	tr.append(interfaces.StreamEvent{
@@ -264,6 +285,9 @@ func (tr *installTranscript) onToolCall(_ context.Context, evt event.Event) erro
 			"tool_call_id": data.ToolCallID,
 		},
 	})
+	if steps > 0 && tr.onActivity != nil {
+		tr.onActivity(steps, lastCmd)
+	}
 	return nil
 }
 
@@ -474,4 +498,60 @@ func (tr *installTranscript) save(ctx context.Context) {
 	if err := tr.messages.UpdateMessage(ctx, msg); err != nil {
 		logger.Warnf(ctx, "[skill] persist install transcript %s failed: %v", tr.sessionID, err)
 	}
+}
+
+// progressLogMaxRunes caps the one-line command summary the progress card
+// shows. The card is one line tall; a heredoc would flatten it.
+const progressLogMaxRunes = 80
+
+// installToolCallSummary condenses one tool call into the one-line log the
+// progress card shows. The engine's own hint (e.g. `shell_exec: uv venv
+// .venv`) is preferred when it has one; otherwise the shell command is used.
+func installToolCallSummary(data event.AgentToolCallData) string {
+	summary := strings.TrimSpace(data.Hint)
+	if summary == "" {
+		if cmd, ok := data.Arguments["command"].(string); ok && strings.TrimSpace(cmd) != "" {
+			summary = fmt.Sprintf("%s: %s", data.ToolName, strings.TrimSpace(cmd))
+		} else {
+			summary = data.ToolName
+		}
+	}
+	summary = strings.ReplaceAll(summary, "\n", " ")
+	if runes := []rune(summary); len(runes) > progressLogMaxRunes {
+		summary = string(runes[:progressLogMaxRunes]) + "…"
+	}
+	return summary
+}
+
+// muteActivityProgress stops the asymptotic progress wherever it has reached.
+// Called once the first installer round ends: everything after it —
+// verification and any repair rounds — is covered by the explicit stage
+// anchors (agent_done 80, repairing 82), and tool calls from a repair round
+// publishing again would drag the bar back below those anchors.
+func (tr *installTranscript) muteActivityProgress() {
+	if tr == nil {
+		return
+	}
+	tr.mu.Lock()
+	tr.progressMuted = true
+	tr.mu.Unlock()
+}
+
+// asymptoticInstallPercent fills the 35→79 span with no knowledge of the
+// total: each command advances the bar by a shrinking share of what is left,
+// so the curve is monotonic for any round count and converges below the
+// agent_done anchor at 80 — never past it, never stalls on the way.
+//
+// The shape is 35 + 44·(1 − e^(−k/12)): the first command moves ~4 points, the
+// tenth ~60%, the twentieth ~71%, and even a run that exhausts
+// max_iterations=30 only reaches ~75, still short of the 79 ceiling.
+func asymptoticInstallPercent(k int) int {
+	if k <= 0 {
+		return 35
+	}
+	p := 35 + int(math.Round(44*(1-math.Exp(-float64(k)/12.0))))
+	if p > 79 {
+		return 79
+	}
+	return p
 }

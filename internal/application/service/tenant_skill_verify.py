@@ -26,7 +26,7 @@ minutes of dependency work and leaves the previous image serving.
     exit 0  the image may be kept
     exit 1  a problem no installer round can fix: a syntax error, a file the
             execution user cannot read, a relative import that can never
-            resolve
+            resolve, a shipped module the import cannot reach
     exit 2  every problem is a dependency missing from this image, so handing
             these lines back to the installer is worth a round
 
@@ -71,6 +71,40 @@ unrepairable = False
 # of these is reachable on its own, because the runtime can be asked to execute
 # a file there; any other prefix is only on sys.path if the skill puts it there.
 script_dirs = {os.path.dirname(os.path.join(root, rel)) for rel in all_scripts}
+
+# ---------------------------------------------------------------------------
+# Third resolution tier: modules the tree itself ships, reached by the
+# script's own sys.path bootstrap.
+#
+# A sibling subtree is never an ancestor, so static resolution cannot see
+# lib/image_video.py from scripts/generate.py - and that is the runtime truth
+# too, until the script puts lib/ on sys.path itself. The scan below records
+# what the tree ships; the evaluator further down decides whether the
+# bootstrap provably reaches it. Only a proven bridge turns a missing import
+# into a note; anything unprovable stays a problem, which is what keeps
+# vendor/requests.py from satisfying `import requests` for a script that
+# never bridges to it.
+
+skip_tree_dirs = {".venv", "node_modules", "__pycache__", ".weknora"}
+
+# name -> root-relative paths of the files providing it ("lib/image_video.py",
+# "scripts/__init__.py"). Built from the uploaded sources only: .venv and the
+# other install-created directories are pruned, because packages pip placed
+# there are not the skill's own code and must not count as shipped.
+shipped_modules = {}
+for _dirpath, _dirnames, _filenames in os.walk(root):
+    _dirnames[:] = sorted(
+        d for d in _dirnames if d not in skip_tree_dirs and not d.startswith(".")
+    )
+    for _filename in _filenames:
+        _stem, _ext = os.path.splitext(_filename)
+        if _ext != ".py":
+            continue
+        _rel = os.path.relpath(os.path.join(_dirpath, _filename), root).replace(os.sep, "/")
+        if _stem == "__init__":
+            shipped_modules.setdefault(os.path.basename(_dirpath), []).append(_rel)
+        else:
+            shipped_modules.setdefault(_stem, []).append(_rel)
 
 
 def add_problem(message, repairable=False):
@@ -184,6 +218,103 @@ def resolve_top_level(name, script_path):
     return ""
 
 
+def dotted_name(node):
+    """'os.path.join' for a Name/Attribute chain, else None."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return ".".join(reversed(parts))
+    return None
+
+
+def static_path_of(node, script_path, env):
+    """Evaluate an expression that is supposed to name a directory.
+
+    Accepts only the shapes a sys.path bootstrap is written with in practice:
+    string literals, __file__, os.path.dirname/abspath/realpath/join, pathlib
+    Path(...).resolve()/absolute()/parent chains with / joins, str(...), and
+    plain names previously assigned one of those. A relative literal is fine
+    as a join component ('..', 'lib'); only the final sys.path entry must be
+    absolute, which bootstrap_push enforces. Everything else - variables the
+    scan cannot see, os.environ, any other call - returns None. The evaluator
+    must never guess: a wrong guess turns a broken import into a passing
+    install.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return os.path.normpath(node.value)
+    if isinstance(node, ast.Name):
+        if node.id == "__file__":
+            return os.path.normpath(os.path.abspath(script_path))
+        return env.get(node.id)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left = static_path_of(node.left, script_path, env)
+        right = static_path_of(node.right, script_path, env)
+        if left is None or right is None:
+            return None
+        return os.path.normpath(os.path.join(left, right))
+    if isinstance(node, ast.Call):
+        if node.keywords:
+            return None
+        name = dotted_name(node.func)
+        args = node.args
+        if name == "os.path.join" and args:
+            parts = [static_path_of(a, script_path, env) for a in args]
+            if any(part is None for part in parts):
+                return None
+            return os.path.normpath(os.path.join(*parts))
+        if name in ("os.path.dirname", "os.path.abspath", "os.path.realpath") and len(args) == 1:
+            base = static_path_of(args[0], script_path, env)
+            if base is None:
+                return None
+            return os.path.dirname(base) if name == "os.path.dirname" else base
+        if name in ("str", "Path", "pathlib.Path") and len(args) == 1:
+            return static_path_of(args[0], script_path, env)
+        if (
+            isinstance(node.func, ast.Attribute)
+            and not args
+            and node.func.attr in ("resolve", "absolute")
+        ):
+            return static_path_of(node.func.value, script_path, env)
+        return None
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        base = static_path_of(node.value, script_path, env)
+        return None if base is None else os.path.dirname(base)
+    return None
+
+
+def bootstrap_push(node, script_path, env, out):
+    """Record the directory a top-level sys.path.insert/append call adds.
+
+    append(path) and insert(index, path) both push args[-1]. A call whose
+    argument cannot be evaluated records None - an unverified bridge, which
+    the caller must treat as reaching nothing.
+    """
+    if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+        return
+    call = node.value
+    func = call.func
+    if not (isinstance(func, ast.Attribute) and func.attr in ("insert", "append")):
+        return
+    target = func.value
+    if not (
+        isinstance(target, ast.Attribute)
+        and target.attr == "path"
+        and isinstance(target.value, ast.Name)
+        and target.value.id == "sys"
+    ):
+        return
+    if call.keywords or not call.args:
+        out.append(None)
+        return
+    path = static_path_of(call.args[-1], script_path, env)
+    # A relative result would resolve against the runtime's cwd, which the
+    # scan cannot know - as unknowable as an unevaluable expression.
+    out.append(path if path is not None and os.path.isabs(path) else None)
+
+
 def check_imports(rel, tree, script_path, report):
     """Check the imports that loading this file is guaranteed to execute.
 
@@ -191,20 +322,38 @@ def check_imports(rel, tree, script_path, report):
     import nested in try/except, in an `if`, or inside a function is how a
     skill declares an optional or lazily loaded dependency, and failing an
     install over one would reject a working skill.
+
+    The single ordered pass matters: a sys.path bootstrap only helps imports
+    that come after it, so each import is checked against the bridges the
+    statements before it have raised. Plain string assignments are tracked
+    too, because the idiomatic bootstrap names its path in a variable first
+    (script_dir = ...; lib_dir = ...; sys.path.insert(0, lib_dir)).
     """
     script_dir = os.path.dirname(script_path)
+    env = {}
+    bootstraps = []
     for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            value = static_path_of(node.value, script_path, env)
+            if value is not None:
+                env[node.targets[0].id] = value
+            continue
+        bootstrap_push(node, script_path, env, bootstraps)
         if isinstance(node, ast.Import):
             for alias in node.names:
-                check_absolute_import(rel, alias.name, script_path, report)
+                check_absolute_import(rel, alias.name, script_path, bootstraps, report)
         elif isinstance(node, ast.ImportFrom):
             if node.level:
                 check_relative_import(rel, node, script_dir, report)
             elif node.module:
-                check_absolute_import(rel, node.module, script_path, report)
+                check_absolute_import(rel, node.module, script_path, bootstraps, report)
 
 
-def check_absolute_import(rel, dotted, script_path, report):
+def check_absolute_import(rel, dotted, script_path, bootstraps, report):
     name = dotted.split(".")[0]
     origin = resolve_top_level(name, script_path)
     if origin == "image":
@@ -216,9 +365,45 @@ def check_absolute_import(rel, dotted, script_path, report):
             "directory on sys.path itself" % (rel, name)
         )
         return
+    providers = shipped_modules.get(name)
+    if not providers:
+        report(
+            "%s imports %s, which is not available in this image" % (rel, name),
+            repairable=True,
+        )
+        return
+    # The tree itself provides the module; whether the import resolves at
+    # runtime depends solely on the script's own bootstrap. Only a bootstrap
+    # proven to raise one of the providing directories counts.
+    bridged_dirs = {
+        os.path.relpath(b, root).replace(os.sep, "/")
+        for b in bootstraps
+        if b is not None
+    }
+    reached = [p for p in providers if os.path.dirname(p) in bridged_dirs]
+    if reached:
+        add_note(
+            "%s imports %s, which the skill ships at %s and reaches via its "
+            "own sys.path bootstrap" % (rel, name, ", ".join(reached))
+        )
+        return
+    if not bootstraps:
+        why = "the file puts no directory on sys.path"
+    elif any(b is None for b in bootstraps):
+        why = "its sys.path bootstrap cannot be verified statically"
+    else:
+        why = "its sys.path bootstrap reaches elsewhere"
+    # Unrepairable on purpose. The repair round installs packages and is
+    # forbidden from editing the skill's own files, so neither of its moves
+    # can fix a shipped module the import cannot reach - installing a
+    # same-named distribution would only shadow the skill's own code, and a
+    # source edit would diverge the installed tree from the uploaded archive.
+    # The bundle has to change, and this line says exactly where.
     report(
-        "%s imports %s, which is not available in this image" % (rel, name),
-        repairable=True,
+        "%s imports %s, which the skill ships at %s, but the import cannot "
+        "resolve at runtime (%s); no package install provides a skill's own "
+        "module - fix the import's reachability in the archive and re-upload"
+        % (rel, name, ", ".join(providers), why),
     )
 
 

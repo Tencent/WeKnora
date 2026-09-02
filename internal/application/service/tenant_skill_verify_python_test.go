@@ -180,14 +180,17 @@ func TestSkillPythonVerifier(t *testing.T) {
 			"scripts/run.py": "x = 1\n",
 		},
 	}, {
+		// The vendor guarantee: a sibling module sharing an import's name does
+		// not make the import resolve. The wording names the shipped file so a
+		// repair round knows no package install will help.
 		name: "a nested file name is not treated as a first-party import",
 		files: map[string]string{
 			"vendor/totally_absent_package.py": "x = 1\n",
 			"scripts/run.py":                   "import totally_absent_package\n",
 		},
 		wantProblem: "scripts/run.py imports totally_absent_package, " +
-			"which is not available in this image",
-		wantExit: 2,
+			"which the skill ships at vendor/totally_absent_package.py",
+		wantExit: 1,
 	}, {
 		// The official Anthropic office toolkit (xlsx/docx/pptx): a non-package
 		// directory holds entry scripts plus sibling packages. Library modules
@@ -267,6 +270,92 @@ func TestSkillPythonVerifier(t *testing.T) {
 				"--index-url https://example.com/simple\n",
 			"scripts/run.py": "x = 1\n",
 		},
+	}, {
+		// The lib/ + sys.path bootstrap layout - the shape that failed a real
+		// install. Static resolution cannot see the bridge, but the script's
+		// own bootstrap provably raises the directory that ships the module,
+		// so the install passes with a note instead of a missing dependency.
+		name: "a script that bootstraps a sibling lib directory and imports from it",
+		files: map[string]string{
+			"lib/image_video.py": "def generate_image():\n    pass\n",
+			"scripts/generate.py": "import sys\nimport os\n" +
+				"script_dir = os.path.dirname(os.path.abspath(__file__))\n" +
+				"lib_dir = os.path.join(script_dir, '..', 'lib')\n" +
+				"sys.path.insert(0, lib_dir)\n" +
+				"from image_video import generate_image\n",
+		},
+		wantNote: "which the skill ships at lib/image_video.py",
+	}, {
+		// The pathlib idiom must evaluate to the same bridge.
+		name: "a pathlib bootstrap reaching a sibling module",
+		files: map[string]string{
+			"lib/helper.py": "x = 1\n",
+			"scripts/runner.py": "import sys\n" +
+				"from pathlib import Path\n" +
+				"sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'lib'))\n" +
+				"import helper\n",
+		},
+		wantNote: "which the skill ships at lib/helper.py",
+	}, {
+		// The same shape without the bridge cannot resolve at runtime, and no
+		// package install provides a skill's own module - the finding names
+		// the shipped file instead of pretending a dependency is missing, and
+		// fails the install outright: a repair round can neither install a
+		// fix nor edit the tree.
+		name: "a script importing a lib module without a sys.path bootstrap",
+		files: map[string]string{
+			"lib/image_video.py":  "def generate_image():\n    pass\n",
+			"scripts/generate.py": "from image_video import generate_image\n",
+		},
+		wantProblem: "which the skill ships at lib/image_video.py",
+		wantExit:    1,
+	}, {
+		// The vendor guarantee holds inside the new tier: a sibling module
+		// sharing a dependency's name is still unresolvable unless the
+		// script's own bootstrap provably reaches it. (A neutral name keeps
+		// the case immune to whatever happens to be importable in the
+		// environment running the tests.)
+		name: "a vendored module must not satisfy an import without a bootstrap",
+		files: map[string]string{
+			"vendor/bridge_helper.py": "x = 1\n",
+			"scripts/run.py":          "import bridge_helper\n",
+		},
+		wantProblem: "which the skill ships at vendor/bridge_helper.py",
+		wantExit:    1,
+	}, {
+		// ...and when the bootstrap does reach the vendored copy, the script
+		// genuinely works: reported, not refused.
+		name: "a bootstrap that reaches the vendored copy is a note",
+		files: map[string]string{
+			"vendor/bridge_helper.py": "x = 1\n",
+			"scripts/run.py": "import sys, os\n" +
+				"sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'vendor'))\n" +
+				"import bridge_helper\n",
+		},
+		wantNote: "which the skill ships at vendor/bridge_helper.py",
+	}, {
+		// A bridge the evaluator cannot prove stays a problem: guessing would
+		// be exactly the false pass the vendor rule exists to prevent.
+		name: "an unprovable bootstrap stays a problem",
+		files: map[string]string{
+			"lib/image_video.py": "def generate_image():\n    pass\n",
+			"scripts/generate.py": "import sys, os\n" +
+				"sys.path.insert(0, os.environ['LIB_DIR'])\n" +
+				"from image_video import generate_image\n",
+		},
+		wantProblem: "cannot be verified statically",
+		wantExit:    1,
+	}, {
+		// Packages pip placed under .venv are not the skill's own code; the
+		// scan must not turn a genuinely missing dependency into a shipped
+		// note.
+		name: "a module that only exists under .venv is still missing",
+		files: map[string]string{
+			".venv/lib/python3.11/site-packages/ghost_mod.py": "x = 1\n",
+			"scripts/run.py": "import ghost_mod\n",
+		},
+		wantProblem: "not available in this image",
+		wantExit:    2,
 	}}
 
 	for _, tc := range cases {
