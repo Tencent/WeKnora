@@ -152,7 +152,7 @@ func TestResolveEffectiveConfigMaterialisesDenyAllEntry(t *testing.T) {
 }
 
 func TestResolveEffectiveConfigDoesNotDuplicateDenyAllEntry(t *testing.T) {
-	for _, existing := range []string{"0.0.0.0/0", " 0.0.0.0/0 ", "1.2.3.4/0"} {
+	for _, existing := range []string{"0.0.0.0/0", "  0.0.0.0/0  ", "1.2.3.4/0"} {
 		t.Run(existing, func(t *testing.T) {
 			tenantCfg := completeE2BTenantConfig()
 			tenantCfg.Network = &types.SandboxNetworkPolicy{
@@ -164,10 +164,24 @@ func TestResolveEffectiveConfigDoesNotDuplicateDenyAllEntry(t *testing.T) {
 			got, err := ResolveEffectiveConfig(tenantCfg, globalTestConfig())
 
 			require.NoError(t, err)
-			require.Equal(t, []string{existing}, got.Network.DenyOut,
-				"an entry that already covers every IPv4 must be left alone")
+			require.Equal(t, []string{types.DenyAllIPv4}, got.Network.DenyOut,
+				"any IPv4 /0 must be rewritten to the canonical deny-all, not duplicated")
 		})
 	}
+}
+
+func TestResolveEffectiveConfigCanonicalizesNonCanonicalDenyAll(t *testing.T) {
+	tenantCfg := completeE2BTenantConfig()
+	tenantCfg.Network = &types.SandboxNetworkPolicy{
+		AllowOut: []string{"api.example.com"},
+		DenyOut:  []string{"10.0.0.0/8", "1.2.3.4/0"},
+	}
+
+	got, err := ResolveEffectiveConfig(tenantCfg, globalTestConfig())
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"10.0.0.0/8", types.DenyAllIPv4}, got.Network.DenyOut)
+	require.True(t, got.Network.DeniesEgressByDefault())
 }
 
 // The entry is the resolved form of DenyEgressByDefault, so an egress-open

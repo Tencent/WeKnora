@@ -279,6 +279,15 @@ func (l *remoteSessionLifecycle) inboundTokenRequired() bool {
 	return allowPublic != nil && !*allowPublic
 }
 
+// missingRequiredInboundToken reports a handle that would 403 on every
+// data-plane call: the provider issues a traffic token, this config requires
+// it, and the handle does not have one. Docker is excluded because its handle
+// does not implement RemoteInboundTokenCarrier.
+func (l *remoteSessionLifecycle) missingRequiredInboundToken(handle RemoteSandboxHandle) bool {
+	_, carriesInboundToken := handle.(RemoteInboundTokenCarrier)
+	return carriesInboundToken && l.inboundTokenRequired() && InboundTokenOf(handle) == ""
+}
+
 func (l *remoteSessionLifecycle) recoverOwnedSandbox(
 	ctx context.Context,
 	key SessionSandboxKey,
@@ -340,8 +349,7 @@ func (l *remoteSessionLifecycle) recoverOwnedSandbox(
 		// empty token there means "not applicable" rather than "lost" — and
 		// destroying a healthy container over it would cost /workspace on
 		// every binding loss.
-		if _, carriesInboundToken := handle.(RemoteInboundTokenCarrier); carriesInboundToken &&
-			l.inboundTokenRequired() && InboundTokenOf(handle) == "" {
+		if l.missingRequiredInboundToken(handle) {
 			// Deleting rather than walking away is safe for the same reason
 			// cleanupOwnedDuplicates below is: this loop holds the lifecycle
 			// lock for key, and l.metadata(key) scopes every candidate to this
@@ -420,6 +428,19 @@ func (l *remoteSessionLifecycle) createAndBind(
 	}
 	if err := l.validateHandle(handle, ""); err != nil {
 		return nil, errors.Join(err, l.cleanupCreated(ctx, handle))
+	}
+	// Same 403 wedge as metadata adoption: the provider issues this token
+	// only at create time, and authentication errors are not replaceable.
+	// Binding an empty token would leave the session permanently stuck, so
+	// fail the create and destroy the unusable sandbox instead.
+	if l.missingRequiredInboundToken(handle) {
+		return nil, errors.Join(
+			fmt.Errorf(
+				"create remote sandbox %q: inbound traffic token missing under a closed-inbound policy",
+				handle.ID(),
+			),
+			l.cleanupCreated(ctx, handle),
+		)
 	}
 
 	exists, checkErr := l.sessionChecker.SessionExists(ctx, key)

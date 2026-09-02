@@ -431,21 +431,23 @@
           {{ $t('settings.sandbox.networkHint') }}
         </p>
 
-        <t-form-item :label="$t('settings.sandbox.inboundAccess')"
-          :tips="$t('settings.sandbox.inboundAccessHelp')">
-          <t-radio-group v-model="allowPublicInbound">
-            <t-radio :value="false">{{ $t('settings.sandbox.inboundTokenRequired') }}</t-radio>
-            <t-radio :value="true">{{ $t('settings.sandbox.inboundPublic') }}</t-radio>
-          </t-radio-group>
-        </t-form-item>
+        <template v-if="backend !== 'docker'">
+          <t-form-item :label="$t('settings.sandbox.inboundAccess')"
+            :tips="$t('settings.sandbox.inboundAccessHelp')">
+            <t-radio-group v-model="allowPublicInbound">
+              <t-radio :value="false">{{ $t('settings.sandbox.inboundTokenRequired') }}</t-radio>
+              <t-radio :value="true">{{ $t('settings.sandbox.inboundPublic') }}</t-radio>
+            </t-radio-group>
+          </t-form-item>
 
-        <t-form-item :label="$t('settings.sandbox.egressDefault')"
-          :tips="$t('settings.sandbox.egressPrecedence')">
-          <t-radio-group v-model="denyEgressByDefault">
-            <t-radio :value="false">{{ $t('settings.sandbox.egressAllowAll') }}</t-radio>
-            <t-radio :value="true">{{ $t('settings.sandbox.egressDenyAll') }}</t-radio>
-          </t-radio-group>
-        </t-form-item>
+          <t-form-item :label="$t('settings.sandbox.egressDefault')"
+            :tips="$t('settings.sandbox.egressPrecedence')">
+            <t-radio-group v-model="denyEgressByDefault">
+              <t-radio :value="false">{{ $t('settings.sandbox.egressAllowAll') }}</t-radio>
+              <t-radio :value="true">{{ $t('settings.sandbox.egressDenyAll') }}</t-radio>
+            </t-radio-group>
+          </t-form-item>
+        </template>
 
         <template v-if="backend === 'docker'">
           <t-form-item :label="$t('settings.sandbox.dockerNetworkMode')"
@@ -721,6 +723,9 @@
       <p v-if="pendingCheckNames.length" class="check-result__hint">
         {{ $t('settings.sandbox.checkPendingHint', { names: pendingCheckNames.join('、') }) }}
       </p>
+      <t-alert v-if="checkResult.capabilities && checkResult.capabilities.supports_volumes === false" theme="warning"
+        class="compact-alert"
+        :message="$t('settings.sandbox.noVolumeSupport')" />
     </div>
 
   </SettingDrawer>
@@ -889,13 +894,21 @@ function addE2BHostRule() {
 // letting the save round-trip fail.
 const domainAllowNeedsDenyAll = computed(() => {
   if (denyEgressByDefault.value) return false
-  if (denyOutRows.value.some((row) => row.trim() === '0.0.0.0/0')) return false
+  if (denyOutRows.value.some((row) => denyOutRowCoversAllIPv4(row))) return false
   return allowOutRows.value.some((row) => {
     const value = row.trim()
     if (!value) return false
     return !/^[0-9./]+$/.test(value)
   })
 })
+
+// Mirrors types.DenyOutCoversAllIPv4: net.ParseCIDR collapses any IPv4 /0
+// onto 0.0.0.0/0, so 1.2.3.4/0 is a real deny-all, not a false warning.
+function denyOutRowCoversAllIPv4(row: string): boolean {
+  const value = row.trim()
+  if (value === '0.0.0.0/0') return true
+  return /^\d{1,3}(?:\.\d{1,3}){3}\/0$/.test(value)
+}
 const inFlightFromSkills = ref(false)
 const templates = ref<SandboxTemplate[]>([])
 const templatesLoading = ref(false)
@@ -1154,9 +1167,16 @@ function reset() {
 
 function selectBackend(value: string) {
   if (backend.value === value) return
+  const crossingDocker = backend.value === 'docker' || value === 'docker'
   backend.value = value
   if (value === 'docker' && !docker.image) {
     docker.image = defaultDockerImage
+  }
+  if (crossingDocker) {
+    // Docker has no inbound token. Leaving this true while the radio is
+    // hidden, then switching to Cube/E2B, would create a publicly reachable
+    // sandbox under a control the admin never saw on the docker form.
+    allowPublicInbound.value = false
   }
   onBackendChange()
 }
@@ -1438,6 +1458,12 @@ function collectPayload(): SandboxConfig {
 // admin never touched serializes to the same thing as a fresh default.
 function collectNetworkPolicy(): SandboxNetworkPolicy {
   const policy: SandboxNetworkPolicy = {}
+  // Docker can only honour network_mode on the docker block. Sending the
+  // Cube/E2B radios would persist a public-inbound flag that becomes real
+  // the moment the admin switches backend.
+  if (backend.value === 'docker') {
+    return policy
+  }
   if (denyEgressByDefault.value) policy.deny_egress_by_default = true
   if (allowPublicInbound.value) policy.allow_public_inbound = true
 

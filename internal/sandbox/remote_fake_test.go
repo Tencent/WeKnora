@@ -99,7 +99,7 @@ type fakeRemoteClient struct {
 }
 
 func newFakeRemoteClient(provider RemoteProvider) *fakeRemoteClient {
-	return &fakeRemoteClient{
+	client := &fakeRemoteClient{
 		provider: provider,
 		capabilities: RemoteSandboxCapabilities{
 			SupportsReconnect:             true,
@@ -112,6 +112,14 @@ func newFakeRemoteClient(provider RemoteProvider) *fakeRemoteClient {
 		getErrs:     make(map[string]error),
 		deleteErrs:  make(map[string]error),
 	}
+	// Cube and E2B issue the inbound token at create. DefaultConfig closes
+	// public inbound, so a tokenless fake would fail createAndBind the same
+	// way a real provider that omitted the token does. Tests that want that
+	// failure must clear trafficAccessToken explicitly.
+	if provider == RemoteProvider(SandboxTypeCube) || provider == RemoteProvider(SandboxTypeE2B) {
+		client.trafficAccessToken = "test-inbound-token"
+	}
+	return client
 }
 
 func TestFakeRemoteClientConnectRestoresRequestedTrafficToken(t *testing.T) {

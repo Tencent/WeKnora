@@ -253,6 +253,25 @@ func DenyOutCoversAllIPv4(denyOut []string) bool {
 	return false
 }
 
+// CanonicalizeDenyOut rewrites any IPv4 /0 onto DenyAllIPv4 so providers that
+// string-match 0.0.0.0/0 (E2B's ALL_TRAFFIC) see the same deny-all the
+// validator accepted. Other entries are copied as typed. Nil input stays nil.
+func CanonicalizeDenyOut(denyOut []string) []string {
+	if denyOut == nil {
+		return nil
+	}
+	out := make([]string, 0, len(denyOut))
+	for _, target := range denyOut {
+		kind, key, err := classifyNetworkTarget(target, false)
+		if err == nil && kind == targetIP && key == DenyAllIPv4 {
+			out = append(out, DenyAllIPv4)
+			continue
+		}
+		out = append(out, target)
+	}
+	return out
+}
+
 type networkTargetKind int
 
 const (
@@ -391,10 +410,19 @@ func validateCubeEgressRules(rules []CubeEgressRule) error {
 			if header == "" {
 				return fmt.Errorf("Cube HTTP 规则 %q 的注入 header 名不能为空", name)
 			}
+			if err := validateHTTPHeaderName(header); err != nil {
+				return fmt.Errorf("规则 %q 的注入 header 名 %q: %w", name, header, err)
+			}
 			if injectHeaders[header] {
 				return fmt.Errorf("Cube HTTP 规则 %q 的注入 header 名 %q 重复", name, header)
 			}
 			injectHeaders[header] = true
+			if err := validateHTTPHeaderValue(inject.Secret); err != nil {
+				return fmt.Errorf("规则 %q 的注入 header %q 的值: %w", name, header, err)
+			}
+			if err := validateHTTPHeaderValue(inject.Format); err != nil {
+				return fmt.Errorf("规则 %q 的注入 header %q 的 format: %w", name, header, err)
+			}
 			if rule.Deny && inject.Secret != "" {
 				return fmt.Errorf("Cube HTTP 规则 %q 是拒绝规则，注入 header 不会生效", name)
 			}
@@ -447,9 +475,15 @@ func validateE2BHostRules(rules []E2BHostRule, allowKeys map[string]string) erro
 			if strings.TrimSpace(name) == "" {
 				return fmt.Errorf("E2B host 规则 %q 的 header 名不能为空", host)
 			}
+			if err := validateHTTPHeaderName(name); err != nil {
+				return fmt.Errorf("host 规则 %q 的 header 名 %q: %w", host, name, err)
+			}
 			if len(name) > e2bMaxHeaderNameLength {
 				return fmt.Errorf("E2B host 规则 %q 的 header 名超过 %d 字符",
 					host, e2bMaxHeaderNameLength)
+			}
+			if err := validateHTTPHeaderValue(value); err != nil {
+				return fmt.Errorf("host 规则 %q 的 header %q 的值: %w", host, name, err)
 			}
 			if len(value) > e2bMaxHeaderValueLen {
 				return fmt.Errorf("E2B host 规则 %q 的 header 值超过 %d 字符",
@@ -458,6 +492,42 @@ func validateE2BHostRules(rules []E2BHostRule, allowKeys map[string]string) erro
 		}
 	}
 	return nil
+}
+
+// validateHTTPHeaderName rejects names that cannot be a single HTTP field
+// name. CR/LF would let an injected header smuggle a second field through
+// CubeEgress / E2B request transforms.
+func validateHTTPHeaderName(name string) error {
+	if name == "" {
+		return errors.New("不能为空")
+	}
+	for _, r := range name {
+		if !isHTTPTokenChar(r) {
+			return errors.New("不是合法 HTTP header 名")
+		}
+	}
+	return nil
+}
+
+// validateHTTPHeaderValue rejects CR, LF and NUL, which would terminate the
+// field and let the rest of the string become a smuggled header or request.
+// Empty is allowed (unset / placeholder).
+func validateHTTPHeaderValue(value string) error {
+	if strings.ContainsAny(value, "\r\n\x00") {
+		return errors.New("不能包含换行或 NUL")
+	}
+	return nil
+}
+
+func isHTTPTokenChar(r rune) bool {
+	if r <= 32 || r >= 127 {
+		return false
+	}
+	switch r {
+	case '(', ')', '<', '>', '@', ',', ';', ':', '\\', '"', '/', '[', ']', '?', '=', '{', '}':
+		return false
+	}
+	return true
 }
 
 // allowListCovers reports whether an allow entry authorises host: either the

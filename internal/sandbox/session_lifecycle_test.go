@@ -191,6 +191,68 @@ func TestCreateAndBindPersistsInboundToken(t *testing.T) {
 		"the token is issued once, so the binding is the only place it survives a pause")
 }
 
+func TestCreateAndBindRejectsTokenlessSandboxWhenInboundClosed(t *testing.T) {
+	closed := false
+	client := newFakeRemoteClient(SandboxTypeE2B)
+	client.trafficAccessToken = ""
+	store := NewMemorySessionSandboxBindingStore()
+	lifecycle := newTestRemoteSessionLifecycleWithPolicy(
+		t, client, store, &fakeSessionExistenceChecker{exists: true},
+		RemoteNetworkPolicy{AllowPublicTraffic: &closed},
+	)
+	key := SessionSandboxKey{TenantID: 1, SessionID: "session-1"}
+
+	_, err := lifecycle.Resolve(context.Background(), key)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "inbound traffic token missing")
+	creates, _, _, _, deletes := client.counts()
+	require.Equal(t, 1, creates)
+	require.Equal(t, 1, deletes, "the unusable sandbox must be destroyed, not bound")
+	binding, err := store.Get(context.Background(), key)
+	require.NoError(t, err)
+	require.Nil(t, binding, "an empty token must not be persisted")
+}
+
+func TestCreateAndBindAllowsTokenlessSandboxWhenProviderHasNoInboundCredential(t *testing.T) {
+	closed := false
+	client := newFakeRemoteClient(SandboxTypeDocker)
+	client.omitsInboundTokenCarrier = true
+	store := NewMemorySessionSandboxBindingStore()
+	lifecycle := newTestRemoteSessionLifecycleWithPolicy(
+		t, client, store, &fakeSessionExistenceChecker{exists: true},
+		RemoteNetworkPolicy{AllowPublicTraffic: &closed},
+	)
+	key := SessionSandboxKey{TenantID: 1, SessionID: "session-1"}
+
+	handle, err := lifecycle.Resolve(context.Background(), key)
+
+	require.NoError(t, err)
+	require.NotEmpty(t, handle.ID())
+	creates, _, _, _, deletes := client.counts()
+	require.Equal(t, 1, creates)
+	require.Zero(t, deletes)
+}
+
+func TestCreateAndBindPersistsTokenWhenInboundClosed(t *testing.T) {
+	closed := false
+	client := newFakeRemoteClient(SandboxTypeCube)
+	client.trafficAccessToken = "traffic-token"
+	store := NewMemorySessionSandboxBindingStore()
+	lifecycle := newTestRemoteSessionLifecycleWithPolicy(
+		t, client, store, &fakeSessionExistenceChecker{exists: true},
+		RemoteNetworkPolicy{AllowPublicTraffic: &closed},
+	)
+	key := SessionSandboxKey{TenantID: 1, SessionID: "session-1"}
+
+	_, err := lifecycle.Resolve(context.Background(), key)
+	require.NoError(t, err)
+
+	binding, err := store.Get(context.Background(), key)
+	require.NoError(t, err)
+	require.Equal(t, "traffic-token", binding.TrafficAccessToken)
+}
+
 func TestResolveReconnectPassesStoredInboundToken(t *testing.T) {
 	client := newFakeRemoteClient(SandboxTypeCube)
 	client.trafficAccessToken = "traffic-token"

@@ -309,7 +309,12 @@ func resolveNetworkPolicy(stored *types.SandboxNetworkPolicy) RemoteNetworkPolic
 		return policy
 	}
 	policy.AllowOut = append([]string(nil), stored.AllowOut...)
-	policy.DenyOut = append([]string(nil), stored.DenyOut...)
+	// Canonicalise first: any IPv4 /0 (including 1.2.3.4/0) collapses onto
+	// 0.0.0.0/0, which is the spelling E2B string-matches as ALL_TRAFFIC.
+	// Leaving a non-canonical /0 on the wire would pass validation and then
+	// fail create, or accept a domain allow-list without actually denying the
+	// rest of the internet.
+	policy.DenyOut = types.CanonicalizeDenyOut(stored.DenyOut)
 	// DenyEgressByDefault means "install a 0.0.0.0/0 deny-all" — that is the
 	// stored field's documented definition — so materialise it as a real deny
 	// entry instead of leaving it implied by the top-level switch. E2B

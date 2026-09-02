@@ -164,14 +164,29 @@ test('domain allow without deny-all is warned about in place', () => {
   )
   assert.match(
     classifierBlock,
-    /denyOutRows\.value\.some\(\(row\) => row\.trim\(\) === '0\.0\.0\.0\/0'\)\) return false/,
+    /denyOutRows\.value\.some\(\(row\) => denyOutRowCoversAllIPv4\(row\)\)\) return false/,
     'an explicit deny-all row must suppress the warning',
+  )
+  assert.match(
+    source,
+    /function denyOutRowCoversAllIPv4\(row: string\): boolean \{[\s\S]*\\\/0\$/,
+    'any IPv4 /0 CIDR must count as deny-all, matching the backend validator',
   )
   assert.match(
     classifierBlock,
     /return !\/\^\[0-9\.\/\]\+\$\/\.test\(value\)/,
     'only non-IP/CIDR allow rows must trigger the warning',
   )
+
+  const helper = source.match(
+    /function denyOutRowCoversAllIPv4\(row: string\): boolean \{\n([\s\S]*?)\n\}/,
+  )
+  assert.ok(helper, 'the deny-all classifier must exist')
+  const coversAll = new Function('row', helper[1])
+  assert.equal(coversAll('0.0.0.0/0'), true)
+  assert.equal(coversAll('  1.2.3.4/0  '), true)
+  assert.equal(coversAll('10.0.0.0/8'), false)
+  assert.equal(coversAll('0.0.0.0/32'), false)
 })
 
 test('docker payload omits hidden allow and deny lists', () => {
@@ -181,8 +196,30 @@ test('docker payload omits hidden allow and deny lists', () => {
   )
   assert.match(
     payloadBlock,
+    /if \(backend\.value === 'docker'\) \{\s*return policy/,
+    'Docker must not persist Cube/E2B radios or allow/deny rows',
+  )
+  assert.match(
+    payloadBlock,
     /if \(backend\.value !== 'docker'\) \{[^}]*policy\.allow_out = allowOut[^}]*policy\.deny_out = denyOut[^}]*\}/,
     'Docker must not send allow/deny rows that its form hides',
+  )
+})
+
+test('docker hides inbound and egress radios that it cannot honour', () => {
+  const networkBlock = source.slice(
+    source.indexOf('settings.sandbox.sectionNetwork'),
+    source.indexOf('settings.sandbox.sectionEnvironment'),
+  )
+  assert.match(
+    networkBlock,
+    /v-if="backend !== 'docker'"[\s\S]*settings\.sandbox\.inboundAccess[\s\S]*settings\.sandbox\.egressDefault/,
+    'inbound and egress radios must not render for Docker',
+  )
+  assert.match(
+    source,
+    /function selectBackend[\s\S]*crossingDocker[\s\S]*allowPublicInbound\.value = false/,
+    'switching across Docker must not carry a public-inbound flag into Cube/E2B',
   )
 })
 

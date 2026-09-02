@@ -166,6 +166,11 @@ func TestDenyOutCoversAllIPv4MatchesValidatorNormalisation(t *testing.T) {
 	// Unparseable entries are the validator's problem, not this predicate's.
 	require.False(t, DenyOutCoversAllIPv4([]string{"not a cidr"}))
 
+	require.Equal(t, []string{DenyAllIPv4}, CanonicalizeDenyOut([]string{"1.2.3.4/0"}))
+	require.Equal(t, []string{DenyAllIPv4}, CanonicalizeDenyOut([]string{"  0.0.0.0/0  "}))
+	require.Equal(t, []string{"10.0.0.0/8", DenyAllIPv4}, CanonicalizeDenyOut([]string{"10.0.0.0/8", "1.2.3.4/0"}))
+	require.Nil(t, CanonicalizeDenyOut(nil))
+
 	// The two spellings the validator accepts must agree with the predicate.
 	for _, policy := range []*SandboxNetworkPolicy{
 		{AllowOut: []string{"api.example.com"}, DenyOut: []string{"0.0.0.0/0"}},
@@ -268,6 +273,42 @@ func TestValidateSandboxNetworkPolicyRejectsDuplicateInjectHeaders(t *testing.T)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Authorization")
 	require.Contains(t, err.Error(), "重复")
+}
+
+func TestValidateSandboxNetworkPolicyRejectsInjectedHeaderCRLF(t *testing.T) {
+	valid := CubeEgressRule{Name: "allow-api", SNI: "api.example.com"}
+
+	crlfName := valid
+	crlfName.Inject = []CubeHeaderInject{{Header: "X-Key\r\nX-Smuggled", Secret: "v"}}
+	requireRuleRejected(t, crlfName, "header 名")
+
+	spaceName := valid
+	spaceName.Inject = []CubeHeaderInject{{Header: "X Key", Secret: "v"}}
+	requireRuleRejected(t, spaceName, "header 名")
+
+	crlfValue := valid
+	crlfValue.Inject = []CubeHeaderInject{{Header: "Authorization", Secret: "tok\r\nX-Smuggled: 1"}}
+	requireRuleRejected(t, crlfValue, "不能包含换行")
+
+	crlfFormat := valid
+	crlfFormat.Inject = []CubeHeaderInject{{
+		Header: "Authorization", Secret: "tok", Format: "Bearer ${SECRET}\r\nX-Smuggled: 1",
+	}}
+	requireRuleRejected(t, crlfFormat, "format")
+
+	err := ValidateSandboxNetworkPolicy(&TenantSandboxConfig{
+		SandboxType: "e2b",
+		Network: &SandboxNetworkPolicy{
+			DenyEgressByDefault: true,
+			AllowOut:            []string{"api.example.com"},
+			E2BHostRules: []E2BHostRule{{
+				Host:    "api.example.com",
+				Headers: map[string]string{"X-Key\nEvil": "v"},
+			}},
+		},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "header 名")
 }
 
 func TestValidateSandboxNetworkPolicyE2BHostRuleNeedsAllowOut(t *testing.T) {
