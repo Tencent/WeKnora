@@ -4658,6 +4658,7 @@ export default {
       agents: 'Agents ({count})',
       longTermMemory: 'Long-term memory',
       openConfiguration: 'Open settings',
+      truncated: 'Showing the first {shown} of {total}',
       bindings: {
         embedding_model: 'Embedding model',
         summary_model: 'Summary model',

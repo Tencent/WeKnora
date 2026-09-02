@@ -383,8 +383,14 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 		return err
 	}
 	if usage.InUse() {
-		kbCount := int64(len(usage.KnowledgeBases))
-		agentCount := int64(len(usage.Agents))
+		kbCount := usage.KnowledgeBaseTotal
+		if kbCount == 0 {
+			kbCount = int64(len(usage.KnowledgeBases))
+		}
+		agentCount := usage.AgentTotal
+		if agentCount == 0 {
+			agentCount = int64(len(usage.Agents))
+		}
 		memoryInUse := len(usage.LongTermMemory.Bindings) > 0
 		logger.Warnf(ctx, "Model %s is in use: kb=%d agent=%d memory=%t", id, kbCount, agentCount, memoryInUse)
 		return apperrors.NewModelInUseError(
@@ -416,20 +422,34 @@ func (s *modelService) getModelUsageDetails(
 		LongTermMemory: types.ModelUsageMemory{Bindings: make([]types.ModelUsageBinding, 0)},
 	}
 
-	var err error
-	details.KnowledgeBases, err = s.kbRepo.ListModelUsages(ctx, tenantID, modelID)
+	kbCount, err := s.kbRepo.CountByModelID(ctx, tenantID, modelID)
 	if err != nil {
 		return details, err
 	}
-	if details.KnowledgeBases == nil {
-		details.KnowledgeBases = make([]types.ModelUsageResource, 0)
+	details.KnowledgeBaseTotal = kbCount
+	if kbCount > 0 {
+		details.KnowledgeBases, err = s.kbRepo.ListModelUsages(ctx, tenantID, modelID)
+		if err != nil {
+			return details, err
+		}
+		if details.KnowledgeBases == nil {
+			details.KnowledgeBases = make([]types.ModelUsageResource, 0)
+		}
 	}
-	details.Agents, err = s.agentRepo.ListModelUsages(ctx, tenantID, modelID)
+
+	agentCount, err := s.agentRepo.CountByModelID(ctx, tenantID, modelID)
 	if err != nil {
 		return details, err
 	}
-	if details.Agents == nil {
-		details.Agents = make([]types.ModelUsageResource, 0)
+	details.AgentTotal = agentCount
+	if agentCount > 0 {
+		details.Agents, err = s.agentRepo.ListModelUsages(ctx, tenantID, modelID)
+		if err != nil {
+			return details, err
+		}
+		if details.Agents == nil {
+			details.Agents = make([]types.ModelUsageResource, 0)
+		}
 	}
 
 	if s.tenantService == nil {

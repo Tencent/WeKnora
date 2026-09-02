@@ -15,6 +15,7 @@ import (
 
 type stubKBRepoForModelDelete struct {
 	usages   []types.ModelUsageResource
+	count    *int64
 	usageErr error
 }
 
@@ -44,6 +45,9 @@ func (s *stubKBRepoForModelDelete) CountByVectorStoreID(context.Context, *gorm.D
 	return 0, nil
 }
 func (s *stubKBRepoForModelDelete) CountByModelID(context.Context, uint64, string) (int64, error) {
+	if s.count != nil {
+		return *s.count, s.usageErr
+	}
 	return int64(len(s.usages)), s.usageErr
 }
 
@@ -61,6 +65,7 @@ func (s *stubKBRepoForModelDelete) ListUserKBPinIDs(context.Context, uint64, str
 
 type stubAgentRepoForModelDelete struct {
 	usages   []types.ModelUsageResource
+	count    *int64
 	usageErr error
 }
 
@@ -78,6 +83,9 @@ func (s *stubAgentRepoForModelDelete) UpdateAgent(context.Context, *types.Custom
 }
 func (s *stubAgentRepoForModelDelete) DeleteAgent(context.Context, string, uint64) error { return nil }
 func (s *stubAgentRepoForModelDelete) CountByModelID(context.Context, uint64, string) (int64, error) {
+	if s.count != nil {
+		return *s.count, s.usageErr
+	}
 	return int64(len(s.usages)), s.usageErr
 }
 
@@ -148,6 +156,7 @@ func TestDeleteModel_RejectsWhenReferenced(t *testing.T) {
 	details, ok := appErr.Details.(types.ModelUsageDetails)
 	require.True(t, ok)
 	require.Len(t, details.KnowledgeBases, 2)
+	assert.Equal(t, int64(2), details.KnowledgeBaseTotal)
 	assert.Equal(t, "Product docs", details.KnowledgeBases[0].Name)
 	assert.Equal(t, []types.ModelUsageBinding{types.ModelUsageBindingVLMModel}, details.KnowledgeBases[0].Bindings)
 	assert.Equal(t, "Engineering", details.KnowledgeBases[1].Name)
@@ -177,6 +186,7 @@ func TestDeleteModel_RejectsWhenUsedByAgent(t *testing.T) {
 	details, ok := appErr.Details.(types.ModelUsageDetails)
 	require.True(t, ok)
 	assert.Len(t, details.Agents, 2)
+	assert.Equal(t, int64(2), details.AgentTotal)
 }
 
 func TestDeleteModel_SucceedsWhenUnreferenced(t *testing.T) {
@@ -215,6 +225,8 @@ func TestGetModelUsageDetails_NormalizesEmptyCollections(t *testing.T) {
 	assert.NotNil(t, details.KnowledgeBases)
 	assert.NotNil(t, details.Agents)
 	assert.NotNil(t, details.LongTermMemory.Bindings)
+	assert.Equal(t, int64(0), details.KnowledgeBaseTotal)
+	assert.Equal(t, int64(0), details.AgentTotal)
 }
 
 func TestDeleteModel_DoesNotDeleteWhenUsageLookupFails(t *testing.T) {
@@ -239,6 +251,44 @@ func TestDeleteModel_DoesNotDeleteWhenUsageLookupFails(t *testing.T) {
 	err := svc.DeleteModel(ctx, modelID)
 	require.ErrorIs(t, err, wantErr)
 	assert.False(t, deleted)
+}
+
+func TestDeleteModel_ReportsUntruncatedTotalsWhenListsAreCapped(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	modelID := "popular-embedding"
+	kbTotal := int64(80)
+	agentTotal := int64(12)
+
+	svc := NewModelService(
+		&stubModelRepoForDelete{model: &types.Model{ID: modelID, TenantID: 1}},
+		&stubKBRepoForModelDelete{
+			count: &kbTotal,
+			usages: []types.ModelUsageResource{
+				{ID: "kb-1", Name: "Alpha", Bindings: []types.ModelUsageBinding{types.ModelUsageBindingEmbeddingModel}},
+				{ID: "kb-2", Name: "Beta", Bindings: []types.ModelUsageBinding{types.ModelUsageBindingEmbeddingModel}},
+			},
+		},
+		&stubAgentRepoForModelDelete{
+			count: &agentTotal,
+			usages: []types.ModelUsageResource{
+				{ID: "agent-1", Name: "Support", Bindings: []types.ModelUsageBinding{types.ModelUsageBindingChatModel}},
+			},
+		},
+		nil, nil, nil,
+	)
+
+	err := svc.DeleteModel(ctx, modelID)
+	require.Error(t, err)
+	appErr, ok := apperrors.IsAppError(err)
+	require.True(t, ok)
+	assert.Contains(t, appErr.Message, "80 knowledge base(s)")
+	assert.Contains(t, appErr.Message, "12 agent(s)")
+	details, ok := appErr.Details.(types.ModelUsageDetails)
+	require.True(t, ok)
+	assert.Equal(t, int64(80), details.KnowledgeBaseTotal)
+	assert.Len(t, details.KnowledgeBases, 2)
+	assert.Equal(t, int64(12), details.AgentTotal)
+	assert.Len(t, details.Agents, 1)
 }
 
 type stubTenantServiceForModelDelete struct {

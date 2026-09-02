@@ -138,6 +138,8 @@ type CustomAgentRepository interface {
 	CountByModelID(ctx context.Context, tenantID uint64, modelID string) (int64, error)
 	// ListModelUsages returns the minimal active agent projections that
 	// reference the model, with every matching binding merged per object.
+	// Implementations must cap the result at types.ModelUsageListLimit;
+	// callers that need the untruncated size should use CountByModelID.
 	ListModelUsages(ctx context.Context, tenantID uint64, modelID string) ([]types.ModelUsageResource, error)
 
 	// CountBySandboxConfigID counts agents pointing at a sandbox config.

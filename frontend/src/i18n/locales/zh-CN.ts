@@ -1985,6 +1985,7 @@ export default {
       agents: '智能体（{count}）',
       longTermMemory: '长期记忆',
       openConfiguration: '打开配置',
+      truncated: '仅显示前 {shown} 个，共 {total} 个',
       bindings: {
         embedding_model: 'Embedding 模型',
         summary_model: '摘要模型',

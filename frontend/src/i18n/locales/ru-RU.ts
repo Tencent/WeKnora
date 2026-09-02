@@ -1983,6 +1983,7 @@ export default {
       agents: 'Агенты ({count})',
       longTermMemory: 'Долговременная память',
       openConfiguration: 'Открыть настройки',
+      truncated: 'Показаны первые {shown} из {total}',
       bindings: {
         embedding_model: 'Модель эмбеддингов',
         summary_model: 'Модель суммаризации',

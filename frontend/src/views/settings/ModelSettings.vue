@@ -147,7 +147,9 @@
         <div class="model-usage-dialog__content">
           <section v-if="usageConflict.knowledge_bases.length" class="model-usage-group">
             <h3>
-              {{ $t('modelSettings.usage.knowledgeBases', { count: usageConflict.knowledge_bases.length }) }}
+              {{ $t('modelSettings.usage.knowledgeBases', {
+                count: modelUsageResourceCount(usageConflict.knowledge_bases, usageConflict.knowledge_base_total)
+              }) }}
             </h3>
             <ul>
               <li v-for="resource in usageConflict.knowledge_bases" :key="resource.id">
@@ -174,10 +176,21 @@
                 </t-button>
               </li>
             </ul>
+            <p
+              v-if="modelUsageListTruncated(usageConflict.knowledge_bases, usageConflict.knowledge_base_total)"
+              class="model-usage-truncated"
+            >
+              {{ $t('modelSettings.usage.truncated', {
+                shown: usageConflict.knowledge_bases.length,
+                total: modelUsageResourceCount(usageConflict.knowledge_bases, usageConflict.knowledge_base_total)
+              }) }}
+            </p>
           </section>
 
           <section v-if="usageConflict.agents.length" class="model-usage-group">
-            <h3>{{ $t('modelSettings.usage.agents', { count: usageConflict.agents.length }) }}</h3>
+            <h3>{{ $t('modelSettings.usage.agents', {
+              count: modelUsageResourceCount(usageConflict.agents, usageConflict.agent_total)
+            }) }}</h3>
             <ul>
               <li v-for="resource in usageConflict.agents" :key="resource.id">
                 <div class="model-usage-resource">
@@ -197,12 +210,21 @@
                   theme="primary"
                   variant="text"
                   size="small"
-                  @click="openUsageResource('agent', resource.id)"
+                  @click="openUsageResource('agent', resource.id, resource.bindings)"
                 >
                   {{ $t('modelSettings.usage.openConfiguration') }}
                 </t-button>
               </li>
             </ul>
+            <p
+              v-if="modelUsageListTruncated(usageConflict.agents, usageConflict.agent_total)"
+              class="model-usage-truncated"
+            >
+              {{ $t('modelSettings.usage.truncated', {
+                shown: usageConflict.agents.length,
+                total: modelUsageResourceCount(usageConflict.agents, usageConflict.agent_total)
+              }) }}
+            </p>
           </section>
 
           <section v-if="usageConflict.long_term_memory.bindings.length" class="model-usage-group">
@@ -252,6 +274,8 @@ import {
   ModelInUseError,
   modelUsageBindingI18nKey,
   modelUsageKnowledgeBaseSection,
+  modelUsageListTruncated,
+  modelUsageResourceCount,
   modelUsageResourceRoute,
   type ModelConfig,
   type ModelUsageDetails,
@@ -636,7 +660,7 @@ const deleteModel = async (_type: ModelType, modelId: string) => {
       showUsageDialog.value = true
       return
     }
-    MessagePlugin.error(t('modelSettings.toasts.deleteFailed'))
+    MessagePlugin.error(error.message || t('modelSettings.toasts.deleteFailed'))
   }
 }
 
@@ -674,7 +698,7 @@ const openUsageResource = async (
   // Both the KB editor and global Settings can already be open underneath the
   // usage dialog. Flush their false state before reusing either component so
   // its visible watcher reloads the target object instead of keeping stale data.
-  await router.push(modelUsageResourceRoute(kind, id))
+  await router.push(modelUsageResourceRoute(kind, id, bindings))
   if (kind === 'knowledge_base') {
     uiStore.openKBSettings(id, knowledgeBaseSection)
   }
@@ -1199,6 +1223,13 @@ onMounted(() => {
       border-top: 1px solid var(--td-component-stroke);
     }
   }
+}
+
+.model-usage-truncated {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+  line-height: 1.5;
 }
 
 .model-usage-resource {

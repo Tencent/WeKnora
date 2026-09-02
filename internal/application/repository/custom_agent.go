@@ -85,16 +85,20 @@ func (r *customAgentRepository) ListModelUsages(
 		Select("id", "name", "config").
 		Where("tenant_id = ?", tenantID)
 	query = scopeCustomAgentsByModelID(query, modelID)
-	if err := query.Order("name ASC, id ASC").Find(&rows).Error; err != nil {
+	if err := query.Order("name ASC, id ASC").Limit(types.ModelUsageListLimit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 
 	usages := make([]types.ModelUsageResource, 0, len(rows))
 	for _, row := range rows {
+		bindings := customAgentModelUsageBindings(row, modelID)
+		if len(bindings) == 0 {
+			continue
+		}
 		usages = append(usages, types.ModelUsageResource{
 			ID:       row.ID,
 			Name:     row.Name,
-			Bindings: customAgentModelUsageBindings(row, modelID),
+			Bindings: bindings,
 		})
 	}
 	return usages, nil

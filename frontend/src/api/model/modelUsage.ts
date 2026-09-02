@@ -28,6 +28,8 @@ export interface ModelUsageDetails {
   long_term_memory: {
     bindings: string[]
   }
+  knowledge_base_total: number
+  agent_total: number
 }
 
 export class ModelInUseError extends Error {
@@ -68,6 +70,13 @@ function parseResources(value: unknown): ModelUsageResource[] | null {
   return resources
 }
 
+function parseTotal(value: unknown, listed: number): number {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= listed) {
+    return Math.floor(value)
+  }
+  return listed
+}
+
 export function parseModelUsageDetails(value: unknown): ModelUsageDetails | null {
   if (!isRecord(value) || !isRecord(value.long_term_memory)) return null
 
@@ -76,10 +85,12 @@ export function parseModelUsageDetails(value: unknown): ModelUsageDetails | null
   const memoryBindings = parseBindings(value.long_term_memory.bindings)
   if (!knowledgeBases || !agents || !memoryBindings) return null
 
-  const details = {
+  const details: ModelUsageDetails = {
     knowledge_bases: knowledgeBases,
     agents,
     long_term_memory: { bindings: memoryBindings },
+    knowledge_base_total: parseTotal(value.knowledge_base_total, knowledgeBases.length),
+    agent_total: parseTotal(value.agent_total, agents.length),
   }
   if (knowledgeBases.length === 0 && agents.length === 0 && memoryBindings.length === 0) {
     return null
@@ -102,9 +113,21 @@ export function modelUsageBindingI18nKey(binding: string): string {
   return `modelSettings.usage.bindings.${key}`
 }
 
+export function modelUsageResourceCount(resources: readonly ModelUsageResource[], total?: number): number {
+  return typeof total === 'number' && Number.isFinite(total) && total >= resources.length
+    ? Math.floor(total)
+    : resources.length
+}
+
+export function modelUsageListTruncated(resources: readonly ModelUsageResource[], total?: number): boolean {
+  return modelUsageResourceCount(resources, total) > resources.length
+}
+
 export type ModelUsageResourceKind = 'knowledge_base' | 'agent'
 
 export type KnowledgeBaseModelUsageSection = 'models' | 'multimodal' | 'asr'
+
+export type AgentModelUsageSection = 'model' | 'multimodal' | 'suggestions'
 
 const knowledgeBaseUsageSections: Partial<Record<KnownModelUsageBinding, KnowledgeBaseModelUsageSection>> = {
   embedding_model: 'models',
@@ -113,6 +136,15 @@ const knowledgeBaseUsageSections: Partial<Record<KnownModelUsageBinding, Knowled
   image_processing_model: 'multimodal',
   vlm_model: 'multimodal',
   asr_model: 'asr',
+}
+
+const agentUsageSections: Partial<Record<KnownModelUsageBinding, AgentModelUsageSection>> = {
+  chat_model: 'model',
+  rerank_model: 'model',
+  query_understand_model: 'model',
+  vlm_model: 'multimodal',
+  asr_model: 'multimodal',
+  follow_up_model: 'suggestions',
 }
 
 export function modelUsageKnowledgeBaseSection(
@@ -125,12 +157,26 @@ export function modelUsageKnowledgeBaseSection(
   return 'models'
 }
 
-export function modelUsageResourceRoute(kind: ModelUsageResourceKind, id: string) {
+export function modelUsageAgentSection(
+  bindings: readonly string[],
+): AgentModelUsageSection {
+  for (const binding of bindings) {
+    const section = agentUsageSections[binding as KnownModelUsageBinding]
+    if (section) return section
+  }
+  return 'model'
+}
+
+export function modelUsageResourceRoute(
+  kind: ModelUsageResourceKind,
+  id: string,
+  bindings: readonly string[] = [],
+) {
   if (kind === 'knowledge_base') {
     return { path: `/platform/knowledge-bases/${encodeURIComponent(id)}` }
   }
   return {
     path: '/platform/agents',
-    query: { edit: id, section: 'model' },
+    query: { edit: id, section: modelUsageAgentSection(bindings) },
   }
 }

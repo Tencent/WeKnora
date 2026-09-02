@@ -15,16 +15,12 @@ test('model deletion renders structured usage groups and localized fallback erro
   assert.match(source, /usageConflict\.knowledge_bases/)
   assert.match(source, /usageConflict\.agents/)
   assert.match(source, /usageConflict\.long_term_memory\.bindings/)
-  assert.match(source, /MessagePlugin\.error\(t\('modelSettings\.toasts\.deleteFailed'\)\)/)
-  assert.doesNotMatch(
-    source,
-    /MessagePlugin\.error\(error\.message \|\| t\('modelSettings\.toasts\.deleteFailed'\)\)/,
-  )
+  assert.match(source, /MessagePlugin\.error\(error\.message \|\| t\('modelSettings\.toasts\.deleteFailed'\)\)/)
 })
 
 test('referenced knowledge bases and agents open their relevant configuration pages', () => {
   assert.match(source, /openUsageResource\('knowledge_base', resource\.id, resource\.bindings\)/)
-  assert.match(source, /openUsageResource\('agent', resource\.id\)/)
+  assert.match(source, /openUsageResource\('agent', resource\.id, resource\.bindings\)/)
   assert.match(source, /uiStore\.closeKBEditor\(\)/)
   assert.match(source, /uiStore\.closeSettings\(\)/)
   assert.match(source, /await nextTick\(\)/)
@@ -32,7 +28,7 @@ test('referenced knowledge bases and agents open their relevant configuration pa
     source,
     /const routeName = router\.currentRoute\.value\.name[\s\S]*canFocusExistingKnowledgeBase[\s\S]*KNOWLEDGE_BASE_EDITOR_HOST_ROUTES\.has\(routeName\)[\s\S]*focusKbEditorSection\(knowledgeBaseSection\)/,
   )
-  assert.match(source, /await router\.push\(modelUsageResourceRoute\(kind, id\)\)/)
+  assert.match(source, /await router\.push\(modelUsageResourceRoute\(kind, id, bindings\)\)/)
   assert.match(source, /uiStore\.openKBSettings\(id, knowledgeBaseSection\)/)
   assert.match(
     agentListSource,

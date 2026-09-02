@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -115,6 +116,29 @@ func TestListModelUsages_KnowledgeBase(t *testing.T) {
 		types.ModelUsageBindingASRModel,
 		types.ModelUsageBindingWikiSynthesisModel,
 	}, usages[1].Bindings)
+}
+
+func TestListModelUsages_KnowledgeBaseRespectsLimit(t *testing.T) {
+	ctx := context.Background()
+	db := setupModelUsageTestDB(t)
+	repo := NewKnowledgeBaseRepository(db)
+	modelID := "shared-embed"
+
+	for i := 0; i < types.ModelUsageListLimit+3; i++ {
+		kb := makeKB(nil)
+		kb.Name = fmt.Sprintf("KB %03d", i)
+		kb.EmbeddingModelID = modelID
+		require.NoError(t, db.Create(kb).Error)
+	}
+
+	usages, err := repo.ListModelUsages(ctx, 1, modelID)
+	require.NoError(t, err)
+	require.Len(t, usages, types.ModelUsageListLimit)
+	assert.Equal(t, "KB 000", usages[0].Name)
+
+	count, err := repo.CountByModelID(ctx, 1, modelID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(types.ModelUsageListLimit+3), count)
 }
 
 func TestCountByModelID_CustomAgent(t *testing.T) {

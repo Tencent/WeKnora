@@ -233,16 +233,20 @@ func (r *knowledgeBaseRepository) ListModelUsages(
 		).
 		Where("tenant_id = ?", tenantID)
 	query = scopeKnowledgeBasesByModelID(query, modelID)
-	if err := query.Order("name ASC, id ASC").Find(&rows).Error; err != nil {
+	if err := query.Order("name ASC, id ASC").Limit(types.ModelUsageListLimit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 
 	usages := make([]types.ModelUsageResource, 0, len(rows))
 	for _, row := range rows {
+		bindings := knowledgeBaseModelUsageBindings(row, modelID)
+		if len(bindings) == 0 {
+			continue
+		}
 		usages = append(usages, types.ModelUsageResource{
 			ID:       row.ID,
 			Name:     row.Name,
-			Bindings: knowledgeBaseModelUsageBindings(row, modelID),
+			Bindings: bindings,
 		})
 	}
 	return usages, nil
