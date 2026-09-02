@@ -33,6 +33,78 @@ func TestParseGeneratedSuggestionsFiltersAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestFilterSuggestionItemsAgainstQueryDropsNormalizedEchoes(t *testing.T) {
+	const currentQuery = "介绍一下手冲咖啡"
+	items := types.SuggestionItems{
+		{ID: "model-echo", Text: "介绍一下 手冲咖啡？", Source: "model"},
+		{ID: "wiki-echo", Text: "介绍一下手冲咖啡。", Source: "wiki"},
+		{ID: "keep", Text: "手冲咖啡适合用什么水温？", Source: "model"},
+	}
+	got := filterSuggestionItemsAgainstQuery(items, currentQuery)
+	if len(got) != 1 || got[0].ID != "keep" {
+		t.Fatalf("filterSuggestionItemsAgainstQuery() = %#v", got)
+	}
+}
+
+func TestFilterSuggestionItemsAgainstQueryKeepsAllWhenQueryEmpty(t *testing.T) {
+	items := types.SuggestionItems{
+		{ID: "1", Text: "A?", Source: "model"},
+		{ID: "2", Text: "B?", Source: "wiki"},
+	}
+	for _, query := range []string{"", "   ", "？？"} {
+		got := filterSuggestionItemsAgainstQuery(items, query)
+		if len(got) != 2 {
+			t.Fatalf("query %q: len = %d, want 2", query, len(got))
+		}
+	}
+}
+
+func TestSuggestionMatchesQueryIgnoresPunctuationAndCase(t *testing.T) {
+	cases := []struct {
+		value, query string
+		want         bool
+	}{
+		{"Tell me about Foo?", "tell me about foo", true},
+		{"介绍一下X", "介绍一下X？", true},
+		{"介绍一下 X", "介绍一下X", true},
+		{"什么是X？", "介绍一下X", false},
+		{"介绍一下XY", "介绍一下X", false},
+		{"介绍一下X", "", false},
+	}
+	for _, c := range cases {
+		if got := suggestionMatchesQuery(c.value, c.query); got != c.want {
+			t.Fatalf("suggestionMatchesQuery(%q, %q) = %v, want %v", c.value, c.query, got, c.want)
+		}
+	}
+}
+
+// Removing the echo must not collapse the hybrid layout: the knowledge slot
+// should be filled by the next knowledge candidate, not stolen by the model.
+func TestMergeHybridKeepsLayoutAfterEchoRemoved(t *testing.T) {
+	const currentQuery = "介绍一下手冲咖啡"
+	model := types.SuggestionItems{
+		{ID: "m1", Text: "手冲咖啡适合用什么水温？", Source: "model"},
+		{ID: "m2", Text: "如何选择咖啡豆？", Source: "model"},
+	}
+	knowledge := filterSuggestionItemsAgainstQuery(types.SuggestionItems{
+		{ID: "k-echo", Text: currentQuery, Source: "wiki"},
+		{ID: "k2", Text: "咖啡豆应该如何保存？", Source: "wiki"},
+	}, currentQuery)
+
+	got := mergeHybridSuggestionItems(model, knowledge, 3)
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3: %#v", len(got), got)
+	}
+	if got[0].ID != "m1" || got[1].ID != "m2" || got[2].ID != "k2" {
+		t.Fatalf("mergeHybridSuggestionItems() = %#v", got)
+	}
+	for _, item := range got {
+		if item.Text == currentQuery {
+			t.Fatalf("follow-up still echoes the current question: %#v", got)
+		}
+	}
+}
+
 func TestMergeSuggestionItemsPreservesPriorityAndLimit(t *testing.T) {
 	primary := types.SuggestionItems{{ID: "1", Text: "A?", Source: "model"}}
 	fallback := types.SuggestionItems{
