@@ -413,7 +413,33 @@ const handleEnabledChange = () => {
   handleConfigChange()
 }
 
+// 标签分隔符：中英文逗号/顿号/分号、竖线、斜杠、换行
+const TAG_SEPARATOR_RE = /[、，,;；|/\\\n\r]+/
+
+// 粘贴整串标签（如"依赖、故障原因、影响"）时自动拆分为多个独立条目。
+// 否则整串会成为单个标签，后端按标签精确匹配关系类型时全部失败，
+// 提取出的关系会被静默丢弃（relations 为空），且界面无任何提示。
 const handleTagsChange = () => {
+  const raw = localGraphExtract.value.tags || []
+  const normalized: string[] = []
+  let changed = false
+  for (const tag of raw) {
+    const parts = String(tag)
+      .split(TAG_SEPARATOR_RE)
+      .map((part) => part.trim())
+      .filter(Boolean)
+    if (parts.length !== 1 || parts[0] !== tag) {
+      changed = true
+    }
+    for (const part of parts) {
+      if (!normalized.includes(part)) {
+        normalized.push(part)
+      }
+    }
+  }
+  if (changed) {
+    localGraphExtract.value.tags = normalized
+  }
   handleConfigChange()
 }
 
@@ -536,7 +562,13 @@ const handleExtract = async () => {
     localGraphExtract.value.nodes = response.nodes || []
     localGraphExtract.value.relations = response.relations || []
     handleNodesChange()
-    MessagePlugin.success(t('graphSettings.extractSuccess'))
+    if ((response.nodes || []).length > 0 && (response.relations || []).length === 0) {
+      // 实体有产出但关系为空：最常见原因是关系类型与标签不匹配（例如标签被
+      // 粘贴成一整串），后端按标签精确匹配后静默丢弃了全部关系。
+      MessagePlugin.warning(t('graphSettings.relationsEmptyWarning'))
+    } else {
+      MessagePlugin.success(t('graphSettings.extractSuccess'))
+    }
   } catch (error: any) {
     console.error('Failed to extract relations:', error)
     MessagePlugin.error(t('graphSettings.extractFailed'))
