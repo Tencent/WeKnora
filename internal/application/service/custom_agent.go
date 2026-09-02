@@ -42,6 +42,9 @@ type customAgentService struct {
 	wikiPageRepo   interfaces.WikiPageRepository
 	tagRepo        interfaces.KnowledgeTagRepository
 	knowledgeRepo  interfaces.KnowledgeRepository
+	// agentShareRepo is optional (nil in unit tests that don't exercise
+	// sharing): it lets read paths resolve organization-shared agents.
+	agentShareRepo interfaces.AgentShareRepository
 }
 
 // NewCustomAgentService creates a new custom agent service
@@ -53,6 +56,7 @@ func NewCustomAgentService(
 	wikiPageRepo interfaces.WikiPageRepository,
 	tagRepo interfaces.KnowledgeTagRepository,
 	knowledgeRepo interfaces.KnowledgeRepository,
+	agentShareRepo interfaces.AgentShareRepository,
 ) interfaces.CustomAgentService {
 	return &customAgentService{
 		repo:           repo,
@@ -62,6 +66,7 @@ func NewCustomAgentService(
 		wikiPageRepo:   wikiPageRepo,
 		tagRepo:        tagRepo,
 		knowledgeRepo:  knowledgeRepo,
+		agentShareRepo: agentShareRepo,
 	}
 }
 
@@ -537,9 +542,38 @@ func (s *customAgentService) getSuggestedQuestions(
 		return nil, ErrInvalidTenantID
 	}
 
-	// Get agent configuration
+	// Get agent configuration. The starter-questions endpoint must also work
+	// for organization-shared agents (issue #2957): when the caller's tenant
+	// has no own copy, fall back to the share and run the KB/tag resolution
+	// below under the source tenant.
 	agent, err := s.GetAgentByID(ctx, agentID)
-	if err != nil {
+	if err != nil && includeCurated {
+		if !errors.Is(err, ErrAgentNotFound) {
+			return nil, err
+		}
+		sharedAgent, shareErr := resolveAgentForSharedRead(
+			ctx, s.agentShareRepo, s.repo.GetAgentByID, tenantID, agentID,
+		)
+		if shareErr != nil {
+			return nil, err // preserve the original own-tenant lookup result
+		}
+		agent = sharedAgent
+		// A shared-agent consumer has no scope over the source tenant, so
+		// caller-supplied KB/knowledge/tag overrides are unsafe to honor:
+		// the owner-tenant switch below would widen them beyond the caller's
+		// own access. Only the agent's configuration selects suggestion
+		// sources — the same visibility chatting with the shared agent
+		// already grants.
+		kbIDs = nil
+		knowledgeIDs = nil
+		tagScopes = nil
+		scopeTagIDs = nil
+		// Run KB/tag/chunk resolution under the source tenant so the agent's
+		// configured knowledge bases resolve; mirrors how the embed widget
+		// queries suggestions for the agent's channels.
+		ctx = context.WithValue(ctx, types.TenantIDContextKey, agent.TenantID)
+		tenantID = agent.TenantID
+	} else if err != nil {
 		return nil, err
 	}
 

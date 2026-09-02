@@ -30,6 +30,9 @@ type embedChannelService struct {
 	agentService interfaces.CustomAgentService
 	chunkService interfaces.ChunkService
 	redis        *redis.Client
+	// agentShareRepo is optional (nil in unit tests): it lets read paths
+	// resolve organization-shared agents.
+	agentShareRepo interfaces.AgentShareRepository
 }
 
 func NewEmbedChannelService(
@@ -37,12 +40,14 @@ func NewEmbedChannelService(
 	agentService interfaces.CustomAgentService,
 	chunkService interfaces.ChunkService,
 	redisClient *redis.Client,
+	agentShareRepo interfaces.AgentShareRepository,
 ) interfaces.EmbedChannelService {
 	return &embedChannelService{
-		repo:         repo,
-		agentService: agentService,
-		chunkService: chunkService,
-		redis:        redisClient,
+		repo:           repo,
+		agentService:   agentService,
+		chunkService:   chunkService,
+		redis:          redisClient,
+		agentShareRepo: agentShareRepo,
 	}
 }
 
@@ -105,7 +110,18 @@ func (s *embedChannelService) ListByAgent(
 ) ([]*types.EmbedChannel, error) {
 	agentID = strings.TrimSpace(agentID)
 	if _, err := s.ensureAgentOwned(ctx, tenantID, agentID); err != nil {
-		return nil, err
+		// Read paths also serve organization-shared agents (issue #2957):
+		// when the agent is not owned by the caller's tenant, resolve it
+		// through the share and list the source tenant's channels. Publish
+		// tokens are never included in responses, and mutating paths keep
+		// going through ensureAgentOwned, so sharing stays read-only here.
+		sharedAgent, shareErr := resolveAgentForSharedRead(
+			ctx, s.agentShareRepo, s.agentService.GetAgentByIDAndTenant, tenantID, agentID,
+		)
+		if shareErr != nil {
+			return nil, err // preserve the ownership error for the handler
+		}
+		tenantID = sharedAgent.TenantID
 	}
 	return s.repo.ListByAgent(ctx, tenantID, agentID)
 }
