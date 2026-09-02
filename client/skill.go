@@ -146,6 +146,32 @@ func (c *Client) ReinstallSandboxSkill(
 	return response.Data.SkillID, nil
 }
 
+// StopSandboxSkill aborts an in-flight install so the operator can retry or
+// uninstall. After a process restart the row may still say installing with no
+// live process; this rewrites it immediately instead of waiting for the
+// stuck-run reaper. Removal is not stopped.
+func (c *Client) StopSandboxSkill(
+	ctx context.Context, configID, skillID string,
+) (*SandboxSkill, error) {
+	if configID == "" {
+		return nil, fmt.Errorf("sandbox config ID is required")
+	}
+	if skillID == "" {
+		return nil, fmt.Errorf("skill ID is required")
+	}
+	path := "/api/v1/sandbox-configs/" + url.PathEscape(configID) +
+		"/skills/" + url.PathEscape(skillID) + "/stop"
+	resp, err := c.doRequest(ctx, http.MethodPost, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var response sandboxSkillResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+	return &response.Data, nil
+}
+
 // SandboxSkillEnv is one environment variable an installed skill declared. It
 // reports whether a workspace-wide value exists and never what it is.
 type SandboxSkillEnv struct {

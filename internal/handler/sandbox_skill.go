@@ -54,6 +54,7 @@ type sandboxSkillService interface {
 		ctx context.Context, tenantID uint64, configID, source string,
 	) (string, error)
 	ReinstallSkill(ctx context.Context, tenantID uint64, configID, skillID string) (string, error)
+	StopSkill(ctx context.Context, tenantID uint64, configID, skillID string) (*types.TenantSkillEntity, error)
 	RemoveSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
 	LastProgress(
 		ctx context.Context, tenantID uint64, configID, skillID string,
@@ -396,6 +397,35 @@ func (h *SandboxSkillHandler) Reinstall(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": gin.H{"skill_id": skillID}})
+}
+
+// Stop godoc
+// @Summary      Stop a skill install
+// @Description  Abort an in-flight install so the operator can retry or uninstall. After a process restart the row may still say installing with no live process; this rewrites it immediately instead of waiting for the stuck-run reaper. Removal is not stopped.
+// @Tags         SandboxConfig
+// @Produce      json
+// @Param        id       path      string  true  "Sandbox config ID"
+// @Param        skillId  path      string  true  "Skill ID"
+// @Success      200      {object}  map[string]interface{}  "Stopped skill"
+// @Failure      400      {object}  apperrors.AppError      "Skill is not installing"
+// @Failure      401      {object}  map[string]interface{}  "Unauthorized"
+// @Failure      404      {object}  apperrors.AppError      "Skill not found"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /sandbox-configs/{id}/skills/{skillId}/stop [post]
+func (h *SandboxSkillHandler) Stop(c *gin.Context) {
+	skill, err := h.service.StopSkill(
+		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), c.Param("skillId"),
+	)
+	if err != nil {
+		respondSkillServiceError(c, err)
+		return
+	}
+	if skill == nil {
+		_ = c.Error(apperrors.NewNotFoundError("skill not found"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": toSkillResponse(skill)})
 }
 
 func skillTooLargeError() error {

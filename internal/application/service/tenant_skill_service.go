@@ -107,6 +107,12 @@ type TenantSkillService struct {
 	cron    *cron.Cron
 	cronMu  sync.Mutex
 	started bool
+
+	// runCancels lets StopSkill abort the goroutine that holds this skill's
+	// install. The map is per-process: a restart or another replica has
+	// nothing to cancel, and StopSkill then only rewrites the stuck row.
+	runCancelMu sync.Mutex
+	runCancels  map[string]*skillRunCancel
 }
 
 // NewTenantSkillService wires the repositories and runtimes the install and
@@ -144,6 +150,7 @@ func NewTenantSkillService(
 		snapshotRetention: skillSnapshotRetention,
 		installHeartbeat:  skillInstallHeartbeatInterval,
 		localLocks:        newKeyedMutex(),
+		runCancels:        map[string]*skillRunCancel{},
 		bundleCache:       newSkillBundleArchiveCache(),
 		cron: cron.New(cron.WithSeconds(), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
@@ -157,6 +164,10 @@ func NewTenantSkillService(
 // run's changes, and the config holds exactly one pointer. Two concurrent
 // installs would each snapshot a base that lacks the other's work, and whoever
 // wrote the pointer last would silently discard the other install.
+//
+// With Redis this is a 30s renewable lease, so every replica of the same
+// workspace contends on one key. Without Redis it is a process-local mutex
+// and two replicas can write the pointer independently.
 func (s *TenantSkillService) withConfigLock(
 	ctx context.Context, tenantID uint64, configID string, fn func(context.Context) error,
 ) error {

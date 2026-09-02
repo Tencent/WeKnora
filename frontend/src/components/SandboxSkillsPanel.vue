@@ -76,6 +76,19 @@
       </section>
 
       <section v-if="mode === 'list' && focusSkillId" class="skill-manage">
+        <Teleport v-if="headerActionsTarget && showHeaderStop" :to="headerActionsTarget" defer>
+          <t-button
+            class="skill-header-stop"
+            theme="default"
+            variant="outline"
+            size="small"
+            :disabled="!managedSkill"
+            :loading="!!managedSkill && stoppingId === managedSkill.id"
+            @click="managedSkill && stopSkill(managedSkill)"
+          >
+            {{ $t('settings.sandbox.skillStop') }}
+          </t-button>
+        </Teleport>
         <Teleport v-if="headerActionsTarget && showHeaderUninstall" :to="headerActionsTarget" defer>
           <t-popconfirm
             theme="warning"
@@ -502,6 +515,21 @@
                     </button>
                   </t-tooltip>
                   <t-tooltip
+                    v-if="skill.status === 'installing'"
+                    :content="$t('settings.sandbox.skillStopHint')"
+                    placement="top"
+                  >
+                    <button
+                      type="button"
+                      class="skill-card__icon-btn"
+                      :disabled="stoppingId === skill.id"
+                      :aria-label="$t('settings.sandbox.skillStop')"
+                      @click="stopSkill(skill)"
+                    >
+                      <t-icon name="stop-circle" size="14px" />
+                    </button>
+                  </t-tooltip>
+                  <t-tooltip
                     v-if="skill.status === 'failed'"
                     :content="$t('settings.sandbox.skillRetryHint')"
                     placement="top"
@@ -592,6 +620,7 @@ import {
   listConfigSkills,
   patchConfigSkill,
   reinstallConfigSkill,
+  stopConfigSkill,
   uploadConfigSkill,
   installConfigSkillFromSource,
   type ConfigSkill,
@@ -649,6 +678,7 @@ const skills = ref<ConfigSkill[]>([])
 const togglingId = ref('')
 const deletingId = ref('')
 const retryingId = ref('')
+const stoppingId = ref('')
 const uninstallingId = ref('')
 const uninstallingName = ref('')
 const uninstallDone = ref(false)
@@ -763,6 +793,13 @@ const showHeaderUninstall = computed(() => {
   const skill = managedSkill.value
   if (!skill || skill.status === 'installing') return false
   return !isRemoving(skill)
+})
+
+const showHeaderStop = computed(() => {
+  if (!props.focusSkillId || uninstallDone.value) return false
+  const skill = managedSkill.value
+  if (!skill) return false
+  return skill.status === 'installing'
 })
 
 watch(managedSkill, (skill) => {
@@ -1363,6 +1400,25 @@ async function retrySkill(skill: ConfigSkill) {
     MessagePlugin.error(e?.message || t('settings.sandbox.skillRetryFailed'))
   } finally {
     retryingId.value = ''
+  }
+}
+
+async function stopSkill(skill: ConfigSkill) {
+  if (!props.record) return
+  stoppingId.value = skill.id
+  forgetProgress(skill.id)
+  try {
+    const res = await stopConfigSkill(props.record.id, skill.id)
+    const updated = res?.data
+    if (updated) {
+      skills.value = skills.value.map((item) => (item.id === skill.id ? { ...item, ...updated } : item))
+    }
+    MessagePlugin.success(t('settings.sandbox.skillStopAccepted'))
+    await loadSkills()
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('settings.sandbox.skillStopFailed'))
+  } finally {
+    stoppingId.value = ''
   }
 }
 

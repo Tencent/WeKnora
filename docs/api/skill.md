@@ -7,6 +7,7 @@
 | GET  | `/skills` | 获取预装 Skills 列表 |
 | POST | `/sandbox-configs/{id}/skills` | 安装技能（zip 上传或托管平台 source） |
 | POST | `/sandbox-configs/{id}/skills/{skillId}/reinstall` | 用已保存的安装包重试安装 |
+| POST | `/sandbox-configs/{id}/skills/{skillId}/stop` | 停止卡住的安装 |
 | GET  | `/sandbox-configs/{id}/skills/{skillId}/files` | 列出已安装技能的文件 |
 | GET  | `/sandbox-configs/{id}/skills/{skillId}/files/content` | 读取已安装技能中的单个文件 |
 | PATCH | `/sandbox-configs/{id}/skills/{skillId}` | 启用/停用技能，或设置空间级环境变量 |
@@ -135,6 +136,33 @@ curl --location --request POST \
     }
 }
 ```
+
+## POST `/sandbox-configs/{id}/skills/{skillId}/stop` - 停止安装
+
+中止进行中的安装，之后可以重试或卸载。服务重启后安装行可能一直停在 `installing` 且没有存活进程，本接口会立刻改写该行，不必等 stuck-run reaper。卸载不受影响。
+
+状态变为 `failed`，错误为「安装已停止」。
+
+```curl
+curl --location --request POST \
+'http://localhost:8080/api/v1/sandbox-configs/{id}/skills/{skillId}/stop' \
+--header 'X-API-Key: sk-xxxxx'
+```
+
+**响应**（200）:
+
+```json
+{
+    "success": true,
+    "data": {
+        "id": "...",
+        "status": "failed",
+        "error": "安装已停止"
+    }
+}
+```
+
+若技能不是 `installing`（且不是已经 `failed`），返回 400。已经 `failed` 的停止是幂等成功。
 
 ## GET `/sandbox-configs/{id}/skills/{skillId}/files` - 列出技能文件
 

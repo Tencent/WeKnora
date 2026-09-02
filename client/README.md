@@ -402,6 +402,18 @@ if err != nil {
 _ = skillID // 用 skillID 订阅 /sandbox-configs/{id}/skills/{skillID}/install-events
 ```
 
+### 示例：停止卡住的安装
+
+服务重启后安装行可能一直停在 `installing`，界面无法重试或卸载。停止会立刻改写该行（进程内若还有 goroutine 也会取消），之后可以再调重试或卸载。
+
+```go
+skill, err := apiClient.StopSandboxSkill(context.Background(), sandboxConfigID, skillID)
+if err != nil {
+    // 处理错误
+}
+_ = skill
+```
+
 ### 示例：重试失败的安装
 
 安装失败的原因常与安装包无关（沙箱不可达、依赖源超时）。服务端保留着原始安装包，重试无需再传一次。

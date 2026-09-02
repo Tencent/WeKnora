@@ -41,6 +41,7 @@ type fakeSandboxSkillService struct {
 	installSource string
 	sourceErr     error
 	reinstallErr  error
+	stopErr       error
 	removeErr     error
 
 	files    []service.SkillFileEntry
@@ -66,6 +67,10 @@ type fakeSandboxSkillService struct {
 	reinstallTenant uint64
 	reinstallConfig string
 	reinstallSkill  string
+
+	stopTenant uint64
+	stopConfig string
+	stopSkill  string
 
 	removeTenant uint64
 	removeConfig string
@@ -207,6 +212,23 @@ func (f *fakeSandboxSkillService) ReinstallSkill(
 	return f.installID, f.reinstallErr
 }
 
+func (f *fakeSandboxSkillService) StopSkill(
+	_ context.Context, tenantID uint64, configID, skillID string,
+) (*types.TenantSkillEntity, error) {
+	f.stopTenant, f.stopConfig, f.stopSkill = tenantID, configID, skillID
+	if f.stopErr != nil {
+		return nil, f.stopErr
+	}
+	skill := f.skills[skillID]
+	if skill == nil {
+		return nil, apperrors.NewNotFoundError("skill not found")
+	}
+	if tenantID != testSkillTenantID || skill.SandboxConfigID != configID {
+		return nil, apperrors.NewNotFoundError("skill not found")
+	}
+	return skill, nil
+}
+
 func (f *fakeSandboxSkillService) RemoveSkill(
 	_ context.Context, tenantID uint64, configID, skillID string,
 ) error {
@@ -278,6 +300,7 @@ func newSkillTestRouter(h *SandboxSkillHandler) *gin.Engine {
 	r.GET("/sandbox-configs/:id/skills/:skillId/files", h.ListFiles)
 	r.GET("/sandbox-configs/:id/skills/:skillId/files/content", h.GetFile)
 	r.POST("/sandbox-configs/:id/skills/:skillId/reinstall", h.Reinstall)
+	r.POST("/sandbox-configs/:id/skills/:skillId/stop", h.Stop)
 	r.PATCH("/sandbox-configs/:id/skills/:skillId", h.Patch)
 	r.DELETE("/sandbox-configs/:id/skills/:skillId", h.Delete)
 	r.GET("/sandbox-configs/:id/skills/:skillId/install-events", h.InstallEvents)
@@ -628,6 +651,42 @@ func TestSandboxSkillReinstallIsAccepted(t *testing.T) {
 	require.Equal(t, "cfg-a", svc.reinstallConfig)
 	require.Equal(t, "skill-1", svc.reinstallSkill)
 	require.Contains(t, w.Body.String(), `"skill_id":"skill-1"`)
+}
+
+func TestSandboxSkillStopReturnsTheSkill(t *testing.T) {
+	svc := &fakeSandboxSkillService{
+		skills: map[string]*types.TenantSkillEntity{
+			"skill-1": {
+				ID: "skill-1", SandboxConfigID: "cfg-a",
+				Status: types.SkillStatusFailed, Enabled: true,
+			},
+		},
+	}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost,
+		"/sandbox-configs/cfg-a/skills/skill-1/stop", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, testSkillTenantID, svc.stopTenant,
+		"a stop must be scoped to the caller's workspace")
+	require.Equal(t, "cfg-a", svc.stopConfig)
+	require.Equal(t, "skill-1", svc.stopSkill)
+	require.Contains(t, w.Body.String(), `"id":"skill-1"`)
+}
+
+func TestSandboxSkillStopReportsAMissingSkill(t *testing.T) {
+	svc := &fakeSandboxSkillService{
+		stopErr: apperrors.NewNotFoundError("skill not found"),
+	}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost,
+		"/sandbox-configs/cfg-a/skills/nope/stop", nil))
+
+	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestSandboxSkillReinstallReportsAMissingSkill(t *testing.T) {
