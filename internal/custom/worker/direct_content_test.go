@@ -226,7 +226,9 @@ func TestReadDraftChunksUsesFixedMPSTaskEvidence(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.VideoProcessingJob{}))
 	videoID := "video-existing"
-	taskID := "2600031422-WorkflowTask-29768d9225c63d39cd26f2a88166bac8tt7"
+	// Use a synthetic ID so a local/cloud MPS task can never be mistaken for
+	// a production binding or copied into a deployment configuration.
+	taskID := "mps-test-task-id"
 	payload, err := json.Marshal(map[string]any{"mps_result": mps.Result{Segments: []mps.Segment{
 		{SourceSegmentID: "mps:fixed:000000", Text: "开场说明", StartMs: 123, EndMs: 19803, SpeakerID: "speaker-1"},
 		{SourceSegmentID: "mps:fixed:000001", Text: "方法介绍", StartMs: 19803, EndMs: 30200, SpeakerID: "speaker-1"},
