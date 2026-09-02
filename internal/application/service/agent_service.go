@@ -423,7 +423,12 @@ func (s *agentService) registerSandboxFileTools(
 	if store := sessionSandboxFileStore(sandboxMgr); store != nil {
 		toolRegistry.RegisterTool(tools.NewListSandboxFilesTool(store))
 		toolRegistry.RegisterTool(tools.NewReadSandboxFileTool(store))
-		toolRegistry.RegisterTool(tools.NewWriteSandboxFileTool(store))
+		// The per-round completion budget, not a fixed byte count, is what
+		// bounds one write; the tool advertises a limit derived from it.
+		toolRegistry.RegisterTool(tools.NewWriteSandboxFileTool(
+			store,
+			types.AgentRoundMaxCompletionTokensFor(config.MaxCompletionTokens, config.SandboxConfigID),
+		))
 		toolRegistry.RegisterTool(tools.NewEditSandboxFileTool(store))
 		logger.Infof(ctx, "Registered list_sandbox_files, read_sandbox_file, write_sandbox_file, and edit_sandbox_file tools")
 	} else {
@@ -1142,11 +1147,11 @@ func (s *agentService) ValidateConfig(config *types.AgentConfig) error {
 		return fmt.Errorf("config cannot be nil")
 	}
 
-	if config.MaxIterations <= 0 {
-		config.MaxIterations = 5 // Default
-	}
-
-	if config.MaxIterations > MAX_ITERATIONS {
+	if config.MaxIterations < 0 {
+		config.MaxIterations = types.UnlimitedMaxIterations
+	} else if config.MaxIterations == 0 {
+		config.MaxIterations = 5
+	} else if config.MaxIterations > MAX_ITERATIONS {
 		return fmt.Errorf("max iterations too high: %d (max %d)", config.MaxIterations, MAX_ITERATIONS)
 	}
 

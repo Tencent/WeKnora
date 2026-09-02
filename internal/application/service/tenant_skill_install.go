@@ -1981,7 +1981,9 @@ func installerAgentConfig(
 	cfg.EnableSkillInstallMode(defaults.ID, skillDir)
 	custom := defaults.Config
 	cfg.MaxIterations = custom.MaxIterations
-	if cfg.MaxIterations == 0 {
+	if cfg.MaxIterations < 0 {
+		cfg.MaxIterations = types.UnlimitedMaxIterations
+	} else if cfg.MaxIterations == 0 {
 		cfg.MaxIterations = 30
 	}
 	// The install tools are unioned in rather than read off the registry entry.

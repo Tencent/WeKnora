@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	agentmemory "github.com/Tencent/WeKnora/internal/agent/memory"
+	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -37,21 +37,30 @@ type AgentEngine struct {
 	toolRegistry         *agenttools.ToolRegistry
 	chatModel            chat.Chat
 	eventBus             *event.EventBus
-	knowledgeBasesInfo   []*KnowledgeBaseInfo      // Detailed knowledge base information for prompt
-	selectedDocs         []*SelectedDocumentInfo   // User-selected documents (via @ mention)
-	pinnedMCPServices    []*PinnedMCPServiceInfo   // User @mentioned MCP services for this turn
-	pinnedSkills         []*PinnedSkillInfo        // User @mentioned skills for this turn
-	sessionID            string                    // Session ID for logging and event emission
-	systemPromptTemplate string                    // System prompt template (optional, uses default if empty)
-	memoryPrompt         string                    // Long-term memory envelope appended to the system prompt
-	skillsManager        *skills.Manager           // Skills manager for Progressive Disclosure (optional)
-	appConfig            *appconfig.Config         // Application config for prompt template resolution (optional)
-	imageDescriber       ImageDescriberFunc        // VLM function for describing images in tool results (optional)
-	tokenEstimator       *agenttoken.Estimator     // Token estimator for context window management
-	memoryConsolidator   *agentmemory.Consolidator // Memory consolidator for LLM-powered summarization (optional)
-	lastUsage            types.TokenUsage          // Token usage from the most recent LLM call
-	lastSentMsgCount     int                       // Number of messages sent in the most recent LLM call
-	modelContext         *modelcontext.Registry    // single request-local boundary for every model handle
+	knowledgeBasesInfo   []*KnowledgeBaseInfo    // Detailed knowledge base information for prompt
+	selectedDocs         []*SelectedDocumentInfo // User-selected documents (via @ mention)
+	pinnedMCPServices    []*PinnedMCPServiceInfo // User @mentioned MCP services for this turn
+	pinnedSkills         []*PinnedSkillInfo      // User @mentioned skills for this turn
+	sessionID            string                  // Session ID for logging and event emission
+	systemPromptTemplate string                  // System prompt template (optional, uses default if empty)
+	memoryPrompt         string                  // Long-term memory envelope appended to the system prompt
+	skillsManager        *skills.Manager         // Skills manager for Progressive Disclosure (optional)
+	appConfig            *appconfig.Config       // Application config for prompt template resolution (optional)
+	imageDescriber       ImageDescriberFunc      // VLM function for describing images in tool results (optional)
+	tokenEstimator       *agenttoken.Estimator   // Token estimator for context window management
+	compactor            *compaction.Compactor   // Summarizes older history to fit the context window (nil = disabled)
+	lastUsage            types.TokenUsage        // Token usage from the most recent LLM call
+	lastSentMsgCount     int                     // Number of messages sent in the most recent LLM call
+	// overflowRecovered records that this turn already spent its one
+	// compact-and-retry on a context overflow. A second attempt would mean
+	// history size was never the problem, and looping on it burns the round
+	// budget without changing anything.
+	overflowRecovered bool
+	// compactionExhaustedAt is the message count at which compaction last
+	// reported it could free nothing. Below that count the answer has not
+	// changed, so there is no reason to spend another summarization call.
+	compactionExhaustedAt int
+	modelContext          *modelcontext.Registry // single request-local boundary for every model handle
 }
 
 // ImageDescriberFunc generates a text description of an image.
@@ -89,12 +98,13 @@ func NewAgentEngine(
 		modelContext:         modelcontext.NewRegistry(config.CitationsEnabled()),
 	}
 
-	// Initialize memory consolidator if context window management is configured
-	if config.MaxContextTokens > 0 {
-		engine.memoryConsolidator = agentmemory.NewConsolidator(
-			chatModel, tokenEst, config.MaxContextTokens, 0,
-		)
-	}
+	engine.compactor = compaction.New(chatModel, tokenEst, compaction.Settings{
+		Enabled:          true,
+		MaxContextTokens: config.MaxContextTokens,
+		ReserveTokens:    engine.contextReserveTokens(),
+		KeepRecentTokens: config.CompactionKeepRecentTokens,
+		MaxSummaryTokens: engine.getCompletionTokenBudget(),
+	})
 
 	return engine
 }
@@ -189,16 +199,48 @@ func (e *AgentEngine) GetSkillsManager() *skills.Manager {
 	return e.skillsManager
 }
 
-// estimateCurrentTokens returns the best estimate of the current context token count.
-// When API-reported usage from a previous round is available, it uses that as a
-// baseline and only BPE-estimates the delta (newly appended messages). Otherwise it
-// falls back to a full BPE estimation of all messages.
+// estimateCurrentTokens returns the best estimate of the current context token
+// count:
+//
+//   - When API usage from a previous round is available, that number is the
+//     baseline (the provider already billed tools + system + history) and only
+//     the messages appended since then are BPE-estimated.
+//   - Otherwise it is a pure message-size estimate. Tool schemas are NOT
+//     added here. Adding 232 tool schemas (~105k) to a 12k conversation made
+//     every round look over the 111k threshold even after a successful
+//     compaction.
+//
+// The baseline already contains the assistant reply, as the `output` half of
+// the round that produced it. So the delta must start *after* that reply.
 func (e *AgentEngine) estimateCurrentTokens(messages []chat.Message) int {
-	if e.lastUsage.TotalTokens > 0 && e.lastSentMsgCount > 0 && e.lastSentMsgCount < len(messages) {
-		delta := e.tokenEstimator.EstimateMessages(messages[e.lastSentMsgCount:])
-		return e.lastUsage.TotalTokens + delta
+	if baseline := contextTokensFromUsage(e.lastUsage); baseline > 0 &&
+		e.lastSentMsgCount > 0 && e.lastSentMsgCount <= len(messages) {
+		return baseline + e.tokenEstimator.EstimateMessages(messages[e.deltaStart(messages):])
 	}
 	return e.tokenEstimator.EstimateMessages(messages)
+}
+
+// deltaStart is the first message not already accounted for by e.lastUsage.
+func (e *AgentEngine) deltaStart(messages []chat.Message) int {
+	start := e.lastSentMsgCount
+	// The reply to the previous request lands here. Its tokens are the usage's
+	// completion half, so skip it — but only if it is really there, since a
+	// failed round appends nothing.
+	if start < len(messages) && messages[start].Role == "assistant" {
+		start++
+	}
+	return start
+}
+
+// contextTokensFromUsage reduces a usage report to the size of the context it
+// describes. Cache counters are not added in: WeKnora normalizes PromptTokens
+// to the provider's full input count, with read/write/miss as descriptive
+// subsets of it (see types.TokenUsage.SetPromptCacheUsage).
+func contextTokensFromUsage(usage types.TokenUsage) int {
+	if usage.TotalTokens > 0 {
+		return usage.TotalTokens
+	}
+	return usage.PromptTokens + usage.CompletionTokens
 }
 
 // Execute executes the agent with conversation history and streaming output
@@ -357,6 +399,30 @@ func truncateRunes(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
+// withinIterationBudget reports whether another ReAct round is allowed.
+// A negative MaxIterations is unlimited: the loop still stops on a natural
+// finish, user cancel, empty-response retries, or a repeated-content stall.
+func (e *AgentEngine) withinIterationBudget(round int) bool {
+	if e.config == nil {
+		return false
+	}
+	if e.config.UnlimitedIterations() {
+		return true
+	}
+	return round < e.config.MaxIterations
+}
+
+func (e *AgentEngine) maxIterationsDisplay() string {
+	if e.config != nil && e.config.UnlimitedIterations() {
+		return "unlimited"
+	}
+	n := 0
+	if e.config != nil {
+		n = e.config.MaxIterations
+	}
+	return fmt.Sprintf("%d", n)
+}
+
 // executeLoop executes the main ReAct loop
 // All events are emitted through EventBus with the given sessionID
 func (e *AgentEngine) executeLoop(
@@ -394,7 +460,7 @@ func (e *AgentEngine) executeLoop(
 	consecutiveSameContent := 0
 	lastResponseContent := ""
 loop:
-	for state.CurrentRound < e.config.MaxIterations {
+	for e.withinIterationBudget(state.CurrentRound) {
 		// Check for context cancellation (request timeout, user cancel, etc.)
 		select {
 		case <-ctx.Done():
@@ -526,18 +592,20 @@ func (e *AgentEngine) runReActIteration(
 		}, retErr)
 	}()
 
-	// Context window management: estimate current token count using
-	// the API-reported usage from the previous round plus a BPE delta
-	// for newly appended messages (assistant reply + tool results).
+	// Compact older history before the next assistant response when the
+	// estimate is over the threshold. The trigger is estimateCurrentTokens —
+	// usage+delta when a previous round reported one, otherwise the message
+	// list alone. Tool schemas are not added here.
 	currentTokens := e.estimateCurrentTokens(*messagesPtr)
-	beforeLen := len(*messagesPtr)
-	*messagesPtr = e.manageContextWindow(ctx, *messagesPtr, round, currentTokens)
-	if len(*messagesPtr) < beforeLen {
-		currentTokens = e.tokenEstimator.EstimateMessages(*messagesPtr)
+	managed, changed := e.manageContextWindow(ctx, *messagesPtr, round, currentTokens)
+	if changed {
+		*messagesPtr = managed
+		currentTokens = e.tokenEstimator.EstimateMessages(managed)
 	}
 
-	logger.Infof(ctx, "[Agent][Round-%d/%d] Starting: %d messages, %d tools, est_tokens=%d",
-		round, e.config.MaxIterations, len(*messagesPtr), len(tools), currentTokens)
+	logger.Infof(ctx, "[Agent][Round-%d/%s] Starting: %d messages, %d tools, est_tokens=%d",
+		round, e.maxIterationsDisplay(), len(*messagesPtr), len(tools), currentTokens)
+	e.logContextPrediction(ctx, round, *messagesPtr, tools, currentTokens)
 	common.PipelineInfo(ctx, "Agent", "round_start", map[string]interface{}{
 		"iteration":      state.CurrentRound,
 		"round":          round,
@@ -548,7 +616,7 @@ func (e *AgentEngine) runReActIteration(
 
 	// 1. Think: Call LLM with function calling (includes retry + graceful degradation)
 	e.lastSentMsgCount = len(*messagesPtr)
-	resp, err := e.callLLMWithRetry(ctx, *messagesPtr, tools, state, query, state.CurrentRound, sessionID)
+	resp, err := e.callLLMWithRetry(ctx, messagesPtr, tools, state, query, state.CurrentRound, sessionID)
 	if err != nil {
 		retErr = err
 		return iterOutcomeNext, err
@@ -556,7 +624,30 @@ func (e *AgentEngine) runReActIteration(
 	if resp == nil {
 		return iterOutcomeBreak, nil
 	}
+
+	// The round's own token estimate can be wrong — history is estimated, not
+	// counted — so a request that looked safe can still come back having hit
+	// the window. Compacting and retrying once turns that into a recovered
+	// round instead of a wasted one. Once per turn: if the retry overflows
+	// too, the problem is not the history size.
+	if !e.overflowRecovered && e.responseHitContextLimit(resp) {
+		e.overflowRecovered = true
+		logger.Warnf(ctx, "[Agent][Round-%d] Response hit the context window (finish=%s, "+
+			"completion=%d of %d requested); compacting and retrying once",
+			round, resp.FinishReason, resp.Usage.CompletionTokens, e.getCompletionTokenBudget())
+		*messagesPtr = e.forceCompaction(ctx, *messagesPtr, round)
+		e.lastSentMsgCount = len(*messagesPtr)
+		resp, err = e.callLLMWithRetry(ctx, messagesPtr, tools, state, query, state.CurrentRound, sessionID)
+		if err != nil {
+			retErr = err
+			return iterOutcomeNext, err
+		}
+		if resp == nil {
+			return iterOutcomeBreak, nil
+		}
+	}
 	response = resp
+	e.logContextDrift(ctx, round, currentTokens, response.Usage)
 	if response.Usage.TotalTokens > 0 {
 		e.lastUsage = response.Usage
 		state.TurnUsage.Accumulate(response.Usage)

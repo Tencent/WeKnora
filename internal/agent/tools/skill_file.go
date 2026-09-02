@@ -312,8 +312,11 @@ func (t *EditSkillFileTool) Execute(ctx context.Context, args json.RawMessage) (
 		}, nil
 	}
 
-	updated, replacements, err := applySandboxEdit(
-		string(raw), input.OldString, input.NewString, input.ReplaceAll)
+	updated, replacements, err := applySandboxEdits(string(raw), []SandboxEdit{{
+		OldString:  input.OldString,
+		NewString:  input.NewString,
+		ReplaceAll: input.ReplaceAll,
+	}})
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: err.Error()}, nil
 	}

@@ -83,7 +83,7 @@ type AgentConfig struct {
 	MaxCompletionTokens         int                       `json:"max_completion_tokens"`
 	Thinking                    *bool                     `json:"thinking"`
 	CitationEnabled             *bool                     `json:"citation_enabled"`
-	MaxIterations               int                       `json:"max_iterations"`
+	MaxIterations               int                       `json:"max_iterations"` // -1 = unlimited
 	LLMCallTimeout              int                       `json:"llm_call_timeout,omitempty"`
 	AllowedTools                []string                  `json:"allowed_tools"`
 	MCPSelectionMode            string                    `json:"mcp_selection_mode"`

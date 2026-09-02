@@ -40,6 +40,25 @@
                 </div>
               </div>
 
+              <!-- Context Compaction -->
+              <div v-if="event.type === 'context_compacted'" class="tool-event">
+                <div class="action-card">
+                  <div class="action-header" @click="toggleEvent(event.event_id)">
+                    <div class="action-title">
+                      <span class="action-title-icon icon-mask" :style="maskIconStyle(compactionIcon)"
+                        aria-hidden="true" />
+                      <span class="action-name">{{ $t('agent.contextCompacted') }}</span>
+                      <span class="action-summary">{{ compactionSummaryText(event) }}</span>
+                    </div>
+                  </div>
+                  <div v-if="event.summary && isEventExpanded(event.event_id)" class="action-details">
+                    <div class="thinking-detail-content markdown-content">
+                      <div v-html="renderMarkdownContent(event.summary)"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <!-- Thinking Event (streaming / merged). When a round's retracted
                    preamble was folded in, it becomes the card title and the
                    reasoning is the expandable body. -->
@@ -248,6 +267,25 @@
               <div class="plan-task-change-card">
                 <div class="plan-task-change-content">
                   <strong>{{ $t('agent.taskLabel') }}</strong> {{ event.task }}
+                </div>
+              </div>
+            </div>
+
+            <!-- Context Compaction -->
+            <div v-if="event.type === 'context_compacted'" class="tool-event">
+              <div class="action-card">
+                <div class="action-header" @click="toggleEvent(event.event_id)">
+                  <div class="action-title">
+                    <span class="action-title-icon icon-mask" :style="maskIconStyle(compactionIcon)"
+                      aria-hidden="true" />
+                    <span class="action-name">{{ $t('agent.contextCompacted') }}</span>
+                    <span class="action-summary">{{ compactionSummaryText(event) }}</span>
+                  </div>
+                </div>
+                <div v-if="event.summary && isEventExpanded(event.event_id)" class="action-details">
+                  <div class="thinking-detail-content markdown-content">
+                    <div v-html="renderMarkdownContent(event.summary)"></div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -847,6 +885,7 @@ const handleWikiDrawerClick = (e: MouseEvent) => {
 // Import icons
 import agentIcon from '@/assets/img/agent.svg';
 import thinkingIcon from '@/assets/img/Frame3718.svg';
+import compactionIcon from '@/assets/img/context-compaction.svg';
 
 interface SessionData {
   id?: string;
@@ -2633,6 +2672,27 @@ const getPlanStatusSummary = (event: any): string => {
   if (parts.pending > 0) textParts.push(`📋 ${t('agentStream.plan.pending')} ${parts.pending}`);
   if (parts.completed > 0) textParts.push(`✅ ${t('agentStream.plan.completed')} ${parts.completed}`);
   return textParts.length > 0 ? textParts.join(' · ') : '';
+};
+
+/**
+ * One-line caption for a compaction card. The token counts are the point: they
+ * are what tells the user how much of the conversation the agent can no longer
+ * see verbatim.
+ */
+const compactionSummaryText = (event: any): string => {
+  const before = Number(event?.tokens_before) || 0;
+  const after = Number(event?.tokens_after) || 0;
+  const parts: string[] = [];
+  if (before > 0 && after > 0) {
+    parts.push(
+      t('agent.contextCompactedSummary', {
+        before: before.toLocaleString(),
+        after: after.toLocaleString(),
+      }),
+    );
+  }
+  if (event?.degraded) parts.push(t('agent.contextCompactedDegraded'));
+  return parts.join(t('agent.stepSummarySeparator'));
 };
 
 /** Render SVG assets in the channel / brand color via CSS mask. */

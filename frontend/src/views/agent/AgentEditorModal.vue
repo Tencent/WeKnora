@@ -706,14 +706,19 @@
                       </div>
                     </div>
 
-                    <!-- 最大迭代次数（Agent 模式） -->
+                    <!-- 最大迭代次数（Agent 模式）：正数为上限，-1 为不限制 -->
                     <div v-if="isAgentMode" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.maxIterations') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.maxIterations') }}</p>
                       </div>
-                      <div class="setting-control">
-                        <t-input-number v-model="formData.config.max_iterations" :min="1" :max="50" theme="column" />
+                      <div class="setting-control max-tokens-control">
+                        <t-radio-group v-model="maxIterationsMode">
+                          <t-radio-button value="limit">{{ $t('agent.editor.maxIterationsLimit') }}</t-radio-button>
+                          <t-radio-button value="unlimited">{{ $t('agent.editor.maxIterationsUnlimited') }}</t-radio-button>
+                        </t-radio-group>
+                        <t-input-number v-if="maxIterationsMode === 'limit'" v-model="formData.config.max_iterations"
+                          :min="2" :max="50" theme="column" />
                       </div>
                     </div>
 
@@ -2882,6 +2887,22 @@ const maxCompletionTokensMode = computed({
   },
 });
 
+const lastFiniteMaxIterations = ref(10);
+const maxIterationsMode = computed({
+  get: () => (formData.value.config.max_iterations < 0 ? 'unlimited' : 'limit'),
+  set: (mode: 'limit' | 'unlimited') => {
+    if (mode === 'unlimited') {
+      if (formData.value.config.max_iterations > 1) {
+        lastFiniteMaxIterations.value = formData.value.config.max_iterations;
+      }
+      formData.value.config.max_iterations = -1;
+      return;
+    }
+    const restored = lastFiniteMaxIterations.value > 1 ? lastFiniteMaxIterations.value : 10;
+    formData.value.config.max_iterations = restored;
+  },
+});
+
 const currentIntentTemplate = computed(() =>
   intentPromptTemplates.value.find((template) => template.id === selectedIntent.value),
 );
@@ -3426,13 +3447,16 @@ watch(() => props.visible, async (val) => {
 
       // 兼容旧数据：如果没有 agent_mode 字段，根据 allowed_tools 推断
       if (!agentData.config.agent_mode) {
-        const isAgent = agentData.config.max_iterations > 1 || (agentData.config.allowed_tools && agentData.config.allowed_tools.length > 0);
+        const isAgent = agentData.config.max_iterations < 0 || agentData.config.max_iterations > 1 || (agentData.config.allowed_tools && agentData.config.allowed_tools.length > 0);
         agentData.config.agent_mode = isAgent ? 'smart-reasoning' : 'quick-answer';
       }
 
       // 设置初始化标志，防止 watch 自动添加工具
       isInitializing.value = true;
       formData.value = agentData;
+      if (agentData.config.max_iterations > 1) {
+        lastFiniteMaxIterations.value = agentData.config.max_iterations;
+      }
       // 初始化知识库选择模式
       initKbSelectionMode();
       initMcpSelectionMode();
@@ -3709,7 +3733,7 @@ watch(agentMode, (val, _oldVal) => {
       }
       formData.value.config.allowed_tools = tools;
     }
-    if (formData.value.config.max_iterations <= 1) {
+    if (formData.value.config.max_iterations >= 0 && formData.value.config.max_iterations <= 1) {
       formData.value.config.max_iterations = 10;
     }
     // 切换到 Agent 模式时，如果系统提示词是快速问答的默认值或为空，替换为 Agent 默认提示词
@@ -3804,6 +3828,12 @@ watch(() => uiStore.showSettingsModal, async (visible, prevVisible) => {
     } catch (e) {
       console.warn('Failed to refresh data after settings closed', e);
     }
+  }
+});
+
+watch(() => chatResources.allModels, (list) => {
+  if (props.visible) {
+    allModels.value = list;
   }
 });
 

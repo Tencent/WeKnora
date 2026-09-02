@@ -91,6 +91,24 @@ func (s *sessionService) AgentQA(
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
 
+	// The model's own metadata decides two things the agent cannot guess: how
+	// much history fits before compaction, and whether images can be passed
+	// through. Resolve it once, before the engine is built — the engine sizes
+	// its memory consolidator from MaxContextTokens at construction.
+	var agentModelSupportsVision bool
+	modelContextWindow := 0
+	if effectiveModelID != "" {
+		if modelInfo, err := s.modelService.GetModelByID(ctx, effectiveModelID); err == nil && modelInfo != nil {
+			agentModelSupportsVision = modelInfo.Parameters.SupportsVision
+			modelContextWindow = modelInfo.Parameters.ContextWindow
+		}
+	}
+	agentConfig.MaxContextTokens = types.AgentMaxContextTokens(
+		agentConfig.MaxContextTokens, modelContextWindow,
+	)
+	logger.Infof(ctx, "Agent context window: %d tokens (model %s declares %d)",
+		agentConfig.MaxContextTokens, effectiveModelID, modelContextWindow)
+
 	// Get rerank model from custom agent config only when knowledge_search can
 	// actually run. A disabled KB scope makes all KB tools ineffective, so it
 	// must not force users to configure an otherwise-unused rerank model.
@@ -209,14 +227,6 @@ func (s *sessionService) AgentQA(
 				logger.Warnf(ctx, "Failed to emit memory recalled event: %v", err)
 			}
 			logger.Infof(ctx, "Injected %d long-term memories into agent context", len(used))
-		}
-	}
-
-	// Route image data based on agent model's vision capability
-	var agentModelSupportsVision bool
-	if effectiveModelID != "" {
-		if modelInfo, err := s.modelService.GetModelByID(ctx, effectiveModelID); err == nil && modelInfo != nil {
-			agentModelSupportsVision = modelInfo.Parameters.SupportsVision
 		}
 	}
 
@@ -404,9 +414,8 @@ func (s *sessionService) buildAgentConfig(
 	}
 	logger.Infof(ctx, "Agent search targets built: %d targets", len(searchTargets))
 
-	if agentConfig.MaxContextTokens <= 0 {
-		agentConfig.MaxContextTokens = types.DefaultMaxContextTokens
-	}
+	// MaxContextTokens is deliberately left unset here. The caller fills it
+	// from the resolved model's declared window, which is not known yet.
 
 	return agentConfig, nil
 }
