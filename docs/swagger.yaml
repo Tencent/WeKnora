@@ -116,6 +116,7 @@ definitions:
     - 2103
     - 2200
     - 2201
+    - 2300
     type: integer
     x-enum-varnames:
     - ErrBadRequest
@@ -141,6 +142,7 @@ definitions:
     - ErrAgentInvalidTemperature
     - ErrVectorStoreBindingInvalid
     - ErrVectorStoreUnavailable
+    - ErrModelInUse
   github_com_Tencent_WeKnora_internal_infrastructure_chunker.DocProfile:
     properties:
       all_caps_short_line_count:
@@ -12844,6 +12846,10 @@ paths:
           schema:
             additionalProperties: true
             type: object
+        "400":
+          description: 模型仍被知识库、智能体或长期记忆引用
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
         "404":
           description: 模型不存在
           schema:

@@ -3,6 +3,9 @@
     <Transition name="modal">
       <div v-if="visible" class="settings-overlay" @click.self="handleClose">
         <div class="settings-modal">
+          <div v-if="editorInitializing" class="editor-initializing" role="status" :aria-label="$t('common.loading')">
+            <t-loading size="medium" :text="$t('common.loading')" />
+          </div>
           <!-- 关闭按钮 -->
           <button class="close-btn" @click="handleClose" :aria-label="$t('common.close')">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
@@ -1777,6 +1780,7 @@
                     $t('common.cancel')
                     }}</t-button>
                   <t-button v-if="!props.readOnly" theme="primary" data-guide="agent-create-submit" :loading="saving"
+                    :disabled="editorInitializing"
                     @click="handleSave">{{
                     saveButtonLabel
                     }}</t-button>
@@ -2014,6 +2018,7 @@ onBeforeUnmount(() => {
 })
 
 const saving = ref(false);
+const editorInitializing = ref(false);
 const allModels = ref<ModelConfig[]>([]);
 const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq'; count?: number; shared?: boolean; orgName?: string; ragEnabled?: boolean; wikiEnabled?: boolean; capabilities?: KBCapabilities }[]>([]);
 
@@ -3358,13 +3363,19 @@ const needsRerankModel = computed(() => {
   return false;
 });
 
+let editorInitializationGeneration = 0;
+
 // 监听可见性变化，重置表单
 watch(() => props.visible, async (val) => {
+  const generation = ++editorInitializationGeneration;
   if (val) {
+    editorInitializing.value = true;
+    try {
     savedAgent.value = null;
     currentSection.value = resolveEditorSection(props.initialSection);
     // 先加载依赖数据（包括默认配置）
     await loadDependencies();
+    if (generation !== editorInitializationGeneration || !props.visible) return;
 
     if (props.mode === 'edit' && props.agent) {
       // 深度复制对象以避免引用问题
@@ -3502,11 +3513,21 @@ watch(() => props.visible, async (val) => {
     }
 
     await syncInstalledSkills()
+    if (generation !== editorInitializationGeneration || !props.visible) return;
 
     if (props.initialHighlightField) {
       await applyInitialFieldHighlight(props.initialHighlightField);
+      if (generation !== editorInitializationGeneration || !props.visible) return;
+    }
+    } catch (error) {
+      console.error('Failed to initialize agent editor', error);
+    } finally {
+      if (generation === editorInitializationGeneration && props.visible) {
+        editorInitializing.value = false;
+      }
     }
   } else {
+    editorInitializing.value = false;
     clearFieldHighlight();
     agentIMChannelCount.value = 0;
     agentEmbedChannelCount.value = 0;
@@ -4825,6 +4846,16 @@ const handleSave = async () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.editor-initializing {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--td-bg-color-container);
 }
 
 .close-btn {

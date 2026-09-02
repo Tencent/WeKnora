@@ -44,6 +44,11 @@ const (
 	ErrVectorStoreBindingInvalid ErrorCode = 2200
 	ErrVectorStoreUnavailable    ErrorCode = 2201
 
+	// Model lifecycle errors (2300-2399).
+	// The dedicated code lets clients render structured usage details without
+	// parsing the backwards-compatible English error message.
+	ErrModelInUse ErrorCode = 2300
+
 	// Add more error codes here
 )
 
@@ -71,6 +76,17 @@ func NewBadRequestError(message string) *AppError {
 	return &AppError{
 		Code:     ErrBadRequest,
 		Message:  message,
+		HTTPCode: http.StatusBadRequest,
+	}
+}
+
+// NewModelInUseError creates the typed HTTP 400 returned when active tenant
+// resources still reference a model.
+func NewModelInUseError(message string, details any) *AppError {
+	return &AppError{
+		Code:     ErrModelInUse,
+		Message:  message,
+		Details:  details,
 		HTTPCode: http.StatusBadRequest,
 	}
 }

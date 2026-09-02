@@ -667,6 +667,7 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 // @Produce      json
 // @Param        id   path      string  true  "模型ID"
 // @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Failure      400  {object}  errors.AppError         "模型仍被知识库、智能体或长期记忆引用"
 // @Failure      404  {object}  errors.AppError         "模型不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth

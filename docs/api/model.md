@@ -436,7 +436,29 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/models/8fdc464d-8
 }
 ```
 
-404 表示模型不存在。
+如果知识库、智能体或当前空间的长期记忆仍引用该模型，接口保持 HTTP 400，并返回专用错误码 `2300` 和结构化引用详情。例如：
+
+```json
+{
+    "success": false,
+    "error": {
+        "code": 2300,
+        "message": "model is used by 2 knowledge base(s); reconfigure or remove those references before deleting",
+        "details": {
+            "knowledge_bases": [
+                {"id": "kb-1", "name": "Product docs", "bindings": ["vlm_model"]},
+                {"id": "kb-2", "name": "Engineering", "bindings": ["vlm_model"]}
+            ],
+            "agents": [],
+            "long_term_memory": {"bindings": []},
+            "knowledge_base_total": 2,
+            "agent_total": 0
+        }
+    }
+}
+```
+
+`bindings` 是稳定的配置类型标识：知识库可能返回 `embedding_model`、`summary_model`、`image_processing_model`、`vlm_model`、`asr_model`、`wiki_synthesis_model`；智能体可能返回 `chat_model`、`rerank_model`、`vlm_model`、`asr_model`、`query_understand_model`、`follow_up_model`；长期记忆可能返回 `embedding_model`、`extract_model`。同一对象的多处引用会合并到一个 `bindings` 数组。`knowledge_bases` / `agents` 最多各返回 50 条；未截断的引用数在 `knowledge_base_total` / `agent_total`。404 表示模型不存在。
 
 ## 参数说明
 

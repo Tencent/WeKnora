@@ -251,7 +251,7 @@ r.GET("/health", func(c *gin.Context) {
 
 - `scopeKnowledgeBasesByModelID`：匹配 `knowledge_bases` 中任一模型绑定字段 —— `embedding_model_id`、`summary_model_id`、`image_processing_config.model_id`、`vlm_config.model_id`、`asr_config.model_id`、`wiki_config.synthesis_model_id`（Postgres 用 `->>` JSON 操作符，SQLite 用 `json_extract`，双方言等价）。
 - `scopeCustomAgentsByModelID`：匹配 `custom_agents.config` 中的 `model_id`、`rerank_model_id`、`vlm_model_id`、`asr_model_id`、`query_understand_model_id`、`question_suggestions.follow_ups.model_id`。
-- 消费方：`knowledgebase.go` / `custom_agent.go` 仓储的 `CountByModelID`，被 `internal/application/service/model.go` 的删除守卫调用（KB 或 Agent 引用计数 > 0 时阻止删除模型）。
+- 消费方：`knowledgebase.go` / `custom_agent.go` 仓储的 `ListModelUsages` 复用上述 scope，返回租户内活动对象的最小投影（`id`、`name`、合并后的 `bindings`），条数上限为 `ModelUsageListLimit`（50）。`internal/application/service/model.go` 的删除守卫以 `CountByModelID` 得到的 `knowledge_base_total` / `agent_total` 为是否拦截的依据，并在 HTTP 400 的 `error.details` 中同时返回截断列表和总数。
 
 token 级别的模型用量则由 Langfuse Generation 的 `usage_details`（`TokenUsage`：input/output/total/cache_*）上报，在 Langfuse UI 中按模型 / 用户（`tenant:<id>`）/ 会话聚合查看。
 

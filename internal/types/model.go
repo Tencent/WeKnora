@@ -31,6 +31,63 @@ const (
 	ModelStatusDownloadFailed ModelStatus = "download_failed" // Model download failed
 )
 
+// ModelUsageBinding is a stable API identifier for one configuration field
+// that references a model. Clients localize these values; repository column
+// names and JSON paths must not leak into the response contract.
+type ModelUsageBinding string
+
+// Model usage binding constants identify supported model-reference roles.
+const (
+	ModelUsageBindingEmbeddingModel       ModelUsageBinding = "embedding_model"
+	ModelUsageBindingSummaryModel         ModelUsageBinding = "summary_model"
+	ModelUsageBindingImageProcessingModel ModelUsageBinding = "image_processing_model"
+	ModelUsageBindingVLMModel             ModelUsageBinding = "vlm_model"
+	ModelUsageBindingASRModel             ModelUsageBinding = "asr_model"
+	ModelUsageBindingWikiSynthesisModel   ModelUsageBinding = "wiki_synthesis_model"
+	ModelUsageBindingChatModel            ModelUsageBinding = "chat_model"
+	ModelUsageBindingRerankModel          ModelUsageBinding = "rerank_model"
+	ModelUsageBindingQueryUnderstandModel ModelUsageBinding = "query_understand_model"
+	ModelUsageBindingFollowUpModel        ModelUsageBinding = "follow_up_model"
+	ModelUsageBindingExtractModel         ModelUsageBinding = "extract_model"
+)
+
+// ModelUsageResource is the minimal, non-sensitive projection returned when a
+// knowledge base or agent prevents model deletion.
+type ModelUsageResource struct {
+	ID       string              `json:"id"`
+	Name     string              `json:"name"`
+	Bindings []ModelUsageBinding `json:"bindings"`
+}
+
+// ModelUsageMemory describes workspace-level long-term-memory model pins.
+type ModelUsageMemory struct {
+	Bindings []ModelUsageBinding `json:"bindings"`
+}
+
+// ModelUsageListLimit caps how many knowledge bases or agents are listed in a
+// model-in-use error. Totals are returned separately so the cap cannot
+// under-count the references that actually block deletion.
+const ModelUsageListLimit = 50
+
+// ModelUsageDetails explains every active tenant-scoped reference that blocks
+// model deletion. KnowledgeBases and Agents may be truncated to
+// ModelUsageListLimit entries; KnowledgeBaseTotal and AgentTotal are the
+// untruncated counts used by the deletion guard and UI headings.
+type ModelUsageDetails struct {
+	KnowledgeBases     []ModelUsageResource `json:"knowledge_bases"`
+	Agents             []ModelUsageResource `json:"agents"`
+	LongTermMemory     ModelUsageMemory     `json:"long_term_memory"`
+	KnowledgeBaseTotal int64                `json:"knowledge_base_total"`
+	AgentTotal         int64                `json:"agent_total"`
+}
+
+// InUse reports whether at least one active object references the model.
+func (d ModelUsageDetails) InUse() bool {
+	return d.KnowledgeBaseTotal > 0 || d.AgentTotal > 0 ||
+		len(d.KnowledgeBases) > 0 || len(d.Agents) > 0 ||
+		len(d.LongTermMemory.Bindings) > 0
+}
+
 // ModelSource represents the source of the model
 type ModelSource string
 

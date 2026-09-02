@@ -4671,6 +4671,29 @@ export default {
     },
     builtinTag: 'Built-in',
     confirmDelete: 'Delete model "{name}"?',
+    usage: {
+      title: 'Model cannot be deleted',
+      description: 'Model "{name}" is still referenced by the following settings. Open each configuration and choose another model before deleting it.',
+      knowledgeBases: 'Knowledge bases ({count})',
+      agents: 'Agents ({count})',
+      longTermMemory: 'Long-term memory',
+      openConfiguration: 'Open settings',
+      truncated: 'Showing the first {shown} of {total}',
+      bindings: {
+        embedding_model: 'Embedding model',
+        summary_model: 'Summary model',
+        image_processing_model: 'Image processing model',
+        vlm_model: 'Vision model',
+        asr_model: 'Speech recognition model',
+        wiki_synthesis_model: 'Wiki synthesis model',
+        chat_model: 'Chat model',
+        rerank_model: 'Re-ranking model',
+        query_understand_model: 'Query understanding model',
+        follow_up_model: 'Follow-up model',
+        extract_model: 'Memory extraction model',
+        unknown: 'Other model setting'
+      }
+    },
     debug: {
       title: 'Model Test',
       description: 'Send a real request to a saved model and inspect the response',
