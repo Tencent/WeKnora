@@ -46,6 +46,48 @@ func TestSummaryNotGeneratedReturnsStructuredStageStatus(t *testing.T) {
 	}
 }
 
+func TestSummarySkipsDraftFromPreviousTranscriptGeneration(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusProcessing,
+		TranscriptGeneration: "generation-current", SummaryDraftWikiPageID: "summary-draft",
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	server := newContentWikiTestServer(t, video.ID, map[string]weknora.WikiPage{
+		"summary-draft": {
+			ID: "summary-draft", Slug: "summary/" + video.ID + "/draft", PageType: "index",
+			Content: "---\ntype: typed_summary\nsource_video_id: " + video.ID + "\ntranscript_generation: generation-old\n---\nnot-json",
+		},
+	})
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/summary", nil)
+	wiki := weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL})
+
+	NewContentHandler(db, wiki, "kb-1").Summary(context)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Status       string `json:"status"`
+		Stage        string `json:"stage"`
+		ErrorCode    string `json:"error_code"`
+		ErrorMessage string `json:"error_message"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.Status != "failed" || payload.Stage != "summary" || payload.ErrorCode != "not_generated" || payload.ErrorMessage == "" {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
 func TestContentEndpointRejectsWrongArtifactPage(t *testing.T) {
 	db := openTestVideoDB(t)
 	video := model.Video{

@@ -662,6 +662,9 @@ type contentArtifactFailure struct {
 	httpStatus int
 	code       string
 	message    string
+	// staleGeneration marks a draft that belongs to a previous transcript
+	// generation. It is a normal pipeline transition, not a corrupt artifact.
+	staleGeneration bool
 }
 
 type contentArtifactCandidate struct {
@@ -698,6 +701,12 @@ func (h *ContentHandler) fetchWikiPageByVideoField(c *gin.Context, video *model.
 			c.JSON(http.StatusOK, response)
 			return
 		}
+		if candidate.stage == "draft" && failure.staleGeneration {
+			// A draft from the previous transcript generation can remain linked
+			// while the current final artifact is still being generated. Do not
+			// expose that expected transition as a contract error.
+			continue
+		}
 		lastFailure = failure
 	}
 	if lastFailure == nil {
@@ -726,6 +735,14 @@ func (h *ContentHandler) readWikiPageCandidate(ctx context.Context, video *model
 	sourceVideoID, _ := frontmatter["source_video_id"].(string)
 	pageGeneration, _ := frontmatter["transcript_generation"].(string)
 	generationMismatch := strings.TrimSpace(video.TranscriptGeneration) != "" && strings.TrimSpace(pageGeneration) != video.TranscriptGeneration
+	if generationMismatch && candidate.stage == "draft" {
+		return nil, &contentArtifactFailure{
+			httpStatus:      http.StatusNotFound,
+			code:            "not_generated",
+			message:         "wiki page is not ready for the current transcript generation",
+			staleGeneration: true,
+		}
+	}
 	if expectedType == "" || actualType != expectedType || sourceVideoID != video.ID || generationMismatch || strings.TrimSpace(page.Content) == "" {
 		return nil, &contentArtifactFailure{httpStatus: http.StatusInternalServerError, code: "artifact_contract_mismatch", message: "wiki page does not satisfy the content artifact contract"}
 	}
