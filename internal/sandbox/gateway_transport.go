@@ -30,6 +30,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -78,11 +79,11 @@ func (p *SandboxGatewayTransportPool) InboundTokens() *InboundTokenRegistry {
 // Configs without a usable gateway URL keep every request on the control
 // transport, matching the SDKs' behaviour when no gateway is configured.
 func (p *SandboxGatewayTransportPool) RoundTripperFor(cfg *Config) http.RoundTripper {
-	gatewayURL, sandboxDomain := gatewayEndpointFor(cfg)
+	gatewayURL, controlURL := gatewayEndpointFor(cfg)
 	split := &gatewaySplitTransport{
-		control:       p.control,
-		sandboxDomain: strings.ToLower(strings.TrimSpace(sandboxDomain)),
-		inboundToken:  p.inboundTokens,
+		control:      p.control,
+		controlHost:  hostOfURL(controlURL),
+		inboundToken: p.inboundTokens,
 	}
 	if host, port, scheme, ok := parseProxyURL(gatewayURL); ok {
 		split.data = p.dataTransport(net.JoinHostPort(host, strconv.Itoa(port)))
@@ -91,19 +92,34 @@ func (p *SandboxGatewayTransportPool) RoundTripperFor(cfg *Config) http.RoundTri
 	return split
 }
 
-// gatewayEndpointFor reads the active provider's data-plane fields. Reading
-// them per provider (rather than merging both) keeps a stale sub-struct left
-// behind by an earlier provider switch from routing today's traffic.
-func gatewayEndpointFor(cfg *Config) (gatewayURL, sandboxDomain string) {
+// gatewayEndpointFor reads the active provider's gateway and control-plane
+// endpoints. Reading them per provider (rather than merging both) keeps a stale
+// sub-struct left behind by an earlier provider switch from routing today's
+// traffic.
+func gatewayEndpointFor(cfg *Config) (gatewayURL, controlURL string) {
 	if cfg == nil {
 		return "", ""
 	}
 	switch cfg.Type {
 	case SandboxTypeE2B:
-		return cfg.E2BProxyURL, cfg.E2BSandboxDomain
+		return cfg.E2BProxyURL, cfg.E2BAPIURL
 	default:
-		return cfg.CubeProxyURL, cfg.CubeSandboxDomain
+		return cfg.CubeProxyURL, cfg.CubeAPIURL
 	}
+}
+
+// hostOfURL returns raw's lowercased hostname without its port, or "" when raw
+// is empty or unparseable.
+func hostOfURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(parsed.Hostname())
 }
 
 // dataTransport returns the transport dialling target, creating it once.
@@ -144,10 +160,14 @@ func newGatewayDataTransportWithPolicy(target string, policy OutboundURLPolicy) 
 // gatewaySplitTransport routes a request to the control or the data transport
 // by looking at the authority the SDK addressed.
 type gatewaySplitTransport struct {
-	control       http.RoundTripper
-	data          http.RoundTripper
-	sandboxDomain string
-	inboundToken  *InboundTokenRegistry
+	control http.RoundTripper
+	data    http.RoundTripper
+
+	// controlHost is the API endpoint's hostname. It is an exclusion, not the
+	// routing rule: the rule is the sandbox authority shape, and this only
+	// covers an API host that happens to wear that shape.
+	controlHost  string
+	inboundToken *InboundTokenRegistry
 
 	// dataScheme is the gateway's scheme. When it differs from the scheme the
 	// SDK hardcoded, data-plane requests are rewritten before dialling.
@@ -201,15 +221,26 @@ func (t *gatewaySplitTransport) applyGatewayScheme(req *http.Request) *http.Requ
 }
 
 // isDataPlane reports whether host addresses a sandbox rather than the control
-// plane. Anything else - including an unset sandbox domain - stays on the
-// control transport, so a misconfiguration cannot silently redirect API calls
-// at the gateway.
+// plane, by the "<port>-<sandboxID>.<domain>" authority shape both SDKs
+// generate — the same test withInboundToken already applies to the same
+// request.
+//
+// It deliberately does NOT compare against the configured sandbox domain.
+// That field is optional for E2B, and go-e2b's envdBaseURL prefers whatever
+// domain the control plane reported over the client-wide one, so the authority
+// actually dialled need not appear anywhere in the config. Matching on it
+// meant a configured gateway was silently never used, and — because the check
+// was a suffix match — that E2B's own defaults (api.e2b.app under sandbox
+// domain e2b.app) sent every control-plane call to the gateway instead.
+//
+// The control host is excluded explicitly because the shape test alone would
+// accept an API host like "8080-api.example.com".
 func (t *gatewaySplitTransport) isDataPlane(host string) bool {
-	if t.sandboxDomain == "" {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" || (t.controlHost != "" && host == t.controlHost) {
 		return false
 	}
-	host = strings.ToLower(host)
-	return host == t.sandboxDomain || strings.HasSuffix(host, "."+t.sandboxDomain)
+	return SandboxIDFromDataPlaneHost(host) != ""
 }
 
 // CloseIdleConnections keeps the SDK's post-rollback reset meaningful. Only
