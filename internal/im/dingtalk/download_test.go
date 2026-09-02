@@ -323,9 +323,107 @@ func TestDownloadFile_TLSSkipVerify(t *testing.T) {
 
 	off := base
 	a2 := NewWebhookAdapter("cid", "sec", "", &off)
-	if _, _, err := a2.DownloadFile(context.Background(), &im.IncomingMessage{
+	_, _, err2 := a2.DownloadFile(context.Background(), &im.IncomingMessage{
 		FileKey: "DL-CODE", FileName: "x.pdf", Extra: map[string]string{"robot_code": "rc"},
-	}); err == nil {
+	})
+	if err2 == nil {
 		t.Error("expected TLS verification error with skip verify disabled, got nil")
+	} else if !strings.Contains(err2.Error(), "x509") {
+		t.Errorf("expected x509 certificate error, got: %v", err2)
+	}
+}
+
+// TestDownloadFile_RewriteConfiguredNoMatch ensures that with rewrite rules
+// configured, a downloadUrl matching none of the prefixes still goes through
+// the original SSRF validation path.
+func TestDownloadFile_RewriteConfiguredNoMatch(t *testing.T) {
+	useTestHTTPClient(t)
+	var api *httptest.Server
+	api = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1.0/oauth2/accessToken":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"accessToken": "tok", "expireIn": 7200})
+		case "/v1.0/robot/messageFiles/download":
+			_ = json.NewEncoder(w).Encode(map[string]string{"downloadUrl": "http://127.0.0.1:1/internal"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+
+	orig := apiBaseURL
+	apiBaseURL = api.URL
+	defer func() { apiBaseURL = orig }()
+
+	cfg := &config.DingTalkConfig{
+		DownloadURLRewrite: &config.DingTalkURLRewriteConfig{
+			From: "https://dingtalk-file.111.111.111.111:15443",
+			To:   "http://222.222.222.222:80",
+		},
+	}
+	a := NewWebhookAdapter("cid", "sec", "", cfg)
+	msg := &im.IncomingMessage{FileKey: "DL-CODE", FileName: "x.pdf", Extra: map[string]string{"robot_code": "rc"}}
+
+	if _, _, err := a.DownloadFile(context.Background(), msg); err == nil {
+		t.Fatal("expected SSRF rejection for non-matching url, got nil")
+	}
+}
+
+// TestDownloadFile_SkipVerifyRoutesToDedicatedClient verifies that a
+// NON-rewritten download URL with download_insecure_skip_verify enabled is
+// fetched via the dedicated skip-verify client, not the shared one. The
+// dedicated client keeps every SSRF safeguard, so the loopback httptest file
+// URL is rejected at the transport with an SSRF policy error (the pre-fetch
+// validator is overridden to nil only so the code reaches the fetch step). If
+// the shared client had been used, the reject transport would instead fail the
+// request because its path ends in /temp/file. The two failure signatures
+// prove which client handled the download.
+func TestDownloadFile_SkipVerifyRoutesToDedicatedClient(t *testing.T) {
+	useRejectingFileFetchHTTPClient(t)
+	fileBytes := []byte("skip-verify route bytes")
+
+	fileSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/temp/file" {
+			_, _ = w.Write(fileBytes)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer fileSrv.Close()
+
+	var api *httptest.Server
+	api = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1.0/oauth2/accessToken":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"accessToken": "tok", "expireIn": 7200})
+		case "/v1.0/robot/messageFiles/download":
+			_ = json.NewEncoder(w).Encode(map[string]string{"downloadUrl": fileSrv.URL + "/temp/file"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+
+	orig := apiBaseURL
+	apiBaseURL = api.URL
+	defer func() { apiBaseURL = orig }()
+
+	origValidate := validateFileDownloadURL
+	validateFileDownloadURL = func(string) error { return nil }
+	defer func() { validateFileDownloadURL = origValidate }()
+
+	cfg := &config.DingTalkConfig{DownloadInsecureSkipVerify: true}
+	a := NewWebhookAdapter("cid", "sec", "", cfg)
+	_, _, err := a.DownloadFile(context.Background(), &im.IncomingMessage{
+		FileKey: "DL-CODE", FileName: "x.pdf", Extra: map[string]string{"robot_code": "rc"},
+	})
+	if err == nil {
+		t.Fatal("expected the dedicated skip-verify client to reject the loopback download URL, got nil")
+	}
+	if strings.Contains(err.Error(), "shared client must not fetch the download url") {
+		t.Fatalf("download went through the SHARED client, want the dedicated skip-verify client: %v", err)
+	}
+	if !strings.Contains(err.Error(), "SSRF policy") {
+		t.Errorf("expected SSRF policy rejection from the dedicated skip-verify client, got: %v", err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -52,6 +53,9 @@ func parseDownloadRewrite(cfg *config.DingTalkURLRewriteConfig) *downloadRewrite
 		}
 		prefixes = append(prefixes, prefix)
 	}
+	// Longest-first so the most specific prefix always wins, decoupling
+	// match results from the order entries appear in the config.
+	slices.SortFunc(prefixes, func(a, b string) int { return len(b) - len(a) })
 	if len(prefixes) == 0 {
 		logger.Warnf(context.Background(), "[DingTalk] im.dingtalk.download_url_rewrite.from has no valid entries; url rewrite disabled")
 		return nil
@@ -124,7 +128,7 @@ func logSnippet(s string, max int) string {
 func newSkipVerifySSRFSafeDownloadClient() *http.Client {
 	transport := &http.Transport{
 		DialContext:     secutils.SSRFSafeDialContext,
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec — operator opt-in flag (im.dingtalk.download_insecure_skip_verify)
 	}
 	return secutils.NewSSRFSafeHTTPClientWithTransport(
 		secutils.SSRFSafeHTTPClientConfig{

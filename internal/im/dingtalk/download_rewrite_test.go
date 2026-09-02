@@ -143,6 +143,19 @@ func TestApplyDownloadRewrite(t *testing.T) {
 			want:        "https://wukong-abc.oss-cn-hangzhou.aliyuncs.com/file?sig=x",
 			wantMatched: false,
 		},
+		{
+			name:        "fragment directly after prefix matches",
+			rawURL:      "https://111.111.111.111:15443#frag",
+			want:        "http://222.222.222.222:80#frag",
+			wantPrefix:  "https://111.111.111.111:15443",
+			wantMatched: true,
+		},
+		{
+			name:        "empty url does not match",
+			rawURL:      "",
+			want:        "",
+			wantMatched: false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -172,6 +185,23 @@ func TestApplyDownloadRewrite_PathPrefix(t *testing.T) {
 	got, _, ok := r.apply("https://files.example.com/ding/a/b.png")
 	if !ok || got != "http://10.2.3.4:8080/mirror/a/b.png" {
 		t.Fatalf("apply = (%q, %v), want (%q, true)", got, ok, "http://10.2.3.4:8080/mirror/a/b.png")
+	}
+}
+
+// TestApplyDownloadRewrite_LongestPrefixWins verifies nested path prefixes
+// resolve to the most specific (longest) match regardless of config order.
+func TestApplyDownloadRewrite_LongestPrefixWins(t *testing.T) {
+	r := parseDownloadRewrite(&config.DingTalkURLRewriteConfig{
+		From: "https://a.example,https://a.example/ding",
+		To:   "http://10.2.3.4:8080",
+	})
+	if r == nil {
+		t.Fatal("parseDownloadRewrite returned nil for valid config")
+	}
+	got, prefix, ok := r.apply("https://a.example/ding/file")
+	if !ok || prefix != "https://a.example/ding" || got != "http://10.2.3.4:8080/file" {
+		t.Fatalf("apply = (%q, %q, %v), want (%q, %q, true)",
+			got, prefix, ok, "http://10.2.3.4:8080/file", "https://a.example/ding")
 	}
 }
 
