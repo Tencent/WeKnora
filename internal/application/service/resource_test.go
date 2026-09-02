@@ -212,3 +212,17 @@ func TestResourceCatalogRejectsUnsupportedPhysicalPath(t *testing.T) {
 	_, err := catalog.Register(context.Background(), 7, "https://example.com/a.png", interfaces.ResourceRegistration{})
 	require.ErrorContains(t, err, "unsupported provider")
 }
+
+func TestResourceCatalogAcceptsBackendScopedOBSPath(t *testing.T) {
+	catalog, _ := newResourceCatalogForTest(t)
+	physical := "storage://backend-obs/obs://documents/weknora/7/report.pdf"
+
+	ref, err := catalog.Register(context.Background(), 7, physical, interfaces.ResourceRegistration{})
+	require.NoError(t, err)
+
+	resolved, resource, err := catalog.ResolvePath(context.Background(), ref)
+	require.NoError(t, err)
+	require.Equal(t, physical, resolved)
+	require.Equal(t, "backend-obs", resource.StorageBackendID)
+	require.Equal(t, "obs", resource.Provider)
+}
