@@ -59,6 +59,24 @@
                         </div>
                       </div>
 
+                      <div class="form-item" data-guide="kb-create-name">
+                        <label class="form-label required">{{ $t('knowledgeEditor.basic.nameLabel') }}</label>
+                        <t-input
+                          v-model="formData.name"
+                          :placeholder="$t('knowledgeEditor.basic.namePlaceholder')"
+                          :maxlength="50"
+                        />
+                      </div>
+                      <div class="form-item">
+                        <label class="form-label">{{ $t('knowledgeEditor.basic.descriptionLabel') }}</label>
+                        <t-textarea
+                          v-model="formData.description"
+                          :placeholder="$t('knowledgeEditor.basic.descriptionPlaceholder')"
+                          :maxlength="200"
+                          :autosize="{ minRows: 3, maxRows: 6 }"
+                        />
+                      </div>
+
                       <div class="form-item">
                         <label class="form-label required">{{ $t('knowledgeEditor.basic.typeLabel') }}</label>
                         <t-radio-group
@@ -154,24 +172,6 @@
                           :placeholder="$t('knowledgeEditor.wiki.extractionInstructionsPlaceholder')"
                           :maxlength="4000"
                           :autosize="{ minRows: 3, maxRows: 8 }"
-                        />
-                      </div>
-
-                      <div class="form-item" data-guide="kb-create-name">
-                        <label class="form-label required">{{ $t('knowledgeEditor.basic.nameLabel') }}</label>
-                        <t-input 
-                          v-model="formData.name" 
-                          :placeholder="$t('knowledgeEditor.basic.namePlaceholder')"
-                          :maxlength="50"
-                        />
-                      </div>
-                      <div class="form-item">
-                        <label class="form-label">{{ $t('knowledgeEditor.basic.descriptionLabel') }}</label>
-                        <t-textarea
-                          v-model="formData.description"
-                          :placeholder="$t('knowledgeEditor.basic.descriptionPlaceholder')"
-                          :maxlength="200"
-                          :autosize="{ minRows: 3, maxRows: 6 }"
                         />
                       </div>
 
