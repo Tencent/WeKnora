@@ -19,6 +19,16 @@ import (
 // archive read here is the same one that was accepted then, and a corrupted or
 // hostile object in storage must not be able to exhaust this process.
 const (
+	// maxBundleZipEntries bounds central-directory iteration on the raw
+	// archive, mirroring maxSkillBundleZipEntries. A GitHub zipball carries
+	// the whole repository, so it sits well above the count of files kept as
+	// the skill.
+	maxBundleZipEntries = 100_000
+	// maxBundleEntries caps the files kept as the skill, mirroring
+	// maxSkillBundleFiles. It is counted after directory entries and the
+	// zipball's extra trees are dropped, exactly as the install counts them:
+	// applying it to the raw entry count instead would reject archives the
+	// install accepted, taking read_skill down for a working install.
 	maxBundleEntries    = 20_000
 	maxBundleEntryBytes = 32 << 20  // 32 MiB per entry
 	maxBundleBytes      = 512 << 20 // 512 MiB across one archive (install cap)
@@ -352,8 +362,8 @@ func skillBundleFileIndex(archive []byte) (map[string]*zip.File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("not a readable zip archive: %w", err)
 	}
-	if len(reader.File) > maxBundleEntries {
-		return nil, fmt.Errorf("archive holds more than %d files", maxBundleEntries)
+	if len(reader.File) > maxBundleZipEntries {
+		return nil, fmt.Errorf("archive holds more than %d entries", maxBundleZipEntries)
 	}
 
 	raw := make(map[string]*zip.File, len(reader.File))
@@ -373,18 +383,21 @@ func skillBundleFileIndex(archive []byte) (map[string]*zip.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if prefix == "" {
-		return raw, nil
-	}
-	out := make(map[string]*zip.File, len(raw))
-	for name, entry := range raw {
-		if !strings.HasPrefix(name, prefix+"/") {
-			continue
+	out := raw
+	if prefix != "" {
+		out = make(map[string]*zip.File, len(raw))
+		for name, entry := range raw {
+			if !strings.HasPrefix(name, prefix+"/") {
+				continue
+			}
+			out[strings.TrimPrefix(name, prefix+"/")] = entry
 		}
-		out[strings.TrimPrefix(name, prefix+"/")] = entry
+		if _, ok := out[SkillFileName]; !ok {
+			return nil, fmt.Errorf("%s is missing from the archive", SkillFileName)
+		}
 	}
-	if _, ok := out[SkillFileName]; !ok {
-		return nil, fmt.Errorf("%s is missing from the archive", SkillFileName)
+	if len(out) > maxBundleEntries {
+		return nil, fmt.Errorf("archive holds more than %d files", maxBundleEntries)
 	}
 	return out, nil
 }

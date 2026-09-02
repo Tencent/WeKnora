@@ -331,20 +331,30 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		return
 	}
 
-	// Get the uploaded file
-	file, err := c.FormFile("file")
-	if err != nil {
-		logger.Error(ctx, "File upload failed", err)
-		c.Error(errors.NewBadRequestError("File upload failed").WithDetails(err.Error()))
-		return
-	}
-
 	// Validate file size — read MAX_FILE_SIZE_MB env (50MB default).
 	// Deliberately not a runtime system_setting; see filesize.go for the
 	// rationale (nginx / docreader / browser bundle all cache this at
 	// container startup, so a UI knob would silently mismatch).
 	maxSizeMB := utils.GetMaxFileSizeMB()
 	maxSize := maxSizeMB * 1024 * 1024
+	// Capped before the multipart parse, not after: FormFile buffers the whole
+	// body first, so the size check below only ever sees an upload we already
+	// accepted. nginx no longer bounds this at the knowledge limit either — its
+	// cap is the larger skill-bundle one.
+	limitUploadBody(c, maxSize)
+
+	// Get the uploaded file
+	file, err := c.FormFile("file")
+	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			logger.Error(ctx, "File size too large")
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", maxSizeMB)))
+			return
+		}
+		logger.Error(ctx, "File upload failed", err)
+		c.Error(errors.NewBadRequestError("File upload failed").WithDetails(err.Error()))
+		return
+	}
 	if file.Size > maxSize {
 		logger.Error(ctx, "File size too large")
 		c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", maxSizeMB)))
