@@ -578,10 +578,10 @@ func (s *agentService) tenantSkillSource(
 // loadInstalledSkillBundle reads the archive one installed skill was built
 // from. An object named by the row itself is that archive. A row that only
 // names a catalog is answered from the definition's zip, but the definition is
-// mutable — registering the same skill again replaces those bytes in place,
-// while this sandbox goes on running the image built from the previous ones.
-// read_skill is documented as serving what was installed, so a definition that
-// has moved on is reported rather than substituted.
+// mutable — registering the same skill again stores a new object and updates
+// the catalog ref, while this sandbox goes on running the image built from the
+// previous bytes. read_skill is documented as serving what was installed, so a
+// definition that has moved on is reported rather than substituted.
 func (s *agentService) loadInstalledSkillBundle(
 	ctx context.Context, tenantID uint64, row *types.TenantSkillEntity,
 ) ([]byte, error) {

@@ -423,6 +423,21 @@ func TestSandboxSkillInstallFromSourceAmbiguousShorthandReturns400(t *testing.T)
 	require.Equal(t, "owner/slug", svc.installSource)
 }
 
+func TestSandboxSkillInstallFromSourceRejectsAnOversizedJSONBody(t *testing.T) {
+	svc := &fakeSandboxSkillService{}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	req := httptest.NewRequest(http.MethodPost, "/sandbox-configs/cfg-a/skills",
+		strings.NewReader(string(oversizedSkillSourceJSON(1))))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "skill source request is too large")
+	require.Empty(t, svc.installSource)
+}
+
 func TestSandboxSkillUploadWithoutFileReturns400(t *testing.T) {
 	svc := &fakeSandboxSkillService{}
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))

@@ -99,3 +99,60 @@ func TestIsRequestBodyTooLargeIgnoresAnAbsentPart(t *testing.T) {
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	engine.ServeHTTP(httptest.NewRecorder(), req)
 }
+
+func TestLimitJSONBodyRejectsAnOversizedBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.POST("/json", func(c *gin.Context) {
+		limitJSONBody(c, skillSourceJSONMaxBytes)
+		var payload struct {
+			Source string `json:"source"`
+		}
+		err := c.ShouldBindJSON(&payload)
+		if isRequestBodyTooLarge(err) {
+			c.String(http.StatusBadRequest, "too large")
+			return
+		}
+		c.String(http.StatusOK, payload.Source)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/json", bytes.NewReader(oversizedSkillSourceJSON(1)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, "too large", rec.Body.String())
+}
+
+func TestLimitSkillUploadBodyKeepsJSONFarBelowTheZipCap(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.POST("/skill", func(c *gin.Context) {
+		limitSkillUploadBody(c, 256<<20)
+		var payload struct {
+			Source string `json:"source"`
+		}
+		err := c.ShouldBindJSON(&payload)
+		if isRequestBodyTooLarge(err) {
+			c.String(http.StatusBadRequest, "too large")
+			return
+		}
+		c.String(http.StatusOK, "ok")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/skill", bytes.NewReader(oversizedSkillSourceJSON(2<<20)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, "too large", rec.Body.String())
+}
+
+func oversizedSkillSourceJSON(extra int) []byte {
+	if extra < 1 {
+		extra = 1
+	}
+	return []byte(`{"source":"` + strings.Repeat("x", skillSourceJSONMaxBytes+extra) + `"}`)
+}

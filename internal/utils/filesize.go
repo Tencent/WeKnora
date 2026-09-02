@@ -42,7 +42,9 @@ func GetMaxFileSizeMB() int64 {
 // GetMaxSkillBundleSize is the compressed zip / source-download cap for
 // skills. Knowledge uploads stay on GetMaxFileSize: packages such as
 // ppt-master exceed 50MB, but raising the document limit would also
-// inflate docreader gRPC messages.
+// inflate docreader gRPC messages. A GitHub zipball is the whole
+// repository archive, not the SKILL.md subtree, so a huge monorepo can
+// still be refused here even when the skill itself is small.
 func GetMaxSkillBundleSize() int64 {
 	return GetMaxSkillBundleSizeMB() * 1024 * 1024
 }

@@ -638,6 +638,8 @@ func getSkillURL(
 	defer func() { _ = resp.Body.Close() }()
 
 	maxBytes := secutils.GetMaxSkillBundleSize()
+	// The cap is the downloaded body — a GitHub zipball is the whole
+	// repository, not the SKILL.md subtree counted later at parse time.
 	if resp.ContentLength > maxBytes {
 		return nil, "", fmt.Errorf("%w: skill bundle cannot exceed %d MB",
 			ErrSkillSourceInvalid, secutils.GetMaxSkillBundleSizeMB())

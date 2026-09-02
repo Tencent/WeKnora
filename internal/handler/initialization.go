@@ -2227,7 +2227,7 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 	maxSize := maxSizeMB * 1024 * 1024
 	// 上限必须在 multipart 解析之前生效：FormFile 会先把整个 body 缓冲下来
 	// （超出内存部分落临时文件），之后的 header.Size 检查看到的已是收完的上传。
-	// nginx 的 client_max_body_size 现在取的是更大的技能包上限，不再兜住这里。
+	// nginx 的 location /api/ 仍是 MAX_FILE_SIZE；这里是直连 app 时的同一道上限。
 	limitUploadBody(c, maxSize)
 
 	// 获取上传的图片文件

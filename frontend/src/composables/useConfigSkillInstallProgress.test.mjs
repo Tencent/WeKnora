@@ -15,7 +15,12 @@ test('catalog install progress follows the same SSE as the sandbox panel', () =>
   assert.match(source, /fetchEventSource/)
   assert.match(source, /configSkillInstallEventsUrl/)
   assert.match(source, /openWhenHidden: true/)
-  assert.match(source, /existing\?\.done && existing\.stage !== 'detached'/)
+  assert.match(source, /if \(!configId \|\| !skillId \|\| abortByKey\.has\(key\)\) return/)
+  assert.doesNotMatch(
+    source,
+    /existing\?\.done && existing\.stage !== 'detached'/,
+    'a done event must not block reconnect: retry reuses the same skill id',
+  )
 })
 
 test('progress keys isolate one install per sandbox', () => {
