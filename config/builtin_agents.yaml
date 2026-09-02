@@ -261,8 +261,15 @@ builtin_agents:
       max_iterations: 30
       kb_selection_mode: "none"
       retrieve_kb_only_when_mentioned: false
+      # The install path unions these three in regardless of what is written
+      # here: an install that cannot write its own skill directory cannot
+      # record what it did. They are listed for accuracy, not as the source of
+      # truth. write_skill_file / edit_skill_file reach only the one skill
+      # being installed and are never offered to a tenant-editable agent.
       allowed_tools:
         - "shell_exec"
+        - "write_skill_file"
+        - "edit_skill_file"
       web_search_enabled: false
       web_search_max_results: 0
       reflection_enabled: false

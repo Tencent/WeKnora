@@ -155,7 +155,7 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 			SkillsEnabled:   false,
 			AllowedTools:    []string{tools.ToolShellExec},
 		}
-		config.EnableSkillInstallMode(types.BuiltinSkillInstallerID)
+		config.EnableSkillInstallMode(types.BuiltinSkillInstallerID, sandbox.SkillsImageRoot+"/pptx")
 
 		engine, err := svc.CreateAgentEngine(ctx, config, chatModel, nil, nil, "sess-1", "msg-1")
 

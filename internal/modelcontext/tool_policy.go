@@ -158,6 +158,10 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	"read_sandbox_file":  {},
 	"write_sandbox_file": {},
 	"edit_sandbox_file":  {},
+	// Installer-only writers for the skill image tree. Same unknown-shape
+	// caveat: they echo paths and byte counts, never knowledge identifiers.
+	"write_skill_file": {},
+	"edit_skill_file":  {},
 }
 
 // HasToolPolicy reports whether a tool has an explicit model-handle policy.

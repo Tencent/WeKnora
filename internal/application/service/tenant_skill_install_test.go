@@ -622,10 +622,44 @@ func TestBuildInstallPromptAsksForADeclarationWithoutValues(t *testing.T) {
 	require.Contains(t, prompt, "On-demand / optional extras MUST be installed now")
 	require.Contains(t, prompt, "uv venv --seed")
 	require.Contains(t, prompt, "install_deps.py")
-	require.Contains(t, prompt, "write_sandbox_file is not available")
-	require.Contains(t, prompt, "short shell redirect")
+	require.Contains(t, prompt, "write_skill_file",
+		"a heredoc truncates at the command-length cap; the file tools are the writer")
+	require.Contains(t, prompt, "write_sandbox_file only writes /workspace",
+		"the installer must be told why the workspace writer cannot help it")
 	require.Contains(t, prompt, "- uv: /root/.local/bin/uv",
 		"the prompt hands over absolute paths instead of a PATH gamble")
+}
+
+// shell_exec used to default to /workspace, so the installer opened command
+// after command with `cd <skill-dir> &&` — the one spelling guaranteed to land
+// somewhere useful. The default is now the skill directory, and the prompt has
+// to say so, because a model that is not told keeps paying for the prefix.
+func TestBuildInstallPromptSaysCommandsAlreadyStartInTheSkillDirectory(t *testing.T) {
+	fx := newInstallFixture(t)
+
+	prompt := buildInstallPrompt(installSkillDir, fx.bundle, nil)
+
+	require.Contains(t, prompt, "shell_exec already starts every command in "+installSkillDir)
+	require.Contains(t, prompt, "do NOT prefix")
+	require.Contains(t, prompt, "cd <skill-dir> &&")
+}
+
+// Import resolution is the agent's job because it is nobody else's: the server
+// parses files without executing them, so it never learns whether an import
+// would have worked. The prompt has to say so, or the one party holding a real
+// interpreter reasons about imports instead of running them.
+func TestBuildInstallPromptDemandsImportsBeProvenByRunningThem(t *testing.T) {
+	fx := newInstallFixture(t)
+
+	prompt := buildInstallPrompt(installSkillDir, fx.bundle, nil)
+
+	require.Contains(t, prompt, "PROVE the skill's imports resolve")
+	require.Contains(t, prompt, "Do not reason about it")
+	require.Contains(t, prompt, installSkillDir+"/.venv/bin/python -c 'import x'")
+	require.Contains(t, prompt, "never judges an import",
+		"the agent must not expect the server to catch an unresolved import")
+	require.Contains(t, prompt, "edit_skill_file",
+		"a shipped module Python cannot find is fixed in the script, not with pip")
 }
 
 func TestBuildInstallPromptNamesOnDemandInstallerInTheArchive(t *testing.T) {
@@ -1487,10 +1521,19 @@ func TestInstallSessionIgnoresATenantOverrideOfTheInstallerAgent(t *testing.T) {
 	require.Equal(t, platform.Config.SystemPrompt, fx.engineConfig.SystemPrompt,
 		"the prompt that drives a root shell is the platform's, not the tenant's")
 	require.NotContains(t, fx.engineConfig.SystemPrompt, "/root/.ssh")
-	require.Equal(t, platform.Config.AllowedTools, fx.engineConfig.AllowedTools)
+	require.Subset(t, fx.engineConfig.AllowedTools, platform.Config.AllowedTools,
+		"the tool set is the platform's, plus what an install structurally needs")
 	require.NotContains(t, fx.engineConfig.AllowedTools, tools.ToolWebSearch)
+	require.NotContains(t, fx.engineConfig.AllowedTools, tools.ToolReadSkill)
+	// Unioned in rather than read off the registry entry: an install that
+	// cannot write its own skill directory cannot record what it did, and a
+	// deployment whose platform YAML predates these tools must not lose them.
+	require.Contains(t, fx.engineConfig.AllowedTools, tools.ToolWriteSkillFile)
+	require.Contains(t, fx.engineConfig.AllowedTools, tools.ToolEditSkillFile)
 	require.Equal(t, platform.Config.MaxIterations, fx.engineConfig.MaxIterations)
 	require.True(t, fx.engineConfig.SkillInstallMode())
+	require.Equal(t, installSkillDir, fx.engineConfig.SkillInstallDir(),
+		"the file tools must be scoped to this install's own skill directory")
 	require.Equal(t, "model-agent", fx.engineModel.GetModelID(),
 		"the model is the one choice the tenant record still makes")
 }

@@ -32,6 +32,16 @@ const (
 	ToolReadSandboxFile  = "read_sandbox_file"
 	ToolWriteSandboxFile = "write_sandbox_file"
 	ToolEditSandboxFile  = "edit_sandbox_file"
+	// ToolWriteSkillFile / ToolEditSkillFile write the skill tree under
+	// /opt/weknora/tenant/skills rather than /workspace, and exist only for
+	// the built-in skill installer. They are scoped to the one skill being
+	// installed; see internal/agent/tools/skill_file.go.
+	//
+	// Deliberately absent from AvailableToolDefinitions: these write the
+	// shared snapshot image, so they are granted by install mode alone and
+	// must not become selectable on a tenant-editable agent config.
+	ToolWriteSkillFile = "write_skill_file"
+	ToolEditSkillFile  = "edit_skill_file"
 	// ToolShellExec lets the LLM execute ad-hoc shell commands inside the
 	// current session's sandbox (dependency installs, environment probing).
 	// Registered only when the resolved backend advertises the session shell

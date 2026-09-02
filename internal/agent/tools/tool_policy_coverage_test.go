@@ -34,6 +34,8 @@ func TestEveryBuiltInToolDeclaresAModelHandlePolicy(t *testing.T) {
 		ToolReadSandboxFile,
 		ToolWriteSandboxFile,
 		ToolEditSandboxFile,
+		ToolWriteSkillFile,
+		ToolEditSkillFile,
 		ToolShellExec,
 		ToolWikiReadPage,
 		ToolWikiWritePage,

@@ -229,7 +229,7 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 	logger.Infof(ctx, "[Tool][EditSandboxFile] session=%s path=%s replacements=%d bytes=%d",
 		sessionID, clean, replacements, len(content))
 
-	if hint := pythonScriptSyntaxHint(clean, updated); hint != "" {
+	if hint := pythonScriptSyntaxHint(clean, updated, ToolEditSandboxFile); hint != "" {
 		return &types.ToolResult{
 			Success: false,
 			Error:   hint,
