@@ -259,6 +259,8 @@ func TestEditSandboxFileReplacesUniqueSnippet(t *testing.T) {
 	assert.Equal(t, 1, editor.writes)
 	assert.Equal(t, 1, result.Data["replacements"])
 	assert.Equal(t, path, result.Data["path"])
+	assert.Equal(t, 1, result.Data["added_lines"])
+	assert.Equal(t, 1, result.Data["removed_lines"])
 	assert.Contains(t, string(editor.files[path]), "/workspace/output/Windows_Server_2008_WiFi连接指南.pptx")
 	assert.NotContains(t, string(editor.files[path]), "/home/user/Desktop")
 	assert.NotContains(t, result.Output, original)

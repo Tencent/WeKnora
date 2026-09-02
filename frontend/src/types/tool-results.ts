@@ -367,6 +367,9 @@ export interface WriteSandboxFileData {
     name?: string;
     size?: number;
     replacements?: number;
+    added_lines?: number;
+    removed_lines?: number;
+    preview?: string;
 }
 
 export interface ReadSkillData {

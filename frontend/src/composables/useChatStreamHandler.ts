@@ -33,6 +33,18 @@ export interface UseChatStreamHandlerOptions {
   debug?: boolean
 }
 
+function mergeToolCallArguments(previous: unknown, incoming: unknown): Record<string, unknown> {
+  const prev =
+    previous && typeof previous === 'object' && !Array.isArray(previous)
+      ? (previous as Record<string, unknown>)
+      : {}
+  const next =
+    incoming && typeof incoming === 'object' && !Array.isArray(incoming)
+      ? (incoming as Record<string, unknown>)
+      : { value: incoming }
+  return { ...prev, ...next }
+}
+
 export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
   const { t } = useI18n()
   const {
@@ -731,7 +743,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           }
           if (toolCallEvent) {
             if (incomingToolName) toolCallEvent.tool_name = incomingToolName
-            if (incomingArguments) toolCallEvent.arguments = incomingArguments
+            if (incomingArguments) {
+              toolCallEvent.arguments = mergeToolCallArguments(toolCallEvent.arguments, incomingArguments)
+            }
             toolCallEvent.pending = true
             if (!toolCallEvent.timestamp) toolCallEvent.timestamp = Date.now()
             pending.set(toolCallId, toolCallEvent)

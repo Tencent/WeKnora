@@ -1329,7 +1329,8 @@ export default {
       truncated: '목록이 잘림',
       wrote: '씀',
       edited: '편집함',
-      replacements: '{count}곳 치환'
+      replacements: '{count}곳 치환',
+      moreLines: '{count}줄 더'
     },
     shellExec: {
       workDir: '디렉터리',

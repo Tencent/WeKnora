@@ -11,3 +11,8 @@ test('failed tool results keep stdout/output instead of replacing it with the sh
     /toolCallEvent\.output = success\s*\?[\s\S]*dataPayload\.error/,
   )
 })
+
+test('later tool_call events merge arguments onto the same pending card', () => {
+  assert.match(source, /function mergeToolCallArguments/)
+  assert.match(source, /toolCallEvent\.arguments = mergeToolCallArguments\(toolCallEvent\.arguments, incomingArguments\)/)
+})

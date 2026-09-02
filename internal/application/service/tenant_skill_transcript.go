@@ -256,6 +256,11 @@ func (tr *installTranscript) onToolCall(_ context.Context, evt event.Event) erro
 		return nil
 	}
 	tr.mu.Lock()
+	_, seen := tr.starts[data.ToolCallID]
+	if seen {
+		tr.mu.Unlock()
+		return nil
+	}
 	tr.starts[data.ToolCallID] = time.Now()
 	// This round called a tool, so it is not the round that ends the run: any
 	// prose it streamed was a preamble and must not reach Message.Content.
