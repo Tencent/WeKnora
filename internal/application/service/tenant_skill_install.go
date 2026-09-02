@@ -1162,11 +1162,22 @@ func (s *TenantSkillService) pointInstallAtCatalog(
 	if catalog == nil || strings.TrimSpace(catalog.BundleRef) == "" {
 		return fmt.Errorf("catalog archive is missing")
 	}
-	return s.updateSkillFields(ctx, skill.TenantID, skill.SandboxConfigID, skill.ID,
+	superseded := ""
+	if err := s.updateSkillFields(ctx, skill.TenantID, skill.SandboxConfigID, skill.ID,
 		func(e *types.TenantSkillEntity) {
+			superseded = strings.TrimSpace(e.BundleRef)
 			e.CatalogID = catalog.ID
 			e.BundleRef = ""
-		})
+		}); err != nil {
+		return err
+	}
+	// This install now reads the definition's copy, so whatever it named before
+	// — a pre-catalog object of its own, or an archive pinned by an earlier
+	// replacement — has one reader fewer.
+	if superseded != "" && superseded != strings.TrimSpace(catalog.BundleRef) {
+		s.releaseInstallBundle(ctx, skill.TenantID, superseded)
+	}
+	return nil
 }
 
 // updateSkillFields loads, mutates and writes back one skill row. It logs on

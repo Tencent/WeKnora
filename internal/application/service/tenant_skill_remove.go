@@ -397,12 +397,21 @@ func (s *TenantSkillService) finishRemoval(
 		return nil
 	}
 
+	// Read before the delete: past it the only record of what this row named is
+	// gone, and a pinned archive would be left behind with nothing to reclaim it.
+	pinned := ""
+	if row, err := s.skills.GetSkill(ctx, tenantID, configID, skillID); err == nil && row != nil {
+		pinned = strings.TrimSpace(row.BundleRef)
+	}
 	if err := s.retrySkillBookkeeping(ctx, func() error {
 		return s.skills.DeleteSkill(ctx, tenantID, configID, skillID)
 	}); err != nil {
 		return fmt.Errorf("skill %s no longer exists in the image but its row remains: %w",
 			skillID, err)
 	}
+	// The definition's archive survives this; only an object no catalog and no
+	// other install names is reclaimed.
+	s.releaseInstallBundle(ctx, tenantID, pinned)
 	// Only an image that actually changed can leave a bound sandbox out of
 	// date. Marking after a removal that moved no pointer would destroy and
 	// rebuild every live sandbox of the config - throwing away each session's
@@ -458,6 +467,45 @@ func (s *TenantSkillService) removeStillOwnsTheRow(
 		return false, nil
 	}
 	return current.Status == types.SkillStatusRemoving, nil
+}
+
+// releaseInstallBundle drops an archive an install row has stopped naming,
+// unless something else still names it.
+//
+// The reference is not owned by one row. A definition's own object is shared by
+// every install of it, and one replaced archive is pinned by each install that
+// was built from it, so "this row let go" is not the same question as "nobody
+// needs these bytes". Both tables are checked before the object is deleted, and
+// an unreadable table means it is kept: a leaked archive costs storage, a
+// deleted one costs an install its files.
+func (s *TenantSkillService) releaseInstallBundle(
+	ctx context.Context, tenantID uint64, bundleRef string,
+) {
+	ref := strings.TrimSpace(bundleRef)
+	if ref == "" {
+		return
+	}
+	catalogs, err := s.skills.ListCatalogsByTenant(ctx, tenantID)
+	if err != nil {
+		logger.Warnf(ctx, "[skill] list catalogs before releasing bundle %s failed: %v", ref, err)
+		return
+	}
+	for _, cat := range catalogs {
+		if cat != nil && strings.TrimSpace(cat.BundleRef) == ref {
+			return
+		}
+	}
+	installs, err := s.skills.ListSkillsByTenant(ctx, tenantID)
+	if err != nil {
+		logger.Warnf(ctx, "[skill] list installs before releasing bundle %s failed: %v", ref, err)
+		return
+	}
+	for _, row := range installs {
+		if row != nil && strings.TrimSpace(row.BundleRef) == ref {
+			return
+		}
+	}
+	s.deleteBundleBestEffort(ctx, tenantID, ref)
 }
 
 func (s *TenantSkillService) deleteBundleBestEffort(

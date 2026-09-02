@@ -354,6 +354,7 @@ func (s *TenantSkillService) storeCatalogBundle(
 		return false, nil
 	}
 	oldRef := strings.TrimSpace(catalog.BundleRef)
+	oldSHA := strings.TrimSpace(catalog.BundleSHA256)
 	ref, err := fs.SaveBytes(ctx, archive, tenantID,
 		fmt.Sprintf("tenant-skills/catalog/%s.zip", catalog.ID), false)
 	if err != nil {
@@ -364,10 +365,57 @@ func (s *TenantSkillService) storeCatalogBundle(
 		return false, nil
 	}
 	catalog.BundleRef = ref
-	if oldRef != "" && oldRef != ref {
+	if oldRef != "" && oldRef != ref && !s.pinInstallsToReplacedBundle(ctx, tenantID, catalog, oldRef, oldSHA) {
 		s.deleteBundleBestEffort(ctx, tenantID, oldRef)
 	}
 	return true, nil
+}
+
+// pinInstallsToReplacedBundle hands the archive a definition just replaced to
+// the installs that are still serving it, and reports whether the object has to
+// be kept.
+//
+// A definition is mutable; an installation is not. Re-registering a skill from
+// a newer zip leaves every sandbox running the image built from the old one, so
+// deleting those bytes would take read_skill and the admin file browser down
+// for installs that are working perfectly. The row is what pins the object:
+// once it names it, nothing else has to remember which version it was.
+func (s *TenantSkillService) pinInstallsToReplacedBundle(
+	ctx context.Context, tenantID uint64, catalog *types.TenantSkillCatalogEntity, oldRef, oldSHA string,
+) bool {
+	installs, err := s.skills.ListSkillsByCatalog(ctx, tenantID, catalog.ID)
+	if err != nil {
+		// Keeping an archive nothing reads costs storage; dropping one an
+		// install still needs costs that install its files.
+		logger.Warnf(ctx, "[skill] list installs of catalog %s before replacing its bundle failed: %v",
+			catalog.ID, err)
+		return true
+	}
+	keep := false
+	for _, row := range installs {
+		if row == nil || strings.TrimSpace(row.BundleRef) != "" {
+			continue
+		}
+		if oldSHA == "" {
+			// The definition never recorded what those bytes were, so no row
+			// can be matched against them. Keep rather than orphan.
+			keep = true
+			continue
+		}
+		if strings.TrimSpace(row.BundleSHA256) != oldSHA {
+			continue
+		}
+		// Best-effort: a row that could not be stamped still reads the object
+		// through the catalog until the next write, and keep is set either way
+		// so the bytes it needs stay where they are.
+		if err := s.updateSkillFields(ctx, row.TenantID, row.SandboxConfigID, row.ID,
+			func(e *types.TenantSkillEntity) { e.BundleRef = oldRef }); err != nil {
+			logger.Warnf(ctx, "[skill] pin install %s to the replaced archive of catalog %s failed: %v",
+				row.ID, catalog.ID, err)
+		}
+		keep = true
+	}
+	return keep
 }
 
 func skillUserErrorMessage(err error) string {
@@ -485,8 +533,11 @@ func (s *TenantSkillService) catalogBundleArchive(
 		if row == nil || strings.TrimSpace(row.BundleRef) == "" {
 			return nil, false
 		}
-		archive, err := s.downloadSkillBundle(ctx, tenantID, row)
-		if err != nil || len(archive) == 0 {
+		// Through the same cache the install rows use: the file drawer lists a
+		// tree and then opens files out of it, and a definition-owned archive
+		// is no cheaper to pull twice than a row-owned one.
+		archive, ok := s.trySkillBundle(ctx, tenantID, row)
+		if !ok || len(archive) == 0 {
 			return nil, false
 		}
 		if wantSHA != "" && !archiveMatchesSHA(archive, wantSHA) {
