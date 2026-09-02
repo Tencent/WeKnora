@@ -6,10 +6,10 @@ import { previewTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { downloadArtifact } from '@/api/chat';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
-import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
-import { sanitizeHTML, sanitizeMarkdownHTML, safeMarkdownToHTML } from '@/utils/security';
+import { sanitizeHTML, sanitizeMarkdownHTML } from '@/utils/security';
+import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { renderMermaidToSvg } from '@/utils/mermaidShared';
 import {
@@ -169,7 +169,6 @@ async function renderText(blob: Blob, fileType: string) {
 }
 
 async function renderMarkdown(blob: Blob) {
-  const { marked } = await import('marked');
   const text = await blob.text();
 
   // 校验文本内容是否有效
@@ -178,33 +177,7 @@ async function renderMarkdown(blob: Blob) {
     return;
   }
 
-  marked.use({
-    breaks: true,
-    gfm: true,
-  });
-  marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
-  const renderer = new marked.Renderer();
-  renderer.code = function ({text, lang}) {
-    // 空值校验：防止 text 为 undefined 或 null
-    if (!text || typeof text !== 'string') {
-      text = '';
-    }
-
-    let highlighted = '';
-    if (lang && hljs.getLanguage(lang)) {
-      try { highlighted = hljs.highlight(text, { language: lang }).value; }
-      catch { highlighted = hljs.highlightAuto(text).value; }
-    } else {
-      highlighted = hljs.highlightAuto(text).value;
-    }
-    return `<pre><code class="hljs">${highlighted}</code></pre>`;
-  };
-  const mathSafeText = preprocessMathDelimiters(text);
-  const safeText = safeMarkdownToHTML(mathSafeText);
-  // Keep this renderer local. `marked.use` mutates a shared singleton and
-  // would otherwise inherit renderers installed by the chunk-content view.
-  const rawHtml = marked.parse(safeText, { renderer }) as string;
-  markdownHtml.value = sanitizeHTML(rawHtml);
+  markdownHtml.value = renderDocumentPreviewMarkdown(text);
 }
 
 function onImageLoad(e: Event) {
@@ -975,7 +948,12 @@ onUnmounted(() => {
     border-radius: 3px;
     font-size: 0.9em;
   }
-  img { max-width: 100%; border-radius: 4px; }
+  img {
+    max-width: 100%;
+    border-radius: 4px;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 180px;
+  }
   hr { border: none; border-top: 1px solid @border-color; margin: 20px 0; }
   a { color: @accent; text-decoration: none; &:hover { color: @accent-hover; text-decoration: underline; } }
   strong { font-weight: 600; }

@@ -33,6 +33,7 @@ const STORAGE_BACKEND_IMG_SRC_RE = new RegExp(
 type SecurityHooks = {
   beforeSanitizeElements: NodeHook;
   afterSanitizeElements: NodeHook;
+  afterSanitizeAttributes?: NodeHook;
 };
 
 function sanitizeWithSecurityHooks(
@@ -42,12 +43,23 @@ function sanitizeWithSecurityHooks(
 ): string {
   DOMPurify.addHook('beforeSanitizeElements', hooks.beforeSanitizeElements);
   DOMPurify.addHook('afterSanitizeElements', hooks.afterSanitizeElements);
+  if (hooks.afterSanitizeAttributes) DOMPurify.addHook('afterSanitizeAttributes', hooks.afterSanitizeAttributes);
   try {
     return DOMPurify.sanitize(html, config);
   } finally {
+    if (hooks.afterSanitizeAttributes) DOMPurify.removeHook('afterSanitizeAttributes', hooks.afterSanitizeAttributes);
     DOMPurify.removeHook('afterSanitizeElements', hooks.afterSanitizeElements);
     DOMPurify.removeHook('beforeSanitizeElements', hooks.beforeSanitizeElements);
   }
+}
+
+export function applyDocumentPreviewImageAttributes(currentNode: Node): void {
+  if (!('tagName' in currentNode) || !('setAttribute' in currentNode)) return;
+  const element = currentNode as Element;
+  if (element.tagName !== 'IMG') return;
+  element.setAttribute('loading', 'lazy');
+  element.setAttribute('decoding', 'async');
+  element.setAttribute('fetchpriority', 'low');
 }
 
 // 配置 DOMPurify 的安全策略
@@ -70,6 +82,7 @@ const DOMPurifyConfig = {
   // 允许的属性
   ALLOWED_ATTR: [
     'href', 'title', 'alt', 'src', 'class', 'id', 'style', 'data-protected-src', 'data-img-loading',
+    'loading', 'decoding', 'fetchpriority',
     'data-artifact-index', 'data-protected-resource', 'download',
     'target', 'rel', 'width', 'height', 'open',
     'type', 'aria-label', 'disabled', 'role', 'tabindex',
@@ -114,6 +127,21 @@ export function sanitizeHTML(html: string): string {
   } catch (error) {
     console.error('HTML sanitization failed:', error);
     // 如果清理失败，返回转义的纯文本
+    return escapeHTML(html);
+  }
+}
+
+/** Sanitize DocumentPreview Markdown and enforce a single image loading policy. */
+export function sanitizeDocumentPreviewHTML(html: string): string {
+  if (!html || typeof html !== 'string') return '';
+  try {
+    const preparedHTML = protectProviderImageSrcInHTML(html);
+    return sanitizeWithSecurityHooks(preparedHTML, DOMPurifyConfig as unknown as Config, {
+      ...domPurifySecurityHooks,
+      afterSanitizeAttributes: applyDocumentPreviewImageAttributes,
+    });
+  } catch (error) {
+    console.error('Document preview HTML sanitization failed:', error);
     return escapeHTML(html);
   }
 }
