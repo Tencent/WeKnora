@@ -30,6 +30,7 @@ func TestApplyAuthAndTenantDefaults_DisableRegistrationDrivesRegistrationMode(t 
 			t.Setenv("DISABLE_REGISTRATION", tc.disable)
 			// Other tenant env vars must not leak between cases.
 			t.Setenv("WEKNORA_TENANT_ENABLE_RBAC", "")
+			t.Setenv("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS", "")
 			t.Setenv("WEKNORA_TENANT_MAX_OWNED_PER_USER", "")
 			t.Setenv("WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED", "")
 

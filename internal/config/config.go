@@ -859,6 +859,20 @@ func applyAuthAndTenantDefaults(cfg *Config) {
 		cfg.Tenant.EnableRBAC = &on
 	}
 
+	// EnableCrossTenantAccess gates the cluster-wide cross-workspace routes
+	// (middleware.RequireCrossTenantAccess). It is documented in .env.example
+	// and echoed in the startup log line, but historically only the config.yaml
+	// `enable_cross_tenant_access` value was honoured — the env override was
+	// never actually applied, so operators who set
+	// WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS=true saw no effect and
+	// cross-tenant routes kept returning "Cross-workspace access is disabled".
+	// Mirror the WEKNORA_TENANT_ENABLE_RBAC pattern above: an explicitly set
+	// env value always wins (true or false) over config.yaml without a
+	// redeploy; when unset, the config.yaml value is preserved.
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS")); value != "" {
+		cfg.Tenant.EnableCrossTenantAccess = strings.EqualFold(value, "true")
+	}
+
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED")); value != "" {
 		if enabled, err := strconv.ParseBool(value); err == nil {
 			cfg.Tenant.SelfServiceCreationEnabled = &enabled
