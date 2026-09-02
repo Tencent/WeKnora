@@ -26,9 +26,6 @@ minutes of dependency work and leaves the previous image serving.
     exit 0  the image may be kept
     exit 1  a problem no installer round can fix: a syntax error, a file the
             execution user cannot read, a relative import that can never
-            resolve
-    exit 1  a problem no installer round can fix: a syntax error, a file the
-            execution user cannot read, a relative import that can never
             resolve, a shipped module the import cannot reach
     exit 2  every problem is a dependency missing from this image, so handing
             these lines back to the installer is worth a round
