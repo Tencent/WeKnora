@@ -1978,6 +1978,28 @@ export default {
     copySuffix: ' 副本',
     builtinTag: '内置',
     confirmDelete: '确定删除模型「{name}」吗？',
+    usage: {
+      title: '模型无法删除',
+      description: '模型「{name}」仍被以下配置引用。请先打开对应配置并更换模型，再重新删除。',
+      knowledgeBases: '知识库（{count}）',
+      agents: '智能体（{count}）',
+      longTermMemory: '长期记忆',
+      openConfiguration: '打开配置',
+      bindings: {
+        embedding_model: 'Embedding 模型',
+        summary_model: '摘要模型',
+        image_processing_model: '图片处理模型',
+        vlm_model: '视觉理解模型',
+        asr_model: '语音识别模型',
+        wiki_synthesis_model: 'Wiki 综合模型',
+        chat_model: '对话模型',
+        rerank_model: '重排序模型',
+        query_understand_model: '问题理解模型',
+        follow_up_model: '追问模型',
+        extract_model: '记忆提取模型',
+        unknown: '其他模型配置'
+      }
+    },
     debug: {
       title: '模型测试',
       description: '向已配置的模型发送真实请求，查看响应与耗时',

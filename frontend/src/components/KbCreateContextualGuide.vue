@@ -7,7 +7,7 @@
 import { computed, ref, watch } from 'vue'
 import SpotlightGuide from '@/components/SpotlightGuide.vue'
 import {
-  KB_EDITOR_FOCUS_SECTION_EVENT,
+  focusKbEditorSection,
   markContextualGuideDone,
   isContextualGuideDone,
   isGlobalUserGuideDone,
@@ -22,25 +22,19 @@ const props = defineProps<{
 
 const active = ref(false)
 
-const focusSection = (section: string) => {
-  window.dispatchEvent(
-    new CustomEvent(KB_EDITOR_FOCUS_SECTION_EVENT, { detail: { section } }),
-  )
-}
-
 const guideSteps = computed<SpotlightGuideStep[]>(() => {
   const steps: SpotlightGuideStep[] = [
     {
       key: 'type',
       target: '[data-guide="kb-create-type"]',
       placement: 'right',
-      before: () => focusSection('basic'),
+      before: () => focusKbEditorSection('basic'),
     },
     {
       key: 'name',
       target: '[data-guide="kb-create-name"]',
       placement: 'right',
-      before: () => focusSection('basic'),
+      before: () => focusKbEditorSection('basic'),
     },
   ]
 
@@ -49,7 +43,7 @@ const guideSteps = computed<SpotlightGuideStep[]>(() => {
       key: 'indexing',
       target: '[data-guide="kb-create-indexing"]',
       placement: 'right',
-      before: () => focusSection('basic'),
+      before: () => focusKbEditorSection('basic'),
     })
   }
 
@@ -58,13 +52,13 @@ const guideSteps = computed<SpotlightGuideStep[]>(() => {
       key: 'navModels',
       target: '[data-guide="kb-editor-nav-models"]',
       placement: 'right',
-      before: () => focusSection('models'),
+      before: () => focusKbEditorSection('models'),
     },
     {
       key: 'llm',
       target: '[data-guide="kb-create-llm"]',
       placement: 'right',
-      before: () => focusSection('models'),
+      before: () => focusKbEditorSection('models'),
     },
   )
 
@@ -73,7 +67,7 @@ const guideSteps = computed<SpotlightGuideStep[]>(() => {
       key: 'embedding',
       target: '[data-guide="kb-create-embedding"]',
       placement: 'right',
-      before: () => focusSection('models'),
+      before: () => focusKbEditorSection('models'),
       optional: true,
     })
   }
@@ -84,42 +78,42 @@ const guideSteps = computed<SpotlightGuideStep[]>(() => {
         key: 'parser',
         target: '[data-guide="kb-editor-nav-parser"]',
         placement: 'right',
-        before: () => focusSection('parser'),
+        before: () => focusKbEditorSection('parser'),
         optional: true,
       },
       {
         key: 'chunking',
         target: '[data-guide="kb-editor-nav-chunking"]',
         placement: 'right',
-        before: () => focusSection('chunking'),
+        before: () => focusKbEditorSection('chunking'),
         optional: true,
       },
       {
         key: 'storage',
         target: '[data-guide="kb-editor-nav-storage"]',
         placement: 'right',
-        before: () => focusSection('storage'),
+        before: () => focusKbEditorSection('storage'),
         optional: true,
       },
       {
         key: 'navMultimodal',
         target: '[data-guide="kb-editor-nav-multimodal"]',
         placement: 'right',
-        before: () => focusSection('multimodal'),
+        before: () => focusKbEditorSection('multimodal'),
         optional: true,
       },
       {
         key: 'multimodalToggle',
         target: '[data-guide="kb-create-multimodal-toggle"]',
         placement: 'right',
-        before: () => focusSection('multimodal'),
+        before: () => focusKbEditorSection('multimodal'),
         optional: true,
       },
       {
         key: 'multimodalVllm',
         target: '[data-guide="kb-create-multimodal-vllm"]',
         placement: 'right',
-        before: () => focusSection('multimodal'),
+        before: () => focusKbEditorSection('multimodal'),
         optional: true,
       },
     )
@@ -128,7 +122,7 @@ const guideSteps = computed<SpotlightGuideStep[]>(() => {
       key: 'faq',
       target: '[data-guide="kb-editor-nav-faq"]',
       placement: 'right',
-      before: () => focusSection('faq'),
+      before: () => focusKbEditorSection('faq'),
       optional: true,
     })
   }
@@ -137,7 +131,7 @@ const guideSteps = computed<SpotlightGuideStep[]>(() => {
     key: 'submit',
     target: '[data-guide="kb-create-submit"]',
     placement: 'top',
-    before: () => focusSection('basic'),
+    before: () => focusKbEditorSection('basic'),
     interact: true,
   })
 

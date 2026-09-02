@@ -1976,6 +1976,28 @@ export default {
     copySuffix: ' копия',
     builtinTag: 'Встроенная',
     confirmDelete: 'Удалить модель «{name}»?',
+    usage: {
+      title: 'Модель нельзя удалить',
+      description: 'Модель «{name}» используется в следующих настройках. Откройте каждую конфигурацию и выберите другую модель, затем повторите удаление.',
+      knowledgeBases: 'Базы знаний ({count})',
+      agents: 'Агенты ({count})',
+      longTermMemory: 'Долговременная память',
+      openConfiguration: 'Открыть настройки',
+      bindings: {
+        embedding_model: 'Модель эмбеддингов',
+        summary_model: 'Модель суммаризации',
+        image_processing_model: 'Модель обработки изображений',
+        vlm_model: 'Модель компьютерного зрения',
+        asr_model: 'Модель распознавания речи',
+        wiki_synthesis_model: 'Модель синтеза Wiki',
+        chat_model: 'Диалоговая модель',
+        rerank_model: 'Модель реранжирования',
+        query_understand_model: 'Модель понимания запроса',
+        follow_up_model: 'Модель уточняющих вопросов',
+        extract_model: 'Модель извлечения памяти',
+        unknown: 'Другая настройка модели'
+      }
+    },
     debug: {
       title: 'Тест модели',
       description: 'Отправьте реальный запрос к настроенной модели и проверьте ответ и время выполнения',

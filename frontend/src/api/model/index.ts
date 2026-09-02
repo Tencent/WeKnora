@@ -1,5 +1,8 @@
 import { get, post, postUpload, put, del } from '../../utils/request';
 import i18n from '@/i18n'
+import { ModelInUseError, modelInUseErrorFromRequest } from './modelUsage'
+
+export * from './modelUsage'
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -135,11 +138,25 @@ export function deleteModel(id: string): Promise<void> {
         if (response.success) {
           resolve();
         } else {
+          const conflict = modelInUseErrorFromRequest(response)
+          if (conflict) {
+            reject(conflict)
+            return
+          }
           reject(new Error(response.message || t('error.model.deleteFailed')));
         }
       })
       .catch((error: any) => {
         console.error('Failed to delete model:', error);
+        if (error instanceof ModelInUseError) {
+          reject(error)
+          return
+        }
+        const conflict = modelInUseErrorFromRequest(error)
+        if (conflict) {
+          reject(conflict)
+          return
+        }
         reject(error);
       });
   });

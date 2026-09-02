@@ -375,44 +375,22 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 		return apperrors.NewBadRequestError("builtin models cannot be deleted")
 	}
 
-	kbCount, err := s.kbRepo.CountByModelID(ctx, tenantID, id)
+	usage, err := s.getModelUsageDetails(ctx, tenantID, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id": id,
 		})
 		return err
 	}
-	agentCount, err := s.agentRepo.CountByModelID(ctx, tenantID, id)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id": id,
-		})
-		return err
-	}
-	if kbCount > 0 || agentCount > 0 {
-		logger.Warnf(ctx, "Model %s is in use: kb=%d agent=%d", id, kbCount, agentCount)
-		return apperrors.NewBadRequestError(formatModelInUseMessage(kbCount, agentCount, false))
-	}
-
-	if s.tenantService != nil {
-		tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
-		if err != nil {
-			logger.ErrorWithFields(ctx, err, map[string]interface{}{
-				"model_id":  id,
-				"tenant_id": tenantID,
-			})
-			return err
-		}
-		// Both models memory pins have to be checked. Deleting the extraction
-		// model leaves the workspace pointing at a model that no longer exists,
-		// and distillation only warns when it cannot resolve one, so auto
-		// extraction would stop with nothing surfaced to the admin who did it.
-		if tenant != nil && tenant.MemoryConfig != nil &&
-			(strings.TrimSpace(tenant.MemoryConfig.EmbeddingModelID) == id ||
-				strings.TrimSpace(tenant.MemoryConfig.ExtractModelID) == id) {
-			logger.Warnf(ctx, "Model %s is used by long-term memory", id)
-			return apperrors.NewBadRequestError(formatModelInUseMessage(0, 0, true))
-		}
+	if usage.InUse() {
+		kbCount := int64(len(usage.KnowledgeBases))
+		agentCount := int64(len(usage.Agents))
+		memoryInUse := len(usage.LongTermMemory.Bindings) > 0
+		logger.Warnf(ctx, "Model %s is in use: kb=%d agent=%d memory=%t", id, kbCount, agentCount, memoryInUse)
+		return apperrors.NewModelInUseError(
+			formatModelInUseMessage(kbCount, agentCount, memoryInUse),
+			usage,
+		)
 	}
 
 	// Delete model from repository
@@ -427,6 +405,59 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 
 	logger.Infof(ctx, "Model deleted successfully: %s", id)
 	return nil
+}
+
+func (s *modelService) getModelUsageDetails(
+	ctx context.Context, tenantID uint64, modelID string,
+) (types.ModelUsageDetails, error) {
+	details := types.ModelUsageDetails{
+		KnowledgeBases: make([]types.ModelUsageResource, 0),
+		Agents:         make([]types.ModelUsageResource, 0),
+		LongTermMemory: types.ModelUsageMemory{Bindings: make([]types.ModelUsageBinding, 0)},
+	}
+
+	var err error
+	details.KnowledgeBases, err = s.kbRepo.ListModelUsages(ctx, tenantID, modelID)
+	if err != nil {
+		return details, err
+	}
+	if details.KnowledgeBases == nil {
+		details.KnowledgeBases = make([]types.ModelUsageResource, 0)
+	}
+	details.Agents, err = s.agentRepo.ListModelUsages(ctx, tenantID, modelID)
+	if err != nil {
+		return details, err
+	}
+	if details.Agents == nil {
+		details.Agents = make([]types.ModelUsageResource, 0)
+	}
+
+	if s.tenantService == nil {
+		return details, nil
+	}
+	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
+	if err != nil {
+		return details, err
+	}
+	if tenant == nil || tenant.MemoryConfig == nil {
+		return details, nil
+	}
+
+	// Both memory model pins have to be checked. Deleting either one leaves
+	// the workspace pointing at a model that no longer exists.
+	if strings.TrimSpace(tenant.MemoryConfig.EmbeddingModelID) == modelID {
+		details.LongTermMemory.Bindings = append(
+			details.LongTermMemory.Bindings,
+			types.ModelUsageBindingEmbeddingModel,
+		)
+	}
+	if strings.TrimSpace(tenant.MemoryConfig.ExtractModelID) == modelID {
+		details.LongTermMemory.Bindings = append(
+			details.LongTermMemory.Bindings,
+			types.ModelUsageBindingExtractModel,
+		)
+	}
+	return details, nil
 }
 
 // GetEmbeddingModel retrieves and initializes an embedding model instance

@@ -85,6 +85,28 @@ curl -X PUT $BASE/api/v1/models/m-1 -H "Authorization: Bearer $TOKEN" \
 
 响应：200 `{"success":true,"message":"Model deleted"}`
 
+仍被当前空间的知识库、智能体或长期记忆引用时，响应为 HTTP 400；兼容 message 保留，同时 `error.code=2300`，`error.details` 给出具体对象和引用位置：
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": 2300,
+    "message": "model is used by 2 knowledge base(s); reconfigure or remove those references before deleting",
+    "details": {
+      "knowledge_bases": [
+        {"id": "kb-1", "name": "Product docs", "bindings": ["vlm_model"]},
+        {"id": "kb-2", "name": "Engineering", "bindings": ["vlm_model"]}
+      ],
+      "agents": [],
+      "long_term_memory": {"bindings": []}
+    }
+  }
+}
+```
+
+知识库绑定值：`embedding_model`、`summary_model`、`image_processing_model`、`vlm_model`、`asr_model`、`wiki_synthesis_model`；智能体绑定值：`chat_model`、`rerank_model`、`vlm_model`、`asr_model`、`query_understand_model`、`follow_up_model`；长期记忆绑定值：`embedding_model`、`extract_model`。详情只包含对象 `id`、`name` 和合并后的 `bindings`。
+
 ```bash
 curl -X DELETE $BASE/api/v1/models/m-1 -H "Authorization: Bearer $TOKEN"
 ```

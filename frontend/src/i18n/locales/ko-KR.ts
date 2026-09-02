@@ -1976,6 +1976,28 @@ export default {
     copySuffix: ' 사본',
     builtinTag: '기본제공',
     confirmDelete: '모델 "{name}"을(를) 삭제하시겠습니까?',
+    usage: {
+      title: '모델을 삭제할 수 없습니다',
+      description: '모델 "{name}"이(가) 다음 설정에서 사용 중입니다. 각 설정을 열어 다른 모델로 변경한 후 다시 삭제하세요.',
+      knowledgeBases: '지식 베이스 ({count})',
+      agents: '에이전트 ({count})',
+      longTermMemory: '장기 메모리',
+      openConfiguration: '설정 열기',
+      bindings: {
+        embedding_model: 'Embedding 모델',
+        summary_model: '요약 모델',
+        image_processing_model: '이미지 처리 모델',
+        vlm_model: '비전 모델',
+        asr_model: '음성 인식 모델',
+        wiki_synthesis_model: 'Wiki 종합 모델',
+        chat_model: '대화 모델',
+        rerank_model: '재정렬 모델',
+        query_understand_model: '질의 이해 모델',
+        follow_up_model: '후속 질문 모델',
+        extract_model: '메모리 추출 모델',
+        unknown: '기타 모델 설정'
+      }
+    },
     debug: {
       title: '모델 테스트',
       description: '구성된 모델에 실제 요청을 보내고 응답과 소요 시간을 확인합니다',

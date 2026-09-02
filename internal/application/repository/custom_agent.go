@@ -74,6 +74,32 @@ func (r *customAgentRepository) CountByModelID(
 	return count, err
 }
 
+// ListModelUsages returns active agents that reference modelID. Only id, name,
+// and config are loaded; the config is decoded locally and never returned.
+func (r *customAgentRepository) ListModelUsages(
+	ctx context.Context, tenantID uint64, modelID string,
+) ([]types.ModelUsageResource, error) {
+	rows := make([]*types.CustomAgent, 0)
+	query := r.db.WithContext(ctx).
+		Model(&types.CustomAgent{}).
+		Select("id", "name", "config").
+		Where("tenant_id = ?", tenantID)
+	query = scopeCustomAgentsByModelID(query, modelID)
+	if err := query.Order("name ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	usages := make([]types.ModelUsageResource, 0, len(rows))
+	for _, row := range rows {
+		usages = append(usages, types.ModelUsageResource{
+			ID:       row.ID,
+			Name:     row.Name,
+			Bindings: customAgentModelUsageBindings(row, modelID),
+		})
+	}
+	return usages, nil
+}
+
 // CountBySandboxConfigID counts agents pointing at a sandbox config.
 //
 // Used only to warn the admin which agents reference a config; never use it to
