@@ -184,27 +184,29 @@ func (h *AgentStreamHandler) handleToolCall(ctx context.Context, evt event.Event
 	}
 
 	h.mu.Lock()
-	// Track start time for this tool call (use tool_call_id as key)
-	h.eventStartTimes[data.ToolCallID] = time.Now()
-	// Any answer text streamed before this tool call was a non-terminal round's
-	// preamble, not the final answer (the agent only ends by stopping naturally
-	// with plain text and no tool calls). Drop those segments from the persisted
-	// answer so the preamble never leaks into Message.Content.
-	supersededAny := false
-	for _, seg := range h.answerSegments {
-		if !seg.superseded && seg.content != "" {
-			seg.superseded = true
-			supersededAny = true
+	_, first := h.eventStartTimes[data.ToolCallID]
+	if !first {
+		h.eventStartTimes[data.ToolCallID] = time.Now()
+		// Any answer text streamed before this tool call was a non-terminal round's
+		// preamble, not the final answer (the agent only ends by stopping naturally
+		// with plain text and no tool calls). Drop those segments from the persisted
+		// answer so the preamble never leaks into Message.Content.
+		supersededAny := false
+		for _, seg := range h.answerSegments {
+			if !seg.superseded && seg.content != "" {
+				seg.superseded = true
+				supersededAny = true
+			}
 		}
-	}
-	if supersededAny {
-		h.finalAnswer = h.composeFinalAnswer()
+		if supersededAny {
+			h.finalAnswer = h.composeFinalAnswer()
+		}
 	}
 	h.mu.Unlock()
 
 	metadata := map[string]interface{}{
 		"tool_name":    data.ToolName,
-		"arguments":    data.Arguments,
+		"arguments":    agenttools.SanitizeSandboxFileCallArgs(data.ToolName, data.Arguments),
 		"tool_call_id": data.ToolCallID,
 	}
 

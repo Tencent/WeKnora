@@ -332,6 +332,11 @@ func compactToolSummary(success bool, errMsg string, data map[string]interface{}
 		path := stringField(data, "path")
 		size := intField(data, "size")
 		if path != "" {
+			added := intField(data, "added_lines")
+			removed := intField(data, "removed_lines")
+			if stat := formatSandboxDiffStat(added, removed); stat != "" {
+				return fmt.Sprintf("Wrote %s (%s, %d bytes)", path, stat, size)
+			}
 			return fmt.Sprintf("Wrote %s (%d bytes)", path, size)
 		}
 	case "edit_sandbox_file":
@@ -339,6 +344,11 @@ func compactToolSummary(success bool, errMsg string, data map[string]interface{}
 		size := intField(data, "size")
 		n := intField(data, "replacements")
 		if path != "" {
+			added := intField(data, "added_lines")
+			removed := intField(data, "removed_lines")
+			if stat := formatSandboxDiffStat(added, removed); stat != "" {
+				return fmt.Sprintf("Edited %s (%s, %d replacement(s), %d bytes)", path, stat, n, size)
+			}
 			return fmt.Sprintf("Edited %s (%d replacement(s), %d bytes)", path, n, size)
 		}
 	case "attachment_parsing":

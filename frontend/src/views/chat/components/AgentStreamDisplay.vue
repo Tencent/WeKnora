@@ -155,6 +155,17 @@
                       <t-tooltip v-else :content="getToolTitle(event)" placement="top">
                         <span class="action-name">{{ getToolTitle(event) }}</span>
                       </t-tooltip>
+                      <span v-if="getSandboxDiffStat(event)" class="sandbox-diff-stat">
+                        <span v-if="getSandboxDiffStat(event)?.added" class="diff-add">+{{ getSandboxDiffStat(event)?.added }}</span>
+                        <span v-if="getSandboxDiffStat(event)?.removed" class="diff-del">-{{ getSandboxDiffStat(event)?.removed }}</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div v-if="event.pending && getSandboxFilePreview(event)" class="sandbox-file-preview">
+                    <pre>{{ getSandboxFilePreview(event) }}</pre>
+                    <div v-if="sandboxPreviewRemaining(event) > 0" class="sandbox-file-preview-more">
+                      {{ t('agentStream.sandboxFiles.moreLines', { count: sandboxPreviewRemaining(event) }) }}
                     </div>
                   </div>
 
@@ -433,6 +444,17 @@
                     <t-tooltip v-else :content="getToolTitle(event)" placement="top">
                       <span class="action-name">{{ getToolTitle(event) }}</span>
                     </t-tooltip>
+                    <span v-if="getSandboxDiffStat(event)" class="sandbox-diff-stat">
+                      <span v-if="getSandboxDiffStat(event)?.added" class="diff-add">+{{ getSandboxDiffStat(event)?.added }}</span>
+                      <span v-if="getSandboxDiffStat(event)?.removed" class="diff-del">-{{ getSandboxDiffStat(event)?.removed }}</span>
+                    </span>
+                  </div>
+                </div>
+
+                <div v-if="event.pending && getSandboxFilePreview(event)" class="sandbox-file-preview">
+                  <pre>{{ getSandboxFilePreview(event) }}</pre>
+                  <div v-if="sandboxPreviewRemaining(event) > 0" class="sandbox-file-preview-more">
+                    {{ t('agentStream.sandboxFiles.moreLines', { count: sandboxPreviewRemaining(event) }) }}
                   </div>
                 </div>
 
@@ -608,7 +630,10 @@ import {
   formatToolTitleWithDetail,
   getEventSkillName,
   getReadSkillTarget,
+  getSandboxDiffStat,
+  getSandboxFilePreview,
   getSandboxToolPath,
+  sandboxPreviewRemaining,
   skillScriptTitleCommand,
 } from '@/utils/skillToolDisplay';
 import { previewShellCommand } from '@/utils/shellExecResult';
@@ -3586,6 +3611,51 @@ const handleAddToKnowledge = (answerEvent: any) => {
   display: inline-block;
   max-width: 100%;
   vertical-align: middle;
+}
+
+.sandbox-diff-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+
+  .diff-add {
+    color: var(--td-success-color);
+  }
+
+  .diff-del {
+    color: var(--td-error-color);
+  }
+}
+
+.sandbox-file-preview {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  font-family: var(--app-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
+  border-radius: 6px;
+
+  pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 180px;
+    overflow: hidden;
+  }
+}
+
+.sandbox-file-preview-more {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
 }
 
 .action-show-icon {
