@@ -1114,7 +1114,7 @@ export default {
       rewriteSystemPrompt: '질문 재작성용 시스템 프롬프트 (비워두면 기본값 사용)',
       rewriteUserPrompt: '질문 재작성용 사용자 프롬프트 템플릿 (비워두면 기본값 사용)',
       selectTools: 'Agent가 사용할 수 있는 도구를 선택하세요',
-      maxIterations: 'Agent가 작업 수행 시 최대 추론 단계 수',
+      maxIterations: 'Agent가 한 작업에서 수행할 최대 추론 단계 수입니다. 「제한 없음」을 선택하면 모델이 스스로 끝나거나 직접 중지할 때까지 계속 실행됩니다.',
       kbScope: '에이전트가 접근할 수 있는 지식베이스 범위를 선택하세요',
       webSearch: '활성화하면 에이전트가 인터넷에서 정보를 검색할 수 있습니다',
       webSearchProvider: '이 에이전트의 검색 엔진을 지정합니다. 비워두면 기본 검색 엔진을 사용합니다',
@@ -2216,7 +2216,7 @@ export default {
       desc: 'Agent 추론 및 계획을 위한 LLM 모델'
     },
     maxIterations: {
-      desc: 'Agent가 작업을 실행할 때의 최대 추론 단계 수'
+      desc: 'Agent가 한 작업에서 수행할 최대 추론 단계 수입니다. 「제한 없음」을 선택하면 모델이 스스로 끝나거나 직접 중지할 때까지 계속 실행됩니다.'
     },
     modelRecommendation: {
       title: '모델 추천'
@@ -2371,6 +2371,11 @@ export default {
       dimensionOverrideDesc: '제공자 문서에서 이 모델이 dimensions 매개변수를 지원한다고 확인한 경우에만 켜세요.',
       supportsVisionLabel: '비전/멀티모달 지원',
       supportsVisionDesc: '모델의 이미지 등 멀티모달 입력 지원 여부',
+      contextWindowLabel: '컨텍스트 창',
+      contextWindowPlaceholder: '기본값 {value}',
+      contextWindowDesc: '모델이 한 요청에 수용할 수 있는 토큰 수입니다. 에이전트 대화 압축이 이 한도를 사용합니다. 비워 두면 기본값 200000(200K)을 사용합니다. 공급자 문서의 실제 값을 입력하세요. 더 크게 설정하면 압축이 발생하지 않고 요청이 거부될 수 있습니다.',
+      contextWindowDefaultHint: '설정되지 않음, 기본값 {value} 사용',
+      contextWindowTokens: '{count} 토큰',
       maxConcurrencyLabel: '백그라운드 동시 실행 상한',
       maxConcurrencyPlaceholder: '0이면 전역 기본값 사용',
       maxConcurrencyDesc: '문서 인덱싱/보강 등 백그라운드 작업이 이 모델을 호출하는 동시 실행 수를 제한합니다(모델별로 모든 복제본이 공유). 0 또는 비워 두면 전역 기본값을 사용하며, 대화형 채팅에는 영향을 주지 않습니다.',
@@ -5674,6 +5679,9 @@ export default {
     toolCalls: '도구 <strong>{tools}</strong>회 호출',
     durationSuffix: '소요 시간 <strong>{duration}</strong>',
     stepSummarySeparator: ' · ',
+    contextCompacted: '컨텍스트 압축',
+    contextCompactedSummary: '{before} → {after} 토큰',
+    contextCompactedDegraded: '요약을 사용할 수 없어 원본 기록을 유지했습니다',
     title: '에이전트',
     subtitle: '에이전트 구성 및 관리, 대화 동작 및 기능 맞춤화',
     createAgent: '에이전트 만들기',
@@ -5773,6 +5781,8 @@ export default {
       rerankModelPlaceholder: 'ReRank 모델을 선택하세요.',
       rerankModelOptionalHint: '현재 범위에 RAG 유형의 지식베이스가 없으므로 선택 사항입니다. 이후 RAG 지식베이스가 추가되면 워크스페이스 기본 ReRank 모델로 자동 폴백되지만, 명시적으로 설정하는 것을 권장합니다.',
       maxIterations: '최대 반복 횟수',
+      maxIterationsLimit: '제한',
+      maxIterationsUnlimited: '제한 없음',
       allowedTools: '허용된 도구',
       multiTurn: '여러 라운드의 대화',
       historyTurns: '라운드 수를 유지하세요',

@@ -16,22 +16,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCurrentTurnToolResultBudgetBounds(t *testing.T) {
-	assert.Equal(t, maxCurrentTurnToolTokens, currentTurnToolResultBudget(0))
-	assert.Equal(t, minCurrentTurnToolTokens, currentTurnToolResultBudget(10_000))
-	assert.Equal(t, 20_000, currentTurnToolResultBudget(100_000))
-	assert.Equal(t, maxCurrentTurnToolTokens, currentTurnToolResultBudget(1_000_000))
+func TestToolResultBudgetBounds(t *testing.T) {
+	assert.Equal(t, maxToolResultTokens, toolResultBudget(0))
+	assert.Equal(t, minToolResultTokens, toolResultBudget(10_000))
+	assert.Equal(t, 20_000, toolResultBudget(100_000))
+	assert.Equal(t, maxToolResultTokens, toolResultBudget(1_000_000))
 }
 
-func TestTrimCurrentTurnToolResultsKeepsNewestAndPairing(t *testing.T) {
+func TestTrimToolResultsKeepsNewestAndPairing(t *testing.T) {
 	estimator, err := agenttoken.NewEstimator()
 	require.NoError(t, err)
 
 	messages := []chat.Message{
-		{Role: "user", Content: "old turn"},
-		{Role: "tool", Name: "old", ToolCallID: "old-call", Content: strings.Repeat("historical ", 1000)},
-		{Role: "assistant", Content: "old answer"},
-		{Role: "user", Content: "current turn"},
+		{Role: "user", Content: "the question"},
 		{
 			Role: "assistant",
 			ToolCalls: []chat.ToolCall{
@@ -44,25 +41,28 @@ func TestTrimCurrentTurnToolResultsKeepsNewestAndPairing(t *testing.T) {
 		{Role: "tool", Name: "two", ToolCallID: "call-2", Content: strings.Repeat("delta epsilon zeta ", 1000)},
 		{Role: "tool", Name: "three", ToolCallID: "call-3", Content: strings.Repeat("newest result ", 100)},
 	}
-	latestCost := estimator.EstimateMessage(&messages[7])
-	markerOne := messages[5]
+	latestCost := estimator.EstimateMessage(&messages[4])
+	markerOne := messages[2]
 	markerOne.Content = compactedToolResultMarker(markerOne.Content)
-	markerTwo := messages[6]
+	markerTwo := messages[3]
 	markerTwo.Content = compactedToolResultMarker(markerTwo.Content)
 	budget := latestCost + estimator.EstimateMessage(&markerOne) + estimator.EstimateMessage(&markerTwo)
 
-	trimmed, changed := trimCurrentTurnToolResults(messages, estimator, budget)
+	trimmed, changed := trimToolResultsToBudget(messages, estimator, budget)
 
 	require.True(t, changed)
-	assert.Equal(t, messages[1].Content, trimmed[1].Content, "historical results are handled separately")
-	assert.Contains(t, trimmed[5].Content, "Tool result compacted")
-	assert.Contains(t, trimmed[6].Content, "Tool result compacted")
-	assert.Equal(t, messages[7].Content, trimmed[7].Content, "newest result should be kept in full")
-	assert.Equal(t, messages[4].ToolCalls, trimmed[4].ToolCalls, "assistant tool-call pairing must remain intact")
-	assert.Equal(t, strings.Repeat("alpha beta gamma ", 1000), messages[5].Content, "input messages must not be mutated")
+	assert.Contains(t, trimmed[2].Content, "Tool result compacted")
+	assert.Contains(t, trimmed[3].Content, "Tool result compacted")
+	assert.Equal(t, messages[4].Content, trimmed[4].Content, "newest result should be kept in full")
+	assert.Equal(t, messages[1].ToolCalls, trimmed[1].ToolCalls, "assistant tool-call pairing must remain intact")
+	assert.Equal(t,
+		strings.Repeat("alpha beta gamma ", 1000),
+		messages[2].Content,
+		"input messages must not be mutated",
+	)
 
 	total := 0
-	for _, idx := range []int{5, 6, 7} {
+	for _, idx := range []int{2, 3, 4} {
 		total += estimator.EstimateMessage(&trimmed[idx])
 	}
 	assert.LessOrEqual(t, total, budget)
@@ -399,27 +399,116 @@ func TestIsLengthFinishReason(t *testing.T) {
 	assert.False(t, isLengthFinishReason("tool_calls"))
 }
 
-func TestAnnotateLengthTruncatedToolErrors(t *testing.T) {
-	step := &types.AgentStep{
-		ToolCalls: []types.ToolCall{
-			{Name: "write_sandbox_file", Result: &types.ToolResult{Success: false, Error: "required parameter 'path' is missing"}},
-			{Name: "ok", Result: &types.ToolResult{Success: true, Output: "wrote"}},
-		},
-	}
-	annotateLengthTruncatedToolErrors("length", step.ToolCalls)
-	assert.Contains(t, step.ToolCalls[0].Result.Error, "finish_reason=length")
-	assert.Contains(t, step.ToolCalls[0].Result.Error, "smaller payload")
-	assert.NotContains(t, step.ToolCalls[0].Result.Error, "`path`")
-	assert.Equal(t, "wrote", step.ToolCalls[1].Result.Output)
+func newEngineWithTool(t *testing.T, name string) (*AgentEngine, *countingTool) {
+	t.Helper()
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	tool := newCountingTool(name)
+	engine.toolRegistry.RegisterTool(tool)
+	return engine, tool
+}
 
-	annotateLengthTruncatedToolErrors("length", step.ToolCalls)
-	assert.Equal(t, 1, strings.Count(step.ToolCalls[0].Result.Error, "finish_reason=length"))
+// "length" alone does not mean the window is full — it usually means the model
+// used the budget we gave it. Retrying those would burn a round reproducing the
+// same truncation, so only a response that stopped short of its own budget
+// counts as something compaction can fix.
+func TestResponseHitContextLimitOnlyWhenShortOfItsOwnBudget(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{}, withMaxCompletionTokens(8192))
 
-	okStep := &types.AgentStep{
-		ToolCalls: []types.ToolCall{
-			{Result: &types.ToolResult{Success: false, Error: "nope"}},
-		},
+	stoppedShort := &types.ChatResponse{
+		FinishReason: "length",
+		Usage:        types.TokenUsage{CompletionTokens: 120},
 	}
-	annotateLengthTruncatedToolErrors("stop", okStep.ToolCalls)
-	assert.Equal(t, "nope", okStep.ToolCalls[0].Result.Error)
+	require.True(t, engine.responseHitContextLimit(stoppedShort))
+
+	usedFullBudget := &types.ChatResponse{
+		FinishReason: "length",
+		Usage:        types.TokenUsage{CompletionTokens: 8192},
+	}
+	require.False(t, engine.responseHitContextLimit(usedFullBudget))
+
+	// Without usage there is nothing to compare against, so this must not
+	// classify every ordinary truncation as an overflow.
+	require.False(t, engine.responseHitContextLimit(&types.ChatResponse{FinishReason: "length"}))
+
+	require.False(t, engine.responseHitContextLimit(&types.ChatResponse{
+		FinishReason: "stop",
+		Usage:        types.TokenUsage{CompletionTokens: 10},
+	}))
+	require.False(t, engine.responseHitContextLimit(nil))
+}
+
+// A response cut off at the completion-token cap must not have any of its tool
+// calls executed: the arguments stop mid-serialization, and a truncated
+// write_sandbox_file lands a half-written file while still reporting success.
+func TestExecuteToolCalls_LengthFinish_RefusesEveryCallWithoutExecuting(t *testing.T) {
+	engine, tool := newEngineWithTool(t, "write_sandbox_file")
+
+	step := &types.AgentStep{}
+	engine.executeToolCalls(
+		context.Background(),
+		&types.ChatResponse{
+			FinishReason: "length",
+			ToolCalls: []types.LLMToolCall{
+				{ID: "call-1", Function: types.FunctionCall{
+					Name: "write_sandbox_file", Arguments: `{"path":"/workspace/output/a.html","content":"<htm`,
+				}},
+			},
+		},
+		step, 0, "sess-1", "msg-1",
+	)
+
+	assert.Equal(t, 0, tool.calls, "a truncated call must never reach the tool")
+	require.Len(t, step.ToolCalls, 1)
+	assert.False(t, step.ToolCalls[0].Result.Success)
+	assert.Contains(t, step.ToolCalls[0].Result.Error, "was not executed")
+	assert.Contains(t, step.ToolCalls[0].Result.Error, "smaller calls")
+}
+
+// A stream that breaks mid-argument never reports finish_reason=length, so the
+// refusal has to come from the repair step noticing it closed the payload off.
+func TestExecuteToolCalls_TruncatedArgsWithoutFinishReason_Refuses(t *testing.T) {
+	engine, tool := newEngineWithTool(t, "write_sandbox_file")
+
+	step := &types.AgentStep{}
+	engine.executeToolCalls(
+		context.Background(),
+		&types.ChatResponse{
+			ToolCalls: []types.LLMToolCall{
+				{ID: "call-1", Function: types.FunctionCall{
+					Name: "write_sandbox_file", Arguments: `{"path":"/workspace/output/a.html","content":"<html><body`,
+				}},
+			},
+		},
+		step, 0, "sess-1", "msg-1",
+	)
+
+	assert.Equal(t, 0, tool.calls)
+	require.Len(t, step.ToolCalls, 1)
+	assert.False(t, step.ToolCalls[0].Result.Success)
+	assert.Contains(t, step.ToolCalls[0].Result.Error, "was not executed")
+}
+
+// Well-formed arguments must still run — the refusal keys on truncation, not on
+// having gone through the repair path at all.
+func TestExecuteToolCalls_CompleteArgs_StillExecute(t *testing.T) {
+	engine, tool := newEngineWithTool(t, "write_sandbox_file")
+
+	step := &types.AgentStep{}
+	engine.executeToolCalls(
+		context.Background(),
+		&types.ChatResponse{
+			FinishReason: "tool_calls",
+			ToolCalls: []types.LLMToolCall{
+				{ID: "call-1", Function: types.FunctionCall{
+					Name: "write_sandbox_file", Arguments: `{"path":"/workspace/output/a.html","content":"<html>"}`,
+				}},
+			},
+		},
+		step, 0, "sess-1", "msg-1",
+	)
+
+	assert.Equal(t, 1, tool.calls)
+	require.Len(t, step.ToolCalls, 1)
+	assert.True(t, step.ToolCalls[0].Result.Success)
 }

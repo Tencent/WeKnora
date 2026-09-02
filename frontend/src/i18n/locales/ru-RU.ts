@@ -1114,7 +1114,7 @@ export default {
       rewriteSystemPrompt: 'Системный промпт для перефразирования вопросов (пустое = по умолчанию)',
       rewriteUserPrompt: 'Шаблон пользовательского промпта для перефразирования (пустое = по умолчанию)',
       selectTools: 'Выберите инструменты, доступные агенту',
-      maxIterations: 'Максимальное количество шагов рассуждения при выполнении задач',
+      maxIterations: 'Ограничивает число шагов рассуждения за одну задачу. «Без ограничения» — цикл идёт, пока модель не остановится сама или вы не остановите её.',
       kbScope: 'Выберите область баз знаний, доступных агенту',
       webSearch: 'При включении агент может искать информацию в интернете',
       webSearchProvider: 'Укажите поисковый движок для этого агента. Если оставить пустым, будет использоваться движок по умолчанию',
@@ -2216,7 +2216,7 @@ export default {
       desc: 'LLM для рассуждений и планирования'
     },
     maxIterations: {
-      desc: 'Максимальное число шагов рассуждений при выполнении задач'
+      desc: 'Ограничивает число шагов рассуждения за одну задачу. «Без ограничения» — цикл идёт, пока модель не остановится сама или вы не остановите её.'
     },
     modelRecommendation: {
       title: 'Model Recommendation'
@@ -2371,6 +2371,11 @@ export default {
       dimensionOverrideDesc: 'Включайте только если документация провайдера подтверждает поддержку параметра dimensions.',
       supportsVisionLabel: 'Поддержка визуального / мультимодального ввода',
       supportsVisionDesc: 'Поддерживает ли модель изображения и другой мультимодальный ввод',
+      contextWindowLabel: 'Контекстное окно',
+      contextWindowPlaceholder: 'По умолчанию {value}',
+      contextWindowDesc: 'Сколько токенов модель принимает за один запрос. Сжатие истории агента использует этот лимит. Пустое значение — по умолчанию 200000 (200K). Укажите реальное окно провайдера: завышенное значение не запускает сжатие, и провайдер отклоняет запрос.',
+      contextWindowDefaultHint: 'Не задано, используется значение по умолчанию {value}',
+      contextWindowTokens: '{count} токенов',
       maxConcurrencyLabel: 'Лимит фоновой параллельности',
       maxConcurrencyPlaceholder: '0 — использовать глобальное значение',
       maxConcurrencyDesc: 'Ограничивает число одновременных фоновых вызовов (индексация/обогащение) к этой модели, общее для модели по всем репликам. 0 или пусто — используется глобальное значение по умолчанию; интерактивный чат не затрагивается.',
@@ -5674,6 +5679,9 @@ export default {
     toolCalls: '<strong>{tools}</strong> вызов(ов) инструментов',
     durationSuffix: '<strong>{duration}</strong>',
     stepSummarySeparator: ' · ',
+    contextCompacted: 'Контекст сжат',
+    contextCompactedSummary: '{before} → {after} токенов',
+    contextCompactedDegraded: 'Сводка недоступна, сохранена исходная запись',
     title: 'Agents',
     subtitle: 'Configure and manage your agents to customize conversation behavior and capabilities',
     createAgent: 'Create Agent',
@@ -5773,6 +5781,8 @@ export default {
       rerankModelPlaceholder: 'Select ReRank Model',
       rerankModelOptionalHint: 'В текущей области нет RAG-базы знаний, поэтому поле необязательное. Если RAG-база будет добавлена позже, будет использоваться модель ReRank по умолчанию для пространства; всё же рекомендуется настроить её явно.',
       maxIterations: 'Max Iterations',
+      maxIterationsLimit: 'Лимит',
+      maxIterationsUnlimited: 'Без ограничения',
       allowedTools: 'Allowed Tools',
       multiTurn: 'Multi-turn Conversation',
       historyTurns: 'History Turns',

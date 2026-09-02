@@ -197,6 +197,25 @@ type AgentFinalAnswerData struct {
 	IsFallback bool   `json:"is_fallback,omitempty"` // True when response is a fallback (no knowledge base match)
 }
 
+// ContextCompactedData reports that older conversation was replaced by a
+// summary. Compaction changes what the agent remembers, so it is shown rather
+// than hidden: an answer that forgets an earlier instruction is otherwise
+// indistinguishable from the model ignoring it.
+type ContextCompactedData struct {
+	Reason         string `json:"reason"` // threshold | overflow
+	Round          int    `json:"round"`
+	TokensBefore   int    `json:"tokens_before"`
+	TokensAfter    int    `json:"tokens_after"`
+	MessagesBefore int    `json:"messages_before"`
+	MessagesAfter  int    `json:"messages_after"`
+	Summary        string `json:"summary"`
+	// Degraded marks a summary that came from the mechanical archive because
+	// the summarizer failed.
+	Degraded bool `json:"degraded,omitempty"`
+	// SplitTurn marks a cut that landed inside a single turn.
+	SplitTurn bool `json:"split_turn,omitempty"`
+}
+
 // AgentReflectionData represents agent reflection data
 type AgentReflectionData struct {
 	ToolCallID string `json:"tool_call_id"` // Tool call ID for tracking

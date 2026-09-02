@@ -107,6 +107,14 @@
                 <span class="model-card__sep">·</span>
                 <span>{{ $t('model.editor.dimensionLabel') }} {{ model.dimension }}</span>
               </template>
+              <template v-if="model._modelType === 'chat' || model._modelType === 'vllm'">
+                <span class="model-card__sep">·</span>
+                <span
+                  class="model-card__ctx"
+                  :class="{ 'model-card__ctx--default': isDefaultContextWindow(model.contextWindow) }"
+                  :title="contextWindowTitle(model.contextWindow)"
+                >{{ formatContextWindow(model.contextWindow) }}</span>
+              </template>
               <template v-if="model._modelType === 'chat' && model.supportsVision">
                 <span class="model-card__sep">·</span>
                 <span class="model-card__vision" :title="$t('model.editor.supportsVisionLabel')"
@@ -284,10 +292,17 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
 import { focusKbEditorSection } from '@/config/contextualGuides'
+import { useChatResourcesStore } from '@/stores/chatResources'
+import {
+  formatContextWindow,
+  isDefaultContextWindow,
+  effectiveContextWindow,
+} from '@/utils/contextWindow'
 
 const { t, te } = useI18n()
 const authStore = useAuthStore()
 const uiStore = useUIStore()
+const chatResources = useChatResourcesStore()
 const router = useRouter()
 type ModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
 type FilterType = 'all' | ModelType
@@ -352,6 +367,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     supportsDimensionOverride: model.parameters.embedding_parameters?.supports_dimension_override || false,
     isBuiltin: model.is_builtin || false,
     supportsVision: model.parameters.supports_vision || false,
+    contextWindow: model.parameters.context_window || undefined,
     maxConcurrency: model.parameters.max_concurrency,
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
@@ -441,6 +457,13 @@ const modelDisplayName = (model: any) => {
   return displayName || model.name
 }
 
+const contextWindowTitle = (tokens?: number) => {
+  if (isDefaultContextWindow(tokens)) {
+    return t('model.editor.contextWindowDefaultHint', { value: formatContextWindow(tokens) })
+  }
+  return t('model.editor.contextWindowTokens', { count: effectiveContextWindow(tokens) })
+}
+
 const emptyHint = computed(() => {
   if (activeTypeFilter.value === 'all') return t('modelSettings.chat.empty')
   const map: Record<ModelType, string> = {
@@ -459,6 +482,9 @@ const loadModels = async () => {
   try {
     const models = await listModels()
     allModels.value = models
+    // 设置页自己 listModels 之后立刻写回空间级缓存。否则对话输入栏 /
+    // 智能体编辑器会继续拿 60s TTL 里的旧 context_window，刷新页面才对。
+    chatResources.replaceModels(models)
   } catch (error: any) {
     console.error('加载模型列表失败:', error)
     MessagePlugin.error(error.message)
@@ -616,6 +642,10 @@ const handleModelSave = async (modelData: any) => {
         } : saveType === 'chat' ? {
           supports_vision: modelData.supportsVision ?? false
         } : {}),
+        ...((saveType === 'chat' || saveType === 'vllm')
+          && Number(modelData.contextWindow) >= 1024
+          ? { context_window: Math.round(Number(modelData.contextWindow)) }
+          : {}),
         // 后台并发上限：仅 chat/embedding/vllm 受治理，>0 才写入（0/空沿用全局默认）。
         ...(['chat', 'embedding', 'vllm'].includes(saveType)
           && Number(modelData.maxConcurrency) > 0
@@ -1135,6 +1165,14 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+}
+
+.model-card__ctx {
+  font-variant-numeric: tabular-nums;
+}
+
+.model-card__ctx--default {
+  color: var(--td-text-color-placeholder);
 }
 
 .model-card__actions {

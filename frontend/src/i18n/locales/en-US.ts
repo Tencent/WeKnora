@@ -823,6 +823,9 @@ export default {
     toolCalls: '<strong>{tools}</strong> tool call(s)',
     durationSuffix: '<strong>{duration}</strong>',
     stepSummarySeparator: ' · ',
+    contextCompacted: 'Compacted context',
+    contextCompactedSummary: '{before} → {after} tokens',
+    contextCompactedDegraded: 'Summary unavailable, raw transcript kept',
     title: 'Agents',
     subtitle: 'Configure and manage your agents to customize conversation behavior and capabilities',
     createAgent: 'Create Agent',
@@ -985,6 +988,8 @@ export default {
       rerankModelPlaceholder: 'Select ReRank Model',
       rerankModelOptionalHint: 'No RAG knowledge base in current scope, so this is optional. If a RAG knowledge base is added later, the workspace default rerank model will be used as a fallback. Configuring it explicitly is still recommended.',
       maxIterations: 'Max Iterations',
+      maxIterationsLimit: 'Limit',
+      maxIterationsUnlimited: 'Unlimited',
       allowedTools: 'Allowed Tools',
       multiTurn: 'Multi-turn Conversation',
       historyTurns: 'History Turns',
@@ -4231,6 +4236,11 @@ export default {
       dimensionOverrideDesc: 'Enable only if the provider documentation says this model accepts a dimensions parameter.',
       supportsVisionLabel: 'Supports Vision / Multimodal',
       supportsVisionDesc: 'Whether the model accepts image and multimodal input',
+      contextWindowLabel: 'Context Window',
+      contextWindowPlaceholder: 'Default {value}',
+      contextWindowDesc: 'How many tokens this model can take in one request. Agent history compaction uses this limit. Leave empty for the default 200000 (200K). Use the provider’s real window — a larger guess means compaction never fires and the provider rejects the request.',
+      contextWindowDefaultHint: 'Unset, using default {value}',
+      contextWindowTokens: '{count} tokens',
       maxConcurrencyLabel: 'Background concurrency limit',
       maxConcurrencyPlaceholder: '0 = use global default',
       maxConcurrencyDesc: 'Caps concurrent background (ingestion/enrichment) calls to this model, shared per model across all replicas. 0 or empty falls back to the global default; interactive chat is never affected.',
@@ -4496,7 +4506,7 @@ export default {
       title: 'Model Recommendation'
     },
     maxIterations: {
-      desc: 'Maximum reasoning steps when the Agent executes tasks'
+      desc: 'Caps how many reasoning steps one task may take. Unlimited keeps going until the model stops on its own or you stop it.'
     },
     thinkingModel: {
       desc: 'LLM used for Agent reasoning and planning'
@@ -5604,7 +5614,7 @@ export default {
       rewriteSystemPrompt: 'System prompt for question rewriting (leave empty for default)',
       rewriteUserPrompt: 'User prompt template for question rewriting (leave empty for default)',
       selectTools: 'Select tools available to the Agent',
-      maxIterations: 'Maximum reasoning steps when the Agent executes tasks',
+      maxIterations: 'Caps how many reasoning steps one task may take. Unlimited keeps going until the model stops on its own or you stop it.',
       kbScope: 'Select the scope of knowledge bases accessible to the agent',
       webSearch: 'When enabled, the agent can search the internet for information',
       webSearchProvider: 'Specify a search engine for this agent. Leave empty to use the default.',

@@ -70,6 +70,28 @@ func TestEnsureDefaults_MaxCompletionTokensByMode(t *testing.T) {
 	}
 }
 
+func TestEnsureDefaults_MaxIterationsUnlimited(t *testing.T) {
+	unset := &CustomAgent{Config: CustomAgentConfig{}}
+	unset.EnsureDefaults()
+	if unset.Config.MaxIterations != 10 {
+		t.Fatalf("unset max_iterations should default to 10, got %d", unset.Config.MaxIterations)
+	}
+
+	unlimited := &CustomAgent{Config: CustomAgentConfig{MaxIterations: -1}}
+	unlimited.EnsureDefaults()
+	if unlimited.Config.MaxIterations != UnlimitedMaxIterations {
+		t.Fatalf("EnsureDefaults must preserve unlimited max_iterations, got %d",
+			unlimited.Config.MaxIterations)
+	}
+
+	oddNegative := &CustomAgent{Config: CustomAgentConfig{MaxIterations: -7}}
+	oddNegative.EnsureDefaults()
+	if oddNegative.Config.MaxIterations != UnlimitedMaxIterations {
+		t.Fatalf("any negative max_iterations should normalize to %d, got %d",
+			UnlimitedMaxIterations, oddNegative.Config.MaxIterations)
+	}
+}
+
 func TestEnsureDefaults_CitationsDefaultEnabledAndPreserveFalse(t *testing.T) {
 	legacy := &CustomAgent{Config: CustomAgentConfig{}}
 	legacy.EnsureDefaults()

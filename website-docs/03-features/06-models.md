@@ -165,6 +165,7 @@ return wrapChatConcurrency(c, config.MaxConcurrency, err)
 | `extra_config` | map[string]string | nil | 厂商专属配置（如 Azure 的 `api_version`） |
 | `custom_headers` | map[string]string | nil | 附加自定义 HTTP 请求头（类似 OpenAI SDK `extra_headers`；`Authorization`、`api-key` 等保留头在运行期被忽略） |
 | `supports_vision` | bool | false | Chat 模型是否接受图片多模态输入 |
+| `context_window` | int | 0（回落到 200000） | 对话/VLM 上下文窗口（token）。智能体压缩历史按此上限工作；留空使用默认 200K。请填厂商真实窗口，填大会导致压缩不触发 |
 | `max_concurrency` | int | 0（回落到全局 `model.max_concurrency`） | 该模型后台任务并发上限（仅 chat/vlm/embedding 生效） |
 | `app_id` / `app_secret` | string | 空 | WeKnoraCloud 专用凭证，`app_secret` AES 加密存储 |
 

@@ -574,3 +574,22 @@ func TestGetKnowledgeBaseInfos_ExcludesUnprocessedDocuments(t *testing.T) {
 	require.Len(t, infos[0].RecentDocs, 1)
 	assert.Equal(t, "doc-completed", infos[0].RecentDocs[0].KnowledgeID)
 }
+
+func TestValidateConfigMaxIterationsUnlimited(t *testing.T) {
+	s := &agentService{}
+
+	unlimited := &types.AgentConfig{MaxIterations: -1}
+	require.NoError(t, s.ValidateConfig(unlimited))
+	assert.Equal(t, types.UnlimitedMaxIterations, unlimited.MaxIterations)
+
+	normalized := &types.AgentConfig{MaxIterations: -9}
+	require.NoError(t, s.ValidateConfig(normalized))
+	assert.Equal(t, types.UnlimitedMaxIterations, normalized.MaxIterations)
+
+	unset := &types.AgentConfig{}
+	require.NoError(t, s.ValidateConfig(unset))
+	assert.Equal(t, 5, unset.MaxIterations)
+
+	tooHigh := &types.AgentConfig{MaxIterations: MAX_ITERATIONS + 1}
+	require.Error(t, s.ValidateConfig(tooHigh))
+}
