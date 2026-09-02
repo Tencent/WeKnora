@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const source = readFileSync(new URL('./AgentEditorModal.vue', import.meta.url), 'utf8')
+const editorResourcesSource = readFileSync(new URL('../../stores/editorResources.ts', import.meta.url), 'utf8')
 
 test('editing an agent closes the editor after a successful save', () => {
   assert.match(
@@ -33,6 +34,42 @@ test('shows a post-create hint after the first successful save', () => {
   assert.match(source, /const isPostCreateSession = computed\(\(\) => !!savedAgent\.value\)/)
   assert.match(source, /settings-footer-note/)
   assert.match(source, /agent\.editor\.postCreateHint\.title/)
+})
+
+test('a failed optional dependency does not discard loaded models and knowledge bases', () => {
+  const loadDependencies = source.match(
+    /const loadDependencies = async \(\) => \{([\s\S]*?)^\};/m
+  )?.[1]
+
+  assert.ok(loadDependencies, 'expected to find loadDependencies')
+  assert.match(loadDependencies, /await Promise\.allSettled\(/)
+  assert.match(loadDependencies, /allModels\.value = chatResources\.allModels/)
+  assert.match(loadDependencies, /kbOptions\.value = \[\.\.\.myKbs, \.\.\.sharedKbs\]/)
+})
+
+test('agent editor prefetch only reads viewer-safe storage status', () => {
+  const statusLoad = editorResourcesSource.match(
+    /async function ensureStorageEngineStatus\(force = false\): Promise<void> \{([\s\S]*?)^  \}/m
+  )?.[1]
+  const prefetch = editorResourcesSource.match(
+    /async function prefetchAgentEditorDeps\(force = false\): Promise<void> \{([\s\S]*?)^  \}/m
+  )?.[1]
+  const fullStorageLoad = editorResourcesSource.match(
+    /async function ensureStorageEngine\(force = false\): Promise<void> \{([\s\S]*?)^  \}/m
+  )?.[1]
+
+  assert.ok(statusLoad, 'expected to find ensureStorageEngineStatus')
+  assert.match(statusLoad, /getStorageEngineStatus\(\)/)
+  assert.doesNotMatch(statusLoad, /getStorageEngineConfig\(\)/)
+
+  assert.ok(prefetch, 'expected to find prefetchAgentEditorDeps')
+  assert.match(prefetch, /Promise\.allSettled/)
+  assert.match(prefetch, /ensureStorageEngineStatus\(force\)/)
+  assert.doesNotMatch(prefetch, /ensureStorageEngine\(force\)/)
+
+  assert.ok(fullStorageLoad, 'expected to find ensureStorageEngine')
+  assert.match(fullStorageLoad, /ensureStorageEngineConfig\(force\)/)
+  assert.match(fullStorageLoad, /ensureStorageEngineStatus\(force\)/)
 })
 
 // Locate a settings row by the i18n key of its label and return the attributes

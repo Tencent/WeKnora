@@ -40,7 +40,8 @@ export function pickUsableStorageProvider(
 }
 
 type EditorResourceKey =
-  | 'storageEngine'
+  | 'storageEngineConfig'
+  | 'storageEngineStatus'
   | 'mcpServices'
   | 'skills'
   | 'skillCatalog'
@@ -84,17 +85,28 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     return p
   }
 
-  async function ensureStorageEngine(force = false): Promise<void> {
-    return runOnce('storageEngine', force, async () => {
-      const [configRes, statusRes] = await Promise.all([
-        getStorageEngineConfig(),
-        getStorageEngineStatus(),
-      ])
+  async function ensureStorageEngineConfig(force = false): Promise<void> {
+    return runOnce('storageEngineConfig', force, async () => {
+      const configRes = await getStorageEngineConfig()
       storageConfig.value = configRes?.data ?? null
+      loadedAt.value.storageEngineConfig = Date.now()
+    })
+  }
+
+  async function ensureStorageEngineStatus(force = false): Promise<void> {
+    return runOnce('storageEngineStatus', force, async () => {
+      const statusRes = await getStorageEngineStatus()
       storageStatus.value = statusRes?.data?.engines ?? []
       storageAllowedProviders.value = statusRes?.data?.allowed_providers ?? []
-      loadedAt.value.storageEngine = Date.now()
+      loadedAt.value.storageEngineStatus = Date.now()
     })
+  }
+
+  async function ensureStorageEngine(force = false): Promise<void> {
+    await Promise.all([
+      ensureStorageEngineConfig(force),
+      ensureStorageEngineStatus(force),
+    ])
   }
 
   function resolveUsableStorageProvider(candidate?: string): string {
@@ -196,14 +208,18 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
 
   /** 智能体编辑器打开时预取的依赖（不含 IM channels / 单 KB shares） */
   async function prefetchAgentEditorDeps(force = false): Promise<void> {
-    await Promise.all([
+    // Wait for every independent request so one failure cannot hide resources
+    // that loaded successfully. The caller still receives the first error for logging.
+    const results = await Promise.allSettled([
       ensureMcpServices(force),
       ensureAgentTypePresets(force),
       ensurePromptTemplates(force),
-      ensureStorageEngine(force),
+      ensureStorageEngineStatus(force),
       ensurePlaceholders(force),
       ensureTenantRetrievalConfig(force),
     ])
+    const failure = results.find((result) => result.status === 'rejected')
+    if (failure?.status === 'rejected') throw failure.reason
   }
 
   function invalidate(...keys: EditorResourceKey[]) {
@@ -247,6 +263,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     parserEngines,
     systemInfo,
     ensureStorageEngine,
+    ensureStorageEngineStatus,
     resolveUsableStorageProvider,
     ensureMcpServices,
     ensureSkills,
