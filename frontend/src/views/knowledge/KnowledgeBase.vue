@@ -1607,6 +1607,61 @@ const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
 
 const uploadConfirmStore = useUploadConfirmStore();
 
+type KnowledgeUploadEventName =
+  | 'knowledgeFileUploadStart'
+  | 'knowledgeFileUploadProgress'
+  | 'knowledgeFileUploadComplete';
+
+type KnowledgeUploadStatus = 'pending' | 'uploading' | 'success' | 'error';
+
+interface KnowledgeUploadEventDetail {
+  uploadId: string;
+  kbId: string;
+  fileName: string;
+  fileSize: number;
+  progress: number;
+  status: KnowledgeUploadStatus;
+  error?: string;
+}
+
+let uploadBatchSequence = 0;
+
+const dispatchKnowledgeUploadEvent = (
+  name: KnowledgeUploadEventName,
+  detail: KnowledgeUploadEventDetail,
+) => {
+  window.dispatchEvent(new CustomEvent(name, { detail }));
+};
+
+const getUploadProgressPercentage = (progressEvent: {
+  loaded?: number;
+  total?: number;
+  progress?: number;
+}) => {
+  let ratio: number | undefined;
+  if (typeof progressEvent.progress === 'number') {
+    ratio = progressEvent.progress;
+  } else if (
+    typeof progressEvent.loaded === 'number'
+    && typeof progressEvent.total === 'number'
+    && progressEvent.total > 0
+  ) {
+    ratio = progressEvent.loaded / progressEvent.total;
+  }
+  if (ratio === undefined || !Number.isFinite(ratio)) return null;
+  const percentage = ratio <= 1 ? ratio * 100 : ratio;
+  return Math.min(100, Math.max(0, Math.round(percentage)));
+};
+
+const getUploadErrorMessage = (error: any) => {
+  const payload = error?.response?.data || error;
+  const code = payload?.code || payload?.error?.code;
+  if (code === 'duplicate_file') {
+    return t('knowledgeBase.fileExists');
+  }
+  return payload?.error?.message || payload?.message || t('knowledgeBase.uploadFailed');
+};
+
 const getFolderUploadFileName = (file: File, targetFolder: string) =>
   buildUploadFileName(file, targetFolder);
 
@@ -1665,7 +1720,32 @@ const executeUploadBatch = async (
   const totalCount = files.length;
   const hasFolderPaths = files.some(isFolderUpload);
 
-  for (const file of files) {
+  uploadBatchSequence += 1;
+  const uploadBatchId = `${targetKbId}-${Date.now()}-${uploadBatchSequence}`;
+  const uploadTasks = files.map((file, index) => ({
+    uploadId: `${uploadBatchId}-${index}`,
+    fileName: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
+    fileSize: file.size,
+  }));
+
+  uploadTasks.forEach(task => {
+    dispatchKnowledgeUploadEvent('knowledgeFileUploadStart', {
+      ...task,
+      kbId: targetKbId,
+      progress: 0,
+      status: 'pending',
+    });
+  });
+
+  for (const [index, file] of files.entries()) {
+    const uploadTask = uploadTasks[index];
+    let lastProgress = 0;
+    dispatchKnowledgeUploadEvent('knowledgeFileUploadStart', {
+      ...uploadTask,
+      kbId: targetKbId,
+      progress: 0,
+      status: 'uploading',
+    });
     try {
       const uploadData: {
         file: File
@@ -1680,32 +1760,51 @@ const executeUploadBatch = async (
         uploadData.process_config = options.processConfig;
       }
 
-      const responseData: any = await uploadKnowledgeFile(targetKbId, uploadData);
+      const responseData: any = await uploadKnowledgeFile(targetKbId, uploadData, progressEvent => {
+        const progress = getUploadProgressPercentage(progressEvent);
+        if (progress === null || progress === lastProgress) return;
+        lastProgress = progress;
+        dispatchKnowledgeUploadEvent('knowledgeFileUploadProgress', {
+          ...uploadTask,
+          kbId: targetKbId,
+          progress,
+          status: 'uploading',
+        });
+      });
       const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
       if (isSuccess) {
         successCount++;
+        dispatchKnowledgeUploadEvent('knowledgeFileUploadComplete', {
+          ...uploadTask,
+          kbId: targetKbId,
+          progress: 100,
+          status: 'success',
+        });
       } else {
         failCount++;
+        const errorMessage = getUploadErrorMessage(responseData);
+        dispatchKnowledgeUploadEvent('knowledgeFileUploadComplete', {
+          ...uploadTask,
+          kbId: targetKbId,
+          progress: 100,
+          status: 'error',
+          error: errorMessage,
+        });
         if (totalCount === 1) {
-          let errorMessage = t('knowledgeBase.uploadFailed');
-          if (responseData?.error?.message) {
-            errorMessage = responseData.error.message;
-          } else if (responseData?.message) {
-            errorMessage = responseData.message;
-          }
-          if (responseData?.code === 'duplicate_file' || responseData?.error?.code === 'duplicate_file') {
-            errorMessage = t('knowledgeBase.fileExists');
-          }
           MessagePlugin.error(errorMessage);
         }
       }
     } catch (error: any) {
       failCount++;
+      const errorMessage = getUploadErrorMessage(error);
+      dispatchKnowledgeUploadEvent('knowledgeFileUploadComplete', {
+        ...uploadTask,
+        kbId: targetKbId,
+        progress: 100,
+        status: 'error',
+        error: errorMessage,
+      });
       if (totalCount === 1) {
-        let errorMessage = error?.error?.message || error?.message || t('knowledgeBase.uploadFailed');
-        if (error?.code === 'duplicate_file') {
-          errorMessage = t('knowledgeBase.fileExists');
-        }
         MessagePlugin.error(errorMessage);
       }
     }

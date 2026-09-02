@@ -706,7 +706,22 @@ export default {
     confirmReparse: 'Confirm and reparse',
     reparseSource: 'Document to reparse',
     reparseHint: 'Reuses the last parse settings; adjust them here',
-    manualCharCount: '{count} characters'
+    manualCharCount: '{count} characters',
+    progress: {
+      title: 'Uploading files',
+      completed: 'Upload complete',
+      completedWithErrors: 'Upload completed with errors',
+      runningSummary: '{completed} of {total} files completed',
+      completedSummary: '{success} succeeded, {failed} failed',
+      overall: 'Overall progress',
+      pending: 'Waiting',
+      uploading: 'Uploading {progress}%',
+      success: 'Uploaded',
+      failed: 'Failed',
+      keepOpen: 'Keep this window open until the upload finishes.',
+      done: 'Done',
+      unknownFile: 'Unknown file'
+    }
   },
   knowledgeStages: {
     title: 'Processing pipeline',

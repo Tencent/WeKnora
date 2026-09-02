@@ -6014,6 +6014,21 @@ export default {
     reparseSource: '待重新解析文档',
     reparseHint: '将沿用上次解析的配置，可在此调整',
     manualCharCount: '{count} 个字符',
+    progress: {
+      title: '正在上传文件',
+      completed: '上传完成',
+      completedWithErrors: '上传完成，部分文件失败',
+      runningSummary: '已完成 {completed}/{total} 个文件',
+      completedSummary: '成功 {success} 个，失败 {failed} 个',
+      overall: '总进度',
+      pending: '等待上传',
+      uploading: '上传中 {progress}%',
+      success: '上传成功',
+      failed: '上传失败',
+      keepOpen: '请保持此窗口打开，直到上传完成。',
+      done: '完成',
+      unknownFile: '未知文件'
+    },
     pdfForceScanned: {
       label: '按扫描件解析 PDF',
       description: '适用于网页打印、扫描件、图片型 PDF。开启后会逐页 OCR，解析更完整但耗时和模型调用更多。'

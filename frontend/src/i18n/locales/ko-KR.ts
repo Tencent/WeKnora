@@ -6012,6 +6012,21 @@ export default {
     reparseSource: '재파싱할 문서',
     reparseHint: '이전 파싱 설정을 사용하며 여기서 조정할 수 있습니다',
     manualCharCount: '{count}자',
+    progress: {
+      title: '파일 업로드 중',
+      completed: '업로드 완료',
+      completedWithErrors: '일부 파일 업로드 실패',
+      runningSummary: '{total}개 중 {completed}개 완료',
+      completedSummary: '성공 {success}개, 실패 {failed}개',
+      overall: '전체 진행률',
+      pending: '대기 중',
+      uploading: '업로드 중 {progress}%',
+      success: '업로드됨',
+      failed: '실패',
+      keepOpen: '업로드가 완료될 때까지 이 창을 열어 두세요.',
+      done: '완료',
+      unknownFile: '알 수 없는 파일'
+    },
     pdfForceScanned: {
       label: '스캔 PDF로 파싱',
       description: '웹 인쇄, 스캔본, 이미지 위주 PDF에 적합합니다. 모든 페이지를 이미지로 렌더링한 뒤 OCR/VLM으로 처리합니다. 처리 시간과 모델 호출 비용이 늘어날 수 있습니다.'
