@@ -2508,9 +2508,6 @@ watch(
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  /* The six audit columns need roughly 930px before the drawer body's
-     padding. Keep the outcome column in view on ordinary desktop widths,
-     while allowing the drawer to shrink safely on smaller screens. */
   max-width: 100vw;
   max-height: 100vh;
   height: 100%;
