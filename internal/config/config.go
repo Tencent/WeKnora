@@ -100,7 +100,8 @@ type DingTalkURLRewriteConfig struct {
 	// From is a comma-separated list of URL prefixes of the form
 	// scheme://host[:port] (a path prefix may also be included).
 	From string `yaml:"from" json:"from"`
-	// To is the replacement base URL of the form scheme://host[:port].
+	// To is the replacement base URL of the form scheme://host[:port]
+	// (a path prefix may also be included).
 	To string `yaml:"to" json:"to"`
 }
 
