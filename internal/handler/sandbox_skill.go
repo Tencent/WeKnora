@@ -407,6 +407,10 @@ func skillSourceRequestTooLargeError() error {
 	return apperrors.NewBadRequestError("skill source request is too large")
 }
 
+func skillJSONRequestTooLargeError() error {
+	return apperrors.NewBadRequestError("skill request is too large")
+}
+
 type skillPatchRequest struct {
 	// Enabled is a pointer because its absence is not a request to disable the
 	// skill; a body may carry envs instead.
@@ -434,8 +438,13 @@ type skillPatchRequest struct {
 // @Security     ApiKeyAuth
 // @Router       /sandbox-configs/{id}/skills/{skillId} [patch]
 func (h *SandboxSkillHandler) Patch(c *gin.Context) {
+	limitJSONBody(c, skillSourceJSONMaxBytes)
 	var req skillPatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(skillJSONRequestTooLargeError())
+			return
+		}
 		_ = c.Error(apperrors.NewBadRequestError(err.Error()))
 		return
 	}
