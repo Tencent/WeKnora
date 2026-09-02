@@ -128,6 +128,17 @@ var shellExecTool = BaseTool{
 	name: ToolShellExec,
 	description: `Run a shell command inside the current session's isolated remote sandbox.
 
+## Working Directory
+- Every command already starts in ` + "`/workspace`" + `, this session's own
+  workspace. Use RELATIVE paths (` + "`ls -la output/`" + `,
+  ` + "`python3 report.py`" + `) and do NOT prefix ` + "`cd /workspace && `" + `
+  onto them — you are already there, and the prefix wastes a line on every call.
+- ` + "`input/`" + ` holds the user's uploaded files and is read-only;
+  ` + "`output/`" + ` is collected for download, so generated files belong there.
+- Each call starts in that directory again: a ` + "`cd`" + ` inside one command
+  does not carry over to the next one. Pass ` + "`work_dir`" + ` when a command
+  must run elsewhere.
+
 ## Usage
 - Use freely to explore and operate inside the sandbox: inspect files, search
   content, transform data, run programs, manage dependencies, install system packages and verify outputs.
@@ -136,9 +147,9 @@ var shellExecTool = BaseTool{
   ` + "`grep`" + ` / ` + "`awk`" + ` to search; ` + "`file`" + ` for an unknown type.
   Do not ` + "`apt-get install`" + ` inspection utilities (` + "`tree`" + `, editors)
   after a 127 — those packages vanish with the session.
-- User-uploaded files listed in ` + "`<sandbox_attachments>`" + ` are restored under
-  ` + "`/workspace/input`" + `. Treat them as read-only inputs; write generated files
-  under ` + "`/workspace/output`" + `.
+- User-uploaded files are listed in the current ` + "`<sandbox_attachments>`" + `
+  block, with the absolute ` + "`/workspace/input/...`" + ` path to pass to a
+  command that takes an input file.
 - Install extra Python packages into the session overlay
   (` + "`python3 -m pip install --target /workspace/.skill-packages/<skill> ...`" + `),
   never into ` + "`/opt/weknora/tenant/skills`" + `. The skill venv is frozen after
@@ -183,8 +194,9 @@ var shellExecTool = BaseTool{
   Supports pipes, redirects, ` + "`&&`" + ` / ` + "`||`" + ` chaining. Keep this short;
   large scripts go through ` + "`write_sandbox_file`" + `; small edits go through
   ` + "`edit_sandbox_file`" + `.
-- ` + "`work_dir`" + ` (optional): working directory, defaults to ` + "`/workspace`" + `.
-  Created on demand if it doesn't exist.
+- ` + "`work_dir`" + ` (optional): an absolute path under ` + "`/workspace`" + `,
+  defaulting to ` + "`/workspace`" + ` itself — omit it unless the command has to
+  run in another directory. Created on demand if it doesn't exist.
 - ` + "`timeout_sec`" + ` (optional): per-call timeout in seconds. Defaults to 120,
   capped at 600. Large installs (LibreOffice, TensorFlow) may need the cap.
 - ` + "`max_output_bytes`" + ` (optional): maximum bytes returned from stdout.
@@ -230,7 +242,7 @@ type ShellExecInput struct {
 	// Command is the shell command to execute. Runs under `/bin/bash -l -c`.
 	Command string `json:"command" jsonschema:"Shell command to execute (single line, supports pipes and && chaining). Runs under /bin/bash -l -c."`
 	// WorkDir is the working directory for the command; defaults to /workspace.
-	WorkDir string `json:"work_dir,omitempty" jsonschema:"Working directory for the command. Defaults to /workspace. Created on demand if missing."`
+	WorkDir string `json:"work_dir,omitempty" jsonschema:"Absolute work dir. Commands already start in /workspace; omit unless the command must run elsewhere."` //nolint:lll // one-line struct tag
 	// TimeoutSec caps execution time. Zero uses the default (120s); the
 	// value is hard-capped at 600s regardless of what the LLM requests.
 	TimeoutSec int `json:"timeout_sec,omitempty" jsonschema:"Per-call timeout in seconds. Defaults to 120, hard-capped at 600."`
@@ -381,9 +393,6 @@ func installShellExecDescription(defaultWorkDir string) string {
   command-length cap and mangles quoting.
 - Install Python extras into the skill's ` + "`.venv`" + `, Node extras into
   ` + "`node_modules`" + `. Prefer ` + "`uv pip install`" + ` / ` + "`python3 -m venv`" + `.
-- ` + "`write_sandbox_file`" + ` / ` + "`read_sandbox_file`" + ` are not
-  available; they only reach ` + "`/workspace`" + `, which is wiped before the
-  snapshot.
 
 ## Parameters
 - ` + "`command`" + ` (required): the shell one-liner under ` + "`/bin/bash -l -c`" + `.

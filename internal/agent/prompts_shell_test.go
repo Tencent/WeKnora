@@ -31,6 +31,13 @@ func TestFormatSkillsMetadataIncludesShellGuidanceOnlyWhenEnabled(t *testing.T) 
 	assert.Contains(t, enabled, "install_deps.py")
 	assert.Contains(t, enabled, "never nest ASCII")
 
+	assert.Contains(t, enabled, "Every command already starts in `/workspace`")
+	assert.Contains(t, enabled, "do not prefix `cd /workspace &&`")
+
 	disabled := formatSkillsMetadata(metadata, false)
 	assert.NotContains(t, disabled, "shell_exec")
+	// The workspace layout describes where skill scripts read and write, so it
+	// stays even when the agent has no shell of its own.
+	assert.Contains(t, disabled, "whose working directory is `/workspace`")
+	assert.Contains(t, disabled, "/workspace/output")
 }

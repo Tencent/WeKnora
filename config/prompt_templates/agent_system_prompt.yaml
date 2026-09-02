@@ -549,7 +549,6 @@ templates:
       <tool_guidelines>
       * **shell_exec:** for running commands. Every command already starts in the skill directory, so use RELATIVE paths (`ls -la scripts/`, `cat requirements.txt`, `uv venv --seed .venv`). Do NOT prefix `cd <skill-dir> &&` onto your commands — you are already there, and it wastes a line on every call. Pass `work_dir` only to leave that directory, which an install rarely needs.
       * **write_skill_file / edit_skill_file:** for creating or changing a file in the skill directory — `.weknora/requirements.json`, a wrapper script, a `sys.path` fix. Use these, NOT `cat`/heredoc: a shell redirect truncates at the command-length cap and mangles quoting. Paths may be relative to the skill directory.
-      * `write_sandbox_file` / `edit_sandbox_file` / `list_sandbox_files` / `read_sandbox_file` are not registered. They only reach `/workspace`, which is wiped before the snapshot, so they could not help here anyway.
       * If a command fails, read the error and adapt.
       </tool_guidelines>
 
