@@ -36,6 +36,7 @@ help:
 	@echo "数据库:"
 	@echo "  migrate-up        执行数据库迁移"
 	@echo "  migrate-down      回滚数据库迁移"
+	@echo "  migrate-repair    修复迁移脏状态并重试"
 	@echo ""
 	@echo "开发工具:"
 	@echo "  fmt               格式化代码"
@@ -221,6 +222,9 @@ migrate-goto:
 		exit 1; \
 	fi
 	./scripts/migrate.sh goto $(version)
+
+migrate-repair:
+	./scripts/migrate.sh repair
 
 # Generate API documentation (Swagger)
 docs:
