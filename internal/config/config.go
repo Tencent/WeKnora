@@ -76,6 +76,32 @@ type IMConfig struct {
 	// RateLimitMax is the maximum number of requests allowed per window per user.
 	// Default: 10.
 	RateLimitMax int `yaml:"rate_limit_max" json:"rate_limit_max"`
+	// DingTalk adapts the DingTalk IM integration for dedicated (专属钉)
+	// intranet deployments. nil = feature disabled.
+	DingTalk *DingTalkConfig `yaml:"dingtalk" json:"dingtalk"`
+}
+
+// DingTalkConfig adapts the DingTalk IM integration for dedicated (专属钉)
+// deployments where temporary file download URLs returned by the
+// robot/messageFiles/download API point to dedicated-line hosts that are
+// unreachable from the intranet. Zero values keep upstream behavior.
+type DingTalkConfig struct {
+	// DownloadURLRewrite rewrites dedicated-line download URL prefixes to a
+	// fixed intranet base address. nil = rewriting disabled.
+	DownloadURLRewrite *DingTalkURLRewriteConfig `yaml:"download_url_rewrite" json:"download_url_rewrite"`
+	// DownloadInsecureSkipVerify skips TLS certificate verification for the
+	// file download GET only; OpenAPI calls always verify. Default false.
+	DownloadInsecureSkipVerify bool `yaml:"download_insecure_skip_verify" json:"download_insecure_skip_verify"`
+}
+
+// DingTalkURLRewriteConfig maps dedicated-line download URL prefixes to a
+// fixed intranet replacement base.
+type DingTalkURLRewriteConfig struct {
+	// From is a comma-separated list of URL prefixes of the form
+	// scheme://host[:port] (a path prefix may also be included).
+	From string `yaml:"from" json:"from"`
+	// To is the replacement base URL of the form scheme://host[:port].
+	To string `yaml:"to" json:"to"`
 }
 
 // DocReaderConfig configures the document parser client (gRPC or HTTP).
