@@ -417,7 +417,7 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 	}
 	size := "unknown"
 	if resp.ContentLength >= 0 {
-		size = strconv.Itoa(int(resp.ContentLength))
+		size = strconv.FormatInt(resp.ContentLength, 10)
 	}
 	logger.Infof(ctx, "[DingTalk] file download ok: %s (content-length: %s)", msg.FileName, size)
 	return resp.Body, msg.FileName, nil

@@ -59,6 +59,23 @@ func TestParseDownloadRewrite(t *testing.T) {
 			},
 			wantNil: true,
 		},
+		{
+			name: "to without host disables rewrite",
+			cfg: &config.DingTalkURLRewriteConfig{
+				From: "https://a.example:15443",
+				To:   "http://",
+			},
+			wantNil: true,
+		},
+		{
+			name: "prefix without host dropped",
+			cfg: &config.DingTalkURLRewriteConfig{
+				From: "https://,https://ok.example:15443",
+				To:   "http://222.222.222.222:80",
+			},
+			wantPrefix: []string{"https://ok.example:15443"},
+			wantTo:     "http://222.222.222.222:80",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -23,10 +24,23 @@ type downloadRewrite struct {
 	to       string   // replacement base URL
 }
 
+// isValidRewriteBase reports whether s parses as a URL with a scheme and a
+// non-empty host. Required for both `to` and every `from` prefix so that
+// malformed values (e.g. "http://" with no host) fail fast at startup
+// instead of at download time.
+func isValidRewriteBase(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+	return u.Scheme != "" && u.Host != ""
+}
+
 // parseDownloadRewrite validates and normalizes the rewrite configuration.
 // It returns nil (feature disabled) when cfg is nil, when `to` is missing or
-// has no scheme, or when no valid prefix remains; every dropped piece is
-// reported with a warning so misconfiguration is visible in logs.
+// is not a valid scheme://host URL, or when no valid prefix remains; every
+// dropped piece is reported with a warning so misconfiguration is visible in
+// logs.
 func parseDownloadRewrite(cfg *config.DingTalkURLRewriteConfig) *downloadRewrite {
 	if cfg == nil {
 		return nil
@@ -36,8 +50,8 @@ func parseDownloadRewrite(cfg *config.DingTalkURLRewriteConfig) *downloadRewrite
 		logger.Warnf(context.Background(), "[DingTalk] im.dingtalk.download_url_rewrite.to is empty; url rewrite disabled")
 		return nil
 	}
-	if !strings.Contains(to, "://") {
-		logger.Warnf(context.Background(), "[DingTalk] im.dingtalk.download_url_rewrite.to %q has no scheme://; url rewrite disabled", to)
+	if !isValidRewriteBase(to) {
+		logger.Warnf(context.Background(), "[DingTalk] im.dingtalk.download_url_rewrite.to %q is not a valid scheme://host[:port] URL; url rewrite disabled", to)
 		return nil
 	}
 
@@ -47,8 +61,8 @@ func parseDownloadRewrite(cfg *config.DingTalkURLRewriteConfig) *downloadRewrite
 		if prefix == "" {
 			continue
 		}
-		if !strings.Contains(prefix, "://") {
-			logger.Warnf(context.Background(), "[DingTalk] im.dingtalk.download_url_rewrite.from entry %q has no scheme://; entry dropped", prefix)
+		if !isValidRewriteBase(prefix) {
+			logger.Warnf(context.Background(), "[DingTalk] im.dingtalk.download_url_rewrite.from entry %q is not a valid scheme://host[:port] URL; entry dropped", prefix)
 			continue
 		}
 		prefixes = append(prefixes, prefix)
@@ -101,7 +115,7 @@ func newTrustedDownloadClient(skipTLSVerify bool) *http.Client {
 	return &http.Client{
 		Timeout: downloadRewriteTimeout,
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: skipTLSVerify},
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: skipTLSVerify}, //nolint:gosec — operator opt-in flag (im.dingtalk.download_insecure_skip_verify)
 		},
 		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
 			if len(via) >= downloadMaxRedirects {
