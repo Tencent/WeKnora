@@ -1,10 +1,13 @@
 package chat
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -141,4 +144,231 @@ func valueOrZero(value *int) int {
 		return 0
 	}
 	return *value
+}
+
+// CacheRetention is the prompt-cache TTL preference. Empty means short (the
+// default 5-minute provider cache). Compaction/summarization uses none so a
+// different prompt prefix does not occupy the session's cache slot.
+type CacheRetention string
+
+const (
+	CacheRetentionNone  CacheRetention = "none"
+	CacheRetentionShort CacheRetention = "short"
+	CacheRetentionLong  CacheRetention = "long"
+)
+
+const openAIPromptCacheKeyMaxLength = 64
+
+func clampPromptCacheKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	runes := []rune(key)
+	if len(runes) <= openAIPromptCacheKeyMaxLength {
+		return key
+	}
+	return string(runes[:openAIPromptCacheKeyMaxLength])
+}
+
+func resolveCacheRetention(opts *ChatOptions) CacheRetention {
+	if opts != nil && opts.CacheRetention != "" {
+		return opts.CacheRetention
+	}
+	return CacheRetentionShort
+}
+
+func promptCacheSessionID(ctx context.Context, opts *ChatOptions) string {
+	if opts != nil && opts.PromptCacheKey != "" {
+		return clampPromptCacheKey(opts.PromptCacheKey)
+	}
+	if sessionID, ok := types.SessionIDFromContext(ctx); ok {
+		return clampPromptCacheKey(sessionID)
+	}
+	return ""
+}
+
+type promptCachePolicy struct {
+	sendKey          bool
+	sendCacheControl bool
+	sendAffinity     bool
+}
+
+func promptCachePolicyFor(name provider.ProviderName, baseURL string) promptCachePolicy {
+	switch name {
+	case provider.ProviderOpenAI, provider.ProviderAzureOpenAI, provider.ProviderOpenRouter:
+		return promptCachePolicy{sendKey: true, sendAffinity: true}
+	case provider.ProviderAliyun:
+		return promptCachePolicy{sendCacheControl: true}
+	case provider.ProviderAnthropic:
+		return promptCachePolicy{sendCacheControl: true}
+	}
+	if strings.Contains(baseURL, "api.openai.com") {
+		return promptCachePolicy{sendKey: true, sendAffinity: true}
+	}
+	return promptCachePolicy{}
+}
+
+type cacheControlMarker struct {
+	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
+}
+
+func cacheControlFor(retention CacheRetention, longTTL string) *cacheControlMarker {
+	if retention == CacheRetentionNone {
+		return nil
+	}
+	marker := &cacheControlMarker{Type: "ephemeral"}
+	if retention == CacheRetentionLong && longTTL != "" {
+		marker.TTL = longTTL
+	}
+	return marker
+}
+
+// applyPromptCacheToJSONBody injects provider cache routing and breakpoints
+// into an already-shaped OpenAI-compatible request object. Returns the (possibly
+// rewritten) body and whether the caller must send it via raw HTTP because the
+// SDK struct cannot carry these fields.
+func applyPromptCacheToJSONBody(
+	body any,
+	policy promptCachePolicy,
+	sessionID string,
+	retention CacheRetention,
+) (any, bool, error) {
+	if retention == CacheRetentionNone {
+		return body, false, nil
+	}
+	if !policy.sendKey && !policy.sendCacheControl {
+		return body, false, nil
+	}
+
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, false, err
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, false, err
+	}
+
+	rewritten := false
+	if policy.sendKey && sessionID != "" {
+		payload["prompt_cache_key"] = sessionID
+		if retention == CacheRetentionLong {
+			payload["prompt_cache_retention"] = "24h"
+		}
+		rewritten = true
+	}
+	if policy.sendCacheControl {
+		marker := cacheControlFor(retention, "1h")
+		if marker != nil {
+			applyCacheControlBreakpoints(payload, marker)
+			rewritten = true
+		}
+	}
+	if !rewritten {
+		return body, false, nil
+	}
+	return payload, true, nil
+}
+
+func applyCacheControlBreakpoints(payload map[string]any, marker *cacheControlMarker) {
+	if marker == nil {
+		return
+	}
+	applyCacheControlToInstructionMessages(payload["messages"], marker)
+	applyCacheControlToLastTool(payload["tools"], marker)
+	applyCacheControlToLastConversationMessage(payload["messages"], marker)
+}
+
+func applyCacheControlToInstructionMessages(raw any, marker *cacheControlMarker) {
+	messages, ok := raw.([]any)
+	if !ok {
+		return
+	}
+	for _, item := range messages {
+		msg, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		role, _ := msg["role"].(string)
+		if role == "system" || role == "developer" {
+			addCacheControlToMessageContent(msg, marker)
+			return
+		}
+	}
+}
+
+func applyCacheControlToLastConversationMessage(raw any, marker *cacheControlMarker) {
+	messages, ok := raw.([]any)
+	if !ok {
+		return
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg, ok := messages[i].(map[string]any)
+		if !ok {
+			continue
+		}
+		role, _ := msg["role"].(string)
+		if role == "user" || role == "assistant" || role == "tool" {
+			if addCacheControlToMessageContent(msg, marker) {
+				return
+			}
+		}
+	}
+}
+
+func applyCacheControlToLastTool(raw any, marker *cacheControlMarker) {
+	tools, ok := raw.([]any)
+	if !ok || len(tools) == 0 {
+		return
+	}
+	last, ok := tools[len(tools)-1].(map[string]any)
+	if !ok {
+		return
+	}
+	last["cache_control"] = marker
+}
+
+func addCacheControlToMessageContent(msg map[string]any, marker *cacheControlMarker) bool {
+	content, ok := msg["content"]
+	if !ok || content == nil {
+		return false
+	}
+	if text, ok := content.(string); ok {
+		if text == "" {
+			return false
+		}
+		msg["content"] = []any{
+			map[string]any{
+				"type":          "text",
+				"text":          text,
+				"cache_control": marker,
+			},
+		}
+		return true
+	}
+	parts, ok := content.([]any)
+	if !ok {
+		return false
+	}
+	for i := len(parts) - 1; i >= 0; i-- {
+		part, ok := parts[i].(map[string]any)
+		if !ok {
+			continue
+		}
+		if partType, _ := part["type"].(string); partType == "text" || partType == "tool_result" {
+			part["cache_control"] = marker
+			return true
+		}
+	}
+	return false
+}
+
+func attachPromptCacheHeaders(req *http.Request, policy promptCachePolicy, sessionID string) {
+	if req == nil || !policy.sendAffinity || sessionID == "" {
+		return
+	}
+	req.Header.Set("session_id", sessionID)
+	req.Header.Set("x-client-request-id", sessionID)
+	req.Header.Set("x-session-affinity", sessionID)
 }

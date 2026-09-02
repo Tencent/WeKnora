@@ -38,8 +38,7 @@ templates:
       ## CRITICAL: Language Rule
       - ALWAYS respond in {{language}}
 
-      The following is retrieved information that may or may not be relevant:
-      {{contexts}}
+      Retrieved materials for the current question are supplied with the user message. Answer only from those materials.
 
   - id: "expert_assistant"
     name: "Domain Expert"
@@ -72,8 +71,6 @@ templates:
       ## CRITICAL: Language Rule
       - ALWAYS respond in {{language}}
 
-      Current time: {{current_time}}
-
   - id: "customer_service"
     name: "Customer Service"
     description: "Friendly and professional customer service template"
@@ -104,8 +101,6 @@ templates:
 
       ## CRITICAL: Language Rule
       - ALWAYS respond in {{language}}
-
-      Current time: {{current_time}}
 
   - id: "technical_support"
     name: "Technical Support"
@@ -139,8 +134,6 @@ templates:
       ## CRITICAL: Language Rule
       - ALWAYS respond in {{language}}
 
-      Current time: {{current_time}}
-
   - id: "pure_chat"
     name: "General Chat"
     description: "General conversation template without knowledge base"
@@ -166,8 +159,6 @@ templates:
 
       ## CRITICAL: Language Rule
       - ALWAYS respond in {{language}}
-
-      Current time: {{current_time}}
 
   - id: "web_search_assistant"
     name: "Web Search Assistant"
@@ -200,5 +191,3 @@ templates:
 
       ## CRITICAL: Language Rule
       - ALWAYS respond in {{language}}
-
-      Current time: {{current_time}}

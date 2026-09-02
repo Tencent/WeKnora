@@ -651,9 +651,12 @@ func (e *AgentEngine) runReActIteration(
 	if response.Usage.TotalTokens > 0 {
 		e.lastUsage = response.Usage
 		state.TurnUsage.Accumulate(response.Usage)
-		logger.Debugf(ctx, "[Agent][Round-%d] Usage: prompt=%d, completion=%d, total=%d",
+		logger.Infof(ctx, "[Agent][Round-%d] Usage: prompt=%d, completion=%d, total=%d, "+
+			"cache_read=%d, cache_write=%d, cache_hit_rate=%.1f%%, cache_status=%s",
 			round, response.Usage.PromptTokens,
-			response.Usage.CompletionTokens, response.Usage.TotalTokens)
+			response.Usage.CompletionTokens, response.Usage.TotalTokens,
+			response.Usage.CacheReadTokens, response.Usage.CacheWriteTokens,
+			response.Usage.PromptCacheHitRate(), response.Usage.CacheStatus)
 	}
 
 	// Detect stuck loops: if the LLM keeps returning the same content
