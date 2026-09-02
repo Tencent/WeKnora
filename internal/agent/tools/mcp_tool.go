@@ -26,6 +26,7 @@ type MCPTool struct {
 	// timeout (seconds) applied when a tool call triggers in-conversation auth.
 	// <=0 uses the gate's configured default.
 	authWaitTimeoutSeconds int
+	requestMeta            *types.MCPRequestMeta
 }
 
 // NewMCPTool creates a new MCP tool wrapper. authWaitTimeoutSeconds carries the
@@ -33,6 +34,7 @@ type MCPTool struct {
 func NewMCPTool(
 	service *types.MCPService, mcpTool *types.MCPTool,
 	mcpManager *mcp.MCPManager, gate approval.MCPApproval, authWaitTimeoutSeconds int,
+	requestMeta *types.MCPRequestMeta,
 ) *MCPTool {
 	return &MCPTool{
 		service:                service,
@@ -40,6 +42,7 @@ func NewMCPTool(
 		mcpManager:             mcpManager,
 		gate:                   gate,
 		authWaitTimeoutSeconds: authWaitTimeoutSeconds,
+		requestMeta:            requestMeta,
 	}
 }
 
@@ -207,7 +210,7 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 			}()
 		}
 
-		result, err := client.CallTool(callCtx, t.mcpTool.Name, input)
+		result, err := client.CallTool(callCtx, t.mcpTool.Name, input, t.requestMeta)
 		if err != nil && !isStdio {
 			logger.GetLogger(callCtx).Warnf("MCP tool call failed, retrying with fresh connection: %v", err)
 			_ = client.Disconnect()
@@ -218,7 +221,7 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 			if err != nil {
 				return nil, err
 			}
-			result, err = client.CallTool(callCtx, t.mcpTool.Name, input)
+			result, err = client.CallTool(callCtx, t.mcpTool.Name, input, t.requestMeta)
 		}
 		return result, err
 	}
@@ -415,6 +418,7 @@ func RegisterMCPTools(
 	mcpManager *mcp.MCPManager,
 	gate approval.MCPApproval,
 	oauthSess *MCPOAuthSession,
+	requestMeta *types.MCPRequestMeta,
 ) (int, error) {
 	if len(services) == 0 {
 		return 0, nil
@@ -492,7 +496,7 @@ func RegisterMCPTools(
 
 		// Register each tool
 		for _, mcpTool := range mcpTools {
-			tool := NewMCPTool(service, mcpTool, mcpManager, gate, authWaitTimeoutSeconds)
+			tool := NewMCPTool(service, mcpTool, mcpManager, gate, authWaitTimeoutSeconds, requestMeta)
 			toolName := tool.Name()
 
 			// Check for name collision before registering (first-wins policy).

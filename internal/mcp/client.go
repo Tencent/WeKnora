@@ -36,7 +36,7 @@ type MCPClient interface {
 	ListResources(ctx context.Context) ([]*types.MCPResource, error)
 
 	// CallTool calls a tool on the MCP service
-	CallTool(ctx context.Context, name string, args map[string]interface{}) (*CallToolResult, error)
+	CallTool(ctx context.Context, name string, args map[string]interface{}, requestMeta *types.MCPRequestMeta) (*CallToolResult, error)
 
 	// ReadResource reads a resource from the MCP service
 	ReadResource(ctx context.Context, uri string) (*ReadResourceResult, error)
@@ -470,17 +470,17 @@ func (c *mcpGoClient) ListResources(ctx context.Context) ([]*types.MCPResource, 
 }
 
 // CallTool calls a tool on the MCP service
-func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string]interface{}) (*CallToolResult, error) {
+func (c *mcpGoClient) CallTool(
+	ctx context.Context,
+	name string,
+	args map[string]interface{},
+	requestMeta *types.MCPRequestMeta,
+) (*CallToolResult, error) {
 	if !c.initialized {
 		return nil, ErrNotConnected
 	}
 
-	req := mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
-			Name:      name,
-			Arguments: args,
-		},
-	}
+	req := newCallToolRequest(name, args, requestMeta)
 
 	result, err := oauthCall(ctx, c, func() (*mcp.CallToolResult, error) {
 		return c.client.CallTool(ctx, req)
@@ -511,6 +511,25 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 		IsError: result.IsError,
 		Content: content,
 	}, nil
+}
+
+func newCallToolRequest(
+	name string,
+	args map[string]interface{},
+	requestMeta *types.MCPRequestMeta,
+) mcp.CallToolRequest {
+	req := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name:      name,
+			Arguments: args,
+		},
+	}
+	if requestMeta != nil && !requestMeta.Empty() {
+		req.Params.Meta = &mcp.Meta{AdditionalFields: map[string]any{
+			types.MCPRequestMetaNamespace: requestMeta,
+		}}
+	}
+	return req
 }
 
 // ReadResource reads a resource from the MCP service

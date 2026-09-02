@@ -1268,6 +1268,33 @@
                           theme="column" :placeholder="$t('agentEditor.mcp.authWaitTimeoutPlaceholder')" />
                       </div>
                     </div>
+
+                    <t-alert v-if="mcpSelectionMode !== 'none'" theme="warning"
+                      :message="$t('agentEditor.mcp.requestMetaWarning')" />
+
+                    <!-- MCP tools/call _meta 请求头白名单 -->
+                    <div v-if="mcpSelectionMode !== 'none'" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.mcp.requestHeaders') }}</label>
+                        <p class="desc">{{ $t('agentEditor.mcp.requestHeadersDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-tag-input v-model="formData.config.mcp_request_meta.headers"
+                          :placeholder="$t('agentEditor.mcp.requestHeadersPlaceholder')" clearable />
+                      </div>
+                    </div>
+
+                    <!-- MCP tools/call _meta 请求 body 字段白名单 -->
+                    <div v-if="mcpSelectionMode !== 'none'" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.mcp.requestBodyFields') }}</label>
+                        <p class="desc">{{ $t('agentEditor.mcp.requestBodyFieldsDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-tag-input v-model="formData.config.mcp_request_meta.body_fields"
+                          :placeholder="$t('agentEditor.mcp.requestBodyFieldsPlaceholder')" clearable />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -2729,6 +2756,11 @@ const defaultFormData = {
     mcp_services: [] as string[],
     // 对话中触发 OAuth 授权时的等待超时（秒），默认 600
     mcp_auth_wait_timeout: 600,
+    // 单次 Agent 请求中允许复制到 MCP tools/call _meta 的字段名
+    mcp_request_meta: {
+      headers: [] as string[],
+      body_fields: [] as string[],
+    },
     // Skills 设置
     skills_selection_mode: 'none' as 'all' | 'selected' | 'none',
     selected_skills: [] as string[],
@@ -3398,6 +3430,10 @@ watch(() => props.visible, async (val) => {
       if (!agentData.config.knowledge_bases) agentData.config.knowledge_bases = [];
       if (!agentData.config.allowed_tools) agentData.config.allowed_tools = [];
       if (!agentData.config.mcp_services) agentData.config.mcp_services = [];
+      agentData.config.mcp_request_meta = {
+        headers: agentData.config.mcp_request_meta?.headers || [],
+        body_fields: agentData.config.mcp_request_meta?.body_fields || [],
+      };
       // 授权等待超时：旧数据缺省时用默认 600 秒
       if (agentData.config.mcp_auth_wait_timeout == null || agentData.config.mcp_auth_wait_timeout <= 0) {
         agentData.config.mcp_auth_wait_timeout = 600;

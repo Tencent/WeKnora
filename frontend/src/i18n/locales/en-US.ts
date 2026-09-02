@@ -5767,6 +5767,13 @@ export default {
       authWaitTimeout: 'Authentication Wait Timeout (s)',
       authWaitTimeoutDesc: 'Maximum seconds to wait for you to complete OAuth authentication when prompted during a conversation; the prompt is skipped after it elapses (only affects OAuth MCP services).',
       authWaitTimeoutPlaceholder: 'Default 600 seconds',
+      requestMetaWarning: 'These values are sent to every MCP service this Agent can call and may contain credentials. Configure trusted services only. Shared Agent calls never forward them.',
+      requestHeaders: 'Forward Request Headers',
+      requestHeadersDesc: 'HTTP header names copied to MCP _meta, up to 16. Request values are used for this call only and are never saved.',
+      requestHeadersPlaceholder: 'For example: Authorization, X-Trace-Id',
+      requestBodyFields: 'Forward Request Body Fields',
+      requestBodyFieldsDesc: 'Copy scalar fields, ID lists, or custom strings under mcp_metadata.<key>, up to 16. Images and attachments are never eligible.',
+      requestBodyFieldsPlaceholder: 'For example: channel, mcp_metadata.user_role',
       unavailableService: 'Unavailable service'
     },
     llmCallTimeout: {

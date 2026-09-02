@@ -881,6 +881,12 @@ definitions:
           MCPAuthWaitTimeout is how many seconds to wait for in-conversation OAuth
           authorization before skipping. <=0 uses the gate's configured timeout.
         type: integer
+      mcp_request_meta:
+        description: |-
+          MCPRequestMeta explicitly allowlists HTTP request values copied into MCP
+          tool-call _meta. The configuration stores selectors only, never values.
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPRequestMetaConfig'
       mcp_selection_mode:
         description: 'MCP service selection mode: "all" = all enabled MCP services,
           "selected" = specific services, "none" = no MCP'
@@ -1974,6 +1980,17 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.MCPHeaders:
     additionalProperties:
       type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.MCPRequestMetaConfig:
+    properties:
+      body_fields:
+        items:
+          type: string
+        type: array
+      headers:
+        items:
+          type: string
+        type: array
     type: object
   github_com_Tencent_WeKnora_internal_types.MCPService:
     properties:
@@ -6162,6 +6179,12 @@ definitions:
         items:
           type: string
         type: array
+      mcp_metadata:
+        additionalProperties:
+          type: string
+        description: Caller-supplied scalar metadata; only Agent-allowlisted keys
+          reach MCP _meta
+        type: object
       mcp_service_ids:
         description: Per-request MCP services selected via @mention
         items:

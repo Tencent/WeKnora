@@ -102,6 +102,10 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	if err := req.Config.MCPRequestMeta.Validate(); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
 
 	// Build agent object
 	agent := &types.CustomAgent{
@@ -347,6 +351,10 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 	}
 	if err := h.validateAgentSandboxConfig(ctx, req.Config); err != nil {
 		c.Error(err)
+		return
+	}
+	if err := req.Config.MCPRequestMeta.Validate(); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 

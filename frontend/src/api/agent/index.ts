@@ -59,6 +59,12 @@ export interface CustomAgentConfig {
   // 对话中触发 OAuth 授权时的等待超时（秒）：到点后自动跳过授权提示。
   // <=0 时使用服务端默认超时。仅对使用 OAuth 的 MCP 服务生效。
   mcp_auth_wait_timeout?: number;
+  // 显式允许从单次 Agent HTTP 请求复制到 MCP tools/call _meta 的字段名。
+  // 值不会持久化；共享 Agent 调用时后端会禁用该透传。
+  mcp_request_meta?: {
+    headers?: string[];
+    body_fields?: string[];
+  };
 
   // ===== Skills设置（仅Agent模式）=====
   // Skills选择模式：all=全部预装, selected=指定, none=不使用

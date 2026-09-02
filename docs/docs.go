@@ -17911,6 +17911,14 @@ const docTemplate = `{
                     "description": "MCPAuthWaitTimeout is how many seconds to wait for in-conversation OAuth\nauthorization before skipping. \u003c=0 uses the gate's configured timeout.",
                     "type": "integer"
                 },
+                "mcp_request_meta": {
+                    "description": "MCPRequestMeta explicitly allowlists HTTP request values copied into MCP\ntool-call _meta. The configuration stores selectors only, never values.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPRequestMetaConfig"
+                        }
+                    ]
+                },
                 "mcp_selection_mode": {
                     "description": "MCP service selection mode: \"all\" = all enabled MCP services, \"selected\" = specific services, \"none\" = no MCP",
                     "type": "string"
@@ -19314,6 +19322,23 @@ const docTemplate = `{
             "type": "object",
             "additionalProperties": {
                 "type": "string"
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.MCPRequestMetaConfig": {
+            "type": "object",
+            "properties": {
+                "body_fields": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "headers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
             }
         },
         "github_com_Tencent_WeKnora_internal_types.MCPService": {
@@ -24849,6 +24874,13 @@ const docTemplate = `{
                     "description": "Selected knowledge ID for this request",
                     "type": "array",
                     "items": {
+                        "type": "string"
+                    }
+                },
+                "mcp_metadata": {
+                    "description": "Caller-supplied scalar metadata; only Agent-allowlisted keys reach MCP _meta",
+                    "type": "object",
+                    "additionalProperties": {
                         "type": "string"
                     }
                 },
