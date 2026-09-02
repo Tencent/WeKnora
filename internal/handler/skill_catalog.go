@@ -51,7 +51,7 @@ func (h *SkillHandler) RegisterCatalog(c *gin.Context) {
 		return
 	}
 	maxBytes := secutils.GetMaxSkillBundleSize()
-	limitUploadBody(c, maxBytes)
+	limitSkillUploadBody(c, maxBytes)
 
 	if strings.HasPrefix(c.ContentType(), "application/json") {
 		h.registerCatalogFromSource(c)
@@ -97,7 +97,7 @@ func (h *SkillHandler) registerCatalogFromSource(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		var tooLarge *http.MaxBytesError
 		if stderrors.As(err, &tooLarge) {
-			_ = c.Error(skillTooLargeError())
+			_ = c.Error(skillSourceRequestTooLargeError())
 			return
 		}
 		_ = c.Error(apperrors.NewBadRequestError("invalid skill source request"))

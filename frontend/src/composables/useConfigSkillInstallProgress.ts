@@ -56,10 +56,9 @@ export function useConfigSkillInstallProgress(options?: {
   function follow(configId: string, skillId: string) {
     const key = progressKey(configId, skillId)
     if (!configId || !skillId || abortByKey.has(key)) return
-    const existing = progressByKey.value[key]
-    // A finished stream (success, failure, or no Redis) must not be reopened
-    // on every catalog poll. Detached is the exception: the run is still going.
-    if (existing?.done && existing.stage !== 'detached') return
+    // abortByKey is the in-flight guard. A finished event for this key is
+    // either status lag or a new run of the same skill id (retry); skipping
+    // reconnect would leave the drawer showing the previous 100%.
     forget(key)
     const controller = new AbortController()
     abortByKey.set(key, controller)

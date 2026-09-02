@@ -295,7 +295,7 @@ func (h *SandboxSkillHandler) GetFile(c *gin.Context) {
 // @Router       /sandbox-configs/{id}/skills [post]
 func (h *SandboxSkillHandler) Upload(c *gin.Context) {
 	maxBytes := secutils.GetMaxSkillBundleSize()
-	limitUploadBody(c, maxBytes)
+	limitSkillUploadBody(c, maxBytes)
 
 	if strings.HasPrefix(c.ContentType(), "application/json") {
 		h.installFromSource(c)
@@ -351,7 +351,7 @@ func (h *SandboxSkillHandler) installFromSource(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		var tooLarge *http.MaxBytesError
 		if stderrors.As(err, &tooLarge) {
-			_ = c.Error(skillTooLargeError())
+			_ = c.Error(skillSourceRequestTooLargeError())
 			return
 		}
 		_ = c.Error(apperrors.NewBadRequestError("invalid skill source request"))
@@ -401,6 +401,10 @@ func (h *SandboxSkillHandler) Reinstall(c *gin.Context) {
 func skillTooLargeError() error {
 	return apperrors.NewBadRequestError(
 		fmt.Sprintf("skill bundle cannot exceed %d MB", secutils.GetMaxSkillBundleSizeMB()))
+}
+
+func skillSourceRequestTooLargeError() error {
+	return apperrors.NewBadRequestError("skill source request is too large")
 }
 
 type skillPatchRequest struct {

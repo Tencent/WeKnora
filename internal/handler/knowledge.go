@@ -339,8 +339,8 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	maxSize := maxSizeMB * 1024 * 1024
 	// Capped before the multipart parse, not after: FormFile buffers the whole
 	// body first, so the size check below only ever sees an upload we already
-	// accepted. nginx no longer bounds this at the knowledge limit either — its
-	// cap is the larger skill-bundle one.
+	// accepted. nginx location /api/ still enforces MAX_FILE_SIZE; this is the
+	// same cap for requests that reach the app without that proxy.
 	limitUploadBody(c, maxSize)
 
 	// Get the uploaded file

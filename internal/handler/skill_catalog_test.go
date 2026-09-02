@@ -119,6 +119,21 @@ func TestRegisterCatalogFromSource(t *testing.T) {
 	require.Equal(t, "@owner/pdf", catalog.source)
 }
 
+func TestRegisterCatalogFromSourceRejectsAnOversizedJSONBody(t *testing.T) {
+	catalog := &fakeSkillCatalog{registerID: "cat-9"}
+	router := newCatalogRouter(NewSkillHandler(&fakeUsableSkillLister{}, catalog))
+
+	req := httptest.NewRequest(http.MethodPost, "/skills/catalog",
+		bytes.NewReader(oversizedSkillSourceJSON(1)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "skill source request is too large")
+	require.Empty(t, catalog.source)
+}
+
 func TestInstallCatalogAcceptsPerConfigIDs(t *testing.T) {
 	catalog := &fakeSkillCatalog{installs: map[string]string{"cfg-1": "sk-1"}}
 	router := newCatalogRouter(NewSkillHandler(&fakeUsableSkillLister{}, catalog))
