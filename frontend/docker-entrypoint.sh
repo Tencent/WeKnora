@@ -25,9 +25,9 @@ window.__RUNTIME_CONFIG__ = {
 EOF
 
 # 处理 nginx 配置。
-# 两个上限分开注入：全站保持知识库的 MAX_FILE_SIZE，只有技能包上传的两条路由
-# 放宽到 MAX_SKILL_BUNDLE_SIZE。合成一个全站上限会让每个上传端点都能收到
-# 技能包那么大的 body。
+# 两个上限分开注入：全站保持知识库的 MAX_FILE_SIZE，只有技能 zip 上传的两条
+# 集合路由放宽到 MAX_SKILL_BUNDLE_SIZE（不含 /install、PATCH 等子路径）。
+# 合成一个全站上限会让每个上传端点都能收到技能包那么大的 body。
 export MAX_FILE_SIZE=${FILE_MB}M
 export MAX_SKILL_BUNDLE_SIZE=${SKILL_MB}M
 export APP_HOST=${APP_HOST:-app}

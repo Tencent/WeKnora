@@ -136,8 +136,13 @@ func (h *SkillHandler) InstallCatalog(c *gin.Context) {
 		_ = c.Error(apperrors.NewInternalServerError("skill catalog is not configured"))
 		return
 	}
+	limitJSONBody(c, skillSourceJSONMaxBytes)
 	var req catalogInstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(skillJSONRequestTooLargeError())
+			return
+		}
 		_ = c.Error(apperrors.NewBadRequestError("invalid install request"))
 		return
 	}

@@ -19,12 +19,13 @@ import (
 )
 
 type fakeSkillCatalog struct {
-	list        []service.SkillCatalogView
-	registerID  string
-	installs    map[string]string
-	installErrs map[string]string
-	deleteErr   error
-	source      string
+	list         []service.SkillCatalogView
+	registerID   string
+	installs     map[string]string
+	installErrs  map[string]string
+	deleteErr    error
+	source       string
+	installCalls int
 }
 
 func (f *fakeSkillCatalog) ListCatalog(context.Context, uint64) ([]service.SkillCatalogView, error) {
@@ -47,6 +48,7 @@ func (f *fakeSkillCatalog) RegisterCatalogFromSource(
 func (f *fakeSkillCatalog) InstallCatalogToConfigs(
 	context.Context, uint64, string, []string,
 ) (*service.CatalogInstallResult, error) {
+	f.installCalls++
 	return &service.CatalogInstallResult{Installs: f.installs, Errors: f.installErrs}, nil
 }
 
@@ -132,6 +134,21 @@ func TestRegisterCatalogFromSourceRejectsAnOversizedJSONBody(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Contains(t, w.Body.String(), "skill source request is too large")
 	require.Empty(t, catalog.source)
+}
+
+func TestInstallCatalogRejectsAnOversizedJSONBody(t *testing.T) {
+	catalog := &fakeSkillCatalog{installs: map[string]string{"cfg-1": "sk-1"}}
+	router := newCatalogRouter(NewSkillHandler(&fakeUsableSkillLister{}, catalog))
+
+	req := httptest.NewRequest(http.MethodPost, "/skills/catalog/cat-1/install",
+		bytes.NewReader(oversizedSkillSourceJSON(1)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "skill request is too large")
+	require.Equal(t, 0, catalog.installCalls)
 }
 
 func TestInstallCatalogAcceptsPerConfigIDs(t *testing.T) {

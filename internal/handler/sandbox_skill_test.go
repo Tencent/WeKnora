@@ -577,6 +577,26 @@ func TestSandboxSkillPatchWithoutEnabledFieldReturns400(t *testing.T) {
 	require.True(t, svc.skills["skill-1"].Enabled)
 }
 
+func TestSandboxSkillPatchRejectsAnOversizedJSONBody(t *testing.T) {
+	svc := &fakeSandboxSkillService{skills: map[string]*types.TenantSkillEntity{
+		"skill-1": {
+			ID: "skill-1", TenantID: testSkillTenantID, SandboxConfigID: "cfg-a",
+			Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
+		},
+	}}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	req := httptest.NewRequest(http.MethodPatch, "/sandbox-configs/cfg-a/skills/skill-1",
+		bytes.NewReader(oversizedSkillSourceJSON(1)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "skill request is too large")
+	require.Equal(t, 0, svc.patchCalls)
+}
+
 // Removal rebuilds the image, so it is accepted and followed, never awaited.
 func TestSandboxSkillDeleteIsAccepted(t *testing.T) {
 	svc := &fakeSandboxSkillService{}

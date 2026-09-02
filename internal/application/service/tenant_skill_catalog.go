@@ -284,12 +284,16 @@ func (s *TenantSkillService) upsertCatalogFromBundle(
 	}
 	now := s.now()
 	if existing != nil {
-		stored, releaseReplaced, err := s.storeCatalogBundle(ctx, tenantID, existing, archive, requireStore)
+		stored, replaced, err := s.storeCatalogBundle(ctx, tenantID, existing, archive, requireStore)
 		if err != nil {
 			return nil, err
 		}
 		if !stored {
 			return existing, nil
+		}
+		keepOld, err := s.pinReplacedCatalogBundle(ctx, tenantID, existing, replaced)
+		if err != nil {
+			return nil, err
 		}
 		existing.Version = bundle.Version
 		existing.Description = bundle.Description
@@ -300,9 +304,13 @@ func (s *TenantSkillService) upsertCatalogFromBundle(
 			// The stored definition still names the old archive, so leave that
 			// archive alone. The object just written is the leak, and it is the
 			// harmless one: the next re-register overwrites that same key.
+			// Installs that were pinned above still name the old archive, which
+			// is also what the uncommitted definition names.
 			return nil, err
 		}
-		releaseReplaced()
+		if replaced.oldRef != "" && !replaced.sameDigest && !keepOld {
+			s.deleteBundleBestEffort(ctx, tenantID, replaced.oldRef)
+		}
 		return existing, nil
 	}
 
@@ -312,7 +320,7 @@ func (s *TenantSkillService) upsertCatalogFromBundle(
 		Instructions: bundle.Instructions,
 		CreatedAt:    now, UpdatedAt: now,
 	}
-	stored, releaseReplaced, err := s.storeCatalogBundle(ctx, tenantID, row, archive, requireStore)
+	stored, _, err := s.storeCatalogBundle(ctx, tenantID, row, archive, requireStore)
 	if err != nil {
 		return nil, err
 	}
@@ -338,62 +346,92 @@ func (s *TenantSkillService) upsertCatalogFromBundle(
 		}
 		return s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, requireStore)
 	}
-	releaseReplaced()
 	return row, nil
 }
 
-// storeCatalogBundle writes the archive and reports whether the definition now
-// names it, along with the work that settles the archive it replaced.
-//
-// That second return value has to be called by whoever commits the row, and
-// only once the commit succeeds. Retiring the old object here instead would
-// delete bytes the stored definition still points at the moment the write below
-// fails: the row would name a ref that no longer resolves, and the object just
-// saved would be unreferenced, which takes the definition's files down for good
-// rather than leaving the failed re-register as a no-op.
+// catalogBundleReplacement is the archive a definition just stopped naming.
+// Pinning has to happen before the catalog row is committed: once the row
+// names the new object, an unpinned install with an empty BundleRef would
+// follow it and lose the tree its image was built from.
+type catalogBundleReplacement struct {
+	oldRef     string
+	oldSHA     string
+	sameDigest bool
+}
+
+// storeCatalogBundle writes the archive and reports whether the in-memory
+// definition now names it. The caller must pin any replacement and only then
+// commit the row; retiring the old object before that commit would delete
+// bytes the stored definition still points at.
 func (s *TenantSkillService) storeCatalogBundle(
 	ctx context.Context, tenantID uint64, catalog *types.TenantSkillCatalogEntity, archive []byte, requireStore bool,
-) (bool, func(), error) {
-	noop := func() {}
+) (bool, catalogBundleReplacement, error) {
+	var none catalogBundleReplacement
 	if catalog == nil || len(archive) == 0 {
-		return false, noop, nil
+		return false, none, nil
 	}
 	digest := skillArchiveSHA256(archive)
-	if strings.TrimSpace(catalog.BundleRef) != "" &&
-		strings.TrimSpace(catalog.BundleSHA256) != "" &&
-		catalog.BundleSHA256 == digest {
+	oldRef := strings.TrimSpace(catalog.BundleRef)
+	oldSHA := strings.TrimSpace(catalog.BundleSHA256)
+	if oldRef != "" && oldSHA != "" && oldSHA == digest &&
+		s.catalogBundleStillHeld(ctx, tenantID, catalog) {
 		// Same bytes already on the definition. Installing onto another
 		// sandbox must not mint a second object.
-		return true, noop, nil
+		return true, none, nil
 	}
 	fs, err := s.fileServiceForTenant(ctx, tenantID)
 	if err != nil {
 		if requireStore {
-			return false, noop, err
+			return false, none, err
 		}
 		logger.Warnf(ctx, "[skill] catalog bundle storage unavailable: %v", err)
-		return false, noop, nil
+		return false, none, nil
 	}
-	oldRef := strings.TrimSpace(catalog.BundleRef)
-	oldSHA := strings.TrimSpace(catalog.BundleSHA256)
 	ref, err := fs.SaveBytes(ctx, archive, tenantID,
 		fmt.Sprintf("tenant-skills/catalog/%s.zip", catalog.ID), false)
 	if err != nil {
 		if requireStore {
-			return false, noop, fmt.Errorf("store catalog bundle: %w", err)
+			return false, none, fmt.Errorf("store catalog bundle: %w", err)
 		}
 		logger.Warnf(ctx, "[skill] catalog bundle store failed: %v", err)
-		return false, noop, nil
+		return false, none, nil
 	}
 	catalog.BundleRef = ref
 	if oldRef == "" || oldRef == ref {
-		return true, noop, nil
+		return true, none, nil
 	}
-	return true, func() {
-		if !s.pinInstallsToReplacedBundle(ctx, tenantID, catalog, oldRef, oldSHA) {
-			s.deleteBundleBestEffort(ctx, tenantID, oldRef)
-		}
+	return true, catalogBundleReplacement{
+		oldRef: oldRef, oldSHA: oldSHA, sameDigest: oldSHA == digest,
 	}, nil
+}
+
+func (s *TenantSkillService) catalogBundleStillHeld(
+	ctx context.Context, tenantID uint64, catalog *types.TenantSkillCatalogEntity,
+) bool {
+	if catalog == nil || strings.TrimSpace(catalog.BundleRef) == "" {
+		return false
+	}
+	want := strings.TrimSpace(catalog.BundleSHA256)
+	archive, ok := s.trySkillBundle(ctx, tenantID, &types.TenantSkillEntity{
+		Name: catalog.Name, BundleRef: catalog.BundleRef, BundleSHA256: catalog.BundleSHA256,
+	})
+	return ok && len(archive) > 0 && (want == "" || archiveMatchesSHA(archive, want))
+}
+
+// pinReplacedCatalogBundle stamps the previous archive onto installs that are
+// still serving it. It must run before the catalog row is committed: a stamp
+// that fails after that write leaves those installs following the new object
+// while their SHA still names the old tree.
+func (s *TenantSkillService) pinReplacedCatalogBundle(
+	ctx context.Context, tenantID uint64, catalog *types.TenantSkillCatalogEntity, replaced catalogBundleReplacement,
+) (bool, error) {
+	if replaced.oldRef == "" || replaced.sameDigest {
+		return false, nil
+	}
+	if catalog != nil && replaced.oldRef == strings.TrimSpace(catalog.BundleRef) {
+		return false, nil
+	}
+	return s.pinInstallsToReplacedBundle(ctx, tenantID, catalog, replaced.oldRef, replaced.oldSHA)
 }
 
 // pinInstallsToReplacedBundle hands the archive a definition just replaced to
@@ -407,14 +445,14 @@ func (s *TenantSkillService) storeCatalogBundle(
 // once it names it, nothing else has to remember which version it was.
 func (s *TenantSkillService) pinInstallsToReplacedBundle(
 	ctx context.Context, tenantID uint64, catalog *types.TenantSkillCatalogEntity, oldRef, oldSHA string,
-) bool {
+) (bool, error) {
+	if catalog == nil || strings.TrimSpace(oldRef) == "" {
+		return false, nil
+	}
 	installs, err := s.skills.ListSkillsByCatalog(ctx, tenantID, catalog.ID)
 	if err != nil {
-		// Keeping an archive nothing reads costs storage; dropping one an
-		// install still needs costs that install its files.
-		logger.Warnf(ctx, "[skill] list installs of catalog %s before replacing its bundle failed: %v",
+		return true, fmt.Errorf("list installs of catalog %s before replacing its bundle: %w",
 			catalog.ID, err)
-		return true
 	}
 	keep := false
 	for _, row := range installs {
@@ -430,17 +468,14 @@ func (s *TenantSkillService) pinInstallsToReplacedBundle(
 		if strings.TrimSpace(row.BundleSHA256) != oldSHA {
 			continue
 		}
-		// Best-effort: a row that could not be stamped still reads the object
-		// through the catalog until the next write, and keep is set either way
-		// so the bytes it needs stay where they are.
 		if err := s.updateSkillFields(ctx, row.TenantID, row.SandboxConfigID, row.ID,
 			func(e *types.TenantSkillEntity) { e.BundleRef = oldRef }); err != nil {
-			logger.Warnf(ctx, "[skill] pin install %s to the replaced archive of catalog %s failed: %v",
+			return true, fmt.Errorf("pin install %s to the replaced archive of catalog %s: %w",
 				row.ID, catalog.ID, err)
 		}
 		keep = true
 	}
-	return keep
+	return keep, nil
 }
 
 func skillUserErrorMessage(err error) string {
