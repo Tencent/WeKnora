@@ -149,9 +149,12 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 		toolCalls = c.toolCallTo(resp.Message.ToolCalls)
 
 		// 获取token计数
+		// Ollama 原生 API 语义：PromptEvalCount = 提示词 token，EvalCount = 生成 token
+		// （与下方流式路径一致；此前误将 EvalCount 当总数减去 prompt，导致
+		// CompletionTokens 为负、TotalTokens 等于生成数。）
 		if resp.EvalCount > 0 {
 			promptTokens = resp.PromptEvalCount
-			completionTokens = resp.EvalCount - promptTokens
+			completionTokens = resp.EvalCount
 		}
 
 		return nil
