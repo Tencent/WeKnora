@@ -364,8 +364,12 @@ func TestDownloadFile_RewriteConfiguredNoMatch(t *testing.T) {
 	a := NewWebhookAdapter("cid", "sec", "", cfg)
 	msg := &im.IncomingMessage{FileKey: "DL-CODE", FileName: "x.pdf", Extra: map[string]string{"robot_code": "rc"}}
 
-	if _, _, err := a.DownloadFile(context.Background(), msg); err == nil {
+	_, _, err := a.DownloadFile(context.Background(), msg)
+	if err == nil {
 		t.Fatal("expected SSRF rejection for non-matching url, got nil")
+	}
+	if !strings.Contains(err.Error(), "rejected") {
+		t.Errorf("expected SSRF rejection (download url rejected), got: %v", err)
 	}
 }
 
@@ -380,13 +384,11 @@ func TestDownloadFile_RewriteConfiguredNoMatch(t *testing.T) {
 // prove which client handled the download.
 func TestDownloadFile_SkipVerifyRoutesToDedicatedClient(t *testing.T) {
 	useRejectingFileFetchHTTPClient(t)
-	fileBytes := []byte("skip-verify route bytes")
 
+	// The dedicated skip-verify client keeps SSRF guards, so the loopback
+	// download URL is rejected before any HTTP request reaches this server;
+	// it only exists to provide a concrete download URL.
 	fileSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/temp/file" {
-			_, _ = w.Write(fileBytes)
-			return
-		}
 		http.NotFound(w, r)
 	}))
 	defer fileSrv.Close()
@@ -423,6 +425,9 @@ func TestDownloadFile_SkipVerifyRoutesToDedicatedClient(t *testing.T) {
 	if strings.Contains(err.Error(), "shared client must not fetch the download url") {
 		t.Fatalf("download went through the SHARED client, want the dedicated skip-verify client: %v", err)
 	}
+	// "SSRF policy" text comes from internal/utils SSRFValidatingRoundTripper;
+	// coupling is intentional here — it proves the dedicated client (which
+	// keeps SSRF guards) was used rather than the shared one.
 	if !strings.Contains(err.Error(), "SSRF policy") {
 		t.Errorf("expected SSRF policy rejection from the dedicated skip-verify client, got: %v", err)
 	}
