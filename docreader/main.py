@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import sys
+import threading
 import traceback
 import uuid
 from concurrent import futures
@@ -288,6 +289,37 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
         return ListEnginesResponse(engines=engines)
 
 
+def _start_opendataloader_warmup() -> None:
+    """Kick off a best-effort OpenDataLoader engine warmup in the background.
+
+    The first ``opendataloader_pdf.convert()`` in this process initializes
+    the JVM and loads the parsing libraries, which can take 20s+ on a cold
+    container and used to time out the first knowledge-base import (issue
+    #1802). Running one tiny conversion right after the server is up moves
+    that cost off the first request. Set ``DOCREADER_ODL_WARMUP=false`` to
+    opt out; warmup failures only log and never affect serving.
+    """
+    if not CONFIG.odl_warmup:
+        logger.info("OpenDataLoader engine warmup disabled (DOCREADER_ODL_WARMUP)")
+        return
+
+    def _run() -> None:
+        try:
+            from docreader.parser.opendataloader_parser import warmup_engine
+
+            ok, msg = warmup_engine()
+        except Exception as e:  # noqa: BLE001 - warmup is best-effort
+            logger.warning("OpenDataLoader engine warmup crashed: %s: %s",
+                           type(e).__name__, e)
+            return
+        if ok:
+            logger.info("OpenDataLoader engine warmed up (%s)", msg)
+        else:
+            logger.warning("OpenDataLoader engine warmup skipped: %s", msg)
+
+    threading.Thread(target=_run, name="opendataloader-warmup", daemon=True).start()
+
+
 def main():
     config.print_config()
 
@@ -326,6 +358,8 @@ def main():
 
     logger.info("Server started on port %d", CONFIG.grpc_port)
     logger.info("Server is ready to accept connections")
+
+    _start_opendataloader_warmup()
 
     try:
         server.wait_for_termination()
