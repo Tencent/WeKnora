@@ -381,7 +381,7 @@
          route is g.Admin()-gated; rendering it for lower roles would
          just produce an unhelpful 403. Lazy-loaded on first open. -->
     <t-drawer v-if="canViewAudit" v-model:visible="auditDrawerVisible" :header="$t('tenantMember.audit.tabLabel')"
-      drawer-class-name="tenant-members-audit-drawer" size="880px" :footer="false" placement="right" destroy-on-close>
+      drawer-class-name="tenant-members-audit-drawer" size="1120px" :footer="false" placement="right" destroy-on-close>
       <div class="audit-drawer-inner audit-panel audit-panel--drawer">
         <div class="audit-header">
           <span class="audit-desc">{{ $t('tenantMember.audit.description') }}</span>
@@ -2508,6 +2508,10 @@ watch(
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  /* The six audit columns need roughly 930px before the drawer body's
+     padding. Keep the outcome column in view on ordinary desktop widths,
+     while allowing the drawer to shrink safely on smaller screens. */
+  max-width: 100vw;
   max-height: 100vh;
   height: 100%;
 }
