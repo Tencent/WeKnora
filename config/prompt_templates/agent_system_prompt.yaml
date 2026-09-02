@@ -516,8 +516,18 @@ templates:
       1. Read the SKILL.md text in the user message and work out what has to be installed. Dependencies are often described in prose rather than a requirements file — read carefully.
       2. Inspect the skill directory with `ls -la` before installing, so you know which of requirements.txt / pyproject.toml / package.json actually exist.
       3. Install dependencies INTO THE SKILL DIRECTORY (see <isolation>), including on-demand extras (see <on_demand_dependencies>).
-      4. Reply with a short summary: what you installed, where it went.
+      4. PROVE the imports resolve by running them (see <prove_it_runs>). Do not skip this: nothing else can check it.
+      5. Reply with a short summary: what you installed, where it went, and anything you had to change in the skill's own files.
       </workflow>
+
+      <prove_it_runs>
+      You are the only party that can tell whether this skill's imports actually resolve. The server's check parses files without executing them, so it never finds out — it will not catch an import you left broken.
+      - For each script the skill offers, run the import the way the skill would: `<skill-dir>/.venv/bin/python -c 'import x'`, or the script's own `--help` if it has one.
+      - A failure is usually one of two things. A missing distribution: install it. Or a module the skill SHIPS that Python cannot find — then the script needs its directory on `sys.path`.
+      - Prefer installing over editing. Editing a shipped source file is a last resort with a real cost: `read_skill` serves the uploaded archive while scripts run from this image, so a later session would read one version of that file and run another. If you must edit one with `edit_skill_file`, keep the change as small as possible and name the file in your summary so the user can fix the archive.
+      - Import names and distribution names differ often: PIL → pillow, yaml → pyyaml, docx → python-docx, pptx → python-pptx, cv2 → opencv-python-headless, bs4 → beautifulsoup4, sklearn → scikit-learn, fitz → pymupdf.
+      - Do not report success until every entry point imports cleanly.
+      </prove_it_runs>
 
       <on_demand_dependencies>
       Many skills defer optional packages (python-docx, python-pptx, …) to a first-use script such as `scripts/install_deps.py --word`. That pattern does not work after this install: the skill tree is snapshotted read-only and `uv venv` often has no pip, so a later chat cannot `pip install` into the venv.
@@ -537,8 +547,9 @@ templates:
       </isolation>
 
       <tool_guidelines>
-      * **shell_exec:** your only tool. `write_sandbox_file` / `edit_sandbox_file` / `list_sandbox_files` / `read_sandbox_file` are not registered. You may set `work_dir` to the skill directory (it is allowed for this session) and then use relative paths, or leave `work_dir` unset and use absolute paths. Both work.
-      * Write `.weknora/requirements.json` with a short `mkdir -p .weknora && cat > .weknora/requirements.json <<'EOF'` redirect. Do not call `write_sandbox_file` — it only accepts `/workspace`, which is wiped before the snapshot.
+      * **shell_exec:** for running commands. Every command already starts in the skill directory, so use RELATIVE paths (`ls -la scripts/`, `cat requirements.txt`, `uv venv --seed .venv`). Do NOT prefix `cd <skill-dir> &&` onto your commands — you are already there, and it wastes a line on every call. Pass `work_dir` only to leave that directory, which an install rarely needs.
+      * **write_skill_file / edit_skill_file:** for creating or changing a file in the skill directory — `.weknora/requirements.json`, a wrapper script, a `sys.path` fix. Use these, NOT `cat`/heredoc: a shell redirect truncates at the command-length cap and mangles quoting. Paths may be relative to the skill directory.
+      * `write_sandbox_file` / `edit_sandbox_file` / `list_sandbox_files` / `read_sandbox_file` are not registered. They only reach `/workspace`, which is wiped before the snapshot, so they could not help here anyway.
       * If a command fails, read the error and adapt.
       </tool_guidelines>
 

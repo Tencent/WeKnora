@@ -731,7 +731,7 @@ type installerJob struct {
 func (s *TenantSkillService) installDependenciesAndVerify(
 	ctx context.Context, job installerJob,
 ) (err error) {
-	run, err := s.openInstallerRun(ctx, job.tenantID, job.sess, job.transcript)
+	run, err := s.openInstallerRun(ctx, job.tenantID, job.sess, job.skillDir, job.transcript)
 	if err != nil {
 		job.transcript.Finish(context.WithoutCancel(ctx), err)
 		return err
@@ -805,7 +805,11 @@ type installerRun struct {
 // AgentQA swallows engine failures (it emits an error event and returns nil)
 // and we need a reliable signal before switching the image.
 func (s *TenantSkillService) openInstallerRun(
-	ctx context.Context, tenantID uint64, sess *types.Session, transcript *installTranscript,
+	ctx context.Context,
+	tenantID uint64,
+	sess *types.Session,
+	skillDir string,
+	transcript *installTranscript,
 ) (*installerRun, error) {
 	if s.installerAgents == nil {
 		return nil, errors.New("custom agent service is not configured")
@@ -821,7 +825,8 @@ func (s *TenantSkillService) openInstallerRun(
 	if err != nil {
 		return nil, fmt.Errorf("load installer agent: %w", err)
 	}
-	agentConfig := installerAgentConfig(installerAgentDefaults(ctx, tenantID), sess.SandboxConfigID)
+	agentConfig := installerAgentConfig(
+		installerAgentDefaults(ctx, tenantID), sess.SandboxConfigID, skillDir)
 
 	chatModel, err := s.resolveInstallerModel(ctx, tenantID, record)
 	if err != nil {
@@ -904,12 +909,11 @@ func (s *TenantSkillService) reopenSkillDirForRepair(
 
 // buildRepairPrompt turns the gate's own findings into the next round's brief.
 //
-// It carries no analysis of its own, deliberately. The reason a first round can
-// fail on a working skill is that SKILL.md and the imports its files execute are
-// two different descriptions of what the skill needs; a third description
-// written here would reintroduce exactly that gap. The only thing added is the
-// import-name-to-distribution mapping, which is a property of PyPI rather than
-// of this skill.
+// It carries no analysis of its own, deliberately: the gate is the only
+// authority on what has to resolve in this image, and a second description
+// written here could disagree with it. Every repairable finding names a
+// distribution one of the skill's manifests declares and pip did not land, so
+// the brief is short — install what the lines name, change nothing else.
 func buildRepairPrompt(skillDir string, gate *skillVerificationError) string {
 	var findings strings.Builder
 	for _, problem := range gate.Problems {
@@ -921,20 +925,15 @@ func buildRepairPrompt(skillDir string, gate *skillVerificationError) string {
 
 The %s check reported:
 %s
-Every line above is a dependency this image cannot resolve. The names were read
-from the imports the skill's own files execute when they load, which is why some
-of them appear nowhere in SKILL.md — install them anyway.
+Every line above names a dependency one of this skill's own manifests declares
+and that is not installed in this image. Install it.
 
 - Python packages go into %s/.venv (`+"`uv pip install`"+`, or
   %s/.venv/bin/python -m pip install). Node packages go under %s/node_modules.
-- The name in each line is an IMPORT name; install the distribution that
-  provides it. Common cases where they differ: PIL -> pillow, yaml -> pyyaml,
-  docx -> python-docx, pptx -> python-pptx, cv2 -> opencv-python-headless,
-  bs4 -> beautifulsoup4, sklearn -> scikit-learn, fitz -> pymupdf.
-- Do NOT edit, move or delete any of the skill's own files, and do NOT edit
-  SKILL.md or requirements.txt to make the check pass. The uploaded archive is
-  what read_skill serves, so a source edit here makes the installed skill differ
-  from what everyone else sees.
+- Do NOT edit SKILL.md, requirements.txt, pyproject.toml or package.json to
+  make the check pass. Those files are what read_skill serves, so weakening a
+  declaration here makes the installed skill differ from what everyone else
+  sees — and the dependency would still be missing at run time.
 - If a package genuinely cannot be installed in this image, say so plainly in
   your summary rather than working around it.
 
@@ -1738,14 +1737,19 @@ Hard requirements:
 - Install dependencies for exactly this one skill.
 - Python dependencies must go into %s/.venv. Do not install into system Python.
 - Node dependencies must go under %s/node_modules. Do not install global packages unless no local alternative exists.
-- Use shell_exec only (write_sandbox_file is not available and cannot write
-  this tree). You may set work_dir to %s. Write .weknora/requirements.json
-  with a short shell redirect after mkdir -p.
+- shell_exec already starts every command in %s. Use relative paths
+  (`+"`ls -la scripts/`"+`, `+"`uv venv --seed .venv`"+`) and do NOT prefix
+  `+"`cd <skill-dir> &&`"+` onto them.
+- To create or change a file in this tree use write_skill_file /
+  edit_skill_file, NOT a shell heredoc or `+"`cat`"+`: those truncate at the
+  command-length cap and mangle quoting.
+  write_sandbox_file only writes /workspace, which is wiped before the
+  snapshot, so it cannot help you here.
 - Each command has a 10-minute budget; you do not need to set timeout_sec.
 - When finished, report what you installed and any global/system packages you changed.
 - Declare the environment variables this skill needs AT RUN TIME. Decide from the SKILL.md text
   at the end of this message: declare what it documents as needed to run the skill. Ignore 
-  anything only the installation itself needed. Run mkdir -p on the directory first, then write the declaration to %s as JSON of this exact shape:
+  anything only the installation itself needed. Write the declaration with write_skill_file to %s, as JSON of this exact shape:
   {"env":[{"name":"TAVILY_API_KEY","description":"what the skill uses it for","required":true}]}
   Each name must be UPPER_SNAKE_CASE and must appear literally somewhere in the skill's own files.
   Never write any value, placeholder or example credential: this file declares what is needed, and
@@ -1768,11 +1772,24 @@ already in the venv.
 %s
 - If an installer script needs --yes / --all / every extra flag, pass them.
 %s
-The server verifies the result itself before the image is kept, so report what
-you did rather than whether it passed. Verification parses every script with
-the interpreter that would run it, resolves the imports each one executes on
-load, and checks every distribution named in requirements.txt is present in the
-venv. It never runs the skill's code.
+Before you finish, PROVE the skill's imports resolve. Do not reason about it —
+run it. The server's own check cannot: it parses files without executing them,
+so it never learns whether an import would have worked. You have the real
+interpreter, so this is your job and yours only.
+- For each script the skill offers, run the import the way the skill would:
+  `+"`%s/.venv/bin/python -c 'import x'`"+`, or the script's own
+  `+"`--help`"+` if it has one.
+- A failure here is usually one of two things. A missing distribution: install
+  it. Or a module the skill ships that Python cannot find — then the script
+  needs the directory on sys.path, and you fix the script with edit_skill_file
+  rather than installing anything.
+- Do not declare success until every entry point imports cleanly.
+
+The server then checks what it can before the image is kept, so report what you
+did rather than whether it passed. It confirms every file parses with the
+interpreter that would run it, and that every distribution named in
+requirements.txt / pyproject.toml is installed in the venv. It never runs the
+skill's code and never judges an import.
 Lazy imports and install_deps.py extras are invisible to that check — you still
 have to install them.
 
@@ -1780,7 +1797,7 @@ SKILL.md:
 %s
 `, skillDir, formatToolchainSection(tools), skillDir, skillDir, skillDir,
 		requirementsPath, skillDir, formatOnDemandInstallers(bundle),
-		formatFrontmatterRepairNote(bundle), skillMD)
+		formatFrontmatterRepairNote(bundle), skillDir, skillMD)
 }
 
 // formatOnDemandInstallers names bundle files that install extras at first
@@ -1920,12 +1937,22 @@ func installerAgentDefaults(ctx context.Context, tenantID uint64) *types.CustomA
 // the shared sandbox image": that is a different permission from "can upload a
 // skill". The model is the one choice still taken from the stored record, in
 // resolveInstallerModel.
-func installerAgentConfig(defaults *types.CustomAgent, configID string) *types.AgentConfig {
+//
+// skillDir scopes the skill file tools to the one skill this install owns. The
+// installer's shell already runs as root in the shared image, so the tools add
+// no reach — they replace `cat` with a heredoc, whose command-length cap and
+// double quoting truncated or mangled every file the agent tried to write.
+func installerAgentConfig(
+	defaults *types.CustomAgent, configID, skillDir string,
+) *types.AgentConfig {
 	memoryOff := false
 	thinkingOff := false
+	installTools := []string{
+		tools.ToolShellExec, tools.ToolWriteSkillFile, tools.ToolEditSkillFile,
+	}
 	cfg := &types.AgentConfig{
 		MaxIterations:    30,
-		AllowedTools:     []string{tools.ToolShellExec},
+		AllowedTools:     append([]string(nil), installTools...),
 		Temperature:      0.2,
 		WebSearchEnabled: false,
 		MCPSelectionMode: "none",
@@ -1942,16 +1969,17 @@ func installerAgentConfig(defaults *types.CustomAgent, configID string) *types.A
 	// The installer's shell_exec must run as root inside the skills image
 	// root; the prompt below asks for exactly that. The grant is keyed on the
 	// built-in agent ID and refused for anything else.
-	cfg.EnableSkillInstallMode(defaults.ID)
+	cfg.EnableSkillInstallMode(defaults.ID, skillDir)
 	custom := defaults.Config
 	cfg.MaxIterations = custom.MaxIterations
 	if cfg.MaxIterations == 0 {
 		cfg.MaxIterations = 30
 	}
-	cfg.AllowedTools = append([]string(nil), custom.AllowedTools...)
-	if len(cfg.AllowedTools) == 0 {
-		cfg.AllowedTools = []string{tools.ToolShellExec}
-	}
+	// The install tools are unioned in rather than read off the registry entry.
+	// An install that cannot write its own skill directory cannot record what
+	// it did, and the platform YAML predates these tools — a deployment that
+	// has not re-synced it must not silently lose them.
+	cfg.AllowedTools = unionTools(custom.AllowedTools, installTools)
 	cfg.Temperature = custom.Temperature
 	cfg.SystemPrompt = custom.SystemPrompt
 	cfg.UseCustomSystemPrompt = custom.SystemPrompt != ""
@@ -1962,6 +1990,25 @@ func installerAgentConfig(defaults *types.CustomAgent, configID string) *types.A
 	cfg.MultiTurnEnabled = custom.MultiTurnEnabled
 	cfg.LLMCallTimeout = custom.LLMCallTimeout
 	return cfg
+}
+
+// unionTools returns configured plus every name in required that it is missing,
+// preserving the configured order so a deployment's own list still reads as it
+// was written.
+func unionTools(configured, required []string) []string {
+	seen := make(map[string]struct{}, len(configured)+len(required))
+	out := make([]string, 0, len(configured)+len(required))
+	for _, name := range append(append([]string(nil), configured...), required...) {
+		if name = strings.TrimSpace(name); name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
 }
 
 // resolveInstallerModel prefers the model the installer agent is configured
