@@ -887,7 +887,9 @@ func newQdrantValueMap(payload map[string]any) map[string]*qdrant.Value {
 	sanitizedPayload := make(map[string]any, len(payload))
 	for key, value := range payload {
 		if stringValue, ok := value.(string); ok {
-			value = common.CleanInvalidUTF8(stringValue)
+			if strings.IndexByte(stringValue, 0) != -1 || !utf8.ValidString(stringValue) {
+				value = common.CleanInvalidUTF8(stringValue)
+			}
 		}
 		sanitizedPayload[key] = value
 	}
