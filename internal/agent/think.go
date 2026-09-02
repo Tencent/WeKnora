@@ -257,6 +257,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		Tools:               tools,
 		Thinking:            e.config.Thinking,
 		ParallelToolCalls:   &parallelToolCalls,
+		PromptCacheKey:      sessionID,
 	}
 
 	pendingToolCalls := make(map[string]bool)

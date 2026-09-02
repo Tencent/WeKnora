@@ -180,8 +180,9 @@ func (c *Compactor) summarize(
 			{Role: "system", Content: summarizationSystemPrompt},
 			{Role: "user", Content: prompt},
 		}, &chat.ChatOptions{
-			Temperature: 0.3, // low temperature for factual summarization
-			MaxTokens:   maxTokens,
+			Temperature:    0.3, // low temperature for factual summarization
+			MaxTokens:      maxTokens,
+			CacheRetention: chat.CacheRetentionNone,
 		})
 		cancel()
 

@@ -71,6 +71,7 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 		FrequencyPenalty:    chatManage.SummaryConfig.FrequencyPenalty,
 		PresencePenalty:     chatManage.SummaryConfig.PresencePenalty,
 		Thinking:            chatManage.SummaryConfig.Thinking,
+		PromptCacheKey:      chatManage.SessionID,
 	}
 	if opt.Thinking != nil {
 		pipelineInfo(ctx, "Stream", "thinking_option", map[string]interface{}{
@@ -94,7 +95,6 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 		"language": chatManage.Language,
 		"contexts": chatManage.RenderedContexts,
 	})
-	systemPrompt = appendRetrievedImageOutputRequirement(systemPrompt, chatManage.RenderedContexts)
 	// Memory goes at the end of the system prompt, after the retrieved-context
 	// placeholders have been rendered, so a remembered sentence can never be
 	// substituted into prompt structure.
@@ -106,9 +106,14 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 
 	chatMessages = AppendHistoryMessages(chatMessages, chatManage.History)
 
+	// Image-output rules are turn-specific. Putting them on the current user
+	// message keeps the system prefix byte-stable so provider prompt caches
+	// still hit on later turns of the same session.
+	userContent := appendRetrievedImageOutputRequirement(chatManage.UserContent, chatManage.RenderedContexts)
+
 	// Add current user message. Only include images when the chat model supports
 	// vision; non-vision models rely on the text description in UserContent.
-	userMsg := chat.Message{Role: "user", Content: chatManage.UserContent}
+	userMsg := chat.Message{Role: "user", Content: userContent}
 	if chatManage.ChatModelSupportsVision && len(chatManage.Images) > 0 {
 		userMsg.Images = chatManage.Images
 	}

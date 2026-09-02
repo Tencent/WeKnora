@@ -38,6 +38,13 @@ type ChatOptions struct {
 	ToolChoice          string          `json:"tool_choice,omitempty"`         // "auto", "required", "none", or specific tool
 	ParallelToolCalls   *bool           `json:"parallel_tool_calls,omitempty"` // 是否允许并行工具调用（默认 nil 表示由模型决定）
 	Format              json.RawMessage `json:"format,omitempty"`              // 响应格式定义
+	// PromptCacheKey is the provider routing key (OpenAI prompt_cache_key).
+	// Empty falls back to the session ID on the call context.
+	PromptCacheKey string `json:"-"`
+	// CacheRetention controls provider prompt-cache TTL. none disables cache
+	// markers; empty/short is the default 5-minute cache; long requests 1h/24h
+	// where the provider accepts it.
+	CacheRetention CacheRetention `json:"-"`
 }
 
 // MessageContentPart represents a part of multi-content message
