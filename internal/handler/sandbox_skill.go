@@ -31,11 +31,6 @@ const (
 	// and a connection that waits for that forever is a leak, so the stream
 	// stops following and says so.
 	skillEventMaxDuration = 60 * time.Minute
-
-	// skillUploadEnvelopeSlack is the multipart framing allowed on top of the
-	// file itself, so the body cap refuses a genuinely oversized upload
-	// without rejecting a legal one for its boundary lines.
-	skillUploadEnvelopeSlack = 1 << 20
 )
 
 // sandboxSkillService is the skill surface the admin endpoints need. Reads and
@@ -300,10 +295,7 @@ func (h *SandboxSkillHandler) GetFile(c *gin.Context) {
 // @Router       /sandbox-configs/{id}/skills [post]
 func (h *SandboxSkillHandler) Upload(c *gin.Context) {
 	maxBytes := secutils.GetMaxSkillBundleSize()
-	// The cap is applied to the body before it is parsed: multipart parsing
-	// buffers the whole request, spilling to temp files, so checking only the
-	// declared part size would let an unbounded body through first.
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes+skillUploadEnvelopeSlack)
+	limitUploadBody(c, maxBytes)
 
 	if strings.HasPrefix(c.ContentType(), "application/json") {
 		h.installFromSource(c)
@@ -312,8 +304,7 @@ func (h *SandboxSkillHandler) Upload(c *gin.Context) {
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if stderrors.As(err, &tooLarge) {
+		if isRequestBodyTooLarge(err) {
 			_ = c.Error(skillTooLargeError())
 			return
 		}

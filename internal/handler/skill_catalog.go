@@ -51,7 +51,7 @@ func (h *SkillHandler) RegisterCatalog(c *gin.Context) {
 		return
 	}
 	maxBytes := secutils.GetMaxSkillBundleSize()
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes+skillUploadEnvelopeSlack)
+	limitUploadBody(c, maxBytes)
 
 	if strings.HasPrefix(c.ContentType(), "application/json") {
 		h.registerCatalogFromSource(c)
@@ -60,8 +60,7 @@ func (h *SkillHandler) RegisterCatalog(c *gin.Context) {
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if stderrors.As(err, &tooLarge) {
+		if isRequestBodyTooLarge(err) {
 			_ = c.Error(skillTooLargeError())
 			return
 		}

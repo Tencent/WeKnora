@@ -2258,8 +2258,14 @@ type installSkillRepo struct {
 	listSnapshotsErr error
 	// deleteSkillErr models the row delete failing past the point of no
 	// return.
-	deleteSkillErr      error
-	createErr           error
+	deleteSkillErr error
+	createErr      error
+	// updateCatalogErr models the definition row failing to commit after its
+	// new archive is already stored.
+	updateCatalogErr error
+	// createCatalogHook stands in for the insert so a test can have the unique
+	// index reject this row because another request won the name first.
+	createCatalogHook   func(*types.TenantSkillCatalogEntity) error
 	getByNameMisses     int
 	readyWriteAttempts  int
 	deleteSkillAttempts int
@@ -2648,6 +2654,9 @@ func (r *installSkillRepo) CreateCatalog(_ context.Context, e *types.TenantSkill
 	if r.catalogs == nil {
 		r.catalogs = map[string]*types.TenantSkillCatalogEntity{}
 	}
+	if r.createCatalogHook != nil {
+		return r.createCatalogHook(e)
+	}
 	cp := *e
 	r.catalogs[e.ID] = &cp
 	return nil
@@ -2692,6 +2701,9 @@ func (r *installSkillRepo) ListCatalogsByTenant(_ context.Context, tenantID uint
 func (r *installSkillRepo) UpdateCatalog(_ context.Context, e *types.TenantSkillCatalogEntity) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.updateCatalogErr != nil {
+		return r.updateCatalogErr
+	}
 	if r.catalogs == nil {
 		r.catalogs = map[string]*types.TenantSkillCatalogEntity{}
 	}

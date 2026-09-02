@@ -284,7 +284,7 @@ func (s *TenantSkillService) upsertCatalogFromBundle(
 	}
 	now := s.now()
 	if existing != nil {
-		stored, err := s.storeCatalogBundle(ctx, tenantID, existing, archive, requireStore)
+		stored, releaseReplaced, err := s.storeCatalogBundle(ctx, tenantID, existing, archive, requireStore)
 		if err != nil {
 			return nil, err
 		}
@@ -297,8 +297,12 @@ func (s *TenantSkillService) upsertCatalogFromBundle(
 		existing.BundleSHA256 = bundle.SHA256
 		existing.UpdatedAt = now
 		if err := s.skills.UpdateCatalog(ctx, existing); err != nil {
+			// The stored definition still names the old archive, so leave that
+			// archive alone. The object just written is the leak, and it is the
+			// harmless one: the next re-register overwrites that same key.
 			return nil, err
 		}
+		releaseReplaced()
 		return existing, nil
 	}
 
@@ -308,7 +312,7 @@ func (s *TenantSkillService) upsertCatalogFromBundle(
 		Instructions: bundle.Instructions,
 		CreatedAt:    now, UpdatedAt: now,
 	}
-	stored, err := s.storeCatalogBundle(ctx, tenantID, row, archive, requireStore)
+	stored, releaseReplaced, err := s.storeCatalogBundle(ctx, tenantID, row, archive, requireStore)
 	if err != nil {
 		return nil, err
 	}
@@ -326,16 +330,33 @@ func (s *TenantSkillService) upsertCatalogFromBundle(
 		if winner == nil {
 			return nil, err
 		}
+		// The row that lost the race is never written, and the object above is
+		// keyed by its ID, so nothing will ever name it again — the retry below
+		// stores its own copy under the winner's key.
+		if ref := strings.TrimSpace(row.BundleRef); ref != "" {
+			s.deleteBundleBestEffort(ctx, tenantID, ref)
+		}
 		return s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, requireStore)
 	}
+	releaseReplaced()
 	return row, nil
 }
 
+// storeCatalogBundle writes the archive and reports whether the definition now
+// names it, along with the work that settles the archive it replaced.
+//
+// That second return value has to be called by whoever commits the row, and
+// only once the commit succeeds. Retiring the old object here instead would
+// delete bytes the stored definition still points at the moment the write below
+// fails: the row would name a ref that no longer resolves, and the object just
+// saved would be unreferenced, which takes the definition's files down for good
+// rather than leaving the failed re-register as a no-op.
 func (s *TenantSkillService) storeCatalogBundle(
 	ctx context.Context, tenantID uint64, catalog *types.TenantSkillCatalogEntity, archive []byte, requireStore bool,
-) (bool, error) {
+) (bool, func(), error) {
+	noop := func() {}
 	if catalog == nil || len(archive) == 0 {
-		return false, nil
+		return false, noop, nil
 	}
 	digest := skillArchiveSHA256(archive)
 	if strings.TrimSpace(catalog.BundleRef) != "" &&
@@ -343,15 +364,15 @@ func (s *TenantSkillService) storeCatalogBundle(
 		catalog.BundleSHA256 == digest {
 		// Same bytes already on the definition. Installing onto another
 		// sandbox must not mint a second object.
-		return true, nil
+		return true, noop, nil
 	}
 	fs, err := s.fileServiceForTenant(ctx, tenantID)
 	if err != nil {
 		if requireStore {
-			return false, err
+			return false, noop, err
 		}
 		logger.Warnf(ctx, "[skill] catalog bundle storage unavailable: %v", err)
-		return false, nil
+		return false, noop, nil
 	}
 	oldRef := strings.TrimSpace(catalog.BundleRef)
 	oldSHA := strings.TrimSpace(catalog.BundleSHA256)
@@ -359,16 +380,20 @@ func (s *TenantSkillService) storeCatalogBundle(
 		fmt.Sprintf("tenant-skills/catalog/%s.zip", catalog.ID), false)
 	if err != nil {
 		if requireStore {
-			return false, fmt.Errorf("store catalog bundle: %w", err)
+			return false, noop, fmt.Errorf("store catalog bundle: %w", err)
 		}
 		logger.Warnf(ctx, "[skill] catalog bundle store failed: %v", err)
-		return false, nil
+		return false, noop, nil
 	}
 	catalog.BundleRef = ref
-	if oldRef != "" && oldRef != ref && !s.pinInstallsToReplacedBundle(ctx, tenantID, catalog, oldRef, oldSHA) {
-		s.deleteBundleBestEffort(ctx, tenantID, oldRef)
+	if oldRef == "" || oldRef == ref {
+		return true, noop, nil
 	}
-	return true, nil
+	return true, func() {
+		if !s.pinInstallsToReplacedBundle(ctx, tenantID, catalog, oldRef, oldSHA) {
+			s.deleteBundleBestEffort(ctx, tenantID, oldRef)
+		}
+	}, nil
 }
 
 // pinInstallsToReplacedBundle hands the archive a definition just replaced to

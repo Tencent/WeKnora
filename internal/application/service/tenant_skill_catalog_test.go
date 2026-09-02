@@ -242,6 +242,66 @@ func TestRegisterCatalogReplacesThePreviousZip(t *testing.T) {
 		"replacing the definition zip must drop the previous object")
 }
 
+// A re-register that cannot commit the row has to be a no-op. Retiring the
+// previous object before the write would leave the stored definition naming a
+// ref that no longer resolves, which takes its files down for good — far worse
+// than the failed upload the caller asked about.
+func TestRegisterCatalogKeepsThePreviousZipWhenTheRowFailsToCommit(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	first := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('v1')\n",
+	})
+	cat, err := fx.svc.RegisterCatalogFromArchive(ctx, 7, first)
+	require.NoError(t, err)
+	firstRef := cat.BundleRef
+
+	fx.skillRepo.updateCatalogErr = errors.New("database unavailable")
+	second := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('v2')\n",
+	})
+	_, err = fx.svc.RegisterCatalogFromArchive(ctx, 7, second)
+
+	require.Error(t, err)
+	require.Empty(t, fx.deletedBundles,
+		"the stored definition still names the previous archive, so it must survive")
+
+	stored, err := fx.skillRepo.GetCatalog(ctx, 7, cat.ID)
+	require.NoError(t, err)
+	require.Equal(t, firstRef, stored.BundleRef)
+	require.NotEmpty(t, fx.storedBundles[firstRef],
+		"the ref the row still names has to resolve to bytes")
+}
+
+// Two first-time registrations of one name race the unique index. The loser's
+// object is keyed by the row ID that was never written, so nothing will ever
+// name it again and the retry stores its own copy under the winner's key.
+func TestRegisterCatalogDropsTheObjectOfTheRowThatLostTheNameRace(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	archive := zipBundle(t, map[string]string{"SKILL.md": validSkillMD})
+
+	fx.skillRepo.createCatalogHook = func(e *types.TenantSkillCatalogEntity) error {
+		// The winner appears between this caller's name lookup and its insert.
+		fx.skillRepo.catalogs["cat-winner"] = &types.TenantSkillCatalogEntity{
+			ID: "cat-winner", TenantID: e.TenantID, Name: e.Name,
+		}
+		fx.skillRepo.createCatalogHook = nil
+		return errors.New("duplicate key value violates unique constraint")
+	}
+
+	cat, err := fx.svc.RegisterCatalogFromArchive(ctx, 7, archive)
+
+	require.NoError(t, err)
+	require.Equal(t, "cat-winner", cat.ID)
+	require.Equal(t, 2, fx.savedBundles, "the retry stores the archive under the winner's key")
+	require.Equal(t, []string{"file://bundle-1.zip"}, fx.deletedBundles,
+		"the object of the row that was never written is unreachable and must go")
+	require.NotEqual(t, "file://bundle-1.zip", cat.BundleRef)
+}
+
 // The sandbox that installed v1 goes on running v1 no matter what the
 // definition says next, so the archive it was built from has to outlive the
 // re-registration that supersedes it. Deleting it here is what would take
