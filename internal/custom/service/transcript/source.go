@@ -15,12 +15,16 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/wikiaudit"
 )
 
 const (
 	SourceStatusCreating = "creating"
 	SourceStatusCreated  = "created"
 	SourceStatusFailed   = "failed"
+
+	SourceKnowledgeBaseMissing = "knowledge_base_routing:knowledge_kb_missing"
+	SourceOwnershipMismatch    = "knowledge_base_routing:source_ownership_mismatch"
 )
 
 // KnowledgeGateway is the small WeKnora surface needed to create and
@@ -50,14 +54,17 @@ func NewSourceWriter(db *gorm.DB, client *weknora.Client) *SourceWriter {
 
 type SourceInput struct {
 	Document FullVideoDocument
+	TaskID   string
 }
 
 type SourceResult struct {
 	VideoID              string
 	TranscriptGeneration string
 	KnowledgeID          string
+	KnowledgeBaseID      string
 	ContentHash          string
 	Action               string
+	AuditEventID         string
 }
 
 // Ensure creates or reuses the source document for one immutable transcript
@@ -68,7 +75,7 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 		return SourceResult{}, fmt.Errorf("transcript source writer dependencies are not configured")
 	}
 	if strings.TrimSpace(w.KBID) == "" {
-		return SourceResult{}, fmt.Errorf("WEKNORA_KB_ID 未配置")
+		return SourceResult{}, fmt.Errorf(SourceKnowledgeBaseMissing)
 	}
 	doc := input.Document
 	documentJSON, err := doc.JSON()
@@ -78,7 +85,7 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(documentJSON)))
 	videoID := strings.TrimSpace(doc.VideoID)
 	generation := strings.TrimSpace(doc.TranscriptGeneration)
-	result := SourceResult{VideoID: videoID, TranscriptGeneration: generation, ContentHash: hash}
+	result := SourceResult{VideoID: videoID, TranscriptGeneration: generation, KnowledgeBaseID: w.KBID, ContentHash: hash}
 
 	// A process-local lock avoids two workers racing between reconciliation and
 	// creation. The database unique key remains the cross-instance guard.
@@ -86,7 +93,10 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 	defer w.mu.Unlock()
 
 	var binding model.VideoTranscriptSource
-	err = w.DB.WithContext(ctx).Where("video_id = ? AND transcript_generation = ?", videoID, generation).First(&binding).Error
+	err = w.DB.WithContext(ctx).Where(
+		"video_id = ? AND transcript_generation = ? AND knowledge_base_id = ?",
+		videoID, generation, w.KBID,
+	).First(&binding).Error
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return result, fmt.Errorf("load transcript source binding: %w", err)
 	}
@@ -97,23 +107,28 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 		if binding.Status == SourceStatusCreated && strings.TrimSpace(binding.KnowledgeID) != "" {
 			result.KnowledgeID = binding.KnowledgeID
 			result.Action = "reused"
-			return result, nil
+			return logSourceAudit(result, input.TaskID), nil
 		}
 	} else {
 		binding = model.VideoTranscriptSource{
 			ID: uuid.NewString(), VideoID: videoID, TranscriptGeneration: generation,
-			ContentHash: hash, Status: SourceStatusCreating,
+			KnowledgeBaseID: w.KBID, ContentHash: hash, Status: SourceStatusCreating,
 			CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 		}
 		createResult := w.DB.WithContext(ctx).Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "video_id"}, {Name: "transcript_generation"}},
+			Columns: []clause.Column{
+				{Name: "video_id"}, {Name: "transcript_generation"}, {Name: "knowledge_base_id"},
+			},
 			DoNothing: true,
 		}).Create(&binding)
 		if createResult.Error != nil {
 			return result, fmt.Errorf("create transcript source binding: %w", createResult.Error)
 		}
 		if createResult.RowsAffected == 0 {
-			if loadErr := w.DB.WithContext(ctx).Where("video_id = ? AND transcript_generation = ?", videoID, generation).First(&binding).Error; loadErr != nil {
+			if loadErr := w.DB.WithContext(ctx).Where(
+				"video_id = ? AND transcript_generation = ? AND knowledge_base_id = ?",
+				videoID, generation, w.KBID,
+			).First(&binding).Error; loadErr != nil {
 				return result, fmt.Errorf("load concurrent transcript source binding: %w", loadErr)
 			}
 			if binding.ContentHash != hash {
@@ -122,7 +137,7 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 			if binding.Status == SourceStatusCreated && strings.TrimSpace(binding.KnowledgeID) != "" {
 				result.KnowledgeID = binding.KnowledgeID
 				result.Action = "reused"
-				return result, nil
+				return logSourceAudit(result, input.TaskID), nil
 			}
 		}
 	}
@@ -153,6 +168,9 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 	if knowledge == nil || strings.TrimSpace(knowledge.ID) == "" {
 		return result, w.fail(binding.ID, result, fmt.Errorf("transcript source returned empty knowledge id"))
 	}
+	if err := validateSourceKnowledgeBase(knowledge.KnowledgeBaseID, w.KBID); err != nil {
+		return result, w.fail(binding.ID, result, err)
+	}
 	parsed, getErr := w.Gateway.GetKnowledge(ctx, knowledge.ID)
 	if getErr != nil {
 		return result, w.fail(binding.ID, result, fmt.Errorf("verify transcript source %s: %w", knowledge.ID, getErr))
@@ -164,16 +182,49 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 		}
 		return result, w.fail(binding.ID, result, fmt.Errorf("verify transcript source: %s", message))
 	}
+	if err := validateSourceKnowledgeBase(parsed.KnowledgeBaseID, w.KBID); err != nil {
+		return result, w.fail(binding.ID, result, err)
+	}
 	if err := w.DB.WithContext(ctx).Model(&model.VideoTranscriptSource{}).Where("id = ?", binding.ID).Updates(map[string]any{
 		"knowledge_id": knowledge.ID, "content_hash": hash, "status": SourceStatusCreated,
 		"error_message": "", "updated_at": time.Now().UTC(),
 	}).Error; err != nil {
 		return result, fmt.Errorf("save transcript source binding: %w", err)
 	}
-	slog.Info("transcript source document ready", "video_id", videoID, "transcript_generation", generation, "knowledge_id", knowledge.ID, "content_hash", hash, "action", action)
+	slog.Info("transcript source document ready", "video_id", videoID, "transcript_generation", generation,
+		"knowledge_id", knowledge.ID, "knowledge_base_id", w.KBID, "content_hash", hash, "action", action)
 	result.KnowledgeID = knowledge.ID
 	result.Action = action
-	return result, nil
+	return logSourceAudit(result, input.TaskID), nil
+}
+
+func logSourceAudit(result SourceResult, inputTaskID string) SourceResult {
+	taskID := strings.TrimSpace(inputTaskID)
+	if taskID == "" {
+		taskID = "source:" + wikiaudit.RunID(wikiaudit.SourceIdentity{
+			VideoID: result.VideoID, TranscriptGeneration: result.TranscriptGeneration,
+			SourceKnowledgeID: result.KnowledgeID, KnowledgeBaseID: result.KnowledgeBaseID,
+		})
+	}
+	auditEvent := wikiaudit.New(wikiaudit.SourceIdentity{
+		VideoID: result.VideoID, TranscriptGeneration: result.TranscriptGeneration,
+		SourceKnowledgeID: result.KnowledgeID, KnowledgeBaseID: result.KnowledgeBaseID,
+	}, taskID, "source:ingest", result.Action, "not_applicable", "source_ingest", "succeeded")
+	if auditJSON, auditErr := auditEvent.JSON(); auditErr == nil {
+		result.AuditEventID = auditEvent.EventID
+		slog.Info("wiki audit event", "event", auditJSON)
+	} else {
+		slog.Error("wiki audit event rejected", "error", auditErr)
+	}
+	return result
+}
+
+func validateSourceKnowledgeBase(actual, expected string) error {
+	actual = strings.TrimSpace(actual)
+	if actual != "" && actual != strings.TrimSpace(expected) {
+		return fmt.Errorf("%s: expected=%s actual=%s", SourceOwnershipMismatch, expected, actual)
+	}
+	return nil
 }
 
 func (w *SourceWriter) fail(bindingID string, result SourceResult, sourceErr error) error {

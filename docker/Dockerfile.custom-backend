@@ -23,6 +23,7 @@ RUN go mod edit \
 
 COPY cmd/custom-backend ./cmd/custom-backend
 COPY internal/custom ./internal/custom
+COPY internal/wikiaudit ./internal/wikiaudit
 
 RUN go build -ldflags="-s -w" -o /out/custom-backend ./cmd/custom-backend
 

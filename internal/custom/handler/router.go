@@ -25,10 +25,15 @@ import (
 
 // Deps 路由依赖
 type Deps struct {
-	DB      *gorm.DB
-	Cfg     *config.Config
-	MinIO   *objstore.Client
-	Wiki    *weknora.WikiClient
+	DB               *gorm.DB
+	Cfg              *config.Config
+	RoutingErr       error
+	MinIO            *objstore.Client
+	Wiki             *weknora.WikiClient
+	EvidenceWeKnora  *weknora.Client
+	KnowledgeWeKnora *weknora.Client
+	// WeKnora is retained as a read-only compatibility alias for the evidence
+	// adapter. Wiki and Agent routes never use this field.
 	WeKnora *weknora.Client
 	Graph   knowledgegraph.Store
 }
@@ -38,11 +43,22 @@ type Deps struct {
 // （与官方 /api/ 前缀分离，见个性化部署流程 §2.5 nginx 最长前缀优先匹配）。
 func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	deps := &Deps{DB: db, Cfg: cfg}
+	if cfg == nil {
+		deps.RoutingErr = fmt.Errorf("knowledge_base_routing:config_missing")
+		return buildRouter(deps)
+	}
 	if m, err := objstore.New(cfg.MinIO); err == nil {
 		deps.MinIO = m
 	}
-	deps.Wiki = weknora.NewWikiClient(cfg.WeKnora)
-	deps.WeKnora = weknora.New(cfg.WeKnora)
+	roles, routingErr := cfg.WeKnora.ResolveKnowledgeBaseRoles()
+	if routingErr != nil {
+		deps.RoutingErr = routingErr
+		return buildRouter(deps)
+	}
+	deps.EvidenceWeKnora = weknora.New(cfg.WeKnora.ForKnowledgeBase(roles.Evidence))
+	deps.KnowledgeWeKnora = weknora.New(cfg.WeKnora.ForKnowledgeBase(roles.Knowledge))
+	deps.WeKnora = deps.EvidenceWeKnora
+	deps.Wiki = weknora.NewWikiClient(cfg.WeKnora.ForKnowledgeBase(roles.Knowledge))
 	deps.Graph, _ = knowledgegraph.New(cfg.WikiGraph, deps.Wiki)
 	return buildRouter(deps)
 }
@@ -50,10 +66,33 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 // BuildRouterForDeps builds the router with already-initialized real clients.
 // The custom backend uses this to share one Wiki graph driver between workers and HTTP.
 func BuildRouterForDeps(deps *Deps) *gin.Engine {
+	if deps == nil {
+		deps = &Deps{RoutingErr: fmt.Errorf("knowledge_base_routing:dependencies_missing")}
+	}
+	if deps.RoutingErr == nil {
+		if deps.Cfg == nil {
+			deps.RoutingErr = fmt.Errorf("knowledge_base_routing:config_missing")
+		} else if _, err := deps.Cfg.WeKnora.ResolveKnowledgeBaseRoles(); err != nil {
+			deps.RoutingErr = err
+		}
+	}
+	if deps.RoutingErr != nil {
+		// A caller may have assembled dependencies before validating config.
+		// Remove every WeKnora-backed dependency here so an invalid role
+		// contract cannot accidentally reach Wiki, Agent, or Graph code.
+		deps.EvidenceWeKnora = nil
+		deps.KnowledgeWeKnora = nil
+		deps.WeKnora = nil
+		deps.Wiki = nil
+		deps.Graph = nil
+	}
 	return buildRouter(deps)
 }
 
 func buildRouter(deps *Deps) *gin.Engine {
+	if deps == nil {
+		deps = &Deps{RoutingErr: fmt.Errorf("knowledge_base_routing:dependencies_missing")}
+	}
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
 	router.Use(corsMiddleware())
@@ -210,28 +249,51 @@ func buildRouter(deps *Deps) *gin.Engine {
 
 	// 视频列表 / 详情
 	vh := NewVideoHandler(deps.DB)
+	vh.MinIO = deps.MinIO
+	evidenceClient := deps.EvidenceWeKnora
+	if evidenceClient == nil {
+		evidenceClient = deps.WeKnora
+	}
+	vh.WeKnora = evidenceClient
+	vh.EvidenceWeKnora = evidenceClient
+	vh.KnowledgeWeKnora = deps.KnowledgeWeKnora
 	api.GET("/videos", vh.List)
 	api.GET("/videos/:id", vh.Detail)
-	chatScope := NewChatScopeHandler(deps.DB, deps.Cfg.WeKnora.KBID, deps.Cfg.WeKnora.AgentID, deps.Cfg.WeKnora.TenantID)
+	api.DELETE("/videos/:id", vh.Delete)
+	roles := config.KnowledgeBaseRoles{}
+	agentID, tenantID := "", ""
+	if deps.Cfg != nil && deps.RoutingErr == nil {
+		if resolved, err := deps.Cfg.WeKnora.ResolveKnowledgeBaseRoles(); err == nil {
+			roles = resolved
+			agentID = deps.Cfg.WeKnora.AgentID
+			tenantID = deps.Cfg.WeKnora.TenantID
+		} else {
+			deps.RoutingErr = err
+		}
+	}
+	// Chat and Agent retrieval operate on the video knowledge role (Wiki and
+	// full-document content). Transcript chunk IDs remain scoped by the
+	// per-video metadata returned from the evidence pipeline.
+	chatScope := NewChatScopeHandler(deps.DB, roles.Knowledge, agentID, tenantID)
 	api.GET("/chat/scope/global", chatScope.Global)
 	chatEvidence := NewChatEvidenceHandler(deps.DB)
 	api.GET("/chat/evidence", chatEvidence.Lookup)
 	chatAudit := NewChatAuditHandler(deps.DB)
 	api.POST("/chat/source-audit", chatAudit.RecordSourceAudit)
-	chatWiki := NewChatWikiHandler(deps.DB, deps.Wiki, deps.Cfg.WeKnora.KBID)
+	chatWiki := NewChatWikiHandler(deps.DB, deps.Wiki, roles.Knowledge)
 	api.GET("/chat/wiki-search", chatWiki.Search)
 	api.GET("/videos/:id/chat-scope", chatScope.Video)
 	dashboard := NewDashboardHandler(deps.DB)
 	api.GET("/dashboard", dashboard.Get)
 	api.POST("/dashboard/questions", dashboard.RecordQuestion)
-	ph := NewProcessingHandler(deps.DB, ProcessingDependencies{Wiki: deps.Wiki, KBID: deps.Cfg.WeKnora.KBID})
+	ph := NewProcessingHandler(deps.DB, ProcessingDependencies{Wiki: deps.Wiki, KBID: roles.Knowledge})
 	api.GET("/videos/:id/processing-status", ph.Status)
 	api.POST("/videos/:id/processing-jobs/:jobType/retry", ph.Retry)
-	graphHandler := NewEntityGraphHandler(deps.DB, deps.Graph, deps.Cfg.WeKnora.KBID, deps.Wiki)
+	graphHandler := NewEntityGraphHandler(deps.DB, deps.Graph, roles.Knowledge, deps.Wiki)
 	api.GET("/graph", graphHandler.Get)
 
 	if deps.Wiki != nil {
-		ch := NewContentHandler(deps.DB, deps.Wiki, deps.Cfg.WeKnora.KBID)
+		ch := NewContentHandler(deps.DB, deps.Wiki, roles.Knowledge)
 		videos := api.Group("/videos/:id")
 		videos.GET("/related-knowledge", ch.RelatedKnowledge)
 		videos.GET("/outline", ch.Outline)

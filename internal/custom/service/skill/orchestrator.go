@@ -86,14 +86,19 @@ func (o *Orchestrator) transcriptSourceManifest(ctx context.Context, db *gorm.DB
 	if len(chunks) == 0 {
 		return "", "", fmt.Errorf("video %s has no active transcript chunks", videoID)
 	}
+	if strings.TrimSpace(o.KBID) == "" {
+		return "", "", fmt.Errorf("knowledge_base_routing:knowledge_kb_missing")
+	}
 	var source model.VideoTranscriptSource
-	if err := db.WithContext(ctx).Where("video_id = ? AND transcript_generation = ?", videoID, video.TranscriptGeneration).First(&source).Error; err != nil {
+	if err := db.WithContext(ctx).Where(
+		"video_id = ? AND transcript_generation = ? AND knowledge_base_id = ?",
+		videoID, video.TranscriptGeneration, o.KBID,
+	).First(&source).Error; err != nil {
 		return "", "", fmt.Errorf("load transcript source document: %w", err)
 	}
 	if source.Status != "created" || strings.TrimSpace(source.KnowledgeID) == "" {
 		return "", "", fmt.Errorf("video %s transcript source document is not ready", videoID)
 	}
-	knowledgeIDs := make([]string, 0, len(chunks))
 	seen := make(map[string]struct{}, len(chunks))
 	for index, chunk := range chunks {
 		if chunk.ChunkIndex != index || chunk.Status != "completed" || strings.TrimSpace(chunk.KnowledgeID) == "" {
@@ -103,13 +108,12 @@ func (o *Orchestrator) transcriptSourceManifest(ctx context.Context, db *gorm.DB
 			return "", "", fmt.Errorf("video %s transcript chunk manifest contains duplicate knowledge id", videoID)
 		}
 		seen[chunk.KnowledgeID] = struct{}{}
-		knowledgeIDs = append(knowledgeIDs, chunk.KnowledgeID)
 	}
 	inputPayload, err := json.Marshal(map[string]any{
-		"transcript_generation":          video.TranscriptGeneration,
-		"transcript_source_knowledge_id": source.KnowledgeID,
-		"transcript_knowledge_ids":       knowledgeIDs,
-		"transcript_chunk_count":         len(knowledgeIDs),
+		"transcript_generation":               video.TranscriptGeneration,
+		"transcript_source_knowledge_id":      source.KnowledgeID,
+		"transcript_source_knowledge_base_id": source.KnowledgeBaseID,
+		"transcript_input_mode":               "full_document",
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("encode transcript source manifest: %w", err)

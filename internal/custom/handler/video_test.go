@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 )
@@ -156,6 +159,133 @@ func TestVideoDetailUsesInitialAvailability(t *testing.T) {
 				t.Fatalf("detail media URLs = %#v, want play_url=%q cover_url=%q", payload, tc.fileURL, tc.thumbnailURL)
 			}
 		})
+	}
+}
+
+func TestVideoDeleteSoftDeletesVideoAndProcessingJobs(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID:         uuid.NewString(),
+		Title:      "待删除视频",
+		Status:     model.VideoStatusReady,
+		FileURL:    "videos/source.mp4",
+		UploadedAt: func() *time.Time { value := time.Now().UTC(); return &value }(),
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	job := model.VideoProcessingJob{ID: uuid.NewString(), VideoID: video.ID, JobType: "thumbnail", Status: "succeeded"}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Params = gin.Params{{Key: "id", Value: video.ID}}
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/custom/videos/"+video.ID, nil)
+	NewVideoHandler(db).Delete(c)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var remaining model.Video
+	if err := db.First(&remaining, "id = ?", video.ID).Error; err != gorm.ErrRecordNotFound {
+		t.Fatalf("video lookup error = %v, want record not found", err)
+	}
+	var jobs int64
+	if err := db.Model(&model.VideoProcessingJob{}).Where("video_id = ?", video.ID).Count(&jobs).Error; err != nil {
+		t.Fatalf("count jobs: %v", err)
+	}
+	if jobs != 0 {
+		t.Fatalf("jobs remaining = %d, want 0", jobs)
+	}
+}
+
+func TestVideoDeleteRoutesKnowledgeByPersistedKnowledgeBase(t *testing.T) {
+	db := openTestVideoDB(t)
+	if err := db.AutoMigrate(&model.VideoTranscriptChunk{}, &model.VideoTranscriptSource{}); err != nil {
+		t.Fatalf("migrate transcript ownership tables: %v", err)
+	}
+	video := model.Video{
+		ID:                    uuid.NewString(),
+		Title:                 "双库删除路由",
+		Status:                model.VideoStatusReady,
+		FileURL:               "videos/source.mp4",
+		TranscriptKnowledgeID: "evidence-anchor",
+		TranscriptGeneration:  "generation-1",
+		UploadedAt:            func() *time.Time { value := time.Now().UTC(); return &value }(),
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	if err := db.Create(&model.VideoTranscriptChunk{
+		VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 0,
+		KnowledgeID: "evidence-chunk", ContentHash: "chunk-hash", Status: "completed",
+	}).Error; err != nil {
+		t.Fatalf("create evidence chunk: %v", err)
+	}
+	if err := db.Create(&model.VideoTranscriptSource{
+		ID: uuid.NewString(), VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration,
+		KnowledgeBaseID: "knowledge-kb", KnowledgeID: "knowledge-source", ContentHash: "source-hash",
+		Status: "created",
+	}).Error; err != nil {
+		t.Fatalf("create knowledge source: %v", err)
+	}
+
+	var deleted []string
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Fatalf("method = %s, want DELETE", r.Method)
+		}
+		deleted = append(deleted, r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer remote.Close()
+	evidence := weknora.New(config.WeKnoraConfig{BaseURL: remote.URL, KBID: "evidence-kb"})
+	knowledge := weknora.New(config.WeKnoraConfig{BaseURL: remote.URL, KBID: "knowledge-kb"})
+	h := NewVideoHandler(db)
+	h.EvidenceWeKnora = evidence
+	h.KnowledgeWeKnora = knowledge
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Params = gin.Params{{Key: "id", Value: video.ID}}
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/custom/videos/"+video.ID, nil)
+	h.Delete(c)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	sort.Strings(deleted)
+	want := []string{
+		"/api/v1/knowledge/evidence-anchor",
+		"/api/v1/knowledge/evidence-chunk",
+		"/api/v1/knowledge/knowledge-source",
+	}
+	sort.Strings(want)
+	if strings.Join(deleted, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("deleted knowledge = %#v, want %#v", deleted, want)
+	}
+}
+
+func TestRouterFailsClosedWhenKnowledgeBaseRolesAreInvalid(t *testing.T) {
+	db := openTestVideoDB(t)
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("invalid routing must not call WeKnora: %s %s", r.Method, r.URL.Path)
+	}))
+	defer remote.Close()
+	deps := &Deps{
+		DB:   db,
+		Cfg:  &config.Config{WeKnora: config.WeKnoraConfig{BaseURL: remote.URL, KBID: "legacy-only"}},
+		Wiki: weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: remote.URL, KBID: "knowledge-kb"}),
+	}
+	router := BuildRouterForDeps(deps)
+	for _, path := range []string{"/api/custom/chat/wiki-search?q=term", "/api/custom/chat/scope/global"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s status = %d, want %d, body = %s", path, rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+		}
 	}
 }
 

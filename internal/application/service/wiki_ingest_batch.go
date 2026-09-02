@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/wikiaudit"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"golang.org/x/sync/errgroup"
@@ -420,6 +421,12 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	slugUpdates := make(map[string][]SlugUpdate)
 	var docResults []*docIngestResult
 	var retractFolderIDs []string
+	// P2 audit state is keyed by source knowledge ID. The queue may contain
+	// ordinary non-video documents too; those continue through native Wiki but
+	// simply do not enter the video-scoped audit contract.
+	auditByKnowledge := make(map[string]wikiAuditContext)
+	mapCandidateByKnowledge := make(map[string]int)
+	mapFailedByKnowledge := make(map[string]bool)
 	// rateLimited flips true when any map/reduce LLM failure looks like an
 	// upstream 429/quota trip. It steers the follow-up scheduler onto the
 	// longer wikiRateLimitBackoff so retries don't keep hammering an already
@@ -433,6 +440,12 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	for _, op := range pendingOps {
 		op := op
 		eg.Go(func() error {
+			auditContext, hasAudit := s.resolveWikiAuditContext(mapCtx, payload, op)
+			if hasAudit {
+				mapMu.Lock()
+				auditByKnowledge[op.KnowledgeID] = auditContext
+				mapMu.Unlock()
+			}
 			if op.Op == WikiOpRetract {
 				// Resolve the authoritative page set at run-time. The caller
 				// (knowledgeService.cleanupWikiOnKnowledgeDelete) captures
@@ -517,6 +530,16 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				mapMu.Lock()
 				ingestFailed++
 				failedOps = append(failedOps, op)
+				mapFailedByKnowledge[op.KnowledgeID] = true
+				if hasAudit {
+					auditEvent := auditContext.event(wikiTaskType, op.Op, "map", "failed")
+					auditEvent.CandidateCount = wikiaudit.Count(0)
+					auditEvent.Reason = previewText(err.Error(), 240)
+					if eventID := emitWikiAudit(mapCtx, auditEvent); eventID != "" {
+						auditContext.IngestEventID = eventID
+						auditByKnowledge[op.KnowledgeID] = auditContext
+					}
+				}
 				if isLikelyRateLimitError(err) {
 					rateLimited = true
 				}
@@ -529,6 +552,21 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				mapMu.Lock()
 				ingestSucceeded++
 				docResults = append(docResults, result)
+				candidateCount := 0
+				if result.MapStats != nil {
+					if value, ok := result.MapStats["candidate_slugs"].(int); ok {
+						candidateCount = value
+					}
+				}
+				mapCandidateByKnowledge[op.KnowledgeID] = candidateCount
+				if hasAudit {
+					auditEvent := auditContext.event(wikiTaskType, op.Op, "map", "succeeded")
+					auditEvent.CandidateCount = wikiaudit.Count(candidateCount)
+					if eventID := emitWikiAudit(mapCtx, auditEvent); eventID != "" {
+						auditContext.IngestEventID = eventID
+						auditByKnowledge[op.KnowledgeID] = auditContext
+					}
+				}
 				docPreview = append(docPreview, fmt.Sprintf("ingest[%s]: title=%s summary=%s", previewText(result.KnowledgeID, 24), previewText(result.DocTitle, 40), previewText(result.Summary, 64)))
 				for _, u := range updates {
 					slugUpdates[u.Slug] = append(slugUpdates[u.Slug], u)
@@ -556,6 +594,18 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// failed. The matching +1 was seeded by
 				// KnowledgePostProcess.SetFinalizing.
 				s.finalizeWikiSubtask(mapCtx, op.KnowledgeID)
+				if hasAudit {
+					mapMu.Lock()
+					mapCandidateByKnowledge[op.KnowledgeID] = 0
+					auditEvent := auditContext.event(wikiTaskType, op.Op, "map", "succeeded")
+					auditEvent.CandidateCount = wikiaudit.Count(0)
+					auditEvent.Reason = "no_candidate_or_source_content"
+					if eventID := emitWikiAudit(mapCtx, auditEvent); eventID != "" {
+						auditContext.IngestEventID = eventID
+						auditByKnowledge[op.KnowledgeID] = auditContext
+					}
+					mapMu.Unlock()
+				}
 			}
 			return nil
 		})
@@ -578,6 +628,17 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	var allPagesAffected []string
 	var ingestPagesAffected []string
 	var retractPagesAffected []string
+	var pageWrites []*wikiPageWrite
+	reduceInputByKnowledge := make(map[string]int)
+	reduceOutputByKnowledge := make(map[string]int)
+	reduceFailedByKnowledge := make(map[string]bool)
+	for _, updates := range slugUpdates {
+		for _, update := range updates {
+			if update.KnowledgeID != "" {
+				reduceInputByKnowledge[update.KnowledgeID]++
+			}
+		}
+	}
 	// failedAdditionSlugs collects entity/concept slugs whose page
 	// generation LLM call failed (so the page was never written). The
 	// post-reduce cleanup step uses this set to strip dead [[slug]]
@@ -625,16 +686,24 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				changed        bool
 				affectedType   string
 				additionFailed bool
+				pageWrite      *wikiPageWrite
 				reduceErr      error
 			)
 			// Serialize same-slug read-modify-write across concurrent batches
 			// (standard mode). runs fn directly in Lite mode.
 			acquired, lockErr := s.withSlugLock(reduceCtx, payload.KnowledgeBaseID, slug, func() error {
-				changed, affectedType, additionFailed, reduceErr = s.reduceSlugUpdates(
+				changed, affectedType, additionFailed, pageWrite, reduceErr = s.reduceSlugUpdates(
 					reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx, kidToWikiSpan)
 				return reduceErr
 			})
 			if lockErr != nil {
+				reduceMu.Lock()
+				for _, update := range updates {
+					if update.KnowledgeID != "" {
+						reduceFailedByKnowledge[update.KnowledgeID] = true
+					}
+				}
+				reduceMu.Unlock()
 				collectUnapplied(updates)
 				// ctx cancelled (batch timeout / shutdown) — stop quietly.
 				return nil
@@ -647,6 +716,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// hopefully-uncontended batch instead of deleting their rows.
 				logger.Warnf(reduceCtx, "wiki ingest: slug %s busy > %s, deferring update", slug, wikiSlugLockWait)
 				collectUnapplied(updates)
+				reduceMu.Lock()
+				for _, update := range updates {
+					if update.KnowledgeID != "" {
+						reduceFailedByKnowledge[update.KnowledgeID] = true
+					}
+				}
+				reduceMu.Unlock()
 				return nil
 			}
 			if reduceErr != nil {
@@ -656,10 +732,39 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// instead of silently dropping the row at trim time.
 				logger.Warnf(reduceCtx, "wiki ingest: reduce failed for slug %s: %v", slug, reduceErr)
 				collectUnapplied(updates)
+				reduceMu.Lock()
+				for _, update := range updates {
+					if update.KnowledgeID != "" {
+						reduceFailedByKnowledge[update.KnowledgeID] = true
+					}
+				}
+				reduceMu.Unlock()
 				if isLikelyRateLimitError(reduceErr) {
 					reduceMu.Lock()
 					rateLimited = true
 					reduceMu.Unlock()
+				}
+			}
+			// A successful Reduce returns the identity returned by the actual
+			// CreatePage/UpdatePage call. Keep it for Publish and emit a
+			// page_write event for every real persisted page, regardless of
+			// whether the surrounding slug had another deferred update.
+			if pageWrite != nil && reduceErr == nil {
+				reduceMu.Lock()
+				pageWrites = append(pageWrites, pageWrite)
+				for _, contributor := range pageWrite.Contributors {
+					reduceOutputByKnowledge[contributor]++
+				}
+				reduceMu.Unlock()
+				for _, contributor := range pageWrite.Contributors {
+					if auditContext, ok := auditByKnowledge[contributor]; ok {
+						auditEvent := auditContext.event(wikiTaskType, WikiOpIngest, "page_write", "succeeded")
+						auditEvent.PageID = pageWrite.PageID
+						auditEvent.Slug = pageWrite.Slug
+						auditEvent.PageType = pageWrite.PageType
+						auditEvent.Version = wikiaudit.Count(pageWrite.Version)
+						emitWikiAudit(reduceCtx, auditEvent)
+					}
 				}
 			}
 			if changed {
@@ -681,6 +786,31 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		})
 	}
 	_ = egReduce.Wait()
+
+	// Reduce emits one per-video aggregate after every slug has either landed
+	// or been marked for retry. The counts describe actual page writes, while
+	// page_write events above carry the individual page identities.
+	auditKnowledgeIDs := make([]string, 0, len(auditByKnowledge))
+	for knowledgeID := range auditByKnowledge {
+		auditKnowledgeIDs = append(auditKnowledgeIDs, knowledgeID)
+	}
+	sort.Strings(auditKnowledgeIDs)
+	for _, knowledgeID := range auditKnowledgeIDs {
+		auditContext := auditByKnowledge[knowledgeID]
+		inputCount := reduceInputByKnowledge[knowledgeID]
+		outputCount := reduceOutputByKnowledge[knowledgeID]
+		status := "succeeded"
+		if reduceFailedByKnowledge[knowledgeID] {
+			status = "failed"
+		}
+		auditEvent := auditContext.event(wikiTaskType, WikiOpIngest, "reduce", status)
+		auditEvent.InputCount = wikiaudit.Count(inputCount)
+		auditEvent.OutputCount = wikiaudit.Count(outputCount)
+		if status != "succeeded" {
+			auditEvent.Reason = "one_or_more_slug_updates_deferred"
+		}
+		emitWikiAudit(ctx, auditEvent)
+	}
 
 	tailCtx, tailCancel := wikiIngestCleanupContext(ctx)
 	defer tailCancel()
@@ -716,9 +846,60 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// Publish freshly-generated pages immediately (NOT deferred to finalize):
 	// users should see a document's wiki pages as soon as their content is
 	// written, not after the debounce window. This is a cheap status flip.
+	var publishedWrites []*wikiPageWrite
 	if len(allPagesAffected) > 0 {
 		logger.Infof(ctx, "wiki ingest: publishing draft pages")
-		s.publishDraftPages(tailCtx, payload.KnowledgeBaseID, allPagesAffected)
+		publishedWrites = s.publishDraftPages(tailCtx, payload.KnowledgeBaseID, allPagesAffected)
+	}
+
+	// Publish returns the page identity after the status transition. Emit one
+	// page-level event per contributing video source and one aggregate event per
+	// source so the stage counts remain meaningful when a page is missing or a
+	// status update fails.
+	pageWriteBySlug := make(map[string]*wikiPageWrite, len(pageWrites))
+	for _, write := range pageWrites {
+		if write != nil && write.Slug != "" {
+			pageWriteBySlug[write.Slug] = write
+		}
+	}
+	publishedCountByKnowledge := make(map[string]int)
+	for _, published := range publishedWrites {
+		if published == nil {
+			continue
+		}
+		if reduced := pageWriteBySlug[published.Slug]; reduced != nil {
+			published.Contributors = append([]string(nil), reduced.Contributors...)
+		}
+		for _, contributor := range published.Contributors {
+			auditContext, ok := auditByKnowledge[contributor]
+			if !ok {
+				continue
+			}
+			publishedCountByKnowledge[contributor]++
+			auditEvent := auditContext.event(wikiTaskType, WikiOpIngest, "publish", "succeeded")
+			auditEvent.InputCount = wikiaudit.Count(1)
+			auditEvent.OutputCount = wikiaudit.Count(1)
+			auditEvent.PageID = published.PageID
+			auditEvent.Slug = published.Slug
+			auditEvent.PageType = published.PageType
+			auditEvent.Version = wikiaudit.Count(published.Version)
+			emitWikiAudit(tailCtx, auditEvent)
+		}
+	}
+	for knowledgeID, auditContext := range auditByKnowledge {
+		inputCount := mapCandidateByKnowledge[knowledgeID]
+		outputCount := publishedCountByKnowledge[knowledgeID]
+		status := "succeeded"
+		if outputCount < inputCount {
+			status = "failed"
+		}
+		auditEvent := auditContext.event(wikiTaskType, WikiOpIngest, "publish", status)
+		auditEvent.InputCount = wikiaudit.Count(inputCount)
+		auditEvent.OutputCount = wikiaudit.Count(outputCount)
+		if status != "succeeded" {
+			auditEvent.Reason = "published_page_count_below_map_candidates"
+		}
+		emitWikiAudit(tailCtx, auditEvent)
 	}
 
 	// Defer KB-global convergence (index-intro rebuild + dead-link cleanup +
@@ -759,7 +940,21 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				})
 			}
 		}
-		s.enqueueFinalize(tailCtx, payload, allPagesAffected, freshTitleBySlug, changes, retractFolderIDs)
+		audits := make([]wikiFinalizeAuditRef, 0, len(docResults))
+		seenAuditKnowledge := make(map[string]struct{}, len(docResults))
+		for _, result := range docResults {
+			if result == nil {
+				continue
+			}
+			if _, seen := seenAuditKnowledge[result.KnowledgeID]; seen {
+				continue
+			}
+			seenAuditKnowledge[result.KnowledgeID] = struct{}{}
+			if auditContext, ok := auditByKnowledge[result.KnowledgeID]; ok {
+				audits = append(audits, auditRefs([]wikiAuditContext{auditContext})...)
+			}
+		}
+		s.enqueueFinalize(tailCtx, payload, allPagesAffected, freshTitleBySlug, changes, retractFolderIDs, audits)
 	}
 
 	// Close postprocess.wiki spans for every successfully-mapped doc.
@@ -995,6 +1190,10 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	var freshRefs []linkRef
 	var folderPruneIDs []string
 	var changeDesc strings.Builder
+	auditRefsByRun := make(map[string][]wikiFinalizeAuditRef)
+	auditRefSeenByRun := make(map[string]map[string]struct{})
+	finalizeRowsByRun := make(map[string]int)
+	finalizePendingIDByRun := make(map[string]int64)
 	for _, r := range rows {
 		ids = append(ids, r.ID)
 		if r.Op == wikiFinalizeOpFolderPrune {
@@ -1007,6 +1206,28 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		if err := json.Unmarshal(r.Payload, &row); err != nil {
 			logger.Warnf(ctx, "wiki finalize: unmarshal row id=%d failed: %v", r.ID, err)
 			continue
+		}
+		rowRuns := make(map[string]struct{})
+		for _, ref := range row.Audits {
+			runID := strings.TrimSpace(ref.RunID)
+			eventID := strings.TrimSpace(ref.IngestEventID)
+			if runID == "" || eventID == "" {
+				continue
+			}
+			if auditRefSeenByRun[runID] == nil {
+				auditRefSeenByRun[runID] = make(map[string]struct{})
+			}
+			if _, seen := auditRefSeenByRun[runID][eventID]; !seen {
+				auditRefSeenByRun[runID][eventID] = struct{}{}
+				auditRefsByRun[runID] = append(auditRefsByRun[runID], ref)
+			}
+			rowRuns[runID] = struct{}{}
+		}
+		for runID := range rowRuns {
+			finalizeRowsByRun[runID]++
+			if _, exists := finalizePendingIDByRun[runID]; !exists {
+				finalizePendingIDByRun[runID] = r.ID
+			}
 		}
 		if r.Op == wikiFinalizeOpFolderPrune {
 			folderPruneIDs = append(folderPruneIDs, row.FolderIDs...)
@@ -1060,16 +1281,36 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	lang := types.LanguageNameFromContext(ctx)
 
 	indexRebuilt := false
+	var indexWrite *wikiPageWrite
 	if changeDesc.Len() > 0 && synthesisModelID != "" {
 		chatModel, mErr := s.modelService.GetChatModel(ctx, synthesisModelID)
 		if mErr != nil {
 			logger.Warnf(ctx, "wiki finalize: get chat model failed: %v", mErr)
-		} else if err := s.rebuildIndexPage(ctx, chatModel, payload, changeDesc.String(), lang,
-			batchCtx.ContentInstructions); err != nil {
-			logger.Warnf(ctx, "wiki finalize: rebuild index failed: %v", err)
+		} else if write, rebuildErr := s.rebuildIndexPage(ctx, chatModel, payload, changeDesc.String(), lang,
+			batchCtx.ContentInstructions); rebuildErr != nil {
+			logger.Warnf(ctx, "wiki finalize: rebuild index failed: %v", rebuildErr)
 		} else {
+			indexWrite = write
 			indexRebuilt = true
 		}
+	}
+	// Finalize audit events need the persisted index identity. Legacy finalize
+	// runs without audit references do not need an index read, which also keeps
+	// the maintenance-only path independent from optional Wiki service methods.
+	// The Wiki service creates the default index when it is absent.
+	if len(auditRefsByRun) > 0 && (indexWrite == nil || strings.TrimSpace(indexWrite.PageID) == "") {
+		indexPage, indexErr := s.wikiService.GetIndex(ctx, payload.KnowledgeBaseID)
+		if indexErr != nil {
+			return fmt.Errorf("wiki finalize: read index page identity: %w", indexErr)
+		} else if indexPage != nil && strings.TrimSpace(indexPage.ID) != "" {
+			indexWrite = &wikiPageWrite{
+				PageID: indexPage.ID, Slug: indexPage.Slug, PageType: indexPage.PageType,
+				Version: indexPage.Version,
+			}
+		}
+	}
+	if len(auditRefsByRun) > 0 && (indexWrite == nil || strings.TrimSpace(indexWrite.PageID) == "") {
+		return errors.New("wiki finalize: index page identity unavailable")
 	}
 
 	if len(affectedSlugs) > 0 {
@@ -1124,6 +1365,40 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	drainCancel()
 	if err != nil {
 		return fmt.Errorf("wiki finalize: trim pending rows: %w", err)
+	}
+
+	// Emit one KB-scoped finalize event per source run only after the durable
+	// finalize rows have been drained. Related IDs come from the real Map
+	// events persisted in each row; no document ID is synthesized here.
+	runIDs := make([]string, 0, len(auditRefsByRun))
+	for runID := range auditRefsByRun {
+		runIDs = append(runIDs, runID)
+	}
+	sort.Strings(runIDs)
+	for _, runID := range runIDs {
+		related := auditRefsByRun[runID]
+		sort.Slice(related, func(i, j int) bool { return related[i].IngestEventID < related[j].IngestEventID })
+		relatedIDs := make([]string, 0, len(related))
+		for _, ref := range related {
+			if id := strings.TrimSpace(ref.IngestEventID); id != "" {
+				relatedIDs = append(relatedIDs, id)
+			}
+		}
+		if len(relatedIDs) == 0 {
+			continue
+		}
+		pendingID := pendingOpAuditID(finalizePendingIDByRun[runID])
+		event := wikiaudit.NewFinalize(
+			payload.KnowledgeBaseID,
+			wikiTaskID(ctx, wikiFinalizeTaskType, payload.KnowledgeBaseID),
+			pendingID,
+			runID,
+			indexWrite.PageID,
+			relatedIDs,
+			finalizeRowsByRun[runID],
+			1,
+		)
+		emitWikiAudit(ctx, event)
 	}
 
 	// If more finalize rows landed while we were working, reschedule so they
@@ -1690,6 +1965,8 @@ func resolveSlugUpdateLanguage(ctx context.Context, updates []SlugUpdate) string
 //     refreshed for it. Callers use this to sanitize dead [[slug]] links
 //     elsewhere (e.g. in the doc's summary page) and to drop the slug from
 //     the wiki log feed so users don't see a clickable entry that 404s.
+//   - pageWrite:        identity returned by CreatePage/UpdatePage when a page
+//     was actually persisted.
 //   - err:              transport / repo error from the persisted upsert.
 func (s *wikiIngestService) reduceSlugUpdates(
 	ctx context.Context,
@@ -1700,7 +1977,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	tenantID uint64,
 	batchCtx *WikiBatchContext,
 	kidToWikiSpan map[string]*Span,
-) (changed bool, affectedType string, additionFailed bool, err error) {
+) (changed bool, affectedType string, additionFailed bool, pageWrite *wikiPageWrite, err error) {
 	// Final safety net for the ingest/delete race: between Map (which already
 	// checks isKnowledgeGone) and Reduce there is a long LLM call where the
 	// source document may be deleted. Drop any addition/summary updates whose
@@ -1709,7 +1986,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	// want when the doc is gone.
 	updates = s.filterLiveUpdates(ctx, kbID, updates)
 	if len(updates) == 0 {
-		return false, "", false, nil
+		return false, "", false, nil, nil
 	}
 
 	// Per-slug page span attribution: a single slug can receive
@@ -1793,7 +2070,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			}
 		}
 		if !hasAdditions {
-			return false, "", false, nil
+			return false, "", false, nil, nil
 		}
 
 		page = &types.WikiPage{
@@ -1844,11 +2121,25 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		changed = true
 
 		if exists {
-			_, err = s.wikiService.UpdatePage(ctx, page)
+			var stored *types.WikiPage
+			stored, err = s.wikiService.UpdatePage(ctx, page)
+			if stored != nil {
+				page = stored
+			}
 		} else {
-			_, err = s.wikiService.CreatePage(ctx, page)
+			var stored *types.WikiPage
+			stored, err = s.wikiService.CreatePage(ctx, page)
+			if stored != nil {
+				page = stored
+			}
 		}
-		return changed, affectedType, false, err
+		if err == nil && page != nil {
+			pageWrite = &wikiPageWrite{
+				PageID: page.ID, Slug: page.Slug, PageType: page.PageType,
+				Version: page.Version, Contributors: append([]string(nil), contributors...),
+			}
+		}
+		return changed, affectedType, false, pageWrite, err
 	}
 
 	var remainingSourcesContent strings.Builder
@@ -2104,14 +2395,28 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		// on top of what was already there, deduplicated.
 		page.ChunkRefs = mergeChunkRefs(page.ChunkRefs, additions)
 		if exists {
-			_, err = s.wikiService.UpdatePage(ctx, page)
+			var stored *types.WikiPage
+			stored, err = s.wikiService.UpdatePage(ctx, page)
+			if stored != nil {
+				page = stored
+			}
 		} else {
-			_, err = s.wikiService.CreatePage(ctx, page)
+			var stored *types.WikiPage
+			stored, err = s.wikiService.CreatePage(ctx, page)
+			if stored != nil {
+				page = stored
+			}
 		}
-		return true, affectedType, additionFailed, err
+		if err == nil && page != nil {
+			pageWrite = &wikiPageWrite{
+				PageID: page.ID, Slug: page.Slug, PageType: page.PageType,
+				Version: page.Version, Contributors: append([]string(nil), contributors...),
+			}
+		}
+		return true, affectedType, additionFailed, pageWrite, err
 	}
 
-	return false, "", additionFailed, nil
+	return false, "", additionFailed, nil, nil
 }
 
 // mergeChunkRefs unions the chunk IDs currently on the page with the ones

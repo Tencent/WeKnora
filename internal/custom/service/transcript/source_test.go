@@ -2,6 +2,8 @@ package transcript
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -15,13 +17,15 @@ import (
 
 type sourceGateway struct {
 	created   []weknora.ManualKnowledgeInput
+	kbIDs     []string
 	items     map[string]weknora.ManualKnowledgeResult
 	findErr   error
 	createErr error
 	getErr    error
 }
 
-func (g *sourceGateway) FindManualKnowledgeByTitle(_ context.Context, _ string, title string) (*weknora.ManualKnowledgeResult, error) {
+func (g *sourceGateway) FindManualKnowledgeByTitle(_ context.Context, kbID string, title string) (*weknora.ManualKnowledgeResult, error) {
+	g.kbIDs = append(g.kbIDs, kbID)
 	if g.findErr != nil {
 		return nil, g.findErr
 	}
@@ -34,12 +38,13 @@ func (g *sourceGateway) FindManualKnowledgeByTitle(_ context.Context, _ string, 
 	return nil, nil
 }
 
-func (g *sourceGateway) CreateManualKnowledge(_ context.Context, _ string, input weknora.ManualKnowledgeInput) (weknora.ManualKnowledgeResult, error) {
+func (g *sourceGateway) CreateManualKnowledge(_ context.Context, kbID string, input weknora.ManualKnowledgeInput) (weknora.ManualKnowledgeResult, error) {
 	if g.createErr != nil {
 		return weknora.ManualKnowledgeResult{}, g.createErr
 	}
 	g.created = append(g.created, input)
-	value := weknora.ManualKnowledgeResult{ID: uuid.NewString(), Title: input.Title, ParseStatus: "completed"}
+	g.kbIDs = append(g.kbIDs, kbID)
+	value := weknora.ManualKnowledgeResult{ID: uuid.NewString(), KnowledgeBaseID: kbID, Title: input.Title, ParseStatus: "completed"}
 	if g.items == nil {
 		g.items = make(map[string]weknora.ManualKnowledgeResult)
 	}
@@ -101,6 +106,56 @@ func TestSourceWriterReusesSameGeneration(t *testing.T) {
 	require.NoError(t, db.Find(&bindings).Error)
 	require.Len(t, bindings, 1)
 	require.Equal(t, SourceStatusCreated, bindings[0].Status)
+	require.Equal(t, "kb-1", bindings[0].KnowledgeBaseID)
+	require.NotEmpty(t, gateway.kbIDs)
+	for _, kbID := range gateway.kbIDs {
+		require.Equal(t, "kb-1", kbID)
+	}
+}
+
+func TestSourceWriterDoesNotReuseLegacyBindingWithoutKnowledgeBase(t *testing.T) {
+	db := openSourceTestDB(t)
+	doc := sourceTestDocument(t, "generation-1", "第一句")
+	documentJSON, err := doc.JSON()
+	require.NoError(t, err)
+	legacyHash := fmt.Sprintf("%x", sha256.Sum256([]byte(documentJSON)))
+	require.NoError(t, db.Create(&model.VideoTranscriptSource{
+		ID: "legacy-binding", VideoID: doc.VideoID, TranscriptGeneration: doc.TranscriptGeneration,
+		KnowledgeID: "legacy-knowledge", ContentHash: legacyHash, Status: SourceStatusCreated,
+	}).Error)
+
+	gateway := &sourceGateway{items: make(map[string]weknora.ManualKnowledgeResult)}
+	writer := &SourceWriter{DB: db, Gateway: gateway, KBID: "knowledge-kb"}
+	result, err := writer.Ensure(context.Background(), SourceInput{Document: doc})
+	require.NoError(t, err)
+	require.Equal(t, "created", result.Action)
+	require.NotEqual(t, "legacy-knowledge", result.KnowledgeID)
+
+	var bindings []model.VideoTranscriptSource
+	require.NoError(t, db.Find(&bindings).Error)
+	require.Len(t, bindings, 2)
+	var legacyCount, knowledgeCount int
+	for _, binding := range bindings {
+		if binding.KnowledgeBaseID == "" {
+			legacyCount++
+		}
+		if binding.KnowledgeBaseID == "knowledge-kb" {
+			knowledgeCount++
+		}
+	}
+	require.Equal(t, 1, legacyCount)
+	require.Equal(t, 1, knowledgeCount)
+}
+
+func TestSourceWriterRejectsRemoteOwnershipMismatch(t *testing.T) {
+	db := openSourceTestDB(t)
+	gateway := &sourceGateway{items: map[string]weknora.ManualKnowledgeResult{
+		"wrong": {ID: "wrong", KnowledgeBaseID: "evidence-kb", Title: SourceTitle("video-1", "generation-1"), ParseStatus: "completed"},
+	}}
+	writer := &SourceWriter{DB: db, Gateway: gateway, KBID: "knowledge-kb"}
+	_, err := writer.Ensure(context.Background(), SourceInput{Document: sourceTestDocument(t, "generation-1", "第一句")})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), SourceOwnershipMismatch)
 }
 
 func TestSourceWriterSeparatesGenerationsAndRejectsHashChange(t *testing.T) {

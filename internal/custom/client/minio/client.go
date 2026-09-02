@@ -465,6 +465,30 @@ func (c *Client) ServeLocalObject(objectKey string) (*os.File, error) {
 	return os.Open(c.LocalObjectPath(objectKey))
 }
 
+// DeletePrefix removes every object under a prefix. It is intentionally
+// idempotent so video deletion can safely be retried after a partial failure.
+func (c *Client) DeletePrefix(ctx context.Context, prefix string) error {
+	prefix = strings.TrimPrefix(strings.TrimSpace(prefix), "/")
+	if prefix == "" {
+		return errors.New("delete object prefix is empty")
+	}
+	if c.IsLocal() {
+		if err := os.RemoveAll(c.LocalObjectPath(prefix)); err != nil {
+			return fmt.Errorf("remove local objects under %s: %w", prefix, err)
+		}
+		return nil
+	}
+	for item := range c.Raw().ListObjects(ctx, c.bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+		if item.Err != nil {
+			return fmt.Errorf("list objects under %s: %w", prefix, item.Err)
+		}
+		if err := c.Raw().RemoveObject(ctx, c.bucket, item.Key, minio.RemoveObjectOptions{}); err != nil {
+			return fmt.Errorf("remove object %s: %w", item.Key, err)
+		}
+	}
+	return nil
+}
+
 // WriteMultipartPart 写入本机分片并返回 ETag。
 func (c *Client) WriteMultipartPart(uploadID string, partNumber int, r io.Reader) (string, error) {
 	partPath := c.multipartPartPath(uploadID, partNumber)

@@ -38,7 +38,7 @@ func TestEnqueueContentPipelinePersistsCurrentTranscriptManifest(t *testing.T) {
 	}).Error)
 	require.NoError(t, db.Create(&model.VideoTranscriptSource{
 		ID: "source-binding-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration,
-		KnowledgeID: "source-knowledge-1", ContentHash: "source-hash-1", Status: "created",
+		KnowledgeBaseID: "kb-1", KnowledgeID: "source-knowledge-1", ContentHash: "source-hash-1", Status: "created",
 	}).Error)
 
 	orchestrator := NewOrchestrator(db, nil, "kb-1")
@@ -48,9 +48,12 @@ func TestEnqueueContentPipelinePersistsCurrentTranscriptManifest(t *testing.T) {
 	require.NoError(t, db.Where("video_id = ?", video.ID).Order("job_type ASC").Find(&jobs).Error)
 	require.Len(t, jobs, 3)
 	for _, job := range jobs {
-		require.Contains(t, job.InputPayload, "knowledge-1")
-		require.Contains(t, job.InputPayload, "knowledge-2")
-		require.Contains(t, job.InputPayload, "source-knowledge-1")
+		var manifest map[string]any
+		require.NoError(t, json.Unmarshal([]byte(job.InputPayload), &manifest))
+		require.NotContains(t, manifest, "transcript_knowledge_ids")
+		require.Equal(t, "source-knowledge-1", manifest["transcript_source_knowledge_id"])
+		require.Equal(t, "full_document", manifest["transcript_input_mode"])
+		require.Equal(t, "kb-1", manifest["transcript_source_knowledge_base_id"])
 		require.Equal(t, video.TranscriptGeneration, job.TranscriptGeneration)
 	}
 }

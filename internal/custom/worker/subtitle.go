@@ -27,6 +27,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/mps"
 	"github.com/Tencent/WeKnora/internal/custom/client/tongyi"
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
+	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/chunk"
 	"github.com/Tencent/WeKnora/internal/custom/service/evidence"
@@ -246,16 +247,29 @@ func accessibleSubtitleURL(ctx context.Context, raw string) string {
 
 // IndexHandler 句子级分块 + 12 字段 metadata + 入 WeKnora KB（VP-T009 + CP-T005）
 type IndexHandler struct {
-	DB           *gorm.DB
-	WeKnora      *weknora.Client
-	Splitter     *chunk.Splitter
-	Orchestrator *skill.Orchestrator
-	SourceWriter *transcriptservice.SourceWriter
+	DB               *gorm.DB
+	WeKnora          *weknora.Client // fixed evidence adapter
+	KnowledgeWeKnora *weknora.Client // fixed full-document adapter
+	Splitter         *chunk.Splitter
+	Orchestrator     *skill.Orchestrator
+	SourceWriter     *transcriptservice.SourceWriter
 }
 
-// NewIndexHandler 构造
-func NewIndexHandler(db *gorm.DB, wk *weknora.Client, orch *skill.Orchestrator) *IndexHandler {
-	return &IndexHandler{DB: db, WeKnora: wk, Splitter: chunk.NewSplitter(), Orchestrator: orch, SourceWriter: transcriptservice.NewSourceWriter(db, wk)}
+// NewIndexHandler keeps the historical constructor available for callers that
+// only build the evidence worker. Such a handler fails closed if it is asked
+// to create a source document without an explicit knowledge adapter.
+func NewIndexHandler(db *gorm.DB, evidenceClient *weknora.Client, orch *skill.Orchestrator) *IndexHandler {
+	return NewIndexHandlerWithKnowledge(db, evidenceClient, nil, orch)
+}
+
+// NewIndexHandlerWithKnowledge constructs the two fixed-role adapters used by
+// the P2 pipeline.
+func NewIndexHandlerWithKnowledge(db *gorm.DB, evidenceClient, knowledgeClient *weknora.Client, orch *skill.Orchestrator) *IndexHandler {
+	return &IndexHandler{
+		DB: db, WeKnora: evidenceClient, KnowledgeWeKnora: knowledgeClient,
+		Splitter: chunk.NewSplitter(), Orchestrator: orch,
+		SourceWriter: transcriptservice.NewSourceWriter(db, knowledgeClient),
+	}
 }
 
 // JobType job 类型
@@ -263,14 +277,17 @@ func (h *IndexHandler) JobType() string { return "index" }
 
 // Run 句子级分块 → 入 WeKnora KB → 回写 transcript_knowledge_id
 func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
-	if h.WeKnora == nil {
-		return fmt.Errorf("WeKnora client 未配置")
+	if h.WeKnora == nil || strings.TrimSpace(h.WeKnora.KBID()) == "" {
+		return fmt.Errorf(config.KBRouteEvidenceMissing)
+	}
+	if h.KnowledgeWeKnora == nil || strings.TrimSpace(h.KnowledgeWeKnora.KBID()) == "" {
+		return fmt.Errorf(config.KBRouteKnowledgeMissing)
+	}
+	if h.WeKnora.KBID() == h.KnowledgeWeKnora.KBID() {
+		return fmt.Errorf(config.KBRouteRoleConflict)
 	}
 	if h.Splitter == nil {
 		h.Splitter = chunk.NewSplitter()
-	}
-	if h.WeKnora.KBID() == "" {
-		return fmt.Errorf("WEKNORA_KB_ID 未配置")
 	}
 	var payload struct {
 		Paragraphs []subtitle.TranscriptParagraph `json:"paragraphs"`
@@ -439,7 +456,7 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	}
 
 	if h.SourceWriter == nil {
-		h.SourceWriter = transcriptservice.NewSourceWriter(h.DB, h.WeKnora)
+		h.SourceWriter = transcriptservice.NewSourceWriter(h.DB, h.KnowledgeWeKnora)
 	}
 	// Create the Wiki-only source before activating the generation. A failed
 	// source write therefore cannot advance the video or enqueue downstream
@@ -451,7 +468,7 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	if err != nil {
 		return fmt.Errorf("build transcript source document: %w", err)
 	}
-	source, err := h.SourceWriter.Ensure(ctx, transcriptservice.SourceInput{Document: document})
+	source, err := h.SourceWriter.Ensure(ctx, transcriptservice.SourceInput{Document: document, TaskID: job.ID})
 	if err != nil {
 		return fmt.Errorf("create transcript source document: %w", err)
 	}
@@ -535,8 +552,12 @@ func (h *IndexHandler) persistSourceResult(job *model.VideoProcessingJob, source
 		payload = make(map[string]any)
 	}
 	payload["transcript_source_knowledge_id"] = source.KnowledgeID
+	payload["transcript_source_knowledge_base_id"] = source.KnowledgeBaseID
 	payload["transcript_source_content_hash"] = source.ContentHash
 	payload["transcript_source_action"] = source.Action
+	if source.AuditEventID != "" {
+		payload["transcript_source_audit_event_id"] = source.AuditEventID
+	}
 	value, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal transcript source result: %w", err)

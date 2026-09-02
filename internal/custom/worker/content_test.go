@@ -26,6 +26,20 @@ func (s sourceReaderStub) GetKnowledge(_ context.Context, _ string) (weknora.Man
 	return s.value, nil
 }
 
+type countingAgentClient struct {
+	calls int
+}
+
+func (c *countingAgentClient) CreateSession(context.Context, string) (string, error) {
+	c.calls++
+	return "session", nil
+}
+
+func (c *countingAgentClient) TriggerSkill(context.Context, string, string, string, string, []string) error {
+	c.calls++
+	return nil
+}
+
 func TestWikiBaselinePersistsAcrossJobRetries(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
@@ -133,7 +147,7 @@ func TestWikiInputFullDocumentDoesNotReadTranscriptChunks(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoTranscriptSource{}))
 	video := model.Video{ID: "video-1", Title: "测试视频", DurationSeconds: 20, TranscriptGeneration: "generation-1"}
 	require.NoError(t, db.Create(&video).Error)
-	require.NoError(t, db.Create(&model.VideoTranscriptSource{ID: "binding-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, KnowledgeID: "source-1", ContentHash: "hash", Status: transcriptservice.SourceStatusCreated}).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptSource{ID: "binding-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, KnowledgeBaseID: "knowledge-kb", KnowledgeID: "source-1", ContentHash: "hash", Status: transcriptservice.SourceStatusCreated}).Error)
 	doc, err := transcriptservice.Build(transcriptservice.Input{
 		VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, Title: video.Title, DurationSeconds: video.DurationSeconds,
 		Chapters: []transcriptservice.InputChapter{{Index: 0, Title: "开场", Paragraphs: []transcriptservice.InputParagraph{{Index: 0, Sentences: []transcriptservice.InputSentence{{SourceSentenceID: "s-1", EvidenceSentenceID: "e-1", Text: "正文", StartMs: 100, EndMs: 1000}}}}}},
@@ -141,7 +155,7 @@ func TestWikiInputFullDocumentDoesNotReadTranscriptChunks(t *testing.T) {
 	require.NoError(t, err)
 	jsonText, err := doc.JSON()
 	require.NoError(t, err)
-	handler := BaseSkillHandler{DB: db, SourceReader: sourceReaderStub{value: weknora.ManualKnowledgeResult{ID: "source-1", Content: transcriptservice.SourceContent(doc, jsonText, "hash")}}}
+	handler := BaseSkillHandler{DB: db, KnowledgeBaseID: "knowledge-kb", SourceReader: sourceReaderStub{value: weknora.ManualKnowledgeResult{ID: "source-1", KnowledgeBaseID: "knowledge-kb", Content: transcriptservice.SourceContent(doc, jsonText, "hash")}}}
 	job := &model.VideoProcessingJob{ID: "job-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, InputPayload: `{"transcript_input_mode":"full_document","transcript_source_knowledge_id":"source-1"}`}
 	input, err := handler.wikiInput(t.Context(), job, &video, skill.JobGraph)
 	require.NoError(t, err)
@@ -155,12 +169,31 @@ func TestWikiInputFullDocumentRejectsMissingSource(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptSource{}))
 	video := model.Video{ID: "video-1", Title: "测试视频", DurationSeconds: 20, TranscriptGeneration: "generation-1"}
 	require.NoError(t, db.Create(&video).Error)
-	handler := BaseSkillHandler{DB: db}
+	handler := BaseSkillHandler{DB: db, KnowledgeBaseID: "knowledge-kb"}
 	_, err = handler.wikiInput(t.Context(), &model.VideoProcessingJob{VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, InputPayload: `{"transcript_input_mode":"full_document"}`}, &video, skill.JobGraph)
 	require.Error(t, err)
 	category, code := ClassifyProcessingError(err)
 	require.Equal(t, ErrorCategoryResponseParse, category)
 	require.Equal(t, "source_missing", code)
+}
+
+func TestWikiInputFullDocumentDoesNotReuseLegacyUnownedBinding(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptSource{}))
+	video := model.Video{ID: "video-1", DurationSeconds: 20, TranscriptGeneration: "generation-1"}
+	require.NoError(t, db.Create(&video).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptSource{
+		ID: "legacy", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration,
+		KnowledgeID: "legacy-source", ContentHash: "hash", Status: transcriptservice.SourceStatusCreated,
+	}).Error)
+	handler := BaseSkillHandler{DB: db, KnowledgeBaseID: "knowledge-kb"}
+	_, err = handler.wikiInput(t.Context(), &model.VideoProcessingJob{
+		VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration,
+		InputPayload: `{"transcript_input_mode":"full_document","transcript_source_knowledge_id":"legacy-source"}`,
+	}, &video, skill.JobGraph)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "source_binding_missing")
 }
 
 func TestSkillQueryFullDocumentForbidsChunkInput(t *testing.T) {
@@ -182,4 +215,12 @@ func TestWikiInputGraphRejectsEvidenceChunkMode(t *testing.T) {
 	require.Error(t, err)
 	_, code := ClassifyProcessingError(err)
 	require.Equal(t, "input_mode_invalid", code)
+}
+
+func TestGraphHandlerSkipsBeforeAgentCall(t *testing.T) {
+	agent := &countingAgentClient{}
+	handler := GraphHandler{BaseSkillHandler: BaseSkillHandler{AgentClient: agent, KnowledgeBaseID: "knowledge-kb"}}
+	err := handler.Run(t.Context(), &model.VideoProcessingJob{ID: "job-1", TranscriptGeneration: "generation-1"}, &model.Video{ID: "video-1"})
+	require.NoError(t, err)
+	require.Zero(t, agent.calls)
 }

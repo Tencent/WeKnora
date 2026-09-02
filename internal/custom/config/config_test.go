@@ -66,6 +66,7 @@ func TestLoadKeepsProductGraphConfigurationIndependentFromOfficialGraph(t *testi
 	t.Setenv("NEO4J_USERNAME", "official")
 	t.Setenv("NEO4J_PASSWORD", "official-password")
 	t.Setenv("WEKNORA_KB_ID", "weknora-kb")
+	t.Setenv("WEKNORA_KNOWLEDGE_KB_ID", "knowledge-kb")
 	t.Setenv("CUSTOM_WIKI_GRAPH_NEO4J_ENABLE", "")
 	t.Setenv("CUSTOM_WIKI_GRAPH_NEO4J_URI", "")
 	t.Setenv("CUSTOM_WIKI_GRAPH_KB_ID", "")
@@ -74,8 +75,48 @@ func TestLoadKeepsProductGraphConfigurationIndependentFromOfficialGraph(t *testi
 	if cfg.WikiGraph.Enabled {
 		t.Fatal("product Wiki graph must not inherit NEO4J_ENABLE")
 	}
-	if cfg.WikiGraph.URI != "" || cfg.WikiGraph.Username != "" || cfg.WikiGraph.KnowledgeBaseID != "weknora-kb" {
+	if cfg.WikiGraph.URI != "" || cfg.WikiGraph.Username != "" || cfg.WikiGraph.KnowledgeBaseID != "knowledge-kb" {
 		t.Fatalf("product Wiki graph inherited official graph settings: %+v", cfg.WikiGraph)
+	}
+}
+
+func TestResolveKnowledgeBaseRolesUsesLegacyOnlyForEvidence(t *testing.T) {
+	roles, err := (WeKnoraConfig{KBID: "legacy-evidence", KnowledgeKBID: "knowledge"}).ResolveKnowledgeBaseRoles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roles.Evidence != "legacy-evidence" || roles.Knowledge != "knowledge" {
+		t.Fatalf("unexpected roles: %+v", roles)
+	}
+}
+
+func TestResolveKnowledgeBaseRolesFailsClosed(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  WeKnoraConfig
+		code string
+	}{
+		{name: "missing evidence", cfg: WeKnoraConfig{KnowledgeKBID: "knowledge"}, code: KBRouteEvidenceMissing},
+		{name: "missing knowledge", cfg: WeKnoraConfig{EvidenceKBID: "evidence", KBID: "legacy"}, code: KBRouteKnowledgeMissing},
+		{name: "same role", cfg: WeKnoraConfig{EvidenceKBID: "same", KnowledgeKBID: "same"}, code: KBRouteRoleConflict},
+		{name: "legacy cannot backfill knowledge", cfg: WeKnoraConfig{KBID: "legacy"}, code: KBRouteKnowledgeMissing},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tt.cfg.ResolveKnowledgeBaseRoles()
+			if err == nil || err.Error() != tt.code {
+				t.Fatalf("error = %v, want %s", err, tt.code)
+			}
+		})
+	}
+}
+
+func TestForKnowledgeBaseReturnsIndependentRoleCopies(t *testing.T) {
+	base := WeKnoraConfig{KBID: "legacy", EvidenceKBID: "evidence", KnowledgeKBID: "knowledge"}
+	evidence := base.ForKnowledgeBase("evidence")
+	knowledge := base.ForKnowledgeBase("knowledge")
+	if base.KBID != "legacy" || evidence.KBID != "evidence" || knowledge.KBID != "knowledge" {
+		t.Fatalf("role copy mutated shared configuration: base=%+v evidence=%+v knowledge=%+v", base, evidence, knowledge)
 	}
 }
 

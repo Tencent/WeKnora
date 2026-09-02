@@ -2,17 +2,27 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	objstore "github.com/Tencent/WeKnora/internal/custom/client/minio"
+	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 )
 
 // VideoHandler 视频列表 / 详情 handler
 type VideoHandler struct {
-	DB *gorm.DB
+	DB               *gorm.DB
+	MinIO            *objstore.Client
+	EvidenceWeKnora  *weknora.Client
+	KnowledgeWeKnora *weknora.Client
+	// WeKnora is retained as a compatibility alias for the evidence client.
+	WeKnora *weknora.Client
 }
 
 // NewVideoHandler 构造
@@ -91,6 +101,133 @@ func (h *VideoHandler) Detail(c *gin.Context) {
 			"transcript_page": v.TranscriptPageWikiPageID != "",
 		},
 	})
+}
+
+// Delete soft-deletes a video after removing its owned knowledge and media.
+func (h *VideoHandler) Delete(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	var video model.Video
+	if err := h.DB.First(&video, "id = ?", id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Transcript chunks belong to the evidence KB, while the standardized full
+	// transcript source belongs to the knowledge KB. Keep the clients fixed by
+	// role and route source rows by their persisted KB ownership; never delete a
+	// source through whichever client happens to be stored in the legacy field.
+	evidenceClient := h.EvidenceWeKnora
+	if evidenceClient == nil {
+		evidenceClient = h.WeKnora
+	}
+	knowledgeClient := h.KnowledgeWeKnora
+	deletions := make(map[*weknora.Client]map[string]struct{})
+	addDeletion := func(client *weknora.Client, knowledgeID string) {
+		knowledgeID = strings.TrimSpace(knowledgeID)
+		if client == nil || knowledgeID == "" {
+			return
+		}
+		if deletions[client] == nil {
+			deletions[client] = make(map[string]struct{})
+		}
+		deletions[client][knowledgeID] = struct{}{}
+	}
+	addSourceDeletion := func(source model.VideoTranscriptSource) error {
+		if evidenceClient == nil && knowledgeClient == nil {
+			return nil
+		}
+		kbID := strings.TrimSpace(source.KnowledgeBaseID)
+		if kbID == "" {
+			return fmt.Errorf("knowledge_base_routing:source_ownership_missing: source=%s", source.KnowledgeID)
+		}
+		if evidenceClient != nil && evidenceClient.KBID() == kbID {
+			addDeletion(evidenceClient, source.KnowledgeID)
+			return nil
+		}
+		if knowledgeClient != nil && knowledgeClient.KBID() == kbID {
+			addDeletion(knowledgeClient, source.KnowledgeID)
+			return nil
+		}
+		return fmt.Errorf("knowledge_base_routing:source_ownership_mismatch: source=%s kb=%s", source.KnowledgeID, kbID)
+	}
+	addDeletion(evidenceClient, video.TranscriptKnowledgeID)
+	if h.DB.Migrator().HasTable(&model.VideoTranscriptChunk{}) {
+		var chunks []model.VideoTranscriptChunk
+		if err := h.DB.Where("video_id = ?", id).Find(&chunks).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		for _, chunk := range chunks {
+			addDeletion(evidenceClient, chunk.KnowledgeID)
+		}
+	}
+	if h.DB.Migrator().HasTable(&model.VideoTranscriptSource{}) {
+		var sources []model.VideoTranscriptSource
+		if err := h.DB.Where("video_id = ?", id).Find(&sources).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		for _, source := range sources {
+			if err := addSourceDeletion(source); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": "delete video knowledge: " + err.Error()})
+				return
+			}
+		}
+	}
+	clients := make([]*weknora.Client, 0, len(deletions))
+	for client := range deletions {
+		clients = append(clients, client)
+	}
+	sort.Slice(clients, func(i, j int) bool { return clients[i].KBID() < clients[j].KBID() })
+	for _, client := range clients {
+		knowledgeIDs := make([]string, 0, len(deletions[client]))
+		for knowledgeID := range deletions[client] {
+			knowledgeIDs = append(knowledgeIDs, knowledgeID)
+		}
+		sort.Strings(knowledgeIDs)
+		for _, knowledgeID := range knowledgeIDs {
+			if err := client.DeleteKnowledge(c.Request.Context(), knowledgeID); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": "delete video knowledge: " + err.Error()})
+				return
+			}
+		}
+	}
+	if h.MinIO != nil {
+		for _, prefix := range []string{"videos/" + id + "/", "thumbnails/" + id + "/", "subtitles/" + id + "/"} {
+			if err := h.MinIO.DeletePrefix(c.Request.Context(), prefix); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": "delete video files: " + err.Error()})
+				return
+			}
+		}
+	}
+
+	err := h.DB.Transaction(func(tx *gorm.DB) error {
+		if tx.Migrator().HasTable(&model.VideoProcessingJob{}) {
+			if err := tx.Where("video_id = ?", id).Delete(&model.VideoProcessingJob{}).Error; err != nil {
+				return err
+			}
+		}
+		if tx.Migrator().HasTable(&model.VideoTranscriptChunk{}) {
+			if err := tx.Where("video_id = ?", id).Delete(&model.VideoTranscriptChunk{}).Error; err != nil {
+				return err
+			}
+		}
+		if tx.Migrator().HasTable(&model.VideoTranscriptSource{}) {
+			if err := tx.Where("video_id = ?", id).Delete(&model.VideoTranscriptSource{}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Delete(&video).Error
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "delete video: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "id": id})
 }
 
 func videoDetailPayload(video model.Video) gin.H {

@@ -66,7 +66,24 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	weknoraCli := weknora.New(cfg.WeKnora)
+	roles, kbRoutingErr := cfg.WeKnora.ResolveKnowledgeBaseRoles()
+	var evidenceWeKnoraCli *weknora.Client
+	var knowledgeWeKnoraCli *weknora.Client
+	var wikiClient *weknora.WikiClient
+	var agentClient *weknora.AgentClient
+	if kbRoutingErr != nil {
+		// Do not construct empty/ambiguous clients. The routing error is fed
+		// into worker gating below and the HTTP router exposes only the
+		// non-WeKnora surface until both roles are configured.
+		slog.Error("WeKnora knowledge-base routing is invalid; content workers disabled", "error", kbRoutingErr)
+	} else {
+		evidenceWeKnoraCfg := cfg.WeKnora.ForKnowledgeBase(roles.Evidence)
+		knowledgeWeKnoraCfg := cfg.WeKnora.ForKnowledgeBase(roles.Knowledge)
+		evidenceWeKnoraCli = weknora.New(evidenceWeKnoraCfg)
+		knowledgeWeKnoraCli = weknora.New(knowledgeWeKnoraCfg)
+		wikiClient = weknora.NewWikiClient(knowledgeWeKnoraCfg)
+		agentClient = weknora.NewAgentClient(knowledgeWeKnoraCfg)
+	}
 	llmCli := llm.NewClient(cfg.LLM)
 	tongyiCli := tongyi.New(cfg.Tongyi)
 	var mpsCli *mps.Client
@@ -78,25 +95,29 @@ func main() {
 			slog.Warn("tencent mps client unavailable", "error", err)
 		}
 	}
-	wikiClient := weknora.NewWikiClient(cfg.WeKnora)
-	wikiGraph, graphErr := knowledgegraph.New(cfg.WikiGraph, wikiClient, db)
-	if graphErr != nil {
-		slog.Warn("wiki graph projection unavailable", "error", graphErr)
-	} else if wikiGraph != nil {
-		defer wikiGraph.Close(context.Background())
+	var wikiGraph knowledgegraph.Store
+	if kbRoutingErr == nil {
+		var graphErr error
+		wikiGraph, graphErr = knowledgegraph.New(cfg.WikiGraph, wikiClient, db)
+		if graphErr != nil {
+			slog.Warn("wiki graph projection unavailable", "error", graphErr)
+		} else if wikiGraph != nil {
+			defer wikiGraph.Close(context.Background())
+		}
 	}
-	agentClient := weknora.NewAgentClient(cfg.WeKnora)
-
 	// 内容生产 skill 编排器（CP-T005 / CP-T006）
-	orchestrator := skill.NewOrchestrator(db, wikiClient, cfg.WeKnora.KBID)
+	orchestrator := skill.NewOrchestrator(db, wikiClient, roles.Knowledge)
 
 	skipWorkers := os.Getenv("CUSTOM_DISABLE_WORKERS") == "true" || cfg.Database.Driver == "sqlite"
 	var engine *worker.Engine
 	if skipWorkers {
 		slog.Info("custom workers disabled")
 	} else {
-		contentAgentID := os.Getenv("CUSTOM_CONTENT_AGENT_ID")
+		contentAgentID := cfg.WeKnora.AgentID
 		missingPipelineConfig := make([]string, 0, 4)
+		if kbRoutingErr != nil {
+			missingPipelineConfig = append(missingPipelineConfig, kbRoutingErr.Error())
+		}
 		if cfg.TranscriptionProvider == "aliyun_tingwu" {
 			if cfg.Tongyi.AccessKeyID == "" {
 				missingPipelineConfig = append(missingPipelineConfig, "TONGYI_ACCESS_KEY_ID")
@@ -118,10 +139,6 @@ func main() {
 				missingPipelineConfig = append(missingPipelineConfig, "TENCENTCLOUD_MPS_OUTPUT_BUCKET")
 			}
 		}
-		if cfg.WeKnora.KBID == "" {
-			missingPipelineConfig = append(missingPipelineConfig, "WEKNORA_KB_ID")
-		}
-
 		contentWorkersEnabled := len(missingPipelineConfig) == 0
 		agentConfigured := contentAgentID != ""
 		llmConfigured := cfg.LLM.BaseURL != "" && cfg.LLM.APIKey != "" && cfg.LLM.Model != ""
@@ -137,11 +154,12 @@ func main() {
 		}
 
 		base := worker.BaseSkillHandler{
-			DB:           db,
-			AgentClient:  agentClient,
-			SourceReader: weknoraCli,
-			Orchestrator: orchestrator,
-			AgentID:      contentAgentID,
+			DB:              db,
+			AgentClient:     agentClient,
+			SourceReader:    knowledgeWeKnoraCli,
+			Orchestrator:    orchestrator,
+			AgentID:         contentAgentID,
+			KnowledgeBaseID: roles.Knowledge,
 		}
 
 		handlers := []worker.Handler{
@@ -161,15 +179,15 @@ func main() {
 			handlers = append(handlers,
 				transcriptionHandler,
 				worker.NewSubtitleGenerateHandler(db, minioCli, tongyiCli),
-				worker.NewIndexHandler(db, weknoraCli, orchestrator),
+				worker.NewIndexHandlerWithKnowledge(db, evidenceWeKnoraCli, knowledgeWeKnoraCli, orchestrator),
 			)
 			handlers = append(handlers,
 				&worker.GraphHandler{BaseSkillHandler: base, Graph: wikiGraph},
-				worker.NewDirectContentHandler(db, llmCli, weknoraCli, wikiClient, orchestrator, skill.JobOutline),
-				worker.NewDirectContentHandler(db, llmCli, weknoraCli, wikiClient, orchestrator, skill.JobSummary),
-				worker.NewDirectContentHandler(db, llmCli, weknoraCli, wikiClient, orchestrator, skill.JobSummaryEnhance),
+				worker.NewDirectContentHandler(db, llmCli, evidenceWeKnoraCli, wikiClient, orchestrator, skill.JobOutline),
+				worker.NewDirectContentHandler(db, llmCli, evidenceWeKnoraCli, wikiClient, orchestrator, skill.JobSummary),
+				worker.NewDirectContentHandler(db, llmCli, evidenceWeKnoraCli, wikiClient, orchestrator, skill.JobSummaryEnhance),
 			)
-			handlers = append(handlers, worker.NewDeterministicAssembleHandler(db, wikiClient, orchestrator, cfg.WeKnora.KBID))
+			handlers = append(handlers, worker.NewDeterministicAssembleHandler(db, wikiClient, orchestrator, roles.Knowledge))
 		}
 		engine = worker.NewEngine(db, &cfg.Worker, handlers...)
 		engine.SetTranscriptionProvider(cfg.TranscriptionProvider)
@@ -179,7 +197,8 @@ func main() {
 
 	// HTTP 服务
 	routerDeps := &handler.Deps{
-		DB: db, Cfg: cfg, MinIO: minioCli, Wiki: wikiClient, WeKnora: weknoraCli, Graph: wikiGraph,
+		DB: db, Cfg: cfg, MinIO: minioCli, Wiki: wikiClient,
+		EvidenceWeKnora: evidenceWeKnoraCli, KnowledgeWeKnora: knowledgeWeKnoraCli, Graph: wikiGraph,
 	}
 	router := handler.BuildRouterForDeps(routerDeps)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)

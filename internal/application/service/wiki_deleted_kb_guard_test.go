@@ -120,6 +120,7 @@ func TestEnqueueWikiFinalizeOnlySchedulesAcceptedRows(t *testing.T) {
 				map[string]string{"slug-1": "Title"},
 				[]wikiFinalizeChange{{Action: wikiFinalizeAdded, DocTitle: "Document"}},
 				[]string{"folder-1"},
+				nil,
 			)
 
 			require.Len(t, repo.guardedOps, 3)

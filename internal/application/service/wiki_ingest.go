@@ -20,6 +20,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/wikiaudit"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
@@ -238,14 +239,30 @@ type wikiFinalizeChange struct {
 	DocSummary string `json:"doc_summary,omitempty"`
 }
 
+// wikiFinalizeAuditRef carries only the source identity needed to reconnect a
+// KB-scoped finalize pass to the video ingest events that produced its rows.
+// It intentionally excludes document content and is persisted inside the
+// finalize queue so a debounced task can outlive the ingest worker process.
+type wikiFinalizeAuditRef struct {
+	RunID                string `json:"run_id"`
+	VideoID              string `json:"video_id"`
+	TranscriptGeneration string `json:"transcript_generation"`
+	SourceKnowledgeID    string `json:"source_knowledge_id"`
+	KnowledgeBaseID      string `json:"knowledge_base_id"`
+	TaskID               string `json:"task_id"`
+	PendingOpID          string `json:"pending_op_id"`
+	IngestEventID        string `json:"ingest_event_id"`
+}
+
 // wikiFinalizeRow is the JSON payload of a task_pending_ops row in the
 // finalize lane. Exactly one of {Slug, Change, FolderIDs} is set,
 // distinguished by the row's Op column.
 type wikiFinalizeRow struct {
-	Slug      string              `json:"slug,omitempty"`
-	Title     string              `json:"title,omitempty"`
-	Change    *wikiFinalizeChange `json:"change,omitempty"`
-	FolderIDs []string            `json:"folder_ids,omitempty"`
+	Slug      string                 `json:"slug,omitempty"`
+	Title     string                 `json:"title,omitempty"`
+	Change    *wikiFinalizeChange    `json:"change,omitempty"`
+	FolderIDs []string               `json:"folder_ids,omitempty"`
+	Audits    []wikiFinalizeAuditRef `json:"audits,omitempty"`
 }
 
 // WikiDeletedTombstoneKey returns the Redis key used to mark a knowledge as
@@ -301,6 +318,17 @@ const (
 type WikiPendingOp struct {
 	Op          string `json:"op"`
 	KnowledgeID string `json:"knowledge_id"`
+	// Source identity is present only for the standardized video source
+	// document. Keeping it in the durable op avoids making native Wiki workers
+	// depend on the custom backend database.
+	VideoID              string `json:"video_id,omitempty"`
+	TranscriptGeneration string `json:"transcript_generation,omitempty"`
+	SourceKnowledgeID    string `json:"source_knowledge_id,omitempty"`
+	KnowledgeBaseID      string `json:"knowledge_base_id,omitempty"`
+	RunID                string `json:"run_id,omitempty"`
+	// IngestEventID is assigned when this op is consumed and is never persisted
+	// in the queue payload. Finalize rows persist the resulting event ID.
+	IngestEventID string `json:"-"`
 	// Ingest fields
 	Language string `json:"language,omitempty"`
 	// Retract fields
@@ -507,11 +535,32 @@ func newWikiIngestPendingOp(
 	tenantID uint64,
 	kbID, knowledgeID string,
 ) (*types.TaskPendingOp, error) {
+	return newWikiIngestPendingOpForKnowledge(ctx, tenantID, kbID, knowledgeID, nil)
+}
+
+// newWikiIngestPendingOpForKnowledge preserves the standardized video source
+// identity in the durable Wiki op. Ordinary manual knowledge has no video
+// frontmatter and keeps the legacy, knowledge-only payload shape.
+func newWikiIngestPendingOpForKnowledge(
+	ctx context.Context,
+	tenantID uint64,
+	kbID, knowledgeID string,
+	knowledge *types.Knowledge,
+) (*types.TaskPendingOp, error) {
 	lang := types.LanguageFromContextOrDefault(ctx)
 	op := WikiPendingOp{
 		Op:          WikiOpIngest,
 		KnowledgeID: knowledgeID,
 		Language:    lang,
+	}
+	if knowledge != nil {
+		if identity, ok := wikiSourceIdentityFromKnowledge(knowledge, kbID); ok {
+			op.VideoID = identity.VideoID
+			op.TranscriptGeneration = identity.TranscriptGeneration
+			op.SourceKnowledgeID = identity.SourceKnowledgeID
+			op.KnowledgeBaseID = identity.KnowledgeBaseID
+			op.RunID = wikiaudit.RunID(identity)
+		}
 	}
 	payloadBytes, err := json.Marshal(op)
 	if err != nil {
@@ -677,13 +726,14 @@ func (s *wikiIngestService) enqueueFinalize(
 	freshTitleBySlug map[string]string,
 	changes []wikiFinalizeChange,
 	folderIDs []string,
+	audits []wikiFinalizeAuditRef,
 ) {
 	if s.pendingRepo == nil {
 		return
 	}
 	acceptedAny := false
 	for _, slug := range affectedSlugs {
-		row := wikiFinalizeRow{Slug: slug, Title: freshTitleBySlug[slug]}
+		row := wikiFinalizeRow{Slug: slug, Title: freshTitleBySlug[slug], Audits: audits}
 		b, err := json.Marshal(row)
 		if err != nil {
 			continue
@@ -701,7 +751,7 @@ func (s *wikiIngestService) enqueueFinalize(
 		}
 	}
 	for i := range changes {
-		row := wikiFinalizeRow{Change: &changes[i]}
+		row := wikiFinalizeRow{Change: &changes[i], Audits: audits}
 		b, err := json.Marshal(row)
 		if err != nil {
 			continue
@@ -719,7 +769,7 @@ func (s *wikiIngestService) enqueueFinalize(
 		}
 	}
 	if len(folderIDs) > 0 {
-		row := wikiFinalizeRow{FolderIDs: uniqueWikiFolderIDs(folderIDs)}
+		row := wikiFinalizeRow{FolderIDs: uniqueWikiFolderIDs(folderIDs), Audits: audits}
 		if b, err := json.Marshal(row); err == nil {
 			if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
 				TenantID: payload.TenantID,
@@ -1243,6 +1293,17 @@ type docIngestResult struct {
 	// ProcessWikiIngest. nil when no parent attempt was found, in which
 	// case the tracker helpers are all no-ops anyway.
 	WikiSpan *Span
+}
+
+// wikiPageWrite is the small identity projection returned by Reduce after a
+// real CreatePage/UpdatePage call. It lets the audit layer record the actual
+// persisted page ID and version rather than a pre-write UUID or guessed slug.
+type wikiPageWrite struct {
+	PageID       string
+	Slug         string
+	PageType     string
+	Version      int
+	Contributors []string
 }
 
 // WikiBatchContext holds shared data across Map and Reduce phases.
@@ -2057,10 +2118,13 @@ const indexIntroSummaryCap = 200
 // that fall through to Summary stay in sync.
 func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat.Chat, payload WikiIngestPayload,
 	changeDesc, lang, customInstructions string,
-) error {
-	indexPage, _ := s.wikiService.GetIndex(ctx, payload.KnowledgeBaseID)
+) (*wikiPageWrite, error) {
+	indexPage, err := s.wikiService.GetIndex(ctx, payload.KnowledgeBaseID)
+	if err != nil {
+		return nil, err
+	}
 	if indexPage == nil {
-		return nil
+		return nil, errors.New("wiki index page not found")
 	}
 
 	// The intro lives on both Content and Summary. Prefer Content since
@@ -2088,7 +2152,7 @@ func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat
 		// the KB is bigger than what we're sampling.
 		recentSummaries, listErr := s.wikiService.ListByTypeRecent(ctx, payload.KnowledgeBaseID, types.WikiPageTypeSummary, indexIntroSummaryCap)
 		if listErr != nil {
-			return listErr
+			return nil, listErr
 		}
 		var docSummaries strings.Builder
 		for _, e := range recentSummaries {
@@ -2158,8 +2222,17 @@ func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat
 
 	indexPage.Content = intro
 	indexPage.Summary = intro
-	_, err := s.wikiService.UpdatePage(ctx, indexPage)
-	return err
+	stored, err := s.wikiService.UpdatePage(ctx, indexPage)
+	if stored != nil {
+		indexPage = stored
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &wikiPageWrite{
+		PageID: indexPage.ID, Slug: indexPage.Slug, PageType: indexPage.PageType,
+		Version: indexPage.Version,
+	}, nil
 }
 
 // splitSummaryLine extracts the "SUMMARY: ..." line from LLM output.
@@ -2182,7 +2255,8 @@ func splitSummaryLine(raw string) (summary string, content string) {
 
 // publishDraftPages transitions draft pages to published status after ingest completes.
 // This ensures users don't see half-built pages during the ingest process.
-func (s *wikiIngestService) publishDraftPages(ctx context.Context, kbID string, slugs []string) {
+func (s *wikiIngestService) publishDraftPages(ctx context.Context, kbID string, slugs []string) []*wikiPageWrite {
+	writes := make([]*wikiPageWrite, 0, len(slugs))
 	for _, slug := range slugs {
 		page, err := s.wikiService.GetPageBySlug(ctx, kbID, slug)
 		if err != nil || page == nil {
@@ -2192,9 +2266,17 @@ func (s *wikiIngestService) publishDraftPages(ctx context.Context, kbID string, 
 			page.Status = types.WikiPageStatusPublished
 			if err := s.wikiService.UpdatePageMeta(ctx, page); err != nil {
 				logger.Warnf(ctx, "wiki ingest: failed to publish page %s: %v", slug, err)
+				continue
 			}
 		}
+		if page.Status == types.WikiPageStatusPublished {
+			writes = append(writes, &wikiPageWrite{
+				PageID: page.ID, Slug: page.Slug, PageType: page.PageType,
+				Version: page.Version,
+			})
+		}
 	}
+	return writes
 }
 
 // writeDedupCandidateGroup renders one new item together with its own

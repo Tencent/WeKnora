@@ -22,16 +22,21 @@ import (
 )
 
 type DirectContentHandler struct {
-	DB           *gorm.DB
-	LLM          *llm.Client
-	WeKnora      *weknora.Client
-	Wiki         *weknora.WikiClient
-	Orchestrator *skill.Orchestrator
-	Job          string
+	DB            *gorm.DB
+	LLM           *llm.Client
+	WeKnora       *weknora.Client // fixed evidence adapter
+	Wiki          *weknora.WikiClient
+	Orchestrator  *skill.Orchestrator
+	KnowledgeKBID string
+	Job           string
 }
 
 func NewDirectContentHandler(db *gorm.DB, client *llm.Client, wk *weknora.Client, wiki *weknora.WikiClient, orchestrator *skill.Orchestrator, jobType string) *DirectContentHandler {
-	return &DirectContentHandler{DB: db, LLM: client, WeKnora: wk, Wiki: wiki, Orchestrator: orchestrator, Job: jobType}
+	knowledgeKBID := ""
+	if orchestrator != nil {
+		knowledgeKBID = orchestrator.KBID
+	}
+	return &DirectContentHandler{DB: db, LLM: client, WeKnora: wk, Wiki: wiki, Orchestrator: orchestrator, KnowledgeKBID: knowledgeKBID, Job: jobType}
 }
 
 func (h *DirectContentHandler) JobType() string { return h.Job }
@@ -39,6 +44,12 @@ func (h *DirectContentHandler) JobType() string { return h.Job }
 func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
 	if h.DB == nil || h.WeKnora == nil || h.Wiki == nil || h.Orchestrator == nil {
 		return fmt.Errorf("direct content handler dependencies are not configured")
+	}
+	if strings.TrimSpace(h.KnowledgeKBID) == "" {
+		return fmt.Errorf("knowledge_base_routing:knowledge_kb_missing")
+	}
+	if h.WeKnora.KBID() == h.KnowledgeKBID {
+		return fmt.Errorf("knowledge_base_routing:kb_role_conflict")
 	}
 	if h.Job != skill.JobOutline && h.Job != skill.JobSummary && h.Job != skill.JobSummaryEnhance {
 		return fmt.Errorf("unsupported direct content job: %s", h.Job)
@@ -190,7 +201,7 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 	if job.ResultStage == "draft" {
 		pageSlug += "/draft"
 	}
-	page, err := h.Wiki.UpsertPage(ctx, h.WeKnora.KBID(), weknora.WikiPageWrite{
+	page, err := h.Wiki.UpsertPage(ctx, h.KnowledgeKBID, weknora.WikiPageWrite{
 		Slug:     pageSlug,
 		Title:    pageTitle,
 		PageType: "index",
@@ -268,7 +279,7 @@ func (h *DirectContentHandler) promoteOutlineDraft(ctx context.Context, job *mod
 	if strings.TrimSpace(video.OutlineDraftWikiPageID) == "" {
 		return false, nil
 	}
-	draftPage, err := h.Wiki.GetPageByID(ctx, h.WeKnora.KBID(), video.OutlineDraftWikiPageID)
+	draftPage, err := h.Wiki.GetPageByID(ctx, h.KnowledgeKBID, video.OutlineDraftWikiPageID)
 	if err != nil {
 		return false, fmt.Errorf("read outline draft: %w", err)
 	}
@@ -305,7 +316,7 @@ func (h *DirectContentHandler) promoteOutlineDraft(ctx context.Context, job *mod
 	if !ok {
 		return false, fmt.Errorf("unknown outline contract")
 	}
-	page, err := h.Wiki.UpsertPage(ctx, h.WeKnora.KBID(), weknora.WikiPageWrite{
+	page, err := h.Wiki.UpsertPage(ctx, h.KnowledgeKBID, weknora.WikiPageWrite{
 		Slug:     contract.WriteSlug(video.ID),
 		Title:    video.Title + "_大纲",
 		PageType: "index",
@@ -496,14 +507,14 @@ func (h *DirectContentHandler) addEnhancementContext(ctx context.Context, video 
 	if strings.TrimSpace(video.SummaryWikiPageID) == "" || strings.TrimSpace(video.KnowledgeBaseWikiPageID) == "" {
 		return "", fmt.Errorf("summary enhancement requires summary and knowledge base pages")
 	}
-	summary, err := h.Wiki.GetPageByID(ctx, h.WeKnora.KBID(), video.SummaryWikiPageID)
+	summary, err := h.Wiki.GetPageByID(ctx, h.KnowledgeKBID, video.SummaryWikiPageID)
 	if err != nil || summary == nil || strings.TrimSpace(summary.Content) == "" {
 		if err == nil {
 			err = fmt.Errorf("summary page is not readable")
 		}
 		return "", fmt.Errorf("read initial summary: %w", err)
 	}
-	knowledge, err := h.Wiki.GetPageByID(ctx, h.WeKnora.KBID(), video.KnowledgeBaseWikiPageID)
+	knowledge, err := h.Wiki.GetPageByID(ctx, h.KnowledgeKBID, video.KnowledgeBaseWikiPageID)
 	if err != nil || knowledge == nil || strings.TrimSpace(knowledge.Content) == "" {
 		if err == nil {
 			err = fmt.Errorf("knowledge base page is not readable")

@@ -147,6 +147,37 @@ func TestIndexSearchRejectsDuplicateOrMissingEvidenceMetadata(t *testing.T) {
 	})
 }
 
+func TestIndexSearchUsesFixedEvidenceKnowledgeBase(t *testing.T) {
+	db := testEvidenceDB(t)
+	videoID, generation := "video-routing", "generation-routing"
+	if err := db.Create(&model.Video{ID: videoID, Title: "视频", TranscriptGeneration: generation}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.VideoTranscriptChunk{
+		VideoID: videoID, Generation: generation, Revision: 1, ChunkIndex: 0,
+		KnowledgeID: "evidence-1", EvidenceSentenceID: "evs:v1:routing", SourceSegmentID: "s1",
+		StartMs: 0, EndMs: 1000, ContentHash: "hash", Status: "completed",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	seenPath := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPath = r.URL.Path
+		content := evidenceContent("evs:v1:routing", "s1", "", generation, 0, 1000, "原文")
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": []weknora.SearchResult{{KnowledgeID: "evidence-1", Content: content}}})
+	}))
+	defer server.Close()
+	base := config.WeKnoraConfig{BaseURL: server.URL, EvidenceKBID: "evidence-kb", KnowledgeKBID: "knowledge-kb"}
+	client := weknora.New(base.ForKnowledgeBase(base.EvidenceKBID))
+	if _, err := NewIndex(db, client).Search(t.Context(), videoID, generation, "原文", 5); err != nil {
+		t.Fatal(err)
+	}
+	if seenPath != "/api/v1/knowledge-bases/evidence-kb/hybrid-search" {
+		t.Fatalf("search path = %q, want evidence KB", seenPath)
+	}
+}
+
 func testEvidenceDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})

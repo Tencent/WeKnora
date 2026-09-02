@@ -45,11 +45,60 @@ type DatabaseConfig struct {
 
 // WeKnoraConfig WeKnora 内容引擎连接配置
 type WeKnoraConfig struct {
-	BaseURL  string
-	APIKey   string
-	KBID     string // 字幕分块默认入库的目标 KB
-	TenantID string // WeKnora 多租户场景
-	AgentID  string // 视频问答使用的自定义智能体
+	BaseURL       string
+	APIKey        string
+	KBID          string // 仅兼容旧证据任务；不得作为 Wiki/Agent 默认值
+	EvidenceKBID  string // 字幕证据写入与检索
+	KnowledgeKBID string // 整篇源文档、Wiki 与 Agent
+	TenantID      string // WeKnora 多租户场景
+	AgentID       string // 视频问答使用的自定义智能体
+}
+
+const (
+	KBRouteEvidenceMissing  = "knowledge_base_routing:evidence_kb_missing"
+	KBRouteKnowledgeMissing = "knowledge_base_routing:knowledge_kb_missing"
+	KBRouteRoleConflict     = "knowledge_base_routing:kb_role_conflict"
+)
+
+// KnowledgeBaseRoles is the validated, immutable routing contract used when
+// dependencies are constructed. Callers never switch a client between roles.
+type KnowledgeBaseRoles struct {
+	Evidence  string
+	Knowledge string
+}
+
+type KnowledgeBaseRoutingError struct {
+	Code string
+}
+
+func (e *KnowledgeBaseRoutingError) Error() string { return e.Code }
+
+// ResolveKnowledgeBaseRoles preserves WEKNORA_KB_ID only as an evidence-layer
+// compatibility fallback. The knowledge role must always be explicit.
+func (w WeKnoraConfig) ResolveKnowledgeBaseRoles() (KnowledgeBaseRoles, error) {
+	evidenceID := strings.TrimSpace(w.EvidenceKBID)
+	if evidenceID == "" {
+		evidenceID = strings.TrimSpace(w.KBID)
+	}
+	knowledgeID := strings.TrimSpace(w.KnowledgeKBID)
+	roles := KnowledgeBaseRoles{Evidence: evidenceID, Knowledge: knowledgeID}
+	if evidenceID == "" {
+		return roles, &KnowledgeBaseRoutingError{Code: KBRouteEvidenceMissing}
+	}
+	if knowledgeID == "" {
+		return roles, &KnowledgeBaseRoutingError{Code: KBRouteKnowledgeMissing}
+	}
+	if evidenceID == knowledgeID {
+		return roles, &KnowledgeBaseRoutingError{Code: KBRouteRoleConflict}
+	}
+	return roles, nil
+}
+
+// ForKnowledgeBase returns a role-fixed copy. It does not mutate the loaded
+// configuration or any previously constructed client.
+func (w WeKnoraConfig) ForKnowledgeBase(kbID string) WeKnoraConfig {
+	w.KBID = strings.TrimSpace(kbID)
+	return w
 }
 
 // WikiGraphConfig is the isolated Neo4j projection used by the product graph.
@@ -175,11 +224,13 @@ func Load() *Config {
 			DBName:   getEnv("CUSTOM_DB_NAME", "vidsage"),
 		},
 		WeKnora: WeKnoraConfig{
-			BaseURL:  getEnv("WEKNORA_BASE_URL", "http://localhost:8080"),
-			APIKey:   getEnv("WEKNORA_API_KEY", ""),
-			KBID:     getEnv("WEKNORA_KB_ID", ""),
-			TenantID: getEnv("WEKNORA_TENANT_ID", ""),
-			AgentID:  getEnv("CUSTOM_CONTENT_AGENT_ID", ""),
+			BaseURL:       getEnv("WEKNORA_BASE_URL", "http://localhost:8080"),
+			APIKey:        getEnv("WEKNORA_API_KEY", ""),
+			KBID:          getEnv("WEKNORA_KB_ID", ""),
+			EvidenceKBID:  getEnv("WEKNORA_EVIDENCE_KB_ID", ""),
+			KnowledgeKBID: getEnv("WEKNORA_KNOWLEDGE_KB_ID", ""),
+			TenantID:      getEnv("WEKNORA_TENANT_ID", ""),
+			AgentID:       getEnv("CUSTOM_CONTENT_AGENT_ID", ""),
 		},
 		WikiGraph: WikiGraphConfig{
 			// The product graph must never inherit the official GraphRAG switch.
@@ -191,9 +242,8 @@ func Load() *Config {
 			Password:  getEnv("CUSTOM_WIKI_GRAPH_NEO4J_PASSWORD", ""),
 			Database:  getEnv("CUSTOM_WIKI_GRAPH_NEO4J_DATABASE", ""),
 			Namespace: getEnv("CUSTOM_WIKI_GRAPH_NEO4J_NAMESPACE", "VIDSAGE_KNOWLEDGE"),
-			// 默认与内容流水线使用同一个真实 WeKnora 知识库；如需隔离，
-			// 由 CUSTOM_WIKI_GRAPH_KB_ID 显式覆盖。
-			KnowledgeBaseID: getEnv("CUSTOM_WIKI_GRAPH_KB_ID", getEnv("WEKNORA_KB_ID", "")),
+			// 产品图谱只能投影视频知识库的 Wiki 页面，绝不回退到旧单库配置。
+			KnowledgeBaseID: getEnv("CUSTOM_WIKI_GRAPH_KB_ID", getEnv("WEKNORA_KNOWLEDGE_KB_ID", "")),
 		},
 		MinIO: MinIOConfig{
 			Backend:   getEnv("CUSTOM_STORAGE_BACKEND", "minio"),

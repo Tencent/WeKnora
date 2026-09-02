@@ -21,18 +21,21 @@ import (
 	transcriptservice "github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
 
-// AgentExecutor 触发 skill（调用 Agent Chat API）
-type AgentExecutor interface {
-	TriggerSkill(ctx context.Context, video *model.Video, skillName string) error
+// AgentClient is the small seam used by content workers. Production uses the
+// fixed knowledge-KB adapter; tests can prove a path never reaches Agent.
+type AgentClient interface {
+	CreateSession(context.Context, string) (string, error)
+	TriggerSkill(context.Context, string, string, string, string, []string) error
 }
 
 // BaseSkillHandler 5 个 skill handler 共用父类
 type BaseSkillHandler struct {
-	DB           *gorm.DB
-	AgentClient  *weknora.AgentClient
-	SourceReader TranscriptSourceReader
-	Orchestrator *skill.Orchestrator
-	AgentID      string
+	DB              *gorm.DB
+	AgentClient     AgentClient
+	SourceReader    TranscriptSourceReader
+	Orchestrator    *skill.Orchestrator
+	AgentID         string
+	KnowledgeBaseID string
 }
 
 const wikiBaselinePayloadKey = "wiki_page_versions_before_skill"
@@ -152,6 +155,9 @@ func (h *BaseSkillHandler) wikiInput(ctx context.Context, job *model.VideoProces
 	}
 	switch mode {
 	case TranscriptInputModeFullDocument:
+		if strings.TrimSpace(h.KnowledgeBaseID) == "" {
+			return wikiInputManifest{}, fmt.Errorf("knowledge_base_routing:knowledge_kb_missing")
+		}
 		if strings.TrimSpace(sourceID) == "" {
 			return wikiInputManifest{}, fmt.Errorf("transcript_source_validation:source_missing: full-document Wiki input requires transcript source knowledge id")
 		}
@@ -160,8 +166,14 @@ func (h *BaseSkillHandler) wikiInput(ctx context.Context, job *model.VideoProces
 			generation = strings.TrimSpace(video.TranscriptGeneration)
 		}
 		var binding model.VideoTranscriptSource
-		if err := h.DB.WithContext(ctx).Where("video_id = ? AND transcript_generation = ?", video.ID, generation).First(&binding).Error; err != nil {
+		if err := h.DB.WithContext(ctx).Where(
+			"video_id = ? AND transcript_generation = ? AND knowledge_base_id = ?",
+			video.ID, generation, h.KnowledgeBaseID,
+		).First(&binding).Error; err != nil {
 			return wikiInputManifest{}, fmt.Errorf("transcript_source_validation:source_binding_missing: load source binding: %w", err)
+		}
+		if binding.KnowledgeBaseID != h.KnowledgeBaseID {
+			return wikiInputManifest{}, fmt.Errorf("knowledge_base_routing:source_ownership_mismatch")
 		}
 		if binding.Status != transcriptservice.SourceStatusCreated || binding.KnowledgeID != sourceID {
 			return wikiInputManifest{}, fmt.Errorf("transcript_source_validation:source_binding_invalid: source binding is not ready for active generation")
@@ -175,6 +187,9 @@ func (h *BaseSkillHandler) wikiInput(ctx context.Context, job *model.VideoProces
 		}
 		if _, err := transcriptservice.ValidateSourceContent(knowledge.Content, video.ID, generation, video.DurationSeconds); err != nil {
 			return wikiInputManifest{}, err
+		}
+		if actual := strings.TrimSpace(knowledge.KnowledgeBaseID); actual != "" && actual != h.KnowledgeBaseID {
+			return wikiInputManifest{}, fmt.Errorf("knowledge_base_routing:source_ownership_mismatch: expected=%s actual=%s", h.KnowledgeBaseID, actual)
 		}
 		return wikiInputManifest{Mode: mode, SourceID: sourceID, KnowledgeIDs: []string{sourceID}}, nil
 	case TranscriptInputModeEvidence:
@@ -249,6 +264,12 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 	contract, ok := skill.Contract(jobType)
 	if !ok {
 		return fmt.Errorf("未注册的 job_type: %s", jobType)
+	}
+	if strings.TrimSpace(h.KnowledgeBaseID) == "" {
+		return fmt.Errorf("knowledge_base_routing:knowledge_kb_missing")
+	}
+	if h.AgentClient == nil {
+		return fmt.Errorf("knowledge_base_routing:knowledge_agent_missing")
 	}
 	explicitRegeneration := skill.IsExplicitSummaryRegeneration(job.InputPayload)
 	if jobType == skill.JobSummary || jobType == skill.JobSummaryEnhance {
@@ -378,57 +399,18 @@ func (h *GraphHandler) JobType() string { return skill.JobGraph }
 //  1. 尝试调 extract-video-knowledge skill（Agent 对话模式）；
 //     若成功但 1 分钟内没有检索到 knowledge_base 新产物，则任务失败
 //  2. 回写 knowledge_base_wiki_page_id，不触发 outline/summary
-func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) (runErr error) {
-	startedAt := time.Now()
-	inputMode, sourceID := "", ""
-	defer func() {
-		slog.Info("wiki skill run finished", "video_id", video.ID, "job_id", job.ID, "job_type", skill.JobGraph,
-			"transcript_generation", job.TranscriptGeneration, "input_mode", inputMode, "source_document_id", sourceID,
-			"elapsed_ms", time.Since(startedAt).Milliseconds(), "error", runErr)
-	}()
-	if h.Graph == nil {
-		return fmt.Errorf("Wiki graph projection is not configured")
-	}
-	contract, _ := skill.Contract(skill.JobGraph)
-	input, err := h.wikiInput(ctx, job, video, skill.JobGraph)
-	if err != nil {
-		return err
-	}
-	inputMode, sourceID = input.Mode, input.SourceID
-	knowledgeIDs := input.KnowledgeIDs
-	baseline, err := h.wikiBaseline(ctx, job, video.ID)
-	if err != nil {
-		return fmt.Errorf("snapshot wiki pages before %s: %w", contract.SkillName, err)
-	}
 
-	// --- 步骤 1：触发 skill，并短等 1 分钟确认产物可读 ---
-	sessionID, err := h.AgentClient.CreateSession(ctx, fmt.Sprintf("content-pipeline/%s/graph", video.ID))
-	if err != nil {
-		return fmt.Errorf("graph create session: %w", err)
-	}
-	query := skillQueryWithInput(video, contract, skill.JobGraph, sourceID, inputMode)
-	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query, knowledgeIDs); err != nil {
-		return fmt.Errorf("graph trigger skill %s: %w", contract.SkillName, err)
-	}
-	wikiPageID, err := h.waitForWikiPage(ctx, video.ID, skill.JobGraph, baseline, time.Minute)
-	if err != nil {
-		return fmt.Errorf("graph wait for readable knowledge_base wiki page: %w", err)
-	}
-
-	indexPage, err := h.Orchestrator.Wiki.GetPageByID(ctx, h.Orchestrator.KBID, wikiPageID)
-	if err != nil {
-		return fmt.Errorf("read knowledge base Wiki page for graph projection: %w", err)
-	}
-	if indexPage == nil || strings.TrimSpace(indexPage.Content) == "" {
-		return fmt.Errorf("knowledge base Wiki page is unavailable for graph projection: %s", wikiPageID)
-	}
-	if err := h.Graph.ProjectVideo(ctx, video, indexPage); err != nil {
-		return fmt.Errorf("project Wiki graph: %w", err)
-	}
-	// Only acknowledge the skill after the real Wiki projection succeeds.
-	if _, _, err = h.Orchestrator.AfterSkillCompleteWithID(ctx, video.ID, skill.JobGraph, wikiPageID); err != nil {
-		return fmt.Errorf("graph after skill: %w", err)
-	}
+func (h *GraphHandler) Run(_ context.Context, job *model.VideoProcessingJob, video *model.Video) error {
+	slog.Info("custom graph root skipped",
+		"reason", "p2_native_wiki_is_single_page_producer",
+		"video_id", video.ID,
+		"job_id", job.ID,
+		"job_type", skill.JobGraph,
+		"transcript_generation", job.TranscriptGeneration,
+		"input_mode", TranscriptInputModeFullDocument,
+		"page_producer", "weknora_native_wiki",
+		"status", "skipped",
+	)
 	return nil
 }
 
