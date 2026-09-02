@@ -1,9 +1,11 @@
 package dingtalk
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/config"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 func TestParseDownloadRewrite(t *testing.T) {
@@ -170,5 +172,25 @@ func TestApplyDownloadRewrite_PathPrefix(t *testing.T) {
 	got, _, ok := r.apply("https://files.example.com/ding/a/b.png")
 	if !ok || got != "http://10.2.3.4:8080/mirror/a/b.png" {
 		t.Fatalf("apply = (%q, %v), want (%q, true)", got, ok, "http://10.2.3.4:8080/mirror/a/b.png")
+	}
+}
+
+// TestNewSkipVerifySSRFSafeDownloadClient verifies the non-rewritten download
+// client keeps every SSRF safeguard while relaxing TLS verification.
+func TestNewSkipVerifySSRFSafeDownloadClient(t *testing.T) {
+	c := newSkipVerifySSRFSafeDownloadClient()
+	rt, ok := c.Transport.(*secutils.SSRFValidatingRoundTripper)
+	if !ok {
+		t.Fatalf("Transport = %T, want *secutils.SSRFValidatingRoundTripper", c.Transport)
+	}
+	tr, ok := rt.Base.(*http.Transport)
+	if !ok {
+		t.Fatalf("Base transport = %T, want *http.Transport", rt.Base)
+	}
+	if tr.DialContext == nil {
+		t.Error("DialContext = nil, want SSRF-safe dial context")
+	}
+	if tr.TLSClientConfig == nil || !tr.TLSClientConfig.InsecureSkipVerify {
+		t.Error("TLSClientConfig.InsecureSkipVerify = false, want true")
 	}
 }

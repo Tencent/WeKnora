@@ -264,3 +264,68 @@ func TestDownloadFile_URLRewrite(t *testing.T) {
 		t.Errorf("resolved name = %q, want %q", name, "x.pdf")
 	}
 }
+
+// TestDownloadFile_TLSSkipVerify drives the file download against a TLS
+// server with a self-signed certificate: with download_insecure_skip_verify
+// enabled the download succeeds; with it disabled the TLS handshake fails.
+func TestDownloadFile_TLSSkipVerify(t *testing.T) {
+	useTestHTTPClient(t)
+	fileBytes := []byte("tls intranet file bytes")
+
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(fileBytes)
+	}))
+	defer tlsSrv.Close()
+
+	var api *httptest.Server
+	api = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1.0/oauth2/accessToken":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"accessToken": "tok", "expireIn": 7200})
+		case "/v1.0/robot/messageFiles/download":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"downloadUrl": "https://dingtalk-file.111.111.111.111:15443/temp/file",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+
+	orig := apiBaseURL
+	apiBaseURL = api.URL
+	defer func() { apiBaseURL = orig }()
+
+	base := config.DingTalkConfig{
+		DownloadURLRewrite: &config.DingTalkURLRewriteConfig{
+			From: "https://dingtalk-file.111.111.111.111:15443",
+			To:   tlsSrv.URL,
+		},
+	}
+
+	on := base
+	on.DownloadInsecureSkipVerify = true
+	a := NewWebhookAdapter("cid", "sec", "", &on)
+	reader, _, err := a.DownloadFile(context.Background(), &im.IncomingMessage{
+		FileKey: "DL-CODE", FileName: "x.pdf", Extra: map[string]string{"robot_code": "rc"},
+	})
+	if err != nil {
+		t.Fatalf("DownloadFile with skip verify error: %v", err)
+	}
+	got, readErr := io.ReadAll(reader)
+	reader.Close()
+	if readErr != nil {
+		t.Fatalf("read body: %v", readErr)
+	}
+	if string(got) != string(fileBytes) {
+		t.Errorf("downloaded bytes = %q, want %q", got, fileBytes)
+	}
+
+	off := base
+	a2 := NewWebhookAdapter("cid", "sec", "", &off)
+	if _, _, err := a2.DownloadFile(context.Background(), &im.IncomingMessage{
+		FileKey: "DL-CODE", FileName: "x.pdf", Extra: map[string]string{"robot_code": "rc"},
+	}); err == nil {
+		t.Error("expected TLS verification error with skip verify disabled, got nil")
+	}
+}

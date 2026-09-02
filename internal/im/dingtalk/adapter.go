@@ -62,7 +62,7 @@ type Adapter struct {
 	trustedDownloadClient *http.Client
 	// skipVerifyDownloadClient fetches non-rewritten download URLs when
 	// download_insecure_skip_verify is enabled (SSRF guards kept, TLS
-	// verification relaxed). Built in Task 5.
+	// verification relaxed).
 	skipVerifyDownloadClient *http.Client
 	// downloadSkipTLSVerify mirrors im.dingtalk.download_insecure_skip_verify.
 	downloadSkipTLSVerify bool
@@ -106,9 +106,13 @@ func newAdapter(clientID, clientSecret, cardTemplateID string, cfg *config.DingT
 	if a.downloadRewrite != nil {
 		logger.Infof(context.Background(), "[DingTalk] download url rewrite enabled: %d prefix(es) -> %s",
 			len(a.downloadRewrite.prefixes), a.downloadRewrite.to)
-		a.trustedDownloadClient = newTrustedDownloadClient()
+		a.trustedDownloadClient = newTrustedDownloadClient(a.downloadSkipTLSVerify)
 		logger.Debugf(context.Background(), "[DingTalk] trusted download client built (skip verify: %v)",
 			a.downloadSkipTLSVerify)
+	}
+	if a.downloadSkipTLSVerify {
+		a.skipVerifyDownloadClient = newSkipVerifySSRFSafeDownloadClient()
+		logger.Debugf(context.Background(), "[DingTalk] skip-verify download client built (SSRF guards kept)")
 	}
 	return a
 }
@@ -389,6 +393,10 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 		if err := validateFileDownloadURL(downloadURL); err != nil {
 			logger.Warnf(ctx, "[DingTalk] download url rejected: %s: %v", downloadURL, err)
 			return nil, "", fmt.Errorf("download url rejected: %w", err)
+		}
+		if a.downloadSkipTLSVerify {
+			client = a.skipVerifyDownloadClient
+			clientKind = "skip-verify"
 		}
 	}
 

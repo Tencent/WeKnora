@@ -2,6 +2,7 @@ package dingtalk
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // downloadRewrite rewrites temporary DingTalk file download URLs that point
@@ -91,10 +93,12 @@ const downloadMaxRedirects = 5
 // omitted — they would reject private intranet addresses. Redirects are
 // capped but not re-validated: the source is a trusted intranet mirror
 // serving DingTalk-signed URLs.
-func newTrustedDownloadClient() *http.Client {
+func newTrustedDownloadClient(skipTLSVerify bool) *http.Client {
 	return &http.Client{
-		Timeout:   downloadRewriteTimeout,
-		Transport: &http.Transport{},
+		Timeout: downloadRewriteTimeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: skipTLSVerify},
+		},
 		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
 			if len(via) >= downloadMaxRedirects {
 				return fmt.Errorf("stopped after %d redirects", downloadMaxRedirects)
@@ -110,4 +114,23 @@ func logSnippet(s string, max int) string {
 		return s
 	}
 	return s[:max] + "...(truncated)"
+}
+
+// newSkipVerifySSRFSafeDownloadClient builds the client used for
+// non-rewritten download URLs when im.dingtalk.download_insecure_skip_verify
+// is enabled. It keeps every SSRF safeguard (per-request validation,
+// per-hop redirect validation, dial-time IP pinning) and only relaxes
+// certificate verification.
+func newSkipVerifySSRFSafeDownloadClient() *http.Client {
+	transport := &http.Transport{
+		DialContext:     secutils.SSRFSafeDialContext,
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	return secutils.NewSSRFSafeHTTPClientWithTransport(
+		secutils.SSRFSafeHTTPClientConfig{
+			Timeout:      downloadRewriteTimeout,
+			MaxRedirects: downloadMaxRedirects,
+		},
+		transport,
+	)
 }
