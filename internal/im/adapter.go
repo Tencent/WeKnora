@@ -42,13 +42,14 @@ const (
 	MessageTypeText  MessageType = "text"
 	MessageTypeFile  MessageType = "file"
 	MessageTypeImage MessageType = "image"
+	MessageTypeVoice MessageType = "voice"
 )
 
 // IncomingMessage is the unified message parsed from an IM callback.
 type IncomingMessage struct {
 	// Platform identifies which IM platform the message comes from.
 	Platform Platform
-	// MessageType is "text" (default) or "file".
+	// MessageType is "text" (default), "file", "image", or "voice".
 	MessageType MessageType
 	// UserID is the IM-platform user identifier.
 	UserID string

@@ -28,6 +28,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	mcppkg "github.com/Tencent/WeKnora/internal/mcp"
+	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/ratelimit"
 	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -68,10 +69,17 @@ const (
 	agentCompleteWaitTimeout = 10 * time.Second
 )
 
+var (
+	errIMAttachmentDownload = errors.New("IM attachment download failed")
+	errIMVoiceTranscription = errors.New("IM voice transcription failed")
+)
+
 // imCitationTagRe matches inline citation tags produced by the agent pipeline.
 // These tags are rendered as interactive UI in the web frontend but are meaningless
 // in IM platforms, so they must be stripped before sending.
 var imCitationTagRe = regexp.MustCompile(`<(?:kb|web)\b[^>]*/?>`)
+
+var imVoiceFormatRe = regexp.MustCompile(`^[a-z0-9]{1,10}$`)
 
 // stripIMCitationTags removes <kb .../> and <web .../> inline citation tags from s.
 func stripIMCitationTags(s string) string {
@@ -297,6 +305,7 @@ type Service struct {
 	messageService interfaces.MessageService
 	tenantService  interfaces.TenantService
 	agentService   interfaces.CustomAgentService
+	modelService   imASRModelService
 
 	// knowledgeService is used for saving IM file messages to knowledge bases.
 	knowledgeService interfaces.KnowledgeService
@@ -360,6 +369,10 @@ type Service struct {
 	stopOnce       sync.Once
 	subscriberOnce sync.Once
 	stopped        atomic.Bool
+}
+
+type imASRModelService interface {
+	GetASRModel(ctx context.Context, modelID string) (asr.ASR, error)
 }
 
 // makeUserKey builds the canonical key used to identify a user's request
@@ -602,8 +615,13 @@ type imDownloadedAttachment struct {
 // prepareIMAttachments downloads an IM attachment and exposes its parsed text
 // (and, for images, a bounded data URI) to the QA pipeline. This is separate
 // from the optional background knowledge-base save.
-func (s *Service) prepareIMAttachments(ctx context.Context, msg *IncomingMessage, adapter Adapter) (types.MessageAttachments, []string, *imDownloadedAttachment, error) {
-	if msg.MessageType != MessageTypeFile && msg.MessageType != MessageTypeImage {
+func (s *Service) prepareIMAttachments(
+	ctx context.Context,
+	msg *IncomingMessage,
+	adapter Adapter,
+	customAgent *types.CustomAgent,
+) (types.MessageAttachments, []string, *imDownloadedAttachment, error) {
+	if msg.MessageType != MessageTypeFile && msg.MessageType != MessageTypeImage && msg.MessageType != MessageTypeVoice {
 		return nil, nil, nil, nil
 	}
 	if msg.FileSize > maxIMAttachmentBytes {
@@ -617,7 +635,7 @@ func (s *Service) prepareIMAttachments(ctx context.Context, msg *IncomingMessage
 	defer cancel()
 	reader, fileName, err := downloader.DownloadFile(attachmentCtx, msg)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("%w: %v", errIMAttachmentDownload, err)
 	}
 	defer reader.Close()
 	content, err := io.ReadAll(io.LimitReader(reader, maxIMAttachmentBytes+1))
@@ -633,11 +651,26 @@ func (s *Service) prepareIMAttachments(ctx context.Context, msg *IncomingMessage
 	if msg.MessageType == MessageTypeImage && filepath.Ext(fileName) == "" {
 		fileName += ".png"
 	}
+	if msg.MessageType == MessageTypeVoice && filepath.Ext(fileName) == "" {
+		voiceFormat := strings.ToLower(strings.TrimSpace(msg.Extra["voice_format"]))
+		if !imVoiceFormatRe.MatchString(voiceFormat) {
+			voiceFormat = "amr"
+		}
+		fileName += "." + voiceFormat
+	}
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(fileName), "."))
 	if ext == "" {
 		return nil, nil, nil, fmt.Errorf("attachment has no file extension")
 	}
 	attachment := types.MessageAttachment{FileName: fileName, FileType: "." + ext, FileSize: int64(len(content))}
+	if msg.MessageType == MessageTypeVoice {
+		transcript, transcribeErr := s.transcribeIMVoice(attachmentCtx, content, fileName, msg, customAgent)
+		if transcribeErr != nil {
+			return nil, nil, nil, transcribeErr
+		}
+		applyIMAttachmentTruncation(transcript, &attachment)
+		return types.MessageAttachments{attachment}, nil, nil, nil
+	}
 	request := &types.ReadRequest{FileContent: content, FileName: fileName, FileType: ext}
 	var result *types.ReadResult
 	isImage := msg.MessageType == MessageTypeImage || docparser.IsImageFormat(ext)
@@ -670,6 +703,54 @@ func (s *Service) prepareIMAttachments(ctx context.Context, msg *IncomingMessage
 		logger.Warnf(ctx, "[IM] image is too large for direct vision input: size=%d limit=%d", len(content), maxIMVisionAttachmentBytes)
 	}
 	return types.MessageAttachments{attachment}, imageURLs, &imDownloadedAttachment{fileName: fileName, content: content}, nil
+}
+
+func (s *Service) transcribeIMVoice(
+	ctx context.Context,
+	content []byte,
+	fileName string,
+	msg *IncomingMessage,
+	customAgent *types.CustomAgent,
+) (string, error) {
+	if customAgent != nil && customAgent.Config.AudioUploadEnabled && customAgent.Config.ASRModelID != "" {
+		if s.modelService == nil {
+			return "", fmt.Errorf("%w: ASR model service is unavailable", errIMVoiceTranscription)
+		}
+		asrModel, err := s.modelService.GetASRModel(ctx, customAgent.Config.ASRModelID)
+		if err != nil {
+			return "", fmt.Errorf("%w: get ASR model: %v", errIMVoiceTranscription, err)
+		}
+		result, err := asrModel.Transcribe(ctx, content, fileName)
+		if err != nil {
+			return "", fmt.Errorf("%w: transcribe audio: %v", errIMVoiceTranscription, err)
+		}
+		if result != nil && strings.TrimSpace(result.Text) != "" {
+			return strings.TrimSpace(result.Text), nil
+		}
+		return "", fmt.Errorf("%w: ASR returned an empty transcript", errIMVoiceTranscription)
+	}
+
+	if msg != nil && msg.Extra != nil {
+		if recognition := strings.TrimSpace(msg.Extra["recognition"]); recognition != "" {
+			return recognition, nil
+		}
+	}
+
+	return "", fmt.Errorf("%w: no ASR model or platform recognition is available", errIMVoiceTranscription)
+}
+
+func imAttachmentFailureReply(msg *IncomingMessage, err error) string {
+	switch {
+	case errors.Is(err, errIMAttachmentDownload):
+		if msg != nil && msg.Platform == PlatformWeCom {
+			return "❌ 无法下载企微临时素材，素材可能已过期或当前应用无权读取。请重新发送该文件或语音。"
+		}
+		return "❌ 无法下载此附件，链接可能已过期。请重新发送。"
+	case errors.Is(err, errIMVoiceTranscription):
+		return "❌ 无法转写这条语音。请联系管理员为当前 Agent 启用音频上传并配置 ASR 模型，或改用文字发送。"
+	default:
+		return "❌ 无法读取此附件，请重试或改用文字描述。"
+	}
 }
 
 func applyIMAttachmentTruncation(content string, attachment *types.MessageAttachment) {
@@ -844,6 +925,7 @@ func NewService(
 	messageService interfaces.MessageService,
 	tenantService interfaces.TenantService,
 	agentService interfaces.CustomAgentService,
+	modelService interfaces.ModelService,
 	knowledgeService interfaces.KnowledgeService,
 	kbService interfaces.KnowledgeBaseService,
 	streamManager interfaces.StreamManager,
@@ -872,6 +954,7 @@ func NewService(
 		messageService:   messageService,
 		tenantService:    tenantService,
 		agentService:     agentService,
+		modelService:     modelService,
 		knowledgeService: knowledgeService,
 		kbService:        kbService,
 		streamManager:    streamManager,
@@ -1738,7 +1821,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	// only adds a best-effort, asynchronous save; it must never replace or block
 	// the reply to this message.  With no configured knowledge base, simply skip
 	// the save rather than rejecting the message.
-	if msg.MessageType == MessageTypeFile || msg.MessageType == MessageTypeImage {
+	if msg.MessageType == MessageTypeFile || msg.MessageType == MessageTypeImage || msg.MessageType == MessageTypeVoice {
 		msg.Content = fileMessageQAContent(msg)
 	}
 
@@ -1897,6 +1980,7 @@ func emptyIncomingMessageReply(msg *IncomingMessage) (string, bool) {
 	// of HandleMessage must not reject attachments.
 	hasAttachment := msg.MessageType == MessageTypeFile ||
 		msg.MessageType == MessageTypeImage ||
+		msg.MessageType == MessageTypeVoice ||
 		strings.TrimSpace(msg.FileKey) != ""
 	if hasAttachment {
 		return "", false
@@ -1945,10 +2029,10 @@ func (s *Service) executeQARequest(req *qaRequest) {
 
 	// kbIDs is left empty so the QA pipeline resolves them from the agent config.
 	var kbIDs []string
-	attachments, imageURLs, downloaded, err := s.prepareIMAttachments(ctx, req.msg, req.adapter)
+	attachments, imageURLs, downloaded, err := s.prepareIMAttachments(ctx, req.msg, req.adapter, req.agent)
 	if err != nil {
 		logger.Warnf(ctx, "[IM] attachment preparation failed: %v", err)
-		if sendErr := req.adapter.SendReply(ctx, req.msg, &ReplyMessage{Content: "❌ 无法读取此附件，请重试或改用文字描述。", IsFinal: true}); sendErr != nil {
+		if sendErr := req.adapter.SendReply(ctx, req.msg, &ReplyMessage{Content: imAttachmentFailureReply(req.msg, err), IsFinal: true}); sendErr != nil {
 			logger.Warnf(ctx, "[IM] Failed to send attachment error reply: %v", sendErr)
 		}
 		return
@@ -3340,6 +3424,9 @@ func fileMessageQAContent(msg *IncomingMessage) string {
 	fileName := strings.TrimSpace(msg.FileName)
 	if fileName == "" {
 		fileName = "未命名文件"
+	}
+	if msg.MessageType == MessageTypeVoice {
+		return fmt.Sprintf("我发送了一条语音「%s」。请根据语音转写内容回答。", fileName)
 	}
 	return fmt.Sprintf("我上传了文件「%s」。请确认已收到，并告知我接下来可以如何协助。", fileName)
 }

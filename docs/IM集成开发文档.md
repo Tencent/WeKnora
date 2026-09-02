@@ -115,6 +115,7 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
    - **Token**：自定义或随机生成（记录下来）
    - **EncodingAESKey**：自定义或随机生成（记录下来）
    - **Corp Agent ID**：应用 AgentID（整数）
+   - **远程图片可信域名**（可选）：允许 WeKnora 下载并转发为企微图片消息的域名，多个域名用逗号分隔，支持 `*.example.com`
 3. 保存后，渠道卡片上会显示**回调地址**，格式为 `https://你的域名/api/v1/im/callback/{channel_id}`
 4. 复制该回调地址
 
@@ -1091,9 +1092,11 @@ type AdapterFactory func(ctx context.Context, channel *IMChannel, msgHandler fun
 - **加密方案：** AES-256-CBC，Key 由 `encoding_aes_key` Base64 解码得到（32 字节），IV 为 Key 前 16 字节
 - **消息格式：** `random(16) + msg_len(4) + message + corp_id`，PKCS#7 填充
 - **签名验证：** SHA-1(`sort([token, timestamp, nonce, encrypt])`)，常量时间比较
-- **消息类型：** 支持 `text`（文本）和 `image`（图片，PicUrl 直接下载或 MediaId 临时素材 API）
+- **消息类型：** 支持 `text`（文本）、`image`（图片）、`file`（文件）和 `voice`（语音）；文件和语音通过 MediaId 临时素材 API 下载后进入当前 QA，语音优先使用 Agent 配置的 ASR，未配置时回退企业微信回调中的 `Recognition`
 - **群聊回复：** 优先尝试 `appchat/send` 群聊 API，失败时降级到私聊直发
-- **回复方式：** 通过 `/cgi-bin/message/send` 接口发送 Markdown 消息
+- **回复方式：** 通过 `/cgi-bin/message/send` 接口发送 Markdown 消息；答案中的远程 Markdown 图片始终保留可点击链接，域名同时命中渠道级 `remote_image_host_allowlist` 与全局 SSRF 校验时，下载 JPEG/PNG（单图不超过 10 MiB）、上传临时素材并追加图片消息
+- **显式降级：** 临时素材过期/无权限、文件下载失败、语音无可用 ASR、图片域名未放行或下载/上传失败时，机器人会返回可操作提示，不再静默丢弃消息或图片
+- **远程图片安全：** `remote_image_host_allowlist` 默认为空（禁止代理下载），支持精确域名与 `*.example.com` 子域通配；重定向目标会再次校验渠道白名单，内网地址还必须加入 `SSRF_WHITELIST`
 
 #### WebSocket 模式 (`WSAdapter` + `LongConnClient`)
 
@@ -1679,14 +1682,14 @@ QA 管道 ──chunk──chunk──chunk──▶ EventBus
 
 ## 文件消息处理
 
-文件和图片会作为 QA 附件供模型理解，用户只收到该消息对应的 QA 回复。`knowledge_base_id` 配置后会额外触发后台入库；未配置时不入库、不报错。入库结果和后续解析不再产生额外 IM 通知。解析出的附件文本最多保留前 500 行且不超过 32 KiB；发生任一限制时，模型会收到通用的截断提示。
+文件、图片和语音会作为 QA 附件供模型理解，用户只收到该消息对应的 QA 回复。语音先转写为文本；Agent 配置了 ASR 模型时使用该模型，企业微信 Webhook 还可回退到回调自带的 `Recognition`。`knowledge_base_id` 配置后会额外触发后台入库；未配置时不入库、不报错。入库结果和后续解析不再产生额外 IM 通知。解析出的附件文本最多保留前 500 行且不超过 32 KiB；发生任一限制时，模型会收到通用的截断提示。
 
 **各平台文件下载方式：**
 
 | 平台 | 方式 |
 |------|------|
 | 飞书 | GetMessageResource API（通过 FileKey） |
-| 企业微信 Webhook | PicUrl 直接下载 或 MediaId 临时素材 API |
+| 企业微信 Webhook | PicUrl 直接下载或 MediaId 临时素材 API；文件、图片、语音均可进入当前 QA，临时素材过期会显式提示重发 |
 | 企业微信 WebSocket | 加密附件 URL + per-message AES 密钥解密 |
 | Telegram | getFile API 获取文件路径 + HTTPS 下载（支持文档和图片） |
 | Mattermost | `GET /api/v4/files/{file_id}/info` + `GET /api/v4/files/{file_id}`（Bearer Bot Token） |

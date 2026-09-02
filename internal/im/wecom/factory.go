@@ -37,6 +37,7 @@ func NewFactory() im.AdapterFactory {
 				im.GetString(creds, "encoding_aes_key"),
 				corpAgentID,
 				im.GetString(creds, "api_base_url"),
+				im.GetString(creds, "remote_image_host_allowlist"),
 			)
 			if err != nil {
 				return nil, nil, err

@@ -997,6 +997,8 @@ export default {
       consoleTip: '前往获取凭证信息',
       wecomWSEndpointHint: '可选，私有化部署时填写自定义 WebSocket 地址，留空则使用默认公有云地址。内网地址需将域名加入 SSRF_WHITELIST 环境变量',
       wecomAPIBaseURLHint: '可选，私有化部署时填写自定义 API 地址，留空则使用默认公有云地址。内网地址需将域名加入 SSRF_WHITELIST 环境变量',
+      wecomRemoteImageHostAllowlist: '远程图片可信域名',
+      wecomRemoteImageHostAllowlistHint: '可选。允许机器人下载并转发为企微图片消息的域名，多个域名用逗号分隔，支持 *.example.com。留空时仅保留可点击链接；内网域名还需加入 SSRF_WHITELIST',
       feishuAPIBaseURLHint: '可选。若服务器能直连外网则留空；若需通过代理才能访问飞书，填写反向代理地址（如 nginx，http://host:port）。内网地址需将域名加入 SSRF_WHITELIST 环境变量',
       fileKnowledgeBase: '文件保存知识库',
       fileKnowledgeBasePlaceholder: '选择知识库（可选）',

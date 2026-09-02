@@ -294,6 +294,12 @@
                   <t-input v-model="formData.credentials.api_base_url" placeholder="https://qyapi.weixin.qq.com" />
                   <p class="form-desc">{{ $t('agentEditor.im.wecomAPIBaseURLHint') }}</p>
                 </div>
+                <div class="form-item">
+                  <label class="form-label">{{ $t('agentEditor.im.wecomRemoteImageHostAllowlist') }}</label>
+                  <t-input v-model="formData.credentials.remote_image_host_allowlist"
+                    placeholder="images.example.com, *.cdn.example.com" />
+                  <p class="form-desc">{{ $t('agentEditor.im.wecomRemoteImageHostAllowlistHint') }}</p>
+                </div>
               </template>
             </template>
 
