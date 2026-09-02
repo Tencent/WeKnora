@@ -58,6 +58,7 @@ type ManualKnowledgeResult struct {
 	ID              string `json:"id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Title           string `json:"title"`
+	Content         string `json:"content"`
 	ParseStatus     string `json:"parse_status"`
 	ErrorMessage    string `json:"error_message"`
 }

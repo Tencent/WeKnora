@@ -86,6 +86,13 @@ func (o *Orchestrator) transcriptSourceManifest(ctx context.Context, db *gorm.DB
 	if len(chunks) == 0 {
 		return "", "", fmt.Errorf("video %s has no active transcript chunks", videoID)
 	}
+	var source model.VideoTranscriptSource
+	if err := db.WithContext(ctx).Where("video_id = ? AND transcript_generation = ?", videoID, video.TranscriptGeneration).First(&source).Error; err != nil {
+		return "", "", fmt.Errorf("load transcript source document: %w", err)
+	}
+	if source.Status != "created" || strings.TrimSpace(source.KnowledgeID) == "" {
+		return "", "", fmt.Errorf("video %s transcript source document is not ready", videoID)
+	}
 	knowledgeIDs := make([]string, 0, len(chunks))
 	seen := make(map[string]struct{}, len(chunks))
 	for index, chunk := range chunks {
@@ -99,9 +106,10 @@ func (o *Orchestrator) transcriptSourceManifest(ctx context.Context, db *gorm.DB
 		knowledgeIDs = append(knowledgeIDs, chunk.KnowledgeID)
 	}
 	inputPayload, err := json.Marshal(map[string]any{
-		"transcript_generation":    video.TranscriptGeneration,
-		"transcript_knowledge_ids": knowledgeIDs,
-		"transcript_chunk_count":   len(knowledgeIDs),
+		"transcript_generation":          video.TranscriptGeneration,
+		"transcript_source_knowledge_id": source.KnowledgeID,
+		"transcript_knowledge_ids":       knowledgeIDs,
+		"transcript_chunk_count":         len(knowledgeIDs),
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("encode transcript source manifest: %w", err)

@@ -32,6 +32,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/service/evidence"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
 	"github.com/Tencent/WeKnora/internal/custom/service/subtitle"
+	transcriptservice "github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
 
 // SubtitleGenerateHandler 生成 SRT + 入对象存储 + 触发 index
@@ -249,11 +250,12 @@ type IndexHandler struct {
 	WeKnora      *weknora.Client
 	Splitter     *chunk.Splitter
 	Orchestrator *skill.Orchestrator
+	SourceWriter *transcriptservice.SourceWriter
 }
 
 // NewIndexHandler 构造
 func NewIndexHandler(db *gorm.DB, wk *weknora.Client, orch *skill.Orchestrator) *IndexHandler {
-	return &IndexHandler{DB: db, WeKnora: wk, Splitter: chunk.NewSplitter(), Orchestrator: orch}
+	return &IndexHandler{DB: db, WeKnora: wk, Splitter: chunk.NewSplitter(), Orchestrator: orch, SourceWriter: transcriptservice.NewSourceWriter(db, wk)}
 }
 
 // JobType job 类型
@@ -436,6 +438,29 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 		}
 	}
 
+	if h.SourceWriter == nil {
+		h.SourceWriter = transcriptservice.NewSourceWriter(h.DB, h.WeKnora)
+	}
+	// Create the Wiki-only source before activating the generation. A failed
+	// source write therefore cannot advance the video or enqueue downstream
+	// Wiki/content work.
+	document, err := transcriptservice.BuildFromJSON(transcriptservice.RawInput{
+		VideoID: video.ID, TranscriptGeneration: generation, Title: video.Title,
+		DurationSeconds: video.DurationSeconds, Provider: "tingwu", Payload: []byte(job.ResultPayload),
+	})
+	if err != nil {
+		return fmt.Errorf("build transcript source document: %w", err)
+	}
+	source, err := h.SourceWriter.Ensure(ctx, transcriptservice.SourceInput{Document: document})
+	if err != nil {
+		return fmt.Errorf("create transcript source document: %w", err)
+	}
+	if err := h.persistSourceResult(job, source); err != nil {
+		return err
+	}
+	// Keep source-document ingestion parallel to evidence indexing. The source
+	// must succeed before generation activation, but it need not wait for every
+	// evidence chunk to become searchable.
 	if err := h.waitUntilSearchable(ctx, video.ID, generation, len(prepared)); err != nil {
 		return err
 	}
@@ -496,6 +521,30 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	if err := h.deleteRetiredGenerations(ctx, video.ID); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (h *IndexHandler) persistSourceResult(job *model.VideoProcessingJob, source transcriptservice.SourceResult) error {
+	var payload map[string]any
+	if strings.TrimSpace(job.ResultPayload) != "" {
+		if err := json.Unmarshal([]byte(job.ResultPayload), &payload); err != nil {
+			return fmt.Errorf("parse index result for source result: %w", err)
+		}
+	}
+	if payload == nil {
+		payload = make(map[string]any)
+	}
+	payload["transcript_source_knowledge_id"] = source.KnowledgeID
+	payload["transcript_source_content_hash"] = source.ContentHash
+	payload["transcript_source_action"] = source.Action
+	value, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal transcript source result: %w", err)
+	}
+	if err := h.DB.Model(job).Update("result_payload", string(value)).Error; err != nil {
+		return fmt.Errorf("save transcript source result: %w", err)
+	}
+	job.ResultPayload = string(value)
 	return nil
 }
 

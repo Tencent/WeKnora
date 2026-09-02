@@ -136,3 +136,27 @@ func TestBuildProducesStableJSON(t *testing.T) {
 		t.Fatalf("duration should remain present in canonical JSON: %s", firstJSON)
 	}
 }
+
+func TestValidateSourceContentRejectsEmptyOversizeIdentityAndDuration(t *testing.T) {
+	doc, err := Build(validDocumentInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	jsonText, err := doc.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := SourceContent(doc, jsonText, "hash")
+	if _, err := ValidateSourceContent("", doc.VideoID, doc.TranscriptGeneration, doc.DurationSeconds); err == nil || !strings.Contains(err.Error(), SourceValidationEmpty) {
+		t.Fatalf("expected empty source validation error, got %v", err)
+	}
+	if _, err := ValidateSourceContent(strings.Repeat("x", MaxSourceDocumentBytes+1), doc.VideoID, doc.TranscriptGeneration, doc.DurationSeconds); err == nil || !strings.Contains(err.Error(), SourceValidationTooLarge) {
+		t.Fatalf("expected size validation error, got %v", err)
+	}
+	if _, err := ValidateSourceContent(content, "other-video", doc.TranscriptGeneration, doc.DurationSeconds); err == nil || !strings.Contains(err.Error(), SourceValidationIdentity) {
+		t.Fatalf("expected identity validation error, got %v", err)
+	}
+	if _, err := ValidateSourceContent(content, doc.VideoID, doc.TranscriptGeneration, doc.DurationSeconds+1); err == nil || !strings.Contains(err.Error(), SourceValidationDuration) {
+		t.Fatalf("expected duration validation error, got %v", err)
+	}
+}

@@ -6,6 +6,79 @@ import (
 	"strings"
 )
 
+const MaxSourceDocumentBytes = 8 << 20
+
+const (
+	SourceValidationEmpty       = "source_empty"
+	SourceValidationTooLarge    = "source_too_large"
+	SourceValidationInvalidJSON = "source_invalid_json"
+	SourceValidationInvalid     = "source_document_invalid"
+	SourceValidationIdentity    = "source_identity_mismatch"
+	SourceValidationDuration    = "source_duration_mismatch"
+)
+
+// SourceValidationError keeps a stable machine-readable code while retaining
+// a short diagnostic for the job error and structured logs.
+type SourceValidationError struct {
+	Code    string
+	Message string
+}
+
+func (e *SourceValidationError) Error() string {
+	return fmt.Sprintf("transcript_source_validation:%s: %s", e.Code, e.Message)
+}
+
+func sourceValidation(code, message string) error {
+	return &SourceValidationError{Code: code, Message: message}
+}
+
+// ParseSourceContent extracts the canonical JSON from SourceContent. The
+// frontmatter remains deliberately lightweight; the JSON is the validated
+// source of truth for Wiki input and evidence mapping.
+func ParseSourceContent(content string) (FullVideoDocument, error) {
+	if strings.TrimSpace(content) == "" {
+		return FullVideoDocument{}, sourceValidation(SourceValidationEmpty, "source document content is empty")
+	}
+	if len([]byte(content)) > MaxSourceDocumentBytes {
+		return FullVideoDocument{}, sourceValidation(SourceValidationTooLarge, fmt.Sprintf("source document exceeds %d bytes", MaxSourceDocumentBytes))
+	}
+	const marker = "```json"
+	start := strings.Index(content, marker)
+	if start < 0 {
+		return FullVideoDocument{}, sourceValidation(SourceValidationInvalidJSON, "source document JSON block is missing")
+	}
+	start += len(marker)
+	end := strings.Index(content[start:], "```")
+	if end < 0 {
+		return FullVideoDocument{}, sourceValidation(SourceValidationInvalidJSON, "source document JSON block is not closed")
+	}
+	var doc FullVideoDocument
+	if err := json.Unmarshal([]byte(strings.TrimSpace(content[start:start+end])), &doc); err != nil {
+		return FullVideoDocument{}, sourceValidation(SourceValidationInvalidJSON, fmt.Sprintf("decode source document JSON: %v", err))
+	}
+	if err := Validate(doc); err != nil {
+		return FullVideoDocument{}, sourceValidation(SourceValidationInvalid, err.Error())
+	}
+	return doc, nil
+}
+
+// ValidateSourceContent applies the runtime contract before a Wiki task can
+// use a source document: non-empty bounded content, identity, duration and
+// every sentence/evidence/time mapping validated by Validate.
+func ValidateSourceContent(content, videoID, generation string, durationSeconds int) (FullVideoDocument, error) {
+	doc, err := ParseSourceContent(content)
+	if err != nil {
+		return FullVideoDocument{}, err
+	}
+	if strings.TrimSpace(videoID) == "" || doc.VideoID != strings.TrimSpace(videoID) || strings.TrimSpace(generation) == "" || doc.TranscriptGeneration != strings.TrimSpace(generation) {
+		return FullVideoDocument{}, sourceValidation(SourceValidationIdentity, "source document does not match active video transcript generation")
+	}
+	if durationSeconds > 0 && doc.DurationSeconds != durationSeconds {
+		return FullVideoDocument{}, sourceValidation(SourceValidationDuration, fmt.Sprintf("source duration %d does not match video duration %d", doc.DurationSeconds, durationSeconds))
+	}
+	return doc, nil
+}
+
 // FullVideoDocument is the stable, Wiki-only representation of one complete
 // transcript generation. It is deliberately separate from subtitle chunks:
 // paragraphs retain the source mapping while continuous_text gives the Wiki

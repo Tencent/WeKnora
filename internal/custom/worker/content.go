@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/knowledgegraph"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
+	transcriptservice "github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
 
 // AgentExecutor 触发 skill（调用 Agent Chat API）
@@ -29,17 +30,41 @@ type AgentExecutor interface {
 type BaseSkillHandler struct {
 	DB           *gorm.DB
 	AgentClient  *weknora.AgentClient
+	SourceReader TranscriptSourceReader
 	Orchestrator *skill.Orchestrator
 	AgentID      string
 }
 
 const wikiBaselinePayloadKey = "wiki_page_versions_before_skill"
 
+const (
+	transcriptSourceKnowledgeIDKey  = "transcript_source_knowledge_id"
+	transcriptInputModeKey          = "transcript_input_mode"
+	TranscriptInputModeFullDocument = "full_document"
+	TranscriptInputModeEvidence     = "evidence_chunks"
+)
+
+// TranscriptSourceReader is the minimal read surface needed to validate the
+// independent full-video source before a Wiki skill is invoked.
+type TranscriptSourceReader interface {
+	GetKnowledge(context.Context, string) (weknora.ManualKnowledgeResult, error)
+}
+
 func skillQuery(video *model.Video, contract skill.JobContract, jobType string) string {
+	return skillQueryWithInput(video, contract, jobType, video.TranscriptKnowledgeID, TranscriptInputModeEvidence)
+}
+
+func skillQueryWithInput(video *model.Video, contract skill.JobContract, jobType, sourceKnowledgeID, inputMode string) string {
 	query := fmt.Sprintf(
-		"使用 $%s 处理视频。当前转写代次：%s。兼容源文档知识 ID：%s；完整转写分块清单已通过调用上下文提供，必须覆盖全部分块。业务视频 ID：%s 仅用于产物归属。视频标题：%s。",
-		contract.SkillName, video.TranscriptGeneration, video.TranscriptKnowledgeID, video.ID, video.Title,
+		"使用 $%s 处理视频。当前转写代次：%s。",
+		contract.SkillName, video.TranscriptGeneration,
 	)
+	if inputMode == TranscriptInputModeFullDocument {
+		query += fmt.Sprintf("本次 Wiki 抽取输入模式：full_document。完整视频源文档知识 ID：%s；必须只读取该整篇源文档作为抽取输入，不得读取字幕分块知识 ID，也不得把字幕分块作为抽取上下文。", sourceKnowledgeID)
+	} else {
+		query += fmt.Sprintf("本次输入模式：evidence_chunks。兼容源文档知识 ID：%s；完整转写分块清单已通过调用上下文提供，必须覆盖全部分块。", sourceKnowledgeID)
+	}
+	query += fmt.Sprintf("业务视频 ID：%s 仅用于产物归属。视频标题：%s。", video.ID, video.Title)
 	if jobType == skill.JobGraph {
 		query += fmt.Sprintf(
 			"必须完整遵循 extract-video-knowledge 的 references/type-frameworks.md、references/wiki-schema.md 和 references/audit-rules.md：每个实体和每个知识原子都要写入独立 Wiki 页面；所有 Skill 知识对象页面的 page_type 必须使用 WeKnora 支持的 index，五类业务类型必须写入 frontmatter.type，禁止把 case、methodology、insight 作为 page_type；方法论、案例、概念、洞察必须填充对应结构维度，实体必须填充对应关键信息维度，未涉及字段留空不得编造。每个知识对象页面的 source_refs 必须填入与 evidence_ids 相同的真实转写分块 ID，确保 Wiki 检索能够按当前视频和转写代次优先召回。关系必须分两阶段写入：先写独立对象页并读取确认真实 Wiki page ID，本轮新对象之间的 relations 首次必须留空；全部目标页面确认可读后，再覆盖更新对象页补齐结构化 relations 和正文双链，禁止猜测 target_wiki_page_id。最后写入视频索引页：slug 严格使用 %q；page_type 使用 index；frontmatter 必须含 type: %s、source_video_id: %s 和 transcript_generation: %s。索引页目标可能尚不存在，首次生成时不要先读取目标 slug；读取返回 not found 不是失败，请继续直接写入。读取或引用上游产物时，必须使用 Wiki 工具返回的实际 slug，禁止根据视频标题或页面标题猜测 slug；不得用示例、占位内容或 mock 数据代替真实 Wiki 产物。"+
@@ -93,6 +118,79 @@ func (h *BaseSkillHandler) transcriptKnowledgeIDs(ctx context.Context, job *mode
 	return ids, nil
 }
 
+type wikiInputManifest struct {
+	Mode         string
+	SourceID     string
+	KnowledgeIDs []string
+}
+
+func (h *BaseSkillHandler) wikiInput(ctx context.Context, job *model.VideoProcessingJob, video *model.Video, jobType string) (wikiInputManifest, error) {
+	var payload map[string]json.RawMessage
+	if strings.TrimSpace(job.InputPayload) != "" {
+		if err := json.Unmarshal([]byte(job.InputPayload), &payload); err != nil {
+			return wikiInputManifest{}, fmt.Errorf("parse wiki input manifest: %w", err)
+		}
+	}
+	mode := ""
+	if raw := payload[transcriptInputModeKey]; len(raw) > 0 {
+		if err := json.Unmarshal(raw, &mode); err != nil {
+			return wikiInputManifest{}, fmt.Errorf("parse wiki input mode: %w", err)
+		}
+	}
+	sourceID := ""
+	if raw := payload[transcriptSourceKnowledgeIDKey]; len(raw) > 0 {
+		if err := json.Unmarshal(raw, &sourceID); err != nil {
+			return wikiInputManifest{}, fmt.Errorf("parse transcript source knowledge id: %w", err)
+		}
+	}
+	if mode == "" {
+		if jobType == skill.JobGraph {
+			mode = TranscriptInputModeFullDocument
+		} else {
+			mode = TranscriptInputModeEvidence
+		}
+	}
+	switch mode {
+	case TranscriptInputModeFullDocument:
+		if strings.TrimSpace(sourceID) == "" {
+			return wikiInputManifest{}, fmt.Errorf("transcript_source_validation:source_missing: full-document Wiki input requires transcript source knowledge id")
+		}
+		generation := strings.TrimSpace(job.TranscriptGeneration)
+		if generation == "" {
+			generation = strings.TrimSpace(video.TranscriptGeneration)
+		}
+		var binding model.VideoTranscriptSource
+		if err := h.DB.WithContext(ctx).Where("video_id = ? AND transcript_generation = ?", video.ID, generation).First(&binding).Error; err != nil {
+			return wikiInputManifest{}, fmt.Errorf("transcript_source_validation:source_binding_missing: load source binding: %w", err)
+		}
+		if binding.Status != transcriptservice.SourceStatusCreated || binding.KnowledgeID != sourceID {
+			return wikiInputManifest{}, fmt.Errorf("transcript_source_validation:source_binding_invalid: source binding is not ready for active generation")
+		}
+		if h.SourceReader == nil {
+			return wikiInputManifest{}, fmt.Errorf("transcript_source_validation:source_reader_missing: source document reader is not configured")
+		}
+		knowledge, err := h.SourceReader.GetKnowledge(ctx, sourceID)
+		if err != nil {
+			return wikiInputManifest{}, fmt.Errorf("transcript source read: %w", err)
+		}
+		if _, err := transcriptservice.ValidateSourceContent(knowledge.Content, video.ID, generation, video.DurationSeconds); err != nil {
+			return wikiInputManifest{}, err
+		}
+		return wikiInputManifest{Mode: mode, SourceID: sourceID, KnowledgeIDs: []string{sourceID}}, nil
+	case TranscriptInputModeEvidence:
+		if jobType == skill.JobGraph {
+			return wikiInputManifest{}, fmt.Errorf("transcript_source_validation:input_mode_invalid: graph Wiki input must use full_document")
+		}
+		ids, err := h.transcriptKnowledgeIDs(ctx, job, video)
+		if err != nil {
+			return wikiInputManifest{}, err
+		}
+		return wikiInputManifest{Mode: mode, SourceID: sourceID, KnowledgeIDs: ids}, nil
+	default:
+		return wikiInputManifest{}, fmt.Errorf("transcript_source_validation:input_mode_invalid: unsupported transcript input mode %q", mode)
+	}
+}
+
 func (h *BaseSkillHandler) wikiBaseline(
 	ctx context.Context,
 	job *model.VideoProcessingJob,
@@ -140,7 +238,14 @@ func (h *BaseSkillHandler) wikiBaseline(
 }
 
 // run 通用 skill 执行流程
-func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video, jobType string) error {
+func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video, jobType string) (runErr error) {
+	startedAt := time.Now()
+	inputMode, sourceID := "", ""
+	defer func() {
+		slog.Info("wiki skill run finished", "video_id", video.ID, "job_id", job.ID, "job_type", jobType,
+			"transcript_generation", job.TranscriptGeneration, "input_mode", inputMode, "source_document_id", sourceID,
+			"elapsed_ms", time.Since(startedAt).Milliseconds(), "error", runErr)
+	}()
 	contract, ok := skill.Contract(jobType)
 	if !ok {
 		return fmt.Errorf("未注册的 job_type: %s", jobType)
@@ -161,10 +266,12 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 			return nil
 		}
 	}
-	knowledgeIDs, err := h.transcriptKnowledgeIDs(ctx, job, video)
+	input, err := h.wikiInput(ctx, job, video, jobType)
 	if err != nil {
 		return err
 	}
+	inputMode, sourceID = input.Mode, input.SourceID
+	knowledgeIDs := input.KnowledgeIDs
 	baseline, err := h.wikiBaseline(ctx, job, video.ID)
 	if err != nil {
 		return fmt.Errorf("snapshot wiki pages before %s: %w", contract.SkillName, err)
@@ -175,7 +282,7 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
-	query := skillQuery(video, contract, jobType)
+	query := skillQueryWithInput(video, contract, jobType, sourceID, inputMode)
 	if explicitRegeneration {
 		query += "这是用户明确发起的历史总结重生成：允许覆盖旧的用户编辑总结，必须按当前类型化 JSON 契约重新写入；不要跳过写入。"
 	}
@@ -271,15 +378,24 @@ func (h *GraphHandler) JobType() string { return skill.JobGraph }
 //  1. 尝试调 extract-video-knowledge skill（Agent 对话模式）；
 //     若成功但 1 分钟内没有检索到 knowledge_base 新产物，则任务失败
 //  2. 回写 knowledge_base_wiki_page_id，不触发 outline/summary
-func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
+func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) (runErr error) {
+	startedAt := time.Now()
+	inputMode, sourceID := "", ""
+	defer func() {
+		slog.Info("wiki skill run finished", "video_id", video.ID, "job_id", job.ID, "job_type", skill.JobGraph,
+			"transcript_generation", job.TranscriptGeneration, "input_mode", inputMode, "source_document_id", sourceID,
+			"elapsed_ms", time.Since(startedAt).Milliseconds(), "error", runErr)
+	}()
 	if h.Graph == nil {
 		return fmt.Errorf("Wiki graph projection is not configured")
 	}
 	contract, _ := skill.Contract(skill.JobGraph)
-	knowledgeIDs, err := h.transcriptKnowledgeIDs(ctx, job, video)
+	input, err := h.wikiInput(ctx, job, video, skill.JobGraph)
 	if err != nil {
 		return err
 	}
+	inputMode, sourceID = input.Mode, input.SourceID
+	knowledgeIDs := input.KnowledgeIDs
 	baseline, err := h.wikiBaseline(ctx, job, video.ID)
 	if err != nil {
 		return fmt.Errorf("snapshot wiki pages before %s: %w", contract.SkillName, err)
@@ -290,7 +406,7 @@ func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	if err != nil {
 		return fmt.Errorf("graph create session: %w", err)
 	}
-	query := skillQuery(video, contract, skill.JobGraph)
+	query := skillQueryWithInput(video, contract, skill.JobGraph, sourceID, inputMode)
 	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query, knowledgeIDs); err != nil {
 		return fmt.Errorf("graph trigger skill %s: %w", contract.SkillName, err)
 	}

@@ -246,7 +246,31 @@ func TestReadDraftChunksUsesFixedMPSTaskEvidence(t *testing.T) {
 	require.Equal(t, 30200, chunks[1].EndMs)
 }
 
-func TestSummaryDraftReadsCurrentEvidenceIndexInsteadOfMPS(t *testing.T) {
+func TestSummaryDraftReadsMPSResultWithoutEvidenceIndex(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoProcessingJob{}))
+	video := &model.Video{ID: "video-existing", Title: "证据总结", VideoType: "training", TranscriptGeneration: "generation-1"}
+	require.NoError(t, db.Create(video).Error)
+	payload, err := json.Marshal(map[string]any{"mps_result": mps.Result{Segments: []mps.Segment{
+		{SourceSegmentID: "mps:test:000000", Text: "开场说明", StartMs: 123, EndMs: 19803, SpeakerID: "speaker-1"},
+		{SourceSegmentID: "mps:test:000001", Text: "方法介绍", StartMs: 19803, EndMs: 30200, SpeakerID: "speaker-1"},
+	}}})
+	require.NoError(t, err)
+	source := model.VideoProcessingJob{ID: "transcription-test", VideoID: video.ID, JobType: "transcription", ExternalTaskID: "mps-test-task", ResultPayload: string(payload)}
+	require.NoError(t, db.Create(&source).Error)
+	h := &DirectContentHandler{DB: db, Job: skill.JobSummary}
+	job := &model.VideoProcessingJob{VideoID: video.ID, ResultStage: "draft", InputPayload: `{"transcription_job_id":"transcription-test"}`}
+	chunks, err := h.readContentChunks(context.Background(), video, video.TranscriptGeneration, job)
+	require.NoError(t, err)
+	require.Len(t, chunks, 2)
+	require.Equal(t, "mps:test:000000", chunks[0].ID)
+	require.NotEmpty(t, chunks[0].EvidenceSentenceID)
+	require.Equal(t, "开场说明", transcript.OriginalText(chunks[0].Content))
+	require.Equal(t, 30200, chunks[1].EndMs)
+}
+
+func TestSummaryFinalReadsCurrentEvidenceIndex(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoProcessingJob{}))
@@ -269,7 +293,7 @@ func TestSummaryDraftReadsCurrentEvidenceIndexInsteadOfMPS(t *testing.T) {
 	defer server.Close()
 	client := weknora.New(config.WeKnoraConfig{BaseURL: server.URL, KBID: "kb-1"})
 	h := &DirectContentHandler{DB: db, WeKnora: client, Job: skill.JobSummary}
-	job := &model.VideoProcessingJob{VideoID: video.ID, ResultStage: "draft", InputPayload: `{"transcription_job_id":"unused-mps-job"}`}
+	job := &model.VideoProcessingJob{VideoID: video.ID, ResultStage: "final"}
 	chunks, err := h.readContentChunks(context.Background(), video, video.TranscriptGeneration, job)
 	require.NoError(t, err)
 	require.Len(t, chunks, 1)

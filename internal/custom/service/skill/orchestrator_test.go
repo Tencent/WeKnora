@@ -22,19 +22,23 @@ func newOrchestratorTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoProcessingJob{}))
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoTranscriptSource{}, &model.VideoProcessingJob{}))
 	return db
 }
 
 func TestEnqueueContentPipelinePersistsCurrentTranscriptManifest(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoProcessingJob{}))
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoTranscriptSource{}, &model.VideoProcessingJob{}))
 	video := model.Video{ID: "video-pipeline", Title: "test", TranscriptGeneration: "generation-1"}
 	require.NoError(t, db.Create(&video).Error)
 	require.NoError(t, db.Create([]model.VideoTranscriptChunk{
 		{VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 0, KnowledgeID: "knowledge-1", ContentHash: "hash-1", Status: "completed"},
 		{VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 1, KnowledgeID: "knowledge-2", ContentHash: "hash-2", Status: "completed"},
+	}).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptSource{
+		ID: "source-binding-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration,
+		KnowledgeID: "source-knowledge-1", ContentHash: "source-hash-1", Status: "created",
 	}).Error)
 
 	orchestrator := NewOrchestrator(db, nil, "kb-1")
@@ -46,6 +50,7 @@ func TestEnqueueContentPipelinePersistsCurrentTranscriptManifest(t *testing.T) {
 	for _, job := range jobs {
 		require.Contains(t, job.InputPayload, "knowledge-1")
 		require.Contains(t, job.InputPayload, "knowledge-2")
+		require.Contains(t, job.InputPayload, "source-knowledge-1")
 		require.Equal(t, video.TranscriptGeneration, job.TranscriptGeneration)
 	}
 }

@@ -139,6 +139,7 @@ func main() {
 		base := worker.BaseSkillHandler{
 			DB:           db,
 			AgentClient:  agentClient,
+			SourceReader: weknoraCli,
 			Orchestrator: orchestrator,
 			AgentID:      contentAgentID,
 		}
@@ -227,6 +228,7 @@ func autoMigrateLocalDB(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&model.Video{},
 		&model.VideoTranscriptChunk{},
+		&model.VideoTranscriptSource{},
 		&model.VideoProcessingJob{},
 		&model.VideoSummaryFramework{},
 		&model.DashboardQuestionStat{},

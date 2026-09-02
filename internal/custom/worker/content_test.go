@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +15,16 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
+	transcriptservice "github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
+
+type sourceReaderStub struct {
+	value weknora.ManualKnowledgeResult
+}
+
+func (s sourceReaderStub) GetKnowledge(_ context.Context, _ string) (weknora.ManualKnowledgeResult, error) {
+	return s.value, nil
+}
 
 func TestWikiBaselinePersistsAcrossJobRetries(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
@@ -115,4 +125,61 @@ func TestTranscriptKnowledgeIDsUsesEveryCurrentChunk(t *testing.T) {
 	ids, err := handler.transcriptKnowledgeIDs(t.Context(), &model.VideoProcessingJob{TranscriptGeneration: video.TranscriptGeneration}, &video)
 	require.NoError(t, err)
 	require.Equal(t, []string{"knowledge-1", "knowledge-2"}, ids)
+}
+
+func TestWikiInputFullDocumentDoesNotReadTranscriptChunks(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoTranscriptSource{}))
+	video := model.Video{ID: "video-1", Title: "测试视频", DurationSeconds: 20, TranscriptGeneration: "generation-1"}
+	require.NoError(t, db.Create(&video).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptSource{ID: "binding-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, KnowledgeID: "source-1", ContentHash: "hash", Status: transcriptservice.SourceStatusCreated}).Error)
+	doc, err := transcriptservice.Build(transcriptservice.Input{
+		VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, Title: video.Title, DurationSeconds: video.DurationSeconds,
+		Chapters: []transcriptservice.InputChapter{{Index: 0, Title: "开场", Paragraphs: []transcriptservice.InputParagraph{{Index: 0, Sentences: []transcriptservice.InputSentence{{SourceSentenceID: "s-1", EvidenceSentenceID: "e-1", Text: "正文", StartMs: 100, EndMs: 1000}}}}}},
+	})
+	require.NoError(t, err)
+	jsonText, err := doc.JSON()
+	require.NoError(t, err)
+	handler := BaseSkillHandler{DB: db, SourceReader: sourceReaderStub{value: weknora.ManualKnowledgeResult{ID: "source-1", Content: transcriptservice.SourceContent(doc, jsonText, "hash")}}}
+	job := &model.VideoProcessingJob{ID: "job-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, InputPayload: `{"transcript_input_mode":"full_document","transcript_source_knowledge_id":"source-1"}`}
+	input, err := handler.wikiInput(t.Context(), job, &video, skill.JobGraph)
+	require.NoError(t, err)
+	require.Equal(t, TranscriptInputModeFullDocument, input.Mode)
+	require.Equal(t, []string{"source-1"}, input.KnowledgeIDs)
+}
+
+func TestWikiInputFullDocumentRejectsMissingSource(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptSource{}))
+	video := model.Video{ID: "video-1", Title: "测试视频", DurationSeconds: 20, TranscriptGeneration: "generation-1"}
+	require.NoError(t, db.Create(&video).Error)
+	handler := BaseSkillHandler{DB: db}
+	_, err = handler.wikiInput(t.Context(), &model.VideoProcessingJob{VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, InputPayload: `{"transcript_input_mode":"full_document"}`}, &video, skill.JobGraph)
+	require.Error(t, err)
+	category, code := ClassifyProcessingError(err)
+	require.Equal(t, ErrorCategoryResponseParse, category)
+	require.Equal(t, "source_missing", code)
+}
+
+func TestSkillQueryFullDocumentForbidsChunkInput(t *testing.T) {
+	video := &model.Video{ID: "video-1", Title: "测试视频", TranscriptGeneration: "generation-1"}
+	contract, ok := skill.Contract(skill.JobGraph)
+	require.True(t, ok)
+	query := skillQueryWithInput(video, contract, skill.JobGraph, "source-1", TranscriptInputModeFullDocument)
+	require.Contains(t, query, "完整视频源文档知识 ID：source-1")
+	require.Contains(t, query, "不得读取字幕分块知识 ID")
+	require.NotContains(t, query, "完整转写分块清单已通过调用上下文提供")
+}
+
+func TestWikiInputGraphRejectsEvidenceChunkMode(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	handler := BaseSkillHandler{DB: db}
+	video := &model.Video{ID: "video-1", TranscriptGeneration: "generation-1"}
+	_, err = handler.wikiInput(t.Context(), &model.VideoProcessingJob{InputPayload: `{"transcript_input_mode":"evidence_chunks"}`}, video, skill.JobGraph)
+	require.Error(t, err)
+	_, code := ClassifyProcessingError(err)
+	require.Equal(t, "input_mode_invalid", code)
 }

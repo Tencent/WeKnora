@@ -26,6 +26,13 @@ func ClassifyProcessingError(err error) (string, string) {
 		return ErrorCategoryTimeout, "timeout"
 	}
 	message := strings.ToLower(err.Error())
+	if marker := "transcript_source_validation:"; strings.Contains(message, marker) {
+		remainder := message[strings.Index(message, marker)+len(marker):]
+		if end := strings.IndexByte(remainder, ':'); end >= 0 && strings.TrimSpace(remainder[:end]) != "" {
+			return ErrorCategoryResponseParse, strings.TrimSpace(remainder[:end])
+		}
+		return ErrorCategoryResponseParse, "transcript_source_validation"
+	}
 	switch {
 	case containsAny(message, "timeout", "deadline exceeded", "超时"):
 		return ErrorCategoryTimeout, "timeout"

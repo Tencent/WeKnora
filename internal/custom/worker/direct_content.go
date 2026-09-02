@@ -242,11 +242,12 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 	return nil
 }
 
-// readContentChunks keeps the two-stage exception narrow: outline drafts may
-// use the just-finished MPS result for immediate navigation, while every
-// summary stage is gated on the immutable current-generation evidence index.
+// readContentChunks keeps the two-stage exception narrow: outline and summary
+// drafts may use the just-finished MPS result for immediate first-pass content,
+// while final and enhancement stages remain gated on the immutable
+// current-generation evidence index.
 func (h *DirectContentHandler) readContentChunks(ctx context.Context, video *model.Video, generation string, job *model.VideoProcessingJob) ([]transcript.Chunk, error) {
-	if job.ResultStage == "draft" && h.Job == skill.JobOutline {
+	if job.ResultStage == "draft" && (h.Job == skill.JobOutline || h.Job == skill.JobSummary) {
 		return h.readDraftChunks(ctx, video.ID, generation, job)
 	}
 	if generation != strings.TrimSpace(video.TranscriptGeneration) {
