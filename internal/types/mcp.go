@@ -123,16 +123,20 @@ type MCPTool struct {
 	RequireApproval bool `json:"require_approval,omitempty"`
 }
 
-// MCPToolApproval persists per-tool "danger / needs human approval" for an MCP service.
-// Tool list itself comes from MCP ListTools; this table only stores overrides.
+// MCPToolApproval persists per-tool policies for an MCP service, including
+// whether the tool is enabled and whether calls require human approval.
+// The tool list itself comes from MCP ListTools; this table stores overrides.
 type MCPToolApproval struct {
-	ID              string    `json:"id"               gorm:"type:varchar(36);primaryKey"`
-	TenantID        uint64    `json:"tenant_id"        gorm:"not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool"`
-	ServiceID       string    `json:"service_id"       gorm:"type:varchar(36);not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool;index"`
-	ToolName        string    `json:"tool_name"        gorm:"type:varchar(512);not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool"`
-	RequireApproval bool      `json:"require_approval" gorm:"not null;default:false"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID              string `json:"id"               gorm:"type:varchar(36);primaryKey"`
+	TenantID        uint64 `json:"tenant_id"        gorm:"not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool"`
+	ServiceID       string `json:"service_id"       gorm:"type:varchar(36);not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool;index"`
+	ToolName        string `json:"tool_name"        gorm:"type:varchar(512);not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool"`
+	RequireApproval bool   `json:"require_approval" gorm:"not null;default:false"`
+	// Enabled controls whether this tool is exposed to the Agent. Missing rows
+	// are treated as enabled for backwards compatibility.
+	Enabled   bool      `json:"enabled"         gorm:"not null"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // BeforeCreate sets ID for MCPToolApproval.

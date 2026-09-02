@@ -519,7 +519,7 @@ func (h *MCPServiceHandler) GetMCPServiceResources(c *gin.Context) {
 	})
 }
 
-// ListMCPToolApprovals returns persisted require_approval flags for tools on an MCP service.
+// ListMCPToolApprovals returns persisted per-tool policies for an MCP service.
 func (h *MCPServiceHandler) ListMCPToolApprovals(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
@@ -548,10 +548,12 @@ func (h *MCPServiceHandler) ListMCPToolApprovals(c *gin.Context) {
 }
 
 type setMCPToolApprovalBody struct {
-	RequireApproval bool `json:"require_approval"`
+	RequireApproval *bool `json:"require_approval"`
+	Enabled         *bool `json:"enabled"`
 }
 
-// SetMCPToolApproval sets whether a tool requires human approval before the agent may call it.
+// SetMCPToolApproval updates per-tool MCP policy fields. The route name is kept
+// for backwards compatibility with the original approval-only endpoint.
 //
 // SetMCPToolApproval godoc
 // @Summary      设置 MCP 工具人工审批策略
@@ -588,9 +590,21 @@ func (h *MCPServiceHandler) SetMCPToolApproval(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	if err := h.mcpToolApprovalService.SetRequireApproval(ctx, tenantID, serviceID, toolName, body.RequireApproval); err != nil {
-		c.Error(errors.NewInternalServerError(err.Error()))
+	if body.RequireApproval == nil && body.Enabled == nil {
+		c.Error(errors.NewBadRequestError("require_approval or enabled is required"))
 		return
+	}
+	if body.RequireApproval != nil {
+		if err := h.mcpToolApprovalService.SetRequireApproval(ctx, tenantID, serviceID, toolName, *body.RequireApproval); err != nil {
+			c.Error(errors.NewInternalServerError(err.Error()))
+			return
+		}
+	}
+	if body.Enabled != nil {
+		if err := h.mcpToolApprovalService.SetEnabled(ctx, tenantID, serviceID, toolName, *body.Enabled); err != nil {
+			c.Error(errors.NewInternalServerError(err.Error()))
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }

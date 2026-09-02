@@ -52,7 +52,24 @@ func (r *MCPToolApprovalRepository) IsRequired(ctx context.Context, tenantID uin
 	return row.RequireApproval, nil
 }
 
-// Upsert creates or updates the approval flag for a tool atomically.
+// IsEnabled returns true when a tool has no stored policy row. This preserves
+// the historical behaviour for tools discovered before per-tool settings.
+func (r *MCPToolApprovalRepository) IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
+	var row types.MCPToolApproval
+	err := r.db.WithContext(ctx).
+		Select("enabled").
+		Where("tenant_id = ? AND service_id = ? AND tool_name = ?", tenantID, serviceID, toolName).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("get mcp tool enabled state: %w", err)
+	}
+	return row.Enabled, nil
+}
+
+// Upsert creates or updates the policy for a tool atomically.
 // Uses ON CONFLICT against the (tenant_id, service_id, tool_name) unique index
 // so concurrent writers don't race the prior SELECT-then-INSERT path into
 // duplicate-key 500s.
@@ -76,6 +93,7 @@ func (r *MCPToolApprovalRepository) Upsert(ctx context.Context, row *types.MCPTo
 		},
 		DoUpdates: clause.Assignments(map[string]interface{}{
 			"require_approval": row.RequireApproval,
+			"enabled":          row.Enabled,
 			"updated_at":       now,
 		}),
 	}).Create(row).Error

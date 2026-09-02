@@ -4088,7 +4088,10 @@ export default {
       emptyDescription: 'This service did not provide tools or resources',
       requireApproval: 'Require human approval',
       requireApprovalTip: 'When enabled, the agent pauses before calling this tool until you approve — use for DB writes, deletes, etc.',
-      approvalSaveFailed: 'Failed to save approval setting'
+      approvalSaveFailed: 'Failed to save approval setting',
+      toolEnabled: 'Enable tool',
+      toolEnabledTip: 'When disabled, the agent will not see or call this tool',
+      toolEnabledSaveFailed: 'Failed to save tool setting'
     }
   },
   error: {

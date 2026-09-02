@@ -103,6 +103,23 @@ func (t *MCPTool) Parameters() json.RawMessage {
 func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	logger.GetLogger(ctx).Infof("Executing MCP tool: %s from service: %s", t.mcpTool.Name, t.service.Name)
 
+	// Re-check the policy at call time as well as during registration. An agent
+	// engine may outlive a settings change, and a disabled tool must not remain
+	// callable merely because it was registered before the toggle was changed.
+	if enabledChecker, ok := t.gate.(interface {
+		IsEnabled(context.Context, uint64, string, string) (bool, error)
+	}); ok {
+		tenantID, _ := types.TenantIDFromContext(ctx)
+		enabled, policyErr := enabledChecker.IsEnabled(ctx, tenantID, t.service.ID, t.mcpTool.Name)
+		if policyErr != nil || !enabled {
+			message := "MCP tool is disabled"
+			if policyErr != nil {
+				message = fmt.Sprintf("MCP tool policy check failed: %v", policyErr)
+			}
+			return &types.ToolResult{Success: false, Error: message}, nil
+		}
+	}
+
 	// Parse args from json.RawMessage
 	var input MCPInput
 	if err := json.Unmarshal(args, &input); err != nil {
@@ -492,6 +509,25 @@ func RegisterMCPTools(
 
 		// Register each tool
 		for _, mcpTool := range mcpTools {
+			if enabledChecker, ok := gate.(interface {
+				IsEnabled(context.Context, uint64, string, string) (bool, error)
+			}); ok {
+				// Builtin services are shared across tenants, so policy must be
+				// read for the current caller rather than the builtin row's owner.
+				policyTenantID := service.TenantID
+				if tenantID, ok := types.TenantIDFromContext(ctx); ok && tenantID != 0 {
+					policyTenantID = tenantID
+				}
+				enabled, policyErr := enabledChecker.IsEnabled(ctx, policyTenantID, service.ID, mcpTool.Name)
+				if policyErr != nil {
+					logger.GetLogger(ctx).Warnf("Failed to read enabled policy for MCP tool %s/%s: %v", service.Name, mcpTool.Name, policyErr)
+					continue
+				}
+				if !enabled {
+					logger.GetLogger(ctx).Infof("MCP tool disabled by policy: %s from service: %s", mcpTool.Name, service.Name)
+					continue
+				}
+			}
 			tool := NewMCPTool(service, mcpTool, mcpManager, gate, authWaitTimeoutSeconds)
 			toolName := tool.Name()
 

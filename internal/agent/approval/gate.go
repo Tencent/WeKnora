@@ -305,6 +305,21 @@ func (g *Gate) NeedsApproval(ctx context.Context, tenantID uint64, serviceID, to
 	return ok
 }
 
+// IsEnabled reports whether a per-tool MCP policy allows registration. Tool
+// settings are optional, so an absent checker keeps tools enabled.
+func (g *Gate) IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
+	if g == nil || g.checker == nil || tenantID == 0 || serviceID == "" || toolName == "" {
+		return true, nil
+	}
+	checker, ok := g.checker.(interface {
+		IsEnabled(context.Context, uint64, string, string) (bool, error)
+	})
+	if !ok {
+		return true, nil
+	}
+	return checker.IsEnabled(ctx, tenantID, serviceID, toolName)
+}
+
 // RequestAndWait emits a UI event, then blocks until Resolve, timeout, or ctx cancellation.
 func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision, error) {
 	if g == nil {
@@ -679,4 +694,18 @@ func (a *Adapter) IsRequired(ctx context.Context, tenantID uint64, serviceID, to
 		return false, nil
 	}
 	return a.Svc.IsRequired(ctx, tenantID, serviceID, toolName)
+}
+
+// IsEnabled implements the optional per-tool registration policy.
+func (a *Adapter) IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
+	if a == nil || a.Svc == nil {
+		return true, nil
+	}
+	checker, ok := a.Svc.(interface {
+		IsEnabled(context.Context, uint64, string, string) (bool, error)
+	})
+	if !ok {
+		return true, nil
+	}
+	return checker.IsEnabled(ctx, tenantID, serviceID, toolName)
 }
