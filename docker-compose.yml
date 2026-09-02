@@ -5,6 +5,8 @@ services:
     build:
       context: ./frontend
     container_name: WeKnora-frontend
+    volumes:
+      - ./frontend/nginx.conf:/etc/nginx/templates/default.conf.template:ro
     ports:
       - "${FRONTEND_PORT:-80}:80"
     environment:
