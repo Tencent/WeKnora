@@ -277,7 +277,7 @@ func TestSkillPythonVerifier(t *testing.T) {
 		// so the install passes with a note instead of a missing dependency.
 		name: "a script that bootstraps a sibling lib directory and imports from it",
 		files: map[string]string{
-			"lib/image_video.py":  "def generate_image():\n    pass\n",
+			"lib/image_video.py": "def generate_image():\n    pass\n",
 			"scripts/generate.py": "import sys\nimport os\n" +
 				"script_dir = os.path.dirname(os.path.abspath(__file__))\n" +
 				"lib_dir = os.path.join(script_dir, '..', 'lib')\n" +
@@ -289,7 +289,7 @@ func TestSkillPythonVerifier(t *testing.T) {
 		// The pathlib idiom must evaluate to the same bridge.
 		name: "a pathlib bootstrap reaching a sibling module",
 		files: map[string]string{
-			"lib/helper.py":     "x = 1\n",
+			"lib/helper.py": "x = 1\n",
 			"scripts/runner.py": "import sys\n" +
 				"from pathlib import Path\n" +
 				"sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'lib'))\n" +
@@ -338,7 +338,7 @@ func TestSkillPythonVerifier(t *testing.T) {
 		// be exactly the false pass the vendor rule exists to prevent.
 		name: "an unprovable bootstrap stays a problem",
 		files: map[string]string{
-			"lib/image_video.py":  "def generate_image():\n    pass\n",
+			"lib/image_video.py": "def generate_image():\n    pass\n",
 			"scripts/generate.py": "import sys, os\n" +
 				"sys.path.insert(0, os.environ['LIB_DIR'])\n" +
 				"from image_video import generate_image\n",
@@ -352,7 +352,7 @@ func TestSkillPythonVerifier(t *testing.T) {
 		name: "a module that only exists under .venv is still missing",
 		files: map[string]string{
 			".venv/lib/python3.11/site-packages/ghost_mod.py": "x = 1\n",
-			"scripts/run.py":                                  "import ghost_mod\n",
+			"scripts/run.py": "import ghost_mod\n",
 		},
 		wantProblem: "not available in this image",
 		wantExit:    2,
