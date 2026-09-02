@@ -194,8 +194,10 @@ func TestValidateSandboxNetworkPolicyRejectsDomainInDenyOut(t *testing.T) {
 }
 
 func TestValidateSandboxNetworkPolicyRejectsBadTargets(t *testing.T) {
-	for _, target := range []string{"*", ".example.com", "*.*.example.com",
-		"api.*.example.com", "example.com:443", "999.999.999.999", "*.999.999", ""} {
+	for _, target := range []string{
+		"*", ".example.com", "*.*.example.com",
+		"api.*.example.com", "example.com:443", "999.999.999.999", "*.999.999", "",
+	} {
 		err := ValidateSandboxNetworkPolicy(&TenantSandboxConfig{
 			SandboxType: "cube",
 			Network: &SandboxNetworkPolicy{
@@ -432,7 +434,7 @@ func TestValidateSandboxNetworkPolicyRejectsDuplicateRules(t *testing.T) {
 		},
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "E2B host 规则")
+	require.Contains(t, err.Error(), "e2b host 规则")
 	require.Contains(t, err.Error(), "重复")
 
 	err = ValidateSandboxNetworkPolicy(&TenantSandboxConfig{
@@ -443,7 +445,7 @@ func TestValidateSandboxNetworkPolicyRejectsDuplicateRules(t *testing.T) {
 		}},
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `Cube HTTP 规则 name "allow-api" 重复`)
+	require.Contains(t, err.Error(), `cube HTTP 规则 name "allow-api" 重复`)
 }
 
 func TestValidateSandboxNetworkPolicyDockerRejectsFineGrained(t *testing.T) {

@@ -1,9 +1,10 @@
-// Package types: sandbox network policy.
+// Sandbox network policy stored on a tenant sandbox config.
 //
 // One sandbox config carries one network policy, applied to every sandbox
 // created from it — chat sessions, skill installs and connectivity probes
 // alike. The provider-facing translation lives in internal/sandbox; this file
 // is only the stored shape, its secret handling, and its validation.
+
 package types
 
 import (
@@ -368,53 +369,53 @@ func validateCubeEgressRules(rules []CubeEgressRule) error {
 			return errors.New("每条 Cube HTTP 规则都需要 name，用于审计与模板合并")
 		}
 		if names[name] {
-			return fmt.Errorf("Cube HTTP 规则 name %q 重复", name)
+			return fmt.Errorf("cube HTTP 规则 name %q 重复", name)
 		}
 		names[name] = true
 
 		if strings.TrimSpace(rule.Host) == "" && strings.TrimSpace(rule.SNI) == "" {
 			return fmt.Errorf(
-				"Cube HTTP 规则 %q 必须填 host 或 sni：网络层只从这两个字段提取放行目标，"+
+				"cube HTTP 规则 %q 必须填 host 或 sni：网络层只从这两个字段提取放行目标，"+
 					"只写 method / path 的规则永远到不了 CubeEgress", name)
 		}
 		if host := strings.TrimSpace(rule.Host); host != "" {
 			if _, _, err := classifyNetworkTarget(hostWithoutPort(host), true); err != nil {
-				return fmt.Errorf("Cube HTTP 规则 %q 的 host %q: %w", name, rule.Host, err)
+				return fmt.Errorf("cube HTTP 规则 %q 的 host %q: %w", name, rule.Host, err)
 			}
 		}
 		if sni := strings.TrimSpace(rule.SNI); sni != "" {
 			kind, _, err := classifyNetworkTarget(sni, true)
 			if err != nil {
-				return fmt.Errorf("Cube HTTP 规则 %q 的 sni %q: %w", name, rule.SNI, err)
+				return fmt.Errorf("cube HTTP 规则 %q 的 sni %q: %w", name, rule.SNI, err)
 			}
 			if kind != targetDomain {
-				return fmt.Errorf("Cube HTTP 规则 %q 的 sni 只能是域名，不能是 IP", name)
+				return fmt.Errorf("cube HTTP 规则 %q 的 sni 只能是域名，不能是 IP", name)
 			}
 		}
 		switch strings.ToLower(strings.TrimSpace(rule.Scheme)) {
 		case "", "http", "https":
 		default:
-			return fmt.Errorf("Cube HTTP 规则 %q 的 scheme 只能是 http 或 https", name)
+			return fmt.Errorf("cube HTTP 规则 %q 的 scheme 只能是 http 或 https", name)
 		}
 		if !cubeAuditLevels[strings.ToLower(strings.TrimSpace(rule.Audit))] {
-			return fmt.Errorf("Cube HTTP 规则 %q 的 audit 只能是 none、metadata 或 full", name)
+			return fmt.Errorf("cube HTTP 规则 %q 的 audit 只能是 none、metadata 或 full", name)
 		}
 		for _, method := range rule.Methods {
 			if !httpMethods[strings.ToUpper(strings.TrimSpace(method))] {
-				return fmt.Errorf("Cube HTTP 规则 %q 的 method %q 不是标准 HTTP 方法", name, method)
+				return fmt.Errorf("cube HTTP 规则 %q 的 method %q 不是标准 HTTP 方法", name, method)
 			}
 		}
 		injectHeaders := make(map[string]bool, len(rule.Inject))
 		for _, inject := range rule.Inject {
 			header := strings.TrimSpace(inject.Header)
 			if header == "" {
-				return fmt.Errorf("Cube HTTP 规则 %q 的注入 header 名不能为空", name)
+				return fmt.Errorf("cube HTTP 规则 %q 的注入 header 名不能为空", name)
 			}
 			if err := validateHTTPHeaderName(header); err != nil {
 				return fmt.Errorf("规则 %q 的注入 header 名 %q: %w", name, header, err)
 			}
 			if injectHeaders[header] {
-				return fmt.Errorf("Cube HTTP 规则 %q 的注入 header 名 %q 重复", name, header)
+				return fmt.Errorf("cube HTTP 规则 %q 的注入 header 名 %q 重复", name, header)
 			}
 			injectHeaders[header] = true
 			if err := validateHTTPHeaderValue(inject.Secret); err != nil {
@@ -424,7 +425,7 @@ func validateCubeEgressRules(rules []CubeEgressRule) error {
 				return fmt.Errorf("规则 %q 的注入 header %q 的 format: %w", name, header, err)
 			}
 			if rule.Deny && inject.Secret != "" {
-				return fmt.Errorf("Cube HTTP 规则 %q 是拒绝规则，注入 header 不会生效", name)
+				return fmt.Errorf("cube HTTP 规则 %q 是拒绝规则，注入 header 不会生效", name)
 			}
 		}
 	}
@@ -440,53 +441,53 @@ func hostWithoutPort(host string) string {
 
 func validateE2BHostRules(rules []E2BHostRule, allowKeys map[string]string) error {
 	if len(rules) > e2bMaxRuleDomains {
-		return fmt.Errorf("E2B 每个沙箱最多 %d 个 host 规则域名", e2bMaxRuleDomains)
+		return fmt.Errorf("e2b 每个沙箱最多 %d 个 host 规则域名", e2bMaxRuleDomains)
 	}
 	seen := make(map[string]bool, len(rules))
 	for _, rule := range rules {
 		host := strings.TrimSpace(rule.Host)
 		if host == "" {
-			return errors.New("E2B host 规则的 host 不能为空")
+			return errors.New("e2b host 规则的 host 不能为空")
 		}
 		if len(host) > e2bMaxRuleDomainLength {
-			return fmt.Errorf("E2B host 规则的 host %q 超过 %d 字符", host, e2bMaxRuleDomainLength)
+			return fmt.Errorf("e2b host 规则的 host %q 超过 %d 字符", host, e2bMaxRuleDomainLength)
 		}
 		kind, key, err := classifyNetworkTarget(host, true)
 		if err != nil {
-			return fmt.Errorf("E2B host 规则的 host %q: %w", host, err)
+			return fmt.Errorf("e2b host 规则的 host %q: %w", host, err)
 		}
 		if kind != targetDomain {
-			return fmt.Errorf("E2B host 规则的 host %q 只能是域名", host)
+			return fmt.Errorf("e2b host 规则的 host %q 只能是域名", host)
 		}
 		if seen[key] {
-			return fmt.Errorf("E2B host 规则 %q 重复：每个域名只能有一条规则", host)
+			return fmt.Errorf("e2b host 规则 %q 重复：每个域名只能有一条规则", host)
 		}
 		seen[key] = true
 
 		if !allowListCovers(allowKeys, key) {
 			return fmt.Errorf(
-				"E2B host 规则的 host %q 必须同时出现在 allow_out 中："+
+				"e2b host 规则的 host %q 必须同时出现在 allow_out 中："+
 					"规则本身只做 header 注入，不授权出网", host)
 		}
 		if len(rule.Headers) > e2bMaxHeadersPerRule {
-			return fmt.Errorf("E2B host 规则 %q 最多 %d 个 header", host, e2bMaxHeadersPerRule)
+			return fmt.Errorf("e2b host 规则 %q 最多 %d 个 header", host, e2bMaxHeadersPerRule)
 		}
 		for name, value := range rule.Headers {
 			if strings.TrimSpace(name) == "" {
-				return fmt.Errorf("E2B host 规则 %q 的 header 名不能为空", host)
+				return fmt.Errorf("e2b host 规则 %q 的 header 名不能为空", host)
 			}
 			if err := validateHTTPHeaderName(name); err != nil {
 				return fmt.Errorf("host 规则 %q 的 header 名 %q: %w", host, name, err)
 			}
 			if len(name) > e2bMaxHeaderNameLength {
-				return fmt.Errorf("E2B host 规则 %q 的 header 名超过 %d 字符",
+				return fmt.Errorf("e2b host 规则 %q 的 header 名超过 %d 字符",
 					host, e2bMaxHeaderNameLength)
 			}
 			if err := validateHTTPHeaderValue(value); err != nil {
 				return fmt.Errorf("host 规则 %q 的 header %q 的值: %w", host, name, err)
 			}
 			if len(value) > e2bMaxHeaderValueLen {
-				return fmt.Errorf("E2B host 规则 %q 的 header 值超过 %d 字符",
+				return fmt.Errorf("e2b host 规则 %q 的 header 值超过 %d 字符",
 					host, e2bMaxHeaderValueLen)
 			}
 		}

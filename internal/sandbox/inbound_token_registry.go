@@ -1,4 +1,4 @@
-// Package sandbox: inbound traffic-token registry.
+// Inbound traffic-token registry.
 //
 // A sandbox created with public inbound access closed only accepts requests
 // carrying its per-sandbox traffic token. Cube's SDK attaches that header
@@ -9,6 +9,7 @@
 // This registry is the lookup that makes it possible. It is process-local and
 // lost on restart, which is fine: the first reconnect after a restart carries
 // the token up from the session binding and re-registers it.
+
 package sandbox
 
 import (
@@ -59,7 +60,7 @@ func (r *InboundTokenRegistry) Delete(sandboxID string) {
 	r.tokens.Delete(strings.ToLower(sandboxID))
 }
 
-// SandboxIDFromDataPlaneHost extracts the sandbox ID from an envd authority of
+// sandboxIDFromDataPlaneHost extracts the sandbox ID from an envd authority of
 // the form "<port>-<sandboxID>.<domain>", or "" when host is not one.
 //
 // Matching on this shape rather than on the configured sandbox domain is
@@ -67,7 +68,7 @@ func (r *InboundTokenRegistry) Delete(sandboxID string) {
 // the SDK resolve its own default, and a domain-based check would then never
 // fire. The registry lookup is the real authority — only sandboxes WeKnora
 // created with inbound closed are in it.
-func SandboxIDFromDataPlaneHost(host string) string {
+func sandboxIDFromDataPlaneHost(host string) string {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
 		return ""

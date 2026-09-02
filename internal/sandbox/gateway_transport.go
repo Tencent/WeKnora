@@ -193,7 +193,7 @@ func (t *gatewaySplitTransport) withInboundToken(req *http.Request) *http.Reques
 	if t.inboundToken == nil || req.Header.Get(InboundTokenHeader) != "" {
 		return req
 	}
-	sandboxID := SandboxIDFromDataPlaneHost(req.URL.Host)
+	sandboxID := sandboxIDFromDataPlaneHost(req.URL.Host)
 	if sandboxID == "" {
 		return req
 	}
@@ -240,7 +240,7 @@ func (t *gatewaySplitTransport) isDataPlane(host string) bool {
 	if host == "" || (t.controlHost != "" && host == t.controlHost) {
 		return false
 	}
-	return SandboxIDFromDataPlaneHost(host) != ""
+	return sandboxIDFromDataPlaneHost(host) != ""
 }
 
 // CloseIdleConnections keeps the SDK's post-rollback reset meaningful. Only

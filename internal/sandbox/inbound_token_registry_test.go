@@ -10,14 +10,14 @@ import (
 
 func TestSandboxIDFromDataPlaneHost(t *testing.T) {
 	// envd is addressed as "<port>-<sandboxID>.<domain>".
-	require.Equal(t, "sb-123", SandboxIDFromDataPlaneHost("49983-sb-123.cube.app"))
-	require.Equal(t, "i9x8", SandboxIDFromDataPlaneHost("80-i9x8.e2b.app"))
-	require.Equal(t, "sb-1", SandboxIDFromDataPlaneHost("49983-sb-1.gateway.internal:8443"))
+	require.Equal(t, "sb-123", sandboxIDFromDataPlaneHost("49983-sb-123.cube.app"))
+	require.Equal(t, "i9x8", sandboxIDFromDataPlaneHost("80-i9x8.e2b.app"))
+	require.Equal(t, "sb-1", sandboxIDFromDataPlaneHost("49983-sb-1.gateway.internal:8443"))
 	// Control-plane and malformed authorities carry no sandbox.
-	require.Empty(t, SandboxIDFromDataPlaneHost("api.e2b.app"))
-	require.Empty(t, SandboxIDFromDataPlaneHost("notaport-sb-1.cube.app"))
-	require.Empty(t, SandboxIDFromDataPlaneHost("49983-.cube.app"))
-	require.Empty(t, SandboxIDFromDataPlaneHost(""))
+	require.Empty(t, sandboxIDFromDataPlaneHost("api.e2b.app"))
+	require.Empty(t, sandboxIDFromDataPlaneHost("notaport-sb-1.cube.app"))
+	require.Empty(t, sandboxIDFromDataPlaneHost("49983-.cube.app"))
+	require.Empty(t, sandboxIDFromDataPlaneHost(""))
 }
 
 func TestInboundTokenRegistryLifecycle(t *testing.T) {
@@ -40,7 +40,7 @@ func TestInboundTokenRegistryNormalizesSandboxIDCase(t *testing.T) {
 	registry.Put("Sb-MiXeD", "token-1")
 
 	require.Equal(t, "token-1", registry.Get("Sb-MiXeD"))
-	sandboxID := SandboxIDFromDataPlaneHost("49983-SB-MIXED.e2b.app")
+	sandboxID := sandboxIDFromDataPlaneHost("49983-SB-MIXED.e2b.app")
 	require.Equal(t, "sb-mixed", sandboxID)
 	require.Equal(t, "token-1", registry.Get(sandboxID))
 
