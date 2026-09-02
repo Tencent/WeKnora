@@ -53,6 +53,17 @@ type ImageURL struct {
 	Detail string `json:"detail,omitempty"` // "auto", "low", "high"
 }
 
+// MessageKind marks messages the engine synthesized rather than received from
+// the user or the model. Compaction needs to tell its own summary apart from a
+// real user turn: a summary that looks like ordinary history gets fed back into
+// the next summarization pass and degrades into a summary of a summary.
+type MessageKind string
+
+// MessageKindCompactionSummary marks the message that replaces compacted
+// history. It carries the `user` role because that is where providers expect
+// conversation history, so the role alone cannot identify it.
+const MessageKindCompactionSummary MessageKind = "compaction_summary"
+
 // Message 表示聊天消息
 type Message struct {
 	Role         string               `json:"role"`                    // 角色：system, user, assistant, tool
@@ -67,6 +78,10 @@ type Message struct {
 	// 把 assistant 的 reasoning_content 原样回传，否则会以 400 拒绝请求；其他不要求的供应商
 	// 会忽略未知字段，无副作用。
 	ReasoningContent string `json:"reasoning_content,omitempty"`
+	// Kind is engine-internal bookkeeping. `json:"-"` keeps it off the wire:
+	// providers reject unknown message fields on some endpoints, and this one
+	// means nothing to them anyway.
+	Kind MessageKind `json:"-"`
 }
 
 // ToolCall represents a tool call in a message

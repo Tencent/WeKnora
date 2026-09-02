@@ -97,7 +97,7 @@ Now generate the final answer:`, query, imageRequirement)
 	logger.Debugf(ctx, "[Agent][FinalAnswer] AnswerID: %s", answerID)
 	answerDoneEmitted := false
 
-	budget := e.getCompletionTokenBudget()
+	budget := e.clampCompletionBudgetToContext(e.tokenEstimator.EstimateMessages(messages))
 	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,

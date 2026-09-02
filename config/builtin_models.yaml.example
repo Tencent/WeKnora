@@ -39,6 +39,7 @@ builtin_models: []
 #       base_url: ${LLM_BASE_URL}
 #       api_key: ${LLM_API_KEY}
 #       provider: ${LLM_PROVIDER}  # openai | generic | aliyun | moonshot | ...
+#       context_window: 200000     # optional; omit to use the 200K default
 #
 #   - id: builtin-embedding-default
 #     type: Embedding
@@ -73,3 +74,4 @@ builtin_models: []
 #       base_url: https://api.openai.com/v1
 #       api_key: ${OPENAI_API_KEY}
 #       provider: openai
+#       context_window: 200000     # optional; omit to use the 200K default

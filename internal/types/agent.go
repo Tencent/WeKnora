@@ -8,8 +8,28 @@ import (
 	"time"
 )
 
-// DefaultMaxContextTokens is the default context window budget for agent conversations (200k).
+// DefaultMaxContextTokens is the context window assumed for a model that does
+// not declare one. 200k matches typical windows on current chat/VLM models
+// (GPT-4.1, Claude, Gemini, Qwen, etc.).
+//
+// It is still below the largest windows on the market. Guessing high is
+// the dangerous direction: compaction never fires, and the first sign of
+// trouble is the provider rejecting the request. Guessing low only costs some
+// history that would have fit.
 const DefaultMaxContextTokens = 200000
+
+// AgentMaxContextTokens picks the context window for one agent run. An
+// explicit agent setting wins, then whatever the model declares, then the
+// assumed default.
+func AgentMaxContextTokens(configured, modelContextWindow int) int {
+	if configured > 0 {
+		return configured
+	}
+	if modelContextWindow > 0 {
+		return modelContextWindow
+	}
+	return DefaultMaxContextTokens
+}
 
 // DefaultSmartReasoningMaxCompletionTokens is the per-round budget when the
 // agent cannot emit write_sandbox_file / edit_sandbox_file. 4096 matches
@@ -52,19 +72,40 @@ func AgentRoundMaxCompletionTokens(configured int) int {
 	return AgentRoundMaxCompletionTokensFor(configured, "")
 }
 
+// MinSandboxWriteCompletionTokens is the floor applied to an explicitly
+// configured per-round budget when a sandbox is bound. write_sandbox_file and
+// edit_sandbox_file carry the whole file body inside the tool-call JSON, so a
+// cap sized for ordinary chat truncates the arguments mid-string on every
+// attempt — the agent then burns its rounds rewriting a file it can never
+// finish. Below this the setting is not a preference, it is a deadlock.
+const MinSandboxWriteCompletionTokens = 8192
+
 // AgentRoundMaxCompletionTokensFor is AgentRoundMaxCompletionTokens with
-// the agent's sandbox: unset + sandbox uses the large write-file budget.
+// the agent's sandbox: unset + sandbox uses the large write-file budget, and a
+// configured value too small to hold a file write is raised to the floor.
 func AgentRoundMaxCompletionTokensFor(configured int, sandboxConfigID string) int {
 	if configured > 0 {
+		if NeedsSandboxWriteCompletionBudget(sandboxConfigID) &&
+			configured < MinSandboxWriteCompletionTokens {
+			return MinSandboxWriteCompletionTokens
+		}
 		return configured
 	}
 	return DefaultMaxCompletionTokens(AgentModeSmartReasoning, sandboxConfigID)
 }
 
+// UnlimitedMaxIterations is the stored MaxIterations value meaning the ReAct
+// loop has no round cap. Zero still means "unset, apply default" so agents
+// that omit the field keep their current behaviour.
+const UnlimitedMaxIterations = -1
+
 // AgentConfig represents the full agent configuration (used at tenant level and runtime)
 // This includes all configuration parameters for agent execution
 type AgentConfig struct {
-	MaxIterations  int      `json:"max_iterations"`          // Maximum number of ReAct iterations
+	// MaxIterations caps ReAct rounds. Zero is unset (filled with a default);
+	// a negative value is unlimited — the loop runs until the model stops,
+	// the user cancels, or another guard fires. See UnlimitedMaxIterations.
+	MaxIterations  int      `json:"max_iterations"`
 	AllowedTools   []string `json:"allowed_tools"`           // List of allowed tool names
 	Temperature    float64  `json:"temperature"`             // LLM temperature for agent
 	KnowledgeBases []string `json:"knowledge_bases"`         // Accessible knowledge base IDs
@@ -130,10 +171,15 @@ type AgentConfig struct {
 	// Outputs exceeding this limit are truncated with head + tail preservation.
 	MaxToolOutputChars int `json:"max_tool_output_chars,omitempty"`
 
-	// Maximum context window tokens for the agent (default: 200000).
-	// The agent compresses older messages to stay within this limit,
-	// preserving tool_call/tool_result pairs.
+	// Maximum context window tokens for the agent. Zero means "use the
+	// model's context_window, or DefaultMaxContextTokens (200000)".
 	MaxContextTokens int `json:"max_context_tokens,omitempty"`
+
+	// How much recent conversation a compaction keeps verbatim. Zero means
+	// compaction.DefaultKeepRecentTokens, scaled down on small windows. This
+	// is the knob that decides how often compaction runs: whatever the context
+	// grew to, it comes out of a compaction at roughly this size.
+	CompactionKeepRecentTokens int `json:"compaction_keep_recent_tokens,omitempty"`
 
 	// Whether to execute independent tool calls in parallel (default: false).
 	// When enabled and the LLM returns multiple tool calls, they run concurrently via errgroup.
@@ -185,6 +231,11 @@ func (c *AgentConfig) SkillInstallDir() string {
 		return ""
 	}
 	return c.skillInstallDir
+}
+
+// UnlimitedIterations reports whether the ReAct loop has no round cap.
+func (c *AgentConfig) UnlimitedIterations() bool {
+	return c != nil && c.MaxIterations < 0
 }
 
 // CitationsEnabled preserves citation output for legacy runtime configs that

@@ -1116,7 +1116,7 @@ export default {
       rewriteSystemPrompt: '用于问题改写的系统提示词（留空使用默认）',
       rewriteUserPrompt: '用于问题改写的用户提示词模板（留空使用默认）',
       selectTools: '选择 Agent 可以使用的工具',
-      maxIterations: 'Agent 执行任务时的最大推理步骤数',
+      maxIterations: '限制 Agent 单次任务的推理步数。选「不限制」时会一直跑到模型自然结束或你手动停止。',
       kbScope: '选择智能体可访问的知识库范围',
       webSearch: '启用后智能体可以搜索互联网获取信息',
       webSearchProvider: '为此智能体指定搜索引擎，留空则使用默认搜索引擎',
@@ -2218,7 +2218,7 @@ export default {
       desc: '用于 Agent 推理和规划的 LLM 模型'
     },
     maxIterations: {
-      desc: 'Agent 执行任务时的最大推理步骤数'
+      desc: '限制 Agent 单次任务的推理步数。选「不限制」时会一直跑到模型自然结束或你手动停止。'
     },
     modelRecommendation: {
       title: '模型推荐'
@@ -2373,6 +2373,11 @@ export default {
       dimensionOverrideDesc: '仅在确认该模型支持 dimensions 参数时开启；默认只使用检测到的实际维度。',
       supportsVisionLabel: '支持视觉/多模态',
       supportsVisionDesc: '模型是否支持图片等多模态输入',
+      contextWindowLabel: '上下文窗口',
+      contextWindowPlaceholder: '默认 {value}',
+      contextWindowDesc: '该模型一次请求能容纳的 token 数。智能体压缩对话历史会按此上限工作。留空则使用默认 200000（200K）。请按厂商文档填写真实值，填大会导致压缩不触发、上游直接拒绝请求。',
+      contextWindowDefaultHint: '未设置，使用默认 {value}',
+      contextWindowTokens: '{count} tokens',
       maxConcurrencyLabel: '后台并发上限',
       maxConcurrencyPlaceholder: '0 表示使用全局默认',
       maxConcurrencyDesc: '限制文档入库/富化等后台任务对该模型的并发调用数（按模型全副本共享）。0 或留空表示沿用全局默认；不影响交互式对话。',
@@ -5719,6 +5724,9 @@ export default {
     toolCalls: '调用 <strong>{tools}</strong> 次工具',
     durationSuffix: '耗时 <strong>{duration}</strong>',
     stepSummarySeparator: ' · ',
+    contextCompacted: '压缩上下文',
+    contextCompactedSummary: '{before} → {after} tokens',
+    contextCompactedDegraded: '摘要不可用，已保留原始记录',
     title: '智能体',
     subtitle: '配置和管理您的智能体，自定义对话行为和能力',
     createAgent: '创建智能体',
@@ -5818,6 +5826,8 @@ export default {
       rerankModelPlaceholder: '请选择 ReRank 模型',
       rerankModelOptionalHint: '当前作用域内暂无 RAG 类型知识库，可不填；后续若加入 RAG 知识库，将自动使用空间默认重排模型，仍建议显式配置。',
       maxIterations: '最大迭代次数',
+      maxIterationsLimit: '限制',
+      maxIterationsUnlimited: '不限制',
       allowedTools: '允许的工具',
       multiTurn: '多轮对话',
       historyTurns: '保留轮数',

@@ -155,6 +155,9 @@ var shellExecTool = BaseTool{
   never into ` + "`/opt/weknora/tenant/skills`" + `. The skill venv is frozen after
   install. ` + "`apt-get`" + ` is only for a system library this task actually needs,
   not to recover from probing with a missing inspection command.
+- The sandbox is one long-lived session: files written and packages installed by
+  an earlier call are still there for later ` + "`shell_exec`" + ` and
+  ` + "`execute_skill_script`" + ` calls. Do not redo setup you already did.
 
 ## When to Use
 - Whenever executing a command is the most direct way to complete the task.
@@ -163,13 +166,17 @@ var shellExecTool = BaseTool{
   intermediate files for later commands or skills.
 
 ## When NOT to Use
-- DO NOT judge a skill's dependencies with a bare ` + "`python3 -c`" + ` or
-  ` + "`node -e`" + `, and do NOT inspect a skill-generated docx/pptx/xlsx that way
-  either: system ` + "`python3`" + ` has none of the skill's packages (` + "`docx`" + `,
-  ` + "`pptx`" + `, pandas, …). Do not ` + "`pip install`" + ` them here, and do not
-  paste the same program into ` + "`.venv/bin/python -c`" + `. Write the script
-  with ` + "`write_sandbox_file`" + ` and run it with
-  ` + "`execute_skill_script(skill_name=..., script_path=/workspace/output/... )`" + `.
+- DO NOT run ANY script that needs a skill's packages (` + "`docx`" + `,
+  ` + "`pptx`" + `, pandas, …) from here — generating a file counts, not just
+  inspecting one. System ` + "`python3`" + ` has none of them. Write the script with
+  ` + "`write_sandbox_file`" + ` and run it with
+  ` + "`execute_skill_script(skill_name=..., script_path=/workspace/output/... )`" + `,
+  which uses the skill's own interpreter and sets ` + "`PYTHONPATH`" + ` / ` + "`NODE_PATH`" + `
+  for you. Do NOT wire that environment by hand
+  (` + "`PYTHONPATH=... python3 script.py`" + `, or calling ` + "`.venv/bin/python`" + `
+  directly): the skill's interpreter already carries what was installed with it,
+  so the hand-wired version just makes you reinstall it. Also do not judge a
+  skill's dependencies with a bare ` + "`python3 -c`" + ` / ` + "`node -e`" + `.
   ` + "`read_skill`" + ` names the skill and how to reach its environment.
 - DO NOT ` + "`chown`" + ` / ` + "`chmod`" + ` / ` + "`ensurepip`" + ` / ` + "`pip install`" + ` a skill
   under ` + "`/opt/weknora/tenant/skills`" + `. That tree is read-only after install
@@ -193,7 +200,9 @@ var shellExecTool = BaseTool{
 - ` + "`command`" + ` (required): the shell one-liner to run under ` + "`/bin/bash -l -c`" + `.
   Supports pipes, redirects, ` + "`&&`" + ` / ` + "`||`" + ` chaining. Keep this short;
   large scripts go through ` + "`write_sandbox_file`" + `; small edits go through
-  ` + "`edit_sandbox_file`" + `.
+  ` + "`edit_sandbox_file`" + `. Watch the quoting: never nest an ASCII
+  ` + "`\"`" + ` inside ` + "`\"...\"`" + ` (or ` + "`'`" + ` inside ` + "`'...'`" + `) —
+  use the other quote, and 「」 for Chinese quotation marks.
 - ` + "`work_dir`" + ` (optional): an absolute path under ` + "`/workspace`" + `,
   defaulting to ` + "`/workspace`" + ` itself — omit it unless the command has to
   run in another directory. Created on demand if it doesn't exist.

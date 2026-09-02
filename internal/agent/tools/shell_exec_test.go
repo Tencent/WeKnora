@@ -234,6 +234,33 @@ func TestShellExecDescriptionSupportsGeneralExploration(t *testing.T) {
 	assert.NotContains(t, description, "If a 'command not found' error occurs, attempt to resolve it")
 }
 
+// The system prompt used to repeat all of this in its shell_exec bullets. The
+// description ships with the tools on every request, so the second copy only
+// spent tokens twice and gave the two wordings room to drift. It was deleted
+// there (TestFormatSkillsMetadataIncludesShellGuidanceOnlyWhenEnabled asserts
+// it stays deleted), which makes this the only copy left.
+func TestShellExecDescriptionOwnsItsMechanics(t *testing.T) {
+	description := NewShellExecTool(&fakeShellExecutor{}, nil).Description()
+
+	for _, mechanic := range []string{
+		// Working directory, and why `cd /workspace &&` is dead weight.
+		"Every command already starts in",
+		"do NOT prefix",
+		"work_dir",
+		// Output budget and how a non-zero exit is meant to be read.
+		"max_output_bytes",
+		"non-zero on failure",
+		"is NOT a tool",
+		// Quoting, which decides whether a one-liner even parses.
+		"never nest an ASCII",
+		"「」",
+		// Session lifetime, so setup is not redone every call.
+		"one long-lived session",
+	} {
+		assert.Contains(t, description, mechanic, "moved out of the system prompt, must live here")
+	}
+}
+
 func TestShellExecBoundsStdoutStderrErrorAndTotal(t *testing.T) {
 	executor := &fakeShellExecutor{result: &sandbox.ExecuteResult{
 		Stdout: strings.Repeat("o", 100*1024),

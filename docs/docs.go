@@ -17912,7 +17912,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "max_iterations": {
-                    "description": "===== Agent Mode Settings =====\nMaximum iterations for ReAct loop (only for agent type)",
+                    "description": "===== Agent Mode Settings =====\nMaximum ReAct iterations. -1 is unlimited; 0 is unset (default applied).",
                     "type": "integer"
                 },
                 "mcp_auth_wait_timeout": {

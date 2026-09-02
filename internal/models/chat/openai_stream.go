@@ -130,10 +130,15 @@ func (c *RemoteAPIChat) processStream(
 					FinishReason: state.lastFinishReason,
 				}
 			} else {
+				logger.Errorf(ctx, "Stream read error: %v (tool_calls_assembled=%d)",
+					err, len(state.toolCallMap))
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeError,
 					Content:      err.Error(),
 					Done:         true,
+					ToolCalls:    state.buildOrderedToolCalls(),
+					Usage:        state.usage,
+					FinishReason: types.FinishReasonIncomplete,
 				}
 			}
 			return
@@ -181,11 +186,15 @@ func (c *RemoteAPIChat) processRawHTTPStream(
 					Usage:        state.usage,
 				}
 			} else {
-				logger.Errorf(ctx, "Stream read error: %v", err)
+				logger.Errorf(ctx, "Stream read error: %v (tool_calls_assembled=%d)",
+					err, len(state.toolCallMap))
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeError,
 					Content:      err.Error(),
 					Done:         true,
+					ToolCalls:    state.buildOrderedToolCalls(),
+					Usage:        state.usage,
+					FinishReason: types.FinishReasonIncomplete,
 				}
 			}
 			return

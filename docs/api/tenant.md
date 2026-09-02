@@ -630,7 +630,7 @@ curl --location --request PUT 'http://localhost:8080/api/v1/tenants/kv/agent-con
 
 **约束**:
 
-- `agent-config`: `max_iterations` 取值范围 `(0, 30]`；`temperature` 取值范围 `[0, 2]`。
+- `agent-config`: `max_iterations` 为正整数时上限 100，`-1` 表示不限制；`temperature` 取值范围 `[0, 2]`。
 - `web-search-config`: `max_results` 取值范围 `[1, 50]`。
 - `conversation-config`: 包含多项阈值校验（如 `keyword_threshold` / `vector_threshold` ∈ `[0, 1]`，`rerank_threshold` ∈ `[-10, 10]`，`temperature` ∈ `[0, 2]`，`max_completion_tokens` ∈ `[1, 100000]` 等）。
 - `retrieval-config`: `embedding_top_k` / `rerank_top_k` ∈ `[0, 200]`；阈值范围同上。

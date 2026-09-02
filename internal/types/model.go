@@ -134,6 +134,15 @@ type ModelParameters struct {
 	// 保留字段（Authorization、api-key、Content-Type、Accept 等）会在运行期被忽略以避免破坏签名/鉴权流程。
 	CustomHeaders  map[string]string `yaml:"custom_headers,omitempty" json:"custom_headers,omitempty"`
 	SupportsVision bool              `yaml:"supports_vision"      json:"supports_vision"` // Whether the model accepts image/multimodal input
+	// ContextWindow is the model's total context window in tokens and
+	// MaxOutputTokens the most it emits in one response. Both are provider
+	// facts the agent cannot discover but has to act on: the context window is
+	// what decides when conversation history gets compacted, and assuming a
+	// window larger than the real one means compaction never fires and the
+	// provider rejects the request mid-conversation instead. 0 means unknown,
+	// which falls back to DefaultMaxContextTokens.
+	ContextWindow   int `yaml:"context_window,omitempty"    json:"context_window,omitempty"`
+	MaxOutputTokens int `yaml:"max_output_tokens,omitempty" json:"max_output_tokens,omitempty"`
 	// MaxConcurrency caps concurrent in-flight BACKGROUND (ingestion /
 	// enrichment) calls to THIS specific model, keyed by model ID and shared
 	// across all replicas. 0 (the default) means "fall back to the

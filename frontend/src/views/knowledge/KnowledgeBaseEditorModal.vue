@@ -1604,6 +1604,12 @@ watch(
     }
   }
 )
+
+watch(() => chatResources.allModels, (list) => {
+  if (props.visible) {
+    allModels.value = list || []
+  }
+})
 </script>
 
 <style scoped lang="less">

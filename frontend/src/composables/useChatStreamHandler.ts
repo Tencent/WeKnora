@@ -598,6 +598,27 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         }
         break
       }
+      case 'context_compacted': {
+        // Shown in the timeline rather than swallowed: after a compaction the
+        // agent no longer sees the earlier rounds, and without a marker that
+        // reads as the model ignoring what it was told.
+        if (!message.agentEventStream) message.agentEventStream = []
+        const d = dataPayload || {}
+        ;(message.agentEventStream as ChatMessage[]).push({
+          type: 'context_compacted',
+          event_id: data.id || `compaction-${Date.now()}`,
+          reason: d.reason,
+          round: d.round,
+          tokens_before: d.tokens_before,
+          tokens_after: d.tokens_after,
+          messages_before: d.messages_before,
+          messages_after: d.messages_after,
+          summary: d.summary,
+          degraded: d.degraded,
+          split_turn: d.split_turn,
+        })
+        break
+      }
       case 'tool_approval_required': {
         if (!message.agentEventStream) message.agentEventStream = []
         const d = dataPayload || {}
@@ -970,7 +991,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       data.response_type === 'tool_call' ||
       data.response_type === 'tool_result' ||
       data.response_type === 'reflection' ||
-      data.response_type === 'artifacts_pending'
+      data.response_type === 'artifacts_pending' ||
+      data.response_type === 'context_compacted'
 
     const lastMessage = messagesList[messagesList.length - 1]
     const isCurrentlyAgentMode = lastMessage?.isAgentMode === true

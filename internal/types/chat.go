@@ -240,6 +240,11 @@ const (
 	// MemoryRecalled: the long-term memories injected into this answer, so
 	// the UI can show and let the user delete what influenced it.
 	ResponseTypeMemoryRecalled ResponseType = "memory_recalled"
+	// ResponseTypeContextCompacted is older conversation summarized away to
+	// fit the context window. Surfaced because it changes what the agent
+	// remembers — an answer that forgets an earlier instruction is otherwise
+	// indistinguishable from the model ignoring it.
+	ResponseTypeContextCompacted ResponseType = "context_compacted"
 	// ResponseTypeInstallPrompt is the instruction a skill install handed to
 	// the installer agent. Only the skill install transcript emits this, and
 	// it emits it first, so replaying the log alone shows what was asked for
@@ -249,6 +254,12 @@ const (
 )
 
 // StreamResponse stream response
+// FinishReasonIncomplete marks a stream that broke before the provider sent a
+// finish reason (read error, timeout, stall). Whatever content and tool calls
+// were collected are a partial response: callers must not treat them as a
+// completed turn.
+const FinishReasonIncomplete = "incomplete"
+
 type StreamResponse struct {
 	ID                  string                 `json:"id"`
 	ResponseType        ResponseType           `json:"response_type"`

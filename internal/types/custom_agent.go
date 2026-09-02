@@ -134,7 +134,9 @@ type CustomAgentConfig struct {
 	CitationEnabled *bool `yaml:"citation_enabled" json:"citation_enabled"`
 
 	// ===== Agent Mode Settings =====
-	// Maximum iterations for ReAct loop (only for agent type)
+	// Maximum iterations for the ReAct loop. Zero is unset (filled with a
+	// default). A negative value is unlimited: the loop runs until the model
+	// stops, the user cancels, or another guard fires.
 	MaxIterations int `yaml:"max_iterations" json:"max_iterations"`
 	// Timeout for a single LLM call in seconds (0 = use global default)
 	LLMCallTimeout int `yaml:"llm_call_timeout" json:"llm_call_timeout,omitempty"`
@@ -500,6 +502,9 @@ func (a *CustomAgent) EnsureDefaults() {
 	}
 	if a.Config.MaxIterations == 0 {
 		a.Config.MaxIterations = 10
+	}
+	if a.Config.MaxIterations < 0 {
+		a.Config.MaxIterations = UnlimitedMaxIterations
 	}
 	if a.Config.WebSearchMaxResults == 0 {
 		a.Config.WebSearchMaxResults = 5
