@@ -59,6 +59,20 @@ type SessionSandboxBinding struct {
 	// since replaced. The sandbox keeps serving until the session's next
 	// resolve, which destroys and recreates it; see InvalidateByConfig.
 	StaleAt *time.Time `json:"stale_at,omitempty"`
+
+	// TrafficAccessToken is the per-sandbox inbound credential issued at
+	// create time when the config closed public inbound access. The provider
+	// issues it exactly once and does not repeat it on connect or resume, so
+	// this binding is the only place it can survive a pause or a WeKnora
+	// restart.
+	//
+	// Stored as-is. It is a bearer credential, so the Redis instance holding
+	// these bindings must be access-controlled — it already holds the
+	// session-to-sandbox ownership anyway. Never log the binding payload.
+	//
+	// Empty for sandboxes created with public inbound allowed, and for
+	// bindings written before this field existed; both are valid.
+	TrafficAccessToken string `json:"traffic_access_token,omitempty"`
 }
 
 // Validate checks a binding against the current schema and authoritative key.

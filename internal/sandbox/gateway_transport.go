@@ -40,8 +40,9 @@ import (
 // clients. One instance lives for the process; clients built from it come and
 // go.
 type SandboxGatewayTransportPool struct {
-	control http.RoundTripper
-	policy  OutboundURLPolicy
+	control       http.RoundTripper
+	policy        OutboundURLPolicy
+	inboundTokens *InboundTokenRegistry
 
 	// data maps a gateway "host:port" to the transport that dials it.
 	data sync.Map
@@ -60,7 +61,17 @@ func NewSandboxGatewayTransportPoolWithPolicy(
 	if control == nil {
 		control = NewGuardedTransportWithPolicy(policy)
 	}
-	return &SandboxGatewayTransportPool{control: control, policy: policy}
+	return &SandboxGatewayTransportPool{
+		control:       control,
+		policy:        policy,
+		inboundTokens: NewInboundTokenRegistry(),
+	}
+}
+
+// InboundTokens is the registry the data-plane transport consults to attach a
+// sandbox's inbound credential. Adapters register on create / connect.
+func (p *SandboxGatewayTransportPool) InboundTokens() *InboundTokenRegistry {
+	return p.inboundTokens
 }
 
 // RoundTripperFor returns the transport a client built from cfg should use.
@@ -71,6 +82,7 @@ func (p *SandboxGatewayTransportPool) RoundTripperFor(cfg *Config) http.RoundTri
 	split := &gatewaySplitTransport{
 		control:       p.control,
 		sandboxDomain: strings.ToLower(strings.TrimSpace(sandboxDomain)),
+		inboundToken:  p.inboundTokens,
 	}
 	if host, port, scheme, ok := parseProxyURL(gatewayURL); ok {
 		split.data = p.dataTransport(net.JoinHostPort(host, strconv.Itoa(port)))
@@ -135,6 +147,7 @@ type gatewaySplitTransport struct {
 	control       http.RoundTripper
 	data          http.RoundTripper
 	sandboxDomain string
+	inboundToken  *InboundTokenRegistry
 
 	// dataScheme is the gateway's scheme. When it differs from the scheme the
 	// SDK hardcoded, data-plane requests are rewritten before dialling.
@@ -142,10 +155,36 @@ type gatewaySplitTransport struct {
 }
 
 func (t *gatewaySplitTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = t.withInboundToken(req)
 	if t.data == nil || !t.isDataPlane(req.URL.Hostname()) {
 		return t.control.RoundTrip(req)
 	}
 	return t.data.RoundTrip(t.applyGatewayScheme(req))
+}
+
+// withInboundToken attaches the sandbox's inbound credential when one is
+// registered. It runs before the data/control split because a deployment
+// without a gateway URL keeps sandbox traffic on the control transport, and
+// those requests need the header just as much.
+//
+// An existing header wins: Cube's SDK sets it from the sandbox object, and
+// overwriting that with our copy would turn a fresh token into a stale one.
+func (t *gatewaySplitTransport) withInboundToken(req *http.Request) *http.Request {
+	if t.inboundToken == nil || req.Header.Get(InboundTokenHeader) != "" {
+		return req
+	}
+	sandboxID := SandboxIDFromDataPlaneHost(req.URL.Host)
+	if sandboxID == "" {
+		return req
+	}
+	token := t.inboundToken.Get(sandboxID)
+	if token == "" {
+		return req
+	}
+	// Clone rather than mutate: the caller owns req, and the SDK may retry it.
+	cloned := req.Clone(req.Context())
+	cloned.Header.Set(InboundTokenHeader, token)
+	return cloned
 }
 
 // applyGatewayScheme returns req addressed with the gateway's scheme. The

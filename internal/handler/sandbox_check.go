@@ -56,6 +56,9 @@ const (
 	skipReasonControlPlaneUnreachable = "control_plane_unreachable"
 	skipReasonSandboxNotCreated       = "sandbox_not_created"
 	skipReasonSandboxExecFailed       = "sandbox_exec_failed"
+	// The config denies egress by default, so a probe that cannot reach the
+	// internet is the policy working as configured, not a fault.
+	skipReasonEgressRestrictedByPolicy = "egress_restricted_by_policy"
 )
 
 // SandboxCheckResponse aggregates the probes for one sandbox configuration.
@@ -267,6 +270,9 @@ func (h *SystemHandler) runDeepSandboxCheck(
 
 	handle, err := client.Create(probeCtx, sandbox.RemoteCreateRequest{
 		TemplateID: sandbox.EffectiveTemplateID(cfg),
+		// Probe under the admin's policy: the point of this check is whether
+		// THIS config works, not whether the provider's default does.
+		Network: cfg.Network,
 		Timeout: sandbox.RemoteTimeoutPolicy{
 			Mode:   sandbox.RemoteTimeoutExplicit,
 			Value:  2 * time.Minute,
@@ -334,7 +340,7 @@ func (h *SystemHandler) runDeepSandboxCheck(
 		result.add("sandbox_exec", true, "", latency)
 	}
 
-	h.probeSandboxEgress(probeCtx, client, handle, result)
+	h.probeSandboxEgress(probeCtx, client, handle, cfg.Network, result)
 }
 
 // egressProbeTargets are tried in order; the first reachable one passes
@@ -355,6 +361,7 @@ func (h *SystemHandler) probeSandboxEgress(
 	ctx context.Context,
 	client sandbox.RemoteSandboxClient,
 	handle sandbox.RemoteSandboxHandle,
+	policy sandbox.RemoteNetworkPolicy,
 	result *SandboxCheckResponse,
 ) {
 	// Echo which target succeeded so the UI message is actionable when
@@ -377,11 +384,11 @@ func (h *SystemHandler) probeSandboxEgress(
 	latency := time.Since(start).Milliseconds()
 	switch {
 	case err != nil:
-		result.add("egress_available", false, sandboxCheckReason(err), latency)
+		reportEgressProbe(result, policy, false, sandboxCheckReason(err), latency)
 	case execResult == nil:
-		result.add("egress_available", false, "出网探测无返回", latency)
+		reportEgressProbe(result, policy, false, "出网探测无返回", latency)
 	case execResult.Killed:
-		result.add("egress_available", false, "出网探测超时", latency)
+		reportEgressProbe(result, policy, false, "出网探测超时", latency)
 	case execResult.ExitCode != 0:
 		msg := strings.TrimSpace(execResult.Stderr)
 		if msg == "" {
@@ -390,14 +397,47 @@ func (h *SystemHandler) probeSandboxEgress(
 		if msg == "" {
 			msg = "国内与国际探测目标均不可达"
 		}
-		result.add("egress_available", false, msg, latency)
+		reportEgressProbe(result, policy, false, msg, latency)
 	default:
 		hit := strings.TrimSpace(execResult.Stdout)
 		if hit == "" {
 			hit = "ok"
 		}
-		result.add("egress_available", true, "reachable via "+hit, latency)
+		reportEgressProbe(result, policy, true, "reachable via "+hit, latency)
 	}
+}
+
+// reportEgressProbe records the outbound-connectivity probe. Under a
+// deny-by-default policy a blocked probe is the expected outcome — the probe
+// target is not on the admin's allow list — so it is reported as "restricted
+// by policy" instead of failing the whole check. Only a config that allows
+// public egress can fail this probe.
+func reportEgressProbe(
+	result *SandboxCheckResponse,
+	policy sandbox.RemoteNetworkPolicy,
+	reachable bool,
+	detail string,
+	latencyMS int64,
+) {
+	if reachable {
+		result.add("egress_available", true, detail, latencyMS)
+		return
+	}
+	if !policy.DeniesEgressByDefault() {
+		result.add("egress_available", false, detail, latencyMS)
+		return
+	}
+	allowed := "（未配置放行目标）"
+	if len(policy.AllowOut) > 0 {
+		allowed = strings.Join(policy.AllowOut, "、")
+	}
+	result.Checks = append(result.Checks, SandboxCheckItem{
+		Name:      "egress_available",
+		OK:        nil,
+		Reason:    skipReasonEgressRestrictedByPolicy,
+		Message:   "该配置默认拒绝出网，仅放行：" + allowed,
+		LatencyMS: latencyMS,
+	})
 }
 
 // explainSandboxCreateFailure turns a failed sandbox creation into a cause the

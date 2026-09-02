@@ -2,7 +2,9 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -318,6 +320,52 @@ func TestSessionSandboxBindingValidation(t *testing.T) {
 	for _, binding := range tests {
 		require.Error(t, binding.Validate(key), "binding must be rejected: %+v", binding)
 	}
+}
+
+// Bindings written before this field existed must stay usable: their sandboxes
+// were created while inbound access was still open, so an empty token is the
+// correct value rather than a corrupt one.
+func TestSessionSandboxBindingWithoutTrafficTokenStaysValid(t *testing.T) {
+	key := SessionSandboxKey{TenantID: 1, SessionID: "session-1"}
+	raw := []byte(`{
+		"version": ` + strconv.Itoa(SessionSandboxBindingVersion) + `,
+		"provider": "cube",
+		"tenant_id": 1,
+		"session_id": "session-1",
+		"sandbox_id": "sandbox-1",
+		"template_id": "tpl-1",
+		"created_at": "2026-01-01T00:00:00Z"
+	}`)
+
+	var binding SessionSandboxBinding
+	require.NoError(t, json.Unmarshal(raw, &binding))
+	require.NoError(t, binding.Validate(key))
+	require.Empty(t, binding.TrafficAccessToken)
+}
+
+func TestSessionSandboxBindingOmitsEmptyTrafficToken(t *testing.T) {
+	encoded, err := json.Marshal(SessionSandboxBinding{
+		Version: SessionSandboxBindingVersion, Provider: SandboxTypeCube,
+		TenantID: 1, SessionID: "s", SandboxID: "sb", TemplateID: "tpl",
+		CreatedAt: time.Unix(0, 0).UTC(),
+	})
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "traffic_access_token")
+}
+
+func TestSessionSandboxBindingRoundTripsTrafficToken(t *testing.T) {
+	const token = "traffic-token"
+	encoded, err := json.Marshal(SessionSandboxBinding{
+		Version: SessionSandboxBindingVersion, Provider: SandboxTypeCube,
+		TenantID: 1, SessionID: "s", SandboxID: "sb", TemplateID: "tpl",
+		TrafficAccessToken: token, CreatedAt: time.Unix(0, 0).UTC(),
+	})
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"traffic_access_token"`)
+
+	var decoded SessionSandboxBinding
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	require.Equal(t, token, decoded.TrafficAccessToken)
 }
 
 func TestMemoryLifecycleLockSerializesSameKey(t *testing.T) {

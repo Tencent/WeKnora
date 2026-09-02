@@ -602,7 +602,7 @@ func TestDockerClientConnectRestartsStoppedContainer(t *testing.T) {
 	}
 	docker := newTestDockerClient(t, engine)
 
-	handle, err := docker.Connect(context.Background(), "container-1")
+	handle, err := docker.Connect(context.Background(), RemoteConnectRequest{SandboxID: "container-1"})
 	require.NoError(t, err)
 	require.Equal(t, "container-1", handle.ID())
 	require.Equal(t, []string{"container-1"}, engine.started)
@@ -618,7 +618,7 @@ func TestDockerClientConnectUnpausesPausedContainer(t *testing.T) {
 	}
 	docker := newTestDockerClient(t, engine)
 
-	_, err := docker.Connect(context.Background(), "container-1")
+	_, err := docker.Connect(context.Background(), RemoteConnectRequest{SandboxID: "container-1"})
 	require.NoError(t, err)
 	require.Equal(t, []string{"container-1"}, engine.unpaused)
 	require.Empty(t, engine.started)
@@ -628,7 +628,7 @@ func TestDockerClientConnectUnpausesPausedContainer(t *testing.T) {
 // session instead of failing every execution forever.
 func TestDockerClientConnectMissingContainerIsReplaceable(t *testing.T) {
 	docker := newTestDockerClient(t, newFakeDockerEngine())
-	_, err := docker.Connect(context.Background(), "container-gone")
+	_, err := docker.Connect(context.Background(), RemoteConnectRequest{SandboxID: "container-gone"})
 	require.Error(t, err)
 	require.True(t, CanReplaceRemoteBinding(err))
 }
