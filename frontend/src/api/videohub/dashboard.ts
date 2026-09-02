@@ -1,10 +1,41 @@
-import { getMockDashboard } from './mockDashboard'
+import { get, post } from '@/utils/request'
 import type { DashboardPayload, DashboardRequest } from '@/types/videohub'
+import { validateDashboardRequest } from './dashboardValidation'
 
 export async function fetchDashboard(req: DashboardRequest): Promise<DashboardPayload> {
-  if (req.range === 'custom' && (!req.from || !req.to)) return Promise.reject(new Error('请选择自定义日期范围'))
-  if (req.range === 'custom' && Date.parse(req.from!) > Date.parse(req.to!)) return Promise.reject(new Error('开始日期不能晚于结束日期'))
-  if (req.range === 'custom' && (Date.parse(`${req.to!}T00:00:00Z`) - Date.parse(`${req.from!}T00:00:00Z`)) / 86400000 >= 90) return Promise.reject(new Error('自定义时间范围最长 90 天'))
-  await Promise.resolve()
-  return getMockDashboard(req)
+  validateDashboardRequest(req)
+  const response = await get<{ success: boolean; data?: DashboardPayload; error?: string }>('/api/custom/dashboard', {
+    params: { range: req.range, from: req.from, to: req.to },
+  })
+  if (!response.success || !response.data) throw new Error(response.error || '提问看板加载失败')
+  return response.data
+}
+
+export interface DashboardQuestionEventInput {
+  event_id: string
+  session_id: string
+  video_id?: string
+  video_seconds?: number
+  question: string
+}
+
+export async function recordDashboardQuestion(input: DashboardQuestionEventInput): Promise<void> {
+  await post('/api/custom/dashboard/questions', input)
+}
+
+export interface ChatSourceAuditInput {
+  event_id: string
+  session_id: string
+  scope: 'global' | 'video'
+  video_id?: string
+  source_mode: 'wiki' | 'chunk' | 'wiki_and_chunk' | 'none'
+  fallback_used: boolean
+  references_found: number
+  wiki_page_ids: string[]
+  knowledge_object_ids: string[]
+  transcript_chunk_ids: string[]
+}
+
+export async function recordChatSourceAudit(input: ChatSourceAuditInput): Promise<void> {
+  await post('/api/custom/chat/source-audit', input)
 }

@@ -6,6 +6,7 @@ export interface KnowledgePoint {
   timestamp: string
   seconds: number
   transcriptSnippet?: string
+  evidenceSentenceIds?: string[]
 }
 
 export type ChapterAlignmentStatus = 'verified' | 'aligned' | 'pending_alignment'
@@ -31,6 +32,7 @@ export interface Chapter {
   knowledge_points: KnowledgePoint[]
   alignment_status?: ChapterAlignmentStatus
   source_content?: ChapterSourceSegment[]
+  evidenceSentenceIds?: string[]
 }
 
 export interface SubtitleCue {
@@ -41,10 +43,18 @@ export interface SubtitleCue {
 
 export interface SummaryEvidence {
   chunkId: string
+  evidenceSentenceId: string
   startSeconds: number
   endSeconds: number
   timestamp: string
   transcriptSnippet: string
+}
+
+export interface SummaryEvidenceRef {
+  chunkId?: string
+  evidenceSentenceId: string
+  startMs: number
+  endMs: number
 }
 
 export type SummaryBlockKind = 'paragraph' | 'bullet'
@@ -54,6 +64,8 @@ export interface SummaryBlock {
   kind: SummaryBlockKind
   text: string
   evidence: SummaryEvidence[]
+  knowledgeRefs?: string[]
+  evidenceRefs?: SummaryEvidenceRef[]
 }
 
 export interface SummarySection {
@@ -70,8 +82,8 @@ export interface ContentState<T> {
   error?: string
 }
 
-export type KnowledgeType = 'entity' | 'concept' | 'case' | 'method' | 'insight'
-export type RelationType = '相同' | '相似' | '补充' | '对比' | '延伸'
+export type KnowledgeType = 'entity' | 'concept' | 'case' | 'methodology' | 'insight'
+export type RelationType = 'contradicts' | 'complements' | 'explains' | 'example_of' | 'part_of' | 'derived_from' | 'supports' | 'related_to'
 
 export interface RelationOverview {
   relation_overview: string
@@ -89,6 +101,7 @@ export interface KnowledgeStructureField {
 export interface WikiDetailLink {
   title: string
   slug?: string
+  targetType?: string
 }
 
 export interface CurrentKnowledgeAnchor {
@@ -97,11 +110,10 @@ export interface CurrentKnowledgeAnchor {
   content: string
   coreContent?: string
   structureFields?: KnowledgeStructureField[]
-  evidenceIds?: string[]
   informationNature?: string
   timeRange?: string
-  relatedKnowledge?: WikiDetailLink[]
-  relatedEntities?: WikiDetailLink[]
+  sourceVideoTitle?: string
+  relatedContent?: WikiDetailLink[]
   timestamp: string
   seconds: number
   related_count: number
@@ -249,19 +261,32 @@ export interface GraphNode {
   video_category?: VideoCategory
   seconds?: number
   link_count?: number
+  is_orphan?: boolean
   type?: string
   knowledge_id?: string
+  wiki_page_id?: string
+  knowledge_object_id?: string
+  audit_status?: 'passed' | 'conditional' | 'failed' | string
   evidence?: GraphEvidence[]
   knowledge_detail?: GraphKnowledgeDetail
 }
 
 export interface GraphKnowledgeDetail {
   id: string
+  knowledge_object_id?: string
   slug?: string
   title: string
   video_id?: string
   video_title?: string
+  source_video_title?: string
+  timestamp?: string
+  seconds?: number
   knowledge_type: KnowledgeType
+  primary_type?: KnowledgeType
+  audit_status?: 'passed' | 'conditional' | 'failed' | string
+  transcript_generation?: string
+  classification_confidence?: number
+  relations?: GraphRelation[]
   entity_sub_type?: 'person' | 'organization' | 'product' | 'technology' | 'industry' | 'place' | string
   page_type?: string
   core_content?: string
@@ -269,8 +294,18 @@ export interface GraphKnowledgeDetail {
   evidence_ids?: string[]
   information_nature?: string
   time_range?: string
-  related_knowledge?: WikiDetailLink[]
-  related_entities?: WikiDetailLink[]
+  related_content?: WikiDetailLink[]
+}
+
+export interface GraphRelation {
+  relation_id?: string
+  relation_type: string
+  target_object_id?: string
+  target_wiki_page_id?: string
+  target_title?: string
+  target_slug?: string
+  evidence_ids?: string[]
+  confidence?: number
 }
 
 export interface GraphEvidence {
@@ -289,6 +324,20 @@ export interface GraphEdge {
   type: string
   weight?: number
   confidence?: number
+  evidence_ids?: string[]
+  relation_kind?: 'semantic' | 'reading' | string
+  relation_source?: 'skill' | 'wiki_link' | string
+  counted?: boolean
+}
+
+export interface GraphReadingAssociation {
+  id: string
+  source: string
+  target: string
+  relation_kind: 'reading' | string
+  relation_source: 'wiki_link' | string
+  target_exists: boolean
+  counted: boolean
 }
 
 export interface WikiGraphMeta {
@@ -299,6 +348,8 @@ export interface WikiGraphMeta {
   center?: string
   depth?: number
   familiar_count?: number
+  semantic_edge_count?: number
+  reading_association_count?: number
 }
 
 export interface WikiGraphRequest {
@@ -311,8 +362,10 @@ export interface WikiGraphRequest {
 }
 
 export interface KnowledgeGraphPayload {
+  knowledge_base_id?: string
   nodes: GraphNode[]
   edges: GraphEdge[]
+  reading_associations?: GraphReadingAssociation[]
   wiki_pages?: GraphKnowledgeDetail[]
   meta: WikiGraphMeta
   attributes: string[]

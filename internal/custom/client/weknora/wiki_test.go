@@ -116,7 +116,7 @@ func TestListByVideoOwnedUsesExplicitOwnershipAndKnowledgeBaseLinks(t *testing.T
 		Content: "知识索引：[[entity/linked]]",
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		require.Equal(t, "entity,concept,case,methodology,insight,index", request.URL.Query().Get("page_type"))
+		require.Equal(t, "entity,concept,index", request.URL.Query().Get("page_type"))
 		_ = json.NewEncoder(writer).Encode(ListPagesResp{
 			Pages: []WikiPage{
 				{ID: "owned", Slug: "entity/owned", PageType: "entity", Content: "---\nsource_video_id: " + videoID + "\n---\nowned"},
@@ -131,7 +131,7 @@ func TestListByVideoOwnedUsesExplicitOwnershipAndKnowledgeBaseLinks(t *testing.T
 	defer server.Close()
 
 	client := NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL})
-	pages, err := client.ListByVideoOwned(t.Context(), "kb-1", videoID, "entity,concept,case,methodology,insight,index", knowledgeBasePage)
+	pages, err := client.ListByVideoOwned(t.Context(), "kb-1", videoID, "entity,concept,index", knowledgeBasePage)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"owned", "linked", "content-owned", "legacy"}, []string{pages[0].ID, pages[1].ID, pages[2].ID, pages[3].ID})
 }

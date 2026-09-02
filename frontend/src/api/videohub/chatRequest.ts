@@ -28,9 +28,9 @@ export function buildChatRequest(
     body: {
       query,
       knowledge_base_ids: scope.knowledge_base_ids,
-      // Video Agent mode can use the configured agent to fall back to other
-      // knowledge in the same resource workspace.
-      ...(scope.scope === 'global' || !scope.agent_id ? { knowledge_ids: scope.knowledge_ids } : {}),
+      // Keep both wiki source_refs and transcript fallback scoped to the
+      // current video's active transcript generation.
+      ...(scope.scope === 'video' || !scope.agent_id ? { knowledge_ids: scope.knowledge_ids } : {}),
       agent_enabled: Boolean(scope.agent_id),
       ...(scope.agent_id ? { agent_id: scope.agent_id } : {}),
       disable_title: true,

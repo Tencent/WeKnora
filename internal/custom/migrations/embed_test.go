@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -67,6 +68,16 @@ func TestEmbeddedMigrationsAreComplete(t *testing.T) {
 		"000010_content_pipeline_metadata.down.sql",
 		"000011_knowledge_audit_status.up.sql",
 		"000011_knowledge_audit_status.down.sql",
+		"000015_dashboard_question_events.up.sql",
+		"000015_dashboard_question_events.down.sql",
+		"000016_chat_source_audits.up.sql",
+		"000016_chat_source_audits.down.sql",
+		"000017_wiki_relation_audits.up.sql",
+		"000017_wiki_relation_audits.down.sql",
+		"000018_wiki_identity_audits.up.sql",
+		"000018_wiki_identity_audits.down.sql",
+		"000019_evidence_sentence_contract.up.sql",
+		"000019_evidence_sentence_contract.down.sql",
 	} {
 		content, err := fs.ReadFile(FS, file)
 		if err != nil {
@@ -78,7 +89,24 @@ func TestEmbeddedMigrationsAreComplete(t *testing.T) {
 		}
 	}
 
+	dashboardMigration, err := fs.ReadFile(FS, "000015_dashboard_question_events.up.sql")
+	if err != nil {
+		t.Fatalf("read dashboard migration: %v", err)
+	}
+	dashboardSQL := string(dashboardMigration)
+	if !strings.Contains(dashboardSQL, "ROW_NUMBER() OVER") ||
+		!strings.Contains(dashboardSQL, "idx_question_stats_stat_date_unique") {
+		t.Error("dashboard migration must normalize duplicate stat dates before adding the unique index")
+	}
+
 	if !versions[8]["up"] || !versions[8]["down"] {
 		t.Error("processing observability migration 000008 must include up and down files")
+	}
+	evidenceMigration, err := fs.ReadFile(FS, "000019_evidence_sentence_contract.up.sql")
+	if err != nil {
+		t.Fatalf("read evidence sentence migration: %v", err)
+	}
+	if !strings.Contains(string(evidenceMigration), "CREATE UNIQUE INDEX") || !strings.Contains(string(evidenceMigration), "evidence_sentence_id <> ''") {
+		t.Error("evidence sentence migration must enforce one-to-one IDs for populated mappings")
 	}
 }

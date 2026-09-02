@@ -8,19 +8,19 @@ const summaryTitles: Record<VideoCategory, readonly string[]> = {
 }
 
 const knowledgeLabels: Record<KnowledgeType, string> = {
-  entity: '关键人物与组织', concept: '核心概念', case: '实践案例', method: '落地方法', insight: '关键洞察',
+  entity: '关键人物与组织', concept: '核心概念', case: '实践案例', methodology: '落地方法论', insight: '关键洞察',
 }
 
 const knowledgeDistributions: KnowledgeType[][] = [
   ['entity', 'concept', 'case'],
-  ['entity', 'concept', 'case', 'method', 'insight'],
-  ['entity', 'method'],
+  ['entity', 'concept', 'case', 'methodology', 'insight'],
+  ['entity', 'methodology'],
   [],
   ['concept', 'insight'],
-  ['case', 'method'],
+  ['case', 'methodology'],
 ]
 
-const relationTypes: RelationType[] = ['相同', '相似', '补充', '对比', '延伸']
+const relationTypes: RelationType[] = ['contradicts', 'complements', 'explains', 'example_of', 'part_of']
 
 const sources = [
   'BigBuckBunny.mp4',
@@ -127,6 +127,7 @@ function makeSummary(videoIndex: number, category: VideoCategory, duration: numb
         text: `${definitions[videoIndex].overview} 本节从“${title.replace(/^.+、/, '')}”出发，提炼关键判断、论证过程与可执行启示。`,
         evidence: [{
           chunkId: `mock-${videoIndex + 1}-${index + 1}`,
+          evidenceSentenceId: `evs:v1:mock-${videoIndex + 1}-${index + 1}`,
           startSeconds: seconds,
           endSeconds: Math.min(seconds + 15, duration),
           timestamp: formatTime(seconds),

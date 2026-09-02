@@ -160,6 +160,118 @@ func TestOutlineEndpointReturnsCanonicalChaptersWithoutSourceContent(t *testing.
 	}
 }
 
+func TestContentEndpointPrefersFinalArtifactOverDraft(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusCompleted,
+		DurationSeconds: 60, TranscriptGeneration: "generation-1", OutlineWikiPageID: "outline-final", OutlineDraftWikiPageID: "outline-draft",
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	canonical, err := outline.Marshal(outline.Document{
+		SchemaVersion: outline.SchemaVersion,
+		Chapters: []outline.Chapter{{
+			ChapterIndex: 1, ChapterTitle: "正式章节", StartSeconds: 0, EndSeconds: 60, ChapterSummary: "正式内容",
+			EvidenceChunkIDs: []string{"chunk-1"},
+			KnowledgePoints:  []outline.KnowledgePoint{{Title: "正式知识点", Seconds: 12, EvidenceChunkIDs: []string{"chunk-1"}}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal outline: %v", err)
+	}
+	server := newContentWikiTestServer(t, video.ID, map[string]weknora.WikiPage{
+		"outline-final": {ID: "outline-final", Slug: "outline/final", PageType: "index", Content: outlinePageContent(video.ID, canonical)},
+		"outline-draft": {ID: "outline-draft", Slug: "outline/draft", PageType: "index", Content: outlinePageContent(video.ID, canonical)},
+	})
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/outline", nil)
+	NewContentHandler(db, weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL}), "kb-1").Outline(context)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var payload WikiPageResp
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if payload.WikiPageID != "outline-final" || payload.ResultStage != "final" || payload.Chapters[0].ChapterTitle != "正式章节" {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+func TestContentEndpointFallsBackToDraftWhenFinalArtifactIsMissing(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusCompleted,
+		DurationSeconds: 60, TranscriptGeneration: "generation-1", OutlineDraftWikiPageID: "outline-draft",
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	canonical, err := outline.Marshal(outline.Document{
+		SchemaVersion: outline.SchemaVersion,
+		Chapters: []outline.Chapter{{
+			ChapterIndex: 1, ChapterTitle: "草稿章节", StartSeconds: 0, EndSeconds: 60, ChapterSummary: "草稿内容",
+			EvidenceChunkIDs: []string{"chunk-1"},
+			KnowledgePoints:  []outline.KnowledgePoint{{Title: "草稿知识点", Seconds: 12, EvidenceChunkIDs: []string{"chunk-1"}}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal outline: %v", err)
+	}
+	server := newContentWikiTestServer(t, video.ID, map[string]weknora.WikiPage{
+		"outline-draft": {ID: "outline-draft", Slug: "outline/video/draft", PageType: "index", Content: outlinePageContent(video.ID, canonical)},
+	})
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/outline", nil)
+	NewContentHandler(db, weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL}), "kb-1").Outline(context)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var payload WikiPageResp
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if payload.WikiPageID != "outline-draft" || payload.ResultStage != "draft" || payload.Chapters[0].ChapterTitle != "草稿章节" {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+func outlinePageContent(videoID, canonical string) string {
+	return "---\ntype: outline\nsource_video_id: " + videoID + "\ntranscript_generation: generation-1\nschema_version: 1\n---\n\n" + canonical
+}
+
+func newContentWikiTestServer(t *testing.T, videoID string, pages map[string]weknora.WikiPage) *httptest.Server {
+	t.Helper()
+	list := make([]weknora.WikiPage, 0, len(pages))
+	for _, page := range pages {
+		list = append(list, page)
+	}
+	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/knowledgebase/kb-1/wiki/pages" {
+			_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{Pages: list, Total: len(list), TotalPages: 1})
+			return
+		}
+		for _, page := range pages {
+			if request.URL.Path == "/api/v1/knowledgebase/kb-1/wiki/pages/"+page.Slug {
+				_ = json.NewEncoder(writer).Encode(page)
+				return
+			}
+		}
+		http.NotFound(writer, request)
+	}))
+}
+
 func TestOutlineEndpointRejectsPlaceholderArtifact(t *testing.T) {
 	db := openTestVideoDB(t)
 	video := model.Video{
@@ -244,7 +356,7 @@ func TestRelatedKnowledgeReturnsAnchorTimelineFromWikiContent(t *testing.T) {
 	db := openTestVideoDB(t)
 	video := model.Video{
 		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusProcessing,
-		KnowledgeBaseWikiPageID: "knowledge-base-1",
+		TranscriptGeneration: "generation-1", KnowledgeBaseWikiPageID: "knowledge-base-1",
 	}
 	if err := db.Create(&video).Error; err != nil {
 		t.Fatalf("create video: %v", err)
@@ -264,9 +376,9 @@ func TestRelatedKnowledgeReturnsAnchorTimelineFromWikiContent(t *testing.T) {
 		pages := []weknora.WikiPage{
 			{ID: "knowledge-base-1", Title: "知识底座", Slug: "knowledge-base/video-1", PageType: "index"},
 			{ID: "entity-1", Title: "张三", PageType: "entity",
-				Content: "---\ntype: person\nsource_video_id: " + video.ID + "\n---\n# 张三\n\n时间范围：00:01:02–00:01:10"},
+				Content: "---\nknowledge_object_id: object-entity-1\ntype: person\nsource_video_id: " + video.ID + "\ntranscript_generation: generation-1\naudit_status: passed\nclassification_confidence: 0.9\nevidence_ids: [chunk-entity-1]\n---\n# 张三\n\n时间范围：00:01:02–00:01:10"},
 			{ID: "case-1", Title: "复盘案例", PageType: "index",
-				Content: "---\ntype: case\nsource_video_id: " + video.ID + "\n---\n# 复盘案例\n\n时间范围：00:02:03–00:02:30"},
+				Content: "---\nknowledge_object_id: object-case-1\ntype: case\nsource_video_id: " + video.ID + "\ntranscript_generation: generation-1\naudit_status: passed\nclassification_confidence: 0.9\nevidence_ids: [chunk-case-1]\n---\n# 复盘案例\n\n时间范围：00:02:03–00:02:30"},
 		}
 		_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{Pages: pages, TotalPages: 1})
 	}))
@@ -285,8 +397,9 @@ func TestRelatedKnowledgeReturnsAnchorTimelineFromWikiContent(t *testing.T) {
 	}
 	var payload struct {
 		Anchors map[string][]struct {
-			Timestamp string `json:"timestamp"`
-			Seconds   int    `json:"seconds"`
+			Timestamp         string `json:"timestamp"`
+			Seconds           int    `json:"seconds"`
+			InformationNature string `json:"information_nature"`
 		} `json:"anchors"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
@@ -294,6 +407,9 @@ func TestRelatedKnowledgeReturnsAnchorTimelineFromWikiContent(t *testing.T) {
 	}
 	if len(payload.Anchors["entity"]) != 1 || payload.Anchors["entity"][0].Timestamp != "00:01:02" || payload.Anchors["entity"][0].Seconds != 62 {
 		t.Fatalf("entity anchors = %#v", payload.Anchors["entity"])
+	}
+	if payload.Anchors["entity"][0].InformationNature != "人物" {
+		t.Fatalf("entity information nature = %q", payload.Anchors["entity"][0].InformationNature)
 	}
 	if len(payload.Anchors["case"]) != 1 || payload.Anchors["case"][0].Timestamp != "00:02:03" || payload.Anchors["case"][0].Seconds != 123 {
 		t.Fatalf("case anchors = %#v", payload.Anchors["case"])
@@ -304,7 +420,7 @@ func TestRelatedKnowledgeReturnsTypeFrameworkDetails(t *testing.T) {
 	db := openTestVideoDB(t)
 	video := model.Video{
 		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusCompleted,
-		KnowledgeBaseWikiPageID: "knowledge-base-1",
+		TranscriptGeneration: "generation-1", KnowledgeBaseWikiPageID: "knowledge-base-1",
 	}
 	if err := db.Create(&video).Error; err != nil {
 		t.Fatalf("create video: %v", err)
@@ -323,7 +439,7 @@ func TestRelatedKnowledgeReturnsTypeFrameworkDetails(t *testing.T) {
 		}
 		pages := []weknora.WikiPage{
 			{ID: "knowledge-base-1", Slug: "video/" + video.ID, PageType: "index"},
-			{ID: "method-1", Slug: "methodology/method-1", PageType: "methodology", Title: "操作方法", Content: "---\ntype: methodology\nsource_video_id: " + video.ID + "\n---\n# 操作方法\n\n核心内容：通过异常数据定位原因。\n\n### 方法论结构\n\n- 输入：留存曲线\n- 步骤：按渠道拆分；对比异常渠道\n- 判断标准：变更时间与留存拐点接近\n- 输出：导致留存下降的变更项\n- 适用条件：单指标异常归因\n\n时间范围：00:03:00-00:04:00\n证据 ID：E001、E002\n信息性质：归纳"},
+			{ID: "method-1", Slug: "methodology/method-1", PageType: "index", Title: "旧页面标题", Content: "---\nknowledge_object_id: object-method-1\ntype: methodology\nprimary_type: methodology\nsource_video_id: " + video.ID + "\ntranscript_generation: generation-1\ntitle: 操作方法\naudit_status: passed\nclassification_confidence: 0.9\nevidence_ids: [E001, E002]\ntime_range: 00:03:00-00:04:00\ninformation_nature: 方法论\nrelated_content:\n  - title: 留存率\n    slug: concept/retention\n    target_type: concept\n---\n# 操作方法\n\n核心内容：通过异常数据定位原因。\n\n### 方法论结构\n\n- 输入：留存曲线\n- 步骤：按渠道拆分；对比异常渠道\n- 判断标准：变更时间与留存拐点接近\n- 输出：导致留存下降的变更项\n- 适用条件：单指标异常归因"},
 		}
 		_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{Pages: pages, TotalPages: 1})
 	}))
@@ -342,10 +458,19 @@ func TestRelatedKnowledgeReturnsTypeFrameworkDetails(t *testing.T) {
 	}
 	var payload struct {
 		Anchors map[string][]struct {
+			Title             string   `json:"title"`
+			PrimaryType       string   `json:"primary_type"`
 			CoreContent       string   `json:"core_content"`
 			InformationNature string   `json:"information_nature"`
 			EvidenceIDs       []string `json:"evidence_ids"`
-			StructureFields   []struct {
+			SourceVideoTitle  string   `json:"source_video_title"`
+			Timestamp         string   `json:"timestamp"`
+			RelatedContent    []struct {
+				Title      string `json:"title"`
+				Slug       string `json:"slug"`
+				TargetType string `json:"target_type"`
+			} `json:"related_content"`
+			StructureFields []struct {
 				Key   string `json:"key"`
 				Label string `json:"label"`
 				Value string `json:"value"`
@@ -355,13 +480,16 @@ func TestRelatedKnowledgeReturnsTypeFrameworkDetails(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	methods := payload.Anchors["method"]
+	methods := payload.Anchors["methodology"]
 	if len(methods) != 1 {
-		t.Fatalf("method anchors = %#v", methods)
+		t.Fatalf("methodology anchors = %#v", methods)
 	}
 	method := methods[0]
-	if method.CoreContent != "通过异常数据定位原因。" || method.InformationNature != "归纳" || strings.Join(method.EvidenceIDs, ",") != "E001,E002" {
-		t.Fatalf("method detail = %#v", method)
+	if method.Title != "操作方法" || method.PrimaryType != "methodology" || method.CoreContent != "通过异常数据定位原因。" || method.InformationNature != "方法论" || strings.Join(method.EvidenceIDs, ",") != "E001,E002" || method.SourceVideoTitle != video.Title || method.Timestamp != "00:03:00" {
+		t.Fatalf("methodology detail = %#v", method)
+	}
+	if len(method.RelatedContent) != 1 || method.RelatedContent[0].Title != "留存率" || method.RelatedContent[0].Slug != "concept/retention" || method.RelatedContent[0].TargetType != "concept" {
+		t.Fatalf("related content = %#v", method.RelatedContent)
 	}
 	if len(method.StructureFields) != 5 || method.StructureFields[0].Key != "input" || method.StructureFields[0].Value != "留存曲线" || method.StructureFields[2].Key != "criteria" {
 		t.Fatalf("structure fields = %#v", method.StructureFields)
@@ -441,11 +569,11 @@ func TestKnowledgeBaseWikiPageRequiresExtractionContract(t *testing.T) {
 	}
 }
 
-func TestRelatedKnowledgeReadsAllFiveKnowledgePageTypesAndLegacyIndex(t *testing.T) {
+func TestRelatedKnowledgeReadsOnlyCurrentAuditedSkillPages(t *testing.T) {
 	db := openTestVideoDB(t)
 	video := model.Video{
 		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusCompleted,
-		KnowledgeBaseWikiPageID: "knowledge-base-1",
+		TranscriptGeneration: "generation-1", KnowledgeBaseWikiPageID: "knowledge-base-1",
 	}
 	if err := db.Create(&video).Error; err != nil {
 		t.Fatalf("create video: %v", err)
@@ -453,11 +581,11 @@ func TestRelatedKnowledgeReadsAllFiveKnowledgePageTypesAndLegacyIndex(t *testing
 
 	pages := []weknora.WikiPage{
 		{ID: "knowledge-base-1", Slug: "video/" + video.ID, PageType: "index"},
-		{ID: "entity-1", Slug: "entity/person-1", PageType: "entity", Title: "张三", Content: "---\ntype: person\nsource_video_id: " + video.ID + "\n---\n# 张三"},
-		{ID: "concept-1", Slug: "concept/concept-1", PageType: "concept", Title: "核心概念", Content: "---\ntype: concept\nsource_video_id: " + video.ID + "\n---\n# 核心概念"},
-		{ID: "case-1", Slug: "case/case-1", PageType: "case", Title: "真实案例", Content: "---\ntype: case\nsource_video_id: " + video.ID + "\n---\n# 真实案例"},
-		{ID: "method-1", Slug: "methodology/method-1", PageType: "methodology", Title: "操作方法", Content: "---\ntype: methodology\nsource_video_id: " + video.ID + "\n---\n# 操作方法"},
-		{ID: "insight-1", Slug: "insight/insight-1", PageType: "insight", Title: "关键洞察", Content: "---\ntype: insight\nsource_video_id: " + video.ID + "\n---\n# 关键洞察"},
+		{ID: "entity-1", Slug: "entity/person-1", PageType: "entity", Title: "张三", Content: "---\nknowledge_object_id: object-entity-1\ntype: person\nsource_video_id: " + video.ID + "\ntranscript_generation: generation-1\naudit_status: passed\nclassification_confidence: 0.9\nevidence_ids: [chunk-entity-1]\n---\n# 张三"},
+		{ID: "concept-1", Slug: "concept/concept-1", PageType: "concept", Title: "核心概念", Content: "---\nknowledge_object_id: object-concept-1\ntype: concept\nsource_video_id: " + video.ID + "\ntranscript_generation: generation-1\naudit_status: passed\nclassification_confidence: 0.9\nevidence_ids: [chunk-concept-1]\n---\n# 核心概念"},
+		{ID: "case-1", Slug: "case/case-1", PageType: "index", Title: "真实案例", Content: "---\nknowledge_object_id: object-case-1\ntype: case\nsource_video_id: " + video.ID + "\ntranscript_generation: generation-1\naudit_status: passed\nclassification_confidence: 0.9\nevidence_ids: [chunk-case-1]\n---\n# 真实案例"},
+		{ID: "method-1", Slug: "methodology/method-1", PageType: "index", Title: "操作方法", Content: "---\nknowledge_object_id: object-method-1\ntype: methodology\nsource_video_id: " + video.ID + "\ntranscript_generation: generation-1\naudit_status: passed\nclassification_confidence: 0.9\nevidence_ids: [chunk-method-1]\n---\n# 操作方法"},
+		{ID: "insight-1", Slug: "insight/insight-1", PageType: "index", Title: "关键洞察", Content: "---\nknowledge_object_id: object-insight-1\ntype: insight\nsource_video_id: " + video.ID + "\ntranscript_generation: generation-1\naudit_status: passed\nclassification_confidence: 0.9\nevidence_ids: [chunk-insight-1]\n---\n# 关键洞察"},
 		{ID: "legacy-entity-1", Slug: "entity/legacy", PageType: "entity", Title: "历史实体", Content: "# 历史实体\n\n视频 ID：" + video.ID},
 		{ID: "foreign-1", Slug: "concept/foreign-1", PageType: "concept", Title: "跨视频概念", Content: "---\ntype: concept\nsource_video_id: another-video\n---\n正文提及视频 ID：" + video.ID},
 	}
@@ -495,11 +623,8 @@ func TestRelatedKnowledgeReadsAllFiveKnowledgePageTypesAndLegacyIndex(t *testing
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	for _, knowledgeType := range []string{"entity", "concept", "case", "method", "insight"} {
+	for _, knowledgeType := range []string{"entity", "concept", "case", "methodology", "insight"} {
 		expectedCount := 1
-		if knowledgeType == "entity" {
-			expectedCount = 2
-		}
 		if len(payload.Anchors[knowledgeType]) != expectedCount {
 			t.Fatalf("%s anchors = %#v", knowledgeType, payload.Anchors[knowledgeType])
 		}

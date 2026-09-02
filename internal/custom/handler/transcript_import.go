@@ -84,7 +84,10 @@ func (h *TranscriptImportHandler) Import(c *gin.Context) {
 	normalizedSRT := subtitle.ParagraphsToSRT(paragraphs)
 	contentHash := sha256.Sum256([]byte(normalizedSRT))
 	hashText := hex.EncodeToString(contentHash[:])
-	importKey := fmt.Sprintf("transcription:%s:srt-import:%s", videoID, hashText)
+	// Keep idempotency keys within the existing varchar(128) contract while
+	// retaining the full digest in ResultPayload for audit and diagnostics.
+	keyHash := hashText[:32]
+	importKey := fmt.Sprintf("transcription:%s:srt-import:%s", videoID, keyHash)
 
 	var existing model.VideoProcessingJob
 	if err := h.DB.WithContext(c.Request.Context()).Where("idempotency_key = ?", importKey).First(&existing).Error; err == nil {
@@ -113,7 +116,7 @@ func (h *TranscriptImportHandler) Import(c *gin.Context) {
 	}
 	subtitleJob := model.VideoProcessingJob{
 		ID: uuid.NewString(), VideoID: videoID, JobType: "subtitle_generate", Provider: "local_srt_import", Status: "succeeded", Progress: 100,
-		AttemptCount: 1, MaxAttempts: 3, IdempotencyKey: fmt.Sprintf("subtitle_generate:%s:srt-import:%s", videoID, hashText), ResultPayload: string(payload), CompletedAt: &now,
+		AttemptCount: 1, MaxAttempts: 3, IdempotencyKey: fmt.Sprintf("subtitle_generate:%s:srt-import:%s", videoID, keyHash), ResultPayload: string(payload), CompletedAt: &now,
 		InputPayload: fmt.Sprintf(`{"transcription_job_id":%q,"source":"srt_import"}`, transcriptionJob.ID),
 	}
 	var indexJob model.VideoProcessingJob

@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/knowledgegraph"
 	miniosdk "github.com/minio/minio-go/v7"
 )
 
@@ -29,6 +30,7 @@ type Deps struct {
 	MinIO   *objstore.Client
 	Wiki    *weknora.WikiClient
 	WeKnora *weknora.Client
+	Graph   knowledgegraph.Store
 }
 
 // NewRouter 构建自研后端路由。
@@ -41,6 +43,13 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	}
 	deps.Wiki = weknora.NewWikiClient(cfg.WeKnora)
 	deps.WeKnora = weknora.New(cfg.WeKnora)
+	deps.Graph, _ = knowledgegraph.New(cfg.WikiGraph, deps.Wiki)
+	return buildRouter(deps)
+}
+
+// BuildRouterForDeps builds the router with already-initialized real clients.
+// The custom backend uses this to share one Wiki graph driver between workers and HTTP.
+func BuildRouterForDeps(deps *Deps) *gin.Engine {
 	return buildRouter(deps)
 }
 
@@ -207,11 +216,18 @@ func buildRouter(deps *Deps) *gin.Engine {
 	api.GET("/chat/scope/global", chatScope.Global)
 	chatEvidence := NewChatEvidenceHandler(deps.DB)
 	api.GET("/chat/evidence", chatEvidence.Lookup)
+	chatAudit := NewChatAuditHandler(deps.DB)
+	api.POST("/chat/source-audit", chatAudit.RecordSourceAudit)
+	chatWiki := NewChatWikiHandler(deps.DB, deps.Wiki, deps.Cfg.WeKnora.KBID)
+	api.GET("/chat/wiki-search", chatWiki.Search)
 	api.GET("/videos/:id/chat-scope", chatScope.Video)
+	dashboard := NewDashboardHandler(deps.DB)
+	api.GET("/dashboard", dashboard.Get)
+	api.POST("/dashboard/questions", dashboard.RecordQuestion)
 	ph := NewProcessingHandler(deps.DB, ProcessingDependencies{Wiki: deps.Wiki, KBID: deps.Cfg.WeKnora.KBID})
 	api.GET("/videos/:id/processing-status", ph.Status)
 	api.POST("/videos/:id/processing-jobs/:jobType/retry", ph.Retry)
-	graphHandler := NewEntityGraphHandler(deps.DB, deps.WeKnora, deps.Cfg.WeKnora.KBID, deps.Wiki)
+	graphHandler := NewEntityGraphHandler(deps.DB, deps.Graph, deps.Cfg.WeKnora.KBID, deps.Wiki)
 	api.GET("/graph", graphHandler.Get)
 
 	if deps.Wiki != nil {

@@ -21,5 +21,5 @@ import './filterTabs.css'
 
 const props = defineProps<{ modelValue: string; attributes: string[]; counts: Record<string, number>; total: number }>()
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
-const visibleAttributes = computed(() => props.attributes.filter(attribute => (props.counts[attribute] ?? 0) > 0))
+const visibleAttributes = computed(() => props.attributes)
 </script>

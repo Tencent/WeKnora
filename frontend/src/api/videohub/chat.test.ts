@@ -12,8 +12,9 @@ import {
 test('shows only the user question when a video-scoped prompt is loaded from WeKnora history', () => {
   const stored = [
     '用户正在视频详情页围绕《个人知识库，还得是Obsidian+AI Agent》提问。当前视频 ID：49068459-82f3-4acd-9dba-0adb821f7607。',
-    '请优先检索并引用当前视频的转写内容；如果当前视频信息不足，必须允许使用同一知识库中的其他视频或全局知识补充。',
-    '引用当前视频之外的内容时，必须明确标注来源视频，不要让用户误以为全部来自当前视频。',
+    '必须先使用 Wiki 搜索读取当前视频已审计通过的知识对象页面，优先引用页面中的可读正文和结构化字段。',
+    '只有 Wiki 页面不存在、检索不到或无法回答时，才使用当前视频同一转写代次的句级分块作为证据回溯；不得把未审计页面当作事实来源。',
+    '回答必须区分知识对象结论与转写原文证据；引用来源时保留 Wiki 页面或转写分块的真实来源。',
     '用户问题：总结这段视频的核心观点',
   ].join('\n')
 
@@ -150,6 +151,22 @@ test('uses the configured resource tenant for Agent requests', () => {
   assert.equal(request.headers['X-Tenant-ID'], '10000')
   assert.equal(request.body.agent_id, 'agent-1')
   assert.equal(request.body.agent_enabled, true)
+})
+
+test('keeps transcript chunk scope on video Agent requests for Wiki source_refs fallback', () => {
+  const request = buildChatRequest(
+    {
+      scope: 'video',
+      agent_id: 'agent-1',
+      knowledge_base_ids: ['kb-1'],
+      knowledge_ids: ['chunk-1', 'chunk-2'],
+      tenant_id: '10000',
+    },
+    '这个视频的核心方法是什么',
+    'jwt-token',
+  )
+
+  assert.deepEqual(request.body.knowledge_ids, ['chunk-1', 'chunk-2'])
 })
 
 test('preserves an explicit tenant header instead of replacing it with the selected tenant', () => {

@@ -372,6 +372,40 @@ func TestSucceededStageWithMissingArtifactBecomesRetryable(t *testing.T) {
 	}
 }
 
+func TestRetrySucceededSummaryAllowsExplicitRegeneration(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "legacy summary", FileURL: "https://cdn.example.com/video.mp4",
+		Status: model.VideoStatusCompleted, TranscriptGeneration: "generation-4", SummaryWikiPageID: "existing-summary-page",
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	job := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "summary", TranscriptGeneration: video.TranscriptGeneration,
+		Status: "succeeded", IdempotencyKey: "summary:" + video.ID + ":" + video.TranscriptGeneration,
+	}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}, {Key: "jobType", Value: "summary"}}
+	context.Request = httptest.NewRequest(http.MethodPost, "/api/custom/videos/"+video.ID+"/processing-jobs/summary/retry", nil)
+	NewProcessingHandler(db).Retry(context)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("retry status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var retried model.VideoProcessingJob
+	if err := db.First(&retried, "id = ?", job.ID).Error; err != nil {
+		t.Fatalf("load retried job: %v", err)
+	}
+	if retried.Status != "pending" || !skill.IsExplicitSummaryRegeneration(retried.InputPayload) {
+		t.Fatalf("retried summary job = %#v", retried)
+	}
+}
+
 func TestProcessingStatusIgnoresFailedOldGeneration(t *testing.T) {
 	video := model.Video{
 		ID: uuid.NewString(), Status: model.VideoStatusProcessing, TranscriptGeneration: "generation-new",

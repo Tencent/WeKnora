@@ -162,7 +162,7 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 			}
 			retried = recreatedJob
 			recreated = true
-		} else if retried.Status == "succeeded" && h.stageArtifactAvailable(c.Request.Context(), video, retried) {
+		} else if retried.Status == "succeeded" && !allowsExplicitSummaryRegeneration(jobType) && h.stageArtifactAvailable(c.Request.Context(), video, retried) {
 			return errStageAlreadySucceeded
 		} else if retried.Status == "pending" || retried.Status == "running" {
 			return errStageInProgress
@@ -266,6 +266,10 @@ func (h *ProcessingHandler) stageArtifactAvailable(ctx context.Context, video mo
 
 var errStageAlreadySucceeded = errors.New("processing stage already succeeded")
 var errStageInProgress = errors.New("processing stage is already in progress")
+
+func allowsExplicitSummaryRegeneration(jobType string) bool {
+	return jobType == "summary" || jobType == "summary_enhance"
+}
 
 func (h *ProcessingHandler) load(c *gin.Context) (model.Video, []model.VideoProcessingJob, bool) {
 	var video model.Video

@@ -1,6 +1,60 @@
 package outline
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Tencent/WeKnora/internal/custom/service/transcript"
+)
+
+func TestResolveEvidenceProjectsImmutableSentenceIDs(t *testing.T) {
+	document := validDocument()
+	chunks := []transcript.Chunk{{ID: "chunk-1", EvidenceSentenceID: "evs:v1:abc", StartMs: 0, EndMs: 1000, Content: "原文"}}
+	if err := ResolveEvidence(&document, chunks); err != nil {
+		t.Fatalf("ResolveEvidence returned error: %v", err)
+	}
+	if got := document.Chapters[0].EvidenceSentenceIDs; len(got) != 1 || got[0] != "evs:v1:abc" {
+		t.Fatalf("chapter evidence sentence IDs = %#v", got)
+	}
+	if got := document.Chapters[0].KnowledgePoints[0].EvidenceSentenceIDs; len(got) != 1 || got[0] != "evs:v1:abc" {
+		t.Fatalf("point evidence sentence IDs = %#v", got)
+	}
+}
+
+func TestValidateAndResolveBindsCurrentEvidenceAndTranscriptEnd(t *testing.T) {
+	document := validDocument()
+	document.Chapters[0].EndSeconds = 13
+	chunks := []transcript.Chunk{
+		{ID: "chunk-1", EvidenceSentenceID: "evs:v1:abc", SourceSentenceID: "source-1", StartMs: 0, EndMs: 12400, Content: "原文"},
+	}
+	if err := ValidateAndResolve(&document, 20, chunks); err != nil {
+		t.Fatalf("ValidateAndResolve returned error: %v", err)
+	}
+	if got := document.Chapters[0].EvidenceSentenceIDs; len(got) != 1 || got[0] != "evs:v1:abc" {
+		t.Fatalf("chapter evidence sentence IDs = %#v", got)
+	}
+	if got := document.Chapters[0].KnowledgePoints[0].EvidenceSentenceIDs; len(got) != 1 || got[0] != "evs:v1:abc" {
+		t.Fatalf("point evidence sentence IDs = %#v", got)
+	}
+}
+
+func TestValidateAndResolveRejectsIncompleteEvidenceMapping(t *testing.T) {
+	document := validDocument()
+	chunks := []transcript.Chunk{{ID: "chunk-1", StartMs: 0, EndMs: 1000, Content: "原文"}}
+	if err := ValidateAndResolve(&document, 10, chunks); err == nil || !contains(err.Error(), "no evidence sentence ID") {
+		t.Fatalf("expected missing evidence sentence ID error, got %v", err)
+	}
+}
+
+func TestValidateAndResolveRejectsDuplicateEvidenceSentenceIDs(t *testing.T) {
+	document := validDocument()
+	chunks := []transcript.Chunk{
+		{ID: "chunk-1", EvidenceSentenceID: "evs:v1:duplicate", StartMs: 0, EndMs: 1000, Content: "第一句"},
+		{ID: "chunk-2", EvidenceSentenceID: "evs:v1:duplicate", StartMs: 1000, EndMs: 2000, Content: "第二句"},
+	}
+	if err := ValidateAndResolve(&document, 10, chunks); err == nil || !contains(err.Error(), "duplicate evidence sentence ID") {
+		t.Fatalf("expected duplicate evidence sentence ID error, got %v", err)
+	}
+}
 
 func validDocument() Document {
 	return Document{

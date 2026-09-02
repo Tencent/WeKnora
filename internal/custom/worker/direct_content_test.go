@@ -1,12 +1,25 @@
 package worker
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+
+	"github.com/Tencent/WeKnora/internal/custom/client/mps"
+	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
+	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/evidence"
 	"github.com/Tencent/WeKnora/internal/custom/service/outline"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
 	"github.com/Tencent/WeKnora/internal/custom/service/summary"
@@ -91,7 +104,7 @@ func TestBuildDirectContentPromptIncludesTranscriptEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildDirectContentPrompt returned error: %v", err)
 	}
-	for _, expected := range []string{"视频一", "training", "chunk-1", "原文内容", "章节导航", "schema_version", "chapter_index", "start_seconds", "knowledge_points", "4～8 章", "1～2 个", "短标题", "不要拼接分块序号", "不要输出 Markdown 代码围栏"} {
+	for _, expected := range []string{"视频一", "training", "chunk-1", "EVIDENCE_SENTENCE_ID", "原文内容", "章节导航", "schema_version", "chapter_index", "start_seconds", "knowledge_points", "4～8 章", "1～2 个", "短标题", "不要拼接分块序号", "不要输出 Markdown 代码围栏"} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("prompt does not contain %q: %s", expected, prompt)
 		}
@@ -106,6 +119,25 @@ func TestBuildDirectContentPromptIncludesSummaryFrameworkAndJSONContract(t *test
 	for _, expected := range []string{"schemaVersion", "videoType", "evidenceChunkIds", "一、目标与受众", "六、练习与应用", "不要输出 Markdown"} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("summary prompt does not contain %q: %s", expected, prompt)
+		}
+	}
+}
+
+func TestSummaryPromptCoversEverySupportedVideoType(t *testing.T) {
+	for videoType, framework := range map[string][]string{
+		"interview": {"一、人物背景", "六、反思与边界"},
+		"training":  {"一、目标与受众", "六、练习与应用"},
+		"salon":     {"一、活动与参与者", "六、探索方向"},
+		"general":   {"一、定位与问题", "五、影响与建议"},
+	} {
+		prompt, err := buildDirectContentPrompt(&model.Video{Title: "视频一", VideoType: videoType}, skill.JobSummary, []transcript.Chunk{{ID: "chunk-1", Index: 0, Content: "原文内容"}})
+		if err != nil {
+			t.Fatalf("buildDirectContentPrompt(%s) returned error: %v", videoType, err)
+		}
+		for _, title := range framework {
+			if !strings.Contains(prompt, title) {
+				t.Fatalf("summary prompt for %s does not contain %q", videoType, title)
+			}
 		}
 	}
 }
@@ -127,7 +159,7 @@ func TestSummaryContractResolvesEvidenceFromTranscriptChunks(t *testing.T) {
 	} {
 		document.Sections = append(document.Sections, summary.Section{ID: section.ID, Title: section.Title, Blocks: []summary.Block{{ID: section.ID + "-block", Kind: summary.BlockKindParagraph, Text: "内容", EvidenceChunkIDs: []string{"chunk-1"}}}})
 	}
-	chunks := []transcript.Chunk{{ID: "chunk-1", StartMs: 605000, EndMs: 620500, Content: "## 视频定位信息\n\n## 原文\n\n我们当时决定停止旧产品。"}}
+	chunks := []transcript.Chunk{{ID: "chunk-1", EvidenceSentenceID: "evs:v1:chunk-1", StartMs: 605000, EndMs: 620500, Content: "## 视频定位信息\n\n## 原文\n\n我们当时决定停止旧产品。"}}
 	if err := summary.Validate(document, "general", map[string]struct{}{"chunk-1": {}}); err != nil {
 		t.Fatalf("summary.Validate returned error: %v", err)
 	}
@@ -162,6 +194,90 @@ func TestNormalizeOutlineEvidenceChunkIDs(t *testing.T) {
 	if document.Chapters[0].EvidenceChunkIDs[0] != "chunk-1" || document.Chapters[0].KnowledgePoints[0].EvidenceChunkIDs[0] != "chunk-1" {
 		t.Fatalf("evidence chunk IDs were not normalized: %+v", document)
 	}
+}
+
+func TestNormalizeOutlineEvidenceChunkIDsUsesSourceSentenceID(t *testing.T) {
+	document := outline.Document{
+		SchemaVersion: 1,
+		Chapters: []outline.Chapter{{
+			EvidenceChunkIDs: []string{"mps:fixed:000000"},
+			KnowledgePoints:  []outline.KnowledgePoint{{EvidenceChunkIDs: []string{"mps:fixed:000000"}}},
+		}},
+	}
+	normalizeOutlineEvidenceChunkIDs(&document, []transcript.Chunk{{ID: "knowledge-1", SourceSentenceID: "mps:fixed:000000", Index: 0}})
+	if document.Chapters[0].EvidenceChunkIDs[0] != "knowledge-1" || document.Chapters[0].KnowledgePoints[0].EvidenceChunkIDs[0] != "knowledge-1" {
+		t.Fatalf("source evidence chunk IDs were not normalized: %+v", document)
+	}
+}
+
+func TestEvidenceRecordsToTranscriptChunksPreservesOutlineInputs(t *testing.T) {
+	records := []evidence.Record{
+		{KnowledgeID: "knowledge-1", EvidenceSentenceID: "evs:v1:one", SourceSentenceID: "s1", SpeakerID: "speaker-1", ChunkIndex: 0, Text: "第一句", StartMs: 100, EndMs: 1200},
+		{KnowledgeID: "knowledge-2", EvidenceSentenceID: "evs:v1:two", SourceSentenceID: "s2", ChunkIndex: 1, Text: "第二句", StartMs: 1200, EndMs: 2400},
+	}
+	chunks := evidenceRecordsToTranscriptChunks(records)
+	if len(chunks) != 2 || chunks[0].ID != "knowledge-1" || chunks[0].EvidenceSentenceID != "evs:v1:one" || chunks[1].StartMs != 1200 || chunks[1].Content != "第二句" {
+		t.Fatalf("chunks = %#v", chunks)
+	}
+}
+
+func TestReadDraftChunksUsesFixedMPSTaskEvidence(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.VideoProcessingJob{}))
+	videoID := "video-existing"
+	taskID := "2600031422-WorkflowTask-29768d9225c63d39cd26f2a88166bac8tt7"
+	payload, err := json.Marshal(map[string]any{"mps_result": mps.Result{Segments: []mps.Segment{
+		{SourceSegmentID: "mps:fixed:000000", Text: "开场说明", StartMs: 123, EndMs: 19803, SpeakerID: "speaker-1"},
+		{SourceSegmentID: "mps:fixed:000001", Text: "方法介绍", StartMs: 19803, EndMs: 30200, SpeakerID: "speaker-1"},
+	}}})
+	require.NoError(t, err)
+	source := model.VideoProcessingJob{ID: "transcription-fixed", VideoID: videoID, JobType: "transcription", ExternalTaskID: taskID, ResultPayload: string(payload)}
+	require.NoError(t, db.Create(&source).Error)
+	job := &model.VideoProcessingJob{VideoID: videoID, InputPayload: `{"transcription_job_id":"transcription-fixed"}`}
+	chunks, err := (&DirectContentHandler{DB: db}).readDraftChunks(context.Background(), videoID, "mps:fixed-generation", job)
+	require.NoError(t, err)
+	require.Len(t, chunks, 2)
+	require.Equal(t, taskID, source.ExternalTaskID)
+	require.Equal(t, "evs:v1:", chunks[0].EvidenceSentenceID[:len("evs:v1:")])
+	require.Equal(t, 123, chunks[0].StartMs)
+	require.Equal(t, 30200, chunks[1].EndMs)
+}
+
+func TestSummaryDraftReadsCurrentEvidenceIndexInsteadOfMPS(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoProcessingJob{}))
+	video := &model.Video{ID: "video-existing", Title: "证据总结", VideoType: "training", TranscriptGeneration: "generation-1"}
+	require.NoError(t, db.Create(video).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptChunk{
+		VideoID: video.ID, Generation: video.TranscriptGeneration, Revision: 1, ChunkIndex: 0,
+		KnowledgeID: "knowledge-1", EvidenceSentenceID: "evs:v1:first", SourceSegmentID: "s1",
+		StartMs: 100, EndMs: 1200, ContentHash: "hash-1", Status: "completed",
+	}).Error)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/chunks/knowledge-1") {
+			payload, _ := json.Marshal(map[string]any{"success": true, "data": []weknora.KnowledgeChunk{{ID: "chunk-1", KnowledgeID: "knowledge-1", Content: evidenceContentForSummary("evs:v1:first", "s1", "generation-1", 100, 1200, "证据原文"), ChunkIndex: 0}}, "total": 1})
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(payload)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	client := weknora.New(config.WeKnoraConfig{BaseURL: server.URL, KBID: "kb-1"})
+	h := &DirectContentHandler{DB: db, WeKnora: client, Job: skill.JobSummary}
+	job := &model.VideoProcessingJob{VideoID: video.ID, ResultStage: "draft", InputPayload: `{"transcription_job_id":"unused-mps-job"}`}
+	chunks, err := h.readContentChunks(context.Background(), video, video.TranscriptGeneration, job)
+	require.NoError(t, err)
+	require.Len(t, chunks, 1)
+	require.Equal(t, "knowledge-1", chunks[0].ID)
+	require.Equal(t, "evs:v1:first", chunks[0].EvidenceSentenceID)
+	require.Equal(t, "证据原文", transcript.OriginalText(chunks[0].Content))
+}
+
+func evidenceContentForSummary(id, source, generation string, start, end int, text string) string {
+	return fmt.Sprintf("## 视频定位信息\n\n```json\n{\"start_ms\":%d,\"end_ms\":%d,\"sentence_id\":\"%s\",\"evidence_sentence_id\":\"%s\",\"transcript_generation\":\"%s\"}\n```\n\n## 原文\n\n%s", start, end, source, id, generation, text)
 }
 
 func TestBuildDirectContentPromptRejectsOversizedTranscript(t *testing.T) {

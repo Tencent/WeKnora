@@ -7,6 +7,7 @@ import type {
   RelationOverview,
   RelationType,
   SummaryBlock,
+  SummaryEvidenceRef,
   SummaryEvidence,
   SummarySection,
   SubtitleCue,
@@ -21,12 +22,15 @@ interface BackendAnchor {
   id: string
   title?: string
   type?: KnowledgeType
+  primary_type?: KnowledgeType
   related_video_ids?: string[]
   core_content?: string
   structure_fields?: Array<{ key?: string; label?: string; value?: string }>
   evidence_ids?: string[]
   information_nature?: string
   time_range?: string
+  source_video_title?: string
+  related_content?: Array<{ title?: string; slug?: string; target_type?: string }>
   related_knowledge?: Array<{ title?: string; slug?: string }>
   related_entities?: Array<{ title?: string; slug?: string }>
   timestamp?: string
@@ -36,6 +40,7 @@ interface BackendAnchor {
 interface CanonicalKnowledgePoint {
   title?: string
   seconds?: number
+  evidence_sentence_ids?: string[]
 }
 
 interface CanonicalChapter {
@@ -46,6 +51,7 @@ interface CanonicalChapter {
   chapter_summary?: string
   knowledge_points?: CanonicalKnowledgePoint[]
   alignment_status?: Chapter['alignment_status']
+  evidence_sentence_ids?: string[]
 }
 
 export interface CanonicalOutlineResponse {
@@ -69,20 +75,23 @@ export interface BackendRelatedKnowledgeResponse {
   overview?: RelationOverview | null
 }
 
-const KNOWLEDGE_TYPES: KnowledgeType[] = ['entity', 'concept', 'case', 'method', 'insight']
-const RELATION_TYPES = new Set<RelationType>(['相同', '相似', '补充', '对比', '延伸'])
+const KNOWLEDGE_TYPES: KnowledgeType[] = ['entity', 'concept', 'case', 'methodology', 'insight']
+const RELATION_TYPES = new Set<RelationType>(['contradicts', 'complements', 'explains', 'example_of', 'part_of', 'derived_from', 'supports', 'related_to'])
 
 function isKnowledgeType(value: unknown): value is KnowledgeType {
   return typeof value === 'string' && KNOWLEDGE_TYPES.includes(value as KnowledgeType)
 }
 
 function hasKnowledgeType<T extends BackendAnchor>(item: T): item is T & { type: KnowledgeType } {
-  return isKnowledgeType(item.type)
+  const type = isKnowledgeType(item.primary_type) ? item.primary_type : item.type
+  if (!isKnowledgeType(type)) return false
+  item.type = type
+  return true
 }
 
-function normalizeWikiLinks(items: Array<{ title?: string; slug?: string }> | undefined) {
+function normalizeWikiLinks(items: Array<{ title?: string; slug?: string; target_type?: string }> | undefined) {
   return (items || [])
-    .map(item => ({ title: item.title?.trim() || item.slug?.trim() || '', slug: item.slug?.trim() || undefined }))
+    .map(item => ({ title: item.title?.trim() || item.slug?.trim() || '', slug: item.slug?.trim() || undefined, targetType: item.target_type?.trim() || undefined }))
     .filter(item => item.title)
 }
 
@@ -142,9 +151,11 @@ function parseCanonicalOutline(response: CanonicalOutlineResponse, durationSecon
           title: point.title.trim(),
           timestamp: formatTimestamp(point.seconds),
           seconds: point.seconds,
+          evidenceSentenceIds: Array.isArray(point.evidence_sentence_ids) ? point.evidence_sentence_ids.filter((id): id is string => typeof id === 'string' && id.trim().length > 0) : undefined,
         }
       }),
       alignment_status: chapter.alignment_status,
+      evidenceSentenceIds: Array.isArray(chapter.evidence_sentence_ids) ? chapter.evidence_sentence_ids.filter((id): id is string => typeof id === 'string' && id.trim().length > 0) : undefined,
     }
   })
 }
@@ -333,22 +344,58 @@ function parseSummaryBlock(rawBlock: unknown, sectionIndex: number, blockIndex: 
   if (evidenceChunkIds.some((chunkId, index) => typeof chunkId !== 'string' || !chunkId.trim() || chunkId !== evidence[index].chunkId)) {
     throw new Error(`智能总结第 ${sectionIndex + 1} 章第 ${blockIndex + 1} 条出处与分块不一致`)
   }
+  const knowledgeRefs = parseStringReferences(block.knowledge_refs ?? block.knowledgeRefs, sectionIndex, blockIndex, 'knowledge_refs')
+  const evidenceRefs = parseEvidenceReferences(block.evidence_refs ?? block.evidenceRefs, evidence, sectionIndex, blockIndex)
   return {
     id: block.id,
     kind,
     text,
     evidence,
+    ...(knowledgeRefs ? { knowledgeRefs } : {}),
+    ...(evidenceRefs ? { evidenceRefs } : {}),
   }
+}
+
+function parseStringReferences(raw: unknown, sectionIndex: number, blockIndex: number, field: string): string[] | undefined {
+  if (raw === undefined) return undefined
+  if (!Array.isArray(raw) || raw.some(item => typeof item !== 'string' || !item.trim())) {
+    throw new Error(`智能总结第 ${sectionIndex + 1} 章第 ${blockIndex + 1} 条 ${field} 无效`)
+  }
+  return raw.map(item => item.trim())
+}
+
+function parseEvidenceReferences(raw: unknown, evidence: SummaryEvidence[], sectionIndex: number, blockIndex: number): SummaryEvidenceRef[] | undefined {
+  if (raw === undefined) return undefined
+  if (!Array.isArray(raw) || raw.length !== evidence.length) {
+    throw new Error(`智能总结第 ${sectionIndex + 1} 章第 ${blockIndex + 1} 条 evidence_refs 与出处数量不一致`)
+  }
+  return raw.map((item, evidenceIndex) => {
+    if (!item || typeof item !== 'object') throw new Error(`智能总结第 ${sectionIndex + 1} 章第 ${blockIndex + 1} 条 evidence_ref ${evidenceIndex + 1} 无效`)
+    const ref = item as Record<string, unknown>
+    const evidenceSentenceId = typeof (ref.evidence_sentence_id ?? ref.evidenceSentenceId) === 'string' ? String(ref.evidence_sentence_id ?? ref.evidenceSentenceId).trim() : ''
+    const startMs = ref.start_ms ?? ref.startMs
+    const endMs = ref.end_ms ?? ref.endMs
+    const chunkId = ref.chunk_id ?? ref.chunkId
+    if (!evidenceSentenceId || typeof startMs !== 'number' || typeof endMs !== 'number' || !Number.isInteger(startMs) || !Number.isInteger(endMs) || startMs < 0 || endMs <= startMs || (chunkId !== undefined && (typeof chunkId !== 'string' || !chunkId.trim()))) {
+      throw new Error(`智能总结第 ${sectionIndex + 1} 章第 ${blockIndex + 1} 条 evidence_ref ${evidenceIndex + 1} 无效`)
+    }
+    const source = evidence[evidenceIndex]
+    if (source.evidenceSentenceId !== evidenceSentenceId || Math.round(source.startSeconds * 1000) !== startMs || Math.round(source.endSeconds * 1000) !== endMs || (chunkId !== undefined && chunkId !== source.chunkId)) {
+      throw new Error(`智能总结第 ${sectionIndex + 1} 章第 ${blockIndex + 1} 条 evidence_ref ${evidenceIndex + 1} 与出处不一致`)
+    }
+    return { evidenceSentenceId, startMs, endMs, ...(typeof chunkId === 'string' ? { chunkId: chunkId.trim() } : {}) }
+  })
 }
 
 function parseSummaryEvidence(rawEvidence: unknown, sectionIndex: number, blockIndex: number, evidenceIndex: number): SummaryEvidence {
   if (!rawEvidence || typeof rawEvidence !== 'object') throw new Error(`智能总结第 ${sectionIndex + 1} 章第 ${blockIndex + 1} 条出处无效`)
   const evidence = rawEvidence as Record<string, unknown>
-  if (typeof evidence.chunkId !== 'string' || !evidence.chunkId.trim() || typeof evidence.startSeconds !== 'number' || typeof evidence.endSeconds !== 'number' || !Number.isFinite(evidence.startSeconds) || !Number.isFinite(evidence.endSeconds) || evidence.startSeconds < 0 || evidence.endSeconds <= evidence.startSeconds || typeof evidence.timestamp !== 'string' || !evidence.timestamp.trim() || typeof evidence.transcriptSnippet !== 'string' || !evidence.transcriptSnippet.trim()) {
+  if (typeof evidence.chunkId !== 'string' || !evidence.chunkId.trim() || typeof evidence.evidenceSentenceId !== 'string' || !evidence.evidenceSentenceId.trim() || typeof evidence.startSeconds !== 'number' || typeof evidence.endSeconds !== 'number' || !Number.isFinite(evidence.startSeconds) || !Number.isFinite(evidence.endSeconds) || evidence.startSeconds < 0 || evidence.endSeconds <= evidence.startSeconds || typeof evidence.timestamp !== 'string' || !evidence.timestamp.trim() || typeof evidence.transcriptSnippet !== 'string' || !evidence.transcriptSnippet.trim()) {
     throw new Error(`智能总结第 ${sectionIndex + 1} 章第 ${blockIndex + 1} 条出处 ${evidenceIndex + 1} 无效`)
   }
   return {
     chunkId: evidence.chunkId,
+    evidenceSentenceId: evidence.evidenceSentenceId.trim(),
     startSeconds: evidence.startSeconds,
     endSeconds: evidence.endSeconds,
     timestamp: evidence.timestamp,
@@ -372,11 +419,14 @@ export function parseTranscriptPageWikiPage(content: string): string {
 
 function parseSubtitleTimestamp(value: string): number {
   const normalized = value.replace(',', '.')
-  const [hours, minutes, seconds] = normalized.split(':').map(Number)
-  if (![hours, minutes, seconds].every(Number.isFinite) || minutes < 0 || minutes >= 60 || seconds < 0 || seconds >= 60) {
+  const parts = normalized.split(':').map(Number)
+  if ((parts.length !== 2 && parts.length !== 3) || !parts.every(Number.isFinite)) {
     throw new Error(`无效字幕时间戳：${value}`)
   }
-  return hours * 3600 + minutes * 60 + seconds
+  const seconds = parts[parts.length - 1]
+  const minutes = parts[parts.length - 2]
+  if (minutes < 0 || minutes >= 60 || seconds < 0 || seconds >= 60) throw new Error(`无效字幕时间戳：${value}`)
+  return parts.length === 2 ? minutes * 60 + seconds : parts[0] * 3600 + minutes * 60 + seconds
 }
 
 export function parseSubtitleFile(content: string): SubtitleCue[] {
@@ -385,9 +435,9 @@ export function parseSubtitleFile(content: string): SubtitleCue[] {
   const blocks = normalized.split(/\n{2,}/)
   const cues = blocks.flatMap(block => {
     const lines = block.split('\n').map(line => line.trim()).filter(Boolean)
-    const timeIndex = lines.findIndex(line => /\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,.]\d{3}/.test(line))
+    const timeIndex = lines.findIndex(line => /(?:\d{2}:)?\d{2}:\d{2}[,.]\d{3,}\s*-->\s*(?:\d{2}:)?\d{2}:\d{2}[,.]\d{3,}/.test(line) || /\d{2}:\d{2}[,.]\d{3,}\s*-->\s*\d{2}:\d{2}[,.]\d{3,}/.test(line))
     if (timeIndex < 0) return []
-    const match = lines[timeIndex].match(/(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})/)
+    const match = lines[timeIndex].match(/((?:\d{2}:)?\d{2}:\d{2}[,.]\d{3,}|\d{2}:\d{2}[,.]\d{3,})\s*-->\s*((?:\d{2}:)?\d{2}:\d{2}[,.]\d{3,}|\d{2}:\d{2}[,.]\d{3,})/)
     if (!match) return []
     const startSeconds = parseSubtitleTimestamp(match[1])
     const endSeconds = parseSubtitleTimestamp(match[2])
@@ -410,7 +460,7 @@ export function mapRelatedKnowledgeResponse(videoId: string, response: BackendRe
       id: item.id || `cross-video-${index + 1}`,
       anchorId: item.anchor_id || item.id,
       knowledge_type: item.type as KnowledgeType,
-      relation_type: RELATION_TYPES.has(item.relation_type as RelationType) ? item.relation_type as RelationType : '补充',
+      relation_type: RELATION_TYPES.has(item.relation_type as RelationType) ? item.relation_type as RelationType : 'related_to',
       knowledge_content: item.title || '关联知识',
       timestamp: item.timestamp || '00:00',
       seconds: Number.isFinite(Number(item.seconds)) ? Number(item.seconds) : item.timestamp ? parseTimestamp(item.timestamp) : 0,
@@ -427,11 +477,10 @@ export function mapRelatedKnowledgeResponse(videoId: string, response: BackendRe
     structureFields: (item.structure_fields || [])
       .filter(field => field.key?.trim() && field.label?.trim() && field.value?.trim())
       .map(field => ({ key: field.key!.trim(), label: field.label!.trim(), value: field.value!.trim() })),
-    evidenceIds: (item.evidence_ids || []).filter(id => id.trim()),
     informationNature: item.information_nature?.trim() || '',
     timeRange: item.time_range?.trim() || '',
-    relatedKnowledge: normalizeWikiLinks(item.related_knowledge),
-    relatedEntities: normalizeWikiLinks(item.related_entities),
+    sourceVideoTitle: item.source_video_title?.trim() || '',
+    relatedContent: normalizeWikiLinks(item.related_content?.length ? item.related_content : [...(item.related_knowledge || []), ...(item.related_entities || [])]),
     timestamp: item.timestamp || '00:00',
     seconds: Number.isFinite(Number(item.seconds)) ? Number(item.seconds) : item.timestamp ? parseTimestamp(item.timestamp) : 0,
     related_count: crossVideoItems.filter(cross => cross.anchorId === item.id).length || item.related_video_ids?.length || 0,

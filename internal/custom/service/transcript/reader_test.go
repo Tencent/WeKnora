@@ -19,12 +19,15 @@ func TestEffectiveEndSecondsRoundsUpLastTimedChunk(t *testing.T) {
 }
 
 func TestParseChunkMetadata(t *testing.T) {
-	metadata, err := parseChunkMetadata("## 视频定位信息\n\n```json\n{\"start_ms\":384000,\"end_ms\":385799}\n```\n\n## 原文\n\n内容")
+	metadata, err := parseChunkMetadata("## 视频定位信息\n\n```json\n{\"start_ms\":384000,\"end_ms\":385799,\"sentence_id\":\"s-1\",\"speaker_id\":\"speaker-2\",\"evidence_sentence_id\":\"evs:v1:abc\",\"transcript_generation\":\"generation-1\"}\n```\n\n## 原文\n\n内容")
 	if err != nil {
 		t.Fatalf("parseChunkMetadata returned error: %v", err)
 	}
 	if metadata.StartMs != 384000 || metadata.EndMs != 385799 {
 		t.Fatalf("unexpected metadata: %+v", metadata)
+	}
+	if metadata.SourceSentenceID != "s-1" || metadata.SpeakerID != "speaker-2" || metadata.EvidenceSentenceID != "evs:v1:abc" || metadata.TranscriptGeneration != "generation-1" {
+		t.Fatalf("immutable evidence metadata was not parsed: %+v", metadata)
 	}
 }
 

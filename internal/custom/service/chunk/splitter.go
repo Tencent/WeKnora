@@ -7,6 +7,7 @@
 package chunk
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -51,6 +52,10 @@ func (s *Splitter) Split(in SplitInputs) []SplitResult {
 			if text == "" {
 				continue
 			}
+			sentenceID := strings.TrimSpace(s.SentenceID)
+			if sentenceID == "" {
+				sentenceID = fmt.Sprintf("sentence:%06d", chunkIdx)
+			}
 			md := model.ChunkMetadata{
 				VideoID:         in.VideoID,
 				VideoType:       videotype.Normalize(in.VideoType),
@@ -59,7 +64,7 @@ func (s *Splitter) Split(in SplitInputs) []SplitResult {
 				EndMs:           s.EndMs,
 				DurationSeconds: in.DurationSeconds,
 				SpeakerID:       speaker,
-				SentenceID:      s.SentenceID,
+				SentenceID:      sentenceID,
 				ParagraphIndex:  pIdx,
 				ChunkIndex:      chunkIdx,
 				Language:        in.Language,

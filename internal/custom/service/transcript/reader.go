@@ -12,19 +12,27 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/evidence"
 )
 
 type Chunk struct {
-	ID      string
-	Index   int
-	Content string
-	StartMs int
-	EndMs   int
+	ID                 string
+	EvidenceSentenceID string
+	SourceSentenceID   string
+	SpeakerID          string
+	Index              int
+	Content            string
+	StartMs            int
+	EndMs              int
 }
 
 type chunkMetadata struct {
-	StartMs int `json:"start_ms"`
-	EndMs   int `json:"end_ms"`
+	StartMs              int    `json:"start_ms"`
+	EndMs                int    `json:"end_ms"`
+	SpeakerID            string `json:"speaker_id"`
+	SourceSentenceID     string `json:"sentence_id"`
+	EvidenceSentenceID   string `json:"evidence_sentence_id"`
+	TranscriptGeneration string `json:"transcript_generation"`
 }
 
 type Reader struct {
@@ -71,9 +79,43 @@ func (r *Reader) Read(ctx context.Context, videoID, generation string) ([]Chunk,
 		if err != nil {
 			return nil, fmt.Errorf("transcript chunk %d has invalid timing metadata: %w", index, err)
 		}
-		chunks = append(chunks, Chunk{ID: checkpoint.KnowledgeID, Index: index, Content: content, StartMs: metadata.StartMs, EndMs: metadata.EndMs})
+		evidenceID := strings.TrimSpace(checkpoint.EvidenceSentenceID)
+		if evidenceID == "" {
+			// Legacy checkpoints predate P1. Derive their ID from the immutable
+			// stored source fields so the active generation remains readable while
+			// the next re-index persists the new column.
+			sentence, buildErr := evidence.BuildSentence(evidence.Input{
+				VideoID: videoID, TranscriptGeneration: generation, Ordinal: index,
+				SourceSentenceID: metadata.SourceSentenceID, Text: OriginalText(content),
+				SpeakerID: metadata.SpeakerID, StartMs: metadata.StartMs, EndMs: metadata.EndMs,
+			})
+			if buildErr != nil {
+				return nil, fmt.Errorf("transcript chunk %d has no immutable evidence sentence ID: %w", index, buildErr)
+			}
+			evidenceID = sentence.ID
+		}
+		if metadata.EvidenceSentenceID != "" && metadata.EvidenceSentenceID != evidenceID {
+			return nil, fmt.Errorf("transcript chunk %d evidence sentence ID does not match stored mapping", index)
+		}
+		if metadata.TranscriptGeneration != "" && metadata.TranscriptGeneration != generation {
+			return nil, fmt.Errorf("transcript chunk %d transcript generation does not match active generation", index)
+		}
+		chunks = append(chunks, Chunk{
+			ID: checkpoint.KnowledgeID, EvidenceSentenceID: evidenceID,
+			SourceSentenceID: firstNonEmpty(checkpoint.SourceSegmentID, metadata.SourceSentenceID), SpeakerID: firstNonEmpty(checkpoint.SpeakerID, metadata.SpeakerID),
+			Index: index, Content: content, StartMs: metadata.StartMs, EndMs: metadata.EndMs,
+		})
 	}
 	return chunks, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func selectTimedKnowledgeChunks(chunks []weknora.KnowledgeChunk, knowledgeID string) (string, chunkMetadata, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/mps"
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/evidence"
 	"github.com/Tencent/WeKnora/internal/custom/service/outline"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
 	"github.com/Tencent/WeKnora/internal/custom/service/summary"
@@ -35,7 +37,7 @@ func NewDirectContentHandler(db *gorm.DB, client *llm.Client, wk *weknora.Client
 func (h *DirectContentHandler) JobType() string { return h.Job }
 
 func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
-	if h.LLM == nil || h.WeKnora == nil || h.Wiki == nil || h.Orchestrator == nil {
+	if h.DB == nil || h.WeKnora == nil || h.Wiki == nil || h.Orchestrator == nil {
 		return fmt.Errorf("direct content handler dependencies are not configured")
 	}
 	if h.Job != skill.JobOutline && h.Job != skill.JobSummary && h.Job != skill.JobSummaryEnhance {
@@ -59,16 +61,19 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 	if generation == "" {
 		return fmt.Errorf("视频 %s 的转写代次不可用或已过期", video.ID)
 	}
-	var chunks []transcript.Chunk
-	var err error
-	if job.ResultStage == "draft" {
-		chunks, err = h.readDraftChunks(ctx, video.ID, generation, job)
-	} else if generation != strings.TrimSpace(video.TranscriptGeneration) {
-		return fmt.Errorf("视频 %s 的转写代次不可用或已过期", video.ID)
-	} else {
-		reader := transcript.NewReader(h.DB, h.WeKnora)
-		chunks, err = reader.Read(ctx, video.ID, generation)
+	if h.Job == skill.JobOutline && job.ResultStage != "draft" {
+		promoted, err := h.promoteOutlineDraft(ctx, job, video, generation)
+		if err != nil {
+			return err
+		}
+		if promoted {
+			return nil
+		}
 	}
+	if h.LLM == nil {
+		return fmt.Errorf("direct content LLM dependency is not configured")
+	}
+	chunks, err := h.readContentChunks(ctx, video, generation, job)
 	if err != nil {
 		return err
 	}
@@ -129,6 +134,9 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		}
 		if validationErr != nil {
 			return validationErr
+		}
+		if err := outline.ValidateAndResolve(&document, video.DurationSeconds, chunks); err != nil {
+			return fmt.Errorf("validate %s evidence: %w", h.Job, err)
 		}
 		canonical, err := outline.Marshal(document)
 		if err != nil {
@@ -234,6 +242,109 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 	return nil
 }
 
+// readContentChunks keeps the two-stage exception narrow: outline drafts may
+// use the just-finished MPS result for immediate navigation, while every
+// summary stage is gated on the immutable current-generation evidence index.
+func (h *DirectContentHandler) readContentChunks(ctx context.Context, video *model.Video, generation string, job *model.VideoProcessingJob) ([]transcript.Chunk, error) {
+	if job.ResultStage == "draft" && h.Job == skill.JobOutline {
+		return h.readDraftChunks(ctx, video.ID, generation, job)
+	}
+	if generation != strings.TrimSpace(video.TranscriptGeneration) {
+		return nil, fmt.Errorf("视频 %s 的转写代次不可用或已过期", video.ID)
+	}
+	records, err := evidence.NewEvidenceIndex(h.DB, h.WeKnora).Read(ctx, video.ID, generation)
+	if err != nil {
+		return nil, fmt.Errorf("read %s evidence index: %w", h.Job, err)
+	}
+	return evidenceRecordsToTranscriptChunks(records), nil
+}
+
+// promoteOutlineDraft reuses a valid draft produced directly from the MPS
+// result. Once the active evidence index is ready, the draft is normalized to
+// current knowledge IDs, revalidated, and copied to the final outline slug.
+// This keeps the normal path from invoking the model twice for one transcript.
+func (h *DirectContentHandler) promoteOutlineDraft(ctx context.Context, job *model.VideoProcessingJob, video *model.Video, generation string) (bool, error) {
+	if strings.TrimSpace(video.OutlineDraftWikiPageID) == "" {
+		return false, nil
+	}
+	draftPage, err := h.Wiki.GetPageByID(ctx, h.WeKnora.KBID(), video.OutlineDraftWikiPageID)
+	if err != nil {
+		return false, fmt.Errorf("read outline draft: %w", err)
+	}
+	if draftPage == nil {
+		return false, nil
+	}
+	frontmatter := draftPage.ParsedFrontmatter()
+	pageType, _ := frontmatter["type"].(string)
+	sourceVideoID, _ := frontmatter["source_video_id"].(string)
+	pageGeneration, _ := frontmatter["transcript_generation"].(string)
+	if pageType != "outline" || sourceVideoID != video.ID || strings.TrimSpace(pageGeneration) != generation {
+		return false, nil
+	}
+	document, err := outline.Parse(draftPage.Content)
+	if err != nil {
+		slog.Warn("outline draft is not promotable", "video_id", video.ID, "page_id", draftPage.ID, "error", err)
+		return false, nil
+	}
+	records, err := evidence.NewEvidenceIndex(h.DB, h.WeKnora).Read(ctx, video.ID, generation)
+	if err != nil {
+		return false, fmt.Errorf("read outline promotion evidence index: %w", err)
+	}
+	chunks := evidenceRecordsToTranscriptChunks(records)
+	normalizeOutlineEvidenceChunkIDs(&document, chunks)
+	if err := outline.ValidateAndResolve(&document, video.DurationSeconds, chunks); err != nil {
+		slog.Warn("outline draft is not promotable", "video_id", video.ID, "page_id", draftPage.ID, "error", err)
+		return false, nil
+	}
+	canonical, err := outline.Marshal(document)
+	if err != nil {
+		return false, fmt.Errorf("marshal promoted outline: %w", err)
+	}
+	contract, ok := skill.Contract(skill.JobOutline)
+	if !ok {
+		return false, fmt.Errorf("unknown outline contract")
+	}
+	page, err := h.Wiki.UpsertPage(ctx, h.WeKnora.KBID(), weknora.WikiPageWrite{
+		Slug:     contract.WriteSlug(video.ID),
+		Title:    video.Title + "_大纲",
+		PageType: "index",
+		Status:   "published",
+		Content:  pageContent(contract.ArtifactType, video.ID, generation, canonical),
+	})
+	if err != nil {
+		return false, fmt.Errorf("save promoted outline: %w", err)
+	}
+	result, _ := json.Marshal(map[string]any{
+		"provider":              "draft_promotion",
+		"wiki_page_id":          page.ID,
+		"transcript_generation": generation,
+		"result_stage":          "final",
+		"source_draft_page_id":  draftPage.ID,
+	})
+	if err := h.DB.WithContext(ctx).Model(job).Update("result_payload", string(result)).Error; err != nil {
+		return false, fmt.Errorf("save promoted outline result: %w", err)
+	}
+	if _, _, err := h.Orchestrator.AfterSkillCompleteWithID(ctx, video.ID, skill.JobOutline, page.ID); err != nil {
+		return false, fmt.Errorf("complete promoted outline: %w", err)
+	}
+	if err := h.DB.WithContext(ctx).Model(&model.Video{}).Where("id = ?", video.ID).Update("outline_result_stage", "final_ready").Error; err != nil {
+		return false, fmt.Errorf("mark promoted outline final: %w", err)
+	}
+	return true, nil
+}
+
+func evidenceRecordsToTranscriptChunks(records []evidence.Record) []transcript.Chunk {
+	chunks := make([]transcript.Chunk, 0, len(records))
+	for _, record := range records {
+		chunks = append(chunks, transcript.Chunk{
+			ID: record.KnowledgeID, EvidenceSentenceID: record.EvidenceSentenceID,
+			SourceSentenceID: record.SourceSentenceID, SpeakerID: record.SpeakerID,
+			Index: record.ChunkIndex, Content: record.Text, StartMs: record.StartMs, EndMs: record.EndMs,
+		})
+	}
+	return chunks
+}
+
 func (h *DirectContentHandler) readDraftChunks(ctx context.Context, videoID, generation string, job *model.VideoProcessingJob) ([]transcript.Chunk, error) {
 	var input struct {
 		TranscriptionJobID string `json:"transcription_job_id"`
@@ -252,6 +363,7 @@ func (h *DirectContentHandler) readDraftChunks(ctx context.Context, videoID, gen
 		return nil, fmt.Errorf("draft MPS result is unavailable")
 	}
 	chunks := make([]transcript.Chunk, 0, len(payload.MPSResult.Segments))
+	manifest := make([]evidence.Sentence, 0, len(payload.MPSResult.Segments))
 	for i, segment := range payload.MPSResult.Segments {
 		if strings.TrimSpace(segment.Text) == "" || segment.EndMs <= segment.StartMs {
 			continue
@@ -260,10 +372,23 @@ func (h *DirectContentHandler) readDraftChunks(ctx context.Context, videoID, gen
 		if id == "" {
 			id = fmt.Sprintf("mps:%s:%06d", source.ExternalTaskID, i)
 		}
-		chunks = append(chunks, transcript.Chunk{ID: id, Index: len(chunks), Content: segment.Text, StartMs: segment.StartMs, EndMs: segment.EndMs})
+		ordinal := len(chunks)
+		sentence, err := evidence.BuildSentence(evidence.Input{
+			VideoID: videoID, TranscriptGeneration: generation, Ordinal: ordinal,
+			SourceSentenceID: id, Text: segment.Text, SpeakerID: segment.SpeakerID,
+			StartMs: segment.StartMs, EndMs: segment.EndMs,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("freeze draft evidence sentence %d: %w", ordinal, err)
+		}
+		chunks = append(chunks, transcript.Chunk{ID: id, EvidenceSentenceID: sentence.ID, SourceSentenceID: id, SpeakerID: segment.SpeakerID, Index: ordinal, Content: segment.Text, StartMs: segment.StartMs, EndMs: segment.EndMs})
+		manifest = append(manifest, sentence)
 	}
 	if len(chunks) == 0 {
 		return nil, fmt.Errorf("draft transcript has no timed segments")
+	}
+	if err := evidence.ValidateManifest(manifest, videoID, generation); err != nil {
+		return nil, fmt.Errorf("validate draft evidence sentence manifest: %w", err)
 	}
 	return chunks, nil
 }
@@ -273,6 +398,10 @@ func normalizeOutlineEvidenceChunkIDs(document *outline.Document, chunks []trans
 	for _, chunk := range chunks {
 		aliases[chunk.ID] = chunk.ID
 		aliases[fmt.Sprintf("%s|%06d", chunk.ID, chunk.Index)] = chunk.ID
+		if sourceID := strings.TrimSpace(chunk.SourceSentenceID); sourceID != "" {
+			aliases[sourceID] = chunk.ID
+			aliases[fmt.Sprintf("%s|%06d", sourceID, chunk.Index)] = chunk.ID
+		}
 	}
 	for chapterIndex := range document.Chapters {
 		chapter := &document.Chapters[chapterIndex]
@@ -402,9 +531,9 @@ func buildDirectContentPrompt(video *model.Video, jobType string, chunks []trans
 	default:
 		return "", fmt.Errorf("unsupported direct content job: %s", jobType)
 	}
-	builder.WriteString(fmt.Sprintf("视频标题：%s\n视频类型：%s\n转写分块：每个分块使用 ID=转写分块ID、TIME_MS=开始毫秒-结束毫秒；evidence chunk ID 只复制 ID= 后的值。\n", video.Title, video.VideoType))
+	builder.WriteString(fmt.Sprintf("视频标题：%s\n视频类型：%s\n转写分块：每个分块使用 ID=转写分块ID、EVIDENCE_SENTENCE_ID=不可变证据句ID、TIME_MS=开始毫秒-结束毫秒；evidence chunk ID 只复制 ID= 后的值，原文依据和时间跳转必须通过同一分块回溯到 EVIDENCE_SENTENCE_ID。\n", video.Title, video.VideoType))
 	for _, chunk := range chunks {
-		builder.WriteString(fmt.Sprintf("ID=%s\nTIME_MS=%d-%d\n%s\n\n", chunk.ID, chunk.StartMs, chunk.EndMs, transcript.OriginalText(chunk.Content)))
+		builder.WriteString(fmt.Sprintf("ID=%s\nEVIDENCE_SENTENCE_ID=%s\nTIME_MS=%d-%d\n%s\n\n", chunk.ID, chunk.EvidenceSentenceID, chunk.StartMs, chunk.EndMs, transcript.OriginalText(chunk.Content)))
 	}
 	if builder.Len() > 240000 {
 		return "", fmt.Errorf("transcript input exceeds direct llm context limit")
@@ -427,7 +556,7 @@ func summaryPrompt(videoType string, enhancement bool) string {
 	}
 	return fmt.Sprintf("任务：%s类型化智能总结。只返回一个 JSON 对象，不要输出 Markdown、代码围栏、解释文字、HTML 或 XML。\n"+
 		"JSON 契约：必须返回 {\"schemaVersion\":1,\"videoType\":%q,\"sections\":[%s]}。sections 必须严格按以下标题和顺序输出：%s。\n"+
-		"每个 section 必须包含至少一个 block；block.kind 只能是 paragraph 或 bullet，block.text 必须是可直接展示的纯文本，不得包含 Markdown 标记；每个 block 必须提供 evidenceChunkIds，且只能引用给定转写分块 ID。一个 block 可以引用多个分块。\n"+
+		"每个 section 必须包含至少一个 block；block.kind 只能是 paragraph 或 bullet，block.text 必须是可直接展示的纯文本，不得包含 Markdown 标记；每个 block 必须提供 evidenceChunkIds，且只能引用给定转写分块 ID。一个 block 可以引用多个分块。knowledge_refs 与 evidence_refs 由系统在保存前生成，不要自行编造或输出。\n"+
 		"章节证据不足时保留章节并明确写出信息不足，不得删除、合并、改名或补充转写之外的事实。%s\n",
 		mode, videoType, strings.Join(sectionShape, ","), frameworkTitles(framework), enhancementInstruction(enhancement))
 }

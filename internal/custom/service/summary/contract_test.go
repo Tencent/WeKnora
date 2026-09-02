@@ -43,7 +43,7 @@ func TestResolveEvidenceReturnsOriginalTextAndTimestamp(t *testing.T) {
 			}},
 		})
 	}
-	chunks := []transcript.Chunk{{ID: "chunk-1", StartMs: 605000, EndMs: 620500, Content: "## 视频定位信息\n\n## 原文\n\n真实原文"}}
+	chunks := []transcript.Chunk{{ID: "chunk-1", EvidenceSentenceID: "evs:v1:abc", StartMs: 605000, EndMs: 620500, Content: "## 视频定位信息\n\n## 原文\n\n真实原文"}}
 	if err := ResolveEvidence(&document, chunks); err != nil {
 		t.Fatalf("ResolveEvidence returned error: %v", err)
 	}
@@ -51,12 +51,40 @@ func TestResolveEvidenceReturnsOriginalTextAndTimestamp(t *testing.T) {
 	if evidence.Timestamp != "10:05–10:20" || evidence.TranscriptSnippet != "真实原文" {
 		t.Fatalf("unexpected evidence: %+v", evidence)
 	}
+	if evidence.EvidenceSentenceID != "evs:v1:abc" {
+		t.Fatalf("unexpected evidence sentence ID: %s", evidence.EvidenceSentenceID)
+	}
+	ref := document.Sections[0].Blocks[0].EvidenceRefs[0]
+	if ref.ChunkID != "chunk-1" || ref.EvidenceSentenceID != "evs:v1:abc" || ref.StartMs != 605000 || ref.EndMs != 620500 {
+		t.Fatalf("unexpected evidence reference: %+v", ref)
+	}
+}
+
+func TestParseAcceptsCamelCaseDoubleReferenceAliases(t *testing.T) {
+	parsed, err := Parse(`{"schemaVersion":1,"videoType":"general","sections":[{"id":"positioning-problem","title":"一、定位与问题","blocks":[{"id":"block-1","kind":"paragraph","text":"内容","evidenceChunkIds":["chunk-1"],"knowledgeRefs":["wiki-1"],"evidenceRefs":[{"chunk_id":"chunk-1","evidence_sentence_id":"evs:v1:one","start_ms":100,"end_ms":1200}],"evidence":[{"chunkId":"chunk-1","evidenceSentenceId":"evs:v1:one","startSeconds":0.1,"endSeconds":1.2,"timestamp":"00:00–00:01","transcriptSnippet":"原文"}]}]},{"id":"claims-reasoning","title":"二、主张与论证","blocks":[{"id":"block-2","kind":"paragraph","text":"内容","evidenceChunkIds":["chunk-1"]}]},{"id":"evidence-cases","title":"三、证据与案例","blocks":[{"id":"block-3","kind":"paragraph","text":"内容","evidenceChunkIds":["chunk-1"]}]},{"id":"limitations-counterarguments","title":"四、限定与反方","blocks":[{"id":"block-4","kind":"paragraph","text":"内容","evidenceChunkIds":["chunk-1"]}]},{"id":"impact-recommendations","title":"五、影响与建议","blocks":[{"id":"block-5","kind":"paragraph","text":"内容","evidenceChunkIds":["chunk-1"]}]}]}`)
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	block := parsed.Sections[0].Blocks[0]
+	if len(block.KnowledgeRefs) != 1 || block.KnowledgeRefs[0] != "wiki-1" || len(block.EvidenceRefs) != 1 {
+		t.Fatalf("double references were not parsed: %+v", block)
+	}
+}
+
+func TestValidateStoredRejectsMismatchedEvidenceReference(t *testing.T) {
+	document := Document{SchemaVersion: SchemaVersion, VideoType: "general", Sections: make([]Section, 0, len(frameworks["general"]))}
+	for _, section := range frameworks["general"] {
+		document.Sections = append(document.Sections, Section{ID: section.ID, Title: section.Title, Blocks: []Block{{ID: section.ID, Kind: BlockKindParagraph, Text: "内容", EvidenceChunkIDs: []string{"chunk-1"}, Evidence: []Evidence{{ChunkID: "chunk-1", EvidenceSentenceID: "evs:v1:one", StartSeconds: 0.1, EndSeconds: 1.2, Timestamp: "00:00–00:01", TranscriptSnippet: "原文"}}, EvidenceRefs: []EvidenceRef{{ChunkID: "chunk-1", EvidenceSentenceID: "evs:v1:one", StartMs: 999, EndMs: 1200}}}}})
+	}
+	if err := ValidateStored(document, "general"); err == nil {
+		t.Fatal("ValidateStored accepted mismatched evidence reference")
+	}
 }
 
 func TestParseStoredSkipsWikiFrontmatter(t *testing.T) {
 	document := Document{SchemaVersion: SchemaVersion, VideoType: "general", Sections: make([]Section, 0, len(frameworks["general"]))}
 	for _, section := range frameworks["general"] {
-		document.Sections = append(document.Sections, Section{ID: section.ID, Title: section.Title, Blocks: []Block{{ID: section.ID, Kind: BlockKindParagraph, Text: "内容", EvidenceChunkIDs: []string{"chunk-1"}, Evidence: []Evidence{{ChunkID: "chunk-1", StartSeconds: 1, EndSeconds: 2, Timestamp: "00:01–00:02", TranscriptSnippet: "原文"}}}}})
+		document.Sections = append(document.Sections, Section{ID: section.ID, Title: section.Title, Blocks: []Block{{ID: section.ID, Kind: BlockKindParagraph, Text: "内容", EvidenceChunkIDs: []string{"chunk-1"}, Evidence: []Evidence{{ChunkID: "chunk-1", EvidenceSentenceID: "evs:v1:chunk-1", StartSeconds: 1, EndSeconds: 2, Timestamp: "00:01–00:02", TranscriptSnippet: "原文"}}}}})
 	}
 	payload, err := json.Marshal(document)
 	if err != nil {
@@ -68,6 +96,10 @@ func TestParseStoredSkipsWikiFrontmatter(t *testing.T) {
 	}
 	if err := ValidateStored(parsed, "general"); err != nil {
 		t.Fatalf("ValidateStored returned error: %v", err)
+	}
+	parsed.Sections[0].Blocks[0].Evidence[0].EvidenceSentenceID = ""
+	if err := ValidateStored(parsed, "general"); err == nil {
+		t.Fatal("ValidateStored accepted evidence without immutable sentence ID")
 	}
 }
 
@@ -89,7 +121,7 @@ func TestParseAcceptsLegacySnakeCaseSchemaVersion(t *testing.T) {
 }
 
 func TestCanonicalJSONUsesFrontendWireContractForEveryVideoType(t *testing.T) {
-	chunk := transcript.Chunk{ID: "chunk-1", StartMs: 1000, EndMs: 2500, Content: "真实原文"}
+	chunk := transcript.Chunk{ID: "chunk-1", EvidenceSentenceID: "evs:v1:chunk-1", StartMs: 1000, EndMs: 2500, Content: "真实原文"}
 	for videoType, framework := range frameworks {
 		document := Document{SchemaVersion: SchemaVersion, VideoType: videoType, Sections: make([]Section, 0, len(framework))}
 		for _, section := range framework {
@@ -112,7 +144,7 @@ func TestCanonicalJSONUsesFrontendWireContractForEveryVideoType(t *testing.T) {
 			t.Fatalf("json.Marshal(%s) returned error: %v", videoType, err)
 		}
 		wire := string(payload)
-		for _, field := range []string{"schemaVersion", "videoType", "evidenceChunkIds", "chunkId", "startSeconds", "endSeconds", "transcriptSnippet"} {
+		for _, field := range []string{"schemaVersion", "videoType", "evidenceChunkIds", "knowledge_refs", "evidence_refs", "evidence_sentence_id", "start_ms", "end_ms", "chunkId", "startSeconds", "endSeconds", "transcriptSnippet"} {
 			if !strings.Contains(wire, `"`+field+`"`) {
 				t.Fatalf("%s payload is missing frontend field %q: %s", videoType, field, wire)
 			}

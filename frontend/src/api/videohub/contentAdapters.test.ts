@@ -56,7 +56,9 @@ test('summary accepts the typed JSON contract and preserves block evidence', () 
           kind: 'paragraph',
           text: `第 ${index + 1} 节内容`,
           evidenceChunkIds: [`chunk-${index + 1}`],
-          evidence: [{ chunkId: `chunk-${index + 1}`, startSeconds: index, endSeconds: index + 1, timestamp: `00:0${index}`, transcriptSnippet: '真实原文' }],
+          evidence: [{ chunkId: `chunk-${index + 1}`, evidenceSentenceId: `evs:v1:${index + 1}`, startSeconds: index, endSeconds: index + 1, timestamp: `00:0${index}`, transcriptSnippet: '真实原文' }],
+          knowledge_refs: ['wiki-reference-1'],
+          evidence_refs: [{ chunk_id: `chunk-${index + 1}`, evidence_sentence_id: `evs:v1:${index + 1}`, start_ms: index * 1000, end_ms: (index + 1) * 1000 }],
         }],
       })),
     ],
@@ -64,6 +66,8 @@ test('summary accepts the typed JSON contract and preserves block evidence', () 
 
   assert.equal(sections[0].title, '一、人物背景')
   assert.equal(sections[0].blocks[0].evidence[0].transcriptSnippet, '真实原文')
+  assert.deepEqual(sections[0].blocks[0].knowledgeRefs, ['wiki-reference-1'])
+  assert.equal(sections[0].blocks[0].evidenceRefs?.[0]?.evidenceSentenceId, 'evs:v1:1')
 })
 
 test('summary renders every category using the backend wire contract', () => {
@@ -88,6 +92,7 @@ test('summary renders every category using the backend wire contract', () => {
           evidenceChunkIds: [`chunk-${index + 1}`],
           evidence: [{
             chunkId: `chunk-${index + 1}`,
+            evidenceSentenceId: `evs:v1:${index + 1}`,
             startSeconds: index + 1,
             endSeconds: index + 2,
             timestamp: `00:0${index + 1}–00:0${index + 2}`,
@@ -112,11 +117,40 @@ test('summary rejects Markdown content and template deviations', () => {
   }, 'interview'))
 })
 
+test('summary rejects evidence_refs that do not match evidence timing', () => {
+  assert.throws(() => parseStructuredSummary({
+    schemaVersion: 1,
+    videoType: 'general',
+    sections: [
+      ...['一、定位与问题', '二、主张与论证', '三、证据与案例', '四、限定与反方', '五、影响与建议'].map((title, index) => ({
+        id: `section-${index + 1}`,
+        title,
+        blocks: [{
+          id: `block-${index + 1}`,
+          kind: 'paragraph',
+          text: '内容',
+          evidenceChunkIds: [`chunk-${index + 1}`],
+          evidence: [{ chunkId: `chunk-${index + 1}`, evidenceSentenceId: `evs:v1:${index + 1}`, startSeconds: index + 1, endSeconds: index + 2, timestamp: '00:01–00:02', transcriptSnippet: '原文' }],
+          evidence_refs: [{ evidence_sentence_id: `evs:v1:${index + 1}`, start_ms: 0, end_ms: 999 }],
+        }],
+      })),
+    ],
+  }, 'general'))
+})
+
 test('parses real SRT subtitles into seekable cues', () => {
   const cues = parseSubtitleFile('\uFEFF1\r\n00:00:01,200 --> 00:00:03,500\r\n第一句\r\n\r\n2\r\n00:01:02,000 --> 00:01:04,000\r\n第二句')
   assert.deepEqual(cues, [
     { start_seconds: 1.2, end_seconds: 3.5, text: '第一句' },
     { start_seconds: 62, end_seconds: 64, text: '第二句' },
+  ])
+})
+
+test('parses WebVTT subtitles with cue identifiers and millisecond timestamps', () => {
+  const cues = parseSubtitleFile('WEBVTT\n\nchapter-1\n00:00:01.250 --> 00:00:03.750 align:start\n第一段\n\n00:04.000 --> 00:05.500\n第二段')
+  assert.deepEqual(cues, [
+    { start_seconds: 1.25, end_seconds: 3.75, text: '第一段' },
+    { start_seconds: 4, end_seconds: 5.5, text: '第二段' },
   ])
 })
 
@@ -128,7 +162,7 @@ test('maps grouped backend anchors without mock video data', () => {
   const payload = mapRelatedKnowledgeResponse('video-1', {
     anchors: {
       entity: [{ id: 'entity-1', title: '张三', type: 'entity', related_video_ids: ['video-2'] }],
-      method: [{ id: 'method-1', title: '复盘法', type: 'method' }],
+      methodology: [{ id: 'method-1', title: '复盘法', type: 'methodology' }],
     },
     cross_video: [],
   })
@@ -141,17 +175,22 @@ test('maps grouped backend anchors without mock video data', () => {
 test('maps type-framework fields from backend anchors', () => {
   const payload = mapRelatedKnowledgeResponse('video-1', {
     anchors: {
-      method: [{
+      methodology: [{
         id: 'method-1',
         title: '复盘法',
-        type: 'method',
+        type: 'methodology',
+        primary_type: 'methodology',
         core_content: '通过异常数据定位原因。',
         structure_fields: [
           { key: 'input', label: '输入', value: '留存曲线' },
           { key: 'criteria', label: '判断标准', value: '拐点接近' },
         ],
         evidence_ids: ['E001', 'E002'],
-        information_nature: '归纳',
+        information_nature: '方法论',
+        source_video_title: '增长复盘课',
+        timestamp: '03:20',
+        seconds: 200,
+        related_content: [{ title: '留存率', slug: 'concept/retention', target_type: 'concept' }],
       }],
     },
     cross_video: [],
@@ -163,8 +202,12 @@ test('maps type-framework fields from backend anchors', () => {
     { key: 'input', label: '输入', value: '留存曲线' },
     { key: 'criteria', label: '判断标准', value: '拐点接近' },
   ])
-  assert.deepEqual(anchor.evidenceIds, ['E001', 'E002'])
-  assert.equal(anchor.informationNature, '归纳')
+  assert.equal(anchor.knowledge_type, 'methodology')
+  assert.equal('evidenceIds' in anchor, false)
+  assert.equal(anchor.informationNature, '方法论')
+  assert.equal(anchor.sourceVideoTitle, '增长复盘课')
+  assert.equal(anchor.timestamp, '03:20')
+  assert.deepEqual(anchor.relatedContent, [{ title: '留存率', slug: 'concept/retention', targetType: 'concept' }])
 })
 
 test('does not misclassify unsupported knowledge types as concepts', () => {
@@ -214,6 +257,21 @@ test('content loader isolates failed content requests', () => {
   assert.equal(state.summary.status, 'error')
   assert.equal(state.relatedKnowledge.status, 'empty')
   assert.equal(state.summary.error, 'summary unavailable')
+})
+
+test('knowledge-layer failure keeps foundation content available', () => {
+  const state = buildVideoContentState(
+    { status: 'fulfilled', value: [{ id: 'chapter-1' }] as any },
+    { status: 'fulfilled', value: { sections: [{ id: 'section-1', title: '初版', blocks: [] }] as any } },
+    { status: 'rejected', reason: { status: 502, error_code: 'weknora_read_failed', message: 'knowledge layer unavailable' } },
+  )
+
+  assert.equal(state.outline.status, 'ready')
+  assert.equal(state.summary.status, 'ready')
+  assert.equal(state.summary.data[0]?.title, '初版')
+  assert.equal(state.relatedKnowledge.status, 'error')
+  assert.equal(state.relatedKnowledge.error, 'knowledge layer unavailable')
+  assert.equal(shouldShowRelatedKnowledgeTab(state.relatedKnowledge), true)
 })
 
 test('content loader distinguishes not generated artifacts from failures', () => {

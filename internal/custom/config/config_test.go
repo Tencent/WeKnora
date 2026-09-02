@@ -60,6 +60,25 @@ func TestLoadReadsDirectContentLLMConfig(t *testing.T) {
 	}
 }
 
+func TestLoadKeepsProductGraphConfigurationIndependentFromOfficialGraph(t *testing.T) {
+	t.Setenv("NEO4J_ENABLE", "true")
+	t.Setenv("NEO4J_URI", "bolt://official-graph:7687")
+	t.Setenv("NEO4J_USERNAME", "official")
+	t.Setenv("NEO4J_PASSWORD", "official-password")
+	t.Setenv("WEKNORA_KB_ID", "weknora-kb")
+	t.Setenv("CUSTOM_WIKI_GRAPH_NEO4J_ENABLE", "")
+	t.Setenv("CUSTOM_WIKI_GRAPH_NEO4J_URI", "")
+	t.Setenv("CUSTOM_WIKI_GRAPH_KB_ID", "")
+
+	cfg := Load()
+	if cfg.WikiGraph.Enabled {
+		t.Fatal("product Wiki graph must not inherit NEO4J_ENABLE")
+	}
+	if cfg.WikiGraph.URI != "" || cfg.WikiGraph.Username != "" || cfg.WikiGraph.KnowledgeBaseID != "weknora-kb" {
+		t.Fatalf("product Wiki graph inherited official graph settings: %+v", cfg.WikiGraph)
+	}
+}
+
 func TestLoadReadsTencentMPSProviderConfig(t *testing.T) {
 	t.Setenv("CUSTOM_TRANSCRIPTION_PROVIDER", "tencent_mps")
 	t.Setenv("TENCENTCLOUD_SECRET_ID", "secret-id")

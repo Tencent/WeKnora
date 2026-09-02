@@ -9,6 +9,7 @@ import {
   shouldAbortStream,
 } from './chatStream'
 import { buildChatRequest, normalizeChatError, normalizeTenantId, type ChatRequestScope } from './chatRequest'
+import { recordChatSourceAudit, recordDashboardQuestion } from './dashboard'
 
 interface ScopeResponse extends ChatRequestScope {
   video_id?: string
@@ -107,6 +108,11 @@ function messageId() {
   return `message-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
 
+function questionEventID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  return messageId()
+}
+
 function nowLabel() {
   return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
@@ -202,8 +208,9 @@ function questionForScope(question: string, scope: ScopeResponse) {
   if (scope.scope !== 'video') return question
   return [
     `用户正在视频详情页围绕《${scope.video_title || '当前视频'}》提问。当前视频 ID：${scope.video_id || 'unknown'}。`,
-    '请优先检索并引用当前视频的转写内容；如果当前视频信息不足，必须允许使用同一知识库中的其他视频或全局知识补充。',
-    '引用当前视频之外的内容时，必须明确标注来源视频，不要让用户误以为全部来自当前视频。',
+    '必须先使用 Wiki 搜索读取当前视频已审计通过的知识对象页面，优先引用页面中的可读正文和结构化字段。',
+    '只有 Wiki 页面不存在、检索不到或无法回答时，才使用当前视频同一转写代次的句级分块作为证据回溯；不得把未审计页面当作事实来源。',
+    '回答必须区分知识对象结论与转写原文证据；引用来源时保留 Wiki 页面或转写分块的真实来源。',
     `用户问题：${question}`,
   ].join('\n')
 }
@@ -225,6 +232,71 @@ async function createSession(question: string, scope: ScopeResponse): Promise<We
     description: sessionDescription(scope.session_meta || { scope: scope.scope }),
   }, tenantRequestConfig(scope.tenant_id))
   return unwrapData(res)
+}
+
+function recordQuestionBestEffort(
+  question: string,
+  scope: ScopeResponse,
+  sessionID: string,
+  currentVideo?: VideoData,
+  currentTime?: number,
+) {
+  const eventID = questionEventID()
+  void recordDashboardQuestion({
+    event_id: eventID,
+    session_id: sessionID,
+    ...((scope.video_id || currentVideo?.id) ? { video_id: scope.video_id || currentVideo?.id } : {}),
+    video_seconds: Math.max(0, Math.floor(currentTime || 0)),
+    question,
+  }).catch(error => {
+    console.warn('record dashboard question failed', error)
+  })
+  return eventID
+}
+
+async function recordSourceAuditBestEffort(
+  eventID: string,
+  sessionID: string,
+  scope: ScopeResponse,
+  messages: WeKnoraMessage[],
+) {
+  const assistant = [...messages].reverse().find(message => message.role === 'assistant' && (message.knowledge_references || []).length)
+  const references = assistant?.knowledge_references || []
+  const knowledgeIDs = references.map(reference => reference.knowledge_id || '').filter(Boolean)
+  const evidenceByKnowledgeID = await lookupEvidence(knowledgeIDs)
+  const wikiPageIDs = new Set<string>()
+  const knowledgeObjectIDs = new Set<string>()
+  const transcriptChunkIDs = new Set<string>()
+  for (const reference of references) {
+    const knowledgeID = reference.knowledge_id || ''
+    const metadata = reference.metadata || {}
+    const sourceType = String(metadata.source_type || metadata.source_kind || metadata.source || '').toLowerCase()
+    const wikiPageID = String(metadata.wiki_page_id || metadata.page_id || '').trim()
+    const knowledgeObjectID = String(metadata.knowledge_object_id || metadata.object_id || '').trim()
+    if (wikiPageID || sourceType.includes('wiki') || sourceType.includes('page')) {
+      if (wikiPageID) wikiPageIDs.add(wikiPageID)
+      if (knowledgeObjectID) knowledgeObjectIDs.add(knowledgeObjectID)
+      continue
+    }
+    if (knowledgeID && (sourceType.includes('chunk') || sourceType.includes('transcript') || evidenceByKnowledgeID.has(knowledgeID))) {
+      transcriptChunkIDs.add(knowledgeID)
+    }
+  }
+  const hasWiki = wikiPageIDs.size > 0
+  const hasChunk = transcriptChunkIDs.size > 0
+  const sourceMode = hasWiki && hasChunk ? 'wiki_and_chunk' : hasWiki ? 'wiki' : hasChunk ? 'chunk' : 'none'
+  await recordChatSourceAudit({
+    event_id: eventID,
+    session_id: sessionID,
+    scope: scope.scope,
+    ...(scope.video_id ? { video_id: scope.video_id } : {}),
+    source_mode: sourceMode,
+    fallback_used: !hasWiki && hasChunk,
+    references_found: references.length,
+    wiki_page_ids: [...wikiPageIDs],
+    knowledge_object_ids: [...knowledgeObjectIDs],
+    transcript_chunk_ids: [...transcriptChunkIDs],
+  })
 }
 
 function tenantRequestConfig(tenantID?: string | number | null) {
@@ -588,8 +660,15 @@ export async function sendChatMessage(question: string, options: SendOptions = {
   try {
     const scope = await getScope(options)
     const session = await createSession(question, scope)
+    const eventID = recordQuestionBestEffort(question, scope, session.id, options.currentVideo, options.currentTime)
     const { answer } = await streamAnswer(session.id, question, scope, { onChunk: options.onStreamMessage })
-    const assistant = await hydrateLastAssistant(session, answer, scope.tenant_id)
+    const storedMessages = await loadSessionMessages(session.id, scope.tenant_id)
+    const mappedMessages = await mapMessages(storedMessages)
+    const assistant = [...mappedMessages].reverse().find(message => message.sender === 'assistant' && message.text.trim())
+      || { id: messageId(), sender: 'assistant' as const, text: answer, timestamp: nowLabel() }
+    void recordSourceAuditBestEffort(eventID, session.id, scope, storedMessages).catch(error => {
+      console.warn('record chat source audit failed', error)
+    })
     options.onMessage?.(assistant)
     return assistant
   } catch (error) {
@@ -613,10 +692,15 @@ export async function createChatTurn(question: string, options: TurnOptions = {}
     if (!options.session?.id || options.session.id.startsWith('pending-')) {
       options.onSessionCreated?.(sessionFromScope(session, effectiveScope, [], question))
     }
+    const eventID = recordQuestionBestEffort(question, effectiveScope, session.id, options.currentVideo, options.currentTime)
     const userMessage: ChatMessage = { id: messageId(), sender: 'user', text: question, timestamp: nowLabel() }
     options.onMessage?.(userMessage)
     const { answer, streamMessage } = await streamAnswer(session.id, question, effectiveScope, { onChunk: options.onStreamMessage })
-    const messages = await mapMessages(await loadSessionMessages(session.id, tenantID))
+    const storedMessages = await loadSessionMessages(session.id, tenantID)
+    const messages = await mapMessages(storedMessages)
+    void recordSourceAuditBestEffort(eventID, session.id, effectiveScope, storedMessages).catch(error => {
+      console.warn('record chat source audit failed', error)
+    })
     const finalMessages = mergeLocalTurnWithStoredMessages(messages, userMessage, { ...streamMessage, id: messageId(), text: answer, timestamp: nowLabel() })
     return sessionFromScope(session, effectiveScope, finalMessages, question)
   } catch (error) {

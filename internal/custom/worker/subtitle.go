@@ -29,6 +29,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/chunk"
+	"github.com/Tencent/WeKnora/internal/custom/service/evidence"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
 	"github.com/Tencent/WeKnora/internal/custom/service/subtitle"
 )
@@ -304,12 +305,15 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	// 内容生成号、本地 checkpoint 与稳定标题共同保证重试只补缺项并支持重转写。
 	kbID := h.WeKnora.KBID()
 	type preparedChunk struct {
-		Index           int
-		SourceSegmentID string
-		StartMs         int
-		EndMs           int
-		Content         string
-		ContentHash     string
+		Index              int
+		EvidenceSentenceID string
+		SourceSegmentID    string
+		SpeakerID          string
+		StartMs            int
+		EndMs              int
+		Text               string
+		Content            string
+		ContentHash        string
 	}
 	prepared := make([]preparedChunk, 0, len(results))
 	generationHash := sha256.New()
@@ -321,9 +325,53 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 		content := fmt.Sprintf("## 视频定位信息\n\n```json\n%s\n```\n\n## 原文\n\n%s", metadataJSON, b.Content)
 		contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
 		_, _ = generationHash.Write([]byte(contentHash))
-		prepared = append(prepared, preparedChunk{Index: b.Metadata.ChunkIndex, SourceSegmentID: b.Metadata.SentenceID, StartMs: b.Metadata.StartMs, EndMs: b.Metadata.EndMs, Content: content, ContentHash: contentHash})
+		prepared = append(prepared, preparedChunk{Index: b.Metadata.ChunkIndex, SourceSegmentID: b.Metadata.SentenceID, StartMs: b.Metadata.StartMs, EndMs: b.Metadata.EndMs, Text: b.Content, Content: content, ContentHash: contentHash})
 	}
-	generation := fmt.Sprintf("%x", generationHash.Sum(nil))
+	// Include the evidence contract version in the generation digest. Keeping
+	// the stored value at 64 hex characters preserves the existing column size
+	// while ensuring pre-P1 checkpoints cannot be mistaken for this generation.
+	versionedHash := sha256.New()
+	_, _ = versionedHash.Write([]byte("evidence-generation-v1|"))
+	_, _ = versionedHash.Write(generationHash.Sum(nil))
+	generation := fmt.Sprintf("%x", versionedHash.Sum(nil))
+	for index := range prepared {
+		item := &prepared[index]
+		sentence, err := evidence.BuildSentence(evidence.Input{
+			VideoID: video.ID, TranscriptGeneration: generation, Ordinal: index,
+			SourceSentenceID: item.SourceSegmentID, Text: item.Text,
+			SpeakerID: results[index].Metadata.SpeakerID, StartMs: item.StartMs, EndMs: item.EndMs,
+		})
+		if err != nil {
+			return fmt.Errorf("freeze evidence sentence %d: %w", index, err)
+		}
+		item.EvidenceSentenceID = sentence.ID
+		item.SpeakerID = sentence.SpeakerID
+	}
+	manifest := make([]evidence.Sentence, 0, len(prepared))
+	for _, item := range prepared {
+		manifest = append(manifest, evidence.Sentence{
+			ID: item.EvidenceSentenceID, VideoID: video.ID, TranscriptGeneration: generation,
+			Ordinal: item.Index, SourceSentenceID: item.SourceSegmentID, Text: item.Text,
+			SpeakerID: item.SpeakerID, StartMs: item.StartMs, EndMs: item.EndMs,
+		})
+	}
+	if err := evidence.ValidateManifest(manifest, video.ID, generation); err != nil {
+		return fmt.Errorf("validate evidence sentence manifest: %w", err)
+	}
+	// Add the immutable ID to the stored positioning metadata only after the
+	// generation is known, avoiding a circular generation/ID dependency.
+	for index := range prepared {
+		result := results[index]
+		result.Metadata.TranscriptGeneration = generation
+		result.Metadata.EvidenceSentenceID = prepared[index].EvidenceSentenceID
+		metadataJSON, err := json.MarshalIndent(result.Metadata.ToMap(), "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal evidence metadata %d: %w", result.Metadata.ChunkIndex, err)
+		}
+		content := fmt.Sprintf("## 视频定位信息\n\n```json\n%s\n```\n\n## 原文\n\n%s", metadataJSON, prepared[index].Text)
+		prepared[index].Content = content
+		prepared[index].ContentHash = fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
+	}
 	if err := h.DB.Model(job).Update("transcript_generation", generation).Error; err != nil {
 		return fmt.Errorf("bind index job transcript generation: %w", err)
 	}
@@ -357,21 +405,30 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 			}
 			checkpoint = model.VideoTranscriptChunk{
 				VideoID: video.ID, Generation: generation, Revision: jobInput.Revision, ChunkIndex: item.Index, KnowledgeID: created.ID,
-				SourceSegmentID: item.SourceSegmentID,
-				StartMs:         item.StartMs, EndMs: item.EndMs,
+				EvidenceSentenceID: item.EvidenceSentenceID, SourceSegmentID: item.SourceSegmentID, SpeakerID: item.SpeakerID,
+				StartMs: item.StartMs, EndMs: item.EndMs,
 				ContentHash: item.ContentHash, Status: "created",
 			}
-			if err := h.DB.Clauses(clause.OnConflict{
+			result := h.DB.Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "video_id"}, {Name: "generation"}, {Name: "chunk_index"}},
-				DoUpdates: clause.AssignmentColumns([]string{"knowledge_id", "source_segment_id", "start_ms", "end_ms", "content_hash", "status", "updated_at"}),
-			}).Create(&checkpoint).Error; err != nil {
-				return fmt.Errorf("save transcript checkpoint %d: %w", item.Index, err)
+				DoNothing: true,
+			}).Create(&checkpoint)
+			if result.Error != nil {
+				return fmt.Errorf("save transcript checkpoint %d: %w", item.Index, result.Error)
 			}
-		} else if checkpoint.StartMs != item.StartMs || checkpoint.EndMs != item.EndMs {
-			if err := h.DB.Model(&model.VideoTranscriptChunk{}).
-				Where("video_id = ? AND generation = ? AND chunk_index = ?", video.ID, generation, item.Index).
-				Updates(map[string]any{"start_ms": item.StartMs, "end_ms": item.EndMs}).Error; err != nil {
-				return fmt.Errorf("backfill transcript timing %d: %w", item.Index, err)
+			if result.RowsAffected == 0 {
+				var existing model.VideoTranscriptChunk
+				if err := h.DB.Where("video_id = ? AND generation = ? AND chunk_index = ?", video.ID, generation, item.Index).First(&existing).Error; err != nil {
+					return fmt.Errorf("load concurrent transcript checkpoint %d: %w", item.Index, err)
+				}
+				if existing.KnowledgeID != checkpoint.KnowledgeID || existing.EvidenceSentenceID != checkpoint.EvidenceSentenceID || existing.ContentHash != checkpoint.ContentHash {
+					return fmt.Errorf("transcript chunk %d immutable checkpoint conflict", item.Index)
+				}
+				checkpoint = existing
+			}
+		} else {
+			if checkpoint.EvidenceSentenceID != item.EvidenceSentenceID || checkpoint.SourceSegmentID != item.SourceSegmentID || checkpoint.SpeakerID != item.SpeakerID || checkpoint.StartMs != item.StartMs || checkpoint.EndMs != item.EndMs {
+				return fmt.Errorf("transcript chunk %d immutable evidence mapping mismatch in generation %s", item.Index, generation)
 			}
 		}
 		if compatibilityAnchorID == "" {
@@ -391,7 +448,8 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 				"transcript_knowledge_id": compatibilityAnchorID, "transcript_generation": generation,
 				"transcript_active_revision": jobInput.Revision, "status": model.VideoStatusProcessing,
 				"knowledge_base_wiki_page_id": "", "knowledge_audit_status": "",
-				"outline_wiki_page_id": "", "overview_wiki_page_id": "", "summary_wiki_page_id": "",
+				"outline_wiki_page_id": "", "outline_draft_wiki_page_id": "", "outline_result_stage": "",
+				"overview_wiki_page_id": "", "summary_wiki_page_id": "", "summary_draft_wiki_page_id": "", "summary_result_stage": "",
 				"summary_wiki_page_version": 0, "summary_source": "", "summary_knowledge_enhanced": false,
 				"summary_user_edited": false, "transcript_page_wiki_page_id": "",
 			})

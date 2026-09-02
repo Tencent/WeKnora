@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
 
 const SchemaVersion = 1
@@ -16,20 +18,22 @@ type Document struct {
 }
 
 type Chapter struct {
-	ChapterIndex     int              `json:"chapter_index"`
-	ChapterTitle     string           `json:"chapter_title"`
-	StartSeconds     int              `json:"start_seconds"`
-	EndSeconds       int              `json:"end_seconds"`
-	ChapterSummary   string           `json:"chapter_summary"`
-	KnowledgePoints  []KnowledgePoint `json:"knowledge_points"`
-	AlignmentStatus  string           `json:"alignment_status,omitempty"`
-	EvidenceChunkIDs []string         `json:"evidence_chunk_ids,omitempty"`
+	ChapterIndex        int              `json:"chapter_index"`
+	ChapterTitle        string           `json:"chapter_title"`
+	StartSeconds        int              `json:"start_seconds"`
+	EndSeconds          int              `json:"end_seconds"`
+	ChapterSummary      string           `json:"chapter_summary"`
+	KnowledgePoints     []KnowledgePoint `json:"knowledge_points"`
+	AlignmentStatus     string           `json:"alignment_status,omitempty"`
+	EvidenceChunkIDs    []string         `json:"evidence_chunk_ids,omitempty"`
+	EvidenceSentenceIDs []string         `json:"evidence_sentence_ids,omitempty"`
 }
 
 type KnowledgePoint struct {
-	Title            string   `json:"title"`
-	Seconds          int      `json:"seconds"`
-	EvidenceChunkIDs []string `json:"evidence_chunk_ids,omitempty"`
+	Title               string   `json:"title"`
+	Seconds             int      `json:"seconds"`
+	EvidenceChunkIDs    []string `json:"evidence_chunk_ids,omitempty"`
+	EvidenceSentenceIDs []string `json:"evidence_sentence_ids,omitempty"`
 }
 
 var legacyMarkdownHeading = regexp.MustCompile(`(?m)^##\s+\S+`)
@@ -65,6 +69,120 @@ func ValidateWithTranscriptEnd(document Document, durationSeconds, transcriptEnd
 		return fmt.Errorf("transcript end timestamp is required")
 	}
 	return validate(document, durationSeconds, transcriptEndSeconds, knownChunkIDs)
+}
+
+// ValidateAndResolve validates an outline against the active evidence layer
+// and projects every citation onto its immutable sentence ID. It is the
+// promotion gate for turning a draft into a final outline.
+func ValidateAndResolve(document *Document, durationSeconds int, chunks []transcript.Chunk) error {
+	if document == nil {
+		return fmt.Errorf("outline document is nil")
+	}
+	if len(chunks) == 0 {
+		return fmt.Errorf("outline evidence chunks are empty")
+	}
+	knownChunkIDs := make(map[string]struct{}, len(chunks))
+	seenEvidenceSentenceIDs := make(map[string]struct{}, len(chunks))
+	for index, chunk := range chunks {
+		if strings.TrimSpace(chunk.ID) == "" {
+			return fmt.Errorf("outline evidence chunk %d has no knowledge ID", index)
+		}
+		if strings.TrimSpace(chunk.EvidenceSentenceID) == "" {
+			return fmt.Errorf("outline evidence chunk %d has no evidence sentence ID", index)
+		}
+		if _, exists := seenEvidenceSentenceIDs[chunk.EvidenceSentenceID]; exists {
+			return fmt.Errorf("outline evidence contains duplicate evidence sentence ID %q", chunk.EvidenceSentenceID)
+		}
+		if chunk.StartMs < 0 || chunk.EndMs <= chunk.StartMs {
+			return fmt.Errorf("outline evidence chunk %d has invalid time range", index)
+		}
+		if _, exists := knownChunkIDs[chunk.ID]; exists {
+			return fmt.Errorf("outline evidence contains duplicate knowledge ID %q", chunk.ID)
+		}
+		knownChunkIDs[chunk.ID] = struct{}{}
+		seenEvidenceSentenceIDs[chunk.EvidenceSentenceID] = struct{}{}
+	}
+	transcriptEndSeconds, err := transcript.EffectiveEndSeconds(chunks)
+	if err != nil {
+		return fmt.Errorf("effective transcript end: %w", err)
+	}
+	if err := ValidateWithTranscriptEnd(*document, durationSeconds, transcriptEndSeconds, knownChunkIDs); err != nil {
+		return err
+	}
+	if err := ResolveEvidence(document, chunks); err != nil {
+		return err
+	}
+	return validateResolvedEvidence(*document, chunks)
+}
+
+// ResolveEvidence projects every chapter and point citation onto the
+// immutable sentence IDs carried by the current transcript chunks.
+func ResolveEvidence(document *Document, chunks []transcript.Chunk) error {
+	if document == nil {
+		return fmt.Errorf("outline document is nil")
+	}
+	byID := make(map[string]transcript.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		byID[chunk.ID] = chunk
+	}
+	resolve := func(ids []string) ([]string, error) {
+		resolved := make([]string, 0, len(ids))
+		for _, id := range ids {
+			chunk, ok := byID[id]
+			if !ok {
+				return nil, fmt.Errorf("resolve unknown evidence chunk %q", id)
+			}
+			if chunk.EvidenceSentenceID != "" {
+				resolved = append(resolved, chunk.EvidenceSentenceID)
+			}
+		}
+		return resolved, nil
+	}
+	for chapterIndex := range document.Chapters {
+		chapter := &document.Chapters[chapterIndex]
+		ids, err := resolve(chapter.EvidenceChunkIDs)
+		if err != nil {
+			return fmt.Errorf("chapter %d: %w", chapter.ChapterIndex, err)
+		}
+		chapter.EvidenceSentenceIDs = ids
+		for pointIndex := range chapter.KnowledgePoints {
+			point := &chapter.KnowledgePoints[pointIndex]
+			ids, err := resolve(point.EvidenceChunkIDs)
+			if err != nil {
+				return fmt.Errorf("chapter %d knowledge point %d: %w", chapter.ChapterIndex, pointIndex+1, err)
+			}
+			point.EvidenceSentenceIDs = ids
+		}
+	}
+	return nil
+}
+
+func validateResolvedEvidence(document Document, chunks []transcript.Chunk) error {
+	byChunkID := make(map[string]string, len(chunks))
+	for _, chunk := range chunks {
+		byChunkID[chunk.ID] = chunk.EvidenceSentenceID
+	}
+	for _, chapter := range document.Chapters {
+		if len(chapter.EvidenceSentenceIDs) != len(chapter.EvidenceChunkIDs) {
+			return fmt.Errorf("chapter %d evidence sentence references are incomplete", chapter.ChapterIndex)
+		}
+		for index, chunkID := range chapter.EvidenceChunkIDs {
+			if chapter.EvidenceSentenceIDs[index] != byChunkID[chunkID] {
+				return fmt.Errorf("chapter %d evidence sentence reference does not match chunk %q", chapter.ChapterIndex, chunkID)
+			}
+		}
+		for pointIndex, point := range chapter.KnowledgePoints {
+			if len(point.EvidenceSentenceIDs) != len(point.EvidenceChunkIDs) {
+				return fmt.Errorf("chapter %d knowledge point %d evidence sentence references are incomplete", chapter.ChapterIndex, pointIndex+1)
+			}
+			for index, chunkID := range point.EvidenceChunkIDs {
+				if point.EvidenceSentenceIDs[index] != byChunkID[chunkID] {
+					return fmt.Errorf("chapter %d knowledge point %d evidence sentence reference does not match chunk %q", chapter.ChapterIndex, pointIndex+1, chunkID)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func validate(document Document, durationSeconds, transcriptEndSeconds int, knownChunkIDs map[string]struct{}) error {

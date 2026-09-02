@@ -50,6 +50,11 @@ type WikiPage struct {
 	PageType       string    `json:"page_type"` // 6 值白名单之一
 	Content        string    `json:"content"`
 	Summary        string    `json:"summary,omitempty"`
+	Aliases        []string  `json:"aliases,omitempty"`
+	SourceRefs     []string  `json:"source_refs,omitempty"`
+	ChunkRefs      []string  `json:"chunk_refs,omitempty"`
+	InLinks        []string  `json:"in_links,omitempty"`
+	OutLinks       []string  `json:"out_links,omitempty"`
 	Version        int       `json:"version"`
 	LastEditSource string    `json:"last_edit_source"`
 	LastEditorID   string    `json:"last_editor_id"`
@@ -124,6 +129,28 @@ func (r *ListPagesResp) AllPages() []WikiPage {
 // ListPages 列出 KB 内 Wiki 页面（按 page_type 可选过滤）
 func (w *WikiClient) ListPages(ctx context.Context, kbID, pageType string) (*ListPagesResp, error) {
 	return w.listPages(ctx, kbID, pageType, 1, 20)
+}
+
+// ListAllPages reads every page in a knowledge base using the paginated Wiki
+// endpoint. Callers that need product filtering must still validate each page's
+// frontmatter and active source generation.
+func (w *WikiClient) ListAllPages(ctx context.Context, kbID, pageType string) ([]WikiPage, error) {
+	const pageSize = maxWikiPageSize
+	pages := make([]WikiPage, 0, pageSize)
+	for page := 1; ; page++ {
+		response, err := w.listPages(ctx, kbID, pageType, page, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		batch := response.AllPages()
+		pages = append(pages, batch...)
+		if len(batch) == 0 ||
+			(response.TotalPages > 0 && page >= response.TotalPages) ||
+			(response.TotalPages == 0 && response.Total > 0 && len(pages) >= response.Total) ||
+			(response.TotalPages == 0 && response.Total == 0 && len(batch) < pageSize) {
+			return pages, nil
+		}
+	}
 }
 
 func (w *WikiClient) listPages(ctx context.Context, kbID, pageType string, page, pageSize int) (*ListPagesResp, error) {
@@ -322,8 +349,9 @@ func (w *WikiClient) ListByVideo(ctx context.Context, kbID, videoID string, page
 //   - 页面被该视频知识底座索引页通过 Wiki 双链显式引用；
 //   - 历史知识底座索引页使用固定 slug video/{videoID} 且正文包含视频 ID。
 //
-// 对缺少 frontmatter 的历史知识页面，仅在五类知识 page_type 内接受正文中的精确视频 ID。
-// 其他页面类型不接受正文提及作为归属依据。
+// 对缺少 frontmatter 的历史知识页面，仅在 WeKnora 支持的知识页面类型内
+// 接受正文中的精确视频 ID。Skill 业务类型统一通过 page_type=index +
+// frontmatter.type 表达，历史 case/methodology/insight page_type 不进入产品视图。
 func (w *WikiClient) ListByVideoOwned(ctx context.Context, kbID, videoID, pageType string, knowledgeBasePage *WikiPage) ([]WikiPage, error) {
 	const pageSize = 100
 	out := make([]WikiPage, 0)
@@ -371,7 +399,7 @@ func wikiPageBelongsToVideo(page WikiPage, videoID string, knowledgeBasePage *Wi
 
 func isKnowledgePageType(pageType string) bool {
 	switch pageType {
-	case "entity", "concept", "case", "methodology", "insight":
+	case "entity", "concept", "index":
 		return true
 	default:
 		return false

@@ -2,7 +2,7 @@
   <main class="knowledge-graph">
     <header class="knowledge-graph__header">
       <div><h1>Knowledge Graph</h1><p>探索视频知识之间的连接</p></div>
-      <span v-if="payload" class="knowledge-graph__count">{{ filteredNodes.length }} 个节点 · {{ filteredEdges.length }} 条关系</span>
+      <span v-if="payload" class="knowledge-graph__count">{{ filteredNodes.length }} 个节点 · {{ filteredEdges.length }} 条正式关系 · {{ filteredReadingAssociations.length }} 条阅读关联</span>
     </header>
     <div v-if="loading" class="knowledge-graph__state"><t-loading text="正在加载知识图谱" /></div>
     <t-alert v-else-if="error" theme="error" :message="error" />
@@ -11,7 +11,7 @@
       <AttributeFilterTabs v-model="selectedAttribute" :attributes="payload.attributes" :counts="attributeCounts" :total="payload.nodes.length" />
       <section class="knowledge-graph__canvas-wrap">
         <div v-if="payload.meta.truncated" class="knowledge-graph__hint">显示 {{ payload.meta.returned }} / {{ payload.meta.total }} 节点</div>
-        <GraphCanvas :nodes="filteredNodes" :edges="filteredEdges" @node-click="selectedNodeId = $event.id" />
+        <GraphCanvas :nodes="filteredNodes" :edges="filteredEdges" :reading-associations="filteredReadingAssociations" @node-click="selectedNodeId = $event.id" />
       </section>
       <section v-if="wikiPages.length" class="knowledge-graph__wiki-list" aria-labelledby="knowledge-graph-wiki-list-title">
         <header>
@@ -24,7 +24,7 @@
         <div class="knowledge-graph__wiki-grid">
           <button v-for="page in wikiPages" :key="page.id" type="button" :class="{ 'is-selected': selectedNode?.knowledge_detail?.id === page.id }" @click="selectWikiPage(page.id)">
             <span class="knowledge-graph__wiki-title">{{ page.title }}</span>
-            <span class="knowledge-graph__wiki-meta">{{ pageTypeLabel(page) }} · {{ page.video_title || '未知来源' }} · {{ page.structure_fields?.length || 0 }} 个结构字段</span>
+            <span class="knowledge-graph__wiki-meta">{{ pageTypeLabel(page) }} · {{ page.source_video_title || page.video_title || '未知来源' }} · {{ page.structure_fields?.length || 0 }} 个结构字段</span>
             <small v-if="!nodeIdByWikiPageId[page.id]">未入图</small>
           </button>
         </div>
@@ -35,8 +35,10 @@
         :node="selectedNode"
         :related-nodes="relatedNodes"
         :related-edges="relatedEdges"
+        :reading-associations="relatedReadingAssociations"
         @close="selectedNodeId = null"
         @select-video-by-id="openVideo"
+        @open-wiki-page="openWikiPage"
       />
     </template>
   </main>
@@ -63,6 +65,7 @@ const attributeCounts = computed(() => Object.fromEntries((payload.value?.attrib
 const filteredNodes = computed(() => payload.value?.nodes.filter(node => selectedAttribute.value === 'all' || node.attributes[0] === selectedAttribute.value) ?? [])
 const filteredNodeIds = computed(() => new Set(filteredNodes.value.map(node => node.id)))
 const filteredEdges = computed(() => payload.value?.edges.filter(edge => filteredNodeIds.value.has(edge.source) && filteredNodeIds.value.has(edge.target)) ?? [])
+const filteredReadingAssociations = computed(() => payload.value?.reading_associations?.filter(edge => filteredNodeIds.value.has(edge.source) && edge.target_exists && filteredNodeIds.value.has(edge.target)) ?? [])
 const selectedNode = computed(() => {
   const existing = payload.value?.nodes.find(node => node.id === selectedNodeId.value)
   if (existing) return existing
@@ -71,6 +74,7 @@ const selectedNode = computed(() => {
   return page ? wikiPageNode(page) : null
 })
 const relatedEdges = computed(() => payload.value?.edges.filter(edge => edge.source === selectedNodeId.value || edge.target === selectedNodeId.value) ?? [])
+const relatedReadingAssociations = computed(() => payload.value?.reading_associations?.filter(edge => edge.source === selectedNodeId.value || edge.target === selectedNodeId.value) ?? [])
 const relatedNodeIds = computed(() => new Set(relatedEdges.value.flatMap(edge => [edge.source, edge.target]).filter(id => id !== selectedNodeId.value)))
 const relatedNodes = computed(() => payload.value?.nodes.filter(node => relatedNodeIds.value.has(node.id)) ?? [])
 const wikiPages = computed(() => payload.value?.wiki_pages ?? [])
@@ -89,6 +93,15 @@ function openVideo(videoId: string, seconds: number) {
   const href = router.resolve({ name: 'videoDetail', params: { videoId }, query: { t: Math.max(0, Math.floor(seconds)) } }).href
   window.open(href, '_blank', 'noopener,noreferrer')
 }
+function openWikiPage(slug: string) {
+  const kbId = payload.value?.knowledge_base_id
+  if (!kbId || !slug) return
+  // The native Wiki graph view owns the reading drawer. Keeping the page
+  // address keyed by KB id + slug lets WikiBrowser fetch the exact page and
+  // open that drawer without duplicating reader logic here.
+  const href = router.resolve({ name: 'knowledgeBaseDetail', params: { kbId }, query: { tab: 'graph', slug } }).href
+  window.open(href, '_blank', 'noopener,noreferrer')
+}
 function selectWikiPage(pageId: string) {
   selectedNodeId.value = nodeIdByWikiPageId.value[pageId] ?? `wiki:${pageId}`
 }
@@ -101,14 +114,14 @@ function wikiPageNode(page: GraphKnowledgeDetail): GraphNode {
     attributes: [typeLabel === '人物' || typeLabel === '机构' || typeLabel === '产品' || typeLabel === '技术' || typeLabel === '行业' || typeLabel === '地点' ? '实体' : typeLabel],
     type: typeLabel === '人物' || typeLabel === '机构' || typeLabel === '产品' || typeLabel === '技术' || typeLabel === '行业' || typeLabel === '地点' ? '实体' : typeLabel,
     video_id: page.video_id,
-    video_title: page.video_title,
-    seconds: 0,
+    video_title: page.source_video_title || page.video_title,
+    seconds: page.seconds || 0,
     link_count: 0,
     knowledge_detail: page,
   }
 }
 function pageTypeLabel(page: GraphKnowledgeDetail) {
-  const labels: Record<string, string> = { entity: '实体', concept: '概念', case: '案例', method: '方法', insight: '洞察' }
+  const labels: Record<string, string> = { entity: '实体', concept: '概念', case: '案例', methodology: '方法论', insight: '洞察' }
   const entityLabels: Record<string, string> = { person: '人物', organization: '机构', product: '产品', technology: '技术', industry: '行业', place: '地点' }
   return page.entity_sub_type ? entityLabels[page.entity_sub_type] || '实体' : labels[page.knowledge_type] || page.knowledge_type
 }

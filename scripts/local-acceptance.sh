@@ -25,6 +25,23 @@ compose() {
     docker compose -f "$COMPOSE_FILE" "$@"
 }
 
+load_tencent_mps_credentials() {
+    local provider credentials_file credentials secret_id secret_key
+    provider="$(awk -F= '/^[[:space:]]*CUSTOM_TRANSCRIPTION_PROVIDER[[:space:]]*=/ { value=$2; gsub(/[[:space:]\"'\''\r]/, "", value); print value; exit }' "$PROJECT_ROOT/.env")"
+    [ "$provider" = "tencent_mps" ] || return 0
+    [ -n "${TENCENTCLOUD_SECRET_ID:-}" ] && [ -n "${TENCENTCLOUD_SECRET_KEY:-}" ] && return 0
+
+    credentials_file="${LOCAL_ACCEPTANCE_TENCENT_CREDENTIALS_FILE:-$PROJECT_ROOT/../reference/SecretKey-腾讯云.csv}"
+    [ -r "$credentials_file" ] || die "腾讯云 MPS 已启用，但本地凭据文件不可读取: $credentials_file"
+
+    credentials="$(awk -F, 'NR == 2 { gsub(/[\r\"[:space:]]/, "", $1); gsub(/[\r\"[:space:]]/, "", $2); print $1 "\t" $2; exit }' "$credentials_file")"
+    secret_id="${credentials%%$'\t'*}"
+    secret_key="${credentials#*$'\t'}"
+    [[ "$secret_id" == AKID* ]] && [ "${#secret_key}" -ge 20 ] || die "腾讯云 MPS 本地凭据文件格式无效"
+    export TENCENTCLOUD_SECRET_ID="$secret_id"
+    export TENCENTCLOUD_SECRET_KEY="$secret_key"
+}
+
 die() {
     printf '[ERROR] %s\n' "$1" >&2
     exit 1
@@ -93,6 +110,7 @@ wait_for_container_http() {
 }
 
 start_backend() {
+    load_tencent_mps_credentials
     if container_exists "$BACKEND_CONTAINER"; then
         printf '[INFO] 移除可能来自旧验收项目的 custom-backend 容器: %s\n' "$BACKEND_CONTAINER"
         docker rm -f "$BACKEND_CONTAINER" >/dev/null

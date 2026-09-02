@@ -9,10 +9,11 @@ import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { FALLBACK_ATTRIBUTE_COLOR, FALLBACK_RELATION_STYLE, KNOWN_ATTRIBUTES, KNOWN_RELATION_TYPES, readThemeToken } from './graphStyles'
-import type { GraphEdge, GraphNode } from '@/types/videohub'
+import { getRelationTypeLabel } from './knowledgeTypeStyles'
+import type { GraphEdge, GraphNode, GraphReadingAssociation } from '@/types/videohub'
 
 echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
-const props = defineProps<{ nodes: GraphNode[]; edges: GraphEdge[] }>()
+const props = defineProps<{ nodes: GraphNode[]; edges: GraphEdge[]; readingAssociations?: GraphReadingAssociation[] }>()
 const emit = defineEmits<{ nodeClick: [node: GraphNode] }>()
 const canvas = ref<HTMLDivElement | null>(null)
 let chart: echarts.ECharts | null = null
@@ -49,10 +50,16 @@ function render() {
         symbolSize: Math.min(52, 22 + Math.sqrt(node.link_count ?? 0) * 6),
         itemStyle: { color: color(KNOWN_ATTRIBUTES[node.type || node.attributes[0]] ?? FALLBACK_ATTRIBUTE_COLOR) },
       })),
-      links: props.edges.map(edge => {
-        const style = KNOWN_RELATION_TYPES[edge.type] ?? FALLBACK_RELATION_STYLE
-        return { source: edge.source, target: edge.target, value: edge.type, lineStyle: { type: style.lineStyle, width: style.width, opacity: style.opacity, color: color(style.color) } }
-      }),
+      links: [
+        ...props.edges.map(edge => {
+          const style = KNOWN_RELATION_TYPES[edge.type] ?? FALLBACK_RELATION_STYLE
+          return { source: edge.source, target: edge.target, value: getRelationTypeLabel(edge.type), lineStyle: { type: style.lineStyle, width: style.width, opacity: style.opacity, color: color(style.color) } }
+        }),
+        ...(props.readingAssociations ?? []).filter(edge => edge.target_exists).map(edge => ({
+          source: edge.source, target: edge.target, value: '阅读关联',
+          lineStyle: { type: 'dashed', width: 1, opacity: .5, color: color('--td-text-color-placeholder') },
+        })),
+      ],
       lineStyle: { curveness: .08 },
     }],
   }, true)
@@ -73,7 +80,7 @@ onMounted(() => {
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'theme-mode'] })
   render()
 })
-watch(() => [props.nodes, props.edges], render, { deep: true })
+watch(() => [props.nodes, props.edges, props.readingAssociations], render, { deep: true })
 onBeforeUnmount(() => { resizeObserver?.disconnect(); themeObserver?.disconnect(); chart?.dispose(); chart = null })
 </script>
 

@@ -20,19 +20,52 @@ const (
 )
 
 type Evidence struct {
-	ChunkID           string  `json:"chunkId"`
-	StartSeconds      float64 `json:"startSeconds"`
-	EndSeconds        float64 `json:"endSeconds"`
-	Timestamp         string  `json:"timestamp"`
-	TranscriptSnippet string  `json:"transcriptSnippet"`
+	ChunkID            string  `json:"chunkId"`
+	EvidenceSentenceID string  `json:"evidenceSentenceId,omitempty"`
+	StartSeconds       float64 `json:"startSeconds"`
+	EndSeconds         float64 `json:"endSeconds"`
+	Timestamp          string  `json:"timestamp"`
+	TranscriptSnippet  string  `json:"transcriptSnippet"`
+}
+
+// EvidenceRef is the stable, machine-readable jump reference for a summary
+// block. The rendered Evidence record remains as the frontend compatibility
+// view, while this shape is the source-of-truth reference contract.
+type EvidenceRef struct {
+	ChunkID            string `json:"chunk_id,omitempty"`
+	EvidenceSentenceID string `json:"evidence_sentence_id"`
+	StartMs            int    `json:"start_ms"`
+	EndMs              int    `json:"end_ms"`
 }
 
 type Block struct {
-	ID               string     `json:"id"`
-	Kind             BlockKind  `json:"kind"`
-	Text             string     `json:"text"`
-	EvidenceChunkIDs []string   `json:"evidenceChunkIds"`
-	Evidence         []Evidence `json:"evidence"`
+	ID               string        `json:"id"`
+	Kind             BlockKind     `json:"kind"`
+	Text             string        `json:"text"`
+	EvidenceChunkIDs []string      `json:"evidenceChunkIds"`
+	KnowledgeRefs    []string      `json:"knowledge_refs"`
+	EvidenceRefs     []EvidenceRef `json:"evidence_refs"`
+	Evidence         []Evidence    `json:"evidence"`
+}
+
+func (block *Block) UnmarshalJSON(data []byte) error {
+	type blockAlias Block
+	var payload struct {
+		blockAlias
+		KnowledgeRefsCamel []string      `json:"knowledgeRefs"`
+		EvidenceRefsCamel  []EvidenceRef `json:"evidenceRefs"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	*block = Block(payload.blockAlias)
+	if len(block.KnowledgeRefs) == 0 && payload.KnowledgeRefsCamel != nil {
+		block.KnowledgeRefs = payload.KnowledgeRefsCamel
+	}
+	if len(block.EvidenceRefs) == 0 && payload.EvidenceRefsCamel != nil {
+		block.EvidenceRefs = payload.EvidenceRefsCamel
+	}
+	return nil
 }
 
 type Section struct {
@@ -157,12 +190,21 @@ func ValidateStored(document Document, expectedVideoType string) error {
 			if len(block.Evidence) != len(block.EvidenceChunkIDs) {
 				return fmt.Errorf("summary section %q block %q has unresolved evidence", section.Title, block.ID)
 			}
+			if len(block.EvidenceRefs) > 0 && len(block.EvidenceRefs) != len(block.Evidence) {
+				return fmt.Errorf("summary section %q block %q has mismatched evidence_refs", section.Title, block.ID)
+			}
 			for evidenceIndex, evidence := range block.Evidence {
 				if evidence.ChunkID != block.EvidenceChunkIDs[evidenceIndex] {
 					return fmt.Errorf("summary section %q block %q evidence %d does not match its chunk ID", section.Title, block.ID, evidenceIndex+1)
 				}
-				if evidence.ChunkID == "" || evidence.Timestamp == "" || evidence.TranscriptSnippet == "" || !validTimeRange(evidence.StartSeconds, evidence.EndSeconds) {
+				if evidence.ChunkID == "" || evidence.EvidenceSentenceID == "" || evidence.Timestamp == "" || evidence.TranscriptSnippet == "" || !validTimeRange(evidence.StartSeconds, evidence.EndSeconds) {
 					return fmt.Errorf("summary section %q block %q has invalid evidence", section.Title, block.ID)
+				}
+				if len(block.EvidenceRefs) > 0 {
+					ref := block.EvidenceRefs[evidenceIndex]
+					if ref.ChunkID != evidence.ChunkID || ref.EvidenceSentenceID != evidence.EvidenceSentenceID || ref.StartMs != int(math.Round(evidence.StartSeconds*1000)) || ref.EndMs != int(math.Round(evidence.EndSeconds*1000)) {
+						return fmt.Errorf("summary section %q block %q evidence_ref %d does not match evidence", section.Title, block.ID, evidenceIndex+1)
+					}
 				}
 			}
 		}
@@ -206,6 +248,16 @@ func Validate(document Document, expectedVideoType string, knownChunkIDs map[str
 			if len(block.EvidenceChunkIDs) == 0 {
 				return fmt.Errorf("summary section %q block %d has no evidence", section.Title, blockIndex+1)
 			}
+			for _, knowledgeRef := range block.KnowledgeRefs {
+				if strings.TrimSpace(knowledgeRef) == "" {
+					return fmt.Errorf("summary section %q block %d has an empty knowledge reference", section.Title, blockIndex+1)
+				}
+			}
+			for _, evidenceRef := range block.EvidenceRefs {
+				if strings.TrimSpace(evidenceRef.EvidenceSentenceID) == "" || evidenceRef.StartMs < 0 || evidenceRef.EndMs <= evidenceRef.StartMs {
+					return fmt.Errorf("summary section %q block %d has an invalid evidence reference", section.Title, blockIndex+1)
+				}
+			}
 			for _, chunkID := range block.EvidenceChunkIDs {
 				if strings.TrimSpace(chunkID) == "" {
 					return fmt.Errorf("summary section %q block %d has an empty evidence chunk ID", section.Title, blockIndex+1)
@@ -229,18 +281,29 @@ func ResolveEvidence(document *Document, chunks []transcript.Chunk) error {
 	for sectionIndex := range document.Sections {
 		for blockIndex := range document.Sections[sectionIndex].Blocks {
 			block := &document.Sections[sectionIndex].Blocks[blockIndex]
+			if block.KnowledgeRefs == nil {
+				block.KnowledgeRefs = []string{}
+			}
 			block.Evidence = make([]Evidence, 0, len(block.EvidenceChunkIDs))
+			block.EvidenceRefs = make([]EvidenceRef, 0, len(block.EvidenceChunkIDs))
 			for _, chunkID := range block.EvidenceChunkIDs {
 				chunk, exists := chunkByID[chunkID]
 				if !exists {
 					return fmt.Errorf("resolve unknown evidence chunk %q", chunkID)
 				}
+				if strings.TrimSpace(chunk.EvidenceSentenceID) == "" {
+					return fmt.Errorf("resolve evidence chunk %q without immutable sentence ID", chunkID)
+				}
 				block.Evidence = append(block.Evidence, Evidence{
-					ChunkID:           chunk.ID,
+					ChunkID: chunk.ID, EvidenceSentenceID: chunk.EvidenceSentenceID,
 					StartSeconds:      float64(chunk.StartMs) / 1000,
 					EndSeconds:        float64(chunk.EndMs) / 1000,
 					Timestamp:         formatRange(chunk.StartMs, chunk.EndMs),
 					TranscriptSnippet: transcript.OriginalText(chunk.Content),
+				})
+				block.EvidenceRefs = append(block.EvidenceRefs, EvidenceRef{
+					ChunkID: chunk.ID, EvidenceSentenceID: chunk.EvidenceSentenceID,
+					StartMs: chunk.StartMs, EndMs: chunk.EndMs,
 				})
 			}
 		}

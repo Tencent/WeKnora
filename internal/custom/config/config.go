@@ -16,6 +16,7 @@ type Config struct {
 	Server                ServerConfig
 	Database              DatabaseConfig
 	WeKnora               WeKnoraConfig
+	WikiGraph             WikiGraphConfig
 	MinIO                 MinIOConfig
 	Upload                UploadConfig
 	Tongyi                TongyiConfig
@@ -49,6 +50,18 @@ type WeKnoraConfig struct {
 	KBID     string // 字幕分块默认入库的目标 KB
 	TenantID string // WeKnora 多租户场景
 	AgentID  string // 视频问答使用的自定义智能体
+}
+
+// WikiGraphConfig is the isolated Neo4j projection used by the product graph.
+// It may point at the same Neo4j server as WeKnora, but always uses its own label namespace.
+type WikiGraphConfig struct {
+	Enabled         bool
+	URI             string
+	Username        string
+	Password        string
+	Database        string
+	Namespace       string
+	KnowledgeBaseID string
 }
 
 // MinIOConfig 对象存储配置（presigned 直传 + 分片）
@@ -88,6 +101,7 @@ type TongyiConfig struct {
 }
 
 // MPSConfig 腾讯云媒体处理智能字幕配置。
+// MPS 输出必须落 COS；保留 SegmentSet 作为结构化结果，避免业务层重新解析字幕文件。
 type MPSConfig struct {
 	SecretID            string
 	SecretKey           string
@@ -143,6 +157,7 @@ func (d DatabaseConfig) MigrateURL() string {
 func Load() *Config {
 	provider, err := NormalizeTranscriptionProvider(getEnv("CUSTOM_TRANSCRIPTION_PROVIDER", "tingwu"))
 	if err != nil {
+		// 非法值安全回退到听悟，避免启动时误把任务路由到未配置的供应商。
 		provider = "aliyun_tingwu"
 	}
 	return &Config{
@@ -165,6 +180,20 @@ func Load() *Config {
 			KBID:     getEnv("WEKNORA_KB_ID", ""),
 			TenantID: getEnv("WEKNORA_TENANT_ID", ""),
 			AgentID:  getEnv("CUSTOM_CONTENT_AGENT_ID", ""),
+		},
+		WikiGraph: WikiGraphConfig{
+			// The product graph must never inherit the official GraphRAG switch.
+			// It is a separate Wiki -> Neo4j projection and must be enabled
+			// explicitly to avoid two competing graph writers.
+			Enabled:   getEnvBool("CUSTOM_WIKI_GRAPH_NEO4J_ENABLE", false),
+			URI:       getEnv("CUSTOM_WIKI_GRAPH_NEO4J_URI", ""),
+			Username:  getEnv("CUSTOM_WIKI_GRAPH_NEO4J_USERNAME", ""),
+			Password:  getEnv("CUSTOM_WIKI_GRAPH_NEO4J_PASSWORD", ""),
+			Database:  getEnv("CUSTOM_WIKI_GRAPH_NEO4J_DATABASE", ""),
+			Namespace: getEnv("CUSTOM_WIKI_GRAPH_NEO4J_NAMESPACE", "VIDSAGE_KNOWLEDGE"),
+			// 默认与内容流水线使用同一个真实 WeKnora 知识库；如需隔离，
+			// 由 CUSTOM_WIKI_GRAPH_KB_ID 显式覆盖。
+			KnowledgeBaseID: getEnv("CUSTOM_WIKI_GRAPH_KB_ID", getEnv("WEKNORA_KB_ID", "")),
 		},
 		MinIO: MinIOConfig{
 			Backend:   getEnv("CUSTOM_STORAGE_BACKEND", "minio"),
@@ -195,11 +224,19 @@ func Load() *Config {
 			InternalFrontendBaseURL: getEnv("INTERNAL_FRONTEND_BASE_URL", ""),
 		},
 		MPS: MPSConfig{
-			SecretID: getEnv("TENCENTCLOUD_SECRET_ID", ""), SecretKey: getEnv("TENCENTCLOUD_SECRET_KEY", ""),
-			Region: getEnv("TENCENTCLOUD_REGION", "ap-guangzhou"), Endpoint: getEnv("TENCENTCLOUD_MPS_ENDPOINT", "mps.tencentcloudapi.com"),
-			OutputBucket: getEnv("TENCENTCLOUD_MPS_OUTPUT_BUCKET", ""), OutputRegion: getEnv("TENCENTCLOUD_MPS_OUTPUT_REGION", ""), OutputDir: getEnv("TENCENTCLOUD_MPS_OUTPUT_DIR", "/subtitles/"),
-			InputBucket: getEnv("TENCENTCLOUD_MPS_INPUT_BUCKET", ""), InputRegion: getEnv("TENCENTCLOUD_MPS_INPUT_REGION", ""), InputDir: getEnv("TENCENTCLOUD_MPS_INPUT_DIR", "vidsage-mps-input/"),
-			TemplateID: uint64(getEnvInt64("TENCENTCLOUD_MPS_TEMPLATE_ID", 307)), PollIntervalSeconds: getEnvInt("TENCENTCLOUD_MPS_POLL_INTERVAL_SECONDS", 5), TimeoutSeconds: getEnvInt("TENCENTCLOUD_MPS_TIMEOUT_SECONDS", 1800),
+			SecretID:            getEnv("TENCENTCLOUD_SECRET_ID", ""),
+			SecretKey:           getEnv("TENCENTCLOUD_SECRET_KEY", ""),
+			Region:              getEnv("TENCENTCLOUD_REGION", "ap-guangzhou"),
+			Endpoint:            getEnv("TENCENTCLOUD_MPS_ENDPOINT", "mps.tencentcloudapi.com"),
+			OutputBucket:        getEnv("TENCENTCLOUD_MPS_OUTPUT_BUCKET", ""),
+			OutputRegion:        getEnv("TENCENTCLOUD_MPS_OUTPUT_REGION", ""),
+			OutputDir:           getEnv("TENCENTCLOUD_MPS_OUTPUT_DIR", "/subtitles/"),
+			InputBucket:         getEnv("TENCENTCLOUD_MPS_INPUT_BUCKET", ""),
+			InputRegion:         getEnv("TENCENTCLOUD_MPS_INPUT_REGION", ""),
+			InputDir:            getEnv("TENCENTCLOUD_MPS_INPUT_DIR", "vidsage-mps-input/"),
+			TemplateID:          uint64(getEnvInt64("TENCENTCLOUD_MPS_TEMPLATE_ID", 307)),
+			PollIntervalSeconds: getEnvInt("TENCENTCLOUD_MPS_POLL_INTERVAL_SECONDS", 5),
+			TimeoutSeconds:      getEnvInt("TENCENTCLOUD_MPS_TIMEOUT_SECONDS", 1800),
 		},
 		TranscriptionProvider: provider,
 		LLM: LLMConfig{
@@ -219,6 +256,8 @@ func Load() *Config {
 	}
 }
 
+// normalizeTranscriptionProvider 返回持久化使用的规范值。
+// 兼容历史任务中的 aliyun_tingwu，同时允许配置使用 tingwu 别名。
 func NormalizeTranscriptionProvider(value string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", "tingwu", "aliyun_tingwu":

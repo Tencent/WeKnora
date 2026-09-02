@@ -11,7 +11,7 @@
       <section class="dashboard-page__kpis" aria-label="核心指标">
         <KpiCard title="总提问数" :value="payload.kpi.total_questions" :trend="{ value: payload.kpi.trend.total_questions }" :tooltip="`所选时段内用户提交的问题总数 · ${periodLabel}`" />
         <KpiCard title="活跃视频数" :value="payload.kpi.active_videos" :trend="{ value: payload.kpi.trend.active_videos }" :tooltip="`至少被提问一次的视频数量 · ${periodLabel}`" />
-        <KpiCard title="高频问题" :value="payload.kpi.cluster_count" :trend="{ value: payload.kpi.trend.cluster_count }" :tooltip="`语义相近问题聚合后的主题数量 · ${periodLabel}`" />
+        <KpiCard title="高频问题" :value="payload.kpi.cluster_count" :trend="{ value: payload.kpi.trend.cluster_count }" :tooltip="`按问题文本归一化后的主题数量 · ${periodLabel}`" />
         <KpiCard title="平均问题" :value="payload.kpi.avg_questions_per_video" :trend="{ value: payload.kpi.trend.avg_questions_per_video }" :tooltip="`总提问数除以活跃视频数 · ${periodLabel}`" />
       </section>
       <section class="dashboard-card">

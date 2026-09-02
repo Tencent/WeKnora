@@ -14,6 +14,8 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -39,7 +41,11 @@ type ContentHandler struct {
 
 var wikiTimestampPattern = regexp.MustCompile(`\b(\d{1,3}:\d{2}(?::\d{2})?)\b`)
 
-const relatedKnowledgePageTypes = "entity,concept,case,methodology,insight,index"
+// WeKnora's persisted Wiki page_type enum does not include the product's
+// case/methodology/insight types. Skill pages use page_type=index and carry
+// the five-type business classification in frontmatter.primary_type (with
+// frontmatter.type retained as a compatibility field).
+const relatedKnowledgePageTypes = "entity,concept,index"
 
 func wikiAnchorTimeline(content string) (string, int) {
 	match := wikiTimestampPattern.FindStringSubmatch(content)
@@ -67,24 +73,61 @@ func wikiAnchorTimeline(content string) (string, int) {
 func wikiAnchor(page weknora.WikiPage, knowledgeType knowledge.KnowledgeType, source string) knowledge.AnchorItem {
 	frontmatter := page.ParsedFrontmatter()
 	entitySubType, _ := frontmatter["entity_sub_type"].(string)
-	fmType, _ := frontmatter["type"].(string)
+	fmType := frontmatterString(frontmatter, "primary_type")
+	if fmType == "" {
+		fmType = frontmatterString(frontmatter, "type")
+	}
 	if entitySubType == "" && knowledge.IsEntitySubType(fmType) {
 		entitySubType = fmType
 	}
-	timestamp, seconds := wikiAnchorTimeline(page.Content)
 	detail := wikiKnowledgeDetail(page.Content, knowledgeType, entitySubType)
+	mergeStructuredFrontmatter(&detail, frontmatter, knowledgeType, entitySubType)
+	timestampSource := detail.TimeRange
+	if timestampSource == "" {
+		timestampSource = page.Content
+	}
+	timestamp, seconds := wikiAnchorTimeline(timestampSource)
 	return knowledge.AnchorItem{
-		ID: page.ID, Slug: page.Slug, Title: page.Title, Type: knowledgeType,
-		CoreContent:       detail.CoreContent,
-		StructureFields:   detail.StructureFields,
-		EvidenceIDs:       detail.EvidenceIDs,
-		InformationNature: detail.InformationNature,
-		TimeRange:         detail.TimeRange,
-		RelatedKnowledge:  detail.RelatedKnowledge,
-		RelatedEntities:   detail.RelatedEntities,
-		Timestamp:         timestamp, Seconds: seconds, EntitySubType: entitySubType,
+		ID: page.ID, Slug: page.Slug,
+		Title:                firstNonEmpty(frontmatterString(frontmatter, "title"), frontmatterString(frontmatter, "canonical_name"), firstMarkdownHeading(page.Content), page.Title, page.Slug),
+		Type:                 knowledgeType,
+		PrimaryType:          knowledgeType,
+		KnowledgeObjectID:    frontmatterString(frontmatter, "knowledge_object_id"),
+		TranscriptGeneration: frontmatterString(frontmatter, "transcript_generation"),
+		AuditStatus:          frontmatterString(frontmatter, "audit_status"),
+		CoreContent:          detail.CoreContent,
+		StructureFields:      detail.StructureFields,
+		EvidenceIDs:          detail.EvidenceIDs,
+		InformationNature:    firstNonEmpty(detail.InformationNature, informationNatureLabel(knowledgeType, entitySubType)),
+		TimeRange:            detail.TimeRange,
+		RelatedContent:       detail.RelatedContent,
+		Timestamp:            timestamp, Seconds: seconds, EntitySubType: entitySubType,
 		PageType: page.PageType, Source: source,
 	}
+}
+
+func knowledgeObjectType(frontmatter map[string]any) string {
+	primaryType := strings.ToLower(frontmatterString(frontmatter, "primary_type"))
+	compatibilityType := strings.ToLower(frontmatterString(frontmatter, "type"))
+	if primaryType != "" && compatibilityType != "" && primaryType != compatibilityType {
+		return ""
+	}
+	return firstNonEmpty(primaryType, compatibilityType)
+}
+
+func informationNatureLabel(knowledgeType knowledge.KnowledgeType, entitySubType string) string {
+	if knowledgeType == knowledge.TypeEntity {
+		return map[string]string{
+			"person": "人物", "organization": "机构", "product": "产品",
+			"technology": "技术", "industry": "行业", "place": "地点",
+		}[entitySubType]
+	}
+	return map[knowledge.KnowledgeType]string{
+		knowledge.TypeMethodology: "方法论",
+		knowledge.TypeCase:        "案例",
+		knowledge.TypeConcept:     "概念",
+		knowledge.TypeInsight:     "洞察",
+	}[knowledgeType]
 }
 
 type wikiKnowledgeDetailData struct {
@@ -93,8 +136,10 @@ type wikiKnowledgeDetailData struct {
 	EvidenceIDs       []string
 	InformationNature string
 	TimeRange         string
+	Relations         []knowledge.StructuredRelation
 	RelatedKnowledge  []knowledge.DetailLink
 	RelatedEntities   []knowledge.DetailLink
+	RelatedContent    []knowledge.DetailLink
 }
 
 type frameworkField struct {
@@ -109,7 +154,7 @@ var typeFrameworkFields = map[string][]frameworkField{
 	"technology":   {{Key: "tech_category", Label: "技术分类"}, {Key: "application_area", Label: "应用领域"}, {Key: "maturity", Label: "发展阶段"}},
 	"industry":     {{Key: "scope", Label: "行业范围"}, {Key: "stage", Label: "发展阶段"}, {Key: "key_trends", Label: "关键趋势"}},
 	"place":        {{Key: "place_type", Label: "地点类型"}, {Key: "associated_activity", Label: "关联活动"}},
-	"method":       {{Key: "input", Label: "输入"}, {Key: "steps", Label: "步骤"}, {Key: "criteria", Label: "判断标准"}, {Key: "output", Label: "输出"}, {Key: "applicability", Label: "适用条件"}},
+	"methodology":  {{Key: "input", Label: "输入"}, {Key: "steps", Label: "步骤"}, {Key: "criteria", Label: "判断标准"}, {Key: "output", Label: "输出"}, {Key: "applicability", Label: "适用条件"}},
 	"case":         {{Key: "context", Label: "背景"}, {Key: "actors", Label: "参与对象"}, {Key: "choices", Label: "选择"}, {Key: "actions", Label: "行动"}, {Key: "outcome", Label: "结果"}, {Key: "retrospective", Label: "复盘判断"}},
 	"concept":      {{Key: "definition", Label: "定义"}, {Key: "components", Label: "构成要素"}, {Key: "mechanism", Label: "运行机制"}, {Key: "distinction", Label: "相邻区别"}},
 	"insight":      {{Key: "claim", Label: "核心判断"}, {Key: "reasoning", Label: "推导依据"}, {Key: "qualifications", Label: "限定条件"}, {Key: "implications", Label: "影响建议"}},
@@ -161,8 +206,8 @@ var structureFieldAliases = map[string]string{
 func wikiKnowledgeDetail(content string, knowledgeType knowledge.KnowledgeType, entitySubType string) wikiKnowledgeDetailData {
 	body := stripWikiFrontmatter(content)
 	fieldSet := string(knowledgeType)
-	if knowledgeType == knowledge.TypeMethod {
-		fieldSet = "method"
+	if knowledgeType == knowledge.TypeMethodology {
+		fieldSet = "methodology"
 	}
 	if knowledgeType == knowledge.TypeEntity && entitySubType != "" {
 		fieldSet = entitySubType
@@ -180,8 +225,10 @@ func wikiKnowledgeDetail(content string, knowledgeType knowledge.KnowledgeType, 
 		EvidenceIDs:       splitEvidenceIDs(firstLabeledValue(values, "evidence_ids")),
 		InformationNature: firstLabeledValue(values, "information_nature"),
 		TimeRange:         firstLabeledValue(values, "time_range"),
+		Relations:         parseWikiStructuredRelations(firstLabeledValue(values, "relations")),
 		RelatedKnowledge:  parseWikiDetailLinks(firstLabeledValue(values, "related_knowledge")),
 		RelatedEntities:   parseWikiDetailLinks(firstLabeledValue(values, "related_entities")),
+		RelatedContent:    parseWikiDetailLinks(firstLabeledValue(values, "related_content")),
 	}
 }
 
@@ -308,6 +355,10 @@ func wikiDetailKey(label string) string {
 		return "related_knowledge"
 	case "关联实体", "related_entity_ids", "source_atom_ids", "related_entities":
 		return "related_entities"
+	case "相关内容", "related_content":
+		return "related_content"
+	case "结构化关系", "relations":
+		return "relations"
 	}
 	return structureFieldAliases[label]
 }
@@ -400,6 +451,64 @@ func parseWikiDetailLinks(value string) []knowledge.DetailLink {
 	return links
 }
 
+func mergeDetailLinks(groups ...[]knowledge.DetailLink) []knowledge.DetailLink {
+	out := make([]knowledge.DetailLink, 0)
+	seen := map[string]struct{}{}
+	for _, group := range groups {
+		for _, link := range group {
+			key := strings.ToLower(strings.TrimSpace(link.Slug) + "\x00" + strings.TrimSpace(link.Title))
+			if key == "\x00" {
+				continue
+			}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, link)
+		}
+	}
+	return out
+}
+
+func frontmatterDetailLinks(raw any) []knowledge.DetailLink {
+	items, ok := raw.([]any)
+	if !ok {
+		if value, ok := raw.(string); ok {
+			return parseWikiDetailLinks(value)
+		}
+		return nil
+	}
+	out := make([]knowledge.DetailLink, 0, len(items))
+	for _, item := range items {
+		switch value := item.(type) {
+		case string:
+			out = append(out, parseWikiDetailLinks(value)...)
+		case map[string]any:
+			title := firstNonEmpty(frontmatterString(value, "title"), frontmatterString(value, "name"))
+			slug := frontmatterString(value, "slug")
+			if title == "" {
+				title = slug
+			}
+			if title != "" {
+				out = append(out, knowledge.DetailLink{Title: title, Slug: slug, TargetType: frontmatterString(value, "target_type")})
+			}
+		}
+	}
+	return mergeDetailLinks(out)
+}
+
+func parseWikiStructuredRelations(value string) []knowledge.StructuredRelation {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	var relations []knowledge.StructuredRelation
+	if err := json.Unmarshal([]byte(value), &relations); err != nil {
+		return nil
+	}
+	return relations
+}
+
 // NewContentHandler 构造
 func NewContentHandler(db *gorm.DB, wiki *weknora.WikiClient, kbID string) *ContentHandler {
 	return &ContentHandler{DB: db, Wiki: wiki, KBID: kbID}
@@ -474,6 +583,8 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	// 一次读取当前知识底座涉及的全部页面，再映射到五类知识。
+	// 关联知识只展示当前转写代次中通过 Skill 审计的知识对象；
+	// 原生 Wiki 旧页面不再混入产品知识视图。
 	pages, err := h.Wiki.ListByVideoOwned(ctx, h.KBID, video.ID, relatedKnowledgePageTypes, knowledgeBasePage)
 	if err != nil {
 		contentError(c, http.StatusInternalServerError, video.ID, "graph", "weknora_read_failed", "list knowledge pages: "+err.Error(), video.UpdatedAt)
@@ -486,7 +597,15 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 			continue
 		}
 		frontmatter := p.ParsedFrontmatter()
-		fmType, _ := frontmatter["type"].(string)
+		fmType := knowledgeObjectType(frontmatter)
+		knowledgeObjectID := frontmatterString(frontmatter, "knowledge_object_id")
+		pageGeneration := frontmatterString(frontmatter, "transcript_generation")
+		auditStatus := strings.ToLower(frontmatterString(frontmatter, "audit_status"))
+		if knowledgeObjectID == "" ||
+			pageGeneration != strings.TrimSpace(video.TranscriptGeneration) ||
+			auditStatus != "passed" {
+			continue
+		}
 		subType, _ := frontmatter["entity_sub_type"].(string)
 		if subType == "" && knowledge.IsEntitySubType(fmType) {
 			subType = fmType
@@ -495,12 +614,9 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 		if !knowledge.IsKnowledgeType(mappedType) {
 			continue
 		}
-		source := "skill"
-		if p.PageType == "entity" || p.PageType == "concept" {
-			source = "native"
-		}
-		anchor := wikiAnchor(p, mappedType, source)
+		anchor := wikiAnchor(p, mappedType, "skill")
 		anchor.EntitySubType = subType
+		anchor.SourceVideoTitle = video.Title
 		anchors = append(anchors, anchor)
 	}
 
@@ -526,7 +642,8 @@ type WikiPageResp struct {
 	ErrorMessage             string            `json:"error_message"`
 	UpdatedAt                time.Time         `json:"updated_at"`
 	VideoID                  string            `json:"video_id"`
-	PageType                 string            `json:"page_type"` // outline / overview / summary / transcript_page
+	PageType                 string            `json:"page_type"`    // outline / overview / summary / transcript_page
+	ResultStage              string            `json:"result_stage"` // draft / final
 	WikiPageID               string            `json:"wiki_page_id"`
 	TranscriptGeneration     string            `json:"transcript_generation"`
 	ArtifactVersion          int               `json:"artifact_version"`
@@ -541,31 +658,62 @@ type WikiPageResp struct {
 	Frontmatter              map[string]any    `json:"frontmatter,omitempty"`
 }
 
+type contentArtifactFailure struct {
+	httpStatus int
+	code       string
+	message    string
+}
+
+type contentArtifactCandidate struct {
+	id    string
+	stage string
+}
+
 // fetchWikiPageByVideoField 按 videos 表字段名取 Wiki 页
 func (h *ContentHandler) fetchWikiPageByVideoField(c *gin.Context, video *model.Video, field string, pageType string) {
-	wikiID := ""
+	candidates := make([]contentArtifactCandidate, 0, 2)
 	switch field {
 	case "outline_wiki_page_id":
-		wikiID = video.OutlineWikiPageID
+		candidates = append(candidates,
+			contentArtifactCandidate{id: video.OutlineWikiPageID, stage: "final"},
+			contentArtifactCandidate{id: video.OutlineDraftWikiPageID, stage: "draft"},
+		)
 	case "overview_wiki_page_id":
-		wikiID = video.OverviewWikiPageID
+		candidates = append(candidates, contentArtifactCandidate{id: video.OverviewWikiPageID, stage: "final"})
 	case "summary_wiki_page_id":
-		wikiID = video.SummaryWikiPageID
+		candidates = append(candidates,
+			contentArtifactCandidate{id: video.SummaryWikiPageID, stage: "final"},
+			contentArtifactCandidate{id: video.SummaryDraftWikiPageID, stage: "draft"},
+		)
 	case "transcript_page_wiki_page_id":
-		wikiID = video.TranscriptPageWikiPageID
+		candidates = append(candidates, contentArtifactCandidate{id: video.TranscriptPageWikiPageID, stage: "final"})
 	}
-	if wikiID == "" {
+	var lastFailure *contentArtifactFailure
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate.id) == "" {
+			continue
+		}
+		response, failure := h.readWikiPageCandidate(c.Request.Context(), video, pageType, candidate)
+		if failure == nil {
+			c.JSON(http.StatusOK, response)
+			return
+		}
+		lastFailure = failure
+	}
+	if lastFailure == nil {
 		contentError(c, http.StatusNotFound, video.ID, pageType, "not_generated", "wiki_page_id not yet generated", video.UpdatedAt)
 		return
 	}
-	page, err := h.Wiki.GetPageByID(c.Request.Context(), h.KBID, wikiID)
+	contentError(c, lastFailure.httpStatus, video.ID, pageType, lastFailure.code, lastFailure.message, video.UpdatedAt)
+}
+
+func (h *ContentHandler) readWikiPageCandidate(ctx context.Context, video *model.Video, pageType string, candidate contentArtifactCandidate) (*WikiPageResp, *contentArtifactFailure) {
+	page, err := h.Wiki.GetPageByID(ctx, h.KBID, candidate.id)
 	if err != nil {
-		contentError(c, http.StatusInternalServerError, video.ID, pageType, "weknora_read_failed", err.Error(), video.UpdatedAt)
-		return
+		return nil, &contentArtifactFailure{httpStatus: http.StatusInternalServerError, code: "weknora_read_failed", message: err.Error()}
 	}
 	if page == nil {
-		contentError(c, http.StatusNotFound, video.ID, pageType, "artifact_missing", "wiki page not found", video.UpdatedAt)
-		return
+		return nil, &contentArtifactFailure{httpStatus: http.StatusNotFound, code: "artifact_missing", message: "wiki page not found"}
 	}
 	frontmatter := page.ParsedFrontmatter()
 	expectedType := map[string]string{
@@ -579,8 +727,7 @@ func (h *ContentHandler) fetchWikiPageByVideoField(c *gin.Context, video *model.
 	pageGeneration, _ := frontmatter["transcript_generation"].(string)
 	generationMismatch := strings.TrimSpace(video.TranscriptGeneration) != "" && strings.TrimSpace(pageGeneration) != video.TranscriptGeneration
 	if expectedType == "" || actualType != expectedType || sourceVideoID != video.ID || generationMismatch || strings.TrimSpace(page.Content) == "" {
-		contentError(c, http.StatusInternalServerError, video.ID, pageType, "artifact_contract_mismatch", "wiki page does not satisfy the content artifact contract", video.UpdatedAt)
-		return
+		return nil, &contentArtifactFailure{httpStatus: http.StatusInternalServerError, code: "artifact_contract_mismatch", message: "wiki page does not satisfy the content artifact contract"}
 	}
 	var canonical outline.Document
 	var summaryDocument *summary.Document
@@ -588,29 +735,24 @@ func (h *ContentHandler) fetchWikiPageByVideoField(c *gin.Context, video *model.
 	if pageType == "outline" {
 		if document, parseErr := outline.Parse(page.Content); parseErr == nil {
 			if pageSchemaVersion, ok := frontmatterInt(frontmatter, "schema_version"); !ok || pageSchemaVersion != outline.SchemaVersion {
-				contentError(c, http.StatusInternalServerError, video.ID, pageType, "artifact_invalid", "outline page schema_version is unsupported", video.UpdatedAt)
-				return
+				return nil, &contentArtifactFailure{httpStatus: http.StatusInternalServerError, code: "artifact_invalid", message: "outline page schema_version is unsupported"}
 			}
 			if validateErr := outline.Validate(document, video.DurationSeconds, nil); validateErr != nil {
-				contentError(c, http.StatusInternalServerError, video.ID, pageType, "artifact_invalid", validateErr.Error(), video.UpdatedAt)
-				return
+				return nil, &contentArtifactFailure{httpStatus: http.StatusInternalServerError, code: "artifact_invalid", message: validateErr.Error()}
 			}
 			canonical = document
 			responseContent = outline.RenderMarkdown(document)
 		} else if !outline.IsLegacyMarkdown(page.Content) {
-			contentError(c, http.StatusInternalServerError, video.ID, pageType, "artifact_invalid", "outline page is neither JSON Schema v1 nor valid legacy Markdown", video.UpdatedAt)
-			return
+			return nil, &contentArtifactFailure{httpStatus: http.StatusInternalServerError, code: "artifact_invalid", message: "outline page is neither JSON Schema v1 nor valid legacy Markdown"}
 		}
 	}
 	if pageType == "summary" {
 		document, parseErr := summary.ParseStored(page.Content)
 		if parseErr != nil {
-			contentError(c, http.StatusInternalServerError, video.ID, pageType, "artifact_invalid", "summary page is not valid JSON", video.UpdatedAt)
-			return
+			return nil, &contentArtifactFailure{httpStatus: http.StatusInternalServerError, code: "artifact_invalid", message: "summary page is not valid JSON"}
 		}
 		if validateErr := summary.ValidateStored(document, video.VideoType); validateErr != nil {
-			contentError(c, http.StatusInternalServerError, video.ID, pageType, "artifact_invalid", validateErr.Error(), video.UpdatedAt)
-			return
+			return nil, &contentArtifactFailure{httpStatus: http.StatusInternalServerError, code: "artifact_invalid", message: validateErr.Error()}
 		}
 		summaryDocument = &document
 		responseContent = ""
@@ -619,13 +761,14 @@ func (h *ContentHandler) fetchWikiPageByVideoField(c *gin.Context, video *model.
 	if updatedAt.IsZero() {
 		updatedAt = video.UpdatedAt
 	}
-	c.JSON(http.StatusOK, WikiPageResp{
+	return &WikiPageResp{
 		Status:                   "completed",
 		Stage:                    pageType,
+		ResultStage:              candidate.stage,
 		UpdatedAt:                updatedAt,
 		VideoID:                  video.ID,
 		PageType:                 pageType,
-		WikiPageID:               wikiID,
+		WikiPageID:               candidate.id,
 		TranscriptGeneration:     video.TranscriptGeneration,
 		ArtifactVersion:          page.Version,
 		SchemaVersion:            canonical.SchemaVersion,
@@ -637,7 +780,7 @@ func (h *ContentHandler) fetchWikiPageByVideoField(c *gin.Context, video *model.
 		Summary:                  summaryDocument,
 		Content:                  responseContent,
 		Frontmatter:              frontmatter,
-	})
+	}, nil
 }
 
 func frontmatterInt(frontmatter map[string]any, key string) (int, bool) {

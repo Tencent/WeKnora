@@ -16,6 +16,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/knowledgegraph"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
 )
 
@@ -41,7 +42,7 @@ func skillQuery(video *model.Video, contract skill.JobContract, jobType string) 
 	)
 	if jobType == skill.JobGraph {
 		query += fmt.Sprintf(
-			"必须完整遵循 extract-video-knowledge 的 references/type-frameworks.md、references/wiki-schema.md 和 references/audit-rules.md：每个实体和每个知识原子都要写入独立 Wiki 页面；方法论、案例、概念、洞察必须填充对应结构维度，实体必须填充对应关键信息维度，未涉及字段留空不得编造。最后写入视频索引页：slug 严格使用 %q；page_type 使用 index；frontmatter 必须含 type: %s、source_video_id: %s 和 transcript_generation: %s。索引页目标可能尚不存在，首次生成时不要先读取目标 slug；读取返回 not found 不是失败，请继续直接写入。读取或引用上游产物时，必须使用 Wiki 工具返回的实际 slug，禁止根据视频标题或页面标题猜测 slug；不得用示例、占位内容或 mock 数据代替真实 Wiki 产物。"+
+			"必须完整遵循 extract-video-knowledge 的 references/type-frameworks.md、references/wiki-schema.md 和 references/audit-rules.md：每个实体和每个知识原子都要写入独立 Wiki 页面；所有 Skill 知识对象页面的 page_type 必须使用 WeKnora 支持的 index，五类业务类型必须写入 frontmatter.type，禁止把 case、methodology、insight 作为 page_type；方法论、案例、概念、洞察必须填充对应结构维度，实体必须填充对应关键信息维度，未涉及字段留空不得编造。每个知识对象页面的 source_refs 必须填入与 evidence_ids 相同的真实转写分块 ID，确保 Wiki 检索能够按当前视频和转写代次优先召回。关系必须分两阶段写入：先写独立对象页并读取确认真实 Wiki page ID，本轮新对象之间的 relations 首次必须留空；全部目标页面确认可读后，再覆盖更新对象页补齐结构化 relations 和正文双链，禁止猜测 target_wiki_page_id。最后写入视频索引页：slug 严格使用 %q；page_type 使用 index；frontmatter 必须含 type: %s、source_video_id: %s 和 transcript_generation: %s。索引页目标可能尚不存在，首次生成时不要先读取目标 slug；读取返回 not found 不是失败，请继续直接写入。读取或引用上游产物时，必须使用 Wiki 工具返回的实际 slug，禁止根据视频标题或页面标题猜测 slug；不得用示例、占位内容或 mock 数据代替真实 Wiki 产物。"+
 				"图谱理解必须以连续语义窗口处理转写：先按章节或相邻分块组织上下文，再提取跨分块成立的实体、概念、案例、方法论和洞察五类知识；实体与关系仍必须绑定最小充分证据分块，禁止把单个分块的偶然关键词直接当作关系。",
 			contract.WriteSlug(video.ID), contract.ArtifactType, video.ID, video.TranscriptGeneration,
 		)
@@ -257,7 +258,10 @@ func (h *BaseSkillHandler) waitForWikiPage(
 }
 
 // GraphHandler extract-video-knowledge
-type GraphHandler struct{ BaseSkillHandler }
+type GraphHandler struct {
+	BaseSkillHandler
+	Graph knowledgegraph.Store
+}
 
 func (h *GraphHandler) JobType() string { return skill.JobGraph }
 
@@ -268,6 +272,9 @@ func (h *GraphHandler) JobType() string { return skill.JobGraph }
 //     若成功但 1 分钟内没有检索到 knowledge_base 新产物，则任务失败
 //  2. 回写 knowledge_base_wiki_page_id，不触发 outline/summary
 func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
+	if h.Graph == nil {
+		return fmt.Errorf("Wiki graph projection is not configured")
+	}
 	contract, _ := skill.Contract(skill.JobGraph)
 	knowledgeIDs, err := h.transcriptKnowledgeIDs(ctx, job, video)
 	if err != nil {
@@ -292,9 +299,18 @@ func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 		return fmt.Errorf("graph wait for readable knowledge_base wiki page: %w", err)
 	}
 
-	// --- 步骤 2：回写 + 推下一环节 ---
-	_, _, err = h.Orchestrator.AfterSkillCompleteWithID(ctx, video.ID, skill.JobGraph, wikiPageID)
+	indexPage, err := h.Orchestrator.Wiki.GetPageByID(ctx, h.Orchestrator.KBID, wikiPageID)
 	if err != nil {
+		return fmt.Errorf("read knowledge base Wiki page for graph projection: %w", err)
+	}
+	if indexPage == nil || strings.TrimSpace(indexPage.Content) == "" {
+		return fmt.Errorf("knowledge base Wiki page is unavailable for graph projection: %s", wikiPageID)
+	}
+	if err := h.Graph.ProjectVideo(ctx, video, indexPage); err != nil {
+		return fmt.Errorf("project Wiki graph: %w", err)
+	}
+	// Only acknowledge the skill after the real Wiki projection succeeds.
+	if _, _, err = h.Orchestrator.AfterSkillCompleteWithID(ctx, video.ID, skill.JobGraph, wikiPageID); err != nil {
 		return fmt.Errorf("graph after skill: %w", err)
 	}
 	return nil

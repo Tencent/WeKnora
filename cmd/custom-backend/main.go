@@ -31,6 +31,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/handler"
 	"github.com/Tencent/WeKnora/internal/custom/migrations"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/knowledgegraph"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
 	"github.com/Tencent/WeKnora/internal/custom/worker"
 )
@@ -69,6 +70,8 @@ func main() {
 	llmCli := llm.NewClient(cfg.LLM)
 	tongyiCli := tongyi.New(cfg.Tongyi)
 	var mpsCli *mps.Client
+	// The switch selects the provider for new jobs. Keep the MPS client alive
+	// after switching back to Tingwu so already persisted MPS jobs can resume.
 	if cfg.MPS.SecretID != "" && cfg.MPS.SecretKey != "" {
 		mpsCli, err = mps.New(cfg.MPS)
 		if err != nil {
@@ -76,15 +79,13 @@ func main() {
 		}
 	}
 	wikiClient := weknora.NewWikiClient(cfg.WeKnora)
-	agentClient := weknora.NewAgentClient(cfg.WeKnora)
-	kbClient := weknora.NewKBClient(cfg.WeKnora)
-
-	// CP-T010：启动时一次性开启原生 Wiki 抽取（失败仅 warn，不阻塞）
-	if cfg.WeKnora.KBID != "" {
-		if err := kbClient.EnableWikiExtraction(context.Background(), cfg.WeKnora.KBID); err != nil {
-			slog.Warn("enable wiki extraction", "error", err)
-		}
+	wikiGraph, graphErr := knowledgegraph.New(cfg.WikiGraph, wikiClient, db)
+	if graphErr != nil {
+		slog.Warn("wiki graph projection unavailable", "error", graphErr)
+	} else if wikiGraph != nil {
+		defer wikiGraph.Close(context.Background())
 	}
+	agentClient := weknora.NewAgentClient(cfg.WeKnora)
 
 	// 内容生产 skill 编排器（CP-T005 / CP-T006）
 	orchestrator := skill.NewOrchestrator(db, wikiClient, cfg.WeKnora.KBID)
@@ -150,10 +151,10 @@ func main() {
 			transcriptionHandler.MinIO = minioCli
 			transcriptionHandler.MPS = mpsCli
 			if mpsCli != nil {
-				if preparer, prepErr := worker.NewTencentMPSInputPreparer(cfg.MPS, minioCli); prepErr != nil {
+				if mpsInputPreparer, prepErr := worker.NewTencentMPSInputPreparer(cfg.MPS, minioCli); prepErr != nil {
 					slog.Warn("tencent mps input staging unavailable", "error", prepErr)
 				} else {
-					transcriptionHandler.MPSInputPreparer = preparer
+					transcriptionHandler.MPSInputPreparer = mpsInputPreparer
 				}
 			}
 			handlers = append(handlers,
@@ -162,7 +163,7 @@ func main() {
 				worker.NewIndexHandler(db, weknoraCli, orchestrator),
 			)
 			handlers = append(handlers,
-				&worker.GraphHandler{BaseSkillHandler: base},
+				&worker.GraphHandler{BaseSkillHandler: base, Graph: wikiGraph},
 				worker.NewDirectContentHandler(db, llmCli, weknoraCli, wikiClient, orchestrator, skill.JobOutline),
 				worker.NewDirectContentHandler(db, llmCli, weknoraCli, wikiClient, orchestrator, skill.JobSummary),
 				worker.NewDirectContentHandler(db, llmCli, weknoraCli, wikiClient, orchestrator, skill.JobSummaryEnhance),
@@ -176,7 +177,10 @@ func main() {
 	}
 
 	// HTTP 服务
-	router := handler.NewRouter(db, cfg)
+	routerDeps := &handler.Deps{
+		DB: db, Cfg: cfg, MinIO: minioCli, Wiki: wikiClient, WeKnora: weknoraCli, Graph: wikiGraph,
+	}
+	router := handler.BuildRouterForDeps(routerDeps)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	srv := &http.Server{Addr: addr, Handler: router}
 
@@ -227,6 +231,10 @@ func autoMigrateLocalDB(db *gorm.DB) error {
 		&model.VideoSummaryFramework{},
 		&model.DashboardQuestionStat{},
 		&model.DashboardQuestionCluster{},
+		&model.DashboardQuestionEvent{},
+		&model.ChatSourceAudit{},
+		&model.WikiRelationAudit{},
+		&model.WikiIdentityAudit{},
 	)
 }
 

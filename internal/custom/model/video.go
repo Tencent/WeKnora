@@ -53,18 +53,20 @@ type Video struct {
 // VideoTranscriptChunk 保存方案 A 中每个字幕块对应的 WeKnora Knowledge。
 // (video_id, generation, chunk_index) 唯一，作为跨 HTTP 重试的持久化检查点。
 type VideoTranscriptChunk struct {
-	VideoID         string    `gorm:"type:varchar(36);primaryKey" json:"video_id"`
-	Generation      string    `gorm:"type:varchar(64);primaryKey" json:"generation"`
-	Revision        int64     `gorm:"not null;index" json:"revision"`
-	ChunkIndex      int       `gorm:"primaryKey" json:"chunk_index"`
-	SourceSegmentID string    `gorm:"type:varchar(192);index" json:"source_segment_id"`
-	StartMs         int       `gorm:"not null;default:0" json:"start_ms"`
-	EndMs           int       `gorm:"not null;default:0" json:"end_ms"`
-	KnowledgeID     string    `gorm:"type:varchar(64);uniqueIndex" json:"knowledge_id"`
-	ContentHash     string    `gorm:"type:varchar(64);not null" json:"content_hash"`
-	Status          string    `gorm:"type:varchar(32);not null" json:"status"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	VideoID            string    `gorm:"type:varchar(36);primaryKey" json:"video_id"`
+	Generation         string    `gorm:"type:varchar(64);primaryKey" json:"generation"`
+	Revision           int64     `gorm:"not null;index" json:"revision"`
+	ChunkIndex         int       `gorm:"primaryKey" json:"chunk_index"`
+	EvidenceSentenceID string    `gorm:"type:varchar(192);index" json:"evidence_sentence_id"`
+	SourceSegmentID    string    `gorm:"type:varchar(192);index" json:"source_segment_id"`
+	SpeakerID          string    `gorm:"type:varchar(128)" json:"speaker_id"`
+	StartMs            int       `gorm:"not null;default:0" json:"start_ms"`
+	EndMs              int       `gorm:"not null;default:0" json:"end_ms"`
+	KnowledgeID        string    `gorm:"type:varchar(64);uniqueIndex" json:"knowledge_id"`
+	ContentHash        string    `gorm:"type:varchar(64);not null" json:"content_hash"`
+	Status             string    `gorm:"type:varchar(32);not null" json:"status"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // VideoProcessingJob 视频处理任务状态机
