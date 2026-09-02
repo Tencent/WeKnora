@@ -38,8 +38,12 @@ func TestRunRemoveProducesANewSnapshotWithoutTheSkillDir(t *testing.T) {
 		"the maintenance session is kept for troubleshooting")
 	require.Equal(t, []string{"Skill remove"}, fx.sessionTitles,
 		"the transcript is kept to troubleshoot this operation, so it must name it")
-	require.Empty(t, fx.deletedBundles,
-		"the zip belongs to the catalog, not this sandbox install")
+	// The seeded row owns a pre-catalog object: no definition and no sibling
+	// install names it, so letting the row go is what makes it unreachable.
+	// A row that reads the definition's copy has nothing of its own to reclaim,
+	// which is the case the catalog test below covers.
+	require.Equal(t, []string{"file://sk-1.zip"}, fx.deletedBundles,
+		"an archive this row alone named is reclaimed with it")
 
 	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
 	require.NoError(t, err)

@@ -157,10 +157,15 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 				reaped++
 				continue
 			}
+			pinned := strings.TrimSpace(row.BundleRef)
 			if err := s.skills.DeleteSkill(ctx, row.TenantID, row.SandboxConfigID, row.ID); err != nil {
 				logger.Warnf(ctx, "[skill] drop abandoned removal %s failed: %v", row.ID, err)
 				continue
 			}
+			// The row was the last thing naming an archive it owned outright,
+			// so the sweep that drops it is what makes those bytes reachable
+			// by nothing. A definition's own object has other names and stays.
+			s.releaseInstallBundle(ctx, row.TenantID, pinned)
 			reaped++
 		}
 	}

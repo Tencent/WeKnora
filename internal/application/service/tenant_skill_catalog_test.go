@@ -241,3 +241,93 @@ func TestRegisterCatalogReplacesThePreviousZip(t *testing.T) {
 	require.Equal(t, []string{firstRef}, fx.deletedBundles,
 		"replacing the definition zip must drop the previous object")
 }
+
+// The sandbox that installed v1 goes on running v1 no matter what the
+// definition says next, so the archive it was built from has to outlive the
+// re-registration that supersedes it. Deleting it here is what would take
+// read_skill and the admin file browser down for an install that works.
+func TestRegisterCatalogKeepsTheReplacedZipForInstallsStillOnIt(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	first := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('v1')\n",
+	})
+	firstBundle, err := ParseSkillBundle(first)
+	require.NoError(t, err)
+	skillID, err := fx.svc.InstallSkill(ctx, 7, "cfg-1", first)
+	require.NoError(t, err)
+	installed, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", skillID)
+	require.NoError(t, err)
+	require.Empty(t, installed.BundleRef, "a fresh install reads the definition's copy")
+	firstRef := fx.catalogRefFor(t, installed.CatalogID)
+
+	second := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('v2')\n",
+	})
+	_, err = fx.svc.RegisterCatalogFromArchive(ctx, 7, second)
+	require.NoError(t, err)
+
+	require.Empty(t, fx.deletedBundles,
+		"an archive a live install was built from must survive the definition moving on")
+	installed, err = fx.skillRepo.GetSkill(ctx, 7, "cfg-1", skillID)
+	require.NoError(t, err)
+	require.Equal(t, firstRef, installed.BundleRef,
+		"the install now names the archive itself, so nothing has to remember its version")
+	require.Equal(t, firstBundle.SHA256, installed.BundleSHA256)
+
+	// The point of keeping the object: the file browser still answers with the
+	// tree this sandbox actually has.
+	files, err := fx.svc.ListSkillFiles(ctx, 7, "cfg-1", skillID)
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	content, err := fx.svc.ReadSkillFile(ctx, 7, "cfg-1", skillID, "scripts/extract.py")
+	require.NoError(t, err)
+	require.Contains(t, content.Content, "v1")
+}
+
+// The mirror of the test above: once the last install of a pinned archive is
+// gone, nothing can reach those bytes again, so removal is what reclaims them.
+func TestRemovingThePinnedInstallReclaimsTheReplacedZip(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	first := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('v1')\n",
+	})
+	skillID, err := fx.svc.InstallSkill(ctx, 7, "cfg-1", first)
+	require.NoError(t, err)
+	installed, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", skillID)
+	require.NoError(t, err)
+	catalogID := installed.CatalogID
+	firstRef := fx.catalogRefFor(t, catalogID)
+
+	second := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('v2')\n",
+	})
+	_, err = fx.svc.RegisterCatalogFromArchive(ctx, 7, second)
+	require.NoError(t, err)
+	secondRef := fx.catalogRefFor(t, catalogID)
+	require.NotEqual(t, firstRef, secondRef)
+
+	pinned, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", skillID)
+	require.NoError(t, err)
+	require.Equal(t, firstRef, pinned.BundleRef)
+	pinned.Status = types.SkillStatusRemoving
+	require.NoError(t, fx.skillRepo.UpdateSkill(ctx, pinned))
+
+	require.NoError(t, fx.svc.runRemove(ctx, 7, "cfg-1", skillID))
+
+	require.Equal(t, []string{firstRef}, fx.deletedBundles,
+		"the pinned archive is reclaimed with its last reader, the definition's is not")
+}
+
+func (f *installFixture) catalogRefFor(t *testing.T, catalogID string) string {
+	t.Helper()
+	cat, err := f.skillRepo.GetCatalog(context.Background(), 7, catalogID)
+	require.NoError(t, err)
+	require.NotNil(t, cat)
+	return cat.BundleRef
+}

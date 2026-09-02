@@ -571,35 +571,50 @@ func (s *agentService) tenantSkillSource(
 	// downloads start failing for installed skills only, and loadBundle needs
 	// a ctx parameter.
 	return skills.NewTenantSkillSource(rows, func(row *types.TenantSkillEntity) ([]byte, error) {
-		ref, err := s.skillBundleRef(ctx, ownerTenantID, row)
-		if err != nil {
-			return nil, err
-		}
-		return s.readSkillBundle(ctx, ownerTenantID, ref)
+		return s.loadInstalledSkillBundle(ctx, ownerTenantID, row)
 	})
 }
 
-func (s *agentService) skillBundleRef(
+// loadInstalledSkillBundle reads the archive one installed skill was built
+// from. An object named by the row itself is that archive. A row that only
+// names a catalog is answered from the definition's zip, but the definition is
+// mutable — registering the same skill again replaces those bytes in place,
+// while this sandbox goes on running the image built from the previous ones.
+// read_skill is documented as serving what was installed, so a definition that
+// has moved on is reported rather than substituted.
+func (s *agentService) loadInstalledSkillBundle(
 	ctx context.Context, tenantID uint64, row *types.TenantSkillEntity,
-) (string, error) {
+) ([]byte, error) {
 	if row == nil {
-		return "", errors.New("skill is required")
+		return nil, errors.New("skill is required")
 	}
 	if ref := strings.TrimSpace(row.BundleRef); ref != "" {
-		return ref, nil
+		return s.readSkillBundle(ctx, tenantID, ref)
 	}
 	cid := strings.TrimSpace(row.CatalogID)
 	if cid == "" || s.db == nil {
-		return "", fmt.Errorf("skill %s has no stored bundle; its files cannot be read", row.Name)
+		return nil, fmt.Errorf("skill %s has no stored bundle; its files cannot be read", row.Name)
 	}
 	cat, err := repository.NewTenantSkillRepository(s.db).GetCatalog(ctx, tenantID, cid)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if cat == nil || strings.TrimSpace(cat.BundleRef) == "" {
-		return "", fmt.Errorf("skill %s has no stored bundle; its files cannot be read", row.Name)
+		return nil, fmt.Errorf("skill %s has no stored bundle; its files cannot be read", row.Name)
 	}
-	return strings.TrimSpace(cat.BundleRef), nil
+	archive, err := s.readSkillBundle(ctx, tenantID, strings.TrimSpace(cat.BundleRef))
+	if err != nil {
+		return nil, err
+	}
+	// The bytes are checked, not the catalog's recorded digest: a reference and
+	// a digest that disagree is exactly the case a stamped-but-unstored archive
+	// leaves behind.
+	if want := strings.TrimSpace(row.BundleSHA256); want != "" && !archiveMatchesSHA(archive, want) {
+		return nil, fmt.Errorf(
+			"skill %s was registered again from a different archive; "+
+				"reinstall it on this sandbox before reading its files", row.Name)
+	}
+	return archive, nil
 }
 
 // userEnvResolver builds the per-caller environment resolver for this run, or

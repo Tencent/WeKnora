@@ -762,6 +762,7 @@ var (
 type reaperSkillStore struct {
 	rows      map[string]*types.TenantSkillEntity
 	snapshots []*types.TenantSkillSnapshotEntity
+	catalogs  []*types.TenantSkillCatalogEntity
 }
 
 func (r *reaperSkillStore) put(e *types.TenantSkillEntity) {
@@ -903,8 +904,21 @@ func (r *reaperSkillStore) MarkSnapshotState(
 func (r *reaperSkillStore) DeleteSnapshotRowsByConfig(context.Context, uint64, string) error {
 	panic("DeleteSnapshotRowsByConfig is outside the reaper surface")
 }
-func (r *reaperSkillStore) ListSkillsByTenant(context.Context, uint64) ([]*types.TenantSkillEntity, error) {
-	panic("ListSkillsByTenant is outside the reaper surface")
+
+// ListSkillsByTenant and ListCatalogsByTenant are on the surface because
+// dropping an abandoned removal is what makes an archive the row owned outright
+// unreachable, and reclaiming it means asking whether anything else names it.
+func (r *reaperSkillStore) ListSkillsByTenant(
+	_ context.Context, tenantID uint64,
+) ([]*types.TenantSkillEntity, error) {
+	var out []*types.TenantSkillEntity
+	for _, e := range r.rows {
+		if e != nil && e.TenantID == tenantID {
+			cp := *e
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
 }
 func (r *reaperSkillStore) ListUserEnvVars(
 	context.Context, uint64, types.Principal, string, string,
@@ -937,8 +951,17 @@ func (r *reaperSkillStore) GetCatalog(context.Context, uint64, string) (*types.T
 func (r *reaperSkillStore) GetCatalogByName(context.Context, uint64, string) (*types.TenantSkillCatalogEntity, error) {
 	panic("GetCatalogByName is outside the reaper surface")
 }
-func (r *reaperSkillStore) ListCatalogsByTenant(context.Context, uint64) ([]*types.TenantSkillCatalogEntity, error) {
-	panic("ListCatalogsByTenant is outside the reaper surface")
+func (r *reaperSkillStore) ListCatalogsByTenant(
+	_ context.Context, tenantID uint64,
+) ([]*types.TenantSkillCatalogEntity, error) {
+	var out []*types.TenantSkillCatalogEntity
+	for _, e := range r.catalogs {
+		if e != nil && e.TenantID == tenantID {
+			cp := *e
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
 }
 func (r *reaperSkillStore) UpdateCatalog(context.Context, *types.TenantSkillCatalogEntity) error {
 	panic("UpdateCatalog is outside the reaper surface")

@@ -103,28 +103,41 @@ func (s *TenantSkillService) skillBundleArchive(
 	if skill == nil {
 		return nil, apperrors.NewNotFoundError("skill not found")
 	}
-	hasRef := strings.TrimSpace(skill.BundleRef) != ""
+	// An object named by the row itself is the archive this sandbox was built
+	// from, so it answers first and needs no digest check.
 	if archive, ok := s.trySkillBundle(ctx, tenantID, skill); ok {
 		return archive, nil
 	}
-	if hasRef {
-		// The install named a blob that we could not read. Only substitute the
-		// catalog copy when it is the same digest — otherwise the admin would
-		// be looking at a different version than the image.
-		if archive, err := s.sameDigestCatalogArchive(ctx, tenantID, skill); err == nil && len(archive) > 0 {
+	// Otherwise the definition holds the zip. It answers for this install only
+	// while the digests agree: registering the skill again replaces the catalog
+	// object in place, while every sandbox keeps running the image built from
+	// the archive its row names. Serving the newer bytes would show the admin
+	// (and read_skill) a tree that image does not have.
+	if archive, err := s.sameDigestCatalogArchive(ctx, tenantID, skill); err == nil && len(archive) > 0 {
+		return archive, nil
+	}
+	if strings.TrimSpace(skill.BundleSHA256) == "" {
+		// A row that recorded no digest predates the catalog and has nothing to
+		// check against, so the definition's copy is the only answer available.
+		if archive, err := s.anyCatalogArchiveFor(ctx, tenantID, skill); err == nil && len(archive) > 0 {
 			return archive, nil
 		}
-		return nil, apperrors.NewNotFoundError("skill files are not available")
 	}
+	return nil, apperrors.NewNotFoundError("skill files are not available")
+}
+
+// anyCatalogArchiveFor resolves the definition an install belongs to without
+// checking what it holds. It exists for rows written before the catalog, which
+// carry neither a bundle reference nor a digest.
+func (s *TenantSkillService) anyCatalogArchiveFor(
+	ctx context.Context, tenantID uint64, skill *types.TenantSkillEntity,
+) ([]byte, error) {
 	if cid := strings.TrimSpace(skill.CatalogID); cid != "" {
 		if archive, err := s.loadCatalogArchive(ctx, tenantID, cid); err == nil && len(archive) > 0 {
 			return archive, nil
 		}
 	}
-	if archive, err := s.loadCatalogArchive(ctx, tenantID, skill.ID); err == nil && len(archive) > 0 {
-		return archive, nil
-	}
-	return nil, apperrors.NewNotFoundError("skill files are not available")
+	return s.loadCatalogArchive(ctx, tenantID, skill.ID)
 }
 
 func (s *TenantSkillService) sameDigestCatalogArchive(
