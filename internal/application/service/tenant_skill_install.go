@@ -169,11 +169,11 @@ func (s *TenantSkillService) installParsedSkill(
 	})
 
 	// The install outlives the HTTP request, so it must not inherit its
-	// cancellation. It is not durable across a restart either - the stuck-run
-	// reaper (Task 17) is what closes that gap.
+	// cancellation. It is not durable across a restart either - StopSkill
+	// rewrites the row, and the stuck-run reaper is the backup.
 	go func() {
 		bgCtx := context.WithoutCancel(ctx)
-		if err := s.withConfigLock(bgCtx, tenantID, configID, func(lockCtx context.Context) error {
+		if err := s.withSkillRunLock(bgCtx, tenantID, configID, skillID, func(lockCtx context.Context) error {
 			return s.runInstall(lockCtx, tenantID, configID, skillID, bundle)
 		}); err != nil {
 			logger.Errorf(bgCtx, "[skill] install %s failed: %v", skillID, err)
@@ -258,6 +258,7 @@ func (s *TenantSkillService) runInstall(
 	// compensating work begins. Each consumer calls cleanupContext to start its
 	// own budget at the moment it needs one.
 	cleanupBase := context.WithoutCancel(ctx)
+	handle := s.lookupSkillRun(tenantID, configID, skillID)
 
 	// pointerSwitched marks the point of no return. Past it the skill is
 	// installed, snapshotted and serving every new session, so a later failure
@@ -271,6 +272,11 @@ func (s *TenantSkillService) runInstall(
 			logger.Errorf(cleanupBase,
 				"[skill] %s is installed and serving but its bookkeeping is incomplete: %v",
 				skillID, err)
+			return
+		}
+		// StopSkill (or a retry) may already own the row; stamping failed on
+		// that owner would hide the run the operator just started.
+		if !s.skillRunStillBound(tenantID, configID, skillID, handle) {
 			return
 		}
 		// The image pointer is deliberately untouched on failure: the previous
@@ -416,6 +422,9 @@ func (s *TenantSkillService) runInstall(
 	// Re-check after the minutes-long agent run: InstallSkill writes the row
 	// outside this lock, so a newer upload or a queued remove may already own
 	// it. Snapshotting anyway would bake a tree the ledger no longer names.
+	if !s.skillRunStillBound(tenantID, configID, skillID, handle) {
+		return nil
+	}
 	owned, err = s.installStillOwnsTheRow(ctx, tenantID, configID, skillID, bundle)
 	if err != nil {
 		return err
@@ -1278,12 +1287,12 @@ func (s *TenantSkillService) failSkill(
 }
 
 // installStillOwnsTheRow is the lock-side counterpart of InstallSkill's
-// optimistic row write. A remove that ran first deleted the row; a newer
-// upload of the same name replaced BundleSHA256; a queued remove flipped the
-// status; a sibling retry of the same archive found the first run had already
-// landed in the live image. Any of those means this run must not snapshot —
-// failSkill would stamp the newer owner's row, and a snapshot with no matching
-// row is an orphan the ledger cannot name.
+// optimistic row write. A remove that ran first deleted the row; StopSkill
+// flipped it to failed; a newer upload of the same name replaced BundleSHA256;
+// a queued remove flipped the status; a sibling retry of the same archive
+// found the first run had already landed in the live image. Any of those means
+// this run must not snapshot — failSkill would stamp the newer owner's row,
+// and a snapshot with no matching row is an orphan the ledger cannot name.
 func (s *TenantSkillService) installStillOwnsTheRow(
 	ctx context.Context, tenantID uint64, configID, skillID string, bundle *SkillBundle,
 ) (bool, error) {
@@ -1294,7 +1303,7 @@ func (s *TenantSkillService) installStillOwnsTheRow(
 	if current == nil {
 		return false, nil
 	}
-	if current.Status == types.SkillStatusRemoving {
+	if current.Status == types.SkillStatusRemoving || current.Status == types.SkillStatusFailed {
 		return false, nil
 	}
 	if bundle != nil && current.BundleSHA256 != "" && current.BundleSHA256 != bundle.SHA256 {

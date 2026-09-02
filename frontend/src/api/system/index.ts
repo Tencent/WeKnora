@@ -1084,6 +1084,18 @@ export function reinstallConfigSkill(
   ) as unknown as Promise<{ data: { skill_id: string } }>
 }
 
+// Aborts an in-flight install so retry/uninstall become available.
+// After a process restart the row may still say installing with nothing running.
+export function stopConfigSkill(
+  configId: string,
+  skillId: string,
+): Promise<{ data: ConfigSkill }> {
+  return post(
+    `/api/v1/sandbox-configs/${configId}/skills/${skillId}/stop`,
+    {},
+  ) as unknown as Promise<{ data: ConfigSkill }>
+}
+
 /**
  * Partial update: an absent field is left alone. `envs` names only the
  * variables to write — an entry with an empty string clears the stored value

@@ -214,6 +214,18 @@ if err != nil {
 _ = skillID // follow /sandbox-configs/{id}/skills/{skillID}/install-events
 ```
 
+### Example: Stop a stuck install
+
+After a process restart the row may sit at `installing` with nothing running, which hides retry and uninstall. Stop rewrites the row immediately (and cancels the in-process goroutine if one is still alive). Then retry or uninstall as usual.
+
+```go
+skill, err := apiClient.StopSandboxSkill(context.Background(), sandboxConfigID, skillID)
+if err != nil {
+    // Handle error
+}
+_ = skill
+```
+
 ### Example: Retry a failed install
 
 Installs usually fail for reasons the bundle cannot fix — an unreachable

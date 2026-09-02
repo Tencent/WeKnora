@@ -43,10 +43,10 @@ func (s *TenantSkillService) RemoveSkill(
 
 	// Like the install, the removal outlives the HTTP request and must not
 	// inherit its cancellation. It is not durable across a restart either;
-	// that is the stuck-run reaper's job (Task 17).
+	// StopSkill rewrites the row, and the stuck-run reaper is the backup.
 	go func() {
 		bgCtx := context.WithoutCancel(ctx)
-		if err := s.withConfigLock(bgCtx, tenantID, configID, func(lockCtx context.Context) error {
+		if err := s.withSkillRunLock(bgCtx, tenantID, configID, skillID, func(lockCtx context.Context) error {
 			return s.runRemove(lockCtx, tenantID, configID, skillID)
 		}); err != nil {
 			logger.Errorf(bgCtx, "[skill] remove %s failed: %v", skillID, err)
@@ -102,6 +102,7 @@ func (s *TenantSkillService) runRemove(
 	// detached here — each consumer calls cleanupContext so its budget starts
 	// when its work does, because a removal can run for minutes.
 	cleanupBase := context.WithoutCancel(ctx)
+	handle := s.lookupSkillRun(tenantID, configID, skillID)
 
 	// imageChanged marks the point of no return. Past it the skill is gone
 	// from the image every new session boots, so restoring the row to ready
@@ -115,6 +116,9 @@ func (s *TenantSkillService) runRemove(
 			logger.Errorf(cleanupBase,
 				"[skill] %s is gone from the image but its bookkeeping is incomplete: %v",
 				skillID, err)
+			return
+		}
+		if !s.skillRunStillBound(tenantID, configID, skillID, handle) {
 			return
 		}
 		// A half-removed skill is worse than a kept one: the image still has
