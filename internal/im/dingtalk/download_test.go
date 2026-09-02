@@ -3,9 +3,11 @@ package dingtalk
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +19,32 @@ func useTestHTTPClient(t *testing.T) {
 	t.Helper()
 	original := httpClient
 	httpClient = &http.Client{Timeout: 5 * time.Second}
+	t.Cleanup(func() { httpClient = original })
+}
+
+// rejectFileFetchTransport lets OpenAPI calls pass through to a plain
+// transport but fails any request whose path ends in /temp/file.
+type rejectFileFetchTransport struct{ next http.RoundTripper }
+
+func (t rejectFileFetchTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if strings.HasSuffix(r.URL.Path, "/temp/file") {
+		return nil, fmt.Errorf("shared client must not fetch the download url")
+	}
+	return t.next.RoundTrip(r)
+}
+
+// useRejectingFileFetchHTTPClient replaces the shared httpClient with one
+// that serves OpenAPI paths but fails any request for the file path. A
+// successful download in TestDownloadFile_URLRewrite then proves the file
+// GET bypassed the shared client and used the adapter's trusted download
+// client.
+func useRejectingFileFetchHTTPClient(t *testing.T) {
+	t.Helper()
+	original := httpClient
+	httpClient = &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: rejectFileFetchTransport{next: &http.Transport{}},
+	}
 	t.Cleanup(func() { httpClient = original })
 }
 
@@ -180,7 +208,7 @@ func TestIsAllowedDingTalkDownloadHost(t *testing.T) {
 // The real validateFileDownloadURL stays active, proving the rewritten
 // target bypasses SSRF validation by design (operator-configured host).
 func TestDownloadFile_URLRewrite(t *testing.T) {
-	useTestHTTPClient(t)
+	useRejectingFileFetchHTTPClient(t)
 	fileBytes := []byte("rewritten intranet file bytes")
 
 	fileSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
