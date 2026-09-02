@@ -20,6 +20,14 @@ var executeSkillScriptTool = BaseTool{
 	name: ToolExecuteSkillScript,
 	description: `Execute a script with a skill's own interpreter and dependencies.
 
+## Working Directory
+- The script runs with ` + "`/workspace`" + ` as its working directory, whichever
+  skill it belongs to. A relative path the script itself opens resolves there,
+  not inside the skill; ` + "`$WEKNORA_SKILL_DIR`" + ` is how a script reaches the
+  files installed beside it.
+- Generated files belong in ` + "`$WEKNORA_SKILL_OUTPUT_DIR`" + `, which is
+  collected for download. ` + "`/workspace/input`" + ` is read-only.
+
 ## Usage
 - ` + "`script_path`" + ` is either:
   - a path **inside the skill** (` + "`scripts/analyze.py`" + `), or
