@@ -332,3 +332,21 @@ func RegisterWeKnoraCloudRoutes(r *gin.RouterGroup, handler *handler.WeKnoraClou
 	g.apiKeyRoute(r, http.MethodPost, "/weknoracloud/credentials", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.SaveCredentials)
 	g.apiKeyRoute(r, http.MethodGet, "/models/weknoracloud/status", apiKeyManageModels(apiKeyFullAccess()), g.Viewer(), handler.Status)
 }
+
+// Backup/restore routes. Archives contain every tenant's data (including
+// encrypted credentials), so every endpoint — reads included — is SystemAdmin.
+func RegisterBackupRoutes(
+	r *gin.RouterGroup,
+	backup *handler.BackupHandler,
+	g *rbacGuards,
+) {
+	backups := r.Group("/backups")
+	{
+		backups.GET("/export", g.SystemAdmin(), backup.Export)
+		backups.POST("", g.SystemAdmin(), backup.CreateSnapshot)
+		backups.GET("", g.SystemAdmin(), backup.ListSnapshots)
+		backups.GET("/:id/download", g.SystemAdmin(), backup.DownloadSnapshot)
+		backups.DELETE("/:id", g.SystemAdmin(), backup.DeleteSnapshot)
+		backups.POST("/restore", g.SystemAdmin(), backup.Restore)
+	}
+}
