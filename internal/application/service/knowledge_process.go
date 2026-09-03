@@ -3913,6 +3913,44 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 	}
 }
 
+// clearStoredParserEngineRules drops only the upload-time parser selection from
+// a knowledge's process overrides. Batch reparse can then resolve parser rules
+// from the current knowledge-base config while retaining document-specific
+// chunking and parser options.
+func (s *knowledgeService) clearStoredParserEngineRules(ctx context.Context, knowledgeID string) error {
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		return err
+	}
+	if knowledge == nil {
+		return fmt.Errorf("knowledge %s not found", secutils.SanitizeForLog(knowledgeID))
+	}
+
+	overrides, err := knowledge.ProcessOverrides()
+	if err != nil {
+		return err
+	}
+	if overrides == nil {
+		return nil
+	}
+
+	changed := len(overrides.ParserEngineRules) > 0
+	overrides.ParserEngineRules = nil
+	if overrides.ChunkingConfig != nil && len(overrides.ChunkingConfig.ParserEngineRules) > 0 {
+		overrides.ChunkingConfig.ParserEngineRules = nil
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+
+	if err := knowledge.SetProcessOverrides(overrides); err != nil {
+		return err
+	}
+	return s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, "metadata", knowledge.Metadata)
+}
+
 // ProcessKnowledgeListReparse handles Asynq knowledge list reparse tasks.
 func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *asynq.Task) error {
 	var payload types.KnowledgeListReparsePayload
@@ -3936,6 +3974,11 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 
 	outcome, err := runKnowledgeListReparseSubmissions(payload.KnowledgeIDs, func(id string) error {
+		if payload.ProcessConfig == nil {
+			if err := s.clearStoredParserEngineRules(ctx, id); err != nil {
+				return err
+			}
+		}
 		_, err := s.ReparseKnowledge(ctx, id, payload.ProcessConfig)
 		return err
 	})
