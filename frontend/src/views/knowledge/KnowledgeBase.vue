@@ -321,14 +321,18 @@ const canMutateKnowledge = computed(() => {
 // Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
 const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
 
-// Downloading returns the original source file, which is intentionally more
-// restrictive than viewing parsed content or using the preview tab. A tenant
-// Viewer can never download; for cross-tenant KBs the effective share
-// permission must additionally be Editor or Admin.
+// Downloading and previewing both return the original source file, which is
+// intentionally more restrictive than viewing parsed content: within the home
+// tenant only the KB creator or an Admin+ may fetch it; for cross-tenant KBs
+// the effective share permission must be Editor or Admin. Callers without it
+// see only the merged/chunked parsed content.
 const canDownloadKnowledge = computed(() => {
   if (!authStore.hasRole('contributor')) return false;
-  const permission = effectiveKBPermission.value;
-  return !permission || permission === 'owner' || permission === 'admin' || permission === 'editor';
+  if (isViaShare.value) {
+    const permission = effectiveKBPermission.value;
+    return permission === 'owner' || permission === 'admin' || permission === 'editor';
+  }
+  return isOwner.value || authStore.hasRole('admin');
 });
 
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);

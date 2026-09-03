@@ -741,6 +741,9 @@ const processedChunks = computed(() => {
 });
 
 const canPreview = (): boolean => {
+  // The preview tab streams the original file (same API as download), so it
+  // follows the download permission instead of the read permission.
+  if (!props.canDownloadKB) return false;
   if (props.details?.type !== 'file') return false;
   const ft = resolveFilePreviewExt(props.details?.title, props.details?.file_type);
   if (!ft) return false;
@@ -787,6 +790,7 @@ const audioBlobUrl = ref('');
 const audioLoading = ref(false);
 
 const loadAudioPreview = async () => {
+  if (!props.canDownloadKB) return;
   if (!props.details?.id || audioBlobUrl.value) return;
   audioLoading.value = true;
   try {

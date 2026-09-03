@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -17,6 +18,15 @@ import (
 type previewKnowledgeServiceStub struct {
 	interfaces.KnowledgeService
 	filename string
+}
+
+type previewKBServiceStub struct {
+	interfaces.KnowledgeBaseService
+	kb *types.KnowledgeBase
+}
+
+func (s *previewKBServiceStub) GetKnowledgeBaseByID(context.Context, string) (*types.KnowledgeBase, error) {
+	return s.kb, nil
 }
 
 type closeNotifyRecorder struct {
@@ -41,11 +51,18 @@ func TestPreviewKnowledgeFileForcesActiveContentDownload(t *testing.T) {
 	router := gin.New()
 	router.Use(middleware.ErrorHandler())
 	router.Use(func(c *gin.Context) {
+		ctx := context.WithValue(c.Request.Context(), types.TenantRoleContextKey, types.TenantRoleAdmin)
+		c.Request = c.Request.WithContext(ctx)
 		c.Set(types.TenantIDContextKey.String(), uint64(42))
 		c.Next()
 	})
 
-	h := &KnowledgeHandler{kgService: &previewKnowledgeServiceStub{filename: "payload.html"}}
+	enabled := true
+	h := &KnowledgeHandler{
+		cfg:       &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &enabled}},
+		kgService: &previewKnowledgeServiceStub{filename: "payload.html"},
+		kbService: &previewKBServiceStub{kb: &types.KnowledgeBase{ID: "kb1", TenantID: 42, CreatorID: "user-1"}},
+	}
 	router.GET("/knowledge/:id/preview", h.PreviewKnowledgeFile)
 
 	req := httptest.NewRequest(http.MethodGet, "/knowledge/k1/preview", nil)
