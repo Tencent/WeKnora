@@ -210,9 +210,24 @@ docker compose pull     # 拉取最新镜像
 docker compose up -d    # 启动核心服务
 ```
 
+Windows 用户无需安装 WSL。启动 Docker Desktop 后，可在 PowerShell 或 `cmd.exe` 中运行原生启动器：
+
+```powershell
+# 默认检查/启动本机 Ollama（可选），随后拉取并启动 Docker 服务
+.\scripts\start_all.cmd
+
+# 只启动 Docker 服务并在启动完成后返回，不持续跟随日志
+.\scripts\start_all.cmd Docker -NoLogs
+
+# 检查 Docker Desktop、Compose、.env、系统架构和 Ollama
+.\scripts\start_all.cmd Check
+```
+
+执行策略限制只影响直接运行 `.ps1`；`.cmd` 包装器仅对当前进程使用 `ExecutionPolicy Bypass`，不会修改系统执行策略。完整参数见 `.\scripts\start_all.cmd Help`。
+
 启动成功后访问 **http://localhost** 即可使用。
 
-> 如需使用本地 Ollama 模型，请先运行 `ollama serve > /dev/null 2>&1 &`
+> Linux/macOS 如需使用本地 Ollama 模型，请先运行 `ollama serve > /dev/null 2>&1 &`；Windows 启动器会自动检查并按需启动。
 
 ### 🔄 版本升级
 

@@ -233,9 +233,24 @@ docker compose pull     # Pull the latest images
 docker compose up -d    # Start core services
 ```
 
+On Windows, no WSL is required. Start Docker Desktop, then use the native launcher from PowerShell or `cmd.exe`:
+
+```powershell
+# Start optional local Ollama, pull images, and start Docker services
+.\scripts\start_all.cmd
+
+# Start only Docker services and return without following logs
+.\scripts\start_all.cmd Docker -NoLogs
+
+# Diagnose Docker Desktop, Compose, .env, platform, and Ollama
+.\scripts\start_all.cmd Check
+```
+
+The `.cmd` wrapper applies `ExecutionPolicy Bypass` only to its child process; it does not change the machine policy. Run `.\scripts\start_all.cmd Help` for all actions.
+
 Once started, visit **http://localhost** to get started.
 
-> To use a local Ollama model, run `ollama serve > /dev/null 2>&1 &` first.
+> On Linux/macOS, run `ollama serve > /dev/null 2>&1 &` before using a local Ollama model. The Windows launcher performs this check for you.
 
 ### 🔄 Upgrading
 
