@@ -269,6 +269,27 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
 }
 
+// SearchGraphNodes traverses the knowledge graph of a knowledge base for the
+// given entity names. It is the service-level entry point the agent tool uses
+// to run the same graph traversal the chat pipeline performs in
+// search_entity.go: matched nodes carry the chunk IDs that referenced them, so
+// callers can backfill the source chunks without a second graph round trip.
+//
+// A nil graph engine (graph backend disabled) yields an error so callers can
+// fall back to retrieval-only behavior.
+func (s *knowledgeBaseService) SearchGraphNodes(ctx context.Context,
+	id string,
+	entities []string,
+) (*types.GraphData, error) {
+	if s.graphEngine == nil {
+		return nil, apperrors.NewInternalServerError("knowledge graph backend is not available")
+	}
+	if len(entities) == 0 {
+		return &types.GraphData{}, nil
+	}
+	return s.graphEngine.SearchNode(ctx, types.NameSpace{KnowledgeBase: id}, entities)
+}
+
 // normalizedMatchCount resolves the effective primary-match cap for a search.
 //
 // MatchCount arrives as Go's zero value whenever a caller omits it — JSON
