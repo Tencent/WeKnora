@@ -426,7 +426,7 @@ docker run -d -p 8081:8081 weknora-docs
 
 注意事项：
 
-- 直链依赖 `APP_EXTERNAL_URL`（或存储后端本身公网可达）才能生成；无法生成时该引用会保持 `resource://` 原样，客户端仍可回退到 `/files`。
+- 直链依赖 `APP_EXTERNAL_URL`（单体部署也可用同时代理 `/r/` 的 `FRONTEND_BASE_URL`）或存储后端本身公网可达才能生成；无法生成时该引用会保持 `resource://` 原样，客户端仍可回退到 `/files`。
 - `public` 会为每个被引用文件签发**限时匿名可读**链接（WeKnora 侧 2 小时，MinIO 24 小时），请评估是否符合你的安全要求。
 - 匿名的 embed 渠道与限定了知识库范围的 API Key **始终返回 handle**，不受该变量影响。
 - 建议同时配置 `SYSTEM_AES_KEY`，以便复用 grant 行、稳定直链 URL 并降低读接口的写入压力。
