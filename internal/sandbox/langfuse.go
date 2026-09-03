@@ -59,12 +59,12 @@ func (c *langfuseRemoteClient) Create(
 }
 
 func (c *langfuseRemoteClient) Connect(
-	ctx context.Context, sandboxID string,
+	ctx context.Context, req RemoteConnectRequest,
 ) (RemoteSandboxHandle, error) {
 	ctx, span := startSandboxSpan(ctx, "sandbox.connect", map[string]interface{}{
-		"sandbox_id": sandboxID,
+		"sandbox_id": req.SandboxID,
 	}, nil)
-	handle, err := c.inner.Connect(ctx, sandboxID)
+	handle, err := c.inner.Connect(ctx, req)
 	span.Finish(sandboxHandleOut(handle), nil, err)
 	return handle, err
 }

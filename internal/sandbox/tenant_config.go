@@ -22,6 +22,7 @@ package sandbox
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -43,6 +44,7 @@ func ResolveEffectiveConfig(
 	}
 	effective := *global
 	if tenantCfg == nil {
+		effective.Network = resolveNetworkPolicy(nil)
 		return &effective, nil
 	}
 	// Keep the baseline's cross-cutting settings, drop everything provider
@@ -59,6 +61,7 @@ func ResolveEffectiveConfig(
 	}
 	overrideSeconds(&effective.DefaultTimeout, tenantCfg.DefaultTimeoutSec)
 	effective.AllowPrivateEndpoints = tenantCfg.AllowPrivateEndpoints
+	effective.Network = resolveNetworkPolicy(tenantCfg.Network)
 	if tenantCfg.EnvVars != nil {
 		effective.EnvVars = cloneMetadata(tenantCfg.EnvVars)
 	}
@@ -176,6 +179,7 @@ func ResolveEffectiveConfig(
 		); err != nil {
 			return nil, err
 		}
+		applyDockerNetworkPolicy(&effective)
 	}
 	return &effective, nil
 }
@@ -212,6 +216,7 @@ func clearProviderFields(cfg *Config) {
 	cfg.E2BTemplate = ""
 	cfg.E2BSandboxTTL = 0
 	cfg.E2BHTTPTimeout = 0
+	cfg.Network = RemoteNetworkPolicy{}
 }
 
 // ErrUnsupportedSandboxType marks a sandbox type string we cannot honour. It is
@@ -279,4 +284,102 @@ func overrideSeconds(dst *time.Duration, seconds int) {
 	if seconds > 0 {
 		*dst = time.Duration(seconds) * time.Second
 	}
+}
+
+// resolveNetworkPolicy turns the stored, admin-facing policy into the
+// provider-facing one. This is the single place the three inversions happen:
+//
+//   - DenyEgressByDefault -> AllowInternetAccess=false
+//   - AllowPublicInbound  -> AllowPublicTraffic
+//   - CubeEgressRule.Deny -> RemoteCubeEgressRule.Allow
+//
+// A nil stored policy is not "unset": it resolves to WeKnora's default of
+// egress allowed and inbound closed, so every downstream consumer sees one
+// fully specified policy and nobody re-derives the default.
+func resolveNetworkPolicy(stored *types.SandboxNetworkPolicy) RemoteNetworkPolicy {
+	allowEgress := true
+	inboundPublic := false
+	if stored != nil {
+		allowEgress = !stored.DenyEgressByDefault
+		inboundPublic = stored.AllowPublicInbound
+	}
+	policy := RemoteNetworkPolicy{
+		AllowInternetAccess: &allowEgress,
+		AllowPublicTraffic:  &inboundPublic,
+	}
+	if stored == nil {
+		return policy
+	}
+	policy.AllowOut = append([]string(nil), stored.AllowOut...)
+	// Canonicalise first: any IPv4 /0 (including 1.2.3.4/0) collapses onto
+	// 0.0.0.0/0, which is the spelling E2B string-matches as ALL_TRAFFIC.
+	// Leaving a non-canonical /0 on the wire would pass validation and then
+	// fail create, or accept a domain allow-list without actually denying the
+	// rest of the internet.
+	policy.DenyOut = types.CanonicalizeDenyOut(stored.DenyOut)
+	// DenyEgressByDefault means "install a 0.0.0.0/0 deny-all" — that is the
+	// stored field's documented definition — so materialise it as a real deny
+	// entry instead of leaving it implied by the top-level switch. E2B
+	// validates the two independently and rejects a create whose allowOut
+	// names a domain unless denyOut carries the entry:
+	//
+	//	400 When specifying allowed domains in allow out, you must include
+	//	'ALL_TRAFFIC' in deny out to block all other traffic.
+	//
+	// allow_internet_access=false does not satisfy it. Doing this here rather
+	// than in the E2B adapter keeps the neutral policy self-consistent, so
+	// every adapter and every reader of DenyOut sees the same deny-all the
+	// admin asked for.
+	if stored.DenyEgressByDefault && !types.DenyOutCoversAllIPv4(policy.DenyOut) {
+		policy.DenyOut = append(policy.DenyOut, types.DenyAllIPv4)
+	}
+
+	for _, rule := range stored.CubeRules {
+		converted := RemoteCubeEgressRule{
+			Name:    rule.Name,
+			Scheme:  rule.Scheme,
+			SNI:     rule.SNI,
+			Host:    rule.Host,
+			Methods: append([]string(nil), rule.Methods...),
+			Path:    rule.Path,
+			Allow:   !rule.Deny,
+			Audit:   rule.Audit,
+		}
+		for _, inject := range rule.Inject {
+			converted.Inject = append(converted.Inject, RemoteHeaderInject{
+				Header: inject.Header,
+				Secret: inject.Secret,
+				Format: inject.Format,
+			})
+		}
+		policy.CubeRules = append(policy.CubeRules, converted)
+	}
+	for _, rule := range stored.E2BHostRules {
+		converted := RemoteE2BHostRule{Host: rule.Host}
+		if len(rule.Headers) > 0 {
+			converted.Headers = make(map[string]string, len(rule.Headers))
+			for name, value := range rule.Headers {
+				converted.Headers[name] = value
+			}
+		}
+		policy.E2BHostRules = append(policy.E2BHostRules, converted)
+	}
+	return policy
+}
+
+// applyDockerNetworkPolicy maps docker.network_mode=none onto the resolved
+// egress switch so DeniesEgressByDefault (and the deep connectivity check)
+// agree with the network the adapter will actually create. The stored
+// SandboxNetworkPolicy stays empty on Docker configs; this is the Docker
+// form's overall switch expressed in the same field the rest of the stack
+// already consults.
+func applyDockerNetworkPolicy(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(cfg.DockerNetworkMode), "none") {
+		return
+	}
+	allow := false
+	cfg.Network.AllowInternetAccess = &allow
 }

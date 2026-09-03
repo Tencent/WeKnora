@@ -356,6 +356,11 @@ func SanitizeSandboxConfig(
 		}
 		merged.Cube.DNSServers = dns
 	}
+	// Rejected here rather than at sandbox-create time: the provider's own
+	// error arrives minutes later, on a screen the admin has already left.
+	if err := types.ValidateSandboxNetworkPolicy(merged); err != nil {
+		return nil, apperrors.NewBadRequestError(err.Error())
+	}
 	for _, endpoint := range sandboxConfigEndpoints(merged) {
 		if err := sandbox.ValidateOutboundURLWithPolicy(endpoint, sandbox.OutboundURLPolicy{
 			AllowPrivate: merged.AllowPrivateEndpoints,
@@ -1514,6 +1519,22 @@ func sandboxConfigHasSecrets(cfg *types.TenantSandboxConfig) bool {
 	for _, value := range cfg.EnvVars {
 		if value != "" {
 			return true
+		}
+	}
+	if cfg.Network != nil {
+		for _, rule := range cfg.Network.CubeRules {
+			for _, inject := range rule.Inject {
+				if inject.Secret != "" {
+					return true
+				}
+			}
+		}
+		for _, rule := range cfg.Network.E2BHostRules {
+			for _, value := range rule.Headers {
+				if value != "" {
+					return true
+				}
+			}
 		}
 	}
 	return false

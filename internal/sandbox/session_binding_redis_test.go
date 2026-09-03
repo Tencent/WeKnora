@@ -45,6 +45,11 @@ func TestRedisSessionSandboxBindingStoreContract(t *testing.T) {
 	testSessionSandboxBindingStore(t, store)
 }
 
+func TestRedisSessionSandboxBindingStoreReplacesTrafficToken(t *testing.T) {
+	store, _, _ := newRedisBindingTestStore(t)
+	testSessionSandboxBindingReplacesTrafficToken(t, store)
+}
+
 func TestRedisSessionSandboxBindingStoreTurnLease(t *testing.T) {
 	store, client, _ := newRedisBindingTestStore(t)
 	testSessionTurnLeaseStore(t, store)

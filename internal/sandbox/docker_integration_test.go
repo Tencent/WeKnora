@@ -306,7 +306,7 @@ func TestDockerBackendScriptExecutionRefreshesActivityMarkerIntegration(t *testi
 	if err != nil || len(summaries) != 1 {
 		t.Fatalf("expected exactly one container: %v %#v", err, summaries)
 	}
-	handle, err := client.Connect(ctx, summaries[0].ID)
+	handle, err := client.Connect(ctx, RemoteConnectRequest{SandboxID: summaries[0].ID})
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -468,7 +468,7 @@ func TestDockerBackendArtifactBootstrapDoesNotFollowSymlinkIntegration(t *testin
 	if err != nil || len(summaries) != 1 {
 		t.Fatalf("expected exactly one container for the session: %v %#v", err, summaries)
 	}
-	handle, err := client.Connect(ctx, summaries[0].ID)
+	handle, err := client.Connect(ctx, RemoteConnectRequest{SandboxID: summaries[0].ID})
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}

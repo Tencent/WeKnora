@@ -360,7 +360,8 @@ var dockerInitProcess = true
 // RemoteNetworkPolicy cannot be honoured here; the one thing that maps
 // cleanly is "no egress at all", which AllowInternetAccess=false expresses.
 // Domain rules are silently not applied — the config surface refuses them
-// before they get this far (see RequireCompleteConfig).
+// before they get this far (see types.ValidateSandboxNetworkPolicy, which
+// rejects any allow/deny list or L7 rule on a docker config at save time).
 func (c *DockerRemoteClient) networkMode(policy RemoteNetworkPolicy) string {
 	if policy.AllowInternetAccess != nil && !*policy.AllowInternetAccess {
 		return "none"
@@ -377,8 +378,11 @@ func (c *DockerRemoteClient) networkMode(policy RemoteNetworkPolicy) string {
 // left off instead of losing everything it installed.
 func (c *DockerRemoteClient) Connect(
 	ctx context.Context,
-	sandboxID string,
+	request RemoteConnectRequest,
 ) (RemoteSandboxHandle, error) {
+	// Docker containers are not fronted by a provider gateway, so there is no
+	// inbound credential to restore; TrafficAccessToken is ignored.
+	sandboxID := request.SandboxID
 	inspected, err := c.api.ContainerInspect(ctx, sandboxID, client.ContainerInspectOptions{})
 	if err != nil {
 		return nil, dockerError("Connect", err)

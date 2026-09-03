@@ -190,10 +190,12 @@ Docker、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接检查和
 
 - **binding store 自动选择**：进程根据通用 `REDIS_ADDR` 是否配置自动决定绑定存储；Redis key 命名空间复用 `WEKNORA_REDIS_NAMESPACE`，未设置时为 `weknora`。
 - **多机部署（生产推荐）**：配置 `REDIS_ADDR`。多副本共享同一 session 的沙箱绑定，通过 Redis SET NX + 可续租分布式锁串行化 create / recover / delete。
-- **单机部署**：不配置 `REDIS_ADDR`（或 Lite 模式）时使用进程内内存 binding，仅限单实例。进程重启会丢失 session→sandbox 映射，remote 侧沙箱成为孤儿（注意：**TTL 到期只会暂停、不会销毁**，见下）。
+- **⚠️ binding store 现在保存承载凭证，必须做访问控制**：入站关闭（默认）时，沙箱的 traffic token 随绑定一起明文存放——它是访问该沙箱公网 URL 的凭证，读到它就等于能访问那个沙箱暴露的端口。因此**存放绑定的 Redis 必须启用认证并限制网络可达范围**，不能与不受信任的服务共用实例。这里不加密是有意的：每次重连都要解密会把开销加在热路径上，而 Redis 本身的访问控制是更合适的边界。代码侧的对应约束是**绝不整体打印绑定或 handle**（日志里只出现 `sandbox_id` 与凭证的有无），改动 `session_binding.go` / 适配器日志时请一并保持。
+- **单机部署**：不配置 `REDIS_ADDR`（或 Lite 模式）时使用进程内内存 binding，仅限单实例。进程重启会丢失 session→sandbox 映射，remote 侧沙箱成为孤儿（注意：**TTL 到期只会暂停、不会销毁**，见下）。绑定丢失后，**入站关闭（默认）的 Cube / E2B 配置不会再按 metadata 领养旧沙箱**——旧沙箱的 traffic token 随绑定一起没了且 provider 不会重发，领养只会得到一个每次数据面调用都 403 的死会话。lifecycle 会直接删掉它再新建，`/workspace` 里的临时文件随之丢失。Docker 没有 traffic token 概念，照旧领养。
 - **切换 provider**：不同 provider 的 sandbox ID 不通用。智能体改选配置只影响之后新建的沙箱，已有沙箱继续按 session pin 回收。
 - **⚠️ 孤儿沙箱不会被 TTL 自动回收**：会话沙箱创建时使用 `onTimeout=pause` + `autoResume=true`（见 `buildSessionCreateRequest`），因此 **TTL 到期是"暂停"而非"销毁"**——保留状态本就是 pause 的目的。加上 CAS 换绑会把旧 sandboxID 从 binding store 覆盖掉，被替换的沙箱会变成**无人知晓 ID 的 paused 孤儿**，持续占用快照存储与费用。删除会话（`session.go` 的 destroyer）与 lifecycle 的惰性 orphan cleanup 都覆盖不到这种情况。生产环境需依赖按 metadata 列举并与 binding 对账的清理任务来回收（`internal/sandbox/orphan_reaper.go`），且**必须显式包含 `paused` 状态**。对账维度是 `(tenant_id, config_id)` 而非仅 `tenant_id`：同一工作区的两份配置可能指向**同一个 provider 账号**（例如同一个 E2B Key 只差模板），只按 `tenant_id` 过滤会把另一份配置的沙箱一并误删。
-- **网络策略**：`cube` 与 `e2b` 默认开启公网出口和 public traffic，可在 create 时通过 provider-neutral `RemoteNetworkPolicy`（`AllowInternetAccess` / `AllowPublicTraffic` / `AllowOut` / `DenyOut`）精细化配置；两个 adapter 都实现了同一契约。
+- **网络策略**：每份具名沙箱配置带一块 `network` 策略，作用于该配置下所有沙箱（会话、技能安装、深度检查共用同一份）。默认**出站放行、入站关闭**——入站关闭意味着沙箱公网 URL 必须携带创建时签发的 traffic token，WeKnora 自身的 envd 链路会自动携带（Cube 由 SDK 附加，E2B 由 WeKnora 的数据面 transport 附加）。若 Cube / E2B 在入站关闭时没有签发 token，create 会失败并销毁该沙箱，而不是把空凭证写入 binding（数据面 403 会被当成 authentication，会话会永久卡住）。管理员可配置 allow / deny 列表，Cube 额外支持 CubeEgress L7 规则（scheme / sni / host / method / path + 审计 + header 注入），E2B 额外支持按 host 注入 header。Docker 只能整体开关（`bridge` / `none`），表单不展示入站/出站 radio，避免切到 Cube/E2B 时把「公网可访问」带过去。**改策略只影响之后新建的沙箱**：本期不做运行中热更新。
+- **⚠️ 升级行为变更**：入站默认从「公网可达」改为「要求凭证」。如果某个部署依赖浏览器直连沙箱端口（而不是经 WeKnora 代理），需要在该沙箱配置的「网络策略 → 入站访问」里改成「公网可访问」。
 
 ## Agent 工具
 

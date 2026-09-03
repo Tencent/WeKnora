@@ -34,6 +34,31 @@ func testGlobalSandboxConfig() *sandbox.Config {
 	return cfg
 }
 
+func TestSandboxConfigHasSecretsIncludesInjectedHeaders(t *testing.T) {
+	cfg := &types.TenantSandboxConfig{
+		Network: &types.SandboxNetworkPolicy{
+			CubeRules: []types.CubeEgressRule{{
+				Inject: []types.CubeHeaderInject{{Secret: "cube-secret"}},
+			}},
+		},
+	}
+	require.True(t, sandboxConfigHasSecrets(cfg))
+
+	cfg.Network.CubeRules = nil
+	cfg.Network.E2BHostRules = []types.E2BHostRule{{
+		Headers: map[string]string{"X-Key": "e2b-secret"},
+	}}
+	require.True(t, sandboxConfigHasSecrets(cfg))
+
+	cfg.Network = &types.SandboxNetworkPolicy{
+		DenyEgressByDefault: true,
+		CubeRules: []types.CubeEgressRule{{
+			Inject: []types.CubeHeaderInject{{Header: "X-Key"}},
+		}},
+	}
+	require.False(t, sandboxConfigHasSecrets(cfg))
+}
+
 func e2bCfg(key, url, domain, template string, ttl int) *types.TenantSandboxConfig {
 	return &types.TenantSandboxConfig{
 		SandboxType: "e2b",
@@ -1295,6 +1320,20 @@ func TestSanitizeSandboxConfigPreservesRedactedSecret(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "stored-key", out.E2B.APIKey)
+}
+
+func TestSanitizeSandboxConfigRejectsDomainAllowWithoutDenyAll(t *testing.T) {
+	_, err := SanitizeSandboxConfig(&types.TenantSandboxConfig{
+		SandboxType: "cube",
+		Cube: &types.CubeSandboxConfig{
+			APIURL: "https://cube.example.com", ProxyURL: "https://cube.example.com",
+			SandboxDomain: "cube.app", TemplateID: "tpl-1",
+		},
+		Network: &types.SandboxNetworkPolicy{AllowOut: []string{"api.example.com"}},
+	}, nil)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "0.0.0.0/0")
 }
 
 func TestSanitizeSandboxConfigPreservesSkillImage(t *testing.T) {
