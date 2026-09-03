@@ -32,10 +32,10 @@ WeKnora 提供两种模式，在对话框顶部切换：
 | `AgentEngine` | `internal/agent/engine.go` | ReAct 主循环的驱动者，持有配置、工具注册表、Chat 模型、事件总线等 |
 | `ToolRegistry` | `internal/agent/tools/registry.go` | 工具注册、查找、参数校验、执行、输出截断、资源清理 |
 | 内置工具集 | `internal/agent/tools/*.go` | 24 个内置工具 + 动态注册的 MCP 工具 |
-| Token 估算与压缩 | `internal/agent/token/` | `Estimator`（BPE 估算）与 `CompressContext`（滑动裁剪） |
-| 记忆整合 | `internal/agent/memory/consolidator.go` | LLM 驱动的历史摘要（Memory Consolidation） |
+| Token 估算与压缩 | `internal/agent/token/` + `internal/agent/compaction/` | `Estimator`（BPE 估算）与长轮次上下文压缩（sandbox 工具历史） |
+| 记忆整合 | `internal/application/service/memory/` | 跨会话长期记忆：抽取、召回、主题提升、文档亲和度、整理 |
 | 技能系统 | `internal/agent/skills/` | SKILL.md 的发现、加载与脚本执行（Progressive Disclosure） |
-| 执行沙箱 | `internal/sandbox/` | 技能脚本的 Docker / Cube / E2B 隔离执行与安全校验 |
+| 执行沙箱 | `internal/sandbox/` | 技能脚本与 `shell_exec` 的 Docker / Cube / E2B 会话级隔离执行与安全校验 |
 | 工具审批 | `internal/agent/approval/gate.go` | MCP 危险工具的人工审批（HITL）与会话内 OAuth 授权 |
 | Agent 服务层 | `internal/application/service/agent_service.go` | 组装引擎：注册工具、解析 KB 元信息、初始化技能/沙箱/VLM |
 | 会话问答入口 | `internal/application/service/session_agent_qa.go` | 从 `CustomAgent` 构建运行时 `AgentConfig` 并执行 |
@@ -425,13 +425,7 @@ Agent 侧的启停在 `configureSkillsFromAgent`（`internal/application/service
 3. **stdin**：内嵌 shell 命令检测；
 4. 合并入口 `ValidateAll`。
 
-**Docker 沙箱**（`docker.go`，`docker run --rm` 隔离）：
-
-- `--user 1000:1000` 非 root、`--cap-drop ALL`、`--security-opt no-new-privileges`、`--pids-limit 100`；
-- 默认 `--network none`（除非 `AllowNetwork`）；
-- 资源限额：内存默认 `DefaultMemoryLimit = 256MB`（`--memory` + `--memory-swap` 同值禁 swap）、CPU 默认 `DefaultCPULimit = 1.0` 核；
-- 技能目录以只读挂载到 `/workspace`；可选 `--read-only` 根文件系统 + 64MB noexec tmpfs；
-- 按扩展名选择解释器（`.py`→`python3` 等）。
+**Docker 沙箱**（会话级长驻容器，`internal/sandbox/docker_engine.go` / `docker_remote_client.go`）：一个会话一个容器，PID 1 为 `sleep infinity`，脚本、`shell_exec`、附件暂存与产物收集都在同一容器里 exec。默认**关闭**（`WEKNORA_SANDBOX_DOCKER_ENABLED` 或系统设置「网络安全」打开）。exec 一律以沙箱账号 `user`(uid 1000) 运行；超时由容器内 `timeout(1)` 执行，空闲回收读活跃标记 mtime。详细能力、网络策略与安全边界见 [`docs/sandbox-docker-backend.md`](../../docs/sandbox-docker-backend.md)。旧的 `docker run --rm` + 只读 bind mount 模型已移除。
 
 Manager 初始化时：`disabled` 模式的 `disabledSandbox` 拒绝一切执行。
 

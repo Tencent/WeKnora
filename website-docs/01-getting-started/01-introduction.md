@@ -47,7 +47,7 @@ WeKnora（维娜拉）是腾讯开源的知识库问答系统，做的事情是�
 | FAQ | FAQ 型知识库中的问答对，存于 Chunk 的 Metadata：标准问 `StandardQuestion`、相似问、反例问、多答案与答案策略 |
 | Wiki 页面 WikiPage | Wiki 型索引产物：由 LLM 从文档生成的结构化百科页面，最多三级分类路径，可被 Agent 以 `wiki_search` / `wiki_read_page` 工具导航 |
 | 知识图谱 Entity / Relationship | 从分块中抽取的实体与关系（强度 1-10），存储在 Neo4j（`NEO4J_ENABLE=true` 时），用于 GraphRAG 增强检索 |
-| 数据源 DataSource | 外部内容连接器。**当前可用 5 个**：`feishu`、`lark`（与飞书同一适配器，域名不同）、`notion`、`yuque`、`rss`，支持 Cron 定时同步（增量/全量）与冲突策略。`internal/types/datasource.go` 里还声明了 `confluence`、`github`、`imap` 等类型常量，但对应实现尚未接入（`initConnectorRegistry()` 中相关注册被注释），选不到 |
+| 数据源 DataSource | 外部内容连接器。**当前可用 7 个**：`feishu`、`lark`（与飞书同一适配器，域名不同）、`gitlab`、`ima`（腾讯 IMA 笔记）、`notion`、`yuque`、`rss`，支持 Cron 定时同步（增量/全量）与冲突策略。`internal/types/datasource.go` 里还声明了 `confluence`、`github`、`imap` 等类型常量，但对应实现尚未接入（`initConnectorRegistry()` 中相关注册被注释），选不到 |
 | 检索配置 RetrievalConfig | 租户级检索参数：`EmbeddingTopK`（默认 50）、`VectorThreshold`（0.15）、`KeywordThreshold`（0.3）、`RerankTopK`（10）、`RerankThreshold`（0.2）、RRF 融合参数（`RRFK`=60，向量权重 0.7 / 关键词权重 0.3） |
 
 ### 对话与智能体
