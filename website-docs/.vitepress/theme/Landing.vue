@@ -202,6 +202,7 @@ const map = [
       { text: '存储后端', link: '/03-features/19-storage-backends' },
       { text: '平台管理与系统管理员', link: '/03-features/20-platform-admin' },
       { text: '图片与文件的对外访问', link: '/03-features/21-file-access' },
+      { text: '工作空间知识事件回调', link: '/03-features/22-workspace-webhooks' },
     ],
   },
   {
