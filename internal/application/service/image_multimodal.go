@@ -537,12 +537,15 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledge
 	// New-style: resolve model through ModelService
 	if vlmCfg.ModelID != "" {
 		model, err := s.modelService.GetVLMModel(ctx, vlmCfg.ModelID)
-		return model, vlmCfg, err
+		// Wrap with a Redis cache so identical images reusing the same prompt
+		// (OCR/caption, or across ingest runs) skip the VLM round-trip.
+		// Nil-safe: Lite mode (no Redis) passes the model through unchanged.
+		return newCachedVLM(model, s.redisClient), vlmCfg, err
 	}
 
 	// Legacy: create VLM from inline config
 	model, err := vlm.NewVLMFromLegacyConfig(vlmCfg, s.ollamaService)
-	return model, vlmCfg, err
+	return newCachedVLM(model, s.redisClient), vlmCfg, err
 }
 
 // resolveFileServiceForPayload resolves tenant/KB scoped file service for reading provider:// URLs.

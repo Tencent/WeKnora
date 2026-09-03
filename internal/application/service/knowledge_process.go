@@ -268,6 +268,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks get embedding model failed")
 			return
 		}
+		// Wrap the embedder with a Redis cache so identical text within a batch
+		// or across ingest runs reuses the cached vector instead of re-hitting
+		// the embedding provider. Nil-safe: Lite mode (no Redis) passes the
+		// embedder through unchanged.
+		embeddingModel = newCachedEmbedder(embeddingModel, s.redisClient)
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping embedding model", kb.ID)
 	}
