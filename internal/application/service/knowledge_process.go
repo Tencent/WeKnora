@@ -87,11 +87,13 @@ func (s *knowledgeService) cloneKnowledge(
 			dst.ParseStatus = "failed"
 			dst.ErrorMessage = err.Error()
 			_ = s.repo.UpdateKnowledge(ctx, dst)
+			s.emitParseTransition(ctx, dst, types.ParseStatusProcessing)
 			logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge failed to move knowledge")
 		} else {
 			dst.ParseStatus = "completed"
 			dst.EnableStatus = "enabled"
 			_ = s.repo.UpdateKnowledge(ctx, dst)
+			s.emitParseTransition(ctx, dst, types.ParseStatusProcessing)
 			logger.GetLogger(ctx).WithField("knowledge_id", dst.ID).Infof("MoveKnowledge move knowledge successfully")
 		}
 	}()
@@ -100,6 +102,7 @@ func (s *knowledgeService) cloneKnowledge(
 		logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge create knowledge failed")
 		return
 	}
+	s.emitKnowledgeCreated(ctx, dst)
 	tenantInfo.StorageUsed += dst.StorageSize
 	if err = s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, dst.StorageSize); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge update tenant storage used failed")
@@ -499,6 +502,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		knowledge.ErrorMessage = err.Error()
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.emitParseTransition(ctx, knowledge, types.ParseStatusProcessing)
 		s.failStage(ctx, knowledge.ID, types.StageChunking,
 			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
 		return
@@ -556,6 +560,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ErrorMessage = err.Error()
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.emitParseTransition(ctx, knowledge, types.ParseStatusProcessing)
 				return
 			}
 			// Check if there's enough storage quota available
@@ -564,6 +569,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ErrorMessage = "存储空间不足"
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.emitParseTransition(ctx, knowledge, types.ParseStatusProcessing)
 				return
 			}
 		}
@@ -587,8 +593,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			knowledge.ErrorMessage = err.Error()
 			knowledge.UpdatedAt = time.Now()
 			s.repo.UpdateKnowledge(ctx, knowledge)
-
-			// delete failed chunks
+			s.emitParseTransition(ctx, knowledge, types.ParseStatusProcessing)
 			if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
 				logger.Errorf(ctx, "Delete chunks failed: %v", err)
 			}
@@ -643,6 +648,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	pendingPDFMultimodal := !isImage && !isVideo && options.EnableMultimodel && len(options.StoredImages) > 0
 
 	now := time.Now()
+	prevStatus := knowledge.ParseStatus
 	finalizeIndexedKnowledgeState(
 		knowledge,
 		totalStorageSize,
@@ -653,6 +659,8 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update knowledge failed")
+	} else {
+		s.emitParseTransition(ctx, knowledge, prevStatus)
 	}
 
 	// Enqueue multimodal tasks for images (async, non-blocking)
@@ -2692,6 +2700,8 @@ func (s *knowledgeService) ReparseKnowledge(
 	if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
 		logger.Errorf(ctx, "Failed to persist unparseable knowledge state for %s: %v",
 			secutils.SanitizeForLog(knowledgeID), err)
+	} else {
+		s.emitParseTransition(ctx, existing, types.ParseStatusPending)
 	}
 	return existing, werrors.NewBadRequestError("Knowledge has no parseable content")
 }

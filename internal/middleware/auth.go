@@ -60,10 +60,32 @@ var noAuthAPI = map[string][]string{
 	// before GET to validate Content-Type / Content-Length when rendering
 	// image previews — both verbs must be allowed for image links to work.
 	"/api/v1/files/presigned": {"GET", "HEAD"},
+	// Workspace webhook download tickets: GET/HEAD on the prefix only.
+	// POST is NOT listed here; isNoAuthAPI additionally allows
+	// POST /api/v1/files/knowledge-download/:id/renew.
+	"/api/v1/files/knowledge-download*": {"GET", "HEAD"},
+}
+
+// normalizeRequestPath trims space and trailing slashes (except "/") so
+// /api/v1/foo/ matches the registered no-auth path /api/v1/foo.
+func normalizeRequestPath(p string) string {
+	p = strings.TrimSpace(p)
+	for len(p) > 1 && strings.HasSuffix(p, "/") {
+		p = strings.TrimSuffix(p, "/")
+	}
+	if p == "" {
+		return "/"
+	}
+	return p
 }
 
 // 检查请求是否在无需认证的API列表中
 func isNoAuthAPI(path string, method string) bool {
+	path = normalizeRequestPath(path)
+	method = strings.ToUpper(strings.TrimSpace(method))
+	if method == http.MethodPost && isKnowledgeDownloadRenewPath(path) {
+		return true
+	}
 	for api, methods := range noAuthAPI {
 		// 如果以*结尾，按照前缀匹配，否则按照全路径匹配
 		if strings.HasSuffix(api, "*") {
@@ -75,6 +97,16 @@ func isNoAuthAPI(path string, method string) bool {
 		}
 	}
 	return false
+}
+
+func isKnowledgeDownloadRenewPath(path string) bool {
+	const prefix = "/api/v1/files/knowledge-download/"
+	const suffix = "/renew"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return false
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+	return id != "" && !strings.Contains(id, "/")
 }
 
 // isTenantOptionalAPI lists authenticated identity-level operations that are

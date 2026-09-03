@@ -91,6 +91,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/Tencent/WeKnora/internal/workspaceevent"
 	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
@@ -180,6 +181,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMemoryRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
+	must(container.Provide(repository.NewWebhookEndpointRepository))
+	must(container.Provide(repository.NewWebhookOutboxRepository))
+	must(container.Provide(repository.NewWebhookDeliveryRepository))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -195,6 +199,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// for tenants that configured nothing.
 	must(container.Provide(service.NewTenantSandboxConfigLoader))
 	must(container.Provide(newTenantSandboxResolver))
+	must(container.Provide(workspaceevent.NewSubscriptionIndex))
+	must(container.Provide(workspaceevent.NewSink))
+	must(container.Provide(func(s *workspaceevent.Sink) interfaces.WorkspaceEventSink { return s }))
 
 	// Business service layer
 	logger.Debugf(ctx, "[Container] Registering business services...")
@@ -324,6 +331,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		must(container.Provide(router.NewMaintenanceAsynqServer, dig.Name("maintenanceAsynqServer")))
 		must(container.Provide(router.NewSharedAsynqServer, dig.Name("sharedAsynqServer")))
 		must(container.Provide(router.NewWikiAsynqServer, dig.Name("wikiAsynqServer")))
+		must(container.Provide(router.NewWebhookAsynqServer, dig.Name("webhookAsynqServer")))
 		// Asynq inspector for cancel-by-knowledge-id (best-effort
 		// dequeue of pending/scheduled/retry tasks + active-task cancel).
 		must(container.Provide(router.NewAsynqInspector))
@@ -346,6 +354,15 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}
 	must(container.Provide(service.NewTemporaryDocumentService))
 	must(container.Invoke(startTemporaryDocumentCleanup))
+	must(container.Provide(service.NewWebhookDispatcher))
+	must(container.Provide(service.NewWebhookDeliverer))
+	must(container.Provide(service.NewWebhookEndpointService))
+	must(container.Invoke(wireWebhookDispatcher))
+	if redisAvailable {
+		must(container.Invoke(startWebhookSweepRedis))
+	} else {
+		must(container.Invoke(startWebhookSweepLite))
+	}
 
 	// Chat pipeline components for processing chat requests
 	logger.Debugf(ctx, "[Container] Registering chat pipeline plugins...")
@@ -445,6 +462,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewIMHandler))
 	must(container.Provide(handler.NewEmbedChannelHandler))
 	must(container.Provide(handler.NewWeKnoraCloudHandler))
+	must(container.Provide(handler.NewWebhookEndpointHandler))
+	must(container.Provide(handler.NewKnowledgeDownloadTicketHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Wire the chat package's local image resolver so multimodal chat can read

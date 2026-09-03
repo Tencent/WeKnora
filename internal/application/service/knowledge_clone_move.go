@@ -1335,6 +1335,7 @@ func (s *knowledgeService) moveKnowledgeReparse(
 	if err := s.repo.DeleteKnowledgeTagRelations(ctx, knowledge.ID); err != nil {
 		return fmt.Errorf("failed to clear knowledge tag relations: %w", err)
 	}
+	oldKBID := knowledge.KnowledgeBaseID
 	knowledge.KnowledgeBaseID = targetKB.ID
 	knowledge.EmbeddingModelID = targetKB.EmbeddingModelID
 	knowledge.ParseStatus = types.ParseStatusPending
@@ -1345,6 +1346,10 @@ func (s *knowledgeService) moveKnowledgeReparse(
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		return fmt.Errorf("failed to update knowledge: %w", err)
 	}
+	deleted := *knowledge
+	deleted.KnowledgeBaseID = oldKBID
+	s.emitKnowledgeDeleted(ctx, &deleted)
+	s.emitKnowledgeCreated(ctx, knowledge)
 
 	// 3. Enqueue document processing task with target KB's configuration
 	if knowledge.IsManual() {

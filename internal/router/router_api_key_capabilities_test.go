@@ -499,6 +499,37 @@ func TestTenantMemberRoutesDeclareManageMembersCapability(t *testing.T) {
 	}
 }
 
+func TestTenantWebhookRoutesDeclareManageTenantSettingsCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+	RegisterTenantWebhookRoutes(v1, &handler.WebhookEndpointHandler{}, g)
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v1/tenants/:id/event/webhooks"},
+		{http.MethodPost, "/api/v1/tenants/:id/event/webhooks"},
+		{http.MethodPatch, "/api/v1/tenants/:id/event/webhooks/:hook_id"},
+		{http.MethodDelete, "/api/v1/tenants/:id/event/webhooks/:hook_id"},
+		{http.MethodPost, "/api/v1/tenants/:id/event/webhooks/:hook_id/test"},
+		{http.MethodGet, "/api/v1/tenants/:id/event/webhooks/:hook_id/deliveries"},
+		{http.MethodGet, "/api/v1/tenants/:id/event/types"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+			if !policy.RequireFullAccess {
+				t.Fatal("policy should require full access without a matching capability")
+			}
+			if !policyHasCapability(policy, types.APIKeyCapabilityManageTenantSettings) {
+				t.Fatalf("policy capabilities = %#v, want manage_tenant_settings", policy.Capabilities)
+			}
+		})
+	}
+}
+
 func TestOrganizationRoutesDeclareManageSpacesCapability(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	g := &rbacGuards{}

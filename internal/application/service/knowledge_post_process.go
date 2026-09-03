@@ -274,6 +274,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		} else {
 			logger.Infof(ctx, "[KnowledgePostProcess] Knowledge %s marked completed (no enrichment subtasks).",
 				payload.KnowledgeID)
+			emitParseCompletedFromRepo(ctx, s.knowledgeRepo, payload.KnowledgeID)
 		}
 	default:
 		// Flip processing to finalizing before fan-out so a parallel
