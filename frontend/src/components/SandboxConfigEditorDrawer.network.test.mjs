@@ -69,11 +69,25 @@ test('docker network mode moved into the network policy section', () => {
   )
 })
 
-test('inbound defaults to credential-required and egress to allowed', () => {
-  assert.match(
+test('inbound is always credential-required and never shown', () => {
+  assert.doesNotMatch(
     source,
-    /const allowPublicInbound = ref\(false\)/,
-    'inbound closed is the default',
+    /settings\.sandbox\.inboundAccess/,
+    'the inbound radio must not appear in the form',
+  )
+  assert.doesNotMatch(
+    source,
+    /allowPublicInbound/,
+    'the form must not keep a public-inbound control',
+  )
+  const payloadBlock = source.slice(
+    source.indexOf('function collectNetworkPolicy'),
+    source.indexOf('function close'),
+  )
+  assert.doesNotMatch(
+    payloadBlock,
+    /allow_public_inbound/,
+    'saves must omit allow_public_inbound so the zero value (require credentials) is stored',
   )
   assert.match(
     source,
@@ -206,20 +220,15 @@ test('docker payload omits hidden allow and deny lists', () => {
   )
 })
 
-test('docker hides inbound and egress radios that it cannot honour', () => {
+test('docker hides egress radios that it cannot honour', () => {
   const networkBlock = source.slice(
     source.indexOf('settings.sandbox.sectionNetwork'),
     source.indexOf('settings.sandbox.sectionEnvironment'),
   )
   assert.match(
     networkBlock,
-    /v-if="backend !== 'docker'"[\s\S]*settings\.sandbox\.inboundAccess[\s\S]*settings\.sandbox\.egressDefault/,
-    'inbound and egress radios must not render for Docker',
-  )
-  assert.match(
-    source,
-    /function selectBackend[\s\S]*crossingDocker[\s\S]*allowPublicInbound\.value = false/,
-    'switching across Docker must not carry a public-inbound flag into Cube/E2B',
+    /v-if="backend !== 'docker'"[\s\S]*settings\.sandbox\.egressDefault/,
+    'egress radios must not render for Docker',
   )
 })
 
@@ -274,6 +283,35 @@ test('cube L7 rules collapse to a name bar', () => {
     false,
     'E2B expanded body must not grow with a second delete control',
   )
+  assert.match(
+    cubeRulesBlock,
+    /:key="rule\.key"/,
+    'Cube rules must key on a stable id so reorder does not remount the open card',
+  )
+  assert.match(
+    cubeRulesBlock,
+    /moveCubeRule\(index, -1\)/,
+    'the name bar must offer move-up',
+  )
+  assert.match(
+    cubeRulesBlock,
+    /moveCubeRule\(index, 1\)/,
+    'the name bar must offer move-down',
+  )
+
+  const mover = source.match(
+    /function moveCubeRule\(index: number, delta: number\) \{\n([\s\S]*?)\n\}/,
+  )
+  assert.ok(mover, 'moveCubeRule must exist')
+  const move = new Function('cubeRules', 'index', 'delta', `${mover[1]}`)
+  const rules = [{ key: 'a' }, { key: 'b' }, { key: 'c' }]
+  move({ value: rules }, 2, -1)
+  assert.deepEqual(rules.map((row) => row.key), ['a', 'c', 'b'])
+  move({ value: rules }, 0, -1)
+  assert.deepEqual(rules.map((row) => row.key), ['a', 'c', 'b'], 'the first row cannot move up')
+  move({ value: rules }, 2, 1)
+  assert.deepEqual(rules.map((row) => row.key), ['a', 'c', 'b'], 'the last row cannot move down')
+
   assert.match(
     source,
     /for \(const rule of cubeRules\.value\) rule\.expanded = false/,
