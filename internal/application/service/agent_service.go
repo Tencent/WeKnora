@@ -330,6 +330,10 @@ func (s *agentService) registerMCPTools(
 		}
 	}
 	if len(enabledServices) > 0 {
+		requestMeta := config.MCPRequestMeta
+		if config.SharedAgentReadOnly {
+			requestMeta = nil
+		}
 		var regCtx *tools.MCPOAuthSession
 		if eventBus != nil && sessionID != "" && assistantMessageID != "" {
 			regCtx = &tools.MCPOAuthSession{
@@ -341,7 +345,7 @@ func (s *agentService) registerMCPTools(
 			}
 		}
 		registered, err := tools.RegisterMCPTools(
-			ctx, toolRegistry, enabledServices, s.mcpManager, s.toolApprovalGate, regCtx,
+			ctx, toolRegistry, enabledServices, s.mcpManager, s.toolApprovalGate, regCtx, requestMeta,
 		)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to register MCP tools: %v", err)

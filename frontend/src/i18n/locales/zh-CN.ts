@@ -913,6 +913,13 @@ export default {
       authWaitTimeout: '授权等待超时（秒）',
       authWaitTimeoutDesc: '对话中触发 OAuth 授权时，等待你完成授权的最长秒数，超时后自动跳过授权提示（仅对使用 OAuth 的 MCP 服务生效）。',
       authWaitTimeoutPlaceholder: '默认 600 秒',
+      requestMetaWarning: '这些值会发送给此 Agent 可调用的每个 MCP 服务，可能包含凭据。仅为可信服务配置；共享 Agent 调用不会透传。',
+      requestHeaders: '透传请求头',
+      requestHeadersDesc: '允许复制到 MCP _meta 的 HTTP 请求头名称，最多 16 个。请求值只用于本次调用，不会保存。',
+      requestHeadersPlaceholder: '例如 Authorization、X-Trace-Id',
+      requestBodyFields: '透传请求 Body 字段',
+      requestBodyFieldsDesc: '允许复制标量、ID 列表或 mcp_metadata.<键> 中的自定义字符串，最多 16 个；图片和附件不可透传。',
+      requestBodyFieldsPlaceholder: '例如 channel、mcp_metadata.user_role',
       unavailableService: '不可用服务'
     },
     agentType: {

@@ -87,6 +87,56 @@ Agent 模式支持更智能的问答，包括工具调用、网络搜索、多�
 | `images` | object[] | 否 | 附带的图片（base64 格式），需要 Agent 启用图片上传 |
 | `channel` | string | 否 | 来源渠道标识：`web`、`api`、`im`、`browser_extension` |
 | `suggestion_attribution` | object | 否 | 用户从推荐问题发起本轮时传入 `{suggestion_set_id, question_id}`；服务端会校验归属 |
+| `mcp_metadata` | object<string,string> | 否 | 提供给 Agent MCP 元数据白名单选择的标量 Body 字段；最多 16 个键，键名仅允许字母、数字、`_`、`-`、`.` |
+
+### MCP 请求元数据透传
+
+如果 Agent 配置了 `mcp_request_meta`，服务端会把本次 HTTP 请求中被白名单选中的值放入每次 MCP `tools/call` 的标准 `_meta` 参数。Agent 配置接口中的示例：
+
+```json
+{
+  "mcp_request_meta": {
+    "headers": ["Authorization", "X-Trace-Id"],
+    "body_fields": ["channel", "mcp_metadata.user_role"]
+  }
+}
+```
+
+调用 Agent 时可以提供自定义的标量 Body 元数据：
+
+```json
+{
+  "query": "查询订单状态",
+  "agent_enabled": true,
+  "agent_id": "agent-001",
+  "mcp_metadata": {
+    "user_role": "auditor"
+  }
+}
+```
+
+MCP 服务收到的参数包含如下扩展字段（实际请求仍是 MCP 标准 `tools/call`）：
+
+```json
+{
+  "_meta": {
+    "io.weknora/request": {
+      "headers": {
+        "Authorization": "Bearer ...",
+        "X-Trace-Id": "trace-123"
+      },
+      "body": {
+        "channel": "api",
+        "mcp_metadata": {
+          "user_role": "auditor"
+        }
+      }
+    }
+  }
+}
+```
+
+只会透传 Agent 配置中明确列出的字段；图片、附件和未列出的请求值不会进入 `_meta`。每类最多配置 16 个字段，单个值和总大小也有限制。由于请求头可能包含凭据，请只对可信 MCP 服务启用；共享 Agent 调用不会透传调用者的请求元数据。
 
 ## 回答后推荐问题
 

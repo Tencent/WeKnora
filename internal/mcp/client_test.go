@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -8,6 +9,43 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/mark3labs/mcp-go/client/transport"
 )
+
+func TestNewCallToolRequestMetadata(t *testing.T) {
+	t.Run("serializes request values under a namespaced _meta key", func(t *testing.T) {
+		req := newCallToolRequest("lookup", map[string]interface{}{"id": "42"}, &types.MCPRequestMeta{
+			Headers: map[string]string{"Authorization": "Bearer token"},
+			Body:    map[string]any{"channel": "api"},
+		})
+
+		data, err := json.Marshal(req.Params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		meta, ok := decoded["_meta"].(map[string]any)
+		if !ok {
+			t.Fatalf("_meta missing from %s", data)
+		}
+		requestMeta, ok := meta[types.MCPRequestMetaNamespace].(map[string]any)
+		if !ok {
+			t.Fatalf("namespace %q missing from %s", types.MCPRequestMetaNamespace, data)
+		}
+		headers := requestMeta["headers"].(map[string]any)
+		if headers["Authorization"] != "Bearer token" {
+			t.Fatalf("Authorization = %v", headers["Authorization"])
+		}
+	})
+
+	t.Run("omits _meta when no values were selected", func(t *testing.T) {
+		req := newCallToolRequest("lookup", nil, &types.MCPRequestMeta{})
+		if req.Params.Meta != nil {
+			t.Fatal("empty request metadata should be omitted")
+		}
+	})
+}
 
 func TestAsOAuthRequired(t *testing.T) {
 	t.Run("nil error", func(t *testing.T) {

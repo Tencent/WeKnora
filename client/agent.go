@@ -25,18 +25,20 @@ type MentionedItem struct {
 
 // AgentQARequest agent Q&A request payload.
 type AgentQARequest struct {
-	Query            string            `json:"query"`                        // Required query text
-	KnowledgeBaseIDs []string          `json:"knowledge_base_ids,omitempty"` // Optional KBs for this query
-	KnowledgeIDs     []string          `json:"knowledge_ids,omitempty"`      // Optional specific knowledge IDs for this query
-	AgentEnabled     bool              `json:"agent_enabled"`                // Whether to run in agent mode
-	AgentID          string            `json:"agent_id,omitempty"`           // Optional custom agent ID
-	WebSearchEnabled bool              `json:"web_search_enabled"`           // Whether to enable web search
-	SummaryModelID   string            `json:"summary_model_id,omitempty"`   // Optional summary model override
-	MentionedItems   []MentionedItem   `json:"mentioned_items,omitempty"`    // @mentioned knowledge bases and files
-	DisableTitle     bool              `json:"disable_title,omitempty"`      // Whether to disable auto title generation
-	MCPServiceIDs    []string          `json:"mcp_service_ids,omitempty"`    // Optional MCP service allow list (deprecated)
-	Images           []ImageAttachment `json:"images,omitempty"`             // Attached images for multimodal chat
-	Channel          string            `json:"channel,omitempty"`            // Source channel: "web", "api", "im", etc.
+	Query            string          `json:"query"`                        // Required query text
+	KnowledgeBaseIDs []string        `json:"knowledge_base_ids,omitempty"` // Optional KBs for this query
+	KnowledgeIDs     []string        `json:"knowledge_ids,omitempty"`      // Optional knowledge IDs
+	AgentEnabled     bool            `json:"agent_enabled"`                // Whether to run in agent mode
+	AgentID          string          `json:"agent_id,omitempty"`           // Optional custom agent ID
+	WebSearchEnabled bool            `json:"web_search_enabled"`           // Whether to enable web search
+	SummaryModelID   string          `json:"summary_model_id,omitempty"`   // Optional summary model override
+	MentionedItems   []MentionedItem `json:"mentioned_items,omitempty"`    // @mentioned knowledge bases and files
+	DisableTitle     bool            `json:"disable_title,omitempty"`      // Whether to disable auto title generation
+	MCPServiceIDs    []string        `json:"mcp_service_ids,omitempty"`    // Deprecated MCP service allow list
+	// Optional scalar metadata selected by the Agent's MCP request-meta allowlist.
+	MCPMetadata map[string]string `json:"mcp_metadata,omitempty"`
+	Images      []ImageAttachment `json:"images,omitempty"`  // Attached images for multimodal chat
+	Channel     string            `json:"channel,omitempty"` // Source channel: "web", "api", "im", etc.
 }
 
 // AgentResponseType defines the type of agent response

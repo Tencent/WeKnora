@@ -46,6 +46,7 @@ type qaRequestContext struct {
 	tagScopes             []types.TagScope
 	tagIDs                []string
 	mcpServiceIDs         []string
+	mcpRequestMeta        *types.MCPRequestMeta
 	skillNames            []string
 	summaryModelID        string
 	webSearchEnabled      bool
@@ -86,6 +87,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		KnowledgeIDs:        rc.knowledgeIDs,
 		TagScopes:           rc.tagScopes,
 		MCPServiceIDs:       rc.mcpServiceIDs,
+		MCPRequestMeta:      rc.mcpRequestMeta,
 		SkillNames:          rc.skillNames,
 		ImageURLs:           imageURLs,
 		ImageDescription:    imageDescription,
@@ -114,6 +116,10 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	var request CreateKnowledgeQARequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		logger.Error(ctx, "Failed to parse request data", err)
+		return nil, nil, errors.NewBadRequestError(err.Error())
+	}
+	if err := types.ValidateMCPRequestMetadata(request.MCPMetadata); err != nil {
+		logger.Warnf(ctx, "Rejected MCP request metadata: %v", err)
 		return nil, nil, errors.NewBadRequestError(err.Error())
 	}
 
@@ -145,7 +151,9 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	}
 
 	// Log request details
-	if requestJSON, err := json.Marshal(request); err == nil {
+	requestForLog := request
+	requestForLog.MCPMetadata = nil // Values may contain credentials; never write them to logs.
+	if requestJSON, err := json.Marshal(requestForLog); err == nil {
 		logger.Infof(ctx, "[%s] Request: session_id=%s, request=%s",
 			logPrefix, sessionID, secutils.SanitizeForLog(secutils.CompactImageDataURLForLog(string(requestJSON))))
 	}
@@ -189,6 +197,14 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 			sharedAgentReadOnly = false
 		}
 	}
+
+	var mcpRequestMetaConfig *types.MCPRequestMetaConfig
+	if customAgent != nil {
+		mcpRequestMetaConfig = customAgent.Config.MCPRequestMeta
+	}
+	mcpRequestMeta := buildMCPRequestMeta(
+		c.Request.Header, &request, mcpRequestMetaConfig, sharedAgentReadOnly,
+	)
 
 	// Log merge results for debugging
 	logger.Infof(ctx, "[%s] @mention merge: request.KnowledgeBaseIDs=%v, request.MentionedItems=%d, merged kbIDs=%v, merged knowledgeIDs=%v",
@@ -374,6 +390,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		tagScopes:             tagScopes,
 		tagIDs:                secutils.SanitizeForLogArray(tagIDs),
 		mcpServiceIDs:         secutils.SanitizeForLogArray(mcpServiceIDs),
+		mcpRequestMeta:        mcpRequestMeta,
 		skillNames:            secutils.SanitizeForLogArray(skillNames),
 		summaryModelID:        secutils.SanitizeForLog(request.SummaryModelID),
 		webSearchEnabled:      request.WebSearchEnabled,

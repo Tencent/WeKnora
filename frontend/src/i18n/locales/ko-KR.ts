@@ -911,6 +911,13 @@ export default {
       authWaitTimeout: '인증 대기 시간(초)',
       authWaitTimeoutDesc: '대화 중 OAuth 인증이 필요할 때 인증 완료를 기다리는 최대 시간(초)이며, 초과하면 인증 요청을 건너뜁니다(OAuth를 사용하는 MCP 서비스에만 적용).',
       authWaitTimeoutPlaceholder: '기본 600초',
+      requestMetaWarning: '이 값은 Agent가 호출할 수 있는 모든 MCP 서비스로 전송되며 자격 증명을 포함할 수 있습니다. 신뢰할 수 있는 서비스에만 설정하세요. 공유 Agent 호출에서는 전달되지 않습니다.',
+      requestHeaders: '요청 헤더 전달',
+      requestHeadersDesc: 'MCP _meta로 복사할 HTTP 헤더 이름이며 최대 16개입니다. 값은 이번 호출에만 사용되고 저장되지 않습니다.',
+      requestHeadersPlaceholder: '예: Authorization, X-Trace-Id',
+      requestBodyFields: '요청 Body 필드 전달',
+      requestBodyFieldsDesc: '스칼라 필드, ID 목록 또는 mcp_metadata.<키> 문자열을 최대 16개 전달할 수 있습니다. 이미지와 첨부 파일은 전달되지 않습니다.',
+      requestBodyFieldsPlaceholder: '예: channel, mcp_metadata.user_role',
       unavailableService: '사용할 수 없는 서비스'
     },
     agentType: {

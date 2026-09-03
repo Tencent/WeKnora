@@ -88,6 +88,7 @@ type AgentConfig struct {
 	AllowedTools                []string                  `json:"allowed_tools"`
 	MCPSelectionMode            string                    `json:"mcp_selection_mode"`
 	MCPServices                 []string                  `json:"mcp_services"`
+	MCPRequestMeta              *MCPRequestMetaConfig     `json:"mcp_request_meta,omitempty"`
 	SkillsSelectionMode         string                    `json:"skills_selection_mode"`
 	SelectedSkills              []string                  `json:"selected_skills"`
 	KBSelectionMode             string                    `json:"kb_selection_mode"`
@@ -125,6 +126,14 @@ type AgentConfig struct {
 	FallbackResponse            string                    `json:"fallback_response"`
 	FallbackPrompt              string                    `json:"fallback_prompt"`
 	QuestionSuggestions         *QuestionSuggestionConfig `json:"question_suggestions,omitempty"`
+}
+
+// MCPRequestMetaConfig declares which request values an Agent may copy into
+// MCP tools/call _meta. It contains selector names only; request values are
+// collected for one call and are never stored in the Agent configuration.
+type MCPRequestMetaConfig struct {
+	Headers    []string `json:"headers,omitempty"`
+	BodyFields []string `json:"body_fields,omitempty"`
 }
 
 type QuestionSuggestionConfig struct {

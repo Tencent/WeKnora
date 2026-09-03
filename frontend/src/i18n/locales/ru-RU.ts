@@ -911,6 +911,13 @@ export default {
       authWaitTimeout: 'Тайм-аут ожидания аутентификации (с)',
       authWaitTimeoutDesc: 'Максимальное время ожидания (в секундах) завершения OAuth-аутентификации при запросе во время диалога; по его истечении запрос пропускается (влияет только на MCP-сервисы с OAuth).',
       authWaitTimeoutPlaceholder: 'Default 600 seconds',
+      requestMetaWarning: 'Эти значения отправляются каждому MCP-сервису, доступному агенту, и могут содержать учётные данные. Настраивайте только доверенные сервисы. Для общих агентов пересылка отключена.',
+      requestHeaders: 'Передаваемые заголовки запроса',
+      requestHeadersDesc: 'Имена HTTP-заголовков, копируемых в MCP _meta, не более 16. Значения используются только в текущем вызове и не сохраняются.',
+      requestHeadersPlaceholder: 'Например: Authorization, X-Trace-Id',
+      requestBodyFields: 'Передаваемые поля тела запроса',
+      requestBodyFieldsDesc: 'Можно передать скалярные поля, списки ID или строки mcp_metadata.<ключ>, не более 16. Изображения и вложения не передаются.',
+      requestBodyFieldsPlaceholder: 'Например: channel, mcp_metadata.user_role',
       unavailableService: 'Недоступный сервис'
     },
     agentType: {

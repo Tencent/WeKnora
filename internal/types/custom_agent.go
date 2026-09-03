@@ -149,6 +149,9 @@ type CustomAgentConfig struct {
 	// MCPAuthWaitTimeout is how many seconds to wait for in-conversation OAuth
 	// authorization before skipping. <=0 uses the gate's configured timeout.
 	MCPAuthWaitTimeout int `yaml:"mcp_auth_wait_timeout,omitempty" json:"mcp_auth_wait_timeout,omitempty"`
+	// MCPRequestMeta explicitly allowlists HTTP request values copied into MCP
+	// tool-call _meta. The configuration stores selectors only, never values.
+	MCPRequestMeta *MCPRequestMetaConfig `yaml:"mcp_request_meta,omitempty" json:"mcp_request_meta,omitempty"`
 
 	// ===== Skills Settings (only for smart-reasoning mode) =====
 	// Skills selection mode: "all" = all preloaded skills, "selected" = specific skills, "none" = no skills

@@ -155,6 +155,9 @@ type AgentConfig struct {
 	// Per-request @mention pins (runtime only; injected as <must_use> in the user message).
 	PinnedMCPServiceIDs []string `json:"-"`
 	PinnedSkillNames    []string `json:"-"`
+	// MCPRequestMeta is captured once by the Agent HTTP handler and passed to
+	// every MCP tool registered for this run. It is never persisted.
+	MCPRequestMeta *MCPRequestMeta `json:"-"`
 	// SharedAgentReadOnly prevents a shared agent from mutating resources in
 	// its source workspace. It is set from the verified share relation, never
 	// inferred from a client-provided tenant ID.

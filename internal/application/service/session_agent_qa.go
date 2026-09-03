@@ -299,6 +299,7 @@ func (s *sessionService) buildAgentConfig(
 		MCPSelectionMode:            customAgent.Config.MCPSelectionMode,
 		MCPServices:                 customAgent.Config.MCPServices,
 		MCPAuthWaitTimeout:          customAgent.Config.MCPAuthWaitTimeout,
+		MCPRequestMeta:              mcpRequestMetaForAgentRun(req),
 		Thinking:                    customAgent.Config.Thinking,
 		CitationEnabled:             customAgent.Config.CitationEnabled,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
@@ -418,6 +419,13 @@ func (s *sessionService) buildAgentConfig(
 	// from the resolved model's declared window, which is not known yet.
 
 	return agentConfig, nil
+}
+
+func mcpRequestMetaForAgentRun(req *types.QARequest) *types.MCPRequestMeta {
+	if req == nil || req.SharedAgentReadOnly {
+		return nil
+	}
+	return req.MCPRequestMeta
 }
 
 func mergeResolvedTagKnowledgeIDs(
