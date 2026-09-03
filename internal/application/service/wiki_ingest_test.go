@@ -633,4 +633,7 @@ func TestGenerateWithTemplateSetsMaxTokens(t *testing.T) {
 	if model.options.Thinking == nil || *model.options.Thinking {
 		t.Fatalf("Thinking should be non-nil false, got %#v", model.options.Thinking)
 	}
+	if model.options.Temperature != 0 {
+		t.Fatalf("Temperature = %v, want 0 for deterministic Wiki generation", model.options.Temperature)
+	}
 }

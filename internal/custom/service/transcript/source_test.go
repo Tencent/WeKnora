@@ -188,3 +188,34 @@ func TestSourceWriterRecordsFailureWithoutBindingSuccess(t *testing.T) {
 	require.Empty(t, binding.KnowledgeID)
 	require.NotEmpty(t, binding.ErrorMessage)
 }
+
+func TestSourceWriterRetryRecoversSameBindingWithoutDuplicate(t *testing.T) {
+	db := openSourceTestDB(t)
+	gateway := &sourceGateway{items: make(map[string]weknora.ManualKnowledgeResult), createErr: gorm.ErrInvalidData}
+	writer := &SourceWriter{DB: db, Gateway: gateway, KBID: "kb-1"}
+	doc := sourceTestDocument(t, "generation-1", "第一句")
+
+	_, err := writer.Ensure(context.Background(), SourceInput{Document: doc})
+	require.Error(t, err)
+
+	var failed model.VideoTranscriptSource
+	require.NoError(t, db.First(&failed).Error)
+	require.Equal(t, SourceStatusFailed, failed.Status)
+	require.Empty(t, failed.KnowledgeID)
+	require.Empty(t, gateway.created)
+
+	gateway.createErr = nil
+	result, err := writer.Ensure(context.Background(), SourceInput{Document: doc})
+	require.NoError(t, err)
+	require.Equal(t, "created", result.Action)
+	require.NotEmpty(t, result.KnowledgeID)
+	require.Len(t, gateway.created, 1)
+
+	var bindings []model.VideoTranscriptSource
+	require.NoError(t, db.Find(&bindings).Error)
+	require.Len(t, bindings, 1)
+	require.Equal(t, failed.ID, bindings[0].ID)
+	require.Equal(t, SourceStatusCreated, bindings[0].Status)
+	require.Equal(t, result.KnowledgeID, bindings[0].KnowledgeID)
+	require.Empty(t, bindings[0].ErrorMessage)
+}

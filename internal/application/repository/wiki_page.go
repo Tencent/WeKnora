@@ -1042,7 +1042,7 @@ func (r *wikiPageRepository) FindSimilarPages(
 		Select("slug, title, page_type, status, aliases, out_links, similarity(lower(title), ?) AS sim", q).
 		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ? AND lower(title) % ?",
 			kbID, pageTypes, types.WikiPageStatusArchived, q).
-		Order("sim DESC").
+		Order("sim DESC, slug ASC").
 		Limit(limit).
 		Scan(&rows).Error; err != nil {
 		return nil, err

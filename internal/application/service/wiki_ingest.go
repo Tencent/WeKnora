@@ -2343,6 +2343,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	ctx context.Context,
 	chatModel chat.Chat,
 	kbID string,
+	previousSlugs map[string]bool,
 	entities, concepts []extractedItem,
 ) ([]extractedItem, []extractedItem) {
 	if len(entities) == 0 && len(concepts) == 0 {
@@ -2488,7 +2489,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	}
 
 	validMerge := func(srcSlug, dstSlug string) bool {
-		if reason := dedupMergeRejectReason(srcSlug, dstSlug, itemCandidates[srcSlug]); reason != "" {
+		if reason := dedupMergeRejectReason(srcSlug, dstSlug, itemCandidates[srcSlug], previousSlugs); reason != "" {
 			logger.Warnf(ctx, "wiki ingest: dedup rejected %s → %s (%s)", srcSlug, dstSlug, reason)
 			return false
 		}
@@ -2560,7 +2561,10 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 		)
 	}
 	thinking := false
-	opts := &chat.ChatOptions{Temperature: 0.3, Thinking: &thinking, MaxTokens: wikiLLMMaxTokens}
+	// Wiki extraction and page identity must be reproducible for a repeated
+	// ingest of the same source document. A non-zero temperature can change
+	// the candidate set between runs, creating new pages or changing links.
+	opts := &chat.ChatOptions{Temperature: 0, Thinking: &thinking, MaxTokens: wikiLLMMaxTokens}
 	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
 	warmupKey := ""
 	if promptTpl == agent.WikiPageModifyUserPrompt {

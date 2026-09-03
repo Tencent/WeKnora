@@ -12,6 +12,7 @@ func TestDedupMergeRejectReason(t *testing.T) {
 		name        string
 		src, dst    string
 		candidates  map[string]bool
+		previous    map[string]bool
 		wantAllowed bool
 	}{
 		{
@@ -20,6 +21,14 @@ func TestDedupMergeRejectReason(t *testing.T) {
 			dst:         "entity/acme-corporation",
 			candidates:  map[string]bool{"entity/acme-corporation": true},
 			wantAllowed: true,
+		},
+		{
+			name:        "rejected: previous source slug cannot reverse canonical page",
+			src:         "entity/domainfuser-skill",
+			dst:         "entity/domainfuser",
+			candidates:  map[string]bool{"entity/domainfuser": true},
+			previous:    map[string]bool{"entity/domainfuser-skill": true},
+			wantAllowed: false,
 		},
 		{
 			name:        "rejected: dst similar to a DIFFERENT item (union hallucination)",
@@ -52,7 +61,7 @@ func TestDedupMergeRejectReason(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			reason := dedupMergeRejectReason(tc.src, tc.dst, tc.candidates)
+			reason := dedupMergeRejectReason(tc.src, tc.dst, tc.candidates, tc.previous)
 			gotAllowed := reason == ""
 			if gotAllowed != tc.wantAllowed {
 				t.Fatalf("dedupMergeRejectReason(%q, %q) allowed=%v (reason=%q), want allowed=%v",

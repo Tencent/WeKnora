@@ -188,7 +188,18 @@ func selectDedupCandidatePages(
 // which share no trigram signal). Requiring dstSlug to be one of srcSlug's
 // own candidates rejects that entire class without depending on the model
 // getting the semantic judgment right.
-func dedupMergeRejectReason(srcSlug, dstSlug string, srcCandidates map[string]bool) string {
+func dedupMergeRejectReason(
+	srcSlug, dstSlug string,
+	srcCandidates map[string]bool,
+	previousSlugs map[string]bool,
+) string {
+	// A slug already attributed to this source document is the continuity
+	// anchor for re-ingest. Letting the model redirect it to another existing
+	// page makes the canonical slug depend on nondeterministic extraction and
+	// can reverse a prior dedup merge on every reparse.
+	if previousSlugs[srcSlug] {
+		return "source slug is already linked to this document"
+	}
 	if !srcCandidates[dstSlug] {
 		// Covers both an outright hallucinated target (in no candidate
 		// set at all) and a real page that was only similar to another

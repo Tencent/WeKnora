@@ -80,10 +80,15 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	var prevSlugsText string
 	if len(oldPageSlugs) > 0 {
 		var sb strings.Builder
+		previousSlugs := make([]string, 0, len(oldPageSlugs))
 		for slug := range oldPageSlugs {
 			if !strings.HasPrefix(slug, "entity/") && !strings.HasPrefix(slug, "concept/") {
 				continue
 			}
+			previousSlugs = append(previousSlugs, slug)
+		}
+		sort.Strings(previousSlugs)
+		for _, slug := range previousSlugs {
 			fmt.Fprintf(&sb, "- %s\n", slug)
 		}
 		prevSlugsText = sb.String()
@@ -115,7 +120,7 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	}
 
 	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
-		ctx, chatModel, kbID, result.Entities, result.Concepts,
+		ctx, chatModel, kbID, oldPageSlugs, result.Entities, result.Concepts,
 	)
 
 	slugItems := make(map[string]extractedItem, len(result.Entities)+len(result.Concepts))
