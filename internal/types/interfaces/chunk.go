@@ -83,6 +83,13 @@ type ChunkRepository interface {
 	DeleteChunks(ctx context.Context, tenantID uint64, ids []string) error
 	// DeleteChunksByKnowledgeID deletes chunks by knowledge id
 	DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error
+	// MarkChunksEmbedded records committed chunk vectors for embedding resume
+	// (see knowledge_embed_progress). Idempotent on (knowledge_id, chunk_id).
+	MarkChunksEmbedded(ctx context.Context, knowledgeID string, chunkIDs []string) error
+	// ListEmbeddedChunkIDs returns chunk IDs whose vectors are already committed.
+	ListEmbeddedChunkIDs(ctx context.Context, knowledgeID string) (map[string]struct{}, error)
+	// DeleteEmbedProgressByKnowledgeID clears resume progress for a knowledge.
+	DeleteEmbedProgressByKnowledgeID(ctx context.Context, knowledgeID string) error
 	// DeleteByKnowledgeList deletes all chunks for a knowledge list
 	DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error
 	// ListImageInfoByKnowledgeIDs returns non-empty (knowledge_id, image_info) pairs for image cleanup.
@@ -158,6 +165,13 @@ type ChunkService interface {
 	DeleteChunks(ctx context.Context, ids []string) error
 	// DeleteChunksByKnowledgeID deletes chunks by knowledge id
 	DeleteChunksByKnowledgeID(ctx context.Context, knowledgeID string) error
+	// MarkChunksEmbedded records committed chunk vectors for embedding resume
+	// (see knowledge_embed_progress). Idempotent on (knowledge_id, chunk_id).
+	MarkChunksEmbedded(ctx context.Context, knowledgeID string, chunkIDs []string) error
+	// ListEmbeddedChunkIDs returns chunk IDs whose vectors are already committed.
+	ListEmbeddedChunkIDs(ctx context.Context, knowledgeID string) (map[string]struct{}, error)
+	// DeleteEmbedProgressByKnowledgeID clears resume progress for a knowledge.
+	DeleteEmbedProgressByKnowledgeID(ctx context.Context, knowledgeID string) error
 	// DeleteByKnowledgeList deletes all chunks for a knowledge list
 	DeleteByKnowledgeList(ctx context.Context, ids []string) error
 	// ListChunkByParentID lists chunks by parent id

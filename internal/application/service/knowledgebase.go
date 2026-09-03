@@ -922,6 +922,24 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, tenantID, knowledgeID); err != nil {
 				logger.Warnf(ctx, "Failed to delete chunks for knowledge %s: %v", knowledgeID, err)
 			}
+			if err := s.chunkRepo.DeleteEmbedProgressByKnowledgeID(ctx, knowledgeID); err != nil {
+				logger.Warnf(ctx, "Failed to delete embed progress for knowledge %s: %v", knowledgeID, err)
+			}
+		}
+
+		// Delete knowledge entries from the database FIRST, then adjust
+		// tenant storage. This ordering makes a retry after a mid-task
+		// interruption idempotent: if the rows are gone, the retry's
+		// ListKnowledgeByKnowledgeBaseID returns empty and the storage
+		// adjustment is skipped entirely — no double deduction.
+		// The alternative (adjust then delete rows) would deduct again on
+		// every retry after a successful adjust + crash-before-row-delete.
+		logger.Infof(ctx, "Deleting knowledge entries from database")
+		if err := s.kgRepo.DeleteKnowledgeList(ctx, tenantID, knowledgeIDs); err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"knowledge_base_id": kbID,
+			})
+			return err
 		}
 
 		// Delete physical files, extracted images, and adjust storage
@@ -955,15 +973,6 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			if err := s.graphEngine.DelGraph(ctx, namespaces); err != nil {
 				logger.Warnf(ctx, "Failed to delete knowledge graph: %v", err)
 			}
-		}
-
-		// Delete all knowledge entries from database
-		logger.Infof(ctx, "Deleting knowledge entries from database")
-		if err := s.kgRepo.DeleteKnowledgeList(ctx, tenantID, knowledgeIDs); err != nil {
-			logger.ErrorWithFields(ctx, err, map[string]interface{}{
-				"knowledge_base_id": kbID,
-			})
-			return err
 		}
 	}
 

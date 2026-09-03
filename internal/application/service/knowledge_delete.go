@@ -216,6 +216,10 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete chunks failed")
 			return err
 		}
+		// 断点续传进度随 chunks 一并清理（best-effort，不留孤儿行）。
+		if err := s.chunkService.DeleteEmbedProgressByKnowledgeID(ctx, knowledge.ID); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Warnf("DeleteKnowledge delete embed progress failed")
+		}
 		return nil
 	})
 
@@ -676,7 +680,13 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete chunks failed")
 			return err
 		}
+		for _, knowledgeID := range ids {
+			if err := s.chunkService.DeleteEmbedProgressByKnowledgeID(ctx, knowledgeID); err != nil {
+				logger.GetLogger(ctx).WithField("error", err).Warnf("DeleteKnowledge delete embed progress failed")
+			}
+		}
 		return nil
+
 	})
 
 	// Delete the knowledge graph
@@ -821,6 +831,14 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 		cleanupErr = errors.Join(cleanupErr, err)
 	}
 
+	// Clear resume state along with chunks and vectors. Otherwise a subsequent
+	// parse could reuse a fingerprint for data that has already been deleted.
+	knowledge.ChunkFingerprint = ""
+	if err := s.chunkService.DeleteEmbedProgressByKnowledgeID(ctx, knowledge.ID); err != nil {
+		logger.GetLogger(ctx).WithField("error", err).Error("Failed to delete embed progress during cleanup")
+		cleanupErr = errors.Join(cleanupErr, err)
+	}
+
 	// Delete extracted images after chunks are deleted. The claims released
 	// here are re-taken by triggerManualProcessing, which always runs after
 	// this cleanup and re-binds whatever the new body still references.
@@ -833,15 +851,25 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 	}
 
 	if knowledge.StorageSize > 0 {
-		tenantInfo.StorageUsed -= knowledge.StorageSize
-		if tenantInfo.StorageUsed < 0 {
-			tenantInfo.StorageUsed = 0
-		}
+		// Deduct first, zero the row's StorageSize only after the deduction
+		// succeeds. The idempotency basis is the persisted StorageSize value:
+		//   - adjustment fails  -> StorageSize stays > 0, caller persists it,
+		//     and the next retry re-attempts the deduction (no quota leak);
+		//   - adjustment succeeds -> StorageSize is zeroed and persisted, so a
+		//     retry sees 0 and skips (no double deduction).
+		// Zeroing unconditionally (as before) leaked tenant quota forever when
+		// AdjustStorageUsed failed while the caller still persisted the zeroed
+		// row.
 		if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, -knowledge.StorageSize); err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Error("Failed to adjust storage usage during manual cleanup")
 			cleanupErr = errors.Join(cleanupErr, err)
+		} else {
+			tenantInfo.StorageUsed -= knowledge.StorageSize
+			if tenantInfo.StorageUsed < 0 {
+				tenantInfo.StorageUsed = 0
+			}
+			knowledge.StorageSize = 0
 		}
-		knowledge.StorageSize = 0
 	}
 
 	return cleanupErr
