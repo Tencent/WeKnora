@@ -39,9 +39,9 @@ type Adapter interface {
 两个**可选**扩展接口决定了平台能力差异：
 
 - `StreamSender` —— 流式回复（`StartStream` → `UpdateStreamContent`（整段替换语义）→ `FinalizeStream`（最终只保留答案，剥离思考/工具过程）→ `EndStream`）。实现者：Feishu/Lark（流式卡片）、DingTalk（AI 卡片，需 `card_template_id`）、Slack、Telegram（消息编辑）、Mattermost、WeCom WebSocket 模式。
-- `FileDownloader` —— 从平台下载用户发送的文件/图片（`DownloadFile`）。实现者：除 QQ 机器人外的全部平台（WeCom 两种模式均支持）。
+- `FileDownloader` —— 从平台下载用户发送的文件/图片/语音（`DownloadFile`）。实现者：除 QQ 机器人外的全部平台（WeCom 两种模式均支持）。
 
-统一消息模型 `IncomingMessage` 携带 `Platform`、`MessageType`（`text`/`file`/`image`）、`UserID`、`ChatID`、`ChatType`（`direct`/`group`）、`Content`、`MessageID`（用于去重）、`FileKey`/`FileName`/`FileSize`、`ThreadID`（话题/线程 ID）、`Quote`（引用消息）等字段。
+统一消息模型 `IncomingMessage` 携带 `Platform`、`MessageType`（`text`/`file`/`image`/`voice`）、`UserID`、`ChatID`、`ChatType`（`direct`/`group`）、`Content`、`MessageID`（用于去重）、`FileKey`/`FileName`/`FileSize`、`ThreadID`（话题/线程 ID）、`Quote`（引用消息）等字段。
 
 ### Service 编排（internal/im/service.go）
 
@@ -74,7 +74,7 @@ imService.RegisterAdapterFactory("yunzhijia", yunzhijia.NewFactory())
 
 | 平台 | 接入模式（默认加粗） | 流式回复 StreamSender | 文件下载 FileDownloader | 线程/话题 ThreadID | 主要凭据字段（credentials JSON） |
 | --- | --- | --- | --- | --- | --- |
-| 企业微信 `wecom` | **websocket**（智能机器人长连接）/ webhook（自建应用回调） | 仅 websocket 模式 | 两种模式均支持 | 否 | websocket：`bot_id`、`bot_secret`、`ws_endpoint`、`bot_name`；webhook：`corp_id`、`agent_secret`、`token`、`encoding_aes_key`、`corp_agent_id`、`api_base_url` |
+| 企业微信 `wecom` | **websocket**（智能机器人长连接）/ webhook（自建应用回调） | 仅 websocket 模式 | 两种模式均支持 | 否 | websocket：`bot_id`、`bot_secret`、`ws_endpoint`、`bot_name`；webhook：`corp_id`、`agent_secret`、`token`、`encoding_aes_key`、`corp_agent_id`、`api_base_url`、`remote_image_host_allowlist` |
 | 飞书 `feishu` | **websocket**（长连接事件流）/ webhook | 是（流式卡片） | 是 | 是（`root_id`，顶层消息用自身 `message_id`） | `app_id`、`app_secret`、`verification_token`、`encrypt_key` |
 | Lark `lark` | 同飞书（同一适配器，`RegionLark` 指向 open.larksuite.com） | 是 | 是 | 是 | 同飞书 |
 | Slack `slack` | **websocket**（Socket Mode）/ webhook（Events API） | 是 | 是 | 是（`thread_ts`） | websocket：`app_token` + `bot_token`；webhook：`bot_token` + `signing_secret` |
@@ -198,9 +198,9 @@ sequenceDiagram
 
 ## 文件消息处理
 
-文件和图片会作为 QA 附件处理：文档内容会提供给模型，图片会在模型支持时直接识别。因此，即使渠道未配置文件知识库，机器人也会基于附件内容正常回复。
+文件、图片和语音会作为 QA 附件处理：文档内容会提供给模型，图片会在模型支持时直接识别，语音会先转写为文本。Agent 配置了 ASR 模型时使用该模型；企业微信 Webhook 未配置 ASR 时还会回退到回调中的 `Recognition`。因此，即使渠道未配置文件知识库，机器人也会基于附件内容正常回复。
 
-`knowledge_base_id` 只决定是否将附件额外保存到知识库。配置后，保存任务在后台执行，不影响当前 QA 回复，也不会额外发送“已入库”或“解析完成”消息。解析文本最多保留前 500 行且不超过 32 KiB，触及任一限制时模型会得到通用截断提示。附件无法读取、平台不支持下载或文件超过 32 MiB 时，机器人会提示用户改用文字描述或重新发送。
+`knowledge_base_id` 只决定是否将附件额外保存到知识库。配置后，保存任务在后台执行，不影响当前 QA 回复，也不会额外发送“已入库”或“解析完成”消息。解析文本最多保留前 500 行且不超过 32 KiB，触及任一限制时模型会得到通用截断提示。附件无法读取、临时素材过期/无权限、平台不支持下载、语音无可用 ASR 或文件超过 32 MiB 时，机器人会提示用户改用文字描述或重新发送。
 
 ## 回复中的图片外链（resource:// 改写）
 
@@ -215,6 +215,8 @@ sequenceDiagram
 2. **配置 `APP_EXTERNAL_URL`**：`resource://` 改写成 `<APP_EXTERNAL_URL>/r/<token>`，请求经 nginx 的 `location ^~ /r/` 反代回 app。官方前端镜像已内置该 location；自建反代必须补上，否则请求落进 SPA fallback 返回空白页。
 
 默认的 MinIO 内网部署（`minio:9000`）和 `local` 后端只能走第二种。IM 渠道已启用但 `APP_EXTERNAL_URL` 为空时，`LoadAndStartChannels` 会打印一次启动告警（`imImageConfigWarning`）。
+
+企业微信 Webhook 模式不能直接在 Markdown 中展示远程图片。WeKnora 会始终把远程 Markdown 图片改成可点击链接；只有图片域名命中渠道凭据 `remote_image_host_allowlist`（支持精确域名和 `*.example.com`）且通过全局 SSRF 校验时，才会下载 JPEG/PNG（单图不超过 10 MiB）、上传为企微临时素材并追加图片消息。白名单默认为空；重定向目标会再次校验，内网域名还需加入 `SSRF_WHITELIST`。未放行或下载/上传失败时，原链接仍保留并附明确提示。
 
 图片仍然不显示时，按[图片与文件的对外访问](21-file-access.md)的排查表逐项对照——那里汇总了四种 URL 形式与各渠道的取法。
 

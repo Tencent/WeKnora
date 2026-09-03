@@ -995,6 +995,8 @@ export default {
       consoleTip: '자격 증명 정보를 가져오세요',
       wecomWSEndpointHint: '선택 사항. 프라이빗 WeCom 배포 시 사용자 정의 WebSocket 주소를 입력하세요. 비워두면 기본 퍼블릭 클라우드 주소를 사용합니다. 내부 네트워크 주소의 경우 SSRF_WHITELIST 환경 변수에 호스트명을 추가하세요.',
       wecomAPIBaseURLHint: '선택 사항. 프라이빗 WeCom 배포 시 사용자 정의 API 기본 URL을 입력하세요. 비워두면 기본 퍼블릭 클라우드 주소를 사용합니다. 내부 네트워크 주소의 경우 SSRF_WHITELIST 환경 변수에 호스트명을 추가하세요.',
+      wecomRemoteImageHostAllowlist: '신뢰할 원격 이미지 호스트',
+      wecomRemoteImageHostAllowlistHint: '선택 사항. 봇이 다운로드하여 WeCom 이미지 메시지로 전달할 수 있는 호스트입니다. 여러 호스트는 쉼표로 구분하며 *.example.com을 지원합니다. 비워두면 클릭 가능한 링크만 유지됩니다. 내부 호스트는 SSRF_WHITELIST에도 추가해야 합니다.',
       feishuAPIBaseURLHint: '선택 사항. 서버가 외부 인터넷에 직접 연결 가능하면 비워두세요. 프록시를 통해서만 접근 가능한 경우 역방향 프록시 URL(예: nginx, http://host:port)을 입력하세요. 내부 네트워크 주소는 SSRF_WHITELIST 환경 변수에 호스트명을 추가하세요.',
       fileKnowledgeBase: '파일 저장 지식 베이스',
       fileKnowledgeBasePlaceholder: '지식 베이스 선택 (선택 사항)',

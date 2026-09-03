@@ -3,11 +3,13 @@ package im
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -15,10 +17,38 @@ type attachmentTestAdapter struct {
 	*lifecycleTestAdapter
 	content  []byte
 	fileName string
+	err      error
 }
 
 func (a *attachmentTestAdapter) DownloadFile(context.Context, *IncomingMessage) (io.ReadCloser, string, error) {
+	if a.err != nil {
+		return nil, "", a.err
+	}
 	return io.NopCloser(bytes.NewReader(a.content)), a.fileName, nil
+}
+
+type attachmentTestASR struct {
+	text string
+	err  error
+}
+
+func (a *attachmentTestASR) Transcribe(context.Context, []byte, string) (*asr.TranscriptionResult, error) {
+	if a.err != nil {
+		return nil, a.err
+	}
+	return &asr.TranscriptionResult{Text: a.text}, nil
+}
+
+func (a *attachmentTestASR) GetModelName() string { return "test-asr" }
+func (a *attachmentTestASR) GetModelID() string   { return "asr-1" }
+
+type attachmentTestModelService struct {
+	model asr.ASR
+	err   error
+}
+
+func (s *attachmentTestModelService) GetASRModel(context.Context, string) (asr.ASR, error) {
+	return s.model, s.err
 }
 
 func TestFileMessageQAContent(t *testing.T) {
@@ -41,6 +71,11 @@ func TestFileMessageQAContent(t *testing.T) {
 			name: "uses safe name when platform omits filename",
 			msg:  &IncomingMessage{},
 			want: "我上传了文件「未命名文件」。请确认已收到，并告知我接下来可以如何协助。",
+		},
+		{
+			name: "builds query for voice event",
+			msg:  &IncomingMessage{MessageType: MessageTypeVoice, FileName: "voice.amr"},
+			want: "我发送了一条语音「voice.amr」。请根据语音转写内容回答。",
 		},
 	}
 
@@ -79,6 +114,11 @@ func TestEmptyIncomingMessageReply(t *testing.T) {
 		{
 			name:      "file without caption is accepted before QA content fill",
 			msg:       &IncomingMessage{MessageType: MessageTypeFile, FileKey: "file-1", FileName: "spec.pdf"},
+			wantEmpty: false,
+		},
+		{
+			name:      "voice attachment without caption is accepted before transcription",
+			msg:       &IncomingMessage{MessageType: MessageTypeVoice, FileKey: "voice-1", FileName: "voice.amr"},
 			wantEmpty: false,
 		},
 		{
@@ -189,7 +229,7 @@ func TestPrepareIMAttachmentsDetectsImageMIMEFromContent(t *testing.T) {
 	attachments, imageURLs, _, err := (&Service{}).prepareIMAttachments(context.Background(), &IncomingMessage{
 		MessageType: MessageTypeImage,
 		FileName:    "platform-image.png",
-	}, adapter)
+	}, adapter, nil)
 	if err != nil {
 		t.Fatalf("prepareIMAttachments() error = %v", err)
 	}
@@ -198,5 +238,87 @@ func TestPrepareIMAttachmentsDetectsImageMIMEFromContent(t *testing.T) {
 	}
 	if len(imageURLs) != 1 || !strings.HasPrefix(imageURLs[0], "data:image/jpeg;base64,") {
 		t.Fatalf("image URL = %v, want JPEG data URI", imageURLs)
+	}
+}
+
+func TestPrepareIMVoiceUsesConfiguredAgentASR(t *testing.T) {
+	adapter := &attachmentTestAdapter{
+		lifecycleTestAdapter: &lifecycleTestAdapter{},
+		content:              []byte("audio bytes"),
+		fileName:             "voice.amr",
+	}
+	service := &Service{modelService: &attachmentTestModelService{model: &attachmentTestASR{text: "  转写后的问题  "}}}
+	agent := &types.CustomAgent{Config: types.CustomAgentConfig{
+		AudioUploadEnabled: true,
+		ASRModelID:         "asr-1",
+	}}
+
+	attachments, imageURLs, downloaded, err := service.prepareIMAttachments(context.Background(), &IncomingMessage{
+		MessageType: MessageTypeVoice,
+		FileKey:     "media-1",
+		FileName:    "voice.amr",
+	}, adapter, agent)
+	if err != nil {
+		t.Fatalf("prepareIMAttachments() error = %v", err)
+	}
+	if len(attachments) != 1 || attachments[0].Content != "转写后的问题" {
+		t.Fatalf("attachments = %#v, want ASR transcript", attachments)
+	}
+	if len(imageURLs) != 0 {
+		t.Fatalf("image URLs = %v, want none", imageURLs)
+	}
+	if downloaded != nil {
+		t.Fatalf("downloaded = %#v, want voice excluded from optional knowledge-base save", downloaded)
+	}
+}
+
+func TestPrepareIMVoiceFallsBackToWeComRecognition(t *testing.T) {
+	adapter := &attachmentTestAdapter{
+		lifecycleTestAdapter: &lifecycleTestAdapter{},
+		content:              []byte("audio bytes"),
+		fileName:             "voice.amr",
+	}
+	attachments, _, _, err := (&Service{}).prepareIMAttachments(context.Background(), &IncomingMessage{
+		MessageType: MessageTypeVoice,
+		FileKey:     "media-1",
+		FileName:    "voice.amr",
+		Extra:       map[string]string{"recognition": "企微识别文本"},
+	}, adapter, nil)
+	if err != nil {
+		t.Fatalf("prepareIMAttachments() error = %v", err)
+	}
+	if len(attachments) != 1 || attachments[0].Content != "企微识别文本" {
+		t.Fatalf("attachments = %#v, want platform recognition", attachments)
+	}
+}
+
+func TestPrepareIMVoiceWithoutTranscriptionReturnsExplicitFailure(t *testing.T) {
+	adapter := &attachmentTestAdapter{
+		lifecycleTestAdapter: &lifecycleTestAdapter{},
+		content:              []byte("audio bytes"),
+		fileName:             "voice.amr",
+	}
+	msg := &IncomingMessage{Platform: PlatformWeCom, MessageType: MessageTypeVoice, FileKey: "media-1", FileName: "voice.amr"}
+	_, _, _, err := (&Service{}).prepareIMAttachments(context.Background(), msg, adapter, nil)
+	if !errors.Is(err, errIMVoiceTranscription) {
+		t.Fatalf("error = %v, want errIMVoiceTranscription", err)
+	}
+	if got := imAttachmentFailureReply(msg, err); !strings.Contains(got, "配置 ASR 模型") {
+		t.Fatalf("failure reply = %q, want ASR configuration hint", got)
+	}
+}
+
+func TestPrepareIMAttachmentDownloadFailureMentionsTemporaryMediaExpiry(t *testing.T) {
+	adapter := &attachmentTestAdapter{
+		lifecycleTestAdapter: &lifecycleTestAdapter{},
+		err:                  errors.New("temporary media API error: code=40007"),
+	}
+	msg := &IncomingMessage{Platform: PlatformWeCom, MessageType: MessageTypeFile, FileKey: "expired"}
+	_, _, _, err := (&Service{}).prepareIMAttachments(context.Background(), msg, adapter, nil)
+	if !errors.Is(err, errIMAttachmentDownload) {
+		t.Fatalf("error = %v, want errIMAttachmentDownload", err)
+	}
+	if got := imAttachmentFailureReply(msg, err); !strings.Contains(got, "可能已过期") {
+		t.Fatalf("failure reply = %q, want expiry hint", got)
 	}
 }

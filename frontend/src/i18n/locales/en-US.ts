@@ -5809,6 +5809,8 @@ export default {
       consoleTip: 'to get credentials',
       wecomWSEndpointHint: 'Optional. For private WeCom deployments, enter a custom WebSocket address. Leave empty to use the default public cloud endpoint. For internal network addresses, add the hostname to the SSRF_WHITELIST env var.',
       wecomAPIBaseURLHint: 'Optional. For private WeCom deployments, enter a custom API base URL. Leave empty to use the default public cloud endpoint. For internal network addresses, add the hostname to the SSRF_WHITELIST env var.',
+      wecomRemoteImageHostAllowlist: 'Trusted Remote Image Hosts',
+      wecomRemoteImageHostAllowlistHint: 'Optional. Hosts the bot may download and forward as WeCom image messages. Separate multiple hosts with commas; *.example.com is supported. When empty, only clickable links are kept. Internal hosts must also be added to SSRF_WHITELIST.',
       feishuAPIBaseURLHint: 'Optional. Leave empty if the server can reach the internet directly; if a proxy is required to access Feishu, enter the reverse proxy URL (e.g. nginx, http://host:port). For internal network addresses, add the hostname to the SSRF_WHITELIST env var.',
       fileKnowledgeBase: 'File Storage Knowledge Base',
       fileKnowledgeBasePlaceholder: 'Select a knowledge base (optional)',
