@@ -5466,7 +5466,8 @@ export default {
       truncated: 'List truncated',
       wrote: 'Wrote',
       edited: 'Edited',
-      replacements: 'Replaced {count}'
+      replacements: 'Replaced {count}',
+      moreLines: '{count} more lines'
     },
     shellExec: {
       workDir: 'Directory',

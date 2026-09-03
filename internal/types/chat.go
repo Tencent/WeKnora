@@ -119,6 +119,16 @@ func mergeUnreportedCacheStatus(accumulated, incoming PromptCacheStatus) PromptC
 	return PromptCacheStatusUnreported
 }
 
+// PromptCacheHitRate returns cache-read tokens as a percentage of the
+// provider's prompt total. Zero when the prompt is empty. A ReAct turn that
+// reuses the system prefix therefore reads as a high hit rather than a miss.
+func (u TokenUsage) PromptCacheHitRate() float64 {
+	if u.PromptTokens <= 0 {
+		return 0
+	}
+	return float64(u.CacheReadTokens) / float64(u.PromptTokens) * 100
+}
+
 // Value persists the usage as a jsonb column (assistant messages carry the
 // turn's aggregate); nil writes SQL NULL. Mirrors the nullable-pointer
 // pattern APIPrincipalConfig uses.

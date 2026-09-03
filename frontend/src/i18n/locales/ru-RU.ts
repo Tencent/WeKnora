@@ -1329,7 +1329,8 @@ export default {
       truncated: 'Список обрезан',
       wrote: 'Записано',
       edited: 'Изменено',
-      replacements: 'Замен: {count}'
+      replacements: 'Замен: {count}',
+      moreLines: 'ещё {count} строк'
     },
     shellExec: {
       workDir: 'Каталог',

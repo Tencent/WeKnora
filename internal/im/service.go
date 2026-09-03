@@ -2669,6 +2669,14 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		}
 		bufMu.Lock()
 		if seenToolCalls[data.ToolCallID] {
+			if useAgent {
+				upsertIMToolStep(&agentToolSteps, agentToolIdx, data.ToolCallID, func(step *IMToolStep) {
+					if data.Arguments != nil {
+						step.Arguments = data.Arguments
+					}
+				})
+				streamedAny = true
+			}
 			bufMu.Unlock()
 			return nil
 		}

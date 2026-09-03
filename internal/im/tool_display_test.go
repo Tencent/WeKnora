@@ -101,3 +101,18 @@ func TestIMGetQueryText_joinsUniqueQueries(t *testing.T) {
 		t.Fatalf("query text = %q", got)
 	}
 }
+
+func TestFormatIMToolLine_writeSandboxPendingShowsDiffStat(t *testing.T) {
+	line := FormatIMToolLine(IMToolStep{
+		ToolName: "write_sandbox_file",
+		Pending:  true,
+		Arguments: map[string]any{
+			"path":          "/workspace/output/a.py",
+			"added_lines":   12,
+			"removed_lines": 0,
+		},
+	})
+	if line != "写入沙箱文件：「/workspace/output/a.py」... +12" {
+		t.Fatalf("pending write line = %q", line)
+	}
+}

@@ -285,32 +285,10 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 	logger.Infof(ctx, "[Tool][EditSandboxFile] session=%s path=%s replacements=%d bytes=%d",
 		sessionID, clean, replacements, len(content))
 
-	if hint := pythonScriptSyntaxHint(clean, updated, ToolEditSandboxFile); hint != "" {
-		return &types.ToolResult{
-			Success: false,
-			Error:   hint,
-			Output:  fmt.Sprintf("=== Edited sandbox file with syntax problems: %s ===\n\n%s\n", clean, hint),
-			Data: map[string]interface{}{
-				"display_type": ToolEditSandboxFile,
-				"session_id":   sessionID,
-				"path":         clean,
-				"root":         rootDir,
-				"name":         path.Base(clean),
-				"size":         len(content),
-				"replacements": replacements,
-				"syntax_error": true,
-			},
-		}, nil
-	}
+	added, removed := sandboxEditDiffStats(string(raw), input.Edits)
 
-	output := fmt.Sprintf(
-		"=== Edited sandbox file: %s ===\n\nreplacements=%d\nbytes=%d\n",
-		clean, replacements, len(content),
-	)
-	return &types.ToolResult{
-		Success: true,
-		Output:  output,
-		Data: map[string]interface{}{
+	if hint := pythonScriptSyntaxHint(clean, updated, ToolEditSandboxFile); hint != "" {
+		data := map[string]interface{}{
 			"display_type": ToolEditSandboxFile,
 			"session_id":   sessionID,
 			"path":         clean,
@@ -318,7 +296,39 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 			"name":         path.Base(clean),
 			"size":         len(content),
 			"replacements": replacements,
-		},
+			"syntax_error": true,
+		}
+		attachSandboxDiffStats(data, added, removed)
+		return &types.ToolResult{
+			Success: false,
+			Error:   hint,
+			Output:  fmt.Sprintf("=== Edited sandbox file with syntax problems: %s ===\n\n%s\n", clean, hint),
+			Data:    data,
+		}, nil
+	}
+
+	diffStat := formatSandboxDiffStat(added, removed)
+	if diffStat == "" {
+		diffStat = fmt.Sprintf("replacements=%d", replacements)
+	}
+	output := fmt.Sprintf(
+		"=== Edited sandbox file: %s ===\n\n%s\nreplacements=%d\nbytes=%d\n",
+		clean, diffStat, replacements, len(content),
+	)
+	data := map[string]interface{}{
+		"display_type": ToolEditSandboxFile,
+		"session_id":   sessionID,
+		"path":         clean,
+		"root":         rootDir,
+		"name":         path.Base(clean),
+		"size":         len(content),
+		"replacements": replacements,
+	}
+	attachSandboxDiffStats(data, added, removed)
+	return &types.ToolResult{
+		Success: true,
+		Output:  output,
+		Data:    data,
 	}, nil
 }
 

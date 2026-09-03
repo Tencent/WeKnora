@@ -5,7 +5,10 @@ import {
   getEventSkillName,
   getReadSkillTarget,
   getSandboxToolPath,
+  getSandboxDiffStat,
+  getSandboxFilePreview,
   sandboxFileListItems,
+  sandboxPreviewRemaining,
   skillFileListItems,
   skillScriptTitleCommand,
 } from './skillToolDisplay.ts'
@@ -75,5 +78,37 @@ test('getSandboxToolPath reads the listed directory', () => {
   assert.equal(
     getSandboxToolPath({ tool_data: { path: '/workspace/output/charts' } }),
     '/workspace/output/charts',
+  )
+})
+
+test('getSandboxDiffStat prefers tool_data over arguments', () => {
+  assert.deepEqual(
+    getSandboxDiffStat({
+      arguments: { added_lines: 3, removed_lines: 1 },
+      tool_data: { added_lines: 12, removed_lines: 4 },
+    }),
+    { added: 12, removed: 4 },
+  )
+  assert.equal(getSandboxDiffStat({ arguments: { path: '/workspace/a.py' } }), null)
+})
+
+test('getSandboxFilePreview reads the truncated write preview', () => {
+  assert.equal(
+    getSandboxFilePreview({
+      arguments: { preview: 'line1\nline2' },
+    }),
+    'line1\nline2',
+  )
+})
+
+test('sandboxPreviewRemaining counts lines beyond the preview cap', () => {
+  assert.equal(
+    sandboxPreviewRemaining({
+      arguments: {
+        added_lines: 15,
+        preview: 'a\nb\nc',
+      },
+    }),
+    12,
   )
 })

@@ -257,6 +257,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		Tools:               tools,
 		Thinking:            e.config.Thinking,
 		ParallelToolCalls:   &parallelToolCalls,
+		PromptCacheKey:      sessionID,
 	}
 
 	pendingToolCalls := make(map[string]bool)
@@ -340,6 +341,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 			if chunk.ResponseType == types.ResponseTypeToolCall && chunk.Data != nil {
 				toolCallID, _ := chunk.Data["tool_call_id"].(string)
 				toolName, _ := chunk.Data["tool_name"].(string)
+				args, _ := chunk.Data["arguments"].(map[string]any)
 
 				if toolCallID != "" && toolName != "" && !pendingToolCalls[toolCallID] {
 					pendingToolCalls[toolCallID] = true
@@ -351,6 +353,20 @@ func (e *AgentEngine) streamThinkingToEventBus(
 						Data: event.AgentToolCallData{
 							ToolCallID: toolCallID,
 							ToolName:   toolName,
+							Arguments:  args,
+							Iteration:  iteration,
+						},
+					})
+				} else if toolCallID != "" && pendingToolCalls[toolCallID] && args != nil {
+					emittedEventTypes["tool_call_progress"]++
+					_ = e.eventBus.Emit(ctx, event.Event{
+						ID:        fmt.Sprintf("%s-tool-call-progress", toolCallID),
+						Type:      event.EventAgentToolCall,
+						SessionID: sessionID,
+						Data: event.AgentToolCallData{
+							ToolCallID: toolCallID,
+							ToolName:   toolName,
+							Arguments:  args,
 							Iteration:  iteration,
 						},
 					})

@@ -1331,7 +1331,8 @@ export default {
       truncated: '列表已截断',
       wrote: '已写入',
       edited: '已编辑',
-      replacements: '替换 {count} 处'
+      replacements: '替换 {count} 处',
+      moreLines: '另有 {count} 行'
     },
     shellExec: {
       workDir: '目录',

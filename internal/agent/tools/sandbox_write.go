@@ -331,27 +331,34 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 
 	// Check the whole file, not just this chunk: a chunk boundary lands in the
 	// middle of the source, so only the assembled result can be judged.
+	added := CountContentLines(string(chunk))
+
 	if hint := pythonScriptSyntaxHint(clean, string(content), ToolEditSandboxFile); hint != "" {
+		data := map[string]interface{}{
+			"display_type": ToolWriteSandboxFile,
+			"session_id":   sessionID,
+			"path":         clean,
+			"root":         rootDir,
+			"name":         path.Base(clean),
+			"size":         len(content),
+			"mode":         mode,
+			"syntax_error": true,
+		}
+		attachSandboxDiffStats(data, added, 0)
 		return &types.ToolResult{
 			Success: false,
 			Error:   hint,
 			Output:  fmt.Sprintf("=== Wrote sandbox file with syntax problems: %s ===\n\n%s\n", clean, hint),
-			Data: map[string]interface{}{
-				"display_type": ToolWriteSandboxFile,
-				"session_id":   sessionID,
-				"path":         clean,
-				"root":         rootDir,
-				"name":         path.Base(clean),
-				"size":         len(content),
-				"mode":         mode,
-				"syntax_error": true,
-			},
+			Data:    data,
 		}, nil
 	}
 
 	sizeLine := fmt.Sprintf("bytes=%d", len(content))
 	if mode == writeModeAppend {
 		sizeLine = fmt.Sprintf("appended=%d, total_bytes=%d", len(chunk), len(content))
+	}
+	if stat := formatSandboxDiffStat(added, 0); stat != "" {
+		sizeLine = stat + ", " + sizeLine
 	}
 	output := fmt.Sprintf(
 		"=== Wrote sandbox file: %s ===\n\n%s\n\n"+
@@ -362,19 +369,21 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 			"User-facing artifacts should land under %s.\n",
 		clean, sizeLine, clean, clean, sandbox.SessionOutputRoot,
 	)
+	data := map[string]interface{}{
+		"display_type": ToolWriteSandboxFile,
+		"session_id":   sessionID,
+		"path":         clean,
+		"root":         rootDir,
+		"name":         path.Base(clean),
+		"size":         len(content),
+		"mode":         mode,
+		"appended":     len(chunk),
+	}
+	attachSandboxDiffStats(data, added, 0)
 	return &types.ToolResult{
 		Success: true,
 		Output:  output,
-		Data: map[string]interface{}{
-			"display_type": ToolWriteSandboxFile,
-			"session_id":   sessionID,
-			"path":         clean,
-			"root":         rootDir,
-			"name":         path.Base(clean),
-			"size":         len(content),
-			"mode":         mode,
-			"appended":     len(chunk),
-		},
+		Data:    data,
 	}, nil
 }
 

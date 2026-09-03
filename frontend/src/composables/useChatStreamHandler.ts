@@ -33,6 +33,18 @@ export interface UseChatStreamHandlerOptions {
   debug?: boolean
 }
 
+function mergeToolCallArguments(previous: unknown, incoming: unknown): Record<string, unknown> {
+  const prev =
+    previous && typeof previous === 'object' && !Array.isArray(previous)
+      ? (previous as Record<string, unknown>)
+      : {}
+  const next =
+    incoming && typeof incoming === 'object' && !Array.isArray(incoming)
+      ? (incoming as Record<string, unknown>)
+      : { value: incoming }
+  return { ...prev, ...next }
+}
+
 export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
   const { t } = useI18n()
   const {
@@ -288,6 +300,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     isCompleted = false,
     isFallback = false,
     agentDurationMs = 0,
+    usage?: unknown,
   ) => {
     const events: ChatMessage[] = []
 
@@ -350,10 +363,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       })
     }
 
-    if (agentDurationMs > 0) {
+    if (agentDurationMs > 0 || usage) {
       events.push({
         type: 'agent_complete',
         total_duration_ms: agentDurationMs,
+        usage,
       })
     }
 
@@ -412,6 +426,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             Boolean(item.is_completed),
             Boolean(item.is_fallback),
             Number(item.agent_duration_ms) || 0,
+            item.usage,
           ),
         )
         item.hideContent = true
@@ -731,7 +746,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           }
           if (toolCallEvent) {
             if (incomingToolName) toolCallEvent.tool_name = incomingToolName
-            if (incomingArguments) toolCallEvent.arguments = incomingArguments
+            if (incomingArguments) {
+              toolCallEvent.arguments = mergeToolCallArguments(toolCallEvent.arguments, incomingArguments)
+            }
             toolCallEvent.pending = true
             if (!toolCallEvent.timestamp) toolCallEvent.timestamp = Date.now()
             pending.set(toolCallId, toolCallEvent)
@@ -886,11 +903,16 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           message.artifacts = streamedArtifacts
         }
         message.artifactsCollecting = false
+        const usage = (dataPayload as any)?.usage || (data as any).usage
+        if (usage) {
+          message.usage = usage
+        }
         if (message.agentEventStream) {
           ;(message.agentEventStream as ChatMessage[]).push({
             type: 'agent_complete',
             total_duration_ms: dataPayload?.total_duration_ms || 0,
             total_steps: dataPayload?.total_steps || 0,
+            usage,
           })
         }
         break

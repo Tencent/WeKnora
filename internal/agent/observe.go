@@ -506,7 +506,7 @@ func buildRuntimeContextBlock(
 ) string {
 	var sb strings.Builder
 	sb.WriteString("<runtime_context scope=\"this_turn\">\n")
-	fmt.Fprintf(&sb, "  <current_time>%s</current_time>\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(&sb, "  <current_time>%s</current_time>\n", time.Now().Format("2006-01-02"))
 	fmt.Fprintf(&sb, "  <session>%s</session>\n", escapeXMLAttr(sessionID))
 
 	if len(kbs) > 0 {
@@ -742,13 +742,6 @@ func (e *AgentEngine) appendToolResults(
 	messages []chat.Message,
 	step types.AgentStep,
 ) []chat.Message {
-	if stepContainsMarkdownImage(step) {
-		// Keep the requirement at system priority even when a custom Agent prompt
-		// replaces the built-in template. Appending it once, when image-bearing
-		// evidence first appears, also avoids burdening text-only turns.
-		messages = appendAgentRetrievedImageRequirement(messages)
-	}
-
 	// Add assistant message with tool calls (if any)
 	if step.Thought != "" || len(step.ToolCalls) > 0 || step.ReasoningContent != "" {
 		assistantMsg := chat.Message{
@@ -791,6 +784,13 @@ func (e *AgentEngine) appendToolResults(
 		}
 
 		messages = append(messages, toolMsg)
+	}
+
+	if stepContainsMarkdownImage(step) {
+		// Keep the requirement at the end of the current prefix. Editing the
+		// system prompt would invalidate provider prefix cache for tools and
+		// the whole transcript on every later round of this turn.
+		messages = appendAgentRetrievedImageRequirement(messages)
 	}
 
 	return messages
