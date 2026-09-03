@@ -1471,6 +1471,96 @@ export default {
     taskQueue: 'Task Queues',
     tenantInfo: 'Workspace Info',
     workspaceSettings: 'Workspace Settings',
+    eventWebhooks: {
+      nav: 'Event webhooks',
+      title: 'Event webhooks',
+      subtitle: 'Push knowledge bases, documents, and member changes that this workspace owns to your HTTPS endpoint. This is not the chat webhook under Publish → Website embed.',
+      loading: 'Loading...',
+      retry: 'Retry',
+      loadFailed: 'Failed to load webhooks',
+      noTenant: 'No workspace selected',
+      howItWorks: 'How it works',
+      hintDeleteKb: 'Deleting a knowledge base sends one kb.deleted event, not one knowledge.deleted per document.',
+      hintBatch: 'A batch delete of more than 100 documents is split into multiple batch_deleted events; IDs are never omitted.',
+      hintNoRollback: 'A failed callback does not roll back uploads or deletes.',
+      docHint: 'See website-docs: workspace event webhooks.',
+      listLabel: 'Callback URLs',
+      listDesc: 'Up to 5 endpoints per workspace. Production URLs must use https.',
+      add: 'Add webhook',
+      empty: 'No webhooks yet',
+      colName: 'Name',
+      colUrl: 'URL',
+      colEvents: 'Events',
+      colEnabled: 'Enabled',
+      colActions: 'Actions',
+      eventsAll: 'All events',
+      eventsMore: '+{n}',
+      colTime: 'Time',
+      colType: 'Type',
+      colStatus: 'Status',
+      colError: 'Error',
+      test: 'Test',
+      edit: 'Edit',
+      delete: 'Delete',
+      createTitle: 'Add webhook',
+      editTitle: 'Edit webhook',
+      formHint: 'The secret is used to HMAC timestamp + "." + raw body. It is never shown again.',
+      createHint: 'Enter a callback URL and secret. Production must use HTTPS; loopback (127.0.0.1 / localhost) may use HTTP.',
+      editHint: 'The secret is stored and never shown again. Fill in a new one only when rotating it.',
+      fieldName: 'Name',
+      fieldNamePh: 'Business sync',
+      fieldUrl: 'URL',
+      fieldUrlPh: 'https://example.com/hooks/weknora',
+      fieldUrlHint: 'Non-loopback URLs must use https.',
+      fieldSecret: 'Secret',
+      fieldSecretPh: 'At least 16 characters',
+      fieldSecretEditPh: 'Leave blank to keep the current secret',
+      fieldSecretHint: 'Used for HMAC (timestamp + "." + raw body). It is never shown again after save.',
+      fieldSecretEditHint: 'A secret is already configured. Leave blank to keep it; a new value must be at least 16 characters.',
+      secretConfigured: 'Configured',
+      fieldEvents: 'Events',
+      fieldEventsHint: 'Only checked types are delivered. Deleting a knowledge base sends kb.deleted, not per-document knowledge.deleted. Member events are users of this workspace, not shared-space / org membership.',
+      selectGroup: 'Select all',
+      clearGroup: 'Clear',
+      eventGroupKnowledge: 'Knowledge',
+      eventGroupKb: 'Knowledge bases',
+      eventGroupMembers: 'Workspace members',
+      eventGroupMembersHint: 'Users in Settings → Workspace → Members. Adding this workspace to a shared space / org does not emit these events.',
+      eventGroupOther: 'Other',
+      eventKnowledgeCreated: 'Knowledge created',
+      eventKnowledgeParsed: 'Parse completed',
+      eventKnowledgeParseFailed: 'Parse failed',
+      eventKnowledgeDeleted: 'Knowledge deleted',
+      eventKnowledgeBatchDeleted: 'Knowledge batch deleted',
+      eventKbCreated: 'Knowledge base created',
+      eventKbDeleted: 'Knowledge base deleted',
+      eventMemberAdded: 'Workspace member added',
+      eventMemberRemoved: 'Workspace member removed',
+      fieldDesc: 'Notes',
+      fieldDescPh: 'Optional',
+      fieldEnabled: 'Enabled',
+      fieldEnabledHint: 'Turn off to pause deliveries without deleting this endpoint.',
+      eventsRequired: 'Select at least one event type',
+      urlRequired: 'Enter a callback URL',
+      urlInvalid: 'Enter a valid http(s) URL',
+      urlHttpsRequired: 'Non-loopback URLs must use https',
+      secretTooShort: 'Secret must be at least 16 characters',
+      saveSuccess: 'Saved',
+      saveFailed: 'Save failed',
+      deleteTitle: 'Delete this webhook?',
+      deleteBody: 'Remove {name}? Pending deliveries will stop.',
+      deleteSuccess: 'Deleted',
+      deliveryTitle: 'Recent deliveries',
+      sendTest: 'Send test',
+      testQueued: 'Test queued',
+      testFailed: 'Test failed',
+      noDeliveries: 'No deliveries yet',
+      exampleLabel: 'Verify signature',
+      exampleDesc: 'HMAC is timestamp + "." + raw body. Download files with the 5-minute ticket.',
+      copy: 'Copy',
+      copied: 'Copied',
+      copyFailed: 'Copy failed',
+    },
     navGroups: {
       account: 'Account',
       workspace: 'Workspace',
@@ -3814,7 +3904,10 @@ export default {
             kbClone: 'Knowledge-base clone',
             kbDelete: 'Knowledge-base deletion',
             wikiIngest: 'Wiki content generation',
-            wikiFinalize: 'Wiki finalization'
+            wikiFinalize: 'Wiki finalization',
+            webhookDeliver: 'Event webhook delivery',
+            webhookOutboxSweep: 'Event webhook outbox sweep',
+            webhookDeliveryPrune: 'Event webhook delivery prune'
           }
         },
         models: {
@@ -3841,7 +3934,8 @@ export default {
           enrichment: 'Enrichment',
           maintenance: 'Maintenance & sync',
           shared: 'Shared elastic',
-          wiki: 'Wiki pool'
+          wiki: 'Wiki pool',
+          webhook: 'Event webhook pool'
         },
         poolDescriptions: {
           core: 'Guaranteed document and manual parsing capacity',
@@ -3849,7 +3943,8 @@ export default {
           enrichment: 'Summaries, images, graph, and question generation',
           maintenance: 'Source sync, batch work, and deletion cleanup',
           shared: 'Borrowed by core or enrichment according to backlog',
-          wiki: 'Wiki content generation and global finalization'
+          wiki: 'Wiki content generation and global finalization',
+          webhook: 'Outbound delivery of workspace knowledge events'
         },
         queueNames: {
           default: 'Document parsing',
@@ -3861,7 +3956,8 @@ export default {
           multimodal: 'Multimodal',
           graph: 'Graph extraction',
           question: 'Questions',
-          wiki: 'Wiki pipeline'
+          wiki: 'Wiki pipeline',
+          webhook: 'Event webhooks'
         },
         queueDescriptions: {
           default: 'Document parse, manual reparse',
@@ -3873,7 +3969,8 @@ export default {
           multimodal: 'Image OCR, vision captions',
           graph: 'Chunk-level graph extraction',
           question: 'Chunk-level question generation',
-          wiki: 'Content generation, index finalize'
+          wiki: 'Content generation, index finalize',
+          webhook: 'Outbound delivery, outbox sweep, delivery prune'
         }
       },
       keyLabels: {
@@ -3901,7 +3998,8 @@ export default {
           enrichment_concurrency: 'Guaranteed enrichment concurrency',
           maintenance_concurrency: 'Maintenance concurrency',
           shared_concurrency: 'Shared elastic concurrency',
-          wiki_concurrency: 'Wiki worker concurrency'
+          wiki_concurrency: 'Wiki worker concurrency',
+          webhook_concurrency: 'Event webhook worker concurrency'
         },
         model: {
           max_concurrency: 'Default per-model concurrency limit'
@@ -3932,7 +4030,8 @@ export default {
           enrichment_concurrency: 'Guaranteed per-process concurrency for summaries, images, graph, and question generation. Enrichment may also borrow the shared elastic pool. Minimum 1; requires a service restart.',
           maintenance_concurrency: 'Per-process concurrency for source sync, batch work, and cleanup, hard-isolated from the user-facing pipeline. Minimum 1; requires a service restart.',
           shared_concurrency: 'Per-process elastic concurrency shared by core parsing and enrichment; whichever side has backlog borrows it automatically. Minimum 1; requires a service restart.',
-          wiki_concurrency: 'Per-process concurrency for the dedicated Wiki worker pool, isolated from upstream tasks. Minimum 1; requires a service restart.'
+          wiki_concurrency: 'Per-process concurrency for the dedicated Wiki worker pool, isolated from upstream tasks. Minimum 1; requires a service restart.',
+          webhook_concurrency: 'Per-process concurrency for the dedicated workspace event webhook pool, isolated from parse and Wiki workers. Minimum 1; requires a service restart.'
         },
         model: {
           max_concurrency: 'Default cap on concurrent background (ingestion/enrichment) calls to a single model, keyed by model ID and shared across replicas. Read on every call and applied immediately with no restart. 0 or a negative value disables the default cap (each model still honours its own limit configured in model management). Affects background tasks only, not interactive chat.'
@@ -6555,7 +6654,7 @@ export default {
     },
     audit: {
       tabLabel: 'Audit log',
-      description: 'Records every membership change and access denial in this workspace. Newest first. Repeated denials within a minute are deduplicated.',
+      description: 'Records membership changes, event-webhook endpoint changes, and access denials in this workspace. Newest first. Repeated denials within a minute are deduplicated.',
       refresh: 'Refresh',
       end: 'End of log.',
       empty: 'No audit events yet.',
@@ -6580,7 +6679,10 @@ export default {
         'rbac.invitation_accepted': 'Invitation accepted',
         'rbac.invitation_declined': 'Invitation declined',
         'rbac.invitation_revoked': 'Invitation revoked',
-        'rbac.invitation_expired': 'Invitation expired'
+        'rbac.invitation_expired': 'Invitation expired',
+        'webhook.endpoint_created': 'Webhook endpoint created',
+        'webhook.endpoint_updated': 'Webhook endpoint updated',
+        'webhook.endpoint_deleted': 'Webhook endpoint deleted'
       },
       outcome: {
         success: 'Success',

@@ -21,6 +21,9 @@ const TENANT_MEMBER_AUDIT_ACTION_LABELS_EN: Record<string, string> = {
   'rbac.invitation_declined': 'Invitation declined',
   'rbac.invitation_revoked': 'Invitation revoked',
   'rbac.invitation_expired': 'Invitation expired',
+  'webhook.endpoint_created': 'Webhook endpoint created',
+  'webhook.endpoint_updated': 'Webhook endpoint updated',
+  'webhook.endpoint_deleted': 'Webhook endpoint deleted',
 }
 
 const SYSTEM_GLOBAL_AUDIT_ACTION_LABELS_EN: Record<string, string> = {
