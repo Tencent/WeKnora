@@ -3914,6 +3914,10 @@ export default {
     },
     wiki: {
       title: 'Wiki 设置',
+      ingestModeLabel: 'Wiki 入库模式',
+      ingestModeTip: '手动模式保留 Wiki REST/API 的读写能力，但上传文档时不会自动生成 Wiki 页面。',
+      ingestModeAuto: '自动',
+      ingestModeManual: '手动',
       synthesisModelLabel: 'Wiki 合成模型',
       synthesisModelPlaceholder: '选择用于 Wiki 生成的 LLM 模型',
       synthesisModelTip: '不设置时将回退使用摘要模型',

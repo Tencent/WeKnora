@@ -3912,6 +3912,10 @@ export default {
     },
     wiki: {
       title: 'Wiki настройки',
+      ingestModeLabel: 'Режим загрузки Wiki',
+      ingestModeTip: 'Ручной режим сохраняет операции чтения и записи через REST/API Wiki, но не создаёт страницы автоматически при загрузке документов.',
+      ingestModeAuto: 'Автоматический',
+      ingestModeManual: 'Ручной',
       synthesisModelLabel: 'Модель синтеза',
       synthesisModelPlaceholder: 'Выберите LLM модель для генерации Wiki',
       synthesisModelTip: 'Если не указано, используется модель суммаризации',

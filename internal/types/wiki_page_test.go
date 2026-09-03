@@ -65,6 +65,63 @@ func TestWikiConfigScanNil(t *testing.T) {
 	}
 }
 
+func TestWikiIngestModeDefaultsToAuto(t *testing.T) {
+	cases := []struct {
+		name string
+		mode WikiIngestMode
+		want WikiIngestMode
+	}{
+		{name: "empty", mode: "", want: WikiIngestModeAuto},
+		{name: "auto", mode: WikiIngestModeAuto, want: WikiIngestModeAuto},
+		{name: "manual", mode: WikiIngestModeManual, want: WikiIngestModeManual},
+		{name: "unknown", mode: "future", want: WikiIngestModeAuto},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.mode.Normalize(); got != tc.want {
+				t.Fatalf("WikiIngestMode(%q).Normalize() = %q, want %q", tc.mode, got, tc.want)
+			}
+		})
+	}
+
+	if !(*WikiConfig)(nil).IsAutoIngestEnabled() {
+		t.Fatal("nil WikiConfig must preserve automatic ingest")
+	}
+	if !(&WikiConfig{}).IsAutoIngestEnabled() {
+		t.Fatal("empty WikiConfig must preserve automatic ingest")
+	}
+	if (&WikiConfig{IngestMode: WikiIngestModeManual}).IsAutoIngestEnabled() {
+		t.Fatal("manual WikiConfig must disable automatic ingest")
+	}
+}
+
+func TestKnowledgeBaseWikiAutoIngestGate(t *testing.T) {
+	cases := []struct {
+		name   string
+		wiki   bool
+		config *WikiConfig
+		want   bool
+	}{
+		{name: "wiki disabled", wiki: false, config: &WikiConfig{}, want: false},
+		{name: "legacy config", wiki: true, config: nil, want: true},
+		{name: "default mode", wiki: true, config: &WikiConfig{}, want: true},
+		{name: "manual mode", wiki: true, config: &WikiConfig{IngestMode: WikiIngestModeManual}, want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			kb := &KnowledgeBase{
+				IndexingStrategy: IndexingStrategy{WikiEnabled: tc.wiki},
+				WikiConfig:       tc.config,
+			}
+			if got := kb.IsWikiAutoIngestEnabled(); got != tc.want {
+				t.Fatalf("IsWikiAutoIngestEnabled() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestStringArrayValueScan(t *testing.T) {
 	arr := StringArray{"a", "b", "c"}
 
@@ -278,6 +335,7 @@ func TestWikiExtractionGranularity_Normalize(t *testing.T) {
 
 func TestWikiConfig_JSONRoundTrip_WithGranularity(t *testing.T) {
 	original := WikiConfig{
+		IngestMode:            WikiIngestModeManual,
 		SynthesisModelID:      "m-1",
 		MaxPagesPerIngest:     20,
 		ExtractionGranularity: WikiExtractionFocused,
@@ -292,6 +350,9 @@ func TestWikiConfig_JSONRoundTrip_WithGranularity(t *testing.T) {
 	}
 	if restored.ExtractionGranularity != WikiExtractionFocused {
 		t.Errorf("granularity round-trip failed: got %q", restored.ExtractionGranularity)
+	}
+	if restored.IngestMode != WikiIngestModeManual {
+		t.Errorf("ingest mode round-trip failed: got %q", restored.IngestMode)
 	}
 
 	// Legacy row without the granularity field. We also include the removed

@@ -826,6 +826,13 @@ func (kb *KnowledgeBase) IsWikiEnabled() bool {
 	return kb.IndexingStrategy.WikiEnabled
 }
 
+// IsWikiAutoIngestEnabled reports whether the built-in document-to-wiki
+// pipeline should run for this knowledge base. WikiEnabled remains the
+// feature/API gate; WikiConfig.IngestMode only controls automatic generation.
+func (kb *KnowledgeBase) IsWikiAutoIngestEnabled() bool {
+	return kb != nil && kb.IsWikiEnabled() && kb.WikiConfig.IsAutoIngestEnabled()
+}
+
 // IsVectorEnabled checks if vector (semantic) search is enabled.
 func (kb *KnowledgeBase) IsVectorEnabled() bool {
 	return kb != nil && kb.IndexingStrategy.VectorEnabled
