@@ -52,3 +52,34 @@ test('getAttachmentParsingSummaryHtml renders skipped count', () => {
   })
   assert.equal(html, '已解析 <strong>2</strong> 个附件，<strong>1</strong> 个未完成已跳过')
 })
+
+// The summary is bound with v-html, so a failed parse must never inject raw
+// markup. The backend embeds the attachment filename in the error text, and
+// the upload-side filename filter only blocks a small set of event-handler
+// patterns, so names like `<details open ontoggle=...>.pdf` reach this path.
+test('getAttachmentParsingSummaryHtml escapes HTML in failed output', () => {
+  const html = getAttachmentParsingSummaryHtml(t, {
+    success: false,
+    output:
+      '附件解析失败: attachment <details open ontoggle=alert(document.domain)>.pdf failed to parse: corrupt file',
+  })
+  assert.ok(!/<[a-z]/i.test(html), `raw HTML tag leaked: ${html}`)
+  assert.ok(html.includes('&lt;details'), `expected escaped text, got: ${html}`)
+})
+
+test('getAttachmentParsingSummaryHtml escapes img onerror payloads', () => {
+  const html = getAttachmentParsingSummaryHtml(t, {
+    success: false,
+    error: 'attachment <img src=x onerror=alert(document.domain)> failed to parse: bad content',
+  })
+  assert.ok(!/<[a-z]/i.test(html), `raw HTML tag leaked: ${html}`)
+  assert.ok(html.includes('&lt;img'), `expected escaped text, got: ${html}`)
+})
+
+test('getAttachmentParsingSummaryHtml keeps plain error text intact', () => {
+  const html = getAttachmentParsingSummaryHtml(t, {
+    success: false,
+    output: '附件解析失败: attachment report.pdf failed to parse: unexpected EOF',
+  })
+  assert.equal(html, 'attachment report.pdf failed to parse: unexpected EOF')
+})

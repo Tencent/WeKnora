@@ -1,5 +1,7 @@
 import type { ComposerTranslation } from 'vue-i18n'
 
+import { escapeHTML } from './security.ts'
+
 type AttachmentParsingEvent = {
   success?: boolean
   output?: string
@@ -44,7 +46,9 @@ export function getAttachmentParsingSummaryHtml(
     const err = String(event.error || event.output || '').trim()
     if (!err) return ''
     const normalized = err.replace(/^附件解析失败:\s*/i, '').trim()
-    return normalized || err
+    // The summary is bound with v-html and the backend error embeds the
+    // user-supplied attachment filename, so it must be escaped first.
+    return escapeHTML(normalized || err)
   }
 
   const { parsed, skipped } = resolveAttachmentParsingCounts(event)
