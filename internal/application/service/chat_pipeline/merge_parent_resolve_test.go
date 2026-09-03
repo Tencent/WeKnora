@@ -26,6 +26,7 @@ func TestResolveParentChunksUsesCurrentContentAndImageURLs(t *testing.T) {
 				{
 					ID: "image", ParentChunkID: "child", ChunkType: types.ChunkTypeImageOCR,
 					ImageInfo: string(imageInfo),
+					IsEnabled: true,
 				},
 			},
 		},
@@ -73,6 +74,7 @@ func TestResolveImageChunkKeepsGrandparentContextWithoutCoordinateSlicing(t *tes
 			"text": {{
 				ID: "image", ParentChunkID: "text", ChunkType: types.ChunkTypeImageOCR,
 				ImageInfo: string(imageInfo),
+				IsEnabled: true,
 			}},
 		},
 	}

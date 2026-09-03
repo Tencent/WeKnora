@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
@@ -42,13 +44,14 @@ type mockChat struct {
 	mu        sync.Mutex
 	responses []mockResponse
 	calls     [][]chat.Message
+	opts      []*chat.ChatOptions
 	callCount int
 }
 
 func (m *mockChat) ChatStream(
 	_ context.Context,
 	messages []chat.Message,
-	_ *chat.ChatOptions,
+	opts *chat.ChatOptions,
 ) (<-chan types.StreamResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -57,6 +60,7 @@ func (m *mockChat) ChatStream(
 	}
 	resp := m.responses[m.callCount]
 	m.calls = append(m.calls, append([]chat.Message(nil), messages...))
+	m.opts = append(m.opts, opts)
 	m.callCount++
 
 	ch := make(chan types.StreamResponse, len(resp.chunks))
@@ -136,6 +140,40 @@ func TestStreamLLMSummarySlugSurvivesDocumentCompaction(t *testing.T) {
 	require.Len(t, result.ToolCalls, 1)
 	require.Contains(t, result.ToolCalls[0].Function.Arguments, summarySlug)
 	require.NotContains(t, result.ToolCalls[0].Function.Arguments, "res://")
+}
+
+// Reproduces the round that ended a 40-round conversation: the stream broke
+// while serializing a large write_sandbox_file call, after a short preamble had
+// already streamed. Treating that as a completed turn let the preamble stand in
+// as the final answer and dropped the call, so the stream error must surface.
+func TestStreamLLMToEventBus_ErrorAfterContent_IsNotASuccessfulTurn(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "非常好，我已经获取了骨架模板。"},
+		{
+			ResponseType: types.ResponseTypeError,
+			Content:      "context deadline exceeded",
+			Done:         true,
+			FinishReason: types.FinishReasonIncomplete,
+			ToolCalls: []types.LLMToolCall{{
+				ID: "call-1",
+				Function: types.FunctionCall{
+					Name:      "write_sandbox_file",
+					Arguments: "{\"path\":\"/a.html\",\"content\":\"<htm",
+				},
+			}},
+		},
+	}}}}
+
+	engine := newTestEngine(t, model)
+	result, err := engine.streamLLMToEventBus(context.Background(), nil, nil, nil)
+
+	require.Error(t, err, "a broken stream must not be reported as a completed turn")
+	require.Contains(t, err.Error(), "context deadline exceeded")
+	// The partial call rides along for diagnostics, and the finish reason must
+	// never fall back to "stop" — that fallback is what ended the conversation.
+	require.Len(t, result.ToolCalls, 1)
+	require.Equal(t, types.FinishReasonIncomplete, result.FinishReason)
+	require.True(t, isTransientError(err), "a broken stream must be retryable")
 }
 
 func TestStreamLLMChunkReferenceExpandsBeforeEmission(t *testing.T) {
@@ -242,6 +280,210 @@ func withCitationsEnabled(enabled bool) testEngineOption {
 	return func(cfg *types.AgentConfig) {
 		cfg.CitationEnabled = &enabled
 	}
+}
+
+func withMaxCompletionTokens(n int) testEngineOption {
+	return func(cfg *types.AgentConfig) {
+		cfg.MaxCompletionTokens = n
+	}
+}
+
+func withMaxContextTokens(n int) testEngineOption {
+	return func(cfg *types.AgentConfig) {
+		cfg.MaxContextTokens = n
+	}
+}
+
+func TestWithinIterationBudgetUnlimited(t *testing.T) {
+	unlimited := newTestEngine(t, &mockChat{}, withMaxIterations(types.UnlimitedMaxIterations))
+	require.True(t, unlimited.withinIterationBudget(0))
+	require.True(t, unlimited.withinIterationBudget(10_000))
+	require.Equal(t, "unlimited", unlimited.maxIterationsDisplay())
+
+	capped := newTestEngine(t, &mockChat{}, withMaxIterations(3))
+	require.True(t, capped.withinIterationBudget(0))
+	require.True(t, capped.withinIterationBudget(2))
+	require.False(t, capped.withinIterationBudget(3))
+	require.Equal(t, "3", capped.maxIterationsDisplay())
+}
+
+// History may not fill the window: the reply has to land somewhere. A reserve
+// expressed as a fraction of the window gets this wrong in both directions —
+// too little room on a small window, needlessly early compaction on a big one.
+func TestContextCompactionThresholdReservesRoomForTheReply(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{},
+		withMaxContextTokens(128000), withMaxCompletionTokens(24576))
+
+	// Reserve is the round's own output budget plus estimation slack.
+	require.Equal(t, 24576+contextSafetyTokens, engine.contextReserveTokens())
+	require.Equal(t, 128000-24576-contextSafetyTokens, engine.compactor.Settings().Threshold())
+
+	// A tiny completion budget still keeps a floor of headroom, rather than
+	// letting history run to the very edge of the window.
+	small := newTestEngine(t, &mockChat{},
+		withMaxContextTokens(128000), withMaxCompletionTokens(1024))
+	require.Equal(t, compaction.DefaultReserveTokens, small.contextReserveTokens())
+
+	// An unknown window disables compaction rather than guessing.
+	require.Nil(t, newTestEngine(t, &mockChat{}).compactor)
+	require.Zero(t, newTestEngine(t, &mockChat{}).compactor.Settings().Threshold())
+}
+
+// The usage baseline already includes the assistant reply as its `output`
+// half. Starting the delta at that reply counts every completion twice, and
+// since the engine re-anchors on fresh usage each round the error rides along
+// permanently — inflating the estimate enough to trigger compaction on a
+// context that is nowhere near the threshold.
+func TestEstimateCurrentTokensDoesNotDoubleCountTheReply(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{}, withMaxContextTokens(128000))
+
+	sent := []chat.Message{
+		{Role: "system", Content: "you are an agent"},
+		{Role: "user", Content: "do the thing"},
+	}
+	reply := chat.Message{
+		Role:             "assistant",
+		Content:          "working on it",
+		ReasoningContent: strings.Repeat("deliberating carefully. ", 200),
+	}
+	toolResult := chat.Message{Role: "tool", Name: "t", ToolCallID: "c1", Content: "result"}
+	messages := append(append([]chat.Message{}, sent...), reply, toolResult)
+
+	// The provider reported this round: 5000 in, and the reply as output.
+	replyTokens := engine.tokenEstimator.EstimateMessage(&reply)
+	engine.lastSentMsgCount = len(sent)
+	engine.lastUsage = types.TokenUsage{
+		PromptTokens:     5000,
+		CompletionTokens: replyTokens,
+		TotalTokens:      5000 + replyTokens,
+	}
+
+	got := engine.estimateCurrentTokens(messages)
+	want := 5000 + replyTokens + engine.tokenEstimator.EstimateMessages(messages[len(sent)+1:])
+	require.Equal(t, want, got)
+
+	// Stated as the property that actually matters: the reply is counted once.
+	require.Less(t, got, 5000+2*replyTokens,
+		"the assistant reply must not be billed by both the usage baseline and the delta")
+}
+
+// The compaction trigger counts conversation only. Tool schemas ride with
+// every request and show up in the provider's usage, but they are not added
+// to a no-usage estimate — doing so made a 12k chat with 232 MCP tools look
+// like 117k and compact every round, including the first.
+func TestEstimateCurrentTokensDoesNotCountToolSchemasWithoutUsage(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{}, withMaxContextTokens(128000))
+
+	messages := []chat.Message{
+		{Role: "system", Content: "you are an agent"},
+		{Role: "user", Content: "do the thing"},
+	}
+	tools := make([]chat.Tool, 80)
+	for i := range tools {
+		tools[i] = chat.Tool{
+			Type: "function",
+			Function: chat.FunctionDef{
+				Name:        fmt.Sprintf("tool_%d", i),
+				Description: strings.Repeat("does something useful. ", 80),
+				Parameters:  []byte(`{"type":"object","properties":{"path":{"type":"string"}}}`),
+			},
+		}
+	}
+
+	got := engine.estimateCurrentTokens(messages)
+	require.Equal(t, engine.tokenEstimator.EstimateMessages(messages), got)
+
+	schemaTokens := engine.tokenEstimator.EstimateTools(tools)
+	require.Greater(t, schemaTokens, got*50,
+		"the fixture has to dwarf the conversation, the way a large MCP tool list does")
+	require.False(t, engine.compactor.Settings().ShouldCompact(got),
+		"a two-message conversation must not cross the threshold")
+}
+
+// summarizerChat counts summarization calls so a test can prove the engine is
+// not paying for one every round.
+type summarizerChat struct {
+	mockChat
+	calls int
+}
+
+func (s *summarizerChat) Chat(
+	context.Context, []chat.Message, *chat.ChatOptions,
+) (*types.ChatResponse, error) {
+	s.calls++
+	return &types.ChatResponse{Content: "## Goal\ndo the thing", FinishReason: "stop"}, nil
+}
+
+// The bug this replaces: inside one ReAct turn nothing was compactable, so
+// every round crossed the threshold, spent a summarization call, and freed
+// nothing. The loop is only broken if a second pass over the compacted context
+// declines to call the summarizer again.
+func TestContextCompactionDoesNotRunEveryRound(t *testing.T) {
+	llm := &summarizerChat{}
+	engine := newTestEngine(t, llm,
+		withMaxContextTokens(40000), withMaxCompletionTokens(4000))
+
+	// One user message, then many assistant/tool rounds — a ReAct turn with
+	// no turn boundary anywhere in it.
+	messages := []chat.Message{
+		{Role: "system", Content: "you are an agent"},
+		{Role: "user", Content: "build me a deck"},
+	}
+	body := strings.Repeat("tool output content ", 400)
+	for i := 0; i < 20; i++ {
+		id := fmt.Sprintf("call-%d", i)
+		messages = append(messages,
+			chat.Message{Role: "assistant", ToolCalls: []chat.ToolCall{{
+				ID:       id,
+				Type:     "function",
+				Function: chat.FunctionCall{Name: "write_sandbox_file", Arguments: `{"path":"/w/a.html"}`},
+			}}},
+			chat.Message{Role: "tool", Name: "write_sandbox_file", ToolCallID: id, Content: body},
+		)
+	}
+
+	before := engine.tokenEstimator.EstimateMessages(messages)
+	require.True(t, engine.compactor.Settings().ShouldCompact(before))
+
+	compacted, changed := engine.manageContextWindow(
+		context.Background(), messages, 1, before,
+	)
+	require.True(t, changed)
+	after := engine.tokenEstimator.EstimateMessages(compacted)
+	require.Less(t, after, before/2, "compaction has to actually free room")
+	callsAfterFirst := llm.calls
+	require.Positive(t, callsAfterFirst)
+
+	// Second round over the already-compacted context: no LLM call, because
+	// there is nothing left outside the keep-recent budget.
+	_, changedAgain := engine.manageContextWindow(
+		context.Background(), compacted, 2, after,
+	)
+	require.False(t, changedAgain)
+	require.Equal(t, callsAfterFirst, llm.calls,
+		"a context that cannot shrink must not spend another summarization call")
+}
+
+// Asking for more output than the window can still hold is rejected outright
+// by the provider, which surfaces to the agent as an unexplained failure.
+func TestClampCompletionBudgetToContext(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{},
+		withMaxContextTokens(32000), withMaxCompletionTokens(24576))
+
+	// Plenty of room: the configured budget is untouched.
+	require.Equal(t, 24576, engine.clampCompletionBudgetToContext(1000))
+
+	// Filling up: the budget shrinks to what is actually left.
+	require.Equal(t, 32000-20000-contextSafetyTokens,
+		engine.clampCompletionBudgetToContext(20000))
+
+	// Past full: never returns zero or negative, which providers reject.
+	require.Positive(t, engine.clampCompletionBudgetToContext(40000))
+
+	// Unknown window means nothing to clamp against.
+	require.Equal(t, 24576,
+		newTestEngine(t, &mockChat{}, withMaxCompletionTokens(24576)).
+			clampCompletionBudgetToContext(999999))
 }
 
 func TestBuildSystemPromptUsesInternalCitationSetting(t *testing.T) {
@@ -409,6 +651,70 @@ func TestStreamThinkingToEventBus_PropagatesFinishReason(t *testing.T) {
 			assert.Equal(t, tt.wantReason, resp.FinishReason)
 		})
 	}
+}
+
+func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
+	t.Run("honors an explicit 4096 budget", func(t *testing.T) {
+		mock := &mockChat{
+			responses: []mockResponse{
+				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
+			},
+		}
+		engine := newTestEngine(t, mock, withMaxCompletionTokens(4096))
+		_, err := engine.streamThinkingToEventBus(context.Background(),
+			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
+		require.NoError(t, err)
+		require.Len(t, mock.opts, 1)
+		assert.Equal(t, 4096, mock.opts[0].MaxTokens)
+		assert.Equal(t, 4096, mock.opts[0].MaxCompletionTokens)
+	})
+
+	t.Run("defaults when unset", func(t *testing.T) {
+		mock := &mockChat{
+			responses: []mockResponse{
+				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
+			},
+		}
+		engine := newTestEngine(t, mock)
+		_, err := engine.streamThinkingToEventBus(context.Background(),
+			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
+		require.NoError(t, err)
+		require.Len(t, mock.opts, 1)
+		assert.Equal(t, types.DefaultSmartReasoningMaxCompletionTokens, mock.opts[0].MaxTokens)
+		assert.Equal(t, types.DefaultSmartReasoningMaxCompletionTokens, mock.opts[0].MaxCompletionTokens)
+	})
+
+	t.Run("defaults to the write-file budget when a sandbox is bound", func(t *testing.T) {
+		mock := &mockChat{
+			responses: []mockResponse{
+				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
+			},
+		}
+		engine := newTestEngine(t, mock, func(cfg *types.AgentConfig) {
+			cfg.SandboxConfigID = "cfg-a"
+		})
+		_, err := engine.streamThinkingToEventBus(context.Background(),
+			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
+		require.NoError(t, err)
+		require.Len(t, mock.opts, 1)
+		assert.Equal(t, types.DefaultAgentMaxCompletionTokens, mock.opts[0].MaxTokens)
+		assert.Equal(t, types.DefaultAgentMaxCompletionTokens, mock.opts[0].MaxCompletionTokens)
+	})
+
+	t.Run("preserves explicit higher budget", func(t *testing.T) {
+		mock := &mockChat{
+			responses: []mockResponse{
+				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
+			},
+		}
+		engine := newTestEngine(t, mock, withMaxCompletionTokens(64000))
+		_, err := engine.streamThinkingToEventBus(context.Background(),
+			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
+		require.NoError(t, err)
+		require.Len(t, mock.opts, 1)
+		assert.Equal(t, 64000, mock.opts[0].MaxTokens)
+		assert.Equal(t, 64000, mock.opts[0].MaxCompletionTokens)
+	})
 }
 
 // TestStreamThinkingToEventBus_RoutesReasoningAndAnswerSeparately is the

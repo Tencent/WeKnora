@@ -88,8 +88,9 @@ X-Request-ID: unique_request_id
 - `GET /api/v1/sessions/continue-stream/{session_id}`（SSE）
 - `GET /api/v1/messages/{session_id}/load`
 - `POST /api/v1/knowledge-search`
+- `POST /api/v1/knowledge-bases/{id}/hybrid-search`（兼容 GET）
 
-改写覆盖答案正文、`knowledge_references`（含 `image_info`）、Agent 执行步骤与工具结果，以及消息
+改写覆盖答案正文、检索结果 `content` / `image_info`、`knowledge_references`、Agent 执行步骤与工具结果，以及消息
 上的图片附件。流式回答里跨两个 chunk 被截断的引用会先缓冲再改写，客户端拿到的始终是完整链接。
 
 ### 注意事项
@@ -130,7 +131,8 @@ WeKnora API 按功能分为以下几类：
 | 系统管理 | 系统信息、解析引擎、存储引擎 | [system.md](./system.md) |
 | MCP 服务 | MCP 工具服务管理 | [mcp-service.md](./mcp-service.md) |
 | 组织管理 | 组织、成员、知识库/智能体共享 | [organization.md](./organization.md) |
-| Skills | 预装智能体技能 | [skill.md](./skill.md) |
+| Skills | 预装与已安装的智能体技能、技能环境变量 | [skill.md](./skill.md) |
+| 长期记忆 | 当前用户的跨会话记忆（设置、条目、主题、文档亲和度、导出、整理） | [memory.md](./memory.md) |
 | 网络搜索 | 网络搜索服务商 | [web-search.md](./web-search.md) |
 | 向量存储 | 向量数据库连接管理 | [vector-store.md](./vector-store.md) |
 | 存储后端 | 对象/文件存储实例（多实例）管理 | [storage-backend.md](./storage-backend.md) |

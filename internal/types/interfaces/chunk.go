@@ -28,8 +28,15 @@ type ChunkRepository interface {
 	ListChunksByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error)
 	// ListChunksBySeqID lists chunks by seq_ids
 	ListChunksBySeqID(ctx context.Context, tenantID uint64, seqIDs []int64) ([]*types.Chunk, error)
-	// ListChunksByKnowledgeID lists chunks by knowledge id
+	// ListChunksByKnowledgeID lists the knowledge's text chunks. Despite the name
+	// it filters to chunk_type = 'text'; reach for ListChunksByKnowledgeIDAndTypes
+	// when summary, parent_text or image chunks are needed too.
 	ListChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// ListChunksByKnowledgeIDAndTypes lists the knowledge's chunks restricted to
+	// the given chunk types, ordered by chunk_index.
+	ListChunksByKnowledgeIDAndTypes(
+		ctx context.Context, tenantID uint64, knowledgeID string, chunkTypes []types.ChunkType,
+	) ([]*types.Chunk, error)
 	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id.
 	// When tagIDs is non-empty, results are filtered by tag_id (OR semantics).
 	// knowledgeType: "faq" or "manual" - determines sort order and search behavior

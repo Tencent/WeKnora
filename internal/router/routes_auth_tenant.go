@@ -176,6 +176,32 @@ func RegisterMyInvitationRoutes(r *gin.RouterGroup, invitationHandler *handler.T
 	}
 }
 
+// RegisterMyEnvVarRoutes wires the caller's own environment variables under
+// /me/env-vars. The v1 group already applies middleware.Auth, and no role gate
+// is added on purpose: these are the caller's own values, and the service
+// derives whose they are from the context rather than the request.
+//
+// This deliberately does not reuse /sandbox-configs/:id/skills*, which is
+// Admin+ even for reads (see routes_infra.go): an upload there drives a root
+// shell whose output is baked into the image, and the listing names what that
+// image carries. This endpoint returns declarations and set/unset status only.
+//
+// h may be nil in environments built without the dependency wired; a no-op
+// registration is preferable to a startup crash, as with the invitation inbox.
+func RegisterMyEnvVarRoutes(r *gin.RouterGroup, h *handler.MeEnvVarHandler) {
+	if h == nil {
+		return
+	}
+	me := r.Group("/me/env-vars")
+	{
+		me.GET("", h.List)
+		me.PUT("/skill", h.SetSkill)
+		me.DELETE("/skill", h.DeleteSkill)
+		me.PUT("/sandbox", h.SetSandbox)
+		me.DELETE("/sandbox", h.DeleteSandbox)
+	}
+}
+
 // RegisterAuthRoutes registers authentication routes
 func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rbacGuards) {
 	r.POST("/auth/register", handler.Register)
@@ -263,6 +289,7 @@ func RegisterSystemAdminRoutes(
 		adminRoutes.POST("/revoke", handler.RevokeSystemAdmin)
 		adminRoutes.GET("/list", handler.ListSystemAdmins)
 		adminRoutes.POST("/users/reset-password", handler.ResetUserPassword)
+		adminRoutes.POST("/users/create", handler.CreateSystemUser)
 		adminRoutes.GET("/api-keys", handler.ListPlatformAPIKeys)
 		adminRoutes.POST("/api-keys", handler.CreatePlatformAPIKey)
 		adminRoutes.DELETE("/api-keys/:key_id", handler.DeletePlatformAPIKey)

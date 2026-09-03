@@ -331,20 +331,30 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		return
 	}
 
-	// Get the uploaded file
-	file, err := c.FormFile("file")
-	if err != nil {
-		logger.Error(ctx, "File upload failed", err)
-		c.Error(errors.NewBadRequestError("File upload failed").WithDetails(err.Error()))
-		return
-	}
-
 	// Validate file size — read MAX_FILE_SIZE_MB env (50MB default).
 	// Deliberately not a runtime system_setting; see filesize.go for the
 	// rationale (nginx / docreader / browser bundle all cache this at
 	// container startup, so a UI knob would silently mismatch).
 	maxSizeMB := utils.GetMaxFileSizeMB()
 	maxSize := maxSizeMB * 1024 * 1024
+	// Capped before the multipart parse, not after: FormFile buffers the whole
+	// body first, so the size check below only ever sees an upload we already
+	// accepted. nginx location /api/ still enforces MAX_FILE_SIZE; this is the
+	// same cap for requests that reach the app without that proxy.
+	limitUploadBody(c, maxSize)
+
+	// Get the uploaded file
+	file, err := c.FormFile("file")
+	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			logger.Error(ctx, "File size too large")
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", maxSizeMB)))
+			return
+		}
+		logger.Error(ctx, "File upload failed", err)
+		c.Error(errors.NewBadRequestError("File upload failed").WithDetails(err.Error()))
+		return
+	}
 	if file.Size > maxSize {
 		logger.Error(ctx, "File size too large")
 		c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", maxSizeMB)))
@@ -1778,14 +1788,22 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 	})
 }
 
+// UpdateKnowledgeRequest defines the partial-update body for PUT /knowledge/:id.
+// Omitted fields are left unchanged; an explicit empty description clears the summary.
+type UpdateKnowledgeRequest struct {
+	Title          *string         `json:"title"`
+	Description    *string         `json:"description"`
+	CustomMetadata json.RawMessage `json:"custom_metadata"`
+}
+
 // UpdateKnowledge godoc
 // @Summary      更新知识
-// @Description  更新知识条目信息
+// @Description  部分更新知识条目（标题/描述/自定义元数据）；未传字段保持不变，显式传空 description 可清空摘要
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string          true  "知识ID"
-// @Param        request  body      types.Knowledge true  "知识信息"
+// @Param        id       path      string                   true  "知识ID"
+// @Param        request  body      UpdateKnowledgeRequest   true  "更新字段（均可选）"
 // @Success      200      {object}  map[string]interface{}  "更新成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -1807,13 +1825,20 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 		return
 	}
 
-	var knowledge types.Knowledge
-	if err := c.ShouldBindJSON(&knowledge); err != nil {
+	var req UpdateKnowledgeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	knowledge.ID = id
+	knowledge := types.Knowledge{ID: id, CustomMetadata: types.JSON(req.CustomMetadata)}
+	if req.Title != nil {
+		knowledge.Title = *req.Title
+	}
+	if req.Description != nil {
+		knowledge.Description = *req.Description
+		knowledge.DescriptionSpecified = true
+	}
 
 	if err := h.kgService.UpdateKnowledge(effCtx, &knowledge); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -2191,8 +2216,8 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        keyword    query     string  false "Keyword to search"
-// @Param        offset     query     int     false "Offset for pagination"
-// @Param        limit      query     int     false "Limit for pagination (default 20)"
+// @Param        offset     query     int     false "Offset for pagination (minimum 0)" minimum(0)
+// @Param        limit      query     int     false "Limit for pagination (default 20, maximum 100)" minimum(1) maximum(100)
 // @Param        file_types query     string  false "Comma-separated file extensions to filter (e.g., csv,xlsx)"
 // @Param        agent_id   query     string  false "Shared agent ID (search within agent's KB scope)"
 // @Param        recent     query     bool    false "Return recent files when keyword is empty"
@@ -2220,8 +2245,10 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		return
 	}
 	keyword = strings.TrimSpace(keyword)
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	offset, limit, ok := parseOffsetPagination(c)
+	if !ok {
+		return
+	}
 
 	var fileTypes []string
 	if fileTypesStr := c.Query("file_types"); fileTypesStr != "" {

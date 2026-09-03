@@ -272,6 +272,19 @@ func TestRegistryCompactsKnownIDsInBuiltInValidationErrors(t *testing.T) {
 	require.Equal(t, "Error: document d1 belongs to knowledge base b1", got)
 }
 
+func TestModelToolResultForTool_failedSkillScriptKeepsStdout(t *testing.T) {
+	registry := NewRegistry(true)
+	stdout := `{"chart":{"success":false,"error":{"error":"X轴字段不存在：工作项目","available":["name","value"]}}}`
+	got := registry.ModelToolResultForTool("execute_skill_script", &types.ToolResult{
+		Success: false,
+		Output:  "=== Script Execution: smart-charts/scripts/cli.py ===\n\n## Standard Output\n\n```\n" + stdout + "\n```\n",
+		Error:   "Script exited with code 1\n\n[Analyze the error above and try a different approach.]",
+	})
+	require.Contains(t, got, "X轴字段不存在：工作项目")
+	require.Contains(t, got, "available")
+	require.Contains(t, got, "Error: Script exited with code 1")
+}
+
 func TestRegistryCompactsDatabaseQueryIDColumnsForBuiltInFollowUps(t *testing.T) {
 	registry := NewRegistry(true)
 	modelOutput := registry.ModelToolResultForTool("database_query", &types.ToolResult{

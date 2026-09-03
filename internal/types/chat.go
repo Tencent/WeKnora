@@ -73,6 +73,89 @@ func (u *TokenUsage) MarkPromptCacheUnsupported() {
 	u.CacheStatus = PromptCacheStatusUnsupported
 }
 
+// Accumulate adds another call's usage into u, preserving the subset
+// semantics: prompt/completion/total and every cache counter sum
+// independently (cache counters stay subsets of the prompt count and are
+// never folded into it). CacheReported ORs, and the cache status is
+// recomputed from the combined counters so a single cache hit anywhere in
+// the accumulated calls reads as a hit.
+func (u *TokenUsage) Accumulate(other TokenUsage) {
+	if u == nil {
+		return
+	}
+	u.PromptTokens += other.PromptTokens
+	u.CompletionTokens += other.CompletionTokens
+	u.TotalTokens += other.TotalTokens
+	u.CachedTokens += other.CachedTokens
+	u.CacheReadTokens += other.CacheReadTokens
+	u.CacheWriteTokens += other.CacheWriteTokens
+	u.CacheMissTokens += other.CacheMissTokens
+	u.CacheReported = u.CacheReported || other.CacheReported
+	switch {
+	case !u.CacheReported:
+		u.CacheStatus = mergeUnreportedCacheStatus(u.CacheStatus, other.CacheStatus)
+	case u.CacheReadTokens > 0:
+		u.CacheStatus = PromptCacheStatusHit
+	default:
+		u.CacheStatus = PromptCacheStatusMiss
+	}
+}
+
+// mergeUnreportedCacheStatus folds the statuses of never-reported usage.
+// "unsupported" survives only while every accumulated call was itself
+// classified unsupported — the first accumulation adopts the incoming
+// classification, and any later call that is not known-unsupported (an
+// unreported or unclassified one) degrades the aggregate to unreported.
+func mergeUnreportedCacheStatus(accumulated, incoming PromptCacheStatus) PromptCacheStatus {
+	if accumulated == "" {
+		if incoming == "" {
+			return PromptCacheStatusUnreported
+		}
+		return incoming
+	}
+	if accumulated == PromptCacheStatusUnsupported && incoming == PromptCacheStatusUnsupported {
+		return PromptCacheStatusUnsupported
+	}
+	return PromptCacheStatusUnreported
+}
+
+// PromptCacheHitRate returns cache-read tokens as a percentage of the
+// provider's prompt total. Zero when the prompt is empty. A ReAct turn that
+// reuses the system prefix therefore reads as a high hit rather than a miss.
+func (u TokenUsage) PromptCacheHitRate() float64 {
+	if u.PromptTokens <= 0 {
+		return 0
+	}
+	return float64(u.CacheReadTokens) / float64(u.PromptTokens) * 100
+}
+
+// Value persists the usage as a jsonb column (assistant messages carry the
+// turn's aggregate); nil writes SQL NULL. Mirrors the nullable-pointer
+// pattern APIPrincipalConfig uses.
+func (u *TokenUsage) Value() (driver.Value, error) {
+	if u == nil {
+		return nil, nil
+	}
+	return json.Marshal(u)
+}
+
+// Scan restores a jsonb usage column; NULL leaves the receiver zero-valued.
+func (u *TokenUsage) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return nil
+	}
+	return json.Unmarshal(b, u)
+}
+
 // LLMToolCall represents a function/tool call from the LLM
 type LLMToolCall struct {
 	ID               string           `json:"id"`
@@ -148,6 +231,11 @@ const (
 	ResponseTypeAgentQuery ResponseType = "agent_query"
 	// Complete response type (agent complete)
 	ResponseTypeComplete ResponseType = "complete"
+	// ResponseTypeArtifactsPending is sent while skill/sandbox output is being
+	// copied into persistent storage after the answer has already streamed.
+	// The UI shows a toolbar placeholder until ResponseTypeComplete carries
+	// the file list.
+	ResponseTypeArtifactsPending ResponseType = "artifacts_pending"
 	// ToolApprovalRequired: MCP tool marked dangerous — UI must collect user approval before execution continues
 	ResponseTypeToolApprovalRequired ResponseType = "tool_approval_required"
 	// ToolApprovalResolved: user approved/rejected (or timeout); informational for UI replay
@@ -162,9 +250,26 @@ const (
 	// MemoryRecalled: the long-term memories injected into this answer, so
 	// the UI can show and let the user delete what influenced it.
 	ResponseTypeMemoryRecalled ResponseType = "memory_recalled"
+	// ResponseTypeContextCompacted is older conversation summarized away to
+	// fit the context window. Surfaced because it changes what the agent
+	// remembers — an answer that forgets an earlier instruction is otherwise
+	// indistinguishable from the model ignoring it.
+	ResponseTypeContextCompacted ResponseType = "context_compacted"
+	// ResponseTypeInstallPrompt is the instruction a skill install handed to
+	// the installer agent. Only the skill install transcript emits this, and
+	// it emits it first, so replaying the log alone shows what was asked for
+	// — the console does not have to read the durable prompt row to caption
+	// the run.
+	ResponseTypeInstallPrompt ResponseType = "install_prompt"
 )
 
 // StreamResponse stream response
+// FinishReasonIncomplete marks a stream that broke before the provider sent a
+// finish reason (read error, timeout, stall). Whatever content and tool calls
+// were collected are a partial response: callers must not treat them as a
+// completed turn.
+const FinishReasonIncomplete = "incomplete"
+
 type StreamResponse struct {
 	ID                  string                 `json:"id"`
 	ResponseType        ResponseType           `json:"response_type"`

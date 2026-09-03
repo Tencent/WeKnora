@@ -33,6 +33,7 @@ WeKnora 支持多种主流 AI 模型服务商，在创建模型时可通过 `par
 | `siliconflow`  | 硅基流动 SiliconFlow         | Chat, Embedding, Rerank, VLLM   |
 | `jina`         | Jina                         | Embedding, Rerank               |
 | `openrouter`   | OpenRouter                   | Chat, VLLM                      |
+| `litellm`      | LiteLLM (self-hosted proxy)  | Chat, Embedding, VLLM           |
 | `requesty`     | Requesty                     | Chat, Embedding, VLLM           |
 | `gemini`       | Google Gemini                | Chat                            |
 | `modelscope`   | 魔搭 ModelScope              | Chat, Embedding, VLLM           |
@@ -43,6 +44,8 @@ WeKnora 支持多种主流 AI 模型服务商，在创建模型时可通过 `par
 | `gpustack`     | GPUStack                     | Chat, Embedding, Rerank, VLLM   |
 
 > 实际可用的服务商以 `GET /models/providers` 返回为准。
+>
+> `litellm` 的目录默认地址是占位符 `http://your_litellm_proxy/v1`，保存前请换成实际可解析的主机名。`localhost` / `127.0.0.1` / `host.docker.internal` 默认会被 SSRF 拦截；自托管时把该主机加入 `SSRF_WHITELIST`。创建模型时 `source` 仍为 `remote`，厂商写在 `parameters.provider`。
 
 ## GET `/models/providers` - 获取模型服务商列表
 
@@ -433,7 +436,29 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/models/8fdc464d-8
 }
 ```
 
-404 表示模型不存在。
+如果知识库、智能体或当前空间的长期记忆仍引用该模型，接口保持 HTTP 400，并返回专用错误码 `2300` 和结构化引用详情。例如：
+
+```json
+{
+    "success": false,
+    "error": {
+        "code": 2300,
+        "message": "model is used by 2 knowledge base(s); reconfigure or remove those references before deleting",
+        "details": {
+            "knowledge_bases": [
+                {"id": "kb-1", "name": "Product docs", "bindings": ["vlm_model"]},
+                {"id": "kb-2", "name": "Engineering", "bindings": ["vlm_model"]}
+            ],
+            "agents": [],
+            "long_term_memory": {"bindings": []},
+            "knowledge_base_total": 2,
+            "agent_total": 0
+        }
+    }
+}
+```
+
+`bindings` 是稳定的配置类型标识：知识库可能返回 `embedding_model`、`summary_model`、`image_processing_model`、`vlm_model`、`asr_model`、`wiki_synthesis_model`；智能体可能返回 `chat_model`、`rerank_model`、`vlm_model`、`asr_model`、`query_understand_model`、`follow_up_model`；长期记忆可能返回 `embedding_model`、`extract_model`。同一对象的多处引用会合并到一个 `bindings` 数组。`knowledge_bases` / `agents` 最多各返回 50 条；未截断的引用数在 `knowledge_base_total` / `agent_total`。404 表示模型不存在。
 
 ## 参数说明
 

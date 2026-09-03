@@ -92,6 +92,10 @@
           <t-icon name="control-platform" class="menu-icon" />
           <span>{{ $t('settings.modelManagement') }}</span>
         </div>
+        <div v-if="canManageSkills" class="menu-item" @click="handleQuickNav('skills')">
+          <t-icon :name="SKILL_ICON" class="menu-icon" />
+          <span>{{ $t('settings.skills.title') }}</span>
+        </div>
         <div class="menu-divider"></div>
         <div class="menu-item" @click="handleSettings">
           <t-icon name="setting" class="menu-icon" />
@@ -218,6 +222,7 @@ import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
 import { openNewUserGuide } from '@/config/contextualGuides'
 import { SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE } from '@/config/settingsAccess'
 import { FEATURES } from '@/config/branding'
+import { SKILL_ICON } from '@/types/mention'
 
 const { t } = useI18n()
 
@@ -258,6 +263,11 @@ const canManageModels = computed(() =>
   authStore.canAccessAllTenants ||
   authStore.isSystemAdmin ||
   authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.models),
+)
+const canManageSkills = computed(() =>
+  authStore.canAccessAllTenants ||
+  authStore.isSystemAdmin ||
+  authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.skills),
 )
 
 const menuRef = ref<HTMLElement>()

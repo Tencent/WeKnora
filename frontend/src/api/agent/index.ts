@@ -44,12 +44,12 @@ export interface CustomAgentConfig {
   model_id?: string;
   rerank_model_id?: string;         // ReRank 模型 ID
   temperature?: number;
-  max_completion_tokens?: number;   // 最大生成token数（普通模式）
+  max_completion_tokens?: number;   // 0 = 跟随系统默认（快速问答 2048；智能推理 4096，绑沙箱可写文件时 24576）。大于 0 为自定义上限
   thinking?: boolean;                      // 是否启用思考模式（支持扩展思考的模型）
   citation_enabled?: boolean;        // 是否在最终回答中输出知识库/网页来源引用（默认开启）
 
   // ===== Agent模式设置 =====
-  max_iterations?: number;          // 最大迭代次数
+  max_iterations?: number;          // 最大迭代次数；-1 表示不限制
   llm_call_timeout?: number;        // LLM调用超时时间（秒）
   allowed_tools?: string[];         // 允许的工具
   reflection_enabled?: boolean;     // 是否启用反思
@@ -64,6 +64,11 @@ export interface CustomAgentConfig {
   // Skills选择模式：all=全部预装, selected=指定, none=不使用
   skills_selection_mode?: 'all' | 'selected' | 'none';
   selected_skills?: string[];       // 选择的Skill名称列表
+
+  // ===== 沙箱设置 =====
+  // 该智能体的技能脚本运行在哪个沙箱配置上；为空表示不启用沙箱执行。
+  // 指向逻辑配置而非某个具体版本，凭据轮换时无需重新指派每个智能体。
+  sandbox_config_id?: string;
 
   // ===== 知识库设置 =====
   // 知识库选择模式：all=全部知识库, selected=指定知识库, none=不使用知识库
@@ -324,7 +329,7 @@ export interface IMChannelOverview {
   id: string;
   tenant_id: number;
   agent_id: string;
-  agent_name: string; // empty string for built-in agents
+  agent_name: string; // localized built-in name when the agent is built-in
   platform: IMChannel['platform'];
   name: string;
   enabled: boolean;

@@ -346,6 +346,24 @@ curl -X POST $BASE/api/v1/agent/mcp-oauth-resolutions/p-1/cancel -H "Authorizati
 curl $BASE/api/v1/skills -H "Authorization: Bearer $TOKEN"
 ```
 
+安装、停用、文件浏览与环境变量走沙箱配置前缀 `/api/v1/sandbox-configs/{id}/skills*` 以及 `/api/v1/me/env-vars*`，完整示例见仓库 [`docs/api/skill.md`](../../docs/api/skill.md)。
+
+## 长期记忆（/api/v1/memory）
+
+跨会话记忆始终绑定当前调用者，路径里没有 subject id。权限：Viewer+；API Key 必须 full-access。Handler: `internal/handler/memory.go`
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET/PUT | `/memory/settings` | 个人开关（空间级开关由管理员在租户设置里改） |
+| GET/POST/DELETE | `/memory/items` | 列出 / 手动新增 / 清空 |
+| PUT/DELETE | `/memory/items/{id}` | 修改 / 删除 |
+| POST | `/memory/items/{id}/confirm` `/reject` | 确认或否决推断出的记忆 |
+| GET | `/memory/topics` `/memory/documents` | 主题计数、文档亲和度 |
+| GET | `/memory/export` | JSON 导出 |
+| POST | `/memory/consolidate` | 立刻整理 |
+
+完整字段与 curl 见仓库 [`docs/api/memory.md`](../../docs/api/memory.md)。
+
 ## 用户收藏（/api/v1/user/favorites）
 
 按用户维度存储（非资源创建者维度）；权限均 Viewer+，仅 JWT（API key 默认拒绝）。Handler: `internal/handler/user_resource_favorite.go`

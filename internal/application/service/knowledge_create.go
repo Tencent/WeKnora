@@ -816,6 +816,11 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		return nil, err
 	}
 
+	// Claim the body's files immediately, before publishing. A draft saved from
+	// a chat answer must already own them: the message it came from could be
+	// deleted while the draft is still unpublished.
+	s.bindContentResources(ctx, tenantID, knowledge.ID, cleanContent)
+
 	if status == types.ManualKnowledgeStatusPublish {
 		logger.Infof(ctx, "Manual knowledge created, enqueuing async processing task, ID: %s", knowledge.ID)
 		taskID, err := s.enqueueManualProcessing(ctx, knowledge, cleanContent, false)
@@ -1063,6 +1068,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 			logger.Errorf(ctx, "Failed to persist manual draft: %v", err)
 			return nil, err
 		}
+		s.bindContentResources(ctx, tenantID, existing.ID, cleanContent)
 		recordKBActivity(ctx, s.audit, tenantID, existing.KnowledgeBaseID, types.AuditActionKnowledgeUpdated,
 			"knowledge", existing.ID, types.AuditOutcomeSuccess, map[string]any{
 				"title": existing.Title, "status": status,
@@ -1178,6 +1184,42 @@ func sanitizeManualDownloadFilename(title string) string {
 	return safeName
 }
 
+// bindContentResources claims every stored file the body references on behalf
+// of a knowledge entry.
+//
+// A manual document routinely points at files it did not upload: an answer saved
+// from a chat carries the very `resource://` handles the assistant message still
+// shows. Claiming them is what makes that copy safe — no bytes are duplicated,
+// and neither the message nor the document can delete a file the other still
+// needs. Handles belonging to another workspace are skipped, so a pasted
+// reference cannot pull in a file the caller may not read.
+//
+// Best-effort by design: the document is already saved, and a missed claim
+// degrades to the old behaviour rather than failing the save.
+func (s *knowledgeService) bindContentResources(
+	ctx context.Context, tenantID uint64, knowledgeID, content string,
+) {
+	if s.resourceCatalog == nil || knowledgeID == "" {
+		return
+	}
+	for _, ref := range types.ScanResourceReferences(content) {
+		resource, err := s.resourceCatalog.Resolve(ctx, ref)
+		if err != nil || resource == nil {
+			logger.Warnf(ctx, "Skip binding unknown resource %s to knowledge %s: %v", ref, knowledgeID, err)
+			continue
+		}
+		if resource.TenantID != tenantID {
+			logger.Warnf(ctx, "Skip binding cross-workspace resource %s to knowledge %s", ref, knowledgeID)
+			continue
+		}
+		if err := s.resourceCatalog.Bind(
+			ctx, ref, types.ResourceOwnerKnowledge, knowledgeID, types.ResourceRelationAttachment,
+		); err != nil {
+			logger.Warnf(ctx, "Failed to bind resource %s to knowledge %s: %v", ref, knowledgeID, err)
+		}
+	}
+}
+
 func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, content string, doSync bool,
 ) {
@@ -1207,6 +1249,11 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 			resolvedImages = append(resolvedImages, storedImages...)
 		}
 	}
+
+	// Re-claim the body's stored files. This runs after cleanupKnowledgeResources
+	// released the previous run's claims, so a republished document keeps the
+	// files its new body still references.
+	s.bindContentResources(ctx, knowledge.TenantID, knowledge.ID, clean)
 
 	// Keep manually entered CRLF text aligned with the LF values sent by the
 	// chunking preview endpoint.

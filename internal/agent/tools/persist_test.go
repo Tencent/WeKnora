@@ -119,11 +119,232 @@ func TestSandboxToolPersistenceStripsDuplicatePayloadsAndCompactsHistory(t *test
 		}
 	}
 	assert(len(result.Output) <= historicalSandboxOutputChars, "persisted shell output must be capped")
-	for _, key := range []string{"stdout", "stderr", "content", "content_base64"} {
+	assert(strings.Contains(result.Output, "shell output"),
+		"persisted output must keep the stream, not a one-line omit")
+	stdout, _ := result.Data["stdout"].(string)
+	stderr, _ := result.Data["stderr"].(string)
+	assert(stdout != "" && len(stdout) <= historicalSandboxOutputChars, "stdout should be kept and capped")
+	assert(stderr != "" && len(stderr) <= historicalSandboxOutputChars, "stderr should be kept and capped")
+	for _, key := range []string{"content", "content_base64"} {
 		_, exists := result.Data[key]
 		assert(!exists, key+" should be stripped")
 	}
 	assert(result.Data["exit_code"] == 0, "exit metadata should remain")
 	assert(len(CompactToolOutputForHistory(ToolShellExec, steps[0].ToolCalls[0].Result)) <= historicalSandboxOutputChars,
 		"historical replay must independently cap legacy raw output")
+}
+
+func TestSanitizeAgentStepsForStorage_shellExecKeepsStructuredOutput(t *testing.T) {
+	skillDir := "/opt/weknora/tenant/skills/smart-charts"
+	command := skillDir + "/.venv/bin/python " + skillDir + "/plot.py"
+	stdout := "README.md\ncharts.py\nrequirements.txt\n"
+	markdown := "=== Shell Exec ===\n**Command**: `" + command + "`\n" +
+		"**Work Dir**: " + skillDir + "\n**Exit Code**: 0\n\n" +
+		"## Stdout\n\n```\n" + stdout + "```\n"
+	steps := []types.AgentStep{{
+		ToolCalls: []types.ToolCall{{
+			Name: ToolShellExec,
+			Result: &types.ToolResult{
+				Success: true,
+				Output:  markdown,
+				Data: map[string]interface{}{
+					"display_type": "shell_exec",
+					"command":      command,
+					"work_dir":     skillDir,
+					"exit_code":    0,
+					"stdout":       stdout,
+					"stderr":       "",
+				},
+			},
+		}},
+	}}
+
+	sanitized := SanitizeAgentStepsForStorage(steps)
+	result := sanitized[0].ToolCalls[0].Result
+	if strings.Contains(result.Output, "omitted from history") {
+		t.Fatalf("structured shell_exec must not collapse to an omit line, got %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "README.md") {
+		t.Fatalf("persisted output should keep stdout structure, got %q", result.Output)
+	}
+	if got, _ := result.Data["stdout"].(string); got != stdout {
+		t.Fatalf("persisted stdout should remain for the UI card, got %#v", result.Data["stdout"])
+	}
+
+	history := CompactToolOutputForHistory(ToolShellExec, result)
+	if strings.Contains(history, "omitted from history") {
+		t.Fatalf("history replay must keep the streams, got %q", history)
+	}
+	if !strings.Contains(history, "README.md") {
+		t.Fatalf("history replay should keep stdout, got %q", history)
+	}
+	if !strings.Contains(history, "plot.py") {
+		t.Fatalf("history replay should keep the full command, got %q", history)
+	}
+}
+
+func TestSanitizeToolResultForClientKeepsShellStreams(t *testing.T) {
+	meta := SanitizeToolResultForClient(ToolShellExec, &types.ToolResult{
+		Success: true,
+		Output:  "=== Shell Exec ===\n**Command**: `ls`\n",
+		Data: map[string]interface{}{
+			"display_type": "shell_exec",
+			"command":      "ls",
+			"exit_code":    0,
+			"stdout":       "README.md\n",
+			"stderr":       "",
+		},
+	})
+	if _, ok := meta["output"]; ok {
+		t.Fatal("structured shell_exec should omit the markdown Output from client metadata")
+	}
+	if meta["stdout"] != "README.md\n" {
+		t.Fatalf("live UI needs stdout, got %#v", meta["stdout"])
+	}
+	if meta["command"] != "ls" {
+		t.Fatalf("command should remain, got %#v", meta["command"])
+	}
+	if meta["display_type"] != "shell_exec" {
+		t.Fatalf("display_type should remain, got %#v", meta["display_type"])
+	}
+}
+
+func TestCompactToolOutputForHistory_recoversStreamsFromPlaceholder(t *testing.T) {
+	history := CompactToolOutputForHistory(ToolShellExec, &types.ToolResult{
+		Success: true,
+		Output:  "shell_exec exit=0 command=ls (output omitted from history)",
+		Data: map[string]interface{}{
+			"display_type": "shell_exec",
+			"command":      "ls /opt/weknora/tenant/skills/smart-charts",
+			"exit_code":    0,
+			"stdout":       "SKILL.md\nplot.py\n",
+		},
+	})
+	if strings.Contains(history, "omitted from history") {
+		t.Fatalf("should rebuild from stdout instead of the omit placeholder, got %q", history)
+	}
+	if !strings.Contains(history, "SKILL.md") {
+		t.Fatalf("rebuilt history should keep stdout, got %q", history)
+	}
+	if !strings.Contains(history, "smart-charts") {
+		t.Fatalf("rebuilt history should keep the command, got %q", history)
+	}
+}
+
+func TestCompactToolOutputForHistory_failedSkillScriptKeepsStdout(t *testing.T) {
+	stdout := `{"chart":{"success":false,"error":{"error":"X轴字段不存在：工作项目","available":["name","value"]}}}`
+	output := "=== Script Execution: smart-charts/scripts/cli.py ===\n\n**Exit Code**: 1\n\n## Standard Output\n\n```\n" + stdout + "\n```\n"
+	errMsg := "Script exited with code 1\n\n[Analyze the error above and try a different approach.]"
+	history := CompactToolOutputForHistory(ToolExecuteSkillScript, &types.ToolResult{
+		Success: false,
+		Output:  output,
+		Error:   errMsg,
+		Data: map[string]interface{}{
+			"display_type": "shell_exec",
+			"command":      "smart-charts/scripts/cli.py --x-axis 工作项目",
+			"exit_code":    1,
+			"stdout":       stdout,
+		},
+	})
+	if !strings.Contains(history, "X轴字段不存在：工作项目") {
+		t.Fatalf("failed skill script history must keep stdout, got %q", history)
+	}
+	if !strings.Contains(history, "Error: Script exited with code 1") {
+		t.Fatalf("failed skill script history must still surface the error, got %q", history)
+	}
+}
+
+func TestSanitizeAgentStepsForStorage_skillScriptKeepsStreamsOnFailure(t *testing.T) {
+	stdout := `{"chart":{"success":false,"error":{"error":"X轴字段不存在：工作项目"}}}`
+	output := "=== Script Execution: smart-charts/scripts/cli.py ===\n\n" + stdout
+	steps := []types.AgentStep{{
+		ToolCalls: []types.ToolCall{{
+			Name: ToolExecuteSkillScript,
+			Result: &types.ToolResult{
+				Success: false,
+				Output:  output,
+				Error:   "Script exited with code 1",
+				Data: map[string]interface{}{
+					"display_type": "shell_exec",
+					"command":      "smart-charts/scripts/cli.py",
+					"exit_code":    1,
+					"stdout":       stdout,
+					"stderr":       "",
+				},
+			},
+		}},
+	}}
+
+	sanitized := SanitizeAgentStepsForStorage(steps)
+	result := sanitized[0].ToolCalls[0].Result
+	if strings.Contains(result.Output, "omitted from history") {
+		t.Fatalf("failed skill script must not collapse to an omit line, got %q", result.Output)
+	}
+	if got, _ := result.Data["stdout"].(string); !strings.Contains(got, "X轴字段不存在") {
+		t.Fatalf("persisted stdout should remain for the UI card, got %#v", result.Data["stdout"])
+	}
+}
+
+func TestCompactToolOutputForHistory_writeSandboxFileKeepsPath(t *testing.T) {
+	history := CompactToolOutputForHistory(ToolWriteSandboxFile, &types.ToolResult{
+		Success: true,
+		Output:  "=== Wrote sandbox file: /workspace/output/generate_ppt.py ===\n",
+		Data: map[string]interface{}{
+			"display_type": ToolWriteSandboxFile,
+			"path":         "/workspace/output/generate_ppt.py",
+			"size":         12345,
+		},
+	})
+	if history != "Wrote /workspace/output/generate_ppt.py (12345 bytes)" {
+		t.Fatalf("history should keep path and size, got %q", history)
+	}
+}
+
+func TestCompactToolOutputForHistory_editSandboxFileKeepsPath(t *testing.T) {
+	history := CompactToolOutputForHistory(ToolEditSandboxFile, &types.ToolResult{
+		Success: true,
+		Output:  "=== Edited sandbox file: /workspace/output/generate_ppt.py ===\n",
+		Data: map[string]interface{}{
+			"display_type": ToolEditSandboxFile,
+			"path":         "/workspace/output/generate_ppt.py",
+			"size":         12345,
+			"replacements": 1,
+		},
+	})
+	if history != "Edited /workspace/output/generate_ppt.py (1 replacement(s), 12345 bytes)" {
+		t.Fatalf("history should keep path, replacements, and size, got %q", history)
+	}
+}
+
+func TestCompactToolOutputForHistory_writeSandboxFileIncludesDiffStat(t *testing.T) {
+	history := CompactToolOutputForHistory(ToolWriteSandboxFile, &types.ToolResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"display_type":  ToolWriteSandboxFile,
+			"path":          "/workspace/output/a.py",
+			"size":          80,
+			"added_lines":   12,
+			"removed_lines": 0,
+		},
+	})
+	if history != "Wrote /workspace/output/a.py (+12, 80 bytes)" {
+		t.Fatalf("history should include +N, got %q", history)
+	}
+}
+
+func TestCompactToolOutputForHistory_editSandboxFileIncludesDiffStat(t *testing.T) {
+	history := CompactToolOutputForHistory(ToolEditSandboxFile, &types.ToolResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"display_type":  ToolEditSandboxFile,
+			"path":          "/workspace/output/a.py",
+			"size":          80,
+			"replacements":  2,
+			"added_lines":   5,
+			"removed_lines": 3,
+		},
+	})
+	if history != "Edited /workspace/output/a.py (+5 -3, 2 replacement(s), 80 bytes)" {
+		t.Fatalf("history should include +/- and replacements, got %q", history)
+	}
 }

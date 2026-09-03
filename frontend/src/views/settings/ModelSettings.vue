@@ -107,6 +107,14 @@
                 <span class="model-card__sep">·</span>
                 <span>{{ $t('model.editor.dimensionLabel') }} {{ model.dimension }}</span>
               </template>
+              <template v-if="model._modelType === 'chat' || model._modelType === 'vllm'">
+                <span class="model-card__sep">·</span>
+                <span
+                  class="model-card__ctx"
+                  :class="{ 'model-card__ctx--default': isDefaultContextWindow(model.contextWindow) }"
+                  :title="contextWindowTitle(model.contextWindow)"
+                >{{ formatContextWindow(model.contextWindow) }}</span>
+              </template>
               <template v-if="model._modelType === 'chat' && model.supportsVision">
                 <span class="model-card__sep">·</span>
                 <span class="model-card__vision" :title="$t('model.editor.supportsVisionLabel')"
@@ -132,6 +140,124 @@
       </div>
     </t-loading>
 
+    <t-dialog
+      v-model:visible="showUsageDialog"
+      :header="$t('modelSettings.usage.title')"
+      :footer="false"
+      width="680px"
+      destroy-on-close
+    >
+      <div v-if="usageConflict" class="model-usage-dialog">
+        <p class="model-usage-dialog__description">
+          {{ $t('modelSettings.usage.description', { name: usageConflictModelName }) }}
+        </p>
+
+        <div class="model-usage-dialog__content">
+          <section v-if="usageConflict.knowledge_bases.length" class="model-usage-group">
+            <h3>
+              {{ $t('modelSettings.usage.knowledgeBases', {
+                count: modelUsageResourceCount(usageConflict.knowledge_bases, usageConflict.knowledge_base_total)
+              }) }}
+            </h3>
+            <ul>
+              <li v-for="resource in usageConflict.knowledge_bases" :key="resource.id">
+                <div class="model-usage-resource">
+                  <strong>{{ resource.name || resource.id }}</strong>
+                  <div class="model-usage-bindings">
+                    <t-tag
+                      v-for="(binding, index) in resource.bindings"
+                      :key="`${binding}-${index}`"
+                      size="small"
+                      variant="light"
+                    >
+                      {{ $t(modelUsageBindingI18nKey(binding)) }}
+                    </t-tag>
+                  </div>
+                </div>
+                <t-button
+                  theme="primary"
+                  variant="text"
+                  size="small"
+                  @click="openUsageResource('knowledge_base', resource.id, resource.bindings)"
+                >
+                  {{ $t('modelSettings.usage.openConfiguration') }}
+                </t-button>
+              </li>
+            </ul>
+            <p
+              v-if="modelUsageListTruncated(usageConflict.knowledge_bases, usageConflict.knowledge_base_total)"
+              class="model-usage-truncated"
+            >
+              {{ $t('modelSettings.usage.truncated', {
+                shown: usageConflict.knowledge_bases.length,
+                total: modelUsageResourceCount(usageConflict.knowledge_bases, usageConflict.knowledge_base_total)
+              }) }}
+            </p>
+          </section>
+
+          <section v-if="usageConflict.agents.length" class="model-usage-group">
+            <h3>{{ $t('modelSettings.usage.agents', {
+              count: modelUsageResourceCount(usageConflict.agents, usageConflict.agent_total)
+            }) }}</h3>
+            <ul>
+              <li v-for="resource in usageConflict.agents" :key="resource.id">
+                <div class="model-usage-resource">
+                  <strong>{{ resource.name || resource.id }}</strong>
+                  <div class="model-usage-bindings">
+                    <t-tag
+                      v-for="(binding, index) in resource.bindings"
+                      :key="`${binding}-${index}`"
+                      size="small"
+                      variant="light"
+                    >
+                      {{ $t(modelUsageBindingI18nKey(binding)) }}
+                    </t-tag>
+                  </div>
+                </div>
+                <t-button
+                  theme="primary"
+                  variant="text"
+                  size="small"
+                  @click="openUsageResource('agent', resource.id, resource.bindings)"
+                >
+                  {{ $t('modelSettings.usage.openConfiguration') }}
+                </t-button>
+              </li>
+            </ul>
+            <p
+              v-if="modelUsageListTruncated(usageConflict.agents, usageConflict.agent_total)"
+              class="model-usage-truncated"
+            >
+              {{ $t('modelSettings.usage.truncated', {
+                shown: usageConflict.agents.length,
+                total: modelUsageResourceCount(usageConflict.agents, usageConflict.agent_total)
+              }) }}
+            </p>
+          </section>
+
+          <section v-if="usageConflict.long_term_memory.bindings.length" class="model-usage-group">
+            <h3>{{ $t('modelSettings.usage.longTermMemory') }}</h3>
+            <div class="model-usage-memory">
+              <div class="model-usage-bindings">
+                <t-tag
+                  v-for="(binding, index) in usageConflict.long_term_memory.bindings"
+                  :key="`${binding}-${index}`"
+                  size="small"
+                  variant="light"
+                >
+                  {{ $t(modelUsageBindingI18nKey(binding)) }}
+                </t-tag>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="model-usage-dialog__actions">
+          <t-button @click="showUsageDialog = false">{{ $t('common.close') }}</t-button>
+        </div>
+      </div>
+    </t-dialog>
+
     <!-- 模型编辑器抽屉 -->
     <ModelEditorDialog v-model:visible="showDialog" :model-type="currentModelType" :model-data="editingModel"
       @confirm="handleModelSave" />
@@ -142,30 +268,65 @@
 
 <script setup lang="ts">
 import { FEATURES } from '@/config/branding'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon, PlayCircleIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
 import ModelDebugDrawer from '@/components/ModelDebugDrawer.vue'
-import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
+import {
+  listModels,
+  createModel,
+  updateModel as updateModelAPI,
+  deleteModel as deleteModelAPI,
+  ModelInUseError,
+  modelUsageBindingI18nKey,
+  modelUsageKnowledgeBaseSection,
+  modelUsageListTruncated,
+  modelUsageResourceCount,
+  modelUsageResourceRoute,
+  type ModelConfig,
+  type ModelUsageDetails,
+  type ModelUsageResourceKind,
+} from '@/api/model'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
+import { focusKbEditorSection } from '@/config/contextualGuides'
+import { useChatResourcesStore } from '@/stores/chatResources'
+import {
+  formatContextWindow,
+  isDefaultContextWindow,
+  effectiveContextWindow,
+} from '@/utils/contextWindow'
 
 const { t, te } = useI18n()
 const authStore = useAuthStore()
 const uiStore = useUIStore()
+const chatResources = useChatResourcesStore()
+const router = useRouter()
 type ModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
 type FilterType = 'all' | ModelType
 
 const showDialog = ref(false)
 const showDebugDrawer = ref(false)
+const showUsageDialog = ref(false)
+const usageConflict = ref<ModelUsageDetails | null>(null)
+const usageConflictModelName = ref('')
 const currentModelType = ref<ModelType>('chat')
 const editingModel = ref<any>(null)
 const loading = ref(true)
 const activeTypeFilter = ref<FilterType>('all')
 
 const MODEL_TAB_TYPES: FilterType[] = ['chat', 'embedding', 'rerank', 'vllm', 'asr']
+const KNOWLEDGE_BASE_EDITOR_HOST_ROUTES = new Set([
+  'home',
+  'knowledgeBaseList',
+  'knowledgeBaseDetail',
+  'globalCreatChat',
+  'kbCreatChat',
+  'chat',
+])
 watch(
   () => uiStore.settingsInitialSubSection,
   (sub) => {
@@ -207,6 +368,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     supportsDimensionOverride: model.parameters.embedding_parameters?.supports_dimension_override || false,
     isBuiltin: model.is_builtin || false,
     supportsVision: model.parameters.supports_vision || false,
+    contextWindow: model.parameters.context_window || undefined,
     maxConcurrency: model.parameters.max_concurrency,
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
@@ -296,6 +458,13 @@ const modelDisplayName = (model: any) => {
   return displayName || model.name
 }
 
+const contextWindowTitle = (tokens?: number) => {
+  if (isDefaultContextWindow(tokens)) {
+    return t('model.editor.contextWindowDefaultHint', { value: formatContextWindow(tokens) })
+  }
+  return t('model.editor.contextWindowTokens', { count: effectiveContextWindow(tokens) })
+}
+
 const emptyHint = computed(() => {
   if (activeTypeFilter.value === 'all') return t('modelSettings.chat.empty')
   const map: Record<ModelType, string> = {
@@ -314,6 +483,9 @@ const loadModels = async () => {
   try {
     const models = await listModels()
     allModels.value = models
+    // 设置页自己 listModels 之后立刻写回空间级缓存。否则对话输入栏 /
+    // 智能体编辑器会继续拿 60s TTL 里的旧 context_window，刷新页面才对。
+    chatResources.replaceModels(models)
   } catch (error: any) {
     console.error('加载模型列表失败:', error)
     MessagePlugin.error(error.message)
@@ -471,6 +643,10 @@ const handleModelSave = async (modelData: any) => {
         } : saveType === 'chat' ? {
           supports_vision: modelData.supportsVision ?? false
         } : {}),
+        ...((saveType === 'chat' || saveType === 'vllm')
+          && Number(modelData.contextWindow) >= 1024
+          ? { context_window: Math.round(Number(modelData.contextWindow)) }
+          : {}),
         // 后台并发上限：仅 chat/embedding/vllm 受治理，>0 才写入（0/空沿用全局默认）。
         ...(['chat', 'embedding', 'vllm'].includes(saveType)
           && Number(modelData.maxConcurrency) > 0
@@ -509,7 +685,53 @@ const deleteModel = async (_type: ModelType, modelId: string) => {
     await loadModels()
   } catch (error: any) {
     console.error('删除模型失败:', error)
+    if (error instanceof ModelInUseError) {
+      usageConflict.value = error.details
+      usageConflictModelName.value = model?.display_name || model?.name || modelId
+      showUsageDialog.value = true
+      return
+    }
     MessagePlugin.error(error.message || t('modelSettings.toasts.deleteFailed'))
+  }
+}
+
+const openUsageResource = async (
+  kind: ModelUsageResourceKind,
+  id: string,
+  bindings: readonly string[] = [],
+) => {
+  showUsageDialog.value = false
+  const knowledgeBaseSection = modelUsageKnowledgeBaseSection(bindings)
+  // The UI store can outlive the route component that owns the KB editor.
+  // Only focus an existing editor when the current route still mounts one;
+  // otherwise a stale visible/id pair would make a direct Settings page no-op.
+  const routeName = router.currentRoute.value.name
+  const canFocusExistingKnowledgeBase = kind === 'knowledge_base'
+    && uiStore.showKBEditorModal
+    && uiStore.currentKBId === id
+    && typeof routeName === 'string'
+    && KNOWLEDGE_BASE_EDITOR_HOST_ROUTES.has(routeName)
+
+  uiStore.closeSettings()
+  await nextTick()
+
+  if (canFocusExistingKnowledgeBase) {
+    // Keep unsaved edits when the referenced KB is already open underneath
+    // global Settings; only move the existing editor to the relevant section.
+    focusKbEditorSection(knowledgeBaseSection)
+    return
+  }
+
+  if (kind === 'knowledge_base') {
+    uiStore.closeKBEditor()
+    await nextTick()
+  }
+  // Both the KB editor and global Settings can already be open underneath the
+  // usage dialog. Flush their false state before reusing either component so
+  // its visible watcher reloads the target object instead of keeping stale data.
+  await router.push(modelUsageResourceRoute(kind, id, bindings))
+  if (kind === 'knowledge_base') {
+    uiStore.openKBSettings(id, knowledgeBaseSection)
   }
 }
 
@@ -946,6 +1168,14 @@ onMounted(() => {
   gap: 3px;
 }
 
+.model-card__ctx {
+  font-variant-numeric: tabular-nums;
+}
+
+.model-card__ctx--default {
+  color: var(--td-text-color-placeholder);
+}
+
 .model-card__actions {
   flex-shrink: 0;
   display: flex;
@@ -986,5 +1216,89 @@ onMounted(() => {
     color: var(--td-text-color-placeholder);
     margin-bottom: 16px;
   }
+}
+
+.model-usage-dialog__description {
+  margin: 0 0 16px;
+  color: var(--td-text-color-secondary);
+  line-height: 1.6;
+}
+
+.model-usage-dialog__content {
+  max-height: min(58vh, 560px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.model-usage-group {
+  & + & {
+    margin-top: 20px;
+  }
+
+  h3 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+  }
+
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+
+    & + li {
+      border-top: 1px solid var(--td-component-stroke);
+    }
+  }
+}
+
+.model-usage-truncated {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+  line-height: 1.5;
+}
+
+.model-usage-resource {
+  min-width: 0;
+
+  strong {
+    display: block;
+    margin-bottom: 6px;
+    overflow: hidden;
+    color: var(--td-text-color-primary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.model-usage-bindings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.model-usage-memory {
+  padding: 10px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+}
+
+.model-usage-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
 }
 </style>

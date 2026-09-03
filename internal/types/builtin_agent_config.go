@@ -125,6 +125,52 @@ func GetBuiltinAgentWithContext(ctx context.Context, id string, tenantID uint64)
 	return buildAgentFromEntry(id, tenantID, locale)
 }
 
+// ApplyBuiltinAgentLocalization overlays the locale-specific name, description,
+// and avatar from builtin_agents.yaml onto a persisted built-in agent.
+// Tenant-specific Config and other DB fields are left untouched.
+//
+// Built-in agents are seeded into the database with the locale that was active
+// at first run. ListAgents / GetAgentByID used to return those stored strings
+// verbatim, so switching the UI language left the cards in Chinese (or
+// whichever language was seeded). YAML already has per-locale copy; this
+// applies it on the read path.
+func ApplyBuiltinAgentLocalization(ctx context.Context, agent *CustomAgent) {
+	if agent == nil {
+		return
+	}
+	localized := GetBuiltinAgentWithContext(ctx, agent.ID, agent.TenantID)
+	if localized == nil {
+		return
+	}
+	if localized.Name != "" {
+		agent.Name = localized.Name
+	}
+	if localized.Description != "" {
+		agent.Description = localized.Description
+	}
+	agent.Avatar = localized.Avatar
+}
+
+var builtinAgentEntriesTestMu sync.Mutex
+
+// OverrideBuiltinAgentEntriesForTest replaces the in-memory YAML registry.
+// Tests in other packages use this to assert locale overlays; call the
+// returned func to restore the previous map. Concurrent tests are serialized
+// so they do not clobber each other's entries.
+func OverrideBuiltinAgentEntriesForTest(entries map[string]*BuiltinAgentEntry) func() {
+	builtinAgentEntriesTestMu.Lock()
+	builtinAgentEntriesMu.Lock()
+	prev := builtinAgentEntries
+	builtinAgentEntries = entries
+	builtinAgentEntriesMu.Unlock()
+	return func() {
+		builtinAgentEntriesMu.Lock()
+		builtinAgentEntries = prev
+		builtinAgentEntriesMu.Unlock()
+		builtinAgentEntriesTestMu.Unlock()
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------

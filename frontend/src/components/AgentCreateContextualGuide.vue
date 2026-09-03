@@ -7,7 +7,7 @@
 import { computed, ref, watch } from 'vue'
 import SpotlightGuide from '@/components/SpotlightGuide.vue'
 import {
-  AGENT_EDITOR_FOCUS_SECTION_EVENT,
+  focusAgentEditorSection,
   markContextualGuideDone,
   isContextualGuideDone,
   isGlobalUserGuideDone,
@@ -21,76 +21,70 @@ const props = defineProps<{
 
 const active = ref(false)
 
-const focusSection = (section: string) => {
-  window.dispatchEvent(
-    new CustomEvent(AGENT_EDITOR_FOCUS_SECTION_EVENT, { detail: { section } }),
-  )
-}
-
 const guideSteps = computed<SpotlightGuideStep[]>(() => {
   const steps: SpotlightGuideStep[] = [
     {
       key: 'mode',
       target: '[data-guide="agent-create-mode"]',
       placement: 'right',
-      before: () => focusSection('basic'),
+      before: () => focusAgentEditorSection('basic'),
     },
     {
       key: 'agentType',
       target: '[data-guide="agent-create-agent-type"]',
       placement: 'right',
-      before: () => focusSection('basic'),
+      before: () => focusAgentEditorSection('basic'),
       optional: true,
     },
     {
       key: 'name',
       target: '[data-guide="agent-create-name"]',
       placement: 'right',
-      before: () => focusSection('basic'),
+      before: () => focusAgentEditorSection('basic'),
     },
     {
       key: 'navModel',
       target: '[data-guide="agent-editor-nav-model"]',
       placement: 'right',
-      before: () => focusSection('model'),
+      before: () => focusAgentEditorSection('model'),
     },
     {
       key: 'model',
       target: '[data-guide="agent-create-model"]',
       placement: 'right',
-      before: () => focusSection('model'),
+      before: () => focusAgentEditorSection('model'),
     },
     {
       key: 'navKnowledge',
       target: '[data-guide="agent-editor-nav-knowledge"]',
       placement: 'right',
-      before: () => focusSection('knowledge'),
+      before: () => focusAgentEditorSection('knowledge'),
     },
     {
       key: 'knowledge',
       target: '[data-guide="agent-create-knowledge"]',
       placement: 'right',
-      before: () => focusSection('knowledge'),
+      before: () => focusAgentEditorSection('knowledge'),
     },
     {
       key: 'navWebsearch',
       target: '[data-guide="agent-editor-nav-websearch"]',
       placement: 'right',
-      before: () => focusSection('websearch'),
+      before: () => focusAgentEditorSection('websearch'),
       optional: true,
     },
     {
       key: 'navMultimodal',
       target: '[data-guide="agent-editor-nav-multimodal"]',
       placement: 'right',
-      before: () => focusSection('multimodal'),
+      before: () => focusAgentEditorSection('multimodal'),
       optional: true,
     },
     {
       key: 'multimodal',
       target: '[data-guide="agent-create-multimodal"]',
       placement: 'right',
-      before: () => focusSection('multimodal'),
+      before: () => focusAgentEditorSection('multimodal'),
       optional: true,
     },
   ]
@@ -100,7 +94,7 @@ const guideSteps = computed<SpotlightGuideStep[]>(() => {
       key: 'navTools',
       target: '[data-guide="agent-editor-nav-tools"]',
       placement: 'right',
-      before: () => focusSection('tools'),
+      before: () => focusAgentEditorSection('tools'),
       optional: true,
     })
   }
@@ -109,7 +103,7 @@ const guideSteps = computed<SpotlightGuideStep[]>(() => {
     key: 'submit',
     target: '[data-guide="agent-create-submit"]',
     placement: 'top',
-    before: () => focusSection('basic'),
+    before: () => focusAgentEditorSection('basic'),
     interact: true,
   })
 

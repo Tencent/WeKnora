@@ -45,6 +45,27 @@ func TestRedisSessionSandboxBindingStoreContract(t *testing.T) {
 	testSessionSandboxBindingStore(t, store)
 }
 
+func TestRedisSessionSandboxBindingStoreReplacesTrafficToken(t *testing.T) {
+	store, _, _ := newRedisBindingTestStore(t)
+	testSessionSandboxBindingReplacesTrafficToken(t, store)
+}
+
+func TestRedisSessionSandboxBindingStoreTurnLease(t *testing.T) {
+	store, client, _ := newRedisBindingTestStore(t)
+	testSessionTurnLeaseStore(t, store)
+
+	key := SessionSandboxKey{TenantID: 42, SessionID: "session-missing-turn"}
+	require.NoError(t, store.ConsumeTurnRebuild(context.Background(), key))
+	exists, err := client.Exists(context.Background(), store.turnKey(key)).Result()
+	require.NoError(t, err)
+	require.Zero(t, exists, "consuming a missing turn must not create a lease key")
+}
+
+func TestRedisSessionSandboxBindingStoreInvalidatesByConfig(t *testing.T) {
+	store, _, _ := newRedisBindingTestStore(t)
+	testSessionSandboxBindingInvalidateByConfig(t, store)
+}
+
 func TestRedisSessionSandboxBindingStoreSeparatesTenants(t *testing.T) {
 	store, _, _ := newRedisBindingTestStore(t)
 	testSessionSandboxBindingTenantIsolation(t, store)

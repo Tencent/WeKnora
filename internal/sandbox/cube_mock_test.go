@@ -22,16 +22,30 @@ import (
 // endpoints that the Cube SDK speaks to. CubeRemoteClient tests exercise the
 // adapter through its public surface without requiring a real Cube deployment.
 type cubeMockServer struct {
-	server      *httptest.Server
-	mu          sync.Mutex
-	createBody  map[string]any
-	createCount atomic.Int32
-	killCount   atomic.Int32
-	nextID      atomic.Int64
-	sandboxes   map[string]map[string]any // sandboxID → sandbox state record
-	executor    func(sandboxID, cmd string, args []string) (stdout, stderr string, exitCode int)
-	files       map[string]map[string][]byte // sandboxID → path → content
-	cmdHistory  []commandRecord
+	server                  *httptest.Server
+	mu                      sync.Mutex
+	createBody              map[string]any
+	createCount             atomic.Int32
+	killCount               atomic.Int32
+	nextID                  atomic.Int64
+	sandboxes               map[string]map[string]any // sandboxID → sandbox state record
+	snapshots               []cubeMockSnapshot
+	snapshotSeq             int64
+	snapshotPageSize        int
+	snapshotStuckPagination bool // always return the same non-empty next token
+	snapshotDeleteFailWith  int  // when set, DELETE /templates/:id returns this status
+	snapshotCreateBody      map[string]any
+	trafficAccessToken      string
+	connectTrafficToken     string
+	executor                func(sandboxID, cmd string, args []string) (stdout, stderr string, exitCode int)
+	files                   map[string]map[string][]byte // sandboxID → path → content
+	cmdHistory              []commandRecord
+}
+
+type cubeMockSnapshot struct {
+	id        string
+	sandboxID string
+	names     []string
 }
 
 type commandRecord struct {
@@ -77,6 +91,12 @@ func (m *cubeMockServer) handle(w http.ResponseWriter, r *http.Request) {
 		m.handleList(w, r)
 	case strings.HasPrefix(r.URL.Path, "/sandboxes/") && strings.HasSuffix(r.URL.Path, "/connect") && r.Method == http.MethodPost:
 		m.handleConnect(w, r)
+	case strings.HasPrefix(r.URL.Path, "/sandboxes/") && strings.HasSuffix(r.URL.Path, "/snapshots") && r.Method == http.MethodPost:
+		m.handleCreateSnapshot(w, r)
+	case r.URL.Path == "/snapshots" && r.Method == http.MethodGet:
+		m.handleListSnapshots(w, r)
+	case strings.HasPrefix(r.URL.Path, "/templates/") && r.Method == http.MethodDelete:
+		m.handleDeleteSnapshot(w, r)
 	case strings.HasPrefix(r.URL.Path, "/sandboxes/") && r.Method == http.MethodGet:
 		m.handleGetInfo(w, r)
 	case strings.HasPrefix(r.URL.Path, "/sandboxes/") && r.Method == http.MethodDelete:
@@ -112,32 +132,42 @@ func (m *cubeMockServer) handleCreate(w http.ResponseWriter, r *http.Request) {
 		"startedAt":   time.Now().UTC().Format(time.RFC3339),
 	}
 	m.files[id] = map[string][]byte{}
+	trafficAccessToken := m.trafficAccessToken
 	m.mu.Unlock()
 
-	writeJSON(w, http.StatusCreated, map[string]any{
+	response := map[string]any{
 		"sandboxID":   id,
 		"clientID":    "client-" + id,
 		"envdVersion": "test",
 		"domain":      "cube.app",
-	})
+	}
+	if trafficAccessToken != "" {
+		response["trafficAccessToken"] = trafficAccessToken
+	}
+	writeJSON(w, http.StatusCreated, response)
 }
 
 func (m *cubeMockServer) handleConnect(w http.ResponseWriter, r *http.Request) {
 	id := extractSandboxID(r.URL.Path, "/connect")
 	m.mu.Lock()
 	_, ok := m.sandboxes[id]
+	connectTrafficToken := m.connectTrafficToken
 	m.mu.Unlock()
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
 		writeJSON(w, http.StatusNotFound, map[string]string{"message": "sandbox not found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"sandboxID":   id,
 		"clientID":    "client-" + id,
 		"envdVersion": "test",
 		"domain":      "cube.app",
-	})
+	}
+	if connectTrafficToken != "" {
+		response["trafficAccessToken"] = connectTrafficToken
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (m *cubeMockServer) handleGetInfo(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +212,107 @@ func (m *cubeMockServer) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	m.killCount.Add(1)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (m *cubeMockServer) handleCreateSnapshot(w http.ResponseWriter, r *http.Request) {
+	id := extractSandboxID(r.URL.Path, "/snapshots")
+	body, _ := io.ReadAll(r.Body)
+	var raw map[string]any
+	_ = json.Unmarshal(body, &raw)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sandboxes[id]; !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "sandbox not found"})
+		return
+	}
+	m.snapshotCreateBody = raw
+	m.snapshotSeq++
+	snapshotID := "snap-" + strconv.FormatInt(m.snapshotSeq, 10)
+	var names []string
+	if rawName, ok := raw["name"].(string); ok {
+		if name := strings.TrimSpace(rawName); name != "" {
+			names = []string{name}
+		}
+	}
+	m.snapshots = append(m.snapshots, cubeMockSnapshot{
+		id:        snapshotID,
+		sandboxID: id,
+		names:     names,
+	})
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"snapshotID": snapshotID,
+		"names":      names,
+	})
+}
+
+func (m *cubeMockServer) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
+	sandboxID := r.URL.Query().Get("sandboxID")
+	start := 0
+	if token := r.URL.Query().Get("nextToken"); token != "" {
+		if parsed, err := strconv.Atoi(token); err == nil && parsed > 0 {
+			start = parsed
+		}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pageSize := m.snapshotPageSize
+	if pageSize <= 0 {
+		pageSize = len(m.snapshots)
+	}
+
+	filtered := make([]cubeMockSnapshot, 0, len(m.snapshots))
+	for _, snapshot := range m.snapshots {
+		if sandboxID != "" && snapshot.sandboxID != sandboxID {
+			continue
+		}
+		filtered = append(filtered, snapshot)
+	}
+	if start > len(filtered) {
+		start = len(filtered)
+	}
+	end := start + pageSize
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	items := make([]map[string]any, 0, end-start)
+	for _, snapshot := range filtered[start:end] {
+		items = append(items, map[string]any{
+			"snapshotID": snapshot.id,
+			"names":      snapshot.names,
+		})
+	}
+	if m.snapshotStuckPagination {
+		w.Header().Set("x-next-token", "stuck")
+	} else if end < len(filtered) {
+		w.Header().Set("x-next-token", strconv.Itoa(end))
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (m *cubeMockServer) handleDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/templates/")
+
+	m.mu.Lock()
+	failWith := m.snapshotDeleteFailWith
+	m.mu.Unlock()
+	if failWith != 0 {
+		writeJSON(w, failWith, map[string]string{"message": "internal error"})
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, snapshot := range m.snapshots {
+		if snapshot.id != id {
+			continue
+		}
+		m.snapshots = append(m.snapshots[:i], m.snapshots[i+1:]...)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeJSON(w, http.StatusNotFound, map[string]string{"message": "template not found"})
 }
 
 // handleEnvd intercepts data-plane requests that the Cube SDK sends through

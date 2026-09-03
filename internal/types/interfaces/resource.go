@@ -24,6 +24,8 @@ type ResourceRepository interface {
 	GetByTenantLocation(ctx context.Context, tenantID uint64, locationHash string) (*types.StoredResource, error)
 	MarkDeleted(ctx context.Context, id string) error
 	CreateBinding(ctx context.Context, binding *types.ResourceBinding) error
+	DeleteBinding(ctx context.Context, resourceID, ownerType, ownerID string) error
+	CountBindings(ctx context.Context, resourceID string) (int64, error)
 	CreateGrant(ctx context.Context, grant *types.ResourceAccessGrant) error
 	GetValidGrant(ctx context.Context, tokenHash string, now time.Time) (*types.ResourceAccessGrant, error)
 	DeleteExpiredGrants(ctx context.Context, before time.Time) error
@@ -46,6 +48,16 @@ type ResourceCatalog interface {
 	Resolve(ctx context.Context, reference string) (*types.StoredResource, error)
 	ResolvePath(ctx context.Context, value string) (string, *types.StoredResource, error)
 	Bind(ctx context.Context, reference, ownerType, ownerID, relation string) error
+	// Release drops one owner's claim on a resource and reports how many
+	// claims remain. Callers use the count to decide whether the bytes may be
+	// deleted: a resource still referenced by another owner — the assistant
+	// message an answer was saved from, a second knowledge entry — must
+	// survive the owner being removed.
+	//
+	// remaining is -1 when the answer is unknown (the reference is not a
+	// catalog handle, or the count could not be read), which callers should
+	// treat as "delete as before" rather than as "keep forever".
+	Release(ctx context.Context, reference, ownerType, ownerID string) (remaining int64, err error)
 	MarkDeleted(ctx context.Context, reference string) error
 	CreateAccessGrant(ctx context.Context, reference string, ttl time.Duration) (string, error)
 	ResolveAccessGrant(ctx context.Context, token string) (*types.StoredResource, error)

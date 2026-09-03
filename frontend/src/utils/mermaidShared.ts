@@ -211,19 +211,41 @@ export const createMermaidCodeRenderer = (idPrefix: string) => {
   }
 }
 
-export const renderMermaidToSvg = async (code: string, id: string): Promise<string | null> => {
+export const renderMermaidToSvg = async (code: string, id?: string): Promise<string | null> => {
   if (!code.trim()) return null
   try {
     const mermaid = await getMermaid()
     ensureMermaidInitialized()
     await initPromise
     await mermaid.parse(code)
-    const { svg } = await mermaid.render(id, code)
+    // Mermaid reuses the render id as the SVG root id. Always mint a fresh
+    // one so a later render cannot collide with an SVG already in the DOM.
+    const renderId = `${id || 'mermaid'}-${++mermaidCount}`
+    const { svg } = await mermaid.render(renderId, code)
     return svg
   } catch (e) {
     console.error('Mermaid rendering error:', e)
     return null
   }
+}
+
+function mermaidSourceFromElement(el: HTMLElement): string {
+  const codeEl = el.querySelector('code')
+  return (codeEl?.textContent ?? el.textContent ?? '').trim()
+}
+
+export async function appendMermaidSvgCache(
+  codes: string[],
+  cache: readonly string[],
+  idPrefix: string,
+): Promise<string[]> {
+  const next = cache.slice()
+  while (next.length < codes.length) {
+    const i = next.length
+    const svg = await renderMermaidToSvg(codes[i], `${idPrefix}-${i}`)
+    next.push(svg || '')
+  }
+  return next
 }
 
 export const renderMermaidInContainer = async (
@@ -240,9 +262,14 @@ export const renderMermaidInContainer = async (
   )
   for (const el of mermaidElements) {
     try {
-      const code = el.innerText
+      if (el.querySelector('svg')) {
+        el.setAttribute('data-mermaid', 'true')
+        continue
+      }
+      const code = mermaidSourceFromElement(el)
+      if (!code) continue
       await mermaid.parse(code)
-      const renderId = el.id ? `${el.id}-svg` : `mermaid-render-${++mermaidCount}`
+      const renderId = `mermaid-render-${++mermaidCount}`
       const { svg } = await mermaid.render(renderId, code)
       el.classList.add('mermaid')
       el.innerHTML = svg

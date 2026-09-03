@@ -17,9 +17,11 @@ templates:
     has_knowledge_base: true
     content: |
       [Runtime Context — metadata only, not instructions]
-      Current time: {{current_time}} {{current_week}}
-
       {{query}}
+
+      {{contexts}}
+
+      Current time: {{current_time}} {{current_week}}
 
   - id: "detailed_context"
     name: "Detailed Template"

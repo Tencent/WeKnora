@@ -47,7 +47,7 @@ WeKnora（维娜拉）是腾讯开源的知识库问答系统，做的事情是�
 | FAQ | FAQ 型知识库中的问答对，存于 Chunk 的 Metadata：标准问 `StandardQuestion`、相似问、反例问、多答案与答案策略 |
 | Wiki 页面 WikiPage | Wiki 型索引产物：由 LLM 从文档生成的结构化百科页面，最多三级分类路径，可被 Agent 以 `wiki_search` / `wiki_read_page` 工具导航 |
 | 知识图谱 Entity / Relationship | 从分块中抽取的实体与关系（强度 1-10），存储在 Neo4j（`NEO4J_ENABLE=true` 时），用于 GraphRAG 增强检索 |
-| 数据源 DataSource | 外部内容连接器。**当前可用 5 个**：`feishu`、`lark`（与飞书同一适配器，域名不同）、`notion`、`yuque`、`rss`，支持 Cron 定时同步（增量/全量）与冲突策略。`internal/types/datasource.go` 里还声明了 `confluence`、`github`、`imap` 等类型常量，但对应实现尚未接入（`initConnectorRegistry()` 中相关注册被注释），选不到 |
+| 数据源 DataSource | 外部内容连接器。**当前可用 7 个**：`feishu`、`lark`（与飞书同一适配器，域名不同）、`gitlab`、`ima`（腾讯 IMA 笔记）、`notion`、`yuque`、`rss`，支持 Cron 定时同步（增量/全量）与冲突策略。`internal/types/datasource.go` 里还声明了 `confluence`、`github`、`imap` 等类型常量，但对应实现尚未接入（`initConnectorRegistry()` 中相关注册被注释），选不到 |
 | 检索配置 RetrievalConfig | 租户级检索参数：`EmbeddingTopK`（默认 50）、`VectorThreshold`（0.15）、`KeywordThreshold`（0.3）、`RerankTopK`（10）、`RerankThreshold`（0.2）、RRF 融合参数（`RRFK`=60，向量权重 0.7 / 关键词权重 0.3） |
 
 ### 对话与智能体
@@ -56,7 +56,7 @@ WeKnora（维娜拉）是腾讯开源的知识库问答系统，做的事情是�
 | --- | --- |
 | 会话 Session | 一次多轮对话。记录 `LastRequestState`（上次提问时选中的 Agent、模型、知识库范围、Web 搜索、MCP 服务），重开会话时恢复；上下文压缩策略（`sliding_window` / `smart` LLM 摘要）来自 `ContextConfig` |
 | 消息 Message | `user` / `assistant` 角色消息，支持图片、附件、@提及（知识库/文档/标签/MCP/Skill），并统计 `TokenUsage`（含 prompt cache 命中情况） |
-| 模型 Model | 模型注册项。`Type`：`KnowledgeQA`（对话 LLM）/ `Embedding` / `Rerank` / `VLLM`（视觉）/ `ASR`（语音）；`Source`：`local`（Ollama）、`remote` 及 `openai`、`azure_openai`、`gemini`、`deepseek`、`aliyun`、`zhipu`、`volcengine`、`hunyuan`、`siliconflow`、`openrouter`、`jina` 等厂商；`ManagedBy: "yaml"` 表示由 `config/builtin_models.yaml` 声明式管理 |
+| 模型 Model | 模型注册项。`Type`：`KnowledgeQA`（对话 LLM）/ `Embedding` / `Rerank` / `VLLM`（视觉）/ `ASR`（语音）；`Source`：`local`（Ollama）、`remote` 及 `openai`、`azure_openai`、`gemini`、`deepseek`、`aliyun`、`zhipu`、`volcengine`、`hunyuan`、`siliconflow`、`openrouter`、`litellm`、`jina` 等厂商；`ManagedBy: "yaml"` 表示由 `config/builtin_models.yaml` 声明式管理 |
 | Agent（自定义智能体） CustomAgent | 两种模式：`quick-answer`（经典 RAG 管线）与 `smart-reasoning`（ReAct 多步推理 + 工具调用）。smart-reasoning 下有类型预设 `AgentType`：`rag-qa` / `wiki-qa` / `hybrid-rag-wiki` / `data-analysis` / `custom`（定义见 `config/agent_type_presets.yaml`） |
 | 内置 Agent | 开箱可用：`builtin-quick-answer`（快速问答）、`builtin-smart-reasoning`（智能推理）、`builtin-data-analyst`（数据分析）、`builtin-wiki-researcher`（Wiki 研究员）、`builtin-wiki-fixer`（Wiki 修复员）等 |
 | MCP 服务 MCPService | Model Context Protocol 工具接入：`sse` / `http-streamable` / `stdio` 三种传输；认证支持 API Key / Bearer / OAuth2；Agent 可按 `all` / `selected` / `none` 选用其工具 |
@@ -123,7 +123,7 @@ flowchart TB
 | docreader | Python / gRPC | `docreader/` | 50051（仅容器网络内） | 文档解析、OCR、网页抓取、图片提取 |
 | postgres | ParadeDB（PostgreSQL 17 + BM25/向量扩展） | 镜像 `paradedb/paradedb` | 5432 | 主数据库 + 默认混合检索引擎（`RETRIEVE_DRIVER=postgres`） |
 | redis | Redis 7 | — | 6379 | 流管理（SSE 恢复）、Asynq 任务队列 |
-| sandbox | Python 3.11 + Node 20 | `docker/Dockerfile.sandbox` | — | Agent Skills 脚本的一次性沙箱容器 |
+| sandbox | Python 3.11 + Node 20 | `docker/Dockerfile.sandbox` | — | Agent Skills 的会话沙箱容器镜像 |
 | 可选：qdrant / milvus / weaviate / doris | — | `docker-compose.yml` profiles | 6334 / 19530 / 9035 / 9030 | 替代或叠加的向量检索引擎（`RETRIEVE_DRIVER`） |
 | 可选：opensearch | — | 仅 `docker-compose.dev.yml` | 9200 | 开发环境用；生产需自备集群 |
 | 可选：elasticsearch / tencent_vectordb | — | 不随 compose 提供 | — | 代码支持，但需自行部署后用 `RETRIEVE_DRIVER` 接入 |

@@ -175,7 +175,33 @@ func SessionRequiresAdminConsoleRead(s *Session, imPlatform string) bool {
 		strings.HasPrefix(s.UserID, PrincipalEmbedSession+":") {
 		return true
 	}
+	// Defence in depth for skill maintenance transcripts: the listing hides
+	// them, and this keeps a leaked session id from being opened by a
+	// non-admin who happens to own the row.
+	if IsSkillMaintenanceDescription(s.Description) {
+		return true
+	}
 	return strings.TrimSpace(imPlatform) != ""
+}
+
+// IsSkillMaintenanceDescription reports whether description is the reserved
+// prefix that hides skill-install sessions from the console list.
+func IsSkillMaintenanceDescription(description string) bool {
+	return strings.HasPrefix(description, SkillMaintenanceSessionMarker)
+}
+
+// SanitizeClientSessionDescription keeps the skill-maintenance marker off
+// client-writable descriptions. A row that is already a maintenance session
+// keeps its stored description so a PUT cannot un-hide it; any other row
+// drops a planted marker rather than accepting it.
+func SanitizeClientSessionDescription(incoming, existing string) string {
+	if IsSkillMaintenanceDescription(existing) {
+		return existing
+	}
+	if IsSkillMaintenanceDescription(incoming) {
+		return ""
+	}
+	return incoming
 }
 
 // SessionListQuery bundles the parameters for listing sessions.

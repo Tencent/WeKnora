@@ -412,9 +412,6 @@ Agents parse the first colon to extract the typed code. The exit code class (see
 | `local.upload_file_not_found` | 1 | no | verify the path is correct and readable |
 | `local.user_aborted` | 1 | no (user said no) | no action taken; pass `-y/--yes` to skip the confirmation prompt |
 | `internal.error` | 1 | no | catch-all for an untyped error that reached the top (a bug or unmapped dependency error); a recurring one is a classification gap worth reporting |
-| `mcp.readonly_mode` | 1 | no | MCP tool surface is read-only; mutations not exposed in this mode |
-| `mcp.schema_unknown_command` | 1 | no | (no canonical hint) |
-| `mcp.tool_not_allowed` | 1 | no | MCP tool not in the curated allowlist |
 
 <!-- ERROR_REFERENCE_END -->
 
@@ -460,7 +457,7 @@ auto-retry this exit code — every exit 10 is a user-in-the-loop decision.
 
 ## Stream recovery
 
-The `weknora session continue-stream <session-id> --message <msg-id>` command resumes an SSE event stream for an existing assistant message. Use cases: network-blip recovery, long-running agent invocation polling, completed-stream inspection.
+The `weknora session resume <session-id> --message <msg-id>` command resumes an SSE event stream for an existing assistant message. Use cases: network-blip recovery, long-running agent invocation polling, completed-stream inspection.
 
 ### Server semantics: replay-from-0, not cursor-resume
 
@@ -479,7 +476,7 @@ The server **replays all stored events from the start** of the assistant message
 | `STREAM_MANAGER_TYPE=redis` | **1 hour** (server-side; not configurable from the CLI) |
 | `STREAM_MANAGER_TYPE=memory` (default) | **Process lifetime** (server restart = data loss; no explicit cleanup logic) |
 
-After TTL, `weknora session continue-stream` returns the typed error `local.sse_stream_aborted`, which maps to exit code 1 per the Error code reference.
+After TTL, `weknora session resume` returns the typed error `local.sse_stream_aborted`, which maps to exit code 1 per the Error code reference.
 
 ## Dry-run contract
 
@@ -552,7 +549,7 @@ The curated 10 tools (`cli/internal/mcp/tools.go`):
 | `search_chunks` | hybrid (vector + keyword) retrieval |
 | `chat` | stream a RAG answer; auto-creates a session if absent |
 | `agent_list` | list custom agents |
-| `agent_invoke` | run a query through a custom agent |
+| `session_ask` | run a query through a custom agent |
 
 Adding a tool is a deliberate API expansion — the AI-agent-callable surface is the reason this CLI ships an MCP server, not its CLI command list, so the registration list in `registerTools` is maintained by hand.
 

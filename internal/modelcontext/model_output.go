@@ -27,10 +27,7 @@ func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
 		return r.modelWebFetchOutput(mapsValue(result.Data["results"]), result.Output)
 	}
 	if !result.Success {
-		if result.Error != "" {
-			return "Error: " + r.CompactKnownText(result.Error)
-		}
-		return "Error: tool call failed"
+		return failedToolModelText(result.Output, result.Error)
 	}
 	switch displayType {
 	case "grep_results":
@@ -476,6 +473,26 @@ func truncateModelEvidence(value string, maxRunes int) (string, bool) {
 		return "", true
 	}
 	return string(runes[:maxRunes]), true
+}
+
+// failedToolModelText is what the model should see for a failed tool call.
+// Script and shell failures put the useful diagnostics in Output (stdout /
+// stderr); Error is often just "exited with code 1" plus a retry hint.
+// Putting Output first makes "[Analyze the error above ...]" refer to the
+// actual streams.
+func failedToolModelText(output, errMsg string) string {
+	output = strings.TrimSpace(output)
+	errMsg = strings.TrimSpace(errMsg)
+	switch {
+	case output == "" && errMsg == "":
+		return "Error: tool call failed"
+	case output == "":
+		return "Error: " + errMsg
+	case errMsg == "" || strings.Contains(output, errMsg):
+		return output
+	default:
+		return output + "\n\nError: " + errMsg
+	}
 }
 
 func mapsValue(value interface{}) []map[string]interface{} {

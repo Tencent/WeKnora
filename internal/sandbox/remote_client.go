@@ -2,7 +2,7 @@
 //
 // This file introduces the RemoteSandboxClient interface and the neutral
 // data-transfer types that SessionBoundManager depends on. Concrete backends
-// (Cube, E2B) each provide an implementation
+// (Cube, E2B, Docker) each provide an implementation
 // in a separate adapter file.
 //
 // The interface is deliberately minimal: it covers only the operations
@@ -15,6 +15,8 @@ package sandbox
 import (
 	"context"
 	"time"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // RemoteProvider identifies a remote sandbox backend. Values match the
@@ -36,6 +38,15 @@ type RemoteSandboxHandle interface {
 	// creation, when the provider preserves it. Returns nil when the provider
 	// does not support metadata recovery.
 	Metadata() map[string]string
+}
+
+// RemoteConnectRequest re-attaches to an existing sandbox. TrafficAccessToken
+// is the inbound credential recovered from the session binding; adapters apply
+// it when the provider's connect response omits it, which is the normal case
+// because the token is only ever issued at create time.
+type RemoteConnectRequest struct {
+	SandboxID          string
+	TrafficAccessToken string
 }
 
 // RemoteTimeoutMode describes how the remote provider should treat the
@@ -119,41 +130,104 @@ type RemoteCreateRequest struct {
 }
 
 // RemoteNetworkPolicy is the provider-neutral outbound-network policy for a
-// new sandbox. Only the fields both Cube and E2B accept live here; provider-
-// specific extensions (E2B request rules, Cube L7 policy, egress proxies,
-// masked host names) stay inside the adapters until we have a second caller
-// that needs them expressed at this layer.
+// new sandbox. The fields both Cube and E2B accept are shared; the two L7
+// extensions they do not share are carried here as separate slices rather
+// than merged, because their shapes have nothing in common. Each adapter
+// consumes its own and ignores the other's. Extensions with no admin-facing
+// surface yet (egress proxies, masked host names) still stay in the adapters.
 //
 // Field semantics match the underlying providers:
 //
-//   - AllowInternetAccess: top-level egress switch. When nil the adapter
-//     leaves it unset so the provider server-side default (typically true)
-//     applies. When *false the sandbox has no default egress; specific
-//     hosts must appear in AllowOut.
+//   - AllowInternetAccess: top-level egress switch. Both adapters materialise
+//     nil as true rather than leaving it unset, because the provider default
+//     is the template's rather than the protocol's. ResolveEffectiveConfig
+//     always fills it, so nil reaches an adapter only from a hand-built
+//     Config. When false the sandbox has no default egress; specific hosts
+//     must appear in AllowOut.
 //   - AllowPublicTraffic: whether the sandbox is reachable from the public
-//     internet by URL. nil defers to the provider default; false hides the
-//     sandbox behind a per-sandbox traffic access token.
+//     internet by URL. ResolveEffectiveConfig always sets this to false
+//     (credential required). nil reaches an adapter only from a hand-built
+//     Config and is materialised as false there too. true is leftover for
+//     tests; production create never sends it.
 //   - AllowOut / DenyOut: CIDR blocks or domain names. Cube treats these as
 //     L3/L4 filters; E2B applies domain-level filtering only on HTTP(S).
 //     Both providers require that specific domain allow-lists be paired
-//     with a deny-all (DenyOut: ["0.0.0.0/0"]) — the adapters surface the
-//     provider-native error unchanged so callers can react.
+//     with a deny-all; types.ValidateSandboxNetworkPolicy enforces that at
+//     save time, so the adapters never see the provider-native error.
 type RemoteNetworkPolicy struct {
 	AllowInternetAccess *bool
 	AllowPublicTraffic  *bool
 	AllowOut            []string
 	DenyOut             []string
+	// CubeRules / E2BHostRules are the provider-specific L7 extensions. Each
+	// adapter consumes its own and ignores the other's, so this type stays a
+	// superset rather than a lowest common denominator.
+	CubeRules    []RemoteCubeEgressRule
+	E2BHostRules []RemoteE2BHostRule
 }
 
-// IsZero reports whether the policy carries no caller-specified fields, in
-// which case adapters apply their own permissive defaults for backwards
-// compatibility with WeKnora deployments that predate provider-neutral
-// network policy.
-func (p RemoteNetworkPolicy) IsZero() bool {
-	return p.AllowInternetAccess == nil &&
-		p.AllowPublicTraffic == nil &&
-		len(p.AllowOut) == 0 &&
-		len(p.DenyOut) == 0
+// DeniesEgressByDefault reports whether outbound traffic falls back to deny,
+// leaving only AllowOut (and L7 rule targets) reachable.
+//
+// It accepts both spellings the drawer and the validator accept: the top-level
+// switch turned off, or a deny-all entry in DenyOut. A caller that checks only
+// AllowInternetAccess misreads a strict-but-valid config as an open one, which
+// is how the deep connectivity check came to report a correct deny-all policy
+// as a hard egress failure.
+func (p RemoteNetworkPolicy) DeniesEgressByDefault() bool {
+	if p.AllowInternetAccess != nil && !*p.AllowInternetAccess {
+		return true
+	}
+	return types.DenyOutCoversAllIPv4(p.DenyOut)
+}
+
+// RemoteInboundTokenCarrier is implemented by handles whose provider issues
+// a per-sandbox inbound traffic token. Cube and E2B always do; Docker does
+// not. It is an optional capability in the same spirit as RemoteSnapshotManager.
+type RemoteInboundTokenCarrier interface {
+	TrafficAccessToken() string
+}
+
+// InboundTokenOf returns the inbound credential a handle carries, or "" when
+// the provider has none. Callers persist it so a later reconnect can restore
+// it.
+func InboundTokenOf(handle RemoteSandboxHandle) string {
+	carrier, ok := handle.(RemoteInboundTokenCarrier)
+	if !ok {
+		return ""
+	}
+	return carrier.TrafficAccessToken()
+}
+
+// RemoteCubeEgressRule is one CubeEgress L7 rule in neutral form. Allow is
+// phrased positively here even though the stored config says Deny: adapters
+// map onto provider payloads whose field is also an allow flag, and having
+// the negation happen exactly once (in ResolveEffectiveConfig) is what keeps
+// a double negative from creeping in.
+type RemoteCubeEgressRule struct {
+	Name    string
+	Scheme  string
+	SNI     string
+	Host    string
+	Methods []string
+	Path    string
+	Allow   bool
+	Audit   string
+	Inject  []RemoteHeaderInject
+}
+
+// RemoteHeaderInject is one credential header injected by the egress proxy.
+// Format defaults to "${SECRET}" provider-side when empty.
+type RemoteHeaderInject struct {
+	Header string
+	Secret string
+	Format string
+}
+
+// RemoteE2BHostRule is one E2B per-host request transform.
+type RemoteE2BHostRule struct {
+	Host    string
+	Headers map[string]string
 }
 
 // RemoteSandboxSummary is the neutral view of a sandbox listing / probe.
@@ -336,6 +410,11 @@ type RemoteSandboxCapabilities struct {
 	// staging tools that would otherwise fail at request time.
 	SupportsFilesystemEnumeration bool
 
+	// SupportsSnapshots reports whether the provider can snapshot a running
+	// sandbox into a reusable image. Snapshot IDs double as template IDs on
+	// Cube, E2B, and Docker, which is what makes skill images work.
+	SupportsSnapshots bool
+
 	// SupportsVolumes is true when the provider can mount a named volume into
 	// a sandbox at creation time (RemoteCreateRequest.VolumeMounts). Callers
 	// use this to tell an operator up front that a backend cannot serve
@@ -369,10 +448,10 @@ type RemoteSandboxClient interface {
 	// is owned by the caller; Delete must eventually be called.
 	Create(ctx context.Context, req RemoteCreateRequest) (RemoteSandboxHandle, error)
 
-	// Connect re-attaches to an already-running sandbox by ID. Adapters that
+	// Connect re-attaches to an already-running sandbox. Adapters that
 	// cannot support reconnect must return RemoteErrorKindUnsupported here
 	// and set SupportsReconnect=false.
-	Connect(ctx context.Context, sandboxID string) (RemoteSandboxHandle, error)
+	Connect(ctx context.Context, req RemoteConnectRequest) (RemoteSandboxHandle, error)
 
 	// Get fetches a single sandbox summary by ID. Returns nil summary and
 	// RemoteErrorKindNotFound when the sandbox is gone.
@@ -396,6 +475,10 @@ type RemoteSandboxClient interface {
 	WriteFile(ctx context.Context, handle RemoteSandboxHandle, path string, content []byte) error
 	ReadFile(ctx context.Context, handle RemoteSandboxHandle, path string) ([]byte, error)
 	ListDir(ctx context.Context, handle RemoteSandboxHandle, path string) ([]RemoteDirEntry, error)
+	// MakeDir creates path, including parents. A directory that already
+	// exists is success: envd's MakeDir is not mkdir -p, and adapters must
+	// hide that so writing a second file into the same folder (or seeding
+	// SKILL.md after resetSkillDir) does not fail.
 	MakeDir(ctx context.Context, handle RemoteSandboxHandle, path string) error
 	Remove(ctx context.Context, handle RemoteSandboxHandle, path string) error
 	Stat(ctx context.Context, handle RemoteSandboxHandle, path string) (*RemoteStatEntry, error)
@@ -412,4 +495,50 @@ func cloneMetadata(source map[string]string) map[string]string {
 		result[key] = value
 	}
 	return result
+}
+
+// RemoteSnapshotRef identifies one provider-side snapshot. ID can be passed
+// straight back as RemoteCreateRequest.TemplateID: Cube and E2B store
+// snapshots as templates, and Docker stores them as local image tags.
+type RemoteSnapshotRef struct {
+	ID    string
+	Names []string
+}
+
+// RemoteSnapshotManager is an optional capability used only by the skill
+// install/remove paths. Session execution never touches it.
+type RemoteSnapshotManager interface {
+	// CreateSnapshot snapshots a running sandbox. An empty name lets the
+	// provider generate one. The provider pauses the sandbox while the
+	// snapshot is taken.
+	CreateSnapshot(ctx context.Context, sandboxID string, name string) (RemoteSnapshotRef, error)
+
+	// DeleteSnapshot removes a snapshot. A missing snapshot is NOT an error:
+	// both SDKs treat delete as idempotent and so must every adapter.
+	DeleteSnapshot(ctx context.Context, snapshotID string) error
+
+	// ListSnapshots lists snapshots. An empty sandboxID lists all of them.
+	ListSnapshots(ctx context.Context, sandboxID string) ([]RemoteSnapshotRef, error)
+}
+
+// SnapshotManagerFrom narrows a client to its snapshot capability. It returns
+// false for providers that cannot snapshot, so callers can fall back to the
+// base template instead of failing.
+//
+// Both signals must agree: the type assertion finds the methods, and
+// SupportsSnapshots is the advertised capability. A wrapper that happens to
+// embed snapshot methods must not be treated as snapshot-capable when the
+// flag is off.
+func SnapshotManagerFrom(client RemoteSandboxClient) (RemoteSnapshotManager, bool) {
+	if client == nil {
+		return nil, false
+	}
+	mgr, ok := client.(RemoteSnapshotManager)
+	if !ok {
+		return nil, false
+	}
+	if !client.Capabilities().SupportsSnapshots {
+		return nil, false
+	}
+	return mgr, true
 }

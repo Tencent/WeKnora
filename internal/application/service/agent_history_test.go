@@ -250,6 +250,42 @@ func TestBuildAssistantHistoryMessages_ToolFailureSurfacesAsError(t *testing.T) 
 	}, got[1])
 }
 
+func TestBuildAssistantHistoryMessages_SkillScriptFailureKeepsStdout(t *testing.T) {
+	stdout := `{"chart":{"success":false,"error":{"error":"X轴字段不存在：工作项目"}}}`
+	msg := &types.Message{
+		Role:    "assistant",
+		Content: "I will retry with a different axis.",
+		AgentSteps: types.AgentSteps{
+			{
+				Iteration: 0,
+				Thought:   "Plot the chart.",
+				ToolCalls: []types.ToolCall{
+					{
+						ID:   "call_skill",
+						Name: agenttools.ToolExecuteSkillScript,
+						Args: map[string]interface{}{"skill_name": "smart-charts", "script_path": "scripts/cli.py"},
+						Result: &types.ToolResult{
+							Success: false,
+							Output:  "=== Script Execution ===\n" + stdout,
+							Error:   "Script exited with code 1",
+							Data: map[string]interface{}{
+								"display_type": "shell_exec",
+								"stdout":       stdout,
+								"exit_code":    1,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	got := buildAssistantHistoryMessages(msg)
+	require.Len(t, got, 3)
+	assert.Equal(t, "tool", got[1].Role)
+	assert.Contains(t, got[1].Content, "X轴字段不存在：工作项目")
+	assert.Contains(t, got[1].Content, "Error: Script exited with code 1")
+}
+
 // TestFilterNonTerminalToolCalls confirms a legacy final_answer entry is
 // dropped — every other tool (KB search, web search, MCP tools…) must survive.
 func TestFilterNonTerminalToolCalls(t *testing.T) {

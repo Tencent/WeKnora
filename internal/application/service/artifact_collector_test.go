@@ -139,6 +139,12 @@ type bindCall struct {
 type fakeCatalog struct {
 	binds   []bindCall
 	bindErr error
+	// Release scripting, used by the deletion-guard tests. releaseRemaining
+	// maps a reference to the binding count left after the release; a missing
+	// entry answers -1 ("not a catalog handle").
+	releaseRemaining map[string]int64
+	releaseErr       error
+	releases         []string
 }
 
 func (c *fakeCatalog) Register(context.Context, uint64, string, interfaces.ResourceRegistration) (string, error) {
@@ -155,6 +161,17 @@ func (c *fakeCatalog) Bind(_ context.Context, ref, ownerType, ownerID, relation 
 	return c.bindErr
 }
 func (c *fakeCatalog) MarkDeleted(context.Context, string) error { return nil }
+
+func (c *fakeCatalog) Release(_ context.Context, ref, ownerType, ownerID string) (int64, error) {
+	c.releases = append(c.releases, ref+"|"+ownerType+"|"+ownerID)
+	if c.releaseErr != nil {
+		return -1, c.releaseErr
+	}
+	if remaining, ok := c.releaseRemaining[ref]; ok {
+		return remaining, nil
+	}
+	return -1, nil
+}
 func (c *fakeCatalog) CreateAccessGrant(context.Context, string, time.Duration) (string, error) {
 	return "", nil
 }
@@ -215,6 +232,48 @@ func TestArtifactCollector_CollectsNewFiles(t *testing.T) {
 		if art.FileSize == 0 {
 			t.Fatalf("artifact FileSize zero: %+v", art)
 		}
+	}
+}
+
+func TestArtifactCollector_NotifyFiresBeforeUpload(t *testing.T) {
+	ctx := context.Background()
+	src := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"sess-1": {
+				{
+					Name: "a.html", Path: "/workspace/output/a.html",
+					Type: sandbox.RemoteEntryFile, Size: 2,
+					ModTime: mustParseTime("2026-07-10T10:20:33Z"),
+				},
+				{
+					Name: "b.csv", Path: "/workspace/output/b.csv",
+					Type: sandbox.RemoteEntryFile, Size: 2,
+					ModTime: mustParseTime("2026-07-10T10:20:34Z"),
+				},
+			},
+		},
+		contents: map[string][]byte{
+			"/workspace/output/a.html": []byte("ok"),
+			"/workspace/output/b.csv":  []byte("x,"),
+		},
+	}
+	c := newTestCollector(src, &fakeStore{}, &fakeFileService{}, 1<<20)
+
+	var notified int
+	got, err := c.CollectWithNotify(ctx, "sess-1", "msg-1", 42, "/workspace/output", func(n int) {
+		if src.readCalls != nil {
+			t.Fatalf("notify ran after ReadSessionFile: %v", src.readCalls)
+		}
+		notified = n
+	})
+	if err != nil {
+		t.Fatalf("CollectWithNotify() error = %v", err)
+	}
+	if notified != 2 {
+		t.Fatalf("notify count = %d, want 2", notified)
+	}
+	if len(got) != 2 {
+		t.Fatalf("CollectWithNotify() len = %d, want 2", len(got))
 	}
 }
 

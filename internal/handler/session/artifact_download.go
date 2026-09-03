@@ -69,14 +69,11 @@ func (h *Handler) ListSessionArtifacts(c *gin.Context) {
 		return
 	}
 
-	// Strip the storage URL before serialising to the client; the URL is a
-	// server-side implementation detail (provider:// path) that must never
-	// escape the process. The client references artifacts by index in the
-	// download URL instead.
 	items := make([]artifactListItem, 0, len(artifacts))
 	for i, a := range artifacts {
 		items = append(items, artifactListItem{
 			Index:      i,
+			Handle:     artifactHandle(a),
 			FileName:   a.FileName,
 			FileType:   a.FileType,
 			FileSize:   a.FileSize,
@@ -128,6 +125,7 @@ func (h *Handler) ListMessageArtifacts(c *gin.Context) {
 	for i, a := range msg.Artifacts {
 		items = append(items, artifactListItem{
 			Index:      i,
+			Handle:     artifactHandle(a),
 			FileName:   a.FileName,
 			FileType:   a.FileType,
 			FileSize:   a.FileSize,
@@ -220,11 +218,16 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 }
 
 // artifactListItem is the JSON shape returned by ListSessionArtifacts /
-// ListMessageArtifacts. It intentionally omits the URL: clients reference
-// each artifact through its position in the parent message's Artifacts
-// array so the storage path never leaves the server.
+// ListMessageArtifacts. It carries the resource handle but never the storage
+// path: the handle is the artifact's public identity — it is what the answer
+// body references and what an authorizing proxy resolves — while the physical
+// bucket/key stays server side.
 type artifactListItem struct {
-	Index      int    `json:"index"`
+	Index int `json:"index"`
+	// Handle is the artifact's `resource://<handle>` reference, matching the
+	// destinations in the message body. Empty when the deployment runs without
+	// a resource catalog, in which case the body references files by name.
+	Handle     string `json:"handle,omitempty"`
 	FileName   string `json:"file_name"`
 	FileType   string `json:"file_type"`
 	FileSize   int64  `json:"file_size"`
@@ -304,7 +307,11 @@ func (urlPathEscaper) escape(s string) string {
 	return b.String()
 }
 
-// ensureAssistantOwnsArtifact is a small helper reserved for future
-// authorisation refinements (per-message role checks). It is unused today
-// but kept close to the handlers so future changes stay obvious.
-var _ = types.MessageArtifact{}
+// artifactHandle returns the artifact's `resource://<handle>` reference, or ""
+// when the deployment stores artifacts without a resource catalog.
+func artifactHandle(artifact types.MessageArtifact) string {
+	if handle, ok := types.ParseResourcePath(artifact.URL); ok {
+		return types.BuildResourcePath(handle)
+	}
+	return ""
+}

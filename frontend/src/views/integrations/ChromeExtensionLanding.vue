@@ -117,7 +117,7 @@ const openChromeStore = () => {
 }
 
 const openApiSettings = () => {
-  router.push({ path: '/platform/settings', query: { section: 'integrations', tab: 'api' } })
+  router.push({ path: '/platform/settings', query: { section: 'integration-api' } })
   uiStore.openSettings('integration-api')
 }
 

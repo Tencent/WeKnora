@@ -138,3 +138,36 @@ func TestChangePassword_MapsSamePasswordDetail(t *testing.T) {
 		t.Fatalf("details = %q, want %q", resp.Error.Details, service.DetailSamePassword)
 	}
 }
+
+func TestChangePassword_MapsPasswordPolicyDetail(t *testing.T) {
+	h := &AuthHandler{
+		userService: &stubChangePasswordUserService{
+			getCurrentUser: func(_ context.Context) (*types.User, error) {
+				return &types.User{ID: "user-1", Email: "alice@example.com"}, nil
+			},
+			changePassword: func(_ context.Context, _, _, _ string) error {
+				return service.ErrComplexPasswordPolicy
+			},
+		},
+	}
+
+	w := doChangePassword(t, newChangePasswordTestRouter(h), map[string]string{
+		"old_password": "OldSecure9",
+		"new_password": "NewSecure9",
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+
+	var resp struct {
+		Error struct {
+			Details string `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Error.Details != service.DetailPasswordPolicy {
+		t.Fatalf("details = %q, want %q", resp.Error.Details, service.DetailPasswordPolicy)
+	}
+}

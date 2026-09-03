@@ -247,7 +247,6 @@ func e2bCompatibleConfig(t *testing.T) *Config {
 
 	cfg := DefaultConfig()
 	cfg.Type = SandboxTypeE2B
-	cfg.FallbackEnabled = false
 	cfg.AllowPrivateEndpoints = true
 	cfg.E2BAPIKey = apiKey
 	cfg.E2BTemplate = template

@@ -103,19 +103,27 @@ func (h *AuthHandler) resolveRegistrationMode(ctx context.Context) string {
 	return h.systemSettingSvc.GetString(ctx, "auth.registration_mode", "", def)
 }
 
-// resolveDefaultTenantMode returns the provisioning policy for ordinary
-// public password registrations. Invitation registration never uses this
-// value: the invitation itself supplies the target tenant.
-func (h *AuthHandler) resolveDefaultTenantMode(ctx context.Context) types.TenantProvisioningMode {
+// resolveDefaultTenantMode returns the provisioning policy for a new
+// local user account.
+// Priority: DB system_settings > cfg.Auth > hard default (create_personal).
+// Shared by public registration and the SystemAdmin create-user endpoint.
+//
+// Invitation registration never uses this value: the invitation itself
+// supplies the target tenant.
+func resolveDefaultTenantMode(
+	ctx context.Context,
+	configInfo *config.Config,
+	systemSettingSvc interfaces.SystemSettingService,
+) types.TenantProvisioningMode {
 	def := config.AuthDefaultTenantModeCreatePersonal
-	if h.configInfo != nil && h.configInfo.Auth != nil {
-		if mode := strings.TrimSpace(h.configInfo.Auth.DefaultTenantMode); mode != "" {
+	if configInfo != nil && configInfo.Auth != nil {
+		if mode := strings.TrimSpace(configInfo.Auth.DefaultTenantMode); mode != "" {
 			def = mode
 		}
 	}
 	mode := def
-	if h.systemSettingSvc != nil {
-		mode = h.systemSettingSvc.GetString(
+	if systemSettingSvc != nil {
+		mode = systemSettingSvc.GetString(
 			ctx,
 			"auth.default_tenant_mode",
 			"WEKNORA_AUTH_DEFAULT_TENANT_MODE",
@@ -126,6 +134,26 @@ func (h *AuthHandler) resolveDefaultTenantMode(ctx context.Context) types.Tenant
 		return types.TenantProvisioningTenantless
 	}
 	return types.TenantProvisioningCreatePersonal
+}
+
+// resolveDefaultTenantMode returns the provisioning policy for ordinary
+// public password registrations.
+func (h *AuthHandler) resolveDefaultTenantMode(ctx context.Context) types.TenantProvisioningMode {
+	return resolveDefaultTenantMode(ctx, h.configInfo, h.systemSettingSvc)
+}
+
+// resolveDefaultTenantMode resolves the same policy for users provisioned
+// by a SystemAdmin via POST /api/v1/system/admin/users/create.
+func (h *SystemHandler) resolveDefaultTenantMode(ctx context.Context) types.TenantProvisioningMode {
+	return resolveDefaultTenantMode(ctx, h.cfg, h.systemSettingSvc)
+}
+
+func (h *AuthHandler) complexPasswordEnabled(ctx context.Context) bool {
+	return service.ResolveComplexPasswordEnabled(ctx, h.configInfo, h.systemSettingSvc)
+}
+
+func (h *SystemHandler) complexPasswordEnabled(ctx context.Context) bool {
+	return service.ResolveComplexPasswordEnabled(ctx, h.cfg, h.systemSettingSvc)
 }
 
 // Register godoc
@@ -180,6 +208,17 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		c.Error(appErr)
 		return
 	}
+
+	// Validate password against the runtime policy (DB system_settings
+	// first). Register itself does not enforce this because OIDC
+	// auto-provision uses an untyped random secret the user never types.
+	if err := service.ValidatePasswordPolicy(req.Password, h.complexPasswordEnabled(ctx)); err != nil {
+		logger.Error(ctx, "Invalid password policy")
+		appErr := errors.NewValidationError(err.Error())
+		_ = c.Error(appErr)
+		return
+	}
+
 	req.Username = secutils.SanitizeForLog(req.Username)
 	req.Email = secutils.SanitizeForLog(req.Email)
 	req.TenantProvisioning = h.resolveDefaultTenantMode(ctx)
@@ -633,11 +672,13 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 // (preserve existing value) from "explicit false". See
 // types.UserPreferences for the persistence-layer counterpart.
 type updateMyPreferencesRequest struct {
-	// LastActiveTenantID lets the SPA persist "after a fresh login,
-	// drop me back into this workspace" across devices. Send a positive
-	// workspace id to set / replace, or 0 to clear. Membership is validated
-	// at next login, not here. Nil = field omitted from the PATCH and
-	// stays untouched.
+	// LastActiveTenantID lets clients persist "after a fresh login,
+	// drop me back into this workspace" across devices. The SPA sends
+	// this after every tenant switch; POST /auth/switch-tenant records
+	// the same preference server-side. Send a positive workspace id to
+	// set / replace, or 0 to clear. Membership is validated at next
+	// login, not here. Nil = field omitted from the PATCH and stays
+	// untouched.
 	LastActiveTenantID *uint64 `json:"last_active_tenant_id"`
 }
 
@@ -690,7 +731,7 @@ func (h *AuthHandler) UpdateMyPreferences(c *gin.Context) {
 
 // ChangePassword godoc
 // @Summary      修改密码
-// @Description  修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；成功后所有会话被撤销，需重新登录。
+// @Description  修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；开启复杂密码后还需包含大小写与特殊字符。成功后所有会话被撤销，需重新登录。
 // @Tags         认证
 // @Accept       json
 // @Produce      json
@@ -725,14 +766,16 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	// Change password
+	// Change password. Policy is enforced in the service after the old
+	// password is verified so a wrong current credential is not masked
+	// by a complexity error.
 	err = h.userService.ChangePassword(ctx, user.ID, req.OldPassword, req.NewPassword)
 	if err != nil {
 		switch {
-		case stderrors.Is(err, service.ErrPasswordPolicy):
+		case service.IsPasswordPolicyError(err):
 			appErr := errors.NewValidationError("Password policy violation").
 				WithDetails(service.DetailPasswordPolicy)
-			c.Error(appErr)
+			_ = c.Error(appErr)
 			return
 		case stderrors.Is(err, service.ErrInvalidOldPassword):
 			appErr := errors.NewBadRequestError("Current password is incorrect").
@@ -761,7 +804,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 
 // GetAuthConfig godoc
 // @Summary      获取认证配置
-// @Description  返回当前部署的注册模式等公开认证配置，供前端决定是否展示注册入口
+// @Description  返回当前部署的注册模式与密码复杂度开关，供前端决定是否展示注册入口以及密码校验规则
 // @Tags         认证
 // @Accept       json
 // @Produce      json
@@ -769,29 +812,38 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 // @Router       /auth/config [get]
 //
 // GetAuthConfig is intentionally a no-auth endpoint: the frontend reads
-// it on app load to decide whether to show the Register tab. We expose
-// only what the UI strictly needs (registration_mode); other config
-// stays internal.
+// it on app load to decide whether to show the Register tab and which
+// password complexity rules to apply. We expose only what the UI
+// strictly needs; other config stays internal.
 func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 	// Same source-of-truth as Register's gate, so the UI hide-the-button
 	// signal can never disagree with the API enforcement signal.
 	mode := h.resolveRegistrationMode(c.Request.Context())
+
+	complexPasswordEnabled := service.ResolveComplexPasswordEnabled(
+		c.Request.Context(),
+		h.configInfo,
+		h.systemSettingSvc,
+	)
 	c.JSON(http.StatusOK, gin.H{
-		"success":           true,
-		"registration_mode": mode,
+		"success":                  true,
+		"registration_mode":        mode,
+		"complex_password_enabled": complexPasswordEnabled,
 	})
 }
 
 // SwitchTenant godoc
 // @Summary      切换激活空间
-// @Description  为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系
+// @Description  为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系（跨租户超级用户除外）。
+// @Description  成功换签会把目标空间写入「最近活跃租户」偏好，下次登录与 refresh 都落在该空间（refresh JWT 不含 tenant_id）。
+// @Description  该偏好是账号级的：一次换签会改变该用户所有设备的下次登录/refresh 落点。偏好写入失败则整次换签失败，不会发出新 token。
 // @Tags         认证
 // @Accept       json
 // @Produce      json
 // @Param        request  body      object{tenant_id=integer,refresh_token=string}  true  "切换请求"
 // @Success      200      {object}  types.LoginResponse
 // @Failure      400      {object}  errors.AppError  "参数错误"
-// @Failure      403      {object}  errors.AppError  "无该空间成员关系"
+// @Failure      403      {object}  errors.AppError  "无该空间成员关系或偏好写入失败"
 // @Security     Bearer
 // @Router       /auth/switch-tenant [post]
 //

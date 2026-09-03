@@ -100,6 +100,8 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/pin -H "Authorization: Bearer $TOK
 
 用途：KB 内混合检索（向量+关键词）。权限：Viewer+，KB read；API key `retrieve`/full。GET 携带 JSON body 仅为向后兼容（#1727），推荐 POST。
 
+查询参数：`resource_urls=handle|public`（`public` 把结果 `content` / `image_info` 里的 `resource://` 换成可加载直链，详见 [API 总览](./01-api-overview.md)）。
+
 请求体（`types.SearchParams`）：
 
 | 字段 | 类型 | 必填 | 说明 |
@@ -117,7 +119,7 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/pin -H "Authorization: Bearer $TOK
 响应：200 `{"success":true,"data":[SearchResult]}`
 
 ```bash
-curl -X POST $BASE/api/v1/knowledge-bases/kb-1/hybrid-search -H "X-API-Key: $API_KEY" \
+curl -X POST "$BASE/api/v1/knowledge-bases/kb-1/hybrid-search?resource_urls=public" -H "X-API-Key: $API_KEY" \
   -H 'Content-Type: application/json' -d '{"query_text":"退款流程","match_count":5}'
 ```
 

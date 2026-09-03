@@ -6,7 +6,7 @@
 
 | 类别 | 格式 |
 | --- | --- |
-| 文档 | PDF、Word（doc/docx）、PPT（ppt/pptx）、Excel（xls/xlsx）、EPUB |
+| 文档 | PDF、Word（doc/docx）、PPT（ppt/pptx）、Excel（xls/xlsx）、EPUB、XMind |
 | 文本 | txt、Markdown、CSV、JSON |
 | 网页 | 在线 URL 抓取、本地 HTML / MHTML 归档 |
 | 图片 | jpg、png、gif、bmp、tiff、webp（需配置视觉模型才能理解内容） |

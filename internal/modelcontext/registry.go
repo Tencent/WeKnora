@@ -250,7 +250,7 @@ func (r *Registry) ModelToolResultForTool(toolName string, result *types.ToolRes
 		if result.Success {
 			return result.Output
 		}
-		return result.Error
+		return failedToolModelText(result.Output, result.Error)
 	}
 	// Protect durable resources and UUID-bearing summary slugs before the
 	// source codec sees any embedded document IDs. Encode once more afterwards
@@ -266,10 +266,8 @@ func (r *Registry) ModelToolResultForTool(toolName string, result *types.ToolRes
 		modelOutput = r.sources.ModelOutput(&copyResult)
 	} else if copyResult.Success {
 		modelOutput = copyResult.Output
-	} else if copyResult.Error != "" {
-		modelOutput = "Error: " + copyResult.Error
 	} else {
-		modelOutput = "Error: tool call failed"
+		modelOutput = failedToolModelText(copyResult.Output, copyResult.Error)
 	}
 	// Even tools without structured source results can surface a known durable
 	// ID in validation errors or status text. Compact only explicitly declared

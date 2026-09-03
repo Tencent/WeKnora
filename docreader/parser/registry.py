@@ -16,10 +16,20 @@ from docreader.parser.opendataloader_parser import (
     opendataloader_available,
 )
 from docreader.parser.pdf_parser import PDFParser
+from docreader.parser.xmind_parser import XMindParser
 
 logger = logging.getLogger(__name__)
 
 BUILTIN_ENGINE = "builtin"
+
+# File types that builtin does not implement natively. When the requested
+# engine (including empty / builtin) cannot parse them, route to this engine
+# instead of raising ValueError — PPT/PPTX/CSV are markitdown-only.
+_DEFAULT_ENGINE_BY_TYPE = {
+    "ppt": "markitdown",
+    "pptx": "markitdown",
+    "csv": "markitdown",
+}
 
 
 class ParserEngineRegistry:
@@ -27,7 +37,7 @@ class ParserEngineRegistry:
 
     Each engine maps file extensions to parser classes.
     When a requested engine doesn't support a file type, the registry
-    falls back to the builtin engine automatically.
+    tries a type-level default engine, then builtin.
     """
 
     def __init__(self):
@@ -58,10 +68,12 @@ class ParserEngineRegistry:
     def get_parser_class(self, engine: str, file_type: str) -> Type[BaseParser]:
         """Resolve parser class for the given engine and file type.
 
-        Falls back to builtin engine when the requested engine doesn't
-        support the file type.
+        Fallback order when the requested engine is empty or does not
+        support the type: type-level default (e.g. ppt → markitdown),
+        then builtin. Raises an actionable error listing engines that
+        do support the type.
         """
-        ft = file_type.lower()
+        ft = file_type.lower().lstrip(".")
 
         if engine and engine in self._engines:
             cls = self._engines[engine].get(ft)
@@ -69,16 +81,36 @@ class ParserEngineRegistry:
                 logger.info("Using engine '%s' for file type '%s'", engine, ft)
                 return cls
             logger.info(
-                "Engine '%s' does not support '%s', falling back to builtin",
+                "Engine '%s' does not support '%s', falling back",
                 engine,
                 ft,
             )
+
+        default_engine = _DEFAULT_ENGINE_BY_TYPE.get(ft)
+        if default_engine:
+            cls = self._engines.get(default_engine, {}).get(ft)
+            if cls:
+                logger.info(
+                    "Using default engine '%s' for file type '%s'",
+                    default_engine,
+                    ft,
+                )
+                return cls
 
         builtin = self._engines.get(BUILTIN_ENGINE, {})
         cls = builtin.get(ft)
         if cls:
             return cls
 
+        supported = sorted(
+            name for name, parsers in self._engines.items() if ft in parsers
+        )
+        engine_label = engine or BUILTIN_ENGINE
+        if supported:
+            raise ValueError(
+                f"Unsupported file type {file_type!r} for engine {engine_label!r}. "
+                f"Configure one of: {', '.join(supported)}"
+            )
         raise ValueError(f"Unsupported file type: {file_type}")
 
     def list_engines(self, overrides: Optional[Dict[str, str]] = None) -> List[Dict]:
@@ -140,6 +172,7 @@ def _build_default_registry() -> ParserEngineRegistry:
             "html": HTMLParser,
             "htm": HTMLParser,
             "mhtml": MHTMLParser,
+            "xmind": XMindParser,
             **_image_types,
         },
         description="内置解析引擎",
