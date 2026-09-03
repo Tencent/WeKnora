@@ -432,14 +432,6 @@
         </p>
 
         <template v-if="backend !== 'docker'">
-          <t-form-item :label="$t('settings.sandbox.inboundAccess')"
-            :tips="$t('settings.sandbox.inboundAccessHelp')">
-            <t-radio-group v-model="allowPublicInbound">
-              <t-radio :value="false">{{ $t('settings.sandbox.inboundTokenRequired') }}</t-radio>
-              <t-radio :value="true">{{ $t('settings.sandbox.inboundPublic') }}</t-radio>
-            </t-radio-group>
-          </t-form-item>
-
           <t-form-item :label="$t('settings.sandbox.egressDefault')"
             :tips="$t('settings.sandbox.egressPrecedence')">
             <t-radio-group v-model="denyEgressByDefault">
@@ -511,7 +503,7 @@
             </t-button>
           </div>
           <p class="section-help">{{ $t('settings.sandbox.cubeL7RulesHelp') }}</p>
-          <div v-for="(rule, index) in cubeRules" :key="`cube-rule-${index}`"
+          <div v-for="(rule, index) in cubeRules" :key="rule.key"
             class="net-rule net-rule--collapsible" :class="{ 'is-open': rule.expanded }">
             <div class="net-rule__bar">
               <button
@@ -528,10 +520,24 @@
                   {{ rule.name.trim() || $t('settings.sandbox.ruleUntitled') }}
                 </span>
               </button>
-              <button type="button" class="net-rule__remove"
-                :aria-label="$t('common.delete')" @click="cubeRules.splice(index, 1)">
-                <t-icon name="close" size="14px" />
-              </button>
+              <div class="net-rule__actions">
+                <button type="button" class="net-rule__move"
+                  :disabled="index === 0"
+                  :aria-label="$t('settings.sandbox.moveRuleUp')"
+                  @click="moveCubeRule(index, -1)">
+                  <t-icon name="chevron-up" size="14px" />
+                </button>
+                <button type="button" class="net-rule__move"
+                  :disabled="index === cubeRules.length - 1"
+                  :aria-label="$t('settings.sandbox.moveRuleDown')"
+                  @click="moveCubeRule(index, 1)">
+                  <t-icon name="chevron-down" size="14px" />
+                </button>
+                <button type="button" class="net-rule__remove"
+                  :aria-label="$t('common.delete')" @click="cubeRules.splice(index, 1)">
+                  <t-icon name="close" size="14px" />
+                </button>
+              </div>
             </div>
             <div v-if="rule.expanded" class="net-rule__body">
               <div class="form-grid form-grid--two">
@@ -821,13 +827,13 @@ const storedSecrets = reactive({ cube: false, e2b: false })
 const envRows = ref<{ key: string; value: string; stored?: boolean }[]>([])
 const skillRollout = ref<'next_turn' | 'new_session'>('next_turn')
 // Both defaults are the zero value on the server too: egress allowed, inbound
-// requiring the per-sandbox credential.
+// requiring the per-sandbox credential. Inbound is not editable in this form.
 const denyEgressByDefault = ref(false)
-const allowPublicInbound = ref(false)
 const allowOutRows = ref<string[]>([])
 const denyOutRows = ref<string[]>([])
 
 type CubeRuleForm = {
+  key: string
   name: string
   scheme?: string
   sni?: string
@@ -859,6 +865,12 @@ type E2BRuleForm = {
 }
 const cubeRules = ref<CubeRuleForm[]>([])
 const e2bHostRules = ref<E2BRuleForm[]>([])
+let cubeRuleKeySeq = 0
+
+function newCubeRuleKey(): string {
+  cubeRuleKeySeq += 1
+  return `cube-rule-${cubeRuleKeySeq}`
+}
 
 function isStoredNetworkSecretRecoverable(
   row: { stored?: boolean },
@@ -875,9 +887,17 @@ function isStoredNetworkSecretRecoverable(
 function addCubeRule() {
   for (const rule of cubeRules.value) rule.expanded = false
   cubeRules.value.push({
+    key: newCubeRuleKey(),
     name: '', scheme: 'https', sni: '', host: '',
     methodsText: '', path: '', deny: false, audit: '', expanded: true, inject: [],
   })
+}
+
+function moveCubeRule(index: number, delta: number) {
+  const next = index + delta
+  if (next < 0 || next >= cubeRules.value.length) return
+  const [row] = cubeRules.value.splice(index, 1)
+  cubeRules.value.splice(next, 0, row)
 }
 
 function addE2BHostRule() {
@@ -1124,10 +1144,10 @@ function reset() {
   skillRollout.value = cfg.skill_rollout === 'new_session' ? 'new_session' : 'next_turn'
   const net = cfg.network || {}
   denyEgressByDefault.value = net.deny_egress_by_default === true
-  allowPublicInbound.value = net.allow_public_inbound === true
   allowOutRows.value = [...(net.allow_out || [])]
   denyOutRows.value = [...(net.deny_out || [])]
   cubeRules.value = (net.cube_rules || []).map((rule) => ({
+    key: newCubeRuleKey(),
     name: rule.name || '',
     scheme: rule.scheme || '',
     sni: rule.sni || '',
@@ -1172,16 +1192,9 @@ function reset() {
 
 function selectBackend(value: string) {
   if (backend.value === value) return
-  const crossingDocker = backend.value === 'docker' || value === 'docker'
   backend.value = value
   if (value === 'docker' && !docker.image) {
     docker.image = defaultDockerImage
-  }
-  if (crossingDocker) {
-    // Docker has no inbound token. Leaving this true while the radio is
-    // hidden, then switching to Cube/E2B, would create a publicly reachable
-    // sandbox under a control the admin never saw on the docker form.
-    allowPublicInbound.value = false
   }
   onBackendChange()
 }
@@ -1463,14 +1476,12 @@ function collectPayload(): SandboxConfig {
 // admin never touched serializes to the same thing as a fresh default.
 function collectNetworkPolicy(): SandboxNetworkPolicy {
   const policy: SandboxNetworkPolicy = {}
-  // Docker can only honour network_mode on the docker block. Sending the
-  // Cube/E2B radios would persist a public-inbound flag that becomes real
-  // the moment the admin switches backend.
+  // Docker can only honour network_mode on the docker block.
   if (backend.value === 'docker') {
     return policy
   }
   if (denyEgressByDefault.value) policy.deny_egress_by_default = true
-  if (allowPublicInbound.value) policy.allow_public_inbound = true
+  // Inbound stays the zero value: require the per-sandbox credential.
 
   if (backend.value !== 'docker') {
     const allowOut = allowOutRows.value.map((row) => row.trim()).filter(Boolean)
@@ -2218,10 +2229,15 @@ onUnmounted(stopTemplatePolling)
 
 .net-rule__bar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 22px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   min-height: 26px;
   padding: 0 2px;
+}
+
+.net-rule__actions {
+  display: flex;
+  align-items: center;
 }
 
 .net-rule__toggle {
@@ -2258,6 +2274,7 @@ onUnmounted(stopTemplatePolling)
   color: var(--td-text-color-placeholder);
 }
 
+.net-rule__move,
 .net-rule__remove {
   display: flex;
   align-items: center;
@@ -2270,6 +2287,16 @@ onUnmounted(stopTemplatePolling)
   color: var(--td-text-color-placeholder);
   cursor: pointer;
   border-radius: 4px;
+}
+
+.net-rule__move:hover:not(:disabled) {
+  color: var(--td-text-color-primary);
+  background: var(--td-bg-color-container-hover);
+}
+
+.net-rule__move:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .net-rule__remove:hover {
