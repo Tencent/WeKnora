@@ -5283,7 +5283,6 @@ export default {
       checkScopeFull: 'Эндпоинт, ключ, шаблон, выполнение внутри песочницы и исходящая сеть проверены по-настоящему.',
       checkScopePolicyRestricted: 'Исходящий доступ ограничен политикой, поэтому исходящая сеть не зондировалась. Эндпоинт, ключ, шаблон и выполнение внутри песочницы проверены.',
       checkPendingHint: '{names} можно подтвердить только полной проверкой: она создаёт временную песочницу, запускает один скрипт и удаляет её.',
-      noVolumeSupport: 'This backend does not support volume mounts; skills relying on a shared volume will be unavailable.',
       skipReasons: {
         needs_deep_check: 'Нужна полная проверка',
         control_plane_unreachable: 'Пропущено: плоскость управления недоступна',

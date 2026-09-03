@@ -723,9 +723,6 @@
       <p v-if="pendingCheckNames.length" class="check-result__hint">
         {{ $t('settings.sandbox.checkPendingHint', { names: pendingCheckNames.join('、') }) }}
       </p>
-      <t-alert v-if="checkResult.capabilities && checkResult.capabilities.supports_volumes === false" theme="warning"
-        class="compact-alert"
-        :message="$t('settings.sandbox.noVolumeSupport')" />
     </div>
 
   </SettingDrawer>
