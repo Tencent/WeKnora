@@ -270,6 +270,43 @@ func TestRetrySuccessfulTranscriptionCreatesNewJob(t *testing.T) {
 	}
 }
 
+func TestRetrySuccessfulTranscriptionFindsProviderGenerationJob(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "provider generation retry", Status: model.VideoStatusCompleted,
+		TranscriptGeneration: "normalized-generation",
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	previous := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "transcription", TranscriptGeneration: "mps:provider-task",
+		Provider: "tencent_mps", Status: "succeeded", ResultPayload: `{"raw_result":"real-result"}`,
+		IdempotencyKey: "transcription:" + video.ID,
+	}
+	if err := db.Create(&previous).Error; err != nil {
+		t.Fatalf("create previous job: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}, {Key: "jobType", Value: "transcription"}}
+	context.Request = httptest.NewRequest(http.MethodPost, "/api/custom/videos/"+video.ID+"/processing-jobs/transcription/retry", nil)
+	NewProcessingHandler(db).Retry(context)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("retry status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode retry response: %v", err)
+	}
+	if response.JobID == "" || response.JobID == previous.ID {
+		t.Fatalf("retry response job id = %q, previous = %q", response.JobID, previous.ID)
+	}
+}
+
 func TestRetryFailedTranscriptionClearsExternalTask(t *testing.T) {
 	db := openTestVideoDB(t)
 	video := model.Video{ID: uuid.NewString(), Title: "failed transcription", Status: model.VideoStatusFailed}

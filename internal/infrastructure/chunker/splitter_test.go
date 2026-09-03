@@ -254,6 +254,38 @@ func TestSplitText_CodeBlockInChinese(t *testing.T) {
 	}
 }
 
+// Regression: a large fenced JSON block is protected from separator-based
+// splitting, but it must still be bounded by the configured chunk budget so
+// downstream embedding APIs do not receive multi-thousand-character inputs.
+func TestSplitText_LargeProtectedCodeBlockHonorsChunkSize(t *testing.T) {
+	code := strings.Repeat("  \"text\": \"这是一段较长的转写内容\",\n", 80)
+	text := "# 视频转写\n\n```json\n" + code + "```\n"
+	cfg := SplitterConfig{
+		ChunkSize:    512,
+		ChunkOverlap: 0,
+		Separators:   []string{"\n\n", "\n", "。"},
+	}
+	chunks := Split(text, cfg)
+	if len(chunks) < 2 {
+		t.Fatalf("expected large protected block to split, got %d chunk(s)", len(chunks))
+	}
+	for i, c := range chunks {
+		if got := len([]rune(c.Content)); got > cfg.ChunkSize {
+			t.Errorf("chunk %d has %d runes, want <= %d", i, got, cfg.ChunkSize)
+		}
+	}
+	textRunes := []rune(text)
+	for i, c := range chunks {
+		if c.Start < 0 || c.End > len(textRunes) || c.End-c.Start != len([]rune(c.Content)) {
+			t.Errorf("chunk %d has invalid source span [%d,%d) for %d runes", i, c.Start, c.End, len([]rune(c.Content)))
+			continue
+		}
+		if got := string(textRunes[c.Start:c.End]); got != c.Content {
+			t.Errorf("chunk %d content does not match source span", i)
+		}
+	}
+}
+
 func TestSplitText_OverlapChunks_NonNegativeStart(t *testing.T) {
 	// When overlap is used, start of the next chunk could go before 0 if broken.
 	text := strings.Repeat("中文测试内容，", 50)

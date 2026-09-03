@@ -145,7 +145,11 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 		}
 		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("video_id = ? AND job_type = ?", videoID, jobType)
-		if video.TranscriptGeneration != "" {
+		// A successful transcription job carries the provider task generation;
+		// the video generation is assigned later when the normalized transcript
+		// is indexed. Filtering transcription retries by the latter would hide
+		// the only retryable job after a completed run.
+		if video.TranscriptGeneration != "" && jobType != "transcription" {
 			query = query.Where("transcript_generation IN ?", []string{"", video.TranscriptGeneration})
 		}
 		if err := query.Order("CASE WHEN transcript_generation = '' THEN 1 ELSE 0 END, updated_at DESC").First(&retried).Error; err != nil {

@@ -300,12 +300,17 @@ func SplitText(text string, cfg SplitterConfig) []Chunk {
 // buildUnitsWithProtection splits text into units, preserving protected spans as atomic.
 // Start/End positions in the returned units are rune offsets (not byte offsets),
 // because downstream merge logic indexes content via []rune slicing.
-// If a protected span exceeds maxProtectedSize, it will be forcibly split to prevent
-// creating chunks that are too large for downstream processing (e.g., embedding APIs).
+// If a protected span exceeds the configured chunk size, it will be forcibly
+// split to prevent creating chunks that are too large for downstream processing
+// (e.g., embedding APIs). A zero chunk size is used by a few low-level callers
+// to mean "no configured budget" and keeps the historical hard ceiling.
 // chunkSize is forwarded to splitBySeparators so recursive splitting can keep pieces
 // under the budget when one separator alone leaves a piece oversize.
 func buildUnitsWithProtection(text string, protected []span, separators []string, chunkSize int) []splitUnit {
-	const maxProtectedSize = 7500 // Maximum size for a protected unit (留余量给标题等)
+	maxProtectedSize := chunkSize
+	if maxProtectedSize <= 0 {
+		maxProtectedSize = 7500
+	}
 
 	var units []splitUnit
 	bytePos := 0

@@ -135,6 +135,20 @@ func TestListKnowledgeChunksReadsAllPagesAndPreservesChunkFields(t *testing.T) {
 	}
 }
 
+func TestJoinKnowledgeChunksRemovesSplitterOverlap(t *testing.T) {
+	chunks := []KnowledgeChunk{
+		{ChunkIndex: 0, Content: "prefix abc"},
+		{ChunkIndex: 1, Content: "abc suffix"},
+	}
+	got, err := JoinKnowledgeChunks(chunks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "prefix abc suffix" {
+		t.Fatalf("joined content = %q", got)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {

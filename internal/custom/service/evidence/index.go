@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
@@ -238,19 +237,15 @@ func (i *Index) readKnowledge(ctx context.Context, knowledgeID string) (string, 
 	if err != nil {
 		return "", metadata{}, err
 	}
-	ordered := append([]weknora.KnowledgeChunk(nil), chunks...)
-	sort.SliceStable(ordered, func(left, right int) bool { return ordered[left].ChunkIndex < ordered[right].ChunkIndex })
-	var builder strings.Builder
-	for index, chunk := range ordered {
+	for _, chunk := range chunks {
 		if chunk.KnowledgeID != "" && chunk.KnowledgeID != knowledgeID {
 			return "", metadata{}, fmt.Errorf("knowledge chunk belongs to another knowledge")
 		}
-		if chunk.ChunkIndex != index {
-			return "", metadata{}, fmt.Errorf("knowledge chunk order is not contiguous")
-		}
-		builder.WriteString(chunk.Content)
 	}
-	content := strings.TrimSpace(builder.String())
+	content, err := weknora.JoinKnowledgeChunks(chunks)
+	if err != nil {
+		return "", metadata{}, err
+	}
 	parsed, err := parseMetadata(content)
 	if err != nil {
 		return "", metadata{}, err

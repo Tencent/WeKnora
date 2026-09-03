@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -85,6 +86,48 @@ type KnowledgeChunk struct {
 	Content     string `json:"content"`
 	ChunkIndex  int    `json:"chunk_index"`
 	ChunkType   string `json:"chunk_type"`
+}
+
+// JoinKnowledgeChunks reconstructs content split by WeKnora's recursive
+// splitter. The splitter may repeat its overlap at the start of the next
+// chunk; remove only the largest exact suffix/prefix overlap so structured
+// content (for example positioning JSON) remains valid after reconstruction.
+func JoinKnowledgeChunks(chunks []KnowledgeChunk) (string, error) {
+	if len(chunks) == 0 {
+		return "", fmt.Errorf("knowledge chunks are empty")
+	}
+	ordered := append([]KnowledgeChunk(nil), chunks...)
+	sort.SliceStable(ordered, func(left, right int) bool { return ordered[left].ChunkIndex < ordered[right].ChunkIndex })
+	var builder strings.Builder
+	for index, chunk := range ordered {
+		if chunk.ChunkIndex != index {
+			return "", fmt.Errorf("knowledge chunk order is not contiguous")
+		}
+		if strings.TrimSpace(chunk.Content) == "" {
+			return "", fmt.Errorf("knowledge chunk %d has empty content", index)
+		}
+		if index == 0 {
+			builder.WriteString(chunk.Content)
+			continue
+		}
+		previous := builder.String()
+		overlap := maxSuffixPrefixOverlap(previous, chunk.Content)
+		builder.WriteString(chunk.Content[overlap:])
+	}
+	return strings.TrimSpace(builder.String()), nil
+}
+
+func maxSuffixPrefixOverlap(previous, next string) int {
+	max := len(previous)
+	if len(next) < max {
+		max = len(next)
+	}
+	for size := max; size > 0; size-- {
+		if strings.HasSuffix(previous, next[:size]) {
+			return size
+		}
+	}
+	return 0
 }
 
 type EntityGraphNode struct {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 
 	"gorm.io/gorm"
@@ -122,21 +121,16 @@ func selectTimedKnowledgeChunks(chunks []weknora.KnowledgeChunk, knowledgeID str
 	if len(chunks) == 0 {
 		return "", chunkMetadata{}, fmt.Errorf("转写内容缺失")
 	}
-	ordered := append([]weknora.KnowledgeChunk(nil), chunks...)
-	sort.SliceStable(ordered, func(left, right int) bool {
-		return ordered[left].ChunkIndex < ordered[right].ChunkIndex
-	})
-	var builder strings.Builder
-	for index, chunk := range ordered {
+	for _, chunk := range chunks {
 		if chunk.KnowledgeID != "" && chunk.KnowledgeID != knowledgeID {
 			return "", chunkMetadata{}, fmt.Errorf("知识分片归属错误")
 		}
-		if chunk.ChunkIndex != index {
-			return "", chunkMetadata{}, fmt.Errorf("知识分片顺序不连续: expected=%d actual=%d", index, chunk.ChunkIndex)
-		}
-		builder.WriteString(chunk.Content)
 	}
-	content := trimGeneratedSummary(builder.String())
+	joined, err := weknora.JoinKnowledgeChunks(chunks)
+	if err != nil {
+		return "", chunkMetadata{}, err
+	}
+	content := trimGeneratedSummary(joined)
 	metadata, err := parseChunkMetadata(content)
 	if err != nil {
 		return "", chunkMetadata{}, err
