@@ -1,7 +1,6 @@
 package embedding
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,7 +22,6 @@ type OpenAIEmbedder struct {
 	modelID                   string
 	httpClient                *http.Client
 	timeout                   time.Duration
-	maxRetries                int
 	customHeaders             map[string]string
 	supportsDimensionOverride bool
 	EmbedderPooler
@@ -78,7 +76,6 @@ func NewOpenAIEmbedder(apiKey, baseURL, modelName string,
 		dimensions:           dimensions,
 		modelID:              modelID,
 		timeout:              timeout,
-		maxRetries:           3, // Maximum retry count
 	}, nil
 }
 
@@ -106,58 +103,19 @@ func (e *OpenAIEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 	return nil, fmt.Errorf("no embedding returned")
 }
 
+// doRequestWithRetry sends the JSON request under the shared retry policy in
+// retry_http.go (429/5xx + Retry-After + exponential backoff). The request is
+// rebuilt from the raw body on every attempt with headers re-applied, so a
+// retry never reuses a consumed body — the failure mode where a shadowed
+// `err` left resp nil and BatchEmbed panicked on resp.Body cannot recur.
 func (e *OpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) (*http.Response, error) {
-	var resp *http.Response
-	var err error
 	url := e.baseURL + "/embeddings"
-
-	for i := 0; i <= e.maxRetries; i++ {
-		if i > 0 {
-			backoffTime := time.Duration(1<<uint(i-1)) * time.Second
-			if backoffTime > 10*time.Second {
-				backoffTime = 10 * time.Second
-			}
-			logger.GetLogger(ctx).
-				Infof("OpenAIEmbedder retrying request (%d/%d), waiting %v", i, e.maxRetries, backoffTime)
-
-			select {
-			case <-time.After(backoffTime):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-
-		// Rebuild request each time to ensure Body is valid.
-		// IMPORTANT: declare `req` separately (var) so the assignment to `err`
-		// below uses the outer-scope variable, not a fresh loop-local one.
-		// Previously this read `req, err := http.NewRequestWithContext(...)`,
-		// where `:=` introduced a new `err` shadowing the outer one. The
-		// `resp, err = httpClient.Do(req)` line then wrote to the shadowed
-		// `err` only, so when all retries failed with connection errors the
-		// outer `err` stayed nil. The function returned `(nil, nil)`, and
-		// callers (BatchEmbed line 195) blindly dereferenced `resp.Body` →
-		// SIGSEGV nil-pointer panic that took down the whole process.
-		// Reproduce: stop the embedding upstream (e.g. localhost:3130), make
-		// any RAG query → backend SIGSEGV instead of returning HTTP 500.
-		var req *http.Request
-		req, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
-		if err != nil {
-			logger.GetLogger(ctx).Errorf("OpenAIEmbedder failed to create request: %v", err)
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+e.apiKey)
-		secutils.ApplyCustomHeaders(req, e.customHeaders)
-
-		resp, err = e.httpClient.Do(req)
-		if err == nil {
-			return resp, nil
-		}
-
-		logger.GetLogger(ctx).Errorf("OpenAIEmbedder request failed (attempt %d/%d): %v", i+1, e.maxRetries+1, err)
-	}
-
-	return nil, err
+	return retryEmbeddingRequest(ctx, e.httpClient, http.MethodPost, url, jsonData,
+		func(req *http.Request) {
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+e.apiKey)
+			secutils.ApplyCustomHeaders(req, e.customHeaders)
+		})
 }
 
 func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
@@ -230,7 +188,11 @@ func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 			bodyStr = bodyStr[:1000] + "... (truncated)"
 		}
 		logger.GetLogger(ctx).Errorf("OpenAIEmbedder EmbedBatch API error: Http Status %s, Response Body: %s", resp.Status, bodyStr)
-		return nil, fmt.Errorf("EmbedBatch API error: Http Status %s, Response: %s", resp.Status, bodyStr)
+		// Retryable statuses become a typed error so the batch layer can apply
+		// backoff + throttling instead of failing the whole document; other
+		// statuses remain plain errors.
+		return nil, embedHTTPError(resp.StatusCode,
+			fmt.Sprintf("EmbedBatch API error: Http Status %s, Response: %s", resp.Status, bodyStr))
 	}
 
 	// Parse response

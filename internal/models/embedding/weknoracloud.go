@@ -1,7 +1,6 @@
 package embedding
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -100,17 +99,15 @@ func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) (
 
 	requestID := uuid.New().String()
 	headers := utils.Sign(e.appID, e.apiKey, requestID, string(bodyBytes))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL+weKnoraCloudEmbedPath, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("weknoracloud embedder: create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := e.client.Do(req)
+	// Signed headers are deterministic for this body+requestID, so the shared
+	// retry policy (retry_http.go) can safely resend the same request.
+	resp, err := retryEmbeddingRequest(ctx, e.client, http.MethodPost,
+		e.baseURL+weKnoraCloudEmbedPath, bodyBytes, func(req *http.Request) {
+			req.Header.Set("Content-Type", "application/json")
+			for k, v := range headers {
+				req.Header.Set(k, v)
+			}
+		})
 	if err != nil {
 		return nil, fmt.Errorf("weknoracloud embedder: do request: %w", err)
 	}
@@ -121,7 +118,8 @@ func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) (
 		return nil, fmt.Errorf("weknoracloud embedder: read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("weknoracloud embedder: status %d: %s", resp.StatusCode, string(respBytes))
+		message := fmt.Sprintf("weknoracloud embedder: status %d: %s", resp.StatusCode, string(respBytes))
+		return nil, embedHTTPError(resp.StatusCode, message)
 	}
 
 	var embedResp weKnoraCloudEmbedResponse

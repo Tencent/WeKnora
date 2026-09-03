@@ -1,7 +1,6 @@
 package embedding
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,7 +26,6 @@ type GeminiEmbedder struct {
 	modelID                   string
 	httpClient                *http.Client
 	timeout                   time.Duration
-	maxRetries                int
 	customHeaders             map[string]string
 	supportsDimensionOverride bool
 	EmbedderPooler
@@ -93,7 +91,6 @@ func NewGeminiEmbedder(apiKey, baseURL, modelName string,
 		modelID:              modelID,
 		httpClient:           newEmbeddingHTTPClient(timeout),
 		timeout:              timeout,
-		maxRetries:           3,
 		EmbedderPooler:       pooler,
 	}, nil
 }
@@ -166,7 +163,8 @@ func (e *GeminiEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 			bodyStr = bodyStr[:1000] + "... (truncated)"
 		}
 		logger.GetLogger(ctx).Errorf("GeminiEmbedder BatchEmbed API error: Http Status %s, Response Body: %s", resp.Status, bodyStr)
-		return nil, fmt.Errorf("Gemini BatchEmbed API error: Http Status %s, Response: %s", resp.Status, bodyStr)
+		return nil, embedHTTPError(resp.StatusCode,
+			fmt.Sprintf("Gemini BatchEmbed API error: Http Status %s, Response: %s", resp.Status, bodyStr))
 	}
 
 	var response geminiBatchEmbedResponse
@@ -185,46 +183,16 @@ func (e *GeminiEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 	return embeddings, nil
 }
 
+// doRequestWithRetry sends the request under the shared retry policy in
+// retry_http.go (429/5xx + Retry-After + exponential backoff).
 func (e *GeminiEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) (*http.Response, error) {
-	var resp *http.Response
-	var err error
 	url := fmt.Sprintf("%s/models/%s:batchEmbedContents", e.baseURL, e.modelName)
-
-	for i := 0; i <= e.maxRetries; i++ {
-		if i > 0 {
-			backoffTime := time.Duration(1<<uint(i-1)) * time.Second
-			if backoffTime > 10*time.Second {
-				backoffTime = 10 * time.Second
-			}
-			logger.GetLogger(ctx).
-				Infof("GeminiEmbedder retrying request (%d/%d), waiting %v", i, e.maxRetries, backoffTime)
-
-			select {
-			case <-time.After(backoffTime):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-
-		var req *http.Request
-		req, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
-		if err != nil {
-			logger.GetLogger(ctx).Errorf("GeminiEmbedder failed to create request: %v", err)
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("x-goog-api-key", e.apiKey)
-		secutils.ApplyCustomHeaders(req, e.customHeaders)
-
-		resp, err = e.httpClient.Do(req)
-		if err == nil {
-			return resp, nil
-		}
-
-		logger.GetLogger(ctx).Errorf("GeminiEmbedder request failed (attempt %d/%d): %v", i+1, e.maxRetries+1, err)
-	}
-
-	return nil, err
+	return retryEmbeddingRequest(ctx, e.httpClient, http.MethodPost, url, jsonData,
+		func(req *http.Request) {
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("x-goog-api-key", e.apiKey)
+			secutils.ApplyCustomHeaders(req, e.customHeaders)
+		})
 }
 
 func (e *GeminiEmbedder) GetModelName() string {

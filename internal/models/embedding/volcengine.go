@@ -1,7 +1,6 @@
 package embedding
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -29,7 +28,6 @@ type VolcengineEmbedder struct {
 	modelID                   string
 	httpClient                *http.Client
 	timeout                   time.Duration
-	maxRetries                int
 	customHeaders             map[string]string
 	supportsDimensionOverride bool
 	EmbedderPooler
@@ -132,7 +130,6 @@ func NewVolcengineEmbedder(apiKey, baseURL, modelName string,
 		dimensions:           dimensions,
 		modelID:              modelID,
 		timeout:              timeout,
-		maxRetries:           3,
 	}, nil
 }
 
@@ -150,45 +147,16 @@ func (e *VolcengineEmbedder) Embed(ctx context.Context, text string) ([]float32,
 	return nil, fmt.Errorf("no embedding returned")
 }
 
+// doRequestWithRetry sends the request under the shared retry policy in
+// retry_http.go (429/5xx + Retry-After + exponential backoff).
 func (e *VolcengineEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) (*http.Response, error) {
-	var resp *http.Response
-	var err error
 	url := e.baseURL + VolcengineMultimodalEmbeddingPath
-
-	for i := 0; i <= e.maxRetries; i++ {
-		if i > 0 {
-			backoffTime := time.Duration(1<<uint(i-1)) * time.Second
-			if backoffTime > 10*time.Second {
-				backoffTime = 10 * time.Second
-			}
-			logger.GetLogger(ctx).
-				Infof("VolcengineEmbedder retrying request (%d/%d), waiting %v", i, e.maxRetries, backoffTime)
-
-			select {
-			case <-time.After(backoffTime):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
-		if err != nil {
-			logger.GetLogger(ctx).Errorf("VolcengineEmbedder failed to create request: %v", err)
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+e.apiKey)
-		secutils.ApplyCustomHeaders(req, e.customHeaders)
-
-		resp, err = e.httpClient.Do(req)
-		if err == nil {
-			return resp, nil
-		}
-
-		logger.GetLogger(ctx).Errorf("VolcengineEmbedder request failed (attempt %d/%d): %v", i+1, e.maxRetries+1, err)
-	}
-
-	return nil, err
+	return retryEmbeddingRequest(ctx, e.httpClient, http.MethodPost, url, jsonData,
+		func(req *http.Request) {
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+e.apiKey)
+			secutils.ApplyCustomHeaders(req, e.customHeaders)
+		})
 }
 
 func (e *VolcengineEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
@@ -235,10 +203,10 @@ func (e *VolcengineEmbedder) BatchEmbed(ctx context.Context, texts []string) ([]
 			var errResp VolcengineErrorResponse
 			if json.Unmarshal(body, &errResp) == nil && errResp.Error.Message != "" {
 				logger.GetLogger(ctx).Errorf("VolcengineEmbedder BatchEmbed API error: %s - %s", errResp.Error.Code, errResp.Error.Message)
-				return nil, fmt.Errorf("API error: %s - %s", errResp.Error.Code, errResp.Error.Message)
+				return nil, embedHTTPError(resp.StatusCode, fmt.Sprintf("API error: %s - %s", errResp.Error.Code, errResp.Error.Message))
 			}
 			logger.GetLogger(ctx).Errorf("VolcengineEmbedder BatchEmbed API error: Http Status %s", resp.Status)
-			return nil, fmt.Errorf("BatchEmbed API error: Http Status %s", resp.Status)
+			return nil, embedHTTPError(resp.StatusCode, fmt.Sprintf("BatchEmbed API error: Http Status %s", resp.Status))
 		}
 
 		var response VolcengineEmbedResponse
