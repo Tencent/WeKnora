@@ -256,6 +256,52 @@ func RegisterKnowledgeBaseActivityRoutes(r *gin.RouterGroup, auditHandler *handl
 		g.OwnedKBOrAdmin(), g.KBAccessRead("id"), auditHandler.ListKnowledgeBaseActivity)
 }
 
+// RegisterKnowledgeMetadataRoutes registers knowledge-base schema and
+// document-value endpoints. Cross-document batch reads remain tenant-scoped
+// in the service; single-document routes also resolve shared-KB access here.
+func RegisterKnowledgeMetadataRoutes(
+	r *gin.RouterGroup,
+	metadataHandler *handler.MetadataHandler,
+	g *rbacGuards,
+) {
+	if metadataHandler == nil {
+		return
+	}
+
+	definitions := g.apiKeyGroup(r.Group("/knowledge-bases/:id/metadata-definitions"), apiKeyIngest(apiKeyFullAccess()))
+	definitionsRead := definitions.With(apiKeyRetrieve(apiKeyFullAccess()))
+	{
+		definitionsRead.GET("", g.Viewer(), g.KBAccessRead("id"), metadataHandler.ListDefinitions)
+		definitions.POST("", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), metadataHandler.CreateDefinition)
+		definitions.PUT("/:definition_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), metadataHandler.UpdateDefinition)
+		definitions.DELETE("/:definition_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), metadataHandler.ArchiveDefinition)
+		definitions.PUT("/:definition_id/auto-rule", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), metadataHandler.ConfigureAutoRule)
+		definitions.DELETE("/:definition_id/auto-rule", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), metadataHandler.DeleteAutoRule)
+	}
+
+	kbMeta := g.apiKeyGroup(r.Group("/knowledge-bases/:id"), apiKeyIngest(apiKeyFullAccess()))
+	{
+		kbMeta.POST("/metadata-auto-fill", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), metadataHandler.RerunKnowledgeBaseAutoFill)
+		kbMeta.POST("/metadata-values/auto-fill", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), metadataHandler.RerunKnowledgeBaseAutoFill)
+		// Nested under /knowledge-bases/:id, so :id is the KB id. Use
+		// OwnedKBOrAdmin (not OwnedKnowledgeKBOrAdmin, which reads :id as
+		// a knowledge document id). Document-level write still goes through
+		// KBAccessWriteFromKnowledgeIDParam("knowledge_id").
+		kbMeta.POST("/knowledge/:knowledge_id/metadata-auto-fill", g.OwnedKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("knowledge_id"), metadataHandler.RerunDocumentAutoFill)
+	}
+
+	kMeta := g.apiKeyGroup(r.Group("/knowledge"), apiKeyIngest(apiKeyFullAccess()))
+	kMetaRead := kMeta.With(apiKeyRetrieve(apiKeyFullAccess()))
+	{
+		kMeta.POST("/:id/metadata-auto-fill", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), metadataHandler.RerunDocumentAutoFill)
+		kMeta.POST("/:id/metadata-values/auto-fill", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), metadataHandler.RerunDocumentAutoFill)
+		kMetaRead.GET("/:id/metadata-values", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), metadataHandler.GetDocumentMetadata)
+		kMeta.PATCH("/:id/metadata-values", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), metadataHandler.ChangeDocumentMetadata)
+		kMeta.POST("/:id/metadata-values/confirm", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), metadataHandler.ConfirmDocumentMetadata)
+		kMetaRead.POST("/metadata-values/batch-get", g.Viewer(), g.KBAccessReadFromKnowledgeIDsBody(), metadataHandler.BatchGetDocumentMetadata)
+	}
+}
+
 // RegisterKnowledgeTagRoutes 注册知识库标签相关路由。
 //
 // Tags are KB metadata: Viewer reads, Contributor writes. Per-KB

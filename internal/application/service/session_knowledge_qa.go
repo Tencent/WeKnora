@@ -91,13 +91,20 @@ func (s *sessionService) KnowledgeQA(
 	if err != nil {
 		return fmt.Errorf("build search targets: %w", err)
 	}
+	originalTargetCount := len(searchTargets)
+	searchTargets, err = s.resolveMetadataSearchTargets(ctx, searchTargets, req.MetadataFilters)
+	if err != nil {
+		return err
+	}
+	resolvedKnowledgeBaseIDs, resolvedKnowledgeIDs := searchTargetSelections(searchTargets)
+	metadataScopeEmpty := originalTargetCount > 0 && len(searchTargets) == 0 && len(req.MetadataFilters) > 0
 
 	// Create chat management object with session settings
 	logger.Infof(
 		ctx,
 		"Creating chat manage object, knowledge base IDs: %v, knowledge IDs: %v, chat model ID: %s, search targets: %d",
-		knowledgeBaseIDs,
-		knowledgeIDs,
+		resolvedKnowledgeBaseIDs,
+		resolvedKnowledgeIDs,
 		chatModelID,
 		len(searchTargets),
 	)
@@ -108,8 +115,10 @@ func (s *sessionService) KnowledgeQA(
 			SessionID:               req.Session.ID,
 			UserID:                  types.SessionOwnerIDFromContext(ctx),
 			MaxRounds:               s.cfg.Conversation.MaxRounds,
-			KnowledgeBaseIDs:        knowledgeBaseIDs,
-			KnowledgeIDs:            knowledgeIDs,
+			KnowledgeBaseIDs:        resolvedKnowledgeBaseIDs,
+			KnowledgeIDs:            resolvedKnowledgeIDs,
+			MetadataFilters:         req.MetadataFilters,
+			MetadataScopeEmpty:      metadataScopeEmpty,
 			SearchTargets:           searchTargets,
 			VectorThreshold:         s.cfg.Conversation.VectorThreshold,
 			KeywordThreshold:        s.cfg.Conversation.KeywordThreshold,
@@ -615,6 +624,89 @@ func (s *sessionService) buildSearchTargets(
 	return targets, nil
 }
 
+func (s *sessionService) resolveMetadataSearchTargets(
+	ctx context.Context,
+	targets types.SearchTargets,
+	filters []types.KBMetadataFilter,
+) (types.SearchTargets, error) {
+	if len(filters) == 0 {
+		return targets, nil
+	}
+	if s.metadataService == nil {
+		return nil, fmt.Errorf("metadata service is not configured")
+	}
+
+	conditionsByKB := make(map[string][]types.MetadataCondition, len(filters))
+	for _, filter := range filters {
+		knowledgeBaseID := strings.TrimSpace(filter.KnowledgeBaseID)
+		if knowledgeBaseID == "" {
+			return nil, fmt.Errorf("metadata filter knowledge base ID is required")
+		}
+		conditionsByKB[knowledgeBaseID] = append(conditionsByKB[knowledgeBaseID], filter.Conditions...)
+	}
+
+	resolved := make(types.SearchTargets, 0, len(targets))
+	for _, target := range targets {
+		if target == nil {
+			continue
+		}
+		conditions, hasFilter := conditionsByKB[target.KnowledgeBaseID]
+		if !hasFilter || len(conditions) == 0 {
+			resolved = append(resolved, target)
+			continue
+		}
+
+		tenantID := target.TenantID
+		if tenantID == 0 {
+			tenantID = types.MustTenantIDFromContext(ctx)
+		}
+		targetCtx := context.WithValue(ctx, types.TenantIDContextKey, tenantID)
+		var explicitKnowledgeIDs []string
+		if target.Type == types.SearchTargetTypeKnowledge {
+			explicitKnowledgeIDs = append([]string(nil), target.KnowledgeIDs...)
+		}
+		scope, err := s.metadataService.ResolveDocumentScope(targetCtx, types.MetadataScopeQuery{
+			KnowledgeBaseID:      target.KnowledgeBaseID,
+			Conditions:           conditions,
+			ExplicitKnowledgeIDs: explicitKnowledgeIDs,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		switch scope.Mode {
+		case types.DocumentScopeModeAll:
+			resolved = append(resolved, target)
+		case types.DocumentScopeModeIDs:
+			target.Type = types.SearchTargetTypeKnowledge
+			target.KnowledgeIDs = append([]string(nil), scope.IDs...)
+			target.MetadataFiltered = true
+			resolved = append(resolved, target)
+		case types.DocumentScopeModeNone:
+			continue
+		default:
+			return nil, fmt.Errorf("unsupported document scope mode %q", scope.Mode)
+		}
+	}
+	return resolved, nil
+}
+
+func searchTargetSelections(targets types.SearchTargets) ([]string, []string) {
+	knowledgeBaseIDs := make([]string, 0, len(targets))
+	knowledgeIDs := make([]string, 0)
+	for _, target := range targets {
+		if target == nil {
+			continue
+		}
+		if target.Type == types.SearchTargetTypeKnowledgeBase {
+			knowledgeBaseIDs = append(knowledgeBaseIDs, target.KnowledgeBaseID)
+			continue
+		}
+		knowledgeIDs = append(knowledgeIDs, target.KnowledgeIDs...)
+	}
+	return knowledgeBaseIDs, knowledgeIDs
+}
+
 func mergeTagScopesByKB(scopes []types.TagScope) map[string][]string {
 	byKB := make(map[string][]string)
 	seen := make(map[string]map[string]bool)
@@ -810,7 +902,7 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 // knowledgeBaseIDs: list of knowledge base IDs to search (supports multi-KB)
 // knowledgeIDs: list of specific knowledge (file) IDs to search
 func (s *sessionService) SearchKnowledge(ctx context.Context,
-	knowledgeBaseIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, query string,
+	knowledgeBaseIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, metadataFilters []types.KBMetadataFilter, query string,
 ) ([]*types.SearchResult, error) {
 	logger.Info(ctx, "Start knowledge base search without LLM summary")
 	logger.Infof(ctx, "Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
@@ -828,6 +920,10 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
+	searchTargets, err = s.resolveMetadataSearchTargets(ctx, searchTargets, metadataFilters)
+	if err != nil {
+		return nil, err
+	}
 
 	if len(searchTargets) == 0 {
 		logger.Warn(ctx, "No search targets available, returning empty results")
@@ -843,12 +939,14 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		rc = tenant.RetrievalConfig
 	}
 
+	resolvedKnowledgeBaseIDs, resolvedKnowledgeIDs := searchTargetSelections(searchTargets)
 	chatManage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
 			Query:            query,
 			UserID:           userID,
-			KnowledgeBaseIDs: knowledgeBaseIDs,
-			KnowledgeIDs:     knowledgeIDs,
+			KnowledgeBaseIDs: resolvedKnowledgeBaseIDs,
+			KnowledgeIDs:     resolvedKnowledgeIDs,
+			MetadataFilters:  metadataFilters,
 			SearchTargets:    searchTargets,
 			MaxRounds:        s.cfg.Conversation.MaxRounds,
 			EmbeddingTopK:    rc.GetEffectiveEmbeddingTopK(),

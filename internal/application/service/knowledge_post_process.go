@@ -19,13 +19,14 @@ import (
 // KnowledgePostProcessService acts as an orchestrator for all post-processing tasks
 // after a document has been parsed and split into chunks (including multimodal OCR/Caption).
 type KnowledgePostProcessService struct {
-	knowledgeRepo interfaces.KnowledgeRepository
-	kbService     interfaces.KnowledgeBaseService
-	chunkService  interfaces.ChunkService
-	taskEnqueuer  interfaces.TaskEnqueuer
-	pendingRepo   interfaces.TaskPendingOpsRepository
-	redisClient   *redis.Client
-	spanTracker   SpanTracker
+	knowledgeRepo    interfaces.KnowledgeRepository
+	kbService        interfaces.KnowledgeBaseService
+	chunkService     interfaces.ChunkService
+	taskEnqueuer     interfaces.TaskEnqueuer
+	pendingRepo      interfaces.TaskPendingOpsRepository
+	redisClient      *redis.Client
+	spanTracker      SpanTracker
+	metadataAutoFill interfaces.MetadataAutoFillService
 }
 
 func NewKnowledgePostProcessService(
@@ -36,15 +37,17 @@ func NewKnowledgePostProcessService(
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
 	spanTracker SpanTracker,
+	metadataAutoFill interfaces.MetadataAutoFillService,
 ) interfaces.TaskHandler {
 	return &KnowledgePostProcessService{
-		knowledgeRepo: knowledgeRepo,
-		kbService:     kbService,
-		chunkService:  chunkService,
-		taskEnqueuer:  taskEnqueuer,
-		pendingRepo:   pendingRepo,
-		redisClient:   redisClient,
-		spanTracker:   spanTracker,
+		knowledgeRepo:    knowledgeRepo,
+		kbService:        kbService,
+		chunkService:     chunkService,
+		taskEnqueuer:     taskEnqueuer,
+		pendingRepo:      pendingRepo,
+		redisClient:      redisClient,
+		spanTracker:      spanTracker,
+		metadataAutoFill: metadataAutoFill,
 	}
 }
 
@@ -345,6 +348,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	if willSpawnAutoTag {
 		enqueuedAutoTag = s.enqueueAutoTagTask(ctx, payload, attempt)
 	}
+	enqueuedMetadata := s.enqueueMetadataAutoFill(ctx, payload)
 
 	// 4. Spawn Summary and Question Tasks
 	enqueuedSummary := false
@@ -471,6 +475,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		"enqueued_graph":          enqueuedGraphCount > 0,
 		"enqueued_graph_count":    enqueuedGraphCount,
 		"enqueued_auto_tag":       enqueuedAutoTag,
+		"enqueued_metadata":       enqueuedMetadata,
 	}
 	s.tracker().EndSpan(ctx, postSpan, postOutput)
 	if wikiSlotOwned && wikiEnqueueErr != nil {
@@ -517,6 +522,31 @@ func (s *KnowledgePostProcessService) enqueueAutoTagTask(
 		return false
 	}
 	logger.Infof(ctx, "[KnowledgePostProcess] Enqueued automatic tagging for %s", payload.KnowledgeID)
+	return true
+}
+
+// enqueueMetadataAutoFill schedules best-effort schema-metadata extraction.
+// Like auto-tag, it owns no pending-subtask slot so a model failure cannot
+// keep document parsing in finalizing.
+func (s *KnowledgePostProcessService) enqueueMetadataAutoFill(
+	ctx context.Context,
+	payload types.KnowledgePostProcessPayload,
+) bool {
+	if s.metadataAutoFill == nil {
+		return false
+	}
+	metadataPayload := types.MetadataAutoFillPayload{
+		TenantID:        payload.TenantID,
+		KnowledgeBaseID: payload.KnowledgeBaseID,
+		KnowledgeID:     payload.KnowledgeID,
+		Trigger:         "post_process",
+		Language:        payload.Language,
+	}
+	if _, err := s.metadataAutoFill.Enqueue(ctx, metadataPayload); err != nil {
+		logger.Warnf(ctx, "[KnowledgePostProcess] Failed to enqueue metadata auto-fill for %s: %v", payload.KnowledgeID, err)
+		return false
+	}
+	logger.Infof(ctx, "[KnowledgePostProcess] Enqueued metadata auto-fill for %s", payload.KnowledgeID)
 	return true
 }
 

@@ -31,6 +31,7 @@ const kbTaskCleanupTimeout = 5 * time.Second
 type knowledgeBaseService struct {
 	repo            interfaces.KnowledgeBaseRepository
 	kgRepo          interfaces.KnowledgeRepository
+	metadataRepo    interfaces.KnowledgeMetadataRepository
 	chunkRepo       interfaces.ChunkRepository
 	shareRepo       interfaces.KBShareRepository
 	kbShareService  interfaces.KBShareService
@@ -54,6 +55,7 @@ type knowledgeBaseService struct {
 // NewKnowledgeBaseService creates a new knowledge base service
 func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	kgRepo interfaces.KnowledgeRepository,
+	metadataRepo interfaces.KnowledgeMetadataRepository,
 	chunkRepo interfaces.ChunkRepository,
 	shareRepo interfaces.KBShareRepository,
 	kbShareService interfaces.KBShareService,
@@ -76,6 +78,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	return &knowledgeBaseService{
 		repo:            repo,
 		kgRepo:          kgRepo,
+		metadataRepo:    metadataRepo,
 		chunkRepo:       chunkRepo,
 		shareRepo:       shareRepo,
 		kbShareService:  kbShareService,
@@ -964,6 +967,12 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 				"knowledge_base_id": kbID,
 			})
 			return err
+		}
+	}
+
+	if s.metadataRepo != nil {
+		if err := s.metadataRepo.DeleteKnowledgeBaseMetadata(ctx, tenantID, kbID); err != nil {
+			return fmt.Errorf("delete knowledge base metadata: %w", err)
 		}
 	}
 

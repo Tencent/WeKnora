@@ -7,7 +7,8 @@ import { MessagePlugin } from "tdesign-vue-next";
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
 import { useMenuStore } from '@/stores/menu';
-import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
+import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags, type KBMetadataFilter } from '@/api/knowledge-base';
+import ChatMetadataFilters from './ChatMetadataFilters.vue';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { stopSession } from '@/api/chat';
 import { useOrganizationStore } from '@/stores/organization';
@@ -1891,8 +1892,10 @@ watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
   }
 }, { deep: true });
 
+const metadataFilters = ref<KBMetadataFilter[]>([]);
+
 const emit = defineEmits<{
-  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[]): void;
+  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[], metadataFilters: KBMetadataFilter[]): void;
   (e: 'stop-generation'): void;
 }>();
 
@@ -1924,7 +1927,7 @@ const createSession = async (val: string) => {
   if (props.embeddedMode) {
     const textarea = getTextareaEl();
     if (textarea) textarea.blur();
-    emit('send-msg', val, selectedModelId.value || '', [], [], []);
+    emit('send-msg', val, selectedModelId.value || '', [], [], [], metadataFilters.value);
     clearvalue();
     return;
   }
@@ -1991,7 +1994,7 @@ const createSession = async (val: string) => {
   // detached DOM element (which causes getComputedStyle to throw).
   const textarea = getTextareaEl();
   if (textarea) textarea.blur();
-  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles);
+  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles, metadataFilters.value);
 
   // Clean up image previews
   uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
@@ -2683,6 +2686,8 @@ defineExpose({
               <span v-if="allSelectedItems.length > 0" class="kb-count">{{ allSelectedItems.length }}</span>
             </div>
           </t-tooltip>
+
+          <ChatMetadataFilters v-model="metadataFilters" :knowledge-bases="selectedKbs" />
 
           <!-- 模型显示 -->
           <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"

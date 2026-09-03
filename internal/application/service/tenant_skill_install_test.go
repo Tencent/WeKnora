@@ -3275,7 +3275,7 @@ func (s *installSessionService) KnowledgeQAByEvent(context.Context, *types.ChatM
 }
 
 func (s *installSessionService) SearchKnowledge(
-	context.Context, []string, []string, []types.TagScope, string,
+	context.Context, []string, []string, []types.TagScope, []types.KBMetadataFilter, string,
 ) ([]*types.SearchResult, error) {
 	return nil, nil
 }

@@ -3960,6 +3960,7 @@ export default {
       multimodal: '이미지 처리',
       asr: '오디오',
       datasource: '데이터 소스',
+      metadata: '메타데이터',
       share: '공유관리',
       activity: '활동 기록'
     },
@@ -6112,6 +6113,21 @@ export default {
       label: '스캔 PDF로 파싱',
       description: '웹 인쇄, 스캔본, 이미지 위주 PDF에 적합합니다. 모든 페이지를 이미지로 렌더링한 뒤 OCR/VLM으로 처리합니다. 처리 시간과 모델 호출 비용이 늘어날 수 있습니다.'
     }
+  },
+  metadata: {
+    settingsTitle: "문서 메타데이터", settingsDescription: "이 지식베이스의 분류, 필터 필드 및 자동 입력 규칙을 정의합니다.",
+    createDefinition: "새 필드", editDefinition: "필드 편집", editDocumentMetadata: "메타데이터 편집", name: "필드 이름", namePlaceholder: "예: 문서 유형", description: "설명", type: "유형", governance: "규칙",
+    required: "필수", requiredDescription: "빈 값은 미완료로 표시되지만 가져오기와 검색은 차단하지 않습니다", filterable: "필터 허용", filterableDescription: "문서 및 검색 필터에서 이 필드를 사용합니다",
+    automaticRule: "자동 입력", automaticRuleDescription: "소스 필드 또는 AI 추출로 후보 값을 만듭니다", manualOnly: "수동 입력만", emptyDefinitions: "정의된 메타데이터 필드가 없습니다", noDescription: "설명 없음", typeLocked: "값이나 자동 규칙이 있으면 유형을 변경할 수 없습니다",
+    options: "허용 값", addOption: "옵션 추가", moveUp: "위로", moveDown: "아래로", archiveTitle: "메타데이터 필드 보관", archiveDescription: "“{name}”을 보관하면 기존 값은 유지되고 편집 및 필터에서 제외됩니다.", archiveAction: "보관",
+    ruleStrategy: "입력 방식", sourceKey: "소스 필드", sourceKeyPlaceholder: "예: product_line", instruction: "추출 지침", modelId: "모델 ID", modelIdPlaceholder: "비워 두면 지식베이스 요약 모델 사용",
+    filter: "메타데이터", chatFilter: "지식베이스 메타데이터 필터", chatFilterDescription: "각 지식베이스의 조건으로 이 메시지의 검색 범위를 제한합니다.", noFilterableFields: "필터 가능한 필드 없음", filterTitle: "메타데이터 필터", filterDescription: "서로 다른 필드는 AND 조건을 사용합니다.", filterEmpty: "문서 범위를 제한할 필드를 추가하세요", addCondition: "필터 필드 추가", applyFilter: "필터 적용", noValueNeeded: "값 필요 없음",
+    trueValue: "예", falseValue: "아니요", documentTitle: "문서 메타데이터", documentFields: "필드 상태", incompleteCount: "필수 필드 {count}개 미완료", allComplete: "필수 필드 완료", confirmAll: "모두 확인", confirmOne: "확인", rerunAutoFill: "자동 입력 다시 실행", allowAutoOverwrite: "자동 덮어쓰기 허용",
+    overwritePromptTitle: "수동 변경 저장", overwritePromptDescription: "수동 변경은 기본적으로 현재 값을 잠급니다. 향후 동기화 또는 추출 결과로 바꾸려면 자동 덮어쓰기를 켜세요.",
+    types: { text: "텍스트", singleSelect: "단일 선택", multiSelect: "다중 선택", number: "숫자", date: "날짜", boolean: "불리언" }, ruleStrategies: { source_mapping: "소스 매핑", llm_extract: "AI 추출" },
+    operators: { equals: "같음", contains: "포함", in: "다음 중 하나", contains_any: "하나 이상 포함", contains_all: "모두 포함", eq: "같음", gt: "초과", gte: "이상", lt: "미만", lte: "이하", between: "범위", on: "해당 날짜", before: "이전", after: "이후", is_empty: "비어 있음", is_not_empty: "비어 있지 않음" },
+    status: { incomplete: "미완료", automatic: "자동 입력", pending: "확인 대기", confirmed: "확인됨", archived: "보관됨", overwriteAllowed: "자동 덮어쓰기", overwriteLocked: "잠김" },
+    messages: { loadFailed: "메타데이터 필드를 불러오지 못했습니다", nameRequired: "필드 이름을 입력하세요", optionRequired: "완성된 옵션을 하나 이상 추가하세요", optionDuplicate: "옵션 이름은 중복될 수 없습니다", sourceKeyRequired: "소스 필드를 입력하세요", instructionRequired: "추출 지침을 입력하세요", saved: "메타데이터 필드가 저장되었습니다", saveFailed: "메타데이터 필드 저장 실패", archived: "메타데이터 필드가 보관되었습니다", archiveFailed: "보관 실패", sortFailed: "순서 저장 실패", documentLoadFailed: "문서 메타데이터 로드 실패", valueSaved: "메타데이터가 저장되었습니다", valueSaveFailed: "메타데이터 저장 실패", versionConflict: "필드가 변경되어 최신 값을 불러왔습니다", policySaveFailed: "덮어쓰기 정책 저장 실패", confirmed: "자동 입력 값을 확인했습니다", confirmFailed: "확인 실패", autoFillQueued: "자동 입력 작업이 제출되었습니다", autoFillFailed: "자동 입력 작업 제출 실패" },
   },
   knowledgeBase: {
     title: '지식베이스',

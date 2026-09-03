@@ -44,6 +44,7 @@ type qaRequestContext struct {
 	knowledgeBaseIDs      []string
 	knowledgeIDs          []string
 	tagScopes             []types.TagScope
+	metadataFilters       []types.KBMetadataFilter
 	tagIDs                []string
 	mcpServiceIDs         []string
 	skillNames            []string
@@ -85,6 +86,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		KnowledgeBaseIDs:    rc.knowledgeBaseIDs,
 		KnowledgeIDs:        rc.knowledgeIDs,
 		TagScopes:           rc.tagScopes,
+		MetadataFilters:     rc.metadataFilters,
 		MCPServiceIDs:       rc.mcpServiceIDs,
 		SkillNames:          rc.skillNames,
 		ImageURLs:           imageURLs,
@@ -372,6 +374,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		knowledgeBaseIDs:      secutils.SanitizeForLogArray(kbIDs),
 		knowledgeIDs:          secutils.SanitizeForLogArray(knowledgeIDs),
 		tagScopes:             tagScopes,
+		metadataFilters:       request.MetadataFilters,
 		tagIDs:                secutils.SanitizeForLogArray(tagIDs),
 		mcpServiceIDs:         secutils.SanitizeForLogArray(mcpServiceIDs),
 		skillNames:            secutils.SanitizeForLogArray(skillNames),
@@ -780,7 +783,7 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	)
 
 	// Directly call knowledge retrieval service without LLM summarization
-	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, tagScopes, request.Query)
+	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, tagScopes, request.MetadataFilters, request.Query)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))

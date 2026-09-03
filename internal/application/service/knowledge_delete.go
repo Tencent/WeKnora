@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -234,6 +235,11 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	}
 	if err := s.repo.DeleteKnowledgeTagRelations(ctx, id); err != nil {
 		logger.Warnf(ctx, "Failed to delete tag relations for knowledge %s: %v", id, err)
+	}
+	if s.metadataRepo != nil {
+		if err := s.metadataRepo.DeleteDocumentMetadata(ctx, tenantID, []string{id}); err != nil {
+			return fmt.Errorf("delete knowledge metadata: %w", err)
+		}
 	}
 	// Delete the knowledge row FIRST, then drop its physical file. Physical
 	// cleanup is deliberately deferred until the row is gone: if any of the
@@ -701,6 +707,11 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	for _, knowledgeID := range ids {
 		if err := s.repo.DeleteKnowledgeTagRelations(ctx, knowledgeID); err != nil {
 			logger.Warnf(ctx, "Failed to delete tag relations for knowledge %s: %v", knowledgeID, err)
+		}
+	}
+	if s.metadataRepo != nil {
+		if err := s.metadataRepo.DeleteDocumentMetadata(ctx, tenantInfo.ID, ids); err != nil {
+			return fmt.Errorf("delete knowledge metadata: %w", err)
 		}
 	}
 	// 6. Delete the knowledge rows FIRST, then drop their physical files. See

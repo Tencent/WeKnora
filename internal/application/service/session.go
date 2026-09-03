@@ -124,6 +124,7 @@ type sessionService struct {
 	webSearchStateRepo    interfaces.WebSearchStateService       // Service for web search state
 	webSearchProviderRepo interfaces.WebSearchProviderRepository // Repository for web search provider entities
 	kbShareService        interfaces.KBShareService              // Service for KB sharing operations
+	metadataService       metadataScopeResolver                  // Service for document metadata scopes
 	suggestionRepo        interfaces.MessageSuggestionRepository
 	sandboxMgr            sandbox.Manager // Default sandbox backend; used to reclaim per-session MicroVMs on delete
 	sandboxResolver       sandbox.TenantSandboxResolver
@@ -135,6 +136,10 @@ type sessionService struct {
 	// TenantSkillService because that service depends on this one.
 	sandboxConfigRepo repository.TenantSandboxConfigRepository
 	tenantSkillRepo   repository.TenantSkillRepository
+}
+
+type metadataScopeResolver interface {
+	ResolveDocumentScope(context.Context, types.MetadataScopeQuery) (types.DocumentScope, error)
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -151,6 +156,7 @@ func NewSessionService(cfg *config.Config,
 	webSearchStateRepo interfaces.WebSearchStateService,
 	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 	kbShareService interfaces.KBShareService,
+	metadataService interfaces.KnowledgeMetadataService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
 	sandboxMgr sandbox.Manager,
 	sandboxResolver sandbox.TenantSandboxResolver,
@@ -174,6 +180,7 @@ func NewSessionService(cfg *config.Config,
 		webSearchStateRepo:    webSearchStateRepo,
 		webSearchProviderRepo: webSearchProviderRepo,
 		kbShareService:        kbShareService,
+		metadataService:       metadataService,
 		suggestionRepo:        suggestionRepo,
 		sandboxMgr:            sandboxMgr,
 		sandboxResolver:       sandboxResolver,

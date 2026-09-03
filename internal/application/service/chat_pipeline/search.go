@@ -62,6 +62,10 @@ func (p *PluginSearch) ActivationEvents() []types.EventType {
 func (p *PluginSearch) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
+	if chatManage.MetadataScopeEmpty && !chatManage.WebSearchEnabled {
+		chatManage.SearchResult = []*types.SearchResult{}
+		return ErrSearchNothing
+	}
 	// Check if we have search targets or web search enabled
 	hasKBTargets := types.HasKnowledgeRetrievalScope(
 		chatManage.SearchTargets,
@@ -444,7 +448,7 @@ func (p *PluginSearch) searchByTargets(
 			var fullKBIDs []string
 			var knowledgeTargets []*types.SearchTarget
 			for _, t := range searchableTargets {
-				if t.Type == types.SearchTargetTypeKnowledgeBase && len(t.TagIDs) == 0 {
+				if t.Type == types.SearchTargetTypeKnowledgeBase && len(t.TagIDs) == 0 && !t.MetadataFiltered {
 					fullKBIDs = append(fullKBIDs, t.KnowledgeBaseID)
 				} else {
 					knowledgeTargets = append(knowledgeTargets, t)

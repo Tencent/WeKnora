@@ -424,6 +424,11 @@
                   <DataSourceSettings :kb-id="activeKbId" @count="dsCount = $event" />
                 </div>
 
+                <!-- 文档元数据（仅编辑模式，非 FAQ） -->
+                <div v-if="editorMode === 'edit' && activeKbId && !isFAQ && currentSection === 'metadata'" class="section">
+                  <KBMetadataSettings :kb-id="activeKbId" />
+                </div>
+
                 <!-- 共享设置（仅编辑模式） -->
                 <div v-if="editorMode === 'edit' && activeKbId && currentSection === 'share'" class="section">
                   <KBShareSettings :kb-id="activeKbId" :can-share="canShareKB" />
@@ -436,7 +441,7 @@
               </div>
 
               <!-- 保存按钮 -->
-              <div class="settings-footer">
+              <div v-if="currentSection !== 'metadata'" class="settings-footer">
                 <p v-if="isPostCreateSession" class="settings-footer-note">
                   <t-icon name="check-circle-filled" class="settings-footer-note__icon" />
                   <span>
@@ -488,6 +493,7 @@ import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
+import KBMetadataSettings from './settings/KBMetadataSettings.vue'
 import KnowledgeBaseActivitySettings from './settings/KnowledgeBaseActivitySettings.vue'
 import { useI18n } from 'vue-i18n'
 
@@ -623,6 +629,9 @@ const navItems = computed(() => {
     )
     if (editorMode.value === 'edit' && activeKbId.value) {
       items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource'), badge: dsCount.value || undefined })
+      if (!isFAQ.value) {
+        items.push({ key: 'metadata', icon: 'catalog', label: t('knowledgeEditor.sidebar.metadata') })
+      }
     }
   }
   if (editorMode.value === 'edit' && activeKbId.value && !authStore.isLiteMode) {
@@ -653,7 +662,7 @@ const navGroups = computed(() => {
     {
       key: 'data',
       label: t('knowledgeEditor.navGroups.data'),
-      items: pickItems(['storage', 'datasource']),
+      items: pickItems(['storage', 'datasource', 'metadata']),
     },
     {
       key: 'integration',

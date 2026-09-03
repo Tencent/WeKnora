@@ -399,6 +399,10 @@ func (s *sessionService) buildAgentConfig(
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
+	searchTargets, err = s.resolveMetadataSearchTargets(ctx, searchTargets, req.MetadataFilters)
+	if err != nil {
+		return nil, err
+	}
 	agentConfig.SearchTargets = searchTargets
 	// Document tags are stored in knowledge_tag_relations, so document-KB tag
 	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve

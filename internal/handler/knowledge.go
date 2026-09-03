@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -36,6 +37,7 @@ type KnowledgeHandler struct {
 	kbService         interfaces.KnowledgeBaseService
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
+	metadataService   interfaces.KnowledgeMetadataService
 	asynqClient       interfaces.TaskEnqueuer
 	spanRepo          repository.KnowledgeSpanRepository
 }
@@ -47,6 +49,7 @@ func NewKnowledgeHandler(
 	kbService interfaces.KnowledgeBaseService,
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
+	metadataService interfaces.KnowledgeMetadataService,
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
 ) *KnowledgeHandler {
@@ -56,6 +59,7 @@ func NewKnowledgeHandler(
 		kbService:         kbService,
 		kbShareService:    kbShareService,
 		agentShareService: agentShareService,
+		metadataService:   metadataService,
 		asynqClient:       asynqClient,
 		spanRepo:          spanRepo,
 	}
@@ -385,6 +389,15 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		}
 		logger.Infof(ctx, "Received file metadata: %s", secutils.SanitizeForLog(fmt.Sprintf("%v", metadata)))
 	}
+	initialMetadata, err := parseInitialMetadataJSON(c.PostForm("metadata_values"))
+	if err != nil {
+		c.Error(errors.NewBadRequestError("Invalid metadata_values format").WithDetails(err.Error()))
+		return
+	}
+	if err := h.validateInitialMetadata(ctx, kbID, initialMetadata); err != nil {
+		c.Error(metadataHTTPError(err))
+		return
+	}
 
 	enableMultimodelForm := c.PostForm("enable_multimodel")
 	var enableMultimodel *bool
@@ -433,6 +446,10 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if err := h.applyInitialMetadata(ctx, knowledge.ID, initialMetadata); err != nil {
+		c.Error(metadataHTTPError(err))
 		return
 	}
 
@@ -490,10 +507,15 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		TagIDs           []string                         `json:"tag_ids"`
 		Channel          string                           `json:"channel"`
 		ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
+		MetadataValues   []dto.MetadataValueChangeRequest `json:"metadata_values"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse URL request", err)
 		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	if err := h.validateInitialMetadata(ctx, kbID, req.MetadataValues); err != nil {
+		c.Error(metadataHTTPError(err))
 		return
 	}
 
@@ -531,6 +553,10 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if err := h.applyInitialMetadata(ctx, knowledge.ID, req.MetadataValues); err != nil {
+		c.Error(metadataHTTPError(err))
 		return
 	}
 
@@ -577,14 +603,21 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 		return
 	}
 
-	var req types.ManualKnowledgePayload
+	var req struct {
+		types.ManualKnowledgePayload
+		MetadataValues []dto.MetadataValueChangeRequest `json:"metadata_values"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse manual knowledge request", err)
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
+	if err := h.validateInitialMetadata(ctx, kbID, req.MetadataValues); err != nil {
+		c.Error(metadataHTTPError(err))
+		return
+	}
 
-	knowledge, err := h.kgService.CreateKnowledgeFromManual(ctx, kbID, &req, req.Channel)
+	knowledge, err := h.kgService.CreateKnowledgeFromManual(ctx, kbID, &req.ManualKnowledgePayload, req.Channel)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)
@@ -597,12 +630,96 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 		return
 	}
 
+	if err := h.applyInitialMetadata(ctx, knowledge.ID, req.MetadataValues); err != nil {
+		c.Error(metadataHTTPError(err))
+		return
+	}
+
 	logger.Infof(ctx, "Manual knowledge created successfully, knowledge ID: %s",
 		secutils.SanitizeForLog(knowledge.ID))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    knowledge,
 	})
+}
+
+func parseInitialMetadataJSON(raw string) ([]dto.MetadataValueChangeRequest, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var changes []dto.MetadataValueChangeRequest
+	if err := json.Unmarshal([]byte(raw), &changes); err != nil {
+		return nil, err
+	}
+	return changes, nil
+}
+
+func (h *KnowledgeHandler) initialMetadataChanges(
+	requests []dto.MetadataValueChangeRequest,
+) ([]types.MetadataValueChange, error) {
+	changes := make([]types.MetadataValueChange, 0, len(requests))
+	for _, request := range requests {
+		change, err := request.Change()
+		if err != nil {
+			return nil, errors.NewBadRequestError("Invalid metadata value").WithDetails(err.Error())
+		}
+		if change.ExpectedVersion == nil {
+			version := 0
+			change.ExpectedVersion = &version
+		}
+		changes = append(changes, change)
+	}
+	return changes, nil
+}
+
+func (h *KnowledgeHandler) validateInitialMetadata(
+	ctx context.Context,
+	knowledgeBaseID string,
+	requests []dto.MetadataValueChangeRequest,
+) error {
+	if len(requests) == 0 {
+		return nil
+	}
+	changes, err := h.initialMetadataChanges(requests)
+	if err != nil {
+		return err
+	}
+	for _, change := range changes {
+		if !change.ValueSet || change.Value == nil {
+			return errors.NewBadRequestError("initial metadata values must include a value")
+		}
+		if change.ExpectedVersion != nil && *change.ExpectedVersion != 0 {
+			return errors.NewBadRequestError("initial metadata values must use expected_version 0")
+		}
+	}
+	if h.metadataService == nil {
+		return nil
+	}
+	return h.metadataService.ValidateDocumentMetadataChanges(ctx, knowledgeBaseID, changes)
+}
+
+func (h *KnowledgeHandler) applyInitialMetadata(
+	ctx context.Context,
+	knowledgeID string,
+	requests []dto.MetadataValueChangeRequest,
+) error {
+	if len(requests) == 0 || h.metadataService == nil {
+		return nil
+	}
+	changes, err := h.initialMetadataChanges(requests)
+	if err != nil {
+		return err
+	}
+	userID, _ := types.UserIDFromContext(ctx)
+	_, err = h.metadataService.ChangeDocumentMetadata(ctx, types.ChangeDocumentMetadata{
+		KnowledgeID: knowledgeID, UpdatedBy: userID, Changes: changes,
+	})
+	if err == nil {
+		return nil
+	}
+	return errors.NewInternalServerError(
+		"knowledge created, but metadata was not saved",
+	).WithDetails(err.Error())
 }
 
 // GetKnowledge godoc
@@ -996,6 +1113,35 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		filter.FolderScope = types.FolderScopeExact
 		if recursive, err := strconv.ParseBool(c.DefaultQuery("folder_recursive", "false")); err == nil && recursive {
 			filter.FolderScope = types.FolderScopeSubtree
+		}
+	}
+	if raw := c.Query("metadata_conditions"); raw != "" {
+		var conditions []types.MetadataCondition
+		decoder := json.NewDecoder(strings.NewReader(raw))
+		decoder.UseNumber()
+		if err := decoder.Decode(&conditions); err != nil {
+			c.Error(errors.NewBadRequestError("invalid metadata_conditions: " + err.Error()))
+			return
+		}
+		if h.metadataService == nil {
+			c.Error(errors.NewInternalServerError("metadata service is not configured"))
+			return
+		}
+		scope, err := h.metadataService.ResolveDocumentScope(ctx, types.MetadataScopeQuery{
+			KnowledgeBaseID: kbID,
+			Conditions:      conditions,
+		})
+		if err != nil {
+			c.Error(metadataHTTPError(err))
+			return
+		}
+		switch scope.Mode {
+		case types.DocumentScopeModeNone:
+			filter.RestrictKnowledgeIDs = true
+			filter.KnowledgeIDs = nil
+		case types.DocumentScopeModeIDs:
+			filter.RestrictKnowledgeIDs = true
+			filter.KnowledgeIDs = scope.IDs
 		}
 	}
 

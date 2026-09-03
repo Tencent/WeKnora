@@ -3960,6 +3960,7 @@ export default {
       multimodal: 'Обработка изображений',
       asr: 'Аудио',
       datasource: 'Источники данных',
+      metadata: 'Метаданные',
       share: 'Sharing',
       activity: 'История активности'
     },
@@ -6112,6 +6113,21 @@ export default {
       label: 'Разбор PDF как сканированного документа',
       description: 'Подходит для PDF с веб-печати, сканов и документов с большим числом изображений. Каждая страница будет отрендерена в изображение и обработана через OCR/VLM. Может увеличить время обработки и расходы на модели.'
     }
+  },
+  metadata: {
+    settingsTitle: 'Метаданные документов', settingsDescription: 'Настройте классификацию, фильтры и правила автоматического заполнения для этой базы знаний.',
+    createDefinition: 'Новое поле', editDefinition: 'Изменить поле', editDocumentMetadata: 'Изменить метаданные', name: 'Название поля', namePlaceholder: 'Например: Тип документа', description: 'Описание', type: 'Тип', governance: 'Правила',
+    required: 'Обязательное', requiredDescription: 'Пустое значение отмечается, но не блокирует импорт и поиск', filterable: 'Можно фильтровать', filterableDescription: 'Использовать поле в фильтрах документов и поиска',
+    automaticRule: 'Автозаполнение', automaticRuleDescription: 'Формировать значения из источника или с помощью ИИ', manualOnly: 'Только вручную', emptyDefinitions: 'Поля метаданных не заданы', noDescription: 'Нет описания', typeLocked: 'Тип заблокирован после появления значений или правила',
+    options: 'Допустимые значения', addOption: 'Добавить вариант', moveUp: 'Вверх', moveDown: 'Вниз', archiveTitle: 'Архивировать поле', archiveDescription: 'Поле «{name}» будет скрыто из редактирования и фильтров, существующие значения сохранятся.', archiveAction: 'Архивировать',
+    ruleStrategy: 'Способ заполнения', sourceKey: 'Поле источника', sourceKeyPlaceholder: 'Например: product_line', instruction: 'Инструкция извлечения', modelId: 'ID модели', modelIdPlaceholder: 'Пусто — модель резюме базы знаний',
+    filter: 'Метаданные', chatFilter: 'Фильтры метаданных базы знаний', chatFilterDescription: 'Условия для каждой базы знаний ограничивают поиск для этого сообщения.', noFilterableFields: 'Нет доступных полей фильтра', filterTitle: 'Фильтры метаданных', filterDescription: 'Условия разных полей объединяются через AND.', filterEmpty: 'Добавьте поле для ограничения документов', addCondition: 'Добавить поле фильтра', applyFilter: 'Применить', noValueNeeded: 'Значение не требуется',
+    trueValue: 'Да', falseValue: 'Нет', documentTitle: 'Метаданные документа', documentFields: 'Состояние полей', incompleteCount: 'Не заполнено обязательных полей: {count}', allComplete: 'Обязательные поля заполнены', confirmAll: 'Подтвердить все', confirmOne: 'Подтвердить', rerunAutoFill: 'Повторить автозаполнение', allowAutoOverwrite: 'Разрешить автозамену',
+    overwritePromptTitle: 'Сохранить ручное изменение', overwritePromptDescription: 'Ручное изменение по умолчанию блокирует значение. Включите автозамену, чтобы будущая синхронизация могла его обновить.',
+    types: { text: 'Текст', singleSelect: 'Один вариант', multiSelect: 'Несколько вариантов', number: 'Число', date: 'Дата', boolean: 'Логическое' }, ruleStrategies: { source_mapping: 'Поле источника', llm_extract: 'Извлечение ИИ' },
+    operators: { equals: 'Равно', contains: 'Содержит', in: 'Один из', contains_any: 'Содержит любой', contains_all: 'Содержит все', eq: 'Равно', gt: 'Больше', gte: 'Не меньше', lt: 'Меньше', lte: 'Не больше', between: 'Между', on: 'Дата', before: 'До', after: 'После', is_empty: 'Пусто', is_not_empty: 'Не пусто' },
+    status: { incomplete: 'Не заполнено', automatic: 'Автоматически', pending: 'Ждет подтверждения', confirmed: 'Подтверждено', archived: 'Архивировано', overwriteAllowed: 'Автозамена включена', overwriteLocked: 'Заблокировано' },
+    messages: { loadFailed: 'Не удалось загрузить поля', nameRequired: 'Введите название поля', optionRequired: 'Добавьте хотя бы один вариант', optionDuplicate: 'Варианты не должны повторяться', sourceKeyRequired: 'Введите поле источника', instructionRequired: 'Введите инструкцию извлечения', saved: 'Поле сохранено', saveFailed: 'Не удалось сохранить поле', archived: 'Поле архивировано', archiveFailed: 'Не удалось архивировать', sortFailed: 'Не удалось сохранить порядок', documentLoadFailed: 'Не удалось загрузить метаданные документа', valueSaved: 'Метаданные сохранены', valueSaveFailed: 'Не удалось сохранить метаданные', versionConflict: 'Поле было изменено. Загружено актуальное значение.', policySaveFailed: 'Не удалось сохранить политику замены', confirmed: 'Автоматические значения подтверждены', confirmFailed: 'Не удалось подтвердить', autoFillQueued: 'Автозаполнение поставлено в очередь', autoFillFailed: 'Не удалось запустить автозаполнение' },
   },
   knowledgeBase: {
     title: 'База знаний',

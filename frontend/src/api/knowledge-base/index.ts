@@ -1,8 +1,98 @@
-import { get, post, put, del, postUpload, getDown } from "../../utils/request";
+import { get, post, put, patch, del, postUpload, getDown } from "../../utils/request";
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import type { AuditLog, AuditOutcome, ListAuditLogResponse } from '@/api/tenant/audit-log';
 
 export type KnowledgeBaseActivity = AuditLog;
+
+export type MetadataValueType = 'text' | 'single_select' | 'multi_select' | 'number' | 'date' | 'boolean';
+export type MetadataOperator =
+  | 'equals' | 'contains' | 'in' | 'contains_any' | 'contains_all'
+  | 'eq' | 'gt' | 'gte' | 'lt' | 'lte' | 'between'
+  | 'on' | 'before' | 'after' | 'is_empty' | 'is_not_empty';
+
+export interface MetadataOption {
+  id: string;
+  metadata_definition_id?: string;
+  label: string;
+  status: 'active' | 'archived';
+  sort_order: number;
+}
+
+export interface MetadataAutoRule {
+  id: string;
+  strategy: 'source_mapping' | 'llm_extract';
+  config: Record<string, unknown>;
+  revision: number;
+  enabled: boolean;
+}
+
+export interface MetadataDefinition {
+  id: string;
+  knowledge_base_id: string;
+  name: string;
+  desc: string;
+  value_type: MetadataValueType;
+  required: boolean;
+  filterable: boolean;
+  status: 'active' | 'archived';
+  sort_order: number;
+  type_locked: boolean;
+  options: MetadataOption[];
+  auto_rule?: MetadataAutoRule;
+}
+
+export interface MetadataSchema {
+  knowledge_base_id: string;
+  definitions: MetadataDefinition[];
+}
+
+export interface MetadataCondition {
+  metadata_definition_id: string;
+  operator: MetadataOperator;
+  values: unknown[];
+}
+
+export interface KBMetadataFilter {
+  knowledge_base_id: string;
+  conditions: MetadataCondition[];
+}
+
+export interface DocumentMetadataValue {
+  id: string;
+  value: unknown;
+  source: 'automatic' | 'manual';
+  review_status: 'pending' | 'confirmed';
+  allow_auto_overwrite: boolean;
+  version: number;
+}
+
+export interface DocumentMetadataField {
+  definition: MetadataDefinition;
+  value?: DocumentMetadataValue;
+  completion_status: 'incomplete' | 'filled' | 'empty_optional';
+}
+
+export interface DocumentMetadata {
+  knowledge_id: string;
+  values: DocumentMetadataField[];
+  incomplete_count: number;
+}
+
+export interface ConfigureMetadataDefinitionInput {
+  name: string;
+  desc: string;
+  value_type: MetadataValueType;
+  required: boolean;
+  filterable: boolean;
+  sort_order: number;
+  options: Array<Pick<MetadataOption, 'label' | 'sort_order'> & Partial<Pick<MetadataOption, 'id' | 'status'>>>;
+}
+
+export interface InitialMetadataValue {
+  metadata_definition_id: string;
+  value: unknown;
+  allow_auto_overwrite?: boolean;
+}
 
 export interface ListKnowledgeBaseActivityParams {
   after_id?: number;
@@ -223,6 +313,8 @@ export function uploadKnowledgeFile(
       formData.append(key, value.join(','));
     } else if (key === 'process_config' && value && typeof value !== 'string') {
       formData.append(key, JSON.stringify(value));
+    } else if (key === 'metadata_values' && value && typeof value !== 'string') {
+      formData.append(key, JSON.stringify(value));
     } else {
       formData.append(key, value);
     }
@@ -274,6 +366,7 @@ export function listKnowledgeFiles(
     folder_path?: string;
     /** Include documents stored in sub-folders of folder_path. */
     folder_recursive?: boolean;
+    metadata_conditions?: MetadataCondition[];
   },
 ) {
   const query = new URLSearchParams();
@@ -290,8 +383,69 @@ export function listKnowledgeFiles(
     query.append('folder_path', params.folder_path);
     if (params.folder_recursive) query.append('folder_recursive', 'true');
   }
+  if (params.metadata_conditions?.length) {
+    query.append('metadata_conditions', JSON.stringify(params.metadata_conditions));
+  }
   const qs = query.toString();
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
+}
+
+export function getMetadataSchema(kbId: string) {
+  return get(`/api/v1/knowledge-bases/${kbId}/metadata-definitions`);
+}
+
+export function createMetadataDefinition(kbId: string, data: ConfigureMetadataDefinitionInput) {
+  return post(`/api/v1/knowledge-bases/${kbId}/metadata-definitions`, data);
+}
+
+export function updateMetadataDefinition(kbId: string, definitionId: string, data: ConfigureMetadataDefinitionInput) {
+  return put(`/api/v1/knowledge-bases/${kbId}/metadata-definitions/${definitionId}`, data);
+}
+
+export function archiveMetadataDefinition(kbId: string, definitionId: string) {
+  return del(`/api/v1/knowledge-bases/${kbId}/metadata-definitions/${definitionId}`);
+}
+
+export function configureMetadataAutoRule(
+  kbId: string,
+  definitionId: string,
+  data: { strategy: MetadataAutoRule['strategy']; config: Record<string, unknown> },
+) {
+  return put(`/api/v1/knowledge-bases/${kbId}/metadata-definitions/${definitionId}/auto-rule`, data);
+}
+
+export function deleteMetadataAutoRule(kbId: string, definitionId: string) {
+  return del(`/api/v1/knowledge-bases/${kbId}/metadata-definitions/${definitionId}/auto-rule`);
+}
+
+export function getDocumentMetadata(knowledgeId: string) {
+  return get(`/api/v1/knowledge/${knowledgeId}/metadata-values`);
+}
+
+export function batchGetDocumentMetadata(knowledgeIds: string[]) {
+  return post('/api/v1/knowledge/metadata-values/batch-get', { knowledge_ids: knowledgeIds });
+}
+
+export function changeDocumentMetadata(
+  knowledgeId: string,
+  changes: Array<{
+    metadata_definition_id: string;
+    value?: unknown;
+    allow_auto_overwrite?: boolean;
+    expected_version?: number;
+  }>,
+) {
+  return patch(`/api/v1/knowledge/${knowledgeId}/metadata-values`, { changes });
+}
+
+export function confirmDocumentMetadata(knowledgeId: string, metadataDefinitionIds: string[] = []) {
+  return post(`/api/v1/knowledge/${knowledgeId}/metadata-values/confirm`, {
+    metadata_definition_ids: metadataDefinitionIds,
+  });
+}
+
+export function rerunDocumentMetadataAutoFill(knowledgeId: string) {
+  return post(`/api/v1/knowledge/${knowledgeId}/metadata-values/auto-fill`, {});
 }
 
 /** One node of the knowledge base folder tree. */

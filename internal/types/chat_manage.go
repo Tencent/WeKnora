@@ -13,10 +13,13 @@ type PipelineRequest struct {
 	KnowledgeBaseIDs []string      `json:"knowledge_base_ids"`
 	KnowledgeIDs     []string      `json:"knowledge_ids,omitempty"`
 	SearchTargets    SearchTargets `json:"-"`
-	VectorThreshold  float64       `json:"vector_threshold"`
-	KeywordThreshold float64       `json:"keyword_threshold"`
-	EmbeddingTopK    int           `json:"embedding_top_k"`
-	VectorDatabase   string        `json:"vector_database"`
+	// MetadataFilters constrain retrieval per knowledge base. Empty means no extra filter.
+	MetadataFilters    []KBMetadataFilter `json:"metadata_filters,omitempty"`
+	MetadataScopeEmpty bool               `json:"-"`
+	VectorThreshold    float64            `json:"vector_threshold"`
+	KeywordThreshold   float64            `json:"keyword_threshold"`
+	EmbeddingTopK      int                `json:"embedding_top_k"`
+	VectorDatabase     string             `json:"vector_database"`
 
 	// Rerank parameters
 	RerankModelID   string  `json:"rerank_model_id"`
@@ -190,6 +193,7 @@ func (c *ChatManage) Clone() *ChatManage {
 				TagIDs:                  tagIDsCopy,
 				ScopeTagIDs:             scopeTagIDsCopy,
 				DisableRecallThresholds: t.DisableRecallThresholds,
+				MetadataFiltered:        t.MetadataFiltered,
 			}
 		}
 	}
@@ -213,6 +217,8 @@ func (c *ChatManage) Clone() *ChatManage {
 			KnowledgeBaseIDs:         knowledgeBaseIDs,
 			KnowledgeIDs:             knowledgeIDs,
 			SearchTargets:            searchTargets,
+			MetadataFilters:          append([]KBMetadataFilter(nil), c.MetadataFilters...),
+			MetadataScopeEmpty:       c.MetadataScopeEmpty,
 			VectorThreshold:          c.VectorThreshold,
 			KeywordThreshold:         c.KeywordThreshold,
 			EmbeddingTopK:            c.EmbeddingTopK,
