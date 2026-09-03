@@ -72,3 +72,9 @@ button {
 button[disabled] {
   background: #c5c5c5;
 }
+
+.picker-value {
+  display: flex;
+  align-items: center;
+  color: #1a1a1a;
+}

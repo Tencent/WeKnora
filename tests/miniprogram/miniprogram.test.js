@@ -3,6 +3,23 @@ const test = require("node:test");
 const { createKnowledgeFromURL, knowledgeChat, listKnowledgeBases } = require("../../miniprogram/utils/request");
 const { collectAnswerFromSSE, parseSSE } = require("../../miniprogram/utils/sse");
 const { normalizeBaseUrl } = require("../../miniprogram/utils/config");
+const { getLocale, normalizeLocale, t } = require("../../miniprogram/utils/i18n");
+
+function mockWx(overrides = {}) {
+  return {
+    getStorageSync() {
+      return {};
+    },
+    setStorageSync() {},
+    setTabBarItem() {},
+    setNavigationBarTitle() {},
+    showToast() {},
+    showModal() {},
+    switchTab() {},
+    request() {},
+    ...overrides
+  };
+}
 
 test("parseSSE extracts event payloads", () => {
   const events = parseSSE('event: message\ndata: {"content":"hi"}\n\n');
@@ -24,6 +41,30 @@ test("collectAnswerFromSSE joins answer chunks and skips references", () => {
 
 test("normalizeBaseUrl trims trailing slashes", () => {
   assert.equal(normalizeBaseUrl(" https://example.com/// "), "https://example.com");
+});
+
+test("i18n defaults to Chinese and supports English", () => {
+  assert.equal(normalizeLocale("zh"), "zh");
+  assert.equal(normalizeLocale("en"), "en");
+  assert.equal(normalizeLocale("fr"), "zh");
+  assert.equal(t("tabKnowledge", {}, "zh"), "知识库");
+  assert.equal(t("tabKnowledge", {}, "en"), "Knowledge");
+  assert.equal(t("loadedKnowledgeBases", { count: 2 }, "zh"), "已加载 2 个知识库。");
+  assert.equal(t("loadedKnowledgeBases", { count: 2 }, "en"), "Loaded 2 knowledge bases.");
+});
+
+test("getLocale reads stored language preference", () => {
+  const originalWx = global.wx;
+  try {
+    global.wx = mockWx({
+      getStorageSync() {
+        return { locale: "en" };
+      }
+    });
+    assert.equal(getLocale(), "en");
+  } finally {
+    global.wx = originalWx;
+  }
 });
 
 test("API helpers send WeKnora auth headers", async () => {
@@ -123,16 +164,17 @@ test("knowledge page skips API loading until settings are configured", async () 
     global.Page = (definition) => {
       pageDefinitions.push(definition);
     };
-    global.wx = {
+    global.wx = mockWx({
       getStorageSync() {
         return {};
       },
       request() {
         calls.push("request");
-      },
-      switchTab() {}
-    };
+      }
+    });
 
+    delete require.cache[require.resolve("../../miniprogram/utils/i18n.js")];
+    delete require.cache[require.resolve("../../miniprogram/utils/config.js")];
     delete require.cache[require.resolve("../../miniprogram/pages/index/index.js")];
     require("../../miniprogram/pages/index/index.js");
     const page = {
@@ -145,6 +187,7 @@ test("knowledge page skips API loading until settings are configured", async () 
     await pageDefinitions[0].onShow.call(page);
 
     assert.equal(page.data.needsSettings, true);
+    assert.equal(page.data.knowledgeTitle, "WeKnora 知识库");
     assert.deepEqual(calls, []);
   } finally {
     global.Page = originalPage;
@@ -162,11 +205,12 @@ test("knowledge page maps API results to picker labels", async () => {
     global.Page = (definition) => {
       pageDefinitions.push(definition);
     };
-    global.wx = {
+    global.wx = mockWx({
       getStorageSync() {
         return {
           apiKey: "sk-test",
-          baseUrl: "https://weknora.example.com"
+          baseUrl: "https://weknora.example.com",
+          locale: "en"
         };
       },
       request(options) {
@@ -182,10 +226,11 @@ test("knowledge page maps API results to picker labels", async () => {
       },
       setStorageSync(key, value) {
         savedSettings = { key, value };
-      },
-      switchTab() {}
-    };
+      }
+    });
 
+    delete require.cache[require.resolve("../../miniprogram/utils/i18n.js")];
+    delete require.cache[require.resolve("../../miniprogram/utils/config.js")];
     delete require.cache[require.resolve("../../miniprogram/pages/index/index.js")];
     require("../../miniprogram/pages/index/index.js");
     const page = {
@@ -200,6 +245,7 @@ test("knowledge page maps API results to picker labels", async () => {
     assert.deepEqual(page.data.knowledgeBaseNames, ["Compliance KB", "Docs KB"]);
     assert.equal(page.data.selectedKnowledgeBaseId, "kb-1");
     assert.equal(page.data.selectedKnowledgeBaseName, "Compliance KB");
+    assert.equal(page.data.statusMessage, "Loaded 2 knowledge bases.");
     assert.equal(savedSettings.value.selectedKnowledgeBaseId, "kb-1");
   } finally {
     global.Page = originalPage;
