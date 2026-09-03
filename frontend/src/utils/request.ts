@@ -268,6 +268,9 @@ export function postUpload(
   config: any = {},
 ): Promise<any> {
   return instance.post(url, data, {
+    // Large uploads can take longer than the 30-second API default before
+    // nginx has buffered the request body and the backend can respond.
+    timeout: 60 * 60 * 1000,
     ...config,
     headers: {
       "Content-Type": "multipart/form-data",
