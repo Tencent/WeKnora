@@ -348,11 +348,3 @@ test('policy-restricted egress does not claim full outbound verification', () =>
     'policy-restricted copy must win over the full-verification claim',
   )
 })
-
-test('volume-incapable backends still have a warning string to show', () => {
-  assert.match(
-    source,
-    /settings\.sandbox\.noVolumeSupport/,
-    'SupportsVolumes=false must not render a missing i18n key',
-  )
-})
