@@ -127,6 +127,31 @@ func TestGatewayTransportDoesNotOverwriteExistingToken(t *testing.T) {
 	require.Equal(t, "sdk-token", recorder.lastHeader)
 }
 
+func TestAttachInboundTokenTransportInjectsWithoutPool(t *testing.T) {
+	recorder := &roundTripRecorder{}
+	registry := NewInboundTokenRegistry()
+	registry.Put("sb-1", "token-1")
+
+	transport := attachInboundTokenTransport(recorder, registry)
+	req, err := http.NewRequest(http.MethodGet, "https://49983-sb-1.e2b.app/envd", nil)
+	require.NoError(t, err)
+
+	_, err = transport.RoundTrip(req)
+	require.NoError(t, err)
+	require.Equal(t, "token-1", recorder.lastHeader,
+		"NewE2BRemoteClient / WithTransport must still inject without a gateway pool")
+}
+
+func TestAttachInboundTokenTransportDoesNotDoubleWrapPoolSplit(t *testing.T) {
+	pool := NewSandboxGatewayTransportPool(http.DefaultTransport)
+	cfg := DefaultConfig()
+	cfg.Type = SandboxTypeE2B
+	split := pool.RoundTripperFor(cfg)
+
+	require.Same(t, split, attachInboundTokenTransport(split, pool.InboundTokens()),
+		"a pool split already injects from this registry")
+}
+
 // roundTripRecorder stands in for the control transport and remembers what
 // header the request carried by the time it got there.
 type roundTripRecorder struct {

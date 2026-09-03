@@ -79,7 +79,7 @@ func TestDeepSandboxCheckReportsEgressRestrictedRatherThanFailed(t *testing.T) {
 	require.Equal(t, "egress_available", item.Name)
 	require.Nil(t, item.OK)
 	require.Equal(t, skipReasonEgressRestrictedByPolicy, item.Reason)
-	require.Contains(t, item.Message, "api.example.com")
+	require.Empty(t, item.Message, "skip reasons are localized by the UI")
 }
 
 // ValidateSandboxNetworkPolicy accepts two equivalent spellings of the
@@ -102,7 +102,7 @@ func TestDeepSandboxCheckReportsEgressRestrictedForDenyOutSpelling(t *testing.T)
 	require.Equal(t, "egress_available", item.Name)
 	require.Nil(t, item.OK)
 	require.Equal(t, skipReasonEgressRestrictedByPolicy, item.Reason)
-	require.Contains(t, item.Message, "api.example.com")
+	require.Empty(t, item.Message, "skip reasons are localized by the UI")
 }
 
 // A deny list that does not cover everything leaves the probe target reachable

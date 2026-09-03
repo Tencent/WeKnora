@@ -58,6 +58,51 @@ func testSessionSandboxBindingStore(t *testing.T, store SessionSandboxBindingSto
 	require.True(t, deleted)
 }
 
+func TestMemorySessionSandboxBindingStoreReplacesTrafficToken(t *testing.T) {
+	store := NewMemorySessionSandboxBindingStore()
+	testSessionSandboxBindingReplacesTrafficToken(t, store)
+}
+
+func testSessionSandboxBindingReplacesTrafficToken(t *testing.T, store SessionSandboxBindingStore) {
+	t.Helper()
+
+	ctx := context.Background()
+	key := SessionSandboxKey{TenantID: 42, SessionID: "session-token"}
+	binding := validSessionSandboxBinding(key, "sandbox-a")
+	binding.TrafficAccessToken = "old-token"
+	binding.ConfigID = "cfg-token"
+	created, err := store.Create(ctx, key, binding)
+	require.NoError(t, err)
+	require.True(t, created)
+
+	marked, err := store.InvalidateByConfig(ctx, key.TenantID, binding.ConfigID)
+	require.NoError(t, err)
+	require.Equal(t, 1, marked)
+
+	wrote, err := store.ReplaceTrafficTokenIfMatch(ctx, key, binding, "new-token")
+	require.NoError(t, err)
+	require.True(t, wrote)
+
+	got, err := store.Get(ctx, key)
+	require.NoError(t, err)
+	require.Equal(t, "new-token", got.TrafficAccessToken)
+	require.Equal(t, binding.SandboxID, got.SandboxID)
+	require.NotNil(t, got.StaleAt, "patching the token must not wipe a concurrent stale mark")
+
+	mismatch := binding
+	mismatch.SandboxID = "sandbox-other"
+	wrote, err = store.ReplaceTrafficTokenIfMatch(ctx, key, mismatch, "ignored")
+	require.NoError(t, err)
+	require.False(t, wrote)
+	got, err = store.Get(ctx, key)
+	require.NoError(t, err)
+	require.Equal(t, "new-token", got.TrafficAccessToken)
+
+	wrote, err = store.ReplaceTrafficTokenIfMatch(ctx, key, binding, "")
+	require.NoError(t, err)
+	require.False(t, wrote)
+}
+
 func testSessionSandboxBindingTenantIsolation(t *testing.T, store SessionSandboxBindingStore) {
 	t.Helper()
 

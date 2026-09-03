@@ -166,6 +166,40 @@ func TestMergeSandboxConfigForUpdatePreservesInjectedHeaderSecrets(t *testing.T)
 	require.NotContains(t, out.Network.E2BHostRules[0].Headers, "X-Other")
 }
 
+func TestMergeSandboxConfigForUpdateMatchesInjectedHeadersCaseInsensitively(t *testing.T) {
+	existing := &TenantSandboxConfig{
+		Network: &SandboxNetworkPolicy{
+			CubeRules: []CubeEgressRule{{
+				Name:   "Allow-API",
+				Inject: []CubeHeaderInject{{Header: "Authorization", Secret: "old-auth"}},
+			}},
+			E2BHostRules: []E2BHostRule{{
+				Host:    "API.example.com",
+				Headers: map[string]string{"X-Key": "old-key"},
+			}},
+		},
+	}
+	incoming := &TenantSandboxConfig{
+		Network: &SandboxNetworkPolicy{
+			CubeRules: []CubeEgressRule{{
+				Name:   "allow-api",
+				Inject: []CubeHeaderInject{{Header: "authorization", Secret: RedactedSecretPlaceholder}},
+			}},
+			E2BHostRules: []E2BHostRule{{
+				Host:    " api.example.com ",
+				Headers: map[string]string{"x-key": RedactedSecretPlaceholder},
+			}},
+		},
+	}
+
+	out := MergeSandboxConfigForUpdate(incoming, existing)
+
+	require.Equal(t, "old-auth", out.Network.CubeRules[0].Inject[0].Secret,
+		"HTTP header case and rule-name case must not drop the stored secret")
+	require.Equal(t, "old-key", out.Network.E2BHostRules[0].Headers["x-key"],
+		"host whitespace and header case must not drop the stored secret")
+}
+
 func TestMergeSandboxConfigForUpdateDropsNetworkWhenIncomingOmitsIt(t *testing.T) {
 	existing := &TenantSandboxConfig{
 		Network: &SandboxNetworkPolicy{DenyEgressByDefault: true},

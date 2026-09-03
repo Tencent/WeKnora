@@ -416,12 +416,12 @@ func mergeNetworkPolicyForUpdate(
 	storedCube := make(map[string]string)
 	for _, rule := range existing.CubeRules {
 		for _, inject := range rule.Inject {
-			storedCube[rule.Name+"\x00"+inject.Header] = inject.Secret
+			storedCube[networkSecretKey(rule.Name, inject.Header)] = inject.Secret
 		}
 	}
 	for i, rule := range out.CubeRules {
 		for j, inject := range rule.Inject {
-			prev := storedCube[rule.Name+"\x00"+inject.Header]
+			prev := storedCube[networkSecretKey(rule.Name, inject.Header)]
 			out.CubeRules[i].Inject[j].Secret = PreserveIfRedacted(inject.Secret, prev)
 		}
 	}
@@ -429,14 +429,22 @@ func mergeNetworkPolicyForUpdate(
 	storedE2B := make(map[string]string)
 	for _, rule := range existing.E2BHostRules {
 		for name, value := range rule.Headers {
-			storedE2B[rule.Host+"\x00"+name] = value
+			storedE2B[networkSecretKey(rule.Host, name)] = value
 		}
 	}
 	for i, rule := range out.E2BHostRules {
 		for name, value := range rule.Headers {
-			prev := storedE2B[rule.Host+"\x00"+name]
+			prev := storedE2B[networkSecretKey(rule.Host, name)]
 			out.E2BHostRules[i].Headers[name] = PreserveIfRedacted(value, prev)
 		}
 	}
 	return out
+}
+
+// networkSecretKey is the identity the merge uses for one injected header.
+// Parent (rule name / host) and child (header name) are trimmed and folded so
+// a whitespace or HTTP-header case change is not treated as a rename that
+// drops the stored secret.
+func networkSecretKey(parent, child string) string {
+	return strings.ToLower(strings.TrimSpace(parent)) + "\x00" + strings.ToLower(strings.TrimSpace(child))
 }

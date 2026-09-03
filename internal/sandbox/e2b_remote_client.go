@@ -82,6 +82,12 @@ func newE2BRemoteClient(
 	if timeout <= 0 {
 		timeout = DefaultE2BHTTPTimeout
 	}
+	// Attach the inbound-token injector even when the caller did not go
+	// through the gateway pool. go-e2b stores TrafficAccessToken but never
+	// sends the header; without this wrap, NewE2BRemoteClient / WithTransport
+	// would register tokens that no HTTP stack consults. A pool-built split
+	// that already owns the same registry is left as-is.
+	transport = attachInboundTokenTransport(transport, inboundTokens)
 	// Every E2B client speaks to envd through the compatibility shim, whether
 	// or not a gateway is configured: the two details it rewrites belong to the
 	// envd protocol itself, not to any one deployment. See envd_compat_transport.go.

@@ -75,6 +75,10 @@ type fakeRemoteClient struct {
 	// default false is the realistic behaviour.
 	reissuesTokenOnConnect bool
 
+	// connectTrafficToken, when set, is returned on Connect even if the
+	// request already carried a token — the provider-wins case.
+	connectTrafficToken string
+
 	// omitsInboundTokenCarrier makes handles skip
 	// RemoteInboundTokenCarrier, the way Docker's do.
 	omitsInboundTokenCarrier bool
@@ -221,7 +225,9 @@ func (c *fakeRemoteClient) Connect(
 		)
 	}
 	token := request.TrafficAccessToken
-	if token == "" && c.reissuesTokenOnConnect {
+	if c.connectTrafficToken != "" {
+		token = c.connectTrafficToken
+	} else if token == "" && c.reissuesTokenOnConnect {
 		token = c.trafficAccessToken
 	}
 	return c.handle(record, token), nil

@@ -5282,7 +5282,9 @@ export default {
       checkFailed: '检测未通过',
       checkScopeConnection: '本次只验证了控制面：端点可达且凭据有效。是否真的能跑起脚本还没有验证。',
       checkScopeFull: '端点、凭据、模板、沙箱内执行与出网均已真实验证。',
+      checkScopePolicyRestricted: '出网按策略受限，未做真实出网探测；端点、凭据、模板与沙箱内执行已验证。',
       checkPendingHint: '{names} 需要「完整验证」才能确认：会真实创建一个临时沙箱、执行一次脚本再销毁。',
+      noVolumeSupport: '该后端不支持挂载卷，依赖共享卷的技能将不可用。',
       skipReasons: {
         needs_deep_check: '需完整验证',
         control_plane_unreachable: '控制面不可达，已跳过',

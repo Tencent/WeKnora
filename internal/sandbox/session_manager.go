@@ -913,6 +913,7 @@ func (m *SessionBoundManager) lookupSessionHandle(
 		handle.Provider() != m.client.Provider() {
 		return nil, false, errors.New("sandbox: remote handle does not match binding")
 	}
+	persistInboundToken(ctx, m.bindings, key, *binding, handle)
 	return handle, true, nil
 }
 

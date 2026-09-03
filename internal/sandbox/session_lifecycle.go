@@ -198,7 +198,7 @@ func (l *remoteSessionLifecycle) resolveLocked(
 	l.consumeTurnRebuild(ctx, key)
 
 	if binding != nil {
-		handle, replace, err := l.connectBinding(ctx, *binding)
+		handle, replace, err := l.connectBinding(ctx, key, *binding)
 		if err != nil {
 			return nil, err
 		}
@@ -231,6 +231,7 @@ func (l *remoteSessionLifecycle) resolveLocked(
 
 func (l *remoteSessionLifecycle) connectBinding(
 	ctx context.Context,
+	key SessionSandboxKey,
 	binding SessionSandboxBinding,
 ) (RemoteSandboxHandle, bool, error) {
 	summary, err := l.client.Get(ctx, binding.SandboxID)
@@ -267,7 +268,34 @@ func (l *remoteSessionLifecycle) connectBinding(
 	if err := l.validateHandle(handle, binding.SandboxID); err != nil {
 		return nil, false, err
 	}
+	persistInboundToken(ctx, l.bindings, key, binding, handle)
 	return handle, false, nil
+}
+
+// persistInboundToken writes a provider-reissued traffic token back onto the
+// binding. Connect may return a fresher credential than Redis has (pause then
+// resume); without this a later restart restores the stale copy, data-plane
+// calls 403, and CanReplaceRemoteBinding will not swap the binding.
+func persistInboundToken(
+	ctx context.Context,
+	store SessionSandboxBindingStore,
+	key SessionSandboxKey,
+	binding SessionSandboxBinding,
+	handle RemoteSandboxHandle,
+) {
+	if store == nil {
+		return
+	}
+	token := InboundTokenOf(handle)
+	if token == "" || token == binding.TrafficAccessToken {
+		return
+	}
+	if _, err := store.ReplaceTrafficTokenIfMatch(ctx, key, binding, token); err != nil {
+		log.Printf(
+			"[sandbox] persist inbound token of session %s failed: %v",
+			key.SessionID, err,
+		)
+	}
 }
 
 // inboundTokenRequired reports whether this config closed public inbound
@@ -517,7 +545,10 @@ func (l *remoteSessionLifecycle) connectKnownWinner(
 			l.client.Provider(),
 		)
 	}
-	handle, replace, err := l.connectBinding(ctx, winner)
+	handle, replace, err := l.connectBinding(ctx, SessionSandboxKey{
+		TenantID:  winner.TenantID,
+		SessionID: winner.SessionID,
+	}, winner)
 	if err != nil {
 		return nil, err
 	}

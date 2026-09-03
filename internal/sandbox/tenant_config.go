@@ -22,6 +22,7 @@ package sandbox
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -178,6 +179,7 @@ func ResolveEffectiveConfig(
 		); err != nil {
 			return nil, err
 		}
+		applyDockerNetworkPolicy(&effective)
 	}
 	return &effective, nil
 }
@@ -363,4 +365,21 @@ func resolveNetworkPolicy(stored *types.SandboxNetworkPolicy) RemoteNetworkPolic
 		policy.E2BHostRules = append(policy.E2BHostRules, converted)
 	}
 	return policy
+}
+
+// applyDockerNetworkPolicy maps docker.network_mode=none onto the resolved
+// egress switch so DeniesEgressByDefault (and the deep connectivity check)
+// agree with the network the adapter will actually create. The stored
+// SandboxNetworkPolicy stays empty on Docker configs; this is the Docker
+// form's overall switch expressed in the same field the rest of the stack
+// already consults.
+func applyDockerNetworkPolicy(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(cfg.DockerNetworkMode), "none") {
+		return
+	}
+	allow := false
+	cfg.Network.AllowInternetAccess = &allow
 }

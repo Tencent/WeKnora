@@ -325,3 +325,34 @@ test('deny rules omit hidden injected secrets', () => {
     'a deny rule must not send inject entries hidden by the form',
   )
 })
+
+test('policy-restricted egress does not claim full outbound verification', () => {
+  assert.match(
+    source,
+    /EGRESS_RESTRICTED_REASON = 'egress_restricted_by_policy'/,
+    'the hint must recognize the skip reason the check API returns',
+  )
+  assert.match(
+    source,
+    /settings\.sandbox\.checkScopePolicyRestricted/,
+    'deny-by-default must not reuse the "outbound was verified" copy',
+  )
+  const hintBlock = source.slice(
+    source.indexOf('const checkScopeHint = computed'),
+    source.indexOf('function checkDetail'),
+  )
+  const restrictedAt = hintBlock.indexOf('checkScopePolicyRestricted')
+  const fullAt = hintBlock.indexOf('checkScopeFull')
+  assert.ok(
+    restrictedAt !== -1 && fullAt !== -1 && restrictedAt < fullAt,
+    'policy-restricted copy must win over the full-verification claim',
+  )
+})
+
+test('volume-incapable backends still have a warning string to show', () => {
+  assert.match(
+    source,
+    /settings\.sandbox\.noVolumeSupport/,
+    'SupportsVolumes=false must not render a missing i18n key',
+  )
+})

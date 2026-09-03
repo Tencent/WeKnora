@@ -1337,7 +1337,9 @@ export default {
       checkFailed: 'Some checks failed',
       checkScopeConnection: 'Only the control plane was verified: the endpoint responds and the credential is valid. Whether a script actually runs is still unverified.',
       checkScopeFull: 'Endpoint, credential, template, in-sandbox execution and outbound network were all verified for real.',
+      checkScopePolicyRestricted: 'Outbound access is restricted by policy, so egress was not probed. Endpoint, credential, template and in-sandbox execution were verified.',
       checkPendingHint: '{names} can only be confirmed by a full verification, which creates a throwaway sandbox, runs one script and destroys it.',
+      noVolumeSupport: 'This backend does not support volume mounts; skills relying on a shared volume will be unavailable.',
       skipReasons: {
         needs_deep_check: 'Needs full verification',
         control_plane_unreachable: 'Skipped: control plane unreachable',

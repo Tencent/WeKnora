@@ -5280,7 +5280,9 @@ export default {
       checkFailed: 'Some checks failed',
       checkScopeConnection: '이번에는 컨트롤 플레인만 확인했습니다. 엔드포인트는 응답하고 자격 증명도 유효하지만, 스크립트가 실제로 실행되는지는 아직 확인되지 않았습니다.',
       checkScopeFull: '엔드포인트, 자격 증명, 템플릿, 샌드박스 내 실행, 외부 통신까지 모두 실제로 검증했습니다.',
+      checkScopePolicyRestricted: '네트워크 정책으로 외부 통신이 제한되어 외부 연결은 실제로 확인하지 않았습니다. 엔드포인트, 자격 증명, 템플릿, 샌드박스 내 실행은 검증했습니다.',
       checkPendingHint: '{names}은(는) 전체 검증으로만 확인할 수 있습니다. 임시 샌드박스를 실제로 만들어 스크립트를 한 번 실행한 뒤 삭제합니다.',
+      noVolumeSupport: 'This backend does not support volume mounts; skills relying on a shared volume will be unavailable.',
       skipReasons: {
         needs_deep_check: '전체 검증 필요',
         control_plane_unreachable: '컨트롤 플레인에 연결할 수 없어 건너뜀',

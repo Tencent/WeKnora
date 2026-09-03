@@ -483,6 +483,32 @@ func TestResolveEffectiveConfigDetectsLocalDockerHostWhenBlank(t *testing.T) {
 	require.Equal(t, "unix:///tmp/from-env.sock", effective.DockerHost)
 }
 
+func TestResolveEffectiveConfigMapsDockerNoneToDeniedEgress(t *testing.T) {
+	effective, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType: "docker",
+		Docker: &types.DockerSandboxConfig{
+			Image:       "weknora:test",
+			NetworkMode: "none",
+		},
+	}, DefaultConfig())
+	require.NoError(t, err)
+	require.True(t, effective.Network.DeniesEgressByDefault(),
+		"docker network_mode=none is this backend's deny-all switch")
+}
+
+func TestResolveEffectiveConfigKeepsDockerBridgeEgressOpen(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "unix:///tmp/from-env.sock")
+	effective, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType: "docker",
+		Docker: &types.DockerSandboxConfig{
+			Image:       "weknora:test",
+			NetworkMode: "bridge",
+		},
+	}, DefaultConfig())
+	require.NoError(t, err)
+	require.False(t, effective.Network.DeniesEgressByDefault())
+}
+
 func TestResolveEffectiveConfigRejectsPlaintextDockerTCP(t *testing.T) {
 	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
 		SandboxType:           "docker",

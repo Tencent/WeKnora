@@ -92,6 +92,29 @@ func (p *SandboxGatewayTransportPool) RoundTripperFor(cfg *Config) http.RoundTri
 	return split
 }
 
+// attachInboundTokenTransport puts inbound-token injection on next. A pool
+// RoundTripperFor result already injects from the same registry and is
+// returned unchanged. nil next becomes the default transport so RoundTrip
+// does not panic.
+func attachInboundTokenTransport(
+	next http.RoundTripper,
+	tokens *InboundTokenRegistry,
+) http.RoundTripper {
+	if tokens == nil {
+		return next
+	}
+	if split, ok := next.(*gatewaySplitTransport); ok && split.inboundToken == tokens {
+		return next
+	}
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	return &gatewaySplitTransport{
+		control:      next,
+		inboundToken: tokens,
+	}
+}
+
 // gatewayEndpointFor reads the active provider's gateway and control-plane
 // endpoints. Reading them per provider (rather than merging both) keeps a stale
 // sub-struct left behind by an earlier provider switch from routing today's

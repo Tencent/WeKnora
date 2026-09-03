@@ -128,6 +128,15 @@ func (s *bindingStoreFaults) DeleteIfMatch(
 	return s.base.DeleteIfMatch(ctx, key, provider, sandboxID)
 }
 
+func (s *bindingStoreFaults) ReplaceTrafficTokenIfMatch(
+	ctx context.Context,
+	key SessionSandboxKey,
+	expected SessionSandboxBinding,
+	token string,
+) (bool, error) {
+	return s.base.ReplaceTrafficTokenIfMatch(ctx, key, expected, token)
+}
+
 func (s *bindingStoreFaults) InvalidateByConfig(
 	ctx context.Context,
 	tenantID uint64,
@@ -272,6 +281,31 @@ func TestResolveReconnectPassesStoredInboundToken(t *testing.T) {
 	client.mu.Unlock()
 	require.Len(t, connects, 1)
 	require.Equal(t, "traffic-token", connects[0].TrafficAccessToken)
+}
+
+func TestResolveReconnectPersistsProviderReissuedInboundToken(t *testing.T) {
+	client := newFakeRemoteClient(SandboxTypeCube)
+	client.trafficAccessToken = "create-token"
+	store := NewMemorySessionSandboxBindingStore()
+	lifecycle := newTestRemoteSessionLifecycle(
+		t, client, store, &fakeSessionExistenceChecker{exists: true},
+	)
+	key := SessionSandboxKey{TenantID: 1, SessionID: "session-1"}
+
+	_, err := lifecycle.Resolve(context.Background(), key)
+	require.NoError(t, err)
+
+	client.mu.Lock()
+	client.connectTrafficToken = "rotated-token"
+	client.mu.Unlock()
+
+	_, err = lifecycle.Resolve(context.Background(), key)
+	require.NoError(t, err)
+
+	binding, err := store.Get(context.Background(), key)
+	require.NoError(t, err)
+	require.Equal(t, "rotated-token", binding.TrafficAccessToken,
+		"a token the provider reissued on connect must replace the stored copy")
 }
 
 func TestRemoteSessionLifecycleCreatesOnceAcrossCoordinators(t *testing.T) {

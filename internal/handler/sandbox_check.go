@@ -427,15 +427,10 @@ func reportEgressProbe(
 		result.add("egress_available", false, detail, latencyMS)
 		return
 	}
-	allowed := "（未配置放行目标）"
-	if len(policy.AllowOut) > 0 {
-		allowed = strings.Join(policy.AllowOut, "、")
-	}
 	result.Checks = append(result.Checks, SandboxCheckItem{
 		Name:      "egress_available",
 		OK:        nil,
 		Reason:    skipReasonEgressRestrictedByPolicy,
-		Message:   "该配置默认拒绝出网，仅放行：" + allowed,
 		LatencyMS: latencyMS,
 	})
 }

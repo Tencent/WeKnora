@@ -1014,11 +1014,19 @@ const pendingCheckNames = computed(() => (checkResult.value?.checks || [])
   .filter((item) => item.ok === null && item.reason === PENDING_SKIP_REASON)
   .map((item) => checkLabel(item.name)))
 
+const EGRESS_RESTRICTED_REASON = 'egress_restricted_by_policy'
+const egressRestrictedByPolicy = computed(() => (checkResult.value?.checks || []).some(
+  (item) => item.reason === EGRESS_RESTRICTED_REASON,
+))
+
 // Says which layer the verdict covers, so "检测通过" is not read as "everything
-// works" after a connection-only probe.
-const checkScopeHint = computed(() => (pendingCheckNames.value.length
-  ? t('settings.sandbox.checkScopeConnection')
-  : t('settings.sandbox.checkScopeFull')))
+// works" after a connection-only probe, or after egress was skipped because
+// the config denies outbound access by policy.
+const checkScopeHint = computed(() => {
+  if (pendingCheckNames.value.length) return t('settings.sandbox.checkScopeConnection')
+  if (egressRestrictedByPolicy.value) return t('settings.sandbox.checkScopePolicyRestricted')
+  return t('settings.sandbox.checkScopeFull')
+})
 
 function checkDetail(item: SandboxCheckItem): string {
   if (item.message) return item.message
