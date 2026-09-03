@@ -121,9 +121,10 @@ func insertKnowledge(t *testing.T, db *gorm.DB, id, status string, updatedAt tim
 func insertSpan(t *testing.T, db *gorm.DB, kid string, attempt int, spanID, status string, updatedAt time.Time) {
 	t.Helper()
 	require.NoError(t, db.Exec(
-		`INSERT INTO knowledge_processing_spans (knowledge_id, attempt, span_id, name, kind, status, updated_at)
-		 VALUES (?, ?, ?, 'docreader', 'stage', ?, ?)`,
-		kid, attempt, spanID, status, updatedAt,
+		`INSERT INTO knowledge_processing_spans
+		 (knowledge_id, attempt, span_id, name, kind, status, started_at, created_at, updated_at)
+		 VALUES (?, ?, ?, 'docreader', 'stage', ?, ?, ?, ?)`,
+		kid, attempt, spanID, status, updatedAt, updatedAt, updatedAt,
 	).Error)
 }
 
@@ -273,6 +274,50 @@ func TestHousekeeping_NoFalseKill_StaleSpanRecovers(t *testing.T) {
 	).Row().Scan(&status))
 	assert.Equal(t, types.ParseStatusFailed, status,
 		"genuinely stuck knowledge (knowledge AND spans both stale) must still be recovered")
+
+	var span types.KnowledgeProcessingSpan
+	require.NoError(t, db.Where("knowledge_id = ? AND span_id = ?", "kid-stuck", "docreader-1").First(&span).Error)
+	assert.Equal(t, types.SpanStatusFailed, span.Status)
+	assert.Equal(t, staleSpanTimeoutErrorCode, span.ErrorCode)
+	assert.NotNil(t, span.FinishedAt)
+}
+
+func TestHousekeeping_StartRecoversStaleOpenSpanForCompletedKnowledge(t *testing.T) {
+	t.Setenv("WEKNORA_HOUSEKEEPING_ENABLED", "true")
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-completed", types.ParseStatusCompleted, time.Now())
+	insertSpan(t, db, "kid-completed", 1, "wiki-page-1", types.SpanStatusRunning, stale)
+
+	require.NoError(t, svc.Start(context.Background()))
+	defer svc.Stop()
+
+	var span types.KnowledgeProcessingSpan
+	require.NoError(t, db.Where(
+		"knowledge_id = ? AND span_id = ?", "kid-completed", "wiki-page-1",
+	).First(&span).Error)
+	assert.Equal(t, types.SpanStatusFailed, span.Status)
+	assert.Equal(t, staleSpanTimeoutErrorCode, span.ErrorCode)
+	assert.Contains(t, span.ErrorMessage, "parent knowledge became terminal")
+	assert.NotNil(t, span.FinishedAt)
+}
+
+func TestHousekeeping_PreservesFreshOpenSpanForCompletedKnowledge(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	insertKnowledge(t, db, "kid-just-completed", types.ParseStatusCompleted, time.Now())
+	insertSpan(t, db, "kid-just-completed", 1, "wiki-page-1", types.SpanStatusRunning, time.Now())
+
+	svc.runSweep(context.Background())
+
+	var span types.KnowledgeProcessingSpan
+	require.NoError(t, db.Where(
+		"knowledge_id = ? AND span_id = ?", "kid-just-completed", "wiki-page-1",
+	).First(&span).Error)
+	assert.Equal(t, types.SpanStatusRunning, span.Status)
+	assert.Empty(t, span.ErrorCode)
+	assert.Nil(t, span.FinishedAt)
 }
 
 // TestHousekeeping_NoFalseKill_TasksStillQueued is the regression test
