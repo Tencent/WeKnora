@@ -46,6 +46,7 @@ import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
+import { getCancellableKnowledgeIds } from './batchParseActions';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import KbFolderTree from './components/KbFolderTree.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
@@ -438,6 +439,7 @@ const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
+const batchCanceling = ref(false);
 const batchTagging = ref(false);
 const batchTagDialogVisible = ref(false);
 const batchTagPreSelectedIds = computed(() => {
@@ -458,6 +460,12 @@ const batchTagPreSelectedIds = computed(() => {
 });
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
 const pendingReparseAck = ref<Set<string>>(new Set());
+
+const cancellableBatchIds = computed(() => getCancellableKnowledgeIds(
+  cardList.value,
+  selectedIds.value,
+  isParseInFlight,
+));
 
 const applyOptimisticBatchReparse = (ids: string[]) => {
   const idSet = new Set(ids);
@@ -526,6 +534,42 @@ const confirmBatchReparse = async () => {
     MessagePlugin.error(e?.message || t('knowledgeBase.batchReparseFailed'));
   } finally {
     batchReparsing.value = false;
+  }
+};
+
+const confirmBatchCancelParse = async () => {
+  if (batchCanceling.value || batchDeleting.value || batchReparsing.value || batchTagging.value
+    || selectedIds.value.size === 0) return;
+
+  const allIds = Array.from(selectedIds.value);
+  const ids = cancellableBatchIds.value;
+  const skipped = allIds.length - ids.length;
+  if (ids.length === 0) {
+    MessagePlugin.info(t('knowledgeBase.batchCancelParseNone'));
+    return;
+  }
+  if (skipped > 0) {
+    MessagePlugin.warning(t('knowledgeBase.batchCancelParseSkipped', { count: skipped }));
+  }
+
+  batchCanceling.value = true;
+  try {
+    const results = await Promise.allSettled(ids.map((id) => cancelKnowledgeParse(id)));
+    const succeeded = results.reduce((count, result) => count + (result.status === 'fulfilled' ? 1 : 0), 0);
+    const failed = results.length - succeeded;
+    if (succeeded > 0) {
+      MessagePlugin.success(t('knowledgeBase.batchCancelParseSuccess', { count: succeeded }));
+    }
+    if (failed > 0) {
+      MessagePlugin.error(t('knowledgeBase.batchCancelParseFailed'));
+    }
+    if (succeeded > 0) {
+      clearSelection();
+      batchMode.value = false;
+      await loadKnowledgeFiles(kbId.value);
+    }
+  } finally {
+    batchCanceling.value = false;
   }
 };
 
@@ -2674,9 +2718,11 @@ async function createNewSession(value: string): Promise<void> {
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
-                  :reparse-loading="batchReparsing" :tag-loading="batchTagging" :visible="batchMode || selectedIds.size > 0"
+                  :reparse-loading="batchReparsing" :cancel-parse-loading="batchCanceling"
+                  :cancellable-count="cancellableBatchIds.length" :tag-loading="batchTagging" :visible="batchMode || selectedIds.size > 0"
                   :show-move-to-folder="canEdit" :folder-options="folderOptions"
                   @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
+                  @cancel-parse="confirmBatchCancelParse"
                   @batch-tag="handleBatchTag"
                   @move-to-folder="(path: string) => moveKnowledgeIntoFolder(Array.from(selectedIds), path)" />
               </div>
