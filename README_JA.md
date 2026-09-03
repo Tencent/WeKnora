@@ -84,6 +84,13 @@ Feishu、GitLab、Tencent IMA、Notion、Yuqueなどの外部プラットフォ�
 
 <table>
   <tr>
+    <td colspan="2" align="center"><b>🛠️ スキルサンドボックス対話 · Word を生成してプレビュー</b><br/><img src="./docs/images/skill-sandbox-chat.png" alt="スキルサンドボックス対話：Word 文書の生成とプレビュー" width="100%"></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><b>📦 スキルカタログ · E2B サンドボックスへインストール</b><br/><img src="./docs/images/skill-catalog.png" alt="ワークスペースのスキルカタログ（docx / pptx / pdf を E2B にインストール）" width="100%"></td>
+    <td width="50%" align="center"><b>🤖 Agent モード · 検索、スキル読取、サンドボックスへ書き込み</b><br/><img src="./docs/images/agent-qa.png" alt="Agent が知識ベースを検索し、docx スキルを読み、サンドボックスにスクリプトを書き込む" width="100%"></td>
+  </tr>
+  <tr>
     <td colspan="2" align="center"><b>💬 インテリジェント Q&A 対話</b><br/><img src="./docs/images/qa.png" alt="インテリジェント Q&A 対話" width="100%"></td>
   </tr>
   <tr>
@@ -96,10 +103,7 @@ Feishu、GitLab、Tencent IMA、Notion、Yuqueなどの外部プラットフォ�
   </tr>
   <tr>
     <td width="50%" align="center"><b>📁 フォルダーツリーと一括操作</b><br/><img src="./docs/images/kb-document-list.png" alt="ナレッジベースのフォルダーツリーと一括操作" width="100%"></td>
-    <td width="50%" align="center"><b>🤖 Agent モード · ツール呼び出しプロセス</b><br/><img src="./docs/images/agent-qa.png" alt="Agent モードツール呼び出しプロセス" width="100%"></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><b>🔭 可観測性 · Langfuse Tracing</b><br/><img src="./docs/images/langfuse.png" alt="Langfuse Tracing" width="100%"></td>
+    <td width="50%" align="center"><b>🔭 可観測性 · Langfuse Tracing</b><br/><img src="./docs/images/langfuse.png" alt="Langfuse Tracing" width="100%"></td>
   </tr>
 </table>
 
@@ -329,13 +333,3 @@ make dev-frontend
 
 このプロジェクトは[MIT](./LICENSE)ライセンスの下で公開されています。
 このプロジェクトのコードを自由に使用、変更、配布できますが、元の著作権表示を保持する必要があります。
-
-## 📈 プロジェクト統計
-
-<a href="https://www.star-history.com/#Tencent/WeKnora&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
- </picture>
-</a>

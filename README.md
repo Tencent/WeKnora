@@ -85,6 +85,13 @@ The framework supports auto-syncing knowledge from Feishu, GitLab, Tencent IMA, 
 
 <table>
   <tr>
+    <td colspan="2" align="center"><b>🛠️ Skill Sandbox Chat · generate and preview a Word file</b><br/><img src="./docs/images/skill-sandbox-chat.png" alt="Skill sandbox conversation generating and previewing a Word document" width="100%"></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><b>📦 Skill Catalog · install onto an E2B sandbox</b><br/><img src="./docs/images/skill-catalog.png" alt="Workspace skill catalog with docx pptx pdf installed on E2B" width="100%"></td>
+    <td width="50%" align="center"><b>🤖 Agent Mode · search, read a skill, write sandbox files</b><br/><img src="./docs/images/agent-qa.png" alt="Agent searching the knowledge base, reading the docx skill, and writing a sandbox script" width="100%"></td>
+  </tr>
+  <tr>
     <td colspan="2" align="center"><b>💬 Intelligent Q&A Conversation</b><br/><img src="./docs/images/qa.png" alt="Intelligent Q&A Conversation" width="100%"></td>
   </tr>
   <tr>
@@ -97,10 +104,7 @@ The framework supports auto-syncing knowledge from Feishu, GitLab, Tencent IMA, 
   </tr>
   <tr>
     <td width="50%" align="center"><b>📁 Folder Tree & Batch Operations</b><br/><img src="./docs/images/kb-document-list.png" alt="Knowledge Base Folder Tree and Batch Operations" width="100%"></td>
-    <td width="50%" align="center"><b>🤖 Agent Mode · Tool Call Process</b><br/><img src="./docs/images/agent-qa.png" alt="Agent Mode Tool Call Process" width="100%"></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><b>🔭 Observability · Langfuse Tracing</b><br/><img src="./docs/images/langfuse.png" alt="Observability Langfuse Tracing" width="100%"></td>
+    <td width="50%" align="center"><b>🔭 Observability · Langfuse Tracing</b><br/><img src="./docs/images/langfuse.png" alt="Observability Langfuse Tracing" width="100%"></td>
   </tr>
 </table>
 
@@ -377,13 +381,3 @@ Thanks to these excellent contributors:
 
 This project is licensed under the [MIT License](./LICENSE).
 You are free to use, modify, and distribute the code with proper attribution.
-
-## 📈 Project Statistics
-
-<a href="https://www.star-history.com/#Tencent/WeKnora&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
- </picture>
-</a>
