@@ -61,7 +61,7 @@ type SessionSandboxBinding struct {
 	StaleAt *time.Time `json:"stale_at,omitempty"`
 
 	// TrafficAccessToken is the per-sandbox inbound credential issued at
-	// create time when the config closed public inbound access.
+	// create time for Cube and E2B. Inbound is always credential-required.
 	//
 	// Cube may reissue it on Connect after pause/resume; the lifecycle writes
 	// the fresh value back here. E2B issues it only at create. Either way this
@@ -71,8 +71,8 @@ type SessionSandboxBinding struct {
 	// these bindings must be access-controlled — it already holds the
 	// session-to-sandbox ownership anyway. Never log the binding payload.
 	//
-	// Empty for sandboxes created with public inbound allowed, and for
-	// bindings written before this field existed; both are valid.
+	// Empty for Docker (no such credential) and for bindings written before
+	// this field existed; both are valid.
 	TrafficAccessToken string `json:"traffic_access_token,omitempty"`
 }
 

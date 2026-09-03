@@ -1,7 +1,7 @@
 // Inbound traffic-token registry.
 //
-// A sandbox created with public inbound access closed only accepts requests
-// carrying its per-sandbox traffic token. Cube's SDK attaches that header
+// Cube and E2B sandboxes only accept requests carrying their per-sandbox
+// traffic token. Cube's SDK attaches that header
 // itself once Sandbox.TrafficAccessToken is set, but go-e2b stores the token
 // and never sends it — so for E2B the header has to be added by the one
 // component WeKnora owns on that path: the data-plane RoundTripper.
@@ -32,8 +32,8 @@ func NewInboundTokenRegistry() *InboundTokenRegistry {
 	return &InboundTokenRegistry{}
 }
 
-// Put records the token for sandboxID. An empty token means the sandbox has
-// public inbound access, so nothing is stored.
+// Put records the token for sandboxID. An empty token is not stored
+// (Docker, or a handle that omitted the credential).
 func (r *InboundTokenRegistry) Put(sandboxID, token string) {
 	if r == nil || sandboxID == "" || token == "" {
 		return
@@ -66,8 +66,8 @@ func (r *InboundTokenRegistry) Delete(sandboxID string) {
 // Matching on this shape rather than on the configured sandbox domain is
 // deliberate: an E2B Cloud deployment may leave sandbox_domain empty and let
 // the SDK resolve its own default, and a domain-based check would then never
-// fire. The registry lookup is the real authority — only sandboxes WeKnora
-// created with inbound closed are in it.
+// fire. The registry lookup is the real authority — only Cube/E2B sandboxes
+// whose token WeKnora recorded are in it.
 func sandboxIDFromDataPlaneHost(host string) string {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {

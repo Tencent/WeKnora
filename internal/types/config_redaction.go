@@ -409,6 +409,9 @@ func mergeNetworkPolicyForUpdate(
 		return nil
 	}
 	out := incoming.CloneWithSecrets(func(value string) string { return value })
+	// Inbound is always credential-required. Accept the wire field so old
+	// clients still decode, then drop it so it cannot persist or reopen.
+	out.AllowPublicInbound = false
 	if existing == nil {
 		return out
 	}

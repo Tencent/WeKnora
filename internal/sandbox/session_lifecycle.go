@@ -298,10 +298,10 @@ func persistInboundToken(
 	}
 }
 
-// inboundTokenRequired reports whether this config closed public inbound
-// access, which makes the per-sandbox traffic token mandatory on every
-// data-plane call. nil means the policy was never resolved (baseline configs
-// and tests), and those predate the token entirely.
+// inboundTokenRequired reports whether the resolved create policy requires
+// the per-sandbox traffic token on every data-plane call. Production resolve
+// always sets AllowPublicTraffic=false. nil means the policy was never
+// resolved (baseline configs and some tests) and predates the token.
 func (l *remoteSessionLifecycle) inboundTokenRequired() bool {
 	allowPublic := l.createRequest.Network.AllowPublicTraffic
 	return allowPublic != nil && !*allowPublic

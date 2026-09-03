@@ -287,11 +287,16 @@ func overrideSeconds(dst *time.Duration, seconds int) {
 }
 
 // resolveNetworkPolicy turns the stored, admin-facing policy into the
-// provider-facing one. This is the single place the three inversions happen:
+// provider-facing one. This is the single place the inversions happen:
 //
 //   - DenyEgressByDefault -> AllowInternetAccess=false
-//   - AllowPublicInbound  -> AllowPublicTraffic
 //   - CubeEgressRule.Deny -> RemoteCubeEgressRule.Allow
+//
+// Inbound is always closed (AllowPublicTraffic=false). Stored
+// AllowPublicInbound is dropped at the persistence boundary already
+// (mergeNetworkPolicyForUpdate); ignoring it again here means even a caller
+// that reaches this function without going through that merge cannot open
+// the sandbox URL.
 //
 // A nil stored policy is not "unset": it resolves to WeKnora's default of
 // egress allowed and inbound closed, so every downstream consumer sees one
@@ -301,7 +306,6 @@ func resolveNetworkPolicy(stored *types.SandboxNetworkPolicy) RemoteNetworkPolic
 	inboundPublic := false
 	if stored != nil {
 		allowEgress = !stored.DenyEgressByDefault
-		inboundPublic = stored.AllowPublicInbound
 	}
 	policy := RemoteNetworkPolicy{
 		AllowInternetAccess: &allowEgress,

@@ -15,20 +15,19 @@ import (
 )
 
 // SandboxNetworkPolicy is the admin-facing network policy for one sandbox
-// config. Both booleans are deliberately phrased so that the zero value IS
-// the intended default — outbound open, inbound closed. That keeps a missing
-// JSON block and an explicitly saved "default" policy identical, and avoids
-// the tri-state pointer trap where nil would mean "allowed" for egress and
-// "closed" for ingress.
+// config. DenyEgressByDefault is phrased so the zero value IS the intended
+// default (outbound open). Inbound is not a switch: it is always
+// credential-required. AllowPublicInbound stays on the wire so old payloads
+// still decode, then is cleared on save and ignored at resolve.
 type SandboxNetworkPolicy struct {
 	// DenyEgressByDefault installs a 0.0.0.0/0 deny-all, after which only
 	// AllowOut (and L7 rule targets) can reach the network. false allows
 	// public egress, which is what skill installs need.
 	DenyEgressByDefault bool `json:"deny_egress_by_default,omitempty"`
 
-	// AllowPublicInbound exposes the sandbox's public URL without a
-	// credential. false requires every inbound request to carry the
-	// per-sandbox traffic access token.
+	// AllowPublicInbound is accepted on the wire for old payloads and then
+	// cleared. Inbound is always credential-required; a true value has no
+	// runtime effect.
 	AllowPublicInbound bool `json:"allow_public_inbound,omitempty"`
 
 	// AllowOut accepts IPv4, IPv4 CIDR, a DNS name, or a single-label

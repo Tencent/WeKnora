@@ -145,9 +145,10 @@ type RemoteCreateRequest struct {
 //     Config. When false the sandbox has no default egress; specific hosts
 //     must appear in AllowOut.
 //   - AllowPublicTraffic: whether the sandbox is reachable from the public
-//     internet by URL. nil uses WeKnora's default of closed inbound access,
-//     deliberately stricter than either provider's own default; false hides
-//     the sandbox behind a per-sandbox traffic access token.
+//     internet by URL. ResolveEffectiveConfig always sets this to false
+//     (credential required). nil reaches an adapter only from a hand-built
+//     Config and is materialised as false there too. true is leftover for
+//     tests; production create never sends it.
 //   - AllowOut / DenyOut: CIDR blocks or domain names. Cube treats these as
 //     L3/L4 filters; E2B applies domain-level filtering only on HTTP(S).
 //     Both providers require that specific domain allow-lists be paired
@@ -180,9 +181,9 @@ func (p RemoteNetworkPolicy) DeniesEgressByDefault() bool {
 	return types.DenyOutCoversAllIPv4(p.DenyOut)
 }
 
-// RemoteInboundTokenCarrier is implemented by handles whose sandbox was
-// created with public inbound access closed. It is an optional capability in
-// the same spirit as RemoteSnapshotManager: Docker has no such credential.
+// RemoteInboundTokenCarrier is implemented by handles whose provider issues
+// a per-sandbox inbound traffic token. Cube and E2B always do; Docker does
+// not. It is an optional capability in the same spirit as RemoteSnapshotManager.
 type RemoteInboundTokenCarrier interface {
 	TrafficAccessToken() string
 }
