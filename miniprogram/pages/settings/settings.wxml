@@ -1,18 +1,25 @@
 <view class="page">
   <view class="card">
-    <view class="title">Connect WeKnora</view>
-    <view class="muted">Use your WeKnora API endpoint and tenant API key.</view>
+    <view class="title">{{settingsTitle}}</view>
+    <view class="muted">{{settingsSubtitle}}</view>
 
     <view class="field">
-      <text class="label">API Base URL</text>
-      <input value="{{baseUrl}}" placeholder="https://your-weknora.example.com" bindinput="onBaseUrlInput" />
+      <text class="label">{{apiBaseUrlLabel}}</text>
+      <input value="{{baseUrl}}" placeholder="{{apiBaseUrlPlaceholder}}" bindinput="onBaseUrlInput" />
     </view>
 
     <view class="field">
-      <text class="label">API Key</text>
-      <input value="{{apiKey}}" password placeholder="sk-..." bindinput="onApiKeyInput" />
+      <text class="label">{{apiKeyLabel}}</text>
+      <input value="{{apiKey}}" password placeholder="{{apiKeyPlaceholder}}" bindinput="onApiKeyInput" />
     </view>
 
-    <button bindtap="save">Save settings</button>
+    <view class="field">
+      <text class="label">{{languageLabel}}</text>
+      <picker range="{{languageLabels}}" value="{{languageIndex}}" bindchange="onLanguageChange">
+        <view class="picker-value">{{displayLanguageLabel}}</view>
+      </picker>
+    </view>
+
+    <button bindtap="save">{{saveSettingsText}}</button>
   </view>
 </view>
