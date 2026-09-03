@@ -769,10 +769,27 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       }
       case 'tool_result':
       case 'error': {
+        // An error event is now exclusively a flow-interrupting failure (model
+        // stream / pipeline error); tool failures arrive as tool_result with
+        // success=false. Handle fatal errors first, before attempting
+        // pending-tool-call matching (which can never match a flow error and
+        // would only emit a spurious warning).
+        if (responseType === 'error') {
+          const errorMsg = String(data.content || t('chat.processError'))
+          message.content = errorMsg
+          message.is_completed = true
+          isReplying.value = false
+          loading.value = false
+          fullContent.value = ''
+          currentAssistantMessageId.value = ''
+          reportError(errorMsg)
+          console.error('[Chat Error]', errorMsg)
+          break
+        }
         if (dataPayload) {
           const toolCallId = dataPayload.tool_call_id as string | undefined
           const toolName = dataPayload.tool_name as string | undefined
-          const success = responseType !== 'error' && dataPayload.success !== false
+          const success = dataPayload.success !== false
           log('[Tool Result]', {
             tool_call_id: toolCallId,
             tool_name: toolName,
@@ -801,6 +818,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             // Keep stdout/markdown on failure. The error field is often just
             // "exited with code 1" plus a retry hint; the streams live on
             // output / tool_data and are what the terminal card should show.
+            // The error event branch is handled earlier as a fatal error, so
+            // tool_result output is the only path that reaches this line.
             toolCallEvent.output = dataPayload.output || data.content
             toolCallEvent.error = !success ? dataPayload.error || data.content : undefined
             const duration =
@@ -813,27 +832,6 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           } else {
             console.warn('[Tool Result] No pending tool call found for', toolCallId || toolName)
           }
-          if (responseType === 'error' && !toolName) {
-            const errorMsg = String(data.content || t('chat.processError'))
-            message.content = errorMsg
-            message.is_completed = true
-            isReplying.value = false
-            loading.value = false
-            fullContent.value = ''
-            currentAssistantMessageId.value = ''
-            reportError(errorMsg)
-            console.error('[Chat Error]', errorMsg)
-          }
-        } else if (responseType === 'error') {
-          const errorMsg = String(data.content || t('chat.processError'))
-          message.content = errorMsg
-          message.is_completed = true
-          isReplying.value = false
-          loading.value = false
-          fullContent.value = ''
-          currentAssistantMessageId.value = ''
-          reportError(errorMsg)
-          console.error('[Chat Error]', errorMsg)
         }
         break
       }
