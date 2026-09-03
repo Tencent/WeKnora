@@ -125,7 +125,7 @@ func TestResolveEffectiveConfigTranslatesNetworkPolicy(t *testing.T) {
 		"DenyEgressByDefault must flip the provider's allow switch off")
 	require.NotNil(t, got.Network.AllowPublicTraffic)
 	require.False(t, *got.Network.AllowPublicTraffic,
-		"inbound stays closed unless the admin opened it")
+		"inbound is always credential-required")
 	require.Equal(t, []string{"*.example.com"}, got.Network.AllowOut)
 	require.Equal(t, []string{"0.0.0.0/0"}, got.Network.DenyOut)
 	require.Equal(t, "api.example.com", got.Network.E2BHostRules[0].Host)
@@ -199,7 +199,7 @@ func TestResolveEffectiveConfigLeavesDenyOutAloneWhenEgressOpen(t *testing.T) {
 	require.False(t, got.Network.DeniesEgressByDefault())
 }
 
-func TestResolveEffectiveConfigAllowsPublicInboundWhenConfigured(t *testing.T) {
+func TestResolveEffectiveConfigIgnoresStoredPublicInbound(t *testing.T) {
 	tenantCfg := completeE2BTenantConfig()
 	tenantCfg.Network = &types.SandboxNetworkPolicy{AllowPublicInbound: true}
 
@@ -207,7 +207,8 @@ func TestResolveEffectiveConfigAllowsPublicInboundWhenConfigured(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, got.Network.AllowPublicTraffic)
-	require.True(t, *got.Network.AllowPublicTraffic)
+	require.False(t, *got.Network.AllowPublicTraffic,
+		"inbound stays credential-required even if a stored row asked for public access")
 }
 
 func TestResolveEffectiveConfigDefaultsNetworkToEgressOpenInboundClosed(t *testing.T) {

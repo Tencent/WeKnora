@@ -200,6 +200,19 @@ func TestMergeSandboxConfigForUpdateMatchesInjectedHeadersCaseInsensitively(t *t
 		"host whitespace and header case must not drop the stored secret")
 }
 
+func TestMergeSandboxConfigForUpdateClearsPublicInbound(t *testing.T) {
+	incoming := &TenantSandboxConfig{
+		Network: &SandboxNetworkPolicy{AllowPublicInbound: true, AllowOut: []string{"1.1.1.1"}},
+	}
+
+	out := MergeSandboxConfigForUpdate(incoming, nil)
+
+	require.NotNil(t, out.Network)
+	require.False(t, out.Network.AllowPublicInbound,
+		"inbound cannot be opened from a saved payload; the field is accepted then cleared")
+	require.Equal(t, []string{"1.1.1.1"}, out.Network.AllowOut)
+}
+
 func TestMergeSandboxConfigForUpdateDropsNetworkWhenIncomingOmitsIt(t *testing.T) {
 	existing := &TenantSandboxConfig{
 		Network: &SandboxNetworkPolicy{DenyEgressByDefault: true},

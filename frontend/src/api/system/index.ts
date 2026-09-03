@@ -817,11 +817,13 @@ export interface SandboxE2BHostRule {
 }
 
 /**
- * Network policy for every sandbox created from this config. Every field
- * absent means the default: egress allowed, inbound requires a credential.
+ * Network policy for every sandbox created from this config. Absent fields
+ * mean egress allowed. Inbound is always credential-required:
+ * allow_public_inbound is accepted then ignored/cleared.
  */
 export interface SandboxNetworkPolicy {
   deny_egress_by_default?: boolean
+  /** Ignored. Inbound is always credential-required. */
   allow_public_inbound?: boolean
   allow_out?: string[]
   deny_out?: string[]
