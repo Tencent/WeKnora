@@ -71,7 +71,7 @@ func TestRegisterByInviteRestoresTenantlessAccountWhenInviteExpiresDuringRegistr
 	r.Use(errorCapture())
 	r.POST("/auth/register-by-invite", h.RegisterByInvite)
 
-	body := []byte(`{"token":"invite-token","email":"alice@example.com","username":"alice","password":"supersecret"}`)
+	body := []byte(`{"token":"invite-token","email":"alice@example.com","username":"alice","password":"supersecret1"}`)
 	req := httptest.NewRequest(http.MethodPost, "/auth/register-by-invite", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -104,7 +104,7 @@ func TestRegisterByInviteUsesInvitedTenantWithoutPersonalTenant(t *testing.T) {
 	r.Use(errorCapture())
 	r.POST("/auth/register-by-invite", h.RegisterByInvite)
 
-	body := []byte(`{"token":"invite-token","email":"alice@example.com","username":"alice","password":"supersecret"}`)
+	body := []byte(`{"token":"invite-token","email":"alice@example.com","username":"alice","password":"supersecret1"}`)
 	req := httptest.NewRequest(http.MethodPost, "/auth/register-by-invite", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -118,5 +118,32 @@ func TestRegisterByInviteUsesInvitedTenantWithoutPersonalTenant(t *testing.T) {
 	}
 	if users.updatedTenant != 42 {
 		t.Fatalf("updated tenant=%d, want 42", users.updatedTenant)
+	}
+}
+
+func TestRegisterByInviteRejectsSimplePasswordWhenComplexEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	users := &invitedRegistrationUserService{}
+	h := &AuthHandler{
+		userService:      users,
+		tenantService:    &invitedRegistrationTenantService{},
+		invitationSvc:    &invitedRegistrationInvitationService{},
+		systemSettingSvc: &tenantPolicySettingService{enabled: true},
+	}
+	r := gin.New()
+	r.Use(errorCapture())
+	r.POST("/auth/register-by-invite", h.RegisterByInvite)
+
+	body := []byte(`{"token":"invite-token","email":"alice@example.com","username":"alice","password":"supersecret1"}`)
+	req := httptest.NewRequest(http.MethodPost, "/auth/register-by-invite", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s, want 400", w.Code, w.Body.String())
+	}
+	if users.registeredMode != "" {
+		t.Fatalf("Register was called with mode=%q", users.registeredMode)
 	}
 }

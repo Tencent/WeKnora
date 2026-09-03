@@ -8,6 +8,7 @@ test('defaultThinkingControl matches backend provider adapters', () => {
   const cases: Array<[string, string, ReturnType<typeof defaultThinkingControl>]> = [
     ['generic', 'anything', 'chat_template_kwargs'],
     ['nvidia', 'anything', 'chat_template_kwargs'],
+    ['litellm', 'anything', 'chat_template_kwargs'],
     ['volcengine', 'doubao', 'thinking_type'],
     ['aliyun', 'qwen3-32b', 'enable_thinking'],
     ['aliyun', 'qwen-plus', 'enable_thinking'],

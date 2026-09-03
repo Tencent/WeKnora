@@ -149,7 +149,7 @@ func TestSoftDeleteHidesSandboxPin(t *testing.T) {
 
 func TestResolveSandboxForExecutionDoesNotPinStatelessBackend(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
-	want := &pinTestManager{typ: sandbox.SandboxTypeLocal}
+	want := &pinTestManager{typ: sandbox.SandboxTypeDisabled}
 
 	got, configID, err := resolveSandboxForExecution(
 		context.Background(), stubSandboxResolver{mgr: want}, nil, pinner,
@@ -161,7 +161,7 @@ func TestResolveSandboxForExecutionDoesNotPinStatelessBackend(t *testing.T) {
 	require.Equal(t, "cfg-local", configID)
 	pinned, err := pinner.Read(context.Background(), "s-1")
 	require.NoError(t, err)
-	require.Empty(t, pinned, "local and Docker executions must not leave a session binding")
+	require.Empty(t, pinned, "disabled backends must not leave a session binding")
 }
 
 func TestResolveSandboxForExecutionPinsRemoteBackend(t *testing.T) {
@@ -179,6 +179,26 @@ func TestResolveSandboxForExecutionPinsRemoteBackend(t *testing.T) {
 	pinned, err := pinner.Read(context.Background(), "s-1")
 	require.NoError(t, err)
 	require.Equal(t, "cfg-cube", pinned)
+}
+
+// Docker is a session-persistent remote backend, same as Cube/E2B. Skipping
+// the pin used to make ArtifactCollector treat the turn as "no live sandbox"
+// and leave generated HTML/files showing as unavailable in chat.
+func TestResolveSandboxForExecutionPinsDockerBackend(t *testing.T) {
+	pinner := NewSessionSandboxPinner(newPinTestDB(t))
+	want := &pinTestManager{typ: sandbox.SandboxTypeDocker}
+
+	got, configID, err := resolveSandboxForExecution(
+		context.Background(), stubSandboxResolver{mgr: want}, nil, pinner,
+		7, "s-1", "cfg-docker", nil,
+	)
+
+	require.NoError(t, err)
+	require.Same(t, want, got)
+	require.Equal(t, "cfg-docker", configID)
+	pinned, err := pinner.Read(context.Background(), "s-1")
+	require.NoError(t, err)
+	require.Equal(t, "cfg-docker", pinned)
 }
 
 func TestResolveSandboxForExecutionKeepsExistingRemotePin(t *testing.T) {

@@ -96,3 +96,23 @@ func TestArtifactSessionSourceSkipsUnpinnedSession(t *testing.T) {
 
 	require.Nil(t, collector.sessionSource(context.Background(), "s-1"))
 }
+
+// Docker (and other named backends) pin the workspace config on first
+// execution. Collection must follow that pin rather than treating the
+// session as having no sandbox.
+func TestArtifactSessionSourceResolvesNamedPin(t *testing.T) {
+	pinner := NewSessionSandboxPinner(newPinTestDB(t))
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	_, err := pinner.Pin(ctx, "s-1", "cfg-docker")
+	require.NoError(t, err)
+
+	named := &artifactFallbackManager{source: &fakeSandboxSource{}}
+	collector := &ArtifactCollector{
+		source:   &fakeSandboxSource{},
+		resolver: stubSandboxResolver{mgr: named},
+		pinner:   pinner,
+	}
+
+	got := collector.sessionSource(ctx, "s-1")
+	require.Equal(t, named, got)
+}

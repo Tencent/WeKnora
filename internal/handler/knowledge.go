@@ -331,20 +331,30 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		return
 	}
 
-	// Get the uploaded file
-	file, err := c.FormFile("file")
-	if err != nil {
-		logger.Error(ctx, "File upload failed", err)
-		c.Error(errors.NewBadRequestError("File upload failed").WithDetails(err.Error()))
-		return
-	}
-
 	// Validate file size — read MAX_FILE_SIZE_MB env (50MB default).
 	// Deliberately not a runtime system_setting; see filesize.go for the
 	// rationale (nginx / docreader / browser bundle all cache this at
 	// container startup, so a UI knob would silently mismatch).
 	maxSizeMB := utils.GetMaxFileSizeMB()
 	maxSize := maxSizeMB * 1024 * 1024
+	// Capped before the multipart parse, not after: FormFile buffers the whole
+	// body first, so the size check below only ever sees an upload we already
+	// accepted. nginx location /api/ still enforces MAX_FILE_SIZE; this is the
+	// same cap for requests that reach the app without that proxy.
+	limitUploadBody(c, maxSize)
+
+	// Get the uploaded file
+	file, err := c.FormFile("file")
+	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			logger.Error(ctx, "File size too large")
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", maxSizeMB)))
+			return
+		}
+		logger.Error(ctx, "File upload failed", err)
+		c.Error(errors.NewBadRequestError("File upload failed").WithDetails(err.Error()))
+		return
+	}
 	if file.Size > maxSize {
 		logger.Error(ctx, "File size too large")
 		c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", maxSizeMB)))
@@ -2206,8 +2216,8 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        keyword    query     string  false "Keyword to search"
-// @Param        offset     query     int     false "Offset for pagination"
-// @Param        limit      query     int     false "Limit for pagination (default 20)"
+// @Param        offset     query     int     false "Offset for pagination (minimum 0)" minimum(0)
+// @Param        limit      query     int     false "Limit for pagination (default 20, maximum 100)" minimum(1) maximum(100)
 // @Param        file_types query     string  false "Comma-separated file extensions to filter (e.g., csv,xlsx)"
 // @Param        agent_id   query     string  false "Shared agent ID (search within agent's KB scope)"
 // @Param        recent     query     bool    false "Return recent files when keyword is empty"
@@ -2235,8 +2245,10 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		return
 	}
 	keyword = strings.TrimSpace(keyword)
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	offset, limit, ok := parseOffsetPagination(c)
+	if !ok {
+		return
+	}
 
 	var fileTypes []string
 	if fileTypesStr := c.Query("file_types"); fileTypesStr != "" {

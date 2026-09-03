@@ -335,9 +335,37 @@ const messages = {
         "queryKnowledgeGraph": "知识图谱查询",
         "readSkill": "读取技能",
         "executeSkillScript": "执行技能脚本",
+        "listSandboxFiles": "列出沙箱文件",
+        "readSandboxFile": "读取沙箱文件",
+        "writeSandboxFile": "写入沙箱文件",
+        "editSandboxFile": "编辑沙箱文件",
+        "shellExec": "执行沙箱命令",
         "dataAnalysis": "数据分析",
         "dataSchema": "数据结构",
         "databaseQuery": "数据库查询"
+      },
+      "skillFiles": {
+        "heading": "技能文件",
+        "script": "脚本",
+        "instructions": "技能说明"
+      },
+      "sandboxFiles": {
+        "found": "找到 {count} 个文件",
+        "empty": "暂无文件",
+        "truncated": "列表已截断",
+        "wrote": "已写入",
+        "edited": "已编辑",
+        "replacements": "替换 {count} 处"
+      },
+      "shellExec": {
+        "workDir": "目录",
+        "exitCode": "退出码",
+        "stdout": "标准输出",
+        "stderr": "标准错误",
+        "emptyOutput": "无输出",
+        "truncated": "输出已截断",
+        "killed": "已超时终止",
+        "binarySuppressed": "二进制输出已省略，请将文件写入产物目录后下载"
       },
       "summary": {
         "searchKb": "检索知识库 <strong>{count}</strong> 次",
@@ -432,7 +460,8 @@ const messages = {
         "queryUnderstanding": "正在理解问题...",
         "queryUnderstandDone": "已完成问题理解",
         "called": "调用 {name}",
-        "calledFailed": "调用 {name} 失败"
+        "calledFailed": "调用 {name} 失败",
+        "shellExecRunning": "正在执行沙箱命令..."
       },
       "copy": {
         "emptyContent": "当前回答为空，无法复制",
@@ -832,9 +861,37 @@ const messages = {
         "queryKnowledgeGraph": "Knowledge Graph Query",
         "readSkill": "Read Skill",
         "executeSkillScript": "Execute Skill Script",
+        "listSandboxFiles": "List sandbox files",
+        "readSandboxFile": "Read sandbox file",
+        "writeSandboxFile": "Write sandbox file",
+        "editSandboxFile": "Edit sandbox file",
+        "shellExec": "Run sandbox command",
         "dataAnalysis": "Data Analysis",
         "dataSchema": "Data Schema",
         "databaseQuery": "Database Query"
+      },
+      "skillFiles": {
+        "heading": "Skill files",
+        "script": "script",
+        "instructions": "Instructions"
+      },
+      "sandboxFiles": {
+        "found": "Found {count} file(s)",
+        "empty": "No files",
+        "truncated": "List truncated",
+        "wrote": "Wrote",
+        "edited": "Edited",
+        "replacements": "Replaced {count}"
+      },
+      "shellExec": {
+        "workDir": "Directory",
+        "exitCode": "Exit code",
+        "stdout": "Stdout",
+        "stderr": "Stderr",
+        "emptyOutput": "No output",
+        "truncated": "Output truncated",
+        "killed": "Timed out",
+        "binarySuppressed": "Binary output omitted. Write files to the artifact directory to download them."
       },
       "summary": {
         "searchKb": "Searched knowledge base <strong>{count}</strong> time(s)",
@@ -929,7 +986,8 @@ const messages = {
         "queryUnderstanding": "Understanding query...",
         "queryUnderstandDone": "Query understood",
         "called": "Called {name}",
-        "calledFailed": "Failed to call {name}"
+        "calledFailed": "Failed to call {name}",
+        "shellExecRunning": "Running sandbox command..."
       },
       "copy": {
         "emptyContent": "Current response is empty, cannot copy",

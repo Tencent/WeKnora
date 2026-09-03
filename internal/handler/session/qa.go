@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/storageurl"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
@@ -53,6 +54,7 @@ type qaRequestContext struct {
 	sharedAgentReadOnly   bool                     // access was granted by a read-only agent share
 	images                []ImageAttachment        // Uploaded images with analysis text
 	userMessageID         string                   // Created user message ID (populated after createUserMessage)
+	userCreatedAt         time.Time                // Persisted user message timestamp, echoed on agent_query
 	channel               string                   // Source channel: "web", "api", "im", etc.
 	attachments           types.MessageAttachments // Processed base64 file attachments (legacy inline uploads)
 	attachmentIDs         []string                 // Pre-uploaded session-scoped document IDs, resolved after SSE starts
@@ -436,14 +438,15 @@ func buildMessageExecutionContext(
 	locale := types.LanguageFromContextOrDefault(ctx)
 
 	snapshot := types.MessageExecutionContext{
-		KnowledgeBaseIDs: knowledgeBaseIDs,
-		KnowledgeIDs:     knowledgeIDs,
-		TagIDs:           tagIDs,
-		TagScopes:        cloneTagScopes(tagScopes),
-		MCPServiceIDs:    mcpServiceIDs,
-		SkillNames:       skillNames,
-		WebSearchEnabled: webSearchEnabled,
-		Locale:           locale,
+		KnowledgeBaseIDs:    knowledgeBaseIDs,
+		KnowledgeIDs:        knowledgeIDs,
+		TagIDs:              tagIDs,
+		TagScopes:           cloneTagScopes(tagScopes),
+		MCPServiceIDs:       mcpServiceIDs,
+		SkillNames:          skillNames,
+		WebSearchEnabled:    webSearchEnabled,
+		Locale:              locale,
+		LangfuseTraceparent: langfuse.TraceparentFromContext(ctx),
 	}
 	if agent == nil {
 		return snapshot, "", effectiveTenantID, modelOverride
@@ -616,7 +619,13 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 	setSSEHeaders(reqCtx.c)
 
 	// Write initial agent_query event
-	h.writeAgentQueryEvent(reqCtx.ctx, reqCtx.sessionID, reqCtx.assistantMessage.ID)
+	h.writeAgentQueryEvent(
+		reqCtx.ctx,
+		reqCtx.sessionID,
+		reqCtx.userMessageID,
+		reqCtx.userCreatedAt,
+		reqCtx.assistantMessage,
+	)
 
 	// Base context for async work: when using shared agent, use source tenant for model/KB/MCP resolution
 	baseCtx := reqCtx.ctx
@@ -920,6 +929,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		return
 	}
 	reqCtx.userMessageID = userMsg.ID
+	reqCtx.userCreatedAt = userMsg.CreatedAt
 
 	// Create assistant message
 	assistantMessagePtr, err := h.createAssistantMessage(ctx, reqCtx.assistantMessage)

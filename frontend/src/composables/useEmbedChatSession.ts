@@ -286,6 +286,7 @@ export function useEmbedChatSession(options: {
       images: displayImages,
       attachments: displayAttachments,
       channel: 'embed',
+      created_at: new Date().toISOString(),
     })
     postEmbedMessageSent(options.channelId, options.sessionId.value, value)
     relayEmbedWebhookEvent(

@@ -51,16 +51,25 @@ type e2bMockServer struct {
 	connectID   string
 	deleteID    string
 
-	mu                sync.Mutex
-	v2Queries         []url.Values
-	repeatV2NextToken bool
-	unsafeV2NextToken string
-	sandboxes         map[string]map[string]any // sandboxID → SandboxInfo JSON
+	mu                      sync.Mutex
+	v2Queries               []url.Values
+	snapshotQueries         []url.Values
+	repeatV2NextToken       bool
+	unsafeV2NextToken       string
+	repeatSnapshotNextToken bool
+	snapshotPageSize        int
+	snapshotDeleteFailWith  int
+	snapshotCreateBody      map[string]any
+	sandboxes               map[string]map[string]any // sandboxID -> SandboxInfo JSON
+	snapshots               map[string]map[string]any // snapshotID -> SnapshotInfo JSON
 }
 
 func newE2BMockServer(t *testing.T) *e2bMockServer {
 	t.Helper()
-	m := &e2bMockServer{sandboxes: map[string]map[string]any{}}
+	m := &e2bMockServer{
+		sandboxes: map[string]map[string]any{},
+		snapshots: map[string]map[string]any{},
+	}
 	m.server = httptest.NewServer(http.HandlerFunc(m.handle))
 	t.Cleanup(m.server.Close)
 	return m
@@ -104,6 +113,32 @@ func (m *e2bMockServer) handle(w http.ResponseWriter, r *http.Request) {
 		m.handleListV2(w, r)
 
 	case strings.HasPrefix(r.URL.Path, "/sandboxes/") &&
+		strings.HasSuffix(r.URL.Path, "/snapshots") &&
+		r.Method == http.MethodPost:
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/sandboxes/"), "/snapshots")
+		if _, ok := m.sandboxes[id]; !ok {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &m.snapshotCreateBody)
+		snapshotID := "snap-" + strconv.Itoa(len(m.snapshots)+1)
+		name, _ := m.snapshotCreateBody["name"].(string)
+		names := []string{}
+		if name != "" {
+			names = append(names, name)
+		}
+		m.snapshots[snapshotID] = map[string]any{
+			"snapshotID": snapshotID,
+			"sandboxID":  id,
+			"names":      names,
+		}
+		writeJSON(w, http.StatusCreated, m.snapshots[snapshotID])
+
+	case r.URL.Path == "/snapshots" && r.Method == http.MethodGet:
+		m.handleListSnapshots(w, r)
+
+	case strings.HasPrefix(r.URL.Path, "/sandboxes/") &&
 		strings.HasSuffix(r.URL.Path, "/connect") &&
 		r.Method == http.MethodPost:
 		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/sandboxes/"), "/connect")
@@ -144,6 +179,19 @@ func (m *e2bMockServer) handle(w http.ResponseWriter, r *http.Request) {
 		m.deleteCount.Add(1)
 		m.deleteID = id
 		delete(m.sandboxes, id)
+		w.WriteHeader(http.StatusNoContent)
+
+	case strings.HasPrefix(r.URL.Path, "/templates/") && r.Method == http.MethodDelete:
+		if m.snapshotDeleteFailWith != 0 {
+			http.Error(w, "delete failed", m.snapshotDeleteFailWith)
+			return
+		}
+		id := strings.TrimPrefix(r.URL.Path, "/templates/")
+		if _, ok := m.snapshots[id]; !ok {
+			http.NotFound(w, r)
+			return
+		}
+		delete(m.snapshots, id)
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
@@ -225,6 +273,55 @@ func (m *e2bMockServer) handleListV2(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
+func (m *e2bMockServer) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
+	m.mu.Lock()
+	m.snapshotQueries = append(m.snapshotQueries, r.URL.Query())
+	repeatToken := m.repeatSnapshotNextToken
+	pageSize := m.snapshotPageSize
+	m.mu.Unlock()
+
+	sandboxID := r.URL.Query().Get("sandboxID")
+	ids := make([]string, 0, len(m.snapshots))
+	for id, info := range m.snapshots {
+		if sandboxID != "" && info["sandboxID"] != sandboxID {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	limit := 100
+	if pageSize > 0 {
+		limit = pageSize
+	}
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && pageSize == 0 {
+			limit = parsed
+		}
+	}
+	start := 0
+	if raw := r.URL.Query().Get("nextToken"); raw != "" && raw != "repeat" {
+		start, _ = strconv.Atoi(raw)
+	}
+	if start > len(ids) {
+		start = len(ids)
+	}
+	end := start + limit
+	if end > len(ids) {
+		end = len(ids)
+	}
+	items := make([]map[string]any, 0, end-start)
+	for _, id := range ids[start:end] {
+		items = append(items, m.snapshots[id])
+	}
+	if repeatToken {
+		w.Header().Set("X-Next-Token", "repeat")
+	} else if end < len(ids) {
+		w.Header().Set("X-Next-Token", strconv.Itoa(end))
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
 func mockMetadataMatches(raw any, expected map[string]string) bool {
 	if len(expected) == 0 {
 		return true
@@ -258,15 +355,108 @@ func TestE2BRemoteClientProviderAndCapabilities(t *testing.T) {
 	client := newTestE2BRemoteClient(t, newE2BMockServer(t))
 
 	require.Equal(t, SandboxTypeE2B, client.Provider())
-	caps := client.Capabilities()
-	require.True(t, caps.SupportsReconnect)
-	require.True(t, caps.SupportsMetadata)
-	require.True(t, caps.SupportsListSandboxes)
-	require.True(t, caps.SupportsPauseResume)
-	require.True(t, caps.SupportsTimeoutRefresh)
-	// The go-e2b SDK now supports ListDir/Stat/MakeDir/Remove via a
-	// forked SDK (replaced in go.mod). Filesystem enumeration is enabled.
-	require.True(t, caps.SupportsFilesystemEnumeration)
+	require.Equal(t, RemoteSandboxCapabilities{
+		SupportsReconnect:             true,
+		SupportsMetadata:              true,
+		SupportsListSandboxes:         true,
+		SupportsPauseResume:           true,
+		SupportsTimeoutRefresh:        true,
+		SupportsFilesystemEnumeration: true,
+		SupportsSnapshots:             true,
+		SupportsVolumes:               true,
+	}, client.Capabilities())
+}
+
+func TestE2BRemoteClientCreateSnapshot(t *testing.T) {
+	mock := newE2BMockServer(t)
+	client := newTestE2BRemoteClient(t, mock)
+	ctx := context.Background()
+	handle, err := client.Create(ctx, RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+
+	ref, err := client.CreateSnapshot(ctx, handle.ID(), "weknora-sk-cfg1-g1")
+
+	require.NoError(t, err)
+	require.Equal(t, "snap-1", ref.ID)
+	require.Equal(t, []string{"weknora-sk-cfg1-g1"}, ref.Names)
+	require.Equal(t, "weknora-sk-cfg1-g1", mock.snapshotCreateBody["name"])
+	require.Equal(t, int32(1), mock.connectCount.Load())
+}
+
+func TestE2BRemoteClientCreateSnapshotRejectsEmptySandboxID(t *testing.T) {
+	client := newTestE2BRemoteClient(t, newE2BMockServer(t))
+
+	_, err := client.CreateSnapshot(context.Background(), "  ", "n")
+
+	require.Error(t, err)
+	require.True(t, IsRemoteInvalidRequest(err))
+}
+
+func TestE2BRemoteClientDeleteSnapshotTreatsMissingAsSuccess(t *testing.T) {
+	client := newTestE2BRemoteClient(t, newE2BMockServer(t))
+
+	err := client.DeleteSnapshot(context.Background(), "snap-missing")
+
+	require.NoError(t, err, "a missing snapshot must not fail the delete path")
+}
+
+func TestE2BRemoteClientDeleteSnapshotRejectsEmptySnapshotID(t *testing.T) {
+	client := newTestE2BRemoteClient(t, newE2BMockServer(t))
+
+	err := client.DeleteSnapshot(context.Background(), "  ")
+
+	require.Error(t, err)
+	require.True(t, IsRemoteInvalidRequest(err))
+}
+
+func TestE2BRemoteClientDeleteSnapshotReturnsUnexpectedErrors(t *testing.T) {
+	mock := newE2BMockServer(t)
+	mock.snapshotDeleteFailWith = http.StatusInternalServerError
+	client := newTestE2BRemoteClient(t, mock)
+
+	err := client.DeleteSnapshot(context.Background(), "snap-any")
+
+	require.Error(t, err)
+	require.False(t, IsRemoteNotFound(err))
+}
+
+func TestE2BRemoteClientListSnapshotsRejectsStuckPagination(t *testing.T) {
+	mock := newE2BMockServer(t)
+	mock.repeatSnapshotNextToken = true
+	client := newTestE2BRemoteClient(t, mock)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := client.ListSnapshots(ctx, "")
+
+	require.Error(t, err)
+	require.True(t, IsRemoteInvalidRequest(err))
+}
+
+func TestE2BRemoteClientListSnapshotsPagesAllResults(t *testing.T) {
+	mock := newE2BMockServer(t)
+	mock.snapshotPageSize = 1
+	client := newTestE2BRemoteClient(t, mock)
+	ctx := context.Background()
+	first, err := client.Create(ctx, RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+	second, err := client.Create(ctx, RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+	firstRef, err := client.CreateSnapshot(ctx, first.ID(), "weknora-sk-cfg1-g1")
+	require.NoError(t, err)
+	secondRef, err := client.CreateSnapshot(ctx, first.ID(), "weknora-sk-cfg2-g1")
+	require.NoError(t, err)
+	_, err = client.CreateSnapshot(ctx, second.ID(), "other")
+	require.NoError(t, err)
+
+	list, err := client.ListSnapshots(ctx, first.ID())
+
+	require.NoError(t, err)
+	require.Equal(t, []RemoteSnapshotRef{firstRef, secondRef}, list)
+	require.Len(t, mock.snapshotQueries, 2)
+	require.Equal(t, first.ID(), mock.snapshotQueries[0].Get("sandboxID"))
+	require.Equal(t, "100", mock.snapshotQueries[0].Get("limit"))
+	require.Equal(t, "1", mock.snapshotQueries[1].Get("nextToken"))
 }
 
 func TestE2BRemoteClientListTemplatesReconcilesStandardTemplateBuildStatus(t *testing.T) {
@@ -1201,6 +1391,14 @@ func TestNormalizeE2BError(t *testing.T) {
 		{"connect data loss", "List", connect.NewError(connect.CodeDataLoss, errors.New("data loss")), RemoteErrorKindInternal},
 		{"connect unknown", "List", connect.NewError(connect.CodeUnknown, errors.New("unknown")), RemoteErrorKindInternal},
 		{"unknown", "List", errors.New("mystery"), RemoteErrorKindInternal},
+		{"delete snapshot in use", "DeleteSnapshot", &e2b.Error{
+			StatusCode: http.StatusBadRequest,
+			Message:    "cannot delete template 'tpl-1' because there are paused sandboxes using it",
+		}, RemoteErrorKindConflict},
+		{"delete snapshot bad id", "DeleteSnapshot", &e2b.Error{
+			StatusCode: http.StatusBadRequest,
+			Message:    "invalid snapshot id",
+		}, RemoteErrorKindInvalidRequest},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

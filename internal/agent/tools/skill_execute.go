@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
@@ -16,27 +18,56 @@ import (
 
 var executeSkillScriptTool = BaseTool{
 	name: ToolExecuteSkillScript,
-	description: `Execute a script from a skill in a sandboxed environment.
+	description: `Execute a script with a skill's own interpreter and dependencies.
+
+## Working Directory
+- The script runs with ` + "`/workspace`" + ` as its working directory, whichever
+  skill it belongs to. A relative path the script itself opens resolves there,
+  not inside the skill; ` + "`$WEKNORA_SKILL_DIR`" + ` is how a script reaches the
+  files installed beside it.
+- Generated files belong in ` + "`$WEKNORA_SKILL_OUTPUT_DIR`" + `, which is
+  collected for download. ` + "`/workspace/input`" + ` is read-only.
 
 ## Usage
-- Use this tool to run utility scripts bundled with a skill
-- Scripts are executed in an isolated sandbox for security
-- Only scripts from loaded skills can be executed
+- ` + "`script_path`" + ` is either:
+  - a path **inside the skill** (` + "`scripts/analyze.py`" + `), or
+  - an absolute session file you just wrote with ` + "`write_sandbox_file`" + `
+    (` + "`/workspace/output/generate_ppt.py`" + `). That file still runs with
+    this skill's virtualenv / node_modules.
+- Do NOT pass ` + "`/workspace/input`" + ` paths as ` + "`script_path`" + `
+  (attachments are inputs via ` + "`args`" + `).
 - User-uploaded files are listed in the current ` + "`<sandbox_attachments>`" + `
   block. Pass their absolute ` + "`/workspace/input/...`" + ` paths through
   ` + "`args`" + ` when a script accepts an input file.
 - Treat ` + "`/workspace/input`" + ` as read-only. Write generated files only to
   ` + "`$WEKNORA_SKILL_OUTPUT_DIR`" + ` so they can be collected for download.
+- Scripts reach the dependencies their install put beside them: Python runs
+  with the skill's own virtualenv interpreter, Node resolves the skill's
+  node_modules from the script's location. A failed import under a bare
+  ` + "`python3 -c`" + ` or ` + "`node -e`" + ` says nothing about whether this
+  tool can run the script.
+- The skill tree is frozen after install. Do not run ` + "`install_deps.py`" + `
+  (or ` + "`python -m pip`" + ` / ` + "`ensurepip`" + ` inside the skill ` + "`.venv`" + `) to
+  fetch extras at chat time. If a package is missing, install it into
+  ` + "`/workspace/.skill-packages/<skill_name>`" + ` with system ` + "`python3 -m pip install --target`" + `
+  and call this tool again — PYTHONPATH already includes that directory.
 
 ## When to Use
 - When a skill's instructions reference a utility script (e.g., "Run scripts/analyze_form.py")
+- After ` + "`write_sandbox_file`" + ` / ` + "`edit_sandbox_file`" + ` customizes a skill
+  script and you still need that skill's packages (python-pptx, pandas, …)
 - When automation or data processing is needed as part of skill workflow
 - For deterministic operations where script execution is more reliable than generating code
+
+## When NOT to Use
+- Do not use this for a standalone ` + "`/workspace`" + ` script that does not need a
+  skill's packages — call ` + "`shell_exec`" + ` instead.
 
 ## Security
 - Scripts run in a sandboxed environment with limited permissions
 - Network access is disabled by default
-- File access is restricted to the skill directory
+- Bundled scripts stay inside the skill directory; session files must sit
+  under ` + "`/workspace`" + ` and not under ` + "`/workspace/input`" + `
 
 ## Returns
 - Script stdout and stderr output
@@ -47,7 +78,7 @@ var executeSkillScriptTool = BaseTool{
 // ExecuteSkillScriptInput defines the input parameters for the execute_skill_script tool
 type ExecuteSkillScriptInput struct {
 	SkillName  string   `json:"skill_name" jsonschema:"Name of the skill containing the script"`
-	ScriptPath string   `json:"script_path" jsonschema:"Relative path to the script within the skill directory (e.g. scripts/analyze.py)"`
+	ScriptPath string   `json:"script_path" jsonschema:"Relative path inside the skill (e.g. scripts/analyze.py), or an absolute /workspace/... file written with write_sandbox_file. Do not pass /workspace/input paths."`
 	Args       []string `json:"args,omitempty" jsonschema:"Optional command-line arguments. For file flags, pass an absolute path from the current <sandbox_attachments> block (/workspace/input/...). For in-memory data, use input instead."`
 	Input      string   `json:"input,omitempty" jsonschema:"Optional input data to pass to the script via stdin. Use this when you have data in memory (e.g. JSON string) that the script should process. This is equivalent to piping data: echo 'data' | python script.py"`
 }
@@ -85,9 +116,18 @@ func (i *ExecuteSkillScriptInput) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("args must be a string or an array of strings: %w", err)
 	}
 
-	// A string is interpreted as a conventional space-separated command line.
-	// The tool schema continues to advertise []string, so well-formed calls are
-	// unaffected; this is only a compatibility fallback for model output.
+	// Some providers emit the array as a stringified JSON payload
+	// (e.g. "[\"--project-name\",\"X\"]"). Treat that as an array first so the
+	// model's intent is preserved; strings.Fields would otherwise split the
+	// brackets/quotes into garbage tokens and the script would see nonsense argv.
+	if err := json.Unmarshal([]byte(argsString), &i.Args); err == nil {
+		return nil
+	}
+
+	// A plain string is interpreted as a conventional space-separated command
+	// line. The tool schema continues to advertise []string, so well-formed
+	// calls are unaffected; this is only a compatibility fallback for model
+	// output.
 	i.Args = strings.Fields(argsString)
 	return nil
 }
@@ -133,6 +173,23 @@ func (t *ExecuteSkillScriptTool) Execute(ctx context.Context, args json.RawMessa
 			Success: false,
 			Error:   "script_path is required",
 		}, nil
+	}
+
+	if _, ok := sandbox.RunnableWorkspaceScript(input.ScriptPath); !ok {
+		rel, err := skillRelativeFilePath(input.SkillName, input.ScriptPath)
+		if err != nil {
+			return &types.ToolResult{
+				Success: false,
+				Error:   err.Error(),
+			}, nil
+		}
+		if rel == "" {
+			return &types.ToolResult{
+				Success: false,
+				Error:   "script_path is the skill directory; pass a relative script such as scripts/generate_ppt.py",
+			}, nil
+		}
+		input.ScriptPath = rel
 	}
 
 	// Check if skill manager is available
@@ -197,18 +254,33 @@ func (t *ExecuteSkillScriptTool) Execute(ctx context.Context, args json.RawMessa
 		builder.WriteString("\n")
 	}
 
+	if hint := skillOnDemandInstallHint(input.SkillName, input.ScriptPath, result.Stdout, result.Stderr); hint != "" {
+		builder.WriteString(hint)
+		builder.WriteString("\n")
+	} else if !result.IsSuccess() {
+		if hint := pythonSyntaxErrorHint(result.Stderr); hint != "" {
+			builder.WriteString(hint)
+			builder.WriteString("\n")
+		} else if hint := skillMissingPackageHint(input.SkillName, result.Stderr); hint != "" {
+			builder.WriteString(hint)
+			builder.WriteString("\n")
+		}
+	}
+
 	// Determine success based on exit code
 	success := result.IsSuccess()
 
 	resultData := map[string]interface{}{
-		"skill_name":  input.SkillName,
-		"script_path": input.ScriptPath,
-		"args":        input.Args,
-		"exit_code":   result.ExitCode,
-		"stdout":      result.Stdout,
-		"stderr":      result.Stderr,
-		"duration_ms": result.Duration.Milliseconds(),
-		"killed":      result.Killed,
+		"display_type": "shell_exec",
+		"command":      skillScriptCommand(input),
+		"skill_name":   input.SkillName,
+		"script_path":  input.ScriptPath,
+		"args":         input.Args,
+		"exit_code":    result.ExitCode,
+		"stdout":       result.Stdout,
+		"stderr":       result.Stderr,
+		"duration_ms":  result.Duration.Milliseconds(),
+		"killed":       result.Killed,
 	}
 
 	logger.Infof(ctx, "[Tool][ExecuteSkillScript] Script completed with exit code: %d", result.ExitCode)
@@ -227,6 +299,21 @@ func (t *ExecuteSkillScriptTool) Execute(ctx context.Context, args json.RawMessa
 			return ""
 		}(),
 	}, nil
+}
+
+func skillScriptCommand(input ExecuteSkillScriptInput) string {
+	parts := make([]string, 0, 1+len(input.Args))
+	script := strings.TrimSpace(input.ScriptPath)
+	switch {
+	case strings.HasPrefix(path.Clean(script), "/workspace/"):
+		parts = append(parts, script)
+	case input.SkillName != "" && script != "":
+		parts = append(parts, input.SkillName+"/"+script)
+	case script != "":
+		parts = append(parts, script)
+	}
+	parts = append(parts, input.Args...)
+	return strings.Join(parts, " ")
 }
 
 // Cleanup releases any resources

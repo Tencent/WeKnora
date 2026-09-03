@@ -102,7 +102,7 @@ docker compose up -d
 | `dex`（含 `full`） | `dex` | 5556 | OIDC 测试用 IdP（配置在 `misc/dex-config.yaml`） |
 | `langfuse`（含 `full`） | `langfuse-db-init`、`langfuse-clickhouse`、`langfuse-minio`、`langfuse-worker`、`langfuse-web` | 3000（UI）/ 9100/9101（专用 MinIO） | 自建 Langfuse 可观测栈，复用 WeKnora 的 postgres（新建 `langfuse` 库）与 redis（DB 1） |
 | `odl-hybrid` | `odl-hybrid` | expose 5002 | OpenDataLoader/Docling PDF 混合解析后端（仅本地构建，配 `DOCREADER_ODL_HYBRID` 使用） |
-| `full` | `sandbox`、`mcp` 及上述带 full 标记的服务 | mcp: `${MCP_PORT:-8082}:8000` | `sandbox` 仅用于 build/pull 镜像（`command: ["true"]`，非常驻），app 执行 Skills 时按需 `docker run`；`mcp` 为 MCP Server |
+| `full` | `sandbox`、`mcp` 及上述带 full 标记的服务 | mcp: `${MCP_PORT:-8082}:8000` | `sandbox` 仅用于 build/pull 镜像（`command: ["true"]`，非常驻）。Docker 沙箱默认关闭，需设 `WEKNORA_SANDBOX_DOCKER_ENABLED=true` 并挂载 `docker.sock`（等同宿主机 root）；Cube/E2B 不依赖本机 daemon。`mcp` 为 MCP Server |
 
 app 容器的 `environment` 段落是全量环境变量清单（数据库、向量库、对象存储、Docreader 调优、租户策略、OIDC 等），详见 [04-configuration.md](./04-configuration.md)。
 
@@ -127,10 +127,10 @@ make dev-logs / dev-status / dev-stop / dev-restart
 
 | Dockerfile | 产物镜像 | 要点 |
 | --- | --- | --- |
-| `docker/Dockerfile.app` | `wechatopenai/weknora-app` | 两阶段：`golang:1.26-bookworm` 编译（`make build-prod`，默认 `WITH_ANYDOC=1` 链接进程内 office 解析引擎，注入版本信息，预下载 DuckDB 扩展 `cmd/download/duckdb`）→ `debian:12.12-slim` 运行层（含 `migrate` 迁移工具、python3/node/uvx（供 stdio MCP 与 Skills 使用）、ffmpeg（ASR）、gosu 降权）。入口 `scripts/docker-entrypoint.sh`：修复挂载目录属主、把 `_builtin` 内置 Skills 合并回 `skills/preloaded`，再以 appuser 运行 `./WeKnora`。`EXPOSE 8080` |
+| `docker/Dockerfile.app` | `wechatopenai/weknora-app` | 两阶段：`golang:1.26-bookworm` 编译（`make build-prod`，默认 `WITH_ANYDOC=1` 链接进程内 office 解析引擎，注入版本信息，预下载 DuckDB 扩展 `cmd/download/duckdb`）→ `debian:12.12-slim` 运行层（含 `migrate` 迁移工具、python3/node/uvx（供 stdio MCP 与 Skills 使用）、ffmpeg（ASR）、gosu 降权）。入口 `scripts/docker-entrypoint.sh`：修复挂载目录属主、把 `_builtin` 内置 Skills 合并回 `skills/preloaded`；若挂载了 docker.sock，按 socket GID 把 appuser 加入对应组（compose `group_add` 在 gosu 后无效），再以 appuser 运行 `./WeKnora`。`EXPOSE 8080` |
 | `docker/Dockerfile.docreader` | `wechatopenai/weknora-docreader` | Python 3.10 + uv 依赖锁定；生成 protobuf；运行层安装 LibreOffice、OpenJDK 17、antiword、Playwright（webkit）与 `grpc_health_probe`。轻量版不含 PaddleOCR。`EXPOSE 50051`。支持 `APT_MIRROR` 构建参数 |
 | `docker/Dockerfile.odl-hybrid` | `weknora-odl-hybrid:local` | 安装 `opendataloader-pdf[hybrid]`（Docling），监听 5002，默认 `--no-ocr`；仅本地构建不发布 |
-| `docker/Dockerfile.sandbox` | `wechatopenai/weknora-sandbox` | Python 3.11-slim + Node 20 + jq，非 root 用户 `sandbox`(UID 1000)，供 Agent Skills 脚本在一次性容器中执行 |
+| `docker/Dockerfile.sandbox` | `wechatopenai/weknora-sandbox` | Python 3.11-slim + Node 20 + jq，非 root 用户 `user`(UID 1000)，Agent Skills 的会话沙箱镜像 |
 | `frontend/Dockerfile` | `wechatopenai/weknora-ui` | 需先在宿主机执行 `./scripts/build_frontend_dist.sh` 产出 `dist/`；基底为按 digest 固定的 `nginx:1.30.3-alpine`（兼容 CentOS 7 旧内核） |
 
 从源码构建全部镜像：
@@ -170,7 +170,7 @@ make docker-build-frontend
 | `scripts/build_images.sh` | 构建镜像并注入版本（git tag / commit / build time），支持跨架构 |
 | `scripts/build_frontend_dist.sh` | 构建前端静态产物 `frontend/dist`（frontend 镜像的前置步骤） |
 | `scripts/migrate.sh` | golang-migrate 封装 |
-| `scripts/docker-entrypoint.sh` | app 容器入口（属主修复 + 内置 Skills 合并 + gosu 降权） |
+| `scripts/docker-entrypoint.sh` | app 容器入口（属主修复 + 内置 Skills 合并 + docker.sock GID 补组 + gosu 降权） |
 | `scripts/package-lite.sh` / `package-mac-app.sh` | Lite tarball / macOS .app 打包 |
 
 ## 六、Helm 部署（helm/）
@@ -223,7 +223,7 @@ Lite 模式通过编译期 `EDITION=lite` 与运行期 `.env.lite` 环境实现�
 - **队列/流**：`STREAM_MANAGER_TYPE=memory`（`internal/stream/factory.go`），不需要 Redis，Asynq 分布式队列在 Lite 模式下为内存/no-op；
 - **前端**：`make build-lite` 会把 `frontend/dist` 复制为仓库根的 `web/`，二进制直接内嵌托管静态资源（`WEKNORA_WEB_DIR` 可指定目录，router 的 `serveFrontendStatic` 提供服务）；
 - **文档解析**：仍可选连本地 docreader（`DOCREADER_ADDR=127.0.0.1:50051`）；
-- **沙箱**：Lite 启动时不预置后端；可在设置页按空间统一配置 Docker、Local、CubeSandbox 或 E2B。
+- **沙箱**：Lite 启动时不预置后端；可在设置页按空间统一配置 Docker、CubeSandbox 或 E2B。
 
 ```bash
 cp .env.lite.example .env.lite      # 修改 SYSTEM_AES_KEY / JWT_SECRET

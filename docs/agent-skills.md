@@ -124,16 +124,15 @@ type AgentConfig struct {
 
 ### Sandbox 配置入口
 
-Sandbox 不再读取 `WEKNORA_SANDBOX_*` 环境变量。后端、凭据、模板、执行超时、TTL 和私网访问策略均在「设置 → 沙箱后端」按空间保存；智能体没有选择空间配置时，脚本执行保持禁用。
+Sandbox 不再把凭据和模板放进 `WEKNORA_SANDBOX_*`。后端、凭据、模板、执行超时、TTL 和私网访问策略均在「设置 → 沙箱后端」按空间保存；智能体没有选择空间配置时，脚本执行保持禁用。Docker 后端默认关闭，由系统管理员在「设置 → 系统设置」打开，或设置 `WEKNORA_SANDBOX_DOCKER_ENABLED=true`。
 
 ### Sandbox 模式
 
-Docker、Local、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接检查和智能体选择接口管理。CubeSandbox / E2B 的集群搭建和设置页接入流程见 [WeKnora 沙箱集群与标准模板](sandbox-cluster.md)。设置页会通过当前连接拉取模板目录；若没有 WeKnora 标准模板，后端会从标准镜像发起创建，用户无需复制模板 ID。
+Docker、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接检查和智能体选择接口管理。CubeSandbox / E2B 的集群搭建和设置页接入流程见 [WeKnora 沙箱集群与标准模板](sandbox-cluster.md)。设置页会通过当前连接拉取模板目录；若没有 WeKnora 标准模板，后端会从标准镜像发起创建，用户无需复制模板 ID。
 
 | 模式 | 状态 | 说明 |
 |------|------|------|
-| `docker` | 稳定 | 每次执行启动短生命周期容器；镜像和环境变量按空间配置，不保留会话绑定 |
-| `local` | 开发 | 直接在 WeKnora 服务主机执行；无容器/MicroVM 隔离，不保留会话绑定 |
+| `docker` | 稳定 | 单机 Docker daemon；会话级持久（一个会话一个长驻容器），支持多机 WeKnora 副本（需 Redis），但沙箱都落在同一台 daemon 上。见 [Docker 沙箱后端](sandbox-docker-backend.md) |
 | `cube` | 稳定 | Tencent CubeSandbox MicroVM；会话级持久，支持多机（需 Redis） |
 | `e2b` | 稳定 | E2B 云端 MicroVM；会话级持久，支持多机（需 Redis）；依赖第三方 SDK go-e2b |
 
@@ -155,6 +154,17 @@ Docker、Local、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接�
 这条规则换来的是：库里那一行就是沙箱位置的完整描述。因此身份比较不必再去解析 `.env`，改 `.env` 也不会在无人察觉的情况下把某份配置重新指向别的账号。
 
 **会话与配置的绑定是「随沙箱同生共死」的钉子。** 会话首次创建沙箱时，把当时用的配置 ID 记在 `sessions.sandbox_config_id` 上；此后该会话的附件上传、产物收集、沙箱销毁都锁定在这份配置上。改智能体的选择**只影响之后新建的沙箱**——否则管理员改一次配置，正在进行的会话就会去错误的账号里找产物，销毁也会打空，留下一个没人知道 ID 的 paused 沙箱持续计费。
+
+### 安装租户技能
+
+空间「技能沙箱」设置里可以把技能装进当前配置的镜像。除上传 zip 外，也支持从托管平台粘贴来源（每种写法只对应一种来源，不会猜测）：
+
+- ClawHub：`@owner/slug`，或不含 `/` 的 slug（如 `my-team--skill`）
+- ClawHub skills.sh 联邦页：`https://clawhub.ai/skills-sh/owner/repo/slug` 或 `skills-sh:owner/repo/slug`（服务端向 ClawHub 解析钉死的 GitHub commit，不会把 URL 最后一段当成仓库子目录）
+- 页面链接：ClawHub / [skillhub.cn](https://skillhub.cn) / 自托管 SkillHub、skills.sh、GitHub、GitLab
+- 直接的 zip / `SKILL.md` URL
+
+不要粘贴裸的 `owner/slug`：请改成 `@owner/slug` 或完整 `https://github.com/...` 链接。来源必须可匿名读取，服务端下载时不携带任何凭据；私有仓库请先导出 zip 再上传。安装仍走原有镜像快照流程。
 
 **有沙箱在跑时改不了身份字段。** 身份字段分两组，成因不同但后果都足够严重：
 
@@ -532,13 +542,15 @@ Docker 模式提供最强的隔离：
 
 ```bash
 # 方式一：直接拉取
-docker pull wechatopenai/weknora-sandbox:latest
+docker pull wechatopenai/weknora-sandbox:main
 
 # 方式二：本地构建
 sh scripts/build_images.sh -s
 ```
 
-> 如果未预拉取，应用启动时会自动异步拉取镜像（`EnsureImage`），但首次执行可能需要等待下载完成。
+> 如果未预拉取，创建第一个沙箱时会先拉取镜像，首次执行需要等待下载完成；也可以在设置页的模板步骤提前触发拉取。
+
+> 用 `main` 而非 `latest`：`latest` 只在发版时移动，目前仍停在 `/workspace` 及其 `input`/`output` 目录交给沙箱账号之前的版本，用它建出来的沙箱写不了自己的产物目录。发版带上该修复后即可换回 `latest`。
 
 **镜像内置环境**：
 - Python 3.11 + pip（requests、pyyaml、pandas、beautifulsoup4）
@@ -555,27 +567,9 @@ docker run --rm \
   --network=none \
   -v /path/to/skill:/skill:ro \
   -w /skill \
-  wechatopenai/weknora-sandbox:latest \
+  wechatopenai/weknora-sandbox:main \
   python scripts/analyze.py input.pdf
 ```
-
-### Local 沙箱
-
-Local 模式提供基础保护：
-
-- **命令白名单**：仅允许特定解释器
-- **工作目录限制**：限定在 Skill 目录
-- **环境变量过滤**：仅传递安全变量
-- **超时控制**：默认 30 秒超时
-- **路径遍历防护**：防止访问 Skill 目录外文件
-- **脚本预校验**：执行前进行安全校验
-
-**允许的命令**：
-- `python`, `python3`
-- `node`, `nodejs`
-- `bash`, `sh`
-- `ruby`
-- `go run`
 
 ## API 参考
 
@@ -679,10 +673,9 @@ go run ./cmd/skills-demo/main.go
 
 ### 脚本执行失败
 
-1. 检查 `sandbox_mode` 配置
+1. 检查沙箱后端配置
 2. Docker 模式：确认 Docker 服务运行中
-3. Local 模式：确认解释器已安装
-4. 检查脚本权限和语法
+3. 检查脚本权限和语法
 
 ### 元数据验证错误
 

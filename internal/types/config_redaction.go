@@ -307,7 +307,8 @@ func SandboxConfigForResponse(cfg *TenantSandboxConfig, maskSecrets bool) *Tenan
 
 // MergeSandboxConfigForUpdate resolves redacted placeholders in incoming
 // against the currently stored config, so a client that never received the
-// real secret can submit the rest of the form without wiping it.
+// real secret can submit the rest of the form without wiping it. Pointers
+// the editor does not own (SkillImage, VolumeMount) are kept from existing.
 func MergeSandboxConfigForUpdate(incoming, existing *TenantSandboxConfig) *TenantSandboxConfig {
 	if incoming == nil {
 		return nil
@@ -344,6 +345,32 @@ func MergeSandboxConfigForUpdate(incoming, existing *TenantSandboxConfig) *Tenan
 			envVars[name] = PreserveIfRedacted(value, prev)
 		}
 		out.EnvVars = envVars
+	}
+
+	// SkillImage and VolumeMount are owned by the install / volume paths, not
+	// by the sandbox settings form. The editor rebuilds the payload without
+	// either field, so copying incoming as-is would wipe a live snapshot on
+	// every runtime save and leave sessions booting the base template while the
+	// skill rows still claim ready. Reading them from the stored row instead —
+	// and clearing when there is no stored row — also means a crafted PUT can
+	// neither plant nor wipe a pointer.
+	out.SkillImage = nil
+	out.VolumeMount = nil
+	if existing != nil {
+		if existing.SkillImage != nil {
+			image := *existing.SkillImage
+			out.SkillImage = &image
+		}
+		if existing.VolumeMount != nil {
+			mount := *existing.VolumeMount
+			out.VolumeMount = &mount
+		}
+		// The runtime form omits skill_rollout. An empty incoming value must
+		// not reset a saved "new_session" choice; the skills panel sends the
+		// explicit next_turn token when the admin switches back.
+		if strings.TrimSpace(out.SkillRollout) == "" {
+			out.SkillRollout = existing.SkillRollout
+		}
 	}
 
 	return &out

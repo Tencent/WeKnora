@@ -9,8 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-
-	"gopkg.in/yaml.v3"
+	"unicode/utf8"
 )
 
 // Skill validation constants following Claude's specification
@@ -23,8 +22,13 @@ const (
 // Reserved words that cannot be used in skill names
 var reservedWords = []string{"anthropic", "claude"}
 
-// namePattern validates skill names: unicode letters, numbers only
-var namePattern = regexp.MustCompile(`^[\p{L}\p{N}-]+$`)
+// namePattern is the install identity: a single path segment of letters
+// (any script), digits, hyphens, and underscores. Display titles such as
+// "Word / DOCX" are not this; those are rewritten via slug / slugify
+// before Validate. Slashes stay out so the name cannot walk SkillsImageRoot.
+var namePattern = regexp.MustCompile(`^[\p{L}\p{N}_-]+$`)
+
+var skillNameSepRE = regexp.MustCompile(`[^\p{L}\p{N}]+`)
 
 // xmlTagPattern detects XML tags in content
 var xmlTagPattern = regexp.MustCompile(`<[^>]+>`)
@@ -38,6 +42,10 @@ type Skill struct {
 	// Metadata (Level 1) - always loaded
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
+	// Slug is an optional filesystem-safe id. ClawHub / SkillHub often put a
+	// display title in name ("Word / DOCX") and the install id in slug
+	// ("word-docx"). When name is not a valid install identity, slug wins.
+	Slug string `yaml:"slug,omitempty"`
 
 	// Filesystem information
 	BasePath string // Absolute path to the skill directory
@@ -46,6 +54,12 @@ type Skill struct {
 	// Instructions (Level 2) - loaded on demand
 	Instructions string // The main body of SKILL.md (after frontmatter)
 	Loaded       bool   // Whether Level 2 instructions have been loaded
+
+	// FrontmatterRepaired is true when the YAML between the --- markers had
+	// to be repaired (keys nested under a scalar, or an unquoted colon)
+	// before it would parse. The original SKILL.md is unchanged; callers
+	// that install the archive should tell the user so they can fix it.
+	FrontmatterRepaired bool
 }
 
 // SkillMetadata represents the minimal metadata for system prompt injection (Level 1)
@@ -70,11 +84,11 @@ func (s *Skill) Validate() error {
 	if s.Name == "" {
 		return errors.New("skill name is required")
 	}
-	if len(s.Name) > MaxNameLength {
-		return fmt.Errorf("skill name exceeds maximum length of %d characters", MaxNameLength)
+	if n := utf8.RuneCountInString(s.Name); n > MaxNameLength {
+		return fmt.Errorf("skill name is %d characters; maximum is %d", n, MaxNameLength)
 	}
 	if !namePattern.MatchString(s.Name) {
-		return errors.New("skill name must contain only lowercase letters, numbers, and hyphens")
+		return errors.New("skill name must contain only letters, numbers, hyphens, and underscores")
 	}
 	for _, reserved := range reservedWords {
 		if strings.Contains(s.Name, reserved) {
@@ -89,14 +103,48 @@ func (s *Skill) Validate() error {
 	if s.Description == "" {
 		return errors.New("skill description is required")
 	}
-	if len(s.Description) > MaxDescriptionLength {
-		return fmt.Errorf("skill description exceeds maximum length of %d characters", MaxDescriptionLength)
+	if n := utf8.RuneCountInString(s.Description); n > MaxDescriptionLength {
+		return fmt.Errorf("skill description is %d characters; maximum is %d", n, MaxDescriptionLength)
 	}
 	if xmlTagPattern.MatchString(s.Description) {
 		return errors.New("skill description cannot contain XML tags")
 	}
 
 	return nil
+}
+
+// applyInstallName picks the directory / tool identity. Third-party SKILL.md
+// files often put a display title in name ("Word / DOCX") and a kebab-case
+// id in slug ("word-docx"). A title that is already a valid identity is
+// left alone so Chinese names such as 律师助手 stay as-is.
+func (s *Skill) applyInstallName() error {
+	if s == nil {
+		return errors.New("skill name is required")
+	}
+	if installableSkillName(s.Name) {
+		s.Name = strings.TrimSpace(s.Name)
+		return nil
+	}
+	if installableSkillName(s.Slug) {
+		s.Name = strings.TrimSpace(s.Slug)
+		return nil
+	}
+	if derived := slugifySkillName(s.Name); installableSkillName(derived) {
+		s.Name = derived
+		return nil
+	}
+	return errors.New("skill name must contain only letters, numbers, hyphens, and underscores (or set slug)")
+}
+
+func installableSkillName(name string) bool {
+	name = strings.TrimSpace(name)
+	return name != "" && namePattern.MatchString(name)
+}
+
+func slugifySkillName(name string) string {
+	s := strings.ToLower(strings.TrimSpace(name))
+	s = skillNameSepRE.ReplaceAllString(s, "-")
+	return strings.Trim(s, "-_")
 }
 
 // ToMetadata converts a Skill to its lightweight metadata representation
@@ -156,8 +204,13 @@ func ParseSkillFile(content string) (*Skill, error) {
 
 	// Parse YAML frontmatter
 	frontmatter := strings.Join(frontmatterLines, "\n")
-	if err := yaml.Unmarshal([]byte(frontmatter), skill); err != nil {
+	repaired, err := UnmarshalSkillFrontmatter(frontmatter, skill)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse YAML frontmatter: %w", err)
+	}
+	skill.FrontmatterRepaired = repaired
+	if err := skill.applyInstallName(); err != nil {
+		return nil, err
 	}
 
 	// Set body instructions
@@ -182,6 +235,23 @@ func ParseSkillMetadata(content string) (*SkillMetadata, error) {
 	return skill.ToMetadata(), nil
 }
 
+// IsOnDemandInstallerPath reports whether path is a first-use dependency
+// installer (scripts/install_deps.py and friends). Skills ship these to defer
+// optional packages to chat time, which cannot work once the skill tree is
+// snapshotted read-only. The installer agent's prompt ("install these extras
+// now") and the runtime hint ("skip this installer") key off the same list.
+func IsOnDemandInstallerPath(scriptPath string) bool {
+	base := strings.ToLower(filepath.Base(strings.TrimSpace(scriptPath)))
+	switch {
+	case strings.Contains(base, "install_dep"):
+		return true
+	case base == "setup_deps.py", base == "bootstrap_deps.py":
+		return true
+	default:
+		return false
+	}
+}
+
 // IsScript checks if a file path represents an executable script
 func IsScript(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
@@ -190,6 +260,8 @@ func IsScript(path string) bool {
 		".sh":   true,
 		".bash": true,
 		".js":   true,
+		".mjs":  true,
+		".cjs":  true,
 		".ts":   true,
 		".rb":   true,
 		".pl":   true,
@@ -206,6 +278,8 @@ func GetScriptLanguage(path string) string {
 		".sh":   "bash",
 		".bash": "bash",
 		".js":   "node",
+		".mjs":  "node",
+		".cjs":  "node",
 		".ts":   "ts-node",
 		".rb":   "ruby",
 		".pl":   "perl",

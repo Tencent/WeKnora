@@ -311,3 +311,83 @@ func TestTraceparentPropagation(t *testing.T) {
 	}
 	t.Fatal("weknora-root span not exported")
 }
+
+// TestAttachTraceparent_FollowUpJoinsOriginatingTrace is the follow-up
+// suggestion regression: generation often runs on a later HTTP request
+// (POST .../suggestions) after the chat handler has already ended its root
+// span. Without AttachTraceparent, StartGeneration auto-opens an orphan
+// root named after the LLM call. With it, the follow-up span and generation
+// inherit the originating chat trace id.
+func TestAttachTraceparent_FollowUpJoinsOriginatingTrace(t *testing.T) {
+	m, exp := newTestManager(t)
+
+	httpCtx, httpTrace := m.StartTrace(context.Background(), TraceOptions{Name: "POST /api/v1/agent-chat/:session_id"})
+	traceparent := TraceparentFromContext(httpCtx)
+	if traceparent == "" {
+		t.Fatal("expected a traceparent on the HTTP trace")
+	}
+	httpTrace.Finish(nil, nil)
+
+	// Separate request: no *Trace, no OTel span — this is POST /suggestions.
+	followCtx := AttachTraceparent(context.Background(), traceparent)
+	followCtx, span := m.StartSpan(followCtx, SpanOptions{Name: "follow_up.suggestions"})
+	_, gen := m.StartGeneration(followCtx, GenerationOptions{Name: "chat.completion", Model: "m"})
+	gen.Finish("qs", nil, nil)
+	span.Finish(nil, nil, nil)
+
+	var followSpan, generation tracetest.SpanStub
+	var autoRoot bool
+	for _, s := range exp.GetSpans() {
+		switch {
+		case s.Name == "follow_up.suggestions" && spanType(s) == obsTypeSpan:
+			followSpan = s
+		case s.Name == "chat.completion" && spanType(s) == obsTypeGeneration:
+			generation = s
+		case s.Name == "chat.completion" && spanType(s) == obsTypeTrace:
+			autoRoot = true
+		}
+	}
+	if followSpan.Name == "" {
+		t.Fatal("follow_up.suggestions span not exported")
+	}
+	if generation.Name == "" {
+		t.Fatal("chat.completion generation not exported")
+	}
+	if followSpan.SpanContext.TraceID().String() != httpTrace.ID {
+		t.Errorf("follow-up span trace id = %s, want HTTP %s", followSpan.SpanContext.TraceID(), httpTrace.ID)
+	}
+	if generation.SpanContext.TraceID().String() != httpTrace.ID {
+		t.Errorf("generation trace id = %s, want HTTP %s", generation.SpanContext.TraceID(), httpTrace.ID)
+	}
+	if autoRoot {
+		t.Error("StartGeneration opened an orphan chat.completion root; traceparent was not attached")
+	}
+}
+
+// TestAttachTraceparent_LeavesExistingTrace ensures same-request background
+// work (completeAssistantMessage) is not re-parented onto a stale remote
+// span when ctx already carries a live *Trace.
+func TestAttachTraceparent_LeavesExistingTrace(t *testing.T) {
+	m, exp := newTestManager(t)
+
+	otherCtx, other := m.StartTrace(context.Background(), TraceOptions{Name: "other"})
+	otherParent := TraceparentFromContext(otherCtx)
+	other.Finish(nil, nil)
+
+	ctx, live := m.StartTrace(context.Background(), TraceOptions{Name: "live"})
+	ctx = AttachTraceparent(ctx, otherParent)
+	_, gen := m.StartGeneration(ctx, GenerationOptions{Name: "chat.completion", Model: "m"})
+	gen.Finish("out", nil, nil)
+	live.Finish(nil, nil)
+
+	for _, s := range exp.GetSpans() {
+		if spanType(s) != obsTypeGeneration {
+			continue
+		}
+		if s.SpanContext.TraceID().String() != live.ID {
+			t.Errorf("generation joined foreign trace %s, want live %s", s.SpanContext.TraceID(), live.ID)
+		}
+		return
+	}
+	t.Fatal("generation span not exported")
+}

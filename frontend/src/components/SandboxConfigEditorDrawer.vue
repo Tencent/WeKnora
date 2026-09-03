@@ -4,7 +4,7 @@
     :visible="visible"
     :title="record ? $t('settings.sandbox.editTitle') : $t('settings.sandbox.createTitle')"
     :description="stepDescription"
-    icon="server"
+    icon="code"
     width="680px"
     :min-width="560"
     :max-width="920"
@@ -20,25 +20,47 @@
       <t-button v-if="wizardStep > 0" variant="outline" @click="previousStep">
         {{ $t('settings.sandbox.back') }}
       </t-button>
+      <t-popconfirm
+        v-if="canDeepCheck"
+        :content="$t('settings.sandbox.deepCheckConfirm')"
+        @confirm="runCheck(true)"
+      >
+        <t-button variant="outline" :loading="checking">
+          {{ lastCheckWasDeep ? $t('settings.sandbox.recheck') : $t('settings.sandbox.deepCheck') }}
+        </t-button>
+      </t-popconfirm>
     </template>
 
-    <nav class="sandbox-steps" :aria-label="$t('settings.sandbox.setupProgress')">
-      <div v-for="(item, index) in wizardSteps" :key="item.key"
-        :class="['sandbox-step', { 'is-active': wizardStep === index, 'is-done': wizardStep > index }]">
-        <span class="sandbox-step__marker">
-          <t-icon v-if="wizardStep > index" name="check" />
-          <template v-else>{{ index + 1 }}</template>
-        </span>
-        <span class="sandbox-step__title">{{ item.title }}</span>
-        <span v-if="index < wizardSteps.length - 1" class="sandbox-step__line" aria-hidden="true" />
-      </div>
-    </nav>
+    <template #header-extra>
+      <nav class="sandbox-steps" :aria-label="$t('settings.sandbox.setupProgress')">
+        <component
+          :is="canJumpTo(index) ? 'button' : 'div'"
+          v-for="(item, index) in wizardSteps"
+          :key="item.key"
+          :type="canJumpTo(index) ? 'button' : undefined"
+          :class="['sandbox-step', {
+            'is-active': wizardStep === index,
+            'is-done': wizardStep > index,
+            'is-clickable': canJumpTo(index),
+          }]"
+          :aria-current="wizardStep === index ? 'step' : undefined"
+          @click="goToStep(index)"
+        >
+          <span class="sandbox-step__marker">
+            <t-icon v-if="wizardStep > index" name="check" />
+            <template v-else>{{ index + 1 }}</template>
+          </span>
+          <span class="sandbox-step__title">{{ item.title }}</span>
+          <span v-if="index < wizardSteps.length - 1" class="sandbox-step__line" aria-hidden="true" />
+        </component>
+      </nav>
+    </template>
 
     <!--
       Identity-change refusals must sit at the top: the form is long and the
       admin otherwise saves, sees nothing, and assumes the click did nothing.
     -->
-    <div v-if="conflict && currentStepKey === 'runtime'" ref="conflictAlertRef" class="blocked blocked-top">
+    <div v-if="conflict" ref="conflictAlertRef" class="blocked blocked-top">
       <t-alert v-if="conflict.code === 'sandboxes_still_live'" theme="warning"
         :message="$t('settings.sandbox.sandboxesStillLive', { count: conflict.inventory?.sandbox_count ?? 0 })">
         <template #description>
@@ -49,6 +71,8 @@
           <p>{{ $t('settings.sandbox.blockedHint') }}</p>
         </template>
       </t-alert>
+      <t-alert v-else-if="conflict.code === 'skill_snapshot_blocks_template'" theme="warning"
+        :message="$t('settings.sandbox.templateLockedBySkills')" />
       <t-alert v-else theme="warning" :message="$t('settings.sandbox.unverifiableBlocked')">
         <template #description>
           <p>{{ $t('settings.sandbox.unverifiableSaveHint') }}</p>
@@ -62,6 +86,7 @@
         <t-form-item :label="$t('settings.sandbox.backendType')">
           <t-select :value="backend" :placeholder="$t('settings.sandbox.backendTypePlaceholder')"
             class="backend-select" :popup-props="{ overlayClassName: 'sandbox-backend-popup' }"
+            :disabled="retargetFrozen"
             @change="(v: any) => selectBackend(String(v))">
             <t-option v-for="opt in backendOptions" :key="opt" :value="opt" :label="backendLabel(opt)">
               <span class="backend-choice">
@@ -79,6 +104,12 @@
             {{ $t(`settings.sandbox.backendDescriptions.${backend}`) }}
           </p>
         </t-form-item>
+        <t-alert v-if="backend === 'docker' && !dockerBackendEnabled" theme="warning" class="compact-alert"
+          :message="$t('settings.sandbox.dockerDisabledAlert')">
+          <template #description>
+            <p>{{ $t('settings.sandbox.dockerDisabledHint') }}</p>
+          </template>
+        </t-alert>
         <t-form-item :label="$t('settings.sandbox.configName')" :status="nameError ? 'error' : undefined"
           :tips="nameError || undefined">
           <t-input v-model="name" :placeholder="$t('settings.sandbox.configNamePlaceholder')" />
@@ -90,29 +121,33 @@
 
       <section v-if="currentStepKey === 'connection' && isRemoteBackend" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.sectionConnection') }}</h4>
-        <t-alert v-if="record" theme="info" class="identity-hint compact-alert"
+        <t-alert v-if="hasSkillSnapshot" theme="info" class="identity-hint compact-alert"
+          :message="$t('settings.sandbox.connectionLockedBySkills')" />
+        <t-alert v-else-if="hasInFlightSkill" theme="info" class="identity-hint compact-alert"
+          :message="$t('settings.sandbox.connectionLockedByInFlight')" />
+        <t-alert v-else-if="record" theme="info" class="identity-hint compact-alert"
           :message="$t('settings.sandbox.identityFieldHint')" />
 
         <template v-if="backend === 'cube'">
           <t-form-item :label="requiredLabel('apiUrl')" :status="fieldStatus('api_url')" :tips="fieldTip('api_url')">
             <t-input v-model="cube.api_url" placeholder="http://cube.example.com:33000"
-              @input="onConnectionInput('api_url')" />
+              :disabled="retargetFrozen" @input="onConnectionInput('api_url')" />
           </t-form-item>
           <div class="form-grid form-grid--two">
             <t-form-item :label="requiredLabel('proxyUrl')" :status="fieldStatus('proxy_url')"
               :tips="fieldTip('proxy_url')">
               <t-input v-model="cube.proxy_url" placeholder="http://cube.example.com:80"
-                @input="onConnectionInput('proxy_url')" />
+                :disabled="retargetFrozen" @input="onConnectionInput('proxy_url')" />
             </t-form-item>
             <t-form-item :label="requiredLabel('sandboxDomain')" :status="fieldStatus('sandbox_domain')"
               :tips="fieldTip('sandbox_domain')">
               <t-input v-model="cube.sandbox_domain" placeholder="cube.app"
-                @input="onConnectionInput('sandbox_domain')" />
+                :disabled="retargetFrozen" @input="onConnectionInput('sandbox_domain')" />
             </t-form-item>
           </div>
           <t-form-item :label="$t('settings.sandbox.apiKey')">
             <t-input v-model="cube.api_key" type="password" :placeholder="secretInputPlaceholder('cube')"
-              @input="invalidateConnection" />
+              :disabled="retargetFrozen" @input="invalidateConnection" />
             <div class="field-hints">
               <p class="section-help">
                 {{ storedSecrets.cube
@@ -125,13 +160,18 @@
               </a>
             </div>
           </t-form-item>
+          <t-form-item :label="$t('settings.sandbox.cubeDnsServers')"
+            :help="$t('settings.sandbox.cubeDnsServersHelp')">
+            <t-tag-input v-model="cube.dns_servers" :placeholder="$t('settings.sandbox.cubeDnsServersPlaceholder')"
+              :disabled="retargetFrozen" clearable @change="invalidateConnection" />
+          </t-form-item>
         </template>
 
         <template v-else-if="backend === 'e2b'">
           <t-form-item :label="requiredLabel('apiKey')" :status="fieldStatus('api_key')"
             :tips="fieldTip('api_key')">
             <t-input v-model="e2b.api_key" type="password" :placeholder="secretInputPlaceholder('e2b')"
-              @input="onConnectionInput('api_key')" />
+              :disabled="retargetFrozen" @input="onConnectionInput('api_key')" />
             <div class="field-hints">
               <p class="section-help">
                 {{ storedSecrets.e2b
@@ -146,15 +186,17 @@
           </t-form-item>
           <div class="form-grid form-grid--two">
             <t-form-item :label="$t('settings.sandbox.apiUrl')" :help="$t('settings.sandbox.e2bApiUrlOptional')">
-              <t-input v-model="e2b.api_url" placeholder="https://api.e2b.app" @input="invalidateConnection" />
+              <t-input v-model="e2b.api_url" placeholder="https://api.e2b.app"
+                :disabled="retargetFrozen" @input="invalidateConnection" />
             </t-form-item>
             <t-form-item :label="$t('settings.sandbox.sandboxDomain')" :help="$t('settings.sandbox.e2bDomainOptional')">
-              <t-input v-model="e2b.sandbox_domain" placeholder="e2b.app" @input="invalidateConnection" />
+              <t-input v-model="e2b.sandbox_domain" placeholder="e2b.app"
+                :disabled="retargetFrozen" @input="invalidateConnection" />
             </t-form-item>
           </div>
           <t-form-item :label="$t('settings.sandbox.proxyUrl')" :help="$t('settings.sandbox.e2bProxyUrlOptional')">
             <t-input v-model="e2b.proxy_url" placeholder="http://sandbox-gateway.example.com"
-              @input="invalidateConnection" />
+              :disabled="retargetFrozen" @input="invalidateConnection" />
           </t-form-item>
         </template>
         <div class="private-endpoint-row">
@@ -162,108 +204,159 @@
             <p class="private-endpoint-row__title">{{ $t('settings.sandbox.allowPrivateEndpoints') }}</p>
             <p class="section-help">{{ $t('settings.sandbox.allowPrivateEndpointsHint') }}</p>
           </div>
-          <t-switch v-model="allowPrivateEndpoints" @change="invalidateConnection" />
+          <t-switch
+            v-model="allowPrivateEndpoints"
+            :disabled="retargetFrozen"
+            @change="invalidateConnection"
+          />
         </div>
       </section>
 
       <section v-if="currentStepKey === 'connection' && !isRemoteBackend" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.sectionRuntimeEnvironment') }}</h4>
-        <template v-if="backend === 'docker'">
-          <div class="weknora-template-card is-active">
-            <SandboxBackendBadge type="docker" />
-            <div class="weknora-template-card__content">
-              <div class="weknora-template-card__title-row">
-                <span class="weknora-template-card__title">{{ $t('settings.sandbox.weknoraDockerImage') }}</span>
-                <t-tag theme="primary" variant="light" size="small">{{ $t('settings.sandbox.recommendedTag') }}</t-tag>
-              </div>
-              <p>{{ $t('settings.sandbox.weknoraDockerImageHint') }}</p>
+        <div class="weknora-template-card is-active">
+          <SandboxBackendBadge type="docker" />
+          <div class="weknora-template-card__content">
+            <div class="weknora-template-card__title-row">
+              <span class="weknora-template-card__title">{{ $t('settings.sandbox.weknoraDockerImage') }}</span>
+              <t-tag theme="primary" variant="light" size="small">{{ $t('settings.sandbox.recommendedTag') }}</t-tag>
             </div>
+            <p>{{ $t('settings.sandbox.weknoraDockerImageHint') }}</p>
           </div>
-          <t-form-item :label="requiredLabel('dockerImage')" :status="fieldStatus('image')"
-            :tips="fieldTip('image')">
-            <t-input v-model="docker.image" placeholder="wechatopenai/weknora-sandbox:latest"
-              @input="onFieldInput('image')" />
-          </t-form-item>
-        </template>
-        <t-alert v-else theme="warning" class="compact-alert" :message="$t('settings.sandbox.localRuntimeWarning')" />
+        </div>
+        <t-form-item :label="requiredLabel('dockerImage')" :status="fieldStatus('image')"
+          :tips="fieldTip('image')">
+          <t-input v-model="docker.image" :placeholder="defaultDockerImage"
+            :disabled="retargetFrozen" @input="onFieldInput('image')" />
+          <p v-if="retargetFrozen" class="section-help section-help--field">
+            {{ hasSkillSnapshot
+              ? $t('settings.sandbox.templateLockedBySkills')
+              : $t('settings.sandbox.templateLockedByInFlight') }}
+          </p>
+        </t-form-item>
+        <t-form-item :label="$t('settings.sandbox.dockerHost')" :help="$t('settings.sandbox.dockerHostHelp')">
+          <t-input v-model="docker.host" placeholder="unix:///var/run/docker.sock"
+            :disabled="retargetFrozen" @input="onFieldInput('host')" />
+        </t-form-item>
+        <t-form-item :label="$t('settings.sandbox.dockerTlsCertPath')"
+          :help="$t('settings.sandbox.dockerTlsCertPathHelp')">
+          <t-input v-model="docker.tls_cert_path" placeholder="/etc/weknora/docker-certs"
+            :disabled="retargetFrozen" @input="onFieldInput('tls_cert_path')" />
+        </t-form-item>
+        <t-alert theme="warning" class="compact-alert" :message="$t('settings.sandbox.dockerHostRisk')" />
+        <div class="private-endpoint-row">
+          <div>
+            <p class="private-endpoint-row__title">{{ $t('settings.sandbox.allowPrivateEndpoints') }}</p>
+            <p class="section-help">{{ $t('settings.sandbox.allowPrivateEndpointsHint') }}</p>
+          </div>
+          <t-switch
+            v-model="allowPrivateEndpoints"
+            :disabled="retargetFrozen"
+            @change="invalidateConnection"
+          />
+        </div>
       </section>
 
       <section v-if="currentStepKey === 'template'" class="setting-drawer__section">
         <div class="section-title-row">
           <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.sectionTemplate') }}</h4>
-          <t-button variant="text" size="small" :loading="templatesLoading" @click="loadTemplates(true)">
+          <t-button variant="text" size="small" :loading="templatesLoading" @click="loadTemplates()">
             <template #icon><t-icon name="refresh" /></template>
             {{ $t('settings.sandbox.refreshTemplates') }}
           </t-button>
         </div>
-        <div class="connection-summary" role="status">
-          <span class="connection-summary__icon"><t-icon name="check" /></span>
-          <div>
-            <p class="connection-summary__title">{{ $t('settings.sandbox.connectionPassedTitle') }}</p>
-            <p class="connection-summary__text">{{ $t('settings.sandbox.connectionPassed') }}</p>
-          </div>
-        </div>
-        <p class="section-help">{{ $t('settings.sandbox.templateStepHint') }}</p>
+        <t-alert v-if="hasSkillSnapshot" theme="info" class="compact-alert"
+          :message="$t('settings.sandbox.templateLockedBySkills')" />
+        <t-alert v-else-if="hasInFlightSkill" theme="info" class="compact-alert"
+          :message="$t('settings.sandbox.templateLockedByInFlight')" />
         <div v-if="templatesLoading && !templatesLoaded" class="template-loading">
           <t-loading size="small" />
           <span>{{ $t('settings.sandbox.loadingTemplates') }}</span>
         </div>
-        <div v-else-if="templates.length" class="template-list" role="radiogroup"
-          :aria-label="$t('settings.sandbox.sectionTemplate')">
-          <button v-for="item in templates" :key="item.id" type="button" class="template-card"
-            :class="{ 'is-active': currentTemplateId === item.id, 'is-pending': isTemplatePending(item) }"
-            :disabled="!isTemplateSelectable(item)" role="radio" :aria-checked="currentTemplateId === item.id"
-            @click="selectTemplate(item.id)">
-            <span class="template-card__badge">
-              <t-icon :name="isTemplatePending(item) ? 'time' : 'code'" />
-            </span>
-            <span class="template-card__body">
-              <span class="template-card__title-row">
-                <span class="template-card__title">{{ item.name }}</span>
-                <t-tag v-if="item.standard" theme="primary" variant="light" size="small">
+        <div v-else class="template-list" role="radiogroup" :aria-label="$t('settings.sandbox.sectionTemplate')">
+          <div v-if="canCreateStandard" class="template-row template-row--offer">
+            <div class="template-row__main">
+              <div class="template-row__head">
+                <span class="template-row__title">{{ $t('settings.sandbox.weknoraStandardTemplate') }}</span>
+                <t-tag theme="primary" variant="outline" size="small">
                   {{ $t('settings.sandbox.recommendedTag') }}
                 </t-tag>
-              </span>
-              <span class="template-card__meta">{{ templateMeta(item) }}</span>
-              <!--
-                An untagged template is indistinguishable from a building one in
-                the provider's list, so it needs its own line: waiting is futile
-                and only a rebuild fixes it.
-              -->
-              <span v-if="isTemplateUntagged(item)" class="template-card__hint template-card__hint--error">
+                <span class="template-row__spacer" />
+                <t-button theme="primary" variant="outline" size="small" :loading="templatesLoading"
+                  @click="createStandardTemplate">
+                  {{ $t('settings.sandbox.createStandardTemplate') }}
+                </t-button>
+              </div>
+              <p class="template-row__hint">{{ $t('settings.sandbox.createStandardTemplateHint') }}</p>
+            </div>
+          </div>
+          <div
+            v-for="item in templates"
+            :key="item.id"
+            class="template-row"
+            :class="{
+              'is-active': currentTemplateId === item.id,
+              'is-pending': isTemplatePending(item),
+              'is-disabled': !isTemplateSelectable(item) || (retargetFrozen && currentTemplateId !== item.id),
+            }"
+            role="radio"
+            :aria-checked="currentTemplateId === item.id"
+            :aria-disabled="!isTemplateSelectable(item) || (retargetFrozen && currentTemplateId !== item.id)"
+            :tabindex="isTemplateSelectable(item) && !(retargetFrozen && currentTemplateId !== item.id) ? 0 : -1"
+            @click="onTemplateCardClick(item)"
+            @keydown.enter.prevent="onTemplateCardClick(item)"
+            @keydown.space.prevent="onTemplateCardClick(item)"
+          >
+            <span class="template-row__marker" aria-hidden="true" />
+            <div class="template-row__main">
+              <div class="template-row__head">
+                <span class="template-row__title" :title="templateDisplayName(item)">
+                  {{ templateDisplayName(item) }}
+                </span>
+                <t-tag v-if="item.standard" theme="primary" variant="outline" size="small">
+                  {{ $t('settings.sandbox.recommendedTag') }}
+                </t-tag>
+                <span class="template-row__spacer" />
+                <t-tag :theme="templateStatusTheme(item)" variant="outline" size="small">
+                  {{ templateStatusLabel(item) }}
+                </t-tag>
+                <span v-if="canRebuildTemplate(item)" class="template-row__rebuild" @click.stop>
+                  <t-popconfirm
+                    theme="warning"
+                    :content="$t('settings.sandbox.replaceStandardTemplateConfirm')"
+                    @confirm="replaceStandardTemplate"
+                  >
+                    <t-button variant="text" size="small" :loading="templatesLoading">
+                      {{ $t('settings.sandbox.replaceStandardTemplate') }}
+                    </t-button>
+                  </t-popconfirm>
+                </span>
+              </div>
+              <dl v-if="templateFieldRows(item).length" class="template-row__fields">
+                <div v-for="field in templateFieldRows(item)" :key="field.key" class="template-row__field">
+                  <dt>{{ field.label }}</dt>
+                  <dd :class="{ 'is-mono': field.mono }" :title="field.value">{{ field.value }}</dd>
+                </div>
+              </dl>
+              <p v-if="isTemplateUntagged(item)" class="template-row__hint template-row__hint--error">
                 {{ $t('settings.sandbox.templateUntaggedHint') }}
-              </span>
-              <span v-else-if="templateFailureReason(item)" class="template-card__hint template-card__hint--error">
+              </p>
+              <p v-else-if="templateFailureReason(item)" class="template-row__hint template-row__hint--error">
                 {{ templateFailureReason(item) }}
-              </span>
-              <span v-else-if="isTemplatePending(item) && item.standard" class="template-card__hint">
+              </p>
+              <p v-else-if="isTemplatePending(item) && item.standard" class="template-row__hint">
                 {{ $t('settings.sandbox.templateBuildingHint') }}
-              </span>
-            </span>
-            <span class="template-card__state">
-              <t-tag :theme="templateStatusTheme(item)" variant="light" size="small">
-                {{ templateStatusLabel(item) }}
-              </t-tag>
-              <t-icon v-if="currentTemplateId === item.id" name="check-circle-filled"
-                class="template-card__selected" />
-            </span>
-          </button>
-        </div>
-        <div v-else-if="templatesLoaded && !templatesError" class="env-empty">
-          {{ $t('settings.sandbox.noTemplates') }}
-        </div>
-        <div v-if="selectedTemplate" class="template-state-note template-state-note--ready" role="status">
-          <t-icon name="check-circle-filled" />
-          <span>{{ $t('settings.sandbox.templateReadyHint', { name: selectedTemplate.name }) }}</span>
-        </div>
-        <div v-else-if="hasPendingTemplates" class="template-state-note" role="status">
-          <t-icon name="time" />
-          <span>{{ $t('settings.sandbox.templateProvisioningHint') }}</span>
+              </p>
+            </div>
+          </div>
+          <div
+            v-if="templatesLoaded && !templates.length && !canCreateStandard && !templatesError"
+            class="env-empty"
+          >
+            {{ $t('settings.sandbox.noTemplates') }}
+          </div>
         </div>
         <t-alert v-if="templatesError" theme="warning" class="compact-alert" :message="templatesError" />
-        <p v-else-if="!templatesLoaded" class="section-help">
-          {{ $t('settings.sandbox.templateLoadHint') }}
-        </p>
         <a class="inline-guide-link" :href="clusterGuideUrl" target="_blank" rel="noopener noreferrer">
           <t-icon name="link" />
           {{ $t('settings.sandbox.howToBuildTemplate') }}
@@ -292,6 +385,36 @@
                 placeholder="300" />
             </t-form-item>
             <p class="section-help section-help--field">{{ $t('settings.sandbox.sandboxTtlHelp') }}</p>
+          </template>
+          <!--
+            Docker has no provider-side timeout at all: an abandoned container
+            keeps its memory and CPU share on the daemon host until WeKnora
+            reclaims it, so the idle TTL and the resource caps are the only
+            things bounding what one workspace can hold.
+          -->
+          <template v-if="backend === 'docker'">
+            <t-form-item :label="$t('settings.sandbox.dockerIdleTtl')">
+              <t-input-number v-model="docker.idle_ttl_seconds" :min="0" theme="column" placeholder="1800" />
+            </t-form-item>
+            <p class="section-help section-help--field">{{ $t('settings.sandbox.dockerIdleTtlHelp') }}</p>
+            <t-form-item :label="$t('settings.sandbox.dockerCpuLimit')">
+              <t-input-number v-model="docker.cpu_limit" :min="0" :step="0.5" theme="column" placeholder="2" />
+            </t-form-item>
+            <t-form-item :label="$t('settings.sandbox.dockerMemoryLimit')">
+              <t-input-number v-model="docker.memory_limit_mb" :min="0" theme="column" placeholder="2048" />
+            </t-form-item>
+            <t-form-item :label="$t('settings.sandbox.dockerPidsLimit')">
+              <t-input-number v-model="docker.pids_limit" :min="0" theme="column" placeholder="512" />
+            </t-form-item>
+            <p class="section-help section-help--field">{{ $t('settings.sandbox.dockerResourceHelp') }}</p>
+            <t-form-item :label="$t('settings.sandbox.dockerNetworkMode')">
+              <t-select v-model="docker.network_mode" :placeholder="$t('settings.sandbox.dockerNetworkBridge')"
+                clearable>
+                <t-option value="bridge" :label="$t('settings.sandbox.dockerNetworkBridge')" />
+                <t-option value="none" :label="$t('settings.sandbox.dockerNetworkNone')" />
+              </t-select>
+            </t-form-item>
+            <p class="section-help section-help--field">{{ $t('settings.sandbox.dockerNetworkModeHelp') }}</p>
           </template>
           <t-form-item :label="$t('settings.sandbox.defaultTimeout')">
             <t-input-number v-model="defaultTimeoutSec" :min="0" theme="column" placeholder="60" />
@@ -325,20 +448,27 @@
         </div>
         <div v-else class="env-empty">{{ $t('settings.sandbox.noEnvVars') }}</div>
       </section>
+
+      <section v-if="currentStepKey === 'runtime'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillRollout') }}</h4>
+        <p class="section-help section-help--under-title">{{ $t('settings.sandbox.skillRolloutHint') }}</p>
+        <t-radio-group v-model="skillRollout" class="skill-rollout-group">
+          <t-radio value="next_turn">{{ $t('settings.sandbox.skillRolloutNextTurn') }}</t-radio>
+          <t-radio value="new_session">{{ $t('settings.sandbox.skillRolloutNewSession') }}</t-radio>
+        </t-radio-group>
+      </section>
     </t-form>
 
-    <div v-if="checkResult && currentStepKey !== 'template'" ref="checkResultRef" class="check-result">
-      <div :class="['check-result__summary', checkResult.ok ? 'is-success' : 'is-error']">
-        <span class="check-result__summary-icon">
-          <t-icon :name="checkResult.ok ? 'check-circle-filled' : 'close-circle-filled'" />
-        </span>
-        <div>
-          <p class="check-result__title">
-            {{ checkResult.ok ? $t('settings.sandbox.checkPassed') : $t('settings.sandbox.checkFailed') }}
-          </p>
-          <p class="check-result__subtitle">{{ checkScopeHint }}</p>
-        </div>
-      </div>
+    <div
+      v-if="checkResult && showCheckResult"
+      ref="checkResultRef"
+      class="check-result"
+    >
+      <p :class="['check-result__title', checkResult.ok ? 'is-success' : 'is-error']">
+        <t-icon :name="checkResult.ok ? 'check-circle-filled' : 'close-circle-filled'" />
+        {{ checkResult.ok ? $t('settings.sandbox.checkPassed') : $t('settings.sandbox.checkFailed') }}
+      </p>
+      <p class="check-result__subtitle">{{ checkScopeHint }}</p>
       <ul class="check-list">
         <li v-for="item in reportedChecks" :key="item.name" class="check-item">
           <t-icon :name="item.ok === true ? 'check-circle-filled'
@@ -349,40 +479,12 @@
           <span v-if="checkDetail(item)" class="check-message">{{ checkDetail(item) }}</span>
         </li>
       </ul>
-      <!--
-        Probes that need a live sandbox used to be listed as three grey "not
-        checked" rows, which made a passing connection test read as half broken
-        and never said how to run them. They are one sentence plus the action
-        that performs them instead. The action stays put even once nothing is
-        pending, because a failed run is precisely when it has to be repeatable.
-      -->
-      <div class="check-pending">
-        <p v-if="pendingCheckNames.length" class="check-pending__text">
-          {{ $t('settings.sandbox.checkPendingHint', { names: pendingCheckNames.join('、') }) }}
-        </p>
-        <t-popconfirm :content="$t('settings.sandbox.deepCheckConfirm')" @confirm="runCheck(true)">
-          <t-button variant="outline" size="small" :loading="checking">
-            {{ lastCheckWasDeep ? $t('settings.sandbox.recheck') : $t('settings.sandbox.deepCheck') }}
-          </t-button>
-        </t-popconfirm>
-      </div>
+      <p v-if="pendingCheckNames.length" class="check-result__hint">
+        {{ $t('settings.sandbox.checkPendingHint', { names: pendingCheckNames.join('、') }) }}
+      </p>
       <t-alert v-if="checkResult.capabilities && checkResult.capabilities.supports_volumes === false" theme="warning"
         class="compact-alert"
         :message="$t('settings.sandbox.noVolumeSupport')" />
-    </div>
-
-    <!--
-      Without a result on screen there is nothing for the pending row above to
-      hang off, so the same offer stands alone. Editing a field discards the
-      previous result, which is exactly when this reappears.
-    -->
-    <div v-else-if="currentStepKey === 'runtime'" class="check-pending check-pending--standalone">
-      <p class="check-pending__text">{{ $t('settings.sandbox.deepCheckIntro') }}</p>
-      <t-popconfirm :content="$t('settings.sandbox.deepCheckConfirm')" @confirm="runCheck(true)">
-        <t-button variant="outline" size="small" :loading="checking">
-          {{ $t('settings.sandbox.deepCheck') }}
-        </t-button>
-      </t-popconfirm>
     </div>
 
   </SettingDrawer>
@@ -394,12 +496,14 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import {
   checkSandboxConfig,
   createSandboxConfig,
   parseSandboxConflict,
   updateSandboxConfigById,
   querySandboxTemplates,
+  listConfigSkills,
   type SandboxCheckItem,
   type SandboxCheckResult,
   type SandboxConfig,
@@ -407,10 +511,13 @@ import {
   type SandboxConflict,
   type SandboxCubeConfig,
   type SandboxE2BConfig,
+  type SandboxDockerConfig,
   type SandboxTemplate,
   isNamedSandboxBackend,
   NAMED_SANDBOX_BACKEND_TYPES,
 } from '@/api/system'
+
+type SandboxStepKey = 'connection' | 'template' | 'runtime'
 
 const props = defineProps<{
   visible: boolean
@@ -424,6 +531,10 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const deploymentCapabilities = useDeploymentCapabilitiesStore()
+const dockerBackendEnabled = computed(() =>
+  deploymentCapabilities.isSupported('settings.sandbox.docker'),
+)
 
 // The backend echoes stored secrets as this placeholder. It never leaves the
 // form as visible text: inputs stay empty and say "configured", and the
@@ -431,10 +542,19 @@ const { t } = useI18n()
 const secretPlaceholder = '***'
 const isMaskedSecret = (value?: string) => value === secretPlaceholder
 
+// Mirrors DefaultDockerImage on the server, including why it tracks main
+// instead of latest: the latest tag still carries an image whose /workspace
+// the sandbox account cannot write.
+const defaultDockerImage = 'wechatopenai/weknora-sandbox:main'
+
 const clusterGuideUrl = 'https://github.com/Tencent/WeKnora/blob/main/docs/sandbox-cluster.md'
 const e2bApiKeysUrl = 'https://e2b.dev/dashboard?tab=keys'
 
-const backendOptions = [...NAMED_SANDBOX_BACKEND_TYPES]
+const backendOptions = computed(() => {
+  const types = [...NAMED_SANDBOX_BACKEND_TYPES]
+  if (dockerBackendEnabled.value || backend.value === 'docker') return types
+  return types.filter((type) => type !== 'docker')
+})
 
 const saving = ref(false)
 const checking = ref(false)
@@ -455,11 +575,13 @@ const defaultTimeoutSec = ref<number | undefined>(undefined)
 const allowPrivateEndpoints = ref(false)
 const cube = reactive<SandboxCubeConfig>({})
 const e2b = reactive<SandboxE2BConfig>({})
-const docker = reactive<{ image?: string }>({})
+const docker = reactive<SandboxDockerConfig>({})
 // Tracks which secrets the tenant already has stored, so an empty input can
 // mean "keep the saved key" instead of "no key configured".
 const storedSecrets = reactive({ cube: false, e2b: false })
 const envRows = ref<{ key: string; value: string; stored?: boolean }[]>([])
+const skillRollout = ref<'next_turn' | 'new_session'>('next_turn')
+const inFlightFromSkills = ref(false)
 const templates = ref<SandboxTemplate[]>([])
 const templatesLoading = ref(false)
 const templatesLoaded = ref(false)
@@ -468,13 +590,17 @@ const wizardStep = ref(0)
 let templatePollTimer: ReturnType<typeof setTimeout> | undefined
 
 // Remote backends additionally expose a template catalog and control-plane
-// settings. All four backends still share the same save/check API.
+// settings. Cube, E2B and Docker still share the same save/check API.
 const isRemoteBackend = computed(() => backend.value === 'cube' || backend.value === 'e2b')
+const hasImageCatalog = computed(() => isRemoteBackend.value || backend.value === 'docker')
 const currentTemplateId = computed(() => (
   backend.value === 'cube' ? cube.template_id : backend.value === 'e2b' ? e2b.template_id : ''
 )?.trim() || '')
 const selectedTemplate = computed(() => templates.value.find((item) => item.id === currentTemplateId.value))
-type SandboxStepKey = 'connection' | 'template' | 'runtime'
+const clusterStandardTemplate = computed(() => templates.value.find((item) => item.standard && item.id))
+const canCreateStandard = computed(() => (
+  isRemoteBackend.value && templatesLoaded.value && !clusterStandardTemplate.value && !retargetFrozen.value
+))
 const wizardSteps = computed<Array<{ key: SandboxStepKey; title: string }>>(() => {
   const steps: Array<{ key: SandboxStepKey; title: string }> = [
     { key: 'connection', title: t('settings.sandbox.stepConnection') },
@@ -492,10 +618,57 @@ const primaryText = computed(() => {
   if (currentStepKey.value === 'template') return t('common.next')
   return t('common.save')
 })
+// Deep check needs the fields that actually get probed. Docker collects
+// the image on the connection step; Cube/E2B still have an empty template_id
+// there, so the action waits until the template step.
+const canDeepCheck = computed(() => {
+  if (backend.value === 'docker' && !dockerBackendEnabled.value) return false
+  if (currentStepKey.value === 'template') return true
+  return currentStepKey.value === 'connection' && !isRemoteBackend.value
+})
+const showCheckResult = computed(() => canDeepCheck.value)
 const primaryDisabled = computed(() => (
-  currentStepKey.value === 'template'
-  && (!selectedTemplate.value || !isTemplateSelectable(selectedTemplate.value))
+  (backend.value === 'docker' && !dockerBackendEnabled.value)
+  || (
+    currentStepKey.value === 'template'
+    && (!selectedTemplate.value || !isTemplateSelectable(selectedTemplate.value))
+  )
 ))
+
+// savedRecord is the config this drawer is editing, including one it just
+// created: a second press of save must update that config rather than create
+// another one if the admin walks back through the wizard before closing.
+const savedRecord = ref<SandboxConfigRecord | null>(null)
+const effectiveRecord = computed(() => savedRecord.value || props.record)
+const hasSkillSnapshot = computed(() => (
+  Boolean(effectiveRecord.value?.config?.skill_image?.snapshot_id?.trim())
+))
+const hasInFlightSkill = computed(() => inFlightFromSkills.value)
+const retargetFrozen = computed(() => hasSkillSnapshot.value || hasInFlightSkill.value)
+
+// Jumping is what separates editing from creating. A config that does not exist
+// yet has to be built in order — its connection has to check out before there
+// are templates to choose from. Once it exists, every step is just a page of
+// its settings, so all of them open directly; steps already visited stay
+// clickable during creation so the rail works as a way back.
+function canJumpTo(index: number): boolean {
+  if (index === wizardStep.value) return false
+  return Boolean(effectiveRecord.value) || index < wizardStep.value
+}
+
+function goToStep(index: number) {
+  if (!canJumpTo(index)) return
+  wizardStep.value = index
+  if (currentStepKey.value !== 'template') {
+    stopTemplatePolling()
+    return
+  }
+  // Landing on the template step without having passed through the connection
+  // step still has to ask the cluster what it offers; a step already loaded
+  // just resumes its poll, as walking back through it always has.
+  if (templatesLoaded.value) scheduleTemplatePolling()
+  else void loadTemplates()
+}
 const hasPendingTemplates = computed(() => templates.value.some(isTemplatePending))
 
 const backendLabel = (value: string) => t(`settings.sandbox.backends.${value}`)
@@ -535,7 +708,6 @@ const REQUIRED_FIELDS: Record<string, string[]> = {
   cube: ['api_url', 'proxy_url', 'sandbox_domain', 'template_id'],
   e2b: ['api_key', 'template_id'],
   docker: ['image'],
-  local: [],
 }
 
 const fieldErrors = ref<Record<string, string>>({})
@@ -605,8 +777,9 @@ function reset() {
   Object.assign(cube, cfg.cube || {})
   Object.assign(e2b, cfg.e2b || {})
   Object.assign(docker, cfg.docker || {})
+  if (!Array.isArray(cube.dns_servers)) cube.dns_servers = []
   if (backend.value === 'docker' && !docker.image) {
-    docker.image = 'wechatopenai/weknora-sandbox:latest'
+    docker.image = defaultDockerImage
   }
   storedSecrets.cube = isMaskedSecret(cube.api_key)
   storedSecrets.e2b = isMaskedSecret(e2b.api_key)
@@ -615,6 +788,7 @@ function reset() {
   envRows.value = Object.entries(cfg.env_vars || {}).map(([key, value]) => (
     isMaskedSecret(value) ? { key, value: '', stored: true } : { key, value }
   ))
+  skillRollout.value = cfg.skill_rollout === 'new_session' ? 'new_session' : 'next_turn'
   checkResult.value = null
   conflict.value = null
   nameError.value = ''
@@ -622,6 +796,7 @@ function reset() {
   templates.value = []
   templatesLoaded.value = false
   templatesError.value = ''
+  savedRecord.value = null
   wizardStep.value = 0
 }
 
@@ -629,16 +804,35 @@ function selectBackend(value: string) {
   if (backend.value === value) return
   backend.value = value
   if (value === 'docker' && !docker.image) {
-    docker.image = 'wechatopenai/weknora-sandbox:latest'
+    docker.image = defaultDockerImage
   }
   onBackendChange()
 }
 
+async function refreshInFlightSkill() {
+  const id = props.record?.id
+  if (!id) {
+    inFlightFromSkills.value = false
+    return
+  }
+  try {
+    const res = await listConfigSkills(id)
+    inFlightFromSkills.value = (res?.data || []).some(
+      (skill) => skill.status === 'installing' || skill.status === 'removing',
+    )
+  } catch {
+    inFlightFromSkills.value = false
+  }
+}
+
 watch(() => props.visible, (open) => {
   if (open) {
+    void deploymentCapabilities.ensureLoaded()
     reset()
+    void refreshInFlightSkill()
   } else {
     stopTemplatePolling()
+    inFlightFromSkills.value = false
   }
 })
 
@@ -670,8 +864,71 @@ function clearTemplateSelection() {
   delete fieldErrors.value.template_id
 }
 
-function templateMeta(item: SandboxTemplate): string {
-  return [item.status, item.version, item.id].filter(Boolean).join(' · ')
+function onTemplateCardClick(item: SandboxTemplate) {
+  if (retargetFrozen.value && item.id !== currentTemplateId.value) return
+  if (!isTemplateSelectable(item)) return
+  selectTemplate(item.id)
+}
+
+function canRebuildTemplate(item: SandboxTemplate): boolean {
+  return Boolean(item.standard && item.id) && !isTemplatePending(item) && !retargetFrozen.value
+}
+
+function templateDisplayName(item: SandboxTemplate): string {
+  const name = item.name?.trim() || ''
+  const id = item.id?.trim() || ''
+  if (!name || name === id) return t('settings.sandbox.templateUnnamed')
+  return name
+}
+
+function formatTemplateTime(value?: string): string {
+  const raw = value?.trim()
+  if (!raw) return ''
+  const ms = Date.parse(raw)
+  if (Number.isNaN(ms)) return raw
+  return new Date(ms).toLocaleString()
+}
+
+function templateFieldRows(item: SandboxTemplate): Array<{ key: string; label: string; value: string; mono?: boolean }> {
+  const rows: Array<{ key: string; label: string; value: string; mono?: boolean }> = []
+  const image = item.image?.trim()
+  if (image) {
+    rows.push({ key: 'image', label: t('settings.sandbox.templateFieldImage'), value: image, mono: true })
+  }
+  const version = item.version?.trim()
+  if (version) {
+    rows.push({ key: 'version', label: t('settings.sandbox.templateFieldVersion'), value: version })
+  }
+  const id = item.id?.trim()
+  if (id) {
+    rows.push({ key: 'id', label: t('settings.sandbox.templateFieldId'), value: id, mono: true })
+  }
+  const created = formatTemplateTime(item.created_at)
+  if (created) {
+    rows.push({ key: 'created', label: t('settings.sandbox.templateFieldCreated'), value: created })
+  }
+  const instanceType = item.instance_type?.trim()
+  if (instanceType) {
+    rows.push({ key: 'instance', label: t('settings.sandbox.templateFieldInstance'), value: instanceType })
+  }
+  const networkType = item.network_type?.trim()
+  if (networkType) {
+    rows.push({ key: 'network', label: t('settings.sandbox.templateFieldNetwork'), value: networkType })
+  }
+  if (item.allow_internet_access === true) {
+    rows.push({
+      key: 'internet',
+      label: t('settings.sandbox.templateFieldInternet'),
+      value: t('settings.sandbox.templateInternetOn'),
+    })
+  } else if (item.allow_internet_access === false) {
+    rows.push({
+      key: 'internet',
+      label: t('settings.sandbox.templateFieldInternet'),
+      value: t('settings.sandbox.templateInternetOff'),
+    })
+  }
+  return rows
 }
 
 function isTemplateSelectable(item: SandboxTemplate): boolean {
@@ -682,7 +939,7 @@ function isTemplateSelectable(item: SandboxTemplate): boolean {
 
 function isTemplatePending(item: SandboxTemplate): boolean {
   const status = item.status?.trim().toLowerCase()
-  return ['building', 'waiting', 'pending', 'queued', 'processing'].includes(status || '')
+  return ['building', 'waiting', 'pending', 'queued', 'processing', 'running'].includes(status || '')
 }
 
 // The backend reports this when a template's builds finished without the tag
@@ -734,27 +991,47 @@ function scheduleTemplatePolling() {
   }, 3000)
 }
 
-async function loadTemplates(ensureStandard: boolean, silent = false): Promise<boolean> {
-  if (!isRemoteBackend.value) return true
+async function loadTemplates(ensureStandard = false, silent = false, replaceStandard = false): Promise<boolean> {
+  if (!hasImageCatalog.value) return true
   if (!connectionReady()) return false
   if (!silent) templatesLoading.value = true
   templatesError.value = ''
   try {
     const res = await querySandboxTemplates({
       config: collectPayload(),
-      config_id: props.record?.id,
+      config_id: effectiveRecord.value?.id,
       ensure_standard: ensureStandard,
+      replace_standard: replaceStandard,
     })
     templates.value = res.data?.templates || []
     templatesLoaded.value = true
     const standardID = res.data?.standard_template_id
     const current = templates.value.find((item) => item.id === currentTemplateId.value)
-    if (currentTemplateId.value && (!current || !isTemplateSelectable(current))) clearTemplateSelection()
+    if (replaceStandard && standardID) {
+      selectTemplate(standardID)
+    } else if (
+      currentTemplateId.value
+      && (!current || (!isTemplateSelectable(current) && !isTemplatePending(current)))
+      && !retargetFrozen.value
+    ) {
+      if (standardID) {
+        const next = templates.value.find((item) => item.id === standardID)
+        if (next && (isTemplateSelectable(next) || isTemplatePending(next))) {
+          selectTemplate(standardID)
+        } else {
+          clearTemplateSelection()
+        }
+      } else {
+        clearTemplateSelection()
+      }
+    }
     const readyStandard = templates.value.find((item) => item.id === standardID && isTemplateSelectable(item))
       || templates.value.find((item) => item.standard && isTemplateSelectable(item))
     if (!currentTemplateId.value && readyStandard) selectTemplate(readyStandard.id)
     if (res.data?.provisioned && !silent) {
-      MessagePlugin.info(t('settings.sandbox.standardTemplateProvisioning'))
+      MessagePlugin.info(replaceStandard
+        ? t('settings.sandbox.standardTemplateReplaced')
+        : t('settings.sandbox.standardTemplateProvisioning'))
     }
     scheduleTemplatePolling()
     return true
@@ -764,6 +1041,15 @@ async function loadTemplates(ensureStandard: boolean, silent = false): Promise<b
   } finally {
     if (!silent) templatesLoading.value = false
   }
+}
+
+function createStandardTemplate() {
+  return loadTemplates(true)
+}
+
+function replaceStandardTemplate() {
+  if (retargetFrozen.value) return
+  return loadTemplates(false, false, true)
 }
 
 // Re-attaches the redaction placeholder to a secret the admin left untouched:
@@ -785,6 +1071,7 @@ function collectPayload(): SandboxConfig {
     default_timeout_sec: defaultTimeoutSec.value || undefined,
     allow_private_endpoints: allowPrivateEndpoints.value || undefined,
     env_vars: envVars,
+    skill_rollout: skillRollout.value,
   }
   // Send only the selected backend's block so an unused one cannot fail
   // validation (e.g. a stale private URL left in the other tab).
@@ -809,14 +1096,22 @@ function validateName(): boolean {
 }
 
 async function handlePrimaryAction() {
+  if (backend.value === 'docker' && !dockerBackendEnabled.value) return
   if (currentStepKey.value === 'connection') {
     if (!validateName() || !validateRequiredFields(false)) return
     if (!(await runCheck(false))) return
     if (isRemoteBackend.value) {
+      invalidateCheck()
       wizardStep.value += 1
-      await loadTemplates(true)
+      await loadTemplates()
       return
     }
+    // Docker's template is the image typed on this step. Kick a background
+    // pull so the first session does not block on a cold registry fetch.
+    if (backend.value === 'docker') {
+      void loadTemplates(true)
+    }
+    invalidateCheck()
     wizardStep.value += 1
     return
   }
@@ -851,13 +1146,16 @@ async function save() {
   conflict.value = null
   try {
     const payload = { name: trimmed, description: description.value, config: collectPayload() }
-    if (props.record) {
-      await updateSandboxConfigById(props.record.id, payload)
-    } else {
-      await createSandboxConfig(payload)
-    }
+    const existing = effectiveRecord.value
+    const res = existing
+      ? await updateSandboxConfigById(existing.id, payload)
+      : await createSandboxConfig(payload)
     MessagePlugin.success(t('common.saveSuccess'))
+    // The list behind the drawer refreshes either way, so closing here is only
+    // about whether the wizard has anything left to offer.
     emit('saved')
+    const saved = res?.data
+    if (saved) savedRecord.value = saved
     close()
   } catch (e: any) {
     const refusal = parseSandboxConflict(e)
@@ -886,7 +1184,7 @@ async function runCheck(deep: boolean): Promise<boolean> {
     // so an edited form can be probed without retyping the API key.
     const res = await checkSandboxConfig({
       config: collectPayload(),
-      config_id: props.record?.id,
+      config_id: effectiveRecord.value?.id,
       deep,
     })
     checkResult.value = res?.data || null
@@ -938,7 +1236,7 @@ onUnmounted(stopTemplatePolling)
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 0 18px;
+  margin: 0;
 }
 
 .sandbox-step {
@@ -960,6 +1258,30 @@ onUnmounted(stopTemplatePolling)
 
   &.is-done {
     color: var(--td-text-color-secondary);
+  }
+
+  /*
+    Reachable steps render as <button>, so the browser's own control styling has
+    to be undone to keep the rail looking identical either way. Only the cursor
+    and hover state give the affordance away.
+  */
+  &.is-clickable {
+    padding: 0;
+    font: inherit;
+    text-align: left;
+    background: none;
+    border: 0;
+    cursor: pointer;
+
+    &:hover:not(.is-active) {
+      color: var(--td-brand-color);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
   }
 }
 
@@ -1010,6 +1332,14 @@ onUnmounted(stopTemplatePolling)
 }
 
 .sandbox-editor-form {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+
+  :deep(.setting-drawer__section) {
+    min-width: 0;
+  }
+
   :deep(.t-form__item) {
     margin-bottom: 0;
   }
@@ -1119,52 +1449,11 @@ onUnmounted(stopTemplatePolling)
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
 
   .setting-drawer__section-title {
     margin-bottom: 0;
   }
-}
-
-.connection-summary {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  background: var(--td-bg-color-secondarycontainer);
-}
-
-.connection-summary__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-  color: var(--td-brand-color);
-  font-size: 13px;
-}
-
-.connection-summary__title,
-.connection-summary__text {
-  margin: 0;
-}
-
-.connection-summary__title {
-  color: var(--td-text-color-primary);
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.45;
-}
-
-.connection-summary__text {
-  margin-top: 2px;
-  color: var(--td-text-color-secondary);
-  font-size: 12px;
-  line-height: 1.5;
 }
 
 .weknora-template-card {
@@ -1222,133 +1511,172 @@ onUnmounted(stopTemplatePolling)
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
-.template-card {
+.template-row {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 10px;
+  box-sizing: border-box;
   width: 100%;
-  min-height: 72px;
-  padding: 12px 14px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  overflow: hidden;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
-  cursor: pointer;
   text-align: left;
-  transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 
-  &:hover:not(:disabled) {
+  &:hover:not(.is-disabled):not(.template-row--offer) {
     border-color: var(--td-brand-color-3, var(--td-brand-color));
-    box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05);
   }
 
   &.is-active {
     border-color: var(--td-brand-color);
-    background: color-mix(in srgb, var(--td-brand-color) 4%, var(--td-bg-color-container));
   }
 
-  &:disabled {
-    cursor: not-allowed;
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
   }
 
-  &.is-pending {
-    background: color-mix(in srgb, var(--td-warning-color) 3%, var(--td-bg-color-container));
+  &.is-disabled {
+    cursor: default;
   }
 }
 
-.template-card__badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
+.template-row--offer {
+  cursor: default;
+  border-style: dashed;
+}
+
+.template-row__marker {
   flex-shrink: 0;
-  border-radius: 9px;
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052d9;
-  font-size: 16px;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--td-border-level-2-color, var(--td-component-stroke));
+  border-radius: 50%;
+  background: var(--td-bg-color-container);
 
-  .is-pending & {
-    background: color-mix(in srgb, var(--td-warning-color) 12%, transparent);
-    color: var(--td-warning-color);
+  .is-active & {
+    border-color: var(--td-brand-color);
+    box-shadow: inset 0 0 0 3.5px var(--td-brand-color);
+  }
+
+  .is-disabled & {
+    opacity: 0.45;
   }
 }
 
-.template-card__body {
+.template-row__main {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-}
-
-.template-card__title-row {
-  display: flex;
-  align-items: center;
   gap: 6px;
   min-width: 0;
+  max-width: 100%;
 }
 
-.template-card__title {
+.template-row__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+
+  :deep(.t-tag) {
+    flex-shrink: 0;
+  }
+}
+
+.template-row__title {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   font-size: 13px;
   font-weight: 600;
+  line-height: 22px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.template-card__meta,
-.template-card__hint {
-  overflow-wrap: anywhere;
-  color: var(--td-text-color-placeholder);
-  font-size: 11px;
-  line-height: 1.45;
+.template-row__spacer {
+  flex: 1 1 8px;
+  min-width: 8px;
 }
 
-.template-card__hint {
-  color: var(--td-warning-color);
+.template-row__rebuild {
+  flex-shrink: 0;
 
-  &--error {
-    color: var(--td-error-color);
+  :deep(.t-button) {
+    color: var(--td-text-color-secondary);
+    padding-left: 4px;
+    padding-right: 4px;
+
+    &:hover {
+      color: var(--td-text-color-primary);
+    }
   }
 }
 
-.template-card__state {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  align-self: flex-start;
-  padding-top: 1px;
+.template-row__fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 0;
+  min-width: 0;
 }
 
-.template-card__selected {
-  color: var(--td-brand-color);
-  font-size: 17px;
+.template-row__field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+
+  dt {
+    color: var(--td-text-color-placeholder);
+    font-size: 11px;
+    line-height: 18px;
+    white-space: nowrap;
+  }
+
+  dd {
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--td-text-color-secondary);
+    font-size: 12px;
+    line-height: 18px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    &.is-mono {
+      font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      font-size: 11px;
+    }
+  }
 }
 
-.template-state-note {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 11px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 7px;
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-secondary);
+.template-row__hint {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--td-text-color-placeholder);
   font-size: 12px;
   line-height: 1.5;
 
-  > .t-icon {
-    flex-shrink: 0;
-    color: var(--td-warning-color);
-    font-size: 15px;
-  }
-
-  &--ready > .t-icon {
-    color: var(--td-brand-color);
+  &--error {
+    color: var(--td-error-color);
   }
 }
 
@@ -1424,6 +1752,13 @@ onUnmounted(stopTemplatePolling)
   text-align: center;
 }
 
+.skill-rollout-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .section-help {
   margin: 0;
   color: var(--td-text-color-placeholder);
@@ -1442,55 +1777,39 @@ onUnmounted(stopTemplatePolling)
 }
 
 .check-result {
-  margin-top: 12px;
+  margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid var(--td-component-stroke);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-}
-
-.check-result__summary {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  background: var(--td-bg-color-secondarycontainer);
-
-  &.is-success .check-result__summary-icon {
-    color: var(--td-brand-color);
-  }
-
-  &.is-error .check-result__summary-icon {
-    color: var(--td-error-color);
-  }
-}
-
-.check-result__summary-icon {
-  flex-shrink: 0;
-  padding-top: 1px;
-  font-size: 17px;
-}
-
-.check-result__title,
-.check-result__subtitle {
-  margin: 0;
+  gap: 8px;
 }
 
 .check-result__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
   color: var(--td-text-color-primary);
   font-size: 13px;
   font-weight: 600;
   line-height: 1.45;
+
+  &.is-success {
+    color: var(--td-success-color);
+  }
+
+  &.is-error {
+    color: var(--td-error-color);
+  }
 }
 
-.check-result__subtitle {
-  margin-top: 2px;
+.check-result__subtitle,
+.check-result__hint {
+  margin: 0;
   color: var(--td-text-color-secondary);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 .check-list {
@@ -1532,29 +1851,6 @@ onUnmounted(stopTemplatePolling)
   color: var(--td-text-color-secondary);
 }
 
-.check-pending {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px dashed var(--td-component-stroke);
-  border-radius: 8px;
-}
-
-.check-pending--standalone {
-  margin-top: 16px;
-}
-
-.check-pending__text {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  color: var(--td-text-color-secondary);
-  font-size: 12px;
-  line-height: 1.55;
-}
-
 .footer-check-ok {
   color: var(--td-success-color);
 }
@@ -1585,6 +1881,10 @@ onUnmounted(stopTemplatePolling)
 
   .sandbox-step__title {
     font-size: 12px;
+  }
+
+  .template-row__fields {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

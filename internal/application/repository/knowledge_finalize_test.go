@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
@@ -97,6 +98,23 @@ func reloadKnowledgeErrorMessage(t *testing.T, db *gorm.DB, id string) string {
 	var msg string
 	require.NoError(t, db.Raw(`SELECT COALESCE(error_message, '') FROM knowledges WHERE id = ?`, id).Scan(&msg).Error)
 	return msg
+}
+
+func TestKnowledgeRepository_UpdateKnowledgeColumnsSanitizesErrorMessage(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db)
+	id := insertProcessingKnowledge(t, db)
+	invalid := "parse failed " + string([]byte{0xef, 0xbc, 0x2e})
+
+	require.NoError(t, repo.UpdateKnowledgeColumns(context.Background(), id, map[string]interface{}{
+		"error_message": invalid,
+	}))
+
+	got := reloadKnowledgeErrorMessage(t, db, id)
+	if !utf8.ValidString(got) {
+		t.Fatalf("persisted error_message is invalid UTF-8: % x", []byte(got))
+	}
+	assert.Equal(t, "parse failed .", got)
 }
 
 func insertKnowledgeWithStatus(t *testing.T, db *gorm.DB, status string, deleted bool) string {

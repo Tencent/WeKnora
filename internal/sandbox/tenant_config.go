@@ -74,6 +74,11 @@ func ResolveEffectiveConfig(
 		overrideString(&effective.CubeTemplate, cube.TemplateID)
 		overrideSeconds(&effective.CubeHTTPTimeout, cube.HTTPTimeoutSec)
 		overrideSeconds(&effective.CubeSandboxTTL, cube.CubeSandboxTTLSeconds)
+		dns, err := NormalizeCubeDNSServers(cube.DNSServers)
+		if err != nil {
+			return nil, err
+		}
+		effective.CubeDNSServers = dns
 	}
 
 	if e2bCfg := tenantCfg.E2B; e2bCfg != nil {
@@ -92,6 +97,24 @@ func ResolveEffectiveConfig(
 
 	if docker := tenantCfg.Docker; docker != nil {
 		overrideString(&effective.DockerImage, docker.Image)
+		if err := ValidateDockerNetworkMode(docker.NetworkMode); err != nil {
+			return nil, err
+		}
+		overrideString(&effective.DockerHost, docker.Host)
+		overrideString(&effective.DockerTLSCertPath, docker.TLSCertPath)
+		overrideString(&effective.DockerNetworkMode, docker.NetworkMode)
+		overrideString(&effective.DockerRuntime, docker.Runtime)
+		if docker.CPULimit > 0 {
+			effective.DockerCPULimit = docker.CPULimit
+		}
+		if docker.MemoryLimitMB > 0 {
+			effective.DockerMemoryBytes = int64(docker.MemoryLimitMB) * 1024 * 1024
+		}
+		if docker.PidsLimit > 0 {
+			effective.DockerPidsLimit = int64(docker.PidsLimit)
+		}
+		overrideSeconds(&effective.DockerIdleTTL, docker.IdleTTLSeconds)
+		overrideSeconds(&effective.DockerHTTPTimeout, docker.HTTPTimeoutSec)
 	}
 
 	switch effective.Type {
@@ -99,11 +122,60 @@ func ResolveEffectiveConfig(
 		applyCubeRuntimeDefaults(&effective)
 	case SandboxTypeE2B:
 		applyE2BRuntimeDefaults(&effective)
+	case SandboxTypeDocker:
+		applyDockerRuntimeDefaults(&effective)
+	}
+	// A skill snapshot is a template ID (Cube/E2B) or an image tag (Docker),
+	// so overriding that field here is the entire session-side change.
+	// Everything downstream keeps reading CubeTemplate / E2BTemplate /
+	// DockerImage and needs no knowledge of skills.
+	switch effective.Type {
+	case SandboxTypeCube:
+		if snapshot := skillImageTemplateOverride(
+			tenantCfg.SkillImage, "cube", effective.CubeAPIKey, effective.CubeAPIURL,
+		); snapshot != "" {
+			effective.CubeTemplate = snapshot
+		}
+	case SandboxTypeE2B:
+		if snapshot := skillImageTemplateOverride(
+			tenantCfg.SkillImage, "e2b", effective.E2BAPIKey, effective.E2BAPIURL,
+		); snapshot != "" {
+			effective.E2BTemplate = snapshot
+		}
+	case SandboxTypeDocker:
+		// Deliberately computed from the STORED docker block, not from
+		// effective.DockerHost: a blank host is resolved from the environment
+		// by applyDockerRuntimeDefaults, and that resolved value must never
+		// reach the fingerprint (see dockerLocalDaemonIdentity).
+		if snapshot := DockerSkillImageOverride(tenantCfg); snapshot != "" {
+			effective.DockerImage = snapshot
+		}
 	}
 	// Deliberately after the runtime defaults: TTLs and HTTP timeouts have
 	// built-in fallbacks, endpoints and credentials do not.
 	if err := RequireCompleteConfig(&effective); err != nil {
 		return nil, err
+	}
+	// The daemon endpoint is judged on the RESOLVED host, which is why this
+	// cannot move up next to the other Docker fields: applyDockerRuntimeDefaults
+	// is what fills a blank host in from DOCKER_HOST or the current docker
+	// context, and that value is what this config will actually dial. Checking
+	// only what the admin typed would let a deployment whose DOCKER_HOST is a
+	// plaintext tcp:// daemon save a config that then fails at its first
+	// sandbox, with an error the settings form never had a chance to show.
+	// It runs after RequireCompleteConfig so a missing image — a field the
+	// admin can see and fix — is still the first thing reported.
+	if effective.Type == SandboxTypeDocker {
+		if err := ValidateDockerHost(
+			effective.DockerHost, effective.AllowPrivateEndpoints,
+		); err != nil {
+			return nil, err
+		}
+		if err := ValidateDockerRemoteTLS(
+			effective.DockerHost, effective.DockerTLSCertPath,
+		); err != nil {
+			return nil, err
+		}
 	}
 	return &effective, nil
 }
@@ -115,6 +187,15 @@ func ResolveEffectiveConfig(
 // "inherits nothing" would still have an exception to explain.
 func clearProviderFields(cfg *Config) {
 	cfg.DockerImage = ""
+	cfg.DockerHost = ""
+	cfg.DockerTLSCertPath = ""
+	cfg.DockerNetworkMode = ""
+	cfg.DockerRuntime = ""
+	cfg.DockerCPULimit = 0
+	cfg.DockerMemoryBytes = 0
+	cfg.DockerPidsLimit = 0
+	cfg.DockerIdleTTL = 0
+	cfg.DockerHTTPTimeout = 0
 	cfg.CubeAPIURL = ""
 	cfg.CubeProxyURL = ""
 	cfg.CubeSandboxDomain = ""
@@ -122,6 +203,7 @@ func clearProviderFields(cfg *Config) {
 	cfg.CubeTemplate = ""
 	cfg.CubeSandboxTTL = 0
 	cfg.CubeHTTPTimeout = 0
+	cfg.CubeDNSServers = nil
 
 	cfg.E2BAPIURL = ""
 	cfg.E2BProxyURL = ""
@@ -148,8 +230,6 @@ func ParseSandboxType(raw string) (SandboxType, error) {
 		return SandboxTypeE2B, nil
 	case SandboxTypeDocker:
 		return SandboxTypeDocker, nil
-	case SandboxTypeLocal:
-		return SandboxTypeLocal, nil
 	case SandboxTypeDisabled:
 		return SandboxTypeDisabled, nil
 	default:
@@ -167,6 +247,10 @@ func EffectiveTemplateID(cfg *Config) string {
 		return cfg.CubeTemplate
 	case SandboxTypeE2B:
 		return cfg.E2BTemplate
+	case SandboxTypeDocker:
+		// The image is what a template ID is for the MicroVM backends: the
+		// pre-baked filesystem a sandbox starts from.
+		return cfg.DockerImage
 	default:
 		return ""
 	}

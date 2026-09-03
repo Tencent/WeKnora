@@ -35,7 +35,7 @@ WeKnora 提供两种模式，在对话框顶部切换：
 | Token 估算与压缩 | `internal/agent/token/` | `Estimator`（BPE 估算）与 `CompressContext`（滑动裁剪） |
 | 记忆整合 | `internal/agent/memory/consolidator.go` | LLM 驱动的历史摘要（Memory Consolidation） |
 | 技能系统 | `internal/agent/skills/` | SKILL.md 的发现、加载与脚本执行（Progressive Disclosure） |
-| 执行沙箱 | `internal/sandbox/` | 技能脚本的 Docker / Local 隔离执行与安全校验 |
+| 执行沙箱 | `internal/sandbox/` | 技能脚本的 Docker / Cube / E2B 隔离执行与安全校验 |
 | 工具审批 | `internal/agent/approval/gate.go` | MCP 危险工具的人工审批（HITL）与会话内 OAuth 授权 |
 | Agent 服务层 | `internal/application/service/agent_service.go` | 组装引擎：注册工具、解析 KB 元信息、初始化技能/沙箱/VLM |
 | 会话问答入口 | `internal/application/service/session_agent_qa.go` | 从 `CustomAgent` 构建运行时 `AgentConfig` 并执行 |
@@ -101,7 +101,7 @@ flowchart TB
         MCP["MCP 工具 mcp_{service}_{tool}"]
     end
     GATE["approval.Gate<br/>（HITL 审批 / OAuth）"]
-    SBX["sandbox.Manager<br/>（Docker / Local）"]
+    SBX["sandbox.Manager<br/>（Docker / Cube / E2B）"]
     EB["event.EventBus"]
 
     H1 --> SQA --> AS --> ENG
@@ -343,17 +343,25 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 
 `manageContextWindow`（`internal/agent/observe.go`）在每轮 Think 之前执行：
 
-**第一级：LLM 记忆整合（memory.Consolidator）** —— 当估算 token 超过 `MaxContextTokens × 0.5`（`DefaultConsolidationThreshold = 0.5`）时触发：
+`MaxContextTokens` 优先取智能体自身设置，其次取模型 `parameters.context_window`，都没有才回落到 `DefaultMaxContextTokens = 200000`。默认值刻意取在市面最大窗口之下：猜大是危险方向——压缩永远不触发，第一个征兆就是上游直接拒绝请求；猜小只是少留了一些本来放得下的历史。
+
+两级压缩共用同一个阈值 `MaxContextTokens - contextReserveTokens`，其中 `contextReserveTokens = max(该轮 completion 预算 + 4096, 16384)`。留白按**绝对值**而非窗口比例计算，因为要放下的是回复，而回复的大小和窗口多大无关；留白随该轮 completion 预算走，否则一个允许输出 24576 token 的智能体会在请求被接受之后被截断回复。
+
+**第一级：LLM 记忆整合（memory.Consolidator）** —— 当估算 token 超过上述阈值时触发：
 
 - 保留：system prompt（首条）、**当前轮**（最后一条 user 消息及其后全部 assistant/tool 消息）、以及按 token 预算从尾部回收的近期历史（`findKeepBoundary` 以 `targetTokens = maxTokens × 0.5 × 0.6` 为目标，预留 500 token 给摘要，且**回收时把 assistant+tool_calls 与其 tool 结果作为整组处理，绝不拆散**）；
 - 其余较老的历史交给 LLM 摘要（低温 0.3、`MaxTokens: 2000`、单次 60s 超时、最多 `maxConsolidationAttempts = 3` 次），摘要要求保留关键事实、工具结果、用户意图和错误处理过程，目标压到原文 30% 以内；
-- 摘要作为一条 system 消息插入：`[Memory Summary - N earlier messages consolidated]`；
+- 摘要要求按固定 section 输出（Goal / Constraints & Preferences / Progress / Key Decisions / Next Steps / Critical Context），并把待总结的对话包在 `<conversation>` 标签内、指令放在最后，避免摘要器把对话内容当成指令；
+- 摘要作为一条 **user** 消息插入，包在 `<summary>` 标签里，前缀为 `The conversation history before this point was compacted into the following summary:`。用 user 而非第二条 system，是因为它是对话历史而不是指令，部分供应商会合并或特殊加权 system 消息；
+- 摘要末尾还会附上一段机械提取的沙箱文件清单（`internal/agent/memory/file_ops.go`）：从被压缩掉的 `write_sandbox_file` / `edit_sandbox_file` / `read_sandbox_file` 调用里取出 `path`，写过的归入 `<modified-files>`、只读过的归入 `<read-files>`（写过的文件不再重复出现在 read 列表里），并从上一次摘要的同名标签里继承，使其跨多次压缩累积。摘要是散文，路径清单恰好是最容易被摘要器丢掉的细节；一旦丢了，模型会以为文件还没写，重新从头生成已经落盘的产物；
 - LLM 三次都失败则退化为 `rawArchive`（截断的纯文本归档），绝不丢信息地静默失败。
 
-**第二级：滑动裁剪（token.CompressContext）** —— 无论整合是否发生都会执行，当 token 超过 `MaxContextTokens × 0.8`（`DefaultContextThresholdRatio = 0.8`）时：
+**第二级：滑动裁剪（token.CompressContext）** —— 无论整合是否发生都会执行，当 token 仍超过同一阈值时：
 
 - 同样保留 system、当前轮尾部；
 - 中间历史经 `groupToolMessages` 分组（assistant+tool_calls 与后续 tool 结果为一组），从**最老的组**开始整组丢弃，直到释放的 token 达到 `currentTokens - threshold`。
+
+**兜底：溢出后压缩重试一次。** 上面两级都建立在 token **估算**之上，而估算会低估——真实分词、供应商侧的模板开销都不在估算里，所以一个看起来安全的请求仍可能撞到窗口。判据：`finish_reason=length` 且 `usage.completion_tokens` **小于**我们本轮请求的上限（`AgentEngine.responseHitContextLimit`）。既然不是我们的 `max_tokens` 拦住的，那拦住它的就是窗口，而窗口是压缩能解决的；反之，用满了预算的截断说明模型确实还有话说，重试只会烧掉一轮复现同样的截断。命中时强制压缩（`forceCompaction`，绕过阈值判断）并重试一次，`overflowRecovered` 保证每轮最多一次——第二次仍溢出，说明问题根本不在历史长度上。
 
 ### 4.3 会话历史（agent_history）
 
@@ -408,7 +416,7 @@ Agent 侧的启停在 `configureSkillsFromAgent`（`internal/application/service
 
 ### 5.3 与沙箱（internal/sandbox）的关系
 
-`execute_skill_script` → `skills.Manager.ExecuteScript` → `sandbox.Manager.Execute`。Docker、Local、CubeSandbox、E2B 均通过「设置 → 沙箱后端」的同一套空间配置与检查接口维护；远端模板从目标集群实时拉取，缺少 WeKnora 标准模板时自动创建。Docker/Local 每次独立执行，不写入会话沙箱绑定，也不提供 shell_exec、附件暂存与产物收集，仅适合本机开发调试。生产环境使用 E2B 协议后端：E2B Cloud、CubeSandbox，或任意 E2B 兼容控制面，接入方式见 `docs/sandbox-protocol.md`。
+`execute_skill_script` → `skills.Manager.ExecuteScript` → `sandbox.Manager.Execute`。Docker、CubeSandbox、E2B 均通过「设置 → 沙箱后端」的同一套空间配置与检查接口维护；远端模板从目标集群实时拉取，缺少 WeKnora 标准模板时自动创建。三者都是会话级持久沙箱，提供 shell_exec、附件暂存与产物收集。本机开发用 Docker 后端连本机 daemon；生产环境使用 E2B 协议后端：E2B Cloud、CubeSandbox，或任意 E2B 兼容控制面，接入方式见 `docs/sandbox-protocol.md`。
 
 **Manager 与校验器**（`internal/sandbox/manager.go`、`validator.go`）：每次执行前，除非 `SkipValidation`，`ScriptValidator` 会做四类静态校验，任一命中即拒绝执行并返回 `ErrSecurityViolation`：
 
@@ -425,11 +433,31 @@ Agent 侧的启停在 `configureSkillsFromAgent`（`internal/application/service
 - 技能目录以只读挂载到 `/workspace`；可选 `--read-only` 根文件系统 + 64MB noexec tmpfs；
 - 按扩展名选择解释器（`.py`→`python3` 等）。
 
-**Local 沙箱**（`local.go` / `local_unix.go`，Docker 不可用时的回退）：解释器白名单（默认 `python`/`python3`/`node`/`bash` 及 `cat`/`grep` 等安全命令）、脚本必须为绝对路径且可选限制在 `AllowedPaths` 内、最小化环境变量、`Setpgid` 建进程组以便超时后 `SIGKILL` 整组杀掉。
+Manager 初始化时：`disabled` 模式的 `disabledSandbox` 拒绝一切执行。
 
-Manager 初始化时：`docker` 模式先探测 `docker version`，可用则异步预拉镜像，不可用且允许回退则降级 local；`disabled` 模式的 `disabledSandbox` 拒绝一切执行。
+### 5.4 沙箱文件工具的契约
 
-### 5.4 技能执行时序图
+`write_sandbox_file` / `read_sandbox_file` / `edit_sandbox_file` 三个工具共用一套上限与并发约定，设计目标是：**模型能写出来的文件，必须能读回来、能局部改，且不会因为一次响应写不完就前功尽弃。**
+
+**写：按 completion 预算给出建议大小，但不据此拒绝。** 工具描述里告诉模型的单次 `content` 建议上限不是写死的常量，而是由本轮 `MaxCompletionTokens` 推导（`writeBudgetBytes`，见 `internal/agent/tools/sandbox_write.go`）。理由是：真正卡住一次写入的从来不是某个字节数，而是模型这一轮还能吐多少 token；如果用户在前端把 `max_completion_token` 调小，一个固定的 256 KiB 上限就成了谎言——模型以为能写，实际参数在半路被截断。
+
+但这个数字只是**预测，不是校验**。推导用的字节/token 系数在 ASCII 和中文之间能差三倍，模型跑赢预测只说明预测不准。而能走到工具里的 `content` 必然是完整的：`finish_reason=length` 的整批调用已在 `act.go` 被拒，JSON 被截断的也已被 `RepairJSONDetail` 拦下。此时因为超出预测而拒绝一份完整的内容，等于把已经花 token 换来的成果扔掉，逼模型分块重发同样的字节——总开销严格更高，且比那次已经成功的调用更容易截断。它也防不住它看起来在防的东西：被截断的写入通常**小于**预测值，照样畅通无阻。工具里唯一硬拦的是 8 MiB 的单文件上限（overwrite 与 append 两条路径都查）。写不完的文件用 `mode: "append"` 分块续写。
+
+**读：分页而非拒绝。** 一页同时受三个上限约束：2000 行、`max_bytes` 字节预算，以及**注册表的 rune 预算**（`OutputBudget(ctx)`，默认 `DefaultMaxToolOutput = 24000`）。没读完的页在结果末尾附上 `[Showing lines A-B of N. Use offset=M to continue.]`；续读提示放在**工具结果里**而不是系统提示词里，是因为它只在模型真正需要时才出现，且直接给出下一次的 `offset`，不需要模型自己算。文件超过 8 MiB 才彻底拒绝下载（与 append 的累计上限对齐），转而建议 `shell_exec` 的 `sed -n` / `head` / `tail`。单行宽于整页预算时无法靠翻页前进，结果直接给出 `sed -n 'Np'` 命令，而不是返回一个空页让模型反复重试。
+
+**页是从整份下载里切出来的。** 三个沙箱后端的 `RemoteClient.ReadFile` 都只接受路径、返回全文,没有 range 读。整文件读进内存再按行切在本地文件系统上重读是 page cache 命中;我们跨网络,每翻一页重下一次全文意味着一个 1 MB 的产物按每页约 23 KB 翻要 45 次全量下载、45 个来回。所以 `read_sandbox_file` 在工具实例上缓存最近一次下载的文件（工具注册表每轮重建,缓存天然是轮次内的）。命中条件是 session、路径、size、mtime 全部相同,**且期间没有任何沙箱文件变更**——最后这条由 `file_mutation_queue.go` 里的全局纪元计数提供:同长度替换（比如改一个数字）不会改变 size,而部分后端的 mtime 只有秒级精度,单靠 stat 会读到脏数据。计数器是全局而非按路径的,写 B 文件会作废 A 的缓存,代价是极少发生的一次重下载,换来的是零维护、不会增长。缓存只留一个槽位:翻页只会走一个文件,单槽把内存占用锁在一份文件而不是这一轮读过的所有文件。
+
+第三个上限是必须的:`TruncateToolOutput` 对超预算的输出是**挖掉中段、保留首尾**。一页若走到那一步是最坏情况——续读提示恰好在尾部，会存活下来并"证明"已连续显示 1-2000 行，而中间被删掉的那一块模型永远不会察觉。按注册表同一套预算裁页，这条截断路径就永远不会触发。两个预算单位不同，且方向与直觉相反:64 KiB 中文约 22k rune 装得下，64 KiB 英文是 65k rune 装不下。至于 UTF-8 安全，分页天然成立——只在 `\n` 处断页，而 0x0A 不可能出现在多字节序列内部，字节预算落在哪都切不坏一个 rune。
+
+这三条约束都只写在各自工具的描述里，系统提示词不重复。单个工具的硬约束（尺寸、分页、`edits` 的匹配语义、`shell_exec` 的工作目录与退出码语义）属于工具描述，工具描述随 tools payload 每轮都发，和系统提示词同时在上下文里，重复一份不会让模型更容易看到；系统提示词只留跨工具的选型规则（比如"需要技能包的脚本走 `execute_skill_script` 而不是 `shell_exec`"）。据此把系统提示词里 `shell_exec` 的 11 条子项收成一行工具清单条目，净省约 1.3 KB；两个方向的测试互相咬住这条边界（`prompts_shell_test.go` 断言机制细节**不在**提示词里，`shell_exec_test.go` 断言它们**在**工具描述里），避免日后又被顺手加回去。
+
+**改：一次调用改多处，且只有一种入参形状。** 所有替换都放进 `edits` 数组，单处修改就是长度为 1 的数组。刻意不保留并列的 `old_string` / `new_string` 平铺字段:那样只为单处修改省下十几个字节，代价是模型要在两种互斥形状间做选择、`replace_all` 只对其中一种有效、每条报错都要维护带/不带下标两个版本。`replace_all` 改为挂在条目上，于是一批里可以混合「全局重命名」和「必须唯一」的条目。
+
+每个 `old_string` 都对照**原始文件**匹配，而不是对照前几处编辑之后的结果——模型是看着同一个版本的文件写出所有 `old_string` 的，那就该在那个版本里解析。于是批量编辑与顺序无关，两处编辑抢同一段字节会在写入前被检测为区间相交并整批拒绝（`replace_all` 展开出的多个区间同样参与检测），而不是静默改坏文件。模型把数组写成单个对象或 JSON 字符串是常见现象，`sandboxEditList` 会容错解析——为一个模型自己看不见的格式问题浪费一轮不划算。
+
+**并发：按路径串行化。** append 与 edit 都是「读—改—写」，而一次响应里的多个工具调用会并行执行（`ParallelToolCalls`）。同一路径的两次 append 若并行，会读到同一份底本，后写的把先写的整个覆盖掉，症状是模型自己的输出凭空消失、且无法从日志证伪。`internal/agent/tools/file_mutation_queue.go` 按 `(sessionID, path)` 加锁串行化，不同路径仍然并发——全局锁虽然也正确，但会让并行工具调用对最需要它的场景失去意义。
+
+### 5.5 技能执行时序图
 
 ```mermaid
 sequenceDiagram
@@ -437,7 +465,7 @@ sequenceDiagram
     participant ENG as AgentEngine
     participant SK as skills.Manager
     participant VAL as ScriptValidator
-    participant SBX as "Sandbox（Docker / Local）"
+    participant SBX as "Sandbox（Docker / Cube / E2B）"
 
     Note over LLM: system prompt 含全部技能<br/>Level 1 元数据（name + description）
     LLM->>ENG: "tool_call: read_skill(skill_name)"
@@ -451,7 +479,7 @@ sequenceDiagram
     alt 校验失败
         VAL-->>LLM: "ExitCode=-1, ErrSecurityViolation"
     else 校验通过
-        SBX->>SBX: "docker run --rm --network none --cap-drop ALL ...<br/>或本地白名单解释器 + 进程组"
+        SBX->>SBX: "会话级容器 / MicroVM 内执行"
         SBX-->>LLM: "stdout / stderr / exit_code / duration / killed"
     end
 ```

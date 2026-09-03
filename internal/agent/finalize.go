@@ -97,10 +97,15 @@ Now generate the final answer:`, query, imageRequirement)
 	logger.Debugf(ctx, "[Agent][FinalAnswer] AnswerID: %s", answerID)
 	answerDoneEmitted := false
 
+	budget := e.clampCompletionBudgetToContext(e.tokenEstimator.EstimateMessages(messages))
 	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
-		&chat.ChatOptions{Temperature: e.config.Temperature}, // Thinking disabled for final answer synthesis
+		&chat.ChatOptions{
+			Temperature:         e.config.Temperature,
+			MaxTokens:           budget,
+			MaxCompletionTokens: budget,
+		}, // Thinking disabled for final answer synthesis
 		func(chunk *types.StreamResponse, fullContent string) {
 			// Defensive filter: only emit answer content, skip thinking chunks
 			if chunk.ResponseType == types.ResponseTypeThinking {
@@ -142,6 +147,12 @@ Now generate the final answer:`, query, imageRequirement)
 				Done:    true,
 			},
 		})
+	}
+
+	// The synthesis call is often the largest of the turn — fold its usage
+	// into the turn aggregate like every ReAct round.
+	if llmResult.Usage != nil {
+		state.TurnUsage.Accumulate(*llmResult.Usage)
 	}
 
 	// Safety net: strip any residual <think> blocks that may have leaked through
@@ -195,6 +206,7 @@ func (e *AgentEngine) emitCompletionEvent(
 			FinalAnswer:     state.FinalAnswer,
 			KnowledgeRefs:   knowledgeRefsInterface,
 			AgentSteps:      state.RoundSteps, // Include detailed execution steps for message storage
+			Usage:           turnUsage(state),
 			TotalSteps:      len(state.RoundSteps),
 			TotalDurationMs: time.Since(startTime).Milliseconds(),
 			MessageID:       messageID, // Include message ID for proper message update
@@ -202,4 +214,15 @@ func (e *AgentEngine) emitCompletionEvent(
 	})
 
 	logger.Infof(ctx, "Agent execution completed in %d rounds", state.CurrentRound)
+}
+
+// turnUsage returns the turn's aggregated LLM usage, or nil when no round
+// reported usage so the field stays absent from the completion event and the
+// persisted message alike.
+func turnUsage(state *types.AgentState) *types.TokenUsage {
+	if state == nil || state.TurnUsage.TotalTokens == 0 {
+		return nil
+	}
+	usage := state.TurnUsage
+	return &usage
 }

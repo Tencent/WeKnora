@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -42,6 +43,17 @@ func sessionSandboxShellExecutor(mgr sandbox.Manager) sandbox.SessionShellExecut
 	return provider.SessionShellExecutor()
 }
 
+// sessionSandboxInstallShellExecutor is the install-mode counterpart of
+// sessionSandboxShellExecutor. It is a separate accessor on a separate
+// interface so a caller cannot obtain the privileged executor by accident.
+func sessionSandboxInstallShellExecutor(mgr sandbox.Manager) sandbox.SessionInstallShellExecutor {
+	provider, ok := mgr.(sandbox.SessionInstallCapabilityProvider)
+	if !ok || provider == nil {
+		return nil
+	}
+	return provider.SessionInstallShellExecutor()
+}
+
 // sessionAttachmentStager is the agentService surface the QA pipeline needs to
 // stage attachments. Declared as a named interface so the runtime type
 // assertion in session_agent_qa.go has one definition to drift against.
@@ -51,6 +63,7 @@ type sessionAttachmentStager interface {
 	) (sandbox.SessionFileStore, error)
 	stageSessionAttachments(
 		ctx context.Context, sessionID, agentSandboxConfigID string,
+		tenantID uint64,
 		attachments types.MessageAttachments,
 	) ([]stagedSessionAttachment, error)
 }
@@ -60,8 +73,8 @@ type sessionAttachmentStager interface {
 //
 // Callers must gate staging on this rather than on the process-wide manager: a
 // different workspace configs expose different capabilities. Remote backends
-// need attachment staging; stateless Docker/Local backends do not advertise a
-// session filesystem at all.
+// need attachment staging; backends that do not advertise a session
+// filesystem skip staging entirely.
 func (s *agentService) sessionSandboxInputStore(
 	ctx context.Context,
 	sessionID string,
@@ -89,6 +102,7 @@ func (s *agentService) stageSessionAttachments(
 	ctx context.Context,
 	sessionID string,
 	agentSandboxConfigID string,
+	tenantID uint64,
 	attachments types.MessageAttachments,
 ) ([]stagedSessionAttachment, error) {
 	if s == nil {
@@ -105,7 +119,11 @@ func (s *agentService) stageSessionAttachments(
 		return nil, fmt.Errorf("file service is unavailable for session input staging")
 	}
 
-	attachments = deduplicateSessionAttachments(attachments)
+	resolved, err := s.resolveSessionAttachmentURLs(ctx, tenantID, sessionID, attachments)
+	if err != nil {
+		return nil, err
+	}
+	attachments = deduplicateSessionAttachments(resolved)
 	existingEntries, err := store.ListSessionFiles(ctx, sessionID, sandbox.SessionInputRoot)
 	if err != nil {
 		return nil, fmt.Errorf("list staged session inputs: %w", err)
@@ -169,6 +187,45 @@ func (s *agentService) stageSessionAttachments(
 	return staged, nil
 }
 
+// resolveSessionAttachmentURLs fills in the storage handle for attachments
+// whose URL was not persisted on the message row. MessageAttachment.URL is
+// deliberately excluded from DB serialization (json:"-") so a cross-session
+// downloadable reference cannot leak; the temporary-document row keyed by
+// attachment.ID is the authoritative source of the storage reference.
+// Attachments that already carry a URL, or that have no temporary-document ID,
+// pass through unchanged so callers with other attachment sources keep working.
+func (s *agentService) resolveSessionAttachmentURLs(
+	ctx context.Context,
+	tenantID uint64,
+	sessionID string,
+	attachments types.MessageAttachments,
+) (types.MessageAttachments, error) {
+	if len(attachments) == 0 || s == nil || s.db == nil {
+		return attachments, nil
+	}
+	repo := repository.NewTemporaryDocumentRepository(s.db)
+	out := make(types.MessageAttachments, 0, len(attachments))
+	for _, attachment := range attachments {
+		if strings.TrimSpace(attachment.URL) != "" || strings.TrimSpace(attachment.ID) == "" {
+			out = append(out, attachment)
+			continue
+		}
+		document, err := repo.GetScoped(ctx, tenantID, sessionID, attachment.ID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve attachment %q storage reference: %w", attachment.FileName, err)
+		}
+		if document == nil || strings.TrimSpace(document.ResourceRef) == "" {
+			// Expired or already-deleted temporary document: leave the URL
+			// empty so deduplicateSessionAttachments skips it instead of
+			// failing the whole staging pass.
+			continue
+		}
+		attachment.URL = document.ResourceRef
+		out = append(out, attachment)
+	}
+	return out, nil
+}
+
 func deduplicateSessionAttachments(attachments types.MessageAttachments) types.MessageAttachments {
 	seen := make(map[string]struct{}, len(attachments))
 	out := make(types.MessageAttachments, 0, len(attachments))
@@ -215,7 +272,7 @@ func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment) string
 			escapeAttachmentXML(attachment.Path),
 		)
 	}
-	b.WriteString("  <instruction>Use these absolute paths as read-only inputs for shell commands or skill script arguments. Write generated files only under $WEKNORA_SKILL_OUTPUT_DIR.</instruction>\n")
+	b.WriteString("  <instruction>Use these absolute paths as read-only inputs. Inspect them with read_sandbox_file or list_sandbox_files, or pass them to shell commands or skill script arguments when those tools are available. Create generated files with write_sandbox_file; patch existing ones with edit_sandbox_file; put downloadable artifacts under $WEKNORA_SKILL_OUTPUT_DIR.</instruction>\n")
 	b.WriteString("</sandbox_attachments>")
 	return b.String()
 }

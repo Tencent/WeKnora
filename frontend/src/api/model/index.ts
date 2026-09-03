@@ -1,5 +1,8 @@
 import { get, post, postUpload, put, del } from '../../utils/request';
 import i18n from '@/i18n'
+import { ModelInUseError, modelInUseErrorFromRequest } from './modelUsage'
+
+export * from './modelUsage'
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -28,6 +31,9 @@ export interface ModelConfig {
     // 会在调用远程模型 API 时附加到每个请求上。Authorization、Content-Type 等保留头会被忽略。
     custom_headers?: Record<string, string>;
     supports_vision?: boolean; // Whether the model accepts image/multimodal input
+    // 对话/VLM 的上下文窗口（token）。0 或不填表示使用后端默认 200000。
+    context_window?: number;
+    max_output_tokens?: number;
     // 后台任务（入库/富化）对该模型的并发上限，按模型 ID 全副本共享。
     // 0 或不填表示沿用全局默认（model.max_concurrency）；仅对 chat/embedding/vllm 生效。
     max_concurrency?: number;
@@ -135,11 +141,25 @@ export function deleteModel(id: string): Promise<void> {
         if (response.success) {
           resolve();
         } else {
+          const conflict = modelInUseErrorFromRequest(response)
+          if (conflict) {
+            reject(conflict)
+            return
+          }
           reject(new Error(response.message || t('error.model.deleteFailed')));
         }
       })
       .catch((error: any) => {
         console.error('Failed to delete model:', error);
+        if (error instanceof ModelInUseError) {
+          reject(error)
+          return
+        }
+        const conflict = modelInUseErrorFromRequest(error)
+        if (conflict) {
+          reject(conflict)
+          return
+        }
         reject(error);
       });
   });

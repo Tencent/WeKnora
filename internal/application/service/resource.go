@@ -155,6 +155,33 @@ func (s *resourceCatalog) Bind(ctx context.Context, reference, ownerType, ownerI
 	})
 }
 
+// Release implements interfaces.ResourceCatalog.
+//
+// Unbinding and counting are deliberately not a single transaction. A racing
+// bind that lands between them makes the count too high, which keeps a live
+// file — the safe direction. The opposite ordering could delete bytes another
+// owner had just claimed.
+func (s *resourceCatalog) Release(
+	ctx context.Context, reference, ownerType, ownerID string,
+) (int64, error) {
+	if strings.TrimSpace(ownerType) == "" || strings.TrimSpace(ownerID) == "" {
+		return -1, fmt.Errorf("resource release requires owner type and id")
+	}
+	if _, ok := types.ParseResourcePath(reference); !ok {
+		// A raw provider path predates the catalog and has no bindings to
+		// account for; the caller keeps its previous delete behaviour.
+		return -1, nil
+	}
+	resource, err := s.Resolve(ctx, reference)
+	if err != nil {
+		return -1, err
+	}
+	if err := s.repo.DeleteBinding(ctx, resource.ID, ownerType, ownerID); err != nil {
+		return -1, err
+	}
+	return s.repo.CountBindings(ctx, resource.ID)
+}
+
 func (s *resourceCatalog) MarkDeleted(ctx context.Context, reference string) error {
 	resource, err := s.Resolve(ctx, reference)
 	if err != nil {

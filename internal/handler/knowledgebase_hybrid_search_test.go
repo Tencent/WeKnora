@@ -18,6 +18,7 @@ type hybridSearchTestService struct {
 	interfaces.KnowledgeBaseService
 	searchCalls  int
 	searchParams types.SearchParams
+	results      []*types.SearchResult
 }
 
 func (s *hybridSearchTestService) GetKnowledgeBaseByID(_ context.Context, id string) (*types.KnowledgeBase, error) {
@@ -31,6 +32,9 @@ func (s *hybridSearchTestService) HybridSearch(
 ) ([]*types.SearchResult, error) {
 	s.searchCalls++
 	s.searchParams = params
+	if s.results != nil {
+		return s.results, nil
+	}
 	return []*types.SearchResult{}, nil
 }
 

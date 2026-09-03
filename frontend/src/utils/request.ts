@@ -1,8 +1,9 @@
 // src/utils/request.js
 import axios from "axios";
-import { generateRandomString, MAX_FILE_SIZE_MB } from "./index";
+import { generateRandomString, MAX_FILE_SIZE_MB, MAX_SKILL_BUNDLE_SIZE_MB } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
+import { isSkillBundleUploadUrl } from './uploadLimit';
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -21,7 +22,7 @@ const instance = axios.create({
 });
 
 // 获取当前用户语言（用于 Accept-Language header）
-function getCurrentLanguage(): string {
+export function getCurrentLanguage(): string {
   return i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN'
 }
 
@@ -215,9 +216,12 @@ instance.interceptors.response.use(
     
     // 处理 Nginx 413 Request Entity Too Large
     if (error.response.status === 413) {
+      const skillUpload = isSkillBundleUploadUrl(error.config?.url)
       return Promise.reject({ 
         status: 413, 
-        message: i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }),
+        message: skillUpload
+          ? i18n.global.t('settings.sandbox.skillBundleTooLarge', { size: MAX_SKILL_BUNDLE_SIZE_MB })
+          : i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }),
         success: false
       });
     }
@@ -289,6 +293,10 @@ export function post<T = any>(url: string, data = {}, config?: any): Promise<T> 
 
 export function put<T = any>(url: string, data = {}, config?: any): Promise<T> {
   return instance.put<T>(url, data, config) as unknown as Promise<T>;
+}
+
+export function patch<T = any>(url: string, data = {}, config?: any): Promise<T> {
+  return instance.patch<T>(url, data, config) as unknown as Promise<T>;
 }
 
 export function del<T = any>(url: string, data?: any): Promise<T> {

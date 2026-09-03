@@ -20,21 +20,48 @@ const (
 	ToolDataSchema          = "data_schema"
 	ToolWebSearch           = "web_search"
 	ToolWebFetch            = "web_fetch"
-	// Skills-related tools (only available when skills are enabled)
+	// Skills-related tools (only available when skills are enabled).
+	//
+	// Like the sandbox tools below, these are absent from
+	// AvailableToolDefinitions and DefaultAllowedTools: initializeSkillsManager
+	// registers them from SkillsEnabled plus a usable sandbox, so a tool
+	// checkbox could neither grant nor withhold them.
 	ToolExecuteSkillScript = "execute_skill_script"
 	ToolReadSkill          = "read_skill"
-	// Sandbox filesystem inspection (read-only; only available when the
-	// sandbox backend supports per-session file listing — currently the
-	// Cube SessionBoundManager). Lets the LLM discover and inspect files
-	// produced by prior skill executions in the same session so chained
-	// skills stop guessing paths.
+	// Sandbox filesystem tools (only available when the sandbox backend
+	// supports per-session files — Cube, E2B, Docker). list/read inspect
+	// the session workspace; write creates text files so generated
+	// scripts do not have to travel through a shell_exec heredoc; edit
+	// patches an existing file without regenerating it.
+	//
+	// Deliberately absent from AvailableToolDefinitions and
+	// DefaultAllowedTools, like search_memory and web_search: the sandbox
+	// switch already decides whether a run has a workspace at all, and
+	// registerSandboxFileTools registers these from that capability rather
+	// than from the allowlist. A checkbox would have been a lie — clearing
+	// it changed nothing.
 	ToolListSandboxFiles = "list_sandbox_files"
 	ToolReadSandboxFile  = "read_sandbox_file"
+	ToolWriteSandboxFile = "write_sandbox_file"
+	ToolEditSandboxFile  = "edit_sandbox_file"
+	// ToolWriteSkillFile / ToolEditSkillFile write the skill tree under
+	// /opt/weknora/tenant/skills rather than /workspace, and exist only for
+	// the built-in skill installer. They are scoped to the one skill being
+	// installed; see internal/agent/tools/skill_file.go.
+	//
+	// Deliberately absent from AvailableToolDefinitions: these write the
+	// shared snapshot image, so they are granted by install mode alone and
+	// must not become selectable on a tenant-editable agent config.
+	ToolWriteSkillFile = "write_skill_file"
+	ToolEditSkillFile  = "edit_skill_file"
 	// ToolShellExec lets the LLM execute ad-hoc shell commands inside the
-	// current session's Cube sandbox (dependency installs, environment
-	// probing). Only registered when the sandbox backend is Cube — Docker
-	// and Local backends do not expose this tool to preserve their
-	// existing stateless security model.
+	// current session's sandbox (dependency installs, environment probing).
+	// Registered only when the resolved backend advertises the session shell
+	// capability (Cube, E2B, Docker). The command never runs on the WeKnora host.
+	//
+	// Also absent from AvailableToolDefinitions: registerSandboxShellIfAllowed
+	// keys it on SkillsEnabled (or install mode), so the shell follows the
+	// skills switch and not a per-agent tool checkbox.
 	ToolShellExec = "shell_exec"
 	// Wiki-related tools (only available when wiki KBs are in scope)
 	ToolWikiReadPage      = "wiki_read_page"
@@ -75,11 +102,6 @@ func AvailableToolDefinitions() []AvailableTool {
 		{Name: ToolDatabaseQuery, Label: "查询数据库", Description: "查询数据库中的信息"},
 		{Name: ToolDataAnalysis, Label: "数据分析", Description: "理解数据文件并进行数据分析"},
 		{Name: ToolDataSchema, Label: "查看数据元信息", Description: "获取表格文件的元信息"},
-		{Name: ToolReadSkill, Label: "读取技能", Description: "按需读取技能内容以学习专业能力"},
-		{Name: ToolExecuteSkillScript, Label: "执行技能脚本", Description: "在沙箱环境中执行技能脚本"},
-		{Name: ToolListSandboxFiles, Label: "列出沙箱文件", Description: "列出当前会话沙箱产出目录下的文件"},
-		{Name: ToolReadSandboxFile, Label: "读取沙箱文件", Description: "读取当前会话沙箱中已生成的文件内容"},
-		{Name: ToolShellExec, Label: "执行沙箱命令", Description: "在当前会话沙箱中执行 shell 命令（如安装依赖、检查环境）"},
 		{Name: ToolWikiReadPage, Label: "读取Wiki页面", Description: "读取指定的Wiki页面内容"},
 		{Name: ToolWikiSearch, Label: "搜索Wiki", Description: "在Wiki中搜索页面"},
 		{Name: ToolWikiReadSourceDoc, Label: "精读源文档", Description: "使用知识点深入阅读特定原始文档"},

@@ -116,6 +116,7 @@ definitions:
     - 2103
     - 2200
     - 2201
+    - 2300
     type: integer
     x-enum-varnames:
     - ErrBadRequest
@@ -141,6 +142,7 @@ definitions:
     - ErrAgentInvalidTemperature
     - ErrVectorStoreBindingInvalid
     - ErrVectorStoreUnavailable
+    - ErrModelInUse
   github_com_Tencent_WeKnora_internal_infrastructure_chunker.DocProfile:
     properties:
       all_caps_short_line_count:
@@ -240,6 +242,20 @@ definitions:
       model_id:
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.AdminCreateUserRequest:
+    properties:
+      email:
+        type: string
+      password:
+        type: string
+      username:
+        maxLength: 50
+        minLength: 2
+        type: string
+    required:
+    - email
+    - username
+    type: object
   github_com_Tencent_WeKnora_internal_types.AgentStep:
     properties:
       iteration:
@@ -294,6 +310,7 @@ definitions:
     - system.admin_promoted
     - system.admin_revoked
     - system.user_password_reset
+    - system.user_created
     - system.api_key_created
     - system.api_key_revoked
     - system.queue_task_retried
@@ -357,6 +374,7 @@ definitions:
     - AuditActionSystemAdminPromoted
     - AuditActionSystemAdminRevoked
     - AuditActionSystemUserPasswordReset
+    - AuditActionSystemUserCreated
     - AuditActionSystemAPIKeyCreated
     - AuditActionSystemAPIKeyRevoked
     - AuditActionSystemQueueTaskRetried
@@ -681,6 +699,12 @@ definitions:
         type: string
       cube_sandbox_ttl_seconds:
         type: integer
+      dns_servers:
+        description: DNSServers are Cube template nameserver IPs. Empty uses Cubelet's
+          default.
+        items:
+          type: string
+        type: array
       http_timeout_sec:
         description: |-
           HTTPTimeoutSec bounds each HTTP call to the sandbox control plane.
@@ -852,7 +876,7 @@ definitions:
       max_iterations:
         description: |-
           ===== Agent Mode Settings =====
-          Maximum iterations for ReAct loop (only for agent type)
+          Maximum ReAct iterations. -1 is unlimited; 0 is unset (default applied).
         type: integer
       mcp_auth_wait_timeout:
         description: |-
@@ -869,6 +893,12 @@ definitions:
         items:
           type: string
         type: array
+      memory_enabled:
+        description: |-
+          Whether this agent may read the user's long-term memory. Nil inherits
+          the workspace setting; false opts a single agent out of memory even when
+          the workspace has it on. There is no "on" that overrides the workspace.
+        type: boolean
       model_id:
         description: |-
           ===== Model Settings =====
@@ -1068,7 +1098,54 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.DockerSandboxConfig:
     properties:
+      cpu_limit:
+        description: |-
+          CPULimit is the number of CPU cores one sandbox may use. 0 uses the
+          built-in default.
+        type: number
+      host:
+        description: |-
+          Host is the daemon endpoint in DOCKER_HOST form. Empty means the local
+          unix socket.
+        type: string
+      http_timeout_sec:
+        description: HTTPTimeoutSec bounds each Engine API call. 0 uses the built-in
+          default.
+        type: integer
+      idle_ttl_seconds:
+        description: |-
+          IdleTTLSeconds is how long a session container may go unused before it
+          is reclaimed. The daemon has no idle timeout of its own, so this is what
+          stops an abandoned session from pinning host memory indefinitely.
+        type: integer
       image:
+        type: string
+      memory_limit_mb:
+        description: MemoryLimitMB caps one sandbox's memory. 0 uses the built-in
+          default.
+        type: integer
+      network_mode:
+        description: |-
+          NetworkMode is the Docker network sandboxes join: "bridge" (default) or
+          "none" for no egress. Nothing else is accepted — host and container:
+          modes share another namespace outright, and a named network is usually
+          the deployment's own compose network, which would put the sandbox next
+          to Postgres and Redis.
+        type: string
+      pids_limit:
+        description: |-
+          PidsLimit caps how many processes one sandbox may run. 0 uses the
+          built-in default.
+        type: integer
+      runtime:
+        description: |-
+          Runtime selects an alternative OCI runtime such as "runsc" (gVisor).
+          Empty uses the daemon default.
+        type: string
+      tls_cert_path:
+        description: |-
+          TLSCertPath is a directory on the WeKnora host containing ca.pem,
+          cert.pem and key.pem. Required when Host is a TCP endpoint.
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.E2BSandboxConfig:
@@ -1464,121 +1541,6 @@ definitions:
       secret_key:
         type: string
     type: object
-  github_com_Tencent_WeKnora_internal_types.Knowledge:
-    properties:
-      channel:
-        description: Channel indicates through which channel the knowledge was ingested
-          (web, api, browser_extension, wechat, etc.)
-        type: string
-      created_at:
-        description: Creation time of the knowledge
-        type: string
-      custom_metadata:
-        description: |-
-          CustomMetadata is user-authored descriptive metadata. It is deliberately
-          separate from Metadata, which contains internal ingestion state and IDs.
-        items:
-          type: integer
-        type: array
-      deleted_at:
-        allOf:
-        - $ref: '#/definitions/gorm.DeletedAt'
-        description: Deletion time of the knowledge
-      description:
-        description: Description of the knowledge
-        type: string
-      embedding_model_id:
-        description: ID of the embedding model
-        type: string
-      enable_status:
-        description: Enable status of the knowledge
-        type: string
-      error_message:
-        description: Error message of the knowledge
-        type: string
-      file_hash:
-        description: File hash of the knowledge
-        type: string
-      file_name:
-        description: File name of the knowledge
-        type: string
-      file_path:
-        description: File path of the knowledge
-        type: string
-      file_size:
-        description: File size of the knowledge
-        type: integer
-      file_type:
-        description: File type of the knowledge
-        type: string
-      folder_path:
-        description: |-
-          FolderPath is the canonical relative directory this entry belongs to
-          inside the knowledge base, e.g. "docs/spec" for a folder upload of
-          "docs/spec/design.md". Empty means the knowledge base root. It is a
-          display/navigation concern only: it never affects where the file is
-          physically stored (see FilePath).
-        type: string
-      id:
-        description: Unique identifier of the knowledge
-        type: string
-      knowledge_base_id:
-        description: ID of the knowledge base
-        type: string
-      knowledge_base_name:
-        description: Knowledge base name (not stored in database, populated on query)
-        type: string
-      last_faq_import_result:
-        description: Last FAQ import result (for FAQ type knowledge only)
-        items:
-          type: integer
-        type: array
-      metadata:
-        description: Metadata of the knowledge
-        items:
-          type: integer
-        type: array
-      parse_status:
-        description: Parse status of the knowledge
-        type: string
-      pending_subtasks_count:
-        description: |-
-          PendingSubtasksCount is the outstanding enrichment subtask count
-          (summary + question + graph chunks). Only meaningful while
-          ParseStatus == "finalizing"; defaults to 0 in any terminal state.
-        type: integer
-      processed_at:
-        description: Processed time of the knowledge
-        type: string
-      source:
-        description: Source of the knowledge (e.g. URL address for url type, "manual"
-          for manual type)
-        type: string
-      storage_size:
-        description: Storage size of the knowledge
-        type: integer
-      summary_status:
-        description: Summary status for async summary generation
-        type: string
-      tags:
-        description: Tags holds the tags associated with this knowledge (populated
-          on query, not persisted directly).
-        items:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeTag'
-        type: array
-      tenant_id:
-        description: Workspace ID
-        type: integer
-      title:
-        description: Title of the knowledge
-        type: string
-      type:
-        description: Type of the knowledge
-        type: string
-      updated_at:
-        description: Last updated time of the knowledge
-        type: string
-    type: object
   github_com_Tencent_WeKnora_internal_types.KnowledgeBase:
     properties:
       asr_config:
@@ -1867,36 +1829,6 @@ definitions:
       vlm_config:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig'
     type: object
-  github_com_Tencent_WeKnora_internal_types.KnowledgeTag:
-    properties:
-      color:
-        description: Optional display color
-        type: string
-      created_at:
-        description: Creation time
-        type: string
-      id:
-        description: Unique identifier of the tag (UUID)
-        type: string
-      knowledge_base_id:
-        description: Knowledge base ID that this tag belongs to
-        type: string
-      name:
-        description: Tag name, unique within the same knowledge base
-        type: string
-      seq_id:
-        description: SeqID is an auto-increment integer ID for external API usage
-        type: integer
-      sort_order:
-        description: Sort order within the same knowledge base
-        type: integer
-      tenant_id:
-        description: Workspace ID
-        type: integer
-      updated_at:
-        description: Last updated time
-        type: string
-    type: object
   github_com_Tencent_WeKnora_internal_types.ListMembersResponse:
     properties:
       members:
@@ -2182,6 +2114,76 @@ definitions:
       tenant_name:
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.MemoryConfig:
+    properties:
+      embedding_model_id:
+        description: |-
+          EmbeddingModelID is the single model used to score memory against a
+          question. It is pinned per workspace: knowledge bases each have their
+          own embedding model, and grabbing whichever one happens to be listed
+          first would mix incomparable vector spaces. Blank means semantic recall
+          is off and matching stays lexical.
+        type: string
+      enabled:
+        description: |-
+          Enabled defaults to false. Memory retains user statements across
+          sessions, so a workspace admin has to turn it on deliberately.
+        type: boolean
+      extract_delay_seconds:
+        description: |-
+          ExtractDelaySeconds is how long a finished turn waits before
+          distillation runs. Waiting lets one model call cover the several
+          messages a user usually sends in a row. 0 means the default.
+        type: integer
+      extract_instructions:
+        description: |-
+          ExtractInstructions are workspace-specific rules appended to the
+          distillation prompt, for policies the product cannot guess ("never record
+          customer names", "always note the environment a question is about").
+        type: string
+      extract_min_interval_seconds:
+        description: |-
+          ExtractMinIntervalSeconds is the floor between two distillation runs for
+          the same person, and exists purely to bound cost. It never drops a turn:
+          a turn arriving inside the interval is queued and picked up by the next
+          run. 0 means the default.
+        type: integer
+      extract_model_id:
+        description: |-
+          ExtractModelID is the model used by the background extraction task.
+          Empty means "use the model the conversation itself used", which is what
+          the settings UI promises, so the extraction task must never fail merely
+          because this is blank.
+        type: string
+      interest_threshold:
+        description: |-
+          InterestThreshold is how many separate conversations must touch a topic
+          before it becomes a stored interest. 0 means the default. Setting it to 1
+          records every topic on first sight, which is usually too noisy.
+        type: integer
+      max_items:
+        description: MaxItems caps active items per subject. 0 means DefaultMemoryMaxItems.
+        type: integer
+      retrieval_conditioning:
+        description: |-
+          RetrievalConditioning lets memory shape retrieval — query rewriting and
+          per-document ranking — rather than only being appended to the answer
+          prompt. This is where memory earns its keep in a knowledge-base product.
+        type: boolean
+      vector_recall:
+        description: |-
+          VectorRecall adds semantic similarity to memory recall. Nil means on
+          when an embedding model is reachable.
+
+          Lexical matching alone cannot find a memory the user has re-worded, which
+          is most of them: "回答直接给结论" and "别铺垫那么多" share no tokens. The
+          cost is one embedding call per turn, bounded and degraded to lexical on
+          failure, so the feature never becomes a reason a chat is slow.
+        type: boolean
+      write_mode:
+        description: WriteMode is MemoryWriteExplicitOnly or MemoryWriteAuto.
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.MentionedItem:
     properties:
       id:
@@ -2302,6 +2304,22 @@ definitions:
       updated_at:
         description: Last update timestamp
         type: string
+      usage:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.TokenUsage'
+        description: |-
+          LLM token usage aggregated across every round of the turn that produced this
+          assistant message. Persisted so history reads can attribute cost after the
+          live stream is gone; NULL (nil) for user messages and pre-feature rows.
+      used_memories:
+        description: |-
+          UsedMemories records which long-term memories were injected into this
+          answer, so the chat UI can show them and let the user delete one on the
+          spot. Persisted rather than only streamed so reopening a conversation
+          still explains what the answer saw.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UsedMemory'
+        type: array
     type: object
   github_com_Tencent_WeKnora_internal_types.MessageArtifact:
     properties:
@@ -2452,6 +2470,7 @@ definitions:
     - siliconflow
     - jina
     - openrouter
+    - litellm
     - requesty
     - nvidia
     - novita
@@ -2471,6 +2490,7 @@ definitions:
       ModelSourceNvidia: NVIDIA model
       ModelSourceOpenAI: OpenAI model
       ModelSourceOpenRouter: OpenRouter model
+      ModelSourceLiteLLM: LiteLLM proxy model
       ModelSourceRemote: Remote model
       ModelSourceRequesty: Requesty model
       ModelSourceSiliconFlow: SiliconFlow model
@@ -2491,6 +2511,7 @@ definitions:
     - SiliconFlow model
     - Jina AI model
     - OpenRouter model
+    - LiteLLM proxy model
     - Requesty model
     - NVIDIA model
     - Novita AI model
@@ -2510,6 +2531,7 @@ definitions:
     - ModelSourceSiliconFlow
     - ModelSourceJina
     - ModelSourceOpenRouter
+    - ModelSourceLiteLLM
     - ModelSourceRequesty
     - ModelSourceNvidia
     - ModelSourceNovita
@@ -2779,6 +2801,18 @@ definitions:
           nil preserves the parser default; an explicit false disables the mode.
         type: boolean
     type: object
+  github_com_Tencent_WeKnora_internal_types.PromptCacheStatus:
+    enum:
+    - unsupported
+    - unreported
+    - miss
+    - hit
+    type: string
+    x-enum-varnames:
+    - PromptCacheStatusUnsupported
+    - PromptCacheStatusUnreported
+    - PromptCacheStatusMiss
+    - PromptCacheStatusHit
   github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig:
     properties:
       custom_instructions:
@@ -3394,6 +3428,32 @@ definitions:
     - organization_id
     - permission
     type: object
+  github_com_Tencent_WeKnora_internal_types.SkillImageConfig:
+    properties:
+      base_template_id:
+        description: |-
+          BaseTemplateID is the template this chain was originally built from;
+          the rebuild path starts over from it.
+        type: string
+      built_at:
+        description: BuiltAt records when this generation was produced.
+        type: string
+      generation:
+        description: |-
+          Generation increments on every successful install/remove, for naming
+          and troubleshooting.
+        type: integer
+      owner_fingerprint:
+        description: |-
+          OwnerFingerprint identifies the provider account that owns the snapshot.
+          Snapshots are invisible across accounts, so a mismatch means "fall back
+          to the base template" rather than "fail".
+        type: string
+      snapshot_id:
+        description: SnapshotID is the currently effective snapshot; empty = base
+          template.
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.StarterSuggestionConfig:
     properties:
       count:
@@ -3690,6 +3750,11 @@ definitions:
       id:
         description: ID
         type: integer
+      memory_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MemoryConfig'
+        description: 'Memory config: workspace switch for cross-session long-term
+          memory'
       name:
         description: Name
         type: string
@@ -3770,10 +3835,24 @@ definitions:
           place secrets here that scripts must not access."
         type: object
       sandbox_type:
+        description: SandboxType is cube, e2b, or docker; disabled is the hidden policy
+          row.
+        type: string
+      skill_image:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SkillImageConfig'
         description: |-
-          SandboxType selects the sandbox backend. Named configs may use "cube",
-          "e2b", "docker", or "local". "disabled" is reserved for the hidden
-          workspace policy row.
+          SkillImage points at the snapshot that carries this config's installed
+          skills. Empty means "use the base template". Written only by the skill
+          install/remove path: MergeSandboxConfigForUpdate ignores client values
+          so a settings-form save cannot wipe or plant the pointer.
+      skill_rollout:
+        description: |-
+          SkillRollout decides whether sessions that already hold a sandbox of
+          this config rebuild after a skill install or removal. Empty and
+          SkillRolloutNextTurn rebuild on the next chat turn. SkillRolloutNewSession
+          leaves those sandboxes on the previous image; only sessions that start
+          afterwards boot the new snapshot.
         type: string
       volume_mount:
         allOf:
@@ -3784,6 +3863,30 @@ definitions:
           skills, but the configuration itself is skill-agnostic and can serve
           any volume-mount use case (shared datasets, pre-installed toolchains,
           etc.).
+    type: object
+  github_com_Tencent_WeKnora_internal_types.TokenUsage:
+    properties:
+      cache_miss_tokens:
+        type: integer
+      cache_read_tokens:
+        type: integer
+      cache_reported:
+        type: boolean
+      cache_status:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.PromptCacheStatus'
+      cache_write_tokens:
+        type: integer
+      cached_tokens:
+        description: |-
+          CachedTokens is the legacy alias for CacheReadTokens. It remains on the
+          wire for compatibility with existing API consumers.
+        type: integer
+      completion_tokens:
+        type: integer
+      prompt_tokens:
+        type: integer
+      total_tokens:
+        type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.ToolCall:
     properties:
@@ -3878,6 +3981,15 @@ definitions:
     required:
     - permission
     type: object
+  github_com_Tencent_WeKnora_internal_types.UsedMemory:
+    properties:
+      content:
+        type: string
+      id:
+        type: string
+      kind:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.User:
     properties:
       avatar:
@@ -3959,11 +4071,14 @@ definitions:
           LastActiveTenantID remembers the last workspace the user actively
           switched into, so a fresh login (new device, cleared browser, new
           refresh token) lands them back in that workspace instead of always
-          bouncing to their home workspace. Login / RefreshToken validate that
+          bouncing to their home workspace. Written by the SPA's preferences
+          PUT and by service-level SwitchTenant (including when switching
+          home, which stores the home ID). Login / RefreshToken validate that
           the workspace still exists and the user still has an active membership
           (or CanAccessAllTenants) before honouring this preference; an
           invalid pointer is best-effort cleared and the user falls back to
-          home.
+          home. Refresh JWT claims have no tenant_id, so RefreshToken
+          re-resolves from this field.
 
           nil  = no preference (use user.TenantID, i.e. home)
           *0   = "clear preference" sentinel for the partial-update endpoint
@@ -4350,6 +4465,10 @@ definitions:
       depth:
         description: populated in ego mode
         type: integer
+      familiar_count:
+        description: FamiliarCount is how many returned nodes are lit up for this
+          person.
+        type: integer
       mode:
         type: string
       returned:
@@ -4364,6 +4483,12 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiGraphNode:
     properties:
+      familiar:
+        description: |-
+          Familiar is true when this page was built from a document this person
+          keeps citing in answers. It is a personal overlay, not a property of
+          the page: two people looking at the same wiki see different highlights.
+        type: boolean
       link_count:
         description: Number of inbound + outbound links
         type: integer
@@ -4807,6 +4932,16 @@ definitions:
     - connection_config
     - engine_type
     - name
+    type: object
+  internal_handler.CreateSystemUserResponse:
+    properties:
+      generated_password:
+        description: |-
+          GeneratedPassword is the plaintext password when the server
+          auto-generated one. Absent when the caller supplied the password.
+        type: string
+      user:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo'
     type: object
   internal_handler.DeleteTagRequest:
     properties:
@@ -5668,6 +5803,17 @@ definitions:
     required:
     - name
     type: object
+  internal_handler.UpdateKnowledgeRequest:
+    properties:
+      custom_metadata:
+        items:
+          type: integer
+        type: array
+      description:
+        type: string
+      title:
+        type: string
+    type: object
   internal_handler.UpdateModelRequest:
     properties:
       description:
@@ -5832,6 +5978,21 @@ definitions:
       tenant_name:
         type: string
     type: object
+  internal_handler.meEnvVarRequest:
+    properties:
+      name:
+        type: string
+      sandbox_config_id:
+        type: string
+      skill_id:
+        type: string
+      value:
+        description: |-
+          Value is unused by the delete endpoints. Clearing a value is a delete
+          rather than a write of "", so a member always has one unambiguous way to
+          revoke.
+        type: string
+    type: object
   internal_handler.platformAPIKeyCreateRequest:
     properties:
       capabilities:
@@ -5878,6 +6039,33 @@ definitions:
     required:
     - name
     type: object
+  internal_handler.skillPatchRequest:
+    properties:
+      enabled:
+        description: |-
+          Enabled is a pointer because its absence is not a request to disable the
+          skill; a body may carry envs instead.
+        type: boolean
+      envs:
+        additionalProperties:
+          type: string
+        description: |-
+          Envs is a pointer to a map because "sent an empty object" and "did not
+          mention envs" are different requests: the first clears what it names,
+          the second must leave every stored value alone.
+        type: object
+    type: object
+  internal_handler.skillSourceRequest:
+    properties:
+      source:
+        description: |-
+          Source is exactly one of: "@owner/slug" or a slash-free slug (ClawHub),
+          a github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, a
+          ClawHub skills-sh catalog page or "skills-sh:owner/repo/slug" locator, or
+          a direct zip/SKILL.md URL. Bare "owner/slug" is rejected: it is both a
+          ClawHub id and a GitHub repo. The fetch carries no credential.
+        type: string
+    type: object
   internal_handler.storageBackendRequest:
     properties:
       config:
@@ -5913,11 +6101,13 @@ definitions:
     properties:
       last_active_tenant_id:
         description: |-
-          LastActiveTenantID lets the SPA persist "after a fresh login,
-          drop me back into this workspace" across devices. Send a positive
-          workspace id to set / replace, or 0 to clear. Membership is validated
-          at next login, not here. Nil = field omitted from the PATCH and
-          stays untouched.
+          LastActiveTenantID lets clients persist "after a fresh login,
+          drop me back into this workspace" across devices. The SPA sends
+          this after every tenant switch; POST /auth/switch-tenant records
+          the same preference server-side. Send a positive workspace id to
+          set / replace, or 0 to clear. Membership is validated at next
+          login, not here. Nil = field omitted from the PATCH and stays
+          untouched.
         type: integer
     type: object
   internal_handler_session.AttachmentUpload:
@@ -6632,7 +6822,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；成功后所有会话被撤销，需重新登录。
+      description: 修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；开启复杂密码后还需包含大小写与特殊字符。成功后所有会话被撤销，需重新登录。
       parameters:
       - description: 密码修改请求
         in: body
@@ -6666,7 +6856,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 返回当前部署的注册模式等公开认证配置，供前端决定是否展示注册入口
+      description: 返回当前部署的注册模式与密码复杂度开关，供前端决定是否展示注册入口以及密码校验规则
       produces:
       - application/json
       responses:
@@ -6994,7 +7184,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: 为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系
+      description: |-
+        为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系（跨租户超级用户除外）。
+        成功换签会把目标空间写入「最近活跃租户」偏好，下次登录与 refresh 都落在该空间（refresh JWT 不含 tenant_id）。
+        该偏好是账号级的：一次换签会改变该用户所有设备的下次登录/refresh 落点。偏好写入失败则整次换签失败，不会发出新 token。
       parameters:
       - description: 切换请求
         in: body
@@ -7019,7 +7212,7 @@ paths:
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
         "403":
-          description: 无该空间成员关系
+          description: 无该空间成员关系或偏好写入失败
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
@@ -9193,6 +9386,14 @@ paths:
         required: true
         schema:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SearchParams'
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
       produces:
       - application/json
       responses:
@@ -9227,6 +9428,14 @@ paths:
         required: true
         schema:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SearchParams'
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
       produces:
       - application/json
       responses:
@@ -10018,6 +10227,44 @@ paths:
       summary: 知识问答
       tags:
       - 问答
+  /knowledge-search:
+    post:
+      consumes:
+      - application/json
+      description: 在知识库中搜索（不使用LLM总结）
+      parameters:
+      - description: 搜索请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_session.SearchKnowledgeRequest'
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 搜索结果
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 知识搜索
+      tags:
+      - 问答
   /knowledge/{id}:
     delete:
       consumes:
@@ -10084,19 +10331,19 @@ paths:
     put:
       consumes:
       - application/json
-      description: 更新知识条目信息
+      description: 部分更新知识条目（标题/描述/自定义元数据）；未传字段保持不变，显式传空 description 可清空摘要
       parameters:
       - description: 知识ID
         in: path
         name: id
         required: true
         type: string
-      - description: 知识信息
+      - description: 更新字段（均可选）
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge'
+          $ref: '#/definitions/internal_handler.UpdateKnowledgeRequest'
       produces:
       - application/json
       responses:
@@ -10537,12 +10784,15 @@ paths:
         in: query
         name: keyword
         type: string
-      - description: Offset for pagination
+      - description: Offset for pagination (minimum 0)
         in: query
+        minimum: 0
         name: offset
         type: integer
-      - description: Limit for pagination (default 20)
+      - description: Limit for pagination (default 20, maximum 100)
         in: query
+        maximum: 100
+        minimum: 1
         name: limit
         type: integer
       - description: Comma-separated file extensions to filter (e.g., csv,xlsx)
@@ -11784,6 +12034,149 @@ paths:
       summary: MCP OAuth 回调
       tags:
       - MCP服务
+  /me/env-vars:
+    get:
+      description: List every sandbox config of this workspace with the caller's own
+        config-wide variables and the credentials its skills declared, each reporting
+        whether it is unset, filled in workspace-wide, or filled in by the caller.
+        Values are never returned.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: One group per sandbox config
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: List my environment variables
+      tags:
+      - Me
+  /me/env-vars/sandbox:
+    delete:
+      consumes:
+      - application/json
+      description: Remove the caller's own value for one variable on a sandbox config.
+      parameters:
+      - description: Sandbox config and variable name
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.meEnvVarRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Deleted
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not set
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Delete one of my sandbox environment variables
+      tags:
+      - Me
+    put:
+      consumes:
+      - application/json
+      description: Store the caller's own value for one variable on a sandbox config.
+        It is injected into every skill script and shell command this caller's turns
+        run on that config.
+      parameters:
+      - description: Sandbox config, variable name and value
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.meEnvVarRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Stored
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Set one of my sandbox environment variables
+      tags:
+      - Me
+  /me/env-vars/skill:
+    delete:
+      consumes:
+      - application/json
+      description: Remove the caller's own value. The workspace-wide value, if there
+        is one, applies again afterwards.
+      parameters:
+      - description: Skill and variable name
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.meEnvVarRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Deleted
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not set
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Delete one of my skill credentials
+      tags:
+      - Me
+    put:
+      consumes:
+      - application/json
+      description: Store the caller's own value for one variable the skill declared.
+        It overrides the workspace-wide value for this caller only, and is injected
+        only into executions that name this skill.
+      parameters:
+      - description: Skill, variable name and value
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.meEnvVarRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Stored
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Set one of my skill credentials
+      tags:
+      - Me
   /me/invitations:
     get:
       description: 返回当前登录用户的待接受邀请（默认仅 pending），用于头像入口和 /invitations 收件箱页。
@@ -11894,6 +12287,365 @@ paths:
       summary: 获取我的待处理邀请数
       tags:
       - 我的邀请
+  /memory/consolidate:
+    post:
+      description: 合并意思接近的条目、归档到期事项，不等待每日后台整理
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 整理结果
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 立刻整理我的记忆
+      tags:
+      - 长期记忆
+  /memory/documents:
+    get:
+      description: 返回当前用户回答里反复引用的文档，次数未达习惯门槛的不展示
+      parameters:
+      - default: 50
+        description: 每页条数
+        in: query
+        name: limit
+        type: integer
+      - description: 偏移量
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 文档列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 列出常用资料
+      tags:
+      - 长期记忆
+  /memory/documents/{id}:
+    delete:
+      description: 删除一条文档亲和度计数，之后检索不再因为这份文档而加权
+      parameters:
+      - description: 亲和度 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除成功
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 停止用某份文档做个性化检索
+      tags:
+      - 长期记忆
+  /memory/export:
+    get:
+      description: 以 JSON 导出当前用户的全部记忆
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 记忆导出
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 导出我的记忆
+      tags:
+      - 长期记忆
+  /memory/items:
+    delete:
+      description: 永久删除当前用户的全部记忆
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 清空成功
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 清空我的记忆
+      tags:
+      - 长期记忆
+    get:
+      description: 分页返回当前用户的记忆条目，可按状态过滤
+      parameters:
+      - description: 状态过滤
+        enum:
+        - active
+        - superseded
+        - archived
+        - pending
+        in: query
+        name: status
+        type: string
+      - default: 50
+        description: 每页条数
+        in: query
+        name: limit
+        type: integer
+      - description: 偏移量
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 记忆列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 列出我的记忆
+      tags:
+      - 长期记忆
+    post:
+      consumes:
+      - application/json
+      description: 手动添加一条长期记忆
+      parameters:
+      - description: 记忆内容
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 新增的记忆
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 新增一条记忆
+      tags:
+      - 长期记忆
+  /memory/items/{id}:
+    delete:
+      description: 永久删除一条记忆
+      parameters:
+      - description: 记忆ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除成功
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 删除一条记忆
+      tags:
+      - 长期记忆
+    put:
+      consumes:
+      - application/json
+      description: 修改记忆内容与重要度，修改后该条记忆不会被后台抽取覆盖
+      parameters:
+      - description: 记忆ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 记忆内容
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的记忆
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 修改一条记忆
+      tags:
+      - 长期记忆
+  /memory/items/{id}/confirm:
+    post:
+      description: 接受系统推断的记忆，使其开始生效
+      parameters:
+      - description: 记忆 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 确认成功
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 确认一条推断出的记忆
+      tags:
+      - 长期记忆
+  /memory/items/{id}/reject:
+    post:
+      description: 拒绝系统推断的记忆，并记住这次拒绝
+      parameters:
+      - description: 记忆 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 否决成功
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 否决一条推断出的记忆
+      tags:
+      - 长期记忆
+  /memory/settings:
+    get:
+      description: 返回合并后的记忆开关状态（空间级 + 个人级）与记忆条数
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 记忆设置
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 获取我的记忆设置
+      tags:
+      - 长期记忆
+    put:
+      consumes:
+      - application/json
+      description: 开启或关闭当前用户自己的长期记忆
+      parameters:
+      - description: 设置
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的设置
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 更新我的记忆设置
+      tags:
+      - 长期记忆
+  /memory/topics:
+    get:
+      description: 返回已计数、尚未提升为长期关注的主题，以及距离阈值还差几次
+      parameters:
+      - default: 50
+        description: 每页条数
+        in: query
+        name: limit
+        type: integer
+      - description: 偏移量
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 主题列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 列出正在观察的主题
+      tags:
+      - 长期记忆
+  /memory/topics/{id}:
+    delete:
+      description: 删除尚未提升的主题计数，并记住这次拒绝，之后不会再自动记为长期关注
+      parameters:
+      - description: 主题 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除成功
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 停止跟踪一个主题
+      tags:
+      - 长期记忆
+  /memory/topics/{id}/promote:
+    post:
+      description: 不等待剩余次数，把正在观察的主题提升为一条长期关注记忆
+      parameters:
+      - description: 主题 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 新增的记忆
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 立即记为长期关注
+      tags:
+      - 长期记忆
   /messages/{session_id}/{id}:
     delete:
       consumes:
@@ -12094,6 +12846,10 @@ paths:
           schema:
             additionalProperties: true
             type: object
+        "400":
+          description: 模型仍被知识库、智能体或长期记忆引用
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
         "404":
           description: 模型不存在
           schema:
@@ -13092,6 +13848,433 @@ paths:
       summary: Inspect sandbox config inventory
       tags:
       - SandboxConfig
+  /sandbox-configs/{id}/skills:
+    get:
+      description: List the agent skills installed onto one sandbox config's image.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Installed skills
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Sandbox config not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: List installed skills
+      tags:
+      - SandboxConfig
+    post:
+      consumes:
+      - application/json
+      - multipart/form-data
+      description: |-
+        Install a skill onto this sandbox config's image. Send a zip
+        as multipart form field "file", or JSON {"source":"..."} to
+        pull a public skill. source is one of: "@owner/slug" or a
+        slash-free slug (ClawHub), a github.com / gitlab.com /
+        skills.sh / clawhub / skillhub URL, a ClawHub skills-sh
+        catalog page (https://clawhub.ai/skills-sh/owner/repo/slug),
+        a skills-sh:owner/repo/slug locator, or a direct zip/SKILL.md
+        URL. Bare "owner/slug" is rejected as ambiguous. The source
+        must be readable anonymously. The install boots a sandbox and
+        runs for minutes, so the request is only accepted; follow it
+        via the install-events stream.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill bundle (zip)
+        in: formData
+        name: file
+        type: file
+      - description: Install from a registry, git host, or archive URL
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/internal_handler.skillSourceRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Install accepted
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Missing, oversized or invalid bundle or source
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Sandbox config not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Install a skill
+      tags:
+      - SandboxConfig
+  /sandbox-configs/{id}/skills/{skillId}:
+    delete:
+      description: |-
+        Remove a skill from the config's image. The removal rebuilds
+        the image and runs for minutes, so it is only accepted; follow
+        it via the install-events stream.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skillId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Removal accepted
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Skill not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Remove an installed skill
+      tags:
+      - SandboxConfig
+    get:
+      description: Retrieve one installed skill of a sandbox config.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skillId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Installed skill
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Skill not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Get an installed skill
+      tags:
+      - SandboxConfig
+    patch:
+      consumes:
+      - application/json
+      description: Show or hide an installed skill and set the workspace-wide values
+        of the environment variables it declared. Either field may be sent, or both.
+        The files stay in the image either way; removal is a separate flow.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skillId
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.skillPatchRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated skill
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Skill not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Update an installed skill
+      tags:
+      - SandboxConfig
+  /sandbox-configs/{id}/skills/{skillId}/files:
+    get:
+      description: List files in the stored skill bundle without starting a sandbox.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skillId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Skill files
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Skill or files not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: List files of an installed skill
+      tags:
+      - SandboxConfig
+  /sandbox-configs/{id}/skills/{skillId}/files/content:
+    get:
+      description: Read one skill file as UTF-8, a small base64 image, or binary.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skillId
+        required: true
+        type: string
+      - description: Skill-root-relative file path
+        in: query
+        name: path
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Skill file
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid path
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Skill or file not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Read one file of an installed skill
+      tags:
+      - SandboxConfig
+  /sandbox-configs/{id}/skills/{skillId}/install-events:
+    get:
+      description: |-
+        Server-sent progress for one install or removal. The stream
+        always terminates: with the run's own terminal event, with one
+        derived from the durable status, or with a "detached" frame
+        when it stops following a run that is still going.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skillId
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of progress events
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Skill not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Follow an install or removal
+      tags:
+      - SandboxConfig
+  /sandbox-configs/{id}/skills/{skillId}/reinstall:
+    post:
+      description: Retry a failed install from the stored archive; does not re-upload.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skillId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Reinstall accepted
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: The stored archive is gone
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Skill not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Retry a skill install
+      tags:
+      - SandboxConfig
+  /sandbox-configs/{id}/skills/{skillId}/transcript:
+    get:
+      description: |-
+        Server-sent replay of everything the installer agent did — the
+        prompt it was given, its thinking, the commands it ran and
+        their output — followed live while the install is still
+        running. Frames are the same shape the chat stream uses, so a
+        console renders an install with the components it renders a
+        chat turn with. 404 once the event log has expired; the
+        durable message history is the fallback.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skillId
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of transcript events
+          schema:
+            type: string
+        "204":
+          description: Install is still preparing; retry once locators exist
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Skill or transcript not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Follow an install's agent transcript
+      tags:
+      - SandboxConfig
   /sessions:
     get:
       consumes:
@@ -13610,44 +14793,6 @@ paths:
       summary: 继续流式响应
       tags:
       - 问答
-  /knowledge-search:
-    post:
-      consumes:
-      - application/json
-      description: 在知识库中搜索（不使用LLM总结）
-      parameters:
-      - description: 搜索请求
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/internal_handler_session.SearchKnowledgeRequest'
-      - default: handle
-        description: 文件引用形式，public 返回可加载直链
-        enum:
-        - handle
-        - public
-        in: query
-        name: resource_urls
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 搜索结果
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: 请求参数错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 知识搜索
-      tags:
-      - 问答
   /shared-agents:
     get:
       description: 返回所有共享给当前用户所在组织的智能体
@@ -13689,7 +14834,12 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取所有预装的Agent Skills元数据
+      description: 返回指定沙箱配置镜像内、智能体实际能调用的已安装技能（ready 且启用）。不传 sandbox_config_id 时列表为空。
+      parameters:
+      - description: Sandbox config ID
+        in: query
+        name: sandbox_config_id
+        type: string
       produces:
       - application/json
       responses:
@@ -13698,14 +14848,10 @@ paths:
           schema:
             additionalProperties: true
             type: object
-        "500":
-          description: 服务器错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
       - ApiKeyAuth: []
-      summary: 获取预装Skills列表
+      summary: 获取当前沙箱配置上可执行的 Skills
       tags:
       - Skills
   /storage-backends:
@@ -14467,6 +15613,58 @@ paths:
             additionalProperties: true
             type: object
       summary: Apply the default storage quota to every existing workspace
+      tags:
+      - System Admin
+  /system/admin/users/create:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Provision a new local user account (SystemAdmin only).
+        When `password` is omitted or null, a cryptographically random
+        password is generated (OIDC-style crypto/rand + base64url)
+        and returned once in the response body. Any provided value,
+        including empty string, is policy-checked. Tenant provisioning
+        follows the shared auth.default_tenant_mode policy.
+      parameters:
+      - description: User creation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AdminCreateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Identity already exists, returns the existing user
+          schema:
+            $ref: '#/definitions/internal_handler.CreateSystemUserResponse'
+        "201":
+          description: User created successfully
+          schema:
+            $ref: '#/definitions/internal_handler.CreateSystemUserResponse'
+        "400":
+          description: Invalid request or weak password
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 'Forbidden: not a system admin'
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Email and username refer to conflicting identities
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Create a new user (SystemAdmin)
       tags:
       - System Admin
   /system/admin/users/reset-password:

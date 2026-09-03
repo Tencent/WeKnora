@@ -128,6 +128,14 @@ func (s *bindingStoreFaults) DeleteIfMatch(
 	return s.base.DeleteIfMatch(ctx, key, provider, sandboxID)
 }
 
+func (s *bindingStoreFaults) InvalidateByConfig(
+	ctx context.Context,
+	tenantID uint64,
+	configID string,
+) (int, error) {
+	return s.base.InvalidateByConfig(ctx, tenantID, configID)
+}
+
 func (s *bindingStoreFaults) WithLifecycleLock(
 	ctx context.Context,
 	key SessionSandboxKey,
@@ -882,6 +890,186 @@ func TestLifecycleTagsGlobalDefaultConfigWithSentinel(t *testing.T) {
 
 	require.Equal(t, types.SandboxConfigIDGlobalDefault, md[remoteMetadataConfigID],
 		"an empty config ID must still be tagged, so listing can target it")
+}
+
+// lifecycleFixture is the smallest complete lifecycle: one memory binding
+// store, one fake provider, one live session bound to config "cfg-1".
+type lifecycleFixture struct {
+	lifecycle *remoteSessionLifecycle
+	bindings  *MemorySessionSandboxBindingStore
+	client    *fakeRemoteClient
+	checker   *fakeSessionExistenceChecker
+	key       SessionSandboxKey
+}
+
+func newLifecycleFixture(t *testing.T) *lifecycleFixture {
+	t.Helper()
+	client := newFakeRemoteClient(SandboxTypeCube)
+	bindings := NewMemorySessionSandboxBindingStore()
+	checker := &fakeSessionExistenceChecker{exists: true}
+	lifecycle, err := newRemoteSessionLifecycle(
+		client,
+		bindings,
+		checker,
+		RemoteCreateRequest{TemplateID: "template-a"},
+		time.Minute,
+		"cfg-1",
+	)
+	require.NoError(t, err)
+	return &lifecycleFixture{
+		lifecycle: lifecycle,
+		bindings:  bindings,
+		client:    client,
+		checker:   checker,
+		key:       SessionSandboxKey{TenantID: 42, SessionID: "session-a"},
+	}
+}
+
+func TestResolveRecreatesSandboxAfterImageChange(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	first, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	second, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	require.NotEqual(t, first.ID(), second.ID(),
+		"a session must pick up the new skill image on its next sandbox use")
+	require.Contains(t, fx.client.deleteIDs, first.ID(),
+		"the stale sandbox must be released, not leaked")
+}
+
+func TestResolveKeepsStaleSandboxDuringAnOpenTurn(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	require.NoError(t, fx.bindings.BeginTurn(ctx, fx.key))
+	first, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	second, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	require.Equal(t, first.ID(), second.ID(),
+		"a turn already using the sandbox must keep it after an install")
+	require.NotContains(t, fx.client.deleteIDs, first.ID())
+}
+
+func TestResolveRebuildsStaleSandboxOnFirstUseOfNextTurn(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	require.NoError(t, fx.bindings.BeginTurn(ctx, fx.key))
+	first, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	require.NoError(t, fx.bindings.EndTurn(ctx, fx.key))
+	require.NoError(t, fx.bindings.BeginTurn(ctx, fx.key))
+
+	second, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	require.NotEqual(t, first.ID(), second.ID(),
+		"the next turn's first resolve must pick up the new skill image")
+	require.Contains(t, fx.client.deleteIDs, first.ID())
+
+	third, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	require.Equal(t, second.ID(), third.ID(),
+		"later resolves of the new turn must keep the rebuilt sandbox")
+}
+
+func TestInvalidateDoesNotDisturbOtherConfigs(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	_, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-other")
+	require.NoError(t, err)
+	require.Zero(t, n)
+}
+
+// Marking is not the same as tearing down: a turn already running in the old
+// sandbox must keep working, and the new image arrives on its next use.
+func TestInvalidateLeavesTheRunningSandboxAlone(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	handle, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	require.True(t, fx.client.hasSandbox(handle.ID()),
+		"invalidation must not destroy a sandbox a turn may be using")
+	binding, err := fx.bindings.Get(ctx, fx.key)
+	require.NoError(t, err)
+	require.NotNil(t, binding, "the binding is marked, never dropped outside the lock")
+	require.NotNil(t, binding.StaleAt)
+}
+
+// A second invalidation between two uses must not report the same binding
+// twice: the caller logs the count as "how many sessions were affected".
+func TestInvalidateSkipsBindingsAlreadyMarked(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	_, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	n, err = fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+	require.Zero(t, n)
+}
+
+// The rebuilt sandbox must not inherit the mark, or every later use would
+// destroy and recreate a perfectly current sandbox.
+func TestResolveClearsStalenessAfterRecreating(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	_, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	_, err = fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+
+	second, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	binding, err := fx.bindings.Get(ctx, fx.key)
+	require.NoError(t, err)
+	require.NotNil(t, binding)
+	require.Nil(t, binding.StaleAt)
+	require.Equal(t, "cfg-1", binding.ConfigID,
+		"the rebuilt binding must record the config it belongs to")
+
+	third, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	require.Equal(t, second.ID(), third.ID())
+}
+
+// Another workspace's session may sit on the same config ID; marking must stay
+// inside the workspace whose image changed.
+func TestInvalidateStaysWithinTheWorkspace(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	_, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID+1, "cfg-1")
+	require.NoError(t, err)
+	require.Zero(t, n)
 }
 
 func newTestLifecycleWithConfigID(t *testing.T, configID string) *remoteSessionLifecycle {

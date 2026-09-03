@@ -143,7 +143,10 @@ func (c *E2BRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		SupportsPauseResume:           true,
 		SupportsTimeoutRefresh:        true,
 		SupportsFilesystemEnumeration: true,
-		SupportsVolumes:               true,
+		// E2B stores snapshots as templates, so a snapshot ID can be handed
+		// straight back as CreateOptions.TemplateID.
+		SupportsSnapshots: true,
+		SupportsVolumes:   true,
 	}
 }
 
@@ -328,6 +331,45 @@ func (c *E2BRemoteClient) EnsureStandardTemplate(ctx context.Context) (*RemoteTe
 			return &items[i], nil
 		}
 	}
+	return c.buildStandardTemplate(ctx)
+}
+
+// ReplaceStandardTemplate starts a new WeKnora-template build from the current
+// spec. E2B resolves builds by name, so this is often a rebuild of the same
+// ID. The previous template stays listed until the caller has persisted a
+// spawnable replacement and called DeleteSupersededStandardTemplates: deleting
+// first left stored template_ids pointing at a missing template, and retrying
+// a refused rebuild by deleting the live ID did the same.
+func (c *E2BRemoteClient) ReplaceStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
+	return c.buildStandardTemplate(ctx)
+}
+
+// DeleteSupersededStandardTemplates drops WeKnora templates other than keepID.
+func (c *E2BRemoteClient) DeleteSupersededStandardTemplates(ctx context.Context, keepID string) error {
+	keepID = strings.TrimSpace(keepID)
+	if keepID == "" {
+		return e2bInvalidRequest("DeleteSupersededStandardTemplates", "template ID is required", nil)
+	}
+	items, err := c.ListTemplates(ctx)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if !item.Standard || strings.TrimSpace(item.ID) == "" || item.ID == keepID {
+			continue
+		}
+		logger.Infof(ctx, "e2b deleting superseded standard template %s", item.ID)
+		if err := c.client.DeleteTemplate(ctx, item.ID); err != nil {
+			var notFound *e2b.TemplateNotFoundError
+			if !errors.As(err, &notFound) {
+				logger.Warnf(ctx, "e2b delete of replaced template %s failed: %v", item.ID, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (c *E2BRemoteClient) buildStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
 	builder := e2b.NewTemplate().FromImage(DefaultDockerImage)
 	build, err := builder.BuildInBackground(ctx, c.client, e2b.BuildConfig{
 		Name: StandardTemplateName,
@@ -867,7 +909,7 @@ func (c *E2BRemoteClient) MakeDir(
 		return e2bInvalidRequest("MakeDir", "path is required", nil)
 	}
 	if err := sandbox.Filesystem.MakeDir(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser)); err != nil {
-		return normalizeE2BError("MakeDir", err)
+		return ignoreExistingDir(normalizeE2BError("MakeDir", err))
 	}
 	return nil
 }
@@ -918,6 +960,117 @@ func (c *E2BRemoteClient) Stat(
 		Size:    info.Size,
 		ModTime: info.ModTime,
 	}, nil
+}
+
+// CreateSnapshot snapshots a running sandbox. E2B exposes snapshots on the
+// connected sandbox handle, so the adapter reattaches first like Delete does.
+func (c *E2BRemoteClient) CreateSnapshot(
+	ctx context.Context, sandboxID string, name string,
+) (RemoteSnapshotRef, error) {
+	if strings.TrimSpace(sandboxID) == "" {
+		return RemoteSnapshotRef{}, e2bInvalidRequest("CreateSnapshot", "sandbox ID is required", nil)
+	}
+	timeoutSeconds, err := e2bTimeoutSeconds(
+		RemoteTimeoutPolicy{Mode: RemoteTimeoutServerDefault},
+		c.timeout,
+	)
+	if err != nil {
+		return RemoteSnapshotRef{}, e2bInvalidRequest("CreateSnapshot", err.Error(), err)
+	}
+	sandbox, err := c.client.Connect(ctx, sandboxID, timeoutSeconds)
+	if err != nil {
+		return RemoteSnapshotRef{}, normalizeE2BError("CreateSnapshot", err)
+	}
+	if sandbox == nil || strings.TrimSpace(sandbox.ID) == "" ||
+		sandbox.ID != sandboxID {
+		return RemoteSnapshotRef{}, NewRemoteError(
+			SandboxTypeE2B, "CreateSnapshot", RemoteErrorKindInternal,
+			"e2b returned a mismatched sandbox handle", nil,
+		)
+	}
+
+	var info *e2b.SnapshotInfo
+	if trimmed := strings.TrimSpace(name); trimmed != "" {
+		info, err = sandbox.CreateSnapshot(ctx, trimmed)
+	} else {
+		info, err = sandbox.CreateSnapshot(ctx)
+	}
+	if err != nil {
+		return RemoteSnapshotRef{}, normalizeE2BError("CreateSnapshot", err)
+	}
+	if info == nil || strings.TrimSpace(info.SnapshotID) == "" {
+		return RemoteSnapshotRef{}, e2bInvalidRequest(
+			"CreateSnapshot", "provider returned an empty snapshot ID", nil)
+	}
+	return RemoteSnapshotRef{ID: info.SnapshotID, Names: info.Names}, nil
+}
+
+// DeleteSnapshot removes a snapshot. go-e2b reports a missing snapshot as
+// (false, nil), so cleanup stays idempotent while genuine provider errors
+// still surface through the neutral error taxonomy.
+func (c *E2BRemoteClient) DeleteSnapshot(ctx context.Context, snapshotID string) error {
+	if strings.TrimSpace(snapshotID) == "" {
+		return e2bInvalidRequest("DeleteSnapshot", "snapshot ID is required", nil)
+	}
+	if _, err := c.client.DeleteSnapshot(ctx, snapshotID); err != nil {
+		normalized := normalizeE2BError("DeleteSnapshot", err)
+		if IsRemoteNotFound(normalized) {
+			return nil
+		}
+		return normalized
+	}
+	return nil
+}
+
+// ListSnapshots pages through every snapshot, optionally filtered by source
+// sandbox. Used only by the skill-image orphan-reconciliation task.
+func (c *E2BRemoteClient) ListSnapshots(
+	ctx context.Context, sandboxID string,
+) ([]RemoteSnapshotRef, error) {
+	baseOptions := []e2b.ListSnapshotsOption{e2b.WithSnapshotLimit(100)}
+	if trimmed := strings.TrimSpace(sandboxID); trimmed != "" {
+		baseOptions = append(baseOptions, e2b.WithSnapshotSandboxID(trimmed))
+	}
+
+	var (
+		out   []RemoteSnapshotRef
+		token string
+		seen  = map[string]struct{}{"": {}}
+	)
+	for {
+		options := append([]e2b.ListSnapshotsOption(nil), baseOptions...)
+		if token != "" {
+			options = append(options, e2b.WithSnapshotNextToken(token))
+		}
+		page, err := c.client.ListSnapshots(ctx, options...)
+		if err != nil {
+			return nil, normalizeE2BError("ListSnapshots", err)
+		}
+		if page == nil {
+			return nil, NewRemoteError(
+				SandboxTypeE2B,
+				"ListSnapshots",
+				RemoteErrorKindInternal,
+				"e2b returned an empty snapshot list page",
+				nil,
+			)
+		}
+		for _, item := range page.Snapshots {
+			out = append(out, RemoteSnapshotRef{ID: item.SnapshotID, Names: item.Names})
+		}
+		if page.NextToken == "" {
+			return out, nil
+		}
+		// A provider/SDK bug that repeats a pagination token (the same one,
+		// or a cycle A→B→A) would otherwise spin forever and block skill-
+		// image orphan cleanup. Fail fast instead of hanging until cancel.
+		if _, dup := seen[page.NextToken]; dup {
+			return nil, e2bInvalidRequest("ListSnapshots",
+				"provider returned a repeated pagination token", nil)
+		}
+		seen[page.NextToken] = struct{}{}
+		token = page.NextToken
+	}
 }
 
 // --- helpers -----------------------------------------------------------------
@@ -1100,6 +1253,7 @@ func normalizeE2BError(op string, err error) error {
 			}
 		}
 	}
+	kind = snapshotDeleteKind(op, kind, err.Error())
 	remoteErr := NewRemoteError(SandboxTypeE2B, op, kind, err.Error(), err)
 	remoteErr.StatusCode = status
 	return remoteErr
@@ -1119,6 +1273,8 @@ func e2bRemoteEntryType(fileType string) RemoteDirEntryType {
 }
 
 var (
-	_ RemoteSandboxClient = (*E2BRemoteClient)(nil)
-	_ RemoteSandboxHandle = (*e2bRemoteHandle)(nil)
+	_ RemoteSandboxClient   = (*E2BRemoteClient)(nil)
+	_ RemoteSnapshotManager = (*E2BRemoteClient)(nil)
+	_ RemoteTemplateCatalog = (*E2BRemoteClient)(nil)
+	_ RemoteSandboxHandle   = (*e2bRemoteHandle)(nil)
 )

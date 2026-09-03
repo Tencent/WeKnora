@@ -342,7 +342,7 @@ type Reranker interface {
 
 ### 现有实现
 
-`internal/models/provider/provider.go` 中已定义 26 个 `ProviderName` 常量：openai、anthropic、aliyun、zhipu、openrouter、requesty、siliconflow、jina、generic、deepseek、gemini、volcengine、hunyuan、minimax、mimo、gpustack、moonshot、modelscope、qianfan、qiniu、longcat、lkeap、nvidia 等。具体 Provider 实现分布在 `internal/models/provider/` 下的各文件（如 `zhipu.go`、`gemini.go`、`hunyuan.go`、`generic.go`）；特殊 embedding 实现如 `internal/models/embedding/jina.go`、`volcengine.go`、`nvidia.go`。
+`internal/models/provider/provider.go` 中已定义 27 个 `ProviderName` 常量：openai、anthropic、aliyun、zhipu、openrouter、litellm、requesty、siliconflow、jina、generic、deepseek、gemini、volcengine、hunyuan、minimax、mimo、gpustack、moonshot、modelscope、qianfan、qiniu、longcat、lkeap、nvidia 等。具体 Provider 实现分布在 `internal/models/provider/` 下的各文件（如 `zhipu.go`、`gemini.go`、`hunyuan.go`、`generic.go`）；特殊 embedding 实现如 `internal/models/embedding/jina.go`、`volcengine.go`、`nvidia.go`。
 
 ### 新增步骤
 

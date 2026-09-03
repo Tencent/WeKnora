@@ -14,9 +14,14 @@ import (
 // It mirrors the real SessionCapabilityProvider contract SessionBoundManager
 // implements, without pulling in the full manager wiring.
 type capableManager struct {
-	typ   sandbox.SandboxType
-	shell sandbox.SessionShellExecutor
-	files sandbox.SessionFileStore
+	typ          sandbox.SandboxType
+	shell        sandbox.SessionShellExecutor
+	files        sandbox.SessionFileStore
+	installShell sandbox.SessionInstallShellExecutor
+}
+
+func (m *capableManager) SessionInstallShellExecutor() sandbox.SessionInstallShellExecutor {
+	return m.installShell
 }
 
 func (m *capableManager) Execute(context.Context, *sandbox.ExecuteConfig) (*sandbox.ExecuteResult, error) {
@@ -44,9 +49,9 @@ func (s *stubShellExecutor) ExecShellCommand(
 }
 
 func TestSessionSandboxShellExecutorReturnsNilWithoutCapability(t *testing.T) {
-	// Managers that don't implement SessionCapabilityProvider (Local /
-	// Docker / Disabled DefaultManager) must never surface shell_exec.
-	nonCapable := &capableManager{typ: sandbox.SandboxTypeLocal}
+	// Managers that don't implement SessionCapabilityProvider (Disabled
+	// DefaultManager) must never surface shell_exec.
+	nonCapable := &capableManager{typ: sandbox.SandboxTypeDisabled}
 	assert.Nil(t, sessionSandboxShellExecutor(nonCapable))
 	assert.Nil(t, sessionSandboxFileStore(nonCapable))
 	assert.Nil(t, sessionSandboxShellExecutor(nil))
@@ -54,8 +59,7 @@ func TestSessionSandboxShellExecutorReturnsNilWithoutCapability(t *testing.T) {
 
 func TestSessionSandboxShellExecutorReturnsNilWhenProviderRefuses(t *testing.T) {
 	// A provider that advertises capabilities but is currently unable to
-	// honour them (e.g. SessionBoundManager after Local fallback) returns
-	// nil from the accessor. The tool layer must respect that.
+	// honour them returns nil from the accessor. The tool layer must respect that.
 	m := &capableManager{typ: sandbox.SandboxTypeCube}
 	assert.Nil(t, sessionSandboxShellExecutor(m))
 	assert.Nil(t, sessionSandboxFileStore(m))

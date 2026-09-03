@@ -43,14 +43,25 @@ type AgentQARequest struct {
 type AgentResponseType string
 
 const (
-	AgentResponseTypeThinking   AgentResponseType = "thinking"
-	AgentResponseTypeToolCall   AgentResponseType = "tool_call"
+	// AgentResponseTypeThinking is emitted while the agent is reasoning.
+	AgentResponseTypeThinking AgentResponseType = "thinking"
+	// AgentResponseTypeToolCall is emitted when the agent invokes a tool.
+	AgentResponseTypeToolCall AgentResponseType = "tool_call"
+	// AgentResponseTypeToolResult is emitted when a tool returns.
 	AgentResponseTypeToolResult AgentResponseType = "tool_result"
+	// AgentResponseTypeReferences is emitted with knowledge references.
 	AgentResponseTypeReferences AgentResponseType = "references"
-	AgentResponseTypeAnswer     AgentResponseType = "answer"
+	// AgentResponseTypeAnswer is emitted for answer tokens.
+	AgentResponseTypeAnswer AgentResponseType = "answer"
+	// AgentResponseTypeReflection is emitted for agent reflection.
 	AgentResponseTypeReflection AgentResponseType = "reflection"
-	AgentResponseTypeError      AgentResponseType = "error"
-	AgentResponseTypeComplete   AgentResponseType = "complete"
+	// AgentResponseTypeError is emitted when the agent fails.
+	AgentResponseTypeError AgentResponseType = "error"
+	// AgentResponseTypeComplete is emitted when the agent run has finished.
+	AgentResponseTypeComplete AgentResponseType = "complete"
+	// AgentResponseTypeArtifactsPending is emitted while skill-generated files
+	// are still being collected after the answer has streamed.
+	AgentResponseTypeArtifactsPending AgentResponseType = "artifacts_pending"
 )
 
 // AgentStreamResponse agent streaming response

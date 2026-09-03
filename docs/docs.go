@@ -825,7 +825,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；成功后所有会话被撤销，需重新登录。",
+                "description": "修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；开启复杂密码后还需包含大小写与特殊字符。成功后所有会话被撤销，需重新登录。",
                 "consumes": [
                     "application/json"
                 ],
@@ -874,7 +874,7 @@ const docTemplate = `{
         },
         "/auth/config": {
             "get": {
-                "description": "返回当前部署的注册模式等公开认证配置，供前端决定是否展示注册入口",
+                "description": "返回当前部署的注册模式与密码复杂度开关，供前端决定是否展示注册入口以及密码校验规则",
                 "consumes": [
                     "application/json"
                 ],
@@ -1370,7 +1370,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系",
+                "description": "为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系（跨租户超级用户除外）。\n成功换签会把目标空间写入「最近活跃租户」偏好，下次登录与 refresh 都落在该空间（refresh JWT 不含 tenant_id）。\n该偏好是账号级的：一次换签会改变该用户所有设备的下次登录/refresh 落点。偏好写入失败则整次换签失败，不会发出新 token。",
                 "consumes": [
                     "application/json"
                 ],
@@ -1414,7 +1414,7 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "无该空间成员关系",
+                        "description": "无该空间成员关系或偏好写入失败",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -4928,6 +4928,17 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SearchParams"
                         }
+                    },
+                    {
+                        "enum": [
+                            "handle",
+                            "public"
+                        ],
+                        "type": "string",
+                        "default": "handle",
+                        "description": "文件引用形式，public 返回可加载直链",
+                        "name": "resource_urls",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4982,6 +4993,17 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SearchParams"
                         }
+                    },
+                    {
+                        "enum": [
+                            "handle",
+                            "public"
+                        ],
+                        "type": "string",
+                        "default": "handle",
+                        "description": "文件引用形式，public 返回可加载直链",
+                        "name": "resource_urls",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -6122,6 +6144,66 @@ const docTemplate = `{
                 }
             }
         },
+        "/knowledge-search": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "在知识库中搜索（不使用LLM总结）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "问答"
+                ],
+                "summary": "知识搜索",
+                "parameters": [
+                    {
+                        "description": "搜索请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_session.SearchKnowledgeRequest"
+                        }
+                    },
+                    {
+                        "enum": [
+                            "handle",
+                            "public"
+                        ],
+                        "type": "string",
+                        "default": "handle",
+                        "description": "文件引用形式，public 返回可加载直链",
+                        "name": "resource_urls",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "搜索结果",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/knowledge/batch": {
             "get": {
                 "security": [
@@ -6594,14 +6676,17 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "minimum": 0,
                         "type": "integer",
-                        "description": "Offset for pagination",
+                        "description": "Offset for pagination (minimum 0)",
                         "name": "offset",
                         "in": "query"
                     },
                     {
+                        "maximum": 100,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Limit for pagination (default 20)",
+                        "description": "Limit for pagination (default 20, maximum 100)",
                         "name": "limit",
                         "in": "query"
                     },
@@ -6751,7 +6836,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "更新知识条目信息",
+                "description": "部分更新知识条目（标题/描述/自定义元数据）；未传字段保持不变，显式传空 description 可清空摘要",
                 "consumes": [
                     "application/json"
                 ],
@@ -6771,12 +6856,12 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "知识信息",
+                        "description": "更新字段（均可选）",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge"
+                            "$ref": "#/definitions/internal_handler.UpdateKnowledgeRequest"
                         }
                     }
                 ],
@@ -8875,6 +8960,219 @@ const docTemplate = `{
                 }
             }
         },
+        "/me/env-vars": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "List every sandbox config of this workspace with the caller's own config-wide variables and the credentials its skills declared, each reporting whether it is unset, filled in workspace-wide, or filled in by the caller. Values are never returned.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Me"
+                ],
+                "summary": "List my environment variables",
+                "responses": {
+                    "200": {
+                        "description": "One group per sandbox config",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/me/env-vars/sandbox": {
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Store the caller's own value for one variable on a sandbox config. It is injected into every skill script and shell command this caller's turns run on that config.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Me"
+                ],
+                "summary": "Set one of my sandbox environment variables",
+                "parameters": [
+                    {
+                        "description": "Sandbox config, variable name and value",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.meEnvVarRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Stored",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Remove the caller's own value for one variable on a sandbox config.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Me"
+                ],
+                "summary": "Delete one of my sandbox environment variables",
+                "parameters": [
+                    {
+                        "description": "Sandbox config and variable name",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.meEnvVarRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deleted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not set",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/me/env-vars/skill": {
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Store the caller's own value for one variable the skill declared. It overrides the workspace-wide value for this caller only, and is injected only into executions that name this skill.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Me"
+                ],
+                "summary": "Set one of my skill credentials",
+                "parameters": [
+                    {
+                        "description": "Skill, variable name and value",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.meEnvVarRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Stored",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Remove the caller's own value. The workspace-wide value, if there is one, applies again afterwards.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Me"
+                ],
+                "summary": "Delete one of my skill credentials",
+                "parameters": [
+                    {
+                        "description": "Skill and variable name",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.meEnvVarRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deleted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not set",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/me/invitations": {
             "get": {
                 "security": [
@@ -9043,6 +9341,574 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/consolidate": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "合并意思接近的条目、归档到期事项，不等待每日后台整理",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "立刻整理我的记忆",
+                "responses": {
+                    "200": {
+                        "description": "整理结果",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/documents": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回当前用户回答里反复引用的文档，次数未达习惯门槛的不展示",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "列出常用资料",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页条数",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "偏移量",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "文档列表",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/documents/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "删除一条文档亲和度计数，之后检索不再因为这份文档而加权",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "停止用某份文档做个性化检索",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "亲和度 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "删除成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/export": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "以 JSON 导出当前用户的全部记忆",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "导出我的记忆",
+                "responses": {
+                    "200": {
+                        "description": "记忆导出",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/items": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "分页返回当前用户的记忆条目，可按状态过滤",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "列出我的记忆",
+                "parameters": [
+                    {
+                        "enum": [
+                            "active",
+                            "superseded",
+                            "archived",
+                            "pending"
+                        ],
+                        "type": "string",
+                        "description": "状态过滤",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页条数",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "偏移量",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "记忆列表",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "手动添加一条长期记忆",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "新增一条记忆",
+                "parameters": [
+                    {
+                        "description": "记忆内容",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "新增的记忆",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "永久删除当前用户的全部记忆",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "清空我的记忆",
+                "responses": {
+                    "200": {
+                        "description": "清空成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/items/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "修改记忆内容与重要度，修改后该条记忆不会被后台抽取覆盖",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "修改一条记忆",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "记忆ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "记忆内容",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的记忆",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "永久删除一条记忆",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "删除一条记忆",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "记忆ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "删除成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/items/{id}/confirm": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "接受系统推断的记忆，使其开始生效",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "确认一条推断出的记忆",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "记忆 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "确认成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/items/{id}/reject": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "拒绝系统推断的记忆，并记住这次拒绝",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "否决一条推断出的记忆",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "记忆 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "否决成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/settings": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回合并后的记忆开关状态（空间级 + 个人级）与记忆条数",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "获取我的记忆设置",
+                "responses": {
+                    "200": {
+                        "description": "记忆设置",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "开启或关闭当前用户自己的长期记忆",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "更新我的记忆设置",
+                "parameters": [
+                    {
+                        "description": "设置",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的设置",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/topics": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回已计数、尚未提升为长期关注的主题，以及距离阈值还差几次",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "列出正在观察的主题",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页条数",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "偏移量",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "主题列表",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/topics/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "删除尚未提升的主题计数，并记住这次拒绝，之后不会再自动记为长期关注",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "停止跟踪一个主题",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "主题 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "删除成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/topics/{id}/promote": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "不等待剩余次数，把正在观察的主题提升为一条长期关注记忆",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "立即记为长期关注",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "主题 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "新增的记忆",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -9553,6 +10419,12 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "模型仍被知识库、智能体或长期记忆引用",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
@@ -10942,6 +11814,631 @@ const docTemplate = `{
                 }
             }
         },
+        "/sandbox-configs/{id}/skills": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "List the agent skills installed onto one sandbox config's image.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "List installed skills",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Installed skills",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Sandbox config not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Install a skill onto this sandbox config's image. Send a zip\nas multipart form field \"file\", or JSON {\"source\":\"...\"} to\npull a public skill. source is one of: \"@owner/slug\" or a\nslash-free slug (ClawHub), a github.com / gitlab.com /\nskills.sh / clawhub / skillhub URL, a ClawHub skills-sh\ncatalog page (https://clawhub.ai/skills-sh/owner/repo/slug),\na skills-sh:owner/repo/slug locator, or a direct zip/SKILL.md\nURL. Bare \"owner/slug\" is rejected as ambiguous. The source\nmust be readable anonymously. The install boots a sandbox and\nruns for minutes, so the request is only accepted; follow it\nvia the install-events stream.",
+                "consumes": [
+                    "application/json",
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Install a skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "Skill bundle (zip)",
+                        "name": "file",
+                        "in": "formData"
+                    },
+                    {
+                        "description": "Install from a registry, git host, or archive URL",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.skillSourceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Install accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Missing, oversized or invalid bundle or source",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Sandbox config not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/skills/{skillId}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Retrieve one installed skill of a sandbox config.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Get an installed skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Installed skill",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Remove a skill from the config's image. The removal rebuilds\nthe image and runs for minutes, so it is only accepted; follow\nit via the install-events stream.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Remove an installed skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Removal accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Show or hide an installed skill and set the workspace-wide values of the environment variables it declared. Either field may be sent, or both. The files stay in the image either way; removal is a separate flow.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Update an installed skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to update",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.skillPatchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated skill",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/skills/{skillId}/files": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "List files in the stored skill bundle without starting a sandbox.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "List files of an installed skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Skill files",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill or files not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/skills/{skillId}/files/content": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Read one skill file as UTF-8, a small base64 image, or binary.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Read one file of an installed skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill-root-relative file path",
+                        "name": "path",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Skill file",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid path",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill or file not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/skills/{skillId}/install-events": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Server-sent progress for one install or removal. The stream\nalways terminates: with the run's own terminal event, with one\nderived from the durable status, or with a \"detached\" frame\nwhen it stops following a run that is still going.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Follow an install or removal",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of progress events",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/skills/{skillId}/reinstall": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Retry a failed install from the stored archive; does not re-upload.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Retry a skill install",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Reinstall accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "The stored archive is gone",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/skills/{skillId}/transcript": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Server-sent replay of everything the installer agent did — the\nprompt it was given, its thinking, the commands it ran and\ntheir output — followed live while the install is still\nrunning. Frames are the same shape the chat stream uses, so a\nconsole renders an install with the components it renders a\nchat turn with. 404 once the event log has expired; the\ndurable message history is the fallback.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Follow an install's agent transcript",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of transcript events",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "204": {
+                        "description": "Install is still preparing; retry once locators exist",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill or transcript not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/sessions": {
             "get": {
                 "security": [
@@ -11166,66 +12663,6 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "会话或消息不存在",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
-                        }
-                    }
-                }
-            }
-        },
-        "/knowledge-search": {
-            "post": {
-                "security": [
-                    {
-                        "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "在知识库中搜索（不使用LLM总结）",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "问答"
-                ],
-                "summary": "知识搜索",
-                "parameters": [
-                    {
-                        "description": "搜索请求",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_session.SearchKnowledgeRequest"
-                        }
-                    },
-                    {
-                        "enum": [
-                            "handle",
-                            "public"
-                        ],
-                        "type": "string",
-                        "default": "handle",
-                        "description": "文件引用形式，public 返回可加载直链",
-                        "name": "resource_urls",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "搜索结果",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -11902,7 +13339,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取所有预装的Agent Skills元数据",
+                "description": "返回指定沙箱配置镜像内、智能体实际能调用的已安装技能（ready 且启用）。不传 sandbox_config_id 时列表为空。",
                 "consumes": [
                     "application/json"
                 ],
@@ -11912,19 +13349,21 @@ const docTemplate = `{
                 "tags": [
                     "Skills"
                 ],
-                "summary": "获取预装Skills列表",
+                "summary": "获取当前沙箱配置上可执行的 Skills",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "sandbox_config_id",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "Skills列表",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
-                        }
-                    },
-                    "500": {
-                        "description": "服务器错误",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -13020,6 +14459,74 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "DB write failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/users/create": {
+            "post": {
+                "description": "Provision a new local user account (SystemAdmin only).\nWhen ` + "`" + `password` + "`" + ` is omitted or null, a cryptographically random\npassword is generated (OIDC-style crypto/rand + base64url)\nand returned once in the response body. Any provided value,\nincluding empty string, is policy-checked. Tenant provisioning\nfollows the shared auth.default_tenant_mode policy.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Create a new user (SystemAdmin)",
+                "parameters": [
+                    {
+                        "description": "User creation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AdminCreateUserRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Identity already exists, returns the existing user",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.CreateSystemUserResponse"
+                        }
+                    },
+                    "201": {
+                        "description": "User created successfully",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.CreateSystemUserResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or weak password",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden: not a system admin",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Email and username refer to conflicting identities",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -15541,7 +17048,8 @@ const docTemplate = `{
                 2102,
                 2103,
                 2200,
-                2201
+                2201,
+                2300
             ],
             "x-enum-varnames": [
                 "ErrBadRequest",
@@ -15566,7 +17074,8 @@ const docTemplate = `{
                 "ErrAgentInvalidMaxIterations",
                 "ErrAgentInvalidTemperature",
                 "ErrVectorStoreBindingInvalid",
-                "ErrVectorStoreUnavailable"
+                "ErrVectorStoreUnavailable",
+                "ErrModelInUse"
             ]
         },
         "github_com_Tencent_WeKnora_internal_infrastructure_chunker.DocProfile": {
@@ -15713,6 +17222,26 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.AdminCreateUserRequest": {
+            "type": "object",
+            "required": [
+                "email",
+                "username"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string",
+                    "maxLength": 50,
+                    "minLength": 2
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.AgentStep": {
             "type": "object",
             "properties": {
@@ -15775,6 +17304,7 @@ const docTemplate = `{
                 "system.admin_promoted",
                 "system.admin_revoked",
                 "system.user_password_reset",
+                "system.user_created",
                 "system.api_key_created",
                 "system.api_key_revoked",
                 "system.queue_task_retried",
@@ -15838,6 +17368,7 @@ const docTemplate = `{
                 "AuditActionSystemAdminPromoted",
                 "AuditActionSystemAdminRevoked",
                 "AuditActionSystemUserPasswordReset",
+                "AuditActionSystemUserCreated",
                 "AuditActionSystemAPIKeyCreated",
                 "AuditActionSystemAPIKeyRevoked",
                 "AuditActionSystemQueueTaskRetried",
@@ -16219,6 +17750,13 @@ const docTemplate = `{
                 "cube_sandbox_ttl_seconds": {
                     "type": "integer"
                 },
+                "dns_servers": {
+                    "description": "DNSServers are Cube template nameserver IPs. Empty uses Cubelet's default.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "http_timeout_sec": {
                     "description": "HTTPTimeoutSec bounds each HTTP call to the sandbox control plane.\n0 means use the built-in default (30s), never the deployment's value.",
                     "type": "integer"
@@ -16374,7 +17912,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "max_iterations": {
-                    "description": "===== Agent Mode Settings =====\nMaximum iterations for ReAct loop (only for agent type)",
+                    "description": "===== Agent Mode Settings =====\nMaximum ReAct iterations. -1 is unlimited; 0 is unset (default applied).",
                     "type": "integer"
                 },
                 "mcp_auth_wait_timeout": {
@@ -16391,6 +17929,10 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "memory_enabled": {
+                    "description": "Whether this agent may read the user's long-term memory. Nil inherits\nthe workspace setting; false opts a single agent out of memory even when\nthe workspace has it on. There is no \"on\" that overrides the workspace.",
+                    "type": "boolean"
                 },
                 "model_id": {
                     "description": "===== Model Settings =====\nModel ID to use for conversations",
@@ -16617,7 +18159,43 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.DockerSandboxConfig": {
             "type": "object",
             "properties": {
+                "cpu_limit": {
+                    "description": "CPULimit is the number of CPU cores one sandbox may use. 0 uses the\nbuilt-in default.",
+                    "type": "number"
+                },
+                "host": {
+                    "description": "Host is the daemon endpoint in DOCKER_HOST form. Empty means the local\nunix socket.",
+                    "type": "string"
+                },
+                "http_timeout_sec": {
+                    "description": "HTTPTimeoutSec bounds each Engine API call. 0 uses the built-in default.",
+                    "type": "integer"
+                },
+                "idle_ttl_seconds": {
+                    "description": "IdleTTLSeconds is how long a session container may go unused before it\nis reclaimed. The daemon has no idle timeout of its own, so this is what\nstops an abandoned session from pinning host memory indefinitely.",
+                    "type": "integer"
+                },
                 "image": {
+                    "type": "string"
+                },
+                "memory_limit_mb": {
+                    "description": "MemoryLimitMB caps one sandbox's memory. 0 uses the built-in default.",
+                    "type": "integer"
+                },
+                "network_mode": {
+                    "description": "NetworkMode is the Docker network sandboxes join: \"bridge\" (default) or\n\"none\" for no egress. Nothing else is accepted — host and container:\nmodes share another namespace outright, and a named network is usually\nthe deployment's own compose network, which would put the sandbox next\nto Postgres and Redis.",
+                    "type": "string"
+                },
+                "pids_limit": {
+                    "description": "PidsLimit caps how many processes one sandbox may run. 0 uses the\nbuilt-in default.",
+                    "type": "integer"
+                },
+                "runtime": {
+                    "description": "Runtime selects an alternative OCI runtime such as \"runsc\" (gVisor).\nEmpty uses the daemon default.",
+                    "type": "string"
+                },
+                "tls_cert_path": {
+                    "description": "TLSCertPath is a directory on the WeKnora host containing ca.pem,\ncert.pem and key.pem. Required when Host is a TCP endpoint.",
                     "type": "string"
                 }
             }
@@ -17163,147 +18741,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_WeKnora_internal_types.Knowledge": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "description": "Channel indicates through which channel the knowledge was ingested (web, api, browser_extension, wechat, etc.)",
-                    "type": "string"
-                },
-                "created_at": {
-                    "description": "Creation time of the knowledge",
-                    "type": "string"
-                },
-                "custom_metadata": {
-                    "description": "CustomMetadata is user-authored descriptive metadata. It is deliberately\nseparate from Metadata, which contains internal ingestion state and IDs.",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "deleted_at": {
-                    "description": "Deletion time of the knowledge",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/gorm.DeletedAt"
-                        }
-                    ]
-                },
-                "description": {
-                    "description": "Description of the knowledge",
-                    "type": "string"
-                },
-                "embedding_model_id": {
-                    "description": "ID of the embedding model",
-                    "type": "string"
-                },
-                "enable_status": {
-                    "description": "Enable status of the knowledge",
-                    "type": "string"
-                },
-                "error_message": {
-                    "description": "Error message of the knowledge",
-                    "type": "string"
-                },
-                "file_hash": {
-                    "description": "File hash of the knowledge",
-                    "type": "string"
-                },
-                "file_name": {
-                    "description": "File name of the knowledge",
-                    "type": "string"
-                },
-                "file_path": {
-                    "description": "File path of the knowledge",
-                    "type": "string"
-                },
-                "file_size": {
-                    "description": "File size of the knowledge",
-                    "type": "integer"
-                },
-                "file_type": {
-                    "description": "File type of the knowledge",
-                    "type": "string"
-                },
-                "folder_path": {
-                    "description": "FolderPath is the canonical relative directory this entry belongs to\ninside the knowledge base, e.g. \"docs/spec\" for a folder upload of\n\"docs/spec/design.md\". Empty means the knowledge base root. It is a\ndisplay/navigation concern only: it never affects where the file is\nphysically stored (see FilePath).",
-                    "type": "string"
-                },
-                "id": {
-                    "description": "Unique identifier of the knowledge",
-                    "type": "string"
-                },
-                "knowledge_base_id": {
-                    "description": "ID of the knowledge base",
-                    "type": "string"
-                },
-                "knowledge_base_name": {
-                    "description": "Knowledge base name (not stored in database, populated on query)",
-                    "type": "string"
-                },
-                "last_faq_import_result": {
-                    "description": "Last FAQ import result (for FAQ type knowledge only)",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "metadata": {
-                    "description": "Metadata of the knowledge",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "parse_status": {
-                    "description": "Parse status of the knowledge",
-                    "type": "string"
-                },
-                "pending_subtasks_count": {
-                    "description": "PendingSubtasksCount is the outstanding enrichment subtask count\n(summary + question + graph chunks). Only meaningful while\nParseStatus == \"finalizing\"; defaults to 0 in any terminal state.",
-                    "type": "integer"
-                },
-                "processed_at": {
-                    "description": "Processed time of the knowledge",
-                    "type": "string"
-                },
-                "source": {
-                    "description": "Source of the knowledge (e.g. URL address for url type, \"manual\" for manual type)",
-                    "type": "string"
-                },
-                "storage_size": {
-                    "description": "Storage size of the knowledge",
-                    "type": "integer"
-                },
-                "summary_status": {
-                    "description": "Summary status for async summary generation",
-                    "type": "string"
-                },
-                "tags": {
-                    "description": "Tags holds the tags associated with this knowledge (populated on query, not persisted directly).",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeTag"
-                    }
-                },
-                "tenant_id": {
-                    "description": "Workspace ID",
-                    "type": "integer"
-                },
-                "title": {
-                    "description": "Title of the knowledge",
-                    "type": "string"
-                },
-                "type": {
-                    "description": "Type of the knowledge",
-                    "type": "string"
-                },
-                "updated_at": {
-                    "description": "Last updated time of the knowledge",
-                    "type": "string"
-                }
-            }
-        },
         "github_com_Tencent_WeKnora_internal_types.KnowledgeBase": {
             "type": "object",
             "properties": {
@@ -17694,47 +19131,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_WeKnora_internal_types.KnowledgeTag": {
-            "type": "object",
-            "properties": {
-                "color": {
-                    "description": "Optional display color",
-                    "type": "string"
-                },
-                "created_at": {
-                    "description": "Creation time",
-                    "type": "string"
-                },
-                "id": {
-                    "description": "Unique identifier of the tag (UUID)",
-                    "type": "string"
-                },
-                "knowledge_base_id": {
-                    "description": "Knowledge base ID that this tag belongs to",
-                    "type": "string"
-                },
-                "name": {
-                    "description": "Tag name, unique within the same knowledge base",
-                    "type": "string"
-                },
-                "seq_id": {
-                    "description": "SeqID is an auto-increment integer ID for external API usage",
-                    "type": "integer"
-                },
-                "sort_order": {
-                    "description": "Sort order within the same knowledge base",
-                    "type": "integer"
-                },
-                "tenant_id": {
-                    "description": "Workspace ID",
-                    "type": "integer"
-                },
-                "updated_at": {
-                    "description": "Last updated time",
-                    "type": "string"
-                }
-            }
-        },
         "github_com_Tencent_WeKnora_internal_types.ListMembersResponse": {
             "type": "object",
             "properties": {
@@ -18118,6 +19514,55 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.MemoryConfig": {
+            "type": "object",
+            "properties": {
+                "embedding_model_id": {
+                    "description": "EmbeddingModelID is the single model used to score memory against a\nquestion. It is pinned per workspace: knowledge bases each have their\nown embedding model, and grabbing whichever one happens to be listed\nfirst would mix incomparable vector spaces. Blank means semantic recall\nis off and matching stays lexical.",
+                    "type": "string"
+                },
+                "enabled": {
+                    "description": "Enabled defaults to false. Memory retains user statements across\nsessions, so a workspace admin has to turn it on deliberately.",
+                    "type": "boolean"
+                },
+                "extract_delay_seconds": {
+                    "description": "ExtractDelaySeconds is how long a finished turn waits before\ndistillation runs. Waiting lets one model call cover the several\nmessages a user usually sends in a row. 0 means the default.",
+                    "type": "integer"
+                },
+                "extract_instructions": {
+                    "description": "ExtractInstructions are workspace-specific rules appended to the\ndistillation prompt, for policies the product cannot guess (\"never record\ncustomer names\", \"always note the environment a question is about\").",
+                    "type": "string"
+                },
+                "extract_min_interval_seconds": {
+                    "description": "ExtractMinIntervalSeconds is the floor between two distillation runs for\nthe same person, and exists purely to bound cost. It never drops a turn:\na turn arriving inside the interval is queued and picked up by the next\nrun. 0 means the default.",
+                    "type": "integer"
+                },
+                "extract_model_id": {
+                    "description": "ExtractModelID is the model used by the background extraction task.\nEmpty means \"use the model the conversation itself used\", which is what\nthe settings UI promises, so the extraction task must never fail merely\nbecause this is blank.",
+                    "type": "string"
+                },
+                "interest_threshold": {
+                    "description": "InterestThreshold is how many separate conversations must touch a topic\nbefore it becomes a stored interest. 0 means the default. Setting it to 1\nrecords every topic on first sight, which is usually too noisy.",
+                    "type": "integer"
+                },
+                "max_items": {
+                    "description": "MaxItems caps active items per subject. 0 means DefaultMemoryMaxItems.",
+                    "type": "integer"
+                },
+                "retrieval_conditioning": {
+                    "description": "RetrievalConditioning lets memory shape retrieval — query rewriting and\nper-document ranking — rather than only being appended to the answer\nprompt. This is where memory earns its keep in a knowledge-base product.",
+                    "type": "boolean"
+                },
+                "vector_recall": {
+                    "description": "VectorRecall adds semantic similarity to memory recall. Nil means on\nwhen an embedding model is reachable.\n\nLexical matching alone cannot find a memory the user has re-worded, which\nis most of them: \"回答直接给结论\" and \"别铺垫那么多\" share no tokens. The\ncost is one embedding call per turn, bounded and degraded to lexical on\nfailure, so the feature never becomes a reason a chat is slow.",
+                    "type": "boolean"
+                },
+                "write_mode": {
+                    "description": "WriteMode is MemoryWriteExplicitOnly or MemoryWriteAuto.",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.MentionedItem": {
             "type": "object",
             "properties": {
@@ -18261,6 +19706,21 @@ const docTemplate = `{
                 "updated_at": {
                     "description": "Last update timestamp",
                     "type": "string"
+                },
+                "usage": {
+                    "description": "LLM token usage aggregated across every round of the turn that produced this\nassistant message. Persisted so history reads can attribute cost after the\nlive stream is gone; NULL (nil) for user messages and pre-feature rows.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TokenUsage"
+                        }
+                    ]
+                },
+                "used_memories": {
+                    "description": "UsedMemories records which long-term memories were injected into this\nanswer, so the chat UI can show them and let the user delete one on the\nspot. Persisted rather than only streamed so reopening a conversation\nstill explains what the answer saw.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UsedMemory"
+                    }
                 }
             }
         },
@@ -18456,6 +19916,7 @@ const docTemplate = `{
                 "siliconflow",
                 "jina",
                 "openrouter",
+                "litellm",
                 "requesty",
                 "nvidia",
                 "novita",
@@ -18475,6 +19936,7 @@ const docTemplate = `{
                 "ModelSourceNvidia": "NVIDIA model",
                 "ModelSourceOpenAI": "OpenAI model",
                 "ModelSourceOpenRouter": "OpenRouter model",
+                "ModelSourceLiteLLM": "LiteLLM proxy model",
                 "ModelSourceRemote": "Remote model",
                 "ModelSourceRequesty": "Requesty model",
                 "ModelSourceSiliconFlow": "SiliconFlow model",
@@ -18496,6 +19958,7 @@ const docTemplate = `{
                 "SiliconFlow model",
                 "Jina AI model",
                 "OpenRouter model",
+                "LiteLLM proxy model",
                 "Requesty model",
                 "NVIDIA model",
                 "Novita AI model",
@@ -18516,6 +19979,7 @@ const docTemplate = `{
                 "ModelSourceSiliconFlow",
                 "ModelSourceJina",
                 "ModelSourceOpenRouter",
+                "ModelSourceLiteLLM",
                 "ModelSourceRequesty",
                 "ModelSourceNvidia",
                 "ModelSourceNovita",
@@ -18883,6 +20347,21 @@ const docTemplate = `{
                     "type": "boolean"
                 }
             }
+        },
+        "github_com_Tencent_WeKnora_internal_types.PromptCacheStatus": {
+            "type": "string",
+            "enum": [
+                "unsupported",
+                "unreported",
+                "miss",
+                "hit"
+            ],
+            "x-enum-varnames": [
+                "PromptCacheStatusUnsupported",
+                "PromptCacheStatusUnreported",
+                "PromptCacheStatusMiss",
+                "PromptCacheStatusHit"
+            ]
         },
         "github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig": {
             "type": "object",
@@ -19691,6 +21170,31 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.SkillImageConfig": {
+            "type": "object",
+            "properties": {
+                "base_template_id": {
+                    "description": "BaseTemplateID is the template this chain was originally built from;\nthe rebuild path starts over from it.",
+                    "type": "string"
+                },
+                "built_at": {
+                    "description": "BuiltAt records when this generation was produced.",
+                    "type": "string"
+                },
+                "generation": {
+                    "description": "Generation increments on every successful install/remove, for naming\nand troubleshooting.",
+                    "type": "integer"
+                },
+                "owner_fingerprint": {
+                    "description": "OwnerFingerprint identifies the provider account that owns the snapshot.\nSnapshots are invisible across accounts, so a mismatch means \"fall back\nto the base template\" rather than \"fail\".",
+                    "type": "string"
+                },
+                "snapshot_id": {
+                    "description": "SnapshotID is the currently effective snapshot; empty = base template.",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.StarterSuggestionConfig": {
             "type": "object",
             "properties": {
@@ -20090,6 +21594,14 @@ const docTemplate = `{
                     "description": "ID",
                     "type": "integer"
                 },
+                "memory_config": {
+                    "description": "Memory config: workspace switch for cross-session long-term memory",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MemoryConfig"
+                        }
+                    ]
+                },
                 "name": {
                     "description": "Name",
                     "type": "string"
@@ -20195,7 +21707,19 @@ const docTemplate = `{
                     }
                 },
                 "sandbox_type": {
-                    "description": "SandboxType selects the sandbox backend. Named configs may use \"cube\",\n\"e2b\", \"docker\", or \"local\". \"disabled\" is reserved for the hidden\nworkspace policy row.",
+                    "description": "SandboxType is cube, e2b, or docker; disabled is the hidden policy row.",
+                    "type": "string"
+                },
+                "skill_image": {
+                    "description": "SkillImage points at the snapshot that carries this config's installed\nskills. Empty means \"use the base template\". Written only by the skill\ninstall/remove path: MergeSandboxConfigForUpdate ignores client values\nso a settings-form save cannot wipe or plant the pointer.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SkillImageConfig"
+                        }
+                    ]
+                },
+                "skill_rollout": {
+                    "description": "SkillRollout decides whether sessions that already hold a sandbox of\nthis config rebuild after a skill install or removal. Empty and\nSkillRolloutNextTurn rebuild on the next chat turn. SkillRolloutNewSession\nleaves those sandboxes on the previous image; only sessions that start\nafterwards boot the new snapshot.",
                     "type": "string"
                 },
                 "volume_mount": {
@@ -20205,6 +21729,39 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VolumeMountConfig"
                         }
                     ]
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.TokenUsage": {
+            "type": "object",
+            "properties": {
+                "cache_miss_tokens": {
+                    "type": "integer"
+                },
+                "cache_read_tokens": {
+                    "type": "integer"
+                },
+                "cache_reported": {
+                    "type": "boolean"
+                },
+                "cache_status": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.PromptCacheStatus"
+                },
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
+                "cached_tokens": {
+                    "description": "CachedTokens is the legacy alias for CacheReadTokens. It remains on the\nwire for compatibility with existing API consumers.",
+                    "type": "integer"
+                },
+                "completion_tokens": {
+                    "type": "integer"
+                },
+                "prompt_tokens": {
+                    "type": "integer"
+                },
+                "total_tokens": {
+                    "type": "integer"
                 }
             }
         },
@@ -20344,6 +21901,20 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.UsedMemory": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.User": {
             "type": "object",
             "properties": {
@@ -20455,7 +22026,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "last_active_tenant_id": {
-                    "description": "LastActiveTenantID remembers the last workspace the user actively\nswitched into, so a fresh login (new device, cleared browser, new\nrefresh token) lands them back in that workspace instead of always\nbouncing to their home workspace. Login / RefreshToken validate that\nthe workspace still exists and the user still has an active membership\n(or CanAccessAllTenants) before honouring this preference; an\ninvalid pointer is best-effort cleared and the user falls back to\nhome.\n\nnil  = no preference (use user.TenantID, i.e. home)\n*0   = \"clear preference\" sentinel for the partial-update endpoint\n       (UpdateUserPreferences turns this into nil). Otherwise treat\n       a stored *0 the same as nil.\n*N   = preferred workspace id.",
+                    "description": "LastActiveTenantID remembers the last workspace the user actively\nswitched into, so a fresh login (new device, cleared browser, new\nrefresh token) lands them back in that workspace instead of always\nbouncing to their home workspace. Written by the SPA's preferences\nPUT and by service-level SwitchTenant (including when switching\nhome, which stores the home ID). Login / RefreshToken validate that\nthe workspace still exists and the user still has an active membership\n(or CanAccessAllTenants) before honouring this preference; an\ninvalid pointer is best-effort cleared and the user falls back to\nhome. Refresh JWT claims have no tenant_id, so RefreshToken\nre-resolves from this field.\n\nnil  = no preference (use user.TenantID, i.e. home)\n*0   = \"clear preference\" sentinel for the partial-update endpoint\n       (UpdateUserPreferences turns this into nil). Otherwise treat\n       a stored *0 the same as nil.\n*N   = preferred workspace id.",
                     "type": "integer"
                 },
                 "oidc_only_login": {
@@ -20922,6 +22493,10 @@ const docTemplate = `{
                     "description": "populated in ego mode",
                     "type": "integer"
                 },
+                "familiar_count": {
+                    "description": "FamiliarCount is how many returned nodes are lit up for this person.",
+                    "type": "integer"
+                },
                 "mode": {
                     "type": "string"
                 },
@@ -20942,6 +22517,10 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.WikiGraphNode": {
             "type": "object",
             "properties": {
+                "familiar": {
+                    "description": "Familiar is true when this page was built from a document this person\nkeeps citing in answers. It is a personal overlay, not a property of\nthe page: two people looking at the same wiki see different highlights.",
+                    "type": "boolean"
+                },
                 "link_count": {
                     "description": "Number of inbound + outbound links",
                     "type": "integer"
@@ -21532,6 +23111,18 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_handler.CreateSystemUserResponse": {
+            "type": "object",
+            "properties": {
+                "generated_password": {
+                    "description": "GeneratedPassword is the plaintext password when the server\nauto-generated one. Absent when the caller supplied the password.",
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo"
                 }
             }
         },
@@ -22760,6 +24351,23 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.UpdateKnowledgeRequest": {
+            "type": "object",
+            "properties": {
+                "custom_metadata": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.UpdateModelRequest": {
             "type": "object",
             "properties": {
@@ -23006,6 +24614,24 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.meEnvVarRequest": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "sandbox_config_id": {
+                    "type": "string"
+                },
+                "skill_id": {
+                    "type": "string"
+                },
+                "value": {
+                    "description": "Value is unused by the delete endpoints. Clearing a value is a delete\nrather than a write of \"\", so a member always has one unambiguous way to\nrevoke.",
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.platformAPIKeyCreateRequest": {
             "type": "object",
             "properties": {
@@ -23075,6 +24701,31 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.skillPatchRequest": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "description": "Enabled is a pointer because its absence is not a request to disable the\nskill; a body may carry envs instead.",
+                    "type": "boolean"
+                },
+                "envs": {
+                    "description": "Envs is a pointer to a map because \"sent an empty object\" and \"did not\nmention envs\" are different requests: the first clears what it names,\nthe second must leave every stored value alone.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_handler.skillSourceRequest": {
+            "type": "object",
+            "properties": {
+                "source": {
+                    "description": "Source is exactly one of: \"@owner/slug\" or a slash-free slug (ClawHub),\na github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, a\nClawHub skills-sh catalog page or \"skills-sh:owner/repo/slug\" locator, or\na direct zip/SKILL.md URL. Bare \"owner/slug\" is rejected: it is both a\nClawHub id and a GitHub repo. The fetch carries no credential.",
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.storageBackendRequest": {
             "type": "object",
             "required": [
@@ -23126,7 +24777,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "last_active_tenant_id": {
-                    "description": "LastActiveTenantID lets the SPA persist \"after a fresh login,\ndrop me back into this workspace\" across devices. Send a positive\nworkspace id to set / replace, or 0 to clear. Membership is validated\nat next login, not here. Nil = field omitted from the PATCH and\nstays untouched.",
+                    "description": "LastActiveTenantID lets clients persist \"after a fresh login,\ndrop me back into this workspace\" across devices. The SPA sends\nthis after every tenant switch; POST /auth/switch-tenant records\nthe same preference server-side. Send a positive workspace id to\nset / replace, or 0 to clear. Membership is validated at next\nlogin, not here. Nil = field omitted from the PATCH and stays\nuntouched.",
                     "type": "integer"
                 }
             }

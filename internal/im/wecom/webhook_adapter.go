@@ -42,7 +42,10 @@ var httpClient = secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfi
 	MaxRedirects: 5,
 })
 
-const defaultAPIBaseURL = "https://qyapi.weixin.qq.com"
+const (
+	defaultAPIBaseURL   = "https://qyapi.weixin.qq.com"
+	wecomPKCS7BlockSize = 32
+)
 
 // extraHostFromEndpoint returns the lowercased hostname from endpoint if it
 // differs from defaultEndpoint; otherwise returns "". Used to extend the SSRF
@@ -456,6 +459,9 @@ func (a *WebhookAdapter) decrypt(encrypted string) ([]byte, error) {
 	if len(ciphertext) < aes.BlockSize {
 		return nil, fmt.Errorf("ciphertext too short")
 	}
+	if len(ciphertext)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("ciphertext length is not a multiple of AES block size")
+	}
 
 	iv := a.aesKey[:aes.BlockSize]
 	mode := cipher.NewCBCDecrypter(block, iv)
@@ -463,7 +469,7 @@ func (a *WebhookAdapter) decrypt(encrypted string) ([]byte, error) {
 
 	// Remove and verify PKCS#7 padding
 	padLen := int(ciphertext[len(ciphertext)-1])
-	if padLen > aes.BlockSize || padLen == 0 || padLen > len(ciphertext) {
+	if padLen > wecomPKCS7BlockSize || padLen == 0 || padLen > len(ciphertext) {
 		return nil, fmt.Errorf("invalid padding")
 	}
 	for i := 0; i < padLen; i++ {
