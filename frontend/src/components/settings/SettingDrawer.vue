@@ -7,7 +7,7 @@
       <div class="setting-drawer-resize-line" />
     </div>
   </teleport>
-  <t-drawer v-model:visible="drawerVisible" v-bind="drawerPassthroughAttrs" :size="effectiveWidth" :z-index="2500" placement="right"
+  <t-drawer v-model:visible="drawerVisible" v-bind="drawerPassthroughAttrs" :size="effectiveWidth" :z-index="zIndex" placement="right"
     attach="body" destroy-on-close :footer="!hideFooter"
     :class="drawerClass" @before-close="blurActiveElementBeforeClose">
     <!--
@@ -18,17 +18,23 @@
       so we don't need a redundant X button.
     -->
     <template #header>
-      <div class="setting-drawer__header">
-        <div v-if="$slots.headerIcon || icon" class="setting-drawer__header-icon">
-          <slot name="headerIcon">
-            <t-icon v-if="icon" :name="icon" />
-          </slot>
-        </div>
-        <div class="setting-drawer__header-text">
-          <div class="setting-drawer__title">{{ title }}</div>
-          <div v-if="description || $slots.subtitle" class="setting-drawer__subtitle">
-            <slot name="subtitle">{{ description }}</slot>
+      <div class="setting-drawer__header-block">
+        <div class="setting-drawer__header">
+          <div v-if="$slots.headerIcon || icon" class="setting-drawer__header-icon">
+            <slot name="headerIcon">
+              <t-icon v-if="icon" :name="icon" />
+            </slot>
           </div>
+          <div class="setting-drawer__header-text">
+            <div class="setting-drawer__title">{{ title }}</div>
+            <div v-if="description || $slots.subtitle" class="setting-drawer__subtitle">
+              <slot name="subtitle">{{ description }}</slot>
+            </div>
+          </div>
+          <div :id="headerActionsId" class="setting-drawer__header-actions"><slot name="header-actions" /></div>
+        </div>
+        <div v-if="$slots['header-extra']" class="setting-drawer__header-extra">
+          <slot name="header-extra" />
         </div>
       </div>
     </template>
@@ -56,8 +62,16 @@
   </t-drawer>
 </template>
 
+<script lang="ts">
+import type { InjectionKey } from 'vue'
+
+// Skill manage (and similar) panels teleport compact header actions here so
+// they sit on the title row without each drawer re-declaring the chrome.
+export const SETTING_DRAWER_HEADER_ACTIONS_ID: InjectionKey<string> = Symbol('settingDrawerHeaderActionsId')
+</script>
+
 <script setup lang="ts">
-import { ref, computed, useAttrs, onMounted, onUnmounted } from 'vue'
+import { ref, computed, provide, useAttrs, useId, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 interface Props {
@@ -90,6 +104,7 @@ interface Props {
   confirmText?: string
   cancelText?: string
   hideFooter?: boolean
+  zIndex?: number
 }
 
 defineOptions({ inheritAttrs: false })
@@ -106,7 +121,8 @@ const props = withDefaults(defineProps<Props>(), {
   confirmDisabled: false,
   confirmText: '',
   cancelText: '',
-  hideFooter: false
+  hideFooter: false,
+  zIndex: 2500,
 })
 
 const emit = defineEmits<{
@@ -117,6 +133,8 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const attrs = useAttrs()
+const headerActionsId = `sdha${useId().replace(/\W/g, '')}`
+provide(SETTING_DRAWER_HEADER_ACTIONS_ID, `#${headerActionsId}`)
 
 const drawerPassthroughAttrs = computed(() => {
   const { class: _class, ...rest } = attrs
@@ -137,8 +155,15 @@ const resolvedStorageKey = computed(
   () => props.storageKey || `setting-drawer:width:${props.title || 'default'}`
 )
 
-const clampWidth = (n: number) =>
-  Math.max(props.minWidth, Math.min(props.maxWidth, Math.round(n)))
+const viewportWidth = ref(
+  typeof window === 'undefined' ? props.maxWidth : window.innerWidth,
+)
+
+const clampWidth = (n: number) => {
+  const cap = Math.min(props.maxWidth, viewportWidth.value)
+  const floor = Math.min(props.minWidth, cap)
+  return Math.max(floor, Math.min(cap, Math.round(n)))
+}
 
 const parseWidthToPx = (width: string) => {
   const n = parseInt(width, 10)
@@ -161,13 +186,11 @@ const loadStoredWidth = (): number | null => {
 // User's persisted width (px) wins over the prop default.
 const userWidthPx = ref<number | null>(loadStoredWidth())
 
-const effectiveWidth = computed(() =>
-  userWidthPx.value != null ? `${userWidthPx.value}px` : props.width
+const drawerWidthPx = computed(() =>
+  clampWidth(userWidthPx.value ?? parseWidthToPx(props.width)),
 )
 
-const drawerWidthPx = computed(() =>
-  userWidthPx.value ?? parseWidthToPx(props.width)
-)
+const effectiveWidth = computed(() => `${drawerWidthPx.value}px`)
 
 const persistWidth = (width: number) => {
   const next = clampWidth(width)
@@ -225,9 +248,7 @@ function cleanupResize() {
 }
 
 function onWindowResize() {
-  if (userWidthPx.value != null) {
-    userWidthPx.value = clampWidth(userWidthPx.value)
-  }
+  viewportWidth.value = window.innerWidth
 }
 
 onMounted(() => {
@@ -258,6 +279,15 @@ const handleCancel = () => {
 
 <style lang="less" scoped>
 /* ---------- Header ---------- */
+.setting-drawer__header-block {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  gap: 8px;
+}
+
 .setting-drawer__header {
   display: flex;
   align-items: center;
@@ -285,6 +315,27 @@ const handleCancel = () => {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-drawer__header-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+
+  &:empty {
+    display: none;
+  }
+
+  :deep(.t-button) {
+    white-space: nowrap;
+  }
+}
+
+.setting-drawer__header-extra {
+  width: 100%;
   min-width: 0;
 }
 
@@ -421,6 +472,14 @@ const handleCancel = () => {
 -->
 <style lang="less">
 .setting-drawer {
+  max-width: 100vw;
+
+  .t-drawer__content {
+    min-width: 0;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
   .t-drawer__header {
     padding: 14px 18px;
     border-bottom: 1px solid var(--td-component-stroke);

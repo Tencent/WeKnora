@@ -189,7 +189,7 @@ func (s *temporaryDocumentService) Create(
 		return nil, fmt.Errorf("create attachment record: %w", err)
 	}
 	if s.resourceCatalog != nil {
-		if err := s.resourceCatalog.Bind(ctx, resourceRef, "temporary_document", document.ID, "source_file"); err != nil {
+		if err := s.resourceCatalog.Bind(ctx, resourceRef, types.ResourceOwnerTemporaryDocument, document.ID, types.ResourceRelationSourceFile); err != nil {
 			_ = s.repo.DeleteScoped(ctx, tenantID, sessionID, document.ID)
 			_ = s.fileService.DeleteFile(ctx, resourceRef)
 			return nil, fmt.Errorf("bind attachment resource: %w", err)
@@ -425,7 +425,7 @@ func (s *temporaryDocumentService) parse(ctx context.Context, document *types.Te
 			for _, image := range stored {
 				images = append(images, types.TemporaryDocumentImage{OriginalRef: image.OriginalRef, URL: image.ServingURL, MimeType: image.MimeType})
 				if s.resourceCatalog != nil {
-					_ = s.resourceCatalog.Bind(ctx, image.ServingURL, "temporary_document", document.ID, "extracted_image")
+					_ = s.resourceCatalog.Bind(ctx, image.ServingURL, types.ResourceOwnerTemporaryDocument, document.ID, types.ResourceRelationExtractedImage)
 				}
 			}
 		}

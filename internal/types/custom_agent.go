@@ -28,6 +28,8 @@ const (
 	BuiltinWikiResearcherID = "builtin-wiki-researcher"
 	// BuiltinWikiFixerID is the ID for the built-in wiki fixer agent
 	BuiltinWikiFixerID = "builtin-wiki-fixer"
+	// BuiltinSkillInstallerID is the ID for the built-in skill installer agent
+	BuiltinSkillInstallerID = "builtin-skill-installer"
 )
 
 // AgentMode constants for agent running mode
@@ -121,7 +123,9 @@ type CustomAgentConfig struct {
 	RerankModelID string `yaml:"rerank_model_id" json:"rerank_model_id"`
 	// Temperature for LLM (0-1)
 	Temperature float64 `yaml:"temperature" json:"temperature"`
-	// Maximum completion tokens (only for normal mode)
+	// Maximum completion tokens. Quick-answer uses this for the RAG answer.
+	// Smart-reasoning ReAct rounds send this value as-is (zero becomes
+	// DefaultMaxCompletionTokens at call time: 4096, or 24576 with a sandbox).
 	MaxCompletionTokens int `yaml:"max_completion_tokens" json:"max_completion_tokens"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `yaml:"thinking" json:"thinking"`
@@ -130,7 +134,9 @@ type CustomAgentConfig struct {
 	CitationEnabled *bool `yaml:"citation_enabled" json:"citation_enabled"`
 
 	// ===== Agent Mode Settings =====
-	// Maximum iterations for ReAct loop (only for agent type)
+	// Maximum iterations for the ReAct loop. Zero is unset (filled with a
+	// default). A negative value is unlimited: the loop runs until the model
+	// stops, the user cancels, or another guard fires.
 	MaxIterations int `yaml:"max_iterations" json:"max_iterations"`
 	// Timeout for a single LLM call in seconds (0 = use global default)
 	LLMCallTimeout int `yaml:"llm_call_timeout" json:"llm_call_timeout,omitempty"`
@@ -417,21 +423,20 @@ func oneOf(value string, allowed ...string) bool {
 }
 
 // ResolveChatParserEngine returns the agent-configured parser engine for a
-// chat attachment file type, or "" when no rule matches. Mirrors the tenant
-// resolver in ParserEngineConfig.ResolveChatParserEngine.
+// chat attachment file type, or the type-level default when no rule matches.
+// Mirrors ParserEngineConfig.ResolveChatParserEngine.
 func (c *CustomAgentConfig) ResolveChatParserEngine(fileType string) string {
-	if c == nil {
-		return ""
-	}
-	fileType = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), ".")
-	for _, rule := range c.ChatParserEngineRules {
-		for _, candidate := range rule.FileTypes {
-			if strings.TrimPrefix(strings.ToLower(strings.TrimSpace(candidate)), ".") == fileType {
-				return strings.TrimSpace(rule.Engine)
+	if c != nil {
+		normalized := normalizeParserFileType(fileType)
+		for _, rule := range c.ChatParserEngineRules {
+			for _, candidate := range rule.FileTypes {
+				if normalizeParserFileType(candidate) == normalized {
+					return strings.TrimSpace(rule.Engine)
+				}
 			}
 		}
 	}
-	return ""
+	return DefaultParserEngine(fileType)
 }
 
 // Value implements driver.Valuer interface for CustomAgentConfig
@@ -498,6 +503,9 @@ func (a *CustomAgent) EnsureDefaults() {
 	if a.Config.MaxIterations == 0 {
 		a.Config.MaxIterations = 10
 	}
+	if a.Config.MaxIterations < 0 {
+		a.Config.MaxIterations = UnlimitedMaxIterations
+	}
 	if a.Config.WebSearchMaxResults == 0 {
 		a.Config.WebSearchMaxResults = 5
 	}
@@ -521,9 +529,9 @@ func (a *CustomAgent) EnsureDefaults() {
 	if a.Config.FallbackStrategy == "" {
 		a.Config.FallbackStrategy = "model"
 	}
-	if a.Config.MaxCompletionTokens == 0 {
-		a.Config.MaxCompletionTokens = 2048
-	}
+	// MaxCompletionTokens 0 means "use DefaultMaxCompletionTokens at call
+	// time". Do not materialize a number here — that would make the editor
+	// treat a chosen default as a custom cap.
 	// Agent mode should always enable multi-turn conversation
 	if a.Config.AgentMode == AgentModeSmartReasoning {
 		a.Config.MultiTurnEnabled = true
@@ -565,11 +573,12 @@ var BuiltinAgentRegistry = map[string]func(uint64) *CustomAgent{}
 // builtinAgentIDsOrdered defines the fixed display order of built-in agents
 // that are exposed in the user-facing agent list (ListAgents).
 //
-// NOTE: BuiltinWikiFixerID is intentionally excluded here. The wiki fixer is
-// an internal agent invoked programmatically from the Wiki editor
-// (see frontend WikiBrowser.vue) and should not clutter the tenant's agent
-// picker. It remains fully usable via GetAgentByID because the YAML entry
-// still registers it in BuiltinAgentRegistry.
+// NOTE: BuiltinWikiFixerID and BuiltinSkillInstallerID are intentionally
+// excluded here. Both are internal agents invoked programmatically — the wiki
+// fixer from the Wiki editor, the skill installer from the sandbox-config skill
+// upload flow — and should not clutter the tenant's agent picker. They remain
+// fully usable via GetAgentByID because the YAML entries still register them in
+// BuiltinAgentRegistry.
 var builtinAgentIDsOrdered = []string{
 	BuiltinQuickAnswerID,
 	BuiltinSmartReasoningID,

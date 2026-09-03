@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/config"
@@ -71,7 +72,7 @@ func validRegisterBody() map[string]string {
 	return map[string]string{
 		"username": "alice",
 		"email":    "alice@example.com",
-		"password": "supersecret",
+		"password": "supersecret1",
 	}
 }
 
@@ -147,6 +148,27 @@ func TestRegister_TenantlessProvisioningFromConfig(t *testing.T) {
 	w := doRegister(t, newRegisterTestRouter(h), validRegisterBody())
 	if w.Code != http.StatusCreated {
 		t.Fatalf("tenantless self-serve registration got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetAuthConfigExposesComplexPassword(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &AuthHandler{
+		configInfo: &config.Config{Auth: &config.AuthConfig{
+			RegistrationMode: config.AuthRegistrationModeSelfServe,
+		}},
+		systemSettingSvc: &tenantPolicySettingService{enabled: true},
+	}
+	r := gin.New()
+	r.GET("/auth/config", h.GetAuthConfig)
+	req := httptest.NewRequest(http.MethodGet, "/auth/config", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"complex_password_enabled":true`) {
+		t.Fatalf("body=%s, want complex_password_enabled true", w.Body.String())
 	}
 }
 

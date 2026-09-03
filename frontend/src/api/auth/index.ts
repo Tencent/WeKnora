@@ -262,6 +262,7 @@ export async function getOIDCConfig(): Promise<OIDCConfigResponse> {
 export interface AuthConfigResponse {
   success: boolean
   registration_mode: 'self_serve' | 'invite_only' | string
+  complex_password_enabled: boolean
 }
 
 export async function getAuthConfig(): Promise<AuthConfigResponse> {
@@ -269,7 +270,7 @@ export async function getAuthConfig(): Promise<AuthConfigResponse> {
     const response = await get('/api/v1/auth/config')
     return response as unknown as AuthConfigResponse
   } catch {
-    return { success: false, registration_mode: 'self_serve' }
+    return { success: false, registration_mode: 'self_serve', complex_password_enabled: false }
   }
 }
 

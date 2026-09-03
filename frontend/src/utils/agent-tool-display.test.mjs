@@ -26,6 +26,17 @@ test('getAgentToolIconName maps rag pipeline tools', () => {
   assert.equal(getAgentToolIconName('knowledge_search'), 'data-search')
 })
 
+test('getAgentToolIconName maps sandbox shell tools to the terminal icon', () => {
+  assert.equal(getAgentToolIconName('shell_exec'), 'terminal')
+})
+
+test('getAgentToolIconName maps skill and sandbox file tools', () => {
+  assert.equal(getAgentToolIconName('read_skill'), 'file')
+  assert.equal(getAgentToolIconName('list_sandbox_files'), 'folder')
+  assert.equal(getAgentToolIconName('read_sandbox_file'), 'file')
+  assert.equal(getAgentToolIconName('execute_skill_script'), 'code')
+})
+
 test('getAgentToolIconName maps Wiki tools to semantic search and reading icons', () => {
   assert.equal(getAgentToolIconName('wiki_search'), 'search')
   assert.equal(getAgentToolIconName('wiki_read_page'), 'file-search')

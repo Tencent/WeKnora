@@ -8,8 +8,7 @@
 //
 //   - Ephemeral: one call to Execute allocates a sandbox, uploads the script,
 //     runs it, then deletes the sandbox regardless of success. This gives
-//     stateless-per-call semantics for callers without a SessionID, matching
-//     the Docker/Local backends.
+//     stateless-per-call semantics for callers without a SessionID.
 //   - Persistent (session-bound): SessionBoundManager resolves the session's
 //     RemoteSandboxHandle through the lifecycle coordinator and hands it to
 //     RemoteSandbox.ExecuteOnHandle. The handle stays owned by the manager;
@@ -23,6 +22,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -110,6 +110,30 @@ func (s *RemoteSandbox) ExecuteOnHandle(
 	}
 	if cfg == nil {
 		return nil, ErrInvalidScript
+	}
+
+	// Scripts already on disk skip upload so the skill venv layout is not
+	// shadowed. Image paths derive the skill directory; workspace paths
+	// require an explicit SkillDir so arbitrary files cannot inherit a
+	// skill interpreter by accident.
+	if remote := strings.TrimSpace(cfg.RemoteScriptPath); remote != "" {
+		skillDir, ok := InterpreterSkillDir(remote, cfg.SkillDir)
+		if !ok {
+			return nil, ErrInvalidScript
+		}
+		command, baseArgs := SkillInterpreterCommand(skillDir, path.Clean(remote))
+		request := RemoteExecRequest{
+			Command: command,
+			Args:    append(baseArgs, cfg.Args...),
+			Stdin:   cfg.Stdin,
+			Env:     cfg.Env,
+			WorkDir: SessionWorkspaceRoot,
+			User:    DefaultSandboxExecUser,
+			Timeout: effectiveTimeout(cfg, 0),
+		}
+		start := time.Now()
+		execResult, err := s.client.Exec(ctx, handle, request)
+		return remoteExecuteResult(execResult, err, time.Since(start)), nil
 	}
 
 	content, err := readScriptContent(cfg)
@@ -203,6 +227,26 @@ func remoteExecuteResult(result *RemoteExecResult, err error, duration time.Dura
 		Stderr:   result.Stderr,
 		ExitCode: result.ExitCode,
 		Duration: result.Duration,
+	}
+}
+
+// getInterpreter picks the interpreter for a script from its extension. The
+// remote backends upload the script and then exec this interpreter against
+// the uploaded path, so the choice must not depend on anything host-side.
+func getInterpreter(scriptName string) string {
+	switch strings.ToLower(filepath.Ext(scriptName)) {
+	case ".py":
+		return "python3"
+	case ".sh", ".bash":
+		return "bash"
+	case ".js", ".mjs", ".cjs":
+		return "node"
+	case ".rb":
+		return "ruby"
+	case ".pl":
+		return "perl"
+	default:
+		return "sh"
 	}
 }
 

@@ -244,6 +244,16 @@ func Logger() gin.HandlerFunc {
 		if responseBodyStr != "" {
 			logMsg = logMsg.WithField("response_body", secutils.SanitizeForLog(responseBodyStr))
 		}
-		logMsg.Info()
+		if last := c.Errors.Last(); last != nil && last.Err != nil {
+			logMsg = logMsg.WithField("error", secutils.SanitizeForLog(last.Err.Error()))
+		}
+		switch {
+		case statusCode >= 500:
+			logMsg.Error()
+		case statusCode >= 400:
+			logMsg.Warn()
+		default:
+			logMsg.Info()
+		}
 	}
 }

@@ -119,6 +119,11 @@ spec:
               value: {{ .Values.app.env.AUTO_RECOVER_DIRTY | quote }}
             - name: CONCURRENCY_POOL_SIZE
               value: {{ .Values.app.env.CONCURRENCY_POOL_SIZE | quote }}
+            # Docker sandbox is off unless the deployer opts in. A workspace
+            # admin who can save a Docker config can create containers on
+            # whatever Engine API this process can reach (often host root).
+            - name: WEKNORA_SANDBOX_DOCKER_ENABLED
+              value: {{ .Values.app.env.WEKNORA_SANDBOX_DOCKER_ENABLED | default "false" | quote }}
             {{- if .Values.neo4j.enabled }}
             # Neo4j configuration (for GraphRAG)
             # NEO4J_ENABLE 是知识图谱的唯一开关（Go 代码认它，不认 ENABLE_GRAPH_RAG）。

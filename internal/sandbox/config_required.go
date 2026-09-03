@@ -30,7 +30,7 @@ var ErrSandboxConfigIncomplete = errors.New("sandbox: config is missing required
 
 // MissingRequiredFields lists the fields cfg fails to supply for its own
 // provider, named after the JSON keys the API and the settings form use so the
-// message can be surfaced without translation. Local and disabled hold no
+// message can be surfaced without translation. Disabled holds no
 // backend-specific values; Docker must explicitly name its image.
 func MissingRequiredFields(cfg *Config) []string {
 	if cfg == nil {

@@ -188,7 +188,7 @@ X-Accel-Buffering: no
 
 取值只有 `handle`（默认）与 `public`，传其它值返回 400。单次请求参数优先于环境变量，所以把部署默认设成 `public` 之后，仍可以用 `?resource_urls=handle` 单独退回。
 
-支持该参数的接口：`POST /knowledge-chat/{session_id}`、`POST /agent-chat/{session_id}`、`GET /sessions/continue-stream/{session_id}`、`GET /messages/{session_id}/load`、`POST /knowledge-search`。改写覆盖答案正文、`knowledge_references`（含 `image_info`）、Agent 执行步骤与工具结果，以及消息上的图片附件；流式回答里跨 chunk 截断的引用会先缓冲再改写，客户端拿到的始终是完整链接。
+支持该参数的接口：`POST /knowledge-chat/{session_id}`、`POST /agent-chat/{session_id}`、`GET /sessions/continue-stream/{session_id}`、`GET /messages/{session_id}/load`、`POST /knowledge-search`、`POST /knowledge-bases/{id}/hybrid-search`（兼容 GET）。改写覆盖答案正文、检索结果 `content` / `image_info`、`knowledge_references`、Agent 执行步骤与工具结果，以及消息上的图片附件；流式回答里跨 chunk 截断的引用会先缓冲再改写，客户端拿到的始终是完整链接。
 
 使用前需要知道的几件事：
 
@@ -224,5 +224,5 @@ X-Accel-Buffering: no
 | 模型与初始化 | [02-api-model-system.md](./02-api-model-system.md) | `/models`、`/initialization`、`/evaluation`、`/weknoracloud` |
 | 系统与平台管理 | [02-api-system.md](./02-api-system.md) | `/system`、`/system/admin` |
 | 基础设施与数据源 | [02-api-infra.md](./02-api-infra.md) | `/vector-stores`、`/storage-backends`、`/web-search-providers`、`/datasource` |
-| Agent、MCP 与技能 | [02-api-agent-mcp.md](./02-api-agent-mcp.md) | `/agents`、`/mcp-services`、`/agent`、`/skills`、`/user/favorites` |
+| Agent、MCP、技能与记忆 | [02-api-agent-mcp.md](./02-api-agent-mcp.md) | `/agents`、`/mcp-services`、`/agent`、`/skills`、`/sandbox-configs`、`/memory`、`/user/favorites` |
 | IM、Embed 与文件服务 | [02-api-channels.md](./02-api-channels.md) | `/im`、`/im-channels`、`/wechat`、`/embed-channels`、`/embed`、`/files`、`/r/:token` |

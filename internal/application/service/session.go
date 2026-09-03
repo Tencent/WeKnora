@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 )
@@ -129,6 +130,11 @@ type sessionService struct {
 	sandboxPinner         *SessionSandboxPinner
 	sandboxPolicy         WorkspaceSandboxPolicy
 	memoryService         interfaces.MemoryService // Service for cross-session long-term memory
+	// sandboxConfigRepo and tenantSkillRepo answer "which installed skills can
+	// this turn actually invoke". They are repositories rather than
+	// TenantSkillService because that service depends on this one.
+	sandboxConfigRepo repository.TenantSandboxConfigRepository
+	tenantSkillRepo   repository.TenantSkillRepository
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -151,6 +157,8 @@ func NewSessionService(cfg *config.Config,
 	sandboxPinner *SessionSandboxPinner,
 	sandboxPolicy WorkspaceSandboxPolicy,
 	memoryService interfaces.MemoryService,
+	sandboxConfigRepo repository.TenantSandboxConfigRepository,
+	tenantSkillRepo repository.TenantSkillRepository,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                   cfg,
@@ -172,6 +180,8 @@ func NewSessionService(cfg *config.Config,
 		sandboxPinner:         sandboxPinner,
 		sandboxPolicy:         sandboxPolicy,
 		memoryService:         memoryService,
+		sandboxConfigRepo:     sandboxConfigRepo,
+		tenantSkillRepo:       tenantSkillRepo,
 	}
 }
 
@@ -410,11 +420,16 @@ func (s *sessionService) UpdateSession(ctx context.Context, session *types.Sessi
 
 	// Update session in repository
 	userID := sessionUserIDFromContext(ctx)
-	if _, err := s.sessionRepo.Get(ctx, session.TenantID, userID, session.ID); err != nil {
+	existing, err := s.sessionRepo.Get(ctx, session.TenantID, userID, session.ID)
+	if err != nil {
 		return err
 	}
+	if existing != nil {
+		session.Description = types.SanitizeClientSessionDescription(
+			session.Description, existing.Description)
+	}
 
-	_, err := s.sessionRepo.Update(ctx, session, userID)
+	_, err = s.sessionRepo.Update(ctx, session, userID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": session.ID,
@@ -656,10 +671,10 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 // destroyBoundSandbox tears down the sandbox MicroVM bound to sessionID, if
 // the configured sandbox backend supports session-scoped instances.
 //
-// Only SessionBoundManager (the CubeSandbox backend) implements the
-// DestroySession method. For Docker/Local/Disabled backends the type assertion
-// fails and the call is a no-op — those backends are stateless per Execute
-// and hold no resources keyed on session ID.
+// Only SessionBoundManager implements the DestroySession method, which every
+// session-scoped backend resolves to (Cube, E2B, Docker). For Disabled
+// the type assertion fails and the call is a no-op — that backend holds no
+// resources keyed on session ID.
 //
 // Errors are logged but never propagated: sandbox teardown must not block
 // session deletion. Call this while the session row is still live so the
@@ -682,7 +697,10 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 	// to the default manager keeps those reachable: DestroySession is a cheap
 	// binding lookup that no-ops when the session truly has no sandbox, whereas
 	// skipping would abandon a paused instance that keeps billing.
-	mgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy)
+	//
+	// Pass nil policy so the workspace kill switch cannot strand an already
+	// created sandbox: disabling script execution must still allow teardown.
+	mgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, nil)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to resolve sandbox for session %s cleanup: %v", sessionID, err)
 		return
@@ -917,4 +935,60 @@ func (s *sessionService) GenerateTitleAsync(
 			}
 		}
 	}()
+}
+
+// holdSandboxTurn opens a chat-turn lease on the session's remote sandbox so
+// a skill-image change mid-turn cannot rebuild the VM between tool calls.
+// The first resolve of this turn may still pick up a stale mark from the
+// previous turn. The returned closer must be called.
+func (s *sessionService) holdSandboxTurn(
+	ctx context.Context, sessionID, configID string,
+) func() {
+	if strings.TrimSpace(sessionID) == "" {
+		return func() {}
+	}
+	begin := func(mgr sandbox.Manager) sandbox.SessionTurnHolder {
+		if mgr == nil {
+			return nil
+		}
+		holder, ok := mgr.(sandbox.SessionTurnHolder)
+		if !ok {
+			return nil
+		}
+		if err := holder.BeginSessionTurn(ctx, sessionID); err != nil {
+			logger.Warnf(ctx, "[sandbox] begin turn for session %s failed: %v", sessionID, err)
+			return nil
+		}
+		return holder
+	}
+
+	if holder := begin(s.sandboxMgr); holder != nil {
+		return func() {
+			if err := holder.EndSessionTurn(ctx, sessionID); err != nil {
+				logger.Warnf(ctx, "[sandbox] end turn for session %s failed: %v", sessionID, err)
+			}
+		}
+	}
+
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	if s.sandboxResolver == nil || tenantID == 0 {
+		return func() {}
+	}
+	mgr, err := resolveTenantSandboxForConfig(
+		ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy,
+	)
+	if err != nil {
+		logger.Warnf(ctx, "[sandbox] resolve config %s to begin turn of session %s failed: %v",
+			configID, sessionID, err)
+		return func() {}
+	}
+	holder := begin(mgr)
+	if holder == nil {
+		return func() {}
+	}
+	return func() {
+		if err := holder.EndSessionTurn(ctx, sessionID); err != nil {
+			logger.Warnf(ctx, "[sandbox] end turn for session %s failed: %v", sessionID, err)
+		}
+	}
 }

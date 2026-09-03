@@ -24,6 +24,7 @@ import { useAuthStore } from '@/stores/auth';
 import DocumentPreview from '@/components/document-preview.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
 import { resolveKnowledgeDownloadFileName } from '@/views/knowledge/knowledgeDownloadFileName';
+import { isKnownPreviewableExt, resolveFilePreviewExt } from '@/utils/filePreview';
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -739,22 +740,12 @@ const processedChunks = computed(() => {
   });
 });
 
-const previewSupportedTypes = new Set([
-  'pdf', 'docx', 'pptx', 'ppt', 'xlsx', 'xls', 'csv',
-  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'svg',
-  'txt', 'md', 'markdown', 'json', 'xml', 'html', 'css', 'js', 'ts',
-  'py', 'java', 'go', 'cpp', 'c', 'h', 'sh', 'yaml', 'yml',
-  'ini', 'conf', 'log', 'sql', 'rs', 'rb', 'php', 'swift', 'kt',
-  'scala', 'r', 'lua', 'pl', 'toml',
-  'mp3', 'wav', 'm4a', 'flac', 'ogg',
-]);
-
 const canPreview = (): boolean => {
   if (props.details?.type !== 'file') return false;
-  const ft = props.details?.file_type?.toLowerCase();
+  const ft = resolveFilePreviewExt(props.details?.title, props.details?.file_type);
   if (!ft) return false;
   if (audioExtensions.has(ft)) return false; // 音频不走预览tab，播放器已内嵌
-  return previewSupportedTypes.has(ft);
+  return isKnownPreviewableExt(ft);
 };
 
 // 当文档详情加载完成时，file 类型自动切换到「预览」；音频类型使用 merged + 播放器

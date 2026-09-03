@@ -151,6 +151,26 @@ func ApplyBuiltinAgentLocalization(ctx context.Context, agent *CustomAgent) {
 	agent.Avatar = localized.Avatar
 }
 
+var builtinAgentEntriesTestMu sync.Mutex
+
+// OverrideBuiltinAgentEntriesForTest replaces the in-memory YAML registry.
+// Tests in other packages use this to assert locale overlays; call the
+// returned func to restore the previous map. Concurrent tests are serialized
+// so they do not clobber each other's entries.
+func OverrideBuiltinAgentEntriesForTest(entries map[string]*BuiltinAgentEntry) func() {
+	builtinAgentEntriesTestMu.Lock()
+	builtinAgentEntriesMu.Lock()
+	prev := builtinAgentEntries
+	builtinAgentEntries = entries
+	builtinAgentEntriesMu.Unlock()
+	return func() {
+		builtinAgentEntriesMu.Lock()
+		builtinAgentEntries = prev
+		builtinAgentEntriesMu.Unlock()
+		builtinAgentEntriesTestMu.Unlock()
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------

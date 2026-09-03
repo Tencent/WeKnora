@@ -2,6 +2,8 @@
 
 [English](./README.md) | 简体中文
 
+[npm](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora)
+
 一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）插件，让 harness 里的 Agent 直接用上
 [WeKnora](https://github.com/Tencent/WeKnora) 知识库：混合检索、按文档通读、以及 WeKnora 自己带引用的成稿答案。
 
@@ -24,6 +26,7 @@ dsh plugin --profile web add ./packages/dsh-weknora
 export WEKNORA_BASE_URL=https://weknora.example.com   # 或 http://localhost:8080
 export WEKNORA_API_KEY=sk-...                          # 需要 `retrieve` 能力（用 ask 还需要 `chat`）
 export WEKNORA_KNOWLEDGE_BASE_IDS=kb-123,kb-456        # 可选的默认知识库范围
+export WEKNORA_RESOURCE_URLS=public                    # 默认；改成 `handle` 则保留内部文件引用
 dsh web
 ```
 
@@ -41,7 +44,7 @@ dsh web
     maxChunkChars: 1200
     requestTimeoutMs: 30000
     chatTimeoutMs: 300000
-    resourceUrls: handle   # 改成 `public`，引用里的图片和文件会给可直接加载的直链
+    resourceUrls: handle   # 默认是 `public`，引用里的图片给可直接加载的直链；`handle` 保留内部引用
     toolPrefix: weknora    # 重命名工具，例如同时挂两个部署时
     tools:
       listKnowledgeBases: true
@@ -103,6 +106,12 @@ Key 通过 `X-API-Key` 发送。如果用的是平台级 API Key，还需要配 
 片段内容在进入模型前会按 `maxChunkChars` 截断，避免一份超大文档吃掉整个上下文窗口；截断这件事会明确告知模型
 （`truncated: true`），而不是悄悄丢文本。
 
+默认 `resourceUrls: public` 时，WeKnora 会把片段里的 `resource://` 图改写成可直接加载的 http(s) 直链——把这些 Markdown
+图片写进回复，dsh 网页端就会把图画出来。限定知识库的 API Key 拿不到直链（WeKnora 会 403），插件会把这次调用改回
+handle 模式，之后也一直用 handle。
+
+配置层还会读 `WEKNORA_RESOURCE_URLS`（`public` 或 `handle`）。
+
 ## 配置项
 
 | 字段 | 默认值 | 说明 |
@@ -116,7 +125,7 @@ Key 通过 `X-API-Key` 发送。如果用的是平台级 API Key，还需要配 
 | `maxChunkChars` | `1200` | 单个片段的字符预算 |
 | `requestTimeoutMs` | `30000` | 检索与读文档 |
 | `chatTimeoutMs` | `300000` | `weknora_ask`，要等 WeKnora 自己的模型调用 |
-| `resourceUrls` | `handle` | `public` 返回可直接加载的文件直链 |
+| `resourceUrls` | `public` | `public` 返回可直接加载的文件直链；`handle` 保留内部 `resource://` 引用。限定知识库的 API Key 会自动回退到 `handle`。可用 `WEKNORA_RESOURCE_URLS` 覆盖。 |
 | `toolPrefix` | `weknora` | 工具名前缀，需匹配 `^[a-z][a-z0-9_]*$` |
 | `tools.*` | 全部 `true` | 少注册几个工具就少占几分 prompt |
 
@@ -146,7 +155,7 @@ profile，而它写出的 profile 把设置放在 `pnpm-workspace.yaml` 里。�
 
 ## 兼容性
 
-已针对 dsh `0.1.0-rc.8` 与 WeKnora `0.7.2` 验证。dsh 处于 developer preview 并明确会有破坏性变更；本包因此**没有任何运行
+已针对 dsh `0.1.0-rc.8` 与 WeKnora `0.8.0` 验证。dsh 处于 developer preview 并明确会有破坏性变更；本包因此**没有任何运行
 时依赖**，交给 `ctx.tools.register()` 的只是一个普通对象，不锁定任何 harness 包版本。如果 harness 的工具定义契约发生变化，
 请在本仓库提 issue。
 

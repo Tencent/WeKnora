@@ -55,6 +55,9 @@ type UserService interface {
 	// returns the corresponding LoginResponse. The caller's previous
 	// refresh token (passed in for revocation) is invalidated. Membership
 	// is verified via the TenantMember service before tokens are issued.
+	// On success the target is recorded as the user's last-active-tenant
+	// preference (next login and refresh land there). A preference-write
+	// failure fails the switch so no token pair is issued.
 	SwitchTenant(ctx context.Context, user *types.User, targetTenantID uint64, currentRefreshToken string) (*types.LoginResponse, error)
 	// ValidateToken validates an access token. It returns the user
 	// referenced by the token plus the active tenant ID encoded in the

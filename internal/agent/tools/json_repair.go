@@ -13,13 +13,26 @@ import (
 //   - Unquoted keys
 //   - Invalid backslash escapes inside strings (e.g. regex patterns like
 //     "C\+\+", "\d+", "\.log$") where the LLM forgot to double-escape.
+//   - Extra tokens after the top-level value (e.g. `{}""`, `{"a":1}{"a":1}`)
 //
 // Returns the repaired JSON string. If repair is not possible,
 // returns the original string unchanged (caller should handle parse errors).
 func RepairJSON(s string) string {
+	repaired, _ := RepairJSONDetail(s)
+	return repaired
+}
+
+// RepairJSONDetail is RepairJSON that also reports whether the payload had to
+// be closed off to parse — an unterminated string or an unbalanced bracket.
+// That only happens when the provider stopped emitting mid-argument, so the
+// values now parse but are partial: `content` holds half a file, `query` holds
+// half a sentence. Callers must refuse such a call rather than run it.
+// Escape and trailing-comma fixes are ordinary malformations, not truncation,
+// and do not set the flag.
+func RepairJSONDetail(s string) (string, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return "{}"
+		return "{}", false
 	}
 
 	// Must start with { for object
@@ -28,7 +41,7 @@ func RepairJSON(s string) string {
 		if strings.Contains(s, ":") || strings.Contains(s, "=") {
 			s = "{" + s + "}"
 		} else {
-			return s
+			return s, false
 		}
 	}
 
@@ -36,13 +49,14 @@ func RepairJSON(s string) string {
 	// strings confuse the comma/bracket trackers below.
 	s = fixInvalidEscapes(s)
 
+	// Drop anything after the first complete top-level value
+	s = trimAfterTopLevelValue(s)
+
 	// Fix trailing commas: ,} or ,]
 	s = fixTrailingCommas(s)
 
 	// Balance brackets and braces
-	s = balanceBrackets(s)
-
-	return s
+	return balanceBrackets(s)
 }
 
 // fixInvalidEscapes turns invalid JSON string escapes into literal backslash
@@ -102,6 +116,51 @@ func fixInvalidEscapes(s string) string {
 	return out.String()
 }
 
+// trimAfterTopLevelValue cuts everything that follows the first balanced
+// top-level object/array. Streaming providers occasionally emit a stray
+// argument fragment after the arguments are already complete — a lone `""`
+// or a repeat of the whole payload — and the concatenated result (`{}""`)
+// fails to parse even though the leading value is perfectly good.
+// Input that never closes its top-level value is returned unchanged so that
+// balanceBrackets can still recover a truncated payload.
+func trimAfterTopLevelValue(s string) string {
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i, r := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inString {
+			switch r {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch r {
+		case '"':
+			inString = true
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+			if depth == 0 {
+				end := i + len(string(r))
+				if strings.TrimSpace(s[end:]) == "" {
+					return s
+				}
+				return s[:end]
+			}
+		}
+	}
+	return s
+}
+
 // fixTrailingCommas removes trailing commas before closing brackets/braces.
 func fixTrailingCommas(s string) string {
 	// Simple state machine to handle strings
@@ -156,8 +215,9 @@ func findNextNonSpace(runes []rune, start int) int {
 	return -1
 }
 
-// balanceBrackets appends missing closing brackets/braces.
-func balanceBrackets(s string) string {
+// balanceBrackets appends missing closing brackets/braces, reporting whether
+// anything had to be appended.
+func balanceBrackets(s string) (string, bool) {
 	var stack []rune
 	inString := false
 	escaped := false
@@ -191,15 +251,19 @@ func balanceBrackets(s string) string {
 		}
 	}
 
+	closed := false
+
 	// Close unclosed string if needed
 	if inString {
 		s += `"`
+		closed = true
 	}
 
 	// Append missing closers in reverse order
 	for i := len(stack) - 1; i >= 0; i-- {
 		s += string(stack[i])
+		closed = true
 	}
 
-	return s
+	return s, closed
 }

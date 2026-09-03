@@ -124,16 +124,15 @@ type AgentConfig struct {
 
 ### Sandbox 配置入口
 
-Sandbox 不再读取 `WEKNORA_SANDBOX_*` 环境变量。后端、凭据、模板、执行超时、TTL 和私网访问策略均在「设置 → 沙箱后端」按空间保存；智能体没有选择空间配置时，脚本执行保持禁用。
+Sandbox 不再把凭据和模板放进 `WEKNORA_SANDBOX_*`。后端、凭据、模板、执行超时、TTL 和私网访问策略均在「设置 → 沙箱后端」按空间保存；智能体没有选择空间配置时，脚本执行保持禁用。Docker 后端默认关闭，由系统管理员在「设置 → 系统设置」打开，或设置 `WEKNORA_SANDBOX_DOCKER_ENABLED=true`。
 
 ### Sandbox 模式
 
-Docker、Local、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接检查和智能体选择接口管理。CubeSandbox / E2B 的集群搭建和设置页接入流程见 [WeKnora 沙箱集群与标准模板](sandbox-cluster.md)。设置页会通过当前连接拉取模板目录；若没有 WeKnora 标准模板，后端会从标准镜像发起创建，用户无需复制模板 ID。
+Docker、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接检查和智能体选择接口管理。CubeSandbox / E2B 的集群搭建和设置页接入流程见 [WeKnora 沙箱集群与标准模板](sandbox-cluster.md)。设置页会通过当前连接拉取模板目录；若没有 WeKnora 标准模板，后端会从标准镜像发起创建，用户无需复制模板 ID。
 
 | 模式 | 状态 | 说明 |
 |------|------|------|
-| `docker` | 稳定 | 每次执行启动短生命周期容器；镜像和环境变量按空间配置，不保留会话绑定 |
-| `local` | 开发 | 直接在 WeKnora 服务主机执行；无容器/MicroVM 隔离，不保留会话绑定 |
+| `docker` | 稳定 | 单机 Docker daemon；会话级持久（一个会话一个长驻容器），支持多机 WeKnora 副本（需 Redis），但沙箱都落在同一台 daemon 上。见 [Docker 沙箱后端](sandbox-docker-backend.md) |
 | `cube` | 稳定 | Tencent CubeSandbox MicroVM；会话级持久，支持多机（需 Redis） |
 | `e2b` | 稳定 | E2B 云端 MicroVM；会话级持久，支持多机（需 Redis）；依赖第三方 SDK go-e2b |
 
@@ -155,6 +154,17 @@ Docker、Local、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接�
 这条规则换来的是：库里那一行就是沙箱位置的完整描述。因此身份比较不必再去解析 `.env`，改 `.env` 也不会在无人察觉的情况下把某份配置重新指向别的账号。
 
 **会话与配置的绑定是「随沙箱同生共死」的钉子。** 会话首次创建沙箱时，把当时用的配置 ID 记在 `sessions.sandbox_config_id` 上；此后该会话的附件上传、产物收集、沙箱销毁都锁定在这份配置上。改智能体的选择**只影响之后新建的沙箱**——否则管理员改一次配置，正在进行的会话就会去错误的账号里找产物，销毁也会打空，留下一个没人知道 ID 的 paused 沙箱持续计费。
+
+### 安装租户技能
+
+空间「技能沙箱」设置里可以把技能装进当前配置的镜像。除上传 zip 外，也支持从托管平台粘贴来源（每种写法只对应一种来源，不会猜测）：
+
+- ClawHub：`@owner/slug`，或不含 `/` 的 slug（如 `my-team--skill`）
+- ClawHub skills.sh 联邦页：`https://clawhub.ai/skills-sh/owner/repo/slug` 或 `skills-sh:owner/repo/slug`（服务端向 ClawHub 解析钉死的 GitHub commit，不会把 URL 最后一段当成仓库子目录）
+- 页面链接：ClawHub / [skillhub.cn](https://skillhub.cn) / 自托管 SkillHub、skills.sh、GitHub、GitLab
+- 直接的 zip / `SKILL.md` URL
+
+不要粘贴裸的 `owner/slug`：请改成 `@owner/slug` 或完整 `https://github.com/...` 链接。来源必须可匿名读取，服务端下载时不携带任何凭据；私有仓库请先导出 zip 再上传。安装仍走原有镜像快照流程。
 
 **有沙箱在跑时改不了身份字段。** 身份字段分两组，成因不同但后果都足够严重：
 
@@ -180,10 +190,12 @@ Docker、Local、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接�
 
 - **binding store 自动选择**：进程根据通用 `REDIS_ADDR` 是否配置自动决定绑定存储；Redis key 命名空间复用 `WEKNORA_REDIS_NAMESPACE`，未设置时为 `weknora`。
 - **多机部署（生产推荐）**：配置 `REDIS_ADDR`。多副本共享同一 session 的沙箱绑定，通过 Redis SET NX + 可续租分布式锁串行化 create / recover / delete。
-- **单机部署**：不配置 `REDIS_ADDR`（或 Lite 模式）时使用进程内内存 binding，仅限单实例。进程重启会丢失 session→sandbox 映射，remote 侧沙箱成为孤儿（注意：**TTL 到期只会暂停、不会销毁**，见下）。
+- **⚠️ binding store 现在保存承载凭证，必须做访问控制**：入站一律要求凭证，Cube / E2B 的 traffic token 随绑定一起明文存放——它是访问该沙箱公网 URL 的凭证，读到它就等于能访问那个沙箱暴露的端口。因此**存放绑定的 Redis 必须启用认证并限制网络可达范围**，不能与不受信任的服务共用实例。这里不加密是有意的：每次重连都要解密会把开销加在热路径上，而 Redis 本身的访问控制是更合适的边界。代码侧的对应约束是**绝不整体打印绑定或 handle**（日志里只出现 `sandbox_id` 与凭证的有无），改动 `session_binding.go` / 适配器日志时请一并保持。
+- **单机部署**：不配置 `REDIS_ADDR`（或 Lite 模式）时使用进程内内存 binding，仅限单实例。进程重启会丢失 session→sandbox 映射，remote 侧沙箱成为孤儿（注意：**TTL 到期只会暂停、不会销毁**，见下）。绑定丢失后，**Cube / E2B 配置不会再按 metadata 领养旧沙箱**——旧沙箱的 traffic token 随绑定一起没了且 provider 不会重发，领养只会得到一个每次数据面调用都 403 的死会话。lifecycle 会直接删掉它再新建，`/workspace` 里的临时文件随之丢失。Docker 没有 traffic token 概念，照旧领养。
 - **切换 provider**：不同 provider 的 sandbox ID 不通用。智能体改选配置只影响之后新建的沙箱，已有沙箱继续按 session pin 回收。
 - **⚠️ 孤儿沙箱不会被 TTL 自动回收**：会话沙箱创建时使用 `onTimeout=pause` + `autoResume=true`（见 `buildSessionCreateRequest`），因此 **TTL 到期是"暂停"而非"销毁"**——保留状态本就是 pause 的目的。加上 CAS 换绑会把旧 sandboxID 从 binding store 覆盖掉，被替换的沙箱会变成**无人知晓 ID 的 paused 孤儿**，持续占用快照存储与费用。删除会话（`session.go` 的 destroyer）与 lifecycle 的惰性 orphan cleanup 都覆盖不到这种情况。生产环境需依赖按 metadata 列举并与 binding 对账的清理任务来回收（`internal/sandbox/orphan_reaper.go`），且**必须显式包含 `paused` 状态**。对账维度是 `(tenant_id, config_id)` 而非仅 `tenant_id`：同一工作区的两份配置可能指向**同一个 provider 账号**（例如同一个 E2B Key 只差模板），只按 `tenant_id` 过滤会把另一份配置的沙箱一并误删。
-- **网络策略**：`cube` 与 `e2b` 默认开启公网出口和 public traffic，可在 create 时通过 provider-neutral `RemoteNetworkPolicy`（`AllowInternetAccess` / `AllowPublicTraffic` / `AllowOut` / `DenyOut`）精细化配置；两个 adapter 都实现了同一契约。
+- **网络策略**：每份具名沙箱配置带一块 `network` 策略，作用于该配置下所有沙箱（会话、技能安装、深度检查共用同一份）。默认**出站放行**；**入站一律要求凭证**——沙箱公网 URL 必须携带创建时签发的 traffic token，WeKnora 自身的 envd 链路会自动携带（Cube 由 SDK 附加，E2B 由 WeKnora 的数据面 transport 附加）。若 Cube / E2B 没有签发 token，create 会失败并销毁该沙箱，而不是把空凭证写入 binding（数据面 403 会被当成 authentication，会话会永久卡住）。管理员可配置 allow / deny 列表，Cube 额外支持 CubeEgress L7 规则（scheme / sni / host / method / path + 审计 + header 注入），E2B 额外支持按 host 注入 header。Docker 只能整体开关（`bridge` / `none`）。表单不再提供入站开关；解析忽略已存的 `allow_public_inbound`，保存时清掉该字段。**改策略只影响之后新建的沙箱**：本期不做运行中热更新。
+- **⚠️ 升级行为变更**：入站从「公网可达」改为「一律要求凭证」。浏览器或外部服务不能再直连沙箱端口；管理界面和 API 都打不开入站。
 
 ## Agent 工具
 
@@ -532,13 +544,15 @@ Docker 模式提供最强的隔离：
 
 ```bash
 # 方式一：直接拉取
-docker pull wechatopenai/weknora-sandbox:latest
+docker pull wechatopenai/weknora-sandbox:main
 
 # 方式二：本地构建
 sh scripts/build_images.sh -s
 ```
 
-> 如果未预拉取，应用启动时会自动异步拉取镜像（`EnsureImage`），但首次执行可能需要等待下载完成。
+> 如果未预拉取，创建第一个沙箱时会先拉取镜像，首次执行需要等待下载完成；也可以在设置页的模板步骤提前触发拉取。
+
+> 用 `main` 而非 `latest`：`latest` 只在发版时移动，目前仍停在 `/workspace` 及其 `input`/`output` 目录交给沙箱账号之前的版本，用它建出来的沙箱写不了自己的产物目录。发版带上该修复后即可换回 `latest`。
 
 **镜像内置环境**：
 - Python 3.11 + pip（requests、pyyaml、pandas、beautifulsoup4）
@@ -555,27 +569,9 @@ docker run --rm \
   --network=none \
   -v /path/to/skill:/skill:ro \
   -w /skill \
-  wechatopenai/weknora-sandbox:latest \
+  wechatopenai/weknora-sandbox:main \
   python scripts/analyze.py input.pdf
 ```
-
-### Local 沙箱
-
-Local 模式提供基础保护：
-
-- **命令白名单**：仅允许特定解释器
-- **工作目录限制**：限定在 Skill 目录
-- **环境变量过滤**：仅传递安全变量
-- **超时控制**：默认 30 秒超时
-- **路径遍历防护**：防止访问 Skill 目录外文件
-- **脚本预校验**：执行前进行安全校验
-
-**允许的命令**：
-- `python`, `python3`
-- `node`, `nodejs`
-- `bash`, `sh`
-- `ruby`
-- `go run`
 
 ## API 参考
 
@@ -679,10 +675,9 @@ go run ./cmd/skills-demo/main.go
 
 ### 脚本执行失败
 
-1. 检查 `sandbox_mode` 配置
+1. 检查沙箱后端配置
 2. Docker 模式：确认 Docker 服务运行中
-3. Local 模式：确认解释器已安装
-4. 检查脚本权限和语法
+3. 检查脚本权限和语法
 
 ### 元数据验证错误
 

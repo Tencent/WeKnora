@@ -91,6 +91,24 @@ func (s *sessionService) AgentQA(
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
 
+	// The model's own metadata decides two things the agent cannot guess: how
+	// much history fits before compaction, and whether images can be passed
+	// through. Resolve it once, before the engine is built — the engine sizes
+	// its memory consolidator from MaxContextTokens at construction.
+	var agentModelSupportsVision bool
+	modelContextWindow := 0
+	if effectiveModelID != "" {
+		if modelInfo, err := s.modelService.GetModelByID(ctx, effectiveModelID); err == nil && modelInfo != nil {
+			agentModelSupportsVision = modelInfo.Parameters.SupportsVision
+			modelContextWindow = modelInfo.Parameters.ContextWindow
+		}
+	}
+	agentConfig.MaxContextTokens = types.AgentMaxContextTokens(
+		agentConfig.MaxContextTokens, modelContextWindow,
+	)
+	logger.Infof(ctx, "Agent context window: %d tokens (model %s declares %d)",
+		agentConfig.MaxContextTokens, effectiveModelID, modelContextWindow)
+
 	// Get rerank model from custom agent config only when knowledge_search can
 	// actually run. A disabled KB scope makes all KB tools ineffective, so it
 	// must not force users to configure an otherwise-unused rerank model.
@@ -142,6 +160,13 @@ func (s *sessionService) AgentQA(
 		llmContext = []chat.Message{}
 	}
 
+	// Hold the sandbox across this turn so an install that finishes while we
+	// are running cannot rebuild the VM between tool calls. Staging below is
+	// the first resolve: if the previous turn left a stale mark, that is
+	// where the new image is picked up.
+	releaseTurn := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
+	defer releaseTurn()
+
 	// Reconcile all durable session attachments into the session's remote
 	// sandbox before the model can request shell or skill execution. The
 	// durable storage URL — not the ephemeral sandbox path — remains the
@@ -164,7 +189,7 @@ func (s *sessionService) AgentQA(
 		if loadErr != nil {
 			return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
 		}
-		stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, agentConfig.SandboxConfigID, sessionAttachments)
+		stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, agentConfig.SandboxConfigID, req.Session.TenantID, sessionAttachments)
 		if err != nil {
 			return fmt.Errorf("restore session attachments into sandbox: %w", err)
 		}
@@ -202,14 +227,6 @@ func (s *sessionService) AgentQA(
 				logger.Warnf(ctx, "Failed to emit memory recalled event: %v", err)
 			}
 			logger.Infof(ctx, "Injected %d long-term memories into agent context", len(used))
-		}
-	}
-
-	// Route image data based on agent model's vision capability
-	var agentModelSupportsVision bool
-	if effectiveModelID != "" {
-		if modelInfo, err := s.modelService.GetModelByID(ctx, effectiveModelID); err == nil && modelInfo != nil {
-			agentModelSupportsVision = modelInfo.Parameters.SupportsVision
 		}
 	}
 
@@ -286,6 +303,7 @@ func (s *sessionService) buildAgentConfig(
 		CitationEnabled:             customAgent.Config.CitationEnabled,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
+		MaxCompletionTokens:         customAgent.Config.MaxCompletionTokens,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
 		SharedAgentReadOnly:         req.SharedAgentReadOnly,
 	}
@@ -297,6 +315,25 @@ func (s *sessionService) buildAgentConfig(
 
 	// Configure skills based on CustomAgentConfig
 	s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
+
+	// Then add the skills installed into the sandbox config this run boots.
+	//
+	// The workspace is the one on the context rather than the agent's owner,
+	// because that is where resolveSandboxForExecution reads it; skillsForRun
+	// picks the config the same way the sandbox resolution does.
+	sandboxTenantID, _ := types.TenantIDFromContext(ctx)
+	skillConfigID, tenantSkills := skillsForRun(
+		ctx, s.sandboxPinner, s.sandboxConfigRepo, s.tenantSkillRepo,
+		sandboxTenantID, req.Session.ID, agentConfig.SandboxConfigID,
+	)
+	agentConfig.TenantSkills = tenantSkills
+	if len(tenantSkills) > 0 {
+		// The config named here is the one the skills came from, which is the
+		// pinned one whenever it differs from the agent's - the only case the
+		// line is worth reading.
+		logger.Infof(ctx, "Sandbox config %s offers %d installed skill(s) to this run",
+			skillConfigID, len(tenantSkills))
+	}
 
 	// Resolve knowledge bases using shared helper
 	kbIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req)
@@ -377,9 +414,8 @@ func (s *sessionService) buildAgentConfig(
 	}
 	logger.Infof(ctx, "Agent search targets built: %d targets", len(searchTargets))
 
-	if agentConfig.MaxContextTokens <= 0 {
-		agentConfig.MaxContextTokens = types.DefaultMaxContextTokens
-	}
+	// MaxContextTokens is deliberately left unset here. The caller fills it
+	// from the resolved model's declared window, which is not known yet.
 
 	return agentConfig, nil
 }
@@ -409,8 +445,12 @@ func mergeResolvedTagKnowledgeIDs(
 	return uniqueNonEmptyStrings(merged)
 }
 
-// applyPerRequestSkillScope narrows the agent's skill whitelist to the @Skill
-// mentions for this turn and records the pinned set for the <must_use> hint.
+// applyPerRequestSkillScope records the @Skill mentions for this turn as the
+// pinned set that drives the <must_use> hint. It deliberately does NOT narrow
+// the allow-gate: an agent whose prompt requires a skill the user did not
+// @mention must still be able to read and execute it. Mentioning a skill only
+// prioritizes it, it never revokes access to the agent's configured set.
+//
 // It is a no-op when no skills were mentioned or skills are disabled.
 func applyPerRequestSkillScope(
 	ctx context.Context,
@@ -428,18 +468,11 @@ func applyPerRequestSkillScope(
 	if !agentConfig.SkillsEnabled {
 		return
 	}
-	switch skillsMode {
-	case "selected":
-		agentConfig.AllowedSkills = intersectPreservingRequestOrder(requested, agentConfig.AllowedSkills)
-		if len(agentConfig.AllowedSkills) == 0 {
-			agentConfig.SkillsEnabled = false
-		}
-	case "all":
-		agentConfig.AllowedSkills = dedupPreservingOrder(requested)
-	}
-	if agentConfig.SkillsEnabled && len(agentConfig.AllowedSkills) > 0 {
-		agentConfig.PinnedSkillNames = intersectPreservingRequestOrder(requested, agentConfig.AllowedSkills)
-	}
+	// PinnedSkillNames carries only mentioned skills that are currently
+	// allowed, so the <must_use> hint never directs the model at a skill it
+	// cannot load. An empty AllowedSkills means all skills are allowed,
+	// matching Manager.isSkillAllowed, so every mention is pinned in that case.
+	agentConfig.PinnedSkillNames = pinPreservingRequestOrder(requested, agentConfig.AllowedSkills)
 	logger.Infof(ctx, "Applied per-request @skill scope: requested=%v effective=%v pinned=%v",
 		requested, agentConfig.AllowedSkills, agentConfig.PinnedSkillNames)
 }
@@ -527,6 +560,33 @@ func intersectPreservingRequestOrder(requested []string, allowed []string) []str
 	return result
 }
 
+// pinPreservingRequestOrder returns the requested skills that are allowed,
+// preserving request order. Unlike intersectPreservingRequestOrder, an empty
+// allowed list is treated as "all skills allowed" (matching
+// Manager.isSkillAllowed), so every requested skill is pinned.
+func pinPreservingRequestOrder(requested []string, allowed []string) []string {
+	allowedAll := len(allowed) == 0
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, value := range allowed {
+		if value != "" {
+			allowedSet[value] = true
+		}
+	}
+	result := make([]string, 0, len(requested))
+	seen := make(map[string]bool, len(requested))
+	for _, value := range requested {
+		if value == "" || seen[value] {
+			continue
+		}
+		if !allowedAll && !allowedSet[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
+
 func dedupPreservingOrder(values []string) []string {
 	result := make([]string, 0, len(values))
 	seen := make(map[string]bool, len(values))
@@ -540,11 +600,10 @@ func dedupPreservingOrder(values []string) []string {
 	return result
 }
 
-// configureSkillsFromAgent configures skills settings in AgentConfig based on CustomAgentConfig
-// Returns the skill directories and allowed skills based on the selection mode:
-//   - "all": uses all preloaded skills
-//   - "selected": uses the explicitly selected skills
-//   - "none" or "": skills are disabled
+// configureSkillsFromAgent turns the agent's skill picker into runtime flags.
+// The skills themselves come from the sandbox image (TenantSkills), not from
+// the deployment's skills/preloaded directory — that host copy is not what
+// execute_skill_script would find inside the sandbox.
 func (s *sessionService) configureSkillsFromAgent(
 	ctx context.Context,
 	agentConfig *types.AgentConfig,
@@ -554,19 +613,14 @@ func (s *sessionService) configureSkillsFromAgent(
 		return
 	}
 	agentConfig.SandboxConfigID = customAgent.Config.SandboxConfigID
-	dir := getPreloadedSkillsDir()
 	switch customAgent.Config.SkillsSelectionMode {
 	case "all":
-		// Enable all preloaded skills
 		agentConfig.SkillsEnabled = true
-		agentConfig.SkillDirs = []string{dir}
-		agentConfig.AllowedSkills = nil // Empty means all skills allowed
-		logger.Infof(ctx, "SkillsSelectionMode=all: enabled all preloaded skills")
+		agentConfig.AllowedSkills = nil
+		logger.Infof(ctx, "SkillsSelectionMode=all: using installed sandbox skills")
 	case "selected":
-		// Enable only selected skills
 		if len(customAgent.Config.SelectedSkills) > 0 {
 			agentConfig.SkillsEnabled = true
-			agentConfig.SkillDirs = []string{dir}
 			agentConfig.AllowedSkills = customAgent.Config.SelectedSkills
 			logger.Infof(ctx, "SkillsSelectionMode=selected: enabled %d selected skills: %v",
 				len(customAgent.Config.SelectedSkills), customAgent.Config.SelectedSkills)
@@ -575,13 +629,10 @@ func (s *sessionService) configureSkillsFromAgent(
 			logger.Infof(ctx, "SkillsSelectionMode=selected but no skills selected: skills disabled")
 		}
 	case "none", "":
-		// Skills disabled
 		agentConfig.SkillsEnabled = false
 		logger.Infof(ctx, "SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
 	default:
-		// Unknown mode, disable skills
 		agentConfig.SkillsEnabled = false
 		logger.Warnf(ctx, "Unknown SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
 	}
-
 }

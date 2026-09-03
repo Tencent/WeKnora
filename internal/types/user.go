@@ -25,11 +25,14 @@ type UserPreferences struct {
 	// LastActiveTenantID remembers the last workspace the user actively
 	// switched into, so a fresh login (new device, cleared browser, new
 	// refresh token) lands them back in that workspace instead of always
-	// bouncing to their home workspace. Login / RefreshToken validate that
+	// bouncing to their home workspace. Written by the SPA's preferences
+	// PUT and by service-level SwitchTenant (including when switching
+	// home, which stores the home ID). Login / RefreshToken validate that
 	// the workspace still exists and the user still has an active membership
 	// (or CanAccessAllTenants) before honouring this preference; an
 	// invalid pointer is best-effort cleared and the user falls back to
-	// home.
+	// home. Refresh JWT claims have no tenant_id, so RefreshToken
+	// re-resolves from this field.
 	//
 	// nil  = no preference (use user.TenantID, i.e. home)
 	// *0   = "clear preference" sentinel for the partial-update endpoint

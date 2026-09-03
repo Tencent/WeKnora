@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -53,6 +54,7 @@ func NewKnowledgeRepository(db *gorm.DB) interfaces.KnowledgeRepository {
 
 // CreateKnowledge creates knowledge
 func (r *knowledgeRepository) CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
+	knowledge.ErrorMessage = common.CleanInvalidUTF8(knowledge.ErrorMessage)
 	err := r.db.WithContext(ctx).Create(knowledge).Error
 	return err
 }
@@ -306,6 +308,7 @@ func (r *knowledgeRepository) RenameKnowledgeFolderPath(
 
 // UpdateKnowledge updates knowledge
 func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
+	knowledge.ErrorMessage = common.CleanInvalidUTF8(knowledge.ErrorMessage)
 	omit := omitFieldsOnUpdate
 	// Legacy/unit-test schemas created before custom_metadata should continue
 	// to support unrelated updates when the caller did not provide the field.
@@ -320,6 +323,11 @@ func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *ty
 func (r *knowledgeRepository) UpdateKnowledgeBatch(ctx context.Context, knowledgeList []*types.Knowledge) error {
 	if len(knowledgeList) == 0 {
 		return nil
+	}
+	for _, knowledge := range knowledgeList {
+		if knowledge != nil {
+			knowledge.ErrorMessage = common.CleanInvalidUTF8(knowledge.ErrorMessage)
+		}
 	}
 	return r.db.Debug().WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledgeList).Error
 }
@@ -513,6 +521,14 @@ func (r *knowledgeRepository) UpdateKnowledgeColumn(
 	column string,
 	value interface{},
 ) error {
+	if column == "error_message" {
+		switch v := value.(type) {
+		case string:
+			value = common.CleanInvalidUTF8(v)
+		case []byte:
+			value = common.CleanInvalidUTF8(string(v))
+		}
+	}
 	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Update(column, value).Error
 	return err
 }
@@ -528,6 +544,14 @@ func (r *knowledgeRepository) UpdateKnowledgeColumns(
 ) error {
 	if len(values) == 0 {
 		return nil
+	}
+	if value, ok := values["error_message"]; ok {
+		switch v := value.(type) {
+		case string:
+			values["error_message"] = common.CleanInvalidUTF8(v)
+		case []byte:
+			values["error_message"] = common.CleanInvalidUTF8(string(v))
+		}
 	}
 	return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Updates(values).Error
 }

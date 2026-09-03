@@ -432,7 +432,7 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `max_iterations` | int | 10 | ReAct 最大迭代次数 |
+| `max_iterations` | int | 10 | ReAct 最大迭代次数。`-1` 表示不限制，直到模型自然结束或用户停止；正数上限为 100 |
 | `allowed_tools` | []string | - | 允许使用的工具列表 |
 | `mcp_selection_mode` | string | - | MCP 服务选择模式：`all`/`selected`/`none` |
 | `mcp_services` | []string | - | 选中的 MCP 服务 ID 列表 |

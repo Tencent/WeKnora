@@ -128,6 +128,23 @@ func (s *bindingStoreFaults) DeleteIfMatch(
 	return s.base.DeleteIfMatch(ctx, key, provider, sandboxID)
 }
 
+func (s *bindingStoreFaults) ReplaceTrafficTokenIfMatch(
+	ctx context.Context,
+	key SessionSandboxKey,
+	expected SessionSandboxBinding,
+	token string,
+) (bool, error) {
+	return s.base.ReplaceTrafficTokenIfMatch(ctx, key, expected, token)
+}
+
+func (s *bindingStoreFaults) InvalidateByConfig(
+	ctx context.Context,
+	tenantID uint64,
+	configID string,
+) (int, error) {
+	return s.base.InvalidateByConfig(ctx, tenantID, configID)
+}
+
 func (s *bindingStoreFaults) WithLifecycleLock(
 	ctx context.Context,
 	key SessionSandboxKey,
@@ -163,6 +180,132 @@ func newTestRemoteSessionLifecycle(
 	)
 	require.NoError(t, err)
 	return lifecycle
+}
+
+func TestCreateAndBindPersistsInboundToken(t *testing.T) {
+	client := newFakeRemoteClient(SandboxTypeCube)
+	client.trafficAccessToken = "traffic-token"
+	store := NewMemorySessionSandboxBindingStore()
+	lifecycle := newTestRemoteSessionLifecycle(
+		t, client, store, &fakeSessionExistenceChecker{exists: true},
+	)
+	key := SessionSandboxKey{TenantID: 1, SessionID: "session-1"}
+
+	_, err := lifecycle.Resolve(context.Background(), key)
+	require.NoError(t, err)
+
+	binding, err := store.Get(context.Background(), key)
+	require.NoError(t, err)
+	require.Equal(t, "traffic-token", binding.TrafficAccessToken,
+		"the token is issued once, so the binding is the only place it survives a pause")
+}
+
+func TestCreateAndBindRejectsTokenlessSandboxWhenInboundClosed(t *testing.T) {
+	closed := false
+	client := newFakeRemoteClient(SandboxTypeE2B)
+	client.trafficAccessToken = ""
+	store := NewMemorySessionSandboxBindingStore()
+	lifecycle := newTestRemoteSessionLifecycleWithPolicy(
+		t, client, store, &fakeSessionExistenceChecker{exists: true},
+		RemoteNetworkPolicy{AllowPublicTraffic: &closed},
+	)
+	key := SessionSandboxKey{TenantID: 1, SessionID: "session-1"}
+
+	_, err := lifecycle.Resolve(context.Background(), key)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "inbound traffic token missing")
+	creates, _, _, _, deletes := client.counts()
+	require.Equal(t, 1, creates)
+	require.Equal(t, 1, deletes, "the unusable sandbox must be destroyed, not bound")
+	binding, err := store.Get(context.Background(), key)
+	require.NoError(t, err)
+	require.Nil(t, binding, "an empty token must not be persisted")
+}
+
+func TestCreateAndBindAllowsTokenlessSandboxWhenProviderHasNoInboundCredential(t *testing.T) {
+	closed := false
+	client := newFakeRemoteClient(SandboxTypeDocker)
+	client.omitsInboundTokenCarrier = true
+	store := NewMemorySessionSandboxBindingStore()
+	lifecycle := newTestRemoteSessionLifecycleWithPolicy(
+		t, client, store, &fakeSessionExistenceChecker{exists: true},
+		RemoteNetworkPolicy{AllowPublicTraffic: &closed},
+	)
+	key := SessionSandboxKey{TenantID: 1, SessionID: "session-1"}
+
+	handle, err := lifecycle.Resolve(context.Background(), key)
+
+	require.NoError(t, err)
+	require.NotEmpty(t, handle.ID())
+	creates, _, _, _, deletes := client.counts()
+	require.Equal(t, 1, creates)
+	require.Zero(t, deletes)
+}
+
+func TestCreateAndBindPersistsTokenWhenInboundClosed(t *testing.T) {
+	closed := false
+	client := newFakeRemoteClient(SandboxTypeCube)
+	client.trafficAccessToken = "traffic-token"
+	store := NewMemorySessionSandboxBindingStore()
+	lifecycle := newTestRemoteSessionLifecycleWithPolicy(
+		t, client, store, &fakeSessionExistenceChecker{exists: true},
+		RemoteNetworkPolicy{AllowPublicTraffic: &closed},
+	)
+	key := SessionSandboxKey{TenantID: 1, SessionID: "session-1"}
+
+	_, err := lifecycle.Resolve(context.Background(), key)
+	require.NoError(t, err)
+
+	binding, err := store.Get(context.Background(), key)
+	require.NoError(t, err)
+	require.Equal(t, "traffic-token", binding.TrafficAccessToken)
+}
+
+func TestResolveReconnectPassesStoredInboundToken(t *testing.T) {
+	client := newFakeRemoteClient(SandboxTypeCube)
+	client.trafficAccessToken = "traffic-token"
+	store := NewMemorySessionSandboxBindingStore()
+	lifecycle := newTestRemoteSessionLifecycle(
+		t, client, store, &fakeSessionExistenceChecker{exists: true},
+	)
+	key := SessionSandboxKey{TenantID: 1, SessionID: "session-1"}
+
+	_, err := lifecycle.Resolve(context.Background(), key)
+	require.NoError(t, err)
+	_, err = lifecycle.Resolve(context.Background(), key)
+	require.NoError(t, err)
+
+	client.mu.Lock()
+	connects := append([]RemoteConnectRequest(nil), client.connects...)
+	client.mu.Unlock()
+	require.Len(t, connects, 1)
+	require.Equal(t, "traffic-token", connects[0].TrafficAccessToken)
+}
+
+func TestResolveReconnectPersistsProviderReissuedInboundToken(t *testing.T) {
+	client := newFakeRemoteClient(SandboxTypeCube)
+	client.trafficAccessToken = "create-token"
+	store := NewMemorySessionSandboxBindingStore()
+	lifecycle := newTestRemoteSessionLifecycle(
+		t, client, store, &fakeSessionExistenceChecker{exists: true},
+	)
+	key := SessionSandboxKey{TenantID: 1, SessionID: "session-1"}
+
+	_, err := lifecycle.Resolve(context.Background(), key)
+	require.NoError(t, err)
+
+	client.mu.Lock()
+	client.connectTrafficToken = "rotated-token"
+	client.mu.Unlock()
+
+	_, err = lifecycle.Resolve(context.Background(), key)
+	require.NoError(t, err)
+
+	binding, err := store.Get(context.Background(), key)
+	require.NoError(t, err)
+	require.Equal(t, "rotated-token", binding.TrafficAccessToken,
+		"a token the provider reissued on connect must replace the stored copy")
 }
 
 func TestRemoteSessionLifecycleCreatesOnceAcrossCoordinators(t *testing.T) {
@@ -374,6 +517,138 @@ func TestRemoteSessionLifecycleDeletesDuplicateMetadataCandidates(t *testing.T) 
 			require.Equal(t, 1, deletes)
 		})
 	}
+}
+
+func newTestRemoteSessionLifecycleWithPolicy(
+	t *testing.T,
+	client RemoteSandboxClient,
+	store SessionSandboxBindingStore,
+	checker SessionExistenceChecker,
+	policy RemoteNetworkPolicy,
+) *remoteSessionLifecycle {
+	t.Helper()
+	lifecycle, err := newRemoteSessionLifecycle(
+		client,
+		store,
+		checker,
+		RemoteCreateRequest{
+			TemplateID: "template-a",
+			Network:    policy,
+			Timeout: RemoteTimeoutPolicy{
+				Mode:   RemoteTimeoutExplicit,
+				Value:  time.Hour,
+				Action: RemoteOnTimeoutPause,
+			},
+		},
+		time.Second,
+		"",
+	)
+	require.NoError(t, err)
+	return lifecycle
+}
+
+// A metadata-adopted sandbox has no binding to supply its inbound token. When
+// the policy closed inbound, adopting it would bind a sandbox whose every
+// data-plane call answers 403 — and 403 is RemoteErrorKindAuthentication, which
+// CanReplaceRemoteBinding refuses to replace, so the session would stay wedged
+// until an operator intervened. Creating a fresh sandbox is the only recovery.
+func TestRemoteSessionLifecycleSkipsTokenlessAdoptionWhenInboundClosed(t *testing.T) {
+	closed := false
+	client := newFakeRemoteClient(SandboxTypeE2B)
+	client.trafficAccessToken = "fresh-token"
+	store := NewMemorySessionSandboxBindingStore()
+	lifecycle := newTestRemoteSessionLifecycleWithPolicy(
+		t, client, store, &fakeSessionExistenceChecker{exists: true},
+		RemoteNetworkPolicy{AllowPublicTraffic: &closed},
+	)
+	key := SessionSandboxKey{TenantID: 42, SessionID: "session-a"}
+	client.addSandbox("orphan", "template-a", RemoteStateRunning, lifecycle.metadata(key), time.Unix(100, 0))
+
+	handle, err := lifecycle.Resolve(context.Background(), key)
+
+	require.NoError(t, err)
+	require.NotEqual(t, "orphan", handle.ID())
+	creates, _, _, _, _ := client.counts()
+	require.Equal(t, 1, creates)
+	binding, err := store.Get(context.Background(), key)
+	require.NoError(t, err)
+	require.Equal(t, handle.ID(), binding.SandboxID)
+	require.Equal(t, "fresh-token", binding.TrafficAccessToken)
+	// The abandoned sandbox is deleted, not left behind. Nothing in-tree
+	// reclaims orphans (ReapOrphanSandboxes has no production caller), and
+	// without this every binding loss would strand one more paused sandbox.
+	require.False(t, client.hasSandbox("orphan"))
+	_, _, _, _, deletes := client.counts()
+	require.Equal(t, 1, deletes)
+}
+
+// Docker has no inbound credential at all, so its handle does not implement
+// RemoteInboundTokenCarrier and InboundTokenOf always returns "". The guard
+// must not read that as a lost credential: Docker never had the 403 wedge, and
+// firing here would destroy a healthy container and its /workspace on every
+// binding loss — on precisely the single-node deployment the guard was for.
+func TestRemoteSessionLifecycleAdoptsWhenProviderHasNoInboundCredential(t *testing.T) {
+	closed := false
+	client := newFakeRemoteClient(SandboxTypeDocker)
+	client.omitsInboundTokenCarrier = true
+	store := NewMemorySessionSandboxBindingStore()
+	lifecycle := newTestRemoteSessionLifecycleWithPolicy(
+		t, client, store, &fakeSessionExistenceChecker{exists: true},
+		RemoteNetworkPolicy{AllowPublicTraffic: &closed},
+	)
+	key := SessionSandboxKey{TenantID: 42, SessionID: "session-a"}
+	client.addSandbox("existing", "template-a", RemoteStateRunning, lifecycle.metadata(key), time.Unix(100, 0))
+
+	handle, err := lifecycle.Resolve(context.Background(), key)
+
+	require.NoError(t, err)
+	require.Equal(t, "existing", handle.ID())
+	creates, _, _, _, deletes := client.counts()
+	require.Zero(t, creates)
+	require.Zero(t, deletes)
+}
+
+func TestRemoteSessionLifecycleAdoptsWhenProviderReissuesInboundToken(t *testing.T) {
+	closed := false
+	client := newFakeRemoteClient(SandboxTypeE2B)
+	client.trafficAccessToken = "reissued-token"
+	client.reissuesTokenOnConnect = true
+	store := NewMemorySessionSandboxBindingStore()
+	lifecycle := newTestRemoteSessionLifecycleWithPolicy(
+		t, client, store, &fakeSessionExistenceChecker{exists: true},
+		RemoteNetworkPolicy{AllowPublicTraffic: &closed},
+	)
+	key := SessionSandboxKey{TenantID: 42, SessionID: "session-a"}
+	client.addSandbox("orphan", "template-a", RemoteStateRunning, lifecycle.metadata(key), time.Unix(100, 0))
+
+	handle, err := lifecycle.Resolve(context.Background(), key)
+
+	require.NoError(t, err)
+	require.Equal(t, "orphan", handle.ID())
+	creates, _, _, _, _ := client.counts()
+	require.Zero(t, creates)
+	binding, err := store.Get(context.Background(), key)
+	require.NoError(t, err)
+	require.Equal(t, "reissued-token", binding.TrafficAccessToken)
+}
+
+func TestRemoteSessionLifecycleAdoptsTokenlessSandboxWhenInboundPublic(t *testing.T) {
+	open := true
+	client := newFakeRemoteClient(SandboxTypeE2B)
+	store := NewMemorySessionSandboxBindingStore()
+	lifecycle := newTestRemoteSessionLifecycleWithPolicy(
+		t, client, store, &fakeSessionExistenceChecker{exists: true},
+		RemoteNetworkPolicy{AllowPublicTraffic: &open},
+	)
+	key := SessionSandboxKey{TenantID: 42, SessionID: "session-a"}
+	client.addSandbox("orphan", "template-a", RemoteStateRunning, lifecycle.metadata(key), time.Unix(100, 0))
+
+	handle, err := lifecycle.Resolve(context.Background(), key)
+
+	require.NoError(t, err)
+	require.Equal(t, "orphan", handle.ID())
+	creates, _, _, _, _ := client.counts()
+	require.Zero(t, creates)
 }
 
 func TestRemoteSessionLifecycleStopsDuplicateCleanupAfterLockLoss(t *testing.T) {
@@ -882,6 +1157,186 @@ func TestLifecycleTagsGlobalDefaultConfigWithSentinel(t *testing.T) {
 
 	require.Equal(t, types.SandboxConfigIDGlobalDefault, md[remoteMetadataConfigID],
 		"an empty config ID must still be tagged, so listing can target it")
+}
+
+// lifecycleFixture is the smallest complete lifecycle: one memory binding
+// store, one fake provider, one live session bound to config "cfg-1".
+type lifecycleFixture struct {
+	lifecycle *remoteSessionLifecycle
+	bindings  *MemorySessionSandboxBindingStore
+	client    *fakeRemoteClient
+	checker   *fakeSessionExistenceChecker
+	key       SessionSandboxKey
+}
+
+func newLifecycleFixture(t *testing.T) *lifecycleFixture {
+	t.Helper()
+	client := newFakeRemoteClient(SandboxTypeCube)
+	bindings := NewMemorySessionSandboxBindingStore()
+	checker := &fakeSessionExistenceChecker{exists: true}
+	lifecycle, err := newRemoteSessionLifecycle(
+		client,
+		bindings,
+		checker,
+		RemoteCreateRequest{TemplateID: "template-a"},
+		time.Minute,
+		"cfg-1",
+	)
+	require.NoError(t, err)
+	return &lifecycleFixture{
+		lifecycle: lifecycle,
+		bindings:  bindings,
+		client:    client,
+		checker:   checker,
+		key:       SessionSandboxKey{TenantID: 42, SessionID: "session-a"},
+	}
+}
+
+func TestResolveRecreatesSandboxAfterImageChange(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	first, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	second, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	require.NotEqual(t, first.ID(), second.ID(),
+		"a session must pick up the new skill image on its next sandbox use")
+	require.Contains(t, fx.client.deleteIDs, first.ID(),
+		"the stale sandbox must be released, not leaked")
+}
+
+func TestResolveKeepsStaleSandboxDuringAnOpenTurn(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	require.NoError(t, fx.bindings.BeginTurn(ctx, fx.key))
+	first, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	second, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	require.Equal(t, first.ID(), second.ID(),
+		"a turn already using the sandbox must keep it after an install")
+	require.NotContains(t, fx.client.deleteIDs, first.ID())
+}
+
+func TestResolveRebuildsStaleSandboxOnFirstUseOfNextTurn(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	require.NoError(t, fx.bindings.BeginTurn(ctx, fx.key))
+	first, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	require.NoError(t, fx.bindings.EndTurn(ctx, fx.key))
+	require.NoError(t, fx.bindings.BeginTurn(ctx, fx.key))
+
+	second, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	require.NotEqual(t, first.ID(), second.ID(),
+		"the next turn's first resolve must pick up the new skill image")
+	require.Contains(t, fx.client.deleteIDs, first.ID())
+
+	third, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	require.Equal(t, second.ID(), third.ID(),
+		"later resolves of the new turn must keep the rebuilt sandbox")
+}
+
+func TestInvalidateDoesNotDisturbOtherConfigs(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	_, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-other")
+	require.NoError(t, err)
+	require.Zero(t, n)
+}
+
+// Marking is not the same as tearing down: a turn already running in the old
+// sandbox must keep working, and the new image arrives on its next use.
+func TestInvalidateLeavesTheRunningSandboxAlone(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	handle, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	require.True(t, fx.client.hasSandbox(handle.ID()),
+		"invalidation must not destroy a sandbox a turn may be using")
+	binding, err := fx.bindings.Get(ctx, fx.key)
+	require.NoError(t, err)
+	require.NotNil(t, binding, "the binding is marked, never dropped outside the lock")
+	require.NotNil(t, binding.StaleAt)
+}
+
+// A second invalidation between two uses must not report the same binding
+// twice: the caller logs the count as "how many sessions were affected".
+func TestInvalidateSkipsBindingsAlreadyMarked(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	_, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	n, err = fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+	require.Zero(t, n)
+}
+
+// The rebuilt sandbox must not inherit the mark, or every later use would
+// destroy and recreate a perfectly current sandbox.
+func TestResolveClearsStalenessAfterRecreating(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	_, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	_, err = fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+
+	second, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	binding, err := fx.bindings.Get(ctx, fx.key)
+	require.NoError(t, err)
+	require.NotNil(t, binding)
+	require.Nil(t, binding.StaleAt)
+	require.Equal(t, "cfg-1", binding.ConfigID,
+		"the rebuilt binding must record the config it belongs to")
+
+	third, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	require.Equal(t, second.ID(), third.ID())
+}
+
+// Another workspace's session may sit on the same config ID; marking must stay
+// inside the workspace whose image changed.
+func TestInvalidateStaysWithinTheWorkspace(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	_, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID+1, "cfg-1")
+	require.NoError(t, err)
+	require.Zero(t, n)
 }
 
 func newTestLifecycleWithConfigID(t *testing.T, configID string) *remoteSessionLifecycle {

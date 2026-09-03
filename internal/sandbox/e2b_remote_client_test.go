@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/Tencent/WeKnora/internal/types"
 	e2b "github.com/matiasinsaurralde/go-e2b"
 	"github.com/stretchr/testify/require"
 )
@@ -51,16 +52,26 @@ type e2bMockServer struct {
 	connectID   string
 	deleteID    string
 
-	mu                sync.Mutex
-	v2Queries         []url.Values
-	repeatV2NextToken bool
-	unsafeV2NextToken string
-	sandboxes         map[string]map[string]any // sandboxID → SandboxInfo JSON
+	mu                      sync.Mutex
+	v2Queries               []url.Values
+	snapshotQueries         []url.Values
+	repeatV2NextToken       bool
+	unsafeV2NextToken       string
+	repeatSnapshotNextToken bool
+	snapshotPageSize        int
+	snapshotDeleteFailWith  int
+	snapshotCreateBody      map[string]any
+	sandboxes               map[string]map[string]any // sandboxID -> SandboxInfo JSON
+	snapshots               map[string]map[string]any // snapshotID -> SnapshotInfo JSON
+	trafficAccessToken      string
 }
 
 func newE2BMockServer(t *testing.T) *e2bMockServer {
 	t.Helper()
-	m := &e2bMockServer{sandboxes: map[string]map[string]any{}}
+	m := &e2bMockServer{
+		sandboxes: map[string]map[string]any{},
+		snapshots: map[string]map[string]any{},
+	}
 	m.server = httptest.NewServer(http.HandlerFunc(m.handle))
 	t.Cleanup(m.server.Close)
 	return m
@@ -83,12 +94,19 @@ func (m *e2bMockServer) handle(w http.ResponseWriter, r *http.Request) {
 			"startedAt":   time.Now().UTC().Format(time.RFC3339),
 			"metadata":    m.createBody["metadata"],
 		}
+		m.mu.Lock()
+		trafficAccessToken := m.trafficAccessToken
+		m.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		response := map[string]any{
 			"sandboxID":       id,
 			"envdAccessToken": "token-" + id,
-		})
+		}
+		if trafficAccessToken != "" {
+			response["trafficAccessToken"] = trafficAccessToken
+		}
+		_ = json.NewEncoder(w).Encode(response)
 
 	case r.URL.Path == "/sandboxes" && r.Method == http.MethodGet:
 		m.listCount.Add(1)
@@ -102,6 +120,32 @@ func (m *e2bMockServer) handle(w http.ResponseWriter, r *http.Request) {
 
 	case r.URL.Path == "/v2/sandboxes" && r.Method == http.MethodGet:
 		m.handleListV2(w, r)
+
+	case strings.HasPrefix(r.URL.Path, "/sandboxes/") &&
+		strings.HasSuffix(r.URL.Path, "/snapshots") &&
+		r.Method == http.MethodPost:
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/sandboxes/"), "/snapshots")
+		if _, ok := m.sandboxes[id]; !ok {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &m.snapshotCreateBody)
+		snapshotID := "snap-" + strconv.Itoa(len(m.snapshots)+1)
+		name, _ := m.snapshotCreateBody["name"].(string)
+		names := []string{}
+		if name != "" {
+			names = append(names, name)
+		}
+		m.snapshots[snapshotID] = map[string]any{
+			"snapshotID": snapshotID,
+			"sandboxID":  id,
+			"names":      names,
+		}
+		writeJSON(w, http.StatusCreated, m.snapshots[snapshotID])
+
+	case r.URL.Path == "/snapshots" && r.Method == http.MethodGet:
+		m.handleListSnapshots(w, r)
 
 	case strings.HasPrefix(r.URL.Path, "/sandboxes/") &&
 		strings.HasSuffix(r.URL.Path, "/connect") &&
@@ -144,6 +188,19 @@ func (m *e2bMockServer) handle(w http.ResponseWriter, r *http.Request) {
 		m.deleteCount.Add(1)
 		m.deleteID = id
 		delete(m.sandboxes, id)
+		w.WriteHeader(http.StatusNoContent)
+
+	case strings.HasPrefix(r.URL.Path, "/templates/") && r.Method == http.MethodDelete:
+		if m.snapshotDeleteFailWith != 0 {
+			http.Error(w, "delete failed", m.snapshotDeleteFailWith)
+			return
+		}
+		id := strings.TrimPrefix(r.URL.Path, "/templates/")
+		if _, ok := m.snapshots[id]; !ok {
+			http.NotFound(w, r)
+			return
+		}
+		delete(m.snapshots, id)
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
@@ -225,6 +282,55 @@ func (m *e2bMockServer) handleListV2(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
+func (m *e2bMockServer) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
+	m.mu.Lock()
+	m.snapshotQueries = append(m.snapshotQueries, r.URL.Query())
+	repeatToken := m.repeatSnapshotNextToken
+	pageSize := m.snapshotPageSize
+	m.mu.Unlock()
+
+	sandboxID := r.URL.Query().Get("sandboxID")
+	ids := make([]string, 0, len(m.snapshots))
+	for id, info := range m.snapshots {
+		if sandboxID != "" && info["sandboxID"] != sandboxID {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	limit := 100
+	if pageSize > 0 {
+		limit = pageSize
+	}
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && pageSize == 0 {
+			limit = parsed
+		}
+	}
+	start := 0
+	if raw := r.URL.Query().Get("nextToken"); raw != "" && raw != "repeat" {
+		start, _ = strconv.Atoi(raw)
+	}
+	if start > len(ids) {
+		start = len(ids)
+	}
+	end := start + limit
+	if end > len(ids) {
+		end = len(ids)
+	}
+	items := make([]map[string]any, 0, end-start)
+	for _, id := range ids[start:end] {
+		items = append(items, m.snapshots[id])
+	}
+	if repeatToken {
+		w.Header().Set("X-Next-Token", "repeat")
+	} else if end < len(ids) {
+		w.Header().Set("X-Next-Token", strconv.Itoa(end))
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
 func mockMetadataMatches(raw any, expected map[string]string) bool {
 	if len(expected) == 0 {
 		return true
@@ -258,15 +364,108 @@ func TestE2BRemoteClientProviderAndCapabilities(t *testing.T) {
 	client := newTestE2BRemoteClient(t, newE2BMockServer(t))
 
 	require.Equal(t, SandboxTypeE2B, client.Provider())
-	caps := client.Capabilities()
-	require.True(t, caps.SupportsReconnect)
-	require.True(t, caps.SupportsMetadata)
-	require.True(t, caps.SupportsListSandboxes)
-	require.True(t, caps.SupportsPauseResume)
-	require.True(t, caps.SupportsTimeoutRefresh)
-	// The go-e2b SDK now supports ListDir/Stat/MakeDir/Remove via a
-	// forked SDK (replaced in go.mod). Filesystem enumeration is enabled.
-	require.True(t, caps.SupportsFilesystemEnumeration)
+	require.Equal(t, RemoteSandboxCapabilities{
+		SupportsReconnect:             true,
+		SupportsMetadata:              true,
+		SupportsListSandboxes:         true,
+		SupportsPauseResume:           true,
+		SupportsTimeoutRefresh:        true,
+		SupportsFilesystemEnumeration: true,
+		SupportsSnapshots:             true,
+		SupportsVolumes:               false,
+	}, client.Capabilities())
+}
+
+func TestE2BRemoteClientCreateSnapshot(t *testing.T) {
+	mock := newE2BMockServer(t)
+	client := newTestE2BRemoteClient(t, mock)
+	ctx := context.Background()
+	handle, err := client.Create(ctx, RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+
+	ref, err := client.CreateSnapshot(ctx, handle.ID(), "weknora-sk-cfg1-g1")
+
+	require.NoError(t, err)
+	require.Equal(t, "snap-1", ref.ID)
+	require.Equal(t, []string{"weknora-sk-cfg1-g1"}, ref.Names)
+	require.Equal(t, "weknora-sk-cfg1-g1", mock.snapshotCreateBody["name"])
+	require.Equal(t, int32(1), mock.connectCount.Load())
+}
+
+func TestE2BRemoteClientCreateSnapshotRejectsEmptySandboxID(t *testing.T) {
+	client := newTestE2BRemoteClient(t, newE2BMockServer(t))
+
+	_, err := client.CreateSnapshot(context.Background(), "  ", "n")
+
+	require.Error(t, err)
+	require.True(t, IsRemoteInvalidRequest(err))
+}
+
+func TestE2BRemoteClientDeleteSnapshotTreatsMissingAsSuccess(t *testing.T) {
+	client := newTestE2BRemoteClient(t, newE2BMockServer(t))
+
+	err := client.DeleteSnapshot(context.Background(), "snap-missing")
+
+	require.NoError(t, err, "a missing snapshot must not fail the delete path")
+}
+
+func TestE2BRemoteClientDeleteSnapshotRejectsEmptySnapshotID(t *testing.T) {
+	client := newTestE2BRemoteClient(t, newE2BMockServer(t))
+
+	err := client.DeleteSnapshot(context.Background(), "  ")
+
+	require.Error(t, err)
+	require.True(t, IsRemoteInvalidRequest(err))
+}
+
+func TestE2BRemoteClientDeleteSnapshotReturnsUnexpectedErrors(t *testing.T) {
+	mock := newE2BMockServer(t)
+	mock.snapshotDeleteFailWith = http.StatusInternalServerError
+	client := newTestE2BRemoteClient(t, mock)
+
+	err := client.DeleteSnapshot(context.Background(), "snap-any")
+
+	require.Error(t, err)
+	require.False(t, IsRemoteNotFound(err))
+}
+
+func TestE2BRemoteClientListSnapshotsRejectsStuckPagination(t *testing.T) {
+	mock := newE2BMockServer(t)
+	mock.repeatSnapshotNextToken = true
+	client := newTestE2BRemoteClient(t, mock)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := client.ListSnapshots(ctx, "")
+
+	require.Error(t, err)
+	require.True(t, IsRemoteInvalidRequest(err))
+}
+
+func TestE2BRemoteClientListSnapshotsPagesAllResults(t *testing.T) {
+	mock := newE2BMockServer(t)
+	mock.snapshotPageSize = 1
+	client := newTestE2BRemoteClient(t, mock)
+	ctx := context.Background()
+	first, err := client.Create(ctx, RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+	second, err := client.Create(ctx, RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+	firstRef, err := client.CreateSnapshot(ctx, first.ID(), "weknora-sk-cfg1-g1")
+	require.NoError(t, err)
+	secondRef, err := client.CreateSnapshot(ctx, first.ID(), "weknora-sk-cfg2-g1")
+	require.NoError(t, err)
+	_, err = client.CreateSnapshot(ctx, second.ID(), "other")
+	require.NoError(t, err)
+
+	list, err := client.ListSnapshots(ctx, first.ID())
+
+	require.NoError(t, err)
+	require.Equal(t, []RemoteSnapshotRef{firstRef, secondRef}, list)
+	require.Len(t, mock.snapshotQueries, 2)
+	require.Equal(t, first.ID(), mock.snapshotQueries[0].Get("sandboxID"))
+	require.Equal(t, "100", mock.snapshotQueries[0].Get("limit"))
+	require.Equal(t, "1", mock.snapshotQueries[1].Get("nextToken"))
 }
 
 func TestE2BRemoteClientListTemplatesReconcilesStandardTemplateBuildStatus(t *testing.T) {
@@ -600,15 +799,14 @@ func TestE2BRemoteClientCreateWritesMetadataAndPauseLifecycle(t *testing.T) {
 	require.Equal(t, true, mock.createBody["autoPause"])
 	require.Equal(t, true, mock.createBody["autoPauseMemory"])
 	require.Equal(t, map[string]any{"enabled": true}, mock.createBody["autoResume"])
-	// Network defaults match the Cube adapter: public traffic on, internet
-	// egress on, and Secure=true so the response carries an envd access
-	// token. Regressing these keeps `pip install` broken silently, so we
-	// pin the wire payload here.
+	// Network defaults: egress on so `pip install` keeps working, inbound
+	// CLOSED so the sandbox URL is not reachable by anyone holding the ID.
+	// The inbound half is intentionally the opposite of E2B's own default.
 	require.Equal(t, true, mock.createBody["secure"])
 	require.Equal(t, true, mock.createBody["allow_internet_access"])
 	networkPayload, ok := mock.createBody["network"].(map[string]any)
 	require.True(t, ok, "network payload missing: %#v", mock.createBody["network"])
-	require.Equal(t, true, networkPayload["allowPublicTraffic"])
+	require.Equal(t, false, networkPayload["allowPublicTraffic"])
 
 }
 
@@ -660,21 +858,112 @@ func TestE2BRemoteClientCreateForwardsNetworkPolicy(t *testing.T) {
 			AllowPublicTraffic:  &privateSandbox,
 			AllowOut:            []string{"*.example.com"},
 			DenyOut:             []string{"0.0.0.0/0"},
+			E2BHostRules: []RemoteE2BHostRule{{
+				Host:    "api.example.com",
+				Headers: map[string]string{"X-Environment": "production"},
+			}},
 		},
 	})
 	require.NoError(t, err)
 
-	// Top-level allow_internet_access flips off as the caller requested,
-	// AllowPublicTraffic hides the sandbox behind a traffic access token,
-	// and the L3/L4 allow/deny lists both reach the server. Regressing any
-	// of these silently opens (or closes) the sandbox's network policy in
-	// a way callers cannot observe from unit tests, so pin the wire.
 	require.Equal(t, false, mock.createBody["allow_internet_access"])
 	networkPayload, ok := mock.createBody["network"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, false, networkPayload["allowPublicTraffic"])
 	require.Equal(t, []any{"*.example.com"}, networkPayload["allowOut"])
 	require.Equal(t, []any{"0.0.0.0/0"}, networkPayload["denyOut"])
+
+	rules, ok := networkPayload["rules"].(map[string]any)
+	require.True(t, ok, "rules payload missing: %#v", networkPayload["rules"])
+	hostRules := rules["api.example.com"].([]any)
+	require.Len(t, hostRules, 1)
+	transform := hostRules[0].(map[string]any)["transform"].(map[string]any)
+	headers := transform["headers"].(map[string]any)
+	require.Equal(t, "production", headers["X-Environment"])
+}
+
+// Regression: a stored "deny by default + domain allowlist" policy used to
+// reach E2B as allow_internet_access=false with an empty denyOut, and the
+// provider answered
+//
+//	400 When specifying allowed domains in allow out, you must include
+//	'ALL_TRAFFIC' in deny out to block all other traffic.
+//
+// so every session on that config failed at create time. The existing wire
+// test could not catch it because it hand-built the resolved policy with the
+// sentinel already in place; this one starts from the stored shape and goes
+// through the real resolver.
+func TestE2BRemoteClientCreateSendsDenyAllForStoredDenyByDefault(t *testing.T) {
+	tenantCfg := &types.TenantSandboxConfig{
+		SandboxType: "e2b",
+		E2B: &types.E2BSandboxConfig{
+			APIKey:     "key-test",
+			TemplateID: "template-a",
+		},
+		Network: &types.SandboxNetworkPolicy{
+			DenyEgressByDefault: true,
+			AllowOut:            []string{"*.example.com"},
+		},
+	}
+	effective, err := ResolveEffectiveConfig(tenantCfg, DefaultConfig())
+	require.NoError(t, err)
+
+	mock := newE2BMockServer(t)
+	client := newTestE2BRemoteClient(t, mock)
+
+	_, err = client.Create(context.Background(), RemoteCreateRequest{
+		TemplateID: "template-a",
+		Network:    effective.Network,
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, false, mock.createBody["allow_internet_access"])
+	networkPayload := mock.createBody["network"].(map[string]any)
+	require.Equal(t, []any{"*.example.com"}, networkPayload["allowOut"])
+	require.Equal(t, []any{"0.0.0.0/0"}, networkPayload["denyOut"],
+		"E2B refuses a domain allowlist without an explicit deny-all")
+}
+
+func TestE2BRemoteClientCreateOmitsRulesWhenNoneConfigured(t *testing.T) {
+	mock := newE2BMockServer(t)
+	client := newTestE2BRemoteClient(t, mock)
+
+	_, err := client.Create(context.Background(), RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+
+	networkPayload := mock.createBody["network"].(map[string]any)
+	require.NotContains(t, networkPayload, "rules")
+}
+
+// Same deliberate inversion as the Cube adapter: unspecified means inbound
+// closed. E2B additionally requires Secure=true for this, which the adapter
+// already pins.
+func TestE2BRemoteClientCreateDefaultsInboundClosed(t *testing.T) {
+	mock := newE2BMockServer(t)
+	client := newTestE2BRemoteClient(t, mock)
+
+	_, err := client.Create(context.Background(), RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+
+	require.Equal(t, true, mock.createBody["secure"])
+	require.Equal(t, true, mock.createBody["allow_internet_access"])
+	networkPayload := mock.createBody["network"].(map[string]any)
+	require.Equal(t, false, networkPayload["allowPublicTraffic"])
+}
+
+func TestE2BRemoteHandleExposesTrafficAccessToken(t *testing.T) {
+	mock := newE2BMockServer(t)
+	mock.mu.Lock()
+	mock.trafficAccessToken = "traffic-token"
+	mock.mu.Unlock()
+	client := newTestE2BRemoteClient(t, mock)
+
+	handle, err := client.Create(context.Background(), RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+
+	carrier, ok := handle.(RemoteInboundTokenCarrier)
+	require.True(t, ok, "e2b handle must expose the inbound token for the binding")
+	require.Equal(t, "traffic-token", carrier.TrafficAccessToken())
 }
 
 func TestE2BRemoteClientCreatePreservesTimeoutModes(t *testing.T) {
@@ -799,7 +1088,7 @@ func TestE2BRemoteClientConnectAcrossClients(t *testing.T) {
 	mock.sandboxes[handle.ID()]["state"] = "paused"
 
 	second := newTestE2BRemoteClient(t, mock)
-	reconnected, err := second.Connect(context.Background(), handle.ID())
+	reconnected, err := second.Connect(context.Background(), RemoteConnectRequest{SandboxID: handle.ID()})
 	require.NoError(t, err)
 	require.Equal(t, handle.ID(), reconnected.ID())
 	require.Nil(t, reconnected.Metadata())
@@ -1201,6 +1490,14 @@ func TestNormalizeE2BError(t *testing.T) {
 		{"connect data loss", "List", connect.NewError(connect.CodeDataLoss, errors.New("data loss")), RemoteErrorKindInternal},
 		{"connect unknown", "List", connect.NewError(connect.CodeUnknown, errors.New("unknown")), RemoteErrorKindInternal},
 		{"unknown", "List", errors.New("mystery"), RemoteErrorKindInternal},
+		{"delete snapshot in use", "DeleteSnapshot", &e2b.Error{
+			StatusCode: http.StatusBadRequest,
+			Message:    "cannot delete template 'tpl-1' because there are paused sandboxes using it",
+		}, RemoteErrorKindConflict},
+		{"delete snapshot bad id", "DeleteSnapshot", &e2b.Error{
+			StatusCode: http.StatusBadRequest,
+			Message:    "invalid snapshot id",
+		}, RemoteErrorKindInvalidRequest},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

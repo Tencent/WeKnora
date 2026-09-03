@@ -49,6 +49,10 @@ var imToolNameLabels = map[string]string{
 	"query_knowledge_graph":   "知识图谱查询",
 	"read_skill":              "读取技能",
 	"execute_skill_script":    "执行技能脚本",
+	"list_sandbox_files":      "列出沙箱文件",
+	"read_sandbox_file":       "读取沙箱文件",
+	"write_sandbox_file":      "写入沙箱文件",
+	"edit_sandbox_file":       "编辑沙箱文件",
 	"shell_exec":              "执行沙箱命令",
 	"data_analysis":           "数据分析",
 	"data_schema":             "数据结构",
@@ -302,6 +306,59 @@ func FormatIMRagPipelineLine(step IMToolStep) string {
 	}
 }
 
+func imSandboxMutationTitle(step IMToolStep, pending bool) string {
+	name := imLocalizedToolName(step.ToolName)
+	path := imSandboxFilePath(step)
+	stat := imSandboxDiffStat(step)
+	base := name
+	if pending {
+		base = name + "..."
+	}
+	if path != "" {
+		base = imAppendQueryTitle(name, path)
+		if pending {
+			base += "..."
+		}
+	}
+	if stat != "" {
+		return base + " " + stat
+	}
+	return base
+}
+
+func imSandboxFilePath(step IMToolStep) string {
+	if step.Data != nil {
+		if p, ok := step.Data["path"].(string); ok && strings.TrimSpace(p) != "" {
+			return strings.TrimSpace(p)
+		}
+	}
+	if step.Arguments != nil {
+		if p, ok := step.Arguments["path"].(string); ok && strings.TrimSpace(p) != "" {
+			return strings.TrimSpace(p)
+		}
+	}
+	return ""
+}
+
+func imSandboxDiffStat(step IMToolStep) string {
+	added := imIntField(step.Arguments, "added_lines")
+	removed := imIntField(step.Arguments, "removed_lines")
+	if added == 0 && removed == 0 {
+		added = imIntField(step.Data, "added_lines")
+		removed = imIntField(step.Data, "removed_lines")
+	}
+	switch {
+	case added > 0 && removed > 0:
+		return fmt.Sprintf("+%d -%d", added, removed)
+	case added > 0:
+		return fmt.Sprintf("+%d", added)
+	case removed > 0:
+		return fmt.Sprintf("-%d", removed)
+	default:
+		return ""
+	}
+}
+
 func imAgentToolTitle(step IMToolStep) string {
 	if step.Pending {
 		switch step.ToolName {
@@ -309,6 +366,8 @@ func imAgentToolTitle(step IMToolStep) string {
 			return "正在查看图片内容..."
 		case "wiki_search", "wiki_read_page":
 			return imLocalizedToolName(step.ToolName) + "..."
+		case "write_sandbox_file", "edit_sandbox_file":
+			return imSandboxMutationTitle(step, true)
 		default:
 			return fmt.Sprintf("正在调用 %s...", imLocalizedToolName(step.ToolName))
 		}
@@ -350,6 +409,10 @@ func imAgentToolTitle(step IMToolStep) string {
 		}
 		base := imToolStatusDescription(step)
 		return imAppendQueryTitle(base, pageLabel)
+	}
+
+	if toolName == "write_sandbox_file" || toolName == "edit_sandbox_file" {
+		return imSandboxMutationTitle(step, false)
 	}
 
 	if summary := imToolHeaderSummary(step); summary != "" {

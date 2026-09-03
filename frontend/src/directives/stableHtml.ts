@@ -53,6 +53,27 @@ function morphImage(current: HTMLImageElement, next: HTMLImageElement): void {
   syncAttributes(current, next);
 }
 
+function isMermaidCanvas(el: Element): boolean {
+  return el.classList.contains('chat-mermaid-block__canvas')
+    || (el.tagName === 'PRE' && el.classList.contains('mermaid'));
+}
+
+function mermaidCanvasHasSvg(el: Element): boolean {
+  return !!el.querySelector('svg');
+}
+
+function morphMermaidCanvas(current: Element, next: Element): void {
+  // Incoming HTML from marked still has mermaid source. Keep a diagram that
+  // was already painted so typewriter / stream ticks cannot flash it back
+  // into a fenced code block.
+  if (mermaidCanvasHasSvg(current) && !mermaidCanvasHasSvg(next)) {
+    syncAttributes(current, next, new Set(['data-mermaid']));
+    return;
+  }
+  syncAttributes(current, next);
+  morphChildren(current, next);
+}
+
 function morphNode(current: Node, next: Node): void {
   if (current.nodeType === Node.TEXT_NODE || current.nodeType === Node.COMMENT_NODE) {
     if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue;
@@ -63,6 +84,10 @@ function morphNode(current: Node, next: Node): void {
   const nextElement = next as Element;
   if (currentElement instanceof HTMLImageElement && nextElement instanceof HTMLImageElement) {
     morphImage(currentElement, nextElement);
+    return;
+  }
+  if (isMermaidCanvas(currentElement) && isMermaidCanvas(nextElement)) {
+    morphMermaidCanvas(currentElement, nextElement);
     return;
   }
 

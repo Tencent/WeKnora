@@ -562,6 +562,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	_ = eg.Wait()
 
+	// Re-read identity claims after every map worker has chosen a slug so
+	// concurrent romanizations of the same title collapse before taxonomy
+	// planning and Reduce lock by slug.
+	slugUpdates = s.remapSlugUpdatesByIdentity(ctx, payload.KnowledgeBaseID, slugUpdates, batchCtx)
+
 	// Plan the directory once for the whole batch BEFORE reduce. Reduce writes
 	// pages in parallel, so it can't converge on shared folders on its own; this
 	// single pass assigns every new entity/concept slug a coherent category_path
@@ -1351,53 +1356,13 @@ func (s *wikiIngestService) mapOneDocument(
 			})
 		}
 
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			summaryContent, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
-				"Content":            content,
-				"Language":           lang,
-				"ExtractedSlugs":     slugListing,
-				"CustomInstructions": batchCtx.ContentInstructions,
-				"InstructionScope":   "wiki_content",
-			})
-			if summaryErr != nil {
-				s.tracker().FailSpan(ctx, summarySpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
-			} else {
-				sumLine, sumBody := splitSummaryLine(summaryContent)
-				s.tracker().EndSpan(ctx, summarySpan, types.JSONMap{
-					"chars":        utf8.RuneCountInString(summaryContent),
-					"summary_line": previewText(sumLine, 160),
-					"body_preview": previewText(sumBody, 320),
-				})
-			}
-		}()
-		go func() {
-			defer wg.Done()
-			// Skip citation pass when Pass 0 has fallen back to the legacy path —
-			// the legacy output already contains paraphrased Details, so chunk
-			// citations would be redundant and we'd spend LLM calls for nothing.
-			if pass0Failed {
-				citations = map[string][]string{}
-				return
-			}
-			candidatesXML := renderCandidateSlugsXML(extractedEntities, extractedConcepts)
-			citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang, batchCtx)
-			s.tracker().EndSpan(ctx, classifySpan, types.JSONMap{
-				"cited_slugs":      len(citations),
-				"new_slugs":        len(newSlugs),
-				"batches":          batchCount,
-				"top_cited":        topCitedSlugs(citations, 8),
-				"new_slugs_sample": previewNewSlugs(newSlugs, 8),
-			})
-		}()
-		wg.Wait()
-
-		// Merge citations back into the item structs (non-failing; items without
-		// citations simply keep their Description+Details fallback).
-		extractedEntities, extractedConcepts, uncited = mergeCitationsIntoItems(extractedEntities, extractedConcepts, citations, newSlugs)
-	}
+	// Merge citations back into the item structs (non-failing; items without
+	// citations simply keep their Description+Details fallback).
+	var uncited int
+	extractedEntities, extractedConcepts, uncited = mergeCitationsIntoItems(extractedEntities, extractedConcepts, citations, newSlugs)
+	extractedEntities, extractedConcepts = s.reclaimExtractedIdentities(
+		ctx, payload.KnowledgeBaseID, extractedEntities, extractedConcepts, batchCtx,
+	)
 
 	// Rebuild slugItems so stale entries (for slugs that did not survive the
 	// merge) and brand-new slugs discovered by the citation pass are both
@@ -1686,7 +1651,7 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	// safe default — the LLM merge call simply doesn't get a candidate
 	// list and the items pass through unchanged.
 	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
-		ctx, chatModel, kbID, result.Entities, result.Concepts,
+		ctx, chatModel, kbID, result.Entities, result.Concepts, batchCtx,
 	)
 
 	slugItems := make(map[string]extractedItem)

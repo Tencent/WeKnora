@@ -24,11 +24,14 @@
     <a href="https://clawhub.ai/lyingbug/weknora" target="_blank">
         <img alt="ClawHub Skill" src="https://img.shields.io/badge/ClawHub Skill-WeKnora-ff6b35">
     </a>
+    <a href="https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora" target="_blank">
+        <img alt="npm @wxg-prc-cpg/dsh-weknora" src="https://img.shields.io/npm/v/@wxg-prc-cpg/dsh-weknora?label=dsh-weknora">
+    </a>
     <a href="https://github.com/Tencent/WeKnora/blob/main/LICENSE">
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="バージョン" src="https://img.shields.io/badge/version-0.7.2-2e6cc4?labelColor=d4eaf7">
+        <img alt="バージョン" src="https://img.shields.io/badge/version-0.8.0-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -50,12 +53,13 @@
 
 [**WeKnora（ウィーノラ）**](https://weknora.weixin.qq.com) は、大規模言語モデル（LLM）をベースとしたオープンソースのナレッジフレームワークで、エンタープライズ級の文書理解、セマンティック検索、自律推論シナリオ向けに設計されています。
 
-本フレームワークは **3 つのコア能力** を中心に構築されています：日常的な検索に最適な **RAG ベースのクイック Q&A**、ナレッジ検索・MCP ツール・Web 検索を自律的にオーケストレーションし複雑なマルチステップタスクを処理する **ReAct Agent 推論**、そして Agent が生のドキュメントから相互リンクされた Markdown ナレッジベースとインタラクティブなナレッジグラフを自律生成・維持する全く新しい **Wiki モード**（手動編集・バージョン履歴・ワンクリックロールバック対応）。ナレッジの整備も細かく制御可能で、**ツリー型フォルダー**がアップロード時のディレクトリ構造を保持し、**チャンク編集とバージョン履歴**により検索チャンクをドキュメントと同様に編集・差分比較・ロールバックできます。さらに、多様なデータソース連携（Feishu ナレッジベース / Feishu クラウドドライブ / Notion / Yuque / RSS、随時拡充中）、**ウェブサイト埋め込み Widget** による外部サイトへのエージェント公開、プログラム連携向けの**スコープ付き API キーと Principal モデル**、ワークスペースごとの**マルチインスタンスストレージバックエンド**、20 以上の LLM プロバイダー統合、Langfuse による全体可観測性と**ランタイムタスクキューダッシュボード + Worker プール統治**、**エンタープライズ向けマルチテナント RBAC（4 階層ロールマトリクス + リソース所有権 + テナント監査ログ）**、完全セルフホスト可能なモジュラーアーキテクチャと組み合わせることで、WeKnora は散在する文書を「検索可能・推論可能・継続的に進化する」専用ナレッジ資産へと昇華させます。
+本フレームワークは **3 つのコア能力** を中心に構築されています：日常的な検索に最適な **RAG ベースのクイック Q&A**、ナレッジ検索・MCP ツール・**スキルカタログ**・セッション永続の **Docker / E2B / Cube サンドボックス**・Web 検索を自律的にオーケストレーションし複雑なマルチステップタスクを処理する **ReAct Agent 推論**、そして Agent が生のドキュメントから相互リンクされた Markdown ナレッジベースとインタラクティブなナレッジグラフを自律生成・維持する全く新しい **Wiki モード**（手動編集・バージョン履歴・ワンクリックロールバック対応）。**クロスセッション長期メモリ**は「あなたが誰で、何を繰り返し尋ねるか」を覚えます。ナレッジの整備も細かく制御可能で、**ツリー型フォルダー**がアップロード時のディレクトリ構造を保持し、**チャンク編集とバージョン履歴**により検索チャンクをドキュメントと同様に編集・差分比較・ロールバックできます。さらに、多様なデータソース連携（Feishu ナレッジベース / Feishu クラウドドライブ / GitLab / Tencent IMA / Notion / Yuque / RSS、随時拡充中）、**ウェブサイト埋め込み Widget** による外部サイトへのエージェント公開、プログラム連携向けの**スコープ付き API キーと Principal モデル**、ワークスペースごとの**マルチインスタンスストレージバックエンド**、20 以上の LLM プロバイダー統合（LiteLLM 含む）、Langfuse による全体可観測性と**ランタイムタスクキューダッシュボード + Worker プール統治**、**エンタープライズ向けマルチテナント RBAC（4 階層ロールマトリクス + リソース所有権 + テナント監査ログ）**、完全セルフホスト可能なモジュラーアーキテクチャと組み合わせることで、WeKnora は散在する文書を「検索可能・推論可能・継続的に進化する」専用ナレッジ資産へと昇華させます。
 
-Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッジ自動同期（他のデータソースも順次対応中）に対応し、PDF、Word、画像、Excelなど10以上の文書フォーマットをサポート。WeChat Work、Feishu、Slack、TelegramなどのIMチャネルから直接Q&Aサービスを提供できます。モデル層ではOpenAI、DeepSeek、Qwen（Alibaba Cloud）、Zhipu、Hunyuan、Gemini、MiniMax、NVIDIA、Ollamaなど主要プロバイダーに対応。全プロセスをモジュラー設計し、大規模モデル、ベクトルデータベース、ストレージなどのコンポーネントを柔軟に差し替え可能。ローカルおよびプライベートクラウドデプロイに対応し、データは完全に自己管理可能です。さらにWeKnoraは **Langfuse** とシームレスに統合され、Agentの推論、トークン消費、パイプラインに対する包括的な可観測性（オブザーバビリティ）を提供します。
+Feishu、GitLab、Tencent IMA、Notion、Yuqueなどの外部プラットフォームからのナレッジ自動同期（他のデータソースも順次対応中）に対応し、PDF、Word、画像、Excel、XMindなど10以上の文書フォーマットをサポート。WeChat Work、Feishu、Slack、TelegramなどのIMチャネルから直接Q&Aサービスを提供できます。モデル層ではOpenAI、DeepSeek、Qwen（Alibaba Cloud）、Zhipu、Hunyuan、Gemini、MiniMax、NVIDIA、LiteLLM、Ollamaなど主要プロバイダーに対応。Office 文書は **anydoc** でプロセス内解析できます。全プロセスをモジュラー設計し、大規模モデル、ベクトルデータベース、ストレージなどのコンポーネントを柔軟に差し替え可能。ローカルおよびプライベートクラウドデプロイに対応し、データは完全に自己管理可能です。さらにWeKnoraは **Langfuse** とシームレスに統合され、Agentの推論、トークン消費、パイプラインに対する包括的な可観測性（オブザーバビリティ）を提供します。
 
 ## ✨ 最新アップデート
 
+- **v0.8.0** — **スキルサンドボックス実行環境**（セッション永続の Docker / E2B / Cube バックエンド、テナント単位のネットワークポリシー；Local ホストプロセスバックエンドを削除；Docker はオプトイン）；**テナントスキルカタログ**（ClawHub / SkillHub / git / zip からインストール、サンドボックス単位のスナップショット、ライブ進捗、ファイル閲覧/編集、個人・ワークスペース環境変数）；**クロスセッション長期メモリ**（profile / preference / fact / task / interest、確認付き自動抽出、`search_memory`）；プロセス内 **anydoc** Office パーサー；公式 **DeepSeek Harness プラグイン** `@wxg-prc-cpg/dsh-weknora`；GitLab と Tencent IMA データソース；LiteLLM；Exa と Metaso Web 検索；XMind 解析；チャット成果物、質問アウトライン、タイムスタンプ；コンテキスト圧縮とプロバイダー Prompt Cache マーカー。加えて OIDC JWKS 検証、任意の複雑パスワード、ドキュメント自動タグ付け、広範なサンドボックス/セキュリティ強化。詳細は [`CHANGELOG.md`](./CHANGELOG.md)。
 - **v0.7.2** — **公式製品ドキュメントサイト**を公開（VitePress、6 セクション約 50 ページで約 360 の API エンドポイントと約 150 の環境変数を網羅、独立した Docker/Nginx デプロイ・クイックスタート用サンプルデータ・ローカル MCP デモを同梱）；**ナレッジベースのフォルダーツリー**（アップロードパスを独立したデータとして保存し、ファイルマネージャーのように参照・リネーム・再配置）；**チャンク編集とバージョン履歴**（UI で検索チャンクを編集、バージョン単位の差分とロールバック、編集後のインデックス自動再構築、ドキュメントのカスタムメタデータ）；**Wiki ページのバージョン履歴**（スナップショット + 行単位差分 + ワンクリックロールバック + ブラウザ内手動編集）；**ファイル直リンクモード** `resource_urls=public` / `RESOURCE_URL_MODE`（サードパーティアプリが認証プロキシへの二次リクエストなしで画像とファイルを表示）；**Feishu クラウドドライブデータソース**と docx の blocks API 同期；ドキュメントの一括タグ付け；**MCP Server 1.1.x**（mcp 2.x の高レベル API へ移行、公式 PyPI パッケージ `tencent-weknora-mcp`、`create_knowledge_from_text` と `list_shared_knowledge_bases` を追加し計 29 ツール）；AWS S3 デフォルト資格情報チェーン（IAM Role / IRSA）；ローカル HTML アップロード解析；QQBot の Markdown 返信；app / frontend / docreader / mcp-server の PR CI チェック追加。加えて router と `modelcontext` の大規模リファクタリング、リランクとチャンキングの品質改善、広範な安定性修正。詳細は [`CHANGELOG.md`](./CHANGELOG.md)。
 - **v0.7.1** — 新しい**Yunzhijia（云之家）IM 連携**（WebSocket + 画像メッセージ + Markdown 返信）；**Volcengine Rerank** プロバイダー（リクエストの自動分割）と **Zhipu AI Web 検索**プロバイダー；コントロールプレーン自動化向けの**プラットフォームスコープ API キー**（テナント管理、システム設定、ランタイムキュー、監査ログ）；**KB 単位のアクティビティ監査証跡**；FAQ 管理の強化（フィルタリング、タグ付け、エクスポート、インポート結果追跡）；**Langfuse OTLP/OTel トレーシング**への移行と W3C traceparent 伝播；チャットヘッダーアクションによるワンクリック **Markdown エクスポート**、参照ドロワーへの Wiki ツール結果表示；プロンプトキャッシュ可観測性；セッションチャネルガバナンス（IM/埋め込み/API セッションを管理者スコープで分離）；Feishu 大規模 Wiki 同期の堅牢化；レガシー Neo4j 会話メモリ依存の削除。加えて広範な slug 整合性・SSRF トランスポート・状態同期の強化。詳細は [`CHANGELOG.md`](./CHANGELOG.md)。
 - **v0.7.0** — きめ細かい**スコープ付き API キーと Principal モデル**（能力単位の付与 + KB 単位の制限 + API 連携プレイグラウンド）；**ランタイムタスクキュー可観測ダッシュボードと Worker プール統治**（ステージ別プール + モデル別並行度ガバナー + 失敗タスクの調査/再試行）；**マルチインスタンスストレージバックエンド**（ワークスペースごとに複数のストレージインスタンス、KB 単位のバインド、デフォルトインスタンス）；**セッションスコープの一時添付**（画像/ドキュメントの非同期解析 + 合算上限）；推奨質問とフォローアップ；安定リソースレジストリと LLM コンテキストのエイリアス圧縮；`@Skill / @MCP` メンションによるスコープ化 Agent ランタイム；会話中の MCP OAuth；QQBot と Lark（Feishu 国際版）IM 連携；Redis TLS；Requesty モデルプロバイダー + Keenable Web 検索；テナントレスプロビジョニングと制御されたセルフサービスワークスペース；管理者パスワードリセット；ナレッジベース複製フロー；`weknora` CLI v0.10。加えて大規模なセキュリティ強化（SSRF、シークレットのマスキング、SQL 検証、IDOR）。詳細は [`CHANGELOG.md`](./CHANGELOG.md)。
@@ -80,6 +84,13 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 
 <table>
   <tr>
+    <td colspan="2" align="center"><b>🛠️ スキルサンドボックス対話 · Word を生成してプレビュー</b><br/><img src="./docs/images/skill-sandbox-chat.png" alt="スキルサンドボックス対話：Word 文書の生成とプレビュー" width="100%"></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><b>📦 スキルカタログ · E2B サンドボックスへインストール</b><br/><img src="./docs/images/skill-catalog.png" alt="ワークスペースのスキルカタログ（docx / pptx / pdf を E2B にインストール）" width="100%"></td>
+    <td width="50%" align="center"><b>🤖 Agent モード · 検索、スキル読取、サンドボックスへ書き込み</b><br/><img src="./docs/images/agent-qa.png" alt="Agent が知識ベースを検索し、docx スキルを読み、サンドボックスにスクリプトを書き込む" width="100%"></td>
+  </tr>
+  <tr>
     <td colspan="2" align="center"><b>💬 インテリジェント Q&A 対話</b><br/><img src="./docs/images/qa.png" alt="インテリジェント Q&A 対話" width="100%"></td>
   </tr>
   <tr>
@@ -92,10 +103,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
   </tr>
   <tr>
     <td width="50%" align="center"><b>📁 フォルダーツリーと一括操作</b><br/><img src="./docs/images/kb-document-list.png" alt="ナレッジベースのフォルダーツリーと一括操作" width="100%"></td>
-    <td width="50%" align="center"><b>🤖 Agent モード · ツール呼び出しプロセス</b><br/><img src="./docs/images/agent-qa.png" alt="Agent モードツール呼び出しプロセス" width="100%"></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><b>🔭 可観測性 · Langfuse Tracing</b><br/><img src="./docs/images/langfuse.png" alt="Langfuse Tracing" width="100%"></td>
+    <td width="50%" align="center"><b>🔭 可観測性 · Langfuse Tracing</b><br/><img src="./docs/images/langfuse.png" alt="Langfuse Tracing" width="100%"></td>
   </tr>
 </table>
 
@@ -112,9 +120,11 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 
 | 機能 | 詳細 |
 |------|------|
-| インテリジェント推論 | ReACT プログレッシブ・マルチステップ推論、ナレッジ検索・MCP ツール・Web 検索を自律的にオーケストレーション |
+| インテリジェント推論 | ReACT プログレッシブ・マルチステップ推論、ナレッジ検索・MCP ツール・スキルサンドボックス・Web 検索を自律的にオーケストレーション |
 | クイック Q&A | ナレッジベースベースの RAG Q&A、迅速かつ正確な回答 |
 | Wiki モード | Agent主導で生のドキュメントから構造化された相互リンク済みMarkdown Wikiページを自動生成・保守；ブラウザ内手動編集、ページのバージョン履歴、行単位差分とワンクリックロールバック |
+| スキルカタログとサンドボックス | ワークスペースのスキルカタログ（ClawHub / SkillHub / git / zip）をセッション永続の Docker / E2B / Cube サンドボックスへインストール；`shell_exec`、ファイルツール、成果物、設定単位のネットワークポリシー；Local ホストプロセスバックエンドは削除 |
+| 長期メモリ | クロスセッションメモリ（profile / preference / fact / task / interest）。自動抽出、ユーザー確認、オンデマンド `search_memory` |
 | ツール呼び出し | 組み込みツール、MCP ツール（OAuth2 リモートサービス・会話中 OAuth 含む）、Web 検索；`@Skill / @MCP` メンションでターン単位に Agent ランタイムを範囲化 |
 | 対話戦略 | オンライン Prompt 編集、検索閾値チューニング、マルチターン文脈認識、Agent 単位の引用出力トグル |
 | 推奨質問 | ナレッジベースの内容に基づく質問の自動生成と回答後のフォローアップ |
@@ -131,8 +141,9 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 | チャンク編集とバージョン | UI から検索チャンクを直接編集、バージョン単位のスナップショット・差分・ワンクリックロールバック、編集後のインデックス自動再構築；生成質問の追加・編集・削除・再生成；ドキュメントのカスタムメタデータ対応 |
 | アップロード単位の解析設定 | アップロード確認ダイアログまたは `process_config` API でパーサー・チャンキング・マルチモーダル（VLM / ASR）・グラフ抽出・質問生成をバッチ単位で上書き；reparse 時も設定変更可能 |
 | 一括 reparse | 複数ドキュメントの解析を一度に再キュー、バッチ単位の `process_config` 対応 |
-| データソースインポート | Feishu ナレッジベース / Feishu クラウドドライブ / Lark / Notion / Yuque / RSS フィードの自動同期（他のデータソースも開発中）、増分・全量同期対応 |
-| 文書フォーマット | PDF / Word / Txt / Markdown / HTML / EPUB / MHTML / 画像 / CSV / Excel / PPT / JSON |
+| データソースインポート | Feishu ナレッジベース / Feishu クラウドドライブ / Lark / GitLab / Tencent IMA / Notion / Yuque / RSS フィードの自動同期（他のデータソースも開発中）、増分・全量同期対応 |
+| 文書フォーマット | PDF / Word / Txt / Markdown / HTML / EPUB / MHTML / 画像 / CSV / Excel / PPT / JSON / XMind |
+| 自動タグ付け | 解析後、ナレッジベース既存タグから一致するものを増分付与（新規タグ作成や手動タグの上書きはしない） |
 | 検索戦略 | BM25 疎検索 / Dense 密検索 / GraphRAG グラフ強化 / 親子チャンキング / pgvector HNSW 加速（1024 次元）/ 多次元インデックス |
 | 一括選択とタグ付け | KB リストでマーキー（ドラッグ）複数選択し、一括 reparse と一括タグ付け（共通タグを自動プリセット）を実行 |
 | E2E テスト | 検索+生成の全パイプライン可視化、リコール的中率・BLEU / ROUGE 指標評価 |
@@ -141,13 +152,13 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 
 | 機能 | 詳細 |
 |------|------|
-| 大規模モデル | OpenAI / Azure OpenAI / Anthropic (Claude) / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Requesty / Ollama |
+| 大規模モデル | OpenAI / Azure OpenAI / Anthropic (Claude) / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Requesty / LiteLLM / Ollama |
 | Embedding | Ollama / BGE / GTE / OpenAI 互換 API |
 | ベクトル DB | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
 | オブジェクトストレージ | ローカル / MinIO / AWS S3（IAM Role / IRSA のデフォルト資格情報チェーン対応）/ 火山引擎 TOS / Alibaba Cloud OSS / 金山雲 KS3 / 華為雲 OBS；**ワークスペースごとに複数のストレージインスタンス**、KB 単位のバインドとデフォルトインスタンス |
 | IM 統合 | WeChat Work / Feishu / Lark（Feishu 国際版）/ QQBot / Slack / Telegram / DingTalk / Mattermost / WeChat / Yunzhijia |
 | ウェブ埋め込み | 埋め込み Widget でエージェントを公開、ドメイン許可リスト・レート制限・セキュアモード Token 交換 |
-| Web 検索 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / Zhipu AI |
+| Web 検索 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / Zhipu AI / Exa / Metaso |
 | API 連携 | スコープ付き API キー（能力単位の付与 + KB 単位の制限 + 節流付き last_used 追跡）と API 連携プレイグラウンド；MCP OAuth と埋め込みセッションを Principal 単位で分離；`resource_urls=public` で直接読み込み可能なファイル / 画像 URL を返却し、認証プロキシへの二次リクエストを不要に |
 | MCP Server | 公式 PyPI パッケージ `tencent-weknora-mcp`、29 ツール、stdio / SSE / HTTP の 3 トランスポート対応 |
 
@@ -175,7 +186,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 
 ## 🐋 DeepSeek Harness プラグイン
 
-[**`@wxg-prc-cpg/dsh-weknora`**](./packages/dsh-weknora/README.md) は公式の [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）プラグインです。harness 自体は検索・埋め込み・ナレッジベースの機能を持たないため、このプラグインがコーディングエージェントに自社ドキュメントを与えます。`dsh plugin --profile web add @wxg-prc-cpg/dsh-weknora` でインストールしてデプロイ先を指定すると、4 つの読み取り専用ツールがエージェントのツールセットに現れます。
+[**`@wxg-prc-cpg/dsh-weknora`**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora) は公式の [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）プラグインです（[ドキュメント](./packages/dsh-weknora/README.md)）。harness 自体は検索・埋め込み・ナレッジベースの機能を持たないため、このプラグインがコーディングエージェントに自社ドキュメントを与えます。`dsh plugin --profile web add @wxg-prc-cpg/dsh-weknora` でインストールしてデプロイ先を指定すると、4 つの読み取り専用ツールがエージェントのツールセットに現れます。
 
 - **`weknora_search`** — ハイブリッド検索。原文のパッセージをそのまま返し、各件に再利用可能な `knowledge_id` が付く
 - **`weknora_read_document`** — 1 つのドキュメントのチャンクを順番に再構成、ページング対応
@@ -322,13 +333,3 @@ make dev-frontend
 
 このプロジェクトは[MIT](./LICENSE)ライセンスの下で公開されています。
 このプロジェクトのコードを自由に使用、変更、配布できますが、元の著作権表示を保持する必要があります。
-
-## 📈 プロジェクト統計
-
-<a href="https://www.star-history.com/#Tencent/WeKnora&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
- </picture>
-</a>
