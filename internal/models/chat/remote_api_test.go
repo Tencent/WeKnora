@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
@@ -127,6 +128,35 @@ func TestBuildChatCompletionRequest_MCPToolsFormat(t *testing.T) {
 		assert.Regexp(t, `^[a-zA-Z0-9_-]+$`, name, "tool name must match OpenAI pattern")
 		assert.LessOrEqual(t, len(name), 64, "tool name must be <= 64 chars")
 	}
+}
+
+func TestGeminiToolSchemaNormalizesNullableTypes(t *testing.T) {
+	chat := newTestRemoteChat(t)
+	chat.provider = provider.ProviderGemini
+	chat.adapter = geminiProvider{}
+
+	body, _, raw, err := chat.buildOutbound([]Message{{Role: "user", Content: "hello"}}, &ChatOptions{
+		Tools: []Tool{{
+			Type: "function",
+			Function: FunctionDef{
+				Name:       "lookup",
+				Parameters: json.RawMessage(`{"type":"object","properties":{"query":{"type":["string","null"]},"items":{"type":"array","items":{"type":["integer","null"]}}}}`),
+			},
+		}},
+	}, false)
+	require.NoError(t, err)
+	require.True(t, raw)
+
+	request, ok := body.(map[string]any)
+	require.True(t, ok)
+	tools, ok := request["tools"].([]any)
+	require.True(t, ok)
+	function := tools[0].(map[string]any)["function"].(map[string]any)
+	parameters := function["parameters"].(map[string]any)
+	properties := parameters["properties"].(map[string]any)
+	assert.Equal(t, "string", properties["query"].(map[string]any)["type"])
+	items := properties["items"].(map[string]any)["items"].(map[string]any)
+	assert.Equal(t, "integer", items["type"])
 }
 
 // TestBuildChatCompletionRequest_GPT5MaxCompletionTokens 验证 GPT-5 / o-series
