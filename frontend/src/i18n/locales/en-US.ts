@@ -2089,6 +2089,7 @@ export default {
     pleaseInputText: 'Please enter sample text first',
     extractSuccess: 'Entity-relationship extraction successful',
     extractFailed: 'Entity-relationship extraction failed',
+    relationsEmptyWarning: 'Entities were extracted but no relations were returned: relations whose type does not exactly match a tag are dropped silently. Check that tags are separate entries rather than one pasted string',
     exampleLoaded: 'Example loaded',
     exampleCleared: 'Example cleared',
     disabledWarning: 'Knowledge graph database is not enabled, entity-relationship extraction will not be available',

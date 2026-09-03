@@ -4677,6 +4677,7 @@ export default {
     pleaseInputText: '请先输入示例文本',
     extractSuccess: '实体关系提取成功',
     extractFailed: '实体关系提取失败',
+    relationsEmptyWarning: '已提取到实体但没有任何关系：通常是关系类型与标签不匹配被丢弃，请检查标签是否为多个独立条目（而非一整串）',
     exampleLoaded: '示例已加载',
     exampleCleared: '示例已清除',
     disabledWarning: '知识图谱数据库未启用，实体关系提取功能将无法使用',
