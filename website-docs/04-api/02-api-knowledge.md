@@ -429,6 +429,8 @@ curl -X POST $BASE/api/v1/knowledge/k-1/cancel-parse -H "Authorization: Bearer $
 curl -OJ $BASE/api/v1/knowledge/k-1/download -H "Authorization: Bearer $TOKEN"
 ```
 
+工作空间事件回调不要走这条登录态下载。接收方用回调里的 5 分钟票请求 `GET /api/v1/files/knowledge-download/:id`，Header `X-WeKnora-Download-Ticket`。过期后 1 小时内可 `POST .../:id/renew`。详见[工作空间知识事件回调](../03-features/22-workspace-webhooks.md)。
+
 ### GET /api/v1/knowledge/:id/preview
 
 用途：预览解析后的文件内容。权限：Viewer+，KB read。

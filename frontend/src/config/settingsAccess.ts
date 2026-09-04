@@ -31,6 +31,7 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   // Every member fills in their own environment variables; the workspace-wide
   // values stay on the Admin+ skills page.
   envvars: 'viewer',
+  'event-webhooks': 'owner',
 }
 
 /**

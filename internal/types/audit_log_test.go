@@ -43,6 +43,9 @@ func TestAuditAction_DotNamespaceConvention(t *testing.T) {
 		AuditActionSystemQueueTaskRunNow,
 		AuditActionSystemQueueTaskCancelled,
 		AuditActionSystemQueueArchivedPurged,
+		AuditActionWebhookEndpointCreated,
+		AuditActionWebhookEndpointUpdated,
+		AuditActionWebhookEndpointDeleted,
 	}
 	for _, a := range all {
 		s := string(a)
@@ -131,6 +134,9 @@ func TestAuditAction_NoCollisionsAcrossNamespaces(t *testing.T) {
 	register("AuditActionSystemQueueTaskRunNow", AuditActionSystemQueueTaskRunNow)
 	register("AuditActionSystemQueueTaskCancelled", AuditActionSystemQueueTaskCancelled)
 	register("AuditActionSystemQueueArchivedPurged", AuditActionSystemQueueArchivedPurged)
+	register("AuditActionWebhookEndpointCreated", AuditActionWebhookEndpointCreated)
+	register("AuditActionWebhookEndpointUpdated", AuditActionWebhookEndpointUpdated)
+	register("AuditActionWebhookEndpointDeleted", AuditActionWebhookEndpointDeleted)
 }
 
 // TestAuditAction_SystemNamespacePrefix pins the system.* actions
@@ -203,5 +209,20 @@ func TestAuditAction_Phase3WireValues(t *testing.T) {
 	}
 	for _, c := range cases {
 		assert.Equal(t, c.wire, string(c.constant))
+	}
+}
+
+func TestAuditAction_WebhookWireValues(t *testing.T) {
+	cases := []struct {
+		constant AuditAction
+		wire     string
+	}{
+		{AuditActionWebhookEndpointCreated, "webhook.endpoint_created"},
+		{AuditActionWebhookEndpointUpdated, "webhook.endpoint_updated"},
+		{AuditActionWebhookEndpointDeleted, "webhook.endpoint_deleted"},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.wire, string(c.constant))
+		assert.True(t, strings.HasPrefix(string(c.constant), "webhook."))
 	}
 }

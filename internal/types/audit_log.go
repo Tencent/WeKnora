@@ -186,6 +186,10 @@ const (
 	AuditActionFAQImportStarted   AuditAction = "faq.import_started"
 	AuditActionFAQImportCompleted AuditAction = "faq.import_completed"
 	AuditActionFAQImportFailed    AuditAction = "faq.import_failed"
+
+	AuditActionWebhookEndpointCreated AuditAction = "webhook.endpoint_created"
+	AuditActionWebhookEndpointUpdated AuditAction = "webhook.endpoint_updated"
+	AuditActionWebhookEndpointDeleted AuditAction = "webhook.endpoint_deleted"
 )
 
 // AuditOutcome separates asynchronous acceptance from terminal business

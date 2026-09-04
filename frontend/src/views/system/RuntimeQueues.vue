@@ -575,6 +575,9 @@ const runtimeTaskTypeKeys: Record<string, string> = {
   'kb:delete': 'kbDelete',
   'wiki:ingest': 'wikiIngest',
   'wiki:finalize': 'wikiFinalize',
+  'webhook:deliver': 'webhookDeliver',
+  'webhook:outbox-sweep': 'webhookOutboxSweep',
+  'webhook:delivery-prune': 'webhookDeliveryPrune',
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null

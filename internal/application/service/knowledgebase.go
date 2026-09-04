@@ -49,6 +49,7 @@ type knowledgeBaseService struct {
 	dsScheduler     *datasource.Scheduler
 	audit           interfaces.AuditLogService
 	resourceCatalog interfaces.ResourceCatalog
+	events          interfaces.WorkspaceEventSink
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
@@ -72,6 +73,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	dsScheduler *datasource.Scheduler,
 	audit interfaces.AuditLogService,
 	resourceCatalog interfaces.ResourceCatalog,
+	events interfaces.WorkspaceEventSink,
 ) interfaces.KnowledgeBaseService {
 	return &knowledgeBaseService{
 		repo:            repo,
@@ -94,6 +96,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		dsScheduler:     dsScheduler,
 		audit:           audit,
 		resourceCatalog: resourceCatalog,
+		events:          events,
 	}
 }
 
@@ -169,6 +172,7 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 		"knowledge_base", kb.ID, types.AuditOutcomeSuccess, map[string]any{
 			"name": kb.Name, "type": kb.Type,
 		})
+	emitKBCreated(s.events, ctx, kb)
 
 	logger.Infof(ctx, "Knowledge base created successfully, ID: %s, name: %s", kb.ID, kb.Name)
 	return kb, nil
@@ -726,6 +730,11 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	}
 
 	// Step 1: Delete the knowledge base record first (mark as deleted)
+	var knowledgeCount int64
+	if s.kgRepo != nil && kb != nil {
+		knowledgeCount, _ = s.kgRepo.CountKnowledgeByKnowledgeBaseID(ctx, tenantID, id)
+	}
+
 	logger.Infof(ctx, "Deleting knowledge base from database")
 	err = s.repo.DeleteKnowledgeBase(ctx, id)
 	if err != nil {
@@ -740,6 +749,9 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	}
 	recordKBActivity(ctx, s.audit, tenantID, id, types.AuditActionKBDeleted,
 		"knowledge_base", id, types.AuditOutcomeSuccess, map[string]any{"name": deletedName})
+	if kb != nil {
+		emitKBDeleted(s.events, ctx, kb, knowledgeCount)
+	}
 
 	// Stop both ephemeral queue work and durable wiki operations that target
 	// the now-deleted KB. ProcessKBDelete repeats this with document IDs and
@@ -1200,6 +1212,7 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 		if err := s.repo.CreateKnowledgeBase(ctx, targetKB); err != nil {
 			return nil, nil, err
 		}
+		emitKBCreated(s.events, ctx, targetKB)
 	}
 	return sourceKB, targetKB, nil
 }
@@ -1265,6 +1278,7 @@ func (s *knowledgeBaseService) DuplicateKnowledgeBase(
 		"knowledge_base", targetKB.ID, types.AuditOutcomeSuccess, map[string]any{
 			"source_kb_id": sourceKB.ID, "name": targetKB.Name,
 		})
+	emitKBCreated(s.events, ctx, targetKB)
 	return targetKB, nil
 }
 

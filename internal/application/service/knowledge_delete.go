@@ -246,6 +246,7 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	if err := s.repo.DeleteKnowledge(ctx, tenantID, id); err != nil {
 		return err
 	}
+	s.emitKnowledgeDeleted(ctx, knowledge)
 
 	// Best-effort physical cleanup. Errors here only leak storage; they must not
 	// fail the delete now that the row is already gone.
@@ -711,6 +712,7 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	if err := s.repo.DeleteKnowledgeList(ctx, tenantInfo.ID, ids); err != nil {
 		return err
 	}
+	s.emitKnowledgeListDeleted(ctx, knowledgeList)
 
 	storageAdjust := int64(0)
 	for _, knowledge := range knowledgeList {

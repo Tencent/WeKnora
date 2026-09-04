@@ -29,6 +29,8 @@ func (runtimeTestSettings) GetInt(_ context.Context, key, _ string, def int64) i
 		return 6
 	case "asynq.wiki_concurrency":
 		return 8
+	case "asynq.webhook_concurrency":
+		return 4
 	default:
 		return def
 	}
@@ -73,6 +75,7 @@ func (runtimeTestInspector) WorkerServerStats(context.Context) ([]types.WorkerSe
 		{Concurrency: 4, Active: 1, Status: "active", Queues: types.QueueWeightsForPool(types.WorkerPoolMaintenance)},
 		{Concurrency: 6, Active: 3, Status: "active", Queues: types.QueueWeightsForSharedPool()},
 		{Concurrency: 8, Active: 2, Status: "active", Queues: types.QueueWeightsForPool(types.WorkerPoolWiki)},
+		{Concurrency: 4, Active: 1, Status: "active", Queues: types.QueueWeightsForPool(types.WorkerPoolWebhook)},
 		{Concurrency: 99, Active: 0, Status: "stopped", Queues: types.QueueWeightsForPool(types.WorkerPoolCore)},
 	}, true, nil
 }
@@ -241,6 +244,7 @@ func TestGetRuntimeQueuesReportsIsolatedPoolCapacity(t *testing.T) {
 		types.WorkerPoolMaintenance: {4, 2},
 		types.WorkerPoolShared:      {6, 7},
 		types.WorkerPoolWiki:        {8, 1},
+		types.WorkerPoolWebhook:     {4, 1},
 	}
 	if len(response.Pools) != len(want) {
 		t.Fatalf("pool count = %d, want %d", len(response.Pools), len(want))
