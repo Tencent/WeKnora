@@ -222,7 +222,12 @@ func ListByModelType(modelType types.ModelType) []ProviderInfo {
 }
 
 // DetectProvider 通过 BaseURL 检测服务商
+//
+// 主机名按 RFC 4343 是大小写不敏感的，用户填写的 BaseURL 也可能带大写，
+// 因此先统一转成小写再匹配；否则形如 https://API.OPENAI.COM/v1 的地址会
+// 落到 ProviderGeneric，被当成兼容 OpenAI 的自定义部署来解析请求与响应。
 func DetectProvider(baseURL string) ProviderName {
+	baseURL = strings.ToLower(baseURL)
 	switch {
 	case containsAny(baseURL, "dashscope.aliyuncs.com"):
 		return ProviderAliyun
