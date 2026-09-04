@@ -301,6 +301,12 @@ func (r *deletionLookupKnowledgeRepo) FindByDataSourceExternalID(
 	return r.knowledge, nil
 }
 
+func (r *deletionLookupKnowledgeRepo) FindTombstonedByDataSourceExternalID(
+	context.Context, uint64, string, string, string,
+) (*types.Knowledge, error) {
+	return nil, nil // no tombstone → normal ingest path
+}
+
 func (r *deletionLookupKnowledgeRepo) HardDeleteKnowledge(_ context.Context, _ uint64, id string) error {
 	if r.hardDeleteErr != nil {
 		return r.hardDeleteErr
@@ -359,6 +365,12 @@ func (r *keyedDeletionRepo) FindByDataSourceExternalID(
 		return nil, nil
 	}
 	return r.items[externalID], nil
+}
+
+func (r *keyedDeletionRepo) FindTombstonedByDataSourceExternalID(
+	context.Context, uint64, string, string, string,
+) (*types.Knowledge, error) {
+	return nil, nil // no tombstone → normal ingest path
 }
 
 func (r *keyedDeletionRepo) HardDeleteKnowledge(_ context.Context, _ uint64, id string) error {

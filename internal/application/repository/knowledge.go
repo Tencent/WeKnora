@@ -800,9 +800,36 @@ func (r *knowledgeRepository) FindByDataSourceExternalID(
 	return &knowledge, nil
 }
 
+// FindTombstonedByDataSourceExternalID returns the soft-deleted row for a
+// (data source, external item ID) pair. It is a persistent tombstone: sync
+// never resurrects an item the user deleted.
+// A file re-created at the source under the same external_id stays suppressed too.
+func (r *knowledgeRepository) FindTombstonedByDataSourceExternalID(
+	ctx context.Context,
+	tenantID uint64,
+	kbID, dataSourceID, externalID string,
+) (*types.Knowledge, error) {
+	var knowledge types.Knowledge
+	err := r.db.Unscoped().WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+		Where("deleted_at IS NOT NULL").
+		Where("metadata->>'datasource_id' = ? AND metadata->>'external_id' = ?", dataSourceID, externalID).
+		Order("deleted_at DESC").
+		First(&knowledge).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &knowledge, nil
+}
+
 // HardDeleteKnowledge physically removes a knowledge row. Call it AFTER
-// DeleteKnowledge's soft-delete cascade so sync-internal deletions never
-// become tombstones that block a later re-sync of the same external item.
+// DeleteKnowledge's soft-delete cascade (chunks/embeddings/graph/wiki/files
+// already cleaned) for sync-internal deletions (update replace, subtree
+// sweep), so those rows never become tombstones. Only user-visible deletions
+// may suppress future syncs.
 func (r *knowledgeRepository) HardDeleteKnowledge(ctx context.Context, tenantID uint64, id string) error {
 	return r.db.Unscoped().WithContext(ctx).
 		Where("tenant_id = ? AND id = ?", tenantID, id).
