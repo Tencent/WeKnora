@@ -181,3 +181,38 @@ func TestHandleModelFallback_IncludesHistoryMessages(t *testing.T) {
 	assert.Equal(t, "user", chatModel.lastMessages[3].Role)
 	assert.Contains(t, chatModel.lastMessages[3].Content, "现在还能继续讲吗？")
 }
+
+// TestResolveDefaultRerankModelID covers the tenant-default rerank fallback
+// used by KnowledgeQA when an agent (e.g. a builtin agent whose YAML has no
+// rerank_model_id) leaves RerankModelID empty. See #1800.
+func TestResolveDefaultRerankModelID(t *testing.T) {
+	newSvc := func(models []*types.Model) *sessionService {
+		return &sessionService{modelService: &stubModelService{availableModels: models}}
+	}
+	rerankPlain := &types.Model{ID: "rerank-a", Type: types.ModelTypeRerank}
+	rerankDefault := &types.Model{ID: "rerank-d", Type: types.ModelTypeRerank, IsDefault: true}
+	rerankDownloading := &types.Model{ID: "rerank-dl", Type: types.ModelTypeRerank, Status: types.ModelStatusDownloading}
+	rerankFailed := &types.Model{ID: "rerank-f", Type: types.ModelTypeRerank, Status: types.ModelStatusDownloadFailed}
+	chatModel := &types.Model{ID: "chat-1", Type: types.ModelTypeKnowledgeQA}
+
+	t.Run("prefers the tenant default rerank model", func(t *testing.T) {
+		svc := newSvc([]*types.Model{rerankPlain, rerankDefault})
+		require.Equal(t, "rerank-d", svc.resolveDefaultRerankModelID(context.Background()))
+	})
+	t.Run("falls back to the first rerank model when none is default", func(t *testing.T) {
+		svc := newSvc([]*types.Model{chatModel, rerankPlain})
+		require.Equal(t, "rerank-a", svc.resolveDefaultRerankModelID(context.Background()))
+	})
+	t.Run("skips downloading and download-failed models", func(t *testing.T) {
+		svc := newSvc([]*types.Model{rerankFailed, rerankDownloading, rerankPlain})
+		require.Equal(t, "rerank-a", svc.resolveDefaultRerankModelID(context.Background()))
+	})
+	t.Run("returns empty when the tenant has no usable rerank model", func(t *testing.T) {
+		svc := newSvc([]*types.Model{chatModel})
+		require.Equal(t, "", svc.resolveDefaultRerankModelID(context.Background()))
+	})
+	t.Run("returns empty when the model list is empty", func(t *testing.T) {
+		svc := newSvc(nil)
+		require.Equal(t, "", svc.resolveDefaultRerankModelID(context.Background()))
+	})
+}

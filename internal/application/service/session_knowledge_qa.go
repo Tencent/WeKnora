@@ -153,6 +153,25 @@ func (s *sessionService) KnowledgeQA(
 	// rewrite, fallback, FAQ strategy, history turns)
 	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
 
+	// Resolve a default rerank model when the effective agent config left
+	// RerankModelID empty. Builtin agents (builtin-quick-answer /
+	// builtin-smart-reasoning) ship without a rerank_model_id in their
+	// YAML definition, so without this fallback quick-answer silently
+	// skipped reranking (unranked top-K, ballooning SSE responses) and
+	// smart-reasoning could only hard-error on fresh installs. See #1800.
+	// Resolution order: agent config > tenant default (is_default=true) >
+	// first available rerank model.
+	if chatManage.RerankModelID == "" {
+		if defaultID := s.resolveDefaultRerankModelID(ctx); defaultID != "" {
+			chatManage.RerankModelID = defaultID
+			logger.Infof(ctx,
+				"[KnowledgeQA] rerank_model_id unset after agent overrides; using default rerank model %s", defaultID)
+		} else {
+			logger.Warnf(ctx,
+				"[KnowledgeQA] rerank_model_id unset and no tenant rerank model available; rerank stage will be skipped")
+		}
+	}
+
 	// An agent may opt out of long-term memory. The preference is per-request
 	// rather than per-user, so it travels in the context that the recall
 	// plugin reads.
@@ -1239,6 +1258,35 @@ func (s *sessionService) emitFallbackAnswer(ctx context.Context, chatManage *typ
 	} else {
 		logger.Infof(ctx, "Fallback answer event emitted successfully")
 	}
+}
+
+// resolveDefaultRerankModelID returns a rerank model ID to fall back to when
+// no agent-level rerank_model_id is configured. Priority: the tenant's
+// default rerank model (is_default=true), then the first available rerank
+// model. Download-failed models are never eligible — the rerank stage would
+// error on them anyway. Returns "" when the tenant has no rerank model.
+func (s *sessionService) resolveDefaultRerankModelID(ctx context.Context) string {
+	models, err := s.modelService.ListModels(ctx)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to list models for default rerank resolution: %v", err)
+		return ""
+	}
+	var firstAvailable string
+	for _, m := range models {
+		if m == nil || m.Type != types.ModelTypeRerank {
+			continue
+		}
+		if m.Status == types.ModelStatusDownloadFailed || m.Status == types.ModelStatusDownloading {
+			continue
+		}
+		if firstAvailable == "" {
+			firstAvailable = m.ID
+		}
+		if m.IsDefault {
+			return m.ID
+		}
+	}
+	return firstAvailable
 }
 
 // resolveWebSearchProviderID returns the web search provider ID to use for a pipeline request.
