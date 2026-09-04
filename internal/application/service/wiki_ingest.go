@@ -2698,6 +2698,29 @@ func (s *wikiIngestService) awaitWikiPromptWarmup(ctx context.Context, key strin
 //   - Substring matches on the error text for common transport failures
 //     ("timeout", "connection reset", "EOF") that providers surface
 //     without a structured status code.
+//
+// rateLimitErrorIndicators are substrings that mark an HTTP 403 response
+// body as rate limiting rather than authorization failure. Providers embed
+// the response body in their errors ("API request failed with status 403:
+// {...}"), and some gateways throttle with 403 (e.g. code 0x04030020,
+// "调用频率（qpm）超限") instead of the standard 429, so the status alone
+// is not enough to classify the failure.
+var rateLimitErrorIndicators = []string{
+	"qpm",        // 网关 qpm 配额（0x04030020）
+	"qps",        // 网关 qps 配额
+	"rate limit", // OpenAI-style "rate limit reached"
+	"rate_limit",
+	"too many requests", // RFC 6585 language
+	"throttl",           // "throttled"
+	"调用频率",              // 中文网关常见措辞
+	"频率超限",
+	"请求过于频繁",
+	"繁忙", // "服务繁忙，请稍后重试"
+	"try again later",
+	"retry later",
+	"slow down",
+}
+
 func isTransientLLMError(ctx context.Context, err error) bool {
 	if err == nil {
 		return false
@@ -2722,6 +2745,20 @@ func isTransientLLMError(ctx context.Context, err error) bool {
 	}
 
 	lower := strings.ToLower(msg)
+	// Some gateways report QPM/QPS throttling as HTTP 403 instead of 429
+	// (e.g. a MaaS gateway returning code 0x04030020, message
+	// "调用频率（qpm）超限"). A plain 403 is usually an authorization
+	// failure and must NOT be retried, so this stays gated on rate-limit
+	// indicators in the response body, which provider errors embed:
+	// "API request failed with status 403: {"code":0x04030020,...}".
+	if strings.Contains(msg, "status 403") {
+		for _, s := range rateLimitErrorIndicators {
+			if strings.Contains(lower, s) {
+				return true
+			}
+		}
+	}
+
 	for _, s := range []string{
 		"timeout",
 		"timed out",
