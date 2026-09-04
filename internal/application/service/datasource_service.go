@@ -936,6 +936,12 @@ func (s *DataSourceService) applyFetchedItem(
 	if err != nil {
 		var dupErr *types.DuplicateKnowledgeError
 		switch {
+		case errors.Is(err, errSkipExisting):
+			// "Skip existing" conflict strategy: the KB already holds this
+			// item, keep it untouched (no re-download, no re-parse).
+			logger.Infof(ctx, "item %q (external_id=%s) already exists and conflict strategy is skip; keeping existing version",
+				item.Title, item.ExternalID)
+			result.Skipped++
 		case errors.As(err, &dupErr):
 			// Duplicate file/URL is not a failure — count as skipped.
 			logger.Infof(ctx, "item %q (external_id=%s) already exists, skipping", item.Title, item.ExternalID)
@@ -1225,8 +1231,17 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 	return connector.Validate(ctx, config)
 }
 
+// errSkipExisting signals that an item with the same external_id is already
+// in the knowledge base and the data source's conflict strategy is "skip":
+// the existing knowledge is kept untouched (no re-ingest). Counted as a
+// skipped item, not a failure.
+var errSkipExisting = errors.New("item already exists; conflict strategy is skip")
+
 // ingestItem writes a single FetchedItem into the knowledge base.
-// If a knowledge item with the same external_id already exists, it is deleted first (update = delete + re-create).
+// If a knowledge item with the same external_id already exists, the data
+// source's conflict strategy decides: "overwrite" (default) deletes it first
+// (update = delete + re-create); "skip" keeps it untouched and returns
+// errSkipExisting.
 //
 // Routing logic:
 //   - Has Content bytes → CreateKnowledgeFromFile (走完整的文档解析 pipeline)
@@ -1267,6 +1282,12 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			logger.Warnf(ctx, "failed to check existing knowledge for external_id=%s: %v", item.ExternalID, err)
 			// Non-fatal: proceed with creation (may produce duplicate)
 		} else if existing != nil {
+			if ds.ConflictStrategy == types.ConflictStrategySkip {
+				// "Skip existing" strategy: keep the current KB version.
+				// Note this also skips genuine source-side updates — switch
+				// the strategy to overwrite to propagate changed content.
+				return false, errSkipExisting
+			}
 			logger.Infof(ctx, "found existing knowledge %s for external_id=%s, deleting for update", existing.ID, item.ExternalID)
 			if err := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); err != nil {
 				logger.Warnf(ctx, "failed to delete existing knowledge %s: %v", existing.ID, err)
