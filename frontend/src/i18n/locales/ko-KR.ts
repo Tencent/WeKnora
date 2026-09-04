@@ -2382,6 +2382,15 @@ export default {
       maxConcurrencyDesc: '문서 인덱싱/보강 등 백그라운드 작업이 이 모델을 호출하는 동시 실행 수를 제한합니다(모델별로 모든 복제본이 공유). 0 또는 비워 두면 전역 기본값을 사용하며, 대화형 채팅에는 영향을 주지 않습니다.',
       thinkingControlLabel: '사고 모드 매개변수 형식',
       thinkingControlDesc: '에이전트 「사고 모드」 켜기/끄기 시 API에 어떻게 기록할지 결정합니다. 벤더/모델에 따라 미리 선택되며, 실제 API와 다르면 문서에 맞게 수정하세요. 「전송 안 함」을 선택하면 에이전트 「사고 모드」 스위치가 효과가 없습니다.',
+      reasoningEffortLabel: '추론 수준 (Responses)',
+      reasoningEffortDesc: '모든 Responses 요청에 reasoning.effort로 전송됩니다. 기본값 medium.',
+      reasoningEffort: {
+        none: 'none',
+        minimal: 'minimal',
+        low: 'low',
+        medium: 'medium',
+        high: 'high'
+      },
       dimensionHint: '모델이 선택되었습니다. "차원 감지" 버튼을 클릭하여 벡터 차원을 자동으로 가져옵니다',
       loadModelListFailed: '모델 목록 로드 실패',
       listRefreshed: '목록이 새로고침되었습니다',
@@ -2473,6 +2482,10 @@ export default {
           label: '사용자 정의 (OpenAI 호환)',
           description: 'Generic API endpoint'
         },
+        responses: {
+          label: 'OpenAI Responses API',
+          description: 'Responses API 엔드포인트(POST /responses), 예: opencode zen'
+        },
         requesty: {
           label: 'Requesty',
           description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5 등'
@@ -2512,7 +2525,8 @@ export default {
         modelNameMax: '모델 이름은 100자를 초과할 수 없습니다',
         baseUrlRequired: 'Base URL을 입력해주세요',
         baseUrlEmpty: 'Base URL은 비워둘 수 없습니다',
-        baseUrlInvalid: 'Base URL 형식이 올바르지 않습니다. 유효한 URL을 입력해주세요'
+        baseUrlInvalid: 'Base URL 형식이 올바르지 않습니다. 유효한 URL을 입력해주세요',
+        responsesBaseUrlSuffix: 'Responses 제공자는 bare API 루트(예: https://opencode.ai/zen/go/v1)를 입력하세요 — /responses와 /chat/completions는 자동으로 추가됩니다'
       },
       thinkingControl: {
         thinkingType: {

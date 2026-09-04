@@ -57,7 +57,7 @@ type Provider interface {
 
 ### 支持的厂商清单
 
-`AllProviders()`（`provider/provider.go`）返回的完整列表（共 27 个，每个厂商在自己的文件里 `init()` 注册）。表格最后一行的 Ollama 不在其中，它走 `source=local` 这条独立路径，列在这里只为方便对照：
+`AllProviders()`（`provider/provider.go`）返回的完整列表（共 28 个，每个厂商在自己的文件里 `init()` 注册）。表格最后一行的 Ollama 不在其中，它走 `source=local` 这条独立路径，列在这里只为方便对照：
 
 | Provider 标识 | 名称 | 说明 |
 |---------------|------|------|
@@ -88,6 +88,7 @@ type Provider interface {
 | `nvidia` | NVIDIA | 专用 Embedding / Rerank 实现 |
 | `novita` | Novita AI | |
 | `azure_openai` | Azure OpenAI | 额外字段 `api_version` |
+| `responses` | OpenAI Responses API | POST `<baseURL>/responses`（如 opencode zen）；BaseURL 只填裸 API 根地址，`reasoning_effort`（none/minimal/low/medium/high，默认 medium）走 `extra_config` |
 | `ollama`（source=`local`） | Ollama 本地模型 | 非 Provider 注册表成员，由 `ModelSourceLocal` 路由 |
 
 当模型未显式指定 provider 时，`DetectProvider(baseURL)` 会按 BaseURL 域名特征自动识别（如 `dashscope.aliyuncs.com -> aliyun`、`api.anthropic.com -> anthropic`），识别失败回落为 `generic`。
@@ -111,6 +112,7 @@ func NewRemoteChat(config *ChatConfig) (Chat, error) {
 
 - **Ollama**（`source=local`）：`chat/ollama.go`、`embedding/ollama.go`、`vlm/ollama.go` 通过 `internal/models/utils/ollama` 的 `OllamaService` 直连本机 Ollama。
 - **Anthropic**：`chat/anthropic.go` 实现 Messages 协议。
+- **Responses**（`provider=responses`）：`chat/responses.go` + `chat/responses_stream.go` 实现 Responses 协议（`input/output_text/usage`、SSE `response.*` 事件、function tools、vision 输入、`reasoning.effort`）；`Chat()`/`ChatStream()` 按 provider 分流，thinking_control 不适用。
 - **其余远程厂商**：统一走 `chat/remote_api.go` 的 OpenAI 兼容 Chat Completions 实现，厂商差异（thinking 编码、参数兼容等）由构造时解析的 `providerAdapter` 处理。
 - **Embedding** 有更多专用实现：阿里云多模态（`tongyi-embedding-vision-*` 走 DashScope 专用端点，纯文本模型自动改写为 `/compatible-mode/v1` OpenAI 兼容端点）、Volcengine 多模态、Jina、Azure OpenAI、NVIDIA、Gemini、Zhipu、WeKnoraCloud，其余为 OpenAI 兼容（`embedding/openai.go`）。
 - **Rerank** 专用实现：Aliyun、Zhipu、Jina、NVIDIA、WeKnoraCloud、LKEAP、Volcengine，默认 `NewOpenAIReranker`（通用 `/rerank` 风格接口）。两个厂商有额外适配：
@@ -244,7 +246,7 @@ builtin_models:
    - `POST /initialization/asr/check` — ASR（`CheckASRModel`）
    - `POST /initialization/multimodal/test` — VLM 多模态解析（`TestMultimodalFunction`）
 
-   请求体 `ModelTestRequest` 可携带 `modelId`：`fillSecretsFromStoredModel` 会把请求中缺失的 `APIKey` / `AppSecret` 从已存模型（解密后）补齐，实现"改 BaseURL 用旧密钥一键验证"，前端无需也无法拿到明文密钥。`buildTestModel` 把请求转换为**不落库**的临时 `*types.Model`，与生产路径共享同一套 `ConfigFromModel` 映射。
+   请求体 `ModelTestRequest` 可携带 `modelId`：`fillSecretsFromStoredModel` 会把请求中缺失的 `APIKey` / `AppSecret` 从已存模型（解密后）补齐，实现"改 BaseURL 用旧密钥一键验证"，前端无需也无法拿到明文密钥。`buildTestModel` 把请求转换为**不落库**的临时 `*types.Model`，与生产路径共享同一套 `ConfigFromModel` 映射。Responses provider 的探针固定发送 `max_tokens: 300`（推理模型需要输出空间），envelope 有效（含 `incomplete`）即算成功。
 
 2. **模型调试器**（`POST /models/:id/debug`，`ModelHandler.DebugModel`）：对已保存模型按类型发起真实调用并返回完整归一化响应——Chat 走流式并聚合 `stream_events` / thinking 观测项；Embedding 返回向量与维度；Rerank 返回打分结果；VLM / ASR 接受上传文件。响应含 `elapsed_ms`、脱敏后的请求预览（`redactedDebugConfig` 隐去 secret/token/api_key 类字段）与 `observations`。
 

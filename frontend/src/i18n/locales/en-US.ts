@@ -4246,6 +4246,15 @@ export default {
       maxConcurrencyDesc: 'Caps concurrent background (ingestion/enrichment) calls to this model, shared per model across all replicas. 0 or empty falls back to the global default; interactive chat is never affected.',
       thinkingControlLabel: 'Thinking mode request format',
       thinkingControlDesc: 'Controls how the agent’s “Thinking mode” on/off switch is written to the API. We pre-select based on vendor/model when possible; change it to match your API docs. With “Do not send”, the agent Thinking mode switch has no effect.',
+      reasoningEffortLabel: 'Reasoning effort (Responses)',
+      reasoningEffortDesc: 'Sent as reasoning.effort on every Responses request. Default medium.',
+      reasoningEffort: {
+        none: 'none',
+        minimal: 'minimal',
+        low: 'low',
+        medium: 'medium',
+        high: 'high'
+      },
       thinkingControl: {
         none: {
           label: 'Do not send thinking fields',
@@ -4286,7 +4295,8 @@ export default {
         modelNameMax: 'Model name cannot exceed 100 characters',
         baseUrlRequired: 'Please enter the Base URL',
         baseUrlEmpty: 'Base URL cannot be empty',
-        baseUrlInvalid: 'Invalid Base URL, please enter a valid URL'
+        baseUrlInvalid: 'Invalid Base URL, please enter a valid URL',
+        responsesBaseUrlSuffix: 'Responses provider needs the bare API root (e.g. https://opencode.ai/zen/go/v1) — /responses and /chat/completions are appended automatically'
       },
       providerLabel: 'Provider',
       providerPlaceholder: 'Select model provider',
@@ -4326,6 +4336,10 @@ export default {
         generic: {
           label: 'Custom (OpenAI-compatible)',
           description: 'Generic API endpoint'
+        },
+        responses: {
+          label: 'OpenAI Responses API',
+          description: 'Responses API endpoint (POST /responses), e.g. opencode zen'
         },
         siliconflow: {
           label: 'SiliconFlow',

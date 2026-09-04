@@ -2382,6 +2382,15 @@ export default {
       maxConcurrencyDesc: 'Ограничивает число одновременных фоновых вызовов (индексация/обогащение) к этой модели, общее для модели по всем репликам. 0 или пусто — используется глобальное значение по умолчанию; интерактивный чат не затрагивается.',
       thinkingControlLabel: 'Формат параметров режима размышления',
       thinkingControlDesc: 'Определяет, как переключатель «Режим размышления» агента записывается в API. При возможности выбирается по поставщику/модели; при несоответствии измените по документации API. При выборе «Не отправлять» переключатель «Режим размышления» агента не действует.',
+      reasoningEffortLabel: 'Уровень reasoning (Responses)',
+      reasoningEffortDesc: 'Отправляется как reasoning.effort в каждом запросе Responses. По умолчанию medium.',
+      reasoningEffort: {
+        none: 'none',
+        minimal: 'minimal',
+        low: 'low',
+        medium: 'medium',
+        high: 'high'
+      },
       dimensionHint: 'Модель выбрана. Нажмите «Определить размерность», чтобы автоматически получить значение.',
       loadModelListFailed: 'Не удалось загрузить список моделей',
       listRefreshed: 'Список обновлён',
@@ -2473,6 +2482,10 @@ export default {
           label: 'Пользовательский (OpenAI-совместимый)',
           description: 'Generic API endpoint'
         },
+        responses: {
+          label: 'OpenAI Responses API',
+          description: 'Responses API (POST /responses), например opencode zen'
+        },
         requesty: {
           label: 'Requesty',
           description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.'
@@ -2512,7 +2525,8 @@ export default {
         modelNameMax: 'Название модели не может превышать 100 символов',
         baseUrlRequired: 'Введите Base URL',
         baseUrlEmpty: 'Base URL не может быть пустым',
-        baseUrlInvalid: 'Недопустимый Base URL, введите корректный адрес'
+        baseUrlInvalid: 'Недопустимый Base URL, введите корректный адрес',
+        responsesBaseUrlSuffix: 'Для провайдера Responses нужен bare API root (например https://opencode.ai/zen/go/v1) — /responses и /chat/completions добавляются автоматически'
       },
       thinkingControl: {
         thinkingType: {
