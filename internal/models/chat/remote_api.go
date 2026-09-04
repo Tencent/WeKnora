@@ -283,11 +283,10 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	// 因为带思考/推理的模型可能数十秒甚至几分钟才产出首 token。
 	timeoutCtx, cancel := withLLMTimeout(ctx, defaultStreamTimeout)
 
-	// Responses streaming (SSE response.* events) lands in #18. Fail loudly
-	// rather than posting a chat-completions body to /responses.
+	// Responses providers speak SSE response.* events (#18).
 	if c.provider == provider.ProviderResponses {
-		cancel()
-		return nil, fmt.Errorf("responses provider streaming is not supported yet (see #18)")
+		ch, err := c.chatStreamWithResponses(timeoutCtx, messages, opts)
+		return wrapStreamCancel(ch, err, cancel)
 	}
 
 	body, endpoint, useRawHTTP, err := c.buildOutbound(messages, opts, true)

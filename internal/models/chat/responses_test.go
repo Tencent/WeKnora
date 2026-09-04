@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/provider"
+	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -123,13 +124,15 @@ func TestResponsesChat_Stubbed(t *testing.T) {
 	assert.Equal(t, "stop", resp.FinishReason)
 }
 
-// Streaming is #18: ChatStream must fail loudly instead of posting a
-// chat-completions body to /responses.
-func TestResponsesChatStream_Rejected(t *testing.T) {
+// Stubbed end-to-end: ChatStream() assembles a live SSE transcript.
+func TestResponsesChatStream_Stubbed(t *testing.T) {
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
 	secutils.ResetSSRFWhitelistForTest()
+	var capturedPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("no request should reach the backend")
+		capturedPath = r.URL.Path
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(responsesStreamTranscript))
 	}))
 	defer server.Close()
 
@@ -140,9 +143,24 @@ func TestResponsesChatStream_Rejected(t *testing.T) {
 		Provider:  string(provider.ProviderResponses),
 	})
 	require.NoError(t, err)
-	_, err = c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "streaming is not supported")
+	ch, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "/responses", capturedPath)
+	var text strings.Builder
+	var done *types.StreamResponse
+	for e := range ch {
+		if e.ResponseType == types.ResponseTypeAnswer && !e.Done {
+			text.WriteString(e.Content)
+		}
+		if e.Done {
+			d := e
+			done = &d
+		}
+	}
+	assert.Equal(t, "proof-ok", text.String())
+	require.NotNil(t, done)
+	require.NotNil(t, done.Usage)
+	assert.Equal(t, 13, done.Usage.PromptTokens)
 }
 func TestResponsesChat_StubbedFullEndpointBaseURL(t *testing.T) {
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
@@ -166,6 +184,89 @@ func TestResponsesChat_StubbedFullEndpointBaseURL(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, strings.HasSuffix(capturedPath, "/responses"))
 	assert.NotContains(t, capturedPath, "responses/responses")
+}
+
+const responsesStreamTranscript = `data: {"type":"response.created","response":{"id":"resp_1"}}
+
+data: {"type":"response.output_text.delta","delta":"proof"}
+
+data: {"type":"response.output_text.delta","delta":"-ok"}
+
+data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":13,"output_tokens":20}}}
+`
+
+const responsesStreamFailed = `data: {"type":"response.failed","response":{"error":{"message":"boom"}}}
+`
+
+const responsesStreamToolCall = `data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"get_weather","arguments":""}}
+
+data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"city"}
+
+data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"\":\"Oslo\"}"}
+
+data: {"type":"response.function_call_arguments.done","output_index":0,"arguments":"{\"city\":\"Oslo\"}"}
+
+data: {"type":"response.completed","response":{"id":"resp_2","status":"completed","usage":{"input_tokens":5,"output_tokens":8}}}
+`
+
+func collectResponsesStream(t *testing.T, transcript string) []types.StreamResponse {
+	t.Helper()
+	var out []types.StreamResponse
+	err := runResponsesStream(strings.NewReader(transcript), func(sr types.StreamResponse) {
+		out = append(out, sr)
+	})
+	require.NoError(t, err)
+	return out
+}
+
+// Acceptance: stubbed SSE transcript assembles to the non-stream text.
+func TestResponsesStream_TextAssembles(t *testing.T) {
+	events := collectResponsesStream(t, responsesStreamTranscript)
+	var text strings.Builder
+	var done *types.StreamResponse
+	for i, e := range events {
+		if e.ResponseType == types.ResponseTypeAnswer && !e.Done {
+			text.WriteString(e.Content)
+		}
+		if e.Done {
+			d := e
+			done = &d
+		}
+		_ = i
+	}
+	assert.Equal(t, "proof-ok", text.String())
+	require.NotNil(t, done)
+	require.NotNil(t, done.Usage)
+	assert.Equal(t, 13, done.Usage.PromptTokens)
+	assert.Equal(t, 20, done.Usage.CompletionTokens)
+}
+
+func TestResponsesStream_Failed(t *testing.T) {
+	events := collectResponsesStream(t, responsesStreamFailed)
+	require.Len(t, events, 1)
+	assert.Equal(t, types.ResponseTypeError, events[0].ResponseType)
+	assert.True(t, events[0].Done)
+	assert.Contains(t, events[0].Content, "boom")
+}
+
+// Tool-call deltas must not break the stream; the assembled call surfaces.
+func TestResponsesStream_ToolCallSurfaces(t *testing.T) {
+	events := collectResponsesStream(t, responsesStreamToolCall)
+	var calls []types.LLMToolCall
+	var done *types.StreamResponse
+	for _, e := range events {
+		if e.ResponseType == types.ResponseTypeToolCall {
+			calls = append(calls, e.ToolCalls...)
+		}
+		if e.Done {
+			d := e
+			done = &d
+		}
+	}
+	require.Len(t, calls, 1)
+	assert.Equal(t, "get_weather", calls[0].Function.Name)
+	assert.JSONEq(t, `{"city":"Oslo"}`, calls[0].Function.Arguments)
+	require.NotNil(t, done)
 }
 
 func TestResolveResponsesEffort(t *testing.T) {
