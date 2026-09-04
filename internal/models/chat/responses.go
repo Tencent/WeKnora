@@ -18,10 +18,35 @@ import (
 // streaming/vision/tools land in #18/#19). Wayfinder map #9, build #15.
 
 type responsesRequest struct {
-	Model           string `json:"model"`
-	Input           string `json:"input"`
-	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
-	Stream          bool   `json:"stream,omitempty"`
+	Model           string              `json:"model"`
+	Input           string              `json:"input"`
+	MaxOutputTokens int                 `json:"max_output_tokens,omitempty"`
+	Reasoning       *responsesReasoning `json:"reasoning,omitempty"`
+	Stream          bool                `json:"stream,omitempty"`
+}
+
+// responsesReasoning carries the effort selector (none/minimal/low/medium/
+// high, default medium) from ExtraConfig key reasoning_effort (#16).
+type responsesReasoning struct {
+	Effort string `json:"effort,omitempty"`
+}
+
+// responsesEffortLevels is the v1 allowlist; xhigh stays out until asked for.
+var responsesEffortLevels = map[string]bool{
+	"none": true, "minimal": true, "low": true, "medium": true, "high": true,
+}
+
+// resolveResponsesEffort reads ExtraConfig reasoning_effort, normalizing
+// case/space; unknown or empty falls back to medium.
+func resolveResponsesEffort(extra map[string]string) string {
+	effort := ""
+	if extra != nil {
+		effort = strings.ToLower(strings.TrimSpace(extra["reasoning_effort"]))
+	}
+	if !responsesEffortLevels[effort] {
+		return "medium"
+	}
+	return effort
 }
 
 type responsesOutputContent struct {
@@ -142,8 +167,9 @@ func parseResponsesBody(body []byte) (*types.ChatResponse, error) {
 // chatWithResponses performs a non-streaming Responses API call.
 func (c *RemoteAPIChat) chatWithResponses(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
 	req := responsesRequest{
-		Model: c.modelName,
-		Input: buildResponsesInput(messages),
+		Model:     c.modelName,
+		Input:     buildResponsesInput(messages),
+		Reasoning: &responsesReasoning{Effort: c.responsesEffort},
 	}
 	if opts != nil {
 		if opts.MaxCompletionTokens > 0 {

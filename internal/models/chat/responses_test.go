@@ -167,3 +167,88 @@ func TestResponsesChat_StubbedFullEndpointBaseURL(t *testing.T) {
 	assert.True(t, strings.HasSuffix(capturedPath, "/responses"))
 	assert.NotContains(t, capturedPath, "responses/responses")
 }
+
+func TestResolveResponsesEffort(t *testing.T) {
+	cases := []struct {
+		name  string
+		extra map[string]string
+		want  string
+	}{
+		{"unset defaults medium", nil, "medium"},
+		{"empty defaults medium", map[string]string{"reasoning_effort": ""}, "medium"},
+		{"low passes through", map[string]string{"reasoning_effort": "low"}, "low"},
+		{"none passes through", map[string]string{"reasoning_effort": "none"}, "none"},
+		{"case and space normalized", map[string]string{"reasoning_effort": " High "}, "high"},
+		{"unknown falls back medium", map[string]string{"reasoning_effort": "ultra"}, "medium"},
+		{"xhigh not in v1 set falls back", map[string]string{"reasoning_effort": "xhigh"}, "medium"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveResponsesEffort(tc.extra); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Effort must ride every /responses request (default medium).
+func TestResponsesChat_SendsEffort(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	secutils.ResetSSRFWhitelistForTest()
+	var capturedRequest responsesRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&capturedRequest))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(responsesCompletedBody))
+	}))
+	defer server.Close()
+
+	c, err := NewRemoteAPIChat(&ChatConfig{
+		BaseURL:   server.URL,
+		ModelName: "m",
+		APIKey:    "k",
+		Provider:  string(provider.ProviderResponses),
+	})
+	require.NoError(t, err)
+	_, err = c.Chat(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, capturedRequest.Reasoning)
+	assert.Equal(t, "medium", capturedRequest.Reasoning.Effort)
+
+	c2, err := NewRemoteAPIChat(&ChatConfig{
+		BaseURL:     server.URL,
+		ModelName:   "m",
+		APIKey:      "k",
+		Provider:    string(provider.ProviderResponses),
+		ExtraConfig: map[string]string{"reasoning_effort": "low"},
+	})
+	require.NoError(t, err)
+	_, err = c2.Chat(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, capturedRequest.Reasoning)
+	assert.Equal(t, "low", capturedRequest.Reasoning.Effort)
+}
+
+// Incomplete envelopes (reasoning ate the budget) must succeed at the chat
+// layer so the connection test treats envelope-valid as success.
+func TestResponsesChat_IncompleteSucceeds(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	secutils.ResetSSRFWhitelistForTest()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(responsesIncompleteBody))
+	}))
+	defer server.Close()
+
+	c, err := NewRemoteAPIChat(&ChatConfig{
+		BaseURL:   server.URL,
+		ModelName: "m",
+		APIKey:    "k",
+		Provider:  string(provider.ProviderResponses),
+	})
+	require.NoError(t, err)
+	resp, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "hi"}}, &ChatOptions{MaxTokens: 300})
+	require.NoError(t, err)
+	assert.Equal(t, "", resp.Content)
+	assert.Equal(t, "incomplete", resp.FinishReason)
+}

@@ -36,6 +36,9 @@ type RemoteAPIChat struct {
 	adapter providerAdapter
 	// thinkingOverride 来自 extra_config.thinking_control，非 nil 时覆盖 adapter.Thinking()。
 	thinkingOverride ThinkingStrategy
+	// responsesEffort 是 Responses provider 的 effort 选择器
+	// （extra_config.reasoning_effort，默认 medium，见 #16）。
+	responsesEffort string
 }
 
 // NewRemoteAPIChat 创建远程 API 聊天实例
@@ -115,6 +118,7 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 		customHeaders:    chatConfig.CustomHeaders,
 		adapter:          resolveProvider(providerName, modelName),
 		thinkingOverride: parseThinkingOverride(chatConfig.ExtraConfig),
+		responsesEffort:  resolveResponsesEffort(chatConfig.ExtraConfig),
 	}, nil
 }
 
