@@ -67,6 +67,34 @@ func TestRemoteAPIVLMResponsesPredict(t *testing.T) {
 	}
 }
 
+func TestRemoteAPIVLMResponsesFullEndpointBaseURL(t *testing.T) {
+	withVLMSSRFWhitelist(t, "127.0.0.1")
+	var lastPath string
+	var lastRequest map[string]interface{}
+	server := newVLMResponsesTestServer(t, &lastPath, &lastRequest, vlmResponsesCompletedBody)
+	defer server.Close()
+
+	v, err := NewRemoteAPIVLM(&Config{
+		BaseURL:   server.URL + "/v1/responses",
+		ModelName: "m",
+		APIKey:    "k",
+		Provider:  "responses",
+	})
+	if err != nil {
+		t.Fatalf("NewRemoteAPIVLM: %v", err)
+	}
+	text, err := v.Predict(t.Context(), [][]byte{testPNG}, "hi")
+	if err != nil {
+		t.Fatalf("Predict: %v", err)
+	}
+	if text != "page text" {
+		t.Errorf("text = %q", text)
+	}
+	if lastPath != "/v1/responses" {
+		t.Errorf("path = %q, want single /responses suffix", lastPath)
+	}
+}
+
 func TestRemoteAPIVLMResponsesEffort(t *testing.T) {
 	withVLMSSRFWhitelist(t, "127.0.0.1")
 	var lastRequest map[string]interface{}

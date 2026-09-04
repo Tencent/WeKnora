@@ -77,6 +77,10 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 				}
 			}
 		}
+	} else if providerName == provider.ProviderResponses {
+		// Responses provider: reduce a pasted full endpoint to the API root
+		// (mirrors chat construction; endpoint guard is the backstop).
+		config.BaseURL = provider.NormalizeBaseURL(providerName, config.BaseURL)
 	} else {
 		// Egress guard: stored full-path base URLs must not double-append
 		// the SDK's internal /chat/completions suffix.
