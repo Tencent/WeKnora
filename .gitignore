@@ -60,8 +60,3 @@ miniprogram/project.private.config.json
 
 # Staging dir for the Docker sandbox self-check probe (removed after each run)
 .weknora-sandbox-check-*
-
-# Personal agent/dev notes (local only, never commit)
-AGENTS.md
-docs/agents/
-docs/research/
