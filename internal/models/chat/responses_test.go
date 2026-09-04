@@ -353,3 +353,96 @@ func TestResponsesChat_IncompleteSucceeds(t *testing.T) {
 	assert.Equal(t, "", resp.Content)
 	assert.Equal(t, "incomplete", resp.FinishReason)
 }
+
+const responsesToolCallBody = `{"id":"resp_3","object":"response","status":"completed","model":"m","output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Oslo\"}"}],"usage":{"input_tokens":20,"output_tokens":10}}`
+
+func TestBuildResponsesTools(t *testing.T) {
+	opts := &ChatOptions{
+		Tools: []Tool{{Type: "function", Function: FunctionDef{
+			Name:        "get_weather",
+			Description: "Get weather",
+			Parameters:  json.RawMessage(`{"type":"object"}`),
+		}}},
+		ToolChoice: "auto",
+	}
+	tools, choice := buildResponsesTools(opts)
+	require.Len(t, tools, 1)
+	assert.Equal(t, "function", tools[0].Type)
+	assert.Equal(t, "get_weather", tools[0].Name)
+	assert.Equal(t, "Get weather", tools[0].Description)
+	assert.JSONEq(t, `{"type":"object"}`, string(tools[0].Parameters))
+	assert.Equal(t, "auto", choice)
+	if tools, choice := buildResponsesTools(nil); len(tools) != 0 || choice != nil {
+		t.Errorf("nil opts should yield no tools, got %v %v", tools, choice)
+	}
+}
+
+func TestBuildResponsesInputValue_TextStaysString(t *testing.T) {
+	v := buildResponsesInputValue([]Message{{Role: "user", Content: "hi"}})
+	s, ok := v.(string)
+	require.True(t, ok, "text-only input must stay a string, got %T", v)
+	assert.Contains(t, s, "hi")
+}
+
+func TestBuildResponsesInputValue_VisionAndTools(t *testing.T) {
+	msgs := []Message{
+		{Role: "user", Content: "what is this?", MultiContent: []MessageContentPart{
+			{Type: "text", Text: "what is this?"},
+			{Type: "image_url", ImageURL: &ImageURL{URL: "https://x/img.png"}},
+		}},
+		{Role: "assistant", Content: "", ToolCalls: []ToolCall{{ID: "call_1", Type: "function",
+			Function: FunctionCall{Name: "get_weather", Arguments: `{"city":"Oslo"}`}}}},
+		{Role: "tool", Content: "sunny", ToolCallID: "call_1", Name: "get_weather"},
+	}
+	v := buildResponsesInputValue(msgs)
+	items, ok := v.([]responsesInputItem)
+	require.True(t, ok, "multimodal input must be an item array, got %T", v)
+	require.Len(t, items, 3)
+	assert.Equal(t, "input_text", items[0].Content[0].Type)
+	assert.Equal(t, "input_image", items[0].Content[1].Type)
+	assert.Equal(t, "https://x/img.png", items[0].Content[1].ImageURL)
+	assert.Equal(t, "function_call", items[1].Type)
+	assert.Equal(t, "get_weather", items[1].Name)
+	assert.Equal(t, "function_call_output", items[2].Type)
+	assert.Equal(t, "call_1", items[2].CallID)
+	assert.Equal(t, "sunny", items[2].Output)
+}
+
+func TestParseResponsesBody_ToolCall(t *testing.T) {
+	resp, err := parseResponsesBody([]byte(responsesToolCallBody))
+	require.NoError(t, err)
+	require.Len(t, resp.ToolCalls, 1)
+	assert.Equal(t, "call_1", resp.ToolCalls[0].ID)
+	assert.Equal(t, "function", resp.ToolCalls[0].Type)
+	assert.Equal(t, "get_weather", resp.ToolCalls[0].Function.Name)
+	assert.JSONEq(t, `{"city":"Oslo"}`, resp.ToolCalls[0].Function.Arguments)
+}
+
+// Stubbed round-trip: tools go out, function_call comes back populated.
+func TestResponsesChat_ToolRoundTrip(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	secutils.ResetSSRFWhitelistForTest()
+	var capturedRequest responsesRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&capturedRequest))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(responsesToolCallBody))
+	}))
+	defer server.Close()
+
+	c, err := NewRemoteAPIChat(&ChatConfig{
+		BaseURL:   server.URL,
+		ModelName: "m",
+		APIKey:    "k",
+		Provider:  string(provider.ProviderResponses),
+	})
+	require.NoError(t, err)
+	resp, err := c.Chat(context.Background(),
+		[]Message{{Role: "user", Content: "weather in Oslo?"}},
+		&ChatOptions{Tools: []Tool{{Type: "function", Function: FunctionDef{Name: "get_weather"}}}})
+	require.NoError(t, err)
+	require.Len(t, capturedRequest.Tools, 1)
+	assert.Equal(t, "get_weather", capturedRequest.Tools[0].Name)
+	require.Len(t, resp.ToolCalls, 1)
+	assert.Equal(t, "get_weather", resp.ToolCalls[0].Function.Name)
+}

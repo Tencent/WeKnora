@@ -189,10 +189,11 @@ func runResponsesStream(r io.Reader, emit func(types.StreamResponse)) error {
 func (c *RemoteAPIChat) chatStreamWithResponses(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
 	req := responsesRequest{
 		Model:     c.modelName,
-		Input:     buildResponsesInput(messages),
+		Input:     buildResponsesInputValue(messages),
 		Reasoning: &responsesReasoning{Effort: c.responsesEffort},
 		Stream:    true,
 	}
+	req.Tools, req.ToolChoice = buildResponsesTools(opts)
 	if opts != nil {
 		if opts.MaxCompletionTokens > 0 {
 			req.MaxOutputTokens = opts.MaxCompletionTokens

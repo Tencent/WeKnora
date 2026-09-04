@@ -19,9 +19,11 @@ import (
 
 type responsesRequest struct {
 	Model           string              `json:"model"`
-	Input           string              `json:"input"`
+	Input           any                 `json:"input"`
 	MaxOutputTokens int                 `json:"max_output_tokens,omitempty"`
 	Reasoning       *responsesReasoning `json:"reasoning,omitempty"`
+	Tools           []responsesTool     `json:"tools,omitempty"`
+	ToolChoice      any                 `json:"tool_choice,omitempty"`
 	Stream          bool                `json:"stream,omitempty"`
 }
 
@@ -55,9 +57,13 @@ type responsesOutputContent struct {
 }
 
 type responsesOutputItem struct {
-	Type    string                   `json:"type"`
-	Role    string                   `json:"role,omitempty"`
-	Content []responsesOutputContent `json:"content,omitempty"`
+	Type      string                   `json:"type"`
+	Role      string                   `json:"role,omitempty"`
+	Content   []responsesOutputContent `json:"content,omitempty"`
+	ID        string                   `json:"id,omitempty"`
+	CallID    string                   `json:"call_id,omitempty"`
+	Name      string                   `json:"name,omitempty"`
+	Arguments string                   `json:"arguments,omitempty"`
 }
 
 type responsesUsage struct {
@@ -103,7 +109,8 @@ func appendOnce(base, suffix string) string {
 }
 
 // buildResponsesInput flattens conversation messages into the single-string
-// Responses input. #15 covers text only; images/tools ride #19.
+// Responses input. Text-only path; structured content rides
+// buildResponsesInputValue (#19).
 func buildResponsesInput(messages []Message) string {
 	var sb strings.Builder
 	for _, m := range messages {
@@ -119,10 +126,153 @@ func buildResponsesInput(messages []Message) string {
 	return sb.String()
 }
 
-// parseResponsesBody converts a raw /responses payload into a ChatResponse.
+// responsesTool maps a WeKnora function tool onto a Responses function tool.
+type responsesTool struct {
+	Type        string          `json:"type"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+}
+
+// buildResponsesTools maps ChatOptions tools + tool_choice. Nil opts (or no
+// tools) yields no fields.
+func buildResponsesTools(opts *ChatOptions) ([]responsesTool, any) {
+	if opts == nil || len(opts.Tools) == 0 {
+		return nil, nil
+	}
+	tools := make([]responsesTool, 0, len(opts.Tools))
+	for _, tool := range opts.Tools {
+		toolType := tool.Type
+		if toolType == "" {
+			toolType = "function"
+		}
+		tools = append(tools, responsesTool{
+			Type:        toolType,
+			Name:        tool.Function.Name,
+			Description: tool.Function.Description,
+			Parameters:  tool.Function.Parameters,
+		})
+	}
+	var choice any
+	switch opts.ToolChoice {
+	case "":
+		choice = nil
+	case "none", "required", "auto":
+		choice = opts.ToolChoice
+	default:
+		choice = map[string]any{"type": "function", "name": opts.ToolChoice}
+	}
+	return tools, choice
+}
+
+// responsesInputContent is one content part inside a structured input item.
+type responsesInputContent struct {
+	Type     string `json:"type"` // input_text | input_image
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
+}
+
+// responsesInputItem is one entry of a structured Responses input array.
+type responsesInputItem struct {
+	Type      string                  `json:"type"` // message | function_call | function_call_output
+	Role      string                  `json:"role,omitempty"`
+	Content   []responsesInputContent `json:"content,omitempty"`
+	Name      string                  `json:"name,omitempty"`
+	CallID    string                  `json:"call_id,omitempty"`
+	Arguments string                  `json:"arguments,omitempty"`
+	Output    string                  `json:"output,omitempty"`
+}
+
+// needsStructuredInput reports whether any message carries non-text content.
+func needsStructuredInput(messages []Message) bool {
+	for _, m := range messages {
+		if len(m.ToolCalls) > 0 || m.Role == "tool" {
+			return true
+		}
+		for _, part := range m.MultiContent {
+			if part.Type == "image_url" && part.ImageURL != nil {
+				return true
+			}
+		}
+		if len(m.Images) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// buildResponsesInputValue returns the Responses input: a plain string for
+// text-only turns (wire shape unchanged), otherwise a structured item array
+// carrying images, function calls and function outputs.
+func buildResponsesInputValue(messages []Message) any {
+	if !needsStructuredInput(messages) {
+		return buildResponsesInput(messages)
+	}
+	items := make([]responsesInputItem, 0, len(messages))
+	for _, m := range messages {
+		switch {
+		case m.Role == "tool":
+			items = append(items, responsesInputItem{
+				Type:   "function_call_output",
+				CallID: m.ToolCallID,
+				Output: m.Content,
+			})
+		case len(m.ToolCalls) > 0:
+			if m.Content != "" {
+				items = append(items, responsesInputItem{
+					Type:    "message",
+					Role:    m.Role,
+					Content: []responsesInputContent{{Type: "input_text", Text: m.Content}},
+				})
+			}
+			for _, tc := range m.ToolCalls {
+				items = append(items, responsesInputItem{
+					Type:      "function_call",
+					CallID:    tc.ID,
+					Name:      tc.Function.Name,
+					Arguments: tc.Function.Arguments,
+				})
+			}
+		default:
+			content := make([]responsesInputContent, 0, 2)
+			for _, part := range m.MultiContent {
+				switch part.Type {
+				case "image_url":
+					if part.ImageURL != nil {
+						content = append(content, responsesInputContent{
+							Type:     "input_image",
+							ImageURL: part.ImageURL.URL,
+						})
+					}
+				case "text":
+					if part.Text != "" {
+						content = append(content, responsesInputContent{Type: "input_text", Text: part.Text})
+					}
+				}
+			}
+			for _, imgURL := range m.Images {
+				content = append(content, responsesInputContent{
+					Type:     "input_image",
+					ImageURL: resolveImageURLForLLM(imgURL),
+				})
+			}
+			if m.Content != "" {
+				content = append(content, responsesInputContent{Type: "input_text", Text: m.Content})
+			}
+			items = append(items, responsesInputItem{
+				Type:    "message",
+				Role:    m.Role,
+				Content: content,
+			})
+		}
+	}
+	return items
+}
+
 // Envelope-valid but textless bodies (e.g. status:incomplete when a reasoning
 // model exhausts max_output_tokens) are NOT errors: content is empty and
 // FinishReason carries the status for the caller (#16 test policy) to judge.
+// parseResponsesBody converts a raw /responses payload into a ChatResponse.
 func parseResponsesBody(body []byte) (*types.ChatResponse, error) {
 	var env struct {
 		Error *responsesError `json:"error,omitempty"`
@@ -153,6 +303,23 @@ func parseResponsesBody(body []byte) (*types.ChatResponse, error) {
 		}
 	}
 	out.Content = strings.Join(texts, "")
+	for _, item := range resp.Output {
+		if item.Type != "function_call" {
+			continue
+		}
+		id := item.CallID
+		if id == "" {
+			id = item.ID
+		}
+		out.ToolCalls = append(out.ToolCalls, types.LLMToolCall{
+			ID:   id,
+			Type: "function",
+			Function: types.FunctionCall{
+				Name:      item.Name,
+				Arguments: item.Arguments,
+			},
+		})
+	}
 	switch resp.Status {
 	case "completed":
 		out.FinishReason = "stop"
@@ -168,9 +335,10 @@ func parseResponsesBody(body []byte) (*types.ChatResponse, error) {
 func (c *RemoteAPIChat) chatWithResponses(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
 	req := responsesRequest{
 		Model:     c.modelName,
-		Input:     buildResponsesInput(messages),
+		Input:     buildResponsesInputValue(messages),
 		Reasoning: &responsesReasoning{Effort: c.responsesEffort},
 	}
+	req.Tools, req.ToolChoice = buildResponsesTools(opts)
 	if opts != nil {
 		if opts.MaxCompletionTokens > 0 {
 			req.MaxOutputTokens = opts.MaxCompletionTokens
