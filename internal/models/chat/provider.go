@@ -85,7 +85,7 @@ type weKnoraCloudProvider struct{ baseProvider }
 func (weKnoraCloudProvider) Name() provider.ProviderName { return provider.ProviderWeKnoraCloud }
 
 func (weKnoraCloudProvider) Endpoint(baseURL, _ string, _ bool) string {
-	return strings.TrimRight(baseURL, "/") + "/api/v1/chat/completions"
+	return appendOnce(baseURL, "/api/v1/chat/completions")
 }
 
 func (weKnoraCloudProvider) ForceRawHTTP() bool { return true }
@@ -172,6 +172,16 @@ type liteLLMProvider struct{ baseProvider }
 
 func (liteLLMProvider) Name() provider.ProviderName { return provider.ProviderLiteLLM }
 func (liteLLMProvider) Thinking() ThinkingStrategy  { return chatTemplateKwargs{} }
+
+// --- Responses API: endpoint + raw HTTP (non-standard wire format) ---
+
+type responsesProvider struct{ baseProvider }
+
+func (responsesProvider) Name() provider.ProviderName { return provider.ProviderResponses }
+func (responsesProvider) Endpoint(baseURL, _ string, _ bool) string {
+	return responsesEndpoint(baseURL)
+}
+func (responsesProvider) ForceRawHTTP() bool { return true }
 
 // --- Gemini OpenAI compatibility: tool thought signatures live in extra_content ---
 
@@ -282,6 +292,7 @@ var providerRegistry = []providerAdapter{
 	lkeapProvider{},
 	deepseekProvider{},
 	genericProvider{},
+	responsesProvider{},
 	liteLLMProvider{},
 	geminiProvider{},
 	volcengineProvider{},

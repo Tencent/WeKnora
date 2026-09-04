@@ -52,6 +52,11 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 		providerName = provider.DetectProvider(chatConfig.BaseURL)
 	}
 
+	// Normalize the stored base URL (a pasted full endpoint such as
+	// .../v1/responses or .../v1/chat/completions is reduced to the API root
+	// for providers that define suffix stripping; all others pass through).
+	chatConfig.BaseURL = provider.NormalizeBaseURL(providerName, chatConfig.BaseURL)
+
 	var config openai.ClientConfig
 	if providerName == provider.ProviderAzureOpenAI {
 		config = openai.DefaultAzureConfig(apiKey, chatConfig.BaseURL)
@@ -170,6 +175,12 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	timeoutCtx, cancel := withLLMTimeout(ctx, defaultChatTimeout)
 	defer cancel()
 
+	// Responses providers speak a different wire format (/responses); they
+	// bypass the chat-completions outbound assembly entirely.
+	if c.provider == provider.ProviderResponses {
+		return c.chatWithResponses(timeoutCtx, messages, opts)
+	}
+
 	body, endpoint, useRawHTTP, err := c.buildOutbound(messages, opts, false)
 	if err != nil {
 		return nil, err
@@ -209,7 +220,7 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 	}
 
 	if endpoint == "" {
-		endpoint = c.baseURL + "/chat/completions"
+		endpoint = chatCompletionsEndpoint(c.baseURL)
 	}
 	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
 		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
@@ -267,6 +278,13 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	// 仅在调用方未设置 deadline 时附加兜底超时；流式调用默认超时更长，
 	// 因为带思考/推理的模型可能数十秒甚至几分钟才产出首 token。
 	timeoutCtx, cancel := withLLMTimeout(ctx, defaultStreamTimeout)
+
+	// Responses streaming (SSE response.* events) lands in #18. Fail loudly
+	// rather than posting a chat-completions body to /responses.
+	if c.provider == provider.ProviderResponses {
+		cancel()
+		return nil, fmt.Errorf("responses provider streaming is not supported yet (see #18)")
+	}
 
 	body, endpoint, useRawHTTP, err := c.buildOutbound(messages, opts, true)
 	if err != nil {
@@ -340,7 +358,7 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 	}
 
 	if endpoint == "" {
-		endpoint = c.baseURL + "/chat/completions"
+		endpoint = chatCompletionsEndpoint(c.baseURL)
 	}
 	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
 		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
