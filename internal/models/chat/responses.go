@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	modelutils "github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -88,24 +89,35 @@ type responsesResponse struct {
 
 // responsesEndpoint resolves the Responses endpoint with a double-append guard.
 func responsesEndpoint(baseURL string) string {
-	return appendOnce(baseURL, "/responses")
+	return modelutils.AppendPathOnce(baseURL, "/responses")
 }
 
 // chatCompletionsEndpoint resolves the chat-completions endpoint with an
 // egress guard: stored full-path rows (e.g. deepseek-v4-flash with a base_url
 // already ending in /chat/completions) must not double-append.
 func chatCompletionsEndpoint(baseURL string) string {
-	return appendOnce(baseURL, "/chat/completions")
+	return modelutils.AppendPathOnce(baseURL, "/chat/completions")
 }
 
-// appendOnce joins base and suffix without double-appending when base
-// already ends with the suffix (case-insensitive).
-func appendOnce(base, suffix string) string {
-	trimmed := strings.TrimRight(base, "/")
-	if strings.HasSuffix(strings.ToLower(trimmed), strings.ToLower(suffix)) {
-		return trimmed
+// newResponsesHTTPRequest builds the shared POST setup for Responses calls:
+// marshal, endpoint + SSRF check, auth and custom headers.
+func (c *RemoteAPIChat) newResponsesHTTPRequest(ctx context.Context, req responsesRequest) (*http.Request, []byte, error) {
+	jsonData, err := json.Marshal(req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal responses request: %w", err)
 	}
-	return trimmed + suffix
+	endpoint := responsesEndpoint(c.baseURL)
+	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
+		return nil, nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	c.adapter.Auth(httpReq, c.authCreds(), jsonData)
+	secutils.ApplyCustomHeaders(httpReq, c.customHeaders)
+	return httpReq, jsonData, nil
 }
 
 // buildResponsesInput flattens conversation messages into the single-string
@@ -346,24 +358,12 @@ func (c *RemoteAPIChat) chatWithResponses(ctx context.Context, messages []Messag
 			req.MaxOutputTokens = opts.MaxTokens
 		}
 	}
-	jsonData, err := json.Marshal(req)
+	httpReq, jsonData, err := c.newResponsesHTTPRequest(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("marshal responses request: %w", err)
-	}
-	endpoint := responsesEndpoint(c.baseURL)
-	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
-		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
+		return nil, err
 	}
 	logger.Infof(ctx, "[LLM Request] Responses, endpoint=%s, model=%s, raw HTTP request:\n%s",
-		endpoint, c.modelName, secutils.CompactImageDataURLForLog(string(jsonData)))
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	c.adapter.Auth(httpReq, c.authCreds(), jsonData)
-	secutils.ApplyCustomHeaders(httpReq, c.customHeaders)
+		httpReq.URL.String(), c.modelName, secutils.CompactImageDataURLForLog(string(jsonData)))
 
 	resp, err := rawHTTPClient.Do(httpReq)
 	if err != nil {

@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // Responses SSE streaming (#18). Event catalog per
@@ -201,24 +199,12 @@ func (c *RemoteAPIChat) chatStreamWithResponses(ctx context.Context, messages []
 			req.MaxOutputTokens = opts.MaxTokens
 		}
 	}
-	jsonData, err := json.Marshal(req)
+	httpReq, _, err := c.newResponsesHTTPRequest(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("marshal responses stream request: %w", err)
+		return nil, err
 	}
-	endpoint := responsesEndpoint(c.baseURL)
-	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
-		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
-	}
-	logger.Infof(ctx, "[LLM Stream Request] Responses, endpoint=%s, model=%s", endpoint, c.modelName)
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	c.adapter.Auth(httpReq, c.authCreds(), jsonData)
 	httpReq.Header.Set("Accept", "text/event-stream")
-	secutils.ApplyCustomHeaders(httpReq, c.customHeaders)
+	logger.Infof(ctx, "[LLM Stream Request] Responses, endpoint=%s, model=%s", httpReq.URL.String(), c.modelName)
 
 	resp, err := rawHTTPClient.Do(httpReq)
 	if err != nil {

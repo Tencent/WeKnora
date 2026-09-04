@@ -1465,6 +1465,9 @@ const checkRemoteAPI = async () => {
           provider: formData.value.provider,
           ...idPayload,
           ...headerPayload,
+          ...(formData.value.provider === 'responses' && formData.value.reasoningEffort
+            ? { extraConfig: { reasoning_effort: formData.value.reasoningEffort } }
+            : {}),
         })
         break
 
@@ -1525,6 +1528,9 @@ const checkRemoteAPI = async () => {
           provider: formData.value.provider,
           ...idPayload,
           ...headerPayload,
+          ...(formData.value.provider === 'responses' && formData.value.reasoningEffort
+            ? { extraConfig: { reasoning_effort: formData.value.reasoningEffort } }
+            : {}),
         })
         break
 

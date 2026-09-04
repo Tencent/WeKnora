@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
+	modelutils "github.com/Tencent/WeKnora/internal/models/utils"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -72,6 +73,10 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 			}
 		}
 	} else {
+		// Egress guard: stored full-path base URLs must not double-append
+		// the SDK's internal /chat/completions suffix.
+		config.BaseURL = modelutils.StripPathSuffix(config.BaseURL,
+			[]string{"/api/v1/chat/completions", "/chat/completions"})
 		apiCfg = openai.DefaultConfig(config.APIKey)
 		if config.BaseURL != "" {
 			apiCfg.BaseURL = config.BaseURL

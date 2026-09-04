@@ -2,8 +2,8 @@ package provider
 
 import (
 	"fmt"
-	"strings"
 
+	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -50,20 +50,12 @@ var responsesPathSuffixes = []string{
 }
 
 // NormalizeBaseURL returns the canonical API-root base URL for a provider.
-// For the Responses provider it strips a trailing endpoint suffix
-// (/responses, /chat/completions, /api/v1/chat/completions) so callers can
-// paste a full endpoint URL; all other providers pass through trimmed but
-// otherwise untouched (Azure/proxy suffixes must be preserved).
+// For the Responses provider it strips a trailing endpoint suffix so
+// callers can paste a full endpoint URL; all other providers pass through
+// trimmed but otherwise untouched (Azure/proxy suffixes must be preserved).
 func NormalizeBaseURL(name ProviderName, baseURL string) string {
-	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if name != ProviderResponses {
-		return trimmed
+		return utils.StripPathSuffix(baseURL, nil)
 	}
-	lowered := strings.ToLower(trimmed)
-	for _, suffix := range responsesPathSuffixes {
-		if strings.HasSuffix(lowered, suffix) {
-			return strings.TrimRight(trimmed[:len(trimmed)-len(suffix)], "/")
-		}
-	}
-	return trimmed
+	return utils.StripPathSuffix(baseURL, responsesPathSuffixes)
 }

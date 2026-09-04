@@ -574,6 +574,15 @@ const handleModelSave = async (modelData: any) => {
         MessagePlugin.warning(t('modelSettings.toasts.baseUrlInvalid'))
         return
       }
+
+      // Responses provider 只接受裸 API 根地址（与编辑弹窗同一规则的服务端兜底）。
+      if (modelData.provider === 'responses') {
+        const lowered = modelData.baseUrl.trim().toLowerCase().replace(/\/+$/, '')
+        if (lowered.endsWith('/responses') || lowered.endsWith('/chat/completions')) {
+          MessagePlugin.warning(t('model.editor.validation.responsesBaseUrlSuffix'))
+          return
+        }
+      }
     }
 
     if (saveType === 'embedding') {

@@ -17,17 +17,6 @@ import (
 
 const weKnoraCloudVLMPath = "/api/v1/chat/completions"
 
-// appendOnce joins base and suffix without double-appending when base
-// already ends with the suffix (case-insensitive). Stored full-path base
-// URLs must keep resolving to a single-suffix endpoint.
-func appendOnce(base, suffix string) string {
-	trimmed := strings.TrimRight(base, "/")
-	if strings.HasSuffix(strings.ToLower(trimmed), strings.ToLower(suffix)) {
-		return trimmed
-	}
-	return trimmed + suffix
-}
-
 // WeKnoraCloudVLM implements VLM via the WeKnoraCloud API.
 type WeKnoraCloudVLM struct {
 	modelName       string
@@ -145,7 +134,7 @@ func (v *WeKnoraCloudVLM) Predict(ctx context.Context, imgBytesList [][]byte, pr
 	requestID := uuid.New().String()
 	headers := utils.Sign(v.appID, v.apiKey, requestID, string(bodyBytes))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, appendOnce(v.baseURL, weKnoraCloudVLMPath), bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, utils.AppendPathOnce(v.baseURL, weKnoraCloudVLMPath), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return "", fmt.Errorf("weknoracloud VLM: create request: %w", err)
 	}

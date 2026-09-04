@@ -42,10 +42,13 @@ WeKnora 支持多种主流 AI 模型服务商，在创建模型时可通过 `par
 | `qiniu`        | 七牛云 Qiniu                 | Chat                            |
 | `longcat`      | LongCat AI                   | Chat                            |
 | `gpustack`     | GPUStack                     | Chat, Embedding, Rerank, VLLM   |
+| `responses`    | OpenAI Responses API         | Chat, VLLM                      |
 
 > 实际可用的服务商以 `GET /models/providers` 返回为准。
 >
 > `litellm` 的目录默认地址是占位符 `http://your_litellm_proxy/v1`，保存前请换成实际可解析的主机名。`localhost` / `127.0.0.1` / `host.docker.internal` 默认会被 SSRF 拦截；自托管时把该主机加入 `SSRF_WHITELIST`。创建模型时 `source` 仍为 `remote`，厂商写在 `parameters.provider`。
+
+> `responses` 走 `POST <baseURL>/responses`（如 opencode zen），`base_url` 只填裸 API 根地址（如 `https://opencode.ai/zen/go/v1`，不要带 `/responses` 后缀）；`reasoning_effort`（none/minimal/low/medium/high，默认 medium）经 `extra_config` 透传；连通性探针固定发送 300 tokens。
 
 ## GET `/models/providers` - 获取模型服务商列表
 
