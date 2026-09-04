@@ -78,7 +78,14 @@ func (t *WebFetchTool) Execute(ctx context.Context, args json.RawMessage) (*type
 	logger.Infof(ctx, "[Tool][WebFetch] Execute started")
 	var input WebFetchInput
 	if err := json.Unmarshal(args, &input); err != nil {
-		return &types.ToolResult{Success: false, Error: fmt.Sprintf("failed to parse args: %v", err)}, err
+		// Some models double-encode the items array as a JSON string; unwrap and retry.
+		var wrapped struct {
+			Items string `json:"items"`
+		}
+		if json.Unmarshal(args, &wrapped) != nil || json.Unmarshal([]byte(wrapped.Items), &input.Items) != nil || len(input.Items) == 0 {
+			return &types.ToolResult{Success: false, Error: fmt.Sprintf("failed to parse args: %v", err)}, err
+		}
+		logger.Warnf(ctx, "[Tool][WebFetch] Unwrapped double-encoded items string (%d item(s))", len(input.Items))
 	}
 	if len(input.Items) == 0 {
 		return &types.ToolResult{Success: false, Error: "missing required parameter: items"}, nil

@@ -129,6 +129,22 @@ func TestWebFetchToolDeduplicatesGitHubBlobAndRawURLs(t *testing.T) {
 	assert.Equal(t, 1, result.Data["skipped_count"])
 }
 
+func TestWebFetchToolUnwrapsDoubleEncodedItemsString(t *testing.T) {
+	const rawURL = "https://example.com/article"
+	fetcher := newStubWebContentFetcher(map[string]string{rawURL: "article content"}, nil)
+	tool := newWebFetchTool(nil, fetcher)
+
+	// Some models emit {"items":"[{\"url\":...}]"} instead of a real array.
+	itemsJSON, _ := json.Marshal([]WebFetchItem{{URL: rawURL, Prompt: "extract facts"}})
+	encoded, _ := json.Marshal(map[string]string{"items": string(itemsJSON)})
+
+	result, err := tool.Execute(context.Background(), encoded)
+
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	assert.Equal(t, 1, fetcher.callCount[rawURL])
+}
+
 func newStubWebContentFetcher(contents map[string]string, failures map[string]error) *stubWebContentFetcher {
 	return &stubWebContentFetcher{
 		contents:  contents,
