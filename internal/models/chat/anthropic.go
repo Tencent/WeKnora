@@ -25,16 +25,27 @@ type AnthropicChat struct {
 	customHeaders map[string]string
 }
 
+type anthropicCacheControl struct {
+	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
+}
+
+type anthropicContentBlock struct {
+	Type         string                 `json:"type"`
+	Text         string                 `json:"text,omitempty"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
 type anthropicMessage struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
 }
 
 type anthropicRequest struct {
 	Model       string             `json:"model"`
 	MaxTokens   int                `json:"max_tokens"`
 	Stream      bool               `json:"stream,omitempty"`
-	System      string             `json:"system,omitempty"`
+	System      any                `json:"system,omitempty"`
 	Messages    []anthropicMessage `json:"messages"`
 	Temperature *float64           `json:"temperature,omitempty"`
 	TopP        *float64           `json:"top_p,omitempty"`
@@ -113,7 +124,7 @@ func NewAnthropicChat(config *ChatConfig) (*AnthropicChat, error) {
 }
 
 func (c *AnthropicChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
-	reqBody := c.buildRequest(messages, opts)
+	reqBody := c.buildRequest(ctx, messages, opts)
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -176,7 +187,7 @@ func (c *AnthropicChat) Chat(ctx context.Context, messages []Message, opts *Chat
 }
 
 func (c *AnthropicChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
-	reqBody := c.buildRequest(messages, opts)
+	reqBody := c.buildRequest(ctx, messages, opts)
 	reqBody.Stream = true
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
@@ -250,7 +261,7 @@ func isAnthropicVersionedBaseURL(baseURL string) bool {
 	return strings.HasSuffix(path, "/v1") || strings.HasSuffix(path, "/v1beta")
 }
 
-func (c *AnthropicChat) buildRequest(messages []Message, opts *ChatOptions) anthropicRequest {
+func (c *AnthropicChat) buildRequest(_ context.Context, messages []Message, opts *ChatOptions) anthropicRequest {
 	req := anthropicRequest{
 		Model:     c.modelName,
 		MaxTokens: 1024,
@@ -292,7 +303,30 @@ func (c *AnthropicChat) buildRequest(messages []Message, opts *ChatOptions) anth
 			req.Messages = append(req.Messages, anthropicMessage{Role: "user", Content: content})
 		}
 	}
-	req.System = strings.Join(systemParts, "\n\n")
+	systemText := strings.Join(systemParts, "\n\n")
+	retention := resolveCacheRetention(opts)
+	marker := cacheControlFor(retention, "1h")
+	if marker == nil {
+		req.System = systemText
+		return req
+	}
+	if systemText != "" {
+		req.System = []anthropicContentBlock{{
+			Type:         "text",
+			Text:         systemText,
+			CacheControl: &anthropicCacheControl{Type: marker.Type, TTL: marker.TTL},
+		}}
+	}
+	if len(req.Messages) > 0 {
+		last := &req.Messages[len(req.Messages)-1]
+		if text, ok := last.Content.(string); ok && text != "" {
+			last.Content = []anthropicContentBlock{{
+				Type:         "text",
+				Text:         text,
+				CacheControl: &anthropicCacheControl{Type: marker.Type, TTL: marker.TTL},
+			}}
+		}
+	}
 	return req
 }
 

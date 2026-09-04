@@ -115,6 +115,16 @@ func (h *cubeRemoteHandle) Metadata() map[string]string {
 	return cloneMetadata(h.metadata)
 }
 
+// TrafficAccessToken implements RemoteInboundTokenCarrier. Cube issues this
+// only at create time and never repeats it on connect or resume, so the
+// lifecycle has to persist it alongside the binding.
+func (h *cubeRemoteHandle) TrafficAccessToken() string {
+	if h == nil || h.sb == nil {
+		return ""
+	}
+	return h.sb.TrafficAccessToken
+}
+
 // --- RemoteSandboxClient ------------------------------------------------------
 
 func (c *CubeRemoteClient) Provider() RemoteProvider { return SandboxTypeCube }
@@ -458,33 +468,18 @@ func (c *CubeRemoteClient) Create(
 			nil,
 		)
 	}
-	// Cube honours two independent switches for outbound reachability and
-	// both must be on for "curl https://example.com" to work from inside
-	// the VM:
-	//
-	//   * AllowInternetAccess (top-level, cluster egress switch): when
-	//     nil the SDK omits the field and the server falls back to the
-	//     template's default. Setting it explicitly makes the intent
-	//     obvious to anyone reading a captured payload and keeps
-	//     behaviour identical when the template default flips.
-	//   * Network.AllowPublicTraffic (per-sandbox routing switch): tells
-	//     CubeProxy to attach the public-egress interface to this MicroVM.
-	//     Without it the VM has no outbound route regardless of the
-	//     cluster-level allow.
-	//
-	// Callers can override either switch via cubeCreateRequest.Network.
-	// The permissive (both on) defaults preserve the pre-refactor
-	// behaviour for callers that leave the policy unset.
-	//
-	// See docs/guide/network-policy.md ("示例 7: 混合 L3 allow 和 L7 rules").
 	network := request.Network
 	if network.AllowInternetAccess == nil {
 		defaultOn := true
 		network.AllowInternetAccess = &defaultOn
 	}
+	// Deliberately the opposite of Cube's own default. Cube leaves the
+	// sandbox URL reachable by anyone who knows the ID; WeKnora closes it and
+	// relies on the per-sandbox traffic token, which the SDK attaches to
+	// data-plane requests for us. Do not change this to true.
 	if network.AllowPublicTraffic == nil {
-		defaultOn := true
-		network.AllowPublicTraffic = &defaultOn
+		defaultClosed := false
+		network.AllowPublicTraffic = &defaultClosed
 	}
 	opts := cubesandbox.CreateOptions{
 		TemplateID:          request.TemplateID,
@@ -496,14 +491,22 @@ func (c *CubeRemoteClient) Create(
 			AllowPublicTraffic: network.AllowPublicTraffic,
 			AllowOut:           append([]string(nil), network.AllowOut...),
 			DenyOut:            append([]string(nil), network.DenyOut...),
+			Rules:              toCubeEgressRules(network.CubeRules),
 		},
 	}
+	// The SDK omits allowInternetAccess for any non-false value, in which
+	// case the server falls back to the template's default. Keep the
+	// adapter's provider-positive default explicit on the wire.
+	if *network.AllowInternetAccess {
+		opts.Extra = map[string]any{"allowInternetAccess": true}
+	}
 	if action != "" {
-		opts.Extra = map[string]any{
-			"lifecycle": map[string]any{
-				"onTimeout":  string(action),
-				"autoResume": autoResume,
-			},
+		if opts.Extra == nil {
+			opts.Extra = make(map[string]any)
+		}
+		opts.Extra["lifecycle"] = map[string]any{
+			"onTimeout":  string(action),
+			"autoResume": autoResume,
 		}
 	}
 	sb, err := c.client.Create(ctx, opts)
@@ -522,9 +525,10 @@ func (c *CubeRemoteClient) Create(
 
 func (c *CubeRemoteClient) Connect(
 	ctx context.Context,
-	sandboxID string,
+	request RemoteConnectRequest,
 ) (RemoteSandboxHandle, error) {
-	if strings.TrimSpace(sandboxID) == "" {
+	sandboxID := strings.TrimSpace(request.SandboxID)
+	if sandboxID == "" {
 		return nil, cubeInvalidRequest("Connect", "sandbox ID is required", nil)
 	}
 	sb, err := c.client.Connect(ctx, sandboxID)
@@ -536,6 +540,11 @@ func (c *CubeRemoteClient) Connect(
 			SandboxTypeCube, "Connect", RemoteErrorKindInternal,
 			"cube returned an empty sandbox handle", nil,
 		)
+	}
+	// Cube does not repeat the traffic token on connect, so without this the
+	// SDK would stop sending the header and every exec would 403.
+	if sb.TrafficAccessToken == "" {
+		sb.TrafficAccessToken = request.TrafficAccessToken
 	}
 	return &cubeRemoteHandle{sb: sb}, nil
 }
@@ -1200,9 +1209,42 @@ func cubeCredentialPresence(value string) string {
 	return "present"
 }
 
+// toCubeEgressRules maps the neutral L7 rules onto the SDK's shape. Deny rules
+// are forwarded too: sending them is what makes the target reachable by
+// CubeEgress, which is the only component that can answer a request-level 403.
+func toCubeEgressRules(rules []RemoteCubeEgressRule) []cubesandbox.Rule {
+	if len(rules) == 0 {
+		return nil
+	}
+	out := make([]cubesandbox.Rule, 0, len(rules))
+	for _, rule := range rules {
+		converted := cubesandbox.Rule{
+			Name: rule.Name,
+			Match: cubesandbox.Match{
+				SNI:    rule.SNI,
+				Host:   rule.Host,
+				Method: append([]string(nil), rule.Methods...),
+				Path:   rule.Path,
+				Scheme: rule.Scheme,
+			},
+			Action: cubesandbox.Action{Allow: rule.Allow, Audit: rule.Audit},
+		}
+		for _, inject := range rule.Inject {
+			converted.Action.Inject = append(converted.Action.Inject, cubesandbox.Inject{
+				Header: inject.Header,
+				Secret: inject.Secret,
+				Format: inject.Format,
+			})
+		}
+		out = append(out, converted)
+	}
+	return out
+}
+
 var (
-	_ RemoteSandboxClient   = (*CubeRemoteClient)(nil)
-	_ RemoteSnapshotManager = (*CubeRemoteClient)(nil)
-	_ RemoteTemplateCatalog = (*CubeRemoteClient)(nil)
-	_ RemoteSandboxHandle   = (*cubeRemoteHandle)(nil)
+	_ RemoteSandboxClient       = (*CubeRemoteClient)(nil)
+	_ RemoteSnapshotManager     = (*CubeRemoteClient)(nil)
+	_ RemoteTemplateCatalog     = (*CubeRemoteClient)(nil)
+	_ RemoteSandboxHandle       = (*cubeRemoteHandle)(nil)
+	_ RemoteInboundTokenCarrier = (*cubeRemoteHandle)(nil)
 )

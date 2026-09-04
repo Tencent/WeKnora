@@ -235,17 +235,27 @@ func TestAppendToolResults_AddsDynamicImageRequirementToCustomSystemPrompt(t *te
 	}
 
 	out := engine.appendToolResults(prior, step)
-	require.Len(t, out, 4)
-	assert.Contains(t, out[0].Content, "Custom agent prompt.")
-	assert.Contains(t, out[0].Content, agentRetrievedImageRequirementMarker)
-	assert.Contains(t, out[0].Content, "MUST include at least one relevant Markdown image")
-	assert.Contains(t, out[0].Content, "ASCII half-width parentheses")
+	require.Len(t, out, 5)
+	assert.Equal(t, "Custom agent prompt.", out[0].Content)
+	assert.NotContains(t, out[0].Content, agentRetrievedImageRequirementMarker)
 	assert.Equal(t, "tool", out[3].Role)
 	assert.Contains(t, out[3].Content, "![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)")
+	assert.Equal(t, "user", out[4].Role)
+	assert.Contains(t, out[4].Content, agentRetrievedImageRequirementMarker)
+	assert.Contains(t, out[4].Content, "MUST include at least one relevant Markdown image")
+	assert.Contains(t, out[4].Content, "ASCII half-width parentheses")
 
-	// A later image-bearing step must not duplicate the system requirement.
+	// A later image-bearing step must not duplicate the requirement.
 	out = engine.appendToolResults(out, step)
-	assert.Equal(t, 1, strings.Count(out[0].Content, agentRetrievedImageRequirementMarker))
+	assert.Equal(t, 1, countImageRequirementMarkers(out))
+}
+
+func countImageRequirementMarkers(messages []chat.Message) int {
+	n := 0
+	for _, message := range messages {
+		n += strings.Count(message.Content, agentRetrievedImageRequirementMarker)
+	}
+	return n
 }
 
 func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {

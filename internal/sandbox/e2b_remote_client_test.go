@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/Tencent/WeKnora/internal/types"
 	e2b "github.com/matiasinsaurralde/go-e2b"
 	"github.com/stretchr/testify/require"
 )
@@ -62,6 +63,7 @@ type e2bMockServer struct {
 	snapshotCreateBody      map[string]any
 	sandboxes               map[string]map[string]any // sandboxID -> SandboxInfo JSON
 	snapshots               map[string]map[string]any // snapshotID -> SnapshotInfo JSON
+	trafficAccessToken      string
 }
 
 func newE2BMockServer(t *testing.T) *e2bMockServer {
@@ -92,12 +94,19 @@ func (m *e2bMockServer) handle(w http.ResponseWriter, r *http.Request) {
 			"startedAt":   time.Now().UTC().Format(time.RFC3339),
 			"metadata":    m.createBody["metadata"],
 		}
+		m.mu.Lock()
+		trafficAccessToken := m.trafficAccessToken
+		m.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		response := map[string]any{
 			"sandboxID":       id,
 			"envdAccessToken": "token-" + id,
-		})
+		}
+		if trafficAccessToken != "" {
+			response["trafficAccessToken"] = trafficAccessToken
+		}
+		_ = json.NewEncoder(w).Encode(response)
 
 	case r.URL.Path == "/sandboxes" && r.Method == http.MethodGet:
 		m.listCount.Add(1)
@@ -363,7 +372,7 @@ func TestE2BRemoteClientProviderAndCapabilities(t *testing.T) {
 		SupportsTimeoutRefresh:        true,
 		SupportsFilesystemEnumeration: true,
 		SupportsSnapshots:             true,
-		SupportsVolumes:               true,
+		SupportsVolumes:               false,
 	}, client.Capabilities())
 }
 
@@ -790,15 +799,14 @@ func TestE2BRemoteClientCreateWritesMetadataAndPauseLifecycle(t *testing.T) {
 	require.Equal(t, true, mock.createBody["autoPause"])
 	require.Equal(t, true, mock.createBody["autoPauseMemory"])
 	require.Equal(t, map[string]any{"enabled": true}, mock.createBody["autoResume"])
-	// Network defaults match the Cube adapter: public traffic on, internet
-	// egress on, and Secure=true so the response carries an envd access
-	// token. Regressing these keeps `pip install` broken silently, so we
-	// pin the wire payload here.
+	// Network defaults: egress on so `pip install` keeps working, inbound
+	// CLOSED so the sandbox URL is not reachable by anyone holding the ID.
+	// The inbound half is intentionally the opposite of E2B's own default.
 	require.Equal(t, true, mock.createBody["secure"])
 	require.Equal(t, true, mock.createBody["allow_internet_access"])
 	networkPayload, ok := mock.createBody["network"].(map[string]any)
 	require.True(t, ok, "network payload missing: %#v", mock.createBody["network"])
-	require.Equal(t, true, networkPayload["allowPublicTraffic"])
+	require.Equal(t, false, networkPayload["allowPublicTraffic"])
 
 }
 
@@ -850,21 +858,112 @@ func TestE2BRemoteClientCreateForwardsNetworkPolicy(t *testing.T) {
 			AllowPublicTraffic:  &privateSandbox,
 			AllowOut:            []string{"*.example.com"},
 			DenyOut:             []string{"0.0.0.0/0"},
+			E2BHostRules: []RemoteE2BHostRule{{
+				Host:    "api.example.com",
+				Headers: map[string]string{"X-Environment": "production"},
+			}},
 		},
 	})
 	require.NoError(t, err)
 
-	// Top-level allow_internet_access flips off as the caller requested,
-	// AllowPublicTraffic hides the sandbox behind a traffic access token,
-	// and the L3/L4 allow/deny lists both reach the server. Regressing any
-	// of these silently opens (or closes) the sandbox's network policy in
-	// a way callers cannot observe from unit tests, so pin the wire.
 	require.Equal(t, false, mock.createBody["allow_internet_access"])
 	networkPayload, ok := mock.createBody["network"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, false, networkPayload["allowPublicTraffic"])
 	require.Equal(t, []any{"*.example.com"}, networkPayload["allowOut"])
 	require.Equal(t, []any{"0.0.0.0/0"}, networkPayload["denyOut"])
+
+	rules, ok := networkPayload["rules"].(map[string]any)
+	require.True(t, ok, "rules payload missing: %#v", networkPayload["rules"])
+	hostRules := rules["api.example.com"].([]any)
+	require.Len(t, hostRules, 1)
+	transform := hostRules[0].(map[string]any)["transform"].(map[string]any)
+	headers := transform["headers"].(map[string]any)
+	require.Equal(t, "production", headers["X-Environment"])
+}
+
+// Regression: a stored "deny by default + domain allowlist" policy used to
+// reach E2B as allow_internet_access=false with an empty denyOut, and the
+// provider answered
+//
+//	400 When specifying allowed domains in allow out, you must include
+//	'ALL_TRAFFIC' in deny out to block all other traffic.
+//
+// so every session on that config failed at create time. The existing wire
+// test could not catch it because it hand-built the resolved policy with the
+// sentinel already in place; this one starts from the stored shape and goes
+// through the real resolver.
+func TestE2BRemoteClientCreateSendsDenyAllForStoredDenyByDefault(t *testing.T) {
+	tenantCfg := &types.TenantSandboxConfig{
+		SandboxType: "e2b",
+		E2B: &types.E2BSandboxConfig{
+			APIKey:     "key-test",
+			TemplateID: "template-a",
+		},
+		Network: &types.SandboxNetworkPolicy{
+			DenyEgressByDefault: true,
+			AllowOut:            []string{"*.example.com"},
+		},
+	}
+	effective, err := ResolveEffectiveConfig(tenantCfg, DefaultConfig())
+	require.NoError(t, err)
+
+	mock := newE2BMockServer(t)
+	client := newTestE2BRemoteClient(t, mock)
+
+	_, err = client.Create(context.Background(), RemoteCreateRequest{
+		TemplateID: "template-a",
+		Network:    effective.Network,
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, false, mock.createBody["allow_internet_access"])
+	networkPayload := mock.createBody["network"].(map[string]any)
+	require.Equal(t, []any{"*.example.com"}, networkPayload["allowOut"])
+	require.Equal(t, []any{"0.0.0.0/0"}, networkPayload["denyOut"],
+		"E2B refuses a domain allowlist without an explicit deny-all")
+}
+
+func TestE2BRemoteClientCreateOmitsRulesWhenNoneConfigured(t *testing.T) {
+	mock := newE2BMockServer(t)
+	client := newTestE2BRemoteClient(t, mock)
+
+	_, err := client.Create(context.Background(), RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+
+	networkPayload := mock.createBody["network"].(map[string]any)
+	require.NotContains(t, networkPayload, "rules")
+}
+
+// Same deliberate inversion as the Cube adapter: unspecified means inbound
+// closed. E2B additionally requires Secure=true for this, which the adapter
+// already pins.
+func TestE2BRemoteClientCreateDefaultsInboundClosed(t *testing.T) {
+	mock := newE2BMockServer(t)
+	client := newTestE2BRemoteClient(t, mock)
+
+	_, err := client.Create(context.Background(), RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+
+	require.Equal(t, true, mock.createBody["secure"])
+	require.Equal(t, true, mock.createBody["allow_internet_access"])
+	networkPayload := mock.createBody["network"].(map[string]any)
+	require.Equal(t, false, networkPayload["allowPublicTraffic"])
+}
+
+func TestE2BRemoteHandleExposesTrafficAccessToken(t *testing.T) {
+	mock := newE2BMockServer(t)
+	mock.mu.Lock()
+	mock.trafficAccessToken = "traffic-token"
+	mock.mu.Unlock()
+	client := newTestE2BRemoteClient(t, mock)
+
+	handle, err := client.Create(context.Background(), RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+
+	carrier, ok := handle.(RemoteInboundTokenCarrier)
+	require.True(t, ok, "e2b handle must expose the inbound token for the binding")
+	require.Equal(t, "traffic-token", carrier.TrafficAccessToken())
 }
 
 func TestE2BRemoteClientCreatePreservesTimeoutModes(t *testing.T) {
@@ -989,7 +1088,7 @@ func TestE2BRemoteClientConnectAcrossClients(t *testing.T) {
 	mock.sandboxes[handle.ID()]["state"] = "paused"
 
 	second := newTestE2BRemoteClient(t, mock)
-	reconnected, err := second.Connect(context.Background(), handle.ID())
+	reconnected, err := second.Connect(context.Background(), RemoteConnectRequest{SandboxID: handle.ID()})
 	require.NoError(t, err)
 	require.Equal(t, handle.ID(), reconnected.ID())
 	require.Nil(t, reconnected.Metadata())

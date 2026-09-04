@@ -283,6 +283,12 @@ type Config struct {
 	// EnvVars are additional environment variables to set for the sandbox.
 	EnvVars map[string]string
 
+	// Network is the outbound/inbound policy every sandbox built from this
+	// config is created with. DefaultConfig and ResolveEffectiveConfig fully
+	// specify it: leaving it nil would let adapters use provider defaults,
+	// which expose inbound traffic publicly.
+	Network RemoteNetworkPolicy
+
 	// CubeAPIURL is the base URL of the CubeAPI (E2B-compatible) endpoint.
 	// Only used when Type == SandboxTypeCube. Example: "http://127.0.0.1:33000".
 	CubeAPIURL string
@@ -358,6 +364,7 @@ func DefaultConfig() *Config {
 		MaxCPU:          DefaultCPULimit,
 		CubeSandboxTTL:  DefaultCubeSandboxTTL,
 		CubeHTTPTimeout: DefaultCubeHTTPTimeout,
+		Network:         resolveNetworkPolicy(nil),
 	}
 }
 

@@ -35,6 +35,8 @@ type cubeMockServer struct {
 	snapshotStuckPagination bool // always return the same non-empty next token
 	snapshotDeleteFailWith  int  // when set, DELETE /templates/:id returns this status
 	snapshotCreateBody      map[string]any
+	trafficAccessToken      string
+	connectTrafficToken     string
 	executor                func(sandboxID, cmd string, args []string) (stdout, stderr string, exitCode int)
 	files                   map[string]map[string][]byte // sandboxID → path → content
 	cmdHistory              []commandRecord
@@ -130,32 +132,42 @@ func (m *cubeMockServer) handleCreate(w http.ResponseWriter, r *http.Request) {
 		"startedAt":   time.Now().UTC().Format(time.RFC3339),
 	}
 	m.files[id] = map[string][]byte{}
+	trafficAccessToken := m.trafficAccessToken
 	m.mu.Unlock()
 
-	writeJSON(w, http.StatusCreated, map[string]any{
+	response := map[string]any{
 		"sandboxID":   id,
 		"clientID":    "client-" + id,
 		"envdVersion": "test",
 		"domain":      "cube.app",
-	})
+	}
+	if trafficAccessToken != "" {
+		response["trafficAccessToken"] = trafficAccessToken
+	}
+	writeJSON(w, http.StatusCreated, response)
 }
 
 func (m *cubeMockServer) handleConnect(w http.ResponseWriter, r *http.Request) {
 	id := extractSandboxID(r.URL.Path, "/connect")
 	m.mu.Lock()
 	_, ok := m.sandboxes[id]
+	connectTrafficToken := m.connectTrafficToken
 	m.mu.Unlock()
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
 		writeJSON(w, http.StatusNotFound, map[string]string{"message": "sandbox not found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"sandboxID":   id,
 		"clientID":    "client-" + id,
 		"envdVersion": "test",
 		"domain":      "cube.app",
-	})
+	}
+	if connectTrafficToken != "" {
+		response["trafficAccessToken"] = connectTrafficToken
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (m *cubeMockServer) handleGetInfo(w http.ResponseWriter, r *http.Request) {

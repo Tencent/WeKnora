@@ -9,6 +9,7 @@ import (
 
 	cubesandbox "github.com/tencentcloud/CubeSandbox/sdk/go"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -160,20 +161,69 @@ func TestCubeRemoteClientCreateWritesLifecyclePayload(t *testing.T) {
 	}, body["lifecycle"])
 }
 
+// Counterpart to the E2B test of the same name. resolveNetworkPolicy
+// materialises DenyEgressByDefault into an explicit deny-all entry, and both
+// adapters must put it on the wire — otherwise the two providers drift and only
+// one of them enforces what the admin ticked.
+func TestCubeRemoteClientCreateSendsDenyAllForStoredDenyByDefault(t *testing.T) {
+	tenantCfg := completeCubeTenantConfig()
+	tenantCfg.Network = &types.SandboxNetworkPolicy{
+		DenyEgressByDefault: true,
+		AllowOut:            []string{"*.example.com"},
+	}
+	effective, err := ResolveEffectiveConfig(tenantCfg, DefaultConfig())
+	require.NoError(t, err)
+
+	mock := newCubeMockServer(t)
+	client := newTestCubeRemoteClient(t, mock)
+
+	_, err = client.Create(context.Background(), RemoteCreateRequest{
+		TemplateID: "template-a",
+		Network:    effective.Network,
+	})
+	require.NoError(t, err)
+
+	mock.mu.Lock()
+	body := mock.createBody
+	mock.mu.Unlock()
+	require.Equal(t, false, body["allowInternetAccess"])
+	networkPayload := body["network"].(map[string]any)
+	require.Equal(t, []any{"*.example.com"}, networkPayload["allowOut"])
+	require.Equal(t, []any{"0.0.0.0/0"}, networkPayload["denyOut"])
+}
+
 func TestCubeRemoteClientCreateForwardsNetworkPolicy(t *testing.T) {
 	mock := newCubeMockServer(t)
-	client, err := NewCubeRemoteClient(testConfig(t, mock))
-	require.NoError(t, err)
+	client := newTestCubeRemoteClient(t, mock)
 	deny := false
 	privateSandbox := false
 
-	_, err = client.Create(context.Background(), RemoteCreateRequest{
+	_, err := client.Create(context.Background(), RemoteCreateRequest{
 		TemplateID: "template-a",
 		Network: RemoteNetworkPolicy{
 			AllowInternetAccess: &deny,
 			AllowPublicTraffic:  &privateSandbox,
 			AllowOut:            []string{"*.example.com"},
 			DenyOut:             []string{"0.0.0.0/0"},
+			CubeRules: []RemoteCubeEgressRule{{
+				Name:    "allow-payment-api",
+				Scheme:  "https",
+				SNI:     "pay.example.com",
+				Host:    "pay.example.com",
+				Methods: []string{"POST"},
+				Path:    "/api/payments/*",
+				Allow:   true,
+				Audit:   "full",
+				Inject: []RemoteHeaderInject{{
+					Header: "Authorization",
+					Secret: "tok",
+					Format: "Bearer ${SECRET}",
+				}},
+			}, {
+				Name:  "deny-uploads",
+				SNI:   "uploads.example.com",
+				Allow: false,
+			}},
 		},
 	})
 	require.NoError(t, err)
@@ -187,6 +237,109 @@ func TestCubeRemoteClientCreateForwardsNetworkPolicy(t *testing.T) {
 	require.Equal(t, false, networkPayload["allowPublicTraffic"])
 	require.Equal(t, []any{"*.example.com"}, networkPayload["allowOut"])
 	require.Equal(t, []any{"0.0.0.0/0"}, networkPayload["denyOut"])
+
+	rules, ok := networkPayload["rules"].([]any)
+	require.True(t, ok, "rules payload missing: %#v", networkPayload["rules"])
+	require.Len(t, rules, 2)
+
+	first := rules[0].(map[string]any)
+	require.Equal(t, "allow-payment-api", first["name"])
+	match := first["match"].(map[string]any)
+	require.Equal(t, "https", match["scheme"])
+	require.Equal(t, "pay.example.com", match["sni"])
+	require.Equal(t, "pay.example.com", match["host"])
+	require.Equal(t, []any{"POST"}, match["method"])
+	require.Equal(t, "/api/payments/*", match["path"])
+	action := first["action"].(map[string]any)
+	require.Equal(t, true, action["allow"])
+	require.Equal(t, "full", action["audit"])
+	inject := action["inject"].([]any)[0].(map[string]any)
+	require.Equal(t, "Authorization", inject["header"])
+	require.Equal(t, "tok", inject["secret"])
+	require.Equal(t, "Bearer ${SECRET}", inject["format"])
+
+	// A deny rule must still be sent: it is what gets the target into
+	// CubeEgress so the proxy can answer 403 instead of the network dropping
+	// the packet.
+	second := rules[1].(map[string]any)
+	require.Equal(t, false, second["action"].(map[string]any)["allow"])
+}
+
+// WeKnora's default deliberately differs from Cube's: an unspecified policy
+// closes inbound access, because "anyone who knows the sandbox ID" used to be
+// the only barrier in front of the sandbox URL. Egress stays open so skill
+// installs keep working.
+func TestCubeRemoteClientCreateDefaultsInboundClosed(t *testing.T) {
+	mock := newCubeMockServer(t)
+	client := newTestCubeRemoteClient(t, mock)
+
+	_, err := client.Create(context.Background(), RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+
+	mock.mu.Lock()
+	body := mock.createBody
+	mock.mu.Unlock()
+	require.Equal(t, true, body["allowInternetAccess"])
+	networkPayload := body["network"].(map[string]any)
+	require.Equal(t, false, networkPayload["allowPublicTraffic"])
+	require.NotContains(t, networkPayload, "rules")
+}
+
+func TestCubeRemoteHandleExposesTrafficAccessToken(t *testing.T) {
+	mock := newCubeMockServer(t)
+	mock.trafficAccessToken = "traffic-token"
+	client := newTestCubeRemoteClient(t, mock)
+
+	handle, err := client.Create(context.Background(), RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+
+	require.Equal(t, "traffic-token", InboundTokenOf(handle))
+	require.Empty(t, InboundTokenOf(
+		&contractHandle{id: "e2b-1", provider: SandboxTypeE2B},
+	))
+}
+
+// The provider issues the traffic token once, at create time. Everything that
+// re-attaches later — auto-resume, a WeKnora restart, an artifact download —
+// has to put it back or every data-plane call answers 403.
+func TestCubeRemoteClientConnectRestoresTrafficAccessToken(t *testing.T) {
+	mock := newCubeMockServer(t)
+	// Deliberately empty: Cube does not repeat the token on connect.
+	mock.trafficAccessToken = ""
+	client := newTestCubeRemoteClient(t, mock)
+	created, err := client.Create(context.Background(), RemoteCreateRequest{
+		TemplateID: "template-a",
+	})
+	require.NoError(t, err)
+
+	handle, err := client.Connect(context.Background(), RemoteConnectRequest{
+		SandboxID:          created.ID(),
+		TrafficAccessToken: "recovered-token",
+	})
+	require.NoError(t, err)
+
+	carrier, ok := handle.(RemoteInboundTokenCarrier)
+	require.True(t, ok)
+	require.Equal(t, "recovered-token", carrier.TrafficAccessToken())
+}
+
+// A provider that does return one wins: it is fresher than our copy.
+func TestCubeRemoteClientConnectKeepsProviderToken(t *testing.T) {
+	mock := newCubeMockServer(t)
+	client := newTestCubeRemoteClient(t, mock)
+	created, err := client.Create(context.Background(), RemoteCreateRequest{
+		TemplateID: "template-a",
+	})
+	require.NoError(t, err)
+	mock.connectTrafficToken = "provider-token"
+
+	handle, err := client.Connect(context.Background(), RemoteConnectRequest{
+		SandboxID:          created.ID(),
+		TrafficAccessToken: "recovered-token",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "provider-token",
+		handle.(RemoteInboundTokenCarrier).TrafficAccessToken())
 }
 
 func TestCubeRemoteClientCreatePreservesTimeoutModes(t *testing.T) {
@@ -252,6 +405,7 @@ func TestCubeRemoteClientCreatePreservesTimeoutModes(t *testing.T) {
 
 func TestCubeRemoteClientLifecycleRoundTrip(t *testing.T) {
 	mock := newCubeMockServer(t)
+	mock.trafficAccessToken = "create-only-traffic-token"
 	client := newTestCubeRemoteClient(t, mock)
 	ctx := context.Background()
 
@@ -277,9 +431,11 @@ func TestCubeRemoteClientLifecycleRoundTrip(t *testing.T) {
 	require.Len(t, list, 1)
 	require.Equal(t, handle.ID(), list[0].ID)
 
-	reconnected, err := client.Connect(ctx, handle.ID())
+	reconnected, err := client.Connect(ctx, RemoteConnectRequest{SandboxID: handle.ID()})
 	require.NoError(t, err)
 	require.Equal(t, handle.ID(), reconnected.ID())
+	require.Empty(t, InboundTokenOf(reconnected),
+		"Cube connect responses do not repeat the create-time traffic token")
 
 	require.NoError(t, client.Delete(ctx, handle.ID()))
 	require.Equal(t, int32(1), mock.killCount.Load())

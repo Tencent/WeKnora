@@ -105,6 +105,7 @@ Now generate the final answer:`, query, imageRequirement)
 			Temperature:         e.config.Temperature,
 			MaxTokens:           budget,
 			MaxCompletionTokens: budget,
+			PromptCacheKey:      sessionID,
 		}, // Thinking disabled for final answer synthesis
 		func(chunk *types.StreamResponse, fullContent string) {
 			// Defensive filter: only emit answer content, skip thinking chunks

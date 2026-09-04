@@ -552,7 +552,10 @@ definitions:
       parser_engine_rules:
         description: |-
           ParserEngineRules configures which parser engine to use for each file type.
-          When empty, the builtin engine is used for all types.
+          When empty, DefaultParserEngine is used (builtin/simple routing, except
+          types that only a specific engine can parse: ppt/pptx fall back to
+          markitdown). A linked anydoc binding is preferred for every type it
+          converts.
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule'
         type: array
@@ -689,6 +692,46 @@ definitions:
     properties:
       weknoracloud:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WeKnoraCloudCredentials'
+    type: object
+  github_com_Tencent_WeKnora_internal_types.CubeEgressRule:
+    properties:
+      audit:
+        description: Audit is none | metadata | full. Empty uses the server default.
+        type: string
+      deny:
+        description: |-
+          Deny inverts the action, which defaults to allow. A deny rule still
+          needs Host or SNI: the target has to reach CubeEgress for it to answer
+          with a request-level 403 instead of the network layer dropping it.
+        type: boolean
+      host:
+        type: string
+      inject:
+        description: Inject adds credential headers on allowed HTTPS requests.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.CubeHeaderInject'
+        type: array
+      methods:
+        items:
+          type: string
+        type: array
+      name:
+        type: string
+      path:
+        type: string
+      scheme:
+        type: string
+      sni:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.CubeHeaderInject:
+    properties:
+      format:
+        type: string
+      header:
+        type: string
+      secret:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.CubeSandboxConfig:
     properties:
@@ -871,12 +914,17 @@ definitions:
         description: Timeout for a single LLM call in seconds (0 = use global default)
         type: integer
       max_completion_tokens:
-        description: Maximum completion tokens (only for normal mode)
+        description: |-
+          Maximum completion tokens. Quick-answer uses this for the RAG answer.
+          Smart-reasoning ReAct rounds send this value as-is (zero becomes
+          DefaultMaxCompletionTokens at call time: 4096, or 24576 with a sandbox).
         type: integer
       max_iterations:
         description: |-
           ===== Agent Mode Settings =====
-          Maximum ReAct iterations. -1 is unlimited; 0 is unset (default applied).
+          Maximum iterations for the ReAct loop. Zero is unset (filled with a
+          default). A negative value is unlimited: the loop runs until the model
+          stops, the user cancels, or another guard fires.
         type: integer
       mcp_auth_wait_timeout:
         description: |-
@@ -1146,6 +1194,18 @@ definitions:
         description: |-
           TLSCertPath is a directory on the WeKnora host containing ca.pem,
           cert.pem and key.pem. Required when Host is a TCP endpoint.
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.E2BHostRule:
+    properties:
+      headers:
+        additionalProperties:
+          type: string
+        description: |-
+          Headers values are credentials and are encrypted at rest; names stay
+          readable so operators can see which headers are injected.
+        type: object
+      host:
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.E2BSandboxConfig:
@@ -2418,6 +2478,16 @@ definitions:
         type: string
       base_url:
         type: string
+      context_window:
+        description: |-
+          ContextWindow is the model's total context window in tokens and
+          MaxOutputTokens the most it emits in one response. Both are provider
+          facts the agent cannot discover but has to act on: the context window is
+          what decides when conversation history gets compacted, and assuming a
+          window larger than the real one means compaction never fires and the
+          provider rejects the request mid-conversation instead. 0 means unknown,
+          which falls back to DefaultMaxContextTokens.
+        type: integer
       custom_headers:
         additionalProperties:
           type: string
@@ -2443,6 +2513,8 @@ definitions:
           across all replicas. 0 (the default) means "fall back to the
           process-wide model.max_concurrency". Interactive user-facing calls are
           never gated. Only chat / vlm / embedding honour this (see limiter.Gate).
+        type: integer
+      max_output_tokens:
         type: integer
       parameter_size:
         description: Ollama model parameter size (e.g., "7B", "13B", "70B")
@@ -2483,6 +2555,7 @@ definitions:
       ModelSourceGemini: Gemini model
       ModelSourceHunyuan: Hunyuan model
       ModelSourceJina: Jina AI model
+      ModelSourceLiteLLM: LiteLLM proxy model
       ModelSourceLocal: Local model
       ModelSourceMimo: Mimo model
       ModelSourceMinimax: Minimax mode
@@ -2490,7 +2563,6 @@ definitions:
       ModelSourceNvidia: NVIDIA model
       ModelSourceOpenAI: OpenAI model
       ModelSourceOpenRouter: OpenRouter model
-      ModelSourceLiteLLM: LiteLLM proxy model
       ModelSourceRemote: Remote model
       ModelSourceRequesty: Requesty model
       ModelSourceSiliconFlow: SiliconFlow model
@@ -3185,6 +3257,50 @@ definitions:
       use_ssl:
         type: boolean
     type: object
+  github_com_Tencent_WeKnora_internal_types.SandboxNetworkPolicy:
+    properties:
+      allow_out:
+        description: |-
+          AllowOut accepts IPv4, IPv4 CIDR, a DNS name, or a single-label
+          wildcard such as "*.example.com". Domain entries are only meaningful
+          together with a deny-all; see ValidateSandboxNetworkPolicy.
+        items:
+          type: string
+        type: array
+      allow_public_inbound:
+        description: |-
+          AllowPublicInbound exposes the sandbox's public URL without a
+          credential. false requires every inbound request to carry the
+          per-sandbox traffic access token.
+        type: boolean
+      cube_rules:
+        description: |-
+          CubeRules are validated whenever present and consumed only by the Cube
+          provider adapter.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.CubeEgressRule'
+        type: array
+      deny_egress_by_default:
+        description: |-
+          DenyEgressByDefault installs a 0.0.0.0/0 deny-all, after which only
+          AllowOut (and L7 rule targets) can reach the network. false allows
+          public egress, which is what skill installs need.
+        type: boolean
+      deny_out:
+        description: |-
+          DenyOut accepts IPv4 and IPv4 CIDR only. Neither provider can deny a
+          domain: denial is a pure longest-prefix match on the destination IP.
+        items:
+          type: string
+        type: array
+      e2b_host_rules:
+        description: |-
+          E2BHostRules are validated whenever present and consumed only by the E2B
+          provider adapter.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.E2BHostRule'
+        type: array
+    type: object
   github_com_Tencent_WeKnora_internal_types.SearchParams:
     properties:
       disable_keywords_match:
@@ -3834,6 +3950,14 @@ definitions:
           become visible to all scripts running in the tenant's\nsandboxes — do not
           place secrets here that scripts must not access."
         type: object
+      network:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SandboxNetworkPolicy'
+        description: |-
+          Network is the outbound/inbound network policy applied to every sandbox
+          created from this config — chat sessions, skill installs and deep
+          connectivity probes alike. nil and the zero value mean the same thing:
+          outbound egress allowed, inbound public access closed.
       sandbox_type:
         description: SandboxType is cube, e2b, or docker; disabled is the hidden policy
           row.
@@ -14228,6 +14352,50 @@ paths:
       summary: Retry a skill install
       tags:
       - SandboxConfig
+  /sandbox-configs/{id}/skills/{skillId}/stop:
+    post:
+      description: Abort an in-flight install so the operator can retry or uninstall.
+        After a process restart the row may still say installing with no live process;
+        this rewrites it immediately instead of waiting for the stuck-run reaper.
+        Removal is not stopped.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skillId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Stopped skill
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Skill is not installing
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Skill not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Stop a skill install
+      tags:
+      - SandboxConfig
   /sandbox-configs/{id}/skills/{skillId}/transcript:
     get:
       description: |-
@@ -14852,6 +15020,126 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 获取当前沙箱配置上可执行的 Skills
+      tags:
+      - Skills
+  /skills/catalog:
+    get:
+      description: Returns every skill definition in this workspace and which sandbox
+        configs it is installed on.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: List workspace skills
+      tags:
+      - Skills
+    post:
+      consumes:
+      - application/json
+      - multipart/form-data
+      description: Records a skill without installing it. Send a zip as multipart
+        field "file", or JSON {"source":"..."}.
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Add a skill to the workspace catalog
+      tags:
+      - Skills
+  /skills/catalog/{id}:
+    delete:
+      description: Refused while any sandbox still has an installation of this skill.
+      parameters:
+      - description: Catalog skill ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Delete a catalog skill
+      tags:
+      - Skills
+  /skills/catalog/{id}/files:
+    get:
+      description: Lists the stored catalog bundle. Files belong to the skill definition,
+        not a sandbox install.
+      parameters:
+      - description: Catalog skill ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: List files of a catalog skill
+      tags:
+      - Skills
+  /skills/catalog/{id}/files/content:
+    get:
+      parameters:
+      - description: Catalog skill ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill-root-relative file path
+        in: query
+        name: path
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Read one file of a catalog skill
+      tags:
+      - Skills
+  /skills/catalog/{id}/install:
+    post:
+      consumes:
+      - application/json
+      description: Runs the existing snapshot install onto each named sandbox config.
+      parameters:
+      - description: Catalog skill ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Install a catalog skill onto sandboxes
       tags:
       - Skills
   /storage-backends:
