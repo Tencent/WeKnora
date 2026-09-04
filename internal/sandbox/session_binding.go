@@ -59,6 +59,21 @@ type SessionSandboxBinding struct {
 	// since replaced. The sandbox keeps serving until the session's next
 	// resolve, which destroys and recreates it; see InvalidateByConfig.
 	StaleAt *time.Time `json:"stale_at,omitempty"`
+
+	// TrafficAccessToken is the per-sandbox inbound credential issued at
+	// create time for Cube and E2B. Inbound is always credential-required.
+	//
+	// Cube may reissue it on Connect after pause/resume; the lifecycle writes
+	// the fresh value back here. E2B issues it only at create. Either way this
+	// binding is the only place the credential survives a WeKnora restart.
+	//
+	// Stored as-is. It is a bearer credential, so the Redis instance holding
+	// these bindings must be access-controlled — it already holds the
+	// session-to-sandbox ownership anyway. Never log the binding payload.
+	//
+	// Empty for Docker (no such credential) and for bindings written before
+	// this field existed; both are valid.
+	TrafficAccessToken string `json:"traffic_access_token,omitempty"`
 }
 
 // Validate checks a binding against the current schema and authoritative key.
@@ -102,6 +117,15 @@ type SessionSandboxBindingStore interface {
 		SessionSandboxKey,
 		RemoteProvider,
 		string,
+	) (bool, error)
+	// ReplaceTrafficTokenIfMatch writes token onto the binding only while it
+	// still names expected's provider and sandbox. It patches that one field
+	// so a concurrent stale-mark cannot be wiped. Empty token is a no-op.
+	ReplaceTrafficTokenIfMatch(
+		ctx context.Context,
+		key SessionSandboxKey,
+		expected SessionSandboxBinding,
+		token string,
 	) (bool, error)
 	// WithLifecycleLock passes fn a request context carrying a separate
 	// ownership context. The ownership context survives caller cancellation
@@ -346,6 +370,40 @@ func (s *MemorySessionSandboxBindingStore) DeleteIfMatch(
 		return false, nil
 	}
 	delete(s.bindings, key)
+	return true, nil
+}
+
+// ReplaceTrafficTokenIfMatch patches the inbound credential without disturbing
+// the rest of the binding, including a concurrent StaleAt mark.
+func (s *MemorySessionSandboxBindingStore) ReplaceTrafficTokenIfMatch(
+	ctx context.Context,
+	key SessionSandboxKey,
+	expected SessionSandboxBinding,
+	token string,
+) (bool, error) {
+	if err := validateBindingMatch(key, expected.Provider, expected.SandboxID); err != nil {
+		return false, err
+	}
+	if token == "" {
+		return false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	binding, exists := s.bindings[key]
+	if !exists ||
+		binding.Provider != expected.Provider ||
+		binding.SandboxID != expected.SandboxID {
+		return false, nil
+	}
+	if binding.TrafficAccessToken == token {
+		return false, nil
+	}
+	binding.TrafficAccessToken = token
+	s.bindings[key] = binding
 	return true, nil
 }
 

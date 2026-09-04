@@ -20,6 +20,14 @@ var executeSkillScriptTool = BaseTool{
 	name: ToolExecuteSkillScript,
 	description: `Execute a script with a skill's own interpreter and dependencies.
 
+## Working Directory
+- The script runs with ` + "`/workspace`" + ` as its working directory, whichever
+  skill it belongs to. A relative path the script itself opens resolves there,
+  not inside the skill; ` + "`$WEKNORA_SKILL_DIR`" + ` is how a script reaches the
+  files installed beside it.
+- Generated files belong in ` + "`$WEKNORA_SKILL_OUTPUT_DIR`" + `, which is
+  collected for download. ` + "`/workspace/input`" + ` is read-only.
+
 ## Usage
 - ` + "`script_path`" + ` is either:
   - a path **inside the skill** (` + "`scripts/analyze.py`" + `), or
@@ -108,9 +116,18 @@ func (i *ExecuteSkillScriptInput) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("args must be a string or an array of strings: %w", err)
 	}
 
-	// A string is interpreted as a conventional space-separated command line.
-	// The tool schema continues to advertise []string, so well-formed calls are
-	// unaffected; this is only a compatibility fallback for model output.
+	// Some providers emit the array as a stringified JSON payload
+	// (e.g. "[\"--project-name\",\"X\"]"). Treat that as an array first so the
+	// model's intent is preserved; strings.Fields would otherwise split the
+	// brackets/quotes into garbage tokens and the script would see nonsense argv.
+	if err := json.Unmarshal([]byte(argsString), &i.Args); err == nil {
+		return nil
+	}
+
+	// A plain string is interpreted as a conventional space-separated command
+	// line. The tool schema continues to advertise []string, so well-formed
+	// calls are unaffected; this is only a compatibility fallback for model
+	// output.
 	i.Args = strings.Fields(argsString)
 	return nil
 }

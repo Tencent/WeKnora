@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -25,6 +26,12 @@ var skillPythonVerifier string
 // "another installer round can fix this" from "the bundle has to change", which
 // is the only distinction that decides what the install flow does next.
 const skillVerifyRepairableExit = 2
+
+// skillTreeVerifyDirExit is the exit code the tree check uses when the skill
+// directory itself is gone, so no file inside it can be probed. Exit 1 is the
+// shared "every finding is one stderr line" code; exit 0 means everything the
+// bundle names is still in place.
+const skillTreeVerifyDirExit = 3
 
 // skillVerifyNotePrefix marks a line the checker reports without refusing the
 // install. Notes travel on stdout so a non-zero exit stays unambiguous.
@@ -56,22 +63,24 @@ func (e *skillVerificationError) Error() string {
 // verifySkill is the server's own check, and the last gate before the image
 // pointer moves: a broken install must leave the previous snapshot serving.
 //
-// It proves loadability, not behaviour, and not "every file can be used as
-// python this_file.py". A skill ships scripts and library packages together;
-// execute_skill_script names files, but those files are also imported by each
-// other. The Python pass resolves each file's imports against the prefixes
-// Python itself would use — the file's own directory and every ancestor up to
-// the skill root — plus the venv. Guessing a single entry script, or treating
-// every .py as an isolated __main__, both fail real skills.
+// It checks only what a file can settle, never what a runtime decides. Every
+// pass here is deterministic: the files the bundle named are present, the
+// isolated dependency trees the installer was told to create exist, every
+// source parses with the interpreter that would run it, and every distribution
+// the manifests name is installed.
+//
+// Import resolution is deliberately absent. Whether `import helper` resolves
+// depends on what a script does to sys.path before the import runs, which no
+// static evaluator can enumerate — and every approximation of it refused
+// skills that run perfectly. That proof belongs to the installer agent, which
+// holds a root shell and the real interpreter and can simply run the import.
+// See the header of tenant_skill_verify.py.
 //
 // Findings are graded rather than uniformly fatal. Refusing an install costs
 // the minutes of dependency work that already succeeded, so only evidence that
-// the install itself is broken may do it: a file nothing the skill offers ever
-// loads, or a requirement pip would have skipped, is returned as a note.
-//
-// Not executing is the point, not a limitation. The previous implementation
-// ran one guessed script with --help; skills that do not parse arguments
-// simply ran their whole main path inside the tree about to be snapshotted.
+// the install itself is broken may do it: a finding in a file nothing the
+// skill offers ever loads, or a requirement pip would have skipped, is
+// returned as a note.
 func (s *TenantSkillService) verifySkill(
 	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
 ) ([]string, error) {
@@ -81,27 +90,70 @@ func (s *TenantSkillService) verifySkill(
 	if err := s.verifyDeclaredDependencies(ctx, mgr, sessionID, skillDir, bundle); err != nil {
 		return nil, err
 	}
-	return s.verifyScriptsLoad(ctx, mgr, sessionID, skillDir, bundle)
+	return s.verifyScriptsParse(ctx, mgr, sessionID, skillDir, bundle)
 }
 
 // verifySkillTree confirms the files the agent was given are still the files
 // the image carries. The agent has a root shell in this directory, so "we
 // wrote it before the agent ran" is not evidence that it survived.
+//
+// The whole check is one command and one round trip, however many files the
+// bundle carries: a missing file costs one remote exec per call otherwise, and
+// a skill with dozens of scripts was spending minutes on that round-trip tax.
+// Every missing file is reported on its own stderr line and the check keeps
+// going, so one round trip returns every finding instead of stopping at the
+// first — an install that fails anyway may as well fail completely.
 func (s *TenantSkillService) verifySkillTree(
 	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
 ) error {
-	if _, err := s.execInstall(ctx, mgr, sessionID,
-		fmt.Sprintf("test -f %s", sandbox.ShellQuote(path.Join(skillDir, "SKILL.md")))); err != nil {
-		return fmt.Errorf("skill directory is incomplete after install: %w", err)
+	res, err := s.execInstall(ctx, mgr, sessionID,
+		skillTreeVerifyCommand(skillDir, sortedScriptPaths(bundle, allScriptExtensions...)))
+	if err == nil {
+		return nil
 	}
-	for _, rel := range sortedScriptPaths(bundle, allScriptExtensions...) {
-		target := path.Join(skillDir, rel)
-		if _, err := s.execInstall(ctx, mgr, sessionID,
-			fmt.Sprintf("test -f %s", sandbox.ShellQuote(target))); err != nil {
-			return fmt.Errorf("script %s is missing after install: %w", rel, err)
+	if res != nil {
+		switch res.ExitCode {
+		case skillTreeVerifyDirExit:
+			// The directory itself is gone; nothing inside it could be probed
+			// and the command already said exactly that.
+			return errors.New("skill directory is incomplete after install")
+		case 1:
+			// The command's own protocol: exit 1 means every finding is one
+			// stderr line, and those lines are the final message. Any other
+			// non-zero exit has no protocol behind it and falls through to
+			// the transport wrapping below rather than promoting arbitrary
+			// stderr noise to a verdict.
+			if lines := verificationProblems(res.Stderr); len(lines) > 0 {
+				return errors.New(strings.Join(lines, "; "))
+			}
 		}
 	}
-	return nil
+	return fmt.Errorf("skill tree verification failed: %w", err)
+}
+
+// skillTreeVerifyCommand folds the structural check into one command: the
+// SKILL.md probe plus one test per bundled script, each missing file reported
+// without stopping the rest. It cds into the skill directory and iterates
+// relative paths, which makes every stderr line the final user-facing message
+// — the Go side never has to reassemble one. Paths reach the command only
+// through ShellQuote: a file name comes from an uploaded archive, and a
+// metacharacter in one must stay a literal.
+func skillTreeVerifyCommand(skillDir string, scripts []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "cd %s || { echo 'skill directory is incomplete after install' >&2; exit %d; }",
+		sandbox.ShellQuote(skillDir), skillTreeVerifyDirExit)
+	b.WriteString("; status=0")
+	b.WriteString("; [ -f 'SKILL.md' ] || { echo 'SKILL.md is missing after install' >&2; status=1; }")
+	if len(scripts) > 0 {
+		b.WriteString("; for f in")
+		for _, rel := range scripts {
+			b.WriteByte(' ')
+			b.WriteString(sandbox.ShellQuote(rel))
+		}
+		b.WriteString(`; do [ -f "$f" ] || { echo "script $f is missing after install" >&2; status=1; }; done`)
+	}
+	b.WriteString("; exit $status")
+	return b.String()
 }
 
 // verifyDeclaredDependencies checks that the isolated trees the installer was
@@ -130,15 +182,20 @@ func (s *TenantSkillService) verifyDeclaredDependencies(
 	return nil
 }
 
-// verifyScriptsLoad runs one pass per language present in the bundle. Each
-// pass covers every file of that language: syntax and imports are properties
-// of the file, not of a guessed entry point.
+// verifyScriptsParse runs one pass per language present in the bundle. Each
+// pass covers every file of that language: parsing is a property of the file,
+// not of a guessed entry point.
 //
-// Only the Python pass takes the auxiliary split. Its findings depend on what
-// the image carries, so a bundled tests/ directory can fail an install that
-// works; `node --check` and `bash -n` only state whether a file parses, which
-// no amount of installing changes either way.
-func (s *TenantSkillService) verifyScriptsLoad(
+// All three passes are parse-only — `ast.parse`, `node --check`, `bash -n`.
+// None of them executes the skill's code and none of them decides whether an
+// import resolves. The Python pass additionally checks the manifests against
+// what pip actually landed, which is the one finding here another installer
+// round can still fix.
+//
+// Only the Python pass takes the auxiliary split, because it is the only one
+// whose findings depend on what the image carries: a bundled tests/ directory
+// naming a package the venv does not have must not fail an install that works.
+func (s *TenantSkillService) verifyScriptsParse(
 	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
 ) ([]string, error) {
 	var notes []string
@@ -232,7 +289,7 @@ func verificationProblems(stderr string) []string {
 	return problems
 }
 
-// skillPythonVerifyCommand pipes the verifier into the same interpreter a
+// skillPythonVerifyCommand pipes the parser into the same interpreter a
 // runtime skill call would use, and names the files to check on the command
 // line. The list is explicit rather than a directory walk so the pass covers
 // exactly the uploaded sources — never .venv, node_modules or anything else

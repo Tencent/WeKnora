@@ -72,6 +72,7 @@ func TestShellExecTimeoutHonorsAndCapsRequestedValue(t *testing.T) {
 
 type fakeInstallShellExecutor struct {
 	timeout time.Duration
+	workDir string
 	calls   int
 }
 
@@ -79,24 +80,81 @@ func (f *fakeInstallShellExecutor) ExecShellCommandWithOptions(
 	_ context.Context, _ string, _ string, opts sandbox.ShellExecOptions,
 ) (*sandbox.ExecuteResult, error) {
 	f.timeout = opts.Timeout
+	f.workDir = opts.WorkDir
 	f.calls++
 	return &sandbox.ExecuteResult{ExitCode: 0}, nil
 }
 
-func TestInstallShellExecDescriptionDoesNotPointAtWriteSandboxFile(t *testing.T) {
-	description := NewInstallShellExecTool(&fakeInstallShellExecutor{}).Description()
+// installShellSkillDir is the directory an install owns, and the working
+// directory its shell must default to.
+const installShellSkillDir = sandbox.SkillsImageRoot + "/pdf-tools"
 
-	assert.Contains(t, description, "only tool")
-	assert.Contains(t, description, "requirements.json")
-	assert.Contains(t, description, sandbox.SkillsImageRoot)
+func TestInstallShellExecDescriptionDoesNotPointAtWriteSandboxFile(t *testing.T) {
+	description := NewInstallShellExecTool(&fakeInstallShellExecutor{}, installShellSkillDir).Description()
+
+	assert.Contains(t, description, ToolWriteSkillFile,
+		"the writer for this tree is write_skill_file, not a heredoc")
+	assert.Contains(t, description, installShellSkillDir)
 	assert.NotContains(t, description, "Do NOT dump large files through")
 	assert.NotContains(t, NewShellExecTool(&fakeShellExecutor{}, nil).Description(),
 		"write_sandbox_file is not available")
 }
 
+// The model reached for `cd <skill-dir> && …` on command after command because
+// the default landed it in /workspace — a directory an install is told not to
+// touch, since it is wiped before the snapshot. Naming the skill directory as
+// the default is what removes the prefix.
+func TestInstallShellExecDefaultsToTheSkillDirectory(t *testing.T) {
+	inner := &fakeInstallShellExecutor{}
+	tool := NewInstallShellExecTool(inner, installShellSkillDir)
+
+	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
+		`{"command":"ls -la scripts/"}`,
+	))
+
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+	assert.Equal(t, installShellSkillDir, inner.workDir)
+	assert.Equal(t, installShellSkillDir, result.Data["work_dir"],
+		"the transcript must show where the command actually ran")
+
+	assert.Contains(t, tool.Description(), "Do NOT prefix",
+		"the default alone did not stop the model; it has to be told")
+}
+
+// An explicit work_dir still wins: an install occasionally has to leave its own
+// directory, and the allowed roots have not changed.
+func TestInstallShellExecStillHonoursAnExplicitWorkDir(t *testing.T) {
+	inner := &fakeInstallShellExecutor{}
+
+	result, err := NewInstallShellExecTool(inner, installShellSkillDir).Execute(
+		shellExecTestContext(),
+		json.RawMessage(`{"command":"ls","work_dir":"/workspace"}`),
+	)
+
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+	assert.Equal(t, "/workspace", inner.workDir)
+}
+
+// A run that somehow carries no valid skill directory must not invent one, and
+// must not send commands to a path outside the allowed roots.
+func TestInstallShellExecFallsBackToWorkspaceWithoutAValidSkillDir(t *testing.T) {
+	for _, dir := range []string{"", sandbox.SkillsImageRoot, "/etc", "/opt/weknora/tenant/skills/a/b"} {
+		inner := &fakeInstallShellExecutor{}
+
+		result, err := NewInstallShellExecTool(inner, dir).Execute(
+			shellExecTestContext(), json.RawMessage(`{"command":"ls"}`))
+
+		require.NoError(t, err)
+		require.True(t, result.Success, result.Error)
+		assert.Equal(t, "/workspace", inner.workDir, "skillDir %q must not become a default", dir)
+	}
+}
+
 func TestInstallShellExecDefaultsToTheTenMinuteBudget(t *testing.T) {
 	inner := &fakeInstallShellExecutor{}
-	tool := NewInstallShellExecTool(inner)
+	tool := NewInstallShellExecTool(inner, installShellSkillDir)
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
 		`{"command":"pip install -r requirements.txt"}`,
@@ -174,6 +232,33 @@ func TestShellExecDescriptionSupportsGeneralExploration(t *testing.T) {
 	assert.Contains(t, description, ".skill-packages")
 	assert.Contains(t, description, "Do not `apt-get install` inspection utilities")
 	assert.NotContains(t, description, "If a 'command not found' error occurs, attempt to resolve it")
+}
+
+// The system prompt used to repeat all of this in its shell_exec bullets. The
+// description ships with the tools on every request, so the second copy only
+// spent tokens twice and gave the two wordings room to drift. It was deleted
+// there (TestFormatSkillsMetadataIncludesShellGuidanceOnlyWhenEnabled asserts
+// it stays deleted), which makes this the only copy left.
+func TestShellExecDescriptionOwnsItsMechanics(t *testing.T) {
+	description := NewShellExecTool(&fakeShellExecutor{}, nil).Description()
+
+	for _, mechanic := range []string{
+		// Working directory, and why `cd /workspace &&` is dead weight.
+		"Every command already starts in",
+		"do NOT prefix",
+		"work_dir",
+		// Output budget and how a non-zero exit is meant to be read.
+		"max_output_bytes",
+		"non-zero on failure",
+		"is NOT a tool",
+		// Quoting, which decides whether a one-liner even parses.
+		"never nest an ASCII",
+		"「」",
+		// Session lifetime, so setup is not redone every call.
+		"one long-lived session",
+	} {
+		assert.Contains(t, description, mechanic, "moved out of the system prompt, must live here")
+	}
 }
 
 func TestShellExecBoundsStdoutStderrErrorAndTotal(t *testing.T) {
@@ -357,7 +442,7 @@ func TestShellExecDoesNotCaptureWhenExecutorErrors(t *testing.T) {
 
 func TestInstallShellExecDoesNotCapture(t *testing.T) {
 	recorder := &recordedCapture{}
-	tool := NewInstallShellExecTool(&fakeInstallShellExecutor{}).WithEnvCapture(recorder.capture)
+	tool := NewInstallShellExecTool(&fakeInstallShellExecutor{}, installShellSkillDir).WithEnvCapture(recorder.capture)
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
 		`{"command":"export USER_TOKEN=x; pip install x","skill_name":"pdf-tools"}`,
@@ -454,7 +539,7 @@ func TestShellExecAllowsOverlayInstallThatMentionsTheSkillTree(t *testing.T) {
 
 func TestInstallShellExecStillPipsIntoTheSkillTree(t *testing.T) {
 	inner := &fakeInstallShellExecutor{}
-	tool := NewInstallShellExecTool(inner)
+	tool := NewInstallShellExecTool(inner, installShellSkillDir)
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
 		`{"command":"pip install python-docx","work_dir":"/opt/weknora/tenant/skills/律师助手"}`,

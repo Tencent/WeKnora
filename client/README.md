@@ -16,7 +16,8 @@
 8. **消息管理**：获取和删除会话消息
 9. **模型管理**：创建、获取、更新和删除模型
 10. **沙箱技能**：向沙箱配置安装技能（zip 上传，或从 ClawHub / SkillHub / GitHub 等来源），并配置技能所需的环境变量
-11. **认证**：登录、刷新令牌、切换激活空间（`SwitchTenant` 会写入最近活跃租户偏好）
+11. **长期记忆**：当前用户的跨会话记忆（设置开关、条目增删改、确认/否决、主题、文档亲和度、导出、立刻整理）
+12. **认证**：登录、刷新令牌、切换激活空间（`SwitchTenant` 会写入最近活跃租户偏好）
 
 ## 使用方法
 
@@ -391,7 +392,7 @@ if err != nil {
 
 ### 示例：从托管平台安装沙箱技能
 
-`source` 必须写明确：ClawHub 用 `@owner/slug`，GitHub / SkillHub 粘贴完整 URL。不要传裸的 `owner/slug`。
+`source` 必须写明确：ClawHub 用 `@owner/slug`，ClawHub 上的 skills.sh 条目用完整 `https://clawhub.ai/skills-sh/owner/repo/slug` 或 `skills-sh:owner/repo/slug`，GitHub / SkillHub 粘贴完整 URL。不要传裸的 `owner/slug`。
 
 ```go
 skillID, err := apiClient.InstallSandboxSkillFromSource(
@@ -400,6 +401,18 @@ if err != nil {
     // 处理错误
 }
 _ = skillID // 用 skillID 订阅 /sandbox-configs/{id}/skills/{skillID}/install-events
+```
+
+### 示例：停止卡住的安装
+
+服务重启后安装行可能一直停在 `installing`，界面无法重试或卸载。停止会立刻改写该行（进程内若还有 goroutine 也会取消），之后可以再调重试或卸载。
+
+```go
+skill, err := apiClient.StopSandboxSkill(context.Background(), sandboxConfigID, skillID)
+if err != nil {
+    // 处理错误
+}
+_ = skill
 ```
 
 ### 示例：重试失败的安装

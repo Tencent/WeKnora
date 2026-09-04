@@ -25,6 +25,6 @@ func TestAppendRetrievedImageOutputRequirement(t *testing.T) {
 
 	withoutImage := appendRetrievedImageOutputRequirement(base, "text-only retrieved context")
 	if withoutImage != base {
-		t.Fatalf("text-only context should not change the system prompt: %q", withoutImage)
+		t.Fatalf("text-only context should not change the user turn: %q", withoutImage)
 	}
 }

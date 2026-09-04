@@ -17,7 +17,7 @@
 
       <section v-if="mode === 'install'" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillSourceSection') }}</h4>
-        <p class="installer-model-hint">{{ $t('settings.sandbox.skillSourceSectionHint') }}</p>
+        <p class="installer-model-hint">{{ $t('settings.sandbox.skillSourceSectionHint', { size: MAX_SKILL_BUNDLE_SIZE_MB }) }}</p>
         <t-input-adornment class="skill-source-row">
           <t-input
             v-model="sourceInput"
@@ -40,7 +40,7 @@
 
       <section v-if="mode === 'install'" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillUploadSection') }}</h4>
-        <p class="installer-model-hint">{{ $t('settings.sandbox.skillUploadSectionHint') }}</p>
+        <p class="installer-model-hint">{{ $t('settings.sandbox.skillUploadSectionHint', { size: MAX_SKILL_BUNDLE_SIZE_MB }) }}</p>
         <input
           ref="fileInputRef"
           type="file"
@@ -76,7 +76,64 @@
       </section>
 
       <section v-if="mode === 'list' && focusSkillId" class="skill-manage">
-        <template v-if="managedSkill">
+        <Teleport v-if="headerActionsTarget && showHeaderStop" :to="headerActionsTarget" defer>
+          <t-button
+            class="skill-header-stop"
+            theme="default"
+            variant="outline"
+            size="small"
+            :disabled="!managedSkill"
+            :loading="!!managedSkill && stoppingId === managedSkill.id"
+            @click="managedSkill && stopSkill(managedSkill)"
+          >
+            {{ $t('settings.sandbox.skillStop') }}
+          </t-button>
+        </Teleport>
+        <Teleport v-if="headerActionsTarget && showHeaderUninstall" :to="headerActionsTarget" defer>
+          <t-popconfirm
+            theme="warning"
+            attach="body"
+            :content="$t('settings.skills.manageUninstallConfirm', { name: managedSkill?.name || '' })"
+            :confirm-btn="{ content: $t('settings.skills.manageUninstall'), theme: 'danger' }"
+            :cancel-btn="{ content: $t('common.cancel') }"
+            placement="bottom-right"
+            @confirm="managedSkill && removeSkill(managedSkill)"
+          >
+            <t-button
+              class="skill-header-uninstall"
+              theme="danger"
+              variant="outline"
+              size="small"
+              :disabled="!managedSkill || isBusy(managedSkill)"
+              :loading="!!managedSkill && deletingId === managedSkill.id"
+            >
+              {{ $t('settings.skills.manageUninstall') }}
+            </t-button>
+          </t-popconfirm>
+        </Teleport>
+        <div v-if="uninstallDone" class="skill-manage__done">
+          <t-icon name="check-circle-filled" size="22px" />
+          <p>{{ $t('settings.sandbox.skillRemoveDone', { name: uninstallingName }) }}</p>
+        </div>
+        <template v-else-if="managedSkill && isRemoving(managedSkill)">
+          <section class="skill-manage__section skill-manage__section--remove">
+            <div class="skill-manage__section-head">
+              <h4>{{ $t('settings.sandbox.skillRemoveInProgress') }}</h4>
+              <div class="skill-manage__progress">
+                <t-progress
+                  theme="circle"
+                  :percentage="progressOf(managedSkill)"
+                  :size="18"
+                  :stroke-width="2"
+                  :label="false"
+                />
+                <span>{{ progressOf(managedSkill) }}%</span>
+              </div>
+            </div>
+            <p class="skill-manage__remove-stage">{{ progressStageText(managedSkill) }}</p>
+          </section>
+        </template>
+        <template v-else-if="managedSkill">
           <div class="skill-manage__row">
             <div class="skill-manage__info">
               <label>{{ $t('settings.skills.manageEnable') }}</label>
@@ -105,29 +162,13 @@
                   <t-icon name="refresh" size="16px" />
                 </button>
               </t-tooltip>
-              <t-popconfirm
-                v-if="!isBusy(managedSkill)"
-                theme="warning"
-                :content="deleteHint"
-                :confirm-btn="{ content: $t('settings.skills.manageUninstall'), theme: 'danger' }"
-                :cancel-btn="{ content: $t('common.cancel') }"
-                placement="top-right"
-                @confirm="removeSkill(managedSkill)"
-              >
-                <button
-                  type="button"
-                  class="skill-card__icon-btn skill-card__icon-btn--danger"
-                  :disabled="deletingId === managedSkill.id"
-                  :title="$t('settings.skills.manageUninstall')"
-                  :aria-label="$t('settings.skills.manageUninstall')"
-                >
-                  <t-icon name="delete" size="16px" />
-                </button>
-              </t-popconfirm>
             </div>
           </div>
           <ul v-if="failedErrorLines(managedSkill).length" class="skill-card__error">
             <li v-for="(line, i) in failedErrorLines(managedSkill)" :key="i">{{ line }}</li>
+          </ul>
+          <ul v-if="removalErrorLines(managedSkill).length" class="skill-card__error">
+            <li v-for="(line, i) in removalErrorLines(managedSkill)" :key="i">{{ line }}</li>
           </ul>
           <section v-if="skillHasDeclaredEnvs(managedSkill)" class="skill-manage__section">
             <h4>{{ $t('settings.sandbox.skillEnv.toggle') }}</h4>
@@ -192,10 +233,10 @@
               </div>
             </div>
           </section>
-          <section v-if="hasTranscript(managedSkill) || isBusy(managedSkill)" class="skill-manage__section">
+          <section v-if="hasTranscript(managedSkill)" class="skill-manage__section">
             <div class="skill-manage__section-head">
               <h4>{{ $t('settings.sandbox.skillTranscriptTitle') }}</h4>
-              <div v-if="isBusy(managedSkill)" class="skill-manage__progress">
+              <div v-if="managedSkill.status === 'installing'" class="skill-manage__progress">
                 <t-progress
                   theme="circle"
                   :percentage="progressOf(managedSkill)"
@@ -474,6 +515,21 @@
                     </button>
                   </t-tooltip>
                   <t-tooltip
+                    v-if="skill.status === 'installing'"
+                    :content="$t('settings.sandbox.skillStopHint')"
+                    placement="top"
+                  >
+                    <button
+                      type="button"
+                      class="skill-card__icon-btn"
+                      :disabled="stoppingId === skill.id"
+                      :aria-label="$t('settings.sandbox.skillStop')"
+                      @click="stopSkill(skill)"
+                    >
+                      <t-icon name="stop-circle" size="14px" />
+                    </button>
+                  </t-tooltip>
+                  <t-tooltip
                     v-if="skill.status === 'failed'"
                     :content="$t('settings.sandbox.skillRetryHint')"
                     placement="top"
@@ -491,8 +547,9 @@
                   <t-popconfirm
                     v-if="!isBusy(skill)"
                     theme="warning"
+                    attach="body"
                     :content="deleteHint"
-                    :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
+                    :confirm-btn="{ content: $t('settings.skills.manageUninstall'), theme: 'danger' }"
                     :cancel-btn="{ content: $t('common.cancel') }"
                     placement="top-right"
                     @confirm="removeSkill(skill)"
@@ -501,7 +558,7 @@
                       type="button"
                       class="skill-card__icon-btn skill-card__icon-btn--danger"
                       :disabled="deletingId === skill.id"
-                      :aria-label="$t('common.delete')"
+                      :aria-label="$t('settings.skills.manageUninstall')"
                     >
                       <t-icon name="delete" size="14px" />
                     </button>
@@ -542,13 +599,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, inject, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import ModelSelector from '@/components/ModelSelector.vue'
 import SkillInstallTimeline from '@/components/SkillInstallTimeline.vue'
+import { SETTING_DRAWER_HEADER_ACTIONS_ID } from '@/components/settings/SettingDrawer.vue'
 import { SKILL_ICON } from '@/types/mention'
 import {
   getAgentById,
@@ -562,6 +620,7 @@ import {
   listConfigSkills,
   patchConfigSkill,
   reinstallConfigSkill,
+  stopConfigSkill,
   uploadConfigSkill,
   installConfigSkillFromSource,
   type ConfigSkill,
@@ -569,7 +628,7 @@ import {
   type SandboxConfigRecord,
 } from '@/api/system'
 import { getApiBaseUrl } from '@/utils/api-base'
-import { generateRandomString } from '@/utils/index'
+import { generateRandomString, MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils/index'
 import i18n from '@/i18n'
 import {
   MAX_ENV_VALUE_BYTES,
@@ -608,6 +667,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const headerActionsTarget = inject(SETTING_DRAWER_HEADER_ACTIONS_ID, '')
 
 const loading = ref(false)
 const uploading = ref(false)
@@ -618,6 +678,11 @@ const skills = ref<ConfigSkill[]>([])
 const togglingId = ref('')
 const deletingId = ref('')
 const retryingId = ref('')
+const stoppingId = ref('')
+const uninstallingId = ref('')
+const uninstallingName = ref('')
+const uninstallDone = ref(false)
+const sawRemoving = ref(false)
 // Only one install timeline is open at a time: each one holds an SSE
 // connection, and two runs' worth of agent steps in a drawer is unreadable.
 const expandedSkillId = ref('')
@@ -687,7 +752,14 @@ function statusLabel(skill: ConfigSkill): string {
 }
 
 function isBusy(skill: ConfigSkill): boolean {
-  return skill.status === 'installing' || skill.status === 'removing'
+  return skill.status === 'installing' || isRemoving(skill)
+}
+
+function isRemoving(skill: ConfigSkill): boolean {
+  if (uninstallingId.value === skill.id && !uninstallDone.value) {
+    if (progressById.value[skill.id]?.stage !== 'failed') return true
+  }
+  return skill.status === 'removing' || deletingId.value === skill.id
 }
 
 function cardStatusClass(skill: ConfigSkill): string {
@@ -716,9 +788,46 @@ const managedSkill = computed(() =>
   props.focusSkillId ? (visibleSkills.value[0] || null) : null,
 )
 
+const showHeaderUninstall = computed(() => {
+  if (!props.focusSkillId || uninstallDone.value) return false
+  const skill = managedSkill.value
+  if (!skill || skill.status === 'installing') return false
+  return !isRemoving(skill)
+})
+
+const showHeaderStop = computed(() => {
+  if (!props.focusSkillId || uninstallDone.value) return false
+  const skill = managedSkill.value
+  if (!skill) return false
+  return skill.status === 'installing'
+})
+
 watch(managedSkill, (skill) => {
   if (skill && skillHasDeclaredEnvs(skill)) ensureEnvDrafts(skill.id)
 }, { immediate: true })
+
+watch(
+  () => props.focusSkillId,
+  () => {
+    uninstallingId.value = ''
+    uninstallingName.value = ''
+    uninstallDone.value = false
+    sawRemoving.value = false
+  },
+)
+
+watch(skills, (list) => {
+  const id = uninstallingId.value
+  if (!id || uninstallDone.value) return
+  const row = list.find((skill) => skill.id === id)
+  if (row?.status === 'removing') {
+    sawRemoving.value = true
+    return
+  }
+  if (sawRemoving.value && (!row || row.status === 'removed')) {
+    uninstallDone.value = true
+  }
+})
 
 watch(
   () => skills.value.some(isBusy),
@@ -906,11 +1015,33 @@ function progressOf(skill: ConfigSkill): number {
   if (typeof percent === 'number' && Number.isFinite(percent)) {
     return Math.max(0, Math.min(100, percent))
   }
+  if (skill.status === 'removing' || deletingId.value === skill.id) return 5
   return skill.status === 'ready' || skill.status === 'failed' ? 100 : 0
 }
 
+const REMOVE_STAGE_I18N: Record<string, string> = {
+  accepted: 'settings.sandbox.skillRemoveStage.accepted',
+  sandbox_ready: 'settings.sandbox.skillRemoveStage.sandbox_ready',
+  removed: 'settings.sandbox.skillRemoveStage.removed',
+  done: 'settings.sandbox.skillRemoveStage.done',
+  failed: 'settings.sandbox.skillRemoveStage.failed',
+}
+
+function progressStageText(skill: ConfigSkill): string {
+  const ev = progressById.value[skill.id]
+  const stageKey = ev?.stage ? REMOVE_STAGE_I18N[ev.stage] : ''
+  if (stageKey) return t(stageKey)
+  if (skill.status === 'removing' || deletingId.value === skill.id) {
+    return t('settings.sandbox.skillRemoveWaiting')
+  }
+  return ev?.log || ''
+}
+
 function progressLog(skill: ConfigSkill): string {
-  return progressById.value[skill.id]?.log || ''
+  const ev = progressById.value[skill.id]
+  if (ev?.log) return ev.log
+  if (skill.status === 'removing') return progressStageText(skill)
+  return ''
 }
 
 // A re-run reuses the skill id, so the previous run's last event is still the
@@ -935,6 +1066,17 @@ function failedError(skill: ConfigSkill): string {
 // missing package or a bundle that needs rebuilding.
 function failedErrorLines(skill: ConfigSkill): string[] {
   return failedError(skill)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+function removalErrorLines(skill: ConfigSkill): string[] {
+  const ev = progressById.value[skill.id]
+  const raw = ev?.stage === 'failed'
+    ? (ev.log || skill.error || '')
+    : (uninstallingId.value === skill.id && skill.status !== 'removing' ? (skill.error || '') : '')
+  return raw
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
@@ -1041,6 +1183,19 @@ function skillsSignature(list: ConfigSkill[]): string {
   return list.map((skill) => `${skill.id}:${skill.status}:${skill.enabled ? 1 : 0}`).join('|')
 }
 
+function overlayUninstallStatus(list: ConfigSkill[]): ConfigSkill[] {
+  const id = uninstallingId.value
+  if (!id || uninstallDone.value) return list
+  if (progressById.value[id]?.stage === 'failed') return list
+  return list.map((item) => {
+    if (item.id !== id) return item
+    if (item.status === 'removed' || item.status === 'failed' || item.status === 'removing') {
+      return item
+    }
+    return { ...item, status: 'removing' }
+  })
+}
+
 async function loadSkills(silent = false) {
   if (!props.record) return
   if (!silent) loading.value = true
@@ -1048,7 +1203,7 @@ async function loadSkills(silent = false) {
   const wasBusy = skills.value.some(isBusy)
   try {
     const res = await listConfigSkills(props.record.id)
-    skills.value = res?.data || []
+    skills.value = overlayUninstallStatus(res?.data || [])
     followBusySkills()
     ensurePoll()
     if (skillsSignature(skills.value) !== previous) {
@@ -1124,6 +1279,26 @@ function isZipFile(file: File): boolean {
   return file.name.toLowerCase().endsWith('.zip') || file.type === 'application/zip'
 }
 
+function skillBundleErrorMessage(err: any, fallbackKey: string): string {
+  const raw = String(err?.message || '')
+  if (/cannot exceed \d+\s*MB/i.test(raw)) {
+    return t('settings.sandbox.skillBundleTooLarge', { size: MAX_SKILL_BUNDLE_SIZE_MB })
+  }
+  const tooManyFiles = raw.match(/skill directory holds more than (\d+) files/i)
+  if (tooManyFiles) {
+    return t('settings.sandbox.skillBundleTooManyFiles', { count: tooManyFiles[1] })
+  }
+  const tooManyEntries = raw.match(/archive has more than (\d+) zip entries/i)
+  if (tooManyEntries) {
+    return t('settings.sandbox.skillBundleTooManyZipEntries', { count: tooManyEntries[1] })
+  }
+  const legacyTooMany = raw.match(/archive holds more than (\d+) files/i)
+  if (legacyTooMany) {
+    return t('settings.sandbox.skillBundleTooManyFiles', { count: legacyTooMany[1] })
+  }
+  return raw || t(fallbackKey)
+}
+
 async function uploadFile(file: File) {
   if (!props.record || installBusy.value) return
   if (!installerModelId.value) {
@@ -1132,6 +1307,10 @@ async function uploadFile(file: File) {
   }
   if (!isZipFile(file)) {
     MessagePlugin.error(t('settings.sandbox.skillUploadFailed'))
+    return
+  }
+  if (file.size > MAX_SKILL_BUNDLE_SIZE_BYTES) {
+    MessagePlugin.error(t('settings.sandbox.skillBundleTooLarge', { size: MAX_SKILL_BUNDLE_SIZE_MB }))
     return
   }
   uploading.value = true
@@ -1145,7 +1324,7 @@ async function uploadFile(file: File) {
     const skillId = res?.data?.skill_id || ''
     emit('installed', skillId)
   } catch (e: any) {
-    MessagePlugin.error(e?.message || t('settings.sandbox.skillUploadFailed'))
+    MessagePlugin.error(skillBundleErrorMessage(e, 'settings.sandbox.skillUploadFailed'))
   } finally {
     uploading.value = false
     uploadPercent.value = 0
@@ -1170,7 +1349,7 @@ async function installFromSource() {
     const skillId = res?.data?.skill_id || ''
     emit('installed', skillId)
   } catch (e: any) {
-    MessagePlugin.error(e?.message || t('settings.sandbox.skillSourceFailed'))
+    MessagePlugin.error(skillBundleErrorMessage(e, 'settings.sandbox.skillSourceFailed'))
   } finally {
     installingFromSource.value = false
   }
@@ -1224,16 +1403,50 @@ async function retrySkill(skill: ConfigSkill) {
   }
 }
 
-async function removeSkill(skill: ConfigSkill) {
+async function stopSkill(skill: ConfigSkill) {
   if (!props.record) return
+  stoppingId.value = skill.id
+  forgetProgress(skill.id)
+  try {
+    const res = await stopConfigSkill(props.record.id, skill.id)
+    const updated = res?.data
+    if (updated) {
+      skills.value = skills.value.map((item) => (item.id === skill.id ? { ...item, ...updated } : item))
+    }
+    MessagePlugin.success(t('settings.sandbox.skillStopAccepted'))
+    await loadSkills()
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('settings.sandbox.skillStopFailed'))
+  } finally {
+    stoppingId.value = ''
+  }
+}
+
+async function removeSkill(skill: ConfigSkill) {
+  if (!props.record || isBusy(skill) || deletingId.value) return
   deletingId.value = skill.id
+  uninstallingId.value = skill.id
+  uninstallingName.value = skill.name
+  uninstallDone.value = false
+  forgetProgress(skill.id)
   try {
     await deleteConfigSkill(props.record.id, skill.id)
     MessagePlugin.success(t('settings.sandbox.skillDeleteAccepted'))
+    skills.value = skills.value.map((item) => (
+      item.id === skill.id ? { ...item, status: 'removing' } : item
+    ))
+    sawRemoving.value = true
+    progressById.value = {
+      ...progressById.value,
+      [skill.id]: { percent: 5, stage: 'accepted', done: false },
+    }
     await loadSkills()
     await refreshImage()
     followProgress(skill.id)
   } catch (e: any) {
+    uninstallingId.value = ''
+    uninstallingName.value = ''
+    sawRemoving.value = false
     MessagePlugin.error(e?.message || t('common.deleteFailed'))
   } finally {
     deletingId.value = ''
@@ -1289,7 +1502,7 @@ onUnmounted(() => {
 }
 
 .installer-model-hint {
-  margin: 0 0 10px;
+  margin: 0;
   font-size: 12px;
   line-height: 1.5;
   color: var(--td-text-color-secondary);
@@ -1448,6 +1661,10 @@ onUnmounted(() => {
   min-height: 0;
 }
 
+.skill-header-uninstall {
+  white-space: nowrap;
+}
+
 .skill-manage {
   display: flex;
   flex-direction: column;
@@ -1495,10 +1712,6 @@ onUnmounted(() => {
   padding-top: 12px;
   border-top: 1px solid var(--td-component-stroke);
 
-  > .t-button {
-    align-self: flex-start;
-  }
-
   h4 {
     margin: 0;
     font-size: 13px;
@@ -1527,69 +1740,97 @@ onUnmounted(() => {
     }
   }
 
-  .skill-envs__hint {
+  &--remove {
+    border-top: 0;
+    padding-top: 0;
+  }
+}
+
+.skill-manage__remove-stage {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+}
+
+.skill-manage__done {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0 4px;
+  color: var(--td-success-color, var(--td-brand-color));
+
+  p {
     margin: 0;
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--td-text-color-secondary);
-  }
-
-  .skill-envs__rows {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .skill-envs__row {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .skill-envs__meta {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .skill-envs__name {
-    font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
-    font-size: 12px;
+    font-size: 14px;
+    line-height: 1.55;
     color: var(--td-text-color-primary);
-    overflow-wrap: anywhere;
   }
+}
 
-  .skill-envs__tag {
-    font-size: 12px;
-    line-height: 18px;
-    padding: 0 8px;
-    border-radius: 10px;
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-secondary);
-  }
+.skill-envs__hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+}
 
-  .skill-envs__tag--required {
-    background: var(--td-warning-color-light);
-    color: var(--td-warning-color);
-  }
+.skill-envs__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 
-  .skill-envs__tag--set {
-    background: var(--td-success-color-light);
-    color: var(--td-success-color);
-  }
+.skill-envs__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 
-  .skill-envs__desc {
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--td-text-color-secondary);
-  }
+.skill-envs__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 
-  .skill-envs__editor {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
+.skill-envs__name {
+  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-size: 12px;
+  color: var(--td-text-color-primary);
+  overflow-wrap: anywhere;
+}
+
+.skill-envs__tag {
+  font-size: 12px;
+  line-height: 18px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+}
+
+.skill-envs__tag--required {
+  background: var(--td-warning-color-light);
+  color: var(--td-warning-color);
+}
+
+.skill-envs__tag--set {
+  background: var(--td-success-color-light);
+  color: var(--td-success-color);
+}
+
+.skill-envs__desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+}
+
+.skill-envs__editor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .skill-list {

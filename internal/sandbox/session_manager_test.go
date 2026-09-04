@@ -400,6 +400,34 @@ func TestWriteSessionFileSucceedsWhenInstallDirectoryAlreadyExists(t *testing.T)
 	require.Equal(t, skillDir+"/SKILL.md", writes[0].path)
 }
 
+// The whole feature is inert without this: RemoteNetworkPolicy already existed
+// and both adapters already forwarded it, but nothing ever filled it in.
+func TestBuildSessionCreateRequestCarriesNetworkPolicy(t *testing.T) {
+	denied := false
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-1"
+	cfg.E2BTemplate = "tpl-1"
+	cfg.DockerImage = "img-1"
+	cfg.Network = RemoteNetworkPolicy{
+		AllowInternetAccess: &denied,
+		AllowOut:            []string{"api.example.com"},
+		DenyOut:             []string{"0.0.0.0/0"},
+	}
+
+	for _, provider := range []RemoteProvider{
+		SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker,
+	} {
+		request, err := buildSessionCreateRequest(provider, cfg)
+		require.NoError(t, err, "provider %s", provider)
+		require.NotNil(t, request.Network.AllowInternetAccess, "provider %s", provider)
+		require.False(t, *request.Network.AllowInternetAccess, "provider %s", provider)
+		require.Equal(t, []string{"api.example.com"}, request.Network.AllowOut,
+			"provider %s", provider)
+		require.Equal(t, []string{"0.0.0.0/0"}, request.Network.DenyOut,
+			"provider %s", provider)
+	}
+}
+
 func newSessionManagerExecTestHarness(t *testing.T) (*SessionBoundManager, *fakeRemoteClient) {
 	t.Helper()
 

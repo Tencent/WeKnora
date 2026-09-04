@@ -155,7 +155,7 @@ profile，而它写出的 profile 把设置放在 `pnpm-workspace.yaml` 里。�
 
 ## 兼容性
 
-已针对 dsh `0.1.0-rc.8` 与 WeKnora `0.7.2` 验证。dsh 处于 developer preview 并明确会有破坏性变更；本包因此**没有任何运行
+已针对 dsh `0.1.0-rc.8` 与 WeKnora `0.8.0` 验证。dsh 处于 developer preview 并明确会有破坏性变更；本包因此**没有任何运行
 时依赖**，交给 `ctx.tools.register()` 的只是一个普通对象，不锁定任何 harness 包版本。如果 harness 的工具定义契约发生变化，
 请在本仓库提 issue。
 

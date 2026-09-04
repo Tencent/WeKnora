@@ -253,6 +253,18 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata, shellExecEnabl
 		builder.WriteString(fmt.Sprintf("   %s\n\n", skill.Description))
 	}
 
+	builder.WriteString("#### Workspace\n\n")
+	builder.WriteString("Everything you run happens in this session's sandbox, ")
+	builder.WriteString("whose working directory is `/workspace`:\n")
+	builder.WriteString("- `/workspace/input`: the user's uploaded files, listed in ")
+	builder.WriteString("`<sandbox_attachments>`. Read-only — pass their absolute paths as arguments\n")
+	builder.WriteString("- `/workspace/output`: what you generate for the user. ")
+	builder.WriteString("Files here are collected for download\n")
+	builder.WriteString("- `/workspace/.skill-packages/<skill>`: where on-demand Python extras go, ")
+	builder.WriteString("since the skill tree is frozen after install\n")
+	builder.WriteString("- The skills themselves live under `/opt/weknora/tenant/skills` and are ")
+	builder.WriteString("reached through `read_skill` / `execute_skill_script`, never by `ls` or `cat`\n\n")
+
 	builder.WriteString("#### Tool Reference\n\n")
 	builder.WriteString("- `read_skill(skill_name)`: Load SKILL.md **and** list the skill's files. This is how you discover scripts — do not `list_sandbox_files` or `ls` `/opt/weknora/tenant/skills/...`\n")
 	builder.WriteString("- `read_skill(skill_name, file_path)`: Read one file inside the skill (`file_path` is relative, e.g. `scripts/generate_ppt.py`)\n")
@@ -261,27 +273,30 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata, shellExecEnabl
 	builder.WriteString("  - `input`: Pass data directly via stdin (use this when you have data in memory, e.g. JSON string)\n")
 	builder.WriteString("  - `args`: Command-line arguments; pass absolute `/workspace/input/...` paths from `<sandbox_attachments>` for user-uploaded files\n")
 	builder.WriteString("  - Treat `/workspace/input` as read-only and write generated files only to `$WEKNORA_SKILL_OUTPUT_DIR`\n")
+	builder.WriteString("  - Scripts run with `/workspace` as their working directory, so a relative ")
+	builder.WriteString("path inside a script resolves there, not inside the skill; ")
+	builder.WriteString("`$WEKNORA_SKILL_DIR` is how a script reaches its own files\n")
 	builder.WriteString(sandboxArtifactReferenceGuidance())
-	builder.WriteString("  - Each skill keeps its dependencies to itself (virtualenv or node_modules); ")
-	builder.WriteString("this tool already runs scripts the right way. A bare `python3 -c` / `node -e` ")
-	builder.WriteString("sees none of them, so never conclude from that that a skill cannot run. ")
-	builder.WriteString("The skill tree is frozen after install — do not run install_deps.py, ")
-	builder.WriteString("chown, ensurepip, or pip into `/opt/weknora/tenant/skills`. ")
-	builder.WriteString("On-demand extras: `python3 -m pip install --target /workspace/.skill-packages/<skill> <package>`, ")
-	builder.WriteString("then execute_skill_script; or ask the user to reinstall the skill so extras are baked in\n")
+	builder.WriteString("  - Every script needing a skill's packages runs through this tool, including ")
+	builder.WriteString("one you wrote yourself to `/workspace`. Do not rebuild the environment by hand ")
+	builder.WriteString("with `PYTHONPATH=... python3` or a skill's `.venv/bin/python`: system `python3` ")
+	builder.WriteString("cannot see what the skill baked in at install time, so that route only makes you ")
+	builder.WriteString("reinstall what was already there. A failed import under `python3 -c` / `node -e` ")
+	builder.WriteString("says nothing about whether the skill runs\n")
+	builder.WriteString("  - The skill tree is frozen after install — do not run install_deps.py, chown, ")
+	builder.WriteString("ensurepip, or pip into `/opt/weknora/tenant/skills`. Only once a run reports a ")
+	builder.WriteString("package missing: `python3 -m pip install --target ")
+	builder.WriteString("/workspace/.skill-packages/<skill> <package>`, then execute_skill_script, which ")
+	builder.WriteString("puts that directory on the path for you\n")
 	if shellExecEnabled {
-		builder.WriteString("- `shell_exec(command, work_dir, timeout_sec, max_output_bytes, max_stderr_bytes, env)`: Freely execute shell commands and explore the current session's isolated Cube sandbox\n")
-		builder.WriteString("  - User-uploaded files are restored under `/workspace/input` and listed in `<sandbox_attachments>`\n")
-		builder.WriteString("  - Use `find` and `ls` to discover files; use `cat`, `head`, `tail`, and `sed` to inspect text; use `grep` and `awk` to search and process content; use `file` for an unknown type\n")
-		builder.WriteString("  - Do not `ls` / `find` / `cat` / `file` a skill under `/opt/weknora/tenant/skills` to discover scripts. `read_skill(skill_name)` already lists them; that tree also contains `.venv` / `node_modules`\n")
-		builder.WriteString("  - Use shell pipelines, redirects, scripts, package managers, compilers, and other installed commands whenever they are the most direct way to complete the task\n")
-		builder.WriteString("  - Do not inspect skill-generated office files with `python3 -c` (system Python has no python-docx/pptx). Write a short script with `write_sandbox_file` and run it with `execute_skill_script`; do not paste the same code into `.venv/bin/python -c`\n")
-		builder.WriteString("  - To change a few lines of a file you already wrote, call `edit_sandbox_file` instead of rewriting the whole file\n")
-		builder.WriteString("  - Python strings: never nest ASCII `\"` inside `\"...\"` (or `'` inside `'...'`). Use the other quote, and 「」 for Chinese quotation\n")
-		builder.WriteString("  - Increase `max_output_bytes` up to 65536 per stream for large text output, or use `sed`/`head`/`tail` for targeted sections\n")
-		builder.WriteString("  - Binary output is suppressed; write binary results under `/workspace/output` so ArtifactCollector attaches them for download\n")
-		builder.WriteString("  - Session state persists across later `shell_exec` and `execute_skill_script` calls\n")
-		builder.WriteString("  - Non-zero exit codes are normal results, not tool errors — inspect stderr and decide what to do next\n")
+		// Only the inventory line. How to drive the shell — working directory,
+		// output limits, exit-code semantics, which scripts do not belong here —
+		// is all in shell_exec's own description, which ships with the tools on
+		// every request and so is never further away than this paragraph.
+		builder.WriteString("- `shell_exec(command, work_dir, timeout_sec, max_output_bytes, max_stderr_bytes, env)`: ")
+		builder.WriteString("Freely execute shell commands and explore the current session's isolated Cube ")
+		builder.WriteString("sandbox. Read its tool description before the first call — it says which work ")
+		builder.WriteString("belongs here and which belongs to `execute_skill_script`\n")
 	}
 
 	return builder.String()
@@ -383,7 +398,7 @@ func BuildSystemPromptWithOptions(
 		template = GetProgressiveRAGSystemPrompt(cfg)
 	}
 
-	currentTime := time.Now().Format(time.RFC3339)
+	currentTime := time.Now().Format("2006-01-02")
 	language := ""
 	if options != nil {
 		language = options.Language

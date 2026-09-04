@@ -10,6 +10,7 @@ import (
 	"io"
 	"mime/multipart"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
@@ -123,16 +124,12 @@ func TestRunInstallIssuesExactlyTheseCommands(t *testing.T) {
 
 	require.Equal(t, []string{
 		installPrepareCommand,
-		"uv --version",
+		installToolsProbeCommand(),
 		seedExtractCommand(installSkillDir),
-		"chmod -R 555 " + installSkillDir,
-		"chown -R root:root " + installSkillDir,
-		"test -f " + installSkillDir + "/SKILL.md",
-		"test -f " + installSkillDir + "/scripts/extract.py",
+		"chmod -R 555 " + installSkillDir + " && chown -R root:root " + installSkillDir,
+		skillTreeVerifyCommand(installSkillDir, []string{"scripts/extract.py"}),
 		installPythonVerifyCommand,
-		"rm -rf /workspace/* /workspace/.[!.]* || true",
-		installWorkspaceRestoreCommand,
-		installCacheCleanupCommand,
+		cleanImageScratchCommand(),
 	}, fx.commands)
 }
 
@@ -165,7 +162,7 @@ func TestRunInstallReportsTransportFailureCause(t *testing.T) {
 	// Scoped to the command whose failure this test is about. An unscoped
 	// result failed the very first install command instead, so the structural
 	// verification this names was never reached.
-	fx.execResultCommand = "test -f " + installSkillDir + "/SKILL.md"
+	fx.execResultCommand = skillTreeVerifyCommand(installSkillDir, []string{"scripts/extract.py"})
 	fx.execResult = &sandbox.ExecuteResult{
 		ExitCode: -1,
 		Killed:   true,
@@ -175,7 +172,7 @@ func TestRunInstallReportsTransportFailureCause(t *testing.T) {
 	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
 
 	require.Error(t, err)
-	require.ErrorContains(t, err, "skill directory is incomplete after install",
+	require.ErrorContains(t, err, "skill tree verification failed",
 		"this is the structural verification's own failure path")
 	require.ErrorContains(t, err, "context deadline exceeded")
 	require.ErrorContains(t, err, "killed")
@@ -183,6 +180,173 @@ func TestRunInstallReportsTransportFailureCause(t *testing.T) {
 	skill, _ := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
 	require.Contains(t, skill.Error, "context deadline exceeded",
 		"the admin's only diagnostic is this row")
+}
+
+// The tree check's exit 1 is a protocol, not a crash: the findings travel as
+// stderr lines and are the whole message. The exec wrapper's generic
+// "command failed (...)" text must not shadow them.
+func TestRunInstallReportsTheMissingScriptByPath(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.execResultCommand = skillTreeVerifyCommand(installSkillDir, []string{"scripts/extract.py"})
+	fx.execResult = &sandbox.ExecuteResult{
+		ExitCode: 1,
+		Stderr:   "script scripts/extract.py is missing after install",
+	}
+
+	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "script scripts/extract.py is missing after install")
+	require.NotContains(t, err.Error(), "command failed",
+		"protocol exits speak for themselves")
+}
+
+// One round trip reports every missing file, not just the first: an install
+// that fails anyway may as well fail completely.
+func TestRunInstallCollectsEveryMissingFile(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.execResultCommand = skillTreeVerifyCommand(installSkillDir, []string{"scripts/extract.py"})
+	fx.execResult = &sandbox.ExecuteResult{
+		ExitCode: 1,
+		Stderr: "SKILL.md is missing after install\n" +
+			"script scripts/extract.py is missing after install",
+	}
+
+	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "SKILL.md is missing after install")
+	require.ErrorContains(t, err, "script scripts/extract.py is missing after install")
+}
+
+// File names come from an uploaded archive; a metacharacter in one must stay
+// a literal, so every path reaches the command only through ShellQuote.
+func TestSkillTreeVerifyCommandQuotesPaths(t *testing.T) {
+	cmd := skillTreeVerifyCommand("/skills/de mo", []string{"scripts/a b.py", "it's.sh"})
+
+	require.Contains(t, cmd, sandbox.ShellQuote("/skills/de mo"))
+	require.Contains(t, cmd, sandbox.ShellQuote("scripts/a b.py"))
+	require.Contains(t, cmd, sandbox.ShellQuote("it's.sh"))
+}
+
+// The tree check costs one round trip however many scripts the bundle carries.
+func TestVerifySkillTreeIssuesOneCommandRegardlessOfScriptCount(t *testing.T) {
+	fx := newInstallFixture(t)
+	files := map[string][]byte{"SKILL.md": []byte(validSkillMD)}
+	rels := []string{"run.sh", "scripts/a.py", "scripts/b.py",
+		"scripts/c.py", "scripts/d.py", "scripts/e.py"}
+	for _, rel := range rels {
+		files[rel] = []byte("pass\n")
+	}
+
+	require.NoError(t, fx.svc.verifySkillTree(context.Background(),
+		fx.sandboxMgr, "sess-1", installSkillDir, &SkillBundle{Name: "pdf-tools", Files: files}))
+
+	require.Len(t, fx.commands, 1,
+		"one command for six scripts, not one command per script")
+	require.Equal(t, skillTreeVerifyCommand(installSkillDir, rels), fx.commands[0])
+}
+
+// The retention half of the cleanup runs for real inside the sandbox, so its
+// guard is tested against an actual shell: a cache under the budget survives,
+// an over-budget one is wiped whole, and the total is reported either way —
+// that report is the data the budget constant is tuned from.
+func TestCacheBudgetGuardKeepsSmallWipesBig(t *testing.T) {
+	dir := t.TempDir()
+	small := filepath.Join(dir, "small")
+	big := filepath.Join(dir, "big")
+	require.NoError(t, os.MkdirAll(small, 0o755))
+	require.NoError(t, os.MkdirAll(big, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(small, "tiny.whl"), bytes.Repeat([]byte("x"), 1024), 0o644))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(big, "huge.whl"), bytes.Repeat([]byte("x"), 2<<20), 0o644))
+
+	kept, err := exec.Command("sh", "-c",
+		cacheBudgetGuardCommand([]string{small}, 1024)).CombinedOutput()
+	require.NoError(t, err, "the guard must always succeed: %s", kept)
+	require.DirExists(t, small, "a cache under the budget is kept")
+	require.Contains(t, string(kept), "cache total:")
+
+	wiped, err := exec.Command("sh", "-c",
+		cacheBudgetGuardCommand([]string{big}, 1024)).CombinedOutput()
+	require.NoError(t, err, "the guard must always succeed: %s", wiped)
+	require.NoDirExists(t, big, "a cache over the budget is wiped whole")
+	require.Contains(t, string(wiped), "wiped")
+}
+
+// The retention command is one opaque string to the sandbox; pinning its
+// structure here keeps the shell contract from drifting silently — in
+// particular that the workspace half still owns the exit code and the
+// retention half can only ever keep or lose caches.
+func TestCleanImageScratchCommandShape(t *testing.T) {
+	cmd := cleanImageScratchCommand()
+
+	require.Contains(t, cmd, "rm -rf /workspace/* /workspace/.[!.]* || true")
+	require.Contains(t, cmd, "mkdir -p")
+	require.Contains(t, cmd, "status=$?")
+	require.Contains(t, cmd, "exit $status")
+	require.Contains(t, cmd, "uv cache prune")
+	require.Contains(t, cmd, "npm cache verify")
+	require.Contains(t, cmd, "pnpm store prune")
+	require.Contains(t, cmd, "du -skc")
+	require.Contains(t, cmd, fmt.Sprintf("%d", skillCacheBudgetMB*1024))
+	require.Contains(t, cmd, "/root/.cache/uv")
+	require.Contains(t, cmd, "/home/"+sandbox.DefaultSandboxExecUser+"/.npm")
+
+	// And it must parse: the command is one opaque string to the sandbox, so a
+	// quoting mistake would only surface as a runtime failure there.
+	require.NoError(t, exec.Command("sh", "-n", "-c", cmd).Run(),
+		"the emitted command must parse under /bin/sh")
+}
+
+// The workspace half of the cleanup keeps its old failure semantics across the
+// merge: if the session account's input/output directories cannot be restored,
+// every session booting from the snapshot lands on a bare /workspace, and that
+// fails the install.
+func TestRunInstallFailsWhenTheWorkspaceRestoreFails(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.execResultCommand = cleanImageScratchCommand()
+	fx.execResult = &sandbox.ExecuteResult{
+		ExitCode: 1,
+		Stderr:   "chown: cannot access '/workspace/input': No such file or directory",
+	}
+
+	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "clean image scratch")
+}
+
+// The probe's stdout is the prompt's toolchain section; the parse keeps
+// exactly the `name=path` lines and drops everything else rather than
+// failing the install over noise.
+func TestParseToolProbeOutput(t *testing.T) {
+	tools := parseToolProbeOutput(
+		"uv=/root/.local/bin/uv\n" +
+			"not a tool line\n" +
+			"npm=\n" + // cut leaves an empty path: dropped
+			"python3=/usr/bin/python3\n" +
+			"\n")
+	require.Equal(t, map[string]string{
+		"uv":      "/root/.local/bin/uv",
+		"python3": "/usr/bin/python3",
+	}, tools)
+}
+
+// The prompt section must name the present tools with their paths and group
+// the missing ones, so the agent neither re-discovers nor gambles on PATH.
+func TestFormatToolchainSection(t *testing.T) {
+	section := formatToolchainSection(map[string]string{
+		"uv":      "/root/.local/bin/uv",
+		"python3": "/usr/bin/python3",
+	})
+	require.Contains(t, section, "- uv: /root/.local/bin/uv")
+	require.Contains(t, section, "- python3: /usr/bin/python3")
+	require.Contains(t, section, "not found: npm, pnpm, pip3, pip, node")
+
+	require.Contains(t, formatToolchainSection(nil),
+		"locate tools with `command -v <tool>`")
 }
 
 func TestRunInstallReportsVerificationFailureCause(t *testing.T) {
@@ -444,7 +608,9 @@ func storedAdminEnv() types.SkillEnvVars {
 func TestBuildInstallPromptAsksForADeclarationWithoutValues(t *testing.T) {
 	fx := newInstallFixture(t)
 
-	prompt := buildInstallPrompt(installSkillDir, fx.bundle, true)
+	prompt := buildInstallPrompt(installSkillDir, fx.bundle, map[string]string{
+		"uv": "/root/.local/bin/uv", "python3": "/usr/bin/python3",
+	})
 
 	require.Contains(t, prompt, sandbox.SkillRequirementsPath(fx.bundle.Name))
 	require.Contains(t, prompt, ".weknora/requirements.json")
@@ -456,15 +622,53 @@ func TestBuildInstallPromptAsksForADeclarationWithoutValues(t *testing.T) {
 	require.Contains(t, prompt, "On-demand / optional extras MUST be installed now")
 	require.Contains(t, prompt, "uv venv --seed")
 	require.Contains(t, prompt, "install_deps.py")
-	require.Contains(t, prompt, "write_sandbox_file is not available")
-	require.Contains(t, prompt, "short shell redirect")
+	require.Contains(t, prompt, "write_skill_file",
+		"a heredoc truncates at the command-length cap; the file tools are the writer")
+	require.Contains(t, prompt, "write_sandbox_file only writes /workspace",
+		"the installer must be told why the workspace writer cannot help it")
+	require.Contains(t, prompt, "- uv: /root/.local/bin/uv",
+		"the prompt hands over absolute paths instead of a PATH gamble")
+}
+
+// shell_exec used to default to /workspace, so the installer opened command
+// after command with `cd <skill-dir> &&` — the one spelling guaranteed to land
+// somewhere useful. The default is now the skill directory, and the prompt has
+// to say so, because a model that is not told keeps paying for the prefix.
+func TestBuildInstallPromptSaysCommandsAlreadyStartInTheSkillDirectory(t *testing.T) {
+	fx := newInstallFixture(t)
+
+	prompt := buildInstallPrompt(installSkillDir, fx.bundle, nil)
+
+	require.Contains(t, prompt, "shell_exec already starts every command in "+installSkillDir)
+	require.Contains(t, prompt, "do NOT prefix")
+	require.Contains(t, prompt, "cd <skill-dir> &&")
+}
+
+// Import resolution is the agent's job because it is nobody else's: the server
+// parses files without executing them, so it never learns whether an import
+// would have worked. The prompt has to say so, or the one party holding a real
+// interpreter reasons about imports instead of running them.
+func TestBuildInstallPromptDemandsImportsBeProvenByRunningThem(t *testing.T) {
+	fx := newInstallFixture(t)
+
+	prompt := buildInstallPrompt(installSkillDir, fx.bundle, nil)
+
+	require.Contains(t, prompt, "PROVE the skill's imports resolve")
+	require.Contains(t, prompt, "Do not reason about it")
+	require.Contains(t, prompt, installSkillDir+"/.venv/bin/python -c 'import x'")
+	require.Contains(t, prompt, "never judges an import",
+		"the agent must not expect the server to catch an unresolved import")
+	require.Contains(t, prompt, "edit_skill_file",
+		"a shipped module Python cannot find is fixed in the script, not with pip")
 }
 
 func TestBuildInstallPromptNamesOnDemandInstallerInTheArchive(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.bundle.Files["scripts/install_deps.py"] = []byte("print(1)\n")
 
-	prompt := buildInstallPrompt(installSkillDir, fx.bundle, true)
+	prompt := buildInstallPrompt(installSkillDir, fx.bundle, map[string]string{
+		"uv": "/root/.local/bin/uv", "python3": "/usr/bin/python3",
+	})
 
 	require.Contains(t, prompt, "This archive ships on-demand installer(s)")
 	require.Contains(t, prompt, "scripts/install_deps.py")
@@ -474,7 +678,9 @@ func TestBuildInstallPromptMentionsRepairedFrontmatter(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.bundle.FrontmatterRepaired = true
 
-	prompt := buildInstallPrompt(installSkillDir, fx.bundle, true)
+	prompt := buildInstallPrompt(installSkillDir, fx.bundle, map[string]string{
+		"uv": "/root/.local/bin/uv", "python3": "/usr/bin/python3",
+	})
 
 	require.Contains(t, prompt, "YAML frontmatter was automatically repaired")
 	require.Contains(t, prompt, "Mention this in your summary")
@@ -590,9 +796,10 @@ func TestInstallSkillSkipsWhenReadyWithTheSameArchive(t *testing.T) {
 	require.Empty(t, fx.sessionCalls, "the same bytes must not boot a billed sandbox")
 	require.NotContains(t, fx.events, "create-snapshot")
 	require.Nil(t, fx.configRepo.saved, "the image pointer must stay where it is")
-	require.GreaterOrEqual(t, fx.savedBundles, 1,
-		"a no-op re-upload must still refresh the stored archive for read_skill")
-	require.Equal(t, "file://bundle.zip", skill.BundleRef)
+	require.Equal(t, 1, fx.savedBundles,
+		"a no-op re-upload must not mint a second catalog object")
+	require.Empty(t, skill.BundleRef,
+		"the install row must not own a zip; readers follow CatalogID")
 	require.NotEmpty(t, skill.CatalogID,
 		"a skip must still attach the install to the workspace catalog")
 }
@@ -677,7 +884,7 @@ func TestReinstallSkillRefusesWhenTheArchiveIsGone(t *testing.T) {
 	_, err := fx.svc.ReinstallSkill(context.Background(), 7, "cfg-1", "sk-1")
 
 	require.Error(t, err)
-	require.ErrorContains(t, err, "no longer stored")
+	require.ErrorContains(t, err, "not available")
 	require.Empty(t, fx.sessionCalls, "a retry that cannot run must not boot a billed sandbox")
 }
 
@@ -1314,10 +1521,19 @@ func TestInstallSessionIgnoresATenantOverrideOfTheInstallerAgent(t *testing.T) {
 	require.Equal(t, platform.Config.SystemPrompt, fx.engineConfig.SystemPrompt,
 		"the prompt that drives a root shell is the platform's, not the tenant's")
 	require.NotContains(t, fx.engineConfig.SystemPrompt, "/root/.ssh")
-	require.Equal(t, platform.Config.AllowedTools, fx.engineConfig.AllowedTools)
+	require.Subset(t, fx.engineConfig.AllowedTools, platform.Config.AllowedTools,
+		"the tool set is the platform's, plus what an install structurally needs")
 	require.NotContains(t, fx.engineConfig.AllowedTools, tools.ToolWebSearch)
+	require.NotContains(t, fx.engineConfig.AllowedTools, tools.ToolReadSkill)
+	// Unioned in rather than read off the registry entry: an install that
+	// cannot write its own skill directory cannot record what it did, and a
+	// deployment whose platform YAML predates these tools must not lose them.
+	require.Contains(t, fx.engineConfig.AllowedTools, tools.ToolWriteSkillFile)
+	require.Contains(t, fx.engineConfig.AllowedTools, tools.ToolEditSkillFile)
 	require.Equal(t, platform.Config.MaxIterations, fx.engineConfig.MaxIterations)
 	require.True(t, fx.engineConfig.SkillInstallMode())
+	require.Equal(t, installSkillDir, fx.engineConfig.SkillInstallDir(),
+		"the file tools must be scoped to this install's own skill directory")
 	require.Equal(t, "model-agent", fx.engineModel.GetModelID(),
 		"the model is the one choice the tenant record still makes")
 }
@@ -1678,19 +1894,6 @@ const (
 		" && mkdir -p /opt/weknora/tenant/skills " + installSkillDir +
 		" && chown user:user /opt/weknora/tenant/skills " + installSkillDir +
 		" && chmod 755 /opt/weknora/tenant/skills " + installSkillDir
-
-	// The scratch wipe removes the base image's own input/output directories,
-	// so the snapshot must carry them back with the ownership the session
-	// account needs. This is the only step of an install that runs with the
-	// privileges required to set that ownership.
-	installWorkspaceRestoreCommand = "mkdir -p /workspace/input /workspace/output" +
-		" && chown user:user /workspace/input /workspace/output" +
-		" && chmod 775 /workspace/input /workspace/output"
-
-	installCacheCleanupCommand = "rm -rf " +
-		"/root/.cache/pip /root/.cache/uv /root/.npm /root/.local/share/pnpm/store " +
-		"/home/user/.cache/pip /home/user/.cache/uv /home/user/.npm " +
-		"/home/user/.local/share/pnpm/store || true"
 )
 
 // installPythonVerifyCommand is built from the same helper the install path
@@ -2098,8 +2301,14 @@ type installSkillRepo struct {
 	listSnapshotsErr error
 	// deleteSkillErr models the row delete failing past the point of no
 	// return.
-	deleteSkillErr      error
-	createErr           error
+	deleteSkillErr error
+	createErr      error
+	// updateCatalogErr models the definition row failing to commit after its
+	// new archive is already stored.
+	updateCatalogErr error
+	// createCatalogHook stands in for the insert so a test can have the unique
+	// index reject this row because another request won the name first.
+	createCatalogHook   func(*types.TenantSkillCatalogEntity) error
 	getByNameMisses     int
 	readyWriteAttempts  int
 	deleteSkillAttempts int
@@ -2488,6 +2697,9 @@ func (r *installSkillRepo) CreateCatalog(_ context.Context, e *types.TenantSkill
 	if r.catalogs == nil {
 		r.catalogs = map[string]*types.TenantSkillCatalogEntity{}
 	}
+	if r.createCatalogHook != nil {
+		return r.createCatalogHook(e)
+	}
 	cp := *e
 	r.catalogs[e.ID] = &cp
 	return nil
@@ -2532,6 +2744,9 @@ func (r *installSkillRepo) ListCatalogsByTenant(_ context.Context, tenantID uint
 func (r *installSkillRepo) UpdateCatalog(_ context.Context, e *types.TenantSkillCatalogEntity) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.updateCatalogErr != nil {
+		return r.updateCatalogErr
+	}
 	if r.catalogs == nil {
 		r.catalogs = map[string]*types.TenantSkillCatalogEntity{}
 	}
@@ -2740,7 +2955,7 @@ func (m *installSandboxManager) ExecShellCommandWithOptions(
 		m.fx.record("prepare-skill-dir")
 	case strings.HasPrefix(command, "tar -xf "):
 		m.extractSeedArchive(command)
-	case strings.HasPrefix(command, "test -f "):
+	case command == skillTreeVerifyCommand(installSkillDir, []string{"scripts/extract.py"}):
 		if !m.structureSeen {
 			m.fx.record("verify-structure")
 			m.structureSeen = true
@@ -2772,7 +2987,7 @@ func (m *installSandboxManager) ExecShellCommandWithOptions(
 		return &sandbox.ExecuteResult{
 			ExitCode: m.fx.rmExitCode, Stderr: "rm: cannot remove",
 		}, nil
-	case command == "rm -rf /workspace/* /workspace/.[!.]* || true":
+	case command == cleanImageScratchCommand():
 		m.fx.record("cleanup-workspace")
 	case strings.HasPrefix(command, "chmod -R 555 "):
 		m.fx.record("chmod")
@@ -3163,7 +3378,9 @@ func (s installFileService) SaveBytes(_ context.Context, data []byte, _ uint64, 
 		}
 		copied := make([]byte, len(data))
 		copy(copied, data)
-		s.fx.storedBundles["file://bundle.zip"] = copied
+		ref := fmt.Sprintf("file://bundle-%d.zip", s.fx.savedBundles)
+		s.fx.storedBundles[ref] = copied
+		return ref, nil
 	}
 	return "file://bundle.zip", nil
 }

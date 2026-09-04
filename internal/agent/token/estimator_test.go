@@ -1,14 +1,12 @@
 package token
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestEstimator(t *testing.T) {
@@ -82,252 +80,63 @@ func TestEstimator(t *testing.T) {
 	})
 }
 
-func TestCompressContext(t *testing.T) {
+// Thinking models (DeepSeek V3.2/V4, MiMo) require prior reasoning_content to
+// be sent back verbatim, and it typically dwarfs the visible reply. Leaving it
+// out of the estimate made a 130k context measure as 26k, so compaction cut in
+// the wrong place, freed almost nothing, and ran again every round.
+func TestEstimateMessageCountsReasoningContent(t *testing.T) {
 	e, err := NewEstimator()
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
-	t.Run("no compression needed", func(t *testing.T) {
-		messages := []chat.Message{
-			{Role: "system", Content: "system prompt"},
-			{Role: "user", Content: "hello"},
-		}
-		tokens := e.EstimateMessages(messages)
-		result := CompressContext(messages, e, 100000, tokens)
-		assert.Equal(t, messages, result)
-	})
+	reasoning := strings.Repeat("let me think about this step by step. ", 200)
+	plain := chat.Message{Role: "assistant", Content: "short answer"}
+	thinking := chat.Message{Role: "assistant", Content: "short answer", ReasoningContent: reasoning}
 
-	t.Run("preserves system and last message", func(t *testing.T) {
-		messages := []chat.Message{
-			{Role: "system", Content: "system prompt"},
-			{Role: "user", Content: strings.Repeat("old message ", 1000)},
-			{Role: "assistant", Content: strings.Repeat("old response ", 1000)},
-			{Role: "user", Content: "current query"},
-		}
-		tokens := e.EstimateMessages(messages)
-		result := CompressContext(messages, e, 100, tokens)
-		require.GreaterOrEqual(t, len(result), 2)
-		assert.Equal(t, "system", result[0].Role)
-		assert.Equal(t, "current query", result[len(result)-1].Content)
-	})
-
-	t.Run("keeps tool_call and tool_result paired", func(t *testing.T) {
-		messages := []chat.Message{
-			{Role: "system", Content: "system prompt"},
-			{Role: "user", Content: strings.Repeat("x", 500)},
-			{Role: "assistant", Content: strings.Repeat("y", 500)},
-			{Role: "assistant", Content: "thinking", ToolCalls: []chat.ToolCall{
-				{ID: "call_1", Function: chat.FunctionCall{Name: "search", Arguments: `{"q":"test"}`}},
-			}},
-			{Role: "tool", Content: strings.Repeat("result ", 100), ToolCallID: "call_1", Name: "search"},
-			{Role: "user", Content: "what did you find?"},
-		}
-
-		tokens := e.EstimateMessages(messages)
-		result := CompressContext(messages, e, 200, tokens)
-
-		b, _ := json.Marshal(result)
-		fmt.Println(string(b))
-
-		for i, msg := range result {
-			if msg.Role == "tool" {
-				require.Greater(t, i, 0)
-				assert.Equal(t, "assistant", result[i-1].Role)
-				assert.Greater(t, len(result[i-1].ToolCalls), 0)
-			}
-		}
-	})
-
-	t.Run("zero maxTokens returns unchanged", func(t *testing.T) {
-		messages := []chat.Message{
-			{Role: "system", Content: "system"},
-			{Role: "user", Content: "hello"},
-		}
-		result := CompressContext(messages, e, 0, 0)
-		assert.Equal(t, messages, result)
-	})
-
-	t.Run("two messages returns unchanged", func(t *testing.T) {
-		messages := []chat.Message{
-			{Role: "system", Content: "system"},
-			{Role: "user", Content: "hello"},
-		}
-		result := CompressContext(messages, e, 1, 999)
-		assert.Equal(t, messages, result)
-	})
-
-	t.Run("round2+: user query not at end, preserves current turn tail", func(t *testing.T) {
-		longText := strings.Repeat("filler content ", 200)
-		messages := []chat.Message{
-			{Role: "system", Content: "system prompt"},
-			// old history
-			{Role: "user", Content: longText},
-			{Role: "assistant", Content: longText},
-			{Role: "user", Content: longText},
-			{Role: "assistant", Content: longText},
-			// current turn
-			{Role: "user", Content: "current question"},
-			{Role: "assistant", Content: "let me search", ToolCalls: []chat.ToolCall{
-				{ID: "c1", Function: chat.FunctionCall{Name: "search", Arguments: `{"q":"test"}`}},
-			}},
-			{Role: "tool", Content: "search results", ToolCallID: "c1", Name: "search"},
-		}
-
-		tokens := e.EstimateMessages(messages)
-		result := CompressContext(messages, e, 300, tokens)
-
-		// System prompt preserved.
-		assert.Equal(t, "system", result[0].Role)
-		assert.Equal(t, "system prompt", result[0].Content)
-
-		// Current turn tail must be fully intact.
-		userIdx := -1
-		for i, m := range result {
-			if m.Role == "user" && m.Content == "current question" {
-				userIdx = i
-				break
-			}
-		}
-		require.NotEqual(t, -1, userIdx, "user query must be preserved")
-		require.Greater(t, len(result), userIdx+2, "assistant + tool must follow")
-		assert.Equal(t, "assistant", result[userIdx+1].Role)
-		assert.Equal(t, "let me search", result[userIdx+1].Content)
-		assert.Equal(t, "tool", result[userIdx+2].Role)
-		assert.Equal(t, "search results", result[userIdx+2].Content)
-
-		// Should be shorter than original (old history trimmed).
-		assert.Less(t, len(result), len(messages))
-	})
-
-	t.Run("round2+: multiple tool results after user query all preserved", func(t *testing.T) {
-		longText := strings.Repeat("data ", 300)
-		messages := []chat.Message{
-			{Role: "system", Content: "sys"},
-			{Role: "user", Content: longText},
-			{Role: "assistant", Content: longText},
-			// current turn with parallel tool calls
-			{Role: "user", Content: "do things"},
-			{Role: "assistant", Content: "ok", ToolCalls: []chat.ToolCall{
-				{ID: "c1", Function: chat.FunctionCall{Name: "t1"}},
-				{ID: "c2", Function: chat.FunctionCall{Name: "t2"}},
-			}},
-			{Role: "tool", Content: "res1", ToolCallID: "c1", Name: "t1"},
-			{Role: "tool", Content: "res2", ToolCallID: "c2", Name: "t2"},
-		}
-
-		tokens := e.EstimateMessages(messages)
-		result := CompressContext(messages, e, 200, tokens)
-
-		// Both tool results must be present.
-		var toolNames []string
-		for _, m := range result {
-			if m.Role == "tool" {
-				toolNames = append(toolNames, m.Name)
-			}
-		}
-		assert.Contains(t, toolNames, "t1")
-		assert.Contains(t, toolNames, "t2")
-
-		// User query preserved.
-		found := false
-		for _, m := range result {
-			if m.Content == "do things" {
-				found = true
-			}
-		}
-		assert.True(t, found)
-	})
-
-	t.Run("round2+: no history between system and user query returns unchanged", func(t *testing.T) {
-		messages := []chat.Message{
-			{Role: "system", Content: "sys"},
-			{Role: "user", Content: "hello"},
-			{Role: "assistant", Content: "thinking", ToolCalls: []chat.ToolCall{
-				{ID: "c1", Function: chat.FunctionCall{Name: "t1"}},
-			}},
-			{Role: "tool", Content: "done", ToolCallID: "c1", Name: "t1"},
-		}
-		tokens := e.EstimateMessages(messages)
-		result := CompressContext(messages, e, 10, tokens)
-		assert.Equal(t, messages, result, "no history to trim → unchanged")
-	})
-
-	t.Run("no user message at all returns unchanged", func(t *testing.T) {
-		messages := []chat.Message{
-			{Role: "system", Content: "sys"},
-			{Role: "assistant", Content: strings.Repeat("x", 1000)},
-			{Role: "assistant", Content: strings.Repeat("y", 1000)},
-		}
-		tokens := e.EstimateMessages(messages)
-		result := CompressContext(messages, e, 10, tokens)
-		// lastUserIdx defaults to len-1 (last msg), history = messages[1:last] = [assistant]
-		// This still does its best—the important thing is it doesn't panic.
-		assert.NotNil(t, result)
-	})
-
-	t.Run("round2+: tool pair in history never split", func(t *testing.T) {
-		longText := strings.Repeat("verbose ", 200)
-		messages := []chat.Message{
-			{Role: "system", Content: "sys"},
-			// old turn 1
-			{Role: "user", Content: "old query 1"},
-			{Role: "assistant", Content: longText, ToolCalls: []chat.ToolCall{
-				{ID: "old1", Function: chat.FunctionCall{Name: "old_tool"}},
-			}},
-			{Role: "tool", Content: longText, ToolCallID: "old1", Name: "old_tool"},
-			// old turn 2
-			{Role: "user", Content: "old query 2"},
-			{Role: "assistant", Content: "short reply"},
-			// current turn
-			{Role: "user", Content: "current"},
-			{Role: "assistant", Content: "working", ToolCalls: []chat.ToolCall{
-				{ID: "new1", Function: chat.FunctionCall{Name: "new_tool"}},
-			}},
-			{Role: "tool", Content: "result", ToolCallID: "new1", Name: "new_tool"},
-		}
-
-		tokens := e.EstimateMessages(messages)
-		result := CompressContext(messages, e, 300, tokens)
-
-		// Verify no orphaned tool message: every "tool" msg must be preceded by
-		// an assistant with tool_calls.
-		for i, m := range result {
-			if m.Role == "tool" {
-				require.Greater(t, i, 0, "tool message at index 0 is impossible")
-				prev := result[i-1]
-				isPairedTool := prev.Role == "tool"
-				isPairedAssistant := prev.Role == "assistant" && len(prev.ToolCalls) > 0
-				assert.True(t, isPairedTool || isPairedAssistant,
-					"tool message at %d must be preceded by assistant+tool_calls or another tool, got %s", i, prev.Role)
-			}
-		}
-	})
+	assert.Greater(t, e.EstimateMessage(&thinking), e.EstimateMessage(&plain)+1000,
+		"reasoning content must be counted, it is sent on the wire")
+	assert.InDelta(t, e.EstimateString(reasoning),
+		e.EstimateMessage(&thinking)-e.EstimateMessage(&plain), 2)
 }
 
-func TestGroupToolMessages(t *testing.T) {
-	t.Run("standalone messages", func(t *testing.T) {
-		messages := []chat.Message{
-			{Role: "user", Content: "hello"},
-			{Role: "assistant", Content: "hi"},
-		}
-		groups := groupToolMessages(messages)
-		assert.Len(t, groups, 2)
-	})
+// Providers bill images by tile count, so neither a short https:// URL nor a
+// megabyte data URI says anything useful about the cost.
+func TestEstimateMessageCountsImages(t *testing.T) {
+	e, err := NewEstimator()
+	assert.NoError(t, err)
 
-	t.Run("tool call with results grouped", func(t *testing.T) {
-		messages := []chat.Message{
-			{Role: "user", Content: "search for X"},
-			{Role: "assistant", Content: "thinking", ToolCalls: []chat.ToolCall{
-				{ID: "call_1", Function: chat.FunctionCall{Name: "search"}},
-				{ID: "call_2", Function: chat.FunctionCall{Name: "fetch"}},
-			}},
-			{Role: "tool", Content: "result1", ToolCallID: "call_1"},
-			{Role: "tool", Content: "result2", ToolCallID: "call_2"},
-			{Role: "user", Content: "thanks"},
-		}
-		groups := groupToolMessages(messages)
-		assert.Len(t, groups, 3)
-		assert.Len(t, groups[1], 3)
-		b, _ := json.Marshal(groups)
-		fmt.Println(string(b))
-	})
+	withImages := chat.Message{Role: "user", Content: "what is this", Images: []string{"https://x/a.png"}}
+	assert.Greater(t, e.EstimateMessage(&withImages), estimatedImageTokens)
+
+	multi := chat.Message{Role: "user", MultiContent: []chat.MessageContentPart{
+		{Type: "text", Text: "describe"},
+		{Type: "image_url", ImageURL: &chat.ImageURL{URL: "data:image/png;base64,AAAA"}},
+	}}
+	assert.Greater(t, e.EstimateMessage(&multi), estimatedImageTokens)
+
+	// MultiContent is the representation actually sent; counting Images too
+	// would bill the same picture twice.
+	both := chat.Message{
+		Role:         "user",
+		Images:       []string{"https://x/a.png"},
+		MultiContent: multi.MultiContent,
+	}
+	assert.Equal(t, e.EstimateMessage(&multi), e.EstimateMessage(&both))
+}
+
+// Tool schemas are part of the billed prompt but never appear in the message
+// list, so omitting them biases every estimate low by a constant.
+func TestEstimateTools(t *testing.T) {
+	e, err := NewEstimator()
+	assert.NoError(t, err)
+
+	assert.Zero(t, e.EstimateTools(nil))
+	tools := []chat.Tool{{
+		Type: "function",
+		Function: chat.FunctionDef{
+			Name:        "shell_exec",
+			Description: strings.Repeat("run a shell command in the sandbox. ", 20),
+			Parameters:  []byte(`{"type":"object","properties":{"command":{"type":"string"}}}`),
+		},
+	}}
+	assert.Greater(t, e.EstimateTools(tools), 100)
 }

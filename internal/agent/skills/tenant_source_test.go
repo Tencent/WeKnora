@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -69,7 +70,7 @@ func TestTenantSkillSourceBasePathIsTheImageDir(t *testing.T) {
 func TestTenantSkillSourceHidesUnusableSkillsFromEveryLookup(t *testing.T) {
 	src := NewTenantSkillSource([]*types.TenantSkillEntity{
 		{ID: "sk-2", Name: "ready-disabled", Status: types.SkillStatusReady, Enabled: false},
-	}, func(string) ([]byte, error) { return nil, errors.New("must not be called") })
+	}, func(*types.TenantSkillEntity) ([]byte, error) { return nil, errors.New("must not be called") })
 
 	_, err := src.GetSkillBasePath("ready-disabled")
 	require.Error(t, err)
@@ -90,7 +91,7 @@ func TestTenantSkillSourceLoadsInstructionsFromTheRow(t *testing.T) {
 		ID: "sk-1", Name: "pdf", Description: "PDF helpers",
 		Instructions: "Run scripts/extract.py.",
 		Status:       types.SkillStatusReady, Enabled: true,
-	}}, func(string) ([]byte, error) { return nil, errors.New("must not be called") })
+	}}, func(*types.TenantSkillEntity) ([]byte, error) { return nil, errors.New("must not be called") })
 
 	skill, err := src.LoadSkillInstructions("pdf")
 
@@ -113,8 +114,8 @@ func TestTenantSkillSourceReadsLevel3FilesFromTheBundle(t *testing.T) {
 	src := NewTenantSkillSource([]*types.TenantSkillEntity{{
 		ID: "sk-1", Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
 		BundleRef: "local://sk-1.zip", BundleSHA256: "sha-1",
-	}}, func(ref string) ([]byte, error) {
-		require.Equal(t, "local://sk-1.zip", ref)
+	}}, func(row *types.TenantSkillEntity) ([]byte, error) {
+		require.Equal(t, "local://sk-1.zip", row.BundleRef)
 		return archive, nil
 	})
 
@@ -143,7 +144,7 @@ func TestTenantSkillSourceDownloadsEachBundleOnce(t *testing.T) {
 	src := NewTenantSkillSource([]*types.TenantSkillEntity{{
 		ID: "sk-1", Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
 		BundleRef: "local://sk-1.zip", BundleSHA256: "sha-1",
-	}}, func(string) ([]byte, error) {
+	}}, func(*types.TenantSkillEntity) ([]byte, error) {
 		downloads++
 		return archive, nil
 	})
@@ -161,7 +162,7 @@ func TestTenantSkillSourceRefusesPathsOutsideTheSkill(t *testing.T) {
 	src := NewTenantSkillSource([]*types.TenantSkillEntity{{
 		ID: "sk-1", Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
 		BundleRef: "local://sk-1.zip",
-	}}, func(string) ([]byte, error) {
+	}}, func(*types.TenantSkillEntity) ([]byte, error) {
 		return nil, errors.New("must not be called")
 	})
 
@@ -371,6 +372,70 @@ func preloadedSkillDir(t *testing.T, name, description string) string {
 	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "scripts", "run.py"),
 		[]byte("print('preloaded')\n"), 0o644))
 	return root
+}
+
+func TestTenantSkillSourceCacheKeepsOneOversizeArchive(t *testing.T) {
+	src := NewTenantSkillSource(nil, nil)
+	src.store("small", bytes.Repeat([]byte("s"), 32))
+	src.store("big", bytes.Repeat([]byte("b"), cachedBundleBytes+1))
+
+	require.Equal(t, bytes.Repeat([]byte("b"), cachedBundleBytes+1), src.cached("big"))
+	require.Nil(t, src.cached("small"),
+		"a zip over the keep-around budget must not sit next to other entries")
+}
+
+// The agent reads the same archive the install accepted, so the two have to
+// count it the same way. Counting raw zip entries against the skill-file cap
+// rejects bundles the install took — directory entries alone can carry a real
+// skill past 20k — and read_skill then fails on an install that works.
+const bundleIndexSkillMD = "---\nname: pdf\ndescription: d\n---\nbody\n"
+
+func TestSkillBundleFileIndexCountsFilesTheWayTheInstallDid(t *testing.T) {
+	files := map[string]string{"repo-main/" + SkillFileName: bundleIndexSkillMD}
+	for i := 0; i < maxBundleEntries-1; i++ {
+		files[fmt.Sprintf("repo-main/templates/asset-%d.txt", i)] = ""
+	}
+	// Directory entries push the raw count past the skill-file cap without
+	// adding a single file the skill is made of.
+	dirs := make([]string, 0, 2000)
+	for i := 0; i < 2000; i++ {
+		dirs = append(dirs, fmt.Sprintf("repo-main/templates/dir-%d/", i))
+	}
+
+	index, err := skillBundleFileIndex(zipArchiveWithDirs(t, files, dirs))
+
+	require.NoError(t, err)
+	require.Len(t, index, maxBundleEntries)
+	require.Contains(t, index, SkillFileName)
+}
+
+func TestSkillBundleFileIndexRejectsMoreSkillFilesThanTheCap(t *testing.T) {
+	files := map[string]string{"repo-main/" + SkillFileName: bundleIndexSkillMD}
+	for i := 0; i < maxBundleEntries; i++ {
+		files[fmt.Sprintf("repo-main/templates/asset-%d.txt", i)] = ""
+	}
+
+	_, err := skillBundleFileIndex(zipArchiveWithDirs(t, files, nil))
+
+	require.ErrorContains(t, err, "more than 20000 files")
+}
+
+func zipArchiveWithDirs(t *testing.T, files map[string]string, dirs []string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	writer := zip.NewWriter(&buf)
+	for _, name := range dirs {
+		_, err := writer.Create(name)
+		require.NoError(t, err)
+	}
+	for name, content := range files {
+		entry, err := writer.Create(name)
+		require.NoError(t, err)
+		_, err = entry.Write([]byte(content))
+		require.NoError(t, err)
+	}
+	require.NoError(t, writer.Close())
+	return buf.Bytes()
 }
 
 func zipArchive(t *testing.T, files map[string]string) []byte {

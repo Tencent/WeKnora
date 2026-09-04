@@ -46,6 +46,99 @@ func TestListSkillFilesReportsMissingBundle(t *testing.T) {
 	require.Equal(t, 404, appErr.HTTPCode)
 }
 
+func TestListSkillFilesUsesCatalogWhenInstallHasNoRef(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	archive, err := zipSkillFiles(map[string][]byte{
+		"SKILL.md":           []byte(validSkillMD),
+		"scripts/extract.py": []byte("print('hi')\n"),
+	})
+	require.NoError(t, err)
+	fx.storedBundles = map[string][]byte{"file://catalog.zip": archive}
+	require.NoError(t, fx.skillRepo.CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
+		ID: "cat-1", TenantID: 7, Name: "pdf-tools",
+		BundleRef: "file://catalog.zip", BundleSHA256: skillArchiveSHA256(archive),
+	}))
+	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	skill.CatalogID = "cat-1"
+	skill.BundleRef = ""
+	skill.BundleSHA256 = skillArchiveSHA256(archive)
+	skill.Status = types.SkillStatusReady
+	require.NoError(t, fx.skillRepo.UpdateSkill(ctx, skill))
+
+	files, err := fx.svc.ListSkillFiles(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+}
+
+// A definition is mutable and an installation is not: registering the skill
+// again replaces the catalog object while this sandbox keeps running the image
+// built from the previous one. Answering with the newer tree would describe
+// files the image does not have.
+func TestListSkillFilesRefusesACatalogArchiveTheInstallWasNotBuiltFrom(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	updated, err := zipSkillFiles(map[string][]byte{
+		"SKILL.md":           []byte(validSkillMD),
+		"scripts/extract.py": []byte("print('v2')\n"),
+	})
+	require.NoError(t, err)
+	fx.storedBundles = map[string][]byte{"file://catalog.zip": updated}
+	require.NoError(t, fx.skillRepo.CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
+		ID: "cat-1", TenantID: 7, Name: "pdf-tools",
+		BundleRef: "file://catalog.zip", BundleSHA256: skillArchiveSHA256(updated),
+	}))
+	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	skill.CatalogID = "cat-1"
+	skill.BundleRef = ""
+	skill.BundleSHA256 = strings.Repeat("d", 64)
+	skill.Status = types.SkillStatusReady
+	require.NoError(t, fx.skillRepo.UpdateSkill(ctx, skill))
+
+	_, err = fx.svc.ListSkillFiles(ctx, 7, "cfg-1", "sk-1")
+	require.Error(t, err)
+	appErr, ok := apperrors.IsAppError(err)
+	require.True(t, ok)
+	require.Equal(t, 404, appErr.HTTPCode)
+}
+
+// The definition's copy is downloaded once per browse the same way a row's own
+// object is: the settings drawer lists the tree and then opens files out of it,
+// and ppt-master-sized archives cannot be pulled again on every click.
+func TestListAndReadSkillFilesDownloadTheCatalogArchiveOnce(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	archive, err := zipSkillFiles(map[string][]byte{
+		"SKILL.md":           []byte(validSkillMD),
+		"scripts/extract.py": []byte("print('hi')\n"),
+	})
+	require.NoError(t, err)
+	fx.storedBundles = map[string][]byte{"file://catalog.zip": archive}
+	require.NoError(t, fx.skillRepo.CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
+		ID: "cat-1", TenantID: 7, Name: "pdf-tools",
+		BundleRef: "file://catalog.zip", BundleSHA256: skillArchiveSHA256(archive),
+	}))
+	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	skill.CatalogID = "cat-1"
+	skill.BundleRef = ""
+	skill.BundleSHA256 = skillArchiveSHA256(archive)
+	skill.Status = types.SkillStatusReady
+	require.NoError(t, fx.skillRepo.UpdateSkill(ctx, skill))
+
+	files, err := fx.svc.ListSkillFiles(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	_, err = fx.svc.ReadSkillFile(ctx, 7, "cfg-1", "sk-1", "SKILL.md")
+	require.NoError(t, err)
+	_, err = fx.svc.ReadSkillFile(ctx, 7, "cfg-1", "sk-1", "scripts/extract.py")
+	require.NoError(t, err)
+
+	require.Equal(t, int32(1), fx.getFileCalls.Load())
+}
+
 func TestReadSkillFileReturnsTextContent(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.seedStoredSkillBundle(t)
@@ -56,6 +149,38 @@ func TestReadSkillFileReturnsTextContent(t *testing.T) {
 	require.Equal(t, skillFileEncodingUTF8, file.Encoding)
 	require.Equal(t, "print('hi')\n", file.Content)
 	require.False(t, file.Binary)
+}
+
+func TestSkillBundleArchiveCacheKeepsOversizeAsSoleOccupant(t *testing.T) {
+	c := &skillBundleArchiveCache{slots: 4, maxBytes: 8}
+	c.put("small", []byte("abcd"))
+	c.put("big", []byte("0123456789"))
+
+	require.Equal(t, []byte("0123456789"), c.get("big"))
+	require.Nil(t, c.get("small"),
+		"a zip over the keep-around budget must not sit next to other entries")
+}
+
+func TestSkillBundleArchiveCacheEvictsToStayUnderBudget(t *testing.T) {
+	c := &skillBundleArchiveCache{slots: 4, maxBytes: 8}
+	c.put("a", []byte("aaaa"))
+	c.put("b", []byte("bbbb"))
+	c.put("c", []byte("cccc"))
+
+	require.Equal(t, []byte("cccc"), c.get("c"))
+	require.Equal(t, []byte("bbbb"), c.get("b"))
+	require.Nil(t, c.get("a"))
+}
+
+func TestSkillBundleArchiveCacheRespectsSlotCount(t *testing.T) {
+	c := &skillBundleArchiveCache{slots: 2, maxBytes: 100}
+	c.put("a", []byte("a"))
+	c.put("b", []byte("b"))
+	c.put("c", []byte("c"))
+
+	require.Nil(t, c.get("a"))
+	require.Equal(t, []byte("c"), c.get("c"))
+	require.Equal(t, []byte("b"), c.get("b"))
 }
 
 func TestListAndReadSkillFilesDownloadTheBundleOnce(t *testing.T) {

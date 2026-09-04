@@ -76,6 +76,24 @@ func TestUseCustomSystemPromptFlag(t *testing.T) {
 	}
 }
 
+// The window the agent plans against must come from the model when the model
+// knows it. Assuming a window wider than the real one means compaction never
+// runs and the provider rejects the request instead.
+func TestAgentMaxContextTokens(t *testing.T) {
+	if got := AgentMaxContextTokens(0, 0); got != DefaultMaxContextTokens {
+		t.Fatalf("nothing known = %d, want %d", got, DefaultMaxContextTokens)
+	}
+	if got := AgentMaxContextTokens(0, 32768); got != 32768 {
+		t.Fatalf("model window unused: got %d, want 32768", got)
+	}
+	if got := AgentMaxContextTokens(64000, 32768); got != 64000 {
+		t.Fatalf("explicit agent setting must win, got %d", got)
+	}
+	if got := AgentMaxContextTokens(64000, 0); got != 64000 {
+		t.Fatalf("explicit agent setting with unknown model = %d, want 64000", got)
+	}
+}
+
 func TestAgentRoundMaxCompletionTokens(t *testing.T) {
 	if got := AgentRoundMaxCompletionTokens(0); got != DefaultSmartReasoningMaxCompletionTokens {
 		t.Fatalf("zero configured = %d, want %d", got, DefaultSmartReasoningMaxCompletionTokens)
@@ -89,8 +107,18 @@ func TestAgentRoundMaxCompletionTokens(t *testing.T) {
 	if got := AgentRoundMaxCompletionTokens(4096); got != 4096 {
 		t.Fatalf("explicit 4096 = %d, want 4096", got)
 	}
-	if got := AgentRoundMaxCompletionTokensFor(4096, "cfg-a"); got != 4096 {
-		t.Fatalf("explicit 4096 with sandbox must stay 4096, got %d", got)
+	// With a sandbox bound, a cap this small cannot hold a file body inside the
+	// tool-call JSON, so every write truncates mid-string and the agent can
+	// never finish. The floor makes the setting survivable rather than a
+	// deadlock.
+	if got := AgentRoundMaxCompletionTokensFor(4096, "cfg-a"); got != MinSandboxWriteCompletionTokens {
+		t.Fatalf("explicit 4096 with sandbox = %d, want floor %d", got, MinSandboxWriteCompletionTokens)
+	}
+	if got := AgentRoundMaxCompletionTokensFor(32768, "cfg-a"); got != 32768 {
+		t.Fatalf("explicit value above the floor must be honored, got %d", got)
+	}
+	if got := AgentRoundMaxCompletionTokens(4096); got != 4096 {
+		t.Fatalf("no sandbox means no floor, got %d", got)
 	}
 	if got := AgentRoundMaxCompletionTokens(64000); got != 64000 {
 		t.Fatalf("explicit high value = %d, want 64000", got)

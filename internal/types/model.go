@@ -31,6 +31,63 @@ const (
 	ModelStatusDownloadFailed ModelStatus = "download_failed" // Model download failed
 )
 
+// ModelUsageBinding is a stable API identifier for one configuration field
+// that references a model. Clients localize these values; repository column
+// names and JSON paths must not leak into the response contract.
+type ModelUsageBinding string
+
+// Model usage binding constants identify supported model-reference roles.
+const (
+	ModelUsageBindingEmbeddingModel       ModelUsageBinding = "embedding_model"
+	ModelUsageBindingSummaryModel         ModelUsageBinding = "summary_model"
+	ModelUsageBindingImageProcessingModel ModelUsageBinding = "image_processing_model"
+	ModelUsageBindingVLMModel             ModelUsageBinding = "vlm_model"
+	ModelUsageBindingASRModel             ModelUsageBinding = "asr_model"
+	ModelUsageBindingWikiSynthesisModel   ModelUsageBinding = "wiki_synthesis_model"
+	ModelUsageBindingChatModel            ModelUsageBinding = "chat_model"
+	ModelUsageBindingRerankModel          ModelUsageBinding = "rerank_model"
+	ModelUsageBindingQueryUnderstandModel ModelUsageBinding = "query_understand_model"
+	ModelUsageBindingFollowUpModel        ModelUsageBinding = "follow_up_model"
+	ModelUsageBindingExtractModel         ModelUsageBinding = "extract_model"
+)
+
+// ModelUsageResource is the minimal, non-sensitive projection returned when a
+// knowledge base or agent prevents model deletion.
+type ModelUsageResource struct {
+	ID       string              `json:"id"`
+	Name     string              `json:"name"`
+	Bindings []ModelUsageBinding `json:"bindings"`
+}
+
+// ModelUsageMemory describes workspace-level long-term-memory model pins.
+type ModelUsageMemory struct {
+	Bindings []ModelUsageBinding `json:"bindings"`
+}
+
+// ModelUsageListLimit caps how many knowledge bases or agents are listed in a
+// model-in-use error. Totals are returned separately so the cap cannot
+// under-count the references that actually block deletion.
+const ModelUsageListLimit = 50
+
+// ModelUsageDetails explains every active tenant-scoped reference that blocks
+// model deletion. KnowledgeBases and Agents may be truncated to
+// ModelUsageListLimit entries; KnowledgeBaseTotal and AgentTotal are the
+// untruncated counts used by the deletion guard and UI headings.
+type ModelUsageDetails struct {
+	KnowledgeBases     []ModelUsageResource `json:"knowledge_bases"`
+	Agents             []ModelUsageResource `json:"agents"`
+	LongTermMemory     ModelUsageMemory     `json:"long_term_memory"`
+	KnowledgeBaseTotal int64                `json:"knowledge_base_total"`
+	AgentTotal         int64                `json:"agent_total"`
+}
+
+// InUse reports whether at least one active object references the model.
+func (d ModelUsageDetails) InUse() bool {
+	return d.KnowledgeBaseTotal > 0 || d.AgentTotal > 0 ||
+		len(d.KnowledgeBases) > 0 || len(d.Agents) > 0 ||
+		len(d.LongTermMemory.Bindings) > 0
+}
+
 // ModelSource represents the source of the model
 type ModelSource string
 
@@ -77,6 +134,15 @@ type ModelParameters struct {
 	// 保留字段（Authorization、api-key、Content-Type、Accept 等）会在运行期被忽略以避免破坏签名/鉴权流程。
 	CustomHeaders  map[string]string `yaml:"custom_headers,omitempty" json:"custom_headers,omitempty"`
 	SupportsVision bool              `yaml:"supports_vision"      json:"supports_vision"` // Whether the model accepts image/multimodal input
+	// ContextWindow is the model's total context window in tokens and
+	// MaxOutputTokens the most it emits in one response. Both are provider
+	// facts the agent cannot discover but has to act on: the context window is
+	// what decides when conversation history gets compacted, and assuming a
+	// window larger than the real one means compaction never fires and the
+	// provider rejects the request mid-conversation instead. 0 means unknown,
+	// which falls back to DefaultMaxContextTokens.
+	ContextWindow   int `yaml:"context_window,omitempty"    json:"context_window,omitempty"`
+	MaxOutputTokens int `yaml:"max_output_tokens,omitempty" json:"max_output_tokens,omitempty"`
 	// MaxConcurrency caps concurrent in-flight BACKGROUND (ingestion /
 	// enrichment) calls to THIS specific model, keyed by model ID and shared
 	// across all replicas. 0 (the default) means "fall back to the

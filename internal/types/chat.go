@@ -119,6 +119,16 @@ func mergeUnreportedCacheStatus(accumulated, incoming PromptCacheStatus) PromptC
 	return PromptCacheStatusUnreported
 }
 
+// PromptCacheHitRate returns cache-read tokens as a percentage of the
+// provider's prompt total. Zero when the prompt is empty. A ReAct turn that
+// reuses the system prefix therefore reads as a high hit rather than a miss.
+func (u TokenUsage) PromptCacheHitRate() float64 {
+	if u.PromptTokens <= 0 {
+		return 0
+	}
+	return float64(u.CacheReadTokens) / float64(u.PromptTokens) * 100
+}
+
 // Value persists the usage as a jsonb column (assistant messages carry the
 // turn's aggregate); nil writes SQL NULL. Mirrors the nullable-pointer
 // pattern APIPrincipalConfig uses.
@@ -240,6 +250,11 @@ const (
 	// MemoryRecalled: the long-term memories injected into this answer, so
 	// the UI can show and let the user delete what influenced it.
 	ResponseTypeMemoryRecalled ResponseType = "memory_recalled"
+	// ResponseTypeContextCompacted is older conversation summarized away to
+	// fit the context window. Surfaced because it changes what the agent
+	// remembers — an answer that forgets an earlier instruction is otherwise
+	// indistinguishable from the model ignoring it.
+	ResponseTypeContextCompacted ResponseType = "context_compacted"
 	// ResponseTypeInstallPrompt is the instruction a skill install handed to
 	// the installer agent. Only the skill install transcript emits this, and
 	// it emits it first, so replaying the log alone shows what was asked for
@@ -249,6 +264,12 @@ const (
 )
 
 // StreamResponse stream response
+// FinishReasonIncomplete marks a stream that broke before the provider sent a
+// finish reason (read error, timeout, stall). Whatever content and tool calls
+// were collected are a partial response: callers must not treat them as a
+// completed turn.
+const FinishReasonIncomplete = "incomplete"
+
 type StreamResponse struct {
 	ID                  string                 `json:"id"`
 	ResponseType        ResponseType           `json:"response_type"`

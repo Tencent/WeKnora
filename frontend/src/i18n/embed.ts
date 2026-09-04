@@ -355,7 +355,8 @@ const messages = {
         "truncated": "列表已截断",
         "wrote": "已写入",
         "edited": "已编辑",
-        "replacements": "替换 {count} 处"
+        "replacements": "替换 {count} 处",
+        "moreLines": "另有 {count} 行"
       },
       "shellExec": {
         "workDir": "目录",
@@ -881,7 +882,8 @@ const messages = {
         "truncated": "List truncated",
         "wrote": "Wrote",
         "edited": "Edited",
-        "replacements": "Replaced {count}"
+        "replacements": "Replaced {count}",
+        "moreLines": "{count} more lines"
       },
       "shellExec": {
         "workDir": "Directory",

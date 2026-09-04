@@ -389,7 +389,7 @@ func withWorkspaceEnvDefaults(env map[string]string) map[string]string {
 func executionOutputDir(cfg *ExecuteConfig) string {
 	if cfg != nil && cfg.Env != nil {
 		if dir := strings.TrimSpace(cfg.Env[skillOutputEnvVar]); dir != "" {
-			if clean, err := cleanSessionWorkDir(dir, false); err == nil {
+			if clean, ok := ValidatedSessionOutputDir(dir); ok {
 				return clean
 			}
 		}
@@ -899,7 +899,10 @@ func (m *SessionBoundManager) lookupSessionHandle(
 	if binding == nil || binding.Provider != m.client.Provider() {
 		return nil, false, nil
 	}
-	handle, err := m.client.Connect(ctx, binding.SandboxID)
+	handle, err := m.client.Connect(ctx, RemoteConnectRequest{
+		SandboxID:          binding.SandboxID,
+		TrafficAccessToken: binding.TrafficAccessToken,
+	})
 	if err != nil {
 		if CanReplaceRemoteBinding(err) {
 			return nil, false, nil
@@ -910,6 +913,7 @@ func (m *SessionBoundManager) lookupSessionHandle(
 		handle.Provider() != m.client.Provider() {
 		return nil, false, errors.New("sandbox: remote handle does not match binding")
 	}
+	persistInboundToken(ctx, m.bindings, key, *binding, handle)
 	return handle, true, nil
 }
 
@@ -1088,6 +1092,7 @@ func buildSessionCreateRequest(provider RemoteProvider, cfg *Config) (RemoteCrea
 		return RemoteCreateRequest{
 			TemplateID: cfg.CubeTemplate,
 			EnvVars:    envVars,
+			Network:    cfg.Network,
 			Timeout: RemoteTimeoutPolicy{
 				Mode:       RemoteTimeoutExplicit,
 				Value:      ttl,
@@ -1104,6 +1109,7 @@ func buildSessionCreateRequest(provider RemoteProvider, cfg *Config) (RemoteCrea
 		return RemoteCreateRequest{
 			TemplateID: cfg.E2BTemplate,
 			EnvVars:    envVars,
+			Network:    cfg.Network,
 			Timeout: RemoteTimeoutPolicy{
 				Mode:       RemoteTimeoutExplicit,
 				Value:      ttl,
@@ -1117,9 +1123,13 @@ func buildSessionCreateRequest(provider RemoteProvider, cfg *Config) (RemoteCrea
 		if ttl <= 0 {
 			ttl = DefaultDockerIdleTTL
 		}
+		// Docker can only honour the overall egress switch (see
+		// DockerRemoteClient.networkMode); the allow / deny lists are
+		// rejected at save time so they cannot arrive here.
 		return RemoteCreateRequest{
 			TemplateID: cfg.DockerImage,
 			EnvVars:    envVars,
+			Network:    cfg.Network,
 			Timeout: RemoteTimeoutPolicy{
 				Mode:  RemoteTimeoutExplicit,
 				Value: ttl,

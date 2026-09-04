@@ -1,32 +1,36 @@
-"""Verify that an installed skill's Python sources can be loaded in this image.
+"""Verify that an installed skill's Python sources are well-formed in this image.
 
 Run inside the sandbox, by the interpreter a real skill call would use, as the
 ordinary execution user, after the tree has been given its final permissions:
 
     python3 - <skill-dir> <script> [<script> ...] [--optional <script> ...]
 
-Nothing here executes the skill's own code. Everything it reports is decided
-from the parse tree and from what the environment can resolve, so a skill that
-writes files or calls the network on import cannot do either while being
-checked, and a script that never learned --help cannot be failed for it.
+Nothing here executes the skill's own code, and nothing here decides whether an
+import will resolve.
 
-Loadability follows Python's import rules, not "this file as isolated
-__main__". A file's import prefixes are its own directory plus every ancestor
-up to the skill root, because any of those can be sys.path[0]: either the
-bundle ships a script there (the runtime hands `python <file>` a directory),
-or the file put it there itself. A sibling subtree is never an ancestor, so
-vendor/requests.py still cannot make `import requests` look satisfied to a
-script under scripts/.
+Import resolution used to live in this file, and it is gone on purpose. Whether
+`import helper` works depends on what the script does to sys.path before it
+runs — an idiom no static evaluator can enumerate: a guarded insert, a path
+constant imported from a sibling module, a value read from the environment, a
+mutation inside a helper function. Every approximation of that rejected skills
+that run perfectly, and a rejected install throws away the dependency work that
+succeeded and leaves the previous image serving. The installer agent has a root
+shell and the real interpreter, so proving an import resolves is its job: it can
+run the import instead of guessing at it.
 
-Findings are graded, because rejecting an install is expensive: it throws away
-minutes of dependency work and leaves the previous image serving.
+What remains is what a file, not a runtime, can settle:
+
+    - the execution user can read every source file
+    - every source file parses
+    - every distribution the manifests name is installed in the venv
+
+Findings are graded, because rejecting an install is expensive.
 
     stdout  `note: ...` lines - reported, image kept
     stderr  problem lines - the install is refused
     exit 0  the image may be kept
-    exit 1  a problem no installer round can fix: a syntax error, a file the
-            execution user cannot read, a relative import that can never
-            resolve
+    exit 1  a problem no installer round can fix: a syntax error, or a file the
+            execution user cannot read
     exit 2  every problem is a dependency missing from this image, so handing
             these lines back to the installer is worth a round
 
@@ -36,7 +40,6 @@ tests/ directory must not decide whether the skill installs.
 """
 
 import ast
-import importlib.util
 import os
 import re
 import sys
@@ -67,11 +70,6 @@ notes = []
 # help or if the bundle itself has to change.
 unrepairable = False
 
-# The directories the bundle actually ships a script in. A prefix that is one
-# of these is reachable on its own, because the runtime can be asked to execute
-# a file there; any other prefix is only on sys.path if the skill puts it there.
-script_dirs = {os.path.dirname(os.path.join(root, rel)) for rel in all_scripts}
-
 
 def add_problem(message, repairable=False):
     global unrepairable
@@ -93,158 +91,6 @@ def note_instead_of_problem(message, repairable=False):
     a note never influences the exit code.
     """
     add_note("%s (auxiliary file; this does not fail the install)" % message)
-
-
-def under_root(candidate):
-    return candidate == root or candidate.startswith(root + os.sep)
-
-
-def is_package(directory):
-    """Whether directory is a regular Python package.
-
-    Only __init__.py counts, and only the relative-import check needs it: a
-    `from . import x` in a directory without one can never resolve when the
-    file is run directly. Absolute imports do not consult this, because a
-    PEP 420 namespace package has no __init__.py and is still importable.
-    """
-    return os.path.isfile(os.path.join(directory, "__init__.py"))
-
-
-def module_exists(base, dotted):
-    """Whether a dotted name resolves to a file or package under base."""
-    target = os.path.join(base, *dotted.split(".")) if dotted else base
-    return os.path.isfile(target + ".py") or os.path.isfile(
-        os.path.join(target, "__init__.py")
-    )
-
-
-def import_search_dirs(script_path):
-    """Every directory that could be sys.path[0] when this file is loaded.
-
-    Its own directory comes first: execute_skill_script runs `python <file>`.
-    Each ancestor up to the skill root follows, because that is what makes a
-    neighbouring entry script's imports resolve - Python puts the directory of
-    the script it was handed on the path, and a package below that directory,
-    regular or namespace, is importable from there. It is also where the
-    `sys.path.insert(0, parent)` idiom lands, which cannot be seen without
-    executing the file.
-
-    Over-approximating here rejects nothing that works. Under-approximating
-    rejected the official office toolkit, whose library modules import their
-    sibling packages by short name.
-    """
-    current = os.path.dirname(os.path.abspath(script_path))
-    dirs = []
-    while under_root(current):
-        if current not in dirs:
-            dirs.append(current)
-        parent = os.path.dirname(current)
-        if parent == current:
-            break
-        current = parent
-    return dirs
-
-
-def find_spec_with(name, prefixes):
-    """Whether find_spec resolves name with prefixes ahead of sys.path.
-
-    find_spec consults the finders without importing, so a missing dependency
-    is reported without the side effects of loading a present one. Only
-    top-level names are ever queried: find_spec on a dotted name imports the
-    parent package, which would run the skill's own module body.
-    """
-    saved = sys.path[:]
-    try:
-        for directory in reversed(prefixes):
-            sys.path.insert(0, directory)
-        return importlib.util.find_spec(name) is not None
-    except Exception:
-        return False
-    finally:
-        sys.path[:] = saved
-
-
-def resolve_top_level(name, script_path):
-    """How a top-level name resolves for this file.
-
-    "image"      the venv, the standard library, or a directory the bundle
-                 ships a script in - something the runtime reaches on its own.
-    "unattested" only a directory that ships no script of its own can provide
-                 it, so it is on sys.path only if the file puts it there. That
-                 is unprovable without executing, so it is reported rather
-                 than trusted or refused.
-    ""           nothing in this image can provide it.
-    """
-    dirs = import_search_dirs(script_path)
-    attested = [directory for directory in dirs if directory in script_dirs]
-    if find_spec_with(name, attested):
-        return "image"
-    if len(attested) != len(dirs) and find_spec_with(name, dirs):
-        return "unattested"
-    return ""
-
-
-def check_imports(rel, tree, script_path, report):
-    """Check the imports that loading this file is guaranteed to execute.
-
-    Only statements at module level are checked, and only unconditionally: an
-    import nested in try/except, in an `if`, or inside a function is how a
-    skill declares an optional or lazily loaded dependency, and failing an
-    install over one would reject a working skill.
-    """
-    script_dir = os.path.dirname(script_path)
-    for node in tree.body:
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                check_absolute_import(rel, alias.name, script_path, report)
-        elif isinstance(node, ast.ImportFrom):
-            if node.level:
-                check_relative_import(rel, node, script_dir, report)
-            elif node.module:
-                check_absolute_import(rel, node.module, script_path, report)
-
-
-def check_absolute_import(rel, dotted, script_path, report):
-    name = dotted.split(".")[0]
-    origin = resolve_top_level(name, script_path)
-    if origin == "image":
-        return
-    if origin == "unattested":
-        add_note(
-            "%s imports %s, which the skill ships but no directory it executes "
-            "scripts from can reach; it resolves only if the file puts that "
-            "directory on sys.path itself" % (rel, name)
-        )
-        return
-    report(
-        "%s imports %s, which is not available in this image" % (rel, name),
-        repairable=True,
-    )
-
-
-def check_relative_import(rel, node, script_dir, report):
-    spelling = "." * node.level + (node.module or "")
-    if not is_package(script_dir):
-        report(
-            "%s uses the relative import '%s' but its directory has no "
-            "__init__.py, so the import can never resolve when the script is "
-            "run directly" % (rel, spelling)
-        )
-        return
-    base = script_dir
-    for _ in range(node.level - 1):
-        base = os.path.dirname(base)
-    if not under_root(base):
-        report(
-            "%s uses the relative import '%s', which reaches outside the "
-            "skill directory" % (rel, spelling)
-        )
-        return
-    # A bare `from . import name` may be pulling something the package's
-    # __init__ defines rather than a submodule, so only the package itself is
-    # checked in that case.
-    if node.module and not module_exists(base, node.module):
-        report("%s imports '%s', which does not exist in the skill" % (rel, spelling))
 
 
 def distribution_name(raw):
@@ -387,13 +233,9 @@ for relative in all_scripts:
         report("%s cannot be read by the skill execution user (%s)" % (relative, exc))
         continue
     try:
-        parsed = ast.parse(code, filename=relative)
+        ast.parse(code, filename=relative)
     except SyntaxError as exc:
-        report(
-            "%s has a syntax error on line %s: %s" % (relative, exc.lineno, exc.msg)
-        )
-        continue
-    check_imports(relative, parsed, script, report)
+        report("%s has a syntax error on line %s: %s" % (relative, exc.lineno, exc.msg))
 
 check_declared_requirements()
 

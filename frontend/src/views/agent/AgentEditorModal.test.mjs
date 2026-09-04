@@ -146,6 +146,7 @@ test('agent skill picker uses the catalog and only enables ready installs', () =
   assert.match(source, /isSkillBusy/)
   assert.match(source, /viewInstallProgress/)
   assert.match(source, /openSkillInstallProgress/)
+  assert.doesNotMatch(source, /await openSkillInstallProgress\(skill\)/)
   assert.match(source, /SandboxSkillsPanel/)
   assert.match(source, /focus-skill-id/)
   assert.match(source, /skillsGroupUnavailable/)

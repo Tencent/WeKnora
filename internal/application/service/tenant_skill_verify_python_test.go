@@ -45,66 +45,6 @@ func TestSkillPythonVerifier(t *testing.T) {
 		// reported without refusing the install.
 		wantNote string
 	}{{
-		name: "a package whose __init__ imports its own submodules",
-		files: map[string]string{
-			"scripts/__init__.py":        "from .chart_generator import ChartGenerator\n",
-			"scripts/chart_generator.py": "class ChartGenerator:\n    pass\n",
-		},
-	}, {
-		// The shape that failed a real install: sys.path is rearranged at run
-		// time, so the absolute import of the skill's own package resolves
-		// only once the file executes. Deciding it statically is not possible,
-		// and guessing wrong rejects a working skill. It is reported, because
-		// the only directory that can satisfy it ships no script of its own.
-		name: "a script that puts the skill root on sys.path and imports its own package",
-		files: map[string]string{
-			"scripts/__init__.py": "",
-			"scripts/helper.py":   "def go():\n    pass\n",
-			"scripts/ux_regression_check.py": "import sys\n" +
-				"from pathlib import Path\n" +
-				"sys.path.insert(0, str(Path(__file__).resolve().parent.parent))\n" +
-				"from scripts.helper import go\n",
-		},
-		wantNote: "imports scripts, which the skill ships but no directory it " +
-			"executes scripts from can reach",
-	}, {
-		name: "a script importing a sibling module directly",
-		files: map[string]string{
-			"scripts/run.py":     "import helper\n",
-			"scripts/helper.py":  "x = 1\n",
-			"scripts/README.txt": "not python\n",
-		},
-	}, {
-		// scripts/ is both a package (relative imports in __init__) and a
-		// directory of files the runtime executes with python file.py.
-		// Loadability is the union of those prefixes, so a sibling import
-		// still resolves when the package marker is present.
-		name: "a packaged scripts directory whose files also import siblings",
-		files: map[string]string{
-			"scripts/__init__.py": "",
-			"scripts/run.py":      "import helper\n",
-			"scripts/helper.py":   "x = 1\n",
-		},
-	}, {
-		name: "an optional dependency behind try/except",
-		files: map[string]string{
-			"scripts/run.py": "try:\n    import matplotlib\nexcept ImportError:\n" +
-				"    matplotlib = None\n",
-		},
-	}, {
-		name: "a dependency imported lazily inside a function",
-		files: map[string]string{
-			"scripts/run.py": "def render():\n    import matplotlib\n    return matplotlib\n",
-		},
-	}, {
-		name: "a dependency the installer never installed",
-		files: map[string]string{
-			"scripts/run.py": "import totally_absent_package\n",
-		},
-		wantProblem: "scripts/run.py imports totally_absent_package, " +
-			"which is not available in this image",
-		wantExit: 2,
-	}, {
 		name: "a syntax error",
 		files: map[string]string{
 			"scripts/run.py": "def broken(:\n    pass\n",
@@ -112,33 +52,25 @@ func TestSkillPythonVerifier(t *testing.T) {
 		wantProblem: "scripts/run.py has a syntax error on line 1",
 		wantExit:    1,
 	}, {
+		// Every file is parsed, not a guessed entry point: a library module the
+		// runtime only ever imports is just as fatal when it does not parse.
+		name: "a syntax error in a library module rather than an entry script",
+		files: map[string]string{
+			"scripts/run.py":    "x = 1\n",
+			"scripts/helper.py": "def broken(:\n",
+		},
+		wantProblem: "scripts/helper.py has a syntax error",
+		wantExit:    1,
+	}, {
 		// The exit code is the whole verdict, so one unfixable finding among
 		// fixable ones has to sink the batch: sending the installer back for a
 		// package it can install would only delay a failure it cannot.
-		name: "a syntax error alongside a missing dependency",
+		name: "a syntax error alongside a missing requirement",
 		files: map[string]string{
-			"scripts/bad.py": "def broken(:\n",
-			"scripts/run.py": "import totally_absent_package\n",
+			"requirements.txt": "pandas==3.0.1\n",
+			"scripts/bad.py":   "def broken(:\n",
 		},
 		wantProblem: "scripts/bad.py has a syntax error",
-		wantExit:    1,
-	}, {
-		name: "a relative import in a directory that is not a package",
-		files: map[string]string{
-			"scripts/run.py":     "from .helper import go\n",
-			"scripts/helper.py":  "def go():\n    pass\n",
-			"scripts/notinit.py": "",
-		},
-		wantProblem: "has no __init__.py",
-		wantExit:    1,
-	}, {
-		name: "a relative import of a module the skill does not ship",
-		files: map[string]string{
-			"pkg/__init__.py":     "",
-			"pkg/sub/__init__.py": "",
-			"pkg/sub/run.py":      "from ..missing import go\n",
-		},
-		wantProblem: "pkg/sub/run.py imports '..missing', which does not exist in the skill",
 		wantExit:    1,
 	}, {
 		name: "a requirement the venv does not carry",
@@ -180,57 +112,6 @@ func TestSkillPythonVerifier(t *testing.T) {
 			"scripts/run.py": "x = 1\n",
 		},
 	}, {
-		name: "a nested file name is not treated as a first-party import",
-		files: map[string]string{
-			"vendor/totally_absent_package.py": "x = 1\n",
-			"scripts/run.py":                   "import totally_absent_package\n",
-		},
-		wantProblem: "scripts/run.py imports totally_absent_package, " +
-			"which is not available in this image",
-		wantExit: 2,
-	}, {
-		// The official Anthropic office toolkit (xlsx/docx/pptx): a non-package
-		// directory holds entry scripts plus sibling packages. Library modules
-		// import those siblings by short name (`from helpers import ...`).
-		// Treating every .py as isolated __main__ rejects this layout; Python's
-		// package path root is scripts/office/, which is where helpers lives.
-		name: "a library package importing a sibling package by short name",
-		files: map[string]string{
-			"scripts/recalc.py":         "from office.soffice import run_soffice\n",
-			"scripts/office/soffice.py": "def run_soffice():\n    pass\n",
-			"scripts/office/validate.py": "from helpers import safe_extract\n" +
-				"from validators import BaseSchemaValidator\n",
-			"scripts/office/helpers/__init__.py":    "def safe_extract():\n    pass\n",
-			"scripts/office/validators/__init__.py": "from .base import BaseSchemaValidator\n",
-			"scripts/office/validators/base.py": "from helpers import safe_extract\n" +
-				"class BaseSchemaValidator:\n    pass\n",
-			"scripts/office/validators/docx.py": "from helpers import safe_extract\n",
-		},
-	}, {
-		name: "a library package importing a dependency the installer never installed",
-		files: map[string]string{
-			"scripts/office/validate.py":            "x = 1\n",
-			"scripts/office/helpers/__init__.py":    "x = 1\n",
-			"scripts/office/validators/__init__.py": "",
-			"scripts/office/validators/base.py":     "import totally_absent_package\n",
-		},
-		wantProblem: "scripts/office/validators/base.py imports totally_absent_package, " +
-			"which is not available in this image",
-		wantExit: 2,
-	}, {
-		// The same layout without __init__.py anywhere. PEP 420 makes those
-		// directories namespace packages, so a neighbouring entry script still
-		// resolves the short-name import - which is why prefixes are every
-		// ancestor and not only the ones a package marker chains together.
-		name: "a namespace package importing a sibling by short name",
-		files: map[string]string{
-			"scripts/office/validate.py":         "from helpers import safe_extract\n",
-			"scripts/office/helpers/__init__.py": "def safe_extract():\n    pass\n",
-			"scripts/office/validators/base.py":  "from helpers import safe_extract\n",
-			"scripts/pkg/sub/mod.py":             "from util import go\n",
-			"scripts/pkg/util.py":                "def go():\n    pass\n",
-		},
-	}, {
 		name: "a pyproject.toml dependency the venv does not carry",
 		files: map[string]string{
 			"pyproject.toml": "[project]\nname = \"demo\"\ndependencies = [\n" +
@@ -239,22 +120,6 @@ func TestSkillPythonVerifier(t *testing.T) {
 		},
 		wantProblem: "pyproject.toml declares totally_absent_package but it is not installed",
 		wantExit:    2,
-	}, {
-		// Skills ship their tests. Nothing the skill offers loads them, so a
-		// bundled tests/ directory must not decide whether the skill installs -
-		// and refusing over one throws away the dependency work that succeeded.
-		name: "a bundled test file importing a package the image does not carry",
-		files: map[string]string{
-			"scripts/run.py":    "x = 1\n",
-			"tests/test_run.py": "import pytest\nimport totally_absent_package\n",
-			"examples/demo.py":  "import totally_absent_package\n",
-			"tests/conftest.py": "def broken(:\n",
-			"scripts/helper.py": "x = 1\n",
-		},
-		optional: []string{
-			"examples/demo.py", "tests/conftest.py", "tests/test_run.py",
-		},
-		wantNote: "auxiliary file; this does not fail the install",
 	}, {
 		// Lines that name a distribution only indirectly cannot be checked by
 		// name, and inventing one from the URL would fail installs whose
@@ -267,6 +132,18 @@ func TestSkillPythonVerifier(t *testing.T) {
 				"--index-url https://example.com/simple\n",
 			"scripts/run.py": "x = 1\n",
 		},
+	}, {
+		// Skills ship their tests. Nothing the skill offers loads them, so a
+		// bundled tests/ directory must not decide whether the skill installs -
+		// and refusing over one throws away the dependency work that succeeded.
+		name: "a bundled test file that does not parse",
+		files: map[string]string{
+			"scripts/run.py":    "x = 1\n",
+			"tests/conftest.py": "def broken(:\n",
+			"examples/demo.py":  "def also_broken(:\n",
+		},
+		optional: []string{"examples/demo.py", "tests/conftest.py"},
+		wantNote: "auxiliary file; this does not fail the install",
 	}}
 
 	for _, tc := range cases {
@@ -351,12 +228,88 @@ func TestSkillPythonVerifierReportsAnUnreadableScript(t *testing.T) {
 		"a file the execution user cannot read is not something installing a package fixes")
 }
 
+// The contract this checker now keeps: an import shape is never a verdict.
+//
+// Whether `import helper` resolves depends on what the file does to sys.path
+// before the import runs, and no static evaluator can enumerate those idioms —
+// a guarded insert, a path constant imported from a sibling module, a value
+// read from the environment, a mutation inside a helper function. Every
+// approximation refused skills that run perfectly. Proving an import resolves
+// belongs to the installer agent, which has a root shell and the real
+// interpreter; this pass only proves the file parses.
+//
+// Each case below was once a refused install. All of them must now install.
+func TestSkillPythonVerifierNeverJudgesImports(t *testing.T) {
+	shapes := map[string]map[string]string{
+		"a package the image genuinely does not carry": {
+			"scripts/run.py": "import totally_absent_package\n",
+		},
+		"a sibling module reached only by a sys.path bootstrap": {
+			"lib/image_video.py": "def generate_image():\n    pass\n",
+			"scripts/generate.py": "import sys, os\n" +
+				"sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'lib'))\n" +
+				"from image_video import generate_image\n",
+		},
+		"a sibling module with no bootstrap at all": {
+			"lib/image_video.py":  "def generate_image():\n    pass\n",
+			"scripts/generate.py": "from image_video import generate_image\n",
+		},
+		"a bootstrap whose argument cannot be evaluated statically": {
+			"lib/helper.py": "x = 1\n",
+			"scripts/run.py": "import sys, os\n" +
+				"sys.path.insert(0, os.environ['LIB_DIR'])\n" +
+				"import helper\n",
+		},
+		"a bootstrap written inside a helper function": {
+			"lib/helper.py": "x = 1\n",
+			"scripts/run.py": "import sys\n" +
+				"from pathlib import Path\n" +
+				"def _setup():\n" +
+				"    sys.path.insert(0, str(Path(__file__).parent.parent / 'lib'))\n" +
+				"_setup()\n" +
+				"import helper\n",
+		},
+		"a path constant imported from a sibling module": {
+			"scripts/paths.py": "from pathlib import Path\n" +
+				"LIB = Path(__file__).resolve().parent.parent / 'lib'\n",
+			"lib/helper.py": "x = 1\n",
+			"scripts/run.py": "import sys\n" +
+				"from paths import LIB\n" +
+				"if str(LIB) not in sys.path:\n" +
+				"    sys.path.insert(0, str(LIB))\n" +
+				"import helper\n",
+		},
+		"a vendored module sharing a distribution's name": {
+			"vendor/totally_absent_package.py": "x = 1\n",
+			"scripts/run.py":                   "import totally_absent_package\n",
+		},
+		"a relative import in a directory with no __init__.py": {
+			"scripts/run.py":    "from .helper import go\n",
+			"scripts/helper.py": "def go():\n    pass\n",
+		},
+		"a relative import reaching a module the skill does not ship": {
+			"pkg/__init__.py":     "",
+			"pkg/sub/__init__.py": "",
+			"pkg/sub/run.py":      "from ..missing import go\n",
+		},
+	}
+
+	for name, files := range shapes {
+		t.Run(name, func(t *testing.T) {
+			root := writeSkillTree(t, files)
+
+			stdout, stderr, err := runSkillPythonVerifier(t, root, pythonFiles(files), nil)
+
+			require.NoError(t, err,
+				"an import shape must not refuse an install; stderr: %s", stderr)
+			require.Contains(t, stdout, "verified")
+		})
+	}
+}
+
 // The layout that started this: the official office toolkit ships entry scripts
 // beside sibling packages, and its library modules import those siblings by
-// short name. Treating every .py as an isolated __main__ rejected it outright.
-// The imports it cannot resolve here are the third-party ones it genuinely
-// needs — including two its SKILL.md never mentions — and that is the list the
-// installer gets handed back.
+// short name. It parses, so it installs.
 func TestSkillPythonVerifierAcceptsTheOfficeToolkitLayout(t *testing.T) {
 	files := map[string]string{
 		"SKILL.md": "# xlsx\n",

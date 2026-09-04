@@ -128,6 +128,17 @@ var shellExecTool = BaseTool{
 	name: ToolShellExec,
 	description: `Run a shell command inside the current session's isolated remote sandbox.
 
+## Working Directory
+- Every command already starts in ` + "`/workspace`" + `, this session's own
+  workspace. Use RELATIVE paths (` + "`ls -la output/`" + `,
+  ` + "`python3 report.py`" + `) and do NOT prefix ` + "`cd /workspace && `" + `
+  onto them — you are already there, and the prefix wastes a line on every call.
+- ` + "`input/`" + ` holds the user's uploaded files and is read-only;
+  ` + "`output/`" + ` is collected for download, so generated files belong there.
+- Each call starts in that directory again: a ` + "`cd`" + ` inside one command
+  does not carry over to the next one. Pass ` + "`work_dir`" + ` when a command
+  must run elsewhere.
+
 ## Usage
 - Use freely to explore and operate inside the sandbox: inspect files, search
   content, transform data, run programs, manage dependencies, install system packages and verify outputs.
@@ -136,14 +147,17 @@ var shellExecTool = BaseTool{
   ` + "`grep`" + ` / ` + "`awk`" + ` to search; ` + "`file`" + ` for an unknown type.
   Do not ` + "`apt-get install`" + ` inspection utilities (` + "`tree`" + `, editors)
   after a 127 — those packages vanish with the session.
-- User-uploaded files listed in ` + "`<sandbox_attachments>`" + ` are restored under
-  ` + "`/workspace/input`" + `. Treat them as read-only inputs; write generated files
-  under ` + "`/workspace/output`" + `.
+- User-uploaded files are listed in the current ` + "`<sandbox_attachments>`" + `
+  block, with the absolute ` + "`/workspace/input/...`" + ` path to pass to a
+  command that takes an input file.
 - Install extra Python packages into the session overlay
   (` + "`python3 -m pip install --target /workspace/.skill-packages/<skill> ...`" + `),
   never into ` + "`/opt/weknora/tenant/skills`" + `. The skill venv is frozen after
   install. ` + "`apt-get`" + ` is only for a system library this task actually needs,
   not to recover from probing with a missing inspection command.
+- The sandbox is one long-lived session: files written and packages installed by
+  an earlier call are still there for later ` + "`shell_exec`" + ` and
+  ` + "`execute_skill_script`" + ` calls. Do not redo setup you already did.
 
 ## When to Use
 - Whenever executing a command is the most direct way to complete the task.
@@ -152,13 +166,17 @@ var shellExecTool = BaseTool{
   intermediate files for later commands or skills.
 
 ## When NOT to Use
-- DO NOT judge a skill's dependencies with a bare ` + "`python3 -c`" + ` or
-  ` + "`node -e`" + `, and do NOT inspect a skill-generated docx/pptx/xlsx that way
-  either: system ` + "`python3`" + ` has none of the skill's packages (` + "`docx`" + `,
-  ` + "`pptx`" + `, pandas, …). Do not ` + "`pip install`" + ` them here, and do not
-  paste the same program into ` + "`.venv/bin/python -c`" + `. Write the script
-  with ` + "`write_sandbox_file`" + ` and run it with
-  ` + "`execute_skill_script(skill_name=..., script_path=/workspace/output/... )`" + `.
+- DO NOT run ANY script that needs a skill's packages (` + "`docx`" + `,
+  ` + "`pptx`" + `, pandas, …) from here — generating a file counts, not just
+  inspecting one. System ` + "`python3`" + ` has none of them. Write the script with
+  ` + "`write_sandbox_file`" + ` and run it with
+  ` + "`execute_skill_script(skill_name=..., script_path=/workspace/output/... )`" + `,
+  which uses the skill's own interpreter and sets ` + "`PYTHONPATH`" + ` / ` + "`NODE_PATH`" + `
+  for you. Do NOT wire that environment by hand
+  (` + "`PYTHONPATH=... python3 script.py`" + `, or calling ` + "`.venv/bin/python`" + `
+  directly): the skill's interpreter already carries what was installed with it,
+  so the hand-wired version just makes you reinstall it. Also do not judge a
+  skill's dependencies with a bare ` + "`python3 -c`" + ` / ` + "`node -e`" + `.
   ` + "`read_skill`" + ` names the skill and how to reach its environment.
 - DO NOT ` + "`chown`" + ` / ` + "`chmod`" + ` / ` + "`ensurepip`" + ` / ` + "`pip install`" + ` a skill
   under ` + "`/opt/weknora/tenant/skills`" + `. That tree is read-only after install
@@ -182,9 +200,12 @@ var shellExecTool = BaseTool{
 - ` + "`command`" + ` (required): the shell one-liner to run under ` + "`/bin/bash -l -c`" + `.
   Supports pipes, redirects, ` + "`&&`" + ` / ` + "`||`" + ` chaining. Keep this short;
   large scripts go through ` + "`write_sandbox_file`" + `; small edits go through
-  ` + "`edit_sandbox_file`" + `.
-- ` + "`work_dir`" + ` (optional): working directory, defaults to ` + "`/workspace`" + `.
-  Created on demand if it doesn't exist.
+  ` + "`edit_sandbox_file`" + `. Watch the quoting: never nest an ASCII
+  ` + "`\"`" + ` inside ` + "`\"...\"`" + ` (or ` + "`'`" + ` inside ` + "`'...'`" + `) —
+  use the other quote, and 「」 for Chinese quotation marks.
+- ` + "`work_dir`" + ` (optional): an absolute path under ` + "`/workspace`" + `,
+  defaulting to ` + "`/workspace`" + ` itself — omit it unless the command has to
+  run in another directory. Created on demand if it doesn't exist.
 - ` + "`timeout_sec`" + ` (optional): per-call timeout in seconds. Defaults to 120,
   capped at 600. Large installs (LibreOffice, TensorFlow) may need the cap.
 - ` + "`max_output_bytes`" + ` (optional): maximum bytes returned from stdout.
@@ -230,7 +251,7 @@ type ShellExecInput struct {
 	// Command is the shell command to execute. Runs under `/bin/bash -l -c`.
 	Command string `json:"command" jsonschema:"Shell command to execute (single line, supports pipes and && chaining). Runs under /bin/bash -l -c."`
 	// WorkDir is the working directory for the command; defaults to /workspace.
-	WorkDir string `json:"work_dir,omitempty" jsonschema:"Working directory for the command. Defaults to /workspace. Created on demand if missing."`
+	WorkDir string `json:"work_dir,omitempty" jsonschema:"Absolute work dir. Commands already start in /workspace; omit unless the command must run elsewhere."` //nolint:lll // one-line struct tag
 	// TimeoutSec caps execution time. Zero uses the default (120s); the
 	// value is hard-capped at 600s regardless of what the LLM requests.
 	TimeoutSec int `json:"timeout_sec,omitempty" jsonschema:"Per-call timeout in seconds. Defaults to 120, hard-capped at 600."`
@@ -295,6 +316,13 @@ type ShellExecTool struct {
 	// workDirRoots are the directories work_dir may point inside. Ordinary
 	// sessions get /workspace only; install mode adds the skills image root.
 	workDirRoots []string
+	// defaultWorkDir is where a call that omits work_dir lands. Empty means
+	// /workspace, which is right for an ordinary session and wrong for an
+	// install: an install works in one skill directory and is told not to
+	// touch /workspace at all (it is wiped before the snapshot). Leaving the
+	// default there made the model prefix `cd <skill-dir> &&` onto command
+	// after command, since that is the spelling guaranteed to work.
+	defaultWorkDir string
 	// defaultTimeout is applied when the caller omits timeout_sec. Ordinary
 	// sessions keep the 120s default; install mode uses the 10-minute cap
 	// because dependency installs routinely exceed two minutes.
@@ -329,13 +357,24 @@ func NewShellExecTool(executor SandboxCommandExecutor, envResolver skills.SkillE
 // NewInstallShellExecTool constructs the install-mode variant: commands run as
 // root and may work inside the skills image root. It is registered only for
 // the built-in skill installer agent (see AgentConfig.SkillInstallMode).
-func NewInstallShellExecTool(executor SandboxInstallCommandExecutor) *ShellExecTool {
+//
+// skillDir becomes the default working directory, because every command an
+// install runs belongs there. A validated directory is required for that: an
+// empty or unrecognised one falls back to /workspace rather than guessing.
+func NewInstallShellExecTool(
+	executor SandboxInstallCommandExecutor, skillDir string,
+) *ShellExecTool {
 	base := shellExecTool
-	base.description = installShellExecDescription()
+	defaultWorkDir, ok := sandbox.ValidatedImageSkillDir(skillDir)
+	if !ok {
+		defaultWorkDir = defaultShellExecWorkDir
+	}
+	base.description = installShellExecDescription(defaultWorkDir)
 	return &ShellExecTool{
 		BaseTool:       base,
 		executor:       installShellExecutor{inner: executor},
 		workDirRoots:   []string{defaultShellExecWorkDir, sandbox.SkillsImageRoot},
+		defaultWorkDir: defaultWorkDir,
 		defaultTimeout: shellExecMaxTimeout,
 	}
 }
@@ -344,24 +383,29 @@ func NewInstallShellExecTool(executor SandboxInstallCommandExecutor) *ShellExecT
 // guidance. That tool is not registered in install mode, and the files this
 // agent must write sit under the skills image root, which write_sandbox_file
 // cannot accept.
-func installShellExecDescription() string {
+func installShellExecDescription(defaultWorkDir string) string {
 	return `Run a shell command as root inside the skill-install sandbox.
 
+## Working Directory
+- Every command already starts in ` + "`" + defaultWorkDir + "`" + `, the skill
+  you are installing. Use RELATIVE paths: ` + "`ls -la scripts/`" + `,
+  ` + "`cat requirements.txt`" + `, ` + "`uv venv --seed .venv`" + `.
+- Do NOT prefix ` + "`cd " + defaultWorkDir + " && `" + ` onto your commands.
+  You are already there, and the prefix wastes a line on every call.
+- Pass ` + "`work_dir`" + ` only to leave that directory, which an install
+  rarely needs.
+
 ## Usage
-- This is your only tool. write_sandbox_file / edit_sandbox_file /
-  list_sandbox_files / read_sandbox_file are not available.
-- work_dir may be the skill directory under ` + "`/opt/weknora/tenant/skills`" + `.
-- Write small files (including ` + "`.weknora/requirements.json`" + `) with a
-  short redirect: ` + "`mkdir -p .weknora && cat > .weknora/requirements.json <<'EOF'`" + `.
-  Do not try write_sandbox_file — it only accepts ` + "`/workspace`" + `, which
-  is wiped before the snapshot.
+- Run commands with this tool. Create or change files in the skill directory
+  with ` + "`write_skill_file`" + ` / ` + "`edit_skill_file`" + ` instead of
+  ` + "`cat`" + ` or a heredoc: a shell redirect truncates at the
+  command-length cap and mangles quoting.
 - Install Python extras into the skill's ` + "`.venv`" + `, Node extras into
   ` + "`node_modules`" + `. Prefer ` + "`uv pip install`" + ` / ` + "`python3 -m venv`" + `.
 
 ## Parameters
 - ` + "`command`" + ` (required): the shell one-liner under ` + "`/bin/bash -l -c`" + `.
-- ` + "`work_dir`" + ` (optional): defaults to ` + "`/workspace`" + `; the skill
-  directory is allowed.
+- ` + "`work_dir`" + ` (optional): defaults to ` + "`" + defaultWorkDir + "`" + `.
 - ` + "`timeout_sec`" + ` (optional): defaults to 600 seconds.
 
 ## Returns
@@ -437,7 +481,7 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 
 	workDir := strings.TrimSpace(input.WorkDir)
 	if workDir == "" {
-		workDir = defaultShellExecWorkDir
+		workDir = t.effectiveDefaultWorkDir()
 	}
 	cleanWorkDir := path.Clean(workDir)
 	if !t.workDirAllowed(cleanWorkDir) {
@@ -675,6 +719,15 @@ func (t *ShellExecTool) isInstallMode() bool {
 		}
 	}
 	return false
+}
+
+// effectiveDefaultWorkDir keeps a zero-value tool on the ordinary /workspace
+// contract; only the install-mode constructor sets anything else.
+func (t *ShellExecTool) effectiveDefaultWorkDir() string {
+	if strings.TrimSpace(t.defaultWorkDir) == "" {
+		return defaultShellExecWorkDir
+	}
+	return t.defaultWorkDir
 }
 
 // allowedWorkDirRoots defaults to /workspace so a zero-value tool (or one

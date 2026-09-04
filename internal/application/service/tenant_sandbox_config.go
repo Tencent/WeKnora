@@ -221,6 +221,10 @@ type sandboxConfigSkillStore interface {
 	MarkSnapshotState(ctx context.Context, tenantID uint64, id, state, snapshotID string) error
 	ListSkillsByConfig(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillEntity, error)
 	DeleteSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
+	// The tenant-wide lists answer who else still reads an archive the
+	// deleted install rows had pinned.
+	ListSkillsByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantSkillEntity, error)
+	ListCatalogsByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantSkillCatalogEntity, error)
 	DeleteSnapshotRowsByConfig(ctx context.Context, tenantID uint64, configID string) error
 	DeleteUserEnvVarsByConfig(ctx context.Context, tenantID uint64, configID string) error
 }
@@ -289,9 +293,9 @@ type TenantSandboxConfigService struct {
 	globalCfg *sandbox.Config
 	now       func() time.Time
 
-	// skills and files are used only when deleting a config, to destroy the
-	// snapshot ledger and drop skill archives. Either may be nil in tests
-	// that never delete a config that owns skills.
+	// skills is used when deleting a config, to destroy the snapshot ledger
+	// and drop install rows. Catalog archives are owned by the skill
+	// definition and are not deleted here.
 	skills sandboxConfigSkillStore
 	files  sandboxConfigBundleResolver
 
@@ -351,6 +355,11 @@ func SanitizeSandboxConfig(
 			return nil, apperrors.NewBadRequestError(err.Error())
 		}
 		merged.Cube.DNSServers = dns
+	}
+	// Rejected here rather than at sandbox-create time: the provider's own
+	// error arrives minutes later, on a screen the admin has already left.
+	if err := types.ValidateSandboxNetworkPolicy(merged); err != nil {
+		return nil, apperrors.NewBadRequestError(err.Error())
 	}
 	for _, endpoint := range sandboxConfigEndpoints(merged) {
 		if err := sandbox.ValidateOutboundURLWithPolicy(endpoint, sandbox.OutboundURLPolicy{
@@ -1282,16 +1291,26 @@ func (s *TenantSandboxConfigService) cleanupSkillMetadata(
 	if err != nil {
 		logger.Warnf(ctx, "[sandbox] list skills for config %s cleanup failed: %v", configID, err)
 	}
+	var pinned []string
+	seen := map[string]struct{}{}
 	for _, skill := range skills {
 		if skill == nil {
 			continue
 		}
-		s.deleteSkillBundleBestEffort(ctx, tenantID, skill.BundleRef)
+		if ref := strings.TrimSpace(skill.BundleRef); ref != "" {
+			if _, dup := seen[ref]; !dup {
+				seen[ref] = struct{}{}
+				pinned = append(pinned, ref)
+			}
+		}
 		if err := s.skills.DeleteSkill(ctx, tenantID, configID, skill.ID); err != nil {
 			logger.Warnf(ctx, "[sandbox] delete skill %s on config %s failed: %v",
 				skill.ID, configID, err)
 		}
 	}
+	// After the rows are gone, never before: each ref is named by the very row
+	// being deleted, so asking first would always find a reader.
+	s.releasePinnedBundles(ctx, tenantID, pinned)
 	if err := s.skills.DeleteSnapshotRowsByConfig(ctx, tenantID, configID); err != nil {
 		logger.Warnf(ctx, "[sandbox] delete snapshot ledger for config %s failed: %v",
 			configID, err)
@@ -1304,20 +1323,65 @@ func (s *TenantSandboxConfigService) cleanupSkillMetadata(
 	}
 }
 
-func (s *TenantSandboxConfigService) deleteSkillBundleBestEffort(
-	ctx context.Context, tenantID uint64, bundleRef string,
+// releasePinnedBundles drops the archives whose last reader was an install row
+// this config deletion just removed.
+//
+// An install row names an object only in one case: a re-register replaced the
+// definition's copy while this sandbox kept running the image built from the
+// old one, so the row pinned those bytes. Deleting the config drops that
+// reader and no code path will ever look for them again.
+//
+// The pin is not exclusive, which is why this cannot just delete what the rows
+// named. Sibling configs installed from the same archive pin the same object,
+// and a definition may have been rolled back onto it, so the bytes go only once
+// no catalog and no surviving install names them. A list that cannot be read
+// keeps the archive: a leaked one costs storage, a deleted one costs some other
+// sandbox its files.
+func (s *TenantSandboxConfigService) releasePinnedBundles(
+	ctx context.Context, tenantID uint64, refs []string,
 ) {
-	if s.files == nil || strings.TrimSpace(bundleRef) == "" {
+	if len(refs) == 0 || s.files == nil || s.skills == nil {
 		return
 	}
-	fs, _, err := s.files.ResolveFileService(ctx, &types.Tenant{ID: tenantID}, "", "", "")
-	if err != nil || fs == nil {
-		logger.Warnf(ctx, "[sandbox] resolve file service to delete bundle %s failed: %v",
-			bundleRef, err)
+	catalogs, err := s.skills.ListCatalogsByTenant(ctx, tenantID)
+	if err != nil {
+		logger.Warnf(ctx, "[sandbox] list catalogs before releasing skill archives failed: %v", err)
 		return
 	}
-	if err := fs.DeleteFile(ctx, bundleRef); err != nil {
-		logger.Warnf(ctx, "[sandbox] delete bundle %s failed: %v", bundleRef, err)
+	installs, err := s.skills.ListSkillsByTenant(ctx, tenantID)
+	if err != nil {
+		logger.Warnf(ctx, "[sandbox] list installs before releasing skill archives failed: %v", err)
+		return
+	}
+	held := make(map[string]struct{}, len(catalogs)+len(installs))
+	for _, cat := range catalogs {
+		if cat != nil {
+			held[strings.TrimSpace(cat.BundleRef)] = struct{}{}
+		}
+	}
+	for _, row := range installs {
+		if row != nil {
+			held[strings.TrimSpace(row.BundleRef)] = struct{}{}
+		}
+	}
+
+	var fs interfaces.FileService
+	for _, ref := range refs {
+		if _, still := held[ref]; still {
+			continue
+		}
+		if fs == nil {
+			resolved, _, resolveErr := s.files.ResolveFileService(ctx, &types.Tenant{ID: tenantID}, "", "", "")
+			if resolveErr != nil || resolved == nil {
+				logger.Warnf(ctx, "[sandbox] resolve file service to release skill archives failed: %v",
+					resolveErr)
+				return
+			}
+			fs = resolved
+		}
+		if err := fs.DeleteFile(ctx, ref); err != nil {
+			logger.Warnf(ctx, "[sandbox] delete skill archive %s failed: %v", ref, err)
+		}
 	}
 }
 
@@ -1455,6 +1519,22 @@ func sandboxConfigHasSecrets(cfg *types.TenantSandboxConfig) bool {
 	for _, value := range cfg.EnvVars {
 		if value != "" {
 			return true
+		}
+	}
+	if cfg.Network != nil {
+		for _, rule := range cfg.Network.CubeRules {
+			for _, inject := range rule.Inject {
+				if inject.Secret != "" {
+					return true
+				}
+			}
+		}
+		for _, rule := range cfg.Network.E2BHostRules {
+			for _, value := range rule.Headers {
+				if value != "" {
+					return true
+				}
+			}
 		}
 	}
 	return false

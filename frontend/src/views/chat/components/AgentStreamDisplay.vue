@@ -40,6 +40,25 @@
                 </div>
               </div>
 
+              <!-- Context Compaction -->
+              <div v-if="event.type === 'context_compacted'" class="tool-event">
+                <div class="action-card">
+                  <div class="action-header" @click="toggleEvent(event.event_id)">
+                    <div class="action-title">
+                      <span class="action-title-icon icon-mask" :style="maskIconStyle(compactionIcon)"
+                        aria-hidden="true" />
+                      <span class="action-name">{{ $t('agent.contextCompacted') }}</span>
+                      <span class="action-summary">{{ compactionSummaryText(event) }}</span>
+                    </div>
+                  </div>
+                  <div v-if="event.summary && isEventExpanded(event.event_id)" class="action-details">
+                    <div class="thinking-detail-content markdown-content">
+                      <div v-html="renderMarkdownContent(event.summary)"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <!-- Thinking Event (streaming / merged). When a round's retracted
                    preamble was folded in, it becomes the card title and the
                    reasoning is the expandable body. -->
@@ -136,6 +155,17 @@
                       <t-tooltip v-else :content="getToolTitle(event)" placement="top">
                         <span class="action-name">{{ getToolTitle(event) }}</span>
                       </t-tooltip>
+                      <span v-if="getSandboxDiffStat(event)" class="sandbox-diff-stat">
+                        <span v-if="getSandboxDiffStat(event)?.added" class="diff-add">+{{ getSandboxDiffStat(event)?.added }}</span>
+                        <span v-if="getSandboxDiffStat(event)?.removed" class="diff-del">-{{ getSandboxDiffStat(event)?.removed }}</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div v-if="event.pending && getSandboxFilePreview(event)" class="sandbox-file-preview">
+                    <pre>{{ getSandboxFilePreview(event) }}</pre>
+                    <div v-if="sandboxPreviewRemaining(event) > 0" class="sandbox-file-preview-more">
+                      {{ t('agentStream.sandboxFiles.moreLines', { count: sandboxPreviewRemaining(event) }) }}
                     </div>
                   </div>
 
@@ -252,6 +282,25 @@
               </div>
             </div>
 
+            <!-- Context Compaction -->
+            <div v-if="event.type === 'context_compacted'" class="tool-event">
+              <div class="action-card">
+                <div class="action-header" @click="toggleEvent(event.event_id)">
+                  <div class="action-title">
+                    <span class="action-title-icon icon-mask" :style="maskIconStyle(compactionIcon)"
+                      aria-hidden="true" />
+                    <span class="action-name">{{ $t('agent.contextCompacted') }}</span>
+                    <span class="action-summary">{{ compactionSummaryText(event) }}</span>
+                  </div>
+                </div>
+                <div v-if="event.summary && isEventExpanded(event.event_id)" class="action-details">
+                  <div class="thinking-detail-content markdown-content">
+                    <div v-html="renderMarkdownContent(event.summary)"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- Thinking Event (streaming / merged). A folded preamble (retracted
              from the answer area) is shown as the card title; the reasoning is
              the expandable body. -->
@@ -341,7 +390,8 @@
                      mode is the primary path for skills, so this is where
                      the button is most likely to appear. -->
                 <span v-if="hasArtifacts || artifactsCollecting" class="answer-toolbar__artifact"
-                  :class="{ 'is-collecting': artifactButtonCollecting }">
+                  :class="{ 'is-collecting': artifactButtonCollecting, 'is-arrived': artifactArrived }"
+                  @animationend="onArtifactArriveEnd">
                   <t-button size="small" variant="outline" shape="round"
                     :disabled="artifactButtonCollecting"
                     :title="hasArtifacts ? $t('agent.artifactDrawer.buttonTitle') : $t('agent.artifactDrawer.collecting')"
@@ -394,6 +444,17 @@
                     <t-tooltip v-else :content="getToolTitle(event)" placement="top">
                       <span class="action-name">{{ getToolTitle(event) }}</span>
                     </t-tooltip>
+                    <span v-if="getSandboxDiffStat(event)" class="sandbox-diff-stat">
+                      <span v-if="getSandboxDiffStat(event)?.added" class="diff-add">+{{ getSandboxDiffStat(event)?.added }}</span>
+                      <span v-if="getSandboxDiffStat(event)?.removed" class="diff-del">-{{ getSandboxDiffStat(event)?.removed }}</span>
+                    </span>
+                  </div>
+                </div>
+
+                <div v-if="event.pending && getSandboxFilePreview(event)" class="sandbox-file-preview">
+                  <pre>{{ getSandboxFilePreview(event) }}</pre>
+                  <div v-if="sandboxPreviewRemaining(event) > 0" class="sandbox-file-preview-more">
+                    {{ t('agentStream.sandboxFiles.moreLines', { count: sandboxPreviewRemaining(event) }) }}
                   </div>
                 </div>
 
@@ -538,6 +599,7 @@ import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
 import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
+import { useArtifactArriveMotion } from '@/composables/useArtifactArriveMotion';
 import ChatMemoryStep from './ChatMemoryStep.vue';
 import { useChatMemoryRow, type UsedMemory } from '@/composables/useChatMemoryRow';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
@@ -568,7 +630,10 @@ import {
   formatToolTitleWithDetail,
   getEventSkillName,
   getReadSkillTarget,
+  getSandboxDiffStat,
+  getSandboxFilePreview,
   getSandboxToolPath,
+  sandboxPreviewRemaining,
   skillScriptTitleCommand,
 } from '@/utils/skillToolDisplay';
 import { previewShellCommand } from '@/utils/shellExecResult';
@@ -845,6 +910,7 @@ const handleWikiDrawerClick = (e: MouseEvent) => {
 // Import icons
 import agentIcon from '@/assets/img/agent.svg';
 import thinkingIcon from '@/assets/img/Frame3718.svg';
+import compactionIcon from '@/assets/img/context-compaction.svg';
 
 interface SessionData {
   id?: string;
@@ -948,6 +1014,7 @@ const artifactList = computed(() => {
 });
 const hasArtifacts = computed(() => artifactList.value.length > 0);
 const artifactCount = computed(() => artifactList.value.length);
+const { artifactArrived, onArtifactArriveEnd } = useArtifactArriveMotion(artifactCount);
 const artifactsCollecting = computed(() => isCollectingSkillArtifacts(props.session as any));
 const artifactButtonCollecting = computed(() => artifactsCollecting.value && !hasArtifacts.value);
 const sessionIdForArtifacts = computed(() => props.sessionId ?? '');
@@ -2632,6 +2699,27 @@ const getPlanStatusSummary = (event: any): string => {
   return textParts.length > 0 ? textParts.join(' · ') : '';
 };
 
+/**
+ * One-line caption for a compaction card. The token counts are the point: they
+ * are what tells the user how much of the conversation the agent can no longer
+ * see verbatim.
+ */
+const compactionSummaryText = (event: any): string => {
+  const before = Number(event?.tokens_before) || 0;
+  const after = Number(event?.tokens_after) || 0;
+  const parts: string[] = [];
+  if (before > 0 && after > 0) {
+    parts.push(
+      t('agent.contextCompactedSummary', {
+        before: before.toLocaleString(),
+        after: after.toLocaleString(),
+      }),
+    );
+  }
+  if (event?.degraded) parts.push(t('agent.contextCompactedDegraded'));
+  return parts.join(t('agent.stepSummarySeparator'));
+};
+
 /** Render SVG assets in the channel / brand color via CSS mask. */
 function maskIconStyle(src: string, size = 18): Record<string, string> {
   if (!src) return {}
@@ -3523,6 +3611,51 @@ const handleAddToKnowledge = (answerEvent: any) => {
   display: inline-block;
   max-width: 100%;
   vertical-align: middle;
+}
+
+.sandbox-diff-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+
+  .diff-add {
+    color: var(--td-success-color);
+  }
+
+  .diff-del {
+    color: var(--td-error-color);
+  }
+}
+
+.sandbox-file-preview {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  font-family: var(--app-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
+  border-radius: 6px;
+
+  pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 180px;
+    overflow: hidden;
+  }
+}
+
+.sandbox-file-preview-more {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
 }
 
 .action-show-icon {

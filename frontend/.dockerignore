@@ -1,4 +1,5 @@
 *
 !dist
 !nginx.conf
+!nginx-api-proxy.conf
 !docker-entrypoint.sh

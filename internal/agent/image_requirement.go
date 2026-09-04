@@ -33,14 +33,16 @@ func stepContainsMarkdownImage(step types.AgentStep) bool {
 }
 
 func appendAgentRetrievedImageRequirement(messages []chat.Message) []chat.Message {
-	for i := range messages {
-		if messages[i].Role != "system" {
-			continue
+	for _, message := range messages {
+		if strings.Contains(message.Content, agentRetrievedImageRequirementMarker) {
+			return messages
 		}
-		if !strings.Contains(messages[i].Content, agentRetrievedImageRequirementMarker) {
-			messages[i].Content = strings.TrimRight(messages[i].Content, " \t\r\n") + agentRetrievedImageSystemRequirement
-		}
-		break
 	}
-	return messages
+	// Append after the current prefix instead of editing the system prompt.
+	// Provider prompt caches are prefix matches: mutating the system block
+	// invalidates the tools and the whole transcript for every later round.
+	return append(messages, chat.Message{
+		Role:    "user",
+		Content: strings.TrimSpace(agentRetrievedImageSystemRequirement),
+	})
 }
