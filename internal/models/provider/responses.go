@@ -8,7 +8,7 @@ import (
 )
 
 // ResponsesProvider implements the OpenAI Responses API provider
-// (POST <baseURL>/responses). Wayfinder map #9, build #15.
+// (POST <baseURL>/responses).
 type ResponsesProvider struct{}
 
 func init() {

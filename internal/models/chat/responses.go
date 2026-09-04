@@ -16,7 +16,7 @@ import (
 )
 
 // Responses API wire types (OpenAI Responses, non-streaming text for #15;
-// streaming/vision/tools land in #18/#19). Wayfinder map #9, build #15.
+// streaming/vision/tools handled in responses_stream.go and below.)
 
 type responsesRequest struct {
 	Model           string              `json:"model"`
@@ -29,7 +29,7 @@ type responsesRequest struct {
 }
 
 // responsesReasoning carries the effort selector (none/minimal/low/medium/
-// high, default medium) from ExtraConfig key reasoning_effort (#16).
+// high, default medium) from ExtraConfig key reasoning_effort.
 type responsesReasoning struct {
 	Effort string `json:"effort,omitempty"`
 }
@@ -122,7 +122,7 @@ func (c *RemoteAPIChat) newResponsesHTTPRequest(ctx context.Context, req respons
 
 // buildResponsesInput flattens conversation messages into the single-string
 // Responses input. Text-only path; structured content rides
-// buildResponsesInputValue (#19).
+// buildResponsesInputValue below.
 func buildResponsesInput(messages []Message) string {
 	var sb strings.Builder
 	for _, m := range messages {

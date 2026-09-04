@@ -294,7 +294,7 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	// 因为带思考/推理的模型可能数十秒甚至几分钟才产出首 token。
 	timeoutCtx, cancel := withLLMTimeout(ctx, defaultStreamTimeout)
 
-	// Responses providers speak SSE response.* events (#18).
+	// Responses providers speak SSE response.* events.
 	if c.provider == provider.ProviderResponses {
 		ch, err := c.chatStreamWithResponses(timeoutCtx, messages, opts)
 		return wrapStreamCancel(ch, err, cancel)

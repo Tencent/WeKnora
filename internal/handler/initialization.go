@@ -1925,7 +1925,7 @@ func (h *InitializationHandler) checkChatModelConnection(
 	}
 	// Responses reasoning models burn hundreds of tokens before emitting
 	// text; max_tokens:1 would return a textless (but envelope-valid)
-	// incomplete. Give the probe room (#16). Other providers stay at 1.
+	// incomplete. Give the probe room. Other providers stay at 1.
 	if provider.ProviderName(model.Parameters.Provider) == provider.ProviderResponses {
 		testOptions.MaxTokens = 300
 	}

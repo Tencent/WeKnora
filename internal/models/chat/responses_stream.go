@@ -12,7 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// Responses SSE streaming (#18). Event catalog per
+// Responses SSE streaming. Event catalog per
 // docs/research/responses-api-contract.md section 2.
 
 type responsesStreamItem struct {

@@ -66,7 +66,7 @@ const (
 	// Azure OpenAI
 	ProviderAzureOpenAI ProviderName = "azure_openai"
 	// OpenAI Responses API (e.g. opencode zen). Speaks POST <baseURL>/responses
-	// instead of /chat/completions; see map #9.
+	// instead of /chat/completions.
 	ProviderResponses ProviderName = "responses"
 )
 
