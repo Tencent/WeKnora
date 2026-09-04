@@ -41,7 +41,7 @@ var responsesEffortLevels = map[string]bool{
 
 // resolveResponsesEffort reads ExtraConfig reasoning_effort, normalizing
 // case/space; unknown or empty falls back to medium.
-func resolveResponsesEffort(extra map[string]string) string {
+func ResolveResponsesEffort(extra map[string]string) string {
 	effort := ""
 	if extra != nil {
 		effort = strings.ToLower(strings.TrimSpace(extra["reasoning_effort"]))
@@ -216,7 +216,7 @@ func needsStructuredInput(messages []Message) bool {
 // buildResponsesInputValue returns the Responses input: a plain string for
 // text-only turns (wire shape unchanged), otherwise a structured item array
 // carrying images, function calls and function outputs.
-func buildResponsesInputValue(messages []Message) any {
+func BuildResponsesInputValue(messages []Message) any {
 	if !needsStructuredInput(messages) {
 		return buildResponsesInput(messages)
 	}
@@ -285,7 +285,7 @@ func buildResponsesInputValue(messages []Message) any {
 // model exhausts max_output_tokens) are NOT errors: content is empty and
 // FinishReason carries the status for the caller (#16 test policy) to judge.
 // parseResponsesBody converts a raw /responses payload into a ChatResponse.
-func parseResponsesBody(body []byte) (*types.ChatResponse, error) {
+func ParseResponsesBody(body []byte) (*types.ChatResponse, error) {
 	var env struct {
 		Error *responsesError `json:"error,omitempty"`
 	}
@@ -347,7 +347,7 @@ func parseResponsesBody(body []byte) (*types.ChatResponse, error) {
 func (c *RemoteAPIChat) chatWithResponses(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
 	req := responsesRequest{
 		Model:     c.modelName,
-		Input:     buildResponsesInputValue(messages),
+		Input:     BuildResponsesInputValue(messages),
 		Reasoning: &responsesReasoning{Effort: c.responsesEffort},
 	}
 	req.Tools, req.ToolChoice = buildResponsesTools(opts)
@@ -379,7 +379,7 @@ func (c *RemoteAPIChat) chatWithResponses(ctx context.Context, messages []Messag
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
-	result, err := parseResponsesBody(body)
+	result, err := ParseResponsesBody(body)
 	if err != nil {
 		return nil, err
 	}

@@ -187,7 +187,7 @@ func runResponsesStream(r io.Reader, emit func(types.StreamResponse)) error {
 func (c *RemoteAPIChat) chatStreamWithResponses(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
 	req := responsesRequest{
 		Model:     c.modelName,
-		Input:     buildResponsesInputValue(messages),
+		Input:     BuildResponsesInputValue(messages),
 		Reasoning: &responsesReasoning{Effort: c.responsesEffort},
 		Stream:    true,
 	}

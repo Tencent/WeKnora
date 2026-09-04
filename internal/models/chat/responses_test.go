@@ -60,7 +60,7 @@ const responsesIncompleteBody = `{"id":"resp_2","object":"response","status":"in
 const responsesErrorBody = `{"error":{"message":"boom","type":"server_error"}}`
 
 func TestParseResponsesBody(t *testing.T) {
-	resp, err := parseResponsesBody([]byte(responsesCompletedBody))
+	resp, err := ParseResponsesBody([]byte(responsesCompletedBody))
 	if err != nil {
 		t.Fatalf("completed: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestParseResponsesBody(t *testing.T) {
 	}
 
 	// Envelope-valid but textless (reasoning ate the budget) must NOT error.
-	resp, err = parseResponsesBody([]byte(responsesIncompleteBody))
+	resp, err = ParseResponsesBody([]byte(responsesIncompleteBody))
 	if err != nil {
 		t.Fatalf("incomplete: %v", err)
 	}
@@ -80,10 +80,10 @@ func TestParseResponsesBody(t *testing.T) {
 		t.Errorf("incomplete = %+v", resp)
 	}
 
-	if _, err = parseResponsesBody([]byte(responsesErrorBody)); err == nil {
+	if _, err = ParseResponsesBody([]byte(responsesErrorBody)); err == nil {
 		t.Error("error envelope should fail")
 	}
-	if _, err = parseResponsesBody([]byte(`{`)); err == nil {
+	if _, err = ParseResponsesBody([]byte(`{`)); err == nil {
 		t.Error("malformed JSON should fail")
 	}
 }
@@ -285,7 +285,7 @@ func TestResolveResponsesEffort(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := resolveResponsesEffort(tc.extra); got != tc.want {
+			if got := ResolveResponsesEffort(tc.extra); got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
@@ -378,7 +378,7 @@ func TestBuildResponsesTools(t *testing.T) {
 }
 
 func TestBuildResponsesInputValue_TextStaysString(t *testing.T) {
-	v := buildResponsesInputValue([]Message{{Role: "user", Content: "hi"}})
+	v := BuildResponsesInputValue([]Message{{Role: "user", Content: "hi"}})
 	s, ok := v.(string)
 	require.True(t, ok, "text-only input must stay a string, got %T", v)
 	assert.Contains(t, s, "hi")
@@ -394,7 +394,7 @@ func TestBuildResponsesInputValue_VisionAndTools(t *testing.T) {
 			Function: FunctionCall{Name: "get_weather", Arguments: `{"city":"Oslo"}`}}}},
 		{Role: "tool", Content: "sunny", ToolCallID: "call_1", Name: "get_weather"},
 	}
-	v := buildResponsesInputValue(msgs)
+	v := BuildResponsesInputValue(msgs)
 	items, ok := v.([]responsesInputItem)
 	require.True(t, ok, "multimodal input must be an item array, got %T", v)
 	require.Len(t, items, 3)
@@ -409,7 +409,7 @@ func TestBuildResponsesInputValue_VisionAndTools(t *testing.T) {
 }
 
 func TestParseResponsesBody_ToolCall(t *testing.T) {
-	resp, err := parseResponsesBody([]byte(responsesToolCallBody))
+	resp, err := ParseResponsesBody([]byte(responsesToolCallBody))
 	require.NoError(t, err)
 	require.Len(t, resp.ToolCalls, 1)
 	assert.Equal(t, "call_1", resp.ToolCalls[0].ID)

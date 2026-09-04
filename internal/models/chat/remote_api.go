@@ -118,7 +118,7 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 		customHeaders:    chatConfig.CustomHeaders,
 		adapter:          resolveProvider(providerName, modelName),
 		thinkingOverride: parseThinkingOverride(chatConfig.ExtraConfig),
-		responsesEffort:  resolveResponsesEffort(chatConfig.ExtraConfig),
+		responsesEffort:  ResolveResponsesEffort(chatConfig.ExtraConfig),
 	}, nil
 }
 

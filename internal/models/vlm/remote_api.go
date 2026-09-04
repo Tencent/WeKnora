@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	modelutils "github.com/Tencent/WeKnora/internal/models/utils"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -46,6 +47,10 @@ type RemoteAPIVLM struct {
 	client      *openai.Client
 	baseURL     string
 	temperature float32
+	provider    provider.ProviderName
+	effort      string
+	apiKey      string
+	httpClient  openai.HTTPDoer
 }
 
 // NewRemoteAPIVLM creates a remote-API backed VLM instance.
@@ -108,11 +113,31 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 		client:      openai.NewClientWithConfig(apiCfg),
 		baseURL:     config.BaseURL,
 		temperature: temp,
+		provider:    providerName,
+		effort:      resolveVLMResponsesEffort(config.Extra),
+		apiKey:      config.APIKey,
+		httpClient:  apiCfg.HTTPClient,
 	}, nil
 }
 
-// Predict sends an image with a text prompt to the OpenAI-compatible API.
+// resolveVLMResponsesEffort reads Extra reasoning_effort through the same
+// allowlist as the chat path (default medium); VLM has no effort selector
+// UI, so Extra is the only knob.
+func resolveVLMResponsesEffort(extra map[string]any) string {
+	if extra != nil {
+		if v, ok := extra["reasoning_effort"].(string); ok {
+			return chat.ResolveResponsesEffort(map[string]string{"reasoning_effort": v})
+		}
+	}
+	return chat.ResolveResponsesEffort(nil)
+}
+
+// Predict sends an image with a text prompt to the OpenAI-compatible API,
+// or to /responses when the model uses the responses provider (#25).
 func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt string) (string, error) {
+	if v.provider == provider.ProviderResponses {
+		return v.predictWithResponses(ctx, imgBytesList, prompt)
+	}
 	var parts []openai.ChatMessagePart
 
 	// Add text prompt first
