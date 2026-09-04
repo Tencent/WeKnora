@@ -218,38 +218,48 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 
 			// FAQ type: search based on searchField
 			// 根据数据库类型使用不同的 JSON 查询语法
-			isPostgres := db.Dialector.Name() == "postgres"
+			dialect := db.Dialector.Name()
 
 			switch searchField {
 			case "standard_question":
 				// Search only in standard_question field of metadata
-				if isPostgres {
+				switch dialect {
+				case "postgres":
 					db = db.Where("metadata->>'standard_question' ILIKE ?", like)
-				} else {
-					// MySQL: metadata->>'$.standard_question' (MySQL 5.7.13+)
-					// 也可以用 JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question'))
-					db = db.Where("metadata->>'$.standard_question' LIKE ?", like)
+				case "mysql":
+					db = db.Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question')) LIKE ?", like)
+				default: // sqlite
+					db = db.Where("json_extract(metadata, '$.standard_question') LIKE ?", like)
 				}
 			case "similar_questions":
 				// Search in similar_questions array of metadata
-				if isPostgres {
+				switch dialect {
+				case "postgres":
 					db = db.Where("(metadata->'similar_questions')::text ILIKE ?", like)
-				} else {
+				case "mysql":
 					db = db.Where("JSON_EXTRACT(metadata, '$.similar_questions') LIKE ?", like)
+				default: // sqlite
+					db = db.Where("json_extract(metadata, '$.similar_questions') LIKE ?", like)
 				}
 			case "answers":
 				// Search in answers array of metadata
-				if isPostgres {
+				switch dialect {
+				case "postgres":
 					db = db.Where("(metadata->'answers')::text ILIKE ?", like)
-				} else {
+				case "mysql":
 					db = db.Where("JSON_EXTRACT(metadata, '$.answers') LIKE ?", like)
+				default: // sqlite
+					db = db.Where("json_extract(metadata, '$.answers') LIKE ?", like)
 				}
 			default:
 				// Search in all fields (content and metadata)
-				if isPostgres {
+				switch dialect {
+				case "postgres":
 					db = db.Where("(content ILIKE ? OR metadata::text ILIKE ?)", like, like)
-				} else {
+				case "mysql":
 					db = db.Where("(content LIKE ? OR CAST(metadata AS CHAR) LIKE ?)", like, like)
+				default: // sqlite
+					db = db.Where("(content LIKE ? OR CAST(metadata AS TEXT) LIKE ?)", like, like)
 				}
 			}
 		}
@@ -475,46 +485,41 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		args = append(args, id)
 	}
 
-	isPostgres := r.db.Dialector.Name() == "postgres"
+	dialect := r.db.Dialector.Name()
 
-	var sql string
-	if isPostgres {
-		sql = fmt.Sprintf(`
-			UPDATE chunks SET
-				content = CASE %s END,
-				is_enabled = (CASE %s END)::boolean,
-				tag_id = CASE %s END,
-				flags = (CASE %s END)::integer,
-				status = (CASE %s END)::integer,
-				updated_at = NOW()
-			WHERE id IN (%s)
-		`,
-			strings.Join(contentCases, " "),
-			strings.Join(isEnabledCases, " "),
-			strings.Join(tagIDCases, " "),
-			strings.Join(flagsCases, " "),
-			strings.Join(statusCases, " "),
-			strings.Join(inPlaceholders, ","),
-		)
-	} else {
-		sql = fmt.Sprintf(`
-			UPDATE chunks SET
-				content = CASE %s END,
-				is_enabled = CASE %s END,
-				tag_id = CASE %s END,
-				flags = CASE %s END,
-				status = CASE %s END,
-				updated_at = datetime('now')
-			WHERE id IN (%s)
-		`,
-			strings.Join(contentCases, " "),
-			strings.Join(isEnabledCases, " "),
-			strings.Join(tagIDCases, " "),
-			strings.Join(flagsCases, " "),
-			strings.Join(statusCases, " "),
-			strings.Join(inPlaceholders, ","),
-		)
+	// Postgres requires explicit casts on the CASE results (::boolean /
+	// ::integer); MySQL and SQLite accept the CASE result as-is. SQLite uses
+	// datetime('now') for the timestamp; Postgres/MySQL use NOW().
+	nowExpr := "NOW()"
+	castEnabled, castFlags, castStatus := "::boolean", "::integer", "::integer"
+	if dialect == "mysql" || dialect == "sqlite" {
+		castEnabled, castFlags, castStatus = "", "", ""
 	}
+	if dialect == "sqlite" {
+		nowExpr = "datetime('now')"
+	}
+
+	sql := fmt.Sprintf(`
+		UPDATE chunks SET
+			content = CASE %s END,
+			is_enabled = (CASE %s END)%s,
+			tag_id = CASE %s END,
+			flags = (CASE %s END)%s,
+			status = (CASE %s END)%s,
+			updated_at = %s
+		WHERE id IN (%s)
+	`,
+		strings.Join(contentCases, " "),
+		strings.Join(isEnabledCases, " "),
+		castEnabled,
+		strings.Join(tagIDCases, " "),
+		strings.Join(flagsCases, " "),
+		castFlags,
+		strings.Join(statusCases, " "),
+		castStatus,
+		nowExpr,
+		strings.Join(inPlaceholders, ","),
+	)
 
 	return r.db.WithContext(ctx).Exec(sql, args...).Error
 }

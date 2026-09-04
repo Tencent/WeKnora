@@ -21,7 +21,7 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 	esv7 "github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v8"
-	_ "github.com/go-sql-driver/mysql" // 给 Doris (database/sql) 注册 MySQL 协议驱动
+	mysql "github.com/go-sql-driver/mysql" // 给 Doris (database/sql) 注册 MySQL 协议驱动 + 主库 MySQL DSN
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/panjf2000/ants/v2"
@@ -29,6 +29,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
 	"google.golang.org/grpc"
+	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -681,6 +682,42 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 			os.Getenv("DB_PORT"),
 			os.Getenv("DB_NAME"),
 		)
+	case "mysql":
+		// DSN for GORM built via go-sql-driver's mysql.Config so passwords
+		// containing special characters (@ / : / #) are escaped correctly,
+		// mirroring the Doris engine's DSN construction.
+		mc := mysql.NewConfig()
+		mc.User = os.Getenv("DB_USER")
+		mc.Passwd = os.Getenv("DB_PASSWORD")
+		mc.Net = "tcp"
+		mc.Addr = fmt.Sprintf("%s:%s", os.Getenv("DB_HOST"), os.Getenv("DB_PORT"))
+		mc.DBName = os.Getenv("DB_NAME")
+		mc.Params = map[string]string{"charset": "utf8mb4"}
+		mc.ParseTime = true
+		mc.Loc = time.UTC
+		gormDSN := mc.FormatDSN()
+		dialector = gormmysql.Open(gormDSN)
+
+		// DSN for golang-migrate (URL format). The password is URL-encoded so
+		// the migrate driver's QueryUnescape round-trips it correctly (it then
+		// rebuilds a safe go-sql-driver DSN and forces multiStatements=true).
+		encodedPassword := url.QueryEscape(os.Getenv("DB_PASSWORD"))
+		migrateDSN = fmt.Sprintf(
+			"mysql://%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=true&loc=UTC",
+			os.Getenv("DB_USER"),
+			encodedPassword,
+			os.Getenv("DB_HOST"),
+			os.Getenv("DB_PORT"),
+			os.Getenv("DB_NAME"),
+		)
+
+		// Debug log (don't log password)
+		logger.Infof(context.Background(), "DB Config: driver=mysql user=%s host=%s port=%s dbname=%s",
+			os.Getenv("DB_USER"),
+			os.Getenv("DB_HOST"),
+			os.Getenv("DB_PORT"),
+			os.Getenv("DB_NAME"),
+		)
 	case "sqlite":
 		dbPath := os.Getenv("DB_PATH")
 		if dbPath == "" {
@@ -715,7 +752,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	// different name (e.g., a wrapper dialect for managed PG) would silently
 	// fall back to the SQLite path, dropping the row-level X-lock. Catching
 	// the mismatch at startup is loud and inexpensive.
-	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" {
+	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" && name != "mysql" {
 		return nil, fmt.Errorf(
 			"unsupported gorm dialector %q; expected postgres or sqlite "+
 				"(see vectorStoreService.isPostgres for impact)", name)
