@@ -64,3 +64,4 @@ miniprogram/project.private.config.json
 # Personal agent/dev notes (local only, never commit)
 AGENTS.md
 docs/agents/
+docs/research/
