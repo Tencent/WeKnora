@@ -87,3 +87,15 @@ builtin_models: []
 #       provider: responses
 #       extra_config:
 #         reasoning_effort: medium   # none | minimal | low | medium | high
+#
+#   - id: builtin-responses-vlm
+#     name: muse-spark-1.3-contributor
+#     type: VLLM
+#     source: remote
+#     is_default: false
+#     parameters:
+#       base_url: https://opencode.ai/zen/go/v1   # bare API root only: no /responses suffix
+#       api_key: ${OPENCODE_API_KEY}
+#       provider: responses
+#       extra_config:
+#         reasoning_effort: medium   # none | minimal | low | medium | high

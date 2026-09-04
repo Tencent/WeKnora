@@ -112,7 +112,7 @@ func NewRemoteChat(config *ChatConfig) (Chat, error) {
 
 - **Ollama**（`source=local`）：`chat/ollama.go`、`embedding/ollama.go`、`vlm/ollama.go` 通过 `internal/models/utils/ollama` 的 `OllamaService` 直连本机 Ollama。
 - **Anthropic**：`chat/anthropic.go` 实现 Messages 协议。
-- **Responses**（`provider=responses`）：`chat/responses.go` + `chat/responses_stream.go` 实现 Responses 协议（`input/output_text/usage`、SSE `response.*` 事件、function tools、vision 输入、`reasoning.effort`）；`Chat()`/`ChatStream()` 按 provider 分流，thinking_control 不适用。
+- **Responses**（`provider=responses`）：`chat/responses.go` + `chat/responses_stream.go` 实现 Responses 协议（`input/output_text/usage`、SSE `response.*` 事件、function tools、vision 输入、`reasoning.effort`）；`Chat()`/`ChatStream()` 按 provider 分流，thinking_control 不适用。VLM（`vlm/responses.go`）在 `Predict` 内共享分支：图片经 `input_image` 传入，`reasoning_effort` 取 VLM 模型的 `extra_config`（默认 medium），失败沿用 warn-and-continue。
 - **其余远程厂商**：统一走 `chat/remote_api.go` 的 OpenAI 兼容 Chat Completions 实现，厂商差异（thinking 编码、参数兼容等）由构造时解析的 `providerAdapter` 处理。
 - **Embedding** 有更多专用实现：阿里云多模态（`tongyi-embedding-vision-*` 走 DashScope 专用端点，纯文本模型自动改写为 `/compatible-mode/v1` OpenAI 兼容端点）、Volcengine 多模态、Jina、Azure OpenAI、NVIDIA、Gemini、Zhipu、WeKnoraCloud，其余为 OpenAI 兼容（`embedding/openai.go`）。
 - **Rerank** 专用实现：Aliyun、Zhipu、Jina、NVIDIA、WeKnoraCloud、LKEAP、Volcengine，默认 `NewOpenAIReranker`（通用 `/rerank` 风格接口）。两个厂商有额外适配：
