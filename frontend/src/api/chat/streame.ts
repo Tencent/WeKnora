@@ -7,8 +7,22 @@ import {
   sanitizeStreamRequestBody,
   type StreamRequestMeta,
 } from '@/utils/chatRequestDebug';
+import { refreshAccessTokenShared, forceReloginRedirect } from '@/utils/request';
 
-
+/**
+ * The SSE handshake was rejected for auth reasons.
+ *
+ * Streaming runs on raw fetch, outside the axios instance, so nothing else
+ * refreshes the token for it. This marker lets startStream tell "your login
+ * expired" apart from a genuine stream failure and recover instead of showing
+ * a dead-end "HTTP 401" toast.
+ */
+class StreamAuthError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`);
+    this.name = 'StreamAuthError';
+  }
+}
 
 interface StreamOptions {
   // 请求方法 (默认POST)
@@ -148,11 +162,14 @@ export function useStream() {
         sentAt: Date.now(),
       };
       
-      await fetchEventSource(url, {
+      // Wrapped so an expired access token can be refreshed and the request
+      // replayed once. Nothing has been streamed to the UI yet when the
+      // handshake 401s, so the replay is invisible to the user.
+      const runStream = (authToken: string) => fetchEventSource(url, {
         method: params.method,
         headers: {
           "Content-Type": "application/json",
-          "Authorization": embedToken ? `Embed ${embedToken}` : `Bearer ${token}`,
+          "Authorization": embedToken ? `Embed ${embedToken}` : `Bearer ${authToken}`,
           "Accept-Language": i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN',
           "X-Request-ID": requestID,
           ...(!embedToken && tenantIdHeader ? { "X-Tenant-ID": tenantIdHeader } : {}),
@@ -167,6 +184,8 @@ export function useStream() {
         openWhenHidden: true,
 
         onopen: async (res) => {
+          // 401 is recoverable (refresh + replay); everything else is not.
+          if (res.status === 401) throw new StreamAuthError(res.status);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           console.log(`[TTFB] response:headers request_id=${requestID} elapsed_ms=${(performance.now() - sentAt).toFixed(1)}`);
           isLoading.value = false;
@@ -190,6 +209,9 @@ export function useStream() {
         },
 
         onerror: (err) => {
+          // Let the auth marker through unwrapped so startStream can act on
+          // it; wrapping would turn it into an opaque string.
+          if (err instanceof StreamAuthError) throw err;
           throw new Error(`${i18n.global.t('error.streamFailed')}: ${err}`);
         },
 
@@ -197,6 +219,43 @@ export function useStream() {
           stopStream();
         },
       });
+
+      try {
+        await runStream(token);
+      } catch (err) {
+        // Embed visitors authenticate with an Embed token that this SPA
+        // cannot refresh — surface the failure instead of bouncing them.
+        if (!(err instanceof StreamAuthError) || embedToken) throw err;
+
+        // The access token died between page load and send. Most often the
+        // account was logged out elsewhere: the backend's Logout revokes
+        // every token issued to that user, so another device signing out
+        // kills this session mid-conversation. Reuse the axios refresh path
+        // (shared queue, so concurrent 401s trigger one refresh) and replay.
+        console.warn('[Stream] auth rejected on handshake, refreshing token and retrying once');
+        let refreshedToken: string;
+        try {
+          refreshedToken = await refreshAccessTokenShared();
+        } catch {
+          // Credentials cleared and /login redirect already issued.
+          throw new Error(i18n.global.t('error.pleaseRelogin'));
+        }
+
+        // A newer send superseded this one while we were refreshing.
+        if (myGeneration !== streamGeneration) return;
+
+        try {
+          await runStream(refreshedToken);
+        } catch (retryErr) {
+          if (retryErr instanceof StreamAuthError) {
+            // A token minted seconds ago was rejected — the session is gone
+            // for good (revoked, not merely expired). Send them to /login.
+            forceReloginRedirect();
+            throw new Error(i18n.global.t('error.pleaseRelogin'));
+          }
+          throw retryErr;
+        }
+      }
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
       stopStream()

@@ -110,6 +110,86 @@ function redirectToLogin() {
   window.location.href = '/login';
 }
 
+/**
+ * Clear stored credentials and send the SPA to /login.
+ *
+ * Exported for callers that authenticate outside this axios instance (the SSE
+ * client) and therefore can't rely on the response interceptor to do it.
+ */
+export function forceReloginRedirect() {
+  localStorage.removeItem('weknora_token');
+  localStorage.removeItem('weknora_refresh_token');
+  localStorage.removeItem('weknora_user');
+  localStorage.removeItem('weknora_tenant');
+  redirectToLogin();
+}
+
+/**
+ * Refresh the access token, de-duplicated across all callers.
+ *
+ * The axios interceptor and the SSE client share one in-flight refresh, so a
+ * burst of 401s produces a single /auth/refresh call instead of N racing ones
+ * (refresh tokens rotate — concurrent refreshes invalidate each other).
+ *
+ * Resolves with the new access token. On failure it has already cleared the
+ * credentials and redirected to /login, so callers only need to surface a
+ * message.
+ */
+export async function refreshAccessTokenShared(): Promise<string> {
+  if (isRefreshing) {
+    // A refresh is already in flight — wait for its result instead of
+    // starting a second one.
+    return new Promise<string>((resolve, reject) => {
+      failedQueue.push({ resolve, reject });
+    });
+  }
+
+  isRefreshing = true;
+  const storedRefreshToken = localStorage.getItem('weknora_refresh_token');
+
+  if (!storedRefreshToken) {
+    localStorage.removeItem('weknora_token');
+    localStorage.removeItem('weknora_user');
+    localStorage.removeItem('weknora_tenant');
+    const noRefreshTokenError = { message: t('error.pleaseRelogin') };
+    processQueue(noRefreshTokenError, null);
+    isRefreshing = false;
+    redirectToLogin();
+    throw noRefreshTokenError;
+  }
+
+  try {
+    // 动态导入refresh token API
+    const { refreshToken: refreshTokenAPI } = await import('../api/auth/index');
+    const response = await refreshTokenAPI(storedRefreshToken);
+
+    if (!response.success || !response.data) {
+      throw new Error(response.message || t('error.tokenRefreshFailed'));
+    }
+
+    const { token, refreshToken: newRefreshToken } = response.data;
+
+    localStorage.setItem('weknora_token', token);
+    localStorage.setItem('weknora_refresh_token', newRefreshToken);
+    processQueue(null, token);
+
+    return token;
+  } catch (refreshError) {
+    // 刷新失败，清除所有token并跳转到登录页
+    localStorage.removeItem('weknora_token');
+    localStorage.removeItem('weknora_refresh_token');
+    localStorage.removeItem('weknora_user');
+    localStorage.removeItem('weknora_tenant');
+
+    processQueue(refreshError, null);
+    redirectToLogin();
+
+    throw refreshError;
+  } finally {
+    isRefreshing = false;
+  }
+}
+
 instance.interceptors.response.use(
   (response) => {
     // 根据业务状态码处理逻辑
@@ -147,70 +227,15 @@ instance.interceptors.response.use(
 
     // 如果是401错误且不是刷新token的请求，尝试刷新token
     if (error.response.status === 401 && !originalRequest._retry && !originalRequest.url?.includes('/auth/refresh')) {
-      if (isRefreshing) {
-        // 如果正在刷新token，将请求加入队列
-        return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
-        }).then(token => {
-          originalRequest.headers['Authorization'] = 'Bearer ' + token;
-          return instance(originalRequest);
-        }).catch(err => {
-          return Promise.reject(err);
-        });
-      }
-      
       originalRequest._retry = true;
-      isRefreshing = true;
-      
-      const refreshToken = localStorage.getItem('weknora_refresh_token');
-      
-      if (refreshToken) {
-        try {
-          // 动态导入refresh token API
-          const { refreshToken: refreshTokenAPI } = await import('../api/auth/index');
-          const response = await refreshTokenAPI(refreshToken);
-          
-          if (response.success && response.data) {
-            const { token, refreshToken: newRefreshToken } = response.data;
-            
-            // 更新localStorage中的token
-            localStorage.setItem('weknora_token', token);
-            localStorage.setItem('weknora_refresh_token', newRefreshToken);
-            
-            // 更新请求头
-            originalRequest.headers['Authorization'] = 'Bearer ' + token;
-            
-            // 处理队列中的请求
-            processQueue(null, token);
-            
-            return instance(originalRequest);
-          } else {
-            throw new Error(response.message || t('error.tokenRefreshFailed'));
-          }
-        } catch (refreshError) {
-          // 刷新失败，清除所有token并跳转到登录页
-          localStorage.removeItem('weknora_token');
-          localStorage.removeItem('weknora_refresh_token');
-          localStorage.removeItem('weknora_user');
-          localStorage.removeItem('weknora_tenant');
-          
-          processQueue(refreshError, null);
-          
-          redirectToLogin();
-          
-          return Promise.reject(refreshError);
-        } finally {
-          isRefreshing = false;
-        }
-      } else {
-        // 没有refresh token，直接跳转到登录页
-        localStorage.removeItem('weknora_token');
-        localStorage.removeItem('weknora_user');
-        localStorage.removeItem('weknora_tenant');
-        
-        redirectToLogin();
-        
-        return Promise.reject({ message: t('error.pleaseRelogin') });
+      try {
+        // Shared with the SSE client so both planes queue behind one refresh.
+        const token = await refreshAccessTokenShared();
+        originalRequest.headers['Authorization'] = 'Bearer ' + token;
+        return instance(originalRequest);
+      } catch (refreshError) {
+        // refreshAccessTokenShared already cleared credentials and redirected.
+        return Promise.reject(refreshError);
       }
     }
     
