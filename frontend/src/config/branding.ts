@@ -10,16 +10,18 @@ export const BRANDING = {
   name: '灵枢·知识中台',
   /** 品牌名第一个字符的高亮色（例如「灵枢·知识中台」的首字「灵」显示为该色） */
   accentColor: '#e60012',
+  /** 品牌名高亮前缀的字符数（2 = 高亮「灵枢」二字，其余字正常色） */
+  accentLength: 2,
   /** 品牌 logo 文件名（放在 src/assets/img/ 目录下，构建时按名字匹配） */
   logoFile: 'smee.png',
   /** 登录页单独使用的 logo 文件名（可选；不填则跟随 logoFile） */
   loginLogoFile: 'smee_w.png',
 } as const
 
-/** 品牌名第一个字符（高亮展示） */
-export const BRAND_ACCENT_LETTER: string = BRANDING.name.charAt(0)
-/** 品牌名其余部分（普通颜色展示） */
-export const BRAND_NAME_TAIL: string = BRANDING.name.slice(1)
+/** 品牌名高亮前缀（默认首个字符；按 BRANDING.accentLength 截取） */
+export const BRAND_ACCENT_LETTER: string = BRANDING.name.slice(0, BRANDING.accentLength)
+/** 品牌名高亮前缀之后的其余部分（普通颜色展示） */
+export const BRAND_NAME_TAIL: string = BRANDING.name.slice(BRANDING.accentLength)
 
 // ---------- 功能可见性开关 ----------
 export const FEATURES = {
