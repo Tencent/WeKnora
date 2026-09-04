@@ -1,9 +1,9 @@
-import { fetchOutline } from './outline'
+import { fetchOutlineResult } from './outline'
 import { fetchRelatedKnowledge } from './relatedKnowledge'
 import { fetchSummary } from './summary'
 import { fetchTranscriptPage } from './transcriptPage'
 import { buildVideoContentState, emptyRelatedKnowledge, settleContentState, type VideoContentModule, type VideoContentState } from './contentState'
-import type { VideoCategory } from '@/types/videohub'
+import type { Chapter, VideoCategory } from '@/types/videohub'
 
 export { buildVideoContentState, classifyContentError, createLoadingContentState, type VideoContentState } from './contentState'
 export { contentModuleForStage, createLoadingContentModuleState, type VideoContentModule } from './contentState'
@@ -15,8 +15,12 @@ export async function fetchVideoContentModule(
   module: VideoContentModule,
 ): Promise<VideoContentState[VideoContentModule]> {
   if (module === 'outline') {
-    const result = await Promise.allSettled([fetchOutline(videoId, durationSeconds)])
-    return settleContentState(result[0], [], data => data.length === 0)
+    const result = await Promise.allSettled([fetchOutlineResult(videoId, durationSeconds)])
+    if (result[0].status === 'fulfilled') {
+      const value = result[0].value
+      return { status: value.partial ? 'partial' : (value.chapters.length === 0 ? 'empty' : 'ready'), data: value.chapters }
+    }
+    return settleContentState(result[0], [], () => true)
   }
   if (module === 'summary') {
     const result = await Promise.allSettled([fetchSummary(videoId, category)])
@@ -39,11 +43,16 @@ export async function fetchVideoContent(
   category: VideoCategory,
 ): Promise<VideoContentState> {
   const [outline, summary, relatedKnowledge, transcriptPage] = await Promise.allSettled([
-    fetchOutline(videoId, durationSeconds),
+    fetchOutlineResult(videoId, durationSeconds),
     fetchSummary(videoId, category),
     fetchRelatedKnowledge(videoId),
     fetchTranscriptPage(videoId),
   ])
 
-  return buildVideoContentState(outline, summary, relatedKnowledge, transcriptPage)
+  const outlineState: PromiseSettledResult<Chapter[]> = outline.status === 'fulfilled'
+    ? { status: 'fulfilled', value: outline.value.chapters }
+    : outline
+  const state = buildVideoContentState(outlineState, summary, relatedKnowledge, transcriptPage)
+  if (outline.status === 'fulfilled' && outline.value.partial) state.outline.status = 'partial'
+  return state
 }

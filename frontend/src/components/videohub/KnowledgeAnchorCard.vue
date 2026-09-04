@@ -3,6 +3,7 @@
     <header>
       <div class="knowledge-anchor__main">
         <h3>{{ anchor.content }}</h3>
+        <button class="knowledge-anchor__time" type="button" title="定位到当前视频此位置" @click="emit('seek', anchor.seconds)">{{ anchor.timestamp }}</button>
       </div>
     </header>
     <p v-if="anchor.coreContent" class="knowledge-anchor__core">{{ anchor.coreContent }}</p>
@@ -48,10 +49,11 @@ function forwardSelection(videoId: string, seconds: number) { emit('selectVideoB
 </script>
 
 <style scoped>
-.knowledge-anchor { padding: calc(var(--td-comp-margin-s) * 2); border: var(--border-width-hairline, .5px) solid var(--td-component-stroke); border-radius: var(--td-radius-extraLarge); background: var(--td-bg-color-container); }
+.knowledge-anchor { padding: 14px 6px 16px; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--td-component-stroke) 62%, transparent); border-radius: 0; background: transparent; }
+.knowledge-anchor:first-child { padding-top: 4px; }
 .knowledge-anchor header { display: flex; align-items: flex-start; gap: calc(var(--td-comp-margin-s) * 1.5); }
 .knowledge-anchor__main { display: flex; align-items: flex-start; gap: var(--td-comp-margin-s); min-width: 0; }
-.knowledge-anchor h3 { margin: 0; color: var(--td-text-color-primary); font-size: 15px; font-weight: 600; line-height: 1.55; }
+.knowledge-anchor h3 { margin: 0; color: var(--td-text-color-primary); font-size: 14px; font-weight: 400; line-height: 1.55; }
 .knowledge-anchor__time { flex: none; padding: 0; border: 0; background: transparent; color: var(--td-brand-color); font-family: var(--app-font-family-mono, monospace); font-size: var(--td-font-size-body-small); cursor: pointer; }
 .knowledge-anchor__time:hover { text-decoration: underline; }
 .knowledge-anchor__core { margin: var(--td-comp-margin-s) 0 0; color: var(--td-text-color-primary); font-size: var(--td-font-size-body-medium); line-height: 1.6; }
@@ -59,7 +61,7 @@ function forwardSelection(videoId: string, seconds: number) { emit('selectVideoB
 .knowledge-anchor__fields dt { color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); white-space: nowrap; }
 .knowledge-anchor__fields dd { min-width: 0; margin: 0; color: var(--td-text-color-primary); font-size: var(--td-font-size-body-small); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .knowledge-anchor__section { margin-top: calc(var(--td-comp-margin-s) * 1.5); }
-.knowledge-anchor__section h4 { margin: 0 0 var(--td-comp-margin-s); color: var(--td-text-color-primary); font-size: var(--td-font-size-title-small); }
+.knowledge-anchor__section h4 { margin: 0 0 var(--td-comp-margin-s); color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); font-weight: 400; }
 .knowledge-anchor__source { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: calc(var(--td-comp-margin-s) / 2) var(--td-comp-margin-s); margin: 0; }
 .knowledge-anchor__source dt { color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }
 .knowledge-anchor__source dd { min-width: 0; margin: 0; color: var(--td-text-color-primary); overflow-wrap: anywhere; }

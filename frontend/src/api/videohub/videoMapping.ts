@@ -17,11 +17,13 @@ export function isVideoInitiallyAvailable(video: { status?: string; file_url?: s
   return INITIAL_VIDEO_STATUSES.has(status) && Boolean((video.play_url || video.file_url)?.trim())
 }
 
-function formatDuration(seconds: number): string {
-  if (!seconds || seconds <= 0) return '—'
-  const minutes = Math.floor(seconds / 60)
-  const remainder = Math.floor(seconds % 60)
-  return minutes > 0 ? `${minutes}分${remainder}秒` : `${remainder}秒`
+export function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '—'
+  const totalSeconds = Math.floor(seconds)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const remainder = totalSeconds % 60
+  return [hours, minutes, remainder].map(value => String(value).padStart(2, '0')).join(':')
 }
 
 export function mapVideo(v: any, response?: any): VideoData {

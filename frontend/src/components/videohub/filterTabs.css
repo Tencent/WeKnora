@@ -10,10 +10,10 @@
   flex: none;
   align-items: center;
   gap: calc(var(--td-comp-margin-s) / 2);
-  padding: calc(var(--td-comp-margin-s) / 2) calc(var(--td-comp-margin-s) * 1.5);
+  padding: 6px 11px;
   border: 0;
-  border-radius: var(--td-radius-medium);
-  background: var(--td-bg-color-secondarycontainer);
+  border-radius: var(--td-radius-round);
+  background: color-mix(in srgb, var(--td-bg-color-container) 52%, transparent);
   color: var(--td-text-color-secondary);
   font: inherit;
   font-size: var(--td-font-size-body-small);
@@ -22,12 +22,7 @@
 
 .videohub-filter-tabs button:hover { color: var(--td-text-color-primary); }
 
-.videohub-filter-tabs button.is-active {
-  background: var(--td-brand-color);
-  color: var(--td-text-color-anti);
-  box-shadow: var(--td-shadow-1);
-  font-weight: 600;
-}
+.videohub-filter-tabs button.is-active { background: var(--td-brand-color-light); color: var(--td-brand-color); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--td-brand-color) 10%, transparent); font-weight: 400; }
 
 .videohub-filter-tabs small {
   font-family: var(--app-font-family-mono, monospace);

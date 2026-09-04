@@ -64,18 +64,18 @@ function formatTime(seconds: number) {
 
 function makeChapters(videoIndex: number, duration: number): Chapter[] {
   const titles = [
-    ['背景与问题定义', '核心原理拆解', '实践方法与案例'],
-    ['技术演进脉络', '关键能力突破', '未来趋势判断'],
-    ['规模扩展规律', '数据与算力边界', '工程决策框架'],
-    ['数据目标定义', '清洗与标注流程', '质量评估闭环'],
-    ['AI Native 定位', '工作流重构', '产品壁垒构建'],
-    ['知识沉淀机制', '关联与检索', '持续运营方法'],
+    ['背景与问题定义', '核心原理拆解', '实践方法与案例', '复盘与行动建议'],
+    ['技术演进脉络', '关键能力突破', '未来趋势判断', '落地路径与边界'],
+    ['规模扩展规律', '数据与算力边界', '工程决策框架', '业务价值验证'],
+    ['数据目标定义', '清洗与标注流程', '质量评估闭环', '持续迭代与应用'],
+    ['AI Native 定位', '工作流重构', '产品壁垒构建', '组织协同与增长'],
+    ['知识沉淀机制', '关联与检索', '持续运营方法', '效果评估与优化'],
   ][videoIndex]
-  const chapterLength = Math.floor(duration / 3)
+  const chapterLength = Math.floor(duration / 4)
 
   return titles.map((title, index) => {
     const start = index * chapterLength
-    const end = index === 2 ? duration : (index + 1) * chapterLength
+    const end = index === titles.length - 1 ? duration : (index + 1) * chapterLength
     return {
       id: `v-${videoIndex + 1}-chapter-${index + 1}`,
       chapter_index: String(index + 1).padStart(2, '0'),
@@ -173,6 +173,7 @@ function makeRelatedKnowledge(videoIndex: number, duration: number) {
           video_title: definitions[targetIndex].title,
           video_category: definitions[targetIndex].category,
           relation_description: `该内容与当前视频的${knowledgeLabels[knowledgeType]}形成交叉印证，可用于补充理解和比较。`,
+          source_chapter: `${knowledgeLabels[knowledgeType]}相关章节`,
         })
       }
     }

@@ -1,4 +1,4 @@
-import { get, post, postUpload } from '@/utils/request'
+import { del, get, post, postUpload } from '@/utils/request'
 import type { VideoData, VideoOption, VideoProcessingStatus } from '@/types/videohub'
 import { isVideoInitiallyAvailable, mapVideo } from './videoMapping'
 import { parseSubtitleFile } from './contentParsing'
@@ -18,6 +18,7 @@ export {
 export { isVideoInitiallyAvailable, mapVideo } from './videoMapping'
 export { parseSubtitleFile } from './contentParsing'
 export { shouldShowRelatedKnowledgeTab } from './contentState'
+export { fetchOutline, fetchOutlineResult, type OutlineResult } from './outline'
 
 export async function fetchVideoList(): Promise<VideoData[]> {
   const resp: any = await get('/api/custom/videos')
@@ -27,6 +28,10 @@ export async function fetchVideoList(): Promise<VideoData[]> {
 export async function fetchVideoDetail(id: string): Promise<VideoData> {
   const resp: any = await get(`/api/custom/videos/${id}`)
   return mapVideo(resp?.data, resp)
+}
+
+export async function deleteVideo(id: string): Promise<void> {
+  await del(`/api/custom/videos/${id}`)
 }
 
 export async function fetchVideoSubtitles(url: string): Promise<ReturnType<typeof parseSubtitleFile>> {

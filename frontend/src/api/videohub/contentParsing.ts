@@ -67,6 +67,9 @@ interface BackendCrossVideoItem extends BackendAnchor {
   video_id?: string
   video_title?: string
   video_type?: string
+  source_chapter?: string
+  source_chapter_title?: string
+  chapter_title?: string
 }
 
 export interface BackendRelatedKnowledgeResponse {
@@ -468,6 +471,7 @@ export function mapRelatedKnowledgeResponse(videoId: string, response: BackendRe
       video_title: item.video_title || '关联视频',
       video_category: item.video_type === 'interview' ? 'interview' : item.video_type === 'tutorial' || item.video_type === 'training' ? 'training' : item.video_type === 'lecture' || item.video_type === 'salon' ? 'salon' : 'general',
       relation_description: item.relation_description || '与当前内容存在知识关联。',
+      source_chapter: item.source_chapter?.trim() || item.source_chapter_title?.trim() || item.chapter_title?.trim() || '',
     }))
   const anchors: CurrentKnowledgeAnchor[] = grouped.filter(hasKnowledgeType).map((item) => ({
     id: item.id,

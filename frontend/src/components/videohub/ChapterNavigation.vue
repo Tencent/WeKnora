@@ -1,12 +1,12 @@
 <template>
   <section class="chapters" aria-label="视频章节">
     <div class="chapters__heading">
-      <div>
-        <h2>章节大纲</h2>
-        <p>全课共 {{ chapters.length }} 个关键章节</p>
+      <div class="chapters__heading-copy">
+        <h2>快速导航</h2>
+        <p>共 {{ chapters.length }} 章节</p>
       </div>
-      <button v-if="chapters.length" class="chapters__collapse-all" type="button" @click="toggleAll">
-        {{ allExpanded ? '全部折叠' : '全部展开' }}
+      <button v-if="chapters.length" class="chapters__collapse-all" type="button" :aria-label="allExpanded ? '全部折叠' : '全部展开'" :title="allExpanded ? '全部折叠' : '全部展开'" @click="toggleAll">
+        <t-icon :name="allExpanded ? 'chevron-up' : 'chevron-down'" />
       </button>
     </div>
     <div v-if="loading" class="chapters__state"><t-loading text="正在加载章节" /></div>
@@ -24,8 +24,8 @@
             <span class="chapter__title">{{ chapter.chapter_title }}</span>
             <span class="chapter__time">{{ chapter.start_time }}–{{ chapter.end_time }}</span>
           </button>
-          <button class="chapter__toggle" type="button" :aria-label="isExpanded(chapter.id) ? '折叠章节' : '展开章节'" :aria-expanded="isExpanded(chapter.id)" @click="toggleChapter(chapter.id)">
-            <span :class="['chapter__chevron', { 'chapter__chevron--collapsed': !isExpanded(chapter.id) }]" aria-hidden="true" />
+          <button class="chapter__toggle" type="button" :aria-label="isExpanded(chapter.id) ? '折叠章节' : '展开章节'" :aria-expanded="isExpanded(chapter.id)" :title="isExpanded(chapter.id) ? '折叠章节' : '展开章节'" @click.stop="toggleChapter(chapter.id)">
+            <t-icon :name="isExpanded(chapter.id) ? 'chevron-up' : 'chevron-down'" />
           </button>
         </div>
         <div v-if="isExpanded(chapter.id)" class="chapter__body">
@@ -104,36 +104,41 @@ watch(() => props.video.id, () => chapterRefs.clear())
 </script>
 
 <style scoped>
-.chapters { overflow: hidden; border: 1px solid var(--td-border-level-1-color); border-radius: var(--td-radius-extraLarge); background: var(--td-bg-color-container); }
-.chapters__heading { display: flex; align-items: center; justify-content: space-between; min-height: 68px; padding: 14px 20px; border-bottom: 1px solid var(--td-border-level-1-color); }
-.chapters__heading h2 { margin: 0; color: var(--td-text-color-primary); font-size: 18px; font-weight: 600; line-height: 1.5; }
-.chapters__heading p { margin: 2px 0 0; color: var(--td-text-color-secondary); font-size: 12px; line-height: 1.67; }
-.chapters__collapse-all { padding: 4px 0; border: 0; background: transparent; color: var(--td-brand-color); font-size: 12px; cursor: pointer; }
-.chapters__collapse-all:hover { color: var(--td-brand-color-hover); }
+.chapters { min-width: 0; height: auto; max-height: none; overflow: hidden; border: 1px solid rgba(255,255,255,.88); border-radius: var(--td-radius-extraLarge); background: transparent; }
+.chapters__heading { display: flex; align-items: center; justify-content: space-between; min-height: 34px; margin: 0 0 12px; padding: 12px 16px; }
+.chapters__heading-copy { display: flex; align-items: baseline; gap: 8px; min-width: 0; white-space: nowrap; }
+.chapters__heading h2 { margin: 0; color: var(--td-text-color-primary); font-size: 16px; font-weight: 600; line-height: 1.5; }
+.chapters__heading p { margin: 0; color: var(--td-text-color-placeholder); font-size: var(--td-font-size-body-small); line-height: 1.67; }
+.chapters__collapse-all, .chapter__toggle { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--td-radius-medium); background: transparent; color: var(--td-text-color-secondary); cursor: pointer; }
+.chapters__collapse-all:hover, .chapter__toggle:hover { background: var(--td-bg-color-container-hover); color: var(--td-brand-color); }
 .chapters__state, .chapters > :deep(.t-empty) { min-height: 180px; display: grid; place-items: center; }
-.chapters__list { max-height: 600px; overflow: auto; padding: 16px 20px 20px; }
-.chapter { margin-bottom: 12px; overflow: hidden; border: 1px solid var(--td-border-level-1-color); border-radius: var(--td-radius-extraLarge); background: var(--td-bg-color-container); transition: border-color .15s ease, box-shadow .15s ease; }
+.chapters__list { height: auto; max-height: none; overflow: visible; padding: 0 4px 96px 0; }
+.chapter { margin: 0; padding: 13px 12px; border: 1px solid transparent; border-bottom-color: color-mix(in srgb, var(--td-component-stroke) 72%, transparent); background: transparent; transition: border-color .15s ease, background-color .15s ease; }
+.chapter:first-child { border-top-color: color-mix(in srgb, var(--td-component-stroke) 72%, transparent); }
 .chapter:last-child { margin-bottom: 0; }
-.chapter:hover, .chapter--active { border-color: var(--td-brand-color-light); box-shadow: 0 2px 8px color-mix(in srgb, var(--td-brand-color) 8%, transparent); }
-.chapter__header { display: flex; align-items: stretch; min-height: 62px; background: var(--td-bg-color-secondarycontainer); }
-.chapter--active .chapter__header { background: var(--td-brand-color-light); }
-.chapter__main { min-width: 0; flex: 1; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 14px 12px 14px 16px; border: 0; background: transparent; color: var(--td-text-color-primary); text-align: left; cursor: pointer; }
-.chapter__index { display: grid; width: 30px; height: 30px; place-items: center; border-radius: var(--td-radius-medium); background: var(--td-brand-color-light); color: var(--td-brand-color); font-size: 14px; font-weight: 600; }
-.chapter__title { min-width: 0; overflow: hidden; font-size: 16px; font-weight: 600; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
-.chapter__time { padding: 4px 8px; border-radius: var(--td-radius-medium); background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-secondary); font-size: 12px; font-weight: 600; line-height: 1.5; white-space: nowrap; }
-.chapter__toggle { width: 48px; border: 0; border-left: 1px solid var(--td-border-level-1-color); background: transparent; cursor: pointer; }
-.chapter__chevron { display: inline-block; width: 9px; height: 9px; border-top: 1.5px solid var(--td-text-color-secondary); border-left: 1.5px solid var(--td-text-color-secondary); transform: rotate(45deg); transition: transform .15s ease; }
-.chapter__chevron--collapsed { transform: rotate(225deg); }
-.chapter__body { padding: 12px 20px 18px; }
-.chapter__summary { width: 100%; display: grid; gap: 6px; margin: 0 0 14px; padding: 14px 16px; border: 1px solid var(--td-warning-color-3); border-radius: var(--td-radius-large); background: var(--td-warning-color-1); color: var(--td-text-color-primary); text-align: left; cursor: pointer; }
-.chapter__summary strong { color: var(--td-warning-color-7); font-size: 13px; line-height: 1.5; }
-.chapter__summary span { color: var(--td-text-color-secondary); font-size: 14px; line-height: 1.6; }
-.chapter__points { display: grid; gap: 8px; }
-.chapter__points-label { color: var(--td-text-color-secondary); font-size: 13px; font-weight: 600; line-height: 1.5; }
-.chapter__point-list { display: flex; flex-wrap: wrap; gap: 8px; }
-.chapter__point { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--td-brand-color-light); border-radius: var(--td-radius-medium); background: var(--td-brand-color-light); color: var(--td-brand-color); font-size: 13px; line-height: 1.5; text-align: left; cursor: pointer; }
-.chapter__point:hover, .chapter__point--active { border-color: var(--td-brand-color); background: var(--td-brand-color); color: var(--td-text-color-anti); }
-.chapter__point-title { min-width: 0; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chapter__point-time { color: inherit; font-size: 12px; font-weight: 600; opacity: .85; }
-@media (max-width: 680px) { .chapters__heading { padding: 12px 16px; }.chapters__list { padding: 12px; }.chapter__main { grid-template-columns: 30px minmax(0, 1fr); gap: 8px; padding-left: 12px; }.chapter__time { grid-column: 2; justify-self: start; }.chapter__body { padding: 10px 12px 14px; }.chapter__title { font-size: 14px; } }
+.chapter--collapsed + .chapter--collapsed { margin-top: 8px; }
+.chapter--active { border-color: color-mix(in srgb, var(--td-brand-color) 14%, transparent); border-radius: var(--td-radius-large); background: color-mix(in srgb, var(--td-brand-color-light) 60%, transparent); }
+.chapter:not(.chapter--active):hover { border-color: rgba(255,255,255,.82); border-radius: var(--td-radius-large); background: rgba(255,255,255,.34); }
+.chapter__header { display: flex; align-items: stretch; gap: 6px; }
+.chapter__main { min-width: 0; flex: 1; display: grid; grid-template-columns: 27px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 0; border: 0; background: transparent; color: var(--td-text-color-primary); text-align: left; cursor: pointer; }
+.chapter__index { display: grid; width: 27px; height: 23px; place-items: center; border-radius: var(--td-radius-medium); background: color-mix(in srgb, var(--td-bg-color-container) 72%, transparent); color: var(--td-text-color-secondary); font-family: var(--app-font-family-mono, monospace); font-size: 11px; font-weight: 600; }
+.chapter--active .chapter__index { background: var(--td-brand-color); color: var(--td-text-color-anti); }
+.chapter__title { min-width: 0; overflow: hidden; font-size: 14px; font-weight: 500; line-height: 1.57; text-overflow: ellipsis; white-space: nowrap; }
+.chapter__time { color: var(--td-text-color-placeholder); font-family: var(--app-font-family-mono, monospace); font-size: var(--td-font-size-body-small); font-weight: 400; white-space: nowrap; }
+.chapter__body { padding: 9px 0 0 36px; }
+.chapter__summary { width: 100%; display: grid; gap: 5px; margin: 0 0 8px; padding: 0; border: 0; background: transparent; color: var(--td-text-color-secondary); font-size: 14px; text-align: left; cursor: pointer; }
+.chapter__summary strong { color: inherit; font-size: 0; line-height: 0; }
+.chapter__summary span { color: var(--td-text-color-secondary); font-size: 14px; line-height: 1.55; }
+.chapter__points { display: grid; gap: 7px; }
+.chapter__points-label { display: none; }
+.chapter__point-list { display: grid; gap: 7px; }
+.chapter__point { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 6px; border: 0; border-radius: var(--td-radius-medium); background: transparent; color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); line-height: 1.55; text-align: left; cursor: pointer; transition: background-color .15s ease, color .15s ease; }
+.chapter__point::before { content: ''; width: 6px; height: 6px; flex: none; border-radius: 50%; background: color-mix(in srgb, var(--td-brand-color) 52%, transparent); }
+.chapter__point:hover { background: color-mix(in srgb, var(--td-brand-color-light) 64%, transparent); color: var(--td-brand-color); }
+.chapter__point--active { color: var(--td-text-color-primary); }
+.chapter__point:hover .chapter__point-time { color: var(--td-brand-color); }
+.chapter__point--active::before { background: var(--td-brand-color); }
+.chapter__point-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chapter__point-time { margin-left: auto; color: var(--td-text-color-secondary); font-family: var(--app-font-family-mono, monospace); font-size: 11px; }
+@media (max-width: 680px) { .chapters__list { padding-right: 0; }.chapter__main { grid-template-columns: 27px minmax(0, 1fr); }.chapter__time { grid-column: 2; justify-self: start; }.chapter__body { padding-left: 36px; } }
 </style>

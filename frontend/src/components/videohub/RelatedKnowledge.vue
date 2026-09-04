@@ -68,8 +68,8 @@ function load(_videoId?: string) {
 </script>
 
 <style scoped>
-.related-knowledge { display: grid; gap: calc(var(--td-comp-margin-s) * 2); padding: calc(var(--td-comp-margin-s) * 2) calc(var(--td-comp-margin-s) / 2); }
+.related-knowledge { display: grid; gap: 14px; height: min(720px, calc(100vh - 170px)); min-height: 0; padding: 16px 4px 96px 0; overflow: hidden; }
 .related-knowledge__state, .related-knowledge > :deep(.t-empty) { min-height: 320px; display: grid; place-items: center; }
-.related-knowledge__anchors { display: grid; gap: calc(var(--td-comp-margin-s) * 2); }
+.related-knowledge__anchors { min-height: 0; overflow-y: auto; padding-right: 6px; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--td-text-color-secondary) 28%, transparent) transparent; }
 .related-knowledge__relation-empty { margin: 0; color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }
 </style>

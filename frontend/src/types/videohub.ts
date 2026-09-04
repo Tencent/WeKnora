@@ -74,7 +74,7 @@ export interface SummarySection {
   blocks: SummaryBlock[]
 }
 
-export type ContentLoadStatus = 'loading' | 'ready' | 'not_generated' | 'empty' | 'error'
+export type ContentLoadStatus = 'loading' | 'partial' | 'ready' | 'not_generated' | 'empty' | 'error'
 
 export interface ContentState<T> {
   status: ContentLoadStatus
@@ -131,6 +131,7 @@ export interface CrossVideoKnowledgeItem {
   video_title: string
   video_category: VideoCategory
   relation_description: string
+  source_chapter?: string
 }
 
 export interface VideoData {

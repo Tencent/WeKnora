@@ -16,9 +16,11 @@ export interface VideoContentState {
 
 export type VideoContentModule = keyof VideoContentState
 
-export function shouldShowRelatedKnowledgeTab(state: ContentState<RelatedKnowledgeContent>): boolean {
-  if (state.status === 'loading' || state.status === 'error') return true
-  return state.data.anchors.length > 0 || state.data.crossVideoItems.length > 0
+export function shouldShowRelatedKnowledgeTab(_state: ContentState<RelatedKnowledgeContent>): boolean {
+  // Keep the entry point visible even before the knowledge layer has produced data.
+  // An empty or unavailable state is rendered inside the tab instead of changing
+  // the page structure after content loading completes.
+  return true
 }
 
 export const emptyRelatedKnowledge: RelatedKnowledgeContent = {

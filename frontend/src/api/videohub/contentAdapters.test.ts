@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { buildVideoContentState, classifyContentError, contentModuleForStage, shouldShowRelatedKnowledgeTab } from './contentState'
-import { mapRelatedKnowledgeResponse, parseOutlineResponse, parseOutlineWikiPage, parseOverviewWikiPage, parseStructuredSummary, parseSubtitleFile, parseTimestamp, parseTranscriptPageWikiPage } from './contentParsing'
+import { mapRelatedKnowledgeResponse, parseOutlineResponse, parseOutlineWikiPage, parseOverviewWikiPage, parseStructuredSummary, parseSubtitleFile, parseTimestamp, parseTranscriptPageWikiPage, type CanonicalOutlineResponse } from './contentParsing'
 import { getNewlyCompletedStages } from '../../components/videohub/processingStatusState'
 
 test('parses cross-hour outline timestamps and knowledge evidence', () => {
@@ -230,12 +230,14 @@ test('keeps cross-video-only responses visible', () => {
       type: 'concept',
       video_id: 'video-2',
       video_title: '另一个视频',
+      source_chapter: '第二章：规模化训练',
       timestamp: '01:05',
     }],
   })
 
   assert.equal(payload.crossVideoItems.length, 1)
   assert.equal(payload.crossVideoItems[0].seconds, 65)
+  assert.equal(payload.crossVideoItems[0].source_chapter, '第二章：规模化训练')
   assert.equal(payload.overview?.relation_count, 1)
 })
 
@@ -244,6 +246,37 @@ test('real content adapters do not import MOCK_VIDEOS', () => {
     const source = readFileSync(new URL(filename, import.meta.url), 'utf8')
     assert.equal(source.includes('MOCK_VIDEOS'), false, `${filename} still reads mock data`)
   }
+})
+
+test('baseline: legacy full-response outline loading exposes chapters only after completion', async () => {
+  let resolveResponse!: (response: CanonicalOutlineResponse) => void
+  const response = new Promise<CanonicalOutlineResponse>(resolve => { resolveResponse = resolve })
+  let pageChapters: ReturnType<typeof parseOutlineResponse> = []
+
+  // This is the old contract: the page assignment runs only after the request
+  // resolves, so a response in progress cannot expose a chapter prefix.
+  const pageLoad = response.then(payload => {
+    pageChapters = parseOutlineResponse(payload, 180)
+  })
+
+  await Promise.resolve()
+  assert.equal(pageChapters.length, 0)
+
+  resolveResponse({
+    schema_version: 1,
+    chapters: [{
+      chapter_index: 1,
+      chapter_title: '完整章节',
+      start_seconds: 0,
+      end_seconds: 60,
+      chapter_summary: '完整章节内容',
+      knowledge_points: [{ title: '关键知识点', seconds: 12 }],
+    }],
+  })
+  await pageLoad
+
+  assert.equal(pageChapters.length, 1)
+  assert.equal(pageChapters[0]?.chapter_title, '完整章节')
 })
 
 test('content loader isolates failed content requests', () => {
@@ -282,11 +315,11 @@ test('content loader distinguishes not generated artifacts from failures', () =>
   assert.equal(classifyContentError({ status: 502, error_code: 'weknora_read_failed' }), 'error')
 })
 
-test('hides related knowledge tab after an empty result', () => {
+test('keeps related knowledge tab visible after an empty result', () => {
   const emptyData = { videoId: 'video-1', overview: null, anchors: [], crossVideoItems: [] }
   assert.equal(shouldShowRelatedKnowledgeTab({ status: 'loading', data: emptyData }), true)
-  assert.equal(shouldShowRelatedKnowledgeTab({ status: 'empty', data: emptyData }), false)
-  assert.equal(shouldShowRelatedKnowledgeTab({ status: 'ready', data: emptyData }), false)
+  assert.equal(shouldShowRelatedKnowledgeTab({ status: 'empty', data: emptyData }), true)
+  assert.equal(shouldShowRelatedKnowledgeTab({ status: 'ready', data: emptyData }), true)
 })
 
 test('maps completed processing stages to local content modules', () => {

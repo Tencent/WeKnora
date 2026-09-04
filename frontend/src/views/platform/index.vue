@@ -1,5 +1,5 @@
 <template>
-    <div class="main" ref="dropzone">
+    <div class="main" :class="{ 'main--video-home': route.name === 'videoList' || route.name === 'videoDetail' }" ref="dropzone">
         <Menu></Menu>
         <div v-if="isRouterAlive" class="platform-route-outlet">
             <RouterView />
@@ -241,6 +241,33 @@ onUnmounted(() => {
     min-height: 0;
     /* 统一整页背景，让左侧菜单与右侧内容区视觉连贯 */
     background: var(--td-bg-color-container);
+}
+
+/* Home follows the compact workspace proportions from the video-list design.
+   Other platform routes retain the established navigation width and desktop
+   minimum width. */
+.main--video-home {
+    min-width: 320px;
+    background: transparent;
+}
+
+.main--video-home > .aside_box {
+    min-width: 260px;
+    width: 260px;
+    z-index: 20;
+    background: rgba(245, 248, 247, .28);
+    border-right-color: rgba(255, 255, 255, .5);
+    backdrop-filter: blur(24px);
+}
+
+.main--video-home > .aside_box.aside_box--collapsed {
+    min-width: 60px;
+    width: 60px;
+}
+
+@media (max-width: 680px) {
+    .main--video-home > .aside_box { min-width: 260px; width: 260px; }
+    .main--video-home > .aside_box.aside_box--collapsed { min-width: 60px; width: 60px; }
 }
 
 /* 右侧路由区：占满剩余宽度与整列高度，并把 min-height:0 传给子页面以便内部 flex 滚动 */

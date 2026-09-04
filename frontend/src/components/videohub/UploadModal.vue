@@ -1,6 +1,8 @@
 <template>
   <t-dialog
     :visible="visible"
+    attach="body"
+    :z-index="3000"
     width="min(560px, calc(100vw - 32px))"
     :close-on-overlay-click="true"
     :destroy-on-close="true"
