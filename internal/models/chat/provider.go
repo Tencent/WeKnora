@@ -85,7 +85,7 @@ type weKnoraCloudProvider struct{ baseProvider }
 func (weKnoraCloudProvider) Name() provider.ProviderName { return provider.ProviderWeKnoraCloud }
 
 func (weKnoraCloudProvider) Endpoint(baseURL, _ string, _ bool) string {
-	return modelutils.AppendPathOnce(baseURL, "/api/v1/chat/completions")
+	return strings.TrimRight(baseURL, "/") + "/api/v1/chat/completions"
 }
 
 func (weKnoraCloudProvider) ForceRawHTTP() bool { return true }

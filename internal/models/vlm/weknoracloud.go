@@ -134,7 +134,7 @@ func (v *WeKnoraCloudVLM) Predict(ctx context.Context, imgBytesList [][]byte, pr
 	requestID := uuid.New().String()
 	headers := utils.Sign(v.appID, v.apiKey, requestID, string(bodyBytes))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, utils.AppendPathOnce(v.baseURL, weKnoraCloudVLMPath), bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, v.baseURL+weKnoraCloudVLMPath, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return "", fmt.Errorf("weknoracloud VLM: create request: %w", err)
 	}
