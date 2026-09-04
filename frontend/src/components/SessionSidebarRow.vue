@@ -35,6 +35,12 @@
     <span v-else class="submenu_title" :class="batchMode ? 'submenu_title--batch' : ''" :title="item.title">
       <t-icon v-if="item.is_pinned" name="pin" class="submenu_pin_icon" />
       <span class="submenu_title-text">{{ item.title }}</span>
+      <span
+        v-if="apiOwnerTag"
+        class="session-owner-tag"
+        :class="`session-owner-tag--${apiOwnerTag.kind}`"
+        :title="apiOwnerTag.full"
+      >{{ apiOwnerTag.label }}</span>
     </span>
     <div v-if="!batchMode" class="session-row-menu-wrap" @click.stop>
       <t-popup
@@ -120,7 +126,7 @@ interface SessionMenuOption {
 type MenuMode = 'menu' | 'clear' | 'delete'
 
 const props = defineProps<{
-  item: { id: string; path: string; title: string; is_pinned?: boolean }
+  item: { id: string; path: string; title: string; is_pinned?: boolean; user_id?: string }
   batchMode: boolean
   activePath: string
   selectedIds: string[]
@@ -151,6 +157,30 @@ const menuOverlayClass = computed(() => (
     ? 'session-action-menu-popup'
     : 'session-action-menu-popup is-confirm'
 ))
+
+/**
+ * API/渠道会话的 owner 是合成主体（api_external_user:<tenant>:<EMP_ID> /
+ * api_tenant_key:<tenant>:<keyID>），不是真实账号。为方便管理员稽核"这条是谁的"，
+ * 在标题旁渲染一个小徽标：外部员工会话取 sub（可读标识），平台 key 会话标 generic。
+ * 普通账号会话（user_id 为空或为真实用户 UUID）不显示。
+ */
+interface ApiOwnerTag { kind: 'user' | 'key'; label: string; full: string }
+const API_EXTERNAL_USER_PREFIX = 'api_external_user:'
+const API_TENANT_KEY_PREFIX = 'api_tenant_key:'
+
+const apiOwnerTag = computed<ApiOwnerTag | null>(() => {
+  const uid = props.item.user_id || ''
+  if (uid.startsWith(API_EXTERNAL_USER_PREFIX)) {
+    const tail = uid.slice(API_EXTERNAL_USER_PREFIX.length)
+    const segments = tail.split(':').filter(Boolean)
+    const label = segments.length ? segments[segments.length - 1] : tail
+    return label ? { kind: 'user', label, full: uid } : null
+  }
+  if (uid.startsWith(API_TENANT_KEY_PREFIX)) {
+    return { kind: 'key', label: 'API', full: uid }
+  }
+  return null
+})
 
 const onMenuVisibleChange = (visible: boolean): void => {
   if (!visible) menuMode.value = 'menu'
@@ -263,6 +293,36 @@ const confirmDangerAction = (): void => {
 
   &:hover {
     background: var(--td-bg-color-container-hover);
+  }
+}
+
+// 合成 owner（api_external_user / api_tenant_key）会话的"提问人"徽标。
+// 父级 .submenu_title 是 flex，故必须 flex:0 0 auto，标题省略号只压缩标题文本。
+.session-owner-tag {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  max-width: 108px;
+  height: 16px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  line-height: 15px;
+  font-weight: 400;
+  border-radius: 4px;
+
+  &--user {
+    color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+    border: 0.5px solid var(--td-brand-color-light-active);
+  }
+
+  &--key {
+    color: var(--td-text-color-secondary);
+    background: var(--td-bg-color-container-hover);
+    border: 0.5px solid var(--td-component-stroke);
   }
 }
 </style>
