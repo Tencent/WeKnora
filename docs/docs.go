@@ -22673,6 +22673,10 @@ const docTemplate = `{
                     "description": "IngestReduceParallel sets the errgroup limit for the Reduce phase\n(per-slug page write) WITHIN one batch. 0 falls back to 10. Bound by the\nsame LLM concurrency / HTTP pool considerations as the Map phase, plus\nDB connection pool size. Same multiplier caveat as IngestMapParallel.",
                     "type": "integer"
                 },
+                "max_reduce_input_bytes": {
+                    "description": "MaxReduceInputBytes bounds the aggregate, trim-eligible input passed to the WikiPageModify prompt. It is an operator-provided byte budget; 0 disables the bound.",
+                    "type": "integer"
+                },
                 "max_pages_per_ingest": {
                     "description": "MaxPagesPerIngest limits pages created/updated per ingest operation (0 = no limit)",
                     "type": "integer"

@@ -32,8 +32,9 @@ func TestWikiPageTypes(t *testing.T) {
 
 func TestWikiConfigValueScan(t *testing.T) {
 	config := WikiConfig{
-		SynthesisModelID:  "model-123",
-		MaxPagesPerIngest: 20,
+		SynthesisModelID:    "model-123",
+		MaxPagesPerIngest:   20,
+		MaxReduceInputBytes: 4096,
 	}
 
 	val, err := config.Value()
@@ -55,6 +56,9 @@ func TestWikiConfigValueScan(t *testing.T) {
 	}
 	if restored.MaxPagesPerIngest != 20 {
 		t.Error("MaxPagesPerIngest mismatch")
+	}
+	if restored.MaxReduceInputBytes != 4096 {
+		t.Error("MaxReduceInputBytes mismatch")
 	}
 }
 
@@ -280,6 +284,7 @@ func TestWikiConfig_JSONRoundTrip_WithGranularity(t *testing.T) {
 	original := WikiConfig{
 		SynthesisModelID:      "m-1",
 		MaxPagesPerIngest:     20,
+		MaxReduceInputBytes:   4096,
 		ExtractionGranularity: WikiExtractionFocused,
 	}
 	data, err := json.Marshal(original)

@@ -168,10 +168,12 @@ func (s *wikiIngestService) newWikiBatchContext(
 	granularity := types.WikiExtractionStandard
 	contentInstructions := ""
 	extractionInstructions := ""
+	reduceInputBudgetBytes := 0
 	if wikiConfig != nil {
 		granularity = wikiConfig.ExtractionGranularity.Normalize()
 		contentInstructions = wikiConfig.ContentInstructions
 		extractionInstructions = wikiConfig.ExtractionInstructions
+		reduceInputBudgetBytes = wikiConfig.MaxReduceInputBytes
 	}
 	return &WikiBatchContext{
 		SlugTitle: func(ctx context.Context, slug string) string {
@@ -186,6 +188,7 @@ func (s *wikiIngestService) newWikiBatchContext(
 		ExtractionGranularity:  granularity,
 		ContentInstructions:    contentInstructions,
 		ExtractionInstructions: extractionInstructions,
+		ReduceInputBudgetBytes: reduceInputBudgetBytes,
 	}
 }
 
@@ -2044,7 +2047,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		pageAliases := strings.Join(page.Aliases, ", ")
 
 		var updatedContent string
-		updatedContent, err = s.generateWithTemplate(ctx, chatModel, agent.WikiPageModifyUserPrompt, map[string]string{
+		reduceInputs := trimWikiReduceInputs(map[string]string{
 			"HasAdditions":            hasAdditionsStr,
 			"HasRetractions":          hasRetractionsStr,
 			"PageSlug":                slug,
@@ -2060,7 +2063,8 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			"Language":                language,
 			"CustomInstructions":      batchCtx.ContentInstructions,
 			"InstructionScope":        "wiki_content",
-		})
+		}, batchCtx.ReduceInputBudgetBytes)
+		updatedContent, err = s.generateWithTemplate(ctx, chatModel, agent.WikiPageModifyUserPrompt, reduceInputs)
 
 		if err == nil && updatedContent != "" {
 			// Translate request-local handles (ref-N) the model copied from the

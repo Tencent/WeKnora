@@ -1319,6 +1319,10 @@ type WikiBatchContext struct {
 	ContentInstructions    string
 	ExtractionInstructions string
 
+	// ReduceInputBudgetBytes is the explicit operator-provided budget for the
+	// trim-eligible WikiPageModify prompt inputs. Zero keeps legacy behavior.
+	ReduceInputBudgetBytes int
+
 	// PlannedFolderID holds the per-slug wiki_folders.id assigned by the batch
 	// taxonomy planning pass (planBatchTaxonomy + folder resolution), keyed by
 	// page slug. Reduce applies it only to pages that aren't already filed
@@ -2897,6 +2901,219 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen]) + "..."
+}
+
+const wikiReduceInputOmissionMarker = "\n[... content omitted by the configured wiki reduce input budget ...]\n"
+
+// trimWikiReduceInputs bounds the four recoverable reduce inputs while leaving
+// DeletedContent intact: a retraction must retain the source text that tells
+// the editor what to remove. The budget is deliberately explicit and
+// deployment-provided; this code does not infer a model context window.
+//
+// Inputs are shed in increasing order of authority: shared source context is
+// reduced to titles first, then remaining-source and new evidence are trimmed,
+// and existing page content is trimmed from the middle so its beginning and
+// end remain visible. The returned map is independent of data.
+func trimWikiReduceInputs(data map[string]string, budget int) map[string]string {
+	trimmed := make(map[string]string, len(data))
+	for key, value := range data {
+		trimmed[key] = value
+	}
+	if budget <= 0 {
+		return trimmed
+	}
+
+	trimmed["SharedSourceContexts"] = wikiReduceTitlesOnly(trimmed["SharedSourceContexts"])
+	// Keep the source titles produced above as the minimum identity context.
+	// Only if the configured budget is smaller than that identity block do we
+	// trim it further; the recoverable bodies are shed first.
+	keys := []string{"RemainingSourcesContent", "NewContent", "ExistingContent"}
+	total := len([]byte(trimmed["SharedSourceContexts"]))
+	for _, key := range keys {
+		total += len([]byte(trimmed[key]))
+	}
+	for _, key := range keys {
+		if total <= budget {
+			break
+		}
+		remove := total - budget
+		current := len([]byte(trimmed[key]))
+		if current == 0 {
+			continue
+		}
+		keep := current - remove
+		if key == "NewContent" {
+			if minimum := wikiReduceRequiredNewPrefix(trimmed[key]); keep < minimum {
+				keep = minimum
+			}
+		}
+		if keep < 0 {
+			keep = 0
+		}
+		switch key {
+		case "ExistingContent":
+			trimmed[key] = trimWikiReduceMiddle(trimmed[key], keep)
+		default:
+			trimmed[key] = trimWikiReducePrefix(trimmed[key], keep)
+		}
+		total -= current - len([]byte(trimmed[key]))
+	}
+	if total > budget {
+		// A very small budget can conflict with the minimum new-content header.
+		// In that case, make one final pass without minimum preservation so the
+		// explicit budget still wins over every optional detail.
+		for i := len(keys) - 1; i >= 0 && total > budget; i-- {
+			key := keys[i]
+			current := len([]byte(trimmed[key]))
+			if current == 0 {
+				continue
+			}
+			keep := current - (total - budget)
+			if keep < 0 {
+				keep = 0
+			}
+			if key == "ExistingContent" {
+				trimmed[key] = trimWikiReduceMiddle(trimmed[key], keep)
+			} else {
+				trimmed[key] = trimWikiReducePrefix(trimmed[key], keep)
+			}
+			total -= current - len([]byte(trimmed[key]))
+		}
+	}
+	if total > budget {
+		trimmed["SharedSourceContexts"] = trimWikiReducePrefix(trimmed["SharedSourceContexts"], budget)
+	}
+	return trimmed
+}
+
+// wikiReduceRequiredNewPrefix returns the shortest prefix that includes the
+// first generated name/description line. NewContent is emitted in document
+// blocks with that line at the start of <content>; retaining it is more useful
+// than retaining arbitrary verbatim evidence when the budget is tight.
+func wikiReduceRequiredNewPrefix(s string) int {
+	content := strings.Index(s, "<content>")
+	if content < 0 {
+		return 0
+	}
+	lineStart := content + len("<content>")
+	for lineStart < len(s) {
+		for lineStart < len(s) && (s[lineStart] == '\n' || s[lineStart] == '\r' || s[lineStart] == ' ' || s[lineStart] == '	') {
+			lineStart++
+		}
+		lineEnd := strings.IndexByte(s[lineStart:], '\n')
+		if lineEnd < 0 {
+			lineEnd = len(s) - lineStart
+		}
+		line := strings.TrimSpace(s[lineStart : lineStart+lineEnd])
+		if line != "" {
+			return lineStart + lineEnd + len([]byte(wikiReduceInputOmissionMarker))
+		}
+		lineStart += lineEnd + 1
+	}
+	return 0
+}
+
+// wikiReduceTitlesOnly keeps the stable identity of shared sources and drops
+// their repeated summary bodies. The simple tag scanner intentionally falls
+// back to the original text when the input is not in the expected document
+// shape, so malformed legacy data is still handled by the normal budget trim.
+func wikiReduceTitlesOnly(s string) string {
+	var out strings.Builder
+	remaining := s
+	for {
+		open := strings.Index(remaining, "<title>")
+		if open < 0 {
+			break
+		}
+		remaining = remaining[open+len("<title>"):]
+		close := strings.Index(remaining, "</title>")
+		if close < 0 {
+			return s
+		}
+		title := strings.TrimSpace(remaining[:close])
+		if title != "" {
+			fmt.Fprintf(&out, "<document>\n<title>%s</title>\n</document>\n", title)
+		}
+		remaining = remaining[close+len("</title>"):]
+	}
+	if out.Len() == 0 {
+		return s
+	}
+	return out.String()
+}
+
+func trimWikiReducePrefix(s string, maxBytes int) string {
+	if len([]byte(s)) <= maxBytes {
+		return s
+	}
+	if maxBytes <= 0 {
+		return ""
+	}
+	markerBytes := len([]byte(wikiReduceInputOmissionMarker))
+	if maxBytes <= markerBytes {
+		return string([]rune(s)[:runeCountWithinBytes(s, maxBytes)])
+	}
+	return safeUTF8Prefix(s, maxBytes-markerBytes) + wikiReduceInputOmissionMarker
+}
+
+func trimWikiReduceMiddle(s string, maxBytes int) string {
+	if len([]byte(s)) <= maxBytes {
+		return s
+	}
+	if maxBytes <= 0 {
+		return ""
+	}
+	markerBytes := len([]byte(wikiReduceInputOmissionMarker))
+	if maxBytes <= markerBytes {
+		return string([]rune(s)[:runeCountWithinBytes(s, maxBytes)])
+	}
+	keep := maxBytes - markerBytes
+	headBytes := keep / 2
+	tailBytes := keep - headBytes
+	head := safeUTF8Prefix(s, headBytes)
+	tailStart := safeUTF8SuffixStart(s, tailBytes)
+	return head + wikiReduceInputOmissionMarker + s[tailStart:]
+}
+
+func safeUTF8Prefix(s string, maxBytes int) string {
+	if maxBytes >= len([]byte(s)) {
+		return s
+	}
+	if maxBytes <= 0 {
+		return ""
+	}
+	for maxBytes > 0 && (s[maxBytes]&0xc0) == 0x80 {
+		maxBytes--
+	}
+	return s[:maxBytes]
+}
+
+func safeUTF8SuffixStart(s string, maxBytes int) int {
+	if maxBytes >= len([]byte(s)) {
+		return 0
+	}
+	start := len(s) - maxBytes
+	for start < len(s) && (s[start]&0xc0) == 0x80 {
+		start++
+	}
+	return start
+}
+
+func runeCountWithinBytes(s string, maxBytes int) int {
+	if maxBytes <= 0 {
+		return 0
+	}
+	count := 0
+	used := 0
+	for _, r := range s {
+		n := len(string(r))
+		if used+n > maxBytes {
+			break
+		}
+		used += n
+		count++
+	}
+	return count
 }
 
 // appendUnique appends a string to a StringArray if not already present
