@@ -697,8 +697,24 @@ func (r *knowledgeRepository) CountKnowledgeByStatus(
 // If keyword is empty, returns recent files
 // Only returns documents from document-type knowledge bases (excludes FAQ)
 // Returns (results, hasMore, error)
+// metadataKeyExpr builds a dialect-appropriate SQL expression that extracts a
+// JSON string field from the `metadata` column. key is an internal,
+// caller-supplied field name (never user input) and is embedded as a literal so
+// index-aware plans can match the exact expression: Postgres `metadata->>'<key>'`,
+// MySQL `JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.<key>'))`, SQLite
+// `json_extract(metadata, '$.<key>')`.
+func metadataKeyExpr(dialector, key string) string {
+	switch dialector {
+	case "postgres":
+		return "metadata->>'" + strings.ReplaceAll(key, "'", "''") + "'"
+	case "mysql":
+		return "JSON_UNQUOTE(JSON_EXTRACT(metadata, '$." + key + "'))"
+	default: // sqlite
+		return "json_extract(metadata, '$." + key + "')"
+	}
+}
+
 // FindByMetadataKey finds a knowledge item by a key-value pair in the metadata JSON column.
-// Uses Postgres jsonb operator: metadata->>'key' = 'value'.
 func (r *knowledgeRepository) FindByMetadataKey(
 	ctx context.Context,
 	tenantID uint64,
@@ -707,9 +723,10 @@ func (r *knowledgeRepository) FindByMetadataKey(
 	value string,
 ) (*types.Knowledge, error) {
 	var knowledge types.Knowledge
+	keyExpr := metadataKeyExpr(r.db.Dialector.Name(), key)
 	err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
-		Where("metadata->>? = ?", key, value).
+		Where(keyExpr+" = ?", value).
 		First(&knowledge).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -744,7 +761,7 @@ func (r *knowledgeRepository) FindByMetadataKeyPrefix(
 	// custom-planned with the actual value, so LIKE 'prefix%' still extracts the
 	// prefix and drives the index. The explicit ESCAPE '\' keeps backslash-escaped
 	// wildcards (e.g. \_) literal on both PostgreSQL and SQLite.
-	keyExpr := "metadata->>'" + strings.ReplaceAll(key, "'", "''") + "'"
+	keyExpr := metadataKeyExpr(r.db.Dialector.Name(), key)
 	err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
 		Where(keyExpr+" LIKE ? ESCAPE ?", escaped+"%", `\`).
@@ -763,9 +780,11 @@ func (r *knowledgeRepository) FindByDataSourceExternalID(
 	kbID, dataSourceID, externalID string,
 ) (*types.Knowledge, error) {
 	var knowledge types.Knowledge
+	dsExpr := metadataKeyExpr(r.db.Dialector.Name(), "datasource_id")
+	extExpr := metadataKeyExpr(r.db.Dialector.Name(), "external_id")
 	err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
-		Where("metadata->>'datasource_id' = ? AND metadata->>'external_id' = ?", dataSourceID, externalID).
+		Where(dsExpr+" = ? AND "+extExpr+" = ?", dataSourceID, externalID).
 		First(&knowledge).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

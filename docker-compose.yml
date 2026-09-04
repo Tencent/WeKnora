@@ -522,6 +522,33 @@ services:
     # 添加停机时的优雅退出时间
     stop_grace_period: 1m
 
+  # 可选：MySQL 主库（DB_DRIVER=mysql 时启用）。
+  # 注意：MySQL 不提供向量/关键词检索，需同时把 app 的 RETRIEVE_DRIVER 设为
+  # qdrant / milvus / elasticsearch / opensearch / doris / sqlite 之一，并把
+  # DB_HOST/DB_PORT/DB_USER/DB_PASSWORD 指向本服务。取消注释并配好 env 即可启用。
+  # mysql:
+  #   image: mysql:8.0
+  #   container_name: WeKnora-mysql
+  #   command: --default-authentication-plugin=mysql_native_password
+  #   environment:
+  #     - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
+  #     - MYSQL_DATABASE=${DB_NAME}
+  #     - MYSQL_USER=${DB_USER}
+  #     - MYSQL_PASSWORD=${DB_PASSWORD}
+  #   volumes:
+  #     - mysql-data:/var/lib/mysql
+  #   networks:
+  #     - WeKnora-network
+  #   ports:
+  #     - "3306:3306"
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p${DB_PASSWORD}"]
+  #     interval: 10s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 30s
+  #   restart: unless-stopped
+
   redis:
     image: redis:7.0-alpine
     container_name: WeKnora-redis
@@ -1010,6 +1037,7 @@ networks:
 
 volumes:
   postgres-data:
+  mysql-data:
   data-files:
   docreader-tmp:
   minio_data:
