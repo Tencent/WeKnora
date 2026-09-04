@@ -1085,6 +1085,7 @@ func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 			pathPrefix,
 			os.Getenv("OSS_TEMP_BUCKET_NAME"),
 			os.Getenv("OSS_TEMP_REGION"),
+			os.Getenv("OSS_SIGNATURE_VERSION"),
 		)
 	case "local":
 		baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")

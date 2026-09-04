@@ -158,11 +158,13 @@ func NewFileServiceFromStorageConfig(
 				sec.OSS.Endpoint, sec.OSS.Region, sec.OSS.AccessKey, sec.OSS.SecretKey,
 				sec.OSS.BucketName, pathPrefix,
 				sec.OSS.TempBucketName, sec.OSS.TempRegion,
+				sec.OSS.SignatureVersion,
 			)
 		} else {
 			svc, err = NewOssFileService(
 				sec.OSS.Endpoint, sec.OSS.Region, sec.OSS.AccessKey, sec.OSS.SecretKey,
 				sec.OSS.BucketName, pathPrefix,
+				sec.OSS.SignatureVersion,
 			)
 		}
 		return svc, p, err

@@ -14,6 +14,7 @@ export interface StorageBackendConfig {
   use_temp_bucket?: boolean
   temp_bucket_name?: string
   temp_region?: string
+  signature_version?: string
 }
 
 export interface StorageBackend {
