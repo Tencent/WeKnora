@@ -9,7 +9,7 @@ import 'highlight.js/styles/github.css';
 import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
-import { sanitizeHTML, sanitizeMarkdownHTML, safeMarkdownToHTML } from '@/utils/security';
+import { escapeHTML, isValidImageURL, sanitizeHTML, sanitizeMarkdownHTML, safeMarkdownToHTML } from '@/utils/security';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { renderMermaidToSvg } from '@/utils/mermaidShared';
 import {
@@ -182,28 +182,44 @@ async function renderMarkdown(blob: Blob) {
     gfm: true,
   });
   marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
-  const renderer = new marked.Renderer();
-  renderer.code = function ({text, lang}) {
-    // 空值校验：防止 text 为 undefined 或 null
-    if (!text || typeof text !== 'string') {
-      text = '';
-    }
+  const renderer = createMarkdownRenderer(marked);
+  const mathSafeText = preprocessMathDelimiters(text);
+  const safeText = safeMarkdownToHTML(mathSafeText);
+  markdownHtml.value = sanitizeHTML(marked.parse(safeText, { renderer }) as string);
+}
 
+function createMarkdownRenderer(marked: any) {
+  const renderer = new marked.Renderer();
+  renderer.image = function ({ href, title, text }: any) {
+    if (!isSafePreviewImageHref(href)) return '';
+    const safeHref = href.replace(/"/g, '&quot;');
+    const safeTitle = title ? ` title="${escapeHTML(title)}"` : '';
+    return `<img src="${safeHref}" alt="${escapeHTML(text || '')}"${safeTitle} class="markdown-image" loading="lazy" decoding="async" fetchpriority="low" />`;
+  };
+  renderer.code = function ({ text, lang }: any) {
+    const source = typeof text === 'string' ? text : '';
     let highlighted = '';
     if (lang && hljs.getLanguage(lang)) {
-      try { highlighted = hljs.highlight(text, { language: lang }).value; }
-      catch { highlighted = hljs.highlightAuto(text).value; }
+      try { highlighted = hljs.highlight(source, { language: lang }).value; }
+      catch { highlighted = hljs.highlightAuto(source).value; }
     } else {
-      highlighted = hljs.highlightAuto(text).value;
+      highlighted = hljs.highlightAuto(source).value;
     }
     return `<pre><code class="hljs">${highlighted}</code></pre>`;
   };
-  const mathSafeText = preprocessMathDelimiters(text);
-  const safeText = safeMarkdownToHTML(mathSafeText);
-  // Keep this renderer local. `marked.use` mutates a shared singleton and
-  // would otherwise inherit renderers installed by the chunk-content view.
-  const rawHtml = marked.parse(safeText, { renderer }) as string;
-  markdownHtml.value = sanitizeHTML(rawHtml);
+  return renderer;
+}
+
+function isSafePreviewImageHref(href: unknown): href is string {
+  if (typeof href !== 'string' || !href.trim()) return false;
+  if (isValidImageURL(href)) return true;
+
+  const trimmed = href.trim();
+  // Keep repository-style relative assets working, but reject protocol-relative
+  // URLs and every explicit scheme that did not pass the shared URL validator.
+  return !trimmed.startsWith('//')
+    && !trimmed.startsWith('#')
+    && !/^[a-z][a-z\d+.-]*:/i.test(trimmed);
 }
 
 function onImageLoad(e: Event) {
