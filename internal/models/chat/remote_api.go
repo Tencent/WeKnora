@@ -136,9 +136,15 @@ func (c *RemoteAPIChat) buildOutbound(
 ) (body any, endpoint string, useRawHTTP bool, err error) {
 	req := c.shapedRequest(messages, opts, isStream)
 
-	thinking := c.thinkingOverride
-	if thinking == nil {
-		thinking = c.adapter.Thinking()
+	// adapterThinking is the provider/model default, including provider-specific
+	// behavior beyond the wire-format name (for example Qwen's non-stream guard).
+	adapterThinking := c.adapter.Thinking()
+	thinking := adapterThinking
+	if c.thinkingOverride != nil &&
+		thinkingStrategyName(c.thinkingOverride) != thinkingStrategyName(adapterThinking) {
+		// thinkingOverride changes the persisted wire format only when it differs
+		// from the adapter's default. Equal formats retain the adapter semantics.
+		thinking = c.thinkingOverride
 	}
 	customBody, useRaw := thinking.Apply(&req, opts, isStream)
 

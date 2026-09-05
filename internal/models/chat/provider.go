@@ -141,7 +141,10 @@ func (lkeapProvider) Matches(model string) bool {
 }
 func (lkeapProvider) Thinking() ThinkingStrategy { return thinkingTypeField{} }
 
-// --- DeepSeek: does not support tool_choice ---
+// --- DeepSeek: thinking via { "thinking": { "type": ... } } ---
+//
+// Only the official DeepSeek V4 Flash/Pro models use this request field.
+// Legacy deepseek-chat / deepseek-reasoner models keep the base behavior.
 
 type deepseekProvider struct{ baseProvider }
 
@@ -150,10 +153,22 @@ func (deepseekProvider) Name() provider.ProviderName { return provider.ProviderD
 // Native DeepSeek cache counters are not represented by go-openai v1.41.2;
 // use the raw path so prompt_cache_hit_tokens/miss_tokens remain observable.
 func (deepseekProvider) ForceRawHTTP() bool { return true }
+
+// --- DeepSeek: does not support tool_choice ---
 func (deepseekProvider) ShapeRequest(req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool) {
 	if opts != nil && opts.ToolChoice != "" {
 		req.ToolChoice = nil
 	}
+}
+
+type deepseekThinkingProvider struct{ deepseekProvider }
+
+func (deepseekThinkingProvider) Matches(model string) bool {
+	return provider.IsDeepSeekThinkingModel(model)
+}
+
+func (deepseekThinkingProvider) Thinking() ThinkingStrategy {
+	return thinkingTypeField{}
 }
 
 // --- Generic (vLLM) / NVIDIA / LiteLLM: thinking via chat_template_kwargs ---
@@ -280,6 +295,7 @@ var providerRegistry = []providerAdapter{
 	weKnoraCloudProvider{},
 	qwenThinkingProvider{},
 	lkeapProvider{},
+	deepseekThinkingProvider{},
 	deepseekProvider{},
 	genericProvider{},
 	liteLLMProvider{},

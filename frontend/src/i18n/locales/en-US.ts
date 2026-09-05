@@ -4383,7 +4383,7 @@ export default {
         },
         deepseek: {
           label: 'DeepSeek',
-          description: 'deepseek-chat, deepseek-reasoner, etc.'
+          description: 'deepseek-v4-flash, deepseek-v4-pro, etc.'
         },
         hunyuan: {
           label: 'Hunyuan',

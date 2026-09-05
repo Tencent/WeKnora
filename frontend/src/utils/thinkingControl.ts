@@ -14,6 +14,12 @@ export function isLkeapDeepSeekR1Model(modelName: string): boolean {
   return modelName.toLowerCase().includes('deepseek-r1')
 }
 
+/** Mirrors backend internal/models/provider.IsDeepSeekThinkingModel. */
+export function isDeepSeekThinkingModel(modelName: string): boolean {
+  const lower = modelName.trim().toLowerCase()
+  return lower === 'deepseek-v4-flash' || lower === 'deepseek-v4-pro'
+}
+
 export type ThinkingControlValue =
   | 'none'
   | 'chat_template_kwargs'
@@ -51,8 +57,10 @@ export function defaultThinkingControl(
       return 'chat_template_kwargs'
     case 'volcengine':
       return 'thinking_type'
+    case 'deepseek':
+      return isDeepSeekThinkingModel(model) ? 'thinking_type' : 'none'
     default:
-      // openai, azure_openai, anthropic, zhipu, deepseek, gemini, siliconflow,
+      // openai, azure_openai, anthropic, zhipu, gemini, siliconflow,
       // hunyuan, moonshot, openrouter, weknoracloud, … → baseProvider / noThinking
       return 'none'
   }
