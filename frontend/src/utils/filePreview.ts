@@ -36,8 +36,12 @@ function register(kind: FilePreviewKind, exts: string[]) {
 }
 
 register('pdf', ['pdf'])
-register('docx', ['docx', 'doc'])
-register('pptx', ['pptx', 'ppt'])
+// .doc (Word 97-2003) and .ppt (PowerPoint 97-2003) are legacy OLE2 binary
+// formats, while the docx/pptx previewers only parse OOXML (ZIP/XML) and
+// would fail with a raw zip error; leaving them unregistered degrades to the
+// unsupported-preview state with a download entry instead.
+register('docx', ['docx'])
+register('pptx', ['pptx'])
 register('image', [
   'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'tif', 'svg', 'svgz',
   'ico', 'avif', 'apng', 'jfif', 'pjpeg', 'pjp', 'heic', 'heif',
