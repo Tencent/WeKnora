@@ -11,6 +11,7 @@ type qdrantRepository struct {
 	collectionBaseName string
 	shardNumber        int // 0 = use Qdrant server default
 	replicationFactor  int // 0 = use Qdrant server default
+	collectionMu       sync.Mutex
 	// Cache for initialized collections (dimension -> true)
 	initializedCollections sync.Map
 }
