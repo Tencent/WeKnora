@@ -5,7 +5,7 @@ import unittest
 import subprocess
 import sys
 import threading
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import grpc
 from docreader.parser.legacy_doc import DOCX_MIME
@@ -35,7 +35,17 @@ class LegacyDocRPCTest(unittest.TestCase):
                     self.assertEqual(response.content_type, DOCX_MIME)
                     self.assertEqual(response.file_name, "preview.docx")
                     self.assertGreater(len(response.file_content), 0)
-                    self.assertLessEqual(convert.call_args.args[1], 2)
+                    # The transport deadline can be rounded; verify the service cap here.
+                    self.assertGreater(convert.call_args.args[1], 0)
+                    self.assertLessEqual(convert.call_args.args[1], 25)
+                    # Check exact deadline propagation without a transport clock.
+                    for remaining, expected in [(2, 2), (50, 25), (None, 25), (0, 0)]:
+                        with self.subTest(remaining=remaining):
+                            context = Mock(spec=grpc.ServicerContext)
+                            context.time_remaining.return_value = remaining
+                            context.is_active.return_value = True
+                            object.__new__(DocReaderServicer).NormalizeLegacyDoc(req, context)
+                            self.assertEqual(convert.call_args.args[1], expected)
                 with patch("docreader.parser.legacy_doc.LegacyDocConverter.normalize", side_effect=RuntimeError("/private/path secret command output")):
                     with self.assertRaises(grpc.RpcError) as raised:
                         client.NormalizeLegacyDoc(req, timeout=2)
