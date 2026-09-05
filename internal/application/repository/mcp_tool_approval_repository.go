@@ -52,35 +52,77 @@ func (r *MCPToolApprovalRepository) IsRequired(ctx context.Context, tenantID uin
 	return row.RequireApproval, nil
 }
 
-// Upsert creates or updates the approval flag for a tool atomically.
-// Uses ON CONFLICT against the (tenant_id, service_id, tool_name) unique index
-// so concurrent writers don't race the prior SELECT-then-INSERT path into
-// duplicate-key 500s.
-func (r *MCPToolApprovalRepository) Upsert(ctx context.Context, row *types.MCPToolApproval) error {
-	if row == nil {
-		return errors.New("row is nil")
+// IsEnabled returns true when a tool has no stored policy row. This preserves
+// the historical behaviour for tools discovered before per-tool settings.
+func (r *MCPToolApprovalRepository) IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
+	var row types.MCPToolApproval
+	err := r.db.WithContext(ctx).
+		Select("enabled").
+		Where("tenant_id = ? AND service_id = ? AND tool_name = ?", tenantID, serviceID, toolName).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return true, nil
 	}
-	if row.ID == "" {
-		row.ID = uuid.New().String()
+	if err != nil {
+		return false, fmt.Errorf("get mcp tool enabled state: %w", err)
 	}
+	return row.Enabled, nil
+}
+
+// UpsertPolicy creates or updates only the supplied policy columns.
+// Concurrent patches of different fields cannot clobber each other because
+// ON CONFLICT updates omit unchanged columns. A first insert uses
+// require_approval=false and enabled=true for any field the patch omits.
+func (r *MCPToolApprovalRepository) UpsertPolicy(
+	ctx context.Context, tenantID uint64, serviceID, toolName string, patch types.MCPToolPolicyPatch,
+) error {
+	if serviceID == "" || toolName == "" {
+		return errors.New("service_id and tool_name are required")
+	}
+	if patch.RequireApproval == nil && patch.Enabled == nil {
+		return errors.New("require_approval or enabled is required")
+	}
+
 	now := time.Now()
-	row.UpdatedAt = now
-	if row.CreatedAt.IsZero() {
-		row.CreatedAt = now
+	requireApproval := false
+	if patch.RequireApproval != nil {
+		requireApproval = *patch.RequireApproval
 	}
-	err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+	enabled := true
+	if patch.Enabled != nil {
+		enabled = *patch.Enabled
+	}
+
+	updates := map[string]interface{}{"updated_at": now}
+	if patch.RequireApproval != nil {
+		updates["require_approval"] = *patch.RequireApproval
+	}
+	if patch.Enabled != nil {
+		updates["enabled"] = *patch.Enabled
+	}
+
+	row := map[string]interface{}{
+		"id":               uuid.New().String(),
+		"tenant_id":        tenantID,
+		"service_id":       serviceID,
+		"tool_name":        toolName,
+		"require_approval": requireApproval,
+		"enabled":          enabled,
+		"created_at":       now,
+		"updated_at":       now,
+	}
+	// Create via map so enabled=false is persisted. GORM struct inserts omit
+	// bool zero values when the field has a default tag.
+	err := r.db.WithContext(ctx).Model(&types.MCPToolApproval{}).Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "tenant_id"},
 			{Name: "service_id"},
 			{Name: "tool_name"},
 		},
-		DoUpdates: clause.Assignments(map[string]interface{}{
-			"require_approval": row.RequireApproval,
-			"updated_at":       now,
-		}),
+		DoUpdates: clause.Assignments(updates),
 	}).Create(row).Error
 	if err != nil {
-		return fmt.Errorf("upsert mcp tool approval: %w", err)
+		return fmt.Errorf("upsert mcp tool policy: %w", err)
 	}
 	return nil
 }

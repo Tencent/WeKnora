@@ -12,12 +12,24 @@ import (
 )
 
 type stubChecker struct {
-	required bool
-	err      error
+	required   bool
+	err        error
+	enabled    *bool
+	enabledErr error
 }
 
 func (s *stubChecker) IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
 	return s.required, s.err
+}
+
+func (s *stubChecker) IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
+	if s.enabledErr != nil {
+		return false, s.enabledErr
+	}
+	if s.enabled == nil {
+		return true, nil
+	}
+	return *s.enabled, nil
 }
 
 func TestGate_RequestAndWait_Approve(t *testing.T) {
@@ -219,4 +231,46 @@ func TestGate_Resolve_RaceWinsAlreadyResolved(t *testing.T) {
 			r.second.Error() == ErrPendingNotFound.Error(),
 		"unexpected error: %v", r.second,
 	)
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+func TestGate_IsEnabled_NoCheckerKeepsToolsOn(t *testing.T) {
+	g := NewGate(nil, nil, nil)
+	enabled, err := g.IsEnabled(context.Background(), 1, "svc", "tool")
+	require.NoError(t, err)
+	require.True(t, enabled)
+}
+
+func TestGate_IsEnabled_MissingTenantFailClosed(t *testing.T) {
+	g := NewGate(nil, &stubChecker{}, nil)
+	enabled, err := g.IsEnabled(context.Background(), 0, "svc", "tool")
+	require.NoError(t, err)
+	require.False(t, enabled)
+}
+
+func TestGate_IsEnabled_HonorsChecker(t *testing.T) {
+	g := NewGate(nil, &stubChecker{enabled: boolPtr(false)}, nil)
+	enabled, err := g.IsEnabled(context.Background(), 1, "svc", "tool")
+	require.NoError(t, err)
+	require.False(t, enabled)
+}
+
+func TestGate_IsEnabled_CheckerErrorPropagates(t *testing.T) {
+	g := NewGate(nil, &stubChecker{enabledErr: context.DeadlineExceeded}, nil)
+	enabled, err := g.IsEnabled(context.Background(), 1, "svc", "tool")
+	require.Error(t, err)
+	require.False(t, enabled)
+}
+
+func TestAdapter_IsEnabled(t *testing.T) {
+	a := &Adapter{Svc: &stubChecker{enabled: boolPtr(false)}}
+	enabled, err := a.IsEnabled(context.Background(), 1, "svc", "tool")
+	require.NoError(t, err)
+	require.False(t, enabled)
+
+	empty := &Adapter{}
+	enabled, err = empty.IsEnabled(context.Background(), 1, "svc", "tool")
+	require.NoError(t, err)
+	require.True(t, enabled)
 }

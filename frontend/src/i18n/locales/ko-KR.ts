@@ -2621,7 +2621,10 @@ export default {
       emptyDescription: '이 서비스에서 제공하는 도구 또는 리소스가 없습니다',
       requireApproval: '수동 승인 필요',
       requireApprovalTip: '활성화 시 에이전트가 이 도구를 호출하기 전에 승인을 기다립니다.',
-      approvalSaveFailed: '승인 설정 저장 실패'
+      approvalSaveFailed: '승인 설정 저장 실패',
+      toolEnabled: '도구 활성화',
+      toolEnabledTip: '비활성화하면 에이전트가 이 도구를 보거나 호출하지 않습니다.',
+      toolEnabledSaveFailed: '도구 설정 저장 실패'
     }
   },
   system: {

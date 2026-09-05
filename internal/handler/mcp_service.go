@@ -519,7 +519,7 @@ func (h *MCPServiceHandler) GetMCPServiceResources(c *gin.Context) {
 	})
 }
 
-// ListMCPToolApprovals returns persisted require_approval flags for tools on an MCP service.
+// ListMCPToolApprovals returns persisted per-tool policies for an MCP service.
 func (h *MCPServiceHandler) ListMCPToolApprovals(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
@@ -548,20 +548,22 @@ func (h *MCPServiceHandler) ListMCPToolApprovals(c *gin.Context) {
 }
 
 type setMCPToolApprovalBody struct {
-	RequireApproval bool `json:"require_approval"`
+	RequireApproval *bool `json:"require_approval"`
+	Enabled         *bool `json:"enabled"`
 }
 
-// SetMCPToolApproval sets whether a tool requires human approval before the agent may call it.
+// SetMCPToolApproval updates per-tool MCP policy fields. The route name is kept
+// for backwards compatibility with the original approval-only endpoint.
 //
 // SetMCPToolApproval godoc
-// @Summary      设置 MCP 工具人工审批策略
-// @Description  为指定 MCP 服务下的某个工具设置/更新审批要求
+// @Summary      设置 MCP 工具策略
+// @Description  为指定 MCP 服务下的某个工具更新启用状态和/或人工审批要求。至少提供 require_approval 或 enabled 之一；省略的字段保持原值。
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
 // @Param        id         path      string                  true  "MCP 服务 ID"
 // @Param        tool_name  path      string                  true  "工具名"
-// @Param        request    body      map[string]interface{}  true  "{require_approval: bool}"
+// @Param        request    body      map[string]interface{}  true  "{require_approval?: bool, enabled?: bool}"
 // @Success      200        {object}  map[string]interface{}  "更新结果"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Failure      404        {object}  errors.AppError         "MCP 服务或工具不存在"
@@ -588,7 +590,17 @@ func (h *MCPServiceHandler) SetMCPToolApproval(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	if err := h.mcpToolApprovalService.SetRequireApproval(ctx, tenantID, serviceID, toolName, body.RequireApproval); err != nil {
+	if body.RequireApproval == nil && body.Enabled == nil {
+		c.Error(errors.NewBadRequestError("require_approval or enabled is required"))
+		return
+	}
+	if err := h.mcpToolApprovalService.SetPolicy(
+		ctx, tenantID, serviceID, toolName, body.RequireApproval, body.Enabled,
+	); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
