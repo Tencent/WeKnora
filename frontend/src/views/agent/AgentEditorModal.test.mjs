@@ -35,6 +35,19 @@ test('shows a post-create hint after the first successful save', () => {
   assert.match(source, /agent\.editor\.postCreateHint\.title/)
 })
 
+test('dependency failures do not discard successfully loaded editor resources', () => {
+  const loadDependencies = source.match(
+    /const loadDependencies = async \(\) => \{([\s\S]*?)^\};/m
+  )?.[1]
+
+  assert.ok(loadDependencies, 'expected to find loadDependencies')
+  assert.match(loadDependencies, /await Promise\.allSettled\(\[/)
+  assert.match(loadDependencies, /if \(result\.status === 'rejected'\)/)
+  assert.match(loadDependencies, /allModels\.value = chatResources\.allModels/)
+  assert.match(loadDependencies, /kbOptions\.value = \[\.\.\.myKbs, \.\.\.sharedKbs\]/)
+  assert.doesNotMatch(loadDependencies, /try\s*\{[\s\S]*await Promise\.all\(/)
+})
+
 // Locate a settings row by the i18n key of its label and return the attributes
 // that sit before class="setting-row" — i.e. whatever v-if guards that row.
 // Anchoring on the label keeps these assertions stable across reformatting.
