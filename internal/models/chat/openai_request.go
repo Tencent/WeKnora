@@ -126,11 +126,17 @@ func (c *RemoteAPIChat) BuildChatCompletionRequest(
 		req.PresencePenalty = float32(opts.PresencePenalty)
 	}
 
-	if opts.MaxTokens > 0 {
-		req.MaxTokens = opts.MaxTokens
-	}
+	// max_tokens and max_completion_tokens are mutually exclusive per the
+	// OpenAI API; providers such as Volcano Ark reject requests carrying both
+	// with a 400 ("max_tokens and max_completion_tokens cannot be set at the
+	// same time"). Callers that set both (the agent engine budgets do) keep
+	// only the newer max_completion_tokens; adapters that need the legacy
+	// field migrate it themselves (e.g. shapeOpenAIReasoning, Anthropic's
+	// MaxCompletionTokens→MaxTokens mapping).
 	if opts.MaxCompletionTokens > 0 {
 		req.MaxCompletionTokens = opts.MaxCompletionTokens
+	} else if opts.MaxTokens > 0 {
+		req.MaxTokens = opts.MaxTokens
 	}
 
 	// 处理 Tools
