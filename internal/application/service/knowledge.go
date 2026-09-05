@@ -45,6 +45,7 @@ var (
 // knowledgeService implements the knowledge service interface
 // service 实现知识服务接口
 type knowledgeService struct {
+	preview         interfaces.DocumentPreviewService
 	config          *config.Config
 	retrieveEngine  interfaces.RetrieveEngineRegistry
 	ownership       retriever.TenantStoreOwnership
@@ -91,6 +92,7 @@ const (
 
 // NewKnowledgeService creates a new knowledge service instance
 func NewKnowledgeService(
+	preview interfaces.DocumentPreviewService,
 	config *config.Config,
 	repo interfaces.KnowledgeRepository,
 	documentReader interfaces.DocumentReader,
@@ -120,6 +122,7 @@ func NewKnowledgeService(
 	audit interfaces.AuditLogService,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
+		preview:         preview,
 		config:          config,
 		repo:            repo,
 		kbService:       kbService,

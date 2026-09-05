@@ -5,6 +5,8 @@ package docreader;
 option go_package = "github.com/Tencent/WeKnora/internal/docreader/proto";
 
 service DocReader {
+  // Transient DOC-to-DOCX preview only; failures use gRPC status codes.
+  rpc NormalizeLegacyDoc(NormalizeLegacyDocRequest) returns (NormalizeLegacyDocResponse) {}
   rpc Read(ReadRequest) returns (ReadResponse) {}
   // ReadStream is the streaming counterpart of Read. It first emits one
   // ReadStreamResponse carrying the parse metadata (markdown / metadata /
@@ -83,4 +85,15 @@ message ParserEngineInfo {
 
 message ListEnginesResponse {
   repeated ParserEngineInfo engines = 1;
+}
+
+message NormalizeLegacyDocRequest {
+  bytes file_content = 1;
+  string file_name = 2;
+}
+
+message NormalizeLegacyDocResponse {
+  bytes file_content = 1;
+  string file_name = 2;
+  string content_type = 3;
 }

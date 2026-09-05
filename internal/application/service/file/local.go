@@ -145,6 +145,10 @@ func (s *localFileService) DeleteFile(ctx context.Context, filePath string) erro
 	}
 
 	err = os.Remove(resolved)
+	if os.IsNotExist(err) {
+		logger.Infof(ctx, "File already deleted: %s", resolved)
+		return nil
+	}
 	if err != nil {
 		logger.Errorf(ctx, "Failed to delete file: %v", err)
 		return fmt.Errorf("failed to delete file: %w", err)
@@ -224,18 +228,22 @@ func (s *localFileService) SaveBytes(ctx context.Context, data []byte, tenantID 
 		return "", fmt.Errorf("invalid file name: %w", err)
 	}
 
-	// Create storage directory with tenant ID
 	dir := filepath.Join(s.baseDir, fmt.Sprintf("%d", tenantID), "exports")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		logger.Errorf(ctx, "Failed to create directory: %v", err)
-		return "", fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	// Generate unique filename using timestamp
 	ext := filepath.Ext(safeName)
 	baseName := safeName[:len(safeName)-len(ext)]
 	uniqueFileName := fmt.Sprintf("%s_%d%s", baseName, time.Now().UnixNano(), ext)
 	filePath := filepath.Join(dir, uniqueFileName)
+	relPath, _ := filepath.Rel(s.baseDir, filePath)
+	physicalPath := localScheme + filepath.ToSlash(relPath)
+	if err := interfaces.RecordFileWriteIntent(ctx, physicalPath); err != nil {
+		return "", fmt.Errorf("record file write intent: %w", err)
+	}
+
+	// Create storage directory with tenant ID after the write intent is durable.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		logger.Errorf(ctx, "Failed to create directory: %v", err)
+		return "", fmt.Errorf("failed to create directory: %w", err)
+	}
 
 	// Write data to file
 	if err := os.WriteFile(filePath, data, 0o644); err != nil {
@@ -244,8 +252,7 @@ func (s *localFileService) SaveBytes(ctx context.Context, data []byte, tenantID 
 	}
 
 	logger.Infof(ctx, "Bytes data saved successfully: %s", filePath)
-	relPath, _ := filepath.Rel(s.baseDir, filePath)
-	return localScheme + filepath.ToSlash(relPath), nil
+	return physicalPath, nil
 }
 
 // GetFileURL returns a download URL for the file.

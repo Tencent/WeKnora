@@ -734,7 +734,7 @@ curl --location -OJ 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-09cf-485b-a
 
 ## GET `/knowledge/:id/preview` - 内联预览文件
 
-返回原始文件用于浏览器**内嵌预览**：
+返回文件用于浏览器**内嵌预览**。除 legacy DOC 外，原有文件预览行为保持不变：
 
 - `Content-Type` 按文件扩展名映射（`.pdf` → `application/pdf`，`.png` → `image/png`，`.txt`/`.md`/`.json` 等 → 对应文本 MIME 并带 `charset=utf-8`，未知扩展名回落到 `application/octet-stream`）。
 - `Content-Disposition: inline; filename="<原文件名>"`，浏览器会内嵌渲染而非下载。
@@ -758,6 +758,33 @@ Cache-Control: private, max-age=3600
 ```
 
 响应体为文件内容（按 `Content-Type` 解读）。
+
+### Legacy DOC 预览副本
+
+上传 `.doc` 后会独立调度后台转换，上传请求不等待转换完成。预览使用存入现有文件存储的 DOCX 副本，
+同一原文件版本复用同一副本。旧 DOC 没有副本时，首次预览请求会触发后台补建。
+此路径与文档解析器的选择无关；`/download` 仍返回原始 DOC。
+
+DOC 预览响应使用 `Cache-Control: no-store`。客户端应先检查 HTTP 状态和 `Content-Type`，
+不要将生成状态的 JSON 传给 DOCX 渲染器：
+
+| 状态 | 响应 | 客户端处理 |
+| --- | --- | --- |
+| `200` | DOCX 二进制，MIME 为 `application/vnd.openxmlformats-officedocument.wordprocessingml.document`，文件名后缀为 `.docx` | 渲染副本 |
+| `202` | `{"code":"preview_pending","retry_after":2}`，响应头 `Retry-After: 2` | 等待建议秒数后重新请求 |
+| `404` | `{"code":"preview_not_found"}` | 原文件已不存在，停止轮询 |
+| `415` | `{"code":"preview_unsupported"}` | 转换不可用或已失败；停止自动轮询，保留原文件下载 |
+| `503` | `{"code":"preview_unavailable"}` | 暂时无法读取预览；保留原文件下载，稍后重试 |
+
+以上为 DOC 预览服务的响应；请求仍需经过现有知识文件权限检查，鉴权失败沿用通用错误响应。
+
+转换失败后可显式请求 `GET /knowledge/:id/preview?retry=1`。失败冷却60秒后，该请求重新调度生成，
+并返回 `202`；冷却期间仍返回 `415`。副本尚在生成时重复请求不会并发创建新的转换尝试。
+前端应限制轮询时长，并在关闭或切换文件时取消请求；内置页面最多等待60秒。
+
+预览版本包含原文件路径、内容哈希和转换协议版本。原文件版本变化后旧副本不能继续发布，
+确认副本丢失或损坏时会重新生成。删除文件或知识库后后台清理专属副本，其他资源引用仍存在时保留对象。
+该机制复用现有资源、绑定和持久任务表，无需数据库结构迁移。
 
 ## PUT `/knowledge/image/:id/:chunk_id` - 更新分块图像信息
 

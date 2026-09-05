@@ -68,7 +68,18 @@ func (r *resourceRepository) MarkDeleted(ctx context.Context, id string) error {
 }
 
 func (r *resourceRepository) CreateBinding(ctx context.Context, binding *types.ResourceBinding) error {
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(binding).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var resource types.StoredResource
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where(
+				"id = ? AND tenant_id = ? AND state = ?",
+				binding.ResourceID, binding.TenantID, types.ResourceStateActive,
+			).
+			First(&resource).Error; err != nil {
+			return err
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(binding).Error
+	})
 }
 
 // DeleteBinding removes one owner's claim on a resource. Deleting a claim that

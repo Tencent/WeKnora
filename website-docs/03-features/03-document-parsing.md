@@ -43,10 +43,11 @@ class BaseParser(ABC):
 
 服务入口是 `docreader/main.py`，只启动一个 gRPC server（`grpc.server` + `ThreadPoolExecutor`），默认监听 `50051` 端口，同时注册标准的 gRPC Health 服务（`grpc_health.v1`）供 K8s / Docker 探活（配合镜像内的 `grpc_health_probe` 二进制）。**没有任何 HTTP 接口**。
 
-Proto 定义在 `docreader/proto/docreader.proto`，共 3 个 RPC：
+Proto 定义在 `docreader/proto/docreader.proto`，共 4 个 RPC：
 
 ```protobuf
 service DocReader {
+  rpc NormalizeLegacyDoc(NormalizeLegacyDocRequest) returns (NormalizeLegacyDocResponse) {}
   rpc Read(ReadRequest) returns (ReadResponse) {}
   // 流式版本：先发 1 帧 meta（markdown/metadata/error），之后每帧 1 张图片。
   // 避免大扫描件 PDF（数百页图片）撞上 unary 消息大小上限（RESOURCE_EXHAUSTED）。
@@ -54,6 +55,14 @@ service DocReader {
   rpc ListEngines(ListEnginesRequest) returns (ListEnginesResponse) {}
 }
 ```
+
+`NormalizeLegacyDoc` 仅供知识文件预览后台任务调用，与解析引擎无关。请求包含真实 OLE DOC 的 `file_content` 和 `.doc` 文件名；成功返回 DOCX 字节、`preview.docx` 文件名和 `application/vnd.openxmlformats-officedocument.wordprocessingml.document`。它复用 `parser/legacy_doc.py` 中的 LibreOffice 转换路径，原始文件不改写。
+
+转换最多执行 25 秒，受客户端 deadline/cancellation 约束；请求及响应在既有 gRPC 消息上限内预留 4096 字节。每个 DocReader 进程最多并发一个预览转换，忙时立即返回 `RESOURCE_EXHAUSTED`；worker 配置为 1 时关闭预览转换，避免占满解析/健康检查线程。输入类型错误返回 `INVALID_ARGUMENT`，不可用或转换失败返回不含内部详情的 `FAILED_PRECONDITION`。
+
+新 DOC 上传在原文件保存和 Knowledge 创建后写入 `task_pending_ops`，由后台任务调用转换；上传请求不等待 LibreOffice，文档解析成功与否也不决定预览任务是否执行。历史 DOC 没有副本时，首次访问预览接口会补建任务。转换结果作为 `preview_file` 存入知识库当前文件存储，并通过既有 `resources` / `resource_bindings` 关联 Knowledge。副本记录原文件内容版本和转换协议版本，同一版本就绪后重复打开直接读取副本，应用重启后也不需要再次转换。整个流程复用现有表，不新增数据库表或字段。
+
+Go `/knowledge/{id}/preview` 沿用 Viewer 权限。副本就绪时返回 DOCX MIME 和安全的 inline `.docx` 文件名；正在生成时返回 `202 {"code":"preview_pending","retry_after":2}`，前端在当前预览仍打开时进行有上限的退避轮询。转换稳定失败时返回 `415 {"code":"preview_unsupported"}`，用户可在冷却时间后明确重试。普通鉴权、存储或网络失败显示安全的加载失败提示，JSON 状态不会交给 DOCX 渲染器。切换或关闭预览会取消请求和等待并丢弃旧响应。`/download` 仍返回原始 DOC 字节和文件名，权限不变。首次生成仍取决于队列、文件大小和 LibreOffice 耗时；性能保证是同一版本复用副本，而不是首次打开必然立即显示。
 
 `ReadRequest` 是统一请求：设置 `file_content`/`file_name`/`file_type` 为文件模式，设置 `url`/`title` 为 URL 模式；`config.parser_engine` 指定引擎（`builtin` / `markitdown` / `opendataloader`），`config.parser_engine_overrides` 传递引擎级覆盖参数（如 `pdf_force_scanned`、`odl_hybrid`）。
 
@@ -445,7 +454,7 @@ docker build -f docker/Dockerfile.app --build-arg WITH_ANYDOC=0 -t weknora-app .
 
 ## 附：关键事实速查
 
-- **对外接口**：仅 gRPC，端口 `50051`（`DOCREADER_GRPC_PORT`/`PORT`），RPC：`Read` / `ReadStream` / `ListEngines` + 标准 Health 服务。
+- **对外接口**：仅 gRPC，端口 `50051`（`DOCREADER_GRPC_PORT`/`PORT`），RPC：`Read` / `ReadStream` / `ListEngines` / `NormalizeLegacyDoc` + 标准 Health 服务。
 - **docreader 直接支持的文件格式全集**：`pdf`、`docx`、`doc`、`xlsx`、`xls`（markitdown 引擎额外含 `pptx`、`ppt`、`csv`）、`md`/`markdown`、`epub`、`html`/`htm`、`mhtml`、图片 `jpg/jpeg/png/gif/bmp/tiff/webp`，以及 URL 网页抓取；`txt`/`csv`/`json`/图片/音频在主链路中由 Go 侧 `SimpleFormatReader` 原生处理，不经过本服务。
 - **OCR / VLM**：docreader 内部零 OCR、零 VLM；扫描页与插图作为图片回传，OCR（PaddleOCR-VL）与 caption 由 Go App 完成。
 - **图片回传**：inline bytes（`ImageRef.image_data`），持久化到 local/minio/cos/tos 由 Go 负责。

@@ -55,7 +55,18 @@ func NewKnowledgeRepository(db *gorm.DB) interfaces.KnowledgeRepository {
 // CreateKnowledge creates knowledge
 func (r *knowledgeRepository) CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
 	knowledge.ErrorMessage = common.CleanInvalidUTF8(knowledge.ErrorMessage)
-	err := r.db.WithContext(ctx).Create(knowledge).Error
+	var err error
+	if isPreviewSource(knowledge) {
+		// Persist the wake-up intent with the owner, before upload can return.
+		err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(knowledge).Error; err != nil {
+				return err
+			}
+			return tx.Create(newPreviewOp(knowledge)).Error
+		})
+	} else {
+		err = r.db.WithContext(ctx).Create(knowledge).Error
+	}
 	return err
 }
 

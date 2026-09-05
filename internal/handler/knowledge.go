@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ import (
 
 // KnowledgeHandler processes HTTP requests related to knowledge resources
 type KnowledgeHandler struct {
+	preview           interfaces.DocumentPreviewService
 	cfg               *config.Config
 	kgService         interfaces.KnowledgeService
 	kbService         interfaces.KnowledgeBaseService
@@ -42,6 +44,7 @@ type KnowledgeHandler struct {
 
 // NewKnowledgeHandler creates a new knowledge handler instance
 func NewKnowledgeHandler(
+	preview interfaces.DocumentPreviewService,
 	cfg *config.Config,
 	kgService interfaces.KnowledgeService,
 	kbService interfaces.KnowledgeBaseService,
@@ -51,6 +54,7 @@ func NewKnowledgeHandler(
 	spanRepo repository.KnowledgeSpanRepository,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
+		preview:           preview,
 		cfg:               cfg,
 		kgService:         kgService,
 		kbService:         kbService,
@@ -1590,13 +1594,22 @@ func mimeTypeByExt(filename string) string {
 
 // PreviewKnowledgeFile godoc
 // @Summary      预览知识文件
-// @Description  返回知识条目关联的原始文件，Content-Type 根据文件类型设置，用于浏览器内嵌预览
+// @Description  返回知识文件预览。Legacy DOC 复用后台生成的 DOCX 副本；原文件下载保持不变。
+// @Description  生成中返回 202 preview_pending，按 Retry-After 秒数轮询。旧文件首次预览触发补建。
+// @Description  转换失败返回 415；retry=1 可在失败冷却60秒后重新生成。存储暂时不可用返回503。
 // @Tags         知识管理
 // @Accept       json
-// @Produce      application/pdf,image/jpeg,image/png,text/plain
+// @Produce      application/pdf,image/jpeg,image/png,text/plain,json
+// @Produce      application/vnd.openxmlformats-officedocument.wordprocessingml.document
 // @Param        id   path      string  true  "知识ID"
+// @Param        retry query    string  false "显式重试失败的 DOC 预览；冷却期间仍返回415" Enums(1)
 // @Success      200  {file}    file    "文件内容"
+// @Success      202  {object}  map[string]interface{} "preview_pending；retry_after 为建议等待秒数"
+// @Header       202  {string}  Retry-After "建议等待秒数，当前为2"
 // @Failure      400  {object}  errors.AppError  "请求参数错误"
+// @Failure      404  {object}  map[string]string "preview_not_found：原文件已不存在"
+// @Failure      415  {object}  map[string]string "preview_unsupported"
+// @Failure      503  {object}  map[string]string "preview_unavailable：暂时无法读取预览"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge/{id}/preview [get]
@@ -1609,12 +1622,16 @@ func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
 		return
 	}
 
-	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
 	if err != nil {
 		c.Error(err)
 		return
 	}
 
+	if strings.EqualFold(filepath.Ext(knowledge.FileName), ".doc") {
+		h.previewLegacyDoc(effCtx, c, knowledge.TenantID, id, knowledge.FileName)
+		return
+	}
 	file, filename, err := h.kgService.GetKnowledgeFile(effCtx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)

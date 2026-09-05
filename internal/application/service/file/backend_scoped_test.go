@@ -4,8 +4,10 @@ import (
 	"context"
 	"io"
 	"net/url"
+	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,4 +33,20 @@ func TestBackendScopedLocalURLRetainsBackendID(t *testing.T) {
 	data, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	assert.Equal(t, "hello", string(data))
+}
+
+func TestBackendScopedSaveBytesRecordsWrappedPath(t *testing.T) {
+	inner := NewLocalFileService(t.TempDir(), "")
+	svc := NewBackendScopedFileService("backend-local-a", inner)
+	var intentPath string
+	ctx := interfaces.WithFileWriteIntent(context.Background(), func(intentCtx context.Context, path string) error {
+		intentPath = path
+		require.NotNil(t, interfaces.FileWriteIntent(intentCtx))
+		return nil
+	})
+
+	got, err := svc.SaveBytes(ctx, []byte("preview"), 7, "preview.docx", false)
+	require.NoError(t, err)
+	require.Equal(t, got, intentPath)
+	require.True(t, strings.HasPrefix(got, "storage://backend-local-a/local://7/exports/preview_"))
 }

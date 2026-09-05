@@ -79,7 +79,7 @@ func TestQueueMaintenanceKeepsLegacyPhysicalName(t *testing.T) {
 
 func TestEveryAsynqTaskTypeHasADeclaredQueue(t *testing.T) {
 	taskTypes := []string{
-		TypeChunkExtract, TypeDocumentProcess, TypeFAQImport,
+		TypeChunkExtract, TypeDocumentProcess, TypeDocumentPreview, TypeFAQImport,
 		TypeQuestionGeneration, TypeSummaryGeneration, TypeKBClone,
 		TypeIndexDelete, TypeKBDelete, TypeKnowledgeListDelete,
 		TypeKnowledgeListReparse, TypeKnowledgeMove, TypeDataTableSummary,

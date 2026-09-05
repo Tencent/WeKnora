@@ -378,8 +378,8 @@ export function downKnowledgeDetails(id: string) {
   return getDown(`/api/v1/knowledge/${id}/download`);
 }
 
-export function previewKnowledgeFile(id: string) {
-  return getDown(`/api/v1/knowledge/${id}/preview`);
+export function previewKnowledgeFile(id: string, signal?: AbortSignal, retry = false) {
+  return getDown(`/api/v1/knowledge/${id}/preview${retry ? '?retry=1' : ''}`, signal);
 }
 
 /** @param idsQueryString - query string with ids (e.g. ids=xxx&ids=yyy) */

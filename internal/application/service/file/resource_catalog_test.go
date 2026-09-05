@@ -109,3 +109,21 @@ func TestResourceCatalogFileServiceReturnsShortExternalGrantURL(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "https://weknora.example.com/r/GrantTokenAbCdEfGhIjKl", externalURL)
 }
+
+func TestResourceCatalogSaveBytesIntentUsesScopedPhysicalPath(t *testing.T) {
+	inner := NewBackendScopedFileService("backend-local-a", NewLocalFileService(t.TempDir(), ""))
+	catalog := &catalogStub{}
+	svc := NewResourceCatalogFileService(inner, catalog)
+	var intentPath string
+	ctx := interfaces.WithFileWriteIntent(context.Background(), func(_ context.Context, path string) error {
+		intentPath = path
+		return nil
+	})
+
+	ref, err := svc.SaveBytes(ctx, []byte("preview"), 7, "preview.docx", false)
+	require.NoError(t, err)
+	require.Equal(t, "resource://AbCdEfGhIjKlMnOpQrStUv", ref)
+	require.Equal(t, intentPath, catalog.resource.PhysicalPath)
+	require.NotEqual(t, ref, intentPath)
+	require.Contains(t, intentPath, "storage://backend-local-a/local://7/exports/preview_")
+}

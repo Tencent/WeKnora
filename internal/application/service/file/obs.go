@@ -304,21 +304,29 @@ func (s *obsFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 			objectKey = fmt.Sprintf("%d/%s%s", tenantID, uuid.New().String(), ext)
 		}
 	}
+	prefix := s.getPrifix()
+	physicalPath := fmt.Sprintf("%s%s/%s", prefix, s.bucketName, objectKey)
+	if s.proxyDomain != "" {
+		physicalPath = fmt.Sprintf("%s%s", prefix, objectKey)
+	}
+	intentEnabled := interfaces.FileWriteIntent(ctx) != nil
+	if err := interfaces.RecordFileWriteIntent(ctx, physicalPath); err != nil {
+		return "", fmt.Errorf("record file write intent: %w", err)
+	}
 
-	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+	input := &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucketName),
 		Key:         aws.String(objectKey),
 		Body:        strings.NewReader(string(data)),
 		ContentType: aws.String("application/octet-stream"),
-		ACL:         "public-read",
-	})
+	}
+	if !intentEnabled {
+		input.ACL = "public-read"
+	}
+	_, err := s.client.PutObject(ctx, input)
 	if err != nil {
 		return "", fmt.Errorf("failed to upload bytes to OBS: %w", err)
 	}
 
-	prefix := s.getPrifix()
-	if s.proxyDomain != "" {
-		return fmt.Sprintf("%s%s", prefix, objectKey), nil
-	}
-	return fmt.Sprintf("%s%s/%s", prefix, s.bucketName, objectKey), nil
+	return physicalPath, nil
 }

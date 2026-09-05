@@ -329,6 +329,10 @@ func (s *s3FileService) SaveBytes(ctx context.Context, data []byte, tenantID uin
 	}
 	ext := filepath.Ext(safeName)
 	objectName := fmt.Sprintf("%s%d/exports/%s%s", s.pathPrefix, tenantID, uuid.New().String(), ext)
+	physicalPath := fmt.Sprintf("s3://%s/%s", s.bucketName, objectName)
+	if err := interfaces.RecordFileWriteIntent(ctx, physicalPath); err != nil {
+		return "", fmt.Errorf("record file write intent: %w", err)
+	}
 
 	// Upload bytes to S3
 	reader := bytes.NewReader(data)
@@ -343,7 +347,7 @@ func (s *s3FileService) SaveBytes(ctx context.Context, data []byte, tenantID uin
 		return "", fmt.Errorf("failed to upload bytes to S3: %w", err)
 	}
 
-	return fmt.Sprintf("s3://%s/%s", s.bucketName, objectName), nil
+	return physicalPath, nil
 }
 
 // GetFileURL returns a presigned download URL for the file
