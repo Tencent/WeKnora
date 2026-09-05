@@ -3,6 +3,7 @@
  */
 
 import DOMPurify from 'dompurify';
+import { applyProtectedFile, responseFileName, RESOURCE_PREVIEW_EVENT, type LoadedProtectedFile } from './protectedResource.ts';
 import type { Config, NodeHook } from 'dompurify';
 import {
   domPurifySecurityHooks,
@@ -69,7 +70,7 @@ const DOMPurifyConfig = {
   // 允许的属性
   ALLOWED_ATTR: [
     'href', 'title', 'alt', 'src', 'class', 'id', 'style', 'data-protected-src', 'data-img-loading',
-    'data-artifact-index',
+    'data-artifact-index', 'data-protected-resource', 'download',
     'target', 'rel', 'width', 'height', 'open',
     'type', 'aria-label', 'disabled', 'role', 'tabindex',
     // Mermaid SVG 支持的属性
@@ -136,6 +137,29 @@ export function sanitizeMarkdownHTML(html: string): string {
   }
 }
 
+function isRasterProtectedImage(file: LoadedProtectedFile): boolean {
+  return file.blob.type.startsWith('image/') && !file.blob.type.includes('svg');
+}
+
+function imageAltFromTag(before: string, after: string): string {
+  const match = `${before} ${after}`.match(/\salt=(["'])(.*?)\1/i);
+  return match?.[2] ?? '';
+}
+
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+    .replace(/</g, '&lt;');
+}
+
+function buildProtectedFileCardTag(file: LoadedProtectedFile, source: string, alt: string): string {
+  const name = file.fileName || alt || 'download';
+  const label = alt || name;
+  return `<a href="${escapeAttr(file.blobURL)}" download="${escapeAttr(name)}" class="protected-resource-card" data-protected-resource="${escapeAttr(source)}" title="${escapeAttr(name)}">${escapeHTML(label)}</a>`;
+}
+
 function buildProtectedImageTag(
   before: string,
   quote: string,
@@ -148,12 +172,15 @@ function buildProtectedImageTag(
   if (protectedFileMissingSources.has(protectedSrc)) {
     return '';
   }
-  // Reuse the already-hydrated blob if we have one, so repeated re-renders
-  // (typewriter streaming) keep the same stable image instead of flashing
-  // back to the placeholder every frame.
-  const cachedBlobURL = protectedFileBlobBySource.get(protectedSrc);
-  if (cachedBlobURL) {
-    return `<img${before} src=${quote}${cachedBlobURL}${quote} data-protected-src=${quote}${protectedSrc}${quote}${after}>`;
+  // Reuse the already-hydrated file if we have one, so repeated re-renders
+  // (typewriter streaming) keep the same stable image or download card
+  // instead of flashing back to the placeholder every frame.
+  const cached = protectedFileBySource.get(protectedSrc);
+  if (cached) {
+    if (isRasterProtectedImage(cached)) {
+      return `<img${before} src=${quote}${cached.blobURL}${quote} data-protected-src=${quote}${protectedSrc}${quote}${after}>`;
+    }
+    return buildProtectedFileCardTag(cached, protectedSrc, imageAltFromTag(before, after));
   }
   // Not hydrated yet: render the 1x1 placeholder but tag it so CSS can give
   // it a stable skeleton box. Otherwise width:auto/height:auto collapse the
@@ -362,13 +389,13 @@ export function createSafeImage(src: string, alt: string = '', title: string = '
 }
 
 type ProtectedFileLoadResult =
-  | { status: 'loaded'; blobURL: string }
+  | ({ status: 'loaded' } & LoadedProtectedFile)
   | { status: 'missing' }
   | { status: 'failed' };
 
 type ProtectedFileCacheState = {
-  blobByRequest: Map<string, string>;
-  blobBySource: Map<string, string>;
+  blobByRequest: Map<string, LoadedProtectedFile>;
+  fileBySource: Map<string, LoadedProtectedFile>;
   missingSources: Set<string>;
   failures: Map<string, number>;
   inflight: Map<string, Promise<ProtectedFileLoadResult>>;
@@ -380,26 +407,24 @@ type ProtectedFileCacheState = {
 const protectedFileCacheState = (() => {
   const fresh = (): ProtectedFileCacheState => ({
     blobByRequest: new Map(),
-    blobBySource: new Map(),
+    fileBySource: new Map(),
     missingSources: new Set(),
     failures: new Map(),
     inflight: new Map(),
   });
   if (typeof window === 'undefined') return fresh();
   const scope = window as typeof window & {
-    __weknoraProtectedFileCacheV1__?: ProtectedFileCacheState;
+    __weknoraProtectedFileCacheV3__?: ProtectedFileCacheState;
   };
-  scope.__weknoraProtectedFileCacheV1__ ||= fresh();
-  return scope.__weknoraProtectedFileCacheV1__;
+  scope.__weknoraProtectedFileCacheV3__ ||= fresh();
+  return scope.__weknoraProtectedFileCacheV3__;
 })();
 
 const protectedFileBlobCache = protectedFileCacheState.blobByRequest;
-// Blob URL keyed by the protected source URL (e.g. `local://...`). Once an image
-// has been hydrated, re-renders of the same markdown can emit the blob src
-// directly instead of the placeholder. Without this, the typewriter re-renders
-// the answer every frame, recreating each <img> as a placeholder that hydration
-// only restores a microtask later — which reads as a per-frame flicker.
-const protectedFileBlobBySource = protectedFileCacheState.blobBySource;
+// File keyed by the protected source URL (e.g. `resource://...`). Once an
+// image or download card has been hydrated, re-renders of the same markdown
+// can emit the blob src / card HTML directly instead of the placeholder.
+const protectedFileBySource = protectedFileCacheState.fileBySource;
 const protectedFileMissingSources = protectedFileCacheState.missingSources;
 // Throttle retries of failed file fetches. During streaming the same markdown
 // is re-rendered on every chunk, producing brand-new <img> elements (so the
@@ -452,12 +477,38 @@ function removeMissingProtectedImages(root: ParentNode, sourceURL: string): void
   });
 }
 
-function applyHydratedProtectedImage(root: ParentNode, sourceURL: string, blobURL: string): void {
+function applyHydratedProtectedImage(root: ParentNode, sourceURL: string, file: LoadedProtectedFile): void {
   forEachProtectedImageWithSource(root, sourceURL, (img) => {
-    img.src = blobURL;
+    if (!isRasterProtectedImage(file)) {
+      applyProtectedFile(img, file, sourceURL);
+      return;
+    }
+    img.src = file.blobURL;
     img.dataset.authHydrated = '1';
     img.removeAttribute('data-img-loading');
   });
+}
+
+function ensureProtectedResourceCardClicks(): void {
+  if (typeof window === 'undefined') return;
+  const scope = window as typeof window & { __weknoraProtectedCardClicks__?: boolean };
+  if (scope.__weknoraProtectedCardClicks__) return;
+  scope.__weknoraProtectedCardClicks__ = true;
+  window.addEventListener('click', (event) => {
+    const target = event.target as Element | null;
+    const link = target?.closest?.('a.protected-resource-card');
+    if (!(link instanceof HTMLAnchorElement)) return;
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const source = link.dataset.protectedResource || '';
+    const file = protectedFileBySource.get(source);
+    if (!file) return;
+    const preview = new CustomEvent(RESOURCE_PREVIEW_EVENT, {
+      detail: file,
+      cancelable: true,
+    });
+    if (!window.dispatchEvent(preview)) event.preventDefault();
+    event.stopPropagation();
+  }, true);
 }
 
 /**
@@ -475,6 +526,8 @@ export async function hydrateProtectedFileImages(
   if (!root || typeof window === 'undefined') {
     return;
   }
+
+  ensureProtectedResourceCardClicks();
 
   const images = root.querySelectorAll<HTMLImageElement>(
     'img[data-protected-src], img[src^="resource://"], img[src^="storage://"], img[src^="local://"], img[src^="minio://"], img[src^="cos://"], img[src^="tos://"], img[src^="s3://"], img[src^="oss://"], img[src^="ks3://"], img[src^="obs://"]',
@@ -511,14 +564,15 @@ export async function hydrateProtectedFileImages(
       return;
     }
     const { url: requestURL, headers } = request;
+    const requestKey = JSON.stringify([requestURL, headers]);
 
-    const cachedBlobURL = protectedFileBlobCache.get(requestURL);
+    const cachedBlobURL = protectedFileBlobCache.get(requestKey);
     if (cachedBlobURL) {
       applyHydratedProtectedImage(root, sourceURL, cachedBlobURL);
       return;
     }
 
-    const lastFailure = protectedFileFailureCache.get(requestURL);
+    const lastFailure = protectedFileFailureCache.get(requestKey);
     if (lastFailure !== undefined && Date.now() - lastFailure < PROTECTED_FILE_RETRY_COOLDOWN_MS) {
       img.dataset.authHydrated = '0';
       return;
@@ -528,7 +582,7 @@ export async function hydrateProtectedFileImages(
     // The previous Set-based de-dupe made later components return immediately;
     // only the component that started the fetch was updated, leaving all other
     // occurrences stuck on the transparent placeholder forever.
-    let loadTask = protectedFileInflight.get(requestURL);
+    let loadTask = protectedFileInflight.get(requestKey);
     if (!loadTask) {
       loadTask = (async (): Promise<ProtectedFileLoadResult> => {
         try {
@@ -539,32 +593,33 @@ export async function hydrateProtectedFileImages(
           });
           if (!resp.ok) {
             if (resp.status === 404) {
-              protectedFileFailureCache.set(requestURL, Date.now());
+              protectedFileFailureCache.set(requestKey, Date.now());
               return { status: 'missing' };
             }
             throw new Error(`HTTP ${resp.status}`);
           }
           const blob = await resp.blob();
           const blobURL = URL.createObjectURL(blob);
-          protectedFileBlobCache.set(requestURL, blobURL);
-          protectedFileFailureCache.delete(requestURL);
-          return { status: 'loaded', blobURL };
+          const file = { blobURL, blob, fileName: responseFileName(resp.headers.get("Content-Disposition"), sourceURL) };
+          protectedFileBlobCache.set(requestKey, file);
+          protectedFileFailureCache.delete(requestKey);
+          return { status: 'loaded', ...file };
         } catch (error) {
           console.warn('[security] hydrateProtectedFileImages failed:', error);
-          protectedFileFailureCache.set(requestURL, Date.now());
+          protectedFileFailureCache.set(requestKey, Date.now());
           return { status: 'failed' };
         } finally {
-          protectedFileInflight.delete(requestURL);
+          protectedFileInflight.delete(requestKey);
         }
       })();
-      protectedFileInflight.set(requestURL, loadTask);
+      protectedFileInflight.set(requestKey, loadTask);
     }
 
     const result = await loadTask;
     if (result.status === 'loaded') {
-      protectedFileBlobBySource.set(sourceURL, result.blobURL);
+      protectedFileBySource.set(sourceURL, result);
       protectedFileMissingSources.delete(sourceURL);
-      applyHydratedProtectedImage(root, sourceURL, result.blobURL);
+      applyHydratedProtectedImage(root, sourceURL, result);
       return;
     }
     if (result.status === 'missing') {

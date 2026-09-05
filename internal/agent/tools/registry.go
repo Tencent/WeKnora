@@ -12,9 +12,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// toolErrorHint is appended to tool error messages to guide the LLM to retry with a different approach.
-const toolErrorHint = "\n\n[Analyze the error above and try a different approach.]"
-
 // ToolRegistry manages the registration and retrieval of tools
 type ToolRegistry struct {
 	tools             map[string]types.Tool
@@ -114,19 +111,29 @@ func (r *ToolRegistry) ExecuteTool(
 	name string,
 	args json.RawMessage,
 ) (*types.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return &types.ToolResult{Success: false, Error: err.Error()}, err
+	}
 	common.PipelineInfo(ctx, "AgentTool", "execute_start", map[string]interface{}{
 		"tool": name,
 		"args": args,
 	})
 	tool, err := r.GetTool(name)
 	if err != nil {
+		if msg := RetiredToolReplacement(name); msg != "" {
+			common.PipelineWarn(ctx, "AgentTool", "retired_tool", map[string]interface{}{
+				"tool":  name,
+				"error": msg,
+			})
+			return &types.ToolResult{Success: false, Error: msg}, nil
+		}
 		common.PipelineError(ctx, "AgentTool", "execute_failed", map[string]interface{}{
 			"tool":  name,
 			"error": err.Error(),
 		})
 		return &types.ToolResult{
 			Success: false,
-			Error:   err.Error() + toolErrorHint,
+			Error:   err.Error(),
 		}, err
 	}
 
@@ -144,7 +151,6 @@ func (r *ToolRegistry) ExecuteTool(
 		if name == ToolEditSandboxFile {
 			errMsg += editSandboxMissingFieldHint
 		}
-		errMsg += toolErrorHint
 		common.PipelineWarn(ctx, "AgentTool", "validation_failed", map[string]interface{}{
 			"tool":   name,
 			"errors": errMsg,
@@ -164,12 +170,24 @@ func (r *ToolRegistry) ExecuteTool(
 		}
 	}
 	result, execErr := tool.Execute(WithOutputBudget(ctx, maxOutput), args)
+	if result == nil {
+		result = &types.ToolResult{Success: false, Error: "tool returned no result"}
+	}
+	if execErr != nil {
+		result.Success = false
+		if result.Error == "" {
+			result.Error = execErr.Error()
+		}
+	}
 
 	// Truncate large tool outputs to prevent context window poisoning. The
 	// limit is counted in runes to match TruncateToolOutput; comparing bytes
 	// here would leave CJK output effectively uncapped.
 	if result != nil && utf8.RuneCountInString(result.Output) > maxOutput {
 		result.Output = TruncateToolOutput(result.Output, maxOutput)
+	}
+	if utf8.RuneCountInString(result.Error) > maxOutput {
+		result.Error = TruncateToolOutput(result.Error, maxOutput)
 	}
 
 	fields := map[string]interface{}{
@@ -186,10 +204,6 @@ func (r *ToolRegistry) ExecuteTool(
 		fields["error"] = execErr.Error()
 		common.PipelineError(ctx, "AgentTool", "execute_done", fields)
 	} else if result != nil && !result.Success {
-		// Append error hint to guide LLM to retry with a different approach
-		if result.Error != "" {
-			result.Error = result.Error + toolErrorHint
-		}
 		common.PipelineWarn(ctx, "AgentTool", "execute_done", fields)
 	} else {
 		common.PipelineInfo(ctx, "AgentTool", "execute_done", fields)

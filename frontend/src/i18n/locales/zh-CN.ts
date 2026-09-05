@@ -1312,6 +1312,7 @@ export default {
       readSkill: '读取技能',
       executeSkillScript: '执行技能脚本',
       listSandboxFiles: '列出沙箱文件',
+      readFile: '读取文件',
       readSandboxFile: '读取沙箱文件',
       writeSandboxFile: '写入沙箱文件',
       editSandboxFile: '编辑沙箱文件',

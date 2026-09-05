@@ -5,6 +5,8 @@
 Agent Skills 是一种让 Agent 通过阅读"使用说明书"来学习新能力的扩展机制。与传统的硬编码工具不同，Skills 通过注入到 System Prompt 来扩展 Agent 的能力，遵循 **Progressive Disclosure（渐进式披露）** 的设计理念。
 目前仅支持带**智能推理**能力的智能体使用。前端可在智能体的编辑页面找到相关配置
 
+已安装到沙箱镜像的技能统一通过 `shell_exec(skill_name=..., command=...)` 执行；`read_file(path="skill://<name>/SKILL.md")` 返回具体执行方式。独立的 `execute_skill_script` 已删除；宿主机技能也通过同一 Shell 入口准备资源并执行，无 Shell 时仅可阅读技能。工具设计与沙箱迁移要求见 [Agent Tools 设计评审与重构](agent-tools-design.md)。
+
 ### 核心特性
 
 - **非侵入式扩展**：不影响原有 Agent ReAct 流程
@@ -28,16 +30,16 @@ Skills 采用三级加载机制，确保只在需要时才向 LLM 提供详细�
                               ↓ 用户请求匹配时
 ┌─────────────────────────────────────────────────────────────────┐
 │ Level 2: 指令 (Instructions)                                    │
-│ • 通过 read_skill 工具按需加载                                   │
+│ • 通过 read_file 读取技能 SKILL.md                                   │
 │ • SKILL.md 的指令内容                                           │
 │ • 包含：详细指令、代码示例、使用方法                               │
 └─────────────────────────────────────────────────────────────────┘
                               ↓ 需要更多信息时
 ┌─────────────────────────────────────────────────────────────────┐
 │ Level 3: 附加资源 (Resources)                                   │
-│ • 通过 read_skill 工具加载特定文件                               │
+│ • 通过 read_file 读取技能附加文件                               │
 │ • 补充文档、配置模板、脚本文件                                    │
-│ • 通过 execute_skill_script 执行脚本                            │
+│ • 通过 shell_exec(skill_name=...) 执行已安装脚本                │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -104,20 +106,19 @@ type AgentConfig struct {
 
     // Skills 相关配置
     SkillsEnabled  bool     `json:"skills_enabled"`   // 是否启用 Skills
-    SkillDirs      []string `json:"skill_dirs"`       // Skill 目录列表
+    SkillDirs      []string `json:"skill_dirs"`       // 测试/宿主技能目录（生产路径不填）
     AllowedSkills  []string `json:"allowed_skills"`   // 白名单（空=全部允许）
+    TenantSkills   []*TenantSkillEntity               // 沙箱镜像内已安装技能
 }
 ```
+
+生产对话只使用当前智能体所选沙箱配置上的已安装技能（`TenantSkills`）。`SkillDirs` 仅用于测试或把宿主技能目录 stage 进会话，不再有部署级 `skills/preloaded`。
 
 ### 配置示例
 
 ```json
 {
   "skills_enabled": true,
-  "skill_dirs": [
-    "/path/to/project/skills",
-    "/home/user/.agent-skills"
-  ],
   "allowed_skills": ["pdf-processing", "code-review"]
 }
 ```
@@ -201,192 +202,60 @@ Docker、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接检查和
 
 Skills 功能通过两个工具与 Agent 交互：
 
-### read_skill
+### read_file
 
-读取技能内容或特定文件。
+统一读取沙箱文件和允许使用的技能资源，参数为 `path`、`offset`、`limit`、`max_bytes`。
 
-**参数**：
+```json
+{"path": "skill://pdf-processing/SKILL.md"}
+```
+
+读取 SKILL.md 会返回技能指令、执行方式和文件列表。附加文件使用同一种地址：
+
+```json
+{"path": "skill://pdf-processing/FORMS.md", "offset": 1, "limit": 200}
+```
+
+沙箱文件可以使用绝对路径，也可以使用相对于 `/workspace` 的路径：
+
+```json
+{"path": "scripts/analyze.py"}
+```
+
+两类内容共用分页、输出预算和二进制抑制；内容较长时按返回的 `next_offset` 继续。技能资源经过技能白名单和包内路径校验，即使没有沙箱也能阅读。`skill://` 代表技能包资源，不是可用于 Shell 的路径；运行脚本时使用加载结果给出的执行方式。
+
+新会话仅注册 `read_file`，不再同时暴露 `read_skill` 和 `read_sandbox_file`。旧的 Tool 实现已删除；名称只保留用于识别和展示旧记录。
+
+### shell_exec
+
+执行普通命令和已安装技能，共用当前会话沙箱。省略 `skill_name` 使用系统环境；指定技能后，仅本次命令使用它的 Python 虚拟环境、Node 模块路径、会话依赖目录和调用者凭据。工作目录默认 `/workspace`，相对 `work_dir` 也从这里解析；每次调用重新设置工作目录。
+
 ```json
 {
-  "skill_name": "pdf-processing",      // 必需：技能名称
-  "file_path": "FORMS.md"              // 可选：相对路径
+  "skill_name": "pdf-processing",
+  "command": "python3 \"$WEKNORA_SKILL_DIR/scripts/analyze.py\" /workspace/input/report.pdf --format json"
 }
 ```
 
-**使用场景**：
-1. 加载 Level 2 内容：仅传 `skill_name`
-2. 加载 Level 3 资源：同时传 `skill_name` 和 `file_path`
+自己编写的脚本先用 `write_sandbox_file` 写入 `scripts/analyze.py`，然后以相同 `skill_name` 运行 `python3 scripts/analyze.py`。用 `edit_sandbox_file` 修改，用 `read_file` 查看；这些工具的相对路径也从 `/workspace` 解析。Shell 已启用时通过 `ls`/`find` 浏览目录，不再额外注册 `list_sandbox_files`。
 
-**示例调用**：
-```json
-// 加载技能主内容
-{"skill_name": "pdf-processing"}
+生成文件放在 `/workspace/output`；原始附件位于 `/workspace/input`，应保留原样。已安装技能目录只读。Node 的 `NODE_PATH` 支持 CommonJS，自建 ESM 脚本仍需在可写项目目录安装依赖，或调用技能目录中的原始脚本。
 
-// 加载补充文档
-{"skill_name": "pdf-processing", "file_path": "FORMS.md"}
+### 旧工具迁移
 
-// 查看脚本内容
-{"skill_name": "pdf-processing", "file_path": "scripts/analyze.py"}
-```
+`read_skill`、`read_sandbox_file`、`execute_skill_script` 已删除独立实现与注册路径。旧记录仍能展示，但不会作为可执行工具重新注册。
 
-### execute_skill_script
+脚本执行统一传给 `shell_exec`：
 
-在沙箱中执行技能脚本。
-
-**参数**：
 ```json
 {
-  "skill_name": "pdf-processing",           // 必需：技能名称
-  "script_path": "scripts/analyze.py",      // 必需：脚本相对路径
-  "args": ["input.pdf", "--format", "json"] // 可选：命令行参数
+  "skill_name": "pdf-processing",
+  "command": "python3 \"$WEKNORA_SKILL_DIR/scripts/analyze.py\" --format json",
+  "stdin": "{\"query\": \"example\"}"
 }
 ```
 
-**支持的脚本类型**：
-- Python (`.py`)
-- Shell (`.sh`)
-- JavaScript/Node.js (`.js`)
-- Ruby (`.rb`)
-- Go (`.go`)
-
-## 预加载技能（Preloaded Skills）
-
-系统内置了以下 5 个预加载技能，用于增强知识库问答和文档处理能力：
-
-### 1. citation-generator - 引用生成器
-
-**用途**：自动生成规范引用格式
-
-**触发场景**：
-- 需要生成参考文献
-- 标注知识库内容出处
-- 要求提供引用信息
-
-**核心能力**：
-| 功能 | 说明 |
-|------|------|
-| 来源标注 | 为回答中使用的每个知识点标注来源 |
-| 格式化引用 | 支持 APA、MLA、Chicago、简化格式 |
-| 参考文献列表 | 在回答末尾生成完整的参考文献列表 |
-
-**简化引用格式示例**：
-```
-根据公司政策[员工手册2024.pdf, 第15页]，年假申请需提前...
-```
-
----
-
-### 2. data-processor - 数据处理器
-
-**用途**：数据处理与分析
-
-**触发场景**：
-- "分析这些数据"、"统计一下"、"计算总数/平均值"
-- "转换为 JSON/CSV 格式"
-- "提取关键信息"、"整理成表格"
-- "生成报告"、"数据汇总"
-
-**核心能力**：
-| 功能 | 说明 |
-|------|------|
-| 数据分析 | 对检索到的文档数据进行统计分析 |
-| 格式转换 | JSON/CSV/Markdown 等格式相互转换 |
-| 数据提取 | 从非结构化文本中提取结构化信息 |
-| 报告生成 | 生成数据分析报告和摘要 |
-
-**可用脚本**：
-- `scripts/analyze.py` - 数据分析脚本
-- `scripts/format_converter.py` - 格式转换脚本
-- `scripts/extract_info.py` - 信息提取脚本
-
-**脚本使用示例**：
-```bash
-# 数据分析
-echo '{"items": [1, 2, 3, 4, 5]}' | python scripts/analyze.py
-
-# 格式转换（JSON 转 CSV）
-echo '[{"name": "A", "value": 1}]' | python scripts/format_converter.py --to csv
-
-# 信息提取
-echo "2024年销售额为100万元" | python scripts/extract_info.py
-```
-
----
-
-### 3. doc-coauthoring - 文档协作 （源于Claude官方Skill）
-
-**用途**：引导用户完成结构化文档创作
-
-**触发场景**：
-- 编写文档："write a doc"、"draft a proposal"、"create a spec"
-- 文档类型：PRD、设计文档、决策文档、RFC
-
-**工作流程**：
-
-```
-Stage 1: 上下文收集 (Context Gathering)
-        ↓
-Stage 2: 细化与结构 (Refinement & Structure)
-        ↓
-Stage 3: 读者测试 (Reader Testing)
-```
-
-**三阶段说明**：
-| 阶段 | 目标 | 关键活动 |
-|------|------|----------|
-| Stage 1 | 缩小用户与 Claude 之间的信息差 | 元信息提问、上下文收集、澄清问题 |
-| Stage 2 | 逐节构建文档 | 头脑风暴、筛选整理、迭代修改 |
-| Stage 3 | 测试文档对读者的效果 | 预测读者问题、子代理测试、修复盲点 |
-
----
-
-### 4. document-analyzer - 文档分析器
-
-**用途**：深度分析文档结构和内容
-
-**触发场景**：
-- 分析文档结构
-- 提取关键信息
-- 识别文档类型
-- 进行内容质量评估
-
-**核心能力**：
-| 功能 | 说明 |
-|------|------|
-| 结构分析 | 识别文档的章节层级、组织架构 |
-| 关键信息提取 | 提取核心论点、关键数据、重要结论 |
-| 文档类型识别 | 判断文档类型（报告、手册、论文、合同等） |
-| 内容质量评估 | 评估文档的完整性、一致性、可读性 |
-
-**分析流程**：
-1. **文档概览** - 获取文档基本信息
-2. **结构分析** - 识别标题层级、章节组织
-3. **内容提取** - 提取核心主题、关键论点、支撑数据
-4. **质量评估** - 评估完整性、一致性、清晰度
-
----
-
-### 技能目录结构
-
-预加载技能位于 `skills/preloaded/` 目录下：
-
-```
-skills/preloaded/
-├── citation-generator/
-│   └── SKILL.md
-├── data-processor/
-│   ├── SKILL.md
-│   └── scripts/
-│       ├── analyze.py
-│       ├── format_converter.py
-│       └── extract_info.py
-├── doc-coauthoring/
-│   └── SKILL.md
-├── document-analyzer/
-│   └── SKILL.md
-└── summary-generator/
-    └── SKILL.md
-```
+stdin 保留引号、Unicode 和末尾换行，最大 65536 字节；更大的输入用文件重定向。宿主机技能的脚本、辅助文件及二进制资源自动复制到会话的 `/workspace/.skills/<name>/<revision>`；使用系统运行时及会话依赖目录，不复制宿主机的虚拟环境或 node_modules。资源准备限制为 1000 个文件、合计 32 MiB，超出时需先安装到沙箱镜像。无 Shell 的后端不会获得另一套执行工具；配置支持 Shell 的沙箱后才能运行脚本。
 
 ## 创建自定义 Skill
 
@@ -594,8 +463,8 @@ type Manager interface {
     // 列出 Skill 中的所有文件
     ListSkillFiles(ctx context.Context, skillName string) ([]string, error)
     
-    // 执行 Skill 脚本
-    ExecuteScript(ctx context.Context, skillName, scriptPath string, args []string) (*sandbox.ExecuteResult, error)
+    // 为统一 Shell 准备技能资源和环境，命令由 shell_exec 执行
+    PrepareShellEnvironment(ctx context.Context, sessionID, skillName, command string, env map[string]string) (string, map[string]string, error)
     
     // 检查是否启用
     IsEnabled() bool
@@ -644,15 +513,14 @@ Agent 思考:
   → 查看 System Prompt 中的 Skills 列表
   → 发现 "pdf-processing" 技能匹配
 
-Agent 行动 1: 调用 read_skill
-  → {"skill_name": "pdf-processing"}
+Agent 行动 1: 调用 read_file
+  → {"path": "skill://pdf-processing/SKILL.md"}
   → 获取 SKILL.md 指令内容
   → 学习如何使用 pdfplumber
 
-Agent 行动 2: 调用 execute_skill_script
+Agent 行动 2: 调用 shell_exec
   → {"skill_name": "pdf-processing", 
-     "script_path": "scripts/extract_text.py",
-     "args": ["report.pdf"]}
+     "command": "python3 \"$WEKNORA_SKILL_DIR/scripts/extract_text.py\" /workspace/input/report.pdf"}
   → 脚本在沙箱中执行，返回提取的表格数据
 
 Agent 回复:

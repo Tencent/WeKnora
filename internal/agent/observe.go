@@ -578,12 +578,13 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 			continue
 		}
 		name := sanitizeMustUseField(skill.Name)
-		lines = append(lines, fmt.Sprintf("Must call read_skill(skill_name=\"%s\") for @Skill \"%s\" before answering.", name, name))
+		lines = append(lines, fmt.Sprintf("Must call read_file(path=%q) for @Skill %q before answering.", "skill://"+name+"/SKILL.md", name))
 	}
 	if len(lines) == 0 {
 		return ""
 	}
-	return "<must_use>\n" + strings.Join(lines, "\n") + "\n</must_use>"
+	return "<must_use>\n" + strings.Join(lines, "\n") +
+		"\nThese selections do not replace research into the task's factual content or exclude other relevant available sources unless the user explicitly restricts them.\n</must_use>"
 }
 
 // sanitizeMustUseField strips newlines and angle brackets so an MCP/skill name

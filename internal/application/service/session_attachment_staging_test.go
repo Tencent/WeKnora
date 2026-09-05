@@ -101,6 +101,14 @@ func (m *stagingSandboxManager) WriteSessionInputFile(_ context.Context, _ strin
 func (m *stagingSandboxManager) WriteSessionWorkspaceFile(ctx context.Context, sessionID, filePath string, content []byte) error {
 	return m.WriteSessionInputFile(ctx, sessionID, filePath, content)
 }
+func (m *stagingSandboxManager) WriteSessionWorkspaceFiles(ctx context.Context, sessionID string, files []sandbox.SessionWorkspaceFile) error {
+	for _, file := range files {
+		if err := m.WriteSessionWorkspaceFile(ctx, sessionID, file.Path, file.Content); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 func (m *stagingSandboxManager) RemoveSessionInputPath(_ context.Context, _ string, targetPath string) error {
 	for filePath := range m.files {
 		if filePath == targetPath || strings.HasPrefix(filePath, targetPath+"/") {
@@ -183,7 +191,9 @@ func TestBuildSandboxAttachmentsPromptEscapesMetadata(t *testing.T) {
 	assert.Contains(t, prompt, `name="a&lt;&amp;&gt;.txt"`)
 	assert.Contains(t, prompt, `path="/workspace/input/hash/a.txt"`)
 	assert.Contains(t, prompt, "read-only inputs")
-	assert.Contains(t, prompt, "read_sandbox_file")
+	assert.Contains(t, prompt, "read_file")
+	assert.NotContains(t, prompt, "read_sandbox_file")
+	assert.NotContains(t, prompt, "list_sandbox_files")
 	assert.Contains(t, prompt, "write_sandbox_file")
 	assert.Contains(t, prompt, "edit_sandbox_file")
 }

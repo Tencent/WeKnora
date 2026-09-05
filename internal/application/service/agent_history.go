@@ -178,6 +178,11 @@ func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
 	}
 
 	finalContent := agentHistoryThinkTagRegex.ReplaceAllString(m.Content, "")
+	// Version clarification was written for that message's turn, not this one.
+	finalContent = strings.NewReplacer(
+		"\n\n本轮生成的文件: ![", "\n\n该历史消息生成的文件: ![",
+		"\n\nFile generated this turn: ![", "\n\nFile generated in that historical turn: ![",
+	).Replace(finalContent)
 	finalContent = strings.TrimSpace(finalContent)
 	if finalContent != "" {
 		msgs = append(msgs, chat.Message{Role: "assistant", Content: finalContent})

@@ -104,7 +104,7 @@ func TestValidateUserEnvNameReservedLayer(t *testing.T) {
 	require.Error(t, validateEnvNameNotReserved("WEKNORA_SESSION_INPUT_DIR"))
 }
 
-// Every name ExecuteScript injects must be undeclarable. This is the lock that
+// Every name skill environment preparation injects must be undeclarable. This is the lock that
 // output dir, history root, skill dir and session input cannot drift out of
 // the blacklist the way a hand-maintained prefix list can.
 func TestReservedEnvNamesCoverEveryInjectedSandboxVar(t *testing.T) {

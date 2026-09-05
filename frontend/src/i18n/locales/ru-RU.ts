@@ -1310,6 +1310,7 @@ export default {
       readSkill: 'Чтение навыка',
       executeSkillScript: 'Выполнение скрипта навыка',
       listSandboxFiles: 'Список файлов песочницы',
+      readFile: 'Чтение файла',
       readSandboxFile: 'Чтение файла песочницы',
       writeSandboxFile: 'Запись файла песочницы',
       editSandboxFile: 'Правка файла песочницы',

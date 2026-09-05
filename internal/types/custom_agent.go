@@ -151,7 +151,7 @@ type CustomAgentConfig struct {
 	MCPAuthWaitTimeout int `yaml:"mcp_auth_wait_timeout,omitempty" json:"mcp_auth_wait_timeout,omitempty"`
 
 	// ===== Skills Settings (only for smart-reasoning mode) =====
-	// Skills selection mode: "all" = all preloaded skills, "selected" = specific skills, "none" = no skills
+	// Skills selection mode: "all" = all installed skills, "selected" = specific skills, "none" = no skills
 	SkillsSelectionMode string `yaml:"skills_selection_mode" json:"skills_selection_mode"`
 	// Selected skill names (only used when SkillsSelectionMode is "selected")
 	SelectedSkills []string `yaml:"selected_skills" json:"selected_skills"`

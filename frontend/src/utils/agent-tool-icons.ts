@@ -45,7 +45,7 @@ export function getAgentToolIconName(
   if (toolName === 'list_sandbox_files') {
     return 'folder'
   }
-  if (toolName === 'read_sandbox_file' || toolName === 'read_skill') {
+  if (toolName === 'read_file' || toolName === 'read_sandbox_file' || toolName === 'read_skill') {
     return 'file'
   }
   if (toolName === 'write_sandbox_file' || toolName === 'edit_sandbox_file') {

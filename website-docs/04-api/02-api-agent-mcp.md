@@ -338,7 +338,7 @@ curl -X POST $BASE/api/v1/agent/mcp-oauth-resolutions/p-1/cancel -H "Authorizati
 
 ### GET /api/v1/skills
 
-用途：预加载技能列表（只读）。权限：Viewer+，仅 JWT。Handler: `internal/handler/skill_handler.go`
+用途：当前沙箱配置上可执行的已安装技能列表（只读）。查询参数 `sandbox_config_id`；不传则列表为空。权限：Viewer+。Handler: `internal/handler/skill_handler.go`
 
 响应：200 `{"success":true,"data":[{name,description}],"skills_available":bool}`
 

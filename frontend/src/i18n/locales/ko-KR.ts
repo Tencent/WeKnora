@@ -1310,6 +1310,7 @@ export default {
       readSkill: '스킬 읽기',
       executeSkillScript: '스킬 스크립트 실행',
       listSandboxFiles: '샌드박스 파일 목록',
+      readFile: '파일 읽기',
       readSandboxFile: '샌드박스 파일 읽기',
       writeSandboxFile: '샌드박스 파일 쓰기',
       editSandboxFile: '샌드박스 파일 편집',

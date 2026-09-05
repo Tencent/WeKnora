@@ -229,7 +229,14 @@ func (l *Loader) LoadSkillFile(skillName, relativePath string) (*SkillFile, erro
 	}
 
 	// Read the file
-	content, err := os.ReadFile(fullPath)
+	// The resource reader must not follow a bundle symlink into host files.
+	// os.Root enforces containment during the open, including symlink races.
+	root, err := os.OpenRoot(skill.BasePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open skill directory: %w", err)
+	}
+	defer root.Close()
+	content, err := root.ReadFile(cleanPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}

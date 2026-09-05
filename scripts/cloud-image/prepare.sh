@@ -122,7 +122,7 @@ fi
 
 echo "[prepare] 2/6 拉取 WeKnora 运行时文件 (ref=${WEKNORA_REF})"
 # 只下载实际需要的 4 个文件, 不 clone 整个仓库 (~MB 级 -> ~KB 级)
-mkdir -p "${WEKNORA_DIR}/config" "${WEKNORA_DIR}/skills"
+mkdir -p "${WEKNORA_DIR}/config"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "${tmp}"' EXIT
@@ -135,8 +135,7 @@ tar -xzf "${tmp}/repo.tar.gz" -C "${tmp}" \
   --wildcards \
   '*/docker-compose.yml' \
   '*/.env.example' \
-  '*/config/config.yaml' \
-  '*/skills/preloaded'
+  '*/config/config.yaml'
 src=$(find "${tmp}" -maxdepth 1 -mindepth 1 -type d -name 'WeKnora-*' | head -1)
 if [[ -z "${src}" ]]; then
   echo "[prepare] 解压失败, 未找到 WeKnora-* 目录" >&2
@@ -146,8 +145,6 @@ fi
 cp    "${src}/docker-compose.yml" "${WEKNORA_DIR}/"
 cp    "${src}/.env.example"       "${WEKNORA_DIR}/"
 cp    "${src}/config/config.yaml" "${WEKNORA_DIR}/config/"
-rm -rf "${WEKNORA_DIR}/skills/preloaded"
-cp -r "${src}/skills/preloaded"   "${WEKNORA_DIR}/skills/"
 
 # 记录元信息, 供 firstboot / 升级时参考
 cat >"${WEKNORA_DIR}/.cloud-image-meta" <<EOF
@@ -228,7 +225,7 @@ systemctl enable weknora-firstboot.service
 echo "[prepare] 6/6 完成"
 echo
 echo "  WeKnora 运行时已部署到 ${WEKNORA_DIR}"
-echo "    docker-compose.yml / config/config.yaml / skills/preloaded / .env"
+echo "    docker-compose.yml / config/config.yaml / .env"
 echo "  版本: ${WEKNORA_REF}  (见 ${WEKNORA_DIR}/.cloud-image-meta)"
 echo
 echo "  打开浏览器访问  http://<本机公网IP>  验证功能"
