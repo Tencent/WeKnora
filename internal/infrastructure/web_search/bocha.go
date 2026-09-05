@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -124,8 +125,8 @@ func (p *BochaProvider) Search(ctx context.Context, query string, maxResults int
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal Bocha response: %w", err)
 	}
-	if response.Code != 0 && response.Code != http.StatusOK {
-		return nil, fmt.Errorf("Bocha API returned code %d: %s", response.Code, response.Msg)
+	if response.Code != 0 && response.Code != bochaCode(http.StatusOK) {
+		return nil, fmt.Errorf("Bocha API returned code %d", response.Code)
 	}
 	results := make([]*types.WebSearchResult, 0, len(response.Data.WebPages.Value))
 	for _, item := range response.Data.WebPages.Value {
@@ -166,11 +167,15 @@ func readBochaResponseBody(reader io.Reader) ([]byte, error) {
 
 func bochaHTTPError(statusCode int, body []byte) error {
 	var apiError struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
+		Message string `json:"message"`
+		Msg     string `json:"msg"`
 	}
 	if json.Unmarshal(body, &apiError) == nil {
-		if detail := strings.TrimSpace(apiError.Msg); detail != "" {
+		detail := strings.TrimSpace(apiError.Message)
+		if detail == "" {
+			detail = strings.TrimSpace(apiError.Msg)
+		}
+		if detail != "" {
 			return fmt.Errorf("Bocha API returned status %d: %s", statusCode, detail)
 		}
 	}
@@ -193,6 +198,25 @@ func parseBochaDate(value string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// bochaCode tolerates the API's mixed code encoding: errors return a
+// JSON string ("401") while success responses may return a number (200).
+type bochaCode int
+
+func (c *bochaCode) UnmarshalJSON(data []byte) error {
+	s := strings.Trim(strings.TrimSpace(string(data)), `"`)
+	if s == "" || s == "null" {
+		*c = 0
+		return nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		*c = 0
+		return nil
+	}
+	*c = bochaCode(n)
+	return nil
+}
+
 type bochaSearchRequest struct {
 	Query     string `json:"query"`
 	Freshness string `json:"freshness"`
@@ -201,8 +225,7 @@ type bochaSearchRequest struct {
 }
 
 type bochaSearchResponse struct {
-	Code int    `json:"code"`
-	Msg  string `json:"msg"`
+	Code bochaCode `json:"code"`
 	Data struct {
 		WebPages struct {
 			Value []bochaWebPage `json:"value"`

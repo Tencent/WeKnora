@@ -71,14 +71,16 @@ func TestValidateBochaParameters(t *testing.T) {
 }
 
 func TestBochaProviderHTTPError(t *testing.T) {
+	// Error body captured from the live API (2026-09-05): the message field is
+	// "message" and the code is a JSON string.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"code":401,"msg":"invalid API key"}`))
+		_, _ = w.Write([]byte(`{"log_id":"4a995aed60e4088e","message":"Invalid API KEY","code":"401"}`))
 	}))
 	defer server.Close()
 	bocha := &BochaProvider{client: server.Client(), baseURL: server.URL, apiKey: "bad", freshness: defaultBochaFreshness, summary: true}
 	_, err := bocha.Search(context.Background(), "test", 1, false)
-	if err == nil || !strings.Contains(err.Error(), "invalid API key") {
+	if err == nil || !strings.Contains(err.Error(), "Invalid API KEY") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -86,12 +88,30 @@ func TestBochaProviderHTTPError(t *testing.T) {
 func TestBochaProviderAPIErrorWithHTTPOK(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"code":429,"msg":"rate limited"}`))
+		_, _ = w.Write([]byte(`{"code":"429","message":"rate limited"}`))
 	}))
 	defer server.Close()
 	bocha := &BochaProvider{client: server.Client(), baseURL: server.URL, apiKey: "sk-test", freshness: defaultBochaFreshness, summary: true}
 	_, err := bocha.Search(context.Background(), "test", 1, false)
-	if err == nil || !strings.Contains(err.Error(), "rate limited") {
+	if err == nil || !strings.Contains(err.Error(), "429") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestBochaProviderSearchAcceptsStringAndNumericCode(t *testing.T) {
+	for _, body := range []string{
+		`{"code":"200","data":{"webPages":{"value":[{"name":"A","url":"https://example.com/a","snippet":"s1"}]}}}`,
+		`{"code":200,"data":{"webPages":{"value":[{"name":"B","url":"https://example.com/b","snippet":"s2"}]}}}`,
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(body))
+		}))
+		bocha := &BochaProvider{client: server.Client(), baseURL: server.URL, apiKey: "sk-test", freshness: defaultBochaFreshness, summary: true}
+		results, err := bocha.Search(context.Background(), "test", 1, false)
+		if err != nil || len(results) != 1 {
+			t.Fatalf("body %s: results = %v, err = %v", body, results, err)
+		}
+		server.Close()
 	}
 }
