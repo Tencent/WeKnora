@@ -2717,6 +2717,7 @@ export default {
           'system.api_key_revoked': '플랫폼 API 키 폐기',
           'system.admin_revoked': '시스템 관리자 회수',
           'system.user_password_reset': '사용자 비밀번호 재설정',
+          'system.user_created': '사용자 생성',
           'system.queue_task_retried': '실패 작업 다시 실행',
           'system.queue_task_deleted': '실패 작업 기록 삭제',
           'system.queue_task_run_now': '큐 작업 즉시 실행',

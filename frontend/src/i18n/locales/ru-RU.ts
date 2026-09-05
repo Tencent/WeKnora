@@ -2717,6 +2717,7 @@ export default {
           'system.api_key_revoked': 'Отозван платформенный API-ключ',
           'system.admin_revoked': 'Отозван системный администратор',
           'system.user_password_reset': 'Сброшен пароль пользователя',
+          'system.user_created': 'Создан пользователь',
           'system.queue_task_retried': 'Повторно запущена сбойная задача',
           'system.queue_task_deleted': 'Удалена запись о сбойной задаче',
           'system.queue_task_run_now': 'Задача очереди запущена сейчас',

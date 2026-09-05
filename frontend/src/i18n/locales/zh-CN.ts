@@ -2719,6 +2719,7 @@ export default {
           'system.api_key_revoked': '吊销平台 API Key',
           'system.admin_revoked': '回收系统管理员',
           'system.user_password_reset': '重置用户密码',
+          'system.user_created': '创建用户',
           'system.queue_task_retried': '重新执行失败任务',
           'system.queue_task_deleted': '清除失败任务记录',
           'system.queue_task_run_now': '立即执行队列任务',
