@@ -168,8 +168,12 @@ func (s *ks3FileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 	}
 	ext := filepath.Ext(safeName)
 	objectKey := joinKS3Key(s.pathPrefix, fmt.Sprintf("%d", tenantID), "exports", uuid.New().String()+ext)
+	physicalPath := fmt.Sprintf("%s%s/%s", ks3Scheme, s.bucketName, objectKey)
+	if err := interfaces.RecordFileWriteIntent(ctx, physicalPath); err != nil {
+		return "", fmt.Errorf("record file write intent: %w", err)
+	}
 
-	_, err = s.client.PutObject(&ks3s3.PutObjectInput{
+	_, err = s.client.PutObjectWithContext(ctx, &ks3s3.PutObjectInput{
 		Bucket:      ks3aws.String(s.bucketName),
 		Key:         ks3aws.String(objectKey),
 		Body:        bytes.NewReader(data),
@@ -179,7 +183,7 @@ func (s *ks3FileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 		return "", fmt.Errorf("failed to upload bytes to KS3: %w", err)
 	}
 
-	return fmt.Sprintf("%s%s/%s", ks3Scheme, s.bucketName, objectKey), nil
+	return physicalPath, nil
 }
 
 // CopyFile copies an existing KS3 object to a new knowledge-owned object using a
@@ -223,7 +227,7 @@ func (s *ks3FileService) GetFile(ctx context.Context, filePath string) (io.ReadC
 		return nil, fmt.Errorf("invalid file path: %w", err)
 	}
 
-	resp, err := s.client.GetObject(&ks3s3.GetObjectInput{
+	resp, err := s.client.GetObjectWithContext(ctx, &ks3s3.GetObjectInput{
 		Bucket: ks3aws.String(s.bucketName),
 		Key:    ks3aws.String(objectKey),
 	})
@@ -243,7 +247,7 @@ func (s *ks3FileService) DeleteFile(ctx context.Context, filePath string) error 
 		return fmt.Errorf("invalid file path: %w", err)
 	}
 
-	_, err = s.client.DeleteObject(&ks3s3.DeleteObjectInput{
+	_, err = s.client.DeleteObjectWithContext(ctx, &ks3s3.DeleteObjectInput{
 		Bucket: ks3aws.String(s.bucketName),
 		Key:    ks3aws.String(objectKey),
 	})

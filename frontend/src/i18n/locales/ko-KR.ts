@@ -1533,7 +1533,10 @@ export default {
   preview: {
     tab: '미리보기',
     loading: '문서 미리보기 로딩 중...',
+    generating: '문서 미리보기를 생성하고 있습니다. 잠시 기다려 주세요...',
     loadFailed: '문서 미리보기 로드 실패',
+    generationFailed: '문서 미리보기를 생성하지 못했습니다',
+    generationTimedOut: '문서 미리보기를 아직 생성 중입니다. 잠시 후 다시 시도해 주세요',
     retry: '재시도',
     unsupported: '이 파일 유형은 온라인 미리보기를 지원하지 않습니다',
     unsupportedHint: '파일을 다운로드하여 로컬 앱으로 열어주세요',

@@ -135,3 +135,21 @@ class ListEnginesResponse(_message.Message):
     ENGINES_FIELD_NUMBER: _ClassVar[int]
     engines: _containers.RepeatedCompositeFieldContainer[ParserEngineInfo]
     def __init__(self, engines: _Optional[_Iterable[_Union[ParserEngineInfo, _Mapping]]] = ...) -> None: ...
+
+class NormalizeLegacyDocRequest(_message.Message):
+    __slots__ = ("file_content", "file_name")
+    FILE_CONTENT_FIELD_NUMBER: _ClassVar[int]
+    FILE_NAME_FIELD_NUMBER: _ClassVar[int]
+    file_content: bytes
+    file_name: str
+    def __init__(self, file_content: _Optional[bytes] = ..., file_name: _Optional[str] = ...) -> None: ...
+
+class NormalizeLegacyDocResponse(_message.Message):
+    __slots__ = ("file_content", "file_name", "content_type")
+    FILE_CONTENT_FIELD_NUMBER: _ClassVar[int]
+    FILE_NAME_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_TYPE_FIELD_NUMBER: _ClassVar[int]
+    file_content: bytes
+    file_name: str
+    content_type: str
+    def __init__(self, file_content: _Optional[bytes] = ..., file_name: _Optional[str] = ..., content_type: _Optional[str] = ...) -> None: ...

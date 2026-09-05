@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import sys
+import threading
 import traceback
 import uuid
 from concurrent import futures
@@ -15,7 +16,7 @@ from docreader.auth import AuthInterceptor, TLSConfigError, load_tls_credentials
 from docreader import config
 from docreader.config import CONFIG
 from docreader.parser import Parser
-from docreader.proto import docreader_pb2_grpc
+from docreader.proto import docreader_pb2, docreader_pb2_grpc
 from docreader.parser.registry import registry
 from docreader.proto.docreader_pb2 import (
     ReadRequest,
@@ -146,6 +147,10 @@ def _iter_image_refs(images: dict):
         )
 
 
+# Preview never queues inside a gRPC worker; reserve capacity for parsing/health.
+_legacy_preview_slots = threading.BoundedSemaphore(1 if CONFIG.grpc_max_workers > 1 else 0)
+
+
 class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
     def __init__(self):
         super().__init__()
@@ -271,6 +276,32 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                 len(result.content),
                 sent,
             )
+
+    def NormalizeLegacyDoc(self, request, context):
+        from docreader.parser.legacy_doc import LegacyDocConverter, DOCX_MIME
+
+        if not request.file_name.lower().endswith(".doc"):
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Unsupported preview input")
+        if CONFIG.grpc_max_workers <= 1:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Legacy Word preview unavailable")
+        if not _legacy_preview_slots.acquire(blocking=False):
+            context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, "Legacy Word preview busy")
+        try:
+            # Leave room for protobuf metadata within the existing transport cap.
+            max_bytes = max(0, CONFIG.grpc_max_file_size_mb - 4096)
+            try:
+                remaining = context.time_remaining()
+                content = LegacyDocConverter().normalize(
+                    request.file_content, min(remaining if remaining is not None else 25, 25),
+                    max_bytes, context.is_active,
+                )
+            except Exception:
+                context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Legacy Word preview unavailable")
+            return docreader_pb2.NormalizeLegacyDocResponse(
+                file_content=content, file_name="preview.docx", content_type=DOCX_MIME,
+            )
+        finally:
+            _legacy_preview_slots.release()
 
     def ListEngines(self, request, context):
         overrides = dict(getattr(request, "config_overrides", None) or {})

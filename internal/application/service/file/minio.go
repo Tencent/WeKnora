@@ -208,6 +208,10 @@ func (s *minioFileService) SaveBytes(ctx context.Context, data []byte, tenantID 
 	}
 	ext := filepath.Ext(safeName)
 	objectName := fmt.Sprintf("%d/exports/%s%s", tenantID, uuid.New().String(), ext)
+	physicalPath := fmt.Sprintf("minio://%s/%s", s.bucketName, objectName)
+	if err := interfaces.RecordFileWriteIntent(ctx, physicalPath); err != nil {
+		return "", fmt.Errorf("record file write intent: %w", err)
+	}
 
 	// Upload bytes to MinIO
 	reader := bytes.NewReader(data)
@@ -218,7 +222,7 @@ func (s *minioFileService) SaveBytes(ctx context.Context, data []byte, tenantID 
 		return "", fmt.Errorf("failed to upload bytes to MinIO: %w", err)
 	}
 
-	return fmt.Sprintf("minio://%s/%s", s.bucketName, objectName), nil
+	return physicalPath, nil
 }
 
 // GetFileURL returns a presigned download URL for the file

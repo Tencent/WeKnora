@@ -224,22 +224,30 @@ func (s *cosFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 	// 如果请求写入临时桶且临时桶已配置
 	if temp && s.tempClient != nil {
 		objectName := fmt.Sprintf("exports/%d/%s%s", tenantID, uuid.New().String(), ext)
+		physicalPath := fmt.Sprintf("%s%s", s.tempBucketURL, objectName)
+		if err := interfaces.RecordFileWriteIntent(ctx, physicalPath); err != nil {
+			return "", fmt.Errorf("record file write intent: %w", err)
+		}
 		_, err := s.tempClient.Object.Put(ctx, objectName, reader, nil)
 		if err != nil {
 			return "", fmt.Errorf("failed to upload bytes to COS temp bucket: %w", err)
 		}
 		// Temp bucket still uses legacy URL format for backward compat (auto-expiring)
-		return fmt.Sprintf("%s%s", s.tempBucketURL, objectName), nil
+		return physicalPath, nil
 	}
 
 	// 写入主桶
 	objectName := fmt.Sprintf("%s/%d/exports/%s%s", s.cosPathPrefix, tenantID, uuid.New().String(), ext)
+	physicalPath := fmt.Sprintf("cos://%s/%s/%s", s.bucketName, s.region, objectName)
+	if err := interfaces.RecordFileWriteIntent(ctx, physicalPath); err != nil {
+		return "", fmt.Errorf("record file write intent: %w", err)
+	}
 	_, err = s.client.Object.Put(ctx, objectName, reader, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to upload bytes to COS: %w", err)
 	}
 
-	return fmt.Sprintf("cos://%s/%s/%s", s.bucketName, s.region, objectName), nil
+	return physicalPath, nil
 }
 
 // GetFileURL returns a presigned download URL for the file

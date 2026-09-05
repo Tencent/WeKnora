@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/url"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -196,6 +197,9 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 			logger.Errorf(ctx, "Failed to delete saved file after knowledge creation failed, path: %s, error: %v", filePath, deleteErr)
 		}
 		return nil, err
+	}
+	if s.preview != nil && strings.EqualFold(filepath.Ext(knowledge.FileName), ".doc") {
+		s.preview.Wake(ctx, tenantID, knowledge.ID)
 	}
 	// Set tag relations
 	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {

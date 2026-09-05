@@ -36,7 +36,7 @@ function register(kind: FilePreviewKind, exts: string[]) {
 }
 
 register('pdf', ['pdf'])
-register('docx', ['docx', 'doc'])
+register('docx', ['docx'])
 register('pptx', ['pptx', 'ppt'])
 register('image', [
   'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'tif', 'svg', 'svgz',
@@ -404,3 +404,10 @@ export function sniffPreview(bytes: Uint8Array): FilePreviewSniff {
 }
 
 export { SNIFF_BYTES as FILE_PREVIEW_SNIFF_BYTES }
+
+/** Legacy DOC is previewable only through an explicit knowledge DOCX response. */
+export function resolveKnowledgePreviewExt(ext: string, mime: string, knowledgeSource: boolean): string {
+  if (ext !== 'doc') return ext;
+  return knowledgeSource && mime.split(';')[0].trim().toLowerCase() === getPreviewMimeType('docx')
+    ? 'docx' : 'doc';
+}

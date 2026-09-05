@@ -10562,27 +10562,65 @@ paths:
     get:
       consumes:
       - application/json
-      description: 返回知识条目关联的原始文件，Content-Type 根据文件类型设置，用于浏览器内嵌预览
+      description: |-
+        返回知识文件预览。Legacy DOC 复用后台生成的 DOCX 副本；原文件下载保持不变。
+        生成中返回 202 preview_pending，按 Retry-After 秒数轮询。旧文件首次预览触发补建。
+        转换失败返回 415；retry=1 可在失败冷却60秒后重新生成。存储暂时不可用返回503。
       parameters:
       - description: 知识ID
         in: path
         name: id
         required: true
         type: string
+      - description: 显式重试失败的 DOC 预览；冷却期间仍返回415
+        enum:
+        - "1"
+        in: query
+        name: retry
+        type: string
       produces:
       - application/pdf
       - image/jpeg
       - image/png
       - text/plain
+      - application/json
+      - application/vnd.openxmlformats-officedocument.wordprocessingml.document
       responses:
         "200":
           description: 文件内容
           schema:
             type: file
+        "202":
+          description: preview_pending；retry_after 为建议等待秒数
+          headers:
+            Retry-After:
+              description: 建议等待秒数，当前为2
+              type: string
+          schema:
+            additionalProperties: true
+            type: object
         "400":
           description: 请求参数错误
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: preview_not_found：原文件已不存在
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "415":
+          description: preview_unsupported
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: preview_unavailable：暂时无法读取预览
+          schema:
+            additionalProperties:
+              type: string
+            type: object
       security:
       - Bearer: []
       - ApiKeyAuth: []

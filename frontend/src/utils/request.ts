@@ -7,6 +7,10 @@ import { isSkillBundleUploadUrl } from './uploadLimit';
 
 const t = (key: string) => i18n.global.t(key)
 
+function isKnowledgePreviewRequest(url: unknown): boolean {
+  return typeof url === 'string' && /\/api\/v1\/knowledge\/[^/?]+\/preview(?:\?|$)/.test(url);
+}
+
 // API基础URL
 const BASE_URL = getApiBaseUrl();
 
@@ -227,6 +231,22 @@ instance.interceptors.response.use(
     }
 
     const { status, data } = error.response;
+    // Knowledge previews use responseType=blob, including their typed 415 error.
+    // Keep this decoding purpose-bound so other downloads retain existing behavior.
+    if (
+      status === 415 &&
+      isKnowledgePreviewRequest(originalRequest?.url) &&
+      data instanceof Blob &&
+      data.size <= 4096 &&
+      data.type.toLowerCase().split(';', 1)[0].trim() === 'application/json'
+    ) {
+      try {
+        const body = JSON.parse(await data.text());
+        if (body?.code === 'preview_unsupported') {
+          return Promise.reject({ status, code: 'preview_unsupported' });
+        }
+      } catch { /* retain the generic error below */ }
+    }
     // 将HTTP状态码一并抛出，方便上层判断401等场景
     // 后端返回格式: { success: false, error: { code, message, details } }
     // 提取 error.message 作为顶层 message，方便前端使用 error?.message 获取
@@ -254,9 +274,10 @@ export function get<T = any>(url: string, config?: any): Promise<T> {
   return instance.get<T>(url, config) as unknown as Promise<T>;
 }
 
-export async function getDown(url: string): Promise<Blob> {
+export async function getDown(url: string, signal?: AbortSignal): Promise<Blob> {
   const res = await instance.get<Blob>(url, {
     responseType: "blob",
+    signal,
   }) as unknown as Blob;
   return res
 }

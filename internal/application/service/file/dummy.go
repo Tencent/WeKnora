@@ -46,6 +46,12 @@ func (s *DummyFileService) DeleteFile(ctx context.Context, filePath string) erro
 
 // SaveBytes pretends to save bytes but just returns a random UUID
 func (s *DummyFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if interfaces.FileWriteIntent(ctx) != nil {
+		return "", interfaces.ErrFileWriteIntentUnsupported
+	}
 	return fmt.Sprintf("dummy://%d/%s", tenantID, uuid.New().String()), nil
 }
 

@@ -51,6 +51,12 @@ func (s *backendScopedFileService) SaveFile(ctx context.Context, f *multipart.Fi
 	return s.wrap(p), nil
 }
 func (s *backendScopedFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, name string, temp bool) (string, error) {
+	if intent := interfaces.FileWriteIntent(ctx); intent != nil {
+		ctx = interfaces.WithFileWriteIntent(ctx, func(intentCtx context.Context, path string) error {
+			observerCtx := interfaces.WithFileWriteIntent(intentCtx, intent)
+			return intent(observerCtx, s.wrap(path))
+		})
+	}
 	p, err := s.inner.SaveBytes(ctx, data, tenantID, name, temp)
 	if err != nil {
 		return "", err

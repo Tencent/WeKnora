@@ -5273,7 +5273,10 @@ export default {
   preview: {
     tab: 'Preview',
     loading: 'Loading document preview...',
+    generating: 'Generating document preview. Please wait...',
     loadFailed: 'Failed to load document preview',
+    generationFailed: 'Failed to generate document preview',
+    generationTimedOut: 'The document preview is still being generated. Please try again later',
     retry: 'Retry',
     unsupported: 'This file type does not support online preview',
     unsupportedHint: 'Please download and open with a local application',

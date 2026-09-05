@@ -745,7 +745,7 @@ const canPreview = (): boolean => {
   const ft = resolveFilePreviewExt(props.details?.title, props.details?.file_type);
   if (!ft) return false;
   if (audioExtensions.has(ft)) return false; // 音频不走预览tab，播放器已内嵌
-  return isKnownPreviewableExt(ft);
+  return ft === 'doc' || isKnownPreviewableExt(ft);
 };
 
 // 当文档详情加载完成时，file 类型自动切换到「预览」；音频类型使用 merged + 播放器

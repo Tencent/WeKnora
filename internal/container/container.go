@@ -179,6 +179,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewWikiPageRepository))
 	must(container.Provide(repository.NewMemoryRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
+	must(container.Provide(repository.NewDocumentPreviewRepository))
+	must(container.Provide(service.NewDocumentPreviewService))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
 
 	// MCP manager for managing MCP client connections
@@ -464,6 +466,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// persistence succeeded immediately before trigger enqueue failed). Re-arm
 	// them only after the matching handlers are ready.
 	must(container.Invoke(recoverPendingWikiTasks))
+	must(container.Invoke(func(preview interfaces.DocumentPreviewService, cleaner interfaces.ResourceCleaner) {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { defer close(done); preview.Run(ctx) }()
+		cleaner.RegisterWithName("DocumentPreviewRecovery", func() error { cancel(); <-done; return nil })
+	}))
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container

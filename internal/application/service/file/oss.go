@@ -233,6 +233,10 @@ func (s *ossFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 		client = s.tempClient
 		objectName = fmt.Sprintf("exports/%d/%s%s", tenantID, uuid.New().String(), ext)
 	}
+	physicalPath := fmt.Sprintf("oss://%s/%s", targetBucket, objectName)
+	if err := interfaces.RecordFileWriteIntent(ctx, physicalPath); err != nil {
+		return "", fmt.Errorf("record file write intent: %w", err)
+	}
 
 	_, err = client.PutObject(ctx, &oss.PutObjectRequest{
 		Bucket:      oss.Ptr(targetBucket),
@@ -244,7 +248,7 @@ func (s *ossFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 		return "", fmt.Errorf("failed to upload bytes to OSS: %w", err)
 	}
 
-	return fmt.Sprintf("oss://%s/%s", targetBucket, objectName), nil
+	return physicalPath, nil
 }
 
 // CopyFile copies an existing OSS object to a new knowledge-owned object using a

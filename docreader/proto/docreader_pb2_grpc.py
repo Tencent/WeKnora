@@ -34,6 +34,11 @@ class DocReaderStub(object):
         Args:
             channel: A grpc.Channel.
         """
+        self.NormalizeLegacyDoc = channel.unary_unary(
+                '/docreader.DocReader/NormalizeLegacyDoc',
+                request_serializer=docreader__pb2.NormalizeLegacyDocRequest.SerializeToString,
+                response_deserializer=docreader__pb2.NormalizeLegacyDocResponse.FromString,
+                _registered_method=True)
         self.Read = channel.unary_unary(
                 '/docreader.DocReader/Read',
                 request_serializer=docreader__pb2.ReadRequest.SerializeToString,
@@ -53,6 +58,13 @@ class DocReaderStub(object):
 
 class DocReaderServicer(object):
     """Missing associated documentation comment in .proto file."""
+
+    def NormalizeLegacyDoc(self, request, context):
+        """Transient DOC-to-DOCX preview only; failures use gRPC status codes.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
 
     def Read(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -81,6 +93,11 @@ class DocReaderServicer(object):
 
 def add_DocReaderServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'NormalizeLegacyDoc': grpc.unary_unary_rpc_method_handler(
+                    servicer.NormalizeLegacyDoc,
+                    request_deserializer=docreader__pb2.NormalizeLegacyDocRequest.FromString,
+                    response_serializer=docreader__pb2.NormalizeLegacyDocResponse.SerializeToString,
+            ),
             'Read': grpc.unary_unary_rpc_method_handler(
                     servicer.Read,
                     request_deserializer=docreader__pb2.ReadRequest.FromString,
@@ -106,6 +123,33 @@ def add_DocReaderServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class DocReader(object):
     """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def NormalizeLegacyDoc(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/docreader.DocReader/NormalizeLegacyDoc',
+            docreader__pb2.NormalizeLegacyDocRequest.SerializeToString,
+            docreader__pb2.NormalizeLegacyDocResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
 
     @staticmethod
     def Read(request,

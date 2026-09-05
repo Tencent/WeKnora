@@ -1535,7 +1535,10 @@ export default {
   preview: {
     tab: '预览',
     loading: '正在加载文档预览...',
+    generating: '正在生成文档预览，请稍候...',
     loadFailed: '加载文档预览失败',
+    generationFailed: '文档预览生成失败',
+    generationTimedOut: '文档预览仍在生成，请稍后重试',
     retry: '重试',
     unsupported: '该文件类型暂不支持在线预览',
     unsupportedHint: '请下载文件后使用本地应用查看',

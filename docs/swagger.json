@@ -7035,7 +7035,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "返回知识条目关联的原始文件，Content-Type 根据文件类型设置，用于浏览器内嵌预览",
+                "description": "返回知识文件预览。Legacy DOC 复用后台生成的 DOCX 副本；原文件下载保持不变。\n生成中返回 202 preview_pending，按 Retry-After 秒数轮询。旧文件首次预览触发补建。\n转换失败返回 415；retry=1 可在失败冷却60秒后重新生成。存储暂时不可用返回503。",
                 "consumes": [
                     "application/json"
                 ],
@@ -7043,7 +7043,9 @@
                     "application/pdf",
                     "image/jpeg",
                     "image/png",
-                    "text/plain"
+                    "text/plain",
+                    "application/json",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 ],
                 "tags": [
                     "知识管理"
@@ -7056,6 +7058,15 @@
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "enum": [
+                            "1"
+                        ],
+                        "type": "string",
+                        "description": "显式重试失败的 DOC 预览；冷却期间仍返回415",
+                        "name": "retry",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -7065,10 +7076,50 @@
                             "type": "file"
                         }
                     },
+                    "202": {
+                        "description": "preview_pending；retry_after 为建议等待秒数",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "string",
+                                "description": "建议等待秒数，当前为2"
+                            }
+                        }
+                    },
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "preview_not_found：原文件已不存在",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "preview_unsupported",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "preview_unavailable：暂时无法读取预览",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     }
                 }

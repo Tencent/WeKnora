@@ -22,6 +22,7 @@ import (
 )
 
 type AsynqTaskParams struct {
+	DocumentPreview interfaces.DocumentPreviewService
 	dig.In
 
 	// Dedicated servers provide minimum capacity for parse, post-process,
@@ -265,6 +266,7 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 
 	// Register document processing handler
 	mux.HandleFunc(types.TypeDocumentProcess, params.KnowledgeService.ProcessDocument)
+	mux.HandleFunc(types.TypeDocumentPreview, params.DocumentPreview.Handle)
 	mux.HandleFunc(types.TypeTemporaryDocumentProcess, params.TemporaryDocument.Process)
 
 	// Register manual knowledge processing handler (cleanup + re-indexing)

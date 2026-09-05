@@ -4,6 +4,13 @@ import { ref, shallowRef, watch, onUnmounted, nextTick, defineAsyncComponent } f
 import { previewKnowledgeFile } from '@/api/knowledge-base/index';
 import { previewTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { downloadArtifact } from '@/api/chat';
+import {
+  PreviewRequestScope,
+  PreviewWaitTimeoutError,
+  isUnsupportedPreviewError,
+  waitForKnowledgePreview,
+} from '@/utils/previewRequest';
+import { normalizeDocxListSymbols } from '@/utils/docxListSymbols';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
 import markedKatex from 'marked-katex-extension';
@@ -19,6 +26,7 @@ import {
   prettyPrintJson,
   resolveFilePreviewExt,
   resolvePreviewKind,
+  resolveKnowledgePreviewExt,
   shouldPrettyPrintJson,
   sniffPreview,
   isValidUTF8,
@@ -45,6 +53,8 @@ const props = defineProps<{
 
 const loading = ref(false);
 const error = ref('');
+const generating = ref(false);
+const legacyPreviewFailed = ref(false);
 const previewType = ref<FilePreviewKind>('unsupported');
 const blobUrl = ref('');
 const textContent = ref('');
@@ -58,6 +68,7 @@ const docxContainer = ref<HTMLElement | null>(null);
 const imageNaturalWidth = ref(0);
 const imageNaturalHeight = ref(0);
 let loadedForId = '';
+const previewRequests = new PreviewRequestScope();
 
 const isFullscreen = ref(false);
 
@@ -90,11 +101,12 @@ const preprocessMathDelimiters = (rawText: string): string => {
     .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 };
 
-async function renderDocx(blob: Blob) {
-  const { renderAsync } = await import('docx-preview');
+async function renderDocx(blob: Blob, signal: AbortSignal) {
+  const { parseAsync, renderDocument } = await import('docx-preview');
   if (docxContainer.value) {
-    docxContainer.value.innerHTML = '';
-    await renderAsync(blob, docxContainer.value, undefined, {
+    // Render off-screen so a stale conversion cannot mutate the next document.
+    const target = document.createElement('div');
+    const options = {
       className: 'docx-preview-wrapper',
       inWrapper: true,
       ignoreWidth: false,
@@ -105,7 +117,13 @@ async function renderDocx(blob: Blob) {
       experimental: false,
       trimXmlDeclaration: true,
       useBase64URL: true,
-    });
+    };
+    const parsedDocument = await parseAsync(blob, options);
+    normalizeDocxListSymbols(parsedDocument);
+    await renderDocument(parsedDocument, target, undefined, options);
+    if (previewRequests.isCurrent(signal) && docxContainer.value) {
+      docxContainer.value.replaceChildren(...Array.from(target.childNodes));
+    }
   }
 }
 
@@ -237,10 +255,10 @@ function allowsHtmlScriptPreview(): boolean {
   return getPreviewSourceKey().startsWith('artifact:');
 }
 
-async function fetchPreviewBlob(): Promise<Blob> {
+async function fetchPreviewBlob(signal: AbortSignal, retry = false): Promise<Blob> {
   if (props.sourceBlob) return props.sourceBlob;
   if (props.knowledgeId) {
-    return previewKnowledgeFile(props.knowledgeId);
+    return previewKnowledgeFile(props.knowledgeId, signal, retry);
   }
   if (props.sessionId && props.attachmentId) {
     return previewTemporaryAttachment(props.sessionId, props.attachmentId);
@@ -271,24 +289,42 @@ function openMermaid() {
   if (mermaidSvg.value) openMermaidFullscreen(mermaidSvg.value);
 }
 
-async function loadPreview() {
+async function loadPreview(retryFailed = false) {
   const sourceKey = getPreviewSourceKey();
   if (!sourceKey) return;
   if (loadedForId === sourceKey) return;
 
   cleanup();
+  const signal = previewRequests.start();
   loading.value = true;
   error.value = '';
+  generating.value = false;
+  legacyPreviewFailed.value = false;
   htmlViewMode.value = allowsHtmlScriptPreview() ? 'render' : 'source';
 
   let ft = resolveFilePreviewExt(props.fileName, props.fileType);
   previewType.value = resolvePreviewKind(ft);
 
   try {
-    const rawBlob = await fetchPreviewBlob();
+    const legacyKnowledgeDoc = ft === 'doc' && Boolean(props.knowledgeId) && !props.sourceBlob;
+    const rawBlob = legacyKnowledgeDoc
+      ? await waitForKnowledgePreview(
+        (requestSignal, attempt) => fetchPreviewBlob(requestSignal, retryFailed && attempt === 0),
+        {
+          signal,
+          onPending: () => {
+            if (previewRequests.isCurrent(signal)) generating.value = true;
+          },
+        },
+      )
+      : await fetchPreviewBlob(signal);
+    if (!previewRequests.isCurrent(signal)) return;
+    generating.value = false;
+    ft = resolveKnowledgePreviewExt(ft, rawBlob.type, Boolean(props.knowledgeId) && !props.sourceBlob);
     let kind = resolvePreviewKind(ft);
-    if (kind === 'unsupported') {
+    if (kind === 'unsupported' && ft !== 'doc') {
       const sample = new Uint8Array(await rawBlob.slice(0, FILE_PREVIEW_SNIFF_BYTES).arrayBuffer());
+      if (!previewRequests.isCurrent(signal)) return;
       const sniffed = sniffPreview(sample);
       kind = sniffed.kind;
       if (sniffed.ext) ft = sniffed.ext;
@@ -305,6 +341,7 @@ async function loadPreview() {
 
     loading.value = false;
     await nextTick();
+    if (!previewRequests.isCurrent(signal)) return;
 
     switch (kind) {
       case 'pdf':
@@ -322,7 +359,7 @@ async function loadPreview() {
         break;
       }
       case 'docx': {
-        await renderDocx(blob);
+        await renderDocx(blob, signal);
         break;
       }
       case 'excel': {
@@ -347,14 +384,39 @@ async function loadPreview() {
       }
     }
   } catch (err: any) {
-    console.error('Document preview failed:', err);
-    error.value = err?.message || t('preview.loadFailed');
+    if (!previewRequests.isCurrent(signal)) return;
+    if (isUnsupportedPreviewError(err)) {
+      previewType.value = 'unsupported';
+      error.value = '';
+      legacyPreviewFailed.value = resolveFilePreviewExt(props.fileName, props.fileType) === 'doc' && Boolean(props.knowledgeId);
+    } else {
+      if (resolveFilePreviewExt(props.fileName, props.fileType) === 'doc') {
+        error.value = err instanceof PreviewWaitTimeoutError
+          ? t('preview.generationTimedOut')
+          : t('preview.loadFailed');
+      } else {
+        console.error('Document preview failed:', err);
+        error.value = err?.message || t('preview.loadFailed');
+      }
+    }
   } finally {
-    loading.value = false;
+    if (previewRequests.isCurrent(signal)) {
+      loading.value = false;
+      generating.value = false;
+    }
   }
 }
 
+function retryPreview() {
+  loadedForId = '';
+  loadPreview(resolveFilePreviewExt(props.fileName, props.fileType) === 'doc' && Boolean(props.knowledgeId));
+}
+
 function cleanup() {
+  previewRequests.cancel();
+  loading.value = false;
+  generating.value = false;
+  legacyPreviewFailed.value = false;
   if (blobUrl.value) {
     URL.revokeObjectURL(blobUrl.value);
     blobUrl.value = '';
@@ -379,6 +441,8 @@ watch(
   ([active]) => {
     if (active && getPreviewSourceKey()) {
       loadPreview();
+    } else {
+      cleanup();
     }
   },
   { immediate: true }
@@ -415,14 +479,14 @@ onUnmounted(() => {
     <!-- Loading -->
     <div v-if="loading" class="preview-loading">
       <t-loading size="medium" />
-      <span class="loading-text">{{ $t('preview.loading') }}</span>
+      <span class="loading-text">{{ generating ? $t('preview.generating') : $t('preview.loading') }}</span>
     </div>
 
     <!-- Error -->
     <div v-else-if="error" class="preview-error">
       <t-icon name="error-circle" size="48px" />
       <p>{{ error }}</p>
-      <t-button theme="primary" size="small" @click="loadedForId = ''; loadPreview()">
+      <t-button theme="primary" size="small" @click="retryPreview">
         {{ $t('preview.retry') }}
       </t-button>
     </div>
@@ -430,8 +494,11 @@ onUnmounted(() => {
     <!-- Unsupported -->
     <div v-else-if="previewType === 'unsupported'" class="preview-unsupported">
       <t-icon name="file-unknown" size="48px" />
-      <p>{{ $t('preview.unsupported') }}</p>
+      <p>{{ legacyPreviewFailed ? $t('preview.generationFailed') : $t('preview.unsupported') }}</p>
       <p class="unsupported-hint">{{ $t('preview.unsupportedHint') }}</p>
+      <t-button v-if="legacyPreviewFailed" theme="primary" size="small" @click="retryPreview">
+        {{ $t('preview.retry') }}
+      </t-button>
     </div>
 
     <!-- PDF -->

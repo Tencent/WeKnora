@@ -288,7 +288,9 @@ Worker 消费 `TypeDocumentProcess` 后按五个规范化阶段推进，每个�
 引擎目录集中在 `internal/infrastructure/docparser/engines.go`：每个引擎同时声明元数据（名称、描述、文件类型、可用性探针）与 `NewReader` 工厂，`docparser.NewReader` 按名字分发，未注册的名字（如只存在于 docreader 的 `markitdown`）落到 docreader 客户端。
 5. 文件模式：从 `FileService.GetFile(payload.FilePath)` 读回字节填入 `ReadRequest.FileContent`。
 
-**docreader 服务侧**（`docreader/`，Python gRPC）：proto 定义 `docreader/proto/docreader.proto`，服务方法 `Read` / `ReadStream`（流式：首帧 meta + 每图一帧，避免大扫描件 PDF 触发 gRPC 消息上限）/ `ListEngines`。内置 parser 覆盖 docx/doc/pdf/md/xlsx/xls/epub/html/htm/mhtml/图片/网页（`WebParser` 处理 URL），并可选注册 `markitdown`（微软 MarkItDown）与 `opendataloader`（PDF 版面分析，需 Java 11+）引擎，Go 侧通过 `ListEngines` 自发现远程引擎。返回统一为 `ReadResult{MarkdownContent, ImageRefs, Metadata, IsAudio, AudioData}` —— **解析产物统一是 Markdown 文本 + 图片字节**，图片持久化由 Go 侧负责。
+**docreader 服务侧**（`docreader/`，Python gRPC）：proto 定义 `docreader/proto/docreader.proto`，服务方法 `Read` / `ReadStream`（流式：首帧 meta + 每图一帧，避免大扫描件 PDF 触发 gRPC 消息上限）/ `ListEngines`，以及独立的 `NormalizeLegacyDoc`（把知识 DOC 转为供浏览器渲染的 DOCX）。内置 parser 覆盖 docx/doc/pdf/md/xlsx/xls/epub/html/htm/mhtml/图片/网页（`WebParser` 处理 URL），并可选注册 `markitdown`（微软 MarkItDown）与 `opendataloader`（PDF 版面分析，需 Java 11+）引擎，Go 侧通过 `ListEngines` 自发现远程引擎。返回统一为 `ReadResult{MarkdownContent, ImageRefs, Metadata, IsAudio, AudioData}` —— **解析产物统一是 Markdown 文本 + 图片字节**，图片持久化由 Go 侧负责。
+
+DOC 预览转换与文档解析任务相互独立。新 DOC 保存并创建 Knowledge 后，通过 `task_pending_ops` 后台生成预览；上传响应不等待 LibreOffice，解析失败也不会取消预览生成。历史 DOC 没有副本时由首次打开触发同一后台任务。生成的 DOCX 作为 `preview_file` 写入现有文件存储，并登记到 `resources` / `resource_bindings`；原 DOC 的路径和下载内容不变。副本用原文件内容版本和转换协议版本校验，同一版本生成成功后再次打开直接复用，不会重复转换。该实现复用现有表，不需要新增数据库表或字段；首次生成仍需等待后台任务完成，不保证首次打开立即显示。
 
 ### 6.2 ASR 转写（音频文件）
 

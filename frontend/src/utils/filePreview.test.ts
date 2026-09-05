@@ -71,3 +71,16 @@ test('mime and highlight maps cover skill-generated html/csv', () => {
   assert.equal(getHighlightLang('html'), 'xml')
   assert.equal(getHighlightLang('ts'), 'typescript')
 })
+
+
+test('legacy DOC is unsupported outside normalized knowledge responses', async () => {
+  const { resolveKnowledgePreviewExt } = await import('./filePreview');
+  const mime = getPreviewMimeType('docx');
+  assert.equal(resolvePreviewKind('doc'), 'unsupported');
+  assert.equal(resolvePreviewKind('docx'), 'docx');
+  assert.equal(resolvePreviewKind('ppt'), 'pptx');
+  assert.equal(resolveKnowledgePreviewExt('doc', 'application/msword', true), 'doc');
+  assert.equal(resolveKnowledgePreviewExt('doc', mime, false), 'doc');
+  assert.equal(resolveKnowledgePreviewExt('doc', mime, true), 'docx');
+  assert.equal(resolveKnowledgePreviewExt('docx', '', true), 'docx');
+});

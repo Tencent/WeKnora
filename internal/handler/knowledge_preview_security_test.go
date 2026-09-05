@@ -29,7 +29,7 @@ func (r *closeNotifyRecorder) CloseNotify() <-chan bool {
 }
 
 func (s *previewKnowledgeServiceStub) GetKnowledgeByIDOnly(context.Context, string) (*types.Knowledge, error) {
-	return &types.Knowledge{ID: "k1", TenantID: 42, KnowledgeBaseID: "kb1"}, nil
+	return &types.Knowledge{ID: "k1", TenantID: 42, KnowledgeBaseID: "kb1", FileName: s.filename}, nil
 }
 
 func (s *previewKnowledgeServiceStub) GetKnowledgeFile(context.Context, string) (io.ReadCloser, string, error) {

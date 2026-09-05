@@ -226,6 +226,10 @@ func (s *tosFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 			uuid.New().String()+ext,
 		)
 	}
+	physicalPath := fmt.Sprintf("tos://%s/%s", targetBucket, objectName)
+	if err := interfaces.RecordFileWriteIntent(ctx, physicalPath); err != nil {
+		return "", fmt.Errorf("record file write intent: %w", err)
+	}
 
 	_, err = s.client.PutObjectV2(ctx, &tos.PutObjectV2Input{
 		PutObjectBasicInput: tos.PutObjectBasicInput{
@@ -239,7 +243,7 @@ func (s *tosFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 		return "", fmt.Errorf("failed to upload bytes to TOS: %w", err)
 	}
 
-	return fmt.Sprintf("tos://%s/%s", targetBucket, objectName), nil
+	return physicalPath, nil
 }
 
 // CopyFile copies an existing TOS object to a new knowledge-owned object using a
