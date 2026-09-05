@@ -5011,12 +5011,12 @@ export default {
     manageMembers: 'Manage Members',
     noMembers: 'No members',
     members: {
-      listTitle: 'Shared space members',
-      searchPlaceholder: 'Search members…',
-      loading: 'Loading members…',
-      emptySearch: 'No members matching "{q}"',
+      listTitle: 'Member workspaces',
+      searchPlaceholder: 'Search workspaces or representative accounts…',
+      loading: 'Loading member workspaces…',
+      emptySearch: 'No member workspaces matching "{q}"',
       columns: {
-        member: 'Member',
+        member: 'Workspace',
         role: 'Role',
         joinedAt: 'Joined',
         operations: 'Actions'
@@ -5074,7 +5074,7 @@ export default {
     },
     settings: {
       editTitle: 'Shared Space Settings',
-      membersDesc: 'View and manage shared space members and their roles. Each member represents a workspace — all users in the same workspace share access to this shared space.',
+      membersDesc: 'The member list shows one row per workspace. All users in a workspace share access; the account below the workspace name only identifies who first joined.',
       permissionsIconHint: 'View role permissions',
       sharedDesc: 'View all knowledge bases shared to this shared space',
       noSharedKB: 'No shared knowledge bases yet',

@@ -1692,7 +1692,7 @@ export default {
     },
     settings: {
       editTitle: '共享空间设置',
-      membersDesc: '查看和管理共享空间成员、调整成员角色。成员的最小单位是空间——加入后该空间下的所有用户都将获得访问权限。',
+      membersDesc: '成员列表按空间展示，每个空间只显示一行。空间下的所有用户共享访问权限，空间名下方的账号仅用于标识最初加入者。',
       permissionsIconHint: '查看各角色权限说明',
       sharedDesc: '查看共享到此共享空间的所有知识库',
       noSharedKB: '暂无共享的知识库',
@@ -1783,12 +1783,12 @@ export default {
       }
     },
     members: {
-      listTitle: '共享空间成员',
-      searchPlaceholder: '搜索成员…',
-      loading: '加载成员中…',
-      emptySearch: '未找到匹配「{q}」的成员',
+      listTitle: '成员空间',
+      searchPlaceholder: '搜索空间或代表账号…',
+      loading: '加载成员空间中…',
+      emptySearch: '未找到匹配「{q}」的成员空间',
       columns: {
-        member: '成员',
+        member: '空间',
         role: '角色',
         joinedAt: '加入时间',
         operations: '操作'
