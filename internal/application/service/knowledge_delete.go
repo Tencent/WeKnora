@@ -449,9 +449,8 @@ func (s *knowledgeService) scrubWikiPendingIngest(ctx context.Context, kbID, kno
 }
 
 // prepareWikiForReparse is the reparse counterpart to
-// cleanupWikiOnKnowledgeDelete. It aligns reparse with the same "pending
-// queue hygiene" the delete path already enforces, without taking any
-// destructive action against existing pages.
+// cleanupWikiOnKnowledgeDelete. It aligns reparse with the same pending queue
+// hygiene the delete path already enforces.
 //
 // Why no retract / tombstone here: reparse is not a "K is gone" event, it's
 // a "K's contribution is about to be swapped for a new version" event. The
@@ -460,10 +459,10 @@ func (s *knowledgeService) scrubWikiPendingIngest(ctx context.Context, kbID, kno
 // the freshly extracted candidate slugs, which is exactly the information
 // the WikiPageModifyUserPrompt needs to do a correct replace-not-append.
 //
-// So the only thing worth doing synchronously at reparse time is keeping
-// the Redis pending list clean so the re-ingest enqueued by
-// KnowledgePostProcess doesn't race with a stale ingest op that would
-// fire mid-flight against zero chunks.
+// Reparse also replaces the knowledge's chunks with newly generated IDs.
+// Strip the old IDs from page metadata while the chunks are still queryable;
+// the normal reduce step will append the new citations. SourceRefs stay intact
+// because the knowledge remains a source throughout the reparse.
 func (s *knowledgeService) prepareWikiForReparse(ctx context.Context, knowledge *types.Knowledge) {
 	if knowledge == nil {
 		return
@@ -474,6 +473,37 @@ func (s *knowledgeService) prepareWikiForReparse(ctx context.Context, knowledge 
 		return
 	}
 	s.scrubWikiPendingIngest(ctx, kbID, knowledgeID, "reparse")
+	if s.wikiRepo == nil || s.wikiService == nil || s.chunkRepo == nil {
+		return
+	}
+
+	oldChunkRefs := s.wikiChunkRefsForKnowledge(ctx, knowledge)
+	if len(oldChunkRefs) == 0 {
+		return
+	}
+	pages, err := s.wikiRepo.ListBySourceRef(ctx, kbID, knowledgeID)
+	if err != nil {
+		logger.Warnf(ctx, "wiki reparse: failed to list pages for knowledge %s: %v", knowledgeID, err)
+		return
+	}
+
+	updated := 0
+	for _, page := range pages {
+		if page == nil {
+			continue
+		}
+		chunkRefs := removeChunkRefs(page.ChunkRefs, oldChunkRefs)
+		if len(chunkRefs) == len(page.ChunkRefs) {
+			continue
+		}
+		page.ChunkRefs = chunkRefs
+		if err := s.wikiService.UpdatePageMeta(ctx, page); err != nil {
+			logger.Warnf(ctx, "wiki reparse: failed to remove old chunk refs from page %s: %v", page.Slug, err)
+			continue
+		}
+		updated++
+	}
+	logger.Infof(ctx, "wiki reparse: removed old chunk refs from %d pages for knowledge %s", updated, knowledgeID)
 }
 
 // removeSourceRef removes entries from source_refs that match a knowledge ID.

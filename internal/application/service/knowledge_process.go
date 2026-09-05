@@ -2462,12 +2462,11 @@ func (s *knowledgeService) ReparseKnowledge(
 	processOverrides, _ = existing.ProcessOverrides()
 	reparseEff := ResolveProcessConfig(kb, processOverrides)
 
-	// Keep wiki's pending queue consistent across both manual and non-manual
-	// paths. The destructive work (swapping old wiki contributions for new)
-	// happens asynchronously inside mapOneDocument — see its oldPageSlugs
-	// handling — once post-process re-enqueues wiki ingest. All we need to
-	// do here is stop any stale pending ingest op from firing against the
-	// pre-reparse chunk set.
+	// Keep wiki metadata and its pending queue consistent across both manual
+	// and non-manual paths. Remove old chunk refs while the chunks are still
+	// queryable, and stop any stale ingest op from firing against the
+	// pre-reparse chunk set. The new refs are added asynchronously when
+	// post-process re-enqueues wiki ingest.
 	if kb != nil && kb.IsWikiEnabled() {
 		s.prepareWikiForReparse(ctx, existing)
 	}
