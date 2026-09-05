@@ -588,12 +588,19 @@ const appendChunkContent = (acc: string, next: string, positionOverlap: number):
 
 /**
  * 合并分块内容，还原完整文档。chunks 按 start_at 排序后逐段用文本重叠匹配拼接。
+ *
+ * 分块列表接口现在默认返回全部 chunk_type（image_ocr / parent_text / summary
+ * 等）。全文视图沿用仅合并 text 分块的历史语义：parent_text 与其子块内容重叠，
+ * image_ocr/caption 的 start_at 恒为 0，纳入合并会造成内容重复或错位拼接。
  */
 const mergeChunks = (chunks: any[]): string => {
   if (!chunks || chunks.length === 0) return '';
 
+  const mergeable = chunks.filter(c => !c.chunk_type || c.chunk_type === 'text');
+  if (mergeable.length === 0) return '';
+
   // 按 start_at 排序
-  const sortedChunks = [...chunks].sort((a, b) => {
+  const sortedChunks = [...mergeable].sort((a, b) => {
     const startA = a.start_at ?? a.chunk_index ?? 0;
     const startB = b.start_at ?? b.chunk_index ?? 0;
     return startA - startB;

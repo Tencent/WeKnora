@@ -124,14 +124,11 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		pagination.PageSize = 100
 	}
 
-	// Default to text chunks; callers may override via ?chunk_type=image_caption etc.
-	chunkType := []types.ChunkType{types.ChunkTypeText}
-	if queryTypes := c.QueryArray("chunk_type"); len(queryTypes) > 0 {
-		chunkType = make([]types.ChunkType, 0, len(queryTypes))
-		for _, qt := range queryTypes {
-			chunkType = append(chunkType, types.ChunkType(qt))
-		}
-	}
+	// Return every chunk type unless the caller narrows the result via
+	// ?chunk_type=image_caption etc. A text-only default silently hid
+	// multimodal chunks (image_ocr / image_caption) from the chunks page
+	// and made the reported total diverge from the database.
+	chunkType := chunkTypeFilter(c.QueryArray("chunk_type"))
 
 	// The route-level guard has rewritten the request's tenant context
 	// to the effective tenant for shared KBs.
@@ -149,6 +146,21 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		"page":      result.Page,
 		"page_size": result.PageSize,
 	})
+}
+
+// chunkTypeFilter builds the chunk-type filter for list requests. Without an
+// explicit ?chunk_type= list it defaults to every chunk type; a text-only
+// default made the chunks page hide multimodal chunks. See
+// Tencent/WeKnora#2857.
+func chunkTypeFilter(queryTypes []string) []types.ChunkType {
+	if len(queryTypes) == 0 {
+		return types.AllChunkTypes()
+	}
+	filter := make([]types.ChunkType, 0, len(queryTypes))
+	for _, qt := range queryTypes {
+		filter = append(filter, types.ChunkType(qt))
+	}
+	return filter
 }
 
 // UpdateChunkRequest defines the request structure for updating a chunk
