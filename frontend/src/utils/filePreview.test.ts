@@ -27,6 +27,12 @@ test('resolvePreviewKind covers office, tables, html, media, and code', () => {
   assert.equal(resolvePreviewKind('pdf'), 'pdf')
   assert.equal(resolvePreviewKind('docx'), 'docx')
   assert.equal(resolvePreviewKind('pptx'), 'pptx')
+  // Legacy OLE2 formats are not parseable by the OOXML previewers and must
+  // degrade to the unsupported state instead of failing with a zip error.
+  assert.equal(resolvePreviewKind('doc'), 'unsupported')
+  assert.equal(resolvePreviewKind('ppt'), 'unsupported')
+  // SheetJS renders legacy .xls fine, so it stays previewable.
+  assert.equal(resolvePreviewKind('xls'), 'excel')
   assert.equal(resolvePreviewKind('png'), 'image')
   assert.equal(resolvePreviewKind('svg'), 'image')
   assert.equal(resolvePreviewKind('md'), 'markdown')
