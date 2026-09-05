@@ -6108,6 +6108,21 @@ export default {
     reparseSource: 'Документ для повторной обработки',
     reparseHint: 'Используются настройки прошлой обработки; их можно изменить здесь',
     manualCharCount: '{count} символов',
+    progress: {
+      title: 'Загрузка файлов',
+      completed: 'Загрузка завершена',
+      completedWithErrors: 'Загрузка завершена с ошибками',
+      runningSummary: 'Завершено: {completed} из {total}',
+      completedSummary: 'Успешно: {success}, с ошибкой: {failed}',
+      overall: 'Общий прогресс',
+      pending: 'В очереди',
+      uploading: 'Загружается: {progress}%',
+      success: 'Загружен',
+      failed: 'Ошибка',
+      keepOpen: 'Не закрывайте это окно до завершения загрузки.',
+      done: 'Готово',
+      unknownFile: 'Неизвестный файл'
+    },
     pdfForceScanned: {
       label: 'Разбор PDF как сканированного документа',
       description: 'Подходит для PDF с веб-печати, сканов и документов с большим числом изображений. Каждая страница будет отрендерена в изображение и обработана через OCR/VLM. Может увеличить время обработки и расходы на модели.'
