@@ -47,4 +47,20 @@ func TestBuildChatCompletionRequest_MaxTokensMutuallyExclusive(t *testing.T) {
 		assert.Equal(t, 4096, req.MaxCompletionTokens)
 		assert.Zero(t, req.MaxTokens)
 	})
+
+	// DeepSeek documents max_tokens only and silently ignores
+	// max_completion_tokens, so its adapter migrates the budget back onto the
+	// legacy field.
+	t.Run("deepseek adapter migrates the budget to max_tokens", func(t *testing.T) {
+		opts := &ChatOptions{MaxTokens: 2048, MaxCompletionTokens: 4096}
+		req := chat.BuildChatCompletionRequest(messages, opts, false)
+		deepseekProvider{}.ShapeRequest(&req, opts, false)
+		assert.Equal(t, 4096, req.MaxTokens)
+		assert.Zero(t, req.MaxCompletionTokens)
+
+		body, err := json.Marshal(req)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), `"max_tokens":4096`)
+		assert.NotContains(t, string(body), "max_completion_tokens")
+	})
 }
