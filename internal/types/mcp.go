@@ -133,10 +133,20 @@ type MCPToolApproval struct {
 	ToolName        string `json:"tool_name"        gorm:"type:varchar(512);not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool"`
 	RequireApproval bool   `json:"require_approval" gorm:"not null;default:false"`
 	// Enabled controls whether this tool is exposed to the Agent. Missing rows
-	// are treated as enabled for backwards compatibility.
-	Enabled   bool      `json:"enabled"         gorm:"not null"`
+	// are treated as enabled for backwards compatibility. The DB/GORM default is
+	// true; inserts persist false via a map Create so GORM does not omit the
+	// Go zero value.
+	Enabled   bool      `json:"enabled" gorm:"not null;default:true"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// MCPToolPolicyPatch is a partial per-tool policy update. Nil fields are left
+// unchanged on existing rows. A newly inserted row uses RequireApproval=false
+// and Enabled=true for any omitted field.
+type MCPToolPolicyPatch struct {
+	RequireApproval *bool
+	Enabled         *bool
 }
 
 // BeforeCreate sets ID for MCPToolApproval.

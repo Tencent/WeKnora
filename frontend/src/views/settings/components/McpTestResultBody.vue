@@ -35,6 +35,7 @@
                     <t-switch
                       :value="tool.enabled !== false"
                       :loading="toolLoading[tool.name]"
+                      :disabled="isToolPolicyBusy(tool.name)"
                       size="small"
                       @change="(v: boolean) => onToolEnabledChange(tool.name, v)"
                     />
@@ -47,6 +48,7 @@
                     <t-switch
                       :value="tool.require_approval"
                       :loading="approvalLoading[tool.name]"
+                      :disabled="isToolPolicyBusy(tool.name)"
                       size="small"
                       @change="(v: boolean) => onRequireApprovalChange(tool.name, v)"
                     />
@@ -130,6 +132,9 @@ const { t } = useI18n()
 const displayTools = ref<MCPTool[]>([])
 const approvalLoading = ref<Record<string, boolean>>({})
 const toolLoading = ref<Record<string, boolean>>({})
+
+const isToolPolicyBusy = (toolName: string) =>
+  Boolean(toolLoading.value[toolName] || approvalLoading.value[toolName])
 
 const mergeApprovals = async () => {
   const tools = props.result?.tools

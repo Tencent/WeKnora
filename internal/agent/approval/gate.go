@@ -67,9 +67,10 @@ func pubsubChannel() string {
 	return pubsubChannelBase
 }
 
-// Checker answers whether a concrete MCP tool requires human approval before execution.
+// Checker answers per-tool MCP policy questions used during registration and execution.
 type Checker interface {
 	IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error)
+	IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error)
 }
 
 // Decision is the outcome of a pending tool approval.
@@ -101,6 +102,7 @@ type PendingRequest struct {
 // MCPApproval is the surface used by MCPTool (mockable in tests).
 type MCPApproval interface {
 	NeedsApproval(ctx context.Context, tenantID uint64, serviceID, toolName string) bool
+	IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error)
 	RequestAndWait(ctx context.Context, req PendingRequest) (Decision, error)
 }
 
@@ -305,19 +307,18 @@ func (g *Gate) NeedsApproval(ctx context.Context, tenantID uint64, serviceID, to
 	return ok
 }
 
-// IsEnabled reports whether a per-tool MCP policy allows registration. Tool
-// settings are optional, so an absent checker keeps tools enabled.
+// IsEnabled reports whether a per-tool MCP policy allows registration or
+// execution. An absent gate/checker keeps tools enabled (policy store is
+// optional). A missing tenant or tool identity is fail-closed: the caller
+// cannot attribute a tenant-scoped disable flag, so the tool is not allowed.
 func (g *Gate) IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
-	if g == nil || g.checker == nil || tenantID == 0 || serviceID == "" || toolName == "" {
+	if g == nil || g.checker == nil {
 		return true, nil
 	}
-	checker, ok := g.checker.(interface {
-		IsEnabled(context.Context, uint64, string, string) (bool, error)
-	})
-	if !ok {
-		return true, nil
+	if tenantID == 0 || serviceID == "" || toolName == "" {
+		return false, nil
 	}
-	return checker.IsEnabled(ctx, tenantID, serviceID, toolName)
+	return g.checker.IsEnabled(ctx, tenantID, serviceID, toolName)
 }
 
 // RequestAndWait emits a UI event, then blocks until Resolve, timeout, or ctx cancellation.
@@ -685,8 +686,11 @@ func (g *Gate) deliverLocal(tenantID uint64, userID, pendingID string, d Decisio
 type Adapter struct {
 	Svc interface {
 		IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error)
+		IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error)
 	}
 }
+
+var _ Checker = (*Adapter)(nil)
 
 // IsRequired implements Checker.
 func (a *Adapter) IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
@@ -696,16 +700,10 @@ func (a *Adapter) IsRequired(ctx context.Context, tenantID uint64, serviceID, to
 	return a.Svc.IsRequired(ctx, tenantID, serviceID, toolName)
 }
 
-// IsEnabled implements the optional per-tool registration policy.
+// IsEnabled implements Checker.
 func (a *Adapter) IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
 	if a == nil || a.Svc == nil {
 		return true, nil
 	}
-	checker, ok := a.Svc.(interface {
-		IsEnabled(context.Context, uint64, string, string) (bool, error)
-	})
-	if !ok {
-		return true, nil
-	}
-	return checker.IsEnabled(ctx, tenantID, serviceID, toolName)
+	return a.Svc.IsEnabled(ctx, tenantID, serviceID, toolName)
 }

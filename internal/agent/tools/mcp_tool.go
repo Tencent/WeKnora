@@ -106,17 +106,14 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	// Re-check the policy at call time as well as during registration. An agent
 	// engine may outlive a settings change, and a disabled tool must not remain
 	// callable merely because it was registered before the toggle was changed.
-	if enabledChecker, ok := t.gate.(interface {
-		IsEnabled(context.Context, uint64, string, string) (bool, error)
-	}); ok {
-		tenantID, _ := types.TenantIDFromContext(ctx)
-		enabled, policyErr := enabledChecker.IsEnabled(ctx, tenantID, t.service.ID, t.mcpTool.Name)
+	if t.gate != nil {
+		tenantID, ok := mcpPolicyTenantID(ctx)
+		if !ok {
+			return disabledMCPToolResult(nil), nil
+		}
+		enabled, policyErr := t.gate.IsEnabled(ctx, tenantID, t.service.ID, t.mcpTool.Name)
 		if policyErr != nil || !enabled {
-			message := "MCP tool is disabled"
-			if policyErr != nil {
-				message = fmt.Sprintf("MCP tool policy check failed: %v", policyErr)
-			}
-			return &types.ToolResult{Success: false, Error: message}, nil
+			return disabledMCPToolResult(policyErr), nil
 		}
 	}
 
@@ -404,6 +401,19 @@ func extractContentText(content []mcp.ContentItem) string {
 	return strings.Join(textParts, "\n")
 }
 
+func mcpPolicyTenantID(ctx context.Context) (uint64, bool) {
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	return tenantID, ok && tenantID != 0
+}
+
+func disabledMCPToolResult(policyErr error) *types.ToolResult {
+	message := "MCP tool is disabled"
+	if policyErr != nil {
+		message = fmt.Sprintf("MCP tool policy check failed: %v", policyErr)
+	}
+	return &types.ToolResult{Success: false, Error: message}
+}
+
 // sanitizeName sanitizes a name to create a valid identifier
 func sanitizeName(name string) string {
 	// Replace invalid characters with underscores
@@ -509,16 +519,16 @@ func RegisterMCPTools(
 
 		// Register each tool
 		for _, mcpTool := range mcpTools {
-			if enabledChecker, ok := gate.(interface {
-				IsEnabled(context.Context, uint64, string, string) (bool, error)
-			}); ok {
-				// Builtin services are shared across tenants, so policy must be
-				// read for the current caller rather than the builtin row's owner.
-				policyTenantID := service.TenantID
-				if tenantID, ok := types.TenantIDFromContext(ctx); ok && tenantID != 0 {
-					policyTenantID = tenantID
+			if gate != nil {
+				policyTenantID, ok := mcpPolicyTenantID(ctx)
+				if !ok {
+					logger.GetLogger(ctx).Warnf(
+						"Skipping MCP tool %s/%s: tenant id missing from context",
+						service.Name, mcpTool.Name,
+					)
+					continue
 				}
-				enabled, policyErr := enabledChecker.IsEnabled(ctx, policyTenantID, service.ID, mcpTool.Name)
+				enabled, policyErr := gate.IsEnabled(ctx, policyTenantID, service.ID, mcpTool.Name)
 				if policyErr != nil {
 					logger.GetLogger(ctx).Warnf("Failed to read enabled policy for MCP tool %s/%s: %v", service.Name, mcpTool.Name, policyErr)
 					continue
