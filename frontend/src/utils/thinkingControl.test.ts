@@ -26,6 +26,7 @@ test('defaultThinkingControl matches backend provider adapters', () => {
     ['hunyuan', 'hunyuan-turbo', 'none'],
     ['moonshot', 'moonshot-v1-8k', 'none'],
     ['weknoracloud', 'anything', 'none'],
+    ['responses', 'muse-spark-1.3-contributor', 'none'],
   ]
   for (const [provider, model, want] of cases) {
     assert.equal(

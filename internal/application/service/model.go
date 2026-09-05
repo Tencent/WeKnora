@@ -99,6 +99,11 @@ func (s *modelService) resolveWeKnoraCloudCredentials(ctx context.Context, param
 func (s *modelService) CreateModel(ctx context.Context, model *types.Model) error {
 	logger.Infof(ctx, "Creating model: %s, type: %s, source: %s", model.Name, model.Type, model.Source)
 
+	// Ingress normalization: a pasted full endpoint URL is reduced to the API
+	// root for providers that define suffix stripping (responses); runtime
+	// construction re-applies this as a safety net.
+	model.Parameters.BaseURL = provider.NormalizeBaseURL(provider.ProviderName(model.Parameters.Provider), model.Parameters.BaseURL)
+
 	// Handle remote models (e.g., OpenAI, Azure)
 	if model.Source == types.ModelSourceRemote {
 		logger.Info(ctx, "Remote model detected, setting status to active")
@@ -249,6 +254,9 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 		model.IsBuiltin = true
 		model.ManagedBy = ""
 	}
+
+	// Ingress normalization (see CreateModel): keep stored base URLs canonical.
+	model.Parameters.BaseURL = provider.NormalizeBaseURL(provider.ProviderName(model.Parameters.Provider), model.Parameters.BaseURL)
 
 	// Update model in repository
 	err = s.repo.Update(ctx, model)

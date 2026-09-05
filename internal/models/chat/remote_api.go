@@ -36,6 +36,9 @@ type RemoteAPIChat struct {
 	adapter providerAdapter
 	// thinkingOverride 来自 extra_config.thinking_control，非 nil 时覆盖 adapter.Thinking()。
 	thinkingOverride ThinkingStrategy
+	// responsesEffort 是 Responses provider 的 effort 选择器
+	// （extra_config.reasoning_effort，默认 medium，见 #16）。
+	responsesEffort string
 }
 
 // NewRemoteAPIChat 创建远程 API 聊天实例
@@ -51,6 +54,11 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 	if providerName == "" {
 		providerName = provider.DetectProvider(chatConfig.BaseURL)
 	}
+
+	// Normalize the stored base URL (a pasted full endpoint such as
+	// .../v1/responses or .../v1/chat/completions is reduced to the API root
+	// for providers that define suffix stripping; all others pass through).
+	chatConfig.BaseURL = provider.NormalizeBaseURL(providerName, chatConfig.BaseURL)
 
 	var config openai.ClientConfig
 	if providerName == provider.ProviderAzureOpenAI {
@@ -110,6 +118,7 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 		customHeaders:    chatConfig.CustomHeaders,
 		adapter:          resolveProvider(providerName, modelName),
 		thinkingOverride: parseThinkingOverride(chatConfig.ExtraConfig),
+		responsesEffort:  ResolveResponsesEffort(chatConfig.ExtraConfig),
 	}, nil
 }
 
@@ -180,6 +189,12 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	timeoutCtx, cancel := withLLMTimeout(ctx, defaultChatTimeout)
 	defer cancel()
 
+	// Responses providers speak a different wire format (/responses); they
+	// bypass the chat-completions outbound assembly entirely.
+	if c.provider == provider.ProviderResponses {
+		return c.chatWithResponses(timeoutCtx, messages, opts)
+	}
+
 	body, endpoint, useRawHTTP, err := c.buildOutbound(timeoutCtx, messages, opts, false)
 	if err != nil {
 		return nil, err
@@ -219,7 +234,7 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 	}
 
 	if endpoint == "" {
-		endpoint = c.baseURL + "/chat/completions"
+		endpoint = chatCompletionsEndpoint(c.baseURL)
 	}
 	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
 		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
@@ -278,6 +293,12 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	// 仅在调用方未设置 deadline 时附加兜底超时；流式调用默认超时更长，
 	// 因为带思考/推理的模型可能数十秒甚至几分钟才产出首 token。
 	timeoutCtx, cancel := withLLMTimeout(ctx, defaultStreamTimeout)
+
+	// Responses providers speak SSE response.* events.
+	if c.provider == provider.ProviderResponses {
+		ch, err := c.chatStreamWithResponses(timeoutCtx, messages, opts)
+		return wrapStreamCancel(ch, err, cancel)
+	}
 
 	body, endpoint, useRawHTTP, err := c.buildOutbound(timeoutCtx, messages, opts, true)
 	if err != nil {
@@ -351,7 +372,7 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 	}
 
 	if endpoint == "" {
-		endpoint = c.baseURL + "/chat/completions"
+		endpoint = chatCompletionsEndpoint(c.baseURL)
 	}
 	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
 		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)

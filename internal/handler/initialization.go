@@ -1923,6 +1923,12 @@ func (h *InitializationHandler) checkChatModelConnection(
 		MaxTokens: 1,
 		Thinking:  &[]bool{false}[0], // for dashscope.aliyuncs qwen3-32b
 	}
+	// Responses reasoning models burn hundreds of tokens before emitting
+	// text; max_tokens:1 would return a textless (but envelope-valid)
+	// incomplete. Give the probe room. Other providers stay at 1.
+	if provider.ProviderName(model.Parameters.Provider) == provider.ProviderResponses {
+		testOptions.MaxTokens = 300
+	}
 
 	_, err = chatInstance.Chat(ctx, testMessages, testOptions)
 	if err != nil {
