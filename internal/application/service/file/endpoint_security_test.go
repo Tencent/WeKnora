@@ -20,7 +20,7 @@ func TestStorageClientsRejectUnsafeEndpointAtConstruction(t *testing.T) {
 			return CheckObsConnectivity(context.Background(), endpoint, "region", "ak", "sk", "bucket")
 		},
 		"oss": func() error {
-			_, err := newOSSClient(endpoint, "region", "ak", "sk")
+			_, err := newOSSClient(endpoint, "region", "ak", "sk", "")
 			return err
 		},
 		"tos": func() error {

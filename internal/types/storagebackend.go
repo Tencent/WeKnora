@@ -105,6 +105,7 @@ type StorageBackendConfig struct {
 	UseTempBucket   bool   `json:"use_temp_bucket,omitempty"`
 	TempBucketName  string `json:"temp_bucket_name,omitempty"`
 	TempRegion      string `json:"temp_region,omitempty"`
+	SignatureVersion string `json:"signature_version,omitempty"`
 }
 
 func (c StorageBackendConfig) Value() (driver.Value, error) {
@@ -239,7 +240,7 @@ func (b StorageBackend) ToStorageEngineConfig() *StorageEngineConfig {
 	case "s3":
 		result.S3 = &S3EngineConfig{Endpoint: c.Endpoint, Region: c.Region, AccessKey: c.AccessKeyID, SecretKey: c.SecretAccessKey, BucketName: c.BucketName, PathPrefix: c.PathPrefix, UseSSL: c.UseSSL, ForcePathStyle: c.ForcePathStyle}
 	case "oss":
-		result.OSS = &OSSEngineConfig{Endpoint: c.Endpoint, Region: c.Region, AccessKey: c.AccessKeyID, SecretKey: c.SecretAccessKey, BucketName: c.BucketName, PathPrefix: c.PathPrefix, UseTempBucket: c.UseTempBucket, TempBucketName: c.TempBucketName, TempRegion: c.TempRegion}
+		result.OSS = &OSSEngineConfig{Endpoint: c.Endpoint, Region: c.Region, AccessKey: c.AccessKeyID, SecretKey: c.SecretAccessKey, BucketName: c.BucketName, PathPrefix: c.PathPrefix, UseTempBucket: c.UseTempBucket, TempBucketName: c.TempBucketName, TempRegion: c.TempRegion, SignatureVersion: c.SignatureVersion}
 	case "ks3":
 		result.KS3 = &KS3EngineConfig{Endpoint: c.Endpoint, Region: c.Region, AccessKey: c.AccessKeyID, SecretKey: c.SecretAccessKey, BucketName: c.BucketName, PathPrefix: c.PathPrefix}
 	case "obs":
@@ -302,7 +303,7 @@ func StorageBackendFromLegacy(tenantID uint64, provider string, legacy *StorageE
 		}
 		c := legacy.OSS
 		b.Name = "OSS"
-		b.Config = StorageBackendConfig{Endpoint: c.Endpoint, Region: c.Region, AccessKeyID: c.AccessKey, SecretAccessKey: c.SecretKey, BucketName: c.BucketName, PathPrefix: c.PathPrefix, UseTempBucket: c.UseTempBucket, TempBucketName: c.TempBucketName, TempRegion: c.TempRegion}
+		b.Config = StorageBackendConfig{Endpoint: c.Endpoint, Region: c.Region, AccessKeyID: c.AccessKey, SecretAccessKey: c.SecretKey, BucketName: c.BucketName, PathPrefix: c.PathPrefix, UseTempBucket: c.UseTempBucket, TempBucketName: c.TempBucketName, TempRegion: c.TempRegion, SignatureVersion: c.SignatureVersion}
 	case "ks3":
 		if legacy.KS3 == nil {
 			return nil
