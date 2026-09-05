@@ -2,7 +2,7 @@
     <div class="dialogue-wrap">
         <div class="dialogue-answers">
             <div class="dialogue-title" style="--wails-draggable: drag">
-                <span style="--wails-draggable: drag">{{ $t('createChat.title') }}</span>
+                <span style="--wails-draggable: drag">{{ $t('createChat.title', { brand: BRANDING.name }) }}</span>
             </div>
             <!-- 推荐问题 -->
             <div ref="sqContainerRef" class="suggested-questions-container">
@@ -69,6 +69,7 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal.vue';
 import { useKnowledgeBaseCreationNavigation } from '@/hooks/useKnowledgeBaseCreationNavigation';
+import { BRANDING } from '@/config/branding';
 
 const router = useRouter();
 const route = useRoute();

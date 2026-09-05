@@ -154,7 +154,7 @@
                   ? $t('settings.sandbox.secretConfigured')
                   : $t('settings.sandbox.cubeApiKeyOptional') }}
               </p>
-              <a class="inline-guide-link" :href="clusterGuideUrl" target="_blank" rel="noopener noreferrer">
+              <a v-if="FEATURES.showGithubLinks" class="inline-guide-link" :href="clusterGuideUrl" target="_blank" rel="noopener noreferrer">
                 <t-icon name="link" />
                 {{ $t('settings.sandbox.cubeApiKeyWhere') }}
               </a>
@@ -357,7 +357,7 @@
           </div>
         </div>
         <t-alert v-if="templatesError" theme="warning" class="compact-alert" :message="templatesError" />
-        <a class="inline-guide-link" :href="clusterGuideUrl" target="_blank" rel="noopener noreferrer">
+        <a v-if="FEATURES.showGithubLinks" class="inline-guide-link" :href="clusterGuideUrl" target="_blank" rel="noopener noreferrer">
           <t-icon name="link" />
           {{ $t('settings.sandbox.howToBuildTemplate') }}
         </a>
@@ -735,6 +735,7 @@
 </template>
 
 <script setup lang="ts">
+import { FEATURES } from '@/config/branding'
 import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'

@@ -80,7 +80,7 @@
             <label>{{ $t('tenant.api.docLabel') }}</label>
             <p>
               {{ $t('tenant.api.docDescription') }}
-              <a class="doc-link" @click="openApiDoc">
+              <a v-if="FEATURES.showGithubLinks" class="doc-link" @click="openApiDoc">
                 {{ $t('tenant.api.openDoc') }}
                 <t-icon name="link" class="link-icon" />
               </a>
@@ -671,6 +671,7 @@
 </template>
 
 <script setup lang="ts">
+import { FEATURES } from '@/config/branding'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'

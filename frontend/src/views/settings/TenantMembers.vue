@@ -53,6 +53,7 @@
       <p class="section-description">
         {{ $t('tenantMember.sectionDescription') }}
         <a
+          v-if="FEATURES.showGithubLinks"
           class="doc-link"
           href="https://github.com/Tencent/WeKnora/blob/main/docs/RBAC%E8%AF%B4%E6%98%8E.md"
           target="_blank"
@@ -511,6 +512,7 @@
 </template>
 
 <script setup lang="ts">
+import { FEATURES } from '@/config/branding'
 import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
