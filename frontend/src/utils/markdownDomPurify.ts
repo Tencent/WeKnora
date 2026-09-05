@@ -57,7 +57,8 @@ export const markdownDomPurifySecurityHooks = {
     if (!('tagName' in currentNode) || !('getAttribute' in currentNode)) return;
     const element = currentNode as Element;
     if (element.tagName === 'A' && element.getAttribute('href')) {
-      if (element.classList.contains('protected-resource-card') || element.hasAttribute('download')) {
+      const className = element.getAttribute('class') || '';
+      if (/\bprotected-resource-card\b/.test(className) || element.hasAttribute('download')) {
         element.removeAttribute('target');
         return;
       }
