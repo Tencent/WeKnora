@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -53,6 +54,19 @@ type Adapter struct {
 	clientSecret   string
 	cardTemplateID string // optional: enables AI card streaming when set
 
+	// Dedicated (专属钉) intranet adaptation: rewrite dedicated-line download
+	// URLs to an operator-configured intranet base. nil = disabled.
+	downloadRewrite *downloadRewrite
+	// trustedDownloadClient fetches rewritten download URLs (target host is
+	// admin-configured, so SSRF guards are intentionally omitted).
+	trustedDownloadClient *http.Client
+	// skipVerifyDownloadClient fetches non-rewritten download URLs when
+	// download_insecure_skip_verify is enabled (SSRF guards kept, TLS
+	// verification relaxed).
+	skipVerifyDownloadClient *http.Client
+	// downloadSkipTLSVerify mirrors im.dingtalk.download_insecure_skip_verify.
+	downloadSkipTLSVerify bool
+
 	// accessToken cache
 	tokenMu    sync.RWMutex
 	token      string
@@ -60,25 +74,47 @@ type Adapter struct {
 }
 
 // NewWebhookAdapter creates a DingTalk adapter for HTTP callback mode.
-func NewWebhookAdapter(clientID, clientSecret, cardTemplateID string) *Adapter {
+// cfg carries the optional im.dingtalk dedicated-deployment adaptation and
+// may be nil.
+func NewWebhookAdapter(clientID, clientSecret, cardTemplateID string, cfg *config.DingTalkConfig) *Adapter {
 	startStreamReaper()
-	return &Adapter{
-		clientID:       clientID,
-		clientSecret:   clientSecret,
-		cardTemplateID: cardTemplateID,
-	}
+	return newAdapter(clientID, clientSecret, cardTemplateID, cfg)
 }
 
 // NewAdapter creates a DingTalk adapter for stream (websocket) mode.
 // The stream connection itself is managed separately by the supervisor; the
 // adapter only sends replies (via sessionWebhook or OpenAPI).
-func NewAdapter(clientID, clientSecret, cardTemplateID string) *Adapter {
+// cfg carries the optional im.dingtalk dedicated-deployment adaptation and
+// may be nil.
+func NewAdapter(clientID, clientSecret, cardTemplateID string, cfg *config.DingTalkConfig) *Adapter {
 	startStreamReaper()
-	return &Adapter{
+	return newAdapter(clientID, clientSecret, cardTemplateID, cfg)
+}
+
+// newAdapter assembles the shared adapter state.
+func newAdapter(clientID, clientSecret, cardTemplateID string, cfg *config.DingTalkConfig) *Adapter {
+	a := &Adapter{
 		clientID:       clientID,
 		clientSecret:   clientSecret,
 		cardTemplateID: cardTemplateID,
 	}
+	if cfg == nil {
+		return a
+	}
+	a.downloadRewrite = parseDownloadRewrite(cfg.DownloadURLRewrite)
+	a.downloadSkipTLSVerify = cfg.DownloadInsecureSkipVerify
+	if a.downloadRewrite != nil {
+		logger.Infof(context.Background(), "[DingTalk] download url rewrite enabled: %d prefix(es) -> %s",
+			len(a.downloadRewrite.prefixes), a.downloadRewrite.to)
+		a.trustedDownloadClient = newTrustedDownloadClient(a.downloadSkipTLSVerify)
+		logger.Debugf(context.Background(), "[DingTalk] trusted download client built (skip verify: %v)",
+			a.downloadSkipTLSVerify)
+	}
+	if a.downloadSkipTLSVerify {
+		a.skipVerifyDownloadClient = newSkipVerifySSRFSafeDownloadClient()
+		logger.Debugf(context.Background(), "[DingTalk] skip-verify download client built (SSRF guards kept)")
+	}
+	return a
 }
 
 func (a *Adapter) Platform() im.Platform {
@@ -319,6 +355,8 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 	if robotCode == "" {
 		robotCode = a.clientID
 	}
+	logger.Debugf(ctx, "[DingTalk] download file request: msgID=%s name=%s downloadCode=%s robotCode=%s",
+		msg.MessageID, msg.FileName, downloadCode, robotCode)
 
 	respBody, err := a.dingtalkAPI(ctx, http.MethodPost, "/v1.0/robot/messageFiles/download", map[string]string{
 		"robotCode":    robotCode,
@@ -331,23 +369,57 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 	if err != nil {
 		return nil, "", err
 	}
-	if err := validateFileDownloadURL(downloadURL); err != nil {
-		return nil, "", fmt.Errorf("download url rejected: %w", err)
+	logger.Debugf(ctx, "[DingTalk] messageFiles/download returned url: %s", downloadURL)
+
+	client := httpClient
+	clientKind := "shared"
+	rewritten := false
+	if a.downloadRewrite != nil {
+		if newURL, prefix, ok := a.downloadRewrite.apply(downloadURL); ok {
+			// The target host is operator-configured (same trust level as
+			// an SSRF_WHITELIST entry): skip SSRF validation and fetch via
+			// the trusted download client.
+			logger.Infof(ctx, "[DingTalk] download url rewritten: %s -> %s", prefix, a.downloadRewrite.to)
+			downloadURL = newURL
+			logger.Debugf(ctx, "[DingTalk] rewritten download url: %s", downloadURL)
+			client = a.trustedDownloadClient
+			clientKind = "trusted"
+			rewritten = true
+		} else {
+			logger.Debugf(ctx, "[DingTalk] download url matched no rewrite prefix: %s", downloadURL)
+		}
+	}
+	if !rewritten {
+		if err := validateFileDownloadURL(downloadURL); err != nil {
+			logger.Warnf(ctx, "[DingTalk] download url rejected: %s: %v", downloadURL, err)
+			return nil, "", fmt.Errorf("download url rejected: %w", err)
+		}
+		if a.downloadSkipTLSVerify {
+			client = a.skipVerifyDownloadClient
+			clientKind = "skip-verify"
+		}
 	}
 
+	logger.Debugf(ctx, "[DingTalk] fetching file via %s client: %s", clientKind, downloadURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("create download request: %w", err)
 	}
-	resp, err := httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("download file: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		logger.Warnf(ctx, "[DingTalk] download returned %d: %s", resp.StatusCode, logSnippet(string(body), 200))
 		return nil, "", fmt.Errorf("download file returned %d: %s", resp.StatusCode, string(body))
 	}
+	size := "unknown"
+	if resp.ContentLength >= 0 {
+		size = strconv.FormatInt(resp.ContentLength, 10)
+	}
+	logger.Infof(ctx, "[DingTalk] file download ok: %s (content-length: %s)", msg.FileName, size)
 	return resp.Body, msg.FileName, nil
 }
 
