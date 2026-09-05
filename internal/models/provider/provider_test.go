@@ -55,6 +55,17 @@ func TestDetectProvider(t *testing.T) {
 		{"http://localhost:11434/v1", ProviderGeneric},
 		{"https://integrate.api.nvidia.com/v1", ProviderNvidia},
 		{"https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking", ProviderNvidia},
+		// 主机名大小写不敏感（RFC 4343）：带大写的 BaseURL 必须识别成同一个服务商，
+		// 否则会落到 ProviderGeneric 并用兼容 OpenAI 的口径去解析别家的响应。
+		{"https://API.OPENAI.COM/v1", ProviderOpenAI},
+		{"https://Api.OpenAI.com/v1", ProviderOpenAI},
+		{"HTTPS://API.DEEPSEEK.COM/v1", ProviderDeepSeek},
+		{"https://DashScope.aliyuncs.com/compatible-mode/v1", ProviderAliyun},
+		{"https://Open.BigModel.cn/api/paas/v4", ProviderZhipu},
+		{"https://LiteLLM.example.com/v1", ProviderLiteLLM},
+		{"https://API.HUNYUAN.CLOUD.TENCENT.COM/v1", ProviderHunyuan},
+		// 大写的自定义域名仍然应该是 Generic，不能被误判成某个已知服务商。
+		{"https://CUSTOM-ENDPOINT.EXAMPLE.COM/v1", ProviderGeneric},
 	}
 
 	for _, tt := range tests {
