@@ -6745,6 +6745,7 @@ export default {
     }
   },
   menu: {
+    sessionInProgress: '대화 진행 중',
     knowledgeBase: '지식베이스',
     agents: '에이전트',
     organizations: '공유 공간',

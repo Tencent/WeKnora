@@ -1,5 +1,6 @@
 export default {
   menu: {
+    sessionInProgress: 'Conversation in progress',
     knowledgeBase: 'Knowledge Base',
     agents: 'Agents',
     organizations: 'Shared Spaces',

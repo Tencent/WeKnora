@@ -1,84 +1,39 @@
 <template>
-  <div
-    :class="[
-      'submenu_item',
-      !batchMode && activePath === item.path ? 'submenu_item_active' : '',
-      batchMode && selectedIds.includes(item.id) ? 'submenu_item_selected' : '',
-      batchMode ? 'submenu_item_batch' : '',
-    ]"
-    @mouseenter="emit('hover-in')"
-    @mouseleave="emit('hover-out')"
-    @click="batchMode ? emit('toggle-select') : emit('navigate')"
-  >
-    <t-checkbox
-      v-if="batchMode"
-      class="batch-checkbox"
-      :checked="selectedIds.includes(item.id)"
-      @click.stop
-      @change="emit('toggle-select')"
-    />
-    <form
-      v-if="titleEditing"
-      class="session-title-edit"
-      @submit.prevent="submitTitleEdit"
-      @click.stop
-    >
-      <input
-        ref="titleInputRef"
-        v-model="titleDraft"
-        class="session-title-edit__input"
-        :maxlength="SESSION_TITLE_MAX_LENGTH"
-        @keydown.esc.prevent="cancelTitleEdit"
-        @blur="submitTitleEdit"
-      />
+  <div :class="[
+    'submenu_item',
+    !batchMode && activePath === item.path ? 'submenu_item_active' : '',
+    batchMode && selectedIds.includes(item.id) ? 'submenu_item_selected' : '',
+    batchMode ? 'submenu_item_batch' : '',
+  ]" @mouseenter="emit('hover-in')" @mouseleave="emit('hover-out')"
+    @click="batchMode ? emit('toggle-select') : emit('navigate')">
+    <t-checkbox v-if="batchMode" class="batch-checkbox" :checked="selectedIds.includes(item.id)" @click.stop
+      @change="emit('toggle-select')" />
+    <form v-if="titleEditing" class="session-title-edit" @submit.prevent="submitTitleEdit" @click.stop>
+      <input ref="titleInputRef" v-model="titleDraft" class="session-title-edit__input"
+        :maxlength="SESSION_TITLE_MAX_LENGTH" @keydown.esc.prevent="cancelTitleEdit" @blur="submitTitleEdit" />
     </form>
     <span v-else class="submenu_title" :class="batchMode ? 'submenu_title--batch' : ''" :title="item.title">
       <t-icon v-if="item.is_pinned" name="pin" class="submenu_pin_icon" />
       <span class="submenu_title-text">{{ item.title }}</span>
-      <span
-        v-if="apiOwnerTag"
-        class="session-owner-tag"
-        :class="`session-owner-tag--${apiOwnerTag.kind}`"
-        :title="apiOwnerTag.full"
-      >{{ apiOwnerTag.label }}</span>
+      <span v-if="apiOwnerTag" class="session-owner-tag" :class="`session-owner-tag--${apiOwnerTag.kind}`"
+        :title="apiOwnerTag.full">{{ apiOwnerTag.label }}</span>
     </span>
+    <span v-if="running" class="session-running-indicator" role="status" :aria-label="t('menu.sessionInProgress')"
+      :title="t('menu.sessionInProgress')"><span class="session-running-indicator__spinner" aria-hidden="true" /></span>
     <div v-if="!batchMode" class="session-row-menu-wrap" @click.stop>
-      <t-popup
-        v-model:visible="menuOpen"
-        :overlay-class-name="menuOverlayClass"
-        trigger="click"
-        destroy-on-close
-        placement="bottom-right"
-        @visible-change="onMenuVisibleChange"
-      >
-        <button
-          type="button"
-          class="menu-more-wrap"
-          aria-haspopup="menu"
-          :aria-expanded="menuOpen"
-          @click.stop
-        >
+      <t-popup v-model:visible="menuOpen" :overlay-class-name="menuOverlayClass" trigger="click" destroy-on-close
+        placement="bottom-right" @visible-change="onMenuVisibleChange">
+        <button type="button" class="menu-more-wrap" aria-haspopup="menu" :aria-expanded="menuOpen" @click.stop>
           <t-icon name="ellipsis" class="menu-more" />
         </button>
         <template #content>
           <div class="session-action-menu" @click.stop>
             <template v-if="menuMode === 'menu'">
               <template v-for="(option, index) in menuOptions" :key="option.value">
-                <div
-                  v-if="shouldShowDividerBefore(option.value, index)"
-                  class="session-action-menu__divider"
-                />
-                <button
-                  type="button"
-                  class="session-action-menu__item"
-                  :class="{ 'is-danger': option.theme === 'error' }"
-                  @click="handleMenuClick(option)"
-                >
-                  <component
-                    :is="option.prefixIcon"
-                    v-if="option.prefixIcon"
-                    class="session-action-menu__icon"
-                  />
+                <div v-if="shouldShowDividerBefore(option.value, index)" class="session-action-menu__divider" />
+                <button type="button" class="session-action-menu__item"
+                  :class="{ 'is-danger': option.theme === 'error' }" @click="handleMenuClick(option)">
+                  <component :is="option.prefixIcon" v-if="option.prefixIcon" class="session-action-menu__icon" />
                   <span>{{ option.content }}</span>
                 </button>
               </template>
@@ -95,11 +50,7 @@
                 <button type="button" class="session-action-confirm__btn" @click="backToMenu">
                   {{ t('common.cancel') }}
                 </button>
-                <button
-                  type="button"
-                  class="session-action-confirm__btn is-danger"
-                  @click="confirmDangerAction"
-                >
+                <button type="button" class="session-action-confirm__btn is-danger" @click="confirmDangerAction">
                   {{ menuMode === 'clear' ? t('common.clear') : t('common.delete') }}
                 </button>
               </div>
@@ -131,6 +82,7 @@ const props = defineProps<{
   activePath: string
   selectedIds: string[]
   menuOptions: SessionMenuOption[]
+  running?: boolean
   /** 渠道文件夹下的会话（样式与聊天区会话共用文案列对齐） */
   nested?: boolean
 }>()
@@ -251,6 +203,40 @@ const confirmDangerAction = (): void => {
 <style scoped lang="less">
 .submenu_item {
   position: relative;
+}
+
+.session-running-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  color: var(--td-brand-color);
+}
+
+.session-running-indicator__spinner {
+  display: block;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--td-component-stroke);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: session-running-spin 0.8s linear infinite;
+}
+
+@keyframes session-running-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-running-indicator__spinner {
+    animation: none;
+  }
 }
 
 .session-row-menu-wrap {
