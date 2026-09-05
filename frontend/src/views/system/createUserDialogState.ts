@@ -95,3 +95,14 @@ export function captureLockedEscape(
   event.stopImmediatePropagation()
   return true
 }
+
+export function formatCreateUserCredentials(
+  reveal: CreateUserReveal,
+  labels: { username: string; email: string; password: string },
+): string {
+  return [
+    `${labels.username}: ${reveal.username}`,
+    `${labels.email}: ${reveal.email}`,
+    `${labels.password}: ${reveal.generatedPassword}`,
+  ].join('\n')
+}

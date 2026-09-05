@@ -4108,8 +4108,8 @@ export default {
           usernameLabel: 'Username',
           emailLabel: 'Email',
           passwordLabel: 'Generated password',
-          copyBtn: 'Copy password',
-          copySuccess: 'Password copied to clipboard',
+          copyBtn: 'Copy account details',
+          copySuccess: 'Account details copied to clipboard',
           acknowledgeBtn: 'I have saved the password'
         }
       },

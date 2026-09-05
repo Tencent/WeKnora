@@ -2805,8 +2805,8 @@ export default {
           usernameLabel: 'Имя пользователя',
           emailLabel: 'Email',
           passwordLabel: 'Сгенерированный пароль',
-          copyBtn: 'Скопировать пароль',
-          copySuccess: 'Пароль скопирован в буфер обмена',
+          copyBtn: 'Скопировать данные аккаунта',
+          copySuccess: 'Данные аккаунта скопированы в буфер обмена',
           acknowledgeBtn: 'Я сохранил пароль'
         }
       },

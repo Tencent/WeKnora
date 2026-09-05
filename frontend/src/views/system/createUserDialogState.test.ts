@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   applyCreateUserResponse,
   captureLockedEscape,
+  formatCreateUserCredentials,
   resolveCreateUserView,
   shouldAcceptCreateUserSubmit,
   type CreateUserReveal,
@@ -99,4 +100,12 @@ test('locked visible dialog captures Escape before Settings can unmount', () => 
   assert.equal(captureLockedEscape(true, false, event), false)
   assert.equal(stopped, false)
   assert.equal(captureLockedEscape(false, true, { key: 'Escape', stopImmediatePropagation() { stopped = true } }), false)
+})
+
+test('formats username, email and password for a single clipboard paste', () => {
+  const text = formatCreateUserCredentials(
+    { username: 'alice', email: 'alice@example.com', generatedPassword: 'OnceOnly9' },
+    { username: 'Username', email: 'Email', password: 'Password' },
+  )
+  assert.equal(text, 'Username: alice\nEmail: alice@example.com\nPassword: OnceOnly9')
 })

@@ -1,96 +1,75 @@
-/* Shared visual shell for the SystemAdmin action dialogs. The dialogs are
-   teleported to body, so this must be global CSS (imported from an
-   unscoped SFC style block), not scoped styles. */
+/* Shared in-place popup chrome for SystemAdmin actions (create user /
+   reset password). Matches TenantMembers invite / UserProfile password
+   popups: t-popup teleports to body, so this must be global CSS. */
 
-.password-reset-dialog,
-.create-user-dialog {
-  padding: 0;
-  overflow: hidden;
-  border-color: var(--td-component-stroke);
-  border-radius: 12px;
+.system-admin-action-popup-overlay {
+  z-index: 3050 !important;
+
+  .t-popup__content {
+    padding: 14px 16px !important;
+    min-width: 300px;
+    max-width: min(360px, calc(100vw - 24px));
+    max-height: min(480px, calc(100vh - 96px));
+    overflow-y: auto;
+    border-radius: 12px !important;
+    background: var(--td-bg-color-container) !important;
+    border: 0.5px solid var(--td-component-stroke) !important;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.03),
+      0 2px 4px rgba(0, 0, 0, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.1) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  }
+}
+
+:root[theme-mode='dark'] .system-admin-action-popup-overlay .t-popup__content {
+  background: rgba(36, 36, 36, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
   box-shadow:
-    0 12px 32px rgba(15, 23, 42, 0.12),
-    0 2px 8px rgba(15, 23, 42, 0.08);
+    0 0 0 0.5px rgba(255, 255, 255, 0.05),
+    0 2px 4px rgba(0, 0, 0, 0.12),
+    0 8px 32px rgba(0, 0, 0, 0.28) !important;
+}
 
-  .t-dialog__header {
-    min-height: 64px;
-    padding: 0 24px;
-    font-size: 18px;
-    line-height: 26px;
-    border-bottom: 1px solid var(--td-component-stroke);
-  }
+.system-admin-action-popup-anchor {
+  display: inline-flex;
+  max-width: 100%;
+}
 
-  .t-dialog__close {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    justify-content: center;
-    border-radius: 6px;
-  }
+.system-admin-action-popup-inner {
+  max-width: 100%;
+}
 
-  .t-dialog__body {
-    padding: 20px 24px 4px;
-  }
+.system-admin-action-popup-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--td-text-color-primary);
+}
 
-  .t-dialog__footer {
-    box-sizing: border-box;
-    padding: 16px 24px 20px;
-    border-top: 1px solid var(--td-component-stroke);
+.system-admin-action-popup-hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
+}
 
-    .t-button {
-      min-width: 88px;
-      border-radius: 6px;
-    }
-  }
+.system-admin-action-popup-form {
+  .t-form__item {
+    margin-bottom: 14px;
 
-  .password-reset-warning,
-  .create-user-warning {
-    padding: 12px 14px;
-    margin-bottom: 20px;
-    border-radius: 8px;
-
-    .t-alert__content {
-      font-size: 13px;
-      line-height: 20px;
-    }
-  }
-
-  .password-reset-form,
-  .create-user-form {
-    .t-form__item {
-      margin-bottom: 16px;
-    }
-
-    .t-form__label--top {
-      min-height: 28px;
-      padding: 0;
-      font-size: 14px;
-      line-height: 22px;
-    }
-
-    .t-input {
-      border-radius: 6px;
+    &:last-child {
+      margin-bottom: 4px;
     }
   }
 }
 
-@media (max-width: 480px) {
-  .password-reset-dialog,
-  .create-user-dialog {
-    width: calc(100vw - 24px) !important;
-
-    .t-dialog__header {
-      min-height: 56px;
-      padding: 0 20px;
-      font-size: 17px;
-    }
-
-    .t-dialog__body {
-      padding: 16px 20px 4px;
-    }
-
-    .t-dialog__footer {
-      padding: 14px 20px 18px;
-    }
-  }
+.system-admin-action-popup-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
 }

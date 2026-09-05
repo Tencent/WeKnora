@@ -2805,8 +2805,8 @@ export default {
           usernameLabel: '사용자 이름',
           emailLabel: '이메일',
           passwordLabel: '생성된 비밀번호',
-          copyBtn: '비밀번호 복사',
-          copySuccess: '비밀번호가 클립보드에 복사되었습니다',
+          copyBtn: '계정 정보 복사',
+          copySuccess: '계정 정보가 클립보드에 복사되었습니다',
           acknowledgeBtn: '비밀번호를 저장했습니다'
         }
       },

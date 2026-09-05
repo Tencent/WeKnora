@@ -1,150 +1,111 @@
 <!--
-  CreateUserDialog: SystemAdmin "Create user" dialog (Access settings row).
+  CreateUserDialog: SystemAdmin "Create user" in-place popup (Access row).
 
-  Owns the whole create-user flow: form (username + email + auto-generate
-  toggle revealing new/confirm password fields) and, when the server mints a
-  one-time password, a reveal view that must be acknowledged before the
-  dialog can close (overlay click, Esc, and the close button are disabled
-  via `locked`). Esc is also captured on window so the parent Settings
-  modal cannot unmount this dialog and discard the password. The idempotent
-  retry path closes with its own success toast instead.
+  Anchors to the row action via the default slot, matching TenantMembers
+  invite and UserProfile password popups. Form (username + email +
+  auto-generate toggle) and, when the server mints a one-time password, a
+  reveal view that must be acknowledged before the popup can close. Esc is
+  captured on window so the parent Settings modal cannot unmount this and
+  discard the password. The idempotent retry path closes with its own
+  success toast instead.
 
   Visibility is owned by the parent via v-model:visible. Every user-visible
   message is also emitted via `announced` so the parent's sr-only live
-  region can relay it. The shared teleported-dialog shell comes from the
-  systemAdminDialog.less import in SystemSettings.vue.
+  region can relay it. Shared popup chrome comes from systemAdminDialog.less
+  (imported by SystemSettings.vue).
 -->
 <template>
-  <t-dialog
-    :visible="visible"
-    :header="createUserSuccess
-      ? t('system.globalSettings.createUser.generated.successTitle')
-      : t('system.globalSettings.createUser.dialogTitle')"
-    width="440px"
-    placement="center"
-    dialog-class-name="create-user-dialog"
-    :footer="!createUserSuccess"
-    :confirm-btn="{
-      content: t('system.globalSettings.createUser.confirmBtn'),
-      theme: 'primary',
-      loading: submitting,
-    }"
-    :cancel-btn="{
-      content: t('system.globalSettings.confirm.cancelBtn'),
-      variant: 'outline',
-    }"
-    :close-on-overlay-click="!locked"
-    :close-btn="!locked"
-    :close-on-esc-keydown="!locked"
-    @update:visible="onVisibleChange"
-    @esc-keydown="onEscKeydown"
-    @close="resetFormFields"
-    @closed="onClosed"
-    @confirm="submit"
-  >
-    <template v-if="createUserSuccess">
-      <t-alert
-        theme="success"
-        :message="t('system.globalSettings.createUser.generated.successBody')"
-        class="create-user-warning"
-      />
-      <div class="create-user-reveal">
-        <div class="create-user-reveal-row">
-          <span class="create-user-reveal-label">
-            {{ t('system.globalSettings.createUser.generated.usernameLabel') }}
-          </span>
-          <span class="create-user-reveal-value">{{ createUserSuccess.username }}</span>
+  <t-popup :visible="visible" trigger="click" placement="left-top" :destroy-on-close="!locked"
+    overlay-class-name="system-admin-action-popup-overlay" @visible-change="onVisibleChange">
+    <span class="system-admin-action-popup-anchor">
+      <slot />
+    </span>
+    <template #content>
+      <div class="system-admin-action-popup-inner" @click.stop>
+        <div class="system-admin-action-popup-title">
+          {{ createUserSuccess
+            ? t('system.globalSettings.createUser.generated.successTitle')
+            : t('system.globalSettings.createUser.dialogTitle') }}
         </div>
-        <div class="create-user-reveal-row">
-          <span class="create-user-reveal-label">
-            {{ t('system.globalSettings.createUser.generated.emailLabel') }}
-          </span>
-          <span class="create-user-reveal-value">{{ createUserSuccess.email }}</span>
-        </div>
-        <div class="create-user-reveal-row create-user-reveal-row--password">
-          <span class="create-user-reveal-label">
-            {{ t('system.globalSettings.createUser.generated.passwordLabel') }}
-          </span>
-          <div class="create-user-reveal-password">
-            <pre class="create-user-reveal-password-value">{{ createUserSuccess.generatedPassword }}</pre>
-            <t-button theme="primary" variant="outline" @click="copyGeneratedPassword">
+        <p class="system-admin-action-popup-hint">
+          {{ createUserSuccess
+            ? t('system.globalSettings.createUser.generated.successBody')
+            : t('system.globalSettings.createUser.warning') }}
+        </p>
+        <template v-if="createUserSuccess">
+          <div class="create-user-reveal">
+            <div class="create-user-reveal-item">
+              <span class="create-user-reveal-label">
+                {{ t('system.globalSettings.createUser.generated.usernameLabel') }}
+              </span>
+              <span class="create-user-reveal-value">{{ createUserSuccess.username }}</span>
+            </div>
+            <div class="create-user-reveal-item">
+              <span class="create-user-reveal-label">
+                {{ t('system.globalSettings.createUser.generated.emailLabel') }}
+              </span>
+              <span class="create-user-reveal-value">{{ createUserSuccess.email }}</span>
+            </div>
+            <div class="create-user-reveal-item">
+              <span class="create-user-reveal-label">
+                {{ t('system.globalSettings.createUser.generated.passwordLabel') }}
+              </span>
+              <pre
+                class="create-user-reveal-value create-user-reveal-value--mono">{{ createUserSuccess.generatedPassword }}</pre>
+            </div>
+          </div>
+          <div class="system-admin-action-popup-footer">
+            <t-button theme="primary" variant="outline" @click="copyAccountDetails">
               {{ t('system.globalSettings.createUser.generated.copyBtn') }}
             </t-button>
+            <t-button theme="primary" @click="acknowledge">
+              {{ t('system.globalSettings.createUser.generated.acknowledgeBtn') }}
+            </t-button>
           </div>
-        </div>
-      </div>
-      <div class="create-user-acknowledge">
-        <t-button theme="primary" block @click="acknowledge">
-          {{ t('system.globalSettings.createUser.generated.acknowledgeBtn') }}
-        </t-button>
-      </div>
-    </template>
-    <template v-else>
-      <t-alert
-        theme="warning"
-        :message="t('system.globalSettings.createUser.warning')"
-        class="create-user-warning"
-      />
-      <t-form
-        ref="formRef"
-        :data="form"
-        :rules="rules"
-        label-align="top"
-        class="create-user-form"
-      >
-        <t-form-item :label="t('system.globalSettings.createUser.usernameLabel')" name="username">
-          <t-input
-            v-model="form.username"
-            type="text"
-            clearable
-            autocomplete="off"
-            :disabled="submitting"
-            :placeholder="t('system.globalSettings.createUser.usernamePlaceholder')"
-          />
-        </t-form-item>
-        <t-form-item :label="t('system.globalSettings.createUser.emailLabel')" name="email">
-          <t-input
-            v-model="form.email"
-            type="text"
-            clearable
-            autocomplete="off"
-            :disabled="submitting"
-            :placeholder="t('system.globalSettings.createUser.emailPlaceholder')"
-          />
-        </t-form-item>
-        <t-form-item name="autoGenerate">
-          <t-checkbox v-model="form.autoGenerate" :disabled="submitting">
-            {{ t('system.globalSettings.createUser.autoGenerateLabel') }}
-          </t-checkbox>
-        </t-form-item>
-        <template v-if="!form.autoGenerate">
-          <t-form-item :label="t('system.globalSettings.createUser.newPasswordLabel')" name="newPassword">
-            <t-input
-              v-model="form.newPassword"
-              type="password"
-              autocomplete="new-password"
-              :disabled="submitting"
-              :placeholder="t('system.globalSettings.createUser.newPasswordPlaceholder')"
-            >
-              <template #prefix-icon><t-icon name="lock-on" /></template>
-            </t-input>
-          </t-form-item>
-          <t-form-item :label="t('system.globalSettings.createUser.confirmPasswordLabel')" name="confirmPassword">
-            <t-input
-              v-model="form.confirmPassword"
-              type="password"
-              autocomplete="new-password"
-              :disabled="submitting"
-              :placeholder="t('system.globalSettings.createUser.confirmPasswordPlaceholder')"
-              @enter="submit"
-            >
-              <template #prefix-icon><t-icon name="lock-on" /></template>
-            </t-input>
-          </t-form-item>
         </template>
-      </t-form>
+        <template v-else>
+          <t-form ref="formRef" :data="form" :rules="rules" label-align="top" class="system-admin-action-popup-form">
+            <t-form-item :label="t('system.globalSettings.createUser.usernameLabel')" name="username">
+              <t-input v-model="form.username" type="text" clearable autocomplete="off" :disabled="submitting"
+                :placeholder="t('system.globalSettings.createUser.usernamePlaceholder')" />
+            </t-form-item>
+            <t-form-item :label="t('system.globalSettings.createUser.emailLabel')" name="email">
+              <t-input v-model="form.email" type="text" clearable autocomplete="off" :disabled="submitting"
+                :placeholder="t('system.globalSettings.createUser.emailPlaceholder')" />
+            </t-form-item>
+            <t-form-item name="autoGenerate">
+              <t-checkbox v-model="form.autoGenerate" :disabled="submitting">
+                {{ t('system.globalSettings.createUser.autoGenerateLabel') }}
+              </t-checkbox>
+            </t-form-item>
+            <template v-if="!form.autoGenerate">
+              <t-form-item :label="t('system.globalSettings.createUser.newPasswordLabel')" name="newPassword">
+                <t-input v-model="form.newPassword" type="password" autocomplete="new-password" :disabled="submitting"
+                  :placeholder="t('system.globalSettings.createUser.newPasswordPlaceholder')">
+                  <template #prefix-icon><t-icon name="lock-on" /></template>
+                </t-input>
+              </t-form-item>
+              <t-form-item :label="t('system.globalSettings.createUser.confirmPasswordLabel')" name="confirmPassword">
+                <t-input v-model="form.confirmPassword" type="password" autocomplete="new-password"
+                  :disabled="submitting" :placeholder="t('system.globalSettings.createUser.confirmPasswordPlaceholder')"
+                  @enter="submit">
+                  <template #prefix-icon><t-icon name="lock-on" /></template>
+                </t-input>
+              </t-form-item>
+            </template>
+          </t-form>
+          <div class="system-admin-action-popup-footer">
+            <t-button variant="outline" :disabled="submitting" @click="emit('update:visible', false)">
+              {{ t('system.globalSettings.confirm.cancelBtn') }}
+            </t-button>
+            <t-button theme="primary" :loading="submitting" @click="submit">
+              {{ t('system.globalSettings.createUser.confirmBtn') }}
+            </t-button>
+          </div>
+        </template>
+      </div>
     </template>
-  </t-dialog>
+  </t-popup>
 </template>
 
 <script setup lang="ts">
@@ -159,6 +120,7 @@ import { newPasswordRules } from '@/utils/passwordPolicy'
 import {
   applyCreateUserResponse,
   captureLockedEscape,
+  formatCreateUserCredentials,
   resolveCreateUserView,
   shouldAcceptCreateUserSubmit,
   type CreateUserReveal,
@@ -173,6 +135,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const submitting = ref(false)
+const dismissing = ref(false)
 const formRef = ref<FormInstanceFunctions>()
 const form = reactive({
   username: '',
@@ -181,9 +144,6 @@ const form = reactive({
   newPassword: '',
   confirmPassword: '',
 })
-// Non-null switches the dialog to the reveal view. Cleared on the next
-// open and after the close animation so the password stays on screen
-// while the dialog is leaving.
 const createUserSuccess = ref<CreateUserReveal | null>(null)
 const locked = computed(() => submitting.value || createUserSuccess.value !== null)
 const complexPasswordEnabled = ref(false)
@@ -196,8 +156,6 @@ const loadAuthConfig = async () => {
   }
 }
 
-// autoGenerate hides the password fields (v-if), so they are never
-// registered with the form and need no skip-guard in their rules.
 const rules = computed<Record<string, FormRule[]>>(() => ({
   username: [
     { required: true, message: t('system.globalSettings.createUser.validation.usernameRequired'), trigger: 'blur' },
@@ -219,7 +177,13 @@ const rules = computed<Record<string, FormRule[]>>(() => ({
 }))
 
 watch(() => props.visible, async (visible) => {
-  if (!visible) return
+  if (!visible) {
+    createUserSuccess.value = null
+    dismissing.value = false
+    resetFormFields()
+    return
+  }
+  dismissing.value = false
   createUserSuccess.value = null
   resetFormFields()
   await loadAuthConfig()
@@ -228,15 +192,12 @@ watch(() => props.visible, async (visible) => {
 })
 
 function onVisibleChange(visible: boolean) {
+  if (!visible && locked.value && !dismissing.value) return
   emit('update:visible', visible)
 }
 
-function onEscKeydown(ctx: { e: KeyboardEvent }) {
-  captureLockedEscape(props.visible, locked.value, ctx.e)
-}
-
 function onWindowEscCapture(e: KeyboardEvent) {
-  captureLockedEscape(props.visible, locked.value, e)
+  captureLockedEscape(props.visible, locked.value && !dismissing.value, e)
 }
 
 onMounted(() => {
@@ -254,12 +215,6 @@ function resetFormFields() {
   form.newPassword = ''
   form.confirmPassword = ''
   formRef.value?.clearValidate?.()
-}
-
-function onClosed() {
-  if (!props.visible) {
-    createUserSuccess.value = null
-  }
 }
 
 function announce(msg: string, kind: 'success' | 'error' = 'success') {
@@ -303,6 +258,7 @@ async function submit() {
       announce(t('system.globalSettings.createUser.missingPassword'), 'error')
     }
     if (next.close) {
+      dismissing.value = true
       emit('update:visible', false)
     }
   } catch (err: any) {
@@ -313,87 +269,71 @@ async function submit() {
   }
 }
 
-async function copyGeneratedPassword() {
+async function copyAccountDetails() {
   if (!createUserSuccess.value) return
   await copyWithToast(
-    createUserSuccess.value.generatedPassword,
+    formatCreateUserCredentials(createUserSuccess.value, {
+      username: t('system.globalSettings.createUser.generated.usernameLabel'),
+      email: t('system.globalSettings.createUser.generated.emailLabel'),
+      password: t('system.globalSettings.createUser.generated.passwordLabel'),
+    }),
     'system.globalSettings.createUser.generated.copySuccess',
   )
 }
 
 function acknowledge() {
   if (!createUserSuccess.value) return
+  dismissing.value = true
   MessagePlugin.success(t('system.globalSettings.createUser.success'))
   emit('update:visible', false)
 }
 </script>
 
 <style lang="less">
-/*
- * Per-flow styles on top of the shared shell in systemAdminDialog.less
- * (imported by SystemSettings.vue).
- */
-.create-user-dialog {
-  .create-user-reveal {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    margin-bottom: 20px;
-  }
+@import './systemAdminDialog.less';
 
-  .create-user-reveal-row {
-    display: flex;
-    align-items: baseline;
-    gap: 12px;
+.create-user-reveal {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 2px 0 0;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  background: var(--td-bg-color-page);
+  overflow: hidden;
+}
 
-    &--password {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 6px;
-    }
-  }
+.create-user-reveal-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--td-component-stroke);
 
-  .create-user-reveal-label {
-    flex-shrink: 0;
-    min-width: 80px;
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
+  &:last-child {
+    border-bottom: none;
   }
+}
 
-  .create-user-reveal-value {
-    font-size: 14px;
-    color: var(--td-text-color-primary);
-    word-break: break-all;
-  }
+.create-user-reveal-label {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--td-text-color-secondary);
+}
 
-  .create-user-reveal-password {
-    display: flex;
-    gap: 8px;
-    align-items: stretch;
-  }
+.create-user-reveal-value {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--td-text-color-primary);
+  word-break: break-all;
+}
 
-  .create-user-reveal-password-value {
-    flex: 1;
-    margin: 0;
-    padding: 8px 12px;
-    font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-    font-size: 14px;
-    line-height: 22px;
-    color: var(--td-text-color-primary);
-    background: var(--td-bg-color-container-hover);
-    border: 1px solid var(--td-component-stroke);
-    border-radius: 6px;
-    word-break: break-all;
-    white-space: pre-wrap;
-    user-select: all;
-  }
-
-  .create-user-acknowledge {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 16px 0;
-    border-top: 1px solid var(--td-component-stroke);
-  }
+.create-user-reveal-value--mono {
+  margin: 0;
+  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  user-select: all;
 }
 </style>

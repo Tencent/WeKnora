@@ -2807,8 +2807,8 @@ export default {
           usernameLabel: '用户名',
           emailLabel: '邮箱',
           passwordLabel: '生成的密码',
-          copyBtn: '复制密码',
-          copySuccess: '密码已复制到剪贴板',
+          copyBtn: '复制账号信息',
+          copySuccess: '账号信息已复制到剪贴板',
           acknowledgeBtn: '我已保存密码'
         }
       },
