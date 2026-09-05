@@ -6745,6 +6745,7 @@ export default {
     }
   },
   menu: {
+    sessionInProgress: 'Диалог выполняется',
     knowledgeBase: 'База знаний',
     agents: 'Агенты',
     organizations: 'Общие пространства',
