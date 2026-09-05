@@ -398,12 +398,18 @@ export interface CreateSystemUserResponse {
    * be fetched again.
    */
   generated_password?: string
+  /**
+   * True on the 200 retry when the identity already existed. The shared
+   * axios interceptor drops HTTP status, so callers must read this flag
+   * instead of the status code.
+   */
+  idempotent?: boolean
 }
 
 /**
  * Provision a new local user account (SystemAdmin only).
  * Backend returns the unwrapped CreateSystemUserResponse body.
- * Responses 201 on success.
+ * 201 on create, 200 with `idempotent: true` when the identity existed.
  */
 export async function createSystemUser(req: CreateSystemUserRequest): Promise<CreateSystemUserResponse> {
   const response = await post('/api/v1/system/admin/users/create', req)

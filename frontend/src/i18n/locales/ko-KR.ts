@@ -2784,8 +2784,8 @@ export default {
         confirmPasswordPlaceholder: '새 비밀번호를 다시 입력',
         confirmBtn: '사용자 생성',
         success: '사용자가 생성되었습니다',
-        successSuppliedPassword: '제출 완료. 이미 존재하는 사용자라면 변경된 내용이 없습니다(비밀번호 포함).',
         successIdempotent: '이미 존재하는 사용자입니다. 변경 사항이 없습니다',
+        missingPassword: '사용자는 생성되었지만 생성된 비밀번호가 반환되지 않았습니다. 비밀번호를 재설정해 접근을 복구하세요.',
         failed: '사용자 생성 실패',
         validation: {
           usernameRequired: '사용자 이름을 입력하세요',
@@ -2805,8 +2805,8 @@ export default {
           usernameLabel: '사용자 이름',
           emailLabel: '이메일',
           passwordLabel: '생성된 비밀번호',
-          copyBtn: '비밀번호 복사',
-          copySuccess: '비밀번호가 클립보드에 복사되었습니다',
+          copyBtn: '계정 정보 복사',
+          copySuccess: '계정 정보가 클립보드에 복사되었습니다',
           acknowledgeBtn: '비밀번호를 저장했습니다'
         }
       },

@@ -4087,8 +4087,8 @@ export default {
         confirmPasswordPlaceholder: 'Enter the new password again',
         confirmBtn: 'Create user',
         success: 'User created',
-        successSuppliedPassword: 'Submitted. If this user already existed, no changes were made (including the password).',
         successIdempotent: 'User already existed; no changes made',
+        missingPassword: 'User was created but the generated password was not returned. Reset the password to recover access.',
         failed: 'Failed to create user',
         validation: {
           usernameRequired: 'Enter a username',
@@ -4108,8 +4108,8 @@ export default {
           usernameLabel: 'Username',
           emailLabel: 'Email',
           passwordLabel: 'Generated password',
-          copyBtn: 'Copy password',
-          copySuccess: 'Password copied to clipboard',
+          copyBtn: 'Copy account details',
+          copySuccess: 'Account details copied to clipboard',
           acknowledgeBtn: 'I have saved the password'
         }
       },
