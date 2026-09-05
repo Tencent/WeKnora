@@ -693,6 +693,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		// persisted without artifacts. Collect is a no-op when either the
 		// collector wasn't wired in, no sandbox is bound, or no files were
 		// produced — those cases must not disturb the completion path.
+		var previous types.MessageArtifacts
 		if h.artifactCollector != nil {
 			collectCtx := context.WithoutCancel(h.ctx)
 			artifacts, err := h.artifactCollector.CollectWithNotify(
@@ -722,7 +723,11 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 					len(artifacts), h.assistantMessageID, h.sessionID,
 				)
 			}
+			previous = h.artifactCollector.ReferencedHistory(collectCtx, h.sessionID,
+				h.assistantMessageID, h.assistantMessage.Content)
 		}
+		h.assistantMessage.Content = types.ClarifyArtifactVersions(h.assistantMessage.Content,
+			h.assistantMessage.Artifacts, previous, types.LanguageFromContextOrDefault(h.ctx))
 	}
 
 	// Fallback: if no answer events were streamed but we have a final answer,
@@ -769,6 +774,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	completeData := map[string]interface{}{
 		"total_steps":       data.TotalSteps,
 		"total_duration_ms": data.TotalDurationMs,
+		"final_content":     h.assistantMessage.Content,
 	}
 	// Attach the freshly-collected artifacts so the frontend can render the
 	// download button without waiting for a page refresh. We strip the

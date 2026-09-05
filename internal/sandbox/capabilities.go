@@ -66,9 +66,20 @@ type SessionFileStore interface {
 	// travel through shell_exec heredocs.
 	WriteSessionWorkspaceFile(ctx context.Context, sessionID, filePath string, content []byte) error
 
+	// WriteSessionWorkspaceFiles writes many workspace files after preparing
+	// the session layout once. Host-skill staging must use this instead of
+	// looping WriteSessionWorkspaceFile.
+	WriteSessionWorkspaceFiles(ctx context.Context, sessionID string, files []SessionWorkspaceFile) error
+
 	// RemoveSessionInputPath deletes a staged attachment. No-op when the
 	// session has no live sandbox.
 	RemoveSessionInputPath(ctx context.Context, sessionID, targetPath string) error
+}
+
+// SessionWorkspaceFile is one path/content pair for WriteSessionWorkspaceFiles.
+type SessionWorkspaceFile struct {
+	Path    string
+	Content []byte
 }
 
 // SessionCapabilityProvider is implemented by managers that MAY offer

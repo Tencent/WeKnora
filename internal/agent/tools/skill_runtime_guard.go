@@ -4,7 +4,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 )
 
@@ -33,7 +32,7 @@ func frozenSkillTreeGuidance(skillName string) string {
 		"Do not chown, chmod, ensurepip, or pip/npm install into it. " +
 		"On-demand extras (python-docx, python-pptx, …) go in the session overlay: " +
 		"`python3 -m pip install --target " + pkgDir + " <package>` " +
-		"(system python3, not the skill venv), then execute_skill_script(" + skillArg + "). " +
+		"(system python3, not the skill venv), then shell_exec(" + skillArg + "). " +
 		"Or ask the user to reinstall the skill so extras are baked into the image."
 }
 
@@ -52,27 +51,4 @@ func isFrozenSkillVenvFailure(stderr string) bool {
 		return true
 	}
 	return strings.Contains(lower, "permission denied") && strings.Contains(lower, ".venv")
-}
-
-func skillOnDemandInstallHint(skillName, scriptPath, stdout, stderr string) string {
-	installer := skills.IsOnDemandInstallerPath(scriptPath)
-	failedInstaller := installer &&
-		(isFrozenSkillVenvFailure(stderr) || strings.Contains(strings.ToLower(stdout+stderr), "安装失败") ||
-			strings.Contains(strings.ToLower(stdout+stderr), "install failed"))
-	if !failedInstaller && !isFrozenSkillVenvFailure(stderr) {
-		return ""
-	}
-	msg := "Hint: " + frozenSkillTreeGuidance(skillName)
-	if installer {
-		msg += " Skip this installer and run the skill's real script."
-	}
-	return msg
-}
-
-func skillMissingPackageHint(skillName, stderr string) string {
-	if !isMissingInterpreterModule(stderr) {
-		return ""
-	}
-	return "Hint: this skill's frozen venv does not have that package. " +
-		frozenSkillTreeGuidance(skillName)
 }

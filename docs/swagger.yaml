@@ -1012,7 +1012,7 @@ definitions:
       skills_selection_mode:
         description: |-
           ===== Skills Settings (only for smart-reasoning mode) =====
-          Skills selection mode: "all" = all preloaded skills, "selected" = specific skills, "none" = no skills
+          Skills selection mode: "all" = all installed skills, "selected" = specific skills, "none" = no skills
         type: string
       supported_file_types:
         description: |-

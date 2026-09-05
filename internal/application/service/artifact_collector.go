@@ -469,6 +469,36 @@ func (c *ArtifactCollector) bindArtifactResource(ctx context.Context, ref, messa
 	}
 }
 
+// ReferencedHistory returns only artifacts from this session explicitly named
+// in the answer. Bind these immutable versions to the new message as well, so
+// deleting their original message cannot invalidate a later reference.
+func (c *ArtifactCollector) ReferencedHistory(ctx context.Context, sessionID, messageID, content string) types.MessageArtifacts {
+	if c == nil || c.store == nil {
+		return nil
+	}
+	refs := make(map[string]bool)
+	for _, ref := range types.ScanResourceReferences(content) {
+		refs[ref] = true
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	previous, err := c.store.KnownArtifacts(ctx, sessionID)
+	if err != nil {
+		logger.Warnf(ctx, "Read referenced artifact history failed: %v", err)
+		return nil
+	}
+	var result types.MessageArtifacts
+	for _, artifact := range previous {
+		if refs[artifact.URL] {
+			result = append(result, artifact)
+			c.bindArtifactResource(ctx, artifact.URL, messageID)
+			delete(refs, artifact.URL)
+		}
+	}
+	return result
+}
+
 // artifactKey is the string form of the (source_path, mtime) tuple used to
 // de-duplicate artifacts across messages. mtime is normalised to UTC + RFC3339
 // nano so equality is stable across time-zone or precision differences

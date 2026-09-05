@@ -346,7 +346,8 @@ type Config struct {
 	// E2BSandboxTTL is the E2B-side idle timeout hint.
 	E2BSandboxTTL time.Duration
 
-	// E2BHTTPTimeout bounds each HTTP call to the E2B API.
+	// E2BHTTPTimeout bounds ordinary E2B HTTP calls, including response bodies.
+	// Command streams use their execution timeout instead.
 	E2BHTTPTimeout time.Duration
 }
 

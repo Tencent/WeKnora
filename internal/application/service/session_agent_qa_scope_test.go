@@ -126,5 +126,5 @@ func TestConfigureSkillsFromAgentDoesNotLoadHostPreloadedDir(t *testing.T) {
 	assert.True(t, cfg.SkillsEnabled)
 	assert.Equal(t, "cfg-1", cfg.SandboxConfigID)
 	assert.Empty(t, cfg.SkillDirs,
-		"the host skills/preloaded tree is not what the sandbox image carries")
+		"a host skill directory is not what the sandbox image carries")
 }

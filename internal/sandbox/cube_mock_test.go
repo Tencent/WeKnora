@@ -579,14 +579,15 @@ func containsPath(urlPath, needle string) bool {
 func testConfig(t *testing.T, mock *cubeMockServer) *Config {
 	t.Helper()
 	return &Config{
-		Type:              SandboxTypeCube,
-		CubeAPIURL:        mock.URL(),
-		CubeAPIKey:        "",
-		CubeProxyURL:      mock.URL(),
-		CubeTemplate:      "template-a",
-		CubeSandboxDomain: "cube.app",
-		CubeSandboxTTL:    30 * time.Minute,
-		CubeHTTPTimeout:   30 * time.Second,
-		DefaultTimeout:    60 * time.Second,
+		Type:                  SandboxTypeCube,
+		AllowPrivateEndpoints: true,
+		CubeAPIURL:            mock.URL(),
+		CubeAPIKey:            "",
+		CubeProxyURL:          mock.URL(),
+		CubeTemplate:          "template-a",
+		CubeSandboxDomain:     "cube.app",
+		CubeSandboxTTL:        30 * time.Minute,
+		CubeHTTPTimeout:       30 * time.Second,
+		DefaultTimeout:        60 * time.Second,
 	}
 }

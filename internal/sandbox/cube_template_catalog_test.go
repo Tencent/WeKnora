@@ -19,11 +19,12 @@ func newCubeTemplateClient(t *testing.T, handler http.HandlerFunc) *CubeRemoteCl
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	client, err := NewCubeRemoteClient(&Config{
-		Type:              SandboxTypeCube,
-		CubeAPIURL:        server.URL,
-		CubeProxyURL:      server.URL,
-		CubeSandboxDomain: "cube.app",
-		CubeHTTPTimeout:   5 * time.Second,
+		Type:                  SandboxTypeCube,
+		AllowPrivateEndpoints: true,
+		CubeAPIURL:            server.URL,
+		CubeProxyURL:          server.URL,
+		CubeSandboxDomain:     "cube.app",
+		CubeHTTPTimeout:       5 * time.Second,
 	})
 	require.NoError(t, err)
 	return client

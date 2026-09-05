@@ -119,6 +119,23 @@ func TestBuildAssistantHistoryMessages_StripsThinkBlocks(t *testing.T) {
 	}
 }
 
+func TestAssistantHistoryScopesArtifactVersionsToHistoricalTurn(t *testing.T) {
+	for _, labels := range [][2]string{
+		{"本轮生成的文件", "该历史消息生成的文件"},
+		{"File generated this turn", "File generated in that historical turn"},
+	} {
+		body := "Done.\n\n" + labels[0] + ": ![deck](resource://AbCdEfGhIjKlMnOpQrStUv)"
+		message := &types.Message{Role: "assistant", Content: body}
+		history := buildAssistantHistoryMessages(message)
+		require.Len(t, history, 1)
+		require.Contains(t, history[0].Content, labels[1]+": ![deck](resource://AbCdEfGhIjKlMnOpQrStUv)")
+		require.Equal(t, body, message.Content, "stored display content must remain unchanged")
+	}
+	result := &types.ToolResult{Success: true, Output: "command completed", OutputFiles: []string{"sandbox:deck.pptx"}}
+	require.Equal(t, "command completed", toolCallOutput(types.ToolCall{Name: agenttools.ToolShellExec, Result: result}))
+	require.Contains(t, result.OutputFiles, "sandbox:deck.pptx")
+}
+
 // TestBuildAssistantHistoryMessages_ToolCallsExpandIntoOpenAIShape covers the
 // option-B replay: non-terminal tool calls from AgentSteps become proper
 // assistant_with_tool_calls + tool messages, and the canonical final answer is
@@ -262,7 +279,7 @@ func TestBuildAssistantHistoryMessages_SkillScriptFailureKeepsStdout(t *testing.
 				ToolCalls: []types.ToolCall{
 					{
 						ID:   "call_skill",
-						Name: agenttools.ToolExecuteSkillScript,
+						Name: agenttools.LegacyToolExecuteSkillScript,
 						Args: map[string]interface{}{"skill_name": "smart-charts", "script_path": "scripts/cli.py"},
 						Result: &types.ToolResult{
 							Success: false,

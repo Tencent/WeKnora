@@ -49,21 +49,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zstd \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
-# Note: Current preloaded skills only use Python stdlib
-# Add packages here when skills actually need them:
+# Add packages here when installed skills actually need them:
 
 # Create non-root user (UID 1000) for sandbox execution. The account is named
 # "user" because that is the account name E2B templates are expected to expose
 # and the one WeKnora names when running scripts and file operations against an
-# E2B-protocol backend; the Docker backend addresses it numerically as
-# 1000:1000, so both paths land on the same account.
+# E2B-protocol backend. Docker also selects this account by name.
 RUN groupadd -g 1000 user && \
     useradd -u 1000 -g user -m -s /bin/bash user
 
 # Pre-create the two directories every backend writes to and hand them to the
-# sandbox account. WeKnora otherwise has to create and chown them as root on
-# each execution, which needs capabilities a hardened container should not
-# have to keep.
+# sandbox account. Runtime preparation uses this same account and fails if
+# the image does not provide a writable workspace; it never escalates to root
+# or replaces existing directories to repair ownership.
 RUN mkdir -p /workspace/input /workspace/output && \
     chown -R user:user /workspace
 

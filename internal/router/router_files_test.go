@@ -239,6 +239,9 @@ func TestResourceGrantServesShortPublicURL(t *testing.T) {
 	if got := recorder.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("X-Content-Type-Options = %q", got)
 	}
+	if got := recorder.Header().Get("Content-Disposition"); !strings.Contains(got, "a.png") {
+		t.Fatalf("Content-Disposition = %q, want original filename a.png", got)
+	}
 }
 
 func TestServeFilesDoesNotFallbackWhenProviderDoesNotMatchGlobalStorage(t *testing.T) {
@@ -580,6 +583,7 @@ func TestMessageScopedFilesServesSharedAgentResource(t *testing.T) {
 		&stubResourceCatalog{resource: &types.StoredResource{
 			TenantID:     ownerTenantID,
 			PhysicalPath: physical,
+			OriginalName: "chart.png",
 			MimeType:     "image/png",
 		}},
 	)
@@ -594,6 +598,9 @@ func TestMessageScopedFilesServesSharedAgentResource(t *testing.T) {
 	}
 	if requestedPath != physical {
 		t.Fatalf("requested path = %q, want %q", requestedPath, physical)
+	}
+	if got := recorder.Header().Get("Content-Disposition"); !strings.Contains(got, "chart.png") {
+		t.Fatalf("Content-Disposition = %q, want original filename chart.png", got)
 	}
 }
 
@@ -760,8 +767,8 @@ func TestServeFilesForcesActiveContentDownload(t *testing.T) {
 	if got := recorder.Header().Get("Content-Type"); got != "application/octet-stream" {
 		t.Fatalf("Content-Type = %q, want application/octet-stream", got)
 	}
-	if got := recorder.Header().Get("Content-Disposition"); got != "attachment" {
-		t.Fatalf("Content-Disposition = %q, want attachment", got)
+	if got := recorder.Header().Get("Content-Disposition"); got != "attachment; filename=payload.svg" {
+		t.Fatalf("Content-Disposition = %q, want attachment with filename", got)
 	}
 	if got := recorder.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)

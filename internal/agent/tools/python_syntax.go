@@ -12,7 +12,7 @@ import (
 // failure is ASCII quotation marks inside a same-kind string literal
 // (`"这不是一个"大干快上"..."`), which Python treats as the end of the
 // string. Caught at write/edit time so the model does not burn a round on
-// execute_skill_script + py_compile.
+// shell_exec + py_compile.
 const pythonQuoteGuidance = "Python strings: never put ASCII `\"` inside `\"...\"` " +
 	"(or `'` inside `'...'`). Use the other quote for the literal, and 「」 " +
 	"for Chinese quotation."

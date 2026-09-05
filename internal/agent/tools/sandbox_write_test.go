@@ -84,7 +84,6 @@ func TestWriteSandboxFileWritesTextUnderOutput(t *testing.T) {
 	assert.Equal(t, 0, result.Data["removed_lines"])
 	assert.Contains(t, result.Output, formatSandboxDiffStat(CountContentLines(script), 0))
 	assert.NotContains(t, result.Output, script)
-	assert.Contains(t, result.Output, "execute_skill_script")
 	assert.Contains(t, result.Output, "/workspace/output/generate_ppt.py")
 	_, hasContent := result.Data["content"]
 	assert.False(t, hasContent)
@@ -324,9 +323,9 @@ func TestWriteSandboxFileRegistryHintsWhenPathMissing(t *testing.T) {
 // be registered anyway.
 func TestSandboxCapabilityToolsAreNotToolListCheckboxes(t *testing.T) {
 	for _, name := range []string{
-		ToolListSandboxFiles, ToolReadSandboxFile,
+		ToolListSandboxFiles, LegacyToolReadSandboxFile,
 		ToolWriteSandboxFile, ToolEditSandboxFile, ToolShellExec,
-		ToolReadSkill, ToolExecuteSkillScript,
+		LegacyToolReadSkill, LegacyToolExecuteSkillScript,
 	} {
 		require.NotContains(t, DefaultAllowedTools(), name)
 		for _, definition := range AvailableToolDefinitions() {

@@ -14,7 +14,7 @@ type QARequest struct {
 	KnowledgeIDs        []string           // Specific knowledge (file) IDs to search
 	TagScopes           []TagScope         // Tag-constrained KB scopes from @mentions
 	MCPServiceIDs       []string           // Per-request MCP service IDs from @mentions
-	SkillNames          []string           // Per-request preloaded skill names from @mentions
+	SkillNames          []string           // Per-request skill names from @mentions
 	ImageURLs           []string           // Image URLs for multimodal input
 	ImageDescription    string             // VLM-generated image description (fallback for non-vision models)
 	UserMessageID       string             // Created user message ID

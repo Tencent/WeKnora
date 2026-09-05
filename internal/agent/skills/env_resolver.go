@@ -14,7 +14,7 @@ import (
 // lives in the service layer, which can reach the repository.
 //
 // It is keyed by skill NAME rather than id because every path into the manager
-// is name-addressed: ExecuteScript receives the name the model wrote, and the
+// is name-addressed: shell_exec receives the name the model wrote, and the
 // row id is an implementation detail of the installed-skill source.
 type SkillEnvResolver interface {
 	// ResolveEnv returns the values to inject and the names of any required
@@ -36,9 +36,8 @@ type MissingSkillEnvError struct {
 func (e *MissingSkillEnvError) Error() string {
 	// English, like every other error in this codebase: the agent relays this
 	// to the user and translates it into whatever language they are speaking.
-	// execute_skill_script has no env parameter, so it cannot take a value the
-	// user just typed. shell_exec can: naming the skill and passing the value
-	// in env runs the command and stores the value for the next run. Pointing
+	// Naming the skill and passing a user-provided value in shell_exec's env
+	// runs the command and records it after success for the next run. Pointing
 	// at the settings page alone would strand IM users, who have no such page.
 	return fmt.Sprintf(
 		"skill %q needs the environment variable(s) %s, which nobody has set yet. "+

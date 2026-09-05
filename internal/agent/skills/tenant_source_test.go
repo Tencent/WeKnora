@@ -189,8 +189,8 @@ func TestTenantSkillSourceReportsAMissingBundleWithoutBlockingExecution(t *testi
 	require.Equal(t, "/opt/weknora/tenant/skills/pdf/scripts/extract.py", remote)
 }
 
-func TestManagerIgnoresPreloadedSkillsWhenTenantSourceIsAttached(t *testing.T) {
-	dir := preloadedSkillDir(t, "document-analyzer", "preloaded description")
+func TestManagerIgnoresHostSkillsWhenTenantSourceIsAttached(t *testing.T) {
+	dir := hostSkillDir(t, "document-analyzer", "host description")
 	mgr := NewManager(&ManagerConfig{SkillDirs: []string{dir}, Enabled: true}, nil)
 	mgr.WithTenantSource(NewTenantSkillSource([]*types.TenantSkillEntity{
 		{
@@ -211,7 +211,7 @@ func TestManagerIgnoresPreloadedSkillsWhenTenantSourceIsAttached(t *testing.T) {
 	}
 	require.Len(t, byName, 2)
 	require.NotContains(t, byName, "document-analyzer",
-		"host preloaded skills are not in the sandbox image")
+		"host skills are not in the sandbox image")
 	require.Equal(t, "tenant description", byName["pdf"].Description)
 	require.Equal(t, "tenant only", byName["csv"].Description)
 
@@ -223,88 +223,6 @@ func TestManagerIgnoresPreloadedSkillsWhenTenantSourceIsAttached(t *testing.T) {
 	require.Error(t, err, "a host-only skill must not be readable once the image is the source")
 }
 
-func TestManagerRunsATenantSkillFromTheImageWithoutUploading(t *testing.T) {
-	sandboxMgr := &recordingSandboxManager{}
-	mgr := NewManager(&ManagerConfig{SkillDirs: nil, Enabled: true}, sandboxMgr)
-	mgr.WithTenantSource(NewTenantSkillSource([]*types.TenantSkillEntity{{
-		ID: "sk-1", Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
-	}}, nil))
-	require.NoError(t, mgr.Initialize(context.Background()))
-
-	_, err := mgr.ExecuteScript(
-		types.WithSessionID(context.Background(), "sess-1"),
-		"pdf", "scripts/extract.py", []string{"--flag"}, "",
-	)
-
-	require.NoError(t, err)
-	require.NotNil(t, sandboxMgr.config)
-	require.Equal(t, "/opt/weknora/tenant/skills/pdf/scripts/extract.py",
-		sandboxMgr.config.RemoteScriptPath)
-	require.Empty(t, sandboxMgr.config.Script,
-		"there is no host-side copy of an installed skill to upload")
-	require.Equal(t, []string{"--flag"}, sandboxMgr.config.Args)
-	require.Equal(t, "sess-1", sandboxMgr.config.SessionID)
-	require.Equal(t, sandbox.SkillsImageRoot+"/pdf",
-		sandboxMgr.config.Env["WEKNORA_SKILL_DIR"])
-	require.Equal(t, "/workspace/output", sandboxMgr.config.Env[artifactOutputEnvVar])
-	require.Equal(t, sandbox.SessionSkillPackageDir("pdf"),
-		sandboxMgr.config.Env["PYTHONPATH"])
-	require.Equal(t, sandbox.SessionSkillPackageDir("pdf"),
-		sandboxMgr.config.Env["NODE_PATH"])
-}
-
-func TestManagerRunsAWorkspaceScriptWithInstalledSkillInterpreter(t *testing.T) {
-	sandboxMgr := &recordingSandboxManager{}
-	mgr := NewManager(&ManagerConfig{SkillDirs: nil, Enabled: true}, sandboxMgr)
-	mgr.WithTenantSource(NewTenantSkillSource([]*types.TenantSkillEntity{{
-		ID: "sk-1", Name: "ppt-generator", Status: types.SkillStatusReady, Enabled: true,
-	}}, nil))
-	require.NoError(t, mgr.Initialize(context.Background()))
-
-	_, err := mgr.ExecuteScript(
-		types.WithSessionID(context.Background(), "sess-1"),
-		"ppt-generator", "/workspace/output/generate_rencui_ppt.py", []string{"--theme", "doraemon"}, "",
-	)
-
-	require.NoError(t, err)
-	require.NotNil(t, sandboxMgr.config)
-	require.Equal(t, "/workspace/output/generate_rencui_ppt.py", sandboxMgr.config.RemoteScriptPath)
-	require.Equal(t, sandbox.SkillsImageRoot+"/ppt-generator", sandboxMgr.config.SkillDir)
-	require.Empty(t, sandboxMgr.config.Script)
-	require.Equal(t, []string{"--theme", "doraemon"}, sandboxMgr.config.Args)
-	require.Equal(t, sandbox.SkillsImageRoot+"/ppt-generator",
-		sandboxMgr.config.Env["WEKNORA_SKILL_DIR"])
-}
-
-func TestManagerRejectsWorkspaceScriptForPreloadedSkill(t *testing.T) {
-	dir := preloadedSkillDir(t, "pdf", "preloaded description")
-	sandboxMgr := &recordingSandboxManager{}
-	mgr := NewManager(&ManagerConfig{SkillDirs: []string{dir}, Enabled: true}, sandboxMgr)
-	require.NoError(t, mgr.Initialize(context.Background()))
-
-	_, err := mgr.ExecuteScript(context.Background(), "pdf", "/workspace/output/custom.py", nil, "")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "shell_exec")
-	require.Zero(t, sandboxMgr.calls)
-}
-
-func TestManagerRejectsWorkspaceInputAsSkillScript(t *testing.T) {
-	sandboxMgr := &recordingSandboxManager{}
-	mgr := NewManager(&ManagerConfig{SkillDirs: nil, Enabled: true}, sandboxMgr)
-	mgr.WithTenantSource(NewTenantSkillSource([]*types.TenantSkillEntity{{
-		ID: "sk-1", Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
-	}}, nil))
-	require.NoError(t, mgr.Initialize(context.Background()))
-
-	_, err := mgr.ExecuteScript(context.Background(), "pdf", "/workspace/input/upload.py", nil, "")
-	require.Error(t, err)
-	require.Zero(t, sandboxMgr.calls)
-}
-
-// The in-sandbox directory is what read_skill shows the model so it can name
-// the skill's own interpreter instead of probing the system python3. A
-// preloaded skill has no such directory: its base path is on the WeKnora host,
-// which no command in the sandbox can reach.
 func TestSandboxSkillDirOnlyAnswersForInstalledSkills(t *testing.T) {
 	installed := NewManager(&ManagerConfig{Enabled: true}, nil)
 	installed.WithTenantSource(NewTenantSkillSource([]*types.TenantSkillEntity{{
@@ -316,33 +234,18 @@ func TestSandboxSkillDirOnlyAnswersForInstalledSkills(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, sandbox.SkillsImageRoot+"/pdf", dir)
 
-	preloaded := NewManager(&ManagerConfig{
-		SkillDirs: []string{preloadedSkillDir(t, "pdf", "preloaded description")},
+	host := NewManager(&ManagerConfig{
+		SkillDirs: []string{hostSkillDir(t, "pdf", "host description")},
 		Enabled:   true,
 	}, nil)
-	require.NoError(t, preloaded.Initialize(context.Background()))
+	require.NoError(t, host.Initialize(context.Background()))
 
-	_, ok = preloaded.SandboxSkillDir("pdf")
+	_, ok = host.SandboxSkillDir("pdf")
 	require.False(t, ok)
 }
 
-// Preloaded skills keep uploading from the host and keep running in their own
-// directory; the tenant source must not change that path at all.
-func TestManagerKeepsPreloadedSkillExecutionWhenNoTenantSource(t *testing.T) {
-	dir := preloadedSkillDir(t, "pdf", "preloaded description")
-	sandboxMgr := &recordingSandboxManager{}
-	mgr := NewManager(&ManagerConfig{SkillDirs: []string{dir}, Enabled: true}, sandboxMgr)
-	require.NoError(t, mgr.Initialize(context.Background()))
-
-	_, err := mgr.ExecuteScript(context.Background(), "pdf", "scripts/run.py", nil, "")
-
-	require.NoError(t, err)
-	require.NotNil(t, sandboxMgr.config)
-	require.Empty(t, sandboxMgr.config.RemoteScriptPath)
-	require.Equal(t, filepath.Join(dir, "pdf", "scripts", "run.py"), sandboxMgr.config.Script)
-	require.Equal(t, dir+"/pdf", sandboxMgr.config.WorkDir)
-}
-
+// Host skills keep uploading from the WeKnora machine and keep running in
+// their staged directory; the tenant source must not change that path at all.
 type recordingSandboxManager struct {
 	config *sandbox.ExecuteConfig
 	calls  int
@@ -360,17 +263,17 @@ func (m *recordingSandboxManager) Cleanup(context.Context) error { return nil }
 func (m *recordingSandboxManager) GetSandbox() sandbox.Sandbox   { return nil }
 func (m *recordingSandboxManager) GetType() sandbox.SandboxType  { return sandbox.SandboxTypeCube }
 
-// preloadedSkillDir writes one deployment-preloaded skill to a temp directory
-// and returns the search root it lives under.
-func preloadedSkillDir(t *testing.T, name, description string) string {
+// hostSkillDir writes one host skill to a temp directory and returns the
+// search root it lives under.
+func hostSkillDir(t *testing.T, name, description string) string {
 	t.Helper()
 	root := t.TempDir()
 	skillDir := filepath.Join(root, name)
 	require.NoError(t, os.MkdirAll(filepath.Join(skillDir, "scripts"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(skillDir, SkillFileName),
-		[]byte("---\nname: "+name+"\ndescription: "+description+"\n---\npreloaded body\n"), 0o644))
+		[]byte("---\nname: "+name+"\ndescription: "+description+"\n---\nhost body\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "scripts", "run.py"),
-		[]byte("print('preloaded')\n"), 0o644))
+		[]byte("print('host')\n"), 0o644))
 	return root
 }
 

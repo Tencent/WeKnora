@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -216,49 +218,13 @@ func TestShellExecSuppressesBinaryStreams(t *testing.T) {
 	assert.Equal(t, "text error", result.Data["stderr"])
 }
 
-func TestShellExecDescriptionSupportsGeneralExploration(t *testing.T) {
+func TestShellExecDescriptionDefinesOneExecutionEntry(t *testing.T) {
 	description := NewShellExecTool(&fakeShellExecutor{}, nil).Description()
-
-	for _, command := range []string{"find", "ls", "cat", "head", "tail", "sed", "grep", "awk"} {
-		assert.Contains(t, description, command)
+	for _, fact := range []string{"/workspace", "skill_name", "virtualenv", "read-only", "non-root", "write_sandbox_file", "edit_sandbox_file", "not automatically saved"} {
+		require.Contains(t, description, fact)
 	}
-	assert.Contains(t, description, "Use freely to explore")
-	assert.Contains(t, description, "Binary output is never returned")
-	assert.Contains(t, description, "write_sandbox_file")
-	assert.Contains(t, description, "edit_sandbox_file")
-	assert.Contains(t, description, "/opt/weknora/tenant/skills")
-	assert.Contains(t, description, "python3 -c")
-	assert.Contains(t, description, "execute_skill_script")
-	assert.Contains(t, description, ".skill-packages")
-	assert.Contains(t, description, "Do not `apt-get install` inspection utilities")
-	assert.NotContains(t, description, "If a 'command not found' error occurs, attempt to resolve it")
-}
-
-// The system prompt used to repeat all of this in its shell_exec bullets. The
-// description ships with the tools on every request, so the second copy only
-// spent tokens twice and gave the two wordings room to drift. It was deleted
-// there (TestFormatSkillsMetadataIncludesShellGuidanceOnlyWhenEnabled asserts
-// it stays deleted), which makes this the only copy left.
-func TestShellExecDescriptionOwnsItsMechanics(t *testing.T) {
-	description := NewShellExecTool(&fakeShellExecutor{}, nil).Description()
-
-	for _, mechanic := range []string{
-		// Working directory, and why `cd /workspace &&` is dead weight.
-		"Every command already starts in",
-		"do NOT prefix",
-		"work_dir",
-		// Output budget and how a non-zero exit is meant to be read.
-		"max_output_bytes",
-		"non-zero on failure",
-		"is NOT a tool",
-		// Quoting, which decides whether a one-liner even parses.
-		"never nest an ASCII",
-		"「」",
-		// Session lifetime, so setup is not redone every call.
-		"one long-lived session",
-	} {
-		assert.Contains(t, description, mechanic, "moved out of the system prompt, must live here")
-	}
+	require.NotContains(t, description, "execute_skill_script")
+	require.Less(t, len(description), 2500)
 }
 
 func TestShellExecBoundsStdoutStderrErrorAndTotal(t *testing.T) {
@@ -274,7 +240,7 @@ func TestShellExecBoundsStdoutStderrErrorAndTotal(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	require.True(t, result.Success)
+	require.False(t, result.Success)
 	assert.LessOrEqual(t, len(result.Output), maxShellExecVisibleBytes)
 	assert.LessOrEqual(t, result.Data["stdout_returned_bytes"].(int), maxShellExecOutputBytes)
 	assert.LessOrEqual(t, result.Data["stderr_returned_bytes"].(int), maxShellExecStderrBytes)
@@ -323,6 +289,7 @@ func (r *recordedCapture) capture(_ context.Context, skillName string, pairs map
 // the workspace or this caller already has stored, missing is what a required
 // declaration still needs.
 type stubEnvResolver struct {
+	err      error
 	resolved map[string]string
 	missing  []string
 }
@@ -330,12 +297,12 @@ type stubEnvResolver struct {
 func (r stubEnvResolver) ResolveEnv(
 	_ context.Context, _ string,
 ) (map[string]string, []string, error) {
-	return r.resolved, r.missing, nil
+	return r.resolved, r.missing, r.err
 }
 
 func TestShellExecCapturesUsedEnvAfterSuccessfulCommand(t *testing.T) {
 	recorder := &recordedCapture{}
-	tool := NewShellExecTool(&fakeShellExecutor{}, nil).WithEnvCapture(recorder.capture)
+	tool := NewShellExecTool(&fakeShellExecutor{}, nil).WithEnvCapture(recorder.capture).WithSkillEnvironment(shellTestSkillEnvironment(t))
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
 		`{"command":"export USER_TOKEN=from-command; python x.py","skill_name":"pdf-tools","env":{"EXTRA_TOKEN":"from-tool"}}`,
@@ -353,7 +320,7 @@ func TestShellExecCapturesUsedEnvAfterSuccessfulCommand(t *testing.T) {
 // mentions a skill directory write into that skill's credentials.
 func TestShellExecDoesNotCaptureWithoutAnExplicitSkillName(t *testing.T) {
 	recorder := &recordedCapture{}
-	tool := NewShellExecTool(&fakeShellExecutor{}, nil).WithEnvCapture(recorder.capture)
+	tool := NewShellExecTool(&fakeShellExecutor{}, nil).WithEnvCapture(recorder.capture).WithSkillEnvironment(shellTestSkillEnvironment(t))
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
 		`{"command":"export USER_TOKEN=from-command; cd /opt/weknora/tenant/skills/pdf-tools && python x.py"}`,
@@ -369,7 +336,7 @@ func TestShellExecDoesNotCaptureWithoutAnExplicitSkillName(t *testing.T) {
 func TestShellExecDoesNotCaptureAlreadyResolvedNames(t *testing.T) {
 	recorder := &recordedCapture{}
 	resolver := stubEnvResolver{resolved: map[string]string{"USER_TOKEN": "stored"}}
-	tool := NewShellExecTool(&fakeShellExecutor{}, resolver).WithEnvCapture(recorder.capture)
+	tool := NewShellExecTool(&fakeShellExecutor{}, resolver).WithEnvCapture(recorder.capture).WithSkillEnvironment(shellTestSkillEnvironment(t))
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
 		`{"command":"python x.py","skill_name":"pdf-tools","env":{"USER_TOKEN":"model-made-this-up","NEW_TOKEN":"fresh"}}`,
@@ -387,7 +354,7 @@ func TestShellExecDoesNotCaptureAlreadyResolvedNames(t *testing.T) {
 func TestShellExecRunsWhenTheCallSuppliesTheMissingRequiredValue(t *testing.T) {
 	recorder := &recordedCapture{}
 	resolver := stubEnvResolver{missing: []string{"USER_TOKEN"}}
-	tool := NewShellExecTool(&fakeShellExecutor{}, resolver).WithEnvCapture(recorder.capture)
+	tool := NewShellExecTool(&fakeShellExecutor{}, resolver).WithEnvCapture(recorder.capture).WithSkillEnvironment(shellTestSkillEnvironment(t))
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
 		`{"command":"python x.py","skill_name":"pdf-tools","env":{"USER_TOKEN":"typed-in-chat"}}`,
@@ -401,7 +368,7 @@ func TestShellExecRunsWhenTheCallSuppliesTheMissingRequiredValue(t *testing.T) {
 
 func TestShellExecStillRefusesAMissingRequiredValueNobodySupplied(t *testing.T) {
 	resolver := stubEnvResolver{missing: []string{"USER_TOKEN"}}
-	tool := NewShellExecTool(&fakeShellExecutor{}, resolver)
+	tool := NewShellExecTool(&fakeShellExecutor{}, resolver).WithSkillEnvironment(shellTestSkillEnvironment(t))
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
 		`{"command":"python x.py","skill_name":"pdf-tools"}`,
@@ -415,7 +382,7 @@ func TestShellExecStillRefusesAMissingRequiredValueNobodySupplied(t *testing.T) 
 func TestShellExecDoesNotCaptureWhenCommandFails(t *testing.T) {
 	recorder := &recordedCapture{}
 	tool := NewShellExecTool(&fakeShellExecutor{result: &sandbox.ExecuteResult{ExitCode: 1}}, nil).
-		WithEnvCapture(recorder.capture)
+		WithEnvCapture(recorder.capture).WithSkillEnvironment(shellTestSkillEnvironment(t))
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
 		`{"command":"export USER_TOKEN=x; false","skill_name":"pdf-tools"}`,
@@ -429,7 +396,7 @@ func TestShellExecDoesNotCaptureWhenCommandFails(t *testing.T) {
 func TestShellExecDoesNotCaptureWhenExecutorErrors(t *testing.T) {
 	recorder := &recordedCapture{}
 	tool := NewShellExecTool(&fakeShellExecutor{err: errors.New("sandbox down")}, nil).
-		WithEnvCapture(recorder.capture)
+		WithEnvCapture(recorder.capture).WithSkillEnvironment(shellTestSkillEnvironment(t))
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
 		`{"command":"export USER_TOKEN=x; true","skill_name":"pdf-tools"}`,
@@ -445,7 +412,7 @@ func TestInstallShellExecDoesNotCapture(t *testing.T) {
 	tool := NewInstallShellExecTool(&fakeInstallShellExecutor{}, installShellSkillDir).WithEnvCapture(recorder.capture)
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
-		`{"command":"export USER_TOKEN=x; pip install x","skill_name":"pdf-tools"}`,
+		`{"command":"export USER_TOKEN=x; pip install x"}`,
 	))
 
 	require.NoError(t, err)
@@ -512,7 +479,7 @@ print(len(doc.paragraphs))
 	require.True(t, result.Success)
 	assert.Contains(t, result.Output, "Do not pip install")
 	assert.Contains(t, result.Output, "write_sandbox_file")
-	assert.Contains(t, result.Output, "execute_skill_script")
+	assert.Contains(t, result.Output, "shell_exec")
 	assert.Contains(t, result.Output, ".venv/bin/python -c")
 }
 
@@ -563,4 +530,23 @@ func TestShellExecHintsWhenVenvHasNoPip(t *testing.T) {
 	assert.Contains(t, result.Output, "frozen")
 	assert.Contains(t, result.Output, "/workspace/.skill-packages/律师助手")
 	assert.NotContains(t, result.Output, "write_sandbox_file")
+}
+
+func shellTestSkillEnvironment(t *testing.T) *skills.Manager {
+	t.Helper()
+	manager := skills.NewManager(&skills.ManagerConfig{Enabled: true}, nil)
+	manager.WithTenantSource(skills.NewTenantSkillSource([]*types.TenantSkillEntity{
+		{Name: "pdf-tools", Status: types.SkillStatusReady, Enabled: true},
+	}, nil))
+	require.NoError(t, manager.Initialize(context.Background()))
+	return manager
+}
+
+func TestShellExecNeverSilentlyFallsBackFromNamedSkill(t *testing.T) {
+	executor := &fakeShellExecutor{}
+	result, err := NewShellExecTool(executor, nil).Execute(shellExecTestContext(), json.RawMessage(`{"command":"python3 report.py","skill_name":"missing"}`))
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Zero(t, executor.calls)
+	require.Contains(t, result.Error, "no skill environment")
 }

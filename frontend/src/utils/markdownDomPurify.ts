@@ -57,6 +57,10 @@ export const markdownDomPurifySecurityHooks = {
     if (!('tagName' in currentNode) || !('getAttribute' in currentNode)) return;
     const element = currentNode as Element;
     if (element.tagName === 'A' && element.getAttribute('href')) {
+      if (element.classList.contains('protected-resource-card') || element.hasAttribute('download')) {
+        element.removeAttribute('target');
+        return;
+      }
       element.setAttribute('rel', 'noopener noreferrer');
       element.setAttribute('target', '_blank');
     }
@@ -79,7 +83,7 @@ export const markdownDomPurifyConfig = {
   ALLOWED_ATTR: [
     'href', 'title', 'target', 'rel', 'data-tooltip', 'data-url', 'data-kb-id',
     'data-chunk-id', 'data-doc', 'data-slug', 'class', 'role', 'tabindex', 'src', 'alt', 'data-protected-src', 'data-img-loading',
-    'data-artifact-index',
+    'data-artifact-index', 'data-protected-resource', 'download',
     'width', 'height', 'style', 'id', 'type', 'aria-label', 'data-mermaid', 'disabled',
     'd', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
     'stroke-dasharray', 'stroke-dashoffset', 'stroke-miterlimit', 'stroke-opacity',

@@ -347,11 +347,14 @@ type Cleanable interface {
 
 // ToolResult represents the result of a tool execution
 type ToolResult struct {
-	Success bool                   `json:"success"`          // Whether the tool executed successfully
-	Output  string                 `json:"output"`           // Human-readable output
-	Data    map[string]interface{} `json:"data,omitempty"`   // Structured data for programmatic use
-	Error   string                 `json:"error,omitempty"`  // Error message if execution failed
-	Images  []string               `json:"images,omitempty"` // Base64 data URIs from tool (e.g. MCP image content)
+	// OutputFiles holds sandbox references for this live result only. History
+	// uses the final answer's persistent resource references instead.
+	OutputFiles []string               `json:"-"`
+	Success     bool                   `json:"success"`          // Whether the tool executed successfully
+	Output      string                 `json:"output"`           // Human-readable output
+	Data        map[string]interface{} `json:"data,omitempty"`   // Structured data for programmatic use
+	Error       string                 `json:"error,omitempty"`  // Error message if execution failed
+	Images      []string               `json:"images,omitempty"` // Base64 data URIs from tool (e.g. MCP image content)
 }
 
 // ToolCall represents a single tool invocation within an agent step

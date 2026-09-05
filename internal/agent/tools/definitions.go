@@ -20,14 +20,9 @@ const (
 	ToolDataSchema          = "data_schema"
 	ToolWebSearch           = "web_search"
 	ToolWebFetch            = "web_fetch"
-	// Skills-related tools (only available when skills are enabled).
-	//
-	// Like the sandbox tools below, these are absent from
-	// AvailableToolDefinitions and DefaultAllowedTools: initializeSkillsManager
-	// registers them from SkillsEnabled plus a usable sandbox, so a tool
-	// checkbox could neither grant nor withhold them.
-	ToolExecuteSkillScript = "execute_skill_script"
-	ToolReadSkill          = "read_skill"
+	// Unified reading: workspace access follows sandbox file capability;
+	// skill resources follow SkillsEnabled and do not require a sandbox.
+	ToolReadFile = "read_file"
 	// Sandbox filesystem tools (only available when the sandbox backend
 	// supports per-session files — Cube, E2B, Docker). list/read inspect
 	// the session workspace; write creates text files so generated
@@ -41,7 +36,6 @@ const (
 	// than from the allowlist. A checkbox would have been a lie — clearing
 	// it changed nothing.
 	ToolListSandboxFiles = "list_sandbox_files"
-	ToolReadSandboxFile  = "read_sandbox_file"
 	ToolWriteSandboxFile = "write_sandbox_file"
 	ToolEditSandboxFile  = "edit_sandbox_file"
 	// ToolWriteSkillFile / ToolEditSkillFile write the skill tree under
@@ -118,12 +112,9 @@ func AvailableToolDefinitions() []AvailableTool {
 // DefaultAllowedTools returns the default allowed tools list.
 func DefaultAllowedTools() []string {
 	return []string{
-		ToolThinking,
-		ToolTodoWrite,
 		ToolKnowledgeSearch,
 		ToolGrepChunks,
 		ToolListKnowledgeChunks,
-		ToolQueryKnowledgeGraph,
 		ToolGetDocumentInfo,
 		// Looking up what this user asked before is only ever a read of their
 		// own history, and it is what lets "上次你给我的那个配置" resolve at all
@@ -135,8 +126,31 @@ func DefaultAllowedTools() []string {
 		// user and the agent all allow memory, and strips it whenever they do
 		// not. Adding it here would let a stale allowlist decide something the
 		// memory switches already decide.
-		ToolDatabaseQuery,
-		ToolDataAnalysis,
-		ToolDataSchema,
+		// Graph, SQL, data analysis and explicit planning are opt-in. Existing
+		// agents keep their explicit allowlists; domain presets select extras.
+	}
+}
+
+// Retired tool identifiers are retained only for decoding existing histories
+// and ignoring obsolete allowlist entries. They have no implementation or
+// registration path and are never offered in model tool schemas.
+const (
+	LegacyToolExecuteSkillScript = "execute_skill_script"
+	LegacyToolReadSkill          = "read_skill"
+	LegacyToolReadSandboxFile    = "read_sandbox_file"
+)
+
+// RetiredToolReplacement tells the model how to replace a removed tool.
+// Empty when name was never a WeKnora tool.
+func RetiredToolReplacement(name string) string {
+	switch name {
+	case LegacyToolExecuteSkillScript:
+		return "execute_skill_script is no longer available; use shell_exec(skill_name=..., command=...) to run skill scripts"
+	case LegacyToolReadSkill:
+		return `read_skill is no longer available; use read_file(path="skill://<name>/<file_path or SKILL.md>")`
+	case LegacyToolReadSandboxFile:
+		return "read_sandbox_file is no longer available; use read_file(path=...)"
+	default:
+		return ""
 	}
 }

@@ -28,13 +28,13 @@ const (
 	// maxSkillBundleFiles. It is counted after directory entries and the
 	// zipball's extra trees are dropped, exactly as the install counts them:
 	// applying it to the raw entry count instead would reject archives the
-	// install accepted, taking read_skill down for a working install.
+	// install accepted, taking read_file down for a working install.
 	maxBundleEntries    = 20_000
 	maxBundleEntryBytes = 32 << 20  // 32 MiB per entry
 	maxBundleBytes      = 512 << 20 // 512 MiB across one archive (install cap)
 )
 
-// A source lives for a single agent run. read_skill is typically called
+// A source lives for a single agent run. read_file is typically called
 // several times against the same skill, so a handful of compressed zips
 // removes the repeated download. 64 MiB is the keep-around budget; a zip
 // larger than that can stay as the sole occupant so a large skill does not
@@ -67,7 +67,7 @@ type TenantSkillSource struct {
 	mu sync.Mutex
 	// cache holds downloaded archives, most recently used first, keyed by
 	// bundle_sha256 (or the storage ref). The zip stays compressed: list and
-	// read_skill inflate one entry at a time so a 13k-file skill cannot pin
+	// read_file inflate one entry at a time so a 13k-file skill cannot pin
 	// hundreds of megabytes unpacked for the rest of the turn.
 	cache []cachedBundle
 }
@@ -159,7 +159,7 @@ func (s *TenantSkillSource) LoadSkillInstructions(name string) (*Skill, error) {
 // LoadSkillFile returns one Level 3 resource out of the uploaded archive.
 //
 // The archive is read rather than the image: reading a file out of the image
-// would need a sandbox, and read_skill must work whether or not this turn has
+// would need a sandbox, and read_file must work whether or not this turn has
 // already booted one.
 func (s *TenantSkillSource) LoadSkillFile(name, relativePath string) (*SkillFile, error) {
 	row, err := s.row(name)

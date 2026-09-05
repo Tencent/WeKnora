@@ -190,9 +190,8 @@ sequenceDiagram
 | `docker/` | 各镜像 Dockerfile（app/docreader/sandbox/odl-hybrid）与 searxng 配置 |
 | `deploy/` | 裸机部署资源（systemd 服务单元等） |
 | `helm/` | Kubernetes Helm Chart（Chart.yaml / values.yaml / templates/） |
-| `skills/` | Agent Skills 技能包目录，`skills/preloaded/` 随镜像预装，可通过挂载 + `WEKNORA_SKILLS_DIR` 免重建扩展 |
+| `examples/` | API 使用示例代码；`examples/skills/` 为 Agent Skill 包示例 |
 | `dataset/` | 评估用 QA 数据集及生成脚本 |
-| `examples/` | API 使用示例代码 |
 | `scripts/` | 构建/启动/迁移辅助脚本（如 `start_all.sh`、`build_frontend_dist.sh`） |
 | `tests/`、`testdata/` | 集成测试与测试数据 |
 | `Formula/` | Homebrew 安装配方（macOS） |

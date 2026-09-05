@@ -162,27 +162,28 @@ func dataKeys(data map[string]interface{}) []string {
 
 // toolDisplayNames maps internal tool names to user-friendly display labels.
 var toolDisplayNames = map[string]string{
-	agenttools.ToolThinking:            "深度思考",
-	agenttools.ToolTodoWrite:           "制定计划",
-	agenttools.ToolGrepChunks:          "关键词搜索",
-	agenttools.ToolKnowledgeSearch:     "知识搜索",
-	agenttools.ToolListKnowledgeChunks: "查看文档分块",
-	agenttools.ToolQueryKnowledgeGraph: "查询知识图谱",
-	agenttools.ToolGetDocumentInfo:     "获取文档信息",
-	agenttools.ToolSearchConversations: "回顾历史对话",
-	agenttools.ToolSearchMemory:        "查询长期记忆",
-	agenttools.ToolDatabaseQuery:       "查询数据",
-	agenttools.ToolDataAnalysis:        "数据分析",
-	agenttools.ToolDataSchema:          "查看数据结构",
-	agenttools.ToolWebSearch:           "搜索网页",
-	agenttools.ToolWebFetch:            "获取网页",
-	agenttools.ToolExecuteSkillScript:  "执行技能脚本",
-	agenttools.ToolReadSkill:           "读取技能",
-	agenttools.ToolListSandboxFiles:    "列出沙箱文件",
-	agenttools.ToolReadSandboxFile:     "读取沙箱文件",
-	agenttools.ToolWriteSandboxFile:    "写入沙箱文件",
-	agenttools.ToolEditSandboxFile:     "编辑沙箱文件",
-	agenttools.ToolShellExec:           "执行沙箱命令",
+	agenttools.ToolThinking:                 "深度思考",
+	agenttools.ToolTodoWrite:                "制定计划",
+	agenttools.ToolGrepChunks:               "关键词搜索",
+	agenttools.ToolKnowledgeSearch:          "知识搜索",
+	agenttools.ToolListKnowledgeChunks:      "查看文档分块",
+	agenttools.ToolQueryKnowledgeGraph:      "查询知识图谱",
+	agenttools.ToolGetDocumentInfo:          "获取文档信息",
+	agenttools.ToolSearchConversations:      "回顾历史对话",
+	agenttools.ToolSearchMemory:             "查询长期记忆",
+	agenttools.ToolDatabaseQuery:            "查询数据",
+	agenttools.ToolDataAnalysis:             "数据分析",
+	agenttools.ToolDataSchema:               "查看数据结构",
+	agenttools.ToolWebSearch:                "搜索网页",
+	agenttools.ToolWebFetch:                 "获取网页",
+	agenttools.LegacyToolExecuteSkillScript: "执行技能脚本",
+	agenttools.LegacyToolReadSkill:          "读取技能",
+	agenttools.ToolReadFile:                 "读取文件",
+	agenttools.ToolListSandboxFiles:         "列出沙箱文件",
+	agenttools.LegacyToolReadSandboxFile:    "读取沙箱文件",
+	agenttools.ToolWriteSandboxFile:         "写入沙箱文件",
+	agenttools.ToolEditSandboxFile:          "编辑沙箱文件",
+	agenttools.ToolShellExec:                "执行沙箱命令",
 }
 
 // toolHintSensitiveArgs lists tools whose arguments should NOT be shown in hints
@@ -294,11 +295,22 @@ func (e *AgentEngine) executeToolCallsParallel(
 	results := make([]types.ToolCall, n)
 	var mu sync.Mutex
 	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(8)
 
 	for i, tc := range response.ToolCalls {
 		i, tc := i, tc // capture loop vars
+		if !agenttools.CanRunConcurrently(tc.Function.Name) {
+			// Drain preceding reads before a mutation, and finish the mutation
+			// before starting later reads. Preserve model order across barriers.
+			_ = g.Wait()
+			results[i] = e.runToolCall(ctx, tc, i, iteration, round, sessionID, assistantMessageID)
+			g, gCtx = errgroup.WithContext(ctx)
+			g.SetLimit(8)
+			continue
+		}
+		readCtx := gCtx
 		g.Go(func() error {
-			toolCall := e.runToolCall(gCtx, tc, i, iteration, round, sessionID, assistantMessageID)
+			toolCall := e.runToolCall(readCtx, tc, i, iteration, round, sessionID, assistantMessageID)
 			mu.Lock()
 			results[i] = toolCall
 			mu.Unlock()

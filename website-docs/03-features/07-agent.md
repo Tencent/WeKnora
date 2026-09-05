@@ -391,8 +391,8 @@ description: Extract text and tables from PDF files, fill forms, merge documents
 ```
 
 - **Level 1（元数据）**：frontmatter 中的 `name` + `description`，启动时全部注入 system prompt；
-- **Level 2（指令）**：SKILL.md 正文，模型判断匹配后经 `read_skill` 按需加载；
-- **Level 3（资源）**：目录内其他文件（文档、脚本），经 `read_skill(file_path=...)` 或 `execute_skill_script` 使用。
+- **Level 2（指令）**：SKILL.md 正文，模型判断匹配后经 `read_file(path="skill://<name>/SKILL.md")` 按需加载；
+- **Level 3（资源）**：目录内其他文件（文档、脚本），经 `read_file` 或 `shell_exec(skill_name=...)` 使用。
 
 校验规则（`Skill.Validate`）：`name` ≤ 64 字符，仅允许 Unicode 字母/数字/连字符，禁止保留词 `anthropic`/`claude`，禁止 XML 标签；`description` ≤ 1024 字符、禁止 XML 标签。脚本识别按扩展名（`.py`/`.sh`/`.bash`/`.js`/`.ts`/`.rb`/`.pl`/`.php`）。
 
@@ -400,23 +400,23 @@ description: Extract text and tables from PDF files, fill forms, merge documents
 
 | 位置 | 内容 | 用途 |
 | --- | --- | --- |
-| `skills/preloaded/` | `citation-generator`（引用生成器）、`data-processor`（数据处理器，含 analyze.py 等脚本）、`doc-coauthoring`（文档协作）、`document-analyzer`（文档分析器）、`openmaic-classroom`（互动课程生成） | 服务端预置技能，Agent 可勾选 |
+| 空间沙箱镜像 | 管理员安装到沙箱配置的技能（`TenantSkills`） | 对话里可勾选、`@` 提及并执行 |
 | `examples/skills/pdf-processing/` | SKILL.md + `scripts/analyze_form.py`、`scripts/extract_text.py` | 自定义技能示例 |
 | `cli/skills/` | `weknora-shared`、`weknora-rag-search`（经 `//go:embed` 打进 CLI 二进制，`weknora skills install` 释放） | 面向外部 Agent 使用 WeKnora CLI 的技能 |
 
-预置目录解析顺序（`getPreloadedSkillsDir`，`internal/application/service/skill_service.go`）：`WEKNORA_SKILLS_DIR` 环境变量 → 可执行文件旁的默认目录 → 当前工作目录 → 相对默认路径。
+技能来自当前智能体所选沙箱配置上已安装且可用的镜像，不再从宿主机 `skills/preloaded` 目录加载。
 
-加载链路：`skills.Loader.DiscoverSkills` 扫描各技能目录下含 `SKILL.md` 的子目录，解析 frontmatter 缓存元数据；`Manager` 负责 enabled 开关、`allowedSkills` 白名单过滤、`LoadSkill`（Level 2）、`ReadSkillFile`/`ListSkillFiles`（Level 3，带路径穿越防护：Clean 后拒绝 `..` 与绝对路径，并校验最终绝对路径仍在技能目录内）。
+加载链路：已安装技能由 `TenantSkillSource` 提供元数据与文件；测试仍可用 `skills.Loader` 扫描含 `SKILL.md` 的宿主目录。`Manager` 负责 enabled 开关、`allowedSkills` 白名单过滤、`LoadSkill`（Level 2）、`ReadSkillFile`/`ListSkillFiles`（Level 3，带路径穿越防护：Clean 后拒绝 `..` 与绝对路径，并校验最终绝对路径仍在技能目录内）。
 
 Agent 侧的启停在 `configureSkillsFromAgent`（`internal/application/service/session_agent_qa.go`）：
 
 - 智能体未选择空间级沙箱配置时，脚本执行工具不可用，但仍可浏览技能说明；
-- `SkillsSelectionMode`：`all` = 全部预置技能、`selected` = `SelectedSkills` 白名单、`none`/空 = 禁用；
-- 用户 `@技能` 提及会经 `applyPerRequestSkillScope` 把本轮白名单收窄到提及集合，并作为 `PinnedSkillInfo` 注入 `<must_use>` 块（"Must call read_skill(...) before answering"）。
+- `SkillsSelectionMode`：`all` = 当前沙箱已安装技能、`selected` = `SelectedSkills` 白名单、`none`/空 = 禁用；
+- 用户 `@技能` 提及会经 `applyPerRequestSkillScope` 把本轮白名单收窄到提及集合，并作为 `PinnedSkillInfo` 注入 `<must_use>` 块（先 `read_file` 技能说明再作答）。
 
 ### 5.3 与沙箱（internal/sandbox）的关系
 
-`execute_skill_script` → `skills.Manager.ExecuteScript` → `sandbox.Manager.Execute`。Docker、CubeSandbox、E2B 均通过「设置 → 沙箱后端」的同一套空间配置与检查接口维护；远端模板从目标集群实时拉取，缺少 WeKnora 标准模板时自动创建。三者都是会话级持久沙箱，提供 shell_exec、附件暂存与产物收集。本机开发用 Docker 后端连本机 daemon；生产环境使用 E2B 协议后端：E2B Cloud、CubeSandbox，或任意 E2B 兼容控制面，接入方式见 `docs/sandbox-protocol.md`。
+`shell_exec(skill_name=...)` 在已安装技能的运行时里执行命令。Docker、CubeSandbox、E2B 均通过「设置 → 沙箱后端」的同一套空间配置与检查接口维护；远端模板从目标集群实时拉取，缺少 WeKnora 标准模板时自动创建。三者都是会话级持久沙箱，提供 shell_exec、附件暂存与产物收集。本机开发用 Docker 后端连本机 daemon；生产环境使用 E2B 协议后端：E2B Cloud、CubeSandbox，或任意 E2B 兼容控制面，接入方式见 `docs/sandbox-protocol.md`。
 
 **Manager 与校验器**（`internal/sandbox/manager.go`、`validator.go`）：每次执行前，除非 `SkipValidation`，`ScriptValidator` 会做四类静态校验，任一命中即拒绝执行并返回 `ErrSecurityViolation`：
 
@@ -431,7 +431,7 @@ Manager 初始化时：`disabled` 模式的 `disabledSandbox` 拒绝一切执行
 
 ### 5.4 沙箱文件工具的契约
 
-`write_sandbox_file` / `read_sandbox_file` / `edit_sandbox_file` 三个工具共用一套上限与并发约定，设计目标是：**模型能写出来的文件，必须能读回来、能局部改，且不会因为一次响应写不完就前功尽弃。**
+`write_sandbox_file` / `read_file` / `edit_sandbox_file` 三个工具共用一套上限与并发约定，设计目标是：**模型能写出来的文件，必须能读回来、能局部改，且不会因为一次响应写不完就前功尽弃。**
 
 **写：按 completion 预算给出建议大小，但不据此拒绝。** 工具描述里告诉模型的单次 `content` 建议上限不是写死的常量，而是由本轮 `MaxCompletionTokens` 推导（`writeBudgetBytes`，见 `internal/agent/tools/sandbox_write.go`）。理由是：真正卡住一次写入的从来不是某个字节数，而是模型这一轮还能吐多少 token；如果用户在前端把 `max_completion_token` 调小，一个固定的 256 KiB 上限就成了谎言——模型以为能写，实际参数在半路被截断。
 

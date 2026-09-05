@@ -47,19 +47,17 @@ WeKnora 所有容器都从 Docker Hub 拉镜像（`wechatopenai/weknora-*`），
 
 ```
 - ./config/config.yaml      (单文件)
-- ./skills/preloaded/       (目录)
 ```
 
-所以镜像里需要的运行时文件**总共不到 100KB**：
+所以镜像里需要的运行时文件**总共不到 50KB**：
 
 | 文件 | 大小 | 用途 |
 |---|---|---|
 | `docker-compose.yml` | 12K | 容器编排 |
 | `.env` | 12K | 环境变量 |
 | `config/config.yaml` | 8K | 后端业务配置 |
-| `skills/preloaded/` | 56K | Agent 预置技能 |
 
-`prepare.sh` 用 `curl + tar` 只下载这 4 项，不 `git clone`。
+`prepare.sh` 用 `curl + tar` 只下载这 3 项，不 `git clone`。
 
 ## 镜像里启动哪些容器
 

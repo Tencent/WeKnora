@@ -1048,7 +1048,7 @@ export default {
       sandboxBackendMissing: 'Config deleted',
       sandboxNoConfigs: 'This workspace has no sandbox yet, so skill scripts will not run.',
       skillsInfoTitle: 'How Skills and the sandbox work together',
-      skillsInfoContent: 'Skills are preloaded knowledge modules whose scripts run in the selected sandbox. The list comes from skills installed there. Once a session sandbox exists, its attachments, artifacts, and teardown stay pinned to the config it was created on — changing the sandbox only affects later sessions.'
+      skillsInfoContent: 'Skills are knowledge modules whose scripts run in the selected sandbox. The list comes from skills installed there. Once a session sandbox exists, its attachments, artifacts, and teardown stay pinned to the config it was created on — changing the sandbox only affects later sessions.'
     },
     selector: {
       title: 'Select Agent',
@@ -5444,6 +5444,7 @@ export default {
       readSkill: 'Read Skill',
       executeSkillScript: 'Execute Skill Script',
       listSandboxFiles: 'List sandbox files',
+      readFile: 'Read file',
       readSandboxFile: 'Read sandbox file',
       writeSandboxFile: 'Write sandbox file',
       editSandboxFile: 'Edit sandbox file',
