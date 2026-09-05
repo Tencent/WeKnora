@@ -91,6 +91,9 @@ func TestCreateSystemUserCreatesUserWithExplicitPassword(t *testing.T) {
 			resp.GeneratedPassword,
 		)
 	}
+	if resp.Idempotent {
+		t.Fatal("fresh create must not set idempotent")
+	}
 	if users.gotReq == nil || users.gotReq.Password == nil || *users.gotReq.Password != "PlainPass9" {
 		t.Fatalf("service received unexpected request: %+v", users.gotReq)
 	}
@@ -132,6 +135,9 @@ func TestCreateSystemUserAutoGeneratesPasswordWhenEmpty(t *testing.T) {
 	}
 	if resp.GeneratedPassword != "G3n3r4t3dP4ssw0rd" {
 		t.Fatalf("generated_password=%q, want the once-only generated password", resp.GeneratedPassword)
+	}
+	if resp.Idempotent {
+		t.Fatal("fresh auto-generate create must not set idempotent")
 	}
 	if users.gotReq == nil || users.gotReq.Password != nil {
 		t.Fatalf("absent password must reach the service as nil, got %+v", users.gotReq)
@@ -259,6 +265,9 @@ func TestCreateSystemUserDuplicateIdentityReturnsExistingUser(t *testing.T) {
 	}
 	if resp.GeneratedPassword != "" {
 		t.Fatalf("generated_password=%q, want empty for an existing user", resp.GeneratedPassword)
+	}
+	if !resp.Idempotent {
+		t.Fatal("duplicate identity 200 must set idempotent=true so the SPA can tell it from a 201")
 	}
 	if len(audits.entries) != 1 || audits.entries[0].Action != types.AuditActionSystemUserCreated {
 		t.Fatalf("expected one %s audit entry, got %+v", types.AuditActionSystemUserCreated, audits.entries)

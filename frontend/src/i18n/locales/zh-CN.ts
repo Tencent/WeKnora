@@ -2786,8 +2786,8 @@ export default {
         confirmPasswordPlaceholder: '再次输入新密码',
         confirmBtn: '创建用户',
         success: '用户已创建',
-        successSuppliedPassword: '已提交。若该用户此前已存在，则未对其做任何更改（包括密码）。',
         successIdempotent: '用户已存在，未做任何更改',
+        missingPassword: '用户已创建，但未返回生成的密码。请使用重置密码来恢复访问。',
         failed: '创建用户失败',
         validation: {
           usernameRequired: '请输入用户名',

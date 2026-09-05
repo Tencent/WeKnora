@@ -5,8 +5,9 @@
   toggle revealing new/confirm password fields) and, when the server mints a
   one-time password, a reveal view that must be acknowledged before the
   dialog can close (overlay click, Esc, and the close button are disabled
-  via `locked`). The idempotent 200 OK path (no generated_password) closes
-  with its own success toast instead.
+  via `locked`). Esc is also captured on window so the parent Settings
+  modal cannot unmount this dialog and discard the password. The idempotent
+  retry path closes with its own success toast instead.
 
   Visibility is owned by the parent via v-model:visible. Every user-visible
   message is also emitted via `announced` so the parent's sr-only live
@@ -36,7 +37,9 @@
     :close-btn="!locked"
     :close-on-esc-keydown="!locked"
     @update:visible="onVisibleChange"
-    @close="resetForm"
+    @esc-keydown="onEscKeydown"
+    @close="resetFormFields"
+    @closed="onClosed"
     @confirm="submit"
   >
     <template v-if="createUserSuccess">
@@ -63,12 +66,7 @@
             {{ t('system.globalSettings.createUser.generated.passwordLabel') }}
           </span>
           <div class="create-user-reveal-password">
-            <t-input
-              v-model="createUserSuccess.generatedPassword"
-              readonly
-              type="password"
-              class="create-user-reveal-password-field"
-            />
+            <pre class="create-user-reveal-password-value">{{ createUserSuccess.generatedPassword }}</pre>
             <t-button theme="primary" variant="outline" @click="copyGeneratedPassword">
               {{ t('system.globalSettings.createUser.generated.copyBtn') }}
             </t-button>
@@ -150,7 +148,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import type { FormInstanceFunctions, FormRule } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -158,6 +156,13 @@ import { createSystemUser, type CreateSystemUserRequest } from '@/api/system'
 import { getAuthConfig } from '@/api/auth'
 import { copyWithToast } from '@/utils/clipboard'
 import { newPasswordRules } from '@/utils/passwordPolicy'
+import {
+  applyCreateUserResponse,
+  captureLockedEscape,
+  resolveCreateUserView,
+  shouldAcceptCreateUserSubmit,
+  type CreateUserReveal,
+} from './createUserDialogState'
 
 const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits<{
@@ -176,23 +181,21 @@ const form = reactive({
   newPassword: '',
   confirmPassword: '',
 })
-// Non-null switches the dialog to the reveal view; cleared on close so
-// the success view survives the close animation.
-const createUserSuccess = ref<{ username: string; email: string; generatedPassword: string } | null>(null)
-// While submitting or showing the reveal view, the dialog can only be
-// dismissed through its footer / acknowledge actions.
+// Non-null switches the dialog to the reveal view. Cleared on the next
+// open and after the close animation so the password stays on screen
+// while the dialog is leaving.
+const createUserSuccess = ref<CreateUserReveal | null>(null)
 const locked = computed(() => submitting.value || createUserSuccess.value !== null)
-// Mirror SystemSettings.vue: the backend's password policy strictness is
-// toggled by the complex_password setting, fetched from the auth config.
 const complexPasswordEnabled = ref(false)
+
 const loadAuthConfig = async () => {
-  try {
-    const resp = await getAuthConfig()
-    complexPasswordEnabled.value = !!resp.complex_password_enabled
-  } catch {
-    complexPasswordEnabled.value = false
+  const resp = await getAuthConfig()
+  complexPasswordEnabled.value = !!resp.complex_password_enabled
+  if (!resp.success) {
+    MessagePlugin.warning(t('system.globalSettings.messages.loadFailed'))
   }
 }
+
 // autoGenerate hides the password fields (v-if), so they are never
 // registered with the form and need no skip-guard in their rules.
 const rules = computed<Record<string, FormRule[]>>(() => ({
@@ -209,41 +212,72 @@ const rules = computed<Record<string, FormRule[]>>(() => ({
     { required: true, message: t('system.globalSettings.createUser.validation.confirmRequired'), trigger: 'blur' },
     {
       validator: (value: string) => value === form.newPassword,
-      message: t('auth.passwordMismatch'),
+      message: t('system.globalSettings.createUser.validation.passwordMismatch'),
       trigger: 'blur',
     },
   ],
 }))
 
-watch(() => props.visible, (visible) => {
-  if (visible) {
-    resetForm()
-    loadAuthConfig()
-    nextTick(() => formRef.value?.clearValidate?.())
-  }
+watch(() => props.visible, async (visible) => {
+  if (!visible) return
+  createUserSuccess.value = null
+  resetFormFields()
+  await loadAuthConfig()
+  await nextTick()
+  formRef.value?.clearValidate?.()
 })
 
 function onVisibleChange(visible: boolean) {
   emit('update:visible', visible)
 }
 
-function resetForm() {
+function onEscKeydown(ctx: { e: KeyboardEvent }) {
+  captureLockedEscape(props.visible, locked.value, ctx.e)
+}
+
+function onWindowEscCapture(e: KeyboardEvent) {
+  captureLockedEscape(props.visible, locked.value, e)
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onWindowEscCapture, true)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onWindowEscCapture, true)
+})
+
+function resetFormFields() {
   form.username = ''
   form.email = ''
   form.autoGenerate = true
   form.newPassword = ''
   form.confirmPassword = ''
-  createUserSuccess.value = null
   formRef.value?.clearValidate?.()
 }
 
-async function submit() {
-  if (submitting.value) return
-  const valid = await formRef.value?.validate?.()
-  if (valid !== true) return
+function onClosed() {
+  if (!props.visible) {
+    createUserSuccess.value = null
+  }
+}
 
+function announce(msg: string, kind: 'success' | 'error' = 'success') {
+  emit('announced', msg)
+  if (kind === 'error') {
+    MessagePlugin.error(msg)
+  } else {
+    MessagePlugin.success(msg)
+  }
+}
+
+async function submit() {
+  if (!shouldAcceptCreateUserSubmit(submitting.value, createUserSuccess.value !== null)) return
   submitting.value = true
   try {
+    const valid = await formRef.value?.validate?.()
+    if (valid !== true) return
+
     const payload: CreateSystemUserRequest = {
       username: form.username.trim(),
       email: form.email.trim(),
@@ -252,35 +286,28 @@ async function submit() {
       payload.password = form.newPassword
     }
     const response = await createSystemUser(payload)
-    const generated = response.generated_password ?? ''
-    if (generated) {
-      // One-time plaintext password: keep the dialog open on the reveal
-      // view until the admin explicitly acknowledges.
-      createUserSuccess.value = {
-        username: payload.username,
-        email: payload.email,
-        generatedPassword: generated,
-      }
+    const view = resolveCreateUserView(
+      response,
+      { username: payload.username, email: payload.email },
+      form.autoGenerate,
+    )
+    const next = applyCreateUserResponse(createUserSuccess.value, view)
+    createUserSuccess.value = next.success
+    if (next.notice === 'reveal') {
       emit('announced', t('system.globalSettings.createUser.success'))
-    } else if (!form.autoGenerate) {
-      // TODO: a fresh 201 create and an idempotent 200 retry return
-      // identical bodies (the API client drops the HTTP status), so the
-      // message is worded to be true for both.
-      const msg = t('system.globalSettings.createUser.successSuppliedPassword')
-      emit('announced', msg)
-      MessagePlugin.success(msg)
-      emit('update:visible', false)
-    } else {
-      // Idempotent path: identity already existed, nothing was minted.
-      const msg = t('system.globalSettings.createUser.successIdempotent')
-      emit('announced', msg)
-      MessagePlugin.success(msg)
+    } else if (next.notice === 'created') {
+      announce(t('system.globalSettings.createUser.success'))
+    } else if (next.notice === 'idempotent') {
+      announce(t('system.globalSettings.createUser.successIdempotent'))
+    } else if (next.notice === 'missingPassword') {
+      announce(t('system.globalSettings.createUser.missingPassword'), 'error')
+    }
+    if (next.close) {
       emit('update:visible', false)
     }
   } catch (err: any) {
     const msg = err?.message || t('system.globalSettings.createUser.failed')
-    emit('announced', msg)
-    MessagePlugin.error(msg)
+    announce(msg, 'error')
   } finally {
     submitting.value = false
   }
@@ -345,8 +372,20 @@ function acknowledge() {
     align-items: stretch;
   }
 
-  .create-user-reveal-password-field {
+  .create-user-reveal-password-value {
     flex: 1;
+    margin: 0;
+    padding: 8px 12px;
+    font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    font-size: 14px;
+    line-height: 22px;
+    color: var(--td-text-color-primary);
+    background: var(--td-bg-color-container-hover);
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 6px;
+    word-break: break-all;
+    white-space: pre-wrap;
+    user-select: all;
   }
 
   .create-user-acknowledge {
