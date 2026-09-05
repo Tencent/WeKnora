@@ -1341,6 +1341,7 @@ export default {
       readSkill: '讀取技能',
       executeSkillScript: '執行技能指令碼',
       listSandboxFiles: '列出沙箱檔案',
+      readFile: '讀取檔案',
       readSandboxFile: '讀取沙箱檔案',
       writeSandboxFile: '寫入沙箱檔案',
       editSandboxFile: '編輯沙箱檔案',
@@ -2627,7 +2628,10 @@ export default {
       emptyDescription: '該服務未提供工具或資源',
       requireApproval: '需人工稽核',
       requireApprovalTip: '開啟後，Agent 呼叫該工具前會暫停並等待確認，適用於可能改庫/刪檔案等高危操作',
-      approvalSaveFailed: '儲存稽核設定失敗'
+      approvalSaveFailed: '儲存稽核設定失敗',
+      toolEnabled: '啟用工具',
+      toolEnabledTip: '關閉後，Agent 將不會再看到或呼叫該工具',
+      toolEnabledSaveFailed: '儲存工具開關失敗'
     }
   },
   system: {
