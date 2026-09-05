@@ -154,6 +154,13 @@ func (deepseekProvider) ShapeRequest(req *openai.ChatCompletionRequest, opts *Ch
 	if opts != nil && opts.ToolChoice != "" {
 		req.ToolChoice = nil
 	}
+	// DeepSeek documents max_tokens only and silently ignores
+	// max_completion_tokens, so migrate the modern field back onto the legacy
+	// one to keep the completion budget effective for agent callers.
+	if req.MaxTokens == 0 && req.MaxCompletionTokens > 0 {
+		req.MaxTokens = req.MaxCompletionTokens
+		req.MaxCompletionTokens = 0
+	}
 }
 
 // --- Generic (vLLM) / NVIDIA / LiteLLM: thinking via chat_template_kwargs ---
