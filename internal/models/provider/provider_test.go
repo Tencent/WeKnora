@@ -379,3 +379,33 @@ func TestLiteLLMProviderValidation(t *testing.T) {
 		assert.True(t, foundEmbed, "LiteLLM should appear for embedding models")
 	})
 }
+
+func TestSynthoraiProviderValidation(t *testing.T) {
+	p := &SynthoraiProvider{}
+
+	t.Run("valid config", func(t *testing.T) {
+		config := &Config{
+			APIKey:    "test-key",
+			ModelName: "claude-opus-5",
+		}
+		err := p.ValidateConfig(config)
+		assert.NoError(t, err)
+	})
+
+	t.Run("missing API key", func(t *testing.T) {
+		config := &Config{
+			ModelName: "claude-opus-5",
+		}
+		err := p.ValidateConfig(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "API key")
+	})
+
+	t.Run("info", func(t *testing.T) {
+		info := p.Info()
+		assert.Equal(t, ProviderSynthorai, info.Name)
+		assert.Equal(t, "Synthorai", info.DisplayName)
+		assert.True(t, info.RequiresAuth)
+		assert.Equal(t, SynthoraiBaseURL, info.DefaultURLs[types.ModelTypeKnowledgeQA])
+	})
+}

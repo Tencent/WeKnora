@@ -4361,6 +4361,10 @@ export default {
           label: 'LiteLLM',
           description: 'Self-hosted proxy to 100+ providers (OpenAI, Anthropic, Gemini, Bedrock, etc.). Replace the placeholder URL; loopback hosts need SSRF_WHITELIST.'
         },
+        synthorai: {
+          label: 'Synthorai',
+          description: 'OpenAI-compatible gateway serving Claude, GPT, Gemini, DeepSeek, Qwen and GLM behind one key.'
+        },
         requesty: {
           label: 'Requesty',
           description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.'

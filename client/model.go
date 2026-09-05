@@ -49,6 +49,7 @@ const (
 	ModelSourceJina        ModelSource = "jina"         // Jina AI model
 	ModelSourceOpenRouter  ModelSource = "openrouter"   // OpenRouter model
 	ModelSourceLiteLLM     ModelSource = "litellm"      // LiteLLM proxy model
+	ModelSourceSynthorai   ModelSource = "synthorai"    // Synthorai model
 	ModelSourceRequesty    ModelSource = "requesty"     // Requesty model
 	ModelSourceNvidia      ModelSource = "nvidia"       // NVIDIA model
 	ModelSourceNovita      ModelSource = "novita"       // Novita AI model

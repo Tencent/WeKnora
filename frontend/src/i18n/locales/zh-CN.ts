@@ -2475,6 +2475,10 @@ export default {
           label: '自定义 (OpenAI兼容接口)',
           description: 'Generic API endpoint (OpenAI-compatible)'
         },
+        synthorai: {
+          label: 'Synthorai',
+          description: 'OpenAI 兼容网关,一个 key 直连 Claude、GPT、Gemini、DeepSeek、Qwen、GLM 等模型。'
+        },
         requesty: {
           label: 'Requesty',
           description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.'
