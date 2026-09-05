@@ -296,17 +296,11 @@ func buildProcessingStatus(video model.Video, jobs []model.VideoProcessingJob) P
 			continue
 		}
 		isUpstreamStage := job.JobType == "transcription" || job.JobType == "subtitle_generate"
-		if !isUpstreamStage && video.TranscriptGeneration != "" && job.TranscriptGeneration != "" && job.TranscriptGeneration != video.TranscriptGeneration {
+		if !isUpstreamStage && video.TranscriptGeneration != "" && job.TranscriptGeneration != video.TranscriptGeneration {
 			continue
 		}
 		previous, exists := latest[job.JobType]
-		candidateIsCurrent := video.TranscriptGeneration != "" && job.TranscriptGeneration == video.TranscriptGeneration
-		previousIsCurrent := video.TranscriptGeneration != "" && previous.TranscriptGeneration == video.TranscriptGeneration
-		candidateIsNewTranscription := job.JobType == "transcription" && job.TranscriptGeneration == "" && (job.Status == "pending" || job.Status == "running")
-		previousIsNewTranscription := previous.JobType == "transcription" && previous.TranscriptGeneration == "" && (previous.Status == "pending" || previous.Status == "running")
-		if !exists || (candidateIsNewTranscription && !previousIsNewTranscription) ||
-			(candidateIsCurrent && !previousIsCurrent && !previousIsNewTranscription) ||
-			(candidateIsCurrent == previousIsCurrent && candidateIsNewTranscription == previousIsNewTranscription && job.UpdatedAt.After(previous.UpdatedAt)) {
+		if !exists || prefersProcessingJob(video, job, previous) {
 			latest[job.JobType] = job
 		}
 	}
@@ -451,6 +445,90 @@ func buildProcessingStatus(video model.Video, jobs []model.VideoProcessingJob) P
 		response.CurrentStage = nextIncompleteStage(latest)
 	}
 	return response
+}
+
+// prefersProcessingJob selects the effective attempt for a stage. A stage can
+// legitimately have a draft and a final attempt at the same time. Activity is
+// considered before timestamps so a newer pending final attempt cannot make a
+// currently running draft appear to have regressed to pending.
+func prefersProcessingJob(video model.Video, candidate, previous model.VideoProcessingJob) bool {
+	// A new transcription has no generation until its provider task completes.
+	// Keep an active unbound transcription ahead of an older bound attempt.
+	candidateNewTranscription := candidate.JobType == "transcription" && candidate.TranscriptGeneration == "" && isActiveProcessingStatus(candidate.Status)
+	previousNewTranscription := previous.JobType == "transcription" && previous.TranscriptGeneration == "" && isActiveProcessingStatus(previous.Status)
+	if candidateNewTranscription != previousNewTranscription {
+		return candidateNewTranscription
+	}
+	// A successful formal result is authoritative over an in-flight draft. A
+	// pending/running formal attempt does not get this shortcut: the draft is
+	// still the effective status until that attempt produces a result.
+	candidateFinalSuccess := processingResultStageRank(candidate.ResultStage) == 2 && candidate.Status == "succeeded" && stageArtifactAvailable(video, candidate)
+	previousFinalSuccess := processingResultStageRank(previous.ResultStage) == 2 && previous.Status == "succeeded" && stageArtifactAvailable(video, previous)
+	if candidateFinalSuccess != previousFinalSuccess {
+		return candidateFinalSuccess
+	}
+
+	candidateCurrent := video.TranscriptGeneration != "" && candidate.TranscriptGeneration == video.TranscriptGeneration
+	previousCurrent := video.TranscriptGeneration != "" && previous.TranscriptGeneration == video.TranscriptGeneration
+	if candidateCurrent != previousCurrent {
+		return candidateCurrent
+	}
+
+	candidateActivity := processingActivityRank(candidate.Status)
+	previousActivity := processingActivityRank(previous.Status)
+	if candidateActivity != previousActivity {
+		return candidateActivity > previousActivity
+	}
+	// When both attempts are terminal, prefer the one whose claimed result is
+	// actually readable. A stale successful final row must not hide a usable
+	// completed draft merely because its result_stage sorts later.
+	candidateReadableSuccess := candidate.Status == "succeeded" && stageArtifactAvailable(video, candidate)
+	previousReadableSuccess := previous.Status == "succeeded" && stageArtifactAvailable(video, previous)
+	if candidateReadableSuccess != previousReadableSuccess && !isActiveProcessingStatus(candidate.Status) && !isActiveProcessingStatus(previous.Status) {
+		return candidateReadableSuccess
+	}
+
+	// For equal activity, prefer the formal result over a draft. This keeps a
+	// final attempt visible when both attempts are waiting or terminal.
+	candidateStage := processingResultStageRank(candidate.ResultStage)
+	previousStage := processingResultStageRank(previous.ResultStage)
+	if candidateStage != previousStage {
+		return candidateStage > previousStage
+	}
+	if candidate.UpdatedAt.Equal(previous.UpdatedAt) {
+		return candidate.ID > previous.ID
+	}
+	return candidate.UpdatedAt.After(previous.UpdatedAt)
+}
+
+func isActiveProcessingStatus(status string) bool {
+	return status == "pending" || status == "running"
+}
+
+func processingActivityRank(status string) int {
+	switch status {
+	case "running":
+		return 3
+	case "pending":
+		return 2
+	case "succeeded", "failed":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func processingResultStageRank(stage string) int {
+	switch strings.ToLower(strings.TrimSpace(stage)) {
+	case "draft", "draft_ready":
+		return 1
+	case "", "final", "final_ready":
+		// Empty is the legacy representation of a final result. The artifact
+		// selector treats every non-draft attempt as final as well.
+		return 2
+	default:
+		return 0
+	}
 }
 
 func processingJobStatus(job model.VideoProcessingJob) ProcessingJobStatus {

@@ -48,6 +48,7 @@ type TranscriptionHandler struct {
 	MinIO                    *objstore.Client
 	InternalFrontendBaseURL  string
 	SourcePreparationTimeout time.Duration
+	DraftsEnabled            bool
 	SourcePreparer           SourcePreparer
 	MPSInputPreparer         MPSInputPreparer
 }
@@ -83,6 +84,13 @@ func NewTranscriptionHandler(db *gorm.DB, t TongyiClient, internalFrontendBaseUR
 		internalURL = strings.TrimRight(strings.TrimSpace(internalFrontendBaseURL[0]), "/")
 	}
 	return &TranscriptionHandler{DB: db, Tongyi: t, InternalFrontendBaseURL: internalURL, SourcePreparationTimeout: transcriptionSourcePrepareTimeout}
+}
+
+// SetDraftsEnabled controls whether the MPS path creates early draft jobs.
+// Formal outline and summary jobs remain the default so drafts cannot consume
+// the processing slots needed by the active transcript generation.
+func (h *TranscriptionHandler) SetDraftsEnabled(enabled bool) {
+	h.DraftsEnabled = enabled
 }
 
 // JobType job 类型
@@ -319,9 +327,6 @@ func (h *TranscriptionHandler) runMPS(ctx context.Context, job *model.VideoProce
 			}
 			payload, _ := json.Marshal(map[string]any{"task_id": job.ExternalTaskID, "provider": mps.Provider, "mps_result": json.RawMessage(resultJSON), "completed_at": time.Now().UTC()})
 			subtitleJob := model.VideoProcessingJob{ID: uuid.NewString(), VideoID: video.ID, JobType: "subtitle_generate", TranscriptGeneration: job.TranscriptGeneration, Provider: mps.Provider, Status: "pending", MaxAttempts: 3, InputPayload: fmt.Sprintf(`{"transcription_job_id":%q}`, job.ID), IdempotencyKey: fmt.Sprintf("subtitle_generate:%s:%s", video.ID, job.ID)}
-			draftInput := fmt.Sprintf(`{"transcription_job_id":%q,"transcript_generation":%q}`, job.ID, job.TranscriptGeneration)
-			draftOutline := model.VideoProcessingJob{ID: uuid.NewString(), VideoID: video.ID, JobType: "outline", TranscriptGeneration: job.TranscriptGeneration, Provider: "llm", ResultStage: "draft", Status: "pending", MaxAttempts: 3, InputPayload: draftInput, IdempotencyKey: fmt.Sprintf("outline:draft:%s:%s", video.ID, job.TranscriptGeneration)}
-			draftSummary := model.VideoProcessingJob{ID: uuid.NewString(), VideoID: video.ID, JobType: "summary", TranscriptGeneration: job.TranscriptGeneration, Provider: "llm", ResultStage: "draft", Status: "pending", MaxAttempts: 3, InputPayload: draftInput, IdempotencyKey: fmt.Sprintf("summary:draft:%s:%s", video.ID, job.TranscriptGeneration)}
 			if err := h.DB.Transaction(func(tx *gorm.DB) error {
 				if err := tx.Model(job).Updates(map[string]any{"result_payload": string(payload), "transcript_generation": job.TranscriptGeneration}).Error; err != nil {
 					return err
@@ -329,6 +334,12 @@ func (h *TranscriptionHandler) runMPS(ctx context.Context, job *model.VideoProce
 				if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "idempotency_key"}}, DoNothing: true}).Create(&subtitleJob).Error; err != nil {
 					return err
 				}
+				if !h.DraftsEnabled {
+					return nil
+				}
+				draftInput := fmt.Sprintf(`{"transcription_job_id":%q,"transcript_generation":%q}`, job.ID, job.TranscriptGeneration)
+				draftOutline := model.VideoProcessingJob{ID: uuid.NewString(), VideoID: video.ID, JobType: "outline", TranscriptGeneration: job.TranscriptGeneration, Provider: "llm", ResultStage: "draft", Status: "pending", MaxAttempts: 3, InputPayload: draftInput, IdempotencyKey: fmt.Sprintf("outline:draft:%s:%s", video.ID, job.TranscriptGeneration)}
+				draftSummary := model.VideoProcessingJob{ID: uuid.NewString(), VideoID: video.ID, JobType: "summary", TranscriptGeneration: job.TranscriptGeneration, Provider: "llm", ResultStage: "draft", Status: "pending", MaxAttempts: 3, InputPayload: draftInput, IdempotencyKey: fmt.Sprintf("summary:draft:%s:%s", video.ID, job.TranscriptGeneration)}
 				if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "idempotency_key"}}, DoNothing: true}).Create(&draftOutline).Error; err != nil {
 					return err
 				}

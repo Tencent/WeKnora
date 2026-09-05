@@ -1,6 +1,9 @@
 package knowledge
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestMapSkillToKnowledgeTypeSupportsSkillOntology(t *testing.T) {
 	tests := map[string]KnowledgeType{
@@ -56,12 +59,13 @@ func TestValidateWikiObjectPageEnforcesFiveTypeContract(t *testing.T) {
 knowledge_object_id: object-1
 type: methodology
 primary_type: methodology
+information_nature: 方法论
 source_video_id: video-1
 transcript_generation: generation-1
 audit_status: passed
 classification_confidence: 0.92
 evidence_ids: [chunk-1]
-source_refs: [chunk-1]
+source_refs: [source-document-1]
 structure_fields:
   input: 留存曲线
   steps: 按渠道拆分并对比异常
@@ -88,6 +92,86 @@ structure_fields:
 		if _, err := ValidateWikiObjectPage(invalid, "index", "video-1", "generation-1"); err == nil {
 			t.Fatalf("expected invalid Wiki object to fail: %s", invalid)
 		}
+	}
+}
+
+func TestValidateWikiObjectPageSeparatesEvidenceIDsFromSourceRefs(t *testing.T) {
+	content := `---
+knowledge_object_id: object-1
+type: concept
+primary_type: concept
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+information_nature: 概念
+classification_confidence: 0.92
+evidence_ids: [transcript-chunk-1]
+source_refs: [source-document-1]
+structure_fields:
+  definition: 稳定定义
+  mechanism: 运行机制
+---
+# 网络效应`
+	result, err := ValidateWikiObjectPage(content, "index", "video-1", "generation-1")
+	if err != nil {
+		t.Fatalf("distinct source and evidence IDs must be accepted: %v", err)
+	}
+	if result.SourceRefs[0] != "source-document-1" {
+		t.Fatalf("source refs = %v", result.SourceRefs)
+	}
+	missing := strings.Replace(content, "source_refs: [source-document-1]", "source_refs: []", 1)
+	if _, err := ValidateWikiObjectPage(missing, "index", "video-1", "generation-1"); err == nil || !strings.Contains(err.Error(), "source document ID") {
+		t.Fatalf("empty source_refs must be rejected, got %v", err)
+	}
+}
+
+func TestValidateWikiObjectPageRejectsDeclaredNonIndexPageType(t *testing.T) {
+	content := `---
+knowledge_object_id: object-1
+type: concept
+primary_type: concept
+page_type: concept
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+classification_confidence: 0.92
+evidence_ids: [chunk-1]
+source_refs: [chunk-1]
+structure_fields:
+  definition: 稳定定义
+  mechanism: 运行机制
+---
+# 网络效应`
+	_, err := ValidateWikiObjectPage(content, "index", "video-1", "generation-1")
+	if err == nil || !strings.Contains(err.Error(), "frontmatter page_type") {
+		t.Fatalf("expected declared non-index page_type to fail, got %v", err)
+	}
+}
+
+func TestValidateWikiObjectPageRejectsInformationNatureAndEntitySubtypeMismatch(t *testing.T) {
+	content := `---
+knowledge_object_id: object-entity
+type: entity
+primary_type: entity
+entity_sub_type: person
+information_nature: 产品
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+classification_confidence: 0.92
+evidence_ids: [chunk-1]
+source_refs: [chunk-1]
+structure_fields:
+  identity: 创业者
+---
+# 张三`
+	if _, err := ValidateWikiObjectPage(content, "index", "video-1", "generation-1"); err == nil || !strings.Contains(err.Error(), "information_nature") {
+		t.Fatalf("expected information_nature mismatch to fail, got %v", err)
+	}
+	invalidSubtype := strings.Replace(content, "entity_sub_type: person", "entity_sub_type: unknown", 1)
+	invalidSubtype = strings.Replace(invalidSubtype, "information_nature: 产品", "information_nature: 人物", 1)
+	if _, err := ValidateWikiObjectPage(invalidSubtype, "index", "video-1", "generation-1"); err == nil || !strings.Contains(err.Error(), "entity_sub_type") {
+		t.Fatalf("expected invalid entity_sub_type to fail, got %v", err)
 	}
 }
 

@@ -636,7 +636,7 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 
 // WikiPageResp 单页 Wiki 响应（CP-T009）
 type WikiPageResp struct {
-	Status                   string            `json:"status"`
+	Status                   string            `json:"status"` // completed / partial
 	Stage                    string            `json:"stage"`
 	ErrorCode                string            `json:"error_code"`
 	ErrorMessage             string            `json:"error_message"`
@@ -648,6 +648,10 @@ type WikiPageResp struct {
 	TranscriptGeneration     string            `json:"transcript_generation"`
 	ArtifactVersion          int               `json:"artifact_version"`
 	SchemaVersion            int               `json:"schema_version,omitempty"`
+	Partial                  bool              `json:"partial,omitempty"`
+	CompletedChapters        int               `json:"completed_chapters,omitempty"`
+	TotalChapters            int               `json:"total_chapters,omitempty"`
+	NextChapterIndex         int               `json:"next_chapter_index,omitempty"`
 	Chapters                 []outline.Chapter `json:"chapters,omitempty"`
 	SummarySource            string            `json:"summary_source,omitempty"`
 	SummaryKnowledgeEnhanced bool              `json:"summary_knowledge_enhanced,omitempty"`
@@ -754,7 +758,12 @@ func (h *ContentHandler) readWikiPageCandidate(ctx context.Context, video *model
 			if pageSchemaVersion, ok := frontmatterInt(frontmatter, "schema_version"); !ok || pageSchemaVersion != outline.SchemaVersion {
 				return nil, &contentArtifactFailure{httpStatus: http.StatusInternalServerError, code: "artifact_invalid", message: "outline page schema_version is unsupported"}
 			}
-			if validateErr := outline.Validate(document, video.DurationSeconds, nil); validateErr != nil {
+			partial := candidate.stage == "draft" && frontmatterBool(frontmatter, "partial")
+			validateErr := outline.Validate(document, video.DurationSeconds, nil)
+			if partial {
+				validateErr = outline.ValidatePartial(document, video.DurationSeconds, nil)
+			}
+			if validateErr != nil {
 				return nil, &contentArtifactFailure{httpStatus: http.StatusInternalServerError, code: "artifact_invalid", message: validateErr.Error()}
 			}
 			canonical = document
@@ -778,8 +787,21 @@ func (h *ContentHandler) readWikiPageCandidate(ctx context.Context, video *model
 	if updatedAt.IsZero() {
 		updatedAt = video.UpdatedAt
 	}
+	partial := pageType == "outline" && candidate.stage == "draft" && frontmatterBool(frontmatter, "partial")
+	completedChapters := frontmatterIntOr(frontmatter, "completed_chapters", len(canonical.Chapters))
+	totalChapters := frontmatterIntOr(frontmatter, "total_chapters", completedChapters)
+	if completedChapters < 0 {
+		completedChapters = 0
+	}
+	if totalChapters < completedChapters {
+		totalChapters = completedChapters
+	}
+	status := "completed"
+	if partial {
+		status = "partial"
+	}
 	return &WikiPageResp{
-		Status:                   "completed",
+		Status:                   status,
 		Stage:                    pageType,
 		ResultStage:              candidate.stage,
 		UpdatedAt:                updatedAt,
@@ -789,6 +811,10 @@ func (h *ContentHandler) readWikiPageCandidate(ctx context.Context, video *model
 		TranscriptGeneration:     video.TranscriptGeneration,
 		ArtifactVersion:          page.Version,
 		SchemaVersion:            canonical.SchemaVersion,
+		Partial:                  partial,
+		CompletedChapters:        completedChapters,
+		TotalChapters:            totalChapters,
+		NextChapterIndex:         completedChapters + 1,
 		Chapters:                 canonical.Chapters,
 		SummarySource:            video.SummarySource,
 		SummaryKnowledgeEnhanced: video.SummaryKnowledgeEnhanced,
@@ -798,6 +824,29 @@ func (h *ContentHandler) readWikiPageCandidate(ctx context.Context, video *model
 		Content:                  responseContent,
 		Frontmatter:              frontmatter,
 	}, nil
+}
+
+func frontmatterBool(frontmatter map[string]any, key string) bool {
+	value, ok := frontmatter[key]
+	if !ok {
+		return false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(typed))
+		return err == nil && parsed
+	default:
+		return false
+	}
+}
+
+func frontmatterIntOr(frontmatter map[string]any, key string, fallback int) int {
+	if value, ok := frontmatterInt(frontmatter, key); ok {
+		return value
+	}
+	return fallback
 }
 
 func frontmatterInt(frontmatter map[string]any, key string) (int, bool) {

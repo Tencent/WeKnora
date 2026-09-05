@@ -47,7 +47,9 @@ func TestEnqueueContentPipelinePersistsCurrentTranscriptManifest(t *testing.T) {
 	var jobs []model.VideoProcessingJob
 	require.NoError(t, db.Where("video_id = ?", video.ID).Order("job_type ASC").Find(&jobs).Error)
 	require.Len(t, jobs, 3)
+	firstIDs := make(map[string]string, len(jobs))
 	for _, job := range jobs {
+		firstIDs[job.JobType] = job.ID
 		var manifest map[string]any
 		require.NoError(t, json.Unmarshal([]byte(job.InputPayload), &manifest))
 		require.NotContains(t, manifest, "transcript_knowledge_ids")
@@ -55,6 +57,13 @@ func TestEnqueueContentPipelinePersistsCurrentTranscriptManifest(t *testing.T) {
 		require.Equal(t, "full_document", manifest["transcript_input_mode"])
 		require.Equal(t, "kb-1", manifest["transcript_source_knowledge_base_id"])
 		require.Equal(t, video.TranscriptGeneration, job.TranscriptGeneration)
+	}
+	require.NoError(t, orchestrator.EnqueueContentPipeline(t.Context(), video.ID))
+	jobs = nil
+	require.NoError(t, db.Where("video_id = ?", video.ID).Order("job_type ASC").Find(&jobs).Error)
+	require.Len(t, jobs, 3)
+	for _, job := range jobs {
+		require.Equal(t, firstIDs[job.JobType], job.ID)
 	}
 }
 
@@ -95,6 +104,42 @@ func TestAfterSkillCompleteWithIDWritesEnhancementWithoutEnqueuingFoundation(t *
 	var jobCount int64
 	require.NoError(t, db.Model(&model.VideoProcessingJob{}).Where("video_id = ?", video.ID).Count(&jobCount).Error)
 	require.Zero(t, jobCount)
+}
+
+func TestAfterSkillCompleteWithIDRejectsGlobalGraphIndex(t *testing.T) {
+	db := newOrchestratorTestDB(t)
+	video := model.Video{ID: "video-1", Title: "test", TranscriptGeneration: "generation-1"}
+	require.NoError(t, db.Create(&video).Error)
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/knowledgebase/kb-1/wiki/pages" {
+			_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{
+				Pages: []weknora.WikiPage{{
+					ID: "global-index", Slug: "index", PageType: "index",
+					Content: "---\ntype: knowledge_base\ntranscript_generation: generation-1\naudit_status: aligned\n---\n# 全局索引",
+				}},
+				Total: 1, Page: 1, PageSize: 100, TotalPages: 1,
+			})
+			return
+		}
+		if request.URL.Path == "/api/v1/knowledgebase/kb-1/wiki/pages/index" {
+			_ = json.NewEncoder(writer).Encode(weknora.WikiPage{
+				ID: "global-index", Slug: "index", PageType: "index",
+				Content: "---\ntype: knowledge_base\ntranscript_generation: generation-1\naudit_status: aligned\n---\n# 全局索引",
+			})
+			return
+		}
+		http.NotFound(writer, request)
+	}))
+	defer server.Close()
+
+	orchestrator := NewOrchestrator(db, weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL}), "kb-1")
+	_, _, err := orchestrator.AfterSkillCompleteWithID(t.Context(), video.ID, JobGraph, "global-index")
+	require.ErrorContains(t, err, "slug does not match")
+
+	var stored model.Video
+	require.NoError(t, db.First(&stored, "id = ?", video.ID).Error)
+	require.Empty(t, stored.KnowledgeBaseWikiPageID)
 }
 
 func TestAssembleMarksVideoCompletedOnlyWhenAllArtifactsExist(t *testing.T) {
@@ -411,4 +456,25 @@ func TestConcurrentEnqueueReusesOneEffectiveJob(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&model.VideoProcessingJob{}).Where("video_id = ? AND job_type = ?", video.ID, JobOutline).Count(&count).Error)
 	require.EqualValues(t, 1, count)
+}
+
+func TestEnqueueJobBindsLegacyUnboundAttemptWithoutCreatingDuplicate(t *testing.T) {
+	db := newOrchestratorTestDB(t)
+	video := model.Video{ID: "video-legacy", Title: "test", TranscriptGeneration: "generation-2"}
+	require.NoError(t, db.Create(&video).Error)
+	legacy := model.VideoProcessingJob{
+		ID: "legacy-outline", VideoID: video.ID, JobType: JobOutline,
+		Status: "pending", ResultStage: "final", IdempotencyKey: JobOutline + ":" + video.ID,
+	}
+	require.NoError(t, db.Create(&legacy).Error)
+
+	orchestrator := NewOrchestrator(db, nil, "kb-1")
+	id, err := orchestrator.EnqueueJob(context.Background(), video.ID, JobOutline)
+	require.NoError(t, err)
+	require.Equal(t, legacy.ID, id)
+
+	var jobs []model.VideoProcessingJob
+	require.NoError(t, db.Where("video_id = ? AND job_type = ?", video.ID, JobOutline).Find(&jobs).Error)
+	require.Len(t, jobs, 1)
+	require.Equal(t, video.TranscriptGeneration, jobs[0].TranscriptGeneration)
 }

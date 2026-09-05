@@ -61,6 +61,43 @@ func TestCreateManualKnowledgeRejectsEmptyResponseID(t *testing.T) {
 	}
 }
 
+func TestGetKnowledgeUsesMetadataContentWhenTopLevelContentIsEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/knowledge/knowledge-1" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"id":"knowledge-1","knowledge_base_id":"kb-1","content":"","metadata":{"content":"来自元数据的正文"},"parse_status":"completed"}}`))
+	}))
+	defer server.Close()
+
+	client := New(config.WeKnoraConfig{BaseURL: server.URL, KBID: "kb-1"})
+	result, err := client.GetKnowledge(context.Background(), "knowledge-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "来自元数据的正文" {
+		t.Fatalf("content = %q", result.Content)
+	}
+}
+
+func TestGetKnowledgePrefersTopLevelContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"id":"knowledge-1","content":"顶层正文","metadata":{"content":"元数据正文"},"parse_status":"completed"}}`))
+	}))
+	defer server.Close()
+
+	client := New(config.WeKnoraConfig{BaseURL: server.URL})
+	result, err := client.GetKnowledge(context.Background(), "knowledge-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "顶层正文" {
+		t.Fatalf("content = %q", result.Content)
+	}
+}
+
 func TestHybridSearchScopesToKnowledgeAndRequiresSuccessfulResponse(t *testing.T) {
 	client := New(config.WeKnoraConfig{BaseURL: "http://weknora.test", KBID: "kb-1"})
 	client.http = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

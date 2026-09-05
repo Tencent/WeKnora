@@ -212,6 +212,55 @@ func ValidateStored(document Document, expectedVideoType string) error {
 	return nil
 }
 
+// ValidateEnhancement ensures a knowledge-enhanced summary keeps the
+// confirmed foundation structure and transcript evidence anchors intact.
+// Knowledge may add context in block text or references, but it cannot move,
+// remove, or retarget an already-confirmed summary block.
+func ValidateEnhancement(base, enhanced Document) error {
+	if base.SchemaVersion != enhanced.SchemaVersion || base.VideoType != enhanced.VideoType {
+		return fmt.Errorf("summary enhancement changed schema or video type")
+	}
+	if len(base.Sections) != len(enhanced.Sections) {
+		return fmt.Errorf("summary enhancement changed section count")
+	}
+	for sectionIndex, baseSection := range base.Sections {
+		current := enhanced.Sections[sectionIndex]
+		if baseSection.ID != current.ID || baseSection.Title != current.Title {
+			return fmt.Errorf("summary enhancement changed section %d identity", sectionIndex+1)
+		}
+		if len(baseSection.Blocks) != len(current.Blocks) {
+			return fmt.Errorf("summary enhancement changed block count in section %q", baseSection.Title)
+		}
+		for blockIndex, baseBlock := range baseSection.Blocks {
+			block := current.Blocks[blockIndex]
+			if baseBlock.ID != block.ID || baseBlock.Kind != block.Kind {
+				return fmt.Errorf("summary enhancement changed block %q identity", baseBlock.ID)
+			}
+			if !sameStringSet(baseBlock.EvidenceChunkIDs, block.EvidenceChunkIDs) {
+				return fmt.Errorf("summary enhancement changed evidence anchors for block %q", baseBlock.ID)
+			}
+		}
+	}
+	return nil
+}
+
+func sameStringSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	counts := make(map[string]int, len(left))
+	for _, value := range left {
+		counts[value]++
+	}
+	for _, value := range right {
+		if counts[value] == 0 {
+			return false
+		}
+		counts[value]--
+	}
+	return true
+}
+
 func Validate(document Document, expectedVideoType string, knownChunkIDs map[string]struct{}) error {
 	framework, ok := Framework(expectedVideoType)
 	if !ok {

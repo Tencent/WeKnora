@@ -79,15 +79,14 @@ func MapPageTypeToKnowledgeType(pageType string, frontmatterType string) Knowled
 	}
 }
 
-// EntitySubTypes 实体 6 类细分（仅内部用，前端聚合时合并为 entity）
-var EntitySubTypes = []string{
-	"person", "organization", "product", "technology", "industry", "place",
-}
-
 // IsEntitySubType 判断是否为实体 6 类细分之一
 func IsEntitySubType(t string) bool {
-	for _, s := range EntitySubTypes {
-		if s == t {
+	digest, err := LoadDefaultFrameworkDigest()
+	if err != nil {
+		return false
+	}
+	for _, entry := range digest.Entries {
+		if entry.PrimaryType == TypeEntity && entry.EntitySubType == t {
 			return true
 		}
 	}
@@ -173,10 +172,6 @@ var wikiObjectTypes = map[string]KnowledgeType{
 	"insight":     TypeInsight,
 }
 
-var entitySubTypeSet = map[string]struct{}{
-	"person": {}, "organization": {}, "product": {}, "technology": {}, "industry": {}, "place": {},
-}
-
 var wikiLabelPattern = regexp.MustCompile(`^\s*(?:[-+*]\s*)?(?:#{1,6}\s*)?([^:：|]+)\s*[:：|]\s*(.*?)\s*$`)
 
 // ValidateWikiObjectPage validates the minimum contract required before a Wiki
@@ -190,8 +185,14 @@ func ValidateWikiObjectPage(content, pageType, expectedVideoID, expectedGenerati
 	if strings.TrimSpace(pageType) != "index" {
 		return result, fmt.Errorf("knowledge object page_type must be index")
 	}
+	if declaredPageType := strings.ToLower(strings.TrimSpace(stringValue(frontmatter["page_type"]))); declaredPageType != "" && declaredPageType != "index" {
+		return result, fmt.Errorf("knowledge object frontmatter page_type must be index")
+	}
 	primaryType := strings.ToLower(strings.TrimSpace(stringValue(frontmatter["primary_type"])))
 	rawType := strings.ToLower(strings.TrimSpace(stringValue(frontmatter["type"])))
+	if primaryType == "" || rawType == "" {
+		return result, fmt.Errorf("frontmatter must contain both type and primary_type")
+	}
 	if primaryType != "" && rawType != "" && primaryType != rawType {
 		return result, fmt.Errorf("primary_type and type must match")
 	}
@@ -210,7 +211,7 @@ func ValidateWikiObjectPage(content, pageType, expectedVideoID, expectedGenerati
 	}
 	entitySubType := strings.ToLower(strings.TrimSpace(stringValue(frontmatter["entity_sub_type"])))
 	if knowledgeType == TypeEntity {
-		if _, ok := entitySubTypeSet[entitySubType]; !ok {
+		if !IsEntitySubType(entitySubType) {
 			return result, fmt.Errorf("entity_sub_type is required for entity")
 		}
 	} else if entitySubType != "" {
@@ -246,6 +247,9 @@ func ValidateWikiObjectPage(content, pageType, expectedVideoID, expectedGenerati
 	if result.AuditStatus != "passed" {
 		return result, fmt.Errorf("audit_status must be passed")
 	}
+	if nature := strings.TrimSpace(stringValue(frontmatter["information_nature"])); nature != knowledgeInformationNature(knowledgeType, entitySubType) {
+		return result, fmt.Errorf("information_nature must be %s", knowledgeInformationNature(knowledgeType, entitySubType))
+	}
 	result.ClassificationConfidence = floatValue(frontmatter["classification_confidence"])
 	if result.ClassificationConfidence <= 0 || result.ClassificationConfidence > 1 {
 		return result, fmt.Errorf("classification_confidence must be between 0 and 1")
@@ -255,8 +259,8 @@ func ValidateWikiObjectPage(content, pageType, expectedVideoID, expectedGenerati
 		return result, fmt.Errorf("evidence_ids must contain at least one ID")
 	}
 	result.SourceRefs = stringSliceValue(frontmatter["source_refs"])
-	if !containsAllStrings(result.SourceRefs, result.EvidenceIDs) {
-		return result, fmt.Errorf("source_refs must contain all evidence_ids")
+	if len(result.SourceRefs) == 0 {
+		return result, fmt.Errorf("source_refs must contain at least one source document ID")
 	}
 	result.StructureFields = structureFields(frontmatter["structure_fields"], body)
 	required := frameworkKeys(knowledgeType, entitySubType)
@@ -280,6 +284,39 @@ func ValidateWikiObjectPage(content, pageType, expectedVideoID, expectedGenerati
 		return result, fmt.Errorf("%s requires at least %d populated structure fields", knowledgeType, minimum)
 	}
 	return result, nil
+}
+
+func knowledgeInformationNature(knowledgeType KnowledgeType, entitySubType string) string {
+	switch knowledgeType {
+	case TypeEntity:
+		switch entitySubType {
+		case "person":
+			return "人物"
+		case "organization":
+			return "机构"
+		case "product":
+			return "产品"
+		case "technology":
+			return "技术"
+		case "industry":
+			return "行业"
+		case "place":
+			return "地点"
+		}
+	case TypeConcept:
+		return "概念"
+	case TypeMethodology:
+		return "方法论"
+	case TypeCase:
+		return "案例"
+	case TypeInsight:
+		return "洞察"
+	default:
+		return ""
+	}
+	// The switch above covers every supported type; keep an explicit fallback
+	// for forward-compatible compiler behavior when new types are introduced.
+	return ""
 }
 
 func rejectMultipleTopLevelTypes(frontmatter map[string]any, rawType string) error {
@@ -532,35 +569,6 @@ func structureFields(raw any, body string) map[string]string {
 	return result
 }
 
-func frameworkKeys(knowledgeType KnowledgeType, entitySubType string) []string {
-	switch knowledgeType {
-	case TypeEntity:
-		switch entitySubType {
-		case "person":
-			return []string{"identity", "background", "expertise", "standpoint"}
-		case "organization":
-			return []string{"org_type", "industry", "stage", "core_business", "key_people"}
-		case "product":
-			return []string{"product_type", "target_users", "core_function", "tech_basis", "differentiation"}
-		case "technology":
-			return []string{"tech_category", "application_area", "maturity"}
-		case "industry":
-			return []string{"scope", "stage", "key_trends"}
-		case "place":
-			return []string{"place_type", "associated_activity"}
-		}
-	case TypeConcept:
-		return []string{"definition", "components", "mechanism", "distinction"}
-	case TypeCase:
-		return []string{"context", "actors", "choices", "actions", "outcome", "retrospective"}
-	case TypeMethodology:
-		return []string{"input", "steps", "criteria", "output", "applicability"}
-	case TypeInsight:
-		return []string{"claim", "reasoning", "qualifications", "implications"}
-	}
-	return nil
-}
-
 var structureFieldAliases = map[string]string{
 	"职业身份": "identity", "身份": "identity", "教育背景": "background", "教育背景与经历": "background",
 	"擅长领域": "expertise", "关注方向": "expertise", "代表性观点": "standpoint", "判断倾向": "standpoint",
@@ -650,17 +658,12 @@ func floatValue(value any) float64 {
 	}
 }
 
-func containsAllStrings(values, required []string) bool {
-	lookup := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		lookup[strings.TrimSpace(value)] = struct{}{}
+func sourceDocumentRefs(sourceDocumentID string) []string {
+	sourceDocumentID = strings.TrimSpace(sourceDocumentID)
+	if sourceDocumentID == "" {
+		return nil
 	}
-	for _, value := range required {
-		if _, ok := lookup[strings.TrimSpace(value)]; !ok {
-			return false
-		}
-	}
-	return true
+	return []string{sourceDocumentID}
 }
 
 // MergeAnchors 双源合并：按 ID 去重，5 类型映射，实体 6 类聚合为 entity

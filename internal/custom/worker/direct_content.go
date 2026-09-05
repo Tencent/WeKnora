@@ -101,17 +101,28 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 	if skill.IsExplicitSummaryRegeneration(job.InputPayload) {
 		prompt += "\n这是用户明确发起的历史总结重生成：允许覆盖旧总结，必须重新生成符合当前 JSON 契约且带观点级原文证据的内容。"
 	}
-	raw, err := h.LLM.Complete(ctx, prompt)
-	if err != nil {
-		return fmt.Errorf("generate %s: %w", h.Job, err)
-	}
 	contract, ok := skill.Contract(h.Job)
 	if !ok {
 		return fmt.Errorf("unknown direct content job: %s", h.Job)
 	}
+	raw := ""
+	if h.Job == skill.JobOutline && job.ResultStage == "draft" {
+		raw, err = h.streamOutlineDraft(ctx, prompt, video, generation, chunks, contract.WriteSlug(video.ID)+"/draft", job.ID)
+		if err != nil && (strings.Contains(err.Error(), "stream contains no content") || strings.Contains(err.Error(), "decode llm stream event")) {
+			// Some OpenAI-compatible gateways accept stream=true but still return
+			// one regular completion. Preserve compatibility with those gateways.
+			raw, err = h.LLM.Complete(ctx, prompt)
+		}
+	} else {
+		raw, err = h.LLM.Complete(ctx, prompt)
+	}
+	if err != nil {
+		return fmt.Errorf("generate %s: %w", h.Job, err)
+	}
 	pageTitle := ""
 	pageSummary := ""
 	pageBody := ""
+	var outlineDocument outline.Document
 	if h.Job == skill.JobOutline {
 		knownChunkIDs := make(map[string]struct{}, len(chunks))
 		for _, chunk := range chunks {
@@ -121,7 +132,6 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		if err != nil {
 			return fmt.Errorf("validate %s input: %w", h.Job, err)
 		}
-		var document outline.Document
 		var validationErr error
 		for attempt := 0; attempt < 2; attempt++ {
 			if attempt > 0 {
@@ -130,13 +140,13 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 					return fmt.Errorf("generate %s retry: %w", h.Job, err)
 				}
 			}
-			document = outline.Document{}
-			if err := parseLLMJSONResponse(raw, &document); err != nil {
+			outlineDocument = outline.Document{}
+			if err := parseLLMJSONResponse(raw, &outlineDocument); err != nil {
 				validationErr = fmt.Errorf("parse %s output: %w", h.Job, err)
 				continue
 			}
-			normalizeOutlineEvidenceChunkIDs(&document, chunks)
-			if err := outline.ValidateWithTranscriptEnd(document, video.DurationSeconds, transcriptEndSeconds, knownChunkIDs); err != nil {
+			normalizeOutlineEvidenceChunkIDs(&outlineDocument, chunks)
+			if err := outline.ValidateWithTranscriptEnd(outlineDocument, video.DurationSeconds, transcriptEndSeconds, knownChunkIDs); err != nil {
 				validationErr = fmt.Errorf("validate %s output: %w", h.Job, err)
 				continue
 			}
@@ -146,10 +156,10 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		if validationErr != nil {
 			return validationErr
 		}
-		if err := outline.ValidateAndResolve(&document, video.DurationSeconds, chunks); err != nil {
+		if err := outline.ValidateAndResolve(&outlineDocument, video.DurationSeconds, chunks); err != nil {
 			return fmt.Errorf("validate %s evidence: %w", h.Job, err)
 		}
-		canonical, err := outline.Marshal(document)
+		canonical, err := outline.Marshal(outlineDocument)
 		if err != nil {
 			return fmt.Errorf("marshal %s output: %w", h.Job, err)
 		}
@@ -184,6 +194,12 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 				validationErr = fmt.Errorf("resolve %s evidence: %w", h.Job, err)
 				continue
 			}
+			if h.Job == skill.JobSummaryEnhance {
+				if err := h.validateEnhancedSummary(ctx, video, document); err != nil {
+					validationErr = fmt.Errorf("validate %s structure: %w", h.Job, err)
+					continue
+				}
+			}
 			validationErr = nil
 			break
 		}
@@ -200,6 +216,18 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 	pageSlug := contract.WriteSlug(video.ID)
 	if job.ResultStage == "draft" {
 		pageSlug += "/draft"
+		// A draft may have started before indexing activated a newer
+		// transcript generation. Re-check the durable video state before
+		// writing the shared draft slug so a late old response cannot replace
+		// the current draft page.
+		var current model.Video
+		if err := h.DB.WithContext(ctx).Select("transcript_generation").First(&current, "id = ?", video.ID).Error; err != nil {
+			return fmt.Errorf("check draft transcript generation: %w", err)
+		}
+		if strings.TrimSpace(current.TranscriptGeneration) != "" && strings.TrimSpace(current.TranscriptGeneration) != generation {
+			slog.Info("discard stale draft result", "video_id", video.ID, "job_id", job.ID, "job_generation", generation, "active_generation", current.TranscriptGeneration)
+			return nil
+		}
 	}
 	page, err := h.Wiki.UpsertPage(ctx, h.KnowledgeKBID, weknora.WikiPageWrite{
 		Slug:     pageSlug,
@@ -229,7 +257,7 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		if h.Job == skill.JobSummary {
 			field, stageField = "summary_draft_wiki_page_id", "summary_result_stage"
 		}
-		if err := h.DB.WithContext(ctx).Model(&model.Video{}).Where("id = ? AND ("+stageField+" IS NULL OR "+stageField+" <> ?)", video.ID, "final_ready").Updates(map[string]any{field: page.ID, stageField: "draft_ready"}).Error; err != nil {
+		if err := h.persistDraftReference(ctx, video.ID, generation, field, stageField, page.ID, job.ID); err != nil {
 			return err
 		}
 		return nil
@@ -251,6 +279,149 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		return err
 	}
 	return nil
+}
+
+func (h *DirectContentHandler) streamOutlineDraft(ctx context.Context, prompt string, video *model.Video, generation string, chunks []transcript.Chunk, pageSlug, jobID string) (string, error) {
+	knownChunkIDs := make(map[string]struct{}, len(chunks))
+	for _, chunk := range chunks {
+		knownChunkIDs[chunk.ID] = struct{}{}
+	}
+	var accumulated strings.Builder
+	published := 0
+	raw, err := h.LLM.Stream(ctx, prompt, func(delta string) error {
+		accumulated.WriteString(delta)
+		chapters := completeOutlineChapters(accumulated.String())
+		for published < len(chapters) {
+			document := outline.Document{SchemaVersion: outline.SchemaVersion, Chapters: append([]outline.Chapter(nil), chapters[:published+1]...)}
+			normalizeOutlineEvidenceChunkIDs(&document, chunks)
+			if err := outline.ValidatePartial(document, video.DurationSeconds, knownChunkIDs); err != nil {
+				break
+			}
+			if err := h.publishOutlinePrefix(ctx, video, generation, pageSlug, document, jobID); err != nil {
+				return err
+			}
+			published++
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return raw, nil
+}
+
+func (h *DirectContentHandler) publishOutlinePrefix(ctx context.Context, video *model.Video, generation, pageSlug string, document outline.Document, jobID string) error {
+	content, err := outline.Marshal(document)
+	if err != nil {
+		return fmt.Errorf("marshal outline progress: %w", err)
+	}
+	page, err := h.Wiki.UpsertPage(ctx, h.KnowledgeKBID, weknora.WikiPageWrite{
+		Slug: pageSlug, Title: video.Title + "_大纲", PageType: "index", Status: "published",
+		Content: pageContentWithProgress("outline", video.ID, generation, content, true, len(document.Chapters), 0),
+	})
+	if err != nil {
+		return fmt.Errorf("save outline progress: %w", err)
+	}
+	if err := h.persistDraftReference(ctx, video.ID, generation, "outline_draft_wiki_page_id", "outline_result_stage", page.ID, jobID); err != nil {
+		return fmt.Errorf("save outline progress reference: %w", err)
+	}
+	return nil
+}
+
+func completeOutlineChapters(raw string) []outline.Chapter {
+	marker := strings.Index(raw, `"chapters"`)
+	if marker < 0 {
+		return nil
+	}
+	start := strings.IndexByte(raw[marker:], '[')
+	if start < 0 {
+		return nil
+	}
+	start += marker + 1
+	chapters := make([]outline.Chapter, 0, 8)
+	for index := start; index < len(raw); {
+		for index < len(raw) && (raw[index] == ' ' || raw[index] == '\n' || raw[index] == '\r' || raw[index] == '\t' || raw[index] == ',') {
+			index++
+		}
+		if index >= len(raw) || raw[index] != '{' {
+			break
+		}
+		end := balancedJSONObjectEnd(raw, index)
+		if end < 0 {
+			break
+		}
+		var chapter outline.Chapter
+		if json.Unmarshal([]byte(raw[index:end]), &chapter) != nil {
+			break
+		}
+		chapters = append(chapters, chapter)
+		index = end
+	}
+	return chapters
+}
+
+func balancedJSONObjectEnd(raw string, start int) int {
+	depth := 0
+	quoted, escaped := false, false
+	for index := start; index < len(raw); index++ {
+		char := raw[index]
+		if quoted {
+			if escaped {
+				escaped = false
+			} else if char == '\\' {
+				escaped = true
+			} else if char == '"' {
+				quoted = false
+			}
+			continue
+		}
+		switch char {
+		case '"':
+			quoted = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return index + 1
+			}
+		}
+	}
+	return -1
+}
+
+func (h *DirectContentHandler) persistDraftReference(ctx context.Context, videoID, generation, field, stageField, pageID, jobID string) error {
+	result := h.DB.WithContext(ctx).Model(&model.Video{}).
+		Where("id = ? AND (transcript_generation = '' OR transcript_generation = ?) AND ("+stageField+" IS NULL OR "+stageField+" <> ?)", videoID, generation, "final_ready").
+		Updates(map[string]any{field: pageID, stageField: "draft_ready"})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		slog.Info("discard stale draft reference", "video_id", videoID, "job_id", jobID, "job_generation", generation)
+	}
+	return nil
+}
+
+func (h *DirectContentHandler) validateEnhancedSummary(ctx context.Context, video *model.Video, enhanced summary.Document) error {
+	if strings.TrimSpace(video.SummaryWikiPageID) == "" {
+		return fmt.Errorf("base summary page is missing")
+	}
+	page, err := h.Wiki.GetPageByID(ctx, h.KnowledgeKBID, video.SummaryWikiPageID)
+	if err != nil {
+		return fmt.Errorf("read base summary: %w", err)
+	}
+	if page == nil || strings.TrimSpace(page.Content) == "" {
+		return fmt.Errorf("base summary page is not readable")
+	}
+	base, err := summary.ParseStored(page.Content)
+	if err != nil {
+		return fmt.Errorf("parse base summary: %w", err)
+	}
+	if err := summary.Validate(base, video.VideoType, nil); err != nil {
+		return fmt.Errorf("validate base summary: %w", err)
+	}
+	return summary.ValidateEnhancement(base, enhanced)
 }
 
 // readContentChunks keeps the two-stage exception narrow: outline and summary
@@ -606,4 +777,13 @@ func pageContent(pageType, videoID, generation, content string) string {
 		schema = "schema_version: 1\n"
 	}
 	return fmt.Sprintf("---\ntype: %s\nsource_video_id: %s\ntranscript_generation: %s\n%s---\n\n%s", pageType, videoID, generation, schema, strings.TrimSpace(content))
+}
+
+func pageContentWithProgress(pageType, videoID, generation, content string, partial bool, completed, total int) string {
+	schema := ""
+	if pageType == "outline" || pageType == "typed_summary" {
+		schema = "schema_version: 1\n"
+	}
+	progress := fmt.Sprintf("partial: %t\ncompleted_chapters: %d\ntotal_chapters: %d\n", partial, completed, total)
+	return fmt.Sprintf("---\ntype: %s\nsource_video_id: %s\ntranscript_generation: %s\n%s%s---\n\n%s", pageType, videoID, generation, schema, progress, strings.TrimSpace(content))
 }

@@ -167,6 +167,7 @@ func main() {
 		}
 		if contentWorkersEnabled {
 			transcriptionHandler := worker.NewTranscriptionHandler(db, tongyiCli, cfg.Tongyi.InternalFrontendBaseURL)
+			transcriptionHandler.SetDraftsEnabled(cfg.Worker.DraftsEnabled)
 			transcriptionHandler.MinIO = minioCli
 			transcriptionHandler.MPS = mpsCli
 			if mpsCli != nil {

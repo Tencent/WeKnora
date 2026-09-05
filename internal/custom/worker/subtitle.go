@@ -502,6 +502,9 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 		if !activated {
 			return nil
 		}
+		if err := retirePendingContentJobs(tx, video.ID, generation); err != nil {
+			return err
+		}
 		return tx.Model(&model.VideoTranscriptChunk{}).
 			Where("video_id = ? AND revision < ?", video.ID, jobInput.Revision).
 			Update("status", "cleanup_pending").Error
@@ -514,6 +517,9 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 			return fmt.Errorf("load active transcript generation: %w", err)
 		}
 		if current.TranscriptGeneration == generation && current.TranscriptActiveRevision == jobInput.Revision {
+			if err := retirePendingContentJobs(h.DB, video.ID, generation); err != nil {
+				return err
+			}
 			if err := h.enqueueContentPipeline(ctx, video.ID); err != nil {
 				return err
 			}
@@ -539,6 +545,23 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 		return err
 	}
 	return nil
+}
+
+// retirePendingContentJobs removes queued work from a transcript generation
+// that has just been replaced. Running jobs are left alone because their
+// external model call cannot be cancelled safely; their artifact source
+// validation prevents them from being attached to the new generation.
+func retirePendingContentJobs(tx *gorm.DB, videoID, activeGeneration string) error {
+	return tx.Model(&model.VideoProcessingJob{}).
+		Where("video_id = ? AND status = ? AND job_type IN ?", videoID, "pending", []string{"graph", "outline", "summary", "summary_enhance", "assemble"}).
+		Where("COALESCE(transcript_generation, '') <> ?", activeGeneration).
+		Updates(map[string]any{
+			"status":         "cancelled",
+			"error_category": "superseded",
+			"error_code":     "stale_transcript_generation",
+			"error_message":  "queued content job superseded by active transcript generation",
+			"completed_at":   time.Now().UTC(),
+		}).Error
 }
 
 func (h *IndexHandler) persistSourceResult(job *model.VideoProcessingJob, source transcriptservice.SourceResult) error {

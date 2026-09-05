@@ -24,6 +24,9 @@ RUN go mod edit \
 COPY cmd/custom-backend ./cmd/custom-backend
 COPY internal/custom ./internal/custom
 COPY internal/wikiaudit ./internal/wikiaudit
+# P3 knowledge rules are read at runtime by the custom backend. Keep the
+# bundled skill copy in the image for deployments without the source checkout.
+COPY skills/preloaded ./skills/preloaded
 
 RUN go build -ldflags="-s -w" -o /out/custom-backend ./cmd/custom-backend
 
@@ -35,6 +38,7 @@ RUN apk add --no-cache ca-certificates ffmpeg tini tzdata wget \
     && addgroup -S app && adduser -S app -G app
 WORKDIR /app
 COPY --from=builder /out/custom-backend /app/custom-backend
+COPY --from=builder /src/skills/preloaded /app/skills/preloaded
 USER app
 
 ENV CUSTOM_SERVER_HOST=0.0.0.0 \

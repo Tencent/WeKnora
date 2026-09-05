@@ -83,6 +83,8 @@ func TestPendingJobOrderDoesNotBlockSummaryBehindLaterOutlines(t *testing.T) {
 
 	createdAt := time.Now().UTC()
 	jobs := []model.VideoProcessingJob{
+		{ID: "outline-draft", VideoID: "video-1", JobType: "outline", ResultStage: "draft", Status: "pending", IdempotencyKey: "outline-draft", CreatedAt: createdAt},
+		{ID: "outline-final", VideoID: "video-1", JobType: "outline", ResultStage: "final", Status: "pending", IdempotencyKey: "outline-final", CreatedAt: createdAt.Add(-time.Second)},
 		{ID: "outline-first", VideoID: "video-1", JobType: "outline", Status: "pending", IdempotencyKey: "outline-first", CreatedAt: createdAt},
 		{ID: "summary-second", VideoID: "video-1", JobType: "summary", Status: "pending", IdempotencyKey: "summary-second", CreatedAt: createdAt.Add(time.Second)},
 		{ID: "outline-third", VideoID: "video-2", JobType: "outline", Status: "pending", IdempotencyKey: "outline-third", CreatedAt: createdAt.Add(2 * time.Second)},
@@ -95,11 +97,201 @@ func TestPendingJobOrderDoesNotBlockSummaryBehindLaterOutlines(t *testing.T) {
 	if err := db.Raw("SELECT * FROM video_processing_jobs WHERE status = 'pending' ORDER BY " + pendingJobOrderClause() + ", created_at ASC").Scan(&ordered).Error; err != nil {
 		t.Fatalf("order pending jobs: %v", err)
 	}
-	if len(ordered) != 3 {
-		t.Fatalf("ordered jobs = %d, want 3", len(ordered))
+	if len(ordered) != 5 {
+		t.Fatalf("ordered jobs = %d, want 5", len(ordered))
 	}
-	if got := []string{ordered[0].ID, ordered[1].ID, ordered[2].ID}; got[0] != "outline-first" || got[1] != "summary-second" || got[2] != "outline-third" {
-		t.Fatalf("pending order = %v, want outline-first, summary-second, outline-third", got)
+	if got := []string{ordered[0].ID, ordered[1].ID, ordered[2].ID}; got[0] != "outline-final" || got[1] != "outline-first" || got[2] != "summary-second" {
+		t.Fatalf("pending order = %v, want final outline before draft/older jobs", got)
+	}
+}
+
+func TestPendingFoundationJobsSharePriorityForActiveGeneration(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&model.Video{}, &model.VideoProcessingJob{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	createdAt := time.Now().UTC()
+	if err := db.Create(&model.Video{ID: "video-active", Title: "video", TranscriptGeneration: "generation-1"}).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	jobs := []model.VideoProcessingJob{
+		{ID: "outline-active", VideoID: "video-active", JobType: "outline", TranscriptGeneration: "generation-1", ResultStage: "final", Status: "pending", IdempotencyKey: "outline-active", CreatedAt: createdAt.Add(time.Second)},
+		{ID: "summary-active", VideoID: "video-active", JobType: "summary", TranscriptGeneration: "generation-1", ResultStage: "final", Status: "pending", IdempotencyKey: "summary-active", CreatedAt: createdAt},
+		{ID: "outline-unbound", VideoID: "video-active", JobType: "outline", ResultStage: "final", Status: "pending", IdempotencyKey: "outline-unbound", CreatedAt: createdAt.Add(-time.Second)},
+	}
+	if err := db.Create(&jobs).Error; err != nil {
+		t.Fatalf("create jobs: %v", err)
+	}
+
+	var pending []model.VideoProcessingJob
+	query := "SELECT video_processing_jobs.* FROM video_processing_jobs JOIN videos ON videos.id = video_processing_jobs.video_id WHERE " + pendingJobWhereClause() + " ORDER BY " + pendingJobOrderClause() + ", created_at ASC"
+	if err := db.Raw(query).Scan(&pending).Error; err != nil {
+		t.Fatalf("select pending jobs: %v", err)
+	}
+	if len(pending) != 2 {
+		t.Fatalf("pending active foundation jobs = %#v, want outline and summary only", pending)
+	}
+	if got := []string{pending[0].ID, pending[1].ID}; got[0] != "summary-active" || got[1] != "outline-active" {
+		t.Fatalf("pending foundation order = %v, want summary then outline by creation time at equal priority", got)
+	}
+}
+
+func TestPendingJobPoolsKeepEnhancementWorkAwayFromFoundation(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&model.Video{}, &model.VideoProcessingJob{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	createdAt := time.Now().UTC()
+	if err := db.Create(&model.Video{ID: "video-pools", Title: "video", TranscriptGeneration: "generation-1"}).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	jobs := []model.VideoProcessingJob{
+		{ID: "outline-pool", VideoID: "video-pools", JobType: "outline", TranscriptGeneration: "generation-1", Status: "pending", IdempotencyKey: "outline-pool", CreatedAt: createdAt},
+		{ID: "summary-pool", VideoID: "video-pools", JobType: "summary", TranscriptGeneration: "generation-1", Status: "pending", IdempotencyKey: "summary-pool", CreatedAt: createdAt.Add(time.Second)},
+		{ID: "graph-pool", VideoID: "video-pools", JobType: "graph", TranscriptGeneration: "generation-1", Status: "pending", IdempotencyKey: "graph-pool", CreatedAt: createdAt.Add(2 * time.Second)},
+		{ID: "enhance-pool", VideoID: "video-pools", JobType: "summary_enhance", TranscriptGeneration: "generation-1", Status: "pending", IdempotencyKey: "enhance-pool", CreatedAt: createdAt.Add(3 * time.Second)},
+	}
+	if err := db.Create(&jobs).Error; err != nil {
+		t.Fatalf("create jobs: %v", err)
+	}
+
+	query := func(pool workerPool) []model.VideoProcessingJob {
+		var pending []model.VideoProcessingJob
+		statement := "SELECT video_processing_jobs.* FROM video_processing_jobs JOIN videos ON videos.id = video_processing_jobs.video_id WHERE " + pendingJobWhereClauseForPool(pool, false) + " ORDER BY " + pendingJobOrderClause() + ", created_at ASC"
+		if err := db.Raw(statement).Scan(&pending).Error; err != nil {
+			t.Fatalf("select %s jobs: %v", pool, err)
+		}
+		return pending
+	}
+
+	foundation := query(foundationPool)
+	if got := []string{foundation[0].ID, foundation[1].ID}; got[0] != "outline-pool" || got[1] != "summary-pool" {
+		t.Fatalf("foundation jobs = %v, want outline and summary only", got)
+	}
+	enhancement := query(enhancementPool)
+	if got := []string{enhancement[0].ID, enhancement[1].ID}; got[0] != "graph-pool" || got[1] != "enhance-pool" {
+		t.Fatalf("enhancement jobs = %v, want graph and summary enhancement only", got)
+	}
+}
+
+func TestPendingDraftJobsRequireExplicitOptIn(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&model.Video{}, &model.VideoProcessingJob{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.Create(&model.Video{ID: "video-draft", TranscriptGeneration: "generation-1"}).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	if err := db.Create(&model.VideoProcessingJob{
+		ID: "draft-opt-in", VideoID: "video-draft", JobType: "summary", ResultStage: "draft",
+		TranscriptGeneration: "generation-1", Status: "pending", IdempotencyKey: "draft-opt-in",
+	}).Error; err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+	baseQuery := "SELECT video_processing_jobs.* FROM video_processing_jobs JOIN videos ON videos.id = video_processing_jobs.video_id WHERE "
+	var disabled []model.VideoProcessingJob
+	if err := db.Raw(baseQuery + pendingJobWhereClauseForPool(foundationPool, false)).Scan(&disabled).Error; err != nil {
+		t.Fatalf("select disabled drafts: %v", err)
+	}
+	if len(disabled) != 0 {
+		t.Fatalf("draft jobs with automatic drafts disabled = %#v, want none", disabled)
+	}
+	var enabled []model.VideoProcessingJob
+	if err := db.Raw(baseQuery + pendingJobWhereClauseForPool(foundationPool, true)).Scan(&enabled).Error; err != nil {
+		t.Fatalf("select enabled drafts: %v", err)
+	}
+	if len(enabled) != 1 || enabled[0].ID != "draft-opt-in" {
+		t.Fatalf("draft jobs with explicit opt-in = %#v, want draft-opt-in", enabled)
+	}
+}
+
+func TestRetireAutomaticDraftJobs(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&model.VideoProcessingJob{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	jobs := []model.VideoProcessingJob{
+		{ID: "draft-pending", VideoID: "video-draft", JobType: "outline", ResultStage: "draft", Status: "pending", IdempotencyKey: "draft-pending"},
+		{ID: "draft-running", VideoID: "video-draft", JobType: "summary", ResultStage: "draft", Status: "running", IdempotencyKey: "draft-running"},
+		{ID: "formal-pending", VideoID: "video-draft", JobType: "summary", ResultStage: "final", Status: "pending", IdempotencyKey: "formal-pending"},
+	}
+	if err := db.Create(&jobs).Error; err != nil {
+		t.Fatalf("create jobs: %v", err)
+	}
+	retired, err := RetireAutomaticDraftJobs(db)
+	if err != nil {
+		t.Fatalf("retire drafts: %v", err)
+	}
+	if retired != 2 {
+		t.Fatalf("retired drafts = %d, want 2", retired)
+	}
+	var draft, formal model.VideoProcessingJob
+	if err := db.First(&draft, "id = ?", "draft-pending").Error; err != nil {
+		t.Fatalf("load pending draft: %v", err)
+	}
+	if draft.Status != "cancelled" || draft.ErrorCode != "formal_result_priority" {
+		t.Fatalf("pending draft = %#v, want cancelled with formal_result_priority", draft)
+	}
+	if err := db.First(&formal, "id = ?", "formal-pending").Error; err != nil {
+		t.Fatalf("load formal job: %v", err)
+	}
+	if formal.Status != "pending" {
+		t.Fatalf("formal job changed to %q, want pending", formal.Status)
+	}
+}
+
+func TestPendingStaleDraftIsRetiredAfterIndexActivation(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&model.Video{}, &model.VideoProcessingJob{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.Create(&model.Video{ID: "video-1", Title: "video", TranscriptGeneration: ""}).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	if err := db.Create(&model.VideoProcessingJob{
+		ID: "index", VideoID: "video-1", JobType: "index", Status: "pending", IdempotencyKey: "index",
+	}).Create(&model.VideoProcessingJob{
+		ID: "draft", VideoID: "video-1", JobType: "summary", ResultStage: "draft", TranscriptGeneration: "provider-generation", Status: "pending", IdempotencyKey: "draft",
+	}).Error; err != nil {
+		t.Fatalf("create jobs: %v", err)
+	}
+	var pending []model.VideoProcessingJob
+	if err := db.Raw("SELECT * FROM video_processing_jobs WHERE " + pendingJobWhereClause() + " ORDER BY " + pendingJobOrderClause()).Scan(&pending).Error; err != nil {
+		t.Fatalf("select pending jobs: %v", err)
+	}
+	if len(pending) != 2 || pending[0].ID != "index" || pending[1].ID != "draft" {
+		t.Fatalf("pending jobs before index activation = %#v, want index then draft", pending)
+	}
+	if err := db.Model(&model.VideoProcessingJob{}).Where("id = ?", "index").Update("status", "succeeded").Error; err != nil {
+		t.Fatalf("complete index: %v", err)
+	}
+	if err := db.Model(&model.Video{}).Where("id = ?", "video-1").Update("transcript_generation", "generation-1").Error; err != nil {
+		t.Fatalf("activate generation: %v", err)
+	}
+	if err := retirePendingContentJobs(db, "video-1", "generation-1"); err != nil {
+		t.Fatalf("retire stale draft: %v", err)
+	}
+	pending = nil
+	if err := db.Raw("SELECT * FROM video_processing_jobs WHERE " + pendingJobWhereClause() + " ORDER BY " + pendingJobOrderClause()).Scan(&pending).Error; err != nil {
+		t.Fatalf("select pending jobs after index: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending jobs after index = %#v, want none", pending)
 	}
 }
 

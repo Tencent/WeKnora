@@ -177,11 +177,13 @@ type LLMConfig struct {
 	MaxTokens      int
 }
 
-// WorkerConfig Worker 引擎配置（轮询周期 / 重试上限）
+// WorkerConfig Worker 引擎配置（轮询周期 / 重试上限 / 处理池）
 type WorkerConfig struct {
-	PollIntervalSeconds int // 扫描周期（秒）
-	MaxAttempts         int // 单个 job 默认重试上限
-	Concurrency         int // 并发 worker 数
+	PollIntervalSeconds    int  // 扫描周期（秒）
+	MaxAttempts            int  // 单个 job 默认重试上限
+	Concurrency            int  // 基础内容处理池并发数
+	EnhancementConcurrency int  // 图谱和总结增强处理池并发数
+	DraftsEnabled          bool // 是否在转写完成后自动生成草稿
 }
 
 // DSN 返回 GORM 使用的 PostgreSQL 连接串
@@ -299,9 +301,11 @@ func Load() *Config {
 			MaxTokens:      getEnvInt("CUSTOM_LLM_MAX_TOKENS", 8192),
 		},
 		Worker: WorkerConfig{
-			PollIntervalSeconds: getEnvInt("CUSTOM_WORKER_POLL_INTERVAL", 5),
-			MaxAttempts:         getEnvInt("CUSTOM_WORKER_MAX_ATTEMPTS", 3),
-			Concurrency:         getEnvInt("CUSTOM_WORKER_CONCURRENCY", 2),
+			PollIntervalSeconds:    getEnvInt("CUSTOM_WORKER_POLL_INTERVAL", 1),
+			MaxAttempts:            getEnvInt("CUSTOM_WORKER_MAX_ATTEMPTS", 3),
+			Concurrency:            getEnvInt("CUSTOM_WORKER_CONCURRENCY", 2),
+			EnhancementConcurrency: getEnvInt("CUSTOM_WORKER_ENHANCEMENT_CONCURRENCY", 1),
+			DraftsEnabled:          getEnvBool("CUSTOM_WORKER_DRAFTS_ENABLED", false),
 		},
 	}
 }

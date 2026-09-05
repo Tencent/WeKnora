@@ -461,6 +461,71 @@ func TestProcessingStatusIgnoresFailedOldGeneration(t *testing.T) {
 	}
 }
 
+func TestProcessingStatusPrefersSuccessfulFinalOverRunningDraft(t *testing.T) {
+	video := model.Video{
+		ID: uuid.NewString(), Status: model.VideoStatusProcessing, TranscriptGeneration: "generation-1",
+		OutlineWikiPageID: "outline-final", OutlineDraftWikiPageID: "outline-draft",
+	}
+	now := time.Now().UTC()
+	status := buildProcessingStatus(video, []model.VideoProcessingJob{
+		{ID: "outline-draft", VideoID: video.ID, JobType: "outline", TranscriptGeneration: video.TranscriptGeneration, ResultStage: "draft", Status: "running", UpdatedAt: now.Add(time.Second)},
+		{ID: "outline-final", VideoID: video.ID, JobType: "outline", TranscriptGeneration: video.TranscriptGeneration, ResultStage: "final", Status: "succeeded", UpdatedAt: now},
+	})
+
+	require.Len(t, status.Jobs, 1)
+	require.Equal(t, "succeeded", status.Jobs[0].Status)
+	require.Contains(t, status.CompletedStages, "outline")
+}
+
+func TestProcessingStatusPrefersLegacySuccessfulFinalOverRunningDraft(t *testing.T) {
+	video := model.Video{
+		ID: uuid.NewString(), Status: model.VideoStatusProcessing, TranscriptGeneration: "generation-1",
+		OutlineWikiPageID: "outline-final", OutlineDraftWikiPageID: "outline-draft",
+	}
+	now := time.Now().UTC()
+	status := buildProcessingStatus(video, []model.VideoProcessingJob{
+		{ID: "outline-draft", VideoID: video.ID, JobType: "outline", TranscriptGeneration: video.TranscriptGeneration, ResultStage: "draft", Status: "running", UpdatedAt: now.Add(time.Second)},
+		// Rows created before result_stage was introduced use an empty value;
+		// the artifact selector still treats them as final results.
+		{ID: "outline-final", VideoID: video.ID, JobType: "outline", TranscriptGeneration: video.TranscriptGeneration, Status: "succeeded", UpdatedAt: now},
+	})
+
+	require.Len(t, status.Jobs, 1)
+	require.Equal(t, "succeeded", status.Jobs[0].Status)
+	require.Contains(t, status.CompletedStages, "outline")
+}
+
+func TestProcessingStatusDoesNotHideRunningDraftBehindMissingFinalArtifact(t *testing.T) {
+	video := model.Video{
+		ID: uuid.NewString(), Status: model.VideoStatusProcessing, TranscriptGeneration: "generation-1",
+		OutlineDraftWikiPageID: "outline-draft",
+	}
+	now := time.Now().UTC()
+	status := buildProcessingStatus(video, []model.VideoProcessingJob{
+		{ID: "outline-draft", VideoID: video.ID, JobType: "outline", TranscriptGeneration: video.TranscriptGeneration, ResultStage: "draft", Status: "running", UpdatedAt: now.Add(time.Second)},
+		{ID: "outline-final", VideoID: video.ID, JobType: "outline", TranscriptGeneration: video.TranscriptGeneration, ResultStage: "final", Status: "succeeded", UpdatedAt: now},
+	})
+
+	require.Len(t, status.Jobs, 1)
+	require.Equal(t, "running", status.Jobs[0].Status)
+}
+
+func TestProcessingStatusKeepsReadableDraftWhenFinalArtifactIsMissing(t *testing.T) {
+	video := model.Video{
+		ID: uuid.NewString(), Status: model.VideoStatusProcessing, TranscriptGeneration: "generation-1",
+		OutlineDraftWikiPageID: "outline-draft",
+	}
+	now := time.Now().UTC()
+	status := buildProcessingStatus(video, []model.VideoProcessingJob{
+		{ID: "outline-draft", VideoID: video.ID, JobType: "outline", TranscriptGeneration: video.TranscriptGeneration, ResultStage: "draft", Status: "succeeded", UpdatedAt: now},
+		{ID: "outline-final", VideoID: video.ID, JobType: "outline", TranscriptGeneration: video.TranscriptGeneration, ResultStage: "final", Status: "succeeded", UpdatedAt: now.Add(time.Second)},
+	})
+
+	require.Len(t, status.Jobs, 1)
+	require.Equal(t, "succeeded", status.Jobs[0].Status)
+	require.Contains(t, status.CompletedStages, "outline")
+}
+
 func TestProcessingStatusKeepsPartialSuccessWhenLaterStageFails(t *testing.T) {
 	video := model.Video{
 		ID: uuid.NewString(), Status: model.VideoStatusFailed, TranscriptGeneration: "generation-1",

@@ -3,6 +3,7 @@ package weknora
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -107,6 +108,46 @@ func TestParsedFrontmatterAcceptsMarkdownFence(t *testing.T) {
 	page := WikiPage{Content: "```markdown\n---\ntype: person\nsource_video_id: video-1\n---\n# 张三"}
 	require.Equal(t, "person", page.ParsedFrontmatter()["type"])
 	require.Equal(t, "video-1", page.ParsedFrontmatter()["source_video_id"])
+}
+
+func TestEnsurePageCreatesOnlyWhenSlugIsMissing(t *testing.T) {
+	created := false
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		const pagePath = "/api/v1/knowledgebase/kb-1/wiki/pages/video/video-1"
+		const collectionPath = "/api/v1/knowledgebase/kb-1/wiki/pages"
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == pagePath:
+			if !created {
+				http.NotFound(writer, request)
+				return
+			}
+			_ = json.NewEncoder(writer).Encode(WikiPage{ID: "index-1", Slug: "video/video-1", PageType: "index", Content: "seed"})
+		case request.Method == http.MethodPost && request.URL.Path == collectionPath:
+			created = true
+			body, err := io.ReadAll(request.Body)
+			require.NoError(t, err)
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal(body, &payload))
+			require.Equal(t, "video/video-1", payload["slug"])
+			require.Equal(t, "index", payload["page_type"])
+			content, ok := payload["content"].(string)
+			require.True(t, ok)
+			_ = json.NewEncoder(writer).Encode(WikiPage{ID: "index-1", Slug: "video/video-1", PageType: "index", Content: content})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	client := NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL})
+	input := WikiPageWrite{Slug: "video/video-1", Title: "视频_知识底座", PageType: "index", Status: "published", Content: "seed"}
+	page, err := client.EnsurePage(t.Context(), "kb-1", input)
+	require.NoError(t, err)
+	require.Equal(t, "index-1", page.ID)
+
+	page, err = client.EnsurePage(t.Context(), "kb-1", WikiPageWrite{Slug: input.Slug, Content: "must-not-overwrite"})
+	require.NoError(t, err)
+	require.Equal(t, "seed", page.Content)
 }
 
 func TestListByVideoOwnedUsesExplicitOwnershipAndKnowledgeBaseLinks(t *testing.T) {

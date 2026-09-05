@@ -60,6 +60,38 @@ func TestLoadReadsDirectContentLLMConfig(t *testing.T) {
 	}
 }
 
+func TestLoadUsesPerformanceWorkerDefaults(t *testing.T) {
+	for _, key := range []string{
+		"CUSTOM_WORKER_POLL_INTERVAL",
+		"CUSTOM_WORKER_ENHANCEMENT_CONCURRENCY",
+		"CUSTOM_WORKER_DRAFTS_ENABLED",
+	} {
+		t.Setenv(key, "")
+	}
+
+	cfg := Load()
+	if cfg.Worker.PollIntervalSeconds != 1 {
+		t.Fatalf("worker poll interval = %d, want 1", cfg.Worker.PollIntervalSeconds)
+	}
+	if cfg.Worker.EnhancementConcurrency != 1 {
+		t.Fatalf("enhancement concurrency = %d, want 1", cfg.Worker.EnhancementConcurrency)
+	}
+	if cfg.Worker.DraftsEnabled {
+		t.Fatal("automatic content drafts must be disabled by default")
+	}
+}
+
+func TestLoadReadsPerformanceWorkerSettings(t *testing.T) {
+	t.Setenv("CUSTOM_WORKER_POLL_INTERVAL", "2")
+	t.Setenv("CUSTOM_WORKER_ENHANCEMENT_CONCURRENCY", "3")
+	t.Setenv("CUSTOM_WORKER_DRAFTS_ENABLED", "true")
+
+	cfg := Load()
+	if cfg.Worker.PollIntervalSeconds != 2 || cfg.Worker.EnhancementConcurrency != 3 || !cfg.Worker.DraftsEnabled {
+		t.Fatalf("unexpected worker config: %+v", cfg.Worker)
+	}
+}
+
 func TestLoadKeepsProductGraphConfigurationIndependentFromOfficialGraph(t *testing.T) {
 	t.Setenv("NEO4J_ENABLE", "true")
 	t.Setenv("NEO4J_URI", "bolt://official-graph:7687")

@@ -439,11 +439,11 @@ func parseDashboardQuery(c *gin.Context) (dashboardQuery, error) {
 		return dashboardQuery{}, fmt.Errorf("不支持的时间范围")
 	}
 
-	from, err := time.Parse("2006-01-02", query.From)
+	from, err := time.ParseInLocation("2006-01-02", query.From, dashboardLocation)
 	if err != nil {
 		return dashboardQuery{}, fmt.Errorf("开始日期格式无效")
 	}
-	to, err := time.Parse("2006-01-02", query.To)
+	to, err := time.ParseInLocation("2006-01-02", query.To, dashboardLocation)
 	if err != nil {
 		return dashboardQuery{}, fmt.Errorf("结束日期格式无效")
 	}

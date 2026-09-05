@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
+	customknowledge "github.com/Tencent/WeKnora/internal/custom/service/knowledge"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -1433,6 +1434,19 @@ func (s *wikiIngestService) mapOneDocument(
 	docStartedAt := time.Now()
 	knowledgeID := op.KnowledgeID
 	lang := types.ResolveLanguageName(ctx, op.Language)
+	// Video source documents keep WeKnora's native Map-Reduce path. The P3
+	// adapter only augments its prompt instructions with the source identity;
+	// it never receives document prose or subtitle chunk payloads.
+	promptBatchCtx := batchCtx
+	if audit, ok := s.resolveWikiAuditContext(ctx, payload, op); ok {
+		adapted, adaptErr := adaptVideoKnowledgeInstructions(batchCtx.ExtractionInstructions, audit)
+		if adaptErr != nil {
+			return nil, nil, fmt.Errorf("adapt native video knowledge prompt: %w", adaptErr)
+		}
+		cloned := *batchCtx
+		cloned.ExtractionInstructions = adapted.Prompt
+		promptBatchCtx = &cloned
+	}
 
 	// Open a postprocess.wiki subspan under the parent attempt's
 	// postprocess stage so the actual per-doc work (LLM extraction +
@@ -1522,11 +1536,11 @@ func (s *wikiIngestService) mapOneDocument(
 		"content_chars": utf8.RuneCountInString(content),
 		"old_pages":     len(oldPageSlugs),
 	})
-	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
+	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, promptBatchCtx)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: pass 0 failed for %s (%v) — falling back to legacy extractor", knowledgeID, err)
 		pass0Failed = true
-		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
+		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, promptBatchCtx)
 		if err != nil {
 			logger.Warnf(ctx, "wiki ingest: legacy fallback also failed for %s: %v", knowledgeID, err)
 			s.tracker().FailSpan(ctx, extractSpan, "EXTRACT_FAILED", err.Error(), err)
@@ -1624,6 +1638,10 @@ func (s *wikiIngestService) mapOneDocument(
 			return
 		}
 		candidatesXML := renderCandidateSlugsXML(extractedEntities, extractedConcepts)
+		// Citation classification intentionally keeps the batch-scoped
+		// instructions: this native post-process stage must inspect chunk
+		// handles to bind evidence, while the P3 adapter is limited to the
+		// source-document Map-Reduce extraction prompt.
 		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang, batchCtx)
 		s.tracker().EndSpan(ctx, classifySpan, types.JSONMap{
 			"cited_slugs":      len(citations),
@@ -1865,6 +1883,22 @@ func (s *wikiIngestService) mapOneDocument(
 		MapStats:    mapStats,
 		WikiSpan:    wikiSpan,
 	}, updates, nil
+}
+
+// adaptVideoKnowledgeInstructions is the only bridge from the product's
+// video-source identity to native Wiki extraction. Keeping this decision
+// explicit prevents ordinary documents from receiving video-only rules and
+// keeps source prose out of the adapter input.
+func adaptVideoKnowledgeInstructions(base string, audit wikiAuditContext) (customknowledge.NativePromptTrace, error) {
+	if strings.TrimSpace(base) == "" {
+		base = "Use the native WeKnora extraction protocol."
+	}
+	return customknowledge.AdaptNativePrompt(base, customknowledge.NativePromptInput{
+		SourceDocumentID:     audit.Identity.SourceKnowledgeID,
+		SourceVideoID:        audit.Identity.VideoID,
+		TranscriptGeneration: audit.Identity.TranscriptGeneration,
+		InputMode:            "full_document",
+	})
 }
 
 func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(

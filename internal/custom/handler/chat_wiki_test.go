@@ -24,6 +24,8 @@ func TestChatWikiSearchReturnsOnlyPassedCurrentObjects(t *testing.T) {
 				{ID: "page-passed", Slug: "concept/passed", PageType: "index", Content: `---
 knowledge_object_id: object-passed
 type: concept
+primary_type: concept
+information_nature: 概念
 source_video_id: video-1
 transcript_generation: generation-1
 audit_status: passed

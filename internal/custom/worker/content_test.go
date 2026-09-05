@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -98,7 +101,11 @@ func TestSkillQueryUsesTranscriptKnowledgeIDAsSourceDocument(t *testing.T) {
 	require.Contains(t, query, "业务视频 ID：video-1")
 	require.Contains(t, query, "每个实体和每个知识原子都要写入独立 Wiki 页面")
 	require.Contains(t, query, "references/type-frameworks.md")
+	require.Contains(t, query, "file_path 必须完整使用 references/type-frameworks.md、references/wiki-schema.md、references/audit-rules.md")
 	require.Contains(t, query, "对应结构维度")
+	require.Contains(t, query, "source_refs 只能填入本次输入的真实源文档知识 ID（knowledge-1）")
+	require.Contains(t, query, "必须与 evidence_ids 分开")
+	require.Contains(t, query, "禁止填入证据句 ID、转写分块 ID、随机 UUID 或 Wiki page ID")
 	require.Contains(t, query, `slug 严格使用 "video/video-1"`)
 	require.Contains(t, query, "type: knowledge_base")
 	require.Contains(t, query, "索引页目标可能尚不存在")
@@ -122,6 +129,18 @@ func TestSkillQueryForSummaryEnhancementUsesKnowledgeBase(t *testing.T) {
 	require.Contains(t, query, "知识底座索引页 ID：knowledge-base-1")
 	require.Contains(t, query, "不是重新生成基础总结")
 	require.Contains(t, query, `slug 严格使用 "typed-summary/video-1"`)
+}
+
+func TestGraphIndexSeedContentIsPendingAndGenerationBound(t *testing.T) {
+	content := graphIndexSeedContent("video-1", "generation-1", "测试视频")
+	page := weknora.WikiPage{Content: content}
+	frontmatter := page.ParsedFrontmatter()
+	require.Equal(t, "knowledge_base", frontmatter["type"])
+	require.Equal(t, "video-1", frontmatter["source_video_id"])
+	require.Equal(t, "generation-1", frontmatter["transcript_generation"])
+	require.Equal(t, "pending", frontmatter["audit_status"])
+	require.Equal(t, "测试视频_知识底座", frontmatter["title"])
+	require.Contains(t, content, "待 extract-video-knowledge 完成知识对象抽取与审计后更新")
 }
 
 func TestTranscriptKnowledgeIDsUsesEveryCurrentChunk(t *testing.T) {
@@ -217,10 +236,158 @@ func TestWikiInputGraphRejectsEvidenceChunkMode(t *testing.T) {
 	require.Equal(t, "input_mode_invalid", code)
 }
 
-func TestGraphHandlerSkipsBeforeAgentCall(t *testing.T) {
+func graphSourceReader(t *testing.T, video *model.Video) sourceReaderStub {
+	doc, err := transcriptservice.Build(transcriptservice.Input{
+		VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration,
+		Title: video.Title, DurationSeconds: video.DurationSeconds,
+		Chapters: []transcriptservice.InputChapter{{
+			Index: 0, Title: "开场",
+			Paragraphs: []transcriptservice.InputParagraph{{
+				Index: 0,
+				Sentences: []transcriptservice.InputSentence{{
+					SourceSentenceID: "s-1", EvidenceSentenceID: "e-1",
+					Text: "正文", StartMs: 100, EndMs: 1000,
+				}},
+			}},
+		}},
+	})
+	require.NoError(t, err)
+	jsonText, err := doc.JSON()
+	require.NoError(t, err)
+	return sourceReaderStub{value: weknora.ManualKnowledgeResult{
+		ID: "source-1", KnowledgeBaseID: "knowledge-kb",
+		Content: transcriptservice.SourceContent(doc, jsonText, "hash"),
+	}}
+}
+
+func p3IndexContent(videoID, generation, title string) string {
+	return "---\n" +
+		"type: knowledge_base\n" +
+		"source_video_id: " + videoID + "\n" +
+		"transcript_generation: " + generation + "\n" +
+		"title: " + title + "_知识底座\n" +
+		"audit_status: aligned\n" +
+		"---\n\n# " + title + "_知识底座\n"
+}
+
+func p3ConceptContent(videoID, generation string) string {
+	return "---\n" +
+		"knowledge_object_id: object-1\n" +
+		"type: concept\n" +
+		"primary_type: concept\n" +
+		"source_video_id: " + videoID + "\n" +
+		"transcript_generation: " + generation + "\n" +
+		"audit_status: passed\n" +
+		"information_nature: 概念\n" +
+		"classification_confidence: 0.9\n" +
+		"evidence_ids: [e-1]\n" +
+		"source_refs: [source-1]\n" +
+		"structure_fields:\n" +
+		"  definition: 概念定义\n" +
+		"  mechanism: 运行机制\n" +
+		"---\n\n# 概念\n"
+}
+
+func p3WikiServer(t *testing.T, pages []weknora.WikiPage) *httptest.Server {
+	t.Helper()
+	bySlug := make(map[string]weknora.WikiPage, len(pages))
+	for _, page := range pages {
+		bySlug[page.Slug] = page
+	}
+	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		const listPath = "/api/v1/knowledgebase/knowledge-kb/wiki/pages"
+		if request.Method == http.MethodPost && request.URL.Path == listPath {
+			var payload struct {
+				Slug     string `json:"slug"`
+				Title    string `json:"title"`
+				PageType string `json:"page_type"`
+				Content  string `json:"content"`
+			}
+			require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+			page := weknora.WikiPage{ID: "created-" + strconv.Itoa(len(pages)+1), Slug: payload.Slug, Title: payload.Title, PageType: payload.PageType, Content: payload.Content, Version: 1}
+			pages = append(pages, page)
+			bySlug[page.Slug] = page
+			writer.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(writer).Encode(page)
+			return
+		}
+		if request.Method == http.MethodGet && request.URL.Path == listPath {
+			_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{
+				Pages: pages, Total: len(pages), Page: 1, PageSize: 100, TotalPages: 1,
+			})
+			return
+		}
+		const pagePrefix = listPath + "/"
+		if slug, ok := strings.CutPrefix(request.URL.Path, pagePrefix); ok {
+			if page, exists := bySlug[slug]; exists {
+				_ = json.NewEncoder(writer).Encode(page)
+				return
+			}
+		}
+		http.NotFound(writer, request)
+	}))
+}
+
+func TestGraphHandlerRejectsUncontractedNativeWiki(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoTranscriptSource{}, &model.VideoProcessingJob{}))
+	video := &model.Video{ID: "video-1", Title: "测试视频", DurationSeconds: 20, TranscriptGeneration: "generation-1", SummaryWikiPageID: "summary-1"}
+	require.NoError(t, db.Create(video).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptChunk{VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 0, KnowledgeID: "chunk-1", ContentHash: "hash", Status: "completed"}).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptSource{ID: "binding-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, KnowledgeBaseID: "knowledge-kb", KnowledgeID: "source-1", ContentHash: "source-hash", Status: "created"}).Error)
+	job := &model.VideoProcessingJob{ID: "job-1", VideoID: video.ID, JobType: skill.JobGraph, TranscriptGeneration: video.TranscriptGeneration, InputPayload: `{"transcript_source_knowledge_id":"source-1"}`}
+	require.NoError(t, db.Create(job).Error)
+	server := p3WikiServer(t, []weknora.WikiPage{
+		{ID: "source-page", Slug: "entity/source", PageType: "entity", Content: "source", SourceRefs: []string{"source-1"}},
+		{ID: "index-1", Slug: "index", PageType: "index", Content: "index"},
+	})
+	defer server.Close()
+	wiki := weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL})
+	orchestrator := skill.NewOrchestrator(db, wiki, "knowledge-kb")
 	agent := &countingAgentClient{}
-	handler := GraphHandler{BaseSkillHandler: BaseSkillHandler{AgentClient: agent, KnowledgeBaseID: "knowledge-kb"}}
-	err := handler.Run(t.Context(), &model.VideoProcessingJob{ID: "job-1", TranscriptGeneration: "generation-1"}, &model.Video{ID: "video-1"})
+	handler := GraphHandler{BaseSkillHandler: BaseSkillHandler{
+		DB: db, AgentClient: agent, SourceReader: graphSourceReader(t, video),
+		KnowledgeBaseID: "knowledge-kb", Orchestrator: orchestrator,
+	}}
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	err = handler.Run(ctx, job, video)
+	require.Error(t, err)
+	require.Equal(t, 2, agent.calls, "a missing P3 artifact must trigger CreateSession and TriggerSkill")
+	seed, readErr := wiki.GetPage(t.Context(), "knowledge-kb", "video/video-1")
+	require.NoError(t, readErr)
+	require.NotNil(t, seed)
+	require.Equal(t, "pending", seed.ParsedFrontmatter()["audit_status"])
+}
+
+func TestGraphHandlerReconcilesCompliantP3WithoutAgent(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoProcessingJob{}))
+	video := &model.Video{ID: "video-1", Title: "测试视频", TranscriptGeneration: "generation-1"}
+	require.NoError(t, db.Create(video).Error)
+	index := weknora.WikiPage{
+		ID: "index-1", Slug: "video/video-1", PageType: "index",
+		Content: p3IndexContent(video.ID, video.TranscriptGeneration, video.Title), Version: 1,
+	}
+	object := weknora.WikiPage{
+		ID: "object-1", Slug: "concept/object-1", PageType: "index",
+		Content: p3ConceptContent(video.ID, video.TranscriptGeneration), Version: 1,
+	}
+	server := p3WikiServer(t, []weknora.WikiPage{index, object})
+	defer server.Close()
+	wiki := weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL})
+	orchestrator := skill.NewOrchestrator(db, wiki, "knowledge-kb")
+	agent := &countingAgentClient{}
+	handler := GraphHandler{BaseSkillHandler: BaseSkillHandler{
+		DB: db, AgentClient: agent, KnowledgeBaseID: "knowledge-kb", Orchestrator: orchestrator,
+	}}
+	err = handler.Run(t.Context(), &model.VideoProcessingJob{ID: "job-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration}, video)
 	require.NoError(t, err)
 	require.Zero(t, agent.calls)
+	var stored model.Video
+	require.NoError(t, db.First(&stored, "id = ?", video.ID).Error)
+	require.Equal(t, index.ID, stored.KnowledgeBaseWikiPageID)
+	require.Equal(t, "passed", stored.KnowledgeAuditStatus)
 }

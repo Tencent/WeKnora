@@ -64,6 +64,19 @@ func Validate(document Document, durationSeconds int, knownChunkIDs map[string]s
 	return validate(document, durationSeconds, 0, knownChunkIDs)
 }
 
+// ValidatePartial validates a prefix written while an outline is still being
+// generated. It keeps all structural and evidence checks but does not require
+// the last chapter to cover the transcript tail.
+func ValidatePartial(document Document, durationSeconds int, knownChunkIDs map[string]struct{}) error {
+	if err := validate(document, durationSeconds, 0, knownChunkIDs); err != nil {
+		return err
+	}
+	if len(document.Chapters) == 0 || document.Chapters[0].StartSeconds > 1 {
+		return fmt.Errorf("outline starts after video beginning")
+	}
+	return nil
+}
+
 func ValidateWithTranscriptEnd(document Document, durationSeconds, transcriptEndSeconds int, knownChunkIDs map[string]struct{}) error {
 	if transcriptEndSeconds <= 0 {
 		return fmt.Errorf("transcript end timestamp is required")

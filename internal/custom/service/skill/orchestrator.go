@@ -48,7 +48,13 @@ func NewOrchestrator(db *gorm.DB, wiki *weknora.WikiClient, kbID string) *Orches
 
 // EnqueueJob 入库一个 pending job（CP-T004 幂等键保证）
 func (o *Orchestrator) EnqueueJob(ctx context.Context, videoID, jobType string) (string, error) {
-	return o.enqueueJob(ctx, o.DB, videoID, jobType)
+	var jobID string
+	err := o.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		jobID, err = o.enqueueJob(ctx, tx, videoID, jobType)
+		return err
+	})
+	return jobID, err
 }
 
 func (o *Orchestrator) EnqueueContentPipeline(ctx context.Context, videoID string) error {
@@ -72,7 +78,7 @@ func (o *Orchestrator) EnqueueContentPipeline(ctx context.Context, videoID strin
 
 func (o *Orchestrator) transcriptSourceManifest(ctx context.Context, db *gorm.DB, videoID string) (string, string, error) {
 	var video model.Video
-	if err := db.WithContext(ctx).Select("id", "transcript_generation").First(&video, "id = ?", videoID).Error; err != nil {
+	if err := db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "transcript_generation").First(&video, "id = ?", videoID).Error; err != nil {
 		return "", "", fmt.Errorf("load transcript generation: %w", err)
 	}
 	if strings.TrimSpace(video.TranscriptGeneration) == "" {
@@ -161,17 +167,47 @@ func (o *Orchestrator) IsSummaryUserEditProtected(ctx context.Context, videoID s
 }
 
 func (o *Orchestrator) enqueueJob(ctx context.Context, db *gorm.DB, videoID, jobType string) (string, error) {
-	idemKey := IdempotencyKey(videoID, jobType)
 	var video model.Video
-	if err := db.WithContext(ctx).Select("transcript_generation").First(&video, "id = ?", videoID).Error; err == nil && video.TranscriptGeneration != "" {
-		idemKey += ":" + video.TranscriptGeneration
+	if err := db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "transcript_generation").First(&video, "id = ?", videoID).Error; err != nil {
+		return "", fmt.Errorf("load video for %s: %w", jobType, err)
 	}
+	generation := strings.TrimSpace(video.TranscriptGeneration)
+	idemKey := IdempotencyKey(videoID, jobType)
+	if generation != "" {
+		idemKey += ":" + generation
+	}
+
+	// Match the logical job identity as well as the idempotency key. This
+	// repairs legacy rows created before transcript generations were included
+	// in the key and prevents a repeated activation event from creating a
+	// second effective final attempt with a different key.
 	var existing model.VideoProcessingJob
-	if err := db.WithContext(ctx).Where("idempotency_key = ?", idemKey).First(&existing).Error; err == nil {
-		// 已有任务直接复用；失败任务恢复原记录，避免唯一键冲突。
+	query := db.WithContext(ctx).
+		Where("video_id = ? AND job_type = ?", videoID, jobType).
+		Where("result_stage = ? OR result_stage = '' OR result_stage IS NULL", "final")
+	if generation == "" {
+		query = query.Where("COALESCE(transcript_generation, '') = ''")
+	} else {
+		// An active unbound attempt is a legacy representation of this same
+		// generation. Only pending/running rows may be rebound; a terminal
+		// unbound result must not be attached to a newer transcript.
+		query = query.Where("transcript_generation = ? OR (COALESCE(transcript_generation, '') = '' AND status IN ?)", generation, []string{"pending", "running"})
+	}
+	if err := query.Order("CASE status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 WHEN 'succeeded' THEN 2 WHEN 'failed' THEN 3 ELSE 4 END, updated_at DESC, created_at DESC").First(&existing).Error; err == nil {
+		if existing.TranscriptGeneration == "" && generation != "" {
+			if err := db.WithContext(ctx).Model(&existing).Updates(map[string]any{
+				"transcript_generation": generation,
+				"result_stage":          "final",
+			}).Error; err != nil {
+				return "", fmt.Errorf("bind %s job to transcript generation: %w", jobType, err)
+			}
+			existing.TranscriptGeneration = generation
+			existing.ResultStage = "final"
+		}
 		if existing.Status == "succeeded" || existing.Status == "running" || existing.Status == "pending" {
 			return existing.ID, nil
 		}
+		// 已有任务直接复用；失败/取消任务恢复原记录，避免唯一键冲突。
 		if err := db.WithContext(ctx).Model(&existing).Updates(map[string]any{
 			"status": "pending", "attempt_count": 0, "error_category": "", "error_code": "", "error_message": "",
 			"started_at": nil, "completed_at": nil, "updated_at": time.Now().UTC(),
@@ -179,12 +215,14 @@ func (o *Orchestrator) enqueueJob(ctx context.Context, db *gorm.DB, videoID, job
 			return "", fmt.Errorf("reset %s job: %w", jobType, err)
 		}
 		return existing.ID, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", fmt.Errorf("find existing %s job: %w", jobType, err)
 	}
 	job := model.VideoProcessingJob{
 		ID:                   uuid.NewString(),
 		VideoID:              videoID,
 		JobType:              jobType,
-		TranscriptGeneration: video.TranscriptGeneration,
+		TranscriptGeneration: generation,
 		Provider:             providerForJob(jobType),
 		ResultStage:          "final",
 		Status:               "pending",
@@ -201,7 +239,15 @@ func (o *Orchestrator) enqueueJob(ctx context.Context, db *gorm.DB, videoID, job
 		return "", fmt.Errorf("enqueue %s job: %w", jobType, result.Error)
 	}
 	if result.RowsAffected == 0 {
-		if err := db.WithContext(ctx).Where("idempotency_key = ?", idemKey).First(&existing).Error; err != nil {
+		if err := db.WithContext(ctx).Where("idempotency_key = ?", idemKey).First(&existing).Error; err == nil {
+			return existing.ID, nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", fmt.Errorf("load concurrent %s job: %w", jobType, err)
+		}
+		// A concurrent caller may have rebound a legacy unbound row without
+		// using the new idempotency key. Re-run the logical lookup once before
+		// reporting a conflict.
+		if err := query.First(&existing).Error; err != nil {
 			return "", fmt.Errorf("load concurrent %s job: %w", jobType, err)
 		}
 		return existing.ID, nil
@@ -327,6 +373,53 @@ func (o *Orchestrator) validateWikiPageSource(ctx context.Context, videoID, page
 	return fmt.Errorf("wiki page %s does not belong to video %s", pageID, videoID)
 }
 
+// validateGraphWikiPage enforces the P3 index contract at the write-back
+// boundary. Worker-side discovery is intentionally not the only guard because
+// other callers can invoke AfterSkillCompleteWithID directly.
+func (o *Orchestrator) validateGraphWikiPage(ctx context.Context, videoID, pageID string) error {
+	if o.DB == nil || o.Wiki == nil {
+		return nil
+	}
+	page, err := o.Wiki.GetPageByID(ctx, o.KBID, pageID)
+	if err != nil {
+		return fmt.Errorf("read graph wiki page: %w", err)
+	}
+	if page == nil || strings.TrimSpace(page.Content) == "" {
+		return fmt.Errorf("wiki page %s is not readable", pageID)
+	}
+	if page.PageType != "index" {
+		return fmt.Errorf("graph wiki page %s must use page_type=index", pageID)
+	}
+	if page.Slug != "video/"+strings.TrimSpace(videoID) {
+		return fmt.Errorf("graph wiki page %s slug does not match video %s", pageID, videoID)
+	}
+	frontmatter := page.ParsedFrontmatter()
+	if strings.ToLower(strings.TrimSpace(graphFrontmatterString(frontmatter, "type"))) != "knowledge_base" {
+		return fmt.Errorf("graph wiki page %s must declare type=knowledge_base", pageID)
+	}
+	if strings.TrimSpace(graphFrontmatterString(frontmatter, "source_video_id")) != strings.TrimSpace(videoID) {
+		return fmt.Errorf("graph wiki page %s source_video_id mismatch", pageID)
+	}
+	var video model.Video
+	if err := o.DB.WithContext(ctx).Select("transcript_generation").First(&video, "id = ?", videoID).Error; err != nil {
+		return fmt.Errorf("load transcript generation for graph wiki page: %w", err)
+	}
+	expectedGeneration := strings.TrimSpace(video.TranscriptGeneration)
+	if expectedGeneration == "" || strings.TrimSpace(graphFrontmatterString(frontmatter, "transcript_generation")) != expectedGeneration {
+		return fmt.Errorf("graph wiki page %s transcript generation mismatch", pageID)
+	}
+	auditStatus := strings.ToLower(strings.TrimSpace(graphFrontmatterString(frontmatter, "audit_status")))
+	if auditStatus != "aligned" && auditStatus != "passed" {
+		return fmt.Errorf("graph wiki page %s audit_status must be aligned or passed", pageID)
+	}
+	return nil
+}
+
+func graphFrontmatterString(frontmatter map[string]any, key string) string {
+	value, _ := frontmatter[key].(string)
+	return value
+}
+
 func (o *Orchestrator) isWikiPageEligible(
 	ctx context.Context,
 	candidate weknora.WikiPage,
@@ -416,7 +509,11 @@ func (o *Orchestrator) afterSkillCompleteWithID(ctx context.Context, videoID, jo
 	if !ok || contract.VideoField == "" {
 		return "", "", fmt.Errorf("job_type %s 无映射字段", jobType)
 	}
-	if err := o.validateWikiPageSource(ctx, videoID, wikiPageID); err != nil {
+	if jobType == JobGraph {
+		if err := o.validateGraphWikiPage(ctx, videoID, wikiPageID); err != nil {
+			return "", "", err
+		}
+	} else if err := o.validateWikiPageSource(ctx, videoID, wikiPageID); err != nil {
 		return "", "", err
 	}
 	candidateVersion, _, auditStatus, err := o.findWikiPageVersion(ctx, videoID, wikiPageID)

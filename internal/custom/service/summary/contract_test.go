@@ -60,6 +60,24 @@ func TestResolveEvidenceReturnsOriginalTextAndTimestamp(t *testing.T) {
 	}
 }
 
+func TestValidateEnhancementPreservesStructureAndEvidence(t *testing.T) {
+	base := Document{SchemaVersion: 1, VideoType: "general", Sections: []Section{{ID: "s1", Title: "一", Blocks: []Block{{ID: "b1", Kind: BlockKindParagraph, Text: "初版", EvidenceChunkIDs: []string{"c1"}}}}}}
+	enhanced := base
+	enhanced.Sections = []Section{{ID: "s1", Title: "一", Blocks: []Block{{ID: "b1", Kind: BlockKindParagraph, Text: "增强", EvidenceChunkIDs: []string{"c1"}, KnowledgeRefs: []string{"wiki-1"}}}}}
+	if err := ValidateEnhancement(base, enhanced); err != nil {
+		t.Fatalf("ValidateEnhancement returned error: %v", err)
+	}
+}
+
+func TestValidateEnhancementRejectsChangedEvidenceAnchor(t *testing.T) {
+	base := Document{SchemaVersion: 1, VideoType: "general", Sections: []Section{{ID: "s1", Title: "一", Blocks: []Block{{ID: "b1", Kind: BlockKindParagraph, Text: "初版", EvidenceChunkIDs: []string{"c1"}}}}}}
+	enhanced := base
+	enhanced.Sections = []Section{{ID: "s1", Title: "一", Blocks: []Block{{ID: "b1", Kind: BlockKindParagraph, Text: "增强", EvidenceChunkIDs: []string{"c2"}}}}}
+	if err := ValidateEnhancement(base, enhanced); err == nil {
+		t.Fatal("changed evidence anchor should be rejected")
+	}
+}
+
 func TestParseAcceptsCamelCaseDoubleReferenceAliases(t *testing.T) {
 	parsed, err := Parse(`{"schemaVersion":1,"videoType":"general","sections":[{"id":"positioning-problem","title":"一、定位与问题","blocks":[{"id":"block-1","kind":"paragraph","text":"内容","evidenceChunkIds":["chunk-1"],"knowledgeRefs":["wiki-1"],"evidenceRefs":[{"chunk_id":"chunk-1","evidence_sentence_id":"evs:v1:one","start_ms":100,"end_ms":1200}],"evidence":[{"chunkId":"chunk-1","evidenceSentenceId":"evs:v1:one","startSeconds":0.1,"endSeconds":1.2,"timestamp":"00:00–00:01","transcriptSnippet":"原文"}]}]},{"id":"claims-reasoning","title":"二、主张与论证","blocks":[{"id":"block-2","kind":"paragraph","text":"内容","evidenceChunkIds":["chunk-1"]}]},{"id":"evidence-cases","title":"三、证据与案例","blocks":[{"id":"block-3","kind":"paragraph","text":"内容","evidenceChunkIds":["chunk-1"]}]},{"id":"limitations-counterarguments","title":"四、限定与反方","blocks":[{"id":"block-4","kind":"paragraph","text":"内容","evidenceChunkIds":["chunk-1"]}]},{"id":"impact-recommendations","title":"五、影响与建议","blocks":[{"id":"block-5","kind":"paragraph","text":"内容","evidenceChunkIds":["chunk-1"]}]}]}`)
 	if err != nil {

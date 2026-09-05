@@ -64,6 +64,21 @@ type ManualKnowledgeResult struct {
 	ErrorMessage    string `json:"error_message"`
 }
 
+type knowledgeResponseData struct {
+	ManualKnowledgeResult
+	Metadata struct {
+		Content string `json:"content"`
+	} `json:"metadata"`
+}
+
+func (data knowledgeResponseData) result() ManualKnowledgeResult {
+	result := data.ManualKnowledgeResult
+	if strings.TrimSpace(result.Content) == "" {
+		result.Content = data.Metadata.Content
+	}
+	return result
+}
+
 type SearchParams struct {
 	QueryText            string   `json:"query_text"`
 	VectorThreshold      float64  `json:"vector_threshold,omitempty"`
@@ -427,15 +442,16 @@ func (c *Client) GetKnowledge(ctx context.Context, knowledgeID string) (ManualKn
 	}
 	var out struct {
 		Success bool                  `json:"success"`
-		Data    ManualKnowledgeResult `json:"data"`
+		Data    knowledgeResponseData `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return ManualKnowledgeResult{}, fmt.Errorf("decode weknora knowledge: %w", err)
 	}
-	if !out.Success || out.Data.ID == "" {
+	result := out.Data.result()
+	if !out.Success || result.ID == "" {
 		return ManualKnowledgeResult{}, fmt.Errorf("weknora get knowledge returned empty id")
 	}
-	return out.Data, nil
+	return result, nil
 }
 
 // DeleteKnowledge 删除 KB（VP-T011 删除视频级联清理用）

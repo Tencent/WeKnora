@@ -99,6 +99,14 @@ func TestOutlineRetryPromptIncludesContractCorrections(t *testing.T) {
 	}
 }
 
+func TestCompleteOutlineChaptersExtractsOnlyClosedChapterObjects(t *testing.T) {
+	raw := `{"schema_version":1,"chapters":[{"chapter_index":1,"chapter_title":"第一章","start_seconds":0,"end_seconds":10,"chapter_summary":"内容","knowledge_points":[{"title":"重点","seconds":3}]},{"chapter_index":2,"chapter_title":"第二章","start_seconds":10,"end_seconds":20,"chapter_summary":"内容","knowledge_points":[{"title":"重点"}`
+	chapters := completeOutlineChapters(raw)
+	if len(chapters) != 1 || chapters[0].ChapterIndex != 1 {
+		t.Fatalf("chapters = %#v", chapters)
+	}
+}
+
 func TestBuildDirectContentPromptIncludesTranscriptEvidence(t *testing.T) {
 	prompt, err := buildDirectContentPrompt(&model.Video{Title: "视频一", VideoType: "training"}, skill.JobOutline, []transcript.Chunk{{ID: "chunk-1", Index: 0, Content: "原文内容"}})
 	if err != nil {
@@ -109,6 +117,46 @@ func TestBuildDirectContentPromptIncludesTranscriptEvidence(t *testing.T) {
 			t.Fatalf("prompt does not contain %q: %s", expected, prompt)
 		}
 	}
+}
+
+func TestSummaryDraftAndFinalUseSeparateStableSlugs(t *testing.T) {
+	video := &model.Video{ID: "video-1", TranscriptGeneration: "generation-1"}
+	contract, ok := skill.Contract(skill.JobSummary)
+	if !ok {
+		t.Fatal("summary contract is not registered")
+	}
+	finalSlug := contract.WriteSlug(video.ID)
+	draftSlug := finalSlug + "/draft"
+	if finalSlug == draftSlug || !strings.HasSuffix(draftSlug, "/draft") {
+		t.Fatalf("draft and final slugs are not separated: final=%q draft=%q", finalSlug, draftSlug)
+	}
+	finalContent := pageContent(contract.ArtifactType, video.ID, video.TranscriptGeneration, `{"schemaVersion":1}`)
+	draftContent := pageContent(contract.ArtifactType, video.ID, video.TranscriptGeneration, `{"schemaVersion":1}`)
+	if finalContent != draftContent || !strings.Contains(finalContent, "type: typed_summary") || !strings.Contains(finalContent, "transcript_generation: generation-1") {
+		t.Fatalf("draft/final content contract is unstable or missing identity metadata")
+	}
+}
+
+func TestSummaryEnhancementInstructionKeepsStructureAndGrounding(t *testing.T) {
+	instruction := enhancementInstruction(true)
+	if !strings.Contains(instruction, "知识底座") || !strings.Contains(instruction, "转写共同证明") || !strings.Contains(instruction, "section") {
+		t.Fatalf("enhancement instruction is missing grounding or structure constraints: %s", instruction)
+	}
+}
+
+func TestDraftReferenceCannotOverwriteNewTranscriptGeneration(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}))
+	require.NoError(t, db.Create(&model.Video{ID: "video-1", Title: "视频", TranscriptGeneration: "generation-2"}).Error)
+
+	h := &DirectContentHandler{DB: db}
+	require.NoError(t, h.persistDraftReference(context.Background(), "video-1", "generation-1", "summary_draft_wiki_page_id", "summary_result_stage", "old-page", "old-job"))
+
+	var video model.Video
+	require.NoError(t, db.First(&video, "id = ?", "video-1").Error)
+	require.Empty(t, video.SummaryDraftWikiPageID)
+	require.Empty(t, video.SummaryResultStage)
 }
 
 func TestBuildDirectContentPromptIncludesSummaryFrameworkAndJSONContract(t *testing.T) {

@@ -51,7 +51,7 @@ func (f *fakeMPSClient) GetTask(context.Context, string) (*mps.Task, error) { re
 func (f *fakeMPSClient) Timeout() time.Duration                             { return time.Second }
 func (f *fakeMPSClient) PollInterval() time.Duration                        { return time.Millisecond }
 
-func TestMPSRunPersistsResultAndEnqueuesProviderBoundJobs(t *testing.T) {
+func TestMPSRunPersistsResultAndSkipsDraftJobsByDefault(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoProcessingJob{}))
@@ -65,12 +65,41 @@ func TestMPSRunPersistsResultAndEnqueuesProviderBoundJobs(t *testing.T) {
 	require.NoError(t, h.Run(context.Background(), &job, &video))
 	var jobs []model.VideoProcessingJob
 	require.NoError(t, db.Where("video_id = ?", video.ID).Order("job_type").Find(&jobs).Error)
-	require.Len(t, jobs, 4)
-	for _, child := range jobs[1:] {
-		require.Equal(t, "mps:mps-task", child.TranscriptGeneration)
-		if child.JobType == "subtitle_generate" {
-			require.Equal(t, mps.Provider, child.Provider)
+	require.Len(t, jobs, 2)
+	var subtitle *model.VideoProcessingJob
+	for i := range jobs {
+		if jobs[i].JobType == "subtitle_generate" {
+			subtitle = &jobs[i]
 		}
+	}
+	if subtitle == nil {
+		t.Fatalf("subtitle job is missing: %#v", jobs)
+	}
+	require.Equal(t, "mps:mps-task", subtitle.TranscriptGeneration)
+	require.Equal(t, mps.Provider, subtitle.Provider)
+}
+
+func TestMPSRunCanOptIntoDraftJobs(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoProcessingJob{}))
+	video := model.Video{ID: uuid.NewString(), FileURL: "https://cdn.example/video.mp4", Status: model.VideoStatusReady}
+	job := model.VideoProcessingJob{ID: uuid.NewString(), VideoID: video.ID, JobType: "transcription", Provider: mps.Provider, Status: "running", MaxAttempts: 3, IdempotencyKey: "transcription:" + video.ID}
+	require.NoError(t, db.Create(&video).Error)
+	require.NoError(t, db.Create(&job).Error)
+	client := &fakeMPSClient{task: &mps.Task{TaskID: "mps-task-drafts", Status: "FINISH", Progress: 100, Result: mps.Result{Segments: []mps.Segment{{SourceSegmentID: "mps:mps-task-drafts:000000", Text: "内容", StartMs: 0, EndMs: 1000}}}}}
+	h := NewTranscriptionHandler(db, nil)
+	h.MPS = client
+	h.SetDraftsEnabled(true)
+	require.NoError(t, h.Run(context.Background(), &job, &video))
+	var jobs []model.VideoProcessingJob
+	require.NoError(t, db.Where("video_id = ?", video.ID).Order("job_type").Find(&jobs).Error)
+	require.Len(t, jobs, 4)
+	for _, child := range jobs {
+		if child.JobType == "transcription" {
+			continue
+		}
+		require.Equal(t, "mps:mps-task-drafts", child.TranscriptGeneration)
 		if child.JobType == "outline" || child.JobType == "summary" {
 			require.Equal(t, "draft", child.ResultStage)
 		}

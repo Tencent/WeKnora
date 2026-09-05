@@ -53,3 +53,20 @@ func TestClientExposesModelAndPromptVersion(t *testing.T) {
 		t.Fatalf("model=%q prompt_version=%q", client.Model(), client.PromptVersion())
 	}
 }
+
+func TestStreamEmitsOpenAICompatibleDeltas(t *testing.T) {
+	client := NewClient(config.LLMConfig{BaseURL: "https://llm.example.test/v1", APIKey: "key", Model: "model"})
+	client.http.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(request.Body)
+		if !strings.Contains(string(body), `"stream":true`) {
+			t.Fatalf("request body = %s", body)
+		}
+		stream := "data: " + `{"choices":[{"delta":{"content":"{"}}]}` + "\n\n" + "data: " + `{"choices":[{"delta":{"content":"}"}}]}` + "\n\n" + "data: [DONE]\n\n"
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(stream))}, nil
+	})
+	var deltas []string
+	content, err := client.Stream(t.Context(), "prompt", func(delta string) error { deltas = append(deltas, delta); return nil })
+	if err != nil || content != "{}" || strings.Join(deltas, "") != "{}" {
+		t.Fatalf("content=%q deltas=%v err=%v", content, deltas, err)
+	}
+}

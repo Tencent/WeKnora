@@ -90,6 +90,19 @@ func TestDashboardReturnsEmptyPayloadWhenNoPersistedStatisticsExist(t *testing.T
 	}
 }
 
+func TestParseDashboardQueryUsesDashboardTimezone(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/custom/dashboard?range=7d", nil)
+
+	query, err := parseDashboardQuery(ctx)
+	if err != nil {
+		t.Fatalf("parseDashboardQuery returned error for current 7d range: %v", err)
+	}
+	if query.To != localToday().Format("2006-01-02") {
+		t.Fatalf("to = %q, want dashboard local date %q", query.To, localToday().Format("2006-01-02"))
+	}
+}
+
 func TestDashboardRecordsRealQuestionIdempotently(t *testing.T) {
 	db := openTestVideoDB(t)
 	if err := db.AutoMigrate(

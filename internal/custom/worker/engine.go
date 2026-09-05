@@ -38,6 +38,13 @@ type Engine struct {
 	transcriptionProvider string
 }
 
+type workerPool string
+
+const (
+	foundationPool  workerPool = "foundation"
+	enhancementPool workerPool = "enhancement"
+)
+
 const stuckUploadTimeout = 30 * time.Minute
 
 // pendingJobOrderClause keeps the two foundation artifacts at the same
@@ -55,14 +62,68 @@ func pendingJobOrderClause() string {
 		WHEN 'graph' THEN 7
 		WHEN 'summary_enhance' THEN 8
 		ELSE 9
-	END`
+	END,
+	CASE WHEN result_stage = 'draft' THEN 1 ELSE 0 END`
+}
+
+// pendingJobWhereClause prevents stale content jobs from running after a new
+// transcript generation becomes active. Draft outline/summary jobs are still
+// allowed while indexing is in progress so the UI can receive a fast first
+// pass; the index activation transaction retires any drafts it supersedes.
+func pendingJobWhereClause() string {
+	return `video_processing_jobs.status = 'pending' AND (
+		video_processing_jobs.job_type IN ('thumbnail', 'transcription', 'subtitle_generate', 'index')
+		OR EXISTS (
+			SELECT 1 FROM videos
+			WHERE videos.id = video_processing_jobs.video_id
+			  AND videos.transcript_generation <> ''
+			  AND videos.transcript_generation = video_processing_jobs.transcript_generation
+		)
+		OR (
+			video_processing_jobs.job_type IN ('outline', 'summary')
+			AND video_processing_jobs.result_stage = 'draft'
+			AND EXISTS (
+				SELECT 1 FROM videos
+				WHERE videos.id = video_processing_jobs.video_id
+				  AND videos.transcript_generation = ''
+			)
+		)
+	)`
+}
+
+func pendingJobWhereClauseForPool(pool workerPool, draftsEnabled bool) string {
+	poolClause := "1 = 1"
+	switch pool {
+	case foundationPool:
+		poolClause = "video_processing_jobs.job_type NOT IN ('graph', 'summary_enhance')"
+	case enhancementPool:
+		poolClause = "video_processing_jobs.job_type IN ('graph', 'summary_enhance')"
+	}
+	clause := pendingJobWhereClause() + " AND " + poolClause
+	if !draftsEnabled {
+		clause += " AND NOT (video_processing_jobs.job_type IN ('outline', 'summary') AND video_processing_jobs.result_stage = 'draft')"
+	}
+	return clause
 }
 
 // NewEngine 构造引擎
 func NewEngine(db *gorm.DB, cfg *config.WorkerConfig, handlers ...Handler) *Engine {
+	if cfg == nil {
+		cfg = &config.WorkerConfig{}
+	}
+	normalized := *cfg
+	if normalized.PollIntervalSeconds <= 0 {
+		normalized.PollIntervalSeconds = 1
+	}
+	if normalized.Concurrency <= 0 {
+		normalized.Concurrency = 1
+	}
+	if normalized.EnhancementConcurrency <= 0 {
+		normalized.EnhancementConcurrency = 1
+	}
 	e := &Engine{
 		db:                    db,
-		cfg:                   cfg,
+		cfg:                   &normalized,
 		handlers:              make(map[string]Handler, len(handlers)),
 		transcriptionProvider: "aliyun_tingwu",
 	}
@@ -83,13 +144,28 @@ func (e *Engine) Start(parent context.Context) {
 	} else if recovered > 0 {
 		slog.Warn("recovered interrupted jobs", "component", "content-worker", "job_count", recovered)
 	}
+	if !e.cfg.DraftsEnabled {
+		if retired, err := RetireAutomaticDraftJobs(e.db); err != nil {
+			slog.Error("retire automatic draft jobs", "component", "content-worker", "error", err)
+		} else if retired > 0 {
+			slog.Info("retired automatic draft jobs", "component", "content-worker", "job_count", retired)
+		}
+	}
 	ctx, cancel := context.WithCancel(parent)
 	e.cancel = cancel
 	for i := 0; i < e.cfg.Concurrency; i++ {
 		e.wg.Add(1)
-		go e.loop(ctx, i)
+		go e.loop(ctx, foundationPool, i)
 	}
-	slog.Info("worker engine started", "concurrency", e.cfg.Concurrency, "poll_interval_sec", e.cfg.PollIntervalSeconds)
+	for i := 0; i < e.cfg.EnhancementConcurrency; i++ {
+		e.wg.Add(1)
+		go e.loop(ctx, enhancementPool, i)
+	}
+	slog.Info("worker engine started",
+		"foundation_concurrency", e.cfg.Concurrency,
+		"enhancement_concurrency", e.cfg.EnhancementConcurrency,
+		"poll_interval_sec", e.cfg.PollIntervalSeconds,
+	)
 }
 
 func RecoverInterruptedJobs(db *gorm.DB) (int64, error) {
@@ -113,7 +189,7 @@ func (e *Engine) Stop() {
 }
 
 // loop 单个 worker 循环
-func (e *Engine) loop(ctx context.Context, id int) {
+func (e *Engine) loop(ctx context.Context, pool workerPool, id int) {
 	defer e.wg.Done()
 	ticker := time.NewTicker(time.Duration(e.cfg.PollIntervalSeconds) * time.Second)
 	defer ticker.Stop()
@@ -122,28 +198,38 @@ func (e *Engine) loop(ctx context.Context, id int) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := e.tick(ctx); err != nil {
-				slog.Warn("worker tick", "id", id, "error", err)
+			if err := e.tick(ctx, pool); err != nil {
+				slog.Warn("worker tick", "pool", pool, "id", id, "error", err)
 			}
 		}
 	}
 }
 
 // tick 处理一轮：扫描 pending / 重试 failed-pending 的 job
-func (e *Engine) tick(ctx context.Context) error {
-	if _, err := CleanupStuckUploads(e.db, time.Now().UTC(), stuckUploadTimeout); err != nil {
-		return err
+
+func (e *Engine) tick(ctx context.Context, pool workerPool) error {
+	if pool == foundationPool {
+		if _, err := CleanupStuckUploads(e.db, time.Now().UTC(), stuckUploadTimeout); err != nil {
+			return err
+		}
 	}
 	for {
 		var job model.VideoProcessingJob
 		err := e.db.Transaction(func(tx *gorm.DB) error {
+			lockClause := "FOR UPDATE SKIP LOCKED"
+			// SQLite is used by the unit tests and does not support PostgreSQL's
+			// row-lock syntax. The transaction still serializes the update there;
+			// production PostgreSQL keeps SKIP LOCKED for worker fairness.
+			if tx.Dialector.Name() == "sqlite" {
+				lockClause = ""
+			}
 			err := tx.Raw(fmt.Sprintf(`
 				SELECT * FROM video_processing_jobs
-				WHERE status = 'pending'
+				WHERE %s
 				ORDER BY %s, created_at ASC
-				FOR UPDATE SKIP LOCKED
+				%s
 				LIMIT 1
-			`, pendingJobOrderClause())).Scan(&job).Error
+			`, pendingJobWhereClauseForPool(pool, e.cfg.DraftsEnabled), pendingJobOrderClause(), lockClause)).Scan(&job).Error
 			if err != nil {
 				return err
 			}
@@ -167,6 +253,24 @@ func (e *Engine) tick(ctx context.Context) error {
 		job.AttemptCount++
 		e.dispatch(ctx, &job)
 	}
+}
+
+// RetireAutomaticDraftJobs removes drafts left by a previous run when formal
+// results are the default. Running jobs have already been recovered to pending
+// by Start, so this also prevents an interrupted draft from taking a formal
+// processing slot after a restart.
+func RetireAutomaticDraftJobs(db *gorm.DB) (int64, error) {
+	result := db.Model(&model.VideoProcessingJob{}).
+		Where("status IN ?", []string{"pending", "running"}).
+		Where("job_type IN ? AND result_stage = ?", []string{"outline", "summary"}, "draft").
+		Updates(map[string]any{
+			"status":         "cancelled",
+			"error_category": "superseded",
+			"error_code":     "formal_result_priority",
+			"error_message":  "automatic draft superseded by formal result priority",
+			"completed_at":   time.Now().UTC(),
+		})
+	return result.RowsAffected, result.Error
 }
 
 // CleanupStuckUploads closes upload records that can no longer make progress.

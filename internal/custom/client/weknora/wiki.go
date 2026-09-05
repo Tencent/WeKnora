@@ -290,6 +290,47 @@ func (w *WikiClient) UpsertPage(ctx context.Context, kbID string, input WikiPage
 	return w.writePage(ctx, http.MethodPut, fmt.Sprintf("%s/api/v1/knowledgebase/%s/wiki/pages/%s", w.cfg.BaseURL, kbID, url.PathEscape(input.Slug)), body, http.StatusOK)
 }
 
+// EnsurePage creates a page only when its slug is missing. Unlike UpsertPage,
+// the create path does not perform a second read before POST, so a concurrent
+// writer cannot be overwritten with the caller's seed content. A concurrent
+// create conflict is resolved by reading the page that won the race.
+func (w *WikiClient) EnsurePage(ctx context.Context, kbID string, input WikiPageWrite) (*WikiPage, error) {
+	if strings.TrimSpace(kbID) == "" {
+		kbID = w.cfg.KBID
+	}
+	if strings.TrimSpace(kbID) == "" || strings.TrimSpace(input.Slug) == "" || strings.TrimSpace(input.Content) == "" {
+		return nil, fmt.Errorf("wiki page kb_id, slug and content are required")
+	}
+	existing, err := w.GetPage(ctx, kbID, input.Slug)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return existing, nil
+	}
+	body, err := json.Marshal(map[string]any{
+		"slug":      input.Slug,
+		"title":     input.Title,
+		"page_type": input.PageType,
+		"status":    input.Status,
+		"content":   input.Content,
+		"summary":   input.Summary,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode wiki page: %w", err)
+	}
+	page, writeErr := w.writePage(ctx, http.MethodPost, fmt.Sprintf("%s/api/v1/knowledgebase/%s/wiki/pages", w.cfg.BaseURL, kbID), body, http.StatusCreated)
+	if writeErr == nil {
+		return page, nil
+	}
+	// The POST may have lost a create race. Do not hide a genuine write error
+	// unless the page is now readable and therefore safely usable by the caller.
+	if raced, readErr := w.GetPage(ctx, kbID, input.Slug); readErr == nil && raced != nil {
+		return raced, nil
+	}
+	return nil, writeErr
+}
+
 func (w *WikiClient) writePage(ctx context.Context, method, endpoint string, body []byte, expectedStatus int) (*WikiPage, error) {
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(body))
 	if err != nil {

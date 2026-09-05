@@ -289,6 +289,42 @@ func TestContentEndpointFallsBackToDraftWhenFinalArtifactIsMissing(t *testing.T)
 	}
 }
 
+func TestContentEndpointReturnsPartialOutlineProgress(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{ID: uuid.NewString(), Title: "video", Status: model.VideoStatusProcessing, DurationSeconds: 600, TranscriptGeneration: "generation-1", OutlineDraftWikiPageID: "outline-draft"}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	canonical, err := outline.Marshal(outline.Document{SchemaVersion: outline.SchemaVersion, Chapters: []outline.Chapter{{
+		ChapterIndex: 1, ChapterTitle: "已完成章节", StartSeconds: 0, EndSeconds: 60, ChapterSummary: "已完成的章节内容",
+		EvidenceChunkIDs: []string{"chunk-1"}, KnowledgePoints: []outline.KnowledgePoint{{Title: "关键点", Seconds: 12, EvidenceChunkIDs: []string{"chunk-1"}}},
+	}}})
+	if err != nil {
+		t.Fatalf("marshal outline: %v", err)
+	}
+	server := newContentWikiTestServer(t, video.ID, map[string]weknora.WikiPage{
+		"outline-draft": {ID: "outline-draft", Slug: "outline/video/draft", PageType: "index", Content: "---\ntype: outline\nsource_video_id: " + video.ID + "\ntranscript_generation: generation-1\nschema_version: 1\npartial: true\ncompleted_chapters: 1\ntotal_chapters: 4\n---\n\n" + canonical},
+	})
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/outline", nil)
+	NewContentHandler(db, weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL}), "kb-1").Outline(context)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var payload WikiPageResp
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if payload.Status != "partial" || !payload.Partial || payload.CompletedChapters != 1 || payload.TotalChapters != 4 || payload.NextChapterIndex != 2 || len(payload.Chapters) != 1 {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
 func outlinePageContent(videoID, canonical string) string {
 	return "---\ntype: outline\nsource_video_id: " + videoID + "\ntranscript_generation: generation-1\nschema_version: 1\n---\n\n" + canonical
 }
