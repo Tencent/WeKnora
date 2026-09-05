@@ -180,6 +180,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMemoryRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
+	must(container.Provide(repository.NewEmbeddingCacheRepository))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -404,6 +405,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewMessageHandler))
 	must(container.Provide(handler.NewMessageSuggestionHandler))
 	must(container.Provide(handler.NewModelHandler))
+	must(container.Provide(handler.NewEmbeddingCacheHandler))
 	must(container.Provide(handler.NewSandboxConfigHandler))
 	must(container.Provide(func(
 		s *service.TenantSkillService, streams interfaces.StreamManager,
@@ -465,6 +467,16 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// them only after the matching handlers are ready.
 	must(container.Invoke(recoverPendingWikiTasks))
 
+	// Optional embedding cache: off by default, opt-in via EMBEDDING_CACHE_ENABLED=true.
+	if strings.EqualFold(os.Getenv("EMBEDDING_CACHE_ENABLED"), "true") {
+		if err := container.Invoke(func(repo interfaces.EmbeddingCacheRepository) {
+			embedding.SetEmbeddingCache(repo)
+		}); err != nil {
+			logger.Warnf(ctx, "[embedding-cache] failed to install cache: %v", err)
+		} else {
+			logger.Infof(ctx, "[embedding-cache] enabled")
+		}
+	}
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container
 }
