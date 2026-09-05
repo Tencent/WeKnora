@@ -50,12 +50,12 @@
                     <div class="action-title" :class="{
                       'thinking-inline-title': !event.title && isEventExpanded(event.event_id),
                     }">
-                      <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)"
+                      <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon, 18)"
                         aria-hidden="true" />
-                      <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
+                      <span v-if="event.title" class="action-name action-preamble-title">{{ sanitizeThinkingText(String(event.title)) }}</span>
                       <div v-else-if="event.content && isEventExpanded(event.event_id)"
                         class="thinking-inline-content markdown-content">
-                        <div class="thinking-inline-markdown" v-html="renderMarkdownContent(event.content)"></div>
+                        <div class="thinking-inline-markdown" v-html="renderThinkingMarkdownContent(event.content)"></div>
                       </div>
                       <span v-else-if="getThinkingSummary(event)" class="action-summary">{{ getThinkingSummary(event)
                         }}</span>
@@ -63,7 +63,7 @@
                   </div>
                   <div v-if="event.title && event.content && isEventExpanded(event.event_id)" class="action-details">
                     <div class="thinking-detail-content markdown-content">
-                      <div v-html="renderMarkdownContent(event.content)"></div>
+                      <div v-html="renderThinkingMarkdownContent(event.content)"></div>
                     </div>
                   </div>
                 </div>
@@ -71,22 +71,20 @@
 
               <!-- Thinking Tool Call -->
               <div v-else-if="event.type === 'tool_call' && event.tool_name === 'thinking'" class="tool-event">
-                <div class="action-card"
+                <div class="action-card thinking-tool-card"
                   :class="{ 'action-pending': event.pending || isThinkingActive(event.tool_call_id) }">
                   <div class="action-header" @click="toggleEvent(event.tool_call_id)">
                     <div class="action-title">
-                      <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)"
+                      <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon, 18)"
                         aria-hidden="true" />
                       <span class="action-name">{{ $t('agent.think') }}</span>
-                      <span v-if="event.tool_data?.thought_number" class="action-badge">{{
-                        event.tool_data.thought_number }}/{{ event.tool_data.total_thoughts }}</span>
                       <span v-if="getThinkingSummary(event) && !isEventExpanded(event.tool_call_id)"
                         class="action-summary">{{ getThinkingSummary(event) }}</span>
                     </div>
                   </div>
                   <div v-if="event.tool_data?.thought && isEventExpanded(event.tool_call_id)" class="action-details">
                     <div class="thinking-detail-content markdown-content">
-                      <div v-html="renderMarkdownContent(event.tool_data.thought)"></div>
+                      <div v-html="renderThinkingMarkdownContent(event.tool_data.thought)"></div>
                     </div>
                   </div>
                 </div>
@@ -262,11 +260,11 @@
                   <div class="action-title" :class="{
                     'thinking-inline-title': !event.title && isEventExpanded(event.event_id),
                   }">
-                    <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
-                    <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
+                    <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon, 18)" aria-hidden="true" />
+                    <span v-if="event.title" class="action-name action-preamble-title">{{ sanitizeThinkingText(String(event.title)) }}</span>
                     <div v-else-if="event.content && isEventExpanded(event.event_id)"
                       class="thinking-inline-content markdown-content">
-                      <div class="thinking-inline-markdown" v-html="renderMarkdownContent(event.content)"></div>
+                      <div class="thinking-inline-markdown" v-html="renderThinkingMarkdownContent(event.content)"></div>
                     </div>
                     <span v-else-if="getThinkingSummary(event) && !isEventExpanded(event.event_id)"
                       class="action-summary">{{ getThinkingSummary(event) }}</span>
@@ -274,7 +272,7 @@
                 </div>
                 <div v-if="event.title && event.content && isEventExpanded(event.event_id)" class="action-details">
                   <div class="thinking-detail-content markdown-content">
-                    <div v-html="renderMarkdownContent(event.content)"></div>
+                    <div v-html="renderThinkingMarkdownContent(event.content)"></div>
                   </div>
                 </div>
               </div>
@@ -299,21 +297,19 @@
 
             <!-- Thinking Tool Call -->
             <div v-else-if="event.type === 'tool_call' && event.tool_name === 'thinking'" class="tool-event">
-              <div class="action-card"
+              <div class="action-card thinking-tool-card"
                 :class="{ 'action-pending': event.pending || isThinkingActive(event.tool_call_id) }">
                 <div class="action-header" @click="toggleEvent(event.tool_call_id)">
                   <div class="action-title">
-                    <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
+                    <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon, 18)" aria-hidden="true" />
                     <span class="action-name">{{ $t('agent.think') }}</span>
-                    <span v-if="event.tool_data?.thought_number" class="action-badge">{{ event.tool_data.thought_number
-                    }}/{{ event.tool_data.total_thoughts }}</span>
                     <span v-if="getThinkingSummary(event) && !isEventExpanded(event.tool_call_id)"
                       class="action-summary">{{ getThinkingSummary(event) }}</span>
                   </div>
                 </div>
                 <div v-if="event.tool_data?.thought && isEventExpanded(event.tool_call_id)" class="action-details">
                   <div class="thinking-detail-content markdown-content">
-                    <div v-html="renderMarkdownContent(event.tool_data.thought)"></div>
+                    <div v-html="renderThinkingMarkdownContent(event.tool_data.thought)"></div>
                   </div>
                 </div>
               </div>
@@ -563,7 +559,7 @@ import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMar
 import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
-import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
+import { getQueryText, getWikiPageText, sanitizeThinkingText } from '@/utils/agent-tool-display';
 import { parseWikiToolReferences } from '@/utils/wikiToolReferences';
 import {
   buildManualMarkdown,
@@ -1742,7 +1738,7 @@ const getThinkingContent = (event: any): string => {
 const getThinkingSummary = (event: any): string => {
   const content = getThinkingContent(event);
   if (!content) return '';
-  const cleaned = sanitizeForDisplay(content)
+  const cleaned = sanitizeThinkingText(content)
     .replace(/^#+\s+/gm, '')
     .replace(/\*\*/g, '')
     .replace(/\*/g, '')
@@ -2401,6 +2397,13 @@ const renderMarkdownContent = (content: unknown): string => {
   return renderAgentMarkdown(content, sanitizeForDisplay);
 };
 
+// Thinking content has its own display policy: keep the reasoning readable
+// while hiding implementation identifiers that are useful to the system but
+// not useful to the person reading the timeline.
+const renderThinkingMarkdownContent = (content: unknown): string => {
+  return renderAgentMarkdown(content, sanitizeThinkingText);
+};
+
 // Renders an answer event's content. Strips final-answer wrappers
 // (e.g. <answer>…</answer>, "Final Answer:") that some models wrap their
 // plain-text answer in, then delegates to the standard markdown renderer.
@@ -2862,8 +2865,10 @@ const handleAddToKnowledge = (answerEvent: any) => {
   gap: 0;
   margin-bottom: 10px;
   position: relative;
-  --agent-step-text-size: 14px;
-  --agent-step-summary-size: 13px;
+  --agent-step-text-size: 12px;
+  --agent-step-summary-size: 12px;
+  --agent-thinking-text-size: 14px;
+  --agent-thinking-icon-size: 18px;
   --agent-step-line-color: color-mix(in srgb, var(--td-text-color-primary) 16%, transparent);
   --agent-step-icon-color: var(--td-text-color-placeholder);
   --stream-brand-2: color-mix(in srgb, var(--td-brand-color) 2%, transparent);
@@ -3615,14 +3620,23 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   .thinking-detail-content {
     padding: 7px 0 0 0;
-    font-size: var(--agent-step-summary-size);
+    font-size: var(--agent-thinking-text-size);
     color: var(--td-text-color-secondary);
+    line-height: 1.57;
     max-height: none;
     overflow-y: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .thinking-inline-title {
+    display: block;
+    position: relative;
     align-items: flex-start;
+    min-height: 22px;
+    width: 100%;
+    overflow: visible;
   }
 
   // Anchor the bulb to the fixed header instead of the variable-height title.
@@ -3632,11 +3646,17 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 
   .thinking-inline-content {
-    flex: 1;
+    display: block;
+    width: 100%;
     min-width: 0;
+    max-width: 100%;
     color: var(--td-text-color-secondary);
-    font-size: var(--agent-step-summary-size);
-    line-height: 1.6;
+    font-size: var(--agent-thinking-text-size);
+    line-height: 1.57;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    white-space: normal;
     overflow-wrap: anywhere;
     user-select: text;
 
@@ -3646,6 +3666,49 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
     :deep(.thinking-inline-markdown > :last-child) {
       margin-bottom: 0;
+    }
+  }
+
+  // Thinking rows intentionally use one readable size, independent of the
+  // compact typography used by ordinary tool rows.
+  .thinking-event-card,
+  .thinking-tool-card {
+    .action-title-icon.icon-mask,
+    .action-title-icon.t-icon {
+      width: var(--agent-thinking-icon-size);
+      height: var(--agent-thinking-icon-size);
+      font-size: var(--agent-thinking-icon-size);
+    }
+
+    .action-name,
+    .action-summary,
+    .thinking-inline-content,
+    .thinking-detail-content {
+      font-size: var(--agent-thinking-text-size);
+      line-height: 1.57;
+    }
+
+    .thinking-inline-content,
+    .thinking-detail-content {
+      :deep(p),
+      :deep(li),
+      :deep(blockquote),
+      :deep(code),
+      :deep(pre),
+      :deep(h1),
+      :deep(h2),
+      :deep(h3),
+      :deep(h4),
+      :deep(h5),
+      :deep(h6) {
+        font-size: var(--agent-thinking-text-size) !important;
+        line-height: 1.57 !important;
+      }
+
+      :deep(*) {
+        font-size: var(--agent-thinking-text-size) !important;
+        line-height: 1.57 !important;
+      }
     }
   }
 
@@ -3693,12 +3756,16 @@ const handleAddToKnowledge = (answerEvent: any) => {
     color: var(--agent-step-icon-color);
     width: 18px;
     height: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    line-height: 18px;
+    flex: 0 0 18px;
   }
 
   .tree-child .action-title-icon {
     position: absolute;
     left: -42px;
-    top: 3px;
+    top: 2px;
   }
 
   .action-title .action-name,
@@ -3711,7 +3778,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 
   .tree-root .action-name {
-    font-size: 14px;
+    font-size: 12px;
     color: var(--td-text-color-secondary);
   }
 

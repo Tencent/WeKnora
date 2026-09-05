@@ -257,6 +257,7 @@ import {
   getKnowledgeSearchSummaryHtml,
   getRagPipelineStepTitle,
   getRetrievalSearchSource,
+  sanitizeThinkingText,
 } from '@/utils/agent-tool-display'
 import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay'
 import { RAG_RETRIEVAL_TOOL_NAMES, RAG_TIMELINE_TOOL_NAMES } from '@/utils/rag-pipeline-history'
@@ -308,10 +309,11 @@ const {
 const thinkingContent = computed(() => {
   const stream = props.session?.agentEventStream
   if (!Array.isArray(stream)) return ''
-  return stream
+  const rawContent = stream
     .filter((event) => event.type === 'thinking')
     .map((event) => String(event.content || ''))
     .join('')
+  return sanitizeThinkingText(rawContent)
 })
 
 const hasThinking = computed(() => thinkingContent.value.trim().length > 0)
@@ -584,8 +586,10 @@ onBeforeUnmount(() => {
 @import '@/components/css/chat-timeline-loading.less';
 
 .rag-pipeline-progress {
-  --agent-step-text-size: 14px;
-  --agent-step-summary-size: 13px;
+  --agent-step-text-size: 12px;
+  --agent-step-summary-size: 12px;
+  --agent-thinking-text-size: 14px;
+  --agent-thinking-icon-size: 18px;
   --agent-step-line-color: color-mix(in srgb, var(--td-text-color-primary) 16%, transparent);
   --agent-step-icon-color: var(--td-text-color-placeholder);
 
@@ -630,8 +634,8 @@ onBeforeUnmount(() => {
     border-radius: 4px;
     background: transparent;
     color: var(--td-text-color-secondary);
-    font-size: 14px;
-    line-height: 22px;
+    font-size: 12px;
+    line-height: 1.55;
     cursor: pointer;
     flex: 0 1 auto;
     min-width: 0;
@@ -668,7 +672,7 @@ onBeforeUnmount(() => {
 
   .tree-root-expand__icon {
     flex-shrink: 0;
-    font-size: 14px;
+    font-size: 12px;
     color: currentColor;
   }
 
@@ -763,9 +767,13 @@ onBeforeUnmount(() => {
   .action-title-icon {
     position: absolute;
     left: -42px;
-    top: 3px;
+    top: 2px;
     width: 18px;
     height: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    line-height: 18px;
+    flex: 0 0 18px;
     flex-shrink: 0;
     color: var(--agent-step-icon-color);
   }
@@ -797,17 +805,30 @@ onBeforeUnmount(() => {
 }
 
 .rag-thinking-step {
+  .action-title-icon {
+    width: var(--agent-thinking-icon-size);
+    height: var(--agent-thinking-icon-size);
+    font-size: var(--agent-thinking-icon-size);
+  }
+
+  .action-name {
+    font-size: var(--agent-thinking-text-size);
+    line-height: 1.57;
+  }
+
   .thinking-detail-content {
     margin-top: 4px;
     padding: 0;
-    font-size: var(--agent-step-summary-size);
+    font-size: var(--agent-thinking-text-size);
     font-weight: 400;
     color: var(--td-text-color-placeholder);
-    line-height: 1.55;
+    line-height: 1.57;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
     word-break: break-word;
-    max-height: 200px;
-    overflow-y: auto;
+    height: auto;
+    max-height: none;
+    overflow: visible;
   }
 
   .action-pending .action-name {

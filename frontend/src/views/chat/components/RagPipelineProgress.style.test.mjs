@@ -92,6 +92,13 @@ test('rag pipeline renders model thinking inside the timeline before the done ro
   assert.ok(thinkingIndex < doneIndex)
 })
 
+test('rag thinking rows use 14px text and icon size', () => {
+  assert.match(source, /--agent-thinking-text-size:\s*14px/)
+  assert.match(source, /--agent-thinking-icon-size:\s*18px/)
+  assert.match(source, /\.rag-thinking-step[\s\S]*\.action-title-icon[\s\S]*width:\s*var\(--agent-thinking-icon-size\)/)
+  assert.match(source, /\.rag-thinking-step[\s\S]*\.thinking-detail-content[\s\S]*font-size:\s*var\(--agent-thinking-text-size\)/)
+})
+
 test('clickable timeline headers use pointer cursor', () => {
   assert.match(source, /\.tool-event \{[\s\S]*\.action-header \{[\s\S]*cursor: pointer/)
   assert.match(source, /\.action-header \{[\s\S]*&\.no-results \{[\s\S]*cursor: default/)
@@ -101,6 +108,8 @@ test('clickable timeline headers use pointer cursor', () => {
 test('collapsed summary uses compact spacing before the answer', () => {
   assert.match(source, /\.tree-container \{\s*margin: 0 0 8px;/)
   assert.match(source, /\.rag-pipeline-progress \{[\s\S]*margin: 0;/)
+  assert.match(source, /\.tree-root-expand \{[\s\S]*font-size: 12px;/)
+  assert.match(source, /\.tree-root-expand__icon \{[\s\S]*font-size: 12px;/)
 })
 
 test('rag pipeline auto-scrolls capped thinking detail while streaming', () => {

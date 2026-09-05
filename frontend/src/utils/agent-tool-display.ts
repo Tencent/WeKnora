@@ -2,6 +2,71 @@ import type { ComposerTranslation } from 'vue-i18n'
 
 export type RetrievalSearchSource = 'knowledge' | 'web' | 'mixed'
 
+const THINKING_UUID_RE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi
+const THINKING_INTERNAL_ID_RE = /(?:(?:source[_\s-]*(?:video|document)|video|knowledge(?:[_\s-]*(?:base|document))?|kb|chunk|document|file|task|job|run|request|trace|transcript)[_\s-]*id(?:s)?\b|(?:视频|知识库|文档|分块|文件|任务|作业|请求|会话|运行)[\s_-]*(?:id|编号))\s*(?:(?:[:：=]\s*|(?:is|为|是)\s*)[`'"“「]?(?:[^\s,，。；;、)）\]}]+)[`'"”」]?)?/gi
+const THINKING_GENERATION_RE = /(?:\b(?:transcript|transcription|transcoding)[_\s-]*generation\b|(?:转码|转写)\s*(?:代次|版本))\s*(?:(?:[:：=]\s*|(?:is|为|是)\s*)[`'"“「]?(?:[^\s,，。；;、)）\]}]+)[`'"”」]?)?/gi
+const THINKING_PATH_FIELD_RE = /(?:\b(?:file|source|document)?[_\s-]*path\b|文件(?:路径|地址)|路径)\s*(?:(?:[:：=]\s*|(?:is|为|是)\s*)(?:"[^"\n]*"|'[^'\n]*'|`[^`\n]*`|[^\s,，。；;、)）\]}]+))?/gi
+const THINKING_ABSOLUTE_PATH_RE = /(?:\/(?:Users|var|tmp|home|private|opt|mnt|workspace|app|srv)\/[^\s`'"，。；;、)）\]}]+|\b[A-Za-z]:[\\/][^\s`'"，。；;、)）\]}]+)/gi
+const THINKING_RELATIVE_PATH_RE = /(?:^|(?<=\s))(?:\.\.?\/|(?:frontend|src|internal|cmd|dist|output|tmp|var)\/)[^\s`'"，。；;、)）\]}]+/gim
+const THINKING_FILE_RE = /`(?:[^`\n]*[\\/][^`\n]*|[^`\n]+\.(?:md|html?|json|ya?ml|ts|tsx|vue|png|jpe?g|pdf))`/gi
+
+function collapseRepeatedThinkingBlock(value: string): string {
+  const leading = value.match(/^\s*/)?.[0] || ''
+  const trailing = value.match(/\s*$/)?.[0] || ''
+  const core = value.trim()
+  if (core.length < 8) return value
+
+  for (let repeatCount = 2; repeatCount <= 4; repeatCount += 1) {
+    if (core.length % repeatCount !== 0) continue
+    const blockLength = core.length / repeatCount
+    const block = core.slice(0, blockLength)
+    if (block.repeat(repeatCount) === core) {
+      return `${leading}${block}${trailing}`
+    }
+  }
+  return value
+}
+
+function dedupeThinkingSegments(value: string): string {
+  const segments = value.match(/(?:[^\n。！？.!?]+[。！？.!?]?|\n+)/g) || [value]
+  const seen = new Set<string>()
+  const deduped = segments.filter((segment) => {
+    if (/^\s+$/.test(segment)) return true
+    const normalized = segment.trim().replace(/\s+/g, ' ')
+    if (!normalized || seen.has(normalized)) return false
+    seen.add(normalized)
+    return true
+  })
+  return deduped.join('').replace(/\n{3,}/g, '\n\n')
+}
+
+/** Remove implementation identifiers from model reasoning before it reaches the UI. */
+export function sanitizeThinkingText(value: string): string {
+  if (!value) return value
+
+  let result = value
+    .replace(THINKING_INTERNAL_ID_RE, '')
+    .replace(THINKING_GENERATION_RE, '')
+    .replace(THINKING_UUID_RE, '')
+    .replace(THINKING_PATH_FIELD_RE, '')
+    .replace(THINKING_ABSOLUTE_PATH_RE, '')
+    .replace(THINKING_RELATIVE_PATH_RE, '')
+    .replace(THINKING_FILE_RE, '')
+    .replace(/\(\s*\)/g, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t]+([，。；：！？])/g, '$1')
+
+  // Streaming can append the same reasoning sentence more than once. Keep
+  // one copy without flattening newlines, lists, or other Markdown structure.
+  result = collapseRepeatedThinkingBlock(result)
+  result = dedupeThinkingSegments(result)
+  result = result
+    .replace(/^[ \t]*[，。；：！？,.!?]+[ \t]*/gm, '')
+    .replace(/([，。；：！？,.!?])[ \t]*(?=[，。；：！？,.!?])/g, '$1')
+
+  return result.trim()
+}
+
 function collectQueryStrings(value: unknown): string[] {
   if (value == null) return []
 

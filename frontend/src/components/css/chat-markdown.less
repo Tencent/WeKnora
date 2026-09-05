@@ -7,10 +7,10 @@
 // live outside this file.
 //
 // Shared typography for chat answer markdown (botmsg, AgentStreamDisplay, embed).
-// Tuned against ChatGPT markdown test doc: 16px body, 24px line-height on paragraphs,
+// Tuned for chat answers: 14px body, 20 / 18 / 16px heading hierarchy,
 // stepped headings, dotted links, light tables, pill inline code, kbd chips.
 .chat-markdown-typography() {
-  font-size: 16px;
+  font-size: 14px;
   color: var(--td-text-color-primary);
   line-height: 1.625;
   letter-spacing: normal;
@@ -442,14 +442,14 @@
   }
 
   :deep(h1) {
-    font-size: 1.5em;
+    font-size: 20px;
     font-weight: 600;
     margin: 0 0 0.375em;
     line-height: 1.333;
   }
 
   :deep(h2) {
-    font-size: 1.25em;
+    font-size: 18px;
     font-weight: 600;
     margin: 1em 0 0.25em;
     line-height: 1.4;
@@ -460,7 +460,7 @@
   }
 
   :deep(h3) {
-    font-size: 1.125em;
+    font-size: 16px;
     font-weight: 600;
     margin: 0.875em 0 0.25em;
     line-height: 1.556;

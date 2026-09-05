@@ -5,6 +5,7 @@ import {
   getKnowledgeSearchSummaryHtml,
   getQueryText,
   getRagPipelineStepTitle,
+  sanitizeThinkingText,
   getWikiPageText,
 } from './agent-tool-display.ts'
 
@@ -51,6 +52,25 @@ test('getWikiPageText supports persisted slugs arrays', () => {
     'entity/知识助理、concept/API管理',
   )
   assert.equal(getWikiPageText('{"slug":"index"}'), 'index')
+})
+
+test('sanitizeThinkingText hides implementation language from reasoning', () => {
+  const text = sanitizeThinkingText(
+    '需要使用转码代次：g-2026-09，并校验 transcript_generation=rev-3，视频 ID: 123e4567-e89b-12d3-a456-426614174000。',
+  )
+  assert.doesNotMatch(text, /转码代次|transcript_generation|视频 ID|123e4567-e89b-12d3-a456-426614174000/)
+})
+
+test('sanitizeThinkingText removes common id and path spellings while retaining readable text', () => {
+  const text = sanitizeThinkingText(
+    '知识库 ID: kb-123，video_id=vid-1，source_document_id: doc-9，文件路径：/Users/lizi/Desktop/foo.ts。继续分析。',
+  )
+  assert.equal(text, '继续分析。')
+})
+
+test('sanitizeThinkingText deduplicates repeated sentences without flattening markdown', () => {
+  const text = sanitizeThinkingText('- 第一步。\n- 第一步。\n第二步。第二步。')
+  assert.equal(text, '- 第一步。\n\n第二步。')
 })
 
 test('getKnowledgeSearchSummaryHtml includes file count when present', () => {

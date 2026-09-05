@@ -19,13 +19,14 @@
             </div>
         </div>
         <div class="think-content" v-show="!isFold || deepSession.thinking">
-            <div ref="contentInnerRef" class="content-inner">{{ deepSession.thinkContent }}</div>
+            <div ref="contentInnerRef" class="content-inner">{{ thinkingContent }}</div>
         </div>
     </div>
 </template>
 <script setup>
-import { watch, ref, onMounted, nextTick } from 'vue';
+import { computed, watch, ref, onMounted, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { sanitizeThinkingText } from '@/utils/agent-tool-display';
 
 const isFold = ref(false)
 const contentInnerRef = ref(null)
@@ -37,6 +38,7 @@ const props = defineProps({
         required: false
     }
 });
+const thinkingContent = computed(() => sanitizeThinkingText(String(props.deepSession?.thinkContent || '')))
 
 // 初始化时检查：如果 thinking 已完成（从历史记录加载），默认折叠
 onMounted(() => {
@@ -83,13 +85,13 @@ const toggleFold = () => {
 .deep-think {
     display: flex;
     flex-direction: column;
-    font-size: 12px;
+    font-size: 14px;
     width: 100%;
     border-radius: 8px;
     background-color: var(--td-bg-color-container);
     border: .5px solid var(--td-component-stroke);
     box-shadow: 0 2px 4px color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-    overflow: hidden;
+    overflow: visible;
     box-sizing: border-box;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     margin: -8px 0px 10px 0px;
@@ -119,8 +121,10 @@ const toggleFold = () => {
 
             .thinking-indicator {
                 position: relative;
-                width: 16px;
-                height: 16px;
+                width: 18px;
+                height: 18px;
+                min-width: 18px;
+                min-height: 18px;
                 margin-right: 8px;
                 display: flex;
                 align-items: center;
@@ -145,7 +149,7 @@ const toggleFold = () => {
             }
 
             .thinking-text {
-                font-size: 12px;
+                font-size: 14px;
                 color: var(--td-text-color-primary);
                 white-space: nowrap;
             }
@@ -156,13 +160,15 @@ const toggleFold = () => {
             align-items: center;
 
             .done-icon {
-                width: 16px;
-                height: 16px;
+                width: 18px;
+                height: 18px;
+                min-width: 18px;
+                min-height: 18px;
                 margin-right: 8px;
             }
 
             .done-text {
-                font-size: 12px;
+                font-size: 14px;
                 color: var(--td-text-color-primary);
                 white-space: nowrap;
             }
@@ -184,22 +190,15 @@ const toggleFold = () => {
 
         .content-inner {
             padding: 8px 14px;
-            font-size: 12px;
-            line-height: 1.6;
+            font-size: 14px;
+            line-height: 1.57;
             color: var(--td-text-color-secondary);
-            max-height: 200px;
-            overflow-y: auto;
+            height: auto;
+            max-height: none;
+            overflow: visible;
             word-break: break-word;
-            white-space: pre-wrap;
-
-            &::-webkit-scrollbar {
-                width: 4px;
-            }
-
-            &::-webkit-scrollbar-thumb {
-                background: rgba(0, 0, 0, 0.1);
-                border-radius: 2px;
-            }
+            white-space: normal;
+            overflow-wrap: anywhere;
         }
     }
 }

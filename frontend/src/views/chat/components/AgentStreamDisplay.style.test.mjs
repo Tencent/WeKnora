@@ -8,16 +8,26 @@ const here = dirname(fileURLToPath(import.meta.url))
 const source = readFileSync(join(here, 'AgentStreamDisplay.vue'), 'utf8')
 
 test('agent steps use compact muted timeline styling', () => {
-  assert.match(source, /--agent-step-text-size:\s*14px/)
-  assert.match(source, /--agent-step-summary-size:\s*13px/)
+  assert.match(source, /--agent-step-text-size:\s*12px/)
+  assert.match(source, /--agent-step-summary-size:\s*12px/)
   assert.match(source, /--agent-step-icon-color:\s*var\(--td-text-color-placeholder\)/)
   assert.match(source, /max-height:\s*none/)
   assert.match(source, /overflow-y:\s*visible/)
-  assert.match(source, /\.tree-root \.action-name\s*\{[\s\S]*font-size:\s*14px/)
+  assert.match(source, /\.tree-root \.action-name\s*\{[\s\S]*font-size:\s*12px/)
   assert.match(source, /\.tree-child \.action-title-icon\s*\{[\s\S]*position:\s*absolute/)
   assert.match(source, /function maskIconStyle\(src: string, size = 18\)/)
   assert.match(source, /\.icon-mask\s*\{[\s\S]*background-color:\s*var\(--agent-step-icon-color\)/)
+  assert.match(source, /\.action-title \.action-title-icon\s*\{[\s\S]*width:\s*18px/)
   assert.doesNotMatch(source, /\.action-title \.action-title-icon,\s*\n\s*\.icon-mask\s*\{/)
+})
+
+test('thinking rows use one 14px text and icon size', () => {
+  assert.match(source, /--agent-thinking-text-size:\s*14px/)
+  assert.match(source, /--agent-thinking-icon-size:\s*18px/)
+  assert.match(source, /\.thinking-event-card,[\s\S]*\.thinking-tool-card[\s\S]*font-size:\s*var\(--agent-thinking-text-size\)/)
+  assert.match(source, /\.thinking-event-card,[\s\S]*\.action-title-icon\.icon-mask,[\s\S]*width:\s*var\(--agent-thinking-icon-size\)/)
+  assert.match(source, /maskIconStyle\(thinkingIcon, 18\)/)
+  assert.doesNotMatch(source, /event\.tool_data\.thought_number/)
 })
 
 test('expanded agent step log keeps model thinking in the tool timeline', () => {
@@ -31,7 +41,7 @@ test('streaming log renders reasoning alongside tool calls', () => {
 
 test('expanded model reasoning stays inline without a separate thinking title', () => {
   assert.match(source, /class="thinking-inline-content markdown-content"/)
-  assert.match(source, /class="thinking-inline-markdown" v-html="renderMarkdownContent\(event\.content\)"/)
+  assert.match(source, /class="thinking-inline-markdown" v-html="renderThinkingMarkdownContent\(event\.content\)"/)
   assert.match(source, /event\.title && event\.content && isEventExpanded\(event\.event_id\)/)
   assert.match(source, /\.thinking-inline-title\s*\{[\s\S]*align-items:\s*flex-start/)
   assert.match(source, /\.thinking-inline-content\s*\{[\s\S]*margin-top:\s*0/)
