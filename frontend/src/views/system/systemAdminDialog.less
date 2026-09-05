@@ -1,0 +1,96 @@
+/* Shared visual shell for the SystemAdmin action dialogs. The dialogs are
+   teleported to body, so this must be global CSS (imported from an
+   unscoped SFC style block), not scoped styles. */
+
+.password-reset-dialog,
+.create-user-dialog {
+  padding: 0;
+  overflow: hidden;
+  border-color: var(--td-component-stroke);
+  border-radius: 12px;
+  box-shadow:
+    0 12px 32px rgba(15, 23, 42, 0.12),
+    0 2px 8px rgba(15, 23, 42, 0.08);
+
+  .t-dialog__header {
+    min-height: 64px;
+    padding: 0 24px;
+    font-size: 18px;
+    line-height: 26px;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  .t-dialog__close {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 6px;
+  }
+
+  .t-dialog__body {
+    padding: 20px 24px 4px;
+  }
+
+  .t-dialog__footer {
+    box-sizing: border-box;
+    padding: 16px 24px 20px;
+    border-top: 1px solid var(--td-component-stroke);
+
+    .t-button {
+      min-width: 88px;
+      border-radius: 6px;
+    }
+  }
+
+  .password-reset-warning,
+  .create-user-warning {
+    padding: 12px 14px;
+    margin-bottom: 20px;
+    border-radius: 8px;
+
+    .t-alert__content {
+      font-size: 13px;
+      line-height: 20px;
+    }
+  }
+
+  .password-reset-form,
+  .create-user-form {
+    .t-form__item {
+      margin-bottom: 16px;
+    }
+
+    .t-form__label--top {
+      min-height: 28px;
+      padding: 0;
+      font-size: 14px;
+      line-height: 22px;
+    }
+
+    .t-input {
+      border-radius: 6px;
+    }
+  }
+}
+
+@media (max-width: 480px) {
+  .password-reset-dialog,
+  .create-user-dialog {
+    width: calc(100vw - 24px) !important;
+
+    .t-dialog__header {
+      min-height: 56px;
+      padding: 0 20px;
+      font-size: 17px;
+    }
+
+    .t-dialog__body {
+      padding: 16px 20px 4px;
+    }
+
+    .t-dialog__footer {
+      padding: 14px 20px 18px;
+    }
+  }
+}
