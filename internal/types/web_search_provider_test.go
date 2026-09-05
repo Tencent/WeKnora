@@ -76,3 +76,27 @@ func TestGetWebSearchProviderTypesIncludesMetaso(t *testing.T) {
 		t.Fatalf("unexpected Metaso scope metadata: %+v", field)
 	}
 }
+
+func TestGetWebSearchProviderTypesIncludesBocha(t *testing.T) {
+	var bocha *WebSearchProviderTypeInfo
+	providerTypes := GetWebSearchProviderTypes()
+	for i := range providerTypes {
+		if providerTypes[i].ID == string(WebSearchProviderTypeBocha) {
+			bocha = &providerTypes[i]
+			break
+		}
+	}
+	if bocha == nil {
+		t.Fatal("Bocha provider type not found")
+	}
+	if !bocha.RequiresAPIKey || !bocha.SupportsProxy || len(bocha.ConfigFields) != 2 {
+		t.Fatalf("unexpected Bocha metadata: %+v", bocha)
+	}
+	freshness := bocha.ConfigFields[0]
+	if freshness.Key != "freshness" || freshness.Default != "noLimit" || len(freshness.Options) != 5 {
+		t.Fatalf("unexpected Bocha freshness metadata: %+v", freshness)
+	}
+	if summary := bocha.ConfigFields[1]; summary.Key != "summary" || summary.Default != "true" {
+		t.Fatalf("unexpected Bocha summary metadata: %+v", summary)
+	}
+}
