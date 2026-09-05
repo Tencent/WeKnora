@@ -1,7 +1,6 @@
 package embedding
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -24,7 +23,6 @@ type ZhipuEmbedder struct {
 	modelID                   string
 	httpClient                *http.Client
 	timeout                   time.Duration
-	maxRetries                int
 	customHeaders             map[string]string
 	supportsDimensionOverride bool
 	EmbedderPooler
@@ -79,7 +77,6 @@ func NewZhipuEmbedder(apiKey, baseURL, modelName string,
 		dimensions:           dimensions,
 		modelID:              modelID,
 		timeout:              timeout,
-		maxRetries:           3, // Maximum retry count
 	}, nil
 }
 
@@ -106,46 +103,16 @@ func (e *ZhipuEmbedder) Embed(ctx context.Context, text string) ([]float32, erro
 	return nil, fmt.Errorf("no embedding returned")
 }
 
+// doRequestWithRetry sends the request under the shared retry policy in
+// retry_http.go (429/5xx + Retry-After + exponential backoff).
 func (e *ZhipuEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) (*http.Response, error) {
-	var resp *http.Response
-	var err error
 	url := e.baseURL + "/embeddings"
-
-	for i := 0; i <= e.maxRetries; i++ {
-		if i > 0 {
-			backoffTime := time.Duration(1<<uint(i-1)) * time.Second
-			if backoffTime > 10*time.Second {
-				backoffTime = 10 * time.Second
-			}
-			logger.GetLogger(ctx).
-				Infof("ZhipuEmbedder retrying request (%d/%d), waiting %v", i, e.maxRetries, backoffTime)
-
-			select {
-			case <-time.After(backoffTime):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-
-		var req *http.Request
-		req, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
-		if err != nil {
-			logger.GetLogger(ctx).Errorf("ZhipuEmbedder failed to create request: %v", err)
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+e.apiKey)
-		secutils.ApplyCustomHeaders(req, e.customHeaders)
-
-		resp, err = e.httpClient.Do(req)
-		if err == nil {
-			return resp, nil
-		}
-
-		logger.GetLogger(ctx).Errorf("ZhipuEmbedder request failed (attempt %d/%d): %v", i+1, e.maxRetries+1, err)
-	}
-
-	return nil, err
+	return retryEmbeddingRequest(ctx, e.httpClient, http.MethodPost, url, jsonData,
+		func(req *http.Request) {
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+e.apiKey)
+			secutils.ApplyCustomHeaders(req, e.customHeaders)
+		})
 }
 
 func (e *ZhipuEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
@@ -217,7 +184,8 @@ func (e *ZhipuEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]flo
 			bodyStr = bodyStr[:1000] + "... (truncated)"
 		}
 		logger.GetLogger(ctx).Errorf("ZhipuEmbedder BatchEmbed API error: Http Status %s, Response Body: %s", resp.Status, bodyStr)
-		return nil, fmt.Errorf("BatchEmbed API error: Http Status %s, Response: %s", resp.Status, bodyStr)
+		return nil, embedHTTPError(resp.StatusCode,
+			fmt.Sprintf("BatchEmbed API error: Http Status %s, Response: %s", resp.Status, bodyStr))
 	}
 
 	// Parse response

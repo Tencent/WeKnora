@@ -188,6 +188,11 @@ type Knowledge struct {
 	ProcessedAt *time.Time `json:"processed_at"`
 	// Error message of the knowledge
 	ErrorMessage string `json:"error_message"`
+	// ChunkFingerprint is a hash of the chunking config + ordered parsed chunk
+	// contents. Document processing writes it before embedding; a retry whose
+	// fingerprint matches reuses the persisted chunks and resumes embedding
+	// instead of rebuilding from scratch (see knowledge_embed_progress).
+	ChunkFingerprint string `json:"chunk_fingerprint"  gorm:"type:varchar(64);not null;default:''"`
 	// Deletion time of the knowledge
 	DeletedAt gorm.DeletedAt `json:"deleted_at"         gorm:"index"`
 	// Knowledge base name (not stored in database, populated on query)

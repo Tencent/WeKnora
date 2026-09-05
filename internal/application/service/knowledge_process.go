@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -116,12 +118,12 @@ func (s *knowledgeService) cloneKnowledge(
 // processDocumentFromPassage handles asynchronous processing of text passages
 func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, passage []string,
-) {
+) error {
 	// Update status to processing
 	knowledge.ParseStatus = "processing"
 	knowledge.UpdatedAt = time.Now()
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
-		return
+		return err
 	}
 
 	// Convert passages to chunks
@@ -149,7 +151,7 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 			opts.QuestionCount = 3
 		}
 	}
-	s.processChunks(ctx, kb, knowledge, chunks, opts)
+	return s.processChunks(ctx, kb, knowledge, chunks, opts)
 }
 
 // ProcessChunksOptions contains options for processing chunks
@@ -242,10 +244,16 @@ func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfi
 }
 
 // processChunks processes chunks and creates embeddings for knowledge content
+// processChunks processes chunks and creates embeddings for knowledge content.
+// It returns an error for any failure that should trigger an asynq retry
+// (embedding model resolution, chunk persistence, BatchIndex, progress
+// writes, post-process/multimodal enqueue). Callers that can retry propagate
+// it; "aborted" (deleting/cancelled) paths return nil so the task does not
+// retry.
 func (s *knowledgeService) processChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
 	opts ...ProcessChunksOptions,
-) {
+) error {
 	// Get options
 	var options ProcessChunksOptions
 	if len(opts) > 0 {
@@ -274,7 +282,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// up yet so the branch is purely "stop early".
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk processing: %s", status, knowledge.ID)
-		return
+		return nil
 	}
 
 	// Get embedding model for vectorization — only needed when vector/keyword indexing is enabled
@@ -283,43 +291,93 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		var err error
 		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 		if err != nil {
+			// Return the error so the asynq task is retried instead of being
+			// marked successful while nothing was embedded/indexed.
 			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks get embedding model failed")
-			return
+			return fmt.Errorf("get embedding model: %w", err)
 		}
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping embedding model", kb.ID)
 	}
 
-	// 幂等性处理：清理旧的chunks和索引数据，避免重复数据
-	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
-
-	// 删除旧的chunks
-	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
-		// 不返回错误，继续处理（可能没有旧数据）
+	// ── Embedding resume (断点续传) ────────────────────────────────────────
+	// 计算本次解析结果的指纹（有序 chunk 内容哈希）。与知识行上存储的指纹一致
+	// 时，说明上次运行已经把同一批 chunk 写入 DB——跳过清理/重建，只补嵌缺失的
+	// 向量；不一致（或为空）则走全量重建，即历史行为。清理路径
+	// （cleanupKnowledgeResources / 知识删除）会同步清空指纹与进度表，因此
+	// 指纹命中只会发生在"任务失败后的 asynq 重试"这一条链路上。
+	fingerprint := computeChunkFingerprint(chunks, options.ParentChunks)
+	resume := knowledge.ChunkFingerprint != "" && knowledge.ChunkFingerprint == fingerprint
+	if resume {
+		logger.Infof(ctx, "[Resume] Chunk fingerprint matches, resuming embedding for knowledge %s", knowledge.ID)
+	} else if knowledge.ChunkFingerprint != "" {
+		logger.Infof(ctx, "[Resume] Chunk fingerprint changed for knowledge %s, full rebuild", knowledge.ID)
 	}
 
-	// 删除旧的索引数据 — only when vector/keyword indexing is enabled
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
-		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
-	if err == nil && embeddingModel != nil {
-		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
-			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
-			// 不返回错误，继续处理（可能没有旧数据）
+	// textChunks 在两条路径（全量重建 / 断点续传）都会被嵌入阶段使用，提前声明。
+	var textChunks []*types.Chunk
+	hasParentChild := len(options.ParentChunks) > 0
+
+	// 提前验证断点续传的可行性：确认上一轮写入的 chunk 行完整可用。不可用则
+	// 降级为全量重建，保证随后的清理只执行一次（清理路径以最终 resume 值为准）。
+	if resume {
+		var ok bool
+		textChunks, ok = loadChunksForResume(ctx, s.chunkService, knowledge, chunks, hasParentChild)
+		if !ok {
+			logger.Warnf(ctx, "[Resume] Failed to reload persisted chunks for %s, falling back to full rebuild", knowledge.ID)
+			resume = false
 		} else {
-			logger.Infof(ctx, "Successfully deleted existing index data for knowledge: %s", knowledge.ID)
+			logger.Infof(ctx, "[Resume] Reusing %d persisted chunks for knowledge %s", len(textChunks), knowledge.ID)
 		}
 	}
 
-	// 删除知识图谱数据（如果存在）
-	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
-	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing graph data (may not exist): %v", err)
-		// 不返回错误，继续处理
+	// 幂等性处理：清理旧的chunks和索引数据，避免重复数据。
+	// 断点续传命中时跳过——上一轮已写入的 chunk 行与向量需要保留。
+	// retrieveEngine 提前创建：清理与后续嵌入阶段共用，避免两条路径各建一个。
+	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	retrieveEngine, retrieveEngineErr := retriever.CreateRetrieveEngineForKB(
+		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
+	if kb.NeedsEmbeddingModel() && retrieveEngineErr != nil {
+		// Fail fast: every later use of retrieveEngine (cleanup delete,
+		// EstimateStorageSize, BatchIndex) assumes a non-nil engine. Returning
+		// now lets asynq retry instead of dereferencing a nil engine.
+		logger.GetLogger(ctx).WithField("error", retrieveEngineErr).
+			Errorf("processChunks init retrieve engine failed for knowledge %s", knowledge.ID)
+		return fmt.Errorf("init retrieve engine: %w", retrieveEngineErr)
 	}
+	if !resume {
+		logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
 
-	logger.Infof(ctx, "Cleanup completed, starting to process new chunks")
+		// 删除旧的chunks
+		if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+			logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
+			// 不返回错误，继续处理（可能没有旧数据）
+		}
+
+		// 删除旧的索引数据 — only when vector/keyword indexing is enabled
+		if retrieveEngineErr == nil && embeddingModel != nil {
+			if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
+				logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
+				// 不返回错误，继续处理（可能没有旧数据）
+			} else {
+				logger.Infof(ctx, "Successfully deleted existing index data for knowledge: %s", knowledge.ID)
+			}
+		}
+
+		// 删除知识图谱数据（如果存在）
+		namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
+		if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
+			logger.Warnf(ctx, "Failed to delete existing graph data (may not exist): %v", err)
+			// 不返回错误，继续处理
+		}
+
+		// 清除断点续传进度（与 chunks/向量一并作废）
+		if err := s.chunkService.DeleteEmbedProgressByKnowledgeID(ctx, knowledge.ID); err != nil {
+			logger.Warnf(ctx, "Failed to delete embed progress (may not exist): %v", err)
+		}
+
+		logger.Infof(ctx, "Cleanup completed, starting to process new chunks")
+	}
 
 	// ========== DocReader 解析结果日志 ==========
 	logger.Infof(ctx, "[DocReader] ========== 解析结果概览 ==========")
@@ -385,9 +443,9 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 	}
 
-	// === Parent-Child Chunking: create parent chunks first ===
-	hasParentChild := len(options.ParentChunks) > 0
-	var parentDBChunks []*types.Chunk // indexed by ParsedParentChunk position
+	if !resume {
+		// === Parent-Child Chunking: create parent chunks first ===
+		var parentDBChunks []*types.Chunk // indexed by ParsedParentChunk position
 	if hasParentChild {
 		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
 		for i, pc := range options.ParentChunks {
@@ -462,7 +520,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// Collect retrievable text chunks only. ParentChunkID only controls parent expansion after retrieval.
 	// When ParentChunkID is empty, retrieval keeps the standalone child content without loading a parent.
-	textChunks := make([]*types.Chunk, 0, len(chunks))
+	textChunks = make([]*types.Chunk, 0, len(chunks))
 	for _, chunk := range insertChunks {
 		if chunk.ChunkType == types.ChunkTypeText {
 			textChunks = append(textChunks, chunk)
@@ -485,7 +543,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Nothing has been persisted yet, so both branches just bail.
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk write: %s", status, knowledge.ID)
-		return
+			return nil
 	}
 
 	// Save chunks to database — ALWAYS, regardless of indexing strategy.
@@ -501,7 +559,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		s.repo.UpdateKnowledge(ctx, knowledge)
 		s.failStage(ctx, knowledge.ID, types.StageChunking,
 			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
-		return
+			return fmt.Errorf("create chunks: %w", err)
 	}
 	totalChunkChars := 0
 	for _, c := range insertChunks {
@@ -511,6 +569,18 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		"chunks_written":   len(insertChunks),
 		"total_text_chars": totalChunkChars,
 	})
+	} else {
+		// Resume path: persisted chunk rows are reused; only stage metadata is
+		// refreshed before embedding the chunks that are still missing.
+		s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
+			"chunks_planned": len(textChunks),
+			"resumed":        true,
+		})
+		s.endStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
+			"chunks_written": len(textChunks),
+			"resumed":        true,
+		})
+	}
 
 	// Create index information and perform vector indexing — only when vector/keyword is enabled.
 	// Chunks are ALWAYS saved to DB (above) because wiki and graph need them even without vector indexing.
@@ -546,25 +616,63 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			})
 		}
 
-		// Calculate storage size required for embeddings
+		// 持久化指纹：必须在嵌入开始前落库，失败后 asynq 重试才能命中续传。
+		if knowledge.ChunkFingerprint != fingerprint {
+			knowledge.ChunkFingerprint = fingerprint
+			knowledge.UpdatedAt = time.Now()
+			if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+				logger.GetLogger(ctx).WithField("error", err).
+					Errorf("[Resume] Failed to persist chunk fingerprint")
+				return fmt.Errorf("persist chunk fingerprint: %w", err)
+			}
+		}
+
+		// 断点续传：只嵌入尚未提交向量的 chunk。
+		toIndex := indexInfoList
+		if resume {
+			embedded, lerr := s.chunkService.ListEmbeddedChunkIDs(ctx, knowledge.ID)
+			if lerr != nil {
+				logger.GetLogger(ctx).WithField("error", lerr).
+					Errorf("[Resume] Failed to load embed progress")
+				return fmt.Errorf("load embed progress: %w", lerr)
+			}
+			missing := make([]*types.IndexInfo, 0, len(indexInfoList))
+			for _, info := range indexInfoList {
+				if _, done := embedded[info.SourceID]; !done {
+					missing = append(missing, info)
+				}
+			}
+			toIndex = missing
+			logger.Infof(ctx, "[Resume] %d/%d chunks already embedded, %d remaining",
+				len(indexInfoList)-len(toIndex), len(indexInfoList), len(toIndex))
+		}
+
+		// Calculate storage size required for embeddings. The tenant
+		// storage adjustment uses the DELTA between the new total and the
+		// previous persisted value (idempotency basis — see the comment at
+		// the AdjustStorageUsed call below).
 		totalStorageSize = retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfoList)
+		storageDelta = totalStorageSize - knowledge.StorageSize
 		if tenantInfo.StorageQuota > 0 {
 			// Re-fetch tenant storage information
-			tenantInfo, err = s.tenantRepo.GetTenantByID(ctx, tenantInfo.ID)
+			tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, tenantInfo.ID)
 			if err != nil {
 				knowledge.ParseStatus = types.ParseStatusFailed
 				knowledge.ErrorMessage = err.Error()
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
-				return
+				return fmt.Errorf("re-fetch tenant for quota check: %w", err)
 			}
-			// Check if there's enough storage quota available
-			if tenantInfo.StorageUsed+totalStorageSize > tenantInfo.StorageQuota {
+			// Check if there's enough storage quota available, accounting
+			// only for the delta (idempotent: a retry-resume that already
+			// accounted the full amount computes delta=0).
+			if tenantInfo.StorageUsed+storageDelta > tenantInfo.StorageQuota {
 				knowledge.ParseStatus = types.ParseStatusFailed
 				knowledge.ErrorMessage = "存储空间不足"
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
-				return
+				return fmt.Errorf("storage quota exceeded: need %d, have %d/%d",
+					storageDelta, tenantInfo.StorageUsed, tenantInfo.StorageQuota)
 			}
 		}
 
@@ -578,40 +686,58 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 					logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
 				}
 			}
-			return
+			return nil
 		}
 
-		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
-		if err != nil {
-			knowledge.ParseStatus = types.ParseStatusFailed
-			knowledge.ErrorMessage = err.Error()
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
-
-			// delete failed chunks
-			if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-				logger.Errorf(ctx, "Delete chunks failed: %v", err)
+		// 按批提交：每完成一组立即记录断点进度。失败时保留已完成的 chunks/向量/
+		// 进度，asynq 重试会命中指纹续传，只补剩余部分——不再整体重来。
+		const embedCommitBatchSize = 40
+		groups := make([][]*types.IndexInfo, 0, (len(toIndex)+embedCommitBatchSize-1)/embedCommitBatchSize)
+		for start := 0; start < len(toIndex); start += embedCommitBatchSize {
+			end := start + embedCommitBatchSize
+			if end > len(toIndex) {
+				end = len(toIndex)
 			}
-
-			// delete index
-			if err := retrieveEngine.DeleteByKnowledgeIDList(
-				ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type,
-			); err != nil {
-				logger.Errorf(ctx, "Delete index failed: %v", err)
-			}
-			// Map vector store / embedding rate-limit errors to a
-			// stable code so the UI can offer "retry later" hints.
-			code := werrors.ErrCodeVectorStoreWriteFailed
-			if isLikelyRateLimitError(err) {
-				code = werrors.ErrCodeEmbeddingRateLimit
-			}
-			s.failStage(ctx, knowledge.ID, types.StageEmbedding,
-				code, "batch index failed", err)
-			return
+			groups = append(groups, toIndex[start:end])
 		}
-		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
+		vectorsWrittenThisRun := 0
+		for gi, group := range groups {
+			if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
+				logger.Infof(ctx, "Knowledge aborted (%s) during group indexing, keeping progress: %s", status, knowledge.ID)
+				return nil
+			}
+			if err := retrieveEngine.BatchIndex(ctx, embeddingModel, group); err != nil {
+				knowledge.ParseStatus = types.ParseStatusFailed
+				knowledge.ErrorMessage = err.Error() + "（已保留完成部分的进度，重试将从断点继续）"
+				knowledge.UpdatedAt = time.Now()
+				s.repo.UpdateKnowledge(ctx, knowledge)
+				code := werrors.ErrCodeVectorStoreWriteFailed
+				if isLikelyRateLimitError(err) {
+					code = werrors.ErrCodeEmbeddingRateLimit
+				}
+				s.failStage(ctx, knowledge.ID, types.StageEmbedding,
+					code, fmt.Sprintf("batch index failed at group %d/%d (progress kept)", gi+1, len(groups)), err)
+				return fmt.Errorf("batch index at group %d/%d: %w", gi+1, len(groups), err)
+			}
+			groupIDs := make([]string, 0, len(group))
+			for _, info := range group {
+				groupIDs = append(groupIDs, info.SourceID)
+			}
+			if err := s.chunkService.MarkChunksEmbedded(ctx, knowledge.ID, groupIDs); err != nil {
+				// Progress write failure: return error so asynq retries.
+				// On retry the resumed fingerprint + already-persisted
+				// progress records make this a near-no-op.
+				logger.GetLogger(ctx).WithField("error", err).
+					Errorf("processChunks mark chunks embedded failed at group %d/%d", gi+1, len(groups))
+				return fmt.Errorf("mark chunks embedded at group %d/%d: %w", gi+1, len(groups), err)
+			}
+			vectorsWrittenThisRun += len(groupIDs)
+		}
+		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index (%d skipped)",
+			len(toIndex), len(indexInfoList)-len(toIndex))
 		s.endStage(ctx, knowledge.ID, types.StageEmbedding, types.JSONMap{
-			"vectors_written": len(indexInfoList),
+			"vectors_written": vectorsWrittenThisRun,
+			"vectors_skipped": len(indexInfoList) - len(toIndex),
 			"storage_bytes":   totalStorageSize,
 		})
 
@@ -628,8 +754,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type); err != nil {
 					logger.Warnf(ctx, "Failed to cleanup index after deletion detected: %v", err)
 				}
+				if err := s.chunkService.DeleteEmbedProgressByKnowledgeID(ctx, knowledge.ID); err != nil {
+					logger.Warnf(ctx, "Failed to cleanup embed progress after deletion detected: %v", err)
+				}
 			}
-			return
+			return nil
 		}
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping BatchIndex", kb.ID)
@@ -651,18 +780,43 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		now,
 	)
 
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update knowledge failed")
+	// Persist the final knowledge state and tenant storage delta atomically.
+	// If either write fails, the transaction rolls both back and the task retry
+	// recomputes the same delta from the unchanged knowledge row.
+	if err := s.repo.FinalizeKnowledgeWithStorage(
+		ctx, knowledge, tenantInfo.ID, storageDelta,
+	); err != nil {
+		logger.GetLogger(ctx).WithField("error", err).
+			WithField("delta", storageDelta).
+			Errorf("processChunks finalize knowledge and storage failed")
+		return fmt.Errorf("finalize knowledge and storage: %w", err)
 	}
+	tenantInfo.StorageUsed += storageDelta
 
-	// Enqueue multimodal tasks for images (async, non-blocking)
+	// Enqueue multimodal tasks for images. Set the Redis pending counter
+	// to the actual number of enqueued tasks so the "all images processed"
+	// gate cannot strand permanently. If enqueue fails, return error so
+	// asynq retries the whole pipeline.
 	if options.EnableMultimodel && len(options.StoredImages) > 0 {
 		s.beginStage(ctx, knowledge.ID, types.StageMultimodal, types.JSONMap{
 			"image_count":    len(options.StoredImages),
 			"enable_ocr":     true,
 			"enable_caption": true,
 		})
-		s.enqueueImageMultimodalTasks(ctx, knowledge, kb, options.StoredImages, chunks, options.Metadata)
+		enqueued, enqErr := s.enqueueImageMultimodalTasks(ctx, knowledge, kb, options.StoredImages, chunks, options.Metadata)
+		if enqueued == 0 && enqErr != nil {
+			s.failStage(ctx, knowledge.ID, types.StageMultimodal,
+				werrors.ErrCodeMultimodalAllFailed, "failed to enqueue any multimodal task", enqErr)
+			return fmt.Errorf("enqueue multimodal tasks: %w", enqErr)
+		}
+		if enqErr != nil {
+			// Partial enqueue success: some tasks are running, but the
+			// parent task will retry and re-enqueue all. The pending
+			// counter was set to the actual enqueued count, so transitive
+			// consistency holds.
+			logger.Warnf(ctx, "Partially enqueued multimodal tasks (%d/%d): %v",
+				enqueued, len(options.StoredImages), enqErr)
+		}
 	} else {
 		s.skipStage(ctx, knowledge.ID, types.StageMultimodal, "skipped")
 		// If there are no multimodal tasks, enqueue the post process task immediately
@@ -676,25 +830,74 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 		langfuse.InjectTracing(ctx, &postProcessPayload)
 		payloadBytes, err := json.Marshal(postProcessPayload)
-		if err == nil {
-			task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes,
-				knowledgePostProcessTaskOptions()...)
-			if _, err := s.task.Enqueue(task); err != nil {
-				logger.Errorf(ctx, "Failed to enqueue knowledge post process task: %v", err)
-			} else {
-				logger.Infof(ctx, "Enqueued knowledge post process task for %s", knowledge.ID)
-			}
-		} else {
+		if err != nil {
 			logger.Errorf(ctx, "Failed to marshal knowledge post process payload: %v", err)
+			return fmt.Errorf("marshal post process payload: %w", err)
 		}
+		task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes,
+			knowledgePostProcessTaskOptions()...)
+		if _, err := s.task.Enqueue(task); err != nil {
+			logger.Errorf(ctx, "Failed to enqueue knowledge post process task: %v", err)
+			return fmt.Errorf("enqueue post process task: %w", err)
+		}
+		logger.Infof(ctx, "Enqueued knowledge post process task for %s", knowledge.ID)
 	}
 
-	// Update tenant's storage usage
-	tenantInfo.StorageUsed += totalStorageSize
-	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, totalStorageSize); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update tenant storage used failed")
-	}
 	logger.GetLogger(ctx).Infof("processChunks successfully")
+	return nil
+}
+
+// computeChunkFingerprint hashes the ordered parsed chunk contents (children
+// and parents) so a retry can tell whether the persisted chunk set is still
+// valid. The chunking config does not need to be hashed separately: any config
+// change produces a different ordered chunk sequence and therefore a different
+// fingerprint.
+func computeChunkFingerprint(chunks []types.ParsedChunk, parents []types.ParsedParentChunk) string {
+	h := sha256.New()
+	for _, c := range chunks {
+		fmt.Fprintf(h, "C|%d|%d|%s\n", int(c.Seq), len(c.Content), c.Content)
+	}
+	for _, p := range parents {
+		fmt.Fprintf(h, "P|%d|%d|%s\n", int(p.Seq), len(p.Content), p.Content)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// loadChunksForResume reloads the persisted chunk rows from the previous run
+// and maps them back onto the freshly parsed chunks (matching by chunk type +
+// index, which is deterministic when the fingerprint matched). Returns the text
+// chunks to (re-)index and whether the mapping was complete. On false the
+// caller must fall back to a full rebuild.
+func loadChunksForResume(
+	ctx context.Context,
+	chunkService interfaces.ChunkService,
+	knowledge *types.Knowledge,
+	chunks []types.ParsedChunk,
+	hasParentChild bool,
+) ([]*types.Chunk, bool) {
+	existing, err := chunkService.ListChunksByKnowledgeID(ctx, knowledge.ID)
+	if err != nil || len(existing) == 0 {
+		return nil, false
+	}
+	byKey := make(map[string]*types.Chunk, len(existing))
+	for _, c := range existing {
+		byKey[fmt.Sprintf("%s:%d", c.ChunkType, c.ChunkIndex)] = c
+	}
+	out := make([]*types.Chunk, 0, len(chunks))
+	for idx := range chunks {
+		if strings.TrimSpace(chunks[idx].Content) == "" {
+			continue
+		}
+		dbChunk := byKey[fmt.Sprintf("%s:%d", types.ChunkTypeText, int(chunks[idx].Seq))]
+		if dbChunk == nil {
+			return nil, false
+		}
+		chunks[idx].ChunkID = dbChunk.ID
+		if !hasParentChild || dbChunk.ParentChunkID != "" {
+			out = append(out, dbChunk)
+		}
+	}
+	return out, true
 }
 
 // defaultMaxInputChars is the default maximum characters used as input for summary generation.
@@ -2506,12 +2709,14 @@ func (s *knowledgeService) ReparseKnowledge(
 		return existing, nil
 	}
 
-	// For non-manual knowledge, cleanup synchronously then enqueue document processing
+	// For non-manual knowledge, cleanup and enqueue while holding the
+	// per-knowledge lock so an active worker cannot interleave its indexing.
 	logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
 	if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"knowledge_id": knowledgeID,
-		})
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"knowledge_id": knowledgeID})
+		if saveErr := s.repo.UpdateKnowledge(ctx, existing); saveErr != nil {
+			logger.Warnf(ctx, "Failed to persist partially cleaned knowledge %s: %v", knowledgeID, saveErr)
+		}
 		return nil, err
 	}
 
@@ -3436,8 +3641,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			EnableQuestionGeneration: payload.EnableQuestionGeneration,
 			QuestionCount:            payload.QuestionCount,
 		}
-		s.processChunks(ctx, kb, knowledge, passageChunks, passageOpts)
-		return nil
+		return s.processChunks(ctx, kb, knowledge, passageChunks, passageOpts)
 	} else {
 		// File import
 		convertResult, err = s.convert(ctx, payload, kb, knowledge, eff, isLastRetry)
@@ -3586,10 +3790,9 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)
 	}
 
-	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
-	s.processChunks(ctx, kb, knowledge, chunks, processOpts)
-
-	return nil
+	// Step 4: Process chunks (vectorize + index + enqueue async tasks).
+	// Propagate failures so Asynq retries instead of marking the task complete.
+	return s.processChunks(ctx, kb, knowledge, chunks, processOpts)
 }
 
 // sanitizeReadResult protects every text field that can cross from a parser
@@ -3846,7 +4049,19 @@ func (s *knowledgeService) failKnowledge(
 	return nil, fmt.Errorf(format, args...)
 }
 
-// enqueueImageMultimodalTasks enqueues asynq tasks for multimodal image processing.
+// enqueueImageMultimodalTasks enqueues asynq tasks for multimodal image
+// processing. It returns the number of tasks actually enqueued and an error
+// summarizing any failures.
+//
+// Consistency contract with the completion gate (checkAndFinalizeAllImages):
+// the Redis key multimodal:pending:<knowledgeID> counts the outstanding image
+// tasks, and post-process is only triggered when it reaches zero. The counter
+// must therefore equal the number of tasks that were ACTUALLY enqueued — the
+// old code seeded it with len(images) before enqueuing, so any enqueue
+// failure left a permanently-waiting pending state (knowledge stuck in
+// "processing" forever). The key is created at 0 first, then incremented by
+// the real enqueue count, so a fast-finishing task can never decrement a
+// key that does not exist yet (which would wrongly fire the finalize gate).
 func (s *knowledgeService) enqueueImageMultimodalTasks(
 	ctx context.Context,
 	knowledge *types.Knowledge,
@@ -3854,19 +4069,20 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 	images []docparser.StoredImage,
 	chunks []types.ParsedChunk,
 	metadata map[string]string,
-) {
+) (enqueued int, retErr error) {
 	if s.task == nil || len(images) == 0 {
-		return
+		return 0, nil
 	}
 
 	attempt := attemptFromCtx(ctx)
 	redisKey := fmt.Sprintf("multimodal:pending:%s", knowledge.ID)
 	if s.redisClient != nil {
-		if err := s.redisClient.Set(ctx, redisKey, len(images), 24*time.Hour).Err(); err != nil {
-			logger.Warnf(ctx, "Failed to set multimodal pending count for %s: %v", knowledge.ID, err)
+		if err := s.redisClient.Set(ctx, redisKey, 0, 24*time.Hour).Err(); err != nil {
+			logger.Warnf(ctx, "Failed to init multimodal pending count for %s: %v", knowledge.ID, err)
 		}
 	}
 
+	var enqueueErr error
 	for idx, img := range images {
 		// Match image to the ParsedChunk whose content contains the image URL.
 		// ChunkID was populated by processChunks with the real DB UUID.
@@ -3900,6 +4116,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		payloadBytes, err := json.Marshal(payload)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to marshal image multimodal payload: %v", err)
+			enqueueErr = errors.Join(enqueueErr, fmt.Errorf("marshal payload for image %d: %w", idx, err))
 			continue
 		}
 
@@ -3907,10 +4124,21 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			asynq.Queue(types.QueueMultimodal), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 		if _, err := s.task.Enqueue(task); err != nil {
 			logger.Warnf(ctx, "Failed to enqueue image multimodal task for %s: %v", img.ServingURL, err)
+			enqueueErr = errors.Join(enqueueErr, fmt.Errorf("enqueue image %d (%s): %w", idx, img.ServingURL, err))
 		} else {
+			enqueued++
 			logger.Infof(ctx, "Enqueued image:multimodal task for %s", img.ServingURL)
 		}
 	}
+
+	// Publish the real count after all enqueues were attempted so the
+	// completion gate only waits for tasks that are actually running.
+	if s.redisClient != nil && enqueued > 0 {
+		if err := s.redisClient.IncrBy(ctx, redisKey, int64(enqueued)).Err(); err != nil {
+			logger.Warnf(ctx, "Failed to bump multimodal pending count to %d for %s: %v", enqueued, knowledge.ID, err)
+		}
+	}
+	return enqueued, enqueueErr
 }
 
 // ProcessKnowledgeListReparse handles Asynq knowledge list reparse tasks.

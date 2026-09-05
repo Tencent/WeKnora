@@ -140,14 +140,15 @@ func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, con
 			return embeddings, nil
 		}
 		logger.Errorf(ctx, "BatchEmbedWithPool attempt %d/%d failed: %v", attempt+1, embedRetryAttempts, err)
-		if attempt+1 < embedRetryAttempts {
-			select {
-			case <-time.After(delay):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-			delay *= 2
+		if !embedding.IsRetryableEmbedError(err) || attempt+1 >= embedRetryAttempts {
+			break
 		}
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		delay *= 2
 	}
 	return embeddings, err
 }
