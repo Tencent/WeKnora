@@ -39,6 +39,25 @@ const (
 	ChunkTypeWikiPage ChunkType = "wiki_page"
 )
 
+// AllChunkTypes 返回全部 Chunk 类型。列表类接口在调用方未显式筛选类型时以
+// 它作为默认集合，新增 Chunk 类型后无需改动调用方即可保持可见。
+func AllChunkTypes() []ChunkType {
+	return []ChunkType{
+		ChunkTypeText,
+		ChunkTypeParentText,
+		ChunkTypeImageOCR,
+		ChunkTypeImageCaption,
+		ChunkTypeSummary,
+		ChunkTypeEntity,
+		ChunkTypeRelationship,
+		ChunkTypeFAQ,
+		ChunkTypeWebSearch,
+		ChunkTypeTableSummary,
+		ChunkTypeTableColumn,
+		ChunkTypeWikiPage,
+	}
+}
+
 // ChunkStatus 定义了不同状态的 Chunk
 type ChunkStatus int
 
