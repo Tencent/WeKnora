@@ -52,6 +52,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { GUIDE_BRAND_NAME } from '@/config/branding'
 import type { SpotlightGuideStep } from '@/types/spotlightGuide'
 
 const CARD_WIDTH = 340
@@ -151,8 +152,8 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null
 
 const step = computed(() => props.steps[index.value] ?? props.steps[0])
 const isLast = computed(() => index.value === props.steps.length - 1)
-const stepTitle = computed(() => t(`${props.stepI18nPrefix}.${step.value.key}.title`))
-const stepDesc = computed(() => t(`${props.stepI18nPrefix}.${step.value.key}.desc`))
+const stepTitle = computed(() => t(`${props.stepI18nPrefix}.${step.value.key}.title`, { brand: GUIDE_BRAND_NAME }))
+const stepDesc = computed(() => t(`${props.stepI18nPrefix}.${step.value.key}.desc`, { brand: GUIDE_BRAND_NAME }))
 
 const hole = computed(() => {
   const el = targetEl.value

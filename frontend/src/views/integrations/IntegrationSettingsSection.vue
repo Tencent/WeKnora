@@ -7,6 +7,7 @@
           <p class="section-description">
             {{ $t('agentEditor.im.description') }}
             <a
+              v-if="FEATURES.showGithubLinks"
               href="https://github.com/Tencent/WeKnora/blob/main/docs/IM%E9%9B%86%E6%88%90%E5%BC%80%E5%8F%91%E6%96%87%E6%A1%A3.md"
               target="_blank"
               rel="noopener noreferrer"
@@ -36,8 +37,9 @@
         <ApiIntegrationSettings />
       </div>
 
-      <ChromeExtensionLanding v-if="tab === 'chrome'" />
-      <ClawSkillLanding v-if="tab === 'claw'" />
+      <ChromeExtensionLanding v-if="FEATURES.showChromeClawIntegrations && tab === 'chrome'" />
+      <ClawSkillLanding v-if="FEATURES.showChromeClawIntegrations && tab === 'claw'" />
+
     </div>
   </div>
 </template>
@@ -50,6 +52,7 @@ import AgentEmbedChannelPanel from '@/components/AgentEmbedChannelPanel.vue'
 import ApiIntegrationSettings from '@/views/integrations/ApiIntegrationSettings.vue'
 import ChromeExtensionLanding from '@/views/integrations/ChromeExtensionLanding.vue'
 import ClawSkillLanding from '@/views/integrations/ClawSkillLanding.vue'
+import { FEATURES } from '@/config/branding'
 import type { IntegrationTab } from '@/config/integrations'
 
 const filterAgentId = ref('')
@@ -61,7 +64,7 @@ const props = defineProps<{
 const route = useRoute()
 
 const isLandingSection = computed(
-  () => props.tab === 'chrome' || props.tab === 'claw',
+  () => FEATURES.showChromeClawIntegrations && (props.tab === 'chrome' || props.tab === 'claw'),
 )
 
 function applyAgentFilterFromRoute() {

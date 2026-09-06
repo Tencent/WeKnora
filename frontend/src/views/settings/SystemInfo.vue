@@ -140,13 +140,15 @@
             <pre class="migration-error-detail">{{ systemInfo.db_migration_error }}</pre>
             <div class="migration-error-actions">
               <t-link
+                v-if="FEATURES.showGithubLinks"
                 theme="primary"
                 :href="troubleshootingDocsURL"
                 target="_blank"
                 rel="noopener noreferrer"
               >{{ $t('system.dbMigrationViewDocs') }}</t-link>
-              <span class="migration-error-actions-sep">·</span>
+              <span v-if="FEATURES.showGithubLinks" class="migration-error-actions-sep">·</span>
               <t-link
+                v-if="FEATURES.showGithubLinks"
                 theme="primary"
                 :href="reportIssueURL"
                 target="_blank"
@@ -195,6 +197,7 @@
 </template>
 
 <script setup lang="ts">
+import { FEATURES } from '@/config/branding'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getSystemInfo, type SystemInfo } from '@/api/system'
 import { useI18n } from 'vue-i18n'
