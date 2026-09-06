@@ -565,6 +565,13 @@ func (s *knowledgeService) ListPagedKnowledgeByKnowledgeBaseID(ctx context.Conte
 	return types.NewPageResult(total, page, knowledges), nil
 }
 
+// ListKnowledgeIDsByFilter returns knowledge IDs matching the list filter.
+func (s *knowledgeService) ListKnowledgeIDsByFilter(
+	ctx context.Context, kbID string, filter types.KnowledgeListFilter,
+) ([]string, error) {
+	return s.repo.ListKnowledgeIDsByFilter(ctx, ctx.Value(types.TenantIDContextKey).(uint64), kbID, filter)
+}
+
 // ListKnowledgeFolderTree returns the folder hierarchy of a knowledge base with
 // per-folder document counts, derived from the folder_path stored on each
 // knowledge entry.

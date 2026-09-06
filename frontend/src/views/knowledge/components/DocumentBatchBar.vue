@@ -7,6 +7,9 @@ defineProps<{
   count: number;
   deleteLoading?: boolean;
   reparseLoading?: boolean;
+  cancelParseLoading?: boolean;
+  // 跨页全选正在拉取全部命中 ID：禁用操作按钮，避免对未拉全的选择集执行操作
+  selectAllLoading?: boolean;
   tagLoading?: boolean;
   // When true the bar stays visible even with 0 selections, so users can exit
   // batch mode from here without selecting anything first.
@@ -20,6 +23,7 @@ const emit = defineEmits<{
   (e: 'cancel'): void;
   (e: 'delete'): void;
   (e: 'reparse'): void;
+  (e: 'cancelParse'): void;
   (e: 'batchTag'): void;
   (e: 'moveToFolder', folderPath: string): void;
 }>();
@@ -35,24 +39,36 @@ const folderPickerVisible = ref(false);
       :aria-label="t('knowledgeBase.selectedCount', { count })">
       <div class="batch-bar-inner">
         <div class="batch-bar-left">
+          <t-loading v-if="selectAllLoading" size="12px" class="batch-bar-loading" />
           <span class="batch-bar-count">{{ t('knowledgeBase.selectedCount', { count }) }}</span>
           <t-button variant="text" theme="default" size="small" class="batch-bar-clear" @click="emit('cancel')">
             {{ t('knowledgeBase.clearSelection') }}
           </t-button>
         </div>
         <div class="batch-bar-actions">
+          <t-popconfirm theme="warning" :content="t('knowledgeBase.confirmBatchCancelParseDocument', { count })"
+            :confirm-btn="{ content: t('knowledgeBase.cancelParse'), theme: 'danger' }"
+            :cancel-btn="{ content: t('common.cancel') }" placement="top" @confirm="emit('cancelParse')">
+            <t-button theme="warning" variant="outline" size="small"
+              :disabled="count === 0 || deleteLoading || reparseLoading || cancelParseLoading || tagLoading || selectAllLoading"
+              :loading="cancelParseLoading" @click.stop>
+              <template #icon><t-icon name="close-circle" size="14px" /></template>
+              {{ t('knowledgeBase.cancelParse') }}
+            </t-button>
+          </t-popconfirm>
+
           <t-popconfirm theme="warning" :content="t('knowledgeBase.confirmBatchReparseDocument', { count })"
             :confirm-btn="{ content: t('knowledgeBase.confirmBatchReparse'), theme: 'warning' }"
             :cancel-btn="{ content: t('common.cancel') }" placement="top" @confirm="emit('reparse')">
             <t-button theme="default" variant="outline" size="small"
-              :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading" :loading="reparseLoading" @click.stop>
+              :disabled="count === 0 || deleteLoading || reparseLoading || cancelParseLoading || tagLoading || selectAllLoading" :loading="reparseLoading" @click.stop>
               <template #icon><t-icon name="refresh" size="14px" /></template>
               {{ t('knowledgeBase.rebuildDocument') }}
             </t-button>
           </t-popconfirm>
 
           <t-button theme="default" variant="outline" size="small"
-            :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading" :loading="tagLoading"
+            :disabled="count === 0 || deleteLoading || reparseLoading || cancelParseLoading || tagLoading || selectAllLoading" :loading="tagLoading"
             @click="emit('batchTag')">
             <template #icon><t-icon name="discount" size="14px" /></template>
             {{ t('knowledgeBase.batchTag') }}
@@ -61,7 +77,7 @@ const folderPickerVisible = ref(false);
           <t-popup v-if="showMoveToFolder" v-model:visible="folderPickerVisible" trigger="click"
             placement="top" overlay-class-name="card-more" destroy-on-close>
             <t-button theme="default" variant="outline" size="small"
-              :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading">
+              :disabled="count === 0 || deleteLoading || reparseLoading || cancelParseLoading || tagLoading || selectAllLoading">
               <template #icon><t-icon name="folder" size="14px" /></template>
               {{ t('knowledgeBase.moveToFolder.action') }}
             </t-button>
@@ -77,7 +93,7 @@ const folderPickerVisible = ref(false);
             :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
             :cancel-btn="{ content: t('common.cancel') }" placement="top" @confirm="emit('delete')">
             <t-button theme="danger" variant="outline" size="small"
-              :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading" :loading="deleteLoading" @click.stop>
+              :disabled="count === 0 || deleteLoading || reparseLoading || cancelParseLoading || tagLoading || selectAllLoading" :loading="deleteLoading" @click.stop>
               <template #icon><t-icon name="delete" size="14px" /></template>
               {{ t('knowledgeBase.batchDelete') }}
             </t-button>
@@ -93,7 +109,7 @@ const folderPickerVisible = ref(false);
   position: relative;
   z-index: 5;
   width: 100%;
-  max-width: 560px;
+  max-width: 640px;
   margin: 0 auto;
   padding: 0 4px;
   box-sizing: border-box;
@@ -124,6 +140,12 @@ const folderPickerVisible = ref(false);
   font-weight: 500;
   color: var(--td-text-color-secondary);
   white-space: nowrap;
+}
+
+.batch-bar-loading {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
 }
 
 .batch-bar-clear {

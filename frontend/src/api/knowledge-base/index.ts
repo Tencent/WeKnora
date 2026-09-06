@@ -324,11 +324,17 @@ export function listKnowledgeFolders(kbId: string) {
  * are derived from the stored paths, so a path that does not exist yet is
  * created by this call. Only the grouping changes; documents are not re-parsed.
  */
-export function moveKnowledgeToFolder(kbId: string, ids: string[], folderPath: string) {
+export function moveKnowledgeToFolder(
+  kbId: string,
+  ids: string[],
+  folderPath: string,
+  selection?: KnowledgeBatchSelectionPayload,
+) {
   return post('/api/v1/knowledge/folder', {
     kb_id: kbId,
-    knowledge_ids: ids,
+    knowledge_ids: selection?.select_all ? undefined : ids,
     folder_path: folderPath,
+    ...selection,
   });
 }
 
@@ -357,7 +363,25 @@ export function reparseKnowledge(id: string, data?: { process_config?: Knowledge
 }
 
 export function cancelKnowledgeParse(id: string) {
-  return post(`/api/v1/knowledge/${id}/cancel-parse`);
+  // Cancel may scan large asynq queues; keep above the default 30s axios timeout.
+  return post(`/api/v1/knowledge/${id}/cancel-parse`, {}, { timeout: 120000 });
+}
+
+/** Batch cancel-parse. Supports explicit ids or select_all + filter. */
+export function batchCancelKnowledgeParse(
+  kbId: string,
+  ids: string[],
+  selection?: KnowledgeBatchSelectionPayload,
+) {
+  return post(
+    `/api/v1/knowledge/batch-cancel-parse`,
+    {
+      kb_id: kbId,
+      ids: selection?.select_all ? undefined : ids,
+      ...selection,
+    },
+    { timeout: 120000 },
+  );
 }
 
 export function getKnowledgeSpans(id: string, attempt?: number) {
@@ -369,9 +393,51 @@ export function delKnowledgeDetails(id: string) {
   return del(`/api/v1/knowledge/${id}`);
 }
 
+/** Shared select_all payload for batch knowledge mutations. */
+export type KnowledgeBatchFilterPayload = {
+  tag_ids?: string[];
+  keyword?: string;
+  file_type?: string;
+  parse_status?: string;
+  source?: string;
+  start_time?: string;
+  end_time?: string;
+  folder_path?: string;
+  folder_recursive?: boolean;
+};
+
+export type KnowledgeBatchSelectionPayload = {
+  select_all?: boolean;
+  exclude_ids?: string[];
+  filter?: KnowledgeBatchFilterPayload;
+};
+
 // 批量删除（同一知识库内）。后端会校验所有 id 隶属于 kb_id 且具有编辑权限。
-export function batchDeleteKnowledge(kbId: string, ids: string[]) {
-  return post(`/api/v1/knowledge/batch-delete`, { kb_id: kbId, ids });
+export function batchDeleteKnowledge(
+  kbId: string,
+  ids: string[],
+  selection?: KnowledgeBatchSelectionPayload,
+) {
+  return post(`/api/v1/knowledge/batch-delete`, {
+    kb_id: kbId,
+    ids: selection?.select_all ? undefined : ids,
+    ...selection,
+  });
+}
+
+// 批量重建（同一知识库内）。后端会校验归属与权限，跳过解析中/删除中的条目。
+export function batchReparseKnowledge(
+  kbId: string,
+  ids: string[],
+  processConfig?: KnowledgeProcessOverrides,
+  selection?: KnowledgeBatchSelectionPayload,
+) {
+  return post(`/api/v1/knowledge/batch-reparse`, {
+    kb_id: kbId,
+    ids: selection?.select_all ? undefined : ids,
+    process_config: processConfig,
+    ...selection,
+  });
 }
 
 export function downKnowledgeDetails(id: string) {
@@ -479,7 +545,14 @@ export function deleteKnowledgeBaseTag(kbId: string, tagSeqId: number, params?: 
   return del(`/api/v1/knowledge-bases/${kbId}/tags/${tagSeqId}${forceQuery}`);
 }
 
-export function updateKnowledgeTagBatch(data: { updates: Record<string, string[]> }) {
+export function updateKnowledgeTagBatch(data: {
+  updates?: Record<string, string[]>;
+  kb_id?: string;
+  tag_ids?: string[];
+  select_all?: boolean;
+  exclude_ids?: string[];
+  filter?: KnowledgeBatchFilterPayload;
+}) {
   return put(`/api/v1/knowledge/tags`, data);
 }
 
@@ -630,12 +703,4 @@ export function knowledgeSemanticSearch(data: {
   knowledge_ids?: string[];
 }) {
   return post('/api/v1/knowledge-search', data);
-}
-
-export function batchReparseKnowledge(kbId: string, ids: string[], processConfig?: KnowledgeProcessOverrides) {
-  return post(`/api/v1/knowledge/batch-reparse`, {
-    kb_id: kbId,
-    ids,
-    process_config: processConfig,
-  });
 }
