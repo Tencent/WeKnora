@@ -130,6 +130,8 @@ func TestEnsurePageCreatesOnlyWhenSlugIsMissing(t *testing.T) {
 			require.NoError(t, json.Unmarshal(body, &payload))
 			require.Equal(t, "video/video-1", payload["slug"])
 			require.Equal(t, "index", payload["page_type"])
+			require.Equal(t, []any{"doc-1"}, payload["source_refs"])
+			require.Equal(t, []any{"chunk-1"}, payload["chunk_refs"])
 			content, ok := payload["content"].(string)
 			require.True(t, ok)
 			_ = json.NewEncoder(writer).Encode(WikiPage{ID: "index-1", Slug: "video/video-1", PageType: "index", Content: content})
@@ -140,7 +142,8 @@ func TestEnsurePageCreatesOnlyWhenSlugIsMissing(t *testing.T) {
 	defer server.Close()
 
 	client := NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL})
-	input := WikiPageWrite{Slug: "video/video-1", Title: "视频_知识底座", PageType: "index", Status: "published", Content: "seed"}
+	input := WikiPageWrite{Slug: "video/video-1", Title: "视频_知识底座", PageType: "index", Status: "published", Content: "seed",
+		SourceRefs: []string{"doc-1"}, ChunkRefs: []string{"chunk-1"}}
 	page, err := client.EnsurePage(t.Context(), "kb-1", input)
 	require.NoError(t, err)
 	require.Equal(t, "index-1", page.ID)
@@ -148,6 +151,31 @@ func TestEnsurePageCreatesOnlyWhenSlugIsMissing(t *testing.T) {
 	page, err = client.EnsurePage(t.Context(), "kb-1", WikiPageWrite{Slug: input.Slug, Content: "must-not-overwrite"})
 	require.NoError(t, err)
 	require.Equal(t, "seed", page.Content)
+}
+
+func TestUpsertPageUpdateSendsSourceAndChunkRefs(t *testing.T) {
+	var updatePayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		const pagePath = "/api/v1/knowledgebase/kb-1/wiki/pages/object/page-1"
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == pagePath:
+			_ = json.NewEncoder(writer).Encode(WikiPage{ID: "page-1", Slug: "object/page-1", Version: 2})
+		case request.Method == http.MethodPut && request.URL.Path == pagePath:
+			require.NoError(t, json.NewDecoder(request.Body).Decode(&updatePayload))
+			_ = json.NewEncoder(writer).Encode(WikiPage{ID: "page-1", Slug: "object/page-1", Version: 2})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	client := NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL})
+	_, err := client.UpsertPage(t.Context(), "kb-1", WikiPageWrite{Slug: "object/page-1", Title: "对象", PageType: "index",
+		Status: "published", Content: "content", SourceRefs: []string{"doc-1"}, ChunkRefs: []string{"chunk-1"}})
+	require.NoError(t, err)
+	require.Equal(t, []any{"doc-1"}, updatePayload["source_refs"])
+	require.Equal(t, []any{"chunk-1"}, updatePayload["chunk_refs"])
+	require.Equal(t, float64(2), updatePayload["version"])
 }
 
 func TestListByVideoOwnedUsesExplicitOwnershipAndKnowledgeBaseLinks(t *testing.T) {

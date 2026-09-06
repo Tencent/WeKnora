@@ -353,12 +353,14 @@ type WikiRevisionPruneRequest struct {
 // fields keep their stored value, so a client can change just the body
 // without re-sending (and risking clobbering) title/status/aliases.
 type WikiPageUpdateRequest struct {
-	Title    *string      `json:"title,omitempty"`
-	Content  *string      `json:"content,omitempty"`
-	Summary  *string      `json:"summary,omitempty"`
-	PageType *string      `json:"page_type,omitempty"`
-	Status   *string      `json:"status,omitempty"`
-	Aliases  *StringArray `json:"aliases,omitempty"`
+	Title      *string      `json:"title,omitempty"`
+	Content    *string      `json:"content,omitempty"`
+	Summary    *string      `json:"summary,omitempty"`
+	PageType   *string      `json:"page_type,omitempty"`
+	Status     *string      `json:"status,omitempty"`
+	Aliases    *StringArray `json:"aliases,omitempty"`
+	SourceRefs *StringArray `json:"source_refs,omitempty"`
+	ChunkRefs  *StringArray `json:"chunk_refs,omitempty"`
 	// Version is the optimistic-lock guard: when > 0 the update is rejected
 	// with a conflict if the stored version differs (someone else edited the
 	// page since the client loaded it). 0 skips the check (legacy clients).

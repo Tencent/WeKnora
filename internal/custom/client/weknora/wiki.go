@@ -48,6 +48,7 @@ type WikiPage struct {
 	Slug           string    `json:"slug"`
 	Title          string    `json:"title"`
 	PageType       string    `json:"page_type"` // 6 值白名单之一
+	Status         string    `json:"status"`
 	Content        string    `json:"content"`
 	Summary        string    `json:"summary,omitempty"`
 	Aliases        []string  `json:"aliases,omitempty"`
@@ -62,13 +63,15 @@ type WikiPage struct {
 }
 
 type WikiPageWrite struct {
-	Slug     string
-	Title    string
-	PageType string
-	Status   string
-	Content  string
-	Summary  string
-	Version  int
+	Slug       string
+	Title      string
+	PageType   string
+	Status     string
+	Content    string
+	Summary    string
+	SourceRefs []string
+	ChunkRefs  []string
+	Version    int
 }
 
 // ParsedFrontmatter 从 content 顶部解析 YAML frontmatter（--- 包裹），返回 map。
@@ -248,12 +251,14 @@ func (w *WikiClient) UpsertPage(ctx context.Context, kbID string, input WikiPage
 	}
 	if existing == nil {
 		body, err := json.Marshal(map[string]any{
-			"slug":      input.Slug,
-			"title":     input.Title,
-			"page_type": input.PageType,
-			"status":    input.Status,
-			"content":   input.Content,
-			"summary":   input.Summary,
+			"slug":        input.Slug,
+			"title":       input.Title,
+			"page_type":   input.PageType,
+			"status":      input.Status,
+			"content":     input.Content,
+			"summary":     input.Summary,
+			"source_refs": input.SourceRefs,
+			"chunk_refs":  input.ChunkRefs,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("encode wiki page: %w", err)
@@ -265,23 +270,27 @@ func (w *WikiClient) UpsertPage(ctx context.Context, kbID string, input WikiPage
 	}
 
 	body, err := json.Marshal(map[string]any{
-		"title":     input.Title,
-		"page_type": input.PageType,
-		"status":    input.Status,
-		"content":   input.Content,
-		"summary":   input.Summary,
-		"version":   input.Version,
+		"title":       input.Title,
+		"page_type":   input.PageType,
+		"status":      input.Status,
+		"content":     input.Content,
+		"summary":     input.Summary,
+		"source_refs": input.SourceRefs,
+		"chunk_refs":  input.ChunkRefs,
+		"version":     input.Version,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("encode wiki page update: %w", err)
 	}
 	if input.Version == 0 {
 		body, err = json.Marshal(map[string]any{
-			"title":     input.Title,
-			"page_type": input.PageType,
-			"status":    input.Status,
-			"content":   input.Content,
-			"summary":   input.Summary,
+			"title":       input.Title,
+			"page_type":   input.PageType,
+			"status":      input.Status,
+			"content":     input.Content,
+			"summary":     input.Summary,
+			"source_refs": input.SourceRefs,
+			"chunk_refs":  input.ChunkRefs,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("encode wiki page update: %w", err)
@@ -309,12 +318,14 @@ func (w *WikiClient) EnsurePage(ctx context.Context, kbID string, input WikiPage
 		return existing, nil
 	}
 	body, err := json.Marshal(map[string]any{
-		"slug":      input.Slug,
-		"title":     input.Title,
-		"page_type": input.PageType,
-		"status":    input.Status,
-		"content":   input.Content,
-		"summary":   input.Summary,
+		"slug":        input.Slug,
+		"title":       input.Title,
+		"page_type":   input.PageType,
+		"status":      input.Status,
+		"content":     input.Content,
+		"summary":     input.Summary,
+		"source_refs": input.SourceRefs,
+		"chunk_refs":  input.ChunkRefs,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("encode wiki page: %w", err)

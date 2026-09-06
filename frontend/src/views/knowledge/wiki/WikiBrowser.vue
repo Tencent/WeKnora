@@ -483,7 +483,7 @@
                       </span>
                       <span class="wiki-badge wiki-badge--type">
                         <t-icon :name="getPageIcon(selectedPage)" />
-                        {{ getTypeLabel(selectedPage.page_type) }}
+                        {{ getTypeLabel(getWikiPageDisplayType(selectedPage)) }}
                       </span>
                       <span class="wiki-badge wiki-badge--ver">
                         {{ $t('knowledgeEditor.wikiBrowser.version', { ver: selectedPage.version }) }}
@@ -808,6 +808,11 @@ import {
   expandedWikiDirectoryPaths,
   expandWikiDirectoryPath,
 } from './wikiDirectoryState'
+import {
+  getWikiObjectType,
+  getWikiPageDisplayType,
+  isVisibleWikiContentPage,
+} from './wikiObjectPage'
 import { getKnowledgeDetails } from '@/api/knowledge-base'
 import { createSessions } from '@/api/chat'
 import ChatView from '@/views/chat/index.vue'
@@ -888,6 +893,8 @@ interface PageTypeBucket {
   items: WikiPage[]
   nextPage: number   // page cursor for the next fetch, 1-based
   total: number      // KB-wide count reported by the backend for this type
+  rawTotal: number   // count reported before filtering system index pages
+  rawLoaded: number  // number of raw rows consumed by the current listing
   loading: boolean
   initialized: boolean // true once the first page has been fetched
   categoryPaths: Array<{ path: string[]; count: number }>
@@ -905,6 +912,8 @@ interface PageTypeBucket {
   flatItems: WikiPage[]
   flatNextPage: number
   flatTotal: number
+  flatRawTotal: number
+  flatRawLoaded: number
   flatLoading: boolean
   flatInitialized: boolean
 }
@@ -1157,7 +1166,10 @@ const typeOrder = ['summary', 'entity', 'concept', 'synthesis', 'comparison']
 // the individual page types by icon instead. Summary keeps its own tab and is
 // shown after the knowledge tab.
 const KNOWLEDGE_TAB = 'knowledge'
-const KNOWLEDGE_TYPES = ['entity', 'concept', 'synthesis', 'comparison']
+// P4 object pages use native page_type=index, so the merged knowledge request
+// must include index and then remove ordinary system index rows in the client.
+const KNOWLEDGE_TYPES = ['entity', 'concept', 'synthesis', 'comparison', 'index']
+const KNOWLEDGE_NATIVE_TYPES = ['entity', 'concept', 'synthesis', 'comparison']
 // CONTENT_TABS are the sidebar tabs in display order: the merged knowledge tab
 // first, then summary. Each tab maps to its own bucket keyed by the tab id.
 const CONTENT_TABS = [KNOWLEDGE_TAB, 'summary']
@@ -1200,21 +1212,22 @@ const groupedPages = computed(() => {
   const statTotal = (tab: string) => {
     const byType = stats.value?.pages_by_type
     if (!byType) return 0
-    if (tab === KNOWLEDGE_TAB) return KNOWLEDGE_TYPES.reduce((sum, t) => sum + (byType[t] || 0), 0)
+    if (tab === KNOWLEDGE_TAB) return KNOWLEDGE_NATIVE_TYPES.reduce((sum, t) => sum + (byType[t] || 0), 0)
     return byType[tab] || 0
   }
   const push = (tab: string) => {
     const bucket = pagesByType.value[tab]
     if (!bucket) return
-    const total = bucket.total || statTotal(tab) || bucket.categoryPaths.length
-    if (total === 0) return
+    const total = bucket.initialized ? bucket.total : (statTotal(tab) || bucket.categoryPaths.length)
+    const hasRawMore = bucket.rawTotal > bucket.rawLoaded
+    if (total === 0 && !hasRawMore) return
     out.push({
       type: tab,
       label: getTypeLabel(tab),
       pages: bucket.items,
       total,
       loading: bucket.loading,
-      hasMore: bucket.total > 0 && bucket.items.length < bucket.total,
+      hasMore: hasRawMore,
     })
     seen.add(tab)
   }
@@ -1235,7 +1248,7 @@ const groupedPages = computed(() => {
 // reported by the backend — zero everywhere means no content pages.
 const hasContentPages = computed(() => {
   for (const bucket of Object.values(pagesByType.value)) {
-    if (bucket.total > 0 || bucket.categoryPaths.length > 0) return true
+    if (bucket.total > 0 || bucket.rawTotal > bucket.rawLoaded || bucket.categoryPaths.length > 0) return true
   }
   return false
 })
@@ -1690,7 +1703,7 @@ const activeFlatState = computed(() => {
   if (!bucket) return null
   return {
     loading: bucket.flatLoading,
-    hasMore: !bucket.flatInitialized || bucket.flatItems.length < bucket.flatTotal,
+    hasMore: !bucket.flatInitialized || flatBucketHasMore(bucket),
   }
 })
 
@@ -1956,7 +1969,8 @@ watch([activeTreeRows, treeListRef], () => {
 function getTypeTheme(type: string): string {
   const map: Record<string, string> = {
     summary: 'primary', entity: 'success', concept: 'warning',
-    synthesis: 'primary', comparison: 'danger', index: 'default',
+    synthesis: 'primary', comparison: 'danger', methodology: 'default',
+    case: 'warning', insight: 'danger', index: 'default',
   }
   return map[type] || 'default'
 }
@@ -1967,9 +1981,12 @@ function getTypeLabel(type: string): string {
     summary: t('knowledgeEditor.wikiBrowser.filterSummary'),
     entity: t('knowledgeEditor.wikiBrowser.filterEntity'),
     concept: t('knowledgeEditor.wikiBrowser.filterConcept'),
+    methodology: t('knowledgeEditor.wikiBrowser.filterMethodology'),
+    case: t('knowledgeEditor.wikiBrowser.filterCase'),
+    insight: t('knowledgeEditor.wikiBrowser.filterInsight'),
     synthesis: t('knowledgeEditor.wikiBrowser.filterSynthesis'),
     comparison: t('knowledgeEditor.wikiBrowser.filterComparison'),
-    index: 'Index',
+    index: t('knowledgeEditor.wikiBrowser.indexTitle'),
   }
   return map[type] || type
 }
@@ -1977,14 +1994,18 @@ function getTypeLabel(type: string): string {
 // getPageIcon picks a distinct icon per page_type so the merged knowledge
 // tab can still tell entities, concepts, etc. apart at a glance.
 function getPageIcon(page: WikiPage): string {
+  const type = getWikiObjectType(page) || page.page_type
   const map: Record<string, string> = {
     entity: 'tag',
     concept: 'lightbulb',
+    methodology: 'tools',
+    case: 'file',
+    insight: 'lightbulb',
     synthesis: 'relativity',
     comparison: 'view-module',
     summary: 'file',
   }
-  return map[page.page_type] || 'file'
+  return map[type] || 'file'
 }
 
 const renderedContent = computed(() => {
@@ -2082,6 +2103,8 @@ function emptyBucket(): PageTypeBucket {
     items: [],
     nextPage: 1,
     total: 0,
+    rawTotal: 0,
+    rawLoaded: 0,
     loading: false,
     initialized: false,
     categoryPaths: [],
@@ -2093,15 +2116,30 @@ function emptyBucket(): PageTypeBucket {
     flatItems: [],
     flatNextPage: 1,
     flatTotal: 0,
+    flatRawTotal: 0,
+    flatRawLoaded: 0,
     flatLoading: false,
     flatInitialized: false,
   }
 }
 
+function visiblePagesForTab(type: string, batch: WikiPage[]): WikiPage[] {
+  if (type !== KNOWLEDGE_TAB) return batch
+  return batch.filter(isVisibleWikiContentPage)
+}
+
+function bucketHasMore(bucket: PageTypeBucket): boolean {
+  return bucket.rawTotal > bucket.rawLoaded
+}
+
+function flatBucketHasMore(bucket: PageTypeBucket): boolean {
+  return bucket.flatRawTotal > bucket.flatRawLoaded
+}
+
 async function loadFlatPagesForType(type: string, reset = false): Promise<boolean> {
   const bucket = ensureBucket(type)
   if (bucket.flatLoading) return bucket.flatItems.length > 0
-  if (!reset && bucket.flatInitialized && bucket.flatItems.length >= bucket.flatTotal) return true
+  if (!reset && bucket.flatInitialized && !flatBucketHasMore(bucket)) return true
 
   bucket.flatLoading = true
   try {
@@ -2115,21 +2153,25 @@ async function loadFlatPagesForType(type: string, reset = false): Promise<boolea
     })
     const body: any = (res as any).data || res
     const batch: WikiPage[] = body?.pages || []
+    const visibleBatch = visiblePagesForTab(type, batch)
     if (reset) {
-      bucket.flatItems = batch
+      bucket.flatItems = visibleBatch
       bucket.flatNextPage = 2
+      bucket.flatRawLoaded = batch.length
     } else {
       const seen = new Set(bucket.flatItems.map(page => page.id))
-      for (const page of batch) {
+      for (const page of visibleBatch) {
         if (!seen.has(page.id)) bucket.flatItems.push(page)
       }
       bucket.flatNextPage += 1
+      bucket.flatRawLoaded += batch.length
     }
-    bucket.flatTotal = Number(body?.total) || 0
+    bucket.flatRawTotal = Number(body?.total) || 0
+    bucket.flatTotal = type === KNOWLEDGE_TAB ? bucket.flatItems.length : bucket.flatRawTotal
     bucket.flatInitialized = true
 
     const seenPages = new Set(pages.value.map(page => page.id))
-    for (const page of batch) {
+    for (const page of visibleBatch) {
       if (!seenPages.has(page.id)) pages.value.push(page)
     }
     return true
@@ -2508,7 +2550,7 @@ async function loadPagesForType(
     const state = scopedState
     if (!state) return
     if (state.initialized && state.total > 0 && (state.nextPage - 1) * WIKI_SIDEBAR_PAGE_SIZE >= state.total) return
-  } else if (!opts.reset && bucket.initialized && bucket.items.length >= bucket.total) {
+  } else if (!opts.reset && bucket.initialized && !bucketHasMore(bucket)) {
     return
   }
 
@@ -2533,26 +2575,30 @@ async function loadPagesForType(
     })
     const body: any = (res as any).data || res
     const batch: WikiPage[] = body?.pages || []
+    const visibleBatch = visiblePagesForTab(type, batch)
     const reportedTotal = Number(body?.total) || 0
 
     if (!scopedToCategory) {
       if (opts.reset) {
-        bucket.items = batch
+        bucket.items = visibleBatch
         bucket.nextPage = 2
+        bucket.rawLoaded = batch.length
         bucket.directoryPages = {}
         if (!opts.preserveDirectoryState) clearDirectoryStateForType(type)
       } else {
         const seenItems = new Set(bucket.items.map(p => p.id))
-        for (const p of batch) {
+        for (const p of visibleBatch) {
           if (!seenItems.has(p.id)) bucket.items.push(p)
         }
         bucket.nextPage += 1
+        bucket.rawLoaded += batch.length
       }
-      bucket.total = reportedTotal
+      bucket.rawTotal = reportedTotal
+      bucket.total = type === KNOWLEDGE_TAB ? bucket.items.length : reportedTotal
       bucket.initialized = true
     } else if (currentScopedState) {
       const seenItems = new Set(bucket.items.map(p => p.id))
-      for (const p of batch) {
+      for (const p of visibleBatch) {
         if (!seenItems.has(p.id)) bucket.items.push(p)
       }
       bucket.directoryPages = {
@@ -2566,13 +2612,13 @@ async function loadPagesForType(
         },
       }
     }
-    initializeDefaultCollapsedDirectories(type, batch)
+    initializeDefaultCollapsedDirectories(type, visibleBatch)
 
     // Mirror the newly arrived rows into the flat pages list so
     // slugDisplayName and friends keep working.
     if (batch.length > 0) {
       const seen = new Set(pages.value.map(p => p.id))
-      for (const p of batch) {
+      for (const p of visibleBatch) {
         if (!seen.has(p.id)) pages.value.push(p)
       }
     }
@@ -3662,7 +3708,8 @@ async function doSearch() {
   loading.value = true
   try {
     const res = await searchWikiPages(props.knowledgeBaseId, searchQuery.value)
-    const hits: WikiPage[] = (res as any).data?.pages || (res as any).pages || []
+    const rawHits: WikiPage[] = (res as any).data?.pages || (res as any).pages || []
+    const hits = rawHits.filter(isVisibleWikiContentPage)
     searchResults.value = hits
     // Also seed `pages.value` with hits so slugDisplayName / navigation
     // heuristics keep resolving titles correctly without re-fetching.

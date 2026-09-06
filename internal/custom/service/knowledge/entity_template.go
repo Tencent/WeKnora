@@ -31,6 +31,7 @@ type EntityTemplateInput struct {
 	Aliases          []string                       `json:"aliases,omitempty"`
 	Description      string                         `json:"description,omitempty"`
 	TimeRange        string                         `json:"time_range"`
+	ChunkRefs        []string                       `json:"chunk_refs,omitempty"`
 	FieldEvidence    map[string]EntityFieldEvidence `json:"field_evidence,omitempty"`
 	SourceParagraphs []EntitySourceParagraph        `json:"source_paragraphs,omitempty"`
 }
@@ -44,6 +45,7 @@ type EntityPageRender struct {
 }
 
 type entityPageFrontmatter struct {
+	PageType                 string            `yaml:"page_type"`
 	ID                       string            `yaml:"id"`
 	KnowledgeObjectID        string            `yaml:"knowledge_object_id"`
 	Type                     string            `yaml:"type"`
@@ -60,6 +62,7 @@ type entityPageFrontmatter struct {
 	ClassificationConfidence float64           `yaml:"classification_confidence"`
 	EvidenceIDs              []string          `yaml:"evidence_ids"`
 	SourceRefs               []string          `yaml:"source_refs"`
+	ChunkRefs                []string          `yaml:"chunk_refs"`
 	StructureFields          map[string]string `yaml:"structure_fields"`
 	RelatedContent           []any             `yaml:"related_content"`
 	Relations                []any             `yaml:"relations"`
@@ -135,6 +138,7 @@ func RenderEntityPage(input EntityTemplateInput) (EntityPageRender, error) {
 	}
 
 	frontmatter := entityPageFrontmatter{
+		PageType:                 "index",
 		ID:                       object.CandidateID,
 		KnowledgeObjectID:        object.CandidateID,
 		Type:                     string(TypeEntity),
@@ -151,6 +155,7 @@ func RenderEntityPage(input EntityTemplateInput) (EntityPageRender, error) {
 		ClassificationConfidence: object.ClassificationConfidence,
 		EvidenceIDs:              sortedEvidenceIDs(object.EvidenceIDs),
 		SourceRefs:               sourceDocumentRefs(object.SourceDocumentID),
+		ChunkRefs:                sortedEvidenceIDs(input.ChunkRefs),
 		StructureFields:          renderedFields,
 		RelatedContent:           []any{},
 		Relations:                []any{},

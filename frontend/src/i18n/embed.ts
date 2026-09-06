@@ -493,6 +493,9 @@ const messages = {
         "filterSummary": "摘要",
         "filterEntity": "实体",
         "filterConcept": "概念",
+        "filterMethodology": "方法论",
+        "filterCase": "案例",
+        "filterInsight": "洞察",
         "filterSynthesis": "综合",
         "filterComparison": "对比"
       }
@@ -990,6 +993,9 @@ const messages = {
         "filterSummary": "Summaries",
         "filterEntity": "Entities",
         "filterConcept": "Concepts",
+        "filterMethodology": "Methodologies",
+        "filterCase": "Cases",
+        "filterInsight": "Insights",
         "filterSynthesis": "Synthesis",
         "filterComparison": "Comparisons"
       }

@@ -27,6 +27,7 @@ type InsightTemplateInput struct {
 	Aliases          []string                        `json:"aliases,omitempty"`
 	Description      string                          `json:"description,omitempty"`
 	TimeRange        string                          `json:"time_range"`
+	ChunkRefs        []string                        `json:"chunk_refs,omitempty"`
 	FieldEvidence    map[string]InsightFieldEvidence `json:"field_evidence,omitempty"`
 	SourceParagraphs []InsightSourceParagraph        `json:"source_paragraphs,omitempty"`
 }
@@ -39,6 +40,7 @@ type InsightPageRender struct {
 }
 
 type insightPageFrontmatter struct {
+	PageType                 string            `yaml:"page_type"`
 	ID                       string            `yaml:"id"`
 	KnowledgeObjectID        string            `yaml:"knowledge_object_id"`
 	Type                     string            `yaml:"type"`
@@ -53,6 +55,7 @@ type insightPageFrontmatter struct {
 	ClassificationConfidence float64           `yaml:"classification_confidence"`
 	EvidenceIDs              []string          `yaml:"evidence_ids"`
 	SourceRefs               []string          `yaml:"source_refs"`
+	ChunkRefs                []string          `yaml:"chunk_refs"`
 	StructureFields          map[string]string `yaml:"structure_fields"`
 	RelatedContent           []any             `yaml:"related_content"`
 	Relations                []any             `yaml:"relations"`
@@ -135,13 +138,15 @@ func RenderInsightPage(input InsightTemplateInput) (InsightPageRender, error) {
 	}
 
 	frontmatter := insightPageFrontmatter{
-		ID: object.CandidateID, KnowledgeObjectID: object.CandidateID,
+		PageType: "index",
+		ID:       object.CandidateID, KnowledgeObjectID: object.CandidateID,
 		Type: string(TypeInsight), PrimaryType: string(TypeInsight),
 		SourceVideoID: object.SourceVideoID, TranscriptGeneration: object.TranscriptGeneration,
 		TimeRange: timeRange, Title: title, Aliases: aliases,
 		InformationNature: "洞察", AuditStatus: "passed",
 		ClassificationConfidence: object.ClassificationConfidence,
 		EvidenceIDs:              sortedEvidenceIDs(object.EvidenceIDs), SourceRefs: sourceDocumentRefs(object.SourceDocumentID),
+		ChunkRefs:       sortedEvidenceIDs(input.ChunkRefs),
 		StructureFields: renderedFields, RelatedContent: []any{}, Relations: []any{},
 	}
 	frontmatterYAML, err := yaml.Marshal(frontmatter)

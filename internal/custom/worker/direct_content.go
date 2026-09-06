@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/evidence"
+	"github.com/Tencent/WeKnora/internal/custom/service/knowledgeprojection"
 	"github.com/Tencent/WeKnora/internal/custom/service/outline"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
 	"github.com/Tencent/WeKnora/internal/custom/service/summary"
@@ -195,6 +196,10 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 				continue
 			}
 			if h.Job == skill.JobSummaryEnhance {
+				if err := h.bindSummaryKnowledgeRefs(ctx, video, &document, generation); err != nil {
+					validationErr = fmt.Errorf("bind %s knowledge references: %w", h.Job, err)
+					continue
+				}
 				if err := h.validateEnhancedSummary(ctx, video, document); err != nil {
 					validationErr = fmt.Errorf("validate %s structure: %w", h.Job, err)
 					continue
@@ -279,6 +284,89 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		return err
 	}
 	return nil
+}
+
+// bindSummaryKnowledgeRefs is deliberately deterministic: the model chooses
+// summary wording and evidence chunks, while only audited object pages can
+// supply knowledge_refs. This keeps page identity and evidence ownership
+// outside model output.
+func (h *DirectContentHandler) bindSummaryKnowledgeRefs(ctx context.Context, video *model.Video, document *summary.Document, generation string) error {
+	pages, err := h.Wiki.ListAllPages(ctx, h.KnowledgeKBID, "")
+	if err != nil {
+		return fmt.Errorf("list knowledge object pages: %w", err)
+	}
+	scope := knowledgeprojection.SummaryReferenceScope{
+		VideoID: video.ID, TranscriptGeneration: generation,
+		Pages: make(map[string]knowledgeprojection.ObjectPageResult),
+	}
+	bindings := make([]knowledgeprojection.SummaryKnowledgeBinding, 0)
+	for _, page := range pages {
+		if page.PageType != "index" || strings.TrimSpace(page.ID) == "" {
+			continue
+		}
+		frontmatter := page.ParsedFrontmatter()
+		if strings.TrimSpace(frontmatterString(frontmatter, "source_video_id")) != video.ID ||
+			strings.TrimSpace(frontmatterString(frontmatter, "transcript_generation")) != generation ||
+			strings.ToLower(strings.TrimSpace(frontmatterString(frontmatter, "audit_status"))) != "passed" {
+			continue
+		}
+		objectType := strings.TrimSpace(frontmatterString(frontmatter, "primary_type"))
+		if objectType == "" {
+			objectType = strings.TrimSpace(frontmatterString(frontmatter, "type"))
+		}
+		if !isSummaryKnowledgeType(objectType) {
+			continue
+		}
+		evidenceIDs := frontmatterStringSlice(frontmatter, "evidence_ids")
+		chunkRefs := frontmatterStringSlice(frontmatter, "chunk_refs")
+		if len(evidenceIDs) == 0 && len(chunkRefs) == 0 {
+			continue
+		}
+		scope.Pages[page.ID] = knowledgeprojection.ObjectPageResult{
+			WikiPageID: page.ID, SourceVideoID: video.ID, TranscriptGeneration: generation,
+		}
+		bindings = append(bindings, knowledgeprojection.SummaryKnowledgeBinding{
+			WikiPageID: page.ID, EvidenceIDs: evidenceIDs, ChunkRefs: chunkRefs,
+		})
+	}
+	if len(bindings) == 0 {
+		return fmt.Errorf("no audited knowledge object pages for active generation")
+	}
+	return knowledgeprojection.BindSummaryKnowledgeReferences(document, bindings, scope)
+}
+
+func isSummaryKnowledgeType(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "entity", "concept", "methodology", "case", "insight":
+		return true
+	default:
+		return false
+	}
+}
+
+func frontmatterString(frontmatter map[string]any, key string) string {
+	value, _ := frontmatter[key].(string)
+	return value
+}
+
+func frontmatterStringSlice(frontmatter map[string]any, key string) []string {
+	value := frontmatter[key]
+	result := make([]string, 0)
+	switch typed := value.(type) {
+	case []any:
+		for _, item := range typed {
+			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+				result = append(result, strings.TrimSpace(text))
+			}
+		}
+	case []string:
+		for _, item := range typed {
+			if strings.TrimSpace(item) != "" {
+				result = append(result, strings.TrimSpace(item))
+			}
+		}
+	}
+	return result
 }
 
 func (h *DirectContentHandler) streamOutlineDraft(ctx context.Context, prompt string, video *model.Video, generation string, chunks []transcript.Chunk, pageSlug, jobID string) (string, error) {

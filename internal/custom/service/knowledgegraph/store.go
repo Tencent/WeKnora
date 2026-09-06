@@ -26,14 +26,11 @@ const relationConfidenceThreshold = 0.70
 const knowledgePageTypes = "entity,concept,index"
 
 var allowedRelationTypes = map[string]struct{}{
-	"contradicts":  {},
-	"complements":  {},
-	"explains":     {},
-	"example_of":   {},
-	"part_of":      {},
-	"derived_from": {},
-	"supports":     {},
-	"related_to":   {},
+	"contradicts": {},
+	"complements": {},
+	"explains":    {},
+	"example_of":  {},
+	"part_of":     {},
 }
 
 type Node struct {
@@ -454,6 +451,9 @@ func buildKnowledgeBaseProjection(pages []weknora.WikiPage) ([]wikiObject, []rel
 			if !ok || target.WikiPageID == source.WikiPageID {
 				continue
 			}
+			if !relationAllowedForKnowledgeTypes(rel.RelationType, source.KnowledgeType, target.KnowledgeType) {
+				continue
+			}
 			key := source.WikiPageID + "\x00" + rel.RelationType + "\x00" + target.WikiPageID
 			if _, exists := seen[key]; exists {
 				continue
@@ -676,6 +676,11 @@ func buildProjectionWithAudit(video *model.Video, pages []weknora.WikiPage) ([]w
 				audits = append(audits, audit)
 				continue
 			}
+			if !relationAllowedForKnowledgeTypes(rel.RelationType, object.KnowledgeType, target.KnowledgeType) {
+				audit.Status, audit.Reason = "invalid_type_combination", "source/target type combination is not allowed by the five-type matrix"
+				audits = append(audits, audit)
+				continue
+			}
 			if rel.ID == "" {
 				rel.ID = object.WikiPageID + ":" + rel.RelationType + ":" + target.WikiPageID
 			}
@@ -686,6 +691,35 @@ func buildProjectionWithAudit(video *model.Video, pages []weknora.WikiPage) ([]w
 		}
 	}
 	return objects, edges, audits, identityAudits, nil
+}
+
+func relationAllowedForKnowledgeTypes(relationType string, source, target knowledge.KnowledgeType) bool {
+	allowed := map[knowledge.KnowledgeType]map[knowledge.KnowledgeType]map[string]struct{}{
+		knowledge.TypeConcept: {
+			knowledge.TypeConcept:     {"complements": {}, "contradicts": {}, "part_of": {}},
+			knowledge.TypeMethodology: {"explains": {}, "part_of": {}},
+			knowledge.TypeCase:        {"example_of": {}},
+			knowledge.TypeInsight:     {"explains": {}},
+		},
+		knowledge.TypeMethodology: {
+			knowledge.TypeConcept:     {"explains": {}},
+			knowledge.TypeMethodology: {"complements": {}, "part_of": {}},
+		},
+		knowledge.TypeCase: {
+			knowledge.TypeConcept:     {"example_of": {}},
+			knowledge.TypeMethodology: {"example_of": {}},
+		},
+		knowledge.TypeInsight: {
+			knowledge.TypeConcept: {"explains": {}, "contradicts": {}},
+			knowledge.TypeInsight: {"complements": {}, "contradicts": {}},
+		},
+	}
+	byTarget, ok := allowed[source]
+	if !ok {
+		return false
+	}
+	_, ok = byTarget[target][relationType]
+	return ok
 }
 
 func persistRelationAudits(db *gorm.DB, videoID, generation string, audits []RelationAudit) error {
