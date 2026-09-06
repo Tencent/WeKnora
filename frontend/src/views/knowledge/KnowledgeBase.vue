@@ -494,11 +494,42 @@ const awaitBatchReparseReflection = async (ids: string[]) => {
   pendingReparseAck.value.clear();
 };
 
+// The backend batch delete/reparse endpoints reject more than 200 ids per
+// request (maxBatch). Split larger selections into chunks and submit them
+// sequentially so big selections don't fail with a 400 error.
+const BATCH_SUBMIT_SIZE = 200;
+const submitInBatches = async (
+  ids: string[],
+  submit: (chunk: string[]) => Promise<any>,
+): Promise<{ succeeded: string[]; failed: string[]; lastError?: string }> => {
+  const succeeded: string[] = [];
+  const failed: string[] = [];
+  let lastError: string | undefined;
+  for (let i = 0; i < ids.length; i += BATCH_SUBMIT_SIZE) {
+    const chunk = ids.slice(i, i + BATCH_SUBMIT_SIZE);
+    try {
+      const res: any = await submit(chunk);
+      if (res?.success) {
+        succeeded.push(...chunk);
+      } else {
+        failed.push(...chunk);
+        lastError = res?.message;
+      }
+    } catch (e: any) {
+      failed.push(...chunk);
+      lastError = e?.message;
+    }
+  }
+  return { succeeded, failed, lastError };
+};
+
 const confirmBatchReparse = async () => {
   if (batchReparsing.value || batchDeleting.value || selectedIds.value.size === 0) return;
   const allIds = Array.from(selectedIds.value);
+  // Index by id first to avoid O(N×M) lookups on large selections
+  const cardById = new Map((cardList.value || []).map((c: KnowledgeCard) => [c.id, c]));
   const ids = allIds.filter((id) => {
-    const item = cardList.value.find((c) => c.id === id);
+    const item = cardById.get(id);
     return !item || !isParseInFlight(item.parse_status);
   });
   const skipped = allIds.length - ids.length;
@@ -511,19 +542,25 @@ const confirmBatchReparse = async () => {
   }
   batchReparsing.value = true;
   try {
-    const res: any = await batchReparseKnowledge(kbId.value, ids);
-    if (res?.success) {
-      MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: ids.length }));
-      applyOptimisticBatchReparse(ids);
-      clearSelection();
-      batchMode.value = false;
-      scheduleWikiStatusProbes();
-      void awaitBatchReparseReflection(ids);
-    } else {
-      MessagePlugin.error(res?.message || t('knowledgeBase.batchReparseFailed'));
+    const { succeeded, failed, lastError } = await submitInBatches(ids, (chunk) =>
+      batchReparseKnowledge(kbId.value, chunk),
+    );
+    if (succeeded.length === 0) {
+      MessagePlugin.error(lastError || t('knowledgeBase.batchReparseFailed'));
+      return;
     }
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || t('knowledgeBase.batchReparseFailed'));
+    if (failed.length === 0) {
+      MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: succeeded.length }));
+    } else {
+      MessagePlugin.warning(
+        t('knowledgeBase.batchReparsePartial', { succeeded: succeeded.length, failed: failed.length }),
+      );
+    }
+    applyOptimisticBatchReparse(succeeded);
+    clearSelection();
+    batchMode.value = false;
+    scheduleWikiStatusProbes();
+    void awaitBatchReparseReflection(succeeded);
   } finally {
     batchReparsing.value = false;
   }
@@ -2096,31 +2133,37 @@ const openKnowledgeItem = (item: KnowledgeCard) => {
 const confirmBatchDelete = async () => {
   if (batchDeleting.value || batchReparsing.value || selectedIds.value.size === 0) return;
   const ids = Array.from(selectedIds.value);
-  const deletedIdSet = new Set(ids);
   batchDeleting.value = true;
   try {
-    const res: any = await batchDeleteKnowledge(kbId.value, ids);
-    if (res?.success) {
-      MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: ids.length }));
-      clearSelection();
-      batchMode.value = false;
-      resetPage();
-      // 后端将批量删除放入异步队列，立刻拉列表仍可能包含待删项；短轮询直到列表与后端一致或超时
-      const maxPolls = 30;
-      const delayMs = 400;
-      for (let i = 0; i < maxPolls; i++) {
-        await loadKnowledgeFiles(kbId.value);
-        const stillPresent = (cardList.value || []).some((c: KnowledgeCard) => deletedIdSet.has(c.id));
-        if (!stillPresent) break;
-        await new Promise<void>((r) => setTimeout(r, delayMs));
-      }
-      loadTags(kbId.value, true);
-      void loadFolderTree(kbId.value);
-    } else {
-      MessagePlugin.error(res?.message || t('knowledgeBase.batchDeleteFailed'));
+    const { succeeded, failed, lastError } = await submitInBatches(ids, (chunk) =>
+      batchDeleteKnowledge(kbId.value, chunk),
+    );
+    if (succeeded.length === 0) {
+      MessagePlugin.error(lastError || t('knowledgeBase.batchDeleteFailed'));
+      return;
     }
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || t('knowledgeBase.batchDeleteFailed'));
+    if (failed.length === 0) {
+      MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: succeeded.length }));
+    } else {
+      MessagePlugin.warning(
+        t('knowledgeBase.batchDeletePartial', { succeeded: succeeded.length, failed: failed.length }),
+      );
+    }
+    const deletedIdSet = new Set(succeeded);
+    clearSelection();
+    batchMode.value = false;
+    resetPage();
+    // 后端将批量删除放入异步队列，立刻拉列表仍可能包含待删项；短轮询直到列表与后端一致或超时
+    const maxPolls = 30;
+    const delayMs = 400;
+    for (let i = 0; i < maxPolls; i++) {
+      await loadKnowledgeFiles(kbId.value);
+      const stillPresent = (cardList.value || []).some((c: KnowledgeCard) => deletedIdSet.has(c.id));
+      if (!stillPresent) break;
+      await new Promise<void>((r) => setTimeout(r, delayMs));
+    }
+    loadTags(kbId.value, true);
+    void loadFolderTree(kbId.value);
   } finally {
     batchDeleting.value = false;
   }
