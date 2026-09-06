@@ -14,8 +14,12 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-// parseCompletionResponse 解析非流式响应
-func (c *RemoteAPIChat) parseCompletionResponse(resp *openai.ChatCompletionResponse) (*types.ChatResponse, error) {
+// parseCompletionResponse 解析非流式响应。
+// reported 表示原始响应是否确实携带 usage 块，由调用方从 raw JSON field
+// presence 判定（SDK 非流式路径已丢失该信息，见 responseBodyCaptureRoundTripper）。
+func (c *RemoteAPIChat) parseCompletionResponse(
+	resp *openai.ChatCompletionResponse, reported bool,
+) (*types.ChatResponse, error) {
 	if len(resp.Choices) == 0 {
 		return nil, fmt.Errorf("no response from API")
 	}
@@ -26,8 +30,7 @@ func (c *RemoteAPIChat) parseCompletionResponse(resp *openai.ChatCompletionRespo
 	// 为设置了 Thinking=false 但模型仍返回思考内容的情况和部分不支持Thinking=false的思考模型(例如Miniax-M2.1)提供兜底策略
 	content := removeThinkingContent(choice.Message.Content)
 
-	// Non-stream OpenAI-compatible responses always include a usage block.
-	usage := tokenUsageFromOpenAI(resp.Usage, c.provider, true)
+	usage := tokenUsageFromOpenAI(resp.Usage, c.provider, reported)
 	response := &types.ChatResponse{
 		Content:      content,
 		FinishReason: string(choice.FinishReason),
@@ -49,6 +52,26 @@ func (c *RemoteAPIChat) parseCompletionResponse(resp *openai.ChatCompletionRespo
 	}
 
 	return response, nil
+}
+
+// usageFieldPresent reports whether a raw OpenAI-compatible response JSON
+// carries a top-level "usage" object. The go-openai non-stream SDK decodes the
+// response into a value Usage struct (int fields) and thereby drops the
+// field-presence signal; callers that still hold the raw body use this to
+// choose provider_reported vs unreported without inferring presence from token
+// values. An absent key and an explicit "usage": null both yield false, matching
+// the SDK's zero-value decoding of both.
+func usageFieldPresent(data []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+	var raw struct {
+		Usage *json.RawMessage `json:"usage"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return false
+	}
+	return raw.Usage != nil
 }
 
 func (c *RemoteAPIChat) applyCompletionToolCallMetadata(body []byte, result *types.ChatResponse) {

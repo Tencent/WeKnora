@@ -480,7 +480,7 @@ func TestParseCompletionResponse_CachedTokens(t *testing.T) {
 			},
 		}
 
-		got, err := c.parseCompletionResponse(resp)
+		got, err := c.parseCompletionResponse(resp, true)
 		require.NoError(t, err)
 		require.NotNil(t, got)
 		assert.Equal(t, 6929, got.Usage.PromptTokens)
@@ -511,7 +511,7 @@ func TestParseCompletionResponse_CachedTokens(t *testing.T) {
 			},
 		}
 
-		got, err := c.parseCompletionResponse(resp)
+		got, err := c.parseCompletionResponse(resp, true)
 		require.NoError(t, err)
 		require.NotNil(t, got)
 		assert.Equal(t, 0, got.Usage.CachedTokens,
