@@ -26,7 +26,7 @@
       </div>
       <div class="analytics-filter analytics-filter--interval">
         <label>{{ t('modelSettings.analytics.interval') }}</label>
-        <t-radio-group v-model="interval" variant="default-filled">
+        <t-radio-group v-model="interval" class="analytics-segmented" variant="default-filled">
           <t-radio-button value="day">{{ t('modelSettings.analytics.day') }}</t-radio-button>
           <t-radio-button value="hour">{{ t('modelSettings.analytics.hour') }}</t-radio-button>
         </t-radio-group>
@@ -59,12 +59,8 @@
             <p class="summary-card__value" :title="exactTitle(analytics.summary.calls.total)">
               {{ formatExactNumber(analytics.summary.calls.total, locale) }}
             </p>
-            <p class="summary-card__meta">
-              {{ t('modelSettings.analytics.callMix', {
-                chat: formatExactNumber(analytics.summary.calls.chat, locale),
-                embedding: formatExactNumber(analytics.summary.calls.embedding, locale),
-                rerank: formatExactNumber(analytics.summary.calls.rerank, locale),
-              }) }}
+            <p class="summary-card__meta summary-card__meta--breakdown" :title="callBreakdown">
+              {{ callBreakdown }}
             </p>
           </article>
 
@@ -74,12 +70,14 @@
             <p class="summary-card__value" :title="exactTitle(analytics.summary.total_tokens.sum)">
               {{ formatCompactNumber(analytics.summary.total_tokens.sum, locale) }}
             </p>
-            <p class="summary-card__meta">
-              {{ t('modelSettings.analytics.inputOutput', {
-                input: formatCompactNumber(analytics.summary.input_tokens.sum, locale),
-                output: formatCompactNumber(analytics.summary.output_tokens.sum, locale),
-              }) }}
-            </p>
+            <div class="summary-card__meta summary-card__meta--tokens">
+              <span>{{ t('modelSettings.analytics.inputDetail', {
+                value: formatCompactNumber(analytics.summary.input_tokens.sum, locale),
+              }) }}</span>
+              <span>{{ t('modelSettings.analytics.outputDetail', {
+                value: formatCompactNumber(analytics.summary.output_tokens.sum, locale),
+              }) }}</span>
+            </div>
           </article>
 
           <article class="analytics-summary-card">
@@ -103,10 +101,12 @@
               {{ formatLatency(analytics.summary.latency.avg_ms, locale) }}
             </p>
             <p class="summary-card__meta">
-              {{ coverageLabel(
-                analytics.summary.latency.observed_calls,
-                analytics.summary.latency.applicable_calls,
-              ) }}
+              <template v-if="analytics.summary.latency.observed_calls < analytics.summary.latency.applicable_calls">
+                {{ coverageLabel(
+                  analytics.summary.latency.observed_calls,
+                  analytics.summary.latency.applicable_calls,
+                ) }}
+              </template>
             </p>
           </article>
         </div>
@@ -115,9 +115,8 @@
           <div class="analytics-panel__header analytics-trend-header">
             <div>
               <h3>{{ t('modelSettings.analytics.usageTrend') }} <span>· UTC</span></h3>
-              <p>{{ t('modelSettings.analytics.trendDescription') }}</p>
             </div>
-            <t-radio-group v-model="trendMetric" variant="default-filled" size="small">
+            <t-radio-group v-model="trendMetric" class="analytics-segmented" variant="default-filled" size="small">
               <t-radio-button value="calls">{{ t('modelSettings.analytics.calls') }}</t-radio-button>
               <t-radio-button value="tokens">{{ t('modelSettings.analytics.tokens') }}</t-radio-button>
               <t-radio-button value="latency">{{ t('modelSettings.analytics.latency') }}</t-radio-button>
@@ -154,10 +153,16 @@
                 class="chart-line"
                 :d="path"
               />
-              <g v-for="point in visibleChartPoints" :key="point.bucketStart">
-                <circle class="chart-point" :cx="point.x" :cy="point.y" r="4">
-                  <title>{{ point.title }}</title>
-                </circle>
+              <g
+                v-for="point in visibleChartPoints"
+                :key="point.bucketStart"
+                class="chart-point-target"
+                tabindex="0"
+                :aria-label="point.title"
+              >
+                <title>{{ point.title }}</title>
+                <circle class="chart-point-hit-area" :cx="point.x" :cy="point.y" r="10" />
+                <circle class="chart-point" :cx="point.x" :cy="point.y" r="3" />
               </g>
               <g class="chart-x-labels">
                 <text
@@ -191,7 +196,7 @@
                 <strong>{{ formatRatio(analytics.summary.prompt_cache.token_cache_ratio, locale) }}</strong>
               </div>
             </div>
-            <p class="cache-panel__meta">
+            <p v-if="analytics.summary.prompt_cache.eligible_calls > 0" class="cache-panel__meta">
               {{ t('modelSettings.analytics.promptCacheDetail', {
                 hit: formatExactNumber(analytics.summary.prompt_cache.hit_calls, locale),
                 miss: formatExactNumber(analytics.summary.prompt_cache.miss_calls, locale),
@@ -214,7 +219,7 @@
                 <strong>{{ formatRatio(analytics.summary.embedding_cache.input_hit_rate, locale) }}</strong>
               </div>
             </div>
-            <p class="cache-panel__meta">
+            <p v-if="analytics.summary.embedding_cache.eligible_inputs > 0" class="cache-panel__meta">
               {{ t('modelSettings.analytics.embeddingCacheDetail', {
                 hit: formatExactNumber(analytics.summary.embedding_cache.cache_hits, locale),
                 miss: formatExactNumber(analytics.summary.embedding_cache.cache_misses, locale),
@@ -291,6 +296,15 @@ const isEmpty = computed(() => (
   && analytics.value.summary.calls.total === 0
   && analytics.value.trend.length === 0
 ))
+
+const callBreakdown = computed(() => {
+  const calls = analytics.value?.summary.calls
+  if (!calls) return ''
+  return (['chat', 'embedding', 'rerank'] as const)
+    .filter(type => calls[type] > 0)
+    .map(type => `${t(`modelSettings.typeShort.${type}`)} ${formatExactNumber(calls[type], locale.value)}`)
+    .join(' · ')
+})
 
 async function loadModelsForFilter() {
   modelsLoading.value = true
@@ -386,7 +400,7 @@ function formatBucketLabel(bucketStart: string, includeYear = false): string {
 }
 
 function formatChartValue(value: number): string {
-  if (trendMetric.value === 'latency') return formatLatency(value, locale.value)
+  if (trendMetric.value === 'latency') return `${formatExactNumber(value, locale.value)} ms`
   return formatExactNumber(value, locale.value)
 }
 
@@ -507,7 +521,7 @@ const chartAriaLabel = computed(() => (
 .analytics-filter {
   min-width: 0;
 
-  label {
+  > label {
     display: block;
     margin-bottom: 7px;
     color: var(--td-text-color-secondary);
@@ -518,6 +532,30 @@ const chartAriaLabel = computed(() => (
   :deep(.t-select-input),
   :deep(.t-date-range-picker) {
     width: 100%;
+  }
+}
+
+:deep(.analytics-segmented.t-radio-group) {
+  align-items: center;
+
+  .t-radio-button,
+  .t-radio-button.t-is-checked {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    height: calc(var(--td-comp-size-m) - 4px);
+    margin: 0;
+    padding: 0 var(--td-comp-paddingLR-l);
+    border: 0;
+    border-radius: var(--td-radius-small);
+    line-height: 20px;
+    vertical-align: middle;
+  }
+
+  &.t-size-s .t-radio-button {
+    height: calc(var(--td-comp-size-xs) - 4px);
+    padding: 0 var(--td-comp-paddingLR-s);
   }
 }
 
@@ -617,14 +655,22 @@ const chartAriaLabel = computed(() => (
 }
 
 .summary-card__meta {
-  min-height: 18px;
+  min-height: 36px;
   margin-top: 10px;
   color: var(--td-text-color-placeholder);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.summary-card__meta--breakdown {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.summary-card__meta--tokens span {
+  display: block;
 }
 
 .analytics-panel {
@@ -708,11 +754,22 @@ const chartAriaLabel = computed(() => (
   vector-effect: non-scaling-stroke;
 }
 
+.chart-point-hit-area {
+  fill: transparent;
+}
+
 .chart-point {
-  fill: var(--td-bg-color-container);
-  stroke: var(--td-brand-color);
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
+  fill: var(--td-brand-color);
+  pointer-events: none;
+}
+
+.chart-point-target:hover .chart-point,
+.chart-point-target:focus .chart-point {
+  r: 4;
+}
+
+.chart-point-target:focus-visible {
+  outline: 1px solid var(--td-brand-color);
 }
 
 .chart-x-labels text {

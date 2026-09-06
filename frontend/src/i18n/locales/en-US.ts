@@ -4674,6 +4674,8 @@ export default {
       avgLatency: 'Avg Latency',
       callMix: 'Chat {chat} · Embedding {embedding} · Rerank {rerank}',
       inputOutput: 'Input {input} · Output {output}',
+      inputDetail: 'Input {value}',
+      outputDetail: 'Output {value}',
       observedCoverage: 'Observed {observed} / {applicable} calls',
       notObserved: 'Not observed',
       usageTrend: 'Usage Trend',
