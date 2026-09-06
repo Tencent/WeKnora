@@ -2,13 +2,14 @@ package provider
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 const (
 	// DeepSeekBaseURL DeepSeek 官方 API BaseURL
-	DeepSeekBaseURL = "https://api.deepseek.com/v1"
+	DeepSeekBaseURL = "https://api.deepseek.com"
 )
 
 // DeepSeekProvider 实现 DeepSeek 的 Provider 接口
@@ -23,7 +24,7 @@ func (p *DeepSeekProvider) Info() ProviderInfo {
 	return ProviderInfo{
 		Name:        ProviderDeepSeek,
 		DisplayName: "DeepSeek",
-		Description: "deepseek-chat, deepseek-reasoner, etc.",
+		Description: "deepseek-v4-flash, deepseek-v4-pro, etc.",
 		DefaultURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: DeepSeekBaseURL,
 		},
@@ -43,4 +44,16 @@ func (p *DeepSeekProvider) ValidateConfig(config *Config) error {
 		return fmt.Errorf("model name is required")
 	}
 	return nil
+}
+
+// IsDeepSeekThinkingModel reports whether an official DeepSeek model uses the
+// thinking.type request field for explicit thinking-mode control.
+func IsDeepSeekThinkingModel(modelName string) bool {
+	name := strings.ToLower(strings.TrimSpace(modelName))
+	switch name {
+	case "deepseek-v4-flash", "deepseek-v4-pro":
+		return true
+	default:
+		return false
+	}
 }
