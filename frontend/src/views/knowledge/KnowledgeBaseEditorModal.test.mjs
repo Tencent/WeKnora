@@ -30,3 +30,9 @@ test('shows a post-create hint after the first successful save', () => {
   assert.match(source, /settings-footer-note/)
   assert.match(source, /knowledgeEditor\.postCreateHint\.followUpDesc/)
 })
+
+test('persists Wiki manual ingest mode without disabling the Wiki API', () => {
+  assert.match(source, /v-model="formData\.wikiConfig\.ingestMode"/)
+  assert.match(source, /value="manual"/)
+  assert.match(source, /ingest_mode: formData\.value\.wikiConfig(?:\?\.|\.)ingestMode === 'manual' \? 'manual' : 'auto'/)
+})

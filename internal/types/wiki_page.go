@@ -493,11 +493,37 @@ func (g WikiExtractionGranularity) Normalize() WikiExtractionGranularity {
 	return WikiExtractionStandard
 }
 
+// WikiIngestMode controls whether uploaded documents are automatically turned
+// into wiki pages. Manual mode keeps the wiki REST/API surface available while
+// leaving page creation to an external publisher.
+type WikiIngestMode string
+
+const (
+	// WikiIngestModeAuto preserves the legacy behavior: completed documents
+	// enqueue the built-in wiki generation pipeline.
+	WikiIngestModeAuto WikiIngestMode = "auto"
+	// WikiIngestModeManual disables only the built-in document-to-wiki enqueue.
+	WikiIngestModeManual WikiIngestMode = "manual"
+)
+
+// Normalize returns a supported mode. Empty and unknown values intentionally
+// fall back to auto so old rows and forward-incompatible configurations remain
+// backwards compatible.
+func (m WikiIngestMode) Normalize() WikiIngestMode {
+	if m == WikiIngestModeManual {
+		return WikiIngestModeManual
+	}
+	return WikiIngestModeAuto
+}
+
 // WikiConfig stores wiki-specific configuration for a knowledge base.
 // Applicable to document-type knowledge bases with wiki feature enabled.
 // Whether the wiki feature is turned on is controlled by IndexingStrategy.WikiEnabled;
-// this struct only carries wiki-specific tunables.
+// this struct carries wiki-specific tunables and the automatic ingest mode.
 type WikiConfig struct {
+	// IngestMode controls whether document processing automatically enqueues
+	// built-in wiki generation. Empty values retain the legacy auto behavior.
+	IngestMode WikiIngestMode `yaml:"ingest_mode,omitempty" json:"ingest_mode,omitempty"`
 	// SynthesisModelID is the LLM model ID used for wiki page generation and updates
 	SynthesisModelID string `yaml:"synthesis_model_id" json:"synthesis_model_id"`
 	// MaxPagesPerIngest limits pages created/updated per ingest operation (0 = no limit)
@@ -549,6 +575,13 @@ type WikiConfig struct {
 	// this knob trades a single KB's peak throughput for cross-KB fairness.
 	// Set it >= the wiki pool size to effectively disable the cap.
 	IngestMaxInflight int `yaml:"ingest_max_inflight" json:"ingest_max_inflight,omitempty"`
+}
+
+// IsAutoIngestEnabled reports whether the built-in document-to-wiki pipeline
+// may be scheduled. A nil config and an empty mode both preserve legacy auto
+// ingest behavior.
+func (c *WikiConfig) IsAutoIngestEnabled() bool {
+	return c == nil || c.IngestMode.Normalize() == WikiIngestModeAuto
 }
 
 // IngestBatchSizeOrDefault returns IngestBatchSize when set (> 0),

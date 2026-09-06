@@ -1217,7 +1217,7 @@ func (s *knowledgeService) moveOneKnowledge(
 		// reparse re-ingests through KnowledgePostProcess once the new chunks
 		// land; reuse_vectors keeps the existing chunks and never re-enters that
 		// pipeline, so the target KB has to be told about the document here.
-		if targetKB.IsWikiEnabled() {
+		if targetKB.IsWikiAutoIngestEnabled() {
 			EnqueueWikiIngest(ctx, s.task, s.taskPendingRepo, tenantID, targetKB.ID, knowledge.ID)
 		}
 		return nil

@@ -194,6 +194,24 @@ func TestKnowledgePostProcessAtomicallySeedsWikiSlot(t *testing.T) {
 	}
 }
 
+func TestKnowledgePostProcessManualWikiModeSkipsBuiltInIngest(t *testing.T) {
+	const knowledgeID = "knowledge-wiki-manual"
+	pendingRepo := &wikiEnqueueFailurePendingRepo{}
+	queue := &wikiEnqueueFailureTaskQueue{}
+	service, repo := newWikiEnqueueTestService(knowledgeID, pendingRepo, queue)
+	kbService := service.kbService.(*wikiEnqueueFailureKBService)
+	kbService.kb.WikiConfig = &types.WikiConfig{IngestMode: types.WikiIngestModeManual}
+
+	err := service.Handle(context.Background(), newWikiEnqueuePostProcessTask(t, knowledgeID))
+
+	require.NoError(t, err)
+	assert.Equal(t, types.ParseStatusFinalizing, repo.knowledge.ParseStatus)
+	assert.Equal(t, 1, repo.expectedSubtasks, "only the summary task should be counted")
+	assert.Equal(t, []string{types.TypeSummaryGeneration}, queue.taskTypes)
+	assert.Equal(t, 0, pendingRepo.seedCalls, "manual mode must not persist a wiki pending op")
+	assert.Nil(t, pendingRepo.seededOp)
+}
+
 func TestKnowledgePostProcessRetriesWikiTriggerWithoutDoubleAccounting(t *testing.T) {
 	const knowledgeID = "knowledge-wiki-trigger-retry"
 	wikiErr := errors.New("redis unavailable")

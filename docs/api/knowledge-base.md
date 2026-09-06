@@ -47,6 +47,7 @@
 | faq_config                    | object  | 否   | FAQ 配置（仅 FAQ 类型知识库需要）                               |
 | question_generation_config    | object  | 否   | 问题生成配置                                                    |
 | auto_tag_config               | object  | 否   | 文档自动标签配置，默认关闭；仅适用于 `document` 类型知识库      |
+| wiki_config                   | object  | 否   | Wiki 配置；`ingest_mode` 可设为 `auto`（默认）或 `manual`。手动模式保留 Wiki REST/API 读写，但上传文档不会触发内置 Wiki 自动生成 |
 | vector_store_id               | string  | 否   | 绑定的向量存储 ID。不传或为空字符串等同于 `null`（使用环境变量默认存储）。指定时必须是调用者所在空间拥有的向量存储 UUID；创建后不可修改。无效 UUID / 跨空间 / 未注册到引擎的 ID 会返回 `400` |
 
 **请求**:
@@ -298,6 +299,9 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001' \
 | name        | string | 是   | 知识库名称                                                    |
 | description | string | 否   | 知识库描述                                                    |
 | config      | object | 否   | 更新配置；包含 `chunking_config` / `image_processing_config` / `faq_config` / `wiki_config` / `indexing_strategy` |
+
+其中 `config.wiki_config.ingest_mode` 支持 `auto`（默认，上传文档后自动生成 Wiki）和
+`manual`（允许通过 Wiki REST/API 读写页面，但不触发内置文档自动入库）。省略该字段或传入未知值时按 `auto` 处理。
 
 **请求**:
 
