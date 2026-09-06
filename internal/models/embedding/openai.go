@@ -44,6 +44,10 @@ type OpenAIEmbedResponse struct {
 		Embedding []float32 `json:"embedding"`
 		Index     int       `json:"index"`
 	} `json:"data"`
+	Usage *struct {
+		PromptTokens *int `json:"prompt_tokens"`
+		TotalTokens  *int `json:"total_tokens"`
+	} `json:"usage"`
 }
 
 // NewOpenAIEmbedder creates a new OpenAI embedder
@@ -238,6 +242,9 @@ func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 	if err := json.Unmarshal(body, &response); err != nil {
 		logger.GetLogger(ctx).Errorf("OpenAIEmbedder EmbedBatch unmarshal response error: %v", err)
 		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+	if response.Usage != nil {
+		noteEmbeddingTokens(ctx, response.Usage.PromptTokens, response.Usage.TotalTokens)
 	}
 
 	// Extract embedding vectors

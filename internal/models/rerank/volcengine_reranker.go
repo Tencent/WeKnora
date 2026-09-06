@@ -174,6 +174,7 @@ func (r *VolcengineReranker) rerankBatch(
 			len(documents),
 		)
 	}
+	noteRerankTokens(ctx, nil, response.Data.TokenUsage)
 	return response.Data.Scores, nil
 }
 

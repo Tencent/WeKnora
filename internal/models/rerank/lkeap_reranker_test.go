@@ -83,6 +83,9 @@ func TestLKEAPReranker_Rerank_batchesMoreThan60Documents(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"Response": map[string]any{
 				"ScoreList": scores,
+				"Usage": map[string]any{
+					"TotalTokens": 5,
+				},
 				"RequestId": "test-request",
 			},
 		})
@@ -95,7 +98,8 @@ func TestLKEAPReranker_Rerank_batchesMoreThan60Documents(t *testing.T) {
 		documents[i] = strconv.Itoa(i) + ":document"
 	}
 
-	results, err := r.Rerank(t.Context(), "query", documents)
+	ctx, span := withRerankSpan(t.Context())
+	results, err := r.Rerank(ctx, "query", documents)
 	require.NoError(t, err)
 	require.Len(t, results, len(documents))
 	require.Len(t, batches, 2)
@@ -106,6 +110,9 @@ func TestLKEAPReranker_Rerank_batchesMoreThan60Documents(t *testing.T) {
 		assert.Equal(t, documents[i], result.Document.Text)
 		assert.Equal(t, float64(i), result.RelevanceScore)
 	}
+	assert.False(t, span.inputReported.Load(), "LKEAP RunRerank documents only total token usage")
+	assert.True(t, span.totalReported.Load())
+	assert.Equal(t, int64(10), span.totalTokens.Load(), "two successful batch responses must accumulate")
 }
 
 func TestLKEAPReranker_Rerank_batchesWithinCharacterLimit(t *testing.T) {

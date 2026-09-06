@@ -128,7 +128,7 @@ func TestVolcengineReranker_BatchesOverLimit(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"scores":[` +
-			strings.Join(scores, ",") + `]}}`))
+			strings.Join(scores, ",") + `],"token_usage":7}}`))
 	})
 
 	total := volcengineRerankMaxDocuments*2 + 10
@@ -137,7 +137,8 @@ func TestVolcengineReranker_BatchesOverLimit(t *testing.T) {
 		documents[i] = fmt.Sprintf("doc-%d", i)
 	}
 
-	results, err := reranker.Rerank(t.Context(), "query", documents)
+	ctx, span := withRerankSpan(t.Context())
+	results, err := reranker.Rerank(ctx, "query", documents)
 	require.NoError(t, err)
 
 	// All documents reranked, each mapped back to its original index/text.
@@ -152,6 +153,9 @@ func TestVolcengineReranker_BatchesOverLimit(t *testing.T) {
 	for _, size := range batchSizes {
 		assert.LessOrEqual(t, size, volcengineRerankMaxDocuments)
 	}
+	assert.True(t, span.totalReported.Load())
+	assert.Equal(t, int64(21), span.totalTokens.Load(), "three successful batch responses must accumulate")
+	assert.False(t, span.inputReported.Load(), "total token usage must not be inferred as input tokens")
 }
 
 func TestVolcengineReranker_APIErrorCode(t *testing.T) {

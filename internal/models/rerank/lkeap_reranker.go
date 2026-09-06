@@ -154,6 +154,13 @@ func (r *LKEAPReranker) rerankBatch(ctx context.Context, query string, documents
 		return nil, fmt.Errorf("LKEAP rerank score count mismatch: got %d scores for %d documents",
 			len(scores), len(documents))
 	}
+	if resp.Response.Usage != nil {
+		noteRerankTokens(
+			ctx,
+			nil,
+			optionalInt64AsInt(resp.Response.Usage.TotalTokens),
+		)
+	}
 
 	results := make([]RankResult, len(documents))
 	for i, score := range scores {
@@ -169,6 +176,14 @@ func (r *LKEAPReranker) rerankBatch(ctx context.Context, query string, documents
 		}
 	}
 	return results, nil
+}
+
+func optionalInt64AsInt(value *int64) *int {
+	if value == nil {
+		return nil
+	}
+	converted := int(*value)
+	return &converted
 }
 
 // GetModelName returns the rerank model name.
