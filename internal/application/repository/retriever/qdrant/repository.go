@@ -60,6 +60,17 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 		return nil
 	}
 
+	// Collection setup is a read/create/index sequence. Serialize it per
+	// repository so concurrent first writes do not both observe a missing
+	// collection and race to create it or its payload indexes.
+	q.collectionMu.Lock()
+	defer q.collectionMu.Unlock()
+
+	// A second cache check is required after waiting for the initializer.
+	if _, ok := q.initializedCollections.Load(dimension); ok {
+		return nil
+	}
+
 	log := logger.GetLogger(ctx)
 
 	// Check if collection exists
@@ -82,59 +93,123 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 			ReplicationFactor: types.OptionalUint32(q.replicationFactor),
 		})
 		if err != nil {
-			log.Errorf("[Qdrant] Failed to create collection: %v", err)
-			return fmt.Errorf("failed to create collection: %w", err)
+			// Another process may have created the collection after the
+			// existence check. Continue with index reconciliation in that
+			// case; all other creation errors remain fatal.
+			if !isCollectionAlreadyExistsError(err) {
+				log.Errorf("[Qdrant] Failed to create collection: %v", err)
+				return fmt.Errorf("failed to create collection: %w", err)
+			}
+			log.Infof("[Qdrant] Collection %s was created concurrently, reconciling indexes", collectionName)
 		}
 
-		// Create payload indexes for filtering
-		indexFields := []string{fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldSourceID}
-		for _, field := range indexFields {
+		if err == nil {
+			// Create payload indexes for filtering
+			indexFields := []string{fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldSourceID, fieldTagID}
+			for _, field := range indexFields {
+				_, err = q.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
+					CollectionName: collectionName,
+					FieldName:      field,
+					FieldType:      qdrant.FieldType_FieldTypeKeyword.Enum(),
+				})
+				if err != nil {
+					log.Warnf("[Qdrant] Failed to create index for field %s: %v", field, err)
+				}
+			}
+
+			// Create bool index for is_enabled
 			_, err = q.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
 				CollectionName: collectionName,
-				FieldName:      field,
-				FieldType:      qdrant.FieldType_FieldTypeKeyword.Enum(),
+				FieldName:      fieldIsEnabled,
+				FieldType:      qdrant.FieldType_FieldTypeBool.Enum(),
 			})
 			if err != nil {
-				log.Warnf("[Qdrant] Failed to create index for field %s: %v", field, err)
+				log.Warnf("[Qdrant] Failed to create index for field %s: %v", fieldIsEnabled, err)
 			}
-		}
 
-		// Create bool index for is_enabled
-		_, err = q.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
-			CollectionName: collectionName,
-			FieldName:      fieldIsEnabled,
-			FieldType:      qdrant.FieldType_FieldTypeBool.Enum(),
-		})
-		if err != nil {
-			log.Warnf("[Qdrant] Failed to create index for field %s: %v", fieldIsEnabled, err)
-		}
-
-		// Create text index for content (for keyword search) with multilingual tokenizer
-		// This supports Chinese, Japanese, Korean and other languages
-		lowercase := true
-		_, err = q.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
-			CollectionName: collectionName,
-			FieldName:      fieldContent,
-			FieldType:      qdrant.FieldType_FieldTypeText.Enum(),
-			FieldIndexParams: &qdrant.PayloadIndexParams{
-				IndexParams: &qdrant.PayloadIndexParams_TextIndexParams{
-					TextIndexParams: &qdrant.TextIndexParams{
-						Tokenizer: qdrant.TokenizerType_Multilingual,
-						Lowercase: &lowercase,
+			// Create text index for content (for keyword search) with multilingual tokenizer
+			// This supports Chinese, Japanese, Korean and other languages
+			lowercase := true
+			_, err = q.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
+				CollectionName: collectionName,
+				FieldName:      fieldContent,
+				FieldType:      qdrant.FieldType_FieldTypeText.Enum(),
+				FieldIndexParams: &qdrant.PayloadIndexParams{
+					IndexParams: &qdrant.PayloadIndexParams_TextIndexParams{
+						TextIndexParams: &qdrant.TextIndexParams{
+							Tokenizer: qdrant.TokenizerType_Multilingual,
+							Lowercase: &lowercase,
+						},
 					},
 				},
-			},
-		})
-		if err != nil {
-			log.Warnf("[Qdrant] Failed to create text index for content: %v", err)
-		}
+			})
+			if err != nil {
+				log.Warnf("[Qdrant] Failed to create text index for content: %v", err)
+			}
 
-		log.Infof("[Qdrant] Successfully created collection %s", collectionName)
+			log.Infof("[Qdrant] Successfully created collection %s", collectionName)
+		}
+	}
+
+	// Older collections were created before tag_id was part of the schema.
+	// Reconcile that field for both existing collections and collections that
+	// won a cross-process create race. Qdrant reports indexed payload fields in
+	// PayloadSchema, so this remains idempotent across restarts.
+	if err := q.ensureTagIDIndex(ctx, collectionName); err != nil {
+		log.Warnf("[Qdrant] Failed to reconcile index for field %s: %v", fieldTagID, err)
+		// Do not cache a partially initialized collection. The next write can
+		// retry after a transient Qdrant/API failure instead of silently
+		// leaving tag filtering unavailable for the lifetime of the process.
+		return nil
 	}
 
 	// Mark as initialized
 	q.initializedCollections.Store(dimension, true)
 	return nil
+}
+
+func (q *qdrantRepository) ensureTagIDIndex(ctx context.Context, collectionName string) error {
+	info, err := q.client.GetCollectionInfo(ctx, collectionName)
+	if err != nil {
+		return fmt.Errorf("failed to get collection info: %w", err)
+	}
+	if !needsPayloadIndex(info, fieldTagID) {
+		return nil
+	}
+
+	_, err = q.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
+		CollectionName: collectionName,
+		FieldName:      fieldTagID,
+		FieldType:      qdrant.FieldType_FieldTypeKeyword.Enum(),
+	})
+	if err != nil && !isPayloadIndexAlreadyExistsError(err) {
+		return fmt.Errorf("failed to create keyword index: %w", err)
+	}
+	return nil
+}
+
+func needsPayloadIndex(info *qdrant.CollectionInfo, fieldName string) bool {
+	if info == nil {
+		return true
+	}
+	_, ok := info.GetPayloadSchema()[fieldName]
+	return !ok
+}
+
+func isCollectionAlreadyExistsError(err error) bool {
+	return containsQdrantAlreadyExistsMessage(err)
+}
+
+func isPayloadIndexAlreadyExistsError(err error) bool {
+	return containsQdrantAlreadyExistsMessage(err)
+}
+
+func containsQdrantAlreadyExistsMessage(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(strings.ReplaceAll(err.Error(), "_", " "))
+	return strings.Contains(message, "already exists") || strings.Contains(message, "already exist")
 }
 
 func (q *qdrantRepository) EngineType() types.RetrieverEngineType {
