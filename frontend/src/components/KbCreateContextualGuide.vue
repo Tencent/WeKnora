@@ -132,7 +132,6 @@ const guideSteps = computed<SpotlightGuideStep[]>(() => {
     target: '[data-guide="kb-create-submit"]',
     placement: 'top',
     before: () => focusKbEditorSection('basic'),
-    interact: true,
   })
 
   return steps
