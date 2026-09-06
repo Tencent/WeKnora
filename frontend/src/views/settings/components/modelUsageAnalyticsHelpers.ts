@@ -1,5 +1,27 @@
 export const EMPTY_ANALYTICS_VALUE = '—'
 
+export interface CallCompositionItem {
+  type: string
+  label: string
+  count: number
+}
+
+// Only chart a complete breakdown; never infer an unknown remainder.
+export function buildCallComposition(items: readonly CallCompositionItem[], total: number) {
+  if (
+    !Number.isSafeInteger(total) || total < 0
+    || items.some(item => !Number.isSafeInteger(item.count) || item.count < 0)
+    || items.reduce((sum, item) => sum + item.count, 0) !== total
+  ) return null
+
+  let cumulative = 0
+  return items.filter(item => item.count > 0).map(item => {
+    const offset = cumulative / total
+    cumulative += item.count
+    return { ...item, ratio: item.count / total, offset }
+  })
+}
+
 export type AnalyticsDateRange = [string, string]
 
 function padDatePart(value: number): string {

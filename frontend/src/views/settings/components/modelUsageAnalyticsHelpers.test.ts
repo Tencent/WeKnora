@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  buildCallComposition,
   defaultAnalyticsDateRange,
   formatCompactNumber,
   formatExactNumber,
@@ -31,7 +32,40 @@ test('keeps null distinct from observed zero in metric formatting', () => {
   assert.equal(formatLatency(null), '—')
   assert.equal(formatLatency(0), '0 ms')
   assert.equal(formatRatio(null), '—')
+  assert.equal(formatRatio(0), '0%')
   assert.equal(formatRatio(0.875), '87.5%')
+})
+
+test('call composition retains exact counts and uses the response total as denominator', () => {
+  const slices = buildCallComposition([
+    { type: 'chat', label: 'Chat', count: 473 },
+    { type: 'embedding', label: 'Embedding', count: 148 },
+    { type: 'rerank', label: 'Rerank', count: 92 },
+  ], 713)!
+  assert.equal(slices.reduce((sum, slice) => sum + slice.count, 0), 713)
+  assert.deepEqual(slices.map(slice => formatRatio(slice.ratio)), ['66.3%', '20.8%', '12.9%'])
+  assert.equal(slices[2].offset, 621 / 713)
+})
+
+test('call composition omits zeros and supports any number of supplied types', () => {
+  const items = Array.from({ length: 6 }, (_, index) => ({
+    type: `type-${index}`, label: `Type ${index}`, count: index,
+  }))
+  const slices = buildCallComposition(items, 15)!
+  assert.equal(slices.length, 5)
+  assert.equal(slices[0].offset, 0)
+  assert.equal(slices[4].offset + slices[4].ratio, 1)
+  assert.deepEqual(buildCallComposition([{ type: 'chat', label: 'Chat', count: 0 }], 0), [])
+  assert.equal(buildCallComposition([{ type: 'chat', label: 'Chat', count: 42 }], 42)![0].ratio, 1)
+})
+
+test('call composition rejects incomplete or invalid counts without inventing a remainder', () => {
+  for (const count of [2, -1, NaN, Infinity, 0.5, null]) {
+    assert.equal(buildCallComposition([
+      { type: 'chat', label: 'Chat', count: count as number },
+    ], 3), null)
+  }
+  assert.equal(buildCallComposition([], NaN), null)
 })
 
 test('formats large token values compactly while retaining an exact formatter', () => {

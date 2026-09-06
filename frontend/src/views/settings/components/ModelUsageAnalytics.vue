@@ -59,9 +59,17 @@
             <p class="summary-card__value" :title="exactTitle(analytics.summary.calls.total)">
               {{ formatExactNumber(analytics.summary.calls.total, locale) }}
             </p>
-            <p class="summary-card__meta summary-card__meta--breakdown" :title="callBreakdown">
-              {{ callBreakdown }}
-            </p>
+            <div class="summary-card__meta">
+              <t-button
+                v-if="selectedModelId === ''"
+                class="summary-card__composition-action"
+                size="small"
+                theme="default"
+                variant="text"
+                :disabled="!compositionAvailable"
+                @click="compositionVisible = true"
+              >{{ t('modelSettings.analytics.viewComposition') }}</t-button>
+            </div>
           </article>
 
           <article class="analytics-summary-card">
@@ -110,6 +118,52 @@
             </p>
           </article>
         </div>
+
+        <t-dialog
+          v-if="compositionAvailable"
+          v-model:visible="compositionVisible"
+          :header="t('modelSettings.analytics.callsComposition')"
+          placement="center"
+          width="min(560px, calc(100vw - 32px))"
+          :footer="false"
+          :close-on-esc-keydown="true"
+          :close-on-overlay-click="true"
+        >
+          <div v-if="compositionSlices" class="calls-composition">
+            <div class="calls-composition__ring">
+              <svg viewBox="0 0 200 200" aria-hidden="true">
+                <circle class="calls-composition__track" cx="100" cy="100" r="80" />
+                <circle
+                  v-for="(item, index) in compositionSlices"
+                  :key="item.type"
+                  cx="100" cy="100" r="80"
+                  pathLength="100"
+                  fill="none"
+                  stroke-width="20"
+                  :stroke="compositionColor(index)"
+                  :stroke-dasharray="`${item.ratio * 100} ${100 - item.ratio * 100}`"
+                  :stroke-dashoffset="-item.offset * 100"
+                  transform="rotate(-90 100 100)"
+                />
+              </svg>
+              <div class="calls-composition__total">
+                <strong>{{ formatExactNumber(analytics.summary.calls.total, locale) }}</strong>
+                <span>{{ t('modelSettings.analytics.callsUnit') }}</span>
+              </div>
+            </div>
+            <ul class="calls-composition__legend">
+              <li v-for="(item, index) in compositionSlices" :key="item.type">
+                <span class="calls-composition__label">
+                  <i :style="{ background: compositionColor(index) }" aria-hidden="true" />
+                  {{ item.label }}
+                </span>
+                <strong>{{ formatExactNumber(item.count, locale) }}</strong>
+                <span>{{ formatRatio(item.ratio, locale) }}</span>
+              </li>
+            </ul>
+          </div>
+          <p v-else>{{ t('modelSettings.analytics.compositionUnavailable') }}</p>
+        </t-dialog>
 
         <section class="analytics-panel analytics-trend-panel">
           <div class="analytics-panel__header analytics-trend-header">
@@ -247,6 +301,7 @@ import {
   type ModelUsageAnalyticsResult,
 } from '@/api/modelUsageAnalytics'
 import {
+  buildCallComposition,
   defaultAnalyticsDateRange,
   formatCompactNumber,
   formatExactNumber,
@@ -274,6 +329,8 @@ const modelsLoading = ref(false)
 const modelsLoadFailed = ref(false)
 const models = ref<ModelConfig[]>([])
 const selectedModelId = ref('')
+const compositionVisible = ref(false)
+const compositionScopeValid = ref(false)
 const dateRange = ref<string[]>(defaultAnalyticsDateRange())
 const interval = ref<ModelUsageAnalyticsInterval>('day')
 const trendMetric = ref<TrendMetric>('calls')
@@ -297,14 +354,28 @@ const isEmpty = computed(() => (
   && analytics.value.trend.length === 0
 ))
 
-const callBreakdown = computed(() => {
+const compositionAvailable = computed(() => (
+  selectedModelId.value === '' && !analytics.value?.model_id
+  && compositionScopeValid.value && !loading.value && !loadFailed.value
+))
+
+const compositionSlices = computed(() => {
   const calls = analytics.value?.summary.calls
-  if (!calls) return ''
-  return (['chat', 'embedding', 'rerank'] as const)
-    .filter(type => calls[type] > 0)
-    .map(type => `${t(`modelSettings.typeShort.${type}`)} ${formatExactNumber(calls[type], locale.value)}`)
-    .join(' · ')
+  if (!calls) return null
+  return buildCallComposition(
+    (['chat', 'embedding', 'rerank'] as const).map(type => ({
+      type,
+      label: t(`modelSettings.typeShort.${type}`),
+      count: calls[type],
+    })),
+    calls.total,
+  )
 })
+
+function compositionColor(index: number): string {
+  const colors = ['var(--td-brand-color)', 'var(--td-warning-color)', 'var(--td-link-color)']
+  return colors[index % colors.length]
+}
 
 async function loadModelsForFilter() {
   modelsLoading.value = true
@@ -320,6 +391,8 @@ async function loadModelsForFilter() {
 }
 
 async function loadAnalytics() {
+  compositionVisible.value = false
+  compositionScopeValid.value = false
   const sequence = ++requestSequence
   let bounds: { startTime: string; endTime: string }
   try {
@@ -337,7 +410,10 @@ async function loadAnalytics() {
       endTime: bounds.endTime,
       interval: interval.value,
     })
-    if (sequence === requestSequence) analytics.value = result
+    if (sequence === requestSequence) {
+      analytics.value = result
+      compositionScopeValid.value = true
+    }
   } catch (error) {
     if (sequence !== requestSequence) return
     console.error('Failed to load model usage analytics:', error)
@@ -504,6 +580,7 @@ const chartAriaLabel = computed(() => (
 
 <style scoped lang="less">
 .usage-analytics {
+  container-type: inline-size;
   width: 100%;
 }
 
@@ -537,6 +614,11 @@ const chartAriaLabel = computed(() => (
 
 :deep(.analytics-segmented.t-radio-group) {
   align-items: center;
+  padding: 2px;
+
+  .t-radio-group__bg-block {
+    display: none;
+  }
 
   .t-radio-button,
   .t-radio-button.t-is-checked {
@@ -551,6 +633,12 @@ const chartAriaLabel = computed(() => (
     border-radius: var(--td-radius-small);
     line-height: 20px;
     vertical-align: middle;
+    transition: background-color 0.2s, color 0.2s;
+  }
+
+  .t-radio-button.t-is-checked {
+    background: var(--td-brand-color);
+    color: var(--td-text-color-anti);
   }
 
   &.t-size-s .t-radio-button {
@@ -598,6 +686,7 @@ const chartAriaLabel = computed(() => (
 
 .analytics-summary-grid {
   display: grid;
+  max-width: 1040px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
 }
@@ -612,7 +701,7 @@ const chartAriaLabel = computed(() => (
 .analytics-summary-card {
   position: relative;
   min-width: 0;
-  padding: 18px;
+  padding: 16px;
   overflow: hidden;
 }
 
@@ -643,7 +732,7 @@ const chartAriaLabel = computed(() => (
 }
 
 .summary-card__value {
-  margin-top: 13px;
+  margin-top: 10px;
   color: var(--td-text-color-primary);
   font-size: clamp(24px, 2.1vw, 31px);
   font-weight: 650;
@@ -656,17 +745,85 @@ const chartAriaLabel = computed(() => (
 
 .summary-card__meta {
   min-height: 36px;
-  margin-top: 10px;
+  margin-top: 6px;
   color: var(--td-text-color-placeholder);
   font-size: 12px;
   line-height: 18px;
   overflow-wrap: anywhere;
 }
 
-.summary-card__meta--breakdown {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.summary-card__composition-action {
+  padding: 0 4px;
+  margin-left: -4px;
+}
+
+.calls-composition {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+
+.calls-composition__ring {
+  position: relative;
+  width: 200px;
+  max-width: 100%;
+  flex-shrink: 0;
+
+  svg { display: block; width: 100%; }
+}
+
+.calls-composition__track {
+  fill: none;
+  stroke: var(--td-bg-color-component);
+  stroke-width: 20;
+}
+
+.calls-composition__total {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+
+  strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+  span { color: var(--td-text-color-secondary); font-size: 12px; }
+}
+
+.calls-composition__legend {
+  flex: 1 1 240px;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+
+  li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  strong { color: var(--td-text-color-primary); font-weight: 500; }
+}
+
+.calls-composition__label {
+  overflow-wrap: anywhere;
+
+  i {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 6px;
+    border-radius: 50%;
+  }
 }
 
 .summary-card__meta--tokens span {
@@ -836,9 +993,16 @@ const chartAriaLabel = computed(() => (
   line-height: 1.5;
 }
 
-@media (max-width: 1100px) {
+@container (max-width: 939px) {
   .analytics-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: 520px;
+  }
+}
+
+@container (max-width: 479px) {
+  .analytics-summary-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
