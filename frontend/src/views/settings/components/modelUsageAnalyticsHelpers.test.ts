@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   buildCallComposition,
+  normalizeCallComposition,
   defaultAnalyticsDateRange,
   formatCompactNumber,
   formatExactNumber,
@@ -73,4 +74,61 @@ test('formats large token values compactly while retaining an exact formatter', 
   assert.equal(formatCompactNumber(236_213_313), '236.2M')
   assert.equal(formatExactNumber(236_213_313), '236,213,313')
   assert.equal(formatLatency(1320), '1.32 s')
+})
+
+const callLabels = { chat: 'Chat', embedding: 'Embedding', rerank: 'Rerank' }
+
+test('normalizes current call types and a runtime future field without dropping counts', () => {
+  const calls = { total: 713, chat: 473, embedding: 149, rerank: 91 }
+  const current = normalizeCallComposition(calls, callLabels, 'Other')!
+  assert.deepEqual(current.map(item => item.count), [473, 149, 91])
+  const future = normalizeCallComposition({ ...calls, total: 723, image: 10 }, callLabels, 'Other')!
+  assert.deepEqual(future[3], { type: 'image', label: 'Image', count: 10 })
+  assert.equal(buildCallComposition(future, 723)![0].ratio, 473 / 723)
+})
+
+test('adds only an unclassified residual and preserves the response denominator', () => {
+  const items = normalizeCallComposition({ total: 723, chat: 473, embedding: 149, rerank: 91 }, callLabels, '其他')!
+  assert.equal(items[3].label, '其他')
+  assert.equal(items[3].count, 10)
+  const slices = buildCallComposition(items, 723)!
+  assert.equal(slices.reduce((sum, item) => sum + item.count, 0), 723)
+  assert.equal(slices[0].ratio, 473 / 723)
+  assert.equal(normalizeCallComposition({ total: 10 }, callLabels, 'Other')![0].count, 10)
+})
+
+test('rejects overfull breakdowns and invalid totals, and keeps zero empty', () => {
+  assert.equal(normalizeCallComposition({ total: 100, chat: 80, embedding: 40 }, callLabels, 'Other'), null)
+  for (const total of [null, undefined, NaN, Infinity, -1]) {
+    assert.equal(normalizeCallComposition({ total }, callLabels, 'Other'), null)
+  }
+  assert.deepEqual(normalizeCallComposition({ total: 0, chat: 0 }, callLabels, 'Other'), [])
+  assert.equal(normalizeCallComposition({ total: 0, chat: 1 }, callLabels, 'Other'), null)
+})
+
+test('handles zero fields, only unknown types, unsafe labels and nonnumeric metadata', () => {
+  const items = normalizeCallComposition({
+    total: 10, image_generation: 10, speech: 0, chat: null,
+    invalid: NaN, negative: -1, metadata: {}, numericString: '3', infinite: Infinity,
+  }, callLabels, 'Other')!
+  assert.deepEqual(items, [{ type: 'image_generation', label: 'Image generation', count: 10 }])
+  assert.equal(buildCallComposition(items, 10)![0].ratio, 1)
+  assert.equal(normalizeCallComposition({ total: 1, constructor: 1 }, callLabels, 'Other')![0].label, 'Constructor')
+  const collision = normalizeCallComposition({ total: 2, __residual_other: 1 }, callLabels, 'Other')!
+  assert.notEqual(collision[0].type, collision[1].type)
+})
+
+test('six types and tiny slices retain finite geometry independent of rounded percentages', () => {
+  const calls = { total: 1_000_005, chat: 1_000_000, embedding: 1, rerank: 1, image: 1, speech: 1, long_future_call_type: 1 }
+  const slices = buildCallComposition(normalizeCallComposition(calls, callLabels, 'Other')!, calls.total)!
+  assert.equal(slices.length, 6)
+  for (const slice of slices) {
+    assert.ok(Number.isFinite(slice.ratio) && slice.ratio > 0 && slice.ratio <= 1)
+    assert.ok(Number.isFinite(slice.offset) && slice.offset >= 0 && slice.offset < 1)
+  }
+  assert.equal(formatRatio(slices[1].ratio), '0%')
+  assert.ok(slices[1].ratio > 0)
+  assert.equal(slices[5].offset + slices[5].ratio, 1)
+  const two = normalizeCallComposition({ total: 3, chat: 1, image: 2 }, callLabels, 'Other')!
+  assert.equal(buildCallComposition(two, 3)![1].ratio, 2 / 3)
 })

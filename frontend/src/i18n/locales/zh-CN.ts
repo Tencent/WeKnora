@@ -1995,6 +1995,7 @@ export default {
       avgLatency: '平均延迟',
       callMix: '对话 {chat} · Embedding {embedding} · 重排序 {rerank}',
       inputOutput: '输入 {input} · 输出 {output}',
+      otherCalls: '其他',
       viewComposition: '查看构成',
       callsComposition: '调用次数构成',
       callsUnit: '次调用',

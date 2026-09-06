@@ -1993,6 +1993,7 @@ export default {
       avgLatency: '평균 지연 시간',
       callMix: '대화 {chat} · Embedding {embedding} · 재정렬 {rerank}',
       inputOutput: '입력 {input} · 출력 {output}',
+      otherCalls: '기타',
       viewComposition: '구성 보기',
       callsComposition: '호출 횟수 구성',
       callsUnit: '회 호출',

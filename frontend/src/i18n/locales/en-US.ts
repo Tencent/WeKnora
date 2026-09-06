@@ -4674,6 +4674,7 @@ export default {
       avgLatency: 'Avg Latency',
       callMix: 'Chat {chat} · Embedding {embedding} · Rerank {rerank}',
       inputOutput: 'Input {input} · Output {output}',
+      otherCalls: 'Other',
       viewComposition: 'View composition',
       callsComposition: 'Calls composition',
       callsUnit: 'calls',

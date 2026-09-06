@@ -6,11 +6,42 @@ export interface CallCompositionItem {
   count: number
 }
 
-// Only chart a complete breakdown; never infer an unknown remainder.
+// Runtime keys may precede a corresponding TypeScript contract update.
+export function normalizeCallComposition(
+  calls: object,
+  knownLabels: Readonly<Record<string, string>>,
+  otherLabel: string,
+): CallCompositionItem[] | null {
+  const total = (calls as { total?: unknown }).total
+  if (typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0) return null
+  const items: CallCompositionItem[] = []
+  for (const [type, count] of Object.entries(calls)) {
+    if (type === 'total' || typeof count !== 'number' || !Number.isFinite(count) || count < 0) continue
+    if (count === 0) continue
+    const readable = type.replace(/[_-]+/g, ' ').trim()
+    const fallback = readable ? readable.charAt(0).toUpperCase() + readable.slice(1) : otherLabel
+    items.push({
+      type,
+      label: Object.hasOwn(knownLabels, type) ? knownLabels[type] : fallback,
+      count,
+    })
+  }
+  const sum = items.reduce((value, item) => value + item.count, 0)
+  if (!Number.isFinite(sum) || sum > total) return null
+  if (sum < total) {
+    // Keep a residual key distinct even if the API supplies its own "other" field.
+    let type = '__residual_other'
+    while (items.some(item => item.type === type)) type += '_'
+    items.push({ type, label: otherLabel, count: total - sum })
+  }
+  return items
+}
+
+// Geometry uses unrounded counts and the original response total.
 export function buildCallComposition(items: readonly CallCompositionItem[], total: number) {
   if (
     !Number.isSafeInteger(total) || total < 0
-    || items.some(item => !Number.isSafeInteger(item.count) || item.count < 0)
+    || items.some(item => !Number.isFinite(item.count) || item.count < 0)
     || items.reduce((sum, item) => sum + item.count, 0) !== total
   ) return null
 

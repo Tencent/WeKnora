@@ -1993,6 +1993,7 @@ export default {
       avgLatency: 'Средняя задержка',
       callMix: 'Чат {chat} · Эмбеддинг {embedding} · Реранжирование {rerank}',
       inputOutput: 'Вход {input} · Выход {output}',
+      otherCalls: 'Прочее',
       viewComposition: 'Посмотреть состав',
       callsComposition: 'Состав вызовов',
       callsUnit: 'вызовов',

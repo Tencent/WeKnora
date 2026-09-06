@@ -78,7 +78,10 @@
             <p class="summary-card__value" :title="exactTitle(analytics.summary.total_tokens.sum)">
               {{ formatCompactNumber(analytics.summary.total_tokens.sum, locale) }}
             </p>
-            <div class="summary-card__meta summary-card__meta--tokens">
+            <div
+              v-if="analytics.summary.input_tokens.sum != null || analytics.summary.output_tokens.sum != null"
+              class="summary-card__meta summary-card__meta--tokens"
+            >
               <span>{{ t('modelSettings.analytics.inputDetail', {
                 value: formatCompactNumber(analytics.summary.input_tokens.sum, locale),
               }) }}</span>
@@ -302,6 +305,7 @@ import {
 } from '@/api/modelUsageAnalytics'
 import {
   buildCallComposition,
+  normalizeCallComposition,
   defaultAnalyticsDateRange,
   formatCompactNumber,
   formatExactNumber,
@@ -356,24 +360,26 @@ const isEmpty = computed(() => (
 
 const compositionAvailable = computed(() => (
   selectedModelId.value === '' && !analytics.value?.model_id
+  && (analytics.value?.summary.calls.total ?? 0) > 0
   && compositionScopeValid.value && !loading.value && !loadFailed.value
 ))
 
 const compositionSlices = computed(() => {
   const calls = analytics.value?.summary.calls
   if (!calls) return null
-  return buildCallComposition(
-    (['chat', 'embedding', 'rerank'] as const).map(type => ({
-      type,
-      label: t(`modelSettings.typeShort.${type}`),
-      count: calls[type],
-    })),
-    calls.total,
-  )
+  const items = normalizeCallComposition(calls, {
+    chat: t('modelSettings.typeShort.chat'),
+    embedding: t('modelSettings.typeShort.embedding'),
+    rerank: t('modelSettings.typeShort.rerank'),
+  }, t('modelSettings.analytics.otherCalls'))
+  return items === null ? null : buildCallComposition(items, calls.total)
 })
 
 function compositionColor(index: number): string {
-  const colors = ['var(--td-brand-color)', 'var(--td-warning-color)', 'var(--td-link-color)']
+  const colors = [
+    'var(--td-brand-color)', 'var(--td-warning-color)', 'var(--td-text-color-secondary)',
+    'var(--td-error-color)', 'var(--td-brand-color-active)', 'var(--td-warning-color-active)',
+  ]
   return colors[index % colors.length]
 }
 
@@ -686,9 +692,9 @@ const chartAriaLabel = computed(() => (
 
 .analytics-summary-grid {
   display: grid;
-  max-width: 1040px;
+  max-width: 1000px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  gap: 16px;
 }
 
 .analytics-summary-card,
@@ -701,14 +707,14 @@ const chartAriaLabel = computed(() => (
 .analytics-summary-card {
   position: relative;
   min-width: 0;
-  padding: 16px;
+  padding: 14px 12px;
   overflow: hidden;
 }
 
 .summary-card__icon {
   position: absolute;
-  top: 16px;
-  right: 16px;
+  top: 12px;
+  right: 12px;
   display: inline-flex;
   width: 30px;
   height: 30px;
@@ -734,7 +740,7 @@ const chartAriaLabel = computed(() => (
 .summary-card__value {
   margin-top: 10px;
   color: var(--td-text-color-primary);
-  font-size: clamp(24px, 2.1vw, 31px);
+  font-size: 22px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
   line-height: 1.15;
@@ -746,7 +752,7 @@ const chartAriaLabel = computed(() => (
 .summary-card__meta {
   min-height: 36px;
   margin-top: 6px;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
   font-size: 12px;
   line-height: 18px;
   overflow-wrap: anywhere;
@@ -856,7 +862,7 @@ const chartAriaLabel = computed(() => (
     font-weight: 600;
 
     span {
-      color: var(--td-text-color-placeholder);
+      color: var(--td-text-color-secondary);
       font-size: 12px;
       font-weight: 500;
     }
@@ -864,7 +870,7 @@ const chartAriaLabel = computed(() => (
 
   p {
     margin-top: 5px;
-    color: var(--td-text-color-placeholder);
+    color: var(--td-text-color-secondary);
     font-size: 12px;
   }
 }
@@ -879,7 +885,7 @@ const chartAriaLabel = computed(() => (
   display: block;
   width: 100%;
   min-height: 220px;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
   font-family: inherit;
 }
 
@@ -891,7 +897,7 @@ const chartAriaLabel = computed(() => (
   }
 
   text {
-    fill: var(--td-text-color-placeholder);
+    fill: var(--td-text-color-secondary);
     font-size: 11px;
   }
 }
@@ -930,7 +936,7 @@ const chartAriaLabel = computed(() => (
 }
 
 .chart-x-labels text {
-  fill: var(--td-text-color-placeholder);
+  fill: var(--td-text-color-secondary);
   font-size: 11px;
 }
 
@@ -941,7 +947,7 @@ const chartAriaLabel = computed(() => (
   justify-content: center;
   flex-direction: column;
   gap: 10px;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
   font-size: 13px;
 }
 
@@ -988,19 +994,28 @@ const chartAriaLabel = computed(() => (
 
 .cache-panel__meta {
   margin: 14px 0 0;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
   font-size: 12px;
   line-height: 1.5;
 }
 
-@container (max-width: 939px) {
+@media (max-width: 1099px) {
   .analytics-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     max-width: 520px;
   }
 }
 
-@container (max-width: 479px) {
+// Settings is capped at 1080px with a 208px sidebar and content padding.
+// Keep four columns on desktop; only collapse a genuinely narrow content area.
+@container (max-width: 619px) {
+  .analytics-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: 520px;
+  }
+}
+
+@container (max-width: 379px) {
   .analytics-summary-grid {
     grid-template-columns: minmax(0, 1fr);
   }
