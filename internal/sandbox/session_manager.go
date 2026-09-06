@@ -687,9 +687,11 @@ type ShellExecOptions struct {
 	// Never set this from a model-authored tool such as shell_exec.
 	AllowSkillsRoot bool
 	// AsRoot is reserved for install/maintenance commands that need to write
-	// outside /workspace; ordinary sessions must keep the provider default user.
-	// Never set this from a model-authored tool such as shell_exec: root inside
-	// the sandbox bypasses file-mode isolation on the image.
+	// outside /workspace. With the default DefaultSandboxExecUser now root the
+	// flag is effectively a no-op kept for call-site clarity and to stay
+	// correct if the default account ever becomes non-root again: it forces
+	// root regardless. AllowSkillsRoot remains the real guard for reaching the
+	// skills image root.
 	AsRoot bool
 }
 

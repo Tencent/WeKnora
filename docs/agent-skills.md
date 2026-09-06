@@ -397,7 +397,7 @@ fullResult := validator.ValidateAll(scriptContent, args, stdin)
 
 Docker 模式提供最强的隔离：
 
-- **非 root 用户**：容器内以普通用户运行
+- **一会话一沙箱**：容器内默认以 root 运行，隔离边界是容器本身而非容器内账号
 - **Capability 限制**：移除所有 Linux capabilities
 - **只读文件系统**：根文件系统只读
 - **资源限制**：内存 256MB，CPU 限制

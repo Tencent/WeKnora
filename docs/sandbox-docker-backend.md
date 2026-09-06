@@ -33,7 +33,7 @@ CubeSandbox / E2B 的集群与模板见 [沙箱集群与标准模板](./sandbox-
 
 ## 现在的形态
 
-一个沙箱就是一个容器。标准镜像以 `USER user` 结尾，创建时覆盖为 uid 0，这样入口才能在 `/var/lib` 写下活跃标记；脚本仍以 `user` 执行。PID 1 是 `sleep infinity`，所有工作都通过 exec 进去做。
+一个沙箱就是一个容器。标准镜像以 `USER root` 结尾，创建时仍显式指定 uid 0，这样即便换成以非 root 结尾的自定义镜像，入口也能在 `/var/lib` 写下活跃标记；脚本按每次调用指定的账号执行，默认是 root（见 `DefaultSandboxExecUser`）。一个会话独占一个沙箱，容器内没有第二个账号需要用文件权限隔开，隔离边界在容器本身。PID 1 是 `sleep infinity`，所有工作都通过 exec 进去做。
 
 这层 wrapper 是通过 `Entrypoint` 下发并把 `Cmd` 显式清空的：daemon 会把镜像自带的
 ENTRYPOINT 拼到 Cmd 前面，所以只设 Cmd 时，任何声明了 ENTRYPOINT 的镜像（本文件的
@@ -75,19 +75,19 @@ ENTRYPOINT 拼到 Cmd 前面，所以只设 Cmd 时，任何声明了 ENTRYPOINT
 执行命令的东西——包括普通技能脚本，不需要 root——都可以起一个后台循环持续 `touch` 标记，
 把自己维持成「一直活跃」。当前没有硬寿命上限，需要的话应由部署方在 daemon 侧限制。
 
-**所有 exec 都以 `user`(uid 1000) 运行，没有例外。** 脚本执行、`shell_exec`、全部文件操作、
-以及 manager 自己的产物目录 bootstrap 都跑在沙箱账号下；`RemoteExecRequest.User` 留空时
-适配器解析成 `DefaultSandboxExecUser` 而不是 root，漏传账号只会失去权限、不会拿到权限。
+**所有 exec 都显式指定账号，默认是 root。** 脚本执行、`shell_exec`、全部文件操作、以及
+manager 自己的产物目录 bootstrap 都跑在 `DefaultSandboxExecUser` 下；`RemoteExecRequest.User`
+留空时适配器解析成这个常量而不是镜像声明的账号，因此一次调用落到哪个账号，不取决于空间选了
+哪个后端。
 
-bootstrap 尤其不能以 root 跑：产物目录位于会话自己可写的 `/workspace` 下，而 `chown`/`chmod`
-会跟随符号链接。会话只要把产物目录换成指向 `/etc` 的链接，一次 root bootstrap 就会把 `/etc`
-的属主交给沙箱账号，接着改写 `passwd` 即可让该账号在下一次 exec 时变成 uid 0（真机验证过）。
-以沙箱账号执行时这条链直接断在内核：`chown` 对不属于自己的目标一律失败。
+默认 root 的前提是一个会话独占一个沙箱：容器内没有第二个租户的文件需要用 mode bit 隔开，跨
+租户与宿主机的隔离都落在容器边界上。镜像里仍然保留 uid 1000 的 `user` 账号，供 E2B/Cube 侧
+按名字寻址的工具以及 `sudo` 使用。
 
 容器 `CapDrop: ALL` 之后额外补回 CHOWN/DAC_OVERRIDE/FOWNER/FSETID/SETGID/SETUID/KILL，
-Docker 默认给的 NET_RAW、MKNOD、SYS_CHROOT 等一律不给。注意这批 capability 是给容器内
-**root** 用的（装包、修属主），而目前没有任何 exec 以 root 运行，因此它们对现有路径是冗余的；
-保留是为了自定义镜像里用 `sudo` 装包的场景，收紧它们是可以独立推进的加固项。
+Docker 默认给的 NET_RAW、MKNOD、SYS_CHROOT 等一律不给。exec 以 root 运行之后这批 capability
+就是实际在用的（装包、修属主都要）；收紧它们需要先确认技能安装路径不依赖，是可以独立推进的
+加固项。
 
 **文件操作走 exec，不走 archive 接口。** archive 接口（`PUT`/`GET`/`HEAD /archive`）由 daemon
 执行，这意味着两件事同时成立：它忽略 exec user 一律以 root 操作，并且会在路径解析时跟随符号

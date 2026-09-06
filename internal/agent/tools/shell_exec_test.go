@@ -220,7 +220,7 @@ func TestShellExecSuppressesBinaryStreams(t *testing.T) {
 
 func TestShellExecDescriptionDefinesOneExecutionEntry(t *testing.T) {
 	description := NewShellExecTool(&fakeShellExecutor{}, nil).Description()
-	for _, fact := range []string{"/workspace", "skill_name", "virtualenv", "read-only", "non-root", "write_sandbox_file", "edit_sandbox_file", "not automatically saved"} {
+	for _, fact := range []string{"/workspace", "skill_name", "virtualenv", "as root", "die with this session", "write_sandbox_file", "edit_sandbox_file", "not automatically saved"} {
 		require.Contains(t, description, fact)
 	}
 	require.NotContains(t, description, "execute_skill_script")

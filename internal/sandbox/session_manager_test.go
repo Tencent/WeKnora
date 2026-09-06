@@ -91,9 +91,8 @@ func TestSessionBoundManagerExecuteEnsuresOutputDir(t *testing.T) {
 		"the attachment directory is prepared alongside the artifact one; a "+
 			"snapshot-derived image carries neither")
 	require.Equal(t, DefaultSandboxExecUser, execs[0].User,
-		"chown follows symlinks, so a root-run bootstrap can be aimed at /etc by "+
-			"a session that swaps its artifact directory for a link; running as the "+
-			"sandbox account is what makes that attempt fail")
+		"the bootstrap names its account like every other caller, so the directories "+
+			"it creates belong to whoever the execs that follow will run as")
 }
 
 func TestWorkspaceBootstrapPreservesExistingData(t *testing.T) {
@@ -201,7 +200,8 @@ func TestExecShellCommandWithOptionsRunsAsRootOnlyWhenAsked(t *testing.T) {
 	require.NoError(t, err)
 	last := lastExecRequest(t, client)
 	require.Equal(t, DefaultSandboxExecUser, last.User,
-		"ordinary shell_exec must stay on the non-root sandbox account")
+		"ordinary shell_exec must stay on the default sandbox account rather than "+
+			"taking the install-mode escape")
 
 	skillDir := mustSkillDir(t, "sk-1")
 	_, err = mgr.ExecShellCommandWithOptions(ctx, "sess-1", "echo hi", ShellExecOptions{

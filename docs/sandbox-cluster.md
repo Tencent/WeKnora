@@ -21,7 +21,7 @@
 - Node.js 20、npm 与 npx；
 - jq 及基础 Shell 工具；
 - `/workspace` 工作目录；
-- UID 1000 的非 root `user` 账号（E2B 模板约定的账号名，WeKnora 以它执行脚本与文件操作）。
+- UID 1000 的 `user` 账号（E2B 模板约定的账号名，保留供按名字寻址的工具与 `sudo` 使用；WeKnora 执行脚本与文件操作默认用的是 root，见 `DefaultSandboxExecUser`）。
 
 生产环境应使用与 WeKnora 相同的版本标签，不建议长期指向 `latest`。Skills 新增系统依赖时，应先更新标准镜像并重新注册模板，再切换集群的默认模板 ID。
 

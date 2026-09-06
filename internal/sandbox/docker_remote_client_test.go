@@ -456,8 +456,8 @@ func TestDockerClientCreateAppliesIsolationAndMetadata(t *testing.T) {
 	require.Len(t, engine.created, 1)
 	created := engine.created[0]
 	// PID 1 both keeps the container alive and prepares the activity marker so
-	// that root and the unprivileged sandbox user can each refresh it; the
-	// idle sweeper reads nothing else.
+	// that any account an exec may land on can refresh it; the idle sweeper
+	// reads nothing else.
 	require.Equal(t, dockerSandboxPID1User, created.Config.User,
 		"PID 1 must be root so the entrypoint can chmod the activity marker")
 	require.Equal(t, "/bin/sh", created.Config.Entrypoint[0])

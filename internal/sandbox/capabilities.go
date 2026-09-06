@@ -92,9 +92,10 @@ type SessionCapabilityProvider interface {
 }
 
 // SessionInstallShellExecutor runs install/maintenance shell commands, which
-// need root and the skills image root. It is a separate interface from
-// SessionShellExecutor so the privilege is something a caller must ask for by
-// name: ordinary chat sessions keep the non-root, /workspace-only contract.
+// need the skills image root. It is a separate interface from
+// SessionShellExecutor so reaching outside /workspace is something a caller
+// must ask for by name: ordinary chat sessions keep the /workspace-only
+// contract even though they already run as root.
 type SessionInstallShellExecutor interface {
 	ExecShellCommandWithOptions(
 		ctx context.Context,

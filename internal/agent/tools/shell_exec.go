@@ -128,12 +128,12 @@ var shellExecBlacklist = []struct {
 
 var shellExecTool = BaseTool{
 	name: ToolShellExec,
-	description: `Execute a command in the current session's isolated sandbox as its non-root user. Never runs on the host.
+	description: `Execute a command in the current session's isolated sandbox as root. The sandbox belongs to this session alone; nothing here runs on the host.
 - CWD defaults to /workspace on every call; cd does not persist. work_dir selects another directory under /workspace and missing directories are created as the same user.
 - Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. Read known paths directly; no mandatory discovery call.
 - Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).
 - skill_name selects a listed skill for this call. Installed skills use their Python virtualenv and Node modules; host skill resources are automatically staged in the session with the system runtime. Scoped credentials apply to both. Example: skill_name="pdf", command="python3 report.py". Run bundled scripts via "$WEKNORA_SKILL_DIR/scripts/...". Omit skill_name for system commands.
-- /workspace/input contains user attachments: preserve originals. /workspace/output holds downloadable deliverables. Installed skills under /opt/weknora/tenant/skills are read-only. Install Python extras WITHOUT skill_name using python3 -m pip install --target /workspace/.skill-packages/<skill> <package>, then run with skill_name. System package installation requires the skill installer; ordinary sessions cannot apt-get or elevate privileges.
+- /workspace/input contains user attachments: preserve originals. /workspace/output holds downloadable deliverables. Install Python extras WITHOUT skill_name using python3 -m pip install --target /workspace/.skill-packages/<skill> <package>, then run with skill_name. apt-get is available when the sandbox network policy allows it, but anything a skill needs permanently belongs in the skill installer: changes made here live and die with this session.
 - Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. Transport failures/timeouts are tool failures. Changing tools does not change permissions; do not repeat a denied operation through another tool.
 - stdout/stderr have independent byte limits, preserving head and tail when truncated. Full output is not automatically saved; redirect verbose commands to a workspace log when it must be retained. Binary bytes are suppressed.
 - Reference collected deliverables as ![description](sandbox:<file name>) using the exact filename.`,
@@ -719,7 +719,7 @@ func (t *ShellExecTool) recoveryHint(skillName string, exitCode int, command, st
 	}
 	lower := strings.ToLower(stderr)
 	if strings.Contains(lower, "permission denied") || strings.Contains(lower, "read-only file system") {
-		return "Permission denied: commands and file tools share the same user. Use /workspace for scratch files and /workspace/output for deliverables. The installed skill tree is read-only; switching tools, chmod, sudo, or retrying the same write cannot grant access."
+		return "Permission denied: commands and file tools share the same user. Use /workspace for scratch files and /workspace/output for deliverables. Switching tools or retrying the same write cannot grant access; a path refused here is refused by the sandbox itself, not by file ownership."
 	}
 	if isMissingInterpreterModule(stderr) {
 		if skillName == "" {

@@ -63,13 +63,13 @@ const dockerActivityMarker = "/var/lib/weknora-sandbox-activity"
 // the container is a place to exec into, not a service — and prepares the
 // activity marker on the way.
 //
-// The marker has to be writable by the sandbox account. PID 1 runs as root so
-// that it can create the file at all, but every exec that would refresh it —
-// scripts, shell commands, filesystem helpers — runs as the unprivileged user.
-// Creating it here, in the container's own entrypoint, avoids an extra API
-// round trip per sandbox, and the chmod that follows is what lets that account
-// touch it. Without this the idle sweeper would see a session that only ever
-// ran scripts as untouched, and reclaim it out from under the user.
+// The marker has to be writable by whichever account the execs land on, which
+// is DefaultSandboxExecUser by default but stays selectable per call and can
+// be a non-root account on a custom image. Creating it here, in the
+// container's own entrypoint, avoids an extra API round trip per sandbox, and
+// the chmod that follows is what lets a non-root account touch it. Without
+// this the idle sweeper would see a session that only ever ran scripts as
+// untouched, and reclaim it out from under the user.
 var dockerSandboxEntrypoint = []string{
 	"/bin/sh", "-c",
 	"touch " + dockerActivityMarker + " 2>/dev/null; " +
@@ -268,9 +268,10 @@ func (c *DockerRemoteClient) Create(
 	created, err := c.api.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Image: image,
 		Config: &container.Config{
-			// The standard image ends with USER user. The entrypoint has to
-			// create and chmod the activity marker under /var/lib, which only
-			// root can do; exec still names DefaultSandboxExecUser per call.
+			// The entrypoint has to create and chmod the activity marker under
+			// /var/lib, which only root can do. Pinning PID 1 to uid 0 keeps
+			// that working for a custom image that ends with a non-root USER;
+			// exec still names DefaultSandboxExecUser per call.
 			User: dockerSandboxPID1User,
 			// Entrypoint rather than Cmd, with Cmd explicitly emptied: the
 			// daemon prepends the image's own ENTRYPOINT to Cmd, so an image
@@ -810,19 +811,16 @@ func dockerExecCommand(req RemoteExecRequest, timeout time.Duration) []string {
 
 // dockerExecUser resolves which account a command runs as.
 //
-// A blank user resolves to the sandbox account. It must never resolve to root:
-// this function is the single choke point for every exec the daemon runs, so a
-// caller that forgets to name an account has to lose privileges here, not
-// silently gain them. It also makes the backends agree — E2B authenticates its
-// data plane as DefaultSandboxExecUser and Cube hands a blank field to envd,
-// which defaults the same way.
+// A blank user resolves to DefaultSandboxExecUser, which is root: this
+// function is the single choke point for every exec the daemon runs, so the
+// account a caller lands on when it names none is decided here rather than by
+// whatever the image happens to declare. It also makes the backends agree —
+// E2B authenticates its data plane as DefaultSandboxExecUser and Cube hands a
+// blank field to envd, which defaults the same way.
 //
-// This used to fall back to root for the manager's artifact-directory
-// bootstrap. That was a container-escape primitive: chown follows symlinks, so
-// a session that replaced its own artifact directory with a link to /etc got
-// the root-run bootstrap to hand it ownership of /etc, and from there uid 0 by
-// rewriting passwd. The bootstrap now names the account like everyone else and
-// simply fails when it is aimed at something the account does not own.
+// Root is safe to default to because a sandbox belongs to exactly one session:
+// there is no second account inside it whose files the kernel would be keeping
+// apart. Host and cross-tenant isolation live at the container boundary.
 func dockerExecUser(user string) string {
 	if trimmed := strings.TrimSpace(user); trimmed != "" {
 		return trimmed
@@ -1242,12 +1240,13 @@ func dockerCleanPath(op, raw string) (string, error) {
 
 // dockerReservedPathPrefixes are refused for every file operation.
 //
-// File operations run as the sandbox account (see WriteFile), so the kernel
-// already decides what is reachable and this list is not what keeps /etc or
-// another session's data safe. It exists for the paths the sandbox account
-// legitimately can touch but never should through this API: /proc and /sys
-// expose the container's own runtime state, and the activity marker is the
-// sweeper's bookkeeping, which a session must not be able to backdate.
+// File operations run as DefaultSandboxExecUser, which is root, so the kernel
+// filters nothing here. What keeps /etc and another session's data safe is the
+// container boundary — a sandbox belongs to one session and holds no second
+// account's files. This list is narrower than that: it covers the paths a
+// session can reach but must not drive through this API. /proc and /sys expose
+// the container's own runtime state, and the activity marker is the sweeper's
+// bookkeeping, which a session must not be able to backdate.
 var dockerReservedPathPrefixes = []string{
 	"/proc",
 	"/sys",
