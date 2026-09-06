@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc
+.PHONY: help build run test clean benchmark-v1 benchmark-v1-preflight docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc
 
 # Show help
 help:
@@ -11,6 +11,8 @@ help:
 	@echo "  anydoc-lib        构建 anydoc 静态库（需要 Rust 工具链）"
 	@echo "  build-anydoc      构建带 anydoc 解析引擎的应用"
 	@echo "  clean             清理构建文件"
+	@echo "  benchmark-v1      运行 Final Benchmark v1.1 并导出最终产物"
+	@echo "  benchmark-v1-preflight  仅检查 Benchmark 前置条件（不调用模型）"
 	@echo ""
 	@echo "Docker 命令:"
 	@echo "  docker-build-app       构建应用 Docker 镜像 (wechatopenai/weknora-app)"
@@ -106,6 +108,12 @@ run: build
 # Run tests
 test:
 	go test -v ./...
+
+benchmark-v1:
+	./scripts/benchmark_v1.sh
+
+benchmark-v1-preflight:
+	BENCHMARK_PREFLIGHT_ONLY=1 ./scripts/benchmark_v1.sh
 
 # Clean build artifacts
 clean:
@@ -346,5 +354,4 @@ dev-app:
 
 dev-frontend:
 	./scripts/dev.sh frontend
-
 

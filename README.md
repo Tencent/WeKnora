@@ -331,6 +331,17 @@ make dev-frontend
 **Detailed Documentation:** [Development Environment Quick Start](./docs/开发指南.md)
 
 
+## Benchmark v1.1 reproduction
+
+After PostgreSQL, Redis, DocReader, and the backend are running, configure the three models and their own provider credentials according to `config/benchmark/final_v1.json`. The credentials do not need to match those used to publish the baseline; the stable model identities do.
+
+```bash
+make benchmark-v1-preflight  # checks only; never calls a model provider
+make benchmark-v1            # runs the evaluation after preflight passes
+```
+
+The final command writes `result.json` and `result.md` under `artifacts/rhino_2026_final/benchmark/`. It assumes dependencies, migrations, and model rows are already provisioned; missing prerequisites fail before evaluation starts. Retrieval metrics are generally more stable, while BLEU/ROUGE can vary slightly because hosted model behavior is not bit-for-bit deterministic.
+
 ## 🤝 Contributing
 
 Welcome to submit [Issues](https://github.com/Tencent/WeKnora/issues) or Pull Requests.

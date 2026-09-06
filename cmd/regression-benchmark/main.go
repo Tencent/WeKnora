@@ -43,6 +43,10 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("regression-benchmark", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	output := fs.String("output", "artifacts/regression/current.json", "path to write the current BenchmarkResult JSON")
+	profilePath := fs.String("profile", "", "final benchmark profile JSON (enables strict preflight and final artifacts)")
+	outputDir := fs.String("output-dir", "artifacts/rhino_2026_final/benchmark", "directory for final result.json and result.md")
+	preflightOnly := fs.Bool("preflight-only", false, "validate final benchmark prerequisites without starting evaluation")
+	backendURL := fs.String("backend-url", "http://127.0.0.1:8080", "running backend base URL checked by final preflight")
 	dataset := fs.String("dataset", "benchmark_v1", "dataset ID to evaluate (benchmark_v1)")
 	tenant := fs.Uint64("tenant", 10000, "tenant ID under which the evaluation runs")
 	timeout := fs.Duration("timeout", 10*time.Minute, "maximum time to wait for the benchmark run")
@@ -52,6 +56,49 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	}
 
 	ctx := benchmarkContext(*tenant)
+	var profile finalProfile
+	var selected selectedModels
+	var commitSHA string
+	if *profilePath != "" {
+		var err error
+		profile, err = loadFinalProfile(*profilePath)
+		if err != nil {
+			fmt.Fprintf(stderr, "benchmark-v1 preflight: %v\n", err)
+			return exitErr
+		}
+		if profile.BenchmarkID != *dataset {
+			fmt.Fprintf(stderr, "benchmark-v1 preflight: dataset flag %q does not match profile benchmark_id %q\n", *dataset, profile.BenchmarkID)
+			return exitErr
+		}
+		if err := checkOutputWritable(filepath.Join(*outputDir, "result.json")); err != nil {
+			fmt.Fprintf(stderr, "benchmark-v1 preflight: %v\n", err)
+			return exitErr
+		}
+		preflightCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		err = checkBackend(preflightCtx, *backendURL)
+		if err != nil {
+			cancel()
+			fmt.Fprintf(stderr, "benchmark-v1 preflight: %v\n", err)
+			return exitErr
+		}
+		env, err := collectPreflightEnvironment(preflightCtx, *tenant)
+		cancel()
+		if err != nil {
+			fmt.Fprintf(stderr, "benchmark-v1 preflight: %v\n", err)
+			return exitErr
+		}
+		selected, err = validatePreflight(profile, env)
+		if err != nil {
+			fmt.Fprintf(stderr, "benchmark-v1 preflight: %v\n", err)
+			return exitErr
+		}
+		commitSHA = env.CommitSHA
+		fmt.Fprintf(stdout, "benchmark-v1 preflight PASS: commit=%s dataset=%s models=%s,%s,%s cache=off worker_limit=%d\n", commitSHA, profile.Dataset.SemanticSHA256, profile.Models.Embedding.Name, profile.Models.Chat.Name, profile.Models.Rerank.Name, profile.Runtime.WorkerLimit)
+		if *preflightOnly {
+			fmt.Fprintln(stdout, "preflight-only: evaluation was not started; no provider API was called")
+			return exitOK
+		}
+	}
 
 	// Resolve the exact runtime the server uses. BuildContainer wires the full
 	// stack (DB, migrations, builtin model seeding, retrieval engines) so the
@@ -65,7 +112,11 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		evalSvc interfaces.EvaluationService,
 		resultSvc interfaces.BenchmarkResultService,
 	) {
-		result, benchErr = runBenchmark(ctx, evalSvc, resultSvc, *dataset, *timeout, *poll)
+		if *profilePath == "" {
+			result, benchErr = runBenchmark(ctx, evalSvc, resultSvc, *dataset, *timeout, *poll)
+		} else {
+			result, benchErr = runBenchmarkWithModels(ctx, evalSvc, resultSvc, *dataset, selected.ChatID, selected.RerankID, *timeout, *poll)
+		}
 	}); err != nil {
 		fmt.Fprintf(stderr, "regression-benchmark: resolve runtime: %v\n", err)
 		return exitErr
@@ -73,6 +124,19 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	if benchErr != nil {
 		fmt.Fprintf(stderr, "regression-benchmark: %v\n", benchErr)
 		return exitErr
+	}
+
+	if *profilePath != "" {
+		artifact, err := buildFinalArtifact(profile, commitSHA, time.Now(), result)
+		if err == nil {
+			err = writeFinalArtifacts(*outputDir, artifact)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "benchmark-v1: %v\n", err)
+			return exitErr
+		}
+		fmt.Fprintf(stdout, "task_id=%s evaluation_run_id=%s benchmark_version=%s written=%s\n", result.Run.TaskID, result.Run.EvaluationRunID, result.BenchmarkVersion, *outputDir)
+		return exitOK
 	}
 
 	if err := writeResult(*output, result); err != nil {
@@ -109,7 +173,17 @@ func runBenchmark(
 	datasetID string,
 	timeout, poll time.Duration,
 ) (*types.BenchmarkResult, error) {
-	detail, err := evalSvc.Evaluation(ctx, datasetID, "", "", "")
+	return runBenchmarkWithModels(ctx, evalSvc, resultSvc, datasetID, "", "", timeout, poll)
+}
+
+func runBenchmarkWithModels(
+	ctx context.Context,
+	evalSvc interfaces.EvaluationService,
+	resultSvc interfaces.BenchmarkResultService,
+	datasetID, chatModelID, rerankModelID string,
+	timeout, poll time.Duration,
+) (*types.BenchmarkResult, error) {
+	detail, err := evalSvc.Evaluation(ctx, datasetID, "", chatModelID, rerankModelID)
 	if err != nil {
 		return nil, fmt.Errorf("start benchmark evaluation: %w", err)
 	}

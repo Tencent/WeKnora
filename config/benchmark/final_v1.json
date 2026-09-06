@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "benchmark_id": "benchmark_v1",
+  "benchmark_version": "v1.1",
+  "dataset": {
+    "semantic_sha256": "56fd363d797ee4c1524a5a1a2517b3b30ce955229c37784cf730c0d1dc47fd0d",
+    "corpus": 32,
+    "questions": 15,
+    "qrels": 15,
+    "answers": 15
+  },
+  "models": {
+    "embedding": {
+      "name": "text-embedding-v4",
+      "type": "Embedding",
+      "source": "remote",
+      "provider": "generic",
+      "dimension": 1024
+    },
+    "chat": {
+      "name": "deepseek-v4-pro",
+      "type": "KnowledgeQA",
+      "source": "remote",
+      "provider": "generic"
+    },
+    "rerank": {
+      "name": "qwen3-rerank",
+      "type": "Rerank",
+      "source": "remote",
+      "provider": "aliyun"
+    }
+  },
+  "runtime": {
+    "worker_limit": 27,
+    "cache_mode": "off",
+    "retrieval": {
+      "vector_threshold": 0.2,
+      "keyword_threshold": 0.3,
+      "embedding_top_k": 30,
+      "rerank_top_k": 30,
+      "rerank_threshold": 0.3,
+      "retrieve_driver": "postgres"
+    },
+    "generation": {
+      "max_rounds": 5,
+      "max_input_chars": 16384,
+      "max_tokens": 0,
+      "repeat_penalty": 1.0,
+      "top_k": 0,
+      "top_p": 0,
+      "frequency_penalty": 0,
+      "presence_penalty": 0,
+      "temperature": 0.3,
+      "seed": 0,
+      "max_completion_tokens": 2048
+    }
+  }
+}
