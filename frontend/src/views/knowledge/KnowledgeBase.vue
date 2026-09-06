@@ -32,7 +32,6 @@ import {
   reparseKnowledge,
   cancelKnowledgeParse,
   batchDeleteKnowledge,
-  batchReparseKnowledge,
   getKnowledgeSpans,
   getKnowledgeDetails,
   listKnowledgeFolders,
@@ -491,6 +490,11 @@ const awaitBatchReparseReflection = async (ids: string[]) => {
     applyOptimisticBatchReparse(Array.from(pendingReparseAck.value));
     await new Promise<void>((r) => setTimeout(r, delayMs));
   }
+  // Docs that finished between polls were never seen in-flight; refresh once
+  // more so the server's terminal status replaces the optimistic one.
+  if (pendingReparseAck.value.size > 0) {
+    await loadKnowledgeFiles(kbId.value);
+  }
   pendingReparseAck.value.clear();
 };
 
@@ -509,18 +513,64 @@ const confirmBatchReparse = async () => {
   if (skipped > 0) {
     MessagePlugin.warning(t('knowledgeBase.batchReparseSkippedInFlight', { count: skipped }));
   }
+
+  if (ids.length === 1) {
+    const idx = cardList.value.findIndex((c) => c.id === ids[0]);
+    const item = cardList.value[idx];
+    if (item && await confirmRebuildKnowledge(idx, item)) {
+      clearSelection();
+      batchMode.value = false;
+    }
+    return;
+  }
+
+  let processConfigs: Record<string, KnowledgeProcessOverrides> | undefined;
+  if (kbInfo.value) {
+    const docs = ids.map((id) => {
+      const item = cardList.value.find((c) => c.id === id);
+      return {
+        knowledgeId: id,
+        fileName: item?.file_name || item?.title || '',
+        fileType: item?.file_type || '',
+        processOverrides: (item?.metadata?.process_overrides ?? null) as KnowledgeProcessOverrides | null,
+      };
+    });
+    try {
+      const result = await uploadConfirmStore.open({
+        mode: 'reparse',
+        kbInfo: kbInfo.value,
+        reparse: { knowledgeId: '', docs },
+      });
+      processConfigs = result.reparse?.processConfigs;
+    } catch {
+      return;
+    }
+  }
+
   batchReparsing.value = true;
   try {
-    const res: any = await batchReparseKnowledge(kbId.value, ids);
-    if (res?.success) {
-      MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: ids.length }));
-      applyOptimisticBatchReparse(ids);
+    const rebuildIds = processConfigs ? Object.keys(processConfigs) : ids;
+    if (rebuildIds.length === 0) return;
+    const CHUNK_SIZE = 10;
+    const okIds: string[] = [];
+    let failedCount = 0;
+    for (let i = 0; i < rebuildIds.length; i += CHUNK_SIZE) {
+      const chunk = rebuildIds.slice(i, i + CHUNK_SIZE);
+      const results = await Promise.allSettled(chunk.map((id) =>
+        reparseKnowledge(id, processConfigs ? { process_config: processConfigs[id] } : undefined),
+      ));
+      results.forEach((r, j) => (r.status === 'fulfilled' ? okIds.push(chunk[j]) : failedCount++));
+    }
+    if (okIds.length > 0) {
+      MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: okIds.length }));
+      applyOptimisticBatchReparse(okIds);
       clearSelection();
       batchMode.value = false;
       scheduleWikiStatusProbes();
-      void awaitBatchReparseReflection(ids);
-    } else {
-      MessagePlugin.error(res?.message || t('knowledgeBase.batchReparseFailed'));
+      void awaitBatchReparseReflection(okIds);
+    }
+    if (failedCount > 0) {
+      MessagePlugin.error(t('knowledgeBase.batchReparseFailed'));
     }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('knowledgeBase.batchReparseFailed'));
@@ -1911,8 +1961,7 @@ const confirmRebuildKnowledge = async (index: number, item: KnowledgeCard) => {
   // No KB context to seed the dialog defaults — fall back to a direct reparse
   // that reuses the overrides stored at upload time.
   if (!kbInfo.value) {
-    await submitReparse(item.id);
-    return;
+    return submitReparse(item.id);
   }
 
   // Prefill the confirm dialog with the overrides this doc was last parsed with.
@@ -1937,7 +1986,7 @@ const confirmRebuildKnowledge = async (index: number, item: KnowledgeCard) => {
       reparse: { knowledgeId: item.id, fileName, fileType, processOverrides },
     });
     if (result.mode === 'reparse' && result.reparse) {
-      await submitReparse(result.reparse.knowledgeId, result.processConfig);
+      return submitReparse(result.reparse.knowledgeId, result.processConfig);
     }
   } catch {
     // cancelled
@@ -1953,8 +2002,10 @@ const submitReparse = async (id: string, processConfig?: KnowledgeProcessOverrid
     resetPage();
     loadKnowledgeFiles(kbId.value);
     scheduleWikiStatusProbes();
+    return true;
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('knowledgeBase.rebuildFailed'));
+    return false;
   }
 };
 
