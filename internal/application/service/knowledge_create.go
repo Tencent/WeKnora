@@ -197,6 +197,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		}
 		return nil, err
 	}
+	s.emitKnowledgeCreated(ctx, knowledge)
 	// Set tag relations
 	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
 		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
@@ -396,6 +397,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
 		return nil, err
 	}
+	s.emitKnowledgeCreated(ctx, knowledge)
 	// Set tag relations
 	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
 		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
@@ -639,6 +641,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
 		return nil, err
 	}
+	s.emitKnowledgeCreated(ctx, knowledge)
 	// Set tag relations
 	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
 		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
@@ -810,6 +813,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		logger.Errorf(ctx, "Failed to create manual knowledge record: %v", err)
 		return nil, err
 	}
+	s.emitKnowledgeCreated(ctx, knowledge)
 	// Set tag relations
 	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, payload.TagIDs); err != nil {
 		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
@@ -908,6 +912,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
 		return nil, err
 	}
+	s.emitKnowledgeCreated(ctx, knowledge)
 	// Process passages
 	if syncMode {
 		logger.Info(ctx, "Processing passage synchronously")

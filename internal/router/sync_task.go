@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -131,6 +132,8 @@ type SyncTaskParams struct {
 	WikiIngest           interfaces.TaskHandler `name:"wikiIngest"`
 	TemporaryDocument    interfaces.TemporaryDocumentService
 	MemoryService        interfaces.MemoryService
+	WebhookDeliverer     interfaces.WebhookDeliverer  `optional:"true"`
+	WebhookDispatcher    interfaces.WebhookDispatcher `optional:"true"`
 }
 
 // RegisterSyncHandlers registers all task handlers on the SyncTaskExecutor.
@@ -157,5 +160,14 @@ func RegisterSyncHandlers(params SyncTaskParams) {
 	params.Executor.RegisterHandler(types.TypeWikiIngest, params.WikiIngest.Handle)
 	params.Executor.RegisterHandler(types.TypeWikiFinalize, params.WikiIngest.Handle)
 	params.Executor.RegisterHandler(types.TypeMemoryExtract, params.MemoryService.Handle)
+	if params.WebhookDeliverer != nil {
+		params.Executor.RegisterHandler(types.TypeWebhookDeliver, func(ctx context.Context, t *asynq.Task) error {
+			var payload types.WebhookDeliverPayload
+			if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+				return err
+			}
+			return params.WebhookDeliverer.Deliver(ctx, payload)
+		})
+	}
 	logger.Infof(context.Background(), "[SyncTask] All task handlers registered (Lite mode, no Redis)")
 }

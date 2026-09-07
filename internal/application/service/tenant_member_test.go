@@ -253,11 +253,11 @@ var _ interfaces.TenantMemberRepository = (*fakeTenantMemberRepo)(nil)
 
 func newServiceWithRepo() (interfaces.TenantMemberService, *fakeTenantMemberRepo) {
 	r := newFakeRepo()
-	// Audit / user / token dependencies are intentionally nil — these
+	// Audit / user / token / events dependencies are intentionally nil — these
 	// tests pre-date PR 6 and exercise membership invariants only. The
 	// service's audit and RemoveMember-cleanup hooks are nil-safe, so
 	// passing nil keeps existing coverage intact without forcing stubs.
-	return NewTenantMemberService(r, nil, nil, nil), r
+	return NewTenantMemberService(r, nil, nil, nil, nil), r
 }
 
 // cleanupUserRepo is a minimal UserRepository used to assert that
@@ -338,7 +338,7 @@ func TestTenantMemberService_RemoveMember_ClearsStaleHomeAndRevokesTokens(t *tes
 		},
 	}}
 	tokenRepo := &cleanupTokenRepo{}
-	svc := NewTenantMemberService(memberRepo, nil, userRepo, tokenRepo)
+	svc := NewTenantMemberService(memberRepo, nil, userRepo, tokenRepo, nil)
 	ctx := context.Background()
 
 	if _, err := svc.EnsureOwner(ctx, "owner", 7); err != nil {
@@ -375,7 +375,7 @@ func TestTenantMemberService_RemoveMember_RevokesTokensEvenWhenHomeUnchanged(t *
 		"contrib": {ID: "contrib", TenantID: 1},
 	}}
 	tokenRepo := &cleanupTokenRepo{}
-	svc := NewTenantMemberService(memberRepo, nil, userRepo, tokenRepo)
+	svc := NewTenantMemberService(memberRepo, nil, userRepo, tokenRepo, nil)
 	ctx := context.Background()
 
 	if _, err := svc.EnsureOwner(ctx, "owner", 7); err != nil {

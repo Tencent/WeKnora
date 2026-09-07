@@ -96,3 +96,4 @@ IM 平台不可能带 WeKnora 的凭证，所以必须给它一个**公网可访
 - [API 总览](../04-api/01-api-overview.md)：`resource_urls` 的完整语义
 - [配置详解](../01-getting-started/04-configuration.md)：上述环境变量
 - [Web 前端](../05-clients/01-frontend.md)：nginx 的 `/files` 与 `/r/` 代理
+- [工作空间知识事件回调](22-workspace-webhooks.md)：票面 `GET /api/v1/files/knowledge-download/:id`

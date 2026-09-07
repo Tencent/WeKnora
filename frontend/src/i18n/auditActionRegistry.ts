@@ -27,6 +27,9 @@ export const TENANT_MEMBER_AUDIT_ACTIONS = [
   'rbac.invitation_declined',
   'rbac.invitation_revoked',
   'rbac.invitation_expired',
+  'webhook.endpoint_created',
+  'webhook.endpoint_updated',
+  'webhook.endpoint_deleted',
 ] as const
 
 /** Platform control-plane audit events (system settings → audit tab). */

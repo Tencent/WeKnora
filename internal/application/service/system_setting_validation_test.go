@@ -17,6 +17,8 @@ func TestValidateWorkerConcurrencyMinimums(t *testing.T) {
 		{name: "shared minimum", key: "asynq.shared_concurrency", value: 1},
 		{name: "wiki zero", key: "asynq.wiki_concurrency", value: 0, wantErr: true},
 		{name: "wiki minimum", key: "asynq.wiki_concurrency", value: 1},
+		{name: "webhook zero", key: "asynq.webhook_concurrency", value: 0, wantErr: true},
+		{name: "webhook minimum", key: "asynq.webhook_concurrency", value: 1},
 	}
 
 	for _, tt := range tests {

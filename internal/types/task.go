@@ -10,6 +10,7 @@ const (
 	WorkerPoolMaintenance = "maintenance"
 	WorkerPoolShared      = "shared"
 	WorkerPoolWiki        = "wiki"
+	WorkerPoolWebhook     = "webhook"
 
 	// Upstream defaults are explicit guarantees plus an elastic pool. The
 	// shared pool may consume core and enrichment queues, so idle capacity in
@@ -20,6 +21,7 @@ const (
 	DefaultMaintenanceWorkerConcurrency = 4
 	DefaultSharedWorkerConcurrency      = 6
 	DefaultWikiWorkerConcurrency        = 8
+	DefaultWebhookWorkerConcurrency     = 4
 	DefaultUpstreamWorkerConcurrency    = DefaultCoreWorkerConcurrency +
 		DefaultPostProcessWorkerConcurrency + DefaultEnrichmentWorkerConcurrency +
 		DefaultMaintenanceWorkerConcurrency + DefaultSharedWorkerConcurrency
@@ -45,7 +47,8 @@ const (
 	// QueueMemory carries debounced long-term memory distillation. It sits in
 	// the enrichment pool because it is a background LLM call whose latency
 	// nobody is waiting on.
-	QueueMemory = "memory"
+	QueueMemory  = "memory"
+	QueueWebhook = "webhook"
 )
 
 // QueueDefinition is the single source of truth for queue topology. Worker
@@ -85,6 +88,9 @@ var queueDefinitions = []QueueDefinition{
 		TypeKnowledgeListDelete, TypeKnowledgeListReparse, TypeKnowledgeMove,
 	}},
 	{Name: QueueWiki, Pool: WorkerPoolWiki, Weight: 1, TaskTypes: []string{TypeWikiIngest, TypeWikiFinalize}},
+	{Name: QueueWebhook, Pool: WorkerPoolWebhook, Weight: 1, TaskTypes: []string{
+		TypeWebhookDeliver, TypeWebhookOutboxSweep, TypeWebhookDeliveryPrune,
+	}},
 }
 
 // QueueDefinitions returns a copy so callers cannot mutate global topology.
@@ -146,6 +152,7 @@ type WorkerPoolConcurrency struct {
 	Maintenance int
 	Shared      int
 	Wiki        int
+	Webhook     int
 }
 
 func DefaultWorkerPoolConcurrency() WorkerPoolConcurrency {
@@ -156,6 +163,7 @@ func DefaultWorkerPoolConcurrency() WorkerPoolConcurrency {
 		Maintenance: DefaultMaintenanceWorkerConcurrency,
 		Shared:      DefaultSharedWorkerConcurrency,
 		Wiki:        DefaultWikiWorkerConcurrency,
+		Webhook:     DefaultWebhookWorkerConcurrency,
 	}
 }
 
@@ -181,6 +189,7 @@ func ResolveWorkerPoolConcurrency(read func(key, env string, fallback int) int) 
 	allocation.Maintenance = positive("asynq.maintenance_concurrency", "WEKNORA_ASYNQ_MAINTENANCE_CONCURRENCY", allocation.Maintenance)
 	allocation.Shared = positive("asynq.shared_concurrency", "WEKNORA_ASYNQ_SHARED_CONCURRENCY", allocation.Shared)
 	allocation.Wiki = positive("asynq.wiki_concurrency", "WEKNORA_WIKI_ASYNQ_CONCURRENCY", allocation.Wiki)
+	allocation.Webhook = positive("asynq.webhook_concurrency", "WEKNORA_ASYNQ_WEBHOOK_CONCURRENCY", allocation.Webhook)
 	return allocation
 }
 
@@ -253,7 +262,10 @@ const (
 	TypeWikiFinalize             = "wiki:finalize"              // Wiki KB 级收尾任务（防抖：索引重建/死链清理/交叉链接）
 	TypeTemporaryDocumentProcess = "temporary_document:process" // 会话临时文档解析任务
 	// TypeMemoryExtract 长期记忆抽取任务（会话轮次防抖后异步执行）
-	TypeMemoryExtract = "memory:extract"
+	TypeMemoryExtract        = "memory:extract"
+	TypeWebhookDeliver       = "webhook:deliver"
+	TypeWebhookOutboxSweep   = "webhook:outbox-sweep"
+	TypeWebhookDeliveryPrune = "webhook:delivery-prune"
 )
 
 // MemoryExtractPayload carries everything the background distillation task

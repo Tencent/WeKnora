@@ -99,6 +99,7 @@ npm run preview  # 预览构建产物
 | [存储后端](03-features/19-storage-backends.md) | 多实例注册、空间默认与按库绑定、连通性测试、legacy 别名迁移 |
 | [平台管理与系统管理员](03-features/20-platform-admin.md) | 平台级身份与空间 Owner 的边界、首个管理员引导、控制台四分区、运行时系统设置 |
 | [图片与文件的对外访问](03-features/21-file-access.md) | 四种 URL 形式、各渠道怎么取、IM/API 图片不显示的排查表 |
+| [工作空间知识事件回调](03-features/22-workspace-webhooks.md) | 归属空间的知识/库/成员出站 Webhook、HMAC、下载票 |
 
 ### 04 API 参考
 

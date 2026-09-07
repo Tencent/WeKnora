@@ -76,6 +76,7 @@ const RUNTIME_WORKER_POOL_NAMES = [
   'maintenance',
   'shared',
   'wiki',
+  'webhook',
 ] as const
 
 const RUNTIME_QUEUE_NAMES = [
@@ -89,6 +90,7 @@ const RUNTIME_QUEUE_NAMES = [
   'graph',
   'question',
   'wiki',
+  'webhook',
 ] as const
 
 const RUNTIME_TASK_TYPE_KEYS = [
@@ -111,6 +113,9 @@ const RUNTIME_TASK_TYPE_KEYS = [
   'kbDelete',
   'wikiIngest',
   'wikiFinalize',
+  'webhookDeliver',
+  'webhookOutboxSweep',
+  'webhookDeliveryPrune',
 ] as const
 
 test('registered audit action labels exist as flat keys in every locale', () => {

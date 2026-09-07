@@ -198,7 +198,7 @@ X-Accel-Buffering: no
 - **限定知识库的 API Key 用 `public` 会返回 403**：这类 Key 本身就被禁止访问 `/files` 代理，能拿到匿名直链等于绕过同一道限制；
 - **同一文件的直链在有效期内复用**，重复请求不会反复签发凭证，客户端与 CDN 缓存因此能命中。
 
-各渠道（Web / IM / 嵌入挂件 / API）分别拿到哪种形式、以及图片加载不出来时怎么排查，见[图片与文件的对外访问](../03-features/21-file-access.md)。
+各渠道（Web / IM / 嵌入挂件 / API）分别拿到哪种形式、以及图片加载不出来时怎么排查，见[图片与文件的对外访问](../03-features/21-file-access.md)。工作空间事件回调里的源文件走独立票面 `GET /api/v1/files/knowledge-download/:id`（`X-WeKnora-Download-Ticket`），不要和下面的登录态 `GET /knowledge/:id/download` 混用，见[工作空间知识事件回调](../03-features/22-workspace-webhooks.md)。
 
 ## 限流说明
 

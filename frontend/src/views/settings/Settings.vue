@@ -79,7 +79,7 @@
             <!-- 右侧内容区域 -->
             <div class="settings-content">
               <div class="content-wrapper" :class="{
-                'content-wrapper--wide': currentSection === 'members',
+                'content-wrapper--wide': currentSection === 'members' || currentSection === 'event-webhooks',
                 'content-wrapper--full': SYSTEM_ADMIN_SECTIONS.has(currentSection) || isIntegrationSection(currentSection),
               }">
                 <!-- 角色不允许访问当前 section（deep-link 进来 / 跨空间切换后角色降级）—— 优先于具体 section 渲染。
@@ -202,6 +202,10 @@
                     <TenantMembers />
                   </div>
 
+                  <div v-if="currentSection === 'event-webhooks'" class="section">
+                    <EventWebhookSettings />
+                  </div>
+
                   <!-- 发布集成 -->
                   <div v-if="isIntegrationSection(currentSection)" class="section">
                     <IntegrationSettingsSection :tab="integrationTabFromSection(currentSection)" />
@@ -249,6 +253,7 @@ import SandboxSettings from './SandboxSettings.vue'
 import SkillSettings from './SkillSettings.vue'
 import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
 import TenantMembers from './TenantMembers.vue'
+import EventWebhookSettings from './EventWebhookSettings.vue'
 import SystemSettings from '@/views/system/SystemSettings.vue'
 import RuntimeQueues from '@/views/system/RuntimeQueues.vue'
 import PlatformAPIKeys from '@/views/system/PlatformAPIKeys.vue'
@@ -390,6 +395,7 @@ const navItems = computed(() => {
     { key: 'envvars', icon: 'key', label: t('envVarSettings.title') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
+    { key: 'event-webhooks', icon: 'link', label: t('settings.eventWebhooks.nav') },
     ...integrationItems,
   ]
   // currentTenantRole 为空表示「membership 还没加载」—— 比起渲染整套
@@ -417,7 +423,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'workspace',
       label: t('settings.navGroups.workspace'),
-      items: pickItems(['tenant', 'members', 'chathistory', 'memory']),
+      items: pickItems(['tenant', 'members', 'event-webhooks', 'chathistory', 'memory']),
     },
     {
       key: 'models_runtime',
