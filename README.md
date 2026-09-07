@@ -201,6 +201,10 @@ The [WeKnora Mini Program](./miniprogram/README.md) provides a lightweight mobil
 - **`weknora_ask`** — WeKnora's own composed answer with citations, over the RAG or the ReAct pipeline
 - **`weknora_list_knowledge_bases`** — knowledge base names and ids, so the agent can scope its own search
 
+## 📦 opencode Plugin
+
+[**`@wxg-prc-cpg/opencode-weknora`**](https://www.npmjs.com/package/@wxg-prc-cpg/opencode-weknora) is the official [opencode](https://opencode.ai) plugin ([docs](./packages/opencode-weknora/README.md)), ported from dsh-weknora with the same four read-only tools. opencode's own tools read the workspace and the internet; this one adds your knowledge bases: put `"plugin": [["@wxg-prc-cpg/opencode-weknora", { "baseUrl": "https://weknora.example.com", "apiKey": "sk-..." }]]` in `opencode.json`, and the agent can search passages, read whole documents and ask cited questions over your deployment.
+
 ## ⌨️ Command-Line Interface
 
 `weknora` is the official CLI for driving the API from a terminal or an AI

@@ -193,6 +193,9 @@ Feishu、GitLab、Tencent IMA、Notion、Yuqueなどの外部プラットフォ�
 - **`weknora_ask`** — WeKnora 自身が引用付きで作成した回答（RAG または ReAct パイプライン）
 - **`weknora_list_knowledge_bases`** — ナレッジベースの名前と id。エージェントが自分で検索範囲を絞れる
 
+## 📦 opencode プラグイン
+
+[**`@wxg-prc-cpg/opencode-weknora`**](https://www.npmjs.com/package/@wxg-prc-cpg/opencode-weknora) は公式の [opencode](https://opencode.ai) プラグインです（[ドキュメント](./packages/opencode-weknora/README.md)）。dsh-weknora から移植した同じ 4 つの読み取り専用ツールを提供します。opencode 自体のツールはワークスペースとインターネットのみを読みますが、このプラグインはナレッジベースを追加します。`opencode.json` に `"plugin": [["@wxg-prc-cpg/opencode-weknora", { "baseUrl": "https://weknora.example.com", "apiKey": "sk-..." }]]` を追加すると、エージェントがデプロイ先に対して段落検索・全文読み取り・引用付き質問応答を行えるようになります。
 
 ## 🚀 クイックスタート
 

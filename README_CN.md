@@ -201,6 +201,10 @@
 - **`weknora_ask`** — WeKnora 自己带引用的成稿答案，走 RAG 或 ReAct 流水线
 - **`weknora_list_knowledge_bases`** — 知识库名称与 id，便于 Agent 自己缩小检索范围
 
+## 📦 opencode 插件
+
+[**`@wxg-prc-cpg/opencode-weknora`**](https://www.npmjs.com/package/@wxg-prc-cpg/opencode-weknora) 是官方的 [opencode](https://opencode.ai) 插件（[说明](./packages/opencode-weknora/README_CN.md)），从 dsh-weknora 移植而来，提供同样的四个只读工具。opencode 自身的工具只读工作区和互联网，这个插件补上你的知识库：在 `opencode.json` 中加入 `"plugin": [["@wxg-prc-cpg/opencode-weknora", { "baseUrl": "https://weknora.example.com", "apiKey": "sk-..." }]]`，Agent 就能对你的部署做段落检索、整篇阅读和带引用的问答。
+
 ## 🚀 快速开始
 
 ### 🛠 环境要求
