@@ -280,6 +280,14 @@ func compactToolMessage(msg chat.Message, maxTokens int, estimator *agenttoken.E
 	runes := []rune(msg.Content)
 	base := msg
 	base.Content = compactedToolResultMarker(msg.Content)
+	if msg.Name == agenttools.ToolDiscoverMCPTools {
+		// Catalog cursors and parameter schemas are structured protocol data.
+		// A head/tail preview can silently remove required fields or constraints.
+		base.Content = "[MCP directory result omitted to fit the context budget. Use smaller list pages. If " +
+			"a single describe result cannot fit, report that limitation; do not invoke a tool " +
+			"using a partial schema.]"
+		return base
+	}
 	if len(runes) == 0 || estimator.EstimateMessage(&base) >= maxTokens {
 		return base
 	}
@@ -563,6 +571,20 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 		if svc == nil {
 			continue
 		}
+		if svc.Discoverable {
+			lines = append(
+				lines,
+				fmt.Sprintf(
+					"Use discover_mcp_tools(mode=\"list_tools\", server_id=%q) for the selected MCP service "+
+						"@%s. Describe the required tools and call them through call_mcp_tool before "+
+						"answering; report connection or authentication failures if the service is "+
+						"unavailable.",
+					sanitizeMustUseField(svc.ID),
+					sanitizeMustUseField(svc.Name),
+				),
+			)
+			continue
+		}
 		prefix := mcpToolNamePrefix(svc)
 		if prefix == "" {
 			continue
@@ -719,7 +741,7 @@ func listToolNames(ts []chat.Tool) []string {
 
 // buildToolsForLLM builds the tools list for LLM function calling
 func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
-	functionDefs := e.toolRegistry.GetFunctionDefinitions()
+	functionDefs := e.toolRegistry.GetModelFunctionDefinitions()
 	tools := make([]chat.Tool, 0, len(functionDefs))
 	for _, def := range functionDefs {
 		tools = append(tools, chat.Tool{

@@ -445,3 +445,21 @@ func mustNotResolve(t *testing.T, table *HandleTable, handle string) string {
 	require.False(t, ok)
 	return value
 }
+
+func TestMCPBridgeKeepsExternalSchemasAndArgumentsOpaque(t *testing.T) {
+	registry := NewRegistry(true)
+	for _, name := range []string{"discover_mcp_tools", "call_mcp_tool"} {
+		require.True(t, HasToolPolicy(name))
+		raw := `{"arguments":{"knowledge_id":"d1","issue_id":"i1","url":"w1"},"tool_ref":"mcpt_abc"}`
+		calls := []types.LLMToolCall{{Function: types.FunctionCall{Name: name, Arguments: raw}}}
+		registry.DecodeToolCalls(calls)
+		require.JSONEq(t, raw, calls[0].Function.Arguments)
+		require.Empty(t, calls[0].UnresolvedHandles)
+		schema := `{"input_schema":{"properties":{"knowledge_id":{"const":"d1"}}}}`
+		require.Equal(
+			t,
+			schema,
+			registry.ModelToolResultForTool(name, &types.ToolResult{Success: true, Output: schema}),
+		)
+	}
+}

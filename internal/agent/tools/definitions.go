@@ -6,6 +6,9 @@ const maxFunctionNameLength = 64
 
 // Tool names constants
 const (
+	// Capability-scoped MCP discovery and invocation; not tenant-selectable builtins.
+	ToolDiscoverMCPTools    = "discover_mcp_tools"
+	ToolCallMCPTool         = "call_mcp_tool"
 	ToolThinking            = "thinking"
 	ToolTodoWrite           = "todo_write"
 	ToolGrepChunks          = "grep_chunks"
