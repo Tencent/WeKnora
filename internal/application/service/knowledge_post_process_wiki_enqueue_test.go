@@ -110,6 +110,30 @@ func (r *wikiEnqueueFailurePendingRepo) SeedKnowledgeFinalizingWithPendingOp(
 	return true, nil
 }
 
+type wikiEnqueueFailureChunkRepo struct {
+	interfaces.ChunkRepository
+	chunks []*types.Chunk
+}
+
+func (r *wikiEnqueueFailureChunkRepo) ListChunksByKnowledgeIDAndTypes(
+	_ context.Context,
+	_ uint64,
+	_ string,
+	chunkTypes []types.ChunkType,
+) ([]*types.Chunk, error) {
+	allowed := make(map[types.ChunkType]struct{}, len(chunkTypes))
+	for _, ct := range chunkTypes {
+		allowed[ct] = struct{}{}
+	}
+	var out []*types.Chunk
+	for _, c := range r.chunks {
+		if _, ok := allowed[c.ChunkType]; ok {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
 func newWikiEnqueueTestService(
 	knowledgeID string,
 	pendingRepo *wikiEnqueueFailurePendingRepo,
@@ -132,6 +156,9 @@ func newWikiEnqueueTestService(
 		}},
 		chunkService: &wikiEnqueueFailureChunkService{chunks: []*types.Chunk{
 			{ID: "chunk-1", ChunkType: types.ChunkTypeText},
+		}},
+		chunkRepo: &wikiEnqueueFailureChunkRepo{chunks: []*types.Chunk{
+			{ID: "chunk-1", ChunkType: types.ChunkTypeText, Content: "plain text"},
 		}},
 		taskEnqueuer: queue,
 		pendingRepo:  pendingRepo,

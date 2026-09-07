@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -22,6 +24,7 @@ type KnowledgePostProcessService struct {
 	knowledgeRepo interfaces.KnowledgeRepository
 	kbService     interfaces.KnowledgeBaseService
 	chunkService  interfaces.ChunkService
+	chunkRepo     interfaces.ChunkRepository
 	taskEnqueuer  interfaces.TaskEnqueuer
 	pendingRepo   interfaces.TaskPendingOpsRepository
 	redisClient   *redis.Client
@@ -32,6 +35,7 @@ func NewKnowledgePostProcessService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	kbService interfaces.KnowledgeBaseService,
 	chunkService interfaces.ChunkService,
+	chunkRepo interfaces.ChunkRepository,
 	taskEnqueuer interfaces.TaskEnqueuer,
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
@@ -41,6 +45,7 @@ func NewKnowledgePostProcessService(
 		knowledgeRepo: knowledgeRepo,
 		kbService:     kbService,
 		chunkService:  chunkService,
+		chunkRepo:     chunkRepo,
 		taskEnqueuer:  taskEnqueuer,
 		pendingRepo:   pendingRepo,
 		redisClient:   redisClient,
@@ -144,8 +149,13 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	processOverrides, _ := knowledge.ProcessOverrides()
 	eff := ResolveProcessConfig(kb, processOverrides)
 
-	// 2. Fetch all chunks
-	chunks, err := s.chunkService.ListChunksByKnowledgeID(ctx, payload.KnowledgeID)
+	// 2. Fetch all text-like chunks. ListChunksByKnowledgeID is text-only by
+	//    design, which silently dropped the OCR / Caption chunks that
+	//    multimodal parsing adds for scanned PDFs — leaving graph extraction
+	//    with nothing but image-link placeholders. Ask the repository for the
+	//    exact chunk types we enrich instead.
+	chunks, err := s.chunkRepo.ListChunksByKnowledgeIDAndTypes(ctx, payload.TenantID, payload.KnowledgeID,
+		[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeImageOCR, types.ChunkTypeImageCaption})
 	if err != nil {
 		return fmt.Errorf("list chunks for knowledge %s: %w", payload.KnowledgeID, err)
 	}
@@ -156,6 +166,23 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		if c.ChunkType == types.ChunkTypeText || c.ChunkType == types.ChunkTypeImageOCR || c.ChunkType == types.ChunkTypeImageCaption {
 			textChunks = append(textChunks, c)
 		}
+	}
+
+	// Graph extraction targets the chunks that actually carry document text:
+	// plain text chunks and OCR transcriptions. Captions describe the page
+	// visually and largely duplicate the OCR text, so they only add cost and
+	// noise to the entity graph. Chunks that hold nothing but image links
+	// (the text layer of a scanned PDF) are skipped too — the LLM has nothing
+	// to extract from them and tends to echo the few-shot example instead.
+	var graphChunks []*types.Chunk
+	for _, c := range textChunks {
+		if c.ChunkType == types.ChunkTypeImageCaption {
+			continue
+		}
+		if !chunkHasExtractableText(c.Content) {
+			continue
+		}
+		graphChunks = append(graphChunks, c)
 	}
 
 	// 3. Compute the enrichment subtask count up front so we can flip to
@@ -208,7 +235,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 
 	graphChunkCount := 0
 	if eff.GraphEnabled {
-		graphChunkCount = len(textChunks)
+		graphChunkCount = len(graphChunks)
 	}
 	expectedSubtasks := 0
 	if willSpawnSummary {
@@ -380,8 +407,9 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	// 5. Spawn Graph RAG Tasks — only when graph indexing is enabled in IndexingStrategy
 	enqueuedGraphCount := 0
 	if graphChunkCount > 0 {
-		logger.Infof(ctx, "[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d text-like chunks", len(textChunks))
-		for i, chunk := range textChunks {
+		logger.Infof(ctx, "[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d text/OCR chunks (of %d text-like)",
+			len(graphChunks), len(textChunks))
+		for i, chunk := range graphChunks {
 			ok, err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.SummaryModelID,
 				payload.KnowledgeID, attempt, i)
 			if err != nil {
@@ -649,4 +677,17 @@ func (s *KnowledgePostProcessService) enqueueQuestionGenerationTasks(
 	logger.Infof(ctx, "[KnowledgePostProcess] Enqueued %d question generation batch tasks (%d chunks, batch_size=%d) for %s (count=%d)",
 		enqueued, total, questionGenChunkBatchSize, payload.KnowledgeID, questionCount)
 	return enqueued
+}
+
+// imageLinkPattern matches markdown image embeds such as
+// ![page_1.jpg](resource://abc). Scanned PDFs produce text chunks that consist
+// of nothing else.
+var imageLinkPattern = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
+
+// chunkHasExtractableText reports whether a chunk still contains prose once
+// markdown image links are removed, i.e. whether graph extraction can find
+// entities in it.
+func chunkHasExtractableText(content string) bool {
+	stripped := imageLinkPattern.ReplaceAllString(content, "")
+	return strings.TrimSpace(stripped) != ""
 }
