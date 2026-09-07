@@ -344,6 +344,7 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 | <img src="./docs/images/readme/icons/phone.svg" width="22" height="22" alt=""> | [**WeChat 미니 프로그램**](./miniprogram/README.md) | 경량 모바일 클라이언트. API 설정, 지식베이스 선택, URL 임포트, WeChat에서 지식 Q&A |
 | <img src="./docs/images/readme/icons/skills.svg" width="22" height="22" alt=""> | [**ClawHub Skill**](https://clawhub.ai/lyingbug/weknora) | ClawHub에 게시된 WeKnora 스킬. REST API로 문서 임포트, 하이브리드 검색, 지식 관리 |
 | <img src="./website-docs/homepage/public/docs/_home/brands/deepseek-color.svg" width="22" height="22" alt=""> | [**DeepSeek Harness 플러그인**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora) | `dsh` 코딩 에이전트에 읽기 전용 도구 4개(검색, 문서 읽기, 질문, 지식베이스 목록) 제공 |
+| <img src="./docs/images/readme/icons/code.svg" width="22" height="22" alt=""> | [**opencode 플러그인**](https://www.npmjs.com/package/@wxg-prc-cpg/opencode-weknora) | [opencode](https://opencode.ai) 코딩 에이전트에 동일한 읽기 전용 도구 4개(검색, 문서 읽기, 질문, 지식베이스 목록) 제공 |
 | <img src="./docs/images/readme/icons/code.svg" width="22" height="22" alt=""> | [**웹사이트 임베드 Widget**](https://weknora.weixin.qq.com/docs/03-features/13-embed-channel) | 에이전트를 외부 사이트에 게시 |
 | <img src="./docs/images/readme/icons/braces.svg" width="22" height="22" alt=""> | [**Go SDK**](https://weknora.weixin.qq.com/docs/05-clients/03-go-sdk) | 지식베이스·문서·세션 등의 CRUD와 SSE 스트리밍 Q&A |
 | <img src="./website-docs/homepage/public/docs/_home/brands/wechat-dialog.png" width="22" height="22" alt=""> | [**WeChat 대화 오픈 플랫폼**](https://chatbot.weixin.qq.com) | WeKnora 기반 호스팅 Q&A. 지식을 업로드하면 코드 없이 WeChat에 Q&A 서비스 게시 |

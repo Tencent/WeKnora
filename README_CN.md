@@ -334,6 +334,7 @@ docker compose up -d    # 用新镜像重建容器
 | <img src="./docs/images/readme/icons/phone.svg" width="22" height="22" alt=""> | [**微信小程序**](./miniprogram/README.md) | 轻量移动端：配置 WeKnora API、选择知识库、导入 URL，并在微信内向知识库提问 |
 | <img src="./docs/images/readme/icons/skills.svg" width="22" height="22" alt=""> | [**ClawHub Skill**](https://clawhub.ai/lyingbug/weknora) | 发布在 ClawHub 上的 WeKnora 技能，通过 REST API 导入文档、混合检索与管理知识条目 |
 | <img src="./website-docs/homepage/public/docs/_home/brands/deepseek-color.svg" width="22" height="22" alt=""> | [**DeepSeek Harness 插件**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora) | 为 `dsh` 编码 Agent 提供四个只读工具：检索、读取文档、提问、列出知识库 |
+| <img src="./docs/images/readme/icons/code.svg" width="22" height="22" alt=""> | [**opencode 插件**](https://www.npmjs.com/package/@wxg-prc-cpg/opencode-weknora) | 为 [opencode](https://opencode.ai) 编码 Agent 提供同样的四个只读工具：检索、读取文档、提问、列出知识库 |
 | <img src="./docs/images/readme/icons/code.svg" width="22" height="22" alt=""> | [**网站嵌入 Widget**](https://weknora.weixin.qq.com/docs/03-features/13-embed-channel) | 将智能体发布到外部站点 |
 | <img src="./docs/images/readme/icons/braces.svg" width="22" height="22" alt=""> | [**Go SDK**](https://weknora.weixin.qq.com/docs/05-clients/03-go-sdk) | 知识库、文档、会话等资源的 CRUD 与 SSE 流式问答 |
 | <img src="./website-docs/homepage/public/docs/_home/brands/wechat-dialog.png" width="22" height="22" alt=""> | [**微信对话开放平台**](https://chatbot.weixin.qq.com) | 基于 WeKnora 的托管问答平台，上传知识即可在微信内发布问答服务，无需写代码 |
