@@ -129,7 +129,7 @@ make package-mac-app  # 打 macOS .app（scripts/package-mac-app.sh）
 | --- | --- |
 | `docker-build-app` | 构建 `wechatopenai/weknora-app`（`docker/Dockerfile.app`，注入 `scripts/get_version.sh` 的版本信息） |
 | `docker-build-docreader` | 构建 `wechatopenai/weknora-docreader`（`docker/Dockerfile.docreader`） |
-| `docker-build-frontend` | 先 `scripts/build_frontend_dist.sh`，再构建 `wechatopenai/weknora-ui` |
+| `docker-build-frontend` | 多阶段构建 `wechatopenai/weknora-ui`（builder 内 `npm ci` + `npm run build`，无需宿主机预构建 dist） |
 | `docker-build-all` | 以上三个镜像 |
 | `docker-run` | 确保 `.env` 存在（缺失时从 `.env.example` 复制或 touch）后 `docker-compose up` |
 | `docker-stop` / `docker-restart` | `docker-compose down` / `stop -t 60` + `up` |

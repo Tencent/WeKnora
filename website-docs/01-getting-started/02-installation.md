@@ -131,7 +131,7 @@ make dev-logs / dev-status / dev-stop / dev-restart
 | `docker/Dockerfile.docreader` | `wechatopenai/weknora-docreader` | Python 3.10 + uv 依赖锁定；生成 protobuf；运行层安装 LibreOffice、OpenJDK 17、antiword、Playwright（webkit）与 `grpc_health_probe`。轻量版不含 PaddleOCR。`EXPOSE 50051`。支持 `APT_MIRROR` 构建参数 |
 | `docker/Dockerfile.odl-hybrid` | `weknora-odl-hybrid:local` | 安装 `opendataloader-pdf[hybrid]`（Docling），监听 5002，默认 `--no-ocr`；仅本地构建不发布 |
 | `docker/Dockerfile.sandbox` | `wechatopenai/weknora-sandbox` | Python 3.11-slim + Node 20 + jq，非 root 用户 `user`(UID 1000)，Agent Skills 的会话沙箱镜像 |
-| `frontend/Dockerfile` | `wechatopenai/weknora-ui` | 需先在宿主机执行 `./scripts/build_frontend_dist.sh` 产出 `dist/`；基底为按 digest 固定的 `nginx:1.30.3-alpine`（兼容 CentOS 7 旧内核） |
+| `frontend/Dockerfile` | `wechatopenai/weknora-ui` | 两阶段：`node:24-bookworm` 内 `npm ci` + `npm run build`（`VITE_IS_DOCKER` / `VITE_FRONTEND_COMMIT`），可选 `NPM_REGISTRY`；运行层为按 digest 固定的 `nginx:1.30.3-alpine`（兼容 CentOS 7 旧内核）。无需宿主机预构建 `dist/` |
 
 从源码构建全部镜像：
 
@@ -168,7 +168,7 @@ make docker-build-frontend
 | `scripts/dev.sh` | 开发环境编排（见上文），子命令 `start/stop/restart/logs/status/app/frontend` |
 | `scripts/check-env.sh` | 校验 `.env` 必填变量（DB_*、STORAGE_TYPE、REDIS_ADDR、OLLAMA_BASE_URL 等）与 Go/npm/Docker/Air 工具链 |
 | `scripts/build_images.sh` | 构建镜像并注入版本（git tag / commit / build time），支持跨架构 |
-| `scripts/build_frontend_dist.sh` | 构建前端静态产物 `frontend/dist`（frontend 镜像的前置步骤） |
+| `scripts/build_frontend_dist.sh` | 宿主机构建前端静态产物 `frontend/dist`（Lite / 桌面打包等非 Docker 场景；UI 镜像改由 Dockerfile 多阶段构建） |
 | `scripts/migrate.sh` | golang-migrate 封装 |
 | `scripts/docker-entrypoint.sh` | app 容器入口（属主修复 + 内置 Skills 合并 + docker.sock GID 补组 + gosu 降权） |
 | `scripts/package-lite.sh` / `package-mac-app.sh` | Lite tarball / macOS .app 打包 |

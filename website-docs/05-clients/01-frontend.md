@@ -293,8 +293,9 @@ RAG 流水线的可视化进度（`views/chat/components/RagPipelineProgress.vue
 
 `frontend/Dockerfile`：
 
-- 基础镜像固定为 digest 锁定的 `nginx:1.30.3-alpine`（注释明确禁止改回浮动 tag——更新的 Alpine 3.24+ 在 CentOS 7 旧内核上无法启动，曾导致 v0.7.0 故障）；
-- 静态产物需先在宿主机构建（`./scripts/build_frontend_dist.sh`），镜像只 `COPY dist`；
+- 两阶段构建：`node:24-bookworm` 执行 `npm ci` + `npm run build`（`VITE_IS_DOCKER=true`，`VITE_FRONTEND_COMMIT` 可经 build-arg 注入；可选 `NPM_REGISTRY`），再拷贝到运行层；
+- 运行层基础镜像固定为 digest 锁定的 `nginx:1.30.3-alpine`（注释明确禁止改回浮动 tag——更新的 Alpine 3.24+ 在 CentOS 7 旧内核上无法启动，曾导致 v0.7.0 故障）；
+- 无需在宿主机预构建 `dist/`（`scripts/build_frontend_dist.sh` 仍供 Lite / 桌面打包使用）；
 - `nginx.conf` 作为模板放入 `/etc/nginx/templates/default.conf.template`，暴露 80 端口，入口为 `docker-entrypoint.sh`。
 
 `frontend/docker-entrypoint.sh`（运行时配置注入）：

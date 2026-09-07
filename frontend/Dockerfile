@@ -1,6 +1,41 @@
-# Production image. Build static assets on the host first:
-#   ./scripts/build_frontend_dist.sh
+# Production image — two-stage build (no host-side npm required).
+# Mirrors scripts/build_frontend_dist.sh:
+#   npm ci + VITE_IS_DOCKER=true + VITE_FRONTEND_COMMIT
 #
+#   docker build --platform linux/amd64 \
+#     --build-arg VITE_FRONTEND_COMMIT=$(git rev-parse --short HEAD) \
+#     -t wechatopenai/weknora-ui:latest \
+#     frontend/
+#
+# Optional npm mirror (e.g. corporate registry):
+#   --build-arg NPM_REGISTRY=https://registry.npmmirror.com
+
+# ---------------------------------------------------------------------------
+# Stage 1: build static assets
+# ---------------------------------------------------------------------------
+FROM node:24-bookworm AS builder
+
+WORKDIR /frontend
+
+ARG VITE_FRONTEND_COMMIT=unknown
+ARG NPM_REGISTRY=
+
+ENV VITE_FRONTEND_COMMIT=${VITE_FRONTEND_COMMIT}
+ENV VITE_IS_DOCKER=true
+
+COPY package.json package-lock.json ./
+RUN if [ -n "$NPM_REGISTRY" ]; then \
+      npm ci --registry="$NPM_REGISTRY"; \
+    else \
+      npm ci; \
+    fi
+
+COPY . .
+RUN npm run build
+
+# ---------------------------------------------------------------------------
+# Stage 2: nginx runtime
+# ---------------------------------------------------------------------------
 # Base image pinned by digest for reproducibility. Do NOT switch back to the
 # floating `nginx:stable-alpine` tag: it drifts with every stable release and a
 # newer Alpine base (3.24+) fails to start on old hosts such as CentOS 7
@@ -8,7 +43,7 @@
 # nginx 1.30.3 / Alpine 3.23.5, the same base as the working v0.6.3 image.
 FROM nginx:1.30.3-alpine@sha256:0d3b80406a13a767339fbe2f41406d6c7da727ab89cf8fae399e81f780f814d1
 
-COPY dist /usr/share/nginx/html
+COPY --from=builder /frontend/dist /usr/share/nginx/html
 
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 
