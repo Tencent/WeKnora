@@ -798,11 +798,14 @@ onMounted(async () => {
       return
     }
 
-    // 3. 未登录：按注册模式决定界面。invite_only 停在登录页、登录后再兑换；self_serve 保持注册流程。
+    // 3. 未登录：按注册模式决定界面。持有有效共享链接 token 时仍进入
+    //    邀请注册模式（token 即授权，对应后端 /auth/register-by-invite，
+    //    它豁免 invite_only）；无 token 时 invite_only 停在登录页、登录后
+    //    再兑换，self_serve 则保持公开注册流程。
     const cfg = await getAuthConfig()
     const inviteOnly = cfg.registration_mode === 'invite_only'
     registrationEnabled.value = !inviteOnly
-    isRegisterMode.value = !inviteOnly
+    isRegisterMode.value = !inviteOnly || !!inviteLookup.value
     loadOIDCConfig()
     return
   }
