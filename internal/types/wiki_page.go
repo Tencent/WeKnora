@@ -63,6 +63,30 @@ func CleanWikiCategoryPath(parts []string) []string {
 	return cleaned
 }
 
+// TrimWikiFolderSegments keeps folder path segments verbatim, dropping only
+// blank entries. Folder names are validated on creation (no separators), and
+// the folder tree is the source of truth for a page's placement, so unlike
+// CleanWikiCategoryPath no page-type filtering, deduplication, or depth cap
+// applies: a user may legitimately name a folder "概念" or "Concepts".
+func TrimWikiFolderSegments(parts []string) []string {
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+// WikiFolderPathSegments splits a materialized folder path ("AI/RAG") into its
+// literal segments. An empty/blank path yields nil (the wiki root).
+func WikiFolderPathSegments(path string) []string {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	return TrimWikiFolderSegments(strings.Split(path, "/"))
+}
+
 // SplitWikiPageTypes parses a page_type value that may carry several
 // comma-separated types (e.g. "entity,concept") into a deduplicated slice,
 // dropping blanks. An empty/whitespace-only input yields nil ("no filter").

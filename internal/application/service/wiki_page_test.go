@@ -646,3 +646,63 @@ func TestFindPagesByNormalizedTitleMatchesWhitespace(t *testing.T) {
 	slugs := []string{batched[0].Slug, batched[1].Slug}
 	require.ElementsMatch(t, []string{"entity/confucius", "entity/mencius"}, slugs)
 }
+
+func TestNormalizeWikiHierarchyKeepsFolderBackedPathVerbatim(t *testing.T) {
+	page := &types.WikiPage{
+		Slug:         "concept/plan",
+		Title:        "将计就计",
+		PageType:     types.WikiPageTypeConcept,
+		FolderID:     "folder-concepts",
+		CategoryPath: types.StringArray{"概念", " 概念 ", "Concepts", ""},
+	}
+
+	normalizeWikiHierarchy(page)
+
+	want := types.StringArray{"概念", "概念", "Concepts"}
+	require.Equal(t, want, page.CategoryPath)
+	require.Equal(t, 3, page.Depth)
+	require.Equal(t, "concept/概念/概念/Concepts/将计就计", page.WikiPath)
+}
+
+func TestMovePageIntoTypeLabelNamedFolderKeepsHierarchy(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
+
+	ctx := context.Background()
+	repo := repository.NewWikiPageRepository(db)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil)
+	now := time.Now()
+
+	folder, err := svc.CreateFolder(ctx, "kb-move", 1, types.WikiFolderRootID, "概念")
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(ctx, &types.WikiPage{
+		ID: "page-plan", TenantID: 1, KnowledgeBaseID: "kb-move", Slug: "concept/plan",
+		Title: "将计就计", PageType: types.WikiPageTypeConcept, Status: types.WikiPageStatusPublished,
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	moved, err := svc.MovePage(ctx, "kb-move", "concept/plan", folder.ID)
+	require.NoError(t, err)
+	require.Equal(t, folder.ID, moved.FolderID)
+
+	stored, err := repo.GetBySlug(ctx, "kb-move", "concept/plan")
+	require.NoError(t, err)
+	require.Equal(t, folder.ID, stored.FolderID)
+	require.Equal(t, types.StringArray{"概念"}, stored.CategoryPath)
+	require.Equal(t, 1, stored.Depth)
+	require.Equal(t, "concept/概念/将计就计", stored.WikiPath)
+
+	// Reading the page back through ListPages must not strip the folder name
+	// either: the directory tree places pages by these fields.
+	folderID := folder.ID
+	listed, err := svc.ListPages(ctx, &types.WikiPageListRequest{
+		KnowledgeBaseID: "kb-move",
+		FolderID:        &folderID,
+	})
+	require.NoError(t, err)
+	require.Len(t, listed.Pages, 1)
+	require.Equal(t, types.StringArray{"概念"}, listed.Pages[0].CategoryPath)
+	require.Equal(t, 1, listed.Pages[0].Depth)
+	require.Equal(t, "concept/概念/将计就计", listed.Pages[0].WikiPath)
+}

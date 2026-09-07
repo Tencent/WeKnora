@@ -365,16 +365,18 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	// Directory filters are pushed to SQL so the DB does the counting and
 	// pagination instead of loading every page of the type into memory. `depth`
 	// is a cached column (= len(category_path)); `category_path` is a JSON column
-	// whose stored text is json.Marshal of the cleaned path, so we compare
-	// against the same encoding. Postgres needs an explicit jsonb cast for array
-	// equality; SQLite stores JSON as TEXT and compares directly.
+	// whose stored text is json.Marshal of the folder path segments, so we
+	// compare against the same encoding (literal segments, since the filter is a
+	// folder path and folder names are authoritative). Postgres needs an explicit
+	// jsonb cast for array equality; SQLite stores JSON as TEXT and compares
+	// directly.
 	if req.FolderID != nil {
 		query = query.Where("folder_id = ?", *req.FolderID)
 	}
 	if req.CategoryDepth != nil {
 		query = query.Where("depth = ?", *req.CategoryDepth)
 	}
-	if wantPath := types.CleanWikiCategoryPath(req.CategoryPath); len(wantPath) > 0 {
+	if wantPath := types.TrimWikiFolderSegments(req.CategoryPath); len(wantPath) > 0 {
 		if encoded, err := json.Marshal([]string(wantPath)); err == nil {
 			if r.db.Dialector != nil && r.db.Dialector.Name() == "postgres" {
 				query = query.Where("category_path::jsonb = ?::jsonb", string(encoded))
