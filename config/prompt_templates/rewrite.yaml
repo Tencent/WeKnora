@@ -187,7 +187,7 @@ templates:
         description: "문제가 완전하고 독립적인지 확인하기 위해 더 엄격한 재작성 요구 사항"
       ja-JP:
         name: "厳格なリライト"
-        description: "質問の完全性と独立性を確保するための、より厳格なリライト要件"
+        description: "質問の完全性と独立性をより厳密に確保するリライト要件"
     content: |
       You are a question rewriting expert. Rewrite the user's question into a complete, independent question.
 

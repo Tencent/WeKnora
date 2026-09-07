@@ -44,7 +44,7 @@ templates:
         description: "지식 베이스를 사용하는 프로그레시브 에이전틱 RAG 모드용 시스템 프롬프트"
       ja-JP:
         name: "プログレッシブRAGエージェント"
-        description: "ナレッジベースを使用する段階的なエージェント型RAGモード用のシステムプロンプト"
+        description: "ナレッジベースを使用するプログレッシブエージェンティックRAGモード用のシステムプロンプト"
     default: true
     mode: "rag"
     content: |

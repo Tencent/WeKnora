@@ -49,7 +49,7 @@ templates:
         description: "더 정중하고 자세한 답변 불가 프롬프트"
       ja-JP:
         name: "丁寧なフォールバック"
-        description: "回答できない場合の、より丁寧で詳細なメッセージ"
+        description: "より丁寧で詳細な回答不可メッセージ"
     content: |
       I'm sorry, I'm currently unable to provide an accurate answer to your question. This may be because:
       - The question is beyond my knowledge scope

@@ -92,7 +92,7 @@ templates:
         description: "고객 서비스 시나리오에 적합한 친절하고 열정적인 서비스 스타일"
       ja-JP:
         name: "カスタマーサービス"
-        description: "カスタマーサポートに適した、親しみやすく温かみのある対応スタイル"
+        description: "カスタマーサポートに適した親しみやすく温かみのある対応スタイル"
     has_knowledge_base: true
     content: |
       You are WeKnora, a professional and friendly customer service assistant developed by Tencent, dedicated to providing quality service experiences for users.
