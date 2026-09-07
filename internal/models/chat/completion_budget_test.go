@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -18,33 +19,44 @@ func TestChatOptionsCompletionBudget(t *testing.T) {
 }
 
 func TestWireCompletionTokenField(t *testing.T) {
-	legacy := []provider.ProviderName{
-		provider.ProviderDeepSeek,
-		provider.ProviderZhipu,
-		provider.ProviderSiliconFlow,
-		provider.ProviderMoonshot,
-		provider.ProviderNvidia,
-		provider.ProviderGeneric,
-		provider.ProviderGPUStack,
+	// Every AllProviders() name must be classified here so a new vendor cannot
+	// silently inherit the default. Match Pi's polarity: default
+	// max_completion_tokens; only documented max_tokens hosts (plus WeKnora
+	// self-hosted / LKEAP, which Pi does not catalog) are exceptions.
+	want := map[provider.ProviderName]completionTokenField{
+		provider.ProviderDeepSeek:     completionTokenFieldMaxTokens,
+		provider.ProviderZhipu:        completionTokenFieldMaxTokens,
+		provider.ProviderSiliconFlow:  completionTokenFieldMaxTokens,
+		provider.ProviderMoonshot:     completionTokenFieldMaxTokens,
+		provider.ProviderNvidia:       completionTokenFieldMaxTokens,
+		provider.ProviderGeneric:      completionTokenFieldMaxTokens,
+		provider.ProviderGPUStack:     completionTokenFieldMaxTokens,
+		provider.ProviderLKEAP:        completionTokenFieldMaxTokens,
+		provider.ProviderOpenAI:       completionTokenFieldMaxCompletionTokens,
+		provider.ProviderAzureOpenAI:  completionTokenFieldMaxCompletionTokens,
+		provider.ProviderVolcengine:   completionTokenFieldMaxCompletionTokens,
+		provider.ProviderAliyun:       completionTokenFieldMaxCompletionTokens,
+		provider.ProviderLiteLLM:      completionTokenFieldMaxCompletionTokens,
+		provider.ProviderGemini:       completionTokenFieldMaxCompletionTokens,
+		provider.ProviderWeKnoraCloud: completionTokenFieldMaxCompletionTokens,
+		provider.ProviderHunyuan:      completionTokenFieldMaxCompletionTokens,
+		provider.ProviderMiniMax:      completionTokenFieldMaxCompletionTokens,
+		provider.ProviderOpenRouter:   completionTokenFieldMaxCompletionTokens,
+		provider.ProviderRequesty:     completionTokenFieldMaxCompletionTokens,
+		provider.ProviderJina:         completionTokenFieldMaxCompletionTokens,
+		provider.ProviderMimo:         completionTokenFieldMaxCompletionTokens,
+		provider.ProviderModelScope:   completionTokenFieldMaxCompletionTokens,
+		provider.ProviderQianfan:      completionTokenFieldMaxCompletionTokens,
+		provider.ProviderQiniu:        completionTokenFieldMaxCompletionTokens,
+		provider.ProviderLongCat:      completionTokenFieldMaxCompletionTokens,
+		provider.ProviderNovita:       completionTokenFieldMaxCompletionTokens,
+		provider.ProviderAnthropic:    completionTokenFieldMaxCompletionTokens,
 	}
-	for _, name := range legacy {
-		assert.Equal(t, completionTokenFieldMaxTokens, wireCompletionTokenField(name, "any"), string(name))
-	}
-
-	modern := []provider.ProviderName{
-		provider.ProviderOpenAI,
-		provider.ProviderAzureOpenAI,
-		provider.ProviderVolcengine,
-		provider.ProviderAliyun, // DashScope documents max_completion_tokens for thinking models
-		provider.ProviderLiteLLM,
-		provider.ProviderGemini,
-		provider.ProviderWeKnoraCloud,
-		provider.ProviderLKEAP,
-		provider.ProviderHunyuan,
-		provider.ProviderMiniMax,
-	}
-	for _, name := range modern {
-		assert.Equal(t, completionTokenFieldMaxCompletionTokens, wireCompletionTokenField(name, "any"), string(name))
+	require.Len(t, want, len(provider.AllProviders()), "classify every AllProviders() name")
+	for _, name := range provider.AllProviders() {
+		field, ok := want[name]
+		require.True(t, ok, "classify %s in TestWireCompletionTokenField", name)
+		assert.Equal(t, field, wireCompletionTokenField(name, "any"), string(name))
 	}
 
 	// GPT-5 / o-series always use the modern field, even on a max_tokens provider.
@@ -71,10 +83,21 @@ func TestBuildChatCompletionRequest_OneWireTokenField(t *testing.T) {
 
 	t.Run("deepseek sends max_tokens", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderDeepSeek), "deepseek-chat", nil)
-		req := c.BuildChatCompletionRequest(messages, &ChatOptions{
+		req := c.shapedRequest(messages, &ChatOptions{
 			MaxTokens: 2048, MaxCompletionTokens: 4096,
 		}, false)
-		c.adapter.ShapeRequest(&req, &ChatOptions{MaxTokens: 2048, MaxCompletionTokens: 4096}, false)
+		assert.Equal(t, 4096, req.MaxTokens)
+		assert.Zero(t, req.MaxCompletionTokens)
+
+		body, err := json.Marshal(req)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), `"max_tokens":4096`)
+		assert.NotContains(t, string(body), "max_completion_tokens")
+	})
+
+	t.Run("lkeap sends max_tokens", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderLKEAP), "deepseek-v3.1", nil)
+		req := c.BuildChatCompletionRequest(messages, &ChatOptions{MaxCompletionTokens: 4096}, false)
 		assert.Equal(t, 4096, req.MaxTokens)
 		assert.Zero(t, req.MaxCompletionTokens)
 
@@ -103,6 +126,36 @@ func TestBuildChatCompletionRequest_OneWireTokenField(t *testing.T) {
 		req := c.BuildChatCompletionRequest(messages, &ChatOptions{MaxTokens: 128}, false)
 		assert.Zero(t, req.MaxTokens)
 		assert.Equal(t, 128, req.MaxCompletionTokens)
+	})
+}
+
+func TestBuildOutbound_OneWireTokenField(t *testing.T) {
+	msgs := []Message{{Role: "user", Content: "hello"}}
+
+	t.Run("volcengine thinking keeps only max_completion_tokens", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderVolcengine), "doubao-seed-2-0-mini", nil)
+		body, _, useRaw, err := c.buildOutbound(context.Background(), msgs, &ChatOptions{
+			MaxTokens: 2048, MaxCompletionTokens: 4096, Thinking: ptrBool(true),
+		}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"thinking"`)
+		assert.Contains(t, js, `"max_completion_tokens":4096`)
+		assert.NotContains(t, js, `"max_tokens"`)
+	})
+
+	t.Run("lkeap thinking keeps only max_tokens", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderLKEAP), "deepseek-v3.1", nil)
+		body, _, useRaw, err := c.buildOutbound(context.Background(), msgs, &ChatOptions{
+			MaxCompletionTokens: 4096, Thinking: ptrBool(false),
+		}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"thinking"`)
+		assert.Contains(t, js, `"max_tokens":4096`)
+		assert.NotContains(t, js, "max_completion_tokens")
 	})
 }
 
