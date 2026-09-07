@@ -261,6 +261,25 @@ export default {
     confirmRemove: '제거 확인'
   },
   integrations: {
+    cli: {
+      title: 'WeKnora CLI',
+      subtitle: '터미널에서 지식 베이스와 문서를 관리하고, 콘텐츠를 검색하고, 질문하세요. CLI 또는 MCP로 스크립트와 AI 도구를 연결할 수 있습니다.',
+      docs: 'CLI 문서 보기',
+      docsHint: '설치 안내 및 전체 명령어 참조',
+      quickstart: '빠른 시작',
+      installTitle: 'CLI 설치',
+      installDesc: 'Git과 Go 1.26+로 소스에서 빌드합니다. 아래 macOS / Linux 예제의 PATH 설정은 현재 터미널에만 적용됩니다. 계속 사용하려면 바이너리를 PATH에 포함된 디렉터리에 배치하세요.',
+      connectTitle: '현재 서버에 연결',
+      connectDesc: 'weknora 프로필을 생성하고 활성화한 후 이메일과 비밀번호로 로그인하세요. 같은 이름의 프로필이 있다면 다른 이름을 사용하고 MCP 예제의 프로필 이름도 변경하세요.',
+      verifyTitle: '연결 확인',
+      verifyDesc: '서버 및 인증 상태를 확인하고 현재 계정으로 접근할 수 있는 지식 베이스를 조회합니다.',
+      commandsTitle: '주요 명령어',
+      commandsDesc: 'KB_ID를 지식 베이스 ID로 바꾸고 파일 경로, 검색어, 질문을 수정하세요. 업로드한 문서는 처리가 완료되어야 검색할 수 있습니다.',
+      mcpTitle: 'MCP 클라이언트 연결',
+      mcpDesc: '로그인 후 stdio를 지원하는 MCP 클라이언트에 아래 설정을 추가하세요. 클라이언트가 weknora를 찾지 못하면 command를 바이너리의 절대 경로로 변경하세요.',
+      copy: '복사',
+      copied: '복사됨',
+    },
     title: '게시 및 통합',
     selectAgentPlaceholder: '에이전트를 선택하세요',
     selectAgentHint: '먼저 에이전트를 선택하세요',
@@ -548,6 +567,7 @@ export default {
       embed: '웹 임베드',
       api: 'API 연동',
       chrome: 'Chrome 확장',
+      cli: 'CLI',
       claw: 'Claw Skill'
     }
   },

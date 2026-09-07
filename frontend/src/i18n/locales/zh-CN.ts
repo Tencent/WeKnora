@@ -261,6 +261,25 @@ export default {
     confirmRemove: '确认移除'
   },
   integrations: {
+    cli: {
+      title: 'WeKnora CLI',
+      subtitle: '在终端中管理知识库和文档、检索内容并发起问答，也可通过脚本或 MCP 接入 AI 工具。',
+      docs: '查看 CLI 文档',
+      docsHint: '安装说明与完整命令参考',
+      quickstart: '快速开始',
+      installTitle: '安装 CLI',
+      installDesc: '目前支持源码构建，需要 Git 和 Go 1.26+。以下示例适用于 macOS / Linux，PATH 设置仅在当前终端生效；长期使用请将二进制放入 PATH 目录。',
+      connectTitle: '连接当前服务',
+      connectDesc: '创建并启用名为 weknora 的连接配置，然后使用邮箱和密码登录。如果已有同名配置，请更换名称，并同步修改 MCP 示例中的配置名。',
+      verifyTitle: '验证连接',
+      verifyDesc: '检查服务与认证状态，并列出当前账号可访问的知识库。',
+      commandsTitle: '常用命令',
+      commandsDesc: '将 KB_ID 替换为知识库 ID，按需替换文件路径、检索词和问题。上传后的文档需解析完成才能检索。',
+      mcpTitle: '接入 MCP 客户端',
+      mcpDesc: '完成登录后，将以下配置添加到支持 stdio 的 MCP 客户端。若客户端无法找到 weknora，请将 command 改为二进制的绝对路径。',
+      copy: '复制',
+      copied: '已复制',
+    },
     title: '发布集成',
     selectAgentPlaceholder: '请选择智能体',
     selectAgentHint: '请先选择一个智能体',
@@ -548,6 +567,7 @@ export default {
       embed: '网页嵌入',
       api: 'API 集成',
       chrome: 'Chrome 插件',
+      cli: 'CLI',
       claw: 'Claw Skill'
     }
   },
