@@ -123,6 +123,7 @@ import {
   type BackupSnapshot,
   type RestoreSummary,
 } from '@/api/backup'
+import { MAX_BACKUP_ARCHIVE_SIZE_BYTES, MAX_BACKUP_ARCHIVE_SIZE_MB } from '@/utils'
 
 const { t } = useI18n()
 const confirmDelete = useConfirmDelete()
@@ -216,6 +217,7 @@ const doRestore = async () => {
     confirmVisible.value = false
     pickedFile.value = null
     MessagePlugin.success(t('backup.restoreDone'))
+    await loadSnapshots()
   } catch (err: any) {
     MessagePlugin.error(err?.message || t('backup.restoreFailed'))
   } finally {
@@ -225,7 +227,13 @@ const doRestore = async () => {
 
 const onFilePicked = (e: Event) => {
   const input = e.target as HTMLInputElement
-  pickedFile.value = input.files?.[0] ?? null
+  const file = input.files?.[0] ?? null
+  if (file && file.size > MAX_BACKUP_ARCHIVE_SIZE_BYTES) {
+    MessagePlugin.error(t('backup.archiveTooLarge', { size: MAX_BACKUP_ARCHIVE_SIZE_MB }))
+    pickedFile.value = null
+  } else {
+    pickedFile.value = file
+  }
   // 允许再次选择同一个文件
   input.value = ''
 }

@@ -38,3 +38,27 @@ func TestGetMaxSkillBundleSizeMB(t *testing.T) {
 		}
 	})
 }
+
+func TestGetMaxBackupArchiveSizeMB(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		t.Setenv("MAX_FILE_SIZE_MB", "")
+		t.Setenv("MAX_BACKUP_ARCHIVE_SIZE_MB", "")
+		if got := GetMaxBackupArchiveSizeMB(); got != defaultMaxBackupArchiveSizeMB {
+			t.Fatalf("got %d, want %d", got, defaultMaxBackupArchiveSizeMB)
+		}
+	})
+	t.Run("never below knowledge cap", func(t *testing.T) {
+		t.Setenv("MAX_FILE_SIZE_MB", "5000")
+		t.Setenv("MAX_BACKUP_ARCHIVE_SIZE_MB", "100")
+		if got := GetMaxBackupArchiveSizeMB(); got != 5000 {
+			t.Fatalf("got %d, want 5000", got)
+		}
+	})
+	t.Run("ceiling", func(t *testing.T) {
+		t.Setenv("MAX_FILE_SIZE_MB", "50")
+		t.Setenv("MAX_BACKUP_ARCHIVE_SIZE_MB", "99999")
+		if got := GetMaxBackupArchiveSizeMB(); got != maxBackupArchiveSizeMBCeiling {
+			t.Fatalf("got %d, want %d", got, maxBackupArchiveSizeMBCeiling)
+		}
+	})
+}
