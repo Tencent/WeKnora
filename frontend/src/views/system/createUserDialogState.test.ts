@@ -14,7 +14,7 @@ const identity = { username: 'alice', email: 'alice@example.com' }
 
 test('reveal wins whenever the server minted a one-time password', () => {
   const view = resolveCreateUserView(
-    { generated_password: 'OnceOnly9', idempotent: false },
+    { generated_password: 'OnceOnly9', created: true },
     identity,
     true,
   )
@@ -26,27 +26,27 @@ test('reveal wins whenever the server minted a one-time password', () => {
   })
 })
 
-test('idempotent flag is the 200 retry signal when no password was minted', () => {
+test('created:false is the 200 retry signal when no password was minted', () => {
   assert.deepEqual(
-    resolveCreateUserView({ idempotent: true }, identity, true),
+    resolveCreateUserView({ created: false }, identity, true),
     { kind: 'idempotent' },
   )
   assert.deepEqual(
-    resolveCreateUserView({ idempotent: true }, identity, false),
+    resolveCreateUserView({ created: false }, identity, false),
     { kind: 'idempotent' },
   )
 })
 
-test('supplied-password create without the idempotent flag is a real create', () => {
+test('created:true with a supplied password is a real create', () => {
   assert.deepEqual(
-    resolveCreateUserView({}, identity, false),
+    resolveCreateUserView({ created: true }, identity, false),
     { kind: 'created' },
   )
 })
 
-test('auto-generate create missing generated_password is not treated as idempotent', () => {
+test('auto-generate create that failed to return generated_password surfaces missingPassword', () => {
   assert.deepEqual(
-    resolveCreateUserView({}, identity, true),
+    resolveCreateUserView({ created: true }, identity, true),
     { kind: 'missingPassword' },
   )
 })

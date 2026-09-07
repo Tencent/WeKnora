@@ -1,20 +1,12 @@
 /**
  * Pure helpers for the SystemAdmin create-user dialog.
- *
- * The axios interceptor discards HTTP status, so 201 (created) and 200
- * (idempotent retry) used to look identical. The backend now sets
- * `idempotent` on the body; generated_password is still the signal for
- * the one-time reveal view.
  */
+
+import type { CreateSystemUserResult } from "@/api/system"
 
 export type CreateUserIdentity = {
   username: string
   email: string
-}
-
-export type CreateUserApiResponse = {
-  generated_password?: string
-  idempotent?: boolean
 }
 
 export type CreateUserReveal = CreateUserIdentity & {
@@ -30,7 +22,7 @@ export type CreateUserView =
 export type CreateUserNotice = 'reveal' | 'created' | 'idempotent' | 'missingPassword'
 
 export function resolveCreateUserView(
-  response: CreateUserApiResponse,
+  response: Omit<CreateSystemUserResult, 'user'>,
   identity: CreateUserIdentity,
   autoGenerate: boolean,
 ): CreateUserView {
@@ -43,7 +35,7 @@ export function resolveCreateUserView(
       generatedPassword: generated,
     }
   }
-  if (response.idempotent) {
+  if (!response.created) {
     return { kind: 'idempotent' }
   }
   if (autoGenerate) {

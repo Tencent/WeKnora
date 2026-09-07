@@ -398,22 +398,25 @@ export interface CreateSystemUserResponse {
    * be fetched again.
    */
   generated_password?: string
+}
+
+export interface CreateSystemUserResult extends CreateSystemUserResponse {
   /**
-   * True on the 200 retry when the identity already existed. The shared
-   * axios interceptor drops HTTP status, so callers must read this flag
-   * instead of the status code.
+   * True only when this call created the account (HTTP 201), false on the
+   * idempotent 200 retry (identity already existed).
    */
-  idempotent?: boolean
+  created: boolean
 }
 
 /**
  * Provision a new local user account (SystemAdmin only).
- * Backend returns the unwrapped CreateSystemUserResponse body.
- * 201 on create, 200 with `idempotent: true` when the identity existed.
+ * The backend answers 201 on create and 200 on the idempotent retry with
+ * the same CreateSystemUserResponse body. The status is projected onto
+ * `created`.
  */
-export async function createSystemUser(req: CreateSystemUserRequest): Promise<CreateSystemUserResponse> {
-  const response = await post('/api/v1/system/admin/users/create', req)
-  return response as unknown as CreateSystemUserResponse
+export async function createSystemUser(req: CreateSystemUserRequest): Promise<CreateSystemUserResult> {
+  const response = await post<CreateSystemUserResponse>('/api/v1/system/admin/users/create', req)
+  return { ...response, created: response.$httpStatus === 201 }
 }
 
 // ---- System Settings (P1) ----
