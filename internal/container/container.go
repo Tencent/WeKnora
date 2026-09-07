@@ -387,6 +387,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// *chatpipeline.EventManager, which only exists after the pipeline
 	// block above — starting the reaper any earlier panics.
 	must(container.Invoke(startTenantSkillReaper))
+	must(container.Invoke(service.ConfigureChatSkillInstaller))
 	logger.Debugf(ctx, "[Container] Tenant skill reaper registered")
 
 	// HTTP handlers layer

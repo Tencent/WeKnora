@@ -93,8 +93,9 @@ func ArtifactOutputDir() string {
 // Manager manages skills lifecycle including discovery, reading, and shell environment preparation
 // It coordinates skill sources and session resource staging; shell_exec owns execution
 type Manager struct {
-	loader     *Loader
-	sandboxMgr sandbox.Manager
+	installerEnabled bool
+	loader           *Loader
+	sandboxMgr       sandbox.Manager
 
 	// tenantSource holds the skills installed into this run's sandbox image.
 	// When set it is the only source the model is told about: a host skill
@@ -155,6 +156,9 @@ func (m *Manager) WithTenantSource(source SkillSource) *Manager {
 // is the only copy the sandbox can run: falling back to a host skill directory
 // would advertise files that are not in the image.
 func (m *Manager) resolveSource(skillName string) SkillSource {
+	if m.IsBuiltin(skillName) {
+		return builtinSource{}
+	}
 	if m.tenantSource != nil {
 		return m.tenantSource
 	}
@@ -186,6 +190,19 @@ func (m *Manager) Initialize(ctx context.Context) error {
 	// Filter by allowed skills if specified
 	if len(m.allowedSkills) > 0 {
 		metadata = m.filterAllowedSkills(metadata)
+	}
+	if m.installerEnabled {
+		builtin, err := (builtinSource{}).DiscoverSkills()
+		if err != nil {
+			return err
+		}
+		filtered := make([]*SkillMetadata, 0, len(metadata)+len(builtin))
+		for _, meta := range metadata {
+			if !m.IsBuiltin(meta.Name) {
+				filtered = append(filtered, meta)
+			}
+		}
+		metadata = append(filtered, builtin...)
 	}
 
 	m.mu.Lock()
@@ -247,6 +264,9 @@ func (m *Manager) LoadSkill(ctx context.Context, skillName string) (*Skill, erro
 
 // isSkillAllowed checks if a skill is in the allowed list
 func (m *Manager) isSkillAllowed(skillName string) bool {
+	if m.IsBuiltin(skillName) {
+		return true
+	}
 	if len(m.allowedSkills) == 0 {
 		return true
 	}
@@ -364,24 +384,7 @@ type SkillInfo struct {
 
 // Reload refreshes the skill cache by rediscovering all skills
 func (m *Manager) Reload(ctx context.Context) error {
-	if !m.enabled {
-		return nil
-	}
-
-	metadata, err := m.discoverAllSkills()
-	if err != nil {
-		return err
-	}
-
-	if len(m.allowedSkills) > 0 {
-		metadata = m.filterAllowedSkills(metadata)
-	}
-
-	m.mu.Lock()
-	m.metadataCache = metadata
-	m.mu.Unlock()
-
-	return nil
+	return m.Initialize(ctx)
 }
 
 // Cleanup releases resources

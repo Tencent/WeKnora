@@ -208,6 +208,8 @@
                     <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
                   </div>
 
+                  <InstallSkillResult v-if="isInlineSkillInstall(event)" :data="event.tool_data" />
+
                     <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                     class="action-details">
                     <div v-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
@@ -244,6 +246,12 @@
         </div>
       </div>
     </div>
+
+    <!-- Installations outlive the answer; keep their result visible when steps collapse. -->
+    <template v-if="shouldShowCollapsedSteps && !showIntermediateSteps">
+      <InstallSkillResult v-for="event in visibleIntermediateEvents.filter(isInlineSkillInstall)"
+        :key="event.tool_call_id" :data="event.tool_data" />
+    </template>
 
     <!-- Event Stream (non-tree mode: before answer starts, or answer events) -->
     <div v-if="!ragMode || displayEvents.length > 0 || showAgentActivityIndicator" ref="streamingStepsContainer"
@@ -497,6 +505,8 @@
                   <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
                 </div>
 
+                <InstallSkillResult v-if="isInlineSkillInstall(event)" :data="event.tool_data" />
+
                 <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                   class="action-details">
                   <div v-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
@@ -592,6 +602,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
 import 'katex/dist/katex.min.css';
 import ToolResultRenderer from './ToolResultRenderer.vue';
+import InstallSkillResult from './tool-results/InstallSkillResult.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
@@ -710,6 +721,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   write_sandbox_file: 'agentStream.tools.writeSandboxFile',
   edit_sandbox_file: 'agentStream.tools.editSandboxFile',
   shell_exec: 'agentStream.tools.shellExec',
+  install_skill: 'settings.skills.installToSandbox',
   data_analysis: 'agentStream.tools.dataAnalysis',
   data_schema: 'agentStream.tools.dataSchema',
   database_query: 'agentStream.tools.databaseQuery',
@@ -2182,9 +2194,14 @@ const isReferenceDrawerTool = (toolName?: string | null): boolean =>
   toolName === 'wiki_read_source_doc';
 
 const hasExpandableResults = (event: any): boolean => {
+  if (isInlineSkillInstall(event)) return false;
   if (isReferenceDrawerTool(event?.tool_name)) return false;
   return hasResults(event);
 };
+
+const isInlineSkillInstall = (event: any): boolean =>
+  event?.tool_name === 'install_skill' && !event.pending && event.success !== false &&
+  !!event.tool_data?.sandbox_config_id && !!event.tool_data?.skill_id;
 
 const hasActionResult = (event: any): boolean => canOpenToolReferences(event) || hasExpandableResults(event);
 

@@ -154,7 +154,7 @@ func (s *temporaryDocumentService) Create(
 	if resourceTenantID == 0 {
 		resourceTenantID = tenantID
 	}
-	if !s.supportsExtension(ctx, resourceTenantID, ext) {
+	if ext != ".zip" && !s.supportsExtension(ctx, resourceTenantID, ext) {
 		return nil, fmt.Errorf("unsupported file type: %s", ext)
 	}
 	maxSize := secutils.GetMaxFileSizeMB() * 1024 * 1024
@@ -184,6 +184,13 @@ func (s *temporaryDocumentService) Create(
 		Status: types.TemporaryDocumentStatusUploaded, ExpiresAt: time.Now().Add(temporaryDocumentTTL()),
 		ProcessingOptions: types.JSON(optionsJSON),
 	}
+	// ZIPs are raw conversation inputs. Preserve the archive for sandbox
+	// staging; parsing or unpacking here would lose the installable bundle.
+	if ext == ".zip" {
+		now := time.Now()
+		document.Status = types.TemporaryDocumentStatusReady
+		document.ReadyAt = &now
+	}
 	if err := s.repo.Create(ctx, document); err != nil {
 		_ = s.fileService.DeleteFile(ctx, resourceRef)
 		return nil, fmt.Errorf("create attachment record: %w", err)
@@ -194,6 +201,9 @@ func (s *temporaryDocumentService) Create(
 			_ = s.fileService.DeleteFile(ctx, resourceRef)
 			return nil, fmt.Errorf("bind attachment resource: %w", err)
 		}
+	}
+	if ext == ".zip" {
+		return document, nil
 	}
 	payload, _ := json.Marshal(types.TemporaryDocumentTaskPayload{TenantID: tenantID, DocumentID: document.ID})
 	queue, _ := types.QueueForTaskType(types.TypeTemporaryDocumentProcess)

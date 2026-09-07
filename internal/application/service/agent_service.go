@@ -92,6 +92,7 @@ func knowledgeBaseScopesForPrompt(config *types.AgentConfig) ([]string, map[stri
 
 // agentService implements agent-related business logic
 type agentService struct {
+	skillInstaller        tools.SkillInstaller
 	cfg                   *config.Config
 	modelService          interfaces.ModelService
 	mcpServiceService     interfaces.MCPServiceService
@@ -252,11 +253,10 @@ func (s *agentService) CreateAgentEngine(
 	// The shell is registered above by registerSandboxShellIfAllowed and
 	// follows SkillsEnabled rather than requiring a ready skill to already
 	// exist. offerSkills only gates the skills manager that feeds the model
-	// the installed-skill list and the read_file / shell_exec environment. A sandbox whose skills are still installing —
-	// or that simply has none yet — therefore gets a shell without an
-	// empty skills manager or skill tools that cannot succeed.
+	// the installed-skill list and the read_file / shell_exec environment.
+	// Administrators also receive the built-in installer in an empty sandbox.
 	offerSkills := config.SkillsEnabled &&
-		(len(config.SkillDirs) > 0 || len(config.TenantSkills) > 0)
+		(len(config.SkillDirs) > 0 || len(config.TenantSkills) > 0 || s.canOfferSkillInstaller(ctx, config))
 	if offerSkills {
 		skillsManager, err := s.initializeSkillsManager(ctx, sessionID, config, toolRegistry)
 		if err != nil {
@@ -574,6 +574,15 @@ func (s *agentService) initializeSkillsManager(
 	skillsManager := skills.NewManager(skillsConfig, sandboxMgr)
 	if source := s.tenantSkillSource(ctx, config); source != nil {
 		skillsManager.WithTenantSource(source)
+	}
+	if s.canOfferSkillInstaller(ctx, config) && tenantID != 0 && configID != "" && configID != "-" &&
+		sandboxMgr.GetType() != sandbox.SandboxTypeDisabled {
+		installer := tools.NewInstallSkillTool(s.skillInstaller, tenantID, configID)
+		if files := sessionSandboxFileStore(sandboxMgr); files != nil {
+			installer.WithAttachments(files)
+		}
+		toolRegistry.RegisterTool(installer)
+		skillsManager.WithInstaller()
 	}
 
 	// Initialize (discover skills)

@@ -47,6 +47,8 @@ let disposed = false;
 
 // Supported file types (matching backend)
 const supportedTypes = ref([
+	// ZIPs remain raw attachments for sandbox use, including skill installation.
+	'.zip',
   // Documents
   '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.epub', '.mhtml',
   // Text
