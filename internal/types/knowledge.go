@@ -67,6 +67,10 @@ const (
 	// queued downstream tasks, but the knowledge row and any already-written
 	// chunks/index are kept so the user can re-trigger parsing via reparse.
 	ParseStatusCancelled = "cancelled"
+	// ParseStatusSkipped indicates a file that is deliberately stored for
+	// reference only. It has a source resource but must never enter the
+	// document parsing, chunking, or embedding pipeline.
+	ParseStatusSkipped = "skipped"
 )
 
 // Summary status constants for async summary generation
@@ -464,6 +468,12 @@ func (k *Knowledge) SetProcessOverrides(o *KnowledgeProcessOverrides) error {
 type KnowledgeCheckParams struct {
 	// File parameters
 	FileName string
+	// FolderPath scopes file deduplication for directory uploads. An empty
+	// value is the knowledge-base root folder.
+	FolderPath string
+	// MatchLogicalPath opts into folder-upload duplicate semantics. Ordinary
+	// uploads continue to deduplicate by content as they did before folders.
+	MatchLogicalPath bool
 	// FileType scopes file-hash deduplication; callers checking file uploads should set it.
 	FileType string
 	FileSize int64

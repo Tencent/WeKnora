@@ -2420,6 +2420,9 @@ func (s *knowledgeService) ReparseKnowledge(
 		logger.Errorf(ctx, "Failed to load knowledge: %v", err)
 		return nil, err
 	}
+	if existing.ParseStatus == types.ParseStatusSkipped {
+		return nil, werrors.NewBadRequestError("仅存储附件不能重新解析")
+	}
 
 	// Allocate a fresh span tree attempt up front. Doing this BEFORE
 	// the cleanup + enqueue means: (a) the UI immediately sees a new
@@ -3225,6 +3228,13 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "Knowledge cancelled by user, aborting processing: %s", payload.KnowledgeID)
 		return nil
 	}
+	if knowledge.ParseStatus == types.ParseStatusSkipped {
+		// Store-only directory attachments own a resource but deliberately have
+		// no chunks or embeddings. A stale or incorrectly-enqueued task must
+		// never turn them into normal knowledge documents.
+		logger.Infof(ctx, "Knowledge is a store-only attachment, skipping processing: %s", payload.KnowledgeID)
+		return nil
+	}
 
 	// 检查任务状态 - 幂等性处理
 	if knowledge.ParseStatus == types.ParseStatusCompleted {
@@ -3504,7 +3514,6 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	// Step 2: Store images and update markdown references
 	var storedImages []docparser.StoredImage
-
 	if s.imageResolver != nil && convertResult != nil {
 		fileSvc := s.resolveFileService(ctx, kb)
 		tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)

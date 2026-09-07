@@ -373,10 +373,13 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 		if params.FileHash != "" {
 			var knowledge types.Knowledge
 			duplicateQuery := query.Where("type = ? AND file_hash = ?", "file", params.FileHash)
+			if params.MatchLogicalPath {
+				duplicateQuery = duplicateQuery.Where("folder_path = ? AND file_name = ?", params.FolderPath, params.FileName)
+			}
 			if params.FileType != "" {
 				duplicateQuery = duplicateQuery.Where("LOWER(file_type) = ?", strings.ToLower(params.FileType))
 			}
-			err := duplicateQuery.First(&knowledge).Error
+			err := duplicateQuery.Order("created_at DESC, id DESC").First(&knowledge).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return false, nil, nil
@@ -389,14 +392,14 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 		// If no hash or hash doesn't match, use filename, size, and file type.
 		if params.FileName != "" && params.FileSize > 0 {
 			var knowledge types.Knowledge
-			duplicateQuery := query.Where(
-				"type = ? AND file_name = ? AND file_size = ?",
-				"file", params.FileName, params.FileSize,
-			)
+			duplicateQuery := query.Where("type = ? AND file_name = ? AND file_size = ?", "file", params.FileName, params.FileSize)
+			if params.MatchLogicalPath {
+				duplicateQuery = duplicateQuery.Where("folder_path = ?", params.FolderPath)
+			}
 			if params.FileType != "" {
 				duplicateQuery = duplicateQuery.Where("LOWER(file_type) = ?", strings.ToLower(params.FileType))
 			}
-			err := duplicateQuery.First(&knowledge).Error
+			err := duplicateQuery.Order("created_at DESC, id DESC").First(&knowledge).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return false, nil, nil
