@@ -138,7 +138,8 @@ func (a messageKBShareAuthorizer) resourceAccessibleViaSharedKB(
 		if kb == nil || kb.TenantID != resource.TenantID {
 			continue
 		}
-		shared, err := a.ShareGuard.HasTenantKBPermission(ctx, kb.ID, callerTenantID, callerTenantRole, types.OrgRoleViewer)
+		shared, err := a.ShareGuard.HasTenantKBPermission(
+			ctx, kb.ID, callerTenantID, callerTenantRole, types.OrgRoleViewer)
 		if err == nil && shared {
 			return true
 		}

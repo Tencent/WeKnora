@@ -754,7 +754,6 @@ func (e *AgentEngine) runReActIteration(
 	// 3. Act: Execute tool calls
 	e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID, assistantMessageID)
 	toolCallCount = len(step.ToolCalls)
-	appendKnowledgeRefsFromStep(state, step)
 
 	// 4. Observe: Add tool results to messages and write to context
 	state.RoundSteps = append(state.RoundSteps, step)

@@ -774,7 +774,9 @@ type stubKBTenantLookup struct {
 	kbs []*types.KnowledgeBase
 }
 
-func (s *stubKBTenantLookup) GetKnowledgeBasesByIDsOnly(_ context.Context, ids []string) ([]*types.KnowledgeBase, error) {
+func (s *stubKBTenantLookup) GetKnowledgeBasesByIDsOnly(
+	_ context.Context, ids []string,
+) ([]*types.KnowledgeBase, error) {
 	byID := make(map[string]*types.KnowledgeBase, len(s.kbs))
 	for _, kb := range s.kbs {
 		byID[kb.ID] = kb
@@ -890,8 +892,7 @@ func TestMessageScopedFilesServesOrgSharedKBResource(t *testing.T) {
 		[]*types.KnowledgeBase{{ID: "kb-1", TenantID: 10005}},
 	)
 
-	req := httptest.NewRequest(http.MethodGet,
-		"/sessions/session-1/messages/message-1/files?file_path="+url.QueryEscape("resource://ShArEdKbHaNdLe00000000"), nil)
+	req := orgSharedKBFileRequest()
 	recorder := httptest.NewRecorder()
 	engine.ServeHTTP(recorder, req)
 
@@ -913,8 +914,7 @@ func TestMessageScopedFilesRejectsOrgSharedKBResourceWhenShareRevoked(t *testing
 		[]*types.KnowledgeBase{{ID: "kb-1", TenantID: 10005}},
 	)
 
-	req := httptest.NewRequest(http.MethodGet,
-		"/sessions/session-1/messages/message-1/files?file_path="+url.QueryEscape("resource://ShArEdKbHaNdLe00000000"), nil)
+	req := orgSharedKBFileRequest()
 	recorder := httptest.NewRecorder()
 	engine.ServeHTTP(recorder, req)
 
@@ -936,8 +936,7 @@ func TestMessageScopedFilesOrgSharedKBRequiresChunkEvidence(t *testing.T) {
 		[]*types.KnowledgeBase{{ID: "kb-1", TenantID: 10005}},
 	)
 
-	req := httptest.NewRequest(http.MethodGet,
-		"/sessions/session-1/messages/message-1/files?file_path="+url.QueryEscape("resource://ShArEdKbHaNdLe00000000"), nil)
+	req := orgSharedKBFileRequest()
 	recorder := httptest.NewRecorder()
 	engine.ServeHTTP(recorder, req)
 
@@ -958,8 +957,7 @@ func TestMessageScopedFilesOrgSharedKBRequiresResourceTenantMatch(t *testing.T) 
 		[]*types.KnowledgeBase{{ID: "kb-1", TenantID: 99999}},
 	)
 
-	req := httptest.NewRequest(http.MethodGet,
-		"/sessions/session-1/messages/message-1/files?file_path="+url.QueryEscape("resource://ShArEdKbHaNdLe00000000"), nil)
+	req := orgSharedKBFileRequest()
 	recorder := httptest.NewRecorder()
 	engine.ServeHTTP(recorder, req)
 
@@ -998,7 +996,7 @@ func TestMessageScopedFilesServesLegacyMessageViaOrgSharedKB(t *testing.T) {
 		&stubTenantService{get: func(_ context.Context, id uint64) (*types.Tenant, error) {
 			return &types.Tenant{ID: id}, nil
 		}},
-		&stubFileService{getFile: func(_ context.Context, path string) (io.ReadCloser, error) {
+		&stubFileService{getFile: func(_ context.Context, _ string) (io.ReadCloser, error) {
 			return io.NopCloser(strings.NewReader("legacy-shared-kb-image")), nil
 		}},
 		&stubResourceCatalog{resource: &types.StoredResource{
@@ -1017,8 +1015,7 @@ func TestMessageScopedFilesServesLegacyMessageViaOrgSharedKB(t *testing.T) {
 		},
 	)
 
-	req := httptest.NewRequest(http.MethodGet,
-		"/sessions/session-1/messages/message-1/files?file_path="+url.QueryEscape("resource://ShArEdKbHaNdLe00000000"), nil)
+	req := orgSharedKBFileRequest()
 	recorder := httptest.NewRecorder()
 	engine.ServeHTTP(recorder, req)
 
@@ -1055,7 +1052,7 @@ func TestMessageScopedFilesOrgSharedKBResolvesKnowledgeOwner(t *testing.T) {
 		&stubTenantService{get: func(_ context.Context, id uint64) (*types.Tenant, error) {
 			return &types.Tenant{ID: id}, nil
 		}},
-		&stubFileService{getFile: func(_ context.Context, path string) (io.ReadCloser, error) {
+		&stubFileService{getFile: func(_ context.Context, _ string) (io.ReadCloser, error) {
 			return io.NopCloser(strings.NewReader("resolved-kb-image")), nil
 		}},
 		&stubResourceCatalog{resource: &types.StoredResource{
@@ -1077,8 +1074,7 @@ func TestMessageScopedFilesOrgSharedKBResolvesKnowledgeOwner(t *testing.T) {
 		},
 	)
 
-	req := httptest.NewRequest(http.MethodGet,
-		"/sessions/session-1/messages/message-1/files?file_path="+url.QueryEscape("resource://ShArEdKbHaNdLe00000000"), nil)
+	req := orgSharedKBFileRequest()
 	recorder := httptest.NewRecorder()
 	engine.ServeHTTP(recorder, req)
 
