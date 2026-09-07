@@ -1596,10 +1596,6 @@ type CreateSystemUserResponse struct {
 	// GeneratedPassword is the plaintext password when the server
 	// auto-generated one. Absent when the caller supplied the password.
 	GeneratedPassword string `json:"generated_password,omitempty"`
-	// Idempotent is true when the identity already existed (HTTP 200).
-	// The SPA axios interceptor discards status codes, so this flag is
-	// the body-level signal that nothing was created or changed.
-	Idempotent bool `json:"idempotent,omitempty"`
 }
 
 // CreateSystemUser godoc
@@ -1658,7 +1654,7 @@ func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
 				"password_generated": false,
 				"idempotent":         true,
 			})
-			c.JSON(http.StatusOK, CreateSystemUserResponse{User: user.ToUserInfo(), Idempotent: true})
+			c.JSON(http.StatusOK, CreateSystemUserResponse{User: user.ToUserInfo()})
 		case errors.Is(err, service.ErrPasswordPolicy):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		case errors.Is(err, service.ErrUserIdentityConflict):
