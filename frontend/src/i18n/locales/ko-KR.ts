@@ -3429,6 +3429,8 @@ export default {
     webFetchStatusSkipped: 'Skipped',
     webFetchErrorCode: 'Error code',
     webFetchRetryable: 'Retryable',
+    webFetchContentRange: '문자 {start}–{end} / 전체 {total}',
+    webFetchPartialContent: '페이지 일부',
     webFetchSummaryFailed: 'Summary failed',
     lengthChars: '{value}자',
     lengthThousands: '{value}천 자',

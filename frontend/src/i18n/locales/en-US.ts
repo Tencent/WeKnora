@@ -3443,6 +3443,8 @@ export default {
     webFetchStatusSkipped: 'Skipped',
     webFetchErrorCode: 'Error code',
     webFetchRetryable: 'Retryable',
+    webFetchContentRange: 'Characters {start}–{end} of {total}',
+    webFetchPartialContent: 'Partial page',
     webFetchSummaryFailed: 'Summary failed',
     lengthChars: '{value} characters',
     lengthThousands: '{value}k characters',

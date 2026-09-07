@@ -264,7 +264,7 @@ builtin_models:
       ...)
   ```
 
-  其中 `purpose` 来自 `types.WithLLMCallMetadata`（如 `web_fetch_summary`、`entity_extraction`），可按用途聚合。
+  其中 `purpose` 来自 `types.WithLLMCallMetadata`（如 `document_summary`、`entity_extraction`），可按用途聚合。
 - **链路追踪**：启用 Langfuse 时，每类模型都有 `langfuse_wrapper.go` 装饰器把调用（含 usage）上报为 trace/span。
 - **流式响应**：usage 随最后的 `StreamResponse` 事件返回（模型调试器会将其聚合进 `usage` 字段）。
 - **并发水位**：如上节所述，`GET /system/admin/runtime/queues` 暴露每模型实时 `active / waiting / limit`。

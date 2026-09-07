@@ -92,29 +92,28 @@ func knowledgeBaseScopesForPrompt(config *types.AgentConfig) ([]string, map[stri
 
 // agentService implements agent-related business logic
 type agentService struct {
-	cfg                   *config.Config
-	modelService          interfaces.ModelService
-	mcpServiceService     interfaces.MCPServiceService
-	mcpManager            *mcp.MCPManager
-	eventBus              *event.EventBus
-	db                    *gorm.DB
-	webSearchService      interfaces.WebSearchService
-	knowledgeBaseService  interfaces.KnowledgeBaseService
-	knowledgeService      interfaces.KnowledgeService
-	fileService           interfaces.FileService
-	chunkService          interfaces.ChunkService
-	duckdb                *sql.DB
-	webSearchStateService interfaces.WebSearchStateService
-	wikiPageService       interfaces.WikiPageService
-	tenantService         interfaces.TenantService
-	messageService        interfaces.MessageService
-	memoryService         interfaces.MemoryService
-	storageResolver       interfaces.StorageBackendResolver
-	toolApprovalGate      approval.MCPApproval
-	sandboxMgr            sandbox.Manager
-	sandboxResolver       sandbox.TenantSandboxResolver
-	sandboxPinner         *SessionSandboxPinner
-	sandboxPolicy         WorkspaceSandboxPolicy
+	cfg                  *config.Config
+	modelService         interfaces.ModelService
+	mcpServiceService    interfaces.MCPServiceService
+	mcpManager           *mcp.MCPManager
+	eventBus             *event.EventBus
+	db                   *gorm.DB
+	webSearchService     interfaces.WebSearchService
+	knowledgeBaseService interfaces.KnowledgeBaseService
+	knowledgeService     interfaces.KnowledgeService
+	fileService          interfaces.FileService
+	chunkService         interfaces.ChunkService
+	duckdb               *sql.DB
+	wikiPageService      interfaces.WikiPageService
+	tenantService        interfaces.TenantService
+	messageService       interfaces.MessageService
+	memoryService        interfaces.MemoryService
+	storageResolver      interfaces.StorageBackendResolver
+	toolApprovalGate     approval.MCPApproval
+	sandboxMgr           sandbox.Manager
+	sandboxResolver      sandbox.TenantSandboxResolver
+	sandboxPinner        *SessionSandboxPinner
+	sandboxPolicy        WorkspaceSandboxPolicy
 }
 
 // NewAgentService creates a new agent service
@@ -131,7 +130,6 @@ func NewAgentService(
 	db *gorm.DB,
 	webSearchService interfaces.WebSearchService,
 	duckdb *sql.DB,
-	webSearchStateService interfaces.WebSearchStateService,
 	wikiPageService interfaces.WikiPageService,
 	tenantService interfaces.TenantService,
 	messageService interfaces.MessageService,
@@ -144,29 +142,28 @@ func NewAgentService(
 	sandboxPolicy WorkspaceSandboxPolicy,
 ) interfaces.AgentService {
 	return &agentService{
-		cfg:                   cfg,
-		modelService:          modelService,
-		knowledgeBaseService:  knowledgeBaseService,
-		knowledgeService:      knowledgeService,
-		fileService:           fileService,
-		chunkService:          chunkService,
-		mcpServiceService:     mcpServiceService,
-		mcpManager:            mcpManager,
-		eventBus:              eventBus,
-		db:                    db,
-		webSearchService:      webSearchService,
-		duckdb:                duckdb,
-		webSearchStateService: webSearchStateService,
-		wikiPageService:       wikiPageService,
-		tenantService:         tenantService,
-		messageService:        messageService,
-		memoryService:         memoryService,
-		storageResolver:       storageResolver,
-		toolApprovalGate:      toolApprovalGate,
-		sandboxMgr:            sandboxMgr,
-		sandboxResolver:       sandboxResolver,
-		sandboxPinner:         sandboxPinner,
-		sandboxPolicy:         sandboxPolicy,
+		cfg:                  cfg,
+		modelService:         modelService,
+		knowledgeBaseService: knowledgeBaseService,
+		knowledgeService:     knowledgeService,
+		fileService:          fileService,
+		chunkService:         chunkService,
+		mcpServiceService:    mcpServiceService,
+		mcpManager:           mcpManager,
+		eventBus:             eventBus,
+		db:                   db,
+		webSearchService:     webSearchService,
+		duckdb:               duckdb,
+		wikiPageService:      wikiPageService,
+		tenantService:        tenantService,
+		messageService:       messageService,
+		memoryService:        memoryService,
+		storageResolver:      storageResolver,
+		toolApprovalGate:     toolApprovalGate,
+		sandboxMgr:           sandboxMgr,
+		sandboxResolver:      sandboxResolver,
+		sandboxPinner:        sandboxPinner,
+		sandboxPolicy:        sandboxPolicy,
 	}
 }
 
@@ -206,6 +203,7 @@ func (s *agentService) CreateAgentEngine(
 	// capability independently of the existing SkillsEnabled execution gate.
 	s.registerSandboxShellIfAllowed(ctx, toolRegistry, sessionID, config)
 	s.registerSandboxFileTools(ctx, toolRegistry, sessionID, config)
+	s.registerWebPageFiles(ctx, toolRegistry, config, sessionID, assistantMessageID)
 
 	// 3. Resolve knowledge base and selected document metadata
 	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
@@ -919,6 +917,9 @@ func (s *agentService) registerTools(
 		logger.Infof(ctx, "Pure Agent Mode: Knowledge base tools filtered out, remaining: %v", allowedTools)
 	}
 
+	// Web capabilities follow the runtime switch even if a saved allowlist names them.
+	allowedTools = withoutString(allowedTools, tools.ToolWebSearch)
+	allowedTools = withoutString(allowedTools, tools.ToolWebFetch)
 	// If web search is enabled, add web_search to allowedTools
 	if config.WebSearchEnabled {
 		allowedTools = append(allowedTools, tools.ToolWebSearch)
@@ -1052,17 +1053,13 @@ func (s *agentService) registerTools(
 		case tools.ToolWebSearch:
 			toolToRegister = tools.NewWebSearchTool(
 				s.webSearchService,
-				s.knowledgeBaseService,
-				s.knowledgeService,
-				s.webSearchStateService,
-				sessionID,
 				config.WebSearchMaxResults,
 				config.WebSearchProviderID,
 			)
 			logger.Infof(ctx, "Registered web_search tool for session: %s, maxResults: %d, providerID: %s", sessionID, config.WebSearchMaxResults, config.WebSearchProviderID)
 
 		case tools.ToolWebFetch:
-			toolToRegister = tools.NewWebFetchTool(chatModel)
+			toolToRegister = tools.NewWebFetchTool()
 			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
 
 		case tools.ToolDataAnalysis:

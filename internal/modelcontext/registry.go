@@ -101,6 +101,7 @@ func (r *Registry) DecodeToolCalls(toolCalls []types.LLMToolCall) {
 			toolCalls[i].ModelArguments = toolCalls[i].Function.Arguments
 		}
 	}
+	normalizeWebFetchItems(toolCalls)
 	r.resources.DecodeToolCalls(toolCalls)
 	r.sources.DecodeToolCallsWithPolicy(toolCalls, sourceArgumentAllowed)
 	for i := range toolCalls {

@@ -1308,7 +1308,7 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
   if (toolName === 'web_fetch') {
     const results = Array.isArray(toolData.results) ? toolData.results : [];
     return results
-      .filter((item: any) => item?.url)
+      .filter((item: any) => item?.url && (!item.status || item.status === 'success'))
       .map((item: any, index: number) => ({
         id: item.url,
         chunk_type: 'web_search',

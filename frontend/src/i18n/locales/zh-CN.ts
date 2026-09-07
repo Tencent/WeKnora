@@ -3431,6 +3431,8 @@ export default {
     webFetchStatusSkipped: '已跳过',
     webFetchErrorCode: '错误码',
     webFetchRetryable: '可重试',
+    webFetchContentRange: '字符范围 {start}–{end}，共 {total} 字符',
+    webFetchPartialContent: '部分页面内容',
     webFetchSummaryFailed: '摘要失败',
     lengthChars: '{value} 字',
     lengthThousands: '{value} 千字',

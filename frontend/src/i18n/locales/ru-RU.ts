@@ -3429,6 +3429,8 @@ export default {
     webFetchStatusSkipped: 'Skipped',
     webFetchErrorCode: 'Error code',
     webFetchRetryable: 'Retryable',
+    webFetchContentRange: 'Символы {start}–{end} из {total}',
+    webFetchPartialContent: 'Часть страницы',
     webFetchSummaryFailed: 'Summary failed',
     lengthChars: '{value} символов',
     lengthThousands: '{value} тыс. символов',

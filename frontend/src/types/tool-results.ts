@@ -189,6 +189,14 @@ export interface WebSearchResultItem {
     content?: string;
     source?: string;
     published_at?: string;
+    age?: string;
+    page_status?: 'success' | 'failed';
+    page_verified?: boolean;
+    page_content?: string;
+    page_error?: string;
+    page_truncated?: boolean;
+    full_output_path?: string;
+    storage_error?: string;
 }
 
 // Web search results data
@@ -202,7 +210,6 @@ export interface WebSearchResultsData {
 // Web fetch result item
 export interface WebFetchResultItem {
     url: string;
-    prompt?: string;
     status?: 'success' | 'failed' | 'skipped';
     retryable?: boolean;
     error_code?: string;
@@ -211,8 +218,14 @@ export interface WebFetchResultItem {
     summary_status?: string;
     summary_error_code?: string;
     summary_error_message?: string;
+    full_output_path?: string;
+    storage_error?: string;
     raw_content?: string;
     content_length?: number;
+    offset?: number;
+    returned_chars?: number;
+    truncated?: boolean;
+    next_offset?: number;
     method?: string;
     /** @deprecated use error_message */
     error?: string;

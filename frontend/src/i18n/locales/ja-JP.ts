@@ -3443,6 +3443,8 @@ export default {
     webFetchStatusSkipped: 'スキップ',
     webFetchErrorCode: 'エラーコード',
     webFetchRetryable: '再試行可能',
+    webFetchContentRange: '文字範囲 {start}–{end} / 全 {total} 文字',
+    webFetchPartialContent: 'ページの一部',
     webFetchSummaryFailed: '要約失敗',
     lengthChars: '{value}文字',
     lengthThousands: '{value}千文字',

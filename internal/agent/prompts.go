@@ -262,7 +262,9 @@ func formatToolGuidance(names []string) string {
 	b.WriteString("For long-running operations, prefer a documented asynchronous mode when available. Use the returned task ID to wait or poll at the recommended interval and retrieve the completed result; after a timeout, check the existing task before resubmitting.\n")
 	b.WriteString("On failure, use the reported cause to correct the input or environment. Retry only after something relevant changes. Permission, policy, or missing-configuration failures are not fixed by switching tools; report the concrete blocker if it cannot be corrected within this session.\n")
 	if has("read_file") {
-		b.WriteString("Use read_file for workspace files and listed skill:// resources. In older instructions, translate read_skill(skill_name, file_path) to read_file(path=skill://<name>/<file_path or SKILL.md>) and read_sandbox_file to read_file.\n")
+		b.WriteString("Use read_file for workspace files, saved web:// pages and listed skill:// resources. " +
+			"In older instructions, translate read_skill(skill_name, file_path) to " +
+			"read_file(path=skill://<name>/<file_path or SKILL.md>) and read_sandbox_file to read_file.\n")
 	}
 	if has("shell_exec") || has("write_sandbox_file") {
 		b.WriteString("Session workspace: /workspace. Preserve uploaded originals in /workspace/input. " +

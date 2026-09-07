@@ -1,6 +1,6 @@
 # 网络搜索与网页抓取
 
-当知识库检索不足以回答问题时，WeKnora 的 Agent 可以借助 `web_search`（联网搜索）与 `web_fetch`（网页抓取 + LLM 分析）两个工具获取实时信息。底层实现分布在 `internal/infrastructure/web_search`（搜索引擎适配层）、`internal/infrastructure/web_fetch`（轻量抓取器）与 `internal/agent/tools`（Agent 工具层），并通过 `docker/searxng` 提供可选的自托管元搜索引擎。
+当知识库检索不足以回答问题时，WeKnora 的 Agent 可以借助 `web_search`（联网搜索）与 `web_fetch`（网页正文读取）两个工具获取实时信息。底层实现分布在 `internal/infrastructure/web_search`（搜索引擎适配层）、`internal/infrastructure/web_fetch`（轻量抓取器）与 `internal/agent/tools`（Agent 工具层），并通过 `docker/searxng` 提供可选的自托管元搜索引擎。
 
 ## 接口抽象
 
@@ -81,78 +81,89 @@ CRUD 路由（`RegisterWebSearchProviderRoutes`，`internal/router/router.go`）
 - 重定向逐跳经 `ssrfSafeRedirect` 复验 `ValidateURLForSSRF`，超过最大跳数直接失败；
 - 显式 `proxy_url` 需通过 SSRF 校验，未配置时回落 `ProxyFromEnvironment`。
 
-## 搜索工具调用流程
+## Agent 搜索与读页
 
-Agent 工具 `web_search`（`internal/agent/tools/web_search.go`）遵循 "KB First" 规则（必须先做 `grep_chunks` + `knowledge_search`），其执行链路：
-
-```mermaid
-flowchart TD
-    A["Agent 决策调用 web_search<br/>(query)"] --> B["WebSearchTool.Execute"]
-    B --> C["webSearchService.Search<br/>(providerID, config, query)"]
-    C --> D["Registry.CreateProvider<br/>(按租户参数实例化引擎)"]
-    D --> E{"引擎类型"}
-    E --> E1["Bing / Tavily / Zhipu / Baidu / ...<br/>(硬编码官方端点)"]
-    E --> E2["SearXNG<br/>(自托管 base_url, SSRF 白名单)"]
-    E --> E3["DuckDuckGo<br/>(HTML 抓取, 免 Key)"]
-    E1 --> F["WebSearchResult 列表<br/>(title / url / snippet / content)"]
-    E2 --> F
-    E3 --> F
-    F --> G{"compression_method<br/>!= none?"}
-    G -->|"是"| H["CompressWithRAG:<br/>结果写入会话级临时知识库<br/>向量化后按 query 检索压缩"]
-    H --> I["Redis 保存临时 KB 状态<br/>(webSearchStateService)"]
-    G -->|"否"| J["原始结果"]
-    I --> K["格式化输出: wN 短页面 ID +<br/>标题 / 摘要 / 内容 (截断 500 字符)"]
-    J --> K
-    K --> L{"内容被截断或不足?"}
-    L -->|"是"| M["Agent 携带 wN 调用 web_fetch"]
-    L -->|"否"| N["Agent 综合作答"]
-```
-
-要点（均见 `web_search.go`）：
-
-- **RAG 压缩**：`CompressWithRAG` 把搜索结果注入一个隐藏的会话级临时知识库（UI 不展示，用后可清理），用向量检索抽取与 query 相关的片段，避免把整页塞进上下文；临时 KB 的 `tempKBID / seenURLs / knowledgeIDs` 状态经 `WebSearchStateService` 持久化在 Redis，会话内多次搜索复用、不重复索引。
-- 结果 URL 以 **wN 短 ID** 呈现给模型，`web_fetch` 用同一 ID 取回完整页面。
-- provider 由 Agent 配置解析出的 `providerID` 决定，空则回落租户默认。
-
-## 网页抓取（web_fetch）
-
-### Agent 工具：chromedp 渲染 + LLM 分析
-
-抓取能力已收敛到 `internal/infrastructure/web_fetch` 一个实现里，Agent 工具（`internal/agent/tools/web_fetch.go`）只负责批量编排、LLM 分析与结构化结果——此前工具层与基础设施层各有一份抓取代码，安全策略容易走偏。
-
-`WebFetchTool` 接收 `{items: [{url: "wN", prompt}]}` 批量任务，并发处理：
+`web_search` 负责发现来源，`web_fetch` 负责读取选中的页面。用户指定网页时可直接读页；用户要求外部或实时信息时可直接搜索。知识库是否需要检索取决于任务相关性与当前可用工具，不再强制先调用 `grep_chunks` 和 `knowledge_search`。
 
 ```mermaid
 flowchart TD
-    A["web_fetch(items)"] --> A1["按规范化 URL 去重<br/>重复项直接标 skipped"]
-    A1 --> B["webfetch.Fetcher.Fetch:<br/>URL 格式 + ValidateURLForSSRF"]
-    B --> C["DNS 解析并 Pin 单一公网 IP<br/>(白名单主机允许私网 IP)"]
-    C --> D["renderWithChromium:<br/>headless Chrome 渲染<br/>host-resolver-rules=MAP host pinnedIP"]
-    D -->|"失败或空页面"| E["HTTP 兜底:<br/>直连 pinned IP, Host 头保留原域名<br/>(SSRF-safe client)"]
-    D -->|"成功"| F["goquery 转正文文本"]
-    E --> F
-    F --> G["按 prompt 调用 chat 模型总结"]
-    G --> H["逐 URL 结构化结果<br/>status + code + retryable"]
+    A[Agent 需要外部信息] --> B[web_search query]
+    B --> C[按当前租户与 providerID 调用搜索服务]
+    C --> D[有效结果去重与数量限制]
+    D --> E[标题、wN、域名、日期、搜索摘要]
+    E --> F{证据是否充分}
+    F -->|是| G[综合作答]
+    F -->|否| H[web_fetch items]
+    U[用户提供或页面发现的 URL] --> H
+    H --> I[SSRF 安全 HTTP 请求]
+    I --> J[HTML 提取 Markdown / 文本直接读取]
+    I -->|需要动态渲染| K[Chromium 兜底]
+    K --> J
+    J --> L[分页面状态与字符范围]
+    L -->|尚有相关内容| M[使用 next_offset 续读缓存快照]
+    M --> L
+    L --> G
 ```
 
-结构化失败语义是这一版的重点：
+### web_search
 
-- 每个 URL 单独返回状态（`success` / `failed` / `skipped`），**部分失败不会拖垮整批**——成功页面的内容照常可用；
-- 失败带稳定的机器可读错误码与可重试标记（`web_fetch.FetchError`）：`invalid_url`、`dns_failed`、`connection_timeout`、`tls_failed`、`http_403`、`http_429`、`http_5xx`、`http_status`、`ssrf_rejected`、`redirect_rejected`、`read_failed`、`html_parse_failed`、`empty_content`、`connection_failed`；
-- 工具输出末尾附一段「Next Steps」指引：全部失败时明确要求模型改用 `web_search` 的标题/摘要作答、声明未经页面校验、对价格库存这类动态事实降低置信度；部分失败时要求直接用成功证据、不要重试不可重试的错误。这样页面抓不到时模型不会陷入反复搜索或凭空编造；
-- 同一批次里重复的 URL 只抓一次。
+调用示例：
 
-安全设计要点：
+```json
+{"query":"Python release notes","count":5}
+{"query":"Rust release notes","country":"DE","freshness":"pw","content":true}
+```
 
-- **DNS pinning**：校验时解析并固定一个安全 IP；chromedp 用 `--host-resolver-rules="MAP host ip"` 强制 Chrome 复用该 IP，HTTP 兜底路径直连该 IP 并保留原始 `Host`/SNI——两条路径都无法二次解析，杜绝 DNS rebinding；
-- 超时 60s（`fetchTimeout`；聊天管线内联抓取用更短的 `pipelineFetchTimeout` 15s），单页读取上限 100KB（`maxBodySize`）；GitHub `blob` 链接自动改写为 `raw.githubusercontent.com`；
-- LLM 调用带 `purpose=web_fetch_summary` 元数据，便于用量归因。
+- `count` 指定结果数量，范围是 1 到当前 Agent 配置的最大结果数（最多 20）；省略时沿用现有 Agent 默认值。
+- `country` / `freshness` 通过新增的 Brave 提供商生效。地区接受两字母代码或 `ALL`，时效接受 `pd` / `pw` / `pm` / `py` 或 `YYYY-MM-DDtoYYYY-MM-DD`。Brave 默认地区为 US；其它提供商暂不支持这些过滤，显式传入时返回错误，不会静默忽略。参数取值参见 [Brave 官方 API 文档](https://api-dashboard.search.brave.com/api-reference/web/search/get)。
+- 在联网搜索设置中新建 Brave Search 配置并填写 API Key，可使用现有代理配置；API Key 沿用加密存储和独立凭据接口。
+- `content` 默认关闭。设为 `true` 时，按搜索结果顺序显式抓取正文（单页 10 秒，最多返回 5,000 字符摘录）。结果区分提供商摘要与已抓取的页面正文，抓取失败仍保留摘要；完整正文地址通过 `full_output_path` 返回。搜索和独立 `web_fetch` 共用本轮快照。
+- Brave 的相对 `age` 原样保留，避免把“2 days ago”伪造为精确发布日期。
 
-### 共享抓取器：`internal/infrastructure/web_fetch`
+- 保留现有多搜索引擎、租户配置、代理、黑名单与日期能力，provider 仍由 Agent 运行配置解析。
+- 去除空查询、无效 URL、重复结果；最大结果数来自 Agent 配置，上限 20。
+- Agent 搜索不再调用 `CompressWithRAG`，不创建临时知识库，不依赖嵌入/重排模型或 Redis 临时状态。聊天快速回答管线的 RAG 压缩配置仍由原管线处理。
+- 模型输出包含标题、域名、可用日期与 wN 页面 ID。摘要与 provider content 标为未经页面验证的搜索证据；每段最多 1,500 字符，整批证据预算 16,000 字符。
 
-`fetcher.go` 同时服务 Agent 工具与聊天管线（`WEB_FETCH` 阶段给高分网页取正文）：SSRF 校验 + `utils.NewSSRFSafeHTTPClient`（重定向逐跳复验）+ 浏览器仿真请求头 + 读取上限，正文抽取用 goquery 移除 `script/style/nav/footer/header/iframe/img` 后取纯文本。`ErrorDetails(err)` 把内部错误映射成上面那张错误码表，调用方据此决定是否重试。
+### web_fetch
 
-> 关于 readability：`codeberg.org/readeck/go-readability/v2`（go.mod）目前用于 RSS 数据源连接器（`internal/datasource/connector/rss/client.go` 的 `extractArticle`，对文章页做正文净化），`web_fetch` 使用 goquery 做正文抽取。
+调用示例：
+
+```json
+{"items":[{"url":"w1"},{"url":"https://example.com/guide","limit":4000}]}
+```
+
+- 接受已知的 wN 页面 ID，也接受用户提供或页面中发现的 HTTP(S) URL。短 ID 在模型上下文边界还原，UI 与持久化结果保留真实 URL。
+- 已移除 `prompt` 参数，工具 schema 仅暴露 `url`、`offset`、`limit`。不再调用第二个模型进行摘要，主 Agent 直接分析网页正文。
+- HTML 先用 Readability 提取正文；成功时直接转换完整提取结果，失败时才回退到 main/article/body，避免二次选择内部 `.content` 节点丢失相邻段落。转为 Markdown 后，保留标题、段落、链接、表格和代码。相对链接以最终 HTTP URL 解析；嵌入资源不会自动下载。
+- 纯文本、Markdown、JSON/XML 直接读取，避免把 `<...>` 当 HTML 丢掉。二进制格式明确报告 `unsupported_content`。
+- HTTP 优先，现有 Chromium 动态页面兜底保留。网络请求继续经过共享 SSRF 校验、安全客户端与 DNS pinning。
+- 每批最多 8 项；相同规范 URL、offset、limit 去重。各项独立返回 `success` / `failed` / `skipped`，部分失败保留成功正文。
+- `offset` 是从 0 开始的 Unicode 字符偏移，`limit` 默认及上限均为 8,000。批次按输出预算分配正文空间，返回 `offset`、`returned_chars`、`content_length`、`truncated`；有剩余内容时返回 `next_offset`。
+- 使用同一 URL 与 `offset=next_offset` 续读。内存缓存最多 8 个页面快照，仅用于本次运行的字符续读；快照被淘汰后可通过返回的 `full_output_path` 继续读取同一份完整正文，不必重新抓网页。旧式字符续读在缓存失效时仍返回 `snapshot_expired`，避免拼接不同版本页面。
+- 抓取后将完整 Markdown 保存到会话所属租户的文件存储，返回 `web://...` 格式的 `full_output_path`。`read_file` 可跨轮读取这些文件，无需启用沙箱。正文与生成它的 assistant 消息绑定，读取检查租户、会话所有者、会话、消息和网页专用绑定；普通附件不能作为网页读出。删除消息或会话后不可访问，存储保留策略与现有软删除消息附件一致。
+- 保存失败不会丢弃已经抓到的正文：结果包含 `storage_error`，此时续读仅限本轮内存缓存。单个保存的 Markdown 上限 8 MiB。
+- `read_file` 的 `offset` 是从 1 开始的行号，`limit` 最多 2,000 行，网页读取最多 50 KiB，并继续受 Agent 输出预算约束。遇到超长单行时返回 `next_offset` 和 `next_line_offset`，使用 `offset` 加 `line_offset` 续读原行；这样无沙箱 Agent 也不需要执行 shell。
+- Agent 单页下载上限 2 MiB，超限报告 `body_too_large`，不会把静默截断的 HTML 冒充完整页面。请求超时仍为 60 秒，Agent 抓取接受 HTTP 2xx 响应。
+- 失败继续返回稳定错误码与可重试标记。临时失败可合理重试；永久失败可选择其他相关来源，证据不足时说明缺口。一次整批失败不会强制终止研究，也不能视为验证成功。
+- 关闭联网时，无论旧 `allowed_tools` 是否列出这两个工具，运行时均不注册。失败网页不再作为成功网页引用展示。
+
+共享抓取器的快速回答路径继续使用 `NewPipelineFetcher`：15 秒超时、100 KiB 下载上限、HTTP-only 与原纯文本抽取。
+
+### 行为调整与回归验证
+
+| 行为 | 调整前 WeKnora Agent | 调整后 |
+| --- | --- | --- |
+| 搜索前置 | 强制两个 KB 工具，即使未注册 | 根据任务与可用来源选择 |
+| 搜索附带处理 | 可自动入临时 KB 做 RAG | 直接返回搜索证据，按需读页 |
+| 读页参数 | 强制 url + prompt | url，按需 offset/limit |
+| 正文分析 | 每页再调用模型摘要 | 主 Agent 直接读 Markdown |
+| 截断 | 每页/整批限额，后续页面可能空白，无续读 | 每页保留份额、完整正文存储、跨轮按行续读 |
+| 失败 | 整批失败强制停止搜索 | 保留已有证据，合理重试或换源 |
+
+保留多搜索引擎、wN 引用、批量调用、租户开关与 SSRF 防护；通过 Brave 适配器支持 country/freshness，不支持过滤的提供商返回明确错误。显式 `content=true` 与独立 `web_fetch` 都可读页。
+
+正文提取使用 Go Readability / Markdown 库。本地 HTML 回归样例覆盖完整文章的相邻段落、结构化内容、链接目录及代码缩进，检查正文结构和链接保留情况，避免二次裁剪丢失段落。运行 `go test ./internal/infrastructure/web_fetch -run TestMarkdownExtractionFixtures` 可验证。
 
 ## docker/searxng 的角色
 

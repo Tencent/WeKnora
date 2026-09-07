@@ -271,8 +271,8 @@ flowchart TD
 | `database_query` | SQL（SELECT-only） | 只读查询白名单表（`knowledge_bases`/`knowledges`/`chunks`），自动注入 tenant_id 过滤与 `deleted_at IS NULL`；SQL 参数在 UI/Langfuse 中脱敏 |
 | `data_schema` | `knowledge_id`\*（`dN`） | 读取 CSV/Excel 文件的 `table_summary` + `table_column` 类型分块，返回表名、列信息与行数 |
 | `data_analysis` | `knowledge_id`\*、`sql`\* | 把 CSV/Excel 载入 DuckDB 后执行 SQL；多 Sheet Excel 合并为一张表并暴露 `__sheet_name` 列；自动纠正列名大小写/空格差异；会话结束 Cleanup 时 DROP 所建表 |
-| `web_search` | `query`\* | 联网搜索；描述中强制 "KB First" 规则（必须先 grep_chunks + knowledge_search）；结果经 RAG 压缩、缓存进会话级临时知识库，返回 `wN` 页面短 ID |
-| `web_fetch` | `items[]`\*（每项 `url`=`wN`、`prompt`） | 并发抓取网页（SSRF 安全客户端 + DNS pinning，必要时 chromedp 渲染），抽取正文后用小模型按 prompt 摘要；60s 超时。逐 URL 返回 `success`/`failed`/`skipped` 状态与可重试错误码，部分失败不影响其它页面 |
+| `web_search` | `query`\*，可选 `count`、`country`、`freshness`、`content` | 联网搜索，直接返回提供商的标题、摘要和 `wN` 页面短 ID；按任务需要选择知识库或联网检索，Agent 搜索不再自动进行 RAG 压缩；Brave 支持地区/时效过滤，`content=true` 显式抓正文并返回完整正文地址 |
+| `web_fetch` | `items[]`\*（每项 `url`\*=`wN` 或 HTTP(S) URL，可选 `offset`、`limit`） | 并发抓取最多 8 个网页（SSRF 安全客户端 + DNS pinning，必要时 chromedp 渲染），直接返回 Markdown 或支持的文本正文；60s 超时。按字符分页，使用 `next_offset` 续读；完整正文保存在 `full_output_path`，可用 `read_file` 跨轮按行读取；逐 URL 返回 `success`/`failed`/`skipped` 状态与可重试错误码，部分失败不影响其它页面 |
 | `read_skill` | `skill_name`\*、`file_path` | 读取技能 SKILL.md 全文（Level 2）或技能目录内指定文件（Level 3），并列出目录内可执行脚本 |
 | `execute_skill_script` | `skill_name`\*、`script_path`\*、`args[]`、`input`（stdin） | 在沙箱中执行技能脚本，返回 stdout/stderr/exit code/duration/killed |
 | `wiki_search` | `queries[]`\*（正则）、`limit`（默认 10）、`knowledge_base_id` | 在 Wiki 页面（标题/内容/slug/摘要）上做 POSIX 正则搜索，返回带 `bN` 标记的页面与摘要；已见 slug 去重 |
