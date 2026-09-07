@@ -131,6 +131,7 @@ var supportedEmbedLocales = map[string]struct{}{
 	"zh-CN": {},
 	"en-US": {},
 	"ko-KR": {},
+	"ja-JP": {},
 	"ru-RU": {},
 }
 

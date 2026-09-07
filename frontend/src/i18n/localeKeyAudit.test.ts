@@ -197,6 +197,7 @@ test('prune rebuild restores registered audit keys from baked-in English default
     'en-US': {},
     'zh-CN': {},
     'ko-KR': {},
+    'ja-JP': {},
     'ru-RU': {},
   } as Record<LocaleName, Record<string, unknown>>
   const rebuilt = rebuildPrunedLocales(emptyBundles, usage)

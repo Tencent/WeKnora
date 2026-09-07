@@ -4,6 +4,6 @@ window.__RUNTIME_CONFIG__ = {
   MAX_SKILL_BUNDLE_SIZE_MB: 256,
   // Optional: serve embed on a dedicated origin, e.g. 'https://embed.example.com'
   EMBED_BASE_URL: '',
-  // Optional: default UI locale for first-time visitors (zh-CN | en-US | ru-RU | ko-KR)
+  // Optional: default UI locale for first-time visitors (zh-CN | en-US | ru-RU | ko-KR | ja-JP)
   DEFAULT_LOCALE: '',
 };

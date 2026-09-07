@@ -63,7 +63,7 @@ type EmbedChannel struct {
 | `widget_position` | string | `bottom-right` | `bottom-right` \| `bottom-left` \| `top-right` \| `top-left` |
 | `allow_web_search` | bool | `false` | 访客侧是否允许联网搜索开关 |
 | `allow_file_upload` | bool | `false` | 访客侧是否允许上传图片/文件 |
-| `default_locale` | string | 空（跟随浏览器） | `zh-CN` \| `en-US` \| `ko-KR` \| `ru-RU` |
+| `default_locale` | string | 空（跟随浏览器） | `zh-CN` \| `en-US` \| `ko-KR` \| `ja-JP` \| `ru-RU` |
 | `webhook_url` | string | 空 | 事件回调地址，**必须为 HTTPS 且通过 SSRF 校验**（禁止内网/链路本地地址） |
 | `webhook_secret` | string | 空 | webhook 签名密钥（API 响应中永不回显） |
 

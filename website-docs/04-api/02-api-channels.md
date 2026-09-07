@@ -131,7 +131,7 @@ API key：`manage_channels`/full。Handler: `internal/handler/embed_channel.go`
 | `header_title_mode` | string | 否 | `channel`（默认）/`session` |
 | `show_suggested_questions` | bool | 否 | 默认 true |
 | `allow_web_search` / `allow_file_upload` | bool | 否 | 默认 false |
-| `default_locale` | string | 否 | `zh-CN/en-US/ko-KR/ru-RU`/空（跟随浏览器） |
+| `default_locale` | string | 否 | `zh-CN/en-US/ko-KR/ja-JP/ru-RU`/空（跟随浏览器） |
 | `webhook_url` / `webhook_secret` | string | 否 | 访客事件 webhook |
 | `agent_id` | string | 否 | 绑定 Agent |
 

@@ -18,7 +18,7 @@ WeKnora 的 Web 前端是一个基于 **Vue 3 + TypeScript + Vite** 的单页应
 | UI 组件库 | TDesign (tdesign-vue-next) | ^1.19.2 | 配合 `tdesign-icons-vue-next` 0.4.4（版本被 overrides 锁定） |
 | 状态管理 | Pinia | ^3.0.4 | 全部 store 位于 `frontend/src/stores/` |
 | 路由 | Vue Router | ^4.5.0 | `createWebHistory`，见 `frontend/src/router/index.ts` |
-| 多语言 | vue-i18n | ^11.4.2 | zh-CN / en-US / ru-RU / ko-KR |
+| 多语言 | vue-i18n | ^11.4.2 | zh-CN / en-US / ru-RU / ko-KR / ja-JP |
 | HTTP | axios | ^1.16.0 | 统一实例封装于 `frontend/src/utils/request.ts` |
 | SSE 流式 | @microsoft/fetch-event-source | ^2.0.1 | 聊天流式回复，见 `frontend/src/api/chat/streame.ts` |
 | Markdown 渲染 | marked / marked-katex-extension / katex / highlight.js / mermaid | — | 聊天答案富文本渲染（公式、代码高亮、图表） |
@@ -57,7 +57,7 @@ flowchart TB
 
     subgraph io["数据访问层"]
         API["API 封装 (src/api)<br/>axios 实例 + SSE 流式"]
-        I18N["多语言 (src/i18n)<br/>zh-CN / en-US / ru-RU / ko-KR"]
+        I18N["多语言 (src/i18n)<br/>zh-CN / en-US / ru-RU / ko-KR / ja-JP"]
         WAILS["桌面绑定 (src/wailsjs)<br/>Wails 自动生成"]
     end
 
@@ -255,6 +255,7 @@ RAG 流水线的可视化进度（`views/chat/components/RagPipelineProgress.vue
   - `en-US`（英语）
   - `ru-RU`（俄语）
   - `ko-KR`（韩语）
+  - `ja-JP`（日语）
 - 语言选择持久化在 `localStorage` 的 `locale` key；axios 拦截器会把当前语言写入 `Accept-Language` 请求头，使后端返回本地化内容。
 - 因部分翻译刻意内嵌 `<strong>` 标记（经 DOMPurify 消毒后 v-html 渲染），配置了 `warnHtmlMessage: false` 关闭 vue-i18n 的 HTML 告警。
 - **Embed 独立 i18n**：访客侧嵌入页使用单独的 `frontend/src/i18n/embed.ts`（由 `embed-main.ts` 加载），管理端「网页嵌入」文案仍在主语言包中；`frontend/src/i18n/locales/embed/index.ts` 统一 re-export 语言归一化助手（支持从 URL 参数同步 embed 语言）。
@@ -299,7 +300,7 @@ RAG 流水线的可视化进度（`views/chat/components/RagPipelineProgress.vue
 
 `frontend/docker-entrypoint.sh`（运行时配置注入）：
 
-1. 生成 `/usr/share/nginx/html/config.js`，把 `MAX_FILE_SIZE_MB`（默认 50）与 `DEFAULT_LOCALE`（可选，默认空）写入 `window.__RUNTIME_CONFIG__` 供前端运行时读取；entrypoint 仅允许 `zh-CN|en-US|ru-RU|ko-KR`，非法值会被丢弃；
+1. 生成 `/usr/share/nginx/html/config.js`，把 `MAX_FILE_SIZE_MB`（默认 50）与 `DEFAULT_LOCALE`（可选，默认空）写入 `window.__RUNTIME_CONFIG__` 供前端运行时读取；entrypoint 仅允许 `zh-CN|en-US|ru-RU|ko-KR|ja-JP`，非法值会被丢弃；
 2. 用 `envsubst` 渲染 nginx 模板，可配置环境变量：`MAX_FILE_SIZE_MB`、`DEFAULT_LOCALE`、`APP_HOST`（默认 `app`）、`APP_PORT`（默认 `8080`）、`APP_SCHEME`（默认 `http`，远程 HTTPS 后端可设 `https`）；
 3. 前台启动 nginx。
 
