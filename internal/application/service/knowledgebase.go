@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -51,6 +52,13 @@ type knowledgeBaseService struct {
 	dsScheduler     *datasource.Scheduler
 	audit           interfaces.AuditLogService
 	resourceCatalog interfaces.ResourceCatalog
+	// queryEmbCache deduplicates SiliconFlow embedding API calls across
+	// repeated query texts (agent multi-turn loops, chat follow-ups, KB
+	// fan-out). Bounded LRU; nil-safe (always initialized in constructor).
+	queryEmbCache *common.LRUCache
+	// queryEmbLocks serializes concurrent embeddings of the same query text
+	// so a cache miss cannot fan out N identical API calls.
+	queryEmbLocks *embeddingKeyedLocks
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
@@ -96,6 +104,11 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		dsScheduler:     dsScheduler,
 		audit:           audit,
 		resourceCatalog: resourceCatalog,
+		// Query-embedding LRU: bounded in-process cache keyed by
+		// modelID|queryText. 2000 entries × 16KB avg ≈ 32MB worst case;
+		// 24h TTL keeps the cache bounded even when the model is swapped.
+		queryEmbCache: common.NewLRUCache(2000, 24*time.Hour),
+		queryEmbLocks: newEmbeddingKeyedLocks(),
 	}
 }
 

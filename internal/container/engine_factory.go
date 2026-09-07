@@ -14,6 +14,7 @@ import (
 	"github.com/go-sql-driver/mysql" // 通过 database/sql 注册 mysql 驱动给 Doris 使用
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/qdrant/go-client/qdrant"
+	"github.com/redis/go-redis/v9"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
 	wgrpc "github.com/weaviate/weaviate-go-client/v5/weaviate/grpc"
@@ -43,10 +44,10 @@ import (
 // injected into VectorStoreService for dynamic registry updates. The
 // EngineFactory type itself is unchanged — the audit sink is captured in the
 // closure rather than added to the signature.
-func NewEngineFactory(db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService) interfaces.EngineFactory {
+func NewEngineFactory(db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService, rdb *redis.Client) interfaces.EngineFactory {
 	sink := newAuditSinkAdapter(auditSvc)
 	return func(ctx context.Context, store types.VectorStore) (interfaces.RetrieveEngineService, error) {
-		return createEngineServiceFromStore(ctx, store, db, cfg, sink)
+		return createEngineServiceFromStore(ctx, store, db, cfg, sink, rdb)
 	}
 }
 
@@ -59,13 +60,14 @@ func createEngineServiceFromStore(
 	db *gorm.DB,
 	cfg *config.Config,
 	auditSink openSearchRepo.AuditSink,
+	rdb *redis.Client,
 ) (interfaces.RetrieveEngineService, error) {
 	if err := validateRuntimeVectorStoreAddresses(store); err != nil {
 		return nil, err
 	}
 	switch store.EngineType {
 	case types.PostgresRetrieverEngineType:
-		return createPostgresEngine(store, db)
+		return createPostgresEngine(store, db, rdb)
 	case types.ElasticsearchRetrieverEngineType:
 		return createElasticsearchEngine(store, cfg)
 	case types.QdrantRetrieverEngineType:
@@ -156,9 +158,9 @@ func createOpenSearchEngine(
 	return retriever.NewKVHybridRetrieveEngine(repo, types.OpenSearchRetrieverEngineType), nil
 }
 
-func createPostgresEngine(store types.VectorStore, db *gorm.DB) (interfaces.RetrieveEngineService, error) {
+func createPostgresEngine(store types.VectorStore, db *gorm.DB, rdb *redis.Client) (interfaces.RetrieveEngineService, error) {
 	if store.ConnectionConfig.UseDefaultConnection {
-		repo := postgresRepo.NewPostgresRetrieveEngineRepository(db)
+		repo := postgresRepo.NewPostgresRetrieveEngineRepository(db, rdb)
 		return retriever.NewKVHybridRetrieveEngine(repo, types.PostgresRetrieverEngineType), nil
 	}
 	// Phase 1: only UseDefaultConnection is supported.

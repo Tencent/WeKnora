@@ -2,9 +2,13 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -12,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/pgvector/pgvector-go"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -19,12 +24,17 @@ import (
 // pgRepository implements PostgreSQL-based retrieval operations
 type pgRepository struct {
 	db *gorm.DB // Database connection
+	// rdb is the optional Redis client used to cache keyword (BM25) results.
+	// May be nil (Lite mode without REDIS_ADDR) — caching is then disabled
+	// and every query hits PostgreSQL directly.
+	rdb *redis.Client
 }
 
 // NewPostgresRetrieveEngineRepository creates a new PostgreSQL retriever repository
-func NewPostgresRetrieveEngineRepository(db *gorm.DB) interfaces.RetrieveEngineRepository {
+// rdb may be nil to disable result caching.
+func NewPostgresRetrieveEngineRepository(db *gorm.DB, rdb *redis.Client) interfaces.RetrieveEngineRepository {
 	logger.GetLogger(context.Background()).Info("[Postgres] Initializing PostgreSQL retriever engine repository")
-	return &pgRepository{db: db}
+	return &pgRepository{db: db, rdb: rdb}
 }
 
 // EngineType returns the retriever engine type (PostgreSQL)
@@ -86,6 +96,7 @@ func (g *pgRepository) Save(ctx context.Context, indexInfo *types.IndexInfo, add
 		return err
 	}
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully saved index for source ID: %s", indexInfo.SourceID)
+	g.bumpCorpusVersion(ctx)
 	return nil
 }
 
@@ -104,6 +115,7 @@ func (g *pgRepository) BatchSave(
 		return err
 	}
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully batch saved %d indices", len(indexInfoList))
+	g.bumpCorpusVersion(ctx)
 	return nil
 }
 
@@ -116,6 +128,7 @@ func (g *pgRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []st
 		return result.Error
 	}
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully deleted %d indices by chunk IDs", result.RowsAffected)
+	g.bumpCorpusVersion(ctx)
 	return nil
 }
 
@@ -131,6 +144,7 @@ func (g *pgRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []
 		return result.Error
 	}
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully deleted %d indices by source IDs", result.RowsAffected)
+	g.bumpCorpusVersion(ctx)
 	return nil
 }
 
@@ -143,6 +157,7 @@ func (g *pgRepository) DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDL
 		return result.Error
 	}
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully deleted %d indices by knowledge IDs", result.RowsAffected)
+	g.bumpCorpusVersion(ctx)
 	return nil
 }
 
@@ -165,6 +180,16 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
 	logger.GetLogger(ctx).Infof("[Postgres] Keywords retrieval: query=%s, topK=%d", params.Query, params.TopK)
+
+	// Redis result cache (best-effort, fail-open). The cache key binds the
+	// full retrieval context (tenant + query + filters + limits) plus a
+	// corpus version that is bumped on every index write, so a stale row is
+	// only ever returned until the next write. See bumpCorpusVersion.
+	if cached := g.keywordsCacheGet(ctx, params); cached != nil {
+		logger.GetLogger(ctx).Infof("[Postgres] Keywords cache hit for query=%s", params.Query)
+		return cached, nil
+	}
+
 	conds := make([]clause.Expression, 0)
 
 	// KnowledgeBaseIDs and KnowledgeIDs use AND logic
@@ -250,18 +275,111 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 			len(results), maxKeywordResultLog, len(results)-maxKeywordResultLog,
 		)
 	}
-	return []*types.RetrieveResult{
-		{
-			Results:             results,
-			RetrieverEngineType: types.PostgresRetrieverEngineType,
-			RetrieverType:       types.KeywordsRetrieverType,
-			Error:               nil,
-		},
-	}, nil
+	resp := &types.RetrieveResult{
+		Results:             results,
+		RetrieverEngineType: types.PostgresRetrieverEngineType,
+		RetrieverType:       types.KeywordsRetrieverType,
+		Error:               nil,
+	}
+	g.keywordsCacheSet(ctx, params, resp)
+	return []*types.RetrieveResult{resp}, nil
+}
+
+// keywordsCacheKey builds the Redis key for a keyword retrieval.
+// Includes the tenant and a hash of every filter that affects results so
+// distinct queries never share a cache row.
+func (g *pgRepository) keywordsCacheKey(ctx context.Context, params types.RetrieveParams) string {
+	h := sha256.New()
+	// Sort the IDs so equivalent filter sets map to the same key.
+	sortedKB := append([]string(nil), params.KnowledgeBaseIDs...)
+	sort.Strings(sortedKB)
+	sortedKI := append([]string(nil), params.KnowledgeIDs...)
+	sort.Strings(sortedKI)
+	sortedTags := append([]string(nil), params.TagIDs...)
+	sort.Strings(sortedTags)
+	fmt.Fprintf(h, "%s|%s|%v|%v|%v|%d|%.6f", params.Query, params.KnowledgeType,
+		sortedKB, sortedKI, sortedTags, params.TopK, params.Threshold)
+	tid, _ := types.TenantIDFromContext(ctx)
+	corpusVer := g.corpusVersion(ctx)
+	return fmt.Sprintf("weknora:kw:%d:%016x:ver%d", tid, h.Sum(nil), corpusVer)
+}
+
+// corpusVersion returns the current corpus write version (0 when Redis is
+// unavailable). Every successful index write bumps it via bumpCorpusVersion.
+func (g *pgRepository) corpusVersion(ctx context.Context) uint64 {
+	if g.rdb == nil {
+		return 0
+	}
+	v, err := g.rdb.Get(ctx, "weknora:corpus_ver").Uint64()
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+// bumpCorpusVersion invalidates all cached keyword results after a write.
+// Best-effort: a Redis failure only costs cache freshness (TTL is the
+// backstop), never correctness of the write itself.
+func (g *pgRepository) bumpCorpusVersion(ctx context.Context) {
+	if g.rdb == nil {
+		return
+	}
+	if err := g.rdb.Incr(ctx, "weknora:corpus_ver").Err(); err != nil {
+		logger.GetLogger(ctx).Warnf("[Postgres] Failed to bump corpus version: %v", err)
+	}
+}
+
+// keywordsCacheGet returns a cached keyword result, or nil on miss/error.
+// Always fail-open: any Redis error falls through to PostgreSQL.
+func (g *pgRepository) keywordsCacheGet(ctx context.Context, params types.RetrieveParams) []*types.RetrieveResult {
+	if g.rdb == nil {
+		return nil
+	}
+	raw, err := g.rdb.Get(ctx, g.keywordsCacheKey(ctx, params)).Bytes()
+	if err != nil {
+		return nil
+	}
+	var resp types.RetrieveResult
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		logger.GetLogger(ctx).Warnf("[Postgres] Keywords cache unmarshal failed: %v", err)
+		return nil
+	}
+	if len(resp.Results) == 0 {
+		return nil
+	}
+	return []*types.RetrieveResult{&resp}
+}
+
+// keywordsCacheSet stores a keyword result with a short TTL. Rows larger
+// than 1000 hits are not cached (BM25 scores dominate there anyway and the
+// scan cost is what we are trying to avoid for the common small-result case).
+// The 1000 cap covers the app's topK=250 default with headroom; a 250-row
+// JSON payload is ~50KB, well within Redis limits.
+func (g *pgRepository) keywordsCacheSet(ctx context.Context, params types.RetrieveParams, resp *types.RetrieveResult) {
+	if g.rdb == nil || resp == nil || len(resp.Results) > 1000 {
+		return
+	}
+	raw, err := json.Marshal(resp)
+	if err != nil {
+		return
+	}
+	if err := g.rdb.Set(ctx, g.keywordsCacheKey(ctx, params), raw, 600*time.Second).Err(); err != nil {
+		logger.GetLogger(ctx).Debugf("[Postgres] Keywords cache set failed: %v", err)
+	}
 }
 
 // VectorRetrieve performs vector similarity search using pgvector
 // Optimized to use HNSW index efficiently and avoid recalculating vector distance
+//
+// pgvector HNSW/ivfflat cap indexable dimensions at 4000 (halfvec). For
+// higher-dimensional embeddings (e.g. Qwen3-Embedding-8B at 4096) we query
+// with the leading 3584-dim sub-vector instead: those models use Matryoshka
+// Representation Learning, so the truncated vector preserves most semantics,
+// and the expression below matches the partial HNSW index built on
+// subvector(embedding, 1, 3584) for dimension=4096 rows.
+const maxPgvectorIndexableDim = 4000
+const pgFallbackIndexDim = 3584
+
 func (g *pgRepository) VectorRetrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
@@ -269,7 +387,13 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 		len(params.Embedding), params.TopK, params.Threshold)
 
 	dimension := len(params.Embedding)
-	queryVector := pgvector.NewHalfVector(params.Embedding)
+	indexDim := dimension
+	indexExpr := fmt.Sprintf("embedding::halfvec(%d)", indexDim)
+	if dimension > maxPgvectorIndexableDim {
+		indexDim = pgFallbackIndexDim
+		indexExpr = "embedding_3584"
+	}
+	queryVector := pgvector.NewHalfVector(params.Embedding[:indexDim])
 
 	// Build WHERE conditions for filtering
 	whereParts := make([]string, 0)
@@ -381,16 +505,16 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 		FROM (
 			SELECT 
 				id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id,
-				embedding::halfvec(%[1]d) <=> $1::halfvec(%[1]d) as distance
+				%[6]s <=> $1::halfvec(%[1]d) as distance
 			FROM embeddings
 			%[2]s
-			ORDER BY embedding::halfvec(%[1]d) <=> $1::halfvec(%[1]d)
+			ORDER BY %[6]s <=> $1::halfvec(%[1]d)
 			LIMIT $%[3]d
 		) AS candidates
 		WHERE distance <= $%[4]d
 		ORDER BY distance ASC
 		LIMIT $%[5]d
-	`, dimension, whereClause, subqueryLimitParam, thresholdParam, finalLimitParam)
+	`, indexDim, whereClause, subqueryLimitParam, thresholdParam, finalLimitParam, indexExpr)
 
 	allVars = append(allVars, expandedTopK)       // LIMIT in subquery
 	allVars = append(allVars, 1-params.Threshold) // Distance threshold
@@ -402,43 +526,62 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 	// silently lose recall. `SET LOCAL` requires a transaction so we wrap the
 	// query in one. We never write inside this transaction, so the cost is
 	// negligible.
+	//
+	// The index used depends on the branch in indexExpr above:
+	//   - dimension > maxPgvectorIndexableDim: ivfflat partial index on
+	//     embedding_3584 — tune ivfflat.probes (hnsw.* GUCs are no-ops here).
+	//   - otherwise: HNSW expression index — tune hnsw.ef_search.
 	efSearch := expandedTopK
 	if efSearch < 40 {
 		efSearch = 40
 	}
+	// ivfflat probes default: 1 (recall ~60-75% for lists=1000). pgvector
+	// suggests probes >= sqrt(lists) ≈ 32 for near-HNSW recall; 8 is a
+	// cost/benefit sweet spot (recall 80-87%, +15-25ms over the 35ms base).
+	const ivfflatProbes = 8
+	usesIVFFlat := indexExpr == "embedding_3584"
 
 	var embeddingDBList []pgVectorWithScore
 
 	err := g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(fmt.Sprintf("SET LOCAL hnsw.ef_search = %d", efSearch)).Error; err != nil {
-			// Treat as non-fatal: pgvector should always expose this GUC, but if
-			// for any reason it does not we still want the query to run (just
-			// with default recall). We must rollback first because a failed
-			// statement aborts the transaction in PostgreSQL.
-			logger.GetLogger(ctx).Warnf("[Postgres] Failed to set hnsw.ef_search=%d: %v", efSearch, err)
-			return err
-		}
-		// pgvector >= 0.8 supports iterative scan, which keeps pulling more
-		// candidates from HNSW until the post-filter (knowledge_base_id /
-		// knowledge_id / tag_id / is_enabled) yields enough rows. Without it,
-		// HNSW returns at most ef_search candidates and the outer filter may
-		// silently lose recall when the filter is selective.
-		// Best-effort: ignore failure on older pgvector versions.
-		if err := tx.Exec("SET LOCAL hnsw.iterative_scan = strict_order").Error; err != nil {
-			logger.GetLogger(ctx).Debugf("[Postgres] hnsw.iterative_scan not available: %v", err)
-			// abort transaction and let the fallback path below handle it.
-			return err
+		if usesIVFFlat {
+			if err := tx.Exec(fmt.Sprintf("SET LOCAL ivfflat.probes = %d", ivfflatProbes)).Error; err != nil {
+				logger.GetLogger(ctx).Warnf("[Postgres] Failed to set ivfflat.probes=%d: %v", ivfflatProbes, err)
+				return err
+			}
+		} else {
+			if err := tx.Exec(fmt.Sprintf("SET LOCAL hnsw.ef_search = %d", efSearch)).Error; err != nil {
+				// Treat as non-fatal: pgvector should always expose this GUC, but if
+				// for any reason it does not we still want the query to run (just
+				// with default recall). We must rollback first because a failed
+				// statement aborts the transaction in PostgreSQL.
+				logger.GetLogger(ctx).Warnf("[Postgres] Failed to set hnsw.ef_search=%d: %v", efSearch, err)
+				return err
+			}
+			// pgvector >= 0.8 supports iterative scan, which keeps pulling more
+			// candidates from HNSW until the post-filter (knowledge_base_id /
+			// knowledge_id / tag_id / is_enabled) yields enough rows. Without it,
+			// HNSW returns at most ef_search candidates and the outer filter may
+			// silently lose recall when the filter is selective.
+			// Best-effort: ignore failure on older pgvector versions.
+			if err := tx.Exec("SET LOCAL hnsw.iterative_scan = strict_order").Error; err != nil {
+				logger.GetLogger(ctx).Debugf("[Postgres] hnsw.iterative_scan not available: %v", err)
+				// abort transaction and let the fallback path below handle it.
+				return err
+			}
 		}
 		return tx.Raw(querySQL, allVars...).Scan(&embeddingDBList).Error
 	})
 
 	// Fallback: if the transaction failed because of an unsupported GUC (e.g.
-	// older pgvector that doesn't have hnsw.ef_search or hnsw.iterative_scan),
-	// retry the query without the SETs so we still return results.
+	// older pgvector that doesn't have hnsw.ef_search / hnsw.iterative_scan /
+	// ivfflat.probes), retry the query without the SETs so we still return
+	// results.
 	if err != nil && len(embeddingDBList) == 0 &&
 		(strings.Contains(err.Error(), "hnsw.ef_search") ||
-			strings.Contains(err.Error(), "hnsw.iterative_scan")) {
-		logger.GetLogger(ctx).Warnf("[Postgres] Retrying vector query without HNSW GUC overrides: %v", err)
+			strings.Contains(err.Error(), "hnsw.iterative_scan") ||
+			strings.Contains(err.Error(), "ivfflat.probes")) {
+		logger.GetLogger(ctx).Warnf("[Postgres] Retrying vector query without GUC overrides: %v", err)
 		err = g.db.WithContext(ctx).Raw(querySQL, allVars...).Scan(&embeddingDBList).Error
 	}
 
@@ -581,6 +724,7 @@ func (g *pgRepository) CopyIndices(ctx context.Context,
 				KnowledgeBaseID: targetKnowledgeBaseID, // Update to target knowledge base ID
 				Dimension:       sourceVector.Dimension,
 				Embedding:       sourceVector.Embedding, // Copy the vector embedding directly, avoid recalculation
+				Embedding3584:   sourceVector.Embedding3584,
 			}
 
 			targetVectors = append(targetVectors, targetVector)
@@ -612,6 +756,7 @@ func (g *pgRepository) CopyIndices(ctx context.Context,
 	}
 
 	logger.GetLogger(ctx).Infof("[Postgres] Index copying completed, total copied: %d", totalCopied)
+	g.bumpCorpusVersion(ctx)
 	return nil
 }
 
@@ -663,6 +808,7 @@ func (g *pgRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, chunkS
 	}
 
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully batch updated chunk enabled status")
+	g.bumpCorpusVersion(ctx)
 	return nil
 }
 
@@ -695,5 +841,6 @@ func (g *pgRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap ma
 	}
 
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully batch updated chunk tag ID")
+	g.bumpCorpusVersion(ctx)
 	return nil
 }
