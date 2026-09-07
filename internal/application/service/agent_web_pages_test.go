@@ -167,8 +167,9 @@ func TestSharedAgentWebPagesUseSessionOwnerStorageScope(t *testing.T) {
 	reader, err := registry.GetTool(tools.ToolReadFile)
 	require.NoError(t, err)
 	path := strings.Replace(ref, "resource://", "web://", 1)
-	_, err = reader.Execute(ctx, []byte(fmt.Sprintf(`{"path":%q}`, path)))
+	result, err := reader.Execute(ctx, []byte(fmt.Sprintf(`{"path":%q}`, path)))
 	require.NoError(t, err)
+	require.False(t, result.Success, "resolver is expected to fail after routing to the session owner tenant")
 	require.Equal(t, uint64(7), storageTenant)
 }
 

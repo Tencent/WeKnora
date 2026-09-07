@@ -50,6 +50,7 @@ const (
 	ErrorConnection         ErrorCode = "connection_failed"
 	ErrorBodyTooLarge       ErrorCode = "body_too_large"
 	ErrorUnsupportedContent ErrorCode = "unsupported_content"
+	ErrorSnapshotExpired    ErrorCode = "snapshot_expired"
 )
 
 // FetchError carries stable, machine-readable failure details.

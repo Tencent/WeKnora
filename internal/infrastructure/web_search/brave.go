@@ -62,11 +62,10 @@ func (p *BraveProvider) SearchWithFilters(
 		maxResults = 5
 	}
 	maxResults = min(maxResults, 20)
-	country := strings.ToUpper(filters.Country)
-	if country == "" {
-		country = "US"
+	params := url.Values{"q": {query}, "count": {strconv.Itoa(maxResults)}}
+	if country := strings.ToUpper(filters.Country); country != "" {
+		params.Set("country", country)
 	}
-	params := url.Values{"q": {query}, "count": {strconv.Itoa(maxResults)}, "country": {country}}
 	if filters.Freshness != "" {
 		params.Set("freshness", filters.Freshness)
 	}

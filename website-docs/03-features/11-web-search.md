@@ -115,9 +115,9 @@ flowchart TD
 ```
 
 - `count` 指定结果数量，范围是 1 到当前 Agent 配置的最大结果数（最多 20）；省略时沿用现有 Agent 默认值。
-- `country` / `freshness` 通过新增的 Brave 提供商生效。地区接受两字母代码或 `ALL`，时效接受 `pd` / `pw` / `pm` / `py` 或 `YYYY-MM-DDtoYYYY-MM-DD`。Brave 默认地区为 US；其它提供商暂不支持这些过滤，显式传入时返回错误，不会静默忽略。参数取值参见 [Brave 官方 API 文档](https://api-dashboard.search.brave.com/api-reference/web/search/get)。
+- `country` / `freshness` 通过新增的 Brave 提供商生效。地区接受两字母代码或 `ALL`，时效接受 `pd` / `pw` / `pm` / `py` 或 `YYYY-MM-DDtoYYYY-MM-DD`。省略 `country` 时不向 Brave 传该参数（Brave 自身默认 US）；显式 `ALL` 表示全球结果。其它提供商暂不支持这些过滤，显式传入时返回错误，不会静默忽略。参数取值参见 [Brave 官方 API 文档](https://api-dashboard.search.brave.com/api-reference/web/search/get)。
 - 在联网搜索设置中新建 Brave Search 配置并填写 API Key，可使用现有代理配置；API Key 沿用加密存储和独立凭据接口。
-- `content` 默认关闭。设为 `true` 时，按搜索结果顺序显式抓取正文（单页 10 秒，最多返回 5,000 字符摘录）。结果区分提供商摘要与已抓取的页面正文，抓取失败仍保留摘要；完整正文地址通过 `full_output_path` 返回。搜索和独立 `web_fetch` 共用本轮快照。
+- `content` 默认关闭。设为 `true` 时，并行抓取前 3 条结果的正文（整批 15 秒预算，每页最多 5,000 字符摘录）；其余结果保留搜索摘要，需用 `web_fetch` 继续读页。抓取失败仍保留摘要；完整正文地址通过 `full_output_path` 返回。搜索和独立 `web_fetch` 共用本轮快照，短超时不会取消正在进行的共享抓取。
 - Brave 的相对 `age` 原样保留，避免把“2 days ago”伪造为精确发布日期。
 
 - 保留现有多搜索引擎、租户配置、代理、黑名单与日期能力，provider 仍由 Agent 运行配置解析。
@@ -140,7 +140,7 @@ flowchart TD
 - HTTP 优先，现有 Chromium 动态页面兜底保留。网络请求继续经过共享 SSRF 校验、安全客户端与 DNS pinning。
 - 每批最多 8 项；相同规范 URL、offset、limit 去重。各项独立返回 `success` / `failed` / `skipped`，部分失败保留成功正文。
 - `offset` 是从 0 开始的 Unicode 字符偏移，`limit` 默认及上限均为 8,000。批次按输出预算分配正文空间，返回 `offset`、`returned_chars`、`content_length`、`truncated`；有剩余内容时返回 `next_offset`。
-- 使用同一 URL 与 `offset=next_offset` 续读。内存缓存最多 8 个页面快照，仅用于本次运行的字符续读；快照被淘汰后可通过返回的 `full_output_path` 继续读取同一份完整正文，不必重新抓网页。旧式字符续读在缓存失效时仍返回 `snapshot_expired`，避免拼接不同版本页面。
+- 使用同一 URL 与 `offset=next_offset` 续读。内存缓存最多 8 个页面快照，仅用于本次运行的字符续读；快照被淘汰后可通过返回的 `full_output_path` 继续读取同一份完整正文，不必重新抓网页。旧式字符续读在缓存失效时返回可重试的 `snapshot_expired`（从 offset 0 重抓，或改用 `read_file`），避免拼接不同版本页面。同一批里的续读会等首次抓取完成。
 - 抓取后将完整 Markdown 保存到会话所属租户的文件存储，返回 `web://...` 格式的 `full_output_path`。`read_file` 可跨轮读取这些文件，无需启用沙箱。正文与生成它的 assistant 消息绑定，读取检查租户、会话所有者、会话、消息和网页专用绑定；普通附件不能作为网页读出。删除消息或会话后不可访问，存储保留策略与现有软删除消息附件一致。
 - 保存失败不会丢弃已经抓到的正文：结果包含 `storage_error`，此时续读仅限本轮内存缓存。单个保存的 Markdown 上限 8 MiB。
 - `read_file` 的 `offset` 是从 1 开始的行号，`limit` 最多 2,000 行，网页读取最多 50 KiB，并继续受 Agent 输出预算约束。遇到超长单行时返回 `next_offset` 和 `next_line_offset`，使用 `offset` 加 `line_offset` 续读原行；这样无沙箱 Agent 也不需要执行 shell。

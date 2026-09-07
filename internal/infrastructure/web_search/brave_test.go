@@ -48,7 +48,7 @@ func TestBraveDefaultsLimitsAndErrors(t *testing.T) {
 	}{{0, "5"}, {99, "20"}} {
 		transport := braveTransport(func(r *http.Request) (*http.Response, error) {
 			require.Equal(t, tc.count, r.URL.Query().Get("count"))
-			require.Equal(t, "US", r.URL.Query().Get("country"))
+			require.False(t, r.URL.Query().Has("country"))
 			require.False(t, r.URL.Query().Has("freshness"))
 			return &http.Response{
 				StatusCode: 429, Body: io.NopCloser(strings.NewReader("secret upstream diagnostics")),
@@ -64,4 +64,20 @@ func TestBraveDefaultsLimitsAndErrors(t *testing.T) {
 	provider, err := NewBraveProvider(types.WebSearchProviderParameters{APIKey: "test"})
 	require.NoError(t, err)
 	require.ErrorIs(t, provider.(*BraveProvider).client.CheckRedirect(nil, nil), http.ErrUseLastResponse)
+}
+
+func TestBraveOmitsCountryUnlessRequestedAndForwardsALL(t *testing.T) {
+	var got string
+	p := &BraveProvider{apiKey: "k", client: &http.Client{Transport: braveTransport(
+		func(r *http.Request) (*http.Response, error) {
+			got = r.URL.Query().Get("country")
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"web":{"results":[]}}`))}, nil
+		},
+	)}}
+	_, err := p.Search(t.Context(), "query", 1, false)
+	require.NoError(t, err)
+	require.Empty(t, got)
+	_, err = p.SearchWithFilters(t.Context(), "query", 1, false, types.WebSearchFilters{Country: "ALL"})
+	require.NoError(t, err)
+	require.Equal(t, "ALL", got)
 }

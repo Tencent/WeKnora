@@ -68,3 +68,31 @@ func TestAgentWebSearchValidatesQueryAndNormalizesResultLimit(t *testing.T) {
 	assert.False(t, result.Success)
 	assert.Zero(t, svc.calls)
 }
+
+func TestAgentWebSearchContentFetchesLeadingPagesOnly(t *testing.T) {
+	svc := &searchOnlyWebService{results: []*types.WebSearchResult{
+		{URL: "https://example.com/a", Snippet: "a"},
+		{URL: "https://example.com/b", Snippet: "b"},
+		{URL: "https://example.com/c", Snippet: "c"},
+		{URL: "https://example.com/d", Snippet: "d"},
+		{URL: "https://example.com/e", Snippet: "e"},
+	}}
+	contents := map[string]string{}
+	for _, result := range svc.results {
+		contents[result.URL] = "page " + result.URL
+	}
+	fetcher := newStubWebContentFetcher(contents, nil)
+	search := NewWebSearchTool(svc, 5, "provider").WithPageReader(newWebFetchTool(fetcher))
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))
+	result, err := search.Execute(ctx, []byte(`{"query":"q","content":true}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Len(t, fetcher.callCount, 3)
+	rows := result.Data["results"].([]map[string]interface{})
+	require.Len(t, rows, 5)
+	assert.Equal(t, "success", rows[0]["page_status"])
+	assert.Equal(t, "success", rows[2]["page_status"])
+	assert.Equal(t, "skipped", rows[3]["page_status"])
+	assert.Equal(t, "skipped", rows[4]["page_status"])
+	assert.Equal(t, "d", rows[3]["snippet"])
+}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	webfetch "github.com/Tencent/WeKnora/internal/infrastructure/web_fetch"
@@ -308,5 +309,108 @@ func TestWebFetchDoesNotCacheFailuresAndBoundsSnapshots(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, expired.Success)
 	assert.Contains(t, expired.Output, "snapshot_expired")
+	assert.Contains(t, expired.Output, "Retryable: true")
 	assert.Equal(t, 2, fetcher.callCount[rawURL], "must not splice a new page into a continuation")
+}
+
+type gatingWebContentFetcher struct {
+	*stubWebContentFetcher
+	started, release chan struct{}
+}
+
+func (f *gatingWebContentFetcher) Fetch(ctx context.Context, rawURL string) (string, error) {
+	select {
+	case <-f.started:
+	default:
+		close(f.started)
+	}
+	select {
+	case <-f.release:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	return f.stubWebContentFetcher.Fetch(ctx, rawURL)
+}
+
+func TestWebFetchBatchContinuationWaitsForInFlightSnapshot(t *testing.T) {
+	const rawURL = "https://example.com/page"
+	fetcher := &gatingWebContentFetcher{
+		stubWebContentFetcher: newStubWebContentFetcher(map[string]string{rawURL: "abcdefghij"}, nil),
+		started:               make(chan struct{}),
+		release:               make(chan struct{}),
+	}
+	tool := newWebFetchTool(fetcher)
+	done := make(chan *types.ToolResult, 1)
+	go func() {
+		result, err := tool.Execute(t.Context(), webFetchArgs(
+			WebFetchItem{URL: rawURL, Limit: 4},
+			WebFetchItem{URL: rawURL, Offset: 4},
+		))
+		require.NoError(t, err)
+		done <- result
+	}()
+	<-fetcher.started
+	close(fetcher.release)
+	result := <-done
+	require.True(t, result.Success, result.Error)
+	items := result.Data["results"].([]map[string]interface{})
+	require.Len(t, items, 2)
+	assert.Equal(t, "abcd", items[0]["raw_content"])
+	assert.Equal(t, "efghij", items[1]["raw_content"])
+	assert.Equal(t, 1, fetcher.callCount[rawURL])
+}
+
+func TestWebFetchContinuationDoesNotCancelSharedFetch(t *testing.T) {
+	const rawURL = "https://example.com/shared"
+	fetcher := &gatingWebContentFetcher{
+		stubWebContentFetcher: newStubWebContentFetcher(map[string]string{rawURL: "shared page body"}, nil),
+		started:               make(chan struct{}),
+		release:               make(chan struct{}),
+	}
+	tool := newWebFetchTool(fetcher)
+	longDone := make(chan *types.ToolResult, 1)
+	go func() {
+		result, err := tool.Execute(context.Background(), webFetchArgs(WebFetchItem{URL: rawURL}))
+		require.NoError(t, err)
+		longDone <- result
+	}()
+	<-fetcher.started
+	short, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	shortResult, err := tool.Execute(short, webFetchArgs(WebFetchItem{URL: rawURL, Offset: 2}))
+	require.NoError(t, err)
+	require.False(t, shortResult.Success)
+	assert.Contains(t, shortResult.Output, "connection_timeout")
+	close(fetcher.release)
+	longResult := <-longDone
+	require.True(t, longResult.Success, longResult.Error)
+	assert.Equal(t, 1, fetcher.callCount[rawURL])
+}
+
+func TestWebFetchOwnerTimeoutDoesNotCancelSharedFetch(t *testing.T) {
+	const rawURL = "https://example.com/owner"
+	fetcher := &gatingWebContentFetcher{
+		stubWebContentFetcher: newStubWebContentFetcher(map[string]string{rawURL: "owner page body"}, nil),
+		started:               make(chan struct{}),
+		release:               make(chan struct{}),
+	}
+	tool := newWebFetchTool(fetcher)
+	longDone := make(chan *types.ToolResult, 1)
+	go func() {
+		result, err := tool.Execute(context.Background(), webFetchArgs(WebFetchItem{URL: rawURL}))
+		require.NoError(t, err)
+		longDone <- result
+	}()
+	<-fetcher.started
+	short, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	shortResult, err := tool.Execute(short, webFetchArgs(WebFetchItem{URL: rawURL}))
+	require.NoError(t, err)
+	require.False(t, shortResult.Success)
+	assert.Contains(t, shortResult.Output, "connection_timeout")
+	close(fetcher.release)
+	longResult := <-longDone
+	require.True(t, longResult.Success, longResult.Error)
+	assert.Equal(t, "owner page body", longResult.Data["results"].([]map[string]interface{})[0]["raw_content"])
+	assert.Equal(t, 1, fetcher.callCount[rawURL])
 }
