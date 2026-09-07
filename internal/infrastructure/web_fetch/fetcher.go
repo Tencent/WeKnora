@@ -441,6 +441,10 @@ func newFetchError(code ErrorCode, retryable bool, format string, args ...interf
 }
 
 func htmlToText(html string) (string, error) {
+	// Binary responses served as text/html (e.g. PDFs) leak raw bytes,
+	// including NUL, into the extracted text. NUL later breaks jsonb
+	// persistence (SQLSTATE 22P05), so drop it before parsing.
+	html = strings.ReplaceAll(html, "\x00", "")
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		fallback := stripTags(html)

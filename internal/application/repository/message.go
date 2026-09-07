@@ -1,8 +1,11 @@
 package repository
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"slices"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -126,9 +129,53 @@ func (r *messageRepository) ListMessagesBySessionAfterTime(
 
 // UpdateMessage updates an existing message
 func (r *messageRepository) UpdateMessage(ctx context.Context, message *types.Message) error {
-	return r.db.WithContext(ctx).Model(&types.Message{}).Where(
+	err := r.db.WithContext(ctx).Model(&types.Message{}).Where(
 		"id = ? AND session_id = ?", message.ID, message.SessionID,
 	).Updates(message).Error
+	if err != nil && isUnsupportedUnicodeEscape(err) {
+		// jsonb columns reject the six-char NUL escape sequence that Go's json.Marshal emits
+		// for NUL bytes carried in from binary content (e.g. raw PDF bytes
+		// fetched by web search). Strip them and retry once so a completed
+		// answer is never lost to a dirty reference payload.
+		stripNulFromMessage(message)
+		return r.db.WithContext(ctx).Model(&types.Message{}).Where(
+			"id = ? AND session_id = ?", message.ID, message.SessionID,
+		).Updates(message).Error
+	}
+	return err
+}
+
+// isUnsupportedUnicodeEscape reports whether err is PostgreSQL's SQLSTATE
+// 22P05 (unsupported Unicode escape sequence), raised when a jsonb value
+// contains the escaped NUL code point.
+func isUnsupportedUnicodeEscape(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "22P05") || strings.Contains(msg, "unsupported Unicode escape sequence")
+}
+
+var nulEscape = []byte{'\\', 'u', '0', '0', '0', '0'}
+
+// stripNulFromMessage removes NUL bytes (serialized as escapes) from
+// every jsonb-bound field plus the text columns, so a retried update can pass
+// PostgreSQL's jsonb validation.
+func stripNulFromMessage(message *types.Message) {
+	for _, field := range []any{
+		&message.KnowledgeReferences,
+		&message.AgentSteps,
+		&message.MentionedItems,
+		&message.Images,
+		&message.Attachments,
+		&message.Artifacts,
+		&message.Usage,
+	} {
+		data, err := json.Marshal(field)
+		if err != nil || !bytes.Contains(data, nulEscape) {
+			continue
+		}
+		_ = json.Unmarshal(bytes.ReplaceAll(data, nulEscape, nil), field)
+	}
+	message.Content = strings.ReplaceAll(message.Content, "\x00", "")
+	message.RenderedContent = strings.ReplaceAll(message.RenderedContent, "\x00", "")
 }
 
 // DeleteMessage deletes a message
