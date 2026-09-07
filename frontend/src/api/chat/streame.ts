@@ -7,22 +7,12 @@ import {
   sanitizeStreamRequestBody,
   type StreamRequestMeta,
 } from '@/utils/chatRequestDebug';
-import { refreshAccessTokenShared, forceReloginRedirect } from '@/utils/request';
-
-/**
- * The SSE handshake was rejected for auth reasons.
- *
- * Streaming runs on raw fetch, outside the axios instance, so nothing else
- * refreshes the token for it. This marker lets startStream tell "your login
- * expired" apart from a genuine stream failure and recover instead of showing
- * a dead-end "HTTP 401" toast.
- */
-class StreamAuthError extends Error {
-  constructor(readonly status: number) {
-    super(`HTTP ${status}`);
-    this.name = 'StreamAuthError';
-  }
-}
+import {
+  StreamAuthError,
+  isStreamAuthError,
+  refreshAccessTokenShared,
+  runStreamWithAuthRetry,
+} from '@/utils/authRefresh';
 
 interface StreamOptions {
   // 请求方法 (默认POST)
@@ -52,6 +42,7 @@ export function useStream() {
   // 启动流式请求
   const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; agent_enabled?: boolean; agent_id?: string; agent_source_tenant_id?: string | number; web_search_enabled?: boolean; summary_model_id?: string; mcp_service_ids?: string[]; skill_names?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string; service_id?: string; skill_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; attachment_ids?: string[]; suggestion_attribution?: { suggestion_set_id: string; question_id: string }; method: string; url: string; embed_token?: string; embed_session_sig?: string; embed_visitor_id?: string }) => {
     const myGeneration = ++streamGeneration
+    const streamAbort = controller
     // 重置状态
     output.value = '';
     error.value = null;
@@ -180,7 +171,7 @@ export function useStream() {
           params.method == "POST"
             ? JSON.stringify(postBody)
             : null,
-        signal: controller.signal,
+        signal: streamAbort.signal,
         openWhenHidden: true,
 
         onopen: async (res) => {
@@ -209,9 +200,7 @@ export function useStream() {
         },
 
         onerror: (err) => {
-          // Let the auth marker through unwrapped so startStream can act on
-          // it; wrapping would turn it into an opaque string.
-          if (err instanceof StreamAuthError) throw err;
+          if (isStreamAuthError(err)) throw err;
           throw new Error(`${i18n.global.t('error.streamFailed')}: ${err}`);
         },
 
@@ -220,42 +209,19 @@ export function useStream() {
         },
       });
 
-      try {
-        await runStream(token);
-      } catch (err) {
-        // Embed visitors authenticate with an Embed token that this SPA
-        // cannot refresh — surface the failure instead of bouncing them.
-        if (!(err instanceof StreamAuthError) || embedToken) throw err;
-
-        // The access token died between page load and send. Most often the
-        // account was logged out elsewhere: the backend's Logout revokes
-        // every token issued to that user, so another device signing out
-        // kills this session mid-conversation. Reuse the axios refresh path
-        // (shared queue, so concurrent 401s trigger one refresh) and replay.
-        console.warn('[Stream] auth rejected on handshake, refreshing token and retrying once');
-        let refreshedToken: string;
-        try {
-          refreshedToken = await refreshAccessTokenShared();
-        } catch {
-          // Credentials cleared and /login redirect already issued.
-          throw new Error(i18n.global.t('error.pleaseRelogin'));
-        }
-
-        // A newer send superseded this one while we were refreshing.
-        if (myGeneration !== streamGeneration) return;
-
-        try {
-          await runStream(refreshedToken);
-        } catch (retryErr) {
-          if (retryErr instanceof StreamAuthError) {
-            // A token minted seconds ago was rejected — the session is gone
-            // for good (revoked, not merely expired). Send them to /login.
-            forceReloginRedirect();
-            throw new Error(i18n.global.t('error.pleaseRelogin'));
-          }
-          throw retryErr;
-        }
-      }
+      await runStreamWithAuthRetry({
+        run: runStream,
+        initialToken: token,
+        isEmbed: Boolean(embedToken),
+        isCurrent: () => myGeneration === streamGeneration && !streamAbort.signal.aborted,
+        refreshAccessToken: () => refreshAccessTokenShared({
+          messages: {
+            pleaseRelogin: i18n.global.t('error.pleaseRelogin'),
+            tokenRefreshFailed: i18n.global.t('error.tokenRefreshFailed'),
+          },
+        }),
+        reloginMessage: i18n.global.t('error.pleaseRelogin'),
+      });
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
       stopStream()
