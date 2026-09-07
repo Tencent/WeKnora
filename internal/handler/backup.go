@@ -384,7 +384,7 @@ func (h *BackupHandler) Restore(c *gin.Context) {
 		_ = c.Error(apperrors.NewInternalServerError("restore failed"))
 		return
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	archivePath := ""
 	if f, ferr := c.FormFile(backupMultipartFile); ferr == nil {
@@ -1273,14 +1273,14 @@ func gunzipFile(in, out string, maxBytes int64) error {
 	return dst.Close()
 }
 
-// versionAtLeast reports whether v >= min. Leading X.Y.Z is parsed even when
-// followed by a prerelease/git suffix. Completely unparseable values (dev
-// builds, "unknown") compare as equal so local builds are not locked out of
-// restoring their own archives; a parseable archive vs parseable instance
-// still enforces the numeric gate.
-func versionAtLeast(v, min string) bool {
+// versionAtLeast reports whether v is at least floor. Leading X.Y.Z is parsed
+// even when followed by a prerelease/git suffix. Completely unparseable
+// values (dev builds, "unknown") compare as equal so local builds are not
+// locked out of restoring their own archives; a parseable archive vs
+// parseable instance still enforces the numeric gate.
+func versionAtLeast(v, floor string) bool {
 	vv, vok := parseVersion(v)
-	mv, mok := parseVersion(min)
+	mv, mok := parseVersion(floor)
 	if !vok || !mok {
 		return true
 	}
