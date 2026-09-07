@@ -215,7 +215,8 @@ func TestResolveImageOCRHit_DoesNotDuplicateRecognizedText(t *testing.T) {
 			},
 			"parent": {
 				ID: "parent", ChunkType: types.ChunkTypeParentText,
-				Content: "long grandparent context\n\nintro\n\nmatched image body text\n\noutro\n\n![matched](u1)\n\nmore context",
+				Content: "long grandparent context\n\nintro\n\n" +
+					"matched image body text\n\noutro\n\n![matched](u1)\n\nmore context",
 			},
 		},
 	}
