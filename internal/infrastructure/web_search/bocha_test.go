@@ -50,11 +50,62 @@ func TestBochaProviderSearch(t *testing.T) {
 	if results[0].Source != "bocha" || results[0].PublishedAt == nil {
 		t.Fatalf("unexpected first result: %+v", results[0])
 	}
-	if want := time.Date(2026, 8, 9, 8, 18, 30, 0, time.UTC); !results[0].PublishedAt.Equal(want) {
+	if want := time.Date(2026, 8, 9, 0, 18, 30, 0, time.UTC); !results[0].PublishedAt.Equal(want) {
 		t.Fatalf("date = %v, want %v", results[0].PublishedAt, want)
 	}
 	if results[1].PublishedAt != nil {
 		t.Fatalf("invalid date should be ignored: %v", results[1].PublishedAt)
+	}
+}
+
+func TestBochaProviderSearchDates(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		published   string
+		lastCrawled string
+		includeDate bool
+		want        string
+	}{
+		{"legacy fallback", "", "2026-08-09T02:18:30Z", true, "2026-08-08T18:18:30Z"},
+		{"invalid published fallback", "invalid", " 2026-08-09T02:18:30.123Z ", true, "2026-08-08T18:18:30.123Z"},
+		{"published UTC preferred", "2026-08-09T02:18:30Z", "2026-08-09T02:18:30Z", true, "2026-08-09T02:18:30Z"},
+		{"published explicit offset", "2026-08-09T02:18:30+08:00", "invalid", true, "2026-08-08T18:18:30Z"},
+		{"fallback explicit offset", "", "2026-08-09T02:18:30+08:00", true, "2026-08-08T18:18:30Z"},
+		{"invalid dates", "invalid", "invalid", true, ""},
+		{"date excluded", "2026-08-09T02:18:30+08:00", "2026-08-09T02:18:30Z", false, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				var response bochaSearchResponse
+				response.Code = 200
+				response.Data.WebPages.Value = []bochaWebPage{{
+					Name: "Result", URL: "https://example.com",
+					DatePublished: tt.published, DateLastCrawled: tt.lastCrawled,
+				}}
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(response); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			bocha := &BochaProvider{
+				client: server.Client(), baseURL: server.URL, apiKey: "sk-test", freshness: defaultBochaFreshness,
+			}
+			results, err := bocha.Search(context.Background(), "test", 1, tt.includeDate)
+			if err != nil || len(results) != 1 {
+				t.Fatalf("results = %v, err = %v", results, err)
+			}
+			got := results[0].PublishedAt
+			if tt.want == "" {
+				if got != nil {
+					t.Fatalf("date = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil || got.UTC().Format(time.RFC3339Nano) != tt.want {
+				t.Fatalf("date = %v, want %s", got, tt.want)
+			}
+		})
 	}
 }
 

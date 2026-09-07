@@ -50,7 +50,7 @@ func NewBochaProvider(params types.WebSearchProviderParameters) (interfaces.WebS
 	}
 	return &BochaProvider{
 		client: client, baseURL: defaultBochaSearchURL,
-		apiKey: strings.TrimSpace(params.APIKey),
+		apiKey:    strings.TrimSpace(params.APIKey),
 		freshness: bochaFreshness(params.ExtraConfig), summary: bochaSummary(params.ExtraConfig),
 	}, nil
 }
@@ -141,7 +141,7 @@ func (p *BochaProvider) Search(ctx context.Context, query string, maxResults int
 		if includeDate {
 			if publishedAt, ok := parseBochaDate(item.DatePublished); ok {
 				result.PublishedAt = &publishedAt
-			} else if publishedAt, ok := parseBochaDate(item.DateLastCrawled); ok {
+			} else if publishedAt, ok := parseBochaLastCrawled(item.DateLastCrawled); ok {
 				result.PublishedAt = &publishedAt
 			}
 		}
@@ -187,6 +187,16 @@ func bochaHTTPError(statusCode int, body []byte) error {
 		return fmt.Errorf("Bocha API returned status %d", statusCode)
 	}
 	return fmt.Errorf("Bocha API returned status %d: %s", statusCode, detail)
+}
+
+func parseBochaLastCrawled(value string) (time.Time, bool) {
+	// Bocha v1's legacy dateLastCrawled field labels UTC+8 wall time with Z.
+	// Correct only this field; datePublished and explicit offsets are accurate.
+	value = strings.TrimSpace(value)
+	if strings.HasSuffix(value, "Z") {
+		value = strings.TrimSuffix(value, "Z") + "+08:00"
+	}
+	return parseBochaDate(value)
 }
 
 func parseBochaDate(value string) (time.Time, bool) {
