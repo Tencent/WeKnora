@@ -14,6 +14,9 @@ templates:
       ko-KR:
         name: "순수 에이전트"
         description: "순수 에이전트 모드용 시스템 프롬프트 (지식 베이스 미사용)"
+      ja-JP:
+        name: "ピュアエージェント"
+        description: "ピュアエージェントモード用のシステムプロンプト（ナレッジベース不使用）"
     mode: "pure"
     content: |
       You are WeKnora, an assistant developed by Tencent. Complete the user's request using the capabilities available in this turn.
@@ -39,6 +42,9 @@ templates:
       ko-KR:
         name: "프로그레시브 RAG 에이전트"
         description: "지식 베이스를 사용하는 프로그레시브 에이전틱 RAG 모드용 시스템 프롬프트"
+      ja-JP:
+        name: "プログレッシブRAGエージェント"
+        description: "ナレッジベースを使用するプログレッシブエージェンティックRAGモード用のシステムプロンプト"
     default: true
     mode: "rag"
     content: |
@@ -75,6 +81,9 @@ templates:
       ko-KR:
         name: "데이터 분석가"
         description: "DuckDB SQL 분석을 사용하는 데이터 분석 에이전트용 시스템 프롬프트"
+      ja-JP:
+        name: "データアナリスト"
+        description: "DuckDB SQLを用いた分析を行うデータ分析エージェント用のシステムプロンプト"
     mode: "data_analyst"
     content: |
       ### Role
@@ -124,6 +133,9 @@ templates:
       ko-KR:
         name: "위키 연구원"
         description: "지식 그래프 탐색 기능이 있는 위키 연구원 에이전트용 시스템 프롬프트"
+      ja-JP:
+        name: "Wikiリサーチャー"
+        description: "ナレッジグラフ探索を行うWikiリサーチャーエージェント用のシステムプロンプト"
     mode: "wiki_researcher"
     content: |
       <role>
@@ -189,6 +201,9 @@ templates:
       en-US:
         name: "Wiki Fixer System Prompt"
         description: "System prompt for repairing and optimizing Wiki pages based on linter issues"
+      ja-JP:
+        name: "Wiki修復システムプロンプト"
+        description: "リンターの指摘に基づいてWikiページを修復・最適化するためのシステムプロンプト"
     mode: "smart-reasoning"
     content: |
       <role>
@@ -272,6 +287,9 @@ templates:
       ko-KR:
         name: "하이브리드 RAG + 위키 에이전트"
         description: "Wiki와 벡터/키워드 인덱스가 동시에 활성화된 지식 베이스에서 사용하는 시스템 프롬프트"
+      ja-JP:
+        name: "ハイブリッドRAG + Wikiエージェント"
+        description: "Wikiとチャンク単位の検索を同時に有効化したナレッジベース用のシステムプロンプト"
     mode: "smart-reasoning"
     content: |
       <role>
@@ -395,6 +413,9 @@ templates:
       en-US:
         name: "Skill Installer System Prompt"
         description: "System prompt for installing an uploaded skill and its dependencies into the sandbox image"
+      ja-JP:
+        name: "スキルインストールシステムプロンプト"
+        description: "アップロードされたスキルとその依存関係をサンドボックスイメージにインストールするためのシステムプロンプト"
     mode: "smart-reasoning"
     content: |
       <role>
