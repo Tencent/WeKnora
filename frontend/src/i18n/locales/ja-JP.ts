@@ -6270,12 +6270,32 @@ export default {
     }
   },
   integrations: {
+    cli: {
+      title: 'WeKnora CLI',
+      subtitle: 'ターミナルからナレッジベースとドキュメントの管理、コンテンツの検索、質問ができます。CLI や MCP を通じてスクリプトや AI ツールと連携できます。',
+      docs: 'CLI ドキュメント',
+      docsHint: 'インストール手順と完全なコマンドリファレンス',
+      quickstart: 'クイックスタート',
+      installTitle: 'CLI をインストール',
+      installDesc: 'Git と Go 1.26 以上を使ってソースからビルドします。この macOS / Linux の例では PATH の設定は現在のターミナルでのみ有効です。継続的に使う場合は、バイナリを PATH 上のディレクトリに配置してください。',
+      connectTitle: 'このサーバーに接続',
+      connectDesc: 'weknora という名前のプロファイルを作成して有効化し、メールアドレスとパスワードでサインインします。同名のプロファイルが既にある場合は別の名前を選び、MCP の例もそれに合わせて変更してください。',
+      verifyTitle: '接続を確認',
+      verifyDesc: 'サーバーと認証の状態を確認し、アカウントがアクセスできるナレッジベースを一覧表示します。',
+      commandsTitle: 'よく使うコマンド',
+      commandsDesc: 'KB_ID をナレッジベース ID に置き換え、ファイルパス・検索語・質問を必要に応じて変更してください。アップロードしたドキュメントは解析が完了するまで検索できません。',
+      mcpTitle: 'MCP クライアントに接続',
+      mcpDesc: 'サインイン後、この設定を stdio 対応の MCP クライアントに追加してください。クライアントが weknora を見つけられない場合は、command をバイナリの絶対パスに変更してください。',
+      copy: 'コピー',
+      copied: 'コピーしました',
+    },
     title: '公開と連携',
     tabs: {
       im: 'IM連携',
       embed: 'Web埋め込み',
       api: 'API連携',
       chrome: 'Chrome拡張機能',
+      cli: 'CLI',
       claw: 'Claw スキル'
     },
     api: {
