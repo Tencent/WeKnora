@@ -378,6 +378,9 @@ func (p *PluginMerge) resolveParentChunks(
 			// surrounding text already covers the OCR/caption body nothing
 			// is added.
 			r.Content = searchutil.JoinChunkContent(r.Content, childRecognizedContent, "\n\n")
+			r.ImageInfo = searchutil.ClearImageInfoTextMatchingBody(
+				r.ImageInfo, childRecognizedContent, r.ChunkType,
+			)
 			r.ContentRewritten = true
 			pipelineInfo(ctx, "Merge", "image_parent_resolve", map[string]interface{}{
 				"child_id":   r.ID,
