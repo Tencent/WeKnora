@@ -3394,3 +3394,22 @@ func (s installFileService) DeleteFile(_ context.Context, ref string) error {
 func (installFileService) CopyFile(context.Context, string, uint64, string) (string, error) {
 	return "", nil
 }
+
+func TestSeededSkillHelperIsDirectlyExecutable(t *testing.T) {
+	raw, err := packSkillTar(&SkillBundle{Files: map[string][]byte{
+		"scripts/helper.sh": []byte("#!/bin/sh\nprintf 'helper works'\n"),
+	}})
+	require.NoError(t, err)
+	dir := t.TempDir()
+	cmd := exec.Command("tar", "-xf", "-", "-C", dir)
+	cmd.Stdin = bytes.NewReader(raw)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	helper := filepath.Join(dir, "scripts", "helper.sh")
+	out, err = exec.Command(helper).CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	require.Equal(t, "helper works", string(out))
+	info, err := os.Stat(helper)
+	require.NoError(t, err)
+	require.NotZero(t, info.Mode().Perm()&0o200, "the executable skill remains writable")
+}

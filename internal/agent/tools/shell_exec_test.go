@@ -20,16 +20,20 @@ type fakeShellExecutor struct {
 	err     error
 	timeout time.Duration
 	calls   int
+	command string
+	workDir string
+	env     map[string]string
 }
 
 func (f *fakeShellExecutor) ExecShellCommand(
 	_ context.Context,
 	_ string,
-	_ string,
-	_ string,
+	command string,
+	workDir string,
 	timeout time.Duration,
-	_ map[string]string,
+	env map[string]string,
 ) (*sandbox.ExecuteResult, error) {
+	f.command, f.workDir, f.env = command, workDir, env
 	f.timeout = timeout
 	f.calls++
 	if f.err != nil {
@@ -528,7 +532,7 @@ func TestShellExecHintsWhenVenvHasNoPip(t *testing.T) {
 	))
 	require.NoError(t, err)
 	require.True(t, result.Success)
-	assert.Contains(t, result.Output, "/opt/weknora/tenant/skills/律师助手/.venv/bin/python -m pip install")
+	assert.Contains(t, result.Output, skillPythonPackageInstallCommand)
 	assert.NotContains(t, result.Output, "/workspace/.skill-packages")
 	assert.NotContains(t, result.Output, "write_sandbox_file")
 }
@@ -550,4 +554,39 @@ func TestShellExecNeverSilentlyFallsBackFromNamedSkill(t *testing.T) {
 	require.False(t, result.Success)
 	require.Zero(t, executor.calls)
 	require.Contains(t, result.Error, "no skill environment")
+}
+
+func TestShellExecPackageRecoveryKeepsWorkspaceCWD(t *testing.T) {
+	for _, command := range []string{skillNodePackageInstallCommand, skillPythonPackageInstallCommand} {
+		executor := &fakeShellExecutor{}
+		tool := NewShellExecTool(executor, nil).WithSkillEnvironment(shellTestSkillEnvironment(t))
+		args, err := json.Marshal(ShellExecInput{
+			SkillName: "pdf-tools", Command: strings.ReplaceAll(command, "<package>", "test-package"),
+		})
+		require.NoError(t, err)
+		result, err := tool.Execute(shellExecTestContext(), args)
+		require.NoError(t, err)
+		require.True(t, result.Success, "%+v", result)
+		require.Equal(t, 1, executor.calls)
+		require.Equal(t, "/workspace", executor.workDir)
+		require.Equal(t, sandbox.SkillsImageRoot+"/pdf-tools", executor.env["WEKNORA_SKILL_DIR"])
+		require.Contains(t, executor.command, "$WEKNORA_SKILL_DIR")
+	}
+}
+
+func TestShellExecPackageRecoveryUsesNamedEnvironment(t *testing.T) {
+	tool := NewShellExecTool(&fakeShellExecutor{}, nil).WithSkillEnvironment(shellTestSkillEnvironment(t))
+	for _, name := range []string{"pdf-tools", "host-skill"} {
+		for _, stderr := range []string{
+			"No module named pip", "ModuleNotFoundError: No module named 'docx'", "Cannot find module 'example'",
+		} {
+			hint := tool.recoveryHint(name, 1, "python3 script.py", stderr)
+			require.Contains(t, hint, `skill_name="`+name+`"`)
+			require.Contains(t, hint, skillPythonPackageInstallCommand)
+			require.Contains(t, hint, skillPythonVenvCreateCommand)
+			require.Contains(t, hint, skillNodePackageInstallCommand)
+			require.NotContains(t, hint, sandbox.SkillsImageRoot)
+			require.NotContains(t, hint, "work_dir=", "package installation must keep the default workspace CWD")
+		}
+	}
 }

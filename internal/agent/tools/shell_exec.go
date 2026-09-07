@@ -132,8 +132,19 @@ var shellExecTool = BaseTool{
 - CWD defaults to /workspace on every call; cd does not persist. work_dir selects another directory under /workspace and missing directories are created as the same user.
 - Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. Read known paths directly; no mandatory discovery call.
 - Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).
-- skill_name selects a listed skill for this call. Installed skills use their Python virtualenv and Node modules; host skill resources are automatically staged in the session with the system runtime. Scoped credentials apply to both. Example: skill_name="pdf", command="python3 report.py". Run bundled scripts via "$WEKNORA_SKILL_DIR/scripts/...". Omit skill_name for system commands.
-- /workspace/input contains user attachments: preserve originals. /workspace/output is the only directory collected for download, so it takes finished deliverables only; keep scratch and intermediate files elsewhere under /workspace. A package a skill is missing goes into that skill's own environment: /opt/weknora/tenant/skills/<skill>/.venv/bin/python -m pip install <package>, or npm install with work_dir set to the skill directory. apt-get is available when the sandbox network policy allows it, but anything a skill needs permanently belongs in the skill installer: changes made here live and die with this session.
+- skill_name selects a listed skill for this call. Installed skills use their Python virtualenv and Node modules;
+  host resources are staged automatically and use the system runtime until a local .venv is created.
+  Scoped credentials apply to both. Example: skill_name="pdf", command="python3 report.py".
+  Run bundled scripts via "$WEKNORA_SKILL_DIR/scripts/...". Omit skill_name for system commands.
+- /workspace/input contains user attachments: preserve originals. /workspace/output is the only directory collected
+  for download, so it takes finished deliverables only; keep scratch and intermediate files elsewhere under /workspace.
+  apt-get is available when the sandbox network policy allows it; permanent dependencies belong in the skill installer.
+- Install extras with skill_name set and the default work_dir:
+  ` + "`" + skillPythonPackageInstallCommand + "`" + ` (no pip needed), or
+  ` + "`" + skillNodePackageInstallCommand + "`" + `.
+  If .venv is absent, create it with python3 -m venv --without-pip "$WEKNORA_SKILL_DIR/.venv".
+  Without uv, run the venv Python with -m ensurepip --upgrade before -m pip install.
+  Changes live and die with this session.
 - Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. Transport failures/timeouts are tool failures. Changing tools does not change permissions; do not repeat a denied operation through another tool.
 - stdout/stderr have independent byte limits, preserving head and tail when truncated. Full output is not automatically saved; redirect verbose commands to a workspace log when it must be retained. Binary bytes are suppressed.
 - Reference collected deliverables as ![description](sandbox:<file name>) using the exact filename.`,
@@ -721,12 +732,20 @@ func (t *ShellExecTool) recoveryHint(skillName string, exitCode int, command, st
 	if strings.Contains(lower, "permission denied") || strings.Contains(lower, "read-only file system") {
 		return "Permission denied: commands and file tools share the same user. Use /workspace for scratch files and /workspace/output for deliverables. Switching tools or retrying the same write cannot grant access; a path refused here is refused by the sandbox itself, not by file ownership."
 	}
+	if isSkillVenvInstallFailure(stderr) {
+		if skillName == "" {
+			skillName = skillNameFromShellCommand(command)
+		}
+		return missingSkillPackageGuidance(skillName)
+	}
 	if isMissingInterpreterModule(stderr) {
 		if skillName == "" {
 			return "If this command needs an installed skill's packages, repeat shell_exec with that skill_name to select its runtime. Otherwise install the missing dependency in the writable workspace."
 		}
 		if strings.Contains(stderr, "Cannot find module") || strings.Contains(stderr, "MODULE_NOT_FOUND") {
-			return "The selected skill runtime could not resolve this Node module. For custom scripts, install dependencies in a writable workspace project. NODE_PATH supports CommonJS; ESM imports resolve relative to the script and need a local dependency tree. Preserve the installed skill directory."
+			return missingSkillPackageGuidance(skillName) +
+				" NODE_PATH supports CommonJS; ESM imports resolve relative to the script, " +
+				"so custom ESM scripts need dependencies in their own workspace project."
 		}
 		return "The selected skill runtime lacks this module. " + missingSkillPackageGuidance(skillName)
 	}

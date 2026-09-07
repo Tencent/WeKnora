@@ -3,8 +3,6 @@ package tools
 import (
 	"strconv"
 	"strings"
-
-	"github.com/Tencent/WeKnora/internal/sandbox"
 )
 
 // A skill's dependencies are supposed to be complete when the install
@@ -26,22 +24,29 @@ import (
 // recommends, while any indirection through a shell variable walked straight
 // past it.
 
+// These commands run with skill_name so the shell environment supplies the
+// actual image or staged directory. Keep work_dir at its /workspace default.
+const (
+	skillPythonPackageInstallCommand  = `uv pip install --python "$WEKNORA_SKILL_DIR/.venv/bin/python" <package>`
+	skillPythonPackageFallbackCommand = `"$WEKNORA_SKILL_DIR/.venv/bin/python" -m ensurepip --upgrade && ` +
+		`"$WEKNORA_SKILL_DIR/.venv/bin/python" -m pip install <package>`
+	skillPythonVenvCreateCommand   = `python3 -m venv --without-pip "$WEKNORA_SKILL_DIR/.venv"`
+	skillNodePackageInstallCommand = `npm --prefix "$WEKNORA_SKILL_DIR" install <package>`
+)
+
 func missingSkillPackageGuidance(skillName string) string {
 	skillArg := "skill_name=<skill>"
-	skillDir := sandbox.SkillsImageRoot + "/<skill>"
 	if skillName != "" {
 		skillArg = "skill_name=" + strconv.Quote(skillName)
-		if dir, err := sandbox.SkillDirFor(skillName); err == nil {
-			skillDir = dir
-		}
 	}
-	return "the skill's install did not leave this package behind. " +
-		"Install it into the skill's own environment rather than the system one: " +
-		"`" + sandbox.SkillVenvPython(skillDir) + " -m pip install <package>` for Python, " +
-		"or `npm install <package>` with work_dir=" + strconv.Quote(skillDir) + " for Node. " +
-		"Then re-run shell_exec(" + skillArg + "), which selects that environment. " +
-		"The install is local to this session, so ask the user to reinstall the skill " +
-		"if every session needs the package."
+	return "Install missing packages with shell_exec(" + skillArg + ", command=...), leaving work_dir at /workspace. " +
+		"That named call supplies $WEKNORA_SKILL_DIR, the actual installed or staged skill directory. " +
+		"For Python, use `" + skillPythonPackageInstallCommand + "`; uv does not need pip in the virtualenv. " +
+		"If .venv is absent (as with staged host resources), first run `" + skillPythonVenvCreateCommand + "`. " +
+		"If uv is unavailable in a custom image, use `" + skillPythonPackageFallbackCommand + "`. " +
+		"For Node, use `" + skillNodePackageInstallCommand + "`. " +
+		"Then rerun the original command with the same skill_name. " +
+		"These changes live and die with this session; reinstall the skill if every session needs the package."
 }
 
 func isSkillVenvInstallFailure(stderr string) bool {

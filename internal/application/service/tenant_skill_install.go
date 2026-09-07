@@ -659,7 +659,9 @@ func packSkillTar(bundle *SkillBundle) ([]byte, error) {
 		content := bundle.Files[rel]
 		if err := tw.WriteHeader(&tar.Header{
 			Name: name,
-			Mode: 0o644,
+			// The former normalization pass made every bundled file executable.
+			// Preserve that contract at extraction while keeping the tree writable.
+			Mode: 0o755,
 			Size: int64(len(content)),
 		}); err != nil {
 			return nil, err
