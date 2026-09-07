@@ -64,12 +64,19 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 		apiCfg.AzureModelMapperFunc = func(model string) string {
 			return model
 		}
+		hasExplicitAPIVersion := false
 		if config.Extra != nil {
 			if v, ok := config.Extra["api_version"]; ok {
 				if vs, ok := v.(string); ok && vs != "" {
 					apiCfg.APIVersion = vs
+					hasExplicitAPIVersion = true
 				}
 			}
+		}
+		// GPT-5 / reasoning 模型需要足够新的 API 版本；DefaultAzureConfig
+		// 默认的 2023-05-15 不支持这些模型。用户显式指定时保留原值。
+		if !hasExplicitAPIVersion && provider.IsOpenAIReasoningOrGPT5Model(config.ModelName) {
+			apiCfg.APIVersion = "2025-04-01-preview"
 		}
 	} else {
 		apiCfg = openai.DefaultConfig(config.APIKey)
