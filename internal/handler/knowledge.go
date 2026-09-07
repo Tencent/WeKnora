@@ -1625,6 +1625,11 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 	logger.Infof(ctx, "Retrieving knowledge file, ID: %s", secutils.SanitizeForLog(id))
 
 	file, filename, err := h.kgService.GetKnowledgeFile(effCtx, id)
+	if previewer, ok := h.kgService.(interface {
+		GetKnowledgePreviewFile(context.Context, string) (io.ReadCloser, string, error)
+	}); ok {
+		file, filename, err = previewer.GetKnowledgePreviewFile(effCtx, id)
+	}
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError("Failed to retrieve file").WithDetails(err.Error()))

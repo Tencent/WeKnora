@@ -9,7 +9,7 @@ import 'highlight.js/styles/github.css';
 import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
-import { sanitizeHTML, sanitizeMarkdownHTML, safeMarkdownToHTML } from '@/utils/security';
+import { hydrateProtectedFileImages, sanitizeHTML, sanitizeMarkdownHTML, safeMarkdownToHTML } from '@/utils/security';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { renderMermaidToSvg } from '@/utils/mermaidShared';
 import {
@@ -50,6 +50,7 @@ const blobUrl = ref('');
 const textContent = ref('');
 const highlightedCode = ref('');
 const markdownHtml = ref('');
+const markdownContainer = ref<HTMLElement | null>(null);
 const excelHtml = ref('');
 const mermaidSvg = ref('');
 const htmlViewMode = ref<'render' | 'source'>('render');
@@ -205,6 +206,8 @@ async function renderMarkdown(blob: Blob) {
   // would otherwise inherit renderers installed by the chunk-content view.
   const rawHtml = marked.parse(safeText, { renderer }) as string;
   markdownHtml.value = sanitizeHTML(rawHtml);
+  await nextTick();
+  await hydrateProtectedFileImages(markdownContainer.value);
 }
 
 function onImageLoad(e: Event) {
@@ -478,7 +481,7 @@ onUnmounted(() => {
 
     <!-- Markdown -->
     <div v-else-if="previewType === 'markdown' && markdownHtml" class="preview-markdown">
-      <div class="markdown-body" v-html="markdownHtml" />
+      <div ref="markdownContainer" class="markdown-body" v-html="markdownHtml" />
     </div>
 
     <!-- Text / Code -->

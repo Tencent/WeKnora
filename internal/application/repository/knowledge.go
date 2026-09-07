@@ -99,6 +99,29 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 	return knowledges, nil
 }
 
+// FindKnowledgeByLogicalPath finds one uploaded file by its path inside a
+// knowledge base. The caller supplies already-normalized values; this method
+// intentionally does no path cleanup so a malformed reference cannot broaden
+// the database query.
+func (r *knowledgeRepository) FindKnowledgeByLogicalPath(
+	ctx context.Context,
+	tenantID uint64,
+	kbID, folderPath, fileName string,
+) (*types.Knowledge, error) {
+	var knowledge types.Knowledge
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND folder_path = ? AND file_name = ?", tenantID, kbID, folderPath, fileName).
+		Order("created_at DESC, id DESC").
+		First(&knowledge).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &knowledge, nil
+}
+
 // applyKnowledgeListFilter applies the optional filter dimensions of
 // KnowledgeListFilter to a GORM query. Tenant / knowledge base scoping must be
 // applied by the caller before invoking this helper.
