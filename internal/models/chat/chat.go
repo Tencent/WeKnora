@@ -26,11 +26,15 @@ type FunctionDef struct {
 
 // ChatOptions 聊天选项
 type ChatOptions struct {
-	Temperature         float64         `json:"temperature"`                   // 温度参数
-	TopP                float64         `json:"top_p"`                         // Top P 参数
-	Seed                int             `json:"seed"`                          // 随机种子
-	MaxTokens           int             `json:"max_tokens"`                    // 最大 token 数
-	MaxCompletionTokens int             `json:"max_completion_tokens"`         // 最大完成 token 数
+	Temperature float64 `json:"temperature"` // 温度参数
+	TopP        float64 `json:"top_p"`       // Top P 参数
+	Seed        int     `json:"seed"`        // 随机种子
+	// MaxTokens and MaxCompletionTokens are aliases for one completion budget.
+	// Callers may set either; CompletionBudget() prefers MaxCompletionTokens.
+	// The outbound Chat Completions JSON carries exactly one of max_tokens or
+	// max_completion_tokens, chosen per provider (see wireCompletionTokenField).
+	MaxTokens           int             `json:"max_tokens"`
+	MaxCompletionTokens int             `json:"max_completion_tokens"`
 	FrequencyPenalty    float64         `json:"frequency_penalty"`             // 频率惩罚
 	PresencePenalty     float64         `json:"presence_penalty"`              // 存在惩罚
 	Thinking            *bool           `json:"thinking"`                      // 是否启用思考

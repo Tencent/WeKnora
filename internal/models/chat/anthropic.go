@@ -268,10 +268,8 @@ func (c *AnthropicChat) buildRequest(_ context.Context, messages []Message, opts
 		Messages:  make([]anthropicMessage, 0, len(messages)),
 	}
 	if opts != nil {
-		if opts.MaxTokens > 0 {
-			req.MaxTokens = opts.MaxTokens
-		} else if opts.MaxCompletionTokens > 0 {
-			req.MaxTokens = opts.MaxCompletionTokens
+		if budget := opts.CompletionBudget(); budget > 0 {
+			req.MaxTokens = budget
 		}
 		if opts.Temperature > 0 {
 			temperature := opts.Temperature

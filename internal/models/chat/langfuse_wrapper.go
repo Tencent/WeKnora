@@ -193,11 +193,8 @@ func buildLangfuseModelParams(opts *ChatOptions) map[string]interface{} {
 	if opts.TopP != 0 {
 		params["top_p"] = opts.TopP
 	}
-	if opts.MaxTokens > 0 {
-		params["max_tokens"] = opts.MaxTokens
-	}
-	if opts.MaxCompletionTokens > 0 {
-		params["max_completion_tokens"] = opts.MaxCompletionTokens
+	if budget := opts.CompletionBudget(); budget > 0 {
+		params["max_completion_tokens"] = budget
 	}
 	if opts.FrequencyPenalty != 0 {
 		params["frequency_penalty"] = opts.FrequencyPenalty

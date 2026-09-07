@@ -103,7 +103,6 @@ Now generate the final answer:`, query, imageRequirement)
 		messages,
 		&chat.ChatOptions{
 			Temperature:         e.config.Temperature,
-			MaxTokens:           budget,
 			MaxCompletionTokens: budget,
 			PromptCacheKey:      sessionID,
 		}, // Thinking disabled for final answer synthesis

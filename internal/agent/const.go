@@ -100,9 +100,10 @@ func (e *AgentEngine) getLLMStallTimeout() time.Duration {
 // exactly fits by our arithmetic is the one that gets rejected.
 const contextSafetyTokens = 4096
 
-// getCompletionTokenBudget is the max_tokens / max_completion_tokens sent on
-// each ReAct LLM round. Unset without a sandbox is 4096; unset with a
-// sandbox (write_sandbox_file / edit_sandbox_file) is 24576.
+// getCompletionTokenBudget is the single completion budget for each ReAct LLM
+// round. The chat layer maps it to max_tokens or max_completion_tokens per
+// provider. Unset without a sandbox is 4096; unset with a sandbox
+// (write_sandbox_file / edit_sandbox_file) is 24576.
 func (e *AgentEngine) getCompletionTokenBudget() int {
 	configured := 0
 	sandboxID := ""
