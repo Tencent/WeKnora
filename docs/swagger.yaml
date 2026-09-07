@@ -5809,6 +5809,11 @@ definitions:
     required:
     - query
     type: object
+  internal_handler.SnapshotRequest:
+    properties:
+      note:
+        type: string
+    type: object
   internal_handler.StorageCheckRequest:
     properties:
       cos:
@@ -7368,6 +7373,191 @@ paths:
       summary: 验证令牌
       tags:
       - 认证
+  /backups:
+    get:
+      description: SystemAdmin only. Newest first.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: List server-side backup snapshots
+      tags:
+      - backup
+    post:
+      consumes:
+      - application/json
+      description: SystemAdmin only. Stores a snapshot under BACKUP_DIR.
+      parameters:
+      - description: Optional note
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/internal_handler.SnapshotRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Create a server-side backup snapshot
+      tags:
+      - backup
+  /backups/{id}:
+    delete:
+      description: SystemAdmin only.
+      parameters:
+      - description: Snapshot id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Delete a stored backup snapshot
+      tags:
+      - backup
+  /backups/{id}/download:
+    get:
+      description: SystemAdmin only.
+      parameters:
+      - description: Snapshot id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Download a stored backup snapshot
+      tags:
+      - backup
+  /backups/export:
+    get:
+      description: SystemAdmin only. Streams a tar.gz of the DB dump and local files.
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Export a full-instance backup
+      tags:
+      - backup
+  /backups/restore:
+    post:
+      consumes:
+      - multipart/form-data
+      description: SystemAdmin only. Replaces the database. Requires confirm=true.
+      parameters:
+      - description: Must be true
+        in: formData
+        name: confirm
+        required: true
+        type: boolean
+      - description: Stored snapshot id
+        in: formData
+        name: snapshot_id
+        type: string
+      - description: Uploaded archive (tar.gz)
+        in: formData
+        name: file
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Restore from a snapshot or uploaded archive
+      tags:
+      - backup
   /chunker/preview:
     post:
       consumes:

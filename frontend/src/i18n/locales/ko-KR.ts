@@ -34,6 +34,7 @@ export default {
     loadFailed: '불러오기 실패',
     autoPreRestore: '자동: 복원 전 롤백 지점',
     manualSnapshot: '수동 스냅샷',
+    archiveTooLarge: '백업 파일은 {size} MB를 초과할 수 없습니다',
   },
   platformApiKeys: {
     title: '플랫폼 API 키',

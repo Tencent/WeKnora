@@ -34,6 +34,7 @@ export default {
     loadFailed: 'Failed to load',
     autoPreRestore: 'Auto: pre-restore rollback point',
     manualSnapshot: 'Manual snapshot',
+    archiveTooLarge: 'Backup file cannot exceed {size} MB',
   },
   menu: {
     sessionInProgress: 'Conversation in progress',

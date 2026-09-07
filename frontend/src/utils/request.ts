@@ -1,9 +1,9 @@
 // src/utils/request.js
 import axios from "axios";
-import { generateRandomString, MAX_FILE_SIZE_MB, MAX_SKILL_BUNDLE_SIZE_MB } from "./index";
+import { generateRandomString, MAX_BACKUP_ARCHIVE_SIZE_MB, MAX_FILE_SIZE_MB, MAX_SKILL_BUNDLE_SIZE_MB } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
-import { isSkillBundleUploadUrl } from './uploadLimit';
+import { isBackupRestoreUrl, isSkillBundleUploadUrl } from './uploadLimit';
 import {
   forceReloginRedirect,
   isEmbedPage,
@@ -177,12 +177,18 @@ instance.interceptors.response.use(
     // 处理 Nginx 413 Request Entity Too Large
     const ERR_ENTITY_TOO_LARGE = 413;
     if (error.response.status === ERR_ENTITY_TOO_LARGE) {
-      const skillUpload = isSkillBundleUploadUrl(error.config?.url)
+      const url = error.config?.url || originalRequest?.url
+      const backupRestore = isBackupRestoreUrl(url)
+      const skillUpload = isSkillBundleUploadUrl(url)
+      let message = i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB })
+      if (backupRestore) {
+        message = i18n.global.t('backup.archiveTooLarge', { size: MAX_BACKUP_ARCHIVE_SIZE_MB })
+      } else if (skillUpload) {
+        message = i18n.global.t('settings.sandbox.skillBundleTooLarge', { size: MAX_SKILL_BUNDLE_SIZE_MB })
+      }
       return Promise.reject(withHttpStatus({
         status: ERR_ENTITY_TOO_LARGE,
-        message: skillUpload
-          ? i18n.global.t('settings.sandbox.skillBundleTooLarge', { size: MAX_SKILL_BUNDLE_SIZE_MB })
-          : i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }),
+        message,
         success: false
       }, ERR_ENTITY_TOO_LARGE));
     }
@@ -192,7 +198,17 @@ instance.interceptors.response.use(
     // 后端返回格式: { success: false, error: { code, message, details } }
     // 提取 error.message 作为顶层 message，方便前端使用 error?.message 获取
     let errorMessage: string | undefined;
-    if (typeof data === 'object') {
+    if (typeof Blob !== 'undefined' && data instanceof Blob) {
+      try {
+        const text = await data.text()
+        const parsed = JSON.parse(text)
+        errorMessage = typeof parsed?.error === 'string'
+          ? parsed.error
+          : (parsed?.error?.message || parsed?.message)
+      } catch {
+        errorMessage = undefined
+      }
+    } else if (typeof data === 'object') {
       if (typeof data?.error === 'string') {
         errorMessage = data.error;
       } else if (data?.error?.message) {

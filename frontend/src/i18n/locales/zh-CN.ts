@@ -34,6 +34,7 @@ export default {
     loadFailed: '加载失败',
     autoPreRestore: '自动:恢复前回滚点',
     manualSnapshot: '手动快照',
+    archiveTooLarge: '备份文件不能超过 {size} MB',
   },
   platformApiKeys: {
     title: '平台 API Key',

@@ -34,6 +34,7 @@ export default {
     loadFailed: 'Ошибка загрузки',
     autoPreRestore: 'Авто: точка отката перед восстановлением',
     manualSnapshot: 'Ручной снимок',
+    archiveTooLarge: 'Файл резервной копии не может превышать {size} МБ',
   },
   platformApiKeys: {
     title: 'Платформенные API-ключи',

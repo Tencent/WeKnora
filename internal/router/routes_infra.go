@@ -341,13 +341,13 @@ func RegisterBackupRoutes(
 	backup *handler.BackupHandler,
 	g *rbacGuards,
 ) {
-	backups := r.Group("/backups")
+	backups := r.Group("/backups", g.SystemAdmin())
 	{
-		backups.GET("/export", g.SystemAdmin(), backup.Export)
-		backups.POST("", g.SystemAdmin(), backup.CreateSnapshot)
-		backups.GET("", g.SystemAdmin(), backup.ListSnapshots)
-		backups.GET("/:id/download", g.SystemAdmin(), backup.DownloadSnapshot)
-		backups.DELETE("/:id", g.SystemAdmin(), backup.DeleteSnapshot)
-		backups.POST("/restore", g.SystemAdmin(), backup.Restore)
+		backups.GET("/export", backup.Export)
+		backups.POST("", backup.CreateSnapshot)
+		backups.GET("", backup.ListSnapshots)
+		backups.GET("/:id/download", backup.DownloadSnapshot)
+		backups.DELETE("/:id", backup.DeleteSnapshot)
+		backups.POST("/restore", backup.Restore)
 	}
 }
