@@ -68,6 +68,11 @@ type mcpGoClient struct {
 	service     *types.MCPService
 	client      *client.Client
 	oauth       *oauthRuntime
+	httpClient  *http.Client
+	headers     map[string]string
+	oauthConfig transport.OAuthConfig
+	useOAuth    bool
+	legacySSE   bool
 	connected   bool
 	initialized bool
 }
@@ -229,8 +234,12 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 	}
 
 	instance := &mcpGoClient{
-		service: config.Service,
-		client:  mcpClient,
+		service:     config.Service,
+		client:      mcpClient,
+		httpClient:  httpClient,
+		headers:     headers,
+		oauthConfig: oauthConfig,
+		useOAuth:    useOAuth,
 	}
 	if useOAuth {
 		instance.oauth = newOAuthRuntime(
@@ -387,9 +396,14 @@ func (c *mcpGoClient) Initialize(ctx context.Context) (*InitializeResult, error)
 		},
 	}
 
-	result, err := oauthCall(ctx, c, func() (*mcp.InitializeResult, error) {
-		return c.client.Initialize(ctx, req)
-	})
+	result, err := c.initializeWithOAuth(ctx, req)
+	if err != nil && c.service.TransportType == types.MCPTransportHTTPStreamable && !c.legacySSE && errors.Is(err, transport.ErrLegacySSEServer) {
+		logger.GetLogger(ctx).Warnf("MCP streamable HTTP endpoint rejected initialize POST; retrying with legacy POST-init SSE: %s", *c.service.URL)
+		if fallbackErr := c.switchToLegacySSE(ctx); fallbackErr != nil {
+			return nil, fmt.Errorf("failed to initialize with legacy SSE fallback: %w", fallbackErr)
+		}
+		result, err = c.initializeWithOAuth(ctx, req)
+	}
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
 		if oerr := asOAuthRequired(err); oerr != nil {
@@ -409,6 +423,44 @@ func (c *mcpGoClient) Initialize(ctx context.Context) (*InitializeResult, error)
 			Description: result.ServerInfo.Description,
 		},
 	}, nil
+}
+
+func (c *mcpGoClient) initializeWithOAuth(ctx context.Context, req mcp.InitializeRequest) (*mcp.InitializeResult, error) {
+	return oauthCall(ctx, c, func() (*mcp.InitializeResult, error) {
+		return c.client.Initialize(ctx, req)
+	})
+}
+
+func (c *mcpGoClient) switchToLegacySSE(ctx context.Context) error {
+	if c.legacySSE {
+		return nil
+	}
+	if c.service.URL == nil || *c.service.URL == "" {
+		return errors.New("URL is required for legacy SSE transport")
+	}
+	legacyTransport, err := newLegacySSETransport(
+		*c.service.URL,
+		c.httpClient,
+		c.headers,
+		c.oauthConfig,
+		c.useOAuth,
+	)
+	if err != nil {
+		return err
+	}
+	legacyClient := client.NewClient(legacyTransport)
+	if err := legacyClient.Start(ctx); err != nil {
+		_ = legacyClient.Close()
+		return fmt.Errorf("failed to start legacy SSE transport: %w", err)
+	}
+	legacyClient.OnConnectionLost(c.onConnectionLost)
+	oldClient := c.client
+	c.client = legacyClient
+	c.legacySSE = true
+	if oldClient != nil {
+		_ = oldClient.Close()
+	}
+	return nil
 }
 
 // ListTools retrieves the list of available tools
