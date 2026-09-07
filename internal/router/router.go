@@ -247,7 +247,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 		// Message-scoped image proxy: shared-agent replies belong to the
 		// caller's session but may reference resources stored in the agent's
 		// source workspace. Authorization is derived from the persisted message,
-		// never from a client-provided workspace ID.
+		// never from a client-provided workspace ID. Replies produced by the
+		// caller's own agent over an org-shared KB fall back to the KB share
+		// relation instead (#3022).
 		serveMessageScopedFiles(
 			v1,
 			rbacGuards,
@@ -257,6 +259,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 			params.FileService,
 			params.StorageBackendResolver,
 			params.ResourceCatalog,
+			params.KBShareService,
+			params.KBService,
+			params.KnowledgeService,
 		)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)

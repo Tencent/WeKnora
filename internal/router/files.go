@@ -62,6 +62,103 @@ type sharedAgentFileLookup interface {
 	) (*types.CustomAgent, error)
 }
 
+// kbSharePermissionGuard is the org-share surface the message-scoped proxy
+// needs for its shared-KB fallback.
+type kbSharePermissionGuard interface {
+	HasTenantKBPermission(
+		ctx context.Context,
+		kbID string,
+		callerTenantID uint64,
+		callerTenantRole types.TenantRole,
+		requiredRole types.OrgMemberRole,
+	) (bool, error)
+}
+
+// kbTenantLookup resolves knowledge bases and knowledge entries without a
+// tenant filter, so a message's persisted references can be mapped back to
+// the knowledge bases they were retrieved from.
+type kbTenantLookup interface {
+	GetKnowledgeBasesByIDsOnly(ctx context.Context, ids []string) ([]*types.KnowledgeBase, error)
+}
+
+// knowledgeOwnerLookup resolves a knowledge entry to its knowledge base for
+// message references that predate the denormalized knowledge_base_id field.
+type knowledgeOwnerLookup interface {
+	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
+}
+
+// messageKBShareAuthorizer bundles the read-only lookups behind the
+// message proxy's org-shared-KB fallback. A nil bundle (or nil member)
+// disables the fallback, which keeps older call sites and tests on the
+// shared-agent-only behavior.
+type messageKBShareAuthorizer struct {
+	ShareGuard kbSharePermissionGuard
+	KBs        kbTenantLookup
+	Knowledges knowledgeOwnerLookup
+}
+
+// resourceAccessibleViaSharedKB reports whether the message's persisted
+// retrieval references prove the resource came from an org-shared KB the
+// caller may read. This is the fallback for replies whose agent belongs to
+// the caller's own workspace while the retrieved resources belong to the
+// workspace that shared the knowledge base (#3022).
+//
+// Evidence required from one reference: its retrieved chunk content contains
+// the resource handle (so the resource cannot be smuggled through an
+// unrelated message), its knowledge base belongs to the resource's tenant,
+// and that KB is org-shared to the caller with at least viewer permission.
+// Any lookup failure fails closed.
+func (a messageKBShareAuthorizer) resourceAccessibleViaSharedKB(
+	ctx context.Context,
+	message *types.Message,
+	resource *types.StoredResource,
+	callerTenantID uint64,
+	callerTenantRole types.TenantRole,
+) bool {
+	if a.ShareGuard == nil || a.KBs == nil || message == nil || resource == nil {
+		return false
+	}
+	resourceRef := types.ResourceScheme + resource.Handle
+
+	var kbIDs []string
+	seen := make(map[string]bool)
+	for _, ref := range message.KnowledgeReferences {
+		if ref == nil || !strings.Contains(ref.Content, resourceRef) {
+			continue
+		}
+		kbID := ref.KnowledgeBaseID
+		if kbID == "" && ref.KnowledgeID != "" && a.Knowledges != nil {
+			knowledge, err := a.Knowledges.GetKnowledgeByIDOnly(ctx, ref.KnowledgeID)
+			if err != nil || knowledge == nil {
+				continue
+			}
+			kbID = knowledge.KnowledgeBaseID
+		}
+		if kbID != "" && !seen[kbID] {
+			seen[kbID] = true
+			kbIDs = append(kbIDs, kbID)
+		}
+	}
+	if len(kbIDs) == 0 {
+		return false
+	}
+
+	kbs, err := a.KBs.GetKnowledgeBasesByIDsOnly(ctx, kbIDs)
+	if err != nil {
+		return false
+	}
+	for _, kb := range kbs {
+		if kb == nil || kb.TenantID != resource.TenantID {
+			continue
+		}
+		shared, err := a.ShareGuard.HasTenantKBPermission(ctx, kb.ID, callerTenantID, callerTenantRole, types.OrgRoleViewer)
+		if err == nil && shared {
+			return true
+		}
+	}
+	return false
+}
+
 // localStorageBaseDir resolves LOCAL_STORAGE_BASE_DIR with the container
 // default.
 func localStorageBaseDir() string {
@@ -517,8 +614,10 @@ func newKBScopedFileServeHandlerWithResources(
 
 // newMessageScopedFileServeHandler serves resources rendered inside one
 // assistant message. The message service first proves that the caller owns the
-// containing session. For cross-workspace resources we then require the
-// message's agent to still be shared from the resource-owning workspace.
+// containing session. For cross-workspace resources we then require either the
+// message's agent to still be shared from the resource-owning workspace, or —
+// when the reply was produced by the caller's own agent over an org-shared
+// knowledge base — that the resource's KB is still shared to the caller.
 //
 // The owner tenant comes from the resource registry whenever possible. This
 // also keeps old messages (written before agent_tenant_id was populated)
@@ -530,6 +629,7 @@ func newMessageScopedFileServeHandler(
 	globalFileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
+	kbShareAuth messageKBShareAuthorizer,
 ) gin.HandlerFunc {
 	absDir := localStorageAbsDir()
 
@@ -568,14 +668,21 @@ func newMessageScopedFileServeHandler(
 		}
 
 		ownerTenantID := message.AgentTenantID
+		kbShareAuthorized := false
 		if resource != nil {
 			ownerTenantID = resource.TenantID
 			// A modern message records its source tenant. A resource from any
 			// other tenant cannot be smuggled through that message even if the
-			// caller happens to have another shared agent with the same ID.
+			// caller happens to have another shared agent with the same ID —
+			// unless the reply's own retrieval references prove the resource
+			// came from an org-shared KB the caller may still read (#3022).
 			if message.AgentTenantID != 0 && message.AgentTenantID != ownerTenantID {
-				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: resource not accessible from this message"})
-				return
+				kbShareAuthorized = kbShareAuth.resourceAccessibleViaSharedKB(
+					ctx, message, resource, callerTenantID, types.TenantRoleFromContext(ctx))
+				if !kbShareAuthorized {
+					c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: resource not accessible from this message"})
+					return
+				}
 			}
 		}
 		if ownerTenantID == 0 {
@@ -583,21 +690,30 @@ func newMessageScopedFileServeHandler(
 			return
 		}
 
-		if ownerTenantID != callerTenantID {
-			if message.AgentID == "" || agentShareService == nil {
-				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: shared agent access required"})
-				return
+		if ownerTenantID != callerTenantID && !kbShareAuthorized {
+			// Messages written before agent_tenant_id was populated have no
+			// recorded source tenant; offer them the same org-shared KB
+			// fallback before the shared-agent relation is demanded.
+			if message.AgentTenantID == 0 {
+				kbShareAuthorized = kbShareAuth.resourceAccessibleViaSharedKB(
+					ctx, message, resource, callerTenantID, types.TenantRoleFromContext(ctx))
 			}
-			agent, shareErr := agentShareService.GetSharedAgentForTenant(
-				ctx,
-				callerTenantID,
-				types.TenantRoleFromContext(ctx),
-				message.AgentID,
-				ownerTenantID,
-			)
-			if shareErr != nil || agent == nil || agent.TenantID != ownerTenantID {
-				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: shared agent access revoked"})
-				return
+			if !kbShareAuthorized {
+				if message.AgentID == "" || agentShareService == nil {
+					c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: shared agent access required"})
+					return
+				}
+				agent, shareErr := agentShareService.GetSharedAgentForTenant(
+					ctx,
+					callerTenantID,
+					types.TenantRoleFromContext(ctx),
+					message.AgentID,
+					ownerTenantID,
+				)
+				if shareErr != nil || agent == nil || agent.TenantID != ownerTenantID {
+					c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: shared agent access revoked"})
+					return
+				}
 			}
 		}
 
@@ -668,6 +784,9 @@ func serveMessageScopedFiles(
 	globalFileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
+	kbShareService interfaces.KBShareService,
+	kbService interfaces.KnowledgeBaseService,
+	knowledgeService interfaces.KnowledgeService,
 ) {
 	g.apiKeyRoute(
 		r,
@@ -682,6 +801,11 @@ func serveMessageScopedFiles(
 			globalFileService,
 			storageResolver,
 			resourceCatalog,
+			messageKBShareAuthorizer{
+				ShareGuard: kbShareService,
+				KBs:        kbService,
+				Knowledges: knowledgeService,
+			},
 		),
 	)
 }
