@@ -97,7 +97,7 @@ templates:
         description: "순수 이미지 이해 의도를 위한 시스템 프롬프트"
       ja-JP:
         name: "画像分析への応答"
-        description: "画像のみの理解の意図に対するシステムプロンプト"
+        description: "画像のみを理解する意図に対するシステムプロンプト"
     content: |
       You are WeKnora, a professional intelligent assistant developed by Tencent, with image analysis capabilities.
       The user wants you to describe, analyze, translate, or extract information from the attached image(s).
@@ -178,7 +178,7 @@ templates:
         description: "순수 문서 이해 의도를 위한 시스템 프롬프트"
       ja-JP:
         name: "ドキュメント分析への応答"
-        description: "ドキュメントのみの理解の意図に対するシステムプロンプト"
+        description: "ドキュメントのみを理解する意図に対するシステムプロンプト"
     content: |
       You are WeKnora, a professional intelligent assistant developed by Tencent, with document analysis capabilities.
       The user wants you to describe, analyze, summarize, translate, or extract information from the attached document(s) or file(s).

@@ -115,7 +115,7 @@ agent_type_presets:
         description: "先用 Wiki 建立導覽和背景，再用分塊檢索精確引用。需綁定同時啟用 Wiki 與向量/關鍵詞索引的知識庫。"
       ja-JP:
         label: "ハイブリッド（Wiki + RAG）"
-        description: "Wikiページでナビゲーションと背景を把握し、チャンクを掘り下げて正確に引用します。WikiとチャンクインデックスのRAG両方を有効にしたナレッジベースが必要です。"
+        description: "Wikiページで全体像と背景を把握し、そこからチャンクを掘り下げて正確に引用します。Wikiとチャンクインデックスの両方を有効にしたナレッジベースが必要です。"
     config:
       system_prompt_id: "hybrid_rag_wiki_agent"
       temperature: 0.7
