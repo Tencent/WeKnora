@@ -3,9 +3,8 @@ package skills
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
-
-	"github.com/Tencent/WeKnora/internal/sandbox"
 )
 
 // SkillEnvResolver produces the environment one execution gets. It is separate
@@ -67,24 +66,25 @@ func ApplyResolvedEnv(env, resolved map[string]string) {
 	}
 }
 
-// applySessionPackagePath prepends the per-session extra-packages directory
-// so a frozen skill venv can still see `pip install --target` extras without
-// mutating the snapshot. Missing directories are ignored by the interpreters.
-func applySessionPackagePath(env map[string]string, skillName string) {
-	if env == nil {
+// applySkillNodePath puts the skill's own node_modules on NODE_PATH, after
+// anything the caller supplied.
+//
+// Python gets no equivalent on purpose. Its dependencies are reached through
+// the skill's own virtualenv interpreter, which the shell wrapper puts first
+// on PATH and which already carries its site-packages. A PYTHONPATH entry
+// would have to name that site-packages directory by interpreter version to
+// be importable at all, and pointing it at the venv root — as an overlay-era
+// path did — resolves nothing.
+func applySkillNodePath(env map[string]string, skillDir string) {
+	if env == nil || skillDir == "" {
 		return
 	}
-	dir := sandbox.SessionSkillPackageDir(skillName)
-	if dir == "" {
-		return
-	}
-	prependPathEnv(env, pythonPathEnvVar, dir)
-	prependPathEnv(env, nodePathEnvVar, dir)
+	appendPathEnv(env, nodePathEnvVar, path.Join(skillDir, "node_modules"))
 }
 
-func prependPathEnv(env map[string]string, key, dir string) {
+func appendPathEnv(env map[string]string, key, dir string) {
 	if existing := strings.TrimSpace(env[key]); existing != "" {
-		env[key] = dir + ":" + existing
+		env[key] = existing + ":" + dir
 		return
 	}
 	env[key] = dir

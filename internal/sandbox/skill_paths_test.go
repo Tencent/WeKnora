@@ -15,9 +15,9 @@ func TestSkillDirFor(t *testing.T) {
 	require.Equal(t, "/opt/weknora/tenant/skills/sk-1", dir)
 }
 
-func TestSessionSkillPackageDir(t *testing.T) {
-	require.Equal(t, "/workspace/.skill-packages/律师助手", SessionSkillPackageDir("律师助手"))
-	require.Equal(t, "/workspace/.skill-packages", SessionSkillPackageDir("../escape"))
+func TestSkillVenvPython(t *testing.T) {
+	require.Equal(t, "/opt/weknora/tenant/skills/律师助手/.venv/bin/python",
+		SkillVenvPython(SkillsImageRoot+"/律师助手"))
 }
 
 func TestSkillDirForRejectsPathEscape(t *testing.T) {

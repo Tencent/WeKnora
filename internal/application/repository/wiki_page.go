@@ -37,6 +37,42 @@ func (r *wikiPageRepository) wikiCategoryRankOrder() string {
 	return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
 }
 
+// wikiPageListSortColumn maps a caller-supplied sort_by to a quoted identifier.
+// Each Name is a string literal so user input never enters the ORDER BY text
+// (GORM quotes the column; direction is clause.OrderByColumn.Desc, not sprintf).
+func wikiPageListSortColumn(sortBy string) clause.Column {
+	switch sortBy {
+	case "title":
+		return clause.Column{Name: "title"}
+	case "created_at":
+		return clause.Column{Name: "created_at"}
+	case "updated_at":
+		return clause.Column{Name: "updated_at"}
+	case "page_type":
+		return clause.Column{Name: "page_type"}
+	case "wiki_path":
+		return clause.Column{Name: "wiki_path"}
+	case "sort_order":
+		return clause.Column{Name: "sort_order"}
+	case "depth":
+		return clause.Column{Name: "depth"}
+	default:
+		return clause.Column{Name: "updated_at"}
+	}
+}
+
+func (r *wikiPageRepository) applyWikiPageListOrder(query *gorm.DB, sortBy, sortOrder string) *gorm.DB {
+	col := wikiPageListSortColumn(sortBy)
+	desc := sortOrder != "asc"
+	if col.Name == "wiki_path" {
+		return query.Order(r.wikiCategoryRankOrder()).
+			Order(clause.OrderByColumn{Column: col, Desc: desc}).
+			Order(clause.OrderByColumn{Column: clause.Column{Name: "sort_order"}}).
+			Order(clause.OrderByColumn{Column: clause.Column{Name: "title"}})
+	}
+	return query.Order(clause.OrderByColumn{Column: col, Desc: desc})
+}
+
 func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
 	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
 		return "(in_links IS NULL OR json_array_length(in_links) = 0)"
@@ -353,26 +389,7 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		return nil, 0, err
 	}
 
-	// Sort
-	sortBy := "updated_at"
-	if req.SortBy != "" {
-		switch req.SortBy {
-		case "title", "created_at", "updated_at", "page_type", "wiki_path", "sort_order", "depth":
-			sortBy = req.SortBy
-		}
-	}
-	sortOrder := "DESC"
-	if req.SortOrder == "asc" {
-		sortOrder = "ASC"
-	}
-	if sortBy == "wiki_path" {
-		query = query.Order(r.wikiCategoryRankOrder()).
-			Order(fmt.Sprintf("wiki_path %s", sortOrder)).
-			Order("sort_order ASC").
-			Order("title ASC")
-	} else {
-		query = query.Order(fmt.Sprintf("%s %s", sortBy, sortOrder))
-	}
+	query = r.applyWikiPageListOrder(query, req.SortBy, req.SortOrder)
 
 	page := req.Page
 	if page < 1 {

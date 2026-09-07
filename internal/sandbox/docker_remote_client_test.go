@@ -456,8 +456,8 @@ func TestDockerClientCreateAppliesIsolationAndMetadata(t *testing.T) {
 	require.Len(t, engine.created, 1)
 	created := engine.created[0]
 	// PID 1 both keeps the container alive and prepares the activity marker so
-	// that root and the unprivileged sandbox user can each refresh it; the
-	// idle sweeper reads nothing else.
+	// that any account an exec may land on can refresh it; the idle sweeper
+	// reads nothing else.
 	require.Equal(t, dockerSandboxPID1User, created.Config.User,
 		"PID 1 must be root so the entrypoint can chmod the activity marker")
 	require.Equal(t, "/bin/sh", created.Config.Entrypoint[0])
@@ -862,10 +862,8 @@ func TestDockerClientExecResumesAStoppedContainerAndRetries(t *testing.T) {
 	require.Len(t, engine.execOptions, 2)
 }
 
-// The archive endpoint would apply this write as root and resolve symlinks on
-// the way, so a link planted under the writable workspace could redirect an
-// upload onto a file the sandbox account cannot touch. Writing through exec
-// puts the kernel back in charge.
+// Parent creation and writes share the explicit execution identity and pass
+// file content through stdin. This is not a symlink-containment test.
 func TestDockerClientWriteFileRunsAsSandboxUserOverExec(t *testing.T) {
 	engine := newFakeDockerEngine()
 	docker := newTestDockerClient(t, engine)
@@ -879,7 +877,7 @@ func TestDockerClientWriteFileRunsAsSandboxUserOverExec(t *testing.T) {
 
 	require.Contains(t, mkdir.Cmd, "mkdir")
 	require.Equal(t, DefaultSandboxExecUser, mkdir.User,
-		"mkdir as root would leave nested dirs unwritable by skill scripts")
+		"parent creation must use the same account as subsequent file and script operations")
 
 	require.Equal(t, DefaultSandboxExecUser, write.User)
 	require.True(t, write.AttachStdin)
@@ -963,10 +961,9 @@ func TestDockerClientStatReportsSymlinkAsOther(t *testing.T) {
 		"a symlink must not be reported as the file it points at")
 }
 
-// Guards the property the symlink fix rests on. The archive endpoints ignored
-// the requested user and ran as root; if any file operation goes back to one,
-// this catches it without needing a daemon to prove the consequence.
-func TestDockerClientFileOperationsNeverRunAsRoot(t *testing.T) {
+// File operations retain the common exec path and explicitly select the
+// default identity. This does not assert symlink containment or non-root access.
+func TestDockerClientFileOperationsUseExplicitDefaultUser(t *testing.T) {
 	engine := newFakeDockerEngine()
 	engine.execStdout = "f\t3\t1786565482.0000000000\t/workspace/output/a.txt\n"
 	docker := newTestDockerClient(t, engine)
@@ -986,7 +983,7 @@ func TestDockerClientFileOperationsNeverRunAsRoot(t *testing.T) {
 	require.NotEmpty(t, engine.execOptions)
 	for i, opts := range engine.execOptions {
 		require.Equal(t, DefaultSandboxExecUser, opts.User,
-			"exec %d (%v) must not run as root", i, opts.Cmd)
+			"exec %d (%v) must explicitly select the default sandbox account", i, opts.Cmd)
 	}
 }
 

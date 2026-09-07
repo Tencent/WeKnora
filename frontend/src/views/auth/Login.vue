@@ -301,7 +301,8 @@
 
               <t-form-item :label="$t('auth.confirmPassword')" name="confirmPassword">
                 <t-input v-model="registerData.confirmPassword" :placeholder="$t('auth.confirmPasswordPlaceholder')"
-                  type="password" autocomplete="new-password" size="large" :disabled="loading" @enter="handleRegister" />
+                  type="password" autocomplete="new-password" size="large" :disabled="loading"
+                  @enter="handleRegister" />
               </t-form-item>
 
               <t-button type="submit" theme="primary" size="large" block :loading="loading" class="submit-button">
@@ -1182,7 +1183,7 @@ onMounted(async () => {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding: 40px 50px 100px 30px;
+  padding: 112px 50px 100px 30px;
   box-sizing: border-box;
   position: relative;
 }

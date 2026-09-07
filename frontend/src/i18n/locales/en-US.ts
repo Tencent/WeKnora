@@ -195,7 +195,7 @@ export default {
         },
         submit: {
           title: 'Create the knowledge base',
-          desc: 'When type, name, and models look correct, click the highlighted Create button. You will then be guided to upload your first document.'
+          desc: 'Click Got it to finish the guide without creating a knowledge base. When ready, enter a name, confirm the type and models, then click Create.'
         }
       }
     },

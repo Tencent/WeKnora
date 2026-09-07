@@ -128,12 +128,24 @@ var shellExecBlacklist = []struct {
 
 var shellExecTool = BaseTool{
 	name: ToolShellExec,
-	description: `Execute a command in the current session's isolated sandbox as its non-root user. Never runs on the host.
+	description: `Execute a command in the current session's isolated sandbox as root.
+The sandbox belongs to this session alone; nothing here runs on the host.
 - CWD defaults to /workspace on every call; cd does not persist. work_dir selects another directory under /workspace and missing directories are created as the same user.
 - Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. Read known paths directly; no mandatory discovery call.
 - Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).
-- skill_name selects a listed skill for this call. Installed skills use their Python virtualenv and Node modules; host skill resources are automatically staged in the session with the system runtime. Scoped credentials apply to both. Example: skill_name="pdf", command="python3 report.py". Run bundled scripts via "$WEKNORA_SKILL_DIR/scripts/...". Omit skill_name for system commands.
-- /workspace/input contains user attachments: preserve originals. /workspace/output holds downloadable deliverables. Installed skills under /opt/weknora/tenant/skills are read-only. Install Python extras WITHOUT skill_name using python3 -m pip install --target /workspace/.skill-packages/<skill> <package>, then run with skill_name. System package installation requires the skill installer; ordinary sessions cannot apt-get or elevate privileges.
+- skill_name selects a listed skill for this call. Installed skills use their Python virtualenv and Node modules;
+  host resources are staged automatically and use the system runtime until a local .venv is created.
+  Scoped credentials apply to both. Example: skill_name="pdf", command="python3 report.py".
+  Run bundled scripts via "$WEKNORA_SKILL_DIR/scripts/...". Omit skill_name for system commands.
+- /workspace/input contains user attachments: preserve originals. /workspace/output is the only directory collected
+  for download, so it takes finished deliverables only; keep scratch and intermediate files elsewhere under /workspace.
+  apt-get is available when the sandbox network policy allows it; permanent dependencies belong in the skill installer.
+- Install extras with skill_name set and the default work_dir:
+  ` + "`" + skillPythonPackageInstallCommand + "`" + ` (no pip needed), or
+  ` + "`" + skillNodePackageInstallCommand + "`" + `.
+  If .venv is absent, create it with python3 -m venv --without-pip "${WEKNORA_SKILL_DIR:?}/.venv".
+  Without uv, run the venv Python with -m ensurepip --upgrade before -m pip install.
+  Changes live and die with this session.
 - Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. Transport failures/timeouts are tool failures. Changing tools does not change permissions; do not repeat a denied operation through another tool.
 - stdout/stderr have independent byte limits, preserving head and tail when truncated. Full output is not automatically saved; redirect verbose commands to a workspace log when it must be retained. Binary bytes are suppressed.
 - Reference collected deliverables as ![description](sandbox:<file name>) using the exact filename.`,
@@ -162,7 +174,7 @@ type ShellExecInput struct {
 	// uses the caller-scoped SkillEnvResolver, so values
 	// are per-caller (taken from ctx) and never persist. Omitting it leaves
 	// shell_exec's behaviour unchanged.
-	SkillName string `json:"skill_name,omitempty" jsonschema:"Optional available skill name. Selects its installed runtime or stages its host resources, plus package overlay and scoped credentials. CWD remains /workspace. Omit for system commands."`
+	SkillName string `json:"skill_name,omitempty" jsonschema:"Optional available skill name. Selects its installed runtime or stages its host resources, plus scoped credentials. CWD remains /workspace. Omit for system commands."` //nolint:lll // JSON schema tags must remain on one line.
 }
 
 // SandboxInstallCommandExecutor is the privileged counterpart of
@@ -698,8 +710,8 @@ func shellExecRecoveryHint(exitCode int, command, stderr string) string {
 	if h := shellCommandNotFoundHint(exitCode, command, stderr); h != "" {
 		parts = append(parts, h)
 	}
-	if isFrozenSkillVenvFailure(stderr) {
-		parts = append(parts, "Hint: "+frozenSkillTreeGuidance(skillNameFromShellCommand(command)))
+	if isSkillVenvInstallFailure(stderr) {
+		parts = append(parts, "Hint: "+skillVenvFailureGuidance(skillNameFromShellCommand(command), stderr))
 		return strings.Join(parts, "\n")
 	}
 	if h := shellMissingModuleHint(command, stderr); h != "" {
@@ -717,18 +729,27 @@ func (t *ShellExecTool) recoveryHint(skillName string, exitCode int, command, st
 	if t.skillEnvironment == nil {
 		return shellExecRecoveryHint(exitCode, command, stderr)
 	}
-	lower := strings.ToLower(stderr)
-	if strings.Contains(lower, "permission denied") || strings.Contains(lower, "read-only file system") {
-		return "Permission denied: commands and file tools share the same user. Use /workspace for scratch files and /workspace/output for deliverables. The installed skill tree is read-only; switching tools, chmod, sudo, or retrying the same write cannot grant access."
+	if isSkillVenvInstallFailure(stderr) {
+		if skillName == "" {
+			skillName = skillNameFromShellCommand(command)
+		}
+		return skillVenvFailureGuidance(skillName, stderr)
+	}
+	if isPermissionFailure(stderr) || isReadOnlyFilesystemFailure(stderr) {
+		return "Permission denied: commands and file tools share the same user. " +
+			"Inspect path permissions and mount restrictions; use a writable workspace location. " +
+			"Switching tools or retrying the same write does not grant access."
 	}
 	if isMissingInterpreterModule(stderr) {
 		if skillName == "" {
 			return "If this command needs an installed skill's packages, repeat shell_exec with that skill_name to select its runtime. Otherwise install the missing dependency in the writable workspace."
 		}
 		if strings.Contains(stderr, "Cannot find module") || strings.Contains(stderr, "MODULE_NOT_FOUND") {
-			return "The selected skill runtime could not resolve this Node module. For custom scripts, install dependencies in a writable workspace project. NODE_PATH supports CommonJS; ESM imports resolve relative to the script and need a local dependency tree. Preserve the installed skill directory."
+			return missingSkillPackageGuidance(skillName) +
+				" NODE_PATH supports CommonJS; ESM imports resolve relative to the script, " +
+				"so custom ESM scripts need dependencies in their own workspace project."
 		}
-		return fmt.Sprintf("The selected skill runtime lacks this module. Install extras with shell_exec WITHOUT skill_name: python3 -m pip install --target %s <package>; then rerun with skill_name=%q.", sandbox.SessionSkillPackageDir(skillName), skillName)
+		return "The selected skill runtime lacks this module. " + missingSkillPackageGuidance(skillName)
 	}
 	return shellCommandNotFoundHint(exitCode, command, stderr)
 }
@@ -749,7 +770,7 @@ func shellMissingModuleHint(command, stderr string) string {
 }
 
 func isMissingInterpreterModule(stderr string) bool {
-	if isFrozenSkillVenvFailure(stderr) {
+	if isSkillVenvInstallFailure(stderr) {
 		return false
 	}
 	return strings.Contains(stderr, "ModuleNotFoundError") ||

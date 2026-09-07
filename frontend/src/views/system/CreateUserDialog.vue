@@ -11,8 +11,7 @@
 
   Visibility is owned by the parent via v-model:visible. Every user-visible
   message is also emitted via `announced` so the parent's sr-only live
-  region can relay it. Shared popup chrome comes from systemAdminDialog.less
-  (imported by SystemSettings.vue).
+  region can relay it. Shared popup chrome comes from systemAdminDialog.less.
 -->
 <template>
   <t-popup :visible="visible" trigger="click" placement="left-top" :destroy-on-close="!locked"

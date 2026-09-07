@@ -323,19 +323,27 @@ type RemoteExecRequest struct {
 	// default". Both backends support selecting it (E2B WithUser, Cube
 	// CommandOptions.User).
 	//
-	// Callers that rely on filesystem permissions for isolation MUST set a
-	// non-root user: root bypasses mode bits entirely, which would defeat
-	// read-only protection on shared volumes.
+	// The default is root: each chat session owns its own sandbox
+	// (one-session-one-sandbox, single tenant), so there is no shared-volume
+	// tenant boundary inside a sandbox for file-mode isolation to defend.
+	// Cross-tenant and host isolation live at the container boundary, not in
+	// the exec account. Callers that still rely on in-container filesystem
+	// permissions should not treat mode bits as a root isolation boundary.
+	// Enforce read-only access at the mount level instead.
 	User string
 
 	// Timeout bounds a single exec call. Zero means "use provider default".
 	Timeout time.Duration
 }
 
-// DefaultSandboxExecUser is the non-root account WeKnora runs sandboxed
-// scripts as. The sandbox template must provision this user; E2B base
-// templates ship a "user" account, and Cube templates are expected to match.
-const DefaultSandboxExecUser = "user"
+// DefaultSandboxExecUser is the account WeKnora runs sandboxed scripts as.
+// It is root: every chat session gets its own sandbox, so the in-container
+// account is not a tenant boundary and root is the least surprising default
+// for an agent that installs packages and writes wherever it needs. The
+// adapters resolve an empty request user to this constant, independent of
+// the image USER. The image retains a "user" compatibility account for
+// E2B/Cube tooling that explicitly selects it.
+const DefaultSandboxExecUser = "root"
 
 // RemoteExecResult is the neutral shape returned by Exec.
 type RemoteExecResult struct {

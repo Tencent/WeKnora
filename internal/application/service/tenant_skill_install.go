@@ -568,9 +568,10 @@ func (s *TenantSkillService) cleanupContext(
 // previous version shipped and this one dropped would otherwise live on in
 // every later snapshot while BundleSHA256 claims the tree equals the archive.
 //
-// Creating and chowning it is what makes the FIRST install work at all:
-// seeding goes through the provider file API, which runs as the default exec
-// user, and the skills root is not part of the base image.
+// Creating the directory is what makes the FIRST install work at all: the
+// skills root is not part of the base image. No chown here — the default exec
+// account is root under one-session-one-sandbox, so chown root:root would be a
+// no-op, and there is no shared-volume tenant boundary to defend with it.
 func (s *TenantSkillService) resetSkillDir(
 	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string,
 ) error {
@@ -579,10 +580,9 @@ func (s *TenantSkillService) resetSkillDir(
 	}
 	root := sandbox.ShellQuote(sandbox.SkillsImageRoot)
 	dir := sandbox.ShellQuote(skillDir)
-	user := sandbox.DefaultSandboxExecUser
 	cmd := fmt.Sprintf(
-		"rm -rf %s && mkdir -p %s %s && chown %s:%s %s %s && chmod 755 %s %s",
-		dir, root, dir, user, user, root, dir, root, dir,
+		"rm -rf %s && mkdir -p %s %s && chmod 755 %s %s",
+		dir, root, dir, root, dir,
 	)
 	if _, err := s.execInstall(ctx, mgr, sessionID, cmd); err != nil {
 		return fmt.Errorf("reset skill directory %s: %w", skillDir, err)
@@ -659,7 +659,9 @@ func packSkillTar(bundle *SkillBundle) ([]byte, error) {
 		content := bundle.Files[rel]
 		if err := tw.WriteHeader(&tar.Header{
 			Name: name,
-			Mode: 0o644,
+			// The former normalization pass made every bundled file executable.
+			// Preserve that contract at extraction while keeping the tree writable.
+			Mode: 0o755,
 			Size: int64(len(content)),
 		}); err != nil {
 			return nil, err
@@ -763,16 +765,6 @@ func (s *TenantSkillService) installDependenciesAndVerify(
 		// the next round's tool calls.
 		job.transcript.muteActivityProgress()
 
-		// The tree is handed to the execution user BEFORE it is verified. The
-		// agent created these files as root, and the language passes
-		// deliberately run as the ordinary user: verifying first would test
-		// permissions that never reach the image, and a restrictive root umask
-		// would fail a perfectly good install because the .venv interpreter
-		// was unreadable.
-		if err = s.normalizeSkillPermissions(ctx, job.mgr, job.sess.ID, job.skillDir); err != nil {
-			return err
-		}
-
 		notes, verifyErr := s.verifySkill(ctx, job.mgr, job.sess.ID, job.skillDir, job.bundle)
 		s.reportVerificationNotes(ctx, job, notes)
 		if verifyErr == nil {
@@ -792,9 +784,6 @@ func (s *TenantSkillService) installDependenciesAndVerify(
 			Log: fmt.Sprintf("%s verification found %d missing dependency/dependencies; "+
 				"asking the installer to add them", gate.Language, len(gate.Problems)),
 		})
-		if err = s.reopenSkillDirForRepair(ctx, job.mgr, job.sess.ID, job.skillDir); err != nil {
-			return err
-		}
 		prompt = buildRepairPrompt(job.skillDir, gate)
 		job.transcript.RecordPrompt(prompt)
 	}
@@ -894,28 +883,6 @@ func (s *TenantSkillService) reportVerificationNotes(
 	})
 }
 
-// reopenSkillDirForRepair undoes normalizeSkillPermissions for another round.
-//
-// Verification runs as the ordinary user, so the tree is locked to 555 and root
-// before it; a repair then has to install into .venv again. Install commands
-// run as root and would get away with writing through those modes, but relying
-// on that makes the next reader work out whether it still holds — restoring the
-// state the seed left is the same two commands and needs no such argument.
-func (s *TenantSkillService) reopenSkillDirForRepair(
-	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string,
-) error {
-	if err := guardSkillDir(skillDir); err != nil {
-		return err
-	}
-	dir := sandbox.ShellQuote(skillDir)
-	user := sandbox.DefaultSandboxExecUser
-	cmd := fmt.Sprintf("chown -R %s:%s %s && chmod -R u+rwX,go+rX %s", user, user, dir, dir)
-	if _, err := s.execInstall(ctx, mgr, sessionID, cmd); err != nil {
-		return fmt.Errorf("reopen skill directory %s for a repair round: %w", skillDir, err)
-	}
-	return nil
-}
-
 // buildRepairPrompt turns the gate's own findings into the next round's brief.
 //
 // It carries no analysis of its own, deliberately: the gate is the only
@@ -948,30 +915,6 @@ and that is not installed in this image. Install it.
 
 The same verification runs again as soon as you finish.
 `, gate.Language, findings.String(), skillDir, skillDir, skillDir)
-}
-
-// normalizeSkillPermissions makes the skill tree readable and executable by
-// the non-root execution user, and writable by nobody. Installs run as root,
-// so without the mode change the user that actually runs skills could not read
-// them at all — which is also why this runs before verification: the checks
-// read every script as that user, so they have to see the permissions the
-// snapshot will carry.
-//
-// Ownership stays with root rather than moving to the execution user because
-// this tree is baked into an image every session of the config inherits. A
-// session that could write here would be editing the skills every other
-// session runs. 555 leaves reads and execs to the "other" bits, which is all a
-// skill run needs; the cost is that Python cannot write __pycache__ into the
-// tree and silently skips bytecode caching.
-func (s *TenantSkillService) normalizeSkillPermissions(
-	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string,
-) error {
-	dir := sandbox.ShellQuote(skillDir)
-	cmd := fmt.Sprintf("chmod -R 555 %s && chown -R root:root %s", dir, dir)
-	if _, err := s.execInstall(ctx, mgr, sessionID, cmd); err != nil {
-		return fmt.Errorf("normalize skill permissions (%s): %w", cmd, err)
-	}
-	return nil
 }
 
 // skillCacheBudgetMB caps the package download caches one image carries into
@@ -1020,19 +963,18 @@ func (s *TenantSkillService) cleanImageScratch(
 // and cannot change that code — it is written to always succeed, and the shell
 // it lands in has no set -e to turn a swallowed prune failure into an abort.
 func cleanImageScratchCommand() string {
-	user := sandbox.DefaultSandboxExecUser
 	inputRoot := sandbox.ShellQuote(sandbox.SessionInputRoot)
 	outputRoot := sandbox.ShellQuote(sandbox.SessionOutputRoot)
 	var b strings.Builder
-	b.WriteString("rm -rf /workspace/* /workspace/.[!.]* || true")
-	fmt.Fprintf(&b, "; mkdir -p %s %s && chown %s:%s %s %s && chmod 775 %s %s; status=$?",
+	b.WriteString("rm -rf /workspace/* /tmp/* /workspace/.[!.]* || true")
+	fmt.Fprintf(&b, "; mkdir -p %s %s && chmod 775 %s %s; status=$?",
 		inputRoot, outputRoot,
-		user, user, inputRoot, outputRoot,
 		inputRoot, outputRoot,
 	)
-	// The prunes run as root, so they only ever trim root's caches. The budget
-	// guard below covers both accounts on purpose — it needs nothing but du and
-	// rm, and this runs as root.
+	// The prunes run as root, so they only ever trim root's caches — which is
+	// now the only account scripts run as. The budget guard below no longer
+	// needs to cover a second "user" account's caches; it needs nothing but du
+	// and rm, and this runs as root.
 	for _, prune := range []struct{ tool, subcommand string }{
 		{"uv", "cache prune"},
 		{"npm", "cache verify"},
@@ -1041,10 +983,7 @@ func cleanImageScratchCommand() string {
 		fmt.Fprintf(&b, "; command -v %s >/dev/null 2>&1 && %s %s >/dev/null 2>&1 || true",
 			prune.tool, prune.tool, prune.subcommand)
 	}
-	paths := append(
-		packageCachePaths("/root"),
-		packageCachePaths(path.Join("/home", sandbox.DefaultSandboxExecUser))...,
-	)
+	paths := packageCachePaths("/root")
 	b.WriteString("; ")
 	b.WriteString(cacheBudgetGuardCommand(paths, skillCacheBudgetMB*1024))
 	b.WriteString("; exit $status")
@@ -1769,11 +1708,12 @@ Hard requirements:
   WEKNORA_SESSION_INPUT_DIR: the sandbox injects those. Other WEKNORA_* names the skill reads
   (WEKNORA_API_KEY, WEKNORA_BASE_URL, WEKNORA_HOST, WEKNORA_TOKEN, WEKNORA_KB_ID) MUST be declared.
 
-On-demand / optional extras MUST be installed now. After you finish, this
-tree is made read-only and session agents cannot pip/npm into it (uv venv also
-has no pip). Skills that ship scripts/install_deps.py or say "pip install when
-the user needs Word/PPT" will fail at chat time unless those packages are
-already in the venv.
+On-demand / optional extras MUST be installed now. Every chat session starts
+from the image this install produces, and whatever a session installs dies with
+it, so an extra deferred to chat time is paid for again on every session and
+fails outright wherever the sandbox has no egress. Skills that ship
+scripts/install_deps.py or say "pip install when the user needs Word/PPT" will
+stall at chat time unless those packages are already in the venv.
 - Create the venv with pip present: `+"`uv venv --seed %s/.venv`"+` (or `+"`python3 -m venv`"+`).
 - Install requirements.txt / pyproject.toml with `+"`uv pip install`"+`.
 - Read SKILL.md and any on-demand installer for extra packages (python-docx,

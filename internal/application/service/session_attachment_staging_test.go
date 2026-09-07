@@ -190,7 +190,9 @@ func TestBuildSandboxAttachmentsPromptEscapesMetadata(t *testing.T) {
 
 	assert.Contains(t, prompt, `name="a&lt;&amp;&gt;.txt"`)
 	assert.Contains(t, prompt, `path="/workspace/input/hash/a.txt"`)
-	assert.Contains(t, prompt, "read-only inputs")
+	assert.Contains(t, prompt, "do not write into /workspace/input")
+	assert.Contains(t, prompt, "only directory collected for download",
+		"a model that treats /workspace/output as scratch ships the user its drafts")
 	assert.Contains(t, prompt, "read_file")
 	assert.NotContains(t, prompt, "read_sandbox_file")
 	assert.NotContains(t, prompt, "list_sandbox_files")

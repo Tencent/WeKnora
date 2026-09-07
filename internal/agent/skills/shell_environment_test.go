@@ -2,6 +2,7 @@ package skills
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -24,8 +25,10 @@ func TestShellEnvironmentSelectsOnlyAllowedInstalledSkills(t *testing.T) {
 	require.Contains(t, wrapped, "/pdf/.venv/bin")
 	require.Contains(t, wrapped, "--noprofile --norc")
 	require.Equal(t, "caller", actual["TOKEN"])
-	require.Equal(t, "/workspace/.skill-packages/pdf:/workspace/custom", actual["PYTHONPATH"])
-	require.Contains(t, actual["NODE_PATH"], "/pdf/node_modules")
+	require.Equal(t, "/workspace/custom", actual["PYTHONPATH"],
+		"the skill's Python packages arrive through its venv interpreter on PATH, "+
+			"so nothing here may displace what the caller asked for")
+	require.Equal(t, "/pdf/node_modules", strings.TrimPrefix(actual["NODE_PATH"], sandbox.SkillsImageRoot))
 	require.Equal(t, "/workspace/custom", env["PYTHONPATH"], "caller environment must not be mutated")
 	require.Len(t, env, 2)
 	for _, name := range []string{"other", "missing", "../pdf"} {

@@ -20,16 +20,20 @@ type fakeShellExecutor struct {
 	err     error
 	timeout time.Duration
 	calls   int
+	command string
+	workDir string
+	env     map[string]string
 }
 
 func (f *fakeShellExecutor) ExecShellCommand(
 	_ context.Context,
 	_ string,
-	_ string,
-	_ string,
+	command string,
+	workDir string,
 	timeout time.Duration,
-	_ map[string]string,
+	env map[string]string,
 ) (*sandbox.ExecuteResult, error) {
+	f.command, f.workDir, f.env = command, workDir, env
 	f.timeout = timeout
 	f.calls++
 	if f.err != nil {
@@ -220,7 +224,10 @@ func TestShellExecSuppressesBinaryStreams(t *testing.T) {
 
 func TestShellExecDescriptionDefinesOneExecutionEntry(t *testing.T) {
 	description := NewShellExecTool(&fakeShellExecutor{}, nil).Description()
-	for _, fact := range []string{"/workspace", "skill_name", "virtualenv", "read-only", "non-root", "write_sandbox_file", "edit_sandbox_file", "not automatically saved"} {
+	for _, fact := range []string{
+		"/workspace", "skill_name", "virtualenv", "as root", "die with this session",
+		"write_sandbox_file", "edit_sandbox_file", "not automatically saved",
+	} {
 		require.Contains(t, description, fact)
 	}
 	require.NotContains(t, description, "execute_skill_script")
@@ -490,14 +497,16 @@ func TestSkillNameFromShellCommandExtractsImageSkill(t *testing.T) {
 	assert.Empty(t, skillNameFromShellCommand(`python3 -c "print(1)"`))
 }
 
-func TestShellExecAllowsOverlayInstallThatMentionsTheSkillTree(t *testing.T) {
+func TestShellExecAllowsAnInstallThatMentionsTheSkillTree(t *testing.T) {
 	// Previously an up-front command blacklist rejected this recovery path
-	// because the line contained both `pip install` and the skills root.
+	// because the line contained both `pip install` and the skills root. It is
+	// now the recommended one: a missing package goes into the skill's own venv.
 	executor := &fakeShellExecutor{result: &sandbox.ExecuteResult{ExitCode: 0}}
 	tool := NewShellExecTool(executor, nil)
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
-		`{"command":"python3 -m pip install --target /workspace/.skill-packages/foo -r /opt/weknora/tenant/skills/foo/requirements.txt"}`,
+		`{"command":"/opt/weknora/tenant/skills/foo/.venv/bin/python -m pip install -r `+
+			`/opt/weknora/tenant/skills/foo/requirements.txt"}`,
 	))
 	require.NoError(t, err)
 	require.True(t, result.Success, result.Error)
@@ -527,8 +536,8 @@ func TestShellExecHintsWhenVenvHasNoPip(t *testing.T) {
 	))
 	require.NoError(t, err)
 	require.True(t, result.Success)
-	assert.Contains(t, result.Output, "frozen")
-	assert.Contains(t, result.Output, "/workspace/.skill-packages/律师助手")
+	assert.Contains(t, result.Output, skillPythonPackageInstallCommand)
+	assert.NotContains(t, result.Output, "/workspace/.skill-packages")
 	assert.NotContains(t, result.Output, "write_sandbox_file")
 }
 
@@ -549,4 +558,66 @@ func TestShellExecNeverSilentlyFallsBackFromNamedSkill(t *testing.T) {
 	require.False(t, result.Success)
 	require.Zero(t, executor.calls)
 	require.Contains(t, result.Error, "no skill environment")
+}
+
+func TestShellExecPackageRecoveryKeepsWorkspaceCWD(t *testing.T) {
+	for _, command := range []string{skillNodePackageInstallCommand, skillPythonPackageInstallCommand} {
+		executor := &fakeShellExecutor{}
+		tool := NewShellExecTool(executor, nil).WithSkillEnvironment(shellTestSkillEnvironment(t))
+		args, err := json.Marshal(ShellExecInput{
+			SkillName: "pdf-tools", Command: strings.ReplaceAll(command, "<package>", "test-package"),
+		})
+		require.NoError(t, err)
+		result, err := tool.Execute(shellExecTestContext(), args)
+		require.NoError(t, err)
+		require.True(t, result.Success, "%+v", result)
+		require.Equal(t, 1, executor.calls)
+		require.Equal(t, "/workspace", executor.workDir)
+		require.Equal(t, sandbox.SkillsImageRoot+"/pdf-tools", executor.env["WEKNORA_SKILL_DIR"])
+		require.Contains(t, executor.command, "${WEKNORA_SKILL_DIR:?}")
+	}
+}
+
+func TestShellExecPackageRecoveryUsesNamedEnvironment(t *testing.T) {
+	tool := NewShellExecTool(&fakeShellExecutor{}, nil).WithSkillEnvironment(shellTestSkillEnvironment(t))
+	for _, name := range []string{"pdf-tools", "host-skill"} {
+		for _, stderr := range []string{
+			"No module named pip", "ModuleNotFoundError: No module named 'docx'", "Cannot find module 'example'",
+		} {
+			hint := tool.recoveryHint(name, 1, "python3 script.py", stderr)
+			require.Contains(t, hint, `skill_name="`+name+`"`)
+			require.Contains(t, hint, skillPythonPackageInstallCommand)
+			require.Contains(t, hint, skillPythonVenvCreateCommand)
+			require.Contains(t, hint, skillNodePackageInstallCommand)
+			require.NotContains(t, hint, sandbox.SkillsImageRoot)
+			require.NotContains(t, hint, "work_dir=", "package installation must keep the default workspace CWD")
+		}
+	}
+}
+
+func TestShellExecVenvAccessFailuresPrecedeGenericPermissionHints(t *testing.T) {
+	for _, withEnvironment := range []bool{false, true} {
+		tool := NewShellExecTool(&fakeShellExecutor{}, nil)
+		if withEnvironment {
+			tool.WithSkillEnvironment(shellTestSkillEnvironment(t))
+		}
+		for _, message := range []string{"Permission denied", "Operation not permitted", "EPERM"} {
+			hint := tool.recoveryHint("pdf-tools", 1, "python3 script.py",
+				message+": /skill/.venv/lib/site-packages")
+			require.Contains(t, hint, "skill virtualenv denied access")
+			require.Contains(t, hint, "Once the environment is writable")
+			require.Contains(t, hint, skillPythonPackageInstallCommand)
+		}
+		for _, message := range []string{"Read-only file system", "Read-only filesystem", "EROFS"} {
+			hint := tool.recoveryHint("pdf-tools", 1, "python3 script.py",
+				message+": /skill/.venv/lib/site-packages")
+			require.Contains(t, hint, "skill virtualenv is on a read-only filesystem")
+			require.Contains(t, hint, "cannot write through a read-only mount")
+			require.NotContains(t, hint, "pip install")
+			unrelated := tool.recoveryHint("pdf-tools", 1, "touch report.txt",
+				message+": /workspace/output/report.txt")
+			require.NotContains(t, unrelated, "skill virtualenv")
+			require.NotContains(t, unrelated, skillPythonPackageInstallCommand)
+		}
+	}
 }

@@ -501,6 +501,38 @@ func TestIngestItem_URLCreationAttachesDataSourceMetadata(t *testing.T) {
 	assert.Equal(t, "url:1", repo.metadataUpdates[0]["external_id"])
 }
 
+// TestIngestItem_PersistsSourceUpdatedAt verifies that the connector-supplied
+// last-modified time reaches the persisted metadata as an RFC3339 UTC string,
+// and that an item without one gets no key rather than a zero time.
+func TestIngestItem_PersistsSourceUpdatedAt(t *testing.T) {
+	ds := &types.DataSource{ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1"}
+	edited := time.Date(2023, 4, 5, 6, 7, 8, 0, time.FixedZone("CST", 8*3600))
+
+	repo := &deletionLookupKnowledgeRepo{}
+	ks := &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-1"}}
+	svc := &DataSourceService{knowledgeService: ks}
+	_, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "url:1",
+		URL:        "https://example.com/doc",
+		UpdatedAt:  edited,
+	}, nil)
+	require.NoError(t, err)
+	require.Len(t, repo.metadataUpdates, 1)
+	assert.Equal(t, "2023-04-04T22:07:08Z", repo.metadataUpdates[0]["source_updated_at"])
+
+	repo = &deletionLookupKnowledgeRepo{}
+	ks = &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-2"}}
+	svc = &DataSourceService{knowledgeService: ks}
+	_, err = svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "url:2",
+		URL:        "https://example.com/doc2",
+	}, nil)
+	require.NoError(t, err)
+	require.Len(t, repo.metadataUpdates, 1)
+	_, present := repo.metadataUpdates[0]["source_updated_at"]
+	assert.False(t, present)
+}
+
 func TestProcessSync_SyncDeletionsDeletesMatchingKnowledge(t *testing.T) {
 	h := newSyncDeletionHarness(t, true, "ds-delete-characterization", "log-delete-characterization", nil, nil)
 	updated, err := h.run(t)

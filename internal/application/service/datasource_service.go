@@ -1251,6 +1251,12 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		"source_resource_id": item.SourceResourceID,
 		"datasource_id":      ds.ID,
 	}
+	// The source system's own last-modified time, when the connector supplied
+	// one. The knowledge row's UpdatedAt moves on every re-parse, so this is
+	// the only record of how old the document itself is.
+	if !item.UpdatedAt.IsZero() {
+		metadata["source_updated_at"] = item.UpdatedAt.UTC().Format(time.RFC3339)
+	}
 	for k, v := range item.Metadata {
 		metadata[k] = v
 	}

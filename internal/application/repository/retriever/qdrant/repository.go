@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -401,7 +402,7 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 		if len(enabledChunkIDs) > 0 {
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
-				Payload:        qdrant.NewValueMap(map[string]any{fieldIsEnabled: true}),
+				Payload:        newQdrantValueMap(map[string]any{fieldIsEnabled: true}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
 						qdrant.NewMatchKeywords(fieldChunkID, enabledChunkIDs...),
@@ -417,7 +418,7 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 		if len(disabledChunkIDs) > 0 {
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
-				Payload:        qdrant.NewValueMap(map[string]any{fieldIsEnabled: false}),
+				Payload:        newQdrantValueMap(map[string]any{fieldIsEnabled: false}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
 						qdrant.NewMatchKeywords(fieldChunkID, disabledChunkIDs...),
@@ -469,7 +470,7 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 		for tagID, chunkIDs := range tagGroups {
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
-				Payload:        qdrant.NewValueMap(map[string]any{fieldTagID: tagID}),
+				Payload:        newQdrantValueMap(map[string]any{fieldTagID: tagID}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
 						qdrant.NewMatchKeywords(fieldChunkID, chunkIDs...),
@@ -808,7 +809,7 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 			if v, ok := payload[fieldIsEnabled]; ok {
 				isEnabled = v.GetBoolValue()
 			}
-			newPayload := qdrant.NewValueMap(map[string]any{
+			newPayload := newQdrantValueMap(map[string]any{
 				fieldContent:         payload[fieldContent].GetStringValue(),
 				fieldSourceID:        targetSourceID,
 				fieldSourceType:      payload[fieldSourceType].GetIntegerValue(),
@@ -879,7 +880,20 @@ func createPayload(embedding *QdrantVectorEmbedding) map[string]*qdrant.Value {
 		fieldTagID:           embedding.TagID,
 		fieldIsEnabled:       embedding.IsEnabled,
 	}
-	return qdrant.NewValueMap(payload)
+	return newQdrantValueMap(payload)
+}
+
+func newQdrantValueMap(payload map[string]any) map[string]*qdrant.Value {
+	sanitizedPayload := make(map[string]any, len(payload))
+	for key, value := range payload {
+		if stringValue, ok := value.(string); ok {
+			if strings.IndexByte(stringValue, 0) != -1 || !utf8.ValidString(stringValue) {
+				value = common.CleanInvalidUTF8(stringValue)
+			}
+		}
+		sanitizedPayload[key] = value
+	}
+	return qdrant.NewValueMap(sanitizedPayload)
 }
 
 func buildRetrieveResult(results []*types.IndexWithScore, retrieverType types.RetrieverType) []*types.RetrieveResult {

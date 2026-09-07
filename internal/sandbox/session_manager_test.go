@@ -91,9 +91,8 @@ func TestSessionBoundManagerExecuteEnsuresOutputDir(t *testing.T) {
 		"the attachment directory is prepared alongside the artifact one; a "+
 			"snapshot-derived image carries neither")
 	require.Equal(t, DefaultSandboxExecUser, execs[0].User,
-		"chown follows symlinks, so a root-run bootstrap can be aimed at /etc by "+
-			"a session that swaps its artifact directory for a link; running as the "+
-			"sandbox account is what makes that attempt fail")
+		"the bootstrap names its account like every other caller, so the directories "+
+			"it creates belong to whoever the execs that follow will run as")
 }
 
 func TestWorkspaceBootstrapPreservesExistingData(t *testing.T) {
@@ -193,7 +192,7 @@ func TestCleanSessionWorkDirStillRejectsArbitraryPathsInInstallMode(t *testing.T
 	require.Error(t, err, "install mode widens the allowlist, it does not remove it")
 }
 
-func TestExecShellCommandWithOptionsRunsAsRootOnlyWhenAsked(t *testing.T) {
+func TestExecShellCommandWithOptionsSelectsMaintenanceBootstrap(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
 	mgr, client := newSessionManagerExecTestHarness(t)
 
@@ -201,7 +200,8 @@ func TestExecShellCommandWithOptionsRunsAsRootOnlyWhenAsked(t *testing.T) {
 	require.NoError(t, err)
 	last := lastExecRequest(t, client)
 	require.Equal(t, DefaultSandboxExecUser, last.User,
-		"ordinary shell_exec must stay on the non-root sandbox account")
+		"ordinary shell_exec must stay on the default sandbox account rather than "+
+			"taking the install-mode escape")
 
 	skillDir := mustSkillDir(t, "sk-1")
 	_, err = mgr.ExecShellCommandWithOptions(ctx, "sess-1", "echo hi", ShellExecOptions{
@@ -213,6 +213,13 @@ func TestExecShellCommandWithOptionsRunsAsRootOnlyWhenAsked(t *testing.T) {
 	last = lastExecRequest(t, client)
 	require.Equal(t, "root", last.User)
 	require.Equal(t, skillDir, last.WorkDir)
+	client.mu.Lock()
+	execs := append([]RemoteExecRequest(nil), client.execRequests...)
+	client.mu.Unlock()
+	require.Len(t, execs, 4, "each command has one bootstrap and one execution")
+	ordinaryBootstrap := workspaceBootstrapCommand(SessionInputRoot, SessionOutputRoot, SessionWorkspaceRoot)
+	require.Equal(t, ordinaryBootstrap, execs[0].Command)
+	require.Equal(t, workspaceBootstrapCommand(skillDir), execs[2].Command)
 }
 
 func TestExecShellCommandKeepsOrdinaryRemoteRequest(t *testing.T) {

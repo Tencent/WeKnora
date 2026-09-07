@@ -7,8 +7,12 @@
 // Design notes:
 //   - Session-scoped: the sandbox is resolved from ToolExecContext.SessionID.
 //   - Path guardrail: writes sit under /workspace and never under
-//     /workspace/input (staged attachments stay read-only). Prefer
-//     /workspace/output for files the user should download.
+//     /workspace/input (staged attachments are the user's, not ours).
+//     /workspace/output is what gets collected for download, so the
+//     description reserves it for finished deliverables and sends scratch
+//     work elsewhere under /workspace. Only the /workspace/input half is
+//     enforced here; the rest is guidance, because "finished" is a judgement
+//     the tool cannot make.
 //   - Content stays out of ToolResult.Data/Output: the model already has the
 //     bytes it just sent. The result is path + size so the next call can
 //     shell_exec the file.
@@ -93,7 +97,9 @@ type SandboxFileSink interface {
 // writeSandboxFileDescription carries one %s, filled with the size guidance
 // derived from the round's completion-token budget.
 const writeSandboxFileDescription = `Create, overwrite, or append a text file under /workspace, excluding /workspace/input.
-Use /workspace/output for deliverables. Send both path and content (path first). Use edit_sandbox_file for small changes to an existing file. File content does not pass through shell quoting.
+/workspace/output is collected for download, so it holds finished deliverables only; put drafts, scratch and
+intermediate files in any other directory under /workspace. Send both path and content (path first).
+Use edit_sandbox_file for small changes to an existing file. File content does not pass through shell quoting.
 Large files: first call uses mode=overwrite (default), subsequent calls use mode=append with only the next chunk. Keep calls in order and inspect the reported running byte count. A refused/truncated call wrote nothing; retry that chunk with complete JSON, never duplicate successful chunks.
 %s
 Binary content is not accepted. The result reports the absolute path and total size without echoing content.`
@@ -104,9 +110,9 @@ Binary content is not accepted. The result reports the absolute path and total s
 // depends on the agent's per-round token budget and is stated in the tool
 // description, which is built per session.
 type WriteSandboxFileInput struct {
-	Path    string `json:"path" jsonschema:"Absolute or /workspace-relative sandbox path to write. Must sit under /workspace and must not sit under /workspace/input. Prefer /workspace/output for downloadable artifacts."`
-	Content string `json:"content" jsonschema:"Text to write. In overwrite mode this is the full file; in append mode it is only the next chunk. Keep near the per-call size stated in the tool description so the response is not cut off. Do not send binary bytes."` //nolint:lll // one-line struct tag
-	Mode    string `json:"mode,omitempty" jsonschema:"How to apply content: 'overwrite' (default) replaces the file, 'append' adds to the end of an existing file. Use append to build a large file across several calls."`                                             //nolint:lll // one-line struct tag
+	Path    string `json:"path" jsonschema:"Absolute or /workspace-relative sandbox path to write. Must sit under /workspace and must not sit under /workspace/input. Use /workspace/output for finished deliverables only; intermediate files belong elsewhere under /workspace."` //nolint:lll // JSON schema tags must remain on one line.
+	Content string `json:"content" jsonschema:"Text to write. In overwrite mode this is the full file; in append mode it is only the next chunk. Keep near the per-call size stated in the tool description so the response is not cut off. Do not send binary bytes."`             //nolint:lll // one-line struct tag
+	Mode    string `json:"mode,omitempty" jsonschema:"How to apply content: 'overwrite' (default) replaces the file, 'append' adds to the end of an existing file. Use append to build a large file across several calls."`                                                         //nolint:lll // one-line struct tag
 }
 
 // WriteSandboxFileTool writes a text file into the session sandbox.

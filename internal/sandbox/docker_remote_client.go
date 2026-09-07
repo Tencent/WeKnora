@@ -16,12 +16,11 @@
 //	Exec     → POST /containers/{id}/exec → /exec/{id}/start (hijack)
 //	Snapshot → POST /commit (skill images under weknora-skill/)
 //
-// Every file operation — WriteFile, ReadFile, Stat, MakeDir, Remove, ListDir —
-// is an exec running as the sandbox account, NOT a call to /archive. The
-// archive endpoints run as root and resolve symlinks, so a session that plants
-// a link inside its own workspace could read or overwrite anything in the
-// container through them. Going through exec puts the kernel back in charge of
-// who may touch what. Do not "simplify" these back onto /archive.
+// Every file operation uses exec with an explicit account (root by default),
+// timeout and activity tracking. Archive endpoints bypass those exec settings.
+// Neither root exec nor archive provides containment under a path prefix:
+// intermediate symlinks may reach other paths inside the same container.
+// See WriteFile for the limits of the file API's path guards.
 //
 // ListDir and Stat use `find -printf`, which needs GNU findutils in the image;
 // the standard WeKnora sandbox image provides it.
@@ -63,13 +62,13 @@ const dockerActivityMarker = "/var/lib/weknora-sandbox-activity"
 // the container is a place to exec into, not a service — and prepares the
 // activity marker on the way.
 //
-// The marker has to be writable by the sandbox account. PID 1 runs as root so
-// that it can create the file at all, but every exec that would refresh it —
-// scripts, shell commands, filesystem helpers — runs as the unprivileged user.
-// Creating it here, in the container's own entrypoint, avoids an extra API
-// round trip per sandbox, and the chmod that follows is what lets that account
-// touch it. Without this the idle sweeper would see a session that only ever
-// ran scripts as untouched, and reclaim it out from under the user.
+// The marker has to be writable by whichever account the execs land on, which
+// is DefaultSandboxExecUser by default but stays selectable per call and can
+// be a non-root account on a custom image. Creating it here, in the
+// container's own entrypoint, avoids an extra API round trip per sandbox, and
+// the chmod that follows is what lets a non-root account touch it. Without
+// this the idle sweeper would see a session that only ever ran scripts as
+// untouched, and reclaim it out from under the user.
 var dockerSandboxEntrypoint = []string{
 	"/bin/sh", "-c",
 	"touch " + dockerActivityMarker + " 2>/dev/null; " +
@@ -268,9 +267,10 @@ func (c *DockerRemoteClient) Create(
 	created, err := c.api.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Image: image,
 		Config: &container.Config{
-			// The standard image ends with USER user. The entrypoint has to
-			// create and chmod the activity marker under /var/lib, which only
-			// root can do; exec still names DefaultSandboxExecUser per call.
+			// The entrypoint has to create and chmod the activity marker under
+			// /var/lib, which only root can do. Pinning PID 1 to uid 0 keeps
+			// that working for a custom image that ends with a non-root USER;
+			// exec still names DefaultSandboxExecUser per call.
 			User: dockerSandboxPID1User,
 			// Entrypoint rather than Cmd, with Cmd explicitly emptied: the
 			// daemon prepends the image's own ENTRYPOINT to Cmd, so an image
@@ -810,19 +810,16 @@ func dockerExecCommand(req RemoteExecRequest, timeout time.Duration) []string {
 
 // dockerExecUser resolves which account a command runs as.
 //
-// A blank user resolves to the sandbox account. It must never resolve to root:
-// this function is the single choke point for every exec the daemon runs, so a
-// caller that forgets to name an account has to lose privileges here, not
-// silently gain them. It also makes the backends agree — E2B authenticates its
-// data plane as DefaultSandboxExecUser and Cube hands a blank field to envd,
-// which defaults the same way.
+// A blank user resolves to DefaultSandboxExecUser, which is root: this
+// function is the single choke point for every exec the daemon runs, so the
+// account a caller lands on when it names none is decided here rather than by
+// whatever the image happens to declare. It also makes the backends agree —
+// E2B authenticates its data plane as DefaultSandboxExecUser and Cube hands a
+// blank field to envd, which defaults the same way.
 //
-// This used to fall back to root for the manager's artifact-directory
-// bootstrap. That was a container-escape primitive: chown follows symlinks, so
-// a session that replaced its own artifact directory with a link to /etc got
-// the root-run bootstrap to hand it ownership of /etc, and from there uid 0 by
-// rewriting passwd. The bootstrap now names the account like everyone else and
-// simply fails when it is aimed at something the account does not own.
+// Root is safe to default to because a sandbox belongs to exactly one session:
+// there is no second account inside it whose files the kernel would be keeping
+// apart. Host and cross-tenant isolation live at the container boundary.
 func dockerExecUser(user string) string {
 	if trimmed := strings.TrimSpace(user); trimmed != "" {
 		return trimmed
@@ -837,22 +834,19 @@ func dockerExecWasKilled(exitCode int) bool {
 	return exitCode == 137 || exitCode == 124
 }
 
-// WriteFile writes one file as the sandbox account.
+// WriteFile writes one file through exec as remoteFileUser(ctx).
 //
-// This and its Read/Stat counterparts deliberately avoid the Engine's archive
-// endpoints (CopyToContainer, CopyFromContainer, ContainerStatPath). Those are
-// served by the daemon, which means two things at once: they ignore the exec
-// user and act as root, and they resolve symlinks on the way. That combination
-// is unsafe here, because the sandbox account can write anywhere under
-// /workspace while every caller-facing path guard in this repository is a
-// string prefix test. A model that runs `ln -s /root /workspace/output/esc`
-// leaves /workspace/output/esc/secret.txt passing those guards, and the daemon
-// then reads it out as root — confirmed against a real daemon, not theorised.
+// Read/Stat and the other file operations use the same exec path for explicit
+// identity, bounded execution and activity tracking. Archive endpoints run in
+// the daemon and do not honor these per-exec settings.
 //
-// Running these as DefaultSandboxExecUser hands the decision to the kernel
-// instead: a path the sandbox account cannot reach on its own stays
-// unreachable regardless of what a link points at, and there is no window
-// between checking and using in which the link could be repointed.
+// The default account is root. Exec still follows intermediate symlinks, and
+// lexical path guards do not confine access to /workspace or protect /root
+// and /etc inside this container. Host and cross-session isolation depend on
+// the container and its mount configuration, not in-container ownership.
+// Root cannot bypass a read-only mount. A future file API requiring path
+// containment must enforce it during resolution and use, not rely on root
+// exec or a separate prefix/Stat check.
 func (c *DockerRemoteClient) WriteFile(
 	ctx context.Context,
 	handle RemoteSandboxHandle,
@@ -1242,12 +1236,10 @@ func dockerCleanPath(op, raw string) (string, error) {
 
 // dockerReservedPathPrefixes are refused for every file operation.
 //
-// File operations run as the sandbox account (see WriteFile), so the kernel
-// already decides what is reachable and this list is not what keeps /etc or
-// another session's data safe. It exists for the paths the sandbox account
-// legitimately can touch but never should through this API: /proc and /sys
-// expose the container's own runtime state, and the activity marker is the
-// sweeper's bookkeeping, which a session must not be able to backdate.
+// These are lexical API restrictions on runtime paths and the activity marker.
+// Root exec can still reach them through intermediate symlinks or shell_exec;
+// the list is not a filesystem or tenant boundary. Mounts and container
+// isolation remain authoritative.
 var dockerReservedPathPrefixes = []string{
 	"/proc",
 	"/sys",

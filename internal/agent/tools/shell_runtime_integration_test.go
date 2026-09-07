@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,8 +41,8 @@ func TestShellRuntimeIntegration(t *testing.T) {
 	ctx = WithToolExecContext(ctx, &ToolExecContext{SessionID: sessionID})
 	t.Cleanup(func() { require.NoError(t, mgr.DestroySession(base, sessionID)) })
 
-	// The install identity deliberately creates a frozen venv with a unique
-	// module that the system Python cannot import.
+	// A previously installed image may contain a read-only venv without pip.
+	// Root sessions must still be able to use and update their own copy.
 	dir := sandbox.SkillsImageRoot + "/runtime-probe"
 	require.NoError(t, mgr.WriteSessionFile(ctx, sessionID, dir+"/SKILL.md", []byte("# Runtime probe\n")),
 		"the installer filesystem must use the maintenance identity")
@@ -73,7 +74,7 @@ func TestShellRuntimeIntegration(t *testing.T) {
 	require.Contains(t, resource.Output, `shell_exec(skill_name="runtime-probe"`)
 	environment := call(ToolShellExec, `{"command":"a=(one two); printf '%s:%s' \"$HOME\" \"${#a[@]}\""}`)
 	require.Equal(t, 0, environment.Data["exit_code"], "%+v", environment)
-	require.Equal(t, "/home/user:2", environment.Data["stdout"], "shell user, HOME and Bash grammar must agree")
+	require.Equal(t, "/root:2", environment.Data["stdout"], "shell user, HOME and Bash grammar must agree")
 	r := call(ToolWriteSandboxFile, `{"path":"scripts/probe.py","content":"import runtime_probe\nprint(runtime_probe.VALUE + 1)\n"}`)
 	require.True(t, r.Success, "%+v", r)
 	r = call(ToolShellExec, `{"skill_name":"runtime-probe","command":"python3 /workspace/scripts/probe.py","work_dir":"output/new-dir"}`)
@@ -81,8 +82,19 @@ func TestShellRuntimeIntegration(t *testing.T) {
 	require.Equal(t, 0, r.Data["exit_code"], "%+v", r)
 	require.Equal(t, "42\n", r.Data["stdout"])
 	r = call(ToolShellExec, `{"skill_name":"runtime-probe","command":"printf changed > \"$WEKNORA_SKILL_DIR/SKILL.md\""}`)
-	require.NotEqual(t, 0, r.Data["exit_code"], "ordinary skill commands cannot mutate the installed tree")
-	require.Contains(t, r.Output, "Permission denied")
+	require.Equal(t, 0, r.Data["exit_code"], "root sessions may update their own installed tree")
+	r = call(ToolWriteSandboxFile, `{"path":"npm-package/package.json","content":"{\"name\":\"runtime-node-probe\",\"version\":\"1.0.0\",\"main\":\"index.js\"}"}`)
+	require.True(t, r.Success, "%+v", r)
+	r = call(ToolWriteSandboxFile, `{"path":"npm-package/index.js","content":"module.exports = 42;"}`)
+	require.True(t, r.Success, "%+v", r)
+	installArgs, err := json.Marshal(ShellExecInput{SkillName: "runtime-probe",
+		Command: strings.ReplaceAll(skillNodePackageInstallCommand, "<package>", "/workspace/npm-package --offline --ignore-scripts --no-audit --no-fund")})
+	require.NoError(t, err)
+	r = call(ToolShellExec, string(installArgs))
+	require.True(t, r.Success, "%+v", r)
+	require.Equal(t, 0, r.Data["exit_code"], "%+v", r)
+	r = call(ToolShellExec, `{"skill_name":"runtime-probe","command":"node -e \"console.log(require('runtime-node-probe'))\""}`)
+	require.Equal(t, "42\n", r.Data["stdout"], "%+v", r)
 	r = call(ToolEditSandboxFile, `{"path":"scripts/probe.py","edits":[{"old_string":"+ 1","new_string":"+ 2"}]}`)
 	require.True(t, r.Success, "%+v", r)
 	r = call(ToolShellExec, `{"skill_name":"runtime-probe","command":"python3 scripts/probe.py"}`)
@@ -124,4 +136,13 @@ sys.stdout.write(sys.stdin.read())
 	require.True(t, r.Success, "%+v", r)
 	require.Equal(t, 0, r.Data["exit_code"], "%+v", r)
 	require.Equal(t, "00ff01\nargument with spaces\n"+stdin, r.Data["stdout"])
+
+	// Follow the missing-environment guidance for a host skill, then ensure
+	// the next named call selects the newly created staged virtualenv.
+	args, err = json.Marshal(ShellExecInput{SkillName: "host-probe", Command: skillPythonVenvCreateCommand})
+	require.NoError(t, err)
+	r = call(ToolShellExec, string(args))
+	require.Equal(t, 0, r.Data["exit_code"], "%+v", r)
+	r = call(ToolShellExec, `{"skill_name":"host-probe","command":"python3 -c \"import os, sys; assert sys.prefix == os.environ['WEKNORA_SKILL_DIR'] + '/.venv'; print('staged venv selected')\""}`)
+	require.Equal(t, "staged venv selected\n", r.Data["stdout"], "%+v", r)
 }

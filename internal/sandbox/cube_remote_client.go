@@ -664,9 +664,11 @@ func (c *CubeRemoteClient) Exec(
 	logCubeDataPlaneExec(ctx, c, sb, request.User, line)
 
 	startedAt := time.Now()
-	// User comes from the neutral request rather than being hardcoded: running
-	// everything as root silently defeats file-mode protections on shared
-	// volumes, and made this adapter behave differently from E2B's.
+	// User comes from the neutral request rather than being hardcoded, so the
+	// account a Cube exec lands on matches the other backends. The default is
+	// now root (see DefaultSandboxExecUser); the shared-volume concern that
+	// once made root here a footgun no longer applies under
+	// one-session-one-sandbox.
 	sdkResult, execErr := sb.Commands().Run(execCtx, line, cubesandbox.CommandOptions{
 		Timeout: request.Timeout,
 		Envs:    envs,

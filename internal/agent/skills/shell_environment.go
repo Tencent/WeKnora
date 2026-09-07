@@ -32,8 +32,7 @@ func (m *Manager) PrepareShellEnvironment(ctx context.Context, sessionID, skillN
 	for k, v := range env {
 		runtimeEnv[k] = v
 	}
-	applySessionPackagePath(runtimeEnv, skillName)
-	runtimeEnv[nodePathEnvVar] += ":" + path.Join(dir, "node_modules")
+	applySkillNodePath(runtimeEnv, dir)
 	runtimeEnv[skillDirEnvVar] = dir
 	runtimeEnv[artifactOutputEnvVar] = ArtifactOutputDir()
 	runtimeEnv[artifactHistoryEnvVar] = ArtifactOutputDir()

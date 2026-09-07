@@ -46,10 +46,13 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
-	// 使用传入的TaskID，如果没传则生成增强的TaskID
-	taskID := payload.TaskID
+	// 使用传入的TaskID，如果没传则生成增强的TaskID。
+	// 客户端传入的 task_id 会进文件名和 Redis key，必须是无路径分隔符的标识符。
+	taskID := strings.TrimSpace(payload.TaskID)
 	if taskID == "" {
 		taskID = secutils.GenerateTaskID("faq_import", tenantID, kbID)
+	} else if err := secutils.ValidateTaskID(taskID); err != nil {
+		return "", werrors.NewBadRequestError("task_id 格式不合法")
 	}
 
 	var knowledgeID string
@@ -156,7 +159,10 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		logger.Infof(ctx, "FAQ entries size: %d bytes, uploading to object storage", len(entriesData))
 
 		// 上传到私有桶（主桶），任务处理完成后清理
-		fileName := fmt.Sprintf("faq_import_entries_%s_%d.json", taskID, enqueuedAt)
+		fileName, err := faqImportEntriesFileName(taskID, enqueuedAt)
+		if err != nil {
+			return "", fmt.Errorf("invalid task id for object name: %w", err)
+		}
 		entriesURL, err := s.fileSvc.SaveBytes(ctx, entriesData, tenantID, fileName, false)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to upload FAQ entries to object storage: %v", err)
@@ -182,7 +188,10 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 	if len(payloadBytes) > payloadSizeThreshold && taskPayload.EntriesURL == "" {
 		// payload 太大但还没上传，现在上传
 		entriesData, _ := json.Marshal(payload.Entries)
-		fileName := fmt.Sprintf("faq_import_entries_%s_%d.json", taskID, enqueuedAt)
+		fileName, nameErr := faqImportEntriesFileName(taskID, enqueuedAt)
+		if nameErr != nil {
+			return "", fmt.Errorf("invalid task id for object name: %w", nameErr)
+		}
 		entriesURL, err := s.fileSvc.SaveBytes(ctx, entriesData, tenantID, fileName, false)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to upload FAQ entries to object storage: %v", err)
@@ -235,6 +244,10 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 	return taskID, nil
 }
 
+func faqImportEntriesFileName(taskID string, enqueuedAt int64) (string, error) {
+	return secutils.SafeFileName(fmt.Sprintf("faq_import_entries_%s_%d.json", taskID, enqueuedAt))
+}
+
 // generateFailedEntriesCSV 生成失败条目的 CSV 文件并上传
 func (s *knowledgeService) generateFailedEntriesCSV(ctx context.Context,
 	tenantID uint64, taskID string, failedEntries []types.FAQFailedEntry,
@@ -280,7 +293,10 @@ func (s *knowledgeService) generateFailedEntriesCSV(ctx context.Context,
 	}
 
 	// 上传 CSV 文件到临时存储（会自动过期）
-	fileName := fmt.Sprintf("faq_dryrun_failed_%s.csv", taskID)
+	fileName, err := secutils.SafeFileName(fmt.Sprintf("faq_dryrun_failed_%s.csv", taskID))
+	if err != nil {
+		return "", fmt.Errorf("invalid task id for object name: %w", err)
+	}
 	filePath, err := s.fileSvc.SaveBytes(ctx, []byte(buf.String()), tenantID, fileName, true)
 	if err != nil {
 		return "", fmt.Errorf("failed to save CSV file: %w", err)

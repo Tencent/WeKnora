@@ -237,8 +237,9 @@ func ParseSkillMetadata(content string) (*SkillMetadata, error) {
 
 // IsOnDemandInstallerPath reports whether path is a first-use dependency
 // installer (scripts/install_deps.py and friends). Skills ship these to defer
-// optional packages to chat time, which cannot work once the skill tree is
-// snapshotted read-only. The installer agent's prompt ("install these extras
+// optional packages to chat time, which is the wrong moment: the work is
+// repeated by every session built from the image and fails wherever the
+// sandbox has no egress. The installer agent's prompt ("install these extras
 // now") and the runtime hint ("skip this installer") key off the same list.
 func IsOnDemandInstallerPath(scriptPath string) bool {
 	base := strings.ToLower(filepath.Base(strings.TrimSpace(scriptPath)))

@@ -265,11 +265,19 @@ func formatToolGuidance(names []string) string {
 		b.WriteString("Use read_file for workspace files and listed skill:// resources. In older instructions, translate read_skill(skill_name, file_path) to read_file(path=skill://<name>/<file_path or SKILL.md>) and read_sandbox_file to read_file.\n")
 	}
 	if has("shell_exec") || has("write_sandbox_file") {
-		b.WriteString("Session workspace: /workspace. Preserve uploaded originals in /workspace/input; create scratch files under /workspace and deliverables under /workspace/output. Commands start from their specified working directory on every call. Files and installed packages persist within the session.\n")
+		b.WriteString("Session workspace: /workspace. Preserve uploaded originals in /workspace/input. " +
+			"/workspace/output is the only directory collected for download, " +
+			"so it takes finished deliverables only; " +
+			"keep drafts and intermediate files in another directory under /workspace. " +
+			"Commands start from their specified working directory on every call. " +
+			"Files and installed packages persist within the session.\n")
 		b.WriteString(sandboxArtifactReferenceGuidance())
 	}
 	if has("shell_exec") && has("read_file") {
-		b.WriteString("For listed skills, run bundled scripts and your own scripts with shell_exec(skill_name=..., command=...). This selects an installed skill's runtime or stages host skill resources, and applies scoped credentials; use $WEKNORA_SKILL_DIR for bundled files. The installed tree is read-only.\n")
+		b.WriteString("For listed skills, run bundled scripts and your own scripts with " +
+			"shell_exec(skill_name=..., command=...). This selects an installed skill's runtime " +
+			"or stages host skill resources, and applies scoped credentials; " +
+			"use $WEKNORA_SKILL_DIR for bundled files.\n")
 		b.WriteString("In older instructions, translate execute_skill_script(skill_name, script_path, ...) to shell_exec(skill_name=..., command=...).\n")
 	}
 

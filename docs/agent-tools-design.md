@@ -82,7 +82,9 @@ WeKnora 的通用沙箱操作需要四个稳定原语：读取、写入、编辑
 
 未指定技能的下一条命令使用系统运行环境。命名了不存在或未接入的技能环境时直接报错，不静默回退到系统解释器。
 
-技能树保持只读。Python 临时依赖通过不带 `skill_name` 的系统 Python 安装到 `/workspace/.skill-packages/<skill>`，再带 `skill_name` 执行。Node 的 `NODE_PATH` 支持 CommonJS；自建 ESM 脚本应在可写项目目录安装依赖，或调用技能目录里的原始脚本，不能假定 NODE_PATH 支持 ESM。
+技能缺包时装进技能自己的环境：安装调用也带 `skill_name`，保持 `work_dir` 为默认的 `/workspace`。Python 用 `uv pip install --python "${WEKNORA_SKILL_DIR:?}/.venv/bin/python" <package>`，无需虚拟环境内已有 pip；Node 用 `npm --prefix "${WEKNORA_SKILL_DIR:?}" install <package>`。`$WEKNORA_SKILL_DIR` 由本次调用注入，指向镜像内技能或宿主机来源技能的实际暂存目录。如果尚无 `.venv`，先用 `python3 -m venv --without-pip "${WEKNORA_SKILL_DIR:?}/.venv"` 创建；自定义镜像没有 uv 时，先用该虚拟环境的 Python 执行 `-m ensurepip --upgrade`，成功后再执行 `-m pip install <package>`。随后仍带同一 `skill_name` 执行原命令。命令中的 `${WEKNORA_SKILL_DIR:?}` 会在变量缺失或为空时终止，避免误用根目录。真正的只读挂载仍需先配置可写的技能环境，root、uv 和 pip 都无法绕过挂载限制。
+
+沙箱归本会话独占且以 root 运行，这类写入落在会话自己的容器里、随会话销毁，不会回流到其他会话启动用的镜像；因此不再需要 `/workspace` 下的包 overlay，技能的包也不会被拆到两个位置。Node 的 `NODE_PATH` 支持 CommonJS；自建 ESM 脚本应在可写项目目录安装依赖，或调用技能目录里的原始脚本，不能假定 NODE_PATH 支持 ESM。
 
 文件工具继续保留写入预算、精确编辑校验、读取分页和二进制处理。Shell 输出保留原来的字节限额和截断策略；完整输出不自动保存，需要时显式重定向到工作区日志。产物仍由 `/workspace/output` 收集，以 `sandbox:<filename>` 引用。
 

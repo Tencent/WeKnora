@@ -35,9 +35,10 @@ const artifactHistoryEnvVar = "WEKNORA_SKILL_HISTORY_ROOT"
 // install-time verification pass exports the same name.
 const skillDirEnvVar = "WEKNORA_SKILL_DIR"
 
-// pythonPathEnvVar / nodePathEnvVar carry the per-session extra-packages
-// overlay (see sandbox.SessionSkillPackageDir). They are injected rather than
-// left for the skill to declare so a stored PYTHONPATH cannot displace them.
+// nodePathEnvVar carries the skill's own node_modules. pythonPathEnvVar is
+// never injected — a skill's Python packages arrive through its venv
+// interpreter — but stays on the blacklist below, because a stored PYTHONPATH
+// could otherwise shadow exactly those packages.
 const pythonPathEnvVar = "PYTHONPATH"
 const nodePathEnvVar = "NODE_PATH"
 

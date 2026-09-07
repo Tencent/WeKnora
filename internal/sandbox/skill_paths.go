@@ -163,20 +163,6 @@ func SkillDirForImageScript(scriptPath string) (string, bool) {
 	return dir, true
 }
 
-// SessionSkillPackageDir is the per-session extra-packages overlay for one
-// skill. The image venv is frozen after install (root-owned, mode 555, and
-// often created with `uv venv` so it has no pip). Skills that lazily
-// `pip install` on first use cannot write there; packages installed with
-// `python3 -m pip install --target` this directory are visible to
-// execute_skill_script via PYTHONPATH / NODE_PATH. The directory is under
-// /workspace so it dies with the session and never mutates the snapshot.
-func SessionSkillPackageDir(skillName string) string {
-	if !IsValidSkillName(skillName) {
-		return path.Join(SessionWorkspaceRoot, ".skill-packages")
-	}
-	return path.Join(SessionWorkspaceRoot, ".skill-packages", skillName)
-}
-
 // SkillVenvPython is where a skill's own Python interpreter lives when the
 // install created one. It is exported because the model needs to be told: the
 // system python3 deliberately carries no skill dependencies, so anything that

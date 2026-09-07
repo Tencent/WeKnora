@@ -239,7 +239,7 @@ Skills 功能通过两个工具与 Agent 交互：
 
 自己编写的脚本先用 `write_sandbox_file` 写入 `scripts/analyze.py`，然后以相同 `skill_name` 运行 `python3 scripts/analyze.py`。用 `edit_sandbox_file` 修改，用 `read_file` 查看；这些工具的相对路径也从 `/workspace` 解析。Shell 已启用时通过 `ls`/`find` 浏览目录，不再额外注册 `list_sandbox_files`。
 
-生成文件放在 `/workspace/output`；原始附件位于 `/workspace/input`，应保留原样。已安装技能目录只读。Node 的 `NODE_PATH` 支持 CommonJS，自建 ESM 脚本仍需在可写项目目录安装依赖，或调用技能目录中的原始脚本。
+生成文件放在 `/workspace/output`；原始附件位于 `/workspace/input`，应保留原样。已安装技能可在本会话沙箱内补装依赖，写入随会话销毁，不会修改其他会话使用的镜像。Node 的 `NODE_PATH` 支持 CommonJS，自建 ESM 脚本仍需在可写项目目录安装依赖，或调用技能目录中的原始脚本。
 
 ### 旧工具迁移
 
@@ -395,19 +395,18 @@ fullResult := validator.ValidateAll(scriptContent, args, stdin)
 
 ### Docker 沙箱
 
-Docker 模式提供最强的隔离：
+Docker 后端为每个会话提供独立容器，当前隔离和资源配置如下（详见 [Docker 后端](./sandbox-docker-backend.md)）：
 
-- **非 root 用户**：容器内以普通用户运行
-- **Capability 限制**：移除所有 Linux capabilities
-- **只读文件系统**：根文件系统只读
-- **资源限制**：内存 256MB，CPU 限制
-- **网络隔离**：默认无网络访问
-- **临时挂载**：Skill 目录只读挂载
-- **脚本预校验**：执行前进行安全校验
+- **执行账号**：默认 root；宿主机和跨会话隔离依赖容器与挂载配置，容器共享宿主机内核。
+- **Capability 限制**：先移除全部，再补回 CHOWN、DAC_OVERRIDE、FOWNER、FSETID、SETGID、SETUID、KILL；启用 `no-new-privileges`。
+- **文件系统**：容器可写层承载技能和工作区，根文件系统不设为只读；当前不支持挂载技能卷，技能随镜像进入会话。
+- **资源限制**：默认 2 GiB 内存、2 核 CPU、512 个进程，可通过配置调整。
+- **网络**：默认 `bridge`，配置禁止出网时使用 `none`；不支持域名级网络规则。
+- **工具约束**：Shell 命令黑名单和文件路径前缀检查用于限制误操作，不是容器内 root 的安全边界。
 
 #### 沙箱镜像
 
-系统使用专用的沙箱镜像 `wechatopenai/weknora-sandbox`，预装了 Python 3.11、Node.js 20、常用 CLI 工具和 Python 库，无需在执行时临时安装依赖。
+系统使用专用的沙箱镜像 `wechatopenai/weknora-sandbox`，预装了 Python 3.11、Node.js 20、uv 和常用 CLI 工具；技能依赖在技能安装阶段写入各自环境。
 
 **预拉取镜像**（推荐在首次部署时执行，避免首次执行脚本时等待下载）：
 
@@ -421,11 +420,11 @@ sh scripts/build_images.sh -s
 
 > 如果未预拉取，创建第一个沙箱时会先拉取镜像，首次执行需要等待下载完成；也可以在设置页的模板步骤提前触发拉取。
 
-> 用 `main` 而非 `latest`：`latest` 只在发版时移动，目前仍停在 `/workspace` 及其 `input`/`output` 目录交给沙箱账号之前的版本，用它建出来的沙箱写不了自己的产物目录。发版带上该修复后即可换回 `latest`。
+> 示例使用 `main`；生产部署应固定已验证的版本标签，并确认镜像与应用版本兼容。
 
 **镜像内置环境**：
-- Python 3.11 + pip（requests、pyyaml、pandas、beautifulsoup4）
-- Node.js 20 + npm
+- Python 3.11 + pip、uv；第三方 Python 包由技能安装阶段提供
+- Node.js 20 + npm、pnpm
 - CLI 工具：jq、curl、bash、grep、sed、awk 等
 
 ```bash
