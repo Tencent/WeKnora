@@ -77,11 +77,11 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 | 浏览器 → `frontend`(NGINX) → `app` | HTTP/HTTPS（REST + SSE） | NGINX 反代 `/api`；聊天走 SSE 流式响应 |
 | `app` → `docreader` | **gRPC**（默认 `docreader:50051`，`DOCREADER_TRANSPORT=grpc`，支持 TLS/mTLS 与 `GRPC_AUTH_TOKEN`） | proto 定义在 `docreader/proto/`；大文件走流式 `ReadStream` |
 | `app` → `postgres` | PostgreSQL wire（GORM/pgx） | 业务数据 + BM25 + pgvector |
-| `app` ↔ `redis` | RESP（支持 TLS） | ① Asynq 任务队列（文档解析/富化/Wiki 等 19 类任务）；② SSE 流断线续传的 Stream Manager（`STREAM_MANAGER_TYPE`）；③ `system_settings` 变更 Pub/Sub；④ Embed 渠道限流；⑤ 分布式 per-model 并发信号量 |
+| `app` ↔ `redis` | RESP（支持 TLS） | ① Asynq 任务队列（文档解析/富化/Wiki/记忆等任务）；② SSE 流断线续传的 Stream Manager（`STREAM_MANAGER_TYPE`）；③ `system_settings` 变更 Pub/Sub；④ Embed 渠道限流；⑤ 分布式 per-model 并发信号量 |
 | `app` → `neo4j` | Bolt（`bolt://neo4j:7687`） | GraphRAG 实体/关系存取 |
 | `app` → `searxng` / Web 搜索 provider | HTTP | SSRF 白名单校验（`SSRF_WHITELIST_EXTRA` 默认放行 compose 内 `searxng,qdrant,milvus,weaviate,doris-fe,doris-be`） |
 | `app` → 向量库/对象存储/LLM 提供商 | 各自 SDK（HTTP/gRPC/MySQL 协议） | Doris 走 MySQL 协议 + Stream Load HTTP |
-| `app` → `sandbox` | 本地 `docker run` | Skills 代码执行隔离 |
+| `app` → 沙箱后端 | Docker Engine API / Cube/E2B 控制面与数据面 | 会话执行、技能安装与文件产物；按空间沙箱配置选择 |
 | `app` ↔ IM 平台 | HTTP webhook / 长连接 SDK | 微信、企业微信、飞书、钉钉、Slack、Telegram、QQ、Mattermost、云之家（`internal/im/`） |
 
 ## 4. 总体架构图
@@ -102,7 +102,7 @@ graph LR
         DR["docreader: Python gRPC (:50051)<br/>PDF / DOCX / Excel / Web 解析"]
         PG[("postgres: ParadeDB pg17<br/>业务数据 + BM25 + pgvector")]
         RD[("redis 7<br/>Asynq 队列 / 流管理 / PubSub / 限流")]
-        SBX["sandbox 容器 (按需 docker run)"]
+        SBX["Docker 会话沙箱 (默认关闭)"]
         subgraph Optional["可选 profile"]
             SX["searxng (联网搜索)"]
             NEO[("neo4j (知识图谱)")]
@@ -112,6 +112,7 @@ graph LR
         end
     end
 
+    REMOTE["Cube / E2B 会话沙箱"]
     EXT["外部服务: LLM API / Elasticsearch / OpenSearch / COS / S3 / OSS ..."]
 
     Browser -->|"HTTP / SSE"| FE
@@ -123,7 +124,8 @@ graph LR
     APP -->|"gRPC ReadStream"| DR
     APP -->|"GORM (SQL)"| PG
     APP -->|"RESP"| RD
-    APP -->|"docker run"| SBX
+    APP -->|"Docker Engine API"| SBX
+    APP -->|"控制面 / 数据面"| REMOTE
     APP -->|"HTTP"| SX
     APP -->|"Bolt"| NEO
     APP -->|"SDK"| VDB

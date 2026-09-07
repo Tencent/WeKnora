@@ -423,7 +423,7 @@ docker build -f docker/Dockerfile.app --build-arg WITH_ANYDOC=0 -t weknora-app .
 # 或在 .env 里设 WITH_ANYDOC=0 再 docker compose build
 ```
 
-启用后在知识库的解析设置里把对应文件类型指向 `anydoc` 引擎即可。
+显式解析规则优先。未配置规则时，已链接 anydoc 且它支持的复杂格式默认优先走 anydoc；简单格式继续用 Go SimpleFormatReader。未链接 anydoc 的 PPT/PPTX 默认回退 markitdown。需要固定引擎时，可在知识库解析设置中显式指定，而不依赖部署的编译选项。
 
 ### 8.2 能力边界
 

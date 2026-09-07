@@ -321,3 +321,9 @@ RAG 流水线的可视化进度（`views/chat/components/RagPipelineProgress.vue
 - `wailsjs/runtime/`：Wails runtime API（窗口控制等），前端在浏览器环境下调用会被 try/catch 安静降级（如 `useTheme.ts`）。
 
 桌面应用的窗口内容就是这份前端代码，Lite 模式（`autoSetup` 免登录 + 深链恢复）与 `--wails-draggable` 标记的可拖拽标题区都是为桌面形态准备的适配。
+
+## 设置导航与部署能力
+
+设置入口按任务分组，发布与集成中包含 CLI 等接入页；技能目录、沙箱配置、个人变量与空间/个人记忆提供各自的管理界面。导航应复用 `frontend/src/config/integrations.ts` 等现有注册信息，新增入口需同时检查侧栏分组。
+
+`GET /api/v1/system/capabilities` 返回 edition 及能力 supported/reason。前端据实际部署能力隐藏或禁用入口，例如 Docker 沙箱默认受平台开关控制；前端可见性只改善操作体验，后端路由继续执行角色与能力检查。接口见[系统 API](../04-api/02-api-system.md)。

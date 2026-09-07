@@ -130,7 +130,7 @@ make dev-logs / dev-status / dev-stop / dev-restart
 | `docker/Dockerfile.app` | `wechatopenai/weknora-app` | 两阶段：`golang:1.26-bookworm` 编译（`make build-prod`，默认 `WITH_ANYDOC=1` 链接进程内 office 解析引擎，注入版本信息，预下载 DuckDB 扩展 `cmd/download/duckdb`）→ `debian:12.12-slim` 运行层（含 `migrate` 迁移工具、python3/node/uvx（供 stdio MCP 与 Skills 使用）、ffmpeg（ASR）、gosu 降权）。入口 `scripts/docker-entrypoint.sh`：修复挂载目录属主；若挂载了 docker.sock，按 socket GID 把 appuser 加入对应组（compose `group_add` 在 gosu 后无效），再以 appuser 运行 `./WeKnora`。`EXPOSE 8080` |
 | `docker/Dockerfile.docreader` | `wechatopenai/weknora-docreader` | Python 3.10 + uv 依赖锁定；生成 protobuf；运行层安装 LibreOffice、OpenJDK 17、antiword、Playwright（webkit）与 `grpc_health_probe`。轻量版不含 PaddleOCR。`EXPOSE 50051`。支持 `APT_MIRROR` 构建参数 |
 | `docker/Dockerfile.odl-hybrid` | `weknora-odl-hybrid:local` | 安装 `opendataloader-pdf[hybrid]`（Docling），监听 5002，默认 `--no-ocr`；仅本地构建不发布 |
-| `docker/Dockerfile.sandbox` | `wechatopenai/weknora-sandbox` | Python 3.11-slim + Node 20 + jq，非 root 用户 `user`(UID 1000)，Agent Skills 的会话沙箱镜像 |
+| `docker/Dockerfile.sandbox` | `wechatopenai/weknora-sandbox` | Python 3.11-slim + Node 20 + jq，默认 `root` 执行，保留 `user`(UID 1000) 供显式选择，Agent Skills 会话沙箱镜像 |
 | `frontend/Dockerfile` | `wechatopenai/weknora-ui` | 两阶段：digest 锁定的 `node:24-bookworm-slim`（`$BUILDPLATFORM`，避免多架构 CI 用 QEMU 跑 Vite）内 `npm ci` + `npm run build`（`VITE_IS_DOCKER` / `VITE_FRONTEND_COMMIT`），可选 `NPM_REGISTRY` / `NODE_MAX_OLD_SPACE_SIZE`；运行层为按 digest 固定的 `nginx:1.30.3-alpine`（兼容 CentOS 7 旧内核）。无需宿主机预构建 `dist/` |
 
 从源码构建全部镜像：

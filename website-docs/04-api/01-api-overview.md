@@ -224,5 +224,10 @@ X-Accel-Buffering: no
 | 模型与初始化 | [02-api-model-system.md](./02-api-model-system.md) | `/models`、`/initialization`、`/evaluation`、`/weknoracloud` |
 | 系统与平台管理 | [02-api-system.md](./02-api-system.md) | `/system`、`/system/admin` |
 | 基础设施与数据源 | [02-api-infra.md](./02-api-infra.md) | `/vector-stores`、`/storage-backends`、`/web-search-providers`、`/datasource` |
-| Agent、MCP、技能与记忆 | [02-api-agent-mcp.md](./02-api-agent-mcp.md) | `/agents`、`/mcp-services`、`/agent`、`/skills`、`/sandbox-configs`、`/memory`、`/user/favorites` |
+| Agent 与 MCP | [02-api-agent-mcp.md](./02-api-agent-mcp.md) | `/agents`、`/mcp-services`、`/agent`、`/user/favorites` |
+| 沙箱、技能与个人变量 | [02-api-sandbox-skills.md](./02-api-sandbox-skills.md) | `/sandbox-configs`、`/skills`、`/me/env-vars` |
+| 长期记忆 | [02-api-memory.md](./02-api-memory.md) | `/memory`、`/tenants/kv/memory-config` |
 | IM、Embed 与文件服务 | [02-api-channels.md](./02-api-channels.md) | `/im`、`/im-channels`、`/wechat`、`/embed-channels`、`/embed`、`/files`、`/r/:token` |
+
+
+新增配置与个人接口分别见[沙箱、技能与个人变量](02-api-sandbox-skills.md)、[长期记忆](02-api-memory.md)；生成文件列表与下载见[会话与聊天](02-api-chat.md)。

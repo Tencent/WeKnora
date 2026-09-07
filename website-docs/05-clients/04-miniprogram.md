@@ -58,6 +58,12 @@ WeKnora 在仓库的 `miniprogram/` 目录下提供了一个轻量级的微信�
 | `createSession(kbId)` | `POST /api/v1/sessions` |
 | `knowledgeChat(sessionId, query, kbId)` | `POST /api/v1/knowledge-chat/{sessionId}` |
 
+## 中英文与本地设置
+
+设置页可选择中文或 English，默认中文；locale 以 zh/en 保存在本地设置。切换后页面文案、导航标题和底部 tab 标签立即更新，重启仍保留选择。词条集中在 `utils/i18n.js`，新增页面应复用该模块。
+
+在微信开发者工具中复制 project.private.config.json.example 为 project.private.config.json 并填写自己的 AppID；共享 project.config.json 不固定 AppID。聊天客户端目前解析请求完成后的 SSE 文本并累计 answer 片段，不代表小程序已实现逐块实时传输。正式发布需把 API 域名加入 request 合法域名。
+
 ## utils/ 工具模块
 
 | 文件 | 职责 |

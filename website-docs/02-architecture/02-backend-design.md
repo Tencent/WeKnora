@@ -92,7 +92,7 @@ if redisAvailable {
 }
 ```
 
-6 个 Asynq worker 池的并发度可经 system settings / 环境变量调整（默认 Core=8、PostProcess=2、Enrichment=12、Maintenance=4、Shared=6、Wiki=8，`WEKNORA_ASYNQ_*_CONCURRENCY`）；队列拓扑定义在 `internal/types/task.go`（default、chat_attachment、postprocess、summary、multimodal、graph、question、sync、low/maintenance、wiki 等，共 19 类任务）。
+6 个 Asynq worker 池的并发度可经 system settings / 环境变量调整（默认 Core=8、PostProcess=2、Enrichment=12、Maintenance=4、Shared=6、Wiki=8，`WEKNORA_ASYNQ_*_CONCURRENCY`）；队列拓扑定义在 `internal/types/task.go`（default、chat_attachment、postprocess、summary、multimodal、graph、question、memory、sync、low/maintenance、wiki 等，包含自动标签与记忆抽取）。
 
 ### 2.3 资源清理与工厂
 

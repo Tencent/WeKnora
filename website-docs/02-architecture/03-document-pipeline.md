@@ -379,6 +379,10 @@ promoted, err := s.knowledgeRepo.SetFinalizing(ctx, payload.KnowledgeID, expecte
 | `TypeChunkExtract` | graph 队列 | 每 chunk 1 个 | 实体/关系抽取写入图引擎 |
 | `TypeWikiIngest` | wiki 队列 | 防抖批量 | 生成/更新 Wiki 页面 |
 
+#### 文档自动标签
+
+解析后的后处理会按知识库 auto_tag_config 决定是否入队 knowledge:auto_tag（summary 队列）。处理器从当前 KB 已有标签中选择，模型回退 summary_model_id；max_tags 默认 3、上限 10，默认跳过已有标签文档。它只增量关联标签，不创建新分类，也不删除人工标签；失败不阻断文档入库。配置与新解析/重解析的生效范围见[知识库管理](../03-features/02-knowledge-base.md)。
+
 #### 摘要刷新（knowledge_summary_refresh.go）
 
 首次入库之外，分块内容编辑、分块启停、自定义元数据变更都会让已有摘要过期，此时入队一次**摘要刷新**（也可由 `POST /knowledge/:id/regenerate-summary` 手动触发）：

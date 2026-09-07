@@ -3,7 +3,7 @@
 WeKnora 对 MCP 的支持是**双向**的：
 
 1. **WeKnora 作为 MCP 客户端**：在「MCP 服务」设置中接入任意外部 MCP server（SSE / Streamable HTTP），其工具自动注册进 Agent 的工具箱，供 Agent 在对话中调用。支持 API Key / Bearer / OAuth 2.0（含动态客户端注册与 PKCE）三种认证策略、按工具粒度的人工审批，以及会话内（in-conversation）OAuth 授权。
-2. **WeKnora 作为 MCP Server**：仓库 `mcp-server/` 目录提供一个独立的 Python MCP server（PyPI 包 `tencent-weknora-mcp`，入口命令 `weknora-mcp-server`），把 WeKnora 的知识库、检索、会话、Agent 问答、Wiki 等 REST API 封装成 29 个 MCP 工具，供 Claude Desktop、VS Code Copilot 等外部 MCP 客户端使用。
+2. **WeKnora 作为 MCP Server**：仓库 `mcp-server/` 目录提供一个独立的 Python MCP server（PyPI 包 `tencent-weknora-mcp`，入口命令 `weknora-mcp-server`），把 WeKnora 的知识库、检索、会话、Agent 问答、Wiki 等 REST API 封装成 31 个 MCP 工具，供 Claude Desktop、VS Code Copilot 等外部 MCP 客户端使用。
 
 简单说：第一个方向是**让 WeKnora 用别人的工具**（比如接入公司内部的工单系统、数据库查询服务），第二个方向是**让别人用 WeKnora**（比如在 Claude Desktop 里直接查你的知识库）。
 
@@ -151,7 +151,7 @@ ClientInfo: mcp.Implementation{ Name: "WeKnora", Version: "1.0.0" }
 | PUT | `/mcp-services/{id}/credentials` | Admin+ | 写入 `api_key` / `token` 凭据（见下） |
 | DELETE | `/mcp-services/{id}/credentials/{field}` | Admin+ | 清除单个凭据字段（`api_key` 或 `token`），幂等，成功返回 204 |
 | GET | `/mcp-services/{id}/tool-approvals` | Viewer+ | 列出该服务的工具审批策略 |
-| PUT | `/mcp-services/{id}/tool-approvals/{tool_name}` | Admin+ | 设置某工具是否需人工审批 `{"require_approval": bool}` |
+| PUT | `/mcp-services/{id}/tool-approvals/{tool_name}` | Admin+ | 更新工具启停/审批：`{"enabled":bool,"require_approval":bool}`，至少一项 |
 | POST | `/mcp-services/{id}/oauth/authorize-url` | Viewer+ | 发起当前用户的 OAuth 授权，返回 `authorization_url` 与 `authorization_attempt` |
 | GET | `/mcp-services/{id}/oauth/status` | Viewer+ | 查询授权状态；带 `authorization_attempt` 参数时只认可本次授权流程 |
 | DELETE | `/mcp-services/{id}/oauth/token` | Viewer+ | 撤销当前用户对该服务的 token，并回收连接 |
@@ -285,7 +285,7 @@ Agent 启动时由 `internal/application/service/agent_service.go` 按 Agent 配
 
 ### 1.8 工具人工审批（issue #1173）
 
-**审批粒度**：`(tenant_id, service_id, tool_name)` 三元组，一条 `MCPToolApproval` 记录一个布尔 `require_approval`。工具清单本身来自 MCP `ListTools`，该表只存覆盖项（`internal/types/mcp.go` 注释）。仓储层（`internal/application/repository/mcp_tool_approval_repository.go`）用 `ON CONFLICT (tenant_id, service_id, tool_name)` 原子 Upsert；`IsRequired` 查不到记录即视为不需要审批。
+**审批粒度**：`(tenant_id, service_id, tool_name)` 三元组，一条 `MCPToolApproval` 记录 `enabled` 与 `require_approval`，分别决定工具是否可用和调用是否需审批。工具清单本身来自 MCP `ListTools`，该表只存覆盖项（`internal/types/mcp.go` 注释）。仓储层（`internal/application/repository/mcp_tool_approval_repository.go`）用 `ON CONFLICT (tenant_id, service_id, tool_name)` 原子 Upsert；`IsRequired` 查不到记录即视为不需要审批。
 
 **审批流程**（`internal/agent/approval/gate.go`）：
 
@@ -308,6 +308,12 @@ flowchart LR
 - **鉴权**：Resolve 校验 tenant 与 session 属主（`ErrTenantMismatch` / `ErrUserMismatch`，空 userID 按不匹配处理，fail-close）；重复决议返回 `ErrAlreadyResolved`。
 - **跨实例**：waiter 在发起等待的实例内存中；配置 Redis 时，落在其他副本的 Resolve 经 `weknora:mcp_approval:resolve` Pub/Sub 广播，属主实例投递决议并通过 per-pending 回复通道回 ack（3 秒窗口），使 HTTP 状态码跨实例仍准确；无 Redis 时退化为单实例（需 sticky session）。
 - **超时与失败策略**：等待超时默认 10 分钟，可由 `config.Agent.ToolApprovalTimeoutSeconds` 配置。审批检查默认 **fail-close**——查询 DB 出错时按「需要审批」处理，可设 `WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=true` 恢复旧的 fail-open 行为。
+
+### 单工具启停
+
+在 MCP 服务的工具列表中可单独禁用某个工具，同时保留该服务的其他工具。缺省记录视为 enabled=true；禁用会影响运行时工具注册，调用时也再次检查，避免已打开会话继续调用被禁用工具。
+
+`PUT /mcp-services/:id/tool-approvals/:tool_name` 接受 enabled、require_approval 中至少一个，未传的字段保持原值。关闭人工审批不等于禁用工具；对应[API 参考](../04-api/02-api-agent-mcp.md)。
 
 ### 1.9 内置（builtin）MCP 服务
 
@@ -411,7 +417,7 @@ SSE 与 HTTP 传输由 `MCPAuthMiddleware`（ASGI 中间件）统一鉴权：客
 
 ### 2.4 暴露的 MCP 工具清单
 
-共 29 个工具，对应 `weknora_mcp_server.py` 中带 `@mcp.tool()` 装饰器的函数（参数列 `*` 表示 required；`WeKnoraClient.update_knowledge_base` 方法存在但**未注册**为工具）：
+共 31 个工具，对应 `weknora_mcp_server.py` 中带 `@mcp.tool()` 装饰器的函数（参数列 `*` 表示 required；`WeKnoraClient.update_knowledge_base` 方法存在但**未注册**为工具）：
 
 **租户管理**
 
@@ -437,6 +443,8 @@ SSE 与 HTTP 传输由 `MCPAuthMiddleware`（ASGI 中间件）统一鉴权：客
 |---|---|---|
 | `create_knowledge_from_file` | `kb_id`\*, `file_path`\*, `enable_multimodel`(true) | 从服务器本地文件导入知识；路径经 `upload_paths.resolve_upload_file_path` 校验（见 2.6） |
 | `create_knowledge_from_url` | `kb_id`\*, `url`\*, `enable_multimodel`(true) | 从网页 URL 导入知识 |
+| `create_knowledge_from_text` | kb_id、title、content 必填；tag_ids、status | 从 Markdown 建手工知识；status 默认 publish，draft 只保存 |
+| `update_knowledge_from_text` | knowledge_id、content 必填；title、status | 更新手工 Markdown；title 空保留原标题，publish 重新索引，draft 保存草稿 |
 | `list_knowledge` | `kb_id`\*, `page`(1), `page_size`(20) | 分页列出知识条目 |
 | `get_knowledge` | `knowledge_id`\* | 知识详情 |
 | `delete_knowledge` | `knowledge_id`\* | 删除知识 |

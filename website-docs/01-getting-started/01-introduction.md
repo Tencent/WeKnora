@@ -59,6 +59,8 @@ WeKnora（维娜拉）是腾讯开源的知识库问答系统，做的事情是�
 | 模型 Model | 模型注册项。`Type`：`KnowledgeQA`（对话 LLM）/ `Embedding` / `Rerank` / `VLLM`（视觉）/ `ASR`（语音）；`Source`：`local`（Ollama）、`remote` 及 `openai`、`azure_openai`、`gemini`、`deepseek`、`aliyun`、`zhipu`、`volcengine`、`hunyuan`、`siliconflow`、`openrouter`、`litellm`、`jina` 等厂商；`ManagedBy: "yaml"` 表示由 `config/builtin_models.yaml` 声明式管理 |
 | Agent（自定义智能体） CustomAgent | 两种模式：`quick-answer`（经典 RAG 管线）与 `smart-reasoning`（ReAct 多步推理 + 工具调用）。smart-reasoning 下有类型预设 `AgentType`：`rag-qa` / `wiki-qa` / `hybrid-rag-wiki` / `data-analysis` / `custom`（定义见 `config/agent_type_presets.yaml`） |
 | 内置 Agent | 开箱可用：`builtin-quick-answer`（快速问答）、`builtin-smart-reasoning`（智能推理）、`builtin-data-analyst`（数据分析）、`builtin-wiki-researcher`（Wiki 研究员）、`builtin-wiki-fixer`（Wiki 修复员）等 |
+| 技能与沙箱 | 空间技能目录保存包，按沙箱配置安装，再绑定智能体使用；支持 Docker/Cube/E2B、个人变量与生成文件，见[技能与沙箱](../03-features/22-skills-sandbox.md) |
+| 长期记忆 | 按空间和调用者保存资料/偏好/事实/事项/兴趣；默认关闭，开启与个人管理见[长期记忆](../03-features/23-memory.md) |
 | MCP 服务 MCPService | Model Context Protocol 工具接入：`sse` / `http-streamable` / `stdio` 三种传输；认证支持 API Key / Bearer / OAuth2；Agent 可按 `all` / `selected` / `none` 选用其工具 |
 
 ### 概念关系图

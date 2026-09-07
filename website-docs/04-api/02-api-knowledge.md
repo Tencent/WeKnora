@@ -33,6 +33,25 @@ curl -X POST $BASE/api/v1/knowledge-bases -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"name":"产品文档","type":"document"}'
 ```
 
+### 文档自动标签配置
+
+创建知识库时 `auto_tag_config` 位于顶层；更新时放在 `config.auto_tag_config`。仅 document 知识库支持，默认 enabled=false。
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| enabled | false | 解析后异步从已有标签中选择 |
+| model_id | 空 | 回退知识库 summary_model_id |
+| max_tags | 3 | 最多 10 个 |
+| skip_if_tagged | true | 已有标签则跳过；false 允许补充标签 |
+
+开启后对新解析/重新解析的文档生效，不自动扫描全部旧文档。无候选标签或无可用模型时不阻断入库。更新示例：
+
+```bash
+curl -X PUT "$BASE/api/v1/knowledge-bases/kb-1" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"产品文档","config":{"auto_tag_config":{"enabled":true,"max_tags":3,"skip_if_tagged":true}}}'
+```
+
 ### GET /api/v1/knowledge-bases
 
 用途：知识库列表。权限：Viewer+；API key `retrieve`/full。
@@ -355,7 +374,7 @@ curl -X DELETE $BASE/api/v1/knowledge/k-1 -H "X-API-Key: $API_KEY"
 
 ### PUT /api/v1/knowledge/:id
 
-用途：更新知识元信息。权限同上。请求体（`types.Knowledge` 子集）：`title`、`description`、`tags`、`custom_metadata`（均可选）。
+用途：更新知识元信息。权限同上。请求体（`types.Knowledge` 子集）：`title`、`description`、`tags`、`custom_metadata`（均可选）。description 省略保持原摘要，显式空字符串清空摘要，非空值保存手工摘要；界面可在文档内容页编辑。
 
 `custom_metadata` 是用户自填的描述性元数据（与系统内部使用的 `metadata` 分开存放，migration `000078`），校验规则见 `internal/application/service/knowledge.go`：
 

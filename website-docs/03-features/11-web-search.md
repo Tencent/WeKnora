@@ -43,6 +43,10 @@ registry.Register("baidu", infra_web_search.NewBaiduProvider)
 registry.Register("searxng", infra_web_search.NewSearxngProvider)
 registry.Register("keenable", infra_web_search.NewKeenableProvider)
 registry.Register("zhipu", infra_web_search.NewZhipuProvider)
+registry.Register("metaso", infra_web_search.NewMetasoProvider)
+registry.Register("exa", infra_web_search.NewExaProvider)
+registry.Register("bocha", infra_web_search.NewBochaProvider)
+registry.Register("brave", infra_web_search.NewBraveProvider)
 ```
 
 | 引擎 | 源码文件 | 是否需要 API Key | 端点 | 备注 |
@@ -56,6 +60,20 @@ registry.Register("zhipu", infra_web_search.NewZhipuProvider)
 | SearXNG | `searxng.go` | 否 | 租户自填 `base_url`（自托管实例） | 唯一允许自定义地址的引擎，需过 SSRF 校验 |
 | Keenable | `keenable.go` | 可选 | `https://api.keenable.ai`（硬编码） | 无 Key 走公共限速端点，有 Key 解除限制 |
 | 智谱搜索 | `zhipu.go` | 是 | `https://open.bigmodel.cn/api/paas/v4/web_search`（硬编码），默认引擎 `search_std` | |
+| 秘塔 Metaso | `metaso.go` | 是 | `https://metaso.cn/api/v1/search` | extra_config.scope 选择资源范围，默认 webpage |
+| Exa | `exa.go` | 是 | `https://api.exa.ai/search` | 默认 highlights，可用 extra_config.include_text 获取正文 |
+| 博查 Bocha | `bocha.go` | 是 | `https://api.bochaai.com/v1/web-search` | extra_config.freshness、summary |
+| Brave Search | `brave.go` | 是 | `https://api.search.brave.com/res/v1/web/search` | 支持按次传 country/freshness |
+
+在「设置 → 网络搜索」选择提供商、填写 API Key 并测试，然后在智能体中选择该配置。当前注册 13 个引擎；实际结果数仍受智能体最大结果数约束。
+
+| 提供商附加配置 | 值 |
+| --- | --- |
+| Metaso scope | webpage（默认）、document、scholar、podcast、video、image |
+| Exa include_text | 字符串布尔值，例如 `"true"`；默认不取正文 |
+| Bocha freshness | noLimit（默认）、oneDay、oneWeek、oneMonth、oneYear |
+| Bocha summary | 字符串布尔值，决定是否请求摘要 |
+| Brave 按次过滤 | country/freshness 是 web_search 工具参数，见下文；与 Bocha 固定配置的字段取值不同 |
 
 除 SearXNG 外，所有引擎端点均硬编码、租户不可配置——这是防 SSRF 的第一道措施（源码注释：`Not configurable by tenants — prevents SSRF`）。
 
@@ -69,7 +87,7 @@ registry.Register("zhipu", infra_web_search.NewZhipuProvider)
 | `engine_id` | string | 空 | 仅 Google Custom Search 需要 |
 | `base_url` | string | 空 | 仅 SearXNG：自托管实例地址；经 `utils.ValidateURLForSSRF` 校验，内网地址须加入 `SSRF_WHITELIST` |
 | `proxy_url` | string | 空 | 可选出站 HTTP/HTTPS 代理（仅隧道流量，不替换 API 端点），同样过 SSRF 校验 |
-| `extra_config` | map[string]string | nil | 预留扩展 |
+| `extra_config` | map[string]string | nil | 提供商特定参数，如 Metaso scope、Exa include_text、Bocha freshness/summary |
 
 CRUD 路由（`RegisterWebSearchProviderRoutes`，`internal/router/router.go`）：`/web-search-providers` 下的增删改查、`POST /test`（用存量凭证探测外部服务，Admin 权限）、`POST /:id/test`、`PUT /:id/credentials`；另有 `GET /web-search/providers` 返回可用引擎类型目录。
 

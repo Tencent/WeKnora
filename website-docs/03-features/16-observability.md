@@ -165,6 +165,16 @@ flowchart LR
     G --> H["Generation: embedding / vlm / chat"]
 ```
 
+### 每轮用量、调用用途与缓存
+
+每次模型调用继续生成独立 Generation；消息的 usage 保存本轮聚合 Token 用量，Agent 完成事件通过 turn_usage 返回，重开历史消息仍可读取。prompt_tokens、completion_tokens、total_tokens 为总计；cached_tokens 是 cache_read_tokens 的兼容别名，cache_read/write/miss 是输入 Token 的细分，不能再加到 prompt_tokens 上。
+
+cache_reported 与 cache_status 区分 hit、miss、unreported、unsupported，未上报不能算缓存未命中。Generation metadata 记录 call_purpose 与提示词前缀指纹，用于区分回答、改写、摘要等用途和解释缓存变化。
+
+Prompt 组装将稳定说明放在前部，动态会话内容放在后部；支持的提供商使用 cache marker。命中仍取决于提供商协议、模型及请求前缀，不保证每次请求都有缓存。排查时先对比调用用途、前缀指纹与模型，再看上报状态。
+
+沙箱调用也有 Langfuse span，可把实例操作和工具执行耗时串到当前 trace，区分等待沙箱与等待模型。追踪开关未启用时不会向 Langfuse 导出。
+
 ## 4. 审计日志
 
 ### 4.1 数据模型（`internal/types/audit_log.go`）

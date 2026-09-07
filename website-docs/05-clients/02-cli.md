@@ -7,6 +7,8 @@ WeKnora CLI（二进制名 `weknora`）是 WeKnora RAG 服务的官方命令行�
 
 命令树入口在 `cli/cmd/root.go`，各命令组按目录组织在 `cli/cmd/` 下。
 
+控制台「设置 → 发布与集成 → CLI」提供安装、连接和验证步骤，生成当前部署的连接命令。服务地址会去掉结尾 /api/v1，保留反向代理路径前缀；复制的 shell 参数会正确引用。完成连接后运行 `weknora doctor`、`weknora kb list` 验证，再按需接入 `weknora mcp serve`。该入口与下方源码安装使用同一 CLI。
+
 ## 总体架构
 
 ```mermaid

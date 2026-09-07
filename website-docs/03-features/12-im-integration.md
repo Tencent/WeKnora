@@ -83,7 +83,7 @@ imService.RegisterAdapterFactory("yunzhijia", yunzhijia.NewFactory())
 | Mattermost `mattermost` | **webhook**（仅支持 Outgoing Webhook + REST API） | 是 | 是 | 是（`root_id`） | `site_url`、`bot_token`、`outgoing_token`（必填）、`bot_user_id`、`post_to_main` |
 | 微信 `wechat`（iLink 机器人） | **longpoll**（强制；创建时后端强制 `mode=longpoll`、`output_mode=full`） | 否（仅整段输出） | 是 | 否 | `bot_token`、`ilink_bot_id`（均必填） |
 | QQ 机器人 `qqbot` | **websocket**（仅支持） | 否 | 否 | 否 | `app_id`、`client_secret`、`api_base_url`、`gateway_url` |
-| 云之家 `yunzhijia` | **webhook** / websocket（从 `send_msg_url` 推导 WS 地址） | 否 | 是 | 否 | `send_msg_url`（必填）、`secret`、`app_id`、`app_secret`、`allowed_webhook_host_suffix`、`timeout_seconds` |
+| 云之家 `yunzhijia` | **webhook** / websocket（从 `send_msg_url` 推导 WS 地址） | 否 | 是 | 是（顶层 msgId / 回复 replyRootMsgId） | `send_msg_url`（必填）、`secret`、`app_id`、`app_secret`、`allowed_webhook_host_suffix`、`timeout_seconds` |
 
 ## 渠道模型与配置（internal/im/types.go）
 
@@ -114,6 +114,16 @@ imService.RegisterAdapterFactory("yunzhijia", yunzhijia.NewFactory())
 | `GET / POST /api/v1/im/callback/:channel_id` | **平台回调地址**（webhook 模式下配置到各平台后台；走平台自身签名校验，不需要 WeKnora API Key） |
 
 Webhook 模式的接入方式就是把 `https://<你的域名>/api/v1/im/callback/<channel_id>` 填到平台的事件订阅/回调地址处；WeKnora 会先响应平台的 URL 验证挑战（`HandleURLVerification`，如飞书的 challenge 回显、企微的 echostr 解密），之后每个回调都过 `VerifyCallback` 签名校验。WebSocket/长连接模式则无需公网回调地址，由 WeKnora 主动连接平台网关。
+
+### 飞书/Lark 反向代理
+
+credentials.api_base_url 可覆盖 API origin，并同时用作长连接 SDK 的 bootstrap domain。留空分别使用飞书/Lark 默认云地址；私有网络可填 `https://feishu-proxy.example.com`，不在结尾附加具体 API 路径。代理应转发平台 API 与长连接启动请求，启动响应返回的 WebSocket 地址也必须能从 WeKnora 服务器访问。只代理网页控制台不能解决服务器到飞书的网络问题。
+
+```json
+{"platform":"feishu","mode":"websocket","credentials":{"app_id":"<app-id>","app_secret":"<app-secret>","api_base_url":"https://feishu-proxy.example.com"}}
+```
+
+云之家选择 session_mode=thread 后按话题复用会话，顶层消息启动新线程，回复沿根消息线程继续。钉钉富文本消息会提取可读内容；飞书 post 消息中的图片进入图片处理。output_mode=full 可显示中间过程与输出进度，answer_only 保留最终答案。
 
 ### 长连接的可靠性：leader 选举与 Supervisor
 

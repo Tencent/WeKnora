@@ -63,6 +63,8 @@ opt := &asynq.RedisClientOpt{
 | `manual:process` | `TypeManualProcess` | 手工知识更新（cleanup + 重新索引） | `default` |
 | `temporary_document:process` | `TypeTemporaryDocumentProcess` | 会话临时文档（聊天附件）解析 | `chat_attachment` |
 | `knowledge:post_process` | `TypeKnowledgePostProcess` | 知识后处理统一调度（fan-out 富化子任务） | `postprocess` |
+| `knowledge:auto_tag` | `TypeKnowledgeAutoTag` | 文档已有标签的自动关联 | `summary` |
+| `memory:extract` | `TypeMemoryExtract` | 个人记忆后台抽取 | `memory` |
 | `summary:generation` | `TypeSummaryGeneration` | 摘要生成 | `summary` |
 | `datatable:summary` | `TypeDataTableSummary` | 表格摘要 | `summary` |
 | `image:multimodal` | `TypeImageMultimodal` | 图片 OCR + VLM Caption | `multimodal` |
@@ -81,6 +83,10 @@ opt := &asynq.RedisClientOpt{
 
 所有 payload 结构体（如 `DocumentProcessPayload`、`ImageMultimodalPayload`）都内嵌 `types.TracingContext`，用于跨进程传递 Langfuse/W3C traceparent（见可观测性文档），并统一携带 `tenant_id` / `knowledge_id` / `knowledge_base_id` 等路由字段，供死信归档与取消匹配使用。
 
+自动标签与摘要共享 summary 队列，属于可选富化任务；仅在文档知识库开启 auto_tag_config 时入队，失败不影响已完成的解析。记忆抽取使用独立 memory 队列，由 enrichment pool 消费，并以权重 1 参与 shared pool 弹性借用，worker pool 总数仍为 6。
+
+记忆任务按个人主体去重、延迟聚合；memory_subjects 的 extract_cursor、pending_sessions 与调度时间用于续接，避免每次发问立即启动一次模型提取。空间关闭记忆或 write_mode 非 auto 时不跑后台蒸馏。Lite 的同步执行器也注册自动标签和记忆任务，遵循同样的业务开关。
+
 ## 4. Worker Pool 拓扑与治理策略
 
 `internal/types/task.go` 中的 `queueDefinitions` 是队列拓扑的**唯一事实来源**（single source of truth），worker server 构建（`QueueWeightsForPool`）与运维面板展示（`QueueStats`）共用该注册表，防止权重漂移。
@@ -93,7 +99,7 @@ opt := &asynq.RedisClientOpt{
 | --- | --- | --- | --- |
 | `core` | 8 | `default`(1)、`chat_attachment`(3) | `asynq.core_concurrency` / `WEKNORA_ASYNQ_CORE_CONCURRENCY` |
 | `postprocess` | 2 | `postprocess`(1) | `asynq.postprocess_concurrency` / `WEKNORA_ASYNQ_POSTPROCESS_CONCURRENCY` |
-| `enrichment` | 12 | `summary`(2)、`multimodal`(1)、`graph`(1)、`question`(1) | `asynq.enrichment_concurrency` / `WEKNORA_ASYNQ_ENRICHMENT_CONCURRENCY` |
+| `enrichment` | 12 | `summary`(2)、`multimodal`(1)、`graph`(1)、`question`(1)、`memory`(1) | `asynq.enrichment_concurrency` / `WEKNORA_ASYNQ_ENRICHMENT_CONCURRENCY` |
 | `maintenance` | 4 | `sync`(2)、`low`(1) | `asynq.maintenance_concurrency` / `WEKNORA_ASYNQ_MAINTENANCE_CONCURRENCY` |
 | `shared`（弹性层） | 6 | core + enrichment 中 `SharedWeight > 0` 的队列 | `asynq.shared_concurrency` / `WEKNORA_ASYNQ_SHARED_CONCURRENCY` |
 | `wiki` | 8 | `wiki`(1) | `asynq.wiki_concurrency` / `WEKNORA_WIKI_ASYNQ_CONCURRENCY` |
@@ -127,6 +133,7 @@ flowchart LR
         Q8["sync (2)"]
         Q9["low (1, maintenance)"]
         Q10["wiki (1)"]
+        Q11["memory (1)"]
     end
 
     subgraph Workers["六个独立 asynq.Server (共享同一个 ServeMux)"]
@@ -148,6 +155,8 @@ flowchart LR
     Q8 --> MT
     Q9 --> MT
     Q10 --> WK
+    Q11 --> EN
+    Q11 -. "弹性借用" .-> SH
     Q1 -. "弹性借用" .-> SH
     Q2 -. "弹性借用" .-> SH
     Q4 -. "弹性借用" .-> SH

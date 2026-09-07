@@ -20,14 +20,14 @@
 
 ```text
 migrations/
-├── versioned/     # PostgreSQL/ParadeDB 版本化迁移：000000-000079 共 80 版（160 个 .up/.down.sql 文件）
+├── versioned/     # PostgreSQL/ParadeDB 版本化迁移：000000-000091 共 92 版（184 个 .up/.down.sql 文件）
 ├── sqlite/        # SQLite 迁移：000000_init（压平的全量 schema）+ 其后的增量版本
 ├── paradedb/      # ParadeDB 附加脚本：00-init-db.sql（扩展初始化）、01-migrate-to-paradedb.sql（存量库切换）
 └── mysql/         # 00-init-db.sql，遗留的一次性 MySQL 建表脚本（未接入代码）
 ```
 
-- `versioned/` 是唯一的"增量历史"，从 `000000_init` 到 `000079_knowledge_folder_path`；
-- `sqlite/` 以 `000000_init` 作为压平后的全量初始化（JSONB→TEXT、SERIAL→AUTOINCREMENT 等方言差异已适配），其后按需追加增量版本（当前有 `000001_remove_wiki_log`、`000002_knowledge_folder_path`），同样由 golang-migrate 顺序执行；
+- PostgreSQL 的 `versioned/` 从 `000000_init` 到 `000091_mcp_tool_enabled`；
+- `sqlite/` 以 `000000_init` 作为压平后的全量初始化（JSONB→TEXT、SERIAL→AUTOINCREMENT 等方言差异已适配），其后按需追加增量版本（当前到 `000013_mcp_tool_enabled`），同样由 golang-migrate 顺序执行；
 - `paradedb/00-init-db.sql` 创建 `pg_search` 等扩展；BM25 索引使用中文 Lindera 分词器建在 `embeddings.content` 上。
 
 ### 2.1 versioned/ 迁移史概览（按主题）
@@ -50,6 +50,37 @@ migrations/
 | 000078 | 分块编辑与自定义元数据 | `chunks` 增加 `source_content`/`content_revision`/`index_status`/`last_editor_id`/`context_header`，新增 `chunk_revisions` 表，`knowledges` 增加 `custom_metadata` |
 | 000079 | 知识库文件夹树 | `knowledges` 增加 `folder_path` 列并回填历史目录上传（原先路径塞在 `file_name` 里），新增 `(tenant_id, knowledge_base_id, folder_path)` 索引 |
 
+### 2.2 新增迁移（000080–000091）
+
+| 版本 | 变更 |
+| --- | --- |
+| 000080 | knowledge_bases.auto_tag_config |
+| 000081 | messages.artifacts，持久化生成文件 |
+| 000082 | tenant_sandbox_configs，多命名后端与配置变更租期 |
+| 000083 | sessions.sandbox_config_id |
+| 000084 | 个人记忆六张表、tenants.memory_config、messages.used_memories |
+| 000085 | messages.usage |
+| 000086 | tenant_skills、tenant_skill_snapshots，安装与快照账本 |
+| 000087 | 技能 install_session_id / install_message_id，安装对话日志 |
+| 000088 | 快照 planned_name，创建前记录计划名称 |
+| 000089 | 技能 envs、tenant_user_env_vars |
+| 000090 | tenant_skill_catalog；tenant_skills.catalog_id，回填已有安装 |
+| 000091 | mcp_tool_approvals.enabled，默认 true |
+
+SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
+
+| SQLite 版本 | 变更 |
+| --- | --- |
+| 000001–000002 | 移除 Wiki 日志、文件夹路径 |
+| 000003–000004 | 自动标签、长期记忆 |
+| 000005 | 消息附件与邀请字段 |
+| 000006–000008 | 任务/死信、系统管理与设置、处理 spans/待处理子任务 |
+| 000009 | 历史 Embed memory 标志列；当前渠道接口不暴露此字段 |
+| 000010–000011 | 多标签关联、principal 模型 |
+| 000012–000013 | 消息 usage、MCP 工具 enabled |
+
+基线 schema 与后续增量共同决定新建库和已有库的最终结果；不能只看新增迁移文件名判断 Lite 是否有某张表。
+
 ## 3. 最终表结构
 
 以下为全部 up 迁移叠加后的**最终生效结构**（后续迁移对早期表的 ALTER 已合并）。所有业务表统一带 `created_at` / `updated_at`，多数带 `deleted_at`（GORM 软删除），不再逐一列出。
@@ -58,7 +89,7 @@ migrations/
 
 | 表 | 用途 | 关键字段 |
 | --- | --- | --- |
-| `tenants` | 租户（工作空间），多租户体系根 | `id`（SERIAL，起始 10000）、`name`、`api_key`（唯一索引）、`retriever_engines`（JSONB）、`status`、`storage_quota`/`storage_used`、`agent_config`/`context_config`/`conversation_config`/`web_search_config`/`credentials`（JSONB）、`default_storage_backend_id` |
+| `tenants` | 租户（工作空间），多租户体系根 | `id`（SERIAL，起始 10000）、`name`、`api_key`（唯一索引）、`retriever_engines`（JSONB）、`status`、`storage_quota`/`storage_used`、`agent_config`/`context_config`/`conversation_config`/`web_search_config`/`credentials`（JSONB）、`default_storage_backend_id`、`memory_config` |
 | `users` | 登录用户 | `id`（UUID）、`username`（唯一）、`email`（唯一）、`password_hash`、`tenant_id`（FK→tenants，ON DELETE SET NULL）、`is_active`、`can_access_all_tenants`（系统管理员）、`preferences`（JSON） |
 | `auth_tokens` | 登录令牌 | `id`、`user_id`（FK→users，CASCADE）、`token`、`token_type`（access/refresh）、`expires_at`（TIMESTAMPTZ，000072 起）、`is_revoked` |
 | `tenant_members` | 租户级 RBAC 成员关系 | `user_id`+`tenant_id`（软删除下唯一）、`role`（owner/admin/contributor/viewer）、`status`、`invited_by`、`joined_at` |
@@ -74,7 +105,7 @@ migrations/
 | 表 | 用途 | 关键字段 |
 | --- | --- | --- |
 | `models` | AI 模型配置（LLM/embedding/rerank 等） | `id`、`tenant_id`（FK→tenants，CASCADE）、`name`/`display_name`、`type`（embedding/summary/rerank/llm…）、`source`、`parameters`（JSONB）、`is_default`、`is_builtin`、`managed_by`、`status` |
-| `knowledge_bases` | 知识库 | `id`（UUID）、`tenant_id`、`name`、`type`（document/faq）、`chunking_config`/`image_processing_config`/`vlm_config`/`faq_config`/`asr_config`/`wiki_config`/`indexing_strategy`（JSONB）、`embedding_model_id`/`summary_model_id`（FK→models）、`vector_store_id`（FK→vector_stores）、`storage_backend_id`（FK→storage_backends）、`creator_id`（FK→users）、`is_temporary`、`activity_scope` |
+| `knowledge_bases` | 知识库 | `id`（UUID）、`tenant_id`、`name`、`type`（document/faq）、`chunking_config`/`image_processing_config`/`vlm_config`/`faq_config`/`asr_config`/`wiki_config`/`indexing_strategy`/`auto_tag_config`（JSONB）、`embedding_model_id`/`summary_model_id`（FK→models）、`vector_store_id`（FK→vector_stores）、`storage_backend_id`（FK→storage_backends）、`creator_id`（FK→users）、`is_temporary`、`activity_scope` |
 | `knowledges` | 知识条目（文档/网页/FAQ 等） | `id`、`tenant_id`、`knowledge_base_id`（FK）、`type`、`title`、`source`（VARCHAR(2048)）、`parse_status`（unprocessed/processing/completed/failed）、`enable_status`、`file_name`/`file_type`/`file_size`/`file_path`/`file_hash`、`metadata`（内部入库状态）、`custom_metadata`（JSONB，用户自填元数据，000078）、`folder_path`（目录树路径，000079）、`summary_status`、`channel`、`processed_at`/`error_message`。**没有 `tag_id` 列**——000063 起标签走 `knowledge_tag_relations` 关联表 |
 | `chunks` | 分块（检索最小单元） | `id`、`tenant_id`、`knowledge_base_id`、`knowledge_id`（FK）、`content`、`source_content`（解析器原始输出，不可变）、`content_revision`、`index_status`（ready/processing/failed）、`last_editor_id`、`context_header`（索引用标题面包屑）、`chunk_index`、`start_at`/`end_at`、`pre_chunk_id`/`next_chunk_id`（链表）、`parent_chunk_id`（父子分块自引用）、`chunk_type`（text/image/…）、`image_info`/`video_info`、`relation_chunks`/`indirect_relation_chunks`（JSONB）、`is_enabled`、`flags`、`status`、`content_hash`、`seq_id`、`tag_id` |
 | `chunk_revisions` | 分块历史版本（000078） | `id`、`tenant_id`、`knowledge_base_id`、`knowledge_id`、`chunk_id`+`revision`（唯一索引）、`content`、`is_enabled`、`editor_id`、`edit_source`、`edited_at` |
@@ -87,8 +118,8 @@ migrations/
 
 | 表 | 用途 | 关键字段 |
 | --- | --- | --- |
-| `sessions` | 会话（对话上下文与检索参数快照） | `id`、`tenant_id`、`title`、`knowledge_base_id`、`agent_id`（FK→custom_agents）、`user_id`、`max_rounds`、`enable_rewrite`、`fallback_strategy`/`fallback_response`、`keyword_threshold`/`vector_threshold`、`embedding_top_k`/`rerank_top_k`/`rerank_threshold`、`rerank_model_id`/`summary_model_id`、`agent_config`/`context_config`（JSONB） |
-| `messages` | 消息 | `id`、`request_id`、`session_id`（FK）、`role`、`content`/`rendered_content`、`knowledge_references`（JSONB 引用）、`agent_steps`（JSONB，Agent 推理轨迹）、`mentioned_items`/`images`（JSONB）、`is_completed`/`is_fallback`、`channel`（web/IM 渠道）、`agent_id`+`agent_tenant_id`、`model_id`、`knowledge_id`、`agent_duration_ms`、`execution_context` |
+| `sessions` | 会话（对话上下文与检索参数快照） | `id`、`tenant_id`、`title`、`knowledge_base_id`、`agent_id`（FK→custom_agents）、`user_id`、`max_rounds`、`enable_rewrite`、`fallback_strategy`/`fallback_response`、`keyword_threshold`/`vector_threshold`、`embedding_top_k`/`rerank_top_k`/`rerank_threshold`、`rerank_model_id`/`summary_model_id`、`agent_config`/`context_config`（JSONB）、`sandbox_config_id` |
+| `messages` | 消息 | `id`、`request_id`、`session_id`（FK）、`role`、`content`/`rendered_content`、`knowledge_references`（JSONB 引用）、`agent_steps`（JSONB，Agent 推理轨迹）、`mentioned_items`/`images`（JSONB）、`is_completed`/`is_fallback`、`channel`（web/IM 渠道）、`agent_id`+`agent_tenant_id`、`model_id`、`knowledge_id`、`agent_duration_ms`、`execution_context`、`artifacts`/`used_memories`/`usage`（JSONB） |
 | `message_suggestion_sets` | 建议问题集（000067） | `tenant_id`、`session_id`、`assistant_message_id`、`placement`（starter/follow_up）、`config_hash`+`locale`（缓存键，唯一）、`status`、`questions`（JSONB）、token/延迟统计、`lease_until` |
 | `message_suggestion_events` | 建议问题曝光/点击事件 | `suggestion_set_id`（FK，CASCADE）、`question_id`、`event_type`、`actor_id` |
 | `temporary_documents` | 会话内临时文档（000070） | `tenant_id`、`session_id`、`resource_ref`、`file_name`/`file_type`/`file_size`、`status`（uploaded/processing/ready/expired）、`content`、`chunks`（JSONB）、`expires_at` |
@@ -99,10 +130,35 @@ migrations/
 | --- | --- | --- |
 | `custom_agents` | 自定义 Agent | **复合主键 (`id`,`tenant_id`)**、`name`、`is_builtin`、`created_by`（FK→users）、`runnable_by_viewer`、`config`（JSONB：模式/模型/工具/知识范围） |
 | `mcp_services` | MCP 服务配置 | `id`、`tenant_id`、`name`、`enabled`、`transport_type`（stdio/sse/…）、`url`/`headers`/`auth_config`/`stdio_config`/`env_vars`（JSONB）、`is_builtin` |
-| `mcp_tool_approvals` | MCP 工具审批策略（000042） | (`tenant_id`,`service_id`,`tool_name`) 唯一、`require_approval` |
+| `mcp_tool_approvals` | MCP 工具审批策略（000042） | (`tenant_id`,`service_id`,`tool_name`) 唯一、`require_approval`、`enabled`（默认 true） |
 | `mcp_oauth_clients` | MCP OAuth 客户端（000062） | (`tenant_id`,`service_id`) 唯一、`client_id`/`client_secret`/`redirect_uri` |
 | `mcp_oauth_tokens` | MCP OAuth 令牌 | (`tenant_id`,`user_id`,`service_id`) 唯一、`access_token`/`refresh_token`、`expires_at`、`refresh_lease_id`/`refresh_lease_until`（000074，防并发刷新） |
 | `principals` / `principal_models` | 主体—模型授权（000064） | 主体（用户/租户）可用模型映射 |
+
+### 沙箱与技能
+
+| 表 | 用途与关键字段 |
+| --- | --- |
+| `tenant_sandbox_configs` | id、tenant_id、name、sandbox_type、config（JSONB）、cordoned_at；未删除配置在空间内名称唯一 |
+| `tenant_skill_catalog` | 空间技能定义；name/version/description/instructions、bundle_ref/bundle_sha256，空间内名称唯一 |
+| `tenant_skills` | catalog_id 与 sandbox_config_id 对应一次安装；enabled/status/error、installed_snapshot_id、installing_since、install_session_id/install_message_id、envs |
+| `tenant_skill_snapshots` | sandbox_config_id、skill_id、snapshot_id/parent_snapshot_id、generation、trigger/state、planned_name、superseded_at |
+| `tenant_user_env_vars` | tenant_id、principal_type/principal_id、sandbox_config_id、skill_id、name、加密 value；空 skill_id 表示配置级变量 |
+
+目录定义与安装分开；禁用技能只改变可见性。个人变量使用完整 principal 身份，不能按 IM 共享的合成 user_id 合并。空间变量与个人值加密存储，响应不回传个人值明文。
+
+### 长期记忆
+
+| 表 | 用途与关键字段 |
+| --- | --- |
+| `memory_subjects` | (tenant_id,subject_id) 唯一；个人 enabled、常驻 block_text、item_count、extract_cursor/pending_sessions/extract_scheduled_at、整理时间 |
+| `memory_items` | kind/content/topic/normalized_key、importance/origin/status、来源会话/消息、valid_from/invalid_at/expires_at、superseded_by |
+| `memory_tombstones` | 删除/拒绝的主题与内容指纹，用于抑制重复抽取，不保存原正文 |
+| `memory_topic_stats` | topic/aliases、hits、last_seen_at/promoted_at |
+| `memory_doc_affinity` | knowledge_id/knowledge_base_id/title、hits/last_used_at |
+| `memory_item_embeddings` | item_id、model_id、dims、vector；与条目分表存储 |
+
+subject_id 使用 Principal.StorageID()，与 tenant_id 共同隔离身份。向量记录不放进条目列表，也不改变原知识库的访问权。
 
 ### 3.5 跨租户协作（组织）
 
@@ -129,7 +185,7 @@ migrations/
 
 | 表 | 用途 | 关键字段 |
 | --- | --- | --- |
-| `data_sources` | 外部数据源连接（Feishu/Notion/语雀/RSS，000029） | `id`、`tenant_id`、`knowledge_base_id`、`type`、`config`（JSONB 凭证）、`sync_schedule`（cron）、`sync_mode`（incremental/full）、`conflict_strategy`、`sync_deletions`、`last_sync_at`/`last_sync_cursor`/`last_sync_result` |
+| `data_sources` | 外部数据源连接（Feishu/Lark/GitLab/IMA/Notion/语雀/RSS，000029） | `id`、`tenant_id`、`knowledge_base_id`、`type`、`config`（JSONB 凭证）、`sync_schedule`（cron）、`sync_mode`（incremental/full）、`conflict_strategy`、`sync_deletions`、`last_sync_at`/`last_sync_cursor`/`last_sync_result` |
 | `sync_logs` | 每次同步的执行记录 | `data_source_id`（FK，CASCADE）、`status`、`started_at`/`finished_at`、`items_total/created/updated/deleted/skipped/failed`、`error_message` |
 | `im_channels` | IM 渠道接入配置（企业微信/飞书/Slack 等） | `tenant_id`、`platform`、`agent_id`、`knowledge_base_id`、凭证配置 |
 | `im_channel_sessions` | IM 用户/线程 ↔ session 映射 | `im_channel_id`、`session_id`、`agent_id`、平台用户/会话标识 |
@@ -261,14 +317,14 @@ if strings.HasPrefix(dsn, "sqlite3://") {
 make migrate-up                    # 应用全部待执行迁移
 make migrate-down                  # 回滚
 make migrate-version               # 查看当前版本与 dirty 标志
-make migrate-create name=add_xxx   # 创建 000080_add_xxx.up.sql / .down.sql
+make migrate-create name=add_xxx   # 创建下一个空闲版本的 add_xxx.up.sql / .down.sql
 make migrate-force version=74      # 强制标记版本（恢复 dirty）
 make migrate-goto version=60       # 迁移/回滚到指定版本
 ```
 
 ## 6. 如何新增一个迁移
 
-1. **创建文件**：`make migrate-create name=add_my_feature`，在 `migrations/versioned/` 下生成下一个版本号（当前最大为 `000079`，新迁移将是 `000080_add_my_feature.up.sql` / `.down.sql`）；
+1. **创建文件**：`make migrate-create name=add_my_feature`，在 `migrations/versioned/` 下生成下一个版本号（当前最大为 `000091`；创建前再次检查目录，使用下一个空闲版本的 up/down 文件）；
 2. **编写 up SQL**：注意 PostgreSQL 方言（JSONB、部分索引、`TIMESTAMP WITH TIME ZONE`）；若涉及 `embeddings` 表，参考既有迁移用 `app.skip_embedding` GUC 做条件门控（`SELECT current_setting('app.skip_embedding', true)`），保证非 postgres 检索引擎部署也能通过迁移；
 3. **编写 down SQL**：必须可逆（drop column/table/index），否则回滚链会断；
 4. **同步 SQLite**：`migrations/sqlite/000000_init.up.sql` 是压平的全量 schema，**新增列/表必须合并进去**（注意方言转换：JSONB→TEXT、SERIAL→INTEGER AUTOINCREMENT、无部分索引语法差异等）。若变更需要在已有 Lite 库上生效（例如删表、删数据），还要在 `migrations/sqlite/` 追加一个增量版本；
@@ -310,4 +366,4 @@ BM25 索引（`USING bm25`、Lindera 中文分词）只在 ParadeDB 可用；原
 
 ### 7.5 版本文件冲突
 
-多个分支同时新增同一个版本号（如两个 `000080_*`）会冲突：golang-migrate 按数字排序且版本号唯一。合并时后合入者需要把自己的迁移改成下一个空闲版本号（up/down 两个文件都要改名）。
+多个分支同时新增同一个版本号（如两个分支都生成同一数字前缀）会冲突：golang-migrate 按数字排序且版本号唯一。合并时后合入者需要把自己的迁移改成下一个空闲版本号（up/down 两个文件都要改名）。

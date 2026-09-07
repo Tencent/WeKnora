@@ -50,6 +50,14 @@ WeKnora 的权限分两层：**空间内**的四级角色（见[租户、用户�
 - **重置用户密码**（`POST /system/admin/users/reset-password`）：替换目标用户的本地密码并吊销其全部会话。**不能给自己重置**——自助改密码仍要求提供旧密码；
 - **批量套用默认存储配额**（`POST /system/admin/tenants/apply-default-storage-quota`）：把当前的默认配额写到所有已存在的空间上。之所以挂在 `/tenants` 而不是 `/settings` 下，是因为它改的是空间数据而不是设置行。
 
+### 创建用户
+
+系统管理员可在系统设置中创建本地账号，填写用户名、邮箱，并选择自动生成密码或指定符合策略的密码。空间分配遵循 auth.default_tenant_mode：create_personal 建个人空间，tenantless 等待加入空间。
+
+自动生成的密码仅在本次创建结果显示，应当场复制完整账号信息；关闭结果后不能再次查询明文。重复身份返回已有用户，不改密码；邮箱和用户名分别指向不同用户时拒绝创建。接口见[系统 API](../04-api/02-api-system.md)。
+
+创建用户与首个管理员引导是不同操作：bootstrap 仍只提升已存在用户，不负责创建账号。
+
 ## 3. 运行时可改的系统设置
 
 `internal/application/service/system_setting.go` 维护一张注册表，表内的键可以在控制台里改，**数据库值盖过环境变量**，绝大多数改完立即生效，不用重启：
@@ -65,6 +73,14 @@ WeKnora 的权限分两层：**空间内**的四级角色（见[租户、用户�
 | `ssrf.whitelist` | 字符串列表 | 空 | 立即（`SSRF_WHITELIST_EXTRA` 仍只由部署方维护，不在此覆盖） |
 | `asynq.core/postprocess/enrichment/maintenance/shared/wiki_concurrency` | int | 见[异步任务系统](../02-architecture/05-async-tasks.md) | 各 worker pool 重新装配 |
 | `model.max_concurrency` | int | `32` | 立即 |
+
+新增设置同样遵循数据库优先：
+
+| 键 | 默认 | 作用 |
+| --- | --- | --- |
+| `auth.complex_password_enabled` | false | 新注册/新密码要求大小写字母、数字和特殊字符 |
+| `tenant.auto_accept_invitation` | false | 邮箱邀请已注册用户时直接写入成员关系 |
+| `sandbox.docker_enabled` | false | 开放 Docker 沙箱配置和实例创建 |
 
 `tenant.auto_create_api_key` 是个兼容开关：老版本「建空间就自动下发一个 full-access Key 并在响应里返回明文」的行为属于破坏性变更，依赖它的集成可以打开这个开关退回旧行为，默认关闭。
 

@@ -38,7 +38,7 @@ WeKnora 界面里有引导页：「设置 → 集成 → Claw Skill」，会带�
 | 面向 | OpenClaw / ClawHub 生态的 Agent | 支持 MCP 协议的客户端（Claude Desktop、VS Code Copilot 等） |
 | 安装 | ClawHub 安装 Skill | `pip install tencent-weknora-mcp` 或 `uvx` 运行 |
 | 传输 | 直接调 REST | stdio / SSE / Streamable HTTP |
-| 能力范围 | 导入、检索、浏览（5 类） | 29 个工具，另含租户、模型、会话、Agent 问答、Wiki |
+| 能力范围 | 导入、检索、浏览（5 类） | 31 个工具，另含租户、模型、会话、Agent 问答、Wiki |
 | 文档 | 本篇 | [MCP 集成](../03-features/08-mcp.md) |
 
 需要更完整的能力（跑 Agent 对话、管模型、读 Wiki）时用 MCP Server；只是想让 Agent 存取资料，Skill 更轻。

@@ -238,12 +238,9 @@ func (c *AuthConfig) IsInviteOnly() bool {
 
 - `POST /auth/register`：`{username(2-50), email, password}`；按 `DefaultTenantMode` 决定是否自动创建个人租户（`TenantProvisioningCreatePersonal` / `TenantProvisioningTenantless`）。
 - `POST /auth/login`：`{email, password}`，返回 `LoginResponse{user, active_tenant, memberships[], token, refresh_token}`；激活租户按 `Preferences.LastActiveTenantID` 恢复。
-- 密码要求分三处，**强度并不一致**，集成时要按最严的来：
-  - **注册页（前端表单）**：8–32 字符，且至少含 1 个字母 + 1 个数字；
-  - **`POST /auth/register`（后端）**：只有 binding 的 `min=6`——`Register()` **不调用** `ValidatePasswordPolicy`，所以直接打接口能设出 6 位纯数字密码；
-  - **`ValidatePasswordPolicy`（8–32 + 字母 + 数字）**：只用于**修改密码**（`user.go` 的改密路径）与**系统管理员重置他人密码**（`handler/system.go`）。
-
-  也就是说走界面注册受 8 位强校验，走 API 注册只受 6 位下限约束。
+- 注册、邀请注册、修改密码及管理员设置新密码均执行统一密码策略：默认 8–32 位，至少字母和数字。`GET /auth/config` 返回当前的 complex_password_enabled；开启后还要求大小写字母和特殊字符。
+- 系统管理员可用 `auth.complex_password_enabled` 调整，未落库时回退 `WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED`。改变策略只约束之后创建或修改的密码，不强迫已有账号立即改密。
+- 在个人资料中自助改密需提供旧密码，新密码不能相同；成功后撤销该用户全部会话，需重新登录。接口错误与参数见[认证 API](../04-api/02-api-auth.md)。
 
 ### 2.3 邀请注册（register-by-invite）
 
@@ -262,6 +259,12 @@ type registerByInviteRequest struct {
 流程：校验 token（`LookupByToken`）→ 检查邮箱未注册（已注册返回 409）→ 以 `tenantless` 模式创建用户 → 将邀请租户设为用户首租户 → `AcceptByToken` 创建 `tenant_members` 行（状态 `active`，角色取邀请中指定的角色）。
 
 配套端点 `POST /auth/invitations/lookup`（无需认证）返回邀请上下文 `{tenant_id, tenant_name, role, expires_at}` 供注册页展示；**故意使用 POST + body 而非 GET + path，避免 token 落入访问日志**；token 无效/被撤销返回 410。
+
+### 已注册用户通过邀请链接加入
+
+invite_only 部署中，邀请页面引导用户先登录，再向 `POST /me/invitations/accept-by-token` 提交 token 加入空间；不需要为已注册邮箱再创建账号。没有默认空间的用户首次加入后，以该空间作为默认空间。`register-by-invite` 仍是凭有效邀请创建新账号的 API。
+
+邮箱邀请已注册用户还受 `tenant.auto_accept_invitation` 控制：默认 false，创建 pending 邀请并等收件箱确认；true 时直接加入，返回 active 成员并处理已有 pending 邀请。前端从 `GET /auth/me` 的 `capabilities.auto_accept_invitation` 感知该开关。它不把任意共享链接变成免登录入口。
 
 ## 3. JWT 机制
 
@@ -389,7 +392,8 @@ requireTenantAPIKeyKnowledgeBases(ctx, "kb-1", "kb-2") // → forbidden
 | 配置项 | 说明 |
 | --- | --- |
 | `enable` | 是否启用 OIDC |
-| `issuer_url` | Issuer 地址 |
+| `issuer_url` | 预期 Issuer，参与 id_token 验证 |
+| `jwks_uri` | 签名公钥集地址；环境变量 OIDC_AUTH_JWKS_URI |
 | `discovery_url` | OpenID Connect Discovery 地址（`.well-known/openid-configuration`） |
 | `provider_display_name` | 登录按钮展示名 |
 | `client_id` / `client_secret` | 客户端凭证（secret 序列化为 `json:"-"`，不下发前端） |
@@ -397,22 +401,27 @@ requireTenantAPIKeyKnowledgeBases(ctx, "kb-1", "kb-2") // → forbidden
 | `scopes` | 请求的 scope（如 `openid email profile`） |
 | `user_info_mapping.username` / `.email` | claims 字段映射（默认 `name` / `email`） |
 
-端点解析顺序：若 `authorization_endpoint` 与 `token_endpoint` 均已配置则直接使用；否则从 `discovery_url` 动态发现；两者都缺失则报错。
+授权/Token 端点可显式配置；即使二者已填写，只要 issuer 或 jwks_uri 不完整，仍需通过 discovery 补齐验证信息。缺少可靠的验证配置时不能仅解析 id_token 的载荷就登录。
 
 路由（`internal/router/router.go`）：
 
 ```go
 r.GET("/auth/oidc/config",   handler.GetOIDCConfig)           // 前端探测是否启用
 r.GET("/auth/oidc/url",      handler.GetOIDCAuthorizationURL) // 获取授权 URL
+r.GET("/auth/oidc/start",    handler.OIDCStart)              // 直接 302 发起登录
 r.GET("/auth/oidc/callback", handler.OIDCRedirectCallback)    // 授权码回调
 ```
+
+企业门户可直接链接到 `/api/v1/auth/oidc/start`，后端返回 302 跳转 IdP，并根据请求 origin 构造回调地址。部署在反向代理后时，应正确传递外部 scheme/host，并在 IdP 登记对应回调地址。该接口不接受任意登录后跳转目标。
 
 ### 5.2 流程与安全设计
 
 `internal/application/service/user.go`：
 
 - `GetOIDCAuthorizationURL`：生成 24 字节随机 `nonce`，用 `secutils.SignOIDCState` 把 `{nonce, redirect_uri}` **签名进 state**（防 CSRF / 重放 / 回调地址篡改）；nonce 通过 HttpOnly cookie 下发（响应 JSON 中 `json:"-"` 省略）。
-- `LoginWithOIDC`：授权码换 token → UserInfo 端点取用户信息（按 `user_info_mapping` 映射）→ **按 email 匹配本地用户**；未找到则 `provisionOIDCUser` 自动开户 → 签发与密码登录完全相同的本地 JWT 对。
+- `LoginWithOIDC`：授权码换 token → 若使用 id_token，先用 JWKS 验证签名、issuer、audience 与有效期 → 合并 UserInfo 端点的用户信息（按 `user_info_mapping` 映射）→ **按 email 匹配本地用户**；未找到则 `provisionOIDCUser` 自动开户 → 签发与密码登录完全相同的本地 JWT 对。
+
+只有 access_token 时可从 UserInfo 取身份；无 JWKS 时不能使用未验签的 id_token claims，但有 access_token 和 UserInfo 端点仍可走 UserInfo。已验签 id_token 可在 UserInfo 请求失败时作为回退。
 
 自动开户细节：
 
@@ -436,6 +445,7 @@ sequenceDiagram
     W->>W: 验证 state 签名与 nonce
     W->>IdP: POST token_endpoint (code + client_secret)
     IdP-->>W: access_token / id_token
+    W->>W: 有 id_token 且有 JWKS 时验证签名与 claims
     W->>IdP: GET user_info_endpoint
     IdP-->>W: claims (email, name)
     W->>W: 按 email 查用户，不存在则自动开户 provisionOIDCUser

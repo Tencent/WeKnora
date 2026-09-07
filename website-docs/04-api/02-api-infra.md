@@ -182,6 +182,8 @@ curl -X PUT $BASE/api/v1/storage-backends/sb-1/default -H "Authorization: Bearer
 
 ## Web 搜索（/api/v1/web-search 与 /api/v1/web-search-providers）
 
+当前注册 13 个搜索提供商，包括 Metaso、Exa、Bocha、Brave。各自的 api_key 与 extra_config 参数见[联网搜索](../03-features/11-web-search.md)。
+
 ### GET /api/v1/web-search/providers
 
 用途：内置搜索提供方目录（只读）。权限：Viewer+，仅 JWT（未声明 API key 策略）。Handler: `internal/handler/web_search.go`
@@ -297,6 +299,8 @@ curl -X POST $BASE/api/v1/web-search-providers/wsp-1/test -H "Authorization: Bea
 ## 数据源（/api/v1/datasource）
 
 外部内容连接器（Feishu/Notion/语雀等），同步任务会写入 KB。Handler: `internal/handler/datasource.go`。本组多数响应为原始对象/数组（无 `success` 包装）。
+
+当前已注册类型为 feishu、lark、gitlab、ima、notion、yuque、rss。GitLab/IMA 的 credentials、资源选择与同步限制见[数据源导入](../03-features/10-datasource.md)。sync_deletions 开启后会真实删除该数据源归属下的已删除知识；source_created_at/source_updated_at 保存在知识 metadata 中。
 
 ### GET /api/v1/datasource/types
 

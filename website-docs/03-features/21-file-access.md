@@ -11,7 +11,7 @@
 | 形式 | 样子 | 谁能访问 | 有效期 |
 | --- | --- | --- | --- |
 | **内部引用** | `resource://<handle>` | 谁都不能直接访问，这是给服务端用的稳定句柄 | — |
-| **鉴权代理** | `/files`、`/api/v1/knowledge-bases/:id/files`、`/api/v1/embed/:channel_id/files` | 带对应凭证的客户端（登录态 / KB 访问权 / Embed token） | 随凭证 |
+| **鉴权代理** | `/files`、`/api/v1/knowledge-bases/:id/files`、`/api/v1/embed/:channel_id/files`、消息级 `/api/v1/sessions/:id/messages/:message_id/files` | 带对应凭证的客户端（登录态 / KB 访问权 / Embed token） | 随凭证 |
 | **能力短链** | `/r/<token>` | 任何拿到链接的人（**匿名可读**） | WeKnora 签发的 grant，2 小时 |
 | **存储预签名** | 存储后端直接给的 http(s) 链接 | 任何拿到链接的人（**匿名可读**） | 由存储决定，MinIO 默认 24 小时 |
 
@@ -41,6 +41,8 @@ flowchart TD
 ### Web 控制台
 
 前端把 `resource://` 与 `provider://` 引用改写成鉴权代理地址（`frontend/src/utils/protectedFileAccess.ts`），按上下文选路径：普通场景走 `/files`（Bearer + `X-Tenant-ID`）；跨租户共享的知识库走 `/api/v1/knowledge-bases/:id/files`（按 KB 访问权判定，能读到属主租户下的图）。这条路径不需要任何额外配置。
+
+共享 Agent 或组织共享知识库回答中的图片，优先走 `/api/v1/sessions/:id/messages/:message_id/files?file_path=...`。服务端验证调用者能读到该消息、请求资源确实被消息引用，并重新校验资源所属知识库或共享 Agent 的授权。共享被撤销后，历史消息不继续授予资源访问。普通知识库浏览仍可用 KB 级代理，两者使用各自的上下文。
 
 ### IM 机器人（最常出问题的一条）
 
@@ -77,6 +79,7 @@ IM 平台不可能带 WeKnora 的凭证，所以必须给它一个**公网可访
 | 加了 `resource_urls=public` 仍返回 `resource://` | 部署不具备外链能力（如 `local` 存储且未配 `APP_EXTERNAL_URL`） | 补外链条件，或改用 `/files` 代理 |
 | 加了 `resource_urls=public` 返回 403 | 用的是限定知识库的 API Key | 改用 `handle` 模式，或换一把 full-access Key |
 | 嵌入挂件里图片不显示，但网页端正常 | 挂件走的是渠道代理，与主站凭证不同 | 确认挂件页面带着有效 Embed token；`resource_urls=public` 对嵌入渠道无效（设计如此） |
+| 共享回答里的图片 403/404 | 消息上下文缺失、资源未绑定或共享已撤销 | 使用消息级代理并检查当前共享权限；不要拼属主租户的 /files 地址 |
 | 外链过一段时间失效 | 外链是限时的（grant 2 小时 / MinIO 预签名 24 小时） | 不要缓存外链本身，需要时重新取；同一文件在有效期内会复用同一链接 |
 | 网页端图片 404，日志显示租户不匹配 | 跨租户共享库的图存在属主租户下 | 该场景应走 `/api/v1/knowledge-bases/:id/files`，确认前端拿到的是 KB 维度的代理地址 |
 

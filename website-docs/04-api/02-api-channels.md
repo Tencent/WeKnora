@@ -18,6 +18,8 @@ curl -X POST $BASE/api/v1/im/callback/ch-1 -H 'Content-Type: application/json' -
 
 API key：`manage_channels`/full。IM 渠道携带外部 bot 凭证：列表 Viewer+，变更/开关/扫码登录 Admin+。
 
+飞书/Lark credentials.api_base_url 同时影响 HTTP API 和 WebSocket bootstrap；云之家支持 session_mode=thread。配置示例及网络要求见[IM 集成](../03-features/12-im-integration.md)。IM/Embed 的记忆偏好来自绑定 Agent 的 config.memory_enabled，当前渠道接口没有单独的 memory_enabled 参数。
+
 ### POST /api/v1/agents/:id/im-channels
 
 用途：为 Agent 创建 IM 渠道。权限：Admin+。

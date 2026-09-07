@@ -69,9 +69,11 @@ registry.Register(feishuConnector.NewConnector(feishuConnector.RegionLark))    /
 registry.Register(notionConnector.NewConnector())                              // notion
 registry.Register(yuqueConnector.NewConnector())                               // yuque
 registry.Register(rssConnector.NewConnector())                                 // rss
+registry.Register(gitlabConnector.NewConnector())                              // gitlab
+registry.Register(imaConnector.NewConnector())                                 // ima
 ```
 
-> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 为前端展示定义了更多连接器元数据（Confluence、GitHub、Google Drive、OneDrive、DingTalk、Web Crawler、Slack、IMAP 等），但**当前代码库中实际注册可用的连接器只有 5 个类型：`feishu`、`lark`、`notion`、`yuque`、`rss`**（其中 feishu/lark 共用同一份实现）。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
+> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 为前端展示定义了更多连接器元数据（Confluence、GitHub、Google Drive、OneDrive、DingTalk、Web Crawler、Slack、IMAP 等），但**当前代码库中实际注册可用的连接器有 7 个类型：`feishu`、`lark`、`notion`、`yuque`、`rss`、`gitlab`、`ima`**（其中 feishu/lark 共用同一份实现）。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
 
 ## 数据模型（internal/types/datasource.go）
 
@@ -171,11 +173,11 @@ flowchart LR
 - **两条抓取路径**：连接器实现了 `StreamingConnector` 走 `processSyncStreaming`（流式）；否则按 `ForceFull || SyncMode==full` 走 `FetchAll`，或带上 `ParseSyncCursor()` 的游标走 `FetchIncremental`（批量）。
 - **流式路径的游标策略**（`streamStartCursor`）：用户触发的全量同步在**首次尝试**时丢弃游标全量抓取；Asynq **重试**（attempt > 0）以及所有增量同步都从最后一个 checkpoint 续传。
 - **入库核心 `applyFetchedItem` → `ingestItem`**：
-  - `IsDeleted=true` 的条目只累加 `result.Deleted` 计数——**刻意不真正删除知识库条目**（防止连接器误判或重新配置导致意外数据丢失，用户需在 KB UI 中显式删除）；
+  - `IsDeleted=true` 且 `sync_deletions=true` 时，按租户、知识库、数据源 ID 和 external_id 查找并真实删除对应知识；关闭同步删除则保留已有知识。删除能力还取决于连接器是否提供可靠的删除检测；
   - 有 `Content` 字节 → 包装成 `multipart.FileHeader` 走 `KnowledgeService.CreateKnowledgeFromFile`（完整文档解析流水线）；只有 `URL` → 走 `CreateKnowledgeFromURL` 由 WeKnora 下载解析；
   - **更新 = 先删后建**：按 metadata `external_id` 查到既有知识条目就先 `DeleteKnowledge` 再重建，计为 Updated；
   - 重复文件（`DuplicateKnowledgeError`）计为 Skipped，不算失败；
-  - 每个条目自动带上 metadata：`external_id`、`source_resource_id`、`datasource_id` 以及连接器附加的 metadata。
+  - 每个条目自动带上 metadata：`external_id`、`source_resource_id`、`datasource_id` 以及连接器附加的 metadata。若源端提供时间，还保存 UTC RFC3339 格式的 `source_created_at` / `source_updated_at`；它们表示源文档时间，与 WeKnora 的 created_at/updated_at 分开。
 - **自动打标**：`resolveAutoTagIDs` 按数据源名称在目标 KB 中 FindOrCreate 一个标签，所有同步条目自动挂上，便于在 KB 中识别来源；打标失败不阻断同步。
 - **结果状态**：全部条目失败 → `failed`（`allFetchedItemsFailedError`）；RSS 部分 feed 失败（`PartialFetchError`）或流式路径存在失败文档 → `partial`；其余 → `success`。失败样本以 `SyncItemError` 形式最多保留 100 条。
 - 抓取失败时若连接器返回了新游标（如 RSS），仍会持久化游标，避免瞬时故障后被迫全量重抓。
@@ -235,7 +237,7 @@ sequenceDiagram
 | 凭据字段 | `app_id`、`app_secret`、`base_url`（可选覆盖） | `api_key`（`base_url` 走 Settings） | `api_token`、`base_url`（私有化部署可选） | `auth_headers`（可选，属凭据）；`feed_urls` 属 Settings |
 | 资源模型 | Wiki 空间 → 节点树（懒加载，`spaceID:nodeToken` 复合 ID） | 页面/数据库全量树（一次返回带 parent 关系） | 知识库（book/repo）扁平列表 | 每个 feed URL 一个资源（扁平） |
 | 内容格式 | 导出 API → `.docx`/`.xlsx` 文件；drive 文件原样下载 | Block → Markdown；数据库转 Markdown 表格；附件下载 | `body` Markdown 原文（`.md`） | Readability 全文抽取 → HTML→Markdown |
-| 增量机制 | 按节点 `obj_edit_time` 比对（cursor: `SpaceNodeTimes`） | 按页面/记录 `last_edited_time` 比对（cursor: `PageEditTimes`） | 按文档 `content_updated_at` 比对（cursor: `BookDocTimes`） | feed 信号指纹 + 内容 SHA-256 指纹双层比对 |
+| 增量机制 | 按内容 `obj_edit_time` 比对（cursor: `SpaceNodeTimes`） | 按页面/记录 `last_edited_time` 比对（cursor: `PageEditTimes`） | 按文档 `content_updated_at` 比对（cursor: `BookDocTimes`） | feed 信号指纹 + 内容 SHA-256 指纹双层比对 |
 | 删除检测 | 支持（游标中有、当前树没有 → `IsDeleted`；部分列举失败时跳过删除检测） | 支持（区分"源端已删"与"用户取消勾选"，后者不报删除） | 支持 | 不支持（feed 天然滚动淘汰旧条目） |
 | 流式可恢复同步 | 是（`StreamingConnector`，每 50 节点或 30 秒 checkpoint） | 否 | 否 | 否 |
 | 限流应对 | 429 读 `Retry-After` + 指数退避（2s/4s/8s，最多 3 次重试）；5xx 重试 | — | 每次 `GetDocDetail` 间隔 300ms（个人 token 约 100 req/5min） | — |
@@ -255,6 +257,30 @@ sequenceDiagram
 - **增量逻辑**：游标 `feishuCursor.SpaceNodeTimes`（`resourceID → nodeToken → editTime`）。变更判定用 `obj_edit_time`（文档内容编辑时间），而**不是** `node_edit_time`（只反映改标题/挪位置）。抓取失败的节点**不推进游标**（保留旧 editTime，下次必然 prev != current 而重试），避免瞬时导出失败导致文档被永久跳过。
 - **FetchStream**：统一全量/增量路径（cursor==nil 即全量），每处理 `feishuStreamCheckpointInterval = 50` 个节点、或距上次 checkpoint 超过 `feishuStreamCheckpointMaxInterval = 30s` 就落盘一次游标——后者兜底"少量文档但每篇导出都极慢（被限流）"导致 2 小时超时前从未 checkpoint 的场景。
 - **错误分类**（`feishuFailure`）：把原始错误归类为稳定 i18n code（`feishu_auth_or_permission` / `feishu_rate_limited` / `feishu_timeout` / `feishu_server_unavailable` / `feishu_api_error`(+code) / `sync_failed`），前端本地化展示；原始 status/body/log_id 只留在服务端日志。
+
+### GitLab（`connector/gitlab/`）
+
+在数据源中选 GitLab，填写 credentials.base_url 与 access_token，然后选择项目、分支或标签及目录。Token 必须能读取所选项目的仓库；私有项目的可见性由 GitLab 凭据决定。
+
+`config.settings.projects` 为非空数组，每项包含字符串 project_id、可选 ref 和 paths。ref 留空使用默认分支；paths 留空选整个仓库，目录使用相对路径与正斜杠。先验证凭据并浏览资源，再保存定时同步。
+
+流式同步支持恢复检查点；增量通过仓库提交差异更新文件，源端删除按 sync_deletions 处理。选择的仓库文件仍经过 WeKnora 文件类型、大小与解析引擎校验，并非所有代码或二进制文件都可直接入库。
+
+```json
+{"credentials":{"base_url":"https://gitlab.example.com","access_token":"<token>"},"settings":{"projects":[{"project_id":"123","ref":"main","paths":["docs"]}]}}
+```
+
+### 腾讯 IMA（`connector/ima/`）
+
+填写 credentials.client_id 和 api_key；base_url 可选，默认 `https://ima.qq.com`。资源树列出该凭据可见的 IMA 知识库与目录，选择结果保存为 config.resource_ids。源端授权失败或资源不可见时，先检查 IMA 凭据及知识库访问权。
+
+可下载文件进入文档解析，网页类按 URL 获取；笔记通过 note OpenAPI 读取正文。AI 会话和视频解析没有可用正文读取入口，会被跳过。支持全量与增量同步：按知识库、父目录和标题建立稳定身份，同名文件替换后 media_id 改变会触发更新；完整列举成功后才检测删除。
+
+```json
+{"credentials":{"client_id":"<client-id>","api_key":"<api-key>"},"resource_ids":["<resource-id-from-tree>"]}
+```
+
+飞书/Lark 同步记录的更新时间取内容编辑时间，避免仅凭 Wiki 节点操作时间遗漏正文变化。GitLab 与 IMA 都支持删除检测；RSS 的自然滚动淘汰不视为删除。
 
 ### Notion（`connector/notion/`）
 
