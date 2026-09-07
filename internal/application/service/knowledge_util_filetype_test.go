@@ -76,3 +76,21 @@ func TestIsDataTableFileType(t *testing.T) {
 		}
 	}
 }
+
+func TestIsAllowedStoreOnlyFileType(t *testing.T) {
+	for _, tt := range []struct {
+		filename string
+		want     bool
+	}{
+		{"image.webp", true},
+		{"diagram.SVG", true},
+		{"schema.yaml", true},
+		{"archive.zip", false},
+		{"program.exe", false},
+		{"no-extension", false},
+	} {
+		if got := isAllowedStoreOnlyFileType(tt.filename); got != tt.want {
+			t.Errorf("isAllowedStoreOnlyFileType(%q) = %v, want %v", tt.filename, got, tt.want)
+		}
+	}
+}

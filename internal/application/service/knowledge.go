@@ -688,6 +688,28 @@ func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.
 	return file, knowledge.FileName, nil
 }
 
+// GetKnowledgePreviewFile returns the original upload for ordinary files, but
+// resolves relative Markdown image references in-memory for preview. The
+// stored source and the download endpoint deliberately remain unchanged.
+func (s *knowledgeService) GetKnowledgePreviewFile(ctx context.Context, id string) (io.ReadCloser, string, error) {
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, id)
+	if err != nil || knowledge == nil {
+		return nil, "", err
+	}
+	file, filename, err := s.GetKnowledgeFile(ctx, id)
+	if err != nil || (knowledge.FileType != "md" && knowledge.FileType != "markdown") {
+		return file, filename, err
+	}
+	defer file.Close()
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return nil, "", err
+	}
+	rewritten := s.RewriteRelativeMarkdownImages(ctx, tenantID, knowledge.KnowledgeBaseID, knowledge.FolderPath, string(content))
+	return io.NopCloser(strings.NewReader(rewritten)), filename, nil
+}
+
 func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
 	record, err := s.repo.GetKnowledgeByID(ctx, ctx.Value(types.TenantIDContextKey).(uint64), knowledge.ID)
 	if err != nil {

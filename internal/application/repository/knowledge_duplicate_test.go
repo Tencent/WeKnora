@@ -61,3 +61,54 @@ func TestCheckKnowledgeExists_FileHashIsScopedByFileType(t *testing.T) {
 		assert.Equal(t, "md", knowledge.FileType)
 	})
 }
+
+func TestCheckKnowledgeExists_FileHashIsScopedByLogicalPath(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db)
+	ctx := context.Background()
+	tenantID := uint64(1)
+	kbID := uuid.NewString()
+	const fileHash = "same-logo-content"
+
+	require.NoError(t, db.Exec(`
+		INSERT INTO knowledges (id, tenant_id, knowledge_base_id, type, title, file_name, folder_path, file_type, file_hash, parse_status)
+		VALUES (?, ?, ?, 'file', 'logo.png', 'logo.png', 'module-a', 'png', ?, 'completed')
+	`, uuid.NewString(), tenantID, kbID, fileHash).Error)
+
+	t.Run("same content in a sibling folder is not a duplicate", func(t *testing.T) {
+		exists, knowledge, err := repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
+			Type: "file", FileHash: fileHash, FileType: "png", FolderPath: "module-b", MatchLogicalPath: true,
+		})
+		require.NoError(t, err)
+		assert.False(t, exists)
+		assert.Nil(t, knowledge)
+	})
+
+	t.Run("same content with another name in the same folder is not a duplicate", func(t *testing.T) {
+		exists, knowledge, err := repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
+			Type: "file", FileName: "logo-copy.png", FileHash: fileHash, FileType: "png", FolderPath: "module-a", MatchLogicalPath: true,
+		})
+		require.NoError(t, err)
+		assert.False(t, exists)
+		assert.Nil(t, knowledge)
+	})
+
+	t.Run("same content at the same logical path remains a duplicate", func(t *testing.T) {
+		exists, knowledge, err := repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
+			Type: "file", FileName: "logo.png", FileHash: fileHash, FileType: "png", FolderPath: "module-a", MatchLogicalPath: true,
+		})
+		require.NoError(t, err)
+		assert.True(t, exists)
+		require.NotNil(t, knowledge)
+		assert.Equal(t, "module-a", knowledge.FolderPath)
+	})
+
+	t.Run("ordinary uploads retain content-based duplicate semantics", func(t *testing.T) {
+		exists, knowledge, err := repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
+			Type: "file", FileName: "renamed.png", FileHash: fileHash, FileType: "png",
+		})
+		require.NoError(t, err)
+		assert.True(t, exists)
+		require.NotNil(t, knowledge)
+	})
+}

@@ -1,4 +1,5 @@
 import { kbFileTypeVerification } from '@/utils'
+import { STORE_ONLY_FILE_EXTENSIONS } from './folderFileMode'
 
 export const UPLOAD_VIDEO_EXTENSIONS = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv']
 
@@ -62,7 +63,11 @@ export function filterUploadFiles(
       continue
     }
 
-    if (kbFileTypeVerification(file, multiFile, dynamicTypes)) {
+    // A directory may additionally contain a small set of safe attachment
+    // types referenced by a Markdown sibling. Other unsupported types remain
+    // rejected, just like individual-file uploads.
+    const isStoreOnlyAttachment = options.fromFolder && STORE_ONLY_FILE_EXTENSIONS.includes(fileExt)
+    if (!isStoreOnlyAttachment && kbFileTypeVerification(file, multiFile, dynamicTypes)) {
       skippedCount++
       continue
     }
