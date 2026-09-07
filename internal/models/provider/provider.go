@@ -65,6 +65,9 @@ const (
 	ProviderNovita ProviderName = "novita"
 	// Azure OpenAI
 	ProviderAzureOpenAI ProviderName = "azure_openai"
+	// OpenAI Responses API (e.g. opencode zen). Speaks POST <baseURL>/responses
+	// instead of /chat/completions.
+	ProviderResponses ProviderName = "responses"
 )
 
 // AllProviders 返回所有注册的提供者名称
@@ -97,6 +100,7 @@ func AllProviders() []ProviderName {
 		ProviderNvidia,
 		ProviderNovita,
 		ProviderAzureOpenAI,
+		ProviderResponses,
 	}
 }
 

@@ -51,6 +51,10 @@ export function defaultThinkingControl(
       return 'chat_template_kwargs'
     case 'volcengine':
       return 'thinking_type'
+    case 'responses':
+      // Responses effort is a separate selector (reasoningEffort.ts);
+      // no chat thinking wire format applies.
+      return 'none'
     default:
       // openai, azure_openai, anthropic, zhipu, deepseek, gemini, siliconflow,
       // hunyuan, moonshot, openrouter, weknoracloud, … → baseProvider / noThinking

@@ -375,6 +375,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     lkeapRegion: model.parameters.extra_config?.region || 'ap-guangzhou',
     // 原始存库值，编辑弹窗内再 resolve（避免打开时被推断值覆盖）
     thinkingControl: model.parameters.extra_config?.thinking_control,
+    reasoningEffort: model.parameters.extra_config?.reasoning_effort,
     _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
     // Preserve the credential metadata map so the editor dialog can render
     // the "Configured" state without an extra round-trip.
@@ -573,6 +574,15 @@ const handleModelSave = async (modelData: any) => {
         MessagePlugin.warning(t('modelSettings.toasts.baseUrlInvalid'))
         return
       }
+
+      // Responses provider 只接受裸 API 根地址（与编辑弹窗同一规则的服务端兜底）。
+      if (modelData.provider === 'responses') {
+        const lowered = modelData.baseUrl.trim().toLowerCase().replace(/\/+$/, '')
+        if (lowered.endsWith('/responses') || lowered.endsWith('/chat/completions')) {
+          MessagePlugin.warning(t('model.editor.validation.responsesBaseUrlSuffix'))
+          return
+        }
+      }
     }
 
     if (saveType === 'embedding') {
@@ -612,6 +622,14 @@ const handleModelSave = async (modelData: any) => {
       && modelData.thinkingControl
     ) {
       extraConfig.thinking_control = modelData.thinkingControl
+    }
+    if (
+      (saveType === 'chat' || saveType === 'vllm')
+      && modelData.source === 'remote'
+      && modelData.provider === 'responses'
+      && modelData.reasoningEffort
+    ) {
+      extraConfig.reasoning_effort = modelData.reasoningEffort
     }
     const extraConfigFields = Object.keys(extraConfig).length > 0
       ? { extra_config: extraConfig }

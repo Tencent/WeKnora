@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 
+	modelutils "github.com/Tencent/WeKnora/internal/models/utils"
+
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -134,6 +136,13 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 			continue
 		}
 		m := e.toModel()
+
+		// Ingress normalization for the responses provider (suffix table
+		// mirrors provider.responsesPathSuffixes).
+		if m.Parameters.Provider == "responses" {
+			m.Parameters.BaseURL = modelutils.StripPathSuffix(m.Parameters.BaseURL,
+				[]string{"/api/v1/chat/completions", "/chat/completions", "/responses"})
+		}
 
 		// A system-admin edit clears managed_by to claim the row as a runtime
 		// override. Preserve that explicit override on subsequent starts rather
@@ -291,6 +300,7 @@ func errBuiltinModel(format string, args ...interface{}) error {
 // seed value of tenants_id_seq); source defaults to "remote"; status
 // defaults to "active". IsBuiltin and ManagedBy are always forced
 // regardless of YAML input.
+
 func (e *BuiltinModelEntry) toModel() Model {
 	tenantID := e.TenantID
 	if tenantID == 0 {

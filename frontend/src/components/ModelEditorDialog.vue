@@ -385,6 +385,20 @@
           <p class="form-desc">{{ $t('model.editor.thinkingControlDesc') }}</p>
         </div>
 
+        <!-- Responses provider：reasoning effort 选择器 -->
+        <div v-if="showReasoningEffortField" class="form-item">
+          <label class="form-label">{{ $t('model.editor.reasoningEffortLabel') }}</label>
+          <t-select v-model="formData.reasoningEffort">
+            <t-option
+              v-for="opt in reasoningEffortOptions"
+              :key="opt.value"
+              :value="opt.value"
+              :label="opt.label"
+            />
+          </t-select>
+          <p class="form-desc">{{ $t('model.editor.reasoningEffortDesc') }}</p>
+        </div>
+
         <!--
           Background concurrency cap for this model. Only chat / embedding / vllm
           are gated by the governor (see internal/models/limiter), so we surface
@@ -419,6 +433,11 @@ import {
   resolveThinkingControl,
   type ThinkingControlValue,
 } from '@/utils/thinkingControl'
+import {
+  defaultReasoningEffort,
+  resolveReasoningEffort,
+  type ReasoningEffortValue,
+} from '@/utils/reasoningEffort'
 import { DEFAULT_MODEL_CONTEXT_WINDOW } from '@/utils/contextWindow'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import CredentialResource, {
@@ -452,6 +471,8 @@ interface ModelFormData {
   maxConcurrency?: number
   /** extra_config.thinking_control — how agent thinking on/off maps to API fields. */
   thinkingControl?: string
+  /** extra_config.reasoning_effort — Responses provider effort selector. */
+  reasoningEffort?: string
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
   customHeaders?: CustomHeaderItem[]
   /** LKEAP Rerank：腾讯云 SecretKey（创建时写入 app_secret） */
@@ -643,6 +664,13 @@ const fallbackProviderOptions = computed(() => [
     description: t('model.editor.providers.generic.description'),
     modelTypes: ['chat', 'embedding', 'rerank', 'vllm', 'asr']
   },
+  {
+    value: 'responses',
+    label: t('model.editor.providers.responses.label'),
+    defaultUrls: {},
+    description: t('model.editor.providers.responses.description'),
+    modelTypes: ['chat', 'vllm']
+  },
 ])
 
 // 从 API 获取 Provider 列表
@@ -721,6 +749,11 @@ const applyThinkingControlFromModelData = () => {
   )
 }
 
+const applyReasoningEffortFromModelData = () => {
+  if (!props.modelData) return
+  formData.value.reasoningEffort = resolveReasoningEffort(props.modelData.reasoningEffort)
+}
+
 const thinkingControlOptions = computed(() => {
   const keys = ['none', 'chatTemplateKwargs', 'enableThinking', 'thinkingType'] as const
   const values = ['none', 'chat_template_kwargs', 'enable_thinking', 'thinking_type'] as const
@@ -730,6 +763,27 @@ const thinkingControlOptions = computed(() => {
     hint: t(`model.editor.thinkingControl.${key}.hint`),
   }))
 })
+
+const showReasoningEffortField = computed(() =>
+  (activeModelType.value === 'chat' || activeModelType.value === 'vllm')
+  && formData.value.source === 'remote'
+  && formData.value.provider === 'responses',
+)
+
+const reasoningEffortOptions = computed(() => {
+  const values: ReasoningEffortValue[] = ['none', 'minimal', 'low', 'medium', 'high']
+  return values.map((value) => ({
+    value,
+    label: t(`model.editor.reasoningEffort.${value}`),
+  }))
+})
+
+const syncReasoningEffortToForm = () => {
+  if (!showReasoningEffortField.value) return
+  if (!formData.value.reasoningEffort) {
+    formData.value.reasoningEffort = defaultReasoningEffort()
+  }
+}
 
 // Header icon for the SettingDrawer — uses the same TDesign icon name table
 // as the model card list, so the drawer's leading badge visually matches the
@@ -1091,6 +1145,7 @@ watch(() => props.visible, (val) => {
             : [],
         }
         applyThinkingControlFromModelData()
+        applyReasoningEffortFromModelData()
       } else if (lastOpenedModelId.value !== null || !formData.value.id) {
         // 上次是编辑某个模型，或第一次新增 → 重置成空白
         resetForm()
@@ -1141,6 +1196,7 @@ const resetForm = () => {
     contextWindow: undefined,
     maxConcurrency: undefined,
     thinkingControl: defaultThinkingControl('generic', ''),
+    reasoningEffort: defaultReasoningEffort(),
     customHeaders: [],
     appSecret: '',
     lkeapRegion: 'ap-guangzhou',
@@ -1185,6 +1241,7 @@ const handleProviderChange = (value: string) => {
   if (!isEdit.value) {
     thinkingControlManual.value = false
     syncThinkingControlToForm(true)
+    syncReasoningEffortToForm()
     return
   }
   // 编辑时仅用户主动换厂商才跟随默认
@@ -1408,6 +1465,9 @@ const checkRemoteAPI = async () => {
           provider: formData.value.provider,
           ...idPayload,
           ...headerPayload,
+          ...(formData.value.provider === 'responses' && formData.value.reasoningEffort
+            ? { extraConfig: { reasoning_effort: formData.value.reasoningEffort } }
+            : {}),
         })
         break
 
@@ -1468,6 +1528,9 @@ const checkRemoteAPI = async () => {
           provider: formData.value.provider,
           ...idPayload,
           ...headerPayload,
+          ...(formData.value.provider === 'responses' && formData.value.reasoningEffort
+            ? { extraConfig: { reasoning_effort: formData.value.reasoningEffort } }
+            : {}),
         })
         break
 
@@ -1544,6 +1607,18 @@ const handleConfirm = async () => {
       } catch {
         MessagePlugin.warning(t('model.editor.validation.baseUrlInvalid'))
         return
+      }
+
+      // Responses provider 只接受 API 根地址，后缀由后端自动拼接
+      if (formData.value.provider === 'responses') {
+        const lowered = formData.value.baseUrl.trim().toLowerCase().replace(/\/+$/, '')
+        if (
+          lowered.endsWith('/responses')
+          || lowered.endsWith('/chat/completions')
+        ) {
+          MessagePlugin.warning(t('model.editor.validation.responsesBaseUrlSuffix'))
+          return
+        }
       }
     }
 

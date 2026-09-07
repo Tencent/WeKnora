@@ -2385,6 +2385,15 @@ export default {
       maxConcurrencyDesc: '限制文档入库/富化等后台任务对该模型的并发调用数（按模型全副本共享）。0 或留空表示沿用全局默认；不影响交互式对话。',
       thinkingControlLabel: '思考模式参数格式',
       thinkingControlDesc: '决定智能体「思考模式」开/关时如何写入 API。已尝试按厂商/模型预选，若与实际情况不符请按 API 文档手动修改；选「不写入」时，智能体「思考模式」开关不生效。',
+      reasoningEffortLabel: '推理强度 (Responses)',
+      reasoningEffortDesc: '每次 Responses 请求以 reasoning.effort 发送。默认 medium。',
+      reasoningEffort: {
+        none: 'none',
+        minimal: 'minimal',
+        low: 'low',
+        medium: 'medium',
+        high: 'high'
+      },
       dimensionHint: '模型已选择，点击"检测维度"按钮自动获取向量维度',
       loadModelListFailed: '加载模型列表失败',
       listRefreshed: '列表已刷新',
@@ -2476,6 +2485,10 @@ export default {
           label: '自定义 (OpenAI兼容接口)',
           description: 'Generic API endpoint (OpenAI-compatible)'
         },
+        responses: {
+          label: 'OpenAI Responses API',
+          description: 'Responses API 接口（POST /responses），如 opencode zen'
+        },
         requesty: {
           label: 'Requesty',
           description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.'
@@ -2515,7 +2528,8 @@ export default {
         modelNameMax: '模型名称不能超过100个字符',
         baseUrlRequired: '请输入 Base URL',
         baseUrlEmpty: 'Base URL 不能为空',
-        baseUrlInvalid: 'Base URL 格式不正确，请输入有效的 URL'
+        baseUrlInvalid: 'Base URL 格式不正确，请输入有效的 URL',
+        responsesBaseUrlSuffix: 'Responses 服务商需要填写裸 API 根地址（例如 https://opencode.ai/zen/go/v1）——/responses 与 /chat/completions 会自动拼接'
       },
       thinkingControl: {
         thinkingType: {
