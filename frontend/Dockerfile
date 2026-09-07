@@ -22,8 +22,12 @@ ARG NPM_REGISTRY=
 
 ENV VITE_FRONTEND_COMMIT=${VITE_FRONTEND_COMMIT}
 ENV VITE_IS_DOCKER=true
+# Vite production builds of this SPA routinely exceed Node's default heap.
+ENV NODE_OPTIONS=--max-old-space-size=4096
 
+# package-lock references file:packages/xlsx-*.tgz — copy before npm ci.
 COPY package.json package-lock.json ./
+COPY packages ./packages
 RUN if [ -n "$NPM_REGISTRY" ]; then \
       npm ci --registry="$NPM_REGISTRY"; \
     else \
