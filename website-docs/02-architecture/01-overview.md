@@ -192,7 +192,7 @@ sequenceDiagram
 | `helm/` | Kubernetes Helm Chart（Chart.yaml / values.yaml / templates/） |
 | `examples/` | API 使用示例代码；`examples/skills/` 为 Agent Skill 包示例 |
 | `dataset/` | 评估用 QA 数据集及生成脚本 |
-| `scripts/` | 构建/启动/迁移辅助脚本（如 `start_all.sh`、`build_frontend_dist.sh`） |
+| `scripts/` | 构建/启动/迁移辅助脚本（如 `start_all.sh`；`build_frontend_dist.sh` 供 Lite / 桌面打包，UI 镜像由 `frontend/Dockerfile` 多阶段构建） |
 | `tests/`、`testdata/` | 集成测试与测试数据 |
 | `Formula/` | Homebrew 安装配方（macOS） |
 | `misc/` | 杂项（如 `dex-config.yaml` OIDC 测试配置） |

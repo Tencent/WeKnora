@@ -12,6 +12,8 @@ logs
 *.tsbuildinfo
 package.json.md5
 *.md
+.env
+.env.*
 .gitignore
 .dockerignore
 Dockerfile

@@ -196,6 +196,7 @@ build_frontend_image() {
         --platform $PLATFORM \
         --build-arg VITE_FRONTEND_COMMIT="$COMMIT_ID" \
         ${NPM_REGISTRY:+--build-arg NPM_REGISTRY="$NPM_REGISTRY"} \
+        ${NODE_MAX_OLD_SPACE_SIZE:+--build-arg NODE_MAX_OLD_SPACE_SIZE="$NODE_MAX_OLD_SPACE_SIZE"} \
         -f frontend/Dockerfile \
         -t wechatopenai/weknora-ui:latest \
         frontend/
