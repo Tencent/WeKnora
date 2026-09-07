@@ -16,11 +16,17 @@ if [ "$SKILL_MB" -gt 512 ] 2>/dev/null; then
   SKILL_MB=512
 fi
 
+# Extra chat attachment extensions (comma-separated, e.g. ".msg,.seq,.ab1").
+# Whitelist characters so an env value can't inject JS into config.js; empty
+# keeps the built-in attachment whitelist unchanged.
+CHAT_EXTRA_EXT=$(printf '%s' "${WEKNORA_CHAT_ATTACHMENT_EXTRA_EXTENSIONS:-}" | tr -cd 'a-zA-Z0-9.,_-' | cut -c1-512)
+
 cat > /usr/share/nginx/html/config.js << EOF
 window.__RUNTIME_CONFIG__ = {
   MAX_FILE_SIZE_MB: ${FILE_MB},
   MAX_SKILL_BUNDLE_SIZE_MB: ${SKILL_MB},
-  DEFAULT_LOCALE: "${RUNTIME_DEFAULT_LOCALE}"
+  DEFAULT_LOCALE: "${RUNTIME_DEFAULT_LOCALE}",
+  CHAT_ATTACHMENT_EXTRA_EXTENSIONS: "${CHAT_EXTRA_EXT}"
 };
 EOF
 

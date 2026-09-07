@@ -9,6 +9,7 @@ declare global {
       MAX_FILE_SIZE_MB?: number;
       MAX_SKILL_BUNDLE_SIZE_MB?: number;
       DEFAULT_LOCALE?: string;
+      CHAT_ATTACHMENT_EXTRA_EXTENSIONS?: string;
     };
   }
 }
@@ -40,6 +41,39 @@ export const MAX_SKILL_BUNDLE_SIZE_MB = Math.min(
   ),
 )
 export const MAX_SKILL_BUNDLE_SIZE_BYTES = MAX_SKILL_BUNDLE_SIZE_MB * 1024 * 1024
+
+// Deploy-time extra chat attachment extensions (comma-separated, e.g.
+// ".msg,.seq,.ab1"; the frontend entrypoint mirrors
+// WEKNORA_CHAT_ATTACHMENT_EXTRA_EXTENSIONS into the runtime config). Files
+// with these extensions are accepted by the chat attachment picker and
+// uploaded as raw attachments: the backend stages them into the agent sandbox
+// instead of parsing, so skills / MCP tools read the originals directly.
+export const CHAT_ATTACHMENT_EXTRA_EXTENSIONS = parseChatAttachmentExtraExtensions(
+  window.__RUNTIME_CONFIG__?.CHAT_ATTACHMENT_EXTRA_EXTENSIONS
+    ?? import.meta.env.VITE_CHAT_ATTACHMENT_EXTRA_EXTENSIONS,
+)
+
+// Executable formats the backend refuses even when listed in the extra
+// extensions config (chat attachments land in agent sandboxes). Mirrored from
+// temporaryDocumentBlockedExtensions in temporary_document.go — filtering here
+// keeps the picker from offering files the upload would only reject.
+const CHAT_ATTACHMENT_BLOCKED_EXTENSIONS = new Set([
+  '.exe', '.dll', '.so', '.dylib', '.msi',
+  '.com', '.scr', '.bat', '.cmd', '.jar',
+  '.ps1', '.vbs', '.hta',
+])
+
+function parseChatAttachmentExtraExtensions(raw: string | undefined | null): string[] {
+  if (!raw) return []
+  return [...new Set(
+    raw
+      .split(',')
+      .map(ext => ext.trim().toLowerCase())
+      .filter(Boolean)
+      .map(ext => (ext.startsWith('.') ? ext : `.${ext}`))
+      .filter(ext => !CHAT_ATTACHMENT_BLOCKED_EXTENSIONS.has(ext)),
+  )]
+}
 
 export function generateRandomString(length: number) {
   let result = "";
