@@ -177,6 +177,53 @@ func TestList_WikiPathSortReturnsCategorizedPagesFirst(t *testing.T) {
 	assert.Equal(t, "entity/001-root", got[2].Slug)
 }
 
+// TestList_CategoryPathFilterMatchesOnSQLite protects the directory view on the
+// SQLite build: the sidebar loads a folder's pages with category_path +
+// category_depth, and StringArray is stored as a BLOB there, so a plain
+// equality against a TEXT bind never matched and every folder listed empty.
+func TestList_CategoryPathFilterMatchesOnSQLite(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	entity, published := types.WikiPageTypeEntity, types.WikiPageStatusPublished
+	pages := []*types.WikiPage{
+		makeCategorizedWikiPage("kb-c", "entity/in-ai", entity, published, "AI"),
+		makeCategorizedWikiPage("kb-c", "entity/in-ai-llm", entity, published, "AI", "LLM"),
+		makeCategorizedWikiPage("kb-c", "entity/in-people", entity, published, "人物"),
+		makeWikiPage("kb-c", "entity/root", entity, published),
+	}
+	for _, p := range pages {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	depth := 1
+	got, total, err := repo.List(ctx, &types.WikiPageListRequest{
+		KnowledgeBaseID: "kb-c",
+		PageType:        types.WikiPageTypeEntity,
+		CategoryPath:    types.StringArray{"AI"},
+		CategoryDepth:   &depth,
+		Page:            1,
+		PageSize:        10,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, got, 1)
+	assert.Equal(t, "entity/in-ai", got[0].Slug)
+
+	got, total, err = repo.List(ctx, &types.WikiPageListRequest{
+		KnowledgeBaseID: "kb-c",
+		PageType:        types.WikiPageTypeEntity,
+		CategoryPath:    types.StringArray{"人物"},
+		Page:            1,
+		PageSize:        10,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, got, 1)
+	assert.Equal(t, "entity/in-people", got[0].Slug)
+}
+
 // TestFolderTree_CRUDAndChildListing exercises the wiki_folders repository:
 // child listing ordered by sort_order/name, find-by-name, page counting under
 // a folder, and that ListDistinctCategoryPaths reflects the folder paths.
