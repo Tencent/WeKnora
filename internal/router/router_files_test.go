@@ -806,6 +806,20 @@ func newOrgSharedKBTestEngine(
 	kbs []*types.KnowledgeBase,
 ) (*gin.Engine, *string) {
 	t.Helper()
+	return newOrgSharedKBTestEngineFromMessage(t, sharePermitted, &types.Message{
+		AgentID:             "own-agent-1",
+		AgentTenantID:       10006,
+		KnowledgeReferences: refs,
+	}, kbs)
+}
+
+func newOrgSharedKBTestEngineFromMessage(
+	t *testing.T,
+	sharePermitted bool,
+	message *types.Message,
+	kbs []*types.KnowledgeBase,
+) (*gin.Engine, *string) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	t.Setenv("STORAGE_TYPE", "local")
 
@@ -830,11 +844,7 @@ func newOrgSharedKBTestEngine(
 	engine := newMessageScopedFilesTestEngine(
 		callerTenantID,
 		&stubMessageFileLookup{get: func(context.Context, string, string) (*types.Message, error) {
-			return &types.Message{
-				AgentID:             "own-agent-1",
-				AgentTenantID:       callerTenantID,
-				KnowledgeReferences: refs,
-			}, nil
+			return message, nil
 		}},
 		&stubSharedAgentFileLookup{get: func(
 			context.Context, uint64, types.TenantRole, string, ...uint64,
@@ -862,6 +872,12 @@ func newOrgSharedKBTestEngine(
 		},
 	)
 	return engine, &requestedPath
+}
+
+func orgSharedKBFileRequest() *http.Request {
+	return httptest.NewRequest(http.MethodGet,
+		"/sessions/session-1/messages/message-1/files?file_path="+
+			url.QueryEscape("resource://ShArEdKbHaNdLe00000000"), nil)
 }
 
 func TestMessageScopedFilesServesOrgSharedKBResource(t *testing.T) {
@@ -1068,6 +1084,142 @@ func TestMessageScopedFilesOrgSharedKBResolvesKnowledgeOwner(t *testing.T) {
 
 	if recorder.Code != http.StatusOK || recorder.Body.String() != "resolved-kb-image" {
 		t.Fatalf("status=%d body=%q", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestMessageScopedFilesOrgSharedKBAcceptsImageInfoEvidence(t *testing.T) {
+	engine, requestedPath := newOrgSharedKBTestEngine(t, true,
+		types.References{{
+			KnowledgeID:     "knowledge-1",
+			KnowledgeBaseID: "kb-1",
+			Content:         "scanned page OCR without markdown images",
+			ImageInfo:       `[{"url":"resource://ShArEdKbHaNdLe00000000","ocr_text":"quadrant"}]`,
+		}},
+		[]*types.KnowledgeBase{{ID: "kb-1", TenantID: 10005}},
+	)
+
+	req := orgSharedKBFileRequest()
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK || recorder.Body.String() != "shared-kb-image" {
+		t.Fatalf("status=%d body=%q", recorder.Code, recorder.Body.String())
+	}
+	if *requestedPath != "local://10005/images/quadrant.jpg" {
+		t.Fatalf("requested path = %q", *requestedPath)
+	}
+}
+
+func TestMessageScopedFilesOrgSharedKBRejectsHandlePrefix(t *testing.T) {
+	engine, _ := newOrgSharedKBTestEngine(t, true,
+		types.References{{
+			KnowledgeID:     "knowledge-1",
+			KnowledgeBaseID: "kb-1",
+			Content:         "![x](resource://ShArEdKbHaNdLe00000000EXTRA)",
+		}},
+		[]*types.KnowledgeBase{{ID: "kb-1", TenantID: 10005}},
+	)
+
+	req := orgSharedKBFileRequest()
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status=%d, want %d (prefix is not a canonical handle)", recorder.Code, http.StatusForbidden)
+	}
+}
+
+func TestMessageScopedFilesServesOrgSharedKBResourceFromAgentSteps(t *testing.T) {
+	engine, requestedPath := newOrgSharedKBTestEngineFromMessage(t, true,
+		&types.Message{
+			AgentID:       "own-agent-1",
+			AgentTenantID: 10006,
+			AgentSteps: types.AgentSteps{{
+				ToolCalls: []types.ToolCall{{
+					Name: "knowledge_search",
+					Result: &types.ToolResult{
+						Success: true,
+						Data: map[string]interface{}{
+							"display_type": "search_results",
+							"results": []map[string]interface{}{{
+								"content":           "ocr text only",
+								"knowledge_base_id": "kb-1",
+								"images": []map[string]interface{}{{
+									"url": "resource://ShArEdKbHaNdLe00000000",
+								}},
+							}},
+						},
+					},
+				}},
+			}},
+		},
+		[]*types.KnowledgeBase{{ID: "kb-1", TenantID: 10005}},
+	)
+
+	req := orgSharedKBFileRequest()
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK || recorder.Body.String() != "shared-kb-image" {
+		t.Fatalf("status=%d body=%q", recorder.Code, recorder.Body.String())
+	}
+	if *requestedPath != "local://10005/images/quadrant.jpg" {
+		t.Fatalf("requested path = %q", *requestedPath)
+	}
+}
+
+func TestMessageScopedFilesOrgSharedKBFailsClosedOnShareError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("STORAGE_TYPE", "local")
+
+	engine := newMessageScopedFilesTestEngine(
+		10006,
+		&stubMessageFileLookup{get: func(context.Context, string, string) (*types.Message, error) {
+			return &types.Message{
+				AgentID:       "own-agent-1",
+				AgentTenantID: 10006,
+				KnowledgeReferences: types.References{{
+					KnowledgeBaseID: "kb-1",
+					Content:         "![quadrant](resource://ShArEdKbHaNdLe00000000)",
+				}},
+			}, nil
+		}},
+		&stubSharedAgentFileLookup{get: func(
+			context.Context, uint64, types.TenantRole, string, ...uint64,
+		) (*types.CustomAgent, error) {
+			t.Fatal("shared-agent lookup must not run when the org-shared KB fallback fails closed")
+			return nil, nil
+		}},
+		&stubTenantService{get: func(context.Context, uint64) (*types.Tenant, error) {
+			t.Fatal("tenant lookup should not run after share lookup error")
+			return nil, nil
+		}},
+		&stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
+			t.Fatal("GetFile should not run after share lookup error")
+			return nil, nil
+		}},
+		&stubResourceCatalog{resource: &types.StoredResource{
+			Handle:       "ShArEdKbHaNdLe00000000",
+			TenantID:     10005,
+			PhysicalPath: "local://10005/images/quadrant.jpg",
+			MimeType:     "image/jpeg",
+		}},
+		messageKBShareAuthorizer{
+			ShareGuard: &stubKBShareGuard{hasPermission: func(
+				context.Context, string, uint64, types.TenantRole, types.OrgMemberRole,
+			) (bool, error) {
+				return false, io.ErrUnexpectedEOF
+			}},
+			KBs: &stubKBTenantLookup{kbs: []*types.KnowledgeBase{{ID: "kb-1", TenantID: 10005}}},
+		},
+	)
+
+	req := orgSharedKBFileRequest()
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status=%d, want %d", recorder.Code, http.StatusForbidden)
 	}
 }
 

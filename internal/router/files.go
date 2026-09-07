@@ -74,9 +74,9 @@ type kbSharePermissionGuard interface {
 	) (bool, error)
 }
 
-// kbTenantLookup resolves knowledge bases and knowledge entries without a
-// tenant filter, so a message's persisted references can be mapped back to
-// the knowledge bases they were retrieved from.
+// kbTenantLookup resolves knowledge bases without a tenant filter, so a
+// message's persisted retrieval evidence can be mapped back to the knowledge
+// bases the chunks were retrieved from.
 type kbTenantLookup interface {
 	GetKnowledgeBasesByIDsOnly(ctx context.Context, ids []string) ([]*types.KnowledgeBase, error)
 }
@@ -88,9 +88,10 @@ type knowledgeOwnerLookup interface {
 }
 
 // messageKBShareAuthorizer bundles the read-only lookups behind the
-// message proxy's org-shared-KB fallback. A nil bundle (or nil member)
+// message proxy's org-shared-KB fallback. A nil ShareGuard or KBs lookup
 // disables the fallback, which keeps older call sites and tests on the
-// shared-agent-only behavior.
+// shared-agent-only behavior. A nil Knowledges lookup only disables the
+// pre-denormalization KnowledgeID path.
 type messageKBShareAuthorizer struct {
 	ShareGuard kbSharePermissionGuard
 	KBs        kbTenantLookup
@@ -98,16 +99,17 @@ type messageKBShareAuthorizer struct {
 }
 
 // resourceAccessibleViaSharedKB reports whether the message's persisted
-// retrieval references prove the resource came from an org-shared KB the
+// retrieval evidence proves the resource came from an org-shared KB the
 // caller may read. This is the fallback for replies whose agent belongs to
 // the caller's own workspace while the retrieved resources belong to the
 // workspace that shared the knowledge base (#3022).
 //
-// Evidence required from one reference: its retrieved chunk content contains
-// the resource handle (so the resource cannot be smuggled through an
-// unrelated message), its knowledge base belongs to the resource's tenant,
-// and that KB is org-shared to the caller with at least viewer permission.
-// Any lookup failure fails closed.
+// Evidence required from one retrieval record: a canonical resource://
+// handle (not a prefix of a longer token) appears in the chunk text or
+// image_info, its knowledge base belongs to the resource's tenant, and
+// that KB is org-shared to the caller with at least viewer permission.
+// Smart-reasoning turns persist that evidence on AgentSteps when
+// KnowledgeReferences was never filled. Any lookup failure fails closed.
 func (a messageKBShareAuthorizer) resourceAccessibleViaSharedKB(
 	ctx context.Context,
 	message *types.Message,
@@ -118,27 +120,12 @@ func (a messageKBShareAuthorizer) resourceAccessibleViaSharedKB(
 	if a.ShareGuard == nil || a.KBs == nil || message == nil || resource == nil {
 		return false
 	}
-	resourceRef := types.ResourceScheme + resource.Handle
-
-	var kbIDs []string
-	seen := make(map[string]bool)
-	for _, ref := range message.KnowledgeReferences {
-		if ref == nil || !strings.Contains(ref.Content, resourceRef) {
-			continue
-		}
-		kbID := ref.KnowledgeBaseID
-		if kbID == "" && ref.KnowledgeID != "" && a.Knowledges != nil {
-			knowledge, err := a.Knowledges.GetKnowledgeByIDOnly(ctx, ref.KnowledgeID)
-			if err != nil || knowledge == nil {
-				continue
-			}
-			kbID = knowledge.KnowledgeBaseID
-		}
-		if kbID != "" && !seen[kbID] {
-			seen[kbID] = true
-			kbIDs = append(kbIDs, kbID)
-		}
+	handle, ok := types.ParseResourcePath(types.BuildResourcePath(resource.Handle))
+	if !ok {
+		return false
 	}
+
+	kbIDs := a.collectSharedKBEvidenceIDs(ctx, message, handle)
 	if len(kbIDs) == 0 {
 		return false
 	}
@@ -157,6 +144,143 @@ func (a messageKBShareAuthorizer) resourceAccessibleViaSharedKB(
 		}
 	}
 	return false
+}
+
+func (a messageKBShareAuthorizer) collectSharedKBEvidenceIDs(
+	ctx context.Context,
+	message *types.Message,
+	handle string,
+) []string {
+	seenKB := make(map[string]bool)
+	seenKnowledge := make(map[string]bool)
+	var kbIDs, knowledgeIDs []string
+	addKB := func(id string) {
+		if id == "" || seenKB[id] {
+			return
+		}
+		seenKB[id] = true
+		kbIDs = append(kbIDs, id)
+	}
+	addKnowledge := func(id string) {
+		if id == "" || seenKnowledge[id] {
+			return
+		}
+		seenKnowledge[id] = true
+		knowledgeIDs = append(knowledgeIDs, id)
+	}
+
+	for _, ref := range message.KnowledgeReferences {
+		if !searchResultHasResourceHandle(ref, handle) {
+			continue
+		}
+		if ref.KnowledgeBaseID != "" {
+			addKB(ref.KnowledgeBaseID)
+			continue
+		}
+		addKnowledge(ref.KnowledgeID)
+	}
+	collectKBEvidenceFromValue(message.AgentSteps, handle, "", "", addKB, addKnowledge)
+
+	if a.Knowledges != nil {
+		for _, knowledgeID := range knowledgeIDs {
+			knowledge, err := a.Knowledges.GetKnowledgeByIDOnly(ctx, knowledgeID)
+			if err != nil || knowledge == nil {
+				continue
+			}
+			addKB(knowledge.KnowledgeBaseID)
+		}
+	}
+	return kbIDs
+}
+
+func searchResultHasResourceHandle(ref *types.SearchResult, handle string) bool {
+	if ref == nil {
+		return false
+	}
+	return textHasResourceHandle(ref.Content, handle) ||
+		textHasResourceHandle(ref.MatchedContent, handle) ||
+		textHasResourceHandle(ref.ImageInfo, handle)
+}
+
+func textHasResourceHandle(text, handle string) bool {
+	if text == "" || handle == "" {
+		return false
+	}
+	want := types.BuildResourcePath(handle)
+	for _, ref := range types.ScanResourceReferences(text) {
+		if ref == want {
+			return true
+		}
+	}
+	return false
+}
+
+func collectKBEvidenceFromValue(
+	v interface{},
+	handle, kbID, knowledgeID string,
+	addKB, addKnowledge func(string),
+) {
+	switch val := v.(type) {
+	case string:
+		if !textHasResourceHandle(val, handle) {
+			return
+		}
+		if kbID != "" {
+			addKB(kbID)
+			return
+		}
+		addKnowledge(knowledgeID)
+	case types.AgentSteps:
+		for _, step := range val {
+			collectKBEvidenceFromValue(step, handle, kbID, knowledgeID, addKB, addKnowledge)
+		}
+	case types.AgentStep:
+		collectKBEvidenceFromValue(val.ToolCalls, handle, kbID, knowledgeID, addKB, addKnowledge)
+	case []types.ToolCall:
+		for _, call := range val {
+			collectKBEvidenceFromValue(call, handle, kbID, knowledgeID, addKB, addKnowledge)
+		}
+	case types.ToolCall:
+		if val.Result != nil {
+			collectKBEvidenceFromValue(val.Result.Output, handle, kbID, knowledgeID, addKB, addKnowledge)
+			collectKBEvidenceFromValue(val.Result.Data, handle, kbID, knowledgeID, addKB, addKnowledge)
+		}
+	case map[string]interface{}:
+		nextKB := firstNonEmptyString(
+			stringFromAnyMap(val, "knowledge_base_id"),
+			stringFromAnyMap(val, "knowledge_base"),
+			kbID,
+		)
+		nextKnowledge := firstNonEmptyString(stringFromAnyMap(val, "knowledge_id"), knowledgeID)
+		for _, nested := range val {
+			collectKBEvidenceFromValue(nested, handle, nextKB, nextKnowledge, addKB, addKnowledge)
+		}
+	case []interface{}:
+		for _, item := range val {
+			collectKBEvidenceFromValue(item, handle, kbID, knowledgeID, addKB, addKnowledge)
+		}
+	case []map[string]interface{}:
+		for _, item := range val {
+			collectKBEvidenceFromValue(item, handle, kbID, knowledgeID, addKB, addKnowledge)
+		}
+	}
+}
+
+func stringFromAnyMap(m map[string]interface{}, key string) string {
+	if m == nil {
+		return ""
+	}
+	s, _ := m[key].(string)
+	return strings.TrimSpace(s)
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 // localStorageBaseDir resolves LOCAL_STORAGE_BASE_DIR with the container
