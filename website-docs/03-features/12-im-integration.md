@@ -61,7 +61,7 @@ imService.RegisterAdapterFactory("feishu", feishu.NewFactory(feishu.RegionFeishu
 imService.RegisterAdapterFactory("lark", feishu.NewFactory(feishu.RegionLark)) // Lark 与飞书同一适配器，仅 API 域名不同
 imService.RegisterAdapterFactory("slack", slack.NewFactory())
 imService.RegisterAdapterFactory("telegram", telegram.NewFactory())
-imService.RegisterAdapterFactory("dingtalk", dingtalk.NewFactory())
+imService.RegisterAdapterFactory("dingtalk", dingtalk.NewFactory(cfg.IM.DingTalk)) // 专属钉内网适配配置，nil = 禁用
 imService.RegisterAdapterFactory("mattermost", mattermost.NewFactory())
 imService.RegisterAdapterFactory("wechat", wechat.NewFactory())
 imService.RegisterAdapterFactory("qqbot", qqbot.NewFactory())

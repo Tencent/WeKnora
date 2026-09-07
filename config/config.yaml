@@ -111,3 +111,13 @@ extract:
 tenant:
   # Enable cross-tenant access (can be enabled for intranet environments)
   enable_cross_tenant_access: false
+
+# IM integration (all optional; zero values fall back to built-in defaults)
+# im:
+#   dingtalk:
+#     # 专属钉内网适配：将文件下载专线地址前缀替换为内网地址（保留 path/query）
+#     download_url_rewrite:
+#       from: "https://dingtalk-file.111.111.111.111:15443,https://111.111.111.111:15443"
+#       to: "http://222.222.222.222:80"
+#     # 文件下载（GET downloadUrl）跳过 TLS 证书校验，默认 false
+#     download_insecure_skip_verify: false

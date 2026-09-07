@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/im"
 )
 
 // NewFactory returns an im.AdapterFactory for DingTalk channels.
 // Supports "webhook" and "websocket" (stream mode, default).
-func NewFactory() im.AdapterFactory {
+// cfg carries the optional im.dingtalk dedicated-deployment adaptation and
+// may be nil.
+func NewFactory(cfg *config.DingTalkConfig) im.AdapterFactory {
 	return func(factoryCtx context.Context, channel *im.IMChannel, msgHandler func(context.Context, *im.IncomingMessage) error) (im.Adapter, context.CancelFunc, error) {
 		creds, err := im.ParseCredentials(channel.Credentials)
 		if err != nil {
@@ -24,7 +27,7 @@ func NewFactory() im.AdapterFactory {
 
 		switch mode {
 		case "webhook":
-			adapter := NewWebhookAdapter(clientID, clientSecret, cardTemplateID)
+			adapter := NewWebhookAdapter(clientID, clientSecret, cardTemplateID, cfg)
 			return adapter, nil, nil
 
 		case "websocket":
@@ -41,7 +44,7 @@ func NewFactory() im.AdapterFactory {
 				},
 			})
 
-			adapter := NewAdapter(clientID, clientSecret, cardTemplateID)
+			adapter := NewAdapter(clientID, clientSecret, cardTemplateID, cfg)
 			return adapter, wsCancel, nil
 
 		default:
