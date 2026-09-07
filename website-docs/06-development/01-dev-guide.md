@@ -33,7 +33,7 @@ pip install uv          # docreader 使用 uv sync 安装依赖
 
 ## 2. 快速开始：开发模式（推荐）
 
-开发模式的核心思想：**基础设施跑在 Docker 里，`app` 与 `frontend` 跑在本地**，改代码即时重启，无需反复构建镜像。入口是 `scripts/dev.sh`（Makefile 的 `dev-*` 目标是它的包装）。
+开发模式的核心思想：**基础设施跑在 Docker 里，`app` 与 `frontend` 跑在本地**，改代码即时重启，无需反复构建镜像。Linux、macOS 与 WSL 使用 `scripts/dev.sh`（Makefile 的 `dev-*` 目标是它的包装）；Windows 原生 PowerShell 使用 `scripts/dev.ps1`。
 
 ```bash
 # 1. 准备环境变量：dev.sh 会加载 .env（必须存在），再用 .env.local 覆盖（可选）
@@ -56,9 +56,59 @@ make dev-stop     # 停止
 make dev-restart  # 重启
 ```
 
-前端 dev server 监听 `5173`（`frontend/vite.config.ts` 中 `server.port: 5173`），并把 `/api` 与 `/files` 代理到本地后端（`DEV_PROXY_TARGET`）。`vite preview`（端口 `4173`）用生产构建产物起服务，是最接近 release 镜像的验证环境。
+前端 dev server 监听 `5173`（`frontend/vite.config.ts` 中 `server.port: 5173`），并把 `/api` 与 `/files` 代理到本地后端（`VITE_DEV_PROXY_TARGET`）。`vite preview`（端口 `4173`）用生产构建产物起服务，是最接近 release 镜像的验证环境。
 
-### 2.1 docker-compose.dev.yml 服务清单
+### 2.1 Windows 原生开发
+
+Windows 原生开发同样采用“Docker Desktop 跑基础设施、Windows 跑 Go/Vite”的结构。后端即使使用 PostgreSQL，构建时仍会编译 DuckDB 与 sqlite-vec，因此必须启用 CGO，并同时提供兼容的 UCRT GCC、`g++.exe` 与 `sqlite3.h`。
+
+当前已验证的组合为 **Windows 11 x64 + Go 1.26 + GCC 14.2 POSIX/SEH/UCRT + UCRT64 SQLite 头文件**。请使用 [DuckDB Windows 构建采用的 GCC 14.2 工具链](https://github.com/niXman/mingw-builds-binaries/releases/download/14.2.0-rt_v12-rev0/x86_64-14.2.0-release-posix-seh-ucrt-rt_v12-rev0.7z)，并从 MSYS2 UCRT64 安装 SQLite 开发包：
+
+```bash
+# 在 MSYS2 UCRT64 终端执行；默认头文件位于 C:\msys64\ucrt64\include\sqlite3.h
+pacman -S --needed mingw-w64-ucrt-x86_64-sqlite3
+```
+
+> 不要使用当前 MSYS2 UCRT64 的 GCC 16 来链接 DuckDB 预编译库。GCC 16 切换为 native TLS 后，旧工具链构建的静态库会缺少 `__emutls_v._ZSt11__once_call` 与 `__emutls_v._ZSt15__once_callable`。`dev.ps1 check` 会在编译前明确报告此问题。背景见 [MSYS2 GCC 16 native TLS 说明](https://www.msys2.org/news/#2026-05-11-native-thread-local-storage-tls-with-gcc-16) 与 [DuckDB Windows 工具链记录](https://github.com/duckdb/duckdb-r/issues/2234)。
+
+在 PowerShell 5.1 或更高版本中配置并启动：
+
+```powershell
+Copy-Item .env.example .env
+
+# 指向下载后包含 gcc.exe / g++.exe 的目录，以及包含 sqlite3.h 的目录。
+$env:WEKNORA_GCC_BIN = 'C:\Tools\duckdb-gcc-14.2\mingw64\bin'
+$env:WEKNORA_SQLITE_INCLUDE = 'C:\msys64\ucrt64\include'
+
+# 必做：检查 Windows/amd64、Go、CGO 工具链、UCRT 和 SQLite 头文件。
+.\scripts\dev.ps1 check
+
+# 启动 Docker Desktop 基础设施；可追加 -Qdrant、-Minio、-Neo4j 等开关。
+.\scripts\dev.ps1 start
+
+# 分别在两个新终端中执行。安装 Air 后，后端会使用 air.windows.toml 热重载。
+.\scripts\dev.ps1 app
+.\scripts\dev.ps1 frontend
+```
+
+也可用 `-GccBin` 与 `-SqliteInclude` 参数代替环境变量。基础设施管理命令为 `start`、`stop`、`restart`、`logs`、`status`；`app -NoAir` 可强制使用普通 `go run`。脚本只读取 `.env`/`.env.local` 的键值，不会把文件内容当作 PowerShell 代码执行。
+
+GoLand 断点调试可创建以 `./cmd/server` 为目标、仓库根目录为工作目录的 Go Build 配置，并设置以下环境：
+
+```text
+CGO_ENABLED=1
+CC=C:\Tools\duckdb-gcc-14.2\mingw64\bin\gcc.exe
+CXX=C:\Tools\duckdb-gcc-14.2\mingw64\bin\g++.exe
+CGO_CFLAGS=-Wno-deprecated-declarations -idirafter "C:/msys64/ucrt64/include"
+GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
+DB_HOST=127.0.0.1
+REDIS_ADDR=127.0.0.1:6379
+DOCREADER_ADDR=127.0.0.1:50051
+```
+
+同时加载 `.env` 中其余配置，并先运行 `.\scripts\dev.ps1 start`。当前 DuckDB Go 预编译绑定只覆盖 `windows/amd64`；Windows ARM64 或不希望维护 Windows CGO 工具链时，请使用 WSL2，在 WSL 内按本节开头的 `dev.sh`/Makefile 流程开发。更多背景可参考 [DuckDB Go Windows 说明](https://github.com/duckdb/duckdb-go#Windows)、[MSYS2 UCRT64 环境说明](https://www.msys2.org/docs/environments/) 与 [Go cgo 文档](https://go.dev/wiki/cgo)。
+
+### 2.2 docker-compose.dev.yml 服务清单
 
 `docker-compose.dev.yml` 只包含依赖服务，不含 `app`/`frontend`。默认启动与 profile 可选服务如下（profile 通过 `dev.sh start` 的参数开启）：
 
@@ -81,7 +131,7 @@ make dev-restart  # 重启
 
 `dev.sh start` 的可选参数：`--minio`、`--qdrant`、`--neo4j`、`--dex`、`--langfuse`（默认开）、`--no-langfuse`、`--odl-hybrid`、`--full`（全部可选服务，不含 odl-hybrid）。通过 Makefile 传参：`make dev-start DEV_ARGS=--odl-hybrid`。
 
-### 2.2 本地单独跑 docreader
+### 2.3 本地单独跑 docreader
 
 `dev-start` 默认把 docreader 跑在容器里；如需本地调试 Python 代码：
 
@@ -93,7 +143,7 @@ uv run -m docreader.main      # 启动 gRPC 服务（与 Dockerfile CMD 一致�
 
 docreader 的大量调优参数（PDF 渲染 DPI、扫描件判定、SSRF 白名单、gRPC TLS 等）以 `DOCREADER_*` 环境变量注入，完整清单见 `docker-compose.dev.yml` 的 `docreader.environment` 段。
 
-### 2.3 Lite 模式（零外部依赖）
+### 2.4 Lite 模式（零外部依赖）
 
 Lite 模式把 SQLite（+sqlite-vec）与内存队列编译进单个二进制，适合快速体验与桌面端：
 
@@ -157,7 +207,8 @@ make package-mac-app  # 打 macOS .app（scripts/package-mac-app.sh）
 | `dev-start` / `dev-stop` / `dev-restart` / `dev-logs` / `dev-status` | `scripts/dev.sh start/stop/restart/logs/status`（支持 `DEV_ARGS` 传 profile 参数） |
 | `dev-app` | 本地 `go run ./cmd/server`（带版本 ldflags） |
 | `dev-frontend` | 本地 `npm run dev` |
-| `build-lite` / `run-lite` / `package-lite` / `package-mac-app` | Lite 模式构建/运行/打包（见 2.3） |
+| Windows 原生命令 | 使用 `scripts/dev.ps1 check/start/app/frontend`，不经过 Makefile（见 2.1） |
+| `build-lite` / `run-lite` / `package-lite` / `package-mac-app` | Lite 模式构建/运行/打包（见 2.4） |
 | `download_spatial` | `go run cmd/download/duckdb/duckdb.go` 下载 DuckDB spatial 扩展（数据分析工具用） |
 
 ## 4. 测试体系
