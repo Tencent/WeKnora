@@ -129,6 +129,7 @@ WeKnora API 按功能分为以下几类：
 | 评估功能 | 评估模型性能 | [evaluation.md](./evaluation.md) |
 | 初始化管理 | 知识库模型配置与 Ollama 管理 | [initialization.md](./initialization.md) |
 | 系统管理 | 系统信息、解析引擎、存储引擎 | [system.md](./system.md) |
+| 备份与恢复 | 全实例备份导出、快照与恢复(SystemAdmin) | [backup.md](./backup.md) |
 | MCP 服务 | MCP 工具服务管理 | [mcp-service.md](./mcp-service.md) |
 | 组织管理 | 组织、成员、知识库/智能体共享 | [organization.md](./organization.md) |
 | Skills | 预装与已安装的智能体技能、技能环境变量 | [skill.md](./skill.md) |

@@ -7,3 +7,11 @@ export function isSkillBundleUploadUrl(url: string | undefined): boolean {
     || /(?:^|\/)skills\/catalog$/.test(path)
     || /(?:^|\/)sandbox-configs\/[^/]+\/skills$/.test(path)
 }
+
+/** True when nginx's backup-restore location (4GiB default) applies. */
+export function isBackupRestoreUrl(url: string | undefined): boolean {
+  if (!url) return false
+  const path = url.split('?')[0].replace(/\/+$/, '')
+  return /(?:^|\/)api\/v1\/backups\/restore$/.test(path)
+    || /(?:^|\/)backups\/restore$/.test(path)
+}

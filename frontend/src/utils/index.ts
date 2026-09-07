@@ -8,6 +8,7 @@ declare global {
     __RUNTIME_CONFIG__?: {
       MAX_FILE_SIZE_MB?: number;
       MAX_SKILL_BUNDLE_SIZE_MB?: number;
+      MAX_BACKUP_ARCHIVE_SIZE_MB?: number;
       DEFAULT_LOCALE?: string;
     };
   }
@@ -40,6 +41,19 @@ export const MAX_SKILL_BUNDLE_SIZE_MB = Math.min(
   ),
 )
 export const MAX_SKILL_BUNDLE_SIZE_BYTES = MAX_SKILL_BUNDLE_SIZE_MB * 1024 * 1024
+
+export const MAX_BACKUP_ARCHIVE_SIZE_MB = Math.min(
+  32768,
+  Math.max(
+    positiveMegabytes(
+      window.__RUNTIME_CONFIG__?.MAX_BACKUP_ARCHIVE_SIZE_MB
+        ?? import.meta.env.VITE_MAX_BACKUP_ARCHIVE_SIZE_MB,
+      4096,
+    ),
+    MAX_FILE_SIZE_MB,
+  ),
+)
+export const MAX_BACKUP_ARCHIVE_SIZE_BYTES = MAX_BACKUP_ARCHIVE_SIZE_MB * 1024 * 1024
 
 export function generateRandomString(length: number) {
   let result = "";
