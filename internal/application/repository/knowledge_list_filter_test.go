@@ -67,3 +67,35 @@ func TestListPaged_ExcludesDeletingByDefault(t *testing.T) {
 	assert.Equal(t, deletingID, rows[0].ID)
 	assert.Equal(t, int64(1), total)
 }
+
+// The deletion UI must use the exact-ID batch endpoint: a row missing from
+// the default list may only be hidden while cleanup is still in progress.
+func TestGetKnowledgeBatch_TracksDeletionUntilSoftDelete(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+	kbID := uuid.New().String()
+	id := insertKnowledgeInKB(t, db, 1, kbID, types.ParseStatusDeleting)
+	otherTenantID := insertKnowledgeInKB(t, db, 2, kbID, types.ParseStatusDeleting)
+
+	rows, err := repo.GetKnowledgeBatch(ctx, 1, []string{id, otherTenantID})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, id, rows[0].ID)
+	assert.Equal(t, types.ParseStatusDeleting, rows[0].ParseStatus)
+
+	updated, err := repo.UpdateActiveDeletingKnowledgeColumns(ctx, id, map[string]interface{}{
+		"parse_status": types.ParseStatusFailed,
+	})
+	require.NoError(t, err)
+	require.True(t, updated)
+	rows, err = repo.GetKnowledgeBatch(ctx, 1, []string{id})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, types.ParseStatusFailed, rows[0].ParseStatus)
+
+	require.NoError(t, repo.DeleteKnowledgeList(ctx, 1, []string{id}))
+	rows, err = repo.GetKnowledgeBatch(ctx, 1, []string{id})
+	require.NoError(t, err)
+	assert.Empty(t, rows)
+}
