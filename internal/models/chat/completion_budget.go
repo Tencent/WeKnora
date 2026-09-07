@@ -35,35 +35,22 @@ func (o *ChatOptions) CompletionBudget() int {
 // pattern: one internal budget, exactly one outbound field.
 //
 // Default is max_completion_tokens (OpenAI Chat Completions, Azure, Ark).
-// Providers that document only max_tokens — or silently ignore the newer
-// field, as DeepSeek does — stay on the legacy name. GPT-5 / o-series always
-// use max_completion_tokens, even when the configured provider would
-// otherwise send max_tokens.
+// Only providers whose docs (or Pi's catalog) use the legacy name stay on
+// max_tokens. Unknown OpenAI-compat hosts — including Aliyun DashScope, which
+// documents max_completion_tokens for thinking models — keep the default.
+// GPT-5 / o-series always use max_completion_tokens.
 func wireCompletionTokenField(name provider.ProviderName, model string) completionTokenField {
 	if provider.IsOpenAIReasoningOrGPT5Model(model) {
 		return completionTokenFieldMaxCompletionTokens
 	}
 	switch name {
-	case provider.ProviderDeepSeek,
-		provider.ProviderGeneric,
-		provider.ProviderNvidia,
-		provider.ProviderMoonshot,
-		provider.ProviderZhipu,
-		provider.ProviderGPUStack,
-		provider.ProviderAliyun,
-		provider.ProviderLKEAP,
-		provider.ProviderSiliconFlow,
-		provider.ProviderHunyuan,
-		provider.ProviderMiniMax,
-		provider.ProviderMimo,
-		provider.ProviderModelScope,
-		provider.ProviderQianfan,
-		provider.ProviderQiniu,
-		provider.ProviderLongCat,
-		provider.ProviderNovita,
-		provider.ProviderLiteLLM,
-		provider.ProviderGemini,
-		provider.ProviderWeKnoraCloud:
+	case provider.ProviderDeepSeek, // api-docs.deepseek.com: max_tokens only
+		provider.ProviderZhipu,       // open.bigmodel.cn: max_tokens only
+		provider.ProviderSiliconFlow, // docs.siliconflow.com schema: max_tokens
+		provider.ProviderMoonshot,    // Pi useMaxTokens (moonshot.ai)
+		provider.ProviderNvidia,      // Pi useMaxTokens (NIM / vLLM)
+		provider.ProviderGeneric,     // self-hosted vLLM typically ignores the new field
+		provider.ProviderGPUStack:    // private vLLM-class runtime
 		return completionTokenFieldMaxTokens
 	default:
 		return completionTokenFieldMaxCompletionTokens

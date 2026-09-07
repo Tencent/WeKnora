@@ -18,16 +18,35 @@ func TestChatOptionsCompletionBudget(t *testing.T) {
 }
 
 func TestWireCompletionTokenField(t *testing.T) {
-	assert.Equal(t, completionTokenFieldMaxCompletionTokens,
-		wireCompletionTokenField(provider.ProviderOpenAI, "gpt-4o"))
-	assert.Equal(t, completionTokenFieldMaxCompletionTokens,
-		wireCompletionTokenField(provider.ProviderVolcengine, "doubao-seed-2-0-mini"))
-	assert.Equal(t, completionTokenFieldMaxTokens,
-		wireCompletionTokenField(provider.ProviderDeepSeek, "deepseek-chat"))
-	assert.Equal(t, completionTokenFieldMaxTokens,
-		wireCompletionTokenField(provider.ProviderGeneric, "qwen3"))
-	assert.Equal(t, completionTokenFieldMaxTokens,
-		wireCompletionTokenField(provider.ProviderNvidia, "llama-3"))
+	legacy := []provider.ProviderName{
+		provider.ProviderDeepSeek,
+		provider.ProviderZhipu,
+		provider.ProviderSiliconFlow,
+		provider.ProviderMoonshot,
+		provider.ProviderNvidia,
+		provider.ProviderGeneric,
+		provider.ProviderGPUStack,
+	}
+	for _, name := range legacy {
+		assert.Equal(t, completionTokenFieldMaxTokens, wireCompletionTokenField(name, "any"), string(name))
+	}
+
+	modern := []provider.ProviderName{
+		provider.ProviderOpenAI,
+		provider.ProviderAzureOpenAI,
+		provider.ProviderVolcengine,
+		provider.ProviderAliyun, // DashScope documents max_completion_tokens for thinking models
+		provider.ProviderLiteLLM,
+		provider.ProviderGemini,
+		provider.ProviderWeKnoraCloud,
+		provider.ProviderLKEAP,
+		provider.ProviderHunyuan,
+		provider.ProviderMiniMax,
+	}
+	for _, name := range modern {
+		assert.Equal(t, completionTokenFieldMaxCompletionTokens, wireCompletionTokenField(name, "any"), string(name))
+	}
+
 	// GPT-5 / o-series always use the modern field, even on a max_tokens provider.
 	assert.Equal(t, completionTokenFieldMaxCompletionTokens,
 		wireCompletionTokenField(provider.ProviderGeneric, "gpt-5-mini"))
@@ -70,6 +89,13 @@ func TestBuildChatCompletionRequest_OneWireTokenField(t *testing.T) {
 		req := c.BuildChatCompletionRequest(messages, &ChatOptions{MaxTokens: 2048}, false)
 		assert.Equal(t, 2048, req.MaxTokens)
 		assert.Zero(t, req.MaxCompletionTokens)
+	})
+
+	t.Run("aliyun dashscope keeps max_completion_tokens", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderAliyun), "qwen-plus", nil)
+		req := c.BuildChatCompletionRequest(messages, &ChatOptions{MaxTokens: 2048}, false)
+		assert.Zero(t, req.MaxTokens)
+		assert.Equal(t, 2048, req.MaxCompletionTokens)
 	})
 
 	t.Run("openai gpt-4o sends max_completion_tokens", func(t *testing.T) {
