@@ -130,7 +130,8 @@
             </div>
           </div>
 
-          <div v-if="activeSettingsSection === 'access'" class="setting-row setting-row--password-reset">
+          <!-- Keep the reset request and its submit lock alive across tab changes. -->
+          <div v-show="activeSettingsSection === 'access'" class="setting-row setting-row--password-reset">
             <div class="setting-info">
               <div class="setting-label">
                 <span>{{ t('system.globalSettings.passwordReset.label') }}</span>
@@ -141,7 +142,8 @@
               <p class="desc">{{ t('system.globalSettings.passwordReset.description') }}</p>
             </div>
             <div class="setting-control">
-              <ResetPasswordDialog v-model:visible="passwordResetVisible" @announced="saveAnnouncement = $event">
+              <ResetPasswordDialog v-model:visible="passwordResetVisible" :active="activeSettingsSection === 'access'"
+                @announced="saveAnnouncement = $event">
                 <t-button theme="danger" variant="text" class="password-reset-trigger">
                   <template #icon><t-icon name="lock-on" /></template>
                   {{ t('system.globalSettings.passwordReset.action') }}

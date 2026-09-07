@@ -7,7 +7,7 @@
   live region.
 -->
 <template>
-  <t-popup :visible="visible" trigger="click" placement="left-top" destroy-on-close
+  <t-popup :visible="visible && active" trigger="click" placement="left-top" destroy-on-close
     overlay-class-name="system-admin-action-popup-overlay" @visible-change="onVisibleChange">
     <span class="system-admin-action-popup-anchor">
       <slot />
@@ -60,7 +60,8 @@ import { resetUserPassword } from '@/api/system'
 import { getAuthConfig } from '@/api/auth'
 import { newPasswordRules } from '@/utils/passwordPolicy'
 
-const props = defineProps<{ visible: boolean }>()
+// Hide the teleported popup on other tabs without discarding a pending reset.
+const props = defineProps<{ visible: boolean; active: boolean }>()
 const emit = defineEmits<{
   'update:visible': [boolean]
   announced: [string]
