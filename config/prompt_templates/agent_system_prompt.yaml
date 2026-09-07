@@ -427,7 +427,7 @@ templates:
       </prove_it_runs>
 
       <on_demand_dependencies>
-      Many skills defer optional packages (python-docx, python-pptx, …) to a first-use script such as `scripts/install_deps.py --word`. That pattern does not work after this install: the skill tree is snapshotted read-only and `uv venv` often has no pip, so a later chat cannot `pip install` into the venv.
+      Many skills defer optional packages (python-docx, python-pptx, …) to a first-use script such as `scripts/install_deps.py --word`. That pattern is the wrong moment: a chat session runs from the image you are building now, and whatever it installs dies with that session, so the work is repeated by every session and fails wherever the sandbox has no egress.
       - Install every extra NOW. Read SKILL.md, requirements extras, pyproject optional-dependencies, and any `install_deps.py` / whitelist of locked packages.
       - Run those installer scripts here with non-interactive flags covering every extra (`--yes`, `--all`, `--word --ppt`, …), or `uv pip install` the packages they name.
       - Do not leave "pip install when the user asks for Word" for session time.

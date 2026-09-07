@@ -82,7 +82,7 @@ WeKnora 的通用沙箱操作需要四个稳定原语：读取、写入、编辑
 
 未指定技能的下一条命令使用系统运行环境。命名了不存在或未接入的技能环境时直接报错，不静默回退到系统解释器。
 
-技能树保持只读。Python 临时依赖通过不带 `skill_name` 的系统 Python 安装到 `/workspace/.skill-packages/<skill>`，再带 `skill_name` 执行。Node 的 `NODE_PATH` 支持 CommonJS；自建 ESM 脚本应在可写项目目录安装依赖，或调用技能目录里的原始脚本，不能假定 NODE_PATH 支持 ESM。
+技能缺包时装进技能自己的环境：Python 用 `<skill-dir>/.venv/bin/python -m pip install`，Node 在技能目录里 `npm install`，再带 `skill_name` 执行。沙箱归本会话独占且以 root 运行，这类写入落在会话自己的容器里、随会话销毁，不会回流到其他会话启动用的镜像；因此不再需要 `/workspace` 下的包 overlay，技能的包也不会被拆到两个位置。Node 的 `NODE_PATH` 支持 CommonJS；自建 ESM 脚本应在可写项目目录安装依赖，或调用技能目录里的原始脚本，不能假定 NODE_PATH 支持 ESM。
 
 文件工具继续保留写入预算、精确编辑校验、读取分页和二进制处理。Shell 输出保留原来的字节限额和截断策略；完整输出不自动保存，需要时显式重定向到工作区日志。产物仍由 `/workspace/output` 收集，以 `sandbox:<filename>` 引用。
 

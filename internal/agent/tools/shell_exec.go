@@ -133,7 +133,7 @@ var shellExecTool = BaseTool{
 - Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. Read known paths directly; no mandatory discovery call.
 - Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).
 - skill_name selects a listed skill for this call. Installed skills use their Python virtualenv and Node modules; host skill resources are automatically staged in the session with the system runtime. Scoped credentials apply to both. Example: skill_name="pdf", command="python3 report.py". Run bundled scripts via "$WEKNORA_SKILL_DIR/scripts/...". Omit skill_name for system commands.
-- /workspace/input contains user attachments: preserve originals. /workspace/output holds downloadable deliverables. Install Python extras WITHOUT skill_name using python3 -m pip install --target /workspace/.skill-packages/<skill> <package>, then run with skill_name. apt-get is available when the sandbox network policy allows it, but anything a skill needs permanently belongs in the skill installer: changes made here live and die with this session.
+- /workspace/input contains user attachments: preserve originals. /workspace/output holds downloadable deliverables. A package a skill is missing goes into that skill's own environment: /opt/weknora/tenant/skills/<skill>/.venv/bin/python -m pip install <package>, or npm install with work_dir set to the skill directory. apt-get is available when the sandbox network policy allows it, but anything a skill needs permanently belongs in the skill installer: changes made here live and die with this session.
 - Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. Transport failures/timeouts are tool failures. Changing tools does not change permissions; do not repeat a denied operation through another tool.
 - stdout/stderr have independent byte limits, preserving head and tail when truncated. Full output is not automatically saved; redirect verbose commands to a workspace log when it must be retained. Binary bytes are suppressed.
 - Reference collected deliverables as ![description](sandbox:<file name>) using the exact filename.`,
@@ -162,7 +162,7 @@ type ShellExecInput struct {
 	// uses the caller-scoped SkillEnvResolver, so values
 	// are per-caller (taken from ctx) and never persist. Omitting it leaves
 	// shell_exec's behaviour unchanged.
-	SkillName string `json:"skill_name,omitempty" jsonschema:"Optional available skill name. Selects its installed runtime or stages its host resources, plus package overlay and scoped credentials. CWD remains /workspace. Omit for system commands."`
+	SkillName string `json:"skill_name,omitempty" jsonschema:"Optional available skill name. Selects its installed runtime or stages its host resources, plus scoped credentials. CWD remains /workspace. Omit for system commands."`
 }
 
 // SandboxInstallCommandExecutor is the privileged counterpart of
@@ -698,8 +698,8 @@ func shellExecRecoveryHint(exitCode int, command, stderr string) string {
 	if h := shellCommandNotFoundHint(exitCode, command, stderr); h != "" {
 		parts = append(parts, h)
 	}
-	if isFrozenSkillVenvFailure(stderr) {
-		parts = append(parts, "Hint: "+frozenSkillTreeGuidance(skillNameFromShellCommand(command)))
+	if isSkillVenvInstallFailure(stderr) {
+		parts = append(parts, "Hint: "+missingSkillPackageGuidance(skillNameFromShellCommand(command)))
 		return strings.Join(parts, "\n")
 	}
 	if h := shellMissingModuleHint(command, stderr); h != "" {
@@ -728,7 +728,7 @@ func (t *ShellExecTool) recoveryHint(skillName string, exitCode int, command, st
 		if strings.Contains(stderr, "Cannot find module") || strings.Contains(stderr, "MODULE_NOT_FOUND") {
 			return "The selected skill runtime could not resolve this Node module. For custom scripts, install dependencies in a writable workspace project. NODE_PATH supports CommonJS; ESM imports resolve relative to the script and need a local dependency tree. Preserve the installed skill directory."
 		}
-		return fmt.Sprintf("The selected skill runtime lacks this module. Install extras with shell_exec WITHOUT skill_name: python3 -m pip install --target %s <package>; then rerun with skill_name=%q.", sandbox.SessionSkillPackageDir(skillName), skillName)
+		return "The selected skill runtime lacks this module. " + missingSkillPackageGuidance(skillName)
 	}
 	return shellCommandNotFoundHint(exitCode, command, stderr)
 }
@@ -749,7 +749,7 @@ func shellMissingModuleHint(command, stderr string) string {
 }
 
 func isMissingInterpreterModule(stderr string) bool {
-	if isFrozenSkillVenvFailure(stderr) {
+	if isSkillVenvInstallFailure(stderr) {
 		return false
 	}
 	return strings.Contains(stderr, "ModuleNotFoundError") ||

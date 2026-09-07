@@ -28,14 +28,20 @@ func TestApplyResolvedEnvAddsNewKeysAndKeepsExistingOnes(t *testing.T) {
 	require.Equal(t, "/workspace/output", env[artifactHistoryEnvVar])
 }
 
-func TestApplySessionPackagePathPrependsPythonAndNodePath(t *testing.T) {
-	env := map[string]string{pythonPathEnvVar: "/already"}
+// Python is deliberately absent here: the skill's venv interpreter carries its
+// own packages, so an injected PYTHONPATH would only be able to shadow them.
+func TestApplySkillNodePathAppendsAfterTheCallersValue(t *testing.T) {
+	skillDir := sandbox.SkillsImageRoot + "/律师助手"
 
-	applySessionPackagePath(env, "律师助手")
+	env := map[string]string{nodePathEnvVar: "/already"}
+	applySkillNodePath(env, skillDir)
+	require.Equal(t, "/already:"+skillDir+"/node_modules", env[nodePathEnvVar])
 
-	dir := sandbox.SessionSkillPackageDir("律师助手")
-	require.Equal(t, dir+":/already", env[pythonPathEnvVar])
-	require.Equal(t, dir, env[nodePathEnvVar])
+	empty := map[string]string{}
+	applySkillNodePath(empty, skillDir)
+	require.Equal(t, skillDir+"/node_modules", empty[nodePathEnvVar],
+		"a caller that supplied nothing must not get a leading separator")
+	require.NotContains(t, empty, pythonPathEnvVar)
 }
 
 // The message is read by the agent and relayed verbatim to a person, so it has

@@ -490,14 +490,15 @@ func TestSkillNameFromShellCommandExtractsImageSkill(t *testing.T) {
 	assert.Empty(t, skillNameFromShellCommand(`python3 -c "print(1)"`))
 }
 
-func TestShellExecAllowsOverlayInstallThatMentionsTheSkillTree(t *testing.T) {
+func TestShellExecAllowsAnInstallThatMentionsTheSkillTree(t *testing.T) {
 	// Previously an up-front command blacklist rejected this recovery path
-	// because the line contained both `pip install` and the skills root.
+	// because the line contained both `pip install` and the skills root. It is
+	// now the recommended one: a missing package goes into the skill's own venv.
 	executor := &fakeShellExecutor{result: &sandbox.ExecuteResult{ExitCode: 0}}
 	tool := NewShellExecTool(executor, nil)
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
-		`{"command":"python3 -m pip install --target /workspace/.skill-packages/foo -r /opt/weknora/tenant/skills/foo/requirements.txt"}`,
+		`{"command":"/opt/weknora/tenant/skills/foo/.venv/bin/python -m pip install -r /opt/weknora/tenant/skills/foo/requirements.txt"}`,
 	))
 	require.NoError(t, err)
 	require.True(t, result.Success, result.Error)
@@ -527,8 +528,8 @@ func TestShellExecHintsWhenVenvHasNoPip(t *testing.T) {
 	))
 	require.NoError(t, err)
 	require.True(t, result.Success)
-	assert.Contains(t, result.Output, "frozen")
-	assert.Contains(t, result.Output, "/workspace/.skill-packages/律师助手")
+	assert.Contains(t, result.Output, "/opt/weknora/tenant/skills/律师助手/.venv/bin/python -m pip install")
+	assert.NotContains(t, result.Output, "/workspace/.skill-packages")
 	assert.NotContains(t, result.Output, "write_sandbox_file")
 }
 
