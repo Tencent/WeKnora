@@ -331,16 +331,37 @@ make dev-frontend
 **Detailed Documentation:** [Development Environment Quick Start](./docs/开发指南.md)
 
 
-## Benchmark v1.1 reproduction
+## Benchmark v1.1 reproduction and verification
 
-After PostgreSQL, Redis, DocReader, and the backend are running, configure the three models and their own provider credentials according to `config/benchmark/final_v1.json`. The credentials do not need to match those used to publish the baseline; the stable model identities do.
+### Reproduce the published final baseline
+
+After PostgreSQL, Redis, DocReader, and the backend are running, configure the three models and your own provider credentials according to `config/benchmark/final_v1.json`. The credentials do not need to match those used to publish the baseline; the stable model identities do. Strict reproduction requires the frozen `benchmark_v1` dataset, semantic SHA, retrieval/generation/runtime profile, cache OFF, and these exact usable model identities:
+
+- Embedding: `text-embedding-v4` (`Embedding`, `remote`, `generic`, dimension 1024)
+- Chat and summary: `deepseek-v4-pro` (`KnowledgeQA`, `remote`, `generic`)
+- Rerank: `qwen3-rerank` (`Rerank`, `remote`, `aliyun`)
 
 ```bash
 make benchmark-v1-preflight  # checks only; never calls a model provider
 make benchmark-v1            # runs the evaluation after preflight passes
 ```
 
-The final command writes `result.json` and `result.md` under `artifacts/rhino_2026_final/benchmark/`. It assumes dependencies, migrations, and model rows are already provisioned; missing prerequisites fail before evaluation starts. Retrieval metrics are generally more stable, while BLEU/ROUGE can vary slightly because hosted model behavior is not bit-for-bit deterministic.
+The final command writes `result.json` and `result.md` under `artifacts/rhino_2026_final/benchmark/`. Strict preflight fails if the models that `EvaluationService` would actually select are ambiguous or differ from the frozen profile. Only this strict mode emits `comparable_to_final_baseline: true`. It assumes dependencies, migrations, and model rows are already provisioned; missing prerequisites fail before evaluation starts. Retrieval metrics are generally more stable, while BLEU/ROUGE can vary slightly because hosted model behavior is not bit-for-bit deterministic.
+
+### Verify Benchmark functionality with your own models
+
+If the three published models are unavailable, use the custom verification mode:
+
+```bash
+make benchmark-v1-custom-preflight  # checks only; never calls a model provider
+make benchmark-v1-custom            # runs the same pipeline with environment-specific models
+```
+
+Custom mode keeps the frozen `benchmark_v1` dataset (32 corpus entries, 15 questions, 15 qrels, and 15 answers), retrieval/generation/runtime profile, cache OFF, `EvaluationService`, retrieval, rerank, generation, all 12 metrics, unified result, and DB Model Usage recording. It only relaxes model identity. To avoid depending on the repository's unspecified row order, preflight requires one usable visible Embedding model, one usable visible KnowledgeQA model (used for both chat and summary), and one usable active Rerank model.
+
+Custom artifacts are written under `artifacts/rhino_2026_final/benchmark_custom/`, identify the configured and resolved models, display a prominent warning, and emit `comparable_to_final_baseline: false`.
+
+**CUSTOM IS NOT A REPRODUCTION OF THE PUBLISHED NUMBERS.** It proves that the one-command Benchmark pipeline is operational, produces all 12 metrics, and records Model Usage; its quality metrics must not be compared directly with the published Final Benchmark baseline. Neither mode writes plaintext credentials to artifacts.
 
 ## 🤝 Contributing
 

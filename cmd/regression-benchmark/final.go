@@ -101,6 +101,23 @@ type selectedModels struct {
 	RerankID    string
 }
 
+type benchmarkExecutionMode string
+
+const (
+	executionModeStrict benchmarkExecutionMode = "strict"
+	executionModeCustom benchmarkExecutionMode = "custom"
+)
+
+func parseExecutionMode(value string) (benchmarkExecutionMode, error) {
+	mode := benchmarkExecutionMode(strings.ToLower(strings.TrimSpace(value)))
+	switch mode {
+	case executionModeStrict, executionModeCustom:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("invalid execution mode %q (expected strict or custom)", value)
+	}
+}
+
 func loadFinalProfile(path string) (finalProfile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -117,67 +134,167 @@ func loadFinalProfile(path string) (finalProfile, error) {
 }
 
 func validatePreflight(p finalProfile, env preflightEnvironment) (selectedModels, error) {
-	if strings.TrimSpace(env.CommitSHA) == "" {
-		return selectedModels{}, errors.New("Git commit unreadable")
-	}
-	want, got := p.Dataset, env.Dataset
-	if got.DatasetID != p.BenchmarkID {
-		return selectedModels{}, fmt.Errorf("Benchmark dataset mismatch: expected %s, actual %s", p.BenchmarkID, got.DatasetID)
-	}
-	if got.DatasetSemanticSHA256 != want.SemanticSHA256 {
-		return selectedModels{}, fmt.Errorf("Benchmark dataset semantic SHA mismatch: expected %s, actual %s", want.SemanticSHA256, got.DatasetSemanticSHA256)
-	}
-	if got.CorpusCount != want.Corpus || got.QuestionCount != want.Questions || got.QrelsCount != want.Qrels || got.AnswerCount != want.Answers {
-		return selectedModels{}, fmt.Errorf("Benchmark dataset count mismatch: expected corpus/questions/qrels/answers %d/%d/%d/%d, actual %d/%d/%d/%d", want.Corpus, want.Questions, want.Qrels, want.Answers, got.CorpusCount, got.QuestionCount, got.QrelsCount, got.AnswerCount)
-	}
-	if env.CacheEnabled || !strings.EqualFold(p.Runtime.CacheMode, "off") {
-		return selectedModels{}, errors.New("Embedding cache must be OFF for the final benchmark profile")
-	}
-	if env.WorkerLimit != p.Runtime.WorkerLimit {
-		return selectedModels{}, fmt.Errorf("Worker limit mismatch: expected %d, actual %d (set GOMAXPROCS=%d)", p.Runtime.WorkerLimit, env.WorkerLimit, p.Runtime.WorkerLimit+1)
-	}
-	if env.Config == nil || env.Config.Conversation == nil || env.Config.Conversation.Summary == nil {
-		return selectedModels{}, errors.New("Benchmark runtime conversation configuration unavailable")
-	}
-	if err := validateRuntime(p.Runtime, env); err != nil {
+	if err := validatePreflightBase(p, env); err != nil {
 		return selectedModels{}, err
 	}
 
-	selected := selectedModels{}
-	checks := []struct {
-		label string
-		want  profileModel
-		id    *string
-	}{{"embedding", p.Models.Embedding, &selected.EmbeddingID}, {"chat", p.Models.Chat, &selected.ChatID}, {"rerank", p.Models.Rerank, &selected.RerankID}}
-	for _, check := range checks {
-		matches := make([]*types.Model, 0, 1)
-		actual := make([]string, 0)
-		for _, model := range env.Models {
-			if model == nil || string(model.Type) != check.want.Type || model.Status != types.ModelStatusActive {
-				continue
-			}
-			actual = append(actual, model.Name)
-			if model.Name == check.want.Name && string(model.Source) == check.want.Source && model.Parameters.Provider == check.want.Provider {
-				matches = append(matches, model)
-			}
-		}
-		sort.Strings(actual)
-		// EvaluationService creates its temporary KB from the visible model list.
-		// Requiring one active candidate per role makes that existing selection
-		// deterministic without changing Evaluation semantics or freezing UUIDs.
-		if len(matches) != 1 || len(actual) != 1 {
-			return selectedModels{}, fmt.Errorf("Configured %s model does not match final benchmark profile. Expected: %s (%s/%s). Actual: %s. This run cannot be compared with the published final baseline", check.label, check.want.Name, check.want.Source, check.want.Provider, strings.Join(actual, ", "))
-		}
-		model := matches[0]
-		if check.want.Dimension != 0 && model.Parameters.EmbeddingParameters.Dimension != check.want.Dimension {
-			return selectedModels{}, fmt.Errorf("Configured %s model dimension mismatch: expected %d, actual %d", check.label, check.want.Dimension, model.Parameters.EmbeddingParameters.Dimension)
-		}
-		if model.Parameters.APIKey == "" && model.Parameters.AppSecret == "" {
-			return selectedModels{}, fmt.Errorf("Required credential unavailable for %s model %s", check.label, check.want.Name)
-		}
-		*check.id = model.ID
+	// EvaluationService creates its temporary KB by iterating every visible
+	// model row, without filtering status or imposing an order, and retains the
+	// last Embedding and KnowledgeQA rows it sees. Requiring exactly one visible
+	// row for each auto-selected role is therefore the wrapper-level invariant
+	// that makes the embedding and summary choices deterministic.
+	embedding, err := requireSingleAutomaticModel(env.Models, "embedding", types.ModelTypeEmbedding)
+	if err != nil {
+		return selectedModels{}, err
 	}
-	return selected, nil
+	chat, err := requireSingleAutomaticModel(env.Models, "KnowledgeQA (chat/summary)", types.ModelTypeKnowledgeQA)
+	if err != nil {
+		return selectedModels{}, err
+	}
+	if err := validateExactModel("embedding", p.Models.Embedding, embedding); err != nil {
+		return selectedModels{}, err
+	}
+	if err := validateExactModel("chat/summary", p.Models.Chat, chat); err != nil {
+		return selectedModels{}, err
+	}
+	rerank, err := requireSingleExactActiveModel(env.Models, "rerank", p.Models.Rerank)
+	if err != nil {
+		return selectedModels{}, err
+	}
+	return selectedModels{EmbeddingID: embedding.ID, ChatID: chat.ID, RerankID: rerank.ID}, nil
+}
+
+func validateCustomPreflight(p finalProfile, env preflightEnvironment) (selectedModels, error) {
+	if err := validatePreflightBase(p, env); err != nil {
+		return selectedModels{}, err
+	}
+	embedding, err := requireSingleAutomaticModel(env.Models, "embedding", types.ModelTypeEmbedding)
+	if err != nil {
+		return selectedModels{}, err
+	}
+	chat, err := requireSingleAutomaticModel(env.Models, "KnowledgeQA (chat/summary)", types.ModelTypeKnowledgeQA)
+	if err != nil {
+		return selectedModels{}, err
+	}
+	rerank, err := requireSingleActiveModel(env.Models, "rerank", types.ModelTypeRerank)
+	if err != nil {
+		return selectedModels{}, err
+	}
+	return selectedModels{EmbeddingID: embedding.ID, ChatID: chat.ID, RerankID: rerank.ID}, nil
+}
+
+func validatePreflightBase(p finalProfile, env preflightEnvironment) error {
+	if strings.TrimSpace(env.CommitSHA) == "" {
+		return errors.New("Git commit unreadable")
+	}
+	want, got := p.Dataset, env.Dataset
+	if got.DatasetID != p.BenchmarkID {
+		return fmt.Errorf("Benchmark dataset mismatch: expected %s, actual %s", p.BenchmarkID, got.DatasetID)
+	}
+	if got.DatasetSemanticSHA256 != want.SemanticSHA256 {
+		return fmt.Errorf("Benchmark dataset semantic SHA mismatch: expected %s, actual %s", want.SemanticSHA256, got.DatasetSemanticSHA256)
+	}
+	if got.CorpusCount != want.Corpus || got.QuestionCount != want.Questions || got.QrelsCount != want.Qrels || got.AnswerCount != want.Answers {
+		return fmt.Errorf("Benchmark dataset count mismatch: expected corpus/questions/qrels/answers %d/%d/%d/%d, actual %d/%d/%d/%d", want.Corpus, want.Questions, want.Qrels, want.Answers, got.CorpusCount, got.QuestionCount, got.QrelsCount, got.AnswerCount)
+	}
+	if env.CacheEnabled || !strings.EqualFold(p.Runtime.CacheMode, "off") {
+		return errors.New("Embedding cache must be OFF for the benchmark profile")
+	}
+	if env.WorkerLimit != p.Runtime.WorkerLimit {
+		return fmt.Errorf("Worker limit mismatch: expected %d, actual %d (set GOMAXPROCS=%d)", p.Runtime.WorkerLimit, env.WorkerLimit, p.Runtime.WorkerLimit+1)
+	}
+	if env.Config == nil || env.Config.Conversation == nil || env.Config.Conversation.Summary == nil {
+		return errors.New("Benchmark runtime conversation configuration unavailable")
+	}
+	if err := validateRuntime(p.Runtime, env); err != nil {
+		return err
+	}
+	return nil
+}
+
+func requireSingleAutomaticModel(models []*types.Model, label string, modelType types.ModelType) (*types.Model, error) {
+	candidates := modelsOfType(models, modelType, false)
+	if len(candidates) != 1 {
+		return nil, fmt.Errorf("EvaluationService automatic %s selection is ambiguous: expected exactly one visible %s row, found %d (%s)", label, modelType, len(candidates), describeModels(candidates))
+	}
+	if err := validateUsableModel(label, candidates[0]); err != nil {
+		return nil, err
+	}
+	return candidates[0], nil
+}
+
+func requireSingleActiveModel(models []*types.Model, label string, modelType types.ModelType) (*types.Model, error) {
+	candidates := modelsOfType(models, modelType, true)
+	if len(candidates) != 1 {
+		return nil, fmt.Errorf("Custom benchmark %s selection is ambiguous: expected exactly one active %s row, found %d (%s)", label, modelType, len(candidates), describeModels(candidates))
+	}
+	if err := validateUsableModel(label, candidates[0]); err != nil {
+		return nil, err
+	}
+	return candidates[0], nil
+}
+
+func requireSingleExactActiveModel(models []*types.Model, label string, want profileModel) (*types.Model, error) {
+	matches := make([]*types.Model, 0, 1)
+	actual := modelsOfType(models, types.ModelType(want.Type), true)
+	for _, model := range actual {
+		if model.Name == want.Name && string(model.Source) == want.Source && model.Parameters.Provider == want.Provider {
+			matches = append(matches, model)
+		}
+	}
+	if len(matches) != 1 {
+		return nil, fmt.Errorf("Configured %s model does not match final benchmark profile. Expected exactly one %s (%s/%s). Actual: %s. This run cannot be compared with the published final baseline", label, want.Name, want.Source, want.Provider, describeModels(actual))
+	}
+	if err := validateExactModel(label, want, matches[0]); err != nil {
+		return nil, err
+	}
+	return matches[0], nil
+}
+
+func validateExactModel(label string, want profileModel, model *types.Model) error {
+	if model.Name != want.Name || string(model.Type) != want.Type || string(model.Source) != want.Source || model.Parameters.Provider != want.Provider {
+		return fmt.Errorf("Configured %s model does not match final benchmark profile. Expected: %s (%s/%s). Actual: %s. This run cannot be compared with the published final baseline", label, want.Name, want.Source, want.Provider, describeModels([]*types.Model{model}))
+	}
+	if want.Dimension != 0 && model.Parameters.EmbeddingParameters.Dimension != want.Dimension {
+		return fmt.Errorf("Configured %s model dimension mismatch: expected %d, actual %d", label, want.Dimension, model.Parameters.EmbeddingParameters.Dimension)
+	}
+	return validateUsableModel(label, model)
+}
+
+func validateUsableModel(label string, model *types.Model) error {
+	if model == nil || strings.TrimSpace(model.ID) == "" {
+		return fmt.Errorf("Required %s model has no usable ID", label)
+	}
+	if model.Status != types.ModelStatusActive {
+		return fmt.Errorf("Required %s model %s is not active (status=%s)", label, model.Name, model.Status)
+	}
+	if model.Source != types.ModelSourceLocal && model.Parameters.APIKey == "" && model.Parameters.AppSecret == "" {
+		return fmt.Errorf("Required credential unavailable for %s model %s", label, model.Name)
+	}
+	return nil
+}
+
+func modelsOfType(models []*types.Model, modelType types.ModelType, activeOnly bool) []*types.Model {
+	result := make([]*types.Model, 0)
+	for _, model := range models {
+		if model == nil || model.Type != modelType || (activeOnly && model.Status != types.ModelStatusActive) {
+			continue
+		}
+		result = append(result, model)
+	}
+	return result
+}
+
+func describeModels(models []*types.Model) string {
+	values := make([]string, 0, len(models))
+	for _, model := range models {
+		values = append(values, fmt.Sprintf("%s[id=%s,status=%s,source=%s,provider=%s]", model.Name, model.ID, model.Status, model.Source, model.Parameters.Provider))
+	}
+	sort.Strings(values)
+	if len(values) == 0 {
+		return "none"
+	}
+	return strings.Join(values, ", ")
 }
 
 func validateRuntime(want profileRuntime, env preflightEnvironment) error {
@@ -330,28 +447,31 @@ func collectPreflightEnvironment(ctx context.Context, tenant uint64) (preflightE
 }
 
 type artifactModel struct {
-	Name              string `json:"name"`
-	Type              string `json:"type"`
-	Source            string `json:"source"`
-	Provider          string `json:"provider"`
-	ResolvedProvider  string `json:"resolved_provider,omitempty"`
-	ResolvedModelName string `json:"resolved_model_name,omitempty"`
+	Name              string  `json:"name"`
+	Type              string  `json:"type"`
+	Source            string  `json:"source"`
+	Provider          string  `json:"provider"`
+	ResolvedProvider  *string `json:"resolved_provider"`
+	ResolvedModelName *string `json:"resolved_model_name"`
 }
 
 type finalArtifact struct {
-	SchemaVersion    int                                  `json:"schema_version"`
-	BenchmarkID      string                               `json:"benchmark_id"`
-	BenchmarkVersion string                               `json:"benchmark_version"`
-	CommitSHA        string                               `json:"commit_sha"`
-	GeneratedAt      time.Time                            `json:"generated_at"`
-	Dataset          profileDataset                       `json:"dataset"`
-	Models           map[string]artifactModel             `json:"models"`
-	Runtime          profileRuntime                       `json:"runtime"`
-	EvaluationRunID  string                               `json:"evaluation_run_id"`
-	Metrics          types.BenchmarkQuality               `json:"metrics"`
-	Usage            *types.EvaluationModelUsageAggregate `json:"usage"`
-	Latency          artifactLatency                      `json:"latency"`
-	Reproducibility  types.BenchmarkReproducibilityState  `json:"reproducibility"`
+	SchemaVersion             int                                  `json:"schema_version"`
+	ExecutionMode             benchmarkExecutionMode               `json:"execution_mode"`
+	ComparableToFinalBaseline bool                                 `json:"comparable_to_final_baseline"`
+	ComparisonNote            string                               `json:"comparison_note"`
+	BenchmarkID               string                               `json:"benchmark_id"`
+	BenchmarkVersion          string                               `json:"benchmark_version"`
+	CommitSHA                 string                               `json:"commit_sha"`
+	GeneratedAt               time.Time                            `json:"generated_at"`
+	Dataset                   profileDataset                       `json:"dataset"`
+	Models                    map[string]artifactModel             `json:"models"`
+	Runtime                   profileRuntime                       `json:"runtime"`
+	EvaluationRunID           string                               `json:"evaluation_run_id"`
+	Metrics                   types.BenchmarkQuality               `json:"metrics"`
+	Usage                     *types.EvaluationModelUsageAggregate `json:"usage"`
+	Latency                   artifactLatency                      `json:"latency"`
+	Reproducibility           types.BenchmarkReproducibilityState  `json:"reproducibility"`
 }
 
 type artifactLatency struct {
@@ -360,15 +480,20 @@ type artifactLatency struct {
 }
 
 func buildFinalArtifact(p finalProfile, commit string, now time.Time, result *types.BenchmarkResult) (finalArtifact, error) {
+	return buildBenchmarkArtifact(executionModeStrict, p, commit, now, result)
+}
+
+func buildBenchmarkArtifact(mode benchmarkExecutionMode, p finalProfile, commit string, now time.Time, result *types.BenchmarkResult) (finalArtifact, error) {
 	if result == nil || result.Run.EvaluationRunID == "" {
-		return finalArtifact{}, errors.New("cannot build final artifact from empty unified benchmark result")
+		return finalArtifact{}, errors.New("cannot build benchmark artifact from empty unified benchmark result")
 	}
-	if err := validateResultProfile(p, result); err != nil {
+	if err := validateResultProfile(mode, p, result); err != nil {
 		return finalArtifact{}, err
 	}
 	models := map[string]artifactModel{
 		"embedding": artifactModelFromSnapshot(result.Config.Models.Embedding),
 		"chat":      artifactModelFromSnapshot(result.Config.Models.Chat),
+		"summary":   artifactModelFromSnapshot(result.Config.Models.Summary),
 		"rerank":    artifactModelFromSnapshot(result.Config.Models.Rerank),
 	}
 	var latency types.LatencyAggregate
@@ -380,17 +505,39 @@ func buildFinalArtifact(p finalProfile, commit string, now time.Time, result *ty
 			if !ok {
 				continue
 			}
-			m.ResolvedProvider = observed.ResolvedProvider
+			m.ResolvedProvider = stringPointer(observed.ResolvedProvider)
 			if observed.ResolvedModelName != nil {
-				m.ResolvedModelName = *observed.ResolvedModelName
+				m.ResolvedModelName = stringPointer(*observed.ResolvedModelName)
 			}
 			models[key] = m
+			if observed.CallType == types.CallTypeChat && result.Config.Models.Summary != nil && result.Config.Models.Chat != nil && result.Config.Models.Summary.ID == result.Config.Models.Chat.ID {
+				summary := models["summary"]
+				summary.ResolvedProvider = stringPointer(observed.ResolvedProvider)
+				if observed.ResolvedModelName != nil {
+					summary.ResolvedModelName = stringPointer(*observed.ResolvedModelName)
+				}
+				models["summary"] = summary
+			}
 		}
 	}
-	return finalArtifact{1, p.BenchmarkID, p.BenchmarkVersion, commit, now.UTC(), p.Dataset, models, p.Runtime, result.Run.EvaluationRunID, result.Quality, result.ModelFacts, artifactLatency{result.RunWallClockDurationMS, latency}, result.Reproducibility}, nil
+	comparable := mode == executionModeStrict
+	note := "Uses environment-specific models and MUST NOT be compared directly with the published Final Benchmark baseline."
+	if comparable {
+		note = "Matches the published final benchmark profile."
+	}
+	return finalArtifact{
+		SchemaVersion: 1, ExecutionMode: mode, ComparableToFinalBaseline: comparable, ComparisonNote: note,
+		BenchmarkID: p.BenchmarkID, BenchmarkVersion: p.BenchmarkVersion, CommitSHA: commit, GeneratedAt: now.UTC(),
+		Dataset: p.Dataset, Models: models, Runtime: p.Runtime, EvaluationRunID: result.Run.EvaluationRunID,
+		Metrics: result.Quality, Usage: result.ModelFacts,
+		Latency: artifactLatency{result.RunWallClockDurationMS, latency}, Reproducibility: result.Reproducibility,
+	}, nil
 }
 
-func validateResultProfile(p finalProfile, result *types.BenchmarkResult) error {
+func validateResultProfile(mode benchmarkExecutionMode, p finalProfile, result *types.BenchmarkResult) error {
+	if mode != executionModeStrict && mode != executionModeCustom {
+		return fmt.Errorf("unsupported benchmark execution mode %q", mode)
+	}
 	if result.BenchmarkVersion != p.BenchmarkVersion {
 		return fmt.Errorf("unified benchmark result version mismatch: expected %s, actual %s", p.BenchmarkVersion, result.BenchmarkVersion)
 	}
@@ -398,17 +545,28 @@ func validateResultProfile(p finalProfile, result *types.BenchmarkResult) error 
 	if d.DatasetID != p.BenchmarkID || d.DatasetSemanticSHA256 != p.Dataset.SemanticSHA256 || d.CorpusCount != p.Dataset.Corpus || d.QuestionCount != p.Dataset.Questions || d.QrelsCount != p.Dataset.Qrels || d.AnswerCount != p.Dataset.Answers {
 		return errors.New("unified benchmark result dataset does not match final benchmark profile")
 	}
-	checks := []struct {
+	configured := []struct {
 		label string
-		want  profileModel
 		got   *types.EvaluationConfiguredModelSnapshot
-	}{{"embedding", p.Models.Embedding, result.Config.Models.Embedding}, {"chat", p.Models.Chat, result.Config.Models.Chat}, {"rerank", p.Models.Rerank, result.Config.Models.Rerank}}
-	for _, check := range checks {
-		if check.got == nil || check.got.Name != check.want.Name || check.got.Type != check.want.Type || check.got.Source != check.want.Source || check.got.Provider != check.want.Provider {
-			return fmt.Errorf("unified benchmark result %s model does not match final benchmark profile", check.label)
+	}{{"embedding", result.Config.Models.Embedding}, {"chat", result.Config.Models.Chat}, {"summary", result.Config.Models.Summary}, {"rerank", result.Config.Models.Rerank}}
+	for _, model := range configured {
+		if model.got == nil {
+			return fmt.Errorf("unified benchmark result has no configured %s model", model.label)
 		}
-		if check.want.Dimension != 0 && (check.got.Embedding == nil || check.got.Embedding.Dimension != check.want.Dimension) {
-			return fmt.Errorf("unified benchmark result %s dimension does not match final benchmark profile", check.label)
+	}
+	if mode == executionModeStrict {
+		checks := []struct {
+			label string
+			want  profileModel
+			got   *types.EvaluationConfiguredModelSnapshot
+		}{{"embedding", p.Models.Embedding, result.Config.Models.Embedding}, {"chat", p.Models.Chat, result.Config.Models.Chat}, {"summary", p.Models.Chat, result.Config.Models.Summary}, {"rerank", p.Models.Rerank, result.Config.Models.Rerank}}
+		for _, check := range checks {
+			if check.got.Name != check.want.Name || check.got.Type != check.want.Type || check.got.Source != check.want.Source || check.got.Provider != check.want.Provider {
+				return fmt.Errorf("unified benchmark result %s model does not match final benchmark profile", check.label)
+			}
+			if check.want.Dimension != 0 && (check.got.Embedding == nil || check.got.Embedding.Dimension != check.want.Dimension) {
+				return fmt.Errorf("unified benchmark result %s dimension does not match final benchmark profile", check.label)
+			}
 		}
 	}
 	if result.Config.Execution.WorkerLimit != p.Runtime.WorkerLimit {
@@ -427,6 +585,46 @@ func validateResultProfile(p finalProfile, result *types.BenchmarkResult) error 
 	}
 	if result.ModelFacts == nil {
 		return errors.New("unified benchmark result has no model usage facts")
+	}
+	if result.Run.Status != types.EvaluationStatueSuccess {
+		return fmt.Errorf("unified benchmark result run is not successful (status=%d)", result.Run.Status)
+	}
+	if result.Quality.State != types.BenchmarkQualityStateComplete {
+		return fmt.Errorf("unified benchmark result quality is not complete (state=%s)", result.Quality.State)
+	}
+	if err := validateCompleteMetrics(result.Quality); err != nil {
+		return err
+	}
+	if result.Reproducibility != types.BenchmarkReproducibilityComplete {
+		return fmt.Errorf("unified benchmark result reproducibility is not complete (state=%s)", result.Reproducibility)
+	}
+	return nil
+}
+
+func validateCompleteMetrics(quality types.BenchmarkQuality) error {
+	if quality.Retrieval == nil {
+		return errors.New("unified benchmark result retrieval metrics are missing")
+	}
+	retrieval := []struct {
+		name  string
+		value *float64
+	}{{"Precision", quality.Retrieval.Precision}, {"Recall", quality.Retrieval.Recall}, {"NDCG@3", quality.Retrieval.NDCG3}, {"NDCG@10", quality.Retrieval.NDCG10}, {"MRR", quality.Retrieval.MRR}, {"MAP", quality.Retrieval.MAP}}
+	for _, metric := range retrieval {
+		if metric.value == nil {
+			return fmt.Errorf("unified benchmark result retrieval metric %s is missing", metric.name)
+		}
+	}
+	if quality.Answer == nil {
+		return errors.New("unified benchmark result answer metrics are missing")
+	}
+	answer := []struct {
+		name  string
+		value *float64
+	}{{"BLEU-1", quality.Answer.BLEU1}, {"BLEU-2", quality.Answer.BLEU2}, {"BLEU-4", quality.Answer.BLEU4}, {"ROUGE-1", quality.Answer.ROUGE1}, {"ROUGE-2", quality.Answer.ROUGE2}, {"ROUGE-L", quality.Answer.ROUGEL}}
+	for _, metric := range answer {
+		if metric.value == nil {
+			return fmt.Errorf("unified benchmark result answer metric %s is missing", metric.name)
+		}
 	}
 	return nil
 }
@@ -464,8 +662,14 @@ func renderFinalMarkdown(a finalArtifact) string {
 		return fmt.Sprintf("%.6f", *v)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Benchmark v1.1 Final Result\n\nCommit: `%s`  \nEvaluation run: `%s`  \nGenerated (UTC): `%s`  \nDataset SHA: `%s`\n\n", a.CommitSHA, a.EvaluationRunID, a.GeneratedAt.Format(time.RFC3339), a.Dataset.SemanticSHA256)
-	fmt.Fprintf(&b, "Models: embedding `%s` (%s), chat `%s` (%s), rerank `%s` (%s)\n\n", a.Models["embedding"].Name, a.Models["embedding"].ResolvedProvider, a.Models["chat"].Name, a.Models["chat"].ResolvedProvider, a.Models["rerank"].Name, a.Models["rerank"].ResolvedProvider)
+	if a.ExecutionMode == executionModeCustom {
+		b.WriteString("# Benchmark v1.1 Custom Verification Result\n\n")
+		b.WriteString("WARNING: This run uses environment-specific models. It verifies that the Benchmark pipeline is operational, but its quality metrics are NOT directly comparable with the published Final Benchmark baseline.\n\n")
+	} else {
+		b.WriteString("# Benchmark v1.1 Final Result\n\n")
+	}
+	fmt.Fprintf(&b, "Execution mode: %s  \nComparable to published baseline: %s  \nCommit: `%s`  \nEvaluation run: `%s`  \nGenerated (UTC): `%s`  \nDataset SHA: `%s`\n\n", strings.ToUpper(string(a.ExecutionMode)), yesNo(a.ComparableToFinalBaseline), a.CommitSHA, a.EvaluationRunID, a.GeneratedAt.Format(time.RFC3339), a.Dataset.SemanticSHA256)
+	fmt.Fprintf(&b, "Models: embedding `%s` (%s), chat `%s` (%s), summary `%s` (%s), rerank `%s` (%s)\n\n", a.Models["embedding"].Name, valueOrNA(a.Models["embedding"].ResolvedProvider), a.Models["chat"].Name, valueOrNA(a.Models["chat"].ResolvedProvider), a.Models["summary"].Name, valueOrNA(a.Models["summary"].ResolvedProvider), a.Models["rerank"].Name, valueOrNA(a.Models["rerank"].ResolvedProvider))
 	b.WriteString("## Quality\n\n| Metric | Value |\n| --- | ---: |\n")
 	if a.Metrics.Retrieval != nil {
 		r := a.Metrics.Retrieval
@@ -478,15 +682,34 @@ func renderFinalMarkdown(a finalArtifact) string {
 	b.WriteString("\n## Runtime / Usage\n\n")
 	fmt.Fprintf(&b, "- Worker limit: %d\n- Cache mode: %s\n", a.Runtime.WorkerLimit, a.Runtime.CacheMode)
 	if a.Usage != nil {
-		fmt.Fprintf(&b, "- Model calls: %d\n- Average model latency: %.2f ms\n", a.Usage.Calls.Total, valueOrZero(a.Usage.Latency.AverageMS))
+		fmt.Fprintf(&b, "- Model calls: %d\n- Average model latency: %s\n", a.Usage.Calls.Total, formatLatency(a.Usage.Latency.AverageMS))
 	}
 	b.WriteString("\nRetrieval metrics are generally more stable. BLEU/ROUGE may vary slightly because hosted model behavior is not bit-for-bit deterministic.\n")
 	return b.String()
 }
 
-func valueOrZero(v *float64) float64 {
+func formatLatency(v *float64) string {
 	if v == nil {
-		return 0
+		return "n/a"
 	}
-	return *v
+	return fmt.Sprintf("%.2f ms", *v)
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "YES"
+	}
+	return "NO"
+}
+
+func stringPointer(value string) *string {
+	copy := value
+	return &copy
+}
+
+func valueOrNA(value *string) string {
+	if value == nil || *value == "" {
+		return "n/a"
+	}
+	return *value
 }

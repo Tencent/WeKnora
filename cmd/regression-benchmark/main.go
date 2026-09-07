@@ -44,9 +44,10 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	output := fs.String("output", "artifacts/regression/current.json", "path to write the current BenchmarkResult JSON")
 	profilePath := fs.String("profile", "", "final benchmark profile JSON (enables strict preflight and final artifacts)")
-	outputDir := fs.String("output-dir", "artifacts/rhino_2026_final/benchmark", "directory for final result.json and result.md")
-	preflightOnly := fs.Bool("preflight-only", false, "validate final benchmark prerequisites without starting evaluation")
-	backendURL := fs.String("backend-url", "http://127.0.0.1:8080", "running backend base URL checked by final preflight")
+	executionModeValue := fs.String("execution-mode", "strict", "profile execution mode: strict or custom")
+	outputDir := fs.String("output-dir", "artifacts/rhino_2026_final/benchmark", "directory for benchmark result.json and result.md")
+	preflightOnly := fs.Bool("preflight-only", false, "validate benchmark prerequisites without starting evaluation")
+	backendURL := fs.String("backend-url", "http://127.0.0.1:8080", "running backend base URL checked by benchmark preflight")
 	dataset := fs.String("dataset", "benchmark_v1", "dataset ID to evaluate (benchmark_v1)")
 	tenant := fs.Uint64("tenant", 10000, "tenant ID under which the evaluation runs")
 	timeout := fs.Duration("timeout", 10*time.Minute, "maximum time to wait for the benchmark run")
@@ -59,8 +60,16 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	var profile finalProfile
 	var selected selectedModels
 	var commitSHA string
+	executionMode, err := parseExecutionMode(*executionModeValue)
+	if err != nil {
+		fmt.Fprintf(stderr, "benchmark-v1 preflight: %v\n", err)
+		return exitErr
+	}
+	if *profilePath == "" && executionMode != executionModeStrict {
+		fmt.Fprintln(stderr, "benchmark-v1 preflight: custom execution mode requires --profile")
+		return exitErr
+	}
 	if *profilePath != "" {
-		var err error
 		profile, err = loadFinalProfile(*profilePath)
 		if err != nil {
 			fmt.Fprintf(stderr, "benchmark-v1 preflight: %v\n", err)
@@ -87,13 +96,17 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "benchmark-v1 preflight: %v\n", err)
 			return exitErr
 		}
-		selected, err = validatePreflight(profile, env)
+		if executionMode == executionModeCustom {
+			selected, err = validateCustomPreflight(profile, env)
+		} else {
+			selected, err = validatePreflight(profile, env)
+		}
 		if err != nil {
 			fmt.Fprintf(stderr, "benchmark-v1 preflight: %v\n", err)
 			return exitErr
 		}
 		commitSHA = env.CommitSHA
-		fmt.Fprintf(stdout, "benchmark-v1 preflight PASS: commit=%s dataset=%s models=%s,%s,%s cache=off worker_limit=%d\n", commitSHA, profile.Dataset.SemanticSHA256, profile.Models.Embedding.Name, profile.Models.Chat.Name, profile.Models.Rerank.Name, profile.Runtime.WorkerLimit)
+		fmt.Fprintf(stdout, "benchmark-v1 %s preflight PASS: commit=%s dataset=%s model_ids=%s,%s,%s cache=off worker_limit=%d comparable_to_final_baseline=%t\n", executionMode, commitSHA, profile.Dataset.SemanticSHA256, selected.EmbeddingID, selected.ChatID, selected.RerankID, profile.Runtime.WorkerLimit, executionMode == executionModeStrict)
 		if *preflightOnly {
 			fmt.Fprintln(stdout, "preflight-only: evaluation was not started; no provider API was called")
 			return exitOK
@@ -127,7 +140,7 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if *profilePath != "" {
-		artifact, err := buildFinalArtifact(profile, commitSHA, time.Now(), result)
+		artifact, err := buildBenchmarkArtifact(executionMode, profile, commitSHA, time.Now(), result)
 		if err == nil {
 			err = writeFinalArtifacts(*outputDir, artifact)
 		}
