@@ -143,7 +143,7 @@ The sandbox belongs to this session alone; nothing here runs on the host.
 - Install extras with skill_name set and the default work_dir:
   ` + "`" + skillPythonPackageInstallCommand + "`" + ` (no pip needed), or
   ` + "`" + skillNodePackageInstallCommand + "`" + `.
-  If .venv is absent, create it with python3 -m venv --without-pip "$WEKNORA_SKILL_DIR/.venv".
+  If .venv is absent, create it with python3 -m venv --without-pip "${WEKNORA_SKILL_DIR:?}/.venv".
   Without uv, run the venv Python with -m ensurepip --upgrade before -m pip install.
   Changes live and die with this session.
 - Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. Transport failures/timeouts are tool failures. Changing tools does not change permissions; do not repeat a denied operation through another tool.
@@ -711,7 +711,7 @@ func shellExecRecoveryHint(exitCode int, command, stderr string) string {
 		parts = append(parts, h)
 	}
 	if isSkillVenvInstallFailure(stderr) {
-		parts = append(parts, "Hint: "+missingSkillPackageGuidance(skillNameFromShellCommand(command)))
+		parts = append(parts, "Hint: "+skillVenvFailureGuidance(skillNameFromShellCommand(command), stderr))
 		return strings.Join(parts, "\n")
 	}
 	if h := shellMissingModuleHint(command, stderr); h != "" {
@@ -729,18 +729,16 @@ func (t *ShellExecTool) recoveryHint(skillName string, exitCode int, command, st
 	if t.skillEnvironment == nil {
 		return shellExecRecoveryHint(exitCode, command, stderr)
 	}
-	lower := strings.ToLower(stderr)
-	if strings.Contains(lower, "permission denied") || strings.Contains(lower, "read-only file system") {
-		return "Permission denied: commands and file tools share the same user. " +
-			"Use /workspace for scratch files and /workspace/output for deliverables. " +
-			"Switching tools or retrying the same write cannot grant access; " +
-			"a path refused here is refused by the sandbox itself, not by file ownership."
-	}
 	if isSkillVenvInstallFailure(stderr) {
 		if skillName == "" {
 			skillName = skillNameFromShellCommand(command)
 		}
-		return missingSkillPackageGuidance(skillName)
+		return skillVenvFailureGuidance(skillName, stderr)
+	}
+	if isPermissionFailure(stderr) || isReadOnlyFilesystemFailure(stderr) {
+		return "Permission denied: commands and file tools share the same user. " +
+			"Inspect path permissions and mount restrictions; use a writable workspace location. " +
+			"Switching tools or retrying the same write does not grant access."
 	}
 	if isMissingInterpreterModule(stderr) {
 		if skillName == "" {

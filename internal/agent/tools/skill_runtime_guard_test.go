@@ -22,9 +22,8 @@ func TestMissingSkillPackageGuidanceUsesTheUnifiedExecutor(t *testing.T) {
 		"the session overlay is gone; a package belongs in the skill's own environment")
 }
 
-// The unnamed case still has to produce a runnable shape rather than an empty
-// path, because the skill name is only recovered from the command when the
-// model wrote one.
+// An unnamed hint asks for a named call; every command also refuses an unset
+// or empty skill directory before invoking a package manager.
 func TestMissingSkillPackageGuidanceWithoutASkillNameStaysConcrete(t *testing.T) {
 	hint := missingSkillPackageGuidance("")
 	require.Contains(t, hint, skillPythonVenvCreateCommand)
@@ -98,5 +97,31 @@ with zipfile.ZipFile("recovery_probe-1.0-py3-none-any.whl", "w") as wheel:
 			require.NoError(t, err, "%s", out)
 			require.Equal(t, "42\n", string(out))
 		})
+	}
+}
+
+func TestSkillPackageCommandsRefuseMissingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	for _, tool := range []string{"uv", "npm", "python3"} {
+		script := []byte("#!/bin/sh\necho tool-invoked\n")
+		require.NoError(t, os.WriteFile(filepath.Join(dir, tool), script, 0o755))
+	}
+	for _, command := range []string{
+		skillPythonPackageInstallCommand, skillPythonPackageFallbackCommand,
+		skillPythonVenvCreateCommand, skillNodePackageInstallCommand,
+	} {
+		for _, empty := range []bool{false, true} {
+			cmd := exec.Command("/bin/bash", "--noprofile", "--norc", "-c",
+				strings.ReplaceAll(command, "<package>", "test-package"))
+			cmd.Env = []string{"PATH=" + dir}
+			if empty {
+				cmd.Env = append(cmd.Env, "WEKNORA_SKILL_DIR=")
+			}
+			out, err := cmd.CombinedOutput()
+			require.Error(t, err, "%s", command)
+			require.Contains(t, string(out), "WEKNORA_SKILL_DIR")
+			require.NotContains(t, string(out), "tool-invoked",
+				"no package manager may run without a skill directory")
+		}
 	}
 }

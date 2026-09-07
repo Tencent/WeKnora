@@ -16,12 +16,11 @@
 //	Exec     → POST /containers/{id}/exec → /exec/{id}/start (hijack)
 //	Snapshot → POST /commit (skill images under weknora-skill/)
 //
-// Every file operation — WriteFile, ReadFile, Stat, MakeDir, Remove, ListDir —
-// is an exec running as the sandbox account, NOT a call to /archive. The
-// archive endpoints run as root and resolve symlinks, so a session that plants
-// a link inside its own workspace could read or overwrite anything in the
-// container through them. Going through exec puts the kernel back in charge of
-// who may touch what. Do not "simplify" these back onto /archive.
+// Every file operation uses exec with an explicit account (root by default),
+// timeout and activity tracking. Archive endpoints bypass those exec settings.
+// Neither root exec nor archive provides containment under a path prefix:
+// intermediate symlinks may reach other paths inside the same container.
+// See WriteFile for the limits of the file API's path guards.
 //
 // ListDir and Stat use `find -printf`, which needs GNU findutils in the image;
 // the standard WeKnora sandbox image provides it.
@@ -835,22 +834,19 @@ func dockerExecWasKilled(exitCode int) bool {
 	return exitCode == 137 || exitCode == 124
 }
 
-// WriteFile writes one file as the sandbox account.
+// WriteFile writes one file through exec as remoteFileUser(ctx).
 //
-// This and its Read/Stat counterparts deliberately avoid the Engine's archive
-// endpoints (CopyToContainer, CopyFromContainer, ContainerStatPath). Those are
-// served by the daemon, which means two things at once: they ignore the exec
-// user and act as root, and they resolve symlinks on the way. That combination
-// is unsafe here, because the sandbox account can write anywhere under
-// /workspace while every caller-facing path guard in this repository is a
-// string prefix test. A model that runs `ln -s /root /workspace/output/esc`
-// leaves /workspace/output/esc/secret.txt passing those guards, and the daemon
-// then reads it out as root — confirmed against a real daemon, not theorised.
+// Read/Stat and the other file operations use the same exec path for explicit
+// identity, bounded execution and activity tracking. Archive endpoints run in
+// the daemon and do not honor these per-exec settings.
 //
-// Running these as DefaultSandboxExecUser hands the decision to the kernel
-// instead: a path the sandbox account cannot reach on its own stays
-// unreachable regardless of what a link points at, and there is no window
-// between checking and using in which the link could be repointed.
+// The default account is root. Exec still follows intermediate symlinks, and
+// lexical path guards do not confine access to /workspace or protect /root
+// and /etc inside this container. Host and cross-session isolation depend on
+// the container and its mount configuration, not in-container ownership.
+// Root cannot bypass a read-only mount. A future file API requiring path
+// containment must enforce it during resolution and use, not rely on root
+// exec or a separate prefix/Stat check.
 func (c *DockerRemoteClient) WriteFile(
 	ctx context.Context,
 	handle RemoteSandboxHandle,
@@ -1240,13 +1236,10 @@ func dockerCleanPath(op, raw string) (string, error) {
 
 // dockerReservedPathPrefixes are refused for every file operation.
 //
-// File operations run as DefaultSandboxExecUser, which is root, so the kernel
-// filters nothing here. What keeps /etc and another session's data safe is the
-// container boundary — a sandbox belongs to one session and holds no second
-// account's files. This list is narrower than that: it covers the paths a
-// session can reach but must not drive through this API. /proc and /sys expose
-// the container's own runtime state, and the activity marker is the sweeper's
-// bookkeeping, which a session must not be able to backdate.
+// These are lexical API restrictions on runtime paths and the activity marker.
+// Root exec can still reach them through intermediate symlinks or shell_exec;
+// the list is not a filesystem or tenant boundary. Mounts and container
+// isolation remain authoritative.
 var dockerReservedPathPrefixes = []string{
 	"/proc",
 	"/sys",

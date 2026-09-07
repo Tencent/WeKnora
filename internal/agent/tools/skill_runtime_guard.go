@@ -27,11 +27,12 @@ import (
 // These commands run with skill_name so the shell environment supplies the
 // actual image or staged directory. Keep work_dir at its /workspace default.
 const (
-	skillPythonPackageInstallCommand  = `uv pip install --python "$WEKNORA_SKILL_DIR/.venv/bin/python" <package>`
-	skillPythonPackageFallbackCommand = `"$WEKNORA_SKILL_DIR/.venv/bin/python" -m ensurepip --upgrade && ` +
-		`"$WEKNORA_SKILL_DIR/.venv/bin/python" -m pip install <package>`
-	skillPythonVenvCreateCommand   = `python3 -m venv --without-pip "$WEKNORA_SKILL_DIR/.venv"`
-	skillNodePackageInstallCommand = `npm --prefix "$WEKNORA_SKILL_DIR" install <package>`
+	skillPythonPackageInstallCommand = `uv pip install --python ` +
+		`"${WEKNORA_SKILL_DIR:?}/.venv/bin/python" <package>`
+	skillPythonPackageFallbackCommand = `"${WEKNORA_SKILL_DIR:?}/.venv/bin/python" -m ensurepip --upgrade && ` +
+		`"${WEKNORA_SKILL_DIR:?}/.venv/bin/python" -m pip install <package>`
+	skillPythonVenvCreateCommand   = `python3 -m venv --without-pip "${WEKNORA_SKILL_DIR:?}/.venv"`
+	skillNodePackageInstallCommand = `npm --prefix "${WEKNORA_SKILL_DIR:?}" install <package>`
 )
 
 func missingSkillPackageGuidance(skillName string) string {
@@ -58,10 +59,31 @@ func isSkillVenvInstallFailure(stderr string) bool {
 		strings.Contains(stderr, "No module named 'pip'") {
 		return true
 	}
-	if strings.Contains(lower, "read-only file system") ||
-		strings.Contains(lower, "erofs") ||
-		strings.Contains(lower, "read-only filesystem") {
-		return true
+	return strings.Contains(lower, ".venv") &&
+		(isReadOnlyFilesystemFailure(lower) || isPermissionFailure(lower))
+}
+
+func isReadOnlyFilesystemFailure(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	return strings.Contains(lower, "read-only file system") || strings.Contains(lower, "erofs") ||
+		strings.Contains(lower, "read-only filesystem")
+}
+
+func isPermissionFailure(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	return strings.Contains(lower, "permission denied") || strings.Contains(lower, "operation not permitted") ||
+		strings.Contains(lower, "eperm")
+}
+
+func skillVenvFailureGuidance(skillName, stderr string) string {
+	if isReadOnlyFilesystemFailure(stderr) {
+		return "The skill virtualenv is on a read-only filesystem. Root, uv and pip cannot write through " +
+			"a read-only mount. Configure a writable skill environment before installing packages."
 	}
-	return strings.Contains(lower, "permission denied") && strings.Contains(lower, ".venv")
+	if isPermissionFailure(stderr) {
+		return "The skill virtualenv denied access. Check its permissions and mount restrictions first; " +
+			"changing package managers does not grant access. Once the environment is writable: " +
+			missingSkillPackageGuidance(skillName)
+	}
+	return missingSkillPackageGuidance(skillName)
 }

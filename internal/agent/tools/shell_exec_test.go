@@ -574,7 +574,7 @@ func TestShellExecPackageRecoveryKeepsWorkspaceCWD(t *testing.T) {
 		require.Equal(t, 1, executor.calls)
 		require.Equal(t, "/workspace", executor.workDir)
 		require.Equal(t, sandbox.SkillsImageRoot+"/pdf-tools", executor.env["WEKNORA_SKILL_DIR"])
-		require.Contains(t, executor.command, "$WEKNORA_SKILL_DIR")
+		require.Contains(t, executor.command, "${WEKNORA_SKILL_DIR:?}")
 	}
 }
 
@@ -591,6 +591,33 @@ func TestShellExecPackageRecoveryUsesNamedEnvironment(t *testing.T) {
 			require.Contains(t, hint, skillNodePackageInstallCommand)
 			require.NotContains(t, hint, sandbox.SkillsImageRoot)
 			require.NotContains(t, hint, "work_dir=", "package installation must keep the default workspace CWD")
+		}
+	}
+}
+
+func TestShellExecVenvAccessFailuresPrecedeGenericPermissionHints(t *testing.T) {
+	for _, withEnvironment := range []bool{false, true} {
+		tool := NewShellExecTool(&fakeShellExecutor{}, nil)
+		if withEnvironment {
+			tool.WithSkillEnvironment(shellTestSkillEnvironment(t))
+		}
+		for _, message := range []string{"Permission denied", "Operation not permitted", "EPERM"} {
+			hint := tool.recoveryHint("pdf-tools", 1, "python3 script.py",
+				message+": /skill/.venv/lib/site-packages")
+			require.Contains(t, hint, "skill virtualenv denied access")
+			require.Contains(t, hint, "Once the environment is writable")
+			require.Contains(t, hint, skillPythonPackageInstallCommand)
+		}
+		for _, message := range []string{"Read-only file system", "Read-only filesystem", "EROFS"} {
+			hint := tool.recoveryHint("pdf-tools", 1, "python3 script.py",
+				message+": /skill/.venv/lib/site-packages")
+			require.Contains(t, hint, "skill virtualenv is on a read-only filesystem")
+			require.Contains(t, hint, "cannot write through a read-only mount")
+			require.NotContains(t, hint, "pip install")
+			unrelated := tool.recoveryHint("pdf-tools", 1, "touch report.txt",
+				message+": /workspace/output/report.txt")
+			require.NotContains(t, unrelated, "skill virtualenv")
+			require.NotContains(t, unrelated, skillPythonPackageInstallCommand)
 		}
 	}
 }

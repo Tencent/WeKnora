@@ -89,18 +89,15 @@ Docker 默认给的 NET_RAW、MKNOD、SYS_CHROOT 等一律不给。exec 以 root
 就是实际在用的（装包、修属主都要）；收紧它们需要先确认技能安装路径不依赖，是可以独立推进的
 加固项。
 
-**文件操作走 exec，不走 archive 接口。** archive 接口（`PUT`/`GET`/`HEAD /archive`）由 daemon
-执行，这意味着两件事同时成立：它忽略 exec user 一律以 root 操作，并且会在路径解析时跟随符号
-链接。沙箱账号对 `/workspace` 有写权限，而调用侧的路径守卫都是字符串前缀比较，于是
-`ln -s /root /workspace/output/esc` 之后，`/workspace/output/esc/secret.txt` 既能通过守卫，
-又会被 daemon 以 root 读出来（真机验证过，不是推演）。改成以沙箱账号 exec 之后，能不能读写
-由内核判定，符号链接指向哪里都不再重要，也不存在「先校验后使用」之间被换掉链接的窗口。
-`Stat` 用 `find`，它不跟随**最后一段**路径，因此路径本身是链接时会如实报告为 `other` 类型，
-要求正规文件的调用方在尝试读取之前就会拒绝。
+**文件操作走 exec，不走 archive 接口。** exec 为文件操作统一提供显式账号、超时控制和活跃标记更新；
+archive 接口由 daemon 执行，不遵循这些逐次 exec 设置。默认账号已经是 root，因此这两条路径都不能
+靠容器内的属主和 mode bit 把文件访问限制在 `/workspace`。路径前缀检查也不是符号链接隔离：
+`/workspace/output/esc` 指向 `/root` 时，经它访问的文件仍可能由 root exec 读写。
 
-这个保证到最后一段为止：中间层的链接由内核在路径解析时展开，`/workspace/output/链接/passwd`
-仍会 stat 成普通文件（真机验证过）。因此「只读产物目录」是一个约定而非权限边界——绕过它读到的
-东西，沙箱账号本来就能用 `shell_exec` 读到，真正的边界始终是内核的权限检查。
+`Stat` 用 `find`，不跟随**最后一段**链接，会将该链接报告为 `other`；中间层链接仍由路径解析展开，
+所以 `/workspace/output/链接/passwd` 可能被报告为普通文件。单独的 Stat 检查也不能防止检查后替换链接。
+产物目录约定不构成文件系统权限边界。宿主机和跨会话隔离依赖容器及挂载配置，真正的只读挂载仍限制 root。
+若后续文件 API 需要严格的路径隔离，应在路径解析和实际访问时实施，不能沿用「exec 的内核账号检查会挡住链接」的前提。
 
 archive 接口里只剩 `HEAD` 还在用，且仅用于读固定路径的活跃标记。
 
@@ -131,8 +128,9 @@ archive 接口里只剩 `HEAD` 还在用，且仅用于读固定路径的活跃�
 「允许访问私网地址」开关过一遍 `SafeDialControl`，这样保存校验解析到公网、连接时被
 重解析到 169.254.169.254 的情况也拦得住。unix socket 不经过这一层。
 
-镜像要求：uid 1000 的 `user` 账号、`/workspace/{input,output}` 归该账号所有、
-GNU `find`（`-printf`）与 coreutils `timeout`。`docker/Dockerfile.sandbox` 产出的标准镜像满足这些，
+镜像要求：可按名执行的 `root` 账号、可写的 `/workspace`、
+GNU `find`（`-printf`）与 coreutils `timeout`。标准镜像另保留 uid 1000 的 `user` 账号，
+并将工作区属主设为该账号以兼容显式选择 `user` 的工具；默认 root 执行不依赖这个属主。`docker/Dockerfile.sandbox` 产出的标准镜像满足这些，
 Debian 系基础镜像天然带 find 和 timeout。
 
 部署形态：

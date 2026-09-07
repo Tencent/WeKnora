@@ -192,7 +192,7 @@ func TestCleanSessionWorkDirStillRejectsArbitraryPathsInInstallMode(t *testing.T
 	require.Error(t, err, "install mode widens the allowlist, it does not remove it")
 }
 
-func TestExecShellCommandWithOptionsRunsAsRootOnlyWhenAsked(t *testing.T) {
+func TestExecShellCommandWithOptionsSelectsMaintenanceBootstrap(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
 	mgr, client := newSessionManagerExecTestHarness(t)
 
@@ -213,6 +213,13 @@ func TestExecShellCommandWithOptionsRunsAsRootOnlyWhenAsked(t *testing.T) {
 	last = lastExecRequest(t, client)
 	require.Equal(t, "root", last.User)
 	require.Equal(t, skillDir, last.WorkDir)
+	client.mu.Lock()
+	execs := append([]RemoteExecRequest(nil), client.execRequests...)
+	client.mu.Unlock()
+	require.Len(t, execs, 4, "each command has one bootstrap and one execution")
+	ordinaryBootstrap := workspaceBootstrapCommand(SessionInputRoot, SessionOutputRoot, SessionWorkspaceRoot)
+	require.Equal(t, ordinaryBootstrap, execs[0].Command)
+	require.Equal(t, workspaceBootstrapCommand(skillDir), execs[2].Command)
 }
 
 func TestExecShellCommandKeepsOrdinaryRemoteRequest(t *testing.T) {

@@ -62,8 +62,9 @@ RUN groupadd -g 1000 user && \
     useradd -u 1000 -g user -m -s /bin/bash user
 
 # Pre-create the two directories every backend writes to. Root can create them
-# at exec time too, but pre-creating keeps first-run cheap and matches what
-# every backend writes to regardless of which account ends up running.
+# at exec time too. Ownership stays with the compatibility account so tools
+# explicitly selecting user can also write here; default root execs do not
+# rely on that ownership.
 RUN mkdir -p /workspace/input /workspace/output && \
     chown -R user:user /workspace
 
@@ -74,8 +75,8 @@ USER root
 #
 # envd is what Cube talks to for everything — the readiness probe that decides
 # whether a template build succeeds, plus every later exec and file call. It
-# runs as root and drops to the account named in each request, which is why
-# this variant does not keep the runtime's USER user.
+# runs as root and selects the account named in each request. WeKnora names
+# root by default, matching the runtime stage.
 #
 # This target is linux/amd64 only: cubesandbox-base publishes no arm64 image,
 # which matches Cube itself (PVM is x86_64-only).

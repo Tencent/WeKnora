@@ -328,8 +328,8 @@ type RemoteExecRequest struct {
 	// tenant boundary inside a sandbox for file-mode isolation to defend.
 	// Cross-tenant and host isolation live at the container boundary, not in
 	// the exec account. Callers that still rely on in-container filesystem
-	// permissions (e.g. a read-only bind mount) should note that root
-	// bypasses mode bits and enforce that boundary at the volume level.
+	// permissions should not treat mode bits as a root isolation boundary.
+	// Enforce read-only access at the mount level instead.
 	User string
 
 	// Timeout bounds a single exec call. Zero means "use provider default".
@@ -340,9 +340,9 @@ type RemoteExecRequest struct {
 // It is root: every chat session gets its own sandbox, so the in-container
 // account is not a tenant boundary and root is the least surprising default
 // for an agent that installs packages and writes wherever it needs. The
-// sandbox template runs unset execs as the container image's default user,
-// which is root; the image keeps a "user" account so sudo and E2B/Cube
-// tooling that targets it still work.
+// adapters resolve an empty request user to this constant, independent of
+// the image USER. The image retains a "user" compatibility account for
+// E2B/Cube tooling that explicitly selects it.
 const DefaultSandboxExecUser = "root"
 
 // RemoteExecResult is the neutral shape returned by Exec.

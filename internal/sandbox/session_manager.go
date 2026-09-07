@@ -675,8 +675,8 @@ func (m *SessionBoundManager) WriteSessionFile(
 }
 
 // ShellExecOptions carries per-call shell execution knobs. The install-only
-// flags are explicit so skill image maintenance can write under /opt without
-// loosening work_dir or user privileges for ordinary chat sessions.
+// flags select the installer working-directory allowlist and bootstrap. Both
+// ordinary and install calls currently execute as root.
 type ShellExecOptions struct {
 	WorkDir string
 	Timeout time.Duration
@@ -686,12 +686,11 @@ type ShellExecOptions struct {
 	// See cleanSessionWorkDir for why the work_dir allowlist is lexical only.
 	// Never set this from a model-authored tool such as shell_exec.
 	AllowSkillsRoot bool
-	// AsRoot is reserved for install/maintenance commands that need to write
-	// outside /workspace. With the default DefaultSandboxExecUser now root the
-	// flag is effectively a no-op kept for call-site clarity and to stay
-	// correct if the default account ever becomes non-root again: it forces
-	// root regardless. AllowSkillsRoot remains the real guard for reaching the
-	// skills image root.
+	// AsRoot forces root and selects the maintenance bootstrap: only WorkDir
+	// is prepared, without requiring /workspace/input or /workspace/output.
+	// The default account is already root, but the bootstrap still differs.
+	// AllowSkillsRoot separately permits a work_dir under the skills image root;
+	// it is not a filesystem boundary for commands running as root.
 	AsRoot bool
 }
 
