@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -206,8 +205,7 @@ func (s *StorageBackendService) Test(ctx context.Context, backend *types.Storage
 		if baseDir == "" {
 			baseDir = "/data/files"
 		}
-		candidate := filepath.Join(baseDir, strings.Trim(strings.TrimSpace(backend.Config.PathPrefix), "/\\"))
-		safeDir, err := secutils.SafePathUnderBase(baseDir, candidate)
+		safeDir, err := secutils.SafeJoinUnderBase(baseDir, backend.Config.PathPrefix)
 		if err != nil {
 			return err
 		}

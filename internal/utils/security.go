@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -123,6 +124,25 @@ func SafePathUnderBase(baseDir, filePath string) (string, error) {
 		return "", fmt.Errorf("path traversal denied: path is outside base directory")
 	}
 	return absPath, nil
+}
+
+// SafeJoinUnderBase 把调用方提供的相对后缀拼到 baseDir 下，并返回仍落在
+// baseDir 内的绝对路径。首尾分隔符会被去掉，避免 "/etc" 一类输入覆盖根目录；
+// ".." 经 path.Clean 后若仍指向父级则拒绝。空后缀表示 baseDir 本身。
+func SafeJoinUnderBase(baseDir, relPath string) (string, error) {
+	if strings.TrimSpace(baseDir) == "" {
+		return "", fmt.Errorf("baseDir cannot be empty")
+	}
+	rel := strings.Trim(strings.TrimSpace(relPath), `/\`)
+	if rel == "" {
+		return SafePathUnderBase(baseDir, baseDir)
+	}
+	slashRel := filepath.ToSlash(rel)
+	cleaned := path.Clean(slashRel)
+	if path.IsAbs(slashRel) || path.IsAbs(cleaned) || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", fmt.Errorf("path traversal denied: path is outside base directory")
+	}
+	return SafePathUnderBase(baseDir, filepath.Join(baseDir, filepath.FromSlash(cleaned)))
 }
 
 // SafeFileName 校验并返回安全的“仅文件名”部分，防止路径遍历。
