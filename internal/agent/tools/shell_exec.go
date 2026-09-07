@@ -128,7 +128,8 @@ var shellExecBlacklist = []struct {
 
 var shellExecTool = BaseTool{
 	name: ToolShellExec,
-	description: `Execute a command in the current session's isolated sandbox as root. The sandbox belongs to this session alone; nothing here runs on the host.
+	description: `Execute a command in the current session's isolated sandbox as root.
+The sandbox belongs to this session alone; nothing here runs on the host.
 - CWD defaults to /workspace on every call; cd does not persist. work_dir selects another directory under /workspace and missing directories are created as the same user.
 - Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. Read known paths directly; no mandatory discovery call.
 - Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).
@@ -173,7 +174,7 @@ type ShellExecInput struct {
 	// uses the caller-scoped SkillEnvResolver, so values
 	// are per-caller (taken from ctx) and never persist. Omitting it leaves
 	// shell_exec's behaviour unchanged.
-	SkillName string `json:"skill_name,omitempty" jsonschema:"Optional available skill name. Selects its installed runtime or stages its host resources, plus scoped credentials. CWD remains /workspace. Omit for system commands."`
+	SkillName string `json:"skill_name,omitempty" jsonschema:"Optional available skill name. Selects its installed runtime or stages its host resources, plus scoped credentials. CWD remains /workspace. Omit for system commands."` //nolint:lll // JSON schema tags must remain on one line.
 }
 
 // SandboxInstallCommandExecutor is the privileged counterpart of
@@ -730,7 +731,10 @@ func (t *ShellExecTool) recoveryHint(skillName string, exitCode int, command, st
 	}
 	lower := strings.ToLower(stderr)
 	if strings.Contains(lower, "permission denied") || strings.Contains(lower, "read-only file system") {
-		return "Permission denied: commands and file tools share the same user. Use /workspace for scratch files and /workspace/output for deliverables. Switching tools or retrying the same write cannot grant access; a path refused here is refused by the sandbox itself, not by file ownership."
+		return "Permission denied: commands and file tools share the same user. " +
+			"Use /workspace for scratch files and /workspace/output for deliverables. " +
+			"Switching tools or retrying the same write cannot grant access; " +
+			"a path refused here is refused by the sandbox itself, not by file ownership."
 	}
 	if isSkillVenvInstallFailure(stderr) {
 		if skillName == "" {
