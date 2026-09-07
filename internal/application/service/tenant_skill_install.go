@@ -1696,7 +1696,7 @@ Hard requirements:
 - Each command has a 10-minute budget; you do not need to set timeout_sec.
 - When finished, report what you installed and any global/system packages you changed.
 - Declare the environment variables this skill needs AT RUN TIME. Decide from the SKILL.md text
-  at the end of this message: declare what it documents as needed to run the skill. Ignore 
+  at the end of this message: declare what it documents as needed to run the skill. Ignore
   anything only the installation itself needed. Write the declaration with write_skill_file to %s, as JSON of this exact shape:
   {"env":[{"name":"TAVILY_API_KEY","description":"what the skill uses it for","required":true}]}
   Each name must be UPPER_SNAKE_CASE and must appear literally somewhere in the skill's own files.
