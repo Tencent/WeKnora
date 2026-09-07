@@ -20,6 +20,8 @@ on:
       - "skills/preloaded/**"
       - "testdata/**"
       - "docker/Dockerfile.app"
+      - "scripts/docker-entrypoint.sh"
+      - "scripts/docker-entrypoint_test.sh"
       - ".github/workflows/app.yml"
   pull_request:
     paths:
@@ -36,6 +38,8 @@ on:
       - "skills/preloaded/**"
       - "testdata/**"
       - "docker/Dockerfile.app"
+      - "scripts/docker-entrypoint.sh"
+      - "scripts/docker-entrypoint_test.sh"
       - ".github/workflows/app.yml"
   workflow_dispatch:
 
@@ -71,6 +75,9 @@ jobs:
 
       - name: Download modules
         run: go mod download
+
+      - name: Test Docker entrypoint permissions
+        run: bash scripts/docker-entrypoint_test.sh
 
       - name: Check formatting
         shell: bash
