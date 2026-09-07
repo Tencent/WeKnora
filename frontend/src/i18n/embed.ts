@@ -581,7 +581,7 @@ const messages = {
       "missingChannel": "埋め込みチャネルまたはトークンがありません",
       "invalidChannel": "無効な埋め込みチャネルです",
       "sessionFailed": "チャットセッションの作成に失敗しました。再試行してください",
-      "channelDisabled": "この埋め込みチャネルは無効になっています。エージェントエディターの「Webページ埋め込み」で再度有効にしてください",
+      "channelDisabled": "この埋め込みチャネルは無効になっています。エージェントエディタの「Webページ埋め込み」で再度有効にしてください",
       "loading": "読み込み中...",
       "tabIframe": "iframe",
       "tabWidget": "ウィジェット",
@@ -593,7 +593,7 @@ const messages = {
       "positionTopLeft": "左上",
       "publishToken": "公開トークン",
       "publishTokenHelp": "公開トークン（em_…）は、この埋め込みチャネルの長期的なシークレットで、APIキーに相当します。チャネル詳細を開くと表示・コピーできます。ローテーションすると、以前のトークンは即座に無効になります。",
-      "sessionTokenHelp": "訪問者がチャットを開くと、iframe は公開トークンを短期のセッショントークン（ems_…、約30分）と交換します。以降のAPI呼び出しはセッショントークンを使うため、公開トークンがURLに残りません。",
+      "sessionTokenHelp": "訪問者がチャットを開くと、iframeは公開トークンを短期のセッショントークン（ems_…、約30分）と交換します。以降のAPI呼び出しはセッショントークンを使うため、公開トークンがURLに残りません。",
       "rotateTokenHelp": "ローテーションすると、以前の公開トークンは無効になります。デプロイ済みの埋め込みコードをすべて更新しないと、サードパーティのサイトからアクセスできなくなります。",
       "revealToken": "表示",
       "hideToken": "非表示",
@@ -602,8 +602,8 @@ const messages = {
       "awaitingToken": "ホストページからトークンが渡されるのを待っています…",
       "preview": "プレビュー",
       "previewLoading": "プレビューを読み込み中…",
-      "previewIframeHint": "サードパーティのページに iframe で埋め込んだ場合の表示です（コピーしたコードと同じ）。",
-      "previewWidgetHint": "疑似ホストページ上でフローティングウィジェットを表示します。実際のサイトでは、ホストページが postMessage でトークンを渡します。",
+      "previewIframeHint": "サードパーティのページにiframeで埋め込んだ場合の表示です（コピーしたコードと同じ）。",
+      "previewWidgetHint": "疑似ホストページ上でフローティングウィジェットを表示します。実際のサイトでは、ホストページがpostMessageでトークンを渡します。",
       "previewMockPage": "疑似ホストページ",
       "defaultChatTitle": "AIアシスタント",
       "newChat": "新しいチャット",
@@ -673,7 +673,7 @@ const messages = {
       "faqIdLabel": "FAQ ID:",
       "faqContainerIdLabel": "所属ドキュメントID:",
       "faqAnswersLabel": "回答:",
-      "chunkOrdinal": "チャンク {index}",
+      "chunkOrdinal": "チャンク{index}",
       "previewContent": "内容をプレビュー",
       "noPlanSteps": "具体的な手順は提供されていません",
       "chunkIndexLabel": "チャンク #{index}",
@@ -693,7 +693,7 @@ const messages = {
       "graphResultsHeader": "{count}件の関連結果が見つかりました",
       "graphNoResults": "関連するグラフ情報が見つかりません",
       "unknownLink": "不明なリンク",
-      "contentLengthLabel": "長さ {value}",
+      "contentLengthLabel": "長さ{value}",
       "notProvided": "未提供",
       "promptLabel": "プロンプト",
       "errorMessageLabel": "エラーメッセージ",
@@ -726,7 +726,7 @@ const messages = {
       "statusDescription": "ステータスの説明",
       "statusIndexed": "ドキュメントはインデックス済みで検索できます",
       "statusSearchable": "検索ツールでドキュメントの内容を探せます",
-      "statusChunkDetailAvailable": "get_chunk_detail でチャンクの詳細を確認できます",
+      "statusChunkDetailAvailable": "get_chunk_detailでチャンクの詳細を確認できます",
       "positionLabel": "位置:",
       "chunkPositionValue": "チャンク #{index}",
       "contentLengthLabelSimple": "内容の長さ:",
@@ -736,10 +736,10 @@ const messages = {
       "noKnowledgeBases": "利用できるナレッジベースがありません",
       "enterDescription": "説明を入力",
       "rawOutputLabel": "生の出力",
-      "wikiWritePageTitle": "Wiki ページ書き込み",
-      "wikiReplaceTextTitle": "Wiki テキスト置換",
-      "wikiRenamePageTitle": "Wiki ページ名変更",
-      "wikiDeletePageTitle": "Wiki ページ削除",
+      "wikiWritePageTitle": "Wikiページ書き込み",
+      "wikiReplaceTextTitle": "Wikiテキスト置換",
+      "wikiRenamePageTitle": "Wikiページ名変更",
+      "wikiDeletePageTitle": "Wikiページ削除",
       "wikiActionCreated": "作成済み",
       "wikiActionUpdated": "更新済み",
       "wikiActionRenamed": "名前変更済み",
@@ -761,25 +761,25 @@ const messages = {
       "noMatchFound": "一致する内容が見つかりません",
       "deleteSessionFailed": "削除に失敗しました。しばらくしてから再試行してください！",
       "imageTooMany": "画像は最大5枚までです",
-      "imageTypeSizeError": "JPG/PNG/GIF/WEBP 形式で10MB以下のみ対応しています",
+      "imageTypeSizeError": "JPG/PNG/GIF/WEBP形式で10MB以下のみ対応しています",
       "imageReadFailed": "画像の読み込みに失敗しました",
       "imageUploadTooltip": "画像をアップロード（貼り付け・ドラッグ＆ドロップ対応）",
       "attachmentUploadTooltip": "添付ファイルをアップロード（ドキュメント、音声など）",
       "attachmentWithCount": "{count}件の添付ファイルをアップロードしました",
       "attachmentTooMany": "添付ファイルは最大{max}件までです",
-      "attachmentTooLarge": "ファイル {name} が{max}MBの上限を超えています",
+      "attachmentTooLarge": "ファイル{name}が{max}MBの上限を超えています",
       "attachmentTypeNotSupported": "サポートされていないファイル形式: {name}",
-	  "attachmentUploading": "アップロード中 {progress}%",
+	  "attachmentUploading": "アップロード中{progress}%",
 	  "attachmentParsing": "解析中",
 	  "attachmentReady": "解析完了",
 	  "attachmentUploadFailed": "添付ファイルのアップロードに失敗しました",
 	  "attachmentParseFailed": "添付ファイルの解析に失敗しました",
-	  "attachmentStillProcessing": "添付ファイル {name} はまだ解析中です",
+	  "attachmentStillProcessing": "添付ファイル{name}はまだ解析中です",
 	  "attachmentParseTimeout": "添付ファイルの解析がタイムアウトしました。しばらくしてから再試行してください。",
       "copySuccess": "クリップボードにコピーしました",
       "copyFailed": "コピーに失敗しました",
       "emptyContentWarning": "内容が空です",
-      "editorOpened": "エディターを開きました。ナレッジベースを選択して保存してください"
+      "editorOpened": "エディタを開きました。ナレッジベースを選択して保存してください"
     },
     "common": {
       "loading": "読み込み中...",
@@ -812,19 +812,19 @@ const messages = {
         "inlineMissing": "ファイルを利用できません"
       },
       "updatePlan": "計画を更新",
-      "webSearchFound": "Web検索結果を <strong>{count}</strong> 件見つけました",
+      "webSearchFound": "Web検索結果を<strong>{count}</strong>件見つけました",
       "argumentsLabel": "引数",
       "toolFallback": "ツール",
-      "stepsCompleted": "<strong>{steps}</strong> ステップ完了",
-      "stepsCompletedWithDuration": "<strong>{steps}</strong> ステップ完了（所要時間 <strong>{duration}</strong>）",
-      "reasoningRounds": "推論 <strong>{rounds}</strong> 回",
-      "toolCalls": "ツール呼び出し <strong>{tools}</strong> 回",
+      "stepsCompleted": "<strong>{steps}</strong>ステップ完了",
+      "stepsCompletedWithDuration": "<strong>{steps}</strong>ステップ完了（所要時間<strong>{duration}</strong>）",
+      "reasoningRounds": "推論<strong>{rounds}</strong>回",
+      "toolCalls": "ツール呼び出し<strong>{tools}</strong>回",
       "durationSuffix": "<strong>{duration}</strong>",
       "stepSummarySeparator": " · "
     },
     "agentStream": {
       "toolApproval": {
-        "banner": "この MCP ツールは人による承認が必要です。実行前にパラメーターを確認してください。",
+        "banner": "このMCPツールは人による承認が必要です。実行前にパラメータを確認してください。",
         "waiting": "承認待ち · {target}",
         "waitingStatus": "承認待ち",
         "targetWithTool": "{service} › {tool}",
@@ -841,13 +841,13 @@ const messages = {
         "reject": "拒否",
         "approvedTag": "承認済み",
         "rejectedTag": "拒否済み",
-        "invalidJson": "引数が正しい JSON ではありません",
+        "invalidJson": "引数が正しいJSONではありません",
         "submitted": "送信しました",
         "submitFailed": "送信に失敗しました",
-        "userRejected": "ユーザーが拒否しました"
+        "userRejected": "ユーザが拒否しました"
       },
       "mcpOAuth": {
-        "banner": "この MCP サービスを利用するには OAuth 認可が必要です",
+        "banner": "このMCPサービスを利用するにはOAuth認可が必要です",
         "waiting": "認可待ち · {target}",
         "waitingStatus": "認可待ち",
         "targetWithTool": "{service} › {tool}",
@@ -920,11 +920,11 @@ const messages = {
         "binarySuppressed": "バイナリ出力は省略されました。ダウンロードするには、成果物ディレクトリにファイルを書き出してください。"
       },
       "summary": {
-        "searchKb": "ナレッジベースを <strong>{count}</strong> 回検索",
-        "thinking": "<strong>{count}</strong> 回思考",
-        "callTool": "{name} を呼び出し",
-        "callTools": "ツール {names} を呼び出し",
-        "intermediateSteps": "<strong>{count}</strong> 件の中間ステップ",
+        "searchKb": "ナレッジベースを<strong>{count}</strong>回検索",
+        "thinking": "<strong>{count}</strong>回思考",
+        "callTool": "{name}を呼び出し",
+        "callTools": "ツール{names}を呼び出し",
+        "intermediateSteps": "<strong>{count}</strong>件の中間ステップ",
         "separator": "、",
         "comma": "、"
       },
@@ -933,13 +933,13 @@ const messages = {
         "notFound": "内容が見つかりません",
         "loadFailed": "読み込みに失敗しました",
         "chunkId": "チャンクID",
-        "noKbForWiki": "関連するナレッジベースを特定できないため、Wiki を開けません。"
+        "noKbForWiki": "関連するナレッジベースを特定できないため、Wikiを開けません。"
       },
       "toolSummary": {
         "getDocument": "ドキュメントを取得: {title}",
         "document": "ドキュメント",
-        "listChunks": "{title} を表示",
-        "listFaqEntry": "FAQ を表示: {question}",
+        "listChunks": "{title}を表示",
+        "listFaqEntry": "FAQを表示: {question}",
         "deepThinking": "深い思考"
       },
       "plan": {
@@ -960,7 +960,7 @@ const messages = {
         "chunkHits": "{count}件のチャンク",
         "keywordHits": "{count}件ヒット",
         "titleMatch": "タイトル一致",
-        "faqEntry": "FAQ 項目"
+        "faqEntry": "FAQ項目"
       },
       "knowledgeChunksList": {
         "chunkRange": "{total}件中{fetched}件のチャンクを読み込みました",
@@ -982,12 +982,12 @@ const messages = {
         "searchingMixedWithQuery": "ナレッジベースとWebを検索しています: 「{query}」",
         "searchDone": "検索が完了しました",
         "searchDoneWithQuery": "ナレッジベースを検索しました: 「{query}」",
-        "referencedDocs": "<strong>{count}</strong> 件のドキュメントを引用",
-        "referencedWebs": "<strong>{count}</strong> 件のWeb検索結果を引用",
-        "referencedDocAndWeb": "<strong>{docCount}</strong> 件のドキュメントと <strong>{webCount}</strong> 件のWeb検索結果を引用"
+        "referencedDocs": "<strong>{count}</strong>件のドキュメントを引用",
+        "referencedWebs": "<strong>{count}</strong>件のWeb検索結果を引用",
+        "referencedDocAndWeb": "<strong>{docCount}</strong>件のドキュメントと<strong>{webCount}</strong>件のWeb検索結果を引用"
       },
       "toolStatus": {
-        "calling": "{name} を呼び出しています...",
+        "calling": "{name}を呼び出しています...",
         "searchKb": "ナレッジベース検索",
         "searchKbFailed": "ナレッジベース検索に失敗しました",
         "searchMixed": "ナレッジベースとWebを検索しました",
@@ -1011,8 +1011,8 @@ const messages = {
         "attachmentParsingFailed": "添付ファイルの解析に失敗しました",
         "queryUnderstanding": "クエリを理解しています...",
         "queryUnderstandDone": "クエリを理解しました",
-        "called": "{name} を呼び出しました",
-        "calledFailed": "{name} の呼び出しに失敗しました",
+        "called": "{name}を呼び出しました",
+        "calledFailed": "{name}の呼び出しに失敗しました",
         "shellExecRunning": "サンドボックスコマンドを実行しています..."
       },
       "copy": {
@@ -1022,7 +1022,7 @@ const messages = {
       },
       "saveToKb": {
         "emptyContent": "現在の回答が空のため、ナレッジベースに保存できません",
-        "editorOpened": "エディターを開きました。ナレッジベースを選択して保存してください"
+        "editorOpened": "エディタを開きました。ナレッジベースを選択して保存してください"
       }
     },
     "input": {
@@ -1056,7 +1056,7 @@ const messages = {
         "agentEnabled": "エージェントモードを有効にしました",
         "agentDisabled": "エージェントモードを無効にしました",
         "agentNotReadyDetail": "エージェントの準備ができていません。次の項目を設定してください: {reasons}",
-        "webSearchNotConfigured": "Web検索エンジンが設定されていません。設定画面でプロバイダーと認証情報を設定してください。",
+        "webSearchNotConfigured": "Web検索エンジンが設定されていません。設定画面でプロバイダと認証情報を設定してください。",
         "webSearchEnabled": "Web検索を有効にしました",
         "webSearchDisabled": "Web検索を無効にしました",
         "sessionMissing": "セッションIDが存在しません",

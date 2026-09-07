@@ -203,7 +203,7 @@ templates:
         description: "System prompt for repairing and optimizing Wiki pages based on linter issues"
       ja-JP:
         name: "Wiki修復システムプロンプト"
-        description: "リンターの指摘に基づいてWikiページを修復・最適化するためのシステムプロンプト"
+        description: "リンタの指摘に基づいてWikiページを修復・最適化するためのシステムプロンプト"
     mode: "smart-reasoning"
     content: |
       <role>
