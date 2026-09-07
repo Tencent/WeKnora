@@ -427,13 +427,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'integrations',
       label: t('integrations.title'),
-      items: pickItems([
-        integrationSectionKey('im'),
-        integrationSectionKey('embed'),
-        integrationSectionKey('api'),
-        integrationSectionKey('chrome'),
-        integrationSectionKey('claw'),
-      ]),
+      items: pickItems(INTEGRATION_PREVIEW_ITEMS.map((item) => integrationSectionKey(item.key))),
     },
     {
       key: 'data_extensions',
