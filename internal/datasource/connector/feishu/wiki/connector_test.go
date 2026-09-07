@@ -579,11 +579,14 @@ func TestConnectorResolveResourceAncestors(t *testing.T) {
 
 func TestFetchAll_DocxNode(t *testing.T) {
 	nodes := []core.WikiNode{{
-		NodeToken:    "nt1",
-		ObjToken:     "obj-docx-1",
-		ObjType:      "docx",
-		Title:        "My Document",
-		NodeEditTime: "1711468800",
+		NodeToken:      "nt1",
+		ObjToken:       "obj-docx-1",
+		ObjType:        "docx",
+		Title:          "My Document",
+		ObjCreateTime:  "1700000000",
+		ObjEditTime:    "1711000000",
+		NodeCreateTime: "1700000001",
+		NodeEditTime:   "1711468800",
 	}}
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
@@ -616,6 +619,27 @@ func TestFetchAll_DocxNode(t *testing.T) {
 	}
 	if item.Metadata["channel"] != types.ChannelFeishu {
 		t.Errorf("Metadata[channel] = %q", item.Metadata["channel"])
+	}
+	// Source timestamps come from the document (obj_*), not the wiki node
+	// attributes, so a rename or move does not look like a content edit.
+	if got := item.UpdatedAt.Unix(); got != 1711000000 {
+		t.Errorf("UpdatedAt = %d, want obj_edit_time 1711000000", got)
+	}
+	if got := item.CreatedAt.Unix(); got != 1700000000 {
+		t.Errorf("CreatedAt = %d, want obj_create_time 1700000000", got)
+	}
+}
+
+func TestContentTimes_FallBackToNodeTimes(t *testing.T) {
+	n := core.WikiNode{NodeCreateTime: "1700000001", NodeEditTime: "1711468800"}
+	if got := contentEditTime(n).Unix(); got != 1711468800 {
+		t.Errorf("contentEditTime fallback = %d, want node_edit_time", got)
+	}
+	if got := contentCreateTime(n).Unix(); got != 1700000001 {
+		t.Errorf("contentCreateTime fallback = %d, want node_create_time", got)
+	}
+	if !contentEditTime(core.WikiNode{}).IsZero() || !contentCreateTime(core.WikiNode{}).IsZero() {
+		t.Errorf("missing times must stay zero, not epoch")
 	}
 }
 

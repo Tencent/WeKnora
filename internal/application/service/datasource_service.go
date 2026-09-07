@@ -1257,6 +1257,9 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 	if !item.UpdatedAt.IsZero() {
 		metadata["source_updated_at"] = item.UpdatedAt.UTC().Format(time.RFC3339)
 	}
+	if !item.CreatedAt.IsZero() {
+		metadata["source_created_at"] = item.CreatedAt.UTC().Format(time.RFC3339)
+	}
 	for k, v := range item.Metadata {
 		metadata[k] = v
 	}

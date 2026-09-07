@@ -511,14 +511,17 @@ func TestIngestItem_PersistsSourceUpdatedAt(t *testing.T) {
 	repo := &deletionLookupKnowledgeRepo{}
 	ks := &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-1"}}
 	svc := &DataSourceService{knowledgeService: ks}
+	created := time.Date(2021, 1, 2, 3, 4, 5, 0, time.UTC)
 	_, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
 		ExternalID: "url:1",
 		URL:        "https://example.com/doc",
 		UpdatedAt:  edited,
+		CreatedAt:  created,
 	}, nil)
 	require.NoError(t, err)
 	require.Len(t, repo.metadataUpdates, 1)
 	assert.Equal(t, "2023-04-04T22:07:08Z", repo.metadataUpdates[0]["source_updated_at"])
+	assert.Equal(t, "2021-01-02T03:04:05Z", repo.metadataUpdates[0]["source_created_at"])
 
 	repo = &deletionLookupKnowledgeRepo{}
 	ks = &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-2"}}
@@ -530,6 +533,8 @@ func TestIngestItem_PersistsSourceUpdatedAt(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, repo.metadataUpdates, 1)
 	_, present := repo.metadataUpdates[0]["source_updated_at"]
+	assert.False(t, present)
+	_, present = repo.metadataUpdates[0]["source_created_at"]
 	assert.False(t, present)
 }
 
