@@ -36,15 +36,25 @@ test('shows a post-create hint after the first successful save', () => {
   assert.match(source, /agent\.editor\.postCreateHint\.title/)
 })
 
-test('a failed optional dependency does not discard loaded models and knowledge bases', () => {
+test('applies each resource only when its own dependency load succeeds', () => {
   const loadDependencies = source.match(
     /const loadDependencies = async \(\) => \{([\s\S]*?)^\};/m
   )?.[1]
 
   assert.ok(loadDependencies, 'expected to find loadDependencies')
   assert.match(loadDependencies, /await Promise\.allSettled\(/)
-  assert.match(loadDependencies, /allModels\.value = chatResources\.allModels/)
-  assert.match(loadDependencies, /kbOptions\.value = \[\.\.\.myKbs, \.\.\.sharedKbs\]/)
+  assert.match(
+    loadDependencies,
+    /if \(modelsResult\.status === 'fulfilled'\) \{\s*allModels\.value = chatResources\.allModels;\s*\} else \{\s*allModels\.value = \[\];\s*\}/
+  )
+  assert.match(
+    loadDependencies,
+    /if \(knowledgeBasesResult\.status === 'fulfilled'\) \{[\s\S]*?kbOptions\.value = \[\.\.\.myKbs, \.\.\.sharedKbs\];\s*\} else \{\s*kbOptions\.value = \[\];\s*\}/
+  )
+  assert.match(
+    loadDependencies,
+    /if \(webSearchProvidersResult\.status === 'fulfilled'\) \{\s*webSearchProviderList\.value = chatResources\.webSearchProviders as WebSearchProviderEntity\[\];\s*\} else \{\s*webSearchProviderList\.value = \[\];\s*\}/
+  )
 })
 
 test('agent editor prefetch only reads viewer-safe storage status', () => {

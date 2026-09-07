@@ -3885,37 +3885,59 @@ const applyPromptTemplateDefaults = (cfg: PromptTemplatesConfig | null) => {
 
 // 加载依赖数据（复用空间级缓存，避免重复请求）
 const loadDependencies = async () => {
+  const [
+    modelsResult,
+    knowledgeBasesResult,
+    webSearchProvidersResult,
+    sandboxConfigsResult,
+    editorResourcesResult,
+  ] = await Promise.allSettled([
+    chatResources.ensureModels(),
+    chatResources.ensureKnowledgeBases(),
+    chatResources.ensureWebSearchProviders(),
+    chatResources.ensureSandboxConfigs(),
+    editorResources.prefetchAgentEditorDeps(),
+  ]);
   const dependencies = [
-    ['models', chatResources.ensureModels()],
-    ['knowledge bases', chatResources.ensureKnowledgeBases()],
-    ['web search providers', chatResources.ensureWebSearchProviders()],
-    ['sandbox configs', chatResources.ensureSandboxConfigs()],
-    ['editor resources', editorResources.prefetchAgentEditorDeps()],
+    ['models', modelsResult],
+    ['knowledge bases', knowledgeBasesResult],
+    ['web search providers', webSearchProvidersResult],
+    ['sandbox configs', sandboxConfigsResult],
+    ['editor resources', editorResourcesResult],
   ] as const;
-  const results = await Promise.allSettled(dependencies.map(([, request]) => request));
-  results.forEach((result, index) => {
+  dependencies.forEach(([name, result]) => {
     if (result.status === 'rejected') {
-      console.warn(`Failed to load agent editor ${dependencies[index][0]}`, result.reason);
+      console.warn(`Failed to load agent editor ${name}`, result.reason);
     }
   });
 
-  if (chatResources.allModels.length > 0) {
+  if (modelsResult.status === 'fulfilled') {
     allModels.value = chatResources.allModels;
+  } else {
+    allModels.value = [];
   }
 
-  const myKbs = chatResources.rawKnowledgeBases.map((kb: any) => mapKbToOption(kb, false));
-  const myKbIds = new Set(myKbs.map(kb => kb.value));
-  const sharedKbs = (orgStore.sharedKnowledgeBases || [])
-    .filter((shared: any) => shared.knowledge_base && !myKbIds.has(shared.knowledge_base.id))
-    .map((shared: any) => mapKbToOption(shared.knowledge_base, true, shared.org_name));
-  kbOptions.value = [...myKbs, ...sharedKbs];
+  if (knowledgeBasesResult.status === 'fulfilled') {
+    const myKbs = chatResources.rawKnowledgeBases.map((kb: any) => mapKbToOption(kb, false));
+    const myKbIds = new Set(myKbs.map(kb => kb.value));
+    const sharedKbs = (orgStore.sharedKnowledgeBases || [])
+      .filter((shared: any) => shared.knowledge_base && !myKbIds.has(shared.knowledge_base.id))
+      .map((shared: any) => mapKbToOption(shared.knowledge_base, true, shared.org_name));
+    kbOptions.value = [...myKbs, ...sharedKbs];
+  } else {
+    kbOptions.value = [];
+  }
 
   agentTypePresets.value = editorResources.agentTypePresets as AgentTypePreset[];
   applyPromptTemplateDefaults(editorResources.promptTemplates);
 
   storageEngineStatus.value = editorResources.storageStatus;
 
-  webSearchProviderList.value = chatResources.webSearchProviders as WebSearchProviderEntity[];
+  if (webSearchProvidersResult.status === 'fulfilled') {
+    webSearchProviderList.value = chatResources.webSearchProviders as WebSearchProviderEntity[];
+  } else {
+    webSearchProviderList.value = [];
+  }
 
   if (editorResources.placeholders) {
     placeholderData.value = editorResources.placeholders;
