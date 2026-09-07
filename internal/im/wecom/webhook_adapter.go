@@ -23,9 +23,11 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -43,8 +45,19 @@ var httpClient = secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfi
 })
 
 const (
-	defaultAPIBaseURL   = "https://qyapi.weixin.qq.com"
-	wecomPKCS7BlockSize = 32
+	defaultAPIBaseURL         = "https://qyapi.weixin.qq.com"
+	wecomPKCS7BlockSize       = 32
+	wecomMaxRemoteImageBytes  = 10 << 20
+	wecomMaxRemoteImages      = 8
+	wecomRemoteImageTimeout   = 30 * time.Second
+	wecomRemoteImageFieldName = "media"
+	wecomRemoteImageFallback  = "远程图片"
+)
+
+var (
+	wecomMarkdownImageRe = regexp.MustCompile(`!\[([^\]]*)\]\((https?://[^)\s]+)\)`)
+	wecomImageHostRe     = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$`)
+	wecomVoiceFormatRe   = regexp.MustCompile(`^[a-z0-9]{1,10}$`)
 )
 
 // extraHostFromEndpoint returns the lowercased hostname from endpoint if it
@@ -80,6 +93,71 @@ func validateEndpointURL(endpoint, defaultEndpoint, requiredScheme string) error
 	return nil
 }
 
+// parseRemoteImageHostAllowlist parses a channel-scoped, comma/whitespace-separated
+// list of exact hosts or wildcard subdomain rules (for example
+// "images.example.com, *.cdn.example.com"). An empty list keeps remote image
+// proxying disabled.
+func parseRemoteImageHostAllowlist(raw string) ([]string, error) {
+	entries := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+	})
+	if len(entries) == 0 {
+		return nil, nil
+	}
+
+	seen := make(map[string]struct{}, len(entries))
+	rules := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		rule := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(entry), "."))
+		wildcard := strings.HasPrefix(rule, "*.")
+		host := strings.TrimPrefix(rule, "*.")
+		if host == "" || strings.ContainsAny(host, "/:@?#[]") || !wecomImageHostRe.MatchString(host) {
+			return nil, fmt.Errorf("invalid host rule %q; use a hostname or *.example.com", entry)
+		}
+		if strings.Contains(host, "..") || strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") {
+			return nil, fmt.Errorf("invalid host rule %q", entry)
+		}
+		if wildcard {
+			rule = "*." + host
+		} else {
+			rule = host
+		}
+		if _, ok := seen[rule]; ok {
+			continue
+		}
+		seen[rule] = struct{}{}
+		rules = append(rules, rule)
+	}
+	return rules, nil
+}
+
+func (a *WebhookAdapter) isRemoteImageURLAllowed(rawURL string) bool {
+	if a == nil || len(a.remoteImageHosts) == 0 {
+		return false
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if host == "" {
+		return false
+	}
+	for _, rule := range a.remoteImageHosts {
+		if strings.HasPrefix(rule, "*.") {
+			base := strings.TrimPrefix(rule, "*.")
+			if host != base && strings.HasSuffix(host, "."+base) {
+				return true
+			}
+			continue
+		}
+		if host == rule {
+			return true
+		}
+	}
+	return false
+}
+
 // WebhookAdapter implements im.Adapter for WeCom in webhook (self-built app callback) mode.
 // Messages arrive via HTTP callback; replies are sent via the WeCom REST API.
 type WebhookAdapter struct {
@@ -91,6 +169,7 @@ type WebhookAdapter struct {
 	corpAgentID      int
 	apiBaseURL       string // WeCom API base URL (e.g. "https://qyapi.weixin.qq.com")
 	extraAllowedHost string // hostname from apiBaseURL for SSRF allowlist (empty if default)
+	remoteImageHosts []string
 
 	// Token cache
 	tokenMu    sync.Mutex
@@ -103,7 +182,11 @@ var _ im.FileDownloader = (*WebhookAdapter)(nil)
 
 // NewWebhookAdapter creates a new WeCom webhook adapter.
 // apiBaseURL overrides the default WeCom API base URL; empty uses the public cloud endpoint.
-func NewWebhookAdapter(corpID, agentSecret, token, encodingAESKey string, corpAgentID int, apiBaseURL string) (*WebhookAdapter, error) {
+func NewWebhookAdapter(
+	corpID, agentSecret, token, encodingAESKey string,
+	corpAgentID int,
+	apiBaseURL, remoteImageHostAllowlist string,
+) (*WebhookAdapter, error) {
 	// Decode the AES key from base64
 	aesKey, err := base64.StdEncoding.DecodeString(encodingAESKey + "=")
 	if err != nil {
@@ -118,6 +201,10 @@ func NewWebhookAdapter(corpID, agentSecret, token, encodingAESKey string, corpAg
 	if err := validateEndpointURL(apiBaseURL, defaultAPIBaseURL, "https"); err != nil {
 		return nil, fmt.Errorf("invalid api_base_url: %w", err)
 	}
+	remoteImageHosts, err := parseRemoteImageHostAllowlist(remoteImageHostAllowlist)
+	if err != nil {
+		return nil, fmt.Errorf("invalid remote_image_host_allowlist: %w", err)
+	}
 
 	return &WebhookAdapter{
 		corpID:           corpID,
@@ -128,6 +215,7 @@ func NewWebhookAdapter(corpID, agentSecret, token, encodingAESKey string, corpAg
 		corpAgentID:      corpAgentID,
 		apiBaseURL:       apiBaseURL,
 		extraAllowedHost: extraHostFromEndpoint(apiBaseURL, defaultAPIBaseURL),
+		remoteImageHosts: remoteImageHosts,
 	}, nil
 }
 
@@ -268,10 +356,74 @@ func (a *WebhookAdapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, err
 			FileName:    msg.MsgID + ".png",
 		}, nil
 
+	case "file":
+		fileName := strings.TrimSpace(msg.FileName)
+		if fileName == "" {
+			// The media/get response usually supplies the original filename via
+			// Content-Disposition. Keep a stable fallback for malformed responses.
+			fileName = msg.MsgID
+		}
+		return &im.IncomingMessage{
+			Platform:    im.PlatformWeCom,
+			MessageType: im.MessageTypeFile,
+			UserID:      msg.FromUserName,
+			UserName:    msg.FromUserName,
+			ChatID:      chatID,
+			ChatType:    chatType,
+			MessageID:   msg.MsgID,
+			FileKey:     msg.MediaId,
+			FileName:    fileName,
+			FileSize:    msg.FileSize,
+			Extra:       map[string]string{"raw_msgtype": "file"},
+		}, nil
+
+	case "voice":
+		voiceFormat := normalizeWeComVoiceFormat(msg.Format)
+		// A callback with no media ID cannot enter the ASR path. Return a
+		// normalized message anyway so the service sends a visible hint instead
+		// of silently dropping the event.
+		if msg.MediaId == "" {
+			return &im.IncomingMessage{
+				Platform:    im.PlatformWeCom,
+				MessageType: im.MessageTypeText,
+				UserID:      msg.FromUserName,
+				UserName:    msg.FromUserName,
+				ChatID:      chatID,
+				ChatType:    chatType,
+				Content:     strings.TrimSpace(msg.Recognition),
+				MessageID:   msg.MsgID,
+				Extra:       map[string]string{"raw_msgtype": "audio"},
+			}, nil
+		}
+		return &im.IncomingMessage{
+			Platform:    im.PlatformWeCom,
+			MessageType: im.MessageTypeVoice,
+			UserID:      msg.FromUserName,
+			UserName:    msg.FromUserName,
+			ChatID:      chatID,
+			ChatType:    chatType,
+			MessageID:   msg.MsgID,
+			FileKey:     msg.MediaId,
+			FileName:    msg.MsgID + "." + voiceFormat,
+			Extra: map[string]string{
+				"raw_msgtype":  "voice",
+				"voice_format": voiceFormat,
+				"recognition":  strings.TrimSpace(msg.Recognition),
+			},
+		}, nil
+
 	default:
 		logger.Infof(c.Request.Context(), "[WeCom] Ignoring unsupported message type: %s", msg.MsgType)
 		return nil, nil
 	}
+}
+
+func normalizeWeComVoiceFormat(raw string) string {
+	format := strings.ToLower(strings.TrimSpace(raw))
+	if !wecomVoiceFormatRe.MatchString(format) {
+		return "amr"
+	}
+	return format
 }
 
 // SendReply sends a reply message via WeCom API.
@@ -282,18 +434,48 @@ func (a *WebhookAdapter) SendReply(ctx context.Context, incoming *im.IncomingMes
 	if err != nil {
 		return fmt.Errorf("get access token: %w", err)
 	}
+	if reply == nil {
+		return fmt.Errorf("reply is required")
+	}
+
+	content, mediaIDs := a.prepareRemoteReplyImages(ctx, accessToken, reply.Content)
+	preparedReply := *reply
+	preparedReply.Content = content
 
 	// For group chats, try sending to the group via appchat API first.
 	// This works for groups created via /cgi-bin/appchat/create.
+	sentToGroup := false
 	if incoming.ChatType == im.ChatTypeGroup && incoming.ChatID != "" {
-		if err := a.sendToAppChat(ctx, accessToken, incoming.ChatID, reply); err == nil {
-			return nil
+		if err := a.sendToAppChat(ctx, accessToken, incoming.ChatID, &preparedReply); err == nil {
+			sentToGroup = true
+		} else {
+			logger.Debugf(ctx, "[WeCom] appchat/send failed for chat=%s, falling back to touser: %v", incoming.ChatID, err)
 		}
-		logger.Debugf(ctx, "[WeCom] appchat/send failed for chat=%s, falling back to touser: %v", incoming.ChatID, err)
 	}
 
 	// Fallback (or direct message): send to the user directly.
-	return a.sendToUser(ctx, accessToken, incoming.UserID, reply)
+	if !sentToGroup {
+		if err := a.sendToUser(ctx, accessToken, incoming.UserID, &preparedReply); err != nil {
+			return err
+		}
+	}
+
+	var firstImageErr error
+	for _, mediaID := range mediaIDs {
+		var sendErr error
+		if sentToGroup {
+			sendErr = a.sendImageToAppChat(ctx, accessToken, incoming.ChatID, mediaID)
+		} else {
+			sendErr = a.sendImageToUser(ctx, accessToken, incoming.UserID, mediaID)
+		}
+		if sendErr != nil {
+			logger.Warnf(ctx, "[WeCom] failed to send uploaded reply image: %v", sendErr)
+			if firstImageErr == nil {
+				firstImageErr = sendErr
+			}
+		}
+	}
+	return firstImageErr
 }
 
 // sendToAppChat sends a message to a WeCom group chat via the appchat API.
@@ -306,37 +488,20 @@ func (a *WebhookAdapter) sendToAppChat(ctx context.Context, accessToken, chatID 
 			"content": reply.Content,
 		},
 	}
-
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal payload: %w", err)
-	}
-
 	sendURL := fmt.Sprintf("%s/cgi-bin/appchat/send?access_token=%s", a.apiBaseURL, accessToken)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sendURL, bytes.NewReader(payloadBytes))
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
+	return postWeComJSON(ctx, sendURL, payload, "send appchat message")
+}
 
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("send appchat message: %w", err)
+func (a *WebhookAdapter) sendImageToAppChat(ctx context.Context, accessToken, chatID, mediaID string) error {
+	payload := map[string]interface{}{
+		"chatid":  chatID,
+		"msgtype": "image",
+		"image": map[string]string{
+			"media_id": mediaID,
+		},
 	}
-	defer resp.Body.Close()
-
-	var result struct {
-		ErrCode int    `json:"errcode"`
-		ErrMsg  string `json:"errmsg"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("decode response: %w", err)
-	}
-	if result.ErrCode != 0 {
-		return fmt.Errorf("appchat api error: code=%d msg=%s", result.ErrCode, result.ErrMsg)
-	}
-
-	return nil
+	sendURL := fmt.Sprintf("%s/cgi-bin/appchat/send?access_token=%s", a.apiBaseURL, accessToken)
+	return postWeComJSON(ctx, sendURL, payload, "send appchat image")
 }
 
 // sendToUser sends a message directly to a user via the application message API.
@@ -350,14 +515,29 @@ func (a *WebhookAdapter) sendToUser(ctx context.Context, accessToken, userID str
 			"content": reply.Content,
 		},
 	}
+	sendURL := fmt.Sprintf("%s/cgi-bin/message/send?access_token=%s", a.apiBaseURL, accessToken)
+	return postWeComJSON(ctx, sendURL, payload, "send user message")
+}
 
+func (a *WebhookAdapter) sendImageToUser(ctx context.Context, accessToken, userID, mediaID string) error {
+	payload := map[string]interface{}{
+		"touser":  userID,
+		"msgtype": "image",
+		"agentid": a.corpAgentID,
+		"image": map[string]string{
+			"media_id": mediaID,
+		},
+	}
+	sendURL := fmt.Sprintf("%s/cgi-bin/message/send?access_token=%s", a.apiBaseURL, accessToken)
+	return postWeComJSON(ctx, sendURL, payload, "send user image")
+}
+
+func postWeComJSON(ctx context.Context, endpoint string, payload interface{}, operation string) error {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
-
-	sendURL := fmt.Sprintf("%s/cgi-bin/message/send?access_token=%s", a.apiBaseURL, accessToken)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sendURL, bytes.NewReader(payloadBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -365,22 +545,207 @@ func (a *WebhookAdapter) sendToUser(ctx context.Context, accessToken, userID str
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("send message: %w", err)
+		return fmt.Errorf("%s: %w", operation, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("%s: status=%d", operation, resp.StatusCode)
+	}
 
 	var result struct {
 		ErrCode int    `json:"errcode"`
 		ErrMsg  string `json:"errmsg"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+		return fmt.Errorf("decode %s response: %w", operation, err)
 	}
 	if result.ErrCode != 0 {
-		return fmt.Errorf("wecom api error: code=%d msg=%s", result.ErrCode, result.ErrMsg)
+		return fmt.Errorf("%s api error: code=%d msg=%s", operation, result.ErrCode, result.ErrMsg)
+	}
+	return nil
+}
+
+type remoteReplyImageResult struct {
+	mediaID string
+	hint    string
+}
+
+// prepareRemoteReplyImages converts remote markdown images into clickable
+// links and, for channel-allowlisted hosts, uploads them as WeCom temporary
+// media. The link is always retained so a later image-message delivery failure
+// never makes the reference disappear from the answer.
+func (a *WebhookAdapter) prepareRemoteReplyImages(ctx context.Context, accessToken, content string) (string, []string) {
+	if !strings.Contains(content, "![") {
+		return content, nil
+	}
+	imageCtx, cancel := context.WithTimeout(ctx, wecomRemoteImageTimeout)
+	defer cancel()
+
+	results := make(map[string]remoteReplyImageResult)
+	orderedURLs := make([]string, 0)
+	matches := wecomMarkdownImageRe.FindAllStringSubmatch(content, -1)
+	for _, match := range matches {
+		if len(match) < 3 {
+			continue
+		}
+		rawURL := match[2]
+		if _, exists := results[rawURL]; exists {
+			continue
+		}
+		orderedURLs = append(orderedURLs, rawURL)
+		switch {
+		case len(orderedURLs) > wecomMaxRemoteImages:
+			results[rawURL] = remoteReplyImageResult{hint: "图片数量超过单次发送上限，已保留原链接"}
+		case !a.isRemoteImageURLAllowed(rawURL):
+			results[rawURL] = remoteReplyImageResult{hint: "图片域名未配置为可信来源，已保留原链接"}
+		case imageCtx.Err() != nil:
+			results[rawURL] = remoteReplyImageResult{hint: "图片处理超时，已保留原链接"}
+		default:
+			mediaID, err := a.uploadRemoteImageFromURL(imageCtx, accessToken, rawURL)
+			if err != nil {
+				logger.Warnf(ctx, "[WeCom] remote reply image download/upload failed: url=%s err=%v", remoteImageLogURL(rawURL), err)
+				results[rawURL] = remoteReplyImageResult{hint: "图片下载或上传失败，已保留原链接"}
+				continue
+			}
+			results[rawURL] = remoteReplyImageResult{mediaID: mediaID}
+		}
 	}
 
-	return nil
+	mediaIDs := make([]string, 0, len(orderedURLs))
+	for _, rawURL := range orderedURLs {
+		if result := results[rawURL]; result.mediaID != "" {
+			mediaIDs = append(mediaIDs, result.mediaID)
+		}
+	}
+
+	rendered := wecomMarkdownImageRe.ReplaceAllStringFunc(content, func(markdown string) string {
+		match := wecomMarkdownImageRe.FindStringSubmatch(markdown)
+		if len(match) < 3 {
+			return markdown
+		}
+		label := strings.TrimSpace(match[1])
+		if label == "" {
+			label = wecomRemoteImageFallback
+		}
+		result := results[match[2]]
+		link := fmt.Sprintf("[%s](%s)", label, match[2])
+		if result.hint != "" {
+			return link + "（" + result.hint + "）"
+		}
+		return link
+	})
+	return rendered, mediaIDs
+}
+
+func remoteImageLogURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "<invalid-url>"
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
+}
+
+func (a *WebhookAdapter) uploadRemoteImageFromURL(ctx context.Context, accessToken, rawURL string) (string, error) {
+	if !a.isRemoteImageURLAllowed(rawURL) {
+		return "", fmt.Errorf("remote image host is not allowlisted")
+	}
+	if err := secutils.ValidateURLForSSRF(rawURL); err != nil {
+		return "", fmt.Errorf("SSRF validation: %w", err)
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("create image request: %w", err)
+	}
+	request.Header.Set("Accept", "image/png,image/jpeg")
+
+	imageClient := *httpClient
+	baseRedirectCheck := httpClient.CheckRedirect
+	imageClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if !a.isRemoteImageURLAllowed(req.URL.String()) {
+			return fmt.Errorf("redirect target host is not allowlisted")
+		}
+		if baseRedirectCheck != nil {
+			return baseRedirectCheck(req, via)
+		}
+		return nil
+	}
+	response, err := imageClient.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("download image: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download image: status=%d", response.StatusCode)
+	}
+
+	imageData, err := io.ReadAll(io.LimitReader(response.Body, wecomMaxRemoteImageBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("read image: %w", err)
+	}
+	if len(imageData) == 0 {
+		return "", fmt.Errorf("download image: empty body")
+	}
+	if len(imageData) > wecomMaxRemoteImageBytes {
+		return "", fmt.Errorf("image exceeds %d bytes", wecomMaxRemoteImageBytes)
+	}
+
+	mediaType := http.DetectContentType(imageData)
+	extension := ""
+	switch mediaType {
+	case "image/jpeg":
+		extension = "jpg"
+	case "image/png":
+		extension = "png"
+	default:
+		return "", fmt.Errorf("unsupported image content type %s (only JPEG and PNG are supported)", mediaType)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile(wecomRemoteImageFieldName, "reply-image."+extension)
+	if err != nil {
+		return "", fmt.Errorf("create upload form: %w", err)
+	}
+	if _, err := part.Write(imageData); err != nil {
+		return "", fmt.Errorf("write upload form: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return "", fmt.Errorf("close upload form: %w", err)
+	}
+
+	uploadURL := fmt.Sprintf("%s/cgi-bin/media/upload?access_token=%s&type=image", a.apiBaseURL, url.QueryEscape(accessToken))
+	uploadRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, &body)
+	if err != nil {
+		return "", fmt.Errorf("create upload request: %w", err)
+	}
+	uploadRequest.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadResponse, err := httpClient.Do(uploadRequest)
+	if err != nil {
+		return "", fmt.Errorf("upload image: %w", err)
+	}
+	defer uploadResponse.Body.Close()
+	if uploadResponse.StatusCode < http.StatusOK || uploadResponse.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("upload image: status=%d", uploadResponse.StatusCode)
+	}
+
+	var result struct {
+		ErrCode int    `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
+		MediaID string `json:"media_id"`
+	}
+	if err := json.NewDecoder(uploadResponse.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode upload response: %w", err)
+	}
+	if result.ErrCode != 0 {
+		return "", fmt.Errorf("upload image api error: code=%d msg=%s", result.ErrCode, result.ErrMsg)
+	}
+	if result.MediaID == "" {
+		return "", fmt.Errorf("upload image returned an empty media_id")
+	}
+	return result.MediaID, nil
 }
 
 // getAccessToken retrieves the WeCom access token with caching.
@@ -521,6 +886,9 @@ type wecomMessage struct {
 	PicUrl       string   `xml:"PicUrl"`       // image: download URL
 	MediaId      string   `xml:"MediaId"`      // image/voice/video: media ID for download
 	Format       string   `xml:"Format"`       // voice: audio format (amr/speex)
+	Recognition  string   `xml:"Recognition"`  // voice: optional WeCom speech recognition text
+	FileName     string   `xml:"FileName"`     // file: optional original filename
+	FileSize     int64    `xml:"FileSize"`     // file: optional size in bytes
 	ThumbMediaId string   `xml:"ThumbMediaId"` // video: thumbnail media ID
 	MsgID        string   `xml:"MsgId"`
 	AgentID      string   `xml:"AgentID"`
@@ -556,7 +924,7 @@ func (a *WebhookAdapter) DownloadFile(ctx context.Context, msg *im.IncomingMessa
 	}
 
 	apiURL := fmt.Sprintf("%s/cgi-bin/media/get?access_token=%s&media_id=%s",
-		a.apiBaseURL, accessToken, msg.FileKey)
+		a.apiBaseURL, url.QueryEscape(accessToken), url.QueryEscape(msg.FileKey))
 	return downloadFromURL(ctx, apiURL, fileName, a.extraAllowedHost)
 }
 
@@ -586,6 +954,21 @@ func downloadFromURL(ctx context.Context, rawURL, fileName string, extraAllowedH
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		return nil, "", fmt.Errorf("download failed: status=%d", resp.StatusCode)
+	}
+	if isWeComMediaGetURL(rawURL) && strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "application/json") {
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		if readErr != nil {
+			return nil, "", fmt.Errorf("read temporary media error response: %w", readErr)
+		}
+		var apiErr struct {
+			ErrCode int    `json:"errcode"`
+			ErrMsg  string `json:"errmsg"`
+		}
+		if err := json.Unmarshal(body, &apiErr); err != nil {
+			return nil, "", fmt.Errorf("temporary media API returned JSON instead of file data")
+		}
+		return nil, "", fmt.Errorf("temporary media API error: code=%d msg=%s", apiErr.ErrCode, apiErr.ErrMsg)
 	}
 
 	logger.Debugf(ctx, "[WeCom] Download response: status=%d content-type=%s content-disposition=%s",
@@ -644,6 +1027,11 @@ func downloadFromURL(ctx context.Context, rawURL, fileName string, extraAllowedH
 	}
 
 	return resp.Body, fileName, nil
+}
+
+func isWeComMediaGetURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	return err == nil && strings.TrimRight(u.Path, "/") == "/cgi-bin/media/get"
 }
 
 // allowedIMAPIHosts lists IM platform API hosts that are trusted for file downloads.
