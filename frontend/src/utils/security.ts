@@ -35,6 +35,8 @@ type SecurityHooks = {
   afterSanitizeElements: NodeHook;
 };
 
+const DOCUMENT_PREVIEW_IMAGE_ATTRS = ['loading', 'decoding', 'fetchpriority'] as const;
+
 function sanitizeWithSecurityHooks(
   html: string,
   config: Config,
@@ -114,6 +116,47 @@ export function sanitizeHTML(html: string): string {
   } catch (error) {
     console.error('HTML sanitization failed:', error);
     // 如果清理失败，返回转义的纯文本
+    return escapeHTML(html);
+  }
+}
+
+export function applyDocumentPreviewImageAttributes(currentNode: Node): void {
+  if (!('tagName' in currentNode) || !('setAttribute' in currentNode)) return;
+  const element = currentNode as Element;
+  if (element.tagName !== 'IMG') return;
+  element.setAttribute('loading', 'lazy');
+  element.setAttribute('decoding', 'async');
+  element.setAttribute('fetchpriority', 'low');
+}
+
+const documentPreviewDomPurifyConfig = {
+  ...DOMPurifyConfig,
+  ADD_ATTR: [...DOCUMENT_PREVIEW_IMAGE_ATTRS],
+};
+
+const documentPreviewSecurityHooks: SecurityHooks = {
+  beforeSanitizeElements: domPurifySecurityHooks.beforeSanitizeElements,
+  afterSanitizeElements: (currentNode) => {
+    domPurifySecurityHooks.afterSanitizeElements(currentNode);
+    applyDocumentPreviewImageAttributes(currentNode);
+  },
+};
+
+/** Sanitize DocumentPreview Markdown and enforce a single image loading policy. */
+export function sanitizeDocumentPreviewHTML(html: string): string {
+  if (!html || typeof html !== 'string') {
+    return '';
+  }
+
+  try {
+    const preparedHTML = protectProviderImageSrcInHTML(html);
+    return sanitizeWithSecurityHooks(
+      preparedHTML,
+      documentPreviewDomPurifyConfig as unknown as Config,
+      documentPreviewSecurityHooks,
+    );
+  } catch (error) {
+    console.error('Document preview HTML sanitization failed:', error);
     return escapeHTML(html);
   }
 }
