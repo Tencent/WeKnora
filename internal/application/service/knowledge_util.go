@@ -35,6 +35,16 @@ var supportedImportFileExtensions = map[string]struct{}{
 	"mp3": {}, "wav": {}, "m4a": {}, "flac": {}, "ogg": {},
 }
 
+// storeOnlyFileExtensions are non-parser attachments that may be retained by a
+// directory upload for Markdown relative references. This intentionally stays
+// narrow: a folder upload must not silently ingest arbitrary build artifacts,
+// executables, or archives simply because they are adjacent to a document.
+var storeOnlyFileExtensions = map[string]struct{}{
+	"png": {}, "jpg": {}, "jpeg": {}, "gif": {}, "webp": {}, "svg": {},
+	"yaml": {}, "yml": {}, "json": {}, "xml": {},
+	"pdf": {}, "txt": {}, "csv": {},
+}
+
 // dataTableFileExtensions are the spreadsheet formats that get an extra
 // table-summary task after their document-process task.
 var dataTableFileExtensions = map[string]struct{}{
@@ -60,6 +70,11 @@ func isSupportedImportExtension(ext string) bool {
 // isValidFileType checks if a filename's extension is supported for import.
 func isValidFileType(filename string) bool {
 	return isSupportedImportExtension(getFileType(filename))
+}
+
+func isAllowedStoreOnlyFileType(filename string) bool {
+	_, ok := storeOnlyFileExtensions[normalizeFileExtension(getFileType(filename))]
+	return ok
 }
 
 // isDataTableFileType reports whether an extension is a spreadsheet format.

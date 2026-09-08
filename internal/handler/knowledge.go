@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
@@ -420,8 +421,48 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 
 	channel := c.PostForm("channel")
 
-	// Create knowledge entry from the file
-	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
+	importOptions := types.KnowledgeFileImportOptions{}
+	for _, field := range []struct {
+		name string
+		set  *bool
+	}{
+		{"folder_upload", &importOptions.FolderUpload},
+		{"defer_processing", &importOptions.DeferProcessing},
+		{"store_only", &importOptions.StoreOnly},
+	} {
+		if raw := c.PostForm(field.name); raw != "" {
+			value, parseErr := strconv.ParseBool(raw)
+			if parseErr != nil {
+				c.Error(errors.NewBadRequestError("Invalid " + field.name + " format"))
+				return
+			}
+			*field.set = value
+		}
+	}
+	if (importOptions.DeferProcessing || importOptions.StoreOnly) && !importOptions.FolderUpload {
+		c.Error(errors.NewBadRequestError("defer_processing and store_only require folder_upload"))
+		return
+	}
+	if importOptions.StoreOnly {
+		importOptions.DeferProcessing = true
+	}
+
+	// Create knowledge entry from the file. The extended method is optional on
+	// the service interface so existing non-folder callers and narrow test
+	// doubles remain source-compatible.
+	var knowledge *types.Knowledge
+	if importOptions.DeferProcessing || importOptions.StoreOnly {
+		creator, ok := h.kgService.(interface {
+			CreateKnowledgeFromFileWithOptions(context.Context, string, *multipart.FileHeader, map[string]string, *bool, string, []string, string, *types.KnowledgeProcessOverrides, types.KnowledgeFileImportOptions) (*types.Knowledge, error)
+		})
+		if !ok {
+			c.Error(errors.NewInternalServerError("Folder upload is not supported by this knowledge service"))
+			return
+		}
+		knowledge, err = creator.CreateKnowledgeFromFileWithOptions(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides, importOptions)
+	} else {
+		knowledge, err = h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
+	}
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
@@ -446,6 +487,43 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		"success": true,
 		"data":    knowledge,
 	})
+}
+
+// FinalizeFolderUpload starts parsing the successfully registered documents of
+// one directory upload. Attachments stored with store_only stay skipped.
+func (h *KnowledgeHandler) FinalizeFolderUpload(c *gin.Context) {
+	ctx := c.Request.Context()
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to finalize folder upload"))
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	var request struct {
+		KnowledgeIDs []string `json:"knowledge_ids" binding:"required,max=1000"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.Error(errors.NewBadRequestError("Invalid folder upload finalize request").WithDetails(err.Error()))
+		return
+	}
+	finalizer, ok := h.kgService.(interface {
+		FinalizeFolderUpload(context.Context, string, []string) (int, int, error)
+	})
+	if !ok {
+		c.Error(errors.NewInternalServerError("Folder upload is not supported by this knowledge service"))
+		return
+	}
+	started, skipped, err := finalizer.FinalizeFolderUpload(ctx, kbID, request.KnowledgeIDs)
+	if err != nil {
+		c.Error(errors.NewInternalServerError("Failed to finalize folder upload").WithDetails(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"started": started, "skipped": skipped}})
 }
 
 // CreateKnowledgeFromURL godoc

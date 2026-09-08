@@ -230,6 +230,12 @@ export function uploadKnowledgeFile(
   return postUpload(`/api/v1/knowledge-bases/${kbId}/knowledge/file`, formData, onProgress);
 }
 
+export function finalizeFolderUpload(kbId: string, knowledgeIds: string[]) {
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/folder/finalize`, {
+    knowledge_ids: knowledgeIds,
+  });
+}
+
 // 从URL创建知识
 // data.tag_ids: 可选，指定知识所属的多个标签 ID
 export function createKnowledgeFromURL(
