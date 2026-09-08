@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -124,8 +125,19 @@ func (a messageKBShareAuthorizer) resourceAccessibleViaSharedKB(
 	if !ok {
 		return false
 	}
+	return a.referenceAccessibleViaSharedKB(ctx, message, handle, resource.TenantID, callerTenantID, callerTenantRole)
+}
 
-	kbIDs := a.collectSharedKBEvidenceIDs(ctx, message, handle)
+// reference is either a catalog handle or an exact legacy provider path.
+// Neither a message's answer text nor its selected KB list is retrieval proof.
+func (a messageKBShareAuthorizer) referenceAccessibleViaSharedKB(
+	ctx context.Context, message *types.Message, reference string,
+	ownerTenantID, callerTenantID uint64, callerTenantRole types.TenantRole,
+) bool {
+	if a.ShareGuard == nil || a.KBs == nil || message == nil || ownerTenantID == 0 {
+		return false
+	}
+	kbIDs := a.collectSharedKBEvidenceIDs(ctx, message, reference)
 	if len(kbIDs) == 0 {
 		return false
 	}
@@ -135,7 +147,7 @@ func (a messageKBShareAuthorizer) resourceAccessibleViaSharedKB(
 		return false
 	}
 	for _, kb := range kbs {
-		if kb == nil || kb.TenantID != resource.TenantID {
+		if kb == nil || kb.TenantID != ownerTenantID {
 			continue
 		}
 		shared, err := a.ShareGuard.HasTenantKBPermission(
@@ -205,6 +217,20 @@ func searchResultHasResourceHandle(ref *types.SearchResult, handle string) bool 
 
 func textHasResourceHandle(text, handle string) bool {
 	if text == "" || handle == "" {
+		return false
+	}
+	if secutils.ParseTenantIDFromStoragePath(handle) != 0 {
+		// Old OCR records contain provider paths instead of resource handles.
+		// Match complete image destinations or individual structured URL values,
+		// never a substring such as chart.png matching chart.png-other.
+		if text == handle {
+			return true
+		}
+		for _, image := range searchutil.MarkdownImageRegex.FindAllStringSubmatch(text, -1) {
+			if strings.TrimSpace(image[2]) == handle {
+				return true
+			}
+		}
 		return false
 	}
 	want := types.BuildResourcePath(handle)
@@ -794,6 +820,17 @@ func newMessageScopedFileServeHandler(
 
 		ownerTenantID := message.AgentTenantID
 		kbShareAuthorized := false
+		if resource == nil {
+			pathTenantID := secutils.ParseTenantIDFromStoragePath(resolvedPath)
+			if pathTenantID != 0 && pathTenantID != ownerTenantID &&
+				secutils.ValidateKBScopedStoragePath(resolvedPath, pathTenantID) == nil {
+				kbShareAuthorized = kbShareAuth.referenceAccessibleViaSharedKB(
+					ctx, message, resolvedPath, pathTenantID, callerTenantID, types.TenantRoleFromContext(ctx))
+				if kbShareAuthorized {
+					ownerTenantID = pathTenantID
+				}
+			}
+		}
 		if resource != nil {
 			ownerTenantID = resource.TenantID
 			// A modern message records its source tenant. A resource from any
