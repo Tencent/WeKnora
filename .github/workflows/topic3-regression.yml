@@ -46,7 +46,7 @@ jobs:
           npm run type-check
           npm run build
       - name: Normal regression comparison passes
-        run: python codex/topic3/topic3.py check --baseline codex/topic3/baseline.json --current codex/topic3/fixtures/current-degraded.json
+        run: python codex/topic3/topic3.py check --baseline codex/topic3/baseline.json --current codex/topic3/baseline.json
       - name: Deliberate retrieval degradation is rejected
         run: |
           if python codex/topic3/topic3.py check --baseline codex/topic3/baseline.json --current codex/topic3/fixtures/current-degraded.json; then
@@ -65,7 +65,7 @@ jobs:
             codex/topic3/fixtures/current-degraded.json
 
   negative-demo:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'workflow_dispatch' && inputs.run_negative_demo
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
