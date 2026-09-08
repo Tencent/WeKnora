@@ -1353,7 +1353,8 @@ export default {
       readSkill: '스킬 읽기',
       executeSkillScript: '스킬 스크립트 실행',
       listSandboxFiles: '샌드박스 파일 목록',
-      readFile: '파일 읽기',
+      readFile: '내용 읽기',
+      grepFiles: '내용 검색',
       readSandboxFile: '샌드박스 파일 읽기',
       writeSandboxFile: '샌드박스 파일 쓰기',
       editSandboxFile: '샌드박스 파일 편집',
@@ -4811,6 +4812,19 @@ export default {
     }
   },
   memorySettings: {
+    experience: {
+      "details": "경험 및 근거",
+      "trigger": "발생 조건",
+      "applicability": "적용 범위",
+      "outcome": "관찰 결과",
+      "avoid": "실패한 방법",
+      "source": "원본 대화 열기",
+      "outcomes": {
+        "success": "성공",
+        "failure": "실패",
+        "uncertain": "미확인"
+      }
+    },
     title: '내 기억',
     description: '어시스턴트가 대화를 넘어 기억하고 있는 내용입니다. 언제든지 확인, 수정, 삭제할 수 있으며 삭제한 기억은 다시 사용되지 않습니다.',
     workspaceDisabled: '이 워크스페이스에서는 장기 기억이 꺼져 있습니다. 관리자가 켜야 이 스위치가 적용됩니다.',
@@ -4921,6 +4935,7 @@ export default {
     emptyTitle: '아직 기억이 없습니다',
     emptyDescription: '대화에서 "기억해 줘: ..."라고 말하거나 위에서 직접 추가하세요.',
     kinds: {
+      experience: "작업 경험",
       profile: '내 정보',
       preference: '선호',
       fact: '사실',
@@ -4928,6 +4943,7 @@ export default {
       interest: '장기 관심사'
     },
     kindHints: {
+      experience: "관련 작업에서 전체 절차를 읽습니다",
       profile: '이후 매 대화 턴에 포함됩니다',
       preference: '이후 매 대화 턴에 포함됩니다',
       fact: '질문과 관련될 때만 사용됩니다',

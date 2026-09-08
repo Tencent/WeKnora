@@ -8,12 +8,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// Situational recall is lexical rather than vector-based. One subject holds a
-// few hundred one-line items, so scanning them costs less than an embedding
-// round trip would, and it keeps the read path free of both a model call and a
-// vector store dependency. If real usage shows lexical matching missing
-// paraphrases, adding a vector index here is an isolated change: the ranking
-// function is the only thing that would move.
+// Lexical matching remains available when optional semantic recall is disabled or fails.
 
 // tokenize splits text the same way NormalizeMemoryKey does, so a query and a
 // stored item are compared on the same alphabet. CJK is split per ideograph
@@ -102,7 +97,7 @@ func scoreItems(query string, items []*types.MemoryItem) []scoredItem {
 		// collision detection, so its adjacency carries no meaning.
 		itemUnigrams := make(map[string]struct{})
 		itemBigrams := make(map[string]struct{})
-		for _, text := range []string{item.Content, item.Topic} {
+		for _, text := range []string{types.MemoryItemText(item), item.Topic} {
 			tokens := tokenize(text)
 			for _, token := range tokens {
 				itemUnigrams[token] = struct{}{}
@@ -210,7 +205,11 @@ func takeWithinBudget(
 		if item == nil {
 			continue
 		}
-		cost := len([]rune(item.Content)) + 3
+		text := types.MemoryItemText(item)
+		if item.Kind == types.MemoryKindExperience {
+			text = types.MemoryExperienceIndexText(item)
+		}
+		cost := len([]rune(text)) + 3
 		if used+cost > runeBudget {
 			continue
 		}

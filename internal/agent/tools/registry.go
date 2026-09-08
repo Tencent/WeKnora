@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/common"
@@ -14,6 +15,7 @@ import (
 
 // ToolRegistry manages the registration and retrieval of tools
 type ToolRegistry struct {
+	outputSource      WebPageSource
 	tools             map[string]types.Tool
 	deferred          map[string]bool
 	maxToolOutputSize int // maximum chars for tool output (0 = use DefaultMaxToolOutput)
@@ -233,8 +235,9 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 	// Truncate large tool outputs to prevent context window poisoning. The
 	// limit is counted in runes to match TruncateToolOutput; comparing bytes
 	// here would leave CJK output effectively uncapped.
-	if result != nil && utf8.RuneCountInString(result.Output) > maxOutput {
-		result.Output = TruncateToolOutput(result.Output, maxOutput)
+	structured, _ := json.Marshal(result.Data)
+	if utf8.RuneCountInString(result.Output) > maxOutput || utf8.RuneCount(structured) > maxOutput {
+		r.preserveLongOutput(ctx, result, maxOutput)
 	}
 	if utf8.RuneCountInString(result.Error) > maxOutput {
 		result.Error = TruncateToolOutput(result.Error, maxOutput)
@@ -271,4 +274,52 @@ func (r *ToolRegistry) Cleanup(ctx context.Context) {
 			cleanable.Cleanup(ctx)
 		}
 	}
+}
+
+// SetOutputSource enables durable continuation before generic truncation.
+func (r *ToolRegistry) SetOutputSource(source WebPageSource) {
+	r.outputSource = source
+	for _, tool := range r.tools {
+		if consumer, ok := tool.(interface{ SetOutputSource(WebPageSource) }); ok {
+			consumer.SetOutputSource(source)
+		}
+	}
+}
+
+func (r *ToolRegistry) preserveLongOutput(ctx context.Context, result *types.ToolResult, budget int) {
+	if result.Data == nil {
+		result.Data = map[string]interface{}{}
+	}
+	result.Data["output_truncated"] = true
+	saved, _ := result.Data["full_output_path"].(string)
+	if !strings.HasPrefix(saved, "output://") && !strings.HasPrefix(saved, "web://") {
+		saved = ""
+	}
+	if saved == "" && r.outputSource != nil && !isBinaryShellOutput(result.Output) {
+		var err error
+		snapshot := result.Output
+		if data, err := json.Marshal(result.Data); err == nil && len(data) > 2 {
+			snapshot += "\n\n## Structured result\n" + string(data)
+		}
+		saved, err = r.outputSource.Save(ctx, snapshot)
+		if err != nil {
+			result.Data["output_snapshot_error"] = err.Error()
+		} else {
+			result.Data["full_output_path"] = saved
+		}
+	}
+	hint := "\nFull output could not be saved; omitted text is unavailable. Narrow the " +
+		"query or redirect verbose shell commands to a workspace log."
+	if saved != "" {
+		hint = fmt.Sprintf("\nSaved output: %s. Use read(path=%q) or grep(path=%q, pattern=...).", saved, saved, saved)
+	}
+	if partial, _ := result.Data["output_snapshot_partial"].(bool); partial {
+		hint = "\nPartial snapshot: some content exceeds storage limits and is unavailable here; " +
+			"narrow the request." + hint
+	}
+	if utf8.RuneCountInString(hint) >= budget {
+		result.Output = TruncateToolOutput(hint, budget)
+		return
+	}
+	result.Output = TruncateToolOutput(result.Output, max(1, budget-utf8.RuneCountInString(hint))) + hint
 }

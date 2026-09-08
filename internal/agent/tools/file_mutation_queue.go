@@ -20,7 +20,7 @@ import (
 )
 
 // sandboxFileMutationEpoch counts completed sandbox file mutations across the
-// process. read_file caches a downloaded file to serve pages from, and
+// process. read caches a downloaded file to serve pages from, and
 // this is what lets that cache notice a write.
 //
 // Stat alone is not enough to detect a change: a same-length replacement
@@ -38,7 +38,7 @@ var sandboxFileMutationEpoch atomic.Uint64
 // later compare against.
 func sandboxMutationEpoch() uint64 { return sandboxFileMutationEpoch.Load() }
 
-// noteSandboxMutation invalidates read_file's workspace download cache.
+// noteSandboxMutation invalidates read's workspace download cache.
 // Shell commands have no path list, so any started command counts as a write.
 func noteSandboxMutation() { sandboxFileMutationEpoch.Add(1) }
 

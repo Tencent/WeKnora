@@ -1835,6 +1835,19 @@ export default {
     }
   },
   memorySettings: {
+    experience: {
+      "details": "Experience and evidence",
+      "trigger": "Trigger",
+      "applicability": "Applicability",
+      "outcome": "Observed outcome",
+      "avoid": "Demonstrated dead ends",
+      "source": "Open source conversation",
+      "outcomes": {
+        "success": "Succeeded",
+        "failure": "Failed",
+        "uncertain": "Uncertain"
+      }
+    },
     title: 'My memory',
     description: 'What the assistant remembers about you across conversations. You can review, edit and delete anything here; deleted memories are never used again.',
     workspaceDisabled: 'Long-term memory is off for this workspace. This switch takes effect once an admin turns it on.',
@@ -1945,6 +1958,7 @@ export default {
     emptyTitle: 'No memories yet',
     emptyDescription: 'Say "remember that ..." in a conversation, or add one directly above.',
     kinds: {
+      experience: "Task experience",
       profile: 'About you',
       preference: 'Preference',
       fact: 'Fact',
@@ -1952,6 +1966,7 @@ export default {
       interest: 'Long-term interest'
     },
     kindHints: {
+      experience: "Read the full procedure when relevant",
       profile: 'Included in every later turn',
       preference: 'Included in every later turn',
       fact: 'Used only when the question is related',
@@ -5522,7 +5537,8 @@ export default {
       readSkill: 'Read Skill',
       executeSkillScript: 'Execute Skill Script',
       listSandboxFiles: 'List sandbox files',
-      readFile: 'Read file',
+      readFile: 'Read content',
+      grepFiles: 'Search content',
       readSandboxFile: 'Read sandbox file',
       writeSandboxFile: 'Write sandbox file',
       editSandboxFile: 'Edit sandbox file',

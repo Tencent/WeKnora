@@ -444,6 +444,7 @@ func renderWikiPagesWithinBudget(pages []pendingWikiPage, budget int) (string, [
 }
 
 type wikiReadPageTool struct {
+	outputSource WebPageSource
 	BaseTool
 	wikiService      interfaces.WikiPageService
 	knowledgeService interfaces.KnowledgeService
@@ -714,6 +715,48 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 
 	finalOutput, truncatedSlugs, omittedSlugs := renderWikiPagesWithinBudget(pending, OutputBudget(ctx))
+	savedOutput, snapshotError := "", ""
+	var snapshotOmitted []string
+	if (len(truncatedSlugs) > 0 || len(omittedSlugs) > 0) && t.outputSource != nil {
+		var full strings.Builder
+		for _, page := range pending {
+			if int64(len(page.body)) > maxReadSandboxDownloadBytes {
+				snapshotOmitted = append(snapshotOmitted, page.page.Slug)
+				continue
+			}
+			rendered := page.render(page.body) + "\n\n"
+			if int64(full.Len()+len(rendered)) > maxReadSandboxDownloadBytes {
+				snapshotOmitted = append(snapshotOmitted, page.page.Slug)
+				continue
+			}
+			full.WriteString(rendered)
+		}
+		if full.Len() > 0 {
+			var saveErr error
+			savedOutput, saveErr = t.outputSource.Save(ctx, full.String())
+			if saveErr != nil {
+				snapshotError = saveErr.Error()
+			}
+		} else {
+			snapshotError = "resolved pages exceed the saved-output size limit"
+		}
+		if len(snapshotOmitted) > 0 {
+			finalOutput += "\nPartial snapshot: pages excluded by the storage limit: " +
+				strings.Join(snapshotOmitted, ", ") +
+				". Request these pages separately; their content is unavailable from this snapshot."
+		}
+		if savedOutput != "" {
+			if len(snapshotOmitted) > 0 {
+				finalOutput += "\nSaved partial resolved pages: " + savedOutput +
+					"; use read or grep for included pages."
+			} else {
+				finalOutput += "\nSaved complete resolved pages: " + savedOutput +
+					"; use read or grep for omitted content."
+			}
+		} else if snapshotError != "" {
+			finalOutput += "\nFull pages could not be saved. Request fewer pages or narrower content."
+		}
+	}
 	if len(omittedSlugs) > 0 {
 		finalOutput += fmt.Sprintf(
 			"\n\n<omitted_pages reason=\"output budget exceeded\">\n%s\n</omitted_pages>"+
@@ -739,10 +782,14 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 		Success: true,
 		Output:  finalOutput,
 		Data: map[string]interface{}{
-			"found_kbs":       foundKBs,
-			"ambiguous_slugs": ambiguous,
-			"truncated_slugs": truncatedSlugs,
-			"omitted_slugs":   omittedSlugs,
+			"found_kbs":               foundKBs,
+			"full_output_path":        savedOutput,
+			"output_snapshot_error":   snapshotError,
+			"output_snapshot_partial": len(snapshotOmitted) > 0,
+			"snapshot_omitted_slugs":  snapshotOmitted,
+			"ambiguous_slugs":         ambiguous,
+			"truncated_slugs":         truncatedSlugs,
+			"omitted_slugs":           omittedSlugs,
 		},
 	}, nil
 }
@@ -1083,3 +1130,5 @@ func truncateRunes(s string, maxRunes int) string {
 	}
 	return string(runes[:maxRunes]) + "..."
 }
+
+func (t *wikiReadPageTool) SetOutputSource(source WebPageSource) { t.outputSource = source }

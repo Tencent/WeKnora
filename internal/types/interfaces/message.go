@@ -67,6 +67,12 @@ type MessageService interface {
 
 // MessageRepository defines the message repository interface
 type MessageRepository interface {
+	ListMessagesForMemory(
+		ctx context.Context,
+		sessionID string,
+		cursor types.MemoryExtractionCursor,
+		limit int,
+	) ([]*types.Message, error)
 	// CreateMessage creates a message
 	CreateMessage(ctx context.Context, message *types.Message) (*types.Message, error)
 	// GetMessage gets a message

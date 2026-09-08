@@ -226,7 +226,7 @@ func TestShellExecDescriptionDefinesOneExecutionEntry(t *testing.T) {
 	description := NewShellExecTool(&fakeShellExecutor{}, nil).Description()
 	for _, fact := range []string{
 		"/workspace", "skill_name", "virtualenv", "as root", "die with this session",
-		"write_sandbox_file", "edit_sandbox_file", "not automatically saved",
+		"write_sandbox_file", "edit_sandbox_file", "output://",
 	} {
 		require.Contains(t, description, fact)
 	}

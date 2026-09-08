@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -118,6 +119,7 @@ func (s *Service) Recall(ctx context.Context, query string) interfaces.MemoryRec
 		},
 	})
 
+	recallCtx = context.WithValue(recallCtx, memoryQueryEmbeddingKey{}, &memoryQueryEmbedding{query: query})
 	scope, cfg, ok := s.enabledScope(recallCtx)
 	if !ok {
 		reason := s.scopeDisableReason(recallCtx)
@@ -163,12 +165,9 @@ func (s *Service) Recall(ctx context.Context, query string) interfaces.MemoryRec
 	// (a write that failed, a new resident kind) stays invisible until the
 	// user's next write. The cache is only a fallback for a failed load.
 	block := types.RenderMemoryBlock(blockItems)
-	if block == "" {
-		block = subject.BlockText
-	}
 
 	situational, err := s.repo.ListActiveByKinds(recallCtx, scope,
-		[]string{types.MemoryKindFact, types.MemoryKindTask}, 400)
+		[]string{types.MemoryKindFact, types.MemoryKindTask}, 0)
 	if err != nil {
 		logger.Warnf(recallCtx, "memory: load situational items failed: %v", err)
 		situational = nil
@@ -193,7 +192,29 @@ func (s *Service) Recall(ctx context.Context, query string) interfaces.MemoryRec
 	matched, rankTrace := s.selectRecallWithTrace(recallCtx, scope, cfg, query, candidates,
 		types.MemoryRecallMaxItems, types.MemoryRecallRuneBudget)
 
-	prompt := types.WrapMemoryForPrompt(block, types.RenderMemoryRecall(matched))
+	experiences, err := s.repo.ListActiveByKinds(recallCtx, scope, []string{types.MemoryKindExperience}, 0)
+	if err != nil {
+		logger.Warnf(recallCtx, "memory: load experiences failed: %v", err)
+	}
+	experiences = filterExperiences(recallCtx, experiences)
+	lessons, experienceTrace := s.selectRecallWithTrace(
+		recallCtx,
+		scope,
+		cfg,
+		query,
+		experiences,
+		3,
+		types.MemoryExperienceRuneBudget,
+	)
+	recallText := types.RenderMemoryRecall(matched)
+	if len(lessons) > 0 {
+		recallText += "\n" + renderExperienceIndex(experienceIndexItems(lessons))
+	}
+	matched = append(matched, experienceIndexItems(lessons)...)
+	prompt := types.WrapMemoryForPrompt(block, recallText)
+	if len(experiences) > 0 {
+		prompt += memoryReadInstructions
+	}
 	if prompt == "" {
 		emptyMeta := s.recallEmptyMeta(scope, len(residentItems), len(candidates), rankTrace)
 		emptyMeta["block_runes"] = len([]rune(block))
@@ -223,22 +244,27 @@ func (s *Service) Recall(ctx context.Context, query string) interfaces.MemoryRec
 		scope.SubjectID, len(used), len(matched), len(selectedInterests), len(relevantInterests),
 		rankTrace.Mode, len([]rune(prompt)))
 	recallSpan.Finish(langfuse.SummarizeMemoryRecallOutput(map[string]interface{}{
-		"outcome":           "ok",
-		"subject_id":        scope.SubjectID,
-		"resident_count":    len(residentItems),
-		"block_runes":       len([]rune(block)),
-		"candidate_count":   len(candidates),
-		"lexical_hits":      rankTrace.LexicalHits,
-		"vector_hits":       rankTrace.VectorHits,
-		"vector_skip":       rankTrace.VectorSkipReason,
-		"ranking_mode":      rankTrace.Mode,
-		"fused_candidates":  rankTrace.FusedCandidates,
-		"matched_count":     len(matched),
-		"interest_total":    len(interests),
-		"interest_injected": len(selectedInterests),
-		"interest_relevant": len(relevantInterests),
-		"used_count":        len(used),
-		"prompt_runes":      len([]rune(prompt)),
+		"outcome":                 "ok",
+		"subject_id":              scope.SubjectID,
+		"resident_count":          len(residentItems),
+		"block_runes":             len([]rune(block)),
+		"candidate_count":         len(candidates),
+		"experience_candidates":   len(experiences),
+		"experience_matches":      len(lessons),
+		"experience_ranking_mode": experienceTrace.Mode,
+		"experience_lexical_hits": experienceTrace.LexicalHits,
+		"experience_vector_hits":  experienceTrace.VectorHits,
+		"lexical_hits":            rankTrace.LexicalHits,
+		"vector_hits":             rankTrace.VectorHits,
+		"vector_skip":             rankTrace.VectorSkipReason,
+		"ranking_mode":            rankTrace.Mode,
+		"fused_candidates":        rankTrace.FusedCandidates,
+		"matched_count":           len(matched),
+		"interest_total":          len(interests),
+		"interest_injected":       len(selectedInterests),
+		"interest_relevant":       len(relevantInterests),
+		"used_count":              len(used),
+		"prompt_runes":            len([]rune(prompt)),
 	}, used), map[string]interface{}{
 		"tenant_id": scope.TenantID,
 	}, nil)
@@ -299,7 +325,14 @@ func (s *Service) write(
 	cfg *types.MemoryConfig,
 	item types.MemoryItem,
 ) (*types.MemoryItem, error) {
-	content := types.SanitizeMemoryContent(item.Content)
+	if item.Kind == types.MemoryKindExperience {
+		if err := sanitizeExperience(&item); err != nil {
+			return nil, err
+		}
+	} else {
+		item.Experience = nil
+	}
+	content := types.SanitizeMemoryItemContent(item.Kind, item.Content)
 	if content == "" {
 		return nil, errors.New("memory: empty content")
 	}
@@ -312,7 +345,7 @@ func (s *Service) write(
 			return nil, ErrSensitiveContent
 		}
 		logger.Infof(ctx, "memory: redacted sensitive material before storing")
-		content = types.SanitizeMemoryContent(redacted)
+		content = types.SanitizeMemoryItemContent(item.Kind, redacted)
 	}
 	if !types.IsValidMemoryKind(item.Kind) {
 		item.Kind = types.MemoryKindFact
@@ -323,15 +356,19 @@ func (s *Service) write(
 	// re-derived statement is usually worded slightly differently and so does
 	// not hash the same: the exact fingerprint, and whether the message it came
 	// from already produced a memory the user rejected.
-	forgotten, err := s.repo.HasTombstone(ctx, scope, types.MemoryFingerprint(content))
+	forgotten, err := s.repo.HasTombstone(ctx, scope, types.MemoryItemFingerprint(item.Kind, content))
 	if err != nil {
 		return nil, fmt.Errorf("check forgotten memory: %w", err)
 	}
 	if !forgotten && item.SourceMessageID != "" && item.Origin == types.MemoryOriginExtracted {
 		// Only the background path is gated this way. An explicit "remember
 		// this" is the user asking again, and must always win.
+		window := rejectedMessageWindow
+		if item.Kind == types.MemoryKindExperience {
+			window = 0
+		}
 		forgotten, err = s.repo.HasTombstoneForMessage(
-			ctx, scope, item.SourceMessageID, rejectedMessageWindow,
+			ctx, scope, item.SourceMessageID, window,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("check forgotten source: %w", err)
@@ -346,17 +383,27 @@ func (s *Service) write(
 	}
 
 	topic := types.SanitizeMemoryTopic(item.Topic)
-	normalizedKey := types.MemoryItemKey(topic, content)
+	item.Topic, item.Content = topic, content
+	normalizedKey := types.MemoryStorageKey(item)
 	existing, err := s.repo.FindActiveByKey(ctx, scope, normalizedKey)
 	if err != nil {
 		return nil, fmt.Errorf("find conflicting memory: %w", err)
 	}
-	if existing != nil && types.SanitizeMemoryContent(existing.Content) == content {
+	if existing != nil && item.Origin == types.MemoryOriginExtracted &&
+		(existing.Origin != types.MemoryOriginExtracted ||
+			(item.Inferred && existing.Status == types.MemoryStatusActive)) {
+		return existing, nil
+	}
+	if existing != nil && item.Experience != nil {
+		item.Experience = mergeExperienceEvidence([]*types.MemoryItem{&item, existing})
+	}
+	if existing != nil && types.MemoryItemText(existing) == types.MemoryItemText(&item) &&
+		reflect.DeepEqual(existing.Experience, item.Experience) {
 		// Same statement about the same topic: nothing changed, so keep the
 		// original timestamps instead of churning the row on every turn.
 		return existing, nil
 	}
-	if existing == nil {
+	if existing == nil && item.Kind != types.MemoryKindExperience {
 		// The same fact often arrives twice: once because the user said
 		// "remember ..." and again from the background distillation, phrased
 		// slightly differently ("我们的生产库是 X" vs "生产库是 X"). They get
@@ -373,11 +420,17 @@ func (s *Service) write(
 		existing = duplicate
 	}
 
+	if existing != nil && item.Origin == types.MemoryOriginExtracted &&
+		(existing.Origin != types.MemoryOriginExtracted ||
+			(item.Inferred && existing.Status == types.MemoryStatusActive)) {
+		return existing, nil
+	}
 	stored := &types.MemoryItem{
 		ID:              uuid.New().String(),
 		TenantID:        scope.TenantID,
 		SubjectID:       scope.SubjectID,
 		Kind:            item.Kind,
+		Experience:      item.Experience,
 		Content:         content,
 		Topic:           topic,
 		NormalizedKey:   normalizedKey,
@@ -743,20 +796,22 @@ func (s *Service) UpdateItem(
 	if existing == nil {
 		return nil, ErrItemNotFound
 	}
-	sanitized := types.SanitizeMemoryContent(content)
-	if sanitized == "" {
+	sanitized, _ := types.RedactSensitive(types.SanitizeMemoryItemContent(existing.Kind, content))
+	if sanitized == "" || types.IsMostlyRedacted(sanitized) {
 		return nil, errors.New("memory: empty content")
 	}
 	// Keep the original topic: the user is correcting the statement, not
 	// re-filing it under a different subject, and reusing the topic is what
 	// keeps the correction able to supersede a future extraction.
-	normalizedKey := types.MemoryItemKey(existing.Topic, sanitized)
+	edited := *existing
+	edited.Content = sanitized
+	normalizedKey := types.MemoryStorageKey(edited)
 	importance = types.ClampMemoryImportance(importance)
 	if err := s.repo.UpdateItemContent(ctx, scope, id, sanitized, normalizedKey, importance); err != nil {
 		return nil, err
 	}
 	s.rebuildBlock(ctx, scope)
-	return s.repo.GetItem(ctx, scope, id)
+	return s.refreshItemEmbedding(ctx, scope, id)
 }
 
 // DeleteItem forgets one memory permanently.
@@ -776,7 +831,8 @@ func (s *Service) DeleteItem(ctx context.Context, id string) error {
 	// distillation is about to re-derive from the same message is how a user
 	// ends up deleting the same thing twice and stops trusting the feature.
 	if err := s.repo.AddTombstone(
-		ctx, scope, existing.Topic, types.MemoryFingerprint(existing.Content), existing.SourceMessageID,
+		ctx, scope, existing.Topic,
+		types.MemoryItemFingerprint(existing.Kind, existing.Content), existing.SourceMessageID,
 	); err != nil {
 		logger.Warnf(ctx, "memory: record tombstone failed: %v", err)
 	}
@@ -843,7 +899,7 @@ func (s *Service) tombstoneEverything(ctx context.Context, scope interfaces.Memo
 				continue
 			}
 			if err := s.repo.AddTombstone(
-				ctx, scope, item.Topic, types.MemoryFingerprint(item.Content), item.SourceMessageID,
+				ctx, scope, item.Topic, types.MemoryItemFingerprint(item.Kind, item.Content), item.SourceMessageID,
 			); err != nil {
 				logger.Warnf(ctx, "memory: record tombstone during clear failed: %v", err)
 			}
@@ -1292,7 +1348,7 @@ func (s *Service) ConfirmItem(ctx context.Context, id string) (*types.MemoryItem
 		return nil, err
 	}
 	s.rebuildBlock(ctx, scope)
-	return s.repo.GetItem(ctx, scope, id)
+	return s.refreshItemEmbedding(ctx, scope, id)
 }
 
 // RejectItem declines an inference. It deletes rather than archives, so the

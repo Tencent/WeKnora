@@ -204,6 +204,7 @@ func (s *agentService) CreateAgentEngine(
 	s.registerSandboxShellIfAllowed(ctx, toolRegistry, sessionID, config)
 	s.registerSandboxFileTools(ctx, toolRegistry, sessionID, config)
 	s.registerWebPageFiles(ctx, toolRegistry, config, sessionID, assistantMessageID)
+	s.registerMemoryFiles(ctx, toolRegistry, config)
 
 	// 3. Resolve knowledge base and selected document metadata
 	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
@@ -250,7 +251,7 @@ func (s *agentService) CreateAgentEngine(
 	// The shell is registered above by registerSandboxShellIfAllowed and
 	// follows SkillsEnabled rather than requiring a ready skill to already
 	// exist. offerSkills only gates the skills manager that feeds the model
-	// the installed-skill list and the read_file / shell_exec environment. A sandbox whose skills are still installing —
+	// the installed-skill list and the read / shell_exec environment. A sandbox whose skills are still installing —
 	// or that simply has none yet — therefore gets a shell without an
 	// empty skills manager or skill tools that cannot succeed.
 	offerSkills := config.SkillsEnabled &&
@@ -266,6 +267,8 @@ func (s *agentService) CreateAgentEngine(
 		}
 	}
 
+	s.registerToolOutputFiles(ctx, toolRegistry, sessionID, assistantMessageID, config)
+	registerFileSearch(toolRegistry)
 	return engine, nil
 }
 
@@ -362,7 +365,7 @@ func (s *agentService) resolveKBAndDocInfos(
 	return kbInfos, selectedDocs
 }
 
-// registerSandboxFileTools registers list_sandbox_files / read_file /
+// registerSandboxFileTools registers list_sandbox_files / read /
 // write_sandbox_file / edit_sandbox_file.
 //
 // These expose per-session filesystem access and are a pure sandbox
@@ -415,7 +418,7 @@ func (s *agentService) registerSandboxFileTools(
 		logger.Infof(ctx, "Registered sandbox file primitives (listing is a no-shell fallback)")
 	} else {
 		logger.Infof(ctx, "Sandbox backend does not advertise session filesystem capability; "+
-			"list_sandbox_files/read_file/write_sandbox_file/edit_sandbox_file not registered")
+			"list_sandbox_files/read/write_sandbox_file/edit_sandbox_file not registered")
 	}
 }
 
@@ -588,7 +591,7 @@ func (s *agentService) initializeSkillsManager(
 			toolRegistry.RegisterTool(reader)
 		}
 		reader.WithSkills(skillsManager, shellEnabled)
-		logger.Infof(ctx, "Attached skill resources to read_file")
+		logger.Infof(ctx, "Attached skill resources to read")
 	}
 
 	return skillsManager, nil
@@ -913,22 +916,9 @@ func (s *agentService) registerTools(
 		allowedTools = append(allowedTools, tools.ToolWebFetch)
 	}
 
-	// Long-term memory search follows the memory switches, not the tool list.
-	// Being able to read memory is already a decision the workspace, the user
-	// and the agent each get a say in; asking for it a fourth time as a tool
-	// checkbox would only produce configurations where memory is on but the
-	// agent cannot reach past what each turn injects for it.
-	//
-	// The tool is dropped before it is re-added so that an allowlist which
-	// still names it — a preset, an API caller, or a config saved while memory
-	// was on — cannot outlive the switch being turned off.
+	// Compatibility with saved tool lists: memory is now a resource of
+	// read, not an additional overlapping search tool.
 	allowedTools = withoutString(allowedTools, tools.ToolSearchMemory)
-	if s.memoryService != nil &&
-		s.memoryService.MemoryAvailable(types.ApplyAgentMemoryPreference(ctx, config.MemoryEnabled)) {
-		allowedTools = append(allowedTools, tools.ToolSearchMemory)
-	} else {
-		logger.Infof(ctx, "search_memory not registered: long-term memory is off for this request")
-	}
 
 	// Tool capability sets — used by the hard safety nets below to drop tools
 	// whose runtime prerequisite (a matching KB surface) is missing.
@@ -1029,12 +1019,6 @@ func (s *agentService) registerTools(
 			// at somebody else's conversations.
 			toolToRegister = tools.NewSearchConversationsTool(
 				s.messageService, types.SessionOwnerIDFromContext(ctx), sessionID)
-		case tools.ToolSearchMemory:
-			// Reaching this case means the memory switches were already
-			// checked above, where the tool is injected. Which memory space is
-			// read is resolved from the request context inside the service, so
-			// this tool needs no owner argument and none can be supplied.
-			toolToRegister = tools.NewSearchMemoryTool(s.memoryService)
 		case tools.ToolDatabaseQuery:
 			toolToRegister = tools.NewDatabaseQueryTool(s.db, config.SearchTargets)
 		case tools.ToolWebSearch:
@@ -1451,4 +1435,30 @@ func (s *agentService) resolvePinnedSkillInfos(config *types.AgentConfig) []*age
 		})
 	}
 	return result
+}
+
+func (s *agentService) registerMemoryFiles(
+	ctx context.Context,
+	registry *tools.ToolRegistry,
+	config *types.AgentConfig,
+) {
+	memoryCtx := types.ApplyAgentMemoryPreference(ctx, config.MemoryEnabled)
+	if s.memoryService == nil || !s.memoryService.MemoryAvailable(memoryCtx) {
+		return
+	}
+	if tool, err := registry.GetTool(tools.ToolReadFile); err == nil {
+		if reader, ok := tool.(*tools.ReadFileTool); ok {
+			reader.WithMemory(s.memoryService)
+			return
+		}
+	}
+	registry.RegisterTool(tools.NewReadFileTool(nil).WithMemory(s.memoryService))
+}
+
+func registerFileSearch(registry *tools.ToolRegistry) {
+	if tool, err := registry.GetTool(tools.ToolReadFile); err == nil {
+		if reader, ok := tool.(*tools.ReadFileTool); ok {
+			registry.RegisterTool(tools.NewGrepFilesTool(reader))
+		}
+	}
 }

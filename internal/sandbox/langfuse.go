@@ -130,7 +130,7 @@ func (c *langfuseRemoteClient) WriteFile(
 func (c *langfuseRemoteClient) ReadFile(
 	ctx context.Context, handle RemoteSandboxHandle, path string,
 ) ([]byte, error) {
-	ctx, span := startSandboxSpan(ctx, "sandbox.read_file", map[string]interface{}{
+	ctx, span := startSandboxSpan(ctx, "sandbox.read", map[string]interface{}{
 		"path": path,
 	}, sandboxHandleMeta(handle))
 	data, err := c.inner.ReadFile(ctx, handle, path)

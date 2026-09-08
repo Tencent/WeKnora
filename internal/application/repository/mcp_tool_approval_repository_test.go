@@ -2,7 +2,7 @@ package repository
 
 import (
 	"context"
-	"fmt"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -15,9 +15,15 @@ import (
 
 func newMCPToolApprovalTestRepo(t *testing.T) interfaces.MCPToolApprovalRepository {
 	t.Helper()
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_busy_timeout=5000", t.Name())
+	// Shared-cache in-memory databases return SQLITE_LOCKED immediately for
+	// concurrent writes. A private WAL database exercises column updates while
+	// allowing SQLite's busy timeout to wait for the other writer.
+	dsn := filepath.Join(t.TempDir(), "mcp-policy.db") + "?_busy_timeout=5000&_journal_mode=WAL"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.AutoMigrate(&types.MCPToolApproval{}))
 	return NewMCPToolApprovalRepository(db)
 }

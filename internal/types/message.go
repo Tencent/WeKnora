@@ -326,6 +326,8 @@ type Message struct {
 // MessageExecutionContext is a message-level snapshot of the non-secret
 // request state used by derived experiences such as follow-up suggestions.
 type MessageExecutionContext struct {
+	// MemoryEnabled snapshots consent so a later enabled turn cannot extract an opted-out turn.
+	MemoryEnabled         *bool                     `json:"memory_enabled,omitempty"`
 	AgentConfigHash       string                    `json:"agent_config_hash,omitempty"`
 	QuestionSuggestions   *QuestionSuggestionConfig `json:"question_suggestions,omitempty"`
 	KnowledgeBaseIDs      []string                  `json:"knowledge_base_ids,omitempty"`

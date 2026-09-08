@@ -3,11 +3,23 @@ import { get, put, post, del } from '@/utils/request'
 // Kinds mirror internal/types/memory.go. profile and preference make up the
 // block injected on every turn; fact and task are pulled in only when the
 // current question matches them.
-export type MemoryKind = 'profile' | 'preference' | 'fact' | 'task' | 'interest'
+export type MemoryKind = 'profile' | 'preference' | 'fact' | 'task' | 'interest' | 'experience'
 export type MemoryStatus = 'active' | 'superseded' | 'archived' | 'pending'
 export type MemoryOrigin = 'explicit' | 'extracted' | 'manual'
 
+export interface MemoryExperience {
+  trigger: string
+  applicability: string
+  avoid?: string
+  outcome: 'success' | 'failure' | 'uncertain'
+  agent_id: string
+  agent_tenant_id: number
+  task_summary?: string
+  evidence: Array<{ session_id: string; message_id: string; tool_call_id: string; tool_name: string; success: boolean }>
+}
+
 export interface MemoryItem {
+  experience?: MemoryExperience
   id: string
   kind: MemoryKind
   content: string

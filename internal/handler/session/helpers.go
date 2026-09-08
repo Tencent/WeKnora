@@ -277,17 +277,20 @@ func createAgentQueryEvent(
 // createUserMessage creates a user message and returns the created message.
 func (h *Handler) createUserMessage(ctx context.Context, sessionID, query, requestID string, mentionedItems types.MentionedItems, images types.MessageImages, attachments types.MessageAttachments, channel string, attribution *types.SuggestionAttribution) (*types.Message, error) {
 	return h.messageService.CreateMessage(ctx, &types.Message{
-		SessionID:        sessionID,
-		Role:             "user",
-		Content:          query,
-		RequestID:        requestID,
-		CreatedAt:        time.Now(),
-		IsCompleted:      true,
-		MentionedItems:   mentionedItems,
-		Images:           images,
-		Attachments:      attachments,
-		Channel:          channel,
-		ExecutionContext: types.MessageExecutionContext{SuggestionAttribution: attribution},
+		SessionID:      sessionID,
+		Role:           "user",
+		Content:        query,
+		RequestID:      requestID,
+		CreatedAt:      time.Now(),
+		IsCompleted:    true,
+		MentionedItems: mentionedItems,
+		Images:         images,
+		Attachments:    attachments,
+		Channel:        channel,
+		ExecutionContext: types.MessageExecutionContext{
+			SuggestionAttribution: attribution,
+			MemoryEnabled:         memoryConsent(ctx),
+		},
 	})
 }
 
@@ -501,3 +504,8 @@ func searchResultFromMap(refMap map[string]interface{}) *types.SearchResult {
 // CustomAgent (builtin-quick-answer / smart-reasoning) and the tenant-level
 // ConversationConfig field was removed; deleting them avoids the only
 // remaining references to that defunct path.
+
+func memoryConsent(ctx context.Context) *bool {
+	enabled := types.MemoryAllowedForAgent(ctx)
+	return &enabled
+}

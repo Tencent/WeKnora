@@ -1,4 +1,4 @@
-// Package tools — read_file.
+// Package tools — read.
 //
 // Read-only tool that lets the LLM read a file under the session's
 // inspectable sandbox directories. Known paths can be read directly;
@@ -54,7 +54,7 @@ const (
 	maxReadSandboxDownloadBytes int64 = maxSandboxFileBytes
 )
 
-// workspaceFileReader is a private source adapter for read_file, not a
+// workspaceFileReader is a private source adapter for read, not a
 // separately registered tool. It owns the workspace cache and path guards.
 type workspaceFileReader struct {
 	source SandboxFileSource
@@ -271,23 +271,9 @@ func renderFilePage(ctx context.Context, input ReadFileInput, data []byte, sessi
 	maxRunes := max(OutputBudget(ctx)-readSandboxPageOverhead, 1)
 	page := paginateSandboxFile(string(data), input.Offset, input.Limit, maxBytes, maxRunes)
 
-	// A line wider than the whole byte budget cannot be paged around: every
-	// retry would land on the same line and return the same nothing. Name the
-	// escape hatch instead of letting the model rediscover the wall.
-	if page.lineTooLarge && strings.HasPrefix(clean, "skill://") {
-		return &types.ToolResult{Success: false, Error: fmt.Sprintf("Line %d exceeds this read's output budget. Increase max_bytes up to 65536 if lower; otherwise use a smaller skill resource. A skill:// address is not a shell path.", page.startLine), Data: resultData}
-	}
-	if page.lineTooLarge {
-		fmt.Fprintf(&b,
-			"size=%d bytes, returned=0 bytes\n\n"+
-				"[Line %d is %d bytes, over the %d byte budget for one call. "+
-				"Use shell_exec: sed -n '%dp' %s | head -c %d]\n",
-			total, page.startLine, page.lineBytes, maxBytes, page.startLine, clean, maxBytes,
-		)
-		resultData["returned_bytes"] = 0
-		resultData["truncated"] = true
-		resultData["total_lines"] = page.totalLines
-		return &types.ToolResult{Success: true, Output: b.String(), Data: resultData}
+	if page.lineTooLarge || input.LineOffset > 0 {
+		input.MaxBytes = maxBytes
+		return renderLongFileLine(ctx, input, data, rootDir, maxRunes)
 	}
 
 	fmt.Fprintf(&b, "size=%d bytes, returned=%d bytes\n", total, len(page.text))

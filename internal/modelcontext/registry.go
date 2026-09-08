@@ -11,6 +11,7 @@ package modelcontext
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
@@ -266,6 +267,9 @@ func (r *Registry) ModelToolResultForTool(toolName string, result *types.ToolRes
 	var modelOutput string
 	if sourceOutputAllowed(toolName) {
 		modelOutput = r.sources.ModelOutput(&copyResult)
+		if truncated, _ := result.Data["output_truncated"].(bool); truncated {
+			modelOutput = copyResult.Output
+		}
 	} else if copyResult.Success {
 		modelOutput = copyResult.Output
 	} else {
@@ -281,10 +285,20 @@ func (r *Registry) ModelToolResultForTool(toolName string, result *types.ToolRes
 }
 
 func outputFilesPrompt(result *types.ToolResult) string {
-	if result == nil || len(result.OutputFiles) == 0 {
+	if result == nil {
 		return ""
 	}
-	return "\nOutput files: `" + strings.Join(result.OutputFiles, "`, `") + "`"
+	var text string
+	if len(result.OutputFiles) > 0 {
+		text = "\nOutput files: `" + strings.Join(result.OutputFiles, "`, `") + "`"
+	}
+	if path, ok := result.Data["full_output_path"].(string); ok &&
+		(strings.HasPrefix(path, "output://") || strings.HasPrefix(path, "web://")) &&
+		!strings.Contains(result.Output, path) {
+		text += fmt.Sprintf("\nSaved tool output: %s. Continue with read(path=%q) or grep(path=%q, "+
+			"pattern=...).", path, path, path)
+	}
+	return text
 }
 
 // DecodeOutputText applies the public citation policy to complete text. It is

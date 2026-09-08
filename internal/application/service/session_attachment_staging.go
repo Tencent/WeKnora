@@ -273,7 +273,7 @@ func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment) string
 		)
 	}
 	b.WriteString("  <instruction>These are the user's files: read them at the absolute paths above " +
-		"and do not write into /workspace/input. Inspect them with read_file, " +
+		"and do not write into /workspace/input. Inspect them with read, " +
 		"or with shell_exec (ls/find) when a shell is available. " +
 		"Create generated files with write_sandbox_file " +
 		"and patch existing ones with edit_sandbox_file. $WEKNORA_SKILL_OUTPUT_DIR (/workspace/output) " +

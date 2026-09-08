@@ -5,6 +5,7 @@ import {
   getEventSkillName,
   getReadSkillTarget,
   getSandboxToolPath,
+  isPathTool,
   getSandboxDiffStat,
   getSandboxFilePreview,
   sandboxFileListItems,
@@ -112,3 +113,16 @@ test('sandboxPreviewRemaining counts lines beyond the preview cap', () => {
     12,
   )
 })
+
+for (const toolName of ['read_file', 'read', 'grep']) {
+  test(`${toolName} timeline titles include paths from live and persisted events`, () => {
+    assert.equal(isPathTool(toolName), true)
+    for (const event of [
+      { arguments: { path: 'memory://items/note.md' } },
+      { tool_data: { path: 'memory://items/note.md' } },
+    ]) {
+      const title = formatToolTitleWithDetail(toolName, getSandboxToolPath(event))
+      assert.equal(title, `${toolName}：「memory://items/note.md」`)
+    }
+  })
+}

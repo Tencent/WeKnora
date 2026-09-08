@@ -25,7 +25,8 @@ const (
 	ToolWebFetch            = "web_fetch"
 	// Unified reading: workspace access follows sandbox file capability;
 	// skill resources follow SkillsEnabled and do not require a sandbox.
-	ToolReadFile = "read_file"
+	ToolReadFile  = "read"
+	ToolGrepFiles = "grep"
 	// Sandbox filesystem tools (only available when the sandbox backend
 	// supports per-session files — Cube, E2B, Docker). list/read inspect
 	// the session workspace; write creates text files so generated
@@ -33,7 +34,7 @@ const (
 	// patches an existing file without regenerating it.
 	//
 	// Deliberately absent from AvailableToolDefinitions and
-	// DefaultAllowedTools, like search_memory and web_search: the sandbox
+	// DefaultAllowedTools, like read and web_search: the sandbox
 	// switch already decides whether a run has a workspace at all, and
 	// registerSandboxFileTools registers these from that capability rather
 	// than from the allowlist. A checkbox would have been a lie — clearing
@@ -123,12 +124,7 @@ func DefaultAllowedTools() []string {
 		// own history, and it is what lets "上次你给我的那个配置" resolve at all
 		// without stuffing every past conversation into the context window.
 		ToolSearchConversations,
-		// ToolSearchMemory is deliberately absent here and from
-		// AvailableToolDefinitions. Like web_search it is not chosen from this
-		// list at all: registerTools injects it whenever the workspace, the
-		// user and the agent all allow memory, and strips it whenever they do
-		// not. Adding it here would let a stale allowlist decide something the
-		// memory switches already decide.
+		// Memory resources are attached to read/grep according to memory switches.
 		// Graph, SQL, data analysis and explicit planning are opt-in. Existing
 		// agents keep their explicit allowlists; domain presets select extras.
 	}
@@ -139,6 +135,7 @@ func DefaultAllowedTools() []string {
 // registration path and are never offered in model tool schemas.
 const (
 	LegacyToolExecuteSkillScript = "execute_skill_script"
+	LegacyToolReadFile           = "read_file"
 	LegacyToolReadSkill          = "read_skill"
 	LegacyToolReadSandboxFile    = "read_sandbox_file"
 )
@@ -150,9 +147,13 @@ func RetiredToolReplacement(name string) string {
 	case LegacyToolExecuteSkillScript:
 		return "execute_skill_script is no longer available; use shell_exec(skill_name=..., command=...) to run skill scripts"
 	case LegacyToolReadSkill:
-		return `read_skill is no longer available; use read_file(path="skill://<name>/<file_path or SKILL.md>")`
+		return `read_skill is no longer available; use read(path="skill://<name>/<file_path or SKILL.md>")`
+	case ToolSearchMemory:
+		return `search_memory is unavailable; use grep(path="memory://", pattern=...) then read the relevant note`
+	case LegacyToolReadFile:
+		return "read_file is no longer available; use read(path=...)"
 	case LegacyToolReadSandboxFile:
-		return "read_sandbox_file is no longer available; use read_file(path=...)"
+		return "read_sandbox_file is no longer available; use read(path=...)"
 	default:
 		return ""
 	}

@@ -38,7 +38,7 @@ const (
 	// still rescue an exact-term match the model embedded poorly.
 	minCosine = 0.5
 	// vectorCandidateCap bounds how many stored vectors one recall loads.
-	vectorCandidateCap = 400
+	vectorCandidateCap = 2000
 	// backfillPerRun is how many missing vectors one maintenance pass fills.
 	backfillPerRun = 50
 )
@@ -110,6 +110,23 @@ func (s *Service) storeItemEmbedding(
 	}
 }
 
+// refreshItemEmbedding replaces stale vectors immediately after a user edit or confirmation.
+func (s *Service) refreshItemEmbedding(
+	ctx context.Context, scope interfaces.MemoryScope, id string,
+) (*types.MemoryItem, error) {
+	if err := s.repo.DeleteItemEmbedding(ctx, scope, id); err != nil {
+		logger.Warnf(ctx, "memory: remove stale embedding failed: %v", err)
+	}
+	item, err := s.repo.GetItem(ctx, scope, id)
+	if err != nil {
+		return nil, err
+	}
+	if item != nil && item.Status == types.MemoryStatusActive {
+		s.storeItemEmbedding(ctx, scope, s.workspaceConfig(ctx, scope.TenantID), item)
+	}
+	return item, nil
+}
+
 // embeddableText is what gets embedded for a memory.
 //
 // Topic and content together, because the topic carries the subject the
@@ -128,7 +145,7 @@ func embeddableText(item *types.MemoryItem, aliases []string) string {
 		return ""
 	}
 	topic := types.SanitizeMemoryTopic(item.Topic)
-	content := types.SanitizeMemoryContent(item.Content)
+	content := types.MemoryItemText(item)
 	text := content
 	if topic != "" && topic != content {
 		text = topic + "：" + content
@@ -194,7 +211,16 @@ func (s *Service) vectorRanking(
 	if !ok {
 		return nil, "vector_disabled"
 	}
-	queryVector := s.embedText(ctx, modelID, query, embedTimeout)
+	var queryVector []float32
+	if cache, ok := ctx.Value(memoryQueryEmbeddingKey{}).(*memoryQueryEmbedding); ok && cache.query == query {
+		if !cache.loaded {
+			cache.vector = s.embedText(ctx, modelID, query, embedTimeout)
+			cache.loaded = true
+		}
+		queryVector = cache.vector
+	} else {
+		queryVector = s.embedText(ctx, modelID, query, embedTimeout)
+	}
 	if len(queryVector) == 0 {
 		return nil, "embed_failed"
 	}
@@ -327,3 +353,12 @@ func sortStableByIndexScore(indexes []int, score func(int) float64) {
 		return score(indexes[i]) > score(indexes[j])
 	})
 }
+
+type (
+	memoryQueryEmbeddingKey struct{}
+	memoryQueryEmbedding    struct {
+		query  string
+		loaded bool
+		vector []float32
+	}
+)

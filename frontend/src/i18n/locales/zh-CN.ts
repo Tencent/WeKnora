@@ -1355,7 +1355,8 @@ export default {
       readSkill: '读取技能',
       executeSkillScript: '执行技能脚本',
       listSandboxFiles: '列出沙箱文件',
-      readFile: '读取文件',
+      readFile: '读取内容',
+      grepFiles: '搜索内容',
       readSandboxFile: '读取沙箱文件',
       writeSandboxFile: '写入沙箱文件',
       editSandboxFile: '编辑沙箱文件',
@@ -4813,6 +4814,19 @@ export default {
     }
   },
   memorySettings: {
+    experience: {
+      "details": "经验详情与依据",
+      "trigger": "触发条件",
+      "applicability": "适用范围",
+      "outcome": "观察结果",
+      "avoid": "已验证的失败做法",
+      "source": "查看来源会话",
+      "outcomes": {
+        "success": "成功",
+        "failure": "失败",
+        "uncertain": "尚未验证"
+      }
+    },
     title: '我的记忆',
     description: '这里是助手跨会话记住的关于你的内容。你可以随时查看、修改和删除，删除后不会再被使用。',
     workspaceDisabled: '当前空间尚未开启长期记忆，管理员开启后这里的开关才会生效。',
@@ -4923,6 +4937,7 @@ export default {
     emptyTitle: '还没有记忆',
     emptyDescription: '在对话里说「记住：……」，或者在上面直接添加一条。',
     kinds: {
+      experience: "任务经验",
       profile: '个人信息',
       preference: '偏好',
       fact: '事实',
@@ -4930,6 +4945,7 @@ export default {
       interest: '长期关注'
     },
     kindHints: {
+      experience: "相关任务按需读取完整步骤",
       profile: '之后每轮对话都会带上',
       preference: '之后每轮对话都会带上',
       fact: '只在问题相关时才会用到',

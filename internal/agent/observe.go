@@ -600,7 +600,10 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 			continue
 		}
 		name := sanitizeMustUseField(skill.Name)
-		lines = append(lines, fmt.Sprintf("Must call read_file(path=%q) for @Skill %q before answering.", "skill://"+name+"/SKILL.md", name))
+		lines = append(
+			lines,
+			fmt.Sprintf("Must call read(path=%q) for @Skill %q before answering.", "skill://"+name+"/SKILL.md", name),
+		)
 	}
 	if len(lines) == 0 {
 		return ""

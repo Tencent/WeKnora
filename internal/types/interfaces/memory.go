@@ -25,6 +25,21 @@ func (s MemoryScope) Valid() bool {
 // worker cannot accidentally operate on whatever the ambient context happens
 // to hold.
 type MemoryRepository interface {
+	TryAcquireExtraction(
+		ctx context.Context,
+		scope MemoryScope,
+		token string,
+		until time.Time,
+	) (bool, error)
+	ReleaseExtraction(ctx context.Context, scope MemoryScope, token string) error
+	AdvanceExtraction(
+		ctx context.Context,
+		scope MemoryScope,
+		sessionID string,
+		cursor types.MemoryExtractionCursor,
+	) error
+	RequeueSessions(ctx context.Context, scope MemoryScope, sessions []string) error
+	CompleteExtractionSessions(ctx context.Context, scope MemoryScope, token string, sessions []string) error
 	// GetSubject returns the memory space, or (nil, nil) when it does not exist.
 	GetSubject(ctx context.Context, scope MemoryScope) (*types.MemorySubject, error)
 	// EnsureSubject returns the memory space, creating it on first use.
@@ -228,6 +243,8 @@ func (c RetrievalContext) Empty() bool {
 
 // MemoryService is the read/write API for long-term memory.
 type MemoryService interface {
+	MemoryResources(ctx context.Context) (map[string]string, error)
+	ReadMemoryResource(ctx context.Context, path string) (string, error)
 	// Recall assembles the memory to inject for one turn. It performs no LLM
 	// calls and returns an empty recall (never an error) whenever memory is
 	// disabled at any level, so callers can use it unconditionally.

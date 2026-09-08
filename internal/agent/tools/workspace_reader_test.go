@@ -129,7 +129,7 @@ func TestReadFileWorkspacePaginatesOverBudgetFile(t *testing.T) {
 // Paging cannot make progress when one line exceeds the whole budget, so the
 // result has to name the escape hatch instead of returning an empty page the
 // model will retry forever.
-func TestReadFileWorkspaceReportsUnpageableLine(t *testing.T) {
+func TestReadFileWorkspacePagesOversizedLine(t *testing.T) {
 	content := []byte(strings.Repeat("y", int(maxReadSandboxMaxBytes)+10) + "\n")
 	source := &fakeSandboxFileSource{
 		stat: &sandbox.RemoteStatEntry{
@@ -145,9 +145,9 @@ func TestReadFileWorkspaceReportsUnpageableLine(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, result.Success)
-	assert.Equal(t, 0, result.Data["returned_bytes"])
-	assert.Contains(t, result.Output, "Line 1 is")
-	assert.Contains(t, result.Output, "sed -n '1p'")
+	assert.Positive(t, result.Data["returned_bytes"])
+	assert.Equal(t, 1, result.Data["next_offset"])
+	assert.Positive(t, result.Data["next_line_offset"])
 }
 
 // The registry truncates over-budget output by deleting the MIDDLE and keeping
@@ -563,7 +563,7 @@ func TestListSandboxFilesRedirectsSkillImagePaths(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, result.Success)
 	assert.Contains(t, result.Error, "outside that scope")
-	assert.Contains(t, result.Error, `read_file(path="skill://ppt-generator/SKILL.md")`)
+	assert.Contains(t, result.Error, `read(path="skill://ppt-generator/SKILL.md")`)
 	assert.Contains(t, result.Error, "Do not ls")
 	assert.Empty(t, source.listedDir)
 }

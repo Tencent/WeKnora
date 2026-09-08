@@ -15,7 +15,7 @@ WeKnora 的通用沙箱操作需要四个稳定原语：读取、写入、编辑
 
 | 发现 | 后果 | 本次处理 |
 | --- | --- | --- |
-| read_skill 和 read_sandbox_file 各自维护读取入口，技能读取没有连续分页 | 选择工具和读取大技能都多一层成本 | 合并为 read_file(path, offset, limit, max_bytes)，共享分页及输出预算；按来源保留访问控制 |
+| read_skill 和 read_sandbox_file 各自维护读取入口，技能读取没有连续分页 | 选择工具和读取大技能都多一层成本 | 合并为 read(path, offset, limit, max_bytes)，共享分页及输出预算；按来源保留访问控制 |
 | shell、技能脚本执行、目录浏览存在重复入口 | 模型需要先判断工具，再判断解释器，容易来回切换 | 已安装技能统一走 shell 的 `skill_name`；有 shell 时隐藏目录列表工具 |
 | 每条工具失败都追加“换一种方式” | 权限问题反复改用其他工具尝试 | 删除统一重试提示；提示词要求先改变相关条件再重试 |
 | Cube SDK 文件 API 默认 root，脚本使用 user | 文件工具创建的目录可能无法被脚本修改 | 仅在文件 API 路由统一身份；控制面认证和命令身份保持各自语义 |
@@ -32,7 +32,7 @@ WeKnora 的通用沙箱操作需要四个稳定原语：读取、写入、编辑
 
 | 场景 | 默认或自动注册行为 |
 | --- | --- |
-| 支持 Shell 的技能沙箱 | `shell_exec`、`read_file`、`write_sandbox_file`、`edit_sandbox_file`；read_file 同时承担技能资源读取 |
+| 支持 Shell 的技能沙箱 | `shell_exec`、`read`、`write_sandbox_file`、`edit_sandbox_file`；read 同时承担技能资源读取 |
 | 已安装技能 | `shell_exec(skill_name=..., command=...)`，不额外注册 `execute_skill_script` |
 | 宿主机技能 | shell_exec 自动准备脚本、辅助文件和二进制资源，再使用同一执行链 |
 | 无 Shell 后端 | 技能可阅读、脚本不可执行；按后端能力继续提供文件读写 |
@@ -47,7 +47,7 @@ WeKnora 的通用沙箱操作需要四个稳定原语：读取、写入、编辑
 
 | 候选 | 决定 | 原因 |
 | --- | --- | --- |
-| read_skill + read_sandbox_file | 合并为 read_file | 操作都是读取文本，差异由资源来源处理；模型只选路径 |
+| read_skill + read_sandbox_file | 合并为 read | 操作都是读取文本，差异由资源来源处理；模型只选路径 |
 | execute_skill_script + shell_exec | 全部合并 | 已安装环境选择、宿主机文件准备和 stdin 统一由 Shell 入口承担 |
 | list_sandbox_files + shell 的 ls/find | Shell 场景只留 Shell | 无 Shell 时保留目录发现能力 |
 | write_skill_file/edit_skill_file 与沙箱写入/编辑 | 保留各自的权限实现 | 两组只在不同角色下注册，不会同时占用普通会话工具列表；安装器写入共享镜像，普通会话写工作区 |
@@ -63,7 +63,7 @@ WeKnora 的通用沙箱操作需要四个稳定原语：读取、写入、编辑
 {"path":"scripts/report.py","offset":1,"limit":100}
 ```
 
-`skill://` 使用技能管理器加载已授权的包资源，主文档包含指令、执行方式和附加文件列表；它不是容器路径，也不保证是安装器修改后的镜像文件。工作区路径仍使用沙箱文件 API。宿主机技能资源通过 os.Root 限制在技能目录中，禁止符号链接逃逸。新注册表只向模型暴露 `read_file`；旧读取 Tool 实现已删除，工作区读取成为私有适配器；仅保留历史名称识别和展示。@Skill 指引、模板、模型结果策略、历史压缩、前端名称和图标同步使用新入口。
+`skill://` 使用技能管理器加载已授权的包资源，主文档包含指令、执行方式和附加文件列表；它不是容器路径，也不保证是安装器修改后的镜像文件。工作区路径仍使用沙箱文件 API。宿主机技能资源通过 os.Root 限制在技能目录中，禁止符号链接逃逸。新注册表只向模型暴露 `read`；旧读取 Tool 实现已删除，工作区读取成为私有适配器；仅保留历史名称识别和展示。@Skill 指引、模板、模型结果策略、历史压缩、前端名称和图标同步使用新入口。
 
 ## 技能执行契约
 
@@ -161,7 +161,7 @@ go test ./internal/sandbox ./internal/agent/... ./internal/application/service \
 
 专项 `go test -race` 已通过，覆盖并发读取与变更屏障、结果归一化、技能环境、工作区准备、文件身份和 Cube 超时隔离。前端 `npm run type-check` 已通过。
 
-统一读取的追加验证已通过：技能与工作区路由、无沙箱读取、技能白名单、路径穿越及宿主机符号链接逃逸、连续分页不丢行、二进制抑制、已安装技能的 Shell 指引。前端工具展示和国际化检查共 36 项通过；本机缺少 tsx，使用 Node 原生 TypeScript stripping 运行同一组测试（`node --experimental-strip-types --test src/utils/agent-tool-display.test.mjs src/views/chat/components/AgentStreamDisplay.style.test.mjs src/i18n/localeKeyAudit.test.ts`）。Docker 集成用例也已切到 read_file，并验证读取技能指令后执行脚本的路径。
+统一读取的追加验证已通过：技能与工作区路由、无沙箱读取、技能白名单、路径穿越及宿主机符号链接逃逸、连续分页不丢行、二进制抑制、已安装技能的 Shell 指引。前端工具展示和国际化检查共 36 项通过；本机缺少 tsx，使用 Node 原生 TypeScript stripping 运行同一组测试（`node --experimental-strip-types --test src/utils/agent-tool-display.test.mjs src/views/chat/components/AgentStreamDisplay.style.test.mjs src/i18n/localeKeyAudit.test.ts`）。Docker 集成用例也已切到 read，并验证读取技能指令后执行脚本的路径。
 
 Docker 集成测试已通过，覆盖文件写入 → 技能 Python 运行 → 编辑 → 再运行、独立命令不继承技能环境、安装器写入、普通命令无法修改技能目录、Bash/HOME、超时、附件上传及产物收集。还验证了超时实际停止进程，以及 output 被替换为链接时保留链接并拒绝执行。既有 Docker conformance 测试本次选择运行上述相关用例，未运行依赖外网安装软件包的用例。
 
@@ -174,3 +174,7 @@ DOCKER_INTEGRATION_IMAGE=your-standard-sandbox-image \
 ```
 
 本次正式 Dockerfile 构建在 Docker daemon 拉取 `node:20-slim` 时因 DNS 故障失败。实际容器验证使用本机缓存镜像构建的独立 fixture，按当前 Dockerfile 的账号和工作区契约修正后运行；这证明了相关运行路径，不代表完整正式镜像已构建或发布。Cube/E2B 通过本地协议测试验证，本次没有连接真实远端服务。没有进行模型端效果 A/B 测试，因此不宣称具体的 Token 或重试率降幅。
+
+## 记忆和长结果
+
+本次读取入口命名为 `read`，新增 `grep` 搜索相同的受控文本来源，记忆不再单独注册 `search_memory`。Shell、Wiki 和通用工具的大结果通过 `output://` 快照按需补读；KB、Wiki、Graph 的原有查询语义继续保留。具体范围、权限、分页限制和实现原则见[长期记忆与任务经验](memory-experience-design.md)。
