@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -11,14 +13,51 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func (e *EvaluationHandler) GetEvaluationHistory(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	result, err := e.evaluationService.EvaluationHistory(c.Request.Context(), limit)
+	if err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
+func (e *EvaluationHandler) GetModelUsageSummary(c *gin.Context) {
+	query := interfaces.ModelUsageQuery{Model: c.Query("model")}
+	if raw := c.Query("start"); raw != "" {
+		value, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			c.Error(errors.NewBadRequestError("start must be RFC3339"))
+			return
+		}
+		query.Start = &value
+	}
+	if raw := c.Query("end"); raw != "" {
+		value, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			c.Error(errors.NewBadRequestError("end must be RFC3339"))
+			return
+		}
+		query.End = &value
+	}
+	result, err := e.modelUsageRepo.Summary(c.Request.Context(), types.MustTenantIDFromContext(c.Request.Context()), query)
+	if err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
 // EvaluationHandler handles evaluation related HTTP requests
 type EvaluationHandler struct {
 	evaluationService interfaces.EvaluationService // Service for evaluation operations
+	modelUsageRepo    interfaces.ModelUsageRepository
 }
 
 // NewEvaluationHandler creates a new EvaluationHandler instance
-func NewEvaluationHandler(evaluationService interfaces.EvaluationService) *EvaluationHandler {
-	return &EvaluationHandler{evaluationService: evaluationService}
+func NewEvaluationHandler(evaluationService interfaces.EvaluationService, modelUsageRepo interfaces.ModelUsageRepository) *EvaluationHandler {
+	return &EvaluationHandler{evaluationService: evaluationService, modelUsageRepo: modelUsageRepo}
 }
 
 // EvaluationRequest contains parameters for evaluation request
@@ -27,6 +66,28 @@ type EvaluationRequest struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"` // ID of knowledge base to use
 	ChatModelID     string `json:"chat_id"`           // ID of chat model to use
 	RerankModelID   string `json:"rerank_id"`         // ID of rerank model to use
+}
+
+type WikiCacheProbeRequest struct {
+	ChatModelID string `json:"chat_id" binding:"required"`
+	Layout      string `json:"layout" binding:"required"`
+	Sample      int    `json:"sample"`
+}
+
+func (e *EvaluationHandler) WikiCacheProbe(c *gin.Context) {
+	var request WikiCacheProbeRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.Error(errors.NewBadRequestError("invalid wiki cache probe request").WithDetails(err.Error()))
+		return
+	}
+	result, err := e.evaluationService.WikiCacheProbe(
+		c.Request.Context(), secutils.SanitizeForLog(request.ChatModelID), request.Layout, request.Sample,
+	)
+	if err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
 
 // Evaluation godoc

@@ -1,0 +1,3 @@
+ALTER TABLE model_usages ADD COLUMN status TEXT NOT NULL DEFAULT 'success';
+ALTER TABLE model_usages ADD COLUMN error_message TEXT NOT NULL DEFAULT '';
+ALTER TABLE model_usages ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0;

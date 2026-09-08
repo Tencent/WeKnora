@@ -2,10 +2,24 @@ package chat
 
 import (
 	"context"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+type UsageSink func(context.Context, string, *types.TokenUsage)
+
+var usageSink struct {
+	sync.RWMutex
+	fn UsageSink
+}
+
+func SetUsageSink(sink UsageSink) {
+	usageSink.Lock()
+	defer usageSink.Unlock()
+	usageSink.fn = sink
+}
 
 // logUsage emits the standard "[LLM Usage]" line shared by every Chat
 // implementation. It is a no-op when usage is nil so callers can pass through
@@ -15,6 +29,12 @@ func logUsage(ctx context.Context, model string, u *types.TokenUsage) {
 		return
 	}
 	purpose, prefixFingerprint := types.LLMCallMetadataFromContext(ctx)
+	usageSink.RLock()
+	sink := usageSink.fn
+	usageSink.RUnlock()
+	if sink != nil {
+		sink(ctx, model, u)
+	}
 	logger.Infof(ctx,
 		"[LLM Usage] model=%s, purpose=%s, prompt_prefix=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d, cached_tokens=%d, cache_read_tokens=%d, cache_write_tokens=%d, cache_miss_tokens=%d, cache_reported=%t, cache_status=%s",
 		model, purpose, prefixFingerprint, u.PromptTokens, u.CompletionTokens, u.TotalTokens,

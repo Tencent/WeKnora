@@ -49,6 +49,9 @@ func RegisterEvaluationRoutes(r *gin.RouterGroup, handler *handler.EvaluationHan
 	{
 		evaluationRoutes.POST("", g.Admin(), handler.Evaluation)
 		evaluationRoutes.GET("", g.Viewer(), handler.GetEvaluationResult)
+		evaluationRoutes.GET("/history", g.Viewer(), handler.GetEvaluationHistory)
+		evaluationRoutes.GET("/model-usage", g.Viewer(), handler.GetModelUsageSummary)
+		evaluationRoutes.POST("/wiki-cache-probe", g.Admin(), handler.WikiCacheProbe)
 	}
 }
 
