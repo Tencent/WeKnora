@@ -42,6 +42,11 @@ func TestSanitizeGeneratedTitle(t *testing.T) {
 			want: strings.Repeat("保", maxSessionTitleRunes),
 		},
 		{
+			name: "wrapping quotes some models add are dropped",
+			raw:  "“询问一加一等于多少”",
+			want: "询问一加一等于多少",
+		},
+		{
 			name: "empty completion stays empty",
 			raw:  "   ",
 			want: "",

@@ -738,6 +738,7 @@ const maxSessionTitleRunes = 100
 // happened so the caller can log it.
 func sanitizeGeneratedTitle(raw string) (string, bool) {
 	title := strings.TrimSpace(strings.TrimPrefix(raw, "<think>\n\n</think>"))
+	title = strings.TrimSpace(strings.Trim(title, "\"'“”‘’「」『』"))
 	runes := []rune(title)
 	if len(runes) <= maxSessionTitleRunes {
 		return title, false
