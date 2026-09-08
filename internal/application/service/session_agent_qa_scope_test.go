@@ -63,11 +63,11 @@ func TestResolvePerRequestMCPScope_SharedAgentAllowsPreset(t *testing.T) {
 	assert.Equal(t, []string{"mcp-a"}, effective)
 }
 
-func TestApplyPerRequestMCPScope_SelectedNarrowsAndPins(t *testing.T) {
+func TestApplyPerRequestMCPScope_SelectedPinsWithoutNarrowing(t *testing.T) {
 	cfg := &types.AgentConfig{MCPSelectionMode: "selected", MCPServices: []string{"mcp-a", "mcp-b"}}
 	applyPerRequestMCPScope(context.Background(), cfg, []string{"mcp-a", "mcp-b"}, false, []string{"mcp-b"})
 	assert.Equal(t, "selected", cfg.MCPSelectionMode)
-	assert.Equal(t, []string{"mcp-b"}, cfg.MCPServices)
+	assert.Equal(t, []string{"mcp-a", "mcp-b"}, cfg.MCPServices)
 	assert.Equal(t, []string{"mcp-b"}, cfg.PinnedMCPServiceIDs)
 }
 

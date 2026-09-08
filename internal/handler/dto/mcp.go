@@ -22,21 +22,22 @@ import (
 // only a boolean per credential field so the frontend can render a
 // "configured / not configured" badge without an additional round-trip.
 type MCPServiceResponse struct {
-	ID             string                   `json:"id"`
-	TenantID       uint64                   `json:"tenant_id"`
-	Name           string                   `json:"name"`
-	Description    string                   `json:"description"`
-	Enabled        bool                     `json:"enabled"`
-	TransportType  types.MCPTransportType   `json:"transport_type"`
-	URL            *string                  `json:"url,omitempty"`
-	Headers        types.MCPHeaders         `json:"headers,omitempty"`
-	AuthConfig     *MCPAuthConfigResponse   `json:"auth_config,omitempty"`
-	AdvancedConfig *types.MCPAdvancedConfig `json:"advanced_config,omitempty"`
-	StdioConfig    *types.MCPStdioConfig    `json:"stdio_config,omitempty"`
-	EnvVars        types.MCPEnvVars         `json:"env_vars,omitempty"`
-	IsBuiltin      bool                     `json:"is_builtin"`
-	CreatedAt      time.Time                `json:"created_at"`
-	UpdatedAt      time.Time                `json:"updated_at"`
+	UsageInstructions string                   `json:"usage_instructions"`
+	ID                string                   `json:"id"`
+	TenantID          uint64                   `json:"tenant_id"`
+	Name              string                   `json:"name"`
+	Description       string                   `json:"description"`
+	Enabled           bool                     `json:"enabled"`
+	TransportType     types.MCPTransportType   `json:"transport_type"`
+	URL               *string                  `json:"url,omitempty"`
+	Headers           types.MCPHeaders         `json:"headers,omitempty"`
+	AuthConfig        *MCPAuthConfigResponse   `json:"auth_config,omitempty"`
+	AdvancedConfig    *types.MCPAdvancedConfig `json:"advanced_config,omitempty"`
+	StdioConfig       *types.MCPStdioConfig    `json:"stdio_config,omitempty"`
+	EnvVars           types.MCPEnvVars         `json:"env_vars,omitempty"`
+	IsBuiltin         bool                     `json:"is_builtin"`
+	CreatedAt         time.Time                `json:"created_at"`
+	UpdatedAt         time.Time                `json:"updated_at"`
 	// Credentials is the per-field "configured?" map. Embedded on the main
 	// response so the credential UI doesn't need a follow-up GET. The
 	// frontend never sees the actual secret value — only whether one is
@@ -75,20 +76,21 @@ func NewMCPServiceResponse(ctx context.Context, svc *types.MCPService) *MCPServi
 	}
 	includeDetail := CanViewIntegrationSecrets(ctx)
 	resp := &MCPServiceResponse{
-		ID:             svc.ID,
-		TenantID:       svc.TenantID,
-		Name:           svc.Name,
-		Description:    svc.Description,
-		Enabled:        svc.Enabled,
-		TransportType:  svc.TransportType,
-		URL:            svc.URL,
-		Headers:        svc.Headers,
-		AdvancedConfig: svc.AdvancedConfig,
-		StdioConfig:    svc.StdioConfig,
-		EnvVars:        svc.EnvVars,
-		IsBuiltin:      svc.IsBuiltin,
-		CreatedAt:      svc.CreatedAt,
-		UpdatedAt:      svc.UpdatedAt,
+		ID:                svc.ID,
+		TenantID:          svc.TenantID,
+		Name:              svc.Name,
+		Description:       svc.Description,
+		UsageInstructions: svc.UsageInstructions,
+		Enabled:           svc.Enabled,
+		TransportType:     svc.TransportType,
+		URL:               svc.URL,
+		Headers:           svc.Headers,
+		AdvancedConfig:    svc.AdvancedConfig,
+		StdioConfig:       svc.StdioConfig,
+		EnvVars:           svc.EnvVars,
+		IsBuiltin:         svc.IsBuiltin,
+		CreatedAt:         svc.CreatedAt,
+		UpdatedAt:         svc.UpdatedAt,
 	}
 	if !includeDetail {
 		resp.Headers = nil

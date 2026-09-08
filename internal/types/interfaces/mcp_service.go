@@ -46,7 +46,8 @@ type MCPServiceService interface {
 
 	// UpdateMCPService updates an MCP service. updateFields records presence for
 	// scalar fields whose zero values cannot represent omission. Supported keys
-	// are "name", "description", and "enabled"; a nil map means none of those
+	// are "name", "description", "usage_instructions", "enabled", "auth_type",
+	// and "api_key_header"; a nil map means none of those
 	// scalar fields were provided.
 	UpdateMCPService(
 		ctx context.Context,

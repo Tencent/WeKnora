@@ -33,7 +33,8 @@ test('OAuth status API sends the attempt id to the backend', () => {
 })
 
 test('settings distinguishes refreshable tokens from usable authorization', () => {
-  assert.match(settingsSource, /getMCPOAuthAuthorizationStatus\(props\.service\.id\)/)
+  assert.match(settingsSource, /getMCPOAuthAuthorizationStatus\(currentService\.value\.id\)/)
+  assert.match(settingsSource, /savedService\.value \?\? props\.service/)
   assert.match(settingsSource, /oauthTokenState === 'refreshable'/)
   assert.match(apiSource, /state: data\?\.state \?\? 'reauth_required'/)
 })

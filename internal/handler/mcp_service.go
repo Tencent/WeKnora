@@ -208,6 +208,11 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	// Track which fields are being updated
 	updateFields := make(map[string]bool)
 
+	if instructions, ok := updateData["usage_instructions"].(string); ok {
+		service.UsageInstructions = instructions
+		updateFields["usage_instructions"] = true
+	}
+
 	// Map the update data to service struct
 	if name, ok := updateData["name"].(string); ok {
 		service.Name = name
@@ -308,11 +313,13 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 		// through the main PUT so a service can be switched to/from OAuth.
 		if authType, ok := authConfig["auth_type"].(string); ok {
 			service.AuthConfig.AuthType = types.MCPAuthType(authType)
+			updateFields["auth_type"] = true
 		}
 		// api_key_header is non-secret structural config (header name for the
 		// api_key strategy); flows through the main PUT like custom_headers.
 		if apiKeyHeader, ok := authConfig["api_key_header"].(string); ok {
 			service.AuthConfig.APIKeyHeader = apiKeyHeader
+			updateFields["api_key_header"] = true
 		}
 		if scopes, ok := authConfig["scopes"].([]interface{}); ok {
 			list := make([]string, 0, len(scopes))

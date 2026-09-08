@@ -571,6 +571,14 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 		if svc == nil {
 			continue
 		}
+		if svc.Discoverable && len(svc.ToolNames) > 0 {
+			lines = append(lines, fmt.Sprintf(
+				"Use relevant available MCP functions for service @%s (server_id=%q) before "+
+					"answering. Their descriptions identify the service and original tool names; use "+
+					"discover_mcp_tools if the service needs reconnection or authentication.",
+				sanitizeMustUseField(svc.Name), sanitizeMustUseField(svc.ID)))
+			continue
+		}
 		if svc.Discoverable {
 			lines = append(
 				lines,

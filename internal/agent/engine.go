@@ -478,6 +478,14 @@ loop:
 		default:
 		}
 
+		// A slow startup, OAuth discovery or explicit refresh may have produced
+		// new definitions since the previous response. Publish them only here,
+		// after all previous tool calls have finished, and rebuild the wire list.
+		if e.toolRegistry != nil {
+			e.toolRegistry.RefreshMCPTools(ctx)
+			tools = e.buildToolsForLLM()
+		}
+
 		// Each iteration runs inside an "agent.round.<N>" Langfuse span.
 		// We execute the body in a closure so `defer span.Finish()` fires at
 		// every exit path (break/continue/next) without having to sprinkle

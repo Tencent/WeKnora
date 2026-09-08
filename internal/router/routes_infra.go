@@ -160,6 +160,8 @@ func RegisterMCPServiceRoutes(
 		mcpServices.POST("/:id/test", g.Admin(), handler.TestMCPService)
 		// Get MCP service tools — Viewer+
 		mcpServices.GET("/:id/tools", g.Viewer(), handler.GetMCPServiceTools)
+		mcpServices.GET("/:id/metadata", g.Viewer(), handler.GetMCPMetadata)
+		mcpServices.POST("/:id/metadata/refresh", g.Admin(), handler.RefreshMCPMetadata)
 		// Get MCP service resources — Viewer+
 		mcpServices.GET("/:id/resources", g.Viewer(), handler.GetMCPServiceResources)
 		// Per-field credential subresource: secrets never travel via the main
