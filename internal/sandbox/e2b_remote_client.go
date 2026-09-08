@@ -172,6 +172,8 @@ func (c *E2BRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		// E2B has no named-volume mount API that WeKnora can use; advertising
 		// it would let a workspace configure a mount that never appears.
 		SupportsVolumes: false,
+		// envd exposes an interactive PTY service that go-e2b wraps.
+		SupportsTerminals: true,
 	}
 }
 

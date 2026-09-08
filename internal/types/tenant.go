@@ -633,6 +633,12 @@ type TenantSandboxConfig struct {
 	// program's built-in default.
 	DefaultTimeoutSec int `json:"default_timeout_sec,omitempty"`
 
+	// TerminalIdleDisconnectSec is how long an interactive terminal may go
+	// without keystrokes or PTY output before WeKnora closes the connection
+	// so the sandbox can pause on its provider TTL. 0 uses the built-in
+	// default (15 minutes). Not an identity field.
+	TerminalIdleDisconnectSec int `json:"terminal_idle_disconnect_sec,omitempty"`
+
 	// AllowPrivateEndpoints permits this workspace config to reach RFC1918 or
 	// loopback cluster endpoints. Link-local/cloud-metadata addresses remain
 	// blocked. It is explicit in the UI instead of hidden in process env.

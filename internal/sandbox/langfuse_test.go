@@ -54,6 +54,51 @@ func TestWrapLangfuseRemoteClientExecForwards(t *testing.T) {
 	require.Equal(t, "echo hi", inner.execRequests[0].Command)
 }
 
+func TestWrapLangfuseRemoteClientPreservesTerminalCapability(t *testing.T) {
+	inner := &terminalFakeClient{fakeRemoteClient: newFakeRemoteClient(SandboxTypeCube)}
+	inner.capabilities.SupportsTerminals = true
+
+	wrapped := wrapLangfuseRemoteClient(inner)
+	mgr, ok := TerminalManagerFrom(wrapped)
+	require.True(t, ok, "wrapping must not hide RemoteTerminalManager from TerminalManagerFrom")
+	require.NotNil(t, mgr)
+
+	session, err := mgr.OpenTerminal(context.Background(), nil, RemoteTerminalOptions{Cols: 80, Rows: 24})
+	require.NoError(t, err)
+	require.NotNil(t, session)
+}
+
+func TestWrapLangfuseRemoteClientDoesNotInventTerminalSupport(t *testing.T) {
+	// Docker advertises no terminal support; wrapping must not fake it.
+	inner := newFakeRemoteClient(SandboxTypeDocker)
+	wrapped := wrapLangfuseRemoteClient(inner)
+	mgr, ok := TerminalManagerFrom(wrapped)
+	require.False(t, ok)
+	require.Nil(t, mgr)
+}
+
+// terminalFakeClient adds the optional terminal capability to the shared fake
+// so wrapper tests can assert capability forwarding.
+type terminalFakeClient struct {
+	*fakeRemoteClient
+}
+
+func (c *terminalFakeClient) OpenTerminal(
+	_ context.Context, _ RemoteSandboxHandle, _ RemoteTerminalOptions,
+) (RemoteTerminalSession, error) {
+	return &terminalFakeSession{}, nil
+}
+
+type terminalFakeSession struct{}
+
+func (s *terminalFakeSession) Output() <-chan RemoteTerminalEvent  { return nil }
+func (s *terminalFakeSession) PID() uint32                         { return 1 }
+func (s *terminalFakeSession) Write(context.Context, []byte) error { return nil }
+func (s *terminalFakeSession) Resize(context.Context, uint32, uint32) error {
+	return nil
+}
+func (s *terminalFakeSession) Close() error { return nil }
+
 func TestTruncateSandboxPreview(t *testing.T) {
 	require.Equal(t, "short", truncateSandboxPreview("short"))
 	long := strings.Repeat("x", sandboxSpanPreviewRunes+8)
