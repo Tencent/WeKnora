@@ -71,3 +71,9 @@ test('both development and production proxies carry WebSocket upgrades', () => {
   assert.match(nginx, /proxy_set_header Upgrade \$http_upgrade/)
   assert.match(nginx, /proxy_set_header Connection \$workbench_connection_upgrade/)
 })
+
+test('tab spacing participates in the TDesign active-bar width calculation', () => {
+  assert.match(panel, /\.workbench-tabs \.t-tabs__nav-item \{ font-size: 13px; \}/)
+  assert.match(panel, /\.workbench-tabs \.t-tabs__nav-item-wrapper \{ margin: 0; padding: 0 12px; \}/)
+  assert.doesNotMatch(panel, /\.workbench-tabs \.t-tabs__nav-item \{[^}]*padding:/)
+})

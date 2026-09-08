@@ -83,7 +83,8 @@ await context.route('**/*', async route => {
   if (url.pathname === `${base}/sandbox/files`) {
     await json({ path: '', entries: [{ name: scenario.name, path: scenario.name, type: 'file', size: fixtures.get(scenario.name).length }] })
   } else if (url.pathname === `${base}/artifacts`) {
-    await json([{ index: 17, message_id: 'fixture-message', artifact_index: 2, file_name: scenario.name, file_type: `.${scenario.name.split('.').pop()}`, file_size: fixtures.get(scenario.name).length, kind: 'web_page' }])
+    if (scenario.mode === 'status') await json([])
+    else await json([{ index: 17, message_id: 'fixture-message', artifact_index: 2, file_name: scenario.name, file_type: `.${scenario.name.split('.').pop()}`, file_size: fixtures.get(scenario.name).length, kind: 'web_page' }])
   } else if (url.pathname === `${base}/sandbox/files/download` || url.pathname === `${base}/messages/fixture-message/artifacts/2/download`) {
     const name = url.searchParams.get('path') || scenario.name
     assert.ok(fixtures.has(name))
@@ -93,7 +94,7 @@ await context.route('**/*', async route => {
     await json({ state: 'unbound', reason: 'unbound', available: false, config_id: '', provider: '', capabilities: { files: false, terminal: false }, limits: {} })
   } else if (scenario.mode === 'status' && url.pathname.includes('sandbox-configs')) {
     await json([])
-  } else if (scenario.mode === 'status' && url.pathname === `${base}/audit`) {
+  } else if (scenario.mode === 'status' && url.pathname === `${base}/sandbox/audit`) {
     await json([])
   } else {
     forbidden.push(url.pathname)
@@ -182,12 +183,27 @@ try {
   }
   await open('status')
   await page.getByText('No sandbox bound', { exact: true }).first().waitFor()
+  for (const label of ['Terminal', 'Files', 'Artifacts', 'Audit']) {
+    const item = page.locator('.workbench-tabs .t-tabs__nav-item').filter({ hasText: label })
+    await item.click()
+    await page.waitForTimeout(300)
+    const alignment = await item.evaluate(element => {
+      const itemRect = element.getBoundingClientRect()
+      const barRect = element.closest('.workbench-tabs')?.querySelector('.t-tabs__bar')?.getBoundingClientRect()
+      return barRect ? {
+        center: Math.abs((itemRect.left + itemRect.width / 2) - (barRect.left + barRect.width / 2)),
+        width: Math.abs(itemRect.width - barRect.width),
+      } : null
+    })
+    assert.ok(alignment && alignment.center <= 0.5 && alignment.width <= 0.5,
+      `${label} tab underline is misaligned: ${JSON.stringify(alignment)}`)
+  }
   assert.equal(await page.getByText('unbound', { exact: true }).count(), 0)
   assert.equal(await page.locator('.workbench-error[role="status"]').innerText(), 'No sandbox bound')
   assert.deepEqual(forbidden, [], 'No external or unexpected API requests')
   assert.deepEqual(errors, [], 'No browser exceptions')
   assert.ok(downloads.some(item => item.mode === 'artifact' && item.path.endsWith('/artifacts/2/download')))
-  console.log(`PASS localized status; ${downloads.length} fixture downloads; no external/credential requests; no browser exceptions`)
+  console.log(`PASS localized status and tab alignment; ${downloads.length} fixture downloads; no external/credential requests; no browser exceptions`)
 } catch (error) {
   console.error(JSON.stringify({ scenario, forbidden, errors, preview: await page.locator('.document-preview').allTextContents(), slides: await page.locator('.pptx-preview-wrapper').evaluateAll(nodes => nodes.map(node => ({ children: node.children.length, text: node.textContent?.slice(0, 200), rect: node.getBoundingClientRect().toJSON() }))) }))
   throw error

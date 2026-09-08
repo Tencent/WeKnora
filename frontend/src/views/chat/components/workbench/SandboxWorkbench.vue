@@ -209,10 +209,13 @@ onBeforeUnmount(() => {
   .workbench-limits dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; }
   .workbench-limits dd { margin: 0; }
   .workbench-tabs { flex-shrink: 0; }
-  .workbench-tabs .t-tabs__nav-item { padding: 0 12px; font-size: 13px; }
+  .workbench-tabs .t-tabs__nav-item { font-size: 13px; }
+  // TDesign sums computed nav-item widths to position the active bar. Spacing
+  // must stay inside the wrapper so content-box padding is not omitted.
+  .workbench-tabs .t-tabs__nav-item-wrapper { margin: 0; padding: 0 12px; }
   .workbench-tabs .t-tabs__content { display: none; }
   @media (max-width: 480px) {
-    .workbench-tabs .t-tabs__nav-item { padding: 0 8px; }
+    .workbench-tabs .t-tabs__nav-item-wrapper { padding: 0 8px; }
   }
   .workbench-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; min-width: 0; flex-shrink: 0; }
   .workbench-ellipsis { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
