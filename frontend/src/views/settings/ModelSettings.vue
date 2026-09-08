@@ -35,6 +35,34 @@
       </div>
     </div>
 
+    <section class="usage-panel" aria-label="模型调用统计">
+      <div class="usage-panel__header">
+        <div>
+          <h3>模型调用统计</h3>
+          <p>数据来自数据库；费用仅统计已配置价格的调用，未知用量不会按零处理。</p>
+        </div>
+        <div class="usage-filters">
+          <select v-model="usageModel" aria-label="筛选模型" @change="loadUsage">
+            <option value="">全部模型</option>
+            <option v-for="model in allModels" :key="model.id" :value="model.name">{{ modelDisplayName(model) }}</option>
+          </select>
+          <input v-model="usageStart" type="datetime-local" aria-label="开始时间" @change="loadUsage" />
+          <input v-model="usageEnd" type="datetime-local" aria-label="结束时间" @change="loadUsage" />
+          <t-button size="small" variant="outline" :loading="usageLoading" @click="loadUsage">刷新</t-button>
+        </div>
+      </div>
+      <div class="usage-grid">
+        <div><strong>{{ usage?.calls ?? 0 }}</strong><span>真实厂商调用</span></div>
+        <div><strong>{{ usage?.successful_calls ?? 0 }}</strong><span>成功调用</span></div>
+        <div><strong>{{ usage?.failed_calls ?? 0 }}</strong><span>失败调用</span></div>
+        <div><strong>{{ usage?.total_tokens ?? 0 }}</strong><span>总 Token</span></div>
+        <div><strong>{{ percent(usage?.provider_cache_hit_rate) }}</strong><span>提示词缓存命中率</span></div>
+        <div><strong>{{ percent(usage?.embedding_cache_hit_rate) }}</strong><span>Embedding 本地命中率</span></div>
+        <div><strong>¥{{ (usage?.estimated_cost_cny ?? 0).toFixed(6) }}</strong><span>估算费用（{{ usage?.cost_known_calls ?? 0 }} 次有价格）</span></div>
+        <div><strong>{{ percent(usage?.cache_reporting_rate) }}</strong><span>厂商缓存字段覆盖率</span></div>
+      </div>
+    </section>
+
     <t-tabs v-model="activeTypeFilter" class="model-type-tabs" data-guide="settings-models">
       <t-tab-panel value="all" :label="`${$t('common.all')}(${allLegacyModels.length})`" />
       <t-tab-panel value="chat" :label="`${$t('modelSettings.typeShort.chat')}(${countByType('chat')})`" />
@@ -147,7 +175,7 @@ import { AddIcon, PlayCircleIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
 import ModelDebugDrawer from '@/components/ModelDebugDrawer.vue'
-import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
+import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, getModelUsageSummary, type ModelConfig, type ModelUsageSummary } from '@/api/model'
 import { useAuthStore } from '@/stores/auth'
 
 const { t, te } = useI18n()
@@ -161,9 +189,34 @@ const currentModelType = ref<ModelType>('chat')
 const editingModel = ref<any>(null)
 const loading = ref(true)
 const activeTypeFilter = ref<FilterType>('all')
+const usage = ref<ModelUsageSummary | null>(null)
+const usageLoading = ref(false)
+const usageModel = ref('')
+const usageStart = ref('')
+const usageEnd = ref('')
 
 // 模型列表数据
 const allModels = ref<ModelConfig[]>([])
+
+function percent(value?: number) {
+  return value === undefined || value === null ? '未知' : `${(value * 100).toFixed(1)}%`
+}
+
+async function loadUsage() {
+  usageLoading.value = true
+  try {
+    usage.value = await getModelUsageSummary({
+      model: usageModel.value || undefined,
+      start: usageStart.value ? new Date(usageStart.value).toISOString() : undefined,
+      end: usageEnd.value ? new Date(usageEnd.value).toISOString() : undefined,
+    })
+  } catch (error) {
+    console.error('加载模型调用统计失败:', error)
+    MessagePlugin.error('模型调用统计加载失败')
+  } finally {
+    usageLoading.value = false
+  }
+}
 
 // 后端 type → 前端分组 type 的映射
 const backendTypeToModelType: Record<string, ModelType> = {
@@ -602,6 +655,7 @@ function getModelType(type: ModelType): 'KnowledgeQA' | 'Embedding' | 'Rerank' |
 
 onMounted(() => {
   loadModels()
+  loadUsage()
 })
 </script>
 
@@ -634,6 +688,34 @@ onMounted(() => {
   justify-content: space-between;
   gap: 20px;
 }
+
+.usage-panel {
+  margin-bottom: 24px;
+  padding: 18px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
+}
+
+.usage-panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  h3 { margin: 0 0 4px; font-size: 16px; }
+  p { margin: 0; color: var(--td-text-color-secondary); font-size: 12px; }
+}
+
+.usage-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.usage-filters select, .usage-filters input {
+  height: 32px; border: 1px solid var(--td-component-border); border-radius: 5px;
+  padding: 0 8px; background: var(--td-bg-color-container); color: var(--td-text-color-primary);
+}
+.usage-grid { display: grid; grid-template-columns: repeat(6, minmax(110px, 1fr)); gap: 12px; }
+.usage-grid > div { display: flex; flex-direction: column; gap: 4px; }
+.usage-grid strong { font-size: 18px; }
+.usage-grid span { color: var(--td-text-color-secondary); font-size: 12px; }
+@media (max-width: 1100px) { .usage-grid { grid-template-columns: repeat(3, 1fr); } }
 
 .model-test-trigger {
   --td-bg-color-container-hover: transparent;

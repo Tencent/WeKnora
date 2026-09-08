@@ -1311,11 +1311,15 @@ async function createScopedAPIKey() {
       // Capabilities only matter below full access; full access already covers them all.
       capabilities: apiKeyFullAccessEnabled.value ? [] : selectedCapabilities(),
     })
-    if (!resp.success || !resp.data?.api_key) {
+    const plaintextToken = resp.data?.token || resp.data?.api_key
+    if (!resp.success || !plaintextToken) {
       throw new Error(resp.message || t('integrations.api.createApiKeyFailed'))
     }
     apiKeyDialogVisible.value = false
-    apiKey.value = resp.data.api_key
+    // The create endpoint returns the newly generated plaintext credential in
+    // `token`. `api_key` belongs to the persisted record and may already have
+    // been transformed by the model's encryption hook before serialization.
+    apiKey.value = plaintextToken
     MessagePlugin.success(t('integrations.api.apiKeyCreated'))
     await loadAPIKeys()
   } catch (err: any) {

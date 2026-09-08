@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite
+.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite topic3-up topic3-eval topic3-check topic3-cache-bench
 
 # Show help
 help:
@@ -94,6 +94,18 @@ run: build
 # Run tests
 test:
 	go test -v ./...
+
+topic3-up:
+	python codex/topic3/topic3.py up
+
+topic3-eval:
+	python codex/topic3/topic3.py eval
+
+topic3-check:
+	python codex/topic3/topic3.py check
+
+topic3-cache-bench:
+	python codex/topic3/topic3.py cache-bench
 
 # Clean build artifacts
 clean:

@@ -91,6 +91,35 @@ export function listModels(type?: string): Promise<ModelConfig[]> {
   });
 }
 
+export interface ModelUsageSummary {
+  calls: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  cache_reported_calls: number
+  cache_reporting_rate: number
+  provider_cache_hit_rate?: number
+  estimated_cost_cny: number
+  cost_known_calls: number
+  successful_calls: number
+  failed_calls: number
+  embedding_input_count: number
+  embedding_cache_hits: number
+  embedding_cache_hit_rate?: number
+}
+
+export async function getModelUsageSummary(filters: { model?: string; start?: string; end?: string } = {}): Promise<ModelUsageSummary> {
+  const query = new URLSearchParams()
+  if (filters.model) query.set('model', filters.model)
+  if (filters.start) query.set('start', filters.start)
+  if (filters.end) query.set('end', filters.end)
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  const response: any = await get(`/api/v1/evaluation/model-usage${suffix}`)
+  return response.data as ModelUsageSummary
+}
+
 // 获取单个模型
 export function getModel(id: string): Promise<ModelConfig> {
   return new Promise((resolve, reject) => {
