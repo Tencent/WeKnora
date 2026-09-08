@@ -68,26 +68,49 @@ func TestWorkbenchRedisLeaseCompareRenewAndFailClosed(t *testing.T) {
 	defer client.Close()
 	store := &redisWorkbenchStore{client: client, prefix: "test:"}
 	ctx := context.Background()
-	require.NoError(t, store.acquire(ctx, "session", "first"))
-	require.ErrorIs(t, store.acquire(ctx, "session", "second"), ErrWorkbenchBusy)
-	require.NoError(t, store.acquire(ctx, "other-tenant-session", "other"))
-	require.ErrorIs(t, store.renew(ctx, "session", "second"), ErrWorkbenchUnavailable)
-	require.NoError(t, store.release(ctx, "session", "second"))
-	require.True(t, rdb.Exists("test:console:session"))
+	require.NoError(t, store.acquire(ctx, "session", "user", "first"))
+	require.ErrorIs(t, store.acquire(ctx, "session", "user", "second"), ErrWorkbenchBusy)
+	require.NoError(t, store.acquire(ctx, "other-tenant-session", "other-user", "other"))
+	require.ErrorIs(t, store.renew(ctx, "session", "user", "second"), ErrWorkbenchUnavailable)
+	require.NoError(t, store.release(ctx, "session", "user", "second"))
+	require.True(t, rdb.Exists("test:{console}:session:session"))
 	rdb.FastForward(10 * time.Second)
-	require.NoError(t, store.renew(ctx, "session", "first"))
+	require.NoError(t, store.renew(ctx, "session", "user", "first"))
 	rdb.FastForward(10 * time.Second)
-	require.ErrorIs(t, store.acquire(ctx, "session", "second"), ErrWorkbenchBusy)
+	require.ErrorIs(t, store.acquire(ctx, "session", "user", "second"), ErrWorkbenchBusy)
 	rdb.FastForward(6 * time.Second)
-	require.NoError(t, store.acquire(ctx, "session", "second"))
-	require.NoError(t, store.release(ctx, "session", "first"))
-	require.ErrorIs(t, store.renew(ctx, "session", "first"), ErrWorkbenchUnavailable)
-	value, err := rdb.Get("test:console:session")
+	require.NoError(t, store.acquire(ctx, "session", "user", "second"))
+	require.NoError(t, store.release(ctx, "session", "user", "first"))
+	require.ErrorIs(t, store.renew(ctx, "session", "user", "first"), ErrWorkbenchUnavailable)
+	value, err := rdb.Get("test:{console}:session:session")
 	require.NoError(t, err)
 	require.Equal(t, "second", value)
 	rdb.Close()
-	err = store.acquire(ctx, "new", "token")
+	err = store.acquire(ctx, "new", "user", "token")
 	require.ErrorIs(t, err, ErrWorkbenchUnavailable)
+}
+
+func TestWorkbenchRedisAuthenticatedConsoleQuotas(t *testing.T) {
+	rdb := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: rdb.Addr(), MaxRetries: -1})
+	t.Cleanup(func() { _ = client.Close() })
+	store := &redisWorkbenchStore{client: client, prefix: "test:"}
+	ctx := context.Background()
+
+	for i := 0; i < WorkbenchMaxAuthenticatedConsolesUser; i++ {
+		require.NoError(t, store.acquire(ctx, "same-user-"+strings.Repeat("x", i+1), "user", "user-token-"+strings.Repeat("x", i+1)))
+	}
+	require.ErrorIs(t, store.acquire(ctx, "same-user-over", "user", "over"), ErrWorkbenchBusy)
+	require.NoError(t, store.acquire(ctx, "different-user", "other-user", "other"))
+
+	rdb.FlushAll()
+	for i := 0; i < WorkbenchMaxAuthenticatedConsoles; i++ {
+		suffix := strings.Repeat("x", i+1)
+		require.NoError(t, store.acquire(ctx, "session-"+suffix, "user-"+suffix, "token-"+suffix))
+	}
+	require.ErrorIs(t, store.acquire(ctx, "global-over", "fresh-user", "over"), ErrWorkbenchBusy)
+	require.NoError(t, store.release(ctx, "session-x", "user-x", "token-x"))
+	require.NoError(t, store.acquire(ctx, "global-replacement", "fresh-user", "replacement"))
 }
 
 func TestWorkbenchMemoryTicketBoundedAndTTL(t *testing.T) {
@@ -109,4 +132,24 @@ func TestWorkbenchMemoryTicketBoundedAndTTL(t *testing.T) {
 	require.NoError(t, err)
 	_, err = store.consumeTicket(context.Background(), "valid")
 	require.ErrorIs(t, err, ErrWorkbenchTicket)
+}
+
+func TestWorkbenchMemoryAuthenticatedConsoleQuotas(t *testing.T) {
+	store := newMemoryWorkbenchStore()
+	ctx := context.Background()
+	for i := 0; i < WorkbenchMaxAuthenticatedConsolesUser; i++ {
+		suffix := strings.Repeat("x", i+1)
+		require.NoError(t, store.acquire(ctx, "same-user-"+suffix, "user", "token-"+suffix))
+	}
+	require.ErrorIs(t, store.acquire(ctx, "same-user-over", "user", "over"), ErrWorkbenchBusy)
+	require.NoError(t, store.acquire(ctx, "different-user", "other-user", "other"))
+
+	store = newMemoryWorkbenchStore()
+	for i := 0; i < WorkbenchMaxAuthenticatedConsoles; i++ {
+		suffix := strings.Repeat("x", i+1)
+		require.NoError(t, store.acquire(ctx, "session-"+suffix, "user-"+suffix, "token-"+suffix))
+	}
+	require.ErrorIs(t, store.acquire(ctx, "global-over", "fresh-user", "over"), ErrWorkbenchBusy)
+	require.NoError(t, store.release(ctx, "session-x", "user-x", "token-x"))
+	require.NoError(t, store.acquire(ctx, "global-replacement", "fresh-user", "replacement"))
 }

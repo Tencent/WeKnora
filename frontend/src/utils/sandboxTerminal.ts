@@ -1,14 +1,24 @@
 import type { TerminalTicket } from '../api/sandbox-workbench'
 import { workbenchSocketUrl } from './sandboxWorkbench'
+import {
+  terminalBinaryBytes,
+  terminalStdinFrames,
+  terminalTextBytes,
+} from './sandboxTerminalFrames'
+
+export const TERMINAL_MAX_JSON_FRAME_BYTES = 16 * 1024
 
 export type TerminalPhase = 'disconnected' | 'connecting' | 'ready' | 'starting' | 'running'
 export type TerminalEvent =
-  | { type: 'ready' | 'started' | 'pong' }
+  | { type: 'ready'; limits?: { max_frame_bytes?: number } }
+  | { type: 'started' | 'pong' }
   | { type: 'exit'; exit_code: number; reason?: string }
   | { type: 'error'; code: string; message: string }
 
 export type TerminalSocket = Pick<WebSocket,
   'binaryType' | 'readyState' | 'onopen' | 'onmessage' | 'onerror' | 'onclose' | 'send' | 'close'>
+
+const encoder = new TextEncoder()
 
 interface Options {
   ticket: () => Promise<TerminalTicket>
@@ -30,6 +40,7 @@ export class SandboxTerminal {
   private readyTimeout?: ReturnType<typeof setTimeout>
   private lastSeen = 0
   private disposed = false
+  private maxFrameBytes = TERMINAL_MAX_JSON_FRAME_BYTES
 
   constructor(private options: Options) {
     options.signal.addEventListener('abort', this.dispose, { once: true })
@@ -73,6 +84,10 @@ export class SandboxTerminal {
         try { frame = JSON.parse(event.data) } catch { this.fail(new Error('Invalid terminal frame')); return }
         if (!frame || typeof frame !== 'object') { this.fail(new Error('Invalid terminal frame')); return }
         if (frame.type === 'ready' && this.phase === 'connecting') {
+          const advertised = frame.limits?.max_frame_bytes
+          if (Number.isFinite(advertised) && (advertised as number) >= 256) {
+            this.maxFrameBytes = Math.min(TERMINAL_MAX_JSON_FRAME_BYTES, Math.floor(advertised as number))
+          }
           clearTimeout(this.readyTimeout)
           this.setPhase('ready')
           this.heartbeat = setInterval(() => {
@@ -106,7 +121,11 @@ export class SandboxTerminal {
   }
 
   stdin(data: string): boolean {
-    return this.phase === 'running' && this.send({ type: 'stdin', data })
+    return this.sendInput(terminalTextBytes(data))
+  }
+
+  stdinBinary(data: string): boolean {
+    return this.sendInput(terminalBinaryBytes(data))
   }
 
   interrupt(): boolean {
@@ -120,8 +139,20 @@ export class SandboxTerminal {
 
   private send(frame: object): boolean {
     if (this.disposed || this.options.signal.aborted || this.socket?.readyState !== 1) return false
-    try { this.socket.send(JSON.stringify(frame)); return true }
+    try {
+      const payload = JSON.stringify(frame)
+      if (encoder.encode(payload).byteLength > this.maxFrameBytes) return false
+      this.socket.send(payload)
+      return true
+    }
     catch (error) { this.fail(error); return false }
+  }
+
+  private sendInput(bytes: Uint8Array): boolean {
+    if (this.phase !== 'running') return false
+    const frames = terminalStdinFrames(bytes, this.maxFrameBytes)
+    if (bytes.byteLength > 0 && frames.length === 0) return false
+    return frames.every(frame => this.send(frame))
   }
 
   private fail(error: unknown) {

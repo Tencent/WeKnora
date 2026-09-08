@@ -69,10 +69,8 @@ type WorkbenchFileEntry struct {
 
 // WorkbenchFileProviderFrom preserves optional capability discovery through
 // wrappers that expose an accessor or the existing SessionFileStore capability.
-// The effective manager type is checked before unwrapping, including disabled
-// wrappers around otherwise usable remote managers.
 func WorkbenchFileProviderFrom(mgr Manager) (SessionWorkbenchFileProvider, bool) {
-	if mgr == nil || !workbenchBackendEnabled(mgr.GetType()) {
+	if mgr == nil {
 		return nil, false
 	}
 	if accessor, ok := mgr.(interface {
@@ -93,14 +91,23 @@ func WorkbenchFileProviderFrom(mgr Manager) (SessionWorkbenchFileProvider, bool)
 
 func (m *SessionBoundManager) workbenchEnabled() bool {
 	return m != nil && !m.remoteDisabled() && m.client != nil &&
-		workbenchBackendEnabled(m.GetType()) && m.GetType() == m.client.Provider()
+		workbenchPrivateExecSupported(m.client) && m.GetType() == m.client.Provider() &&
+		!workbenchRuntimeKnownIncompatible(m, workbenchRuntimeFiles)
 }
 
-func workbenchBackendEnabled(backend SandboxType) bool {
-	// Cube currently logs the full lowered command, including stdin. Do not
-	// expose file bodies to that logger. Its adapter must provide a redacted
-	// exec path before this optional capability can be enabled there.
-	return backend == SandboxTypeDocker || backend == SandboxTypeE2B
+type workbenchPrivateExecCapability interface {
+	SupportsPrivateWorkbenchExec() bool
+}
+
+func workbenchPrivateExecSupported(client RemoteSandboxClient) bool {
+	switch wrapped := client.(type) {
+	case *langfuseRemoteClient:
+		return workbenchPrivateExecSupported(wrapped.inner)
+	case *langfuseSnapshotClient:
+		return workbenchPrivateExecSupported(wrapped.inner)
+	}
+	capability, ok := client.(workbenchPrivateExecCapability)
+	return ok && capability.SupportsPrivateWorkbenchExec()
 }
 
 func (m *SessionBoundManager) SessionWorkbenchFileProvider() SessionWorkbenchFileProvider {
@@ -119,6 +126,9 @@ var workbenchFileHelper string
 func (m *SessionBoundManager) WorkbenchFiles(
 	ctx context.Context, sessionID string, req WorkbenchFileRequest,
 ) (*WorkbenchFileResult, error) {
+	if m != nil && workbenchRuntimeKnownIncompatible(m, workbenchRuntimeFiles) {
+		return nil, ErrWorkbenchRuntimeIncompatible
+	}
 	if !m.workbenchEnabled() || m.bindings == nil || m.checker == nil {
 		return nil, ErrWorkbenchUnavailable
 	}
@@ -149,6 +159,9 @@ func (m *SessionBoundManager) WorkbenchFiles(
 		}
 		if !ok {
 			return ErrWorkbenchUnavailable
+		}
+		if err := m.ensureWorkbenchRuntime(lockCtx, handle, false, workbenchRuntimeFiles); err != nil {
+			return err
 		}
 		if req.Operation == "write" && len(req.Content) > workbenchDirectBytes {
 			result, err = m.workbenchUpload(lockCtx, handle, req)
@@ -461,7 +474,7 @@ func (m *SessionBoundManager) workbenchUpload(
 func isWorkbenchError(err error) bool {
 	return errors.Is(err, ErrWorkbenchPath) || errors.Is(err, ErrWorkbenchNotFound) ||
 		errors.Is(err, ErrWorkbenchConflict) || errors.Is(err, ErrWorkbenchTooLarge) ||
-		errors.Is(err, ErrWorkbenchUnavailable)
+		errors.Is(err, ErrWorkbenchUnavailable) || errors.Is(err, ErrWorkbenchRuntimeIncompatible)
 }
 
 var _ SessionWorkbenchFileProvider = (*SessionBoundManager)(nil)

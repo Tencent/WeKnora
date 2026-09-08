@@ -76,6 +76,39 @@ class WorkbenchFilesTest(unittest.TestCase):
         self.ok(self.call("mkdir", "d2"))
         self.error(self.call("rename", "d1", new_path="d2"), "conflict")
 
+    def test_failed_direct_write_removes_staging_and_destination(self):
+        original = helper.os.write
+        failed = False
+
+        def fail_after_partial_write(fd, data):
+            nonlocal failed
+            if not failed:
+                failed = True
+                original(fd, data[:1])
+                raise OSError(5, "injected write failure")
+            return original(fd, data)
+
+        with mock.patch.object(helper.os, "write", fail_after_partial_write):
+            self.error(self.call("write", "broken", b"partial-data"), "unavailable")
+        self.assertFalse((self.root / "broken").exists())
+        self.assertEqual([], list(self.root.glob(helper.STAGING_PREFIX + "*")))
+
+    def test_failed_upload_chunk_removes_staging(self):
+        template = {"name": helper.STAGING_PREFIX + "f" * 32,
+                    "device": 0, "inode": 0}
+        ref = self.call("_upload_begin", upload=template)["upload"]
+        original = helper.os.write
+
+        def fail_write(fd, data):
+            original(fd, data[:1])
+            raise OSError(5, "injected chunk failure")
+
+        with mock.patch.object(helper.os, "write", fail_write):
+            self.error(self.call("_upload_chunk", content=b"chunk", upload=ref),
+                       "unavailable")
+        self.assertFalse((self.root / ref["name"]).exists())
+        self.assertEqual([], list(self.root.glob(helper.STAGING_PREFIX + "*")))
+
     def test_lexical_validation_and_root_restriction(self):
         for op in ("read", "write", "mkdir", "rename", "remove"):
             self.error(self.call(op), "path")
@@ -192,7 +225,12 @@ class WorkbenchFilesTest(unittest.TestCase):
             return original(pin, flags)
 
         with mock.patch.object(helper, "reopen_regular", swap):
-            self.error(self.call("read", "leaf"), "path")
+            # Filesystems with ctime precision high enough detect the pinned
+            # inode rename during the read (conflict); others reach the final
+            # name verification and reject the replacement symlink (path).
+            reply = self.call("read", "leaf")
+            self.assertFalse(reply["ok"])
+            self.assertIn(reply["code"], ("path", "conflict"))
         self.assertEqual(b"outside-secret", (self.outside / "secret").read_bytes())
 
     def test_hardlink_added_during_read(self):
@@ -263,19 +301,29 @@ class WorkbenchFilesTest(unittest.TestCase):
         self.assertLessEqual(consumed, helper.MAX_FILE + 1)
 
     def test_upload_identity_digest_and_cleanup(self):
-        ref = {"name": helper.STAGING_PREFIX + "a" * 32, "device": 0, "inode": 0}
-        begin = self.call("_upload_begin", upload=ref)
+        template = {"name": helper.STAGING_PREFIX + "a" * 32,
+                    "device": 0, "inode": 0}
+        begin = self.call("_upload_begin", upload=template)
         self.ok(begin)
         ref = begin["upload"]
         self.ok(self.call("_upload_chunk", content=b"chunk", upload=ref))
         self.error(self.call("_upload_chunk", content=b"again", upload=ref), "conflict")
-        self.error(self.call("write", "dest", upload=ref, size=5, sha256="wrong"), "conflict")
+        self.assertFalse((self.root / ref["name"]).exists())
+        begin = self.call("_upload_begin", upload=template)
+        ref = begin["upload"]
+        self.ok(self.call("_upload_chunk", content=b"chunk", upload=ref))
+        self.error(self.call("write", "dest", upload=ref, size=5,
+                             sha256="0" * 64), "conflict")
         self.assertFalse((self.root / "dest").exists())
+        self.assertFalse((self.root / ref["name"]).exists())
+        begin = self.call("_upload_begin", upload=template)
+        ref = begin["upload"]
+        self.ok(self.call("_upload_chunk", content=b"chunk", upload=ref))
         self.ok(self.call("write", "dest", upload=ref, size=5, sha256=hashlib.sha256(b"chunk").hexdigest()))
         self.ok(self.call("_upload_abort", upload=ref))
         self.assertFalse((self.root / ref["name"]).exists())
         self.assertEqual(b"chunk", (self.root / "dest").read_bytes())
-        begin = self.call("_upload_begin", upload={**ref, "device": 0, "inode": 0})
+        begin = self.call("_upload_begin", upload=template)
         ref = begin["upload"]
         (self.root / ref["name"]).rename(self.root / "old-upload")
         (self.root / ref["name"]).write_bytes(b"replacement")

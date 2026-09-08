@@ -31,17 +31,17 @@ test('live HTML removes executable content, links, forms, remote sources, and ne
   result.window.close()
 })
 
-test('preview CSP blocks all network and auth-bearing subresources, allowing only local styling and data images', () => {
+test('preview CSP blocks all network and auth-bearing subresources, including data images', () => {
   const directives = Object.fromEntries(WORKBENCH_PREVIEW_CSP.split(';').map(part => {
     const [name, ...value] = part.trim().split(' ')
     return [name, value.join(' ')]
   }))
   for (const name of ['default-src', 'script-src', 'connect-src', 'font-src', 'media-src', 'object-src', 'frame-src', 'base-uri', 'form-action']) assert.equal(directives[name], "'none'")
-  assert.equal(directives['img-src'], 'data:')
+  assert.equal(directives['img-src'], "'none'")
   const html = sanitizeWorkbenchPreview('<img src="data:image/png;base64,AAAA"><img src="data:image/svg+xml,<svg onload=alert(1)></svg>">')
   const result = new JSDOM(html)
   const images = result.window.document.querySelectorAll('img')
-  assert.equal(images[0].getAttribute('src'), 'data:image/png;base64,AAAA')
+  assert.equal(images[0].getAttribute('src'), null)
   assert.equal(images[1].getAttribute('src'), null)
   result.window.close()
 })

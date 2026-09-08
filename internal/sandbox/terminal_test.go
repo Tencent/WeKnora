@@ -8,6 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -133,4 +138,185 @@ func TestTerminalEnvdDocumentedJSONFrames(t *testing.T) {
 		require.Error(t, err)
 		require.False(t, errors.Is(err, io.EOF))
 	}
+}
+
+func TestTerminalEnvdBinaryInputRemainsBytes(t *testing.T) {
+	payload := []byte{0, 255, 254, 128, '\r', '\n'}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/process.Process/SendInput", r.URL.Path)
+		var request struct {
+			Input struct {
+				PTY []byte `json:"pty"`
+			} `json:"input"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		require.Equal(t, payload, request.Input.PTY)
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer server.Close()
+	client := &terminalEnvdClient{http: server.Client(), base: server.URL}
+	err := client.unary(context.Background(), "SendInput", struct {
+		Input struct {
+			PTY []byte `json:"pty"`
+		} `json:"input"`
+	}{Input: struct {
+		PTY []byte `json:"pty"`
+	}{PTY: payload}})
+	require.NoError(t, err)
+}
+
+func TestWorkbenchRuntimeProbeFailuresFailCapabilitiesClosed(t *testing.T) {
+	failures := []struct {
+		name         string
+		result       *RemoteExecResult
+		wantTerminal bool
+		wantFiles    bool
+	}{
+		{name: "python", result: &RemoteExecResult{ExitCode: 127}},
+		{name: "bash", result: &RemoteExecResult{Stdout: `{"contract":"weknora-workbench-runtime/v1","terminal":false,"files":true,"missing_terminal":"bash"}`}, wantFiles: true},
+		{name: "proc", result: &RemoteExecResult{Stdout: `{"contract":"weknora-workbench-runtime/v1","terminal":false,"files":false,"missing_terminal":"proc","missing_files":"proc"}`}},
+		{name: "prctl", result: &RemoteExecResult{Stdout: `{"contract":"weknora-workbench-runtime/v1","terminal":false,"files":true,"missing_terminal":"prctl"}`}, wantFiles: true},
+	}
+	for _, failure := range failures {
+		t.Run(failure.name, func(t *testing.T) {
+			mgr, client, ctx := workbenchHarness(t, false)
+			_, terminal := TerminalProviderFrom(mgr)
+			_, files := WorkbenchFileProviderFrom(mgr)
+			require.True(t, terminal)
+			require.True(t, files)
+			creates, connects, _, lists, _ := client.counts()
+			require.Zero(t, creates)
+			require.Zero(t, connects)
+			require.Zero(t, lists)
+
+			client.probeResult = failure.result
+			err := mgr.EnsureWorkbenchSession(ctx, "workbench-test")
+			if failure.wantTerminal || failure.wantFiles {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, ErrWorkbenchRuntimeIncompatible)
+			}
+			require.Equal(t, 1, client.probeCalls)
+			_, terminal = TerminalProviderFrom(mgr)
+			_, files = WorkbenchFileProviderFrom(mgr)
+			require.Equal(t, failure.wantTerminal, terminal)
+			require.Equal(t, failure.wantFiles, files)
+
+			client.probeResult = &RemoteExecResult{
+				Stdout: `{"contract":"weknora-workbench-runtime/v1","terminal":true,"files":true}`,
+			}
+			require.NoError(t, mgr.EnsureWorkbenchSession(ctx, "workbench-test"))
+			require.Equal(t, 2, client.probeCalls)
+			_, terminal = TerminalProviderFrom(mgr)
+			_, files = WorkbenchFileProviderFrom(mgr)
+			require.True(t, terminal)
+			require.True(t, files)
+		})
+	}
+}
+
+func TestWorkbenchInitializationRetriesSandboxReclaimedAfterResolve(t *testing.T) {
+	for _, kind := range []RemoteErrorKind{
+		RemoteErrorKindNotFound,
+		RemoteErrorKindConflict,
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			mgr, client, ctx := workbenchHarness(t, true)
+			workspaceAttempts := 0
+			client.run = func(
+				_ context.Context,
+				handle RemoteSandboxHandle,
+				_ RemoteExecRequest,
+			) (*RemoteExecResult, error) {
+				workspaceAttempts++
+				if workspaceAttempts == 1 {
+					require.NoError(t, client.fakeRemoteClient.Delete(ctx, handle.ID()))
+					return nil, NewRemoteError(
+						client.Provider(),
+						"Exec",
+						kind,
+						"sandbox reclaimed by idle sweep",
+						nil,
+					)
+				}
+				return &RemoteExecResult{}, nil
+			}
+
+			require.NoError(t, mgr.EnsureWorkbenchSession(ctx, "workbench-test"))
+			require.Equal(t, 2, workspaceAttempts)
+			require.Equal(t, 1, client.probeCalls)
+			creates, _, _, _, deletes := client.counts()
+			require.Equal(t, 2, creates)
+			require.Equal(t, 1, deletes)
+
+			key, err := mgr.sessionKey(ctx, "workbench-test")
+			require.NoError(t, err)
+			binding, err := mgr.bindings.Get(ctx, key)
+			require.NoError(t, err)
+			require.Equal(t, "docker-2", binding.SandboxID)
+			leaser := mgr.bindings.(sessionTurnLeaseStore)
+			active, _, err := leaser.TurnState(ctx, key)
+			require.NoError(t, err)
+			require.False(t, active, "initialization must release its temporary turn")
+		})
+	}
+}
+
+func TestWorkbenchRuntimeStateCacheIsBoundedAndExpires(t *testing.T) {
+	now := time.Date(2026, time.September, 8, 12, 0, 0, 0, time.UTC)
+	cache := newWorkbenchRuntimeStateCache(2, 3, time.Minute)
+	cache.now = func() time.Time { return now }
+
+	var latestRuntime workbenchRuntimeKey
+	var latestSandbox workbenchSandboxRuntimeKey
+	for index := 0; index < 4; index++ {
+		latestRuntime = workbenchRuntimeKey{
+			provider: SandboxTypeDocker,
+			configID: fmt.Sprintf("config-%d", index),
+		}
+		latestSandbox = workbenchSandboxRuntimeKey{
+			runtime: latestRuntime,
+			id:      fmt.Sprintf("sandbox-%d", index),
+		}
+		cache.store(
+			latestRuntime,
+			latestSandbox,
+			workbenchRuntimeSupport{terminal: true, files: true},
+		)
+		now = now.Add(time.Second)
+	}
+
+	cache.mu.Lock()
+	require.Len(t, cache.runtimes, 2)
+	require.Len(t, cache.sandboxes, 3)
+	cache.mu.Unlock()
+	_, found := cache.loadRuntime(latestRuntime)
+	require.True(t, found)
+	_, found = cache.loadSandbox(latestSandbox)
+	require.True(t, found)
+
+	now = now.Add(2 * time.Minute)
+	_, found = cache.loadRuntime(latestRuntime)
+	require.False(t, found)
+	_, found = cache.loadSandbox(latestSandbox)
+	require.False(t, found)
+}
+
+func TestTerminalRuntimePythonProbeSuite(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("runtime contract requires Linux")
+	}
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is not installed")
+	}
+	_, source, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	out, err := exec.CommandContext(
+		ctx, python, "-I", filepath.Join(filepath.Dir(source), "terminal_runtime_probe_test.py"),
+	).CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	t.Logf("%s", out)
 }

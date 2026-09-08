@@ -322,6 +322,63 @@ func (r *messageRepository) UpdateMessageKnowledgeID(
 		Update("knowledge_id", knowledgeID).Error
 }
 
+// ListSessionArtifactMessages returns a keyset page of artifact-bearing
+// assistant messages. Keep this projection narrow: message content and the
+// other JSON columns can be large and are irrelevant to the artifact drawer.
+func (r *messageRepository) ListSessionArtifactMessages(
+	ctx context.Context,
+	sessionID string,
+	cursor *types.SessionArtifactCursor,
+	limit int,
+) ([]types.SessionArtifactMessage, bool, error) {
+	if sessionID == "" {
+		return []types.SessionArtifactMessage{}, false, nil
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	query := r.db.WithContext(ctx).
+		Model(&types.Message{}).
+		Select("id AS message_id", "artifacts", "created_at").
+		Where("session_id = ? AND role = ?", sessionID, "assistant").
+		Where("artifacts IS NOT NULL")
+	switch r.db.Dialector.Name() {
+	case "postgres":
+		query = query.Where("jsonb_array_length(artifacts) > 0")
+	case "mysql":
+		query = query.Where("JSON_LENGTH(artifacts) > 0")
+	case "sqlite":
+		query = query.Where("json_array_length(artifacts) > 0")
+	default:
+		query = query.Where("CAST(artifacts AS VARCHAR) NOT IN (?, ?)", "[]", "null")
+	}
+	if cursor != nil {
+		query = query.Where(
+			"(created_at > ?) OR (created_at = ? AND id > ?)",
+			cursor.CreatedAt, cursor.CreatedAt, cursor.MessageID,
+		)
+	}
+
+	rows := make([]types.SessionArtifactMessage, 0, limit+1)
+	if err := query.
+		Order("created_at ASC").
+		Order("id ASC").
+		Limit(limit + 1).
+		Find(&rows).Error; err != nil {
+		return nil, false, err
+	}
+
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	return rows, hasMore, nil
+}
+
 // GetSessionArtifacts returns every skill-produced MessageArtifact recorded
 // against any assistant message of the session, in creation order.
 //
@@ -343,6 +400,7 @@ func (r *messageRepository) GetSessionArtifacts(
 		Select("artifacts", "created_at").
 		Where("session_id = ? AND deleted_at IS NULL", sessionID).
 		Order("created_at ASC").
+		Order("id ASC").
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}

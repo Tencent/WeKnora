@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	appservice "github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -34,7 +35,10 @@ func paramSessionID(c *gin.Context) string {
 // @Tags         会话
 // @Produce      json
 // @Param        session_id  path  string  true  "会话ID"
+// @Param        cursor      query string  false "上一页返回的不透明游标"
+// @Param        limit       query int     false "消息页大小，1-100，默认50"
 // @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  errors.AppError
 // @Failure      404  {object}  errors.AppError
 // @Security     Bearer
 // @Router       /sessions/{session_id}/artifacts [get]
@@ -62,38 +66,58 @@ func (h *Handler) ListSessionArtifacts(c *gin.Context) {
 		return
 	}
 
-	// Preserve message-local download identity. The old flattened artifact
-	// slice cannot identify which message owns index zero of a later reply.
-	items := make([]artifactListItem, 0)
-	const pageSize = 100
-	for page := 1; ; page++ {
-		messages, err := h.messageService.GetMessagesBySession(ctx, sessionID, page, pageSize)
-		if err != nil {
-			logger.Errorf(ctx, "list session artifacts failed: session=%s err=%v", sessionID, err)
-			c.Error(errors.NewInternalServerError("failed to list session artifacts"))
+	limit := 50
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 100 {
+			c.Error(errors.NewBadRequestError("limit must be between 1 and 100"))
 			return
 		}
-		for _, message := range messages {
-			if message == nil || message.SessionID != sessionID {
-				continue
-			}
-			for index, a := range message.Artifacts {
-				items = append(items, artifactListItem{
-					Index: len(items), MessageID: message.ID, ArtifactIndex: index,
-					Handle: artifactHandle(a), FileName: a.FileName, FileType: a.FileType,
-					Kind: a.DisplayKind(), FileSize: a.FileSize, SourcePath: a.SourcePath,
-					ModTime: a.ModTime, CreatedAt: a.CreatedAt,
-				})
-			}
+		limit = parsed
+	}
+
+	page, err := h.messageService.ListSessionArtifactMessages(
+		ctx,
+		sessionID,
+		strings.TrimSpace(c.Query("cursor")),
+		limit,
+	)
+	if err != nil {
+		if stderrors.Is(err, appservice.ErrInvalidArtifactCursor) {
+			c.Error(errors.NewBadRequestError("invalid artifact cursor"))
+			return
 		}
-		if len(messages) < pageSize {
-			break
+		logger.Errorf(ctx, "list session artifacts failed: session=%s err=%v", sessionID, err)
+		c.Error(errors.NewInternalServerError("failed to list session artifacts"))
+		return
+	}
+	if page == nil {
+		c.Error(errors.NewInternalServerError("failed to list session artifacts"))
+		return
+	}
+
+	// Preserve message-local download identity. A flattened artifact slice
+	// cannot identify which message owns index zero of a later reply.
+	items := make([]artifactListItem, 0)
+	for _, message := range page.Messages {
+		if len(message.Artifacts) == 0 {
+			continue
+		}
+		for index, a := range message.Artifacts {
+			items = append(items, artifactListItem{
+				Index: len(items), MessageID: message.MessageID, ArtifactIndex: index,
+				Handle: artifactHandle(a), FileName: a.FileName, FileType: a.FileType,
+				Kind: a.DisplayKind(), FileSize: a.FileSize, SourcePath: a.SourcePath,
+				ModTime: a.ModTime, CreatedAt: a.CreatedAt,
+			})
 		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    items,
+		"success":     true,
+		"data":        items,
+		"next_cursor": page.NextCursor,
+		"has_more":    page.HasMore,
 	})
 }
 

@@ -25,22 +25,42 @@ func TestDeploymentCapabilityKeysMatchFrontend(t *testing.T) {
 
 func TestBuildDeploymentCapabilitiesIncludesAllKeys(t *testing.T) {
 	result := BuildDeploymentCapabilities("standard", DeploymentFeatureAvailability{
-		Organizations: true,
-		Agents:        true,
-		IM:            true,
-		Embed:         true,
-		API:           true,
-		MCP:           true,
-		WebSearch:     true,
-		VectorStore:   true,
-		Storage:       true,
-		Sandbox:       true,
+		Organizations:    true,
+		Agents:           true,
+		IM:               true,
+		Embed:            true,
+		API:              true,
+		MCP:              true,
+		WebSearch:        true,
+		VectorStore:      true,
+		Storage:          true,
+		Sandbox:          true,
+		Workbench:        true,
+		WorkbenchEnabled: true,
 	})
 
 	for _, key := range DeploymentCapabilityKeys {
 		if _, ok := result.Capabilities[key]; !ok {
 			t.Fatalf("missing capability key %q", key)
 		}
+	}
+}
+
+func TestBuildDeploymentCapabilitiesReflectsWorkbenchLifecycle(t *testing.T) {
+	disabled := BuildDeploymentCapabilities("standard", DeploymentFeatureAvailability{Workbench: true})
+	capability := disabled.Capabilities["sandbox.workbench"]
+	if capability.Supported || capability.Reason != "feature_disabled" {
+		t.Fatalf("disabled workbench capability = %#v", capability)
+	}
+
+	enabled := BuildDeploymentCapabilities("standard", DeploymentFeatureAvailability{Workbench: true, WorkbenchEnabled: true})
+	if !enabled.Capabilities["sandbox.workbench"].Supported {
+		t.Fatal("enabled workbench handler must expose sandbox.workbench")
+	}
+
+	missing := BuildDeploymentCapabilities("standard", DeploymentFeatureAvailability{})
+	if missing.Capabilities["sandbox.workbench"].Reason != "route_not_registered" {
+		t.Fatalf("missing workbench reason = %q", missing.Capabilities["sandbox.workbench"].Reason)
 	}
 }
 

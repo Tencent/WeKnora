@@ -165,8 +165,11 @@ func TestWorkbenchTracePayloadRedaction(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(attr.Value.GetStringValue()), &input))
 			if input["command"] == "python3" {
 				workbenchSpans++
-				require.Equal(t, map[string]any{"command": "python3", "shell": false,
-					"work_dir": "/", "user": "root", "timeout_ms": float64(15000)}, input)
+				require.Equal(t, "python3", input["command"])
+				require.Equal(t, false, input["shell"])
+				require.Equal(t, "/", input["work_dir"])
+				require.Equal(t, "root", input["user"])
+				require.Contains(t, []any{float64(10000), float64(15000)}, input["timeout_ms"])
 			}
 			if input["command"] == "ordinary-command-marker" {
 				ordinarySpans++

@@ -3,11 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -18,35 +16,18 @@ import (
 
 const workbenchAuditScope = "sandbox_workbench"
 
-var workbenchRedactions = []*regexp.Regexp{
-	regexp.MustCompile(`(?s)-----BEGIN [^-]*PRIVATE KEY-----.*`),
-	// All assignments are redacted, including non-secret environment values.
-	regexp.MustCompile(`(?i)[a-z_][a-z0-9_]*\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^\s;&|]+)`),
-	regexp.MustCompile(`(?i)(?:--?(?:password|passwd|token|secret|api[-_]?key|authorization|credential|cookie|user)|-H|-u)\s+(?:"[^"\n]*"|'[^'\n]*'|[^\s;&|]+)`),
-	regexp.MustCompile(`(?i)(?:bearer|basic)\s+[a-z0-9+/_.=-]+`),
-	regexp.MustCompile(`(?i)https?://[^\s/@]+:[^\s/@]+@`),
-	regexp.MustCompile(`\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+`),
-	regexp.MustCompile(`\b(?:sk-|ghp_|github_pat_|AKIA)[a-zA-Z0-9_-]+`),
+func redactWorkbenchCommand(command string) string {
+	// Shell syntax has too many credential forms to redact safely with a
+	// denylist. Keep the command out of durable storage; execution_id remains
+	// the correlation handle without exposing even a brute-forceable digest.
+	return "[REDACTED]"
 }
 
-func redactWorkbenchCommand(command string) string {
-	for _, pattern := range workbenchRedactions {
-		command = pattern.ReplaceAllString(command, "[REDACTED]")
+func workbenchCommandAuditDetails(command string) map[string]any {
+	return map[string]any{
+		"command":       redactWorkbenchCommand(command),
+		"command_bytes": len(command),
 	}
-	command = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return ' '
-		}
-		return r
-	}, command)
-	if len(command) > 2048 {
-		command = command[:2048]
-		for !utf8.ValidString(command) {
-			command = command[:len(command)-1]
-		}
-		command += " [truncated]"
-	}
-	return command
 }
 
 type workbenchAudit struct {
@@ -176,7 +157,7 @@ func (s *WorkbenchService) OpenTerminal(ctx context.Context, sessionID string, r
 	if !ok {
 		return nil, ErrWorkbenchCapability
 	}
-	audit, err := s.beginAudit(ctx, session, "command", map[string]any{"command": redactWorkbenchCommand(request.Command)})
+	audit, err := s.beginAudit(ctx, session, "command", workbenchCommandAuditDetails(request.Command))
 	if err != nil {
 		return nil, err
 	}

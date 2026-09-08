@@ -19,7 +19,7 @@ func remoteTerminalFrom(client RemoteSandboxClient) (remoteTerminalProvider, boo
 }
 
 func (m *SessionBoundManager) SessionTerminalProvider() SessionTerminalProvider {
-	if m == nil || m.remoteDisabled() {
+	if m == nil || m.remoteDisabled() || workbenchRuntimeKnownIncompatible(m, workbenchRuntimeTerminal) {
 		return nil
 	}
 	if _, ok := remoteTerminalFrom(m.client); !ok {
@@ -40,6 +40,9 @@ func (m *SessionBoundManager) SessionTerminalProvider() SessionTerminalProvider 
 func (m *SessionBoundManager) OpenSessionTerminal(ctx context.Context, sessionID string, req TerminalRequest) (Terminal, error) {
 	if err := m.requireRemoteBackend(); err != nil {
 		return nil, err
+	}
+	if workbenchRuntimeKnownIncompatible(m, workbenchRuntimeTerminal) {
+		return nil, ErrWorkbenchRuntimeIncompatible
 	}
 	req, err := normalizeTerminalRequest(req)
 	if err != nil {
@@ -90,6 +93,9 @@ func (m *SessionBoundManager) OpenSessionTerminal(ctx context.Context, sessionID
 	}
 	if err := m.ensureSessionWorkspaceDirs(ctx, handle, SessionOutputRoot); err != nil {
 		return nil, errors.Join(terminalProviderError("prepare workspace", err), release())
+	}
+	if err := m.ensureWorkbenchRuntime(ctx, handle, false, workbenchRuntimeTerminal); err != nil {
+		return nil, errors.Join(err, release())
 	}
 	ctx, span := startSandboxSpan(ctx, "sandbox.terminal", terminalSpanInput(req), sandboxHandleMeta(handle))
 	inner, err := provider.OpenTerminal(ctx, handle, req)

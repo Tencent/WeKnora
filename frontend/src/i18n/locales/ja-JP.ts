@@ -14,6 +14,7 @@ export default {
     officeExternal: 'プレビューを停止しました。この Office ファイルには外部リンクやリソースが含まれています。リソースを埋め込んだファイルを使用してください。',
     officeInvalid: 'プレビューを停止しました。この Office ファイルは破損しているか、安全でないアーカイブパスを含んでいます。',
     officeTooLarge: 'プレビューを停止しました。この Office ファイルはアーカイブまたは展開後のサイズ制限を超えています。',
+    imageTooLarge: 'プレビューを停止しました。この画像は寸法またはピクセル数の制限を超えています。',
     noArtifacts: 'このセッションに成果物はありません', missingArtifactIdentity: 'プレビュー識別子がありません', noAudit: '監査記録はありません',
     selectConfig: 'サンドボックス設定を選択', bind: 'セッションに関連付け', noConfigs: '利用可能なサンドボックス設定がありません',
     limits: '制限', commandTimeout: 'コマンド制限時間', sessionTimeout: 'セッション制限時間', cpuLimit: 'CPU 時間', memoryLimit: 'メモリ', fileLimit: 'ファイルサイズ',

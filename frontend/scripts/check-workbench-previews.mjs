@@ -8,8 +8,8 @@ import JSZip from 'jszip'
 import * as XLSX from 'xlsx'
 import { JSDOM } from 'jsdom'
 
-const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || '../../.runtime/node_modules/playwright/index.mjs')
-const origin = process.env.PREVIEW_ORIGIN || 'http://127.0.0.1:15173'
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
+const origin = process.env.PREVIEW_ORIGIN || 'http://127.0.0.1:5173'
 assert.ok(process.env.PREVIEW_ARTIFACT_DIR, 'Set PREVIEW_ARTIFACT_DIR to a directory containing the generated PPTX/HTML/CSV files')
 const exportsDir = pathToFileURL(resolve(process.env.PREVIEW_ARTIFACT_DIR) + '/')
 const saved = await readdir(exportsDir)
@@ -31,6 +31,11 @@ fixtures.set('probe.html', Buffer.from(`<h1>Isolated preview</h1>
   <img src="/api/v1/auth/me"><img src="https://preview-external.invalid/image">
   <style>@import 'https://preview-external.invalid/style'; body {background:url('/api/v1/auth/me')}</style>
   <a href="/api/v1/auth/me">blocked link</a><iframe src="/api/v1/auth/me"></iframe>`))
+const oversizedPng = Buffer.alloc(24)
+oversizedPng.set([0x89, 0x50, 0x4e, 0x47], 0)
+oversizedPng.writeUInt32BE(12000, 16)
+oversizedPng.writeUInt32BE(12000, 20)
+fixtures.set('oversized.png', oversizedPng)
 
 const dom = new JSDOM('')
 const markup = await JSZip.loadAsync(fixtures.get('agent-workbench-demo.pptx'))
@@ -164,6 +169,10 @@ try {
     assert.equal(await frame.locator('script, iframe, [href], [src]').count(), 0)
     assert.equal(await page.evaluate(() => window.__previewLeak), undefined)
     console.log(`PASS ${mode}: opaque HTML frame, CSP, no active content`)
+    await open(mode, 'oversized.png')
+    assert.match(await page.locator('.preview-error').innerText(), /dimension|pixel|尺寸|像素/i)
+    assert.equal(await page.locator('.preview-image img').count(), 0)
+    console.log(`PASS ${mode}: oversized image rejected before browser decode`)
   }
   for (const name of ['agent-workbench-demo.pptx', 'summary.xlsx', 'legacy.xls']) {
     await open('baseline', name)

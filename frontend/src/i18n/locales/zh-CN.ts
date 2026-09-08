@@ -14,6 +14,7 @@ export default {
     officeExternal: '无法预览：此 Office 文件包含外部链接或资源，请使用资源完整内嵌的文件。',
     officeInvalid: '无法预览：此 Office 文件已损坏或包含不安全的压缩包路径。',
     officeTooLarge: '无法预览：此 Office 文件超过压缩包或解压内容大小限制。',
+    imageTooLarge: '无法预览：此图片超过尺寸或像素数量限制。',
     noArtifacts: '当前会话暂无产物', missingArtifactIdentity: '缺少预览标识', noAudit: '暂无审计记录',
     selectConfig: '选择沙箱配置', bind: '绑定到当前会话', noConfigs: '暂无可用沙箱配置',
     limits: '资源限制', commandTimeout: '命令超时', sessionTimeout: '会话超时', cpuLimit: 'CPU 时间', memoryLimit: '内存', fileLimit: '文件大小',

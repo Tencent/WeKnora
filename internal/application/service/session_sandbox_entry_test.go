@@ -97,6 +97,21 @@ func TestArtifactSessionSourceSkipsUnpinnedSession(t *testing.T) {
 	require.Nil(t, collector.sessionSource(context.Background(), "s-1"))
 }
 
+func TestArtifactBaselineTreatsUnpinnedFirstTurnAsEmpty(t *testing.T) {
+	collector := &ArtifactCollector{
+		source:   &fakeSandboxSource{},
+		resolver: stubSandboxResolver{},
+		pinner:   NewSessionSandboxPinner(newPinTestDB(t)),
+	}
+
+	baseline, err := collector.CaptureTurnBaseline(
+		context.Background(), "s-1", "/workspace/output",
+	)
+	require.NoError(t, err)
+	require.True(t, baseline.valid)
+	require.Empty(t, baseline.files)
+}
+
 // Docker (and other named backends) pin the workspace config on first
 // execution. Collection must follow that pin rather than treating the
 // session as having no sandbox.

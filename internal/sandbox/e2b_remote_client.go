@@ -162,7 +162,8 @@ func (h *e2bRemoteHandle) TrafficAccessToken() string {
 
 // --- RemoteSandboxClient ------------------------------------------------------
 
-func (c *E2BRemoteClient) Provider() RemoteProvider { return SandboxTypeE2B }
+func (c *E2BRemoteClient) Provider() RemoteProvider           { return SandboxTypeE2B }
+func (c *E2BRemoteClient) SupportsPrivateWorkbenchExec() bool { return true }
 
 func (c *E2BRemoteClient) Capabilities() RemoteSandboxCapabilities {
 	return RemoteSandboxCapabilities{

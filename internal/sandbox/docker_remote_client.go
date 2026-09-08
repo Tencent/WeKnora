@@ -208,7 +208,8 @@ func (h *dockerSandboxHandle) Provider() RemoteProvider    { return SandboxTypeD
 func (h *dockerSandboxHandle) Metadata() map[string]string { return h.metadata }
 
 // Provider identifies this backend.
-func (c *DockerRemoteClient) Provider() RemoteProvider { return SandboxTypeDocker }
+func (c *DockerRemoteClient) Provider() RemoteProvider           { return SandboxTypeDocker }
+func (c *DockerRemoteClient) SupportsPrivateWorkbenchExec() bool { return true }
 
 // Capabilities reports what this backend can do.
 //
@@ -407,6 +408,15 @@ func (c *DockerRemoteClient) Connect(
 			return nil, err
 		}
 	}
+	// Connect means this sandbox is active again. Refresh its marker before
+	// starting the asynchronous sweep; otherwise the sweep can classify the
+	// very container being connected as idle and delete it before the caller's
+	// first exec. Exec supplies the same marker update for normal commands.
+	if c.sweeper != nil {
+		if err := c.refreshActivity(ctx, inspected.Container.ID); err != nil {
+			return nil, err
+		}
+	}
 	c.sweepInBackground(ctx)
 
 	var labels map[string]string
@@ -418,6 +428,28 @@ func (c *DockerRemoteClient) Connect(
 		metadata: dockerSandboxMetadata(labels),
 	}, nil
 }
+
+func (c *DockerRemoteClient) refreshActivity(ctx context.Context, id string) error {
+	result, err := c.Exec(ctx, &dockerSandboxHandle{id: id}, RemoteExecRequest{
+		Command: "true",
+		User:    DefaultSandboxExecUser,
+		Timeout: dockerActivityRefreshTimeout,
+	})
+	if err != nil {
+		return err
+	}
+	if result == nil || result.Killed || result.ExitCode != 0 {
+		return &RemoteError{
+			Kind:     RemoteErrorKindInternal,
+			Provider: SandboxTypeDocker,
+			Op:       "Connect",
+			Message:  "activity marker refresh failed",
+		}
+	}
+	return nil
+}
+
+const dockerActivityRefreshTimeout = 5 * time.Second
 
 // dockerStartReadyTimeout bounds how long Create/Connect/Exec wait for PID 1
 // after the daemon has accepted a start. The window is milliseconds on a

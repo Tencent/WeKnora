@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -19,11 +20,12 @@ import (
 )
 
 type workbenchClientFrame struct {
-	Type    string `json:"type"`
-	Command string `json:"command,omitempty"`
-	Data    string `json:"data,omitempty"`
-	Cols    uint16 `json:"cols,omitempty"`
-	Rows    uint16 `json:"rows,omitempty"`
+	Type     string `json:"type"`
+	Command  string `json:"command,omitempty"`
+	Data     string `json:"data,omitempty"`
+	Encoding string `json:"encoding,omitempty"`
+	Cols     uint16 `json:"cols,omitempty"`
+	Rows     uint16 `json:"rows,omitempty"`
 }
 
 func decodeWorkbenchFrame(raw []byte, target any) error {
@@ -42,8 +44,12 @@ func decodeWorkbenchFrame(raw []byte, target any) error {
 // Terminal is registered before global bearer/API-key middleware. Its only
 // credential is a single-use ticket in the first text frame, never in a URL.
 func (h *WorkbenchHandler) Terminal(c *gin.Context) {
-	if !h.service.Enabled() {
+	if !h.Enabled() {
 		workbenchHTTPError(c, service.ErrWorkbenchDisabled)
+		return
+	}
+	if h.isShuttingDown() {
+		workbenchHTTPError(c, service.ErrWorkbenchUnavailable)
 		return
 	}
 	if c.Request.URL.RawQuery != "" {
@@ -69,7 +75,14 @@ func (h *WorkbenchHandler) Terminal(c *gin.Context) {
 	if err != nil {
 		return
 	}
-	defer conn.Close()
+	if !h.registerSocket(conn) {
+		_ = conn.Close()
+		return
+	}
+	defer func() {
+		_ = conn.Close()
+		h.unregisterSocket(conn)
+	}()
 	conn.SetReadLimit(service.WorkbenchMaxFrameBytes)
 	// All outbound data goes through one writer. Application-level ping is
 	// JSON; unsolicited protocol controls need no concurrent response writer.
@@ -101,17 +114,26 @@ func (h *WorkbenchHandler) Terminal(c *gin.Context) {
 		writeWorkbenchHandshakeError(conn, err, h.writeTimeout)
 		return
 	}
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = lease.Release(ctx)
-	}()
 	releaseSlot()
 	limits := service.DefaultWorkbenchLimits()
 	ctx, cancel := context.WithTimeout(identity.Context(c.Request.Context()), time.Duration(limits.SessionTimeoutSeconds)*time.Second)
-	defer cancel()
 	_ = conn.SetReadDeadline(time.Now().Add(time.Duration(limits.SessionTimeoutSeconds) * time.Second))
 	console := &workbenchConsole{handler: h, conn: conn, ctx: ctx, cancel: cancel, identity: identity, lease: lease, outgoing: make(chan workbenchOutput, 32), cols: 80, rows: 24}
+	if !h.registerConsole(console) {
+		cancel()
+		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = lease.Release(releaseCtx)
+		releaseCancel()
+		writeWorkbenchHandshakeError(conn, service.ErrWorkbenchUnavailable, h.writeTimeout)
+		return
+	}
+	defer func() {
+		cancel()
+		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = lease.Release(releaseCtx)
+		releaseCancel()
+		h.unregisterConsole(console)
+	}()
 	console.run()
 }
 
@@ -126,8 +148,9 @@ type workbenchOutput struct {
 	data []byte
 }
 type workbenchCommand struct {
-	cancel    context.CancelFunc
-	execution *service.WorkbenchExecution
+	cancel      context.CancelFunc
+	execution   *service.WorkbenchExecution
+	interrupted atomic.Bool
 }
 type workbenchConsole struct {
 	handler     *WorkbenchHandler
@@ -170,9 +193,6 @@ func (w *workbenchConsole) run() {
 		}
 		checkCtx, cancel := context.WithTimeout(w.ctx, 2*time.Second)
 		err = w.lease.Renew(checkCtx)
-		if err == nil {
-			_, err = w.handler.service.Authorize(checkCtx, w.identity.SessionID)
-		}
 		cancel()
 		if err != nil {
 			w.failure(err)
@@ -259,7 +279,7 @@ func (w *workbenchConsole) recheckLoop() {
 }
 
 func (w *workbenchConsole) handle(frame workbenchClientFrame) bool {
-	if frame.Type != "command" && frame.Command != "" || frame.Type != "stdin" && frame.Data != "" || frame.Type != "resize" && (frame.Cols != 0 || frame.Rows != 0) {
+	if frame.Type != "command" && frame.Command != "" || frame.Type != "stdin" && (frame.Data != "" || frame.Encoding != "") || frame.Type != "resize" && (frame.Cols != 0 || frame.Rows != 0) {
 		w.failure(service.ErrWorkbenchInvalid)
 		return false
 	}
@@ -306,6 +326,11 @@ func (w *workbenchConsole) handle(frame workbenchClientFrame) bool {
 	}
 	w.mu.Unlock()
 	if execution == nil {
+		if frame.Type == "interrupt" && active != nil {
+			active.interrupted.Store(true)
+			active.cancel()
+			return true
+		}
 		if frame.Type != "resize" {
 			w.failure(service.ErrWorkbenchInvalid)
 		}
@@ -318,7 +343,18 @@ func (w *workbenchConsole) handle(frame workbenchClientFrame) bool {
 	case "resize":
 		err = execution.Terminal.Resize(ctx, frame.Cols, frame.Rows)
 	case "stdin":
-		err = execution.Terminal.Input(ctx, []byte(frame.Data))
+		var input []byte
+		switch frame.Encoding {
+		case "":
+			input = []byte(frame.Data)
+		case "base64":
+			input, err = base64.StdEncoding.DecodeString(frame.Data)
+		default:
+			err = service.ErrWorkbenchInvalid
+		}
+		if err == nil {
+			err = execution.Terminal.Input(ctx, input)
+		}
 	case "interrupt":
 		err = execution.Terminal.Interrupt(ctx)
 	}
@@ -341,6 +377,10 @@ func (w *workbenchConsole) execute(ctx context.Context, command *workbenchComman
 	}()
 	execution, err := w.handler.service.OpenTerminal(ctx, w.identity.SessionID, request)
 	if err != nil {
+		if command.interrupted.Load() {
+			w.json(map[string]any{"type": "exit", "exit_code": 130, "reason": "interrupted"})
+			return
+		}
 		w.failure(err)
 		return
 	}

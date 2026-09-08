@@ -49,7 +49,7 @@ test('auth is the first frame, with no URL credentials; only the explicit comman
   assert.equal(h.terminal.stdin('idle'), false)
   socket.open()
   assert.deepEqual(socket.sent, [{ type: 'auth', ticket: 'ticket-1' }])
-  socket.frame({ type: 'ready' })
+  socket.frame({ type: 'ready', limits: { max_frame_bytes: 16 * 1024 } })
   assert.equal(h.terminal.stdin('still idle'), false)
   assert.equal(h.terminal.command('printf one\nprintf two'), true)
   assert.equal(h.terminal.command('duplicate'), false)
@@ -62,10 +62,27 @@ test('auth is the first frame, with no URL credentials; only the explicit comman
   assert.equal(h.terminal.phase, 'ready')
   assert.equal(h.terminal.stdin('after exit'), false)
   assert.deepEqual(socket.sent.slice(1), [
-    { type: 'command', command: 'printf one\nprintf two' }, { type: 'stdin', data: '\x03' },
+    { type: 'command', command: 'printf one\nprintf two' }, { type: 'stdin', encoding: 'base64', data: 'Aw==' },
     { type: 'resize', cols: 80, rows: 24 }, { type: 'interrupt' },
   ])
   assert.deepEqual([...h.output[0]], [0x1b, 0x5b, 0x33, 0x31, 0x6d, 0xff])
+})
+
+test('binary stdin preserves 8-bit bytes and large text is split below the server frame limit', async t => {
+  const h = setup()
+  t.after(h.terminal.dispose)
+  await h.terminal.connect()
+  const socket = h.sockets[0]
+  socket.open()
+  socket.frame({ type: 'ready', limits: { max_frame_bytes: 512 } })
+  h.terminal.command('cat')
+  socket.frame({ type: 'started' })
+  assert.equal(h.terminal.stdinBinary(String.fromCharCode(0, 0x80, 0xff)), true)
+  assert.equal(h.terminal.stdin('x'.repeat(2000)), true)
+  const stdin = socket.sent.filter(frame => frame.type === 'stdin')
+  assert.equal(stdin[0].data, 'AID/')
+  assert.ok(stdin.length > 2)
+  for (const frame of stdin) assert.ok(Buffer.byteLength(JSON.stringify(frame)) <= 512)
 })
 
 test('disconnect never reconnects or replays a running command', async t => {

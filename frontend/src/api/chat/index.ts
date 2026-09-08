@@ -119,11 +119,23 @@ export async function listMessageArtifacts(session_id: string, message_id: strin
   );
 }
 
-// listSessionArtifacts returns every artifact recorded against the whole
-// session, in creation order. Powers "download everything generated in this
-// chat" drawers.
-export async function listSessionArtifacts(session_id: string, config?: { signal?: AbortSignal }) {
-  return get<{ success: boolean; data: ArtifactMeta[] }>(`/api/v1/sessions/${encodeURIComponent(session_id)}/artifacts`, config);
+export interface SessionArtifactPage {
+  success: boolean;
+  data: ArtifactMeta[];
+  next_cursor?: string;
+  has_more?: boolean;
+}
+
+// listSessionArtifacts returns one stable keyset page in creation order.
+export async function listSessionArtifacts(
+  session_id: string,
+  config?: { signal?: AbortSignal; cursor?: string; limit?: number },
+) {
+  const params = new URLSearchParams();
+  if (config?.cursor) params.set('cursor', config.cursor);
+  if (config?.limit) params.set('limit', String(config.limit));
+  const query = params.size ? `?${params}` : '';
+  return get<SessionArtifactPage>(`/api/v1/sessions/${encodeURIComponent(session_id)}/artifacts${query}`, { signal: config?.signal });
 }
 
 // downloadArtifact streams a single artifact's bytes as a Blob so the caller

@@ -14,6 +14,7 @@ export default {
     officeExternal: 'Preview blocked: this Office file contains external links or resources. Use a self-contained file.',
     officeInvalid: 'Preview blocked: this Office file is invalid or contains unsafe archive paths.',
     officeTooLarge: 'Preview blocked: this Office file exceeds the archive or expanded-content limits.',
+    imageTooLarge: 'Preview blocked: this image exceeds the dimension or pixel limit.',
     noArtifacts: 'No artifacts in this session', missingArtifactIdentity: 'Preview identity unavailable', noAudit: 'No audit entries',
     selectConfig: 'Select sandbox configuration', bind: 'Bind to session', noConfigs: 'No available sandbox configurations',
     limits: 'Limits', commandTimeout: 'Command timeout', sessionTimeout: 'Session timeout', cpuLimit: 'CPU time', memoryLimit: 'Memory', fileLimit: 'File size',

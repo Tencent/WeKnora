@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -25,10 +27,19 @@ type WorkbenchHandler struct {
 	authTimeout     time.Duration
 	recheckInterval time.Duration
 	writeTimeout    time.Duration
+	consoleMu       sync.Mutex
+	consoles        map[*workbenchConsole]struct{}
+	sockets         map[io.Closer]struct{}
+	consoleWG       sync.WaitGroup
+	socketWG        sync.WaitGroup
+	shuttingDown    bool
 }
 
 func NewWorkbenchHandler(s *service.WorkbenchService) (*WorkbenchHandler, error) {
-	h := &WorkbenchHandler{service: s, origins: make(map[string]bool), unauthenticated: make(chan struct{}, 64), authTimeout: 5 * time.Second, recheckInterval: 5 * time.Second, writeTimeout: 5 * time.Second}
+	h := &WorkbenchHandler{service: s, origins: make(map[string]bool), unauthenticated: make(chan struct{}, 64), authTimeout: 5 * time.Second, recheckInterval: 5 * time.Second, writeTimeout: 5 * time.Second, consoles: make(map[*workbenchConsole]struct{}), sockets: make(map[io.Closer]struct{})}
+	if s == nil || !s.Enabled() {
+		return h, nil
+	}
 	if raw := strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_WORKBENCH_ORIGINS")); raw != "" {
 		for _, value := range strings.Split(raw, ",") {
 			origin, err := workbenchOrigin(strings.TrimSpace(value))
@@ -39,6 +50,82 @@ func NewWorkbenchHandler(s *service.WorkbenchService) (*WorkbenchHandler, error)
 		}
 	}
 	return h, nil
+}
+
+func (h *WorkbenchHandler) registerSocket(socket io.Closer) bool {
+	h.consoleMu.Lock()
+	defer h.consoleMu.Unlock()
+	if h.shuttingDown {
+		return false
+	}
+	h.sockets[socket] = struct{}{}
+	h.socketWG.Add(1)
+	return true
+}
+
+func (h *WorkbenchHandler) unregisterSocket(socket io.Closer) {
+	h.consoleMu.Lock()
+	delete(h.sockets, socket)
+	h.consoleMu.Unlock()
+	h.socketWG.Done()
+}
+
+func (h *WorkbenchHandler) registerConsole(console *workbenchConsole) bool {
+	h.consoleMu.Lock()
+	defer h.consoleMu.Unlock()
+	if h.shuttingDown {
+		return false
+	}
+	h.consoles[console] = struct{}{}
+	h.consoleWG.Add(1)
+	return true
+}
+
+func (h *WorkbenchHandler) unregisterConsole(console *workbenchConsole) {
+	h.consoleMu.Lock()
+	delete(h.consoles, console)
+	h.consoleMu.Unlock()
+	h.consoleWG.Done()
+}
+
+func (h *WorkbenchHandler) isShuttingDown() bool {
+	h.consoleMu.Lock()
+	defer h.consoleMu.Unlock()
+	return h.shuttingDown
+}
+
+// Shutdown prevents new authenticated consoles, cancels active ones and waits
+// for command cleanup, completion auditing and lease release.
+func (h *WorkbenchHandler) Shutdown(ctx context.Context) error {
+	if h == nil {
+		return nil
+	}
+	h.consoleMu.Lock()
+	h.shuttingDown = true
+	sockets := make([]io.Closer, 0, len(h.sockets))
+	for socket := range h.sockets {
+		sockets = append(sockets, socket)
+	}
+	for console := range h.consoles {
+		console.cancel()
+	}
+	h.consoleMu.Unlock()
+	for _, socket := range sockets {
+		_ = socket.Close()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		h.consoleWG.Wait()
+		h.socketWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func workbenchOrigin(raw string) (string, error) {
@@ -163,6 +250,10 @@ func (h *WorkbenchHandler) Bind(c *gin.Context) {
 }
 
 func (h *WorkbenchHandler) Ticket(c *gin.Context) {
+	if !h.Enabled() {
+		workbenchHTTPError(c, service.ErrWorkbenchDisabled)
+		return
+	}
 	origin, err := h.requestOrigin(c.Request, false)
 	if err != nil {
 		workbenchHTTPError(c, err)

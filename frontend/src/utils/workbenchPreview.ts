@@ -1,8 +1,7 @@
 import DOMPurify from 'dompurify'
 import { resolvePreviewKind, sniffPreview, type FilePreviewKind } from './filePreview'
 
-export const WORKBENCH_PREVIEW_CSP = "default-src 'none'; script-src 'none'; connect-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
-const SAFE_DATA_IMAGE = /^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=\s]+$/i
+export const WORKBENCH_PREVIEW_CSP = "default-src 'none'; script-src 'none'; connect-src 'none'; img-src 'none'; style-src 'unsafe-inline'; font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
 
 export function sanitizeWorkbenchPreview(html: string): string {
   const clean = DOMPurify.sanitize(html, {
@@ -11,11 +10,12 @@ export function sanitizeWorkbenchPreview(html: string): string {
     FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'base', 'link', 'meta', 'form', 'input', 'button', 'textarea', 'select', 'audio', 'video', 'source', 'foreignObject', 'animate', 'animateMotion', 'animateTransform', 'set'],
     FORBID_ATTR: ['href', 'xlink:href', 'srcset', 'action', 'formaction', 'target', 'ping', 'background'],
     ALLOW_DATA_ATTR: false,
-    ALLOWED_URI_REGEXP: SAFE_DATA_IMAGE,
+    ALLOWED_URI_REGEXP: /^(?:)$/,
   })
-  // DOMPurify's built-in data-URI exception is broader than ALLOWED_URI_REGEXP.
+  // Restricted HTML has no decoded-pixel budget. Remove all image sources;
+  // direct image files go through validateWorkbenchImage instead.
   for (const element of clean.querySelectorAll('[src]')) {
-    if (!SAFE_DATA_IMAGE.test(element.getAttribute('src') || '')) element.removeAttribute('src')
+    element.removeAttribute('src')
   }
   const container = clean.ownerDocument.createElement('div')
   container.appendChild(clean)

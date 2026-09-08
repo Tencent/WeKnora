@@ -7,10 +7,10 @@
         </t-button>
         <span class="workbench-ellipsis" :title="preview.path">{{ preview.path }}</span>
       </div>
-      <DocumentPreview
+      <WorkbenchDocumentPreview
         :key="preview.key" :source-key="preview.key" :source-blob="preview.blob"
         :file-name="preview.name" :file-type="resolveFilePreviewExt(preview.name)"
-        :active="active" :max-preview-bytes="maxBytes" restricted-preview fill-height
+        :active="active" :max-preview-bytes="maxBytes" :request-signal="signal"
       />
     </template>
     <template v-else>
@@ -75,7 +75,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { WorkbenchApi, WorkbenchFile } from '@/api/sandbox-workbench'
-import DocumentPreview from '@/components/document-preview.vue'
+import WorkbenchDocumentPreview from '@/components/WorkbenchDocumentPreview.vue'
 import { getFileIcon } from '@/utils/files'
 import { resolveFilePreviewExt } from '@/utils/filePreview'
 import {
@@ -110,7 +110,6 @@ async function refresh() {
   if (!current()) return
   const request = ++listRequest
   ++revision
-  closePreview()
   loading.value = true
   error.value = ''
   try {
@@ -122,6 +121,7 @@ async function refresh() {
     entries.value = result.entries.filter(entry =>
       ['file', 'dir'].includes(entry.type) && validWorkbenchPath(entry.path),
     ).sort((a, b) => Number(b.type === 'dir') - Number(a.type === 'dir') || a.name.localeCompare(b.name))
+    if (preview.value && !entries.value.some(entry => entry.type === 'file' && entry.path === preview.value?.path)) closePreview()
   } catch (value) {
     if (current() && request === listRequest) { entries.value = []; error.value = workbenchError(value) || t('workbench.requestFailed') }
   } finally { if (current() && request === listRequest) loading.value = false }

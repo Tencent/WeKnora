@@ -136,6 +136,10 @@ func (h *cubeRemoteHandle) TrafficAccessToken() string {
 
 func (c *CubeRemoteClient) Provider() RemoteProvider { return SandboxTypeCube }
 
+// Cube's current command adapter logs lowered stdin. Do not expose file bodies
+// until that provider supplies a payload-redacted private exec path.
+func (c *CubeRemoteClient) SupportsPrivateWorkbenchExec() bool { return false }
+
 func (c *CubeRemoteClient) Capabilities() RemoteSandboxCapabilities {
 	return RemoteSandboxCapabilities{
 		SupportsReconnect:             true,

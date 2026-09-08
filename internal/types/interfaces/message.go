@@ -60,9 +60,14 @@ type MessageService interface {
 
 	// GetSessionArtifacts returns every skill-produced MessageArtifact
 	// recorded against any assistant message of the session. Used to power
-	// the frontend "download files generated in this session" drawer and
-	// to clean up storage blobs on session deletion.
+	// internal history reconciliation and storage cleanup.
 	GetSessionArtifacts(ctx context.Context, sessionID string) (types.MessageArtifacts, error)
+
+	// ListSessionArtifactMessages returns a cursor page of light message
+	// projections for the session artifact drawer.
+	ListSessionArtifactMessages(
+		ctx context.Context, sessionID, cursor string, limit int,
+	) (*types.SessionArtifactPage, error)
 }
 
 // MessageRepository defines the message repository interface
@@ -117,6 +122,14 @@ type MessageRepository interface {
 	// cheap even for long conversations. Empty slice + nil error means the
 	// session has no artifacts yet (never an error).
 	GetSessionArtifacts(ctx context.Context, sessionID string) (types.MessageArtifacts, error)
+	// ListSessionArtifactMessages returns artifact-bearing assistant messages
+	// ordered by (created_at, id), projecting only id, artifacts and created_at.
+	ListSessionArtifactMessages(
+		ctx context.Context,
+		sessionID string,
+		cursor *types.SessionArtifactCursor,
+		limit int,
+	) ([]types.SessionArtifactMessage, bool, error)
 	// GetSessionAttachments returns every user-uploaded attachment recorded in
 	// the session. Implementations should project only the attachments column.
 	GetSessionAttachments(ctx context.Context, sessionID string) (types.MessageAttachments, error)

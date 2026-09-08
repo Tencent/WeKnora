@@ -238,6 +238,17 @@ func TestWorkbenchStatusAndBind(t *testing.T) {
 	require.Equal(t, DefaultWorkbenchLimits(), status.Limits)
 }
 
+func TestWorkbenchStatusDoesNotAdvertiseTerminalWithoutStore(t *testing.T) {
+	s, ctx, _, _, _ := newWorkbenchFixture(t)
+	s.store = nil
+	status, err := s.Status(ctx, "session")
+	require.NoError(t, err)
+	require.False(t, status.Capabilities["terminal"])
+	require.True(t, status.Capabilities["files"])
+	_, err = s.IssueTicket(ctx, "session", "http://localhost:15173")
+	require.ErrorIs(t, err, ErrWorkbenchCapability)
+}
+
 func TestWorkbenchAuditFailureRefusesOperations(t *testing.T) {
 	s, ctx, manager, audit, _ := newWorkbenchFixture(t)
 	audit.failAt = 1
@@ -303,10 +314,16 @@ func TestWorkbenchPathsAndRedaction(t *testing.T) {
 	for _, value := range []string{"file.txt", "folder/file.txt", "a b.txt"} {
 		require.NoError(t, ValidateWorkbenchPath(value, false))
 	}
-	redacted := redactWorkbenchCommand("HELLO=world\necho " + strings.Repeat("x", 3000))
-	require.NotContains(t, redacted, "world")
-	require.NotContains(t, redacted, "\n")
-	require.Less(t, len(redacted), 2070)
+	for _, command := range []string{
+		"HELLO=world\necho " + strings.Repeat("x", 3000),
+		"mysql -pSecretValue",
+		"psql postgresql://alice:SecretValue@db.example/app",
+	} {
+		details := workbenchCommandAuditDetails(command)
+		require.Equal(t, "[REDACTED]", details["command"])
+		require.Equal(t, len(command), details["command_bytes"])
+		require.NotContains(t, details, "SecretValue")
+	}
 }
 
 func TestWorkbenchOptInAndMemoryRequiresSingleInstance(t *testing.T) {

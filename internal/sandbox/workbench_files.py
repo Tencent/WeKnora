@@ -169,15 +169,101 @@ def write_all(fd, data):
     checked_stat(fd)
 
 
+def random_staging_name():
+    return STAGING_PREFIX + os.urandom(16).hex()
+
+
+def open_random_staging(parent):
+    for _attempt in range(16):
+        name = random_staging_name()
+        try:
+            fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_EXCL
+                         | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent)
+            return name, fd
+        except FileExistsError:
+            pass
+    raise Failure("unavailable")
+
+
+def unlink_if_owned(parent, name, pin):
+    expected = os.fstat(pin)
+    try:
+        current = os.open(name, PIN_FLAGS, dir_fd=parent)
+    except FileNotFoundError:
+        return
+    with owned(current):
+        actual = os.fstat(current)
+        if (stat.S_ISREG(actual.st_mode) and
+                (expected.st_dev, expected.st_ino) == (actual.st_dev, actual.st_ino)):
+            os.unlink(name, dir_fd=parent)
+
+
+def verify_content(pin, expected_size, expected_digest):
+    if (type(expected_size) is not int or expected_size < 0 or expected_size > MAX_FILE
+            or not isinstance(expected_digest, str)
+            or not re.fullmatch("[0-9a-f]{64}", expected_digest)):
+        raise Failure("path")
+    before = checked_stat(pin)
+    if not stat.S_ISREG(before.st_mode):
+        raise Failure("path")
+    if before.st_size != expected_size:
+        raise Failure("conflict")
+    digest = hashlib.sha256()
+    total = 0
+    with owned(reopen_regular(pin, os.O_RDONLY)) as fd:
+        while total <= MAX_FILE:
+            part = os.read(fd, min(CHUNK, MAX_FILE + 1 - total))
+            if not part:
+                break
+            digest.update(part)
+            total += len(part)
+        after = checked_stat(fd)
+    if total != expected_size or digest.hexdigest() != expected_digest:
+        raise Failure("conflict")
+    if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+            after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+        raise Failure("conflict")
+
+
+def publish_staging(parent, staging, pin, name, expected_size, expected_digest):
+    published = False
+    try:
+        ensure_absent(parent, name)
+        verify_name(parent, staging, pin)
+        verify_content(pin, expected_size, expected_digest)
+        rename_noreplace(parent, staging, parent, name)
+        published = True
+        verify_name(parent, name, pin)
+    except BaseException:
+        unlink_if_owned(parent, name if published else staging, pin)
+        raise
+
+
 def create_file(parent, name, data):
     if len(data) > MAX_FILE:
         raise Failure("too_large")
-    ensure_absent(parent, name)
-    fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
-                 | os.O_CLOEXEC, 0o600, dir_fd=parent)
+    staging, fd = open_random_staging(parent)
     with owned(fd):
-        write_all(fd, data)
-        verify_name(parent, name, fd)
+        try:
+            write_all(fd, data)
+            os.fsync(fd)
+            publish_staging(parent, staging, fd, name, len(data),
+                            hashlib.sha256(data).hexdigest())
+        except BaseException:
+            unlink_if_owned(parent, staging, fd)
+            raise
+
+
+def create_upload(root, name):
+    ensure_absent(root, name)
+    fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+                 | os.O_CLOEXEC, 0o600, dir_fd=root)
+    with owned(fd):
+        try:
+            return verify_name(root, name, fd)
+        except BaseException:
+            unlink_if_owned(root, name, fd)
+            raise
 
 
 def rename_noreplace(src_parent, src, dst_parent, dst):
@@ -193,6 +279,22 @@ def rename_noreplace(src_parent, src, dst_parent, dst):
         if code in (errno.ENOSYS, errno.EOPNOTSUPP):
             raise Failure("unavailable")
         raise OSError(code, "renameat2")
+
+
+def move_upload_to_parent(root, upload, pin, parent):
+    for _attempt in range(16):
+        staging = random_staging_name()
+        try:
+            rename_noreplace(root, upload, parent, staging)
+        except FileExistsError:
+            continue
+        try:
+            verify_name(parent, staging, pin)
+            return staging
+        except BaseException:
+            unlink_if_owned(parent, staging, pin)
+            raise
+    raise Failure("unavailable")
 
 
 def list_directory(root, parts, path):
@@ -255,34 +357,63 @@ def upload_operation(root, req, data):
     if op == "_upload_begin":
         if ref["device"] or ref["inode"] or data:
             raise Failure("path")
-        create_file(root, name, b"")
-        with owned(os.open(name, PIN_FLAGS, dir_fd=root)) as fd:
-            info = checked_stat(fd)
-            return {"ok": True, "upload": {"name": name,
-                    "device": info.st_dev, "inode": info.st_ino}}
-    with owned(os.open(name, PIN_FLAGS, dir_fd=root)) as pin:
+        info = create_upload(root, name)
+        return {"ok": True, "upload": {"name": name,
+                "device": info.st_dev, "inode": info.st_ino}}
+    try:
+        pin = os.open(name, PIN_FLAGS, dir_fd=root)
+    except FileNotFoundError:
+        if op == "_upload_abort":
+            return {"ok": True}
+        raise
+    with owned(pin):
         info = check_upload(pin, ref)
         if op == "_upload_abort":
             verify_name(root, name, pin)
             os.unlink(name, dir_fd=root)
         elif op == "_upload_chunk":
-            offset = req.get("offset", 0)
-            if type(offset) is not int or offset < 0:
-                raise Failure("path")
-            if not data or len(data) > CHUNK or offset + len(data) > MAX_FILE:
-                raise Failure("too_large")
-            if info.st_size != offset:
-                raise Failure("conflict")
-            with owned(reopen_regular(pin, os.O_WRONLY | os.O_APPEND)) as fd:
-                if check_upload(fd, ref).st_size != offset:
+            try:
+                offset = req.get("offset", 0)
+                if type(offset) is not int or offset < 0:
+                    raise Failure("path")
+                if not data or len(data) > CHUNK or offset + len(data) > MAX_FILE:
+                    raise Failure("too_large")
+                if info.st_size != offset:
                     raise Failure("conflict")
-                write_all(fd, data)
-                if check_upload(fd, ref).st_size != offset + len(data):
-                    raise Failure("conflict")
-                verify_name(root, name, fd)
+                with owned(reopen_regular(pin, os.O_WRONLY | os.O_APPEND)) as fd:
+                    if check_upload(fd, ref).st_size != offset:
+                        raise Failure("conflict")
+                    write_all(fd, data)
+                    if check_upload(fd, ref).st_size != offset + len(data):
+                        raise Failure("conflict")
+                    verify_name(root, name, fd)
+            except BaseException:
+                unlink_if_owned(root, name, pin)
+                raise
         else:
             raise Failure("path")
     return {"ok": True}
+
+
+def commit_upload(root, parent, name, ref, expected_size, expected_digest):
+    with owned(os.open(ref["name"], PIN_FLAGS, dir_fd=root)) as pin:
+        staging = ""
+        upload_owned = False
+        try:
+            check_upload(pin, ref)
+            upload_owned = True
+            with owned(reopen_regular(pin, os.O_RDWR)) as fd:
+                os.fsync(fd)
+            verify_content(pin, expected_size, expected_digest)
+            ensure_absent(parent, name)
+            staging = move_upload_to_parent(root, ref["name"], pin, parent)
+            publish_staging(parent, staging, pin, name, expected_size, expected_digest)
+        except BaseException:
+            if staging:
+                unlink_if_owned(parent, staging, pin)
+            elif upload_owned:
+                unlink_if_owned(root, ref["name"], pin)
+            raise
 
 
 def perform(req, root_path):
@@ -320,13 +451,10 @@ def perform(req, root_path):
                         if data:
                             raise Failure("path")
                         ref = upload_ref(req)
-                        with owned(os.open(ref["name"], PIN_FLAGS, dir_fd=root)) as pin:
-                            check_upload(pin, ref)
-                            data = read_regular(pin)
-                            if (type(req.get("size")) is not int or len(data) != req["size"]
-                                    or hashlib.sha256(data).hexdigest() != req.get("sha256")):
-                                raise Failure("conflict")
-                    create_file(parent, name, data)
+                        commit_upload(root, parent, name, ref, req.get("size"),
+                                      req.get("sha256"))
+                    else:
+                        create_file(parent, name, data)
                 elif op == "mkdir":
                     ensure_absent(parent, name)
                     os.mkdir(name, 0o700, dir_fd=parent)

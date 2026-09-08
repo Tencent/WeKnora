@@ -20,6 +20,9 @@
           <template #icon><t-icon name="download" /></template>
         </t-button>
       </li>
+      <li v-if="hasMore" class="artifact-load-more">
+        <t-button variant="text" :loading="loadingMore" @click="loadMore">{{ t('common.loadMore') }}</t-button>
+      </li>
     </ul>
     <ChatArtifactsDrawer
       v-if="preview && artifactTarget(preview)" :visible="true" :session-id="sessionId" restricted-preview :request-signal="signal" :max-preview-bytes="maxBytes"
@@ -44,6 +47,9 @@ const loading = ref(false)
 const error = ref('')
 const downloading = ref<ArtifactMeta>()
 const preview = ref<ArtifactMeta>()
+const cursor = ref('')
+const hasMore = ref(false)
+const loadingMore = ref(false)
 let request = 0
 let alive = true
 const current = () => alive && !props.signal.aborted
@@ -60,14 +66,36 @@ function openPreview(item: ArtifactMeta) {
 async function refresh() {
   const version = ++request
   loading.value = true
+  cursor.value = ''
+  hasMore.value = false
   error.value = ''
   try {
-    const result = await listSessionArtifacts(props.sessionId, { signal: props.signal })
+    const result = await listSessionArtifacts(props.sessionId, { signal: props.signal, limit: 50 })
     if (!current() || version !== request) return
     if (!result.success || !Array.isArray(result.data)) throw result
     items.value = result.data
+    cursor.value = result.next_cursor || ''
+    hasMore.value = result.has_more === true && !!cursor.value
   } catch (value) { if (current() && version === request) error.value = workbenchError(value) || t('workbench.requestFailed') }
   finally { if (current() && version === request) loading.value = false }
+}
+
+async function loadMore() {
+  if (!hasMore.value || !cursor.value || loadingMore.value || !current()) return
+  const version = request
+  loadingMore.value = true
+  error.value = ''
+  try {
+    const result = await listSessionArtifacts(props.sessionId, { signal: props.signal, cursor: cursor.value, limit: 50 })
+    if (!current() || version !== request) return
+    if (!result.success || !Array.isArray(result.data)) throw result
+    const seen = new Set(items.value.map(item => `${item.message_id}:${item.artifact_index}`))
+    items.value.push(...result.data.filter(item => !seen.has(`${item.message_id}:${item.artifact_index}`)))
+    cursor.value = result.next_cursor || ''
+    hasMore.value = result.has_more === true && !!cursor.value
+  } catch (value) {
+    if (current() && version === request) error.value = workbenchError(value) || t('workbench.requestFailed')
+  } finally { if (current() && version === request) loadingMore.value = false }
 }
 
 async function download(item: ArtifactMeta) {
@@ -92,4 +120,5 @@ onBeforeUnmount(() => { alive = false; ++request; preview.value = undefined })
 .artifact-name:disabled { cursor: default; }
 .artifact-name small { color: var(--td-text-color-secondary); overflow-wrap: anywhere; }
 .artifact-name .workbench-ellipsis { max-width: 100%; flex: auto; }
+.artifact-load-more { display: flex; justify-content: center; padding: 8px; }
 </style>

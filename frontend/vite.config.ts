@@ -50,7 +50,7 @@ function embedHtmlDevFallback(): Plugin {
 const DEV_PROXY_TARGET =
   process.env.VITE_DEV_PROXY_TARGET ||
   process.env.FRONTEND_BACKEND_URL ||
-  'http://localhost:18081'
+  'http://localhost:8080'
 
 function resolveVueOfficePptxEntry(): string {
   try {
@@ -128,7 +128,7 @@ export default defineConfig({
     },
   },
   server: {
-    port: Number(process.env.VITE_DEV_PORT) || 15173,
+    port: Number(process.env.VITE_DEV_PORT) || 5173,
     host: true,
     // 代理配置，用于开发环境
     proxy: {

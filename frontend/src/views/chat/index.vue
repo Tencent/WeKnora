@@ -6,7 +6,7 @@
         'has-workbench-panel': workbenchVisible,
     }">
         <ChatHeader v-if="!embeddedMode" :session="currentSession" :has-references-panel="referencesDrawerVisible"
-            workbench-enabled :workbench-visible="workbenchVisible" @toggle-workbench="toggleWorkbench" />
+            :workbench-enabled="workbenchEnabled" :workbench-visible="workbenchVisible" @toggle-workbench="toggleWorkbench" />
         <div class="chat_thread">
             <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
                 <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
@@ -170,6 +170,7 @@ import ChatQuestionMinimap from '@/components/chat/ChatQuestionMinimap.vue';
 import { shouldShowConversationTimestamp } from '@/utils/messageTimestamp';
 import ChatHeader from '@/components/ChatHeader.vue';
 import { useAuthStore } from '@/stores/auth';
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
 const SandboxWorkbench = defineAsyncComponent(() => import('./components/workbench/SandboxWorkbench.vue'));
 import {
     notifySessionMutation,
@@ -239,6 +240,8 @@ const route = useRoute();
 const session_id = ref(props.session_id || route.params.chatid);
 const currentSession = ref(null);
 const authStore = useAuthStore();
+const deploymentCapabilities = useDeploymentCapabilitiesStore();
+const workbenchEnabled = computed(() => deploymentCapabilities.isSupported('sandbox.workbench'));
 const workbenchVisible = ref(false);
 const workbenchRef = ref(null);
 const workbenchScopeKey = computed(() => JSON.stringify([session_id.value, route.fullPath, authStore.user?.id, authStore.effectiveTenantId, authStore.isLoggedIn]));
@@ -248,11 +251,12 @@ function closeWorkbench() {
 }
 function toggleWorkbench() {
     if (workbenchVisible.value) { closeWorkbench(); return; }
-    if (!session_id.value || props.embeddedMode) return;
+    if (!workbenchEnabled.value || !session_id.value || props.embeddedMode) return;
     referencesDrawer.close();
     workbenchVisible.value = true;
 }
 watch(workbenchScopeKey, closeWorkbench, { flush: 'sync' });
+watch(workbenchEnabled, enabled => { if (!enabled) closeWorkbench(); }, { flush: 'sync' });
 watch(referencesDrawerVisible, visible => { if (visible) closeWorkbench(); }, { flush: 'sync' });
 
 // 拉 session 详情，并按其 last_request_state 把输入栏状态恢复到当时的发起态。

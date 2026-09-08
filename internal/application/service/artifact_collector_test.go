@@ -55,11 +55,13 @@ func (f *fakeSandboxSource) ReadSessionFile(_ context.Context, _ string, path st
 // fakeStore lets a test declare which (path, mtime) tuples the collector
 // should treat as already recorded.
 type fakeStore struct {
-	prev []types.MessageArtifact
-	err  error
+	prev  []types.MessageArtifact
+	err   error
+	calls int
 }
 
 func (s *fakeStore) KnownArtifacts(_ context.Context, _ string) ([]types.MessageArtifact, error) {
+	s.calls++
 	return s.prev, s.err
 }
 
@@ -190,6 +192,96 @@ func newTestCollector(src *fakeSandboxSource, store *fakeStore, fs *fakeFileServ
 	return NewArtifactCollector(src, fs, store, nil, ArtifactCollectorConfig{MaxFileBytes: max})
 }
 
+func testArtifactBaseline(entries ...sandbox.RemoteDirEntry) ArtifactTurnBaseline {
+	baseline := ArtifactTurnBaseline{
+		outputDir: "/workspace/output",
+		files:     make(map[string]artifactFileState, len(entries)),
+		valid:     true,
+	}
+	for _, entry := range entries {
+		baseline.files[entry.Path] = artifactFileState{
+			modTime: entry.ModTime,
+			size:    entry.Size,
+		}
+	}
+	return baseline
+}
+
+func TestArtifactCollector_TurnBaselineExcludesWorkbenchFiles(t *testing.T) {
+	ctx := context.Background()
+	workbenchFile := sandbox.RemoteDirEntry{
+		Name: "uploaded.csv", Path: "/workspace/output/uploaded.csv",
+		Type: sandbox.RemoteEntryFile, Size: 4,
+		ModTime: mustParseTime("2026-09-08T10:20:33Z"),
+	}
+	agentFile := sandbox.RemoteDirEntry{
+		Name: "generated.csv", Path: "/workspace/output/generated.csv",
+		Type: sandbox.RemoteEntryFile, Size: 3,
+		ModTime: mustParseTime("2026-09-08T10:21:00Z"),
+	}
+	src := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{"sess-1": {workbenchFile}},
+		contents: map[string][]byte{
+			workbenchFile.Path: []byte("user"),
+			agentFile.Path:     []byte("new"),
+		},
+	}
+	store := &fakeStore{prev: []types.MessageArtifact{{
+		SourcePath: agentFile.Path,
+		ModTime:    agentFile.ModTime,
+	}}}
+	collector := newTestCollector(src, store, &fakeFileService{}, 1<<20)
+
+	baseline, err := collector.CaptureTurnBaseline(ctx, "sess-1", "/workspace/output")
+	if err != nil {
+		t.Fatalf("CaptureTurnBaseline() error = %v", err)
+	}
+	src.entries["sess-1"] = append(src.entries["sess-1"], agentFile)
+
+	got, err := collector.Collect(
+		ctx, "sess-1", "msg-1", 42, "/workspace/output", baseline,
+	)
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(got) != 1 || got[0].FileName != agentFile.Name {
+		t.Fatalf("Collect() = %+v, want only current-turn agent output", got)
+	}
+	if store.calls != 0 {
+		t.Fatalf("current-turn attribution must not query historical artifacts; calls=%d", store.calls)
+	}
+}
+
+func TestArtifactCollector_InvalidBaselineFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	src := &fakeSandboxSource{listErr: stderrors.New("envd timeout")}
+	collector := newTestCollector(src, &fakeStore{}, &fakeFileService{}, 1<<20)
+
+	baseline, err := collector.CaptureTurnBaseline(ctx, "sess-1", "/workspace/output")
+	if err == nil {
+		t.Fatal("CaptureTurnBaseline() error = nil, want lookup failure")
+	}
+	src.listErr = nil
+	src.entries = map[string][]sandbox.RemoteDirEntry{"sess-1": {{
+		Name: "user-upload.txt", Path: "/workspace/output/user-upload.txt",
+		Type: sandbox.RemoteEntryFile, Size: 4, ModTime: time.Now(),
+	}}}
+	src.contents = map[string][]byte{"/workspace/output/user-upload.txt": []byte("user")}
+
+	got, err := collector.Collect(
+		ctx, "sess-1", "msg-1", 42, "/workspace/output", baseline,
+	)
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Collect() = %+v, want fail-closed empty result", got)
+	}
+	if len(src.readCalls) != 0 {
+		t.Fatalf("invalid baseline must not read files: %v", src.readCalls)
+	}
+}
+
 func TestArtifactCollector_CollectsNewFiles(t *testing.T) {
 	ctx := context.Background()
 	src := &fakeSandboxSource{
@@ -208,7 +300,7 @@ func TestArtifactCollector_CollectsNewFiles(t *testing.T) {
 	fs := &fakeFileService{}
 	c := newTestCollector(src, store, fs, 1<<20)
 
-	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output", testArtifactBaseline())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -258,6 +350,7 @@ func TestArtifactCollector_NotifyFiresBeforeUpload(t *testing.T) {
 		},
 	}
 	c := newTestCollector(src, &fakeStore{}, &fakeFileService{}, 1<<20)
+	ctx = WithArtifactTurnBaseline(ctx, testArtifactBaseline())
 
 	var notified int
 	got, err := c.CollectWithNotify(ctx, "sess-1", "msg-1", 42, "/workspace/output", func(n int) {
@@ -277,9 +370,8 @@ func TestArtifactCollector_NotifyFiresBeforeUpload(t *testing.T) {
 	}
 }
 
-func TestArtifactCollector_SkipsAlreadyKnown(t *testing.T) {
+func TestArtifactCollector_SkipsWorkbenchFilePresentAtTurnStart(t *testing.T) {
 	ctx := context.Background()
-	mod, _ := time.Parse(time.RFC3339, "2026-07-10T10:20:33Z")
 	src := &fakeSandboxSource{
 		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
@@ -290,24 +382,28 @@ func TestArtifactCollector_SkipsAlreadyKnown(t *testing.T) {
 			"/workspace/output/report.pptx": []byte("PPTX"),
 		},
 	}
-	store := &fakeStore{prev: []types.MessageArtifact{
-		{SourcePath: "/workspace/output/report.pptx", ModTime: mod},
-	}}
+	store := &fakeStore{}
 	fs := &fakeFileService{}
 	c := newTestCollector(src, store, fs, 1<<20)
 
-	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
+	got, err := c.Collect(
+		ctx, "sess-1", "msg-1", 42, "/workspace/output",
+		testArtifactBaseline(src.entries["sess-1"][0]),
+	)
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("Collect() len = %d, want 0 (dedupe should have kicked in)", len(got))
+		t.Fatalf("Collect() len = %d, want 0 (turn baseline should exclude it)", len(got))
 	}
 	if len(fs.saved) != 0 {
 		t.Fatalf("SaveBytes should not have been called; saved=%v", fs.saved)
 	}
 	if len(src.readCalls) != 0 {
 		t.Fatalf("ReadSessionFile should not have been called; readCalls=%v", src.readCalls)
+	}
+	if store.calls != 0 {
+		t.Fatalf("turn attribution must not load historical artifacts; calls=%d", store.calls)
 	}
 }
 
@@ -317,7 +413,8 @@ func TestArtifactCollector_ReattachesOnMtimeChange(t *testing.T) {
 	src := &fakeSandboxSource{
 		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
-				// Same path as the known set, but a *newer* mtime — must be re-attached.
+				// Same path as the baseline, but a newer mtime: the agent
+				// modified it during this turn, so it must be attached.
 				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:21:00Z")},
 			},
 		},
@@ -325,13 +422,17 @@ func TestArtifactCollector_ReattachesOnMtimeChange(t *testing.T) {
 			"/workspace/output/report.pptx": []byte("PPTX"),
 		},
 	}
-	store := &fakeStore{prev: []types.MessageArtifact{
-		{SourcePath: "/workspace/output/report.pptx", ModTime: oldMod},
-	}}
+	store := &fakeStore{}
 	fs := &fakeFileService{}
 	c := newTestCollector(src, store, fs, 1<<20)
 
-	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
+	got, err := c.Collect(
+		ctx, "sess-1", "msg-1", 42, "/workspace/output",
+		testArtifactBaseline(sandbox.RemoteDirEntry{
+			Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile,
+			Size: 4, ModTime: oldMod,
+		}),
+	)
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -360,7 +461,7 @@ func TestArtifactCollector_SkipsOversize(t *testing.T) {
 	fs := &fakeFileService{}
 	c := newTestCollector(src, &fakeStore{}, fs, 100)
 
-	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output", testArtifactBaseline())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -389,7 +490,7 @@ func TestArtifactCollector_SkipsOversizeAfterRead(t *testing.T) {
 	fs := &fakeFileService{}
 	c := newTestCollector(src, &fakeStore{}, fs, 100)
 
-	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output", testArtifactBaseline())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -402,7 +503,7 @@ func TestArtifactCollector_EmptyWhenNoEntries(t *testing.T) {
 	ctx := context.Background()
 	src := &fakeSandboxSource{}
 	c := newTestCollector(src, &fakeStore{}, &fakeFileService{}, 1<<20)
-	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output", testArtifactBaseline())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -417,7 +518,7 @@ func TestArtifactCollector_EmptyWhenNoSessionID(t *testing.T) {
 	ctx := context.Background()
 	src := &fakeSandboxSource{}
 	c := newTestCollector(src, &fakeStore{}, &fakeFileService{}, 1<<20)
-	got, err := c.Collect(ctx, "", "msg-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "", "msg-1", 42, "/workspace/output", testArtifactBaseline())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -433,7 +534,7 @@ func TestArtifactCollector_ListErrorDegrades(t *testing.T) {
 	ctx := context.Background()
 	src := &fakeSandboxSource{listErr: stderrors.New("envd timeout")}
 	c := newTestCollector(src, &fakeStore{}, &fakeFileService{}, 1<<20)
-	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output", testArtifactBaseline())
 	if err != nil {
 		t.Fatalf("Collect() error = %v (should degrade gracefully)", err)
 	}
@@ -463,7 +564,7 @@ func TestArtifactCollector_UploadFailureIsPerFile(t *testing.T) {
 	fs := &fakeFileService{saveErr: stderrors.New("s3 dead")}
 	c := newTestCollector(src, &fakeStore{}, fs, 1<<20)
 
-	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output", testArtifactBaseline())
 	if err != nil {
 		t.Fatalf("Collect() error = %v (want best-effort)", err)
 	}
@@ -489,7 +590,7 @@ func TestArtifactCollector_FiltersDirectories(t *testing.T) {
 		},
 	}
 	c := newTestCollector(src, &fakeStore{}, &fakeFileService{}, 1<<20)
-	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output", testArtifactBaseline())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -518,7 +619,7 @@ func TestArtifactCollector_BindsResourceToMessage(t *testing.T) {
 	cat := &fakeCatalog{}
 	c := NewArtifactCollector(src, fs, &fakeStore{}, cat, ArtifactCollectorConfig{MaxFileBytes: 1 << 20})
 
-	got, err := c.Collect(ctx, "sess-1", "msg-42", 7, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-42", 7, "/workspace/output", testArtifactBaseline())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -551,7 +652,7 @@ func TestArtifactCollector_BindFailureDoesNotDropArtifact(t *testing.T) {
 	cat := &fakeCatalog{bindErr: stderrors.New("db down")}
 	c := NewArtifactCollector(src, fs, &fakeStore{}, cat, ArtifactCollectorConfig{MaxFileBytes: 1 << 20})
 
-	got, err := c.Collect(ctx, "sess-1", "msg-1", 7, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 7, "/workspace/output", testArtifactBaseline())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}

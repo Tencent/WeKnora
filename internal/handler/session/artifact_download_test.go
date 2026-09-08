@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	appservice "github.com/Tencent/WeKnora/internal/application/service"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -41,28 +42,18 @@ func (s *stubSessionServiceForArtifacts) GetSession(ctx context.Context, id stri
 
 type stubMessageServiceForArtifacts struct {
 	interfaces.MessageService
-	getMessage         func(ctx context.Context, sessionID, id string) (*types.Message, error)
-	getSessionArtifact func(ctx context.Context, sessionID string) (types.MessageArtifacts, error)
-	getMessages        func(ctx context.Context, sessionID string, page, pageSize int) ([]*types.Message, error)
+	getMessage    func(ctx context.Context, sessionID, id string) (*types.Message, error)
+	listArtifacts func(ctx context.Context, sessionID, cursor string, limit int) (*types.SessionArtifactPage, error)
 }
 
 func (s *stubMessageServiceForArtifacts) GetMessage(ctx context.Context, sessionID, id string) (*types.Message, error) {
 	return s.getMessage(ctx, sessionID, id)
 }
 
-func (s *stubMessageServiceForArtifacts) GetSessionArtifacts(ctx context.Context, sessionID string) (types.MessageArtifacts, error) {
-	if s.getSessionArtifact == nil {
-		return types.MessageArtifacts{}, nil
-	}
-	return s.getSessionArtifact(ctx, sessionID)
-}
-
-func (s *stubMessageServiceForArtifacts) GetMessagesBySession(ctx context.Context, sessionID string, page, pageSize int) ([]*types.Message, error) {
-	if s.getMessages != nil {
-		return s.getMessages(ctx, sessionID, page, pageSize)
-	}
-	artifacts, err := s.GetSessionArtifacts(ctx, sessionID)
-	return []*types.Message{{ID: "msg-1", SessionID: sessionID, Artifacts: artifacts}}, err
+func (s *stubMessageServiceForArtifacts) ListSessionArtifactMessages(
+	ctx context.Context, sessionID, cursor string, limit int,
+) (*types.SessionArtifactPage, error) {
+	return s.listArtifacts(ctx, sessionID, cursor, limit)
 }
 
 // fakeArtifactFileService serves canned bytes for a single URL.
@@ -239,10 +230,16 @@ func TestListSessionArtifacts_StripsURL(t *testing.T) {
 			},
 		},
 		messageService: &stubMessageServiceForArtifacts{
-			getSessionArtifact: func(_ context.Context, _ string) (types.MessageArtifacts, error) {
-				return types.MessageArtifacts{
-					{URL: "fake://internal/1", FileName: "a.txt", FileSize: 1, CreatedAt: time.Now()},
-				}, nil
+			listArtifacts: func(_ context.Context, sessionID, cursor string, limit int) (*types.SessionArtifactPage, error) {
+				if sessionID != "sess-1" || cursor != "" || limit != 50 {
+					t.Fatalf("unexpected first-page query: session=%q cursor=%q limit=%d", sessionID, cursor, limit)
+				}
+				return &types.SessionArtifactPage{Messages: []types.SessionArtifactMessage{{
+					MessageID: "msg-1",
+					Artifacts: types.MessageArtifacts{
+						{URL: "fake://internal/1", FileName: "a.txt", FileSize: 1, CreatedAt: time.Now()},
+					},
+				}}}, nil
 			},
 		},
 	}
@@ -264,21 +261,77 @@ func TestListSessionArtifacts_StripsURL(t *testing.T) {
 	}
 }
 
+func TestListSessionArtifacts_RejectsInvalidLimit(t *testing.T) {
+	h := &Handler{
+		sessionService: &stubSessionServiceForArtifacts{
+			getSession: func(_ context.Context, _ string) (*types.Session, error) {
+				return &types.Session{ID: "sess-1", TenantID: 42}, nil
+			},
+		},
+		messageService: &stubMessageServiceForArtifacts{
+			listArtifacts: func(context.Context, string, string, int) (*types.SessionArtifactPage, error) {
+				t.Fatal("message service must not run for an invalid limit")
+				return nil, nil
+			},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	newArtifactTestRouter(h).ServeHTTP(w, httptest.NewRequest(
+		http.MethodGet, "/sessions/sess-1/artifacts?limit=101", nil,
+	))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 (body=%s)", w.Code, w.Body.String())
+	}
+}
+
+func TestListSessionArtifacts_RejectsInvalidCursor(t *testing.T) {
+	h := &Handler{
+		sessionService: &stubSessionServiceForArtifacts{
+			getSession: func(_ context.Context, _ string) (*types.Session, error) {
+				return &types.Session{ID: "sess-1", TenantID: 42}, nil
+			},
+		},
+		messageService: &stubMessageServiceForArtifacts{
+			listArtifacts: func(context.Context, string, string, int) (*types.SessionArtifactPage, error) {
+				return nil, appservice.ErrInvalidArtifactCursor
+			},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	newArtifactTestRouter(h).ServeHTTP(w, httptest.NewRequest(
+		http.MethodGet, "/sessions/sess-1/artifacts?cursor=broken", nil,
+	))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 (body=%s)", w.Code, w.Body.String())
+	}
+}
+
 func TestWorkbenchArtifactIdentityAndKind(t *testing.T) {
 	h := &Handler{
 		sessionService: &stubSessionServiceForArtifacts{getSession: func(context.Context, string) (*types.Session, error) {
 			return &types.Session{ID: "session", TenantID: 7}, nil
 		}},
-		messageService: &stubMessageServiceForArtifacts{getMessages: func(_ context.Context, id string, page, pageSize int) ([]*types.Message, error) {
-			return []*types.Message{
-				{ID: "first", SessionID: id, Artifacts: types.MessageArtifacts{{FileName: "one.pptx"}, {FileName: "two.html"}}},
-				{ID: "second", SessionID: id, Artifacts: types.MessageArtifacts{{FileName: "three.xlsx"}}},
-				{ID: "foreign", SessionID: "another-session", Artifacts: types.MessageArtifacts{{FileName: "private.txt"}}},
+		messageService: &stubMessageServiceForArtifacts{listArtifacts: func(_ context.Context, id, cursor string, limit int) (*types.SessionArtifactPage, error) {
+			if id != "session" || cursor != "next-page" || limit != 2 {
+				t.Fatalf("unexpected artifact query: session=%q cursor=%q limit=%d", id, cursor, limit)
+			}
+			return &types.SessionArtifactPage{
+				Messages: []types.SessionArtifactMessage{
+					{MessageID: "first", Artifacts: types.MessageArtifacts{{FileName: "one.pptx"}, {FileName: "two.html"}}},
+					{MessageID: "empty"},
+					{MessageID: "second", Artifacts: types.MessageArtifacts{{FileName: "three.xlsx"}}},
+				},
+				NextCursor: "following-page",
+				HasMore:    true,
 			}, nil
 		}},
 	}
 	w := httptest.NewRecorder()
-	newArtifactTestRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/session/artifacts", nil))
+	newArtifactTestRouter(h).ServeHTTP(w, httptest.NewRequest(
+		http.MethodGet, "/sessions/session/artifacts?cursor=next-page&limit=2", nil,
+	))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -289,6 +342,8 @@ func TestWorkbenchArtifactIdentityAndKind(t *testing.T) {
 			ArtifactIndex int    `json:"artifact_index"`
 			Kind          string `json:"kind"`
 		} `json:"data"`
+		NextCursor string `json:"next_cursor"`
+		HasMore    bool   `json:"has_more"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
@@ -302,6 +357,9 @@ func TestWorkbenchArtifactIdentityAndKind(t *testing.T) {
 	}
 	if result.Data[0].Kind != "presentation" || result.Data[1].Kind != "web_page" {
 		t.Fatalf("legacy classification missing: %s", w.Body.String())
+	}
+	if result.NextCursor != "following-page" || !result.HasMore {
+		t.Fatalf("pagination metadata missing: %s", w.Body.String())
 	}
 	views := publicArtifactViews(types.MessageArtifacts{{FileName: "one.pptx", URL: "private://secret"}})
 	if views[0]["kind"] != types.ArtifactKindForFile("one.pptx") {

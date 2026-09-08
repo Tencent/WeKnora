@@ -14,6 +14,7 @@ export default {
     officeExternal: '미리보기가 차단되었습니다. 이 Office 파일에 외부 링크나 리소스가 포함되어 있습니다. 리소스가 내장된 파일을 사용하세요.',
     officeInvalid: '미리보기가 차단되었습니다. 이 Office 파일이 손상되었거나 안전하지 않은 압축 경로를 포함합니다.',
     officeTooLarge: '미리보기가 차단되었습니다. 이 Office 파일이 압축 파일 또는 압축 해제 크기 제한을 초과합니다.',
+    imageTooLarge: '미리보기가 차단되었습니다. 이 이미지가 크기 또는 픽셀 수 제한을 초과합니다.',
     noArtifacts: '이 세션에 결과물이 없습니다', missingArtifactIdentity: '미리보기 식별자가 없습니다', noAudit: '감사 기록이 없습니다',
     selectConfig: '샌드박스 설정 선택', bind: '세션에 연결', noConfigs: '사용 가능한 샌드박스 설정이 없습니다',
     limits: '제한', commandTimeout: '명령 제한 시간', sessionTimeout: '세션 제한 시간', cpuLimit: 'CPU 시간', memoryLimit: '메모리', fileLimit: '파일 크기',

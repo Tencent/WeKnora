@@ -171,8 +171,8 @@ func workbenchIdentityError(err error) error {
 	return ErrWorkbenchUnavailable
 }
 
-// Authorize also runs for every socket command and on its five-second timer.
-// A failed policy read must never become permission to run.
+// Authorize runs before socket authentication, on its five-second timer and
+// when opening each command. A failed policy read must never become permission.
 func (s *WorkbenchService) Authorize(ctx context.Context, sessionID string) (*types.Session, error) {
 	session, err := s.authorizeIdentity(ctx, sessionID)
 	if err != nil {
@@ -202,7 +202,7 @@ func (s *WorkbenchService) manager(ctx context.Context, tenantID uint64, configI
 	if err != nil {
 		return nil, ErrWorkbenchUnavailable
 	}
-	if entity == nil || entity.TenantID != tenantID || entity.ID != configID || types.IsSandboxWorkspacePolicyRow(entity) || !sandbox.IsNamedSandboxBackendType(entity.SandboxType) {
+	if entity == nil || entity.TenantID != tenantID || entity.ID != configID || types.IsSandboxWorkspacePolicyRow(entity) {
 		return nil, ErrWorkbenchCapability
 	}
 	if entity.IsCordoned(time.Now(), types.SandboxCordonLease) {
@@ -212,15 +212,16 @@ func (s *WorkbenchService) manager(ctx context.Context, tenantID uint64, configI
 	if err != nil {
 		return nil, ErrWorkbenchUnavailable
 	}
-	if mgr == nil || !sandbox.IsNamedSandboxBackendType(string(mgr.GetType())) {
+	if mgr == nil {
 		return nil, ErrWorkbenchCapability
 	}
 	return mgr, nil
 }
 
-func workbenchStatus(configID string, mgr sandbox.Manager) *WorkbenchStatus {
+func workbenchStatus(configID string, mgr sandbox.Manager, consoleAvailable bool) *WorkbenchStatus {
 	_, terminal := sandbox.TerminalProviderFrom(mgr)
 	_, files := sandbox.WorkbenchFileProviderFrom(mgr)
+	terminal = terminal && consoleAvailable
 	status := &WorkbenchStatus{ConfigID: configID, Available: terminal || files, State: "bound", Root: sandbox.SessionOutputRoot, Limits: DefaultWorkbenchLimits(), Capabilities: map[string]bool{"terminal": terminal, "files": files}}
 	if mgr != nil {
 		status.Provider = string(mgr.GetType())
@@ -242,13 +243,13 @@ func (s *WorkbenchService) Status(ctx context.Context, sessionID string) (*Workb
 		return nil, err
 	}
 	if session.SandboxConfigID == "" {
-		return workbenchStatus("", nil), nil
+		return workbenchStatus("", nil, s.store != nil), nil
 	}
 	mgr, err := s.manager(ctx, session.TenantID, session.SandboxConfigID)
 	if err != nil {
 		return nil, err
 	}
-	return workbenchStatus(session.SandboxConfigID, mgr), nil
+	return workbenchStatus(session.SandboxConfigID, mgr, s.store != nil), nil
 }
 
 func (s *WorkbenchService) Bind(ctx context.Context, sessionID, configID string) (status *WorkbenchStatus, retErr error) {
@@ -305,7 +306,7 @@ func (s *WorkbenchService) Bind(ctx context.Context, sessionID, configID string)
 	if err := audit.finish(0, "completed", nil); err != nil {
 		return nil, err
 	}
-	return workbenchStatus(winner, mgr), nil
+	return workbenchStatus(winner, mgr, s.store != nil), nil
 }
 
 // ValidateWorkbenchPath does not normalize away invalid input. The provider

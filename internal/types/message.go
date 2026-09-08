@@ -175,9 +175,8 @@ func (m *MessageAttachments) Scan(value interface{}) error {
 // download them after the sandbox is reaped.
 //
 // URL is the provider-scoped storage path (e.g. "local://tenant/..."), never
-// exposed directly to the client. SourcePath + ModTime form the sandbox-side
-// identity used by ArtifactCollector to de-duplicate files across multi-turn
-// runs (see docs/superpowers/specs/2026-07-10-skill-artifact-download-design.md).
+// exposed directly to the client. SourcePath + ModTime record the sandbox-side
+// version that ArtifactCollector observed after the producing turn.
 type MessageArtifact struct {
 	URL        string       `json:"url"`       // Storage URL (provider://path); persisted, not sent to client
 	FileName   string       `json:"file_name"` // Original filename inside the sandbox
@@ -187,6 +186,27 @@ type MessageArtifact struct {
 	SourcePath string       `json:"source_path"` // Absolute path inside the sandbox (used for diff)
 	ModTime    time.Time    `json:"mod_time"`    // Sandbox-side modification time (used for diff)
 	CreatedAt  time.Time    `json:"created_at"`  // When WeKnora persisted the blob
+}
+
+// SessionArtifactCursor is the stable keyset position used when listing
+// artifact-bearing messages. MessageID breaks timestamp ties.
+type SessionArtifactCursor struct {
+	CreatedAt time.Time
+	MessageID string
+}
+
+// SessionArtifactMessage is the light projection needed by the artifact list.
+type SessionArtifactMessage struct {
+	MessageID string           `gorm:"column:message_id"`
+	Artifacts MessageArtifacts `gorm:"column:artifacts"`
+	CreatedAt time.Time        `gorm:"column:created_at"`
+}
+
+// SessionArtifactPage carries one service-level cursor page.
+type SessionArtifactPage struct {
+	Messages   []SessionArtifactMessage
+	NextCursor string
+	HasMore    bool
 }
 
 // MessageArtifacts is a slice of MessageArtifact for database storage.

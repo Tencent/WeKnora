@@ -28,6 +28,19 @@ func TestWorkbenchSocketAuthTimeoutAndSemaphore(t *testing.T) {
 	require.Eventually(t, func() bool { return len(f.h.unauthenticated) == 0 }, time.Second, 10*time.Millisecond)
 }
 
+func TestWorkbenchShutdownClosesUnauthenticatedSocket(t *testing.T) {
+	f := newWorkbenchHandlerFixture(t)
+	f.h.authTimeout = time.Hour
+	conn := f.socket(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, f.h.Shutdown(ctx))
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	_, _, err := conn.ReadMessage()
+	require.Error(t, err)
+	require.Eventually(t, func() bool { return len(f.h.unauthenticated) == 0 }, time.Second, 10*time.Millisecond)
+}
+
 func TestWorkbenchSocketRejectsQueryCredential(t *testing.T) {
 	f := newWorkbenchHandlerFixture(t)
 	_, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(f.server.URL, "http")+"/api/v1/sandbox-terminal?ticket=not-accepted", http.Header{"Origin": []string{"http://127.0.0.1:15173"}})
@@ -36,30 +49,48 @@ func TestWorkbenchSocketRejectsQueryCredential(t *testing.T) {
 	_ = response.Body.Close()
 }
 
-func TestWorkbenchSocketRechecksEveryFrameAndLeaseLoss(t *testing.T) {
-	for _, revoke := range []string{"membership", "lease"} {
-		t.Run(revoke, func(t *testing.T) {
-			f := newWorkbenchHandlerFixture(t)
-			// Disable the fast test timer so only the frame authorizer can reject.
-			f.h.recheckInterval = time.Hour
-			conn := f.socket(t)
-			authenticateWorkbenchSocket(t, conn, f.ticket(t))
-			if revoke == "membership" {
-				require.NoError(t, f.db.Exec("UPDATE tenant_members SET status='suspended'").Error)
-			} else {
-				f.redis.FlushAll()
-			}
-			require.NoError(t, conn.WriteJSON(map[string]any{"type": "command", "command": "echo prohibited"}))
-			_ = conn.SetReadDeadline(time.Now().Add(time.Second))
-			for {
-				_, _, err := conn.ReadMessage()
-				if err != nil {
-					break
-				}
-			}
-			require.Zero(t, f.manager.opened.Load())
-		})
+func TestWorkbenchSocketFramesOnlyRenewAndCommandReauthorizes(t *testing.T) {
+	f := newWorkbenchHandlerFixture(t)
+	f.h.recheckInterval = time.Hour
+	conn := f.socket(t)
+	authenticateWorkbenchSocket(t, conn, f.ticket(t))
+	baseline := f.policy.calls.Load()
+
+	f.policy.disabled.Store(true)
+	require.NoError(t, conn.WriteJSON(map[string]any{"type": "ping"}))
+	readWorkbenchEvent(t, conn, "pong")
+	require.Equal(t, baseline, f.policy.calls.Load(), "ordinary frames must not run full authorization")
+
+	require.NoError(t, conn.WriteJSON(map[string]any{"type": "command", "command": "echo prohibited"}))
+	require.Equal(t, "policy_disabled", readWorkbenchEvent(t, conn, "error")["code"])
+	require.Equal(t, baseline+1, f.policy.calls.Load(), "OpenTerminal must reauthorize each command")
+	require.Zero(t, f.manager.opened.Load())
+}
+
+func TestWorkbenchSocketFrameFailsClosedOnLeaseLoss(t *testing.T) {
+	f := newWorkbenchHandlerFixture(t)
+	f.h.recheckInterval = time.Hour
+	conn := f.socket(t)
+	authenticateWorkbenchSocket(t, conn, f.ticket(t))
+	f.redis.FlushAll()
+	require.NoError(t, conn.WriteJSON(map[string]any{"type": "ping"}))
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	for {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			break
+		}
 	}
+	require.Zero(t, f.manager.opened.Load())
+}
+
+func TestWorkbenchInterruptCancelsCommandWhileStarting(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	command := &workbenchCommand{cancel: cancel}
+	w := &workbenchConsole{ctx: ctx, cancel: cancel, outgoing: make(chan workbenchOutput, 1), active: command}
+	require.True(t, w.handle(workbenchClientFrame{Type: "interrupt"}))
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+	require.True(t, command.interrupted.Load())
 }
 
 func TestWorkbenchBackpressureCancelsAndOutputLimitClosesProcess(t *testing.T) {

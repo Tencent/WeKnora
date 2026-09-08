@@ -20,12 +20,31 @@ import (
 
 type workbenchTestClient struct {
 	*fakeRemoteClient
-	run func(context.Context, RemoteSandboxHandle, RemoteExecRequest) (*RemoteExecResult, error)
+	run         func(context.Context, RemoteSandboxHandle, RemoteExecRequest) (*RemoteExecResult, error)
+	probeResult *RemoteExecResult
+	probeErr    error
+	probeCalls  int
 }
 
+func (c *workbenchTestClient) SupportsPrivateWorkbenchExec() bool { return true }
+
 func (c *workbenchTestClient) Exec(ctx context.Context, handle RemoteSandboxHandle, req RemoteExecRequest) (*RemoteExecResult, error) {
+	if req.Command == "python3" && len(req.Args) == 3 && req.Args[0] == "-I" &&
+		req.Args[1] == "-c" && req.Args[2] == terminalRuntimeProbe {
+		c.probeCalls++
+		if c.probeResult != nil || c.probeErr != nil {
+			return c.probeResult, c.probeErr
+		}
+		return &RemoteExecResult{Stdout: `{"contract":"weknora-workbench-runtime/v1","terminal":true,"files":true}`}, nil
+	}
 	c.fakeRemoteClient.Exec(ctx, handle, req)
 	return c.run(ctx, handle, req)
+}
+
+func (c *workbenchTestClient) OpenTerminal(
+	context.Context, RemoteSandboxHandle, TerminalRequest,
+) (Terminal, error) {
+	return nil, errors.New("test terminal was not expected to open")
 }
 
 func workbenchHarness(t *testing.T, bound bool) (*SessionBoundManager, *workbenchTestClient, context.Context) {
@@ -89,16 +108,8 @@ func TestWorkbenchCapabilityFailsClosed(t *testing.T) {
 	provider, ok = WorkbenchFileProviderFrom(wrapper)
 	require.True(t, ok)
 	require.Same(t, mgr, provider)
-	wrapper.effective = SandboxTypeDisabled
-	provider, ok = WorkbenchFileProviderFrom(wrapper)
-	require.False(t, ok)
-	require.Nil(t, provider)
-	wrapper.effective = SandboxTypeCube
-	provider, ok = WorkbenchFileProviderFrom(wrapper)
-	require.False(t, ok, "Cube's command logger must not receive workbench bodies")
-	require.Nil(t, provider)
-	require.False(t, workbenchBackendEnabled(SandboxTypeCube))
-	require.True(t, workbenchBackendEnabled(SandboxTypeE2B))
+	require.False(t, workbenchPrivateExecSupported(&CubeRemoteClient{}), "Cube's command logger must not receive workbench bodies")
+	require.True(t, workbenchPrivateExecSupported(&E2BRemoteClient{}))
 	var nilManager *SessionBoundManager
 	for _, disabled := range []Manager{nil, nilManager, NewDisabledManager()} {
 		provider, ok = WorkbenchFileProviderFrom(disabled)

@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -43,9 +44,13 @@ func (s workbenchHandlerSessions) GetOwnedSession(ctx context.Context, id string
 	return &row, err
 }
 
-type workbenchHandlerPolicy struct{ disabled atomic.Bool }
+type workbenchHandlerPolicy struct {
+	disabled atomic.Bool
+	calls    atomic.Int32
+}
 
 func (p *workbenchHandlerPolicy) WorkspaceScriptsDisabled(context.Context, uint64) (bool, error) {
+	p.calls.Add(1)
 	return p.disabled.Load(), nil
 }
 
@@ -268,6 +273,12 @@ func TestWorkbenchSocketStreamingInputResizeInterrupt(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, websocket.BinaryMessage, kind)
 	require.Equal(t, "input:hello\n", string(raw))
+	binary := []byte{0, 0x80, 0xff}
+	require.NoError(t, conn.WriteJSON(map[string]any{"type": "stdin", "encoding": "base64", "data": base64.StdEncoding.EncodeToString(binary)}))
+	kind, raw, err = conn.ReadMessage()
+	require.NoError(t, err)
+	require.Equal(t, websocket.BinaryMessage, kind)
+	require.Equal(t, append([]byte("input:"), binary...), raw)
 	require.NoError(t, conn.WriteJSON(map[string]any{"type": "resize", "cols": 120, "rows": 30}))
 	select {
 	case dims := <-terminal.resized:
@@ -315,6 +326,30 @@ func TestWorkbenchSocketPeriodicRevocation(t *testing.T) {
 	terminal := <-f.manager.terminals
 	f.policy.disabled.Store(true)
 	require.Eventually(t, func() bool { return terminal.closed.Load() && f.audit.count() == 2 }, 2*time.Second, 10*time.Millisecond)
+}
+
+func TestWorkbenchHandlerShutdownWaitsForAuthenticatedConsoles(t *testing.T) {
+	f := newWorkbenchHandlerFixture(t)
+	conn := f.socket(t)
+	authenticateWorkbenchSocket(t, conn, f.ticket(t))
+	require.NoError(t, conn.WriteJSON(map[string]any{"type": "command", "command": "sleep 100"}))
+	readWorkbenchEvent(t, conn, "started")
+	_, _, err := conn.ReadMessage()
+	require.NoError(t, err)
+	terminal := <-f.manager.terminals
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	require.NoError(t, f.h.Shutdown(ctx))
+	require.True(t, terminal.closed.Load())
+	require.Equal(t, 2, f.audit.count())
+	_, _, err = conn.ReadMessage()
+	require.Error(t, err)
+
+	_, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(f.server.URL, "http")+"/api/v1/sandbox-terminal", http.Header{"Origin": []string{"http://127.0.0.1:15173"}})
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, response.StatusCode)
+	_ = response.Body.Close()
 }
 
 func TestWorkbenchSocketAuditFailureNoLaunch(t *testing.T) {
@@ -370,6 +405,20 @@ func TestWorkbenchTicketHTTPOrigin(t *testing.T) {
 			require.Contains(t, w.Body.String(), `"websocket_path":"/api/v1/sandbox-terminal"`)
 		}
 	}
+}
+
+func TestWorkbenchDisabledSkipsOriginConfigurationValidation(t *testing.T) {
+	t.Setenv("WEKNORA_SANDBOX_WORKBENCH_ENABLED", "false")
+	t.Setenv("WEKNORA_SANDBOX_WORKBENCH_ORIGINS", "not-an-origin")
+	h, err := NewWorkbenchHandler(service.NewWorkbenchService(service.WorkbenchServiceDeps{}))
+	require.NoError(t, err)
+	require.NotNil(t, h)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/sessions/session/sandbox/terminal-ticket", nil)
+	c.Request.Header.Set("Origin", "not-an-origin")
+	h.Ticket(c)
+	require.Equal(t, http.StatusNotFound, recorder.Code)
 }
 
 func TestWorkbenchMultipartPathsAndDownload(t *testing.T) {

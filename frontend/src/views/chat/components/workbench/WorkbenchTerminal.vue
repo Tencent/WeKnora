@@ -140,7 +140,7 @@ onMounted(() => {
     onError: value => { error.value = workbenchError(value) || t('workbench.requestFailed') },
   })
   terminal.onData(data => connection?.stdin(data))
-  terminal.onBinary(data => connection?.stdin(data))
+  terminal.onBinary(data => connection?.stdinBinary(data))
   terminal.onResize(({ cols, rows }) => connection?.resize(cols, rows))
   observer = new ResizeObserver(fitTerminal)
   observer.observe(terminalHost.value)

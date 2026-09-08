@@ -16,9 +16,11 @@ import (
 )
 
 const (
-	WorkbenchTicketTTL   = 30 * time.Second
-	workbenchLeaseTTL    = 15 * time.Second
-	workbenchMemoryLimit = 2048
+	WorkbenchTicketTTL                    = 30 * time.Second
+	WorkbenchMaxAuthenticatedConsoles     = 256
+	WorkbenchMaxAuthenticatedConsolesUser = 4
+	workbenchLeaseTTL                     = 15 * time.Second
+	workbenchMemoryLimit                  = 2048
 )
 
 type WorkbenchIdentity struct {
@@ -75,7 +77,10 @@ func (s *WorkbenchService) IssueTicket(ctx context.Context, sessionID, origin st
 	}
 	tid, _ := types.TenantIDFromContext(ctx)
 	uid, _ := types.UserIDFromContext(ctx)
-	identity := WorkbenchIdentity{tid, uid, sessionID, origin, time.Now().Add(WorkbenchTicketTTL)}
+	identity := WorkbenchIdentity{
+		TenantID: tid, UserID: uid, SessionID: sessionID,
+		Origin: origin, ExpiresAt: time.Now().Add(WorkbenchTicketTTL),
+	}
 	if err := s.store.putTicket(ctx, workbenchHash(token), identity); err != nil {
 		return nil, err
 	}
@@ -108,14 +113,15 @@ func (s *WorkbenchService) ConsumeTicket(ctx context.Context, ticket, origin str
 type workbenchStore interface {
 	putTicket(context.Context, string, WorkbenchIdentity) error
 	consumeTicket(context.Context, string) (WorkbenchIdentity, error)
-	acquire(context.Context, string, string) error
-	renew(context.Context, string, string) error
-	release(context.Context, string, string) error
+	acquire(context.Context, string, string, string) error
+	renew(context.Context, string, string, string) error
+	release(context.Context, string, string, string) error
 }
 
 type WorkbenchLease struct {
-	store      workbenchStore
-	key, token string
+	store               workbenchStore
+	sessionKey, userKey string
+	token               string
 }
 
 func (s *WorkbenchService) AcquireConsole(ctx context.Context, i WorkbenchIdentity) (*WorkbenchLease, error) {
@@ -129,16 +135,19 @@ func (s *WorkbenchService) AcquireConsole(ctx context.Context, i WorkbenchIdenti
 	if err != nil {
 		return nil, err
 	}
-	key := workbenchHash(fmt.Sprintf("%d:%s", i.TenantID, i.SessionID))
-	if err := s.store.acquire(ctx, key, token); err != nil {
+	sessionKey := workbenchHash(fmt.Sprintf("%d:%s", i.TenantID, i.SessionID))
+	userKey := workbenchHash(i.UserID)
+	if err := s.store.acquire(ctx, sessionKey, userKey, token); err != nil {
 		return nil, err
 	}
-	return &WorkbenchLease{s.store, key, token}, nil
+	return &WorkbenchLease{s.store, sessionKey, userKey, token}, nil
 }
 
-func (l *WorkbenchLease) Renew(ctx context.Context) error { return l.store.renew(ctx, l.key, l.token) }
+func (l *WorkbenchLease) Renew(ctx context.Context) error {
+	return l.store.renew(ctx, l.sessionKey, l.userKey, l.token)
+}
 func (l *WorkbenchLease) Release(ctx context.Context) error {
-	return l.store.release(ctx, l.key, l.token)
+	return l.store.release(ctx, l.sessionKey, l.userKey, l.token)
 }
 
 type redisWorkbenchStore struct {
@@ -174,30 +183,72 @@ func (s *redisWorkbenchStore) consumeTicket(ctx context.Context, hash string) (W
 	return i, nil
 }
 
-func (s *redisWorkbenchStore) acquire(ctx context.Context, key, token string) error {
-	ok, err := s.client.SetNX(ctx, s.prefix+"console:"+key, token, workbenchLeaseTTL).Result()
+var workbenchAcquireScript = redis.NewScript(`
+local now = redis.call('TIME')
+local now_ms = now[1] * 1000 + math.floor(now[2] / 1000)
+local expires_at = now_ms + tonumber(ARGV[2])
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now_ms)
+redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', now_ms)
+if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
+if redis.call('ZCARD', KEYS[2]) >= tonumber(ARGV[3]) then return -1 end
+if redis.call('ZCARD', KEYS[3]) >= tonumber(ARGV[4]) then return -1 end
+redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+redis.call('ZADD', KEYS[2], expires_at, ARGV[1])
+redis.call('ZADD', KEYS[3], expires_at, ARGV[1])
+redis.call('PEXPIRE', KEYS[2], ARGV[2] * 2)
+redis.call('PEXPIRE', KEYS[3], ARGV[2] * 2)
+return 1
+`)
+
+func (s *redisWorkbenchStore) consoleKeys(sessionKey, userKey string) []string {
+	base := s.prefix + "{console}:"
+	return []string{base + "session:" + sessionKey, base + "global", base + "user:" + userKey}
+}
+
+func (s *redisWorkbenchStore) acquire(ctx context.Context, sessionKey, userKey, token string) error {
+	n, err := workbenchAcquireScript.Run(ctx, s.client, s.consoleKeys(sessionKey, userKey),
+		token, workbenchLeaseTTL.Milliseconds(),
+		WorkbenchMaxAuthenticatedConsoles, WorkbenchMaxAuthenticatedConsolesUser).Int()
 	if err != nil {
 		return ErrWorkbenchUnavailable
 	}
-	if !ok {
+	if n != 1 {
 		return ErrWorkbenchBusy
 	}
 	return nil
 }
 
-var workbenchRenewScript = redis.NewScript(`if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('PEXPIRE', KEYS[1], ARGV[2]) end return 0`)
-var workbenchReleaseScript = redis.NewScript(`if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0`)
+var workbenchRenewScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+if not redis.call('ZSCORE', KEYS[2], ARGV[1]) or not redis.call('ZSCORE', KEYS[3], ARGV[1]) then return 0 end
+local now = redis.call('TIME')
+local expires_at = now[1] * 1000 + math.floor(now[2] / 1000) + tonumber(ARGV[2])
+redis.call('PEXPIRE', KEYS[1], ARGV[2])
+redis.call('ZADD', KEYS[2], expires_at, ARGV[1])
+redis.call('ZADD', KEYS[3], expires_at, ARGV[1])
+redis.call('PEXPIRE', KEYS[2], ARGV[2] * 2)
+redis.call('PEXPIRE', KEYS[3], ARGV[2] * 2)
+return 1
+`)
+var workbenchReleaseScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('DEL', KEYS[1])
+redis.call('ZREM', KEYS[2], ARGV[1])
+redis.call('ZREM', KEYS[3], ARGV[1])
+return 1
+`)
 
-func (s *redisWorkbenchStore) renew(ctx context.Context, key, token string) error {
-	n, err := workbenchRenewScript.Run(ctx, s.client, []string{s.prefix + "console:" + key}, token, workbenchLeaseTTL.Milliseconds()).Int()
+func (s *redisWorkbenchStore) renew(ctx context.Context, sessionKey, userKey, token string) error {
+	n, err := workbenchRenewScript.Run(ctx, s.client, s.consoleKeys(sessionKey, userKey),
+		token, workbenchLeaseTTL.Milliseconds()).Int()
 	if err != nil || n != 1 {
 		return ErrWorkbenchUnavailable
 	}
 	return nil
 }
 
-func (s *redisWorkbenchStore) release(ctx context.Context, key, token string) error {
-	if _, err := workbenchReleaseScript.Run(ctx, s.client, []string{s.prefix + "console:" + key}, token).Result(); err != nil {
+func (s *redisWorkbenchStore) release(ctx context.Context, sessionKey, userKey, token string) error {
+	if _, err := workbenchReleaseScript.Run(ctx, s.client, s.consoleKeys(sessionKey, userKey), token).Result(); err != nil {
 		return ErrWorkbenchUnavailable
 	}
 	return nil
@@ -205,6 +256,7 @@ func (s *redisWorkbenchStore) release(ctx context.Context, key, token string) er
 
 type workbenchMemoryLease struct {
 	token   string
+	userKey string
 	expires time.Time
 }
 type memoryWorkbenchStore struct {
@@ -264,46 +316,57 @@ func (s *memoryWorkbenchStore) consumeTicket(ctx context.Context, hash string) (
 	return i, nil
 }
 
-func (s *memoryWorkbenchStore) acquire(ctx context.Context, key, token string) error {
+func (s *memoryWorkbenchStore) acquire(ctx context.Context, sessionKey, userKey, token string) error {
 	if ctx.Err() != nil {
 		return ErrWorkbenchUnavailable
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.purge()
-	if _, ok := s.leases[key]; ok {
+	if _, ok := s.leases[sessionKey]; ok {
 		return ErrWorkbenchBusy
 	}
-	if len(s.leases) >= workbenchMemoryLimit {
+	if len(s.leases) >= WorkbenchMaxAuthenticatedConsoles {
 		return ErrWorkbenchBusy
 	}
-	s.leases[key] = workbenchMemoryLease{token, s.now().Add(workbenchLeaseTTL)}
+	userConsoles := 0
+	for _, lease := range s.leases {
+		if lease.userKey == userKey {
+			userConsoles++
+		}
+	}
+	if userConsoles >= WorkbenchMaxAuthenticatedConsolesUser {
+		return ErrWorkbenchBusy
+	}
+	s.leases[sessionKey] = workbenchMemoryLease{token: token, userKey: userKey, expires: s.now().Add(workbenchLeaseTTL)}
 	return nil
 }
 
-func (s *memoryWorkbenchStore) renew(ctx context.Context, key, token string) error {
+func (s *memoryWorkbenchStore) renew(ctx context.Context, sessionKey, userKey, token string) error {
 	if ctx.Err() != nil {
 		return ErrWorkbenchUnavailable
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.purge()
-	l, ok := s.leases[key]
-	if !ok || l.token != token {
+	l, ok := s.leases[sessionKey]
+	if !ok || l.token != token || l.userKey != userKey {
 		return ErrWorkbenchUnavailable
 	}
-	s.leases[key] = workbenchMemoryLease{token, s.now().Add(workbenchLeaseTTL)}
+	l.expires = s.now().Add(workbenchLeaseTTL)
+	s.leases[sessionKey] = l
 	return nil
 }
 
-func (s *memoryWorkbenchStore) release(ctx context.Context, key, token string) error {
+func (s *memoryWorkbenchStore) release(ctx context.Context, sessionKey, userKey, token string) error {
 	if ctx.Err() != nil {
 		return ErrWorkbenchUnavailable
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.leases[key].token == token {
-		delete(s.leases, key)
+	lease, ok := s.leases[sessionKey]
+	if ok && lease.token == token && lease.userKey == userKey {
+		delete(s.leases, sessionKey)
 	}
 	return nil
 }

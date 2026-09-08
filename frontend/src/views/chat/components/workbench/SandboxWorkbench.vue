@@ -46,16 +46,16 @@
       </t-tabs>
       <WorkbenchTerminal
         v-if="canUseTerminal" v-show="tab === 'terminal'" :api="api" :signal="scope.signal"
-        :active="tab === 'terminal'" @changed="revision++"
+        :active="tab === 'terminal'" @changed="onTerminalChanged"
       />
       <div v-else-if="tab === 'terminal' && !loading" class="workbench-empty">{{ capabilityLabel('terminal') }}</div>
       <WorkbenchFiles
         v-if="canUseFiles" v-show="tab === 'files'" :api="api" :signal="scope.signal"
-        :active="tab === 'files'" :revision="revision" :max-bytes="maxBytes"
+        :active="tab === 'files'" :revision="fileRevision" :max-bytes="maxBytes"
       />
       <div v-else-if="tab === 'files' && !loading" class="workbench-empty">{{ capabilityLabel('files') }}</div>
-      <WorkbenchArtifacts :session-id="sessionId" :signal="scope.signal" :active="tab === 'artifacts'" :revision="revision" :max-bytes="maxBytes" v-show="tab === 'artifacts'" />
-      <WorkbenchAudit :api="api" :signal="scope.signal" :active="tab === 'audit'" :revision="revision" v-show="tab === 'audit'" />
+      <WorkbenchArtifacts :session-id="sessionId" :signal="scope.signal" :active="tab === 'artifacts'" :revision="recordRevision" :max-bytes="maxBytes" v-show="tab === 'artifacts'" />
+      <WorkbenchAudit :api="api" :signal="scope.signal" :active="tab === 'audit'" :revision="recordRevision" v-show="tab === 'audit'" />
     </div>
   </t-drawer>
 </template>
@@ -91,7 +91,8 @@ const configsLoading = ref(false)
 const policyDisabled = ref(false)
 const binding = ref(false)
 const tab = ref('terminal')
-const revision = ref(0)
+const fileRevision = ref(0)
+const recordRevision = ref(0)
 const media = window.matchMedia('(max-width: 1199px)')
 const overlay = ref(media.matches)
 const canUseTerminal = computed(() => !!status.value?.available && !!status.value.config_id && status.value.capabilities.terminal)
@@ -142,7 +143,6 @@ async function refreshStatus() {
     const result = await api.status()
     if (scope.signal.aborted || request !== statusRequest) return
     status.value = result
-    revision.value++
     if (result.state === 'unbound') await loadConfigs()
   } catch (error) {
     if (!scope.signal.aborted && request === statusRequest) {
@@ -159,9 +159,14 @@ async function bind() {
   configError.value = ''
   try {
     const result = await api.bind(configId.value)
-    if (!scope.signal.aborted) { status.value = result; revision.value++ }
+    if (!scope.signal.aborted) { status.value = result; fileRevision.value++; recordRevision.value++ }
   } catch (error) { if (!scope.signal.aborted) configError.value = workbenchError(error) || t('workbench.requestFailed') }
   finally { if (!scope.signal.aborted) { binding.value = false; loading.value = false } }
+}
+
+function onTerminalChanged() {
+  fileRevision.value++
+  recordRevision.value++
 }
 
 function onMediaChange() { overlay.value = media.matches }

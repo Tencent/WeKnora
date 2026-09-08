@@ -22,6 +22,7 @@ var DeploymentCapabilityKeys = []string{
 	"settings.storage",
 	"settings.sandbox",
 	"settings.sandbox.docker",
+	"sandbox.workbench",
 }
 
 // DeploymentCapability describes whether a deployment exposes a feature route.
@@ -38,17 +39,19 @@ type DeploymentCapabilitiesData struct {
 
 // DeploymentFeatureAvailability mirrors injected backend handlers/services.
 type DeploymentFeatureAvailability struct {
-	Organizations bool
-	Agents        bool
-	IM            bool
-	Embed         bool
-	API           bool
-	MCP           bool
-	WebSearch     bool
-	VectorStore   bool
-	Storage       bool
-	Sandbox       bool
-	SandboxDocker bool
+	Organizations    bool
+	Agents           bool
+	IM               bool
+	Embed            bool
+	API              bool
+	MCP              bool
+	WebSearch        bool
+	VectorStore      bool
+	Storage          bool
+	Sandbox          bool
+	SandboxDocker    bool
+	Workbench        bool
+	WorkbenchEnabled bool
 }
 
 func supportedDeploymentCapability(supported bool) DeploymentCapability {
@@ -77,6 +80,14 @@ func BuildDeploymentCapabilities(
 	} else if !available.Sandbox {
 		sandboxDocker.Reason = "route_not_registered"
 	}
+	workbench := DeploymentCapability{
+		Supported: available.Workbench && available.WorkbenchEnabled,
+	}
+	if !available.Workbench {
+		workbench.Reason = "route_not_registered"
+	} else if !available.WorkbenchEnabled {
+		workbench.Reason = "feature_disabled"
+	}
 
 	return DeploymentCapabilitiesData{
 		Edition: edition,
@@ -92,6 +103,7 @@ func BuildDeploymentCapabilities(
 			"settings.storage":        supportedDeploymentCapability(available.Storage),
 			"settings.sandbox":        supportedDeploymentCapability(available.Sandbox),
 			"settings.sandbox.docker": sandboxDocker,
+			"sandbox.workbench":       workbench,
 		},
 	}
 }

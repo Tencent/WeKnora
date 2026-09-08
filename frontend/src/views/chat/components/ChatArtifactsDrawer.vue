@@ -99,16 +99,26 @@
             </div>
         </template>
         <div v-if="previewItem" class="artifact-preview-body">
-            <DocumentPreview
+            <WorkbenchDocumentPreview
+                v-if="restrictedPreview"
                 :session-id="sessionId"
                 :message-id="messageId"
                 :artifact-index="previewItem.index"
                 :file-type="previewFileType"
                 :file-name="previewItem.file_name"
                 :active="internalVisible"
-                :restricted-preview="restrictedPreview"
                 :request-signal="requestSignal"
                 :max-preview-bytes="maxPreviewBytes"
+            />
+            <DocumentPreview
+                v-else
+                :session-id="sessionId"
+                :message-id="messageId"
+                :artifact-index="previewItem.index"
+                :file-type="previewFileType"
+                :file-name="previewItem.file_name"
+                :active="internalVisible"
+                :request-signal="requestSignal"
                 fill-height
             />
         </div>
@@ -194,6 +204,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { downloadArtifact, listMessageArtifacts, type ArtifactMeta } from '@/api/chat'
 import { resolveArtifactPreview } from '@/utils/artifactPreview'
 import DocumentPreview from '@/components/document-preview.vue'
+import WorkbenchDocumentPreview from '@/components/WorkbenchDocumentPreview.vue'
 
 const LIST_WIDTH = 440
 const PREVIEW_WIDTH_KEY = 'weknora-chat-artifact-preview-width'
