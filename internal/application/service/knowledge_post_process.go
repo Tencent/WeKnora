@@ -414,7 +414,8 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	// 5. Spawn Graph RAG Tasks — only when graph indexing is enabled in IndexingStrategy
 	enqueuedGraphCount := 0
 	if graphChunkCount > 0 {
-		logger.Infof(ctx, "[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d text/OCR chunks (of %d text-like)",
+		logger.Infof(ctx,
+			"[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d text/OCR chunks (of %d text-like)",
 			len(graphChunks), len(textChunks))
 		for i, chunk := range graphChunks {
 			ok, err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.SummaryModelID,
