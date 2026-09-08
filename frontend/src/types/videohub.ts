@@ -83,7 +83,8 @@ export interface ContentState<T> {
 }
 
 export type KnowledgeType = 'entity' | 'concept' | 'case' | 'methodology' | 'insight'
-export type RelationType = 'contradicts' | 'complements' | 'explains' | 'example_of' | 'part_of' | 'derived_from' | 'supports' | 'related_to'
+export type FormalRelationType = 'part_of' | 'explains' | 'example_of' | 'applies_to' | 'supports' | 'contradicts' | 'complements' | 'involves'
+export type RelationType = FormalRelationType | 'derived_from' | 'related_to'
 
 export interface RelationOverview {
   relation_overview: string
@@ -114,9 +115,27 @@ export interface CurrentKnowledgeAnchor {
   timeRange?: string
   sourceVideoTitle?: string
   relatedContent?: WikiDetailLink[]
+  relations?: KnowledgeRelationLink[]
+  evidence?: KnowledgeEvidenceExcerpt[]
   timestamp: string
   seconds: number
   related_count: number
+}
+
+export interface KnowledgeRelationLink {
+  id: string
+  relationType: RelationType
+  targetId: string
+  targetTitle: string
+  targetType: KnowledgeType
+  confidence?: number
+}
+
+export interface KnowledgeEvidenceExcerpt {
+  id: string
+  text: string
+  timestamp: string
+  seconds: number
 }
 
 export interface CrossVideoKnowledgeItem {
@@ -203,6 +222,7 @@ export interface VideoProcessingStatus {
   enhancement_status: VideoProcessingState
   current_stage?: string
   transcript_generation?: string
+  knowledge_contract_version: string
   completed_stages: string[]
   failure?: VideoProcessingFailure
   enhancement_failure?: VideoProcessingFailure
@@ -264,6 +284,7 @@ export interface GraphNode {
   link_count?: number
   is_orphan?: boolean
   type?: string
+  knowledge_type?: KnowledgeType | string
   knowledge_id?: string
   wiki_page_id?: string
   knowledge_object_id?: string
@@ -316,12 +337,19 @@ export interface GraphEvidence {
   end_ms: number
   chunk_index: number
   chunk_ids?: string[]
+  transcript_generation?: string
+  evidence_sentence_id?: string
+  text?: string
 }
 
 export interface GraphEdge {
   id: string
   source: string
   target: string
+  source_title?: string
+  source_slug?: string
+  target_title?: string
+  target_slug?: string
   type: string
   weight?: number
   confidence?: number
@@ -335,6 +363,8 @@ export interface GraphReadingAssociation {
   id: string
   source: string
   target: string
+  target_title?: string
+  target_slug?: string
   relation_kind: 'reading' | string
   relation_source: 'wiki_link' | string
   target_exists: boolean
@@ -353,6 +383,27 @@ export interface WikiGraphMeta {
   reading_association_count?: number
 }
 
+export type KnowledgeGraphStatus = 'ready' | 'partial' | 'empty' | 'filter_empty' | 'not_generated' | 'not_projected' | 'video_missing' | 'failed'
+
+export interface KnowledgeGraphCounts {
+  scope_nodes: number
+  filtered_nodes: number
+  candidate_nodes: number
+  returned_nodes: number
+  type_counts: Record<string, number>
+  type_denominator: number
+  unknown_types: number
+  unknown_type_denominator: number
+  formal_relations: number
+  formal_relation_denominator: number
+  reading_associations: number
+  reading_association_denominator: number
+  orphan_nodes: number
+  orphan_denominator: number
+  rejected_records: number
+  rejected_denominator: number
+}
+
 export interface WikiGraphRequest {
   mode?: 'overview' | 'ego'
   center?: string
@@ -363,6 +414,7 @@ export interface WikiGraphRequest {
 }
 
 export interface KnowledgeGraphPayload {
+  status?: KnowledgeGraphStatus | string
   knowledge_base_id?: string
   nodes: GraphNode[]
   edges: GraphEdge[]
@@ -370,6 +422,70 @@ export interface KnowledgeGraphPayload {
   wiki_pages?: GraphKnowledgeDetail[]
   meta: WikiGraphMeta
   attributes: string[]
+  unknown_nodes?: Array<{ wiki_page_id: string; title: string; raw_type: string; status: string }>
+  rejected_records?: Array<{ wiki_page_id?: string; title?: string; status: string; reason: string }>
+  counts?: KnowledgeGraphCounts
+}
+
+export interface KnowledgeGraphDetailPayload {
+  status: KnowledgeGraphStatus | string
+  knowledge_base_id?: string
+  detail: GraphKnowledgeDetail
+  evidence: GraphEvidence[]
+  formal_relations: GraphEdge[]
+  reading_associations: GraphReadingAssociation[]
+  counts?: {
+    formal_relations: number
+    formal_relation_denominator: number
+    reading_associations: number
+    reading_association_denominator: number
+    evidence: number
+    evidence_denominator: number
+  }
+}
+
+export interface CrossVideoEvidence {
+  id: string
+  knowledge_id: string
+  video_id: string
+  video_title: string
+  transcript_generation: string
+  text?: string
+  start_ms: number
+  end_ms: number
+  seconds: number
+}
+
+export interface CrossVideoAssociation {
+  id: string
+  source_wiki_page_id: string
+  target_wiki_page_id: string
+  knowledge_object_id: string
+  relation_type: 'shared_object' | string
+  relation_kind: 'cross_video' | string
+  relation_source: 'shared_object' | string
+  relation_description: string
+  source_video_id: string
+  source_video_title: string
+  source_video_type?: string
+  target_video_id: string
+  target_video_title: string
+  target_video_type?: string
+  source_evidence: CrossVideoEvidence
+  target_evidence: CrossVideoEvidence
+}
+
+export type CrossVideoStatus = 'ready' | 'empty' | 'not_generated' | 'candidate_pending' | 'filter_empty' | 'failed'
+
+export interface CrossVideoPayload {
+  status: CrossVideoStatus | string
+  video_id: string
+  wiki_page_id?: string
+  associations: CrossVideoAssociation[]
+  rejected: Array<{ source_wiki_page_id?: string; target_wiki_page_id?: string; reason: string }>
+  candidate_count: number
+  current_page_count: number
+  other_video_count: number
 }
 
 export type DashboardRange = '7d' | '30d' | '90d' | 'custom'

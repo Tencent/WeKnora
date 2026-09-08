@@ -2,6 +2,7 @@ import { del, get, post, postUpload } from '@/utils/request'
 import type { VideoData, VideoOption, VideoProcessingStatus } from '@/types/videohub'
 import { isVideoInitiallyAvailable, mapVideo } from './videoMapping'
 import { parseSubtitleFile } from './contentParsing'
+import { assertSupportedKnowledgeContract } from '@/utils/videoProcessingStatus'
 
 export {
   buildVideoContentState,
@@ -49,7 +50,9 @@ export async function fetchVideoOptions(): Promise<VideoOption[]> {
 }
 
 export async function fetchVideoProcessingStatus(id: string): Promise<VideoProcessingStatus> {
-  return get(`/api/custom/videos/${id}/processing-status`)
+  const status = await get<VideoProcessingStatus>(`/api/custom/videos/${id}/processing-status`)
+  assertSupportedKnowledgeContract(status.knowledge_contract_version)
+  return status
 }
 
 export async function retryVideoProcessingStage(id: string, jobType: string): Promise<{ job_id: string; job_type: string; status: string; reused: boolean }> {

@@ -3,21 +3,25 @@
     <span class="relation-overview__icon" aria-hidden="true"><t-icon name="relation" /></span>
     <div class="relation-overview__metrics">
       <div class="relation-overview__metric">
-        <strong>{{ overview.relation_count }}</strong>
-        <span>个关联知识</span>
+        <strong>{{ knowledgeCount }}</strong>
+        <span>个 Wiki 页面</span>
       </div>
       <span class="relation-overview__divider" aria-hidden="true"></span>
       <div class="relation-overview__metric">
-        <strong>{{ overview.related_video_count }}</strong>
-        <span>个关联视频</span>
+        <strong>{{ overview.relation_count }}</strong>
+        <span>组知识关系</span>
       </div>
+      <template v-if="overview.related_video_count">
+        <span class="relation-overview__divider" aria-hidden="true"></span>
+        <div class="relation-overview__metric"><strong>{{ overview.related_video_count }}</strong><span>个关联视频</span></div>
+      </template>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
 import type { RelationOverview } from '@/types/videohub'
-defineProps<{ overview: RelationOverview }>()
+defineProps<{ overview: RelationOverview; knowledgeCount: number }>()
 </script>
 
 <style scoped>

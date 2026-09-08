@@ -1,4 +1,5 @@
 import type { Chapter, ContentState, CurrentKnowledgeAnchor, CrossVideoKnowledgeItem, RelationOverview, SummarySection } from '@/types/videohub'
+import { resolveProcessingErrorMessage } from '../../utils/videoProcessingStatus'
 
 export interface RelatedKnowledgeContent {
   videoId: string
@@ -68,8 +69,11 @@ function readErrorField(reason: unknown, field: string): string {
 }
 
 function errorMessage(reason: unknown): string {
-  if (reason instanceof Error) return reason.message
-  return readErrorField(reason, 'error_message') || readErrorField(reason, 'message') || readErrorField(reason, 'error')
+  const message = reason instanceof Error
+    ? reason.message
+    : readErrorField(reason, 'error_message') || readErrorField(reason, 'message') || readErrorField(reason, 'error')
+  const code = readErrorField(reason, 'error_code') || readErrorField(reason, 'code')
+  return resolveProcessingErrorMessage(code, message)
 }
 
 export function classifyContentError(reason: unknown): 'not_generated' | 'error' {

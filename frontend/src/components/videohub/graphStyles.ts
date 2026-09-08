@@ -6,15 +6,15 @@ export interface RelationStyle {
 }
 
 export const KNOWN_ATTRIBUTES: Record<string, string> = {
-  '实体': '--td-brand-color',
-  '概念': '--td-text-color-link',
-  '案例': '--td-error-color',
-  '方法论': '--td-success-color',
-  methodology: '--td-success-color',
-  '洞察': '--td-warning-color',
+  '实体': '--color-data-1',
+  '概念': '--color-data-2',
+  '案例': '--color-data-3',
+  '方法论': '--color-data-4',
+  methodology: '--color-data-4',
+  '洞察': '--color-data-5',
 }
 
-export const FALLBACK_ATTRIBUTE_COLOR = '--td-brand-color'
+export const FALLBACK_ATTRIBUTE_COLOR = '--color-data-1'
 
 export const KNOWN_RELATION_TYPES: Record<string, RelationStyle> = {
 	contradicts: { lineStyle: 'dotted', width: 2, opacity: .9, color: '--td-error-color' },

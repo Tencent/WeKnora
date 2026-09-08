@@ -1,15 +1,18 @@
 .videohub-filter-tabs {
   display: flex;
   gap: calc(var(--td-comp-margin-s) * .75);
+  min-height: 32px;
   overflow-x: auto;
   padding-bottom: calc(var(--td-comp-margin-s) / 2);
 }
 
 .videohub-filter-tabs button {
+  box-sizing: border-box;
   display: inline-flex;
   flex: none;
   align-items: center;
   gap: calc(var(--td-comp-margin-s) / 2);
+  min-height: 28px;
   padding: 6px 11px;
   border: 0;
   border-radius: var(--td-radius-round);
@@ -17,6 +20,7 @@
   color: var(--td-text-color-secondary);
   font: inherit;
   font-size: var(--td-font-size-body-small);
+  line-height: 1.2;
   cursor: pointer;
 }
 

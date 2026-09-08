@@ -1,12 +1,13 @@
 <template>
   <nav class="videohub-filter-tabs" aria-label="知识图谱分类筛选">
-    <button type="button" :class="{ 'is-active': modelValue === 'all' }" @click="emit('update:modelValue', 'all')">
+    <button type="button" :aria-pressed="modelValue === 'all'" :class="{ 'is-active': modelValue === 'all' }" @click="emit('update:modelValue', 'all')">
       全部 <small>{{ total }}</small>
     </button>
     <button
       v-for="attribute in visibleAttributes"
       :key="attribute"
       type="button"
+      :aria-pressed="modelValue === attribute"
       :class="{ 'is-active': modelValue === attribute }"
       @click="emit('update:modelValue', attribute)"
     >

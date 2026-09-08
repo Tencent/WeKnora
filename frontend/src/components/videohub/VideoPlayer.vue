@@ -1,10 +1,6 @@
 <template>
   <section ref="playerRoot" class="video-player">
     <video ref="video" :src="src" :poster="poster" preload="metadata" @loadedmetadata="onLoaded" @timeupdate="onTimeUpdate" @play="playing = true" @pause="playing = false" @error="hasError = true" @click="togglePlayback" />
-    <div v-if="title || chapterLabel" class="video-player__copy" aria-hidden="true">
-      <strong v-if="title">{{ title }}</strong>
-      <span v-if="chapterLabel">{{ chapterLabel }}</span>
-    </div>
     <button v-if="!playing && !hasError" class="video-player__center-toggle" type="button" aria-label="播放" @click.stop="togglePlayback">
       <t-icon name="play" />
     </button>
@@ -16,14 +12,14 @@
       </div>
       <div class="video-player__toolbar">
         <button type="button" :aria-label="playing ? '暂停' : '播放'" @click="togglePlayback">{{ playing ? 'Ⅱ' : '▶' }}</button>
-        <button type="button" aria-label="后退 10 秒" @click="skip(-10)">−10s</button>
-        <button type="button" aria-label="前进 10 秒" @click="skip(10)">+10s</button>
         <span>{{ formatTime(currentSeconds) }} / {{ formatTime(duration || durationHint) }}</span>
         <label class="video-player__volume">音量<input v-model.number="volume" type="range" min="0" max="1" step="0.05" aria-label="音量" @input="setVolume" /></label>
-        <select v-model.number="playbackRate" aria-label="播放速度" @change="setPlaybackRate">
-          <option v-for="rate in rates" :key="rate" :value="rate">{{ rate }}x</option>
-        </select>
-        <button type="button" :aria-pressed="subtitlesEnabled" @click="subtitlesEnabled = !subtitlesEnabled">字幕</button>
+        <div class="video-player__speed" @mouseleave="speedMenuOpen = false">
+          <button class="video-player__speed-trigger" type="button" aria-label="播放速度" :aria-expanded="speedMenuOpen" @click.stop="speedMenuOpen = !speedMenuOpen">{{ playbackRate }}x</button>
+          <div v-if="speedMenuOpen" class="video-player__speed-menu" role="listbox" aria-label="播放速度选项" @click.stop>
+            <button v-for="rate in rates" :key="rate" type="button" role="option" :aria-selected="playbackRate === rate" :class="{ 't-is-active': playbackRate === rate }" @click="setPlaybackRate(rate)">{{ rate }}x</button>
+          </div>
+        </div>
         <button type="button" aria-label="全屏" @click="toggleFullscreen">全屏</button>
       </div>
     </div>
@@ -49,6 +45,7 @@ const currentSeconds = ref(0)
 const duration = ref(0)
 const volume = ref(1)
 const playbackRate = ref(1)
+const speedMenuOpen = ref(false)
 const subtitlesEnabled = ref(true)
 const hasError = ref(false)
 const rates = [0.5, 0.75, 1, 1.25, 1.5, 2]
@@ -86,9 +83,12 @@ async function togglePlayback() {
   else video.value.pause()
 }
 
-function skip(offset: number) { seekTo(currentSeconds.value + offset) }
 function setVolume() { if (video.value) video.value.volume = volume.value }
-function setPlaybackRate() { if (video.value) video.value.playbackRate = playbackRate.value }
+function setPlaybackRate(rate: number) {
+  playbackRate.value = rate
+  speedMenuOpen.value = false
+  if (video.value) video.value.playbackRate = rate
+}
 async function toggleFullscreen() {
   if (document.fullscreenElement) await document.exitFullscreen()
   else await playerRoot.value?.requestFullscreen()
@@ -102,17 +102,15 @@ defineExpose({ seekTo })
 </script>
 
 <style scoped>
-.video-player { position: relative; overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid rgba(255,255,255,.9); border-radius: var(--td-radius-large); background: #20352e; color: var(--td-text-color-anti); }
+.video-player { container-type: size; position: relative; overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid rgba(255,255,255,.9); border-radius: var(--td-radius-large); background: #20352e; color: var(--td-text-color-anti); }
 .video-player::after { content: ''; position: absolute; z-index: 1; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(9,19,15,.02) 35%, rgba(9,19,15,.68)); }
 .video-player video { position: relative; z-index: 0; width: 100%; height: 100%; display: block; object-fit: contain; background: #20352e; }
-.video-player__copy { position: absolute; z-index: 2; top: 22px; left: 24px; color: rgba(255,255,255,.92); pointer-events: none; }
-.video-player__copy strong { display: block; font-size: 18px; font-weight: 500; line-height: 1.45; }
-.video-player__copy span { display: block; margin-top: 5px; color: rgba(255,255,255,.7); font-size: 12px; line-height: 1.5; }
 .video-player__center-toggle { position: absolute; z-index: 3; inset: 0; width: 64px; height: 64px; min-height: 0 !important; margin: auto; padding: 0 !important; border: 0 !important; border-radius: 50% !important; background: transparent !important; color: #fff; font-size: 44px; text-shadow: 0 2px 12px rgba(0,0,0,.28); cursor: pointer; }
 .video-player__center-toggle:hover { color: rgba(255,255,255,.82); }
 .video-player__error { position: absolute; z-index: 5; inset: 0; display: grid; place-items: center; background: #20352e; color: var(--td-error-color); }
 .video-player__subtitle { position: absolute; z-index: 3; left: 50%; bottom: 72px; max-width: 76%; transform: translateX(-50%); padding: 6px 12px; border: 1px solid rgba(255,255,255,.6); border-radius: var(--td-radius-medium); background: rgba(255,255,255,.78); color: var(--td-text-color-primary); font-size: 14px; line-height: 1.57; backdrop-filter: blur(8px); text-align: center; }
-.video-player__controls { position: absolute; z-index: 4; right: 0; bottom: 0; left: 0; display: grid; gap: 9px; padding: 20px 18px 13px; background: transparent; }
+.video-player__controls { position: absolute; z-index: 4; right: 0; bottom: 0; left: 0; display: grid; gap: 9px; padding: 20px 18px 13px; background: transparent; opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .18s ease, visibility .18s ease; }
+.video-player:hover .video-player__controls, .video-player:focus-within .video-player__controls { opacity: 1; visibility: visible; pointer-events: auto; }
 .video-player__progress input { display: block; width: 100%; height: 4px; margin: 0; appearance: none; border: 0; border-radius: 3px; outline: 0; cursor: pointer; }
 .video-player__progress input::-webkit-slider-thumb { width: 10px; height: 10px; appearance: none; border: 0; border-radius: 50%; background: var(--td-brand-color); opacity: 0; transition: opacity .15s ease; }
 .video-player__progress input:hover::-webkit-slider-thumb, .video-player__progress input:focus-visible::-webkit-slider-thumb { opacity: 1; }
@@ -123,6 +121,15 @@ defineExpose({ seekTo })
 .video-player button[aria-pressed="true"] { color: var(--td-brand-color-2); }
 .video-player button { padding: 0 8px; }.video-player select { padding: 0 4px; }
 .video-player__toolbar > span { margin-right: auto; color: inherit; }
-.video-player__volume { display: flex; align-items: center; gap: 5px; color: inherit; }.video-player__volume input { width: 72px; accent-color: var(--td-brand-color); }
-@media (max-width: 760px) { .video-player__volume, .video-player__toolbar > span { display: none; } .video-player__toolbar { overflow-x: auto; } }
+.video-player__volume { --volume-menu-gap: 8px; --volume-track-length: clamp(40px, 30cqh, 145px); --volume-menu-height: max(50px, calc(var(--volume-track-length) + 10px)); position: relative; display: inline-flex; width: 42px; min-width: 42px; height: 30px; flex: 0 0 42px; align-items: center; justify-content: center; color: inherit; font-size: 12px; }
+.video-player__volume::before { position: absolute; z-index: 2; bottom: calc(100% + var(--volume-menu-gap)); left: 50%; display: none; width: 30px; height: var(--volume-menu-height); border-radius: 14px; background: rgba(64,64,64,.72); backdrop-filter: blur(8px); content: ''; pointer-events: none; transform: translateX(-50%); }
+.video-player__volume:hover::before, .video-player__volume:focus-within::before { display: block; }
+.video-player__volume input { position: absolute; z-index: 3; bottom: calc(28px + var(--volume-menu-gap) + var(--volume-menu-height) / 2); left: 50%; display: none; width: var(--volume-track-length); height: 4px; margin: 0; accent-color: var(--td-brand-color); cursor: pointer; transform: translateX(-50%) rotate(-90deg); transform-origin: center; }
+.video-player__volume:hover input, .video-player__volume:focus-within input { display: block; }
+.video-player__speed { position: relative; display: inline-flex; align-items: center; }
+.video-player__speed-trigger { min-width: 38px; padding: 0 5px !important; font-size: 12px; }
+.video-player__speed-menu { position: absolute; z-index: 6; right: 0; bottom: 38px; display: grid; width: 50px; padding: 4px 0; overflow: hidden; border-radius: 14px; background: rgba(44,44,44,.97); }
+.video-player__speed-menu button { width: 100%; height: 30px; min-height: 30px; padding: 0; border-radius: 0; color: rgba(255,255,255,.48); font-size: 16px; white-space: nowrap; }
+.video-player__speed-menu button:hover, .video-player__speed-menu button.t-is-active { background: transparent; color: #fff; }
+@media (max-width: 760px) { .video-player__toolbar > span { display: none; } .video-player__toolbar { overflow-x: auto; } }
 </style>

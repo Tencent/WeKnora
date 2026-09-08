@@ -9,9 +9,7 @@
           返回列表
         </t-button>
         <div class="video-detail-page__title">
-          <span class="video-detail-page__title-mark" aria-hidden="true"><t-icon name="play" /></span>
           <h1>{{ video.title }}</h1>
-          <span class="video-detail-page__status">{{ statusLabel }}</span>
           <span v-if="video.categoryName" class="video-detail-page__category">{{ video.categoryName }}</span>
         </div>
         <t-select class="video-detail-page__switcher" v-model="selectedVideoId" :options="videoOptions" placeholder="切换视频" aria-label="切换视频" @change="switchVideo" />
@@ -54,6 +52,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { contentModuleForStage, createLoadingContentModuleState, createLoadingContentState, fetchVideoContent, fetchVideoContentModule, fetchVideoDetail, fetchVideoOptions, fetchVideoSubtitles, isVideoInitiallyAvailable, shouldShowRelatedKnowledgeTab, type VideoContentModule, type VideoContentState } from '@/api/videohub'
+import { isAiLearningEvalFixtureEnabled } from '@/api/videohub/fixtures/aiLearningEval'
 import type { VideoData } from '@/types/videohub'
 import VideoPlayer from '@/components/videohub/VideoPlayer.vue'
 import ChapterNavigation from '@/components/videohub/ChapterNavigation.vue'
@@ -64,6 +63,7 @@ import ProcessingStatus from '@/components/videohub/ProcessingStatus.vue'
 
 const route = useRoute()
 const router = useRouter()
+const isOfflineEval = isAiLearningEvalFixtureEnabled()
 const player = ref<InstanceType<typeof VideoPlayer> | null>(null)
 const page = ref<HTMLElement | null>(null)
 const layout = ref<HTMLElement | null>(null)
@@ -73,7 +73,7 @@ const video = ref<VideoData | null>(null)
 const videoOptions = ref<Array<{ label: string; value: string }>>([])
 const selectedVideoId = ref('')
 const currentSeconds = ref(0)
-const activeTab = ref('related')
+const activeTab = ref(isOfflineEval ? 'related' : 'summary')
 const loading = ref(true)
 const error = ref('')
 const content = ref<VideoContentState>(createLoadingContentState())
@@ -95,19 +95,6 @@ const isPlayable = computed(() => Boolean(video.value && isVideoInitiallyAvailab
   thumbnail_url: video.value.poster_url,
   initially_available: video.value.initiallyAvailable,
 })))
-const statusLabel = computed(() => {
-  if (!video.value?.status) return '状态未知'
-  const map: Record<string, string> = {
-    uploading: '上传中',
-    uploaded: '处理中',
-    initializing: '处理中',
-    ready: '可播放',
-    processing: '处理中',
-    completed: '可播放',
-    failed: '处理失败',
-  }
-  return map[video.value.status] || video.value.status
-})
 const statusHint = computed(() => {
   if (!video.value) return ''
   if (video.value.status === 'failed') return video.value.processing_error_summary || '视频初始处理失败'
@@ -149,7 +136,7 @@ function observeLeftElement(element: HTMLElement | null) {
 async function loadVideo(id: string) {
   const sequence = ++loadSequence
   contentSequence++
-  loading.value = true; error.value = ''; currentSeconds.value = 0; activeTab.value = 'related'
+  loading.value = true; error.value = ''; currentSeconds.value = 0; activeTab.value = isOfflineEval ? 'related' : 'summary'
   try {
     const nextVideo = await fetchVideoDetail(id)
     if (sequence !== loadSequence) return
@@ -239,7 +226,6 @@ function switchVideo(value: string | number | Array<string | number>) { if (type
 watch(() => route.params.videoId, value => { if (typeof value === 'string') loadVideo(value) })
 watch(showRelatedKnowledgeTab, visible => {
   if (!visible && activeTab.value === 'related') activeTab.value = 'summary'
-  else if (visible && activeTab.value === 'summary') activeTab.value = 'related'
 })
 watch(left, observeLeftElement, { flush: 'post' })
 watch([isPlayable, () => content.value.outline.data.length], scheduleRightHeightSync, { flush: 'post' })
@@ -260,13 +246,11 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .video-detail-page { position: relative; isolation: isolate; box-sizing: border-box; height: 100%; min-height: 0; overflow-y: auto; padding: 0 30px 104px; background: linear-gradient(116deg, rgba(213,224,226,.28) 0%, rgba(255,255,255,.1) 34%, rgba(215,231,219,.06) 68%, rgba(255,255,255,.12) 100%), repeating-linear-gradient(90deg, rgba(255,255,255,.06) 0, rgba(255,255,255,.06) 1px, transparent 1px, transparent 92px), linear-gradient(118deg, #edf1f1 0%, #f3f5f4 37%, #edf1ef 68%, #f0f3f1 100%); background-attachment: local, local, fixed; color: var(--td-text-color-primary); }
-.video-detail-page__header { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 16px; min-height: 72px; margin: 0 -30px 24px; padding: 0 30px; border-bottom: 1px solid rgba(48,59,65,.12); background: rgba(255,255,255,.28); backdrop-filter: blur(20px) saturate(180%); }
-.video-detail-page__back { flex: none; padding: 0 !important; color: var(--td-text-color-secondary) !important; font-size: var(--td-font-size-body-small) !important; }
+.video-detail-page__header { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 16px; min-height: 60px; margin: 0 -30px 24px; padding: 0 30px; border-bottom: 1px solid rgba(48,59,65,.12); background: rgba(255,255,255,.28); backdrop-filter: blur(20px) saturate(180%); }
+.video-detail-page__back { flex: none; padding: 0 !important; color: var(--td-text-color-secondary) !important; font-size: 14px !important; }
 .video-detail-page__title { display: flex; align-items: center; gap: 10px; min-width: 0; padding-left: 16px; border-left: 1px solid var(--td-component-stroke); }
-.video-detail-page__title-mark { display: grid; flex: none; width: 24px; height: 24px; place-items: center; border-radius: var(--td-radius-medium); background: var(--td-brand-color); color: var(--td-text-color-anti); font-size: 14px; }
 .video-detail-page__header h1 { min-width: 0; margin: 0; overflow: hidden; color: var(--td-text-color-primary); font-size: var(--td-font-size-title-medium); font-weight: 400; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
-.video-detail-page__status { flex: none; padding: 3px 8px; border: 1px solid color-mix(in srgb, var(--td-brand-color) 20%, transparent); border-radius: var(--td-radius-large); background: var(--td-brand-color-light); color: var(--td-brand-color); font-size: var(--td-font-size-body-small); line-height: 1.5; white-space: nowrap; }
-.video-detail-page__category { flex: none; overflow: hidden; color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); text-overflow: ellipsis; white-space: nowrap; }
+.video-detail-page__category { display: inline-flex; flex: none; max-width: 180px; align-items: center; padding: 3px 9px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--td-brand-color) 22%, transparent); border-radius: var(--td-radius-round); background: var(--td-brand-color-light); color: var(--td-brand-color); font-size: var(--td-font-size-body-small); line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .video-detail-page__switcher { width: 26px; margin-left: auto; overflow: hidden; }
 .video-detail-page__switcher :deep(.t-input) { min-width: 26px; padding: 0; border: 0; background: transparent; }
 .video-detail-page__switcher :deep(.t-input__inner) { display: none; }
@@ -279,7 +263,7 @@ onBeforeUnmount(() => {
 .video-detail-page__right :deep(.t-tabs__nav) { margin: 0; border-bottom: 1px solid color-mix(in srgb, var(--td-component-stroke) 58%, transparent); }
 .video-detail-page__right :deep(.t-tabs__bar) { display: none; }
 .video-detail-page__right :deep(.t-tabs__nav-item) { position: relative; height: 42px; padding: 0 14px; color: var(--td-text-color-secondary); font-size: 16px; transition: color .15s ease, background-color .15s ease; }
-.video-detail-page__right :deep(.t-tabs__nav-item:hover) { background: color-mix(in srgb, var(--td-bg-color-container) 34%, transparent); color: var(--td-text-color-primary); }
+.video-detail-page__right :deep(.t-tabs__nav-item:hover), .video-detail-page__right :deep(.t-tabs__nav-item:active), .video-detail-page__right :deep(.t-tabs__nav-item-wrapper:hover), .video-detail-page__right :deep(.t-tabs__nav-item-wrapper:active) { background: transparent !important; background-color: transparent !important; color: var(--td-text-color-primary); box-shadow: none; --ripple-color: transparent; }
 .video-detail-page__right :deep(.t-tabs__nav-item.t-is-active) { color: var(--td-brand-color); font-weight: 600; }
 .video-detail-page__right :deep(.t-tabs__nav-item.t-is-active)::after { position: absolute; right: auto; bottom: 0; left: 50%; width: calc(100% - 28px); height: 2px; border-radius: var(--td-radius-small); background: var(--td-brand-color); content: ''; transform: translateX(-50%); }
 .video-detail-page__tab-label { display: inline-flex; align-items: center; gap: 0; font-size: 16px; }
@@ -287,7 +271,8 @@ onBeforeUnmount(() => {
 .video-detail-page__right :deep(.t-tabs__content) { min-height: 0; flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; background: transparent; }
 .video-detail-page__state { min-height: 420px; display: grid; place-items: center; }
 .video-detail-page__error { max-width: 640px; margin: 0 auto 24px; }
+.video-detail-page :deep(.t-button:hover), .video-detail-page :deep(.t-button:active), .video-detail-page :deep(.t-button:focus) { background: transparent !important; background-color: transparent !important; box-shadow: none !important; --ripple-color: transparent; }
 @media (max-width: 1050px) { .video-detail-page { padding: 0 20px 104px; }.video-detail-page__header { margin-right: -20px; margin-left: -20px; padding: 0 20px; }.video-detail-page__layout { display: block; }.video-detail-page__right { height: auto !important; min-height: 520px; margin-top: 28px; padding-left: 0; overflow: visible; }.video-detail-page__right :deep(.t-tabs), .video-detail-page__right :deep(.t-tabs__content) { height: auto; overflow: visible; }.video-detail-page__switcher { margin-left: 0; } }
-@media (max-width: 680px) { .video-detail-page__header { gap: 10px; }.video-detail-page__back { width: 32px; overflow: hidden; white-space: nowrap; }.video-detail-page__back :deep(.t-button__text) { display: none; }.video-detail-page__title { gap: 7px; padding-left: 10px; }.video-detail-page__category { display: none; }.video-detail-page__status { padding: 2px 6px; font-size: 11px; }.video-detail-page__switcher { flex: none; } }
-@media (max-width: 420px) { .video-detail-page { padding-right: 12px; padding-left: 12px; }.video-detail-page__header { margin-right: -12px; margin-left: -12px; padding-right: 12px; padding-left: 12px; }.video-detail-page__title-mark { width: 22px; height: 22px; }.video-detail-page__title { gap: 6px; padding-left: 8px; }.video-detail-page__header h1 { font-size: var(--td-font-size-body-large); }.video-detail-page__status { padding: 1px 5px; font-size: 10px; }.video-detail-page__right { border-right: 0; border-left: 0; border-radius: var(--td-radius-large); padding-right: 8px; } }
+@media (max-width: 680px) { .video-detail-page__header { gap: 10px; }.video-detail-page__back { width: 32px; overflow: hidden; white-space: nowrap; }.video-detail-page__back :deep(.t-button__text) { display: none; }.video-detail-page__title { gap: 7px; padding-left: 10px; }.video-detail-page__category { max-width: 130px; }.video-detail-page__switcher { flex: none; } }
+@media (max-width: 420px) { .video-detail-page { padding-right: 12px; padding-left: 12px; }.video-detail-page__header { margin-right: -12px; margin-left: -12px; padding-right: 12px; padding-left: 12px; }.video-detail-page__title { gap: 6px; padding-left: 8px; }.video-detail-page__header h1 { font-size: var(--td-font-size-body-large); }.video-detail-page__right { border-right: 0; border-left: 0; border-radius: var(--td-radius-large); padding-right: 8px; } }
 </style>

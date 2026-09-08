@@ -307,6 +307,24 @@ test('knowledge-layer failure keeps foundation content available', () => {
   assert.equal(shouldShowRelatedKnowledgeTab(state.relatedKnowledge), true)
 })
 
+test('knowledge contract failure is shown instead of not-generated empty state', () => {
+  const state = buildVideoContentState(
+    { status: 'fulfilled', value: [{ id: 'chapter-1' }] as any },
+    { status: 'fulfilled', value: { sections: [{ id: 'section-1', title: '初版', blocks: [] }] as any } },
+    {
+      status: 'rejected',
+      reason: {
+        status: 409,
+        error_code: 'content_contract_failed',
+        error_message: 'P3 knowledge object validation failed: unknown evidence ID',
+      },
+    },
+  )
+
+  assert.equal(state.relatedKnowledge.status, 'error')
+  assert.equal(state.relatedKnowledge.error, 'AI 契约校验失败：输出未通过知识契约，未写入知识图谱。请重试知识提取')
+})
+
 test('content loader distinguishes not generated artifacts from failures', () => {
   assert.equal(classifyContentError({ status: 404, error_code: 'not_generated' }), 'not_generated')
   assert.equal(classifyContentError({ status: 404, error_code: 'artifact_missing' }), 'error')

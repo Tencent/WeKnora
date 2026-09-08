@@ -1,5 +1,5 @@
 <template>
-    <div class="main" :class="{ 'main--video-home': route.name === 'videoList' || route.name === 'videoDetail' }" ref="dropzone">
+    <div class="main" :class="{ 'main--video-home': route.name === 'videoList' || route.name === 'videoDetail' || route.name === 'knowledgeGraph' }" ref="dropzone">
         <Menu></Menu>
         <div v-if="isRouterAlive" class="platform-route-outlet">
             <RouterView />

@@ -1,153 +1,68 @@
 <template>
   <main class="knowledge-graph">
     <header class="knowledge-graph__header">
-      <div><h1>Knowledge Graph</h1><p>探索视频知识之间的连接</p></div>
-      <span v-if="payload" class="knowledge-graph__count">{{ filteredNodes.length }} 个节点 · {{ filteredEdges.length }} 条正式关系 · {{ filteredReadingAssociations.length }} 条阅读关联</span>
+      <div><h1>Knowledge Graph</h1><p>以 Wiki 页面为身份，查看企业知识的结构化关系与来源证据</p></div>
+      <div class="knowledge-graph__header-actions">
+        <div v-if="activeView === 'knowledge' && payload?.counts" class="knowledge-graph__count" aria-live="polite">{{ visibleCount }} / {{ payload.counts.scope_nodes }} 个节点 · {{ visibleEdgeCount }} 条正式关系 · {{ visibleReadingCount }} 条阅读关联</div>
+        <t-button size="small" variant="outline" :loading="refreshing" @click="refreshCurrentView"><template #icon><t-icon name="refresh" /></template>刷新</t-button>
+      </div>
     </header>
-    <div v-if="loading" class="knowledge-graph__state"><t-loading text="正在加载知识图谱" /></div>
-    <t-alert v-else-if="error" theme="error" :message="error" />
-    <t-empty v-else-if="!payload || !payload.nodes.length" description="暂无知识图谱" />
-    <template v-else>
-      <AttributeFilterTabs v-model="selectedAttribute" :attributes="payload.attributes" :counts="attributeCounts" :total="payload.nodes.length" />
-      <section class="knowledge-graph__canvas-wrap">
-        <div v-if="payload.meta.truncated" class="knowledge-graph__hint">显示 {{ payload.meta.returned }} / {{ payload.meta.total }} 节点</div>
-        <GraphCanvas :nodes="filteredNodes" :edges="filteredEdges" :reading-associations="filteredReadingAssociations" @node-click="selectedNodeId = $event.id" />
-      </section>
-      <section v-if="wikiPages.length" class="knowledge-graph__wiki-list" aria-labelledby="knowledge-graph-wiki-list-title">
-        <header>
-          <div>
-            <h2 id="knowledge-graph-wiki-list-title">知识 Wiki 页面</h2>
-            <p>来自 extract-video-knowledge 的独立知识页</p>
-          </div>
-          <span>{{ wikiPages.length }} 页</span>
-        </header>
-        <div class="knowledge-graph__wiki-grid">
-          <button v-for="page in wikiPages" :key="page.id" type="button" :class="{ 'is-selected': selectedNode?.knowledge_detail?.id === page.id }" @click="selectWikiPage(page.id)">
-            <span class="knowledge-graph__wiki-title">{{ page.title }}</span>
-            <span class="knowledge-graph__wiki-meta">{{ pageTypeLabel(page) }} · {{ page.source_video_title || page.video_title || '未知来源' }} · {{ page.structure_fields?.length || 0 }} 个结构字段</span>
-            <small v-if="!nodeIdByWikiPageId[page.id]">未入图</small>
-          </button>
-        </div>
-      </section>
-      <NodeDetailPanel
-        v-if="selectedNode"
-        :key="selectedNode.id"
-        :node="selectedNode"
-        :related-nodes="relatedNodes"
-        :related-edges="relatedEdges"
-        :reading-associations="relatedReadingAssociations"
-        @close="selectedNodeId = null"
-        @select-video-by-id="openVideo"
-        @open-wiki-page="openWikiPage"
-      />
+    <nav class="knowledge-graph__view-tabs" role="tablist" aria-label="知识图谱视图">
+      <button type="button" role="tab" :aria-selected="activeView === 'knowledge'" :class="{ 'is-active': activeView === 'knowledge' }" @click="setActiveView('knowledge')">知识视图</button>
+      <button type="button" role="tab" :aria-selected="activeView === 'scene'" :class="{ 'is-active': activeView === 'scene' }" @click="setActiveView('scene')">场景视图</button>
+    </nav>
+    <section v-if="isOfflineEval" class="knowledge-graph__fixture" role="status"><t-icon name="file-paste" /><span><strong>离线测评数据</strong> · 14 个 Wiki 页面、15 组正式关系，仅用于本地样式验收</span></section>
+    <section v-if="graphStatus !== 'ready' && graphStatus !== 'partial' && graphStatus !== 'loading'" class="knowledge-graph__status" :class="`is-${graphStatus}`" role="status"><strong>{{ graphStatusLabel }}</strong><span>{{ graphStatusDescription }}</span><t-button v-if="graphStatus === 'failed'" size="small" variant="outline" @click="loadGraph()">重试</t-button></section>
+    <div v-if="activeView === 'knowledge' && loading && !payload" class="knowledge-graph__state"><t-loading text="正在加载知识图谱" /></div>
+    <t-alert v-else-if="activeView === 'knowledge' && graphStatus === 'failed' && !payload" theme="error" :message="graphError || '知识图谱加载失败'" />
+    <t-empty v-else-if="activeView === 'knowledge' && !payload" description="暂无可展示的知识图谱" />
+    <SceneView v-else-if="activeView === 'scene'" ref="sceneViewRef" />
+    <template v-else-if="payload">
+      <AttributeFilterTabs v-model="selectedAttribute" :attributes="catalogAttributes" :counts="attributeCounts" :total="catalogTotal" />
+      <div v-if="loading" class="knowledge-graph__refreshing" role="status"><t-loading size="small" /> 正在更新筛选结果</div>
+      <section class="knowledge-graph__canvas-wrap"><div v-if="payload.meta.truncated" class="knowledge-graph__hint">显示 {{ payload.meta.returned }} / {{ payload.meta.total }} 节点</div><GraphCanvas v-if="filteredNodes.length" :nodes="filteredNodes" :edges="filteredEdges" :reading-associations="filteredReadingAssociations" @node-click="selectNode" /><t-empty v-else description="当前筛选没有结果" /></section>
+      <section v-if="wikiPages.length" class="knowledge-graph__wiki-list" aria-labelledby="knowledge-graph-wiki-list-title"><header><div><h2 id="knowledge-graph-wiki-list-title">知识 Wiki 页面</h2><p>页面身份和内容均来自当前图谱读取结果</p></div><span>{{ wikiPages.length }} 页</span></header><div class="knowledge-graph__wiki-grid"><button v-for="page in wikiPages" :key="page.id" type="button" :class="{ 'is-selected': selectedNode?.wiki_page_id === page.id }" @click="selectWikiPage(page)"><span class="knowledge-graph__wiki-title">{{ page.title }}</span><span class="knowledge-graph__wiki-meta">{{ pageTypeLabel(page) }} · {{ page.source_video_title || page.video_title || '来源视频不可读' }}</span><small v-if="!nodeIdByWikiPageId[page.id]">未入图，仅可查看 Wiki 详情</small></button></div></section>
     </template>
+    <NodeDetailPanel v-if="activeView === 'knowledge' && selectedNode" :key="selectedNode.id" :node="selectedNode" :detail="activeDetail" :evidence="activeEvidence" :related-nodes="relatedNodes" :related-edges="detailLoaded ? detailEdges : []" :reading-associations="detailLoaded ? detailReading : []" :detail-loading="detailLoading" :detail-loaded="detailLoaded" :detail-status="detailStatus" :detail-error="detailError" :cross-video-loading="crossVideoLoading" :cross-video-status="crossVideoStatus" :cross-video-associations="crossVideoAssociations" :cross-video-rejected-count="crossVideoRejectedCount" :cross-video-error="crossVideoError" @close="closeDetail" @retry-detail="retryDetail" @retry-cross-video="retryCrossVideo" @select-video-by-id="openVideo" @select-graph-node="selectGraphNode" />
   </main>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { fetchKnowledgeGraph } from '@/api/videohub/knowledgeGraph'
+import { fetchCrossVideoAssociations, fetchKnowledgeGraph, fetchKnowledgeGraphDetail } from '@/api/videohub/knowledgeGraph'
+import { isAiLearningEvalFixtureEnabled } from '@/api/videohub/fixtures/aiLearningEval'
 import AttributeFilterTabs from '@/components/videohub/AttributeFilterTabs.vue'
 import GraphCanvas from '@/components/videohub/GraphCanvas.vue'
 import NodeDetailPanel from '@/components/videohub/NodeDetailPanel.vue'
-import type { GraphKnowledgeDetail, GraphNode, KnowledgeGraphPayload } from '@/types/videohub'
+import SceneView from '@/components/videohub/SceneView.vue'
+import type { CrossVideoAssociation, CrossVideoStatus, GraphKnowledgeDetail, GraphNode, GraphReadingAssociation, KnowledgeGraphPayload, KnowledgeGraphStatus } from '@/types/videohub'
+import { createRequestGate, GRAPH_FILTER_TYPES, graphContainsSelection, graphTypesForAttribute, isWikiPageId } from './knowledgeGraphState'
 
-const router = useRouter()
-const route = useRoute()
-const loading = ref(true)
-const error = ref('')
-const payload = ref<KnowledgeGraphPayload | null>(null)
-const selectedAttribute = ref('all')
-const selectedNodeId = ref<string | null>(null)
+const router = useRouter(); const route = useRoute(); const activeView = ref<'knowledge' | 'scene'>(route.query.view === 'scene' ? 'scene' : 'knowledge'); const loading = ref(true); const graphError = ref(''); const graphStatus = ref<KnowledgeGraphStatus | string>('loading'); const payload = ref<KnowledgeGraphPayload | null>(null); const selectedAttribute = ref('all'); const selectedNodeId = ref<string | null>(null); const selectedNodeOverride = ref<GraphNode | null>(null); const activeDetail = ref<GraphKnowledgeDetail | null>(null); const activeEvidence = ref<GraphNode['evidence']>([]); const detailLoading = ref(false); const detailLoaded = ref(false); const detailStatus = ref<KnowledgeGraphStatus | string>('empty'); const detailError = ref(''); const detailEdges = ref<KnowledgeGraphPayload['edges']>([]); const detailReading = ref<GraphReadingAssociation[]>([]); const crossVideoLoading = ref(false); const crossVideoStatus = ref<CrossVideoStatus | string>('idle'); const crossVideoAssociations = ref<CrossVideoAssociation[]>([]); const crossVideoRejectedCount = ref(0); const crossVideoError = ref(''); const catalogAttributes = ref<string[]>([]); const catalogCounts = ref<Record<string, number>>({}); const catalogTotal = ref(0); const graphGate = createRequestGate(); const detailGate = createRequestGate(); const crossVideoGate = createRequestGate()
+const sceneRefreshing = ref(false)
+const sceneViewRef = ref<{ refresh: () => void } | null>(null)
+const isOfflineEval = isAiLearningEvalFixtureEnabled()
+const typeByAttribute = GRAPH_FILTER_TYPES
+const refreshing = computed(() => activeView.value === 'knowledge' ? loading.value : sceneRefreshing.value)
+const wikiPages = computed(() => payload.value?.wiki_pages ?? []); const selectedNodeFallback = computed<GraphNode | null>(() => { if (!selectedNodeId.value?.startsWith('wiki:')) return null; if (selectedNodeOverride.value?.id === selectedNodeId.value) return selectedNodeOverride.value; const page = wikiPages.value.find(item => `wiki:${item.id}` === selectedNodeId.value); return page ? { id: `wiki:${page.id}`, name: page.title, label: page.title, attributes: [pageTypeLabel(page)], type: pageTypeLabel(page), knowledge_type: page.knowledge_type, wiki_page_id: page.id, video_id: page.video_id, video_title: page.source_video_title || page.video_title, knowledge_detail: page } : null }); const selectedNode = computed(() => payload.value?.nodes.find(node => node.id === selectedNodeId.value) ?? selectedNodeFallback.value)
+const nodeIdByWikiPageId = computed(() => Object.fromEntries((payload.value?.nodes ?? []).map(node => [node.wiki_page_id || node.knowledge_detail?.id || '', node.id]).filter(([id]) => id))); const attributeCounts = computed(() => catalogCounts.value); const filteredNodes = computed(() => payload.value?.nodes ?? []); const filteredNodeIds = computed(() => new Set(filteredNodes.value.map(node => node.id))); const filteredEdges = computed(() => payload.value?.edges.filter(edge => filteredNodeIds.value.has(edge.source) && filteredNodeIds.value.has(edge.target)) ?? []); const filteredReadingAssociations = computed(() => payload.value?.reading_associations?.filter(edge => filteredNodeIds.value.has(edge.source) && edge.target_exists && filteredNodeIds.value.has(edge.target)) ?? []); const relatedEdges = computed(() => payload.value?.edges.filter(edge => edge.source === selectedNodeId.value || edge.target === selectedNodeId.value) ?? []); const relatedReadingAssociations = computed(() => payload.value?.reading_associations?.filter(edge => edge.source === selectedNodeId.value || edge.target === selectedNodeId.value) ?? []); const relatedNodeIds = computed(() => new Set([...relatedEdges.value, ...relatedReadingAssociations.value].flatMap(edge => [edge.source, edge.target]).filter(id => id !== selectedNodeId.value))); const relatedNodes = computed(() => payload.value?.nodes.filter(node => relatedNodeIds.value.has(node.id)) ?? []); const visibleCount = computed(() => filteredNodes.value.length); const visibleEdgeCount = computed(() => filteredEdges.value.length); const visibleReadingCount = computed(() => filteredReadingAssociations.value.length)
+const graphStatusLabel = computed(() => ({ loading: '正在加载图谱', empty: '暂无图谱结果', filter_empty: '筛选后暂无结果', not_generated: '知识尚未生成', not_projected: '图谱尚未投影', video_missing: '视频不存在', failed: '图谱读取失败' }[graphStatus.value] || '图谱状态异常')); const graphStatusDescription = computed(() => ({ empty: '当前范围没有可回读的 Wiki 页面。', filter_empty: '请清除筛选或选择其他类型。', not_generated: '该视频尚未生成可用的知识页面。', not_projected: '知识页面存在，但尚未形成图谱投影。', failed: graphError.value || '依赖服务暂时不可用。' }[graphStatus.value] || ''))
 
-const attributeCounts = computed(() => Object.fromEntries((payload.value?.attributes ?? []).map(attribute => [attribute, payload.value?.nodes.filter(node => node.attributes[0] === attribute).length ?? 0])))
-const filteredNodes = computed(() => payload.value?.nodes.filter(node => selectedAttribute.value === 'all' || node.attributes[0] === selectedAttribute.value) ?? [])
-const filteredNodeIds = computed(() => new Set(filteredNodes.value.map(node => node.id)))
-const filteredEdges = computed(() => payload.value?.edges.filter(edge => filteredNodeIds.value.has(edge.source) && filteredNodeIds.value.has(edge.target)) ?? [])
-const filteredReadingAssociations = computed(() => payload.value?.reading_associations?.filter(edge => filteredNodeIds.value.has(edge.source) && edge.target_exists && filteredNodeIds.value.has(edge.target)) ?? [])
-const selectedNode = computed(() => {
-  const existing = payload.value?.nodes.find(node => node.id === selectedNodeId.value)
-  if (existing) return existing
-  if (!selectedNodeId.value?.startsWith('wiki:')) return null
-  const page = wikiPages.value.find(item => `wiki:${item.id}` === selectedNodeId.value)
-  return page ? wikiPageNode(page) : null
-})
-const relatedEdges = computed(() => payload.value?.edges.filter(edge => edge.source === selectedNodeId.value || edge.target === selectedNodeId.value) ?? [])
-const relatedReadingAssociations = computed(() => payload.value?.reading_associations?.filter(edge => edge.source === selectedNodeId.value || edge.target === selectedNodeId.value) ?? [])
-const relatedNodeIds = computed(() => new Set(relatedEdges.value.flatMap(edge => [edge.source, edge.target]).filter(id => id !== selectedNodeId.value)))
-const relatedNodes = computed(() => payload.value?.nodes.filter(node => relatedNodeIds.value.has(node.id)) ?? [])
-const wikiPages = computed(() => payload.value?.wiki_pages ?? [])
-const nodeIdByWikiPageId = computed(() => Object.fromEntries((payload.value?.nodes ?? []).flatMap(node => node.knowledge_detail?.id ? [[node.knowledge_detail.id, node.id]] : [])))
-
-async function load() {
-  loading.value = true
-  const requestedLimit = Number(route.query.limit)
-  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.floor(requestedLimit) : 500
-  error.value = ''
-  try { payload.value = await fetchKnowledgeGraph({ mode: 'overview', limit }) }
-  catch (cause) { error.value = cause instanceof Error ? cause.message : '知识图谱加载失败' }
-  finally { loading.value = false }
-}
-function openVideo(videoId: string, seconds: number) {
-  const href = router.resolve({ name: 'videoDetail', params: { videoId }, query: { t: Math.max(0, Math.floor(seconds)) } }).href
-  window.open(href, '_blank', 'noopener,noreferrer')
-}
-function openWikiPage(slug: string) {
-  const kbId = payload.value?.knowledge_base_id
-  if (!kbId || !slug) return
-  // The native Wiki graph view owns the reading drawer. Keeping the page
-  // address keyed by KB id + slug lets WikiBrowser fetch the exact page and
-  // open that drawer without duplicating reader logic here.
-  const href = router.resolve({ name: 'knowledgeBaseDetail', params: { kbId }, query: { tab: 'graph', slug } }).href
-  window.open(href, '_blank', 'noopener,noreferrer')
-}
-function selectWikiPage(pageId: string) {
-  selectedNodeId.value = nodeIdByWikiPageId.value[pageId] ?? `wiki:${pageId}`
-}
-function wikiPageNode(page: GraphKnowledgeDetail): GraphNode {
-  const typeLabel = pageTypeLabel(page)
-  return {
-    id: `wiki:${page.id}`,
-    name: page.title,
-    label: page.title,
-    attributes: [typeLabel === '人物' || typeLabel === '机构' || typeLabel === '产品' || typeLabel === '技术' || typeLabel === '行业' || typeLabel === '地点' ? '实体' : typeLabel],
-    type: typeLabel === '人物' || typeLabel === '机构' || typeLabel === '产品' || typeLabel === '技术' || typeLabel === '行业' || typeLabel === '地点' ? '实体' : typeLabel,
-    video_id: page.video_id,
-    video_title: page.source_video_title || page.video_title,
-    seconds: page.seconds || 0,
-    link_count: 0,
-    knowledge_detail: page,
-  }
-}
-function pageTypeLabel(page: GraphKnowledgeDetail) {
-  const labels: Record<string, string> = { entity: '实体', concept: '概念', case: '案例', methodology: '方法论', insight: '洞察' }
-  const entityLabels: Record<string, string> = { person: '人物', organization: '机构', product: '产品', technology: '技术', industry: '行业', place: '地点' }
-  return page.entity_sub_type ? entityLabels[page.entity_sub_type] || '实体' : labels[page.knowledge_type] || page.knowledge_type
-}
-watch(selectedAttribute, () => { selectedNodeId.value = null })
-onMounted(load)
+async function loadGraph(attribute = selectedAttribute.value) { const sequence = graphGate.next(); loading.value = true; graphError.value = ''; try { const requestedLimit = Number(route.query.limit); const limit = Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.floor(requestedLimit) : 500; const next = await fetchKnowledgeGraph({ mode: 'overview', limit, types: graphTypesForAttribute(attribute) }); if (!graphGate.isCurrent(sequence)) return; if (!catalogAttributes.value.length) { catalogAttributes.value = next.attributes; const rawCounts = next.counts?.type_counts || {}; catalogCounts.value = Object.fromEntries(next.attributes.map(item => [item, rawCounts[typeByAttribute[item]] ?? next.nodes.filter(node => node.attributes[0] === item).length])); catalogTotal.value = next.counts?.scope_nodes ?? next.nodes.length } if (!graphContainsSelection(next, selectedNodeId.value)) closeDetail(); payload.value = next; graphStatus.value = next.status || (next.nodes.length ? 'ready' : 'empty'); if (graphStatus.value !== 'ready' && graphStatus.value !== 'partial') closeDetail() } catch (cause) { if (!graphGate.isCurrent(sequence)) return; graphStatus.value = 'failed'; graphError.value = cause instanceof Error ? cause.message : '知识图谱加载失败' } finally { if (graphGate.isCurrent(sequence)) loading.value = false } }
+async function loadDetail(node: GraphNode, includeCrossVideo: boolean) { const sequence = detailGate.next(); const pageId = node.wiki_page_id || node.knowledge_detail?.id || ''; detailLoading.value = true; detailLoaded.value = false; activeDetail.value = null; activeEvidence.value = []; detailEdges.value = []; detailReading.value = []; detailError.value = ''; if (!isWikiPageId(pageId)) { detailLoading.value = false; detailStatus.value = 'failed'; detailError.value = '节点缺少有效的 Wiki page ID'; return } try { const response = await fetchKnowledgeGraphDetail(pageId); if (!detailGate.isCurrent(sequence)) return; activeDetail.value = response.detail; activeEvidence.value = response.evidence; detailEdges.value = response.formal_relations; detailReading.value = response.reading_associations; detailStatus.value = response.status; detailLoaded.value = true; if (includeCrossVideo) void loadCrossVideo(response.detail.video_id || node.video_id, pageId) } catch (cause) { if (detailGate.isCurrent(sequence)) { detailStatus.value = 'failed'; detailError.value = cause instanceof Error ? cause.message : '知识详情加载失败'; if (includeCrossVideo) void loadCrossVideo(node.video_id, pageId) } } finally { if (detailGate.isCurrent(sequence)) detailLoading.value = false } }
+function selectNode(node: GraphNode) { selectedNodeOverride.value = null; selectedNodeId.value = node.id; crossVideoGate.invalidate(); crossVideoLoading.value = false; crossVideoAssociations.value = []; crossVideoRejectedCount.value = 0; crossVideoError.value = ''; crossVideoStatus.value = 'idle'; void loadDetail(node, true) }
+async function loadCrossVideo(videoId = '', pageId = '') { const sequence = crossVideoGate.next(); if (!videoId) { crossVideoLoading.value = false; crossVideoStatus.value = 'empty'; return }; crossVideoLoading.value = true; crossVideoError.value = ''; try { const response = await fetchCrossVideoAssociations(videoId, pageId); if (!crossVideoGate.isCurrent(sequence)) return; crossVideoStatus.value = response.status; crossVideoAssociations.value = response.associations; crossVideoRejectedCount.value = response.rejected.length } catch (cause) { if (!crossVideoGate.isCurrent(sequence)) return; crossVideoStatus.value = 'failed'; crossVideoError.value = cause instanceof Error ? cause.message : '跨视频关联加载失败' } finally { if (crossVideoGate.isCurrent(sequence)) crossVideoLoading.value = false } }
+function retryDetail() { if (selectedNode.value) void loadDetail(selectedNode.value, false) }; function retryCrossVideo() { if (selectedNode.value) void loadCrossVideo(activeDetail.value?.video_id || selectedNode.value.video_id, selectedNode.value.wiki_page_id || activeDetail.value?.id) }; function closeDetail() { selectedNodeId.value = null; selectedNodeOverride.value = null; detailGate.invalidate(); crossVideoGate.invalidate(); detailLoading.value = false; detailLoaded.value = false; activeDetail.value = null; activeEvidence.value = []; crossVideoLoading.value = false; crossVideoStatus.value = 'idle' }; function selectWikiPage(page: GraphKnowledgeDetail) { const node = payload.value?.nodes.find(item => item.wiki_page_id === page.id) || { id: `wiki:${page.id}`, name: page.title, label: page.title, attributes: [pageTypeLabel(page)], knowledge_type: page.knowledge_type, wiki_page_id: page.id, video_id: page.video_id, video_title: page.video_title }; selectNode(node) }; function selectGraphNode(target: { targetPageId: string; title: string; targetSlug?: string }) { const pageId = target.targetPageId.trim().replace(/^wiki:/, ''); if (!pageId) return; const node = payload.value?.nodes.find(item => item.wiki_page_id === pageId || item.id === `wiki:${pageId}`); if (node) { selectNode(node); return }; const page = wikiPages.value.find(item => item.id === pageId); if (page) { selectWikiPage(page); return }; const fallback: GraphNode = { id: `wiki:${pageId}`, name: target.title, label: target.title, attributes: ['知识对象'], wiki_page_id: pageId, knowledge_detail: undefined }; selectedNodeOverride.value = fallback; selectNodeOverride(fallback) }; function selectNodeOverride(node: GraphNode) { selectedNodeId.value = node.id; crossVideoGate.invalidate(); crossVideoLoading.value = false; crossVideoAssociations.value = []; crossVideoRejectedCount.value = 0; crossVideoError.value = ''; crossVideoStatus.value = 'idle'; void loadDetail(node, true) }; function openVideo(videoId: string, seconds: number) { if (!videoId) return; const query: Record<string, string | number> = {}; if (Number.isFinite(seconds)) query.t = Math.max(0, Math.floor(seconds)); if (isOfflineEval) query.fixture = 'ai-learning'; const href = router.resolve({ name: 'videoDetail', params: { videoId }, query }).href; window.open(href, '_blank', 'noopener,noreferrer') }; function pageTypeLabel(page: GraphKnowledgeDetail) { const labels: Record<string, string> = { entity: '实体', concept: '概念', case: '案例', methodology: '方法论', insight: '洞察' }; const entityLabels: Record<string, string> = { person: '人物', organization: '机构', product: '产品', technology: '技术', industry: '行业', place: '地点' }; return page.entity_sub_type ? entityLabels[page.entity_sub_type] || '实体' : labels[page.knowledge_type] || page.knowledge_type || '未知类型' }
+function setActiveView(view: 'knowledge' | 'scene') { activeView.value = view; void router.replace({ query: { ...route.query, view: view === 'scene' ? 'scene' : undefined } }) }
+async function refreshCurrentView() { if (activeView.value === 'knowledge') { await loadGraph(); return }; sceneRefreshing.value = true; sceneViewRef.value?.refresh(); await Promise.resolve(); sceneRefreshing.value = false }
+watch(() => route.query.view, value => { activeView.value = value === 'scene' ? 'scene' : 'knowledge' })
+watch(selectedAttribute, value => { if (payload.value) void loadGraph(value) }); onMounted(() => void loadGraph())
 </script>
 
 <style scoped>
-.knowledge-graph { display: grid; align-content: start; gap: calc(var(--td-comp-margin-s) * 2); min-height: 100%; padding: calc(var(--td-comp-margin-s) * 2); background: var(--td-bg-color-container); }
-.knowledge-graph__header { display: flex; align-items: flex-end; justify-content: space-between; gap: calc(var(--td-comp-margin-s) * 2); }
-.knowledge-graph h1 { margin: 0; color: var(--td-text-color-primary); font-size: var(--td-font-size-headline-medium); }
-.knowledge-graph__header p { margin: calc(var(--td-comp-margin-s) / 2) 0 0; color: var(--td-text-color-secondary); }
-.knowledge-graph__count { color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }
-.knowledge-graph__state, .knowledge-graph > :deep(.t-empty) { min-height: 420px; display: grid; place-items: center; }
-.knowledge-graph__canvas-wrap { position: relative; min-width: 0; }
-.knowledge-graph__hint { position: absolute; z-index: 2; top: var(--td-comp-margin-s); left: 50%; padding: calc(var(--td-comp-margin-s) / 2) var(--td-comp-margin-s); transform: translateX(-50%); border: var(--border-width-hairline, .5px) solid var(--td-component-stroke); border-radius: var(--rounded-popup, 10px); background: var(--td-bg-color-container); box-shadow: var(--td-shadow-2); color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }
-.knowledge-graph__wiki-list { display: grid; gap: calc(var(--td-comp-margin-s) * 1.5); min-width: 0; padding-top: calc(var(--td-comp-margin-s) * 2); border-top: 1px solid var(--td-component-stroke); }
-.knowledge-graph__wiki-list header { display: flex; align-items: flex-end; justify-content: space-between; gap: calc(var(--td-comp-margin-s) * 2); }
-.knowledge-graph__wiki-list h2 { margin: 0; color: var(--td-text-color-primary); font-size: var(--td-font-size-title-medium); }
-.knowledge-graph__wiki-list p { margin: calc(var(--td-comp-margin-s) / 2) 0 0; color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }
-.knowledge-graph__wiki-list header > span { color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); white-space: nowrap; }
-.knowledge-graph__wiki-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--td-comp-margin-s); }
-.knowledge-graph__wiki-grid button { display: grid; gap: 2px; min-width: 0; padding: var(--td-comp-margin-s); border: var(--border-width-hairline, .5px) solid var(--td-component-stroke); border-radius: var(--td-radius-medium); background: var(--td-bg-color-container); text-align: left; cursor: pointer; }
-.knowledge-graph__wiki-grid button:hover, .knowledge-graph__wiki-grid button.is-selected { border-color: var(--td-brand-color); background: var(--td-bg-color-secondarycontainer); }
-.knowledge-graph__wiki-title { overflow: hidden; color: var(--td-text-color-primary); text-overflow: ellipsis; white-space: nowrap; }
-.knowledge-graph__wiki-meta { color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }
-.knowledge-graph__wiki-grid small { color: var(--td-warning-color); font-size: var(--td-font-size-body-small); }
-@media (max-width: 720px) { .knowledge-graph__header { align-items: flex-start; flex-direction: column; } }
+.knowledge-graph { display: grid; align-content: start; box-sizing: border-box; height: 100%; min-height: 0; overflow-y: auto; gap: calc(var(--td-comp-margin-s) * 2); padding: calc(var(--td-comp-margin-s) * 2); background: linear-gradient(116deg, rgba(213,224,226,.28) 0%, rgba(255,255,255,.1) 34%, rgba(215,231,219,.06) 68%, rgba(255,255,255,.12) 100%), repeating-linear-gradient(90deg, rgba(255,255,255,.06) 0, rgba(255,255,255,.06) 1px, transparent 1px, transparent 92px), linear-gradient(118deg, #edf1f1 0%, #f3f5f4 37%, #edf1ef 68%, #f0f3f1 100%); background-attachment: local, local, fixed; color: var(--td-text-color-primary); }.knowledge-graph__header { display: flex; align-items: flex-end; justify-content: space-between; gap: calc(var(--td-comp-margin-s) * 2); }.knowledge-graph h1 { margin: 0; font-size: var(--td-font-size-headline-medium); font-weight: 600; }.knowledge-graph__header p, .knowledge-graph__wiki-list p { margin: calc(var(--td-comp-margin-s) / 2) 0 0; color: var(--td-text-color-secondary); }.knowledge-graph__count, .knowledge-graph__wiki-list header > span { color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); white-space: nowrap; }.knowledge-graph__view-tabs { display: inline-flex; width: max-content; gap: 3px; padding: 3px; border: 1px solid rgba(255,255,255,.86); border-radius: var(--td-radius-medium); background: rgba(226,233,229,.54); }.knowledge-graph__view-tabs button { min-height: 32px; padding: 4px 14px; border: 0; border-radius: var(--td-radius-small); color: var(--td-text-color-secondary); background: transparent; cursor: pointer; font-size: var(--td-font-size-body-small); }.knowledge-graph__view-tabs button:hover, .knowledge-graph__view-tabs button.is-active { color: var(--td-brand-color); background: rgba(255,255,255,.9); font-weight: 600; }.knowledge-graph__state { min-height: 420px; display: grid; place-items: center; }.knowledge-graph__status { display: flex; align-items: center; flex-wrap: wrap; gap: var(--td-comp-margin-s); padding: var(--td-comp-margin-s) calc(var(--td-comp-margin-s) * 1.5); border: 1px solid rgba(255,255,255,.72); border-radius: var(--td-radius-large); background: rgba(255,255,255,.32); backdrop-filter: blur(20px) saturate(112%); -webkit-backdrop-filter: blur(20px) saturate(112%); color: var(--td-text-color-secondary); }.knowledge-graph__status strong { color: var(--td-text-color-primary); }.knowledge-graph__status.is-failed { border-color: var(--td-error-color); }.knowledge-graph__status.is-partial { border-color: var(--td-warning-color); }.knowledge-graph__status .t-button { margin-left: auto; }.knowledge-graph__refreshing { display: flex; align-items: center; gap: var(--td-comp-margin-s); color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }.knowledge-graph__canvas-wrap { position: relative; min-width: 0; }.knowledge-graph__hint { position: absolute; z-index: 2; top: var(--td-comp-margin-s); left: 50%; padding: calc(var(--td-comp-margin-s) / 2) var(--td-comp-margin-s); transform: translateX(-50%); border: 1px solid rgba(255,255,255,.82); border-radius: var(--td-radius-large); background: rgba(255,255,255,.42); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }.knowledge-graph__wiki-list { display: grid; gap: calc(var(--td-comp-margin-s) * 1.5); min-width: 0; padding-top: calc(var(--td-comp-margin-s) * 2); border-top: 1px solid color-mix(in srgb, var(--td-component-stroke) 58%, transparent); }.knowledge-graph__wiki-list header { display: flex; align-items: flex-end; justify-content: space-between; gap: calc(var(--td-comp-margin-s) * 2); }.knowledge-graph__wiki-list h2 { margin: 0; font-size: var(--td-font-size-title-medium); }.knowledge-graph__wiki-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--td-comp-margin-s); }.knowledge-graph__wiki-grid button { display: grid; gap: 2px; min-width: 0; padding: var(--td-comp-margin-s); border: 1px solid rgba(255,255,255,.82); border-radius: var(--td-radius-medium); background: rgba(255,255,255,.36); backdrop-filter: blur(18px) saturate(112%); -webkit-backdrop-filter: blur(18px) saturate(112%); color: inherit; text-align: left; cursor: pointer; }.knowledge-graph__wiki-grid button:hover, .knowledge-graph__wiki-grid button.is-selected { border-color: var(--td-brand-color); background: rgba(255,255,255,.56); }.knowledge-graph__wiki-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.knowledge-graph__wiki-meta, .knowledge-graph__wiki-grid small { color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }.knowledge-graph__wiki-grid small { color: var(--td-warning-color); }
+.knowledge-graph__fixture { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid color-mix(in srgb, var(--td-brand-color) 18%, transparent); border-radius: var(--td-radius-medium); background: color-mix(in srgb, var(--td-brand-color-light) 36%, transparent); color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }.knowledge-graph__fixture strong { color: var(--td-brand-color); }
+.knowledge-graph__header-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--td-comp-margin-s); }
+@media (max-width: 720px) { .knowledge-graph { padding: var(--td-comp-margin-s); }.knowledge-graph__header { align-items: flex-start; flex-direction: column; }.knowledge-graph__header-actions { width: 100%; justify-content: space-between; }.knowledge-graph__count { white-space: normal; } }
 </style>

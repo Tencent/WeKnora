@@ -29,6 +29,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchVideoProcessingStatus, retryVideoProcessingStage } from '@/api/videohub'
 import type { VideoProcessingJobStatus, VideoProcessingStatus } from '@/types/videohub'
 import { getNewlyCompletedStages } from './processingStatusState'
+import { resolveProcessingFailureMessage } from '@/utils/videoProcessingStatus'
 
 const props = defineProps<{ videoId: string }>()
 const emit = defineEmits<{
@@ -79,7 +80,9 @@ const alertTheme = computed<'info' | 'success' | 'warning' | 'error'>(() => {
 const message = computed(() => {
   if (loadError.value) return `解析状态加载失败：${loadError.value}`
   if (!status.value) return '正在读取内容解析状态'
-  if (status.value.enhancement_status === 'failed' && status.value.foundation_status === 'completed') return '基础内容已完成，知识增强失败，可单独重试知识提取'
+  if (status.value.enhancement_status === 'failed' && status.value.foundation_status === 'completed') {
+    return resolveProcessingFailureMessage(status.value.enhancement_failure)
+  }
   const rawStage = status.value.current_stage || ''
   const displayName = stageLabels[rawStage] || (stageFallback[rawStage] ? stageLabels[stageFallback[rawStage]] : rawStage) || '等待开始'
   const stage = displayName
@@ -94,7 +97,7 @@ const message = computed(() => {
   }
   switch (status.value.status) {
     case 'completed': return '内容解析已完成，章节、总结和关联内容均可使用'
-    case 'failed': return `${stage}失败：${status.value.failure?.message || '可重试当前阶段'}`
+    case 'failed': return `${stage}失败：${resolveProcessingFailureMessage(status.value.failure)}`
     case 'partial_completed': return `部分内容已生成，当前阶段：${stage}`
     case 'processing': return `内容解析中，当前阶段：${stage}`
     default: return '视频已可播放，内容解析即将开始'
