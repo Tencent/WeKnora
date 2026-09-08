@@ -3377,8 +3377,10 @@ export default {
     referencesDrawerEmpty: '暂无参考来源',
     sandbox: {
         panelTitle: '沙箱可视化',
+        tabArtifacts: '产物',
         tabTerminal: '终端',
         tabDesktop: '桌面',
+        artifactsEmpty: '本会话尚未生成可下载的文件',
         desktopPlaceholder: '桌面可视化即将支持',
         notStarted: '终端尚未启动。启动后会连接本会话的沙箱环境；若沙箱不存在或已暂停，将为你创建或唤醒它。',
         start: '启动终端',

@@ -3375,8 +3375,10 @@ export default {
     referencesDrawerEmpty: 'Источники отсутствуют',
     sandbox: {
         panelTitle: 'Песочница',
+        tabArtifacts: 'Файлы',
         tabTerminal: 'Терминал',
         tabDesktop: 'Рабочий стол',
+        artifactsEmpty: 'В этом диалоге пока нет созданных файлов',
         desktopPlaceholder: 'Визуализация рабочего стола скоро появится',
         notStarted: 'Терминал ещё не запущен. Запуск подключит его к песочнице этого диалога, создав или возобновив её при необходимости.',
         start: 'Запустить терминал',

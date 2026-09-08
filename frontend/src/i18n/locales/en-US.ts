@@ -3392,8 +3392,10 @@ export default {
     referencesDrawerEmpty: 'No sources available',
     sandbox: {
         panelTitle: 'Sandbox',
+        tabArtifacts: 'Files',
         tabTerminal: 'Terminal',
         tabDesktop: 'Desktop',
+        artifactsEmpty: 'No generated files in this conversation yet.',
         desktopPlaceholder: 'Desktop visualization coming soon',
         notStarted: 'The terminal is not running yet. Starting it connects to this conversation\'s sandbox, creating or resuming one if none is available.',
         start: 'Start terminal',

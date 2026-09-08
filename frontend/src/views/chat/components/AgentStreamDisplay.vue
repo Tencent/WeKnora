@@ -577,7 +577,7 @@
     </template>
   </t-drawer>
   <ChatArtifactsDrawer
-    v-if="hasArtifacts && sessionIdForArtifacts && messageIdForArtifacts"
+    v-if="hasArtifacts && embeddedMode && sessionIdForArtifacts && messageIdForArtifacts"
     v-model:visible="showArtifactDrawer"
     :session-id="sessionIdForArtifacts"
     :message-id="messageIdForArtifacts"
@@ -600,6 +600,7 @@ import picturePreview from '@/components/picture-preview.vue';
 import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
 import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 import { useArtifactArriveMotion } from '@/composables/useArtifactArriveMotion';
+import { useChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import ChatMemoryStep from './ChatMemoryStep.vue';
 import { useChatMemoryRow, type UsedMemory } from '@/composables/useChatMemoryRow';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
@@ -1004,11 +1005,10 @@ watch(
 // Skill artifact download drawer (Agent path)
 // -----------------------------------------------------------------------------
 // Same contract as botmsg.vue: only render the button when the persisted
-// assistant message actually recorded files, then let ChatArtifactsDrawer
-// resolve names/sizes/mtimes and stream downloads via the /artifacts
-// endpoint. Agent mode is the primary path for skills, so this button will
-// appear more often here than in the RAG path.
+// assistant message actually recorded files, then open the sandbox panel's
+// artifacts tab (or ChatArtifactsDrawer in embedded mode).
 const showArtifactDrawer = ref(false);
+const sandboxPanel = useChatSandboxPanel();
 const artifactList = computed(() => {
   const list = ((props.session?.artifacts as any[]) || []);
   return list.map((a, i) => ({ index: i, ...a }));
@@ -1027,6 +1027,13 @@ const messageIdForArtifacts = computed(() =>
 const artifactPreviewIndex = ref<number | null>(null);
 function openArtifactDrawer(previewIndex: number | null = null) {
   if (!hasArtifacts.value) return;
+  if (sandboxPanel && !props.embeddedMode) {
+    sandboxPanel.open('artifacts', {
+      messageId: messageIdForArtifacts.value,
+      previewIndex,
+    });
+    return;
+  }
   artifactPreviewIndex.value = previewIndex;
   showArtifactDrawer.value = true;
 }

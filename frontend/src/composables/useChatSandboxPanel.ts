@@ -1,6 +1,15 @@
 import { inject, provide, ref, type InjectionKey, type Ref } from 'vue'
 
-export type SandboxPanelTab = 'terminal' | 'desktop'
+export type SandboxPanelTab = 'artifacts' | 'terminal' | 'desktop'
+
+export type ArtifactPanelFocus = {
+  messageId: string
+  previewIndex?: number | null
+}
+
+export type ArtifactPanelFocusState = ArtifactPanelFocus & {
+  nonce: number
+}
 
 // 面板宽度可拖拽调整，持久化到 localStorage。
 export const SANDBOX_PANEL_MIN_WIDTH = 320
@@ -27,8 +36,10 @@ export type ChatSandboxPanelContext = {
   activeTab: Ref<SandboxPanelTab>
   width: Ref<number>
   setWidth: (width: number) => void
-  open: (tab?: SandboxPanelTab) => void
+  artifactFocus: Ref<ArtifactPanelFocusState | null>
+  open: (tab?: SandboxPanelTab, focus?: ArtifactPanelFocus) => void
   close: () => void
+  clearArtifactFocus: () => void
 }
 
 const CHAT_SANDBOX_PANEL_KEY: InjectionKey<ChatSandboxPanelContext> = Symbol(
@@ -37,21 +48,31 @@ const CHAT_SANDBOX_PANEL_KEY: InjectionKey<ChatSandboxPanelContext> = Symbol(
 
 export function provideChatSandboxPanel(): ChatSandboxPanelContext {
   const visible = ref(false)
-  const activeTab = ref<SandboxPanelTab>('terminal')
+  const activeTab = ref<SandboxPanelTab>('artifacts')
   const width = ref(initialPanelWidth())
+  const artifactFocus = ref<ArtifactPanelFocusState | null>(null)
+  let focusNonce = 0
 
   const setWidth = (next: number) => {
     width.value = clampPanelWidth(next)
     localStorage.setItem('sandbox_panel_width', String(width.value))
   }
 
-  const open = (tab?: SandboxPanelTab) => {
+  const open = (tab?: SandboxPanelTab, focus?: ArtifactPanelFocus) => {
     if (tab) activeTab.value = tab
+    if (focus) {
+      artifactFocus.value = { ...focus, nonce: ++focusNonce }
+    }
     visible.value = true
   }
 
   const close = () => {
     visible.value = false
+    artifactFocus.value = null
+  }
+
+  const clearArtifactFocus = () => {
+    artifactFocus.value = null
   }
 
   const ctx: ChatSandboxPanelContext = {
@@ -59,8 +80,10 @@ export function provideChatSandboxPanel(): ChatSandboxPanelContext {
     activeTab,
     width,
     setWidth,
+    artifactFocus,
     open,
     close,
+    clearArtifactFocus,
   }
 
   provide(CHAT_SANDBOX_PANEL_KEY, ctx)

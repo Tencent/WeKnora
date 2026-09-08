@@ -40,6 +40,13 @@ test('artifact count is a top-right overlay instead of t-badge', () => {
   assert.doesNotMatch(agentStream, /<t-badge/)
 })
 
+test('artifact toolbar opens the sandbox panel artifacts tab', () => {
+  assert.match(botMessage, /sandboxPanel.open\('artifacts'/)
+  assert.match(agentStream, /sandboxPanel.open\('artifacts'/)
+  assert.match(botMessage, /v-if="hasArtifacts && embeddedMode"/)
+  assert.match(agentStream, /v-if="hasArtifacts && embeddedMode/)
+})
+
 test('artifact toolbar uses a folder icon and replaces it while collecting', () => {
   assert.match(botMessage, /answer-toolbar__artifact[\s\S]{0,800}name="folder"/)
   assert.match(agentStream, /answer-toolbar__artifact[\s\S]{0,800}name="folder"/)

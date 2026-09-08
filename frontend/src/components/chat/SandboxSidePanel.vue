@@ -14,8 +14,27 @@
         :aria-hidden="true"
         @mousedown.prevent="startResize"
       />
-      <header class="chat-sandbox-panel__header">
-        <h3 class="chat-sandbox-panel__title">{{ t('chat.sandbox.panelTitle') }}</h3>
+      <div class="chat-sandbox-panel__tabs">
+        <div class="chat-sandbox-panel__tablist" role="tablist">
+          <button
+            v-for="tab in tabs"
+            :key="tab.id"
+            type="button"
+            class="chat-sandbox-panel__tab"
+            :class="{ 'is-active': panel?.activeTab.value === tab.id }"
+            role="tab"
+            :aria-selected="panel?.activeTab.value === tab.id"
+            @click="panel?.open(tab.id)"
+          >
+            <t-icon :name="tab.icon" size="16px" />
+            <span>{{ tab.label }}</span>
+            <span
+              v-if="tab.id === 'artifacts' && artifacts.length"
+              class="chat-sandbox-panel__tab-count"
+              aria-hidden="true"
+            >{{ artifacts.length }}</span>
+          </button>
+        </div>
         <button
           type="button"
           class="chat-sandbox-panel__close"
@@ -24,25 +43,21 @@
         >
           <t-icon name="close" size="20px" />
         </button>
-      </header>
-
-      <div class="chat-sandbox-panel__tabs" role="tablist">
-        <button
-          v-for="tab in tabs"
-          :key="tab.id"
-          type="button"
-          class="chat-sandbox-panel__tab"
-          :class="{ 'is-active': panel?.activeTab.value === tab.id }"
-          role="tab"
-          :aria-selected="panel?.activeTab.value === tab.id"
-          @click="panel?.open(tab.id)"
-        >
-          <t-icon :name="tab.icon" size="16px" />
-          <span>{{ tab.label }}</span>
-        </button>
       </div>
 
-      <div class="chat-sandbox-panel__body">
+      <div
+        class="chat-sandbox-panel__body"
+        :class="{ 'is-flush': panel?.activeTab.value === 'artifacts' }"
+      >
+        <ChatArtifactsPanel
+          v-show="panel?.activeTab.value === 'artifacts'"
+          class="chat-sandbox-panel__artifacts"
+          :session-id="sessionId"
+          :items="artifacts"
+          :collecting="artifactsCollecting"
+          :active="panel?.activeTab.value === 'artifacts'"
+        />
+
         <!-- 终端：首次激活时惰性挂载；切 tab 用 v-show 保留实例（不丢 PTY）。 -->
         <SandboxTerminal
           v-if="terminalMounted"
@@ -76,19 +91,30 @@ import {
   type SandboxPanelTab,
 } from '@/composables/useChatSandboxPanel'
 import SandboxTerminal from '@/views/chat/components/SandboxTerminal.vue'
+import ChatArtifactsPanel from '@/views/chat/components/ChatArtifactsPanel.vue'
+import type { SessionArtifactItem } from '@/utils/sessionArtifacts'
 
-const props = defineProps<{
-  sessionId: string
-  /** 当前会话选中的 agent（首次连接时按其配置自动创建沙箱）。 */
-  agentId?: string
-  /** 参考来源面板同开时整体左移，避免两块 fixed 面板重叠。 */
-  shifted?: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    sessionId: string
+    /** 当前会话选中的 agent（首次连接时按其配置自动创建沙箱）。 */
+    agentId?: string
+    /** 参考来源面板同开时整体左移，避免两块 fixed 面板重叠。 */
+    shifted?: boolean
+    artifacts?: SessionArtifactItem[]
+    artifactsCollecting?: boolean
+  }>(),
+  {
+    artifacts: () => [],
+    artifactsCollecting: false,
+  },
+)
 
 const { t } = useI18n()
 const panel = useChatSandboxPanel()
 
 const tabs = computed(() => [
+  { id: 'artifacts' as SandboxPanelTab, icon: 'folder', label: t('chat.sandbox.tabArtifacts') },
   { id: 'terminal' as SandboxPanelTab, icon: 'terminal', label: t('chat.sandbox.tabTerminal') },
   { id: 'desktop' as SandboxPanelTab, icon: 'desktop', label: t('chat.sandbox.tabDesktop') },
 ])
@@ -107,6 +133,13 @@ watch(
     }
   },
   { immediate: true },
+)
+
+watch(
+  () => props.sessionId,
+  () => {
+    panel?.clearArtifactFocus()
+  },
 )
 
 // --- 左缘拖拽调宽 -------------------------------------------------------
@@ -198,23 +231,6 @@ function startResize(event: MouseEvent) {
   }
 }
 
-.chat-sandbox-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 16px 12px;
-  border-bottom: 1px solid var(--td-component-stroke);
-}
-
-.chat-sandbox-panel__title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--td-text-color-secondary);
-  line-height: 1.4;
-}
-
 .chat-sandbox-panel__close {
   border: 0;
   background: var(--td-bg-color-secondarycontainer);
@@ -237,22 +253,33 @@ function startResize(event: MouseEvent) {
 
 .chat-sandbox-panel__tabs {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--td-component-stroke);
+  flex-shrink: 0;
+}
+
+.chat-sandbox-panel__tablist {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+  overflow-x: auto;
 }
 
 .chat-sandbox-panel__tab {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 6px 10px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--td-text-color-secondary);
   font-size: 13px;
   cursor: pointer;
+  white-space: nowrap;
   transition: background-color 0.15s ease, color 0.15s ease;
 
   &:hover {
@@ -266,17 +293,35 @@ function startResize(event: MouseEvent) {
   }
 }
 
+.chat-sandbox-panel__tab-count {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--td-brand-color);
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+
 .chat-sandbox-panel__body {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 8px;
+
+  &.is-flush {
+    padding: 0;
+  }
 }
 
-.chat-sandbox-panel__terminal {
+.chat-sandbox-panel__terminal,
+.chat-sandbox-panel__artifacts {
   flex: 1;
   min-height: 0;
+  min-width: 0;
 }
 
 .chat-sandbox-panel__placeholder {

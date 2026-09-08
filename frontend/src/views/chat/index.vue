@@ -154,7 +154,8 @@
     <ChatReferencesDrawer />
     <ChatAttachmentPreviewDrawer />
     <SandboxSidePanel v-if="!embeddedMode" :session-id="session_id"
-        :agent-id="useSettingsStoreInstance.selectedAgentId" :shifted="referencesDrawerVisible" />
+        :agent-id="useSettingsStoreInstance.selectedAgentId" :shifted="referencesDrawerVisible"
+        :artifacts="sessionArtifacts" :artifacts-collecting="sessionArtifactsCollecting" />
 </template>
 <script setup>
 import { storeToRefs } from 'pinia';
@@ -198,6 +199,8 @@ import { provideChatAttachmentPreviewDrawer } from '@/composables/useChatAttachm
 import { useSessionActivityStore } from '@/stores/sessionActivity';
 import { provideChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import SandboxSidePanel from '@/components/chat/SandboxSidePanel.vue';
+import { collectSessionArtifacts } from '@/utils/sessionArtifacts';
+import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 const referencesDrawer = provideChatReferencesDrawer();
 provideChatAttachmentPreviewDrawer();
 const sandboxPanel = provideChatSandboxPanel();
@@ -280,6 +283,10 @@ const inputFieldRef = ref();
 const created_at = ref('');
 const limit = ref(20);
 const messagesList = reactive([]);
+const sessionArtifacts = computed(() => collectSessionArtifacts(messagesList));
+const sessionArtifactsCollecting = computed(() =>
+    messagesList.some((message) => isCollectingSkillArtifacts(message)),
+);
 const isReplying = ref(false);
 const currentAssistantMessageId = ref(''); // 当前正在生成的 assistant message ID
 // True only while attaching to an in-flight *IM-originated* reply via continue-stream.

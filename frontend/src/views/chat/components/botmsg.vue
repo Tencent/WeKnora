@@ -92,7 +92,7 @@
                 :on-leave="scheduleCitationClose" />
         </Teleport>
         <ChatArtifactsDrawer
-            v-if="hasArtifacts"
+            v-if="hasArtifacts && embeddedMode"
             v-model:visible="showArtifactDrawer"
             :session-id="sessionId"
             :message-id="messageIdForArtifacts"
@@ -114,6 +114,7 @@ import picturePreview from '@/components/picture-preview.vue';
 import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
 import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 import { useArtifactArriveMotion } from '@/composables/useArtifactArriveMotion';
+import { useChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import {
     artifactIndexFromEventTarget,
@@ -206,18 +207,17 @@ const props = defineProps({
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
 
 // -----------------------------------------------------------------------------
-// Skill artifact download (drawer)
+// Skill artifact download (drawer in embedded mode; sandbox panel otherwise)
 // -----------------------------------------------------------------------------
-// The download button and drawer are opt-in per message: the toolbar checks
+// The download button is opt-in per message: the toolbar checks
 // `hasArtifacts` and only renders when the assistant message actually
-// recorded a file. `messageIdForArtifacts` resolves to whichever field the
-// caller uses to identify the row on the server (session.id from the SSE
-// hydration path, request_id when the caller pre-populated it).
+// recorded a file. In the main app this opens the sandbox panel's artifacts
+// tab. Embedded chat still uses ChatArtifactsDrawer.
 //
 // NOTE: this file's <script setup> block is plain JS (no lang="ts"), so we
-// stay away from TypeScript-only syntax like `as any[]` — the vite Vue
-// plugin routes non-TS blocks through babel which rejects those tokens.
+// stay away from TypeScript-only syntax like `as any[]`.
 const showArtifactDrawer = ref(false);
+const sandboxPanel = useChatSandboxPanel();
 const artifactList = computed(() => {
     const raw = props.session && props.session.artifacts;
     const list = Array.isArray(raw) ? raw : [];
@@ -242,6 +242,13 @@ const messageIdForArtifacts = computed(() => {
 const artifactPreviewIndex = ref(null);
 function openArtifactDrawer(previewIndex = null) {
     if (!hasArtifacts.value) return;
+    if (sandboxPanel && !props.embeddedMode) {
+        sandboxPanel.open('artifacts', {
+            messageId: messageIdForArtifacts.value,
+            previewIndex,
+        });
+        return;
+    }
     artifactPreviewIndex.value = previewIndex;
     showArtifactDrawer.value = true;
 }

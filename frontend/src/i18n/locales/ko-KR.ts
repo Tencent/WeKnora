@@ -3375,8 +3375,10 @@ export default {
     referencesDrawerEmpty: '참고 출처가 없습니다',
     sandbox: {
         panelTitle: '샌드박스',
+        tabArtifacts: '파일',
         tabTerminal: '터미널',
         tabDesktop: '데스크톱',
+        artifactsEmpty: '이 대화에서 생성된 파일이 없습니다',
         desktopPlaceholder: '데스크톱 시각화는 곧 지원될 예정입니다',
         notStarted: '터미널이 아직 실행되지 않았습니다. 시작하면 이 대화의 샌드박스에 연결하며, 샌드박스가 없거나 일시 중지된 경우 생성하거나 다시 시작합니다.',
         start: '터미널 시작',

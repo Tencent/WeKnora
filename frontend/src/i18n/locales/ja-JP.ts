@@ -3392,8 +3392,10 @@ export default {
     referencesDrawerEmpty: '出典はありません',
     sandbox: {
         panelTitle: 'サンドボックス',
+        tabArtifacts: 'ファイル',
         tabTerminal: 'ターミナル',
         tabDesktop: 'デスクトップ',
+        artifactsEmpty: 'この会話で生成されたファイルはまだありません',
         desktopPlaceholder: 'デスクトップの可視化は近日対応予定です',
         notStarted: 'ターミナルはまだ起動していません。起動するとこの会話のサンドボックスに接続し、存在しないか一時停止中の場合は作成または再開します。',
         start: 'ターミナルを起動',
