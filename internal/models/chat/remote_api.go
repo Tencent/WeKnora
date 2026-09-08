@@ -72,7 +72,7 @@ func (rt responseBodyCaptureRoundTripper) RoundTrip(req *http.Request) (*http.Re
 		return resp, err
 	}
 	body, readErr := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if readErr != nil {
 		return resp, readErr
 	}
@@ -252,7 +252,7 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 		return c.chatWithRawHTTP(timeoutCtx, endpoint, body, opts)
 	}
 
-	req := *(body.(*openai.ChatCompletionRequest))
+	req := *body.(*openai.ChatCompletionRequest)
 	c.logRequest(timeoutCtx, req, false)
 	noteChatProviderRequest(timeoutCtx)
 	// Seed a body-capture slot so we can recover the raw response and detect
@@ -359,7 +359,7 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 		return wrapStreamCancel(ch, err, cancel)
 	}
 
-	req := *(body.(*openai.ChatCompletionRequest))
+	req := *body.(*openai.ChatCompletionRequest)
 	c.logRequest(timeoutCtx, req, true)
 
 	streamDumper := newStreamPacketDumper(c.modelName, &req)

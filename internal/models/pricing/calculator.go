@@ -46,8 +46,14 @@ func (c *Calculator) Calculate(usage *types.ModelUsage, rule *types.ModelPricing
 	switch rule.BillingMode {
 	case types.BillingModeChatStandardTokens:
 		parts = []component{
-			meterComponent(usage.InputTokens, rule.InputTokenPrice, rule.UnitScale, func(v *types.Decimal) { cost.InputCost = v }),
-			meterComponent(usage.OutputTokens, rule.OutputTokenPrice, rule.UnitScale, func(v *types.Decimal) { cost.OutputCost = v }),
+			meterComponent(
+				usage.InputTokens, rule.InputTokenPrice, rule.UnitScale,
+				func(v *types.Decimal) { cost.InputCost = v },
+			),
+			meterComponent(
+				usage.OutputTokens, rule.OutputTokenPrice, rule.UnitScale,
+				func(v *types.Decimal) { cost.OutputCost = v },
+			),
 		}
 	case types.BillingModeChatCacheSplitTokens:
 		var uncached *int
@@ -58,27 +64,63 @@ func (c *Calculator) Calculate(usage *types.ModelUsage, rule *types.ModelPricing
 			}
 		}
 		parts = []component{
-			meterComponent(uncached, rule.InputTokenPrice, rule.UnitScale, func(v *types.Decimal) { cost.InputCost = v }),
-			meterComponent(usage.CacheReadTokens, rule.CacheReadTokenPrice, rule.UnitScale, func(v *types.Decimal) { cost.CacheReadCost = v }),
-			meterComponent(usage.CacheWriteTokens, rule.CacheWriteTokenPrice, rule.UnitScale, func(v *types.Decimal) { cost.CacheWriteCost = v }),
-			meterComponent(usage.OutputTokens, rule.OutputTokenPrice, rule.UnitScale, func(v *types.Decimal) { cost.OutputCost = v }),
+			meterComponent(
+				uncached, rule.InputTokenPrice, rule.UnitScale,
+				func(v *types.Decimal) { cost.InputCost = v },
+			),
+			meterComponent(
+				usage.CacheReadTokens, rule.CacheReadTokenPrice, rule.UnitScale,
+				func(v *types.Decimal) { cost.CacheReadCost = v },
+			),
+			meterComponent(
+				usage.CacheWriteTokens, rule.CacheWriteTokenPrice, rule.UnitScale,
+				func(v *types.Decimal) { cost.CacheWriteCost = v },
+			),
+			meterComponent(
+				usage.OutputTokens, rule.OutputTokenPrice, rule.UnitScale,
+				func(v *types.Decimal) { cost.OutputCost = v },
+			),
 		}
 	case types.BillingModeEmbeddingInputToken:
-		parts = []component{meterComponent(usage.InputTokens, rule.InputTokenPrice, rule.UnitScale, func(v *types.Decimal) { cost.InputCost = v })}
+		parts = []component{meterComponent(
+			usage.InputTokens, rule.InputTokenPrice, rule.UnitScale,
+			func(v *types.Decimal) { cost.InputCost = v },
+		)}
 	case types.BillingModeEmbeddingTotalToken:
-		parts = []component{meterComponent(usage.TotalTokens, rule.TotalTokenPrice, rule.UnitScale, func(v *types.Decimal) { cost.InputCost = v })}
+		parts = []component{meterComponent(
+			usage.TotalTokens, rule.TotalTokenPrice, rule.UnitScale,
+			func(v *types.Decimal) { cost.InputCost = v },
+		)}
 	case types.BillingModeEmbeddingProviderInput:
-		parts = []component{meterComponent(embeddingProviderInputMeter(usage), rule.PerInputPrice, rule.UnitScale, func(v *types.Decimal) { cost.ProviderInputCost = v })}
+		parts = []component{meterComponent(
+			embeddingProviderInputMeter(usage), rule.PerInputPrice, rule.UnitScale,
+			func(v *types.Decimal) { cost.ProviderInputCost = v },
+		)}
 	case types.BillingModeEmbeddingProviderRequest:
-		parts = []component{meterComponent(&usage.ProviderRequests, rule.PerRequestPrice, rule.UnitScale, func(v *types.Decimal) { cost.RequestCost = v })}
+		parts = []component{meterComponent(
+			&usage.ProviderRequests, rule.PerRequestPrice, rule.UnitScale,
+			func(v *types.Decimal) { cost.RequestCost = v },
+		)}
 	case types.BillingModeRerankInputToken:
-		parts = []component{meterComponent(usage.InputTokens, rule.InputTokenPrice, rule.UnitScale, func(v *types.Decimal) { cost.InputCost = v })}
+		parts = []component{meterComponent(
+			usage.InputTokens, rule.InputTokenPrice, rule.UnitScale,
+			func(v *types.Decimal) { cost.InputCost = v },
+		)}
 	case types.BillingModeRerankTotalToken:
-		parts = []component{meterComponent(usage.TotalTokens, rule.TotalTokenPrice, rule.UnitScale, func(v *types.Decimal) { cost.InputCost = v })}
+		parts = []component{meterComponent(
+			usage.TotalTokens, rule.TotalTokenPrice, rule.UnitScale,
+			func(v *types.Decimal) { cost.InputCost = v },
+		)}
 	case types.BillingModeRerankProviderPair:
-		parts = []component{meterComponent(&usage.ProviderPairs, rule.PerPairPrice, rule.UnitScale, func(v *types.Decimal) { cost.ProviderPairCost = v })}
+		parts = []component{meterComponent(
+			&usage.ProviderPairs, rule.PerPairPrice, rule.UnitScale,
+			func(v *types.Decimal) { cost.ProviderPairCost = v },
+		)}
 	case types.BillingModeRerankProviderRequest:
-		parts = []component{meterComponent(&usage.ProviderRequests, rule.PerRequestPrice, rule.UnitScale, func(v *types.Decimal) { cost.RequestCost = v })}
+		parts = []component{meterComponent(
+			&usage.ProviderRequests, rule.PerRequestPrice, rule.UnitScale,
+			func(v *types.Decimal) { cost.RequestCost = v },
+		)}
 	default:
 		return cost, nil
 	}

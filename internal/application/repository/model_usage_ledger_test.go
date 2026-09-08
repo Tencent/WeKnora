@@ -388,7 +388,7 @@ func sqliteColumnNullability(t *testing.T, db *gorm.DB, table string) map[string
 	t.Helper()
 	rows, err := db.Raw("PRAGMA table_info(" + table + ")").Rows()
 	require.NoError(t, err)
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[string]bool{}
 	for rows.Next() {
 		var cid, notNull, pk int
@@ -405,7 +405,7 @@ func sqliteFKOnDelete(t *testing.T, db *gorm.DB, table string) string {
 	t.Helper()
 	rows, err := db.Raw("PRAGMA foreign_key_list(" + table + ")").Rows()
 	require.NoError(t, err)
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var onDelete string
 	for rows.Next() {
 		var id, seq int
@@ -423,7 +423,7 @@ func sqliteIndexes(t *testing.T, db *gorm.DB, table string) map[string]bool {
 	t.Helper()
 	rows, err := db.Raw("PRAGMA index_list(" + table + ")").Rows()
 	require.NoError(t, err)
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[string]bool{}
 	for rows.Next() {
 		var seq, unique int

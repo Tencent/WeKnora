@@ -50,7 +50,9 @@ type modelUsageAggregationRow struct {
 	KnownCost    *types.Decimal
 }
 
-func (r *modelUsageRepository) AggregateEvaluationRun(ctx context.Context, tenantID uint64, evaluationRunID string) (*types.EvaluationModelUsageAggregate, error) {
+func (r *modelUsageRepository) AggregateEvaluationRun(
+	ctx context.Context, tenantID uint64, evaluationRunID string,
+) (*types.EvaluationModelUsageAggregate, error) {
 	if tenantID == 0 {
 		return nil, fmt.Errorf("model_usage aggregation: tenant_id must be non-zero")
 	}
@@ -142,8 +144,14 @@ func finishObservedModels(groups map[observedModelKey]int64) []types.ObservedMod
 	}
 	sort.Slice(keys, func(i, j int) bool {
 		left, right := keys[i], keys[j]
-		leftFields := []string{string(left.CallType), left.ModelID, left.ModelName, left.ModelType, left.ModelSource, left.ResolvedProvider}
-		rightFields := []string{string(right.CallType), right.ModelID, right.ModelName, right.ModelType, right.ModelSource, right.ResolvedProvider}
+		leftFields := []string{
+			string(left.CallType), left.ModelID, left.ModelName,
+			left.ModelType, left.ModelSource, left.ResolvedProvider,
+		}
+		rightFields := []string{
+			string(right.CallType), right.ModelID, right.ModelName,
+			right.ModelType, right.ModelSource, right.ResolvedProvider,
+		}
 		for index := range leftFields {
 			if leftFields[index] != rightFields[index] {
 				return leftFields[index] < rightFields[index]
@@ -172,7 +180,11 @@ func finishObservedModels(groups map[observedModelKey]int64) []types.ObservedMod
 	return result
 }
 
-func aggregateUsageRow(result *types.EvaluationModelUsageAggregate, costs map[string]*currencyCostAccumulator, row *modelUsageAggregationRow) error {
+func aggregateUsageRow(
+	result *types.EvaluationModelUsageAggregate,
+	costs map[string]*currencyCostAccumulator,
+	row *modelUsageAggregationRow,
+) error {
 	result.Calls.Total++
 	switch row.CallType {
 	case types.CallTypeChat:
@@ -331,13 +343,17 @@ type currencyCostAccumulator struct {
 
 func newCurrencyCostAccumulator() *currencyCostAccumulator {
 	result := &currencyCostAccumulator{}
-	for _, accumulator := range []*callTypeCostAccumulator{&result.chat, &result.embedding, &result.rerank, &result.total} {
+	for _, accumulator := range []*callTypeCostAccumulator{
+		&result.chat, &result.embedding, &result.rerank, &result.total,
+	} {
 		accumulator.priced, accumulator.known = new(big.Rat), new(big.Rat)
 	}
 	return result
 }
 
-func (c *currencyCostAccumulator) add(callType types.CallType, status types.CostStatus, totalCost, knownCost *types.Decimal) error {
+func (c *currencyCostAccumulator) add(
+	callType types.CallType, status types.CostStatus, totalCost, knownCost *types.Decimal,
+) error {
 	var byType *callTypeCostAccumulator
 	switch callType {
 	case types.CallTypeChat:
@@ -392,7 +408,9 @@ func (c *currencyCostAccumulator) finish(currency string) (types.CurrencyCostAgg
 	if err != nil {
 		return types.CurrencyCostAggregate{}, err
 	}
-	return types.CurrencyCostAggregate{Currency: currency, Chat: chat, Embedding: embedding, Rerank: rerank, Total: total}, nil
+	return types.CurrencyCostAggregate{
+		Currency: currency, Chat: chat, Embedding: embedding, Rerank: rerank, Total: total,
+	}, nil
 }
 
 func (c *callTypeCostAccumulator) finish() (types.CallTypeCostAggregate, error) {

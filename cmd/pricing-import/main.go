@@ -18,7 +18,7 @@ import (
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		writeOutput(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
 }
@@ -41,7 +41,7 @@ func run(args []string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("pricing-import: get database handle: %w", err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 	if !db.Migrator().HasTable("model_pricing") {
 		return fmt.Errorf("pricing-import: model_pricing table is missing; apply existing migrations first")
 	}
@@ -51,9 +51,13 @@ func run(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "pricing_version=%s source=%s inserted=%d no_op=%d closed=%d\n",
+	writeOutput(stdout, "pricing_version=%s source=%s inserted=%d no_op=%d closed=%d\n",
 		result.PricingVersion, result.SourceName, result.Inserted, result.NoOp, result.Closed)
 	return nil
+}
+
+func writeOutput(w io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintf(w, format, args...)
 }
 
 func openDatabase() (*gorm.DB, error) {

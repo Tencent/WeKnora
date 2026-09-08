@@ -151,8 +151,14 @@ func TestAggregateAnalyticsSQLiteCostsRemainExactAndSeparateCoverage(t *testing.
 		rows[i] = analyticsUsage(17, "cost-model", types.CallTypeChat, start.Add(time.Duration(i)*time.Minute))
 		require.NoError(t, repo.Create(ctx, rows[i]))
 	}
-	insertAggregationCost(t, db, rows[0].ID, types.CostStatusPriced, "USD", decPtr("0.100000000000000001"), decPtr("0.100000000000000001"))
-	insertAggregationCost(t, db, rows[1].ID, types.CostStatusPriced, "USD", decPtr("0.200000000000000002"), decPtr("0.200000000000000002"))
+	insertAggregationCost(
+		t, db, rows[0].ID, types.CostStatusPriced, "USD",
+		decPtr("0.100000000000000001"), decPtr("0.100000000000000001"),
+	)
+	insertAggregationCost(
+		t, db, rows[1].ID, types.CostStatusPriced, "USD",
+		decPtr("0.200000000000000002"), decPtr("0.200000000000000002"),
+	)
 	insertAggregationCost(t, db, rows[2].ID, types.CostStatusPartial, "USD", nil, decPtr("0.3"))
 	insertAggregationCost(t, db, rows[3].ID, types.CostStatusUnpriced, "CNY", nil, nil)
 	// rows[4] intentionally has no cost row.
@@ -254,12 +260,23 @@ func TestAggregateAnalyticsPostgreSQLUsesServerBucketsAndExactNumericSums(t *tes
 		1, 0, 0, 0, 0, 25, 0, 75, 100,
 		0, 0, 0, 0, 0, 0, 0,
 	)
-	mock.ExpectQuery(`(?s)date_trunc\('hour', u\.created_at AT TIME ZONE 'UTC'\).*FROM model_usage AS u.*u\.tenant_id = \$1 AND u\.created_at >= \$2 AND u\.created_at < \$3 AND u\.model_id = \$4.*GROUP BY bucket_start, u\.call_type.*ORDER BY bucket_start ASC`).
+	mock.ExpectQuery(
+		`(?s)date_trunc\('hour', u\.created_at AT TIME ZONE 'UTC'\).*FROM model_usage AS u.*`+
+			`u\.tenant_id = \$1 AND u\.created_at >= \$2 AND u\.created_at < \$3 AND u\.model_id = \$4.*`+
+			`GROUP BY bucket_start, u\.call_type.*ORDER BY bucket_start ASC`,
+	).
 		WithArgs(int64(37), sqlmock.AnyArg(), sqlmock.AnyArg(), "model-pg").WillReturnRows(usageRows)
 	costRows := sqlmock.NewRows([]string{
-		"bucket_start", "call_type", "cost_group", "cost_status", "cost_currency", "calls", "total_cost_text", "known_cost_text",
-	}).AddRow("2026-09-04T10:00:00Z", "chat", "currency", "priced", "USD", 1, "0.100000000000000001", "0.100000000000000001")
-	mock.ExpectQuery(`(?s)SUM\(c\.total_cost\)::text.*LEFT JOIN model_usage_cost AS c ON c\.usage_id = u\.id.*u\.tenant_id = \$1.*GROUP BY bucket_start.*ORDER BY bucket_start ASC`).
+		"bucket_start", "call_type", "cost_group", "cost_status",
+		"cost_currency", "calls", "total_cost_text", "known_cost_text",
+	}).AddRow(
+		"2026-09-04T10:00:00Z", "chat", "currency", "priced", "USD", 1,
+		"0.100000000000000001", "0.100000000000000001",
+	)
+	mock.ExpectQuery(
+		`(?s)SUM\(c\.total_cost\)::text.*LEFT JOIN model_usage_cost AS c ON c\.usage_id = u\.id.*`+
+			`u\.tenant_id = \$1.*GROUP BY bucket_start.*ORDER BY bucket_start ASC`,
+	).
 		WithArgs(int64(37), sqlmock.AnyArg(), sqlmock.AnyArg(), "model-pg").WillReturnRows(costRows)
 
 	start := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)

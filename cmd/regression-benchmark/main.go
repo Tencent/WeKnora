@@ -45,9 +45,15 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	output := fs.String("output", "artifacts/regression/current.json", "path to write the current BenchmarkResult JSON")
 	profilePath := fs.String("profile", "", "final benchmark profile JSON (enables strict preflight and final artifacts)")
 	executionModeValue := fs.String("execution-mode", "strict", "profile execution mode: strict or custom")
-	outputDir := fs.String("output-dir", "artifacts/rhino_2026_final/benchmark", "directory for benchmark result.json and result.md")
+	outputDir := fs.String(
+		"output-dir", "artifacts/rhino_2026_final/benchmark",
+		"directory for benchmark result.json and result.md",
+	)
 	preflightOnly := fs.Bool("preflight-only", false, "validate benchmark prerequisites without starting evaluation")
-	backendURL := fs.String("backend-url", "http://127.0.0.1:8080", "running backend base URL checked by benchmark preflight")
+	backendURL := fs.String(
+		"backend-url", "http://127.0.0.1:8080",
+		"running backend base URL checked by benchmark preflight",
+	)
 	dataset := fs.String("dataset", "benchmark_v1", "dataset ID to evaluate (benchmark_v1)")
 	tenant := fs.Uint64("tenant", 10000, "tenant ID under which the evaluation runs")
 	timeout := fs.Duration("timeout", 10*time.Minute, "maximum time to wait for the benchmark run")
@@ -62,38 +68,42 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	var commitSHA string
 	executionMode, err := parseExecutionMode(*executionModeValue)
 	if err != nil {
-		fmt.Fprintf(stderr, "benchmark-v1 preflight: %v\n", err)
+		writeCLI(stderr, "benchmark-v1 preflight: %v\n", err)
 		return exitErr
 	}
 	if *profilePath == "" && executionMode != executionModeStrict {
-		fmt.Fprintln(stderr, "benchmark-v1 preflight: custom execution mode requires --profile")
+		writeCLI(stderr, "benchmark-v1 preflight: custom execution mode requires --profile\n")
 		return exitErr
 	}
 	if *profilePath != "" {
 		profile, err = loadFinalProfile(*profilePath)
 		if err != nil {
-			fmt.Fprintf(stderr, "benchmark-v1 preflight: %v\n", err)
+			writeCLI(stderr, "benchmark-v1 preflight: %v\n", err)
 			return exitErr
 		}
 		if profile.BenchmarkID != *dataset {
-			fmt.Fprintf(stderr, "benchmark-v1 preflight: dataset flag %q does not match profile benchmark_id %q\n", *dataset, profile.BenchmarkID)
+			writeCLI(
+				stderr,
+				"benchmark-v1 preflight: dataset flag %q does not match profile benchmark_id %q\n",
+				*dataset, profile.BenchmarkID,
+			)
 			return exitErr
 		}
 		if err := checkOutputWritable(filepath.Join(*outputDir, "result.json")); err != nil {
-			fmt.Fprintf(stderr, "benchmark-v1 preflight: %v\n", err)
+			writeCLI(stderr, "benchmark-v1 preflight: %v\n", err)
 			return exitErr
 		}
 		preflightCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		err = checkBackend(preflightCtx, *backendURL)
 		if err != nil {
 			cancel()
-			fmt.Fprintf(stderr, "benchmark-v1 preflight: %v\n", err)
+			writeCLI(stderr, "benchmark-v1 preflight: %v\n", err)
 			return exitErr
 		}
 		env, err := collectPreflightEnvironment(preflightCtx, *tenant)
 		cancel()
 		if err != nil {
-			fmt.Fprintf(stderr, "benchmark-v1 preflight: %v\n", err)
+			writeCLI(stderr, "benchmark-v1 preflight: %v\n", err)
 			return exitErr
 		}
 		if executionMode == executionModeCustom {
@@ -102,13 +112,20 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 			selected, err = validatePreflight(profile, env)
 		}
 		if err != nil {
-			fmt.Fprintf(stderr, "benchmark-v1 preflight: %v\n", err)
+			writeCLI(stderr, "benchmark-v1 preflight: %v\n", err)
 			return exitErr
 		}
 		commitSHA = env.CommitSHA
-		fmt.Fprintf(stdout, "benchmark-v1 %s preflight PASS: commit=%s dataset=%s model_ids=%s,%s,%s cache=off worker_limit=%d comparable_to_final_baseline=%t\n", executionMode, commitSHA, profile.Dataset.SemanticSHA256, selected.EmbeddingID, selected.ChatID, selected.RerankID, profile.Runtime.WorkerLimit, executionMode == executionModeStrict)
+		writeCLI(
+			stdout,
+			"benchmark-v1 %s preflight PASS: commit=%s dataset=%s model_ids=%s,%s,%s "+
+				"cache=off worker_limit=%d comparable_to_final_baseline=%t\n",
+			executionMode, commitSHA, profile.Dataset.SemanticSHA256,
+			selected.EmbeddingID, selected.ChatID, selected.RerankID,
+			profile.Runtime.WorkerLimit, executionMode == executionModeStrict,
+		)
 		if *preflightOnly {
-			fmt.Fprintln(stdout, "preflight-only: evaluation was not started; no provider API was called")
+			writeCLI(stdout, "preflight-only: evaluation was not started; no provider API was called\n")
 			return exitOK
 		}
 	}
@@ -128,14 +145,17 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		if *profilePath == "" {
 			result, benchErr = runBenchmark(ctx, evalSvc, resultSvc, *dataset, *timeout, *poll)
 		} else {
-			result, benchErr = runBenchmarkWithModels(ctx, evalSvc, resultSvc, *dataset, selected.ChatID, selected.RerankID, *timeout, *poll)
+			result, benchErr = runBenchmarkWithModels(
+				ctx, evalSvc, resultSvc, *dataset,
+				selected.ChatID, selected.RerankID, *timeout, *poll,
+			)
 		}
 	}); err != nil {
-		fmt.Fprintf(stderr, "regression-benchmark: resolve runtime: %v\n", err)
+		writeCLI(stderr, "regression-benchmark: resolve runtime: %v\n", err)
 		return exitErr
 	}
 	if benchErr != nil {
-		fmt.Fprintf(stderr, "regression-benchmark: %v\n", benchErr)
+		writeCLI(stderr, "regression-benchmark: %v\n", benchErr)
 		return exitErr
 	}
 
@@ -145,21 +165,30 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 			err = writeFinalArtifacts(*outputDir, artifact)
 		}
 		if err != nil {
-			fmt.Fprintf(stderr, "benchmark-v1: %v\n", err)
+			writeCLI(stderr, "benchmark-v1: %v\n", err)
 			return exitErr
 		}
-		fmt.Fprintf(stdout, "task_id=%s evaluation_run_id=%s benchmark_version=%s written=%s\n", result.Run.TaskID, result.Run.EvaluationRunID, result.BenchmarkVersion, *outputDir)
+		writeCLI(
+			stdout, "task_id=%s evaluation_run_id=%s benchmark_version=%s written=%s\n",
+			result.Run.TaskID, result.Run.EvaluationRunID, result.BenchmarkVersion, *outputDir,
+		)
 		return exitOK
 	}
 
 	if err := writeResult(*output, result); err != nil {
-		fmt.Fprintf(stderr, "regression-benchmark: %v\n", err)
+		writeCLI(stderr, "regression-benchmark: %v\n", err)
 		return exitErr
 	}
 
-	fmt.Fprintf(stdout, "task_id=%s evaluation_run_id=%s benchmark_version=%s written=%s\n",
+	writeCLI(stdout, "task_id=%s evaluation_run_id=%s benchmark_version=%s written=%s\n",
 		result.Run.TaskID, result.Run.EvaluationRunID, result.BenchmarkVersion, *output)
 	return exitOK
+}
+
+// writeCLI deliberately preserves the command's established exit-code contract
+// when its caller-provided output stream fails.
+func writeCLI(w io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintf(w, format, args...)
 }
 
 // benchmarkContext builds the workspace context the internal benchmark driver
@@ -234,7 +263,9 @@ func runBenchmarkWithModels(
 	}
 }
 
-func pollStatus(ctx context.Context, evalSvc interfaces.EvaluationService, taskID string) (types.EvaluationStatue, error) {
+func pollStatus(
+	ctx context.Context, evalSvc interfaces.EvaluationService, taskID string,
+) (types.EvaluationStatue, error) {
 	detail, err := evalSvc.EvaluationResult(ctx, taskID)
 	if err != nil {
 		return types.EvaluationStatuePending, fmt.Errorf("poll benchmark evaluation: %w", err)

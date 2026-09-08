@@ -89,7 +89,7 @@ func write[T any](directory, name string, rows []T) {
 
 func check(err error) {
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }

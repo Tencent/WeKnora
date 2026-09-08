@@ -67,7 +67,9 @@ func (f *usageFakeChat) Chat(ctx context.Context, _ []Message, _ *ChatOptions) (
 	return f.resp, f.err
 }
 
-func (f *usageFakeChat) ChatStream(ctx context.Context, _ []Message, _ *ChatOptions) (<-chan types.StreamResponse, error) {
+func (f *usageFakeChat) ChatStream(
+	ctx context.Context, _ []Message, _ *ChatOptions,
+) (<-chan types.StreamResponse, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -311,12 +313,18 @@ func TestChatUsageTokenProvenance(t *testing.T) {
 	}{
 		{
 			"provider_reported",
-			types.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15, TokenProvenance: types.TokenProvenanceProviderReported},
+			types.TokenUsage{
+				PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15,
+				TokenProvenance: types.TokenProvenanceProviderReported,
+			},
 			types.TokenProvenanceProviderReported, intPtr(10), intPtr(5), intPtr(15),
 		},
 		{
 			"derived",
-			types.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15, TokenProvenance: types.TokenProvenanceDerived},
+			types.TokenUsage{
+				PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15,
+				TokenProvenance: types.TokenProvenanceDerived,
+			},
 			types.TokenProvenanceDerived, intPtr(10), intPtr(5), intPtr(15),
 		},
 		{
@@ -427,7 +435,10 @@ type streamFuncChat struct {
 func (c *streamFuncChat) Chat(context.Context, []Message, *ChatOptions) (*types.ChatResponse, error) {
 	return nil, nil
 }
-func (c *streamFuncChat) ChatStream(ctx context.Context, _ []Message, _ *ChatOptions) (<-chan types.StreamResponse, error) {
+
+func (c *streamFuncChat) ChatStream(
+	ctx context.Context, _ []Message, _ *ChatOptions,
+) (<-chan types.StreamResponse, error) {
 	return c.fn(ctx), nil
 }
 func (c *streamFuncChat) GetModelName() string { return "fake" }

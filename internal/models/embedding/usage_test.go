@@ -116,9 +116,22 @@ func TestEmbeddingUsageCacheAccounting(t *testing.T) {
 		readErr  int
 		writeErr int
 	}{
-		{"full hit", &cacheRequestSummary{inputs: 4, hits: 4, misses: 0, providerInputs: 0}, types.EmbeddingCacheStatusFullHit, 4, 0, 0, 0, 0},
-		{"partial", &cacheRequestSummary{inputs: 4, hits: 1, misses: 3, providerInputs: 3}, types.EmbeddingCacheStatusPartial, 1, 3, 3, 0, 0},
-		{"miss with errors", &cacheRequestSummary{inputs: 4, hits: 0, misses: 4, providerInputs: 4, readError: true, writeError: true}, types.EmbeddingCacheStatusMiss, 0, 4, 4, 1, 1},
+		{
+			"full hit", &cacheRequestSummary{inputs: 4, hits: 4, misses: 0, providerInputs: 0},
+			types.EmbeddingCacheStatusFullHit, 4, 0, 0, 0, 0,
+		},
+		{
+			"partial", &cacheRequestSummary{inputs: 4, hits: 1, misses: 3, providerInputs: 3},
+			types.EmbeddingCacheStatusPartial, 1, 3, 3, 0, 0,
+		},
+		{
+			"miss with errors",
+			&cacheRequestSummary{
+				inputs: 4, hits: 0, misses: 4, providerInputs: 4,
+				readError: true, writeError: true,
+			},
+			types.EmbeddingCacheStatusMiss, 0, 4, 4, 1, 1,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &fakeUsageRepo{}
@@ -256,7 +269,9 @@ func (f *failingUsageEmbedder) BatchEmbed(ctx context.Context, _ []string) ([][]
 
 type failingPooledUsageEmbedder struct{ usageFakeEmbedder }
 
-func (f *failingPooledUsageEmbedder) BatchEmbedWithPool(ctx context.Context, _ Embedder, _ []string) ([][]float32, error) {
+func (f *failingPooledUsageEmbedder) BatchEmbedWithPool(
+	ctx context.Context, _ Embedder, _ []string,
+) ([][]float32, error) {
 	noteEmbeddingProviderRequest(ctx)
 	return nil, context.DeadlineExceeded
 }
@@ -265,10 +280,12 @@ func (f *usageFakeEmbedder) Embed(ctx context.Context, _ string) ([]float32, err
 	noteEmbeddingProviderRequest(ctx)
 	return []float32{1}, nil
 }
+
 func (f *usageFakeEmbedder) BatchEmbed(ctx context.Context, _ []string) ([][]float32, error) {
 	noteEmbeddingProviderRequest(ctx)
 	return [][]float32{{1}}, nil
 }
+
 func (f *usageFakeEmbedder) BatchEmbedWithPool(ctx context.Context, _ Embedder, _ []string) ([][]float32, error) {
 	noteEmbeddingProviderRequest(ctx)
 	return [][]float32{{1}}, nil

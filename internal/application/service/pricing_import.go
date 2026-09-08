@@ -41,7 +41,7 @@ func (i *PricingImporter) ImportFile(ctx context.Context, path string) (*Pricing
 	if err != nil {
 		return nil, fmt.Errorf("pricing import: open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	source, rules, err := parsePricingSource(f)
 	if err != nil {
@@ -261,7 +261,10 @@ func validatePricingStorageBounds(index int, pricing *types.ModelPricing) error 
 func validateStoredDecimal(name string, value types.Decimal, maxIntegerDigits, maxFractionDigits int) error {
 	integer, fraction, _ := strings.Cut(string(value), ".")
 	if len(integer) > maxIntegerDigits || len(fraction) > maxFractionDigits {
-		return fmt.Errorf("%s exceeds database precision (%d integer, %d fractional digits)", name, maxIntegerDigits, maxFractionDigits)
+		return fmt.Errorf(
+			"%s exceeds database precision (%d integer, %d fractional digits)",
+			name, maxIntegerDigits, maxFractionDigits,
+		)
 	}
 	return nil
 }
@@ -295,7 +298,8 @@ func validatePricingSourceIntervals(rules []types.PricingImportRule) error {
 	for i := 0; i < len(rules); i++ {
 		for j := i + 1; j < len(rules); j++ {
 			a, b := &rules[i].Pricing, &rules[j].Pricing
-			if a.ResolvedProvider != b.ResolvedProvider || a.ResolvedModelName != b.ResolvedModelName || a.CallType != b.CallType {
+			if a.ResolvedProvider != b.ResolvedProvider ||
+				a.ResolvedModelName != b.ResolvedModelName || a.CallType != b.CallType {
 				continue
 			}
 			if intervalsOverlap(a.EffectiveFrom, a.EffectiveTo, b.EffectiveFrom, b.EffectiveTo) {

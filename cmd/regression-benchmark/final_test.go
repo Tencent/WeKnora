@@ -37,15 +37,33 @@ func validFinalProfile() finalProfile {
 func validPreflightEnvironment() preflightEnvironment {
 	credential := "unit-test-credential-must-never-be-serialized"
 	model := func(id, name string, typ types.ModelType, provider string) *types.Model {
-		return &types.Model{ID: id, Name: name, Type: typ, Source: types.ModelSourceRemote, Status: types.ModelStatusActive, Parameters: types.ModelParameters{Provider: provider, APIKey: credential}}
+		return &types.Model{
+			ID: id, Name: name, Type: typ,
+			Source: types.ModelSourceRemote, Status: types.ModelStatusActive,
+			Parameters: types.ModelParameters{Provider: provider, APIKey: credential},
+		}
 	}
 	embedding := model("embedding-id", "text-embedding-v4", types.ModelTypeEmbedding, "generic")
 	embedding.Parameters.EmbeddingParameters.Dimension = 1024
 	return preflightEnvironment{
-		CommitSHA:      "abc123",
-		Dataset:        types.EvaluationDatasetIdentity{DatasetID: "benchmark_v1", DatasetSemanticSHA256: "dataset-sha", CorpusCount: 32, QuestionCount: 15, QrelsCount: 15, AnswerCount: 15},
-		Models:         []*types.Model{embedding, model("chat-id", "deepseek-v4-pro", types.ModelTypeKnowledgeQA, "generic"), model("rerank-id", "qwen3-rerank", types.ModelTypeRerank, "aliyun")},
-		Config:         &appconfig.Config{Conversation: &appconfig.ConversationConfig{MaxRounds: 5, VectorThreshold: 0.2, KeywordThreshold: 0.3, EmbeddingTopK: 30, RerankTopK: 30, RerankThreshold: 0.3, Summary: &appconfig.SummaryConfig{MaxInputChars: 16384, RepeatPenalty: 1, Temperature: 0.3, MaxCompletionTokens: 2048}}},
+		CommitSHA: "abc123",
+		Dataset: types.EvaluationDatasetIdentity{
+			DatasetID: "benchmark_v1", DatasetSemanticSHA256: "dataset-sha",
+			CorpusCount: 32, QuestionCount: 15, QrelsCount: 15, AnswerCount: 15,
+		},
+		Models: []*types.Model{
+			embedding,
+			model("chat-id", "deepseek-v4-pro", types.ModelTypeKnowledgeQA, "generic"),
+			model("rerank-id", "qwen3-rerank", types.ModelTypeRerank, "aliyun"),
+		},
+		Config: &appconfig.Config{Conversation: &appconfig.ConversationConfig{
+			MaxRounds: 5, VectorThreshold: 0.2, KeywordThreshold: 0.3,
+			EmbeddingTopK: 30, RerankTopK: 30, RerankThreshold: 0.3,
+			Summary: &appconfig.SummaryConfig{
+				MaxInputChars: 16384, RepeatPenalty: 1,
+				Temperature: 0.3, MaxCompletionTokens: 2048,
+			},
+		}},
 		RetrieveDriver: "postgres", WorkerLimit: 27,
 	}
 }
@@ -75,9 +93,9 @@ func TestFinalPreflightRejectsWrongModelsClearly(t *testing.T) {
 		index              int
 		replacement, label string
 	}{
-		{"embedding", 0, "bge-m3", "Configured embedding model"},
-		{"chat", 1, "other-chat", "Configured chat/summary model"},
-		{"rerank", 2, "other-rerank", "Configured rerank model"},
+		{"embedding", 0, "bge-m3", "configured embedding model"},
+		{"chat", 1, "other-chat", "configured chat/summary model"},
+		{"rerank", 2, "other-rerank", "configured rerank model"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -109,8 +127,15 @@ func TestFinalPreflightRejectsExtraAutomaticSelectionRows(t *testing.T) {
 		name  string
 		model *types.Model
 	}{
-		{"inactive embedding", &types.Model{ID: "historical-embedding", Name: "old-embedding", Type: types.ModelTypeEmbedding, Source: types.ModelSourceRemote, Status: types.ModelStatusDownloadFailed}},
-		{"extra KnowledgeQA", &types.Model{ID: "extra-chat", Name: "other-chat", Type: types.ModelTypeKnowledgeQA, Source: types.ModelSourceRemote, Status: types.ModelStatusActive, Parameters: types.ModelParameters{APIKey: "test"}}},
+		{"inactive embedding", &types.Model{
+			ID: "historical-embedding", Name: "old-embedding", Type: types.ModelTypeEmbedding,
+			Source: types.ModelSourceRemote, Status: types.ModelStatusDownloadFailed,
+		}},
+		{"extra KnowledgeQA", &types.Model{
+			ID: "extra-chat", Name: "other-chat", Type: types.ModelTypeKnowledgeQA,
+			Source: types.ModelSourceRemote, Status: types.ModelStatusActive,
+			Parameters: types.ModelParameters{APIKey: "test"},
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -137,7 +162,7 @@ func TestCustomPreflightAcceptsNonFinalModels(t *testing.T) {
 func TestFinalPreflightRejectsUnavailableBackend(t *testing.T) {
 	client := httpDoerFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("connection refused") })
 	err := checkBackendWithClient(context.Background(), "http://backend", client)
-	require.ErrorContains(t, err, "Backend unavailable")
+	require.ErrorContains(t, err, "backend unavailable")
 }
 
 type httpDoerFunc func(*http.Request) (*http.Response, error)
@@ -176,16 +201,39 @@ func validBenchmarkResult() *types.BenchmarkResult {
 		BenchmarkVersion: "v1.1",
 		Run:              types.BenchmarkRunSummary{EvaluationRunID: "run-1", Status: types.EvaluationStatueSuccess},
 		Config: types.EvaluationConfigSnapshotV1{
-			Dataset:   types.EvaluationDatasetSnapshot{DatasetID: "benchmark_v1", DatasetSemanticSHA256: "dataset-sha", CorpusCount: 32, QuestionCount: 15, QrelsCount: 15, AnswerCount: 15},
-			Retrieval: types.EvaluationRetrievalSnapshot{VectorThreshold: 0.2, KeywordThreshold: 0.3, EmbeddingTopK: 30, RerankTopK: 30, RerankThreshold: 0.3, RetrieveDriver: "postgres"},
-			Models: types.EvaluationModelsSnapshot{
-				Embedding: &types.EvaluationConfiguredModelSnapshot{Name: "text-embedding-v4", Type: "Embedding", Source: "remote", Provider: "generic", Embedding: &types.EvaluationEmbeddingSnapshot{Dimension: 1024}},
-				Chat:      &types.EvaluationConfiguredModelSnapshot{ID: "chat-id", Name: "deepseek-v4-pro", Type: "KnowledgeQA", Source: "remote", Provider: "generic"},
-				Summary:   &types.EvaluationConfiguredModelSnapshot{ID: "chat-id", Name: "deepseek-v4-pro", Type: "KnowledgeQA", Source: "remote", Provider: "generic"},
-				Rerank:    &types.EvaluationConfiguredModelSnapshot{Name: "qwen3-rerank", Type: "Rerank", Source: "remote", Provider: "aliyun"},
+			Dataset: types.EvaluationDatasetSnapshot{
+				DatasetID: "benchmark_v1", DatasetSemanticSHA256: "dataset-sha",
+				CorpusCount: 32, QuestionCount: 15, QrelsCount: 15, AnswerCount: 15,
 			},
-			Generation: types.EvaluationGenerationSnapshot{MaxRounds: 5, SummaryConfig: types.SummaryConfig{RepeatPenalty: 1, Temperature: 0.3, MaxCompletionTokens: 2048}},
-			Execution:  types.EvaluationExecutionSnapshot{WorkerLimit: 27},
+			Retrieval: types.EvaluationRetrievalSnapshot{
+				VectorThreshold: 0.2, KeywordThreshold: 0.3,
+				EmbeddingTopK: 30, RerankTopK: 30, RerankThreshold: 0.3,
+				RetrieveDriver: "postgres",
+			},
+			Models: types.EvaluationModelsSnapshot{
+				Embedding: &types.EvaluationConfiguredModelSnapshot{
+					Name: "text-embedding-v4", Type: "Embedding", Source: "remote", Provider: "generic",
+					Embedding: &types.EvaluationEmbeddingSnapshot{Dimension: 1024},
+				},
+				Chat: &types.EvaluationConfiguredModelSnapshot{
+					ID: "chat-id", Name: "deepseek-v4-pro",
+					Type: "KnowledgeQA", Source: "remote", Provider: "generic",
+				},
+				Summary: &types.EvaluationConfiguredModelSnapshot{
+					ID: "chat-id", Name: "deepseek-v4-pro",
+					Type: "KnowledgeQA", Source: "remote", Provider: "generic",
+				},
+				Rerank: &types.EvaluationConfiguredModelSnapshot{
+					Name: "qwen3-rerank", Type: "Rerank", Source: "remote", Provider: "aliyun",
+				},
+			},
+			Generation: types.EvaluationGenerationSnapshot{
+				MaxRounds: 5,
+				SummaryConfig: types.SummaryConfig{
+					RepeatPenalty: 1, Temperature: 0.3, MaxCompletionTokens: 2048,
+				},
+			},
+			Execution: types.EvaluationExecutionSnapshot{WorkerLimit: 27},
 		},
 		Quality: types.BenchmarkQuality{
 			State: types.BenchmarkQualityStateComplete,
@@ -207,13 +255,23 @@ func TestBenchmarkArtifactFailsClosed(t *testing.T) {
 		mutate func(*types.BenchmarkResult)
 		want   string
 	}{
-		{"run status", func(r *types.BenchmarkResult) { r.Run.Status = types.EvaluationStatueRunning }, "run is not successful"},
-		{"quality state", func(r *types.BenchmarkResult) { r.Quality.State = types.BenchmarkQualityStatePending }, "quality is not complete"},
+		{"run status", func(r *types.BenchmarkResult) {
+			r.Run.Status = types.EvaluationStatueRunning
+		}, "run is not successful"},
+		{"quality state", func(r *types.BenchmarkResult) {
+			r.Quality.State = types.BenchmarkQualityStatePending
+		}, "quality is not complete"},
 		{"retrieval missing", func(r *types.BenchmarkResult) { r.Quality.Retrieval = nil }, "retrieval metrics are missing"},
-		{"retrieval metric missing", func(r *types.BenchmarkResult) { r.Quality.Retrieval.MAP = nil }, "retrieval metric MAP is missing"},
+		{"retrieval metric missing", func(r *types.BenchmarkResult) {
+			r.Quality.Retrieval.MAP = nil
+		}, "retrieval metric MAP is missing"},
 		{"answer missing", func(r *types.BenchmarkResult) { r.Quality.Answer = nil }, "answer metrics are missing"},
-		{"answer metric missing", func(r *types.BenchmarkResult) { r.Quality.Answer.ROUGEL = nil }, "answer metric ROUGE-L is missing"},
-		{"reproducibility", func(r *types.BenchmarkResult) { r.Reproducibility = types.BenchmarkReproducibilityLegacyUnknown }, "reproducibility is not complete"},
+		{"answer metric missing", func(r *types.BenchmarkResult) {
+			r.Quality.Answer.ROUGEL = nil
+		}, "answer metric ROUGE-L is missing"},
+		{"reproducibility", func(r *types.BenchmarkResult) {
+			r.Reproducibility = types.BenchmarkReproducibilityLegacyUnknown
+		}, "reproducibility is not complete"},
 		{"model facts", func(r *types.BenchmarkResult) { r.ModelFacts = nil }, "no model usage facts"},
 	}
 	for _, mode := range []benchmarkExecutionMode{executionModeStrict, executionModeCustom} {
@@ -240,7 +298,10 @@ func TestCustomArtifactIsExplicitlyNonComparable(t *testing.T) {
 	require.False(t, artifact.ComparableToFinalBaseline)
 	jsonData, err := json.Marshal(artifact)
 	require.NoError(t, err)
-	require.JSONEq(t, `{"execution_mode":"custom","comparable_to_final_baseline":false}`, extractComparabilityJSON(t, jsonData))
+	require.JSONEq(
+		t, `{"execution_mode":"custom","comparable_to_final_baseline":false}`,
+		extractComparabilityJSON(t, jsonData),
+	)
 	markdown := renderFinalMarkdown(artifact)
 	require.Contains(t, markdown, "Custom Verification Result")
 	require.Contains(t, markdown, "WARNING:")

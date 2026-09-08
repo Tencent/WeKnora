@@ -247,7 +247,9 @@ func TestEvaluationConfigSnapshotSecretExclusion(t *testing.T) {
 	data, err := json.Marshal(snapshot)
 	require.NoError(t, err)
 	lower := strings.ToLower(string(data))
-	for _, forbidden := range []string{"api_key", "app_secret", "authorization", "cookie", "custom_headers", "provider_response"} {
+	for _, forbidden := range []string{
+		"api_key", "app_secret", "authorization", "cookie", "custom_headers", "provider_response",
+	} {
 		require.NotContains(t, lower, forbidden)
 	}
 }

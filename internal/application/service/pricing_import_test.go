@@ -54,24 +54,48 @@ func TestParsePricingSourcePreservesExactValuesAndProvenance(t *testing.T) {
 }
 
 func TestParsePricingSourceRejectsInvalidInput(t *testing.T) {
+	replace := func(old, replacement string) string {
+		return strings.Replace(validPricingYAML, old, replacement, 1)
+	}
 	secondRule := strings.Replace(strings.Split(validPricingYAML, "rules:\n")[1],
 		"10000000-0000-4000-8000-000000000001", "10000000-0000-4000-8000-000000000002", 1)
 	tests := map[string]string{
-		"unknown field":        strings.Replace(validPricingYAML, "pricing_version:", "unexpected: true\npricing_version:", 1),
-		"schema version":       strings.Replace(validPricingYAML, "schema_version: 1", "schema_version: 2", 1),
-		"numeric decimal":      strings.Replace(validPricingYAML, `input_token_price: "0.123456789012345678"`, "input_token_price: 0.25", 1),
-		"invalid decimal":      strings.Replace(validPricingYAML, `input_token_price: "0.123456789012345678"`, `input_token_price: "NaN"`, 1),
-		"excess decimal scale": strings.Replace(validPricingYAML, `input_token_price: "0.123456789012345678"`, `input_token_price: "0.1234567890123456789"`, 1),
-		"sub-microsecond time": strings.Replace(validPricingYAML, `effective_from: "2026-01-01T00:00:00Z"`, `effective_from: "2026-01-01T00:00:00.000000001Z"`, 1),
-		"whitespace currency":  strings.Replace(validPricingYAML, `currency: "TEST"`, `currency: "   "`, 1),
-		"uppercase uuid":       strings.Replace(validPricingYAML, "10000000-0000-4000-8000-000000000001", "A0000000-0000-4000-8000-00000000000A", 1),
-		"compact uuid":         strings.Replace(validPricingYAML, "10000000-0000-4000-8000-000000000001", "a000000000004000800000000000000a", 1),
-		"braced uuid":          strings.Replace(validPricingYAML, "10000000-0000-4000-8000-000000000001", "{a0000000-0000-4000-8000-00000000000a}", 1),
-		"urn uuid":             strings.Replace(validPricingYAML, "10000000-0000-4000-8000-000000000001", "urn:uuid:a0000000-0000-4000-8000-00000000000a", 1),
-		"noncanonical closure": strings.Replace(validPricingYAML, "closes_rule_id: null", `closes_rule_id: "URN:UUID:a0000000-0000-4000-8000-00000000000a"`, 1),
-		"duplicate id":         strings.Replace(validPricingYAML, "rules:\n", "rules:\n", 1) + strings.Split(validPricingYAML, "rules:\n")[1],
-		"overlapping rules":    validPricingYAML + secondRule,
-		"second document":      validPricingYAML + "---\nschema_version: 1\n",
+		"unknown field":  replace("pricing_version:", "unexpected: true\npricing_version:"),
+		"schema version": replace("schema_version: 1", "schema_version: 2"),
+		"numeric decimal": replace(
+			`input_token_price: "0.123456789012345678"`, "input_token_price: 0.25",
+		),
+		"invalid decimal": replace(
+			`input_token_price: "0.123456789012345678"`, `input_token_price: "NaN"`,
+		),
+		"excess decimal scale": replace(
+			`input_token_price: "0.123456789012345678"`,
+			`input_token_price: "0.1234567890123456789"`,
+		),
+		"sub-microsecond time": replace(
+			`effective_from: "2026-01-01T00:00:00Z"`,
+			`effective_from: "2026-01-01T00:00:00.000000001Z"`,
+		),
+		"whitespace currency": replace(`currency: "TEST"`, `currency: "   "`),
+		"uppercase uuid": replace(
+			"10000000-0000-4000-8000-000000000001", "A0000000-0000-4000-8000-00000000000A",
+		),
+		"compact uuid": replace(
+			"10000000-0000-4000-8000-000000000001", "a000000000004000800000000000000a",
+		),
+		"braced uuid": replace(
+			"10000000-0000-4000-8000-000000000001", "{a0000000-0000-4000-8000-00000000000a}",
+		),
+		"urn uuid": replace(
+			"10000000-0000-4000-8000-000000000001",
+			"urn:uuid:a0000000-0000-4000-8000-00000000000a",
+		),
+		"noncanonical closure": replace(
+			"closes_rule_id: null", `closes_rule_id: "URN:UUID:a0000000-0000-4000-8000-00000000000a"`,
+		),
+		"duplicate id":      validPricingYAML + strings.Split(validPricingYAML, "rules:\n")[1],
+		"overlapping rules": validPricingYAML + secondRule,
+		"second document":   validPricingYAML + "---\nschema_version: 1\n",
 	}
 	for name, input := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -86,12 +110,16 @@ type pricingImportStub struct {
 	result types.PricingImportResult
 }
 
-func (s *pricingImportStub) ImportPricingBatch(_ context.Context, rules []types.PricingImportRule) (*types.PricingImportResult, error) {
+func (s *pricingImportStub) ImportPricingBatch(
+	_ context.Context, rules []types.PricingImportRule,
+) (*types.PricingImportResult, error) {
 	s.rules = rules
 	return &s.result, nil
 }
 func (*pricingImportStub) CreatePricing(context.Context, *types.ModelPricing) error { return nil }
-func (*pricingImportStub) ResolvePricing(context.Context, string, string, types.CallType, time.Time) (*types.ModelPricing, error) {
+func (*pricingImportStub) ResolvePricing(
+	context.Context, string, string, types.CallType, time.Time,
+) (*types.ModelPricing, error) {
 	return nil, nil
 }
 func (*pricingImportStub) CreateCost(context.Context, *types.ModelUsageCost) error { return nil }

@@ -254,7 +254,8 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	// timeout surfaced as ErrVectorStoreUnavailable) must surface to the
 	// caller rather than be silently converted to a truncated chunk list.
 	deduplicatedChunks, err = s.applyFAQPostProcessing(
-		ctx, kb, deduplicatedChunks, vectorResults, groups, params, matchCount)
+		ctx, kb, deduplicatedChunks, vectorResults, groups, params, matchCount,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -474,7 +475,10 @@ func (s *knowledgeBaseService) resolveQueryEmbedding(
 	logger.Infof(ctx, "Embedding model retrieved: %v", embeddingModel)
 
 	logger.Info(ctx, "Starting to generate query embedding")
-	queryEmbedding, err := embeddingModel.Embed(types.WithEmbedQuery(types.WithLLMCallMetadata(ctx, "query_embedding", "")), params.QueryText)
+	queryEmbedding, err := embeddingModel.Embed(
+		types.WithEmbedQuery(types.WithLLMCallMetadata(ctx, "query_embedding", "")),
+		params.QueryText,
+	)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to embed query text, query text: %s, error: %v", params.QueryText, err)
 		return nil, err

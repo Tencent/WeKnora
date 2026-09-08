@@ -69,7 +69,9 @@ func (w *usageChat) Chat(ctx context.Context, messages []Message, opts *ChatOpti
 	return resp, err
 }
 
-func (w *usageChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
+func (w *usageChat) ChatStream(
+	ctx context.Context, messages []Message, opts *ChatOptions,
+) (<-chan types.StreamResponse, error) {
 	ctx, span := withChatUsageSpan(ctx)
 	start := time.Now()
 	ch, err := w.inner.ChatStream(ctx, messages, opts)
@@ -114,7 +116,10 @@ func (w *usageChat) ChatStream(ctx context.Context, messages []Message, opts *Ch
 
 // record builds and persists the usage row. sawError, when non-nil, is how a
 // stream signals a terminal provider error (there is no returned error to pass).
-func (w *usageChat) record(ctx context.Context, span *chatUsageSpan, start time.Time, tok *types.TokenUsage, err error, sawError *bool) {
+func (w *usageChat) record(
+	ctx context.Context, span *chatUsageSpan, start time.Time,
+	tok *types.TokenUsage, err error, sawError *bool,
+) {
 	latencyMS := time.Since(start).Milliseconds()
 	mu := &types.ModelUsage{
 		ModelTenantID:     w.config.TenantID,

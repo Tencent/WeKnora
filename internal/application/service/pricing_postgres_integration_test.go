@@ -131,9 +131,11 @@ func assertPostgreSQLAggregation(t *testing.T, ctx context.Context, tx *gorm.DB)
 	t.Helper()
 	tenantID := uint64(991001)
 	runID := uuid.NewString()
-	require.NoError(t, tx.Exec(`
+	require.NoError(t, tx.Exec(
+		`
 		INSERT INTO evaluation_runs
-			(id, task_id, tenant_id, dataset_id, embedding_model_id, chat_model_id, status, config_snapshot, created_at, updated_at)
+			(id, task_id, tenant_id, dataset_id, embedding_model_id, chat_model_id,
+			 status, config_snapshot, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, '{}'::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
 		runID, "pg-smoke-"+uuid.NewString(), tenantID, "fake-dataset", "fake-embedding", "fake-chat",
 		types.EvaluationStatuePending,

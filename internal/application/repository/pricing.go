@@ -31,7 +31,10 @@ func (r *pricingRepository) CreatePricing(ctx context.Context, rule *types.Model
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var count int64
 		q := tx.Model(&types.ModelPricing{}).
-			Where("resolved_provider = ? AND resolved_model_name = ? AND call_type = ?", rule.ResolvedProvider, rule.ResolvedModelName, rule.CallType).
+			Where(
+				"resolved_provider = ? AND resolved_model_name = ? AND call_type = ?",
+				rule.ResolvedProvider, rule.ResolvedModelName, rule.CallType,
+			).
 			Where("effective_to IS NULL OR effective_to > ?", rule.EffectiveFrom)
 		if rule.EffectiveTo != nil {
 			q = q.Where("effective_from < ?", *rule.EffectiveTo)
@@ -46,7 +49,9 @@ func (r *pricingRepository) CreatePricing(ctx context.Context, rule *types.Model
 	})
 }
 
-func (r *pricingRepository) ImportPricingBatch(ctx context.Context, rules []types.PricingImportRule) (*types.PricingImportResult, error) {
+func (r *pricingRepository) ImportPricingBatch(
+	ctx context.Context, rules []types.PricingImportRule,
+) (*types.PricingImportResult, error) {
 	seen := make(map[string]struct{}, len(rules))
 	ids := make([]string, 0, len(rules)*2)
 	for i := range rules {
@@ -112,14 +117,23 @@ func (r *pricingRepository) ImportPricingBatch(ctx context.Context, rules []type
 			incoming := &instruction.Pricing
 			old := existing[*instruction.ClosesRuleID]
 			if old == nil {
-				return fmt.Errorf("model_pricing import rule %q: closes_rule_id %q does not exist", incoming.ID, *instruction.ClosesRuleID)
+				return fmt.Errorf(
+					"model_pricing import rule %q: closes_rule_id %q does not exist",
+					incoming.ID, *instruction.ClosesRuleID,
+				)
 			}
 			if old.ResolvedProvider != incoming.ResolvedProvider ||
 				old.ResolvedModelName != incoming.ResolvedModelName || old.CallType != incoming.CallType {
-				return fmt.Errorf("model_pricing import rule %q: closes_rule_id %q has different runtime identity", incoming.ID, old.ID)
+				return fmt.Errorf(
+					"model_pricing import rule %q: closes_rule_id %q has different runtime identity",
+					incoming.ID, old.ID,
+				)
 			}
 			if !old.EffectiveFrom.Before(incoming.EffectiveFrom) {
-				return fmt.Errorf("model_pricing import rule %q: replacement must start after closes_rule_id %q", incoming.ID, old.ID)
+				return fmt.Errorf(
+					"model_pricing import rule %q: replacement must start after closes_rule_id %q",
+					incoming.ID, old.ID,
+				)
 			}
 			switch {
 			case old.EffectiveTo == nil:
@@ -136,10 +150,17 @@ func (r *pricingRepository) ImportPricingBatch(ctx context.Context, rules []type
 				result.Closed++
 			case old.EffectiveTo.Equal(incoming.EffectiveFrom):
 				if existing[incoming.ID] == nil {
-					return fmt.Errorf("model_pricing import rule %q: closes_rule_id %q is already closed but replacement does not exist", incoming.ID, old.ID)
+					return fmt.Errorf(
+						"model_pricing import rule %q: closes_rule_id %q is already closed "+
+							"but replacement does not exist",
+						incoming.ID, old.ID,
+					)
 				}
 			default:
-				return fmt.Errorf("model_pricing import rule %q: closes_rule_id %q was already closed at a different time", incoming.ID, old.ID)
+				return fmt.Errorf(
+					"model_pricing import rule %q: closes_rule_id %q was already closed at a different time",
+					incoming.ID, old.ID,
+				)
 			}
 		}
 
@@ -227,7 +248,9 @@ func timePtrEqual(a, b *time.Time) bool {
 	return a.Equal(*b)
 }
 
-func (r *pricingRepository) ResolvePricing(ctx context.Context, provider, modelName string, callType types.CallType, at time.Time) (*types.ModelPricing, error) {
+func (r *pricingRepository) ResolvePricing(
+	ctx context.Context, provider, modelName string, callType types.CallType, at time.Time,
+) (*types.ModelPricing, error) {
 	if provider == "" || modelName == "" || at.IsZero() {
 		return nil, nil
 	}
@@ -256,7 +279,9 @@ func (r *pricingRepository) CreateCost(ctx context.Context, cost *types.ModelUsa
 	return r.db.WithContext(ctx).Create(cost).Error
 }
 
-func (r *pricingRepository) GetCostByUsageID(ctx context.Context, tenantID uint64, usageID string) (*types.ModelUsageCost, error) {
+func (r *pricingRepository) GetCostByUsageID(
+	ctx context.Context, tenantID uint64, usageID string,
+) (*types.ModelUsageCost, error) {
 	var cost types.ModelUsageCost
 	// Scope the read through model_usage so a caller can only see a cost for a
 	// usage that belongs to its own tenant. A cross-tenant usage_id resolves to

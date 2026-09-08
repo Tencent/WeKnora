@@ -117,14 +117,26 @@ func TestAttachPromptCacheHeaders(t *testing.T) {
 }
 
 func TestBuildOutbound_WikiExplicitPromptCacheKey(t *testing.T) {
-	for _, name := range []provider.ProviderName{provider.ProviderOpenAI, provider.ProviderAzureOpenAI, provider.ProviderOpenRouter} {
+	for _, name := range []provider.ProviderName{
+		provider.ProviderOpenAI, provider.ProviderAzureOpenAI, provider.ProviderOpenRouter,
+	} {
 		t.Run(string(name), func(t *testing.T) {
 			c := newOutboundChat(t, string(name), "configured-model", map[string]string{"remote_model_name": "effective-model"})
 			require.Equal(t, "effective-model", c.GetModelName())
-			key := BuildPromptCacheKey(7, FingerprintPromptPrefix(c.GetModelID(), c.GetModelName()), "wiki_page_modify", FingerprintPromptPrefix("system", "shared"))
+			key := BuildPromptCacheKey(
+				7, FingerprintPromptPrefix(c.GetModelID(), c.GetModelName()),
+				"wiki_page_modify", FingerprintPromptPrefix("system", "shared"),
+			)
 			ctx := types.WithSessionID(context.Background(), "session-must-not-win")
 			for _, page := range []string{"page A", "page B"} {
-				body, _, raw, err := c.buildOutbound(ctx, []Message{{Role: "system", Content: "system"}, {Role: "user", Content: "shared\n" + page}}, &ChatOptions{PromptCacheKey: key}, false)
+				body, _, raw, err := c.buildOutbound(
+					ctx,
+					[]Message{
+						{Role: "system", Content: "system"},
+						{Role: "user", Content: "shared\n" + page},
+					},
+					&ChatOptions{PromptCacheKey: key}, false,
+				)
 				require.NoError(t, err)
 				require.True(t, raw)
 				payload := body.(map[string]any)

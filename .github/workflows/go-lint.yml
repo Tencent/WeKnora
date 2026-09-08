@@ -1,10 +1,10 @@
 name: Go Lint
 
 # The repository carries a large backlog of pre-existing golangci-lint findings,
-# so pull requests are only judged on the code they introduce (`only-new-issues`).
-# That filter needs a pull request diff, which is why this workflow has no other
-# trigger; the companion go-lint-cache.yml keeps the caches this job restores
-# from warm on main.
+# so pull requests are only judged on the code they introduce. The comparison is
+# resolved from the local git history so large pull requests do not depend on
+# GitHub's size-limited pull request diff API. The companion go-lint-cache.yml
+# keeps the caches this job restores from warm on main.
 
 on:
   pull_request:
@@ -42,6 +42,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Detect changed modules
         id: detect
         shell: bash
@@ -91,6 +92,24 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Resolve lint base
+        id: lint-base
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if ! git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$PR_BASE_SHA"
+          fi
+          merge_base="$(git merge-base HEAD "$PR_BASE_SHA")"
+          if [ -z "$merge_base" ]; then
+            echo "Unable to resolve merge-base for HEAD and $PR_BASE_SHA" >&2
+            exit 1
+          fi
+          echo "rev=$merge_base" >> "$GITHUB_OUTPUT"
+          echo "Linting changes since merge-base $merge_base"
 
       - uses: actions/setup-go@v6
         with:
@@ -101,4 +120,4 @@ jobs:
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: ${{ matrix.module }}
-          only-new-issues: true
+          args: --new-from-rev=${{ steps.lint-base.outputs.rev }}

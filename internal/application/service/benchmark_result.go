@@ -23,7 +23,9 @@ func NewBenchmarkResultService(
 	return &benchmarkResultService{evaluationRuns: evaluationRuns, modelUsage: modelUsage}
 }
 
-func (s *benchmarkResultService) GetBenchmarkResult(ctx context.Context, taskID string) (*types.BenchmarkResult, error) {
+func (s *benchmarkResultService) GetBenchmarkResult(
+	ctx context.Context, taskID string,
+) (*types.BenchmarkResult, error) {
 	tenantID := types.MustTenantIDFromContext(ctx)
 	run, err := s.evaluationRuns.GetByTaskID(ctx, tenantID, taskID)
 	if err != nil {
@@ -152,7 +154,9 @@ func validateBenchmarkReproducibilitySnapshot(snapshot types.EvaluationConfigSna
 		strings.TrimSpace(snapshot.Models.SummaryModelID) == "" {
 		return fmt.Errorf("required model ids are missing")
 	}
-	if err := validateConfiguredBenchmarkModel("embedding", snapshot.Models.Embedding, snapshot.Models.EmbeddingModelID); err != nil {
+	if err := validateConfiguredBenchmarkModel(
+		"embedding", snapshot.Models.Embedding, snapshot.Models.EmbeddingModelID,
+	); err != nil {
 		return err
 	}
 	if snapshot.Models.Embedding.Embedding == nil {
@@ -161,14 +165,18 @@ func validateBenchmarkReproducibilitySnapshot(snapshot types.EvaluationConfigSna
 	if err := validateConfiguredBenchmarkModel("chat", snapshot.Models.Chat, snapshot.Models.ChatModelID); err != nil {
 		return err
 	}
-	if err := validateConfiguredBenchmarkModel("summary", snapshot.Models.Summary, snapshot.Models.SummaryModelID); err != nil {
+	if err := validateConfiguredBenchmarkModel(
+		"summary", snapshot.Models.Summary, snapshot.Models.SummaryModelID,
+	); err != nil {
 		return err
 	}
 	if snapshot.Models.RerankModelID != nil {
 		if strings.TrimSpace(*snapshot.Models.RerankModelID) == "" {
 			return fmt.Errorf("rerank model id is empty")
 		}
-		if err := validateConfiguredBenchmarkModel("rerank", snapshot.Models.Rerank, *snapshot.Models.RerankModelID); err != nil {
+		if err := validateConfiguredBenchmarkModel(
+			"rerank", snapshot.Models.Rerank, *snapshot.Models.RerankModelID,
+		); err != nil {
 			return err
 		}
 	} else if snapshot.Models.Rerank != nil {

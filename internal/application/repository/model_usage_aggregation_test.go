@@ -177,8 +177,14 @@ func TestAggregateEvaluationRunCostsAreExactAndCurrencyGrouped(t *testing.T) {
 	for _, usage := range []*types.ModelUsage{chatOne, chatTwo, embedding, rerank, chatUnpriced} {
 		require.NoError(t, repo.Create(ctx, usage))
 	}
-	insertAggregationCost(t, db, chatOne.ID, types.CostStatusPriced, "TEST", decPtr("0.100000000000000001"), decPtr("0.100000000000000001"))
-	insertAggregationCost(t, db, chatTwo.ID, types.CostStatusPriced, "TEST", decPtr("0.200000000000000002"), decPtr("0.200000000000000002"))
+	insertAggregationCost(
+		t, db, chatOne.ID, types.CostStatusPriced, "TEST",
+		decPtr("0.100000000000000001"), decPtr("0.100000000000000001"),
+	)
+	insertAggregationCost(
+		t, db, chatTwo.ID, types.CostStatusPriced, "TEST",
+		decPtr("0.200000000000000002"), decPtr("0.200000000000000002"),
+	)
 	insertAggregationCost(t, db, rerank.ID, types.CostStatusPartial, "TEST", nil, decPtr("0.3"))
 	insertAggregationCost(t, db, chatUnpriced.ID, types.CostStatusUnpriced, "CNY", nil, nil)
 
@@ -290,7 +296,10 @@ func TestAggregateEvaluationRunPostgreSQLQueryAndExactScan(t *testing.T) {
 		0, 0, 0, 0, "cost-pg", "priced",
 		"TEST", "0.100000000000000001", "0.100000000000000001",
 	)
-	mock.ExpectQuery(`(?s)SELECT u\.call_type,.*LEFT JOIN model_usage_cost AS c ON c\.usage_id = u\.id.*u\.tenant_id = \$1 AND u\.evaluation_run_id = \$2.*ORDER BY u\.id ASC`).
+	mock.ExpectQuery(
+		`(?s)SELECT u\.call_type,.*LEFT JOIN model_usage_cost AS c ON c\.usage_id = u\.id.*`+
+			`u\.tenant_id = \$1 AND u\.evaluation_run_id = \$2.*ORDER BY u\.id ASC`,
+	).
 		WithArgs(int64(91), "run-pg").WillReturnRows(rows)
 
 	got, err := NewModelUsageRepository(db).AggregateEvaluationRun(context.Background(), 91, "run-pg")
@@ -331,12 +340,18 @@ func decPtr(value string) *types.Decimal {
 	return &decimal
 }
 
-func insertAggregationCost(t *testing.T, db *gorm.DB, usageID string, status types.CostStatus, currency string, total, known *types.Decimal) {
+func insertAggregationCost(
+	t *testing.T, db *gorm.DB, usageID string, status types.CostStatus,
+	currency string, total, known *types.Decimal,
+) {
 	t.Helper()
 	insertAggregationCostWithCurrency(t, db, usageID, status, &currency, total, known)
 }
 
-func insertAggregationCostWithCurrency(t *testing.T, db *gorm.DB, usageID string, status types.CostStatus, currency *string, total, known *types.Decimal) {
+func insertAggregationCostWithCurrency(
+	t *testing.T, db *gorm.DB, usageID string, status types.CostStatus,
+	currency *string, total, known *types.Decimal,
+) {
 	t.Helper()
 	require.NoError(t, db.Create(&types.ModelUsageCost{
 		UsageID: usageID, Status: status, Currency: currency, TotalCost: total, KnownCost: known,

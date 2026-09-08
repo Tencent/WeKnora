@@ -34,8 +34,16 @@ func TestModelUsageAnalyticsHandlerValidation(t *testing.T) {
 	}{
 		{name: "invalid start RFC3339", url: "/api/v1/model-usage/analytics?start_time=nope"},
 		{name: "invalid end RFC3339", url: "/api/v1/model-usage/analytics?end_time=nope"},
-		{name: "start equals end", url: "/api/v1/model-usage/analytics?start_time=2026-09-05T00:00:00Z&end_time=2026-09-05T00:00:00Z"},
-		{name: "start after end", url: "/api/v1/model-usage/analytics?start_time=2026-09-06T00:00:00Z&end_time=2026-09-05T00:00:00Z"},
+		{
+			name: "start equals end",
+			url: "/api/v1/model-usage/analytics?start_time=2026-09-05T00:00:00Z" +
+				"&end_time=2026-09-05T00:00:00Z",
+		},
+		{
+			name: "start after end",
+			url: "/api/v1/model-usage/analytics?start_time=2026-09-06T00:00:00Z" +
+				"&end_time=2026-09-05T00:00:00Z",
+		},
 		{name: "invalid interval", url: "/api/v1/model-usage/analytics?interval=week"},
 		{name: "empty model ID", url: "/api/v1/model-usage/analytics?model_id="},
 		{name: "tenant override", url: "/api/v1/model-usage/analytics?tenant_id=999"},
@@ -116,8 +124,12 @@ func TestModelUsageAnalyticsHandlerExplicitOffsetTimesNormalizeToUTC(t *testing.
 	router.Use(middleware.ErrorHandler())
 	router.GET("/api/v1/model-usage/analytics", h.GetAnalytics)
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet,
-		"/api/v1/model-usage/analytics?start_time=2026-09-05T08:00:00%2B08:00&end_time=2026-09-05T10:00:00%2B08:00&interval=hour", nil))
+	router.ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/model-usage/analytics?start_time=2026-09-05T08:00:00%2B08:00"+
+			"&end_time=2026-09-05T10:00:00%2B08:00&interval=hour",
+		nil,
+	))
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Equal(t, time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC), stub.query.StartTime)
 	require.Equal(t, time.Date(2026, 9, 5, 2, 0, 0, 0, time.UTC), stub.query.EndTime)

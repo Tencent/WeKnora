@@ -185,26 +185,38 @@ func validateCustomPreflight(p finalProfile, env preflightEnvironment) (selected
 
 func validatePreflightBase(p finalProfile, env preflightEnvironment) error {
 	if strings.TrimSpace(env.CommitSHA) == "" {
-		return errors.New("Git commit unreadable")
+		return errors.New("git commit unreadable")
 	}
 	want, got := p.Dataset, env.Dataset
 	if got.DatasetID != p.BenchmarkID {
-		return fmt.Errorf("Benchmark dataset mismatch: expected %s, actual %s", p.BenchmarkID, got.DatasetID)
+		return fmt.Errorf("benchmark dataset mismatch: expected %s, actual %s", p.BenchmarkID, got.DatasetID)
 	}
 	if got.DatasetSemanticSHA256 != want.SemanticSHA256 {
-		return fmt.Errorf("Benchmark dataset semantic SHA mismatch: expected %s, actual %s", want.SemanticSHA256, got.DatasetSemanticSHA256)
+		return fmt.Errorf(
+			"benchmark dataset semantic SHA mismatch: expected %s, actual %s",
+			want.SemanticSHA256, got.DatasetSemanticSHA256,
+		)
 	}
-	if got.CorpusCount != want.Corpus || got.QuestionCount != want.Questions || got.QrelsCount != want.Qrels || got.AnswerCount != want.Answers {
-		return fmt.Errorf("Benchmark dataset count mismatch: expected corpus/questions/qrels/answers %d/%d/%d/%d, actual %d/%d/%d/%d", want.Corpus, want.Questions, want.Qrels, want.Answers, got.CorpusCount, got.QuestionCount, got.QrelsCount, got.AnswerCount)
+	if got.CorpusCount != want.Corpus || got.QuestionCount != want.Questions ||
+		got.QrelsCount != want.Qrels || got.AnswerCount != want.Answers {
+		return fmt.Errorf(
+			"benchmark dataset count mismatch: expected corpus/questions/qrels/answers "+
+				"%d/%d/%d/%d, actual %d/%d/%d/%d",
+			want.Corpus, want.Questions, want.Qrels, want.Answers,
+			got.CorpusCount, got.QuestionCount, got.QrelsCount, got.AnswerCount,
+		)
 	}
 	if env.CacheEnabled || !strings.EqualFold(p.Runtime.CacheMode, "off") {
-		return errors.New("Embedding cache must be OFF for the benchmark profile")
+		return errors.New("embedding cache must be OFF for the benchmark profile")
 	}
 	if env.WorkerLimit != p.Runtime.WorkerLimit {
-		return fmt.Errorf("Worker limit mismatch: expected %d, actual %d (set GOMAXPROCS=%d)", p.Runtime.WorkerLimit, env.WorkerLimit, p.Runtime.WorkerLimit+1)
+		return fmt.Errorf(
+			"worker limit mismatch: expected %d, actual %d (set GOMAXPROCS=%d)",
+			p.Runtime.WorkerLimit, env.WorkerLimit, p.Runtime.WorkerLimit+1,
+		)
 	}
 	if env.Config == nil || env.Config.Conversation == nil || env.Config.Conversation.Summary == nil {
-		return errors.New("Benchmark runtime conversation configuration unavailable")
+		return errors.New("benchmark runtime conversation configuration unavailable")
 	}
 	if err := validateRuntime(p.Runtime, env); err != nil {
 		return err
@@ -212,10 +224,16 @@ func validatePreflightBase(p finalProfile, env preflightEnvironment) error {
 	return nil
 }
 
-func requireSingleAutomaticModel(models []*types.Model, label string, modelType types.ModelType) (*types.Model, error) {
+func requireSingleAutomaticModel(
+	models []*types.Model, label string, modelType types.ModelType,
+) (*types.Model, error) {
 	candidates := modelsOfType(models, modelType, false)
 	if len(candidates) != 1 {
-		return nil, fmt.Errorf("EvaluationService automatic %s selection is ambiguous: expected exactly one visible %s row, found %d (%s)", label, modelType, len(candidates), describeModels(candidates))
+		return nil, fmt.Errorf(
+			"evaluation service automatic %s selection is ambiguous: "+
+				"expected exactly one visible %s row, found %d (%s)",
+			label, modelType, len(candidates), describeModels(candidates),
+		)
 	}
 	if err := validateUsableModel(label, candidates[0]); err != nil {
 		return nil, err
@@ -223,10 +241,16 @@ func requireSingleAutomaticModel(models []*types.Model, label string, modelType 
 	return candidates[0], nil
 }
 
-func requireSingleActiveModel(models []*types.Model, label string, modelType types.ModelType) (*types.Model, error) {
+func requireSingleActiveModel(
+	models []*types.Model, label string, modelType types.ModelType,
+) (*types.Model, error) {
 	candidates := modelsOfType(models, modelType, true)
 	if len(candidates) != 1 {
-		return nil, fmt.Errorf("Custom benchmark %s selection is ambiguous: expected exactly one active %s row, found %d (%s)", label, modelType, len(candidates), describeModels(candidates))
+		return nil, fmt.Errorf(
+			"custom benchmark %s selection is ambiguous: "+
+				"expected exactly one active %s row, found %d (%s)",
+			label, modelType, len(candidates), describeModels(candidates),
+		)
 	}
 	if err := validateUsableModel(label, candidates[0]); err != nil {
 		return nil, err
@@ -243,7 +267,12 @@ func requireSingleExactActiveModel(models []*types.Model, label string, want pro
 		}
 	}
 	if len(matches) != 1 {
-		return nil, fmt.Errorf("Configured %s model does not match final benchmark profile. Expected exactly one %s (%s/%s). Actual: %s. This run cannot be compared with the published final baseline", label, want.Name, want.Source, want.Provider, describeModels(actual))
+		return nil, fmt.Errorf(
+			"configured %s model does not match final benchmark profile. "+
+				"Expected exactly one %s (%s/%s). Actual: %s. "+
+				"This run cannot be compared with the published final baseline",
+			label, want.Name, want.Source, want.Provider, describeModels(actual),
+		)
 	}
 	if err := validateExactModel(label, want, matches[0]); err != nil {
 		return nil, err
@@ -252,24 +281,33 @@ func requireSingleExactActiveModel(models []*types.Model, label string, want pro
 }
 
 func validateExactModel(label string, want profileModel, model *types.Model) error {
-	if model.Name != want.Name || string(model.Type) != want.Type || string(model.Source) != want.Source || model.Parameters.Provider != want.Provider {
-		return fmt.Errorf("Configured %s model does not match final benchmark profile. Expected: %s (%s/%s). Actual: %s. This run cannot be compared with the published final baseline", label, want.Name, want.Source, want.Provider, describeModels([]*types.Model{model}))
+	if model.Name != want.Name || string(model.Type) != want.Type ||
+		string(model.Source) != want.Source || model.Parameters.Provider != want.Provider {
+		return fmt.Errorf(
+			"configured %s model does not match final benchmark profile. "+
+				"Expected: %s (%s/%s). Actual: %s. "+
+				"This run cannot be compared with the published final baseline",
+			label, want.Name, want.Source, want.Provider, describeModels([]*types.Model{model}),
+		)
 	}
 	if want.Dimension != 0 && model.Parameters.EmbeddingParameters.Dimension != want.Dimension {
-		return fmt.Errorf("Configured %s model dimension mismatch: expected %d, actual %d", label, want.Dimension, model.Parameters.EmbeddingParameters.Dimension)
+		return fmt.Errorf(
+			"configured %s model dimension mismatch: expected %d, actual %d",
+			label, want.Dimension, model.Parameters.EmbeddingParameters.Dimension,
+		)
 	}
 	return validateUsableModel(label, model)
 }
 
 func validateUsableModel(label string, model *types.Model) error {
 	if model == nil || strings.TrimSpace(model.ID) == "" {
-		return fmt.Errorf("Required %s model has no usable ID", label)
+		return fmt.Errorf("required %s model has no usable ID", label)
 	}
 	if model.Status != types.ModelStatusActive {
-		return fmt.Errorf("Required %s model %s is not active (status=%s)", label, model.Name, model.Status)
+		return fmt.Errorf("required %s model %s is not active (status=%s)", label, model.Name, model.Status)
 	}
 	if model.Source != types.ModelSourceLocal && model.Parameters.APIKey == "" && model.Parameters.AppSecret == "" {
-		return fmt.Errorf("Required credential unavailable for %s model %s", label, model.Name)
+		return fmt.Errorf("required credential unavailable for %s model %s", label, model.Name)
 	}
 	return nil
 }
@@ -288,7 +326,10 @@ func modelsOfType(models []*types.Model, modelType types.ModelType, activeOnly b
 func describeModels(models []*types.Model) string {
 	values := make([]string, 0, len(models))
 	for _, model := range models {
-		values = append(values, fmt.Sprintf("%s[id=%s,status=%s,source=%s,provider=%s]", model.Name, model.ID, model.Status, model.Source, model.Parameters.Provider))
+		values = append(values, fmt.Sprintf(
+			"%s[id=%s,status=%s,source=%s,provider=%s]",
+			model.Name, model.ID, model.Status, model.Source, model.Parameters.Provider,
+		))
 	}
 	sort.Strings(values)
 	if len(values) == 0 {
@@ -299,14 +340,29 @@ func describeModels(models []*types.Model) string {
 
 func validateRuntime(want profileRuntime, env preflightEnvironment) error {
 	c := env.Config.Conversation
-	gotRetrieval := profileRetrieval{c.VectorThreshold, c.KeywordThreshold, c.EmbeddingTopK, c.RerankTopK, c.RerankThreshold, env.RetrieveDriver}
+	gotRetrieval := profileRetrieval{
+		VectorThreshold: c.VectorThreshold, KeywordThreshold: c.KeywordThreshold,
+		EmbeddingTopK: c.EmbeddingTopK, RerankTopK: c.RerankTopK,
+		RerankThreshold: c.RerankThreshold, RetrieveDriver: env.RetrieveDriver,
+	}
 	if gotRetrieval != want.Retrieval {
-		return fmt.Errorf("Retrieval configuration does not match final benchmark profile: expected %+v, actual %+v", want.Retrieval, gotRetrieval)
+		return fmt.Errorf(
+			"retrieval configuration does not match final benchmark profile: expected %+v, actual %+v",
+			want.Retrieval, gotRetrieval,
+		)
 	}
 	s := c.Summary
-	gotGeneration := profileGeneration{c.MaxRounds, s.MaxInputChars, s.MaxTokens, s.RepeatPenalty, s.TopK, s.TopP, s.FrequencyPenalty, s.PresencePenalty, s.Temperature, s.Seed, s.MaxCompletionTokens}
+	gotGeneration := profileGeneration{
+		MaxRounds: c.MaxRounds, MaxInputChars: s.MaxInputChars, MaxTokens: s.MaxTokens,
+		RepeatPenalty: s.RepeatPenalty, TopK: s.TopK, TopP: s.TopP,
+		FrequencyPenalty: s.FrequencyPenalty, PresencePenalty: s.PresencePenalty,
+		Temperature: s.Temperature, Seed: s.Seed, MaxCompletionTokens: s.MaxCompletionTokens,
+	}
 	if gotGeneration != want.Generation {
-		return fmt.Errorf("Generation configuration does not match final benchmark profile: expected %+v, actual %+v", want.Generation, gotGeneration)
+		return fmt.Errorf(
+			"generation configuration does not match final benchmark profile: expected %+v, actual %+v",
+			want.Generation, gotGeneration,
+		)
 	}
 	return nil
 }
@@ -330,15 +386,15 @@ type httpDoer interface {
 func checkBackendWithClient(ctx context.Context, baseURL string, client httpDoer) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/health", nil)
 	if err != nil {
-		return fmt.Errorf("Backend unavailable: %w", err)
+		return fmt.Errorf("backend unavailable: %w", err)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("Backend unavailable at %s: %w", baseURL, err)
+		return fmt.Errorf("backend unavailable at %s: %w", baseURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Backend unavailable at %s: health returned HTTP %d", baseURL, resp.StatusCode)
+		return fmt.Errorf("backend unavailable at %s: health returned HTTP %d", baseURL, resp.StatusCode)
 	}
 	return nil
 }
@@ -349,11 +405,11 @@ func checkOutputWritable(path string) error {
 		info, err := os.Stat(parent)
 		if err == nil {
 			if !info.IsDir() {
-				return fmt.Errorf("Output path cannot be written: %s is not a directory", parent)
+				return fmt.Errorf("output path cannot be written: %s is not a directory", parent)
 			}
 			f, err := os.CreateTemp(parent, ".benchmark-write-check-*")
 			if err != nil {
-				return fmt.Errorf("Output path cannot be written: %w", err)
+				return fmt.Errorf("output path cannot be written: %w", err)
 			}
 			name := f.Name()
 			_ = f.Close()
@@ -361,11 +417,11 @@ func checkOutputWritable(path string) error {
 			return nil
 		}
 		if !os.IsNotExist(err) {
-			return fmt.Errorf("Output path cannot be written: %w", err)
+			return fmt.Errorf("output path cannot be written: %w", err)
 		}
 		next := filepath.Dir(parent)
 		if next == parent {
-			return errors.New("Output path cannot be written: no existing parent directory")
+			return errors.New("output path cannot be written: no existing parent directory")
 		}
 		parent = next
 	}
@@ -374,7 +430,7 @@ func checkOutputWritable(path string) error {
 func loadDatasetIdentity(ctx context.Context, id string) (types.EvaluationDatasetIdentity, error) {
 	dataset, err := service.NewDatasetService().GetDatasetByID(ctx, id)
 	if err != nil {
-		return types.EvaluationDatasetIdentity{}, fmt.Errorf("Benchmark dataset missing or invalid: %w", err)
+		return types.EvaluationDatasetIdentity{}, fmt.Errorf("benchmark dataset missing or invalid: %w", err)
 	}
 	return dataset.Identity, nil
 }
@@ -384,7 +440,11 @@ func loadConfiguredModels(ctx context.Context, tenant uint64) ([]*types.Model, e
 	var dialector gorm.Dialector
 	switch driver {
 	case "postgres":
-		dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable connect_timeout=5", os.Getenv("DB_HOST"), os.Getenv("DB_PORT"), os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD"), os.Getenv("DB_NAME"))
+		dsn := fmt.Sprintf(
+			"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable connect_timeout=5",
+			os.Getenv("DB_HOST"), os.Getenv("DB_PORT"), os.Getenv("DB_USER"),
+			os.Getenv("DB_PASSWORD"), os.Getenv("DB_NAME"),
+		)
 		dialector = postgres.Open(dsn)
 	case "sqlite":
 		path := os.Getenv("DB_PATH")
@@ -392,23 +452,23 @@ func loadConfiguredModels(ctx context.Context, tenant uint64) ([]*types.Model, e
 			path = "./data/weknora.db"
 		}
 		if _, err := os.Stat(path); err != nil {
-			return nil, fmt.Errorf("PostgreSQL unavailable (configured sqlite database missing): %w", err)
+			return nil, fmt.Errorf("postgresql unavailable (configured sqlite database missing): %w", err)
 		}
 		dialector = sqlite.Open(path + "?mode=ro")
 	default:
-		return nil, fmt.Errorf("PostgreSQL unavailable: unsupported DB_DRIVER %q", driver)
+		return nil, fmt.Errorf("postgresql unavailable: unsupported DB_DRIVER %q", driver)
 	}
 	db, err := gorm.Open(dialector, &gorm.Config{})
 	if err != nil {
-		return nil, fmt.Errorf("PostgreSQL unavailable: %w", err)
+		return nil, fmt.Errorf("postgresql unavailable: %w", err)
 	}
 	sqlDB, err := db.DB()
 	if err != nil {
-		return nil, fmt.Errorf("PostgreSQL unavailable: %w", err)
+		return nil, fmt.Errorf("postgresql unavailable: %w", err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 	if err := sqlDB.PingContext(ctx); err != nil {
-		return nil, fmt.Errorf("PostgreSQL unavailable: %w", err)
+		return nil, fmt.Errorf("postgresql unavailable: %w", err)
 	}
 	models, err := repository.NewModelRepository(db).List(ctx, tenant, "", "")
 	if err != nil {
@@ -420,7 +480,7 @@ func loadConfiguredModels(ctx context.Context, tenant uint64) ([]*types.Model, e
 func collectPreflightEnvironment(ctx context.Context, tenant uint64) (preflightEnvironment, error) {
 	sha, err := currentCommitSHA()
 	if err != nil {
-		return preflightEnvironment{}, fmt.Errorf("Git commit unreadable: %w", err)
+		return preflightEnvironment{}, fmt.Errorf("git commit unreadable: %w", err)
 	}
 	identity, err := loadDatasetIdentity(ctx, "benchmark_v1")
 	if err != nil {
@@ -436,7 +496,7 @@ func collectPreflightEnvironment(ctx context.Context, tenant uint64) (preflightE
 	}
 	cacheConfig, cacheWarnings := embedding.LoadEmbeddingCacheConfigFromEnv()
 	if len(cacheWarnings) != 0 {
-		return preflightEnvironment{}, fmt.Errorf("Embedding cache mode cannot be confirmed: %v", cacheWarnings[0])
+		return preflightEnvironment{}, fmt.Errorf("embedding cache mode cannot be confirmed: %v", cacheWarnings[0])
 	}
 	return preflightEnvironment{
 		CommitSHA: sha, Dataset: identity, Models: models, Config: cfg,
@@ -479,11 +539,16 @@ type artifactLatency struct {
 	ModelCalls             types.LatencyAggregate `json:"model_calls"`
 }
 
-func buildFinalArtifact(p finalProfile, commit string, now time.Time, result *types.BenchmarkResult) (finalArtifact, error) {
+func buildFinalArtifact(
+	p finalProfile, commit string, now time.Time, result *types.BenchmarkResult,
+) (finalArtifact, error) {
 	return buildBenchmarkArtifact(executionModeStrict, p, commit, now, result)
 }
 
-func buildBenchmarkArtifact(mode benchmarkExecutionMode, p finalProfile, commit string, now time.Time, result *types.BenchmarkResult) (finalArtifact, error) {
+func buildBenchmarkArtifact(
+	mode benchmarkExecutionMode, p finalProfile, commit string,
+	now time.Time, result *types.BenchmarkResult,
+) (finalArtifact, error) {
 	if result == nil || result.Run.EvaluationRunID == "" {
 		return finalArtifact{}, errors.New("cannot build benchmark artifact from empty unified benchmark result")
 	}
@@ -510,7 +575,9 @@ func buildBenchmarkArtifact(mode benchmarkExecutionMode, p finalProfile, commit 
 				m.ResolvedModelName = stringPointer(*observed.ResolvedModelName)
 			}
 			models[key] = m
-			if observed.CallType == types.CallTypeChat && result.Config.Models.Summary != nil && result.Config.Models.Chat != nil && result.Config.Models.Summary.ID == result.Config.Models.Chat.ID {
+			if observed.CallType == types.CallTypeChat &&
+				result.Config.Models.Summary != nil && result.Config.Models.Chat != nil &&
+				result.Config.Models.Summary.ID == result.Config.Models.Chat.ID {
 				summary := models["summary"]
 				summary.ResolvedProvider = stringPointer(observed.ResolvedProvider)
 				if observed.ResolvedModelName != nil {
@@ -521,7 +588,8 @@ func buildBenchmarkArtifact(mode benchmarkExecutionMode, p finalProfile, commit 
 		}
 	}
 	comparable := mode == executionModeStrict
-	note := "Uses environment-specific models and MUST NOT be compared directly with the published Final Benchmark baseline."
+	note := "Uses environment-specific models and MUST NOT be compared directly " +
+		"with the published Final Benchmark baseline."
 	if comparable {
 		note = "Matches the published final benchmark profile."
 	}
@@ -539,16 +607,26 @@ func validateResultProfile(mode benchmarkExecutionMode, p finalProfile, result *
 		return fmt.Errorf("unsupported benchmark execution mode %q", mode)
 	}
 	if result.BenchmarkVersion != p.BenchmarkVersion {
-		return fmt.Errorf("unified benchmark result version mismatch: expected %s, actual %s", p.BenchmarkVersion, result.BenchmarkVersion)
+		return fmt.Errorf(
+			"unified benchmark result version mismatch: expected %s, actual %s",
+			p.BenchmarkVersion, result.BenchmarkVersion,
+		)
 	}
 	d := result.Config.Dataset
-	if d.DatasetID != p.BenchmarkID || d.DatasetSemanticSHA256 != p.Dataset.SemanticSHA256 || d.CorpusCount != p.Dataset.Corpus || d.QuestionCount != p.Dataset.Questions || d.QrelsCount != p.Dataset.Qrels || d.AnswerCount != p.Dataset.Answers {
+	if d.DatasetID != p.BenchmarkID || d.DatasetSemanticSHA256 != p.Dataset.SemanticSHA256 ||
+		d.CorpusCount != p.Dataset.Corpus || d.QuestionCount != p.Dataset.Questions ||
+		d.QrelsCount != p.Dataset.Qrels || d.AnswerCount != p.Dataset.Answers {
 		return errors.New("unified benchmark result dataset does not match final benchmark profile")
 	}
 	configured := []struct {
 		label string
 		got   *types.EvaluationConfiguredModelSnapshot
-	}{{"embedding", result.Config.Models.Embedding}, {"chat", result.Config.Models.Chat}, {"summary", result.Config.Models.Summary}, {"rerank", result.Config.Models.Rerank}}
+	}{
+		{"embedding", result.Config.Models.Embedding},
+		{"chat", result.Config.Models.Chat},
+		{"summary", result.Config.Models.Summary},
+		{"rerank", result.Config.Models.Rerank},
+	}
 	for _, model := range configured {
 		if model.got == nil {
 			return fmt.Errorf("unified benchmark result has no configured %s model", model.label)
@@ -559,12 +637,19 @@ func validateResultProfile(mode benchmarkExecutionMode, p finalProfile, result *
 			label string
 			want  profileModel
 			got   *types.EvaluationConfiguredModelSnapshot
-		}{{"embedding", p.Models.Embedding, result.Config.Models.Embedding}, {"chat", p.Models.Chat, result.Config.Models.Chat}, {"summary", p.Models.Chat, result.Config.Models.Summary}, {"rerank", p.Models.Rerank, result.Config.Models.Rerank}}
+		}{
+			{"embedding", p.Models.Embedding, result.Config.Models.Embedding},
+			{"chat", p.Models.Chat, result.Config.Models.Chat},
+			{"summary", p.Models.Chat, result.Config.Models.Summary},
+			{"rerank", p.Models.Rerank, result.Config.Models.Rerank},
+		}
 		for _, check := range checks {
-			if check.got.Name != check.want.Name || check.got.Type != check.want.Type || check.got.Source != check.want.Source || check.got.Provider != check.want.Provider {
+			if check.got.Name != check.want.Name || check.got.Type != check.want.Type ||
+				check.got.Source != check.want.Source || check.got.Provider != check.want.Provider {
 				return fmt.Errorf("unified benchmark result %s model does not match final benchmark profile", check.label)
 			}
-			if check.want.Dimension != 0 && (check.got.Embedding == nil || check.got.Embedding.Dimension != check.want.Dimension) {
+			if check.want.Dimension != 0 &&
+				(check.got.Embedding == nil || check.got.Embedding.Dimension != check.want.Dimension) {
 				return fmt.Errorf("unified benchmark result %s dimension does not match final benchmark profile", check.label)
 			}
 		}
@@ -573,14 +658,23 @@ func validateResultProfile(mode benchmarkExecutionMode, p finalProfile, result *
 		return errors.New("unified benchmark result worker limit does not match final benchmark profile")
 	}
 	r := result.Config.Retrieval
-	if (profileRetrieval{r.VectorThreshold, r.KeywordThreshold, r.EmbeddingTopK, r.RerankTopK, r.RerankThreshold, r.RetrieveDriver}) != p.Runtime.Retrieval {
+	gotRetrieval := profileRetrieval{
+		r.VectorThreshold, r.KeywordThreshold, r.EmbeddingTopK,
+		r.RerankTopK, r.RerankThreshold, r.RetrieveDriver,
+	}
+	if gotRetrieval != p.Runtime.Retrieval {
 		return errors.New("unified benchmark result retrieval settings do not match final benchmark profile")
 	}
 	g := result.Config.Generation
 	s := g.SummaryConfig
 	// MaxInputChars is validated from config during preflight; the frozen v1.1
 	// EvaluationGenerationSnapshot predates that field and cannot re-state it.
-	if (profileGeneration{g.MaxRounds, p.Runtime.Generation.MaxInputChars, s.MaxTokens, s.RepeatPenalty, s.TopK, s.TopP, s.FrequencyPenalty, s.PresencePenalty, s.Temperature, s.Seed, s.MaxCompletionTokens}) != p.Runtime.Generation {
+	gotGeneration := profileGeneration{
+		g.MaxRounds, p.Runtime.Generation.MaxInputChars, s.MaxTokens,
+		s.RepeatPenalty, s.TopK, s.TopP, s.FrequencyPenalty,
+		s.PresencePenalty, s.Temperature, s.Seed, s.MaxCompletionTokens,
+	}
+	if gotGeneration != p.Runtime.Generation {
 		return errors.New("unified benchmark result generation settings do not match final benchmark profile")
 	}
 	if result.ModelFacts == nil {
@@ -608,7 +702,14 @@ func validateCompleteMetrics(quality types.BenchmarkQuality) error {
 	retrieval := []struct {
 		name  string
 		value *float64
-	}{{"Precision", quality.Retrieval.Precision}, {"Recall", quality.Retrieval.Recall}, {"NDCG@3", quality.Retrieval.NDCG3}, {"NDCG@10", quality.Retrieval.NDCG10}, {"MRR", quality.Retrieval.MRR}, {"MAP", quality.Retrieval.MAP}}
+	}{
+		{"Precision", quality.Retrieval.Precision},
+		{"Recall", quality.Retrieval.Recall},
+		{"NDCG@3", quality.Retrieval.NDCG3},
+		{"NDCG@10", quality.Retrieval.NDCG10},
+		{"MRR", quality.Retrieval.MRR},
+		{"MAP", quality.Retrieval.MAP},
+	}
 	for _, metric := range retrieval {
 		if metric.value == nil {
 			return fmt.Errorf("unified benchmark result retrieval metric %s is missing", metric.name)
@@ -620,7 +721,14 @@ func validateCompleteMetrics(quality types.BenchmarkQuality) error {
 	answer := []struct {
 		name  string
 		value *float64
-	}{{"BLEU-1", quality.Answer.BLEU1}, {"BLEU-2", quality.Answer.BLEU2}, {"BLEU-4", quality.Answer.BLEU4}, {"ROUGE-1", quality.Answer.ROUGE1}, {"ROUGE-2", quality.Answer.ROUGE2}, {"ROUGE-L", quality.Answer.ROUGEL}}
+	}{
+		{"BLEU-1", quality.Answer.BLEU1},
+		{"BLEU-2", quality.Answer.BLEU2},
+		{"BLEU-4", quality.Answer.BLEU4},
+		{"ROUGE-1", quality.Answer.ROUGE1},
+		{"ROUGE-2", quality.Answer.ROUGE2},
+		{"ROUGE-L", quality.Answer.ROUGEL},
+	}
 	for _, metric := range answer {
 		if metric.value == nil {
 			return fmt.Errorf("unified benchmark result answer metric %s is missing", metric.name)
@@ -664,28 +772,63 @@ func renderFinalMarkdown(a finalArtifact) string {
 	var b strings.Builder
 	if a.ExecutionMode == executionModeCustom {
 		b.WriteString("# Benchmark v1.1 Custom Verification Result\n\n")
-		b.WriteString("WARNING: This run uses environment-specific models. It verifies that the Benchmark pipeline is operational, but its quality metrics are NOT directly comparable with the published Final Benchmark baseline.\n\n")
+		b.WriteString("WARNING: This run uses environment-specific models. " +
+			"It verifies that the Benchmark pipeline is operational, but its quality metrics are NOT directly " +
+			"comparable with the published Final Benchmark baseline.\n\n")
 	} else {
 		b.WriteString("# Benchmark v1.1 Final Result\n\n")
 	}
-	fmt.Fprintf(&b, "Execution mode: %s  \nComparable to published baseline: %s  \nCommit: `%s`  \nEvaluation run: `%s`  \nGenerated (UTC): `%s`  \nDataset SHA: `%s`\n\n", strings.ToUpper(string(a.ExecutionMode)), yesNo(a.ComparableToFinalBaseline), a.CommitSHA, a.EvaluationRunID, a.GeneratedAt.Format(time.RFC3339), a.Dataset.SemanticSHA256)
-	fmt.Fprintf(&b, "Models: embedding `%s` (%s), chat `%s` (%s), summary `%s` (%s), rerank `%s` (%s)\n\n", a.Models["embedding"].Name, valueOrNA(a.Models["embedding"].ResolvedProvider), a.Models["chat"].Name, valueOrNA(a.Models["chat"].ResolvedProvider), a.Models["summary"].Name, valueOrNA(a.Models["summary"].ResolvedProvider), a.Models["rerank"].Name, valueOrNA(a.Models["rerank"].ResolvedProvider))
+	writeBuilder(
+		&b,
+		"Execution mode: %s  \nComparable to published baseline: %s  \nCommit: `%s`  \n"+
+			"Evaluation run: `%s`  \nGenerated (UTC): `%s`  \nDataset SHA: `%s`\n\n",
+		strings.ToUpper(string(a.ExecutionMode)), yesNo(a.ComparableToFinalBaseline), a.CommitSHA,
+		a.EvaluationRunID, a.GeneratedAt.Format(time.RFC3339), a.Dataset.SemanticSHA256,
+	)
+	writeBuilder(
+		&b,
+		"Models: embedding `%s` (%s), chat `%s` (%s), summary `%s` (%s), rerank `%s` (%s)\n\n",
+		a.Models["embedding"].Name, valueOrNA(a.Models["embedding"].ResolvedProvider),
+		a.Models["chat"].Name, valueOrNA(a.Models["chat"].ResolvedProvider),
+		a.Models["summary"].Name, valueOrNA(a.Models["summary"].ResolvedProvider),
+		a.Models["rerank"].Name, valueOrNA(a.Models["rerank"].ResolvedProvider),
+	)
 	b.WriteString("## Quality\n\n| Metric | Value |\n| --- | ---: |\n")
 	if a.Metrics.Retrieval != nil {
 		r := a.Metrics.Retrieval
-		fmt.Fprintf(&b, "| Precision | %s |\n| Recall | %s |\n| NDCG@3 | %s |\n| NDCG@10 | %s |\n| MRR | %s |\n| MAP | %s |\n", metric(r.Precision), metric(r.Recall), metric(r.NDCG3), metric(r.NDCG10), metric(r.MRR), metric(r.MAP))
+		writeBuilder(
+			&b,
+			"| Precision | %s |\n| Recall | %s |\n| NDCG@3 | %s |\n| NDCG@10 | %s |\n"+
+				"| MRR | %s |\n| MAP | %s |\n",
+			metric(r.Precision), metric(r.Recall), metric(r.NDCG3),
+			metric(r.NDCG10), metric(r.MRR), metric(r.MAP),
+		)
 	}
 	if a.Metrics.Answer != nil {
 		q := a.Metrics.Answer
-		fmt.Fprintf(&b, "| BLEU-1 | %s |\n| BLEU-2 | %s |\n| BLEU-4 | %s |\n| ROUGE-1 | %s |\n| ROUGE-2 | %s |\n| ROUGE-L | %s |\n", metric(q.BLEU1), metric(q.BLEU2), metric(q.BLEU4), metric(q.ROUGE1), metric(q.ROUGE2), metric(q.ROUGEL))
+		writeBuilder(
+			&b,
+			"| BLEU-1 | %s |\n| BLEU-2 | %s |\n| BLEU-4 | %s |\n| ROUGE-1 | %s |\n"+
+				"| ROUGE-2 | %s |\n| ROUGE-L | %s |\n",
+			metric(q.BLEU1), metric(q.BLEU2), metric(q.BLEU4),
+			metric(q.ROUGE1), metric(q.ROUGE2), metric(q.ROUGEL),
+		)
 	}
 	b.WriteString("\n## Runtime / Usage\n\n")
-	fmt.Fprintf(&b, "- Worker limit: %d\n- Cache mode: %s\n", a.Runtime.WorkerLimit, a.Runtime.CacheMode)
+	writeBuilder(&b, "- Worker limit: %d\n- Cache mode: %s\n", a.Runtime.WorkerLimit, a.Runtime.CacheMode)
 	if a.Usage != nil {
-		fmt.Fprintf(&b, "- Model calls: %d\n- Average model latency: %s\n", a.Usage.Calls.Total, formatLatency(a.Usage.Latency.AverageMS))
+		writeBuilder(
+			&b, "- Model calls: %d\n- Average model latency: %s\n",
+			a.Usage.Calls.Total, formatLatency(a.Usage.Latency.AverageMS),
+		)
 	}
-	b.WriteString("\nRetrieval metrics are generally more stable. BLEU/ROUGE may vary slightly because hosted model behavior is not bit-for-bit deterministic.\n")
+	b.WriteString("\nRetrieval metrics are generally more stable. BLEU/ROUGE may vary slightly " +
+		"because hosted model behavior is not bit-for-bit deterministic.\n")
 	return b.String()
+}
+
+func writeBuilder(b *strings.Builder, format string, args ...any) {
+	_, _ = fmt.Fprintf(b, format, args...)
 }
 
 func formatLatency(v *float64) string {

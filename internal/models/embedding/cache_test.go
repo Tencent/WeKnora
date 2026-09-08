@@ -179,7 +179,10 @@ func TestCachingEmbedderEmbedMissThenHit(t *testing.T) {
 	if provider.embedCalls != 1 {
 		t.Fatalf("provider Embed calls = %d, want 1", provider.embedCalls)
 	}
-	wantStats := EmbeddingCacheStats{EmbeddingRequests: 2, EmbeddingInputs: 2, CacheHits: 1, CacheMisses: 1, ProviderInputs: 1}
+	wantStats := EmbeddingCacheStats{
+		EmbeddingRequests: 2, EmbeddingInputs: 2,
+		CacheHits: 1, CacheMisses: 1, ProviderInputs: 1,
+	}
 	if got := GetEmbeddingCacheStats(); got != wantStats {
 		t.Fatalf("stats = %+v, want %+v", got, wantStats)
 	}

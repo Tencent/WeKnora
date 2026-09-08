@@ -1,7 +1,6 @@
 package regression
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -41,11 +40,20 @@ func CheckCompatibility(baseline, current *types.BenchmarkResult) []Mismatch {
 		{"dataset.dataset_semantic_sha256", b.Config.Dataset.DatasetSemanticSHA256, c.Config.Dataset.DatasetSemanticSHA256},
 		{"dataset.corpus_count", intStr(b.Config.Dataset.CorpusCount), intStr(c.Config.Dataset.CorpusCount)},
 		{"dataset.question_count", intStr(b.Config.Dataset.QuestionCount), intStr(c.Config.Dataset.QuestionCount)},
-		{"retrieval.vector_threshold", floatStr(b.Config.Retrieval.VectorThreshold), floatStr(c.Config.Retrieval.VectorThreshold)},
-		{"retrieval.keyword_threshold", floatStr(b.Config.Retrieval.KeywordThreshold), floatStr(c.Config.Retrieval.KeywordThreshold)},
+		{
+			"retrieval.vector_threshold",
+			floatStr(b.Config.Retrieval.VectorThreshold), floatStr(c.Config.Retrieval.VectorThreshold),
+		},
+		{
+			"retrieval.keyword_threshold",
+			floatStr(b.Config.Retrieval.KeywordThreshold), floatStr(c.Config.Retrieval.KeywordThreshold),
+		},
 		{"retrieval.embedding_top_k", intStr(b.Config.Retrieval.EmbeddingTopK), intStr(c.Config.Retrieval.EmbeddingTopK)},
 		{"retrieval.rerank_top_k", intStr(b.Config.Retrieval.RerankTopK), intStr(c.Config.Retrieval.RerankTopK)},
-		{"retrieval.rerank_threshold", floatStr(b.Config.Retrieval.RerankThreshold), floatStr(c.Config.Retrieval.RerankThreshold)},
+		{
+			"retrieval.rerank_threshold",
+			floatStr(b.Config.Retrieval.RerankThreshold), floatStr(c.Config.Retrieval.RerankThreshold),
+		},
 		{"retrieval.retrieve_driver", b.Config.Retrieval.RetrieveDriver, c.Config.Retrieval.RetrieveDriver},
 		{"models.embedding.name", modelName(b.Config.Models.Embedding), modelName(c.Config.Models.Embedding)},
 		{"models.embedding.provider", modelProvider(b.Config.Models.Embedding), modelProvider(c.Config.Models.Embedding)},
@@ -72,9 +80,9 @@ func FormatMismatches(mismatches []Mismatch) string {
 	var b strings.Builder
 	b.WriteString("Compatibility: FAIL\n\n")
 	for _, m := range mismatches {
-		fmt.Fprintf(&b, "%s\n", m.Field)
-		fmt.Fprintf(&b, "baseline = %s\n", m.Baseline)
-		fmt.Fprintf(&b, "current  = %s\n\n", m.Current)
+		writeBuilder(&b, "%s\n", m.Field)
+		writeBuilder(&b, "baseline = %s\n", m.Baseline)
+		writeBuilder(&b, "current  = %s\n\n", m.Current)
 	}
 	return b.String()
 }

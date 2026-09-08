@@ -88,7 +88,8 @@ const (
 // Counters that a provider does not report are stored as NULL, never forged to
 // zero. Monetary cost remains a separate derived model_usage_cost fact.
 type ModelUsage struct {
-	ID       string `gorm:"type:varchar(36);primaryKey"`
+	ID string `gorm:"type:varchar(36);primaryKey"`
+	//nolint:lll // Composite GORM indexes must remain together in the field tag.
 	TenantID uint64 `gorm:"not null;index:idx_model_usage_tenant_created,priority:1;index:idx_model_usage_tenant_model_created,priority:1;index:idx_model_usage_tenant_evaluation_created,priority:1"`
 	// ModelTenantID is the tenant that owns the model config / credential, as
 	// opposed to TenantID which is the business / evaluation caller. The two
@@ -97,6 +98,7 @@ type ModelUsage struct {
 	// EvaluationRunID attributes the row to a run-level evaluation when set;
 	// ordinary business calls leave it NULL. The repository enforces that a
 	// non-NULL run belongs to TenantID.
+	//nolint:lll // Composite GORM indexes must remain together in the field tag.
 	EvaluationRunID *string `gorm:"type:varchar(36);index:idx_model_usage_tenant_evaluation_created,priority:2;index:idx_model_usage_evaluation_run"`
 
 	// Model identity snapshot at call time. Never dereferenced later, so a
@@ -122,7 +124,8 @@ type ModelUsage struct {
 	// when the call never completed enough to be measured.
 	LatencyMS *int64     `gorm:"column:latency_ms"`
 	StartedAt *time.Time `gorm:"column:started_at"`
-	CreatedAt time.Time  `gorm:"not null;index:idx_model_usage_tenant_created,priority:2;index:idx_model_usage_tenant_model_created,priority:3;index:idx_model_usage_tenant_evaluation_created,priority:3"`
+	//nolint:lll // Composite GORM indexes must remain together in the field tag.
+	CreatedAt time.Time `gorm:"not null;index:idx_model_usage_tenant_created,priority:2;index:idx_model_usage_tenant_model_created,priority:3;index:idx_model_usage_tenant_evaluation_created,priority:3"`
 
 	// Universal token counters, interpreted by CallType. NULL when the
 	// provider did not report that value.
@@ -249,7 +252,8 @@ func (u *ModelUsage) Validate() error {
 		u.EmbeddingCacheStatus != nil && *u.EmbeddingCacheStatus != EmbeddingCacheStatusDisabled {
 		if u.CacheHits+u.CacheMisses != u.EmbeddingInputs {
 			return fmt.Errorf(
-				"model_usage: embedding cache accounting must satisfy cache_hits + cache_misses == embedding_inputs (got %d + %d != %d)",
+				"model_usage: embedding cache accounting must satisfy "+
+					"cache_hits + cache_misses == embedding_inputs (got %d + %d != %d)",
 				u.CacheHits, u.CacheMisses, u.EmbeddingInputs,
 			)
 		}

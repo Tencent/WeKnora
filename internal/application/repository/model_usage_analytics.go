@@ -87,20 +87,37 @@ func (r *modelUsageRepository) AggregateAnalytics(
 			COUNT(u.latency_ms) AS latency_observed,
 			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status = 'hit' THEN 1 ELSE 0 END) AS prompt_hit,
 			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status = 'miss' THEN 1 ELSE 0 END) AS prompt_miss,
-			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status = 'unsupported' THEN 1 ELSE 0 END) AS prompt_unsupported,
+			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status = 'unsupported'
+				THEN 1 ELSE 0 END) AS prompt_unsupported,
 			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status = 'unreported' THEN 1 ELSE 0 END) AS prompt_unreported,
 			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status IS NULL THEN 1 ELSE 0 END) AS prompt_not_recorded,
-			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status IN ('hit', 'miss') AND u.input_tokens IS NOT NULL AND u.cache_read_tokens IS NOT NULL THEN u.cache_read_tokens ELSE 0 END) AS cache_read_tokens,
-			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status IN ('hit', 'miss') AND u.cache_write_tokens IS NOT NULL THEN u.cache_write_tokens ELSE 0 END) AS cache_write_tokens,
-			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status IN ('hit', 'miss') AND u.cache_miss_tokens IS NOT NULL THEN u.cache_miss_tokens ELSE 0 END) AS cache_miss_tokens,
-			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status IN ('hit', 'miss') AND u.input_tokens IS NOT NULL AND u.cache_read_tokens IS NOT NULL THEN u.input_tokens ELSE 0 END) AS prompt_token_input,
-			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status = 'full_hit' THEN 1 ELSE 0 END) AS embedding_full_hit,
-			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status = 'partial' THEN 1 ELSE 0 END) AS embedding_partial,
+			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status IN ('hit', 'miss')
+				AND u.input_tokens IS NOT NULL AND u.cache_read_tokens IS NOT NULL
+				THEN u.cache_read_tokens ELSE 0 END) AS cache_read_tokens,
+			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status IN ('hit', 'miss')
+				AND u.cache_write_tokens IS NOT NULL
+				THEN u.cache_write_tokens ELSE 0 END) AS cache_write_tokens,
+			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status IN ('hit', 'miss')
+				AND u.cache_miss_tokens IS NOT NULL
+				THEN u.cache_miss_tokens ELSE 0 END) AS cache_miss_tokens,
+			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status IN ('hit', 'miss')
+				AND u.input_tokens IS NOT NULL AND u.cache_read_tokens IS NOT NULL
+				THEN u.input_tokens ELSE 0 END) AS prompt_token_input,
+			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status = 'full_hit'
+				THEN 1 ELSE 0 END) AS embedding_full_hit,
+			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status = 'partial'
+				THEN 1 ELSE 0 END) AS embedding_partial,
 			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status = 'miss' THEN 1 ELSE 0 END) AS embedding_miss,
-			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status = 'disabled' THEN 1 ELSE 0 END) AS embedding_disabled,
-			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status IS NULL THEN 1 ELSE 0 END) AS embedding_not_recorded,
-			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status IN ('full_hit', 'partial', 'miss') THEN u.cache_hits ELSE 0 END) AS embedding_cache_hits,
-			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status IN ('full_hit', 'partial', 'miss') THEN u.cache_misses ELSE 0 END) AS embedding_cache_misses
+			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status = 'disabled'
+				THEN 1 ELSE 0 END) AS embedding_disabled,
+			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status IS NULL
+				THEN 1 ELSE 0 END) AS embedding_not_recorded,
+			SUM(CASE WHEN u.call_type = 'embedding'
+				AND u.embedding_cache_status IN ('full_hit', 'partial', 'miss')
+				THEN u.cache_hits ELSE 0 END) AS embedding_cache_hits,
+			SUM(CASE WHEN u.call_type = 'embedding'
+				AND u.embedding_cache_status IN ('full_hit', 'partial', 'miss')
+				THEN u.cache_misses ELSE 0 END) AS embedding_cache_misses
 		FROM model_usage AS u
 		WHERE %s
 		GROUP BY bucket_start, u.call_type
@@ -165,7 +182,9 @@ func (r *modelUsageRepository) AggregateAnalytics(
 			if err := addModelUsageAnalyticsCostRow(&result.Summary, summaryCosts, row); err != nil {
 				return nil, fmt.Errorf("aggregate model usage analytics: %w", err)
 			}
-			if err := addModelUsageAnalyticsCostRow(&result.Trend[bucketIndex].ModelUsageAnalyticsAggregate, bucketCosts, row); err != nil {
+			if err := addModelUsageAnalyticsCostRow(
+				&result.Trend[bucketIndex].ModelUsageAnalyticsAggregate, bucketCosts, row,
+			); err != nil {
 				return nil, fmt.Errorf("aggregate model usage analytics: %w", err)
 			}
 		}
@@ -177,7 +196,9 @@ func (r *modelUsageRepository) AggregateAnalytics(
 	for i := range result.Trend {
 		bucket := &result.Trend[i]
 		bucketKey := bucket.BucketStart.Format(time.RFC3339)
-		if err := finishModelUsageAnalyticsAggregate(&bucket.ModelUsageAnalyticsAggregate, costsByBucket[bucketKey]); err != nil {
+		if err := finishModelUsageAnalyticsAggregate(
+			&bucket.ModelUsageAnalyticsAggregate, costsByBucket[bucketKey],
+		); err != nil {
 			return nil, fmt.Errorf("aggregate model usage analytics: %w", err)
 		}
 	}
@@ -235,7 +256,10 @@ func (r *modelUsageRepository) queryModelUsageAnalyticsCosts(
 		totalCostExpression = "COALESCE(GROUP_CONCAT(c.total_cost, ','), '')"
 		knownCostExpression = "COALESCE(GROUP_CONCAT(c.known_cost, ','), '')"
 	default:
-		return nil, fmt.Errorf("aggregate model usage analytics costs: unsupported database dialect %q", r.db.Dialector.Name())
+		return nil, fmt.Errorf(
+			"aggregate model usage analytics costs: unsupported database dialect %q",
+			r.db.Dialector.Name(),
+		)
 	}
 	costSQL := fmt.Sprintf(`
 		SELECT %s AS bucket_start, u.call_type,
@@ -358,7 +382,10 @@ func addModelUsageAnalyticsCostRow(
 		accumulator = newCurrencyCostAccumulator()
 		costs[row.Currency] = accumulator
 	}
-	return addGroupedCurrencyCost(accumulator, row.CallType, row.CostStatus, row.Calls, row.TotalCostText, row.KnownCostText)
+	return addGroupedCurrencyCost(
+		accumulator, row.CallType, row.CostStatus,
+		row.Calls, row.TotalCostText, row.KnownCostText,
+	)
 }
 
 func incrementCallCountsPointerBy(counts *types.CallCounts, callType types.CallType, amount int64) error {

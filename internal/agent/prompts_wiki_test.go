@@ -188,7 +188,11 @@ func TestWikiDocumentPromptsStablePrefix(t *testing.T) {
 			render := func(content string) string {
 				tmpl := template.Must(template.New("wiki").Parse(prompt))
 				var b strings.Builder
-				err := tmpl.Execute(&b, map[string]string{"Content": content, "Language": "English", "Granularity": "standard", "GranularityGuidance": WikiGranularityGuidanceStandard, "PreviousSlugs": "PREVIOUS_SENTINEL", "ExtractedSlugs": "EXTRACTED_SENTINEL"})
+				err := tmpl.Execute(&b, map[string]string{
+					"Content": content, "Language": "English", "Granularity": "standard",
+					"GranularityGuidance": WikiGranularityGuidanceStandard,
+					"PreviousSlugs":       "PREVIOUS_SENTINEL", "ExtractedSlugs": "EXTRACTED_SENTINEL",
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -208,7 +212,10 @@ func TestWikiDocumentPromptsStablePrefix(t *testing.T) {
 				rules = append(rules, "### JSON Formatting Rules", "Output ONLY valid JSON. Example:")
 				rules = append(rules, "### Extraction Scope")
 			} else {
-				rules = append(rules, "**Image rule**", "**Wiki-link rule**", "**Empty content rule**", "Output the SUMMARY line first")
+				rules = append(
+					rules, "**Image rule**", "**Wiki-link rule**", "**Empty content rule**",
+					"Output the SUMMARY line first",
+				)
 			}
 			for _, rule := range rules {
 				if k := strings.Index(a, rule); k < 0 || k >= i {

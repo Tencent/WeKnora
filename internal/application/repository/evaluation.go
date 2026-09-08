@@ -22,7 +22,9 @@ func (r *evaluationRunRepository) Create(ctx context.Context, run *types.Evaluat
 	return r.db.WithContext(ctx).Create(run).Error
 }
 
-func (r *evaluationRunRepository) GetByTaskID(ctx context.Context, tenantID uint64, taskID string) (*types.EvaluationRun, error) {
+func (r *evaluationRunRepository) GetByTaskID(
+	ctx context.Context, tenantID uint64, taskID string,
+) (*types.EvaluationRun, error) {
 	var run types.EvaluationRun
 	err := r.db.WithContext(ctx).Where("tenant_id = ? AND task_id = ?", tenantID, taskID).First(&run).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -31,7 +33,9 @@ func (r *evaluationRunRepository) GetByTaskID(ctx context.Context, tenantID uint
 	return &run, err
 }
 
-func (r *evaluationRunRepository) MarkRunning(ctx context.Context, tenantID uint64, taskID string, startedAt time.Time) error {
+func (r *evaluationRunRepository) MarkRunning(
+	ctx context.Context, tenantID uint64, taskID string, startedAt time.Time,
+) error {
 	res := r.db.WithContext(ctx).Model(&types.EvaluationRun{}).
 		Where("tenant_id = ? AND task_id = ? AND status = ?", tenantID, taskID, types.EvaluationStatuePending).
 		Updates(map[string]interface{}{"status": types.EvaluationStatueRunning, "started_at": startedAt})
@@ -55,7 +59,10 @@ func (r *evaluationRunRepository) IncrementFinished(ctx context.Context, tenantI
 	return transitionError(res, "increment evaluation progress")
 }
 
-func (r *evaluationRunRepository) MarkSuccess(ctx context.Context, tenantID uint64, taskID string, metric *types.MetricResult, finishedAt time.Time) error {
+func (r *evaluationRunRepository) MarkSuccess(
+	ctx context.Context, tenantID uint64, taskID string,
+	metric *types.MetricResult, finishedAt time.Time,
+) error {
 	updates, err := terminalUpdates(metric, finishedAt)
 	if err != nil {
 		return err
@@ -65,7 +72,10 @@ func (r *evaluationRunRepository) MarkSuccess(ctx context.Context, tenantID uint
 	return r.markTerminal(ctx, tenantID, taskID, updates, "mark evaluation successful")
 }
 
-func (r *evaluationRunRepository) MarkFailed(ctx context.Context, tenantID uint64, taskID string, metric *types.MetricResult, message string, finishedAt time.Time) error {
+func (r *evaluationRunRepository) MarkFailed(
+	ctx context.Context, tenantID uint64, taskID string,
+	metric *types.MetricResult, message string, finishedAt time.Time,
+) error {
 	updates, err := terminalUpdates(metric, finishedAt)
 	if err != nil {
 		return err
@@ -75,7 +85,10 @@ func (r *evaluationRunRepository) MarkFailed(ctx context.Context, tenantID uint6
 	return r.markTerminal(ctx, tenantID, taskID, updates, "mark evaluation failed")
 }
 
-func (r *evaluationRunRepository) markTerminal(ctx context.Context, tenantID uint64, taskID string, updates map[string]interface{}, operation string) error {
+func (r *evaluationRunRepository) markTerminal(
+	ctx context.Context, tenantID uint64, taskID string,
+	updates map[string]interface{}, operation string,
+) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var run types.EvaluationRun
 		if err := tx.Select("started_at").

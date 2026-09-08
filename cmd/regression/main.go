@@ -41,7 +41,7 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 	if *baselinePath == "" || *currentPath == "" {
-		fmt.Fprintln(stderr, "regression: --baseline and --current are required")
+		writeCLI(stderr, "regression: --baseline and --current are required\n")
 		return exitError
 	}
 
@@ -49,7 +49,7 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	if *policyPath != "" {
 		loaded, err := loadPolicy(*policyPath)
 		if err != nil {
-			fmt.Fprintf(stderr, "regression: %v\n", err)
+			writeCLI(stderr, "regression: %v\n", err)
 			return exitError
 		}
 		policy = loaded
@@ -57,33 +57,33 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 
 	baseline, err := loadResult(*baselinePath)
 	if err != nil {
-		fmt.Fprintf(stderr, "regression: load baseline: %v\n", err)
+		writeCLI(stderr, "regression: load baseline: %v\n", err)
 		return exitError
 	}
 	current, err := loadResult(*currentPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "regression: load current: %v\n", err)
+		writeCLI(stderr, "regression: load current: %v\n", err)
 		return exitError
 	}
 
 	// Contract guard first: a mismatch between the benchmark contracts is a
 	// configuration failure (fail-closed), not a quality comparison.
 	if mismatches := regression.CheckCompatibility(baseline, current); len(mismatches) > 0 {
-		fmt.Fprint(stdout, regression.FormatMismatches(mismatches))
+		writeCLI(stdout, "%s", regression.FormatMismatches(mismatches))
 		return exitRegression
 	}
 
 	report, err := regression.Compare(baseline, current, policy)
 	if err != nil {
-		fmt.Fprintf(stderr, "regression: %v\n", err)
+		writeCLI(stderr, "regression: %v\n", err)
 		return exitError
 	}
 
-	fmt.Fprint(stdout, report.RenderText())
+	writeCLI(stdout, "%s", report.RenderText())
 
 	if *reportPath != "" {
 		if err := writeReport(*reportPath, report); err != nil {
-			fmt.Fprintf(stderr, "regression: %v\n", err)
+			writeCLI(stderr, "regression: %v\n", err)
 			return exitError
 		}
 	}
@@ -92,6 +92,12 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		return exitRegression
 	}
 	return exitPass
+}
+
+// writeCLI deliberately preserves the command's established exit-code contract
+// when its caller-provided output stream fails.
+func writeCLI(w io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintf(w, format, args...)
 }
 
 func loadResult(path string) (*types.BenchmarkResult, error) {
@@ -111,7 +117,7 @@ func loadPolicy(path string) (regression.Policy, error) {
 	if err != nil {
 		return regression.Policy{}, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return regression.LoadPolicy(f)
 }
 

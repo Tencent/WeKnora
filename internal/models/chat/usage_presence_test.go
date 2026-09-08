@@ -57,16 +57,18 @@ func TestOpenAIUsagePresenceSemantics(t *testing.T) {
 			wantTotal:      nil,
 		},
 		{
-			name:           "usage explicit zero",
-			body:           `{"choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}`,
+			name: "usage explicit zero",
+			body: `{"choices":[{"message":{"content":"hi"}}],` +
+				`"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}`,
 			wantProvenance: types.TokenProvenanceProviderReported,
 			wantInput:      intPtr(0),
 			wantOutput:     intPtr(0),
 			wantTotal:      intPtr(0),
 		},
 		{
-			name:           "normal usage",
-			body:           `{"choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
+			name: "normal usage",
+			body: `{"choices":[{"message":{"content":"hi"}}],` +
+				`"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
 			wantProvenance: types.TokenProvenanceProviderReported,
 			wantInput:      intPtr(10),
 			wantOutput:     intPtr(5),
@@ -121,7 +123,7 @@ func TestResponseBodyCaptureRoundTripper(t *testing.T) {
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		got, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
@@ -135,7 +137,7 @@ func TestResponseBodyCaptureRoundTripper(t *testing.T) {
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		got, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)

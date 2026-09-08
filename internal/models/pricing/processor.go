@@ -29,7 +29,9 @@ func (p *Processor) Process(ctx context.Context, usage *types.ModelUsage) error 
 	if usage.ResolvedProvider == "" || usage.ResolvedModelName == nil || usage.StartedAt == nil {
 		return nil
 	}
-	rule, err := p.repo.ResolvePricing(ctx, usage.ResolvedProvider, *usage.ResolvedModelName, usage.CallType, *usage.StartedAt)
+	rule, err := p.repo.ResolvePricing(
+		ctx, usage.ResolvedProvider, *usage.ResolvedModelName, usage.CallType, *usage.StartedAt,
+	)
 	if err != nil {
 		return err
 	}

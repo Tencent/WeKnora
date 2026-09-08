@@ -124,8 +124,16 @@ func TestDatasetIntegrityRejectsMalformedSemanticData(t *testing.T) {
 	}{
 		{name: "query without qrels", mutate: func(d *dataset) { delete(d.qrels, 1) }, want: "query 1 has no qrels"},
 		{name: "query without qas", mutate: func(d *dataset) { delete(d.qas, 1) }, want: "query 1 has no qas relation"},
-		{name: "qrels unknown query", mutate: func(d *dataset) { d.qrels[2] = []int64{10} }, want: "qrels references unknown query 2"},
-		{name: "qrel unknown passage", mutate: func(d *dataset) { d.qrels[1] = []int64{99} }, want: "references unknown corpus passage"},
+		{
+			name:   "qrels unknown query",
+			mutate: func(d *dataset) { d.qrels[2] = []int64{10} },
+			want:   "qrels references unknown query 2",
+		},
+		{
+			name:   "qrel unknown passage",
+			mutate: func(d *dataset) { d.qrels[1] = []int64{99} },
+			want:   "references unknown corpus passage",
+		},
 		{name: "qas unknown query", mutate: func(d *dataset) { d.qas[2] = 20 }, want: "qas references unknown query 2"},
 		{name: "qas unknown answer", mutate: func(d *dataset) { d.qas[1] = 99 }, want: "references unknown answer"},
 		{name: "empty question", mutate: func(d *dataset) { d.queries[1] = " \n" }, want: "query 1 has empty text"},

@@ -18,12 +18,17 @@ type modelUsageAnalyticsRepositoryStub struct {
 func (s *modelUsageAnalyticsRepositoryStub) Create(context.Context, *types.ModelUsage) error {
 	return nil
 }
+
 func (s *modelUsageAnalyticsRepositoryStub) GetByID(context.Context, uint64, string) (*types.ModelUsage, error) {
 	return nil, nil
 }
-func (s *modelUsageAnalyticsRepositoryStub) AggregateEvaluationRun(context.Context, uint64, string) (*types.EvaluationModelUsageAggregate, error) {
+
+func (s *modelUsageAnalyticsRepositoryStub) AggregateEvaluationRun(
+	context.Context, uint64, string,
+) (*types.EvaluationModelUsageAggregate, error) {
 	return nil, nil
 }
+
 func (s *modelUsageAnalyticsRepositoryStub) AggregateAnalytics(
 	_ context.Context, tenantID uint64, query types.ModelUsageAnalyticsQuery,
 ) (*types.ModelUsageAnalyticsResult, error) {

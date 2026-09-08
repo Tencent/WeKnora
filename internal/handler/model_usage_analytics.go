@@ -71,7 +71,9 @@ func (h *ModelUsageAnalyticsHandler) parseQuery(c *gin.Context) (types.ModelUsag
 	modelID := ""
 	if raw, supplied := c.GetQuery("model_id"); supplied {
 		if raw == "" || strings.TrimSpace(raw) != raw || utf8.RuneCountInString(raw) > types.ModelIDMaxLen {
-			return types.ModelUsageAnalyticsQuery{}, errors.NewBadRequestError("model_id must be a non-empty model ID of at most 64 characters")
+			return types.ModelUsageAnalyticsQuery{}, errors.NewBadRequestError(
+				"model_id must be a non-empty model ID of at most 64 characters",
+			)
 		}
 		modelID = raw
 	}

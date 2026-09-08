@@ -163,7 +163,10 @@ func (p *ModelPricing) Validate() error {
 	case BillingModeChatStandardTokens:
 		allowedRates["input_token_price"], allowedRates["output_token_price"] = true, true
 	case BillingModeChatCacheSplitTokens:
-		for _, name := range []string{"input_token_price", "output_token_price", "cache_read_token_price", "cache_write_token_price"} {
+		for _, name := range []string{
+			"input_token_price", "output_token_price",
+			"cache_read_token_price", "cache_write_token_price",
+		} {
 			allowedRates[name] = true
 		}
 	case BillingModeEmbeddingInputToken, BillingModeRerankInputToken:

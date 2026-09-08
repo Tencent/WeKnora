@@ -51,7 +51,12 @@ func TestAliyunRerankerUsageParsing(t *testing.T) {
 			t.Setenv("SSRF_WHITELIST", "127.0.0.1")
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = fmt.Fprintf(w, `{"output":{"results":[{"index":0,"relevance_score":0.9,"document":{"text":"d"}}]},"usage":%s}`, test.usageJSON)
+				_, _ = fmt.Fprintf(
+					w,
+					`{"output":{"results":[{"index":0,"relevance_score":0.9,`+
+						`"document":{"text":"d"}}]},"usage":%s}`,
+					test.usageJSON,
+				)
 			}))
 			defer server.Close()
 

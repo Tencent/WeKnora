@@ -18,9 +18,12 @@ type evalServiceStub struct {
 	result func(ctx context.Context, taskID string) (*types.EvaluationDetail, error)
 }
 
-func (s *evalServiceStub) Evaluation(ctx context.Context, datasetID, kbID, chatID, rerankID string) (*types.EvaluationDetail, error) {
+func (s *evalServiceStub) Evaluation(
+	ctx context.Context, datasetID, kbID, chatID, rerankID string,
+) (*types.EvaluationDetail, error) {
 	return s.start(ctx, datasetID, kbID, chatID, rerankID)
 }
+
 func (s *evalServiceStub) EvaluationResult(ctx context.Context, taskID string) (*types.EvaluationDetail, error) {
 	return s.result(ctx, taskID)
 }

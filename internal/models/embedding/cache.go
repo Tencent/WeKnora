@@ -444,7 +444,9 @@ func (c *cachingEmbedder) record(ctx context.Context, summary cacheRequestSummar
 	if summary.inputs > 0 {
 		hitRate = float64(summary.hits) / float64(summary.inputs)
 	}
-	logger.Infof(ctx, "[EmbeddingCache] request_type=%s model_id=%s embedding_inputs=%d cache_hits=%d cache_misses=%d provider_inputs=%d cache_hit_rate=%.4f cache_read_error=%t cache_write_error=%t duration_ms=%d",
+	logger.Infof(ctx, "[EmbeddingCache] request_type=%s model_id=%s embedding_inputs=%d cache_hits=%d "+
+		"cache_misses=%d provider_inputs=%d cache_hit_rate=%.4f cache_read_error=%t "+
+		"cache_write_error=%t duration_ms=%d",
 		summary.requestType, c.inner.GetModelID(), summary.inputs, summary.hits, summary.misses,
 		summary.providerInputs, hitRate, summary.readError, summary.writeError, summary.duration.Milliseconds())
 }
@@ -540,7 +542,10 @@ func decodeEmbedding(payload []byte, expectedDimensions int) ([]float32, error) 
 		return nil, fmt.Errorf("embedding cache payload length %d does not match dimension %d", len(payload), dimensions)
 	}
 	if expectedDimensions > 0 && dimensions != expectedDimensions {
-		return nil, fmt.Errorf("embedding cache dimension %d does not match model dimension %d", dimensions, expectedDimensions)
+		return nil, fmt.Errorf(
+			"embedding cache dimension %d does not match model dimension %d",
+			dimensions, expectedDimensions,
+		)
 	}
 	vector := make([]float32, dimensions)
 	for index := range vector {

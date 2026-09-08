@@ -19,25 +19,37 @@ type benchmarkEvaluationRepositoryStub struct {
 func (s *benchmarkEvaluationRepositoryStub) Create(context.Context, *types.EvaluationRun) error {
 	return nil
 }
-func (s *benchmarkEvaluationRepositoryStub) GetByTaskID(_ context.Context, tenantID uint64, taskID string) (*types.EvaluationRun, error) {
+
+func (s *benchmarkEvaluationRepositoryStub) GetByTaskID(
+	_ context.Context, tenantID uint64, taskID string,
+) (*types.EvaluationRun, error) {
 	if tenantID != s.tenantID || taskID != s.taskID {
 		return nil, nil
 	}
 	return s.run, nil
 }
+
 func (s *benchmarkEvaluationRepositoryStub) MarkRunning(context.Context, uint64, string, time.Time) error {
 	return nil
 }
+
 func (s *benchmarkEvaluationRepositoryStub) UpdateTotal(context.Context, uint64, string, int) error {
 	return nil
 }
+
 func (s *benchmarkEvaluationRepositoryStub) IncrementFinished(context.Context, uint64, string) error {
 	return nil
 }
-func (s *benchmarkEvaluationRepositoryStub) MarkSuccess(context.Context, uint64, string, *types.MetricResult, time.Time) error {
+
+func (s *benchmarkEvaluationRepositoryStub) MarkSuccess(
+	context.Context, uint64, string, *types.MetricResult, time.Time,
+) error {
 	return nil
 }
-func (s *benchmarkEvaluationRepositoryStub) MarkFailed(context.Context, uint64, string, *types.MetricResult, string, time.Time) error {
+
+func (s *benchmarkEvaluationRepositoryStub) MarkFailed(
+	context.Context, uint64, string, *types.MetricResult, string, time.Time,
+) error {
 	return nil
 }
 
@@ -48,10 +60,14 @@ type benchmarkUsageRepositoryStub struct {
 }
 
 func (s *benchmarkUsageRepositoryStub) Create(context.Context, *types.ModelUsage) error { return nil }
+
 func (s *benchmarkUsageRepositoryStub) GetByID(context.Context, uint64, string) (*types.ModelUsage, error) {
 	return nil, nil
 }
-func (s *benchmarkUsageRepositoryStub) AggregateEvaluationRun(_ context.Context, tenantID uint64, runID string) (*types.EvaluationModelUsageAggregate, error) {
+
+func (s *benchmarkUsageRepositoryStub) AggregateEvaluationRun(
+	_ context.Context, tenantID uint64, runID string,
+) (*types.EvaluationModelUsageAggregate, error) {
 	s.tenantID, s.runID = tenantID, runID
 	return s.result, nil
 }
@@ -187,7 +203,10 @@ func TestBenchmarkResultServiceQualityAndOperationalFacts(t *testing.T) {
 	}{
 		{name: "pending", status: types.EvaluationStatuePending, wantState: types.BenchmarkQualityStatePending},
 		{name: "running", status: types.EvaluationStatueRunning, wantState: types.BenchmarkQualityStatePending},
-		{name: "success", status: types.EvaluationStatueSuccess, wantState: types.BenchmarkQualityStateComplete, wantQuality: true},
+		{
+			name: "success", status: types.EvaluationStatueSuccess,
+			wantState: types.BenchmarkQualityStateComplete, wantQuality: true,
+		},
 		{name: "failed", status: types.EvaluationStatueFailed, wantState: types.BenchmarkQualityStateUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

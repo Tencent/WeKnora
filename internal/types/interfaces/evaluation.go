@@ -15,8 +15,14 @@ type EvaluationRunRepository interface {
 	MarkRunning(ctx context.Context, tenantID uint64, taskID string, startedAt time.Time) error
 	UpdateTotal(ctx context.Context, tenantID uint64, taskID string, total int) error
 	IncrementFinished(ctx context.Context, tenantID uint64, taskID string) error
-	MarkSuccess(ctx context.Context, tenantID uint64, taskID string, metric *types.MetricResult, finishedAt time.Time) error
-	MarkFailed(ctx context.Context, tenantID uint64, taskID string, metric *types.MetricResult, message string, finishedAt time.Time) error
+	MarkSuccess(
+		ctx context.Context, tenantID uint64, taskID string,
+		metric *types.MetricResult, finishedAt time.Time,
+	) error
+	MarkFailed(
+		ctx context.Context, tenantID uint64, taskID string,
+		metric *types.MetricResult, message string, finishedAt time.Time,
+	) error
 }
 
 // EvaluationService defines operations for evaluation tasks
