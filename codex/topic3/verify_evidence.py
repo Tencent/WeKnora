@@ -14,14 +14,40 @@ TOPIC = ROOT / "codex" / "topic3"
 MANIFEST = TOPIC / "EVIDENCE_MANIFEST_20260908.json"
 CORE_SNAPSHOT = TOPIC / "CORE_SOURCE_SNAPSHOT_20260908.json"
 SECRET_PATTERN = re.compile(r"sk-[A-Za-z0-9._-]{20,}")
+TEXT_SUFFIXES = {
+    ".go",
+    ".json",
+    ".log",
+    ".md",
+    ".ps1",
+    ".py",
+    ".sql",
+    ".ts",
+    ".txt",
+    ".vue",
+    ".yaml",
+    ".yml",
+}
 
 
 def load(path: pathlib.Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def canonical_bytes(path: pathlib.Path) -> bytes:
+    """Return stable bytes across Windows and Linux Git checkouts."""
+    data = path.read_bytes()
+    if path.suffix.lower() in TEXT_SUFFIXES or path.name.startswith(".env"):
+        return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return data
+
+
 def sha256(path: pathlib.Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(canonical_bytes(path)).hexdigest()
+
+
+def canonical_size(path: pathlib.Path) -> int:
+    return len(canonical_bytes(path))
 
 
 def verify() -> list[str]:
@@ -36,7 +62,7 @@ def verify() -> list[str]:
             continue
         if sha256(path) != item["sha256"]:
             errors.append(f"SHA-256 mismatch: {item['path']}")
-        if path.stat().st_size != item["bytes"]:
+        if canonical_size(path) != item["bytes"]:
             errors.append(f"size mismatch: {item['path']}")
         if path.suffix.lower() in {".json", ".md", ".txt", ".log"}:
             if SECRET_PATTERN.search(path.read_text(encoding="utf-8", errors="ignore")):
@@ -54,7 +80,7 @@ def verify() -> list[str]:
             continue
         if sha256(path) != item["sha256"]:
             errors.append(f"core source changed after experiment: {item['path']}")
-        if path.stat().st_size != item["bytes"]:
+        if canonical_size(path) != item["bytes"]:
             errors.append(f"core source size changed after experiment: {item['path']}")
 
     batch = TOPIC / "results" / manifest["formal_batch"]

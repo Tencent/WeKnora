@@ -1,22 +1,24 @@
 {
   "formal_batch": "batch-20260908-102705",
   "status": "ALL_COMPLETE",
+  "hash_mode": "text_lf_canonical_v1",
   "baseline_sha256": "12fbe9ca1938eee6abe15cc3f7c1e5d92a9b3ca9ab584f4bd8f77b76af0967cf",
   "notes": [
     "Only this batch is used as the formal local acceptance batch.",
     "Earlier failed batches are diagnostic evidence and are excluded from formal metrics.",
-    "API keys are not stored in these artifacts."
+    "API keys are not stored in these artifacts.",
+    "Text artifacts use LF-canonical SHA-256 and byte counts so verification is stable on Windows and Linux."
   ],
   "artifacts": [
-    {"path":"codex/topic3/results/batch-20260908-102705/acceptance-report.json","sha256":"45d8d10554ab25478b8fc9cbba124d7e91f598f880937d5b26965bce1c5a3162","bytes":1026,"purpose":"machine-readable acceptance summary"},
-    {"path":"codex/topic3/results/batch-20260908-102705/acceptance-report.md","sha256":"09759bd0cc75838c75e356aa318c76109ec8dc860b7bea321023d97b031cf44e","bytes":560,"purpose":"human-readable acceptance summary"},
-    {"path":"codex/topic3/results/batch-20260908-102705/cache-benchmark.json","sha256":"90448977082d0a0859d3fbf6d1f1662d87fe651dbfe694bcb16b84d51b85d367","bytes":31493,"purpose":"nine-run embedding cache experiment"},
-    {"path":"codex/topic3/results/batch-20260908-102705/checkpoint.json","sha256":"2058c1b40eaab0ad863f2ffd80600f155c141569f4b976c32a2a689858866685","bytes":3264,"purpose":"stage and resume audit trail"},
-    {"path":"codex/topic3/results/batch-20260908-102705/manifest.json","sha256":"45d8d10554ab25478b8fc9cbba124d7e91f598f880937d5b26965bce1c5a3162","bytes":1026,"purpose":"formal batch manifest"},
-    {"path":"codex/topic3/results/batch-20260908-102705/negative-control.json","sha256":"ea8615c328f75303884c50be67d4ec50d3af9fac63f7031587ac78299ee01fd9","bytes":1066,"purpose":"real retrieval degradation evidence"},
-    {"path":"codex/topic3/results/batch-20260908-102705/postcheck.json","sha256":"b182de8fe2e7833f541587133e6a6a79c06643c1fd37ec4e3fa652d563cec511","bytes":284,"purpose":"database, baseline, secret and health postcheck"},
-    {"path":"codex/topic3/results/batch-20260908-102705/preflight.json","sha256":"23dfb75857427f46d97cc08426a4fa0e7af76692d4042225daaacdd6e2b49472","bytes":657,"purpose":"free preflight evidence"},
-    {"path":"codex/topic3/results/batch-20260908-102705/wiki-cache-benchmark.json","sha256":"2a9b6f4c2a3697286e1b5abc3596ad7f358de79d91bd5174a7242b5bb402f011","bytes":6444,"purpose":"eight-call Wiki prompt-cache comparison"},
-    {"path":"codex/topic3/results/batch-20260908-102705/wiki-cache-benchmark.pre-threshold-failure.json","sha256":"905327e2331e9c99a52f65a8145be3ce4183baf53c7cded1517c1fe33f0f9518","bytes":777,"purpose":"preserved diagnostic result before prefix correction"}
+    {"path":"codex/topic3/results/batch-20260908-102705/acceptance-report.json","sha256":"9702a3512b31b219e754bb04c29d6eea9c52171d2c2ea2bc83549dc87956906d","bytes":1002,"purpose":"machine-readable acceptance summary"},
+    {"path":"codex/topic3/results/batch-20260908-102705/acceptance-report.md","sha256":"3c01ed1c554bbf50be97a1ae4cd950294621e6f2507e37399a3e257d758e5cf4","bytes":539,"purpose":"human-readable acceptance summary"},
+    {"path":"codex/topic3/results/batch-20260908-102705/cache-benchmark.json","sha256":"9e19fcad0a155425e6f4b0e5628bcf019cc5b854c2096b2ad6ae6d5089d8a121","bytes":30527,"purpose":"nine-run embedding cache experiment"},
+    {"path":"codex/topic3/results/batch-20260908-102705/checkpoint.json","sha256":"7a10c8f4ef85f41e05e925e8ab1a7ccb3f8f8d671a0c17cb1e0bbf6aa1eeba6e","bytes":3126,"purpose":"stage and resume audit trail"},
+    {"path":"codex/topic3/results/batch-20260908-102705/manifest.json","sha256":"9702a3512b31b219e754bb04c29d6eea9c52171d2c2ea2bc83549dc87956906d","bytes":1002,"purpose":"formal batch manifest"},
+    {"path":"codex/topic3/results/batch-20260908-102705/negative-control.json","sha256":"d16f4d0e80cbcfdd9f57911989f779b3c72ae2d3a4ebd691e827b5a63509180a","bytes":1033,"purpose":"real retrieval degradation evidence"},
+    {"path":"codex/topic3/results/batch-20260908-102705/postcheck.json","sha256":"82a15d44dca64ef1a41777ed9ffd188b417b97684291950a4aab96fc05283bcd","bytes":273,"purpose":"database, baseline, secret and health postcheck"},
+    {"path":"codex/topic3/results/batch-20260908-102705/preflight.json","sha256":"e32bf927eafbb8a784e527b9310cefb56a1fda801fdbcf443c1a37923a261002","bytes":634,"purpose":"free preflight evidence"},
+    {"path":"codex/topic3/results/batch-20260908-102705/wiki-cache-benchmark.json","sha256":"28219109035a8a6ccf851d127d65554f6490bfbbce2fa8e9d02fa1566fe646fb","bytes":6246,"purpose":"eight-call Wiki prompt-cache comparison"},
+    {"path":"codex/topic3/results/batch-20260908-102705/wiki-cache-benchmark.pre-threshold-failure.json","sha256":"a77421bd55f9babee62298ea455af96ada4dce0e3f947756ec7e05b9816630c6","bytes":750,"purpose":"preserved diagnostic result before prefix correction"}
   ]
 }
