@@ -90,8 +90,13 @@ export async function clearSessionMessages(session_id: string) {
 // the actual bytes so ownership checks always run server-side.
 // ---------------------------------------------------------------------------
 
+export type ArtifactKind = 'presentation' | 'web_page' | 'spreadsheet' | 'document' | 'image' | 'text' | 'other';
+
 export interface ArtifactMeta {
   index: number;
+  kind?: ArtifactKind;
+  message_id?: string;
+  artifact_index?: number;
   /**
    * `resource://<handle>` — the artifact's stable identity, and the destination
    * the answer body references. Empty when the deployment runs without a
@@ -117,8 +122,8 @@ export async function listMessageArtifacts(session_id: string, message_id: strin
 // listSessionArtifacts returns every artifact recorded against the whole
 // session, in creation order. Powers "download everything generated in this
 // chat" drawers.
-export async function listSessionArtifacts(session_id: string) {
-  return get(`/api/v1/sessions/${session_id}/artifacts`);
+export async function listSessionArtifacts(session_id: string, config?: { signal?: AbortSignal }) {
+  return get<{ success: boolean; data: ArtifactMeta[] }>(`/api/v1/sessions/${encodeURIComponent(session_id)}/artifacts`, config);
 }
 
 // downloadArtifact streams a single artifact's bytes as a Blob so the caller
@@ -130,8 +135,10 @@ export async function downloadArtifact(
   session_id: string,
   message_id: string,
   index: number,
+  config?: { signal?: AbortSignal },
 ): Promise<Blob> {
   return getDown(
-    `/api/v1/sessions/${session_id}/messages/${message_id}/artifacts/${index}/download`,
+    `/api/v1/sessions/${encodeURIComponent(session_id)}/messages/${encodeURIComponent(message_id)}/artifacts/${index}/download`,
+    config,
   );
 }

@@ -23,8 +23,10 @@ import (
 
 // E2BRemoteClient implements RemoteSandboxClient on top of the go-e2b client.
 type E2BRemoteClient struct {
-	client        *e2b.Client
-	inboundTokens *InboundTokenRegistry
+	client         *e2b.Client
+	inboundTokens  *InboundTokenRegistry
+	terminalHTTP   *http.Client
+	terminalDomain string
 
 	templateID string
 	timeout    time.Duration
@@ -99,6 +101,7 @@ func newE2BRemoteClient(
 			timeout: timeout,
 		},
 	}
+	httpClient.Transport = &terminalCredentialTransport{next: httpClient.Transport}
 	client, err := e2b.NewClient(e2b.ClientConfig{
 		APIKey:        cfg.E2BAPIKey,
 		APIBaseURL:    strings.TrimSpace(cfg.E2BAPIURL),
@@ -114,10 +117,12 @@ func newE2BRemoteClient(
 		ttl = DefaultE2BSandboxTTL
 	}
 	return &E2BRemoteClient{
-		client:        client,
-		inboundTokens: inboundTokens,
-		templateID:    strings.TrimSpace(cfg.E2BTemplate),
-		timeout:       ttl,
+		client:         client,
+		inboundTokens:  inboundTokens,
+		terminalHTTP:   httpClient,
+		terminalDomain: strings.TrimSpace(cfg.E2BSandboxDomain),
+		templateID:     strings.TrimSpace(cfg.E2BTemplate),
+		timeout:        ttl,
 	}, nil
 }
 
@@ -126,6 +131,7 @@ func newE2BRemoteClient(
 type e2bRemoteHandle struct {
 	sandbox  *e2b.Sandbox
 	metadata map[string]string
+	terminal terminalCredentials
 }
 
 func (h *e2bRemoteHandle) ID() string {
@@ -489,7 +495,8 @@ func (c *E2BRemoteClient) Create(
 		config.AutoPauseMemory = &autoPauseMemory
 		config.AutoResume = &e2b.AutoResumeConfig{Enabled: true}
 	}
-	sandbox, err := c.client.NewSandbox(ctx, config)
+	var credentials terminalCredentials
+	sandbox, err := c.client.NewSandbox(context.WithValue(ctx, terminalCredentialKey{}, &credentials), config)
 	if err != nil {
 		return nil, normalizeE2BError("Create", err)
 	}
@@ -505,6 +512,7 @@ func (c *E2BRemoteClient) Create(
 	return &e2bRemoteHandle{
 		sandbox:  sandbox,
 		metadata: cloneMetadata(request.Metadata),
+		terminal: credentials,
 	}, nil
 }
 
@@ -523,7 +531,8 @@ func (c *E2BRemoteClient) Connect(
 	if err != nil {
 		return nil, e2bInvalidRequest("Connect", err.Error(), err)
 	}
-	sandbox, err := c.client.Connect(ctx, sandboxID, timeoutSeconds)
+	var credentials terminalCredentials
+	sandbox, err := c.client.Connect(context.WithValue(ctx, terminalCredentialKey{}, &credentials), sandboxID, timeoutSeconds)
 	if err != nil {
 		return nil, normalizeE2BError("Connect", err)
 	}
@@ -538,7 +547,7 @@ func (c *E2BRemoteClient) Connect(
 		sandbox.TrafficAccessToken = request.TrafficAccessToken
 	}
 	c.inboundTokens.Put(sandbox.ID, sandbox.TrafficAccessToken)
-	return &e2bRemoteHandle{sandbox: sandbox}, nil
+	return &e2bRemoteHandle{sandbox: sandbox, terminal: credentials}, nil
 }
 
 // Get returns a single sandbox summary by ID. E2B's control plane exposes no

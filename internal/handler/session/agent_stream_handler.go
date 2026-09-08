@@ -841,6 +841,7 @@ func publicArtifactViews(list types.MessageArtifacts) []map[string]interface{} {
 			"handle":      artifactHandle(a),
 			"file_name":   a.FileName,
 			"file_type":   a.FileType,
+			"kind":        a.DisplayKind(),
 			"file_size":   a.FileSize,
 			"source_path": a.SourcePath,
 			"mod_time":    a.ModTime,

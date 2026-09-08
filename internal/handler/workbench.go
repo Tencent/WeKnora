@@ -1,0 +1,307 @@
+package handler
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"mime"
+	"net/http"
+	"net/url"
+	"os"
+	"path"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/gin-gonic/gin"
+)
+
+type WorkbenchHandler struct {
+	service         *service.WorkbenchService
+	origins         map[string]bool
+	unauthenticated chan struct{}
+	authTimeout     time.Duration
+	recheckInterval time.Duration
+	writeTimeout    time.Duration
+}
+
+func NewWorkbenchHandler(s *service.WorkbenchService) (*WorkbenchHandler, error) {
+	h := &WorkbenchHandler{service: s, origins: make(map[string]bool), unauthenticated: make(chan struct{}, 64), authTimeout: 5 * time.Second, recheckInterval: 5 * time.Second, writeTimeout: 5 * time.Second}
+	if raw := strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_WORKBENCH_ORIGINS")); raw != "" {
+		for _, value := range strings.Split(raw, ",") {
+			origin, err := workbenchOrigin(strings.TrimSpace(value))
+			if err != nil {
+				return nil, errors.New("invalid WEKNORA_SANDBOX_WORKBENCH_ORIGINS")
+			}
+			h.origins[origin] = true
+		}
+	}
+	return h, nil
+}
+
+func workbenchOrigin(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u == nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" || strings.ContainsAny(raw, "\t\r\n ,\\#?") {
+		return "", service.ErrWorkbenchInvalid
+	}
+	return u.Scheme + "://" + strings.ToLower(u.Host), nil
+}
+
+func (h *WorkbenchHandler) requestOrigin(r *http.Request, requireHeader bool) (string, error) {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	// Forwarded headers are not an origin authority. Reverse-proxy deployments
+	// with a different public origin configure the explicit allowlist.
+	same, err := workbenchOrigin(scheme + "://" + r.Host)
+	if err != nil {
+		return "", err
+	}
+	values := r.Header.Values("Origin")
+	if len(values) == 0 && !requireHeader {
+		return same, nil
+	}
+	if len(values) != 1 {
+		return "", service.ErrWorkbenchDenied
+	}
+	origin, err := workbenchOrigin(values[0])
+	if err != nil || (origin != same && !h.origins[origin]) {
+		return "", service.ErrWorkbenchDenied
+	}
+	return origin, nil
+}
+
+func workbenchSessionID(c *gin.Context) string {
+	if id := c.Param("session_id"); id != "" {
+		return id
+	}
+	return c.Param("id")
+}
+
+func workbenchJSON(c *gin.Context, value any, err error) {
+	c.Header("Cache-Control", "no-store")
+	if err != nil {
+		workbenchHTTPError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": value})
+}
+
+func workbenchError(err error) (int, string, string) {
+	switch {
+	case errors.Is(err, service.ErrWorkbenchDisabled):
+		return 404, "disabled", "Workbench is disabled"
+	case errors.Is(err, service.ErrWorkbenchDenied):
+		return 403, "forbidden", "Active web user and workspace membership required"
+	case errors.Is(err, service.ErrWorkbenchSession):
+		return 404, "not_found", "Session not found"
+	case errors.Is(err, service.ErrWorkbenchPolicy):
+		return 403, "policy_disabled", "Workspace scripts are disabled"
+	case errors.Is(err, service.ErrWorkbenchTicket):
+		return 401, "invalid_ticket", "Invalid or expired terminal ticket"
+	case errors.Is(err, service.ErrWorkbenchInvalid):
+		return 400, "invalid_request", "Invalid workbench request"
+	case errors.Is(err, sandbox.ErrWorkbenchPath):
+		return 400, "invalid_path", "Invalid workbench path or file type"
+	case errors.Is(err, sandbox.ErrWorkbenchNotFound):
+		return 404, "not_found", "File not found"
+	case errors.Is(err, sandbox.ErrWorkbenchConflict):
+		return 409, "conflict", "Destination exists or path changed"
+	case errors.Is(err, sandbox.ErrWorkbenchTooLarge):
+		return 413, "too_large", "Workbench size limit exceeded"
+	case errors.Is(err, service.ErrWorkbenchUnbound):
+		return 409, "unbound", "Bind a sandbox configuration first"
+	case errors.Is(err, service.ErrWorkbenchBusy):
+		return 409, "console_busy", "Session console is already in use"
+	case errors.Is(err, service.ErrWorkbenchCapability):
+		return 409, "capability_unavailable", "Sandbox capability unavailable"
+	case errors.Is(err, service.ErrWorkbenchAudit):
+		return 503, "audit_unavailable", "Durable audit write failed; outcome may be unknown"
+	default:
+		return 503, "unavailable", "Workbench operation unavailable"
+	}
+}
+
+func workbenchHTTPError(c *gin.Context, err error) {
+	status, code, message := workbenchError(err)
+	c.Header("Cache-Control", "no-store")
+	c.AbortWithStatusJSON(status, gin.H{"success": false, "error": gin.H{"code": code, "message": message}})
+}
+
+func decodeWorkbenchJSON(c *gin.Context, value any) error {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.WorkbenchMaxFrameBytes)
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(value) != nil {
+		return service.ErrWorkbenchInvalid
+	}
+	var extra any
+	if decoder.Decode(&extra) != io.EOF {
+		return service.ErrWorkbenchInvalid
+	}
+	return nil
+}
+
+func (h *WorkbenchHandler) Status(c *gin.Context) {
+	data, err := h.service.Status(c.Request.Context(), workbenchSessionID(c))
+	workbenchJSON(c, data, err)
+}
+
+func (h *WorkbenchHandler) Bind(c *gin.Context) {
+	var request struct {
+		ConfigID string `json:"config_id"`
+	}
+	if err := decodeWorkbenchJSON(c, &request); err != nil {
+		workbenchHTTPError(c, err)
+		return
+	}
+	data, err := h.service.Bind(c.Request.Context(), workbenchSessionID(c), request.ConfigID)
+	workbenchJSON(c, data, err)
+}
+
+func (h *WorkbenchHandler) Ticket(c *gin.Context) {
+	origin, err := h.requestOrigin(c.Request, false)
+	if err != nil {
+		workbenchHTTPError(c, err)
+		return
+	}
+	data, err := h.service.IssueTicket(c.Request.Context(), workbenchSessionID(c), origin)
+	workbenchJSON(c, data, err)
+}
+
+func (h *WorkbenchHandler) ListFiles(c *gin.Context) {
+	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), sandbox.WorkbenchFileRequest{Operation: "list", Path: c.Query("path")})
+	workbenchJSON(c, data, err)
+}
+
+func (h *WorkbenchHandler) Download(c *gin.Context) {
+	filePath := c.Query("path")
+	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), sandbox.WorkbenchFileRequest{Operation: "read", Path: filePath})
+	if err != nil {
+		workbenchHTTPError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": path.Base(filePath)}))
+	c.Data(http.StatusOK, "application/octet-stream", data.Content)
+}
+
+func (h *WorkbenchHandler) Upload(c *gin.Context) {
+	if _, err := h.service.Authorize(c.Request.Context(), workbenchSessionID(c)); err != nil {
+		workbenchHTTPError(c, err)
+		return
+	}
+	request, err := readWorkbenchUpload(c)
+	if err != nil {
+		workbenchHTTPError(c, err)
+		return
+	}
+	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), request)
+	workbenchJSON(c, data, err)
+}
+
+// Read multipart parts directly: multipart.FileHeader.Filename has already
+// stripped directory components, which would erase a malicious traversal.
+func readWorkbenchUpload(c *gin.Context) (sandbox.WorkbenchFileRequest, error) {
+	fail := func(err error) (sandbox.WorkbenchFileRequest, error) { return sandbox.WorkbenchFileRequest{}, err }
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.WorkbenchMaxFileBytes+(64<<10))
+	reader, err := c.Request.MultipartReader()
+	if err != nil {
+		return fail(service.ErrWorkbenchInvalid)
+	}
+	var destination, filename string
+	var content []byte
+	seen := map[string]bool{}
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fail(service.ErrWorkbenchInvalid)
+		}
+		_, params, err := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
+		if err != nil {
+			return fail(service.ErrWorkbenchInvalid)
+		}
+		name := params["name"]
+		if seen[name] {
+			return fail(service.ErrWorkbenchInvalid)
+		}
+		seen[name] = true
+		switch name {
+		case "path":
+			if _, file := params["filename"]; file {
+				return fail(service.ErrWorkbenchInvalid)
+			}
+			value, err := io.ReadAll(io.LimitReader(part, 4097))
+			if err != nil || len(value) > 4096 {
+				return fail(service.ErrWorkbenchInvalid)
+			}
+			destination = string(value)
+		case "file":
+			filename = params["filename"]
+			if service.ValidateWorkbenchPath(filename, false) != nil || strings.Contains(filename, "/") {
+				return fail(service.ErrWorkbenchInvalid)
+			}
+			content, err = io.ReadAll(io.LimitReader(part, service.WorkbenchMaxFileBytes+1))
+			if err != nil {
+				return fail(service.ErrWorkbenchInvalid)
+			}
+			if len(content) > service.WorkbenchMaxFileBytes {
+				return fail(sandbox.ErrWorkbenchTooLarge)
+			}
+		default:
+			return fail(service.ErrWorkbenchInvalid)
+		}
+		_ = part.Close()
+	}
+	if !seen["file"] || !seen["path"] || service.ValidateWorkbenchPath(destination, false) != nil {
+		return fail(service.ErrWorkbenchInvalid)
+	}
+	return sandbox.WorkbenchFileRequest{Operation: "write", Path: destination, Content: content}, nil
+}
+
+func (h *WorkbenchHandler) Directory(c *gin.Context) {
+	var request struct {
+		Path string `json:"path"`
+	}
+	if err := decodeWorkbenchJSON(c, &request); err != nil {
+		workbenchHTTPError(c, err)
+		return
+	}
+	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), sandbox.WorkbenchFileRequest{Operation: "mkdir", Path: request.Path})
+	workbenchJSON(c, data, err)
+}
+
+func (h *WorkbenchHandler) Rename(c *gin.Context) {
+	var request struct {
+		Path    string `json:"path"`
+		NewPath string `json:"new_path"`
+	}
+	if err := decodeWorkbenchJSON(c, &request); err != nil {
+		workbenchHTTPError(c, err)
+		return
+	}
+	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), sandbox.WorkbenchFileRequest{Operation: "rename", Path: request.Path, NewPath: request.NewPath})
+	workbenchJSON(c, data, err)
+}
+
+func (h *WorkbenchHandler) Remove(c *gin.Context) {
+	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), sandbox.WorkbenchFileRequest{Operation: "remove", Path: c.Query("path")})
+	workbenchJSON(c, data, err)
+}
+
+func (h *WorkbenchHandler) Audit(c *gin.Context) {
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	if err != nil || limit < 1 {
+		workbenchHTTPError(c, service.ErrWorkbenchInvalid)
+		return
+	}
+	data, err := h.service.Audit(c.Request.Context(), workbenchSessionID(c), limit)
+	workbenchJSON(c, data, err)
+}

@@ -3,8 +3,10 @@
         'is-embedded': embeddedMode,
         'is-sidebar-collapsed': uiStore.sidebarCollapsed,
         'has-references-panel': referencesDrawerVisible,
+        'has-workbench-panel': workbenchVisible,
     }">
-        <ChatHeader v-if="!embeddedMode" :session="currentSession" :has-references-panel="referencesDrawerVisible" />
+        <ChatHeader v-if="!embeddedMode" :session="currentSession" :has-references-panel="referencesDrawerVisible"
+            workbench-enabled :workbench-visible="workbenchVisible" @toggle-workbench="toggleWorkbench" />
         <div class="chat_thread">
             <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
                 <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
@@ -136,10 +138,12 @@
         @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
     <ChatReferencesDrawer />
     <ChatAttachmentPreviewDrawer />
+    <SandboxWorkbench v-if="workbenchVisible && !embeddedMode && session_id" ref="workbenchRef"
+        :key="workbenchScopeKey" :session-id="String(session_id)" @close="closeWorkbench" />
 </template>
 <script setup>
 import { storeToRefs } from 'pinia';
-import { ref, onMounted, onBeforeMount, onUnmounted, nextTick, watch, reactive, computed } from 'vue';
+import { ref, onMounted, onBeforeMount, onUnmounted, nextTick, watch, reactive, computed, defineAsyncComponent } from 'vue';
 import { useRoute, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
@@ -165,6 +169,8 @@ import MessageTimestamp from '@/components/chat/MessageTimestamp.vue';
 import ChatQuestionMinimap from '@/components/chat/ChatQuestionMinimap.vue';
 import { shouldShowConversationTimestamp } from '@/utils/messageTimestamp';
 import ChatHeader from '@/components/ChatHeader.vue';
+import { useAuthStore } from '@/stores/auth';
+const SandboxWorkbench = defineAsyncComponent(() => import('./components/workbench/SandboxWorkbench.vue'));
 import {
     notifySessionMutation,
     SESSION_MUTATION_EVENT,
@@ -232,6 +238,22 @@ const attachStreamDebugToMessage = (message) => {
 const route = useRoute();
 const session_id = ref(props.session_id || route.params.chatid);
 const currentSession = ref(null);
+const authStore = useAuthStore();
+const workbenchVisible = ref(false);
+const workbenchRef = ref(null);
+const workbenchScopeKey = computed(() => JSON.stringify([session_id.value, route.fullPath, authStore.user?.id, authStore.effectiveTenantId, authStore.isLoggedIn]));
+function closeWorkbench() {
+    workbenchRef.value?.dispose();
+    workbenchVisible.value = false;
+}
+function toggleWorkbench() {
+    if (workbenchVisible.value) { closeWorkbench(); return; }
+    if (!session_id.value || props.embeddedMode) return;
+    referencesDrawer.close();
+    workbenchVisible.value = true;
+}
+watch(workbenchScopeKey, closeWorkbench, { flush: 'sync' });
+watch(referencesDrawerVisible, visible => { if (visible) closeWorkbench(); }, { flush: 'sync' });
 
 // 拉 session 详情，并按其 last_request_state 把输入栏状态恢复到当时的发起态。
 // 嵌入式（embeddedMode）由宿主页面注入 agent/KB，所以跳过整套恢复逻辑，
@@ -1060,6 +1082,7 @@ onMounted(async () => {
     }
 })
 const clearData = () => {
+    closeWorkbench();
     if (!props.embeddedMode) sessionActivity.detach(activitySessionId.value);
     activitySessionId.value = '';
     stopStream();
@@ -1135,6 +1158,13 @@ onBeforeRouteUpdate((to, from, next) => {
             .chat_scroll_box {
                 padding-top: 0;
             }
+        }
+    }
+
+    &.has-workbench-panel:not(.is-embedded) {
+        @media (min-width: 1200px) {
+            padding-right: min(44vw, 600px);
+            .chat_scroll_box { padding-top: 0; }
         }
     }
 

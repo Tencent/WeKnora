@@ -62,25 +62,33 @@ func (h *Handler) ListSessionArtifacts(c *gin.Context) {
 		return
 	}
 
-	artifacts, err := h.messageService.GetSessionArtifacts(ctx, sessionID)
-	if err != nil {
-		logger.Errorf(ctx, "list session artifacts failed: session=%s err=%v", sessionID, err)
-		c.Error(errors.NewInternalServerError(err.Error()))
-		return
-	}
-
-	items := make([]artifactListItem, 0, len(artifacts))
-	for i, a := range artifacts {
-		items = append(items, artifactListItem{
-			Index:      i,
-			Handle:     artifactHandle(a),
-			FileName:   a.FileName,
-			FileType:   a.FileType,
-			FileSize:   a.FileSize,
-			SourcePath: a.SourcePath,
-			ModTime:    a.ModTime,
-			CreatedAt:  a.CreatedAt,
-		})
+	// Preserve message-local download identity. The old flattened artifact
+	// slice cannot identify which message owns index zero of a later reply.
+	items := make([]artifactListItem, 0)
+	const pageSize = 100
+	for page := 1; ; page++ {
+		messages, err := h.messageService.GetMessagesBySession(ctx, sessionID, page, pageSize)
+		if err != nil {
+			logger.Errorf(ctx, "list session artifacts failed: session=%s err=%v", sessionID, err)
+			c.Error(errors.NewInternalServerError("failed to list session artifacts"))
+			return
+		}
+		for _, message := range messages {
+			if message == nil || message.SessionID != sessionID {
+				continue
+			}
+			for index, a := range message.Artifacts {
+				items = append(items, artifactListItem{
+					Index: len(items), MessageID: message.ID, ArtifactIndex: index,
+					Handle: artifactHandle(a), FileName: a.FileName, FileType: a.FileType,
+					Kind: a.DisplayKind(), FileSize: a.FileSize, SourcePath: a.SourcePath,
+					ModTime: a.ModTime, CreatedAt: a.CreatedAt,
+				})
+			}
+		}
+		if len(messages) < pageSize {
+			break
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -124,14 +132,17 @@ func (h *Handler) ListMessageArtifacts(c *gin.Context) {
 	items := make([]artifactListItem, 0, len(msg.Artifacts))
 	for i, a := range msg.Artifacts {
 		items = append(items, artifactListItem{
-			Index:      i,
-			Handle:     artifactHandle(a),
-			FileName:   a.FileName,
-			FileType:   a.FileType,
-			FileSize:   a.FileSize,
-			SourcePath: a.SourcePath,
-			ModTime:    a.ModTime,
-			CreatedAt:  a.CreatedAt,
+			Index:         i,
+			MessageID:     messageID,
+			ArtifactIndex: i,
+			Kind:          a.DisplayKind(),
+			Handle:        artifactHandle(a),
+			FileName:      a.FileName,
+			FileType:      a.FileType,
+			FileSize:      a.FileSize,
+			SourcePath:    a.SourcePath,
+			ModTime:       a.ModTime,
+			CreatedAt:     a.CreatedAt,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -223,7 +234,10 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 // body references and what an authorizing proxy resolves — while the physical
 // bucket/key stays server side.
 type artifactListItem struct {
-	Index int `json:"index"`
+	Index         int                `json:"index"`
+	MessageID     string             `json:"message_id"`
+	ArtifactIndex int                `json:"artifact_index"`
+	Kind          types.ArtifactKind `json:"kind"`
 	// Handle is the artifact's `resource://<handle>` reference, matching the
 	// destinations in the message body. Empty when the deployment runs without
 	// a resource catalog, in which case the body references files by name.

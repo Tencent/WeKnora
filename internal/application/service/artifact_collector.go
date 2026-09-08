@@ -439,6 +439,7 @@ func (c *ArtifactCollector) maybePersist(
 		URL:        storagePath,
 		FileName:   entry.Name,
 		FileType:   strings.ToLower(filepath.Ext(entry.Name)),
+		Kind:       types.ArtifactKindForFile(entry.Name),
 		FileSize:   int64(len(data)),
 		SourcePath: entry.Path,
 		ModTime:    entry.ModTime,

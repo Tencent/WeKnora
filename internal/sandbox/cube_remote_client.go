@@ -29,6 +29,7 @@ type CubeRemoteClient struct {
 	client        *cubesandbox.Client
 	sandboxDomain string
 	httpTimeout   time.Duration
+	terminalHTTP  *http.Client
 }
 
 // NewCubeRemoteClient constructs a Cube-backed RemoteSandboxClient using the
@@ -92,6 +93,7 @@ func NewCubeRemoteClientWithPool(
 		),
 		sandboxDomain: config.CubeSandboxDomain,
 		httpTimeout:   httpTimeout,
+		terminalHTTP:  httpClient,
 	}, nil
 }
 

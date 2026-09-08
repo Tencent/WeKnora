@@ -179,13 +179,14 @@ func (m *MessageAttachments) Scan(value interface{}) error {
 // identity used by ArtifactCollector to de-duplicate files across multi-turn
 // runs (see docs/superpowers/specs/2026-07-10-skill-artifact-download-design.md).
 type MessageArtifact struct {
-	URL        string    `json:"url"`         // Storage URL (provider://path); persisted, not sent to client
-	FileName   string    `json:"file_name"`   // Original filename inside the sandbox
-	FileType   string    `json:"file_type"`   // File extension (e.g., ".pptx", ".pdf")
-	FileSize   int64     `json:"file_size"`   // File size in bytes
-	SourcePath string    `json:"source_path"` // Absolute path inside the sandbox (used for diff)
-	ModTime    time.Time `json:"mod_time"`    // Sandbox-side modification time (used for diff)
-	CreatedAt  time.Time `json:"created_at"`  // When WeKnora persisted the blob
+	URL        string       `json:"url"`       // Storage URL (provider://path); persisted, not sent to client
+	FileName   string       `json:"file_name"` // Original filename inside the sandbox
+	FileType   string       `json:"file_type"` // File extension (e.g., ".pptx", ".pdf")
+	Kind       ArtifactKind `json:"kind,omitempty"`
+	FileSize   int64        `json:"file_size"`   // File size in bytes
+	SourcePath string       `json:"source_path"` // Absolute path inside the sandbox (used for diff)
+	ModTime    time.Time    `json:"mod_time"`    // Sandbox-side modification time (used for diff)
+	CreatedAt  time.Time    `json:"created_at"`  // When WeKnora persisted the blob
 }
 
 // MessageArtifacts is a slice of MessageArtifact for database storage.

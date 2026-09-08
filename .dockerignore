@@ -1,8 +1,14 @@
 # VCS / CI
 .git/
+.git
 .github/
 .gitignore
 .gitattributes
+
+# Local workbench state and credentials must never enter image build contexts.
+.runtime/
+docs/dev/
+.weknora-sandbox-workbench.code-workspace
 
 # 编辑器 / IDE 本地配置
 .cursor/

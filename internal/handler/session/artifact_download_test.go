@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	stderrors "errors"
 	"io"
 	"mime/multipart"
@@ -42,6 +43,7 @@ type stubMessageServiceForArtifacts struct {
 	interfaces.MessageService
 	getMessage         func(ctx context.Context, sessionID, id string) (*types.Message, error)
 	getSessionArtifact func(ctx context.Context, sessionID string) (types.MessageArtifacts, error)
+	getMessages        func(ctx context.Context, sessionID string, page, pageSize int) ([]*types.Message, error)
 }
 
 func (s *stubMessageServiceForArtifacts) GetMessage(ctx context.Context, sessionID, id string) (*types.Message, error) {
@@ -53,6 +55,14 @@ func (s *stubMessageServiceForArtifacts) GetSessionArtifacts(ctx context.Context
 		return types.MessageArtifacts{}, nil
 	}
 	return s.getSessionArtifact(ctx, sessionID)
+}
+
+func (s *stubMessageServiceForArtifacts) GetMessagesBySession(ctx context.Context, sessionID string, page, pageSize int) ([]*types.Message, error) {
+	if s.getMessages != nil {
+		return s.getMessages(ctx, sessionID, page, pageSize)
+	}
+	artifacts, err := s.GetSessionArtifacts(ctx, sessionID)
+	return []*types.Message{{ID: "msg-1", SessionID: sessionID, Artifacts: artifacts}}, err
 }
 
 // fakeArtifactFileService serves canned bytes for a single URL.
@@ -251,6 +261,54 @@ func TestListSessionArtifacts_StripsURL(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "a.txt") {
 		t.Fatalf("response body missing file name: %s", w.Body.String())
+	}
+}
+
+func TestWorkbenchArtifactIdentityAndKind(t *testing.T) {
+	h := &Handler{
+		sessionService: &stubSessionServiceForArtifacts{getSession: func(context.Context, string) (*types.Session, error) {
+			return &types.Session{ID: "session", TenantID: 7}, nil
+		}},
+		messageService: &stubMessageServiceForArtifacts{getMessages: func(_ context.Context, id string, page, pageSize int) ([]*types.Message, error) {
+			return []*types.Message{
+				{ID: "first", SessionID: id, Artifacts: types.MessageArtifacts{{FileName: "one.pptx"}, {FileName: "two.html"}}},
+				{ID: "second", SessionID: id, Artifacts: types.MessageArtifacts{{FileName: "three.xlsx"}}},
+				{ID: "foreign", SessionID: "another-session", Artifacts: types.MessageArtifacts{{FileName: "private.txt"}}},
+			}, nil
+		}},
+	}
+	w := httptest.NewRecorder()
+	newArtifactTestRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/session/artifacts", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var result struct {
+		Data []struct {
+			Index         int    `json:"index"`
+			MessageID     string `json:"message_id"`
+			ArtifactIndex int    `json:"artifact_index"`
+			Kind          string `json:"kind"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data) != 3 {
+		t.Fatalf("unexpected artifacts: %s", w.Body.String())
+	}
+	last := result.Data[2]
+	if last.Index != 2 || last.MessageID != "second" || last.ArtifactIndex != 0 || last.Kind != "spreadsheet" {
+		t.Fatalf("lost message-local identity: %+v", last)
+	}
+	if result.Data[0].Kind != "presentation" || result.Data[1].Kind != "web_page" {
+		t.Fatalf("legacy classification missing: %s", w.Body.String())
+	}
+	views := publicArtifactViews(types.MessageArtifacts{{FileName: "one.pptx", URL: "private://secret"}})
+	if views[0]["kind"] != types.ArtifactKindForFile("one.pptx") {
+		t.Fatalf("stream kind missing: %v", views)
+	}
+	if _, ok := views[0]["url"]; ok {
+		t.Fatal("stream exposes private URL")
 	}
 }
 

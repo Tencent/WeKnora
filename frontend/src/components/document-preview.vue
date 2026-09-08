@@ -12,6 +12,9 @@ import { sanitizeHTML, sanitizeMarkdownHTML } from '@/utils/security';
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { renderMermaidToSvg } from '@/utils/mermaidShared';
+import { sanitizeWorkbenchPreview, workbenchPreviewKind } from '@/utils/workbenchPreview';
+import { prepareWorkbenchOfficePreview, WorkbenchOfficePreviewError, WORKBENCH_OFFICE_LIMITS } from '@/utils/workbenchOfficePreview';
+import { formatWorkbenchBytes, workbenchFileLimit } from '@/utils/sandboxWorkbench';
 import {
   FILE_PREVIEW_SNIFF_BYTES,
   getHighlightLang as resolveHighlightLang,
@@ -32,6 +35,10 @@ const { t } = useI18n();
 
 const props = defineProps<{
   sourceBlob?: Blob;
+  sourceKey?: string;
+  restrictedPreview?: boolean;
+  requestSignal?: AbortSignal;
+  maxPreviewBytes?: number;
   knowledgeId?: string;
   sessionId?: string;
   attachmentId?: string;
@@ -53,11 +60,13 @@ const markdownHtml = ref('');
 const excelHtml = ref('');
 const mermaidSvg = ref('');
 const htmlViewMode = ref<'render' | 'source'>('render');
+const restrictedHtml = ref('');
 const pptxData = shallowRef<ArrayBuffer | null>(null);
 const docxContainer = ref<HTMLElement | null>(null);
 const imageNaturalWidth = ref(0);
 const imageNaturalHeight = ref(0);
 let loadedForId = '';
+let previewGeneration = 0;
 
 const isFullscreen = ref(false);
 
@@ -111,7 +120,7 @@ function decodeCSVBlob(arrayBuffer: ArrayBuffer): string {
   return new TextDecoder('gbk').decode(bytes);
 }
 
-async function renderExcel(blob: Blob, fileType?: string) {
+async function renderExcel(blob: Blob, fileType?: string): Promise<string> {
   const XLSX = await import('xlsx');
   const arrayBuffer = await blob.arrayBuffer();
 
@@ -128,17 +137,27 @@ async function renderExcel(blob: Blob, fileType?: string) {
   }
 
   let html = '';
+  let cells = 0;
   workbook.SheetNames.forEach((name, sheetIdx) => {
     const sheet = workbook.Sheets[name];
+    if (props.restrictedPreview && sheet['!ref']) {
+      const range = XLSX.utils.decode_range(sheet['!ref']);
+      cells += (range.e.r - range.s.r + 1) * (range.e.c - range.s.c + 1);
+      if (!Number.isSafeInteger(cells) || cells < 0 || cells > WORKBENCH_OFFICE_LIMITS.spreadsheetCells) {
+        throw new WorkbenchOfficePreviewError('officeTooLarge');
+      }
+    }
     const sheetHtml = XLSX.utils.sheet_to_html(sheet, { id: `sheet-${sheetIdx}` });
     html += `<div class="excel-sheet">`;
     if (workbook.SheetNames.length > 1) {
-      html += `<div class="excel-sheet-name">${name}</div>`;
+      const label = document.createElement('div');
+      label.textContent = name;
+      html += `<div class="excel-sheet-name">${label.innerHTML}</div>`;
     }
     html += sheetHtml;
     html += `</div>`;
   });
-  excelHtml.value = sanitizeHTML(html);
+  return sanitizeHTML(html);
 }
 
 async function renderText(blob: Blob, fileType: string) {
@@ -179,6 +198,7 @@ function onImageLoad(e: Event) {
 
 function getPreviewSourceKey(): string {
   if (props.sourceBlob) {
+    if (props.sourceKey) return `resource-blob:${props.sourceKey}`;
     return `resource-blob:${props.fileName}:${props.fileType}:${props.sourceBlob.size}:${props.sourceBlob.type}`;
   }
   if (props.knowledgeId) return `knowledge:${props.knowledgeId}`;
@@ -198,7 +218,7 @@ function getPreviewSourceKey(): string {
 // scripts. Knowledge-base files and chat attachments are untrusted uploads:
 // they stay as source, matching the previous text preview.
 function allowsHtmlScriptPreview(): boolean {
-  return getPreviewSourceKey().startsWith('artifact:');
+  return !props.restrictedPreview && getPreviewSourceKey().startsWith('artifact:');
 }
 
 async function fetchPreviewBlob(): Promise<Blob> {
@@ -215,7 +235,7 @@ async function fetchPreviewBlob(): Promise<Blob> {
     Number.isInteger(props.artifactIndex) &&
     (props.artifactIndex as number) >= 0
   ) {
-    return downloadArtifact(props.sessionId, props.messageId, props.artifactIndex as number);
+    return downloadArtifact(props.sessionId, props.messageId, props.artifactIndex as number, { signal: props.requestSignal });
   }
   throw new Error('Missing preview source');
 }
@@ -241,6 +261,7 @@ async function loadPreview() {
   if (loadedForId === sourceKey) return;
 
   cleanup();
+  const generation = previewGeneration;
   loading.value = true;
   error.value = '';
   htmlViewMode.value = allowsHtmlScriptPreview() ? 'render' : 'source';
@@ -250,7 +271,43 @@ async function loadPreview() {
 
   try {
     const rawBlob = await fetchPreviewBlob();
+    if (generation !== previewGeneration) return;
     let kind = resolvePreviewKind(ft);
+    if (props.restrictedPreview) {
+      const maxBytes = workbenchFileLimit(props.maxPreviewBytes);
+      if (rawBlob.size > maxBytes) throw new Error(t('workbench.fileTooLarge', { size: formatWorkbenchBytes(maxBytes) }));
+      const sample = new Uint8Array(await rawBlob.slice(0, FILE_PREVIEW_SNIFF_BYTES).arrayBuffer());
+      if (generation !== previewGeneration) return;
+      kind = workbenchPreviewKind(ft, sample);
+      previewType.value = kind;
+      loadedForId = sourceKey;
+      if (kind === 'unsupported') return;
+      let previewBlob = rawBlob;
+      if (kind === 'pptx' || ft === 'xlsx') {
+        const data = await prepareWorkbenchOfficePreview(rawBlob, kind === 'pptx' ? 'pptx' : 'xlsx', maxBytes, props.requestSignal);
+        if (generation !== previewGeneration) return;
+        if (kind === 'pptx') {
+          pptxData.value = data;
+          return;
+        }
+        previewBlob = new Blob([data], { type: rawBlob.type });
+      }
+      if (kind === 'html' || kind === 'markdown' || kind === 'excel') {
+        let html = kind === 'excel' ? await renderExcel(previewBlob, ft) : await previewBlob.text();
+        if (generation !== previewGeneration) return;
+        if (kind === 'markdown') html = renderDocumentPreviewMarkdown(html);
+        restrictedHtml.value = sanitizeWorkbenchPreview(html);
+        return;
+      }
+      if (kind === 'image') {
+        const sniffed = sniffPreview(sample);
+        blobUrl.value = URL.createObjectURL(ensureBlobType(rawBlob, sniffed.ext));
+      } else {
+        // Highlighting huge untrusted text synchronously can stall the workbench.
+        textContent.value = await rawBlob.text();
+      }
+      return;
+    }
     if (kind === 'unsupported') {
       const sample = new Uint8Array(await rawBlob.slice(0, FILE_PREVIEW_SNIFF_BYTES).arrayBuffer());
       const sniffed = sniffPreview(sample);
@@ -269,6 +326,7 @@ async function loadPreview() {
 
     loading.value = false;
     await nextTick();
+    if (generation !== previewGeneration) return;
 
     switch (kind) {
       case 'pdf':
@@ -290,7 +348,8 @@ async function loadPreview() {
         break;
       }
       case 'excel': {
-        await renderExcel(blob, ft);
+        const html = await renderExcel(blob, ft);
+        if (generation === previewGeneration) excelHtml.value = html;
         break;
       }
       case 'text': {
@@ -311,14 +370,17 @@ async function loadPreview() {
       }
     }
   } catch (err: any) {
+    if (generation !== previewGeneration || props.requestSignal?.aborted) return;
     console.error('Document preview failed:', err);
-    error.value = err?.message || t('preview.loadFailed');
+    error.value = err instanceof WorkbenchOfficePreviewError ? t(`workbench.${err.code}`) : err?.message || t('preview.loadFailed');
   } finally {
-    loading.value = false;
+    if (generation === previewGeneration) loading.value = false;
   }
 }
 
 function cleanup() {
+  previewGeneration++;
+  restrictedHtml.value = '';
   if (blobUrl.value) {
     URL.revokeObjectURL(blobUrl.value);
     blobUrl.value = '';
@@ -339,7 +401,7 @@ function cleanup() {
 }
 
 watch(
-  () => [props.active, props.knowledgeId, props.sessionId, props.attachmentId, props.messageId, props.artifactIndex, props.sourceBlob, props.fileName, props.fileType],
+  () => [props.active, props.knowledgeId, props.sessionId, props.attachmentId, props.messageId, props.artifactIndex, props.sourceBlob, props.sourceKey, props.restrictedPreview, props.fileName, props.fileType],
   ([active]) => {
     if (active && getPreviewSourceKey()) {
       loadPreview();
@@ -396,6 +458,13 @@ onUnmounted(() => {
       <t-icon name="file-unknown" size="48px" />
       <p>{{ $t('preview.unsupported') }}</p>
       <p class="unsupported-hint">{{ $t('preview.unsupportedHint') }}</p>
+    </div>
+
+    <div v-else-if="restrictedPreview && restrictedHtml" class="preview-html">
+      <iframe :srcdoc="restrictedHtml" class="html-iframe" sandbox="" referrerpolicy="no-referrer" :title="fileName" />
+    </div>
+    <div v-else-if="restrictedPreview && previewType === 'text'" class="preview-text">
+      <pre class="code-preview"><code>{{ textContent }}</code></pre>
     </div>
 
     <!-- PDF -->
