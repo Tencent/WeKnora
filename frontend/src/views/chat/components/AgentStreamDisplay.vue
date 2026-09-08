@@ -212,7 +212,7 @@
                     class="action-details">
                     <div v-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                       <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
-                        :output="event.output" :arguments="event.arguments" />
+                        :output="event.output || event.error" :arguments="event.arguments" :success="event.success" />
                     </div>
                     <div v-else-if="event.output" class="tool-output-wrapper">
                       <div class="fallback-header">
@@ -501,7 +501,7 @@
                   class="action-details">
                   <div v-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                     <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
-                      :output="event.output" :arguments="event.arguments" />
+                      :output="event.output || event.error" :arguments="event.arguments" :success="event.success" />
                   </div>
 
                   <div v-else-if="event.output" class="tool-output-wrapper">
@@ -675,7 +675,11 @@ const { t } = useI18n();
 
 ensureMermaidInitialized();
 
+import { getMcpToolDisplayType, getMcpToolTitle } from '@/utils/mcpToolDisplay';
+
 const TOOL_NAME_KEYS: Record<string, string> = {
+  discover_mcp_tools: 'agentStream.mcp.discoverTools',
+  call_mcp_tool: 'agentStream.mcp.callTool',
   search_knowledge: 'agentStream.tools.searchKnowledge',
   knowledge_search: 'agentStream.tools.searchKnowledge',
   grep_chunks: 'agentStream.tools.grepChunks',
@@ -1150,6 +1154,8 @@ const formatToolResultContent = (value: unknown): string => {
 const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
 
 const resolveToolDisplayType = (event: any): DisplayType | undefined => {
+  const mcpType = getMcpToolDisplayType(event?.tool_name)
+  if (mcpType) return mcpType
   if (event?.display_type) return event.display_type as DisplayType
   if (event?.tool_name === 'shell_exec' || event?.tool_name === 'execute_skill_script') {
     return 'shell_exec'
@@ -2795,6 +2801,8 @@ const getAttachmentParsingSummary = (event: any): string => {
 
 // Get tool title - prefer summary over description, add query for search tools
 const getToolTitle = (event: any): string => {
+  const mcpTitle = getMcpToolTitle(t, event)
+  if (mcpTitle) return mcpTitle
   if (event.pending) {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');

@@ -14,7 +14,7 @@ Agent 的 MCP 主路径使用 `discover_mcp_tools` 和 `call_mcp_tool`，不再�
 {"mode":"list_tools","server_id":"目录中的服务ID","limit":20}
 ```
 
-按返回的原始名称读取完整定义：
+列表仅提供名称和摘要，以及读取定义的下一步提示，不返回可调用引用。按返回的原始名称读取完整定义：
 
 ```json
 {"mode":"describe","server_id":"目录中的服务ID","tool_name":"get_order"}
@@ -25,6 +25,8 @@ Agent 的 MCP 主路径使用 `discover_mcp_tools` 和 `call_mcp_tool`，不再�
 ```json
 {"tool_ref":"describe 返回的引用","arguments":{"order_id":"123"}}
 ```
+
+`arguments` 必须是符合目标 schema 的 JSON 对象，不能是 JSON 编码后的字符串。调用入口会检查当前 engine 是否已成功返回该引用对应的完整定义；仅列目录、读取其他工具或沿用未读取的新 schema 引用均不能执行。格式错误返回对象示例和读取定义的提示。
 
 `search` 是限定单个服务的名称 / 描述子串匹配，可忽略大小写；不是 BM25 或跨语言语义检索。空结果时使用 `list_tools` 完整枚举，再精确 `describe`，工具可达性不依赖搜索排名。
 
@@ -58,6 +60,8 @@ MCP 客户端通过现有认证 transport 读取原始 `inputSchema`，保留顶
 MCP 参数使用完整 JSON Schema 校验，覆盖嵌套对象、数组、组合约束、额外属性以及本地引用。按 schema 声明选择方言，未声明时使用 2020-12；schema 编译结果按工具快照缓存。验证器不读取外部 URL 或文件，无法解析的外部引用明确报错。审批修改后的参数也会重新校验，并整体替换原参数。内置工具继续使用原有校验规则。
 
 `ToolCall.Name / Args / ID / ProviderMetadata` 保留模型原始调用，用于当前轮及跨轮回放。新增 `ToolCall.Target` 保存实际服务、工具名和内层参数，供界面和日志展示。实时事件使用目标名称，历史恢复也读取 target；不通过改写模型调用来实现展示。
+
+聊天时间线为目录发现和代理调用提供专用名称、图标和结果展示：目录显示服务或工具摘要、分页数量与状态；定义显示参数、必填标记和可展开的完整 schema；代理入口失败显示错误信息。历史中仅存于 `output` 的目录 JSON 也可以解析展示，实际目标工具继续沿用 MCP 结果抽屉。
 
 MCP schema 和外部返回值保持外部身份语义，不参与 WeKnora 知识库 ID 的改写。用户显式 @MCP 时，提示语指向目录读取，不再依赖初始请求中的原生 MCP 函数名前缀。
 

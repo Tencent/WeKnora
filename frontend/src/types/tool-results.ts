@@ -30,7 +30,9 @@ export type DisplayType =
     | 'list_sandbox_files'
     | 'write_sandbox_file'
     | 'edit_sandbox_file'
-    | 'read_skill';
+    | 'read_skill'
+    | 'mcp_discovery'
+    | 'mcp_call';
 
 // Search result item
 export interface SearchResultItem {

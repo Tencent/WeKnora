@@ -19,7 +19,8 @@ import (
 const mcpDiscoveryDescription = "" +
 	"Discover authorized MCP tools without loading every schema. Start with list_servers, then " +
 	"list_tools for a server, then describe an exact tool. Server IDs and tool names must come " +
-	"from this directory. Call call_mcp_tool with the returned tool_ref and arguments matching " +
+	"from this directory. Only describe returns a callable tool_ref. Call call_mcp_tool with that " +
+	"tool_ref and arguments matching " +
 	"input_schema. Follow next_cursor until has_more is false; an empty page does not mean a " +
 	"capability is unconfigured when a server is unavailable. Search is an optional case- " +
 	"insensitive substring filter on names and descriptions within one server; if it misses, " +
@@ -70,9 +71,12 @@ const mcpCallSchema = `{
   "type": "object",
   "properties": {
     "tool_ref": {
+      "description": "Reference returned by a successful describe of the exact tool in this engine.",
       "type": "string"
     },
     "arguments": {
+      "description": "Original tool parameters as a JSON object matching input_schema, never a JSON-encoded string.",
+      "examples": [{"order_id": "123"}],
       "type": "object"
     }
   },
@@ -82,6 +86,11 @@ const mcpCallSchema = `{
   ],
   "additionalProperties": false
 }`
+const mcpCallArgumentsHint = ` Read the tool with discover_mcp_tools(mode="describe", ` +
+	`server_id=..., tool_name=...) first. Use its tool_ref and pass arguments as a JSON object, ` +
+	`not a JSON-encoded string; for example ` +
+	`{"tool_ref":"<describe reference>","arguments":{"order_id":"123"}} (use the actual input_schema fields).`
+
 const maxMCPDefinitionChars = 256 * 1024
 
 // mcpExternalDataNotice keeps the trust boundary that the per-tool
@@ -111,6 +120,7 @@ type MCPCatalog struct {
 	principal      string
 	oauthPrincipal string
 	servers        map[string]*mcpCatalogServer
+	described      sync.Map // Definition references successfully returned by describe in this engine.
 	load           mcpCatalogLoader
 	lookup         MCPServiceLookup
 	gate           approval.MCPApproval
@@ -131,7 +141,7 @@ type mcpServerSummary struct {
 	Status      string `json:"status"`
 }
 type mcpToolSummary struct {
-	ToolRef     string `json:"tool_ref"`
+	ToolRef     string `json:"tool_ref,omitempty"`
 	ServerID    string `json:"server_id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
@@ -147,6 +157,7 @@ type mcpDiscoveryArgs struct {
 }
 type mcpDiscoveryPage struct {
 	Mode       string             `json:"mode"`
+	NextStep   string             `json:"next_step,omitempty"`
 	Notice     string             `json:"notice,omitempty"`
 	Servers    []mcpServerSummary `json:"servers,omitempty"`
 	Tools      []mcpToolSummary   `json:"tools,omitempty"`
@@ -398,8 +409,9 @@ func installMCPCatalog(registry *ToolRegistry, c *MCPCatalog) {
 			BaseTool: NewBaseTool(
 				ToolCallMCPTool,
 				"Call an authorized MCP tool using tool_ref returned by discover_mcp_tools. Read its "+
-					"full input_schema with describe before calling. Pass the original tool arguments in "+
-					"arguments. Discovery does not bypass approval or permissions.",
+					"full input_schema with describe before calling; listing does not enable execution. "+
+					"Pass the original tool arguments in arguments as a JSON object, never a JSON-encoded string. "+
+					"Discovery does not bypass approval or permissions.",
 				json.RawMessage(mcpCallSchema),
 			),
 			catalog:  c,
@@ -521,6 +533,9 @@ func (t *MCPDiscoverTool) Execute(ctx context.Context, raw json.RawMessage) (*ty
 						"error",
 					)
 				}
+				if err == nil && result != nil && result.Success {
+					t.catalog.described.Store(mcpToolRef(tool), true)
+				}
 				return result, err
 			}
 			if args.Mode == "search" &&
@@ -554,6 +569,9 @@ func paginateMCP(ctx context.Context, page mcpDiscoveryPage, args mcpDiscoveryAr
 	// actually present: list_servers returns locally configured service names.
 	if args.Mode != "list_servers" {
 		page.Notice = mcpExternalDataNotice
+		page.NextStep = `Choose a tool, then use discover_mcp_tools(mode="describe", ` +
+			`server_id=<its server_id>, tool_name=<its name>) to read the full input_schema and obtain ` +
+			`a callable tool_ref. Do not call from this summary.`
 	}
 	// Service order is by ID. Operational state and editable display metadata
 	// do not change membership and must not invalidate an in-progress traversal.
@@ -606,7 +624,12 @@ func paginateMCP(ctx context.Context, page mcpDiscoveryPage, args mcpDiscoveryAr
 		if args.Mode == "list_servers" {
 			resultPage.Servers = page.Servers[start:end]
 		} else {
-			resultPage.Tools = page.Tools[start:end]
+			// Retain definition refs internally for cursor invalidation, but only
+			// describe exposes callable refs to the model. Copy before clearing.
+			resultPage.Tools = append([]mcpToolSummary(nil), page.Tools[start:end]...)
+			for i := range resultPage.Tools {
+				resultPage.Tools[i].ToolRef = ""
+			}
 		}
 		result, err := mcpJSONResult(resultPage)
 		if err != nil || !result.Success {
@@ -633,7 +656,7 @@ func decodeMCPCall(raw json.RawMessage) (string, json.RawMessage, error) {
 	var object map[string]any
 	if args.ToolRef == "" || len(args.Arguments) == 0 || json.Unmarshal(args.Arguments, &object) != nil ||
 		object == nil {
-		return "", nil, fmt.Errorf("tool_ref and an arguments object are required")
+		return "", nil, fmt.Errorf("tool_ref and an arguments object are required.%s", mcpCallArgumentsHint)
 	}
 	return args.ToolRef, args.Arguments, nil
 }
@@ -680,6 +703,13 @@ func (t *MCPCallTool) resolve(ctx context.Context, raw json.RawMessage) (*MCPToo
 		if mcpToolRef(tool) == ref {
 			if err := t.catalog.checkEnabled(ctx, tool); err != nil {
 				return nil, nil, err
+			}
+			if _, described := t.catalog.described.Load(ref); !described {
+				return nil, nil, fmt.Errorf(
+					"tool schema has not been described; use discover_mcp_tools(mode=\"describe\", "+
+						"server_id=%q, tool_name=%q) before calling",
+					tool.service.ID, tool.mcpTool.Name,
+				)
 			}
 			return tool, args, nil
 		}

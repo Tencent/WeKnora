@@ -89,7 +89,11 @@ func TestAgentMCPProxyKeepsTargetEventsAndProtocolHistory(t *testing.T) {
   "tool_name": "get_order"
 }`)
 	require.True(t, definition.Result.Success, definition.Result.Error)
-	raw, _ := json.Marshal(map[string]any{"tool_ref": page.Tools[0].ToolRef, "arguments": map[string]any{"id": "42"}})
+	var described struct {
+		ToolRef string `json:"tool_ref"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(definition.Result.Output), &described))
+	raw, _ := json.Marshal(map[string]any{"tool_ref": described.ToolRef, "arguments": map[string]any{"id": "42"}})
 	call := run("model-proxy-id", agenttools.ToolCallMCPTool, string(raw))
 	require.True(t, call.Result.Success, call.Result.Error)
 	require.Equal(t, agenttools.ToolCallMCPTool, call.Name)
