@@ -61,12 +61,18 @@ var sensitiveQueryFields = map[string]struct{}{
 	"id_token":              {},
 	"refresh_token":         {},
 	"state":                 {},
-	"token":                 {},
+	// ticket is the sandbox terminal's WebSocket handshake credential. A
+	// browser cannot set Authorization on an upgrade, so it travels in the
+	// query string; anyone holding it for its 2-minute TTL can open a shell
+	// in the session's sandbox, which is why it must never reach a log line.
+	"ticket": {},
+	"token":  {},
 }
 
-// sanitizeQuery prevents OAuth authorization codes and CSRF/attempt state from
-// being copied into access logs. Parsing the query also covers repeated and
-// percent-encoded parameters without relying on fragile string replacement.
+// sanitizeQuery prevents OAuth authorization codes, CSRF/attempt state, and
+// handshake credentials from being copied into access logs. Parsing the query
+// also covers repeated and percent-encoded parameters without relying on
+// fragile string replacement.
 func sanitizeQuery(raw string) string {
 	values, err := url.ParseQuery(raw)
 	if err != nil {

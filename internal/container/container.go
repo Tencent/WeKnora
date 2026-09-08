@@ -311,6 +311,14 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// per-session file inspection; downstream code guards on nil.
 	must(container.Provide(service.NewArtifactCollectorFromSandboxManager))
 
+	// SandboxTerminalService opens interactive PTYs on session sandboxes for
+	// the frontend terminal panel. The agent lookup lets a first-use terminal
+	// connect provision the sandbox with the agent's config.
+	must(container.Provide(service.NewSandboxTerminalService))
+	must(container.Provide(func(s interfaces.CustomAgentService) service.TerminalAgentConfigLookup {
+		return s
+	}))
+
 	logger.Debugf(ctx, "[Container] Registering task enqueuer...")
 	redisAvailable := os.Getenv("REDIS_ADDR") != ""
 	if redisAvailable {

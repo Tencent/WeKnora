@@ -30,6 +30,14 @@ func (s *stubAuthTokenRepo) GetTokenByValue(_ context.Context, tokenValue string
 	}
 	return token, nil
 }
+func (s *stubAuthTokenRepo) GetTokenByID(_ context.Context, id string) (*types.AuthToken, error) {
+	for _, token := range s.tokens {
+		if token != nil && token.ID == id {
+			return token, nil
+		}
+	}
+	return nil, errors.New("token not found")
+}
 func (s *stubAuthTokenRepo) GetTokensByUserID(context.Context, string) ([]*types.AuthToken, error) {
 	return nil, nil
 }
@@ -317,5 +325,36 @@ func TestUserIDFromSignedTokenAcceptsExpiredToken(t *testing.T) {
 	}
 	if userID != "user-1" {
 		t.Fatalf("userIDFromSignedToken(expired) = %q, want user-1", userID)
+	}
+}
+
+func TestGetAccessTokenLookupsRedactJWT(t *testing.T) {
+	ctx := context.Background()
+	raw := "jwt-secret-value"
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{
+		raw: {
+			ID:        "tok-1",
+			UserID:    "user-1",
+			Token:     raw,
+			TokenType: "access_token",
+			ExpiresAt: time.Now().Add(time.Hour),
+		},
+	}}
+	svc := newAuthTestUserService(tokenRepo)
+
+	byValue, err := svc.GetAccessTokenByValue(ctx, raw)
+	if err != nil {
+		t.Fatalf("GetAccessTokenByValue: %v", err)
+	}
+	if byValue.ID != "tok-1" || byValue.Token != "" {
+		t.Fatalf("GetAccessTokenByValue = %+v, want id tok-1 with redacted token", byValue)
+	}
+
+	byID, err := svc.GetAccessTokenByID(ctx, "tok-1")
+	if err != nil {
+		t.Fatalf("GetAccessTokenByID: %v", err)
+	}
+	if byID.ID != "tok-1" || byID.Token != "" {
+		t.Fatalf("GetAccessTokenByID = %+v, want id tok-1 with redacted token", byID)
 	}
 }
