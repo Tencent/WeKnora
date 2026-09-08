@@ -709,6 +709,30 @@ func (e *AgentEngine) runReActIteration(
 		return iterOutcomeBreak, nil
 	}
 
+	// A token-limited plain answer must be continued, not treated as another
+	// reasoning round (which rewrites the answer and persists only its tail).
+	if len(response.ToolCalls) == 0 && isLengthFinishReason(response.FinishReason) {
+		state.RoundSteps = append(state.RoundSteps, step)
+		messages := append([]chat.Message(nil), (*messagesPtr)...)
+		prompt := "Please provide your complete answer now as plain text."
+		if response.Content != "" {
+			messages = append(messages, chat.Message{Role: "assistant", Content: response.Content})
+			prompt = finalAnswerContinuationPrompt
+		}
+		messages = append(messages, chat.Message{Role: "user", Content: prompt})
+		answerID := response.AnswerEventID
+		if answerID == "" {
+			answerID = generateEventID("answer")
+		}
+		err := e.streamAnswerSegments(ctx, messages, state, sessionID, answerID,
+			response.Content, maxFinalAnswerSegments-1)
+		if err != nil && ctx.Err() == nil && state.FinalAnswer == "" {
+			state.FinalAnswer = "Sorry, I was unable to generate a complete answer."
+		}
+		state.IsComplete = err == nil
+		return iterOutcomeBreak, err
+	}
+
 	// 2. Analyze: Check for stop conditions (natural stop with no tool calls)
 	verdict := e.analyzeResponse(ctx, response, step, state.CurrentRound, sessionID, roundStart)
 	if verdict.isDone {

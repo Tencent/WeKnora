@@ -278,6 +278,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	splitter := agenttools.NewThinkStreamSplitter()
 	thinkingOpen := false
 	answerStreamed := false
+	var streamedAnswer strings.Builder
 
 	emitThought := func(content string, done bool) {
 		if content == "" && !done {
@@ -320,6 +321,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		}
 		closeThinking()
 		answerStreamed = true
+		streamedAnswer.WriteString(content)
 		emittedEventTypes["final_answer_chunk"]++
 		e.eventBus.Emit(ctx, event.Event{
 			ID:        answerID,
@@ -444,6 +446,10 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		iteration+1, len(llmResult.Content), len(llmResult.ToolCalls), emittedEventTypes)
 
 	fullContent := agenttools.StripThinkBlocks(llmResult.Content)
+	if answerStreamed && isLengthFinishReason(llmResult.FinishReason) {
+		// Preserve whitespace at the continuation boundary exactly as streamed.
+		fullContent = streamedAnswer.String()
+	}
 
 	// Use actual finish_reason from LLM stream instead of hardcoding "stop".
 	// Fallback to "stop" when the stream did not report a finish_reason
