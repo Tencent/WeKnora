@@ -312,12 +312,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewArtifactCollectorFromSandboxManager))
 
 	// SandboxTerminalService opens interactive PTYs on session sandboxes for
-	// the frontend terminal panel. The agent lookup lets a first-use terminal
-	// connect provision the sandbox with the agent's config.
+	// the frontend terminal panel. First-use provisioning takes a sandbox
+	// config ID already resolved by the WebSocket handler (own or shared agent).
 	must(container.Provide(service.NewSandboxTerminalService))
-	must(container.Provide(func(s interfaces.CustomAgentService) service.TerminalAgentConfigLookup {
-		return s
-	}))
 
 	logger.Debugf(ctx, "[Container] Registering task enqueuer...")
 	redisAvailable := os.Getenv("REDIS_ADDR") != ""

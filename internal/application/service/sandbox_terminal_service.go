@@ -34,16 +34,6 @@ type SandboxTerminalService struct {
 	resolver sandbox.TenantSandboxResolver
 	fallback sandbox.Manager
 	policy   WorkspaceSandboxPolicy
-	// agentLookup resolves the agent whose sandbox config a first-time
-	// terminal connect should provision with. Optional: without it the
-	// service stays lookup-only.
-	agentLookup TerminalAgentConfigLookup
-}
-
-// TerminalAgentConfigLookup is the narrow slice of the custom-agent service
-// the terminal needs to find the sandbox config an agent would use.
-type TerminalAgentConfigLookup interface {
-	GetAgentByIDAndTenant(ctx context.Context, id string, tenantID uint64) (*types.CustomAgent, error)
 }
 
 // NewSandboxTerminalService wires the terminal service. All dependencies
@@ -54,14 +44,12 @@ func NewSandboxTerminalService(
 	resolver sandbox.TenantSandboxResolver,
 	fallback sandbox.Manager,
 	policy WorkspaceSandboxPolicy,
-	agentLookup TerminalAgentConfigLookup,
 ) *SandboxTerminalService {
 	return &SandboxTerminalService{
-		pinner:      pinner,
-		resolver:    resolver,
-		fallback:    fallback,
-		policy:      policy,
-		agentLookup: agentLookup,
+		pinner:   pinner,
+		resolver: resolver,
+		fallback: fallback,
+		policy:   policy,
 	}
 }
 
@@ -122,25 +110,28 @@ func (s *SandboxTerminalService) resolveSessionManager(
 }
 
 // EnsureSessionTerminal opens a PTY on the session's sandbox, provisioning
-// one when the session has none and the caller supplies the agent context.
+// one when the session has none and the caller supplies a sandbox config ID.
 //
 // Only call this for a confirmed user action. It creates and bills real
 // infrastructure, so the lookup-only OpenSessionTerminal is what a page load
 // or a background reconnect must use.
 //
-// Provisioning reuses the exact chat-flow path — the agent's sandbox config,
-// the workspace kill switch, and the pin claim in resolveSandboxForExecution
-// — so a terminal-created sandbox is indistinguishable from one created by a
-// conversation turn (same config, same pin, same lifecycle). A no-op shell
-// command drives the lazy creation, which also seeds the workspace layout.
+// Provisioning reuses the exact chat-flow path — the resolved agent's sandbox
+// config, the workspace kill switch, and the pin claim in
+// resolveSandboxForExecution — so a terminal-created sandbox is
+// indistinguishable from one created by a conversation turn. The WebSocket
+// handler must resolve the agent the same way a chat turn does (own agent
+// or shared agent from another workspace) and pass that config ID here.
+// A no-op shell command drives the lazy creation, which also seeds the
+// workspace layout.
 //
-// With no agentID (or an agent without a sandbox config) the call stays
-// lookup-only and reports sandbox.ErrNoLiveSessionSandbox, which the
-// WebSocket handler maps onto the SANDBOX_NOT_BOUND guidance frame.
+// With no sandboxConfigID the call stays lookup-only and reports
+// sandbox.ErrNoLiveSessionSandbox, which the WebSocket handler maps onto
+// the SANDBOX_NOT_BOUND guidance frame.
 func (s *SandboxTerminalService) EnsureSessionTerminal(
 	ctx context.Context,
 	sessionID string,
-	agentID string,
+	sandboxConfigID string,
 	opts sandbox.RemoteTerminalOptions,
 ) (*SessionTerminal, error) {
 	mgr, _, err := s.resolveSessionManager(ctx, sessionID)
@@ -164,23 +155,13 @@ func (s *SandboxTerminalService) EnsureSessionTerminal(
 		}
 		return nil, terr
 	}
-	if !errors.Is(err, sandbox.ErrNoLiveSessionSandbox) || strings.TrimSpace(agentID) == "" {
+	if !errors.Is(err, sandbox.ErrNoLiveSessionSandbox) || strings.TrimSpace(sandboxConfigID) == "" {
 		return nil, err
 	}
 
-	// First-use provisioning: follow the agent's config choice.
 	tenantID, _ := types.TenantIDFromContext(ctx)
-	if s.agentLookup == nil || tenantID == 0 {
-		return nil, sandbox.ErrNoLiveSessionSandbox
-	}
-	agent, err := s.agentLookup.GetAgentByIDAndTenant(ctx, strings.TrimSpace(agentID), tenantID)
-	if err != nil || agent == nil {
-		logger.Warnf(ctx, "[sandbox-terminal] resolve agent %s failed: %v", agentID, err)
-		return nil, sandbox.ErrNoLiveSessionSandbox
-	}
-	agentConfigID := strings.TrimSpace(agent.Config.SandboxConfigID)
 	mgr, _, err = resolveSandboxForExecution(
-		ctx, s.resolver, s.fallback, s.pinner, tenantID, sessionID, agentConfigID, s.policy,
+		ctx, s.resolver, s.fallback, s.pinner, tenantID, sessionID, strings.TrimSpace(sandboxConfigID), s.policy,
 	)
 	if err != nil {
 		return nil, err

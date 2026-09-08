@@ -30,7 +30,13 @@ var ErrTerminalAuthDenied = errors.New("terminal authorization no longer valid")
 //
 // Call it before the upgrade and periodically on the live bridge; using the
 // one function for both is deliberate, so a live terminal is held to exactly
-// the checks that admitted it.
+// the checks that admitted it — except token expiry. Handshake minting and
+// the upgrade still require a non-expired access token; the live recheck
+// does not, because axios silently rotates access tokens without revoking
+// the row the ticket was bound to. Logout / password reset still revoke
+// every row and tear the PTY down.
+//
+// rejectExpired is true for the handshake and false for the open-PTY timer.
 func CheckSandboxTerminalAuth(
 	ctx context.Context,
 	users interfaces.UserService,
@@ -38,6 +44,7 @@ func CheckSandboxTerminalAuth(
 	sessions interfaces.SessionService,
 	claims SandboxTerminalTicketClaims,
 	rbacEnforced bool,
+	rejectExpired bool,
 ) (*types.User, error) {
 	if users == nil || members == nil || sessions == nil {
 		return nil, ErrTerminalAuthDenied
@@ -59,8 +66,13 @@ func CheckSandboxTerminalAuth(
 	if token == nil {
 		return nil, ErrTerminalAuthDenied
 	}
-	if err := AssertAccessTokenStillActive(token, userID, time.Now()); err != nil {
+	if err := AssertAccessTokenNotRevoked(token, userID); err != nil {
 		return nil, err
+	}
+	if rejectExpired {
+		if err := assertAccessTokenNotExpired(token, time.Now()); err != nil {
+			return nil, err
+		}
 	}
 
 	user, err := users.GetUserByID(ctx, userID)
@@ -88,10 +100,12 @@ func CheckSandboxTerminalAuth(
 	return user, nil
 }
 
-// AssertAccessTokenStillActive reports whether a stored access-token row is
-// still a live credential for userID (not revoked, not expired, right type
-// and owner). Used when minting a terminal ticket and when rechecking one.
-func AssertAccessTokenStillActive(token *types.AuthToken, userID string, now time.Time) error {
+// AssertAccessTokenNotRevoked reports whether a stored access-token row is
+// still the minting credential for userID (right owner and type, not
+// revoked). Expiry is checked separately: a live PTY must survive silent
+// access-token rotation, while minting a new ticket still requires a
+// current token.
+func AssertAccessTokenNotRevoked(token *types.AuthToken, userID string) error {
 	if token == nil {
 		return ErrTerminalAuthDenied
 	}
@@ -104,10 +118,27 @@ func AssertAccessTokenStillActive(token *types.AuthToken, userID string, now tim
 	if token.IsRevoked {
 		return ErrTerminalAuthDenied
 	}
+	return nil
+}
+
+func assertAccessTokenNotExpired(token *types.AuthToken, now time.Time) error {
+	if token == nil {
+		return ErrTerminalAuthDenied
+	}
 	if !token.ExpiresAt.IsZero() && !token.ExpiresAt.After(now) {
 		return ErrTerminalAuthDenied
 	}
 	return nil
+}
+
+// AssertAccessTokenStillActive is the minting check: not revoked and not
+// expired. The handshake ticket POST uses this so a stale Bearer token
+// cannot open a new PTY.
+func AssertAccessTokenStillActive(token *types.AuthToken, userID string, now time.Time) error {
+	if err := AssertAccessTokenNotRevoked(token, userID); err != nil {
+		return err
+	}
+	return assertAccessTokenNotExpired(token, now)
 }
 
 // terminalMembershipStillValid answers "may this user still act in this

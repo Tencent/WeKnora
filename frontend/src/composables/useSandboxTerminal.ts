@@ -97,13 +97,14 @@ export type SandboxTerminalSession = {
 }
 
 /**
- * 两个参数都必须是活的 ref（`toRef(props, …)`），不能是 `ref(props.x)` 那样的
- * 快照：每次 openSocket 都会重读它们，用户切换 agent 后的下一次连接才能按新
- * agent 的沙箱配置去创建沙箱。
+ * 三个参数都必须是活的 ref（`toRef(props, …)`），不能是 `ref(props.x)` 那样的
+ * 快照：每次 openSocket 都会重读它们，用户切换 agent（含共享来源空间）后的
+ * 下一次连接才能按新 agent 的沙箱配置去创建沙箱。
  */
 export function useSandboxTerminal(
   sessionId: Ref<string>,
   agentId: Ref<string | undefined>,
+  agentSourceTenantId: Ref<string | number | null | undefined> = ref(undefined),
 ): SandboxTerminalSession {
   const status = ref<SandboxTerminalStatus>('not_started')
 
@@ -177,6 +178,10 @@ export function useSandboxTerminal(
         const agent = agentId.value
         if (agent && agent !== 'builtin-quick-answer') {
           query.set('agent_id', agent)
+        }
+        const sourceTenant = agentSourceTenantId.value
+        if (sourceTenant != null && String(sourceTenant).trim() !== '') {
+          query.set('agent_source_tenant_id', String(sourceTenant).trim())
         }
       }
       if (lastPid && lastPid > 0) {

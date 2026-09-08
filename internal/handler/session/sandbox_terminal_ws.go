@@ -163,7 +163,7 @@ func (h *Handler) SandboxTerminalWS(c *gin.Context) {
 	// One call covers the whole handshake identity: minting token still live,
 	// user active, workspace membership intact, session still owned. It also
 	// hands back the user, so nothing below re-queries it.
-	user, err := h.checkTerminalAuth(c.Request.Context(), *claims)
+	user, err := h.checkTerminalAuth(c.Request.Context(), *claims, true)
 	if err != nil {
 		if stderrors.Is(err, service.ErrTerminalAuthDenied) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: invalid or expired ticket"})
@@ -200,11 +200,7 @@ func (h *Handler) SandboxTerminalWS(c *gin.Context) {
 	// SANDBOX_NOT_BOUND, which the UI turns into an explicit "create and
 	// start" button. Only that confirmed click sets provision=1.
 	allowProvision := terminalFlagParam(c.Query("provision"))
-
-	// The agent context lets a first-use terminal connect provision the
-	// sandbox with the same config the conversation would use. Empty (or an
-	// unknown agent) keeps the lookup-only behaviour with the guidance frame.
-	agentID := strings.TrimSpace(c.Query("agent_id"))
+	sandboxConfigID := h.terminalProvisionConfigID(ctx, c, allowProvision)
 
 	// Geometry from the query string; the frontend resizes right after
 	// ready anyway, so defaults only shape the first paint.
@@ -217,7 +213,7 @@ func (h *Handler) SandboxTerminalWS(c *gin.Context) {
 	// The connection outlives the HTTP exchange, so the terminal lifetime is
 	// governed by this derived context, cancelled in cleanup().
 	termCtx, cancelTerm := context.WithCancel(context.WithoutCancel(ctx))
-	terminal, err := h.openTerminal(termCtx, sessionID, agentID, allowProvision, opts)
+	terminal, err := h.openTerminal(termCtx, sessionID, sandboxConfigID, allowProvision, opts)
 	if err != nil {
 		code, detail := terminalErrorFrame(err)
 		logger.Warnf(ctx, "[sandbox-terminal] open failed session=%s provision=%t code=%s: %v",
@@ -242,7 +238,7 @@ func (h *Handler) SandboxTerminalWS(c *gin.Context) {
 		terminal:       terminal,
 		idleDisconnect: terminal.IdleDisconnect,
 		authCheck: func(checkCtx context.Context) error {
-			_, err := h.checkTerminalAuth(checkCtx, authClaims)
+			_, err := h.checkTerminalAuth(checkCtx, authClaims, false)
 			return err
 		},
 	}
@@ -254,14 +250,41 @@ func (h *Handler) SandboxTerminalWS(c *gin.Context) {
 // action may create infrastructure.
 func (h *Handler) openTerminal(
 	ctx context.Context,
-	sessionID, agentID string,
+	sessionID, sandboxConfigID string,
 	allowProvision bool,
 	opts sandbox.RemoteTerminalOptions,
 ) (*service.SessionTerminal, error) {
 	if allowProvision {
-		return h.terminalService.EnsureSessionTerminal(ctx, sessionID, agentID, opts)
+		return h.terminalService.EnsureSessionTerminal(ctx, sessionID, sandboxConfigID, opts)
 	}
 	return h.terminalService.OpenSessionTerminal(ctx, sessionID, opts)
+}
+
+// terminalProvisionConfigID resolves the sandbox config a confirmed create
+// should use. It goes through resolveAgent so a shared agent from another
+// workspace provisions the same way a chat turn would, instead of looking the
+// agent up only in the current tenant.
+func (h *Handler) terminalProvisionConfigID(ctx context.Context, c *gin.Context, allowProvision bool) string {
+	if !allowProvision || h == nil || c == nil {
+		return ""
+	}
+	agentID := strings.TrimSpace(c.Query("agent_id"))
+	if agentID == "" {
+		return ""
+	}
+	agent, _, _ := h.resolveAgent(ctx, c, agentID, terminalTenantParam(c.Query("agent_source_tenant_id")))
+	if agent == nil {
+		return ""
+	}
+	return strings.TrimSpace(agent.Config.SandboxConfigID)
+}
+
+func terminalTenantParam(raw string) uint64 {
+	value, err := strconv.ParseUint(strings.TrimSpace(raw), 10, 64)
+	if err != nil || value == 0 {
+		return 0
+	}
+	return value
 }
 
 // terminalFlagParam parses an opt-in query flag. Anything other than an
@@ -378,6 +401,7 @@ func sandboxTerminalBearerToken(c *gin.Context) string {
 func (h *Handler) checkTerminalAuth(
 	ctx context.Context,
 	claims service.SandboxTerminalTicketClaims,
+	rejectExpired bool,
 ) (*types.User, error) {
 	if h == nil {
 		return nil, service.ErrTerminalAuthDenied
@@ -389,6 +413,7 @@ func (h *Handler) checkTerminalAuth(
 		h.sessionService,
 		claims,
 		h.terminalRBACEnforced(),
+		rejectExpired,
 	)
 }
 

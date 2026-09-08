@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createPtyEchoPredictor } from './ptyEchoPredictor'
+import { createPtyEchoPredictor, looksLikeSecretPrompt } from './ptyEchoPredictor'
 
 function collect() {
   const written: string[] = []
@@ -63,4 +63,27 @@ test('locally erases a predicted character on backspace', () => {
   predictor.onLocal('ab')
   predictor.onLocal('\x7f')
   assert.equal(text(), 'ab\b \b')
+})
+
+test('looksLikeSecretPrompt detects sudo and localized prompts', () => {
+  assert.equal(looksLikeSecretPrompt('[sudo] password for alice: '), true)
+  assert.equal(looksLikeSecretPrompt('Password:'), true)
+  assert.equal(looksLikeSecretPrompt('请输入密码:'), true)
+  assert.equal(looksLikeSecretPrompt('user@host:~$ '), false)
+})
+
+test('does not locally echo keystrokes after a password prompt', () => {
+  const { predictor, text } = collect()
+  predictor.onRemote(new TextEncoder().encode('[sudo] password for alice: '))
+  predictor.onLocal('s')
+  predictor.onLocal('e')
+  predictor.onLocal('c')
+  predictor.onLocal('r')
+  predictor.onLocal('e')
+  predictor.onLocal('t')
+  assert.equal(text(), '[sudo] password for alice: ')
+  predictor.onLocal('\r')
+  predictor.onRemote(new TextEncoder().encode('\r\nalice@host:~$ '))
+  predictor.onLocal('l')
+  assert.equal(text().endsWith('l'), true)
 })

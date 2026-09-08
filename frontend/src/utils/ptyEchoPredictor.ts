@@ -5,9 +5,20 @@
  * SendInput is a unary RPC, so that wait is one data-plane RTT per key.
  * Printable input is drawn immediately and later stripped from the PTY
  * stream when the real echo arrives, so characters do not double.
+ *
+ * Password prompts must not be locally echoed: sudo / read -s / login
+ * typically send no echo, and predicted characters would stay on screen.
  */
 
 export type PtyEchoWrite = (chunk: string | Uint8Array) => void
+
+export function looksLikeSecretPrompt(text: string): boolean {
+  const line = (text.split(/\r\n|\n|\r/).pop() ?? '').trimEnd()
+  if (/(?:password|passphrase|密码)/i.test(line)) {
+    return true
+  }
+  return /\bpin\s*:?\s*$/i.test(line)
+}
 
 function cellWidth(ch: string): number {
   const cp = ch.codePointAt(0) ?? 0
@@ -30,6 +41,8 @@ function popChar(s: string): { rest: string; ch: string } {
 
 export function createPtyEchoPredictor(write: PtyEchoWrite) {
   let predicted = ''
+  let secretPrompt = false
+  let recentRemote = ''
   const decoder = new TextDecoder()
 
   function eraseCells(n: number) {
@@ -42,8 +55,25 @@ export function createPtyEchoPredictor(write: PtyEchoWrite) {
     predicted = ''
   }
 
+  function noteRemote(text: string) {
+    recentRemote = (recentRemote + text).slice(-400)
+    if (looksLikeSecretPrompt(recentRemote)) {
+      secretPrompt = true
+      rewindAll()
+      return
+    }
+    if (!secretPrompt) return
+    const line = recentRemote.split(/\r\n|\n|\r/).pop() ?? ''
+    if (line.trim() !== '') {
+      secretPrompt = false
+    }
+  }
+
   return {
     onLocal(data: string) {
+      if (secretPrompt) {
+        return
+      }
       if (data === '\x7f' || data === '\b') {
         if (!predicted) return
         const { rest, ch } = popChar(predicted)
@@ -75,6 +105,7 @@ export function createPtyEchoPredictor(write: PtyEchoWrite) {
       if (bytes.length === 0) return
       const text = decoder.decode(bytes, { stream: true })
       if (!text) return
+      noteRemote(text)
 
       const predChars = [...predicted]
       const textChars = [...text]

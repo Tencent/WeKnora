@@ -33,6 +33,15 @@ func TestTerminalFlagParam(t *testing.T) {
 	}
 }
 
+func TestTerminalTenantParam(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, uint64(0), terminalTenantParam(""))
+	require.Equal(t, uint64(0), terminalTenantParam("0"))
+	require.Equal(t, uint64(0), terminalTenantParam("-1"))
+	require.Equal(t, uint64(84), terminalTenantParam("84"))
+	require.Equal(t, uint64(84), terminalTenantParam(" 84 "))
+}
+
 func TestTerminalAuthRecheckInterval(t *testing.T) {
 	t.Parallel()
 	require.GreaterOrEqual(t, terminalAuthRecheckInterval, time.Minute)

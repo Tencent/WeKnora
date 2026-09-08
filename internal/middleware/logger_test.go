@@ -42,6 +42,11 @@ func TestSanitizeBody(t *testing.T) {
 			want: `{"password":"***","token":"***"}`,
 		},
 		{
+			name: "sandbox terminal handshake ticket in JSON body",
+			in:   `{"success":true,"data":{"ticket":"eyJhbGciOiJIUzI1NiJ9.payload.signature","expires_in":120}}`,
+			want: `{"success":true,"data":{"ticket":"***","expires_in":120}}`,
+		},
+		{
 			name: "snake_case new_password and old_password",
 			in:   `{"email":"alice@example.com","new_password":"FreshPass9","old_password":"OldPass9"}`,
 			want: `{"email":"alice@example.com","new_password":"***","old_password":"***"}`,

@@ -149,6 +149,26 @@ func TestValidateTokenRejectsRefreshToken(t *testing.T) {
 	}
 }
 
+func TestValidateTokenRejectsSandboxTerminalTicket(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+
+	ticket := signTestJWT(jwt.MapClaims{
+		"user_id":    "user-1",
+		"tenant_id":  1,
+		"session_id": "sess",
+		"token_id":   "tok-1",
+		"type":       sandboxTerminalTicketType,
+		"exp":        time.Now().Add(time.Minute).Unix(),
+	})
+
+	_, _, err := svc.ValidateToken(ctx, ticket)
+	if err == nil || err.Error() != "terminal ticket cannot be used as access token" {
+		t.Fatalf("ValidateToken(terminal ticket) err = %v, want terminal ticket rejection", err)
+	}
+}
+
 func TestRefreshTokenRejectsAccessTokenRecord(t *testing.T) {
 	ctx := context.Background()
 	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}

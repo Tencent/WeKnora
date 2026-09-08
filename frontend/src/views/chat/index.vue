@@ -154,7 +154,9 @@
     <ChatReferencesDrawer />
     <ChatAttachmentPreviewDrawer />
     <SandboxSidePanel v-if="!embeddedMode" :session-id="session_id"
-        :agent-id="useSettingsStoreInstance.selectedAgentId" :shifted="referencesDrawerVisible"
+        :agent-id="useSettingsStoreInstance.selectedAgentId"
+        :agent-source-tenant-id="useSettingsStoreInstance.selectedAgentSourceTenantId"
+        :shifted="referencesDrawerVisible"
         :artifacts="sessionArtifacts" :artifacts-collecting="sessionArtifactsCollecting" />
 </template>
 <script setup>
