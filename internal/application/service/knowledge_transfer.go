@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
 )
@@ -174,11 +175,11 @@ func (s *knowledgeService) planKnowledgeMove(
 		if matchesTransfer(ctx, state, source, target, access.KBTransferMove, row.ID, mode) && state.Phase == "moving" {
 			allowed = []string{source.ID, target.ID}
 		}
-		chunks, err := s.transferChunks(ctx, row, allowed...)
+		_, err = s.transferChunks(ctx, row, allowed...)
 		if err != nil {
 			return nil, err
 		}
-		if mode == "reuse_vectors" && row.EmbeddingModelID != "" && len(chunks) > 0 {
+		if mode == "reuse_vectors" && row.EmbeddingModelID != "" {
 			if row.EmbeddingModelID != source.EmbeddingModelID {
 				return nil, fmt.Errorf("knowledge %s uses a different embedding model", row.ID)
 			}
@@ -368,7 +369,9 @@ func (s *knowledgeService) executeKnowledgeClone(
 	return nil
 }
 
-func (s *knowledgeService) completeMovedReparse(
+// acknowledgeMovedReparse completes transfer admission, not document parsing.
+// The target processing pipeline owns ParseStatus after its task is enqueued.
+func (s *knowledgeService) acknowledgeMovedReparse(
 	ctx context.Context,
 	knowledge *types.Knowledge,
 	source, target *types.KnowledgeBase,
@@ -467,7 +470,10 @@ func (s *knowledgeService) markMoveItemFailed(
 	before, after := *row, *row
 	after.ParseStatus = types.ParseStatusFailed
 	after.ErrorMessage = taskErr.Error()
-	_ = s.repo.UpdateKnowledgeForTransfer(ctx, &before, &after)
+	if err := s.repo.UpdateKnowledgeForTransfer(ctx, &before, &after); err != nil {
+		logger.Errorf(ctx, "Failed to record move failure for knowledge %s, task %s: %v (move error: %v)",
+			row.ID, state.TaskID, err, taskErr)
+	}
 }
 
 // A stale parser must not start after a move has claimed a completed document,

@@ -453,10 +453,11 @@ type KnowledgeListDeletePayload struct {
 // KnowledgeListReparsePayload represents the batch knowledge reparse task payload
 type KnowledgeListReparsePayload struct {
 	TracingContext
-	TenantID      uint64                     `json:"tenant_id"`
-	KnowledgeIDs  []string                   `json:"knowledge_ids"`
-	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
-	Initiator     TaskInitiator              `json:"initiator,omitempty"`
+	KnowledgeBaseID string                     `json:"knowledge_base_id,omitempty"`
+	TenantID        uint64                     `json:"tenant_id"`
+	KnowledgeIDs    []string                   `json:"knowledge_ids"`
+	ProcessConfig   *KnowledgeProcessOverrides `json:"process_config,omitempty"`
+	Initiator       TaskInitiator              `json:"initiator,omitempty"`
 }
 
 // KnowledgeMovePayload represents the knowledge move task payload

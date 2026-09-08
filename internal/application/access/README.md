@@ -122,19 +122,21 @@ reader is opened. The KB catalog checks live document bindings first, then exact
 references in active chunks/wiki pages for historical files. A same-tenant path
 or handle prefix cannot replace a KB binding. Message evidence comes from
 persisted content, references, images, artifacts and tool results; tool arguments
-do not prove that the message returned a file.
+do not prove that the message returned a file. The organization-shared KB
+fallback also checks the catalog for an independent live KB/file binding;
+retrieval text and a currently shared KB ID alone are insufficient.
 
 The storage adapter uses the authorized owner and backend. The shared
 `filetransport` package owns response headers, safe inline/download disposition,
 streaming and reader closure. Seekable readers use standard HTTP Range and HEAD
-handling; streaming-only backends return full content without buffering the
-object. Permission-controlled responses use `private, no-store` so a later
+handling; streaming-only backends return full content with `Accept-Ranges: none`
+without buffering the object (RFC 9110 sections 14.2 and 14.3). Permission-controlled responses use `private, no-store` so a later
 request rechecks current access. Tenant-wide and signed-token file routes keep
 their own authorization and caching contracts.
 
 ## Document and chunk writes
 
-Document metadata, manual content, document tags/folders, image edits, chunk mutations
+Document metadata, manual content, reparse, document tags/folders, image edits, chunk mutations
 and generated-question edits consume explicit Editor grants after loading the
 persisted document/KB binding. Full chunk objects cannot reparent existing rows.
 Batch inputs are deduplicated and fully validated, including missing IDs and
@@ -157,6 +159,12 @@ omit the KB are accepted only when remaining rows resolve to one same-tenant KB;
 they cannot reconstruct the KB that existed at enqueue time. Failure callbacks
 skip rejected scopes and condition status updates on tenant, KB and deleting
 state. Scope/identity errors are not retried; infrastructure failures are.
+
+Batch reparse payloads likewise carry the admitted KB ID. Workers validate the
+whole batch before any submission and use exactly one `WithKBTaskWrite` grant;
+each reparse reload consumes that grant and rejects a document still moving.
+Missing/mixed/moved selections fail without submitting earlier batch members.
+Legacy reparse payloads can reconstruct only a present, single-KB binding.
 
 Session-history, temporary-KB and clone cleanup use exact server-derived
 references from their already admitted operations. These cleanup contexts cannot
@@ -181,8 +189,22 @@ state. A document's `_knowledge_transfer` metadata records task identity and
 progress; retries reuse the reserved target, replace incomplete clones, skip
 completed moves and retry only enqueue for a moved document awaiting parsing.
 This field is internal operation state, not caller-supplied custom metadata.
+For `reparse`, transfer `done` means target binding and parser admission are
+complete, not that parsing has finished. `ParseStatus` remains the parser's
+state. `reparse_pending` already admits the target parser; extending the
+`moving` write guard to that phase would also block legitimate worker writes.
+Locking all writes until parsing finishes is a separate processing/concurrency
+contract, including ordinary reparses, and is not provided by this transfer marker.
+
+Failed clone chunk/index writes attempt rollback after conditionally claiming
+the original destination. Rollback failures are returned, references retained
+when cleanup is uncertain, and later retries replace the failed copy. Accounting
+is committed only after the clone succeeds. FAQ containers do not inherit the
+source document's transfer marker.
 
 Vector reuse relocates KB metadata while preserving physical vector/chunk IDs.
+OpenSearch selects the entire source KB/document pair, even without DB chunks,
+and rejects version conflicts, timeouts and partial failures before DB relocation.
 It never copies vectors and then deletes by the same document ID. Source and
 target must use the same vector store for reuse, and the same concrete file
 storage instance for either mode. Doris ANN tables cannot safely replace rows
@@ -220,7 +242,14 @@ These are separate follow-ups, not capabilities provided by this package:
    remaining KB configuration/duplicate/delete, wiki and resource-administration
    service methods, preserving their existing route admission policies. Keep
    user/organization membership, embed, IM and signed-resource contracts separate.
-5. **Resource-reference indexing and legacy migration.** Backfill historical
+5. **Shared-agent message-file provenance.** Distinguish KB-origin files from
+   generated message artifacts, then apply the agent's current KB selection and
+   live bindings to KB-origin files. The existing source-owned shared-agent
+   fallback checks exact persisted output plus the live agent share, but does
+   not yet apply `selected`/`none` KB selection to every file. Do not treat the
+   org-shared KB fix as closing that separate path, or blindly apply KB gates
+   to generated artifacts that have no KB owner.
+6. **Resource-reference indexing and legacy migration.** Backfill historical
    file bindings, measure the request-local text-reference fallback and migrate
    old queued payloads. A legacy delete task without a KB ID can reconstruct
    only its present unambiguous binding, not its original enqueue-time binding.

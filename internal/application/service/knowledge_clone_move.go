@@ -268,11 +268,34 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 	dstSvc := s.resolveFileService(ctx, dstKB)
 	urlCache := map[string]string{}
 	var copiedURLs []string
-	chunksPersisted := false
+	chunksAttempted := false
+	var rollbackIndices func() error
 	defer func() {
-		if err != nil && !chunksPersisted {
-			cleanupCopiedObjects(ctx, dstSvc, copiedURLs)
+		if err == nil {
+			return
 		}
+		if chunksAttempted {
+			// A failed create may have committed before losing its acknowledgement.
+			// Claim the original destination before removing any persisted data.
+			before, after := *stored, *stored
+			after.ParseStatus = types.ParseStatusFailed
+			after.ErrorMessage = err.Error()
+			if checkpointErr := s.repo.UpdateKnowledgeForTransfer(ctx, &before, &after); checkpointErr != nil {
+				err = errors.Join(err, fmt.Errorf("claim failed clone cleanup: %w", checkpointErr))
+				return
+			}
+			if rollbackIndices != nil {
+				if cleanupErr := rollbackIndices(); cleanupErr != nil {
+					err = errors.Join(err, fmt.Errorf("clean failed clone indices: %w", cleanupErr))
+					return
+				}
+			}
+			if cleanupErr := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, dst.TenantID, dst.ID); cleanupErr != nil {
+				err = errors.Join(err, fmt.Errorf("clean failed clone chunks: %w", cleanupErr))
+				return
+			}
+		}
+		cleanupCopiedObjects(ctx, dstSvc, copiedURLs)
 	}()
 
 	now := time.Now()
@@ -301,11 +324,11 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 		// rewritten until its child image chunk has been processed).
 		newImageInfo, copied, copyErr := cloneChunkImageInfo(
 			ctx, dstSvc, sourceChunk.ImageInfo, dst.TenantID, dst.ID, urlCache)
+		copiedURLs = append(copiedURLs, copied...)
 		if copyErr != nil {
 			err = fmt.Errorf("clone chunk image copy failed: %w", copyErr)
 			return err
 		}
-		copiedURLs = append(copiedURLs, copied...)
 
 		targetChunk := &types.Chunk{
 			ID:              uuid.New().String(),
@@ -358,11 +381,11 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 		}
 	}
 	for chunks := range slices.Chunk(targetChunks, chunkPageSize) {
+		chunksAttempted = true
 		err := s.chunkRepo.CreateChunks(ctx, chunks)
 		if err != nil {
 			return err
 		}
-		chunksPersisted = true
 	}
 
 	tenantID := types.MustTenantIDFromContext(ctx)
@@ -383,6 +406,9 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, dst.EmbeddingModelID)
 	if err != nil {
 		return err
+	}
+	rollbackIndices = func() error {
+		return retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{dst.ID}, embeddingModel.GetDimensions(), dst.Type)
 	}
 	if err := retrieveEngine.CopyIndices(ctx, src.KnowledgeBaseID, dst.KnowledgeBaseID,
 		map[string]string{src.ID: dst.ID},
@@ -914,7 +940,17 @@ func (s *knowledgeService) getOrCreateFAQKnowledge(ctx context.Context, kb *type
 		knowledge.Description = srcKnowledge.Description
 		knowledge.Source = srcKnowledge.Source
 		knowledge.Channel = srcKnowledge.Channel
-		knowledge.Metadata = srcKnowledge.Metadata
+		fields := map[string]json.RawMessage{}
+		if len(srcKnowledge.Metadata) > 0 {
+			if err := json.Unmarshal(srcKnowledge.Metadata, &fields); err != nil {
+				return nil, fmt.Errorf("decode source FAQ metadata: %w", err)
+			}
+			delete(fields, types.KnowledgeTransferMetadataKey)
+			knowledge.Metadata, err = json.Marshal(fields)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
@@ -1264,7 +1300,7 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 	for _, chunk := range oldChunks {
 		chunkIDs = append(chunkIDs, chunk.ID)
 	}
-	if len(chunkIDs) > 0 && knowledge.EmbeddingModelID != "" {
+	if knowledge.EmbeddingModelID != "" {
 		engine, err := retriever.CreateRetrieveEngineForKB(
 			ctx,
 			s.retrieveEngine,
@@ -1407,7 +1443,7 @@ func (s *knowledgeService) enqueueMovedKnowledge(
 		if err != nil && !errors.Is(err, asynq.ErrTaskIDConflict) && !errors.Is(err, asynq.ErrDuplicateTask) {
 			return err
 		}
-		return s.completeMovedReparse(ctx, knowledge, sourceKB, targetKB)
+		return s.acknowledgeMovedReparse(ctx, knowledge, sourceKB, targetKB)
 	}
 
 	if knowledge.FilePath != "" {
@@ -1457,7 +1493,7 @@ func (s *knowledgeService) enqueueMovedKnowledge(
 		_ = info
 	}
 
-	return s.completeMovedReparse(ctx, knowledge, sourceKB, targetKB)
+	return s.acknowledgeMovedReparse(ctx, knowledge, sourceKB, targetKB)
 }
 
 // getOrCreateTagInTarget finds or creates a tag in the target knowledge base based on the source tag.

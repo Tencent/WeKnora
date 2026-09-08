@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // MessageFileLookup is the narrow message-service surface needed by the
@@ -46,13 +47,14 @@ type KnowledgeOwnerLookup interface {
 
 // MessageKBShareAuthorizer bundles the read-only lookups behind the
 // message proxy's org-shared-KB fallback. A nil ShareGuard or KBs lookup
-// disables the fallback, which keeps older call sites and tests on the
-// shared-agent-only behavior. A nil Knowledges lookup only disables the
+// disables the fallback. A live Bindings lookup is also required and can
+// be supplied by the resource catalog. A nil Knowledges lookup only disables the
 // pre-denormalization KnowledgeID path.
 type MessageKBShareAuthorizer struct {
 	ShareGuard KBSharePermissionGuard
 	KBs        KBTenantLookup
 	Knowledges KnowledgeOwnerLookup
+	Bindings   interfaces.KBResourceLookup
 }
 
 // resourceAccessibleViaSharedKB reports whether the message's persisted
@@ -64,7 +66,8 @@ type MessageKBShareAuthorizer struct {
 // Evidence required from one retrieval record: a canonical resource://
 // handle (not a prefix of a longer token) appears in the chunk text or
 // image_info, its knowledge base belongs to the resource's tenant, and
-// that KB is org-shared to the caller with at least viewer permission.
+// that KB is org-shared to the caller with at least viewer permission, and
+// an independent live resource binding confirms the file still belongs to it.
 // Smart-reasoning turns persist that evidence on AgentSteps when
 // KnowledgeReferences was never filled. Any lookup failure fails closed.
 func (a MessageKBShareAuthorizer) resourceAccessibleViaSharedKB(
@@ -74,7 +77,7 @@ func (a MessageKBShareAuthorizer) resourceAccessibleViaSharedKB(
 	callerTenantID uint64,
 	callerTenantRole types.TenantRole,
 ) bool {
-	if a.ShareGuard == nil || a.KBs == nil || message == nil || resource == nil {
+	if a.ShareGuard == nil || a.KBs == nil || a.Bindings == nil || message == nil || resource == nil {
 		return false
 	}
 	handle, ok := types.ParseResourcePath(types.BuildResourcePath(resource.Handle))
@@ -98,7 +101,11 @@ func (a MessageKBShareAuthorizer) resourceAccessibleViaSharedKB(
 		}
 		shared, err := permissions.Check(kb.ID, types.OrgRoleViewer)
 		if err == nil && shared {
-			return true
+			bound, bindingErr := a.Bindings.IsReferencedByKnowledgeBase(
+				ctx, resource.TenantID, kb.ID, types.BuildResourcePath(handle))
+			if bindingErr == nil && bound {
+				return true
+			}
 		}
 	}
 	return false

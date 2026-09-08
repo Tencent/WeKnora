@@ -101,7 +101,7 @@ func (s *knowledgeBaseService) listChunksByIDWithShared(ctx context.Context,
 	crossChunks, err := s.chunkRepo.ListChunksByIDOnly(ctx, missing)
 	if err != nil {
 		logger.Warnf(ctx, "[listChunksByIDWithShared] Failed to fetch chunks by ID only: %v", err)
-		return chunks, nil
+		return nil, err
 	}
 	for _, c := range crossChunks {
 		appendAllowed(c)

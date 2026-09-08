@@ -108,3 +108,40 @@ func TestMessageArtifactsKeepSessionOwnershipSeparateFromAgentOutput(t *testing.
 	_, err = ResolveMessageArtifact(callerContext(), message, 0, nil, catalog, MessageKBShareAuthorizer{})
 	require.ErrorIs(t, err, ErrForbidden)
 }
+
+type messageFileKBs struct{ kb *types.KnowledgeBase }
+
+func (k messageFileKBs) GetKnowledgeBasesByIDsOnly(context.Context, []string) ([]*types.KnowledgeBase, error) {
+	return []*types.KnowledgeBase{k.kb}, nil
+}
+
+func TestMessageSharedKBFilesRequireLiveBinding(t *testing.T) {
+	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
+	message := &types.Message{
+		AgentTenantID: 1, Role: "assistant",
+		KnowledgeReferences: types.References{{KnowledgeBaseID: "shared", Content: ref}},
+	}
+	catalog := fileCatalog{&types.StoredResource{
+		Handle: "AbCdEfGhIjKlMnOpQrStUv", TenantID: 2, PhysicalPath: "local://2/exports/a.png",
+	}}
+	binding := &fileBinding{allowed: true}
+	shares := &shareLookup{permission: types.OrgRoleViewer}
+	authorizer := MessageKBShareAuthorizer{
+		ShareGuard: shares, KBs: messageFileKBs{kb: &types.KnowledgeBase{ID: "shared", TenantID: 2}}, Bindings: binding,
+	}
+	_, err := AuthorizeMessageFile(callerContext(), message, ref, nil, catalog, authorizer)
+	require.NoError(t, err)
+	require.Equal(t, "shared", binding.kb)
+	require.Equal(t, uint64(2), binding.tenant)
+	binding.allowed = false
+	_, err = AuthorizeMessageFile(callerContext(), message, ref, nil, catalog, authorizer)
+	require.ErrorIs(t, err, ErrForbidden, "retrieval text alone must not authorize an unrelated same-tenant resource")
+	binding.allowed = true
+	binding.err = errors.New("binding lookup unavailable")
+	_, err = AuthorizeMessageFile(callerContext(), message, ref, nil, catalog, authorizer)
+	require.ErrorIs(t, err, ErrForbidden)
+	binding.err = nil
+	authorizer.Bindings = nil
+	_, err = AuthorizeMessageFile(callerContext(), message, ref, nil, catalog, authorizer)
+	require.ErrorIs(t, err, ErrForbidden, "missing live lookup must fail closed")
+}

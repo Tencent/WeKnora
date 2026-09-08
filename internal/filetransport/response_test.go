@@ -72,5 +72,6 @@ func TestServeActiveContentAndStreamingRange(t *testing.T) {
 	require.NoError(t, Serve(w, req, io.NopCloser(strings.NewReader("<svg/>")), Options{Filename: "../payload.svg"}))
 	require.Equal(t, http.StatusOK, w.Code, "non-seekable readers return the complete body")
 	require.Equal(t, "<svg/>", w.Body.String())
+	require.Equal(t, "none", w.Header().Get("Accept-Ranges"))
 	require.Equal(t, "attachment; filename=payload.svg", w.Header().Get("Content-Disposition"))
 }

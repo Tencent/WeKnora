@@ -175,6 +175,9 @@ func AuthorizeMessageFile(ctx context.Context, message *types.Message, reference
 	if message.Role == "user" && owner != caller.TenantID {
 		return FileAccess{}, ErrForbidden
 	}
+	if kbShares.Bindings == nil {
+		kbShares.Bindings, _ = catalog.(interfaces.KBResourceLookup)
+	}
 	kbAuthorized := false
 	if resource != nil && message.AgentTenantID != 0 && message.AgentTenantID != owner {
 		kbAuthorized = kbShares.resourceAccessibleViaSharedKB(ctx, message, resource, caller.TenantID, caller.Role)

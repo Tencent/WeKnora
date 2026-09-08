@@ -260,6 +260,9 @@ func TestCloneRetryReplacesIncompleteCopyWithoutDuplicatingEmptyHashes(t *testin
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, types.ParseStatusFailed, rows[0].ParseStatus)
+	failedChunks, chunkErr := f.chunkRepo.ListAllChunksByKnowledgeID(f.ctx, 7, rows[0].ID)
+	require.NoError(t, chunkErr)
+	require.Empty(t, failedChunks, "a lost create acknowledgement must also be rolled back")
 	fault.fail = false
 	require.NoError(t, f.svc.executeKnowledgeClone(f.ctx, f.kbs.values["kb"], f.kbs.values["other"], nil))
 	rows, err = f.repo.ListKnowledgeByKnowledgeBaseID(f.ctx, 7, "other")

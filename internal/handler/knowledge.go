@@ -206,13 +206,14 @@ func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
 // enqueueKnowledgeListReparse enqueues an async batch-reparse task for the
 // given knowledge IDs and returns the asynq task ID.
 func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
-	ctx context.Context, tenantID uint64, ids []string, processConfig *types.KnowledgeProcessOverrides,
+	ctx context.Context, tenantID uint64, kbID string, ids []string, processConfig *types.KnowledgeProcessOverrides,
 ) (string, error) {
 	payload := types.KnowledgeListReparsePayload{
-		TenantID:      tenantID,
-		KnowledgeIDs:  ids,
-		ProcessConfig: processConfig,
-		Initiator:     types.TaskInitiatorFromContext(ctx),
+		KnowledgeBaseID: kbID,
+		TenantID:        tenantID,
+		KnowledgeIDs:    ids,
+		ProcessConfig:   processConfig,
+		Initiator:       types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -2620,7 +2621,7 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 		}
 	}
 
-	taskID, err := h.enqueueKnowledgeListReparse(ctx, effectiveTenantID, ids, req.ProcessConfig)
+	taskID, err := h.enqueueKnowledgeListReparse(ctx, effectiveTenantID, kbID, ids, req.ProcessConfig)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue batch knowledge reparse task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue batch reparse task"))

@@ -968,13 +968,16 @@ func newOrgSharedKBTestEngineFromMessage(
 			requestedPath = path
 			return io.NopCloser(strings.NewReader("shared-kb-image")), nil
 		}},
-		&stubResourceCatalog{resource: &types.StoredResource{
-			Handle:       "ShArEdKbHaNdLe00000000",
-			TenantID:     ownerTenantID,
-			PhysicalPath: physical,
-			OriginalName: "quadrant.jpg",
-			MimeType:     "image/jpeg",
-		}},
+		&stubResourceCatalog{
+			bound: func(context.Context, uint64, string, string) (bool, error) { return true, nil },
+			resource: &types.StoredResource{
+				Handle:       "ShArEdKbHaNdLe00000000",
+				TenantID:     ownerTenantID,
+				PhysicalPath: physical,
+				OriginalName: "quadrant.jpg",
+				MimeType:     "image/jpeg",
+			},
+		},
 		messageKBShareAuthorizer{
 			ShareGuard: shareGuard,
 			KBs:        &stubKBTenantLookup{kbs: kbs},
@@ -1106,12 +1109,15 @@ func TestMessageScopedFilesServesLegacyMessageViaOrgSharedKB(t *testing.T) {
 		&stubFileService{getFile: func(_ context.Context, _ string) (io.ReadCloser, error) {
 			return io.NopCloser(strings.NewReader("legacy-shared-kb-image")), nil
 		}},
-		&stubResourceCatalog{resource: &types.StoredResource{
-			Handle:       "ShArEdKbHaNdLe00000000",
-			TenantID:     ownerTenantID,
-			PhysicalPath: "local://10005/images/quadrant.jpg",
-			MimeType:     "image/jpeg",
-		}},
+		&stubResourceCatalog{
+			bound: func(context.Context, uint64, string, string) (bool, error) { return true, nil },
+			resource: &types.StoredResource{
+				Handle:       "ShArEdKbHaNdLe00000000",
+				TenantID:     ownerTenantID,
+				PhysicalPath: "local://10005/images/quadrant.jpg",
+				MimeType:     "image/jpeg",
+			},
+		},
 		messageKBShareAuthorizer{
 			ShareGuard: &stubKBShareGuard{hasPermission: func(
 				context.Context, string, uint64, types.TenantRole, types.OrgMemberRole,
@@ -1162,12 +1168,15 @@ func TestMessageScopedFilesOrgSharedKBResolvesKnowledgeOwner(t *testing.T) {
 		&stubFileService{getFile: func(_ context.Context, _ string) (io.ReadCloser, error) {
 			return io.NopCloser(strings.NewReader("resolved-kb-image")), nil
 		}},
-		&stubResourceCatalog{resource: &types.StoredResource{
-			Handle:       "ShArEdKbHaNdLe00000000",
-			TenantID:     10005,
-			PhysicalPath: "local://10005/images/quadrant.jpg",
-			MimeType:     "image/jpeg",
-		}},
+		&stubResourceCatalog{
+			bound: func(context.Context, uint64, string, string) (bool, error) { return true, nil },
+			resource: &types.StoredResource{
+				Handle:       "ShArEdKbHaNdLe00000000",
+				TenantID:     10005,
+				PhysicalPath: "local://10005/images/quadrant.jpg",
+				MimeType:     "image/jpeg",
+			},
+		},
 		messageKBShareAuthorizer{
 			ShareGuard: &stubKBShareGuard{hasPermission: func(
 				context.Context, string, uint64, types.TenantRole, types.OrgMemberRole,
@@ -1301,12 +1310,15 @@ func TestMessageScopedFilesOrgSharedKBFailsClosedOnShareError(t *testing.T) {
 			t.Fatal("GetFile should not run after share lookup error")
 			return nil, nil
 		}},
-		&stubResourceCatalog{resource: &types.StoredResource{
-			Handle:       "ShArEdKbHaNdLe00000000",
-			TenantID:     10005,
-			PhysicalPath: "local://10005/images/quadrant.jpg",
-			MimeType:     "image/jpeg",
-		}},
+		&stubResourceCatalog{
+			bound: func(context.Context, uint64, string, string) (bool, error) { return true, nil },
+			resource: &types.StoredResource{
+				Handle:       "ShArEdKbHaNdLe00000000",
+				TenantID:     10005,
+				PhysicalPath: "local://10005/images/quadrant.jpg",
+				MimeType:     "image/jpeg",
+			},
+		},
 		messageKBShareAuthorizer{
 			ShareGuard: &stubKBShareGuard{hasPermission: func(
 				context.Context, string, uint64, types.TenantRole, types.OrgMemberRole,

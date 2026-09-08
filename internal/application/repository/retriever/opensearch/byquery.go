@@ -17,8 +17,13 @@ import (
 // bounded id + type. A non-zero version_conflicts count with no hard failures
 // is logged as a warning but not treated as an error.
 func inspectByQueryResponse(body io.Reader) error {
+	return inspectByQueryResult(body, false)
+}
+
+func inspectByQueryResult(body io.Reader, requireComplete bool) error {
 	var r struct {
-		VersionConflicts int `json:"version_conflicts"`
+		TimedOut         bool `json:"timed_out"`
+		VersionConflicts int  `json:"version_conflicts"`
 		Failures         []struct {
 			ID    string `json:"id"`
 			Cause struct {
@@ -29,6 +34,10 @@ func inspectByQueryResponse(body io.Reader) error {
 	}
 	if err := json.NewDecoder(body).Decode(&r); err != nil {
 		return fmt.Errorf("opensearch: parse by-query response: %w", ErrTransport)
+	}
+	if requireComplete && (r.TimedOut || r.VersionConflicts != 0) {
+		return fmt.Errorf("opensearch: incomplete move (timed_out=%t, version_conflicts=%d): %w",
+			r.TimedOut, r.VersionConflicts, ErrTransport)
 	}
 	log := logger.GetLogger(context.Background())
 	if len(r.Failures) == 0 {

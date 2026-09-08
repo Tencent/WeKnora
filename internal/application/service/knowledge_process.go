@@ -2451,12 +2451,13 @@ func (s *knowledgeService) ReparseKnowledge(
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start re-parsing knowledge")
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	existing, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	existing, kb, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, knowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to load knowledge: %v", err)
 		return nil, err
 	}
+
+	tenantID := existing.TenantID
 
 	// Allocate a fresh span tree attempt up front. Doing this BEFORE
 	// the cleanup + enqueue means: (a) the UI immediately sees a new
@@ -2469,13 +2470,6 @@ func (s *knowledgeService) ReparseKnowledge(
 		reparseAttempt = n
 	} else if err != nil {
 		logger.Warnf(ctx, "[Reparse] OpenAttempt failed for %s: %v (will fall back in worker)", existing.ID, err)
-	}
-
-	// Get knowledge base configuration
-	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, existing.KnowledgeBaseID)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get knowledge base for reparse: %v", err)
-		return nil, err
 	}
 
 	// When the caller supplies new overrides (e.g. via the reparse confirm
@@ -4005,6 +3999,11 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 
 	logger.Infof(ctx, "Processing knowledge list reparse task for %d knowledge items", len(payload.KnowledgeIDs))
 
+	ctx, ids, err := s.reparseTaskScope(ctx, payload)
+	if err != nil || len(ids) == 0 {
+		return err
+	}
+
 	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get tenant %d: %v", payload.TenantID, err)
@@ -4014,7 +4013,7 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 
-	outcome, err := runKnowledgeListReparseSubmissions(payload.KnowledgeIDs, func(id string) error {
+	outcome, err := runKnowledgeListReparseSubmissions(ids, func(id string) error {
 		_, err := s.ReparseKnowledge(ctx, id, payload.ProcessConfig)
 		return err
 	})

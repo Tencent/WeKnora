@@ -25,7 +25,7 @@ type Options struct {
 
 // Serve closes reader on every path. Seekable backends support standard Range
 // and HEAD via ServeContent; streaming-only backends return the full response
-// without buffering the object just to implement seeking.
+// without buffering the object just to implement seeking (RFC 9110 section 14.2).
 func Serve(w http.ResponseWriter, r *http.Request, reader io.ReadCloser, options Options) error {
 	defer func() { _ = reader.Close() }()
 	contentType, inline := secutils.SafeContentTypeByFilename(options.Filename)
@@ -57,6 +57,7 @@ func Serve(w http.ResponseWriter, r *http.Request, reader io.ReadCloser, options
 		http.ServeContent(w, r, options.Filename, time.Time{}, seeker)
 		return nil
 	}
+	w.Header().Set("Accept-Ranges", "none")
 	if options.Size > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(options.Size, 10))
 	}
