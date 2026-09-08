@@ -106,6 +106,16 @@ var (
 	ErrDangerousCommand  = errors.New("script contains dangerous command")
 	ErrArgInjection      = errors.New("argument injection detected")
 	ErrStdinInjection    = errors.New("stdin injection detected")
+	// ErrNoLiveSessionSandbox is returned by lookup-only entry points (the
+	// interactive terminal) when the session has no currently bound sandbox.
+	// Unlike Execute, these entry points never provision: creating a sandbox
+	// needs the agent's config-pin context, which they do not carry.
+	ErrNoLiveSessionSandbox = errors.New("session has no live sandbox")
+	// ErrTerminalUnsupported is returned when the active backend cannot
+	// stream PTYs (Docker, a disabled manager). Distinct from
+	// ErrNoLiveSessionSandbox: the session may well have a live sandbox,
+	// it just cannot host an interactive terminal.
+	ErrTerminalUnsupported = errors.New("sandbox backend does not support interactive terminals")
 )
 
 // Sandbox defines the interface for isolated script execution
@@ -231,6 +241,11 @@ type Config struct {
 
 	// DefaultTimeout is the default execution timeout
 	DefaultTimeout time.Duration
+
+	// TerminalIdleDisconnect is how long an open interactive terminal may
+	// go without input or PTY output before the WebSocket is closed. Zero
+	// is treated as DefaultTerminalIdleDisconnect at use time.
+	TerminalIdleDisconnect time.Duration
 
 	// AllowPrivateEndpoints is the per-workspace outbound policy for this
 	// connection. Link-local addresses are blocked regardless.

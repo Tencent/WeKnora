@@ -421,6 +421,11 @@
               :tips="$t('settings.sandbox.defaultTimeoutHelp')">
               <t-input-number v-model="defaultTimeoutSec" :min="0" theme="column" placeholder="60" />
             </t-form-item>
+            <t-form-item :label="$t('settings.sandbox.terminalIdleDisconnect')"
+              :tips="$t('settings.sandbox.terminalIdleDisconnectHelp')">
+              <t-input-number v-model="terminalIdleDisconnectSec" :min="0" :max="86400"
+                theme="column" placeholder="900" />
+            </t-form-item>
           </div>
         </div>
       </section>
@@ -817,6 +822,7 @@ const backend = ref('')
 // undefined rather than 0 so the input renders empty and shows its placeholder,
 // matching the HTTP timeout / TTL fields. A literal 0 would read as a real value.
 const defaultTimeoutSec = ref<number | undefined>(undefined)
+const terminalIdleDisconnectSec = ref<number | undefined>(undefined)
 const allowPrivateEndpoints = ref(false)
 const cube = reactive<SandboxCubeConfig>({})
 const e2b = reactive<SandboxE2BConfig>({})
@@ -1121,6 +1127,7 @@ function reset() {
     ? cfg.sandbox_type!
     : defaultBackendType()
   defaultTimeoutSec.value = cfg.default_timeout_sec || undefined
+  terminalIdleDisconnectSec.value = cfg.terminal_idle_disconnect_sec || undefined
   allowPrivateEndpoints.value = cfg.allow_private_endpoints === true
   // Replace rather than merge: a reused reactive object would otherwise carry
   // the previously edited config's fields into the next one opened.
@@ -1459,6 +1466,7 @@ function collectPayload(): SandboxConfig {
   const payload: SandboxConfig = {
     sandbox_type: backend.value,
     default_timeout_sec: defaultTimeoutSec.value || undefined,
+    terminal_idle_disconnect_sec: terminalIdleDisconnectSec.value || undefined,
     allow_private_endpoints: allowPrivateEndpoints.value || undefined,
     env_vars: envVars,
     skill_rollout: skillRollout.value,

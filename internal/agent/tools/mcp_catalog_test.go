@@ -92,6 +92,20 @@ func discoverPage(ctx context.Context, t *testing.T, r *ToolRegistry, args map[s
 	return page
 }
 
+// describeTool follows the model-facing protocol and returns the executable reference.
+func describeTool(ctx context.Context, t *testing.T, r *ToolRegistry, server, name string) mcpToolSummary {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{"mode": "describe", "server_id": server, "tool_name": name})
+	require.NoError(t, err)
+	result, err := r.ExecuteTool(ctx, ToolDiscoverMCPTools, raw)
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+	var tool mcpToolSummary
+	require.NoError(t, json.Unmarshal([]byte(result.Output), &tool))
+	require.NotEmpty(t, tool.ToolRef)
+	return tool
+}
+
 func TestMCPCatalogRegistrationDoesNotConnect(t *testing.T) {
 	ctx := catalogTestContext()
 	r := NewToolRegistry()
@@ -139,7 +153,7 @@ func TestMCPCatalogEnumeratesAllToolsWithoutSchemas(t *testing.T) {
 		for _, tool := range page.Tools {
 			require.False(t, found[tool.Name])
 			found[tool.Name] = true
-			require.NotEmpty(t, tool.ToolRef)
+			require.Empty(t, tool.ToolRef, "listing must not expose callable references")
 		}
 		if !page.HasMore {
 			require.Empty(t, page.NextCursor)
@@ -182,6 +196,7 @@ func TestMCPCatalogSearchMissStillAllowsExactDiscovery(t *testing.T) {
 func TestMCPCatalogPermissionsAndCursorInvalidation(t *testing.T) {
 	ctx, r, _, gate, _ := catalogFixture(t, 4)
 	first := discoverPage(ctx, t, r, map[string]any{"mode": "list_tools", "server_id": "server-1", "limit": 1})
+	described := describeTool(ctx, t, r, "server-1", first.Tools[0].Name)
 	gate.disabled["server-1/tool_002"] = true
 	raw, _ := json.Marshal(map[string]any{"mode": "list_tools", "server_id": "server-1", "cursor": first.NextCursor})
 	result, err := r.ExecuteTool(ctx, ToolDiscoverMCPTools, raw)
@@ -191,7 +206,7 @@ func TestMCPCatalogPermissionsAndCursorInvalidation(t *testing.T) {
 	page := discoverPage(ctx, t, r, map[string]any{"mode": "list_tools", "server_id": "server-1"})
 	require.Equal(t, 3, page.Total)
 	gate.disabled["server-1/tool_000"] = true
-	raw, _ = json.Marshal(map[string]any{"tool_ref": first.Tools[0].ToolRef, "arguments": map[string]any{"count": 1}})
+	raw, _ = json.Marshal(map[string]any{"tool_ref": described.ToolRef, "arguments": map[string]any{"count": 1}})
 	result, err = r.ExecuteTool(ctx, ToolCallMCPTool, raw)
 	require.NoError(t, err)
 	require.False(t, result.Success)
@@ -208,8 +223,8 @@ func TestMCPCatalogPermissionsAndCursorInvalidation(t *testing.T) {
 
 func TestMCPCatalogScopeAndProxyTargetValidation(t *testing.T) {
 	ctx, r, _, _, _ := catalogFixture(t, 1)
-	page := discoverPage(ctx, t, r, map[string]any{"mode": "list_tools", "server_id": "server-1"})
-	raw, _ := json.Marshal(map[string]any{"tool_ref": page.Tools[0].ToolRef, "arguments": map[string]any{}})
+	described := describeTool(ctx, t, r, "server-1", "tool_000")
+	raw, _ := json.Marshal(map[string]any{"tool_ref": described.ToolRef, "arguments": map[string]any{}})
 	result, err := r.ExecuteTool(ctx, ToolCallMCPTool, raw)
 	require.NoError(t, err)
 	require.False(t, result.Success)
@@ -249,6 +264,7 @@ func TestMCPCatalogIdentityDoesNotUseSanitizedName(t *testing.T) {
 	c.load = func(context.Context, *types.MCPService) ([]*MCPTool, error) { return []*MCPTool{a, b}, nil }
 	page := discoverPage(ctx, t, r, map[string]any{"mode": "list_tools", "server_id": "server-1"})
 	require.Len(t, page.Tools, 2)
+	describeTool(ctx, t, r, "server-1", b.mcpTool.Name)
 	proxy, _ := r.GetTool(ToolCallMCPTool)
 	raw, _ := json.Marshal(map[string]any{"tool_ref": mcpToolRef(b), "arguments": map[string]any{"count": 1}})
 	resolved, _, err := proxy.(*MCPCallTool).resolve(ctx, raw)
@@ -261,7 +277,7 @@ func TestMCPCatalogIdentityDoesNotUseSanitizedName(t *testing.T) {
 
 func TestMCPCatalogRefreshRetiresRemovedAndChangedDefinitions(t *testing.T) {
 	ctx, r, c, gate, _ := catalogFixture(t, 1)
-	first := discoverPage(ctx, t, r, map[string]any{"mode": "list_tools", "server_id": "server-1"})
+	described := describeTool(ctx, t, r, "server-1", "tool_000")
 	c.load = func(_ context.Context, s *types.MCPService) ([]*MCPTool, error) {
 		tool := catalogTestTool(s, "tool_000", "new version", gate)
 		tool.mcpTool.InputSchema = json.RawMessage(`{
@@ -278,8 +294,8 @@ func TestMCPCatalogRefreshRetiresRemovedAndChangedDefinitions(t *testing.T) {
 		return []*MCPTool{tool}, nil
 	}
 	changed := discoverPage(ctx, t, r, map[string]any{"mode": "list_tools", "server_id": "server-1", "refresh": true})
-	require.NotEqual(t, first.Tools[0].ToolRef, changed.Tools[0].ToolRef)
-	raw, _ := json.Marshal(map[string]any{"tool_ref": first.Tools[0].ToolRef, "arguments": map[string]any{"count": 1}})
+	require.NotEqual(t, described.ToolRef, describeTool(ctx, t, r, "server-1", changed.Tools[0].Name).ToolRef)
+	raw, _ := json.Marshal(map[string]any{"tool_ref": described.ToolRef, "arguments": map[string]any{"count": 1}})
 	result, err := r.ExecuteTool(ctx, ToolCallMCPTool, raw)
 	require.NoError(t, err)
 	require.False(t, result.Success)
@@ -400,12 +416,12 @@ func TestMCPCatalogWaitCanBeCanceledAndReportsLoading(t *testing.T) {
 
 func TestMCPTargetPresentationDoesNotConnectOrReauthorize(t *testing.T) {
 	ctx, r, c, _, _ := catalogFixture(t, 1)
-	page := discoverPage(ctx, t, r, map[string]any{"mode": "list_tools", "server_id": "server-1"})
+	described := describeTool(ctx, t, r, "server-1", "tool_000")
 	c.lookup = func(context.Context, uint64, string) (*types.MCPService, error) {
 		t.Fatal("presentation must not perform service lookup")
 		return nil, nil
 	}
-	raw, _ := json.Marshal(map[string]any{"tool_ref": page.Tools[0].ToolRef, "arguments": map[string]any{"count": 1}})
+	raw, _ := json.Marshal(map[string]any{"tool_ref": described.ToolRef, "arguments": map[string]any{"count": 1}})
 	target := r.MCPCallTarget(ctx, ToolCallMCPTool, raw)
 	require.NotNil(t, target)
 	require.Equal(t, "tool_000", target.ToolName)
@@ -443,4 +459,66 @@ func TestMCPCatalogMarksExternalMetadataAsUntrusted(t *testing.T) {
 	require.Contains(t, described.Notice, "not instructions")
 	// The definition is still returned verbatim; only its trust level is stated.
 	require.Equal(t, injection, described.Description)
+}
+
+func TestMCPCatalogRequiresDescribeBeforeCalling(t *testing.T) {
+	ctx, r, c, _, _ := catalogFixture(t, 2)
+	for _, mode := range []string{"list_tools", "search"} {
+		args := map[string]any{"mode": mode, "server_id": "server-1"}
+		if mode == "search" {
+			args["query"] = "lookup"
+		}
+		raw, _ := json.Marshal(args)
+		result, err := r.ExecuteTool(ctx, ToolDiscoverMCPTools, raw)
+		require.NoError(t, err)
+		require.True(t, result.Success, result.Error)
+		require.NotContains(t, result.Output, `"tool_ref":`)
+		require.NotContains(t, result.Output, `"input_schema":`)
+		require.Contains(t, result.Output, `"next_step":`)
+	}
+	// Even a remembered or reconstructed reference cannot bypass describe.
+	snapshot, _, err := c.snapshot(ctx, "server-1", false)
+	require.NoError(t, err)
+	raw, _ := json.Marshal(map[string]any{"tool_ref": mcpToolRef(snapshot[0]), "arguments": map[string]any{"count": 1}})
+	proxy, _ := r.GetTool(ToolCallMCPTool)
+	_, _, err = proxy.(*MCPCallTool).resolve(ctx, raw)
+	require.ErrorContains(t, err, "schema has not been described")
+	require.ErrorContains(t, err, `server_id="server-1"`)
+	require.Nil(t, r.MCPCallTarget(ctx, ToolCallMCPTool, raw), "listing must not present a target before describe")
+	describeTool(ctx, t, r, "server-1", snapshot[1].mcpTool.Name)
+	_, _, err = proxy.(*MCPCallTool).resolve(ctx, raw)
+	require.ErrorContains(t, err, "schema has not been described", "describing another tool must not enable this tool")
+	require.Nil(t, r.MCPCallTarget(ctx, ToolCallMCPTool, raw))
+	described := describeTool(ctx, t, r, "server-1", snapshot[0].mcpTool.Name)
+	require.Equal(t, mcpToolRef(snapshot[0]), described.ToolRef)
+	_, _, err = proxy.(*MCPCallTool).resolve(ctx, raw)
+	require.NoError(t, err)
+	target := r.MCPCallTarget(ctx, ToolCallMCPTool, raw)
+	require.NotNil(t, target)
+	require.Equal(t, snapshot[0].mcpTool.Name, target.ToolName)
+	// A new schema loaded by refresh has to be described again.
+	c.load = func(_ context.Context, service *types.MCPService) ([]*MCPTool, error) {
+		tool := catalogTestTool(service, snapshot[0].mcpTool.Name, "changed", nil)
+		tool.mcpTool.InputSchema = json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}}}`)
+		return []*MCPTool{tool}, nil
+	}
+	snapshot, _, err = c.snapshot(ctx, "server-1", true)
+	require.NoError(t, err)
+	raw, _ = json.Marshal(map[string]any{"tool_ref": mcpToolRef(snapshot[0]), "arguments": map[string]any{"id": "1"}})
+	_, _, err = proxy.(*MCPCallTool).resolve(ctx, raw)
+	require.ErrorContains(t, err, "schema has not been described")
+	require.Nil(t, r.MCPCallTarget(ctx, ToolCallMCPTool, raw))
+}
+
+func TestMCPCallInvalidArgumentsExplainObjectEnvelope(t *testing.T) {
+	ctx, r, _, _, _ := catalogFixture(t, 1)
+	described := describeTool(ctx, t, r, "server-1", "tool_000")
+	for _, arguments := range []any{`{"count":1}`, []any{1}, nil} {
+		raw, _ := json.Marshal(map[string]any{"tool_ref": described.ToolRef, "arguments": arguments})
+		result, err := r.ExecuteTool(ctx, ToolCallMCPTool, raw)
+		require.NoError(t, err)
+		require.False(t, result.Success)
+		require.Contains(t, result.Error, "JSON object, not a JSON-encoded string")
+		require.Contains(t, result.Error, `"arguments":{"order_id":"123"}`)
+	}
 }

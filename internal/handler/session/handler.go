@@ -38,6 +38,15 @@ type Handler struct {
 	// not support artifact collection; handlers must check before using.
 	artifactCollector *service.ArtifactCollector
 	memoryService     interfaces.MemoryService // Service for cross-session long-term memory
+	// userService / memberService back the sandbox terminal's self-contained
+	// handshake (browser WebSocket upgrades cannot send Authorization).
+	userService   interfaces.UserService
+	memberService interfaces.TenantMemberService
+	// terminalService opens PTYs on the sandbox bound to a session. It also
+	// owns first-use provisioning: the WS handshake carries the chat page's
+	// selected agent so the sandbox is created with the same config a
+	// conversation turn would use.
+	terminalService *service.SandboxTerminalService
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -61,6 +70,9 @@ func NewHandler(
 	temporaryDocuments interfaces.TemporaryDocumentService,
 	artifactCollector *service.ArtifactCollector,
 	memoryService interfaces.MemoryService,
+	userService interfaces.UserService,
+	memberService interfaces.TenantMemberService,
+	terminalService *service.SandboxTerminalService,
 ) *Handler {
 	return &Handler{
 		sessionService:       sessionService,
@@ -80,6 +92,9 @@ func NewHandler(
 		temporaryDocuments:   temporaryDocuments,
 		artifactCollector:    artifactCollector,
 		memoryService:        memoryService,
+		userService:          userService,
+		memberService:        memberService,
+		terminalService:      terminalService,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,

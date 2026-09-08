@@ -212,7 +212,7 @@
                     class="action-details">
                     <div v-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                       <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
-                        :output="event.output" :arguments="event.arguments" />
+                        :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                     </div>
                     <div v-else-if="event.output" class="tool-output-wrapper">
                       <div class="fallback-header">
@@ -501,7 +501,7 @@
                   class="action-details">
                   <div v-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                     <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
-                      :output="event.output" :arguments="event.arguments" />
+                      :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                   </div>
 
                   <div v-else-if="event.output" class="tool-output-wrapper">
@@ -577,7 +577,7 @@
     </template>
   </t-drawer>
   <ChatArtifactsDrawer
-    v-if="hasArtifacts && sessionIdForArtifacts && messageIdForArtifacts"
+    v-if="hasArtifacts && embeddedMode && sessionIdForArtifacts && messageIdForArtifacts"
     v-model:visible="showArtifactDrawer"
     :session-id="sessionIdForArtifacts"
     :message-id="messageIdForArtifacts"
@@ -600,6 +600,7 @@ import picturePreview from '@/components/picture-preview.vue';
 import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
 import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 import { useArtifactArriveMotion } from '@/composables/useArtifactArriveMotion';
+import { useChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import ChatMemoryStep from './ChatMemoryStep.vue';
 import { useChatMemoryRow, type UsedMemory } from '@/composables/useChatMemoryRow';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
@@ -625,6 +626,7 @@ import {
 import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
+import { getMcpToolDisplayType, getMcpToolTitle, mcpToolResultOutput } from '@/utils/mcpToolDisplay';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
 import {
   formatToolTitleWithDetail,
@@ -676,6 +678,8 @@ const { t } = useI18n();
 ensureMermaidInitialized();
 
 const TOOL_NAME_KEYS: Record<string, string> = {
+  discover_mcp_tools: 'agentStream.mcp.discoverTools',
+  call_mcp_tool: 'agentStream.mcp.callTool',
   search_knowledge: 'agentStream.tools.searchKnowledge',
   knowledge_search: 'agentStream.tools.searchKnowledge',
   grep_chunks: 'agentStream.tools.grepChunks',
@@ -1004,11 +1008,10 @@ watch(
 // Skill artifact download drawer (Agent path)
 // -----------------------------------------------------------------------------
 // Same contract as botmsg.vue: only render the button when the persisted
-// assistant message actually recorded files, then let ChatArtifactsDrawer
-// resolve names/sizes/mtimes and stream downloads via the /artifacts
-// endpoint. Agent mode is the primary path for skills, so this button will
-// appear more often here than in the RAG path.
+// assistant message actually recorded files, then open the sandbox panel's
+// artifacts tab (or ChatArtifactsDrawer in embedded mode).
 const showArtifactDrawer = ref(false);
+const sandboxPanel = useChatSandboxPanel();
 const artifactList = computed(() => {
   const list = ((props.session?.artifacts as any[]) || []);
   return list.map((a, i) => ({ index: i, ...a }));
@@ -1027,6 +1030,13 @@ const messageIdForArtifacts = computed(() =>
 const artifactPreviewIndex = ref<number | null>(null);
 function openArtifactDrawer(previewIndex: number | null = null) {
   if (!hasArtifacts.value) return;
+  if (sandboxPanel && !props.embeddedMode) {
+    sandboxPanel.open('artifacts', {
+      messageId: messageIdForArtifacts.value,
+      previewIndex,
+    });
+    return;
+  }
   artifactPreviewIndex.value = previewIndex;
   showArtifactDrawer.value = true;
 }
@@ -1150,6 +1160,8 @@ const formatToolResultContent = (value: unknown): string => {
 const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
 
 const resolveToolDisplayType = (event: any): DisplayType | undefined => {
+  const mcpType = getMcpToolDisplayType(event?.tool_name)
+  if (mcpType) return mcpType
   if (event?.display_type) return event.display_type as DisplayType
   if (event?.tool_name === 'shell_exec' || event?.tool_name === 'execute_skill_script') {
     return 'shell_exec'
@@ -2795,6 +2807,8 @@ const getAttachmentParsingSummary = (event: any): string => {
 
 // Get tool title - prefer summary over description, add query for search tools
 const getToolTitle = (event: any): string => {
+  const mcpTitle = getMcpToolTitle(t, event)
+  if (mcpTitle) return mcpTitle
   if (event.pending) {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');

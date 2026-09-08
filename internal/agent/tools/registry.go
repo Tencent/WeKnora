@@ -192,6 +192,9 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 	}
 	if len(validationErrs) > 0 {
 		errMsg := FormatValidationErrors(validationErrs)
+		if name == ToolCallMCPTool {
+			errMsg += mcpCallArgumentsHint
+		}
 		if name == ToolWriteSandboxFile {
 			errMsg += writeSandboxMissingFieldHint
 		}

@@ -770,6 +770,7 @@ export interface SandboxSkillImage {
 export interface SandboxConfig {
   sandbox_type?: string
   default_timeout_sec?: number
+  terminal_idle_disconnect_sec?: number
   allow_private_endpoints?: boolean
   env_vars?: Record<string, string>
   volume_mount?: SandboxVolumeMountConfig

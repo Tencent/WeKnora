@@ -35,6 +35,7 @@ func TestCubeRemoteClientProviderAndCapabilities(t *testing.T) {
 		SupportsTimeoutRefresh:        true,
 		SupportsFilesystemEnumeration: true,
 		SupportsSnapshots:             true,
+		SupportsTerminals:             true,
 	}, client.Capabilities())
 }
 

@@ -36,7 +36,10 @@ export function getAgentToolIconName(
   if (toolName === 'attachment_parsing') {
     return 'attach'
   }
-  if (toolName.startsWith('mcp_')) {
+  if (toolName === 'discover_mcp_tools') {
+    return 'search'
+  }
+  if (toolName === 'call_mcp_tool' || toolName.startsWith('mcp_')) {
     return 'terminal'
   }
   if (toolName === 'shell_exec') {
