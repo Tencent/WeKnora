@@ -75,9 +75,9 @@
 | Wiki真实8次对照 | 已真实验收；未观察到厂商命中 |
 | 真实检索退化负例 | 已真实验收 |
 | 数据库重启持久化与服务恢复 | 已真实验收 |
-| GitHub Actions配置文件 | 已实现，待远程验证 |
-| Required status check | 待Fork后配置 |
-| 空数据库1题真实复现 | 待完成 |
+| GitHub Actions配置文件 | 已实现并在 Fork PR 中通过 |
+| Required status check | 已配置并完成正常、退化和阻断验证 |
+| 空数据库1题真实复现 | 已真实验收；1/1完成，重启后可查询，Wiki探针有效 |
 | 最终Commit、Tag、submission.yaml | 待完成 |
 
 ## 6. 已知限制

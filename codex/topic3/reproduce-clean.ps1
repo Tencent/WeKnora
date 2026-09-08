@@ -185,13 +185,13 @@ function Run-Reproduction {
             if ($task.status -eq 3) { throw "evaluation failed: $($task.err_msg)" }
         } while ($task.status -ne 2 -and (Get-Date) -lt $deadline)
         if ($task.status -ne 2 -or $task.finished -ne 1 -or $task.total -ne 1) { throw 'one-question evaluation did not complete 1/1' }
-        $current.data | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath (Join-Path $resultDir 'evaluation.json') -Encoding utf8NoBOM
+        $current.data | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath (Join-Path $resultDir 'evaluation.json') -Encoding UTF8
 
         Write-Host '[run] running exactly one optimized Wiki probe'
         $wiki = Invoke-Topic3Api 'POST' '/api/v1/evaluation/wiki-cache-probe' $headers @{
             chat_id = $chatId; layout = 'optimized'; sample = 0
         }
-        $wiki.data | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath (Join-Path $resultDir 'wiki-prefix-probe.json') -Encoding utf8NoBOM
+        $wiki.data | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath (Join-Path $resultDir 'wiki-prefix-probe.json') -Encoding UTF8
         if (-not $wiki.data.output_valid -or -not $wiki.data.expected_found) { throw 'Wiki probe output validation failed' }
 
         $afterCalls = Get-DatabaseSnapshot
@@ -221,7 +221,7 @@ function Run-Reproduction {
             limitation = 'Provider usage reports total prompt tokens, not a separate exact token count for the stable prefix.'
         }
         $reportPath = Join-Path $resultDir 'clean-reproduction-report.json'
-        $report | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $reportPath -Encoding utf8NoBOM
+        $report | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $reportPath -Encoding UTF8
         $markdown = @(
             '# Topic 3 clean database reproduction report',
             '',
@@ -237,10 +237,15 @@ function Run-Reproduction {
             '',
             'Limitation: provider usage reports total prompt tokens, not a separate exact token count for the stable prefix.'
         ) -join "`r`n"
-        $markdown | Set-Content -LiteralPath (Join-Path $resultDir 'clean-reproduction-report.md') -Encoding utf8NoBOM
+        $markdown | Set-Content -LiteralPath (Join-Path $resultDir 'clean-reproduction-report.md') -Encoding UTF8
 
         $secretPattern = 'sk-[A-Za-z0-9_.-]{12,}'
-        if (Get-ChildItem -LiteralPath $resultDir -File | Select-String -Pattern $secretPattern -Quiet) { throw 'secret-like text found in reproduction output' }
+        # In Windows PowerShell, Select-String -Quiet returns one Boolean per
+        # input file.  An array containing only $false values still converts to
+        # $true in an if expression, so inspect actual MatchInfo objects here.
+        $secretHits = @(Get-ChildItem -LiteralPath $resultDir -File |
+            Select-String -Pattern $secretPattern)
+        if ($secretHits.Count -gt 0) { throw 'secret-like text found in reproduction output' }
         Write-Host 'REPRO_COMPLETE'
         Write-Host $resultDir
     } finally {

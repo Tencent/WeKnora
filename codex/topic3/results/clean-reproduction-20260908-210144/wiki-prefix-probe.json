@@ -1,0 +1,19 @@
+﻿{
+    "layout":  "optimized",
+    "sample":  0,
+    "purpose":  "topic3_wiki_cache_optimized",
+    "prefix_fingerprint":  "30a27474fe91dac7",
+    "expected_slug":  "entity/weknora",
+    "output":  "{\n  \"citations\": {\n    \"entity/weknora\": [\n      \"c001\"\n    ]\n  },\n  \"new_slugs\": []\n}",
+    "output_valid":  true,
+    "expected_found":  true,
+    "usage":  {
+                  "prompt_tokens":  1293,
+                  "completion_tokens":  41,
+                  "total_tokens":  1334,
+                  "cache_miss_tokens":  1293,
+                  "cache_reported":  true,
+                  "cache_status":  "miss"
+              },
+    "duration_ms":  636
+}
