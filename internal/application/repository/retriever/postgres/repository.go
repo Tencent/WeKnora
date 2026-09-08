@@ -184,7 +184,12 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 	// Redis result cache (best-effort, fail-open). The cache key binds the
 	// full retrieval context (tenant + query + filters + limits) plus a
 	// corpus version that is bumped on every index write, so a stale row is
-	// only ever returned until the next write. See bumpCorpusVersion.
+	// only ever returned until the next write. When the corpus version
+	// itself is unreadable (Redis outage) both cache read and write are
+	// bypassed — the ver0 keyspace is never touched during an outage window.
+	// Known residual (not fixed here): a bump that fails during a PG write
+	// leaves the version stalled, so pre-write verN entries stay visible for
+	// up to the 600s TTL (lost-bump window, see the R2 issue record).
 	if cached := g.keywordsCacheGet(ctx, params); cached != nil {
 		logger.GetLogger(ctx).Infof("[Postgres] Keywords cache hit for query=%s", params.Query)
 		return cached, nil
@@ -285,10 +290,12 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 	return []*types.RetrieveResult{resp}, nil
 }
 
-// keywordsCacheKey builds the Redis key for a keyword retrieval.
-// Includes the tenant and a hash of every filter that affects results so
-// distinct queries never share a cache row.
-func (g *pgRepository) keywordsCacheKey(ctx context.Context, params types.RetrieveParams) string {
+// keywordsCacheKeyVer builds the Redis key for a keyword retrieval and
+// reports whether the corpus version was readable. The bool is false when
+// Redis is unreachable: the key is empty and both cache read and write
+// must be bypassed (miss / skip) so no entry is ever read from or written
+// to the ver0 keyspace during an outage window (R2 fix).
+func (g *pgRepository) keywordsCacheKeyVer(ctx context.Context, params types.RetrieveParams) (string, bool) {
 	h := sha256.New()
 	// Sort the IDs so equivalent filter sets map to the same key.
 	sortedKB := append([]string(nil), params.KnowledgeBaseIDs...)
@@ -300,21 +307,41 @@ func (g *pgRepository) keywordsCacheKey(ctx context.Context, params types.Retrie
 	fmt.Fprintf(h, "%s|%s|%v|%v|%v|%d|%.6f", params.Query, params.KnowledgeType,
 		sortedKB, sortedKI, sortedTags, params.TopK, params.Threshold)
 	tid, _ := types.TenantIDFromContext(ctx)
-	corpusVer := g.corpusVersion(ctx)
-	return fmt.Sprintf("weknora:kw:%d:%016x:ver%d", tid, h.Sum(nil), corpusVer)
+	corpusVer, ok := g.corpusVersion(ctx)
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("weknora:kw:%d:%016x:ver%d", tid, h.Sum(nil), corpusVer), true
 }
 
-// corpusVersion returns the current corpus write version (0 when Redis is
-// unavailable). Every successful index write bumps it via bumpCorpusVersion.
-func (g *pgRepository) corpusVersion(ctx context.Context) uint64 {
+// keywordsCacheKey is the legacy single-value wrapper around
+// keywordsCacheKeyVer. When the corpus version is unreadable it returns an
+// empty string: existing tests and any diagnostic callers keep compiling,
+// while the cache Get/Set paths above use the two-value form and bypass
+// the cache on false.
+func (g *pgRepository) keywordsCacheKey(ctx context.Context, params types.RetrieveParams) string {
+	key, _ := g.keywordsCacheKeyVer(ctx, params)
+	return key
+}
+
+// corpusVersion returns the current corpus write version and whether it
+// could be read. (0, true) means a genuine never-bumped version 0 (the
+// corpus_ver key is absent — redis.Nil). (0, false) means the version is
+// UNKNOWN (Redis unreachable): callers must bypass the cache entirely
+// rather than collapsing onto the ver0 keyspace, which is the documented
+// R2 stale-read defect (see ISSUE-redis-degradation-stale-read).
+func (g *pgRepository) corpusVersion(ctx context.Context) (uint64, bool) {
 	if g.rdb == nil {
-		return 0
+		return 0, false
 	}
 	v, err := g.rdb.Get(ctx, "weknora:corpus_ver").Uint64()
-	if err != nil {
-		return 0
+	if errors.Is(err, redis.Nil) {
+		return 0, true // key absent: legitimate "never bumped" era
 	}
-	return v
+	if err != nil {
+		return 0, false // outage / connection error: version unknown
+	}
+	return v, true
 }
 
 // bumpCorpusVersion invalidates all cached keyword results after a write.
@@ -335,7 +362,11 @@ func (g *pgRepository) keywordsCacheGet(ctx context.Context, params types.Retrie
 	if g.rdb == nil {
 		return nil
 	}
-	raw, err := g.rdb.Get(ctx, g.keywordsCacheKey(ctx, params)).Bytes()
+	key, ok := g.keywordsCacheKeyVer(ctx, params)
+	if !ok {
+		return nil // corpus version unknown: miss, fall through to PG (never touch ver0)
+	}
+	raw, err := g.rdb.Get(ctx, key).Bytes()
 	if err != nil {
 		return nil
 	}
@@ -359,11 +390,15 @@ func (g *pgRepository) keywordsCacheSet(ctx context.Context, params types.Retrie
 	if g.rdb == nil || resp == nil || len(resp.Results) > 1000 {
 		return
 	}
+	key, ok := g.keywordsCacheKeyVer(ctx, params)
+	if !ok {
+		return // corpus version unknown: skip the write entirely (never pollute ver0)
+	}
 	raw, err := json.Marshal(resp)
 	if err != nil {
 		return
 	}
-	if err := g.rdb.Set(ctx, g.keywordsCacheKey(ctx, params), raw, 600*time.Second).Err(); err != nil {
+	if err := g.rdb.Set(ctx, key, raw, 600*time.Second).Err(); err != nil {
 		logger.GetLogger(ctx).Debugf("[Postgres] Keywords cache set failed: %v", err)
 	}
 }
