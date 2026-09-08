@@ -6,12 +6,18 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type wikiKBDeleteCall struct {
+	tenantID uint64
+	kbID     string
+}
 
 // recordingWikiRepo records calls to the four KB-scoped delete methods.
 // Embedding interfaces.WikiPageRepository satisfies the interface; only the
@@ -24,30 +30,39 @@ type recordingWikiRepo struct {
 	revisionsErr error
 	issuesErr    error
 
-	pagesCalls     []string
-	foldersCalls   []string
-	revisionsCalls []string
-	issuesCalls    []string
+	pagesCalls     []wikiKBDeleteCall
+	foldersCalls   []wikiKBDeleteCall
+	revisionsCalls []wikiKBDeleteCall
+	issuesCalls    []wikiKBDeleteCall
 }
 
-func (r *recordingWikiRepo) DeleteByKnowledgeBaseID(_ context.Context, kbID string) error {
-	r.pagesCalls = append(r.pagesCalls, kbID)
+func (r *recordingWikiRepo) DeleteByKnowledgeBaseID(_ context.Context, tenantID uint64, kbID string) error {
+	r.pagesCalls = append(r.pagesCalls, wikiKBDeleteCall{tenantID, kbID})
 	return r.pagesErr
 }
 
-func (r *recordingWikiRepo) DeleteFoldersByKnowledgeBaseID(_ context.Context, kbID string) error {
-	r.foldersCalls = append(r.foldersCalls, kbID)
+func (r *recordingWikiRepo) DeleteFoldersByKnowledgeBaseID(_ context.Context, tenantID uint64, kbID string) error {
+	r.foldersCalls = append(r.foldersCalls, wikiKBDeleteCall{tenantID, kbID})
 	return r.foldersErr
 }
 
-func (r *recordingWikiRepo) DeleteRevisionsByKnowledgeBaseID(_ context.Context, kbID string) error {
-	r.revisionsCalls = append(r.revisionsCalls, kbID)
+func (r *recordingWikiRepo) DeleteRevisionsByKnowledgeBaseID(_ context.Context, tenantID uint64, kbID string) error {
+	r.revisionsCalls = append(r.revisionsCalls, wikiKBDeleteCall{tenantID, kbID})
 	return r.revisionsErr
 }
 
-func (r *recordingWikiRepo) DeleteIssuesByKnowledgeBaseID(_ context.Context, kbID string) error {
-	r.issuesCalls = append(r.issuesCalls, kbID)
+func (r *recordingWikiRepo) DeleteIssuesByKnowledgeBaseID(_ context.Context, tenantID uint64, kbID string) error {
+	r.issuesCalls = append(r.issuesCalls, wikiKBDeleteCall{tenantID, kbID})
 	return r.issuesErr
+}
+
+func assertWikiCleanup(t *testing.T, wikiRepo *recordingWikiRepo, tenantID uint64, kbID string) {
+	t.Helper()
+	want := []wikiKBDeleteCall{{tenantID, kbID}}
+	assert.Equal(t, want, wikiRepo.pagesCalls)
+	assert.Equal(t, want, wikiRepo.foldersCalls)
+	assert.Equal(t, want, wikiRepo.revisionsCalls)
+	assert.Equal(t, want, wikiRepo.issuesCalls)
 }
 
 // kbDeletePayload builds the asynq task payload used by ProcessKBDelete.
@@ -62,6 +77,7 @@ func kbDeletePayload(t *testing.T, kbID string, tenantID uint64) *asynq.Task {
 // up when ProcessKBDelete runs against a KB with documents.
 func TestProcessKBDeleteCleansWikiData(t *testing.T) {
 	const kbID = "kb-with-docs"
+	const tenantID uint64 = 1
 	wikiRepo := &recordingWikiRepo{}
 	svc := &knowledgeBaseService{
 		kgRepo: populatedKBKnowledgeRepo{items: []*types.Knowledge{
@@ -73,20 +89,17 @@ func TestProcessKBDeleteCleansWikiData(t *testing.T) {
 		wikiRepo:      wikiRepo,
 	}
 
-	err := svc.ProcessKBDelete(context.Background(), kbDeletePayload(t, kbID, 1))
+	err := svc.ProcessKBDelete(context.Background(), kbDeletePayload(t, kbID, tenantID))
 
 	require.NoError(t, err)
-	assert.Equal(t, []string{kbID}, wikiRepo.pagesCalls)
-	assert.Equal(t, []string{kbID}, wikiRepo.foldersCalls)
-	assert.Equal(t, []string{kbID}, wikiRepo.revisionsCalls)
-	assert.Equal(t, []string{kbID}, wikiRepo.issuesCalls)
+	assertWikiCleanup(t, wikiRepo, tenantID, kbID)
 }
 
-// TestProcessKBDeleteWikiCleanupFailureDoesNotBlock verifies a wiki cleanup
-// failure is logged but does not fail the whole KB delete task. The KB is
-// already gone, so leftover rows are unreachable, not worth retrying.
-func TestProcessKBDeleteWikiCleanupFailureDoesNotBlock(t *testing.T) {
+// TestProcessKBDeleteWikiCleanupFailureRetries verifies a wiki cleanup
+// failure fails the task so asynq retries, while still attempting every table.
+func TestProcessKBDeleteWikiCleanupFailureRetries(t *testing.T) {
 	const kbID = "kb-wiki-fail"
+	const tenantID uint64 = 1
 	wikiRepo := &recordingWikiRepo{
 		pagesErr:     errors.New("pages boom"),
 		foldersErr:   errors.New("folders boom"),
@@ -103,14 +116,14 @@ func TestProcessKBDeleteWikiCleanupFailureDoesNotBlock(t *testing.T) {
 		wikiRepo:      wikiRepo,
 	}
 
-	err := svc.ProcessKBDelete(context.Background(), kbDeletePayload(t, kbID, 1))
+	err := svc.ProcessKBDelete(context.Background(), kbDeletePayload(t, kbID, tenantID))
 
-	require.NoError(t, err)
-	// Every cleanup path was still attempted despite earlier failures.
-	assert.Len(t, wikiRepo.pagesCalls, 1)
-	assert.Len(t, wikiRepo.foldersCalls, 1)
-	assert.Len(t, wikiRepo.revisionsCalls, 1)
-	assert.Len(t, wikiRepo.issuesCalls, 1)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "pages boom")
+	assert.ErrorContains(t, err, "folders boom")
+	assert.ErrorContains(t, err, "revisions boom")
+	assert.ErrorContains(t, err, "issues boom")
+	assertWikiCleanup(t, wikiRepo, tenantID, kbID)
 }
 
 // TestProcessKBDeleteWikiCleanupNilRepoSafe guards backward compatibility:
@@ -133,11 +146,11 @@ func TestProcessKBDeleteWikiCleanupNilRepoSafe(t *testing.T) {
 }
 
 // TestProcessKBDeleteEmptyKBStillCleansWiki verifies wiki cleanup runs even
-// when the KB has no knowledge entries. The cleanup lives outside the
-// "if len(knowledgeList) > 0" block because a KB can have wiki data without
-// any documents (pure wiki KB, or documents already deleted individually).
+// when the KB has no knowledge entries. A KB can have wiki data without any
+// documents (pure wiki KB, or documents already deleted individually).
 func TestProcessKBDeleteEmptyKBStillCleansWiki(t *testing.T) {
 	const kbID = "kb-no-docs"
+	const tenantID uint64 = 1
 	wikiRepo := &recordingWikiRepo{}
 	svc := &knowledgeBaseService{
 		kgRepo:          emptyKBKnowledgeRepo{},
@@ -146,20 +159,17 @@ func TestProcessKBDeleteEmptyKBStillCleansWiki(t *testing.T) {
 		wikiRepo:        wikiRepo,
 	}
 
-	err := svc.ProcessKBDelete(context.Background(), kbDeletePayload(t, kbID, 1))
+	err := svc.ProcessKBDelete(context.Background(), kbDeletePayload(t, kbID, tenantID))
 
 	require.NoError(t, err)
-	assert.Equal(t, []string{kbID}, wikiRepo.pagesCalls)
-	assert.Equal(t, []string{kbID}, wikiRepo.foldersCalls)
-	assert.Equal(t, []string{kbID}, wikiRepo.revisionsCalls)
-	assert.Equal(t, []string{kbID}, wikiRepo.issuesCalls)
+	assertWikiCleanup(t, wikiRepo, tenantID, kbID)
 }
 
 // TestProcessKBDeleteWikiCleanupIdempotent verifies calling the cleanup path
-// twice doesn't accumulate state or error out. Soft-deletes re-stamp
-// deleted_at; hard-deletes affect 0 rows on the second pass.
+// twice doesn't error out. Each attempt still issues the four scoped deletes.
 func TestProcessKBDeleteWikiCleanupIdempotent(t *testing.T) {
 	const kbID = "kb-idempotent"
+	const tenantID uint64 = 1
 	wikiRepo := &recordingWikiRepo{}
 	svc := &knowledgeBaseService{
 		kgRepo:          emptyKBKnowledgeRepo{},
@@ -167,18 +177,80 @@ func TestProcessKBDeleteWikiCleanupIdempotent(t *testing.T) {
 		taskPendingRepo: &recordingKBPendingRepo{},
 		wikiRepo:        wikiRepo,
 	}
-	task := kbDeletePayload(t, kbID, 1)
+	task := kbDeletePayload(t, kbID, tenantID)
 
 	require.NoError(t, svc.ProcessKBDelete(context.Background(), task))
 	require.NoError(t, svc.ProcessKBDelete(context.Background(), task))
 
-	require.Len(t, wikiRepo.pagesCalls, 2)
-	require.Len(t, wikiRepo.foldersCalls, 2)
-	require.Len(t, wikiRepo.revisionsCalls, 2)
-	require.Len(t, wikiRepo.issuesCalls, 2)
-	// All calls target the same KB.
-	assert.Equal(t, []string{kbID, kbID}, wikiRepo.pagesCalls)
-	assert.Equal(t, []string{kbID, kbID}, wikiRepo.foldersCalls)
-	assert.Equal(t, []string{kbID, kbID}, wikiRepo.revisionsCalls)
-	assert.Equal(t, []string{kbID, kbID}, wikiRepo.issuesCalls)
+	want := []wikiKBDeleteCall{{tenantID, kbID}, {tenantID, kbID}}
+	assert.Equal(t, want, wikiRepo.pagesCalls)
+	assert.Equal(t, want, wikiRepo.foldersCalls)
+	assert.Equal(t, want, wikiRepo.revisionsCalls)
+	assert.Equal(t, want, wikiRepo.issuesCalls)
+}
+
+// TestProcessKBDeleteCleansWikiWhenVectorStoreForbidden verifies wiki cleanup
+// still runs when engine resolution returns SkipRetry. Wiki rows do not
+// depend on the vector store and must not be left behind.
+func TestProcessKBDeleteCleansWikiWhenVectorStoreForbidden(t *testing.T) {
+	const kbID = "kb-skip"
+	const tenantID uint64 = 1
+	const storeID = "00000000-0000-0000-0000-0000000000ff"
+	storeIDPtr := storeID
+	wikiRepo := &recordingWikiRepo{}
+	repo := &kbDeleteTrackingKnowledgeRepo{populatedKBKnowledgeRepo: populatedKBKnowledgeRepo{items: []*types.Knowledge{
+		{ID: "k1", KnowledgeBaseID: kbID, EmbeddingModelID: "m1"},
+	}}}
+	svc := &knowledgeBaseService{
+		kgRepo:        repo,
+		chunkRepo:     kbCleanupChunkRepo{},
+		modelService:  kbCleanupModelService{},
+		taskInspector: &recordingKBTaskInspector{},
+		ownership:     &kbDeleteOwnership{owned: map[string]uint64{}},
+		wikiRepo:      wikiRepo,
+	}
+
+	payload, err := json.Marshal(types.KBDeletePayload{
+		TenantID:        tenantID,
+		KnowledgeBaseID: kbID,
+		VectorStoreID:   &storeIDPtr,
+	})
+	require.NoError(t, err)
+
+	err = svc.ProcessKBDelete(context.Background(), asynq.NewTask(types.TypeKBDelete, payload))
+
+	require.ErrorIs(t, err, asynq.SkipRetry)
+	assert.Equal(t, 0, repo.deleteCalls)
+	assertWikiCleanup(t, wikiRepo, tenantID, kbID)
+}
+
+func TestProcessKBDeleteCleansWikiWhenVectorStoreUnavailable(t *testing.T) {
+	const kbID = "kb-unavailable"
+	const tenantID uint64 = 1
+	const storeID = "00000000-0000-0000-0000-0000000000aa"
+	storeIDPtr := storeID
+	wikiRepo := &recordingWikiRepo{}
+	svc := &knowledgeBaseService{
+		kgRepo: populatedKBKnowledgeRepo{items: []*types.Knowledge{
+			{ID: "k1", KnowledgeBaseID: kbID, EmbeddingModelID: "m1"},
+		}},
+		chunkRepo:      kbCleanupChunkRepo{},
+		modelService:   kbCleanupModelService{},
+		taskInspector:  &recordingKBTaskInspector{},
+		retrieveEngine: kbDeleteDeferredRegistry{err: retriever.ErrVectorStoreUnavailable},
+		ownership:      &kbDeleteOwnership{owned: map[string]uint64{storeID: tenantID}},
+		wikiRepo:       wikiRepo,
+	}
+
+	payload, err := json.Marshal(types.KBDeletePayload{
+		TenantID:        tenantID,
+		KnowledgeBaseID: kbID,
+		VectorStoreID:   &storeIDPtr,
+	})
+	require.NoError(t, err)
+
+	err = svc.ProcessKBDelete(context.Background(), asynq.NewTask(types.TypeKBDelete, payload))
+
+	require.ErrorIs(t, err, retriever.ErrVectorStoreUnavailable)
+	assertWikiCleanup(t, wikiRepo, tenantID, kbID)
 }
