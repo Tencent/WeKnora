@@ -1122,6 +1122,55 @@
                 </div>
 
                 <!-- 工具配置（仅 Agent 模式） -->
+                <div v-show="currentSection === 'semantic'" class="section">
+                  <div class="section-header">
+                    <h2>{{ $t('semantic.agent.navLabel') }}</h2>
+                    <p class="section-description">{{ $t('semantic.agent.sectionDesc') }}</p>
+                  </div>
+
+                  <div class="settings-group">
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('semantic.agent.modelScope') }}</label>
+                        <p class="desc">{{ $t('semantic.agent.modelScopeDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-radio-group v-model="semanticMode">
+                          <t-radio-button value="all">{{ $t('semantic.agent.scopeAll') }}</t-radio-button>
+                          <t-radio-button value="selected">{{ $t('semantic.agent.scopeSelected') }}</t-radio-button>
+                          <t-radio-button value="none">{{ $t('semantic.agent.scopeNone') }}</t-radio-button>
+                        </t-radio-group>
+                      </div>
+                    </div>
+
+                    <div v-if="semanticMode === 'selected'" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('semantic.agent.selectModels') }}</label>
+                        <p class="desc">{{ $t('semantic.agent.selectModelsDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-select v-model="formData.config.semantic_models" multiple filterable
+                          :min-collapsed-num="3" :placeholder="$t('semantic.agent.selectModels')"
+                          :loading="semanticModelsLoading">
+                          <t-option v-for="m in semanticModelOptions" :key="m.value" :value="m.value" :label="m.label">
+                            <div class="kb-option-item">
+                              <span class="kb-option-label">{{ m.label }}</span>
+                              <span class="kb-option-tag tag-rag">cube</span>
+                            </div>
+                          </t-option>
+                        </t-select>
+                      </div>
+                    </div>
+
+                    <div v-if="semanticMode !== 'none'" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('semantic.agent.runtimeHintTitle') }}</label>
+                        <p class="desc">{{ $t('semantic.agent.runtimeHint') }}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <div v-show="currentSection === 'tools' && isAgentMode" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.toolsConfig') }}</h2>
@@ -1858,6 +1907,7 @@ import {
   type PromptTemplatesConfig,
 } from '@/api/system';
 import { useUIStore } from '@/stores/ui';
+import { getModuleInfo, listModels } from '@/semantic/api';
 import { useAuthStore } from '@/stores/auth';
 import { useOrganizationStore } from '@/stores/organization';
 import { useChatResourcesStore } from '@/stores/chatResources';
@@ -2014,8 +2064,42 @@ const onAgentEditorFocusSection = (event: Event) => {
   }
 }
 
+// 数据建模模块是否启用: 启用时智能体编排出现「数据建模」配置
+const semanticEnabled = ref(false);
+// 编排: 本智能体可查询的语义模型范围
+const semanticMode = ref<'all' | 'selected' | 'none'>('none');
+const semanticModelOptions = ref<{ value: string; label: string }[]>([]);
+const semanticModelsLoading = ref(false);
+
+watch(semanticMode, (mode) => {
+  formData.value.config.semantic_model_mode = mode;
+  if (mode === 'none') formData.value.config.semantic_models = [];
+  if (mode !== 'none' && semanticModelOptions.value.length === 0) loadSemanticModels();
+});
+
+async function loadSemanticModels() {
+  semanticModelsLoading.value = true;
+  try {
+    const resp = await listModels();
+    semanticModelOptions.value = (resp.models || [])
+      .filter(m => m.status === 'published')
+      .map(m => ({ value: m.name, label: m.title ? `${m.title} (${m.name})` : m.name }));
+  } catch {
+    semanticModelOptions.value = [];
+  } finally {
+    semanticModelsLoading.value = false;
+  }
+}
+
 onMounted(() => {
   window.addEventListener(AGENT_EDITOR_FOCUS_SECTION_EVENT, onAgentEditorFocusSection)
+  // 探测数据建模模块开关 (失败视为未启用, 不阻塞编辑器)
+  getModuleInfo()
+    .then(info => {
+      semanticEnabled.value = !!info?.enabled;
+      if (semanticEnabled.value) loadSemanticModels();
+    })
+    .catch(() => { semanticEnabled.value = false })
 })
 
 onBeforeUnmount(() => {
@@ -2672,6 +2756,9 @@ const navItems = computed(() => {
   items.push({ key: 'multimodal', icon: 'attach', label: t('agentEditor.imageUpload.navLabel') });
   // Agent 模式能力
   if (isAgentMode.value) {
+    if (semanticEnabled.value) {
+      items.push({ key: 'semantic', icon: 'chart', label: t('semantic.agent.navLabel') });
+    }
     items.push({ key: 'tools', icon: 'tools', label: t('agent.editor.toolsConfig') });
     items.push({ key: 'mcp', icon: 'server', label: t('agentEditor.mcp.label') });
     items.push({ key: 'skills', icon: SKILL_ICON, label: t('agent.editor.skillsConfig') });
@@ -2702,7 +2789,7 @@ const navGroups = computed(() => {
     {
       key: 'capability',
       label: t('agentEditor.navGroups.capability'),
-      items: pickItems(['multimodal', 'tools', 'mcp', 'skills']),
+      items: pickItems(['multimodal', 'semantic', 'tools', 'mcp', 'skills']),
     },
     {
       key: 'integration',
@@ -2729,6 +2816,9 @@ const defaultFormData = {
     max_completion_tokens: 0,
     thinking: false, // 默认禁用思考模式
     citation_enabled: true, // 默认输出知识库/网页来源引用
+    // 数据建模 (Cube 语义层) 范围
+    semantic_model_mode: 'none' as 'all' | 'selected' | 'none',
+    semantic_models: [] as string[],
     // Agent模式设置
     max_iterations: 10,
     llm_call_timeout: 120,  // 120 seconds
@@ -3427,6 +3517,9 @@ watch(() => props.visible, async (val) => {
         },
       };
       // 确保数组字段存在
+      // 数据建模编排回显
+      semanticMode.value = ((agentData.config as any).semantic_model_mode as 'all' | 'selected' | 'none') || 'none';
+      if (!agentData.config.semantic_models) agentData.config.semantic_models = [];
       if (!agentData.config.knowledge_bases) agentData.config.knowledge_bases = [];
       if (!agentData.config.allowed_tools) agentData.config.allowed_tools = [];
       if (!agentData.config.mcp_services) agentData.config.mcp_services = [];

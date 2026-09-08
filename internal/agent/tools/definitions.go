@@ -80,7 +80,7 @@ type AvailableTool struct {
 // AvailableToolDefinitions returns the list of tools exposed to the UI.
 // Keep this in sync with registered tools in this package.
 func AvailableToolDefinitions() []AvailableTool {
-	return []AvailableTool{
+	defs := []AvailableTool{
 		{Name: ToolThinking, Label: "思考", Description: "动态和反思性的问题解决思考工具"},
 		{Name: ToolTodoWrite, Label: "制定计划", Description: "创建结构化的研究计划"},
 		{Name: ToolGrepChunks, Label: "关键词搜索", Description: "快速定位包含特定关键词的文档和分块"},
@@ -107,6 +107,7 @@ func AvailableToolDefinitions() []AvailableTool {
 		{Name: ToolWikiReadIssue, Label: "查看Wiki问题", Description: "查看特定的Wiki页面问题详情"},
 		{Name: ToolWikiUpdateIssue, Label: "更新Wiki问题状态", Description: "更新特定的Wiki页面问题状态"},
 	}
+	return defs
 }
 
 // DefaultAllowedTools returns the default allowed tools list.

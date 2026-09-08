@@ -7,6 +7,8 @@ import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
 import { normalizeSettingsSection } from '@/config/settingsRoute'
+// 数据建模模块 (自包含): 启动即注册其自带 i18n, 使侧栏菜单文案可用
+import '@/semantic'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -138,6 +140,13 @@ const router = createRouter({
           name: "agentList",
           component: () => import("../views/agent/AgentList.vue"),
           meta: { requiresInit: true, requiresAuth: true, requiredCapability: 'agents' }
+        },
+        {
+          // 数据建模模块: 路由加载即触发模块 i18n 自注册 (见 @/semantic)
+          path: "semantic",
+          name: "semanticStudio",
+          component: () => import("@/semantic/SemanticStudio.vue"),
+          meta: { requiresInit: true, requiresAuth: true }
         },
         {
           path: "integrations",
