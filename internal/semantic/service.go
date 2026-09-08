@@ -518,13 +518,14 @@ func (e *Engine) DraftCube(ctx context.Context, tenant uint64, id, schema, table
 
 // SaveModelInput carries editable fields; DraftYAML is the canonical body.
 type SaveModelInput struct {
-	Name          string   `json:"name"`
-	Title         string   `json:"title"`
-	Description   string   `json:"description"`
-	ConnectionID  string   `json:"connection_id"`
-	Kind          string   `json:"kind"`
-	DraftYAML     string   `json:"draft_yaml"`
-	AllowedGroups []string `json:"allowed_groups"`
+	Name             string   `json:"name"`
+	Title            string   `json:"title"`
+	Description      string   `json:"description"`
+	ConnectionID     string   `json:"connection_id"`
+	Kind             string   `json:"kind"`
+	DraftYAML        string   `json:"draft_yaml"`
+	AllowedGroups    []string `json:"allowed_groups"`
+	MemberVisibility string   `json:"member_visibility,omitempty"`
 }
 
 // validateModelYAML parses + validates a draft against published model names.
@@ -564,6 +565,7 @@ func (e *Engine) CreateModel(
 		ConnectionID: in.ConnectionID, Kind: in.Kind,
 		DraftYAML: in.DraftYAML, Status: ModelStatusDraft,
 		AllowedGroups: StringListJSON(in.AllowedGroups), CreatedBy: userID,
+		MemberVisibility: types.JSON(in.MemberVisibility),
 	}
 	if m.Kind == "" {
 		m.Kind = ModelKindCube
@@ -614,6 +616,9 @@ func (e *Engine) UpdateModel(
 	m.DraftYAML = in.DraftYAML
 	if in.AllowedGroups != nil {
 		m.AllowedGroups = StringListJSON(in.AllowedGroups)
+	}
+	if in.MemberVisibility != "" {
+		m.MemberVisibility = types.JSON(in.MemberVisibility)
 	}
 	if err := e.repo.SaveModel(ctx, m); err != nil {
 		return nil, err
@@ -710,14 +715,15 @@ func (e *Engine) Publish(
 	case ModelKindCube:
 		// Force data_source to the bound connection slug.
 		doc.Cubes[0].DataSource = boundConn.Name
-		// Force-inject default-deny access_policy (never trust YAML).
-		doc.Cubes[0].AccessPolicy = BuildPolicy(StringList(m.AllowedGroups))
+		// Force-inject access_policy with member-level visibility if configured.
+		groups := StringList(m.AllowedGroups)
+		vis := parseMemberVisibility(m.MemberVisibility)
+		doc.Cubes[0].AccessPolicy = BuildPolicyWithVisibility(vis, groups)
 	case ModelKindView:
 		// Views also get forced access_policy (Cube member-level rules
 		// on the underlying cube do NOT cascade to views).
 		if len(doc.Views) > 0 {
-			extra, _ := doc.Views[0].Extra.(map[string]interface{})
-			doc.Views[0].Extra = setViewPolicy(extra, BuildPolicy(StringList(m.AllowedGroups)))
+			doc.Views[0].Extra = setViewPolicy(doc.Views[0].Extra, BuildPolicy(StringList(m.AllowedGroups)))
 		}
 	}
 	yamlText, err := GenerateModelYAML(doc)
@@ -727,7 +733,6 @@ func (e *Engine) Publish(
 	if err := e.syncDatasources(ctx); err != nil {
 		return nil, fmt.Errorf("failed to sync datasources.yaml: %w", err)
 	}
-	fingerprint := schemaFingerprint(doc)
 	if err := e.deployer.PublishModel(m.TenantID, name, yamlText); err != nil {
 		e.markPublishFailed(ctx, m, err.Error())
 		return nil, err
@@ -738,12 +743,22 @@ func (e *Engine) Publish(
 		e.markPublishFailed(ctx, m, "cube client not configured")
 		return nil, fmt.Errorf("cube client not configured (CUBE_API_URL / CUBEJS_API_SECRET)")
 	}
-	// Fingerprint-based verification: waits for the NEW definition to appear
-	// (not just the model name — a stale schema from a previous publish would
-	// still have the same name). Checks that measures/dimensions match.
-	if err := e.client.WaitUntilCompiledFingerprint(
-		pubCtx, name, fingerprint, e.fingerprintFromMeta, e.cfg.PublishTimeout,
-	); err != nil {
+	// Wait for the model to appear in /v1/meta. Additionally verify that the
+	// measure count matches the new definition (catches stale schema from a
+	// failed re-publish of an existing model).
+	expectedMeasures := 0
+	if len(doc.Cubes) > 0 {
+		expectedMeasures = len(doc.Cubes[0].Measures)
+	}
+	verifyFn := func(meta *cubeclient.MetaResponse) bool {
+		for _, cb := range meta.Cubes {
+			if cb.Name == name {
+				return len(cb.Measures) == expectedMeasures
+			}
+		}
+		return false
+	}
+	if err := e.client.WaitUntilCompiledVerify(pubCtx, name, verifyFn, e.cfg.PublishTimeout); err != nil {
 		_ = e.deployer.UnpublishModel(m.TenantID, name) // self-heal: do not serve a broken schema
 		e.markPublishFailed(ctx, m, err.Error())
 		return nil, err
@@ -1023,7 +1038,15 @@ func (e *Engine) QueryForUser(
 	if err != nil {
 		return nil, err
 	}
-	return e.client.Load(uctx, q.toCubeQuery(e.cfg.MaxPreviewRows))
+	resp, err := e.client.Load(uctx, q.toCubeQuery(e.cfg.MaxPreviewRows))
+	if err != nil {
+		return nil, err
+	}
+	// Attach the generated SQL for transparency (dry-run, no extra DB cost).
+	if sqlResp, sqlErr := e.client.SQL(uctx, q.toCubeQuery(e.cfg.MaxPreviewRows)); sqlErr == nil && len(sqlResp.SQL) > 0 { //nolint:lll // long but readable
+		resp.GeneratedSQL = sqlResp.SQL
+	}
+	return resp, nil
 }
 
 // SQLForUser dry-runs a query under the caller's identity (agent tools).
@@ -1182,28 +1205,17 @@ func WarnDenied(meta *cubeclient.MetaResponse, q *PreviewQuery) string {
 	return ""
 }
 
-// fingerprintFromMeta extracts a comparable fingerprint from the Cube /v1/meta
-// response for the named model. Returns empty string if not found.
-func (e *Engine) fingerprintFromMeta(ctx context.Context, modelName string) string {
-	meta, err := e.client.Meta(ctx)
-	if err != nil {
-		return ""
+// parseMemberVisibility decodes the MemberVisibility JSONB field into a
+// MemberVisibility map. Returns empty map on parse failure.
+func parseMemberVisibility(raw types.JSON) MemberVisibility {
+	if len(raw) == 0 {
+		return MemberVisibility{}
 	}
-	for _, cb := range meta.Cubes {
-		if cb.Name != modelName {
-			continue
-		}
-		var b strings.Builder
-		b.WriteString(cb.Type + ":" + cb.Name)
-		for _, m := range cb.Measures {
-			b.WriteString("|m:" + m.Name + ":" + m.Type)
-		}
-		for _, d := range cb.Dimensions {
-			b.WriteString("|d:" + d.Name + ":" + d.Type)
-		}
-		return b.String()
+	var vis MemberVisibility
+	if err := json.Unmarshal(raw, &vis); err != nil {
+		return MemberVisibility{}
 	}
-	return ""
+	return vis
 }
 
 // setViewPolicy injects or replaces the access_policy in a view's Extra map.
@@ -1222,22 +1234,3 @@ func setViewPolicy(
 // corrupting each other (e.g. A publishes while B writes a broken model,
 // causing the whole schema to fail compilation and A to be falsely marked failed).
 var publishMu sync.Mutex
-
-// schemaFingerprint generates a deterministic fingerprint of a model document
-// (kind:name + member name:type pairs) used to verify that Cube compiled the
-// NEW definition, not a stale one from a previous publish.
-func schemaFingerprint(doc *ModelDoc) string {
-	var b strings.Builder
-	kind, name, _ := doc.Identity()
-	b.WriteString(kind + ":" + name)
-	if len(doc.Cubes) > 0 {
-		c := doc.Cubes[0]
-		for _, m := range c.Measures {
-			b.WriteString("|m:" + m.Name + ":" + m.Type)
-		}
-		for _, d := range c.Dimensions {
-			b.WriteString("|d:" + d.Name + ":" + d.Type)
-		}
-	}
-	return b.String()
-}

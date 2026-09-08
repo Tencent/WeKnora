@@ -166,6 +166,14 @@
                       </t-select>
                       <p class="form-tip">{{ t('semantic.model.editor.groupsHint') }}</p>
                     </div>
+                    <!-- 字段级可见性: 勾选组后可为每组指定可见的成员子集 -->
+                    <div v-for="gname in form.allowed_groups" :key="gname" class="member-vis-row">
+                      <label class="form-label" style="font-size:13px">{{ gname }}</label>
+                      <t-select v-model="memberVis[gname]" multiple filterable :disabled="!canEdit"
+                        :placeholder="t('semantic.model.editor.memberVisPh')" size="small" clearable>
+                        <t-option v-for="m in allMemberNames" :key="m" :value="m" :label="m" />
+                      </t-select>
+                    </div>
                   </div>
 
                   <!-- YAML 源码 -->
@@ -329,6 +337,7 @@ const saveError = ref('')
 const saving = ref(false)
 const publishing = ref(false)
 const noteVisible = ref(false)
+const memberVis = ref<Record<string, string[]>>({})
 const previewMeasures = ref<string[]>([])
 const previewDimensions = ref<string[]>([])
 const previewRows = ref<Record<string, unknown>[]>([])
@@ -336,6 +345,17 @@ const previewColumns = ref<{ colKey: string; title: string }[]>([])
 const previewing = ref(false)
 const previewHint = ref('')
 const previewRan = ref(false)
+
+const allMemberNames = computed(() => {
+  const names: string[] = []
+  for (const d of dimensionRows.value) {
+    if (d.name) names.push(d.name)
+  }
+  for (const m of measureRows.value) {
+    if (m.name) names.push(m.name)
+  }
+  return names
+})
 
 const isCube = computed(() => model.value?.kind !== 'view')
 const isPublished = computed(() => model.value?.status === 'published')
@@ -527,7 +547,8 @@ async function save(): Promise<SemanticModel | null> {
       connection_id: form.value.connection_id,
       kind: model.value!.kind,
       draft_yaml: currentYaml(),
-      allowed_groups: form.value.allowed_groups
+      allowed_groups: form.value.allowed_groups,
+      member_visibility: JSON.stringify(memberVis.value)
     })
     model.value = updated
     emit('saved', updated)

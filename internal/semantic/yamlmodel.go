@@ -51,10 +51,10 @@ type CubeDef struct {
 // and their member syntax is expressive enough that v1 authors them in the
 // YAML source mode; only the identity fields are parsed for listing.
 type ViewDef struct {
-	Name        string      `yaml:"name"`
-	Title       string      `yaml:"title,omitempty"`
-	Description string      `yaml:"description,omitempty"`
-	Extra       interface{} `yaml:",inline"`
+	Name        string                 `yaml:"name"`
+	Title       string                 `yaml:"title,omitempty"`
+	Description string                 `yaml:"description,omitempty"`
+	Extra       map[string]interface{} `yaml:",inline"`
 }
 
 // JoinDef is one cube join.
@@ -117,6 +117,48 @@ func GenerateModelYAML(doc *ModelDoc) (string, error) {
 		return "", fmt.Errorf("YAML generation failed: %w", err)
 	}
 	return string(out), nil
+}
+
+// MemberVisibility maps a data group slug to the set of member names that
+// group can see. An empty/absent entry means "all members" (includes: "*").
+type MemberVisibility map[string][]string
+
+// BuildPolicyWithVisibility renders a default-deny access policy where each
+// group can be granted all members or a specific subset. Admin always gets
+// full access.
+func BuildPolicyWithVisibility(vis MemberVisibility, allowedGroups []string) []PolicyRule {
+	rules := []PolicyRule{{
+		Group:       "*",
+		MemberLevel: &MemberLevel{Includes: []interface{}{}},
+	}}
+	seen := map[string]bool{"*": true}
+
+	grant := func(group string, includes interface{}) {
+		if group == "" || seen[group] {
+			return
+		}
+		seen[group] = true
+		rules = append(rules, PolicyRule{Group: group, MemberLevel: &MemberLevel{Includes: includes}})
+	}
+
+	// Admin always gets all members
+	grant(AdminGroup, "*")
+
+	for _, group := range allowedGroups {
+		group = strings.TrimSpace(group)
+		if group == "" || seen[group] {
+			continue
+		}
+		visible, hasExplicit := vis[group]
+		if !hasExplicit || len(visible) == 0 {
+			// No restriction: all members
+			grant(group, "*")
+		} else {
+			// Filter to only the specified members
+			grant(group, visible)
+		}
+	}
+	return rules
 }
 
 // BuildPolicy renders the default-deny access policy for the given group

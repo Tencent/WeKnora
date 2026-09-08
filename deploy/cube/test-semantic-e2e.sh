@@ -16,7 +16,7 @@
 #
 # 可选环境变量:
 #   DB_HOST (默认 172.18.0.1)  DB_PORT (默认 13306)
-#   DB_USER (默认 <your_db_user>)        DB_PASS (<your_db_password>)
+#   DB_USER (默认 root)                 DB_PASS (默认 cube123, mock 库密码)
 #   DB_NAME (默认 erp_clt)
 #   TABLE_SCHEMA (默认 erp_clt) TABLE_NAME (默认 sn_list)
 #   CLEANUP (默认 true, 测完清理创建的资源)
@@ -26,8 +26,8 @@ B="http://127.0.0.1:8080/api/v1/semantic"
 EMAIL="${EMAIL:?need EMAIL}"; PASS="${PASS:?need PASS}"
 DB_HOST="${DB_HOST:-172.18.0.1}"
 DB_PORT="${DB_PORT:-13306}"
-DB_USER="${DB_USER:-<your_db_user>}"
-DB_PASS="${DB_PASS:-<your_db_password>}"
+DB_USER="${DB_USER:-root}"
+DB_PASS="${DB_PASS:-cube123}"
 DB_NAME="${DB_NAME:-erp_clt}"
 TABLE_SCHEMA="${TABLE_SCHEMA:-erp_clt}"
 TABLE_NAME="${TABLE_NAME:-sn_list}"

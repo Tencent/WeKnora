@@ -5,8 +5,6 @@ import (
 	"errors"
 
 	"gorm.io/gorm"
-
-	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // Repository provides data access for the semantic module. All queries are
@@ -285,5 +283,3 @@ func (r *Repository) ListAudits(ctx context.Context, tenantID uint64, limit int)
 		Order("created_at DESC").Limit(limit).Find(&out).Error
 	return out, err
 }
-
-var _ = types.JSON(nil)

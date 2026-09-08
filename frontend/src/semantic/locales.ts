@@ -8,6 +8,7 @@ const MESSAGES: Record<string, Record<string, unknown>> = {
   'zh-CN': { semantic: zhCN, menu: { semantic: zhCN.menu } },
   'en-US': { semantic: enUS, menu: { semantic: enUS.menu } },
   'ru-RU': { semantic: enUS, menu: { semantic: enUS.menu } },
+  'ja-JP': { semantic: enUS, menu: { semantic: enUS.menu } },
   'ko-KR': { semantic: enUS, menu: { semantic: enUS.menu } }
 }
 

@@ -279,12 +279,17 @@ func (t *CubeQueryTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		output = hint + "\n\n" + output
 	}
 	logger.Infof(ctx, "[Tool][CubeQuery] returned %d rows", rowCount)
+	sqlNote := ""
+	if len(resp.GeneratedSQL) > 0 {
+		sqlNote = "\n\nGenerated SQL (for reference):\n" + strings.Join(resp.GeneratedSQL, "\n")
+	}
 	return &types.ToolResult{
 		Success: true,
-		Output:  output,
+		Output:  output + sqlNote,
 		Data: map[string]interface{}{
 			"rows":         resp.Data,
 			"row_count":    rowCount,
+			"sql":          resp.GeneratedSQL,
 			"display_type": "cube_query",
 		},
 	}, nil
