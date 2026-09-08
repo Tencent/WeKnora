@@ -1,19 +1,14 @@
 # 长期记忆与任务经验
 
-本次把用户记忆、执行经验、整理和召回纳入同一条生命周期。目标是复用 Codex 的可验证机制，而不是声称模型质量已与 Codex 等同；实际提取质量仍需用生产模型和代表性任务评估。
+用户记忆、执行经验、整理和召回共用一条生命周期。经验用于复用经过验证的操作步骤、失败原因和修正方法，实际提取质量需使用生产模型和代表性任务评估。
 
-## 核对的基线
+## 实现原则
 
-核对日期：2026-09-08。Codex 公共源码固定在 `74d3a5bf1046f004ee33a200ee497dc7593a5687`：
-
-- [提取输入](https://github.com/openai/codex/blob/74d3a5bf1046f004ee33a200ee497dc7593a5687/codex-rs/memories/write/src/rollout_input.rs)：输入是会话过程，包含用户、助手、工具调用与结果，并非只看最终 Assistant Answer。
-- [第一阶段提示词](https://github.com/openai/codex/blob/74d3a5bf1046f004ee33a200ee497dc7593a5687/codex-rs/memories/write/templates/memories/stage_one_system.md)：提炼可复用步骤、失败与修正、验证证据、适用范围，允许没有值得保存的内容。助手自述不能替代工具验证。
-- [整理阶段](https://github.com/openai/codex/blob/74d3a5bf1046f004ee33a200ee497dc7593a5687/codex-rs/memories/write/templates/memories/consolidation.md)：将任务记录整理为摘要、索引和更详细的记录。
-- [读取指引](https://github.com/openai/codex/blob/74d3a5bf1046f004ee33a200ee497dc7593a5687/codex-rs/ext/memories/templates/memories/read_path.md)：先使用短摘要，再按任务相关性查索引和详细证据。
-- [工具开关](https://github.com/openai/codex/blob/74d3a5bf1046f004ee33a200ee497dc7593a5687/codex-rs/ext/memories/src/extension.rs)：支持可选 `dedicated_tools`，因此不能说 Codex 永远没有独立记忆检索工具。普通文件方式也受支持。
-- [执行工具](https://github.com/openai/codex/blob/74d3a5bf1046f004ee33a200ee497dc7593a5687/codex-rs/core/src/tools/handlers/mod.rs)：本次核对的版本主要通过执行工具运行 `rg`/`grep`，没有常规独立的 `grep_files` 注册。
-
-这里对齐的是过程证据、异步提取与整理、渐进读取、去重和失败可恢复。WeKnora 使用数据库和受控虚拟资源，不把每个用户的记忆写入共享沙箱，也不复制 Codex 的本地文件布局或后台启动时机。
+- 从会话中的用户消息、助手报告、工具调用与执行结果提取经验，保留可核对的过程证据。
+- 记录适用范围、失败与修正、验证结果和不确定性；没有可复用内容时不保存经验。
+- 异步提取后按需整理，通过短索引、完整条目和详细证据逐步读取。
+- 使用统一的文本读取和搜索入口，并按数据来源检查访问范围。
+- 使用数据库和受控虚拟资源保存记忆，支持去重、人工维护保护及失败恢复。
 
 ## 统一写入
 
@@ -75,4 +70,4 @@ PostgreSQL：`000092_memory_experience`；SQLite：`000014_memory_experience`。
 
 回归覆盖：单队列联合提取、完整正文匹配后输出短索引、旧条目可检索、跨用户/租户/Agent 隔离、关闭/删除、同时间戳分页、未完成回合、多轮证据、伪造证据拒绝、租约、手动条目保护、超长行续读、搜索分页、保存失败、Shell 中间输出补查、结果快照授权和模型结果预算。SQLite 升降级另有脚本验证。
 
-这些检查验证实现约束，不是模型能力评测。没有用生产 LLM 进行与 Codex 同题对照；没有运行真实 PostgreSQL 升降级。因此不作“效果绝不低于 Codex”的未经验证承诺。
+这些检查覆盖实现约束。生产模型的提取质量评测和真实 PostgreSQL 升降级验证尚未执行。

@@ -177,4 +177,4 @@ DOCKER_INTEGRATION_IMAGE=your-standard-sandbox-image \
 
 ## 记忆和长结果
 
-本次读取入口命名为 `read`，新增 `grep` 搜索相同的受控文本来源，记忆不再单独注册 `search_memory`。Shell、Wiki 和通用工具的大结果通过 `output://` 快照按需补读；KB、Wiki、Graph 的原有查询语义继续保留。具体范围、权限、分页限制和 Codex 基线见[长期记忆与任务经验](memory-experience-design.md)。
+本次读取入口命名为 `read`，新增 `grep` 搜索相同的受控文本来源，记忆不再单独注册 `search_memory`。Shell、Wiki 和通用工具的大结果通过 `output://` 快照按需补读；KB、Wiki、Graph 的原有查询语义继续保留。具体范围、权限、分页限制和实现原则见[长期记忆与任务经验](memory-experience-design.md)。
