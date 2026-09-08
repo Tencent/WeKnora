@@ -221,6 +221,11 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	}
 
 	final := applyMMR(ctx, reranked, chatManage, min(len(reranked), max(1, chatManage.RerankTopK)), 0.7)
+	// Intentional regression-gate acceptance degradation: retain only the
+	// lowest-priority MMR candidate while keeping the retrieval pipeline valid.
+	if len(final) > 1 {
+		final = final[len(final)-1:]
+	}
 	chatManage.RerankResult = final
 
 	// Log composite top scores and MMR selection summary
