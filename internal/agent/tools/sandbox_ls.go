@@ -62,9 +62,12 @@ const (
 // Tool schema
 
 var listSandboxFilesTool = BaseTool{
-	name:        ToolListSandboxFiles,
-	description: `List files under /workspace when no shell executor is available. Omitted path lists the artifact output directory. Use known paths directly with read_file; list only to discover unknown files. Results are bounded by max_entries. An unprovisioned session returns an empty listing.`,
-	schema:      utils.GenerateSchema[ListSandboxFilesInput](),
+	name: ToolListSandboxFiles,
+	description: "List files under /workspace when no shell executor is available. Omitted path " +
+		"lists the artifact output directory. Use known paths directly with read; list " +
+		"only to discover unknown files. Results are bounded by max_entries. An " +
+		"unprovisioned session returns an empty listing.",
+	schema: utils.GenerateSchema[ListSandboxFilesInput](),
 }
 
 // ListSandboxFilesInput defines the input parameters for list_sandbox_files.
@@ -248,7 +251,7 @@ func resolveSessionID(ctx context.Context) string {
 }
 
 // sandboxInspectableRoots is the allowlist for list_sandbox_files and
-// read_file: the session workspace, and nothing outside it.
+// read: the session workspace, and nothing outside it.
 //
 // It matches what write_sandbox_file may create. Narrowing the readers to
 // artifacts and attachments used to leave the agent unable to read back the
@@ -271,14 +274,15 @@ func inspectableRootsDescription() string {
 
 // inspectablePathError explains a refused list/read path. Skill image
 // paths are the common miss: the model sees /opt/weknora/tenant/skills/<name>
-// in read_file's environment section and retries with this tool or ls.
+// in read's environment section and retries with this tool or ls.
 func inspectablePathError(requested string) string {
 	base := fmt.Sprintf("this tool only lists/reads /workspace. path %q is outside that scope", requested)
 	name, inImage := sandbox.SkillNameFromImagePath(path.Clean(requested))
 	if inImage && name != "" {
-		return base + fmt.Sprintf(". Use read_file(path=%q) for package instructions and file discovery. Do not ls the whole installed dependency tree.", "skill://"+name+"/SKILL.md")
+		return base + fmt.Sprintf(". Use read(path=%q) for package instructions and file discovery. Do not ls "+
+			"the whole installed dependency tree.", "skill://"+name+"/SKILL.md")
 	}
-	return base + ". Use read_file with a listed skill:// resource for skill packages."
+	return base + ". Use read with a listed skill:// resource for skill packages."
 }
 
 func relativeSkillFileFromImagePath(clean, skillName string) string {

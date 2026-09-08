@@ -10,14 +10,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// searchCandidatePool bounds how many stored items one search ranks over.
-//
-// It matches the recall pool deliberately. The pool was never what made recall
-// miss things — four hundred candidates is more than almost any subject holds
-// — the output cap of five items was. Widening the pool here would buy little
-// and would put a few thousand embedding reads on a path the user is waiting
-// on.
-const searchCandidatePool = 400
+// Rank all active notes within the subject capacity before applying output limits.
+const searchCandidatePool = 0 // Search all active notes within the subject capacity.
 
 // MemoryAvailable reports whether this request may read memory at all.
 //
@@ -98,6 +92,7 @@ func (s *Service) SearchMemory(
 		return interfaces.MemorySearchResult{Available: true}
 	}
 
+	candidates = filterExperiences(searchCtx, candidates)
 	matched, rankTrace := s.selectRecallWithTrace(
 		searchCtx, scope, cfg, query, candidates, limit, types.MemorySearchRuneBudget)
 

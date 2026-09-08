@@ -274,9 +274,25 @@
                   </t-button>
                 </div>
               </div>
-              <p v-else class="memory-content" :class="{ inactive: isRetired(item) }">
+              <p v-else class="memory-content" :class="{ inactive: isRetired(item), 'memory-procedure': item.kind === 'experience' }">
                 {{ item.content }}
               </p>
+              <details v-if="item.experience && editingId !== item.id" class="memory-experience">
+                <summary>{{ t('memorySettings.experience.details') }}</summary>
+                <p><strong>{{ t('memorySettings.experience.trigger') }}:</strong> {{ item.experience.trigger }}</p>
+                <p><strong>{{ t('memorySettings.experience.applicability') }}:</strong> {{ item.experience.applicability }}</p>
+                <p><strong>{{ t('memorySettings.experience.outcome') }}:</strong> {{ t(`memorySettings.experience.outcomes.${item.experience.outcome}`) }}</p>
+                <p v-if="item.experience.avoid"><strong>{{ t('memorySettings.experience.avoid') }}:</strong> {{ item.experience.avoid }}</p>
+                <p v-if="item.experience.task_summary" class="memory-task-summary">{{ item.experience.task_summary }}</p>
+                <ul>
+                  <li v-for="evidence in item.experience.evidence" :key="`${evidence.message_id}:${evidence.tool_call_id}`">
+                    {{ evidence.tool_name }} · {{ evidence.success ? t('memorySettings.experience.outcomes.success') : t('memorySettings.experience.outcomes.failure') }}
+                    <t-button v-if="evidence.session_id" size="small" variant="text" @click="router.push({ name: 'chat', params: { chatid: evidence.session_id } })">
+                      {{ t('memorySettings.experience.source') }}
+                    </t-button>
+                  </li>
+                </ul>
+              </details>
               <div class="memory-meta">
                 <span :title="kindHint(item.kind)">{{ kindLabel(item.kind) }}</span>
                 <span
@@ -1086,6 +1102,19 @@ onMounted(async () => {
 .memory-main {
   flex: 1;
   min-width: 0;
+}
+
+.memory-procedure,
+.memory-task-summary {
+  white-space: pre-wrap;
+}
+
+.memory-experience {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+
+  summary { cursor: pointer; }
+  p { margin: 8px 0; }
 }
 
 .memory-content {

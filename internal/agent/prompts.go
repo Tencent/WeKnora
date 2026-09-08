@@ -235,10 +235,18 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata, shellExecEnabl
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("\n\nAvailable skills: read a relevant skill's listed SKILL.md resource with read_file before applying it. Load additional files only as needed; the returned file list already identifies bundled scripts.\n")
+	b.WriteString("\n\nAvailable skills: read a relevant skill's listed SKILL.md resource with" +
+		" read before applying it. Load additional files only as needed; the " +
+		"returned file list already identifies bundled scripts.\n")
 	for _, skill := range skillsMetadata {
 		if skill != nil {
-			fmt.Fprintf(&b, "- %s: %s (read_file path=%q)\n", skill.Name, skill.Description, "skill://"+skill.Name+"/SKILL.md")
+			fmt.Fprintf(
+				&b,
+				"- %s: %s (read path=%q)\n",
+				skill.Name,
+				skill.Description,
+				"skill://"+skill.Name+"/SKILL.md",
+			)
 		}
 	}
 	return b.String()
@@ -262,10 +270,10 @@ func formatToolGuidance(names []string) string {
 	b.WriteString("\n\nTool execution: use only the tools provided for this turn. Plan internally; use a planning tool only when it helps. Read known paths directly. Batch independent reads; keep dependent operations in order. Inspect results before claiming completion.\n")
 	b.WriteString("For long-running operations, prefer a documented asynchronous mode when available. Use the returned task ID to wait or poll at the recommended interval and retrieve the completed result; after a timeout, check the existing task before resubmitting.\n")
 	b.WriteString("On failure, use the reported cause to correct the input or environment. Retry only after something relevant changes. Permission, policy, or missing-configuration failures are not fixed by switching tools; report the concrete blocker if it cannot be corrected within this session.\n")
-	if has("read_file") {
-		b.WriteString("Use read_file for workspace files, saved web:// pages and listed skill:// resources. " +
+	if has("read") {
+		b.WriteString("Use read for workspace files, saved web:// pages and listed skill:// resources. " +
 			"In older instructions, translate read_skill(skill_name, file_path) to " +
-			"read_file(path=skill://<name>/<file_path or SKILL.md>) and read_sandbox_file to read_file.\n")
+			"read(path=skill://<name>/<file_path or SKILL.md>) and read_sandbox_file to read.\n")
 	}
 	if has("shell_exec") || has("write_sandbox_file") {
 		b.WriteString("Session workspace: /workspace. Preserve uploaded originals in /workspace/input. " +
@@ -276,7 +284,7 @@ func formatToolGuidance(names []string) string {
 			"Files and installed packages persist within the session.\n")
 		b.WriteString(sandboxArtifactReferenceGuidance())
 	}
-	if has("shell_exec") && has("read_file") {
+	if has("shell_exec") && has("read") {
 		b.WriteString("For listed skills, run bundled scripts and your own scripts with " +
 			"shell_exec(skill_name=..., command=...). This selects an installed skill's runtime " +
 			"or stages host skill resources, and applies scoped credentials; " +

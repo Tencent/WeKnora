@@ -35,6 +35,8 @@ func registerToolsFor(
 	registry := tools.NewToolRegistry()
 	svc := &agentService{memoryService: memory}
 	require.NoError(t, svc.registerTools(t.Context(), registry, config, nil, nil, "session-1"))
+	svc.registerMemoryFiles(t.Context(), registry, config)
+	registerFileSearch(registry)
 	return registry
 }
 
@@ -45,13 +47,15 @@ func hasTool(registry *tools.ToolRegistry, name string) bool {
 
 // Memory search follows the memory switches, not the tool list: an agent whose
 // allowlist never mentions it still gets it while memory is on.
-func TestMemorySearchIsInjectedWithoutBeingAllowlisted(t *testing.T) {
+func TestMemoryUsesReadFileWithoutBeingAllowlisted(t *testing.T) {
 	memory := &stubMemoryAvailability{available: true}
 	registry := registerToolsFor(t, memory, &types.AgentConfig{
 		AllowedTools: []string{tools.ToolThinking},
 	})
 
-	require.True(t, hasTool(registry, tools.ToolSearchMemory))
+	require.False(t, hasTool(registry, tools.ToolSearchMemory))
+	require.True(t, hasTool(registry, tools.ToolReadFile))
+	require.True(t, hasTool(registry, tools.ToolGrepFiles))
 	require.True(t, hasTool(registry, tools.ToolThinking), "the rest of the allowlist is untouched")
 }
 

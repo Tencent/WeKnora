@@ -1835,6 +1835,19 @@ export default {
     }
   },
   memorySettings: {
+    experience: {
+      "details": "経験と根拠",
+      "trigger": "発生条件",
+      "applicability": "適用範囲",
+      "outcome": "確認された結果",
+      "avoid": "失敗した方法",
+      "source": "元の会話を開く",
+      "outcomes": {
+        "success": "成功",
+        "failure": "失敗",
+        "uncertain": "未検証"
+      }
+    },
     title: 'マイメモリ',
     description: '会話をまたいでアシスタントが記憶しているあなたの情報です。ここで内容の確認・編集・削除ができます。削除したメモリが再び使われることはありません。',
     workspaceDisabled: 'このワークスペースでは長期メモリが無効です。この切り替えは、管理者が有効にした後に反映されます。',
@@ -1945,6 +1958,7 @@ export default {
     emptyTitle: 'メモリはまだありません',
     emptyDescription: '会話で「...を覚えておいて」と伝えるか、上の入力欄から直接追加してください。',
     kinds: {
+      experience: "タスクの経験",
       profile: 'あなたについて',
       preference: '好み',
       fact: '事実',
@@ -1952,6 +1966,7 @@ export default {
       interest: '長期的な関心'
     },
     kindHints: {
+      experience: "関連するタスクで手順の詳細を読み込みます",
       profile: '以降のすべてのやり取りに含まれます',
       preference: '以降のすべてのやり取りに含まれます',
       fact: '質問が関連する場合にのみ使用されます',
@@ -5522,7 +5537,8 @@ export default {
       readSkill: 'スキルを読み取り',
       executeSkillScript: 'スキルスクリプトを実行',
       listSandboxFiles: 'サンドボックスのファイル一覧',
-      readFile: 'ファイルを読み取り',
+      readFile: '内容を読む',
+      grepFiles: '内容を検索',
       readSandboxFile: 'サンドボックスのファイルを読み取り',
       writeSandboxFile: 'サンドボックスにファイルを書き込み',
       editSandboxFile: 'サンドボックスのファイルを編集',

@@ -265,6 +265,7 @@ func (r *memoryRepository) ListActiveResident(
 	var items []*types.MemoryItem
 	query := notExpired(r.scoped(ctx, scope).
 		Where("status = ?", types.MemoryStatusActive).
+		Where("kind <> ?", types.MemoryKindExperience).
 		Where("kind IN ? OR origin = ?",
 			types.ResidentMemoryKinds,
 			types.MemoryOriginExplicit)).
@@ -1041,4 +1042,61 @@ func (r *memoryRepository) CountActive(
 		Where("status = ?", types.MemoryStatusActive).
 		Count(&count).Error
 	return count, err
+}
+
+func (r *memoryRepository) TryAcquireExtraction(
+	ctx context.Context,
+	scope interfaces.MemoryScope,
+	token string,
+	until time.Time,
+) (bool, error) {
+	result := r.scoped(ctx, scope).Model(&types.MemorySubject{}).
+		Where("extract_lease_until IS NULL OR extract_lease_until < ?", time.Now()).
+		Updates(map[string]interface{}{"extract_lease_token": token, "extract_lease_until": until})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *memoryRepository) ReleaseExtraction(ctx context.Context, scope interfaces.MemoryScope, token string) error {
+	return r.scoped(ctx, scope).Model(&types.MemorySubject{}).Where("extract_lease_token = ?", token).
+		Updates(map[string]interface{}{"extract_lease_token": "", "extract_lease_until": nil}).Error
+}
+
+func (r *memoryRepository) AdvanceExtraction(
+	ctx context.Context,
+	scope interfaces.MemoryScope,
+	sessionID string,
+	cursor types.MemoryExtractionCursor,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var subject types.MemorySubject
+		if err := tx.Clauses(forUpdateClause()).
+			Where("tenant_id = ? AND subject_id = ?", scope.TenantID, scope.SubjectID).
+			First(&subject).Error; err != nil {
+			return err
+		}
+		if subject.ExtractionProgress == nil {
+			subject.ExtractionProgress = make(map[string]types.MemoryExtractionCursor)
+		}
+		old := subject.ExtractionProgress[sessionID]
+		if cursor.At.Before(old.At) || (cursor.At.Equal(old.At) && cursor.ID <= old.ID) {
+			return nil
+		}
+		subject.ExtractionProgress[sessionID] = cursor
+		return tx.Model(&subject).Select("ExtractionProgress").Updates(&subject).Error
+	})
+}
+
+func (r *memoryRepository) RequeueSessions(ctx context.Context, scope interfaces.MemoryScope, sessions []string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var subject types.MemorySubject
+		if err := tx.Clauses(forUpdateClause()).
+			Where("tenant_id = ? AND subject_id = ?", scope.TenantID, scope.SubjectID).
+			First(&subject).Error; err != nil {
+			return err
+		}
+		for _, sessionID := range sessions {
+			subject.PendingSessions = subject.PendingSessions.Append(sessionID)
+		}
+		return tx.Model(&subject).Select("PendingSessions").Updates(&subject).Error
+	})
 }

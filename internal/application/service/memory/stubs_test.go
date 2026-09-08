@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -373,3 +374,57 @@ func (e *stubEmbedder) BatchEmbedWithPool(
 func (e *stubEmbedder) GetModelName() string { return "stub-embedder" }
 func (e *stubEmbedder) GetDimensions() int   { return 3 }
 func (e *stubEmbedder) GetModelID() string   { return "embed-1" }
+
+func (s *stubMessageRepo) ListMessagesForMemory(
+	ctx context.Context,
+	sessionID string,
+	cursor types.MemoryExtractionCursor,
+	limit int,
+) ([]*types.Message, error) {
+	messages, err := s.ListMessagesBySessionAfterTime(ctx, sessionID, time.Time{}, 0)
+	if err != nil {
+		return nil, err
+	}
+	// Real persisted messages always have IDs. Supply them for older concise fixtures.
+	for i, message := range messages {
+		cloned := *message
+		if cloned.ID == "" {
+			cloned.ID = fmt.Sprintf("fixture-%04d", i)
+		}
+		if cloned.SessionID == "" {
+			cloned.SessionID = sessionID
+		}
+		messages[i] = &cloned
+	}
+	sort.SliceStable(messages, func(i, j int) bool {
+		if messages[i].CreatedAt.Equal(messages[j].CreatedAt) {
+			return messages[i].ID < messages[j].ID
+		}
+		return messages[i].CreatedAt.Before(messages[j].CreatedAt)
+	})
+	var out []*types.Message
+	for _, m := range messages {
+		if (cursor.ID != "" || !cursor.At.IsZero()) &&
+			(m.CreatedAt.Before(cursor.At) || (m.CreatedAt.Equal(cursor.At) && m.ID <= cursor.ID)) {
+			continue
+		}
+		out = append(out, m)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (s *stubMessageRepo) GetMessage(ctx context.Context, sessionID, id string) (*types.Message, error) {
+	messages, err := s.ListMessagesBySessionAfterTime(ctx, sessionID, time.Time{}, 0)
+	if err != nil {
+		return nil, err
+	}
+	for _, message := range messages {
+		if message.ID == id {
+			return message, nil
+		}
+	}
+	return nil, nil
+}

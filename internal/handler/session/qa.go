@@ -437,8 +437,13 @@ func buildMessageExecutionContext(
 	webSearchEnabled bool,
 ) (types.MessageExecutionContext, string, uint64, string) {
 	locale := types.LanguageFromContextOrDefault(ctx)
+	memoryEnabled := types.MemoryAllowedForAgent(ctx)
+	if agent != nil {
+		memoryEnabled = types.MemoryAllowedForAgent(types.ApplyAgentMemoryPreference(ctx, agent.Config.MemoryEnabled))
+	}
 
 	snapshot := types.MessageExecutionContext{
+		MemoryEnabled:       &memoryEnabled,
 		KnowledgeBaseIDs:    knowledgeBaseIDs,
 		KnowledgeIDs:        knowledgeIDs,
 		TagIDs:              tagIDs,
@@ -900,6 +905,19 @@ const (
 // It handles message creation, SSE setup, VLM analysis, service invocation, and error handling.
 func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle bool) {
 	ctx := reqCtx.ctx
+	if reqCtx.customAgent != nil {
+		ctx = types.ApplyAgentMemoryPreference(ctx, reqCtx.customAgent.Config.MemoryEnabled)
+	}
+	memoryCtx := ctx
+	if reqCtx.effectiveTenantID > 0 {
+		memoryCtx = types.WithExecutionTenant(memoryCtx, reqCtx.effectiveTenantID)
+	}
+	enabled := h.memoryService != nil && h.memoryService.MemoryAvailable(memoryCtx)
+	if !enabled {
+		ctx = types.WithMemoryDisabled(ctx)
+	}
+	reqCtx.assistantMessage.ExecutionContext.MemoryEnabled = &enabled
+	reqCtx.ctx = ctx
 	sessionID := reqCtx.sessionID
 
 	// Persist the input-bar state used for this request so reopening the
@@ -1458,7 +1476,7 @@ func (h *Handler) completeAssistantMessage(
 			}
 		}()
 	}
-	if userQuery != "" {
+	if userQuery != "" || len(assistantMessage.AgentSteps) > 0 {
 		go h.recordTurnMemory(bgCtx, assistantMessage, userQuery, userMessageID)
 	}
 }
@@ -1467,8 +1485,8 @@ func (h *Handler) completeAssistantMessage(
 //
 // This is the single place a conversation can produce memory, and it sits at
 // the point where both the RAG and the Agent path converge, so neither mode
-// can silently miss it. A stopped conversation arrives with an empty query and
-// is skipped by the caller.
+// can silently miss it. A stopped task may still contribute completed tool
+// observations, even when no final user query was returned by the pipeline.
 func (h *Handler) recordTurnMemory(
 	ctx context.Context, assistantMessage *types.Message, userQuery, userMessageID string,
 ) {

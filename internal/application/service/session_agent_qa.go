@@ -40,6 +40,7 @@ func (s *sessionService) AgentQA(
 
 	// Resolve retrieval tenant using shared helper
 	agentTenantID := s.resolveRetrievalTenantID(ctx, req)
+	ctx = types.WithMemoryAgentScope(ctx, req.CustomAgent.ID, agentTenantID)
 	logger.Infof(ctx, "Start agent-based question answering, session ID: %s, agent tenant ID: %d, query: %s, session: %s",
 		sessionID, agentTenantID, req.Query, string(sessionJSON))
 

@@ -147,7 +147,9 @@ The sandbox belongs to this session alone; nothing here runs on the host.
   Without uv, run the venv Python with -m ensurepip --upgrade before -m pip install.
   Changes live and die with this session.
 - Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. Transport failures/timeouts are tool failures. Changing tools does not change permissions; do not repeat a denied operation through another tool.
-- stdout/stderr have independent byte limits, preserving head and tail when truncated. Full output is not automatically saved; redirect verbose commands to a workspace log when it must be retained. Binary bytes are suppressed.
+- stdout/stderr have independent byte limits, preserving head and tail when truncated.
+  Truncated captured streams return an output:// address for read/grep when storage is available.
+  Otherwise redirect verbose commands to a workspace log. Binary bytes are suppressed.
 - Reference collected deliverables as ![description](sandbox:<file name>) using the exact filename.`,
 	schema: utils.GenerateSchema[ShellExecInput](),
 }
@@ -218,6 +220,7 @@ func (e installShellExecutor) ExecShellCommand(
 
 // ShellExecTool executes shell commands inside the session's sandbox.
 type ShellExecTool struct {
+	outputSource WebPageSource
 	BaseTool
 	executor SandboxCommandExecutor
 	// workDirRoots are the directories work_dir may point inside. Ordinary
@@ -527,8 +530,24 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	if res.Killed {
 		b.WriteString("**Killed**: yes (timeout or terminated)\n")
 	}
+	savedOutput, snapshotError := "", ""
+	if truncated && t.outputSource != nil && !stdoutBinary && !stderrBinary {
+		snapshot := fmt.Sprintf("Command: %s\nWork dir: %s\nExit code: %d\nKilled: %t\n\n## Stdout\n%s\n## "+
+			"Stderr\n%s\n## Error\n%s", command, workDir, res.ExitCode, res.Killed, res.Stdout, res.Stderr, res.Error)
+		var saveErr error
+		savedOutput, saveErr = t.outputSource.Save(ctx, snapshot)
+		if saveErr != nil {
+			snapshotError = saveErr.Error()
+		}
+	}
 	if truncated {
-		b.WriteString("**Truncated**: yes (head+tail kept; full output was not saved. For future commands, redirect verbose output to a workspace log and read that file.)\n")
+		if savedOutput != "" {
+			fmt.Fprintf(&b, "**Truncated**: yes. Saved captured output: %s; use read or grep on that "+
+				"address.\n", savedOutput)
+		} else {
+			b.WriteString("**Truncated**: yes (head+tail kept; full output was not saved. For future " +
+				"commands, redirect verbose output to a workspace log and read that file.)\n")
+		}
 	}
 	if stdoutBinary || stderrBinary {
 		b.WriteString("**Binary Output Suppressed**: yes (write binary files to the artifact output directory for download)\n")
@@ -605,6 +624,12 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		"max_stderr_bytes":       stderrLimit,
 	}
 
+	if savedOutput != "" {
+		resultData["full_output_path"] = savedOutput
+	}
+	if snapshotError != "" {
+		resultData["output_snapshot_error"] = snapshotError
+	}
 	logger.Infof(ctx, "[Tool][ShellExec] session=%s exit=%d duration=%v killed=%v truncated=%v",
 		sessionID, res.ExitCode, res.Duration, res.Killed, truncated)
 
@@ -834,7 +859,9 @@ func shellCommandNotFoundHint(exitCode int, command, stderr string) string {
 	missing := inferredMissingCommand(command, stderr)
 	switch missing {
 	case "tree", "less", "more", "nano", "vim", "vi":
-		return "Hint: `" + missing + "` is not in the default sandbox image. Use find/ls, head, sed, and `file`. Skill scripts: `read_file` for skill instructions, then the execution tool named there. Do not apt-get install inspection tools — session packages are discarded."
+		return "Hint: `" + missing + "` is not in the default sandbox image. Use find/ls, head, sed, and `file`. " +
+			"Skill scripts: `read` for skill instructions, then the execution tool named there. " +
+			"Do not apt-get install inspection tools — session packages are discarded."
 	default:
 		return "Hint: that command is not installed. Prefer find, ls, head, tail, cat, sed, grep, awk, file. apt-get install only for a package this task actually needs — session installs are discarded."
 	}
@@ -1019,4 +1046,10 @@ func truncateShellStream(s string, limit int) (string, bool) {
 	b.WriteString(marker)
 	b.WriteString(s[len(s)-tail:])
 	return b.String(), true
+}
+
+// WithOutputSource preserves captured streams before display truncation.
+func (t *ShellExecTool) WithOutputSource(source WebPageSource) *ShellExecTool {
+	t.outputSource = source
+	return t
 }

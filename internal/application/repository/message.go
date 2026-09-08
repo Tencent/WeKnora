@@ -385,3 +385,20 @@ func (r *messageRepository) GetSessionAttachments(
 	}
 	return result, nil
 }
+
+// ListMessagesForMemory uses an exact stable cursor; same-timestamp messages
+// must not disappear at a page boundary.
+func (r *messageRepository) ListMessagesForMemory(
+	ctx context.Context,
+	sessionID string,
+	cursor types.MemoryExtractionCursor,
+	limit int,
+) ([]*types.Message, error) {
+	var messages []*types.Message
+	q := r.db.WithContext(ctx).Where("session_id = ?", sessionID)
+	if !cursor.At.IsZero() {
+		q = q.Where("created_at > ? OR (created_at = ? AND id > ?)", cursor.At, cursor.At, cursor.ID)
+	}
+	err := q.Order("created_at ASC, id ASC").Limit(limit).Find(&messages).Error
+	return messages, err
+}

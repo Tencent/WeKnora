@@ -57,7 +57,7 @@ func TestFetchSavedPageSurvivesCacheEvictionAndModelEncoding(t *testing.T) {
 			saved = row["full_output_path"].(string)
 			encoded := modelcontext.NewRegistry(true).ModelToolResultForTool(ToolWebFetch, result)
 			require.Contains(t, encoded, saved)
-			require.Contains(t, encoded, `tool="read_file"`)
+			require.Contains(t, encoded, `tool="read"`)
 		}
 	}
 	require.Len(t, fetch.pages, 8)

@@ -444,6 +444,7 @@ func renderWikiPagesWithinBudget(pages []pendingWikiPage, budget int) (string, [
 }
 
 type wikiReadPageTool struct {
+	outputSource WebPageSource
 	BaseTool
 	wikiService      interfaces.WikiPageService
 	knowledgeService interfaces.KnowledgeService
@@ -714,6 +715,25 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 
 	finalOutput, truncatedSlugs, omittedSlugs := renderWikiPagesWithinBudget(pending, OutputBudget(ctx))
+	savedOutput, snapshotError := "", ""
+	if (len(truncatedSlugs) > 0 || len(omittedSlugs) > 0) && t.outputSource != nil {
+		var full strings.Builder
+		for _, page := range pending {
+			full.WriteString(page.render(page.body))
+			full.WriteString("\n\n")
+			if int64(full.Len()) > maxReadSandboxDownloadBytes {
+				break
+			}
+		}
+		var saveErr error
+		savedOutput, saveErr = t.outputSource.Save(ctx, full.String())
+		if saveErr != nil {
+			snapshotError = saveErr.Error()
+		}
+		if savedOutput != "" {
+			finalOutput += "\nSaved complete resolved pages: " + savedOutput + "; use read or grep for omitted content."
+		}
+	}
 	if len(omittedSlugs) > 0 {
 		finalOutput += fmt.Sprintf(
 			"\n\n<omitted_pages reason=\"output budget exceeded\">\n%s\n</omitted_pages>"+
@@ -739,10 +759,12 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 		Success: true,
 		Output:  finalOutput,
 		Data: map[string]interface{}{
-			"found_kbs":       foundKBs,
-			"ambiguous_slugs": ambiguous,
-			"truncated_slugs": truncatedSlugs,
-			"omitted_slugs":   omittedSlugs,
+			"found_kbs":             foundKBs,
+			"full_output_path":      savedOutput,
+			"output_snapshot_error": snapshotError,
+			"ambiguous_slugs":       ambiguous,
+			"truncated_slugs":       truncatedSlugs,
+			"omitted_slugs":         omittedSlugs,
 		},
 	}, nil
 }
@@ -1083,3 +1105,5 @@ func truncateRunes(s string, maxRunes int) string {
 	}
 	return string(runes[:maxRunes]) + "..."
 }
+
+func (t *wikiReadPageTool) SetOutputSource(source WebPageSource) { t.outputSource = source }

@@ -184,3 +184,71 @@ func (r *webPageStorageResolver) ResolveFileService(
 	r.resolve(tenant)
 	return nil, "", fmt.Errorf("storage unavailable for this test")
 }
+
+func TestSavedToolOutputsUseSeparateBindingAndEnforceSessionOwnership(t *testing.T) {
+	catalog, db := newResourceCatalogForTest(t)
+	require.NoError(
+		t,
+		db.Exec(
+			`CREATE TABLE sessions (id TEXT PRIMARY KEY, tenant_id INTEGER, user_id TEXT, deleted_at DATETIME)`,
+		).Error,
+	)
+	require.NoError(
+		t,
+		db.Exec(`CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, deleted_at DATETIME)`).Error,
+	)
+	require.NoError(
+		t,
+		db.Exec(`INSERT INTO sessions (id,tenant_id,user_id) VALUES ('s',7,'alice'),('other',7,'alice')`).Error,
+	)
+	require.NoError(t, db.Exec(`INSERT INTO messages (id,session_id,role) VALUES ('m','s','assistant')`).Error)
+	memory := &webPageMemoryFiles{objects: map[string]string{}}
+	fs := fileService.NewResourceCatalogFileService(memory, catalog)
+	source := &agentWebPages{
+		db:        db,
+		catalog:   catalog,
+		tenantID:  7,
+		ownerID:   "alice",
+		sessionID: "s",
+		messageID: "m",
+		scheme:    "output://",
+		relation:  "tool_output",
+		files:     func(context.Context, string) (interfaces.FileService, error) { return fs, nil },
+	}
+	saved, err := source.Save(t.Context(), "captured result")
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(saved, "output://"))
+	later := *source
+	later.messageID = "later"
+	data, err := later.Read(t.Context(), saved)
+	require.NoError(t, err)
+	require.Equal(t, "captured result", string(data))
+	web := *source
+	web.scheme = "web://"
+	web.relation = webPageRelation
+	_, err = web.Read(t.Context(), strings.Replace(saved, "output://", "web://", 1))
+	require.Error(t, err)
+	other := *source
+	other.sessionID = "other"
+	_, err = other.Read(t.Context(), saved)
+	require.Error(t, err)
+	require.NoError(t, db.Exec(`UPDATE messages SET deleted_at=CURRENT_TIMESTAMP WHERE id='m'`).Error)
+	_, err = source.Read(t.Context(), saved)
+	require.Error(t, err)
+}
+
+func TestToolOutputSnapshotScopeIncludesRuntimeTagsAndAgentIdentity(t *testing.T) {
+	ctx := types.WithMemoryAgentScope(t.Context(), "agent", 7)
+	config := &types.AgentConfig{
+		KnowledgeBases: []string{"kb"},
+		SearchTargets: types.SearchTargets{
+			&types.SearchTarget{KnowledgeBaseID: "kb", TenantID: 7, TagIDs: []string{"tag-a"}},
+		},
+	}
+	before := toolOutputScopeRelation(ctx, config)
+	require.Equal(t, before, toolOutputScopeRelation(ctx, config))
+	config.SearchTargets[0].TagIDs = []string{"tag-b"}
+	require.NotEqual(t, before, toolOutputScopeRelation(ctx, config))
+	config.SearchTargets[0].TagIDs = []string{"tag-a"}
+	require.NotEqual(t, before, toolOutputScopeRelation(types.WithMemoryAgentScope(ctx, "different-agent", 7), config))
+}

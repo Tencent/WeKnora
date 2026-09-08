@@ -5,7 +5,7 @@
 Agent Skills 是一种让 Agent 通过阅读"使用说明书"来学习新能力的扩展机制。与传统的硬编码工具不同，Skills 通过注入到 System Prompt 来扩展 Agent 的能力，遵循 **Progressive Disclosure（渐进式披露）** 的设计理念。
 目前仅支持带**智能推理**能力的智能体使用。前端可在智能体的编辑页面找到相关配置
 
-已安装到沙箱镜像的技能统一通过 `shell_exec(skill_name=..., command=...)` 执行；`read_file(path="skill://<name>/SKILL.md")` 返回具体执行方式。独立的 `execute_skill_script` 已删除；宿主机技能也通过同一 Shell 入口准备资源并执行，无 Shell 时仅可阅读技能。工具设计与沙箱迁移要求见 [Agent Tools 设计评审与重构](agent-tools-design.md)。
+已安装到沙箱镜像的技能统一通过 `shell_exec(skill_name=..., command=...)` 执行；`read(path="skill://<name>/SKILL.md")` 返回具体执行方式。独立的 `execute_skill_script` 已删除；宿主机技能也通过同一 Shell 入口准备资源并执行，无 Shell 时仅可阅读技能。工具设计与沙箱迁移要求见 [Agent Tools 设计评审与重构](agent-tools-design.md)。
 
 ### 核心特性
 
@@ -30,14 +30,14 @@ Skills 采用三级加载机制，确保只在需要时才向 LLM 提供详细�
                               ↓ 用户请求匹配时
 ┌─────────────────────────────────────────────────────────────────┐
 │ Level 2: 指令 (Instructions)                                    │
-│ • 通过 read_file 读取技能 SKILL.md                                   │
+│ • 通过 read 读取技能 SKILL.md                                   │
 │ • SKILL.md 的指令内容                                           │
 │ • 包含：详细指令、代码示例、使用方法                               │
 └─────────────────────────────────────────────────────────────────┘
                               ↓ 需要更多信息时
 ┌─────────────────────────────────────────────────────────────────┐
 │ Level 3: 附加资源 (Resources)                                   │
-│ • 通过 read_file 读取技能附加文件                               │
+│ • 通过 read 读取技能附加文件                               │
 │ • 补充文档、配置模板、脚本文件                                    │
 │ • 通过 shell_exec(skill_name=...) 执行已安装脚本                │
 └─────────────────────────────────────────────────────────────────┘
@@ -202,7 +202,7 @@ Docker、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接检查和
 
 Skills 功能通过两个工具与 Agent 交互：
 
-### read_file
+### read
 
 统一读取沙箱文件和允许使用的技能资源，参数为 `path`、`offset`、`limit`、`max_bytes`。
 
@@ -224,7 +224,7 @@ Skills 功能通过两个工具与 Agent 交互：
 
 两类内容共用分页、输出预算和二进制抑制；内容较长时按返回的 `next_offset` 继续。技能资源经过技能白名单和包内路径校验，即使没有沙箱也能阅读。`skill://` 代表技能包资源，不是可用于 Shell 的路径；运行脚本时使用加载结果给出的执行方式。
 
-新会话仅注册 `read_file`，不再同时暴露 `read_skill` 和 `read_sandbox_file`。旧的 Tool 实现已删除；名称只保留用于识别和展示旧记录。
+新会话仅注册 `read`，不再同时暴露 `read_skill` 和 `read_sandbox_file`。旧的 Tool 实现已删除；名称只保留用于识别和展示旧记录。
 
 ### shell_exec
 
@@ -237,7 +237,7 @@ Skills 功能通过两个工具与 Agent 交互：
 }
 ```
 
-自己编写的脚本先用 `write_sandbox_file` 写入 `scripts/analyze.py`，然后以相同 `skill_name` 运行 `python3 scripts/analyze.py`。用 `edit_sandbox_file` 修改，用 `read_file` 查看；这些工具的相对路径也从 `/workspace` 解析。Shell 已启用时通过 `ls`/`find` 浏览目录，不再额外注册 `list_sandbox_files`。
+自己编写的脚本先用 `write_sandbox_file` 写入 `scripts/analyze.py`，然后以相同 `skill_name` 运行 `python3 scripts/analyze.py`。用 `edit_sandbox_file` 修改，用 `read` 查看；这些工具的相对路径也从 `/workspace` 解析。Shell 已启用时通过 `ls`/`find` 浏览目录，不再额外注册 `list_sandbox_files`。
 
 生成文件放在 `/workspace/output`；原始附件位于 `/workspace/input`，应保留原样。已安装技能可在本会话沙箱内补装依赖，写入随会话销毁，不会修改其他会话使用的镜像。Node 的 `NODE_PATH` 支持 CommonJS，自建 ESM 脚本仍需在可写项目目录安装依赖，或调用技能目录中的原始脚本。
 
@@ -512,7 +512,7 @@ Agent 思考:
   → 查看 System Prompt 中的 Skills 列表
   → 发现 "pdf-processing" 技能匹配
 
-Agent 行动 1: 调用 read_file
+Agent 行动 1: 调用 read
   → {"path": "skill://pdf-processing/SKILL.md"}
   → 获取 SKILL.md 指令内容
   → 学习如何使用 pdfplumber

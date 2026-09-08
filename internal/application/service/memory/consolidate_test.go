@@ -34,7 +34,7 @@ func seedItem(
 	require.NoError(t, svc.repo.CreateItem(ctx, &types.MemoryItem{
 		ID: uuid.New().String(), TenantID: scope.TenantID, SubjectID: scope.SubjectID,
 		Kind: kind, Topic: topic, Content: content, NormalizedKey: key,
-		Status: types.MemoryStatusActive, Origin: types.MemoryOriginManual,
+		Status: types.MemoryStatusActive, Origin: types.MemoryOriginExtracted,
 		Importance: 3, ValidFrom: time.Now(),
 	}))
 }

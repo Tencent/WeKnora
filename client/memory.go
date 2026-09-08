@@ -25,25 +25,46 @@ type MemorySettings struct {
 	MaxItems         int    `json:"max_items"`
 }
 
-// MemoryItem is one long-term memory row as returned by the API.
+// MemoryExperience describes applicability and provenance for an extracted procedure.
+type MemoryExperience struct {
+	Trigger       string           `json:"trigger"`
+	Applicability string           `json:"applicability"`
+	Avoid         string           `json:"avoid,omitempty"`
+	Outcome       string           `json:"outcome"`
+	AgentID       string           `json:"agent_id"`
+	AgentTenantID uint64           `json:"agent_tenant_id"`
+	TaskSummary   string           `json:"task_summary,omitempty"`
+	Evidence      []MemoryEvidence `json:"evidence"`
+}
+
+// MemoryEvidence identifies a persisted tool observation supporting an experience.
+type MemoryEvidence struct {
+	SessionID  string `json:"session_id"`
+	MessageID  string `json:"message_id"`
+	ToolCallID string `json:"tool_call_id"`
+	ToolName   string `json:"tool_name"`
+	Success    bool   `json:"success"`
+}
+
 type MemoryItem struct {
-	ID              string     `json:"id"`
-	Kind            string     `json:"kind"`
-	Content         string     `json:"content"`
-	Topic           string     `json:"topic,omitempty"`
-	Importance      int        `json:"importance"`
-	Origin          string     `json:"origin"`
-	Status          string     `json:"status"`
-	SourceSessionID string     `json:"source_session_id,omitempty"`
-	SourceMessageID string     `json:"source_message_id,omitempty"`
-	ValidFrom       time.Time  `json:"valid_from"`
-	InvalidAt       *time.Time `json:"invalid_at,omitempty"`
-	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
-	SupersededBy    string     `json:"superseded_by,omitempty"`
-	LastUsedAt      *time.Time `json:"last_used_at,omitempty"`
-	UseCount        int        `json:"use_count"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	Experience      *MemoryExperience `json:"experience,omitempty"`
+	ID              string            `json:"id"`
+	Kind            string            `json:"kind"`
+	Content         string            `json:"content"`
+	Topic           string            `json:"topic,omitempty"`
+	Importance      int               `json:"importance"`
+	Origin          string            `json:"origin"`
+	Status          string            `json:"status"`
+	SourceSessionID string            `json:"source_session_id,omitempty"`
+	SourceMessageID string            `json:"source_message_id,omitempty"`
+	ValidFrom       time.Time         `json:"valid_from"`
+	InvalidAt       *time.Time        `json:"invalid_at,omitempty"`
+	ExpiresAt       *time.Time        `json:"expires_at,omitempty"`
+	SupersededBy    string            `json:"superseded_by,omitempty"`
+	LastUsedAt      *time.Time        `json:"last_used_at,omitempty"`
+	UseCount        int               `json:"use_count"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
 // MemoryTopic is a subject the extractor is still counting before promoting
@@ -178,7 +199,7 @@ func (c *Client) ListMemoryItems(ctx context.Context, status string, limit, offs
 }
 
 // CreateMemoryItem manually adds a long-term memory. kind is one of
-// profile / preference / fact / task / interest.
+// profile / preference / fact / task / interest / experience (extracted).
 func (c *Client) CreateMemoryItem(ctx context.Context, kind, content string, importance int) (*MemoryItem, error) {
 	body := map[string]interface{}{
 		"kind":       kind,

@@ -1648,7 +1648,7 @@ func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationRe
 	// ============================================================
 
 	// ArrayExpr (ARRAY[...] expressions)
-	// Attack: SELECT ARRAY[pg_read_file('/etc/passwd')] FROM table
+	// Attack: SELECT ARRAY[pg_read('/etc/passwd')] FROM table
 	if ae := node.GetAArrayExpr(); ae != nil {
 		for _, elem := range ae.Elements {
 			if err := v.validateNode(elem, result); err != nil {
@@ -1658,7 +1658,7 @@ func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationRe
 	}
 
 	// RowExpr (ROW(...) expressions)
-	// Attack: SELECT ROW(pg_read_file('/etc/passwd')) FROM table
+	// Attack: SELECT ROW(pg_read('/etc/passwd')) FROM table
 	if re := node.GetRowExpr(); re != nil {
 		for _, arg := range re.Args {
 			if err := v.validateNode(arg, result); err != nil {
@@ -1968,7 +1968,7 @@ func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationRe
 	}
 
 	// JsonScalarExpr (JSON_SCALAR(...)) - PG17 SQL/JSON node.
-	// Attack: SELECT JSON_SCALAR(pg_read_file('/etc/passwd')) FROM table
+	// Attack: SELECT JSON_SCALAR(pg_read('/etc/passwd')) FROM table
 	if jse := node.GetJsonScalarExpr(); jse != nil {
 		if err := v.validateNode(jse.Expr, result); err != nil {
 			return err
@@ -1976,7 +1976,7 @@ func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationRe
 	}
 
 	// JsonFuncExpr (JSON_VALUE / JSON_QUERY / JSON_EXISTS(...)) - PG17 SQL/JSON node.
-	// Attack: SELECT JSON_VALUE(pg_read_file('/etc/passwd'), '$') FROM table
+	// Attack: SELECT JSON_VALUE(pg_read('/etc/passwd'), '$') FROM table
 	if jfe := node.GetJsonFuncExpr(); jfe != nil {
 		if err := v.validateJsonValueExpr(jfe.ContextItem, result); err != nil {
 			return err
@@ -2073,7 +2073,7 @@ func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationRe
 	// The recursive branches above validate every expression type we know how
 	// to inspect. Any node type NOT in the recognized set below is REJECTED,
 	// because an unhandled type can smuggle a dangerous FuncCall past the
-	// blacklist (e.g. PG17's JSON_SCALAR wrapping pg_read_file). Whenever a new
+	// blacklist (e.g. PG17's JSON_SCALAR wrapping pg_read). Whenever a new
 	// recursive handler is added above, add its Node_* wrapper here as well.
 	// ============================================================
 	switch node.Node.(type) {
@@ -2196,7 +2196,7 @@ func (v *sqlValidator) validateFuncCall(fc *pg_query.FuncCall, result *SQLValida
 	// Block dangerous function prefixes
 	if v.checkDangerousFuncs {
 		dangerousPrefixes := []string{
-			"pg_",     // All pg_* functions (pg_read_file, pg_reload_conf, pg_stat_*, etc.)
+			"pg_",     // All pg_* functions (pg_read, pg_reload_conf, pg_stat_*, etc.)
 			"lo_",     // Large object functions (lo_import, lo_export, lo_from_bytea, lo_put, etc.)
 			"dblink",  // Database link functions
 			"file_",   // File functions

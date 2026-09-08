@@ -31,7 +31,9 @@ test('getAgentToolIconName maps sandbox shell tools to the terminal icon', () =>
 })
 
 test('getAgentToolIconName maps skill and sandbox file tools', () => {
+  assert.equal(getAgentToolIconName('read'), 'file')
   assert.equal(getAgentToolIconName('read_file'), 'file')
+  assert.equal(getAgentToolIconName('grep'), 'search')
   assert.equal(getAgentToolIconName('read_skill'), 'file')
   assert.equal(getAgentToolIconName('list_sandbox_files'), 'folder')
   assert.equal(getAgentToolIconName('read_sandbox_file'), 'file')

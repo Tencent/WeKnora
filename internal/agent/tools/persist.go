@@ -16,6 +16,7 @@ var persistStripFields = map[string][]string{
 // persistStripFieldsByTool drops binary / duplicate blobs. stdout/stderr stay
 // (compacted separately) so a history reload can still render the card.
 var persistStripFieldsByTool = map[string][]string{
+	LegacyToolReadFile:        {"content", "content_base64", "instructions"},
 	ToolReadFile:              {"content", "content_base64", "instructions"},
 	ToolShellExec:             {"content", "content_base64"},
 	LegacyToolReadSandboxFile: {"content", "content_base64"},
@@ -27,6 +28,7 @@ var persistStripFieldsByTool = map[string][]string{
 // needs stdout/stderr to render a terminal card; those streams are already
 // capped by the tool. Persist still uses persistStripFieldsByTool.
 var clientStripFieldsByTool = map[string][]string{
+	LegacyToolReadFile:        {"content", "content_base64", "instructions"},
 	ToolReadFile:              {"content", "content_base64", "instructions"},
 	ToolShellExec:             {"content", "content_base64"},
 	LegacyToolReadSandboxFile: {"content", "content_base64"},
@@ -136,6 +138,10 @@ func SanitizeAgentStepsForStorage(steps []types.AgentStep) []types.AgentStep {
 			} else if ShouldOmitRawToolOutput(tc.Name, result.Data) {
 				result.Output = compactToolSummary(result.Success, result.Error, result.Data)
 			}
+			if path, ok := result.Data["full_output_path"].(string); ok && path != "" &&
+				!strings.Contains(result.Output, path) {
+				result.Output += "\nSaved tool output: " + path + "; use read or grep."
+			}
 			result.Data = SanitizeToolDataForPersist(tc.Name, result.Data)
 			compactSandboxStreamFields(result.Data)
 			toolCalls[j].Result = &result
@@ -168,7 +174,8 @@ func CompactToolOutputForHistory(toolName string, result *types.ToolResult) stri
 }
 
 func isSandboxContentTool(toolName string) bool {
-	return toolName == ToolShellExec || toolName == ToolReadFile || toolName == LegacyToolReadSandboxFile || toolName == LegacyToolExecuteSkillScript
+	return toolName == ToolShellExec || toolName == ToolReadFile || toolName == LegacyToolReadFile ||
+		toolName == LegacyToolReadSandboxFile || toolName == LegacyToolExecuteSkillScript
 }
 
 // failedToolVisibleContent keeps stdout/stderr (in Output) when a tool fails.

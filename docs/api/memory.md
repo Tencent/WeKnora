@@ -71,7 +71,9 @@ curl --location --request PUT 'http://localhost:8080/api/v1/memory/settings' \
 | `limit` | 默认 50，最大 200 |
 | `offset` | 默认 0 |
 
-`kind` 取值：`profile` / `preference` / `fact` / `task` / `interest`。
+`kind` 取值：`profile` / `preference` / `fact` / `task` / `interest` / `experience`。
+
+`experience` 由同一后台提取任务从执行过程生成，包含 `experience.trigger`、`applicability`、`avoid`、`outcome`、`task_summary` 及真实 `evidence` 引用；正文可保留最多 8000 字符。结果不确定的经验等待确认。管理 API 可编辑、删除或确认已有经验，手工新增接口仍用于普通记忆。Agent 通过 `read` / `grep` 按需查阅，见[生命周期和工具设计](../memory-experience-design.md)。
 
 ## POST `/memory/items`
 

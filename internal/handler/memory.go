@@ -266,6 +266,13 @@ func (h *MemoryHandler) CreateItem(c *gin.Context) {
 		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
+	if req.Kind == types.MemoryKindExperience {
+		_ = c.Error(
+			apperrors.NewBadRequestError("task experience must be extracted from execution evidence; use a fact for a" +
+				" manually written note"),
+		)
+		return
+	}
 	item, err := h.memoryService.CreateItem(ctx, req.Kind, req.Content, req.Importance)
 	if err != nil {
 		h.fail(c, err, "Failed to create memory")

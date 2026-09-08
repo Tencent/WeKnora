@@ -56,7 +56,8 @@ test('memory i18n keys referenced in code exist in every locale', () => {
 // see them and a renamed kind would silently render a raw key in the chat.
 test('dynamic memory kind and origin labels exist in every locale', () => {
   const dynamic = [
-    ...['profile', 'preference', 'fact', 'task'].map((kind) => `memorySettings.kinds.${kind}`),
+    ...['success', 'failure', 'uncertain'].map((outcome) => `memorySettings.experience.outcomes.${outcome}`),
+    ...['profile', 'preference', 'fact', 'task', 'interest', 'experience'].map((kind) => `memorySettings.kinds.${kind}`),
     ...['explicit', 'extracted', 'manual'].map((origin) => `memorySettings.origins.${origin}`),
   ]
   const failures: string[] = []

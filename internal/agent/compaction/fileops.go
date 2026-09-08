@@ -74,7 +74,7 @@ func extractFileOps(previousSummary string, groups ...[]chat.Message) fileOps {
 					ops.written = appendUnique(ops.written, path)
 				case agenttools.ToolEditSandboxFile:
 					ops.edited = appendUnique(ops.edited, path)
-				case agenttools.ToolReadFile, agenttools.LegacyToolReadSandboxFile:
+				case agenttools.ToolReadFile, agenttools.LegacyToolReadFile, agenttools.LegacyToolReadSandboxFile:
 					ops.read = appendUnique(ops.read, path)
 				}
 			}
