@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 type MCPInput = map[string]any
@@ -26,6 +28,9 @@ type MCPTool struct {
 	// timeout (seconds) applied when a tool call triggers in-conversation auth.
 	// <=0 uses the gate's configured default.
 	authWaitTimeoutSeconds int
+	schemaOnce             sync.Once
+	schema                 *jsonschema.Schema
+	schemaErr              error
 }
 
 // NewMCPTool creates a new MCP tool wrapper. authWaitTimeoutSeconds carries the
@@ -173,6 +178,14 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 				}
 				if len(decision.ModifiedArgs) > 0 {
 					args = decision.ModifiedArgs
+					if err := t.ValidateArguments(args); err != nil {
+						return &types.ToolResult{
+							Success: false,
+							Error:   fmt.Sprintf("Invalid modified_args after approval: %v", err),
+						}, nil
+					}
+					// Approved replacements must not retain keys from the old object.
+					input = nil
 					if err := json.Unmarshal(args, &input); err != nil {
 						return &types.ToolResult{
 							Success: false,
@@ -432,132 +445,118 @@ func sanitizeName(name string) string {
 	return result.String()
 }
 
-// RegisterMCPTools registers MCP tools from given services. It returns the
-// number of tools registered. oauthSess enables in-conversation OAuth when tool
-// discovery requires authorization.
+// RegisterMCPTools installs a scoped directory and call proxy without connecting
+// to MCP servers or advertising their full schemas. The count is services, not
+// tools: discovery occurs on demand during tool execution.
 func RegisterMCPTools(
 	ctx context.Context,
 	registry *ToolRegistry,
 	services []*types.MCPService,
 	mcpManager *mcp.MCPManager,
 	gate approval.MCPApproval,
-	oauthSess *MCPOAuthSession,
+	authWaitTimeoutSeconds int,
+	lookup MCPServiceLookup,
 ) (int, error) {
-	if len(services) == 0 {
+	catalog := newMCPCatalog(
+		ctx,
+		services,
+		gate,
+		func(loadCtx context.Context, service *types.MCPService) ([]*MCPTool, error) {
+			meta, _ := ToolExecFromContext(loadCtx)
+			oauthSess := oauthSessionFromToolExec(loadCtx, meta).withAuthWaitTimeout(authWaitTimeoutSeconds)
+			definitions, err := loadMCPServiceTools(loadCtx, service, mcpManager, gate, oauthSess)
+			if err != nil {
+				return nil, err
+			}
+			tools := make([]*MCPTool, 0, len(definitions))
+			seen := make(map[string]bool)
+			for _, definition := range definitions {
+				if definition == nil || definition.Name == "" || seen[definition.Name] {
+					continue
+				}
+				seen[definition.Name] = true
+				tools = append(tools, NewMCPTool(service, definition, mcpManager, gate, authWaitTimeoutSeconds))
+			}
+			return tools, nil
+		},
+		lookup,
+	)
+	if err := catalog.authorize(ctx); err != nil {
+		return 0, err
+	}
+	if len(catalog.servers) == 0 {
 		return 0, nil
 	}
-
-	// Use provided context, but don't add timeout here
-	// The GetOrCreateClient has its own timeout for connection/init
-	// For ListTools, we use a reasonable timeout to prevent hanging
-	// but longer than before since ListTools may need time for SSE communication
-	listToolsTimeout := 30 * time.Second
-	if ctx == nil || ctx == context.Background() {
-		// If no context provided, create one with timeout
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.Background(), listToolsTimeout)
-		defer cancel()
-	}
-
-	registered := 0
-	authWaitTimeoutSeconds := 0
-	if oauthSess != nil {
-		authWaitTimeoutSeconds = oauthSess.AuthWaitTimeoutSeconds
-	}
-	regOAuth := oauthSessionForRegistration(ctx, oauthSess, listToolsTimeout)
-	for _, service := range services {
-		if !service.Enabled {
-			continue
+	// Refuse partial installation or collisions with caller-registered tools.
+	for _, name := range []string{ToolDiscoverMCPTools, ToolCallMCPTool} {
+		if _, err := registry.GetTool(name); err == nil {
+			return 0, fmt.Errorf("MCP entry point already registered: %s", name)
 		}
+	}
+	installMCPCatalog(registry, catalog)
+	return len(catalog.servers), nil
+}
 
-		toolCallID := "mcp-register-" + service.ID
-		client, err := getOrCreateMCPClientWithOAuthRetry(
+func loadMCPServiceTools(
+	ctx context.Context,
+	service *types.MCPService,
+	mcpManager *mcp.MCPManager,
+	gate approval.MCPApproval,
+	regOAuth *MCPOAuthSession,
+) ([]*types.MCPTool, error) {
+	const listToolsTimeout = 30 * time.Second
+	toolCallID := "mcp-discover-" + service.ID
+	if meta, ok := ToolExecFromContext(ctx); ok && meta != nil {
+		toolCallID = meta.ToolCallID
+	}
+	client, err := getOrCreateMCPClientWithOAuthRetry(
+		ctx, mcpManager, service, gate, regOAuth, "", toolCallID,
+	)
+	if err != nil {
+		logger.GetLogger(ctx).Errorf("Failed to create MCP client for service %s: %v", service.Name, err)
+		return nil, err
+	}
+
+	// For stdio transport, ensure connection is released after listing tools
+	isStdio := service.TransportType == types.MCPTransportStdio
+	if isStdio {
+		defer func() {
+			if err := client.Disconnect(); err != nil {
+				logger.GetLogger(ctx).Warnf("Failed to disconnect stdio MCP client after listing tools: %v", err)
+			}
+		}()
+	}
+
+	// List tools from the service with timeout.
+	// If the cached connection is stale, disconnect and retry once.
+	listCtx, cancel := context.WithTimeout(ctx, listToolsTimeout)
+	mcpTools, err := client.ListTools(listCtx)
+	cancel()
+
+	if err != nil && !isStdio {
+		logger.GetLogger(ctx).
+			Warnf("Failed to list tools from MCP service %s (will retry with fresh connection): %v", service.Name, err)
+		_ = client.Disconnect()
+
+		client, err = getOrCreateMCPClientWithOAuthRetry(
 			ctx, mcpManager, service, gate, regOAuth, "", toolCallID,
 		)
 		if err != nil {
-			logger.GetLogger(ctx).Errorf("Failed to create MCP client for service %s: %v", service.Name, err)
-			continue
+			logger.GetLogger(ctx).Errorf("Failed to reconnect MCP client for service %s: %v", service.Name, err)
+			return nil, err
 		}
 
-		// For stdio transport, ensure connection is released after listing tools
-		isStdio := service.TransportType == types.MCPTransportStdio
-		if isStdio {
-			defer func() {
-				if err := client.Disconnect(); err != nil {
-					logger.GetLogger(ctx).Warnf("Failed to disconnect stdio MCP client after listing tools: %v", err)
-				}
-			}()
-		}
-
-		// List tools from the service with timeout.
-		// If the cached connection is stale, disconnect and retry once.
-		listCtx, cancel := context.WithTimeout(ctx, listToolsTimeout)
-		mcpTools, err := client.ListTools(listCtx)
-		cancel()
-
-		if err != nil && !isStdio {
-			logger.GetLogger(ctx).Warnf("Failed to list tools from MCP service %s (will retry with fresh connection): %v", service.Name, err)
-			_ = client.Disconnect()
-
-			client, err = getOrCreateMCPClientWithOAuthRetry(
-				ctx, mcpManager, service, gate, regOAuth, "", toolCallID,
-			)
-			if err != nil {
-				logger.GetLogger(ctx).Errorf("Failed to reconnect MCP client for service %s: %v", service.Name, err)
-				continue
-			}
-
-			retryCtx, retryCancel := context.WithTimeout(ctx, listToolsTimeout)
-			mcpTools, err = client.ListTools(retryCtx)
-			retryCancel()
-		}
-
-		if err != nil {
-			logger.GetLogger(ctx).Errorf("Failed to list tools from MCP service %s: %v", service.Name, err)
-			continue
-		}
-
-		// Register each tool
-		for _, mcpTool := range mcpTools {
-			if gate != nil {
-				policyTenantID, ok := mcpPolicyTenantID(ctx)
-				if !ok {
-					logger.GetLogger(ctx).Warnf(
-						"Skipping MCP tool %s/%s: tenant id missing from context",
-						service.Name, mcpTool.Name,
-					)
-					continue
-				}
-				enabled, policyErr := gate.IsEnabled(ctx, policyTenantID, service.ID, mcpTool.Name)
-				if policyErr != nil {
-					logger.GetLogger(ctx).Warnf("Failed to read enabled policy for MCP tool %s/%s: %v", service.Name, mcpTool.Name, policyErr)
-					continue
-				}
-				if !enabled {
-					logger.GetLogger(ctx).Infof("MCP tool disabled by policy: %s from service: %s", mcpTool.Name, service.Name)
-					continue
-				}
-			}
-			tool := NewMCPTool(service, mcpTool, mcpManager, gate, authWaitTimeoutSeconds)
-			toolName := tool.Name()
-
-			// Check for name collision before registering (first-wins policy).
-			if existing, err := registry.GetTool(toolName); err == nil {
-				if mcpExisting, ok := existing.(*MCPTool); ok && mcpExisting.service.ID != service.ID {
-					logger.GetLogger(ctx).Warnf(
-						"MCP tool name collision: %q from service %q conflicts with service %q — skipped (first-wins)",
-						toolName, service.Name, mcpExisting.service.Name,
-					)
-				}
-			}
-
-			registry.RegisterTool(tool)
-			registered++
-			logger.GetLogger(ctx).Infof("Registered MCP tool: %s from service: %s", toolName, service.Name)
-		}
+		retryCtx, retryCancel := context.WithTimeout(ctx, listToolsTimeout)
+		mcpTools, err = client.ListTools(retryCtx)
+		retryCancel()
 	}
 
-	return registered, nil
+	if err != nil {
+		logger.GetLogger(ctx).Errorf("Failed to list tools from MCP service %s: %v", service.Name, err)
+		return nil, err
+	}
+
+	return mcpTools, nil
 }
 
 // MCPToolNamesByServiceID returns registered MCP tool names grouped by service ID.

@@ -446,7 +446,7 @@ func (s *messageService) DeleteMessageKnowledge(ctx context.Context, knowledgeID
 		return
 	}
 	logger.Infof(ctx, "Deleting chat history knowledge entry: %s", knowledgeID)
-	if err := s.knowService.DeleteKnowledge(ctx, knowledgeID); err != nil {
+	if err := deleteReferencedKnowledge(ctx, s.knowService, "", []string{knowledgeID}); err != nil {
 		logger.Warnf(ctx, "Failed to delete chat history knowledge %s: %v", knowledgeID, err)
 	}
 }
@@ -466,7 +466,7 @@ func (s *messageService) DeleteSessionKnowledge(ctx context.Context, sessionID s
 	}
 
 	logger.Infof(ctx, "Deleting %d chat history knowledge entries for session %s", len(knowledgeIDs), sessionID)
-	if err := s.knowService.DeleteKnowledgeList(ctx, knowledgeIDs); err != nil {
+	if err := deleteReferencedKnowledge(ctx, s.knowService, "", knowledgeIDs); err != nil {
 		logger.Warnf(ctx, "Failed to batch delete chat history knowledge for session %s: %v", sessionID, err)
 	}
 }

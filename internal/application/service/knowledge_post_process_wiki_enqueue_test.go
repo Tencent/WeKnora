@@ -155,24 +155,40 @@ func newWikiEnqueueTestService(
 ) (*KnowledgePostProcessService, *wikiEnqueueFailureKnowledgeRepo) {
 	repo := &wikiEnqueueFailureKnowledgeRepo{
 		knowledge: &types.Knowledge{
-			ID:          knowledgeID,
-			ParseStatus: types.ParseStatusProcessing,
+			ID:              knowledgeID,
+			TenantID:        7,
+			KnowledgeBaseID: "kb-wiki",
+			ParseStatus:     types.ParseStatusProcessing,
 		},
 	}
 	pendingRepo.knowledgeRepo = repo
 	return &KnowledgePostProcessService{
 		knowledgeRepo: repo,
 		kbService: &wikiEnqueueFailureKBService{kb: &types.KnowledgeBase{
-			ID: "kb-wiki",
+			ID:       "kb-wiki",
+			TenantID: 7,
 			IndexingStrategy: types.IndexingStrategy{
 				WikiEnabled: true,
 			},
 		}},
 		chunkService: &wikiEnqueueFailureChunkService{chunks: []*types.Chunk{
-			{ID: "chunk-1", ChunkType: types.ChunkTypeText},
+			{
+				ID:              "chunk-1",
+				TenantID:        7,
+				KnowledgeID:     knowledgeID,
+				KnowledgeBaseID: "kb-wiki",
+				ChunkType:       types.ChunkTypeText,
+			},
 		}},
 		chunkRepo: &wikiEnqueueFailureChunkRepo{chunks: []*types.Chunk{
-			{ID: "chunk-1", ChunkType: types.ChunkTypeText, Content: "plain text"},
+			{
+				ID:              "chunk-1",
+				TenantID:        7,
+				KnowledgeID:     knowledgeID,
+				KnowledgeBaseID: "kb-wiki",
+				ChunkType:       types.ChunkTypeText,
+				Content:         "plain text",
+			},
 		}},
 		taskEnqueuer: queue,
 		pendingRepo:  pendingRepo,
@@ -259,4 +275,14 @@ func TestKnowledgePostProcessRetriesWikiTriggerWithoutDoubleAccounting(t *testin
 		[]string{types.TypeSummaryGeneration, types.TypeWikiIngest, types.TypeWikiIngest},
 		queue.taskTypes,
 	)
+}
+
+func TestPostProcessRejectsMovedKnowledgeBeforeWikiOrSpanWrites(t *testing.T) {
+	pending := &wikiEnqueueFailurePendingRepo{}
+	queue := &wikiEnqueueFailureTaskQueue{}
+	svc, repo := newWikiEnqueueTestService("moved-doc", pending, queue)
+	repo.knowledge.KnowledgeBaseID = "other-kb"
+	require.ErrorIs(t, svc.Handle(context.Background(), newWikiEnqueuePostProcessTask(t, "moved-doc")), asynq.SkipRetry)
+	require.Zero(t, repo.expectedSubtasks)
+	require.Equal(t, types.ParseStatusProcessing, repo.knowledge.ParseStatus)
 }

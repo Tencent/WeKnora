@@ -359,6 +359,8 @@ type ToolResult struct {
 
 // ToolCall represents a single tool invocation within an agent step
 type ToolCall struct {
+	// Target identifies the actual proxy target; Name/Args retain the model call for replay.
+	Target           *ToolCallTarget        `json:"target,omitempty"`
 	ID               string                 `json:"id"`                          // Function call ID from LLM
 	Name             string                 `json:"name"`                        // Tool name
 	Args             map[string]interface{} `json:"args"`                        // Tool arguments
@@ -366,6 +368,31 @@ type ToolCall struct {
 	Reflection       string                 `json:"reflection,omitempty"`        // Agent's reflection on this tool call result (if enabled)
 	Duration         int64                  `json:"duration"`                    // Execution time in milliseconds
 	ProviderMetadata ToolCallMetadata       `json:"provider_metadata,omitempty"` // Provider-specific tool-call state for replay
+}
+
+// ToolCallTarget identifies a resolved invocation without rewriting the model's
+// function call, which must be preserved for history replay and provider state.
+type ToolCallTarget struct {
+	Name        string                 `json:"name"`
+	Args        map[string]interface{} `json:"args"`
+	ServiceName string                 `json:"service_name"`
+	ToolName    string                 `json:"tool_name"`
+}
+
+// ExecutionName returns the resolved target name for presentation and tracing.
+func (t ToolCall) ExecutionName() string {
+	if t.Target != nil {
+		return t.Target.Name
+	}
+	return t.Name
+}
+
+// ExecutionArgs returns the resolved target arguments without changing replay data.
+func (t ToolCall) ExecutionArgs() map[string]interface{} {
+	if t.Target != nil {
+		return t.Target.Args
+	}
+	return t.Args
 }
 
 // PipelineToolCallIDPrefix marks a persisted tool call the model never made.

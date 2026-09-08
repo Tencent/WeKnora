@@ -2,23 +2,25 @@ package router
 
 import (
 	"context"
+	"errors"
 	"io"
-	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
-	"github.com/gin-gonic/gin"
-
 	"github.com/Tencent/WeKnora/internal/config"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/filetransport"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/gin-gonic/gin"
 )
 
 // files.go hosts every file-proxy surface the router exposes:
@@ -42,247 +44,11 @@ type getRouteRegistrar interface {
 	GET(string, ...gin.HandlerFunc) gin.IRoutes
 }
 
-// messageFileLookup is the narrow message-service surface needed by the
-// message-scoped file proxy. Keeping it small makes the authorization boundary
-// independently testable.
-type messageFileLookup interface {
-	GetMessage(ctx context.Context, sessionID, messageID string) (*types.Message, error)
-}
-
-// sharedAgentFileLookup verifies that a source workspace's agent is still
-// shared to the caller. Revoking the share therefore also revokes historical
-// message-file access.
-type sharedAgentFileLookup interface {
-	GetSharedAgentForTenant(
-		ctx context.Context,
-		tenantID uint64,
-		callerTenantRole types.TenantRole,
-		agentID string,
-		sourceTenantID ...uint64,
-	) (*types.CustomAgent, error)
-}
-
-// kbSharePermissionGuard is the org-share surface the message-scoped proxy
-// needs for its shared-KB fallback.
-type kbSharePermissionGuard interface {
-	HasTenantKBPermission(
-		ctx context.Context,
-		kbID string,
-		callerTenantID uint64,
-		callerTenantRole types.TenantRole,
-		requiredRole types.OrgMemberRole,
-	) (bool, error)
-}
-
-// kbTenantLookup resolves knowledge bases without a tenant filter, so a
-// message's persisted retrieval evidence can be mapped back to the knowledge
-// bases the chunks were retrieved from.
-type kbTenantLookup interface {
-	GetKnowledgeBasesByIDsOnly(ctx context.Context, ids []string) ([]*types.KnowledgeBase, error)
-}
-
-// knowledgeOwnerLookup resolves a knowledge entry to its knowledge base for
-// message references that predate the denormalized knowledge_base_id field.
-type knowledgeOwnerLookup interface {
-	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
-}
-
-// messageKBShareAuthorizer bundles the read-only lookups behind the
-// message proxy's org-shared-KB fallback. A nil ShareGuard or KBs lookup
-// disables the fallback, which keeps older call sites and tests on the
-// shared-agent-only behavior. A nil Knowledges lookup only disables the
-// pre-denormalization KnowledgeID path.
-type messageKBShareAuthorizer struct {
-	ShareGuard kbSharePermissionGuard
-	KBs        kbTenantLookup
-	Knowledges knowledgeOwnerLookup
-}
-
-// resourceAccessibleViaSharedKB reports whether the message's persisted
-// retrieval evidence proves the resource came from an org-shared KB the
-// caller may read. This is the fallback for replies whose agent belongs to
-// the caller's own workspace while the retrieved resources belong to the
-// workspace that shared the knowledge base (#3022).
-//
-// Evidence required from one retrieval record: a canonical resource://
-// handle (not a prefix of a longer token) appears in the chunk text or
-// image_info, its knowledge base belongs to the resource's tenant, and
-// that KB is org-shared to the caller with at least viewer permission.
-// Smart-reasoning turns persist that evidence on AgentSteps when
-// KnowledgeReferences was never filled. Any lookup failure fails closed.
-func (a messageKBShareAuthorizer) resourceAccessibleViaSharedKB(
-	ctx context.Context,
-	message *types.Message,
-	resource *types.StoredResource,
-	callerTenantID uint64,
-	callerTenantRole types.TenantRole,
-) bool {
-	if a.ShareGuard == nil || a.KBs == nil || message == nil || resource == nil {
-		return false
-	}
-	handle, ok := types.ParseResourcePath(types.BuildResourcePath(resource.Handle))
-	if !ok {
-		return false
-	}
-
-	kbIDs := a.collectSharedKBEvidenceIDs(ctx, message, handle)
-	if len(kbIDs) == 0 {
-		return false
-	}
-
-	kbs, err := a.KBs.GetKnowledgeBasesByIDsOnly(ctx, kbIDs)
-	if err != nil {
-		return false
-	}
-	for _, kb := range kbs {
-		if kb == nil || kb.TenantID != resource.TenantID {
-			continue
-		}
-		shared, err := a.ShareGuard.HasTenantKBPermission(
-			ctx, kb.ID, callerTenantID, callerTenantRole, types.OrgRoleViewer)
-		if err == nil && shared {
-			return true
-		}
-	}
-	return false
-}
-
-func (a messageKBShareAuthorizer) collectSharedKBEvidenceIDs(
-	ctx context.Context,
-	message *types.Message,
-	handle string,
-) []string {
-	seenKB := make(map[string]bool)
-	seenKnowledge := make(map[string]bool)
-	var kbIDs, knowledgeIDs []string
-	addKB := func(id string) {
-		if id == "" || seenKB[id] {
-			return
-		}
-		seenKB[id] = true
-		kbIDs = append(kbIDs, id)
-	}
-	addKnowledge := func(id string) {
-		if id == "" || seenKnowledge[id] {
-			return
-		}
-		seenKnowledge[id] = true
-		knowledgeIDs = append(knowledgeIDs, id)
-	}
-
-	for _, ref := range message.KnowledgeReferences {
-		if !searchResultHasResourceHandle(ref, handle) {
-			continue
-		}
-		if ref.KnowledgeBaseID != "" {
-			addKB(ref.KnowledgeBaseID)
-			continue
-		}
-		addKnowledge(ref.KnowledgeID)
-	}
-	collectKBEvidenceFromValue(message.AgentSteps, handle, "", "", addKB, addKnowledge)
-
-	if a.Knowledges != nil {
-		for _, knowledgeID := range knowledgeIDs {
-			knowledge, err := a.Knowledges.GetKnowledgeByIDOnly(ctx, knowledgeID)
-			if err != nil || knowledge == nil {
-				continue
-			}
-			addKB(knowledge.KnowledgeBaseID)
-		}
-	}
-	return kbIDs
-}
-
-func searchResultHasResourceHandle(ref *types.SearchResult, handle string) bool {
-	if ref == nil {
-		return false
-	}
-	return textHasResourceHandle(ref.Content, handle) ||
-		textHasResourceHandle(ref.MatchedContent, handle) ||
-		textHasResourceHandle(ref.ImageInfo, handle)
-}
-
-func textHasResourceHandle(text, handle string) bool {
-	if text == "" || handle == "" {
-		return false
-	}
-	want := types.BuildResourcePath(handle)
-	for _, ref := range types.ScanResourceReferences(text) {
-		if ref == want {
-			return true
-		}
-	}
-	return false
-}
-
-func collectKBEvidenceFromValue(
-	v interface{},
-	handle, kbID, knowledgeID string,
-	addKB, addKnowledge func(string),
-) {
-	switch val := v.(type) {
-	case string:
-		if !textHasResourceHandle(val, handle) {
-			return
-		}
-		if kbID != "" {
-			addKB(kbID)
-			return
-		}
-		addKnowledge(knowledgeID)
-	case types.AgentSteps:
-		for _, step := range val {
-			collectKBEvidenceFromValue(step, handle, kbID, knowledgeID, addKB, addKnowledge)
-		}
-	case types.AgentStep:
-		collectKBEvidenceFromValue(val.ToolCalls, handle, kbID, knowledgeID, addKB, addKnowledge)
-	case []types.ToolCall:
-		for _, call := range val {
-			collectKBEvidenceFromValue(call, handle, kbID, knowledgeID, addKB, addKnowledge)
-		}
-	case types.ToolCall:
-		if val.Result != nil {
-			collectKBEvidenceFromValue(val.Result.Output, handle, kbID, knowledgeID, addKB, addKnowledge)
-			collectKBEvidenceFromValue(val.Result.Data, handle, kbID, knowledgeID, addKB, addKnowledge)
-		}
-	case map[string]interface{}:
-		nextKB := firstNonEmptyString(
-			stringFromAnyMap(val, "knowledge_base_id"),
-			stringFromAnyMap(val, "knowledge_base"),
-			kbID,
-		)
-		nextKnowledge := firstNonEmptyString(stringFromAnyMap(val, "knowledge_id"), knowledgeID)
-		for _, nested := range val {
-			collectKBEvidenceFromValue(nested, handle, nextKB, nextKnowledge, addKB, addKnowledge)
-		}
-	case []interface{}:
-		for _, item := range val {
-			collectKBEvidenceFromValue(item, handle, kbID, knowledgeID, addKB, addKnowledge)
-		}
-	case []map[string]interface{}:
-		for _, item := range val {
-			collectKBEvidenceFromValue(item, handle, kbID, knowledgeID, addKB, addKnowledge)
-		}
-	}
-}
-
-func stringFromAnyMap(m map[string]interface{}, key string) string {
-	if m == nil {
-		return ""
-	}
-	s, _ := m[key].(string)
-	return strings.TrimSpace(s)
-}
-
-func firstNonEmptyString(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
+type (
+	messageFileLookup        = access.MessageFileLookup
+	sharedAgentFileLookup    = access.SharedAgentFileLookup
+	messageKBShareAuthorizer = access.MessageKBShareAuthorizer
+)
 
 // localStorageBaseDir resolves LOCAL_STORAGE_BASE_DIR with the container
 // default.
@@ -372,68 +138,17 @@ func resolveFileService(
 	return filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
 }
 
-// resolveTenantFileServiceWithFallback is resolveFileService plus the
-// fallback rule shared by /files and the KB-scoped proxy: when tenant-level
-// resolution fails and the requested provider matches the process-global
-// STORAGE_TYPE, serve through the global file service instead of failing.
-// Returns ok=false (already logged) when no service can be resolved; the
-// caller decides the HTTP status.
-func resolveTenantFileServiceWithFallback(
-	ctx context.Context,
-	logTag string,
-	tenant *types.Tenant,
-	backendID, provider, absDir string,
-	storageResolver interfaces.StorageBackendResolver,
-	globalFileService interfaces.FileService,
-) (fileSvc interfaces.FileService, resolvedProvider string, ok bool) {
-	var err error
-	if storageResolver != nil {
-		fileSvc, resolvedProvider, err = storageResolver.ResolveFileService(ctx, tenant, backendID, provider, absDir)
-	} else if tenant.StorageEngineConfig != nil {
-		fileSvc, resolvedProvider, err = filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
-	} else {
-		err = http.ErrMissingFile
-	}
-	if err == nil {
-		return fileSvc, resolvedProvider, true
-	}
-
-	globalStorageType := strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
-	if globalStorageType == "" {
-		globalStorageType = "local"
-	}
-	if provider == globalStorageType && globalFileService != nil {
-		logger.Warnf(ctx, "[Router] %s tenant storage config missing or invalid, fallback to global file service: tenant_id=%d provider=%s err=%v",
-			logTag, tenant.ID, provider, err)
-		return globalFileService, globalStorageType, true
-	}
-	logger.Warnf(ctx, "[Router] %s resolve file service failed without fallback: tenant_id=%d provider=%s global_storage_type=%s err=%v",
-		logTag, tenant.ID, provider, globalStorageType, err)
-	return nil, "", false
-}
-
 // streamStoredFile writes the shared success response of every file proxy:
 // safe content type, nosniff, disposition for non-inline types, the route's
 // cache policy, then the body (skipped for HEAD). Closes reader.
 func streamStoredFile(c *gin.Context, reader io.ReadCloser, contentType string, inline bool, cacheControl, logTag string, fileNames ...string) {
-	defer reader.Close()
-	c.Header("Content-Type", contentType)
-	c.Header("X-Content-Type-Options", "nosniff")
-	disposition := "inline"
-	if !inline {
-		disposition = "attachment"
-	}
+	name := ""
 	if len(fileNames) > 0 {
-		c.Header("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": filepath.Base(fileNames[0])}))
-	} else if !inline {
-		c.Header("Content-Disposition", disposition)
+		name = fileNames[0]
 	}
-	c.Header("Cache-Control", cacheControl)
-	c.Status(http.StatusOK)
-	if c.Request.Method == http.MethodHead {
-		return
-	}
-	if _, err := io.Copy(c.Writer, reader); err != nil {
+	if err := filetransport.Serve(c.Writer, c.Request, reader, filetransport.Options{
+		Filename: name, Download: !inline, ContentType: contentType, CacheControl: cacheControl,
+	}); err != nil {
 		logger.Warnf(c.Request.Context(), "[Router] %s write response failed: %v", logTag, err)
 	}
 }
@@ -486,7 +201,7 @@ func newFileServeHandler(
 		}
 
 		backendID, provider := parseStorageTarget(filePath)
-		fileSvc, resolvedProvider, ok := resolveTenantFileServiceWithFallback(
+		fileSvc, resolvedProvider, ok := filesvc.ResolveTenantFileServiceWithFallback(
 			c.Request.Context(), "/files", tenant, backendID, provider, absDir, storageResolver, globalFileService)
 		if !ok {
 			c.Status(http.StatusBadRequest)
@@ -591,9 +306,6 @@ func serveResourceGrants(
 			fileName = resource.PhysicalPath
 		}
 		contentType, inline := secutils.SafeContentTypeByFilename(fileName)
-		if resource.MimeType != "" && inline {
-			contentType = resource.MimeType
-		}
 		streamStoredFile(c, reader, contentType, inline, "private, max-age=300",
 			"resource grant (resource_id="+resource.ID+")", fileName)
 	}
@@ -603,13 +315,10 @@ func serveResourceGrants(
 
 // serveKBScopedFiles registers the KB-scoped file proxy used to render images
 // embedded in a knowledge base's content (chunks / wiki pages). Unlike the
-// tenant-scoped /files route — which enforces file_path.tenant == caller.tenant
-// and therefore cannot serve objects owned by another tenant — this route is
-// gated by RequireKBAccess. That guard resolves org-shared / agent-visible KBs
-// and rewrites the request context's tenant ID to the KB's *owner* (source)
-// tenant, so images stored under the owner tenant (local://<owner>/exports/...)
-// become reachable by tenants that legitimately share the KB, while still
-// enforcing that the requested path belongs to that owner tenant.
+// tenant-scoped /files route, this route consumes RequireKBAccess's exact KB
+// grant. The file must be owned by that KB's tenant and have a live document
+// binding or an exact reference in the KB's chunks/wiki pages. Only then does
+// storage execute under the owner tenant.
 //
 // Route:
 //   - GET /api/v1/knowledge-bases/:id/files?file_path=<provider://...>
@@ -622,14 +331,8 @@ func serveKBScopedFiles(
 	resourceCatalogs ...interfaces.ResourceCatalog,
 ) {
 	logger.Infof(context.Background(), "[Router] Serving KB-scoped files from /knowledge-bases/:id/files")
-	// API-key access mirrors /files: KB-restricted keys are denied (an
-	// arbitrary file_path under the KB owner tenant cannot be bounded to a
-	// key's allow-list), while full-access and tenant-wide retrieve keys pass
-	// — KBAccessRead still confines them to KBs they may read (own /
-	// org-shared / agent-visible), exactly as it does for a JWT Viewer. The
-	// route is declared to the gate with the retrieve policy so it is reachable
-	// at all; AllowFileServeAPIKey then applies the stricter not-KB-restricted
-	// constraint.
+	// Preserve the existing file-route API-key policy: KB-restricted keys are
+	// denied; full-access and tenant-wide retrieve keys still need KBAccessRead.
 	g.apiKeyRoute(r, http.MethodGet, "/knowledge-bases/:id/files",
 		apiKeyRetrieve(apiKeyFullAccess()),
 		middleware.AllowFileServeAPIKey(),
@@ -642,24 +345,6 @@ func serveKBScopedFiles(
 			firstResourceCatalog(resourceCatalogs),
 		),
 	)
-}
-
-// newKBScopedFileServeHandler builds the handler backing serveKBScopedFiles.
-// The effective (owner) tenant is taken from the request context, which
-// RequireKBAccess has already rewritten to the KB's source tenant. The owner
-// tenant's storage config is loaded via TenantService so the file is fetched
-// from the backend that actually holds it — the caller's own storage config is
-// irrelevant here.
-func newKBScopedFileServeHandler(
-	tenantService interfaces.TenantService,
-	globalFileService interfaces.FileService,
-	resolvers ...interfaces.StorageBackendResolver,
-) gin.HandlerFunc {
-	var storageResolver interfaces.StorageBackendResolver
-	if len(resolvers) > 0 {
-		storageResolver = resolvers[0]
-	}
-	return newKBScopedFileServeHandlerWithResources(tenantService, globalFileService, storageResolver, nil)
 }
 
 func firstResourceCatalog(catalogs []interfaces.ResourceCatalog) interfaces.ResourceCatalog {
@@ -675,71 +360,32 @@ func newKBScopedFileServeHandlerWithResources(
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
 ) gin.HandlerFunc {
-	absDir := localStorageAbsDir()
-
 	return func(c *gin.Context) {
-		ctx := c.Request.Context()
-
-		filePath, ok := requireFilePathQuery(c)
+		reference, ok := requireFilePathQuery(c)
 		if !ok {
 			return
 		}
-
-		// RequireKBAccess rewrote the request context tenant ID to the KB's
-		// owner (source) tenant for shared KBs; for own KBs it equals the
-		// caller's tenant. Either way it is the tenant that owns this KB's
-		// storage objects, so the requested path must belong to it.
-		ownerTenantID, ok := types.TenantIDFromContext(ctx)
-		if !ok || ownerTenantID == 0 {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
+		grant, _ := middleware.KBAccessFromContext(c)
+		bindings, _ := resourceCatalog.(interfaces.KBResourceLookup)
+		file, err := access.ResolveKBFile(
+			c.Request.Context(),
+			grant,
+			c.Param("id"),
+			reference,
+			resourceCatalog,
+			bindings,
+		)
+		if fileAccessError(c, err) {
 			return
 		}
-		filePath, _, ok = resolveCatalogResource(c, resourceCatalog, filePath, ownerTenantID)
-		if !ok {
-			return
-		}
-
-		if err := secutils.ValidateKBScopedStoragePath(filePath, ownerTenantID); err != nil {
-			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files denied path not allowed for KB proxy: owner_tenant_id=%d file_path=%q err=%v",
-				ownerTenantID, filePath, err)
-			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
-			return
-		}
-
-		tenant, err := tenantService.GetTenantByID(ctx, ownerTenantID)
-		if err != nil || tenant == nil {
-			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files owner tenant lookup failed: owner_tenant_id=%d err=%v",
-				ownerTenantID, err)
-			c.Status(http.StatusNotFound)
-			return
-		}
-
-		backendID, provider := parseStorageTarget(filePath)
-		fileSvc, resolvedProvider, ok := resolveTenantFileServiceWithFallback(
-			ctx, "/knowledge-bases/:id/files", tenant, backendID, provider, absDir, storageResolver, globalFileService)
-		if !ok {
-			c.Status(http.StatusBadRequest)
-			return
-		}
-
-		reader, err := fileSvc.GetFile(ctx, filePath)
-		if err != nil {
-			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files get file failed: owner_tenant_id=%d provider=%s path=%q err=%v",
-				ownerTenantID, resolvedProvider, filePath, err)
-			c.Status(http.StatusNotFound)
-			return
-		}
-
-		contentType, inline := secutils.SafeContentTypeByFilename(filePath)
-		// Cross-tenant shared content — keep it private so shared proxies /
-		// CDNs do not cache one tenant's view for another.
-		streamStoredFile(c, reader, contentType, inline, "private, max-age=86400", "/knowledge-bases/:id/files", filePath)
+		serveAuthorizedFile(c, file, tenantService, globalFileService, storageResolver, "KB files")
 	}
 }
 
 // newMessageScopedFileServeHandler serves resources rendered inside one
 // assistant message. The message service first proves that the caller owns the
-// containing session. For cross-workspace resources we then require either the
+// containing session, and the persisted message must reference the exact file.
+// For cross-workspace resources we then require either the
 // message's agent to still be shared from the resource-owning workspace, or —
 // when the reply was produced by the caller's own agent over an org-shared
 // knowledge base — that the resource's KB is still shared to the caller.
@@ -756,145 +402,81 @@ func newMessageScopedFileServeHandler(
 	resourceCatalog interfaces.ResourceCatalog,
 	kbShareAuth messageKBShareAuthorizer,
 ) gin.HandlerFunc {
-	absDir := localStorageAbsDir()
-
 	return func(c *gin.Context) {
-		ctx := c.Request.Context()
-		filePath, ok := requireFilePathQuery(c)
+		reference, ok := requireFilePathQuery(c)
 		if !ok {
 			return
 		}
-
-		callerTenantID, ok := types.TenantIDFromContext(ctx)
-		if !ok || callerTenantID == 0 {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
+		file, err := access.ResolveMessageFile(c.Request.Context(), c.Param("id"), c.Param("message_id"), reference,
+			messageService, agentShareService, resourceCatalog, kbShareAuth)
+		if fileAccessError(c, err) {
 			return
 		}
-		if messageService == nil {
-			c.Status(http.StatusNotFound)
-			return
-		}
-
-		message, err := messageService.GetMessage(ctx, c.Param("id"), c.Param("message_id"))
-		if err != nil || message == nil {
-			// Do not reveal whether a message exists outside the caller's session.
-			c.Status(http.StatusNotFound)
-			return
-		}
-
-		resolvedPath := filePath
-		var resource *types.StoredResource
-		if resourceCatalog != nil {
-			resolvedPath, resource, err = resourceCatalog.ResolvePath(ctx, filePath)
-			if err != nil {
-				c.Status(http.StatusNotFound)
-				return
-			}
-		}
-
-		ownerTenantID := message.AgentTenantID
-		kbShareAuthorized := false
-		if resource != nil {
-			ownerTenantID = resource.TenantID
-			// A modern message records its source tenant. A resource from any
-			// other tenant cannot be smuggled through that message even if the
-			// caller happens to have another shared agent with the same ID —
-			// unless the reply's own retrieval references prove the resource
-			// came from an org-shared KB the caller may still read (#3022).
-			if message.AgentTenantID != 0 && message.AgentTenantID != ownerTenantID {
-				kbShareAuthorized = kbShareAuth.resourceAccessibleViaSharedKB(
-					ctx, message, resource, callerTenantID, types.TenantRoleFromContext(ctx))
-				if !kbShareAuthorized {
-					c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: resource not accessible from this message"})
-					return
-				}
-			}
-		}
-		if ownerTenantID == 0 {
-			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: message resource workspace missing"})
-			return
-		}
-
-		if ownerTenantID != callerTenantID && !kbShareAuthorized {
-			// Messages written before agent_tenant_id was populated have no
-			// recorded source tenant; offer them the same org-shared KB
-			// fallback before the shared-agent relation is demanded.
-			if message.AgentTenantID == 0 {
-				kbShareAuthorized = kbShareAuth.resourceAccessibleViaSharedKB(
-					ctx, message, resource, callerTenantID, types.TenantRoleFromContext(ctx))
-			}
-			if !kbShareAuthorized {
-				if message.AgentID == "" || agentShareService == nil {
-					c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: shared agent access required"})
-					return
-				}
-				agent, shareErr := agentShareService.GetSharedAgentForTenant(
-					ctx,
-					callerTenantID,
-					types.TenantRoleFromContext(ctx),
-					message.AgentID,
-					ownerTenantID,
-				)
-				if shareErr != nil || agent == nil || agent.TenantID != ownerTenantID {
-					c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: shared agent access revoked"})
-					return
-				}
-			}
-		}
-
-		// Registered resources carry authoritative tenant ownership. Legacy
-		// provider paths must still encode the authorized owner tenant.
-		if resource == nil {
-			if err := secutils.ValidateStoragePathTenant(resolvedPath, ownerTenantID); err != nil {
-				logger.Warnf(ctx,
-					"[Router] message files denied cross-tenant or invalid path: owner_tenant_id=%d file_path=%q err=%v",
-					ownerTenantID, resolvedPath, err)
-				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
-				return
-			}
-		}
-
-		ownerTenant, err := tenantService.GetTenantByID(ctx, ownerTenantID)
-		if err != nil || ownerTenant == nil {
-			c.Status(http.StatusNotFound)
-			return
-		}
-
-		backendID, provider := parseStorageTarget(resolvedPath)
-		fileSvc, resolvedProvider, ok := resolveTenantFileServiceWithFallback(
-			ctx,
-			"/sessions/:id/messages/:message_id/files",
-			ownerTenant,
-			backendID,
-			provider,
-			absDir,
-			storageResolver,
-			globalFileService,
-		)
-		if !ok {
-			c.Status(http.StatusBadRequest)
-			return
-		}
-
-		reader, err := fileSvc.GetFile(ctx, resolvedPath)
-		if err != nil {
-			logger.Warnf(ctx,
-				"[Router] message files get file failed: owner_tenant_id=%d provider=%s path=%q err=%v",
-				ownerTenantID, resolvedProvider, resolvedPath, err)
-			c.Status(http.StatusNotFound)
-			return
-		}
-
-		contentType, inline := secutils.SafeContentTypeByFilename(resolvedPath)
-		if resource != nil && resource.MimeType != "" && inline {
-			contentType = resource.MimeType
-		}
-		fileName := resolvedPath
-		if resource != nil && strings.TrimSpace(resource.OriginalName) != "" {
-			fileName = resource.OriginalName
-		}
-		streamStoredFile(c, reader, contentType, inline, "private, max-age=86400", "message files", fileName)
+		serveAuthorizedFile(c, file, tenantService, globalFileService, storageResolver, "message files")
 	}
+}
+
+// Storage consumes the authorized locator; it never infers permissions from
+// a context tenant or attempts a different resource after an authorization error.
+func serveAuthorizedFile(c *gin.Context, file access.FileAccess, tenants interfaces.TenantService,
+	global interfaces.FileService, resolver interfaces.StorageBackendResolver, tag string,
+) {
+	ctx := types.WithExecutionTenant(c.Request.Context(), file.OwnerTenantID)
+	tenant, err := tenants.GetTenantByID(ctx, file.OwnerTenantID)
+	if err != nil || tenant == nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	backendID, provider := parseStorageTarget(file.Path)
+	if file.StorageBackendID != "" {
+		backendID = file.StorageBackendID
+	}
+	svc, _, ok := filesvc.ResolveTenantFileServiceWithFallback(
+		ctx,
+		tag,
+		tenant,
+		backendID,
+		provider,
+		localStorageAbsDir(),
+		resolver,
+		global,
+	)
+	if !ok {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+	reader, err := svc.GetFile(ctx, file.Path)
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	if err := filetransport.Serve(c.Writer, c.Request, reader, filetransport.Options{
+		Filename: file.Filename, CacheControl: "private, no-store",
+	}); err != nil {
+		logger.Warnf(ctx, "%s stream failed: %v", tag, err)
+	}
+}
+
+func fileAccessError(c *gin.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	case errors.Is(err, access.ErrNotFound):
+		c.Status(http.StatusNotFound)
+	case errors.Is(err, access.ErrUnauthorized):
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
+	case errors.Is(err, access.ErrForbidden):
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file not accessible from this resource"})
+	default:
+		if app, ok := apperrors.IsAppError(err); ok {
+			c.JSON(app.HTTPCode, gin.H{"error": app.Message})
+		} else {
+			logger.Warnf(c.Request.Context(), "file authorization failed: %v", err)
+			c.Status(http.StatusServiceUnavailable)
+		}
+	}
+	return true
 }
 
 // serveMessageScopedFiles registers the authenticated proxy used by the chat

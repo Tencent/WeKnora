@@ -28,6 +28,7 @@ type Handler struct {
 	agentShareService    interfaces.AgentShareService    // Service for resolving shared agents (KB scope in retrieval)
 	kbShareService       interfaces.KBShareService       // Service for resolving shared KB permissions
 	fileService          interfaces.FileService          // Service for file storage (image uploads)
+	resourceCatalog      interfaces.ResourceCatalog
 	storageResolver      interfaces.StorageBackendResolver
 	modelService         interfaces.ModelService // Service for model management (VLM access)
 	attachmentProcessor  *AttachmentProcessor    // Processor for file attachments
@@ -52,6 +53,7 @@ func NewHandler(
 	agentShareService interfaces.AgentShareService,
 	kbShareService interfaces.KBShareService,
 	fileService interfaces.FileService,
+	resourceCatalog interfaces.ResourceCatalog,
 	storageResolver interfaces.StorageBackendResolver,
 	modelService interfaces.ModelService,
 	documentReader interfaces.DocumentReader,
@@ -72,6 +74,7 @@ func NewHandler(
 		agentShareService:    agentShareService,
 		kbShareService:       kbShareService,
 		fileService:          fileService,
+		resourceCatalog:      resourceCatalog,
 		storageResolver:      storageResolver,
 		modelService:         modelService,
 		temporaryDocuments:   temporaryDocuments,

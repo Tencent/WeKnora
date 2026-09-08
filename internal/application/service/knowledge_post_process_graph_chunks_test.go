@@ -71,31 +71,43 @@ func TestKnowledgePostProcessGraphEnqueueSelection(t *testing.T) {
 	t.Setenv("NEO4J_ENABLE", "true")
 
 	const knowledgeID = "knowledge-graph-ocr"
+	const kbID = "kb-graph"
 	repo := &wikiEnqueueFailureKnowledgeRepo{
 		knowledge: &types.Knowledge{
-			ID:          knowledgeID,
-			ParseStatus: types.ParseStatusProcessing,
+			ID:              knowledgeID,
+			TenantID:        7,
+			KnowledgeBaseID: kbID,
+			ParseStatus:     types.ParseStatusProcessing,
 		},
 	}
 	queue := &wikiEnqueueFailureTaskQueue{}
+	bind := func(id, parent, content string, chunkType types.ChunkType) *types.Chunk {
+		return &types.Chunk{
+			ID:              id,
+			TenantID:        7,
+			KnowledgeID:     knowledgeID,
+			KnowledgeBaseID: kbID,
+			ParentChunkID:   parent,
+			ChunkType:       chunkType,
+			Content:         content,
+		}
+	}
 	service := &KnowledgePostProcessService{
 		knowledgeRepo: repo,
 		kbService: &wikiEnqueueFailureKBService{kb: &types.KnowledgeBase{
-			ID: "kb-graph",
+			ID:       kbID,
+			TenantID: 7,
 			IndexingStrategy: types.IndexingStrategy{
 				GraphEnabled: true,
 			},
 			ExtractConfig: &types.ExtractConfig{Enabled: true},
 		}},
 		chunkRepo: &wikiEnqueueFailureChunkRepo{chunks: []*types.Chunk{
-			{ID: "text-link", ChunkType: types.ChunkTypeText, Content: "![page_1.jpg](resource://abc)"},
-			{ID: "ocr-scanned", ChunkType: types.ChunkTypeImageOCR, ParentChunkID: "text-link", Content: "第1章 総則"},
-			{
-				ID: "cap-scanned", ChunkType: types.ChunkTypeImageCaption,
-				ParentChunkID: "text-link", Content: "a scanned page",
-			},
-			{ID: "text-prose", ChunkType: types.ChunkTypeText, Content: "Contract between Alice and Bob."},
-			{ID: "ocr-figure", ChunkType: types.ChunkTypeImageOCR, ParentChunkID: "text-prose", Content: "ACME logo"},
+			bind("text-link", "", "![page_1.jpg](resource://abc)", types.ChunkTypeText),
+			bind("ocr-scanned", "text-link", "第1章 総則", types.ChunkTypeImageOCR),
+			bind("cap-scanned", "text-link", "a scanned page", types.ChunkTypeImageCaption),
+			bind("text-prose", "", "Contract between Alice and Bob.", types.ChunkTypeText),
+			bind("ocr-figure", "text-prose", "ACME logo", types.ChunkTypeImageOCR),
 		}},
 		taskEnqueuer: queue,
 	}
@@ -103,7 +115,7 @@ func TestKnowledgePostProcessGraphEnqueueSelection(t *testing.T) {
 	payload, err := json.Marshal(types.KnowledgePostProcessPayload{
 		TenantID:        7,
 		KnowledgeID:     knowledgeID,
-		KnowledgeBaseID: "kb-graph",
+		KnowledgeBaseID: kbID,
 	})
 	require.NoError(t, err)
 

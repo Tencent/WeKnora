@@ -45,6 +45,7 @@ var sourceKeySpaces = map[string]sourceKeySpace{
 }
 
 type toolHandlePolicy struct {
+	opaqueOutput        bool // MCP bridge payloads use external identities and schemas.
 	sourceIDKeys        map[string]struct{}
 	sourceTextKeys      map[string]struct{}
 	sourceOutput        bool
@@ -58,7 +59,9 @@ type toolHandlePolicy struct {
 // alone are deliberately insufficient: a dynamic MCP tool may use the same
 // name with unrelated semantics and must remain opaque.
 var toolHandlePolicies = map[string]toolHandlePolicy{
-	"read_file": {},
+	"discover_mcp_tools": {opaqueOutput: true},
+	"call_mcp_tool":      {opaqueOutput: true},
+	"read_file":          {},
 	"knowledge_search": {
 		sourceIDKeys: map[string]struct{}{"knowledge_base_ids": {}},
 		sourceOutput: true,
@@ -197,8 +200,8 @@ func sourceCompactionAllowed(toolName string) bool {
 	if toolName == "" {
 		return true
 	}
-	_, ok := toolHandlePolicies[toolName]
-	return ok
+	policy, ok := toolHandlePolicies[toolName]
+	return ok && !policy.opaqueOutput
 }
 
 // decodeToolPolicies handles the deliberately small set of arguments whose

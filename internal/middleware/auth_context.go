@@ -77,5 +77,10 @@ func applyAuthSession(c *gin.Context, s authSession) {
 		set(key, v)
 	}
 
+	userID := ""
+	if s.User != nil {
+		userID = s.User.ID
+	}
+	ctx = types.WithCaller(ctx, types.Caller{TenantID: s.TenantID, UserID: userID, Role: s.Role})
 	c.Request = c.Request.WithContext(ctx)
 }

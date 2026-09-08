@@ -407,6 +407,10 @@ type KBClonePayload struct {
 	SourceID  string        `json:"source_id"`
 	TargetID  string        `json:"target_id"`
 	Initiator TaskInitiator `json:"initiator,omitempty"`
+	// New clone destinations are reserved by the server at admission and
+	// created by the worker once. Retries retain both ID and creator.
+	CreateTarget bool   `json:"create_target,omitempty"`
+	CreatorID    string `json:"creator_id,omitempty"`
 }
 
 // IndexDeletePayload represents the index delete task payload
@@ -440,18 +444,20 @@ type KBDeletePayload struct {
 // KnowledgeListDeletePayload represents the batch knowledge delete task payload
 type KnowledgeListDeletePayload struct {
 	TracingContext
-	TenantID     uint64        `json:"tenant_id"`
-	KnowledgeIDs []string      `json:"knowledge_ids"`
-	Initiator    TaskInitiator `json:"initiator,omitempty"`
+	TenantID        uint64        `json:"tenant_id"`
+	KnowledgeIDs    []string      `json:"knowledge_ids"`
+	Initiator       TaskInitiator `json:"initiator,omitempty"`
+	KnowledgeBaseID string        `json:"knowledge_base_id,omitempty"`
 }
 
 // KnowledgeListReparsePayload represents the batch knowledge reparse task payload
 type KnowledgeListReparsePayload struct {
 	TracingContext
-	TenantID      uint64                     `json:"tenant_id"`
-	KnowledgeIDs  []string                   `json:"knowledge_ids"`
-	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
-	Initiator     TaskInitiator              `json:"initiator,omitempty"`
+	KnowledgeBaseID string                     `json:"knowledge_base_id,omitempty"`
+	TenantID        uint64                     `json:"tenant_id"`
+	KnowledgeIDs    []string                   `json:"knowledge_ids"`
+	ProcessConfig   *KnowledgeProcessOverrides `json:"process_config,omitempty"`
+	Initiator       TaskInitiator              `json:"initiator,omitempty"`
 }
 
 // KnowledgeMovePayload represents the knowledge move task payload

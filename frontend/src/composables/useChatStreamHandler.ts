@@ -344,11 +344,12 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             if (toolCall.name === 'final_answer') return
             const result = toolCall.result as ChatMessage | undefined
             const resultData = result?.data as ChatMessage | undefined
+            const target = toolCall.target as ChatMessage | undefined
             events.push({
               type: 'tool_call',
               tool_call_id: toolCall.id,
-              tool_name: toolCall.name,
-              arguments: toolCall.args,
+              tool_name: target?.name || toolCall.name,
+              arguments: target?.args || toolCall.args,
               pending: false,
               success: result?.success !== false,
               output: result?.output || '',
@@ -746,9 +747,17 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             )
           }
           if (toolCallEvent) {
+            const resolvedMcpTarget =
+              toolCallEvent.tool_name === 'call_mcp_tool' && incomingToolName?.startsWith('mcp_')
             if (incomingToolName) toolCallEvent.tool_name = incomingToolName
             if (incomingArguments) {
-              toolCallEvent.arguments = mergeToolCallArguments(toolCallEvent.arguments, incomingArguments)
+              if (resolvedMcpTarget) {
+                // The executor now supplies the target's arguments; discard
+                // the streamed proxy envelope instead of mixing the two.
+                toolCallEvent.arguments = incomingArguments
+              } else {
+                toolCallEvent.arguments = mergeToolCallArguments(toolCallEvent.arguments, incomingArguments)
+              }
             }
             toolCallEvent.pending = true
             if (!toolCallEvent.timestamp) toolCallEvent.timestamp = Date.now()

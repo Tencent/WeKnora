@@ -3,11 +3,11 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -49,7 +49,7 @@ type editableChunkKBRepo struct {
 }
 
 func (editableChunkKBRepo) GetKnowledgeBaseByID(context.Context, string) (*types.KnowledgeBase, error) {
-	return &types.KnowledgeBase{}, nil
+	return &types.KnowledgeBase{ID: "kb", TenantID: 1}, nil
 }
 
 type editableChunkKnowledgeRepo struct {
@@ -57,7 +57,7 @@ type editableChunkKnowledgeRepo struct {
 }
 
 func (editableChunkKnowledgeRepo) GetKnowledgeByID(context.Context, uint64, string) (*types.Knowledge, error) {
-	return nil, errors.New("summary refresh not configured in unit test")
+	return &types.Knowledge{ID: "knowledge", TenantID: 1, KnowledgeBaseID: "kb"}, nil
 }
 
 type imageSyncChunkRepo struct {
@@ -165,6 +165,17 @@ func TestUpdateDocumentChunkPreservesGeneratedQuestionsAcrossRevision(t *testing
 		kbRepository:    editableChunkKBRepo{},
 	}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	ctx = (&access.KBAccess{
+		KnowledgeBase: &types.KnowledgeBase{
+			ID:       "kb",
+			TenantID: 1,
+		},
+		Caller:            types.CallerFromContext(ctx),
+		EffectiveTenantID: 1,
+		Permission:        types.OrgRoleEditor,
+	}).Context(
+		ctx,
+	)
 	newContent := "new body"
 
 	updated, err := service.UpdateDocumentChunk(ctx, "chunk", &newContent, nil, nil)

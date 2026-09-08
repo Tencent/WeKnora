@@ -73,10 +73,11 @@ type SelectedDocumentInfo struct {
 
 // PinnedMCPServiceInfo describes an MCP service explicitly @mentioned for this turn.
 type PinnedMCPServiceInfo struct {
-	ID          string
-	Name        string
-	Description string
-	ToolNames   []string // Registered tool.function names for this service (mcp_{service}_{tool})
+	Discoverable bool // Available through the scoped MCP directory.
+	ID           string
+	Name         string
+	Description  string
+	ToolNames    []string // Registered tool.function names for this service (mcp_{service}_{tool})
 }
 
 // PinnedSkillInfo describes a skill explicitly @mentioned for this turn.

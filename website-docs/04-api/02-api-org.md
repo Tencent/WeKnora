@@ -1,6 +1,6 @@
 # API 参考：组织与共享
 
-路由注册：`internal/router/router.go` 的 `RegisterOrganizationRoutes`。Handler：`internal/handler/organization.go`。
+管理组织成员以及知识库和智能体的共享关系。组织以工作空间为成员单位。
 
 组织（Organization）以“空间（tenant）”为成员单位。组织组路由的 API key 策略为 `manage_spaces` 或 full-access；KB/Agent 分享管理仅 full-access key 可用。
 
@@ -438,3 +438,7 @@ curl $BASE/api/v1/shared-agents -H "Authorization: Bearer $TOKEN"
 curl -X POST $BASE/api/v1/shared-agents/disabled -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"agent_id":"agent-1","disabled":true}'
 ```
+
+## 实现参考
+
+路由注册：`internal/router/router.go` 的 `RegisterOrganizationRoutes`。Handler：`internal/handler/organization.go`。

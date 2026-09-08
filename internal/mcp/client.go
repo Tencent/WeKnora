@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -417,27 +418,93 @@ func (c *mcpGoClient) ListTools(ctx context.Context) ([]*types.MCPTool, error) {
 		return nil, ErrNotConnected
 	}
 
-	req := mcp.ListToolsRequest{}
-	result, err := oauthCall(ctx, c, func() (*mcp.ListToolsResult, error) {
-		return c.client.ListTools(ctx, req)
+	tools, err := oauthCall(ctx, c, func() ([]*types.MCPTool, error) {
+		return c.listRawTools(ctx)
 	})
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
 		return nil, fmt.Errorf("failed to list tools: %w", err)
 	}
 
-	// Convert to our types
-	tools := make([]*types.MCPTool, len(result.Tools))
-	for i, tool := range result.Tools {
-		data, _ := json.Marshal(tool.InputSchema)
-		tools[i] = &types.MCPTool{
-			Name:        tool.Name,
-			Description: tool.Description,
-			InputSchema: data,
-		}
-	}
-
 	return tools, nil
+}
+
+// A tenant-supplied MCP endpoint is untrusted, and the whole directory is held
+// in memory and schema-compiled afterwards. Bound protocol pagination so a
+// hostile or looping server cannot grow it without limit under the list
+// timeout; an over-limit directory is rejected rather than published in part.
+const (
+	maxToolListPages   = 100
+	maxToolsPerService = 2000
+	maxToolSchemaBytes = 256 * 1024
+)
+
+// The SDK's typed ToolInputSchema discards unknown root keywords (e.g. oneOf)
+// and rewrites definitions to $defs without rewriting references. Read raw
+// schemas through the same authenticated transport instead. String request IDs
+// cannot collide with the SDK client's numeric IDs.
+func (c *mcpGoClient) listRawTools(ctx context.Context) ([]*types.MCPTool, error) {
+	var tools []*types.MCPTool
+	cursor := ""
+	seen := make(map[string]bool)
+	for pages := 0; ; pages++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if pages >= maxToolListPages {
+			return nil, fmt.Errorf("tools/list exceeded %d pages", maxToolListPages)
+		}
+		response, err := c.client.GetTransport().SendRequest(ctx, transport.JSONRPCRequest{
+			JSONRPC: mcp.JSONRPC_VERSION,
+			ID:      mcp.NewRequestId("weknora-tools-" + uuid.NewString()),
+			Method:  "tools/list",
+			Params: struct {
+				Cursor string `json:"cursor,omitempty"`
+			}{cursor},
+		})
+		if err != nil {
+			return nil, transport.NewError(err)
+		}
+		if response == nil {
+			return nil, fmt.Errorf("empty tools/list response")
+		}
+		if response.Error != nil {
+			return nil, response.Error.AsError()
+		}
+		var page struct {
+			Tools []struct {
+				Name        string          `json:"name"`
+				Description string          `json:"description"`
+				InputSchema json.RawMessage `json:"inputSchema"`
+			} `json:"tools"`
+			NextCursor string `json:"nextCursor"`
+		}
+		if err := json.Unmarshal(response.Result, &page); err != nil {
+			return nil, fmt.Errorf("invalid tools/list response: %w", err)
+		}
+		for _, tool := range page.Tools {
+			if len(tool.InputSchema) > maxToolSchemaBytes {
+				return nil, fmt.Errorf(
+					"tool %q input schema exceeds %d bytes", tool.Name, maxToolSchemaBytes,
+				)
+			}
+			tools = append(
+				tools,
+				&types.MCPTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema},
+			)
+		}
+		if len(tools) > maxToolsPerService {
+			return nil, fmt.Errorf("tools/list exceeded %d tools", maxToolsPerService)
+		}
+		if page.NextCursor == "" {
+			return tools, nil
+		}
+		if seen[page.NextCursor] {
+			return nil, fmt.Errorf("tools/list returned a repeated cursor")
+		}
+		seen[page.NextCursor] = true
+		cursor = page.NextCursor
+	}
 }
 
 // ListResources retrieves the list of available resources

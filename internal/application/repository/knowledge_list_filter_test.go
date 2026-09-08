@@ -84,7 +84,7 @@ func TestGetKnowledgeBatch_TracksDeletionUntilSoftDelete(t *testing.T) {
 	assert.Equal(t, id, rows[0].ID)
 	assert.Equal(t, types.ParseStatusDeleting, rows[0].ParseStatus)
 
-	updated, err := repo.UpdateActiveDeletingKnowledgeColumns(ctx, id, map[string]interface{}{
+	updated, err := repo.UpdateActiveDeletingKnowledgeColumns(ctx, 1, kbID, id, map[string]interface{}{
 		"parse_status": types.ParseStatusFailed,
 	})
 	require.NoError(t, err)
