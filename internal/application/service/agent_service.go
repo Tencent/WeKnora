@@ -1144,11 +1144,33 @@ func (s *agentService) registerTools(
 		}
 	}
 
+	// Semantic modeling (Cube) tools: registered per agent orchestration config,
+	// not in AllowedTools — decoupled from the tool checkbox list.
+	if semantic.Default() != nil && config.SemanticModelMode != "" && config.SemanticModelMode != "none" {
+		bound := config.SemanticModels
+		if config.SemanticModelMode != "all" {
+			bound = normalizeSemanticModels(config.SemanticModels)
+		} else {
+			bound = nil
+		}
+		if config.SemanticModelMode == "all" || len(bound) > 0 {
+			if t := tools.NewCubeMetaTool(bound); t != nil {
+				registry.RegisterTool(t)
+			}
+			if t := tools.NewCubeQueryTool(bound); t != nil {
+				registry.RegisterTool(t)
+			}
+			if t := tools.NewCubeSQLTool(bound); t != nil {
+				registry.RegisterTool(t)
+			}
+		}
+	}
+
 	logger.Infof(ctx, "Registered %d tools", len(registry.ListTools()))
 	return nil
 }
 
-// normalizeSemanticModels 去重去空, 保持顺序。
+// normalizeSemanticModels deduplicates and trims a model name list.
 func normalizeSemanticModels(names []string) []string {
 	seen := make(map[string]bool, len(names))
 	out := make([]string, 0, len(names))

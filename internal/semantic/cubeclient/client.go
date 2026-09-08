@@ -35,11 +35,14 @@ type Client struct {
 }
 
 // New builds a client. endpoint example: http://cube:4000/cubejs-api/v1
-func New(endpoint, secret string) *Client {
+func New(endpoint, secret string, timeout time.Duration) *Client {
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
 	return &Client{
 		endpoint: strings.TrimRight(endpoint, "/"),
 		secret:   secret,
-		http:     &http.Client{Timeout: 120 * time.Second},
+		http:     &http.Client{Timeout: timeout},
 	}
 }
 

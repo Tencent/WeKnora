@@ -50,8 +50,8 @@ func TestKnowledgeIDsMatchingAnyTag(t *testing.T) {
 		[]string{"tag-a"},
 		func(_ context.Context, ids []string) (map[string][]*types.KnowledgeTag, error) {
 			return map[string][]*types.KnowledgeTag{
-				"doc-1": []*types.KnowledgeTag{testKnowledgeTag("tag-z")},
-				"doc-2": []*types.KnowledgeTag{testKnowledgeTag("tag-a")},
+				"doc-1": {testKnowledgeTag("tag-z")},
+				"doc-2": {testKnowledgeTag("tag-a")},
 			}, nil
 		},
 	)
@@ -199,8 +199,8 @@ func TestPagePassesWikiScope_TagScope(t *testing.T) {
 		WikiScope{KnowledgeBaseID: "kb-1", TagIDs: []string{"tag-a"}},
 		func(_ context.Context, ids []string) (map[string][]*types.KnowledgeTag, error) {
 			return map[string][]*types.KnowledgeTag{
-				"doc-1": []*types.KnowledgeTag{testKnowledgeTag("tag-z")},
-				"doc-2": []*types.KnowledgeTag{testKnowledgeTag("tag-a")},
+				"doc-1": {testKnowledgeTag("tag-z")},
+				"doc-2": {testKnowledgeTag("tag-a")},
 			}, nil
 		},
 	)
@@ -217,8 +217,8 @@ func TestPagePassesWikiScope_TagScope(t *testing.T) {
 		WikiScope{KnowledgeBaseID: "kb-1", TagIDs: []string{"tag-missing"}},
 		func(_ context.Context, ids []string) (map[string][]*types.KnowledgeTag, error) {
 			return map[string][]*types.KnowledgeTag{
-				"doc-1": []*types.KnowledgeTag{testKnowledgeTag("tag-z")},
-				"doc-2": []*types.KnowledgeTag{testKnowledgeTag("tag-a")},
+				"doc-1": {testKnowledgeTag("tag-z")},
+				"doc-2": {testKnowledgeTag("tag-a")},
 			}, nil
 		},
 	)

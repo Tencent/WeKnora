@@ -25,9 +25,11 @@ func (f *fakeFileService) CheckConnectivity(ctx context.Context) error { return 
 func (f *fakeFileService) SaveFile(ctx context.Context, _ *multipart.FileHeader, _ uint64, _ string) (string, error) {
 	return "", errors.New("not implemented in fake")
 }
+
 func (f *fakeFileService) SaveBytes(ctx context.Context, _ []byte, _ uint64, _ string, _ bool) (string, error) {
 	return "", errors.New("not implemented in fake")
 }
+
 func (f *fakeFileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
 	fn, ok := f.readers[filePath]
 	if !ok {
@@ -35,6 +37,7 @@ func (f *fakeFileService) GetFile(ctx context.Context, filePath string) (io.Read
 	}
 	return fn()
 }
+
 func (f *fakeFileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
 	// Return a URL that DuckDB would NOT be able to open on its own; the
 	// production code must *not* pass this through to DuckDB.

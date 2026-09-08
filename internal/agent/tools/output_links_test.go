@@ -38,7 +38,8 @@ func TestShellOutputLinksUseChangedFilesAndDoNotReplay(t *testing.T) {
 	unchanged := sandbox.RemoteDirEntry{Path: "/workspace/output/data.json", Type: sandbox.RemoteEntryFile, Size: 20}
 	executor := &outputLinkExecutor{
 		before: []sandbox.RemoteDirEntry{old, unchanged},
-		after: []sandbox.RemoteDirEntry{next, unchanged,
+		after: []sandbox.RemoteDirEntry{
+			next, unchanged,
 			{Path: "/workspace/output/new.csv", Type: sandbox.RemoteEntryFile},
 			{Path: "/workspace/output/subdir", Type: sandbox.RemoteEntryDir},
 		},

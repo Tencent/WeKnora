@@ -40,20 +40,25 @@ type Config struct {
 	ModelDir string
 	// DatasourcesFile is where driverFactory reads connection configs.
 	DatasourcesFile string
+	// MaxPreviewRows caps preview/query result rows (CUBE_MAX_PREVIEW_ROWS, default 200).
+	MaxPreviewRows int
+	// PublishTimeout bounds post-publish compile verification (CUBE_PUBLISH_TIMEOUT, default 30s).
+	PublishTimeout time.Duration
+	// HTTPTimeout is the Cube REST client timeout (CUBE_HTTP_TIMEOUT, default 120s).
+	HTTPTimeout time.Duration
+	// AuditLimit caps audit log list results (CUBE_AUDIT_LIMIT, default 100).
+	AuditLimit int
 }
 
 // AdminGroup is granted on every published model and to platform admins'
 // securityContext, keeping operator access independent of data groups.
 const AdminGroup = "admin"
 
-// publishTimeout bounds the post-write compile verification.
-const publishTimeout = 30 * time.Second
-
 // NewEngine builds the module engine (nil client when not configured).
 func NewEngine(cfg Config, db *gorm.DB) (*Engine, error) {
 	e := &Engine{cfg: cfg, repo: NewRepository(db)}
 	if cfg.APIURL != "" && cfg.APISecret != "" {
-		e.client = cubeclient.New(cfg.APIURL, cfg.APISecret)
+		e.client = cubeclient.New(cfg.APIURL, cfg.APISecret, cfg.HTTPTimeout)
 	}
 	var err error
 	if e.deployer, err = NewDeployer(cfg.ModelDir, cfg.DatasourcesFile); err != nil {
@@ -662,6 +667,8 @@ func (e *Engine) Publish(
 	id string,
 	note string,
 ) (*PublishResult, error) {
+	publishMu.Lock()
+	defer publishMu.Unlock()
 	m, err := e.repo.FindModel(ctx, tenant, id)
 	if err != nil {
 		return nil, err
@@ -699,15 +706,15 @@ func (e *Engine) Publish(
 	if idErr != nil {
 		return nil, idErr
 	}
-	if kind == ModelKindCube {
+	switch kind {
+	case ModelKindCube:
 		// Force data_source to the bound connection slug.
 		doc.Cubes[0].DataSource = boundConn.Name
 		// Force-inject default-deny access_policy (never trust YAML).
 		doc.Cubes[0].AccessPolicy = BuildPolicy(StringList(m.AllowedGroups))
-	} else if kind == ModelKindView {
+	case ModelKindView:
 		// Views also get forced access_policy (Cube member-level rules
 		// on the underlying cube do NOT cascade to views).
-		// own policy applies). Inject the same default-deny to prevent bypass.
 		if len(doc.Views) > 0 {
 			extra, _ := doc.Views[0].Extra.(map[string]interface{})
 			doc.Views[0].Extra = setViewPolicy(extra, BuildPolicy(StringList(m.AllowedGroups)))
@@ -725,7 +732,7 @@ func (e *Engine) Publish(
 		e.markPublishFailed(ctx, m, err.Error())
 		return nil, err
 	}
-	pubCtx, cancel := context.WithTimeout(ctx, publishTimeout)
+	pubCtx, cancel := context.WithTimeout(ctx, e.cfg.PublishTimeout)
 	defer cancel()
 	if e.client == nil {
 		e.markPublishFailed(ctx, m, "cube client not configured")
@@ -734,7 +741,9 @@ func (e *Engine) Publish(
 	// Fingerprint-based verification: waits for the NEW definition to appear
 	// (not just the model name — a stale schema from a previous publish would
 	// still have the same name). Checks that measures/dimensions match.
-	if err := e.client.WaitUntilCompiledFingerprint(pubCtx, name, fingerprint, e.fingerprintFromMeta, publishTimeout); err != nil {
+	if err := e.client.WaitUntilCompiledFingerprint(
+		pubCtx, name, fingerprint, e.fingerprintFromMeta, e.cfg.PublishTimeout,
+	); err != nil {
 		_ = e.deployer.UnpublishModel(m.TenantID, name) // self-heal: do not serve a broken schema
 		e.markPublishFailed(ctx, m, err.Error())
 		return nil, err
@@ -1000,7 +1009,7 @@ func (e *Engine) Preview(
 	if err != nil {
 		return nil, err
 	}
-	return e.client.Load(uctx, q.toCubeQuery(200))
+	return e.client.Load(uctx, q.toCubeQuery(e.cfg.MaxPreviewRows))
 }
 
 // QueryForUser executes a Cube query under the caller's identity (agent tools).
@@ -1014,7 +1023,7 @@ func (e *Engine) QueryForUser(
 	if err != nil {
 		return nil, err
 	}
-	return e.client.Load(uctx, q.toCubeQuery(200))
+	return e.client.Load(uctx, q.toCubeQuery(e.cfg.MaxPreviewRows))
 }
 
 // SQLForUser dry-runs a query under the caller's identity (agent tools).
@@ -1028,7 +1037,7 @@ func (e *Engine) SQLForUser(
 	if err != nil {
 		return nil, err
 	}
-	return e.client.SQL(uctx, q.toCubeQuery(200))
+	return e.client.SQL(uctx, q.toCubeQuery(e.cfg.MaxPreviewRows))
 }
 
 // ---- data groups ----

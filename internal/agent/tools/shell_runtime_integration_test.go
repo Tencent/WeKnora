@@ -87,8 +87,10 @@ func TestShellRuntimeIntegration(t *testing.T) {
 	require.True(t, r.Success, "%+v", r)
 	r = call(ToolWriteSandboxFile, `{"path":"npm-package/index.js","content":"module.exports = 42;"}`)
 	require.True(t, r.Success, "%+v", r)
-	installArgs, err := json.Marshal(ShellExecInput{SkillName: "runtime-probe",
-		Command: strings.ReplaceAll(skillNodePackageInstallCommand, "<package>", "/workspace/npm-package --offline --ignore-scripts --no-audit --no-fund")})
+	installArgs, err := json.Marshal(ShellExecInput{
+		SkillName: "runtime-probe",
+		Command:   strings.ReplaceAll(skillNodePackageInstallCommand, "<package>", "/workspace/npm-package --offline --ignore-scripts --no-audit --no-fund"),
+	})
 	require.NoError(t, err)
 	r = call(ToolShellExec, string(installArgs))
 	require.True(t, r.Success, "%+v", r)
@@ -113,16 +115,16 @@ func TestShellRuntimeIntegration(t *testing.T) {
 	// assets, preserve argv/stdin, and never reference a host filesystem path.
 	hostRoot := t.TempDir()
 	hostDir := filepath.Join(hostRoot, "host-probe")
-	require.NoError(t, os.MkdirAll(filepath.Join(hostDir, "scripts"), 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(hostDir, "SKILL.md"), []byte("---\nname: host-probe\ndescription: Test staging\n---\nRun scripts/run.py.\n"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(hostDir, "asset.bin"), []byte{0, 255, 1}, 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(hostDir, "scripts"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(hostDir, "SKILL.md"), []byte("---\nname: host-probe\ndescription: Test staging\n---\nRun scripts/run.py.\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(hostDir, "asset.bin"), []byte{0, 255, 1}, 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(hostDir, "scripts", "run.py"), []byte(`import os, pathlib, sys
 base = pathlib.Path(os.environ["WEKNORA_SKILL_DIR"])
 assert str(pathlib.Path.cwd()) == "/workspace"
 print((base / "asset.bin").read_bytes().hex())
 print(sys.argv[1])
 sys.stdout.write(sys.stdin.read())
-`), 0644))
+`), 0o644))
 	hostSkills := skills.NewManager(&skills.ManagerConfig{Enabled: true, SkillDirs: []string{hostRoot}}, mgr)
 	require.NoError(t, hostSkills.Initialize(ctx))
 	registry = NewToolRegistry()

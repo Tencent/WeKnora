@@ -8,7 +8,7 @@ import (
 )
 
 func TestClientSignJWT(t *testing.T) {
-	c := New("http://localhost:4000/cubejs-api/v1", "test-secret-key")
+	c := New("http://localhost:4000/cubejs-api/v1", "test-secret-key", 0)
 	sec := SecurityContext{
 		Sub:      "user-123",
 		Groups:   []string{"analytics", "ops"},
@@ -52,7 +52,7 @@ func TestClientSignJWT(t *testing.T) {
 }
 
 func TestClientEmptyEndpoint(t *testing.T) {
-	c := New("", "secret")
+	c := New("", "secret", 0)
 	// Endpoint() returns empty string when not configured
 	if c.Endpoint() != "" {
 		t.Errorf("expected empty endpoint")

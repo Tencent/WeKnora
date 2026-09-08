@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -40,7 +41,23 @@ func LoadConfig() Config {
 		APISecret:       os.Getenv("CUBEJS_API_SECRET"),
 		ModelDir:        os.Getenv("CUBE_MODEL_DIR"),
 		DatasourcesFile: os.Getenv("CUBE_DATASOURCES_FILE"),
+		MaxPreviewRows:  envInt("CUBE_MAX_PREVIEW_ROWS", 200),
+		PublishTimeout:  time.Duration(envInt("CUBE_PUBLISH_TIMEOUT", 30)) * time.Second,
+		HTTPTimeout:     time.Duration(envInt("CUBE_HTTP_TIMEOUT", 120)) * time.Second,
+		AuditLimit:      envInt("CUBE_AUDIT_LIMIT", 100),
 	}
+}
+
+func envInt(key string, def int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 func envBool(key string, def bool) bool {
