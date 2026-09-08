@@ -14,9 +14,6 @@ on:
         required: false
         default: false
         type: boolean
-  schedule:
-    - cron: "0 18 * * *"
-
 jobs:
   deterministic-checks:
     runs-on: ubuntu-latest

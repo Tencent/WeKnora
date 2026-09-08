@@ -103,11 +103,11 @@ TOPIC3_CHAT_OUTPUT_PRICE_PER_MILLION_CNY=
 
 ## CI 与合并门禁
 
-`.github/workflows/topic3-regression.yml` 支持 PR、手动和每日定时运行确定性检查。正常的退化fixture会被检查器拒绝、但确定性任务保持绿色。手动勾选 `run_negative_demo` 可产生专门的预期红灯证据。
+`.github/workflows/topic3-regression.yml` 支持 PR 自动检查和手动运行，不再定时运行。正常的退化fixture会被检查器拒绝、但确定性任务保持绿色。手动勾选 `run_negative_demo` 可产生专门的预期红灯证据。
 
 真实评测不会由PR或定时任务触发。只有手动运行时同时勾选 `run_real_evaluation`，并配置仓库变量 `TOPIC3_REAL_EVAL_ENABLED=true`、模型 ID 及 Secret `TOPIC3_TOKEN`，才会产生真实调用和费用。
 
-工作流出现红灯不等于已强制阻断合并。仓库管理员仍须在 GitHub 分支保护中把 `topic3-regression / deterministic-checks` 设为 required status check，并保留截图作为验收证据。
+Fork 的 `topic3-v0.7.2-base` 已启用分支保护，`topic3-regression / deterministic-checks` 已设为 required status check。负例演示提交 `c159b29c` 使 Required 检查和专用负例任务同时失败，页面禁止合并；恢复提交 `e18741f2` 后检查重新变绿并允许合并。远程门禁证据见 `codex/topic3/CI_ACCEPTANCE_20260908.md`。
 
 ## 状态边界
 
@@ -121,6 +121,6 @@ TOPIC3_CHAT_OUTPUT_PRICE_PER_MILLION_CNY=
 | 固定 10 题数据集与正式基线 | 两次真实 10/10 评测均成功；最新结果 Recall/MRR/NDCG 均为 1.0，已经人工确认并冻结为正式基线 |
 | embedding 冷/暖缓存三组重复实验 | 已完成9轮真实验收；真实调用减少约91.7%，检索质量不变 |
 | Wiki 厂商缓存前后实验 | 已完成8次真实调用；输出质量不变，但本次隐式缓存均未命中 |
-| GitHub required check | 待提供目标仓库权限后配置 |
+| GitHub required check | 已配置并真实验证；退化提交被阻断，恢复后检查通过 |
 
 任何尚未完成的真实验收不得以 fixture、mock 或本地逻辑测试替代。
