@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,8 +15,31 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
+	transcriptservice "github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
+
+type processingSourceGateway struct {
+	created []weknora.ManualKnowledgeInput
+}
+
+func (g *processingSourceGateway) FindManualKnowledgeByTitle(context.Context, string, string) (*weknora.ManualKnowledgeResult, error) {
+	return nil, nil
+}
+
+func (g *processingSourceGateway) CreateManualKnowledge(_ context.Context, kbID string, input weknora.ManualKnowledgeInput) (weknora.ManualKnowledgeResult, error) {
+	g.created = append(g.created, input)
+	return weknora.ManualKnowledgeResult{
+		ID: "backfilled-source", KnowledgeBaseID: kbID, Title: input.Title, ParseStatus: "completed",
+	}, nil
+}
+
+func (g *processingSourceGateway) GetKnowledge(context.Context, string) (weknora.ManualKnowledgeResult, error) {
+	return weknora.ManualKnowledgeResult{
+		ID: "backfilled-source", KnowledgeBaseID: "knowledge-kb", ParseStatus: "completed",
+	}, nil
+}
 
 func TestProcessingStatusReportsFailedStageAndRetryableJob(t *testing.T) {
 	db := openTestVideoDB(t)
@@ -54,6 +78,9 @@ func TestProcessingStatusReportsFailedStageAndRetryableJob(t *testing.T) {
 	}
 	if payload.Status != ProcessingStateFailed || payload.CurrentStage != "subtitle_generate" {
 		t.Fatalf("processing state = %#v", payload)
+	}
+	if payload.KnowledgeContractVersion != knowledge.WikiObjectContractVersion {
+		t.Fatalf("knowledge contract version = %q", payload.KnowledgeContractVersion)
 	}
 	if payload.Failure == nil || payload.Failure.JobID != jobs[1].ID || payload.Failure.Category != "object_storage" {
 		t.Fatalf("failure = %#v", payload.Failure)
@@ -223,6 +250,87 @@ func TestRetryFailedStageReusesSameJob(t *testing.T) {
 	if gotVideo.Status != model.VideoStatusProcessing || gotVideo.ProcessingErrorSummary != "" {
 		t.Fatalf("video retry state = %#v", gotVideo)
 	}
+}
+
+func TestRetryGraphRebuildsCurrentFullDocumentManifest(t *testing.T) {
+	db := openTestVideoDB(t)
+	require.NoError(t, db.AutoMigrate(&model.VideoTranscriptSource{}))
+	video := model.Video{ID: uuid.NewString(), Title: "graph retry", Status: model.VideoStatusProcessing, TranscriptGeneration: "generation-current"}
+	require.NoError(t, db.Create(&video).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptSource{
+		ID: "source-binding", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration,
+		KnowledgeBaseID: "knowledge-kb", KnowledgeID: "source-current", Status: "created",
+	}).Error)
+	job := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "graph", TranscriptGeneration: video.TranscriptGeneration,
+		Status: "failed", InputPayload: `{"transcript_chunk_count":35,"transcript_knowledge_ids":["legacy-chunk"]}`,
+		IdempotencyKey: "graph:" + video.ID + ":" + video.TranscriptGeneration,
+	}
+	require.NoError(t, db.Create(&job).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: video.ID}, {Key: "jobType", Value: "graph"}}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/custom/videos/"+video.ID+"/processing-jobs/graph/retry", nil)
+	NewProcessingHandler(db, ProcessingDependencies{KBID: "knowledge-kb"}).Retry(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+
+	var retried model.VideoProcessingJob
+	require.NoError(t, db.First(&retried, "id = ?", job.ID).Error)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(retried.InputPayload), &payload))
+	require.Equal(t, "full_document", payload["transcript_input_mode"])
+	require.Equal(t, "source-current", payload["transcript_source_knowledge_id"])
+	require.Equal(t, "knowledge-kb", payload["transcript_source_knowledge_base_id"])
+	_, hasLegacyChunks := payload["transcript_knowledge_ids"]
+	require.False(t, hasLegacyChunks)
+}
+
+func TestRetryGraphBackfillsMissingFullDocumentFromSuccessfulIndex(t *testing.T) {
+	db := openTestVideoDB(t)
+	require.NoError(t, db.AutoMigrate(&model.VideoTranscriptSource{}))
+	video := model.Video{
+		ID: uuid.NewString(), Title: "legacy graph retry", DurationSeconds: 2,
+		Status: model.VideoStatusProcessing, TranscriptGeneration: "generation-current",
+	}
+	require.NoError(t, db.Create(&video).Error)
+	indexJob := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "index", TranscriptGeneration: video.TranscriptGeneration,
+		Status: "succeeded", IdempotencyKey: "index:" + video.ID,
+		ResultPayload: `{"paragraphs":[{"paragraph_id":"paragraph-1","speaker_id":"speaker-1","sentences":[{"sentence_id":"sentence-1","text":"真实历史转写内容","start_ms":100,"end_ms":1200,"speaker_id":"speaker-1"}]}],"language":"zh"}`,
+	}
+	require.NoError(t, db.Create(&indexJob).Error)
+	graphJob := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "graph", TranscriptGeneration: video.TranscriptGeneration,
+		Status: "failed", InputPayload: `{"transcript_chunk_count":1,"transcript_knowledge_ids":["legacy-chunk"]}`,
+		IdempotencyKey: "graph:" + video.ID + ":" + video.TranscriptGeneration,
+	}
+	require.NoError(t, db.Create(&graphJob).Error)
+	gateway := &processingSourceGateway{}
+	writer := &transcriptservice.SourceWriter{DB: db, Gateway: gateway, KBID: "knowledge-kb"}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: video.ID}, {Key: "jobType", Value: "graph"}}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/custom/videos/"+video.ID+"/processing-jobs/graph/retry", nil)
+	NewProcessingHandler(db, ProcessingDependencies{KBID: "knowledge-kb", SourceWriter: writer}).Retry(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Len(t, gateway.created, 1)
+	document, err := transcriptservice.ParseSourceContent(gateway.created[0].Content)
+	require.NoError(t, err)
+	require.Equal(t, video.ID, document.VideoID)
+	require.Equal(t, video.TranscriptGeneration, document.TranscriptGeneration)
+	require.Equal(t, "真实历史转写内容", document.Chapters[0].Paragraphs[0].Text)
+	var retried model.VideoProcessingJob
+	require.NoError(t, db.First(&retried, "id = ?", graphJob.ID).Error)
+	require.Equal(t, "pending", retried.Status)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(retried.InputPayload), &payload))
+	require.Equal(t, "full_document", payload["transcript_input_mode"])
+	require.Equal(t, "backfilled-source", payload["transcript_source_knowledge_id"])
+	_, hasLegacyChunks := payload["transcript_knowledge_ids"]
+	require.False(t, hasLegacyChunks)
 }
 
 func TestRetrySuccessfulTranscriptionCreatesNewJob(t *testing.T) {

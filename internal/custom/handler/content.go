@@ -106,6 +106,50 @@ func wikiAnchor(page weknora.WikiPage, knowledgeType knowledge.KnowledgeType, so
 	}
 }
 
+func currentEvidenceChunkIndexes(
+	ctx context.Context,
+	db *gorm.DB,
+	video model.Video,
+) (map[string]model.VideoTranscriptChunk, map[string]model.VideoTranscriptChunk, error) {
+	var chunks []model.VideoTranscriptChunk
+	if err := db.WithContext(ctx).
+		Where("video_id = ? AND generation = ? AND status = ?", video.ID, video.TranscriptGeneration, "completed").
+		Order("chunk_index ASC").Find(&chunks).Error; err != nil {
+		return nil, nil, err
+	}
+	byEvidence := make(map[string]model.VideoTranscriptChunk, len(chunks)*2)
+	byIndex := make(map[string]model.VideoTranscriptChunk, len(chunks))
+	for _, chunk := range chunks {
+		prefix := chunk.VideoID + "\x00" + chunk.Generation + "\x00"
+		byEvidence[prefix+chunk.KnowledgeID] = chunk
+		if chunk.EvidenceSentenceID != "" {
+			byEvidence[prefix+chunk.EvidenceSentenceID] = chunk
+		}
+		byIndex[prefix+strconv.Itoa(chunk.ChunkIndex)] = chunk
+	}
+	return byEvidence, byIndex, nil
+}
+
+func applyEvidenceTimeline(
+	anchor *knowledge.AnchorItem,
+	video model.Video,
+	byEvidence map[string]model.VideoTranscriptChunk,
+	byIndex map[string]model.VideoTranscriptChunk,
+) {
+	if anchor == nil {
+		return
+	}
+	for _, evidenceID := range anchor.EvidenceIDs {
+		chunk, ok := resolveEvidenceChunk(byEvidence, byIndex, video.ID, video.TranscriptGeneration, evidenceID)
+		if !ok {
+			continue
+		}
+		anchor.Seconds = chunk.StartMs / 1000
+		anchor.Timestamp = formatGraphTimestamp(anchor.Seconds)
+		return
+	}
+}
+
 func knowledgeObjectType(frontmatter map[string]any) string {
 	primaryType := strings.ToLower(frontmatterString(frontmatter, "primary_type"))
 	compatibilityType := strings.ToLower(frontmatterString(frontmatter, "type"))
@@ -554,6 +598,28 @@ func isKnowledgeBaseWikiPage(page *weknora.WikiPage, videoID string) bool {
 }
 
 func (h *ContentHandler) requireKnowledgeBase(c *gin.Context, video *model.Video) (*weknora.WikiPage, bool) {
+	var latestGraphJob model.VideoProcessingJob
+	query := h.DB.WithContext(c.Request.Context()).
+		Where("video_id = ? AND job_type = ?", video.ID, "graph")
+	if generation := strings.TrimSpace(video.TranscriptGeneration); generation != "" {
+		query = query.Where("transcript_generation = ?", generation)
+	}
+	if err := query.Order("updated_at DESC").First(&latestGraphJob).Error; err != nil && err != gorm.ErrRecordNotFound {
+		contentError(c, http.StatusInternalServerError, video.ID, "graph", "processing_status_read_failed", "read graph processing status: "+err.Error(), video.UpdatedAt)
+		return nil, false
+	}
+	if latestGraphJob.Status == "failed" {
+		code := strings.TrimSpace(latestGraphJob.ErrorCode)
+		if code == "" {
+			code = "processing_failed"
+		}
+		message := strings.TrimSpace(latestGraphJob.ErrorMessage)
+		if message == "" {
+			message = "knowledge extraction failed"
+		}
+		contentError(c, http.StatusConflict, video.ID, "graph", code, message, latestGraphJob.UpdatedAt)
+		return nil, false
+	}
 	if strings.TrimSpace(video.KnowledgeBaseWikiPageID) == "" {
 		contentError(c, http.StatusNotFound, video.ID, "graph", "not_generated", "knowledge_base wiki page not yet generated", video.UpdatedAt)
 		return nil, false
@@ -590,6 +656,11 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 		contentError(c, http.StatusInternalServerError, video.ID, "graph", "weknora_read_failed", "list knowledge pages: "+err.Error(), video.UpdatedAt)
 		return
 	}
+	byEvidence, byIndex, err := currentEvidenceChunkIndexes(ctx, h.DB, *video)
+	if err != nil {
+		contentError(c, http.StatusInternalServerError, video.ID, "graph", "evidence_read_failed", "read current transcript evidence: "+err.Error(), video.UpdatedAt)
+		return
+	}
 
 	anchors := make([]knowledge.AnchorItem, 0, len(pages))
 	for _, p := range pages {
@@ -615,6 +686,7 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 			continue
 		}
 		anchor := wikiAnchor(p, mappedType, "skill")
+		applyEvidenceTimeline(&anchor, *video, byEvidence, byIndex)
 		anchor.EntitySubType = subType
 		anchor.SourceVideoTitle = video.Title
 		anchors = append(anchors, anchor)

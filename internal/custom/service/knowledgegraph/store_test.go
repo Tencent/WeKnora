@@ -1,14 +1,69 @@
 package knowledgegraph
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
+	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestGraphQueryStatementsKeepReadContract(t *testing.T) {
+	statements := buildGraphQueryStatements("TEST_GRAPH")
+	checks := []struct {
+		name      string
+		statement string
+		required  []string
+	}{
+		{
+			name: "count", statement: statements.count,
+			required: []string{"MATCH (n:TEST_GRAPH)", "n.source_video_id = $video_id", "n.audit_status = 'passed'", "n.projection_version = 'wiki-v1'"},
+		},
+		{
+			name: "nodes", statement: statements.nodes,
+			required: []string{"n.wiki_page_id = $wiki_page_id", "n.knowledge_type IN $types", "ORDER BY toLower(coalesce(n.title, '')), n.wiki_page_id", "LIMIT $limit"},
+		},
+		{
+			name: "edges", statement: statements.edges,
+			required: []string{"[r:KNOWLEDGE_RELATION]", "source.wiki_page_id = $wiki_page_id OR target.wiki_page_id = $wiki_page_id", "source.source_video_id = $video_id AND target.source_video_id = $video_id", "r.projection_version = 'wiki-v1'", "ORDER BY r.relation_id"},
+		},
+	}
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			for _, required := range check.required {
+				if !strings.Contains(check.statement, required) {
+					t.Fatalf("statement is missing %q:\n%s", required, check.statement)
+				}
+			}
+		})
+	}
+}
+
+func TestGraphQueryFailsClosedWithoutNeo4jDriver(t *testing.T) {
+	store := &StoreImpl{namespace: "TEST_GRAPH"}
+	if _, err := store.Query(context.Background(), Query{}); err == nil || !strings.Contains(err.Error(), "neo4j is unavailable") {
+		t.Fatalf("Query error = %v", err)
+	}
+}
+
+func TestFormalRelationTypeContract(t *testing.T) {
+	for _, relationType := range []string{"contradicts", "complements", "explains", "example_of", "part_of", "applies_to", "supports", "involves"} {
+		if !IsFormalRelationType(relationType) {
+			t.Fatalf("formal relation type %q was rejected", relationType)
+		}
+	}
+	for _, relationType := range []string{"", "related_to", "random_link"} {
+		if IsFormalRelationType(relationType) {
+			t.Fatalf("non-formal relation type %q was accepted", relationType)
+		}
+	}
+}
 
 func TestBuildProjectionAcceptsOnlyPassedCurrentObjectsAndValidatedRelations(t *testing.T) {
 	video := &model.Video{ID: "video-1", TranscriptGeneration: "generation-1"}
@@ -58,7 +113,9 @@ structure_fields:
   input: 方法论输入
   steps: 方法论步骤
 --- 
-# 方法论二`,
+# 方法论二
+
+一句话概述：方法论二用于完成评估。`,
 		},
 		{
 			ID: "page-failed", Slug: "insight/failed", PageType: "index",
@@ -121,7 +178,9 @@ relations:
     evidence_ids: [chunk-5]
     confidence: 0.99
 --- 
-# 组织`,
+# 组织
+
+一句话概述：这是参与培训的组织。`,
 		},
 	}
 
@@ -154,27 +213,132 @@ func TestParseObjectRejectsMissingStructuredIdentity(t *testing.T) {
 	}
 }
 
+func TestKnowledgeBaseProjectionIncludesOnlyAuditedVideoKnowledge(t *testing.T) {
+	pages := []weknora.WikiPage{
+		{
+			ID: "valid-page", Slug: "concept/validated", Title: "合规概念", PageType: "index",
+			Content: `---
+knowledge_object_id: object-1
+type: concept
+primary_type: concept
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+information_nature: 概念
+classification_confidence: 0.9
+evidence_ids: [chunk-1]
+source_refs: [source-1]
+structure_fields:
+  definition: 合规概念定义
+  mechanism: 合规概念机制
+---
+# 合规概念
+
+一句话概述：这是可展示的合规概念。`,
+		},
+		{
+			ID: "legacy-page", Slug: "concept/legacy", Title: "旧概念", PageType: "concept",
+			Content: "# 旧概念\n\n没有视频归属、转写代次或证据。",
+		},
+	}
+
+	nodes, edges := buildKnowledgeBaseProjection(pages)
+	require.Len(t, nodes, 1)
+	require.Equal(t, "valid-page", nodes[0].WikiPageID)
+	require.Equal(t, "video-1", nodes[0].SourceVideoID)
+	require.Equal(t, "generation-1", nodes[0].TranscriptGeneration)
+	require.Equal(t, "passed", nodes[0].AuditStatus)
+	require.Empty(t, edges)
+}
+
+func TestKnowledgeBaseProjectionExcludesStaleVideoGeneration(t *testing.T) {
+	current := weknora.WikiPage{
+		ID: "current-page", Slug: "concept/current", Title: "当前概念", PageType: "index",
+		Content: strings.ReplaceAll(`---
+knowledge_object_id: object-current
+type: concept
+primary_type: concept
+source_video_id: video-1
+transcript_generation: GENERATION
+audit_status: passed
+information_nature: 概念
+classification_confidence: 0.9
+evidence_ids: [chunk-1]
+source_refs: [source-1]
+structure_fields:
+  definition: 当前概念定义
+  mechanism: 当前概念机制
+---
+# 当前概念
+
+一句话概述：这是当前代次的概念。`, "GENERATION", "generation-2"),
+	}
+	stale := current
+	stale.ID = "stale-page"
+	stale.Slug = "concept/stale"
+	stale.Content = strings.ReplaceAll(stale.Content, "object-current", "object-stale")
+	stale.Content = strings.ReplaceAll(stale.Content, "generation-2", "generation-1")
+
+	nodes, _ := buildKnowledgeBaseProjectionForGenerations(
+		[]weknora.WikiPage{stale, current},
+		map[string]string{"video-1": "generation-2"},
+	)
+	require.Len(t, nodes, 1)
+	require.Equal(t, "current-page", nodes[0].WikiPageID)
+}
+
 func TestBuildKnowledgeBaseProjectionUsesStructuredRelationsOnly(t *testing.T) {
 	pages := []weknora.WikiPage{
 		{
-			ID: "concept-page", Slug: "concept/harness", Title: "Harness", PageType: "concept",
+			ID: "concept-page", Slug: "concept/harness", Title: "Harness", PageType: "index",
 			Content: `---
+knowledge_object_id: concept-object
+type: concept
+primary_type: concept
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+information_nature: 概念
+classification_confidence: 0.9
+evidence_ids: [chunk-1]
+source_refs: [source-1]
+structure_fields:
+  definition: Harness 定义
+  mechanism: Harness 运行机制
 relations:
   - relation_id: relation-1
     relation_type: explains
-    target_object_id: method-page
+    target_object_id: method-object
     target_wiki_page_id: method-page
     evidence_ids: [chunk-1]
     confidence: 0.88
 ---
 # Harness
 
+一句话概述：Harness 用于组织评估过程。
+
 正文中的普通双链 [[method/agent-eval|Agent Eval]] 不应直接入图。`,
-			SourceRefs: []string{"chunk-1"},
 		},
 		{
-			ID: "method-page", Slug: "method/agent-eval", Title: "Agent Eval", PageType: "method",
-			Content: "# Agent Eval\n\n评估方法。",
+			ID: "method-page", Slug: "method/agent-eval", Title: "Agent Eval", PageType: "index",
+			Content: `---
+knowledge_object_id: method-object
+type: methodology
+primary_type: methodology
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+information_nature: 方法论
+classification_confidence: 0.9
+evidence_ids: [chunk-2]
+source_refs: [source-1]
+structure_fields:
+  input: 评估输入
+  steps: 执行评估步骤
+---
+# Agent Eval
+
+一句话概述：这是评估方法。`,
 		},
 		{
 			ID: "summary-page", Slug: "summary/chunk-1", Title: "Summary", PageType: "summary",
@@ -206,12 +370,48 @@ relations:
 func TestBuildKnowledgeBaseProjectionRejectsPlainWikiLinks(t *testing.T) {
 	pages := []weknora.WikiPage{
 		{
-			ID: "concept-page", Slug: "concept/harness", Title: "Harness", PageType: "concept",
-			Content: "# Harness\n\n关联 [[method/agent-eval|Agent Eval]]。",
+			ID: "concept-page", Slug: "concept/harness", Title: "Harness", PageType: "index",
+			Content: `---
+knowledge_object_id: concept-object
+type: concept
+primary_type: concept
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+information_nature: 概念
+classification_confidence: 0.9
+evidence_ids: [chunk-1]
+source_refs: [source-1]
+structure_fields:
+  definition: Harness 定义
+  mechanism: Harness 运行机制
+---
+# Harness
+
+一句话概述：Harness 用于组织评估过程。
+
+关联 [[method/agent-eval|Agent Eval]]。`,
 		},
 		{
-			ID: "method-page", Slug: "method/agent-eval", Title: "Agent Eval", PageType: "method",
-			Content: "# Agent Eval\n\n评估方法。",
+			ID: "method-page", Slug: "method/agent-eval", Title: "Agent Eval", PageType: "index",
+			Content: `---
+knowledge_object_id: method-object
+type: methodology
+primary_type: methodology
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+information_nature: 方法论
+classification_confidence: 0.9
+evidence_ids: [chunk-2]
+source_refs: [source-1]
+structure_fields:
+  input: 评估输入
+  steps: 执行评估步骤
+---
+# Agent Eval
+
+一句话概述：这是评估方法。`,
 		},
 	}
 
@@ -245,7 +445,9 @@ structure_fields:
   definition: 上下文信息集合
   mechanism: 通过历史记录帮助判断
 ---
-# Context`,
+# Context
+
+一句话概述：上下文帮助系统理解历史信息。`,
 		},
 		{
 			ID: "page-product", Slug: "product/context", Title: "Context", PageType: "index",
@@ -267,7 +469,9 @@ structure_fields:
   product_type: AI 产品
   core_function: 记录和理解上下文
 ---
-# Context`,
+# Context
+
+一句话概述：Context Machine 是记录上下文的产品。`,
 		},
 	}
 
@@ -282,6 +486,49 @@ structure_fields:
 		identityAudits[0].NormalizedName != "context" ||
 		identityAudits[0].TitleMatch != true {
 		t.Fatalf("identity audit = %#v", identityAudits[0])
+	}
+}
+
+func TestValidateSemanticIdentityCompletionRejectsMeaningDuplicates(t *testing.T) {
+	video := &model.Video{ID: "video-1", TranscriptGeneration: "generation-1"}
+	pages := []weknora.WikiPage{
+		semanticIdentityTestPage("10000000-0000-4000-8000-000000000001", "concept/second-brain", "第二大脑", "second-brain", "第二大脑是可调用知识并执行工作的系统。"),
+		semanticIdentityTestPage("10000000-0000-4000-8000-000000000002", "concept/second-brain-v2", "第二大脑（概念）", "second-brain-v2", "第二大脑是由 AI Agent 调用知识并执行工作的系统。"),
+	}
+
+	if err := ValidateSemanticIdentityCompletion(video.ID, video.TranscriptGeneration, pages); err == nil || !strings.Contains(err.Error(), "semantic identity") {
+		t.Fatalf("semantic duplicates must block completion, got %v", err)
+	}
+}
+
+func semanticIdentityTestPage(id, slug, title, objectID, core string) weknora.WikiPage {
+	return weknora.WikiPage{
+		ID: id, Slug: slug, Title: title, PageType: "index", Status: "published",
+		Content: fmt.Sprintf(`---
+knowledge_object_id: %s
+type: concept
+primary_type: concept
+title: %s
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+information_nature: 概念
+classification_confidence: 0.9
+evidence_ids: [ev-1]
+source_refs: [doc-1]
+core_content: %s
+structure_fields:
+  definition: 把静态档案库升级为可执行的知识系统
+  components: 本地知识库、AI Agent 和方法模板
+  mechanism: AI Agent 调用知识、执行方法并回写经验
+relations: []
+---
+
+# %s
+
+## 一句话概述
+
+%s`, objectID, title, core, title, core),
 	}
 }
 

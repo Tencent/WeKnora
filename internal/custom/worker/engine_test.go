@@ -555,6 +555,7 @@ func TestClassifyProcessingError(t *testing.T) {
 		{name: "weknora", err: errors.New("knowledge abc parse failed"), category: "weknora", code: "weknora_operation"},
 		{name: "agent skill", err: errors.New("trigger skill generate-transcript-outline: upstream unavailable"), category: "weknora", code: "weknora_operation"},
 		{name: "wiki artifact", err: errors.New("未找到 job=outline 的 wiki 页"), category: "wiki_artifact", code: "wiki_artifact_missing"},
+		{name: "wiki content contract", err: errors.New("等待 wiki 产物页超时（type=knowledge_base）: P3 knowledge object validation failed: object-1: core content is required"), category: "wiki_artifact", code: "content_contract_failed"},
 		{name: "database", err: errors.New("save transcription result: database is locked"), category: "database", code: "database_operation"},
 	}
 	for _, tc := range cases {

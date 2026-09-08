@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -15,9 +16,11 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
 	"github.com/Tencent/WeKnora/internal/custom/service/outline"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
 	"github.com/Tencent/WeKnora/internal/custom/service/summary"
+	transcriptservice "github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
 
 const (
@@ -86,35 +89,39 @@ type ProcessingJobStatus struct {
 }
 
 type ProcessingStatusResponse struct {
-	VideoID              string                  `json:"video_id"`
-	Status               string                  `json:"status"`
-	FoundationStatus     string                  `json:"foundation_status"`
-	EnhancementStatus    string                  `json:"enhancement_status"`
-	CurrentStage         string                  `json:"current_stage,omitempty"`
-	TranscriptGeneration string                  `json:"transcript_generation,omitempty"`
-	CompletedStages      []string                `json:"completed_stages"`
-	Failure              *ProcessingFailure      `json:"failure,omitempty"`
-	EnhancementFailure   *ProcessingFailure      `json:"enhancement_failure,omitempty"`
-	RetryableJob         *RetryableProcessingJob `json:"retryable_job,omitempty"`
-	Jobs                 []ProcessingJobStatus   `json:"jobs"`
-	UpdatedAt            time.Time               `json:"updated_at"`
+	VideoID                  string                  `json:"video_id"`
+	Status                   string                  `json:"status"`
+	FoundationStatus         string                  `json:"foundation_status"`
+	EnhancementStatus        string                  `json:"enhancement_status"`
+	CurrentStage             string                  `json:"current_stage,omitempty"`
+	TranscriptGeneration     string                  `json:"transcript_generation,omitempty"`
+	KnowledgeContractVersion string                  `json:"knowledge_contract_version"`
+	CompletedStages          []string                `json:"completed_stages"`
+	Failure                  *ProcessingFailure      `json:"failure,omitempty"`
+	EnhancementFailure       *ProcessingFailure      `json:"enhancement_failure,omitempty"`
+	RetryableJob             *RetryableProcessingJob `json:"retryable_job,omitempty"`
+	Jobs                     []ProcessingJobStatus   `json:"jobs"`
+	UpdatedAt                time.Time               `json:"updated_at"`
 }
 
 type ProcessingHandler struct {
-	DB   *gorm.DB
-	Wiki *weknora.WikiClient
-	KBID string
+	DB           *gorm.DB
+	Wiki         *weknora.WikiClient
+	SourceWriter *transcriptservice.SourceWriter
+	KBID         string
 }
 
 type ProcessingDependencies struct {
-	Wiki *weknora.WikiClient
-	KBID string
+	Wiki         *weknora.WikiClient
+	SourceWriter *transcriptservice.SourceWriter
+	KBID         string
 }
 
 func NewProcessingHandler(db *gorm.DB, dependencies ...ProcessingDependencies) *ProcessingHandler {
 	handler := &ProcessingHandler{DB: db}
 	if len(dependencies) > 0 {
 		handler.Wiki = dependencies[0].Wiki
+		handler.SourceWriter = dependencies[0].SourceWriter
 		handler.KBID = dependencies[0].KBID
 	}
 	return handler
@@ -135,12 +142,25 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported processing stage"})
 		return
 	}
+	if jobType == "graph" {
+		if err := h.ensureGraphTranscriptSource(c.Request.Context(), videoID); err != nil {
+			if errors.Is(err, errVideoOrProcessingStageNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "video or processing stage not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
 
 	var retried model.VideoProcessingJob
 	recreated := false
 	err := h.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var video model.Video
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&video, "id = ?", videoID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errVideoOrProcessingStageNotFound
+			}
 			return err
 		}
 		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -153,6 +173,9 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 			query = query.Where("transcript_generation IN ?", []string{"", video.TranscriptGeneration})
 		}
 		if err := query.Order("CASE WHEN transcript_generation = '' THEN 1 ELSE 0 END, updated_at DESC").First(&retried).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errVideoOrProcessingStageNotFound
+			}
 			return err
 		}
 		if retried.Status == "succeeded" && jobType == "transcription" {
@@ -189,6 +212,13 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 				}
 				updates["input_payload"] = inputPayload
 			}
+			if jobType == "graph" {
+				inputPayload, payloadErr := rebuildGraphInputPayload(tx, h.KBID, video)
+				if payloadErr != nil {
+					return payloadErr
+				}
+				updates["input_payload"] = inputPayload
+			}
 			if err := tx.Model(&retried).Updates(updates).Error; err != nil {
 				return err
 			}
@@ -200,7 +230,7 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 			"status": model.VideoStatusProcessing, "processing_error_summary": "",
 		}).Error
 	})
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, errVideoOrProcessingStageNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "video or processing stage not found"})
 		return
 	}
@@ -217,6 +247,117 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"job_id": retried.ID, "job_type": retried.JobType, "status": "pending", "reused": !recreated})
+}
+
+func (h *ProcessingHandler) ensureGraphTranscriptSource(ctx context.Context, videoID string) error {
+	var video model.Video
+	if err := h.DB.WithContext(ctx).First(&video, "id = ?", videoID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errVideoOrProcessingStageNotFound
+		}
+		return fmt.Errorf("load video for graph retry: %w", err)
+	}
+	generation := strings.TrimSpace(video.TranscriptGeneration)
+	if generation == "" {
+		return fmt.Errorf("transcript_source_validation:generation_missing")
+	}
+	knowledgeBaseID := strings.TrimSpace(h.KBID)
+	if knowledgeBaseID == "" {
+		return fmt.Errorf("knowledge_base_routing:knowledge_kb_missing")
+	}
+
+	var graphJob model.VideoProcessingJob
+	if err := h.DB.WithContext(ctx).
+		Where("video_id = ? AND job_type = ? AND transcript_generation IN ?", video.ID, "graph", []string{"", generation}).
+		Order("CASE WHEN transcript_generation = '' THEN 1 ELSE 0 END, updated_at DESC").
+		First(&graphJob).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errVideoOrProcessingStageNotFound
+		}
+		return fmt.Errorf("load graph job for retry: %w", err)
+	}
+	if graphJob.Status == "pending" || graphJob.Status == "running" ||
+		(graphJob.Status == "succeeded" && stageArtifactAvailable(video, graphJob)) {
+		return nil
+	}
+
+	var source model.VideoTranscriptSource
+	err := h.DB.WithContext(ctx).Where(
+		"video_id = ? AND transcript_generation = ? AND knowledge_base_id = ?",
+		video.ID, generation, knowledgeBaseID,
+	).First(&source).Error
+	if err == nil {
+		if source.Status != transcriptservice.SourceStatusCreated || strings.TrimSpace(source.KnowledgeID) == "" {
+			return fmt.Errorf("transcript_source_validation:source_binding_invalid")
+		}
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("load transcript source binding: %w", err)
+	}
+	if h.SourceWriter == nil {
+		return fmt.Errorf("transcript_source_backfill:source_writer_missing")
+	}
+
+	var indexJob model.VideoProcessingJob
+	if err := h.DB.WithContext(ctx).
+		Where("video_id = ? AND job_type = ? AND transcript_generation = ? AND status = ?", video.ID, "index", generation, "succeeded").
+		Where("TRIM(COALESCE(result_payload, '')) <> ''").
+		Order("updated_at DESC").First(&indexJob).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("transcript_source_backfill:index_result_missing")
+		}
+		return fmt.Errorf("load successful index result for source backfill: %w", err)
+	}
+	document, err := transcriptservice.BuildFromJSON(transcriptservice.RawInput{
+		VideoID: video.ID, TranscriptGeneration: generation, Title: video.Title,
+		DurationSeconds: video.DurationSeconds, Provider: "tingwu", Payload: []byte(indexJob.ResultPayload),
+	})
+	if err != nil {
+		return fmt.Errorf("transcript_source_backfill:build_full_document: %w", err)
+	}
+	result, err := h.SourceWriter.Ensure(ctx, transcriptservice.SourceInput{
+		Document: document, TaskID: indexJob.ID + ":graph-retry-source-backfill",
+	})
+	if err != nil {
+		return fmt.Errorf("transcript_source_backfill:ensure_source: %w", err)
+	}
+	if result.VideoID != video.ID || result.TranscriptGeneration != generation ||
+		result.KnowledgeBaseID != knowledgeBaseID || strings.TrimSpace(result.KnowledgeID) == "" {
+		return fmt.Errorf("transcript_source_backfill:source_identity_mismatch")
+	}
+	return nil
+}
+
+func rebuildGraphInputPayload(db *gorm.DB, knowledgeBaseID string, video model.Video) (string, error) {
+	knowledgeBaseID = strings.TrimSpace(knowledgeBaseID)
+	generation := strings.TrimSpace(video.TranscriptGeneration)
+	if knowledgeBaseID == "" {
+		return "", fmt.Errorf("knowledge_base_routing:knowledge_kb_missing")
+	}
+	if generation == "" {
+		return "", fmt.Errorf("transcript_source_validation:generation_missing")
+	}
+	var source model.VideoTranscriptSource
+	if err := db.Where(
+		"video_id = ? AND transcript_generation = ? AND knowledge_base_id = ?",
+		video.ID, generation, knowledgeBaseID,
+	).First(&source).Error; err != nil {
+		return "", fmt.Errorf("transcript_source_validation:source_binding_missing: %w", err)
+	}
+	if source.Status != "created" || strings.TrimSpace(source.KnowledgeID) == "" {
+		return "", fmt.Errorf("transcript_source_validation:source_binding_invalid")
+	}
+	payload, err := json.Marshal(map[string]string{
+		"transcript_generation":               generation,
+		"transcript_input_mode":               "full_document",
+		"transcript_source_knowledge_base_id": knowledgeBaseID,
+		"transcript_source_knowledge_id":      strings.TrimSpace(source.KnowledgeID),
+	})
+	if err != nil {
+		return "", fmt.Errorf("encode graph retry input: %w", err)
+	}
+	return string(payload), nil
 }
 
 func (h *ProcessingHandler) stageArtifactAvailable(ctx context.Context, video model.Video, job model.VideoProcessingJob) bool {
@@ -270,6 +411,7 @@ func (h *ProcessingHandler) stageArtifactAvailable(ctx context.Context, video mo
 
 var errStageAlreadySucceeded = errors.New("processing stage already succeeded")
 var errStageInProgress = errors.New("processing stage is already in progress")
+var errVideoOrProcessingStageNotFound = errors.New("video or processing stage not found")
 
 func allowsExplicitSummaryRegeneration(jobType string) bool {
 	return jobType == "summary" || jobType == "summary_enhance"
@@ -308,10 +450,11 @@ func buildProcessingStatus(video model.Video, jobs []model.VideoProcessingJob) P
 	response := ProcessingStatusResponse{
 		VideoID: video.ID, Status: ProcessingStateReady,
 		FoundationStatus: ProcessingStateReady, EnhancementStatus: ProcessingStateReady,
-		TranscriptGeneration: video.TranscriptGeneration,
-		CompletedStages:      make([]string, 0, len(latest)),
-		Jobs:                 make([]ProcessingJobStatus, 0, len(latest)),
-		UpdatedAt:            video.UpdatedAt,
+		TranscriptGeneration:     video.TranscriptGeneration,
+		KnowledgeContractVersion: knowledge.WikiObjectContractVersion,
+		CompletedStages:          make([]string, 0, len(latest)),
+		Jobs:                     make([]ProcessingJobStatus, 0, len(latest)),
+		UpdatedAt:                video.UpdatedAt,
 	}
 	var foundationFailed *model.VideoProcessingJob
 	var enhancementFailed *model.VideoProcessingJob

@@ -347,5 +347,8 @@ func openTestVideoDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(&model.VideoProcessingJob{}); err != nil {
 		t.Fatalf("migrate jobs: %v", err)
 	}
+	if err := db.AutoMigrate(&model.VideoTranscriptChunk{}); err != nil {
+		t.Fatalf("migrate transcript chunks: %v", err)
+	}
 	return db
 }

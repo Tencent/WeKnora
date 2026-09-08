@@ -14,6 +14,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/contentprovenance"
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	customknowledge "github.com/Tencent/WeKnora/internal/custom/service/knowledge"
@@ -26,7 +27,7 @@ import (
 // fixed knowledge-KB adapter; tests can prove a path never reaches Agent.
 type AgentClient interface {
 	CreateSession(context.Context, string) (string, error)
-	TriggerSkill(context.Context, string, string, string, string, []string) error
+	TriggerSkill(context.Context, string, string, string, string, []string, *contentprovenance.Job) error
 }
 
 // BaseSkillHandler 5 个 skill handler 共用父类
@@ -71,9 +72,8 @@ func skillQueryWithInput(video *model.Video, contract skill.JobContract, jobType
 	query += fmt.Sprintf("业务视频 ID：%s 仅用于产物归属。视频标题：%s。", video.ID, video.Title)
 	if jobType == skill.JobGraph {
 		query += fmt.Sprintf(
-			"必须完整遵循 extract-video-knowledge 的 references/type-frameworks.md、references/wiki-schema.md 和 references/audit-rules.md；调用 read_skill 读取参考文件时，file_path 必须完整使用 references/type-frameworks.md、references/wiki-schema.md、references/audit-rules.md，不能省略 references/ 目录或只传文件名：每个实体和每个知识原子都要写入独立 Wiki 页面；所有 Skill 知识对象页面的 page_type 必须使用 WeKnora 支持的 index，五类业务类型必须写入 frontmatter.type，禁止把 case、methodology、insight 作为 page_type；方法论、案例、概念、洞察必须填充对应结构维度，实体必须填充对应关键信息维度，未涉及字段留空不得编造。每个知识对象页面的 evidence_ids 必须填入真实转写证据分块 ID；source_refs 只能填入本次输入的真实源文档知识 ID（%s），必须与 evidence_ids 分开，禁止填入证据句 ID、转写分块 ID、随机 UUID 或 Wiki page ID。关系必须分两阶段写入：先写独立对象页并读取确认真实 Wiki page ID，本轮新对象之间的 relations 首次必须留空；全部目标页面确认可读后，再覆盖更新对象页补齐结构化 relations 和正文双链，禁止猜测 target_wiki_page_id。最后写入视频索引页：slug 严格使用 %q；page_type 使用 index；frontmatter 必须含 type: %s、source_video_id: %s 和 transcript_generation: %s。索引页目标可能尚不存在，首次生成时不要先读取目标 slug；读取返回 not found 不是失败，请继续直接写入。读取或引用上游产物时，必须使用 Wiki 工具返回的实际 slug，禁止根据视频标题或页面标题猜测 slug；不得用示例、占位内容或 mock 数据代替真实 Wiki 产物。"+
-				"图谱理解必须以连续语义窗口处理转写：先按章节或相邻分块组织上下文，再提取跨分块成立的实体、概念、案例、方法论和洞察五类知识；实体与关系仍必须绑定最小充分证据分块，禁止把单个分块的偶然关键词直接当作关系。",
-			strings.TrimSpace(sourceKnowledgeID), contract.WriteSlug(video.ID), contract.ArtifactType, video.ID, video.TranscriptGeneration,
+			"当前知识对象提交外壳版本为 %s。开始处理前必须通过 read_skill 完整读取 SKILL.md、references/type-frameworks.md、references/wiki-schema.md 和 references/audit-rules.md；组装输出前再完整读取 references/output-examples.md。file_path 必须包含 references/ 目录。V2 Skill 只负责五类候选、复合对象拆解、规范标题建议和当前视频当前代次的一组 evidence_contribution；不得自行决定最终知识对象 ID、Wiki 页面 ID 或规范 slug。只把通过审计的候选提交给 wiki_write_page，候选身份只是提案；写入后必须使用工具返回的 knowledge_object_id、wiki_page_id、规范标题和 slug 完成回读、关系补写和视频索引，语义不确定或冲突时停止该候选，不得换 slug 绕过。证据贡献的源文档只能是 %s，证据正文仍只保存在证据知识库。图谱理解必须使用连续语义窗口，五类对象和关系都绑定最小充分证据。最后写入视频索引页：slug 严格使用 %q，page_type 使用 index，frontmatter 使用 type: %s、source_video_id: %s、transcript_generation: %s、title: %s 和 audit_status: aligned；索引只引用工具已返回并回读的规范页面。不得使用示例、占位内容或 mock 数据。",
+			customknowledge.WikiObjectContractVersion, strings.TrimSpace(sourceKnowledgeID), contract.WriteSlug(video.ID), contract.ArtifactType, video.ID, video.TranscriptGeneration, strings.TrimSpace(video.Title)+"_知识底座",
 		)
 	} else {
 		query += fmt.Sprintf(
@@ -302,10 +302,26 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 		if err := h.ensureGraphIndexSeed(ctx, video); err != nil {
 			return err
 		}
+		versions, snapshotErr := h.Orchestrator.SnapshotWikiPageVersions(ctx, video.ID)
+		if snapshotErr != nil {
+			return fmt.Errorf("snapshot graph attempt wiki pages: %w", snapshotErr)
+		}
+		baseline = skill.WikiPageBaseline{Versions: versions, JobCreatedAt: time.Now().UTC()}
 	}
 
 	// 创建 session 并触发 skill
-	sessionID, err := h.AgentClient.CreateSession(ctx, fmt.Sprintf("content-pipeline/%s/%s", video.ID, jobType))
+	productionGeneration := strings.TrimSpace(job.TranscriptGeneration)
+	if productionGeneration == "" {
+		productionGeneration = strings.TrimSpace(video.TranscriptGeneration)
+	}
+	if productionGeneration == "" {
+		return fmt.Errorf("content pipeline session requires a transcript generation")
+	}
+	productionJob, err := authenticatedProductionJob(job, video, jobType, productionGeneration)
+	if err != nil {
+		return err
+	}
+	sessionID, err := h.AgentClient.CreateSession(ctx, fmt.Sprintf("content-pipeline/%s/%s/%s/%s", video.ID, productionGeneration, jobType, job.ID))
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
@@ -313,26 +329,31 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 	if explicitRegeneration {
 		query += "这是用户明确发起的历史总结重生成：允许覆盖旧的用户编辑总结，必须按当前类型化 JSON 契约重新写入；不要跳过写入。"
 	}
-	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query, knowledgeIDs); err != nil {
+	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query, knowledgeIDs, productionJob); err != nil {
 		if !isMissingWikiPageError(err) {
 			return fmt.Errorf("trigger skill %s: %w", contract.SkillName, err)
 		}
 		slog.Warn("skill stopped on an expected first-run missing wiki page; retrying with recovery instruction",
 			"video_id", video.ID, "job_type", jobType, "error", err)
-		recoverySessionID, sessionErr := h.AgentClient.CreateSession(ctx, fmt.Sprintf("content-pipeline/%s/%s-recovery", video.ID, jobType))
+		recoverySessionID, sessionErr := h.AgentClient.CreateSession(ctx, fmt.Sprintf("content-pipeline/%s/%s/%s-recovery/%s", video.ID, productionGeneration, jobType, job.ID))
 		if sessionErr != nil {
 			return fmt.Errorf("trigger skill %s recovery session: %w (initial error: %v)", contract.SkillName, sessionErr, err)
 		}
 		recoveryQuery := query + " 这是首次生成恢复流程：目标产物页可能尚不存在，不要先读取目标 slug；请直接调用创建/覆盖 Wiki 写入。读取返回 not found 不是失败，继续完成写入。"
-		if retryErr := h.AgentClient.TriggerSkill(ctx, recoverySessionID, h.AgentID, contract.SkillName, recoveryQuery, knowledgeIDs); retryErr != nil {
+		if retryErr := h.AgentClient.TriggerSkill(ctx, recoverySessionID, h.AgentID, contract.SkillName, recoveryQuery, knowledgeIDs, productionJob); retryErr != nil {
 			return fmt.Errorf("trigger skill %s after missing-page recovery: %w (initial error: %v)", contract.SkillName, retryErr, err)
+		}
+	}
+	if jobType == skill.JobGraph {
+		if err := h.repairP3KnowledgeOnce(ctx, video, query, knowledgeIDs, baseline, productionJob); err != nil {
+			return err
 		}
 	}
 
 	// 轮询等待 Wiki 产物页落地（WeKnora 写入到可检索有延迟），最多 10 分钟
 	wikiPageID, err := h.waitForWikiPage(ctx, video.ID, jobType, baseline, 10*time.Minute)
 	if err != nil {
-		return fmt.Errorf("等待 wiki 产物页超时（type=%s）: %w", contract.ArtifactType, err)
+		return wrapWikiArtifactWaitError(contract.ArtifactType, err)
 	}
 
 	// 回写 wiki_page_id；基础内容齐备时由编排器调度组装
@@ -346,6 +367,70 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 		return fmt.Errorf("after skill complete: %w", oerr)
 	}
 	_ = wikiPageID // 回写已在 AfterSkillComplete 中完成
+	return nil
+}
+
+func authenticatedProductionJob(
+	job *model.VideoProcessingJob,
+	video *model.Video,
+	jobType, generation string,
+) (*contentprovenance.Job, error) {
+	if job == nil || video == nil || strings.TrimSpace(job.ID) == "" ||
+		strings.TrimSpace(job.VideoID) != strings.TrimSpace(video.ID) ||
+		strings.TrimSpace(job.JobType) != strings.TrimSpace(jobType) ||
+		strings.TrimSpace(job.TranscriptGeneration) != strings.TrimSpace(generation) {
+		return nil, fmt.Errorf("content pipeline provenance requires a persisted task matching video, generation, and job type")
+	}
+	return &contentprovenance.Job{
+		TaskID:               job.ID,
+		VideoID:              video.ID,
+		TranscriptGeneration: generation,
+		JobType:              jobType,
+	}, nil
+}
+
+func wrapWikiArtifactWaitError(artifactType string, err error) error {
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "timeout") {
+		return fmt.Errorf("等待 wiki 产物页超时（type=%s）: %w", artifactType, err)
+	}
+	return fmt.Errorf("Wiki 产物页未通过验收（type=%s）: %w", artifactType, err)
+}
+
+// repairP3KnowledgeOnce turns strict validation failures into one bounded,
+// actionable Agent repair. A task retry still owns the outer retry budget; this
+// method only repairs pages written by the current Agent run.
+func (h *BaseSkillHandler) repairP3KnowledgeOnce(
+	ctx context.Context,
+	video *model.Video,
+	query string,
+	knowledgeIDs []string,
+	baseline skill.WikiPageBaseline,
+	productionJob *contentprovenance.Job,
+) error {
+	artifacts, invalidObjects, err := h.inspectP3KnowledgeAfter(ctx, video.ID, video.TranscriptGeneration, video.Title, baseline)
+	if err != nil {
+		return fmt.Errorf("inspect generated P3 knowledge: %w", err)
+	}
+	if artifacts != nil && artifacts.Index != nil {
+		return nil
+	}
+	diagnostics := "未生成可用的视频索引页，或当前代次没有任何通过契约的知识对象页"
+	if len(invalidObjects) > 0 {
+		diagnostics = strings.Join(invalidObjects, "; ")
+	}
+	repairSessionID, err := h.AgentClient.CreateSession(ctx, fmt.Sprintf("content-pipeline/%s/%s/%s-contract-repair/%s", video.ID, video.TranscriptGeneration, skill.JobGraph, productionJob.TaskID))
+	if err != nil {
+		return fmt.Errorf("create graph contract repair session: %w", err)
+	}
+	repairQuery := query + " 本轮生成的候选 Wiki 页面未通过后端契约校验。校验结果：" + diagnostics +
+		"。只修复当前视频、当前转写代次的页面；逐页读取现有内容后使用 wiki_write_page 完整覆盖，确保 frontmatter.core_content 为非空的一句话概括，每次调用必须显式提供 slug、title、summary、content、page_type、source_refs 六个必填参数，禁止使用 wiki_replace_text，禁止追加第二段 frontmatter。修复后再次读取并确认对象页与视频索引页均满足原契约。"
+	contract, ok := skill.Contract(skill.JobGraph)
+	if !ok {
+		return fmt.Errorf("unknown graph skill contract")
+	}
+	if err := h.AgentClient.TriggerSkill(ctx, repairSessionID, h.AgentID, contract.SkillName, repairQuery, knowledgeIDs, productionJob); err != nil {
+		return fmt.Errorf("repair generated P3 knowledge contract: %w", err)
+	}
 	return nil
 }
 
@@ -408,7 +493,7 @@ func (h *BaseSkillHandler) waitForWikiPage(
 		if err != nil {
 			return "", err
 		}
-		return h.waitForP3Knowledge(ctx, videoID, generation, title, timeout)
+		return h.waitForP3Knowledge(ctx, videoID, generation, title, baseline, timeout)
 	}
 
 	deadline := time.Now().Add(timeout)
@@ -468,62 +553,249 @@ func (h *BaseSkillHandler) findP3Knowledge(
 	ctx context.Context,
 	videoID, generation, title string,
 ) (*p3KnowledgeArtifacts, error) {
+	artifacts, _, err := h.inspectP3Knowledge(ctx, videoID, generation, title)
+	return artifacts, err
+}
+
+func (h *BaseSkillHandler) inspectP3Knowledge(
+	ctx context.Context,
+	videoID, generation, title string,
+) (*p3KnowledgeArtifacts, []string, error) {
+	return h.inspectP3KnowledgeAfter(ctx, videoID, generation, title, skill.WikiPageBaseline{})
+}
+
+func (h *BaseSkillHandler) inspectP3KnowledgeAfter(
+	ctx context.Context,
+	videoID, generation, title string,
+	baseline skill.WikiPageBaseline,
+) (*p3KnowledgeArtifacts, []string, error) {
 	if h.Orchestrator == nil || h.Orchestrator.Wiki == nil {
-		return nil, fmt.Errorf("native Wiki graph reconciliation is not configured")
+		return nil, nil, fmt.Errorf("native Wiki graph reconciliation is not configured")
 	}
 	if strings.TrimSpace(h.KnowledgeBaseID) == "" {
-		return nil, fmt.Errorf("knowledge_base_routing:knowledge_kb_missing")
+		return nil, nil, fmt.Errorf("knowledge_base_routing:knowledge_kb_missing")
 	}
 	generation = strings.TrimSpace(generation)
 	if generation == "" {
-		return nil, fmt.Errorf("video %s has no active transcript generation", videoID)
+		return nil, nil, fmt.Errorf("video %s has no active transcript generation", videoID)
 	}
 	pages, err := h.Orchestrator.Wiki.ListAllPages(ctx, h.KnowledgeBaseID, "")
 	if err != nil {
-		return nil, fmt.Errorf("list Wiki pages for P3 knowledge: %w", err)
+		return nil, nil, fmt.Errorf("list Wiki pages for P3 knowledge: %w", err)
 	}
 
 	var index *weknora.WikiPage
+	invalidObjects := make([]string, 0)
+	indexCandidateFound := false
 	for i := range pages {
 		candidate := pages[i]
-		if candidate.PageType != "index" || candidate.Slug != "video/"+strings.TrimSpace(videoID) {
+		if candidate.Slug != "video/"+strings.TrimSpace(videoID) {
 			continue
 		}
+		if !isWikiPageInAttempt(candidate, baseline) {
+			continue
+		}
+		indexCandidateFound = true
 		page, readErr := h.readWikiPageForValidation(ctx, candidate)
 		if readErr != nil {
-			return nil, readErr
+			return nil, nil, readErr
 		}
-		if page != nil && isP3KnowledgeIndex(*page, videoID, generation, title) {
+		if page == nil {
+			invalidObjects = append(invalidObjects, fmt.Sprintf("%s: video index page is empty or unreadable", candidate.ID))
+			continue
+		}
+		if validationErr := validateP3KnowledgeIndex(*page, videoID, generation, title); validationErr != nil {
+			invalidObjects = append(invalidObjects, fmt.Sprintf("%s: %v", candidate.ID, validationErr))
+			continue
+		}
+		if index == nil {
 			index = page
-			break
 		}
 	}
-	if index == nil {
-		return nil, nil
+	if !indexCandidateFound {
+		if baseline.Versions != nil {
+			invalidObjects = append(invalidObjects, fmt.Sprintf("video/%s: video index page was not created or updated in the current attempt", strings.TrimSpace(videoID)))
+		} else {
+			invalidObjects = append(invalidObjects, fmt.Sprintf("video/%s: video index page is missing", strings.TrimSpace(videoID)))
+		}
 	}
 
-	objectCount := 0
+	type validatedObjectPage struct {
+		page       weknora.WikiPage
+		validation customknowledge.WikiObjectValidation
+	}
+	validatedObjects := make([]validatedObjectPage, 0)
 	for i := range pages {
 		candidate := pages[i]
-		if candidate.ID == index.ID || candidate.PageType != "index" || candidate.Slug == index.Slug {
+		if candidate.Slug == "video/"+strings.TrimSpace(videoID) {
+			continue
+		}
+		if !isWikiPageInAttempt(candidate, baseline) {
 			continue
 		}
 		page, readErr := h.readWikiPageForValidation(ctx, candidate)
 		if readErr != nil {
-			return nil, readErr
+			return nil, nil, readErr
 		}
 		if page == nil {
 			continue
 		}
-		if _, validationErr := customknowledge.ValidateWikiObjectPage(page.Content, page.PageType, videoID, generation); validationErr != nil {
+		if !isCurrentP3ObjectCandidate(*page, videoID, generation) {
 			continue
 		}
-		objectCount++
+		validation, validationErr := customknowledge.ValidateWikiObjectWritePage(page.Content, page.PageType, videoID, generation)
+		if validationErr != nil {
+			invalidObjects = append(invalidObjects, fmt.Sprintf("%s: %v", page.ID, validationErr))
+			continue
+		}
+		validatedObjects = append(validatedObjects, validatedObjectPage{page: *page, validation: validation})
+	}
+
+	objectCount := 0
+	validatedPages := make([]weknora.WikiPage, 0, len(validatedObjects))
+	identityPages := make([]weknora.WikiPage, 0, len(validatedObjects))
+	if len(validatedObjects) > 0 {
+		if h.DB == nil {
+			return nil, nil, fmt.Errorf("validate P3 knowledge evidence: database is not configured")
+		}
+		var chunks []model.VideoTranscriptChunk
+		if err := h.DB.WithContext(ctx).
+			Where("video_id = ? AND generation = ? AND status = ?", videoID, generation, "completed").
+			Find(&chunks).Error; err != nil {
+			return nil, nil, fmt.Errorf("validate P3 knowledge evidence: %w", err)
+		}
+		byEvidence, byIndex := knowledgegraph.BuildEvidenceChunkIndex(chunks)
+		for _, candidate := range validatedObjects {
+			if evidenceErr := validateP3KnowledgeEvidence(candidate.validation, byEvidence, byIndex); evidenceErr != nil {
+				invalidObjects = append(invalidObjects, fmt.Sprintf("%s: %v", candidate.page.ID, evidenceErr))
+				continue
+			}
+			objectCount++
+			validatedPages = append(validatedPages, candidate.page)
+			identityPages = append(identityPages, candidate.page)
+		}
+		// Attempt-scoped validation prevents historical malformed pages from
+		// poisoning retries. Semantic identity is different: every valid page in
+		// the active generation must participate or an unchanged duplicate can
+		// silently return to the graph after the current attempt succeeds.
+		for i := range pages {
+			candidate := pages[i]
+			if candidate.Slug == "video/"+strings.TrimSpace(videoID) || isWikiPageInAttempt(candidate, baseline) ||
+				!isCurrentP3ObjectCandidate(candidate, videoID, generation) {
+				continue
+			}
+			page, readErr := h.readWikiPageForValidation(ctx, candidate)
+			if readErr != nil {
+				return nil, nil, readErr
+			}
+			if page == nil {
+				continue
+			}
+			validation, validationErr := customknowledge.ValidateWikiObjectWritePage(page.Content, page.PageType, videoID, generation)
+			if validationErr != nil || validateP3KnowledgeEvidence(validation, byEvidence, byIndex) != nil {
+				continue
+			}
+			identityPages = append(identityPages, *page)
+		}
+		if len(identityPages) > 1 {
+			if identityErr := knowledgegraph.ValidateSemanticIdentityCompletion(videoID, generation, identityPages); identityErr != nil {
+				invalidObjects = append(invalidObjects, identityErr.Error())
+			}
+		}
 	}
 	if objectCount == 0 {
-		return nil, nil
+		invalidObjects = append(invalidObjects, "当前代次没有任何知识对象候选页")
+	} else if objectCount > 1 {
+		if _, _, relationErr := knowledgegraph.ValidateFormalRelationCompletion(videoID, generation, validatedPages); relationErr != nil {
+			invalidObjects = append(invalidObjects, relationErr.Error())
+		}
 	}
-	return &p3KnowledgeArtifacts{Index: index, ObjectCount: objectCount}, nil
+	if index == nil || objectCount == 0 || len(invalidObjects) > 0 {
+		return nil, invalidObjects, nil
+	}
+	return &p3KnowledgeArtifacts{Index: index, ObjectCount: objectCount}, nil, nil
+}
+
+func validateP3KnowledgeEvidence(
+	object customknowledge.WikiObjectValidation,
+	byEvidence map[string]model.VideoTranscriptChunk,
+	byIndex map[string]model.VideoTranscriptChunk,
+) error {
+	validate := func(evidenceID string) error {
+		if _, ok := knowledgegraph.ResolveEvidenceChunk(
+			byEvidence, byIndex, object.SourceVideoID, object.TranscriptGeneration, evidenceID,
+		); !ok {
+			return fmt.Errorf("evidence %q is missing from the current transcript generation", evidenceID)
+		}
+		return nil
+	}
+	for _, evidenceID := range object.EvidenceIDs {
+		if err := validate(evidenceID); err != nil {
+			return err
+		}
+	}
+	for _, relation := range object.Relations {
+		for _, evidenceID := range relation.EvidenceIDs {
+			if err := validate(evidenceID); err != nil {
+				return fmt.Errorf("relation %q: %w", relation.RelationID, err)
+			}
+		}
+	}
+	return nil
+}
+
+func isWikiPageInAttempt(page weknora.WikiPage, baseline skill.WikiPageBaseline) bool {
+	if baseline.Versions == nil {
+		return true
+	}
+	previousVersion, existed := baseline.Versions[page.ID]
+	return !existed || page.Version > previousVersion
+}
+
+func isCurrentP3ObjectCandidate(page weknora.WikiPage, videoID, generation string) bool {
+	frontmatter := page.ParsedFrontmatter()
+	parsedIdentityMatches := strings.TrimSpace(wikiFrontmatterString(frontmatter, "source_video_id")) == strings.TrimSpace(videoID) &&
+		strings.TrimSpace(wikiFrontmatterString(frontmatter, "transcript_generation")) == strings.TrimSpace(generation)
+	if parsedIdentityMatches {
+		for _, key := range []string{"type", "primary_type"} {
+			value := customknowledge.KnowledgeType(strings.ToLower(strings.TrimSpace(wikiFrontmatterString(frontmatter, key))))
+			if customknowledge.IsKnowledgeType(value) {
+				return true
+			}
+		}
+	}
+	// ParsedFrontmatter intentionally fails closed on malformed YAML. Keep such
+	// pages in the validation set when their raw identity and object namespace
+	// still prove they belong to this exact video generation; otherwise a
+	// duplicate key or broken scalar is silently ignored until the task times out.
+	if rawFrontmatterScalar(page.Content, "source_video_id") != strings.TrimSpace(videoID) ||
+		rawFrontmatterScalar(page.Content, "transcript_generation") != strings.TrimSpace(generation) {
+		return false
+	}
+	for _, prefix := range []string{"entity/", "concept/", "case/", "methodology/", "insight/", "knowledge-object/"} {
+		if strings.HasPrefix(strings.TrimSpace(page.Slug), prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func rawFrontmatterScalar(content, key string) string {
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return ""
+	}
+	prefix := key + ":"
+	for _, line := range lines[1:] {
+		line = strings.TrimSpace(line)
+		if line == "---" {
+			break
+		}
+		if strings.HasPrefix(line, prefix) {
+			return strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, prefix)), `"'`)
+		}
+	}
+	return ""
 }
 
 func (h *BaseSkillHandler) readWikiPageForValidation(ctx context.Context, candidate weknora.WikiPage) (*weknora.WikiPage, error) {
@@ -540,6 +812,7 @@ func (h *BaseSkillHandler) readWikiPageForValidation(ctx context.Context, candid
 func (h *BaseSkillHandler) waitForP3Knowledge(
 	ctx context.Context,
 	videoID, generation, title string,
+	baseline skill.WikiPageBaseline,
 	timeout time.Duration,
 ) (string, error) {
 	deadline := time.Now().Add(timeout)
@@ -550,12 +823,14 @@ func (h *BaseSkillHandler) waitForP3Knowledge(
 		if time.Now().After(deadline) {
 			return "", fmt.Errorf("timeout waiting for P3 knowledge artifacts: object_count=%d", lastObjectCount)
 		}
-		artifacts, err := h.findP3Knowledge(ctx, videoID, generation, title)
+		artifacts, invalidObjects, err := h.inspectP3KnowledgeAfter(ctx, videoID, generation, title, baseline)
 		if err != nil {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
 			slog.Warn("waitForP3Knowledge find artifacts", "video_id", videoID, "error", err)
+		} else if len(invalidObjects) > 0 {
+			return "", fmt.Errorf("P3 knowledge object validation failed: %s", strings.Join(invalidObjects, "; "))
 		} else if artifacts != nil && artifacts.Index != nil {
 			lastObjectCount = artifacts.ObjectCount
 			slog.Info("waitForP3Knowledge found", "video_id", videoID, "index_page_id", artifacts.Index.ID, "object_count", artifacts.ObjectCount)
@@ -570,24 +845,13 @@ func (h *BaseSkillHandler) waitForP3Knowledge(
 }
 
 func isP3KnowledgeIndex(page weknora.WikiPage, videoID, generation, title string) bool {
-	if page.PageType != "index" || page.Slug != "video/"+strings.TrimSpace(videoID) || strings.TrimSpace(page.Content) == "" {
-		return false
-	}
-	frontmatter := page.ParsedFrontmatter()
-	if strings.ToLower(strings.TrimSpace(wikiFrontmatterString(frontmatter, "type"))) != "knowledge_base" {
-		return false
-	}
-	if strings.TrimSpace(wikiFrontmatterString(frontmatter, "source_video_id")) != strings.TrimSpace(videoID) ||
-		strings.TrimSpace(wikiFrontmatterString(frontmatter, "transcript_generation")) != strings.TrimSpace(generation) {
-		return false
-	}
-	if strings.ToLower(strings.TrimSpace(wikiFrontmatterString(frontmatter, "audit_status"))) != "aligned" {
-		return false
-	}
-	if title != "" && strings.TrimSpace(wikiFrontmatterString(frontmatter, "title")) != strings.TrimSpace(title)+"_知识底座" {
-		return false
-	}
-	return true
+	return validateP3KnowledgeIndex(page, videoID, generation, title) == nil
+}
+
+func validateP3KnowledgeIndex(page weknora.WikiPage, videoID, generation, title string) error {
+	return customknowledge.ValidateVideoKnowledgeIndexPage(
+		page.Content, page.PageType, page.Slug, videoID, generation, title,
+	)
 }
 
 func wikiFrontmatterString(frontmatter map[string]any, key string) string {
@@ -627,6 +891,9 @@ func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 		if _, _, err := h.Orchestrator.AfterSkillCompleteWithID(ctx, video.ID, skill.JobGraph, artifacts.Index.ID); err != nil {
 			return fmt.Errorf("record existing P3 knowledge: %w", err)
 		}
+		if err := h.projectP3Knowledge(ctx, video.ID, artifacts.Index); err != nil {
+			return err
+		}
 		slog.Info("P3 knowledge already reconciled",
 			"video_id", video.ID, "job_id", job.ID,
 			"index_page_id", artifacts.Index.ID, "object_count", artifacts.ObjectCount)
@@ -636,8 +903,64 @@ func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	if err := h.BaseSkillHandler.run(ctx, job, video, skill.JobGraph); err != nil {
 		return err
 	}
+	index, err := h.recordedP3KnowledgeIndex(ctx, video.ID, generation, title)
+	if err != nil {
+		return err
+	}
+	artifacts, invalidObjects, err := h.inspectP3Knowledge(ctx, video.ID, generation, title)
+	if err != nil {
+		return fmt.Errorf("validate completed P3 knowledge: %w", err)
+	}
+	if artifacts == nil || artifacts.Index == nil || len(invalidObjects) > 0 {
+		diagnostics := "completed extraction has no valid P3 knowledge artifacts"
+		if len(invalidObjects) > 0 {
+			diagnostics = strings.Join(invalidObjects, "; ")
+		}
+		return fmt.Errorf("P3 knowledge object validation failed: %s", diagnostics)
+	}
+	if artifacts.Index.ID != index.ID {
+		return fmt.Errorf("P3 knowledge object validation failed: recorded index does not match the validated video index")
+	}
+	if err := h.projectP3Knowledge(ctx, video.ID, index); err != nil {
+		return err
+	}
 	slog.Info("P3 knowledge extracted",
 		"video_id", video.ID, "job_id", job.ID, "page_producer", "extract-video-knowledge")
+	return nil
+}
+
+func (h *GraphHandler) recordedP3KnowledgeIndex(ctx context.Context, videoID, generation, title string) (*weknora.WikiPage, error) {
+	var current model.Video
+	if err := h.DB.WithContext(ctx).Select("knowledge_base_wiki_page_id").First(&current, "id = ?", videoID).Error; err != nil {
+		return nil, fmt.Errorf("project P3 knowledge: reload recorded index: %w", err)
+	}
+	if strings.TrimSpace(current.KnowledgeBaseWikiPageID) == "" {
+		return nil, fmt.Errorf("project P3 knowledge: completed Wiki index is not recorded")
+	}
+	page, err := h.Orchestrator.Wiki.GetPageByID(ctx, h.KnowledgeBaseID, current.KnowledgeBaseWikiPageID)
+	if err != nil {
+		return nil, fmt.Errorf("project P3 knowledge: read recorded index: %w", err)
+	}
+	if page == nil {
+		return nil, fmt.Errorf("project P3 knowledge: recorded Wiki index is unavailable")
+	}
+	if err := validateP3KnowledgeIndex(*page, videoID, generation, title); err != nil {
+		return nil, fmt.Errorf("project P3 knowledge: recorded Wiki index is invalid: %w", err)
+	}
+	return page, nil
+}
+
+func (h *GraphHandler) projectP3Knowledge(ctx context.Context, videoID string, indexPage *weknora.WikiPage) error {
+	if h.Graph == nil {
+		return nil
+	}
+	var current model.Video
+	if err := h.DB.WithContext(ctx).First(&current, "id = ?", videoID).Error; err != nil {
+		return fmt.Errorf("project P3 knowledge: reload video: %w", err)
+	}
+	if err := h.Graph.ProjectVideo(ctx, &current, indexPage); err != nil {
+		return fmt.Errorf("project P3 knowledge: %w", err)
+	}
 	return nil
 }
 

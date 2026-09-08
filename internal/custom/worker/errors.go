@@ -26,6 +26,9 @@ func ClassifyProcessingError(err error) (string, string) {
 		return ErrorCategoryTimeout, "timeout"
 	}
 	message := strings.ToLower(err.Error())
+	if containsAny(message, "p3 knowledge object validation failed", "knowledge object content contract", "knowledge object relation contract") {
+		return ErrorCategoryWikiArtifact, "content_contract_failed"
+	}
 	if marker := "transcript_source_validation:"; strings.Contains(message, marker) {
 		remainder := message[strings.Index(message, marker)+len(marker):]
 		if end := strings.IndexByte(remainder, ':'); end >= 0 && strings.TrimSpace(remainder[:end]) != "" {

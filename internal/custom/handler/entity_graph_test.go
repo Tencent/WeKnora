@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 
@@ -21,6 +22,7 @@ type graphStoreStub struct {
 	graph        *knowledgegraph.Graph
 	projectGraph *knowledgegraph.Graph
 	projectCount int
+	queryErr     error
 }
 
 func (stub graphStoreStub) ProjectVideo(context.Context, *model.Video, *weknora.WikiPage) error {
@@ -35,8 +37,64 @@ func (stub *graphStoreStub) ProjectKnowledgeBase(context.Context) error {
 	return nil
 }
 
-func (stub *graphStoreStub) Query(context.Context, knowledgegraph.Query) (*knowledgegraph.Graph, error) {
-	return stub.graph, nil
+func (stub *graphStoreStub) Query(_ context.Context, query knowledgegraph.Query) (*knowledgegraph.Graph, error) {
+	if stub.queryErr != nil {
+		return nil, stub.queryErr
+	}
+	if stub.graph == nil {
+		return nil, nil
+	}
+	requested := make(map[knowledge.KnowledgeType]struct{}, len(query.Types))
+	for _, knowledgeType := range query.Types {
+		requested[knowledgeType] = struct{}{}
+	}
+	result := &knowledgegraph.Graph{Stats: knowledgegraph.GraphStats{TypeCounts: make(map[string]int)}}
+	for _, node := range stub.graph.Nodes {
+		if query.VideoID != "" && node.SourceVideoID != query.VideoID {
+			continue
+		}
+		result.Stats.ScopeTotal++
+		if knowledge.IsKnowledgeType(node.KnowledgeType) {
+			result.Stats.TypeCounts[string(node.KnowledgeType)]++
+		} else {
+			result.Stats.UnknownTypeCount++
+		}
+		if len(requested) > 0 {
+			if _, ok := requested[node.KnowledgeType]; !ok {
+				continue
+			}
+		}
+		if query.WikiPageID != "" && node.WikiPageID != query.WikiPageID {
+			continue
+		}
+		result.Stats.FilteredTotal++
+		result.Nodes = append(result.Nodes, node)
+	}
+	sort.SliceStable(result.Nodes, func(i, j int) bool {
+		if result.Nodes[i].Title == result.Nodes[j].Title {
+			return result.Nodes[i].WikiPageID < result.Nodes[j].WikiPageID
+		}
+		return result.Nodes[i].Title < result.Nodes[j].Title
+	})
+	if query.Limit > 0 && len(result.Nodes) > query.Limit {
+		result.Nodes = result.Nodes[:query.Limit]
+	}
+	visible := make(map[string]struct{}, len(result.Nodes))
+	for _, node := range result.Nodes {
+		visible[node.WikiPageID] = struct{}{}
+	}
+	for _, edge := range stub.graph.Edges {
+		if query.WikiPageID != "" && (edge.SourceWikiPageID == query.WikiPageID || edge.TargetWikiPageID == query.WikiPageID) {
+			result.Edges = append(result.Edges, edge)
+			continue
+		}
+		_, sourceOK := visible[edge.SourceWikiPageID]
+		_, targetOK := visible[edge.TargetWikiPageID]
+		if sourceOK && targetOK {
+			result.Edges = append(result.Edges, edge)
+		}
+	}
+	return result, nil
 }
 
 func (stub *graphStoreStub) Close(context.Context) error {
@@ -45,7 +103,7 @@ func (stub *graphStoreStub) Close(context.Context) error {
 
 func TestEntityGraphUsesProjectedWikiPageAsStableIdentity(t *testing.T) {
 	videoID := uuid.NewString()
-	pageID := "method-page-1"
+	pageID := uuid.NewString()
 	wikiServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/v1/knowledgebase/kb-1/wiki/pages":
@@ -69,7 +127,7 @@ func TestEntityGraphUsesProjectedWikiPageAsStableIdentity(t *testing.T) {
 	if err := db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if err := db.Create(&model.Video{ID: videoID, Title: "方法论培训", VideoType: "training"}).Error; err != nil {
+	if err := db.Create(&model.Video{ID: videoID, Title: "方法论培训", VideoType: "training", TranscriptGeneration: "generation-1"}).Error; err != nil {
 		t.Fatalf("create video: %v", err)
 	}
 	if err := db.Create(&model.VideoTranscriptChunk{
@@ -133,7 +191,7 @@ func TestEntityGraphUsesProjectedWikiPageAsStableIdentity(t *testing.T) {
 	if node.Seconds != 180 || len(node.Evidence) != 1 || node.Evidence[0].ChunkIDs[0] != "chunk-1" {
 		t.Fatalf("node evidence = %#v", node.Evidence)
 	}
-	if strings.Join(response.Data.Attributes, ",") != "实体,概念,案例,方法论,洞察" {
+	if strings.Join(response.Data.Attributes, ",") != "实体,概念,方法论,案例,洞察" {
 		t.Fatalf("attributes = %#v", response.Data.Attributes)
 	}
 }
@@ -229,6 +287,7 @@ func TestEntityGraphDoesNotFallbackToTitleForMissingWikiPage(t *testing.T) {
 	defer wikiServer.Close()
 
 	handler := &EntityGraphHandler{
+		db: openTestVideoDB(t),
 		graph: &graphStoreStub{graph: &knowledgegraph.Graph{Nodes: []knowledgegraph.Node{{
 			ID: "wiki:missing", WikiPageID: "missing", KnowledgeObjectID: "K1",
 			KnowledgeType: knowledge.TypeConcept, Title: "同名知识", AuditStatus: "passed",
@@ -264,6 +323,7 @@ func TestEntityGraphReturnsEmptySlicesForEmptyGraph(t *testing.T) {
 	defer wikiServer.Close()
 
 	handler := &EntityGraphHandler{
+		db:    openTestVideoDB(t),
 		graph: &graphStoreStub{graph: &knowledgegraph.Graph{}},
 		wiki:  weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: wikiServer.URL}),
 		kbID:  "kb-1",
@@ -294,7 +354,7 @@ func TestEntityGraphReturnsEmptySlicesForEmptyGraph(t *testing.T) {
 	}
 }
 
-func TestEntityGraphProjectsKnowledgeBaseWhenNeo4jIsEmpty(t *testing.T) {
+func TestEntityGraphDoesNotProjectKnowledgeBaseWhenNeo4jIsEmpty(t *testing.T) {
 	wikiServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/v1/knowledgebase/kb-1/wiki/pages":
@@ -312,15 +372,9 @@ func TestEntityGraphProjectsKnowledgeBaseWhenNeo4jIsEmpty(t *testing.T) {
 	}))
 	defer wikiServer.Close()
 
-	store := &graphStoreStub{
-		graph: &knowledgegraph.Graph{},
-		projectGraph: &knowledgegraph.Graph{Nodes: []knowledgegraph.Node{{
-			ID: "wiki:legacy-page", WikiPageID: "legacy-page", KnowledgeObjectID: "legacy-page",
-			KnowledgeType: knowledge.TypeConcept, Title: "历史概念", AuditStatus: "passed",
-			ClassificationConfidence: 1,
-		}}},
-	}
+	store := &graphStoreStub{graph: &knowledgegraph.Graph{}}
 	handler := &EntityGraphHandler{
+		db:    openTestVideoDB(t),
 		graph: store,
 		wiki:  weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: wikiServer.URL}),
 		kbID:  "kb-1",
@@ -333,8 +387,8 @@ func TestEntityGraphProjectsKnowledgeBaseWhenNeo4jIsEmpty(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	if store.projectCount != 1 {
-		t.Fatalf("ProjectKnowledgeBase called %d times, want 1", store.projectCount)
+	if store.projectCount != 0 {
+		t.Fatalf("read-only graph endpoint called ProjectKnowledgeBase %d times", store.projectCount)
 	}
 	var response struct {
 		Data struct {
@@ -344,14 +398,17 @@ func TestEntityGraphProjectsKnowledgeBaseWhenNeo4jIsEmpty(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(response.Data.Nodes) != 1 || response.Data.Nodes[0].Type != "概念" {
+	if len(response.Data.Nodes) != 0 {
 		t.Fatalf("response nodes = %#v", response.Data.Nodes)
 	}
 }
 
 func TestEntityGraphSeparatesSemanticEdgesReadingAssociationsAndOrphans(t *testing.T) {
+	pageAID := "70000000-0000-4000-8000-000000000001"
+	pageBID := "70000000-0000-4000-8000-000000000002"
+	orphanPageID := "70000000-0000-4000-8000-000000000003"
 	pageContent := func(id, typ, title string) string {
-		return "---\nknowledge_object_id: " + id + "\ntype: " + typ + "\naudit_status: passed\nclassification_confidence: 0.9\n---\n# " + title + "\n\n正文内容。"
+		return "---\nknowledge_object_id: " + id + "\ntype: " + typ + "\nsource_video_id: video-1\ntranscript_generation: generation-1\naudit_status: passed\nclassification_confidence: 0.9\nevidence_ids: [evs:" + id + "]\n---\n# " + title + "\n\n核心内容：正文内容。"
 	}
 	wikiServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/api/v1/knowledgebase/kb-1/wiki/pages" {
@@ -359,22 +416,41 @@ func TestEntityGraphSeparatesSemanticEdgesReadingAssociationsAndOrphans(t *testi
 			return
 		}
 		_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{Pages: []weknora.WikiPage{
-			{ID: "page-a", Slug: "concept/a", Title: "概念 A", PageType: "index", Content: pageContent("object-a", "concept", "概念 A") + "\n关联 [[concept/b|概念 B]] 和 [[concept/missing|缺失页面]]。"},
-			{ID: "page-b", Slug: "concept/b", Title: "概念 B", PageType: "index", Content: pageContent("object-b", "concept", "概念 B")},
-			{ID: "page-orphan", Slug: "insight/orphan", Title: "孤岛洞察", PageType: "index", Content: pageContent("object-orphan", "insight", "孤岛洞察")},
+			{ID: pageAID, Slug: "concept/a", Title: "概念 A", PageType: "index", Content: pageContent("object-a", "concept", "概念 A") + "\n关联 [[concept/b|概念 B]] 和 [[concept/missing|缺失页面]]。"},
+			{ID: pageBID, Slug: "concept/b", Title: "概念 B", PageType: "index", Content: pageContent("object-b", "concept", "概念 B")},
+			{ID: orphanPageID, Slug: "insight/orphan", Title: "孤岛洞察", PageType: "index", Content: pageContent("object-orphan", "insight", "孤岛洞察")},
 		}, TotalPages: 1})
 	}))
 	defer wikiServer.Close()
 
+	db := openTestVideoDB(t)
+	if err := db.AutoMigrate(&model.VideoTranscriptChunk{}); err != nil {
+		t.Fatalf("migrate chunks: %v", err)
+	}
+	if err := db.Create(&model.Video{ID: "video-1", Title: "图谱视频", TranscriptGeneration: "generation-1"}).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	for index, objectID := range []string{"object-a", "object-b", "object-orphan"} {
+		if err := db.Create(&model.VideoTranscriptChunk{
+			VideoID: "video-1", Generation: "generation-1", ChunkIndex: index,
+			KnowledgeID: "knowledge-" + objectID, EvidenceSentenceID: "evs:" + objectID,
+			StartMs: index * 1000, EndMs: (index + 1) * 1000, ContentHash: "hash-" + objectID, Status: "completed",
+		}).Error; err != nil {
+			t.Fatalf("create chunk: %v", err)
+		}
+	}
 	store := &graphStoreStub{graph: &knowledgegraph.Graph{
 		Nodes: []knowledgegraph.Node{
-			{ID: "wiki:page-a", WikiPageID: "page-a", KnowledgeObjectID: "object-a", KnowledgeType: knowledge.TypeConcept, AuditStatus: "passed"},
-			{ID: "wiki:page-b", WikiPageID: "page-b", KnowledgeObjectID: "object-b", KnowledgeType: knowledge.TypeConcept, AuditStatus: "passed"},
-			{ID: "wiki:page-orphan", WikiPageID: "page-orphan", KnowledgeObjectID: "object-orphan", KnowledgeType: knowledge.TypeInsight, AuditStatus: "passed"},
+			{ID: "wiki:" + pageAID, WikiPageID: pageAID, KnowledgeObjectID: "object-a", KnowledgeType: knowledge.TypeConcept, SourceVideoID: "video-1", TranscriptGeneration: "generation-1", AuditStatus: "passed", EvidenceIDs: []string{"evs:object-a"}},
+			{ID: "wiki:" + pageBID, WikiPageID: pageBID, KnowledgeObjectID: "object-b", KnowledgeType: knowledge.TypeConcept, SourceVideoID: "video-1", TranscriptGeneration: "generation-1", AuditStatus: "passed", EvidenceIDs: []string{"evs:object-b"}},
+			{ID: "wiki:" + orphanPageID, WikiPageID: orphanPageID, KnowledgeObjectID: "object-orphan", KnowledgeType: knowledge.TypeInsight, SourceVideoID: "video-1", TranscriptGeneration: "generation-1", AuditStatus: "passed", EvidenceIDs: []string{"evs:object-orphan"}},
 		},
-		Edges: []knowledgegraph.Edge{{ID: "relation-1", SourceWikiPageID: "page-a", TargetWikiPageID: "page-b", RelationType: "explains", Confidence: 0.9}},
+		Edges: []knowledgegraph.Edge{{
+			ID: "relation-1", SourceWikiPageID: pageAID, TargetWikiPageID: pageBID,
+			RelationType: "explains", Confidence: 0.9, EvidenceIDs: []string{"evs:object-a"},
+		}},
 	}}
-	handler := &EntityGraphHandler{graph: store, wiki: weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: wikiServer.URL}), kbID: "kb-1"}
+	handler := &EntityGraphHandler{db: db, graph: store, wiki: weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: wikiServer.URL}), kbID: "kb-1"}
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
 	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/graph", nil)
@@ -405,24 +481,88 @@ func TestEntityGraphSeparatesSemanticEdgesReadingAssociationsAndOrphans(t *testi
 	if len(response.Data.ReadingAssociations) != 2 || response.Data.Meta.ReadingAssociationCount != 2 {
 		t.Fatalf("reading associations = %#v meta=%#v", response.Data.ReadingAssociations, response.Data.Meta)
 	}
-	var foundMissing bool
+	var foundExisting, foundMissing bool
 	for _, association := range response.Data.ReadingAssociations {
+		if association.Target == "wiki:"+pageBID {
+			foundExisting = true
+			if !association.TargetExists || association.TargetTitle != "概念 B" || association.TargetSlug != "concept/b" {
+				t.Fatalf("existing target association = %#v", association)
+			}
+		}
 		if association.Target == "wiki:concept/missing" {
 			foundMissing = true
-			if association.TargetExists || association.Counted || association.RelationKind != "reading" || association.RelationSource != "wiki_link" {
+			if association.TargetExists || association.TargetTitle != "" || association.TargetSlug != "" || association.Counted || association.RelationKind != "reading" || association.RelationSource != "wiki_link" {
 				t.Fatalf("missing target association = %#v", association)
 			}
 		}
 	}
-	if !foundMissing {
+	if !foundExisting || !foundMissing {
 		t.Fatalf("missing target reading association not returned: %#v", response.Data.ReadingAssociations)
 	}
 	for _, node := range response.Data.Nodes {
-		if node.WikiPageID == "page-orphan" && (!node.IsOrphan || node.LinkCount != 0) {
+		if node.WikiPageID == orphanPageID && (!node.IsOrphan || node.LinkCount != 0) {
 			t.Fatalf("orphan node = %#v", node)
 		}
-		if node.WikiPageID == "page-a" && (node.IsOrphan || node.LinkCount != 1) {
+		if node.WikiPageID == pageAID && (node.IsOrphan || node.LinkCount != 1) {
 			t.Fatalf("connected node = %#v", node)
 		}
+	}
+}
+
+func TestEntityGraphSemanticallyNormalizesFivePagesIntoTwoKnowledgeObjects(t *testing.T) {
+	nodes := []EntityGraphNode{
+		semanticGraphNode("page-deepseek", "deepseek-canonical", knowledge.TypeEntity, "product", "DeepSeek", "DeepSeek 是可读写本地文件并调用工具的 AI 助手。", "ev-deepseek-1"),
+		semanticGraphNode("page-deepseek-entity", "deepseek-duplicate", knowledge.TypeEntity, "product", "DeepSeek（实体）", "视频中的 DeepSeek 是能够读写本地文件、调用工具的 AI Agent 配套工具。", "ev-deepseek-2"),
+		semanticGraphNode("page-brain", "brain-canonical", knowledge.TypeConcept, "", "第二大脑", "第二大脑是由本地知识库和 AI Agent 组成、能够调用知识并执行工作的系统。", "ev-brain-1"),
+		semanticGraphNode("page-brain-concept", "brain-duplicate-1", knowledge.TypeConcept, "", "第二大脑（概念）", "第二大脑是让 AI Agent 调用本地知识并执行工作的知识系统。", "ev-brain-2"),
+		semanticGraphNode("page-agent-brain", "brain-duplicate-2", knowledge.TypeConcept, "", "AI Agent 第二大脑（概念）", "接入 AI Agent 后，本地知识库升级为能够调用知识并执行工作的第二大脑。", "ev-brain-3"),
+	}
+
+	aggregated, canonicalByPageID := aggregateSemanticGraphNodes(nodes)
+	if len(aggregated) != 2 {
+		t.Fatalf("semantic graph nodes = %#v, want 2 objects", aggregated)
+	}
+	byTitle := make(map[string]EntityGraphNode, len(aggregated))
+	for _, node := range aggregated {
+		byTitle[node.Name] = node
+	}
+	if len(byTitle["DeepSeek"].Evidence) != 2 || len(byTitle["第二大脑"].Evidence) != 3 {
+		t.Fatalf("merged evidence = DeepSeek:%#v 第二大脑:%#v", byTitle["DeepSeek"].Evidence, byTitle["第二大脑"].Evidence)
+	}
+	if canonicalByPageID["page-deepseek-entity"] != "page-deepseek" || canonicalByPageID["page-agent-brain"] != "page-brain" {
+		t.Fatalf("canonical page mapping = %#v", canonicalByPageID)
+	}
+
+	edges := canonicalizeSemanticGraphEdges([]EntityGraphEdge{
+		{ID: "self-after-merge", Source: "wiki:page-deepseek", Target: "wiki:page-deepseek-entity", Type: "complements", EvidenceIDs: []string{"ev-deepseek-1"}},
+		{ID: "relation-a", Source: "wiki:page-brain", Target: "wiki:page-deepseek", Type: "involves", EvidenceIDs: []string{"ev-brain-1"}, Confidence: 0.8},
+		{ID: "relation-b", Source: "wiki:page-brain-concept", Target: "wiki:page-deepseek-entity", Type: "involves", EvidenceIDs: []string{"ev-brain-2"}, Confidence: 0.9},
+	}, canonicalByPageID)
+	if len(edges) != 1 {
+		t.Fatalf("canonical graph edges = %#v, want one deduplicated non-self edge", edges)
+	}
+	if edges[0].Source != "wiki:page-brain" || edges[0].Target != "wiki:page-deepseek" || edges[0].Confidence != 0.9 {
+		t.Fatalf("canonical edge = %#v", edges[0])
+	}
+	if strings.Join(edges[0].EvidenceIDs, ",") != "ev-brain-1,ev-brain-2" {
+		t.Fatalf("canonical edge evidence = %#v", edges[0].EvidenceIDs)
+	}
+}
+
+func semanticGraphNode(pageID, objectID string, knowledgeType knowledge.KnowledgeType, entitySubType, title, core, evidenceID string) EntityGraphNode {
+	fields := []knowledge.DetailField{{Key: "definition", Value: core}, {Key: "mechanism", Value: "调用知识并执行工作"}}
+	if knowledgeType == knowledge.TypeEntity {
+		fields = []knowledge.DetailField{{Key: "product_type", Value: "AI 编程与工具调用助手"}, {Key: "core_function", Value: "读写本地文件并调用工具"}}
+	}
+	evidence := EntityGraphEvidence{VideoID: "video-1", TranscriptGeneration: "generation-1", EvidenceSentenceID: evidenceID, KnowledgeID: evidenceID}
+	detail := &EntityGraphKnowledgeDetail{
+		ID: pageID, KnowledgeObjectID: objectID, Title: title, KnowledgeType: knowledgeType,
+		PrimaryType: knowledgeType, EntitySubType: entitySubType, CoreContent: core,
+		StructureFields: fields, EvidenceIDs: []string{evidenceID},
+	}
+	return EntityGraphNode{
+		ID: "wiki:" + pageID, Name: title, Label: title, KnowledgeType: knowledgeType,
+		WikiPageID: pageID, KnowledgeObjectID: objectID, Evidence: []EntityGraphEvidence{evidence},
+		KnowledgeDetail: detail,
 	}
 }

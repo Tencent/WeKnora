@@ -13,16 +13,22 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
 	"github.com/Tencent/WeKnora/internal/custom/service/knowledgegraph"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type EntityGraphEvidence struct {
-	VideoID    string   `json:"video_id"`
-	VideoTitle string   `json:"video_title"`
-	StartMs    int      `json:"start_ms"`
-	EndMs      int      `json:"end_ms"`
-	ChunkIndex int      `json:"chunk_index"`
-	ChunkIDs   []string `json:"chunk_ids,omitempty"`
+	VideoID              string   `json:"video_id"`
+	VideoTitle           string   `json:"video_title"`
+	TranscriptGeneration string   `json:"transcript_generation"`
+	EvidenceSentenceID   string   `json:"evidence_sentence_id"`
+	KnowledgeID          string   `json:"knowledge_id"`
+	Text                 string   `json:"text,omitempty"`
+	StartMs              int      `json:"start_ms"`
+	EndMs                int      `json:"end_ms"`
+	Seconds              int      `json:"seconds"`
+	ChunkIndex           int      `json:"chunk_index"`
+	ChunkIDs             []string `json:"chunk_ids,omitempty"`
 }
 
 type EntityGraphKnowledgeDetail struct {
@@ -78,6 +84,10 @@ type EntityGraphEdge struct {
 	ID             string   `json:"id"`
 	Source         string   `json:"source"`
 	Target         string   `json:"target"`
+	SourceTitle    string   `json:"source_title,omitempty"`
+	SourceSlug     string   `json:"source_slug,omitempty"`
+	TargetTitle    string   `json:"target_title,omitempty"`
+	TargetSlug     string   `json:"target_slug,omitempty"`
 	Type           string   `json:"type"`
 	Weight         int      `json:"weight"`
 	Confidence     float64  `json:"confidence,omitempty"`
@@ -94,22 +104,65 @@ type EntityGraphReadingAssociation struct {
 	ID             string `json:"id"`
 	Source         string `json:"source"`
 	Target         string `json:"target"`
+	TargetTitle    string `json:"target_title,omitempty"`
+	TargetSlug     string `json:"target_slug,omitempty"`
 	RelationKind   string `json:"relation_kind"`
 	RelationSource string `json:"relation_source"`
 	TargetExists   bool   `json:"target_exists"`
 	Counted        bool   `json:"counted"`
 }
 
+type EntityGraphUnknownNode struct {
+	WikiPageID        string `json:"wiki_page_id"`
+	KnowledgeObjectID string `json:"knowledge_object_id,omitempty"`
+	Title             string `json:"title"`
+	RawType           string `json:"raw_type"`
+	Status            string `json:"status"`
+}
+
+type EntityGraphRejectedRecord struct {
+	WikiPageID        string `json:"wiki_page_id,omitempty"`
+	KnowledgeObjectID string `json:"knowledge_object_id,omitempty"`
+	RawType           string `json:"raw_type,omitempty"`
+	Status            string `json:"status"`
+	Reason            string `json:"reason"`
+}
+
+type EntityGraphCounts struct {
+	ScopeNodes                    int            `json:"scope_nodes"`
+	FilteredNodes                 int            `json:"filtered_nodes"`
+	CandidateNodes                int            `json:"candidate_nodes"`
+	ReturnedNodes                 int            `json:"returned_nodes"`
+	TypeCounts                    map[string]int `json:"type_counts"`
+	TypeDenominator               int            `json:"type_denominator"`
+	UnknownTypes                  int            `json:"unknown_types"`
+	UnknownTypeDenominator        int            `json:"unknown_type_denominator"`
+	FormalRelations               int            `json:"formal_relations"`
+	FormalRelationDenominator     int            `json:"formal_relation_denominator"`
+	ReadingAssociations           int            `json:"reading_associations"`
+	ReadingAssociationDenominator int            `json:"reading_association_denominator"`
+	OrphanNodes                   int            `json:"orphan_nodes"`
+	OrphanDenominator             int            `json:"orphan_denominator"`
+	RejectedRecords               int            `json:"rejected_records"`
+	RejectedDenominator           int            `json:"rejected_denominator"`
+}
+
 type entityGraphResponse struct {
+	Status              string                          `json:"status"`
 	KnowledgeBaseID     string                          `json:"knowledge_base_id"`
 	Nodes               []EntityGraphNode               `json:"nodes"`
+	UnknownNodes        []EntityGraphUnknownNode        `json:"unknown_nodes"`
+	RejectedRecords     []EntityGraphRejectedRecord     `json:"rejected_records"`
 	Edges               []EntityGraphEdge               `json:"edges"`
 	ReadingAssociations []EntityGraphReadingAssociation `json:"reading_associations"`
 	WikiPages           []EntityGraphKnowledgeDetail    `json:"wiki_pages,omitempty"`
 	Attributes          []string                        `json:"attributes"`
+	Counts              EntityGraphCounts               `json:"counts"`
 	Meta                struct {
 		Mode                    string `json:"mode"`
 		Total                   int    `json:"total"`
+		ScopeTotal              int    `json:"scope_total"`
+		FilteredTotal           int    `json:"filtered_total"`
 		Returned                int    `json:"returned"`
 		Truncated               bool   `json:"truncated"`
 		SemanticEdgeCount       int    `json:"semantic_edge_count"`
@@ -118,10 +171,11 @@ type entityGraphResponse struct {
 }
 
 type EntityGraphHandler struct {
-	db    *gorm.DB
-	graph knowledgegraph.Store
-	wiki  *weknora.WikiClient
-	kbID  string
+	db       *gorm.DB
+	graph    knowledgegraph.Store
+	wiki     *weknora.WikiClient
+	evidence *weknora.Client
+	kbID     string
 }
 
 func NewEntityGraphHandler(db *gorm.DB, graph knowledgegraph.Store, kbID string, wiki ...*weknora.WikiClient) *EntityGraphHandler {
@@ -133,8 +187,8 @@ func NewEntityGraphHandler(db *gorm.DB, graph knowledgegraph.Store, kbID string,
 }
 
 func (h *EntityGraphHandler) Get(c *gin.Context) {
-	if h.graph == nil || h.wiki == nil || strings.TrimSpace(h.kbID) == "" {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "Wiki knowledge graph is unavailable"})
+	if h.db == nil || h.graph == nil || h.wiki == nil || strings.TrimSpace(h.kbID) == "" {
+		graphFailure(c, http.StatusServiceUnavailable, graphErrorReadFailed, "Wiki knowledge graph is unavailable", "")
 		return
 	}
 	limit := 500
@@ -151,34 +205,23 @@ func (h *EntityGraphHandler) Get(c *gin.Context) {
 	}
 	types, err := parseGraphTypes(c.Query("types"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		graphFailure(c, http.StatusBadRequest, graphErrorUnknownFilter, err.Error(), "")
 		return
 	}
+	videoID := strings.TrimSpace(c.Query("video_id"))
 	source, err := h.graph.Query(c.Request.Context(), knowledgegraph.Query{
-		VideoID: strings.TrimSpace(c.Query("video_id")), Types: types, Limit: limit,
+		VideoID: videoID, Types: types, Limit: 500,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"success": false, "error": err.Error()})
+		graphFailure(c, http.StatusBadGateway, graphErrorReadFailed, err.Error(), "")
 		return
-	}
-	if source == nil || len(source.Nodes) == 0 {
-		if err := h.graph.ProjectKnowledgeBase(c.Request.Context()); err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"success": false, "error": err.Error()})
-			return
-		}
-		source, err = h.graph.Query(c.Request.Context(), knowledgegraph.Query{
-			VideoID: strings.TrimSpace(c.Query("video_id")), Types: types, Limit: limit,
-		})
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"success": false, "error": err.Error()})
-			return
-		}
 	}
 	response, err := h.buildResponse(c.Request.Context(), source, limit)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"success": false, "error": err.Error()})
+		graphFailure(c, http.StatusBadGateway, graphErrorReadFailed, err.Error(), "")
 		return
 	}
+	response.Status = h.overviewStatus(c.Request.Context(), source, response, videoID, len(types) > 0)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": response})
 }
 
@@ -190,10 +233,6 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *knowledg
 	seenVideoIDs := make(map[string]struct{})
 	for _, node := range source.Nodes {
 		addVideoID(&videoIDs, seenVideoIDs, node.SourceVideoID)
-		for _, evidenceID := range node.EvidenceIDs {
-			ref := parseTranscriptEvidenceRef(evidenceID)
-			addVideoID(&videoIDs, seenVideoIDs, ref.VideoID)
-		}
 	}
 	videoByID := make(map[string]model.Video, len(videoIDs))
 	chunkByEvidence := make(map[string]model.VideoTranscriptChunk)
@@ -206,24 +245,58 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *knowledg
 		for _, video := range videos {
 			videoByID[video.ID] = video
 		}
-		var chunks []model.VideoTranscriptChunk
-		if err := h.db.WithContext(ctx).Where("video_id IN ? AND status = ?", videoIDs, "completed").Find(&chunks).Error; err != nil {
-			return nil, fmt.Errorf("load graph evidence: %w", err)
+		videoIDsByGeneration := make(map[string][]string)
+		for _, video := range videos {
+			if generation := strings.TrimSpace(video.TranscriptGeneration); generation != "" {
+				videoIDsByGeneration[generation] = append(videoIDsByGeneration[generation], video.ID)
+			}
 		}
-		for _, chunk := range chunks {
-			key := chunk.VideoID + "\x00" + chunk.Generation + "\x00" + chunk.KnowledgeID
-			chunkByEvidence[key] = chunk
-			indexKey := chunk.VideoID + "\x00" + chunk.Generation + "\x00" + strconv.Itoa(chunk.ChunkIndex)
-			chunkByIndex[indexKey] = chunk
+		for generation, currentVideoIDs := range videoIDsByGeneration {
+			var chunks []model.VideoTranscriptChunk
+			if err := h.db.WithContext(ctx).
+				Where("video_id IN ? AND generation = ? AND status = ?", currentVideoIDs, generation, "completed").
+				Find(&chunks).Error; err != nil {
+				return nil, fmt.Errorf("load graph evidence: %w", err)
+			}
+			for _, chunk := range chunks {
+				prefix := chunk.VideoID + "\x00" + chunk.Generation + "\x00"
+				chunkByEvidence[prefix+chunk.KnowledgeID] = chunk
+				if chunk.EvidenceSentenceID != "" {
+					chunkByEvidence[prefix+chunk.EvidenceSentenceID] = chunk
+				}
+				indexKey := prefix + strconv.Itoa(chunk.ChunkIndex)
+				chunkByIndex[indexKey] = chunk
+			}
 		}
 	}
 
-	result := &entityGraphResponse{KnowledgeBaseID: h.kbID}
+	result := &entityGraphResponse{Status: graphStatusReady, KnowledgeBaseID: h.kbID}
 	result.Meta.Mode = "overview"
-	result.Meta.Total = len(source.Nodes)
+	result.Meta.ScopeTotal = source.Stats.ScopeTotal
+	if result.Meta.ScopeTotal == 0 && len(source.Nodes) > 0 {
+		result.Meta.ScopeTotal = len(source.Nodes)
+	}
+	result.Meta.FilteredTotal = source.Stats.FilteredTotal
+	if result.Meta.FilteredTotal == 0 && len(source.Nodes) > 0 {
+		result.Meta.FilteredTotal = len(source.Nodes)
+	}
+	result.Meta.Total = result.Meta.FilteredTotal
 	result.Nodes = make([]EntityGraphNode, 0)
+	result.UnknownNodes = make([]EntityGraphUnknownNode, 0)
+	result.RejectedRecords = make([]EntityGraphRejectedRecord, 0)
 	result.Edges = make([]EntityGraphEdge, 0)
+	result.ReadingAssociations = make([]EntityGraphReadingAssociation, 0)
 	result.WikiPages = make([]EntityGraphKnowledgeDetail, 0)
+	result.Counts.TypeCounts = make(map[string]int, 5)
+	for _, knowledgeType := range []knowledge.KnowledgeType{knowledge.TypeEntity, knowledge.TypeConcept, knowledge.TypeMethodology, knowledge.TypeCase, knowledge.TypeInsight} {
+		result.Counts.TypeCounts[string(knowledgeType)] = 0
+	}
+	reject := func(projected knowledgegraph.Node, rawType, status, reason string) {
+		result.RejectedRecords = append(result.RejectedRecords, EntityGraphRejectedRecord{
+			WikiPageID: projected.WikiPageID, KnowledgeObjectID: projected.KnowledgeObjectID,
+			RawType: rawType, Status: status, Reason: reason,
+		})
+	}
 	pageByID := make(map[string]weknora.WikiPage)
 	if h.wiki != nil && len(source.Nodes) > 0 {
 		pages, err := h.wiki.ListAllPages(ctx, h.kbID, "")
@@ -237,6 +310,11 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *knowledg
 	nodeByPageID := make(map[string]EntityGraphNode, len(source.Nodes))
 	for _, projected := range source.Nodes {
 		if projected.WikiPageID == "" {
+			reject(projected, string(projected.KnowledgeType), "wiki_page_id_missing", "projected node has no Wiki page ID")
+			continue
+		}
+		if _, err := uuid.Parse(projected.WikiPageID); err != nil {
+			reject(projected, string(projected.KnowledgeType), graphErrorInvalidPageID, "projected Wiki page ID is not a UUID")
 			continue
 		}
 		page, ok := pageByID[projected.WikiPageID]
@@ -254,66 +332,81 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *knowledg
 				return nil, fmt.Errorf("read Wiki page %s: %w", projected.WikiPageID, err)
 			}
 			if loaded == nil {
+				reject(projected, string(projected.KnowledgeType), graphErrorPageMissing, "Wiki page does not exist")
 				continue
 			}
 			page = *loaded
 		}
 		if strings.TrimSpace(page.Content) == "" {
+			reject(projected, string(projected.KnowledgeType), graphErrorPageInvalid, "Wiki page content is empty")
 			continue
 		}
-		if page.ID == "" {
-			page.ID = projected.WikiPageID
+		if page.ID == "" || page.ID != projected.WikiPageID {
+			reject(projected, string(projected.KnowledgeType), graphErrorPageInvalid, "Wiki page identity does not match the projected page ID")
+			continue
 		}
 		if pageByID[projected.WikiPageID].ID == "" || strings.TrimSpace(pageByID[projected.WikiPageID].Content) == "" {
 			pageByID[projected.WikiPageID] = page
 		}
 		detail := graphKnowledgeDetail(page)
-		if detail == nil || detail.KnowledgeType != projected.KnowledgeType {
+		if detail == nil {
+			rawType := rawGraphKnowledgeType(page.ParsedFrontmatter(), page.PageType)
+			result.UnknownNodes = append(result.UnknownNodes, EntityGraphUnknownNode{
+				WikiPageID: page.ID, KnowledgeObjectID: firstNonEmpty(frontmatterString(page.ParsedFrontmatter(), "knowledge_object_id"), projected.KnowledgeObjectID),
+				Title: firstNonEmpty(page.Title, firstMarkdownHeading(page.Content), page.Slug), RawType: rawType, Status: graphErrorUnknownType,
+			})
 			continue
 		}
-		if detail.KnowledgeObjectID == "" {
-			detail.KnowledgeObjectID = projected.KnowledgeObjectID
+		if detail.KnowledgeType != projected.KnowledgeType {
+			reject(projected, rawGraphKnowledgeType(page.ParsedFrontmatter(), page.PageType), "knowledge_type_mismatch", "Wiki page type does not match the projected node")
+			continue
 		}
-		if detail.TranscriptGeneration == "" {
-			detail.TranscriptGeneration = projected.TranscriptGeneration
+		frontmatter := page.ParsedFrontmatter()
+		pageVideoID := frontmatterString(frontmatter, "source_video_id")
+		if detail.KnowledgeObjectID == "" || detail.TranscriptGeneration == "" || pageVideoID == "" || strings.TrimSpace(detail.CoreContent) == "" {
+			reject(projected, string(detail.KnowledgeType), graphErrorPageInvalid, "Wiki page identity, source, generation, or core content is incomplete")
+			continue
 		}
-		if detail.AuditStatus == "" {
-			detail.AuditStatus = projected.AuditStatus
-		}
-		if detail.KnowledgeObjectID != projected.KnowledgeObjectID ||
+		if detail.KnowledgeObjectID != projected.KnowledgeObjectID || pageVideoID != projected.SourceVideoID ||
 			detail.TranscriptGeneration != projected.TranscriptGeneration ||
 			strings.ToLower(detail.AuditStatus) != strings.ToLower(projected.AuditStatus) {
+			reject(projected, string(detail.KnowledgeType), "projection_identity_mismatch", "Wiki page identity does not match the projected node")
+			continue
+		}
+		video, videoExists := videoByID[pageVideoID]
+		if !videoExists {
+			reject(projected, string(detail.KnowledgeType), graphErrorSourceMissing, "source video does not exist")
+			continue
+		}
+		if strings.TrimSpace(video.TranscriptGeneration) == "" || detail.TranscriptGeneration != video.TranscriptGeneration {
+			reject(projected, string(detail.KnowledgeType), graphErrorGenerationMismatch, "Wiki page does not belong to the current transcript generation")
 			continue
 		}
 		if !displayableGraphDetail(detail) {
+			reject(projected, string(detail.KnowledgeType), "content_quality_rejected", "Wiki page does not satisfy graph display quality")
 			continue
 		}
 		detail.VideoID = projected.SourceVideoID
-		if video, ok := videoByID[projected.SourceVideoID]; ok {
-			detail.VideoTitle = video.Title
-			detail.SourceVideoTitle = video.Title
-		}
+		detail.VideoTitle = video.Title
+		detail.SourceVideoTitle = video.Title
 		if timestamp, seconds := wikiAnchorTimeline(detail.TimeRange); timestamp != "" {
 			detail.Timestamp = timestamp
 			detail.Seconds = seconds
 		}
-		if detail.CoreContent == "" {
-			detail.CoreContent = projected.Summary
-		}
 		if len(detail.EvidenceIDs) == 0 {
-			detail.EvidenceIDs = append([]string(nil), projected.EvidenceIDs...)
+			reject(projected, string(detail.KnowledgeType), graphErrorEvidenceInvalid, "Wiki page has no evidence IDs")
+			continue
 		}
-		if detail.ClassificationConfidence == 0 {
-			detail.ClassificationConfidence = projected.ClassificationConfidence
-		}
-		enrichStructuredRelationTargets(detail.Relations, pageByID)
+		// Raw frontmatter relations are not exposed until their projected edge,
+		// endpoints, and evidence have all passed the read contract below.
+		detail.Relations = nil
 		title := detail.Title
 		if title == "" {
 			title = projected.Title
 		}
 
 		item := EntityGraphNode{
-			ID: projected.ID, Name: title, Label: title,
+			ID: "wiki:" + projected.WikiPageID, Name: title, Label: title,
 			Type:          knowledgeTypeLabel(projected.KnowledgeType),
 			KnowledgeType: projected.KnowledgeType, Attributes: []string{knowledgeTypeLabel(projected.KnowledgeType)},
 			KnowledgeID: firstEvidenceID(detail.EvidenceIDs), WikiPageID: projected.WikiPageID,
@@ -323,6 +416,7 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *knowledg
 		if video, ok := videoByID[projected.SourceVideoID]; ok {
 			item.VideoID, item.VideoTitle, item.VideoType = video.ID, video.Title, video.VideoType
 		}
+		evidenceValid := true
 		for _, evidenceID := range detail.EvidenceIDs {
 			chunk, ok := resolveEvidenceChunk(
 				chunkByEvidence,
@@ -332,7 +426,8 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *knowledg
 				evidenceID,
 			)
 			if !ok {
-				continue
+				evidenceValid = false
+				break
 			}
 			if item.VideoID == "" {
 				item.VideoID = chunk.VideoID
@@ -346,9 +441,15 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *knowledg
 			}
 			item.Evidence = append(item.Evidence, EntityGraphEvidence{
 				VideoID: chunk.VideoID, VideoTitle: videoByID[chunk.VideoID].Title,
-				StartMs: chunk.StartMs, EndMs: chunk.EndMs, ChunkIndex: chunk.ChunkIndex,
+				TranscriptGeneration: chunk.Generation, EvidenceSentenceID: chunk.EvidenceSentenceID,
+				KnowledgeID: chunk.KnowledgeID,
+				StartMs:     chunk.StartMs, EndMs: chunk.EndMs, Seconds: chunk.StartMs / 1000, ChunkIndex: chunk.ChunkIndex,
 				ChunkIDs: []string{chunk.KnowledgeID},
 			})
+		}
+		if !evidenceValid {
+			reject(projected, string(detail.KnowledgeType), graphErrorEvidenceInvalid, "Wiki page evidence is missing from the current transcript generation")
+			continue
 		}
 		if len(item.Evidence) > 0 {
 			item.Seconds = item.Evidence[0].StartMs / 1000
@@ -366,42 +467,75 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *knowledg
 	for _, node := range nodeByPageID {
 		nodes = append(nodes, node)
 	}
+	rawNodeByPageID := nodeByPageID
+	nodes, canonicalByPageID := aggregateSemanticGraphNodes(nodes)
+	nodeByPageID = make(map[string]EntityGraphNode, len(nodes))
+	for _, node := range nodes {
+		nodeByPageID[node.WikiPageID] = node
+		result.Counts.TypeCounts[string(node.KnowledgeType)]++
+	}
 	sort.Slice(nodes, func(i, j int) bool {
 		if nodes[i].Label == nodes[j].Label {
 			return nodes[i].WikiPageID < nodes[j].WikiPageID
 		}
 		return nodes[i].Label < nodes[j].Label
 	})
+	eligibleNodeCount := len(nodes)
 	if len(nodes) > limit {
 		nodes = nodes[:limit]
 		result.Meta.Truncated = true
 	}
+	if result.Meta.FilteredTotal > len(source.Nodes) {
+		result.Meta.Truncated = true
+	}
 	result.Nodes = nodes
 	result.Meta.Returned = len(nodes)
-	result.ReadingAssociations = make([]EntityGraphReadingAssociation, 0)
 	visible := make(map[string]struct{}, len(nodes))
 	for index := range result.Nodes {
 		visible[result.Nodes[index].WikiPageID] = struct{}{}
 	}
 	// Formal link_count deliberately excludes Wiki navigation links. This keeps
 	// orphan detection meaningful even when a page has only historical links.
+	formalCandidates := make([]EntityGraphEdge, 0, len(source.Edges))
 	for _, edge := range source.Edges {
-		if weakWikiLinkEdge(edge) {
+		if weakWikiLinkEdge(edge) || !knowledgegraph.IsFormalRelationType(edge.RelationType) {
 			continue
 		}
-		if _, sourceOK := visible[edge.SourceWikiPageID]; !sourceOK {
+		sourceCanonicalID, sourceMapped := canonicalByPageID[edge.SourceWikiPageID]
+		targetCanonicalID, targetMapped := canonicalByPageID[edge.TargetWikiPageID]
+		if !sourceMapped || !targetMapped {
 			continue
 		}
-		if _, targetOK := visible[edge.TargetWikiPageID]; !targetOK {
+		if _, sourceOK := visible[sourceCanonicalID]; !sourceOK {
 			continue
 		}
-		result.Edges = append(result.Edges, EntityGraphEdge{
+		if _, targetOK := visible[targetCanonicalID]; !targetOK {
+			continue
+		}
+		candidate := EntityGraphEdge{
 			ID: edge.ID, Source: "wiki:" + edge.SourceWikiPageID, Target: "wiki:" + edge.TargetWikiPageID,
 			Type: edge.RelationType, Weight: 1, Confidence: edge.Confidence, EvidenceIDs: edge.EvidenceIDs,
 			RelationKind: "semantic", RelationSource: "skill", Counted: true,
-		})
+		}
+		formalCandidates = append(formalCandidates, candidate)
+		sourceNode := rawNodeByPageID[edge.SourceWikiPageID]
+		if sourceNode.KnowledgeDetail == nil || !graphEdgeEvidenceCurrent(edge.EvidenceIDs, sourceNode, chunkByEvidence, chunkByIndex) {
+			continue
+		}
+		result.Edges = append(result.Edges, candidate)
 	}
+	result.Edges = canonicalizeSemanticGraphEdges(result.Edges, canonicalByPageID)
+	formalCandidates = canonicalizeSemanticGraphEdges(formalCandidates, canonicalByPageID)
 	result.Meta.SemanticEdgeCount = len(result.Edges)
+	for index := range result.Nodes {
+		if result.Nodes[index].KnowledgeDetail != nil {
+			result.Nodes[index].KnowledgeDetail.Relations = structuredRelationsFromFormalEdges(
+				result.Nodes[index].WikiPageID,
+				result.Edges,
+				nodeByPageID,
+			)
+		}
+	}
 	for index := range result.Nodes {
 		for _, edge := range result.Edges {
 			if edge.Source == result.Nodes[index].ID || edge.Target == result.Nodes[index].ID {
@@ -418,8 +552,201 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *knowledg
 			result.WikiPages = append(result.WikiPages, *node.KnowledgeDetail)
 		}
 	}
-	result.Attributes = []string{"实体", "概念", "案例", "方法论", "洞察"}
+	result.Attributes = []string{"实体", "概念", "方法论", "案例", "洞察"}
+	result.Counts.ScopeNodes = result.Meta.ScopeTotal
+	result.Counts.FilteredNodes = result.Meta.FilteredTotal
+	result.Counts.CandidateNodes = len(source.Nodes)
+	result.Counts.ReturnedNodes = len(result.Nodes)
+	result.Counts.TypeDenominator = eligibleNodeCount + len(result.UnknownNodes)
+	result.Counts.UnknownTypes = len(result.UnknownNodes)
+	result.Counts.UnknownTypeDenominator = result.Counts.TypeDenominator
+	result.Counts.FormalRelations = len(result.Edges)
+	result.Counts.FormalRelationDenominator = len(formalCandidates)
+	result.Counts.ReadingAssociations = len(result.ReadingAssociations)
+	result.Counts.ReadingAssociationDenominator = len(result.Nodes)
+	result.Counts.OrphanDenominator = len(result.Nodes)
+	for _, node := range result.Nodes {
+		if node.IsOrphan {
+			result.Counts.OrphanNodes++
+		}
+	}
+	result.Counts.RejectedRecords = len(result.RejectedRecords)
+	result.Counts.RejectedDenominator = len(source.Nodes)
+	if len(result.RejectedRecords) > 0 || len(result.UnknownNodes) > 0 ||
+		(!result.Meta.Truncated && result.Counts.FormalRelations != result.Counts.FormalRelationDenominator) {
+		result.Status = graphStatusPartial
+	}
 	return result, nil
+}
+
+func aggregateSemanticGraphNodes(nodes []EntityGraphNode) ([]EntityGraphNode, map[string]string) {
+	sorted := append([]EntityGraphNode(nil), nodes...)
+	sort.Slice(sorted, func(i, j int) bool {
+		left, right := graphIdentityCandidate(sorted[i]), graphIdentityCandidate(sorted[j])
+		if knowledge.CanonicalIdentityLess(left, right) {
+			return true
+		}
+		if knowledge.CanonicalIdentityLess(right, left) {
+			return false
+		}
+		return sorted[i].WikiPageID < sorted[j].WikiPageID
+	})
+	candidates := make([]knowledge.IdentityCandidate, len(sorted))
+	for index := range sorted {
+		candidates[index] = graphIdentityCandidate(sorted[index])
+	}
+	groups := knowledge.GroupSemanticIdentities(candidates)
+	result := make([]EntityGraphNode, 0, len(groups))
+	canonicalByPageID := make(map[string]string, len(nodes))
+	for _, group := range groups {
+		canonical := sorted[group[0]]
+		canonical.LinkCount = 0
+		canonical.IsOrphan = false
+		for _, index := range group {
+			occurrence := sorted[index]
+			canonicalByPageID[occurrence.WikiPageID] = canonical.WikiPageID
+			if index == group[0] {
+				continue
+			}
+			canonical.Evidence = mergeGraphEvidence(canonical.Evidence, occurrence.Evidence)
+			if canonical.KnowledgeDetail != nil && occurrence.KnowledgeDetail != nil {
+				canonical.KnowledgeDetail.EvidenceIDs = mergeUniqueStrings(
+					canonical.KnowledgeDetail.EvidenceIDs,
+					occurrence.KnowledgeDetail.EvidenceIDs,
+				)
+			}
+		}
+		if len(canonical.Evidence) > 0 {
+			canonical.Seconds = canonical.Evidence[0].Seconds
+		}
+		result = append(result, canonical)
+	}
+	return result, canonicalByPageID
+}
+
+func graphIdentityCandidate(node EntityGraphNode) knowledge.IdentityCandidate {
+	candidate := knowledge.IdentityCandidate{
+		KnowledgeObjectID: node.KnowledgeObjectID,
+		KnowledgeType:     node.KnowledgeType,
+		Title:             firstNonEmpty(node.Name, node.Label),
+	}
+	if node.KnowledgeDetail == nil {
+		return candidate
+	}
+	candidate.EntitySubType = node.KnowledgeDetail.EntitySubType
+	candidate.CoreContent = node.KnowledgeDetail.CoreContent
+	candidate.SourceVideoID = node.KnowledgeDetail.VideoID
+	candidate.TranscriptGeneration = node.KnowledgeDetail.TranscriptGeneration
+	candidate.EvidenceIDs = append([]string(nil), node.KnowledgeDetail.EvidenceIDs...)
+	candidate.StructureFields = make(map[string]string, len(node.KnowledgeDetail.StructureFields))
+	for _, field := range node.KnowledgeDetail.StructureFields {
+		candidate.StructureFields[field.Key] = field.Value
+	}
+	return candidate
+}
+
+func mergeGraphEvidence(left, right []EntityGraphEvidence) []EntityGraphEvidence {
+	result := append([]EntityGraphEvidence(nil), left...)
+	seen := make(map[string]struct{}, len(left)+len(right))
+	key := func(item EntityGraphEvidence) string {
+		return strings.Join([]string{item.VideoID, item.TranscriptGeneration, item.EvidenceSentenceID, item.KnowledgeID}, "\x00")
+	}
+	for _, item := range result {
+		seen[key(item)] = struct{}{}
+	}
+	for _, item := range right {
+		if _, exists := seen[key(item)]; exists {
+			continue
+		}
+		seen[key(item)] = struct{}{}
+		result = append(result, item)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		leftKey, rightKey := key(result[i]), key(result[j])
+		if leftKey == rightKey {
+			return result[i].StartMs < result[j].StartMs
+		}
+		return leftKey < rightKey
+	})
+	return result
+}
+
+func canonicalizeSemanticGraphEdges(edges []EntityGraphEdge, canonicalByPageID map[string]string) []EntityGraphEdge {
+	byKey := make(map[string]EntityGraphEdge, len(edges))
+	for _, edge := range edges {
+		sourcePageID := strings.TrimPrefix(edge.Source, "wiki:")
+		targetPageID := strings.TrimPrefix(edge.Target, "wiki:")
+		if canonical := canonicalByPageID[sourcePageID]; canonical != "" {
+			sourcePageID = canonical
+		}
+		if canonical := canonicalByPageID[targetPageID]; canonical != "" {
+			targetPageID = canonical
+		}
+		if sourcePageID == targetPageID {
+			continue
+		}
+		edge.Source = "wiki:" + sourcePageID
+		edge.Target = "wiki:" + targetPageID
+		key := strings.Join([]string{edge.Source, edge.Target, edge.Type}, "\x00")
+		if existing, ok := byKey[key]; ok {
+			existing.EvidenceIDs = mergeUniqueStrings(existing.EvidenceIDs, edge.EvidenceIDs)
+			if edge.Confidence > existing.Confidence {
+				existing.Confidence = edge.Confidence
+			}
+			if existing.ID == "" || (edge.ID != "" && edge.ID < existing.ID) {
+				existing.ID = edge.ID
+			}
+			if edge.Weight > existing.Weight {
+				existing.Weight = edge.Weight
+			}
+			byKey[key] = existing
+			continue
+		}
+		edge.EvidenceIDs = mergeUniqueStrings(nil, edge.EvidenceIDs)
+		byKey[key] = edge
+	}
+	result := make([]EntityGraphEdge, 0, len(byKey))
+	for _, edge := range byKey {
+		result = append(result, edge)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		left := strings.Join([]string{result[i].Source, result[i].Target, result[i].Type, result[i].ID}, "\x00")
+		right := strings.Join([]string{result[j].Source, result[j].Target, result[j].Type, result[j].ID}, "\x00")
+		return left < right
+	})
+	return result
+}
+
+func mergeUniqueStrings(left, right []string) []string {
+	seen := make(map[string]struct{}, len(left)+len(right))
+	result := make([]string, 0, len(left)+len(right))
+	for _, values := range [][]string{left, right} {
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			if _, exists := seen[value]; exists {
+				continue
+			}
+			seen[value] = struct{}{}
+			result = append(result, value)
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
+func graphEdgeEvidenceCurrent(edgeEvidence []string, source EntityGraphNode, byEvidence map[string]model.VideoTranscriptChunk, byIndex map[string]model.VideoTranscriptChunk) bool {
+	if len(edgeEvidence) == 0 || source.KnowledgeDetail == nil {
+		return false
+	}
+	for _, evidenceID := range edgeEvidence {
+		if _, ok := resolveEvidenceChunk(byEvidence, byIndex, source.VideoID, source.KnowledgeDetail.TranscriptGeneration, evidenceID); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func formatGraphTimestamp(seconds int) string {
@@ -577,37 +904,10 @@ func addVideoID(videoIDs *[]string, seen map[string]struct{}, videoID string) {
 	*videoIDs = append(*videoIDs, videoID)
 }
 
-type transcriptEvidenceRef struct {
-	VideoID     string
-	Generation  string
-	KnowledgeID string
-	ChunkIndex  int
-	HasIndex    bool
-}
+type transcriptEvidenceRef = knowledgegraph.TranscriptEvidenceRef
 
 func parseTranscriptEvidenceRef(value string) transcriptEvidenceRef {
-	value = strings.TrimSpace(value)
-	ref := transcriptEvidenceRef{KnowledgeID: value}
-	if pipe := strings.Index(value, "|"); pipe >= 0 {
-		ref.KnowledgeID = strings.TrimSpace(value[:pipe])
-		value = strings.TrimSpace(value[pipe+1:])
-	}
-	parts := strings.Split(value, "/")
-	for index, part := range parts {
-		if part != "transcript" || index+3 >= len(parts) {
-			continue
-		}
-		ref.VideoID = strings.TrimSpace(parts[index+1])
-		ref.Generation = strings.TrimSpace(parts[index+2])
-		if chunkIndex, err := strconv.Atoi(strings.TrimLeft(strings.TrimSpace(parts[index+3]), "0")); err == nil {
-			ref.ChunkIndex = chunkIndex
-			ref.HasIndex = true
-		} else if strings.TrimSpace(parts[index+3]) == "0" || strings.TrimSpace(parts[index+3]) == "000000" {
-			ref.HasIndex = true
-		}
-		return ref
-	}
-	return ref
+	return knowledgegraph.ParseTranscriptEvidenceRef(value)
 }
 
 func resolveEvidenceChunk(
@@ -617,21 +917,34 @@ func resolveEvidenceChunk(
 	generation string,
 	evidenceID string,
 ) (model.VideoTranscriptChunk, bool) {
-	if chunk, ok := byEvidence[sourceVideoID+"\x00"+generation+"\x00"+evidenceID]; ok {
-		return chunk, true
-	}
-	ref := parseTranscriptEvidenceRef(evidenceID)
-	if ref.VideoID != "" && ref.Generation != "" {
-		if chunk, ok := byEvidence[ref.VideoID+"\x00"+ref.Generation+"\x00"+ref.KnowledgeID]; ok {
-			return chunk, true
+	return knowledgegraph.ResolveEvidenceChunk(byEvidence, byIndex, sourceVideoID, generation, evidenceID)
+}
+
+func structuredRelationsFromFormalEdges(pageID string, edges []EntityGraphEdge, nodes map[string]EntityGraphNode) []knowledge.StructuredRelation {
+	result := make([]knowledge.StructuredRelation, 0)
+	for _, edge := range edges {
+		if edge.Source != "wiki:"+pageID {
+			continue
 		}
-		if ref.HasIndex {
-			if chunk, ok := byIndex[ref.VideoID+"\x00"+ref.Generation+"\x00"+strconv.Itoa(ref.ChunkIndex)]; ok {
-				return chunk, true
-			}
+		targetPageID := strings.TrimPrefix(edge.Target, "wiki:")
+		target, ok := nodes[targetPageID]
+		if !ok {
+			continue
 		}
+		relation := knowledge.StructuredRelation{
+			RelationID: edge.ID, RelationType: edge.Type,
+			TargetObjectID: target.KnowledgeObjectID, TargetWikiPageID: targetPageID,
+			EvidenceIDs: append([]string(nil), edge.EvidenceIDs...), Confidence: edge.Confidence,
+		}
+		if target.KnowledgeDetail != nil {
+			relation.TargetTitle = target.KnowledgeDetail.Title
+			relation.TargetSlug = target.KnowledgeDetail.Slug
+		} else {
+			relation.TargetTitle = target.Label
+		}
+		result = append(result, relation)
 	}
-	return model.VideoTranscriptChunk{}, false
+	return result
 }
 
 func mergeStructuredFrontmatter(parsed *wikiKnowledgeDetailData, frontmatter map[string]any, knowledgeType knowledge.KnowledgeType, entitySubType string) {
@@ -756,6 +1069,8 @@ func buildReadingAssociations(nodes []EntityGraphNode, pages map[string]weknora.
 		result = append(result, EntityGraphReadingAssociation{
 			ID:     "wiki-link:" + sourceID + ":" + targetID,
 			Source: "wiki:" + sourceID, Target: "wiki:" + targetID,
+			TargetTitle:  firstNonEmpty(target.Title, firstMarkdownHeading(target.Content), target.Slug),
+			TargetSlug:   target.Slug,
 			RelationKind: "reading", RelationSource: "wiki_link",
 			TargetExists: exists, Counted: false,
 		})

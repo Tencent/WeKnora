@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/config"
@@ -430,6 +431,39 @@ func TestRelatedKnowledgeNotGeneratedReturnsStructuredStageStatus(t *testing.T) 
 	}
 }
 
+func TestRelatedKnowledgeReturnsCurrentGraphContractFailure(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusCompleted, TranscriptGeneration: "generation-1",
+	}
+	require.NoError(t, db.Create(&video).Error)
+	job := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "graph", TranscriptGeneration: video.TranscriptGeneration,
+		Status: "failed", ErrorCategory: "wiki_artifact", ErrorCode: "content_contract_failed",
+		ErrorMessage: "P3 knowledge object validation failed: evidence is missing from the current transcript generation",
+	}
+	require.NoError(t, db.Create(&job).Error)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/related-knowledge", nil)
+	NewContentHandler(db, weknora.NewWikiClient(config.WeKnoraConfig{}), "kb-1").RelatedKnowledge(context)
+
+	require.Equal(t, http.StatusConflict, recorder.Code, recorder.Body.String())
+	var payload struct {
+		Status       string `json:"status"`
+		Stage        string `json:"stage"`
+		ErrorCode    string `json:"error_code"`
+		ErrorMessage string `json:"error_message"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.Equal(t, "failed", payload.Status)
+	require.Equal(t, "graph", payload.Stage)
+	require.Equal(t, job.ErrorCode, payload.ErrorCode)
+	require.Equal(t, job.ErrorMessage, payload.ErrorMessage)
+}
+
 func TestRelatedKnowledgeReturnsAnchorTimelineFromWikiContent(t *testing.T) {
 	db := openTestVideoDB(t)
 	video := model.Video{
@@ -492,6 +526,59 @@ func TestRelatedKnowledgeReturnsAnchorTimelineFromWikiContent(t *testing.T) {
 	if len(payload.Anchors["case"]) != 1 || payload.Anchors["case"][0].Timestamp != "00:02:03" || payload.Anchors["case"][0].Seconds != 123 {
 		t.Fatalf("case anchors = %#v", payload.Anchors["case"])
 	}
+}
+
+func TestRelatedKnowledgeReturnsAnchorTimelineFromCurrentEvidence(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusCompleted,
+		TranscriptGeneration: "generation-1", KnowledgeBaseWikiPageID: "knowledge-base-1",
+	}
+	require.NoError(t, db.Create(&video).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptChunk{
+		VideoID: video.ID, Generation: video.TranscriptGeneration, Revision: 1, ChunkIndex: 3,
+		EvidenceSentenceID: "evs:v1:anchor", StartMs: 62300, EndMs: 70100,
+		KnowledgeID: "chunk-anchor", ContentHash: "hash", Status: "completed",
+	}).Error)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if strings.HasSuffix(request.URL.Path, "/knowledge-base/video-1") {
+			_ = json.NewEncoder(writer).Encode(weknora.WikiPage{
+				ID: "knowledge-base-1", Slug: "knowledge-base/video-1", PageType: "index",
+				Content: "---\ntype: knowledge_base\nsource_video_id: " + video.ID + "\n---\n知识底座",
+			})
+			return
+		}
+		if request.URL.Path != "/api/v1/knowledgebase/kb-1/wiki/pages" {
+			http.NotFound(writer, request)
+			return
+		}
+		_ = json.NewEncoder(writer).Encode(weknora.ListPagesResp{Pages: []weknora.WikiPage{
+			{ID: "knowledge-base-1", Title: "知识底座", Slug: "knowledge-base/video-1", PageType: "index"},
+			{ID: "concept-1", Title: "证据概念", Slug: "concept/evidence", PageType: "concept",
+				Content: "---\nknowledge_object_id: object-concept-1\ntype: concept\nprimary_type: concept\nsource_video_id: " + video.ID + "\ntranscript_generation: generation-1\naudit_status: passed\nclassification_confidence: 0.9\nevidence_ids: [evs:v1:anchor]\n---\n# 证据概念\n\n核心内容：只包含证据引用，不重复写时间。"},
+		}, TotalPages: 1})
+	}))
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/related-knowledge", nil)
+	wiki := weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL})
+
+	NewContentHandler(db, wiki, "kb-1").RelatedKnowledge(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var payload struct {
+		Anchors map[string][]struct {
+			Timestamp string `json:"timestamp"`
+			Seconds   int    `json:"seconds"`
+		} `json:"anchors"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.Len(t, payload.Anchors["concept"], 1)
+	require.Equal(t, "01:02", payload.Anchors["concept"][0].Timestamp)
+	require.Equal(t, 62, payload.Anchors["concept"][0].Seconds)
 }
 
 func TestRelatedKnowledgeReturnsTypeFrameworkDetails(t *testing.T) {

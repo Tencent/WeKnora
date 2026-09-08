@@ -4,11 +4,12 @@
 # ===== 阶段 1: 编译 =====
 FROM golang:1.27-alpine AS builder
 WORKDIR /src
+RUN apk add --no-cache build-base
 
 # 国内镜像
 ENV GOPROXY=https://goproxy.cn,direct \
     GOSUMDB=sum.golang.google.cn \
-    CGO_ENABLED=0 \
+    CGO_ENABLED=1 \
     GOOS=linux
 
 COPY go.mod go.sum ./
@@ -22,13 +23,26 @@ RUN go mod edit \
  && go mod download
 
 COPY cmd/custom-backend ./cmd/custom-backend
+COPY cmd/vw-p5-reconcile ./cmd/vw-p5-reconcile
 COPY internal/custom ./internal/custom
+COPY internal/contentprovenance ./internal/contentprovenance
 COPY internal/wikiaudit ./internal/wikiaudit
+# The semantic identity adapter reuses WeKnora's chat model contracts and
+# their supporting internal packages. Keep the dependency closure in the
+# isolated build context so custom-backend remains independently buildable.
+COPY internal/errors ./internal/errors
+COPY internal/logger ./internal/logger
+COPY internal/models ./internal/models
+COPY internal/storageallowlist ./internal/storageallowlist
+COPY internal/tracing ./internal/tracing
+COPY internal/types ./internal/types
+COPY internal/utils ./internal/utils
 # P3 knowledge rules are read at runtime by the custom backend. Keep the
 # bundled skill copy in the image for deployments without the source checkout.
 COPY skills/preloaded ./skills/preloaded
 
-RUN go build -ldflags="-s -w" -o /out/custom-backend ./cmd/custom-backend
+RUN go build -ldflags="-s -w" -o /out/custom-backend ./cmd/custom-backend \
+ && go build -ldflags="-s -w" -o /out/vw-p5-reconcile ./cmd/vw-p5-reconcile
 
 # ===== 阶段 2: 运行 =====
 # 选 3.19 而非 3.20：3.20 的 apk 对 libpulse/libflac 等音频包默认 --no-network，
@@ -38,12 +52,15 @@ RUN apk add --no-cache ca-certificates ffmpeg tini tzdata wget \
     && addgroup -S app && adduser -S app -G app
 WORKDIR /app
 COPY --from=builder /out/custom-backend /app/custom-backend
+COPY --from=builder /out/vw-p5-reconcile /app/vw-p5-reconcile
 COPY --from=builder /src/skills/preloaded /app/skills/preloaded
+COPY --from=builder /go/pkg/mod/github.com/yanyiwu/gojieba@v1.4.7/deps/cppjieba/dict /app/jieba-dict
 USER app
 
 ENV CUSTOM_SERVER_HOST=0.0.0.0 \
     CUSTOM_SERVER_PORT=8090 \
-    CUSTOM_LOG_LEVEL=info
+    CUSTOM_LOG_LEVEL=info \
+    JIEBA_DICT_DIR=/app/jieba-dict
 
 EXPOSE 8090
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

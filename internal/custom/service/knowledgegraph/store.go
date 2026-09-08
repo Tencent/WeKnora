@@ -22,7 +22,7 @@ import (
 
 const defaultNamespace = "VIDSAGE_KNOWLEDGE"
 
-const relationConfidenceThreshold = 0.70
+const FormalRelationConfidenceThreshold = 0.70
 const knowledgePageTypes = "entity,concept,index"
 
 var allowedRelationTypes = map[string]struct{}{
@@ -31,6 +31,109 @@ var allowedRelationTypes = map[string]struct{}{
 	"explains":    {},
 	"example_of":  {},
 	"part_of":     {},
+	"applies_to":  {},
+	"supports":    {},
+	"involves":    {},
+}
+
+// RelationMatrix is the frozen five-type semantic relationship contract.
+// The map is intentionally kept in this package so projection and read-time
+// validation cannot drift into separate, weaker rules.
+var RelationMatrix = map[knowledge.KnowledgeType]map[knowledge.KnowledgeType]map[string]struct{}{
+	knowledge.TypeEntity: {
+		knowledge.TypeEntity: {"part_of": {}},
+	},
+	knowledge.TypeConcept: {
+		knowledge.TypeEntity:      {"applies_to": {}},
+		knowledge.TypeConcept:     {"complements": {}, "contradicts": {}, "part_of": {}, "explains": {}},
+		knowledge.TypeMethodology: {"explains": {}, "part_of": {}},
+		knowledge.TypeCase:        {"applies_to": {}},
+		knowledge.TypeInsight:     {"explains": {}, "supports": {}},
+	},
+	knowledge.TypeMethodology: {
+		knowledge.TypeEntity:      {"applies_to": {}, "involves": {}},
+		knowledge.TypeConcept:     {"explains": {}, "applies_to": {}},
+		knowledge.TypeMethodology: {"complements": {}, "part_of": {}},
+		knowledge.TypeCase:        {"applies_to": {}},
+		knowledge.TypeInsight:     {"supports": {}},
+	},
+	knowledge.TypeCase: {
+		knowledge.TypeEntity:      {"involves": {}},
+		knowledge.TypeConcept:     {"example_of": {}},
+		knowledge.TypeMethodology: {"example_of": {}},
+		knowledge.TypeCase:        {"complements": {}, "contradicts": {}, "part_of": {}},
+		knowledge.TypeInsight:     {"supports": {}},
+	},
+	knowledge.TypeInsight: {
+		knowledge.TypeEntity:  {"involves": {}},
+		knowledge.TypeConcept: {"explains": {}, "contradicts": {}},
+		knowledge.TypeInsight: {"complements": {}, "contradicts": {}, "supports": {}},
+	},
+}
+
+// IsRelationAllowedForTypes applies the relationship matrix to one directed
+// source/target pair. Unknown types and relation names fail closed.
+func IsRelationAllowedForTypes(relationType string, source, target knowledge.KnowledgeType) bool {
+	relationType = strings.ToLower(strings.TrimSpace(relationType))
+	byTarget, ok := RelationMatrix[source]
+	if !ok {
+		return false
+	}
+	_, ok = byTarget[target][relationType]
+	return ok
+}
+
+// IsFormalRelationType reports whether a relationship is part of the audited
+// product graph contract. Wiki reading links are represented separately.
+func IsFormalRelationType(value string) bool {
+	_, ok := allowedRelationTypes[strings.TrimSpace(value)]
+	return ok
+}
+
+// ValidateFormalRelationCompletion verifies the batch-level completion gate.
+// Individual objects may be valid or legitimately orphaned, but a multi-object
+// extraction cannot finish while every structured relation is absent or fails
+// the formal relation contract.
+func ValidateFormalRelationCompletion(videoID, generation string, pages []weknora.WikiPage) (int, int, error) {
+	video := &model.Video{ID: strings.TrimSpace(videoID), TranscriptGeneration: strings.TrimSpace(generation)}
+	nodes, edges, _, identityAudits, err := buildProjectionWithAudit(video, pages)
+	if err != nil {
+		return 0, 0, fmt.Errorf("validate formal relation completion: %w", err)
+	}
+	if err := validateSemanticIdentityAudits(identityAudits); err != nil {
+		return len(nodes), len(edges), err
+	}
+	if len(nodes) > 1 && len(edges) == 0 {
+		return len(nodes), 0, fmt.Errorf("formal relation completion failed: %d knowledge objects have no accepted formal relation", len(nodes))
+	}
+	return len(nodes), len(edges), nil
+}
+
+// ValidateSemanticIdentityCompletion rejects a batch that still contains
+// reusable or type-conflicting semantic identities. It is intentionally a
+// completion gate: ambiguous pages remain recoverable in Wiki, but cannot be
+// published as separate trusted graph objects.
+func ValidateSemanticIdentityCompletion(videoID, generation string, pages []weknora.WikiPage) error {
+	video := &model.Video{ID: strings.TrimSpace(videoID), TranscriptGeneration: strings.TrimSpace(generation)}
+	_, _, _, audits, err := buildProjectionWithAudit(video, pages)
+	if err != nil {
+		return fmt.Errorf("validate semantic identity completion: %w", err)
+	}
+	return validateSemanticIdentityAudits(audits)
+}
+
+func validateSemanticIdentityAudits(audits []IdentityAudit) error {
+	for _, audit := range audits {
+		if audit.Decision != string(knowledge.IdentityReuse) && audit.Decision != string(knowledge.IdentityConflict) {
+			continue
+		}
+		return fmt.Errorf(
+			"semantic identity %s: Wiki pages %s and %s require %s (%s)",
+			audit.NormalizedName, audit.SourceWikiPageID, audit.CandidateWikiPageID,
+			audit.Decision, audit.Reason,
+		)
+	}
+	return nil
 }
 
 type Node struct {
@@ -59,12 +162,21 @@ type Edge struct {
 type Graph struct {
 	Nodes []Node
 	Edges []Edge
+	Stats GraphStats
+}
+
+type GraphStats struct {
+	ScopeTotal       int
+	FilteredTotal    int
+	TypeCounts       map[string]int
+	UnknownTypeCount int
 }
 
 type Query struct {
-	VideoID string
-	Types   []knowledge.KnowledgeType
-	Limit   int
+	VideoID    string
+	WikiPageID string
+	Types      []knowledge.KnowledgeType
+	Limit      int
 }
 
 type Store interface {
@@ -81,6 +193,43 @@ type StoreImpl struct {
 	wiki      *weknora.WikiClient
 	kbID      string
 	db        *gorm.DB
+}
+
+type graphQueryStatements struct {
+	count string
+	nodes string
+	edges string
+}
+
+func buildGraphQueryStatements(namespace string) graphQueryStatements {
+	return graphQueryStatements{
+		count: fmt.Sprintf(`
+			MATCH (n:%s)
+			WHERE ($video_id = '' OR n.source_video_id = $video_id)
+			  AND n.audit_status = 'passed'
+			  AND n.projection_version = 'wiki-v1'
+			RETURN coalesce(n.knowledge_type, '') AS knowledge_type, count(n) AS total`, namespace),
+		nodes: fmt.Sprintf(`
+			MATCH (n:%s)
+			WHERE ($video_id = '' OR n.source_video_id = $video_id)
+			  AND ($wiki_page_id = '' OR n.wiki_page_id = $wiki_page_id)
+			  AND (size($types) = 0 OR n.knowledge_type IN $types)
+			  AND n.audit_status = 'passed'
+			  AND n.projection_version = 'wiki-v1'
+			RETURN n
+			ORDER BY toLower(coalesce(n.title, '')), n.wiki_page_id
+			LIMIT $limit`, namespace),
+		edges: fmt.Sprintf(`
+			MATCH (source:%s)-[r:KNOWLEDGE_RELATION]->(target:%s)
+			WHERE (($wiki_page_id <> '' AND (source.wiki_page_id = $wiki_page_id OR target.wiki_page_id = $wiki_page_id))
+			   OR ($wiki_page_id = '' AND source.wiki_page_id IN $node_ids AND target.wiki_page_id IN $node_ids))
+			  AND ($video_id = '' OR (source.source_video_id = $video_id AND target.source_video_id = $video_id))
+			  AND source.audit_status = 'passed' AND target.audit_status = 'passed'
+			  AND source.projection_version = 'wiki-v1' AND target.projection_version = 'wiki-v1'
+			  AND r.projection_version = 'wiki-v1'
+			RETURN source, target, r
+			ORDER BY r.relation_id`, namespace, namespace),
+	}
 }
 
 func New(cfg config.WikiGraphConfig, wiki *weknora.WikiClient, databases ...*gorm.DB) (Store, error) {
@@ -230,7 +379,21 @@ func (s *StoreImpl) ProjectKnowledgeBase(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list Wiki pages for knowledge base graph: %w", err)
 	}
-	nodes, edges := buildKnowledgeBaseProjection(pages)
+	if s.db == nil {
+		return fmt.Errorf("business database is required for knowledge base graph projection")
+	}
+	var videos []model.Video
+	if err := s.db.WithContext(ctx).
+		Select("id", "transcript_generation").
+		Where("transcript_generation <> ''").
+		Find(&videos).Error; err != nil {
+		return fmt.Errorf("list active video generations for knowledge base graph: %w", err)
+	}
+	activeGenerations := make(map[string]string, len(videos))
+	for _, video := range videos {
+		activeGenerations[video.ID] = strings.TrimSpace(video.TranscriptGeneration)
+	}
+	nodes, edges := buildKnowledgeBaseProjectionForGenerations(pages, activeGenerations)
 
 	session := s.driver.NewSession(ctx, neo4j.SessionConfig{
 		AccessMode:   neo4j.AccessModeWrite,
@@ -314,23 +477,49 @@ func (s *StoreImpl) Query(ctx context.Context, query Query) (*Graph, error) {
 	defer session.Close(ctx)
 
 	params := map[string]any{
-		"video_id": query.VideoID,
-		"types":    knowledgeTypeValues(query.Types),
-		"limit":    query.Limit,
+		"video_id":     query.VideoID,
+		"wiki_page_id": query.WikiPageID,
+		"types":        knowledgeTypeValues(query.Types),
+		"limit":        query.Limit,
+	}
+	statements := buildGraphQueryStatements(s.namespace)
+	stats := GraphStats{TypeCounts: make(map[string]int)}
+	_, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		result, err := tx.Run(ctx, statements.count, params)
+		if err != nil {
+			return nil, err
+		}
+		requested := make(map[string]struct{}, len(query.Types))
+		for _, item := range knowledgeTypeValues(query.Types) {
+			requested[item] = struct{}{}
+		}
+		for result.Next(ctx) {
+			record := result.Record()
+			rawType, _ := record.Get("knowledge_type")
+			rawTotal, _ := record.Get("total")
+			typeName, _ := rawType.(string)
+			count := int(floatFrom(rawTotal))
+			stats.ScopeTotal += count
+			if knowledge.IsKnowledgeType(knowledge.KnowledgeType(typeName)) {
+				stats.TypeCounts[typeName] += count
+			} else {
+				stats.UnknownTypeCount += count
+			}
+			if len(requested) == 0 {
+				stats.FilteredTotal += count
+			} else if _, ok := requested[typeName]; ok {
+				stats.FilteredTotal += count
+			}
+		}
+		return nil, result.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("count Wiki graph nodes: %w", err)
 	}
 	nodes := make([]Node, 0, query.Limit)
 	nodeIDs := make(map[string]struct{})
-	_, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		cypher := fmt.Sprintf(`
-			MATCH (n:%s)
-			WHERE ($video_id = '' OR n.source_video_id = $video_id)
-			  AND (size($types) = 0 OR n.knowledge_type IN $types)
-			  AND n.audit_status = 'passed'
-			  AND n.projection_version = 'wiki-v1'
-			RETURN n
-			ORDER BY n.title
-			LIMIT $limit`, s.namespace)
-		result, err := tx.Run(ctx, cypher, params)
+	_, err = session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		result, err := tx.Run(ctx, statements.nodes, params)
 		if err != nil {
 			return nil, err
 		}
@@ -358,14 +547,10 @@ func (s *StoreImpl) Query(ctx context.Context, query Query) (*Graph, error) {
 
 	edges := make([]Edge, 0)
 	if len(nodeIDs) == 0 {
-		return &Graph{Nodes: nodes, Edges: edges}, nil
+		return &Graph{Nodes: nodes, Edges: edges, Stats: stats}, nil
 	}
 	_, err = session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		cypher := fmt.Sprintf(`
-			MATCH (source:%s)-[r:KNOWLEDGE_RELATION]->(target:%s)
-			WHERE source.wiki_page_id IN $node_ids AND target.wiki_page_id IN $node_ids
-			RETURN source, target, r`, s.namespace, s.namespace)
-		result, err := tx.Run(ctx, cypher, map[string]any{"node_ids": keys(nodeIDs)})
+		result, err := tx.Run(ctx, statements.edges, map[string]any{"node_ids": keys(nodeIDs), "wiki_page_id": query.WikiPageID, "video_id": query.VideoID})
 		if err != nil {
 			return nil, err
 		}
@@ -394,7 +579,7 @@ func (s *StoreImpl) Query(ctx context.Context, query Query) (*Graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query Wiki graph relationships: %w", err)
 	}
-	return &Graph{Nodes: nodes, Edges: edges}, nil
+	return &Graph{Nodes: nodes, Edges: edges, Stats: stats}, nil
 }
 
 type wikiObject struct {
@@ -441,7 +626,7 @@ func buildKnowledgeBaseProjection(pages []weknora.WikiPage) ([]wikiObject, []rel
 			if _, exists := allowedRelationTypes[rel.RelationType]; !exists {
 				continue
 			}
-			if rel.Confidence < relationConfidenceThreshold || len(rel.EvidenceIDs) == 0 {
+			if rel.Confidence < FormalRelationConfidenceThreshold || len(rel.EvidenceIDs) == 0 {
 				continue
 			}
 			target, ok := objectByID[rel.TargetObjectID]
@@ -476,51 +661,41 @@ func buildKnowledgeBaseProjection(pages []weknora.WikiPage) ([]wikiObject, []rel
 	return objects, edges
 }
 
+func buildKnowledgeBaseProjectionForGenerations(
+	pages []weknora.WikiPage,
+	activeGenerations map[string]string,
+) ([]wikiObject, []relation) {
+	current := make([]weknora.WikiPage, 0, len(pages))
+	for _, page := range pages {
+		frontmatter := page.ParsedFrontmatter()
+		videoID := strings.TrimSpace(frontmatterString(frontmatter, "source_video_id"))
+		generation := strings.TrimSpace(frontmatterString(frontmatter, "transcript_generation"))
+		if videoID == "" || generation == "" || activeGenerations[videoID] != generation {
+			continue
+		}
+		current = append(current, page)
+	}
+	return buildKnowledgeBaseProjection(current)
+}
+
 func parseKnowledgeBaseObject(page weknora.WikiPage) (wikiObject, bool) {
-	knowledgeType := legacyKnowledgeType(page.PageType)
-	if knowledgeType == "" || strings.TrimSpace(page.ID) == "" || strings.TrimSpace(page.Slug) == "" {
+	if strings.TrimSpace(page.ID) == "" || strings.TrimSpace(page.Slug) == "" {
 		return wikiObject{}, false
 	}
 	frontmatter := page.ParsedFrontmatter()
-	primaryType := strings.ToLower(strings.TrimSpace(frontmatterString(frontmatter, "primary_type")))
-	compatibilityType := strings.ToLower(strings.TrimSpace(frontmatterString(frontmatter, "type")))
-	if primaryType != "" && compatibilityType != "" && primaryType != compatibilityType {
+	sourceVideoID := strings.TrimSpace(frontmatterString(frontmatter, "source_video_id"))
+	transcriptGeneration := strings.TrimSpace(frontmatterString(frontmatter, "transcript_generation"))
+	if sourceVideoID == "" || transcriptGeneration == "" {
 		return wikiObject{}, false
 	}
-	rawType := firstNonEmpty(primaryType, compatibilityType)
-	if rawType == "knowledge_base" || rawType == "outline" || rawType == "overview" || rawType == "typed_summary" || rawType == "transcript_page" {
+	object, ok, err := parseObject(&model.Video{
+		ID:                   sourceVideoID,
+		TranscriptGeneration: transcriptGeneration,
+	}, page)
+	if err != nil || !ok {
 		return wikiObject{}, false
 	}
-	if mapped := knowledge.MapSkillToKnowledgeType(rawType); mapped != "" {
-		knowledgeType = mapped
-	}
-	evidenceIDs := firstStringSlice(
-		stringSliceValue(frontmatter["evidence_ids"]),
-		page.ChunkRefs,
-		page.SourceRefs,
-	)
-	sourceVideoID := frontmatterString(frontmatter, "source_video_id")
-	transcriptGeneration := frontmatterString(frontmatter, "transcript_generation")
-	relations, _ := parseRelations(frontmatter["relations"])
-	return wikiObject{
-		Node: Node{
-			ID:                       "wiki:" + page.ID,
-			WikiPageID:               page.ID,
-			KnowledgeObjectID:        firstNonEmpty(frontmatterString(frontmatter, "knowledge_object_id"), page.ID),
-			KnowledgeType:            knowledgeType,
-			Title:                    firstNonEmpty(page.Title, frontmatterString(frontmatter, "title"), frontmatterString(frontmatter, "canonical_name"), page.Slug),
-			Summary:                  firstNonEmpty(page.Summary, frontmatterString(frontmatter, "summary"), frontmatterString(frontmatter, "core_content")),
-			SourceVideoID:            sourceVideoID,
-			TranscriptGeneration:     transcriptGeneration,
-			AuditStatus:              firstNonEmpty(strings.ToLower(frontmatterString(frontmatter, "audit_status")), "passed"),
-			ClassificationConfidence: firstNonZeroFloat(floatFrom(frontmatter["classification_confidence"]), 1),
-			EvidenceIDs:              evidenceIDs,
-		},
-		EntitySubType:   firstNonEmpty(frontmatterString(frontmatter, "entity_sub_type"), "technology"),
-		Aliases:         append([]string(nil), page.Aliases...),
-		StructureFields: map[string]string{},
-		Relations:       relations,
-	}, true
+	return object, true
 }
 
 func legacyKnowledgeType(pageType string) knowledge.KnowledgeType {
@@ -660,7 +835,7 @@ func buildProjectionWithAudit(video *model.Video, pages []weknora.WikiPage) ([]w
 				audits = append(audits, audit)
 				continue
 			}
-			if rel.Confidence < relationConfidenceThreshold {
+			if rel.Confidence < FormalRelationConfidenceThreshold {
 				audit.Status, audit.Reason = "low_confidence", "relation confidence is below the publish threshold"
 				audits = append(audits, audit)
 				continue
@@ -694,32 +869,7 @@ func buildProjectionWithAudit(video *model.Video, pages []weknora.WikiPage) ([]w
 }
 
 func relationAllowedForKnowledgeTypes(relationType string, source, target knowledge.KnowledgeType) bool {
-	allowed := map[knowledge.KnowledgeType]map[knowledge.KnowledgeType]map[string]struct{}{
-		knowledge.TypeConcept: {
-			knowledge.TypeConcept:     {"complements": {}, "contradicts": {}, "part_of": {}},
-			knowledge.TypeMethodology: {"explains": {}, "part_of": {}},
-			knowledge.TypeCase:        {"example_of": {}},
-			knowledge.TypeInsight:     {"explains": {}},
-		},
-		knowledge.TypeMethodology: {
-			knowledge.TypeConcept:     {"explains": {}},
-			knowledge.TypeMethodology: {"complements": {}, "part_of": {}},
-		},
-		knowledge.TypeCase: {
-			knowledge.TypeConcept:     {"example_of": {}},
-			knowledge.TypeMethodology: {"example_of": {}},
-		},
-		knowledge.TypeInsight: {
-			knowledge.TypeConcept: {"explains": {}, "contradicts": {}},
-			knowledge.TypeInsight: {"complements": {}, "contradicts": {}},
-		},
-	}
-	byTarget, ok := allowed[source]
-	if !ok {
-		return false
-	}
-	_, ok = byTarget[target][relationType]
-	return ok
+	return IsRelationAllowedForTypes(relationType, source, target)
 }
 
 func persistRelationAudits(db *gorm.DB, videoID, generation string, audits []RelationAudit) error {
@@ -784,6 +934,7 @@ func (o wikiObject) identityCandidate() knowledge.IdentityCandidate {
 		EntitySubType:        o.EntitySubType,
 		Title:                o.Title,
 		Aliases:              append([]string(nil), o.Aliases...),
+		CoreContent:          o.Summary,
 		SourceVideoID:        o.SourceVideoID,
 		TranscriptGeneration: o.TranscriptGeneration,
 		StructureFields:      cloneStringMap(o.StructureFields),
@@ -799,7 +950,18 @@ func commonNormalizedName(left, right knowledge.IdentityCandidate) string {
 			return name
 		}
 	}
-	return ""
+	if !knowledge.IdentityRecall(left, right) {
+		return ""
+	}
+	leftName := knowledge.NormalizeIdentity(left.Title)
+	rightName := knowledge.NormalizeIdentity(right.Title)
+	if leftName == "" {
+		return rightName
+	}
+	if rightName == "" || len([]rune(leftName)) <= len([]rune(rightName)) {
+		return leftName
+	}
+	return rightName
 }
 
 func normalizedNames(values []string) map[string]struct{} {
@@ -925,11 +1087,10 @@ func parseObject(video *model.Video, page weknora.WikiPage) (wikiObject, bool, e
 		aliases = append(aliases, alias)
 	}
 	title := firstNonEmpty(page.Title, frontmatterString(fm, "title"), frontmatterString(fm, "canonical_name"), page.Slug)
-	summary := firstNonEmpty(frontmatterString(fm, "summary"), frontmatterString(fm, "core_content"), frontmatterString(fm, "description"))
 	return wikiObject{
 		Node: Node{
 			ID: "wiki:" + page.ID, WikiPageID: page.ID, KnowledgeObjectID: objectID,
-			KnowledgeType: mapped, Title: title, Summary: summary, SourceVideoID: sourceVideoID,
+			KnowledgeType: mapped, Title: title, Summary: validation.CoreContent, SourceVideoID: sourceVideoID,
 			TranscriptGeneration: generation, AuditStatus: status,
 			ClassificationConfidence: confidence, EvidenceIDs: evidence,
 		},

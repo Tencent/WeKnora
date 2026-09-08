@@ -20,6 +20,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/knowledgegraph"
+	transcriptservice "github.com/Tencent/WeKnora/internal/custom/service/transcript"
 	miniosdk "github.com/minio/minio-go/v7"
 )
 
@@ -286,11 +287,17 @@ func buildRouter(deps *Deps) *gin.Engine {
 	dashboard := NewDashboardHandler(deps.DB)
 	api.GET("/dashboard", dashboard.Get)
 	api.POST("/dashboard/questions", dashboard.RecordQuestion)
-	ph := NewProcessingHandler(deps.DB, ProcessingDependencies{Wiki: deps.Wiki, KBID: roles.Knowledge})
+	ph := NewProcessingHandler(deps.DB, ProcessingDependencies{
+		Wiki: deps.Wiki, KBID: roles.Knowledge,
+		SourceWriter: transcriptservice.NewSourceWriter(deps.DB, deps.KnowledgeWeKnora),
+	})
 	api.GET("/videos/:id/processing-status", ph.Status)
 	api.POST("/videos/:id/processing-jobs/:jobType/retry", ph.Retry)
 	graphHandler := NewEntityGraphHandler(deps.DB, deps.Graph, roles.Knowledge, deps.Wiki)
+	graphHandler.evidence = evidenceClient
 	api.GET("/graph", graphHandler.Get)
+	api.GET("/graph/cross-video", graphHandler.CrossVideo)
+	api.GET("/graph/wiki-pages/:wikiPageID", graphHandler.Detail)
 
 	if deps.Wiki != nil {
 		ch := NewContentHandler(deps.DB, deps.Wiki, roles.Knowledge)
