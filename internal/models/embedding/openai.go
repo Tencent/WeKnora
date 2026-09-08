@@ -111,19 +111,25 @@ func (e *OpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 	var err error
 	url := e.baseURL + "/embeddings"
 
+	// pendingWait is set by the 429/5xx branch so the next loop iteration
+	// does not stack an extra exponential backoff on top of Retry-After.
+	var pendingWait time.Duration
+
 	for i := 0; i <= e.maxRetries; i++ {
-		if i > 0 {
-			backoffTime := time.Duration(1<<uint(i-1)) * time.Second
-			if backoffTime > 10*time.Second {
-				backoffTime = 10 * time.Second
+		if pendingWait > 0 {
+			logger.GetLogger(ctx).
+				Infof("OpenAIEmbedder retrying request (%d/%d), waiting %v", i, e.maxRetries, pendingWait)
+			if werr := waitCtx(ctx, pendingWait); werr != nil {
+				return nil, werr
 			}
+			pendingWait = 0
+		} else if i > 0 {
+			// Transport-error backoff (connection failures).
+			backoffTime := jitteredBackoff(time.Second, i-1, 10*time.Second)
 			logger.GetLogger(ctx).
 				Infof("OpenAIEmbedder retrying request (%d/%d), waiting %v", i, e.maxRetries, backoffTime)
-
-			select {
-			case <-time.After(backoffTime):
-			case <-ctx.Done():
-				return nil, ctx.Err()
+			if werr := waitCtx(ctx, backoffTime); werr != nil {
+				return nil, werr
 			}
 		}
 
@@ -150,14 +156,58 @@ func (e *OpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 		secutils.ApplyCustomHeaders(req, e.customHeaders)
 
 		resp, err = e.httpClient.Do(req)
-		if err == nil {
-			return resp, nil
+		if err != nil {
+			logger.GetLogger(ctx).Errorf("OpenAIEmbedder request failed (attempt %d/%d): %v", i+1, e.maxRetries+1, err)
+			continue
 		}
 
-		logger.GetLogger(ctx).Errorf("OpenAIEmbedder request failed (attempt %d/%d): %v", i+1, e.maxRetries+1, err)
+		// Transport succeeded. Retry 429 / 5xx inside this loop so a single
+		// sub-batch does not immediately bubble up and force a whole-document
+		// re-embed. Non-retriable statuses are returned as-is for BatchEmbed
+		// to translate into a hard error.
+		if shouldRetryHTTPStatus(resp.StatusCode) {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			fallback := jitteredBackoff(time.Second, i, 10*time.Second)
+			if resp.StatusCode == http.StatusTooManyRequests {
+				rlErr := rateLimitErrorFromResponse(resp.StatusCode, resp.Header.Get("Retry-After"), body, fallback)
+				err = rlErr
+				if i == e.maxRetries {
+					return nil, rlErr
+				}
+				pendingWait = rlErr.RetryAfter
+				logger.GetLogger(ctx).Warnf(
+					"OpenAIEmbedder rate limited (attempt %d/%d), will wait %v: %s",
+					i+1, e.maxRetries+1, pendingWait, rlErr.Body,
+				)
+				continue
+			}
+			// 5xx
+			err = fmt.Errorf("EmbedBatch API temporary error: Http Status %s, Response: %s",
+				resp.Status, truncateForLog(body, 500))
+			if i == e.maxRetries {
+				return nil, err
+			}
+			pendingWait = fallback
+			logger.GetLogger(ctx).Warnf(
+				"OpenAIEmbedder server error (attempt %d/%d), will wait %v: %v",
+				i+1, e.maxRetries+1, pendingWait, err,
+			)
+			continue
+		}
+
+		return resp, nil
 	}
 
 	return nil, err
+}
+
+func truncateForLog(body []byte, max int) string {
+	s := string(body)
+	if len(s) > max {
+		return s[:max] + "... (truncated)"
+	}
+	return s
 }
 
 func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
@@ -225,11 +275,18 @@ func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 
 	if resp.StatusCode != http.StatusOK {
 		// Log detailed error response from OpenAI API
-		bodyStr := string(body)
-		if len(bodyStr) > 1000 {
-			bodyStr = bodyStr[:1000] + "... (truncated)"
-		}
+		bodyStr := truncateForLog(body, 1000)
 		logger.GetLogger(ctx).Errorf("OpenAIEmbedder EmbedBatch API error: Http Status %s, Response Body: %s", resp.Status, bodyStr)
+		if resp.StatusCode == http.StatusTooManyRequests {
+			// doRequestWithRetry should already have exhausted 429 retries;
+			// surface a typed error so the batch pool can pace remaining work.
+			return nil, rateLimitErrorFromResponse(
+				resp.StatusCode,
+				resp.Header.Get("Retry-After"),
+				body,
+				time.Second,
+			)
+		}
 		return nil, fmt.Errorf("EmbedBatch API error: Http Status %s, Response: %s", resp.Status, bodyStr)
 	}
 
