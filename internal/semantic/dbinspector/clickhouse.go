@@ -3,6 +3,7 @@ package dbinspector
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	gormclickhouse "gorm.io/driver/clickhouse"
@@ -25,15 +26,23 @@ func (a ClickHouseAdapter) Dialector(cfg *ConnectionConfig) (gorm.Dialector, err
 	if cfg.Host == "" || cfg.Database == "" {
 		return nil, fmt.Errorf("ClickHouse 连接需要 host 和 database")
 	}
-	dsn := fmt.Sprintf("clickhouse://%s:%d/%s?username=%s&password=%s&dial_timeout=10s&read_timeout=30s",
-		cfg.Host, cfg.Port, cfg.Database, cfg.Username, cfg.Password)
-	if v := cfg.ExtraString("secure"); v == "true" {
-		dsn += "&secure=true"
+	u := url.URL{
+		Scheme: "clickhouse",
+		Host:   fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+	}
+	u.User = url.UserPassword(cfg.Username, cfg.Password)
+	q := u.Query()
+	q.Set("database", cfg.Database)
+	q.Set("dial_timeout", "10s")
+	q.Set("read_timeout", "30s")
+	if cfg.ExtraString("secure") == "true" {
+		q.Set("secure", "true")
 	}
 	if v := cfg.ExtraString("skip_verify"); v != "" {
-		dsn += "&skip_verify=" + v
+		q.Set("skip_verify", v)
 	}
-	return gormclickhouse.Open(dsn), nil
+	u.RawQuery = q.Encode()
+	return gormclickhouse.Open(u.String()), nil
 }
 
 // ListTables returns user tables (system schemas excluded).

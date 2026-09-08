@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	sqlmysql "github.com/go-sql-driver/mysql"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -25,14 +26,19 @@ func (a MySQLAdapter) Dialector(cfg *ConnectionConfig) (gorm.Dialector, error) {
 	if cfg.Host == "" || cfg.Database == "" {
 		return nil, fmt.Errorf("MySQL 连接需要 host 和 database")
 	}
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=true&loc=UTC&timeout=10s&readTimeout=30s",
-		cfg.Username, cfg.Password, cfg.Host, cfg.Port, cfg.Database)
+	dsnCfg := sqlmysql.NewConfig()
+	dsnCfg.User = cfg.Username
+	dsnCfg.Passwd = cfg.Password
+	dsnCfg.Net = "tcp"
+	dsnCfg.Addr = fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	dsnCfg.DBName = cfg.Database
+	dsnCfg.Params = map[string]string{"charset": "utf8mb4", "parseTime": "true", "loc": "UTC"}
 	for k, v := range cfg.Extra {
-		if s, ok := v.(string); ok && k != "" {
-			dsn += "&" + k + "=" + s
+		if s, ok := v.(string); ok && extraKeyAllowed(k) {
+			dsnCfg.Params[k] = s
 		}
 	}
-	return mysql.Open(dsn), nil
+	return mysql.New(mysql.Config{DSN: dsnCfg.FormatDSN()}), nil
 }
 
 // ListTables returns user tables (system schemas excluded).

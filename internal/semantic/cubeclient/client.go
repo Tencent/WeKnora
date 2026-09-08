@@ -247,6 +247,48 @@ func (c *Client) Ping(ctx context.Context) error {
 	return err
 }
 
+// WaitUntilCompiledFingerprint polls /v1/meta until modelName appears AND its
+// member fingerprint matches the expected fingerprint. This verifies that
+// Cube compiled the NEW definition, not a stale one from a previous publish
+// (a model name that existed before would still show in /v1/meta even if the
+// new compile failed). If expectedFingerprint is empty, falls back to
+// name-only matching.
+func (c *Client) WaitUntilCompiledFingerprint(
+	ctx context.Context,
+	modelName string,
+	expectedFingerprint string,
+	fingerprintFromMeta func(ctx context.Context, modelName string) string,
+	timeout time.Duration,
+) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		meta, err := c.Meta(ctx)
+		if err == nil {
+			for _, cb := range meta.Cubes {
+				if cb.Name == modelName {
+					if expectedFingerprint == "" || fingerprintFromMeta == nil {
+						return nil
+					}
+					actual := fingerprintFromMeta(ctx, modelName)
+					if actual == expectedFingerprint {
+						return nil
+					}
+					// fingerprint mismatch: old schema still served, keep polling
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("model %s compile fingerprint mismatch after %s; "+
+				"the model may have failed to update, check Cube logs", modelName, timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+}
+
 // ---- securityContext plumbing through request context ----
 
 type secCtxKeyType struct{}

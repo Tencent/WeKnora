@@ -3,6 +3,7 @@ package dbinspector
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	gormpostgres "gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -24,13 +25,17 @@ func (a PostgresAdapter) Dialector(cfg *ConnectionConfig) (gorm.Dialector, error
 	if cfg.Host == "" || cfg.Database == "" {
 		return nil, fmt.Errorf("PostgreSQL 连接需要 host 和 database")
 	}
-	sslmode := cfg.ExtraString("sslmode")
-	if sslmode == "" {
-		sslmode = "disable"
+	u := url.URL{Scheme: "postgres", Host: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)}
+	u.User = url.UserPassword(cfg.Username, cfg.Password)
+	q := u.Query()
+	q.Set("dbname", cfg.Database)
+	q.Set("sslmode", cfg.ExtraString("sslmode"))
+	q.Set("connect_timeout", "10")
+	if schema := cfg.ExtraString("search_path"); schema != "" {
+		q.Set("search_path", schema)
 	}
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s connect_timeout=10",
-		cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.Database, sslmode)
-	return gormpostgres.Open(dsn), nil
+	u.RawQuery = q.Encode()
+	return gormpostgres.Open(u.String()), nil
 }
 
 // ListTables returns user tables (system schemas excluded).

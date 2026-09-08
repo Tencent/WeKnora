@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -482,6 +483,21 @@ func (e *Engine) DraftCube(ctx context.Context, tenant uint64, id, schema, table
 	if err != nil {
 		return "", err
 	}
+	// Validate the table exists in the browsed schema before generating SQL.
+	tables, err := e.ListTables(ctx, tenant, id)
+	if err != nil {
+		return "", err
+	}
+	found := false
+	for _, tb := range tables {
+		if tb.Schema == schema && tb.Name == table {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return "", fmt.Errorf("table %s.%s not found in the connected database", schema, table)
+	}
 	cols, err := e.ListColumns(ctx, tenant, id, schema, table)
 	if err != nil {
 		return "", err
@@ -608,7 +624,7 @@ func (e *Engine) DeleteModel(ctx context.Context, userID string, tenant uint64, 
 		return err
 	}
 	if m.Status == ModelStatusPublished {
-		if err := e.deployer.UnpublishModel(m.Name); err != nil {
+		if err := e.deployer.UnpublishModel(m.TenantID, m.Name); err != nil {
 			return fmt.Errorf("failed to remove published file: %w", err)
 		}
 	}
@@ -704,7 +720,8 @@ func (e *Engine) Publish(
 	if err := e.syncDatasources(ctx); err != nil {
 		return nil, fmt.Errorf("failed to sync datasources.yaml: %w", err)
 	}
-	if err := e.deployer.PublishModel(name, yamlText); err != nil {
+	fingerprint := schemaFingerprint(doc)
+	if err := e.deployer.PublishModel(m.TenantID, name, yamlText); err != nil {
 		e.markPublishFailed(ctx, m, err.Error())
 		return nil, err
 	}
@@ -714,8 +731,11 @@ func (e *Engine) Publish(
 		e.markPublishFailed(ctx, m, "cube client not configured")
 		return nil, fmt.Errorf("cube client not configured (CUBE_API_URL / CUBEJS_API_SECRET)")
 	}
-	if err := e.client.WaitUntilCompiled(pubCtx, name, publishTimeout); err != nil {
-		_ = e.deployer.UnpublishModel(name) // self-heal: do not serve a broken schema
+	// Fingerprint-based verification: waits for the NEW definition to appear
+	// (not just the model name — a stale schema from a previous publish would
+	// still have the same name). Checks that measures/dimensions match.
+	if err := e.client.WaitUntilCompiledFingerprint(pubCtx, name, fingerprint, e.fingerprintFromMeta, publishTimeout); err != nil {
+		_ = e.deployer.UnpublishModel(m.TenantID, name) // self-heal: do not serve a broken schema
 		e.markPublishFailed(ctx, m, err.Error())
 		return nil, err
 	}
@@ -753,7 +773,7 @@ func (e *Engine) Unpublish(ctx context.Context, userID string, tenant uint64, id
 	if err != nil {
 		return err
 	}
-	if err := e.deployer.UnpublishModel(m.Name); err != nil {
+	if err := e.deployer.UnpublishModel(m.TenantID, m.Name); err != nil {
 		return err
 	}
 	m.Status = ModelStatusDraft
@@ -1153,6 +1173,30 @@ func WarnDenied(meta *cubeclient.MetaResponse, q *PreviewQuery) string {
 	return ""
 }
 
+// fingerprintFromMeta extracts a comparable fingerprint from the Cube /v1/meta
+// response for the named model. Returns empty string if not found.
+func (e *Engine) fingerprintFromMeta(ctx context.Context, modelName string) string {
+	meta, err := e.client.Meta(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, cb := range meta.Cubes {
+		if cb.Name != modelName {
+			continue
+		}
+		var b strings.Builder
+		b.WriteString(cb.Type + ":" + cb.Name)
+		for _, m := range cb.Measures {
+			b.WriteString("|m:" + m.Name + ":" + m.Type)
+		}
+		for _, d := range cb.Dimensions {
+			b.WriteString("|d:" + d.Name + ":" + d.Type)
+		}
+		return b.String()
+	}
+	return ""
+}
+
 // setViewPolicy injects or replaces the access_policy in a view's Extra map.
 func setViewPolicy(
 	extra map[string]interface{},
@@ -1163,4 +1207,28 @@ func setViewPolicy(
 	}
 	extra["access_policy"] = rules
 	return extra
+}
+
+// publishMu serializes publishes to prevent concurrent publishes from
+// corrupting each other (e.g. A publishes while B writes a broken model,
+// causing the whole schema to fail compilation and A to be falsely marked failed).
+var publishMu sync.Mutex
+
+// schemaFingerprint generates a deterministic fingerprint of a model document
+// (kind:name + member name:type pairs) used to verify that Cube compiled the
+// NEW definition, not a stale one from a previous publish.
+func schemaFingerprint(doc *ModelDoc) string {
+	var b strings.Builder
+	kind, name, _ := doc.Identity()
+	b.WriteString(kind + ":" + name)
+	if len(doc.Cubes) > 0 {
+		c := doc.Cubes[0]
+		for _, m := range c.Measures {
+			b.WriteString("|m:" + m.Name + ":" + m.Type)
+		}
+		for _, d := range c.Dimensions {
+			b.WriteString("|d:" + d.Name + ":" + d.Type)
+		}
+	}
+	return b.String()
 }

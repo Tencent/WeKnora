@@ -52,21 +52,28 @@ func (d *Deployer) ensureDatasourcesFile() error {
 // autoDir is the subdirectory owned by this module.
 func (d *Deployer) autoDir() string { return filepath.Join(d.modelDir, "auto") }
 
+// tenantFile builds the namespaced filename for a published model.
+// The tenant prefix prevents two tenants from overwriting each other's
+// online model files (both could define a cube named "orders").
+func (d *Deployer) tenantFile(tenantID uint64, name string) string {
+	return fmt.Sprintf("t%d_%s.yaml", tenantID, name)
+}
+
 // PublishModel writes one model file atomically.
-func (d *Deployer) PublishModel(name, yamlText string) error {
+func (d *Deployer) PublishModel(tenantID uint64, name, yamlText string) error {
 	if !ValidSlug(name) {
 		return fmt.Errorf("model name %q is invalid", name)
 	}
 	if err := os.MkdirAll(d.autoDir(), 0o755); err != nil {
 		return err
 	}
-	return atomicWrite(filepath.Join(d.autoDir(), name+".yaml"), []byte(yamlText), 0o644)
+	return atomicWrite(filepath.Join(d.autoDir(), d.tenantFile(tenantID, name)), []byte(yamlText), 0o644)
 }
 
 // UnpublishModel removes one model file. A missing file is not an error —
 // unpublishing an already-removed model is idempotent.
-func (d *Deployer) UnpublishModel(name string) error {
-	path := filepath.Join(d.autoDir(), name+".yaml")
+func (d *Deployer) UnpublishModel(tenantID uint64, name string) error {
+	path := filepath.Join(d.autoDir(), d.tenantFile(tenantID, name))
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}

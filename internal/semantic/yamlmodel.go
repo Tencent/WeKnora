@@ -306,12 +306,20 @@ func BuildDraftCube(connSlug string, table TableSchema) (*ModelDoc, error) {
 			{Name: "count", Type: "count", Title: table.Name + " count"},
 		},
 	}
+	seen := map[string]bool{}
 	for _, col := range table.Columns {
 		if col.Name == "deleted_at" {
 			continue
 		}
+		dimName := Slugify(col.Name)
+		if dimName == "" || seen[dimName] {
+			// Skip columns that slugify to empty or duplicate an existing
+			// dimension (e.g. user_id and user-id would collide after slugify).
+			continue
+		}
+		seen[dimName] = true
 		dim := MemberDef{
-			Name:  Slugify(col.Name),
+			Name:  dimName,
 			SQL:   col.Name,
 			Type:  CubeTypeForColumn(col.DataType),
 			Title: col.Name,

@@ -42,10 +42,10 @@ func TestPublishUnpublishModel(t *testing.T) {
 	d, _ := NewDeployer(filepath.Join(dir, "model"), "")
 
 	yaml := "cubes:\n  - name: orders\n    sql: SELECT 1\n"
-	if err := d.PublishModel("orders", yaml); err != nil {
+	if err := d.PublishModel(10001, "orders", yaml); err != nil {
 		t.Fatalf("PublishModel: %v", err)
 	}
-	path := filepath.Join(dir, "model", "auto", "orders.yaml")
+	path := filepath.Join(dir, "model", "auto", "t10001_orders.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("file not written: %v", err)
@@ -55,14 +55,14 @@ func TestPublishUnpublishModel(t *testing.T) {
 	}
 
 	// idempotent unpublish (non-existent file is OK)
-	if err := d.UnpublishModel("orders"); err != nil {
+	if err := d.UnpublishModel(10001, "orders"); err != nil {
 		t.Errorf("UnpublishModel: %v", err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("file should be removed after unpublish")
 	}
 	// unpublish again is safe (already gone)
-	if err := d.UnpublishModel("orders"); err != nil {
+	if err := d.UnpublishModel(10001, "orders"); err != nil {
 		t.Errorf("idempotent unpublish failed: %v", err)
 	}
 }
@@ -71,7 +71,7 @@ func TestPublishModelRejectsBadSlug(t *testing.T) {
 	dir := t.TempDir()
 	d, _ := NewDeployer(filepath.Join(dir, "model"), "")
 	for _, name := range []string{"Bad-Name", "123start", "", "has space"} {
-		if err := d.PublishModel(name, "yaml"); err == nil {
+		if err := d.PublishModel(10001, name, "yaml"); err == nil {
 			t.Errorf("PublishModel(%q) should reject invalid slug", name)
 		}
 	}

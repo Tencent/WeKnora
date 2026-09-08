@@ -199,6 +199,18 @@ func unwrapErr(err error) error {
 // quoteIdent rejects identifiers containing quotes/semicolons before they
 // reach a query we cannot parameterize (schema/table names in
 // information_schema predicates are literals, but keep them safe anyway).
+// extraKeyAllowed returns true for driver DSN param names that are safe to
+// pass through. Prevents injection of dangerous driver options.
+func extraKeyAllowed(k string) bool {
+	allowed := map[string]bool{
+		"sslmode": true, "ssl": true, "sslverify": true, "tls": true,
+		"charset": true, "collation": true, "readTimeout": true, "writeTimeout": true,
+		"connectTimeout": true, "loc": true, "parseTime": true, "timezone": true,
+		"secure": true, "skip_verify": true, "search_path": true,
+	}
+	return allowed[k]
+}
+
 func quoteIdent(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "'", ""), "`", "")
 }
