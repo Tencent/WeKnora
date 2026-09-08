@@ -1,6 +1,6 @@
 # API 参考：知识库与知识
 
-路由注册：`internal/router/routes_knowledge.go` 的 `RegisterKnowledgeBaseRoutes`、`RegisterKnowledgeRoutes`。Handler：`internal/handler/knowledgebase.go`、`internal/handler/knowledge.go`。
+创建知识库，导入与管理文档，并查询处理进度、复制或移动内容。
 
 权限速记：读路由为 Viewer+ 且需对 KB 有 read 权限（自有/组织共享/共享 Agent 可见）；写路由为“KB 创建者 OR Admin+”且需 write 权限。API key：读需 `retrieve`，内容写需 `ingest`，KB 生命周期需 `manage_kbs`（均可被 full-access 覆盖），并受 KB 白名单约束。
 
@@ -291,7 +291,7 @@ curl "$BASE/api/v1/knowledge-bases/kb-1/knowledge?page=1&parse_status=completed"
 
 ### GET /api/v1/knowledge-bases/:id/knowledge/folders
 
-用途：获取知识库的文件夹目录树。整目录上传时目录结构会被保留（migration `000079` 起存在 `knowledges.folder_path` 列，早期把路径塞在 `file_name` 里的数据已回填）。权限：Viewer+ + KBAccessRead。
+用途：获取知识库的文件夹目录树。整目录上传时目录结构会被保留（migration `000079` 起存在 `knowledges.folder_path` 列，历史 `file_name` 中的路径已回填到该字段）。权限：Viewer+ + KBAccessRead。
 
 响应：200 `{"success":true,"data":[{FolderNode}]}`
 
@@ -583,3 +583,7 @@ curl -X POST $BASE/api/v1/knowledge/move -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"knowledge_ids":["k-1"],"source_kb_id":"kb-1","target_kb_id":"kb-2","mode":"reuse_vectors"}'
 ```
+
+## 实现参考
+
+路由注册：`internal/router/routes_knowledge.go` 的 `RegisterKnowledgeBaseRoutes`、`RegisterKnowledgeRoutes`。Handler：`internal/handler/knowledgebase.go`、`internal/handler/knowledge.go`。

@@ -2,16 +2,16 @@
 
 WeKnora 的配置由四层组成，**优先级从低到高**：
 
-| 层 | 位置 | 什么时候用 |
+| 层 | 位置 | 用途 |
 | --- | --- | --- |
 | 主配置文件 | `config/config.yaml` | 结构化的默认值，随镜像分发 |
 | 模板 / 预设 | `config/prompt_templates/*.yaml`、`builtin_agents.yaml`、`agent_type_presets.yaml`、`builtin_models.yaml` | 提示词、内置 Agent、内置模型 |
 | 环境变量 | `.env` / 容器 environment | 部署级覆盖，改完需重启 |
-| 运行时系统设置 | 数据库 `system_settings` 表，界面在「设置 → 系统」 | 一部分开关可以在线改，**盖过环境变量**，绝大多数立即生效 |
+| 运行时系统设置 | 数据库 `system_settings` 表，界面在「设置 → 系统」 | 支持的设置可在线修改，优先于环境变量，多数立即生效 |
 
-最后一层容易被忽略，却是排查「改了 env 没生效」的第一现场：注册模式、空间策略与配额、SSRF 白名单、各 worker pool 并发、模型并发上限这些键一旦在界面上改过，数据库里就留下一行记录，此后环境变量不再起作用；把该项重置（`DELETE /api/v1/system/admin/settings/:key`）才会回落到环境变量或内置默认值。完整键表与语义见[租户、用户与认证授权](../03-features/01-tenant-auth.md)的「运行时可改的系统设置」。
+注册模式、空间策略与配额、SSRF 白名单、任务并发及模型并发上限支持运行时配置。在控制台修改后，数据库中的值优先于环境变量；重置设置项（`DELETE /api/v1/system/admin/settings/:key`）才会恢复使用环境变量或内置默认值。排查环境变量未生效时，应先检查该项是否已有运行时配置。完整设置见[平台管理与系统管理员](../03-features/20-platform-admin.md)。
 
-下文对照 `internal/config/config.go` 中的结构体逐段解读，并在末尾汇总环境变量。
+主配置结构定义在 `internal/config/config.go`。各项配置与环境变量的含义、默认值及生效条件如下。
 
 ## 配置加载机制
 
@@ -142,7 +142,7 @@ flowchart LR
 | `LOG_LEVEL` / `LOG_PATH` / `LOG_FORMAT` | debug / 空 / 空 | 日志级别、文件路径（空则仅 stdout）、自定义格式 |
 | `LLM_DEBUG_LOG` | false | true 时在 LOG_PATH 同目录写 `llm_debug.log` |
 | `TZ` | Asia/Shanghai | 时区 |
-| `WEKNORA_LANGUAGE` | 空 | 文档处理语言（问题/摘要生成）。优先级：本变量 > 请求的 `Accept-Language` > 内置 `zh-CN`。**它压过请求头**是刻意的：界面语言与文档处理语言是两件事，允许「英文界面 + 处理韩文文档」 |
+| `WEKNORA_LANGUAGE` | 空 | 文档处理语言（问题/摘要生成）。优先级：本变量 > 请求的 `Accept-Language` > 内置 `zh-CN`。文档处理语言可独立于界面语言设置，例如使用英文界面处理韩文文档 |
 | `AUTO_MIGRATE` | true | 启动时自动执行数据库迁移 |
 | `AUTO_RECOVER_DIRTY` | true | 自动修复 golang-migrate 的 dirty 状态（上次迁移中断留下的）。手工排查迁移问题时应临时设为 false，否则启动会自动改写迁移版本记录，见[数据库与迁移](../06-development/02-database-schema.md) |
 | `WEKNORA_TRUSTED_PROXIES` | 空 | gin 信任代理 CIDR（逗号分隔） |

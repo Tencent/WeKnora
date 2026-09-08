@@ -1,6 +1,8 @@
 # API 参考：长期记忆
 
-使用 `/api/v1` 前缀。个人接口均要求 Viewer+，API Key 必须 full-access；作用域来自凭证，不接受任意 subject_id。`$BASE` 是服务地址，`$TOKEN` 是当前用户的 Bearer token。
+管理当前调用者的长期记忆、主题和文档偏好，以及空间级记忆配置。路径使用 `/api/v1` 前缀。
+
+个人接口均要求 Viewer+，API Key 必须 full-access。作用域从凭证中确定，不接受任意 `subject_id`。示例中的 `$BASE` 为服务地址，`$TOKEN` 为当前用户的 Bearer token。
 
 ## 空间配置与请求开关
 

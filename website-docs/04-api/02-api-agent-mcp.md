@@ -1,6 +1,6 @@
 # API 参考：Agent、MCP 与技能
 
-路由注册：`internal/router/router.go` 的 `RegisterCustomAgentRoutes`、`RegisterMCPServiceRoutes`、`RegisterSkillRoutes`、`RegisterUserFavoriteRoutes`。Handler：`internal/handler/custom_agent.go`、`internal/handler/mcp_service.go`、`internal/handler/mcp_credentials.go`、`internal/handler/mcp_oauth.go`、`internal/handler/skill_handler.go`、`internal/handler/user_resource_favorite.go`。
+管理智能体、MCP 服务及其凭据、技能和资源收藏。智能体的工具范围与调用审批配置通过本组接口维护。
 
 ## Agent（/api/v1/agents）
 
@@ -378,3 +378,7 @@ curl -X POST $BASE/api/v1/user/favorites -H "Authorization: Bearer $TOKEN" \
 ```bash
 curl -X DELETE $BASE/api/v1/user/favorites/kb/kb-1 -H "Authorization: Bearer $TOKEN"
 ```
+
+## 实现参考
+
+路由注册：`internal/router/router.go` 的 `RegisterCustomAgentRoutes`、`RegisterMCPServiceRoutes`、`RegisterSkillRoutes`、`RegisterUserFavoriteRoutes`。Handler：`internal/handler/custom_agent.go`、`internal/handler/mcp_service.go`、`internal/handler/mcp_credentials.go`、`internal/handler/mcp_oauth.go`、`internal/handler/skill_handler.go`、`internal/handler/user_resource_favorite.go`。

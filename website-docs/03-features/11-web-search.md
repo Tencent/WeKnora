@@ -1,33 +1,8 @@
 # 网络搜索与网页抓取
 
-当知识库检索不足以回答问题时，WeKnora 的 Agent 可以借助 `web_search`（联网搜索）与 `web_fetch`（网页正文读取）两个工具获取实时信息。底层实现分布在 `internal/infrastructure/web_search`（搜索引擎适配层）、`internal/infrastructure/web_fetch`（轻量抓取器）与 `internal/agent/tools`（Agent 工具层），并通过 `docker/searxng` 提供可选的自托管元搜索引擎。
+网络搜索用于补充知识库之外的信息。智能体通过 `web_search` 查找结果，再通过 `web_fetch` 读取网页正文。可接入搜索服务，也可部署 SearXNG。
 
-## 接口抽象
-
-搜索能力由两层接口定义（`internal/types/interfaces/web_search.go`）：
-
-```go
-// WebSearchProvider defines the interface for web search providers
-type WebSearchProvider interface {
-    Name() string
-    Search(ctx context.Context, query string, maxResults int, includeDate bool) ([]*types.WebSearchResult, error)
-}
-
-// WebSearchService defines the interface for web search services
-type WebSearchService interface {
-    Search(ctx context.Context, providerID string, config *types.WebSearchConfig, query string) ([]*types.WebSearchResult, error)
-    CompressWithRAG(ctx context.Context, sessionID string, tempKBID string, questions []string, ...) (...)
-}
-```
-
-`internal/infrastructure/web_search/registry.go` 维护 **provider 类型 -> 工厂函数** 的注册表，实例按租户参数在调用时创建：
-
-```go
-type ProviderFactory func(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)
-
-func (r *Registry) Register(id string, factory ProviderFactory)
-func (r *Registry) CreateProvider(providerType string, params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)
-```
+在「设置 → 网络搜索」选择提供商、填写凭据并测试连接，然后在智能体中选择该搜索配置。搜索结果数受智能体的最大结果数设置约束。
 
 ## 支持的搜索引擎
 
@@ -90,14 +65,6 @@ registry.Register("brave", infra_web_search.NewBraveProvider)
 | `extra_config` | map[string]string | nil | 提供商特定参数，如 Metaso scope、Exa include_text、Bocha freshness/summary |
 
 CRUD 路由（`RegisterWebSearchProviderRoutes`，`internal/router/router.go`）：`/web-search-providers` 下的增删改查、`POST /test`（用存量凭证探测外部服务，Admin 权限）、`POST /:id/test`、`PUT /:id/credentials`；另有 `GET /web-search/providers` 返回可用引擎类型目录。
-
-## 出站请求的 SSRF 防护
-
-`internal/infrastructure/web_search/proxy.go` 的 `NewSearchHTTPClient` 为所有引擎构造统一的安全 HTTP 客户端：
-
-- `DialContext` 使用 `utils.SSRFSafeDialContext`（拨号时校验目标 IP，防 DNS rebinding）；
-- 重定向逐跳经 `ssrfSafeRedirect` 复验 `ValidateURLForSSRF`，超过最大跳数直接失败；
-- 显式 `proxy_url` 需通过 SSRF 校验，未配置时回落 `ProxyFromEnvironment`。
 
 ## Agent 搜索与读页
 
@@ -192,7 +159,44 @@ SearXNG 是自托管的元搜索引擎（聚合上游多个引擎），WeKnora �
 - 应用容器默认把 `searxng` 主机名并入 SSRF 白名单：`SSRF_WHITELIST_EXTRA=searxng,qdrant,...`，因此租户配置 `base_url: http://searxng:8080` 开箱即用。
 - 客户端超时 12s（`defaultSearxngTimeout`），略高于 SearXNG 的 `outgoing.max_request_timeout: 10.0`，让上游慢引擎表现为 SearXNG 侧错误而非客户端取消。`ValidateSearxngBaseURL` 在"保存"与"使用"两处共享，保证配置校验一致。
 
-## 如何新增一个搜索引擎
+## 实现与扩展参考
+
+### 出站请求的 SSRF 防护
+
+`internal/infrastructure/web_search/proxy.go` 的 `NewSearchHTTPClient` 为所有引擎构造统一的安全 HTTP 客户端：
+
+- `DialContext` 使用 `utils.SSRFSafeDialContext`（拨号时校验目标 IP，防 DNS rebinding）；
+- 重定向逐跳经 `ssrfSafeRedirect` 复验 `ValidateURLForSSRF`，超过最大跳数直接失败；
+- 显式 `proxy_url` 需通过 SSRF 校验，未配置时回落 `ProxyFromEnvironment`。
+
+### 接口抽象
+
+搜索能力由两层接口定义（`internal/types/interfaces/web_search.go`）：
+
+```go
+// WebSearchProvider defines the interface for web search providers
+type WebSearchProvider interface {
+    Name() string
+    Search(ctx context.Context, query string, maxResults int, includeDate bool) ([]*types.WebSearchResult, error)
+}
+
+// WebSearchService defines the interface for web search services
+type WebSearchService interface {
+    Search(ctx context.Context, providerID string, config *types.WebSearchConfig, query string) ([]*types.WebSearchResult, error)
+    CompressWithRAG(ctx context.Context, sessionID string, tempKBID string, questions []string, ...) (...)
+}
+```
+
+`internal/infrastructure/web_search/registry.go` 维护 **provider 类型 -> 工厂函数** 的注册表，实例按租户参数在调用时创建：
+
+```go
+type ProviderFactory func(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)
+
+func (r *Registry) Register(id string, factory ProviderFactory)
+func (r *Registry) CreateProvider(providerType string, params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)
+```
+
+### 如何新增一个搜索引擎
 
 1. 在 `internal/infrastructure/web_search/` 新建 `<engine>.go`，实现 `interfaces.WebSearchProvider`（`Name()` + `Search()`），并提供工厂函数 `func New<Engine>Provider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)`；官方端点应硬编码为常量，HTTP 客户端用 `NewSearchHTTPClient(timeout, params.ProxyURL)` 构造。
 2. 在 `internal/types/web_search_provider.go` 增加 `WebSearchProviderType` 常量。

@@ -1,6 +1,6 @@
 # API 参考：沙箱、技能与个人变量
 
-路径均以 `/api/v1` 为前缀。功能操作步骤见[技能目录与沙箱](../03-features/22-skills-sandbox.md)。本页示例使用 `$BASE` 和 `$TOKEN`。
+管理沙箱配置、技能目录、安装任务和个人环境变量。路径均以 `/api/v1` 为前缀；示例中的 `$BASE` 为服务地址，`$TOKEN` 为当前用户的 Bearer token。界面操作步骤见[技能目录与沙箱](../03-features/22-skills-sandbox.md)。
 
 ## 权限
 

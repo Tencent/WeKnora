@@ -1,12 +1,12 @@
 # 总体架构
 
-本章从部署视角与代码视角两个维度介绍 WeKnora 的整体架构：系统由哪些进程/容器组成、各组件之间如何通信、使用了哪些技术栈，以及代码仓库的顶层目录布局。
+WeKnora 由 Web 前端、Go 主服务和 Python 文档解析服务组成，使用数据库保存业务数据，通过 Redis 调度异步任务。向量存储、对象存储、知识图谱和模型服务可按部署需求配置。
 
-## 1. 系统组成
+## 系统组成 {#_1-系统组成}
 
 WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架构，外加 PostgreSQL 与 Redis 两个基础设施依赖；其余组件（向量库、知识图谱、联网搜索等）均为可选，通过 Docker Compose profile 按需启用。
 
-### 1.1 核心服务（默认启动）
+### 核心服务（默认启动） {#_1-1-核心服务-默认启动}
 
 | 服务 | 镜像 / 构建 | 端口 | 职责 |
 | --- | --- | --- | --- |
@@ -19,7 +19,7 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 
 `app` 与 `docreader` 之间还通过共享卷 `docreader-tmp`（挂载于 `/tmp/docreader`）传递解析产物图片；`app` 的本地文件存储卷为 `data-files`（`/data/files`）。
 
-### 1.2 可选组件（Compose profile）
+### 可选组件（Compose profile） {#_1-2-可选组件-compose-profile}
 
 | 服务 | profile | 用途 |
 | --- | --- | --- |
@@ -34,7 +34,7 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 
 此外，Go 后端还可直连未在 compose 内的外部引擎：Elasticsearch v7/v8、OpenSearch、腾讯云 VectorDB、火山 VikingDB，以及 8 种对象存储（local/MinIO/COS/TOS/S3/OSS/KS3/OBS）。
 
-### 1.3 部署形态
+### 部署形态 {#_1-3-部署形态}
 
 除标准 Docker Compose 部署外，仓库还支持：
 
@@ -42,7 +42,7 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 - **桌面版**：`cmd/desktop` 基于 Wails v2 打包为桌面应用；
 - **Kubernetes**：`helm/` Chart；**裸机**：`deploy/` systemd 单元；**macOS**：`Formula/` Homebrew 配方。
 
-## 2. 技术栈清单
+## 技术栈清单 {#_2-技术栈清单}
 
 | 层 | 技术 | 版本/说明 |
 | --- | --- | --- |
@@ -70,7 +70,7 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 | 文档解析服务 | Python + grpcio | `docreader/main.py`；解析器位于 `docreader/parser/`（pdf/docx/excel/epub/web/image/markitdown/opendataloader 等） |
 | 桌面端 | Wails v2 | `cmd/desktop` |
 
-## 3. 进程间通信方式
+## 进程间通信方式 {#_3-进程间通信方式}
 
 | 链路 | 协议 | 说明 |
 | --- | --- | --- |
@@ -84,7 +84,7 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 | `app` → 沙箱后端 | Docker Engine API / Cube/E2B 控制面与数据面 | 会话执行、技能安装与文件产物；按空间沙箱配置选择 |
 | `app` ↔ IM 平台 | HTTP webhook / 长连接 SDK | 微信、企业微信、飞书、钉钉、Slack、Telegram、QQ、Mattermost、云之家（`internal/im/`） |
 
-## 4. 总体架构图
+## 总体架构图 {#_4-总体架构图}
 
 ```mermaid
 graph LR
@@ -135,7 +135,7 @@ graph LR
     DR -.->|"共享卷 docreader-tmp"| APP
 ```
 
-## 5. 典型请求链路：文档上传与解析入库
+## 典型请求链路：文档上传与解析入库 {#_5-典型请求链路-文档上传与解析入库}
 
 下图展示一篇文档从上传到可被检索的完整链路，覆盖了绝大多数组件间交互（同步 API、Asynq 异步任务、gRPC 解析、Embedding 与向量写入、富化子任务）：
 
@@ -175,7 +175,7 @@ sequenceDiagram
 
 对话链路（`POST /api/v1/knowledge-chat/:session_id` 或 agent-chat）则为同步 SSE：Handler → `SessionService` → `chat_pipeline` 插件流水线（query 理解 → 并行检索 → rerank → 合并 → Prompt 组装 → LLM 流式补全）→ 通过 Stream Manager（Redis/内存）将 token 流推回客户端，详见后端设计篇。
 
-## 6. 代码仓库顶层目录导览
+## 代码仓库顶层目录导览 {#_6-代码仓库顶层目录导览}
 
 | 目录 | 职责 |
 | --- | --- |

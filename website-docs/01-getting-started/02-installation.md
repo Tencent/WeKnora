@@ -1,6 +1,6 @@
 # 安装部署
 
-WeKnora 支持从「一台笔记本」到「Kubernetes 集群」的多种部署形态。本文逐一介绍 Docker Compose（生产/开发两套编排）、镜像构建、Makefile 与脚本、Helm，以及桌面端（Lite 单二进制、桌面应用与 Homebrew）。
+WeKnora 支持 Docker Compose、Kubernetes Helm、Lite 单二进制和桌面应用。服务器部署可选择 Compose 或 Helm；本地使用可选择 Lite；参与开发时使用独立的开发编排。各方式的依赖、启动命令和数据目录如下。
 
 ## 部署形态总览
 
@@ -214,7 +214,7 @@ helm install weknora ./helm -n weknora --create-namespace \
 
 桌面端面向本机与低资源环境，底层都是同一套 Lite 运行时（单进程 + SQLite + 内存队列），只是分发与启动方式不同：**单二进制**（命令行启动，也可作为后台服务）、**桌面应用**（图形界面，双击启动）、**Homebrew**（macOS/Linux 命令行安装 Lite）。三者能力范围一致。
 
-### 7.1 Lite 运行时（零外部依赖）
+### Lite 运行时（零外部依赖） {#_7-1-lite-运行时-零外部依赖}
 
 Lite 模式通过编译期 `EDITION=lite` 与运行期 `.env.lite` 环境实现「一进程跑全套」：
 
@@ -233,9 +233,9 @@ make package-lite                   # 打包发行 tarball（scripts/package-lit
 
 Lite 还提供 `POST /auth/auto-setup` 一键生成本地账号（仅 lite edition 开放，见 `internal/handler/auth.go`），桌面应用据此实现免注册启动。
 
-### 7.2 桌面应用（cmd/desktop，Wails v2）
+### 桌面应用（cmd/desktop，Wails v2） {#_7-2-桌面应用-cmd-desktop-wails-v2}
 
-桌面应用提供图形界面的本机使用方式：双击启动，进程内自带后端与 SQLite，数据落在系统的应用数据目录；另有端口设置、局域网绑定与更新检查等桌面特有能力。运行时能力与 §7.1 相同。
+桌面应用提供图形界面的本机使用方式：双击启动，进程内自带后端与 SQLite，数据落在系统的应用数据目录；另有端口设置、局域网绑定与更新检查等桌面特有能力。运行时能力与 [Lite 运行时（零外部依赖）](#_7-1-lite-运行时-零外部依赖) 相同。
 
 ::: warning 尚未正式发布
 桌面应用目前**没有随 Release 提供安装包**，需要自己按下面的步骤构建。`release-lite.yml` 里已有跨平台（macOS universal/amd64/arm64、Linux amd64、Windows amd64）的构建任务，但该工作流的 tag 触发被注释掉、只能手动触发，且当前最新 Release 未附带任何产物。
@@ -248,7 +248,7 @@ Lite 还提供 `POST /auth/auto-setup` 一键生成本地账号（仅 lite editi
 make package-mac-app
 ```
 
-### 7.3 Homebrew（Formula/weknora-lite.rb）
+### Homebrew（Formula/weknora-lite.rb） {#_7-3-homebrew-formula-weknora-lite-rb}
 
 ```bash
 brew install weknora-lite            # 从 GitHub Releases 下载 WeKnora-lite_v{ver}_{os}_{arch}.tar.gz

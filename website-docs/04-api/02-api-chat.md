@@ -1,6 +1,6 @@
 # API 参考：会话、消息与聊天
 
-路由注册：`internal/router/router.go` 的 `RegisterSessionRoutes`、`RegisterChatRoutes`、`RegisterMessageRoutes`。Handler：`internal/handler/session/`（handler.go、qa.go、stream.go、title.go、temporary_document.go）、`internal/handler/message.go`、`internal/handler/message_suggestion.go`。
+创建和管理会话，读取消息与临时附件，并通过 SSE 获取知识问答或智能体回答。
 
 会话为“用户私有”资源，handler 内部强制归属校验；路由层为 Viewer+。API key：会话/聊天需 `chat` capability（或 full-access）；消息搜索需 `message_history`；知识检索需 `retrieve`。
 
@@ -392,3 +392,7 @@ curl "$BASE/api/v1/sessions/session-1/messages/message-1/artifacts/0/download" \
 ### 每轮用量
 
 消息返回持久化的 usage，Agent 完成事件携带 turn_usage；包含本轮各用途模型调用聚合结果。工具调用自身并不都产生 Token，用量以提供商返回或后端已采集的记录为准。字段见[可观测性](../03-features/16-observability.md)。
+
+## 实现参考
+
+路由注册：`internal/router/router.go` 的 `RegisterSessionRoutes`、`RegisterChatRoutes`、`RegisterMessageRoutes`。Handler：`internal/handler/session/`（handler.go、qa.go、stream.go、title.go、temporary_document.go）、`internal/handler/message.go`、`internal/handler/message_suggestion.go`。

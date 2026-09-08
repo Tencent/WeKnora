@@ -1,21 +1,21 @@
 # 知识图谱
 
-向量检索擅长找「意思相近的段落」，但不擅长回答「A 和 B 是什么关系」。知识图谱补的就是这一块：文档入库时用大模型把里面的实体和关系抽出来存成图，提问时顺着图多召回一批相关片段，一起交给模型作答。
+知识图谱在文档入库时提取实体与关系，并在问答时沿关联关系检索更多相关片段。它可与向量和关键词检索共同使用，为回答补充关系上下文。
 
-适合关系密集的资料（人物、组织、产品线、合同条款之间互相牵扯），普通的问答场景开不开区别不大。代价是入库时要额外调大模型，且需要部署 Neo4j。
+该功能适用于人物、组织、产品或条款之间关系较多的资料。启用后会增加入库阶段的模型调用，并需要部署 Neo4j。
 
 <Screenshot
   src="/screenshots/kg-graph.png"
   caption="知识图谱视图：实体与关系"
   hint="展示知识库图谱页签中的实体关系图，节点可点击查看关联文档。" />
 
-图谱存储后端为 **Neo4j**（唯一实现，依赖 APOC 插件；代码中不存在 Nebula 等其他图数据库集成）。
+图谱存储使用 Neo4j，并依赖 APOC 插件。
 
 ## 开启配置
 
 图谱功能需要**两级开关**同时满足：
 
-### 1. 全局开关：Neo4j 环境变量
+### 全局开关：Neo4j 环境变量 {#_1-全局开关-neo4j-环境变量}
 
 `NEO4J_ENABLE` 是知识图谱的唯一全局开关（`docker-compose.yml` 注释明确：`ENABLE_GRAPH_RAG` 自 v0.1.6 起已被 `NEO4J_ENABLE` 取代，Go 主应用不再读取）。
 
@@ -30,7 +30,7 @@
 
 docker-compose 的 `neo4j` 服务预装 APOC：`NEO4JLABS_PLUGINS=["apoc"]`（图谱写入依赖 `apoc.merge.node` / `apoc.merge.relationship`，删除依赖 `apoc.periodic.iterate`）。
 
-### 2. 知识库级开关：IndexingStrategy + ExtractConfig
+### 知识库级开关：IndexingStrategy + ExtractConfig {#_2-知识库级开关-indexingstrategy-extractconfig}
 
 `internal/types/knowledgebase.go`：
 

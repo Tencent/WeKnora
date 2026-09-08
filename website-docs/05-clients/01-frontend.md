@@ -4,7 +4,7 @@ WeKnora 的 Web 前端是一个基于 **Vue 3 + TypeScript + Vite** 的单页应
 
 1. **标准 Web 部署**：Vite 构建产物由 nginx 容器托管，`/api` 反向代理到后端；
 2. **网页嵌入（Embed）**：独立的轻量入口 `frontend/embed.html` + `frontend/src/embed-main.ts`，供第三方网站以 iframe / 浮窗方式嵌入智能体对话；
-3. **桌面端（Wails）**：通过 `frontend/src/wailsjs/` 下的自动生成绑定与桌面进程的 Go 侧通信，前端代码中可见大量对桌面形态的适配（如 `--wails-draggable` 拖拽区域、窗口深浅色同步）。
+3. **桌面端（Wails）**：通过 `frontend/src/wailsjs/` 下的自动生成绑定与桌面进程的 Go 侧通信，支持 `--wails-draggable` 拖拽区域和窗口深浅色同步等桌面功能。
 
 ## 技术栈总览
 
@@ -257,7 +257,7 @@ RAG 流水线的可视化进度（`views/chat/components/RagPipelineProgress.vue
   - `ko-KR`（韩语）
   - `ja-JP`（日语）
 - 语言选择持久化在 `localStorage` 的 `locale` key；axios 拦截器会把当前语言写入 `Accept-Language` 请求头，使后端返回本地化内容。
-- 因部分翻译刻意内嵌 `<strong>` 标记（经 DOMPurify 消毒后 v-html 渲染），配置了 `warnHtmlMessage: false` 关闭 vue-i18n 的 HTML 告警。
+- 部分翻译内嵌 `<strong>` 标记（经 DOMPurify 消毒后 v-html 渲染），配置了 `warnHtmlMessage: false` 关闭 vue-i18n 的 HTML 告警。
 - **Embed 独立 i18n**：访客侧嵌入页使用单独的 `frontend/src/i18n/embed.ts`（由 `embed-main.ts` 加载），管理端「网页嵌入」文案仍在主语言包中；`frontend/src/i18n/locales/embed/index.ts` 统一 re-export 语言归一化助手（支持从 URL 参数同步 embed 语言）。
 - **审计与裁剪工具**：语言包体量大、容易积累无人引用的死键或漏翻的新键，因此配套了三个脚本（`frontend/package.json`）：
 

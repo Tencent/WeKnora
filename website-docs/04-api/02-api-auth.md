@@ -1,6 +1,6 @@
 # API 参考：认证与用户
 
-路由注册：`internal/router/router.go` 的 `RegisterAuthRoutes` 与 `RegisterMyInvitationRoutes`。Handler：`internal/handler/auth.go`、`internal/handler/auth_register_by_invite.go`、`internal/handler/tenant_invitation.go`。
+提供注册、登录、令牌刷新、个人资料和邀请处理接口。认证要求随接口而异，公开接口在各条目中标注。
 
 除特别标注外，本组接口在认证中间件之后仅要求“已登录”（无角色下限）。免认证接口见各条目。
 
@@ -289,3 +289,7 @@ curl -X POST $BASE/api/v1/me/invitations/12/accept -H "Authorization: Bearer $TO
 ```bash
 curl -X POST $BASE/api/v1/me/invitations/12/decline -H "Authorization: Bearer $TOKEN"
 ```
+
+## 实现参考
+
+路由注册：`internal/router/router.go` 的 `RegisterAuthRoutes` 与 `RegisterMyInvitationRoutes`。Handler：`internal/handler/auth.go`、`internal/handler/auth_register_by_invite.go`、`internal/handler/tenant_invitation.go`。

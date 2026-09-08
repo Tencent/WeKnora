@@ -1,15 +1,15 @@
 # Agent 引擎
 
-普通问答是「检索一次、回答一次」，遇到需要多步骤的问题就不够用了——比如「对比这三份合同的付款条款，并查一下最新的行业惯例」。Agent 解决的是这类问题：它会自己决定检索几轮、要不要联网、要不要调外部工具，边想边做，直到攒够依据再回答。
+智能体可结合知识库检索、联网搜索和外部工具处理多步骤任务，例如比较多份合同的条款。智能推理模式按问题选择工具并执行多轮调用，再根据获得的结果生成回答。
 
-WeKnora 提供两种模式，在对话框顶部切换：
+对话框顶部可选择快速问答或智能推理：
 
-| 模式 | 适合 | 代价 |
+| 模式 | 适用任务 | 执行特点 |
 | --- | --- | --- |
-| 快速问答（quick-answer） | 事实性提问，答案就在文档里 | 一轮检索，快、便宜 |
-| 智能推理（smart-reasoning） | 需要多步骤、跨文档、要联网或调工具 | 多轮模型调用，慢、贵 |
+| 快速问答（quick-answer） | 基于文档的事实查询 | 检索后生成回答，通常调用次数较少 |
+| 智能推理（smart-reasoning） | 跨文档分析、联网查询或工具操作 | 可能执行多轮调用，耗时与用量取决于任务 |
 
-除内置 Agent 外，可以在「智能体」页建自己的 Agent：选模式与模型、圈定可用知识库、开关联网搜索、挂载 MCP 工具与技能、写专属提示词。建好的 Agent 可以在网页对话里用，也可以绑到 IM 渠道或网页挂件上对外服务。
+在「智能体」页可以创建自定义智能体，选择模式和模型，限定知识库范围，并配置提示词、联网搜索、MCP 工具及技能。保存后可用于网页对话，也可绑定到 IM 或嵌入渠道。
 
 <Screenshot
   src="/screenshots/agent-editor.png"
@@ -21,11 +21,159 @@ WeKnora 提供两种模式，在对话框顶部切换：
   caption="Agent 对话：推理过程与工具调用时间线"
   hint="展示一轮 Agent 回答，包含展开的思考步骤、工具调用卡片与最终答案的引用。" />
 
-下文依次介绍 Agent 引擎的整体架构、ReAct 循环、全部内置工具、记忆与上下文压缩、技能系统与沙箱、工具审批、自定义/内置 Agent 配置，以及 Agent 模式与普通 RAG 问答模式的关系。
+配置决定智能体可访问的资料与工具，实际调用仍受当前用户或渠道的权限约束。
 
-## 1. 总览与架构
+## 创建与使用智能体
 
-### 1.1 核心组件
+1. 在「智能体」页新建智能体，选择快速问答或智能推理模式。
+2. 选择模型、知识库范围和提示词。类型预设会预填配置，保存前仍可调整。
+3. 根据任务启用联网搜索或选择 MCP 工具；运行技能脚本时还需绑定已安装技能的沙箱。
+4. 保存后在对话页选择该智能体，完成一次提问，检查回答来源与工具结果。
+
+初次使用可直接选择内置智能体。快速问答适用于文档查询；数据分析智能体面向 CSV 和 Excel；Wiki 智能体用于浏览和维护 Wiki 内容。
+
+## 设置资料和工具范围
+
+智能体可以使用全部、指定或禁用的知识库及技能范围。对话中的提及用于选择本轮资料或提示优先技能，不能绕过已有授权。联网搜索同时受智能体配置和本轮请求开关约束。
+
+通过组织共享智能体后，接收方在授权范围内使用来源空间的模型与资料。共享智能体为只读，接收方不能修改其配置。
+
+## 处理工具审批与授权
+
+需要人工审批的 MCP 工具在执行前显示审批卡片，用户可批准、拒绝或修改参数。默认等待上限为 10 分钟；拒绝、超时或取消会作为工具结果返回，智能体可据此继续处理。此审批机制只用于 MCP 工具。
+
+MCP 服务需要 OAuth 授权时，可在当前对话中完成授权，成功后系统会重试工具调用。
+
+## 使用技能、附件和记忆
+
+绑定沙箱后，智能推理可读取附件、运行脚本并生成文件。可下载的产物应写入 `/workspace/output`，回答完成后可在会话中预览和下载。安装与变量配置见[技能目录与沙箱](22-skills-sandbox.md)，附件操作见[会话与对话体验](18-chat-experience.md)。
+
+长期记忆按空间和调用者隔离，智能体可单独关闭记忆读写；完整说明见[跨会话长期记忆](23-memory.md)。
+
+## 配置参考
+
+### 自定义 Agent {#_7-自定义-agent}
+
+#### 模式与类型预设 {#_7-1-模式与类型预设}
+
+`CustomAgent`（`internal/types/custom_agent.go`）有两个运行模式（`Config.AgentMode`）：
+
+- `quick-answer`：经典 RAG 管道（检索→拼上下文→单次生成），不进 Agent 引擎；
+- `smart-reasoning`：ReAct Agent 模式，`IsAgentMode()` 返回 true，并强制 `MultiTurnEnabled = true`。
+
+smart-reasoning 下还可选**类型预设**（`Config.AgentType`，定义在 `config/agent_type_presets.yaml`，由 `internal/types/agent_type_preset.go` 加载）。预设只在编辑器里**预填表单**，用户可任意覆盖：
+
+| 预设 ID | 系统提示词模板 | 温度 | 最大迭代 | 预填工具 | KB 过滤 |
+| --- | --- | --- | --- | --- | --- |
+| `rag-qa` | `progressive_rag_agent` | 0.7 | 30 | knowledge_search、grep_chunks、list_knowledge_chunks、get_document_info | 由工具派生：any_of vector/keyword |
+| `wiki-qa` | `wiki_researcher` | 0.7 | 30 | wiki_search、wiki_read_page、wiki_read_source_doc、wiki_flag_issue | 由工具派生：any_of wiki |
+| `hybrid-rag-wiki` | `hybrid_rag_wiki_agent` | 0.7 | 40 | wiki_search、wiki_read_page、knowledge_search、grep_chunks、list_knowledge_chunks、get_document_info、wiki_flag_issue | any_of vector/keyword/wiki |
+| `data-analysis` | `data_analyst` | 0.3 | 30 | data_schema、data_analysis；关闭 web 搜索；限定文件类型 csv/xlsx | 显式 `none_of: [faq]` |
+| `custom` | 无 | — | — | 不预填 | 不限制 |
+
+`thinking` 和 `todo_write` 默认不包含在预设工具中，使用时需手动选择；启用会增加 token 开销。
+
+#### 可配置项（CustomAgentConfig） {#_7-2-可配置项-customagentconfig}
+
+`internal/types/custom_agent.go` 中 `CustomAgentConfig` 的主要字段（handler `CreateAgent`/`UpdateAgent` 直接接收该结构）：
+
+| 分类 | 字段 | 说明 / 默认（EnsureDefaults） |
+| --- | --- | --- |
+| 基础 | `agent_mode` | `quick-answer` / `smart-reasoning` |
+| 基础 | `agent_type` | smart-reasoning 下的预设类别，空/未知视为 custom |
+| 基础 | `system_prompt` / `system_prompt_id` | 直接内容或模板 ID（启动时经 `ResolveBuiltinAgentPromptRefs` 等解析） |
+| 基础 | `context_template` / `context_template_id` | 普通模式下检索片段的拼装模板 |
+| 模型 | `model_id`、`rerank_model_id`、`temperature`、`max_completion_tokens`、`thinking`、`citation_enabled` | temperature<0 → 0.7；max_completion_tokens=0 使用运行时默认：quick-answer 2048、smart-reasoning 4096、绑定沙箱的 smart-reasoning 24576；thinking 未设时固定为 false；citation 未设时视为 true |
+| Agent | `max_iterations` | 默认 10（服务层上限 100） |
+| Agent | `llm_call_timeout` | 单次 LLM 调用秒数，0 用全局默认（120s） |
+| Agent | `allowed_tools` | 工具白名单；空回退 DefaultAllowedTools |
+| MCP | `mcp_selection_mode`（all/selected/none）、`mcp_services`、`mcp_auth_wait_timeout` | OAuth 等待秒数 <=0 用 Gate 默认 |
+| 技能 | `skills_selection_mode`（all/selected/none）、`selected_skills`、`sandbox_config_id` | 选择空间沙箱及其已安装技能，见[技能目录与沙箱](22-skills-sandbox.md) |
+| 记忆 | `memory_enabled` | nil 继承空间，false 禁用本智能体的记忆读写 |
+| 知识库 | `kb_selection_mode`（all/selected/none）、`knowledge_bases`、`retrieve_kb_only_when_mentioned`、`retain_retrieval_history` | retain=true 时历史 KB 检索结果不脱敏 |
+| 多模态 | `image_upload_enabled`、`vlm_model_id`、`audio_upload_enabled`、`asr_model_id`、`image_storage_provider` | VLM 也用于 MCP 工具返回图片的描述 |
+| 文件 | `supported_file_types`、`chat_parser_engine_rules`、`attachment_image_understanding`、`attachment_ocr_max_pages`、`attachment_parse_wait_timeout_sec` | 数据分析型 Agent 常限定 csv/xlsx |
+| FAQ | `faq_priority_enabled`、`faq_direct_answer_threshold`、`faq_score_boost` | — |
+| Web | `web_search_enabled`、`web_search_max_results`、`web_search_provider_id`、`web_fetch_enabled`、`web_fetch_top_n` | max_results 默认 5 |
+| 多轮 | `multi_turn_enabled`、`history_turns` | history_turns 默认 5；smart-reasoning 强制 multi_turn |
+| 检索 | `embedding_top_k`（10）、`keyword_threshold`（0.3）、`vector_threshold`（0.5）、`rerank_top_k`（5）、`rerank_threshold` | 括号内为默认值 |
+| 高级 | `enable_query_expansion`、`enable_rewrite`、`rewrite_prompt_*`、`query_understand_model_id`、`fallback_strategy`（默认 model）、`fallback_response`、`fallback_prompt`、`intent_prompts`、`data_analysis_enabled` | 主要作用于 quick-answer 管道 |
+| 建议 | `question_suggestions`（starters / follow_ups） | starters 默认 hybrid 模式 6 条；follow_ups 默认关闭、3 条 |
+
+Handler 层（`internal/handler/custom_agent.go`）提供 `CreateAgent`、`GetAgent`、`ListAgents`、`UpdateAgent`、`DeleteAgent`、`CopyAgent`、`GetPlaceholders`（返回 `types.PlaceholdersByField(PromptFieldAgentSystemPrompt)` 的占位符清单）、`GetAgentTypePresets`（带 i18n 的预设列表）、`GetSuggestedQuestions`。创建/更新时经 `authorizeAgentKnowledgeScope` 校验受限 API Key 的 KB 范围：`kb_selection_mode: all` 对 KB 受限 key 直接 403，`selected` 逐一鉴权。
+
+运行时映射：`buildAgentConfig`（`session_agent_qa.go`）把 `CustomAgentConfig` 转换为引擎的 `types.AgentConfig`（`internal/types/agent.go`），并叠加：web 搜索需 Agent 与请求同时开启（`customAgent.Config.WebSearchEnabled && req.WebSearchEnabled`）、web provider 回退租户默认、`SearchTargets` 由 KB/@文档/@标签 scope 统一构建、`MaxContextTokens` 兜底 200000、`@Skill` 的每轮优先提示与 `@MCP` 的每轮范围收窄（共享 Agent 的 @MCP 只能落在 Agent 预设集合内）。另外只有当 `knowledge_search` 实际可用时才要求配置 rerank 模型（`agentRequiresRerankModel`）。
+
+#### 分享机制（agent_share） {#_7-3-分享机制-agent-share}
+
+`internal/application/service/agent_share.go`：Agent 可分享给**组织（Organization）**：
+
+- 仅 Agent 属主租户可分享（`ErrNotAgentOwner`）；分享者所在租户须为组织 Editor+ 成员；
+- 分享前校验 Agent 配置完整：必须有 `model_id`；若 `knowledge_search` 在其工具集内（或工具集为空回退默认集）且 KB scope 未禁用，还必须有 `rerank_model_id`，否则 `ErrAgentNotConfigured`；
+- **权限强制为只读**：`permission = types.OrgRoleViewer`（跨租户编辑不在 v1 范围）；重复分享则幂等更新；
+- 接收方租户可通过 `TenantDisabledSharedAgentRepository` 把某个共享 Agent 在本租户禁用；
+- 使用共享 Agent 对话时（`session_agent_qa.go`），检索与模型 scope 切到 **Agent 属主租户**（`resolveRetrievalTenantID`），因此共享方的 KB 对使用方可用，而使用方自己的 MCP @提及会被限制在 Agent 预设内。
+
+### 内置 Agent（config/builtin_agents.yaml） {#_8-内置-agent-config-builtin-agents-yaml}
+
+内置 Agent 由 `config/builtin_agents.yaml` 定义，启动时 `types.LoadBuiltinAgentsConfig` 载入并重建 `BuiltinAgentRegistry`（`internal/types/builtin_agent_config.go`），支持 default/zh-CN/zh-TW/ja-JP/ko-KR 多语言名称与描述；`system_prompt_id`/`context_template_id` 在启动时经 `ResolveBuiltinAgentPromptRefs` 解析为具体模板内容。
+
+| ID | 名称（zh-CN） | agent_mode / agent_type | 关键配置 |
+| --- | --- | --- | --- |
+| `builtin-quick-answer` | 快速问答 | `quick-answer` | 模板 `default_kb` + `default_context`；temperature 0.7；FAQ 优先（直接回答阈值 0.9、加权 1.2）；query expansion + rewrite；web 搜索开、5 条；不进 Agent 引擎 |
+| `builtin-smart-reasoning` | 智能推理 | `smart-reasoning` / `rag-qa` | `max_iterations: 50`；工具：knowledge_search、grep_chunks、list_knowledge_chunks、query_knowledge_graph、get_document_info；web 搜索开；多轮 5 轮 |
+| `builtin-data-analyst` | 数据分析师 | `smart-reasoning` / `data-analysis` | 模板 `data_analyst`；temperature 0.3；`max_iterations: 30`；工具仅 data_schema + data_analysis；限定 csv/xlsx；关闭 web 搜索；历史 10 轮 |
+| `builtin-wiki-researcher` | 维基问答 | `smart-reasoning` / `wiki-qa` | 模板 `wiki_researcher`；`max_iterations: 30`；工具：wiki_search、wiki_read_page、wiki_read_source_doc、wiki_flag_issue（只读 + 报障）；关闭 web 搜索 |
+| `builtin-wiki-fixer` | 维基修订 | `smart-reasoning` / `custom` | 模板 `wiki_fixer`；`retain_retrieval_history: true`（修订需要跨轮记住页面内容）；工具含全部 wiki 写操作（wiki_write_page、wiki_replace_text、wiki_rename_page、wiki_delete_page、wiki_read_issue、wiki_update_issue 等 9 个）；`kb_selection_mode: selected` |
+
+补充两点（来自 `internal/types/custom_agent.go`）：
+
+- `builtin-wiki-fixer` 不显示在用户可见的 Agent 列表（`builtinAgentIDsOrdered` 排除了它）——它是 Wiki 编辑器程序化调用的内部 Agent，但仍可经 `GetAgentByID` 使用；
+- `builtinAgentIDsOrdered` 中还保留了 `builtin-deep-researcher`、`builtin-knowledge-graph-expert`、`builtin-document-assistant` 等 ID 常量位次，但当前 YAML 未定义这些条目，注册表以 YAML 为准；
+- `builtin_agents.yaml` 里每个条目都带 `reflection_enabled`（数据分析师为 `true`，其余 `false`），但**后端目前不消费这个字段**——`internal/` 下既没有对应的结构体字段也没有引用，只有 YAML 与前端类型定义里存在。也就是说它当前不影响 Agent 的实际行为，看到它为 `true` 不要以为多了一轮反思。
+
+顺带一提，`internal/agent/prompts_wiki.go` 中的 `WikiSummaryPrompt`、`WikiKnowledgeExtractPrompt`、`WikiTaxonomyPlanPrompt` 等常量属于 **Wiki ingest 管道**（文档入库时 LLM 生成 wiki 页面/目录规划）使用的提示词，与 wiki 类 Agent 的运行时工具互补：前者生产 Wiki 内容，后者消费与维护。
+
+### 建议问题（Starters 与追问） {#_10-建议问题-starters-与追问}
+
+对话框在两个位置会给出可点击的问题：会话还空着时的**开场问题**（starters），以及每轮回答结束后的**追问建议**（follow-ups）。这套配置归 Agent 所有（`QuestionSuggestionConfig`，`internal/types/custom_agent.go`），渠道设置只能抑制展示，不能改内容策略。
+
+#### 配置项
+
+两组配置各自独立开关，`mode` 决定问题从哪来：
+
+| mode | 来源 |
+| --- | --- |
+| `curated` | 只用人工写死的 `items` |
+| `knowledge` | 从知识库内容里取 |
+| `generated` | 让模型生成 |
+| `hybrid`（默认） | 上述几种混合 |
+
+| 配置 | 默认 | 说明 |
+| --- | --- | --- |
+| `starters.enabled` / `mode` / `items` / `count` | — / `hybrid` / 空 / 6 | 开场问题 |
+| `follow_ups.enabled` / `mode` / `count` | — / `hybrid` / 3 | 追问建议 |
+| `follow_ups.model_id` | 空（用会话模型） | 生成追问用的模型，可指定小模型省成本 |
+| `follow_ups.categories` | 空 | 限定问题类型：`clarify`（澄清）/ `deepen`（深入）/ `action`（行动） |
+| `follow_ups.max_context_turns` | 2 | 生成时回看几轮对话 |
+| `follow_ups.additional_instruction` | 空 | 追加到生成提示词的业务约束 |
+| `follow_ups.suppress_on_fallback` | — | 回答走了兜底策略时不出建议 |
+| `follow_ups.suppress_when_answer_asks_question` | — | 回答本身在反问用户时不出建议（避免两个问题打架） |
+| `follow_ups.knowledge_fallback` | — | 生成失败时回退到知识库来源 |
+| `follow_ups.allow_regenerate` | — | 是否允许用户手动换一批 |
+
+#### 生成、缓存与埋点
+
+- 结果存 `message_suggestion_sets` 表，按 `(assistant_message_id, placement, config_hash, locale)` 缓存——`config_hash` 把「当前生效的 Agent 配置」摘要进缓存键，所以改了配置会自然拿到新的一批，而不是读到旧缓存；`locale` 让多语言各自缓存；
+- 状态：`generating` → `ready`，另有 `suppressed`（按上面的抑制规则跳过）与 `failed`；`lease_until` 防止多实例重复生成同一批；
+- 接口：`GET /sessions/:id/messages/:message_id/suggestions` 读，`POST` 同路径触发生成（幂等），`POST /sessions/:session_id/suggestion-events` 上报埋点；
+- 埋点事件：`impression`（曝光）/ `click`（点击）/ `dismiss`（关掉）/ `regenerate`（换一批），存 `message_suggestion_events`。点击后发出的下一条用户消息会带 `SuggestionAttribution`（`suggestion_set_id` + `question_id`），因此统计上能区分「点了建议」与「自己打了同样的问题」。
+
+## 执行机制参考
+
+### 总览与架构 {#_1-总览与架构}
+
+#### 核心组件 {#_1-1-核心组件}
 
 | 组件 | 源码位置 | 职责 |
 | --- | --- | --- |
@@ -67,14 +215,14 @@ type AgentEngine struct {
 }
 ```
 
-几个关键设计点：
+引擎职责与约束：
 
 1. **引擎跨轮无状态（stateless across turns）**。引擎源码注释明确写道：会话历史每轮由调用方通过 `service.LoadAgentHistory` 从 DB 重建，作为 `llmContext` 传入 `Execute`；引擎自身不维护缓存、system prompt 存储或跨轮缓冲。
 2. **事件驱动输出**。引擎不直接写 SSE，所有输出（思考、工具调用、工具结果、最终答案、完成事件）都通过 `event.EventBus` 发射，由 Handler 层的订阅者转成 SSE 流并落库。相关事件类型包括 `EventAgentThought`、`EventAgentFinalAnswer`、`EventAgentToolCall`、`EventAgentToolResult`、`EventAgentTool`、`EventAgentComplete`、`EventError`。
 3. **引用/资源别名**。`resourceRefs`（`llmresource.Registry`）与 `sourceRefs`（`llmreference.Registry`）在每次 LLM 调用前对消息做 Encode，把持久化 ID（chunk/document/web 的 UUID）替换为短别名（`cN`/`dN`/`bN`/`wN`、`res://NNNN`），流式返回时再 Decode。这样模型永远看不到真实 UUID。`think.go` 中特别注明了编码顺序：`resourceRefs` 必须先于 `sourceRefs` 编码，否则 wiki summary 页 slug 中内嵌的文档 UUID 会被 citation 压缩误替换为 `d1` 之类的别名，形成死链。
 4. **可观测性**。每次执行会开启 Langfuse span 层级：`agent.execute` → `agent.round.N` → `agent.tool.<name>`，内含轮次、token 用量、工具输出预览（截断至 4000 rune）等。`database_query` 的 SQL 参数在 Langfuse 与 UI hint 中均被脱敏（`toolHintSensitiveArgs`）。
 
-### 1.2 组件关系图
+#### 组件关系图 {#_1-2-组件关系图}
 
 ```mermaid
 flowchart TB
@@ -119,7 +267,7 @@ flowchart TB
     ENG --> EB --> SSE
 ```
 
-### 1.3 System Prompt 的构建
+#### System Prompt 的构建 {#_1-3-system-prompt-的构建}
 
 `internal/agent/prompts.go` 中的 `BuildSystemPromptWithOptions` 按以下优先级选择模板：
 
@@ -146,9 +294,9 @@ flowchart TB
 
 当用户 @提及了 MCP 服务或技能时，`buildMustUseBlock` 会额外注入 `<must_use>` 块，强制模型使用对应前缀的 MCP 工具或先用 `read_file` 读取技能说明。
 
-## 2. ReAct 循环逐阶段详解
+### ReAct 循环逐阶段详解 {#_2-react-循环逐阶段详解}
 
-### 2.1 入口：Execute
+#### 入口：Execute {#_2-1-入口-execute}
 
 `AgentEngine.Execute`（`internal/agent/engine.go`）流程：
 
@@ -159,7 +307,7 @@ flowchart TB
 5. `buildToolsForLLM` 把注册表中的工具转换为 function calling 定义；
 6. 进入 `executeLoop`。
 
-### 2.2 主循环：executeLoop 与 runReActIteration
+#### 主循环：executeLoop 与 runReActIteration {#_2-2-主循环-executeloop-与-runreactiteration}
 
 ```go
 for state.CurrentRound < e.config.MaxIterations {
@@ -180,7 +328,7 @@ if !state.IsComplete && ctx.Err() == nil {
 
 一次迭代 `runReActIteration` 内部依次是四个阶段：
 
-**① Think（思考）**：先做上下文窗口管理（见第 4 节），然后 `callLLMWithRetry`（`internal/agent/think.go`）：
+**① Think（思考）**：先做上下文窗口管理（见[记忆与上下文压缩](#_4-记忆与上下文压缩)），然后 `callLLMWithRetry`（`internal/agent/think.go`）：
 
 - `agenttools.SanitizeMessages` 修复连续同角色、孤儿 tool result 等问题；
 - 流式调用 LLM（`streamThinkingToEventBus`），单次调用超时 `defaultLLMCallTimeout = 120s`（可用 `AgentConfig.LLMCallTimeout` 覆盖）；
@@ -206,7 +354,7 @@ if !state.IsComplete && ctx.Err() == nil {
 
 **④ Observe（观察）**：`appendToolResults`（`internal/agent/observe.go`）按 OpenAI 协议把本轮追加进消息数组：一条带 `tool_calls` 的 assistant 消息 + 每个结果一条 `role:"tool"` 消息（内容经 `sourceRefs.ModelOutput` 别名化）。若本轮任一成功的工具结果里含 Markdown 图片，还会向 system 消息追加一次 `## Retrieved Image Output Requirement` 要求（`internal/agent/image_requirement.go`），强制最终答案原样携带相关图片。随后 `state.CurrentRound++` 进入下一轮。
 
-### 2.3 终止条件汇总与最大迭代
+#### 终止条件汇总与最大迭代 {#_2-3-终止条件汇总与最大迭代}
 
 | 终止路径 | 触发条件 | 最终答案来源 |
 | --- | --- | --- |
@@ -227,7 +375,7 @@ if !state.IsComplete && ctx.Err() == nil {
 
 达到上限后 `handleMaxIterations` 会用一个专门的合成 prompt（`internal/agent/finalize.go`）把全部工具结果作为 user 消息喂给 LLM 生成完整答案（合成阶段关闭 thinking），若检索结果含 Markdown 图片还会附加图片输出要求。
 
-### 2.4 ReAct 循环流程图
+#### ReAct 循环流程图 {#_2-4-react-循环流程图}
 
 ```mermaid
 flowchart TD
@@ -253,9 +401,9 @@ flowchart TD
     OBSERVE --> NEXT["CurrentRound++"] --> CHECK
 ```
 
-## 3. 内置工具全解
+### 内置工具全解 {#_3-内置工具全解}
 
-### 3.1 工具总表
+#### 工具总表 {#_3-1-工具总表}
 
 工具名常量定义在 `internal/agent/tools/definitions.go`。下表覆盖全部内置工具（参数列只列 schema 中的字段，`*` 为必填）：
 
@@ -294,7 +442,7 @@ flowchart TD
 
 默认工具白名单 `DefaultAllowedTools()`（旧 Agent 未配置 `allowed_tools` 时的回退）：`thinking`、`todo_write`、`knowledge_search`、`grep_chunks`、`list_knowledge_chunks`、`query_knowledge_graph`、`get_document_info`、`database_query`、`data_analysis`、`data_schema`。
 
-### 3.2 工具注册表（ToolRegistry）
+#### 工具注册表（ToolRegistry） {#_3-2-工具注册表-toolregistry}
 
 `internal/agent/tools/registry.go`：
 
@@ -305,7 +453,7 @@ flowchart TD
 - **错误提示**：失败结果统一追加 `"[Analyze the error above and try a different approach.]"`，引导 LLM 换策略；
 - **清理**：`Cleanup` 遍历实现 `types.Cleanable` 的工具释放资源。
 
-### 3.3 能力（capabilities）机制与按配置启停
+#### 能力（capabilities）机制与按配置启停 {#_3-3-能力-capabilities-机制与按配置启停}
 
 `internal/agent/tools/capabilities.go` 是前端 `frontend/src/utils/tool-capabilities.ts` 的 Go 镜像，声明每个工具对 KB 能力的需求：
 
@@ -336,17 +484,17 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 4. **硬安全网**：扫描 `SearchTargets` 中各 KB 的真实能力——没有 wiki KB 就丢弃全部 wiki 工具；没有 vector/keyword KB 就丢弃全部 RAG 工具（防止配置陈旧：先勾了 wiki 工具、后换成非 wiki KB）；
 5. 去重后逐个实例化并注册；MCP 工具按 `MCPSelectionMode`（all/selected/none）另行注册；沙箱 shell/文件工具按会话能力注册，`read_file` 再叠加技能和网页数据源；旧技能工具名仅作兼容识别，不再注册。
 
-## 4. 记忆与上下文压缩
+### 记忆与上下文压缩 {#_4-记忆与上下文压缩}
 
 长期记忆按空间和调用者跨会话保存，与下述会话历史压缩分别配置。开启和个人管理见[跨会话长期记忆](23-memory.md)，完整接口见[记忆 API](../04-api/02-api-memory.md)。
 
-### 4.1 Token 预算与估算器
+#### Token 预算与估算器 {#_4-1-token-预算与估算器}
 
 - 上下文预算：`AgentConfig.MaxContextTokens`，`buildAgentConfig` 未设置时兜底 `types.DefaultMaxContextTokens = 200000`；
 - `token.Estimator`（`internal/agent/token/estimator.go`）用 tiktoken 的 **cl100k_base** 编码估算，常量 `perMessageOverhead = 3`、`perConversationTail = 3`；编码失败时退化为 `len(s)/4` 近似；
 - **权威值优先**：真正的 token 数以模型 API 返回的 `Usage` 为准。引擎的 `estimateCurrentTokens` 用上一轮 API 报告的 `lastUsage.TotalTokens` 作基线，只对新增消息（assistant 回复 + tool 结果）做 BPE 增量估算；首轮无 Usage 时才全量估算。
 
-### 4.2 上下文压缩与溢出恢复
+#### 上下文压缩与溢出恢复 {#_4-2-上下文压缩与溢出恢复}
 
 `manageContextWindow`（`internal/agent/observe.go`）在每轮 Think 前调用 `compaction.Compactor`。MaxContextTokens 优先取智能体配置，其次模型 parameters.context_window，最后回退 200000。触发阈值为窗口减去 reserve，reserve 至少 16384，并随本轮输出预算增加：`max(completion 预算 + 4096, 16384)`。
 
@@ -360,23 +508,23 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 
 提供商报告上下文超限（错误或响应截断判据）时，还可强制压缩并重试一次。仅因生成耗尽 completion 预算的截断不应误判成上下文超限。具体提供商错误识别见 `internal/agent/compaction/overflow.go`。
 
-### 4.3 会话历史（agent_history）
+#### 会话历史（agent_history） {#_4-3-会话历史-agent-history}
 
 跨轮历史由 `LoadAgentHistory`（`internal/application/service/agent_history.go`）每轮从 messages 表重建（DB 是唯一事实来源，无 Redis/内存缓存）：
 
 - 取 `HistoryTurns × 4`（最低 50）条原始消息，按 `RequestID` 配对 user/assistant，只保留 assistant 已完成（`IsCompleted`）的完整轮，按时间排序取最近 `HistoryTurns` 轮；
-- 每轮展开为：user 消息（含图片 caption 与附件 prompt；**故意忽略** `RenderedContent` 快照以避免旧协议污染）→ 每个含工具调用的 `AgentStep` 展开为 assistant(with tool_calls) + 若干 tool 消息 → 末尾一条规范化最终答案 assistant 消息（剥离 `<think>` 块）；
+- 每轮展开为：user 消息（含图片 caption 与附件 prompt；忽略 `RenderedContent` 快照，避免将旧渲染协议带入上下文）→ 每个含工具调用的 `AgentStep` 展开为 assistant(with tool_calls) + 若干 tool 消息 → 末尾一条规范化最终答案 assistant 消息（剥离 `<think>` 块）；
 - 历史中的 tool 消息内容用 `CompactToolOutputForHistory`（`internal/agent/tools/persist.go`）压缩：带 `display_type` 的大载荷（如 `knowledge_chunks_list` 的 chunks、`grep_results` 的 chunk_results）替换为一行摘要（如 `"Listed 20/87 chunks from X (content omitted from history)"`）。
 
 进入引擎后，`buildMessagesWithLLMContext` 还会做**历史 KB 结果脱敏**（`redactHistoryKBResults`）：除非 Agent 开启 `RetainRetrievalHistory`，历史轮次中 KB 类工具（`knowledge_search`、`grep_chunks`、`list_knowledge_chunks`、`query_knowledge_graph`、`get_document_info`、`wiki_search`、`wiki_read_page`、`wiki_read_source_doc`）的结果一律替换为 `"[Previous retrieval result omitted — knowledge base may have changed. Please perform a fresh search.]"`，强制模型对可能已变更的知识库做新鲜检索。
 
 持久化侧，`SanitizeAgentStepsForStorage` 在把 `AgentSteps` 写入 DB / SSE 重放前剥离 LLM-only 大载荷，只留紧凑摘要。
 
-## 5. 技能（Skills）系统
+### 技能（Skills）系统 {#_5-技能-skills-系统}
 
 使用步骤、安装来源、沙箱连接、网络策略和环境变量见[技能目录与沙箱](22-skills-sandbox.md)。技能依赖智能体选择的空间沙箱配置，生产对话不加载宿主机 `skills/preloaded`。
 
-### 5.1 渐进加载和作用域
+#### 渐进加载和作用域 {#_5-1-渐进加载和作用域}
 
 技能包包含带 YAML frontmatter 的 `SKILL.md`，以及 scripts/templates 等资源。模型先看到名称和说明（Level 1），再通过 `read_file(path="skill://<name>/SKILL.md")` 读取完整说明（Level 2），按需读取附加资源（Level 3）。读取结果同时给出实际执行方式、可用文件和技能目录信息。
 
@@ -384,7 +532,7 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 
 统一入口为 `read_file` 和 `shell_exec(skill_name=..., command=...)`；旧 `read_skill`、`execute_skill_script` 不再注册。技能文件 URI 不是 shell 路径；执行包内脚本使用读取结果给出的目录或 `$WEKNORA_SKILL_DIR`。未选择空间沙箱配置时，脚本执行不可用。
 
-### 5.2 会话环境与文件
+#### 会话环境与文件 {#_5-2-会话环境与文件}
 
 Docker、Cube、E2B 都提供会话级沙箱。附件暂存、shell 执行和产物收集复用同一实例；沙箱身份绑定到会话，不能通过工具参数切换其他空间的运行环境。默认执行账号为沙箱内 root，隔离边界是沙箱本身。Docker 默认关闭，启用条件见[技能目录与沙箱](22-skills-sandbox.md#选择沙箱后端)。
 
@@ -398,7 +546,7 @@ Docker、Cube、E2B 都提供会话级沙箱。附件暂存、shell 执行和产
 
 沙箱空闲 TTL、技能镜像更新或重建会影响实例中的临时状态。对话产物收集见[会话与对话体验](18-chat-experience.md)，接口见[沙箱与技能 API](../04-api/02-api-sandbox-skills.md)。
 
-### 5.3 文件工具契约
+#### 文件工具契约 {#_5-3-文件工具契约}
 
 - **写入**：`write_sandbox_file` 只写 /workspace 下的文件，排除只读输入目录 /workspace/input；支持 overwrite/append，单文件最多 8 MiB。模型输出额度用于生成前预算，不作为拒绝完整文件内容的预测字节阈值。截断的工具调用在执行前拒绝，避免把半份内容写入文件。
 - **读取**：`read_file` 使用从 1 开始的 offset 行号、limit 默认 2000 行，并受 max_bytes 和工具输出预算限制；截断时按返回的 next_offset 续读。工作区文本最多 64 KiB/页；网页快照最多 50 KiB/页，超长行使用 line_offset 续读。二进制不会直接作为文本返回。
@@ -408,7 +556,7 @@ Docker、Cube、E2B 都提供会话级沙箱。附件暂存、shell 执行和产
 
 约束放在工具描述中，系统提示词仅说明选型和跨工具流程。底层文件缓存依赖会话、路径、大小、mtime 与文件变更纪元，避免同长度编辑后读到旧内容。
 
-### 5.4 执行流程
+#### 执行流程 {#_5-4-执行流程}
 
 ```mermaid
 sequenceDiagram
@@ -427,9 +575,9 @@ sequenceDiagram
     Note over SBX: 交付文件写入 /workspace/output
 ```
 
-## 6. 工具审批机制（Human-in-the-Loop）
+### 工具审批机制（Human-in-the-Loop） {#_6-工具审批机制-human-in-the-loop}
 
-审批代码在 `internal/agent/approval/gate.go`（issue #1173）。要点：
+MCP 工具审批由 `internal/agent/approval/gate.go` 实现。
 
 **审批范围**：审批门（`approval.MCPApproval`）**只接入 MCP 工具**——`MCPTool.Execute`（`internal/agent/tools/mcp_tool.go`）在真正调用 MCP 服务前询问 `gate.NeedsApproval(tenantID, serviceID, toolName)`；内置工具不走审批。哪些 MCP 工具需要审批由 `Checker`（DB 中的 `MCPToolApprovalService`，经 `approval.Adapter` 适配）按租户+服务+工具名判定。
 
@@ -451,91 +599,9 @@ sequenceDiagram
 
 **会话内 OAuth**：同一个 Gate 还提供 `RequestOAuthAndWait`——当 MCP 传输层返回"需要授权"错误时（而非查审批表），发射 `EventMCPOAuthRequired` 让用户在对话内完成 OAuth，等待上限取 Agent 配置的 `MCPAuthWaitTimeout`（`internal/agent/tools/mcp_oauth.go`），授权成功后自动重试工具调用。
 
-## 7. 自定义 Agent
+### Agent 模式与普通 RAG 问答模式 {#_9-agent-模式与普通-rag-问答模式}
 
-### 7.1 模式与类型预设
-
-`CustomAgent`（`internal/types/custom_agent.go`）有两个运行模式（`Config.AgentMode`）：
-
-- `quick-answer`：经典 RAG 管道（检索→拼上下文→单次生成），不进 Agent 引擎；
-- `smart-reasoning`：ReAct Agent 模式，`IsAgentMode()` 返回 true，并强制 `MultiTurnEnabled = true`。
-
-smart-reasoning 下还可选**类型预设**（`Config.AgentType`，定义在 `config/agent_type_presets.yaml`，由 `internal/types/agent_type_preset.go` 加载）。预设只在编辑器里**预填表单**，用户可任意覆盖：
-
-| 预设 ID | 系统提示词模板 | 温度 | 最大迭代 | 预填工具 | KB 过滤 |
-| --- | --- | --- | --- | --- | --- |
-| `rag-qa` | `progressive_rag_agent` | 0.7 | 30 | knowledge_search、grep_chunks、list_knowledge_chunks、get_document_info | 由工具派生：any_of vector/keyword |
-| `wiki-qa` | `wiki_researcher` | 0.7 | 30 | wiki_search、wiki_read_page、wiki_read_source_doc、wiki_flag_issue | 由工具派生：any_of wiki |
-| `hybrid-rag-wiki` | `hybrid_rag_wiki_agent` | 0.7 | 40 | wiki_search、wiki_read_page、knowledge_search、grep_chunks、list_knowledge_chunks、get_document_info、wiki_flag_issue | any_of vector/keyword/wiki |
-| `data-analysis` | `data_analyst` | 0.3 | 30 | data_schema、data_analysis；关闭 web 搜索；限定文件类型 csv/xlsx | 显式 `none_of: [faq]` |
-| `custom` | 无 | — | — | 不预填 | 不限制 |
-
-注意 `thinking` / `todo_write` 被有意排除在各预设默认工具之外（token 开销大，需要时手动勾选）。
-
-### 7.2 可配置项（CustomAgentConfig）
-
-`internal/types/custom_agent.go` 中 `CustomAgentConfig` 的主要字段（handler `CreateAgent`/`UpdateAgent` 直接接收该结构）：
-
-| 分类 | 字段 | 说明 / 默认（EnsureDefaults） |
-| --- | --- | --- |
-| 基础 | `agent_mode` | `quick-answer` / `smart-reasoning` |
-| 基础 | `agent_type` | smart-reasoning 下的预设类别，空/未知视为 custom |
-| 基础 | `system_prompt` / `system_prompt_id` | 直接内容或模板 ID（启动时经 `ResolveBuiltinAgentPromptRefs` 等解析） |
-| 基础 | `context_template` / `context_template_id` | 普通模式下检索片段的拼装模板 |
-| 模型 | `model_id`、`rerank_model_id`、`temperature`、`max_completion_tokens`、`thinking`、`citation_enabled` | temperature<0 → 0.7；max_completion_tokens=0 使用运行时默认：quick-answer 2048、smart-reasoning 4096、绑定沙箱的 smart-reasoning 24576；thinking 未设时固定为 false；citation 未设时视为 true |
-| Agent | `max_iterations` | 默认 10（服务层上限 100） |
-| Agent | `llm_call_timeout` | 单次 LLM 调用秒数，0 用全局默认（120s） |
-| Agent | `allowed_tools` | 工具白名单；空回退 DefaultAllowedTools |
-| MCP | `mcp_selection_mode`（all/selected/none）、`mcp_services`、`mcp_auth_wait_timeout` | OAuth 等待秒数 <=0 用 Gate 默认 |
-| 技能 | `skills_selection_mode`（all/selected/none）、`selected_skills`、`sandbox_config_id` | 选择空间沙箱及其已安装技能，见[技能目录与沙箱](22-skills-sandbox.md) |
-| 记忆 | `memory_enabled` | nil 继承空间，false 禁用本智能体的记忆读写 |
-| 知识库 | `kb_selection_mode`（all/selected/none）、`knowledge_bases`、`retrieve_kb_only_when_mentioned`、`retain_retrieval_history` | retain=true 时历史 KB 检索结果不脱敏 |
-| 多模态 | `image_upload_enabled`、`vlm_model_id`、`audio_upload_enabled`、`asr_model_id`、`image_storage_provider` | VLM 也用于 MCP 工具返回图片的描述 |
-| 文件 | `supported_file_types`、`chat_parser_engine_rules`、`attachment_image_understanding`、`attachment_ocr_max_pages`、`attachment_parse_wait_timeout_sec` | 数据分析型 Agent 常限定 csv/xlsx |
-| FAQ | `faq_priority_enabled`、`faq_direct_answer_threshold`、`faq_score_boost` | — |
-| Web | `web_search_enabled`、`web_search_max_results`、`web_search_provider_id`、`web_fetch_enabled`、`web_fetch_top_n` | max_results 默认 5 |
-| 多轮 | `multi_turn_enabled`、`history_turns` | history_turns 默认 5；smart-reasoning 强制 multi_turn |
-| 检索 | `embedding_top_k`（10）、`keyword_threshold`（0.3）、`vector_threshold`（0.5）、`rerank_top_k`（5）、`rerank_threshold` | 括号内为默认值 |
-| 高级 | `enable_query_expansion`、`enable_rewrite`、`rewrite_prompt_*`、`query_understand_model_id`、`fallback_strategy`（默认 model）、`fallback_response`、`fallback_prompt`、`intent_prompts`、`data_analysis_enabled` | 主要作用于 quick-answer 管道 |
-| 建议 | `question_suggestions`（starters / follow_ups） | starters 默认 hybrid 模式 6 条；follow_ups 默认关闭、3 条 |
-
-Handler 层（`internal/handler/custom_agent.go`）提供 `CreateAgent`、`GetAgent`、`ListAgents`、`UpdateAgent`、`DeleteAgent`、`CopyAgent`、`GetPlaceholders`（返回 `types.PlaceholdersByField(PromptFieldAgentSystemPrompt)` 的占位符清单）、`GetAgentTypePresets`（带 i18n 的预设列表）、`GetSuggestedQuestions`。创建/更新时经 `authorizeAgentKnowledgeScope` 校验受限 API Key 的 KB 范围：`kb_selection_mode: all` 对 KB 受限 key 直接 403，`selected` 逐一鉴权。
-
-运行时映射：`buildAgentConfig`（`session_agent_qa.go`）把 `CustomAgentConfig` 转换为引擎的 `types.AgentConfig`（`internal/types/agent.go`），并叠加：web 搜索需 Agent 与请求同时开启（`customAgent.Config.WebSearchEnabled && req.WebSearchEnabled`）、web provider 回退租户默认、`SearchTargets` 由 KB/@文档/@标签 scope 统一构建、`MaxContextTokens` 兜底 200000、`@Skill` 的每轮优先提示与 `@MCP` 的每轮范围收窄（共享 Agent 的 @MCP 只能落在 Agent 预设集合内）。另外只有当 `knowledge_search` 实际可用时才要求配置 rerank 模型（`agentRequiresRerankModel`）。
-
-### 7.3 分享机制（agent_share）
-
-`internal/application/service/agent_share.go`：Agent 可分享给**组织（Organization）**：
-
-- 仅 Agent 属主租户可分享（`ErrNotAgentOwner`）；分享者所在租户须为组织 Editor+ 成员；
-- 分享前校验 Agent 配置完整：必须有 `model_id`；若 `knowledge_search` 在其工具集内（或工具集为空回退默认集）且 KB scope 未禁用，还必须有 `rerank_model_id`，否则 `ErrAgentNotConfigured`；
-- **权限强制为只读**：`permission = types.OrgRoleViewer`（跨租户编辑不在 v1 范围）；重复分享则幂等更新；
-- 接收方租户可通过 `TenantDisabledSharedAgentRepository` 把某个共享 Agent 在本租户禁用；
-- 使用共享 Agent 对话时（`session_agent_qa.go`），检索与模型 scope 切到 **Agent 属主租户**（`resolveRetrievalTenantID`），因此共享方的 KB 对使用方可用，而使用方自己的 MCP @提及会被限制在 Agent 预设内。
-
-## 8. 内置 Agent（config/builtin_agents.yaml）
-
-内置 Agent 由 `config/builtin_agents.yaml` 定义，启动时 `types.LoadBuiltinAgentsConfig` 载入并重建 `BuiltinAgentRegistry`（`internal/types/builtin_agent_config.go`），支持 default/zh-CN/zh-TW/ja-JP/ko-KR 多语言名称与描述；`system_prompt_id`/`context_template_id` 在启动时经 `ResolveBuiltinAgentPromptRefs` 解析为具体模板内容。
-
-| ID | 名称（zh-CN） | agent_mode / agent_type | 关键配置 |
-| --- | --- | --- | --- |
-| `builtin-quick-answer` | 快速问答 | `quick-answer` | 模板 `default_kb` + `default_context`；temperature 0.7；FAQ 优先（直接回答阈值 0.9、加权 1.2）；query expansion + rewrite；web 搜索开、5 条；不进 Agent 引擎 |
-| `builtin-smart-reasoning` | 智能推理 | `smart-reasoning` / `rag-qa` | `max_iterations: 50`；工具：knowledge_search、grep_chunks、list_knowledge_chunks、query_knowledge_graph、get_document_info；web 搜索开；多轮 5 轮 |
-| `builtin-data-analyst` | 数据分析师 | `smart-reasoning` / `data-analysis` | 模板 `data_analyst`；temperature 0.3；`max_iterations: 30`；工具仅 data_schema + data_analysis；限定 csv/xlsx；关闭 web 搜索；历史 10 轮 |
-| `builtin-wiki-researcher` | 维基问答 | `smart-reasoning` / `wiki-qa` | 模板 `wiki_researcher`；`max_iterations: 30`；工具：wiki_search、wiki_read_page、wiki_read_source_doc、wiki_flag_issue（只读 + 报障）；关闭 web 搜索 |
-| `builtin-wiki-fixer` | 维基修订 | `smart-reasoning` / `custom` | 模板 `wiki_fixer`；`retain_retrieval_history: true`（修订需要跨轮记住页面内容）；工具含全部 wiki 写操作（wiki_write_page、wiki_replace_text、wiki_rename_page、wiki_delete_page、wiki_read_issue、wiki_update_issue 等 9 个）；`kb_selection_mode: selected` |
-
-补充两点（来自 `internal/types/custom_agent.go`）：
-
-- `builtin-wiki-fixer` **有意不出现**在用户可见的 Agent 列表（`builtinAgentIDsOrdered` 排除了它）——它是 Wiki 编辑器程序化调用的内部 Agent，但仍可经 `GetAgentByID` 使用；
-- `builtinAgentIDsOrdered` 中还保留了 `builtin-deep-researcher`、`builtin-knowledge-graph-expert`、`builtin-document-assistant` 等 ID 常量位次，但当前 YAML 未定义这些条目，注册表以 YAML 为准；
-- `builtin_agents.yaml` 里每个条目都带 `reflection_enabled`（数据分析师为 `true`，其余 `false`），但**后端目前不消费这个字段**——`internal/` 下既没有对应的结构体字段也没有引用，只有 YAML 与前端类型定义里存在。也就是说它当前不影响 Agent 的实际行为，看到它为 `true` 不要以为多了一轮反思。
-
-顺带一提，`internal/agent/prompts_wiki.go` 中的 `WikiSummaryPrompt`、`WikiKnowledgeExtractPrompt`、`WikiTaxonomyPlanPrompt` 等常量属于 **Wiki ingest 管道**（文档入库时 LLM 生成 wiki 页面/目录规划）使用的提示词，与 wiki 类 Agent 的运行时工具互补：前者生产 Wiki 内容，后者消费与维护。
-
-## 9. Agent 模式与普通 RAG 问答模式
-
-### 9.1 两条问答路径
+#### 两条问答路径 {#_9-1-两条问答路径}
 
 路由层（`internal/router/router.go`）注册了两个入口：
 
@@ -553,9 +619,9 @@ const (
 )
 ```
 
-### 9.2 模式决策逻辑
+#### 模式决策逻辑 {#_9-2-模式决策逻辑}
 
-`Handler.AgentQA` 中的决策（真实代码逻辑）：
+`Handler.AgentQA` 按以下顺序选择执行模式：
 
 1. 解析请求并经 `resolveAgent` 解析 `agent_id` 对应的 `CustomAgent`（含内置与共享 Agent 的权限校验）；
 2. **`CustomAgent.IsAgentMode()` 优先于请求里的 `agent_enabled` 字段**——即 `Config.AgentMode == "smart-reasoning"` 才走 Agent，`quick-answer` 型 Agent 即使打到 `/agent-chat` 也会被降级：
@@ -564,7 +630,7 @@ const (
 
 嵌入渠道（`internal/handler/embed_channel.go` 的 `delegateEmbedChat`）同理：`agentMode && ch.AgentID != types.BuiltinQuickAnswerID` 才转发 `AgentQA`，否则 `KnowledgeQA`。
 
-### 9.3 两条路径的差异
+#### 两条路径的差异 {#_9-3-两条路径的差异}
 
 | 维度 | 普通 RAG（qaModeNormal） | Agent（qaModeAgent） |
 | --- | --- | --- |
@@ -577,42 +643,7 @@ const (
 
 `sessionService.AgentQA`（`internal/application/service/session_agent_qa.go`）在进入引擎前还处理：共享 Agent 的租户切换、视觉模型路由（模型支持 vision 则直传图片，否则把 VLM 描述并入 query）、引用上下文/附件内容并入 query、rerank 模型按需初始化等；执行是异步的，事件经 EventBus 流回 Handler 层。
 
-## 10. 建议问题（Starters 与追问）
-
-对话框在两个位置会给出可点击的问题：会话还空着时的**开场问题**（starters），以及每轮回答结束后的**追问建议**（follow-ups）。这套配置归 Agent 所有（`QuestionSuggestionConfig`，`internal/types/custom_agent.go`），渠道设置只能抑制展示，不能改内容策略。
-
-### 配置项
-
-两组配置各自独立开关，`mode` 决定问题从哪来：
-
-| mode | 来源 |
-| --- | --- |
-| `curated` | 只用人工写死的 `items` |
-| `knowledge` | 从知识库内容里取 |
-| `generated` | 让模型生成 |
-| `hybrid`（默认） | 上述几种混合 |
-
-| 配置 | 默认 | 说明 |
-| --- | --- | --- |
-| `starters.enabled` / `mode` / `items` / `count` | — / `hybrid` / 空 / 6 | 开场问题 |
-| `follow_ups.enabled` / `mode` / `count` | — / `hybrid` / 3 | 追问建议 |
-| `follow_ups.model_id` | 空（用会话模型） | 生成追问用的模型，可指定小模型省成本 |
-| `follow_ups.categories` | 空 | 限定问题类型：`clarify`（澄清）/ `deepen`（深入）/ `action`（行动） |
-| `follow_ups.max_context_turns` | 2 | 生成时回看几轮对话 |
-| `follow_ups.additional_instruction` | 空 | 追加到生成提示词的业务约束 |
-| `follow_ups.suppress_on_fallback` | — | 回答走了兜底策略时不出建议 |
-| `follow_ups.suppress_when_answer_asks_question` | — | 回答本身在反问用户时不出建议（避免两个问题打架） |
-| `follow_ups.knowledge_fallback` | — | 生成失败时回退到知识库来源 |
-| `follow_ups.allow_regenerate` | — | 是否允许用户手动换一批 |
-
-### 生成、缓存与埋点
-
-- 结果存 `message_suggestion_sets` 表，按 `(assistant_message_id, placement, config_hash, locale)` 缓存——`config_hash` 把「当前生效的 Agent 配置」摘要进缓存键，所以改了配置会自然拿到新的一批，而不是读到旧缓存；`locale` 让多语言各自缓存；
-- 状态：`generating` → `ready`，另有 `suppressed`（按上面的抑制规则跳过）与 `failed`；`lease_until` 防止多实例重复生成同一批；
-- 接口：`GET /sessions/:id/messages/:message_id/suggestions` 读，`POST` 同路径触发生成（幂等），`POST /sessions/:session_id/suggestion-events` 上报埋点；
-- 埋点事件：`impression`（曝光）/ `click`（点击）/ `dismiss`（关掉）/ `regenerate`（换一批），存 `message_suggestion_events`。点击后发出的下一条用户消息会带 `SuggestionAttribution`（`suggestion_set_id` + `question_id`），因此统计上能区分「点了建议」与「自己打了同样的问题」。
-
-## 11. 关键常量速查
+### 关键常量速查 {#_11-关键常量速查}
 
 | 常量 | 值 | 位置 |
 | --- | --- | --- |

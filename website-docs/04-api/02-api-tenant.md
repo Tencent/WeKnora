@@ -1,6 +1,6 @@
 # API 参考：租户（空间）与成员
 
-路由注册：`internal/router/router.go` 的 `RegisterTenantRoutes`。Handler：`internal/handler/tenant.go`、`internal/handler/tenant_member.go`、`internal/handler/tenant_invitation.go`、`internal/handler/tenant_invite_link.go`、`internal/handler/audit_log.go`。
+管理工作空间、成员、邀请、API Key 和审计日志。操作作用于当前活跃空间，跨空间访问按接口权限校验。
 
 所有 `/tenants/:id/*` 路由在组级挂载 `PathTenantMatch()`（`internal/middleware/access.go`）：URL 中的 `:id` 必须等于当前活跃空间（跨空间超管例外），防止越权操作他人空间。
 
@@ -379,3 +379,7 @@ curl "$BASE/api/v1/tenants/1/audit-log?limit=50" -H "Authorization: Bearer $TOKE
 ```bash
 curl $BASE/api/v1/knowledge-bases/kb-1/activity -H "Authorization: Bearer $TOKEN"
 ```
+
+## 实现参考
+
+路由注册：`internal/router/router.go` 的 `RegisterTenantRoutes`。Handler：`internal/handler/tenant.go`、`internal/handler/tenant_member.go`、`internal/handler/tenant_invitation.go`、`internal/handler/tenant_invite_link.go`、`internal/handler/audit_log.go`。

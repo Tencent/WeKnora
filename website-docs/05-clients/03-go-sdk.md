@@ -1,6 +1,6 @@
 # Go SDK
 
-WeKnora 官方 Go SDK 位于仓库的 `client/` 目录，是一个独立的 Go module，封装了 WeKnora 服务端 `/api/v1/*` 全部主要资源的 CRUD 操作与 SSE 流式对话能力。服务端自身、官方 CLI（`weknora`）均基于此 SDK 构建。
+Go SDK 封装知识库、文档、会话等主要资源的 CRUD 操作，以及 SSE 流式问答。源码位于 `client/`，以独立 Go module 提供；官方 CLI 和服务端相关调用复用此 SDK。
 
 ## 安装
 

@@ -1,8 +1,8 @@
 # 数据库与迁移
 
-本章梳理 WeKnora 的数据库支持矩阵、`migrations/` 目录全部迁移叠加后的最终表结构、表间关系（ER 图）、golang-migrate 迁移机制，以及新增迁移与常见问题排查。
+WeKnora 使用版本化迁移维护数据库结构，PostgreSQL 与 SQLite 分别使用对应的迁移目录。应用启动时可自动执行迁移，也可通过脚本手动执行；新增字段或表时需要同步维护两条路径。
 
-## 1. 支持的数据库
+## 支持的数据库 {#_1-支持的数据库}
 
 主应用通过 GORM 连接数据库，驱动由环境变量 `DB_DRIVER` 决定。`internal/container/container.go` 的 `initDatabase()` 中的 switch **只接受两个值**：
 
@@ -16,7 +16,7 @@
 
 检索引擎（向量/关键词索引的存储）与主库解耦，由 `RETRIEVE_DRIVER` 控制（postgres / elasticsearch / qdrant / milvus / sqlite 等，详见《扩展点指南》）。当 `RETRIEVE_DRIVER` 不含 `postgres` 时，迁移 DSN 会带上 `options=-c app.skip_embedding=true`，`embeddings` 表相关迁移通过该 GUC 条件跳过。
 
-## 2. 迁移目录结构
+## 迁移目录结构 {#_2-迁移目录结构}
 
 ```text
 migrations/
@@ -30,7 +30,7 @@ migrations/
 - `sqlite/` 以 `000000_init` 作为压平后的全量初始化（JSONB→TEXT、SERIAL→AUTOINCREMENT 等方言差异已适配），其后按需追加增量版本（当前到 `000013_mcp_tool_enabled`），同样由 golang-migrate 顺序执行；
 - `paradedb/00-init-db.sql` 创建 `pg_search` 等扩展；BM25 索引使用中文 Lindera 分词器建在 `embeddings.content` 上。
 
-### 2.1 versioned/ 迁移史概览（按主题）
+### versioned/ 迁移史概览（按主题） {#_2-1-versioned-迁移史概览-按主题}
 
 | 版本段 | 主题 | 引入的关键表/列 |
 | --- | --- | --- |
@@ -50,7 +50,7 @@ migrations/
 | 000078 | 分块编辑与自定义元数据 | `chunks` 增加 `source_content`/`content_revision`/`index_status`/`last_editor_id`/`context_header`，新增 `chunk_revisions` 表，`knowledges` 增加 `custom_metadata` |
 | 000079 | 知识库文件夹树 | `knowledges` 增加 `folder_path` 列并回填历史目录上传（原先路径塞在 `file_name` 里），新增 `(tenant_id, knowledge_base_id, folder_path)` 索引 |
 
-### 2.2 新增迁移（000080–000091）
+### 新增迁移（000080–000091） {#_2-2-新增迁移-000080–000091}
 
 | 版本 | 变更 |
 | --- | --- |
@@ -81,11 +81,11 @@ SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 
 基线 schema 与后续增量共同决定新建库和已有库的最终结果；不能只看新增迁移文件名判断 Lite 是否有某张表。
 
-## 3. 最终表结构
+## 最终表结构 {#_3-最终表结构}
 
 以下为全部 up 迁移叠加后的**最终生效结构**（后续迁移对早期表的 ALTER 已合并）。所有业务表统一带 `created_at` / `updated_at`，多数带 `deleted_at`（GORM 软删除），不再逐一列出。
 
-### 3.1 租户与用户
+### 租户与用户 {#_3-1-租户与用户}
 
 | 表 | 用途 | 关键字段 |
 | --- | --- | --- |
@@ -100,7 +100,7 @@ SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 | `user_resource_favorites` | 用户收藏 | PK（`user_id`,`tenant_id`,`resource_type`,`resource_id`） |
 | `audit_logs` | 审计日志（000044） | `tenant_id`、`actor_user_id`/`actor_role`、`action`、`target_type`/`target_id`/`target_user_id`、`request_path`/`request_method`、`outcome`（success/denied）、`scope_type`/`scope_id`、`details`（JSONB） |
 
-### 3.2 模型与知识库
+### 模型与知识库 {#_3-2-模型与知识库}
 
 | 表 | 用途 | 关键字段 |
 | --- | --- | --- |
@@ -114,7 +114,7 @@ SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 | `knowledge_tag_relations` | 文档 ↔ 标签多对多（000063） | 复合主键（`knowledge_id`,`tag_id`）+ `created_at`；两侧各建索引。**同时删掉了 `knowledges.tag_id` 列**（存量单标签数据已迁入本表）。FAQ 条目的标签不在这里，仍是 `chunks.tag_id` 单标签 |
 | `vector_stores` | 外接向量库连接配置（000032） | `id`、`tenant_id`、`name`（租户内唯一）、`engine_type`、`connection_config`/`index_config`（JSONB） |
 
-### 3.3 会话与消息
+### 会话与消息 {#_3-3-会话与消息}
 
 | 表 | 用途 | 关键字段 |
 | --- | --- | --- |
@@ -124,7 +124,7 @@ SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 | `message_suggestion_events` | 建议问题曝光/点击事件 | `suggestion_set_id`（FK，CASCADE）、`question_id`、`event_type`、`actor_id` |
 | `temporary_documents` | 会话内临时文档（000070） | `tenant_id`、`session_id`、`resource_ref`、`file_name`/`file_type`/`file_size`、`status`（uploaded/processing/ready/expired）、`content`、`chunks`（JSONB）、`expires_at` |
 
-### 3.4 Agent 与 MCP
+### Agent 与 MCP {#_3-4-agent-与-mcp}
 
 | 表 | 用途 | 关键字段 |
 | --- | --- | --- |
@@ -160,7 +160,7 @@ SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 
 subject_id 使用 Principal.StorageID()，与 tenant_id 共同隔离身份。向量记录不放进条目列表，也不改变原知识库的访问权。
 
-### 3.5 跨租户协作（组织）
+### 跨租户协作（组织） {#_3-5-跨租户协作-组织}
 
 | 表 | 用途 | 关键字段 |
 | --- | --- | --- |
@@ -172,7 +172,7 @@ subject_id 使用 Principal.StorageID()，与 tenant_id 共同隔离身份。向
 | `agent_shares` | Agent 共享到组织 | FK (`agent_id`,`source_tenant_id`)→custom_agents 复合主键、`organization_id`、`permission` |
 | `tenant_disabled_shared_agents` | 租户禁用某共享 Agent | PK（`tenant_id`,`agent_id`,`source_tenant_id`） |
 
-### 3.6 Wiki
+### Wiki {#_3-6-wiki}
 
 | 表 | 用途 | 关键字段 |
 | --- | --- | --- |
@@ -181,7 +181,7 @@ subject_id 使用 Principal.StorageID()，与 tenant_id 共同隔离身份。向
 | `wiki_page_issues` | 页面问题上报 | `knowledge_base_id`、`slug`、`issue_type`、`description`、`suspected_knowledge_ids`、`status`、`reported_by` |
 | `wiki_page_revisions` | Wiki 页面历史版本（000075） | `page_id`+`version`（唯一索引）、标题/正文/摘要/类型/状态/别名快照、`edit_source`（pipeline/agent/user/revert）、`editor_id`、`edited_at`；两级保留上限：软 50 版（只裁 pipeline 与空来源）/ 硬 200 版 |
 
-### 3.7 数据源 / 渠道 / 搜索
+### 数据源 / 渠道 / 搜索 {#_3-7-数据源-渠道-搜索}
 
 | 表 | 用途 | 关键字段 |
 | --- | --- | --- |
@@ -192,7 +192,7 @@ subject_id 使用 Principal.StorageID()，与 tenant_id 共同隔离身份。向
 | `embed_channels` | 网页嵌入聊天组件渠道（000060） | `tenant_id`、`agent_id`、公开 token/域名配置 |
 | `web_search_providers` | 联网搜索引擎配置（000030） | `id`、`tenant_id`、`name`、`provider`（bing/google/tavily/searxng…）、`parameters`（JSONB API key）、`is_default` |
 
-### 3.8 存储 / 资源 / 任务 / 可观测
+### 存储 / 资源 / 任务 / 可观测 {#_3-8-存储-资源-任务-可观测}
 
 | 表 | 用途 | 关键字段 |
 | --- | --- | --- |
@@ -206,7 +206,7 @@ subject_id 使用 Principal.StorageID()，与 tenant_id 共同隔离身份。向
 | `knowledge_processing_spans` | 文档处理管道 trace（000055） | (`knowledge_id`,`attempt`,`span_id`) 唯一、`parent_span_id`、`name`（DocReader/Chunking/Embedding…）、`kind`、`status`、`input`/`output`/`metadata`（JSONB）、`error_code`/`error_message`、`duration_ms` |
 | `schema_migrations` | golang-migrate 状态表（自动维护） | `version`、`dirty` |
 
-## 4. ER 图（核心表）
+## ER 图（核心表） {#_4-er-图-核心表}
 
 ```mermaid
 erDiagram
@@ -279,11 +279,11 @@ erDiagram
     knowledges ||--o{ knowledge_processing_spans : "处理 trace"
 ```
 
-## 5. 迁移机制（golang-migrate）
+## 迁移机制（golang-migrate） {#_5-迁移机制-golang-migrate}
 
 迁移工具是 **golang-migrate/migrate v4**（`go.mod`：`github.com/golang-migrate/migrate/v4 v4.19.1`），状态记录在 `schema_migrations` 表（`version` + `dirty`）。有两条执行路径：
 
-### 5.1 应用启动时自动迁移（默认）
+### 应用启动时自动迁移（默认） {#_5-1-应用启动时自动迁移-默认}
 
 `internal/container/container.go` 的 `initDatabase()`：
 
@@ -304,7 +304,7 @@ if strings.HasPrefix(dsn, "sqlite3://") {
 
 即 postgres/ParadeDB 走 `migrations/versioned/`，SQLite 走 `migrations/sqlite/`。
 
-### 5.2 手工执行：scripts/migrate.sh
+### 手工执行：scripts/migrate.sh {#_5-2-手工执行-scripts-migrate-sh}
 
 `scripts/migrate.sh` 是 `migrate` CLI 的包装（Makefile 的 `migrate-*` 目标调用它）：
 
@@ -322,7 +322,7 @@ make migrate-force version=74      # 强制标记版本（恢复 dirty）
 make migrate-goto version=60       # 迁移/回滚到指定版本
 ```
 
-## 6. 如何新增一个迁移
+## 如何新增一个迁移 {#_6-如何新增一个迁移}
 
 1. **创建文件**：`make migrate-create name=add_my_feature`，在 `migrations/versioned/` 下生成下一个版本号（当前最大为 `000091`；创建前再次检查目录，使用下一个空闲版本的 up/down 文件）；
 2. **编写 up SQL**：注意 PostgreSQL 方言（JSONB、部分索引、`TIMESTAMP WITH TIME ZONE`）；若涉及 `embeddings` 表，参考既有迁移用 `app.skip_embedding` GUC 做条件门控（`SELECT current_setting('app.skip_embedding', true)`），保证非 postgres 检索引擎部署也能通过迁移；
@@ -331,9 +331,9 @@ make migrate-goto version=60       # 迁移/回滚到指定版本
 5. **同步 GORM 模型**：在 `internal/types/` 对应 struct 增加字段（GORM 只做 ORM 映射，生产库**不使用 AutoMigrate** 建表，schema 完全由 SQL 迁移驱动）;
 6. **验证**：`make migrate-up` → `make migrate-down` → `make migrate-up` 三连确认可逆；SQLite 侧用 `DB_DRIVER=sqlite` 启动一次 Lite 版验证初始化脚本。
 
-## 7. 常见迁移问题排查
+## 常见迁移问题排查 {#_7-常见迁移问题排查}
 
-### 7.1 dirty state（最常见）
+### dirty state（最常见） {#_7-1-dirty-state-最常见}
 
 迁移中途失败/进程被杀后，`schema_migrations.dirty = true`，后续迁移拒绝执行。
 
@@ -352,18 +352,18 @@ make migrate-up
 
 应用默认 `AUTO_RECOVER_DIRTY` 开启（`container.go`），启动时会自动尝试恢复；若关闭（设为 `false`），日志会提示手工使用 force。
 
-### 7.2 迁移"成功"但表没建出来
+### 迁移"成功"但表没建出来 {#_7-2-迁移-成功-但表没建出来}
 
 检查启动日志：自动迁移失败只是 Warn（`Database migration failed ... Continuing with application startup`），不会让进程退出。另外 `embeddings` 相关对象受 `app.skip_embedding` 门控——若 `RETRIEVE_DRIVER` 不含 `postgres`，不建 `embeddings` 索引属预期行为。
 
-### 7.3 密码特殊字符导致连接失败
+### 密码特殊字符导致连接失败 {#_7-3-密码特殊字符导致连接失败}
 
 `migrate` CLI 要求 URL 形式 DSN，密码含 `@ # !` 等字符必须 URL 编码。`scripts/migrate.sh` 和 `container.go` 都已处理（分别用 Python `quote` 与 Go `url.QueryEscape`）；自己手拼 `DB_URL` 时需自行编码。
 
-### 7.4 ParadeDB / 原生 Postgres 差异
+### ParadeDB / 原生 Postgres 差异 {#_7-4-paradedb-原生-postgres-差异}
 
 BM25 索引（`USING bm25`、Lindera 中文分词）只在 ParadeDB 可用；原生 Postgres 部署需保证相应迁移的条件分支生效或改用 Elasticsearch 等外部检索引擎。存量原生 Postgres 库切到 ParadeDB 可参考 `migrations/paradedb/01-migrate-to-paradedb.sql`。
 
-### 7.5 版本文件冲突
+### 版本文件冲突 {#_7-5-版本文件冲突}
 
 多个分支同时新增同一个版本号（如两个分支都生成同一数字前缀）会冲突：golang-migrate 按数字排序且版本号唯一。合并时后合入者需要把自己的迁移改成下一个空闲版本号（up/down 两个文件都要改名）。

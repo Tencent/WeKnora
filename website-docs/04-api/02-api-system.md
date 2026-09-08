@@ -1,8 +1,6 @@
 # API 参考：系统与平台管理
 
-这一组是部署级接口：读系统信息，以及系统管理员专属的平台控制面（全局设置、运行时队列、平台 API Key、跨空间审计、重置密码）。功能说明见[平台管理与系统管理员](../03-features/20-platform-admin.md)。
-
-路由注册：`internal/router/routes_auth_tenant.go` 的 `RegisterSystemAdminRoutes` 与 `RegisterSystemRoutes`。Handler：`internal/handler/system.go`、`internal/handler/audit_log.go`。
+提供部署级系统信息和平台管理接口，包括全局设置、任务队列、平台 API Key、跨空间审计和用户密码重置。功能说明见[平台管理与系统管理员](../03-features/20-platform-admin.md)。
 
 `/system/admin/*` 全组挂 `SystemAdmin()` 守卫；平台 API Key 按能力细分（`system_settings_read/manage`、`system_runtime_read/manage`、`system_tenants_read/manage`、`system_audit_read`）。
 
@@ -269,3 +267,7 @@ curl -X POST $BASE/api/v1/system/admin/tenants/apply-default-storage-quota -H "A
 ```bash
 curl $BASE/api/v1/system/admin/audit-log -H "Authorization: Bearer $TOKEN"
 ```
+
+## 实现参考
+
+路由注册：`internal/router/routes_auth_tenant.go` 的 `RegisterSystemAdminRoutes` 与 `RegisterSystemRoutes`。Handler：`internal/handler/system.go`、`internal/handler/audit_log.go`。

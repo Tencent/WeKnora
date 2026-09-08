@@ -1,6 +1,6 @@
 # API 参考：IM、Embed 与文件服务
 
-路由注册：`internal/router/router.go` 的 `RegisterIMRoutes`、`RegisterIMChannelRoutes`、`RegisterEmbedChannelRoutes`、`RegisterEmbedPublicRoutes`、`serveFilesWithResources`、`servePresignedFiles`、`servePresignedPreview`、`serveResourceGrants`。Handler：`internal/handler/im.go`、`internal/handler/wechat_qrcode.go`、`internal/handler/embed_channel.go`。
+管理 IM 和网页嵌入渠道，并提供渠道回调、访客会话与文件访问接口。管理端、IM 平台回调和 Embed 访客使用各自的认证方式。
 
 ## IM 回调（免全局认证）
 
@@ -443,3 +443,7 @@ curl "$BASE/api/v1/files/presigned-preview?file_path=local://1/x.png" -H "Author
 ```bash
 curl $BASE/r/abc123 -o file.png
 ```
+
+## 实现参考
+
+路由注册：`internal/router/router.go` 的 `RegisterIMRoutes`、`RegisterIMChannelRoutes`、`RegisterEmbedChannelRoutes`、`RegisterEmbedPublicRoutes`、`serveFilesWithResources`、`servePresignedFiles`、`servePresignedPreview`、`serveResourceGrants`。Handler：`internal/handler/im.go`、`internal/handler/wechat_qrcode.go`、`internal/handler/embed_channel.go`。
