@@ -136,6 +136,9 @@ export default defineConfig({
         target: DEV_PROXY_TARGET,
         changeOrigin: true,
         secure: false,
+        // 沙箱终端等 WebSocket 升级请求也走 /api，必须开启 WS 转发，
+        // 否则浏览器侧握手失败、前端表现为"一直正在连接"。
+        ws: true,
       },
       '/files': {
         target: DEV_PROXY_TARGET,
@@ -155,6 +158,7 @@ export default defineConfig({
         target: DEV_PROXY_TARGET,
         changeOrigin: true,
         secure: false,
+        ws: true,
       },
       '/files': {
         target: DEV_PROXY_TARGET,
