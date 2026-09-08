@@ -418,6 +418,30 @@ type WikiPageRepository interface {
 	// DeleteRevisionsByPage hard-deletes a page's entire snapshot history.
 	DeleteRevisionsByPage(ctx context.Context, pageID string) error
 
+	// DeleteByKnowledgeBaseID soft-deletes all wiki pages in a knowledge base.
+	// Used by KB delete cleanup to batch-soft-delete every page without walking
+	// the folder tree. Bypasses the per-page chunk/link reconciliation that
+	// DeletePage does — the whole KB is going away, so cross-link cleanup and
+	// chunk sync deletion are the KB delete flow's responsibility.
+	DeleteByKnowledgeBaseID(ctx context.Context, kbID string) error
+
+	// DeleteFoldersByKnowledgeBaseID soft-deletes all wiki folders in a
+	// knowledge base. Unlike DeleteFolder this does NOT enforce the emptiness
+	// guard — the KB is being deleted, so non-empty folders must go too.
+	DeleteFoldersByKnowledgeBaseID(ctx context.Context, kbID string) error
+
+	// DeleteRevisionsByKnowledgeBaseID hard-deletes all wiki page revisions
+	// in a knowledge base. Revisions have no deleted_at column (they are
+	// immutable snapshots, not soft-deletable rows), so this is a physical
+	// DELETE — same semantics as DeleteRevisionsByPage but scoped to the
+	// whole KB.
+	DeleteRevisionsByKnowledgeBaseID(ctx context.Context, kbID string) error
+
+	// DeleteIssuesByKnowledgeBaseID soft-deletes all wiki page issues in a
+	// knowledge base. Issues reference the KB and must be cleaned up
+	// alongside pages to avoid orphans.
+	DeleteIssuesByKnowledgeBaseID(ctx context.Context, kbID string) error
+
 	// CreateIssue inserts a new wiki page issue record.
 	CreateIssue(ctx context.Context, issue *types.WikiPageIssue) error
 

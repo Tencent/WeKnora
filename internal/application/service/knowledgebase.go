@@ -51,6 +51,7 @@ type knowledgeBaseService struct {
 	dsScheduler     *datasource.Scheduler
 	audit           interfaces.AuditLogService
 	resourceCatalog interfaces.ResourceCatalog
+	wikiRepo        interfaces.WikiPageRepository
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
@@ -74,6 +75,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	dsScheduler *datasource.Scheduler,
 	audit interfaces.AuditLogService,
 	resourceCatalog interfaces.ResourceCatalog,
+	wikiRepo interfaces.WikiPageRepository,
 ) interfaces.KnowledgeBaseService {
 	return &knowledgeBaseService{
 		repo:            repo,
@@ -96,6 +98,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		dsScheduler:     dsScheduler,
 		audit:           audit,
 		resourceCatalog: resourceCatalog,
+		wikiRepo:        wikiRepo,
 	}
 }
 
@@ -966,6 +969,29 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 				"knowledge_base_id": kbID,
 			})
 			return err
+		}
+	}
+
+	// Clean up wiki data associated with this knowledge base. Pages, folders,
+	// and issues are soft-deleted (they carry DeletedAt); revisions are
+	// hard-deleted (no deleted_at column — they are immutable snapshots).
+	// Best-effort: Warnf + continue, same pattern as chunks/graph cleanup
+	// above. A failure here leaves rows that are already unreachable via every
+	// read path (the KB itself is gone), so it's not worth retrying the task.
+	// nil-safe for tests that construct knowledgeBaseService without wikiRepo.
+	logger.Infof(ctx, "Cleaning up wiki data for knowledge base")
+	if s.wikiRepo != nil {
+		if err := s.wikiRepo.DeleteByKnowledgeBaseID(ctx, kbID); err != nil {
+			logger.Warnf(ctx, "Failed to delete wiki pages for KB %s: %v", kbID, err)
+		}
+		if err := s.wikiRepo.DeleteFoldersByKnowledgeBaseID(ctx, kbID); err != nil {
+			logger.Warnf(ctx, "Failed to delete wiki folders for KB %s: %v", kbID, err)
+		}
+		if err := s.wikiRepo.DeleteRevisionsByKnowledgeBaseID(ctx, kbID); err != nil {
+			logger.Warnf(ctx, "Failed to delete wiki revisions for KB %s: %v", kbID, err)
+		}
+		if err := s.wikiRepo.DeleteIssuesByKnowledgeBaseID(ctx, kbID); err != nil {
+			logger.Warnf(ctx, "Failed to delete wiki issues for KB %s: %v", kbID, err)
 		}
 	}
 
