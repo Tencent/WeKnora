@@ -13,6 +13,7 @@ import { useMenuStore } from '@/stores/menu';
 import { useUIStore } from '@/stores/ui';
 import { useOrganizationStore } from '@/stores/organization';
 import { useAuthStore } from '@/stores/auth';
+import { permissionCanEditKB, permissionCanManageKB } from '@/utils/kbPermission';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
@@ -276,6 +277,11 @@ const currentSharedKb = computed(() =>
 // in the share list is the authoritative signal.
 const isViaShare = computed(() => !!currentSharedKb.value);
 
+// Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB).
+// Declared first: the canEdit / canManage gates below treat an explicit
+// cross-tenant grant as the single source of truth.
+const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
+
 // Can edit: when accessed via an organization share, ONLY the share grant
 // counts — even if the current user happens to be the original creator of
 // the KB. The backend's RBAC middleware authorizes based on the active
@@ -283,19 +289,29 @@ const isViaShare = computed(() => !!currentSharedKb.value);
 // different tenant context will be 403'd on write. Otherwise: KB creator
 // (any role) or tenant Admin+ in the home tenant.
 //
+// A resolved cross-tenant permission (org share or shared-agent visibility,
+// already capped server-side by effective = min(share, org_role, tenant_role))
+// outranks every local signal: without this priority rule a personal-workspace
+// admin browsing a read-only shared KB saw edit entries that only led to 403s
+// (#3098).
+//
 // hasRole('contributor') is intentionally NOT here — being a Contributor
 // in a tenant does not by itself grant edit on someone else's KB.
 const canEdit = computed(() => {
+  const permission = effectiveKBPermission.value;
+  if (permission) return permissionCanEditKB(permission);
   if (isViaShare.value) return orgStore.canEditKB(kbId.value, false);
   if (isOwner.value) return true;
   if (authStore.hasRole('admin')) return true;
   return orgStore.canEditKB(kbId.value, false);
 });
 
-// Can manage (delete, settings, etc.): same isViaShare-first rule. For
+// Can manage (delete, settings, etc.): same permission-first rule. For
 // shared KBs only an 'admin' share grant qualifies — editor/viewer (and
 // even being the creator viewed via share) never grant delete/settings.
 const canManage = computed(() => {
+  const permission = effectiveKBPermission.value;
+  if (permission) return permissionCanManageKB(permission);
   if (isViaShare.value) return orgStore.canManageKB(kbId.value, false);
   if (isOwner.value) return true;
   if (authStore.hasRole('admin')) return true;
@@ -319,9 +335,6 @@ const canMutateKnowledge = computed(() => {
   if (authStore.hasRole('admin')) return true;
   return authStore.hasRole('contributor');
 });
-
-// Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
-const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
 
 // Downloading returns the original source file, which is intentionally more
 // restrictive than viewing parsed content or using the preview tab. A tenant
