@@ -882,6 +882,81 @@ func orgSharedKBFileRequest() *http.Request {
 			url.QueryEscape("resource://ShArEdKbHaNdLe00000000"), nil)
 }
 
+func TestMessageScopedFilesLegacySharedKBPaths(t *testing.T) {
+	const path = "local://7/exports/chart.png"
+	for _, tc := range []struct {
+		name, path, evidence string
+		shared               bool
+		kbTenant             uint64
+		want                 int
+	}{
+		{"shared", path, "![chart](" + path + ")", true, 7, 200},
+		{"structured URL", path, path, true, 7, 200},
+		{"revoked", path, "![chart](" + path + ")", false, 7, 403},
+		{"unrelated resource", path, "![chart](" + path + "-other)", true, 7, 403},
+		{"wrong KB owner", path, "![chart](" + path + ")", true, 8, 403},
+		{"answer text is not proof", path, "", true, 7, 403},
+		{"private upload", "local://7/uploads/private.png", "local://7/uploads/private.png", true, 7, 403},
+		{"traversal", "local://7/exports/../private.png", "local://7/exports/../private.png", true, 7, 400},
+		{"minio", "minio://bucket/7/exports/chart.png", "![chart](minio://bucket/7/exports/chart.png)", true, 7, 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("STORAGE_TYPE", "local")
+			if strings.HasPrefix(tc.path, "minio:") {
+				t.Setenv("STORAGE_TYPE", "minio")
+			}
+			message := &types.Message{AgentTenantID: 42, Content: "![forged](" + tc.path + ")",
+				ExecutionContext: types.MessageExecutionContext{KnowledgeBaseIDs: []string{"kb"}},
+				AgentSteps: types.AgentSteps{{ToolCalls: []types.ToolCall{{Result: &types.ToolResult{
+					Data: map[string]interface{}{"results": []interface{}{map[string]interface{}{
+						"knowledge_base_id": "kb", "content": tc.evidence,
+					}}},
+				}}}}},
+			}
+			read := false
+			engine := newMessageScopedFilesTestEngine(42,
+				&stubMessageFileLookup{get: func(context.Context, string, string) (*types.Message, error) {
+					return message, nil
+				}},
+				nil,
+				&stubTenantService{get: func(_ context.Context, id uint64) (*types.Tenant, error) {
+					if id != 7 {
+						t.Fatalf("wrong storage tenant %d", id)
+					}
+					return &types.Tenant{ID: id}, nil
+				}},
+				&stubFileService{getFile: func(_ context.Context, p string) (io.ReadCloser, error) {
+					read = true
+					if p != tc.path {
+						t.Fatalf("wrong path %q", p)
+					}
+					return io.NopCloser(strings.NewReader("image")), nil
+				}}, nil,
+				messageKBShareAuthorizer{
+					KBs: &stubKBTenantLookup{kbs: []*types.KnowledgeBase{{ID: "kb", TenantID: tc.kbTenant}}},
+					ShareGuard: &stubKBShareGuard{hasPermission: func(
+						_ context.Context, kb string, caller uint64, _ types.TenantRole, role types.OrgMemberRole,
+					) (bool, error) {
+						if kb != "kb" || caller != 42 || role != types.OrgRoleViewer {
+							t.Fatal("incorrect permission scope")
+						}
+						return tc.shared, nil
+					}},
+				},
+			)
+			recorder := httptest.NewRecorder()
+			engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet,
+				"/sessions/s/messages/m/files?file_path="+url.QueryEscape(tc.path), nil))
+			if recorder.Code != tc.want {
+				t.Fatalf("status=%d, want=%d, body=%s", recorder.Code, tc.want, recorder.Body.String())
+			}
+			if read != (tc.want == 200) {
+				t.Fatalf("unexpected file read: %v", read)
+			}
+		})
+	}
+}
+
 func TestMessageScopedFilesServesOrgSharedKBResource(t *testing.T) {
 	engine, requestedPath := newOrgSharedKBTestEngine(t, true,
 		types.References{{
