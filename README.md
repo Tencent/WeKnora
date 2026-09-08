@@ -54,14 +54,14 @@
 [**WeKnora**](https://weknora.weixin.qq.com) is an open-source, LLM-powered knowledge framework built for enterprise-grade document understanding, semantic retrieval, and autonomous reasoning.
 
 <p align="center">
-  <a href="./docs/media/weknora-narrated/weknora-narrated-readme.mp4?raw=true">
+  <a href="https://github.com/user-attachments/assets/19b28ce2-a62f-4f54-b289-c983576259bc">
     <img src="./docs/media/weknora-narrated/cover-en.jpg" alt="Watch the WeKnora product tour: RAG, Agents and Auto-Wiki — 2 minutes 25 seconds, with English narration and captions" width="960">
   </a>
 </p>
 <p align="center">
-  <a href="./docs/media/weknora-narrated/weknora-narrated-readme.mp4?raw=true"><b>Watch the product tour</b></a> · 2:25 · English narration &amp; captions<br>
+  <a href="https://github.com/user-attachments/assets/19b28ce2-a62f-4f54-b289-c983576259bc"><b>Watch the product tour</b></a> · 2:25 · 1080p · English narration &amp; captions<br>
   From connected sources to cited answers, agent skills, memory and Auto-Wiki — through to integrations and self-hosting.<br>
-  <a href="./docs/media/weknora-narrated/weknora-narrated-bilingual-readme.mp4?raw=true">中文 / English subtitles</a>
+  <a href="https://github.com/user-attachments/assets/2819598d-3140-4623-814a-8162a22b653c">中文 / English subtitles</a>
 </p>
 
 It is organized around three core capabilities: **RAG-based Quick Q&A** for everyday lookups, a **ReAct Agent** that autonomously orchestrates retrieval, MCP tools, a **tenant skill catalog**, session-persistent **Docker / E2B / Cube sandboxes** and web search to handle complex multi-step tasks, and a brand-new **Wiki Mode** in which agents distill raw documents into a self-maintaining, interlinked markdown knowledge base with an interactive knowledge graph, complete with manual editing, revision history and one-click rollback. **Cross-session long-term memory** remembers who you are and what you keep asking about. Knowledge curation is equally hands-on: a **tree-structured folder view** preserves the directory layout of uploads, and **chunk editing with revision history** lets retrieval chunks be edited, diffed and reverted like documents. Combined with multi-source ingestion (Feishu wiki / Feishu Drive / GitLab / Tencent IMA / Notion / Yuque / RSS, and growing), **website embed widgets** for publishing agents to external sites, **scoped API keys with a principal model** for programmatic integrations, **multi-instance storage backends** per workspace for flexible data placement, 20+ LLM provider integrations (including LiteLLM), full Langfuse observability plus a **runtime task-queue dashboard with worker-pool governance**, **enterprise-ready multi-workspace RBAC** (4-tier role matrix + per-resource ownership + per-workspace audit log), and a fully self-hostable modular architecture, WeKnora turns scattered documents into a queryable, reasoning-capable, continuously evolving knowledge asset.
