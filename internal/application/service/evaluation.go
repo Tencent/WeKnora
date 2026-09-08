@@ -141,6 +141,21 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Tenant ID: %d", tenantID)
 
+	// Every evaluation runs against a newly-created KB. If setup fails after
+	// that KB has been created, remove it here. Once the background run starts,
+	// EvalDataset owns cleanup for every success and failure path.
+	var createdEvaluationKBID string
+	evaluationStarted := false
+	defer func() {
+		if evaluationStarted || createdEvaluationKBID == "" {
+			return
+		}
+		logger.Infof(ctx, "Cleaning up evaluation knowledge base after setup failure: %s", createdEvaluationKBID)
+		if err := e.knowledgeBaseService.DeleteKnowledgeBase(ctx, createdEvaluationKBID); err != nil {
+			logger.Errorf(ctx, "Failed to clean up evaluation knowledge base after setup failure: %v", err)
+		}
+	}()
+
 	// Handle knowledge base creation if not provided
 	if knowledgeBaseID == "" {
 		logger.Info(ctx, "No knowledge base ID provided, creating new knowledge base")
@@ -172,6 +187,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 		kb, err := e.knowledgeBaseService.CreateKnowledgeBase(ctx, &types.KnowledgeBase{
 			Name:             "evaluation",
 			Description:      "evaluation",
+			IsTemporary:      true,
 			EmbeddingModelID: embeddingModelID,
 			SummaryModelID:   llmModelID,
 		})
@@ -180,6 +196,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 			return nil, err
 		}
 		knowledgeBaseID = kb.ID
+		createdEvaluationKBID = kb.ID
 		logger.Infof(ctx, "Created new knowledge base with ID: %s", knowledgeBaseID)
 	} else {
 		logger.Infof(ctx, "Using existing knowledge base ID: %s", knowledgeBaseID)
@@ -193,6 +210,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 		kb, err = e.knowledgeBaseService.CreateKnowledgeBase(ctx, &types.KnowledgeBase{
 			Name:             "evaluation",
 			Description:      "evaluation",
+			IsTemporary:      true,
 			EmbeddingModelID: kb.EmbeddingModelID,
 			SummaryModelID:   kb.SummaryModelID,
 		})
@@ -201,6 +219,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 			return nil, err
 		}
 		knowledgeBaseID = kb.ID
+		createdEvaluationKBID = kb.ID
 		logger.Infof(ctx, "Created new knowledge base with ID: %s based on existing one", knowledgeBaseID)
 	}
 
@@ -302,6 +321,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 
 	// Start evaluation in background goroutine
 	logger.Info(ctx, "Starting evaluation in background")
+	evaluationStarted = true
 	go func() {
 		// Create new context with logger for background task
 		newCtx := logger.CloneContext(ctx)
@@ -334,6 +354,24 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 	logger.Info(ctx, "Start evaluating dataset")
 	logger.Infof(ctx, "Task ID: %s, Dataset ID: %s", detail.Task.ID, detail.Task.DatasetID)
 
+	// The evaluation KB is always ephemeral. Register cleanup before loading the
+	// dataset so malformed/missing parquet files and ingestion failures cannot
+	// leave orphaned KBs behind.
+	var knowledge *types.Knowledge
+	defer func() {
+		if knowledge != nil {
+			logger.Infof(ctx, "Cleaning up resources - deleting knowledge: %s", knowledge.ID)
+			if err := e.knowledgeService.DeleteKnowledge(ctx, knowledge.ID); err != nil {
+				logger.Errorf(ctx, "Failed to delete knowledge: %v, knowledge ID: %s", err, knowledge.ID)
+			}
+		}
+
+		logger.Infof(ctx, "Cleaning up resources - deleting knowledge base: %s", knowledgeBaseID)
+		if err := e.knowledgeBaseService.DeleteKnowledgeBase(ctx, knowledgeBaseID); err != nil {
+			logger.Errorf(ctx, "Failed to delete knowledge base: %v, knowledge base ID: %s", err, knowledgeBaseID)
+		}
+	}()
+
 	// Retrieve dataset from storage
 	dataset, err := e.dataset.GetDatasetByID(ctx, detail.Task.DatasetID)
 	if err != nil {
@@ -353,29 +391,22 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 	logger.Infof(ctx, "Creating knowledge from %d passages", len(passages))
 
 	// Create knowledge base from passages (sync: wait for indexing to complete before querying)
-	knowledge, err := e.knowledgeService.CreateKnowledgeFromPassageSync(ctx, knowledgeBaseID, passages, "")
+	knowledge, err = e.knowledgeService.CreateKnowledgeFromPassageSync(ctx, knowledgeBaseID, passages, "")
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge from passages: %v", err)
 		return err
 	}
+	if knowledge == nil {
+		return errors.New("evaluation knowledge ingestion returned no knowledge")
+	}
+	if knowledge.EnableStatus != "enabled" {
+		return fmt.Errorf(
+			"evaluation knowledge was not indexed successfully: parse_status=%s, enable_status=%s",
+			knowledge.ParseStatus,
+			knowledge.EnableStatus,
+		)
+	}
 	logger.Infof(ctx, "Knowledge created and indexed successfully, ID: %s", knowledge.ID)
-
-	// Setup cleanup of temporary resources
-	defer func() {
-		logger.Infof(ctx, "Cleaning up resources - deleting knowledge: %s", knowledge.ID)
-		if err := e.knowledgeService.DeleteKnowledge(ctx, knowledge.ID); err != nil {
-			logger.Errorf(ctx, "Failed to delete knowledge: %v, knowledge ID: %s", err, knowledge.ID)
-		}
-
-		logger.Infof(ctx, "Cleaning up resources - deleting knowledge base: %s", knowledgeBaseID)
-		if err := e.knowledgeBaseService.DeleteKnowledgeBase(ctx, knowledgeBaseID); err != nil {
-			logger.Errorf(
-				ctx,
-				"Failed to delete knowledge base: %v, knowledge base ID: %s",
-				err, knowledgeBaseID,
-			)
-		}
-	}()
 
 	// Initialize parallel evaluation metrics
 	var finished int
