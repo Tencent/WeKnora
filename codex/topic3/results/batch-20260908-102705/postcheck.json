@@ -1,0 +1,12 @@
+{
+  "service_healthy": true,
+  "no_unfinished_evaluations": true,
+  "baseline_unchanged": true,
+  "no_result_secrets": true,
+  "database_after": {
+    "evaluation_runs": 14,
+    "unfinished_evaluations": 0,
+    "model_usage_rows": 478,
+    "embedding_cache_rows": 163
+  }
+}

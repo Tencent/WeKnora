@@ -1,0 +1,25 @@
+{
+  "batch_id": "batch-20260908-102705",
+  "runner_version": "2026-09-08.3",
+  "status": "ALL_COMPLETE",
+  "started_at": "2026-09-08T02:27:05.502012Z",
+  "resumed_at": "2026-09-08T02:51:17.950311Z",
+  "previous_failure": "optimized Wiki prompt is below the 1024-token implicit-cache threshold",
+  "completed_at": "2026-09-08T02:54:53.880876Z",
+  "checks": {
+    "缓存实验完成9轮": true,
+    "暖缓存减少真实Embedding调用": true,
+    "Wiki真实调用完成8次": true,
+    "Wiki输出质量全部通过": true,
+    "真实退化被回归门禁拒绝": true,
+    "正式基线保持不变": true,
+    "结果目录未发现API Key": true,
+    "后端最终健康": true
+  },
+  "known_cost_cny": 0.09016704,
+  "artifacts": {
+    "cache": "codex\\topic3\\results\\batch-20260908-102705\\cache-benchmark.json",
+    "wiki": "codex\\topic3\\results\\batch-20260908-102705\\wiki-cache-benchmark.json",
+    "negative": "codex\\topic3\\results\\batch-20260908-102705\\negative-control.json"
+  }
+}

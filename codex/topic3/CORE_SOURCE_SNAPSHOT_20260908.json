@@ -1,0 +1,17 @@
+{
+  "captured_at": "2026-09-08",
+  "purpose": "Hash snapshot of the core implementation used by the accepted local experiments before documentation and delivery edits.",
+  "git_state_at_experiment": "3d5d8bfcdfeeea266b292b71cea616847af28d0f-dirty",
+  "files": [
+    {"path":"internal/agent/prompts_wiki.go","sha256":"43f8f0bd858656f8559eadd2f33bb4909ba43a2edc387b66695557a03dd5825f","bytes":39622},
+    {"path":"internal/application/service/evaluation.go","sha256":"3d87b8f935c7f69a604115bac79e1143d6df4367c6f559ff883d38f86521c846","bytes":21547},
+    {"path":"internal/application/service/embedding_cache.go","sha256":"e57b6dc261f2e57cd36a58ad8bfef664ddbf9d9e6867ca39fdb1f4e7737ce914","bytes":5855},
+    {"path":"internal/application/service/evaluation_wiki_probe.go","sha256":"b3ae103613dc7e0aa8d5cc66d5831340fd6b81368360212c98ff4020de636c2c","bytes":4660},
+    {"path":"internal/application/service/rerank_usage.go","sha256":"6e722287abca2c66875f5d0c72a68327970eb75b45b09fac6e624756aa9778c7","bytes":1805},
+    {"path":"internal/handler/evaluation.go","sha256":"b00a53a48347a1f0ba2f3ff62eee2d9bde0f57a595b896c6cb285bd5d2ba04eb","bytes":6553},
+    {"path":"internal/router/routes_infra.go","sha256":"0d0f81bcf57493d7df869c52dd870237409ac8cf82afe8965abe11c863efa5e4","bytes":16092},
+    {"path":"internal/types/evaluation.go","sha256":"9c5c8791da8adc99c6054ff123bfeec7dcdbed344be0b46e2049afa88ee0fda4","bytes":7369},
+    {"path":"codex/topic3/topic3.py","sha256":"9e15d9b38def546b546710b360070eecc44ff8dbf9e955c302730c9ae6b38483","bytes":34410},
+    {"path":"docker-compose.yml","sha256":"7bf561aa2da3912f8258024f853ef92bf14ab6b62d5f5d4bba36810f17a3b006","bytes":49661}
+  ]
+}

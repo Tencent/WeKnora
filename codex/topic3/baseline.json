@@ -1,0 +1,39 @@
+{
+  "kind": "topic3-formal-baseline",
+  "confirmed_by_user": true,
+  "confirmed_at": "2026-09-07T23:33:23.9598909+08:00",
+  "source_result": "codex/topic3/results/evaluation_10000_1788794712449_9efddf10_topic310.json",
+  "source_result_sha256": "ff2599a8dacd2d6e0bba7927c965a53301b873afa6ccca77c0c8ec9b656c75e8",
+  "dataset_id": "topic3-10",
+  "dataset_sha256": "2e3fbb27adc1d485e5a55a708b3e2a2697435cd07354908d9c108efdef27b017",
+  "code_commit": "3d5d8bfcdfeeea266b292b71cea616847af28d0f-dirty",
+  "prompt_version": "weknora-v0.7.2-topic3",
+  "price_version": "unknown",
+  "currency": "CNY",
+  "threshold": 0.03,
+  "task": {
+    "id": "evaluation_10000_1788794712449_9efddf10_topic310",
+    "status": 2,
+    "total": 10,
+    "finished": 10,
+    "duration_ms": 76096
+  },
+  "metric": {
+    "retrieval_metrics": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "ndcg3": 1.0,
+      "ndcg10": 1.0,
+      "mrr": 1.0,
+      "map": 1.0
+    },
+    "generation_metrics": {
+      "bleu1": 0.1225427690564255,
+      "bleu2": 0.08168727783459943,
+      "bleu4": 0.04806421146377619,
+      "rouge1": 0.24476086543471834,
+      "rouge2": 0.0704111610346197,
+      "rougel": 0.23284935589162986
+    }
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "retrieval_metrics": {"recall": 0.90, "mrr": 0.85, "ndcg3": 0.82},
+  "generation_metrics": {"rougel": 0.50}
+}
