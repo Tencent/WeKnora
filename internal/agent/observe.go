@@ -408,6 +408,21 @@ func (e *AgentEngine) analyzeResponse(
 			"answer_len": len(response.Content),
 		})
 
+		// An empty natural stop is retryable (the caller nudges the model and
+		// runs another round), so it must not emit any terminal answer event
+		// yet: downstream consumers treat a Done=true EventAgentFinalAnswer as
+		// "the answer is finished" and would finalize (or cancel) while the
+		// retry is still running (#2906). When retries are exhausted the
+		// caller emits the fallback as the sole terminal answer.
+		if response.Content == "" {
+			return responseVerdict{
+				isDone:       true,
+				finalAnswer:  "",
+				emptyContent: true,
+				step:         step,
+			}
+		}
+
 		// Emit the final answer. The answer text reaches the UI by one of two
 		// paths:
 		//   (a) Already streamed live during the think phase — the common case
@@ -449,7 +464,7 @@ func (e *AgentEngine) analyzeResponse(
 		return responseVerdict{
 			isDone:       true,
 			finalAnswer:  response.Content,
-			emptyContent: response.Content == "",
+			emptyContent: false,
 			step:         step,
 		}
 	}
