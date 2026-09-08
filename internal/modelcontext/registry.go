@@ -292,7 +292,8 @@ func outputFilesPrompt(result *types.ToolResult) string {
 	if len(result.OutputFiles) > 0 {
 		text = "\nOutput files: `" + strings.Join(result.OutputFiles, "`, `") + "`"
 	}
-	if path, ok := result.Data["full_output_path"].(string); ok && strings.HasPrefix(path, "output://") &&
+	if path, ok := result.Data["full_output_path"].(string); ok &&
+		(strings.HasPrefix(path, "output://") || strings.HasPrefix(path, "web://")) &&
 		!strings.Contains(result.Output, path) {
 		text += fmt.Sprintf("\nSaved tool output: %s. Continue with read(path=%q) or grep(path=%q, "+
 			"pattern=...).", path, path, path)

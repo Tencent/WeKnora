@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -136,10 +137,18 @@ func (s *Service) readExperienceEvidence(ctx context.Context, item *types.Memory
 		seen[ref.MessageID] = true
 		message, err := s.messageRepo.GetMessage(ctx, ref.SessionID, ref.MessageID)
 		if err != nil {
-			return "", err
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			logger.Warnf(ctx, "memory: evidence message unavailable: %v", err)
 		}
-		if message == nil || message.SessionID != ref.SessionID || message.AgentID != item.Experience.AgentID ||
-			message.AgentTenantID != item.Experience.AgentTenantID {
+		if err != nil || message == nil || message.SessionID != ref.SessionID ||
+			message.AgentID != item.Experience.AgentID || message.AgentTenantID != item.Experience.AgentTenantID {
+			fmt.Fprintf(
+				&b,
+				"\nMessage %s: evidence unavailable; no outcome can be verified from this reference.\n",
+				ref.MessageID,
+			)
 			continue
 		}
 		for _, observation := range messageObservations(message) {

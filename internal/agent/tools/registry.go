@@ -292,7 +292,7 @@ func (r *ToolRegistry) preserveLongOutput(ctx context.Context, result *types.Too
 	}
 	result.Data["output_truncated"] = true
 	saved, _ := result.Data["full_output_path"].(string)
-	if !strings.HasPrefix(saved, "output://") {
+	if !strings.HasPrefix(saved, "output://") && !strings.HasPrefix(saved, "web://") {
 		saved = ""
 	}
 	if saved == "" && r.outputSource != nil && !isBinaryShellOutput(result.Output) {
@@ -312,6 +312,10 @@ func (r *ToolRegistry) preserveLongOutput(ctx context.Context, result *types.Too
 		"query or redirect verbose shell commands to a workspace log."
 	if saved != "" {
 		hint = fmt.Sprintf("\nSaved output: %s. Use read(path=%q) or grep(path=%q, pattern=...).", saved, saved, saved)
+	}
+	if partial, _ := result.Data["output_snapshot_partial"].(bool); partial {
+		hint = "\nPartial snapshot: some content exceeds storage limits and is unavailable here; " +
+			"narrow the request." + hint
 	}
 	if utf8.RuneCountInString(hint) >= budget {
 		result.Output = TruncateToolOutput(hint, budget)

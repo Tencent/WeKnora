@@ -39,6 +39,7 @@ type MemoryRepository interface {
 		cursor types.MemoryExtractionCursor,
 	) error
 	RequeueSessions(ctx context.Context, scope MemoryScope, sessions []string) error
+	CompleteExtractionSessions(ctx context.Context, scope MemoryScope, token string, sessions []string) error
 	// GetSubject returns the memory space, or (nil, nil) when it does not exist.
 	GetSubject(ctx context.Context, scope MemoryScope) (*types.MemorySubject, error)
 	// EnsureSubject returns the memory space, creating it on first use.

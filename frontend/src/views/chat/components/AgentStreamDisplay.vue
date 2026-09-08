@@ -635,6 +635,7 @@ import {
   getSandboxDiffStat,
   getSandboxFilePreview,
   getSandboxToolPath,
+  isPathTool,
   sandboxPreviewRemaining,
   skillScriptTitleCommand,
 } from '@/utils/skillToolDisplay';
@@ -2829,7 +2830,7 @@ const getToolTitle = (event: any): string => {
       const name = getLocalizedToolName(event.tool_name);
       return `${formatToolTitleWithDetail(name, getEventSkillName(event))}...`;
     }
-    if (event.tool_name === 'list_sandbox_files' || event.tool_name === 'read' || event.tool_name === 'read_sandbox_file' || event.tool_name === 'write_sandbox_file' || event.tool_name === 'edit_sandbox_file') {
+    if (isPathTool(event.tool_name)) {
       const name = getLocalizedToolName(event.tool_name);
       return `${formatToolTitleWithDetail(name, getSandboxToolPath(event))}...`;
     }
@@ -2935,7 +2936,7 @@ const getToolTitle = (event: any): string => {
     return formatToolTitleWithDetail(getToolDescription(event), getReadSkillTarget(event));
   }
 
-  if (toolName === 'list_sandbox_files' || toolName === 'read' || toolName === 'read_sandbox_file' || toolName === 'write_sandbox_file' || toolName === 'edit_sandbox_file') {
+  if (isPathTool(toolName)) {
     return formatToolTitleWithDetail(getToolDescription(event), getSandboxToolPath(event));
   }
 
@@ -2990,7 +2991,7 @@ const getToolDescription = (event: any): string => {
       const name = getLocalizedToolName(event.tool_name);
       return `${formatToolTitleWithDetail(name, getEventSkillName(event))}...`;
     }
-    if (event.tool_name === 'list_sandbox_files' || event.tool_name === 'read' || event.tool_name === 'read_sandbox_file' || event.tool_name === 'write_sandbox_file' || event.tool_name === 'edit_sandbox_file') {
+    if (isPathTool(event.tool_name)) {
       const name = getLocalizedToolName(event.tool_name);
       return `${formatToolTitleWithDetail(name, getSandboxToolPath(event))}...`;
     }
@@ -3027,7 +3028,7 @@ const getToolDescription = (event: any): string => {
     return success ? t('agentStream.toolStatus.attachmentParsingDone') : t('agentStream.toolStatus.attachmentParsingFailed');
   } else if (toolName === 'query_understand') {
     return success ? t('agentStream.toolStatus.queryUnderstandDone') : t('agentStream.toolStatus.calledFailed', { name: getLocalizedToolName(toolName) });
-  } else if (toolName === 'shell_exec' || toolName === 'execute_skill_script' || toolName === 'read_skill' || toolName === 'list_sandbox_files' || toolName === 'read' || toolName === 'read_sandbox_file' || toolName === 'write_sandbox_file' || toolName === 'edit_sandbox_file') {
+  } else if (toolName === 'shell_exec' || toolName === 'execute_skill_script' || toolName === 'read_skill' || isPathTool(toolName)) {
     const localizedName = getLocalizedToolName(toolName);
     return success ? localizedName : t('agentStream.toolStatus.calledFailed', { name: localizedName });
   } else {

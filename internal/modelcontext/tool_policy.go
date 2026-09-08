@@ -62,6 +62,7 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	"discover_mcp_tools": {opaqueOutput: true},
 	"call_mcp_tool":      {opaqueOutput: true},
 	"read":               {},
+	"grep":               {},
 	"knowledge_search": {
 		sourceIDKeys: map[string]struct{}{"knowledge_base_ids": {}},
 		sourceOutput: true,

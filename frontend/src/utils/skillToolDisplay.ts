@@ -68,6 +68,11 @@ export function getReadSkillTarget(event: ToolEventLike | null | undefined): str
   return skill || file
 }
 
+export function isPathTool(toolName: string | undefined): boolean {
+  return ['list_sandbox_files', 'read', 'read_file', 'grep', 'read_sandbox_file',
+    'write_sandbox_file', 'edit_sandbox_file'].includes(toolName || '')
+}
+
 export function getSandboxToolPath(event: ToolEventLike | null | undefined): string {
   return stringField(eventFields(event), 'path')
 }

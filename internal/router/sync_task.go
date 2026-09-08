@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -93,6 +94,10 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 				backoff := time.Duration(attempt) * 5 * time.Second
 				if backoff > 30*time.Second {
 					backoff = 30 * time.Second
+				}
+				var leaseErr *types.MemoryExtractionLeaseError
+				if errors.As(lastErr, &leaseErr) {
+					backoff = leaseErr.RetryDelay()
 				}
 				logger.Infof(ctx, "[SyncTask] Retrying task type=%s id=%s attempt=%d/%d backoff=%s",
 					task.Type(), taskID, attempt, maxRetry, backoff)

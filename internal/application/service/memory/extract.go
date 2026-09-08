@@ -44,17 +44,7 @@ const (
 	// in-flight claim is stale. Without it, a worker that died between claiming
 	// and running would wedge the subject permanently.
 	extractInFlightGrace = 10 * time.Minute
-	// extractCandidatePool is how many stored memories are considered before
-	// narrowing, and extractRelevantCandidates is how many the model actually
-	// sees.
-	//
-	// Showing everything was the original behaviour and it does not survive a
-	// store of any size: the model has to hold dozens of unrelated notes in
-	// mind to decide whether one sentence updates any of them, the prompt grows
-	// without bound, and unrelated memories invite spurious update and delete
-	// decisions. mem0 shows 10 by vector similarity, Graphiti at most 15 per
-	// entity — a small, relevant set is the shape that works.
-	extractCandidatePool      = 200
+	// Rank all active memories before limiting the candidates shown to the model.
 	extractRelevantCandidates = 15
 	// extractShownTopics bounds the tracked subjects shown to the extraction
 	// call. The resolver still considers more; this is about anchoring, not
@@ -294,7 +284,15 @@ func (s *Service) Handle(ctx context.Context, task *asynq.Task) error {
 		return err
 	}
 	if !acquired {
-		return nil
+		current, err := s.repo.GetSubject(ctx, scope)
+		if err != nil {
+			return err
+		}
+		retryAt := time.Now().Add(extractInFlightGrace)
+		if current != nil && current.ExtractLeaseUntil != nil {
+			retryAt = *current.ExtractLeaseUntil
+		}
+		return &types.MemoryExtractionLeaseError{RetryAt: retryAt}
 	}
 	subject, err = s.repo.GetSubject(ctx, scope)
 	if err != nil || subject == nil {
@@ -338,6 +336,9 @@ func (s *Service) Handle(ctx context.Context, task *asynq.Task) error {
 		return err
 	}
 	if len(segments) == 0 {
+		if err := s.repo.CompleteExtractionSessions(ctx, scope, token, pending); err != nil {
+			return err
+		}
 		unfinished = nil
 		s.releaseSlot(ctx, scope)
 		s.scheduleFollowUpIfNeeded(ctx, scope, cfg, payload, false)
@@ -355,7 +356,7 @@ func (s *Service) Handle(ctx context.Context, task *asynq.Task) error {
 			}
 			continue
 		}
-		existing, err := s.repo.ListActiveByKinds(ctx, scope, types.MemoryKinds, extractCandidatePool)
+		existing, err := s.repo.ListActiveByKinds(ctx, scope, types.MemoryKinds, 0)
 		if err != nil {
 			return fmt.Errorf("load existing memories: %w", err)
 		}
@@ -405,13 +406,22 @@ func (s *Service) Handle(ctx context.Context, task *asynq.Task) error {
 	}
 
 	if err := s.repo.FinishExtraction(ctx, scope, newCursor); err != nil {
-		logger.Warnf(ctx, "memory: advance extraction cursor failed: %v", err)
+		return fmt.Errorf("finish extraction: %w", err)
 	}
 
 	// Either this run hit its message cap, or new turns arrived while it was
 	// working. Both mean there is more to read, and both are how the "every
 	// message is eventually considered" guarantee survives a busy user.
 	if err := s.repo.RequeueSessions(ctx, scope, remaining); err != nil {
+		return err
+	}
+	completed := make([]string, 0, len(pending))
+	for _, sessionID := range pending {
+		if !containsString(remaining, sessionID) {
+			completed = append(completed, sessionID)
+		}
+	}
+	if err := s.repo.CompleteExtractionSessions(ctx, scope, token, completed); err != nil {
 		return err
 	}
 	unfinished = nil

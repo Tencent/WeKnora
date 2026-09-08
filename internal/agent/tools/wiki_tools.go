@@ -716,22 +716,45 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 
 	finalOutput, truncatedSlugs, omittedSlugs := renderWikiPagesWithinBudget(pending, OutputBudget(ctx))
 	savedOutput, snapshotError := "", ""
+	var snapshotOmitted []string
 	if (len(truncatedSlugs) > 0 || len(omittedSlugs) > 0) && t.outputSource != nil {
 		var full strings.Builder
 		for _, page := range pending {
-			full.WriteString(page.render(page.body))
-			full.WriteString("\n\n")
-			if int64(full.Len()) > maxReadSandboxDownloadBytes {
-				break
+			if int64(len(page.body)) > maxReadSandboxDownloadBytes {
+				snapshotOmitted = append(snapshotOmitted, page.page.Slug)
+				continue
 			}
+			rendered := page.render(page.body) + "\n\n"
+			if int64(full.Len()+len(rendered)) > maxReadSandboxDownloadBytes {
+				snapshotOmitted = append(snapshotOmitted, page.page.Slug)
+				continue
+			}
+			full.WriteString(rendered)
 		}
-		var saveErr error
-		savedOutput, saveErr = t.outputSource.Save(ctx, full.String())
-		if saveErr != nil {
-			snapshotError = saveErr.Error()
+		if full.Len() > 0 {
+			var saveErr error
+			savedOutput, saveErr = t.outputSource.Save(ctx, full.String())
+			if saveErr != nil {
+				snapshotError = saveErr.Error()
+			}
+		} else {
+			snapshotError = "resolved pages exceed the saved-output size limit"
+		}
+		if len(snapshotOmitted) > 0 {
+			finalOutput += "\nPartial snapshot: pages excluded by the storage limit: " +
+				strings.Join(snapshotOmitted, ", ") +
+				". Request these pages separately; their content is unavailable from this snapshot."
 		}
 		if savedOutput != "" {
-			finalOutput += "\nSaved complete resolved pages: " + savedOutput + "; use read or grep for omitted content."
+			if len(snapshotOmitted) > 0 {
+				finalOutput += "\nSaved partial resolved pages: " + savedOutput +
+					"; use read or grep for included pages."
+			} else {
+				finalOutput += "\nSaved complete resolved pages: " + savedOutput +
+					"; use read or grep for omitted content."
+			}
+		} else if snapshotError != "" {
+			finalOutput += "\nFull pages could not be saved. Request fewer pages or narrower content."
 		}
 	}
 	if len(omittedSlugs) > 0 {
@@ -759,12 +782,14 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 		Success: true,
 		Output:  finalOutput,
 		Data: map[string]interface{}{
-			"found_kbs":             foundKBs,
-			"full_output_path":      savedOutput,
-			"output_snapshot_error": snapshotError,
-			"ambiguous_slugs":       ambiguous,
-			"truncated_slugs":       truncatedSlugs,
-			"omitted_slugs":         omittedSlugs,
+			"found_kbs":               foundKBs,
+			"full_output_path":        savedOutput,
+			"output_snapshot_error":   snapshotError,
+			"output_snapshot_partial": len(snapshotOmitted) > 0,
+			"snapshot_omitted_slugs":  snapshotOmitted,
+			"ambiguous_slugs":         ambiguous,
+			"truncated_slugs":         truncatedSlugs,
+			"omitted_slugs":           omittedSlugs,
 		},
 	}, nil
 }

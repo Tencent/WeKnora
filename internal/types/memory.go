@@ -1444,6 +1444,20 @@ func CosineSimilarity(a, b []float32) float64 {
 
 // MemoryExtractionCursor orders messages by (created_at, id), including ties.
 type MemoryExtractionCursor struct {
-	At time.Time `json:"at"`
-	ID string    `json:"id"`
+	// Claimed survives a worker crash until this session has been fully processed.
+	Claimed bool      `json:"claimed,omitempty"`
+	At      time.Time `json:"at"`
+	ID      string    `json:"id"`
+}
+
+// MemoryExtractionLeaseError asks workers to retry after the current owner's lease expires.
+type MemoryExtractionLeaseError struct{ RetryAt time.Time }
+
+func (e *MemoryExtractionLeaseError) Error() string {
+	return "memory: extraction lease is held by another worker"
+}
+
+// RetryDelay leaves a small margin for the expired-lease comparison.
+func (e *MemoryExtractionLeaseError) RetryDelay() time.Duration {
+	return max(time.Until(e.RetryAt)+time.Second, time.Second)
 }

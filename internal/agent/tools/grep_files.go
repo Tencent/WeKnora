@@ -124,6 +124,7 @@ scan:
 		totalBytes += len(data)
 		scanned++
 		if isBinaryShellOutput(string(data)) {
+			partial = true
 			skipped++
 			continue
 		}

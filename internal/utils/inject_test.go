@@ -535,12 +535,24 @@ func TestValidateSQL_JSONNodeBypass(t *testing.T) {
 		name string
 		sql  string
 	}{
-		{"JSON_SCALAR + pg_read", "SELECT JSON_SCALAR(pg_read('/etc/passwd')) AS data FROM knowledge_bases LIMIT 1"},
-		{"JSON_VALUE + pg_read", "SELECT JSON_VALUE(pg_read('/etc/passwd'), '$') AS data FROM knowledge_bases LIMIT 1"},
-		{"JSON_QUERY + pg_read", "SELECT JSON_QUERY(pg_read('/etc/passwd'), '$') AS data FROM knowledge_bases LIMIT 1"},
+		{
+			"JSON_SCALAR + pg_read_file",
+			"SELECT JSON_SCALAR(pg_read_file('/etc/passwd')) AS data FROM knowledge_bases LIMIT 1",
+		},
+		{
+			"JSON_VALUE + pg_read_file",
+			"SELECT JSON_VALUE(pg_read_file('/etc/passwd'), '$') AS data FROM knowledge_bases LIMIT 1",
+		},
+		{
+			"JSON_QUERY + pg_read_file",
+			"SELECT JSON_QUERY(pg_read_file('/etc/passwd'), '$') AS data FROM knowledge_bases LIMIT 1",
+		},
 		{"JSON scalar + lo_export", "SELECT JSON_SCALAR(lo_export(1, '/tmp/x')) FROM knowledge_bases LIMIT 1"},
-		{"JSON() parse + pg_read", "SELECT JSON(pg_read('/etc/passwd')) FROM knowledge_bases LIMIT 1"},
-		{"JSON_SERIALIZE + pg_read", "SELECT JSON_SERIALIZE(pg_read('/etc/passwd')) FROM knowledge_bases LIMIT 1"},
+		{"JSON() parse + pg_read_file", "SELECT JSON(pg_read_file('/etc/passwd')) FROM knowledge_bases LIMIT 1"},
+		{
+			"JSON_SERIALIZE + pg_read_file",
+			"SELECT JSON_SERIALIZE(pg_read_file('/etc/passwd')) FROM knowledge_bases LIMIT 1",
+		},
 	}
 
 	for _, tt := range dangerous {

@@ -811,8 +811,7 @@ func (s *Service) UpdateItem(
 		return nil, err
 	}
 	s.rebuildBlock(ctx, scope)
-	_ = s.repo.DeleteItemEmbedding(ctx, scope, id)
-	return s.repo.GetItem(ctx, scope, id)
+	return s.refreshItemEmbedding(ctx, scope, id)
 }
 
 // DeleteItem forgets one memory permanently.
@@ -1349,8 +1348,7 @@ func (s *Service) ConfirmItem(ctx context.Context, id string) (*types.MemoryItem
 		return nil, err
 	}
 	s.rebuildBlock(ctx, scope)
-	_ = s.repo.DeleteItemEmbedding(ctx, scope, id)
-	return s.repo.GetItem(ctx, scope, id)
+	return s.refreshItemEmbedding(ctx, scope, id)
 }
 
 // RejectItem declines an inference. It deletes rather than archives, so the

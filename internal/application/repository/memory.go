@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -141,10 +142,9 @@ func (r *memoryRepository) EnqueuePendingSession(
 	return &snapshot, shouldSend, nil
 }
 
-// ClaimPendingSessions empties the queue and returns it together with the
-// watermark to walk forward from. Emptying it here (rather than after the run)
-// is deliberate: turns arriving during the run land in a fresh queue and
-// trigger a follow-up, instead of being erased by the run that never saw them.
+// ClaimPendingSessions moves queued sessions to durable claims before clearing
+// the queue. Orphaned claims are recovered by the next lease owner; concurrent
+// turns still enter a fresh queue and trigger a follow-up.
 func (r *memoryRepository) ClaimPendingSessions(
 	ctx context.Context, scope interfaces.MemoryScope,
 ) ([]string, time.Time, error) {
@@ -160,15 +160,31 @@ func (r *memoryRepository) ClaimPendingSessions(
 			return err
 		}
 		pending = append(pending, subject.PendingSessions...)
+		if subject.ExtractionProgress == nil {
+			subject.ExtractionProgress = make(map[string]types.MemoryExtractionCursor)
+		}
+		queued := make(map[string]bool, len(pending))
+		for _, sessionID := range pending {
+			queued[sessionID] = true
+		}
+		var orphaned []string
+		for sessionID, progress := range subject.ExtractionProgress {
+			if progress.Claimed && !queued[sessionID] {
+				orphaned = append(orphaned, sessionID)
+			}
+		}
+		sort.Strings(orphaned)
+		pending = append(pending, orphaned...)
+		for _, sessionID := range pending {
+			progress := subject.ExtractionProgress[sessionID]
+			progress.Claimed = true
+			subject.ExtractionProgress[sessionID] = progress
+		}
 		if subject.ExtractCursor != nil {
 			cursor = *subject.ExtractCursor
 		}
-		return tx.Model(&types.MemorySubject{}).
-			Where("tenant_id = ? AND subject_id = ?", scope.TenantID, scope.SubjectID).
-			Updates(map[string]interface{}{
-				"pending_sessions": types.MemoryPendingSessions{},
-				"updated_at":       time.Now(),
-			}).Error
+		subject.PendingSessions = types.MemoryPendingSessions{}
+		return tx.Model(&subject).Select("PendingSessions", "ExtractionProgress").Updates(&subject).Error
 	})
 	if err != nil {
 		return nil, time.Time{}, err
@@ -1081,6 +1097,7 @@ func (r *memoryRepository) AdvanceExtraction(
 		if cursor.At.Before(old.At) || (cursor.At.Equal(old.At) && cursor.ID <= old.ID) {
 			return nil
 		}
+		cursor.Claimed = old.Claimed
 		subject.ExtractionProgress[sessionID] = cursor
 		return tx.Model(&subject).Select("ExtractionProgress").Updates(&subject).Error
 	})
@@ -1098,5 +1115,27 @@ func (r *memoryRepository) RequeueSessions(ctx context.Context, scope interfaces
 			subject.PendingSessions = subject.PendingSessions.Append(sessionID)
 		}
 		return tx.Model(&subject).Select("PendingSessions").Updates(&subject).Error
+	})
+}
+
+// CompleteExtractionSessions acknowledges only sessions drained by this lease owner.
+func (r *memoryRepository) CompleteExtractionSessions(
+	ctx context.Context, scope interfaces.MemoryScope, token string, sessions []string,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var subject types.MemorySubject
+		if err := tx.Clauses(forUpdateClause()).Where(
+			"tenant_id = ? AND subject_id = ? AND extract_lease_token = ?", scope.TenantID, scope.SubjectID, token,
+		).First(&subject).Error; err != nil {
+			return err
+		}
+		for _, sessionID := range sessions {
+			progress, ok := subject.ExtractionProgress[sessionID]
+			if ok {
+				progress.Claimed = false
+				subject.ExtractionProgress[sessionID] = progress
+			}
+		}
+		return tx.Model(&subject).Select("ExtractionProgress").Updates(&subject).Error
 	})
 }

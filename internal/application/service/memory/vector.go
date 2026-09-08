@@ -110,6 +110,23 @@ func (s *Service) storeItemEmbedding(
 	}
 }
 
+// refreshItemEmbedding replaces stale vectors immediately after a user edit or confirmation.
+func (s *Service) refreshItemEmbedding(
+	ctx context.Context, scope interfaces.MemoryScope, id string,
+) (*types.MemoryItem, error) {
+	if err := s.repo.DeleteItemEmbedding(ctx, scope, id); err != nil {
+		logger.Warnf(ctx, "memory: remove stale embedding failed: %v", err)
+	}
+	item, err := s.repo.GetItem(ctx, scope, id)
+	if err != nil {
+		return nil, err
+	}
+	if item != nil && item.Status == types.MemoryStatusActive {
+		s.storeItemEmbedding(ctx, scope, s.workspaceConfig(ctx, scope.TenantID), item)
+	}
+	return item, nil
+}
+
 // embeddableText is what gets embedded for a memory.
 //
 // Topic and content together, because the topic carries the subject the

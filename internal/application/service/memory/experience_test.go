@@ -244,7 +244,9 @@ func TestExtractionLeasePreventsDuplicateModelCalls(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, acquired)
 	task := queue.pop()
-	require.NoError(t, svc.Handle(ctx, task))
+	var busy *types.MemoryExtractionLeaseError
+	require.ErrorAs(t, svc.Handle(ctx, task), &busy)
+	require.Greater(t, busy.RetryDelay(), 50*time.Second)
 	require.Zero(t, models.calls)
 	require.NoError(t, svc.repo.ReleaseExtraction(ctx, scope, "other-worker"))
 	require.NoError(t, svc.Handle(ctx, task))
