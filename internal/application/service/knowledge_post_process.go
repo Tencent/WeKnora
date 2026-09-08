@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -83,11 +84,39 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 
 	logger.Infof(ctx, "[KnowledgePostProcess] Orchestrating post processing for knowledge: %s", payload.KnowledgeID)
 
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	ctx = types.WithExecutionTenant(ctx, payload.TenantID)
 	if payload.Language != "" {
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 
+	// 1. Fetch Knowledge and KB
+	knowledge, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID)
+	if err != nil {
+		return fmt.Errorf("get knowledge %s: %w", payload.KnowledgeID, err)
+	}
+	if knowledge == nil {
+		logger.Warnf(ctx, "[KnowledgePostProcess] Knowledge %s not found, aborting.", payload.KnowledgeID)
+		return nil
+	}
+
+	if err := validateProcessingKnowledge(knowledge,
+		payload.TenantID,
+		payload.KnowledgeBaseID,
+		payload.KnowledgeID); err != nil {
+		return err
+	}
+	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+	if err != nil || kb == nil {
+		return fmt.Errorf("get knowledge base %s: %w", payload.KnowledgeBaseID, err)
+	}
+
+	if kb.ID != payload.KnowledgeBaseID || kb.TenantID != payload.TenantID {
+		return fmt.Errorf("postprocess task KB owner changed: %w", asynq.SkipRetry)
+	}
+	ctx, err = access.WithKBTaskWrite(ctx, kb, payload.TenantID)
+	if err != nil {
+		return fmt.Errorf("invalid postprocess scope: %v: %w", err, asynq.SkipRetry)
+	}
 	// Resolve attempt: payload carries it from the upstream stage, but
 	// fall back to the latest known attempt for compatibility with
 	// in-flight tasks queued before this code shipped.
@@ -108,16 +137,6 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 
 	postSpan := s.tracker().BeginStage(ctx, payload.KnowledgeID, attempt, types.StagePostProcess, nil)
 
-	// 1. Fetch Knowledge and KB
-	knowledge, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID)
-	if err != nil {
-		return fmt.Errorf("get knowledge %s: %w", payload.KnowledgeID, err)
-	}
-	if knowledge == nil {
-		logger.Warnf(ctx, "[KnowledgePostProcess] Knowledge %s not found, aborting.", payload.KnowledgeID)
-		return nil
-	}
-
 	// Skip post-processing entirely when the knowledge has been cancelled
 	// by the user or marked for deletion. We must NOT enqueue summary /
 	// question / graph / wiki child tasks for an aborted knowledge. We
@@ -136,11 +155,6 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		return nil
 	}
 
-	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
-	if err != nil || kb == nil {
-		return fmt.Errorf("get knowledge base %s: %w", payload.KnowledgeBaseID, err)
-	}
-
 	processOverrides, _ := knowledge.ProcessOverrides()
 	eff := ResolveProcessConfig(kb, processOverrides)
 
@@ -148,6 +162,13 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	chunks, err := s.chunkService.ListChunksByKnowledgeID(ctx, payload.KnowledgeID)
 	if err != nil {
 		return fmt.Errorf("list chunks for knowledge %s: %w", payload.KnowledgeID, err)
+	}
+
+	for _, chunk := range chunks {
+		if chunk == nil || chunk.TenantID != payload.TenantID || chunk.KnowledgeID != payload.KnowledgeID ||
+			chunk.KnowledgeBaseID != payload.KnowledgeBaseID {
+			return fmt.Errorf("postprocess chunk binding changed: %w", asynq.SkipRetry)
+		}
 	}
 
 	// Gather all text-like chunks (including newly added OCR and Caption from multimodal tasks)

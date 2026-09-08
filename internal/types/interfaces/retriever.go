@@ -154,3 +154,18 @@ type RetrieveEngineService interface {
 	// RetrieveEngine retrieves the engine
 	RetrieveEngine
 }
+
+// KnowledgeIndexMover changes the KB binding of existing indices, preserving
+// their chunk IDs and vectors. It must match both source KB and document,
+// clear KB-scoped tags, and be safe to repeat after a partial failure.
+// CopyIndices followed by DeleteByKnowledgeIDList cannot implement this: the
+// unchanged knowledge ID also selects the destination rows for deletion.
+type KnowledgeIndexMover interface {
+	MoveKnowledgeIndices(
+		ctx context.Context,
+		sourceKB, targetKB, knowledgeID string,
+		chunkIDs []string,
+		dimension int,
+		knowledgeType string,
+	) error
+}

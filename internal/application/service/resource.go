@@ -155,6 +155,33 @@ func (s *resourceCatalog) Bind(ctx context.Context, reference, ownerType, ownerI
 	})
 }
 
+func (s *resourceCatalog) IsReferencedByKnowledgeBase(
+	ctx context.Context,
+	tenantID uint64,
+	kbID, reference string,
+) (bool, error) {
+	physical, resource, err := s.ResolvePath(ctx, reference)
+	if err != nil {
+		return false, err
+	}
+	if resource == nil {
+		resource, err = s.repo.GetByTenantLocation(ctx, tenantID, resourceLocationHash(physical))
+		if err != nil {
+			return false, err
+		}
+	}
+	refs := []string{reference, physical}
+	resourceID := ""
+	if resource != nil {
+		if resource.TenantID != tenantID {
+			return false, nil
+		}
+		resourceID = resource.ID
+		refs = append(refs, types.BuildResourcePath(resource.Handle))
+	}
+	return s.repo.IsReferencedByKnowledgeBase(ctx, tenantID, kbID, resourceID, refs)
+}
+
 // Release implements interfaces.ResourceCatalog.
 //
 // Unbinding and counting are deliberately not a single transaction. A racing

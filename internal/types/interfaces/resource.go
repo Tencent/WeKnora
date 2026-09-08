@@ -26,6 +26,12 @@ type ResourceRepository interface {
 	CreateBinding(ctx context.Context, binding *types.ResourceBinding) error
 	DeleteBinding(ctx context.Context, resourceID, ownerType, ownerID string) error
 	CountBindings(ctx context.Context, resourceID string) (int64, error)
+	IsReferencedByKnowledgeBase(
+		ctx context.Context,
+		tenantID uint64,
+		kbID, resourceID string,
+		references []string,
+	) (bool, error)
 	CreateGrant(ctx context.Context, grant *types.ResourceAccessGrant) error
 	GetValidGrant(ctx context.Context, tokenHash string, now time.Time) (*types.ResourceAccessGrant, error)
 	DeleteExpiredGrants(ctx context.Context, before time.Time) error
@@ -61,4 +67,10 @@ type ResourceCatalog interface {
 	MarkDeleted(ctx context.Context, reference string) error
 	CreateAccessGrant(ctx context.Context, reference string, ttl time.Duration) (string, error)
 	ResolveAccessGrant(ctx context.Context, token string) (*types.StoredResource, error)
+}
+
+// KBResourceLookup verifies an exact live knowledge binding or persisted
+// chunk/Wiki reference. A common storage tenant alone is insufficient.
+type KBResourceLookup interface {
+	IsReferencedByKnowledgeBase(ctx context.Context, tenantID uint64, kbID, reference string) (bool, error)
 }

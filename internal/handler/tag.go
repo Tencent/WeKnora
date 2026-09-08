@@ -2,16 +2,17 @@ package handler
 
 import (
 	"context"
+	stderrors "errors"
+	"io"
 	"net/http"
 	"strconv"
-
-	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/gin-gonic/gin"
 )
 
 // TagHandler handles knowledge base tag operations.
@@ -235,19 +236,42 @@ func (h *TagHandler) DeleteTag(c *gin.Context) {
 	contentOnly := c.Query("content_only") == "true"
 
 	var req DeleteTagRequest
-	_ = c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil && !stderrors.Is(err, io.EOF) {
+		_ = c.Error(errors.NewBadRequestError("删除选项不合法"))
+		return
+	}
 
 	var excludeUUIDs []string
 	if len(req.ExcludeIDs) > 0 {
 		tenantID := types.MustTenantIDFromContext(ctx)
+		wanted := make(map[int64]bool, len(req.ExcludeIDs))
+		for _, id := range req.ExcludeIDs {
+			if id <= 0 {
+				_ = c.Error(errors.NewBadRequestError("排除条目 ID 必须为正整数"))
+				return
+			}
+			wanted[id] = true
+		}
 		chunks, err := h.getChunksBySeqIDs(ctx, tenantID, req.ExcludeIDs)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to resolve exclude_ids: %v", err)
-		} else {
-			excludeUUIDs = make([]string, len(chunks))
-			for i, chunk := range chunks {
-				excludeUUIDs[i] = chunk.ID
+			_ = c.Error(err)
+			return
+		}
+		for _, chunk := range chunks {
+			if chunk == nil || !wanted[chunk.SeqID] {
+				continue
 			}
+			if chunk.TenantID != tenantID || chunk.KnowledgeBaseID != c.Param("id") ||
+				chunk.ChunkType != types.ChunkTypeFAQ {
+				_ = c.Error(errors.NewForbiddenError("排除条目不属于当前知识库"))
+				return
+			}
+			excludeUUIDs = append(excludeUUIDs, chunk.ID)
+			delete(wanted, chunk.SeqID)
+		}
+		if len(wanted) != 0 {
+			_ = c.Error(errors.NewNotFoundError("排除条目不存在"))
+			return
 		}
 	}
 

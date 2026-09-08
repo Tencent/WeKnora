@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -85,6 +86,7 @@ func (r *moveWikiChunkRepo) MoveChunksByKnowledgeID(
 func wikiEnabledKB(id string) *types.KnowledgeBase {
 	return &types.KnowledgeBase{
 		ID:               id,
+		TenantID:         1,
 		IndexingStrategy: types.IndexingStrategy{WikiEnabled: true},
 	}
 }
@@ -124,25 +126,25 @@ func newMoveWikiService(t *testing.T) (
 }
 
 func moveWikiCtx() context.Context {
-	return context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	ctx, _ := access.WithKBTransferTask(
+		context.Background(),
+		wikiEnabledKB("kb-src"),
+		wikiEnabledKB("kb-dst"),
+		1,
+		access.KBTransferMove,
+		"move-task",
+		false,
+	)
+	return ctx
 }
 
-func TestMoveOneKnowledgeRetractsWikiFromSourceKB(t *testing.T) {
-	// An unknown mode makes the move itself a no-op, which pins the cleanup as
-	// unconditional: it runs before the mode dispatch, while the knowledge still
-	// belongs to the source KB.
+func TestMoveOneKnowledgeRejectsUnknownModeBeforeWikiCleanup(t *testing.T) {
 	svc, wikiRepo, pendingRepo, _ := newMoveWikiService(t)
-
-	err := svc.moveOneKnowledge(moveWikiCtx(), "kn-1",
-		wikiEnabledKB("kb-src"), wikiEnabledKB("kb-dst"), "bogus")
-
-	require.Error(t, err)
-	assert.Equal(t, []string{"kb-src"}, wikiRepo.listedKBs)
-
-	srcOps := opsFor(pendingRepo.ops, "kb-src")
-	require.Len(t, srcOps, 1)
-	assert.Equal(t, WikiOpRetract, srcOps[0].Op)
-	assert.Equal(t, "kn-1", srcOps[0].DedupKey)
+	err := svc.moveOneKnowledge(moveWikiCtx(), "kn-1", wikiEnabledKB("kb-src"), wikiEnabledKB("kb-dst"), "bogus")
+	require.ErrorContains(t, err, "unknown move mode")
+	require.Empty(t, wikiRepo.listedKBs)
+	require.Empty(t, pendingRepo.ops)
+	require.Equal(t, types.ParseStatusCompleted, svc.repo.(*moveWikiKnowledgeRepo).knowledge.ParseStatus)
 }
 
 func TestMoveOneKnowledgeReuseVectorsIngestsIntoTargetKB(t *testing.T) {
@@ -165,10 +167,30 @@ func TestMoveOneKnowledgeReuseVectorsIngestsIntoTargetKB(t *testing.T) {
 func TestMoveOneKnowledgeSkipsWikiWorkForNonWikiKBs(t *testing.T) {
 	svc, wikiRepo, pendingRepo, _ := newMoveWikiService(t)
 
-	err := svc.moveOneKnowledge(moveWikiCtx(), "kn-1",
-		&types.KnowledgeBase{ID: "kb-src"}, &types.KnowledgeBase{ID: "kb-dst"}, "reuse_vectors")
+	err := svc.moveOneKnowledge(
+		moveWikiCtx(),
+		"kn-1",
+		&types.KnowledgeBase{
+			ID:       "kb-src",
+			TenantID: 1,
+		},
+		&types.KnowledgeBase{ID: "kb-dst", TenantID: 1},
+		"reuse_vectors",
+	)
 
 	require.NoError(t, err)
 	assert.Empty(t, wikiRepo.listedKBs)
 	assert.Empty(t, pendingRepo.ops)
+}
+
+func (r *moveWikiKnowledgeRepo) UpdateKnowledgeForTransfer(
+	ctx context.Context,
+	_ *types.Knowledge,
+	after *types.Knowledge,
+) error {
+	return r.UpdateKnowledge(ctx, after)
+}
+
+func (r *moveWikiChunkRepo) ListAllChunksByKnowledgeID(context.Context, uint64, string) ([]*types.Chunk, error) {
+	return nil, nil
 }
