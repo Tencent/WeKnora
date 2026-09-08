@@ -71,3 +71,43 @@ func envSizeMB(key string, fallback int64) int64 {
 	}
 	return fallback
 }
+
+const (
+	defaultMaxBackupArchiveSizeMB = 4096
+	maxBackupArchiveSizeMBCeiling = 32768
+	maxBackupExtractBytesCeiling  = 32 << 30
+)
+
+// GetMaxBackupArchiveSize is the compressed backup-upload cap in bytes.
+// Default 4096 MB (4 GiB). Nginx has a matching location for
+// POST /api/v1/backups/restore so the frontend proxy does not 413 at
+// MAX_FILE_SIZE_MB. Never below MAX_FILE_SIZE_MB; ceiling 32768 MB.
+func GetMaxBackupArchiveSize() int64 {
+	return GetMaxBackupArchiveSizeMB() * 1024 * 1024
+}
+
+// GetMaxBackupArchiveSizeMB returns the backup-upload cap in MB.
+func GetMaxBackupArchiveSizeMB() int64 {
+	mb := envSizeMB("MAX_BACKUP_ARCHIVE_SIZE_MB", defaultMaxBackupArchiveSizeMB)
+	if fileMB := GetMaxFileSizeMB(); mb < fileMB {
+		mb = fileMB
+	}
+	if mb > maxBackupArchiveSizeMBCeiling {
+		return maxBackupArchiveSizeMBCeiling
+	}
+	return mb
+}
+
+// GetMaxBackupExtractBytes caps uncompressed bytes written while unpacking
+// a backup (zip-bomb guard). Defaults to 8× the compressed upload cap,
+// never above 32 GiB.
+func GetMaxBackupExtractBytes() int64 {
+	capBytes := GetMaxBackupArchiveSize() * 8
+	if capBytes > maxBackupExtractBytesCeiling {
+		return maxBackupExtractBytesCeiling
+	}
+	if capBytes < 1<<30 {
+		return 1 << 30
+	}
+	return capBytes
+}

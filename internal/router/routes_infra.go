@@ -333,3 +333,22 @@ func RegisterWeKnoraCloudRoutes(r *gin.RouterGroup, handler *handler.WeKnoraClou
 	g.apiKeyRoute(r, http.MethodPost, "/weknoracloud/credentials", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.SaveCredentials)
 	g.apiKeyRoute(r, http.MethodGet, "/models/weknoracloud/status", apiKeyManageModels(apiKeyFullAccess()), g.Viewer(), handler.Status)
 }
+
+// RegisterBackupRoutes mounts full-instance backup/restore endpoints.
+// Archives contain every tenant's data (including encrypted credentials),
+// so every endpoint — reads included — is SystemAdmin-only.
+func RegisterBackupRoutes(
+	r *gin.RouterGroup,
+	backup *handler.BackupHandler,
+	g *rbacGuards,
+) {
+	backups := r.Group("/backups", g.SystemAdmin())
+	{
+		backups.GET("/export", backup.Export)
+		backups.POST("", backup.CreateSnapshot)
+		backups.GET("", backup.ListSnapshots)
+		backups.GET("/:id/download", backup.DownloadSnapshot)
+		backups.DELETE("/:id", backup.DeleteSnapshot)
+		backups.POST("/restore", backup.Restore)
+	}
+}

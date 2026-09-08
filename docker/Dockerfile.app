@@ -90,7 +90,7 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
     fi && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        build-essential postgresql-client default-mysql-client tzdata sed curl bash vim wget \
+        build-essential default-mysql-client tzdata sed curl bash vim wget gnupg \
         libsqlite3-0 \
         python3 python3-pip python3-dev libffi-dev libssl-dev \
         nodejs npm \
@@ -102,6 +102,18 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
     chown -R appuser:appuser /home/appuser && \
     ln -sf /home/appuser/.local/bin/uvx /usr/local/bin/uvx && \
     chmod +x /usr/local/bin/uvx && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# PostgreSQL 17 client (pg_dump/psql). Debian 12's postgresql-client is 15 and
+# cannot dump ParadeDB pg17 (`server version mismatch`). Match the bundled
+# postgres major version used by docker-compose.
+RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends postgresql-client-17 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
