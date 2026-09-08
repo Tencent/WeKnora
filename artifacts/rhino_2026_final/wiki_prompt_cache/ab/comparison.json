@@ -1,0 +1,152 @@
+{
+  "experiment": "wiki_prompt_cache_final_ab",
+  "commit": "cd21908a652d1330499986e191fbd704b7d9c13b",
+  "design": "controlled A/B pair (AB sequence); arms differ only in cohort marker in wiki_config.content_instructions; same frozen corpus/models/pipeline",
+  "arms": {
+    "A": {
+      "label": "ab-a1",
+      "marker": "final-wiki-cohort-a",
+      "kb_id": "6b01c0a2-a53e-47cb-9ea7-833c6bea6d22",
+      "kb_name": "final-wiki-cache-ab-a1",
+      "started_at": "2026-09-07T09:10:13Z",
+      "finished_at": "2026-09-07T09:25:43.394682Z",
+      "wiki_pages": 50,
+      "files_completed": 4,
+      "success_by_purpose": {
+        "wiki_candidate_slug": {
+          "calls": 4,
+          "pcs": "hit",
+          "input_tokens": 8738,
+          "cache_read_tokens": 8576
+        },
+        "wiki_chunk_citation": {
+          "calls": 4,
+          "pcs": "hit",
+          "input_tokens": 8878,
+          "cache_read_tokens": 2560
+        },
+        "wiki_index_intro": {
+          "calls": 1,
+          "pcs": "miss",
+          "input_tokens": 726,
+          "cache_read_tokens": 0
+        },
+        "wiki_page_modify": {
+          "calls": 45,
+          "pcs": "hit",
+          "input_tokens": 143348,
+          "cache_read_tokens": 68224
+        },
+        "wiki_summary": {
+          "calls": 4,
+          "pcs": "hit",
+          "input_tokens": 6700,
+          "cache_read_tokens": 2048
+        },
+        "wiki_taxonomy_plan": {
+          "calls": 1,
+          "pcs": "miss",
+          "input_tokens": 2929,
+          "cache_read_tokens": 0
+        }
+      },
+      "timeout_by_purpose": {
+        "wiki_summary": 1
+      },
+      "prompt_cache": {
+        "scope": "wiki_* purposes (chat call_type)",
+        "eligible_calls": 59,
+        "hit_calls": 57,
+        "miss_calls": 2,
+        "unreported_calls": 0,
+        "unsupported_calls": 0,
+        "null_status_calls": 1,
+        "call_hit_rate": 0.966102,
+        "input_tokens": 171319,
+        "cache_read_tokens": 81408,
+        "cache_write_tokens": 0,
+        "cache_miss_tokens": 89911,
+        "output_tokens": 177814,
+        "token_cache_ratio": 0.475184,
+        "latency_ms": 3053857
+      }
+    },
+    "B": {
+      "label": "ab-b1",
+      "marker": "final-wiki-cohort-b",
+      "kb_id": "bcebcf3d-6534-46c7-885b-5ac08c3140e5",
+      "kb_name": "final-wiki-cache-ab-b1",
+      "started_at": "2026-09-07T10:04:03Z",
+      "finished_at": "2026-09-07T10:22:55.471698Z",
+      "wiki_pages": 50,
+      "files_completed": 4,
+      "success_by_purpose": {
+        "wiki_candidate_slug": {
+          "calls": 4,
+          "pcs": "hit",
+          "input_tokens": 8738,
+          "cache_read_tokens": 8576
+        },
+        "wiki_chunk_citation": {
+          "calls": 4,
+          "pcs": "hit",
+          "input_tokens": 8940,
+          "cache_read_tokens": 2560
+        },
+        "wiki_index_intro": {
+          "calls": 1,
+          "pcs": "miss",
+          "input_tokens": 709,
+          "cache_read_tokens": 0
+        },
+        "wiki_page_modify": {
+          "calls": 45,
+          "pcs": "hit",
+          "input_tokens": 147637,
+          "cache_read_tokens": 81792
+        },
+        "wiki_summary": {
+          "calls": 4,
+          "pcs": "hit",
+          "input_tokens": 6806,
+          "cache_read_tokens": 2048
+        },
+        "wiki_taxonomy_plan": {
+          "calls": 1,
+          "pcs": "miss",
+          "input_tokens": 2910,
+          "cache_read_tokens": 0
+        }
+      },
+      "timeout_by_purpose": {
+        "wiki_candidate_slug": 1,
+        "wiki_chunk_citation": 4,
+        "wiki_page_modify": 1,
+        "wiki_summary": 4
+      },
+      "prompt_cache": {
+        "scope": "wiki_* purposes (chat call_type)",
+        "eligible_calls": 59,
+        "hit_calls": 57,
+        "miss_calls": 2,
+        "unreported_calls": 0,
+        "unsupported_calls": 0,
+        "null_status_calls": 10,
+        "call_hit_rate": 0.966102,
+        "input_tokens": 175740,
+        "cache_read_tokens": 94976,
+        "cache_write_tokens": 0,
+        "cache_miss_tokens": 80764,
+        "output_tokens": 177831,
+        "token_cache_ratio": 0.540435,
+        "latency_ms": 5358023
+      }
+    }
+  },
+  "wall_time_seconds": {
+    "A": 930.4,
+    "B": 1132.5
+  },
+  "call_hit_rate_equal": true,
+  "note": "timeout rows are real provider timeouts/retries, retained and excluded from hit-rate denominator (NULL != 0)"
+}

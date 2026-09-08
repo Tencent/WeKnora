@@ -1,0 +1,62 @@
+Model Usage runtime DB capture
+Captured: 2026-09-07 (read-only PostgreSQL query)
+
+Filter
+------
+tenant_id: 10000
+model_id: 5a50bf0a-60f9-4340-974b-0bd85c80b286
+model_name: deepseek-v4-pro
+call_type: chat
+created_at: >= 2026-08-31T13:00:00Z and < 2026-09-07T11:00:00Z
+
+SQL
+---
+SELECT model_id, model_name, call_type,
+       COUNT(*) AS calls,
+       SUM(input_tokens) AS input_tokens,
+       COUNT(input_tokens) AS input_observed,
+       SUM(output_tokens) AS output_tokens,
+       SUM(total_tokens) AS total_tokens,
+       ROUND(AVG(latency_ms)::numeric, 6) AS avg_latency_ms,
+       COUNT(*) FILTER (WHERE prompt_cache_status='hit') AS prompt_hit_calls,
+       COUNT(*) FILTER (WHERE prompt_cache_status='miss') AS prompt_miss_calls,
+       COUNT(*) FILTER (WHERE prompt_cache_status IS NULL) AS prompt_null_calls,
+       SUM(cache_read_tokens) AS cache_read_tokens,
+       SUM(cache_miss_tokens) AS cache_miss_tokens,
+       ROUND((COUNT(*) FILTER (WHERE prompt_cache_status='hit'))::numeric /
+             NULLIF(COUNT(*) FILTER (WHERE prompt_cache_status IN ('hit','miss')),0), 6)
+         AS prompt_call_hit_rate,
+       ROUND(SUM(cache_read_tokens)::numeric / NULLIF(SUM(input_tokens),0), 6)
+         AS prompt_token_cache_ratio,
+       COUNT(*) FILTER (WHERE embedding_cache_status='hit') AS embedding_hit_calls,
+       COUNT(*) FILTER (WHERE embedding_cache_status='miss') AS embedding_miss_calls
+FROM model_usage
+WHERE tenant_id=10000
+  AND model_id='5a50bf0a-60f9-4340-974b-0bd85c80b286'
+  AND created_at >= '2026-08-31T13:00:00Z'::timestamptz
+  AND created_at <  '2026-09-07T11:00:00Z'::timestamptz
+GROUP BY model_id, model_name, call_type;
+
+Result
+------
+model_id:                  5a50bf0a-60f9-4340-974b-0bd85c80b286
+model_name:                deepseek-v4-pro
+call_type:                 chat
+calls:                     658
+input_tokens:              1689294
+input_observed:            629
+output_tokens:             1409722
+total_tokens:              3099016
+avg_latency_ms:            35849.834347
+prompt_hit_calls:          562
+prompt_miss_calls:         67
+prompt_null_calls:         29
+cache_read_tokens:         913280
+cache_miss_tokens:         776014
+prompt_call_hit_rate:      0.893482
+prompt_token_cache_ratio:  0.540628
+embedding_hit_calls:       0 (not applicable to this chat-model filter)
+embedding_miss_calls:      0 (not applicable to this chat-model filter)
+
+NULL semantics: the 29 timeout rows have NULL token/cache observations. They are
+not converted to zero and are excluded from the hit-rate denominator.

@@ -1,0 +1,156 @@
+{
+  "overall_status": "FAIL",
+  "baseline_id": "evaluation_10000_1788770724740_d35f5c12_benchmarkv1",
+  "current_id": "evaluation_10000_1788770724740_d35f5c12_benchmarkv1",
+  "comparisons": [
+    {
+      "key": "precision",
+      "display_name": "Precision",
+      "higher_is_better": true,
+      "missing": false,
+      "non_finite": false,
+      "baseline": 0.1390038665038665,
+      "current": 0.1390038665038665,
+      "delta": 0,
+      "allowed_drop": 0.02,
+      "status": "PASS"
+    },
+    {
+      "key": "recall",
+      "display_name": "Recall",
+      "higher_is_better": true,
+      "missing": false,
+      "non_finite": false,
+      "baseline": 1,
+      "current": 0.5,
+      "delta": -0.5,
+      "allowed_drop": 0.02,
+      "status": "FAIL"
+    },
+    {
+      "key": "ndcg_3",
+      "display_name": "NDCG@3",
+      "higher_is_better": true,
+      "missing": false,
+      "non_finite": false,
+      "baseline": 1,
+      "current": 1,
+      "delta": 0,
+      "allowed_drop": 0.02,
+      "status": "PASS"
+    },
+    {
+      "key": "ndcg_10",
+      "display_name": "NDCG@10",
+      "higher_is_better": true,
+      "missing": false,
+      "non_finite": false,
+      "baseline": 1,
+      "current": 1,
+      "delta": 0,
+      "allowed_drop": 0.02,
+      "status": "PASS"
+    },
+    {
+      "key": "mrr",
+      "display_name": "MRR",
+      "higher_is_better": true,
+      "missing": false,
+      "non_finite": false,
+      "baseline": 1,
+      "current": 1,
+      "delta": 0,
+      "allowed_drop": 0.02,
+      "status": "PASS"
+    },
+    {
+      "key": "map",
+      "display_name": "MAP",
+      "higher_is_better": true,
+      "missing": false,
+      "non_finite": false,
+      "baseline": 1,
+      "current": 1,
+      "delta": 0,
+      "allowed_drop": 0.02,
+      "status": "PASS"
+    },
+    {
+      "key": "bleu_1",
+      "display_name": "BLEU-1",
+      "higher_is_better": true,
+      "missing": false,
+      "non_finite": false,
+      "baseline": 0.16187812788396444,
+      "current": 0.16187812788396444,
+      "delta": 0,
+      "allowed_drop": 0.03,
+      "status": "PASS"
+    },
+    {
+      "key": "bleu_2",
+      "display_name": "BLEU-2",
+      "higher_is_better": true,
+      "missing": false,
+      "non_finite": false,
+      "baseline": 0.13583017781622067,
+      "current": 0.13583017781622067,
+      "delta": 0,
+      "allowed_drop": 0.025,
+      "status": "PASS"
+    },
+    {
+      "key": "bleu_4",
+      "display_name": "BLEU-4",
+      "higher_is_better": true,
+      "missing": false,
+      "non_finite": false,
+      "baseline": 0.09804269528700206,
+      "current": 0.09804269528700206,
+      "delta": 0,
+      "allowed_drop": 0.02,
+      "status": "PASS"
+    },
+    {
+      "key": "rouge_1",
+      "display_name": "ROUGE-1",
+      "higher_is_better": true,
+      "missing": false,
+      "non_finite": false,
+      "baseline": 0.2827728018464779,
+      "current": 0.2827728018464779,
+      "delta": 0,
+      "allowed_drop": 0.035,
+      "status": "PASS"
+    },
+    {
+      "key": "rouge_2",
+      "display_name": "ROUGE-2",
+      "higher_is_better": true,
+      "missing": false,
+      "non_finite": false,
+      "baseline": 0.15485747897021415,
+      "current": 0.15485747897021415,
+      "delta": 0,
+      "allowed_drop": 0.02,
+      "status": "PASS"
+    },
+    {
+      "key": "rouge_l",
+      "display_name": "ROUGE-L",
+      "higher_is_better": true,
+      "missing": false,
+      "non_finite": false,
+      "baseline": 0.2770340961077722,
+      "current": 0.2770340961077722,
+      "delta": 0,
+      "allowed_drop": 0.035,
+      "status": "PASS"
+    }
+  ],
+  "failed_metrics": [
+    "recall"
+  ],
+  "missing_metrics": null,
+  "summary": "1 quality metric exceeded allowed regression threshold"
+}

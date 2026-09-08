@@ -1,0 +1,558 @@
+{
+  "data": {
+    "time_basis": "created_at",
+    "interval": "day",
+    "start_time": "2026-08-31T13:00:00Z",
+    "end_time": "2026-09-07T11:00:00Z",
+    "model_id": "5a50bf0a-60f9-4340-974b-0bd85c80b286",
+    "summary": {
+      "calls": {
+        "total": 658,
+        "chat": 658,
+        "embedding": 0,
+        "rerank": 0
+      },
+      "input_tokens": {
+        "sum": 1689294,
+        "observed_calls": 629,
+        "applicable_calls": 658
+      },
+      "output_tokens": {
+        "sum": 1409722,
+        "observed_calls": 629,
+        "applicable_calls": 658
+      },
+      "total_tokens": {
+        "sum": 3099016,
+        "observed_calls": 629,
+        "applicable_calls": 658
+      },
+      "latency": {
+        "sum_ms": 23589191,
+        "avg_ms": 35849.83434650456,
+        "max_ms": 292567,
+        "observed_calls": 658,
+        "applicable_calls": 658
+      },
+      "prompt_cache": {
+        "hit_calls": 562,
+        "miss_calls": 67,
+        "unsupported_calls": 0,
+        "unreported_calls": 0,
+        "not_recorded_calls": 29,
+        "eligible_calls": 629,
+        "call_hit_rate": 0.8934817170111288,
+        "cache_read_tokens": 913280,
+        "cache_write_tokens": 0,
+        "cache_miss_tokens": 776014,
+        "token_denominator": 1689294,
+        "token_cache_ratio": 0.5406282151005094
+      },
+      "embedding_cache": {
+        "full_hit_calls": 0,
+        "partial_calls": 0,
+        "miss_calls": 0,
+        "disabled_calls": 0,
+        "not_recorded_calls": 0,
+        "cache_hits": 0,
+        "cache_misses": 0,
+        "eligible_inputs": 0,
+        "input_hit_rate": null
+      },
+      "cost_by_currency": [
+        {
+          "currency": "TEST",
+          "chat": {
+            "priced_cost": "1347",
+            "known_cost": "1347",
+            "priced_calls": 1,
+            "partial_calls": 0,
+            "unpriced_calls": 0
+          },
+          "embedding": {
+            "priced_cost": "0",
+            "known_cost": "0",
+            "priced_calls": 0,
+            "partial_calls": 0,
+            "unpriced_calls": 0
+          },
+          "rerank": {
+            "priced_cost": "0",
+            "known_cost": "0",
+            "priced_calls": 0,
+            "partial_calls": 0,
+            "unpriced_calls": 0
+          },
+          "total": {
+            "priced_cost": "1347",
+            "known_cost": "1347",
+            "priced_calls": 1,
+            "partial_calls": 0,
+            "unpriced_calls": 0
+          }
+        }
+      ],
+      "no_cost_row_calls": {
+        "total": 657,
+        "chat": 657,
+        "embedding": 0,
+        "rerank": 0
+      },
+      "cost_rows_without_currency": {
+        "total": 0,
+        "chat": 0,
+        "embedding": 0,
+        "rerank": 0
+      }
+    },
+    "trend": [
+      {
+        "bucket_start": "2026-08-31T00:00:00Z",
+        "calls": {
+          "total": 2,
+          "chat": 2,
+          "embedding": 0,
+          "rerank": 0
+        },
+        "input_tokens": {
+          "sum": 1606,
+          "observed_calls": 2,
+          "applicable_calls": 2
+        },
+        "output_tokens": {
+          "sum": 472,
+          "observed_calls": 2,
+          "applicable_calls": 2
+        },
+        "total_tokens": {
+          "sum": 2078,
+          "observed_calls": 2,
+          "applicable_calls": 2
+        },
+        "latency": {
+          "sum_ms": 10743,
+          "avg_ms": 5371.5,
+          "max_ms": 6033,
+          "observed_calls": 2,
+          "applicable_calls": 2
+        },
+        "prompt_cache": {
+          "hit_calls": 2,
+          "miss_calls": 0,
+          "unsupported_calls": 0,
+          "unreported_calls": 0,
+          "not_recorded_calls": 0,
+          "eligible_calls": 2,
+          "call_hit_rate": 1,
+          "cache_read_tokens": 1536,
+          "cache_write_tokens": 0,
+          "cache_miss_tokens": 70,
+          "token_denominator": 1606,
+          "token_cache_ratio": 0.9564134495641345
+        },
+        "embedding_cache": {
+          "full_hit_calls": 0,
+          "partial_calls": 0,
+          "miss_calls": 0,
+          "disabled_calls": 0,
+          "not_recorded_calls": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "eligible_inputs": 0,
+          "input_hit_rate": null
+        },
+        "cost_by_currency": [
+          {
+            "currency": "TEST",
+            "chat": {
+              "priced_cost": "1347",
+              "known_cost": "1347",
+              "priced_calls": 1,
+              "partial_calls": 0,
+              "unpriced_calls": 0
+            },
+            "embedding": {
+              "priced_cost": "0",
+              "known_cost": "0",
+              "priced_calls": 0,
+              "partial_calls": 0,
+              "unpriced_calls": 0
+            },
+            "rerank": {
+              "priced_cost": "0",
+              "known_cost": "0",
+              "priced_calls": 0,
+              "partial_calls": 0,
+              "unpriced_calls": 0
+            },
+            "total": {
+              "priced_cost": "1347",
+              "known_cost": "1347",
+              "priced_calls": 1,
+              "partial_calls": 0,
+              "unpriced_calls": 0
+            }
+          }
+        ],
+        "no_cost_row_calls": {
+          "total": 1,
+          "chat": 1,
+          "embedding": 0,
+          "rerank": 0
+        },
+        "cost_rows_without_currency": {
+          "total": 0,
+          "chat": 0,
+          "embedding": 0,
+          "rerank": 0
+        }
+      },
+      {
+        "bucket_start": "2026-09-01T00:00:00Z",
+        "calls": {
+          "total": 32,
+          "chat": 32,
+          "embedding": 0,
+          "rerank": 0
+        },
+        "input_tokens": {
+          "sum": 58514,
+          "observed_calls": 30,
+          "applicable_calls": 32
+        },
+        "output_tokens": {
+          "sum": 4931,
+          "observed_calls": 30,
+          "applicable_calls": 32
+        },
+        "total_tokens": {
+          "sum": 63445,
+          "observed_calls": 30,
+          "applicable_calls": 32
+        },
+        "latency": {
+          "sum_ms": 107031,
+          "avg_ms": 3344.71875,
+          "max_ms": 5756,
+          "observed_calls": 32,
+          "applicable_calls": 32
+        },
+        "prompt_cache": {
+          "hit_calls": 15,
+          "miss_calls": 15,
+          "unsupported_calls": 0,
+          "unreported_calls": 0,
+          "not_recorded_calls": 2,
+          "eligible_calls": 30,
+          "call_hit_rate": 0.5,
+          "cache_read_tokens": 26752,
+          "cache_write_tokens": 0,
+          "cache_miss_tokens": 31762,
+          "token_denominator": 58514,
+          "token_cache_ratio": 0.4571897323717401
+        },
+        "embedding_cache": {
+          "full_hit_calls": 0,
+          "partial_calls": 0,
+          "miss_calls": 0,
+          "disabled_calls": 0,
+          "not_recorded_calls": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "eligible_inputs": 0,
+          "input_hit_rate": null
+        },
+        "cost_by_currency": [],
+        "no_cost_row_calls": {
+          "total": 32,
+          "chat": 32,
+          "embedding": 0,
+          "rerank": 0
+        },
+        "cost_rows_without_currency": {
+          "total": 0,
+          "chat": 0,
+          "embedding": 0,
+          "rerank": 0
+        }
+      },
+      {
+        "bucket_start": "2026-09-02T00:00:00Z",
+        "calls": {
+          "total": 64,
+          "chat": 64,
+          "embedding": 0,
+          "rerank": 0
+        },
+        "input_tokens": {
+          "sum": 118971,
+          "observed_calls": 61,
+          "applicable_calls": 64
+        },
+        "output_tokens": {
+          "sum": 11946,
+          "observed_calls": 61,
+          "applicable_calls": 64
+        },
+        "total_tokens": {
+          "sum": 130917,
+          "observed_calls": 61,
+          "applicable_calls": 64
+        },
+        "latency": {
+          "sum_ms": 225863,
+          "avg_ms": 3529.109375,
+          "max_ms": 28752,
+          "observed_calls": 64,
+          "applicable_calls": 64
+        },
+        "prompt_cache": {
+          "hit_calls": 61,
+          "miss_calls": 0,
+          "unsupported_calls": 0,
+          "unreported_calls": 0,
+          "not_recorded_calls": 3,
+          "eligible_calls": 61,
+          "call_hit_rate": 1,
+          "cache_read_tokens": 113536,
+          "cache_write_tokens": 0,
+          "cache_miss_tokens": 5435,
+          "token_denominator": 118971,
+          "token_cache_ratio": 0.9543165981625774
+        },
+        "embedding_cache": {
+          "full_hit_calls": 0,
+          "partial_calls": 0,
+          "miss_calls": 0,
+          "disabled_calls": 0,
+          "not_recorded_calls": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "eligible_inputs": 0,
+          "input_hit_rate": null
+        },
+        "cost_by_currency": [],
+        "no_cost_row_calls": {
+          "total": 64,
+          "chat": 64,
+          "embedding": 0,
+          "rerank": 0
+        },
+        "cost_rows_without_currency": {
+          "total": 0,
+          "chat": 0,
+          "embedding": 0,
+          "rerank": 0
+        }
+      },
+      {
+        "bucket_start": "2026-09-05T00:00:00Z",
+        "calls": {
+          "total": 306,
+          "chat": 306,
+          "embedding": 0,
+          "rerank": 0
+        },
+        "input_tokens": {
+          "sum": 851437,
+          "observed_calls": 299,
+          "applicable_calls": 306
+        },
+        "output_tokens": {
+          "sum": 835382,
+          "observed_calls": 299,
+          "applicable_calls": 306
+        },
+        "total_tokens": {
+          "sum": 1686819,
+          "observed_calls": 299,
+          "applicable_calls": 306
+        },
+        "latency": {
+          "sum_ms": 11840918,
+          "avg_ms": 38695.81045751634,
+          "max_ms": 283674,
+          "observed_calls": 306,
+          "applicable_calls": 306
+        },
+        "prompt_cache": {
+          "hit_calls": 252,
+          "miss_calls": 47,
+          "unsupported_calls": 0,
+          "unreported_calls": 0,
+          "not_recorded_calls": 7,
+          "eligible_calls": 299,
+          "call_hit_rate": 0.842809364548495,
+          "cache_read_tokens": 391552,
+          "cache_write_tokens": 0,
+          "cache_miss_tokens": 459885,
+          "token_denominator": 851437,
+          "token_cache_ratio": 0.4598719576433723
+        },
+        "embedding_cache": {
+          "full_hit_calls": 0,
+          "partial_calls": 0,
+          "miss_calls": 0,
+          "disabled_calls": 0,
+          "not_recorded_calls": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "eligible_inputs": 0,
+          "input_hit_rate": null
+        },
+        "cost_by_currency": [],
+        "no_cost_row_calls": {
+          "total": 306,
+          "chat": 306,
+          "embedding": 0,
+          "rerank": 0
+        },
+        "cost_rows_without_currency": {
+          "total": 0,
+          "chat": 0,
+          "embedding": 0,
+          "rerank": 0
+        }
+      },
+      {
+        "bucket_start": "2026-09-06T00:00:00Z",
+        "calls": {
+          "total": 69,
+          "chat": 69,
+          "embedding": 0,
+          "rerank": 0
+        },
+        "input_tokens": {
+          "sum": 212567,
+          "observed_calls": 66,
+          "applicable_calls": 69
+        },
+        "output_tokens": {
+          "sum": 185029,
+          "observed_calls": 66,
+          "applicable_calls": 69
+        },
+        "total_tokens": {
+          "sum": 397596,
+          "observed_calls": 66,
+          "applicable_calls": 69
+        },
+        "latency": {
+          "sum_ms": 2653721,
+          "avg_ms": 38459.72463768116,
+          "max_ms": 168270,
+          "observed_calls": 69,
+          "applicable_calls": 69
+        },
+        "prompt_cache": {
+          "hit_calls": 65,
+          "miss_calls": 1,
+          "unsupported_calls": 0,
+          "unreported_calls": 0,
+          "not_recorded_calls": 3,
+          "eligible_calls": 66,
+          "call_hit_rate": 0.9848484848484849,
+          "cache_read_tokens": 108032,
+          "cache_write_tokens": 0,
+          "cache_miss_tokens": 104535,
+          "token_denominator": 212567,
+          "token_cache_ratio": 0.508225641797645
+        },
+        "embedding_cache": {
+          "full_hit_calls": 0,
+          "partial_calls": 0,
+          "miss_calls": 0,
+          "disabled_calls": 0,
+          "not_recorded_calls": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "eligible_inputs": 0,
+          "input_hit_rate": null
+        },
+        "cost_by_currency": [],
+        "no_cost_row_calls": {
+          "total": 69,
+          "chat": 69,
+          "embedding": 0,
+          "rerank": 0
+        },
+        "cost_rows_without_currency": {
+          "total": 0,
+          "chat": 0,
+          "embedding": 0,
+          "rerank": 0
+        }
+      },
+      {
+        "bucket_start": "2026-09-07T00:00:00Z",
+        "calls": {
+          "total": 185,
+          "chat": 185,
+          "embedding": 0,
+          "rerank": 0
+        },
+        "input_tokens": {
+          "sum": 446199,
+          "observed_calls": 171,
+          "applicable_calls": 185
+        },
+        "output_tokens": {
+          "sum": 371962,
+          "observed_calls": 171,
+          "applicable_calls": 185
+        },
+        "total_tokens": {
+          "sum": 818161,
+          "observed_calls": 171,
+          "applicable_calls": 185
+        },
+        "latency": {
+          "sum_ms": 8750915,
+          "avg_ms": 47302.24324324324,
+          "max_ms": 292567,
+          "observed_calls": 185,
+          "applicable_calls": 185
+        },
+        "prompt_cache": {
+          "hit_calls": 167,
+          "miss_calls": 4,
+          "unsupported_calls": 0,
+          "unreported_calls": 0,
+          "not_recorded_calls": 14,
+          "eligible_calls": 171,
+          "call_hit_rate": 0.9766081871345029,
+          "cache_read_tokens": 271872,
+          "cache_write_tokens": 0,
+          "cache_miss_tokens": 174327,
+          "token_denominator": 446199,
+          "token_cache_ratio": 0.6093066098310395
+        },
+        "embedding_cache": {
+          "full_hit_calls": 0,
+          "partial_calls": 0,
+          "miss_calls": 0,
+          "disabled_calls": 0,
+          "not_recorded_calls": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "eligible_inputs": 0,
+          "input_hit_rate": null
+        },
+        "cost_by_currency": [],
+        "no_cost_row_calls": {
+          "total": 185,
+          "chat": 185,
+          "embedding": 0,
+          "rerank": 0
+        },
+        "cost_rows_without_currency": {
+          "total": 0,
+          "chat": 0,
+          "embedding": 0,
+          "rerank": 0
+        }
+      }
+    ]
+  },
+  "success": true
+}

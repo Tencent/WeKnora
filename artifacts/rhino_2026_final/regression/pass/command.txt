@@ -1,0 +1,2 @@
+env GOCACHE=/tmp/weknora-go-cache go run ./cmd/regression --baseline config/regression/baseline.json --current artifacts/rhino_2026_final/regression/pass/current.json --policy config/regression/policy.json --report artifacts/rhino_2026_final/regression/pass/regression-report.json
+exit_code=0

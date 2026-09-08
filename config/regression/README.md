@@ -6,13 +6,14 @@
 
 ## 文件
 
-- `baseline.json` — 冻结的 baseline。来自真实 Benchmark v1.1 Cache OFF run
+- `baseline.json` — 冻结的 baseline。来自 Final strict Benchmark v1.1 Cache OFF Run 1
   （见下方 Baseline Provenance），保留 `quality`（12 metrics）+ `config`
-  （frozen contract：dataset / retrieval / model / worker_limit）+ 标识符，
+  （frozen contract：dataset / retrieval / generation / model / worker_limit）+ 标识符，
   剥离 `model_facts` / `run_wall_clock_duration_ms` 等 operational 数据。
-- `current.json` — 最新的 current result。初始状态与 baseline 相同 contract +
-  相同 quality（PASS）。真实 Benchmark 运行后用 `cmd/regression-benchmark`
-  产出的 JSON 覆盖它。
+- `current.json` — committed deterministic healthy fixture，是 Final Run 1 的同一
+  comparator-schema 投影，用于证明 no-regression 路径 PASS；它不是新的正式
+  baseline，也不是新的 Evaluation run。真实 Benchmark 运行后用
+  `cmd/regression-benchmark` 产出的 JSON 覆盖它。
 - `policy.json` — 阈值策略。`default_allowed_drop` 是默认允许下降的绝对幅度，
   `allowed_drop` 可按 metric 覆盖。
 
@@ -20,19 +21,16 @@
 
 | 字段 | 值 |
 |---|---|
-| task_id | `evaluation_10000_1788273787263_0cff0de6_benchmarkv1` |
-| evaluation_run_id | `449b15c1-0b49-481c-aef2-00091254d98d` |
+| task_id | `evaluation_10000_1788770724740_d35f5c12_benchmarkv1` |
+| evaluation_run_id | `eca1f236-0047-4fe3-aa11-39897e5d321b` |
 | benchmark version | `v1.1` |
-| 来源 | `dataset/benchmark_v1/baseline_cache_off_v1_1.json`（真实 run） |
+| 来源 | `artifacts/rhino_2026_final/benchmark/run_1/result.json` + `metadata.json` |
+| 选择规则 | first complete strict success（不是择优） |
 | 冻结 | 是（quality metrics + benchmark contract） |
 
-`baseline_cache_off_v1_1.json` 是 Benchmark v1.1 correctness/E2E audit artifact。
-其 12 个 quality metrics 是真实的、可追溯的；但该 run 的 embedding provider
-出现过 header timeout / retry，因此 `run_wall_clock_duration_ms` / model latency /
-provider-request / provider-input / cost 这些 **operational 值不是权威 operational
-baseline**（见 `dataset/benchmark_v1/README.md`）。Regression Comparator 只 gate
-12 个 quality metrics，不 gate operational 值，因此该 run 的 quality 部分可安全
-作为 quality regression baseline。
+Run 1 是三个 Final strict runs 中预声明规则选出的首个完整成功 run，不是按指标
+择优。`baseline.json` 从该 run 精确投影 comparator 所需的 run/config/quality/
+reproducibility 字段，不包含 usage、cost、latency 等 operational 数据。
 
 ## Compatibility Check
 
@@ -58,9 +56,11 @@ threshold = -allowed_drop        # 允许的最大绝对下降幅度（取负号
 PASS      = delta >= threshold   # 即 current >= baseline - allowed_drop
 ```
 
-阈值统一使用**绝对下降**（不是百分比下降）。默认 `0.02`，当前仓库没有官方阈值
-要求，故采用可配置机制 + 文档化默认值。任一 metric 下降超过自己的 threshold →
-整体 FAIL（禁止加权抵消）。
+阈值统一使用**绝对下降**（不是百分比下降）。Retrieval 六项、BLEU-4 和
+ROUGE-2 为 `0.020`；BLEU-1 为 `0.030`，BLEU-2 为 `0.025`，ROUGE-1 和
+ROUGE-L 为 `0.035`。Generation 阈值来自 Final strict x3 的 empirical worst
+downward delta 加小幅显式余量，不使用 3σ。任一 metric 下降超过自己的
+threshold → 整体 FAIL（禁止加权抵消）。
 
 ## 运行
 

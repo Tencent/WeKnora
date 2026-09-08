@@ -1,0 +1,42 @@
+{
+  "accepted": [
+    {
+      "id": "86b59a63-919d-459d-a82b-c4b16fcd692d",
+      "phase": "off",
+      "status": "success",
+      "embedding_inputs": 32,
+      "cache_hits": 0,
+      "cache_misses": 0,
+      "provider_requests": 7,
+      "provider_inputs": 32,
+      "embedding_cache_status": "disabled"
+    },
+    {
+      "id": "5a1a90d3-dd18-4165-aeb4-1f94b472302d",
+      "phase": "cold",
+      "status": "success",
+      "embedding_inputs": 32,
+      "cache_hits": 0,
+      "cache_misses": 32,
+      "provider_requests": 7,
+      "provider_inputs": 32,
+      "embedding_cache_status": "miss"
+    },
+    {
+      "id": "bd15e611-cf92-47e7-88b0-1c25ffdd34a8",
+      "phase": "warm",
+      "status": "success",
+      "embedding_inputs": 32,
+      "cache_hits": 32,
+      "cache_misses": 0,
+      "provider_requests": 0,
+      "provider_inputs": 0,
+      "embedding_cache_status": "full_hit"
+    }
+  ],
+  "excluded_setup_probe": {
+    "id": "a51ab543-5e70-4e2f-a736-952b1358aa7f",
+    "status": "error",
+    "reason": "non-production single 32-item batch exceeded provider batch-size limit; corrected to production pooled-batch path"
+  }
+}

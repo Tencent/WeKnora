@@ -1,0 +1,85 @@
+{
+  "scope": {
+    "tenant_id": 10000,
+    "window": {
+      "start": "2026-08-31T13:00:00Z",
+      "end": "2026-09-07T11:00:00Z"
+    },
+    "actual_min_created_at": "2026-08-31 13:21:09.586846+00",
+    "actual_max_created_at": "2026-09-07 10:22:55.471698+00",
+    "total_rows": 1011,
+    "cost_in_scope": false,
+    "note": "cost dimension excluded from final evidence (model_pricing empty => unpriced). NULL != 0; unobserved fields are null, not zero."
+  },
+  "models": {
+    "deepseek-v4-pro": {
+      "model_id": "5a50bf0a-60f9-4340-974b-0bd85c80b286",
+      "call_types": {
+        "chat": {
+          "calls": 658,
+          "input_tokens_sum": 1689294,
+          "input_tokens_observed": 629,
+          "output_tokens_sum": 1409722,
+          "total_tokens_sum": 3099016,
+          "latency_ms_sum": 23589191,
+          "latency_ms_observed": 658
+        }
+      }
+    },
+    "qwen3-rerank": {
+      "model_id": "73b5c8e8-c403-4b2e-b36c-71af65db0920",
+      "call_types": {
+        "rerank": {
+          "calls": 136,
+          "input_tokens_sum": null,
+          "input_tokens_observed": 0,
+          "output_tokens_sum": null,
+          "total_tokens_sum": 313330,
+          "latency_ms_sum": 645999,
+          "latency_ms_observed": 136
+        }
+      }
+    },
+    "text-embedding-v4": {
+      "model_id": "c24c212d-ae14-4bed-b4c3-be95eeb36464",
+      "call_types": {
+        "embedding": {
+          "calls": 217,
+          "input_tokens_sum": 19619,
+          "input_tokens_observed": 67,
+          "output_tokens_sum": null,
+          "total_tokens_sum": 19619,
+          "latency_ms_sum": 1442071,
+          "latency_ms_observed": 217
+        }
+      }
+    }
+  },
+  "derived_metrics": {
+    "prompt_cache_chat": {
+      "hit_calls": 562,
+      "miss_calls": 67,
+      "unsupported_calls": 0,
+      "unreported_calls": 0,
+      "not_recorded_calls": 29,
+      "eligible_calls": 629,
+      "call_hit_rate": 0.893482,
+      "cache_read_tokens": 913280,
+      "cache_write_tokens": 0,
+      "cache_miss_tokens": 776014,
+      "token_denominator": 1689294,
+      "token_cache_ratio": 0.540628
+    },
+    "embedding_cache": {
+      "full_hit_calls": 17,
+      "partial_calls": 0,
+      "miss_calls": 17,
+      "disabled_calls": 183,
+      "not_recorded_calls": 0,
+      "cache_hits": 79,
+      "cache_misses": 79,
+      "eligible_inputs": 158,
+      "input_hit_rate": 0.5
+    }
+  }
+}

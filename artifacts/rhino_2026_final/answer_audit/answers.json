@@ -1,0 +1,250 @@
+{
+  "commit": "cd21908a652d1330499986e191fbd704b7d9c13b",
+  "dataset_id": "benchmark_v1",
+  "dataset_semantic_sha256": "56fd363d797ee4c1524a5a1a2517b3b30ce955229c37784cf730c0d1dc47fd0d",
+  "published_run": "benchmark/run_1",
+  "status": "needs_human_review_per_question_outputs_not_persisted",
+  "human_confirmed": false,
+  "answers": [
+    {
+      "question_id": 0,
+      "question": "在 NebulaTech 连续司龄满 3 年及以上的全职员工，每个完整自然年度有多少个工作日年假？",
+      "reference_answer": "12 个工作日。",
+      "generated_answer": null,
+      "relevant_documents": [
+        {
+          "pid": 0,
+          "text": "NebulaTech 中国大陆全职员工每个完整自然年度的年假额度按连续司龄计算：不足 1 年为 5 个工作日，满 1 年但不足 3 年为 8 个工作日，满 3 年及以上为 12 个工作日。"
+        }
+      ],
+      "retrieved_evidence_identifiers": [],
+      "top_retrieved_chunks": [],
+      "provisional_verdict": "needs_human_review",
+      "evidence_gap": "published aggregate artifact does not persist generated answer or per-question retrieval output"
+    },
+    {
+      "question_id": 1,
+      "question": "通过试用期的全职员工每个自然周最多可以远程办公多少个工作日？未使用额度能否累积到下周？",
+      "reference_answer": "最多 2 个工作日，未使用额度不能累积到下周。",
+      "generated_answer": null,
+      "relevant_documents": [
+        {
+          "pid": 2,
+          "text": "通过试用期的全职员工每个自然周最多可远程办公 2 个工作日；试用期员工不享有固定远程办公额度。跨周申请按每个自然周分别计算，未使用额度不能累积。"
+        }
+      ],
+      "retrieved_evidence_identifiers": [],
+      "top_retrieved_chunks": [],
+      "provisional_verdict": "needs_human_review",
+      "evidence_gap": "published aggregate artifact does not persist generated answer or per-question retrieval output"
+    },
+    {
+      "question_id": 2,
+      "question": "NebulaTech 海外出差的酒店含税上限是多少？",
+      "reference_answer": "每人每晚人民币等值 1200 元。",
+      "generated_answer": null,
+      "relevant_documents": [
+        {
+          "pid": 5,
+          "text": "海外出差酒店含税上限为每人每晚人民币等值 1200 元，餐补为每人每天人民币等值 250 元。海外标准不与国内标准叠加。"
+        }
+      ],
+      "retrieved_evidence_identifiers": [],
+      "top_retrieved_chunks": [],
+      "provisional_verdict": "needs_human_review",
+      "evidence_gap": "published aggregate artifact does not persist generated answer or per-question retrieval output"
+    },
+    {
+      "question_id": 3,
+      "question": "出差结束后，正常提交完整报销单的期限是多少？超过哪个更长的期限且无书面例外会不予报销？",
+      "reference_answer": "正常期限为 10 个工作日；超过 30 个自然日且无财务负责人书面例外时不予报销。",
+      "generated_answer": null,
+      "relevant_documents": [
+        {
+          "pid": 6,
+          "text": "员工须在出差结束后的 10 个工作日内提交完整报销单。超过 10 个工作日需额外获得部门负责人批准；超过 30 个自然日且无财务负责人书面例外的费用不予报销。"
+        }
+      ],
+      "retrieved_evidence_identifiers": [],
+      "top_retrieved_chunks": [],
+      "provisional_verdict": "needs_human_review",
+      "evidence_gap": "published aggregate artifact does not persist generated answer or per-question retrieval output"
+    },
+    {
+      "question_id": 4,
+      "question": "测试数据库的 Schema 变更需要谁审批？",
+      "reference_answer": "发起人的直属 Team Lead。",
+      "generated_answer": null,
+      "relevant_documents": [
+        {
+          "pid": 9,
+          "text": "测试数据库 Schema 变更必须由发起人的直属 Team Lead 审批，且审批记录必须关联迁移脚本的 Git commit；聊天消息不是有效审批记录。"
+        }
+      ],
+      "retrieved_evidence_identifiers": [],
+      "top_retrieved_chunks": [],
+      "provisional_verdict": "needs_human_review",
+      "evidence_gap": "published aggregate artifact does not persist generated answer or per-question retrieval output"
+    },
+    {
+      "question_id": 5,
+      "question": "普通研发人员排障时申请生产数据库临时只读权限，单次授权最长多久？",
+      "reference_answer": "最长 2 小时。",
+      "generated_answer": null,
+      "relevant_documents": [
+        {
+          "pid": 12,
+          "text": "生产数据库临时只读权限由 DBA 审批，单次最长 2 小时；临时写权限由 DBA 和安全负责人双人审批，单次最长 1 小时。"
+        }
+      ],
+      "retrieved_evidence_identifiers": [],
+      "top_retrieved_chunks": [],
+      "provisional_verdict": "needs_human_review",
+      "evidence_gap": "published aggregate artifact does not persist generated answer or per-question retrieval output"
+    },
+    {
+      "question_id": 6,
+      "question": "发布到 Staging 环境前需要谁进行人工审批？",
+      "reference_answer": "发起人的直属 Team Lead。",
+      "generated_answer": null,
+      "relevant_documents": [
+        {
+          "pid": 14,
+          "text": "发布到 Staging 前必须通过单元测试和静态检查，并由发起人的直属 Team Lead 审批；不要求当周值班 SRE 审批。"
+        }
+      ],
+      "retrieved_evidence_identifiers": [],
+      "top_retrieved_chunks": [],
+      "provisional_verdict": "needs_human_review",
+      "evidence_gap": "published aggregate artifact does not persist generated answer or per-question retrieval output"
+    },
+    {
+      "question_id": 7,
+      "question": "NebulaTech 常规 Production 应用发布窗口是每周什么时间？",
+      "reference_answer": "每周三 20:00 至 22:00。",
+      "generated_answer": null,
+      "relevant_documents": [
+        {
+          "pid": 16,
+          "text": "常规 Production 应用发布窗口是每周三 20:00 至 22:00；法定节假日前最后一个工作日禁止常规 Production 发布。"
+        }
+      ],
+      "retrieved_evidence_identifiers": [],
+      "top_retrieved_chunks": [],
+      "provisional_verdict": "needs_human_review",
+      "evidence_gap": "published aggregate artifact does not persist generated answer or per-question retrieval output"
+    },
+    {
+      "question_id": 8,
+      "question": "P1 告警的首次确认时限是多少？它是否与 P0 的时限相同？",
+      "reference_answer": "P1 为 10 分钟，不相同；P0 为 5 分钟。",
+      "generated_answer": null,
+      "relevant_documents": [
+        {
+          "pid": 19,
+          "text": "事故告警首次确认时限分别为：P0 5 分钟、P1 10 分钟、P2 30 分钟、P3 4 小时。确认须在 NebulaPager 点击 Acknowledge 并进入事故频道。"
+        }
+      ],
+      "retrieved_evidence_identifiers": [],
+      "top_retrieved_chunks": [],
+      "provisional_verdict": "needs_human_review",
+      "evidence_gap": "published aggregate artifact does not persist generated answer or per-question retrieval output"
+    },
+    {
+      "question_id": 9,
+      "question": "个人 SSH 公钥最长登记有效期是多少？",
+      "reference_answer": "365 天。",
+      "generated_answer": null,
+      "relevant_documents": [
+        {
+          "pid": 24,
+          "text": "新建 SSH Key 必须使用 Ed25519。个人 SSH 公钥最长登记有效期为 365 天，到期后需重新登记。"
+        }
+      ],
+      "retrieved_evidence_identifiers": [],
+      "top_retrieved_chunks": [],
+      "provisional_verdict": "needs_human_review",
+      "evidence_gap": "published aggregate artifact does not persist generated answer or per-question retrieval output"
+    },
+    {
+      "question_id": 10,
+      "question": "Pro 套餐每个 Workspace 的默认 API Rate Limit 是多少？",
+      "reference_answer": "每分钟 600 个请求。",
+      "generated_answer": null,
+      "relevant_documents": [
+        {
+          "pid": 25,
+          "text": "每个 Workspace 的默认 API 限额按套餐区分：Basic 每分钟 120 个请求，Pro 每分钟 600 个请求，Enterprise 每分钟 3000 个请求；窗口按自然分钟计算。"
+        }
+      ],
+      "retrieved_evidence_identifiers": [],
+      "top_retrieved_chunks": [],
+      "provisional_verdict": "needs_human_review",
+      "evidence_gap": "published aggregate artifact does not persist generated answer or per-question retrieval output"
+    },
+    {
+      "question_id": 11,
+      "question": "公开 API 主版本进入 Deprecated 状态后至少还要提供多少天服务？",
+      "reference_answer": "至少 180 个自然日。",
+      "generated_answer": null,
+      "relevant_documents": [
+        {
+          "pid": 26,
+          "text": "公开 API 主版本进入 Deprecated 状态后至少继续提供 180 个自然日服务，并须公告替代版本和停止服务日期。"
+        }
+      ],
+      "retrieved_evidence_identifiers": [],
+      "top_retrieved_chunks": [],
+      "provisional_verdict": "needs_human_review",
+      "evidence_gap": "published aggregate artifact does not persist generated answer or per-question retrieval output"
+    },
+    {
+      "question_id": 12,
+      "question": "Enterprise 套餐的单个文件导入大小上限是多少？",
+      "reference_answer": "1 GB。",
+      "generated_answer": null,
+      "relevant_documents": [
+        {
+          "pid": 27,
+          "text": "Basic Workspace 最多 10 名成员且单文件导入上限 50 MB；Pro 最多 100 名成员且上限 200 MB；Enterprise 成员数无产品内硬上限且单文件导入上限 1 GB。"
+        }
+      ],
+      "retrieved_evidence_identifiers": [],
+      "top_retrieved_chunks": [],
+      "provisional_verdict": "needs_human_review",
+      "evidence_gap": "published aggregate artifact does not persist generated answer or per-question retrieval output"
+    },
+    {
+      "question_id": 13,
+      "question": "Staging Snapshot 的保留周期是多少？",
+      "reference_answer": "7 个自然日。",
+      "generated_answer": null,
+      "relevant_documents": [
+        {
+          "pid": 30,
+          "text": "Staging Snapshot 保留 7 个自然日，Production 每日全量 Backup 保留 35 个自然日，月度 Archive 保留 365 天。三种对象用途不同，保留周期不得混用。"
+        }
+      ],
+      "retrieved_evidence_identifiers": [],
+      "top_retrieved_chunks": [],
+      "provisional_verdict": "needs_human_review",
+      "evidence_gap": "published aggregate artifact does not persist generated answer or per-question retrieval output"
+    },
+    {
+      "question_id": 14,
+      "question": "NebulaTech 新一周 On-call 值班从周一几点生效？",
+      "reference_answer": "周一 10:00。",
+      "generated_answer": null,
+      "relevant_documents": [
+        {
+          "pid": 31,
+          "text": "新一周 On-call 从周一 10:00 生效。P0 或 P1 发给 Primary 后 5 分钟未确认会升级给 Secondary；之后 P0 再过 5 分钟、P1 再过 10 分钟未确认时升级给 Incident Manager。"
+        }
+      ],
+      "retrieved_evidence_identifiers": [],
+      "top_retrieved_chunks": [],
+      "provisional_verdict": "needs_human_review",
+      "evidence_gap": "published aggregate artifact does not persist generated answer or per-question retrieval output"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "phase": "warm",
+  "commit": "cd21908a652d1330499986e191fbd704b7d9c13b",
+  "dataset_id": "benchmark_v1",
+  "dataset_semantic_sha256": "56fd363d797ee4c1524a5a1a2517b3b30ce955229c37784cf730c0d1dc47fd0d",
+  "embedding_model_id": "c24c212d-ae14-4bed-b4c3-be95eeb36464",
+  "embedding_model_name": "text-embedding-v4",
+  "dimensions": 1024,
+  "logical_inputs": 32,
+  "returned_vectors": 32,
+  "elapsed_ms": 10,
+  "cache_enabled": true,
+  "cache_prefix": "weknora:embedding:final-acceptance:cd21908a",
+  "cache_stats": {
+    "embedding_requests": 1,
+    "embedding_inputs": 32,
+    "cache_hits": 32,
+    "cache_misses": 0,
+    "provider_inputs": 0,
+    "cache_read_errors": 0,
+    "cache_write_errors": 0
+  },
+  "started_at": "2026-09-07T09:01:12.900569283Z",
+  "finished_at": "2026-09-07T09:01:12.911353124Z"
+}

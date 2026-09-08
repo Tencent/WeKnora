@@ -1,0 +1,80 @@
+{
+  "commit_sha": "cd21908a652d1330499986e191fbd704b7d9c13b",
+  "evaluation_run_id": "eca1f236-0047-4fe3-aa11-39897e5d321b",
+  "task_id": "evaluation_10000_1788770724740_d35f5c12_benchmarkv1",
+  "status": 2,
+  "total": 15,
+  "finished": 15,
+  "created_at": "2026-09-07T08:45:24.740343+00:00",
+  "started_at": "2026-09-07T08:45:24.752552+00:00",
+  "finished_at": "2026-09-07T08:46:02.58478+00:00",
+  "duration_ms": 37832,
+  "dataset": {
+    "semantic_sha256": "56fd363d797ee4c1524a5a1a2517b3b30ce955229c37784cf730c0d1dc47fd0d",
+    "corpus": 32,
+    "questions": 15,
+    "qrels": 15,
+    "answers": 15
+  },
+  "models": {
+    "chat": {
+      "name": "deepseek-v4-pro",
+      "type": "KnowledgeQA",
+      "source": "remote",
+      "provider": "generic",
+      "resolved_provider": "generic",
+      "resolved_model_name": "deepseek-v4-pro"
+    },
+    "embedding": {
+      "name": "text-embedding-v4",
+      "type": "Embedding",
+      "source": "remote",
+      "provider": "generic",
+      "resolved_provider": "generic",
+      "resolved_model_name": "text-embedding-v4"
+    },
+    "rerank": {
+      "name": "qwen3-rerank",
+      "type": "Rerank",
+      "source": "remote",
+      "provider": "aliyun",
+      "resolved_provider": "aliyun",
+      "resolved_model_name": "qwen3-rerank"
+    },
+    "summary": {
+      "name": "deepseek-v4-pro",
+      "type": "KnowledgeQA",
+      "source": "remote",
+      "provider": "generic",
+      "resolved_provider": "generic",
+      "resolved_model_name": "deepseek-v4-pro"
+    }
+  },
+  "runtime": {
+    "worker_limit": 27,
+    "cache_mode": "off",
+    "retrieval": {
+      "vector_threshold": 0.2,
+      "keyword_threshold": 0.3,
+      "embedding_top_k": 30,
+      "rerank_top_k": 30,
+      "rerank_threshold": 0.3,
+      "retrieve_driver": "postgres"
+    },
+    "generation": {
+      "max_rounds": 5,
+      "max_input_chars": 16384,
+      "max_tokens": 0,
+      "repeat_penalty": 1,
+      "top_k": 0,
+      "top_p": 0,
+      "frequency_penalty": 0,
+      "presence_penalty": 0,
+      "temperature": 0.3,
+      "seed": 0,
+      "max_completion_tokens": 2048
+    }
+  },
+  "execution_mode": "strict",
+  "comparable_to_final_baseline": true
+}

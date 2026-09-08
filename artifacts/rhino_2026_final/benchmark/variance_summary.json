@@ -1,0 +1,141 @@
+{
+  "benchmark_id": "benchmark_v1",
+  "benchmark_version": "v1.1",
+  "commit_sha": "cd21908a652d1330499986e191fbd704b7d9c13b",
+  "published_final_result": "run_1",
+  "selection_rule": "First complete successful Final Strict Run.",
+  "runs": [
+    {
+      "run": "run_1",
+      "evaluation_run_id": "eca1f236-0047-4fe3-aa11-39897e5d321b",
+      "task_id": "evaluation_10000_1788770724740_d35f5c12_benchmarkv1",
+      "started_at": "2026-09-07T08:45:24.752552+00:00",
+      "finished_at": "2026-09-07T08:46:02.58478+00:00"
+    },
+    {
+      "run": "run_2",
+      "evaluation_run_id": "b749008d-cd0f-4bb4-a7f8-dfefbc079d75",
+      "task_id": "evaluation_10000_1788770833615_fed6235c_benchmarkv1",
+      "started_at": "2026-09-07T08:47:13.622264+00:00",
+      "finished_at": "2026-09-07T08:47:23.163471+00:00"
+    },
+    {
+      "run": "run_3",
+      "evaluation_run_id": "b34144cd-055e-4abb-8048-19ee10c5bfe9",
+      "task_id": "evaluation_10000_1788770858460_fd1c8eee_benchmarkv1",
+      "started_at": "2026-09-07T08:47:38.467471+00:00",
+      "finished_at": "2026-09-07T08:47:46.828136+00:00"
+    }
+  ],
+  "metrics": {
+    "precision": {
+      "run_1": 0.1390038665038665,
+      "run_2": 0.1390038665038665,
+      "run_3": 0.13900386650386648,
+      "min": 0.13900386650386648,
+      "max": 0.1390038665038665,
+      "mean": 0.1390038665038665,
+      "range": 2.7755575615628914e-17
+    },
+    "recall": {
+      "run_1": 1,
+      "run_2": 1,
+      "run_3": 1,
+      "min": 1,
+      "max": 1,
+      "mean": 1.0,
+      "range": 0
+    },
+    "ndcg_3": {
+      "run_1": 1,
+      "run_2": 1,
+      "run_3": 1,
+      "min": 1,
+      "max": 1,
+      "mean": 1.0,
+      "range": 0
+    },
+    "ndcg_10": {
+      "run_1": 1,
+      "run_2": 1,
+      "run_3": 1,
+      "min": 1,
+      "max": 1,
+      "mean": 1.0,
+      "range": 0
+    },
+    "mrr": {
+      "run_1": 1,
+      "run_2": 1,
+      "run_3": 1,
+      "min": 1,
+      "max": 1,
+      "mean": 1.0,
+      "range": 0
+    },
+    "map": {
+      "run_1": 1,
+      "run_2": 1,
+      "run_3": 1,
+      "min": 1,
+      "max": 1,
+      "mean": 1.0,
+      "range": 0
+    },
+    "bleu_1": {
+      "run_1": 0.16187812788396444,
+      "run_2": 0.16861354305363524,
+      "run_3": 0.13698726366884717,
+      "min": 0.13698726366884717,
+      "max": 0.16861354305363524,
+      "mean": 0.1558263115354823,
+      "range": 0.03162627938478807
+    },
+    "bleu_2": {
+      "run_1": 0.13583017781622067,
+      "run_2": 0.14325200302074442,
+      "run_3": 0.11628183204617806,
+      "min": 0.11628183204617806,
+      "max": 0.14325200302074442,
+      "mean": 0.13178800429438106,
+      "range": 0.02697017097456636
+    },
+    "bleu_4": {
+      "run_1": 0.09804269528700206,
+      "run_2": 0.10175637655174019,
+      "run_3": 0.0830913635139883,
+      "min": 0.0830913635139883,
+      "max": 0.10175637655174019,
+      "mean": 0.09429681178424353,
+      "range": 0.018665013037751893
+    },
+    "rouge_1": {
+      "run_1": 0.2827728018464779,
+      "run_2": 0.30610940781346757,
+      "run_3": 0.2558906393924722,
+      "min": 0.2558906393924722,
+      "max": 0.30610940781346757,
+      "mean": 0.2815909496841392,
+      "range": 0.050218768420995374
+    },
+    "rouge_2": {
+      "run_1": 0.15485747897021415,
+      "run_2": 0.17275137870950924,
+      "run_3": 0.1390549677055363,
+      "min": 0.1390549677055363,
+      "max": 0.17275137870950924,
+      "mean": 0.15555460846175323,
+      "range": 0.03369641100397294
+    },
+    "rouge_l": {
+      "run_1": 0.2770340961077722,
+      "run_2": 0.29129459299865273,
+      "run_3": 0.25007450430804445,
+      "min": 0.25007450430804445,
+      "max": 0.29129459299865273,
+      "mean": 0.2728010644714898,
+      "range": 0.04122008869060828
+    }
+  },
+  "conclusion": "Retrieval is identical across the repeated runs. Lexical answer-quality metrics exhibit run-to-run variance under the same frozen hosted-generation configuration; this does not by itself prove the provider-level cause."
+}
