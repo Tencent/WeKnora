@@ -36,6 +36,13 @@ func (r *wikiEnqueueFailureKnowledgeRepo) SetFinalizing(
 	return true, nil
 }
 
+func (r *wikiEnqueueFailureKnowledgeRepo) FinalizeSubtask(
+	context.Context,
+	string,
+) (int, bool, error) {
+	return 0, false, nil
+}
+
 func (r *wikiEnqueueFailureKnowledgeRepo) UpdateKnowledgeColumn(
 	context.Context,
 	string,
@@ -71,8 +78,9 @@ func (s *wikiEnqueueFailureChunkService) ListChunksByKnowledgeID(
 
 type wikiEnqueueFailureTaskQueue struct {
 	interfaces.TaskEnqueuer
-	taskTypes []string
-	wikiErr   error
+	taskTypes       []string
+	extractChunkIDs []string
+	wikiErr         error
 }
 
 func (q *wikiEnqueueFailureTaskQueue) Enqueue(
@@ -82,6 +90,12 @@ func (q *wikiEnqueueFailureTaskQueue) Enqueue(
 	q.taskTypes = append(q.taskTypes, task.Type())
 	if task.Type() == types.TypeWikiIngest {
 		return nil, q.wikiErr
+	}
+	if task.Type() == types.TypeChunkExtract {
+		var payload types.ExtractChunkPayload
+		if err := json.Unmarshal(task.Payload(), &payload); err == nil {
+			q.extractChunkIDs = append(q.extractChunkIDs, payload.ChunkID)
+		}
 	}
 	return &asynq.TaskInfo{ID: "queued", Type: task.Type()}, nil
 }

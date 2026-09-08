@@ -1,6 +1,15 @@
 package service
 
-import "testing"
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/hibiken/asynq"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
 func TestChunkHasExtractableText(t *testing.T) {
 	tests := []struct {
@@ -15,6 +24,14 @@ func TestChunkHasExtractableText(t *testing.T) {
 		{"prose", "第1章 総則", true},
 		{"prose around an image link", "See figure: ![fig](resource://x) below.", true},
 		{"image link followed by OCR text", "![page_1.jpg](resource://abc)\nSection 2: Definitions", true},
+		{"title containing right paren", `![a](images/a.png "阶段 1) 结果")`, false},
+		{"path with balanced parens", `![a](images/a_(1).png "title")`, false},
+		{"empty image wrapper", `<image url="x"><image_original>![a](x)</image_original></image>`, false},
+		{"wrapper with OCR body", `<image url="images/p1.png">
+<image_original>![p1](images/p1.png)</image_original>
+<image_caption>scanned letter</image_caption>
+<image_ocr>Sehr geehrter Herr Mustermann</image_ocr>
+</image>`, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -23,4 +40,81 @@ func TestChunkHasExtractableText(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSelectGraphChunks(t *testing.T) {
+	chunks := []*types.Chunk{
+		{ID: "text-link", ChunkType: types.ChunkTypeText, Content: "![page_1.jpg](resource://abc)"},
+		{ID: "ocr-scanned", ChunkType: types.ChunkTypeImageOCR, ParentChunkID: "text-link", Content: "第1章 総則"},
+		{
+			ID: "cap-scanned", ChunkType: types.ChunkTypeImageCaption,
+			ParentChunkID: "text-link", Content: "a scanned page of printed text",
+		},
+		{ID: "text-prose", ChunkType: types.ChunkTypeText, Content: "Contract between Alice and Bob."},
+		{ID: "ocr-figure", ChunkType: types.ChunkTypeImageOCR, ParentChunkID: "text-prose", Content: "ACME logo"},
+		{
+			ID: "text-title-paren", ChunkType: types.ChunkTypeText,
+			Content: `![a](images/a.png "阶段 1) 结果")`,
+		},
+		{ID: "ocr-orphan", ChunkType: types.ChunkTypeImageOCR, Content: "standalone OCR"},
+	}
+
+	got := selectGraphChunks(chunks)
+	gotIDs := make([]string, len(got))
+	for i, c := range got {
+		gotIDs[i] = c.ID
+	}
+	assert.Equal(t, []string{"ocr-scanned", "text-prose", "ocr-orphan"}, gotIDs)
+}
+
+func TestKnowledgePostProcessGraphEnqueueSelection(t *testing.T) {
+	t.Setenv("NEO4J_ENABLE", "true")
+
+	const knowledgeID = "knowledge-graph-ocr"
+	repo := &wikiEnqueueFailureKnowledgeRepo{
+		knowledge: &types.Knowledge{
+			ID:          knowledgeID,
+			ParseStatus: types.ParseStatusProcessing,
+		},
+	}
+	queue := &wikiEnqueueFailureTaskQueue{}
+	service := &KnowledgePostProcessService{
+		knowledgeRepo: repo,
+		kbService: &wikiEnqueueFailureKBService{kb: &types.KnowledgeBase{
+			ID: "kb-graph",
+			IndexingStrategy: types.IndexingStrategy{
+				GraphEnabled: true,
+			},
+			ExtractConfig: &types.ExtractConfig{Enabled: true},
+		}},
+		chunkRepo: &wikiEnqueueFailureChunkRepo{chunks: []*types.Chunk{
+			{ID: "text-link", ChunkType: types.ChunkTypeText, Content: "![page_1.jpg](resource://abc)"},
+			{ID: "ocr-scanned", ChunkType: types.ChunkTypeImageOCR, ParentChunkID: "text-link", Content: "第1章 総則"},
+			{
+				ID: "cap-scanned", ChunkType: types.ChunkTypeImageCaption,
+				ParentChunkID: "text-link", Content: "a scanned page",
+			},
+			{ID: "text-prose", ChunkType: types.ChunkTypeText, Content: "Contract between Alice and Bob."},
+			{ID: "ocr-figure", ChunkType: types.ChunkTypeImageOCR, ParentChunkID: "text-prose", Content: "ACME logo"},
+		}},
+		taskEnqueuer: queue,
+	}
+
+	payload, err := json.Marshal(types.KnowledgePostProcessPayload{
+		TenantID:        7,
+		KnowledgeID:     knowledgeID,
+		KnowledgeBaseID: "kb-graph",
+	})
+	require.NoError(t, err)
+
+	err = service.Handle(context.Background(), asynq.NewTask(types.TypeKnowledgePostProcess, payload))
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"ocr-scanned", "text-prose"}, queue.extractChunkIDs)
+	assert.Equal(t, []string{
+		types.TypeSummaryGeneration,
+		types.TypeChunkExtract,
+		types.TypeChunkExtract,
+	}, queue.taskTypes)
+	assert.Equal(t, 3, repo.expectedSubtasks, "summary plus two graph extract slots")
 }

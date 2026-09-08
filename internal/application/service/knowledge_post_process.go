@@ -5,11 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
-	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -168,22 +167,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		}
 	}
 
-	// Graph extraction targets the chunks that actually carry document text:
-	// plain text chunks and OCR transcriptions. Captions describe the page
-	// visually and largely duplicate the OCR text, so they only add cost and
-	// noise to the entity graph. Chunks that hold nothing but image links
-	// (the text layer of a scanned PDF) are skipped too — the LLM has nothing
-	// to extract from them and tends to echo the few-shot example instead.
-	var graphChunks []*types.Chunk
-	for _, c := range textChunks {
-		if c.ChunkType == types.ChunkTypeImageCaption {
-			continue
-		}
-		if !chunkHasExtractableText(c.Content) {
-			continue
-		}
-		graphChunks = append(graphChunks, c)
-	}
+	graphChunks := selectGraphChunks(textChunks)
 
 	// 3. Compute the enrichment subtask count up front so we can flip to
 	//    "finalizing" with the right counter BEFORE spawning any subtasks.
@@ -213,12 +197,14 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	// call retries / cancels / traces independently. We only target
 	// ChunkTypeText here — OCR / Caption chunks were never fed to question
 	// generation in the legacy whole-knowledge loop, so excluding them
-	// keeps behavior identical. Sorted by StartAt so the per-chunk
-	// context (prev / next) matches the legacy ordering.
+	// keeps behavior identical. Link-only text chunks (scanned PDF pages)
+	// are skipped: the LLM has nothing to ask about and tends to echo the
+	// few-shot example. Sorted by StartAt so the per-chunk context
+	// (prev / next) matches the legacy ordering.
 	var questionChunks []*types.Chunk
 	if willSpawnQuestion {
 		for _, c := range textChunks {
-			if c.ChunkType == types.ChunkTypeText {
+			if c.ChunkType == types.ChunkTypeText && chunkHasExtractableText(c.Content) {
 				questionChunks = append(questionChunks, c)
 			}
 		}
@@ -679,15 +665,47 @@ func (s *KnowledgePostProcessService) enqueueQuestionGenerationTasks(
 	return enqueued
 }
 
-// imageLinkPattern matches markdown image embeds such as
-// ![page_1.jpg](resource://abc). Scanned PDFs produce text chunks that consist
-// of nothing else.
-var imageLinkPattern = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
+// selectGraphChunks picks the chunks that should be sent to graph extraction.
+// Captions are dropped (they describe the page visually and duplicate OCR).
+// Text chunks that are only image placeholders are skipped so the extractor
+// cannot echo the few-shot example. OCR is kept when the parent text chunk
+// has no extractable prose (scanned PDF pages); OCR of figures next to real
+// text is skipped to avoid doubling LLM cost on illustrated documents.
+func selectGraphChunks(chunks []*types.Chunk) []*types.Chunk {
+	textByID := make(map[string]*types.Chunk, len(chunks))
+	for _, c := range chunks {
+		if c != nil && c.ChunkType == types.ChunkTypeText {
+			textByID[c.ID] = c
+		}
+	}
+	var out []*types.Chunk
+	for _, c := range chunks {
+		if c == nil {
+			continue
+		}
+		switch c.ChunkType {
+		case types.ChunkTypeImageCaption:
+			continue
+		case types.ChunkTypeImageOCR:
+			if !chunkHasExtractableText(c.Content) {
+				continue
+			}
+			if parent := textByID[c.ParentChunkID]; parent != nil && chunkHasExtractableText(parent.Content) {
+				continue
+			}
+			out = append(out, c)
+		case types.ChunkTypeText:
+			if chunkHasExtractableText(c.Content) {
+				out = append(out, c)
+			}
+		}
+	}
+	return out
+}
 
 // chunkHasExtractableText reports whether a chunk still contains prose once
-// markdown image links are removed, i.e. whether graph extraction can find
-// entities in it.
+// markdown images and <image> wrappers are removed, i.e. whether graph
+// extraction (or question generation) can find entities in it.
 func chunkHasExtractableText(content string) bool {
-	stripped := imageLinkPattern.ReplaceAllString(content, "")
-	return strings.TrimSpace(stripped) != ""
+	return extractRealText(docparser.StripMarkdownImages(content)) != ""
 }

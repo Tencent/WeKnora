@@ -7,6 +7,7 @@ import (
 )
 
 type markdownImageTargetSpan struct {
+	ImageStart  int
 	TargetStart int
 	TargetEnd   int
 }
@@ -30,12 +31,39 @@ func scanMarkdownImageTargets(markdown string) []markdownImageTargetSpan {
 			continue
 		}
 		spans = append(spans, markdownImageTargetSpan{
+			ImageStart:  i,
 			TargetStart: targetStart,
 			TargetEnd:   targetEnd,
 		})
 		i = targetEnd
 	}
 	return spans
+}
+
+// StripMarkdownImages removes complete ![alt](destination) constructs,
+// including destinations and titles that contain parentheses. Leftover
+// prose is preserved so callers can tell whether a chunk still has
+// extractable text after image placeholders are gone.
+func StripMarkdownImages(markdown string) string {
+	spans := scanMarkdownImageTargets(markdown)
+	if len(spans) == 0 {
+		return markdown
+	}
+	var b strings.Builder
+	b.Grow(len(markdown))
+	last := 0
+	for _, span := range spans {
+		if span.ImageStart < last {
+			continue
+		}
+		b.WriteString(markdown[last:span.ImageStart])
+		last = span.TargetEnd + 1
+		if last > len(markdown) {
+			last = len(markdown)
+		}
+	}
+	b.WriteString(markdown[last:])
+	return b.String()
 }
 
 func findMarkdownImageAltEnd(markdown string, start int) int {
