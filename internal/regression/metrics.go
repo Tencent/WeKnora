@@ -17,18 +17,30 @@ import "github.com/Tencent/WeKnora/internal/types"
 type MetricKey string
 
 const (
+	// MetricPrecision identifies retrieval precision.
 	MetricPrecision MetricKey = "precision"
-	MetricRecall    MetricKey = "recall"
-	MetricNDCG3     MetricKey = "ndcg_3"
-	MetricNDCG10    MetricKey = "ndcg_10"
-	MetricMRR       MetricKey = "mrr"
-	MetricMAP       MetricKey = "map"
-	MetricBLEU1     MetricKey = "bleu_1"
-	MetricBLEU2     MetricKey = "bleu_2"
-	MetricBLEU4     MetricKey = "bleu_4"
-	MetricROUGE1    MetricKey = "rouge_1"
-	MetricROUGE2    MetricKey = "rouge_2"
-	MetricROUGEL    MetricKey = "rouge_l"
+	// MetricRecall identifies retrieval recall.
+	MetricRecall MetricKey = "recall"
+	// MetricNDCG3 identifies normalized discounted cumulative gain at three.
+	MetricNDCG3 MetricKey = "ndcg_3"
+	// MetricNDCG10 identifies normalized discounted cumulative gain at ten.
+	MetricNDCG10 MetricKey = "ndcg_10"
+	// MetricMRR identifies mean reciprocal rank.
+	MetricMRR MetricKey = "mrr"
+	// MetricMAP identifies mean average precision.
+	MetricMAP MetricKey = "map"
+	// MetricBLEU1 identifies the BLEU-1 answer metric.
+	MetricBLEU1 MetricKey = "bleu_1"
+	// MetricBLEU2 identifies the BLEU-2 answer metric.
+	MetricBLEU2 MetricKey = "bleu_2"
+	// MetricBLEU4 identifies the BLEU-4 answer metric.
+	MetricBLEU4 MetricKey = "bleu_4"
+	// MetricROUGE1 identifies the ROUGE-1 answer metric.
+	MetricROUGE1 MetricKey = "rouge_1"
+	// MetricROUGE2 identifies the ROUGE-2 answer metric.
+	MetricROUGE2 MetricKey = "rouge_2"
+	// MetricROUGEL identifies the ROUGE-L answer metric.
+	MetricROUGEL MetricKey = "rouge_l"
 )
 
 // MetricSpec is the comparator-facing contract of one quality metric. All
@@ -49,30 +61,54 @@ type MetricSpec struct {
 // deterministic order (retrieval first, then answer quality).
 func Metrics() []MetricSpec {
 	return []MetricSpec{
-		{Key: MetricPrecision, DisplayName: "Precision", HigherIsBetter: true,
-			get: ret(func(q *types.BenchmarkRetrievalQuality) *float64 { return q.Precision })},
-		{Key: MetricRecall, DisplayName: "Recall", HigherIsBetter: true,
-			get: ret(func(q *types.BenchmarkRetrievalQuality) *float64 { return q.Recall })},
-		{Key: MetricNDCG3, DisplayName: "NDCG@3", HigherIsBetter: true,
-			get: ret(func(q *types.BenchmarkRetrievalQuality) *float64 { return q.NDCG3 })},
-		{Key: MetricNDCG10, DisplayName: "NDCG@10", HigherIsBetter: true,
-			get: ret(func(q *types.BenchmarkRetrievalQuality) *float64 { return q.NDCG10 })},
-		{Key: MetricMRR, DisplayName: "MRR", HigherIsBetter: true,
-			get: ret(func(q *types.BenchmarkRetrievalQuality) *float64 { return q.MRR })},
-		{Key: MetricMAP, DisplayName: "MAP", HigherIsBetter: true,
-			get: ret(func(q *types.BenchmarkRetrievalQuality) *float64 { return q.MAP })},
-		{Key: MetricBLEU1, DisplayName: "BLEU-1", HigherIsBetter: true,
-			get: ans(func(q *types.BenchmarkAnswerQuality) *float64 { return q.BLEU1 })},
-		{Key: MetricBLEU2, DisplayName: "BLEU-2", HigherIsBetter: true,
-			get: ans(func(q *types.BenchmarkAnswerQuality) *float64 { return q.BLEU2 })},
-		{Key: MetricBLEU4, DisplayName: "BLEU-4", HigherIsBetter: true,
-			get: ans(func(q *types.BenchmarkAnswerQuality) *float64 { return q.BLEU4 })},
-		{Key: MetricROUGE1, DisplayName: "ROUGE-1", HigherIsBetter: true,
-			get: ans(func(q *types.BenchmarkAnswerQuality) *float64 { return q.ROUGE1 })},
-		{Key: MetricROUGE2, DisplayName: "ROUGE-2", HigherIsBetter: true,
-			get: ans(func(q *types.BenchmarkAnswerQuality) *float64 { return q.ROUGE2 })},
-		{Key: MetricROUGEL, DisplayName: "ROUGE-L", HigherIsBetter: true,
-			get: ans(func(q *types.BenchmarkAnswerQuality) *float64 { return q.ROUGEL })},
+		{
+			Key: MetricPrecision, DisplayName: "Precision", HigherIsBetter: true,
+			get: ret(func(q *types.BenchmarkRetrievalQuality) *float64 { return q.Precision }),
+		},
+		{
+			Key: MetricRecall, DisplayName: "Recall", HigherIsBetter: true,
+			get: ret(func(q *types.BenchmarkRetrievalQuality) *float64 { return q.Recall }),
+		},
+		{
+			Key: MetricNDCG3, DisplayName: "NDCG@3", HigherIsBetter: true,
+			get: ret(func(q *types.BenchmarkRetrievalQuality) *float64 { return q.NDCG3 }),
+		},
+		{
+			Key: MetricNDCG10, DisplayName: "NDCG@10", HigherIsBetter: true,
+			get: ret(func(q *types.BenchmarkRetrievalQuality) *float64 { return q.NDCG10 }),
+		},
+		{
+			Key: MetricMRR, DisplayName: "MRR", HigherIsBetter: true,
+			get: ret(func(q *types.BenchmarkRetrievalQuality) *float64 { return q.MRR }),
+		},
+		{
+			Key: MetricMAP, DisplayName: "MAP", HigherIsBetter: true,
+			get: ret(func(q *types.BenchmarkRetrievalQuality) *float64 { return q.MAP }),
+		},
+		{
+			Key: MetricBLEU1, DisplayName: "BLEU-1", HigherIsBetter: true,
+			get: ans(func(q *types.BenchmarkAnswerQuality) *float64 { return q.BLEU1 }),
+		},
+		{
+			Key: MetricBLEU2, DisplayName: "BLEU-2", HigherIsBetter: true,
+			get: ans(func(q *types.BenchmarkAnswerQuality) *float64 { return q.BLEU2 }),
+		},
+		{
+			Key: MetricBLEU4, DisplayName: "BLEU-4", HigherIsBetter: true,
+			get: ans(func(q *types.BenchmarkAnswerQuality) *float64 { return q.BLEU4 }),
+		},
+		{
+			Key: MetricROUGE1, DisplayName: "ROUGE-1", HigherIsBetter: true,
+			get: ans(func(q *types.BenchmarkAnswerQuality) *float64 { return q.ROUGE1 }),
+		},
+		{
+			Key: MetricROUGE2, DisplayName: "ROUGE-2", HigherIsBetter: true,
+			get: ans(func(q *types.BenchmarkAnswerQuality) *float64 { return q.ROUGE2 }),
+		},
+		{
+			Key: MetricROUGEL, DisplayName: "ROUGE-L", HigherIsBetter: true,
+			get: ans(func(q *types.BenchmarkAnswerQuality) *float64 { return q.ROUGEL }),
+		},
 	}
 }
 

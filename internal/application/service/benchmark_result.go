@@ -16,6 +16,7 @@ type benchmarkResultService struct {
 	modelUsage     interfaces.ModelUsageRepository
 }
 
+// NewBenchmarkResultService creates a service that assembles unified benchmark results.
 func NewBenchmarkResultService(
 	evaluationRuns interfaces.EvaluationRunRepository,
 	modelUsage interfaces.ModelUsageRepository,
@@ -81,7 +82,9 @@ func benchmarkQuality(run *types.EvaluationRun) (types.BenchmarkQuality, error) 
 			},
 		}, nil
 	default:
-		return types.BenchmarkQuality{}, fmt.Errorf("benchmark invariant violation: unknown evaluation status %d", run.Status)
+		return types.BenchmarkQuality{}, fmt.Errorf(
+			"benchmark invariant violation: unknown evaluation status %d", run.Status,
+		)
 	}
 }
 
@@ -198,7 +201,8 @@ func validateConfiguredBenchmarkModel(
 	if model.ID != configuredID {
 		return fmt.Errorf("%s model id does not match configured id", role)
 	}
-	if model.Source == string(types.ModelSourceRemote) && !lowercaseSHA256Pattern.MatchString(model.EndpointFingerprint) {
+	if model.Source == string(types.ModelSourceRemote) &&
+		!lowercaseSHA256Pattern.MatchString(model.EndpointFingerprint) {
 		return fmt.Errorf("remote %s model endpoint fingerprint is missing or invalid", role)
 	}
 	return nil

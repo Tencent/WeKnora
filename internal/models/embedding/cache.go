@@ -29,6 +29,8 @@ const (
 
 // EmbeddingCache is the deliberately small storage contract needed by the
 // embedding decorator. Values are opaque versioned binary payloads.
+//
+//nolint:revive // Public name retained for embedding API compatibility.
 type EmbeddingCache interface {
 	GetMany(ctx context.Context, keys []string) (map[string][]byte, error)
 	SetMany(ctx context.Context, values map[string][]byte, ttl time.Duration) error
@@ -36,6 +38,8 @@ type EmbeddingCache interface {
 
 // EmbeddingCacheConfig controls the process-wide embedding cache. It is loaded
 // in one place so environment reads do not leak into business services.
+//
+//nolint:revive // Public name retained for embedding API compatibility.
 type EmbeddingCacheConfig struct {
 	Enabled bool
 	TTL     time.Duration
@@ -104,6 +108,7 @@ func configuredEmbeddingCache() (EmbeddingCache, EmbeddingCacheConfig) {
 // RedisEmbeddingCache adapts the application's shared Redis client.
 type RedisEmbeddingCache struct{ client *redis.Client }
 
+// NewRedisEmbeddingCache creates an embedding cache backed by Redis.
 func NewRedisEmbeddingCache(client *redis.Client) EmbeddingCache {
 	if client == nil {
 		return nil
@@ -111,6 +116,7 @@ func NewRedisEmbeddingCache(client *redis.Client) EmbeddingCache {
 	return &RedisEmbeddingCache{client: client}
 }
 
+// GetMany retrieves cached embedding payloads by key.
 func (c *RedisEmbeddingCache) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {
 	if len(keys) == 0 {
 		return map[string][]byte{}, nil
@@ -136,6 +142,7 @@ func (c *RedisEmbeddingCache) GetMany(ctx context.Context, keys []string) (map[s
 	return result, nil
 }
 
+// SetMany stores embedding payloads with a shared TTL.
 func (c *RedisEmbeddingCache) SetMany(ctx context.Context, values map[string][]byte, ttl time.Duration) error {
 	if len(values) == 0 {
 		return nil
@@ -150,6 +157,8 @@ func (c *RedisEmbeddingCache) SetMany(ctx context.Context, values map[string][]b
 
 // EmbeddingCacheStats is a process-wide, race-safe snapshot. Every decorator
 // shares the same collector because model instances are recreated frequently.
+//
+//nolint:revive // Public name retained for embedding API compatibility.
 type EmbeddingCacheStats struct {
 	EmbeddingRequests uint64 `json:"embedding_requests"`
 	EmbeddingInputs   uint64 `json:"embedding_inputs"`
@@ -406,7 +415,9 @@ func (c *cachingEmbedder) batch(
 		return nil, err
 	}
 	if len(vectors) != len(providerInputs) {
-		return nil, fmt.Errorf("embedding model returned %d embeddings for %d inputs", len(vectors), len(providerInputs))
+		return nil, fmt.Errorf(
+			"embedding model returned %d embeddings for %d inputs", len(vectors), len(providerInputs),
+		)
 	}
 
 	writes := make(map[string][]byte, len(misses))
@@ -539,7 +550,9 @@ func decodeEmbedding(payload []byte, expectedDimensions int) ([]float32, error) 
 	dimensions := int(binary.LittleEndian.Uint32(payload[:4]))
 	expectedLength := 4 + dimensions*4
 	if expectedLength < 4 || len(payload) != expectedLength {
-		return nil, fmt.Errorf("embedding cache payload length %d does not match dimension %d", len(payload), dimensions)
+		return nil, fmt.Errorf(
+			"embedding cache payload length %d does not match dimension %d", len(payload), dimensions,
+		)
 	}
 	if expectedDimensions > 0 && dimensions != expectedDimensions {
 		return nil, fmt.Errorf(

@@ -7,6 +7,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// PricingRepository persists pricing rules and derived model usage costs.
 type PricingRepository interface {
 	CreatePricing(ctx context.Context, rule *types.ModelPricing) error
 	ImportPricingBatch(ctx context.Context, rules []types.PricingImportRule) (*types.PricingImportResult, error)

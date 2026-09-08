@@ -37,7 +37,8 @@ func wikiCachePageData() map[string]string {
 		"HasAdditions": "1", "SharedSourceContexts": "shared ![source](minio://kb/shared.jpg)",
 		"CustomInstructions": "Use precise terminology.", "InstructionScope": "wiki_content",
 		"PageSlug": "concept/alpha", "PageTitle": "Alpha", "PageType": "concept", "PageAliases": "A",
-		"ExistingContent": "old alpha", "NewContent": "new alpha", "AvailableSlugs": "concept/beta", "Language": "English",
+		"ExistingContent": "old alpha", "NewContent": "new alpha",
+		"AvailableSlugs": "concept/beta", "Language": "English",
 	}
 }
 
@@ -147,7 +148,9 @@ func TestWikiPromptPurposeMapping(t *testing.T) {
 	} {
 		t.Run(tc.purpose, func(t *testing.T) {
 			m := &templateCaptureChatModel{}
-			_, err := (&wikiIngestService{}).generateWithTemplate(context.Background(), m, tc.prompt, wikiCachePageData())
+			_, err := (&wikiIngestService{}).generateWithTemplate(
+				context.Background(), m, tc.prompt, wikiCachePageData(),
+			)
 			require.NoError(t, err)
 			require.Equal(t, tc.purpose, m.purpose)
 			require.NotEmpty(t, m.prefix)

@@ -12,6 +12,7 @@ type modelUsageAnalyticsService struct {
 	modelUsage interfaces.ModelUsageRepository
 }
 
+// NewModelUsageAnalyticsService creates a tenant-scoped model usage analytics service.
 func NewModelUsageAnalyticsService(modelUsage interfaces.ModelUsageRepository) interfaces.ModelUsageAnalyticsService {
 	return &modelUsageAnalyticsService{modelUsage: modelUsage}
 }

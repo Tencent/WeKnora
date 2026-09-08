@@ -43,7 +43,9 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("regression-benchmark", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	output := fs.String("output", "artifacts/regression/current.json", "path to write the current BenchmarkResult JSON")
-	profilePath := fs.String("profile", "", "final benchmark profile JSON (enables strict preflight and final artifacts)")
+	profilePath := fs.String(
+		"profile", "", "final benchmark profile JSON (enables strict preflight and final artifacts)",
+	)
 	executionModeValue := fs.String("execution-mode", "strict", "profile execution mode: strict or custom")
 	outputDir := fs.String(
 		"output-dir", "artifacts/rhino_2026_final/benchmark",

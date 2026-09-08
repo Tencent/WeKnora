@@ -30,6 +30,7 @@ type Repository interface {
 	Create(ctx context.Context, usage *types.ModelUsage) error
 }
 
+// CostProcessor derives and persists cost for a completed usage row.
 type CostProcessor interface {
 	Process(ctx context.Context, usage *types.ModelUsage) error
 }
@@ -41,6 +42,7 @@ type Recorder struct {
 	costProcessor CostProcessor
 }
 
+// NewRecorder creates a process-wide model usage recorder.
 func NewRecorder(repo Repository, costProcessors ...CostProcessor) *Recorder {
 	r := &Recorder{repo: repo}
 	if len(costProcessors) > 0 {

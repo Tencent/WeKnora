@@ -2,21 +2,29 @@ package types
 
 import "time"
 
+// BenchmarkQualityState describes the availability of benchmark quality metrics.
 type BenchmarkQualityState string
 
 const (
-	BenchmarkQualityStatePending     BenchmarkQualityState = "pending"
-	BenchmarkQualityStateComplete    BenchmarkQualityState = "complete"
+	// BenchmarkQualityStatePending indicates metrics are not ready yet.
+	BenchmarkQualityStatePending BenchmarkQualityState = "pending"
+	// BenchmarkQualityStateComplete indicates all required metrics are available.
+	BenchmarkQualityStateComplete BenchmarkQualityState = "complete"
+	// BenchmarkQualityStateUnavailable indicates metrics cannot be produced.
 	BenchmarkQualityStateUnavailable BenchmarkQualityState = "unavailable"
 )
 
+// BenchmarkReproducibilityState describes whether reproducibility facts are complete.
 type BenchmarkReproducibilityState string
 
 const (
-	BenchmarkReproducibilityComplete      BenchmarkReproducibilityState = "complete"
+	// BenchmarkReproducibilityComplete indicates all reproducibility facts are present.
+	BenchmarkReproducibilityComplete BenchmarkReproducibilityState = "complete"
+	// BenchmarkReproducibilityLegacyUnknown identifies legacy results without complete facts.
 	BenchmarkReproducibilityLegacyUnknown BenchmarkReproducibilityState = "legacy_unknown"
 )
 
+// BenchmarkRunSummary describes the persisted state of one benchmark run.
 type BenchmarkRunSummary struct {
 	EvaluationRunID string           `json:"evaluation_run_id"`
 	TaskID          string           `json:"task_id"`
@@ -29,6 +37,7 @@ type BenchmarkRunSummary struct {
 	ErrorMessage    string           `json:"error_message,omitempty"`
 }
 
+// BenchmarkRetrievalQuality contains retrieval quality metrics.
 type BenchmarkRetrievalQuality struct {
 	Precision *float64 `json:"precision"`
 	Recall    *float64 `json:"recall"`
@@ -38,6 +47,7 @@ type BenchmarkRetrievalQuality struct {
 	MAP       *float64 `json:"map"`
 }
 
+// BenchmarkAnswerQuality contains generated-answer quality metrics.
 type BenchmarkAnswerQuality struct {
 	BLEU1  *float64 `json:"bleu_1"`
 	BLEU2  *float64 `json:"bleu_2"`
@@ -47,6 +57,7 @@ type BenchmarkAnswerQuality struct {
 	ROUGEL *float64 `json:"rouge_l"`
 }
 
+// BenchmarkQuality groups the availability state and quality metric families.
 type BenchmarkQuality struct {
 	State     BenchmarkQualityState      `json:"state"`
 	Retrieval *BenchmarkRetrievalQuality `json:"retrieval,omitempty"`

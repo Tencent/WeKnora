@@ -15,8 +15,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// PricingSourceSchemaVersion is the supported pricing source schema version.
 const PricingSourceSchemaVersion = 1
 
+// PricingFileImportResult summarizes one pricing file import.
 type PricingFileImportResult struct {
 	PricingVersion string
 	SourceName     string
@@ -25,14 +27,17 @@ type PricingFileImportResult struct {
 	Closed         int
 }
 
+// PricingImporter validates and imports versioned pricing files.
 type PricingImporter struct {
 	repository interfaces.PricingRepository
 }
 
+// NewPricingImporter creates a pricing file importer.
 func NewPricingImporter(repository interfaces.PricingRepository) *PricingImporter {
 	return &PricingImporter{repository: repository}
 }
 
+// ImportFile validates and imports pricing rules from path.
 func (i *PricingImporter) ImportFile(ctx context.Context, path string) (*PricingFileImportResult, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("pricing import: file path is required")
@@ -172,7 +177,9 @@ func parsePricingSource(r io.Reader) (*pricingSource, []types.PricingImportRule,
 		}
 		if utf8.RuneCountInString(raw.ResolvedProvider) > 64 || utf8.RuneCountInString(raw.ResolvedModelName) > 255 ||
 			utf8.RuneCountInString(raw.Currency) > 16 {
-			return nil, nil, fmt.Errorf("rules[%d]: runtime identity or currency exceeds model_pricing column limits", index)
+			return nil, nil, fmt.Errorf(
+				"rules[%d]: runtime identity or currency exceeds model_pricing column limits", index,
+			)
 		}
 		if strings.TrimSpace(raw.Currency) == "" {
 			return nil, nil, fmt.Errorf("rules[%d].currency must not be empty or whitespace", index)
@@ -185,11 +192,15 @@ func parsePricingSource(r io.Reader) (*pricingSource, []types.PricingImportRule,
 		}
 		seen[raw.ID] = struct{}{}
 		if raw.ClosesRuleID != nil {
-			if err := validateCanonicalUUID(fmt.Sprintf("rules[%d].closes_rule_id", index), *raw.ClosesRuleID); err != nil {
+			if err := validateCanonicalUUID(
+				fmt.Sprintf("rules[%d].closes_rule_id", index), *raw.ClosesRuleID,
+			); err != nil {
 				return nil, nil, err
 			}
 			if previous, duplicate := closed[*raw.ClosesRuleID]; duplicate {
-				return nil, nil, fmt.Errorf("pricing rules %q and %q both close rule %q", previous, raw.ID, *raw.ClosesRuleID)
+				return nil, nil, fmt.Errorf(
+					"pricing rules %q and %q both close rule %q", previous, raw.ID, *raw.ClosesRuleID,
+				)
 			}
 			closed[*raw.ClosesRuleID] = raw.ID
 		}
@@ -197,11 +208,14 @@ func parsePricingSource(r io.Reader) (*pricingSource, []types.PricingImportRule,
 		pricing := types.ModelPricing{
 			ID: raw.ID, ResolvedProvider: raw.ResolvedProvider, ResolvedModelName: raw.ResolvedModelName,
 			CallType: raw.CallType, BillingMode: raw.BillingMode, Currency: raw.Currency,
-			UnitScale:       decimalValue(raw.UnitScale),
-			InputTokenPrice: decimalPointer(raw.InputTokenPrice), OutputTokenPrice: decimalPointer(raw.OutputTokenPrice),
-			TotalTokenPrice: decimalPointer(raw.TotalTokenPrice), CacheReadTokenPrice: decimalPointer(raw.CacheReadTokenPrice),
-			CacheWriteTokenPrice: decimalPointer(raw.CacheWriteTokenPrice), PerRequestPrice: decimalPointer(raw.PerRequestPrice),
-			PerInputPrice: decimalPointer(raw.PerInputPrice), PerPairPrice: decimalPointer(raw.PerPairPrice),
+			UnitScale:            decimalValue(raw.UnitScale),
+			InputTokenPrice:      decimalPointer(raw.InputTokenPrice),
+			OutputTokenPrice:     decimalPointer(raw.OutputTokenPrice),
+			TotalTokenPrice:      decimalPointer(raw.TotalTokenPrice),
+			CacheReadTokenPrice:  decimalPointer(raw.CacheReadTokenPrice),
+			CacheWriteTokenPrice: decimalPointer(raw.CacheWriteTokenPrice),
+			PerRequestPrice:      decimalPointer(raw.PerRequestPrice),
+			PerInputPrice:        decimalPointer(raw.PerInputPrice), PerPairPrice: decimalPointer(raw.PerPairPrice),
 			EffectiveFrom: raw.EffectiveFrom.Time, EffectiveTo: timestampPointer(raw.EffectiveTo),
 			PricingVersion: source.PricingVersion, SourceName: source.Source.Name,
 			SourceReference: source.Source.Reference, SourceRetrievedAt: &source.Source.RetrievedAt.Time,

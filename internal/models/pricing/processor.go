@@ -8,15 +8,18 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
+// Processor resolves pricing and persists a derived cost for model usage.
 type Processor struct {
 	repo       interfaces.PricingRepository
 	calculator *Calculator
 }
 
+// NewProcessor creates a model usage pricing processor.
 func NewProcessor(repo interfaces.PricingRepository) *Processor {
 	return &Processor{repo: repo, calculator: NewCalculator()}
 }
 
+// Process derives and persists cost when the usage row has a matching rule.
 func (p *Processor) Process(ctx context.Context, usage *types.ModelUsage) error {
 	if usage == nil {
 		return nil

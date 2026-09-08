@@ -1,3 +1,4 @@
+// Package main imports versioned model pricing rules.
 package main
 
 import (
@@ -86,7 +87,7 @@ func openDatabase() (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pricing-import: open database: %w", err)
 	}
-	if db.Dialector.Name() == "sqlite" {
+	if db.Name() == "sqlite" {
 		sqlDB, err := db.DB()
 		if err != nil {
 			return nil, fmt.Errorf("pricing-import: get SQLite handle: %w", err)

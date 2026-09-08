@@ -121,7 +121,9 @@ func TestBuildOutbound_WikiExplicitPromptCacheKey(t *testing.T) {
 		provider.ProviderOpenAI, provider.ProviderAzureOpenAI, provider.ProviderOpenRouter,
 	} {
 		t.Run(string(name), func(t *testing.T) {
-			c := newOutboundChat(t, string(name), "configured-model", map[string]string{"remote_model_name": "effective-model"})
+			c := newOutboundChat(
+				t, string(name), "configured-model", map[string]string{"remote_model_name": "effective-model"},
+			)
 			require.Equal(t, "effective-model", c.GetModelName())
 			key := BuildPromptCacheKey(
 				7, FingerprintPromptPrefix(c.GetModelID(), c.GetModelName()),

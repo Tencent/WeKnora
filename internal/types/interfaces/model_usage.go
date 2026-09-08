@@ -20,6 +20,7 @@ type ModelUsageRepository interface {
 	) (*types.ModelUsageAnalyticsResult, error)
 }
 
+// ModelUsageAnalyticsService aggregates model usage for the authenticated tenant.
 type ModelUsageAnalyticsService interface {
 	GetAnalytics(ctx context.Context, query types.ModelUsageAnalyticsQuery) (*types.ModelUsageAnalyticsResult, error)
 }

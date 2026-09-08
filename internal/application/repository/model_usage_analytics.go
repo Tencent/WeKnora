@@ -68,7 +68,7 @@ func (r *modelUsageRepository) AggregateAnalytics(
 	if !query.StartTime.Before(query.EndTime) {
 		return nil, fmt.Errorf("model_usage analytics: start_time must be before end_time")
 	}
-	bucketExpression, err := modelUsageBucketExpression(r.db.Dialector.Name(), query.Interval)
+	bucketExpression, err := modelUsageBucketExpression(r.db.Name(), query.Interval)
 	if err != nil {
 		return nil, err
 	}
@@ -89,8 +89,10 @@ func (r *modelUsageRepository) AggregateAnalytics(
 			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status = 'miss' THEN 1 ELSE 0 END) AS prompt_miss,
 			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status = 'unsupported'
 				THEN 1 ELSE 0 END) AS prompt_unsupported,
-			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status = 'unreported' THEN 1 ELSE 0 END) AS prompt_unreported,
-			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status IS NULL THEN 1 ELSE 0 END) AS prompt_not_recorded,
+			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status = 'unreported'
+				THEN 1 ELSE 0 END) AS prompt_unreported,
+			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status IS NULL
+				THEN 1 ELSE 0 END) AS prompt_not_recorded,
 			SUM(CASE WHEN u.call_type = 'chat' AND u.prompt_cache_status IN ('hit', 'miss')
 				AND u.input_tokens IS NOT NULL AND u.cache_read_tokens IS NOT NULL
 				THEN u.cache_read_tokens ELSE 0 END) AS cache_read_tokens,
@@ -107,7 +109,8 @@ func (r *modelUsageRepository) AggregateAnalytics(
 				THEN 1 ELSE 0 END) AS embedding_full_hit,
 			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status = 'partial'
 				THEN 1 ELSE 0 END) AS embedding_partial,
-			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status = 'miss' THEN 1 ELSE 0 END) AS embedding_miss,
+			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status = 'miss'
+				THEN 1 ELSE 0 END) AS embedding_miss,
 			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status = 'disabled'
 				THEN 1 ELSE 0 END) AS embedding_disabled,
 			SUM(CASE WHEN u.call_type = 'embedding' AND u.embedding_cache_status IS NULL
@@ -144,7 +147,10 @@ func (r *modelUsageRepository) AggregateAnalytics(
 		if !ok {
 			bucketStart, parseErr := time.Parse(time.RFC3339, row.BucketStart)
 			if parseErr != nil {
-				return nil, fmt.Errorf("aggregate model usage analytics: invalid database bucket %q: %w", row.BucketStart, parseErr)
+				return nil, fmt.Errorf(
+					"aggregate model usage analytics: invalid database bucket %q: %w",
+					row.BucketStart, parseErr,
+				)
 			}
 			bucketIndex = len(result.Trend)
 			bucketIndexes[row.BucketStart] = bucketIndex
@@ -172,7 +178,10 @@ func (r *modelUsageRepository) AggregateAnalytics(
 			row := &costRows[i]
 			bucketIndex, ok := bucketIndexes[row.BucketStart]
 			if !ok {
-				return nil, fmt.Errorf("aggregate model usage analytics: cost row references unknown bucket %q", row.BucketStart)
+				return nil, fmt.Errorf(
+					"aggregate model usage analytics: cost row references unknown bucket %q",
+					row.BucketStart,
+				)
 			}
 			bucketCosts := costsByBucket[row.BucketStart]
 			if bucketCosts == nil {
@@ -245,7 +254,7 @@ func (r *modelUsageRepository) queryModelUsageAnalyticsCosts(
 	args []any,
 ) ([]modelUsageAnalyticsCostRow, error) {
 	var totalCostExpression, knownCostExpression string
-	switch r.db.Dialector.Name() {
+	switch r.db.Name() {
 	case "postgres":
 		totalCostExpression = "COALESCE(SUM(c.total_cost)::text, '')"
 		knownCostExpression = "COALESCE(SUM(c.known_cost)::text, '')"
@@ -258,7 +267,7 @@ func (r *modelUsageRepository) queryModelUsageAnalyticsCosts(
 	default:
 		return nil, fmt.Errorf(
 			"aggregate model usage analytics costs: unsupported database dialect %q",
-			r.db.Dialector.Name(),
+			r.db.Name(),
 		)
 	}
 	costSQL := fmt.Sprintf(`

@@ -307,7 +307,9 @@ func TestImportPricingBatchClosureAndReimport(t *testing.T) {
 
 	replacement := fakePricingRule(t1, nil, "v2")
 	replacement.ID = "20000000-0000-4000-8000-000000000011"
-	result, err = repo.ImportPricingBatch(ctx, []types.PricingImportRule{{Pricing: *replacement, ClosesRuleID: &old.ID}})
+	result, err = repo.ImportPricingBatch(ctx, []types.PricingImportRule{
+		{Pricing: *replacement, ClosesRuleID: &old.ID},
+	})
 	require.NoError(t, err)
 	require.Equal(t, &types.PricingImportResult{Inserted: 1, Closed: 1}, result)
 
@@ -329,7 +331,9 @@ func TestImportPricingBatchClosureAndReimport(t *testing.T) {
 	_, err = repo.ImportPricingBatch(ctx, []types.PricingImportRule{{Pricing: mutatedOld}})
 	require.ErrorContains(t, err, "different semantic content")
 
-	result, err = repo.ImportPricingBatch(ctx, []types.PricingImportRule{{Pricing: *replacement, ClosesRuleID: &old.ID}})
+	result, err = repo.ImportPricingBatch(ctx, []types.PricingImportRule{
+		{Pricing: *replacement, ClosesRuleID: &old.ID},
+	})
 	require.NoError(t, err)
 	require.Equal(t, &types.PricingImportResult{NoOp: 1}, result)
 }

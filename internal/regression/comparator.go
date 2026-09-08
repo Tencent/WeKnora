@@ -12,7 +12,9 @@ import (
 type Status string
 
 const (
+	// StatusPass indicates that no monitored metric regressed.
 	StatusPass Status = "PASS"
+	// StatusFail indicates that at least one monitored metric failed.
 	StatusFail Status = "FAIL"
 )
 

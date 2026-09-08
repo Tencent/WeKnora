@@ -261,7 +261,9 @@ func TestBenchmarkArtifactFailsClosed(t *testing.T) {
 		{"quality state", func(r *types.BenchmarkResult) {
 			r.Quality.State = types.BenchmarkQualityStatePending
 		}, "quality is not complete"},
-		{"retrieval missing", func(r *types.BenchmarkResult) { r.Quality.Retrieval = nil }, "retrieval metrics are missing"},
+		{"retrieval missing", func(r *types.BenchmarkResult) {
+			r.Quality.Retrieval = nil
+		}, "retrieval metrics are missing"},
 		{"retrieval metric missing", func(r *types.BenchmarkResult) {
 			r.Quality.Retrieval.MAP = nil
 		}, "retrieval metric MAP is missing"},

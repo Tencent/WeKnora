@@ -17,6 +17,7 @@ import (
 
 type pricingRepository struct{ db *gorm.DB }
 
+// NewPricingRepository creates a database-backed pricing repository.
 func NewPricingRepository(db *gorm.DB) interfaces.PricingRepository {
 	return &pricingRepository{db: db}
 }
@@ -70,7 +71,10 @@ func (r *pricingRepository) ImportPricingBatch(
 			return nil, fmt.Errorf("model_pricing import rule %q: %w", rule.Pricing.ID, err)
 		}
 		if strings.TrimSpace(rule.Pricing.Currency) == "" {
-			return nil, fmt.Errorf("model_pricing import rule %q: currency must not be empty or whitespace", rule.Pricing.ID)
+			return nil, fmt.Errorf(
+				"model_pricing import rule %q: currency must not be empty or whitespace",
+				rule.Pricing.ID,
+			)
 		}
 		ids = append(ids, rule.Pricing.ID)
 		if rule.ClosesRuleID != nil {
@@ -88,7 +92,8 @@ func (r *pricingRepository) ImportPricingBatch(
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var persisted []types.ModelPricing
 		if len(ids) > 0 {
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id IN ?", ids).Find(&persisted).Error; err != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("id IN ?", ids).Find(&persisted).Error; err != nil {
 				return fmt.Errorf("inspect existing model_pricing rules: %w", err)
 			}
 		}
@@ -101,7 +106,10 @@ func (r *pricingRepository) ImportPricingBatch(
 			incoming := &rules[i].Pricing
 			if current := existing[incoming.ID]; current != nil {
 				if !samePricingSemantics(current, incoming) {
-					return fmt.Errorf("model_pricing import: rule id %q already exists with different semantic content", incoming.ID)
+					return fmt.Errorf(
+						"model_pricing import: rule id %q already exists with different semantic content",
+						incoming.ID,
+					)
 				}
 				result.NoOp++
 			}

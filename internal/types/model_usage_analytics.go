@@ -2,13 +2,17 @@ package types
 
 import "time"
 
+// ModelUsageAnalyticsTimeBasis identifies the timestamp used for analytics windows.
 const ModelUsageAnalyticsTimeBasis = "created_at"
 
+// ModelUsageAnalyticsInterval identifies the aggregation bucket width.
 type ModelUsageAnalyticsInterval string
 
 const (
+	// ModelUsageAnalyticsIntervalHour selects hourly buckets.
 	ModelUsageAnalyticsIntervalHour ModelUsageAnalyticsInterval = "hour"
-	ModelUsageAnalyticsIntervalDay  ModelUsageAnalyticsInterval = "day"
+	// ModelUsageAnalyticsIntervalDay selects daily buckets.
+	ModelUsageAnalyticsIntervalDay ModelUsageAnalyticsInterval = "day"
 )
 
 // ModelUsageAnalyticsQuery is already tenant-free by design. The tenant scope
@@ -54,6 +58,7 @@ type EmbeddingCacheAnalytics struct {
 	InputHitRate     *float64 `json:"input_hit_rate"`
 }
 
+// ModelUsageAnalyticsAggregate contains usage totals for one analytics scope.
 type ModelUsageAnalyticsAggregate struct {
 	Calls CallCounts `json:"calls"`
 
@@ -70,11 +75,13 @@ type ModelUsageAnalyticsAggregate struct {
 	CostRowsWithoutCurrency CallCounts              `json:"cost_rows_without_currency"`
 }
 
+// ModelUsageAnalyticsBucket contains usage totals for one time bucket.
 type ModelUsageAnalyticsBucket struct {
 	BucketStart time.Time `json:"bucket_start"`
 	ModelUsageAnalyticsAggregate
 }
 
+// ModelUsageAnalyticsResult contains the summary and time-series usage aggregates.
 type ModelUsageAnalyticsResult struct {
 	TimeBasis string                       `json:"time_basis"`
 	Interval  ModelUsageAnalyticsInterval  `json:"interval"`

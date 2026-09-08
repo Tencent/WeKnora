@@ -137,7 +137,9 @@ func TestDatasetIntegrityRejectsMalformedSemanticData(t *testing.T) {
 		{name: "qas unknown query", mutate: func(d *dataset) { d.qas[2] = 20 }, want: "qas references unknown query 2"},
 		{name: "qas unknown answer", mutate: func(d *dataset) { d.qas[1] = 99 }, want: "references unknown answer"},
 		{name: "empty question", mutate: func(d *dataset) { d.queries[1] = " \n" }, want: "query 1 has empty text"},
-		{name: "empty corpus", mutate: func(d *dataset) { d.corpus[10] = "\t" }, want: "corpus passage 10 has empty text"},
+		{name: "empty corpus", mutate: func(d *dataset) {
+			d.corpus[10] = "\t"
+		}, want: "corpus passage 10 has empty text"},
 		{name: "empty answer", mutate: func(d *dataset) { d.answers[20] = " " }, want: "answer 20 has empty text"},
 	}
 	for _, tc := range tests {

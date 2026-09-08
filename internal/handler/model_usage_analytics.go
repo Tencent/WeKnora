@@ -15,11 +15,13 @@ import (
 
 const modelUsageAnalyticsDefaultRange = 30 * 24 * time.Hour
 
+// ModelUsageAnalyticsHandler serves model usage analytics requests.
 type ModelUsageAnalyticsHandler struct {
 	service interfaces.ModelUsageAnalyticsService
 	now     func() time.Time
 }
 
+// NewModelUsageAnalyticsHandler creates a model usage analytics handler.
 func NewModelUsageAnalyticsHandler(service interfaces.ModelUsageAnalyticsService) *ModelUsageAnalyticsHandler {
 	return &ModelUsageAnalyticsHandler{service: service, now: time.Now}
 }
@@ -41,13 +43,13 @@ func NewModelUsageAnalyticsHandler(service interfaces.ModelUsageAnalyticsService
 func (h *ModelUsageAnalyticsHandler) GetAnalytics(c *gin.Context) {
 	query, err := h.parseQuery(c)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	result, serviceErr := h.service.GetAnalytics(c.Request.Context(), query)
 	if serviceErr != nil {
 		logger.ErrorWithFields(c.Request.Context(), serviceErr, nil)
-		c.Error(errors.NewInternalServerError("Failed to aggregate model usage analytics"))
+		_ = c.Error(errors.NewInternalServerError("Failed to aggregate model usage analytics"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})

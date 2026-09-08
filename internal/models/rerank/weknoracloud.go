@@ -131,6 +131,7 @@ func (r *WeKnoraCloudReranker) effectiveModelName() string {
 	return r.modelName
 }
 
+// EffectiveModelName returns the model name sent to the remote provider.
 func (r *WeKnoraCloudReranker) EffectiveModelName() string { return r.effectiveModelName() }
 
 func (r *WeKnoraCloudReranker) GetModelName() string { return r.modelName }

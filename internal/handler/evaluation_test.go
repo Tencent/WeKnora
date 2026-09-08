@@ -67,8 +67,12 @@ func TestEvaluationHandlerPOSTWireCompatibility(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Set(string(types.TenantIDContextKey), uint64(42))
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/evaluation",
-		strings.NewReader(`{"dataset_id":"benchmark_v1","knowledge_base_id":"kb","chat_id":"chat","rerank_id":"rerank"}`))
+	ctx.Request = httptest.NewRequest(
+		http.MethodPost, "/evaluation",
+		strings.NewReader(
+			`{"dataset_id":"benchmark_v1","knowledge_base_id":"kb","chat_id":"chat","rerank_id":"rerank"}`,
+		),
+	)
 	ctx.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Evaluation(ctx)

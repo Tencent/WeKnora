@@ -16,6 +16,7 @@ import (
 // for Model Usage v1.
 type modelUsageRepository struct{ db *gorm.DB }
 
+// NewModelUsageRepository creates a database-backed model usage repository.
 func NewModelUsageRepository(db *gorm.DB) interfaces.ModelUsageRepository {
 	return &modelUsageRepository{db: db}
 }

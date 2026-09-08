@@ -464,6 +464,7 @@ func TestChatUsageStreamProviderError(t *testing.T) {
 	ch, err := w.ChatStream(tenantCtx(1), nil, nil)
 	require.NoError(t, err)
 	for range ch {
+		continue
 	}
 
 	require.Equal(t, 1, repo.count())

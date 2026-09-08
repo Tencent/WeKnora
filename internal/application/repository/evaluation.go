@@ -14,6 +14,7 @@ import (
 
 type evaluationRunRepository struct{ db *gorm.DB }
 
+// NewEvaluationRunRepository creates a database-backed evaluation run repository.
 func NewEvaluationRunRepository(db *gorm.DB) interfaces.EvaluationRunRepository {
 	return &evaluationRunRepository{db: db}
 }

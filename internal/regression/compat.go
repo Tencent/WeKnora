@@ -37,7 +37,10 @@ func CheckCompatibility(baseline, current *types.BenchmarkResult) []Mismatch {
 	}{
 		{"benchmark_version", b.BenchmarkVersion, c.BenchmarkVersion},
 		{"dataset.dataset_id", b.Config.Dataset.DatasetID, c.Config.Dataset.DatasetID},
-		{"dataset.dataset_semantic_sha256", b.Config.Dataset.DatasetSemanticSHA256, c.Config.Dataset.DatasetSemanticSHA256},
+		{
+			"dataset.dataset_semantic_sha256",
+			b.Config.Dataset.DatasetSemanticSHA256, c.Config.Dataset.DatasetSemanticSHA256,
+		},
 		{"dataset.corpus_count", intStr(b.Config.Dataset.CorpusCount), intStr(c.Config.Dataset.CorpusCount)},
 		{"dataset.question_count", intStr(b.Config.Dataset.QuestionCount), intStr(c.Config.Dataset.QuestionCount)},
 		{
@@ -48,7 +51,10 @@ func CheckCompatibility(baseline, current *types.BenchmarkResult) []Mismatch {
 			"retrieval.keyword_threshold",
 			floatStr(b.Config.Retrieval.KeywordThreshold), floatStr(c.Config.Retrieval.KeywordThreshold),
 		},
-		{"retrieval.embedding_top_k", intStr(b.Config.Retrieval.EmbeddingTopK), intStr(c.Config.Retrieval.EmbeddingTopK)},
+		{
+			"retrieval.embedding_top_k",
+			intStr(b.Config.Retrieval.EmbeddingTopK), intStr(c.Config.Retrieval.EmbeddingTopK),
+		},
 		{"retrieval.rerank_top_k", intStr(b.Config.Retrieval.RerankTopK), intStr(c.Config.Retrieval.RerankTopK)},
 		{
 			"retrieval.rerank_threshold",
@@ -56,8 +62,14 @@ func CheckCompatibility(baseline, current *types.BenchmarkResult) []Mismatch {
 		},
 		{"retrieval.retrieve_driver", b.Config.Retrieval.RetrieveDriver, c.Config.Retrieval.RetrieveDriver},
 		{"models.embedding.name", modelName(b.Config.Models.Embedding), modelName(c.Config.Models.Embedding)},
-		{"models.embedding.provider", modelProvider(b.Config.Models.Embedding), modelProvider(c.Config.Models.Embedding)},
-		{"models.embedding.dimension", modelDimension(b.Config.Models.Embedding), modelDimension(c.Config.Models.Embedding)},
+		{
+			"models.embedding.provider",
+			modelProvider(b.Config.Models.Embedding), modelProvider(c.Config.Models.Embedding),
+		},
+		{
+			"models.embedding.dimension",
+			modelDimension(b.Config.Models.Embedding), modelDimension(c.Config.Models.Embedding),
+		},
 		{"models.chat.name", modelName(b.Config.Models.Chat), modelName(c.Config.Models.Chat)},
 		{"models.chat.provider", modelProvider(b.Config.Models.Chat), modelProvider(c.Config.Models.Chat)},
 		{"models.rerank.name", modelName(b.Config.Models.Rerank), modelName(c.Config.Models.Rerank)},

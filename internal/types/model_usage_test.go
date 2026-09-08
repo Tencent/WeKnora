@@ -194,7 +194,10 @@ func TestEvaluationRunIDSurvivesCloneDecision(t *testing.T) {
 		t.Fatal("EvaluationRunIDContextKey has no clone decision")
 	}
 	if !clone {
-		t.Fatal("EvaluationRunIDContextKey must survive logger.CloneContext so sync evaluation attribution is not dropped")
+		t.Fatal(
+			"EvaluationRunIDContextKey must survive logger.CloneContext " +
+				"so sync evaluation attribution is not dropped",
+		)
 	}
 
 	found := false

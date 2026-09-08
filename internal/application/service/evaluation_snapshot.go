@@ -34,7 +34,9 @@ func evaluationTokenizerSnapshot() (types.EvaluationTokenizerSnapshot, error) {
 	for _, name := range jiebaDictionaryFiles {
 		data, err := os.ReadFile(filepath.Join(directory, name))
 		if err != nil {
-			return types.EvaluationTokenizerSnapshot{}, fmt.Errorf("fingerprint custom jieba dictionary %s: %w", name, err)
+			return types.EvaluationTokenizerSnapshot{}, fmt.Errorf(
+				"fingerprint custom jieba dictionary %s: %w", name, err,
+			)
 		}
 		// Include the stable basename and byte length so concatenation cannot make
 		// distinct file sets ambiguous. The absolute local path is never stored.
@@ -170,7 +172,10 @@ func effectiveModelBaseURL(model *types.Model) (string, error) {
 	}
 	selected, ok := provider.Get(providerName)
 	if !ok {
-		return "", fmt.Errorf("remote model %q has no configured endpoint and unknown provider %q", model.ID, providerName)
+		return "", fmt.Errorf(
+			"remote model %q has no configured endpoint and unknown provider %q",
+			model.ID, providerName,
+		)
 	}
 	endpoint := strings.TrimSpace(selected.Info().GetDefaultURL(model.Type))
 	if endpoint == "" {

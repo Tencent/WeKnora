@@ -147,7 +147,9 @@ func TestRunBenchmarkStartError(t *testing.T) {
 			return nil, os.ErrNotExist
 		},
 	}
-	_, err := runBenchmark(context.Background(), eval, &resultServiceStub{}, "benchmark_v1", time.Minute, time.Millisecond)
+	_, err := runBenchmark(
+		context.Background(), eval, &resultServiceStub{}, "benchmark_v1", time.Minute, time.Millisecond,
+	)
 	require.ErrorContains(t, err, "start benchmark evaluation")
 }
 

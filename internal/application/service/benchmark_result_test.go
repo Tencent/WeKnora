@@ -186,10 +186,10 @@ func benchmarkRun(status types.EvaluationStatue) *types.EvaluationRun {
 	}
 	if status == types.EvaluationStatueSuccess {
 		value := 0.5
-		run.Precision, run.Recall, run.NDCG3, run.NDCG10, run.MRR, run.MAP =
-			&value, &value, &value, &value, &value, &value
-		run.BLEU1, run.BLEU2, run.BLEU4, run.ROUGE1, run.ROUGE2, run.ROUGEL =
-			&value, &value, &value, &value, &value, &value
+		run.Precision, run.Recall, run.NDCG3 = &value, &value, &value
+		run.NDCG10, run.MRR, run.MAP = &value, &value, &value
+		run.BLEU1, run.BLEU2, run.BLEU4 = &value, &value, &value
+		run.ROUGE1, run.ROUGE2, run.ROUGEL = &value, &value, &value
 	}
 	return run
 }
@@ -261,7 +261,9 @@ func TestBenchmarkResultServiceLegacyAndTenantIsolation(t *testing.T) {
 		Dataset:               types.EvaluationDatasetSnapshot{DatasetID: "benchmark_v1"},
 	}
 	repo := &benchmarkEvaluationRepositoryStub{tenantID: 7, taskID: "task-1", run: run}
-	svc := NewBenchmarkResultService(repo, &benchmarkUsageRepositoryStub{result: &types.EvaluationModelUsageAggregate{}})
+	svc := NewBenchmarkResultService(
+		repo, &benchmarkUsageRepositoryStub{result: &types.EvaluationModelUsageAggregate{}},
+	)
 
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 	got, err := svc.GetBenchmarkResult(ctx, "task-1")

@@ -18,6 +18,7 @@ type NullableMetricAggregate struct {
 	ApplicableCalls int64  `json:"applicable_calls"`
 }
 
+// NonNullUsageCounters contains counters whose zero values are observed facts.
 type NonNullUsageCounters struct {
 	LogicalRequests  int64 `json:"logical_requests"`
 	ProviderRequests int64 `json:"provider_requests"`
@@ -33,6 +34,7 @@ type NonNullUsageCounters struct {
 	Pairs            int64 `json:"pairs"`
 }
 
+// PromptCacheStatusCounts groups calls by provider prompt-cache status.
 type PromptCacheStatusCounts struct {
 	NotRecorded int64 `json:"not_recorded"`
 	Unreported  int64 `json:"unreported"`
@@ -41,6 +43,7 @@ type PromptCacheStatusCounts struct {
 	Hit         int64 `json:"hit"`
 }
 
+// EmbeddingCacheStatusCounts groups calls by WeKnora embedding-cache status.
 type EmbeddingCacheStatusCounts struct {
 	NotRecorded int64 `json:"not_recorded"`
 	Disabled    int64 `json:"disabled"`
@@ -49,6 +52,7 @@ type EmbeddingCacheStatusCounts struct {
 	Miss        int64 `json:"miss"`
 }
 
+// LatencyAggregate summarizes nullable model-call latency observations.
 type LatencyAggregate struct {
 	SumMS           *int64   `json:"sum_ms"`
 	AverageMS       *float64 `json:"avg_ms"`
@@ -82,6 +86,7 @@ type CallTypeCostAggregate struct {
 	UnpricedCalls int64   `json:"unpriced_calls"`
 }
 
+// CurrencyCostAggregate groups derived model costs by currency and call type.
 type CurrencyCostAggregate struct {
 	Currency  string                `json:"currency"`
 	Chat      CallTypeCostAggregate `json:"chat"`

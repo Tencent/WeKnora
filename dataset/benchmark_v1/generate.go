@@ -1,3 +1,4 @@
+// Package main generates the frozen Benchmark v1 dataset files.
 package main
 
 import (

@@ -23,8 +23,10 @@ func pricingRule(mode types.BillingMode, callType types.CallType) *types.ModelPr
 func TestChatStandardNoDoubleCountingAndReportedZero(t *testing.T) {
 	rule := pricingRule(types.BillingModeChatStandardTokens, types.CallTypeChat)
 	rule.UnitScale, rule.InputTokenPrice, rule.OutputTokenPrice = "100", dec("2"), dec("4")
-	usage := &types.ModelUsage{ID: "u1", CallType: types.CallTypeChat,
-		InputTokens: meter(100), OutputTokens: meter(50), TotalTokens: meter(999)}
+	usage := &types.ModelUsage{
+		ID: "u1", CallType: types.CallTypeChat,
+		InputTokens: meter(100), OutputTokens: meter(50), TotalTokens: meter(999),
+	}
 
 	cost, err := NewCalculator().Calculate(usage, rule)
 	require.NoError(t, err)
@@ -45,8 +47,10 @@ func TestChatCacheSplitAndPartial(t *testing.T) {
 	rule.UnitScale = "10"
 	rule.InputTokenPrice, rule.CacheReadTokenPrice = dec("2"), dec("1")
 	rule.CacheWriteTokenPrice, rule.OutputTokenPrice = dec("3"), dec("4")
-	usage := &types.ModelUsage{ID: "u2", CallType: types.CallTypeChat,
-		InputTokens: meter(100), CacheReadTokens: meter(20), CacheWriteTokens: meter(10), OutputTokens: meter(5)}
+	usage := &types.ModelUsage{
+		ID: "u2", CallType: types.CallTypeChat,
+		InputTokens: meter(100), CacheReadTokens: meter(20), CacheWriteTokens: meter(10), OutputTokens: meter(5),
+	}
 
 	cost, err := NewCalculator().Calculate(usage, rule)
 	require.NoError(t, err)
@@ -106,8 +110,10 @@ func TestEmbeddingPrimaryBillingDimensions(t *testing.T) {
 		t.Run(string(tc.mode), func(t *testing.T) {
 			rule := pricingRule(tc.mode, types.CallTypeEmbedding)
 			tc.setRate(rule)
-			usage := &types.ModelUsage{ID: "embed", CallType: types.CallTypeEmbedding,
-				InputTokens: meter(10), TotalTokens: meter(12), ProviderInputs: 5, ProviderRequests: 2}
+			usage := &types.ModelUsage{
+				ID: "embed", CallType: types.CallTypeEmbedding,
+				InputTokens: meter(10), TotalTokens: meter(12), ProviderInputs: 5, ProviderRequests: 2,
+			}
 			cost, err := NewCalculator().Calculate(usage, rule)
 			require.NoError(t, err)
 			require.Equal(t, types.CostStatusPriced, cost.Status)
@@ -144,8 +150,10 @@ func TestRerankPrimaryBillingDimensionsAndFailureStatus(t *testing.T) {
 		t.Run(string(tc.mode), func(t *testing.T) {
 			rule := pricingRule(tc.mode, types.CallTypeRerank)
 			tc.setRate(rule)
-			usage := &types.ModelUsage{ID: "rerank", CallType: types.CallTypeRerank, Status: types.UsageStatusError,
-				InputTokens: meter(10), TotalTokens: meter(12), ProviderPairs: 7, ProviderRequests: 2}
+			usage := &types.ModelUsage{
+				ID: "rerank", CallType: types.CallTypeRerank, Status: types.UsageStatusError,
+				InputTokens: meter(10), TotalTokens: meter(12), ProviderPairs: 7, ProviderRequests: 2,
+			}
 			cost, err := NewCalculator().Calculate(usage, rule)
 			require.NoError(t, err)
 			require.Equal(t, types.CostStatusPriced, cost.Status, "failed calls are priced from observed meters")

@@ -92,7 +92,10 @@ func TestEndpointFingerprintNormalizationAndSecretExclusion(t *testing.T) {
 
 	canonical := fingerprint("https://EXAMPLE.com:443/api/v1/")
 	require.Equal(t, canonical, fingerprint("https://example.com/api/v1"))
-	require.Equal(t, canonical, fingerprint("https://user-secret:password@example.com/api/v1?token=query-secret#fragment"))
+	require.Equal(
+		t, canonical,
+		fingerprint("https://user-secret:password@example.com/api/v1?token=query-secret#fragment"),
+	)
 	require.NotEqual(t, canonical, fingerprint("https://other.example.com/api/v1"))
 	require.NotEqual(t, canonical, fingerprint("https://example.com/api/v2"))
 }

@@ -88,13 +88,13 @@ func TestPricingAndAggregationPostgreSQLSmoke(t *testing.T) {
 	require.NotNil(t, storedV1.EffectiveTo)
 	require.True(t, storedV1.EffectiveTo.Equal(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)))
 
-	assertPostgreSQLOverlapRollback(t, ctx, tx, pricingRepo, provider, model)
-	assertPostgreSQLAggregation(t, ctx, tx)
+	assertPostgreSQLOverlapRollback(ctx, t, tx, pricingRepo, provider, model)
+	assertPostgreSQLAggregation(ctx, t, tx)
 }
 
 func assertPostgreSQLOverlapRollback(
-	t *testing.T,
 	ctx context.Context,
+	t *testing.T,
 	tx *gorm.DB,
 	pricingRepo interface {
 		ImportPricingBatch(context.Context, []types.PricingImportRule) (*types.PricingImportResult, error)
@@ -127,7 +127,7 @@ func assertPostgreSQLOverlapRollback(
 	require.Zero(t, count, "the earlier insert in the failed batch must roll back")
 }
 
-func assertPostgreSQLAggregation(t *testing.T, ctx context.Context, tx *gorm.DB) {
+func assertPostgreSQLAggregation(ctx context.Context, t *testing.T, tx *gorm.DB) {
 	t.Helper()
 	tenantID := uint64(991001)
 	runID := uuid.NewString()
@@ -204,9 +204,10 @@ func postgresAggregationUsage(tenantID uint64, runID string, callType types.Call
 	resolvedModel := "fake-model"
 	latencyMS := int64(10)
 	modelType := "knowledge_qa"
-	if callType == types.CallTypeEmbedding {
+	switch callType {
+	case types.CallTypeEmbedding:
 		modelType = string(types.ModelTypeEmbedding)
-	} else if callType == types.CallTypeRerank {
+	case types.CallTypeRerank:
 		modelType = string(types.ModelTypeRerank)
 	}
 	return &types.ModelUsage{

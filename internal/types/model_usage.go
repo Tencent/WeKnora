@@ -14,9 +14,12 @@ import (
 type CallType string
 
 const (
-	CallTypeChat      CallType = "chat"      // Chat completion (knowledge QA, agent round, summary, …)
+	// CallTypeChat identifies chat-completion calls.
+	CallTypeChat CallType = "chat" // Chat completion (knowledge QA, agent round, summary, …)
+	// CallTypeEmbedding identifies embedding calls.
 	CallTypeEmbedding CallType = "embedding" // Text embedding (document or query)
-	CallTypeRerank    CallType = "rerank"    // Cross-encoder reranking
+	// CallTypeRerank identifies reranking calls.
+	CallTypeRerank CallType = "rerank" // Cross-encoder reranking
 )
 
 // TokenProvenance describes the trust source of the token counts in a row.
@@ -43,11 +46,16 @@ const (
 type TokenProvenance string
 
 const (
+	// TokenProvenanceProviderReported indicates provider-reported token counts.
 	TokenProvenanceProviderReported TokenProvenance = "provider_reported"
-	TokenProvenanceDerived          TokenProvenance = "derived"
-	TokenProvenanceEstimated        TokenProvenance = "estimated"
-	TokenProvenanceUnreported       TokenProvenance = "unreported"
-	TokenProvenanceUnsupported      TokenProvenance = "unsupported"
+	// TokenProvenanceDerived indicates token counts derived from reported values.
+	TokenProvenanceDerived TokenProvenance = "derived"
+	// TokenProvenanceEstimated indicates estimated token counts.
+	TokenProvenanceEstimated TokenProvenance = "estimated"
+	// TokenProvenanceUnreported indicates that the provider omitted token counts.
+	TokenProvenanceUnreported TokenProvenance = "unreported"
+	// TokenProvenanceUnsupported indicates that token accounting is unsupported.
+	TokenProvenanceUnsupported TokenProvenance = "unsupported"
 )
 
 // UsageStatus is the normalized terminal state of a logical model invocation.
@@ -61,10 +69,14 @@ const (
 type UsageStatus string
 
 const (
-	UsageStatusSuccess   UsageStatus = "success"
-	UsageStatusError     UsageStatus = "error"
+	// UsageStatusSuccess indicates a successful model invocation.
+	UsageStatusSuccess UsageStatus = "success"
+	// UsageStatusError indicates a failed model invocation.
+	UsageStatusError UsageStatus = "error"
+	// UsageStatusCancelled indicates a cancelled model invocation.
 	UsageStatusCancelled UsageStatus = "cancelled"
-	UsageStatusTimeout   UsageStatus = "timeout"
+	// UsageStatusTimeout indicates a timed-out model invocation.
+	UsageStatusTimeout UsageStatus = "timeout"
 )
 
 // EmbeddingCacheStatus describes the WeKnora embedding cache outcome for an
@@ -74,10 +86,14 @@ const (
 type EmbeddingCacheStatus string
 
 const (
+	// EmbeddingCacheStatusDisabled indicates that the cache was not used.
 	EmbeddingCacheStatusDisabled EmbeddingCacheStatus = "disabled" // Cache not configured or bypassed
-	EmbeddingCacheStatusFullHit  EmbeddingCacheStatus = "full_hit" // Every input served from cache
-	EmbeddingCacheStatusPartial  EmbeddingCacheStatus = "partial"  // Some inputs served, rest sent to provider
-	EmbeddingCacheStatusMiss     EmbeddingCacheStatus = "miss"     // No inputs served from cache
+	// EmbeddingCacheStatusFullHit indicates that every input came from cache.
+	EmbeddingCacheStatusFullHit EmbeddingCacheStatus = "full_hit" // Every input served from cache
+	// EmbeddingCacheStatusPartial indicates a mix of cache hits and misses.
+	EmbeddingCacheStatusPartial EmbeddingCacheStatus = "partial" // Some inputs served, rest sent to provider
+	// EmbeddingCacheStatusMiss indicates that no input came from cache.
+	EmbeddingCacheStatusMiss EmbeddingCacheStatus = "miss" // No inputs served from cache
 )
 
 // ModelUsage is a call-level record of one logical model invocation. A single
@@ -165,8 +181,10 @@ type ModelUsage struct {
 	ProviderPairs int `gorm:"column:provider_pairs;not null;default:0"`
 }
 
+// TableName returns the database table for model usage rows.
 func (ModelUsage) TableName() string { return "model_usage" }
 
+// BeforeCreate assigns an identifier to a new model usage row.
 func (u *ModelUsage) BeforeCreate(_ *gorm.DB) error {
 	if u.ID == "" {
 		u.ID = uuid.NewString()
@@ -179,6 +197,7 @@ func (u *ModelUsage) BeforeCreate(_ *gorm.DB) error {
 // numeric counters, and the cross-field embedding-cache accounting identity.
 // It is the single source of truth for semantic validation, called by the
 // repository before any write.
+// Validate checks the model usage invariants for its call type.
 func (u *ModelUsage) Validate() error {
 	if u.TenantID == 0 {
 		return fmt.Errorf("model_usage: tenant_id must be non-zero")

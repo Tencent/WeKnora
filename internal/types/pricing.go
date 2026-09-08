@@ -17,6 +17,7 @@ type Decimal string
 
 var decimalPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)(\.[0-9]+)?$`)
 
+// Validate checks that the decimal is non-negative and exactly representable.
 func (d Decimal) Validate(name string) error {
 	if !decimalPattern.MatchString(string(d)) {
 		return fmt.Errorf("%s must be a non-negative decimal, got %q", name, d)
@@ -27,6 +28,7 @@ func (d Decimal) Validate(name string) error {
 	return nil
 }
 
+// Value implements driver.Valuer for exact decimal values.
 func (d Decimal) Value() (driver.Value, error) {
 	if err := d.Validate("decimal"); err != nil {
 		return nil, err
@@ -34,6 +36,7 @@ func (d Decimal) Value() (driver.Value, error) {
 	return string(d), nil
 }
 
+// Scan implements sql.Scanner for exact decimal values.
 func (d *Decimal) Scan(value any) error {
 	if value == nil {
 		return fmt.Errorf("cannot scan NULL into Decimal")
@@ -51,19 +54,30 @@ func (d *Decimal) Scan(value any) error {
 	return d.Validate("decimal")
 }
 
+// BillingMode identifies the metering rule used to calculate model cost.
 type BillingMode string
 
 const (
-	BillingModeChatStandardTokens       BillingMode = "chat_standard_tokens"
-	BillingModeChatCacheSplitTokens     BillingMode = "chat_cache_split_tokens"
-	BillingModeEmbeddingInputToken      BillingMode = "embedding_input_token"
-	BillingModeEmbeddingTotalToken      BillingMode = "embedding_total_token"
-	BillingModeEmbeddingProviderInput   BillingMode = "embedding_provider_input"
+	// BillingModeChatStandardTokens prices standard chat input and output tokens.
+	BillingModeChatStandardTokens BillingMode = "chat_standard_tokens"
+	// BillingModeChatCacheSplitTokens prices chat tokens with cache-aware rates.
+	BillingModeChatCacheSplitTokens BillingMode = "chat_cache_split_tokens"
+	// BillingModeEmbeddingInputToken prices embedding input tokens.
+	BillingModeEmbeddingInputToken BillingMode = "embedding_input_token"
+	// BillingModeEmbeddingTotalToken prices embedding total tokens.
+	BillingModeEmbeddingTotalToken BillingMode = "embedding_total_token"
+	// BillingModeEmbeddingProviderInput prices embedding provider inputs.
+	BillingModeEmbeddingProviderInput BillingMode = "embedding_provider_input"
+	// BillingModeEmbeddingProviderRequest prices embedding provider requests.
 	BillingModeEmbeddingProviderRequest BillingMode = "embedding_provider_request"
-	BillingModeRerankInputToken         BillingMode = "rerank_input_token"
-	BillingModeRerankTotalToken         BillingMode = "rerank_total_token"
-	BillingModeRerankProviderPair       BillingMode = "rerank_provider_pair"
-	BillingModeRerankProviderRequest    BillingMode = "rerank_provider_request"
+	// BillingModeRerankInputToken prices rerank input tokens.
+	BillingModeRerankInputToken BillingMode = "rerank_input_token"
+	// BillingModeRerankTotalToken prices rerank total tokens.
+	BillingModeRerankTotalToken BillingMode = "rerank_total_token"
+	// BillingModeRerankProviderPair prices rerank provider pairs.
+	BillingModeRerankProviderPair BillingMode = "rerank_provider_pair"
+	// BillingModeRerankProviderRequest prices rerank provider requests.
+	BillingModeRerankProviderRequest BillingMode = "rerank_provider_request"
 )
 
 // ModelPricing is one versioned pricing fact for an effective model identity.
@@ -95,8 +109,10 @@ type ModelPricing struct {
 	CreatedAt         time.Time `gorm:"not null"`
 }
 
+// TableName returns the database table for pricing rules.
 func (ModelPricing) TableName() string { return "model_pricing" }
 
+// BeforeCreate assigns an identifier to a new pricing rule.
 func (p *ModelPricing) BeforeCreate(_ *gorm.DB) error {
 	if p.ID == "" {
 		p.ID = uuid.NewString()
@@ -104,6 +120,7 @@ func (p *ModelPricing) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
+// Validate checks the pricing rule invariants for its billing mode.
 func (p *ModelPricing) Validate() error {
 	if p.ResolvedProvider == "" || p.ResolvedModelName == "" {
 		return fmt.Errorf("model_pricing: resolved provider and model name are required")
@@ -193,14 +210,19 @@ func (p *ModelPricing) Validate() error {
 	return nil
 }
 
+// CostStatus describes whether a usage row could be fully priced.
 type CostStatus string
 
 const (
-	CostStatusPriced   CostStatus = "priced"
+	// CostStatusPriced indicates that every applicable meter was priced.
+	CostStatusPriced CostStatus = "priced"
+	// CostStatusUnpriced indicates that no matching price was available.
 	CostStatusUnpriced CostStatus = "unpriced"
-	CostStatusPartial  CostStatus = "partial"
+	// CostStatusPartial indicates that only some applicable meters were priced.
+	CostStatusPartial CostStatus = "partial"
 )
 
+// ModelUsageCost stores the immutable derived cost for one usage row.
 type ModelUsageCost struct {
 	ID                string     `gorm:"type:varchar(36);primaryKey"`
 	UsageID           string     `gorm:"type:varchar(36);not null;uniqueIndex"`
@@ -222,8 +244,10 @@ type ModelUsageCost struct {
 	CalculatedAt      time.Time  `gorm:"not null"`
 }
 
+// TableName returns the database table for derived model usage costs.
 func (ModelUsageCost) TableName() string { return "model_usage_cost" }
 
+// BeforeCreate assigns an identifier to a new model usage cost row.
 func (c *ModelUsageCost) BeforeCreate(_ *gorm.DB) error {
 	if c.ID == "" {
 		c.ID = uuid.NewString()

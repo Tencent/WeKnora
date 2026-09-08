@@ -55,8 +55,10 @@ func testEvaluationRun(taskID string, tenantID uint64) *types.EvaluationRun {
 
 func testMetric() *types.MetricResult {
 	return &types.MetricResult{
-		RetrievalMetrics:  types.RetrievalMetrics{Precision: .1, Recall: .2, NDCG3: .3, NDCG10: .4, MRR: .5, MAP: .6},
-		GenerationMetrics: types.GenerationMetrics{BLEU1: .7, BLEU2: .8, BLEU4: .9, ROUGE1: .11, ROUGE2: .22, ROUGEL: .33},
+		RetrievalMetrics: types.RetrievalMetrics{Precision: .1, Recall: .2, NDCG3: .3, NDCG10: .4, MRR: .5, MAP: .6},
+		GenerationMetrics: types.GenerationMetrics{
+			BLEU1: .7, BLEU2: .8, BLEU4: .9, ROUGE1: .11, ROUGE2: .22, ROUGEL: .33,
+		},
 	}
 }
 

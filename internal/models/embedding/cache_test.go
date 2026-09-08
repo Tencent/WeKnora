@@ -208,7 +208,10 @@ func TestCachingEmbedderBatchAllMissPartialHitAllHitAndOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := [][]float32{testVector("A", 2), testVector("B", 2), testVector("A", 2), testVector("C", 2), testVector("D", 2)}
+	want := [][]float32{
+		testVector("A", 2), testVector("B", 2), testVector("A", 2),
+		testVector("C", 2), testVector("D", 2),
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("partial-hit vectors = %v, want %v", got, want)
 	}

@@ -1,3 +1,4 @@
+// Package pricing derives immutable model usage costs from pricing rules.
 package pricing
 
 import (
@@ -10,10 +11,13 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// CalculatorVersion identifies the pricing calculation algorithm.
 const CalculatorVersion = "pricing-v1"
 
+// Calculator derives model usage costs from observed meters and a pricing rule.
 type Calculator struct{}
 
+// NewCalculator creates a pricing calculator.
 func NewCalculator() *Calculator { return &Calculator{} }
 
 type component struct {
@@ -22,6 +26,7 @@ type component struct {
 	set   func(*types.ModelUsageCost, *types.Decimal)
 }
 
+// Calculate derives an immutable cost fact for one model usage row.
 func (c *Calculator) Calculate(usage *types.ModelUsage, rule *types.ModelPricing) (*types.ModelUsageCost, error) {
 	if usage == nil {
 		return nil, fmt.Errorf("pricing: usage is nil")

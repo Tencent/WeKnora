@@ -40,6 +40,7 @@ const (
 	EvaluationStatueFailed                          // Task failed
 )
 
+// BenchmarkContractVersionV11 identifies the frozen Benchmark v1.1 contract.
 const BenchmarkContractVersionV11 = "v1.1"
 
 // EvaluationTask contains information about an evaluation task
@@ -78,6 +79,7 @@ type EvaluationConfigSnapshotV1 struct {
 	Execution                EvaluationExecutionSnapshot  `json:"execution"`
 }
 
+// EvaluationDatasetSnapshot records the dataset identity used by an evaluation.
 type EvaluationDatasetSnapshot struct {
 	DatasetID             string `json:"dataset_id"`
 	DatasetSemanticSHA256 string `json:"dataset_semantic_sha256,omitempty"`
@@ -89,6 +91,7 @@ type EvaluationDatasetSnapshot struct {
 	ChunkingApplied       bool   `json:"chunking_applied"`
 }
 
+// EvaluationPipelineSnapshot records the evaluation pipeline configuration.
 type EvaluationPipelineSnapshot struct {
 	Name        string                      `json:"name"`
 	Metrics     []string                    `json:"metrics"`
@@ -96,12 +99,14 @@ type EvaluationPipelineSnapshot struct {
 	Tokenizer   EvaluationTokenizerSnapshot `json:"tokenizer"`
 }
 
+// EvaluationTokenizerSnapshot records the tokenizer configuration.
 type EvaluationTokenizerSnapshot struct {
 	Name                  string `json:"name"`
 	DictionaryMode        string `json:"dictionary_mode"`
 	DictionaryFingerprint string `json:"dictionary_fingerprint,omitempty"`
 }
 
+// EvaluationRetrievalSnapshot records the effective retrieval configuration.
 type EvaluationRetrievalSnapshot struct {
 	VectorThreshold  float64 `json:"vector_threshold"`
 	KeywordThreshold float64 `json:"keyword_threshold"`
@@ -111,6 +116,7 @@ type EvaluationRetrievalSnapshot struct {
 	RetrieveDriver   string  `json:"retrieve_driver,omitempty"`
 }
 
+// EvaluationModelsSnapshot records the model identities used by an evaluation.
 type EvaluationModelsSnapshot struct {
 	EmbeddingModelID string  `json:"embedding_model_id"`
 	ChatModelID      string  `json:"chat_model_id"`
@@ -138,18 +144,21 @@ type EvaluationConfiguredModelSnapshot struct {
 	Embedding           *EvaluationEmbeddingSnapshot `json:"embedding,omitempty"`
 }
 
+// EvaluationEmbeddingSnapshot records embedding-specific model properties.
 type EvaluationEmbeddingSnapshot struct {
 	Dimension                 int  `json:"dimension"`
 	TruncatePromptTokens      int  `json:"truncate_prompt_tokens"`
 	SupportsDimensionOverride bool `json:"supports_dimension_override"`
 }
 
+// EvaluationSourceKBSnapshot records the source knowledge base identity.
 type EvaluationSourceKBSnapshot struct {
 	ID               string `json:"id"`
 	EmbeddingModelID string `json:"embedding_model_id"`
 	SummaryModelID   string `json:"summary_model_id"`
 }
 
+// EvaluationGenerationSnapshot records the effective generation configuration.
 type EvaluationGenerationSnapshot struct {
 	MaxRounds           int           `json:"max_rounds"`
 	SummaryConfig       SummaryConfig `json:"summary_config"`
@@ -158,12 +167,15 @@ type EvaluationGenerationSnapshot struct {
 	RewritePromptUser   string        `json:"rewrite_prompt_user"`
 }
 
+// EvaluationExecutionSnapshot records execution settings for an evaluation.
 type EvaluationExecutionSnapshot struct {
 	WorkerLimit int `json:"worker_limit"`
 }
 
+// Value implements driver.Valuer for an evaluation configuration snapshot.
 func (s EvaluationConfigSnapshotV1) Value() (driver.Value, error) { return json.Marshal(s) }
 
+// Scan implements sql.Scanner for an evaluation configuration snapshot.
 func (s *EvaluationConfigSnapshotV1) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -215,8 +227,10 @@ type EvaluationRun struct {
 	UpdatedAt             time.Time
 }
 
+// TableName returns the database table for evaluation runs.
 func (EvaluationRun) TableName() string { return "evaluation_runs" }
 
+// BeforeCreate assigns an identifier to a new evaluation run.
 func (r *EvaluationRun) BeforeCreate(_ *gorm.DB) error {
 	if r.ID == "" {
 		r.ID = uuid.NewString()

@@ -262,7 +262,8 @@ func requireSingleExactActiveModel(models []*types.Model, label string, want pro
 	matches := make([]*types.Model, 0, 1)
 	actual := modelsOfType(models, types.ModelType(want.Type), true)
 	for _, model := range actual {
-		if model.Name == want.Name && string(model.Source) == want.Source && model.Parameters.Provider == want.Provider {
+		if model.Name == want.Name && string(model.Source) == want.Source &&
+			model.Parameters.Provider == want.Provider {
 			matches = append(matches, model)
 		}
 	}
@@ -646,11 +647,17 @@ func validateResultProfile(mode benchmarkExecutionMode, p finalProfile, result *
 		for _, check := range checks {
 			if check.got.Name != check.want.Name || check.got.Type != check.want.Type ||
 				check.got.Source != check.want.Source || check.got.Provider != check.want.Provider {
-				return fmt.Errorf("unified benchmark result %s model does not match final benchmark profile", check.label)
+				return fmt.Errorf(
+					"unified benchmark result %s model does not match final benchmark profile",
+					check.label,
+				)
 			}
 			if check.want.Dimension != 0 &&
 				(check.got.Embedding == nil || check.got.Embedding.Dimension != check.want.Dimension) {
-				return fmt.Errorf("unified benchmark result %s dimension does not match final benchmark profile", check.label)
+				return fmt.Errorf(
+					"unified benchmark result %s dimension does not match final benchmark profile",
+					check.label,
+				)
 			}
 		}
 	}
@@ -846,8 +853,8 @@ func yesNo(value bool) string {
 }
 
 func stringPointer(value string) *string {
-	copy := value
-	return &copy
+	copied := value
+	return &copied
 }
 
 func valueOrNA(value *string) string {
