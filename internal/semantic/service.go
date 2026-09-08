@@ -672,15 +672,31 @@ func (e *Engine) Publish(
 		e.markPublishFailed(ctx, m, err.Error())
 		return nil, err
 	}
-	// keep the stored accessPolicy in sync with the group selection
+	// Force-override data_source with the bound connection slug.
+	// Prevents a contributor from writing another tenant's connection slug
+	// in YAML to query cross-tenant databases.
+	boundConn, err := e.repo.FindConnection(ctx, tenant, m.ConnectionID)
+	if err != nil {
+		return nil, fmt.Errorf("bound data source not found: %w", err)
+	}
 	kind, name, idErr := doc.Identity()
 	if idErr != nil {
 		return nil, idErr
 	}
 	if kind == ModelKindCube {
+		// Force data_source to the bound connection slug.
+		doc.Cubes[0].DataSource = boundConn.Name
+		// Force-inject default-deny access_policy (never trust YAML).
 		doc.Cubes[0].AccessPolicy = BuildPolicy(StringList(m.AllowedGroups))
+	} else if kind == ModelKindView {
+		// Views also get forced access_policy (Cube member-level rules
+		// on the underlying cube do NOT cascade to views).
+		// own policy applies). Inject the same default-deny to prevent bypass.
+		if len(doc.Views) > 0 {
+			extra, _ := doc.Views[0].Extra.(map[string]interface{})
+			doc.Views[0].Extra = setViewPolicy(extra, BuildPolicy(StringList(m.AllowedGroups)))
+		}
 	}
-	// views keep their own policy via YAML source mode
 	yamlText, err := GenerateModelYAML(doc)
 	if err != nil {
 		return nil, err
@@ -1135,4 +1151,16 @@ func WarnDenied(meta *cubeclient.MetaResponse, q *PreviewQuery) string {
 		}
 	}
 	return ""
+}
+
+// setViewPolicy injects or replaces the access_policy in a view's Extra map.
+func setViewPolicy(
+	extra map[string]interface{},
+	rules []PolicyRule,
+) map[string]interface{} {
+	if extra == nil {
+		extra = map[string]interface{}{}
+	}
+	extra["access_policy"] = rules
+	return extra
 }

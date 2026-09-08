@@ -388,6 +388,22 @@ func validateBoundModels(bound []string, input *CubeQueryInput) error {
 			return err
 		}
 	}
+	// Also validate filters, time_dimensions, and order keys.
+	for _, f := range input.Filters {
+		if err := check(f.Member); err != nil {
+			return err
+		}
+	}
+	for _, td := range input.TimeDimensions {
+		if err := check(td.Dimension); err != nil {
+			return err
+		}
+	}
+	for key := range input.Order {
+		if err := check(key); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

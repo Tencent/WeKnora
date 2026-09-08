@@ -39,22 +39,25 @@
                       <h3 class="section-title">{{ $t('semantic.model.editor.basic') }}</h3>
                       <p class="section-desc">{{ $t('semantic.agent.modelScopeDesc') }}</p>
                     </div>
-                    <t-form label-width="110px" label-align="right" size="small">
-                      <t-form-item :label="t('semantic.model.name')">
-                        <t-input v-model="form.name" :disabled="!canEdit || isPublished" @change="syncNameToDoc" />
-                      </t-form-item>
-                      <t-form-item :label="t('semantic.model.titleField')">
-                        <t-input v-model="form.title" :disabled="!canEdit" />
-                      </t-form-item>
-                      <t-form-item :label="t('semantic.model.connection')">
-                        <t-select v-model="form.connection_id" :disabled="!canEdit" @change="syncDataSource">
-                          <t-option v-for="c in connections" :key="c.id" :value="c.id" :label="`${c.title || c.name} (${c.type})`" />
-                        </t-select>
-                      </t-form-item>
-                      <t-form-item :label="t('semantic.model.description')">
-                        <t-textarea v-model="form.description" :autosize="{ minRows: 2, maxRows: 4 }" :disabled="!canEdit" />
-                      </t-form-item>
-                    </t-form>
+                    <div class="form-item">
+                      <label class="form-label" :class="{ required: !isPublished }">{{ t('semantic.model.name') }}</label>
+                      <t-input v-model="form.name" :disabled="!canEdit || isPublished" @change="syncNameToDoc" />
+                    </div>
+                    <div class="form-item">
+                      <label class="form-label">{{ t('semantic.model.titleField') }}</label>
+                      <t-input v-model="form.title" :disabled="!canEdit" />
+                    </div>
+                    <div class="form-item">
+                      <label class="form-label required">{{ t('semantic.model.connection') }}</label>
+                      <t-select v-model="form.connection_id" :disabled="!canEdit" @change="syncDataSource">
+                        <t-option v-for="c in connections" :key="c.id" :value="c.id" :label="`${c.title || c.name} (${c.type})`" />
+                      </t-select>
+                    </div>
+                    <div class="form-item">
+                      <label class="form-label">{{ t('semantic.model.description') }}</label>
+                      <t-textarea v-model="form.description" :autosize="{ minRows: 2, maxRows: 4 }" :disabled="!canEdit" />
+                      <p class="form-tip">{{ t('semantic.model.editor.basicDesc') }}</p>
+                    </div>
                   </div>
 
                   <!-- 维度 -->
@@ -156,14 +159,13 @@
                       <h3 class="section-title">{{ $t('semantic.model.editor.groups') }}</h3>
                       <p class="section-desc">{{ $t('semantic.model.editor.groupsDesc') }}</p>
                     </div>
-                    <t-form label-width="110px" label-align="right" size="small">
-                      <t-form-item :label="t('semantic.model.editor.groups')">
-                        <t-select v-model="form.allowed_groups" multiple filterable :disabled="!canEdit" clearable>
-                          <t-option v-for="g in groups" :key="g.id" :value="g.name" :label="g.title || g.name" />
-                        </t-select>
-                      </t-form-item>
-                    </t-form>
-                    <div class="groups-hint">{{ t('semantic.model.editor.groupsHint') }}</div>
+                    <div class="form-item">
+                      <label class="form-label">{{ t('semantic.model.editor.groups') }}</label>
+                      <t-select v-model="form.allowed_groups" multiple filterable :disabled="!canEdit" clearable>
+                        <t-option v-for="g in groups" :key="g.id" :value="g.name" :label="g.title || g.name" />
+                      </t-select>
+                      <p class="form-tip">{{ t('semantic.model.editor.groupsHint') }}</p>
+                    </div>
                   </div>
 
                   <!-- YAML 源码 -->
@@ -746,6 +748,35 @@ async function runPreview() {
   font-size: 14px;
   color: var(--td-text-color-placeholder);
   line-height: 22px;
+}
+
+.form-item {
+  margin-bottom: 16px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 8px;
+  font-family: var(--app-font-family);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+
+  &.required::after {
+    content: '*';
+    color: var(--td-error-color);
+    margin-left: 4px;
+  }
+}
+
+.form-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
 }
 
 .section-block-header {
