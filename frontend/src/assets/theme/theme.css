@@ -99,18 +99,18 @@
 
 /* 关联知识五类型数据色板 */
 :root:root {
-    --color-data-1: #07c05f;
-    --color-data-2: #3B82F6;
-    --color-data-3: #F97316;
-    --color-data-4: #6B7280;
-    --color-data-5: #A855F7;
+    --color-data-1: #7BC27C;
+    --color-data-2: #6581C0;
+    --color-data-3: #F08B67;
+    --color-data-4: #C9CBC9;
+    --color-data-5: #5F58A1;
 }
 :root:root[theme-mode="dark"] {
-    --color-data-1: #48c79c;
-    --color-data-2: #60A5FA;
-    --color-data-3: #FB923C;
-    --color-data-4: #9CA3AF;
-    --color-data-5: #C084FC;
+    --color-data-1: #7BC27C;
+    --color-data-2: #6581C0;
+    --color-data-3: #F08B67;
+    --color-data-4: #C9CBC9;
+    --color-data-5: #5F58A1;
 }
 
 /* 全局深色模式滚动条样式 */
