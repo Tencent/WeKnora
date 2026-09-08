@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -109,6 +110,13 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	go func() {
 		answerDecoder := modelContext.StreamDecoder()
 		thinkingDecoder := modelContext.StreamDecoder()
+		// Some providers cannot fully disable thinking server-side and embed
+		// <think>…</think> blocks in the plain content channel (Minimax-M2,
+		// several vLLM/Ollama Qwen deployments). The agent pipeline splits
+		// those inline blocks out before emitting; the chat pipeline must do
+		// the same, otherwise the raw closing tag leaks into the UI thinking
+		// card (#3099).
+		inlineThink := tools.NewThinkStreamSplitter()
 		thinkingID := fmt.Sprintf("%s-thinking", uuid.New().String()[:8])
 		answerID := fmt.Sprintf("%s-answer", uuid.New().String()[:8])
 		thinkingOpen := false
@@ -224,12 +232,46 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					if answerCompleted {
 						continue
 					}
-					response.Content = answerDecoder.Feed(response.Content)
+					// Split inline <think>…</think> reasoning out of the content
+					// channel and route it to the thinking card, mirroring the
+					// agent pipeline. Answer text outside the blocks keeps going
+					// through the resource-aware answer decoder untouched.
+					thinkPart, answerPart := inlineThink.Feed(response.Content)
+					if response.Done {
+						flushThink, flushAnswer := inlineThink.Flush()
+						thinkPart += flushThink
+						answerPart += flushAnswer
+					}
+					if thinkPart != "" {
+						thinkContent := thinkingDecoder.Feed(thinkPart)
+						if response.Done {
+							thinkContent += thinkingDecoder.Flush()
+						}
+						if thinkContent != "" {
+							thinkingOpen = true
+							eventBus.Emit(ctx, types.Event{
+								ID:        thinkingID,
+								Type:      types.EventType(event.EventAgentThought),
+								SessionID: chatManage.SessionID,
+								Data: event.AgentThoughtData{
+									Content: thinkContent,
+									Done:    false,
+								},
+							})
+						}
+					}
+					response.Content = answerDecoder.Feed(answerPart)
 					if response.Done {
 						response.Content += answerDecoder.Flush()
 						answerCompleted = true
 					}
-					closeThinking()
+					// Close the thinking card only when real answer text starts
+					// (or the stream ends): closing on every intermediate chunk
+					// would flicker the card while inline think and answer
+					// alternate across chunks.
+					if response.Content != "" || response.Done {
+						closeThinking()
+					}
 					eventBus.Emit(ctx, types.Event{
 						ID:        answerID,
 						Type:      types.EventType(event.EventAgentFinalAnswer),
