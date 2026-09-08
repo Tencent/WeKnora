@@ -275,7 +275,7 @@ func (s *knowledgeService) wikiChunkRefsForKnowledge(ctx context.Context, knowle
 	if knowledge == nil || s.chunkRepo == nil {
 		return nil
 	}
-	chunks, err := s.chunkRepo.ListChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID)
+	chunks, err := s.chunkRepo.ListAllChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID)
 	if err != nil {
 		logger.Warnf(ctx, "wiki cleanup: failed to list chunks for knowledge %s: %v", knowledge.ID, err)
 		return nil
@@ -631,23 +631,14 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 		return nil
 	}
 
+	kb, err := knowledgeWriteKB(ctx, s.kbService, knowledge)
+	if err != nil {
+		return fmt.Errorf("resolve cleanup knowledge base: %w", err)
+	}
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if knowledge.EmbeddingModelID != "" {
-		// Load KB to discover its VectorStoreID binding. Falls back to tenant
-		// effective engines if the KB has no binding or the load fails.
-		//
-		// Silent fallback risk: if a bound KB fails to load here due to a
-		// transient DB error, the cleanup will delete from env engines and
-		// leave orphan vectors in the bound store. Warn so operators can spot it.
-		var boundStoreID *string
-		if kb, loadErr := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID); loadErr == nil && kb != nil {
-			boundStoreID = kb.VectorStoreID
-		} else if loadErr != nil {
-			logger.GetLogger(ctx).WithField("error", loadErr).WithField("knowledge_base_id", knowledge.KnowledgeBaseID).
-				Warnf("cleanupKnowledgeResources: failed to load KB for vector store resolution; falling back to tenant effective engines")
-		}
 		retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
-			ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, boundStoreID)
+			ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
 		if err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Error("Failed to init retrieve engine during cleanup")
 			cleanupErr = errors.Join(cleanupErr, err)
@@ -666,7 +657,6 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 	}
 
 	// Collect image URLs before chunks are deleted
-	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
 	fileSvc := s.resolveFileService(ctx, kb)
 	chunkImageInfos, imgErr := s.chunkService.GetRepository().ListImageInfoByKnowledgeIDs(ctx, tenantInfo.ID, []string{knowledge.ID})
 	if imgErr != nil {
@@ -760,7 +750,7 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 	ctx = withKnowledgeCleanup(ctx, payload.TenantID, bindings)
 	if err := s.DeleteKnowledgeList(ctx, ids); err != nil {
 		var appErr *apperrors.AppError
-		if errors.As(err, &appErr) && (appErr.HTTPCode == 403 || appErr.HTTPCode == 400) {
+		if errors.As(err, &appErr) && (appErr.HTTPCode == 403 || appErr.HTTPCode == 400 || appErr.HTTPCode == 409) {
 			return fmt.Errorf("invalid delete task scope: %v: %w", err, asynq.SkipRetry)
 		}
 		return err

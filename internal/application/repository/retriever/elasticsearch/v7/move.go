@@ -42,6 +42,8 @@ func (e *elasticsearchRepository) MoveKnowledgeIndices(
 		return fmt.Errorf("move indices: %s", resp.String())
 	}
 	var result struct {
+		Total     *int64            `json:"total"`
+		Updated   *int64            `json:"updated"`
 		TimedOut  bool              `json:"timed_out"`
 		Conflicts int               `json:"version_conflicts"`
 		Failures  []json.RawMessage `json:"failures"`
@@ -49,7 +51,8 @@ func (e *elasticsearchRepository) MoveKnowledgeIndices(
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return err
 	}
-	if result.TimedOut || result.Conflicts != 0 || len(result.Failures) != 0 {
+	if result.Total == nil || result.Updated == nil || *result.Total < 0 || *result.Total != *result.Updated ||
+		result.TimedOut || result.Conflicts != 0 || len(result.Failures) != 0 {
 		return fmt.Errorf("move indices was incomplete")
 	}
 	return nil

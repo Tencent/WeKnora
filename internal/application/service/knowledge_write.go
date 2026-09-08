@@ -14,19 +14,6 @@ type knowledgeBaseWriteLookup interface {
 	GetKnowledgeBaseByID(context.Context, string) (*types.KnowledgeBase, error)
 }
 
-// A move owns its document until the target checkpoint is durable. Ordinary
-// edits must not reset that state or mutate children in the middle of a retry.
-func rejectMovingKnowledge(knowledge *types.Knowledge) error {
-	state, err := transferState(knowledge)
-	if err != nil {
-		return err
-	}
-	if state != nil && state.Operation == access.KBTransferMove && state.Phase == "moving" {
-		return apperrors.NewConflictError("knowledge has an unfinished move; retry the move first")
-	}
-	return nil
-}
-
 func writeResourceIDs(ids []string) ([]string, error) {
 	result := make([]string, 0, len(ids))
 	seen := make(map[string]bool, len(ids))
@@ -87,7 +74,7 @@ func loadKnowledgeWrite(
 	if knowledge == nil || knowledge.ID != id || knowledge.TenantID != tenant {
 		return nil, nil, apperrors.NewNotFoundError("knowledge not found")
 	}
-	if err := rejectMovingKnowledge(knowledge); err != nil {
+	if err := access.RejectMovingKnowledge(knowledge); err != nil {
 		return nil, nil, err
 	}
 	kb, err := knowledgeWriteKB(ctx, lookup, knowledge)
@@ -134,7 +121,7 @@ func loadKnowledgeWriteBatch(
 		if row == nil {
 			return nil, apperrors.NewNotFoundError("knowledge not found")
 		}
-		if err := rejectMovingKnowledge(row); err != nil {
+		if err := access.RejectMovingKnowledge(row); err != nil {
 			return nil, err
 		}
 		if !checked[row.KnowledgeBaseID] {

@@ -119,6 +119,9 @@ func (h *KnowledgeHandler) validateKnowledgeBaseWriteAccessWithKBID(
 	if err != nil {
 		return nil, kbID, 0, "", err
 	}
+	if err := access.RequireKBWrite(grant.Context(c.Request.Context()), grant.KnowledgeBase); err != nil {
+		return nil, kbID, 0, "", kbAccessHTTPError(err)
+	}
 	return grant.KnowledgeBase, kbID, grant.EffectiveTenantID, grant.Permission, nil
 }
 
@@ -1251,6 +1254,11 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 		return
 	}
 
+	if err := access.RejectMovingKnowledge(knowledge); err != nil {
+		_ = c.Error(err)
+		return
+	}
+
 	// Reuse the batch async pipeline so single-item delete shares the same
 	// hardening (asynq retries, business-aware queue routing, marking-as-deleting
 	// inside the worker) as BatchDeleteKnowledge / ClearKnowledgeBaseContents.
@@ -1347,6 +1355,10 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		return
 	}
 	for _, k := range knowledgeList {
+		if err := access.RejectMovingKnowledge(k); err != nil {
+			_ = c.Error(err)
+			return
+		}
 		if k.KnowledgeBaseID != kbID {
 			c.Error(errors.NewBadRequestError(
 				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",
@@ -1426,6 +1438,10 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 
 	knowledgeIDs := make([]string, 0, len(knowledgeList))
 	for _, knowledge := range knowledgeList {
+		if err := access.RejectMovingKnowledge(knowledge); err != nil {
+			_ = c.Error(err)
+			return
+		}
 		knowledgeIDs = append(knowledgeIDs, knowledge.ID)
 	}
 
@@ -1721,7 +1737,12 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 
 	if err := h.kgService.UpdateKnowledge(effCtx, &knowledge); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		var appErr *errors.AppError
+		if goerrors.As(err, &appErr) {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewInternalServerError(err.Error()))
+		}
 		return
 	}
 	updated, getErr := h.kgService.GetKnowledgeByID(effCtx, id)
@@ -1753,7 +1774,12 @@ func (h *KnowledgeHandler) RegenerateKnowledgeSummary(c *gin.Context) {
 	knowledge, err := h.kgService.GetKnowledgeByID(effCtx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		var appErr *errors.AppError
+		if goerrors.As(err, &appErr) {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewInternalServerError(err.Error()))
+		}
 		return
 	}
 	if knowledge.SummaryStatus == "" || knowledge.SummaryStatus == types.SummaryStatusNone {
@@ -1766,7 +1792,12 @@ func (h *KnowledgeHandler) RegenerateKnowledgeSummary(c *gin.Context) {
 	}
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		var appErr *errors.AppError
+		if goerrors.As(err, &appErr) {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewBadRequestError(err.Error()))
+		}
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": knowledge})
@@ -2016,6 +2047,11 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 			ctx = effCtx
 		}
 	}
+	if err := h.requireKBOwnershipOrAdmin(c, authorizedKBID); err != nil {
+		_ = c.Error(err)
+		return
+	}
+
 	if err := h.kgService.UpdateKnowledgeTagBatch(ctx, authorizedKBID, req.Updates); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
@@ -2077,7 +2113,12 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 	err = h.kgService.UpdateImageInfo(effCtx, id, chunkID, secutils.SanitizeForLog(request.ImageInfo))
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		var appErr *errors.AppError
+		if goerrors.As(err, &appErr) {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewInternalServerError(err.Error()))
+		}
 		return
 	}
 
@@ -2591,13 +2632,17 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 		return
 	}
 
-	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseWriteAccessWithKBID(c, req.KBID)
 	if err != nil {
 		c.Error(err)
 		return
 	}
 	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
 		c.Error(errors.NewForbiddenError("no permission to reparse knowledge in this kb"))
+		return
+	}
+	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+		_ = c.Error(err)
 		return
 	}
 	ctx = types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
@@ -2613,6 +2658,10 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 		return
 	}
 	for _, k := range knowledgeList {
+		if err := access.RejectMovingKnowledge(k); err != nil {
+			_ = c.Error(err)
+			return
+		}
 		if k.KnowledgeBaseID != kbID {
 			c.Error(errors.NewBadRequestError(
 				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",

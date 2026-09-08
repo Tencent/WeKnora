@@ -159,6 +159,8 @@ Document deletion shares a preflight plan and executor for single and batch
 calls. The plan validates every selection and KB, loads owner TenantInfo and
 routing metadata, and captures image references before marking rows as deleting.
 Index/graph failures leave the document and original file available for retry.
+Wiki deletion collects all chunk types before deleting chunks, so parent, image
+and summary citations are removed along with text citations.
 Physical file cleanup remains best effort after database deletion; this does not
 introduce a transaction across database, indexes and storage or durable blob GC.
 
@@ -171,8 +173,17 @@ they cannot reconstruct the KB that existed at enqueue time. Failure callbacks
 skip rejected scopes and condition status updates on tenant, KB and deleting
 state. Scope/identity errors are not retried; infrastructure failures are.
 
-Batch reparse payloads likewise carry the admitted KB ID. Workers validate the
-whole batch before any submission and use exactly one `WithKBTaskWrite` grant;
+Single/batch delete, clear-content and batch-reparse admission reject already
+moving documents with HTTP 409 before enqueue. Workers recheck current state;
+a deletion conflict is terminal for that admitted task, so retries cannot
+follow a document into a different KB. This does not serialize admission with
+a concurrent move. Synchronous metadata/image/chunk/summary handlers preserve
+application 403/409 errors, including wrapped errors.
+
+Batch reparse and batch document tags resolve an Editor operation and apply the
+same creator-or-Admin admission policy as single-document writes, respecting
+RBAC rollout/API-key behavior. Batch reparse payloads likewise carry the admitted
+KB ID. Workers validate the whole batch before any submission and use exactly one `WithKBTaskWrite` grant;
 each reparse reload consumes that grant and rejects a document still moving.
 Missing/mixed/moved selections fail without submitting earlier batch members.
 Legacy reparse payloads can reconstruct only a present, single-KB binding.
@@ -226,7 +237,13 @@ is empty, avoiding offset limits/skipped rows. Repeated IDs or partial failures
 return errors and leave the document checkpoint pending for retry.
 OpenSearch selects the entire source KB/document pair, even without DB chunks,
 and rejects version conflicts, timeouts and partial failures before DB relocation.
-It never copies vectors and then deletes by the same document ID. Source and
+OpenSearch and Elasticsearch 7/8 require present non-negative `total`/`updated`
+counts with `updated == total`; their move scripts do not skip/delete documents.
+A zero/zero result allows a retry after metadata already reached the target.
+Reparse cleanup loads and validates the source KB before touching any backend,
+reusing its storage binding throughout; a failed/missing lookup cannot fall
+back to the tenant default store.
+Vector reuse never copies vectors and then deletes by the same document ID. Source and
 target must use the same vector store for reuse, and the same concrete file
 storage instance for either mode. Doris ANN tables cannot safely replace rows
 without a delete/insert gap, so their moves require `reparse`. Clone still

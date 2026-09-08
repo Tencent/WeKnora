@@ -22,8 +22,10 @@ func inspectByQueryResponse(body io.Reader) error {
 
 func inspectByQueryResult(body io.Reader, requireComplete bool) error {
 	var r struct {
-		TimedOut         bool `json:"timed_out"`
-		VersionConflicts int  `json:"version_conflicts"`
+		Total            *int64 `json:"total"`
+		Updated          *int64 `json:"updated"`
+		TimedOut         bool   `json:"timed_out"`
+		VersionConflicts int    `json:"version_conflicts"`
 		Failures         []struct {
 			ID    string `json:"id"`
 			Cause struct {
@@ -38,6 +40,9 @@ func inspectByQueryResult(body io.Reader, requireComplete bool) error {
 	if requireComplete && (r.TimedOut || r.VersionConflicts != 0) {
 		return fmt.Errorf("opensearch: incomplete move (timed_out=%t, version_conflicts=%d): %w",
 			r.TimedOut, r.VersionConflicts, ErrTransport)
+	}
+	if requireComplete && (r.Total == nil || r.Updated == nil || *r.Total < 0 || *r.Updated != *r.Total) {
+		return fmt.Errorf("opensearch: incomplete move document counts: %w", ErrTransport)
 	}
 	log := logger.GetLogger(context.Background())
 	if len(r.Failures) == 0 {

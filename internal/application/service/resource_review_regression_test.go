@@ -129,7 +129,7 @@ func TestFAQCloneDoesNotInheritTransferState(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `{"custom":{"value":3}}`, string(dst.Metadata))
 	require.Equal(t, before, string(src.Metadata))
-	require.NoError(t, rejectMovingKnowledge(dst))
+	require.NoError(t, access.RejectMovingKnowledge(dst))
 }
 
 type partialCloneEngine struct {

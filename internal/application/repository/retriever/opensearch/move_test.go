@@ -14,7 +14,13 @@ func TestMoveIndicesRequiresCompleteResult(t *testing.T) {
 		name, response string
 		fails          bool
 	}{
-		{"complete", `{"updated":2,"version_conflicts":0,"failures":[]}`, false},
+		{"complete", `{"total":2,"updated":2,"version_conflicts":0,"failures":[]}`, false},
+		{"partial", `{"total":100,"updated":40,"failures":[]}`, true},
+		{"empty", `{"total":0,"updated":0,"failures":[]}`, false},
+		{"missing counts", `{"failures":[]}`, true},
+		{"missing total", `{"updated":2,"failures":[]}`, true},
+		{"missing updated", `{"total":2,"failures":[]}`, true},
+		{"negative", `{"total":-1,"updated":-1,"failures":[]}`, true},
 		{"conflict", `{"updated":1,"version_conflicts":1,"failures":[]}`, true},
 		{"timeout", `{"timed_out":true,"version_conflicts":0,"failures":[]}`, true},
 		{"failure", `{"failures":[{"id":"doc","cause":{"type":"unavailable"}}]}`, true},
@@ -42,7 +48,7 @@ func TestMoveIndicesIncludesOrphansEvenWithoutDatabaseChunks(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode move request: %v", err)
 		}
-		_, _ = w.Write([]byte(`{"updated":1,"failures":[]}`))
+		_, _ = w.Write([]byte(`{"total":1,"updated":1,"failures":[]}`))
 	})
 	defer server.Close()
 	require.NoError(t, repo.MoveKnowledgeIndices(context.Background(), "source", "target", "doc", nil, 1, "file"))

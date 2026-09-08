@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -129,7 +130,7 @@ func (s *knowledgeService) planKnowledgeDelete(ctx context.Context, ids []string
 		if isCleanup && cleanup.bindings[id] != row.KnowledgeBaseID {
 			return nil, apperrors.NewForbiddenError("cleanup resource binding changed")
 		}
-		if err := rejectMovingKnowledge(row); err != nil {
+		if err := access.RejectMovingKnowledge(row); err != nil {
 			return nil, err
 		}
 		if _, ok := plan.kbs[row.KnowledgeBaseID]; !ok {

@@ -38,7 +38,8 @@ func (e *elasticsearchRepository) MoveKnowledgeIndices(
 	if err != nil {
 		return err
 	}
-	if result == nil || (result.TimedOut != nil && *result.TimedOut) ||
+	if result == nil || result.Total == nil || result.Updated == nil ||
+		*result.Total < 0 || *result.Total != *result.Updated || (result.TimedOut != nil && *result.TimedOut) ||
 		(result.VersionConflicts != nil && *result.VersionConflicts != 0) ||
 		len(result.Failures) != 0 {
 		return fmt.Errorf("move indices was incomplete")
