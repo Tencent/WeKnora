@@ -53,16 +53,9 @@
 
 **[WeKnora（维娜拉）](https://weknora.weixin.qq.com)** 是一款开源的、基于大语言模型（LLM）的知识管理框架，专为企业级文档理解、语义检索与智能推理场景打造。
 
-<p align="center">
-  <a href="https://github.com/user-attachments/assets/2819598d-3140-4623-814a-8162a22b653c">
-    <img src="./docs/media/weknora-narrated/cover-zh-CN.jpg" alt="观看 WeKnora 产品介绍：RAG、Agent 与 Auto-Wiki，2 分 25 秒，英文旁白与中英双语字幕" width="960">
-  </a>
-</p>
-<p align="center">
-  <a href="https://github.com/user-attachments/assets/2819598d-3140-4623-814a-8162a22b653c"><b>观看产品介绍</b></a> · 2 分 25 秒 · 1080p · 英文旁白 / 中英双语字幕<br>
-  从多源接入、可溯源问答，到 Agent 技能、长期记忆、自动 Wiki、渠道集成与私有化部署。<br>
-  <a href="https://github.com/user-attachments/assets/19b28ce2-a62f-4f54-b289-c983576259bc">纯英文字幕版 / English captions</a>
-</p>
+https://github.com/user-attachments/assets/2819598d-3140-4623-814a-8162a22b653c
+
+*2 分 25 秒 · 1080p · 英文旁白，中英字幕。*
 
 框架围绕三大核心能力构建：**RAG 快速问答**适合日常知识查询，**ReAct Agent 智能推理**自主编排知识检索、MCP 工具、**技能目录**、会话级 **Docker / E2B / Cube 沙箱**与网络搜索完成复杂多步任务，全新的 **Wiki 模式**则让 Agent 从原始文档中自治生成相互链接的 Markdown 知识库与可视化知识图谱，并支持人工编辑、版本历史与一键回滚。**跨会话长期记忆**会记住你是谁、你常问什么。知识加工环节也完全可控：**树形文件夹**保留上传目录结构，**分块编辑与版本历史**让检索片段可以像文档一样被修改、比对与回滚。结合多源数据接入（飞书知识库 / 飞书云盘 / GitLab / 腾讯 IMA / Notion / 语雀 / RSS，更多持续接入中）、**网站嵌入 Widget** 将智能体发布到外部站点、**权限范围 API Key 与 Principal 模型**面向程序化集成、**每空间多实例存储后端**灵活编排数据落地、二十余家主流模型厂商集成（含 LiteLLM）、Langfuse 全链路可观测性与**运行时任务队列面板 + Worker 池治理**、**企业级多空间 RBAC（四级角色矩阵 + 资源归属 + 空间审计日志）**，以及完全可私有化部署的模块化架构，WeKnora 帮助团队把分散文档沉淀为可查询、可推理、可持续演进的专属知识资产。
 
