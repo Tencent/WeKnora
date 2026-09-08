@@ -26,6 +26,7 @@ const (
 	BuiltinDocumentAssistantID = "builtin-document-assistant"
 	// BuiltinWikiResearcherID is the ID for the built-in wiki researcher agent
 	BuiltinWikiResearcherID = "builtin-wiki-researcher"
+	BuiltinGuidedLearningID = "builtin-guided-learning"
 	// BuiltinWikiFixerID is the ID for the built-in wiki fixer agent
 	BuiltinWikiFixerID = "builtin-wiki-fixer"
 	// BuiltinSkillInstallerID is the ID for the built-in skill installer agent
@@ -583,6 +584,7 @@ var builtinAgentIDsOrdered = []string{
 	BuiltinQuickAnswerID,
 	BuiltinSmartReasoningID,
 	BuiltinWikiResearcherID,
+	BuiltinGuidedLearningID,
 	BuiltinDeepResearcherID,
 	BuiltinDataAnalystID,
 	BuiltinKnowledgeGraphExpertID,

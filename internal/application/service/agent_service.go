@@ -108,6 +108,7 @@ type agentService struct {
 	tenantService        interfaces.TenantService
 	messageService       interfaces.MessageService
 	memoryService        interfaces.MemoryService
+	learningService      interfaces.LearningService
 	storageResolver      interfaces.StorageBackendResolver
 	toolApprovalGate     approval.MCPApproval
 	sandboxMgr           sandbox.Manager
@@ -140,6 +141,7 @@ func NewAgentService(
 	sandboxResolver sandbox.TenantSandboxResolver,
 	sandboxPinner *SessionSandboxPinner,
 	sandboxPolicy WorkspaceSandboxPolicy,
+	learningService interfaces.LearningService,
 ) interfaces.AgentService {
 	return &agentService{
 		cfg:                  cfg,
@@ -158,6 +160,7 @@ func NewAgentService(
 		tenantService:        tenantService,
 		messageService:       messageService,
 		memoryService:        memoryService,
+		learningService:      learningService,
 		storageResolver:      storageResolver,
 		toolApprovalGate:     toolApprovalGate,
 		sandboxMgr:           sandboxMgr,
@@ -836,6 +839,8 @@ func (s *agentService) registerTools(
 	// ---- Capability detection from SearchTargets ----
 	var hasVectorKB bool
 	var wikiKBIDs []string
+	var learningOwnedWikiIDs []string
+	caller := types.CallerFromContext(ctx)
 	wikiRoutes := tools.NewWikiRouteResolver()
 	for _, target := range config.SearchTargets {
 		if target == nil || target.KnowledgeBaseID == "" {
@@ -850,6 +855,9 @@ func (s *agentService) registerTools(
 		}
 		if kb.IsWikiEnabled() {
 			wikiKBIDs = append(wikiKBIDs, kb.ID)
+			if kb.TenantID == caller.TenantID {
+				learningOwnedWikiIDs = append(learningOwnedWikiIDs, kb.ID)
+			}
 		}
 	}
 	wikiKBIDs = dedupStrings(wikiKBIDs)
@@ -863,6 +871,27 @@ func (s *agentService) registerTools(
 	}
 	wikiKBIDs = scopedWikiKBIDs
 	hasWikiKB := len(wikiKBIDs) > 0
+
+	learningKBIDs := tools.LearningWholeKBIDs(config.SearchTargets, learningOwnedWikiIDs)
+	learningRequested := false
+	for _, name := range allowedTools {
+		learningRequested = learningRequested || tools.IsLearningTool(name)
+	}
+	learningAllowed := learningRequested && !config.SharedAgentReadOnly && len(learningKBIDs) > 0 &&
+		s.learningService != nil && tools.LearningWebCallerAllowed(ctx)
+	if learningAllowed {
+		settings, err := s.learningService.GetSettings(ctx)
+		learningAllowed = err == nil && settings != nil && settings.Enabled
+	}
+	if !learningAllowed {
+		filtered := make([]string, 0, len(allowedTools))
+		for _, name := range allowedTools {
+			if !tools.IsLearningTool(name) {
+				filtered = append(filtered, name)
+			}
+		}
+		allowedTools = filtered
+	}
 
 	// Filter out knowledge base tools if no knowledge scope is configured for this turn.
 	hasKnowledge := agentHasKnowledgeScope(config)
@@ -1000,6 +1029,8 @@ func (s *agentService) registerTools(
 		var toolToRegister types.Tool
 
 		switch toolName {
+		case tools.ToolGetLearningProfile, tools.ToolRecommendLearningTopics, tools.ToolPrepareLearningQuiz:
+			toolToRegister = tools.NewLearningTool(toolName, s.learningService, s.wikiPageService, learningKBIDs, config.MemoryEnabled)
 		case tools.ToolThinking:
 			toolToRegister = tools.NewSequentialThinkingTool()
 		case tools.ToolTodoWrite:

@@ -2377,6 +2377,9 @@ const mcpSelectionMode = ref<'all' | 'selected' | 'none'>('none');
 // 工具的 KB 能力依赖关系统一在 `@/utils/tool-capabilities` 声明，
 // `availableTools` 通过 `evaluateToolRequirement` 读取，不在这里重复维护。
 const allTools = computed(() => [
+  { value: 'get_learning_profile', label: t('learning.tools.profile'), description: t('learning.tools.profileDesc'), group: 'wiki_read' },
+  { value: 'recommend_learning_topics', label: t('learning.tools.recommend'), description: t('learning.tools.recommendDesc'), group: 'wiki_read' },
+  { value: 'prepare_learning_quiz', label: t('learning.tools.quiz'), description: t('learning.tools.quizDesc'), group: 'wiki_read' },
   // 基础思考类
   { value: 'thinking', label: t('agentEditor.tools.thinking'), description: t('agentEditor.tools.thinkingDesc'), group: 'base' },
   { value: 'todo_write', label: t('agentEditor.tools.todoWrite'), description: t('agentEditor.tools.todoWriteDesc'), group: 'base' },

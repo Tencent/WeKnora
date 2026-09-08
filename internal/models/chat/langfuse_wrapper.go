@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -20,6 +21,9 @@ func (l *langfuseChat) GetModelName() string { return l.inner.GetModelName() }
 func (l *langfuseChat) GetModelID() string   { return l.inner.GetModelID() }
 
 func (l *langfuseChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
+	if types.LLMContentRedacted(ctx) {
+		return l.chatContentRedacted(ctx, messages, opts)
+	}
 	mgr := langfuse.GetManager()
 	if !mgr.Enabled() {
 		return l.inner.Chat(ctx, messages, opts)
@@ -54,7 +58,38 @@ func (l *langfuseChat) Chat(ctx context.Context, messages []Message, opts *ChatO
 	return resp, err
 }
 
+func (l *langfuseChat) chatContentRedacted(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
+	mgr := langfuse.GetManager()
+	if !mgr.Enabled() {
+		return l.inner.Chat(ctx, messages, opts)
+	}
+	purpose, _ := types.LLMCallMetadataFromContext(ctx)
+	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
+		Name:            "chat.completion",
+		Model:           l.inner.GetModelName(),
+		Input:           "[content redacted]",
+		ModelParameters: buildLangfuseModelParams(opts),
+		Metadata:        map[string]interface{}{"model_id": l.inner.GetModelID(), "call_purpose": purpose, "content_redacted": true},
+	})
+	resp, err := l.inner.Chat(genCtx, messages, opts)
+	var usage *langfuse.TokenUsage
+	if resp != nil {
+		usage = convertUsage(&resp.Usage)
+	}
+	var observationErr error
+	if err != nil {
+		observationErr = errors.New("model call failed (content redacted)")
+	}
+	gen.Finish("[content redacted]", usage, observationErr)
+	return resp, err
+}
+
 func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
+	// Assessment generation uses Chat. Keep the privacy restriction effective
+	// for accidental streaming callers too; no content is retained for tracing.
+	if types.LLMContentRedacted(ctx) {
+		return l.inner.ChatStream(ctx, messages, opts)
+	}
 	mgr := langfuse.GetManager()
 	if !mgr.Enabled() {
 		return l.inner.ChatStream(ctx, messages, opts)

@@ -51,6 +51,9 @@ type ToolRequirement struct {
 // as always available / file-consuming (permissive fallback: unknown MCP
 // tools shouldn't silently break).
 var ToolCapabilityRequirements = map[string]ToolRequirement{
+	ToolGetLearningProfile:      {AllOf: []KBCapability{CapWiki}},
+	ToolRecommendLearningTopics: {AllOf: []KBCapability{CapWiki}},
+	ToolPrepareLearningQuiz:     {AllOf: []KBCapability{CapWiki}},
 	// ---- base / reasoning (no KB dependency, no file consumption) ----
 	"thinking":   {},
 	"todo_write": {},

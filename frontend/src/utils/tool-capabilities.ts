@@ -41,6 +41,9 @@ export interface ToolRequirement {
 }
 
 export const TOOL_CAPABILITY_REQUIREMENTS: Record<string, ToolRequirement> = {
+  get_learning_profile: { allOf: ['wiki'] },
+  recommend_learning_topics: { allOf: ['wiki'] },
+  prepare_learning_quiz: { allOf: ['wiki'] },
   // ---- base / reasoning (no KB dependency) ----
   thinking: {},
   todo_write: {},

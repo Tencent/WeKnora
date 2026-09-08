@@ -1,0 +1,337 @@
+{
+  "schema_version": 1,
+  "id": "topic4-synthetic-v1",
+  "algorithm_version": "bkt-v1",
+  "provenance": "Explicit hand-authored synthetic fixtures, authored by the implementation assistant. No sampled users, real answer logs, generated labels, independent human annotators, or model calls. Labels were specified before running the benchmark.",
+  "label_policy": "3 = immediate priority for the stated goal; 2 = useful next practice; 1 = acceptable exploration; 0 = no immediate relevance. Recall counts every label > 0. Degrees describe a hypothetical larger Wiki, not just the candidate subset. Related links are not prerequisites.",
+  "prediction_policy": "Fixed prior 0.20; update only on the chronological training prefix. Freeze the model at the split, predict every heldout response with 0.90*p + 0.25*(1-p), and never update from heldout answers. Each observation is a distinct question on unchanged synthetic evidence.",
+  "now": "2026-09-09T12:00:00Z",
+  "topics": [
+    {"id": "a", "title": "Cache consistency", "page_type": "concept", "summary": "Invalidation and consistency examples.", "chunks": 3, "degree": 30},
+    {"id": "b", "title": "Database transactions", "page_type": "concept", "summary": "Atomic commits and rollback.", "chunks": 3, "degree": 24},
+    {"id": "c", "title": "Database indexes", "page_type": "concept", "summary": "Lookup and update costs.", "chunks": 3, "degree": 18},
+    {"id": "d", "title": "Lock contention", "page_type": "concept", "summary": "Lock ordering and deadlocks.", "chunks": 2, "degree": 15},
+    {"id": "e", "title": "PostgreSQL", "page_type": "entity", "summary": "Storage engine overview.", "chunks": 3, "degree": 12},
+    {"id": "f", "title": "Isolation level comparison", "page_type": "comparison", "summary": "Read anomalies by isolation level.", "chunks": 3, "degree": 10},
+    {"id": "g", "title": "Database recovery", "page_type": "synthesis", "summary": "Logging and recovery together.", "chunks": 3, "degree": 8},
+    {"id": "h", "title": "Bayesian learner models", "aliases": ["Knowledge tracing"], "page_type": "concept", "summary": "Latent knowledge and noisy answers.", "chunks": 3, "degree": 2},
+    {"id": "i", "title": "NDCG ranking metrics", "page_type": "concept", "summary": "Discounted graded relevance.", "chunks": 1, "degree": 3},
+    {"id": "j", "title": "Exploration strategies", "page_type": "synthesis", "summary": "Trying unfamiliar learning topics.", "chunks": 3, "degree": 1},
+    {"id": "k", "title": "GPU architecture", "page_type": "entity", "summary": "Parallel hardware execution.", "chunks": 3, "degree": 20},
+    {"id": "l", "title": "Storage format comparison", "page_type": "comparison", "summary": "", "chunks": 1, "degree": 4}
+  ],
+  "states": [
+    {
+      "id": "unseen",
+      "why": "No personal evidence starts at the fixed prior.",
+      "current_source_stamp": "v1",
+      "mastery": null,
+      "familiar": false,
+      "expected": {"state": "unseen", "p_mastery": 0.2, "attempts": 0, "correct": 0, "consecutive_correct": 0, "source_stale": false}
+    },
+    {
+      "id": "read_only",
+      "why": "Reading marks familiarity without an assessed answer.",
+      "current_source_stamp": "v1",
+      "mastery": {"p_mastery": 0.2, "attempts": 0, "correct": 0, "consecutive_correct": 0, "viewed_at": "2026-09-08T12:00:00Z", "source_stamp": "v1"},
+      "familiar": true,
+      "expected": {"state": "unseen", "p_mastery": 0.2, "attempts": 0, "correct": 0, "consecutive_correct": 0, "source_stale": false}
+    },
+    {
+      "id": "uncredited_high",
+      "why": "An uncredited stored probability cannot replace the prior; this is a boundary snapshot, not a fitted learner.",
+      "current_source_stamp": "v1",
+      "mastery": {"p_mastery": 0.99, "attempts": 0, "correct": 0, "consecutive_correct": 0, "source_stamp": "v0"},
+      "familiar": false,
+      "expected": {"state": "unseen", "p_mastery": 0.2, "attempts": 0, "correct": 0, "consecutive_correct": 0, "source_stale": false}
+    },
+    {
+      "id": "learning",
+      "why": "One correct distinct answer is practice evidence, not mastery.",
+      "current_source_stamp": "v1",
+      "mastery": {"p_mastery": 0.5526315789473684, "attempts": 1, "correct": 1, "consecutive_correct": 1, "last_assessed_at": "2026-09-08T12:00:00Z", "next_review_at": "2026-09-10T12:00:00Z", "source_stamp": "v1"},
+      "familiar": false,
+      "expected": {"state": "learning", "p_mastery": 0.5526315789473684, "attempts": 1, "correct": 1, "consecutive_correct": 1, "last_assessed_at": "2026-09-08T12:00:00Z", "next_review_at": "2026-09-10T12:00:00Z", "source_stale": false}
+    },
+    {
+      "id": "too_few",
+      "why": "The three-answer gate holds even with a high stored probability; this deliberately tests the boundary.",
+      "current_source_stamp": "v1",
+      "mastery": {"p_mastery": 0.95, "attempts": 2, "correct": 2, "consecutive_correct": 2, "source_stamp": "v1"},
+      "familiar": false,
+      "expected": {"state": "learning", "p_mastery": 0.95, "attempts": 2, "correct": 2, "consecutive_correct": 2, "source_stale": false}
+    },
+    {
+      "id": "mastered",
+      "why": "Three correct answers and a future review meet the model's mastery rule.",
+      "current_source_stamp": "v1",
+      "mastery": {"p_mastery": 0.9584756076946482, "attempts": 3, "correct": 3, "consecutive_correct": 3, "last_assessed_at": "2026-09-08T12:00:00Z", "next_review_at": "2026-09-15T12:00:00Z", "source_stamp": "v1"},
+      "familiar": false,
+      "expected": {"state": "mastered", "p_mastery": 0.9584756076946482, "attempts": 3, "correct": 3, "consecutive_correct": 3, "last_assessed_at": "2026-09-08T12:00:00Z", "next_review_at": "2026-09-15T12:00:00Z", "source_stale": false}
+    },
+    {
+      "id": "due",
+      "why": "The exact review deadline is due, even for a previously mastered topic.",
+      "current_source_stamp": "v1",
+      "mastery": {"p_mastery": 0.9584756076946482, "attempts": 3, "correct": 3, "consecutive_correct": 3, "last_assessed_at": "2026-09-02T12:00:00Z", "next_review_at": "2026-09-09T12:00:00Z", "source_stamp": "v1"},
+      "familiar": false,
+      "expected": {"state": "review_due", "p_mastery": 0.9584756076946482, "attempts": 3, "correct": 3, "consecutive_correct": 3, "last_assessed_at": "2026-09-02T12:00:00Z", "next_review_at": "2026-09-09T12:00:00Z", "source_stale": false}
+    },
+    {
+      "id": "stale",
+      "why": "Changed evidence invalidates current mastery credit but preserves reading familiarity.",
+      "current_source_stamp": "v2",
+      "mastery": {"p_mastery": 0.9584756076946482, "attempts": 3, "correct": 3, "consecutive_correct": 3, "viewed_at": "2026-09-08T12:00:00Z", "last_assessed_at": "2026-09-08T12:00:00Z", "next_review_at": "2026-09-15T12:00:00Z", "source_stamp": "v1"},
+      "familiar": true,
+      "expected": {"state": "review_due", "p_mastery": 0.2, "attempts": 3, "correct": 3, "consecutive_correct": 0, "last_assessed_at": "2026-09-08T12:00:00Z", "next_review_at": "2026-09-15T12:00:00Z", "source_stale": true}
+    },
+    {
+      "id": "missing",
+      "why": "Missing current evidence cannot retain previously credited mastery.",
+      "current_source_stamp": "",
+      "mastery": {"p_mastery": 0.9584756076946482, "attempts": 3, "correct": 3, "consecutive_correct": 3, "last_assessed_at": "2026-09-08T12:00:00Z", "next_review_at": "2026-09-15T12:00:00Z", "source_stamp": "v1"},
+      "familiar": false,
+      "expected": {"state": "review_due", "p_mastery": 0.2, "attempts": 3, "correct": 3, "consecutive_correct": 0, "last_assessed_at": "2026-09-08T12:00:00Z", "next_review_at": "2026-09-15T12:00:00Z", "source_stale": true}
+    }
+  ],
+  "ranking_cases": [
+    {
+      "id": "due_review_priority",
+      "goal": "Review due database material before already-mastered high-degree hubs; allow one unfamiliar database overview.",
+      "interests": [],
+      "candidates": [
+        {"topic": "a", "state": "mastered", "related": false, "relevance": 0, "why": "Already mastered; not due."},
+        {"topic": "b", "state": "due", "related": false, "relevance": 3, "why": "Core transaction review is due."},
+        {"topic": "c", "state": "learning", "related": false, "relevance": 2, "why": "Unfinished index practice."},
+        {"topic": "d", "state": "due", "related": false, "relevance": 3, "why": "Core contention review is due."},
+        {"topic": "e", "state": "unseen", "related": false, "relevance": 1, "why": "Acceptable unfamiliar database overview."},
+        {"topic": "f", "state": "due", "related": false, "relevance": 3, "why": "Core isolation review is due."},
+        {"topic": "g", "state": "due", "related": false, "relevance": 2, "why": "Useful due recovery recap."},
+        {"topic": "k", "state": "mastered", "related": false, "relevance": 0, "why": "Unrelated mastered hardware topic."}
+      ]
+    },
+    {
+      "id": "related_frontier",
+      "goal": "After transaction practice, explore linked database topics; links express relatedness only.",
+      "interests": [],
+      "candidates": [
+        {"topic": "a", "state": "read_only", "related": false, "relevance": 0, "why": "Read but outside this transaction-focused neighborhood."},
+        {"topic": "b", "state": "mastered", "related": false, "relevance": 0, "why": "Recently completed starting topic."},
+        {"topic": "c", "state": "read_only", "related": true, "relevance": 2, "why": "Useful related database mechanism."},
+        {"topic": "d", "state": "read_only", "related": true, "relevance": 3, "why": "Contention is central to this next-step goal."},
+        {"topic": "e", "state": "mastered", "related": false, "relevance": 0, "why": "Overview already mastered."},
+        {"topic": "f", "state": "read_only", "related": true, "relevance": 3, "why": "Isolation is central to this next-step goal."},
+        {"topic": "g", "state": "read_only", "related": true, "relevance": 2, "why": "Recovery connects related ideas."},
+        {"topic": "k", "state": "unseen", "related": false, "relevance": 0, "why": "Unfamiliar hardware is outside the stated goal."}
+      ]
+    },
+    {
+      "id": "optional_interest_on",
+      "goal": "Study adaptive learning and its evaluation; optional interests are available. The paired off case keeps the same relevance labels.",
+      "interests": ["  KNOWLEDGE   TRACING  ", "ranking metrics"],
+      "candidates": [
+        {"topic": "a", "state": "unseen", "related": false, "relevance": 0, "why": "Unrelated cache topic."},
+        {"topic": "b", "state": "unseen", "related": false, "relevance": 1, "why": "Acceptable storage background for practice records."},
+        {"topic": "e", "state": "unseen", "related": false, "relevance": 0, "why": "Database product overview is not needed now."},
+        {"topic": "g", "state": "unseen", "related": false, "relevance": 0, "why": "Recovery is not part of this goal."},
+        {"topic": "h", "state": "unseen", "related": false, "relevance": 3, "why": "Knowledge tracing directly addresses the goal."},
+        {"topic": "i", "state": "unseen", "related": false, "relevance": 3, "why": "Ranking evaluation directly addresses the goal."},
+        {"topic": "j", "state": "unseen", "related": true, "relevance": 2, "why": "Related exploration strategy is useful."},
+        {"topic": "k", "state": "unseen", "related": false, "relevance": 0, "why": "Unrelated hardware topic."}
+      ]
+    },
+    {
+      "id": "optional_interest_off",
+      "goal": "The same adaptive-learning objective with memory unavailable; interests are omitted without relabeling candidates.",
+      "interests": [],
+      "candidates": [
+        {"topic": "a", "state": "unseen", "related": false, "relevance": 0, "why": "Unrelated cache topic."},
+        {"topic": "b", "state": "unseen", "related": false, "relevance": 1, "why": "Acceptable storage background for practice records."},
+        {"topic": "e", "state": "unseen", "related": false, "relevance": 0, "why": "Database product overview is not needed now."},
+        {"topic": "g", "state": "unseen", "related": false, "relevance": 0, "why": "Recovery is not part of this goal."},
+        {"topic": "h", "state": "unseen", "related": false, "relevance": 3, "why": "Knowledge tracing directly addresses the goal."},
+        {"topic": "i", "state": "unseen", "related": false, "relevance": 3, "why": "Ranking evaluation directly addresses the goal."},
+        {"topic": "j", "state": "unseen", "related": true, "relevance": 2, "why": "Related exploration strategy is useful."},
+        {"topic": "k", "state": "unseen", "related": false, "relevance": 0, "why": "Unrelated hardware topic."}
+      ]
+    },
+    {
+      "id": "exploration_slot",
+      "goal": "Balance six due database reviews with unfamiliar synthesis topics. Due work has higher immediate relevance than exploration.",
+      "interests": [],
+      "candidates": [
+        {"topic": "a", "state": "due", "related": false, "relevance": 3, "why": "Immediate cache review."},
+        {"topic": "b", "state": "due", "related": false, "relevance": 3, "why": "Immediate transaction review."},
+        {"topic": "c", "state": "due", "related": false, "relevance": 2, "why": "Useful due index review."},
+        {"topic": "d", "state": "due", "related": false, "relevance": 2, "why": "Useful due contention review."},
+        {"topic": "e", "state": "due", "related": false, "relevance": 2, "why": "Useful due engine overview."},
+        {"topic": "f", "state": "due", "related": false, "relevance": 2, "why": "Useful due isolation comparison."},
+        {"topic": "g", "state": "unseen", "related": false, "relevance": 1, "why": "Acceptable unfamiliar synthesis."},
+        {"topic": "j", "state": "unseen", "related": false, "relevance": 2, "why": "Useful exploration strategy for the stated balance."}
+      ]
+    },
+    {
+      "id": "freshness_reset",
+      "goal": "Reassess database material whose source changed or disappeared; current mastered topics need no immediate repetition.",
+      "interests": [],
+      "candidates": [
+        {"topic": "a", "state": "mastered", "related": false, "relevance": 0, "why": "Current and mastered."},
+        {"topic": "b", "state": "stale", "related": false, "relevance": 3, "why": "Changed transaction evidence needs reassessment."},
+        {"topic": "c", "state": "missing", "related": false, "relevance": 3, "why": "Missing index evidence requires revisiting the topic, not accepting old credit."},
+        {"topic": "d", "state": "learning", "related": true, "relevance": 2, "why": "Related unfinished practice remains useful."},
+        {"topic": "e", "state": "read_only", "related": false, "relevance": 1, "why": "Reading alone leaves room for first practice."},
+        {"topic": "f", "state": "mastered", "related": false, "relevance": 0, "why": "Current and mastered."},
+        {"topic": "g", "state": "unseen", "related": false, "relevance": 1, "why": "Acceptable new database synthesis."},
+        {"topic": "l", "state": "unseen", "related": false, "relevance": 0, "why": "Sparse format comparison is not useful now."}
+      ]
+    },
+    {
+      "id": "cold_start",
+      "goal": "A new learner wants general storage foundations without personal signals. Cache, transactions and indexes are more immediate than broad synthesis.",
+      "interests": [],
+      "candidates": [
+        {"topic": "a", "state": "unseen", "related": false, "relevance": 3, "why": "Core cache foundation."},
+        {"topic": "b", "state": "unseen", "related": false, "relevance": 3, "why": "Core transaction foundation."},
+        {"topic": "c", "state": "unseen", "related": false, "relevance": 2, "why": "Useful index foundation."},
+        {"topic": "d", "state": "unseen", "related": false, "relevance": 2, "why": "Useful contention foundation."},
+        {"topic": "e", "state": "unseen", "related": false, "relevance": 2, "why": "Useful engine overview."},
+        {"topic": "f", "state": "unseen", "related": false, "relevance": 1, "why": "Acceptable comparison after foundations."},
+        {"topic": "g", "state": "unseen", "related": false, "relevance": 1, "why": "Acceptable synthesis after foundations."},
+        {"topic": "k", "state": "unseen", "related": false, "relevance": 0, "why": "Hardware is outside the goal."}
+      ]
+    },
+    {
+      "id": "kind_diversity_tradeoff",
+      "goal": "A focused review session values due concepts over already-mastered pages of other kinds; page-kind diversity has no relevance credit by itself.",
+      "interests": [],
+      "candidates": [
+        {"topic": "a", "state": "due", "related": false, "relevance": 3, "why": "Immediate due concept."},
+        {"topic": "b", "state": "due", "related": false, "relevance": 3, "why": "Immediate due concept."},
+        {"topic": "c", "state": "due", "related": false, "relevance": 2, "why": "Useful due concept."},
+        {"topic": "d", "state": "due", "related": false, "relevance": 2, "why": "Useful due concept."},
+        {"topic": "e", "state": "mastered", "related": false, "relevance": 0, "why": "Mastered entity adds no immediate value."},
+        {"topic": "f", "state": "mastered", "related": false, "relevance": 0, "why": "Mastered comparison adds no immediate value."},
+        {"topic": "g", "state": "mastered", "related": false, "relevance": 0, "why": "Mastered synthesis adds no immediate value."},
+        {"topic": "h", "state": "learning", "related": false, "relevance": 1, "why": "Acceptable unfinished practice, below due concepts."}
+      ]
+    }
+  ],
+  "prediction_cases": [
+    {
+      "id": "steady_success",
+      "why": "Repeated successful training followed by successful heldout answers.",
+      "source_stamp": "v1",
+      "train": [
+        {"question_id": "q1", "at": "2026-09-01T12:00:00Z", "correct": true},
+        {"question_id": "q2", "at": "2026-09-02T12:00:00Z", "correct": true},
+        {"question_id": "q3", "at": "2026-09-03T12:00:00Z", "correct": true}
+      ],
+      "heldout": [
+        {"question_id": "q4", "at": "2026-09-04T12:00:00Z", "correct": true},
+        {"question_id": "q5", "at": "2026-09-05T12:00:00Z", "correct": true},
+        {"question_id": "q6", "at": "2026-09-06T12:00:00Z", "correct": true}
+      ]
+    },
+    {
+      "id": "early_errors_then_success",
+      "why": "Improvement after early mistakes; no claim about real learning transitions.",
+      "source_stamp": "v1",
+      "train": [
+        {"question_id": "q1", "at": "2026-09-01T12:00:00Z", "correct": false},
+        {"question_id": "q2", "at": "2026-09-02T12:00:00Z", "correct": false},
+        {"question_id": "q3", "at": "2026-09-03T12:00:00Z", "correct": true}
+      ],
+      "heldout": [
+        {"question_id": "q4", "at": "2026-09-04T12:00:00Z", "correct": true},
+        {"question_id": "q5", "at": "2026-09-05T12:00:00Z", "correct": false},
+        {"question_id": "q6", "at": "2026-09-06T12:00:00Z", "correct": true}
+      ]
+    },
+    {
+      "id": "persistent_errors",
+      "why": "The chance baseline can beat a model with a positive learning transition.",
+      "source_stamp": "v1",
+      "train": [
+        {"question_id": "q1", "at": "2026-09-01T12:00:00Z", "correct": false},
+        {"question_id": "q2", "at": "2026-09-02T12:00:00Z", "correct": false},
+        {"question_id": "q3", "at": "2026-09-03T12:00:00Z", "correct": false}
+      ],
+      "heldout": [
+        {"question_id": "q4", "at": "2026-09-04T12:00:00Z", "correct": false},
+        {"question_id": "q5", "at": "2026-09-05T12:00:00Z", "correct": false},
+        {"question_id": "q6", "at": "2026-09-06T12:00:00Z", "correct": false}
+      ]
+    },
+    {
+      "id": "success_then_reversal",
+      "why": "A deliberately adverse trace: high training success does not guarantee heldout success.",
+      "source_stamp": "v1",
+      "train": [
+        {"question_id": "q1", "at": "2026-09-01T12:00:00Z", "correct": true},
+        {"question_id": "q2", "at": "2026-09-02T12:00:00Z", "correct": true},
+        {"question_id": "q3", "at": "2026-09-03T12:00:00Z", "correct": true}
+      ],
+      "heldout": [
+        {"question_id": "q4", "at": "2026-09-04T12:00:00Z", "correct": false},
+        {"question_id": "q5", "at": "2026-09-05T12:00:00Z", "correct": false},
+        {"question_id": "q6", "at": "2026-09-06T12:00:00Z", "correct": false}
+      ]
+    },
+    {
+      "id": "mixed_recovery",
+      "why": "Alternating training evidence followed by two successes and an error.",
+      "source_stamp": "v1",
+      "train": [
+        {"question_id": "q1", "at": "2026-09-01T12:00:00Z", "correct": true},
+        {"question_id": "q2", "at": "2026-09-02T12:00:00Z", "correct": false},
+        {"question_id": "q3", "at": "2026-09-03T12:00:00Z", "correct": true}
+      ],
+      "heldout": [
+        {"question_id": "q4", "at": "2026-09-04T12:00:00Z", "correct": true},
+        {"question_id": "q5", "at": "2026-09-05T12:00:00Z", "correct": true},
+        {"question_id": "q6", "at": "2026-09-06T12:00:00Z", "correct": false}
+      ]
+    },
+    {
+      "id": "mixed_difficulty",
+      "why": "Alternating training evidence followed by mostly wrong answers.",
+      "source_stamp": "v1",
+      "train": [
+        {"question_id": "q1", "at": "2026-09-01T12:00:00Z", "correct": false},
+        {"question_id": "q2", "at": "2026-09-02T12:00:00Z", "correct": true},
+        {"question_id": "q3", "at": "2026-09-03T12:00:00Z", "correct": false}
+      ],
+      "heldout": [
+        {"question_id": "q4", "at": "2026-09-04T12:00:00Z", "correct": false},
+        {"question_id": "q5", "at": "2026-09-05T12:00:00Z", "correct": true},
+        {"question_id": "q6", "at": "2026-09-06T12:00:00Z", "correct": false}
+      ]
+    },
+    {
+      "id": "no_history",
+      "why": "An empty training prefix must predict the fixed prior response chance.",
+      "source_stamp": "v1",
+      "train": [],
+      "heldout": [
+        {"question_id": "q1", "at": "2026-09-04T12:00:00Z", "correct": true},
+        {"question_id": "q2", "at": "2026-09-05T12:00:00Z", "correct": false},
+        {"question_id": "q3", "at": "2026-09-06T12:00:00Z", "correct": false}
+      ]
+    },
+    {
+      "id": "errors_then_reversal",
+      "why": "A second adverse trace: training mistakes followed by all heldout successes.",
+      "source_stamp": "v1",
+      "train": [
+        {"question_id": "q1", "at": "2026-09-01T12:00:00Z", "correct": false},
+        {"question_id": "q2", "at": "2026-09-02T12:00:00Z", "correct": false},
+        {"question_id": "q3", "at": "2026-09-03T12:00:00Z", "correct": false}
+      ],
+      "heldout": [
+        {"question_id": "q4", "at": "2026-09-04T12:00:00Z", "correct": true},
+        {"question_id": "q5", "at": "2026-09-05T12:00:00Z", "correct": true},
+        {"question_id": "q6", "at": "2026-09-06T12:00:00Z", "correct": true}
+      ]
+    }
+  ]
+}

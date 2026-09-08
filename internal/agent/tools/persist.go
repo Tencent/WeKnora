@@ -292,6 +292,12 @@ func compactToolSummary(success bool, errMsg string, data map[string]interface{}
 		return "Error: tool call failed"
 	}
 	switch stringField(data, "display_type") {
+	case "learning_quiz":
+		return "Prepared a personal quiz card. Fetch current state in the learning interface; no answer key is available to the Agent."
+	case "learning_profile":
+		return "Read a learning overview. Refresh the profile before making new mastery claims."
+	case "learning_recommendations":
+		return "Retrieved evidence-based learning recommendations. Refresh them before choosing a new topic."
 	case "knowledge_chunks_list":
 		title := stringField(data, "knowledge_title")
 		if title == "" {

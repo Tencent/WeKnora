@@ -91,6 +91,19 @@ const validTabs = ['documents', 'wiki', 'graph'] as const
 type KbTab = typeof validTabs[number]
 const initTab = validTabs.includes(route.query.tab as any) ? (route.query.tab as KbTab) : 'documents'
 const activeKbTab = ref<KbTab>(initTab);
+const narrowWikiViewport = ref(false);
+let wikiViewport: MediaQueryList | undefined;
+const updateWikiViewport = () => { narrowWikiViewport.value = wikiViewport?.matches === true; };
+onMounted(() => {
+  wikiViewport = window.matchMedia('(max-width: 760px)');
+  updateWikiViewport();
+  wikiViewport.addEventListener('change', updateWikiViewport);
+});
+onUnmounted(() => wikiViewport?.removeEventListener('change', updateWikiViewport));
+watch([narrowWikiViewport, isWiki, activeKbTab], ([narrow, wiki, tab]) => {
+  // Keep desktop preference in storage; only the current narrow view collapses.
+  if (narrow && wiki && tab !== 'documents') uiStore.sidebarCollapsed = true;
+}, { immediate: true });
 
 // Wiki 状态用于面包屑上的索引中指示。父组件自行拉取，避免依赖 WikiBrowser 挂载状态
 // （用户切到"文档" tab 时 WikiBrowser 会卸载，这里仍需持续反映后台索引进度）。
@@ -275,6 +288,9 @@ const currentSharedKb = computed(() =>
 // active switcher rather than "how this KB became visible to me". Presence
 // in the share list is the authoritative signal.
 const isViaShare = computed(() => !!currentSharedKb.value);
+const learningAvailable = computed(() => authStore.isLoggedIn && !isViaShare.value
+  && kbInfo.value?.id === kbId.value
+  && String(kbInfo.value?.tenant_id || '') === String(authStore.effectiveTenantId || ''));
 
 // Can edit: when accessed via an organization share, ONLY the share grant
 // counts — even if the current user happens to be the original creator of
@@ -2326,7 +2342,7 @@ async function createNewSession(value: string): Promise<void> {
 
 <template>
   <template v-if="!isFAQ">
-    <div class="knowledge-layout">
+    <div class="knowledge-layout" :class="{ 'knowledge-layout--wiki': isWiki && activeKbTab !== 'documents' }">
       <div class="document-header">
         <div class="document-header-title">
           <div class="document-title-row">
@@ -2391,8 +2407,8 @@ async function createNewSession(value: string): Promise<void> {
               </t-tooltip>
             </div>
           </div>
-          <p class="document-subtitle">{{ $t('knowledgeEditor.document.subtitle') }}</p>
-          <p v-if="unsupportedFileTypes.length" class="parser-hint" @click="goToParserSettings">
+          <p v-if="activeKbTab === 'documents' || !isWiki" class="document-subtitle">{{ $t('knowledgeEditor.document.subtitle') }}</p>
+          <p v-if="unsupportedFileTypes.length && (activeKbTab === 'documents' || !isWiki)" class="parser-hint" @click="goToParserSettings">
             <t-icon name="info-circle" class="parser-hint-icon" />
             <span>{{$t('knowledgeBase.unsupportedTypesHint', {
               types: unsupportedFileTypes.map(t => '.' + t).join('、')
@@ -2410,7 +2426,8 @@ async function createNewSession(value: string): Promise<void> {
 
       <!-- Wiki Browser / Graph (shown when wiki or graph tab is active) -->
       <div v-if="isWiki && (activeKbTab === 'wiki' || activeKbTab === 'graph')" class="wiki-main-area">
-        <WikiBrowser v-if="kbId" :knowledge-base-id="kbId" :view="activeKbTab === 'graph' ? 'graph' : 'browser'"
+        <WikiBrowser v-if="kbId" :key="`${authStore.effectiveTenantId}:${authStore.currentUserId}:${kbId}`"
+          :knowledge-base-id="kbId" :view="activeKbTab === 'graph' ? 'graph' : 'browser'" :learning-available="learningAvailable"
           :can-edit="canEdit" @open-source-doc="openSourceDoc" @status-change="onWikiStatusChange"
           @view-graph="onViewWikiInGraph" />
       </div>
@@ -2857,6 +2874,18 @@ async function createNewSession(value: string): Promise<void> {
   margin: 0 6px;
   color: var(--td-text-color-disabled);
   font-weight: 400;
+}
+
+@media (max-width: 760px) {
+  .knowledge-layout.knowledge-layout--wiki { width: 100%; min-width: 0; margin: 0; padding: 12px 10px 0; gap: 12px; }
+  .knowledge-layout--wiki .document-header, .knowledge-layout--wiki .document-header-title,
+  .knowledge-layout--wiki .document-title-row { min-width: 0; max-width: 100%; width: 100%; }
+  .knowledge-layout--wiki .document-breadcrumb { flex-wrap: wrap; min-width: 0; max-width: 100%; font-size: 14px; line-height: 22px; gap: 6px; }
+  .knowledge-layout--wiki .breadcrumb-link { min-width: 0; max-width: 100%; margin: 0; padding: 0; text-align: left; }
+  .knowledge-layout--wiki .breadcrumb-link span { min-width: 0; overflow-wrap: anywhere; }
+  .knowledge-layout--wiki .document-breadcrumb :deep(.t-dropdown),
+  .knowledge-layout--wiki .document-breadcrumb :deep(.t-popup__reference) { min-width: 0; max-width: 100%; }
+  .knowledge-layout--wiki .kb-title-actions { margin-left: 0; }
 }
 
 .wiki-main-area {

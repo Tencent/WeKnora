@@ -59,6 +59,18 @@ type toolHandlePolicy struct {
 // alone are deliberately insufficient: a dynamic MCP tool may use the same
 // name with unrelated semantics and must remain opaque.
 var toolHandlePolicies = map[string]toolHandlePolicy{
+	"get_learning_profile": {
+		sourceIDKeys: map[string]struct{}{"knowledge_base_id": {}},
+		sourceOutput: true,
+	},
+	"recommend_learning_topics": {
+		sourceIDKeys: map[string]struct{}{"knowledge_base_id": {}},
+		sourceOutput: true,
+	},
+	"prepare_learning_quiz": {
+		sourceIDKeys: map[string]struct{}{"knowledge_base_id": {}},
+		sourceOutput: true,
+	},
 	"discover_mcp_tools": {opaqueOutput: true},
 	"call_mcp_tool":      {opaqueOutput: true},
 	"read_file":          {},

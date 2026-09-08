@@ -28,6 +28,30 @@
 # drift that used to plague this file.
 
 agent_type_presets:
+  - id: "guided-learning"
+    i18n:
+      default: {label: "Guided Learning", description: "Source-backed practice and personal Wiki learning recommendations."}
+      zh-CN: {label: "引导式学习", description: "基于来源的测验与个人 Wiki 学习推荐。"}
+      zh-TW: {label: "引導式學習", description: "依據來源的測驗與個人 Wiki 學習建議。"}
+      ja-JP: {label: "学習ガイド", description: "出典に基づく練習と個人向けWiki学習提案。"}
+      ko-KR: {label: "학습 가이드", description: "출처 기반 연습과 개인별 Wiki 학습 추천."}
+      ru-RU: {label: "Учебный помощник", description: "Практика и персональные рекомендации по Wiki."}
+    config:
+      system_prompt_id: "guided_learning"
+      temperature: 0.2
+      max_iterations: 12
+      kb_selection_mode: "selected"
+      web_search_enabled: false
+      allowed_tools:
+        - "get_learning_profile"
+        - "recommend_learning_topics"
+        - "prepare_learning_quiz"
+        - "wiki_search"
+        - "wiki_read_page"
+        - "wiki_read_source_doc"
+    kb_filter:
+      all_of: ["wiki"]
+
   # --------------------------------------------------------------------------
   # RAG Q&A — classic evidence-based retrieval over chunk indexes.
   # Best for document / FAQ KBs without wiki.

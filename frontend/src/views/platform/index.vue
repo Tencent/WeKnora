@@ -251,6 +251,24 @@ onUnmounted(() => {
     overflow: hidden;
 }
 
+@media (max-width: 760px) {
+    .main:has(.wiki-main-area) {
+        min-width: 0;
+        width: 100%;
+        position: relative;
+    }
+    .main:has(.wiki-main-area) > .aside_box:not(.aside_box--collapsed) {
+        position: absolute;
+        inset: 0 auto 0 0;
+        z-index: 200;
+        max-width: calc(100% - 48px);
+        min-width: 0;
+    }
+    .main:has(.wiki-main-area) > .aside_box:not(.aside_box--collapsed) + .platform-route-outlet {
+        margin-left: 60px;
+    }
+}
+
 .upload-mask {
     background-color: rgba(255, 255, 255, 0.8);
     position: fixed;
