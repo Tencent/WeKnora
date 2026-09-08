@@ -1,15 +1,30 @@
 import type { ComposerTranslation } from 'vue-i18n'
 
+const discoveryFields = [
+  'mode', 'servers', 'tools', 'total', 'has_more', 'next_cursor', 'next_step',
+  'notice', 'status', 'name', 'description', 'input_schema', 'tool_ref', 'server_id',
+] as const
+
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown> : {}
 }
 
+function discoveryOverlay(data?: unknown): Record<string, unknown> {
+  const extra = record(data)
+  const overlay: Record<string, unknown> = {}
+  for (const key of discoveryFields) {
+    if (key in extra) overlay[key] = extra[key]
+  }
+  return overlay
+}
+
 // Discovery historically stored its complete JSON in output, without tool_data.
+// Live SSE copies the whole event envelope onto tool_data; only merge catalog fields.
 export function parseMcpDiscovery(output?: string, data?: unknown): Record<string, unknown> {
   let parsed = {}
   try { parsed = record(JSON.parse(output || '')) } catch { /* Error or truncated historical output. */ }
-  return { ...parsed, ...record(data) }
+  return { ...parsed, ...discoveryOverlay(data) }
 }
 
 export function mcpDiscoveryRows(data: Record<string, unknown>) {
@@ -50,6 +65,11 @@ export function getMcpToolDisplayType(toolName?: string): 'mcp_discovery' | 'mcp
   if (toolName === 'discover_mcp_tools') return 'mcp_discovery'
   if (toolName === 'call_mcp_tool') return 'mcp_call'
   return undefined
+}
+
+export function mcpToolResultOutput(event: { tool_name?: string; output?: string; error?: string }): string | undefined {
+  if (!getMcpToolDisplayType(event.tool_name)) return event.output
+  return event.output || event.error
 }
 
 export function getMcpToolTitle(t: ComposerTranslation, event: {

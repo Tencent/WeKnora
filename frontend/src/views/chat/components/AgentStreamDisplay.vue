@@ -212,7 +212,7 @@
                     class="action-details">
                     <div v-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                       <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
-                        :output="event.output || event.error" :arguments="event.arguments" :success="event.success" />
+                        :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                     </div>
                     <div v-else-if="event.output" class="tool-output-wrapper">
                       <div class="fallback-header">
@@ -501,7 +501,7 @@
                   class="action-details">
                   <div v-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                     <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
-                      :output="event.output || event.error" :arguments="event.arguments" :success="event.success" />
+                      :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                   </div>
 
                   <div v-else-if="event.output" class="tool-output-wrapper">
@@ -625,6 +625,7 @@ import {
 import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
+import { getMcpToolDisplayType, getMcpToolTitle, mcpToolResultOutput } from '@/utils/mcpToolDisplay';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
 import {
   formatToolTitleWithDetail,
@@ -674,8 +675,6 @@ const authStore = useAuthStore();
 const { t } = useI18n();
 
 ensureMermaidInitialized();
-
-import { getMcpToolDisplayType, getMcpToolTitle } from '@/utils/mcpToolDisplay';
 
 const TOOL_NAME_KEYS: Record<string, string> = {
   discover_mcp_tools: 'agentStream.mcp.discoverTools',

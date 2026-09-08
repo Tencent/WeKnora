@@ -330,6 +330,29 @@ const messages = {
         "resumeFailed": "恢复执行失败，请重试",
         "skipFailed": "跳过失败，请重试"
       },
+      "mcp": {
+        "discoverTools": "发现 MCP 工具",
+        "listServers": "查看 MCP 服务",
+        "listTools": "查看 MCP 工具",
+        "searchTools": "搜索 MCP 工具",
+        "describeTool": "读取工具定义",
+        "callTool": "调用 MCP 工具",
+        "showing": "已显示 {count} / {total} 项",
+        "moreAvailable": "还有更多结果",
+        "required": "必填",
+        "fullSchema": "完整参数定义",
+        "failed": "MCP 操作失败",
+        "result": "执行结果",
+        "status": {
+          "not_loaded": "未加载",
+          "loading": "加载中",
+          "ready": "可用",
+          "needs_auth": "需要授权",
+          "error": "连接失败",
+          "disabled": "已禁用",
+          "unavailable": "不可用"
+        }
+      },
       "tools": {
         "searchKnowledge": "知识库检索",
         "grepChunks": "搜索关键词",
@@ -868,6 +891,29 @@ const messages = {
         "startFailed": "認可の開始に失敗しました",
         "resumeFailed": "再開に失敗しました。再試行してください。",
         "skipFailed": "スキップに失敗しました。再試行してください。"
+      },
+      "mcp": {
+        "discoverTools": "MCP ツールを検出",
+        "listServers": "MCP サービス一覧",
+        "listTools": "MCP ツール一覧",
+        "searchTools": "MCP ツールを検索",
+        "describeTool": "ツール定義を確認",
+        "callTool": "MCP ツールを実行",
+        "showing": "{total} 件中 {count} 件を表示",
+        "moreAvailable": "他にも結果があります",
+        "required": "必須",
+        "fullSchema": "完全なパラメータ定義",
+        "failed": "MCP 操作に失敗しました",
+        "result": "実行結果",
+        "status": {
+          "not_loaded": "未読み込み",
+          "loading": "読み込み中",
+          "ready": "利用可能",
+          "needs_auth": "認証が必要",
+          "error": "接続失敗",
+          "disabled": "無効",
+          "unavailable": "利用不可"
+        }
       },
       "tools": {
         "searchKnowledge": "ナレッジベース検索",
@@ -1408,6 +1454,29 @@ const messages = {
         "resumeFailed": "Failed to resume. Please try again.",
         "skipFailed": "Failed to skip. Please try again."
       },
+      "mcp": {
+        "discoverTools": "Discover MCP tools",
+        "listServers": "List MCP services",
+        "listTools": "List MCP tools",
+        "searchTools": "Search MCP tools",
+        "describeTool": "Read tool definition",
+        "callTool": "Call MCP tool",
+        "showing": "Showing {count} of {total}",
+        "moreAvailable": "More results available",
+        "required": "Required",
+        "fullSchema": "Full parameter definition",
+        "failed": "MCP operation failed",
+        "result": "Result",
+        "status": {
+          "not_loaded": "Not loaded",
+          "loading": "Loading",
+          "ready": "Ready",
+          "needs_auth": "Authorization required",
+          "error": "Connection failed",
+          "disabled": "Disabled",
+          "unavailable": "Unavailable"
+        }
+      },
       "tools": {
         "searchKnowledge": "Knowledge Search",
         "grepChunks": "Text Pattern Search",
@@ -1731,6 +1800,29 @@ const koEmbedPublish = {
       resumeFailed: '실행 재개 실패, 다시 시도하세요',
       skipFailed: '건너뛰기 실패, 다시 시도하세요',
     },
+    mcp: {
+      discoverTools: 'MCP 도구 탐색',
+      listServers: 'MCP 서비스 목록',
+      listTools: 'MCP 도구 목록',
+      searchTools: 'MCP 도구 검색',
+      describeTool: '도구 정의 읽기',
+      callTool: 'MCP 도구 호출',
+      showing: '{total}개 중 {count}개 표시',
+      moreAvailable: '결과가 더 있습니다',
+      required: '필수',
+      fullSchema: '전체 매개변수 정의',
+      failed: 'MCP 작업 실패',
+      result: '실행 결과',
+      status: {
+        not_loaded: '로드되지 않음',
+        loading: '로드 중',
+        ready: '사용 가능',
+        needs_auth: '인증 필요',
+        error: '연결 실패',
+        disabled: '비활성화됨',
+        unavailable: '사용 불가',
+      },
+    },
   },
 } as const
 
@@ -1821,6 +1913,29 @@ const ruEmbedPublish = {
       startFailed: 'Не удалось начать авторизацию',
       resumeFailed: 'Не удалось возобновить выполнение, повторите попытку',
       skipFailed: 'Не удалось пропустить, повторите попытку',
+    },
+    mcp: {
+      discoverTools: 'Поиск инструментов MCP',
+      listServers: 'Сервисы MCP',
+      listTools: 'Инструменты MCP',
+      searchTools: 'Поиск инструментов MCP',
+      describeTool: 'Чтение определения инструмента',
+      callTool: 'Вызов инструмента MCP',
+      showing: 'Показано {count} из {total}',
+      moreAvailable: 'Есть другие результаты',
+      required: 'Обязательно',
+      fullSchema: 'Полное описание параметров',
+      failed: 'Ошибка операции MCP',
+      result: 'Результат',
+      status: {
+        not_loaded: 'Не загружено',
+        loading: 'Загрузка',
+        ready: 'Доступно',
+        needs_auth: 'Требуется авторизация',
+        error: 'Ошибка подключения',
+        disabled: 'Отключено',
+        unavailable: 'Недоступно',
+      },
     },
   },
 } as const

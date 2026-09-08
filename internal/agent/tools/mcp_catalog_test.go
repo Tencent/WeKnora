@@ -484,13 +484,18 @@ func TestMCPCatalogRequiresDescribeBeforeCalling(t *testing.T) {
 	_, _, err = proxy.(*MCPCallTool).resolve(ctx, raw)
 	require.ErrorContains(t, err, "schema has not been described")
 	require.ErrorContains(t, err, `server_id="server-1"`)
+	require.Nil(t, r.MCPCallTarget(ctx, ToolCallMCPTool, raw), "listing must not present a target before describe")
 	describeTool(ctx, t, r, "server-1", snapshot[1].mcpTool.Name)
 	_, _, err = proxy.(*MCPCallTool).resolve(ctx, raw)
 	require.ErrorContains(t, err, "schema has not been described", "describing another tool must not enable this tool")
+	require.Nil(t, r.MCPCallTarget(ctx, ToolCallMCPTool, raw))
 	described := describeTool(ctx, t, r, "server-1", snapshot[0].mcpTool.Name)
 	require.Equal(t, mcpToolRef(snapshot[0]), described.ToolRef)
 	_, _, err = proxy.(*MCPCallTool).resolve(ctx, raw)
 	require.NoError(t, err)
+	target := r.MCPCallTarget(ctx, ToolCallMCPTool, raw)
+	require.NotNil(t, target)
+	require.Equal(t, snapshot[0].mcpTool.Name, target.ToolName)
 	// A new schema loaded by refresh has to be described again.
 	c.load = func(_ context.Context, service *types.MCPService) ([]*MCPTool, error) {
 		tool := catalogTestTool(service, snapshot[0].mcpTool.Name, "changed", nil)
@@ -502,6 +507,7 @@ func TestMCPCatalogRequiresDescribeBeforeCalling(t *testing.T) {
 	raw, _ = json.Marshal(map[string]any{"tool_ref": mcpToolRef(snapshot[0]), "arguments": map[string]any{"id": "1"}})
 	_, _, err = proxy.(*MCPCallTool).resolve(ctx, raw)
 	require.ErrorContains(t, err, "schema has not been described")
+	require.Nil(t, r.MCPCallTarget(ctx, ToolCallMCPTool, raw))
 }
 
 func TestMCPCallInvalidArgumentsExplainObjectEnvelope(t *testing.T) {

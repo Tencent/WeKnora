@@ -328,6 +328,11 @@ func mcpToolRef(tool *MCPTool) string {
 	return "mcpt_" + hex.EncodeToString(sum[:])
 }
 
+func (c *MCPCatalog) describedRef(ref string) bool {
+	_, ok := c.described.Load(ref)
+	return ok
+}
+
 func shortMCPDescription(s string) string {
 	runes := []rune(s)
 	if len(runes) > 200 {
@@ -704,7 +709,7 @@ func (t *MCPCallTool) resolve(ctx context.Context, raw json.RawMessage) (*MCPToo
 			if err := t.catalog.checkEnabled(ctx, tool); err != nil {
 				return nil, nil, err
 			}
-			if _, described := t.catalog.described.Load(ref); !described {
+			if !t.catalog.describedRef(ref) {
 				return nil, nil, fmt.Errorf(
 					"tool schema has not been described; use discover_mcp_tools(mode=\"describe\", "+
 						"server_id=%q, tool_name=%q) before calling",
@@ -747,7 +752,9 @@ func (r *ToolRegistry) MCPCallTarget(ctx context.Context, name string, raw json.
 		return nil
 	}
 	tool := proxy.catalog.cachedTool(ref)
-	if tool == nil {
+	if tool == nil || !proxy.catalog.describedRef(ref) {
+		// Listing caches the target, but presentation must stay on call_mcp_tool
+		// until describe has returned this exact schema reference.
 		return nil
 	}
 	var input map[string]any

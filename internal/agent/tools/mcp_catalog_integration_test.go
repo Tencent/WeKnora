@@ -101,9 +101,14 @@ func TestMCPProxyHTTPApprovalArgumentsAndImages(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, blocked.Success)
 	require.Contains(t, blocked.Error, "schema has not been described")
+	require.Nil(t, registry.MCPCallTarget(ctx, ToolCallMCPTool, premature))
 	require.Zero(t, calls.Load())
 	require.Empty(t, gate.request.ToolCallID)
 	described := describeTool(ctx, t, registry, service.ID, page.Tools[0].Name)
+	describedRaw, _ := json.Marshal(map[string]any{
+		"tool_ref": described.ToolRef, "arguments": map[string]any{"count": 2},
+	})
+	require.NotNil(t, registry.MCPCallTarget(ctx, ToolCallMCPTool, describedRaw))
 	ctx = WithToolExecContext(
 		ctx,
 		&ToolExecContext{

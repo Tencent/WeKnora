@@ -72,4 +72,12 @@ test('proxy validation errors and empty service lists use dedicated views', asyn
   const empty = await render({ displayType: 'mcp_discovery', output: '{"mode":"list_servers","total":0,"has_more":false}' })
   assert.match(empty, /Showing 0 of 0/)
   assert.doesNotMatch(empty, /fallback-output/)
+  const live = await render({
+    displayType: 'mcp_discovery',
+    success: true,
+    output: JSON.stringify({ mode: 'list_tools', tools: [{ name: 'get_log' }], total: 1 }),
+    toolData: { tool_name: 'discover_mcp_tools', success: true, output: '{"mode":"list_tools"}', error: '' },
+  })
+  assert.match(live, /get_log/)
+  assert.doesNotMatch(live, /fallback-output/)
 })
