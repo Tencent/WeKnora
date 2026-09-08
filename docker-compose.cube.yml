@@ -1,0 +1,55 @@
+# 数据建模模块: Cube (语义层) 附加编排
+#
+# 用法 (在 WeKnora 根目录):
+#   docker compose -f docker-compose.yml -f docker-compose.cube.yml up -d
+#
+# 联动 .env (app 容器经 env_file 自动读取, 无需在此重复):
+#   CUBE_ENABLE=true
+#   CUBE_API_URL=http://cube:4000/cubejs-api/v1
+#   CUBEJS_API_SECRET=<随机串, cube 与 app 必须一致>
+#   CUBE_MODEL_DIR=/cube-workspace/model
+#   CUBE_DATASOURCES_FILE=/cube-workspace/datasources.yaml
+#
+# 安全: Cube dev 模式无鉴权, 4000 端口刻意不映射宿主机, 仅容器网络内可达。
+# 业务库账号建议只读; deploy/cube/workspace/ 内含连接凭据 (已 gitignore),
+# 注意宿主机目录权限收窄。
+
+services:
+  cube:
+    image: cubejs/cube:latest
+    container_name: WeKnora-cube
+    environment:
+      CUBEJS_DEV_MODE: "true" # 模型文件热加载, 发布即生效
+      CUBEJS_TELEMETRY: "false"
+      CUBEJS_API_SECRET: ${CUBEJS_API_SECRET}
+      # cube.js 从这里读连接配置 (app 容器写入同一宿主机目录)
+      CUBE_DATASOURCES_FILE: /cube-workspace/datasources.yaml
+    # driverFactory 需要从容器内访问宿主机上的业务库 (如本地模拟 ERP 13306)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # 仅绑定本机回环: 本地开发时 app 在宿主机上跑, 需访问 127.0.0.1:${CUBE_PORT};
+    # 多机生产部署请删除此映射 (4000 dev 模式无鉴权, 只允许容器网络内访问)
+    ports:
+      - "127.0.0.1:${CUBE_PORT:-4000}:4000"
+    volumes:
+      - ./deploy/cube/cube.js:/cube/conf/cube.js
+      - ./deploy/cube/workspace:/cube-workspace:ro
+      - ./deploy/cube/workspace/model:/cube/conf/model
+      - cube-store:/cube/conf/.cubestore
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+
+  app:
+    volumes:
+      - ./deploy/cube/workspace:/cube-workspace
+    # dbinspector 测试连接/表结构探测需从 app 容器直连业务库
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - cube
+    networks:
+      - WeKnora-network
+
+volumes:
+  cube-store:

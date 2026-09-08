@@ -298,6 +298,8 @@ func (s *sessionService) buildAgentConfig(
 		MemoryEnabled:               customAgent.Config.MemoryEnabled,
 		MCPSelectionMode:            customAgent.Config.MCPSelectionMode,
 		MCPServices:                 customAgent.Config.MCPServices,
+		SemanticModelMode:           customAgent.Config.SemanticModelMode,
+		SemanticModels:              customAgent.Config.SemanticModels,
 		MCPAuthWaitTimeout:          customAgent.Config.MCPAuthWaitTimeout,
 		Thinking:                    customAgent.Config.Thinking,
 		CitationEnabled:             customAgent.Config.CitationEnabled,

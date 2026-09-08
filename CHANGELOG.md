@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### New Features
+
+- **NEW**: **Semantic Modeling Module (Data Modeling)** — a self-contained module that lets users configure business database connections, visually author Cube.js semantic models (measures/dimensions/joins), and control who can query what via data groups. Gated by `CUBE_ENABLE` env var; when disabled, the app behaves exactly as upstream.
+  - **Data sources**: guided support (test connection + schema browsing + draft generation) for MySQL, PostgreSQL, ClickHouse, SQL Server; passthrough support for all other Cube drivers. Credentials AES-256-GCM encrypted, never sent to frontend.
+  - **Modeling**: form ↔ YAML source dual-mode editor; publish writes model files to a shared volume and polls Cube `/v1/meta` for compile verification; version history with one-click rollback; failed publishes auto-remove the file.
+  - **Permissions**: data groups + members (default-deny access policy); JWT securityContext signed per session user; query results filtered by data group membership; orchestration-bound scope enforces agent-level model visibility.
+  - **Agent tools**: `cube_meta` / `cube_query` / `cube_sql` native tools, registered per agent orchestration config (not in `AllowedTools`); lenient arg decoding for WeKnora's stringified array/object params; permission-filtered recall.
+  - **UI**: knowledge-base-style home (space sidebar: all/favorites/recents/mine + collapsible card sections); full-screen dual-pane model editor; audit log drawer; i18n self-registered (no upstream locale file changes).
+  - **Deployment**: `docker-compose.cube.yml` override + `deploy/cube/cube.js` (dev mode hot-reload); regression test script `deploy/cube/test-semantic.sh`.
+  - See [`internal/semantic/README.md`](./internal/semantic/README.md) for architecture, API, permissions, and migration guide.
+
 ## [0.8.0] - 2026-09-03
 
 ### New Features

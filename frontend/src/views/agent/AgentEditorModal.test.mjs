@@ -116,7 +116,7 @@ test('skills and sandbox share one editor section', () => {
   assert.match(navItems, /icon: SKILL_ICON/)
   assert.doesNotMatch(navItems, /key: 'sandbox'/)
 
-  const capabilityGroup = source.match(/pickItems\(\['multimodal', 'tools', 'mcp', 'skills'\]\)/)
+  const capabilityGroup = source.match(/pickItems\(\['multimodal', 'semantic', 'tools', 'mcp', 'skills'\]\)/)
   assert.ok(capabilityGroup, 'expected the capability group to list skills without a separate sandbox tab')
 
   assert.match(source, /v-show="currentSection === 'skills' && isAgentMode"/)

@@ -8,7 +8,7 @@
 
 import { get, post, del } from '@/utils/request'
 
-export type FavoriteResourceType = 'kb' | 'agent'
+export type FavoriteResourceType = 'kb' | 'agent' | 'semantic_model'
 
 export interface FavoriteEntry {
   user_id: string

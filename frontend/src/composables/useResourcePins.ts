@@ -72,7 +72,7 @@ function readRecents(): PinEntry[] {
       (e: unknown): e is PinEntry =>
         !!e &&
         typeof (e as PinEntry).type === 'string' &&
-        ((e as PinEntry).type === 'kb' || (e as PinEntry).type === 'agent') &&
+        (['kb', 'agent', 'semantic_model'] as const).includes((e as PinEntry).type as any) &&
         typeof (e as PinEntry).id === 'string' &&
         typeof (e as PinEntry).ts === 'number'
     )
@@ -91,9 +91,11 @@ function writeRecents(list: PinEntry[]): void {
 const favoritesByType: Record<ResourceType, Ref<PinEntry[]>> = {
   kb: ref<PinEntry[]>([]),
   agent: ref<PinEntry[]>([]),
+  // semantic_model 的收藏由 semantic 模块自行管理 (见 @/semantic/ModelsTab)
+  semantic_model: ref<PinEntry[]>([]),
 }
-const loaded: Record<ResourceType, boolean> = { kb: false, agent: false }
-const inFlight: Record<ResourceType, Promise<void> | null> = { kb: null, agent: null }
+const loaded: Record<ResourceType, boolean> = { kb: false, agent: false, semantic_model: false }
+const inFlight: Record<ResourceType, Promise<void> | null> = { kb: null, agent: null, semantic_model: null }
 
 // recents revision counter — same bump-to-invalidate pattern as before.
 const recentsRevision = ref(0)
