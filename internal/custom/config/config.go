@@ -45,13 +45,14 @@ type DatabaseConfig struct {
 
 // WeKnoraConfig WeKnora 内容引擎连接配置
 type WeKnoraConfig struct {
-	BaseURL       string
-	APIKey        string
-	KBID          string // 仅兼容旧证据任务；不得作为 Wiki/Agent 默认值
-	EvidenceKBID  string // 字幕证据写入与检索
-	KnowledgeKBID string // 整篇源文档、Wiki 与 Agent
-	TenantID      string // WeKnora 多租户场景
-	AgentID       string // 视频问答使用的自定义智能体
+	BaseURL                    string
+	APIKey                     string
+	KBID                       string // 仅兼容旧证据任务；不得作为 Wiki/Agent 默认值
+	EvidenceKBID               string // 字幕证据写入与检索
+	KnowledgeKBID              string // 整篇源文档、Wiki 与 Agent
+	TenantID                   string // WeKnora 多租户场景
+	AgentID                    string // 视频问答使用的自定义智能体
+	ContentPipelineAuditSecret string // 生产任务来源签名，仅由服务端读取
 }
 
 const (
@@ -226,13 +227,14 @@ func Load() *Config {
 			DBName:   getEnv("CUSTOM_DB_NAME", "vidsage"),
 		},
 		WeKnora: WeKnoraConfig{
-			BaseURL:       getEnv("WEKNORA_BASE_URL", "http://localhost:8080"),
-			APIKey:        getEnv("WEKNORA_API_KEY", ""),
-			KBID:          getEnv("WEKNORA_KB_ID", ""),
-			EvidenceKBID:  getEnv("WEKNORA_EVIDENCE_KB_ID", ""),
-			KnowledgeKBID: getEnv("WEKNORA_KNOWLEDGE_KB_ID", ""),
-			TenantID:      getEnv("WEKNORA_TENANT_ID", ""),
-			AgentID:       getEnv("CUSTOM_CONTENT_AGENT_ID", ""),
+			BaseURL:                    getEnv("WEKNORA_BASE_URL", "http://localhost:8080"),
+			APIKey:                     getEnv("WEKNORA_API_KEY", ""),
+			KBID:                       getEnv("WEKNORA_KB_ID", ""),
+			EvidenceKBID:               getEnv("WEKNORA_EVIDENCE_KB_ID", ""),
+			KnowledgeKBID:              getEnv("WEKNORA_KNOWLEDGE_KB_ID", ""),
+			TenantID:                   getEnv("WEKNORA_TENANT_ID", ""),
+			AgentID:                    getEnv("CUSTOM_CONTENT_AGENT_ID", ""),
+			ContentPipelineAuditSecret: getEnv("CONTENT_PIPELINE_AUDIT_SECRET", ""),
 		},
 		WikiGraph: WikiGraphConfig{
 			// The product graph must never inherit the official GraphRAG switch.
@@ -244,8 +246,8 @@ func Load() *Config {
 			Password:  getEnv("CUSTOM_WIKI_GRAPH_NEO4J_PASSWORD", ""),
 			Database:  getEnv("CUSTOM_WIKI_GRAPH_NEO4J_DATABASE", ""),
 			Namespace: getEnv("CUSTOM_WIKI_GRAPH_NEO4J_NAMESPACE", "VIDSAGE_KNOWLEDGE"),
-			// 产品图谱只能投影视频知识库的 Wiki 页面，绝不回退到旧单库配置。
-			KnowledgeBaseID: getEnv("CUSTOM_WIKI_GRAPH_KB_ID", getEnv("WEKNORA_KNOWLEDGE_KB_ID", "")),
+			// 产品图谱只能投影知识层 Wiki 页面，不允许通过独立配置产生双重身份。
+			KnowledgeBaseID: getEnv("WEKNORA_KNOWLEDGE_KB_ID", ""),
 		},
 		MinIO: MinIOConfig{
 			Backend:   getEnv("CUSTOM_STORAGE_BACKEND", "minio"),

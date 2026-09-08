@@ -47,7 +47,7 @@ func TestRenderMethodologyPageUsesFrameworkOrderAndSeparatesApplicability(t *tes
 		}
 	}
 	if !strings.Contains(render.Content, "## 适用条件") ||
-		!strings.Contains(render.Content, "- 适用条件：适用于单指标异常归因") {
+		!strings.Contains(render.Content, "- 适用条件与限制：适用于单指标异常归因") {
 		t.Fatalf("applicability section missing or malformed: %s", render.Content)
 	}
 	if !strings.Contains(render.Content, "\n方法论\n") {

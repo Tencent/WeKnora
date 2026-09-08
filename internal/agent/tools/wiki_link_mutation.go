@@ -26,16 +26,24 @@ func applyIncomingWikiContentRewrite(
 	inLinks []string,
 	rewrite wikiContentRewrite,
 ) ([]appliedWikiContentChange, []string, error) {
-	var changes []appliedWikiContentChange
-	var updatedSlugs []string
+	pages := make([]*types.WikiPage, 0, len(inLinks))
 	for _, sourceSlug := range dedupNonEmptyStrings(inLinks) {
 		page, err := service.GetPageBySlug(ctx, kbID, sourceSlug)
 		if err != nil || page == nil {
 			if err == nil {
 				err = fmt.Errorf("empty result")
 			}
-			return changes, updatedSlugs, fmt.Errorf("load incoming page %s: %w", sourceSlug, err)
+			return nil, nil, fmt.Errorf("load incoming page %s: %w", sourceSlug, err)
 		}
+		if isProtectedKnowledgeV2Page(page) {
+			return nil, nil, fmt.Errorf("incoming page %s: %s", sourceSlug, protectedKnowledgeV2MutationError)
+		}
+		pages = append(pages, page)
+	}
+
+	var changes []appliedWikiContentChange
+	var updatedSlugs []string
+	for _, page := range pages {
 		updatedContent, changed := rewrite(page.Content)
 		if !changed {
 			continue
@@ -44,10 +52,10 @@ func applyIncomingWikiContentRewrite(
 		page.Content = updatedContent
 		if err := service.UpdateAutoLinkedContent(ctx, page); err != nil {
 			page.Content = original
-			return changes, updatedSlugs, fmt.Errorf("update incoming page %s: %w", sourceSlug, err)
+			return changes, updatedSlugs, fmt.Errorf("update incoming page %s: %w", page.Slug, err)
 		}
 		changes = append(changes, appliedWikiContentChange{page: page, originalContent: original})
-		updatedSlugs = append(updatedSlugs, sourceSlug)
+		updatedSlugs = append(updatedSlugs, page.Slug)
 	}
 	return changes, updatedSlugs, nil
 }

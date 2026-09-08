@@ -17,12 +17,14 @@ type mockTool struct {
 	name        string
 	description string
 	parameters  json.RawMessage
+	executed    json.RawMessage
 }
 
 func (m *mockTool) Name() string                { return m.name }
 func (m *mockTool) Description() string         { return m.description }
 func (m *mockTool) Parameters() json.RawMessage { return m.parameters }
 func (m *mockTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	m.executed = append(m.executed[:0], args...)
 	return &types.ToolResult{Success: true}, nil
 }
 
@@ -153,4 +155,35 @@ func TestRegisterTool_DuplicateRejected(t *testing.T) {
 	defs := r.GetFunctionDefinitions()
 	require.Len(t, defs, 1)
 	assert.Equal(t, "original", defs[0].Description, "first registration must win")
+}
+
+func TestExecuteToolNormalizesObservedWikiWritePageShape(t *testing.T) {
+	tool := &mockTool{
+		name: ToolWikiWritePage,
+		parameters: json.RawMessage(`{
+  "type":"object",
+  "properties":{
+    "slug":{"type":"string"},"title":{"type":"string"},
+    "summary":{"type":"string"},"content":{"type":"string"},
+    "page_type":{"type":"string"},"source_refs":{"type":"array"}
+  },
+  "required":["slug","title","summary","content","page_type"]
+}`),
+	}
+	registry := NewToolRegistry()
+	registry.RegisterTool(tool)
+	result, err := registry.ExecuteTool(context.Background(), ToolWikiWritePage, json.RawMessage(`{
+  "slug":"entity/obsidian","title":"Obsidian",
+  "summary":{
+    "content":"---\nknowledge_object_id: ko-1\ntype: entity\nsource_video_id: video-1\ntranscript_generation: generation-1\n---\n\n# Obsidian\n\n本地知识库。",
+    "page_type":"entity","source_refs":["doc-real"]
+  }
+}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	assert.JSONEq(t, `{
+  "slug":"entity/obsidian","title":"Obsidian","summary":"本地知识库。",
+  "content":"---\nknowledge_object_id: ko-1\ntype: entity\nsource_video_id: video-1\ntranscript_generation: generation-1\n---\n\n# Obsidian\n\n本地知识库。",
+  "page_type":"index","source_refs":["doc-real"]
+}`, string(tool.executed))
 }

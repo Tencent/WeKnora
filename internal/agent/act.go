@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -461,12 +462,22 @@ func (e *AgentEngine) runToolCall(
 
 	principal, _ := types.PrincipalFromContext(ctx)
 	execTimeout := toolExecutionTimeout(tc.Function.Name)
+	pinnedSkillNames := make([]string, 0, len(e.pinnedSkills))
+	for _, pinnedSkill := range e.pinnedSkills {
+		if pinnedSkill != nil && strings.TrimSpace(pinnedSkill.Name) != "" {
+			pinnedSkillNames = append(pinnedSkillNames, strings.TrimSpace(pinnedSkill.Name))
+		}
+	}
 	toolExecCtx := agenttools.WithToolExecContext(toolCtx, &agenttools.ToolExecContext{
-		SessionID:          sessionID,
-		AssistantMessageID: assistantMessageID,
-		EventBus:           e.eventBus,
-		ToolCallID:         tc.ID,
-		UserID:             principal.StorageID(),
+		SessionID:            sessionID,
+		AssistantMessageID:   assistantMessageID,
+		EventBus:             e.eventBus,
+		ToolCallID:           tc.ID,
+		PinnedSkillNames:     pinnedSkillNames,
+		ProductionTaskID:     e.config.ProductionTaskID,
+		ProductionVideoID:    e.config.ProductionVideoID,
+		ProductionGeneration: e.config.ProductionGeneration,
+		UserID:               principal.StorageID(),
 		// ApprovalCtx keeps the round-level ctx without the per-tool execution timeout,
 		// so MCP tool human-approval (issue #1173) can legitimately block longer.
 		ApprovalCtx: toolCtx,

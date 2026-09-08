@@ -12,15 +12,16 @@ import (
 )
 
 const (
-	knowledgeFrameworkRelativePath  = "skill/extract-video-knowledge/references/type-frameworks.md"
+	knowledgeFrameworkRelativePath  = "skill/extract-video-knowledge-v2/references/type-frameworks.md"
 	knowledgeFrameworkPreloadedPath = "skills/preloaded/extract-video-knowledge/references/type-frameworks.md"
 	knowledgeFrameworkEnv           = "WEKNORA_KNOWLEDGE_FRAMEWORK_PATH"
 )
 
 var (
-	frameworkTopTypePattern = regexp.MustCompile(`^(.+?)\s+` + "`" + `([a-z_]+)` + "`$")
-	frameworkHeadingPattern = regexp.MustCompile("^###\\s+`([a-z_]+)`\\s+(.+?)\\s*$")
-	frameworkFieldPattern   = regexp.MustCompile("^`([a-z_]+)`$")
+	frameworkTopTypePattern      = regexp.MustCompile(`^(.+?)\s+` + "`" + `([a-z_]+)` + "`$")
+	frameworkHeadingPattern      = regexp.MustCompile("^###\\s+`([a-z_]+)`\\s+(.+?)\\s*$")
+	frameworkFieldPattern        = regexp.MustCompile("^`([a-z_]+)`$")
+	frameworkCompactFieldPattern = regexp.MustCompile("`([a-z_]+)`\\s*([^→]+)")
 )
 
 // FrameworkField is a source-defined structure field and its user-facing
@@ -207,12 +208,16 @@ func parseFrameworkSource(data []byte, sourcePath string) (FrameworkDigest, erro
 	detailLabels := make(map[string]string)
 	currentDetailKey := ""
 	inStructureMapping := false
+	inCompactFieldMapping := false
+	inEntitySubtypeMapping := false
 
 	for _, rawLine := range lines {
 		line := strings.TrimSpace(strings.TrimPrefix(rawLine, "\ufeff"))
 		if strings.HasPrefix(line, "## ") {
 			sectionTitle := strings.TrimSpace(strings.TrimPrefix(line, "## "))
 			inStructureMapping = sectionTitle == "结构维度展示契约"
+			inCompactFieldMapping = strings.Contains(sectionTitle, "字段与展示顺序")
+			inEntitySubtypeMapping = strings.Contains(sectionTitle, "实体子类型")
 			currentDetailKey = ""
 			switch {
 			case strings.Contains(sectionTitle, "方法论结构维度"):
@@ -234,6 +239,25 @@ func parseFrameworkSource(data []byte, sourcePath string) (FrameworkDigest, erro
 		}
 		cells := markdownTableCells(line)
 		if len(cells) < 2 {
+			continue
+		}
+		if inCompactFieldMapping {
+			key := strings.Trim(cells[0], "` ")
+			if key == "" || key == "类型或子类型" {
+				continue
+			}
+			matches := frameworkCompactFieldPattern.FindAllStringSubmatch(cells[1], -1)
+			for _, match := range matches {
+				detailFields[key] = append(detailFields[key], FrameworkField{Key: match[1]})
+				displayLabels[key] = append(displayLabels[key], strings.TrimSpace(match[2]))
+			}
+			continue
+		}
+		if inEntitySubtypeMapping {
+			key := strings.Trim(cells[0], "` ")
+			if key != "" && key != "entity_sub_type" {
+				detailLabels[key] = strings.TrimSpace(cells[1])
+			}
 			continue
 		}
 		if inStructureMapping {

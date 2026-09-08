@@ -86,6 +86,9 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: "Failed to resolve page to rename: " + err.Error()}, nil
 	}
+	if isProtectedKnowledgeV2Page(existingPage) {
+		return &types.ToolResult{Success: false, Error: protectedKnowledgeV2MutationError}, nil
+	}
 
 	inLinks := make([]string, len(existingPage.InLinks))
 	copy(inLinks, existingPage.InLinks)

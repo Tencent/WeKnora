@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/contentprovenance"
 	"github.com/Tencent/WeKnora/internal/custom/config"
 )
 
@@ -76,7 +77,12 @@ func (a *AgentClient) CreateSession(ctx context.Context, title string) (string, 
 }
 
 // TriggerSkill 触发单个 skill（Agent Chat API + skill_names）
-func (a *AgentClient) TriggerSkill(ctx context.Context, sessionID, agentID, skillName, query string, knowledgeIDs []string) error {
+func (a *AgentClient) TriggerSkill(
+	ctx context.Context,
+	sessionID, agentID, skillName, query string,
+	knowledgeIDs []string,
+	productionJob *contentprovenance.Job,
+) error {
 	request := map[string]any{
 		"query":         query,
 		"agent_enabled": true,
@@ -96,6 +102,21 @@ func (a *AgentClient) TriggerSkill(ctx context.Context, sessionID, agentID, skil
 		return err
 	}
 	a.setHeaders(req)
+	if productionJob != nil {
+		knowledgeBaseIDs := []string(nil)
+		if a.cfg.KBID != "" {
+			knowledgeBaseIDs = []string{a.cfg.KBID}
+		}
+		envelope := contentprovenance.NewEnvelope(
+			*productionJob, sessionID, agentID, skillName, query, knowledgeBaseIDs, knowledgeIDs,
+		)
+		encoded, signed, err := contentprovenance.Sign(a.cfg.ContentPipelineAuditSecret, envelope)
+		if err != nil {
+			return fmt.Errorf("sign content pipeline provenance: %w", err)
+		}
+		req.Header.Set(contentprovenance.EnvelopeHeader, encoded)
+		req.Header.Set(contentprovenance.SignatureHeader, signed)
+	}
 	// SSE 流式接收
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := a.http.Do(req)
@@ -107,7 +128,9 @@ func (a *AgentClient) TriggerSkill(ctx context.Context, sessionID, agentID, skil
 		buf, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("trigger skill status %d: %s", resp.StatusCode, string(buf))
 	}
-	// 消费 SSE：等到 [DONE] 或 error 事件
+	// 消费 SSE：只在完成事件或终止错误时结束。Agent 会把单次工具
+	// 调用失败也作为 response_type=error 推送，但该事件 done=false，
+	// 随后仍会继续推理和重试，不能据此提前启动新的处理任务。
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	eventType := ""
@@ -126,10 +149,8 @@ func (a *AgentClient) TriggerSkill(ctx context.Context, sessionID, agentID, skil
 			if data == "[DONE]" {
 				return nil
 			}
-			if eventType == "error" {
-				return fmt.Errorf("agent chat error: %s", data)
-			}
-			// 检测 error 事件
+			// 检测 complete / terminal error 事件。非终止工具错误留给
+			// Agent 消化，继续读取同一条 SSE 流。
 			var evt map[string]any
 			if err := json.Unmarshal([]byte(data), &evt); err == nil {
 				responseType, _ := evt["response_type"].(string)
@@ -137,19 +158,26 @@ func (a *AgentClient) TriggerSkill(ctx context.Context, sessionID, agentID, skil
 				if responseType == "complete" && done {
 					return nil
 				}
-				if responseType == "error" {
+				if responseType == "error" && done {
 					return fmt.Errorf("agent chat error: %v", evt["content"])
 				}
-				if evtType, ok := evt["type"].(string); ok && (evtType == "error" || evtType == "ERROR") {
+				if evtType, ok := evt["type"].(string); ok && done && (evtType == "error" || evtType == "ERROR") {
 					return fmt.Errorf("agent chat error: %v", evt["message"])
 				}
-				if value, ok := evt["error"]; ok && value != nil {
+				if value, ok := evt["error"]; ok && value != nil && done {
 					return fmt.Errorf("agent chat error: %v", value)
 				}
+				continue
+			}
+			if eventType == "error" {
+				return fmt.Errorf("agent chat error: %s", data)
 			}
 		}
 	}
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return fmt.Errorf("agent chat stream ended before a terminal event")
 }
 
 func (a *AgentClient) setHeaders(req *http.Request) {

@@ -1,97 +1,127 @@
-# Wiki 页面契约
+# Wiki 候选与规范页面契约
 
-本 Skill 的产物全部以 WeKnora 知识库 Wiki 页面形态存在。本地 `wiki/` 目录及子目录、`wiki/index.md` 不再生成。每个知识原子、每个实体与视频索引页各对应一个独立 Wiki 页面，通过 **创建/覆盖 Wiki** 工具写入。
+本文件定义 V2 Skill 的候选提交、证据贡献、规范页面、关系和写入顺序。五类字段见 [type-frameworks.md](type-frameworks.md)，质量状态见 [audit-rules.md](audit-rules.md)。
 
-## 数据获取
+第一阶段沿用写入工具当前的 `p3-wiki-object/v1` 入参外壳，但语义已经收敛为“Skill 提交候选，服务端确定规范身份”。入参中的对象 ID、标题和 slug 都是候选建议；工具返回值才是最终身份。
 
-| 工具 | 获取内容 |
+## 1. 一对象一规范页
+
+一个账户空间和知识库内，一个语义对象只对应一个规范知识对象 ID 和一张规范 Wiki 页面。视频不是对象身份的一部分；不同视频讲述同一对象时，只增加证据贡献。
+
+规范页面保存规范标题、类型、结构内容、关系和证据贡献引用。证据正文、原文和检索分块只保存在证据知识库，Wiki 只保存 ID 与时间范围。
+
+Skill 每次只形成当前视频当前转写代次的一组贡献，不读取或拼装其他视频的贡献，也不决定合并目标。
+
+## 2. 候选提交
+
+每个 `passed` 候选通过 `wiki_write_page` 提交完整页面提案。写入参数 `page_type` 使用 `index`，业务类型写入 `type` 和同值的 `primary_type`。
+
+| 分组 | 字段 |
 |---|---|
-| **精读源文档** | 段落原文、说话人、时间戳、证据片段 |
-| **查看文档分块** | 文档分块索引与内容（精确定位原文范围） |
-| **阅读 Wiki 页面** | 已有知识原子、实体、视频分类 Wiki 页面 |
-| **查询知识图谱** | 已有实体关系 |
+| 候选身份 | `id`、`knowledge_object_id`、`title`；可选 `aliases`、`canonical_name` |
+| 类型 | `type`、`primary_type`、实体所需的 `entity_sub_type`、`information_nature` |
+| 当前贡献兼容字段 | `source_video_id`、`source_document_id`、`transcript_generation`、`evidence_ids`、`source_refs`、`chunk_refs`、`time_range`、`field_evidence` |
+| 质量与内容 | `audit_status`、`classification_confidence`、`core_content`、`structure_fields` |
+| 规范写入输入 | `evidence_contribution`、`related_content`、`relations` |
 
-## frontmatter
+约束：
 
-每个 Wiki 页面以 YAML frontmatter 开头：
+- `id` 与 `knowledge_object_id` 首次提交时都填写候选 ID，只为兼容当前工具入参；不得把它当作最终规范对象 ID。
+- `title` 是规范标题建议。标题、唯一 H1 和实体 `canonical_name` 在提交时同值，且不含类型装饰。
+- `primary_type` 与 `type` 同值；`page_type` 固定为 `index`。
+- `classification_confidence` 是 YAML 数值，取值为 `0 < x <= 1`。
+- `core_content` 是 frontmatter 顶层非空字符串，并与正文一句话概述同义。
+- `structure_fields` 只使用 [type-frameworks.md](type-frameworks.md) 对应类型的键；每个非空字段都有同名 `field_evidence`。
+- 当前贡献兼容字段与 `evidence_contribution` 必须表达同一视频、源文档、代次和证据集合。Skill 每次只提交当前视频当前代次的一组单数 `evidence_contribution`；服务端写入规范页时统一转换为 `evidence_contributions` 列表，并按“视频 + 转写代次”覆盖或追加。兼容字段不再作为新页面的事实来源。
+- `related_content` 和 `relations` 首次提交为空；关系目标必须等所有对象返回规范身份并回读后再补写。
+
+## 3. 证据贡献
+
+`evidence_contribution` 是当前视频当前转写代次对候选对象的版本化引用。它是写入请求的单数组件；规范 Wiki 页面落盘后使用同结构的 `evidence_contributions` 列表：
 
 ```yaml
----
-id: V002-K005              # 知识原子或实体 ID
-type: concept              # primary_type 或 entity_type
-source_video_id: V002      # 视频 ID（编排器据此归属页面）
-title: 从智能到智慧         # 人类可读标题
-aliases: []                # 实体的 aliases 字段
-tags: [智能, 智慧, AI应用]  # tags 字段
-audit_status: aligned       # 审计状态
----
+evidence_contribution:
+  source_video_id: V002
+  source_document_id: doc-V002
+  transcript_generation: generation-20260907
+  evidence_ids: [ev-004]
+  chunk_refs: [chunk-004]
+  time_range: 00:01:02-00:01:10
+  field_evidence:
+    definition: [ev-004]
+  quality_status: passed
 ```
 
-字段定义见 [type-frameworks.md](type-frameworks.md) 的知识原子与实体章节。`type` 必须属于 `methodology` / `case` / `concept` / `insight` 或 `person` / `organization` / `product` / `technology` / `industry` / `place` 之一。
+规则：
 
-## 视频索引页契约（关键）
+- `source_document_id` 与 `source_refs` 的唯一值相同；证据、分块和 Wiki 页面 ID 不能代填源文档 ID。
+- `evidence_ids` 包含 1–3 个当前代次的最小充分证据；`field_evidence` 只能引用本组 `evidence_ids`。
+- `chunk_refs` 与证据一一可回查，`time_range` 能定位视频播放位置。
+- 同一视频同一代次重跑时，服务端覆盖该组贡献；跨视频提交时，服务端新增贡献。
+- Skill 不提交证据正文，不汇总 `evidence_contributions`，也不删除其他来源贡献。
+- 服务端必须保留规范页的对象 ID、规范标题和页面 ID；合并时不得把当前候选正文覆盖为另一视频的证据正文。
 
-视频索引页是编排器回写视频状态所依赖的产物，必须满足：
+## 4. 写入工具返回
 
-1. **写工具 `page_type` 参数用 `index`**（不是 entity/concept/summary）。
-2. frontmatter `type` 固定为 `knowledge_base`。
-3. frontmatter 必须含 `source_video_id`。
+服务端对候选执行召回、语义判定和规则冲突检查，返回以下结果之一：
+
+| 结果 | 含义 | Skill 后续动作 |
+|---|---|---|
+| `created` | 创建新的规范身份和规范页 | 回读并使用返回身份 |
+| `reused` | 复用已有规范身份和规范页，更新当前贡献 | 回读并使用返回身份 |
+| `review_required` | 同名异义、类型冲突、多目标命中、事实冲突或语义不确定 | 标记问题并停止该候选 |
+
+成功结果必须包含 `knowledge_object_id`、`canonical_wiki_page_id`、规范 `title` 和 `slug`。若当前工具返回字段名仍为 `wiki_page_id`，将其视为 `canonical_wiki_page_id` 的兼容名称。任何返回字段为空或回读不一致都视为写入失败。
+
+Skill 不根据搜索结果直接覆盖页面，不从标题推测页面 ID 或 slug，不在 `review_required` 后换一个 slug 新建页面。
+
+## 5. 页面正文
+
+规范页面正文按以下顺序展示：唯一 H1、一句话核心内容、实际有值的结构维度、全部有效来源的视频名称与可点击时间戳、中文类型、正式关系、阅读关联。
+
+普通用户页面不展示视频 ID、源文档 ID、证据 ID、分块 ID、转写代次、原始 JSON 或模型过程。需要展示原文时，按证据 ID 从证据知识库读取。
+
+Skill 提交的正文只包含当前候选有证据支持的内容；已有规范页的内容合并、字段证据重算和其他贡献保留由服务端完成。
+
+## 6. 正式关系
+
+| 中文 | `relation_type` | 方向 | 含义 |
+|---|---|---|---|
+| 包含于 | `part_of` | A → B | A 是 B 的组成部分或子知识 |
+| 解释 | `explains` | A → B | A 说明 B 的原理、原因或含义 |
+| 是……的案例 | `example_of` | A → B | A 是概念或方法 B 的实例 |
+| 应用于 | `applies_to` | A → B | 方法或概念 A 被用于对象或场景 B |
+| 支持 | `supports` | A → B | A 为判断 B 提供依据 |
+| 反驳 | `contradicts` | 双向 | A 与 B 对同一问题的判断冲突 |
+| 补充 | `complements` | 双向 | A 与 B 共同形成更完整解释 |
+| 涉及 | `involves` | A → B | 案例、方法或洞察 A 涉及实体 B |
+
+每条关系包含 `relation_id`、`relation_type`、`target_object_id`、`target_wiki_page_id`、`evidence_ids`、`time_range` 和 `confidence`。两端都是 `passed` 对象，目标只使用写入工具返回并回读确认的规范身份。相邻出现、标题相似、关键词重合和普通双链不构成正式关系。
+
+## 7. 两阶段写入
+
+1. 提交不带关系的完整候选和当前 `evidence_contribution`。
+2. 记录工具返回的结果、判定依据、冲突字段和规范身份。
+3. 对 `created` 或 `reused` 结果，按返回页面 ID 与 slug 回读。
+4. 全部关系目标可读后，使用返回的规范身份补写正式关系和阅读关联，再次回读。
+5. `review_required` 或目标失败时跳过对应写入并标记问题。
+6. 最后写视频索引页，且只引用已确认的规范页面。
+
+## 8. 视频索引页
+
+索引页 slug 为 `video/{视频ID}`，写入参数使用 `page_type: index`：
 
 ```yaml
 ---
+page_type: index
 type: knowledge_base
 source_video_id: V002
-title: {视频标题}_知识底座
+source_document_id: doc-V002
+transcript_generation: generation-20260907
+title: "{视频标题}_知识底座"
 audit_status: aligned
+source_refs: [doc-V002]
 ---
 ```
 
-## 页面正文顺序
-
-知识原子页面：
-
-1. 一级标题（`title`）
-2. 核心内容（`core_content`）
-3. 结构维度（按 `primary_type` 展示对应结构字段的子字段，标签使用中文；详见 [type-frameworks.md](type-frameworks.md)）
-4. 时间范围（`HH:MM:SS–HH:MM:SS`，从证据 ID 反查分块得到）
-5. 证据 ID（`evidence_ids`）
-6. 信息性质（`information_nature`）
-7. 关联知识（`related_atom_ids`，Wiki 双链）
-8. 关联实体（`related_entity_ids`，Wiki 双链）
-
-实体页面：
-
-1. 一级标题（`canonical_name`）
-2. 别名（如有）
-3. 一句话概述（`description`）
-4. 关键信息维度（按实体类型对应子字段，标签使用中文；详见 [type-frameworks.md](type-frameworks.md)）
-5. 证据 ID（`evidence_ids`）
-6. 关联知识（`source_atom_ids`，Wiki 双链）
-
-视频索引页：视频标题、主类型 / 次类型 / 审计状态、知识对象数量统计、全部实体的 Wiki 双链索引、全部知识原子按类型分组的 Wiki 双链索引、视频概要、必要的上游审计警示。
-
-## 双链规则
-
-使用 WeKnora 原生 Wiki 引用（`[[汪天凡]]`、`[[从智能到智慧]]`），与 [assemble-transcript-page 的链接优先级](../../assemble-transcript-page/references/page-contract.md) 一致。禁止本地文件路径、纯文本 ID、HTML 锚点、外部链接。带显示文本：`[[汪天凡|受访者]]`。
-
-## 写入顺序
-
-Wiki 双链必须分两阶段写入，避免页面尚未落地时产生悬空引用：
-
-1. 先确定页面名，分别通过 **创建/覆盖 Wiki** 写入知识原子和实体页面。
-2. 每次写入后记录工具返回的实际页面名或 slug，并通过 **阅读 Wiki 页面** 按该值确认页面存在且正文非空；不得凭标题自行猜测 slug。
-3. 所有目标页面确认可读后，再使用已记录的实际页面名或 slug 更新正文补齐 `[[xxx]]` 双链；目标页面创建失败时保留无该链接的可审计正文，并通过 **标记 Wiki 问题** 记录失败。
-4. 最后写入视频索引页，索引只允许引用已确认存在的页面，并在写入后再次读取确认。
-
-## 命名规则
-
-- 实体 Wiki 页面名：`canonical_name`。
-- 知识原子 Wiki 页面名：`title`；非法字符由 **创建/覆盖 Wiki** 工具按平台规则处理。
-- 视频索引页 Wiki 页面名：`{视频标题}_知识底座`。
-
-## 其他规则
-
-- 索引页不得宣称局部候选对象已拥有全局身份（全局 ID 由 `$build-video-knowledge-graph` 分配）。
-- 不得合并全库同名实体，不得修改其他视频页面。
-- 写入前 **阅读 Wiki 页面** 检查目标页面是否已存在；存在时按 SKILL.md 降级规则处理。
-- 写入校验项见 [audit-rules.md](audit-rules.md) 的"Wiki 写入校验"小节。
+索引页包含视频分类、五类数量、规范页面索引、视频概要和审计警示。它不设置 `primary_type`，也不进入五类列表或 Graph。索引只能使用工具返回的规范页面身份，同一规范页面不得因多个候选或贡献重复出现。

@@ -347,6 +347,7 @@ func (p pendingWikiPage) render(body string) string {
 	return fmt.Sprintf(`<wiki_page>
 <metadata>
 <knowledge_base_id>%s</knowledge_base_id>
+<wiki_page_id>%s</wiki_page_id>
 <link>[[%s|%s]]</link>
 <type>%s</type>
 <aliases>%s</aliases>
@@ -366,6 +367,7 @@ func (p pendingWikiPage) render(body string) string {
 </content>
 </wiki_page>`,
 		p.kbID,
+		p.page.ID,
 		p.page.Slug, p.page.Title, p.page.PageType,
 		strings.Join(p.page.Aliases, ", "),
 		strings.Join(p.outLinks, ", "),

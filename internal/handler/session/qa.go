@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/contentprovenance"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -46,6 +48,9 @@ type qaRequestContext struct {
 	tagIDs                []string
 	mcpServiceIDs         []string
 	skillNames            []string
+	productionTaskID      string
+	productionVideoID     string
+	productionGeneration  string
 	summaryModelID        string
 	webSearchEnabled      bool
 	mentionedItems        types.MentionedItems
@@ -74,22 +79,25 @@ type qaRequestContext struct {
 func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 	imageURLs, imageDescription := extractImageURLsAndOCRText(rc.images)
 	return &types.QARequest{
-		Session:             rc.session,
-		Query:               rc.query,
-		AssistantMessageID:  rc.assistantMessage.ID,
-		SummaryModelID:      rc.summaryModelID,
-		CustomAgent:         rc.customAgent,
-		SharedAgentReadOnly: rc.sharedAgentReadOnly,
-		KnowledgeBaseIDs:    rc.knowledgeBaseIDs,
-		KnowledgeIDs:        rc.knowledgeIDs,
-		TagScopes:           rc.tagScopes,
-		MCPServiceIDs:       rc.mcpServiceIDs,
-		SkillNames:          rc.skillNames,
-		ImageURLs:           imageURLs,
-		ImageDescription:    imageDescription,
-		UserMessageID:       rc.userMessageID,
-		WebSearchEnabled:    rc.webSearchEnabled,
-		Attachments:         rc.attachments,
+		Session:              rc.session,
+		Query:                rc.query,
+		AssistantMessageID:   rc.assistantMessage.ID,
+		SummaryModelID:       rc.summaryModelID,
+		CustomAgent:          rc.customAgent,
+		SharedAgentReadOnly:  rc.sharedAgentReadOnly,
+		KnowledgeBaseIDs:     rc.knowledgeBaseIDs,
+		KnowledgeIDs:         rc.knowledgeIDs,
+		TagScopes:            rc.tagScopes,
+		MCPServiceIDs:        rc.mcpServiceIDs,
+		SkillNames:           rc.skillNames,
+		ProductionTaskID:     rc.productionTaskID,
+		ProductionVideoID:    rc.productionVideoID,
+		ProductionGeneration: rc.productionGeneration,
+		ImageURLs:            imageURLs,
+		ImageDescription:     imageDescription,
+		UserMessageID:        rc.userMessageID,
+		WebSearchEnabled:     rc.webSearchEnabled,
+		Attachments:          rc.attachments,
 	}
 }
 
@@ -346,6 +354,24 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		request.WebSearchEnabled,
 	)
 
+	productionIdentity, provenanceErr := productionIdentityFromSignedRequest(
+		ctx,
+		contentPipelineAuditSecret(h.config),
+		c.GetHeader(contentprovenance.EnvelopeHeader),
+		c.GetHeader(contentprovenance.SignatureHeader),
+		request.Channel,
+		sessionID,
+		request.AgentID,
+		request.Query,
+		skillNames,
+		kbIDs,
+		knowledgeIDs,
+	)
+	if provenanceErr != nil {
+		logger.Warnf(ctx, "Rejected content pipeline provenance: %v", provenanceErr)
+		return nil, nil, errors.NewUnauthorizedError("invalid content pipeline provenance")
+	}
+
 	// Build request context
 	reqCtx := &qaRequestContext{
 		ctx:         ctx,
@@ -373,6 +399,9 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		tagIDs:                secutils.SanitizeForLogArray(tagIDs),
 		mcpServiceIDs:         secutils.SanitizeForLogArray(mcpServiceIDs),
 		skillNames:            secutils.SanitizeForLogArray(skillNames),
+		productionTaskID:      productionIdentity.TaskID,
+		productionVideoID:     productionIdentity.VideoID,
+		productionGeneration:  productionIdentity.TranscriptGeneration,
 		summaryModelID:        secutils.SanitizeForLog(request.SummaryModelID),
 		webSearchEnabled:      request.WebSearchEnabled,
 		mentionedItems:        convertMentionedItems(request.MentionedItems),
@@ -390,6 +419,43 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	}
 
 	return reqCtx, &request, nil
+}
+
+type pipelineProductionIdentity struct {
+	TaskID               string
+	VideoID              string
+	TranscriptGeneration string
+}
+
+func productionIdentityFromSignedRequest(
+	ctx context.Context,
+	secret, encoded, signed, channel, sessionID, agentID, query string,
+	skillNames, knowledgeBaseIDs, knowledgeIDs []string,
+) (pipelineProductionIdentity, error) {
+	principal, ok := types.PrincipalFromContext(ctx)
+	if strings.TrimSpace(channel) != "content_pipeline" {
+		return pipelineProductionIdentity{}, nil
+	}
+	if !ok || principal.Type != types.PrincipalAPITenant {
+		return pipelineProductionIdentity{}, contentprovenance.ErrMismatchedRequest
+	}
+	envelope, err := contentprovenance.Verify(secret, encoded, signed)
+	if err != nil {
+		return pipelineProductionIdentity{}, err
+	}
+	if !envelope.MatchesRequest(sessionID, agentID, query, skillNames, knowledgeBaseIDs, knowledgeIDs) {
+		return pipelineProductionIdentity{}, contentprovenance.ErrMismatchedRequest
+	}
+	return pipelineProductionIdentity{
+		TaskID: envelope.TaskID, VideoID: envelope.VideoID, TranscriptGeneration: envelope.TranscriptGeneration,
+	}, nil
+}
+
+func contentPipelineAuditSecret(cfg *config.Config) string {
+	if cfg == nil || cfg.Agent == nil {
+		return ""
+	}
+	return cfg.Agent.ContentPipelineAuditSecret
 }
 
 func decodeAndValidateAttachmentUploads(

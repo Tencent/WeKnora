@@ -11,12 +11,16 @@ type execCtxKey struct{}
 
 // ToolExecContext is attached to context during agent tool execution (per tool call).
 type ToolExecContext struct {
-	SessionID          string
-	AssistantMessageID string
-	RequestID          string
-	ToolCallID         string
-	UserID             string // principal storage ID of the originating session; used by HITL gates for authorization (issue #1173)
-	EventBus           *event.EventBus
+	SessionID            string
+	AssistantMessageID   string
+	RequestID            string
+	ToolCallID           string
+	PinnedSkillNames     []string
+	ProductionTaskID     string
+	ProductionVideoID    string
+	ProductionGeneration string
+	UserID               string // principal storage ID of the originating session; used by HITL gates for authorization (issue #1173)
+	EventBus             *event.EventBus
 	// ApprovalCtx is the parent ctx WITHOUT defaultToolExecTimeout; used when the tool
 	// must wait for human approval that may exceed normal tool exec timeout (issue #1173).
 	// Falls back to the per-tool execCtx when nil.

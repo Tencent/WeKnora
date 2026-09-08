@@ -20,6 +20,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// WikiObjectContractVersion identifies the shared AI, write-tool, API, and UI
+// contract for P3 knowledge objects.
+const WikiObjectContractVersion = "p3-wiki-object/v1"
+
 // KnowledgeType 前端五类型枚举（与 spec §2.1 对齐）
 type KnowledgeType string
 
@@ -147,6 +151,7 @@ type StructuredRelation struct {
 	TargetTitle      string   `json:"target_title,omitempty"`
 	TargetSlug       string   `json:"target_slug,omitempty"`
 	EvidenceIDs      []string `json:"evidence_ids"`
+	TimeRange        string   `json:"time_range"`
 	Confidence       float64  `json:"confidence"`
 }
 
@@ -155,13 +160,17 @@ type WikiObjectValidation struct {
 	KnowledgeType            KnowledgeType
 	EntitySubType            string
 	Title                    string
+	Aliases                  []string
+	CoreContent              string
 	SourceVideoID            string
 	TranscriptGeneration     string
 	AuditStatus              string
 	ClassificationConfidence float64
 	EvidenceIDs              []string
 	SourceRefs               []string
+	EvidenceContributions    []EvidenceContribution
 	StructureFields          map[string]string
+	Relations                []StructuredRelation
 }
 
 var wikiObjectTypes = map[string]KnowledgeType{
@@ -235,6 +244,7 @@ func ValidateWikiObjectPage(content, pageType, expectedVideoID, expectedGenerati
 	if result.Title == "" {
 		return result, fmt.Errorf("title or canonical_name is required")
 	}
+	result.Aliases = stringSliceValue(frontmatter["aliases"])
 	result.SourceVideoID = strings.TrimSpace(stringValue(frontmatter["source_video_id"]))
 	if result.SourceVideoID == "" || (strings.TrimSpace(expectedVideoID) != "" && result.SourceVideoID != strings.TrimSpace(expectedVideoID)) {
 		return result, fmt.Errorf("source_video_id does not match the active video")
@@ -262,6 +272,11 @@ func ValidateWikiObjectPage(content, pageType, expectedVideoID, expectedGenerati
 	if len(result.SourceRefs) == 0 {
 		return result, fmt.Errorf("source_refs must contain at least one source document ID")
 	}
+	contributions, contributionErr := ParseEvidenceContributions(content)
+	if contributionErr != nil {
+		return result, contributionErr
+	}
+	result.EvidenceContributions = contributions
 	result.StructureFields = structureFields(frontmatter["structure_fields"], body)
 	required := frameworkKeys(knowledgeType, entitySubType)
 	if err := rejectForeignStructureFields(frontmatter["structure_fields"], required); err != nil {
@@ -282,6 +297,114 @@ func ValidateWikiObjectPage(content, pageType, expectedVideoID, expectedGenerati
 	}
 	if filled < minimum {
 		return result, fmt.Errorf("%s requires at least %d populated structure fields", knowledgeType, minimum)
+	}
+	result.CoreContent = firstNonEmptyString(
+		stringValue(frontmatter["core_content"]),
+		wikiBodyLabeledValue(body, "一句话概述", "核心内容"),
+	)
+	if result.CoreContent == "" {
+		return result, fmt.Errorf("core content is required")
+	}
+	return result, nil
+}
+
+// ValidateWikiObjectWritePage applies the current strict write contract. Read
+// paths keep accepting legacy pages whose core content only exists in the body,
+// while every new or repaired AI write must persist the structured field.
+func ValidateWikiObjectWritePage(content, pageType, expectedVideoID, expectedGeneration string) (WikiObjectValidation, error) {
+	frontmatter, _ := parseWikiFrontmatter(content)
+	if strings.TrimSpace(stringValue(frontmatter["core_content"])) == "" {
+		return WikiObjectValidation{}, fmt.Errorf("frontmatter.core_content is required by %s", WikiObjectContractVersion)
+	}
+	result, err := ValidateWikiObjectPage(content, pageType, expectedVideoID, expectedGeneration)
+	if err != nil {
+		return result, err
+	}
+	result.CoreContent = strings.TrimSpace(stringValue(frontmatter["core_content"]))
+	return result, nil
+}
+
+// IsWikiObjectCandidate identifies pages owned by the five-type contract. It
+// intentionally checks key presence rather than valid YAML values so malformed
+// candidate pages are routed into validation instead of bypassing it.
+func IsWikiObjectCandidate(content string) bool {
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return false
+	}
+	keys := make(map[string]struct{})
+	for _, line := range lines[1:] {
+		line = strings.TrimSpace(line)
+		if line == "---" {
+			break
+		}
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, _, ok := strings.Cut(line, ":")
+		if ok {
+			keys[strings.TrimSpace(key)] = struct{}{}
+		}
+	}
+	_, hasObjectID := keys["knowledge_object_id"]
+	if !hasObjectID {
+		_, hasObjectID = keys["id"]
+	}
+	_, hasVideoID := keys["source_video_id"]
+	_, hasGeneration := keys["transcript_generation"]
+	_, hasType := keys["type"]
+	if !hasType {
+		_, hasType = keys["primary_type"]
+	}
+	return hasObjectID && hasVideoID && hasGeneration && hasType
+}
+
+// ParseWikiObjectRelations validates the write-time shape of structured
+// relations without making relation failures invalidate the source object at
+// projection time. Callers that persist a relation-bearing page must also
+// resolve and validate every target page before writing.
+func ParseWikiObjectRelations(content string) ([]StructuredRelation, error) {
+	frontmatter, _ := parseWikiFrontmatter(content)
+	raw := frontmatter["relations"]
+	if raw == nil {
+		return nil, nil
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("relations must be a list")
+	}
+	result := make([]StructuredRelation, 0, len(items))
+	for index, item := range items {
+		values, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("relations[%d] must be an object", index)
+		}
+		relation := StructuredRelation{
+			RelationID:       strings.TrimSpace(stringValue(values["relation_id"])),
+			RelationType:     strings.ToLower(strings.TrimSpace(stringValue(values["relation_type"]))),
+			TargetObjectID:   strings.TrimSpace(stringValue(values["target_object_id"])),
+			TargetWikiPageID: strings.TrimSpace(stringValue(values["target_wiki_page_id"])),
+			EvidenceIDs:      stringSliceValue(values["evidence_ids"]),
+			TimeRange:        strings.TrimSpace(stringValue(values["time_range"])),
+			Confidence:       floatValue(values["confidence"]),
+		}
+		switch {
+		case relation.RelationID == "":
+			return nil, fmt.Errorf("relations[%d].relation_id is required", index)
+		case relation.RelationType == "":
+			return nil, fmt.Errorf("relations[%d].relation_type is required", index)
+		case relation.TargetObjectID == "":
+			return nil, fmt.Errorf("relations[%d].target_object_id is required", index)
+		case relation.TargetWikiPageID == "":
+			return nil, fmt.Errorf("relations[%d].target_wiki_page_id is required", index)
+		case len(relation.EvidenceIDs) == 0:
+			return nil, fmt.Errorf("relations[%d].evidence_ids must contain at least one ID", index)
+		case relation.TimeRange == "":
+			return nil, fmt.Errorf("relations[%d].time_range is required", index)
+		case relation.Confidence <= 0 || relation.Confidence > 1:
+			return nil, fmt.Errorf("relations[%d].confidence must be between 0 and 1", index)
+		}
+		result = append(result, relation)
 	}
 	return result, nil
 }
@@ -368,6 +491,7 @@ type IdentityCandidate struct {
 	EntitySubType        string
 	Title                string
 	Aliases              []string
+	CoreContent          string
 	SourceVideoID        string
 	TranscriptGeneration string
 	StructureFields      map[string]string
@@ -383,23 +507,53 @@ const (
 )
 
 type IdentityComparison struct {
-	Decision        IdentityDecision
-	Score           float64
-	TitleMatch      bool
-	TypeMatch       bool
-	ContextMatch    bool
-	EvidenceOverlap bool
-	Reason          string
+	Decision           IdentityDecision
+	Score              float64
+	TitleMatch         bool
+	TypeMatch          bool
+	ContextMatch       bool
+	EvidenceOverlap    bool
+	NameSimilarity     float64
+	SemanticSimilarity float64
+	Reason             string
 }
 
-// CompareIdentity is deliberately conservative. It is used after normalized
-// title/alias candidate recall; a low semantic score never causes a merge.
+// IdentityRecall finds plausible identity pairs. Surface names only recall a
+// candidate; CompareIdentity still requires compatible type and meaning before
+// it can reuse an identity.
+func IdentityRecall(left, right IdentityCandidate) bool {
+	if strings.TrimSpace(left.KnowledgeObjectID) != "" && left.KnowledgeObjectID == right.KnowledgeObjectID {
+		return true
+	}
+	nameSimilarity, containment := identityNameSimilarity(left, right)
+	semanticSimilarity := identitySemanticSimilarity(left, right)
+	if nameSimilarity == 1 {
+		return true
+	}
+	if containment && semanticSimilarity >= 0.18 {
+		return true
+	}
+	return nameSimilarity >= 0.45 && semanticSimilarity >= 0.28 || semanticSimilarity >= 0.58
+}
+
+// CompareIdentity is deliberately conservative. Names recall candidates, but
+// only compatible types plus sufficiently similar definitions and structure
+// can reuse a semantic identity.
 func CompareIdentity(left, right IdentityCandidate) IdentityComparison {
+	nameSimilarity, containment := identityNameSimilarity(left, right)
+	semanticSimilarity := identitySemanticSimilarity(left, right)
 	result := IdentityComparison{
-		TypeMatch:       left.KnowledgeType == right.KnowledgeType && left.EntitySubType == right.EntitySubType,
-		TitleMatch:      identityNameMatch(left, right),
-		ContextMatch:    fieldSimilarity(left.StructureFields, right.StructureFields) >= 0.35,
-		EvidenceOverlap: overlapRatio(left.EvidenceIDs, right.EvidenceIDs) > 0,
+		TypeMatch:          left.KnowledgeType == right.KnowledgeType && left.EntitySubType == right.EntitySubType,
+		TitleMatch:         identityNameMatch(left, right),
+		ContextMatch:       semanticSimilarity >= 0.28,
+		EvidenceOverlap:    overlapRatio(left.EvidenceIDs, right.EvidenceIDs) > 0,
+		NameSimilarity:     nameSimilarity,
+		SemanticSimilarity: semanticSimilarity,
+	}
+	if !IdentityRecall(left, right) {
+		result.Decision = IdentitySeparate
+		result.Reason = "surface and semantic signals do not recall the same identity"
+		return result
 	}
 	if left.KnowledgeType != right.KnowledgeType {
 		result.Decision = IdentityConflict
@@ -411,36 +565,114 @@ func CompareIdentity(left, right IdentityCandidate) IdentityComparison {
 		result.Reason = "same candidate name has different entity subtypes"
 		return result
 	}
-	if !result.TitleMatch {
-		result.Decision = IdentitySeparate
-		result.Reason = "title and aliases do not match"
-		return result
-	}
-	score := 0.45
-	if result.ContextMatch {
-		score += 0.30
-	}
+	score := nameSimilarity*0.45 + semanticSimilarity*0.45
 	if result.EvidenceOverlap {
-		score += 0.15
+		score += 0.05
 	}
 	if left.SourceVideoID != "" && left.SourceVideoID == right.SourceVideoID {
 		score += 0.05
 	}
-	if left.TranscriptGeneration != "" && left.TranscriptGeneration == right.TranscriptGeneration {
-		score += 0.05
+	if score > 1 {
+		score = 1
 	}
 	result.Score = score
-	if score >= 0.80 {
+	sameCanonicalName := nameSimilarity == 1
+	if sameCanonicalName && semanticSimilarity >= 0.12 {
 		result.Decision = IdentityReuse
-		result.Reason = "same normalized identity and compatible context"
+		result.Reason = "same canonical name and compatible semantic content"
+	} else if containment && semanticSimilarity >= 0.22 {
+		result.Decision = IdentityReuse
+		result.Reason = "one concept title specializes the other while their semantic content agrees"
+	} else if nameSimilarity >= 0.55 && semanticSimilarity >= 0.35 {
+		result.Decision = IdentityReuse
+		result.Reason = "related surface names describe the same structured meaning"
+	} else if semanticSimilarity >= 0.62 && nameSimilarity >= 0.30 {
+		result.Decision = IdentityReuse
+		result.Reason = "different surface names have strongly equivalent semantic content"
 	} else {
 		result.Decision = IdentitySeparate
-		result.Reason = "same name but insufficient semantic or evidence agreement"
+		result.Reason = "candidate names are related but semantic content is insufficiently equivalent"
 	}
 	return result
 }
 
+// GroupSemanticIdentities returns connected semantic components. Identity is
+// transitive: once two surface forms independently resolve to the same anchor,
+// a partial third form must not split that canonical object by iteration order.
+func GroupSemanticIdentities(candidates []IdentityCandidate) [][]int {
+	parents := make([]int, len(candidates))
+	for index := range parents {
+		parents[index] = index
+	}
+	var find func(int) int
+	find = func(index int) int {
+		if parents[index] != index {
+			parents[index] = find(parents[index])
+		}
+		return parents[index]
+	}
+	union := func(left, right int) {
+		leftRoot, rightRoot := find(left), find(right)
+		if leftRoot != rightRoot {
+			parents[rightRoot] = leftRoot
+		}
+	}
+	for left := range candidates {
+		for right := left + 1; right < len(candidates); right++ {
+			if semanticIdentityEquivalent(candidates[left], candidates[right]) {
+				union(left, right)
+			}
+		}
+	}
+	groupByRoot := make(map[int]int, len(candidates))
+	groups := make([][]int, 0, len(candidates))
+	for index := range candidates {
+		root := find(index)
+		groupIndex, exists := groupByRoot[root]
+		if !exists {
+			groupIndex = len(groups)
+			groupByRoot[root] = groupIndex
+			groups = append(groups, nil)
+		}
+		groups[groupIndex] = append(groups[groupIndex], index)
+	}
+	return groups
+}
+
+// CanonicalIdentityLess defines a stable winner without relying on write time.
+// Clean, concise surface names win over type-decorated or compound labels; the
+// object ID is the final deterministic tie-breaker.
+func CanonicalIdentityLess(left, right IdentityCandidate) bool {
+	leftTitle := strings.TrimSpace(left.Title)
+	rightTitle := strings.TrimSpace(right.Title)
+	leftClean := stripIdentityTypeDecoration(leftTitle) == leftTitle
+	rightClean := stripIdentityTypeDecoration(rightTitle) == rightTitle
+	if leftClean != rightClean {
+		return leftClean
+	}
+	leftLength, rightLength := len([]rune(leftTitle)), len([]rune(rightTitle))
+	if leftLength != rightLength {
+		return leftLength < rightLength
+	}
+	if leftNormalized, rightNormalized := NormalizeIdentity(leftTitle), NormalizeIdentity(rightTitle); leftNormalized != rightNormalized {
+		return leftNormalized < rightNormalized
+	}
+	return strings.TrimSpace(left.KnowledgeObjectID) < strings.TrimSpace(right.KnowledgeObjectID)
+}
+
+func semanticIdentityEquivalent(left, right IdentityCandidate) bool {
+	if left.KnowledgeType != right.KnowledgeType ||
+		(left.KnowledgeType == TypeEntity && left.EntitySubType != right.EntitySubType) {
+		return false
+	}
+	if leftID, rightID := strings.TrimSpace(left.KnowledgeObjectID), strings.TrimSpace(right.KnowledgeObjectID); leftID != "" && leftID == rightID {
+		return true
+	}
+	return CompareIdentity(left, right).Decision == IdentityReuse
+}
+
 func NormalizeIdentity(value string) string {
+	value = stripIdentityTypeDecoration(value)
 	var builder strings.Builder
 	for _, char := range strings.ToLower(strings.TrimSpace(value)) {
 		if unicode.IsLetter(char) || unicode.IsDigit(char) {
@@ -448,6 +680,17 @@ func NormalizeIdentity(value string) string {
 		}
 	}
 	return builder.String()
+}
+
+var identityTypeDecorationPattern = regexp.MustCompile(`(?i)[\s_-]*(?:[（(]\s*(?:实体|概念|案例|方法论|方法|洞察|entity|concept|case|methodology|method|insight)\s*[）)])\s*$`)
+
+func stripIdentityTypeDecoration(value string) string {
+	previous := ""
+	for value != previous {
+		previous = value
+		value = identityTypeDecorationPattern.ReplaceAllString(strings.TrimSpace(value), "")
+	}
+	return strings.TrimSpace(value)
 }
 
 func identityNameMatch(left, right IdentityCandidate) bool {
@@ -461,6 +704,102 @@ func identityNameMatch(left, right IdentityCandidate) bool {
 		}
 	}
 	return false
+}
+
+func identityNameSimilarity(left, right IdentityCandidate) (float64, bool) {
+	leftNames := append([]string{left.Title}, left.Aliases...)
+	rightNames := append([]string{right.Title}, right.Aliases...)
+	best := 0.0
+	contained := false
+	for _, leftName := range leftNames {
+		leftNormalized := NormalizeIdentity(leftName)
+		if leftNormalized == "" {
+			continue
+		}
+		for _, rightName := range rightNames {
+			rightNormalized := NormalizeIdentity(rightName)
+			if rightNormalized == "" {
+				continue
+			}
+			if leftNormalized == rightNormalized {
+				return 1, true
+			}
+			shorter, longer := leftNormalized, rightNormalized
+			if len([]rune(shorter)) > len([]rune(longer)) {
+				shorter, longer = longer, shorter
+			}
+			if len([]rune(shorter)) >= 4 && strings.Contains(longer, shorter) {
+				contained = true
+				ratio := float64(len([]rune(shorter))) / float64(len([]rune(longer)))
+				if ratio > best {
+					best = ratio
+				}
+			}
+			if similarity := runeGramSimilarity(leftNormalized, rightNormalized); similarity > best {
+				best = similarity
+			}
+		}
+	}
+	return best, contained
+}
+
+func identitySemanticSimilarity(left, right IdentityCandidate) float64 {
+	return runeGramSimilarity(identitySemanticText(left), identitySemanticText(right))
+}
+
+func identitySemanticText(candidate IdentityCandidate) string {
+	parts := make([]string, 0, len(candidate.StructureFields)+1)
+	if value := strings.TrimSpace(candidate.CoreContent); value != "" {
+		parts = append(parts, value)
+	}
+	keys := make([]string, 0, len(candidate.StructureFields))
+	for key := range candidate.StructureFields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if value := strings.TrimSpace(candidate.StructureFields[key]); value != "" {
+			parts = append(parts, value)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func runeGramSimilarity(left, right string) float64 {
+	leftGrams := identityRuneGrams(left)
+	rightGrams := identityRuneGrams(right)
+	if len(leftGrams) == 0 || len(rightGrams) == 0 {
+		return 0
+	}
+	intersection := 0
+	for gram := range leftGrams {
+		if _, ok := rightGrams[gram]; ok {
+			intersection++
+		}
+	}
+	return float64(2*intersection) / float64(len(leftGrams)+len(rightGrams))
+}
+
+func identityRuneGrams(value string) map[string]struct{} {
+	var builder strings.Builder
+	for _, char := range strings.ToLower(value) {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) {
+			builder.WriteRune(char)
+		}
+	}
+	runes := []rune(builder.String())
+	if len(runes) == 0 {
+		return nil
+	}
+	grams := make(map[string]struct{}, len(runes))
+	if len(runes) == 1 {
+		grams[string(runes)] = struct{}{}
+		return grams
+	}
+	for index := 0; index < len(runes)-1; index++ {
+		grams[string(runes[index:index+2])] = struct{}{}
+	}
+	return grams
 }
 
 func fieldSimilarity(left, right map[string]string) float64 {
@@ -597,6 +936,26 @@ func firstWikiHeading(body string) string {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "# ") {
 			return strings.TrimSpace(strings.TrimPrefix(line, "# "))
+		}
+	}
+	return ""
+}
+
+func wikiBodyLabeledValue(body string, labels ...string) string {
+	allowed := make(map[string]struct{}, len(labels))
+	for _, label := range labels {
+		allowed[strings.TrimSpace(label)] = struct{}{}
+	}
+	for _, line := range strings.Split(body, "\n") {
+		match := wikiLabelPattern.FindStringSubmatch(line)
+		if len(match) != 3 {
+			continue
+		}
+		if _, ok := allowed[strings.TrimSpace(match[1])]; !ok {
+			continue
+		}
+		if value := strings.TrimSpace(match[2]); value != "" {
+			return value
 		}
 	}
 	return ""

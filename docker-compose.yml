@@ -317,6 +317,7 @@ services:
       # Agent LLM call timeout
       - WEKNORA_AGENT_LLM_TIMEOUT=${WEKNORA_AGENT_LLM_TIMEOUT:-}
       - WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT=${WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT:-}
+      - CONTENT_PIPELINE_AUDIT_SECRET=${CONTENT_PIPELINE_AUDIT_SECRET:-}
       # MCP 工具人工审批失败时是否放行（true 放行 / 默认 fail-close 拒绝）
       - WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=${WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN:-}
       # Tenant / RBAC（详见 docs/RBAC说明.md 与 .env.example 注释）

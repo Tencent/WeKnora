@@ -60,6 +60,16 @@ func TestLoadReadsDirectContentLLMConfig(t *testing.T) {
 	}
 }
 
+func TestLoadReadsContentPipelineAuditSecret(t *testing.T) {
+	t.Setenv("CONTENT_PIPELINE_AUDIT_SECRET", "server-only-secret")
+
+	cfg := Load()
+
+	if cfg.WeKnora.ContentPipelineAuditSecret != "server-only-secret" {
+		t.Fatalf("content pipeline audit secret was not loaded")
+	}
+}
+
 func TestLoadUsesPerformanceWorkerDefaults(t *testing.T) {
 	for _, key := range []string{
 		"CUSTOM_WORKER_POLL_INTERVAL",
@@ -101,7 +111,7 @@ func TestLoadKeepsProductGraphConfigurationIndependentFromOfficialGraph(t *testi
 	t.Setenv("WEKNORA_KNOWLEDGE_KB_ID", "knowledge-kb")
 	t.Setenv("CUSTOM_WIKI_GRAPH_NEO4J_ENABLE", "")
 	t.Setenv("CUSTOM_WIKI_GRAPH_NEO4J_URI", "")
-	t.Setenv("CUSTOM_WIKI_GRAPH_KB_ID", "")
+	t.Setenv("CUSTOM_WIKI_GRAPH_KB_ID", "legacy-graph-kb")
 
 	cfg := Load()
 	if cfg.WikiGraph.Enabled {

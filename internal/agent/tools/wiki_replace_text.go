@@ -102,6 +102,9 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: fmt.Sprintf("Failed to fetch page %s: %v", params.Slug, err)}, nil
 	}
+	if isProtectedKnowledgeV2Page(existingPage) {
+		return &types.ToolResult{Success: false, Error: protectedKnowledgeV2MutationError}, nil
+	}
 
 	replacementCount := strings.Count(existingPage.Content, params.OldText)
 	if replacementCount == 0 {

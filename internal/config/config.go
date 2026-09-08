@@ -49,6 +49,9 @@ type AgentConfig struct {
 	// ToolApprovalTimeoutSeconds is how long the agent waits for human approval on a flagged MCP tool.
 	// 0 means default 600 (10 minutes).
 	ToolApprovalTimeoutSeconds int `yaml:"tool_approval_timeout_seconds" json:"tool_approval_timeout_seconds"`
+	// ContentPipelineAuditSecret verifies server-signed production provenance.
+	// It is environment-only and must never be exposed through config APIs.
+	ContentPipelineAuditSecret string `yaml:"-" json:"-"`
 }
 
 // IMConfig configures the IM integration service.
@@ -788,6 +791,7 @@ func applyAgentEnvOverrides(cfg *Config) {
 			cfg.Agent.ToolApprovalTimeoutSeconds = int(d.Seconds())
 		}
 	}
+	cfg.Agent.ContentPipelineAuditSecret = os.Getenv("CONTENT_PIPELINE_AUDIT_SECRET")
 }
 
 // applyAuthAndTenantDefaults fills in defaults for the Auth and Tenant

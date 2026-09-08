@@ -288,6 +288,9 @@ func (s *sessionService) buildAgentConfig(
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
 		SharedAgentReadOnly:         req.SharedAgentReadOnly,
+		ProductionTaskID:            req.ProductionTaskID,
+		ProductionVideoID:           req.ProductionVideoID,
+		ProductionGeneration:        req.ProductionGeneration,
 	}
 
 	// Falls back to global configuration if no specific timeout is set for the agent.

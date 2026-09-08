@@ -57,8 +57,11 @@ type AgentConfig struct {
 	VLMModelID      string `json:"-"` // VLM model ID for tool result image analysis (set from CustomAgent config)
 	SandboxConfigID string `json:"-"` // Workspace sandbox config ID for skill execution (set from CustomAgent config)
 	// Per-request @mention pins (runtime only; injected as <must_use> in the user message).
-	PinnedMCPServiceIDs []string `json:"-"`
-	PinnedSkillNames    []string `json:"-"`
+	PinnedMCPServiceIDs  []string `json:"-"`
+	PinnedSkillNames     []string `json:"-"`
+	ProductionTaskID     string   `json:"-"` // Content pipeline task owning this Agent run
+	ProductionVideoID    string   `json:"-"`
+	ProductionGeneration string   `json:"-"`
 	// SharedAgentReadOnly prevents a shared agent from mutating resources in
 	// its source workspace. It is set from the verified share relation, never
 	// inferred from a client-provided tenant ID.

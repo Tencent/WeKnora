@@ -169,6 +169,25 @@ func TestWikiReadPageSchemaUsesAutomaticKBRouting(t *testing.T) {
 	}
 }
 
+func TestWikiReadPageOutputIncludesWikiPageID(t *testing.T) {
+	page := newTestWikiPage("kb-1", "concept/a")
+	page.ID = "page-a"
+	service := &fakeWikiPageService{pages: map[string]*types.WikiPage{
+		wikiPageKey("kb-1", page.Slug): page,
+	}}
+	tool := NewWikiReadPageTool(
+		service, nil, NewWikiScopesFromKBIDs([]string{"kb-1"}), NewWikiRouteResolver(),
+	)
+
+	result, err := tool.Execute(context.Background(), json.RawMessage(`{"slugs":["concept/a"]}`))
+	if err != nil || result == nil || !result.Success {
+		t.Fatalf("wiki_read_page failed: result=%+v err=%v", result, err)
+	}
+	if !strings.Contains(result.Output, "<wiki_page_id>page-a</wiki_page_id>") {
+		t.Fatalf("wiki_read_page output must expose the real page ID: %q", result.Output)
+	}
+}
+
 func TestWikiReadPageRoutesEachSlugIndependently(t *testing.T) {
 	pageA := newTestWikiPage("kb-1", "concept/a")
 	pageB := newTestWikiPage("kb-2", "concept/b")

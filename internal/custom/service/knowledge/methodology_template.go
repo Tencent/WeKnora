@@ -55,6 +55,7 @@ type methodologyPageFrontmatter struct {
 	InformationNature        string            `yaml:"information_nature"`
 	AuditStatus              string            `yaml:"audit_status"`
 	ClassificationConfidence float64           `yaml:"classification_confidence"`
+	CoreContent              string            `yaml:"core_content"`
 	EvidenceIDs              []string          `yaml:"evidence_ids"`
 	SourceRefs               []string          `yaml:"source_refs"`
 	ChunkRefs                []string          `yaml:"chunk_refs"`
@@ -153,6 +154,7 @@ func RenderMethodologyPage(input MethodologyTemplateInput) (MethodologyPageRende
 		InformationNature:        "方法论",
 		AuditStatus:              "passed",
 		ClassificationConfidence: object.ClassificationConfidence,
+		CoreContent:              description,
 		EvidenceIDs:              sortedEvidenceIDs(object.EvidenceIDs),
 		SourceRefs:               sourceDocumentRefs(object.SourceDocumentID),
 		ChunkRefs:                sortedEvidenceIDs(input.ChunkRefs),
@@ -191,7 +193,14 @@ func RenderMethodologyPage(input MethodologyTemplateInput) (MethodologyPageRende
 	}
 	if value := renderedFields["applicability"]; value != "" {
 		body.WriteString("\n## 适用条件\n\n")
-		fmt.Fprintf(&body, "- %s：%s\n", framework.Fields[len(framework.Fields)-1].Label, value)
+		applicabilityLabel := "适用条件与限制"
+		for _, field := range framework.Fields {
+			if field.Key == "applicability" {
+				applicabilityLabel = field.Label
+				break
+			}
+		}
+		fmt.Fprintf(&body, "- %s：%s\n", applicabilityLabel, value)
 	}
 	body.WriteString("\n## 知识来源\n\n")
 	body.WriteString("时间范围：")

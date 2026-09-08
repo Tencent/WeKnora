@@ -102,6 +102,53 @@ func TestCastParams_StringToStringArray(t *testing.T) {
 	}
 }
 
+func TestCastParams_NormalizesNestedWikiWritePagePayload(t *testing.T) {
+	schema := json.RawMessage(`{
+  "type":"object",
+  "properties":{
+    "slug":{"type":"string"}, "title":{"type":"string"},
+    "summary":{"type":"string"}, "content":{"type":"string"},
+    "page_type":{"type":"string"}, "source_refs":{"type":"array"}
+  },
+  "required":["slug","title","summary","content","page_type"]
+}`)
+	args := json.RawMessage(`{
+  "slug":"entity/obsidian",
+  "title":"Obsidian",
+  "summary":{
+    "content":"---\nknowledge_object_id: ko-1\ntype: entity\nprimary_type: entity\nsource_video_id: video-1\ntranscript_generation: generation-1\n---\n\n# Obsidian\n\n本地 Markdown 知识库软件。",
+    "page_type":"entity",
+    "source_refs":["doc-real"]
+  }
+}`)
+	got := NormalizeToolParams(ToolWikiWritePage, args, schema)
+	got = CastParams(got, schema)
+	var parsed map[string]interface{}
+	require.NoError(t, json.Unmarshal(got, &parsed))
+	assert.Equal(t, "index", parsed["page_type"])
+	assert.Equal(t, "doc-real", parsed["source_refs"].([]interface{})[0])
+	assert.Contains(t, parsed["content"], "# Obsidian")
+	assert.Equal(t, "本地 Markdown 知识库软件。", parsed["summary"])
+	assert.Empty(t, ValidateParams(got, schema))
+}
+
+func TestCastParams_PreservesExplicitWikiSummary(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","properties":{"summary":{"type":"string"},"content":{"type":"string"},"page_type":{"type":"string"}}}`)
+	args := json.RawMessage(`{"summary":{"summary":"保留的摘要","content":"---\nknowledge_object_id: ko-1\ntype: concept\nsource_video_id: video-1\ntranscript_generation: generation-1\n---\n正文","page_type":"concept"}}`)
+	got := NormalizeToolParams(ToolWikiWritePage, args, schema)
+	got = CastParams(got, schema)
+	var parsed map[string]interface{}
+	require.NoError(t, json.Unmarshal(got, &parsed))
+	assert.Equal(t, "保留的摘要", parsed["summary"])
+	assert.Equal(t, "index", parsed["page_type"])
+}
+
+func TestNormalizeToolParams_DoesNotTouchOtherTools(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","properties":{"summary":{"type":"string"},"content":{"type":"string"},"page_type":{"type":"string"}}}`)
+	args := json.RawMessage(`{"summary":{"content":"---\ntype: concept\n---\n正文","page_type":"concept"}}`)
+	assert.Equal(t, string(args), string(NormalizeToolParams("dynamic_tool", args, schema)))
+}
+
 // ---- ClampParams ------------------------------------------------------------
 
 func clampSchema() json.RawMessage {

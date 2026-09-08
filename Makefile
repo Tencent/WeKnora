@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend acceptance-up acceptance-down acceptance-restart acceptance-status acceptance-logs docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc
+.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend acceptance-up acceptance-down acceptance-restart acceptance-status acceptance-logs docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc sync-extract-video-knowledge-v2 check-extract-video-knowledge-v2
 
 # Show help
 help:
@@ -43,6 +43,8 @@ help:
 	@echo "  deps              安装依赖"
 	@echo "  docs              生成 Swagger API 文档"
 	@echo "  install-swagger   安装 swag 工具"
+	@echo "  sync-extract-video-knowledge-v2  从工作区 V2 源更新运行时 Skill 副本"
+	@echo "  check-extract-video-knowledge-v2 检查运行时 Skill 是否与 V2 源一致"
 	@echo ""
 	@echo "环境检查:"
 	@echo "  check-env         检查环境配置"
@@ -251,6 +253,12 @@ lint:
 # Install dependencies
 deps:
 	go mod download
+
+sync-extract-video-knowledge-v2:
+	./scripts/sync-extract-video-knowledge-v2.sh --write
+
+check-extract-video-knowledge-v2:
+	./scripts/sync-extract-video-knowledge-v2.sh --check
 
 # Build for production
 # google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn for qdrant milvus proto conflict

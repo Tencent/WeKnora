@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/config"
+	customknowledge "github.com/Tencent/WeKnora/internal/custom/service/knowledge"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
@@ -711,7 +712,8 @@ func (s *agentService) registerTools(
 			toolToRegister = tools.NewWikiUpdateIssueTool(s.wikiPageService, wikiKBIDs)
 		case tools.ToolWikiWritePage:
 			toolToRegister = tools.NewWikiWritePageTool(s.wikiPageService, wikiKBIDs, s.knowledgeService, wikiRoutes).
-				WithSearchTargets(config.SearchTargets)
+				WithSearchTargets(config.SearchTargets).
+				WithSemanticIdentityAdapter(customknowledge.NewModelSemanticIdentityAdapter(chatModel))
 		case tools.ToolWikiReplaceText:
 			toolToRegister = tools.NewWikiReplaceTextTool(s.wikiPageService, wikiKBIDs, s.knowledgeService, wikiRoutes).
 				WithSearchTargets(config.SearchTargets)

@@ -69,3 +69,24 @@ func TestIncomingWikiRewriteCanBeCompensated(t *testing.T) {
 		t.Fatalf("UpdateAutoLinkedContent calls = %d, want apply + failed apply + rollback", service.updateCalls)
 	}
 }
+
+func TestIncomingWikiRewriteRejectsV2PageBeforeAnyUpdate(t *testing.T) {
+	service := &linkMutationWikiService{
+		pages: map[string]*types.WikiPage{
+			"source/a": {Slug: "source/a", Content: "see [[concept/old]]"},
+			"source/v2": {
+				Slug: "concept/v2", Content: "---\nknowledge_object_id: object-1\ntype: concept\nsource_video_id: video-1\ntranscript_generation: generation-1\n---\n[[concept/old]]",
+			},
+		},
+	}
+	changes, updated, err := applyIncomingWikiContentRewrite(
+		context.Background(), service, "kb-1", []string{"source/a", "source/v2"},
+		func(content string) (string, bool) { return content + " changed", true },
+	)
+	if err == nil || len(changes) != 0 || len(updated) != 0 {
+		t.Fatalf("V2 incoming page must abort preflight: changes=%d updated=%v err=%v", len(changes), updated, err)
+	}
+	if service.updateCalls != 0 {
+		t.Fatalf("V2 incoming page preflight reached persistence: updates=%d", service.updateCalls)
+	}
+}

@@ -55,6 +55,7 @@ type conceptPageFrontmatter struct {
 	InformationNature        string            `yaml:"information_nature"`
 	AuditStatus              string            `yaml:"audit_status"`
 	ClassificationConfidence float64           `yaml:"classification_confidence"`
+	CoreContent              string            `yaml:"core_content"`
 	EvidenceIDs              []string          `yaml:"evidence_ids"`
 	SourceRefs               []string          `yaml:"source_refs"`
 	ChunkRefs                []string          `yaml:"chunk_refs"`
@@ -150,6 +151,7 @@ func RenderConceptPage(input ConceptTemplateInput) (ConceptPageRender, error) {
 		InformationNature:        "概念",
 		AuditStatus:              "passed",
 		ClassificationConfidence: object.ClassificationConfidence,
+		CoreContent:              description,
 		EvidenceIDs:              sortedEvidenceIDs(object.EvidenceIDs),
 		SourceRefs:               sourceDocumentRefs(object.SourceDocumentID),
 		ChunkRefs:                sortedEvidenceIDs(input.ChunkRefs),

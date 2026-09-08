@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/common/redislock"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -38,6 +39,25 @@ func stripWikiPageInlineChunkCitations(page *types.WikiPage) {
 	}
 	page.Content = stripWikiInlineChunkCitations(page.Content)
 	page.Summary = stripWikiInlineChunkCitations(page.Summary)
+}
+
+// WithCanonicalIdentityLock serializes canonical identity resolution across
+// backend instances within one tenant and Wiki scope. The lock cannot be keyed
+// by title because semantically identical candidates may use different names.
+// It is intentionally optional so lightweight WikiPageService implementations
+// remain compatible.
+func (s *wikiPageService) WithCanonicalIdentityLock(ctx context.Context, kbID, _ string, fn func(context.Context) error) error {
+	if fn == nil {
+		return errors.New("canonical identity lock callback is required")
+	}
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	key := fmt.Sprintf("wiki:canonical-identity:%d:%s", tenantID, strings.TrimSpace(kbID))
+	if s.redisClient == nil {
+		return fn(ctx)
+	}
+	return redislock.WithRenewableLock(ctx, s.redisClient, key, 2*time.Minute, 20*time.Second, func(lockCtx context.Context) error {
+		return fn(lockCtx)
+	})
 }
 
 // wikiPageService implements the WikiPageService interface

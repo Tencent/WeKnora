@@ -3,11 +3,14 @@ package knowledge
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
-const canonicalFrameworkSHA256 = "02c226b9541a0cecfe70106085a6da64fadb99fdec3083b77ee1d4e2ef5e7f5a"
+const canonicalFrameworkSHA256 = "b0446c773cfbc600762d6646236b2952f0b1b505601aa3f310a7443fce8e4502"
 
 func TestFrameworkDigestContainsFiveTypesAndSixEntitySubtypes(t *testing.T) {
 	digest, err := LoadDefaultFrameworkDigest()
@@ -80,9 +83,9 @@ func TestFrameworkFieldsAndLabelsFollowSourceOrder(t *testing.T) {
 		{TypeEntity, "technology", []string{"tech_category", "application_area", "maturity"}, []string{"技术分类", "应用领域", "发展阶段"}},
 		{TypeEntity, "industry", []string{"scope", "stage", "key_trends"}, []string{"行业范围", "发展阶段", "关键趋势"}},
 		{TypeEntity, "place", []string{"place_type", "associated_activity"}, []string{"地点类型", "关联活动"}},
-		{TypeMethodology, "", []string{"input", "steps", "criteria", "output", "applicability"}, []string{"输入", "步骤", "判断标准", "输出", "适用条件"}},
+		{TypeMethodology, "", []string{"input", "steps", "criteria", "output", "applicability", "risks"}, []string{"输入", "步骤", "判断标准", "输出", "适用条件与限制", "风险"}},
 		{TypeCase, "", []string{"context", "actors", "choices", "actions", "outcome", "retrospective"}, []string{"背景", "参与对象", "选择", "行动", "结果", "复盘判断"}},
-		{TypeConcept, "", []string{"definition", "components", "mechanism", "distinction"}, []string{"定义", "构成要素", "运行机制", "相邻区别"}},
+		{TypeConcept, "", []string{"definition", "components", "mechanism", "distinction", "examples", "scope"}, []string{"定义", "构成要素", "运行机制", "相邻区别", "示例", "适用边界"}},
 		{TypeInsight, "", []string{"claim", "reasoning", "qualifications", "implications"}, []string{"核心判断", "推导依据", "限定条件", "影响建议"}},
 	}
 
@@ -101,6 +104,58 @@ func TestFrameworkFieldsAndLabelsFollowSourceOrder(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestOutputExamplesUseCanonicalStructureFields(t *testing.T) {
+	frameworkPath, err := resolveBundledFrameworkPath()
+	if err != nil {
+		t.Fatalf("resolve framework path: %v", err)
+	}
+	examplesPath := filepath.Join(filepath.Dir(frameworkPath), "output-examples.md")
+	source, err := os.ReadFile(examplesPath)
+	if err != nil {
+		t.Fatalf("read output examples: %v", err)
+	}
+	blocks := regexp.MustCompile("(?s)```yaml\\s*(.*?)\\s*```").FindAllStringSubmatch(string(source), -1)
+	objectExamples := 0
+	for _, block := range blocks {
+		content := strings.TrimSpace(block[1])
+		content = strings.TrimPrefix(content, "---\n")
+		content = strings.TrimSuffix(content, "\n---")
+		var document any
+		if err := yaml.Unmarshal([]byte(content), &document); err != nil {
+			t.Fatalf("parse output YAML example: %v", err)
+		}
+		for _, frontmatter := range exampleObjectMaps(document) {
+			primaryType := KnowledgeType(strings.TrimSpace(stringValue(frontmatter["primary_type"])))
+			if !IsKnowledgeType(primaryType) {
+				continue
+			}
+			objectExamples++
+			entitySubType := strings.TrimSpace(stringValue(frontmatter["entity_sub_type"]))
+			if err := rejectForeignStructureFields(frontmatter["structure_fields"], frameworkKeys(primaryType, entitySubType)); err != nil {
+				t.Errorf("output example %s/%s: %v", primaryType, entitySubType, err)
+			}
+		}
+	}
+	if objectExamples != 5 {
+		t.Fatalf("output object example count = %d, want 5", objectExamples)
+	}
+}
+
+func exampleObjectMaps(value any) []map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return []map[string]any{typed}
+	case []any:
+		result := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			result = append(result, exampleObjectMaps(item)...)
+		}
+		return result
+	default:
+		return nil
 	}
 }
 

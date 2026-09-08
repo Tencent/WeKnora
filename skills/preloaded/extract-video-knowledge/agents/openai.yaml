@@ -1,4 +1,6 @@
 interface:
-  display_name: "单视频知识提取"
-  short_description: "从单个视频提取可追溯的结构化知识和局部 Wiki 内容"
-  default_prompt: "使用 $extract-video-knowledge 提取单视频知识、绑定证据并生成局部 Wiki。"
+  display_name: "单视频知识提取 V2"
+  short_description: "生成五类知识候选与证据贡献，由服务端确定规范身份"
+  default_prompt: "使用 $extract-video-knowledge 处理单视频知识。开始前完整读取 SKILL.md、references/type-frameworks.md、references/wiki-schema.md、references/audit-rules.md，并在组装输出前读取 references/output-examples.md；只提交候选和证据贡献，后续只使用写入工具返回的规范身份。"
+policy:
+  allow_implicit_invocation: true

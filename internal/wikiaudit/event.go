@@ -13,6 +13,7 @@ import (
 const (
 	InputModeFullDocument = "full_document"
 	ProducerNativeWiki    = "weknora_native"
+	ProducerKnowledgeV2   = "extract_video_knowledge_v2"
 	ScopeVideo            = "video"
 	ScopeKnowledgeBase    = "knowledge_base"
 )
@@ -26,8 +27,8 @@ type SourceIdentity struct {
 	KnowledgeBaseID      string
 }
 
-// Event is the P2 native Wiki audit contract. Required fields intentionally do
-// not use omitempty so malformed evidence is visible rather than ambiguous.
+// Event is the shared native/V2 Wiki production audit contract. Required
+// fields intentionally do not use omitempty so malformed evidence is visible.
 type Event struct {
 	EventID               string   `json:"event_id"`
 	EventScope            string   `json:"event_scope"`
@@ -39,6 +40,10 @@ type Event struct {
 	InputMode             string   `json:"input_mode"`
 	PageProducer          string   `json:"page_producer"`
 	TaskID                string   `json:"task_id"`
+	SessionID             string   `json:"session_id,omitempty"`
+	SkillName             string   `json:"skill_name,omitempty"`
+	ToolName              string   `json:"tool_name,omitempty"`
+	ToolCallID            string   `json:"tool_call_id,omitempty"`
 	EventTime             string   `json:"event_time"`
 	TaskType              string   `json:"task_type"`
 	Op                    string   `json:"op"`
@@ -55,6 +60,76 @@ type Event struct {
 	IndexPageID           string   `json:"index_page_id,omitempty"`
 	RelatedIngestEventIDs []string `json:"related_ingest_event_ids,omitempty"`
 	Reason                string   `json:"reason,omitempty"`
+}
+
+// NewKnowledgeV2PageWrite records the V2 Skill, Agent task and exact tool call
+// that produced one Wiki page. The deployed Skill name intentionally differs
+// from the V2 source directory name.
+func NewKnowledgeV2PageWrite(
+	identity SourceIdentity,
+	taskID string,
+	sessionID string,
+	skillName string,
+	toolCallID string,
+	op string,
+	pageID string,
+	slug string,
+	pageType string,
+	version int,
+) Event {
+	event := New(identity, taskID, "agent:skill", op, "not_applicable", "page_write", "succeeded")
+	event.PageProducer = ProducerKnowledgeV2
+	event.SessionID = sessionID
+	event.SkillName = skillName
+	event.ToolName = "wiki_write_page"
+	event.ToolCallID = toolCallID
+	event.PageID = pageID
+	event.Slug = slug
+	event.PageType = pageType
+	event.Version = Count(version)
+	return event
+}
+
+// ParseKnowledgeV2PageIdentity validates the page-owned identity against the
+// server-resolved source reference before a V2 page is persisted.
+func ParseKnowledgeV2PageIdentity(content, kbID string, resolvedSourceRefs []string) (SourceIdentity, error) {
+	identity := SourceIdentity{KnowledgeBaseID: strings.TrimSpace(kbID)}
+	if len(resolvedSourceRefs) != 1 {
+		return identity, fmt.Errorf("wiki_audit_event:source_ref_count_invalid")
+	}
+	resolvedSourceID := sourceRefID(resolvedSourceRefs[0])
+	if resolvedSourceID == "" {
+		return identity, fmt.Errorf("wiki_audit_event:source_knowledge_id_missing")
+	}
+
+	trimmed := strings.TrimSpace(content)
+	if !strings.HasPrefix(trimmed, "---\n") {
+		return identity, fmt.Errorf("wiki_audit_event:page_frontmatter_missing")
+	}
+	rest := strings.TrimPrefix(trimmed, "---\n")
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return identity, fmt.Errorf("wiki_audit_event:page_frontmatter_unclosed")
+	}
+	var frontmatter struct {
+		SourceVideoID        string   `yaml:"source_video_id"`
+		SourceDocumentID     string   `yaml:"source_document_id"`
+		TranscriptGeneration string   `yaml:"transcript_generation"`
+		SourceRefs           []string `yaml:"source_refs"`
+	}
+	if err := yaml.Unmarshal([]byte(rest[:end]), &frontmatter); err != nil {
+		return identity, fmt.Errorf("wiki_audit_event:page_frontmatter_invalid: %w", err)
+	}
+	if strings.TrimSpace(frontmatter.SourceVideoID) == "" || strings.TrimSpace(frontmatter.TranscriptGeneration) == "" {
+		return identity, fmt.Errorf("wiki_audit_event:page_identity_invalid")
+	}
+	if sourceRefID(frontmatter.SourceDocumentID) != resolvedSourceID || len(frontmatter.SourceRefs) != 1 || sourceRefID(frontmatter.SourceRefs[0]) != resolvedSourceID {
+		return identity, fmt.Errorf("wiki_audit_event:page_source_identity_mismatch")
+	}
+	identity.VideoID = strings.TrimSpace(frontmatter.SourceVideoID)
+	identity.TranscriptGeneration = strings.TrimSpace(frontmatter.TranscriptGeneration)
+	identity.SourceKnowledgeID = resolvedSourceID
+	return identity, nil
 }
 
 func RunID(identity SourceIdentity) string {
@@ -125,6 +200,15 @@ func (e Event) Validate() error {
 			return fmt.Errorf("wiki_audit_event:finalize_identity_invalid")
 		}
 	}
+	if e.PageProducer == ProducerKnowledgeV2 {
+		if strings.TrimSpace(e.SessionID) == "" || strings.TrimSpace(e.SkillName) == "" ||
+			strings.TrimSpace(e.ToolName) != "wiki_write_page" || strings.TrimSpace(e.ToolCallID) == "" {
+			return fmt.Errorf("wiki_audit_event:knowledge_v2_provenance_incomplete")
+		}
+		if strings.TrimSpace(e.TaskID) == strings.TrimSpace(e.SessionID) {
+			return fmt.Errorf("wiki_audit_event:knowledge_v2_task_session_collision")
+		}
+	}
 	return nil
 }
 
@@ -164,5 +248,9 @@ func ParseSourceIdentity(content, sourceKnowledgeID, kbID string) (SourceIdentit
 }
 
 func Count(value int) *int { return intPtr(value) }
+
+func sourceRefID(value string) string {
+	return strings.TrimSpace(strings.SplitN(value, "|", 2)[0])
+}
 
 func intPtr(value int) *int { return &value }

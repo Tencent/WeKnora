@@ -130,6 +130,9 @@ func (r *ToolRegistry) ExecuteTool(
 		}, err
 	}
 
+	// Repair known tool-specific argument shapes before generic casting.
+	args = NormalizeToolParams(name, args, tool.Parameters())
+
 	// Cast parameters to match expected schema types before execution.
 	// This handles common LLM quirks like returning "true" instead of true.
 	args = CastParams(args, tool.Parameters())
