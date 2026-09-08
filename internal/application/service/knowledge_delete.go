@@ -139,9 +139,9 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 //   - It writes a tombstone + scrubs pending ingest ops so new pages cannot be
 //     born with a stale source_ref (guards (a) queued ingest and (b) ingest
 //     tasks mid-LLM call — both consult the tombstone before writing).
-//   - It immediately reconciles any pages already present (delete-if-only-ref
-//     or strip-ref-if-multi).
-//   - It *unconditionally* enqueues a retract task. Crucially we DO NOT gate
+//   - It persists a retract task before reconciling existing pages (delete
+//     if only source, or strip the source if shared), preserving retry evidence.
+//     Crucially we DO NOT gate
 //     enqueue on "pages currently exist": in the ingest/delete race the
 //     knowledge may have pages that exist only after this function returns
 //     (the ingest task fires later and, absent the tombstone, would have
@@ -149,20 +149,42 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 //     run time, so even with an empty PageSlugs it will do the right thing —
 //     and at worst it's a cheap no-op.
 func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, knowledge *types.Knowledge) {
+	if err := s.cleanupWikiReferences(ctx, knowledge, s.wikiChunkRefsForKnowledge(ctx, knowledge)); err != nil {
+		logger.Warnf(ctx, "wiki cleanup failed: %v", err)
+	}
+}
+
+func (s *knowledgeService) cleanupWikiReferences(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	sourceChunkRefs map[string]bool,
+) error {
 	if knowledge == nil {
-		return
+		return nil
 	}
 	kbID := knowledge.KnowledgeBaseID
 	knowledgeID := knowledge.ID
 	if kbID == "" || knowledgeID == "" {
-		return
+		return nil
 	}
+
+	var cleanupErr error
 
 	// (1) Tombstone + scrub pending ingest — must happen first so any
 	// wiki_ingest task that wakes up between here and the retract enqueue
 	// below sees "knowledge gone" and bails out.
-	s.markKnowledgeDeletedForWiki(ctx, kbID, knowledgeID)
-	s.scrubWikiPendingIngest(ctx, kbID, knowledgeID, "cleanup")
+	if s.redisClient != nil {
+		key := WikiDeletedTombstoneKey(kbID, knowledgeID)
+		if err := s.redisClient.Set(ctx, key, "1", wikiDeletedTTL).Err(); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
+	}
+	if s.taskPendingRepo != nil {
+		err := s.taskPendingRepo.DeleteByDedupKey(ctx, wikiTaskType, wikiTaskScope, kbID, knowledgeID, WikiOpIngest)
+		if err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
+	}
 
 	// Pull title/summary from the knowledge itself — do NOT read them from
 	// existing wiki pages. In the race window wiki pages may not exist yet,
@@ -184,9 +206,8 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 	pages, err := s.wikiRepo.ListBySourceRef(ctx, kbID, knowledgeID)
 	if err != nil {
 		logger.Warnf(ctx, "wiki cleanup: failed to list pages by source ref %s: %v", knowledgeID, err)
-		pages = nil
+		return errors.Join(cleanupErr, err)
 	}
-	sourceChunkRefs := s.wikiChunkRefsForKnowledge(ctx, knowledge)
 
 	// Prefer the on-disk summary if the summary page already exists (it's
 	// richer than the raw user-provided description). Leave docSummary
@@ -198,15 +219,29 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 		}
 	}
 
+	// Persist the retract page set before removing source refs. Otherwise an
+	// enqueue failure would leave the retry unable to rediscover those pages.
+	var pageSlugs, folderIDs []string
+	for _, page := range pages {
+		if page.PageType != types.WikiPageTypeIndex {
+			pageSlugs = append(pageSlugs, page.Slug)
+			folderIDs = append(folderIDs, page.FolderID)
+		}
+	}
+	lang := types.LanguageFromContextOrDefault(ctx)
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	if err := enqueueWikiRetract(ctx, s.task, s.taskPendingRepo, WikiRetractPayload{
+		TenantID: tenantID, KnowledgeBaseID: kbID, KnowledgeID: knowledgeID,
+		DocTitle: docTitle, DocSummary: docSummary, Language: lang,
+		PageSlugs: pageSlugs, FolderIDs: uniqueWikiFolderIDs(folderIDs),
+	}); err != nil {
+		return errors.Join(cleanupErr, err)
+	}
+
 	var deletedSlugs []string
-	var retractSlugs []string
-	var affectedFolderIDs []string
 	for _, page := range pages {
 		if page.PageType == types.WikiPageTypeIndex {
 			continue
-		}
-		if page.FolderID != "" {
-			affectedFolderIDs = append(affectedFolderIDs, page.FolderID)
 		}
 
 		remaining := removeSourceRef(page.SourceRefs, knowledgeID)
@@ -214,6 +249,7 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 		if len(remaining) == 0 {
 			if err := s.wikiService.DeletePage(ctx, kbID, page.Slug); err != nil {
 				logger.Warnf(ctx, "wiki cleanup: failed to delete page %s: %v", page.Slug, err)
+				cleanupErr = errors.Join(cleanupErr, err)
 			} else {
 				deletedSlugs = append(deletedSlugs, page.Slug)
 			}
@@ -222,8 +258,7 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 			page.ChunkRefs = removeChunkRefs(page.ChunkRefs, sourceChunkRefs)
 			if err := s.wikiService.UpdatePageMeta(ctx, page); err != nil {
 				logger.Warnf(ctx, "wiki cleanup: failed to update source refs for page %s: %v", page.Slug, err)
-			} else {
-				retractSlugs = append(retractSlugs, page.Slug)
+				cleanupErr = errors.Join(cleanupErr, err)
 			}
 		}
 	}
@@ -233,27 +268,7 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 			len(deletedSlugs), knowledgeID, deletedSlugs)
 	}
 
-	allAffectedSlugs := append(retractSlugs, deletedSlugs...)
-
-	// (3) Unconditionally enqueue the retract task. See function comment —
-	// an empty PageSlugs is not a bug, it's the signal "re-query at run
-	// time". The handler will ListPagesBySourceRef again, pick up any
-	// pages that materialised after we looked, and also rebuild the index
-	// so the knowledge's disappearance is reflected in the UI.
-	lang := types.LanguageFromContextOrDefault(ctx)
-	tenantID, _ := types.TenantIDFromContext(ctx)
-	EnqueueWikiRetract(ctx, s.task, s.taskPendingRepo, WikiRetractPayload{
-		TenantID:        tenantID,
-		KnowledgeBaseID: kbID,
-		KnowledgeID:     knowledgeID,
-		DocTitle:        docTitle,
-		DocSummary:      docSummary,
-		Language:        lang,
-		PageSlugs:       allAffectedSlugs,
-		FolderIDs:       uniqueWikiFolderIDs(affectedFolderIDs),
-	})
-	logger.Infof(ctx, "wiki cleanup: enqueued retract task for knowledge %s (%d known slugs: %v)",
-		knowledgeID, len(allAffectedSlugs), allAffectedSlugs)
+	return cleanupErr
 }
 
 func (s *knowledgeService) wikiChunkRefsForKnowledge(ctx context.Context, knowledge *types.Knowledge) map[string]bool {
@@ -275,19 +290,6 @@ func (s *knowledgeService) wikiChunkRefsForKnowledge(ctx context.Context, knowle
 	return refs
 }
 
-// markKnowledgeDeletedForWiki writes a short-TTL tombstone so any wiki_ingest
-// task still running or queued for this knowledge can short-circuit before
-// resurrecting a page with a stale source_ref. No-op when Redis is absent.
-func (s *knowledgeService) markKnowledgeDeletedForWiki(ctx context.Context, kbID, knowledgeID string) {
-	if s.redisClient == nil || kbID == "" || knowledgeID == "" {
-		return
-	}
-	key := WikiDeletedTombstoneKey(kbID, knowledgeID)
-	if err := s.redisClient.Set(ctx, key, "1", wikiDeletedTTL).Err(); err != nil {
-		logger.Warnf(ctx, "wiki cleanup: failed to write tombstone %s: %v", key, err)
-	}
-}
-
 // scrubWikiPendingIngest removes queued WikiOpIngest entries for a knowledge
 // from task_pending_ops. Used by both the delete path (we're about to
 // soft-delete the doc, no point ingesting it) and the reparse path (the
@@ -303,7 +305,8 @@ func (s *knowledgeService) scrubWikiPendingIngest(ctx context.Context, kbID, kno
 	if s.taskPendingRepo == nil || kbID == "" || knowledgeID == "" {
 		return
 	}
-	if err := s.taskPendingRepo.DeleteByDedupKey(ctx, wikiTaskType, wikiTaskScope, kbID, knowledgeID, WikiOpIngest); err != nil {
+	err := s.taskPendingRepo.DeleteByDedupKey(ctx, wikiTaskType, wikiTaskScope, kbID, knowledgeID, WikiOpIngest)
+	if err != nil {
 		logger.Warnf(ctx, "wiki %s: failed to scrub pending ingest ops for knowledge %s: %v", reason, knowledgeID, err)
 		return
 	}

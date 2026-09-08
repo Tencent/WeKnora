@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -59,6 +61,9 @@ func (s *knowledgeBaseService) fetchKnowledgeDataWithShared(ctx context.Context,
 			continue
 		}
 		k, err := s.kgRepo.GetKnowledgeByIDOnly(ctx, id)
+		if err != nil && !errors.Is(err, repository.ErrKnowledgeNotFound) {
+			return nil, err
+		}
 		if err == nil {
 			appendAllowed(k)
 		}

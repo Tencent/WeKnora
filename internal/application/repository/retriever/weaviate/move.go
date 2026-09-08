@@ -21,12 +21,11 @@ func (w *weaviateRepository) MoveKnowledgeIndices(
 		filters.Where().WithPath([]string{fieldKnowledgeBaseID}).WithOperator(filters.Equal).WithValueString(sourceKB),
 		filters.Where().WithPath([]string{fieldKnowledgeID}).WithOperator(filters.Equal).WithValueString(knowledgeID),
 	})
-	var ids []string
-	offset := 0
+	seen := make(map[string]bool)
 	for {
 		result, err := w.client.GraphQL().Get().WithClassName(collection).WithWhere(where).WithLimit(100).
 			WithFields(graphql.Field{Name: "_additional", Fields: []graphql.Field{{Name: "id"}}}).
-			WithOffset(offset).Do(ctx)
+			Do(ctx)
 		if err != nil {
 			return err
 		}
@@ -41,6 +40,10 @@ func (w *weaviateRepository) MoveKnowledgeIndices(
 		if !ok {
 			return fmt.Errorf("invalid move index collection")
 		}
+		if len(rows) == 0 {
+			return nil
+		}
+		var ids []string
 		for _, row := range rows {
 			data, ok := row.(map[string]interface{})
 			if !ok {
@@ -54,19 +57,21 @@ func (w *weaviateRepository) MoveKnowledgeIndices(
 			if !ok || id == "" {
 				return fmt.Errorf("invalid move index ID")
 			}
+			if seen[id] {
+				return fmt.Errorf("move indices made no progress for %s", id)
+			}
+			seen[id] = true
 			ids = append(ids, id)
-
 		}
-		offset += len(rows)
-		if len(rows) < 100 {
-			break
+		// Drain the first filtered page; after+where is unsupported by Weaviate.
+		// Successful updates remove these IDs from the predicate. Only an empty
+		// follow-up query proves completion, including after partial-page updates.
+		for _, id := range ids {
+			if err := w.client.Data().Updater().WithClassName(collection).WithID(id).WithMerge().
+				WithProperties(map[string]interface{}{fieldKnowledgeBaseID: targetKB, fieldTagID: ""}).
+				Do(ctx); err != nil {
+				return err
+			}
 		}
 	}
-	for _, id := range ids {
-		if err := w.client.Data().Updater().WithClassName(collection).WithID(id).WithMerge().
-			WithProperties(map[string]interface{}{fieldKnowledgeBaseID: targetKB, fieldTagID: ""}).Do(ctx); err != nil {
-			return err
-		}
-	}
-	return nil
 }

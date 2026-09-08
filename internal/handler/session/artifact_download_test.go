@@ -242,7 +242,7 @@ func TestDownloadMessageArtifact_SourceStorageAndShareRevocation(t *testing.T) {
 		messageService: &stubMessageServiceForArtifacts{
 			getMessage: func(context.Context, string, string) (*types.Message, error) {
 				return &types.Message{
-					AgentID: "agent", AgentTenantID: 7,
+					ID: "msg-1", AgentID: "agent", AgentTenantID: 7,
 					Artifacts: types.MessageArtifacts{{URL: ref, FileName: "report.pdf"}},
 				}, nil
 			},
@@ -369,4 +369,12 @@ func TestBuildAttachmentHeader_CJK(t *testing.T) {
 	if strings.ContainsRune(got, '报') {
 		t.Fatalf("filename* contains raw CJK: %q", got)
 	}
+}
+
+func (s *artifactCatalogStub) GetMessageFileBindings(
+	_ context.Context,
+	_ uint64,
+	_, messageID string,
+) (*types.MessageFileBindings, error) {
+	return &types.MessageFileBindings{MessageArtifact: messageID == "msg-1"}, nil
 }

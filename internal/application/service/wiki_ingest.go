@@ -600,12 +600,18 @@ func enqueueWikiIngestTrigger(
 // because there is no "user upload arriving in waves" pattern to
 // debounce against — a deletion fires once and we want the cleanup
 // to land promptly.
-func EnqueueWikiRetract(
+func EnqueueWikiRetract(ctx context.Context, task interfaces.TaskEnqueuer,
+	pendingRepo interfaces.TaskPendingOpsRepository, payload WikiRetractPayload,
+) {
+	_ = enqueueWikiRetract(ctx, task, pendingRepo, payload)
+}
+
+func enqueueWikiRetract(
 	ctx context.Context,
 	task interfaces.TaskEnqueuer,
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	payload WikiRetractPayload,
-) {
+) error {
 	op := WikiPendingOp{
 		Op:          WikiOpRetract,
 		KnowledgeID: payload.KnowledgeID,
@@ -618,7 +624,7 @@ func EnqueueWikiRetract(
 	payloadBytes, err := json.Marshal(op)
 	if err != nil {
 		logger.Warnf(ctx, "wiki retract: failed to marshal pending op: %v", err)
-		return
+		return err
 	}
 	accepted, err := enqueueWikiPendingOp(ctx, pendingRepo, &types.TaskPendingOp{
 		TenantID: payload.TenantID,
@@ -631,11 +637,11 @@ func EnqueueWikiRetract(
 	})
 	if err != nil {
 		logger.Warnf(ctx, "wiki retract: failed to enqueue pending op: %v", err)
-		return
+		return err
 	}
 	if !accepted {
 		logger.Infof(ctx, "wiki retract: skip enqueue for deleted KB %s", payload.KnowledgeBaseID)
-		return
+		return nil
 	}
 
 	trigger := WikiIngestPayload{
@@ -653,7 +659,9 @@ func EnqueueWikiRetract(
 	)
 	if _, err := task.Enqueue(t); err != nil {
 		logger.Warnf(ctx, "wiki retract: failed to enqueue trigger task: %v", err)
+		return err
 	}
+	return nil
 }
 
 // Handle implements interfaces.TaskHandler for asynq task processing. The

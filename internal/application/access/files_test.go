@@ -74,9 +74,13 @@ func TestKBFilesRequireExactGrantAndBinding(t *testing.T) {
 
 func TestMessageFilesRequireReferenceAndRecheckRevocation(t *testing.T) {
 	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
-	messages := &fileMessages{message: &types.Message{AgentID: "agent", AgentTenantID: 2, Role: "assistant"}}
+	messages := &fileMessages{
+		message: &types.Message{ID: "message", AgentID: "agent", AgentTenantID: 2, Role: "assistant"},
+	}
 	agents := &agentLookup{agent: &types.CustomAgent{ID: "agent", TenantID: 2}}
-	catalog := fileCatalog{&types.StoredResource{TenantID: 2, PhysicalPath: "local://2/exports/a.png"}}
+	catalog := artifactFileCatalog{
+		fileCatalog{&types.StoredResource{TenantID: 2, PhysicalPath: "local://2/exports/a.png"}},
+	}
 	ctx := types.WithExecutionTenant(callerContext(), 2)
 	_, err := ResolveMessageFile(ctx, "session", "message", ref, messages, agents, catalog, MessageKBShareAuthorizer{})
 	require.ErrorIs(t, err, ErrForbidden)
@@ -144,4 +148,15 @@ func TestMessageSharedKBFilesRequireLiveBinding(t *testing.T) {
 	authorizer.Bindings = nil
 	_, err = AuthorizeMessageFile(callerContext(), message, ref, nil, catalog, authorizer)
 	require.ErrorIs(t, err, ErrForbidden, "missing live lookup must fail closed")
+}
+
+// This fixture represents a catalog claim made by the artifact collector.
+type artifactFileCatalog struct{ fileCatalog }
+
+func (artifactFileCatalog) GetMessageFileBindings(
+	_ context.Context,
+	_ uint64,
+	_, messageID string,
+) (*types.MessageFileBindings, error) {
+	return &types.MessageFileBindings{MessageArtifact: messageID == "message"}, nil
 }

@@ -16,13 +16,15 @@ import (
 // Transfer state lives with the document, so queue retries do not depend on
 // an expiring progress cache. It is server metadata, never custom metadata.
 type knowledgeTransferState struct {
-	TaskID    string                     `json:"task_id"`
-	Operation access.KBTransferOperation `json:"operation"`
-	SourceKB  string                     `json:"source_kb"`
-	TargetKB  string                     `json:"target_kb"`
-	SourceID  string                     `json:"source_id"`
-	Mode      string                     `json:"mode,omitempty"`
-	Phase     string                     `json:"phase"`
+	TaskID       string                     `json:"task_id"`
+	Operation    access.KBTransferOperation `json:"operation"`
+	SourceKB     string                     `json:"source_kb"`
+	TargetKB     string                     `json:"target_kb"`
+	SourceID     string                     `json:"source_id"`
+	Mode         string                     `json:"mode,omitempty"`
+	WikiChunkIDs []string                   `json:"wiki_chunk_ids,omitempty"`
+	WikiSummary  string                     `json:"wiki_summary,omitempty"`
+	Phase        string                     `json:"phase"`
 }
 
 func transferState(k *types.Knowledge) (*knowledgeTransferState, error) {
@@ -492,4 +494,32 @@ func validateProcessingKnowledge(knowledge *types.Knowledge, tenant uint64, kbID
 		return fmt.Errorf("knowledge is being moved: %w", asynq.SkipRetry)
 	}
 	return nil
+}
+
+// Cleanup consumes the durable source references only after target ownership
+// is committed. A done transfer is retried here when wiki reconciliation fails.
+func (s *knowledgeService) cleanupMovedSourceWiki(ctx context.Context, knowledge *types.Knowledge,
+	source, target *types.KnowledgeBase,
+) error {
+	if !source.IsWikiEnabled() {
+		return nil
+	}
+	if knowledge.KnowledgeBaseID != target.ID {
+		return access.ErrForbidden
+	}
+	state, err := transferState(knowledge)
+	if err != nil {
+		return err
+	}
+	if state == nil || state.SourceKB != source.ID || state.TargetKB != target.ID {
+		return access.ErrForbidden
+	}
+	old := *knowledge
+	old.KnowledgeBaseID = source.ID
+	old.Description = state.WikiSummary
+	refs := make(map[string]bool, len(state.WikiChunkIDs))
+	for _, id := range state.WikiChunkIDs {
+		refs[id] = true
+	}
+	return s.cleanupWikiReferences(ctx, &old, refs)
 }

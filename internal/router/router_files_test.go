@@ -24,8 +24,9 @@ type stubFileService struct {
 }
 
 type stubResourceCatalog struct {
-	resource *types.StoredResource
-	bound    func(context.Context, uint64, string, string) (bool, error)
+	resource     *types.StoredResource
+	fileBindings *types.MessageFileBindings
+	bound        func(context.Context, uint64, string, string) (bool, error)
 }
 
 type stubMessageFileLookup struct {
@@ -608,7 +609,7 @@ func TestMessageScopedFilesServesSharedAgentResource(t *testing.T) {
 			if sessionID != "session-1" || messageID != "message-1" {
 				t.Fatalf("unexpected message scope %s/%s", sessionID, messageID)
 			}
-			return &types.Message{AgentID: "agent-1", AgentTenantID: ownerTenantID, Content: ref}, nil
+			return &types.Message{ID: "message-1", AgentID: "agent-1", AgentTenantID: ownerTenantID, Content: ref}, nil
 		}},
 		&stubSharedAgentFileLookup{get: func(
 			_ context.Context,
@@ -633,12 +634,15 @@ func TestMessageScopedFilesServesSharedAgentResource(t *testing.T) {
 			requestedPath = filePath
 			return io.NopCloser(strings.NewReader("shared-agent-image")), nil
 		}},
-		&stubResourceCatalog{resource: &types.StoredResource{
-			TenantID:     ownerTenantID,
-			PhysicalPath: physical,
-			OriginalName: "chart.png",
-			MimeType:     "image/png",
-		}},
+		&stubResourceCatalog{
+			fileBindings: &types.MessageFileBindings{MessageArtifact: true},
+			resource: &types.StoredResource{
+				TenantID:     ownerTenantID,
+				PhysicalPath: physical,
+				OriginalName: "chart.png",
+				MimeType:     "image/png",
+			},
+		},
 		messageKBShareAuthorizer{},
 	)
 
@@ -1368,4 +1372,13 @@ func TestServeFilesForcesActiveContentDownload(t *testing.T) {
 	if got := recorder.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
 	}
+}
+
+func (s *stubResourceCatalog) GetMessageFileBindings(
+	context.Context,
+	uint64,
+	string,
+	string,
+) (*types.MessageFileBindings, error) {
+	return s.fileBindings, nil
 }

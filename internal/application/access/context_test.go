@@ -112,3 +112,29 @@ func TestKBGrantBranchesRemainIndependent(t *testing.T) {
 	require.True(t, HasKBGrant(second, "second", 2, types.OrgRoleViewer))
 	require.False(t, HasKBGrant(second, "first", 2, types.OrgRoleViewer))
 }
+
+func TestKBPermissionsOwnerShortcutOnlyGrantsRead(t *testing.T) {
+	roles := []types.TenantRole{types.TenantRoleViewer, types.TenantRoleContributor, types.TenantRoleAdmin}
+	for _, role := range roles {
+		ctx := context.WithValue(callerContext(), types.TenantRoleContextKey, role)
+		permissions := NewKBPermissions(ctx, nil)
+		for _, required := range []types.OrgMemberRole{types.OrgRoleViewer, types.OrgRoleEditor, types.OrgRoleAdmin} {
+			allowed, err := permissions.Check("kb", 1, required)
+			require.NoError(t, err)
+			require.Equal(t, required == types.OrgRoleViewer, allowed)
+		}
+		grant := &KBAccess{
+			Caller:            types.CallerFromContext(ctx),
+			KnowledgeBase:     &types.KnowledgeBase{ID: "kb", TenantID: 1},
+			EffectiveTenantID: 1,
+			Permission:        types.OrgRoleEditor,
+		}
+		permissions = NewKBPermissions(grant.Context(ctx), nil)
+		allowed, err := permissions.Check("kb", 1, types.OrgRoleEditor)
+		require.NoError(t, err)
+		require.True(t, allowed)
+		allowed, err = permissions.Check("kb", 1, types.OrgRoleAdmin)
+		require.NoError(t, err)
+		require.False(t, allowed)
+	}
+}

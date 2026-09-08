@@ -54,7 +54,7 @@ func resolveFile(
 }
 
 // ResolveKBFile requires the route's exact KB grant and an independent live
-// binding/reference check. Rewriting the execution tenant is insufficient.
+// explicit binding check. Rewriting the execution tenant is insufficient.
 func ResolveKBFile(
 	ctx context.Context,
 	grant *KBAccess,
@@ -195,6 +195,24 @@ func AuthorizeMessageFile(ctx context.Context, message *types.Message, reference
 			}
 			agent, err := agents.GetSharedAgentForTenant(ctx, caller.TenantID, caller.Role, message.AgentID, owner)
 			if err != nil || agent == nil || agent.TenantID != owner {
+				return FileAccess{}, ErrForbidden
+			}
+			bindings, ok := catalog.(interfaces.MessageFileBindingLookup)
+			if !ok {
+				return FileAccess{}, ErrForbidden
+			}
+			origins, err := bindings.GetMessageFileBindings(ctx, owner, reference, message.ID)
+			if err != nil || origins == nil {
+				return FileAccess{}, ErrForbidden
+			}
+			allowed := origins.MessageArtifact
+			scope := types.NewSharedAgentKBScope(agent)
+			for _, kbID := range origins.KnowledgeBaseIDs {
+				if scope.Allows(kbID, owner) && types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbID) == nil {
+					allowed = true
+				}
+			}
+			if !allowed {
 				return FileAccess{}, ErrForbidden
 			}
 		}

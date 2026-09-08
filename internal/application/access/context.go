@@ -83,10 +83,11 @@ func (p *KBPermissions) Check(kbID string, ownerTenantID uint64, required types.
 	if err := types.AuthorizeTenantAPIKeyKnowledgeBases(p.ctx, kbID); err != nil {
 		return false, err
 	}
-	if p.caller.TenantID == ownerTenantID || HasKBGrant(p.ctx, kbID, ownerTenantID, required) {
+	if (p.caller.TenantID == ownerTenantID && required == types.OrgRoleViewer) ||
+		HasKBGrant(p.ctx, kbID, ownerTenantID, required) {
 		return true, nil
 	}
-	if p.caller.TenantID == 0 {
+	if p.caller.TenantID == 0 || p.caller.TenantID == ownerTenantID {
 		return false, nil
 	}
 	return p.shares.Check(kbID, required)

@@ -13,7 +13,7 @@ codes, RBAC rollout behavior, and response projection at their existing boundari
 | KB list, document search and batch restoration with `agent_id` | Shared-agent lookup, then `SharedAgentKBScope` | API-key intersection; dynamic list/search selections also apply capability filtering |
 | Wiki fixer source tenant | Organization Editor permission | Built-in fixer only; exactly one KB |
 | Message file shared-KB fallback | Organization Viewer permission | Persisted message reference, exact resource handle, KB/resource owner match |
-| KB file proxy | `ResolveKBFile`: exact Viewer grant and current KB binding/reference | Owner tenant and exports namespace; original uploads retain their separate download permission |
+| KB file proxy | `ResolveKBFile`: exact Viewer grant and current explicit KB binding | Owner tenant and exports namespace; original uploads retain their separate download permission |
 | Message file proxy | `ResolveMessageFile`: session ownership and exact persisted output reference | Current shared-agent or organization-KB permission for source-owned resources |
 | Message artifact download | `ResolveMessageArtifact`: session ownership and persisted artifact index | Session-owned output remains accessible; source-owned output rechecks current sharing |
 | FAQ and tag mutations | `RequireKBWrite`: exact Editor operation grant | API-key ingest capability and KB scope; tenant-role/creator checks remain at the admission boundary |
@@ -118,13 +118,24 @@ it does not add a transaction across the database, task queue and search index.
 ## File authorization and transport
 
 File resolvers return request-local `FileAccess` locators before any storage
-reader is opened. The KB catalog checks live document bindings first, then exact
-references in active chunks/wiki pages for historical files. A same-tenant path
-or handle prefix cannot replace a KB binding. Message evidence comes from
+reader is opened. The KB catalog accepts only explicit resource bindings to live
+documents in the exact live KB. Registered physical aliases resolve to the same
+resource ID; chunk/wiki text is never authorization evidence. Historical files
+without explicit bindings fail closed and need a trusted migration. A same-tenant
+path or handle prefix cannot replace a KB binding. Message evidence comes from
 persisted content, references, images, artifacts and tool results; tool arguments
 do not prove that the message returned a file. The organization-shared KB
 fallback also checks the catalog for an independent live KB/file binding;
 retrieval text and a currently shared KB ID alone are insufficient.
+
+Source-owned shared-agent files also require the current live agent share.
+KB sources need an explicit live KB binding allowed by the agent's current
+`all`/`selected` selection and the caller's API-key KB scope; `none`, unknown
+modes, removed KB selections and deleted sources fail closed. Independently
+generated artifacts remain accessible when explicitly bound to the exact
+authorized message as an artifact. Mentioning a file in message text or the
+artifact list does not create that binding. Caller-owned artifacts retain their
+session ownership contract.
 
 The storage adapter uses the authorized owner and backend. The shared
 `filetransport` package owns response headers, safe inline/download disposition,
@@ -187,7 +198,7 @@ Document/FAQ plans validate all selected resources, chunks, parents and tags
 before destructive work. Lifecycle reads include every chunk type and indexing
 state. A document's `_knowledge_transfer` metadata records task identity and
 progress; retries reuse the reserved target, replace incomplete clones, skip
-completed moves and retry only enqueue for a moved document awaiting parsing.
+completed vector moves and retry outstanding wiki cleanup/parser enqueue.
 This field is internal operation state, not caller-supplied custom metadata.
 For `reparse`, transfer `done` means target binding and parser admission are
 complete, not that parsing has finished. `ParseStatus` remains the parser's
@@ -202,7 +213,17 @@ when cleanup is uncertain, and later retries replace the failed copy. Accounting
 is committed only after the clone succeeds. FAQ containers do not inherit the
 source document's transfer marker.
 
+Source wiki cleanup starts only after the document ownership CAS succeeds.
+The transfer checkpoint preserves source chunk IDs and summary before reparse
+removes them. Retract page lists are persisted before page source refs are removed, so queue
+failures retain retry evidence. Cleanup errors propagate; redelivery resumes cleanup after a
+committed move without repeating vector/chunk relocation. These retries do not
+provide a distributed transaction or recovery after retries are exhausted.
+
 Vector reuse relocates KB metadata while preserving physical vector/chunk IDs.
+Weaviate and Milvus drain the first source-filtered page until a follow-up query
+is empty, avoiding offset limits/skipped rows. Repeated IDs or partial failures
+return errors and leave the document checkpoint pending for retry.
 OpenSearch selects the entire source KB/document pair, even without DB chunks,
 and rejects version conflicts, timeouts and partial failures before DB relocation.
 It never copies vectors and then deletes by the same document ID. Source and
@@ -242,17 +263,12 @@ These are separate follow-ups, not capabilities provided by this package:
    remaining KB configuration/duplicate/delete, wiki and resource-administration
    service methods, preserving their existing route admission policies. Keep
    user/organization membership, embed, IM and signed-resource contracts separate.
-5. **Shared-agent message-file provenance.** Distinguish KB-origin files from
-   generated message artifacts, then apply the agent's current KB selection and
-   live bindings to KB-origin files. The existing source-owned shared-agent
-   fallback checks exact persisted output plus the live agent share, but does
-   not yet apply `selected`/`none` KB selection to every file. Do not treat the
-   org-shared KB fix as closing that separate path, or blindly apply KB gates
-   to generated artifacts that have no KB owner.
-6. **Resource-reference indexing and legacy migration.** Backfill historical
-   file bindings, measure the request-local text-reference fallback and migrate
-   old queued payloads. A legacy delete task without a KB ID can reconstruct
-   only its present unambiguous binding, not its original enqueue-time binding.
+5. **Trusted legacy file migration.** Backfill historical file bindings from
+   verified provenance, not arbitrary chunk/wiki mentions. Unbound historical
+   files now fail closed; request-path text fallback has been removed. Migrate
+   old queued payloads and transfer records without captured source wiki refs.
+   A legacy delete task without a KB ID can reconstruct only its present
+   unambiguous binding, not its original enqueue-time binding.
 
 No public request schema or database column migration is required by this
 refactor. Internal service interfaces require operation contexts, queued payloads

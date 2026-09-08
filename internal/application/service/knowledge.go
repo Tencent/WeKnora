@@ -823,6 +823,9 @@ func (s *knowledgeService) GetKnowledgeBatchWithSharedAccess(ctx context.Context
 			continue
 		}
 		k, err := s.repo.GetKnowledgeByIDOnly(ctx, id)
+		if err != nil && !errors.Is(err, repository.ErrKnowledgeNotFound) {
+			return nil, err
+		}
 		if err == nil {
 			appendAllowed(k)
 		}

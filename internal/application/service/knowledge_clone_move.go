@@ -1218,11 +1218,18 @@ func (s *knowledgeService) moveOneKnowledge(
 		return err
 	}
 	if matchesTransfer(ctx, state, sourceKB, targetKB, access.KBTransferMove, knowledgeID, mode) {
-		if state.Phase == "done" {
+		if state.Phase == "done" || state.Phase == "reparse_pending" {
+			if err := s.cleanupMovedSourceWiki(ctx, knowledge, sourceKB, targetKB); err != nil {
+				return err
+			}
+			if state.Phase == "reparse_pending" {
+				return s.enqueueMovedKnowledge(ctx, knowledge, sourceKB, targetKB)
+			}
+			if mode == "reuse_vectors" && targetKB.IsWikiEnabled() {
+				_, err := EnqueueWikiIngest(ctx, s.task, s.taskPendingRepo, tenantID, targetKB.ID, knowledge.ID)
+				return err
+			}
 			return nil
-		}
-		if state.Phase == "reparse_pending" {
-			return s.enqueueMovedKnowledge(ctx, knowledge, sourceKB, targetKB)
 		}
 	} else {
 		state = &knowledgeTransferState{
@@ -1234,6 +1241,16 @@ func (s *knowledgeService) moveOneKnowledge(
 			Mode:      mode,
 			Phase:     "moving",
 		}
+		if sourceKB.IsWikiEnabled() {
+			chunks, err := s.transferChunks(ctx, knowledge, sourceKB.ID)
+			if err != nil {
+				return err
+			}
+			for _, chunk := range chunks {
+				state.WikiChunkIDs = append(state.WikiChunkIDs, chunk.ID)
+			}
+			state.WikiSummary = knowledge.Description
+		}
 		before := *knowledge
 		knowledge.ParseStatus = types.ParseStatusProcessing
 		if err := setTransferState(knowledge, *state); err != nil {
@@ -1244,26 +1261,20 @@ func (s *knowledgeService) moveOneKnowledge(
 		}
 	}
 
-	// From the source KB's point of view the document is leaving for good, so it
-	// needs the same wiki reconciliation a delete performs: wiki_pages carry
-	// source_refs back to this knowledge and are what the folder tree and the
-	// wiki graph are built from, and nothing below touches them. This must run
-	// while KnowledgeBaseID still points at the source and before any chunk is
-	// removed, since the cleanup matches pages by chunk_refs.
-	if sourceKB.IsWikiEnabled() {
-		s.cleanupWikiOnKnowledgeDelete(ctx, knowledge)
-	}
-
 	switch mode {
 	case "reuse_vectors":
 		if err := s.moveKnowledgeReuseVectors(ctx, knowledge, sourceKB, targetKB); err != nil {
+			return err
+		}
+		if err := s.cleanupMovedSourceWiki(ctx, knowledge, sourceKB, targetKB); err != nil {
 			return err
 		}
 		// reparse re-ingests through KnowledgePostProcess once the new chunks
 		// land; reuse_vectors keeps the existing chunks and never re-enters that
 		// pipeline, so the target KB has to be told about the document here.
 		if targetKB.IsWikiEnabled() {
-			EnqueueWikiIngest(ctx, s.task, s.taskPendingRepo, tenantID, targetKB.ID, knowledge.ID)
+			_, err := EnqueueWikiIngest(ctx, s.task, s.taskPendingRepo, tenantID, targetKB.ID, knowledge.ID)
+			return err
 		}
 		return nil
 	case "reparse":
@@ -1403,6 +1414,9 @@ func (s *knowledgeService) moveKnowledgeReparse(
 		return err
 	}
 	if err := s.repo.UpdateKnowledgeForTransfer(ctx, &before, knowledge); err != nil {
+		return err
+	}
+	if err := s.cleanupMovedSourceWiki(ctx, knowledge, sourceKB, targetKB); err != nil {
 		return err
 	}
 	return s.enqueueMovedKnowledge(ctx, knowledge, sourceKB, targetKB)

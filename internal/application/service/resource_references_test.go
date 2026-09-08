@@ -11,10 +11,11 @@ import (
 
 func TestKBFileBindingRequiresLiveKnowledgeInExactKB(t *testing.T) {
 	catalog, db := newResourceCatalogForTest(t)
-	require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.Chunk{}, &types.WikiPage{}))
+	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}, &types.Knowledge{}, &types.Chunk{}, &types.WikiPage{}))
 	ctx := context.Background()
 	ref, err := catalog.Register(ctx, 7, "local://7/exports/image.png", interfaces.ResourceRegistration{})
 	require.NoError(t, err)
+	require.NoError(t, db.Create(&types.KnowledgeBase{ID: "kb", TenantID: 7}).Error)
 	knowledge := &types.Knowledge{ID: "doc", TenantID: 7, KnowledgeBaseID: "kb", Type: "file"}
 	require.NoError(t, db.Create(knowledge).Error)
 	require.NoError(
@@ -36,9 +37,9 @@ func TestKBFileBindingRequiresLiveKnowledgeInExactKB(t *testing.T) {
 	require.False(t, ok, "a stale binding cannot authorize a deleted document")
 }
 
-func TestKBFileLegacyReferencesMatchExactTokens(t *testing.T) {
+func TestKBFileLegacyTextReferencesDoNotAuthorizeFiles(t *testing.T) {
 	catalog, db := newResourceCatalogForTest(t)
-	require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.Chunk{}, &types.WikiPage{}))
+	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}, &types.Knowledge{}, &types.Chunk{}, &types.WikiPage{}))
 	lookup := catalog.(interfaces.KBResourceLookup)
 	const reference = "local://7/exports/image.png"
 	chunk := &types.Chunk{
@@ -54,7 +55,7 @@ func TestKBFileLegacyReferencesMatchExactTokens(t *testing.T) {
 	require.NoError(t, db.Model(chunk).Update("image_info", `[{"url":"`+reference+`"}]`).Error)
 	ok, err = lookup.IsReferencedByKnowledgeBase(context.Background(), 7, "kb", reference)
 	require.NoError(t, err)
-	require.True(t, ok)
+	require.False(t, ok, "text is not an ownership binding")
 	require.NoError(t, db.Delete(chunk).Error)
 	ok, err = lookup.IsReferencedByKnowledgeBase(context.Background(), 7, "kb", reference)
 	require.NoError(t, err)
@@ -63,7 +64,7 @@ func TestKBFileLegacyReferencesMatchExactTokens(t *testing.T) {
 	require.NoError(t, db.Create(page).Error)
 	ok, err = lookup.IsReferencedByKnowledgeBase(context.Background(), 7, "kb", reference)
 	require.NoError(t, err)
-	require.True(t, ok)
+	require.False(t, ok, "text is not an ownership binding")
 	ok, err = lookup.IsReferencedByKnowledgeBase(context.Background(), 8, "kb", reference)
 	require.NoError(t, err)
 	require.False(t, ok)

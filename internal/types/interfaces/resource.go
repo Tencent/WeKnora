@@ -30,8 +30,12 @@ type ResourceRepository interface {
 		ctx context.Context,
 		tenantID uint64,
 		kbID, resourceID string,
-		references []string,
 	) (bool, error)
+	GetMessageFileBindings(
+		ctx context.Context,
+		tenantID uint64,
+		resourceID, messageID string,
+	) (*types.MessageFileBindings, error)
 	CreateGrant(ctx context.Context, grant *types.ResourceAccessGrant) error
 	GetValidGrant(ctx context.Context, tokenHash string, now time.Time) (*types.ResourceAccessGrant, error)
 	DeleteExpiredGrants(ctx context.Context, before time.Time) error
@@ -69,8 +73,18 @@ type ResourceCatalog interface {
 	ResolveAccessGrant(ctx context.Context, token string) (*types.StoredResource, error)
 }
 
-// KBResourceLookup verifies an exact live knowledge binding or persisted
-// chunk/Wiki reference. A common storage tenant alone is insufficient.
+// KBResourceLookup verifies an explicit binding to a live knowledge document.
+// Text references and common storage tenancy never establish ownership.
 type KBResourceLookup interface {
 	IsReferencedByKnowledgeBase(ctx context.Context, tenantID uint64, kbID, reference string) (bool, error)
+}
+
+// MessageFileBindingLookup resolves explicit KB and message-artifact bindings.
+// Only the catalog can turn a raw locator into a registered resource identity.
+type MessageFileBindingLookup interface {
+	GetMessageFileBindings(
+		ctx context.Context,
+		tenantID uint64,
+		reference, messageID string,
+	) (*types.MessageFileBindings, error)
 }
