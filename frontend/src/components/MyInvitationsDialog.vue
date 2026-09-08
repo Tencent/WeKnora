@@ -121,7 +121,7 @@ function inviterDisplay(row: TenantInvitation): string {
 function formatDate(s: string): string {
   if (!s) return '-'
   try {
-    return new Intl.DateTimeFormat(locale.value || 'zh-CN', {
+    return new Intl.DateTimeFormat(locale.value || 'en-US', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',

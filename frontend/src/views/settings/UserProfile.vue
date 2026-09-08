@@ -268,7 +268,7 @@ const formatDate = (dateStr: string | undefined) => {
   if (!dateStr) return t('tenant.unknown')
   try {
     const d = new Date(dateStr)
-    const fmt = new Intl.DateTimeFormat(locale.value || 'zh-CN', {
+    const fmt = new Intl.DateTimeFormat(locale.value || 'en-US', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',

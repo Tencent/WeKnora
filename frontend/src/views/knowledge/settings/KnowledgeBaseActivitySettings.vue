@@ -515,7 +515,7 @@ function actorLabel(entry: KnowledgeBaseActivity): string {
 function formatDatePart(value: string): string {
   if (!value) return '—'
   try {
-    return new Intl.DateTimeFormat(locale.value || 'zh-CN', {
+    return new Intl.DateTimeFormat(locale.value || 'en-US', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -528,7 +528,7 @@ function formatDatePart(value: string): string {
 function formatTimePart(value: string): string {
   if (!value) return ''
   try {
-    return new Intl.DateTimeFormat(locale.value || 'zh-CN', {
+    return new Intl.DateTimeFormat(locale.value || 'en-US', {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',

@@ -133,7 +133,7 @@ const truncateContent = (content: string, maxLength: number = 300): string => {
 const formatDate = (dateStr: string): string => {
   try {
     const date = new Date(dateStr);
-    return date.toLocaleDateString(locale.value || 'zh-CN', {
+    return date.toLocaleDateString(locale.value || 'en-US', {
       year: 'numeric',
       month: 'long',
       day: 'numeric'

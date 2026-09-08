@@ -1,7 +1,7 @@
-export const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'ru-RU', 'ko-KR', 'ja-JP'] as const
+export const SUPPORTED_LOCALES = ['en-US', 'ru-RU', 'ja-JP'] as const
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number]
 
-export const BUILT_IN_DEFAULT: SupportedLocale = 'zh-CN'
+export const BUILT_IN_DEFAULT: SupportedLocale = 'en-US'
 
 function isSupportedLocale(value: string): value is SupportedLocale {
   return (SUPPORTED_LOCALES as readonly string[]).includes(value)
