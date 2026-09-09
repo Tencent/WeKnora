@@ -201,6 +201,10 @@ go run ./cmd/evidenceverify -report wiki-cache-benchmark-<id>.json
 
 ## 真实实验一：RAG 双模型受控对比
 
+最终功能提交 `5fb873a7` 上重新执行的 RAG 双模型对比与 Wiki 严格 A/B 已汇总在
+[最终版本真实验收证据](./evidence/final-acceptance-2026-09-09.md)。该报告是提交评审时的首要
+实验入口；原始 JSON 因包含内部资源 UUID，仅在实验操作者本地保留并由 `evidenceverify` 校验。
+
 在 `rhino-topic3-zh` 数据集上完成百炼 `qwen3.7-plus` 与本地 `qwen2:7b` 的受控对比，
 并对百炼模型完成 3 次严格匹配重复实验。两者检索指标均为 100%；代表性运行中，本地模型
 BLEU/ROUGE 更高且 Token 更少，但端到端耗时为 138.26 秒，对比百炼的 13.40 秒。

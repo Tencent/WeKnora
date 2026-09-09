@@ -133,6 +133,12 @@ traffic; neither evidence type is presented as the other.
 
 ## Real provider evidence
 
+The primary final-version evidence entry point is the
+[final acceptance report](./evidence/final-acceptance-2026-09-09.md). It records
+the controlled two-model RAG comparison and strict Wiki cache A/B rerun on
+commit `5fb873a7`, with locally retained raw exports verified by
+`cmd/evidenceverify`.
+
 [`evidence/rag-model-comparison-2026-09-08.md`](./evidence/rag-model-comparison-2026-09-08.md)
 records a controlled comparison between Bailian `qwen3.7-plus` and local
 `qwen2:7b` on the four-sample `rhino-topic3-zh` dataset, plus the three-run
