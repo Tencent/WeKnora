@@ -22,6 +22,31 @@ go run ./cmd/evidenceverify -report <exported-report.json>
 UUID。本报告只公开指标、非敏感指纹、代码版本和原始报告校验和，不包含 Prompt、问题正文、
 参考答案、模型回答、检索正文、租户编号或资源 UUID。
 
+## 界面验收截图
+
+以下截图只展示聚合指标和模型显示名称，不包含任务编号、租户编号、资源 UUID、Prompt、
+问题正文、参考答案、模型回答或检索正文。
+
+### 重复实验汇总
+
+![三轮匹配运行的重复实验汇总](./screenshots/repeated-runs-summary.png)
+
+### 双模型受控对比
+
+![双模型对比的检索与生成质量指标](./screenshots/controlled-model-comparison-quality.png)
+
+![双模型对比的耗时、Token、缓存与成本指标](./screenshots/controlled-model-comparison-usage.png)
+
+### Wiki 缓存严格 A/B
+
+![Wiki 缓存严格 A/B 界面复验](./screenshots/wiki-cache-strict-ab.png)
+
+Wiki 截图来自同一冻结代码上的独立界面复验，报告校验和为
+`sha256:88dde80174d1af9a758d5ac7795d995b05e9e1c9c03ccbcc4b5b0ca3f161681e`。
+该轮冷、暖缓存命中率分别为 0.00% 和 99.62%，估算成本下降 68.29%；暖组 P95 受远程
+服务抖动影响高于冷组，因此它只用于展示 UI 和再次确认 Provider 缓存命中，不替换下文
+冻结实验的时延结论。
+
 ## RAG 双模型受控对比
 
 ### 可比性
