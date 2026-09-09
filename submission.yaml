@@ -1,0 +1,15 @@
+version: 1
+student:
+  name: "苏宗韬"
+  github_id: "szt1107"
+topic:
+  id: "3"
+  title: "质量评测基线与成本可观测"
+result:
+  type: code
+  url: "https://github.com/szt1107/WeKnora/tree/rhino-2026-final-3/codex/topic3"
+repository:
+  url: "https://github.com/szt1107/WeKnora"
+  branch: "topic3-v0.7.2-base"
+  commit: "de08cc8b004cec83ed4835a737d36eab45cb6d3a"
+  tag: "rhino-2026-final-3"
