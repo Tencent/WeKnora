@@ -80,21 +80,26 @@ func TestBuildFallbackMessages_AttachesImagesToUserTurn(t *testing.T) {
 	assert.Equal(t, cm.Images, withVision[len(withVision)-1].Images)
 }
 
-func TestPrepareFallbackMessagesMigratesHistoricalCitations(t *testing.T) {
+func TestPrepareFallbackMessagesKeepsHistoricalSourcesNonCitable(t *testing.T) {
 	cm := &types.ChatManage{}
 	cm.Query = "follow-up"
 	cm.History = []*types.History{{
-		Query:  "previous",
-		Answer: `Previous <kb doc="Legacy" chunk_id="legacy-chunk" kb_id="legacy-kb" />`,
+		Query: "previous",
+		Answer: `Previous <kb doc="Legacy" chunk_id="legacy-chunk" kb_id="legacy-kb" /> ` +
+			`<web url="https://example.com/previous" title="Previous source" />`,
 	}}
 
 	messages, refs := prepareFallbackMessages(cm, "legacy fallback prompt")
 	require.Contains(t, messages[0].Content, "Source handling protocol")
-	require.Equal(t, `Previous <ref id="c1"/>`, messages[2].Content)
-	require.Equal(t,
-		`<kb doc="Legacy" chunk_id="legacy-chunk" kb_id="legacy-kb" />`,
-		refs.DecodeOutputText(`<ref id="c1"/>`),
-	)
+	require.Equal(t, `Previous <ref id="c1"/> <ref id="w1"/>`, messages[2].Content)
+	// Fallback has no current retrieval evidence. Historical handles are kept
+	// for navigation but must not authorize citations in the new answer.
+	raw := `Answer <ref id="c1"/><ref id="w1"/>`
+	require.Equal(t, "Answer ", refs.DecodeOutputText(raw))
+	decoder := refs.StreamDecoder()
+	streamed := decoder.Feed(`Answer <ref id="c`) +
+		decoder.Feed(`1"/><ref id="w`) + decoder.Feed(`1"/>`) + decoder.Flush()
+	require.Equal(t, "Answer ", streamed)
 }
 
 func TestPrepareFallbackMessagesSuppressesCitationsWhenDisabled(t *testing.T) {
