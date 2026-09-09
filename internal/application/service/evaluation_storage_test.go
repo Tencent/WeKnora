@@ -135,6 +135,45 @@ func TestEvaluationStorageReturnsTaskNotFound(t *testing.T) {
 	require.EqualError(t, err, "task not found")
 }
 
+func TestEvaluationStorageListsTenantRunsNewestFirst(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "evaluation-runs.db")), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&evaluationRecord{}))
+	storage := newEvaluationStorage(db)
+	startedAt := time.Now().UTC().Truncate(time.Second)
+	for _, item := range []struct {
+		id       string
+		tenantID uint64
+		started  time.Time
+	}{
+		{id: "tenant-7-old", tenantID: 7, started: startedAt.Add(-time.Hour)},
+		{id: "tenant-7-new", tenantID: 7, started: startedAt},
+		{id: "tenant-8-private", tenantID: 8, started: startedAt.Add(time.Hour)},
+	} {
+		require.NoError(t, storage.register(context.Background(), &types.EvaluationDetail{
+			Task: &types.EvaluationTask{
+				ID: item.id, TenantID: item.tenantID, DatasetID: "default",
+				StartTime: item.started, Status: types.EvaluationStatueSuccess,
+			},
+			Params: &types.ChatManage{},
+			Metric: &types.MetricResult{RetrievalMetrics: types.RetrievalMetrics{Recall: 0.8}},
+			Usage:  &types.EvaluationUsage{CallCount: 2},
+		}))
+	}
+
+	page, err := storage.list(context.Background(), 7, 1, 0)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, page.Total)
+	require.Equal(t, 1, page.Limit)
+	require.Equal(t, "tenant-7-new", page.Items[0].Task.ID)
+	require.Equal(t, 0.8, page.Items[0].Metric.RetrievalMetrics.Recall)
+	require.Equal(t, 2, page.Items[0].Usage.CallCount)
+
+	secondPage, err := storage.list(context.Background(), 7, 1, 1)
+	require.NoError(t, err)
+	require.Equal(t, "tenant-7-old", secondPage.Items[0].Task.ID)
+}
+
 func TestEvaluationStorageAggregatesModelCalls(t *testing.T) {
 	t.Setenv("WEKNORA_MODEL_CALL_FINGERPRINT_KEY", "evaluation-test-secret")
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "evaluation.db")), &gorm.Config{})

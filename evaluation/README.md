@@ -60,6 +60,27 @@ proof that a recall regression blocks the job rather than a screenshot-only
 claim. The frozen reference result must only be updated through an intentional,
 reviewable baseline change backed by a reproducible accepted run.
 
+## Export and verify run evidence
+
+Successful runs expose **Export evidence** in **Settings → RAG Evaluation**.
+New runs include the actual code revision, dataset/config/model fingerprints,
+ordered per-sample retrieval provenance, per-sample metrics, and hashes of the
+question, reference answer, generated answer, and retrieved content. No prompt,
+answer, or passage body is included in the export.
+
+Verify a downloaded report from the repository root:
+
+```bash
+go run ./cmd/evidenceverify -report evaluation-evidence-TASK_ID.json
+```
+
+The checksum proves that the exported report was not modified afterwards; it
+does not prove authorship. Reproducibility comes from the recorded commit,
+frozen dataset fingerprint, controlled configuration fingerprint, model
+snapshots, and a rerun under the same protocol. Older runs are retained and
+exportable, but carry `per_sample_evidence_unavailable` because that evidence
+was not collected retroactively.
+
 ## Compare cache optimization runs
 
 Capture the same document batch before and after enabling the optimization,
@@ -70,6 +91,7 @@ change without uploading prompts, tokens, or credentials:
 
 ```bash
 go run ./cmd/cachebench \
+  -strict \
   -before evaluation/fixtures/cache_before.json \
   -after evaluation/fixtures/cache_after.json \
   -report cache-comparison.json
@@ -79,6 +101,16 @@ The checked-in before/after files are deterministic examples for testing the
 calculation only; they are not claimed as measurements from a deployed model.
 Replace them with exports from two runs over the same documents, model, and
 chunking configuration for the submission report.
+
+`-strict` rejects the report unless both cohorts have identical non-empty
+workload, model, and configuration fingerprints; the same repetition count of
+at least three; and one-to-one Wiki model/purpose/prompt-prefix signatures,
+with each distinct prefix appearing once in each cohort. It
+also rejects cold hits, warm zero-hit results, failed calls, and missing
+provider cache telemetry. The report includes median and P95 latency plus cost
+per 1,000 prompt tokens. No data deletion is needed: use a fixed test workload
+that has never run for the cold cohort, then replay it unchanged immediately
+for the warm cohort.
 
 ## Real provider evidence
 

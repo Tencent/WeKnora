@@ -4855,6 +4855,30 @@ export default {
       desc: 'Maximum number of tokens to generate in the response'
     }
   },
+  evaluationSettings: {
+    navLabel: 'RAG Evaluation',
+    title: 'RAG Evaluation',
+    description: 'Run reproducible evaluations and compare quality, latency, tokens, cache, and cost.',
+    refresh: 'Refresh', newRun: 'New evaluation',
+    newRunHint: 'Fix the dataset and change one variable at a time for an attributable comparison.',
+    dataset: 'Dataset', knowledgeBase: 'Knowledge base', chatModel: 'Chat model', rerankModel: 'Rerank model',
+    autoSelect: 'Use system default', adminOnly: 'Viewer access can inspect runs; Admin access is required to start one.',
+    start: 'Start evaluation', reset: 'Reset fields', chatRequired: 'Select a chat model explicitly so the comparison remains reproducible.', comparison: 'Run comparison',
+    comparisonHint: 'The first run is the baseline; compare up to {count} models or configurations.',
+    comparable: 'Comparability passed: dataset, knowledge base, chunking, pipeline, and dependency models match except for the chat model.',
+    comparabilityUnknown: 'Some runs lack a complete snapshot, so comparability cannot be verified.', datasetDiffers: 'Dataset content differs.',
+    knowledgeBaseDiffers: 'Source knowledge base differs.', chunkingDiffers: 'Chunking configuration differs.',
+    pipelineDiffers: 'Retrieval or generation pipeline differs.', modelDependencyDiffers: 'Embedding or rerank model differs.',
+    clear: 'Clear', metric: 'Metric', base: 'Baseline', candidate: 'Candidate', delta: 'Delta',
+    duration: 'End-to-end duration', cacheHitRate: 'Cache hit rate', cost: 'Estimated cost',
+    history: 'Run history', historyHint: 'Select 2–4 successful runs for version or multi-model comparison.',
+    total: '{count} runs', empty: 'No evaluation runs yet.', selectCompare: 'Select for comparison',
+    exportEvidence: 'Export evidence', exportSucceeded: 'Evidence report downloaded.', exportFailed: 'Failed to export the evidence report.',
+    modelValue: 'Model: {value}', knowledgeBaseValue: 'Knowledge base: {value}', defaultConfiguration: 'System default configuration', unknownValue: 'Unknown',
+    loadFailed: 'Failed to load evaluation data.', startFailed: 'Failed to start evaluation.', pollFailed: 'Failed to refresh the evaluation status three times. Please refresh and try again.',
+    invalidHint: 'No chat-model call succeeded, so this run cannot be used in a formal comparison.',
+    status: { pending: 'Pending', running: 'Running', success: 'Succeeded', failed: 'Failed', invalid: 'Invalid result', unknown: 'Unknown' }
+  },
   mcpSettings: {
     addUsageInstructions: "Add usage instructions",
     noUsageInstructions: "No usage instructions yet",
@@ -5006,7 +5030,7 @@ export default {
     },
     builtinTag: 'Built-in',
     confirmDelete: 'Delete model "{name}"?',
-    usage: {
+    dependencyUsage: {
       title: 'Model cannot be deleted',
       description: 'Model "{name}" is still referenced by the following settings. Open each configuration and choose another model before deleting it.',
       knowledgeBases: 'Knowledge bases ({count})',

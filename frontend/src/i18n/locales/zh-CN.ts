@@ -2194,7 +2194,7 @@ export default {
     copySuffix: ' 副本',
     builtinTag: '内置',
     confirmDelete: '确定删除模型「{name}」吗？',
-    usage: {
+    dependencyUsage: {
       title: '模型无法删除',
       description: '模型「{name}」仍被以下配置引用。请先打开对应配置并更换模型，再重新删除。',
       knowledgeBases: '知识库（{count}）',
@@ -2378,6 +2378,30 @@ export default {
         wiki_generation: 'Wiki 内容生成'
       }
     }
+  },
+  evaluationSettings: {
+    navLabel: 'RAG 评测',
+    title: 'RAG 评测',
+    description: '执行可复现评测，并对比质量、耗时、Token、缓存和成本。',
+    refresh: '刷新', newRun: '新建评测',
+    newRunHint: '固定数据集，每次只改变一个变量，才能解释指标变化来源。',
+    dataset: '数据集', knowledgeBase: '知识库', chatModel: '对话模型', rerankModel: '重排模型',
+    autoSelect: '使用系统默认', adminOnly: 'Viewer 可查看结果；启动评测需要 Admin 权限。',
+    start: '开始评测', reset: '重置条件', chatRequired: '请明确选择对话模型，避免默认值造成不可复现的对比。', comparison: '运行对比',
+    comparisonHint: '第一个运行作为基线，最多可同时对比 {count} 个模型或配置。',
+    comparable: '可比性校验通过：除对话模型外，数据集、知识库、分块、检索管线和依赖模型一致。',
+    comparabilityUnknown: '部分运行缺少完整快照，无法验证可比性。', datasetDiffers: '数据集内容不一致。',
+    knowledgeBaseDiffers: '来源知识库不一致。', chunkingDiffers: '分块配置不一致。',
+    pipelineDiffers: '检索或生成管线配置不一致。', modelDependencyDiffers: 'Embedding 或重排模型不一致。',
+    clear: '清空', metric: '指标', base: '基线', candidate: '候选', delta: '差值',
+    duration: '端到端耗时', cacheHitRate: '缓存命中率', cost: '估算成本',
+    history: '评测历史', historyHint: '选择 2–4 次成功运行，可做新旧版本或多模型横向对比。',
+    total: '共 {count} 次', empty: '暂无评测运行。', selectCompare: '选择比较',
+    exportEvidence: '导出证据', exportSucceeded: '证据报告已下载。', exportFailed: '证据报告导出失败。',
+    modelValue: '模型：{value}', knowledgeBaseValue: '知识库：{value}', defaultConfiguration: '系统默认配置', unknownValue: '未知',
+    loadFailed: '评测数据加载失败。', startFailed: '评测启动失败。', pollFailed: '评测状态连续获取失败，请刷新后重试。',
+    invalidHint: '没有成功的对话模型调用，不可用于正式对比。',
+    status: { pending: '等待中', running: '运行中', success: '已成功', failed: '已失败', invalid: '结果无效', unknown: '未知' }
   },
   mcpSettings: {
     addUsageInstructions: "添加使用说明",

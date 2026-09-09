@@ -9,6 +9,8 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -140,6 +142,40 @@ func (e *evaluationStorage) getStoredDetail(ctx context.Context, taskID string) 
 	return evaluationRecordToDetail(&record)
 }
 
+func (e *evaluationStorage) list(
+	ctx context.Context, tenantID uint64, limit, offset int,
+) (*types.EvaluationRunPage, error) {
+	query := e.db.WithContext(ctx).Model(&evaluationRecord{}).Where("tenant_id = ?", tenantID)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var records []evaluationRecord
+	if err := query.Order("started_at DESC, id DESC").Limit(limit).Offset(offset).Find(&records).Error; err != nil {
+		return nil, err
+	}
+	page := &types.EvaluationRunPage{
+		Items: make([]types.EvaluationRunSummary, 0, len(records)),
+		Total: total, Limit: limit, Offset: offset,
+	}
+	for i := range records {
+		detail, err := evaluationRecordToDetail(&records[i])
+		if err != nil {
+			return nil, fmt.Errorf("decode evaluation run %s: %w", records[i].ID, err)
+		}
+		metric := detail.Metric
+		if metric != nil && len(metric.Samples) > 0 {
+			copy := *metric
+			copy.Samples = nil
+			metric = &copy
+		}
+		page.Items = append(page.Items, types.EvaluationRunSummary{
+			Task: detail.Task, RunConfig: detail.RunConfig, Metric: metric, Usage: detail.Usage,
+		})
+	}
+	return page, nil
+}
+
 func (e *evaluationStorage) update(
 	ctx context.Context,
 	taskID string,
@@ -261,6 +297,65 @@ func (e *EvaluationService) EvaluationResult(ctx context.Context, taskID string)
 	return detail, nil
 }
 
+// EvaluationEvidence returns a portable, deterministic and tenant-scoped proof
+// bundle. It intentionally excludes ChatManage because that structure contains
+// prompt templates and request text.
+func (e *EvaluationService) EvaluationEvidence(
+	ctx context.Context, taskID string,
+) (*types.EvaluationEvidenceReport, error) {
+	detail, err := e.EvaluationResult(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	report := buildEvaluationEvidenceReport(detail)
+	if err := sealEvaluationEvidenceReport(report); err != nil {
+		return nil, err
+	}
+	return report, nil
+}
+
+func sealEvaluationEvidenceReport(report *types.EvaluationEvidenceReport) error {
+	report.ReportSHA256 = ""
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		return fmt.Errorf("encode evaluation evidence: %w", err)
+	}
+	report.ReportSHA256 = fmt.Sprintf("sha256:%x", sha256.Sum256(encoded))
+	return nil
+}
+
+func buildEvaluationEvidenceReport(detail *types.EvaluationDetail) *types.EvaluationEvidenceReport {
+	report := &types.EvaluationEvidenceReport{
+		SchemaVersion: 1, Task: detail.Task, RunConfig: detail.RunConfig,
+		Metric: detail.Metric, Usage: detail.Usage,
+		ModelCalls: make([]types.EvaluationEvidenceCall, 0, len(detail.ModelCalls)),
+	}
+	for _, call := range detail.ModelCalls {
+		report.ModelCalls = append(report.ModelCalls, types.EvaluationEvidenceCall{
+			ID: call.ID, ModelID: call.ModelID, ModelName: call.ModelName,
+			ModelType: call.ModelType, Purpose: call.Purpose,
+			PromptPrefixFingerprint: call.PromptPrefixFingerprint,
+			Usage:                   call.Usage, Pricing: call.Pricing, EstimatedCost: call.EstimatedCost,
+			DurationMS: call.DurationMS, Success: call.Success, CreatedAt: call.CreatedAt,
+		})
+	}
+	sort.Slice(report.ModelCalls, func(i, j int) bool {
+		if report.ModelCalls[i].CreatedAt.Equal(report.ModelCalls[j].CreatedAt) {
+			return report.ModelCalls[i].ID < report.ModelCalls[j].ID
+		}
+		return report.ModelCalls[i].CreatedAt.Before(report.ModelCalls[j].CreatedAt)
+	})
+	if detail.RunConfig == nil || detail.RunConfig.CodeVersion == "" || detail.RunConfig.CodeVersion == "unknown" {
+		report.Warnings = append(report.Warnings, "code_version_unknown")
+	} else if strings.HasSuffix(detail.RunConfig.CodeVersion, "-dirty") {
+		report.Warnings = append(report.Warnings, "code_version_dirty")
+	}
+	if detail.Metric == nil || len(detail.Metric.Samples) == 0 {
+		report.Warnings = append(report.Warnings, "per_sample_evidence_unavailable")
+	}
+	return report
+}
+
 // ModelUsage returns model-level evaluation usage for the current tenant and
 // optional inclusive time interval.
 func (e *EvaluationService) ModelUsage(
@@ -273,6 +368,13 @@ func (e *EvaluationService) ModelUsage(
 // evaluation UI. It performs no model calls and is safe for Viewer access.
 func (e *EvaluationService) EvaluationDatasets(ctx context.Context) ([]types.EvaluationDataset, error) {
 	return e.dataset.ListDatasets(ctx)
+}
+
+// EvaluationRuns returns newest-first history for the current tenant.
+func (e *EvaluationService) EvaluationRuns(
+	ctx context.Context, limit, offset int,
+) (*types.EvaluationRunPage, error) {
+	return e.evaluationStorage.list(ctx, types.MustTenantIDFromContext(ctx), limit, offset)
 }
 
 // Evaluation starts a new evaluation task with given parameters
@@ -491,18 +593,25 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 		}
 		logger.Info(newCtx, "Evaluation task status set to running")
 
-		// Execute actual evaluation
-		if err := e.EvalDataset(newCtx, detail, knowledgeBaseID, dataset); err != nil {
+		// Execute the evaluation and reject superficially successful runs that
+		// never completed an answer-model call. A retrieval/provider failure can
+		// otherwise fall through to a fallback response and produce zero metrics
+		// while the task is misleadingly marked successful.
+		evaluationErr := e.EvalDataset(newCtx, detail, knowledgeBaseID, dataset)
+		if evaluationErr == nil {
+			evaluationErr = e.validateSuccessfulEvaluationCalls(newCtx, taskID)
+		}
+		if evaluationErr != nil {
 			finishedAt := time.Now()
 			if updateErr := e.evaluationStorage.update(newCtx, taskID, func(current *types.EvaluationDetail) {
 				current.Task.Status = types.EvaluationStatueFailed
-				current.Task.ErrMsg = err.Error()
+				current.Task.ErrMsg = evaluationErr.Error()
 				current.Task.EndTime = &finishedAt
 				current.Task.DurationMS = finishedAt.Sub(current.Task.StartTime).Milliseconds()
 			}); updateErr != nil {
 				logger.Errorf(newCtx, "Failed to persist failed status: %v", updateErr)
 			}
-			logger.Errorf(newCtx, "Evaluation task failed: %v, task ID: %s", err, taskID)
+			logger.Errorf(newCtx, "Evaluation task failed: %v, task ID: %s", evaluationErr, taskID)
 			return
 		}
 
@@ -520,6 +629,26 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 
 	logger.Infof(ctx, "Evaluation task created successfully, task ID: %s", taskID)
 	return detail, nil
+}
+
+func (e *EvaluationService) validateSuccessfulEvaluationCalls(ctx context.Context, taskID string) error {
+	calls, _, err := e.evaluationStorage.getModelCalls(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("read evaluation model calls: %w", err)
+	}
+	if hasSuccessfulEvaluationChatCall(calls) {
+		return nil
+	}
+	return errors.New("evaluation produced no successful chat model call")
+}
+
+func hasSuccessfulEvaluationChatCall(calls []types.EvaluationModelCall) bool {
+	for _, call := range calls {
+		if call.ModelType == types.ModelTypeKnowledgeQA && call.Success {
+			return true
+		}
+	}
+	return false
 }
 
 // EvalDataset performs the actual evaluation of a dataset
@@ -693,12 +822,71 @@ func (e *EvaluationService) buildEvaluationRunConfig(
 		}
 		models = append(models, snapshotEvaluationModel(item.role, model))
 	}
-	return &types.EvaluationRunConfig{
-		SchemaVersion: 1, DatasetID: datasetID, DatasetFingerprint: datasetFingerprint,
+	config := &types.EvaluationRunConfig{
+		SchemaVersion: 2, DatasetID: datasetID, DatasetFingerprint: datasetFingerprint,
 		DatasetSamples: datasetSamples, SourceKnowledgeBaseID: sourceKnowledgeBaseID,
 		EvaluationKnowledgeBaseID: evaluationKB.ID, Chunking: evaluationKB.ChunkingConfig,
-		Pipeline: pipeline, Models: models, CodeVersion: evaluationCodeVersion(),
-	}, nil
+		Pipeline: snapshotEvaluationPipeline(pipeline), Models: models, CodeVersion: evaluationCodeVersion(),
+	}
+	config.ConfigFingerprint = fingerprintEvaluationConfig(config, false)
+	config.ControlledFingerprint = fingerprintEvaluationConfig(config, true)
+	return config, nil
+}
+
+func snapshotEvaluationPipeline(pipeline types.PipelineRequest) types.EvaluationPipelineSnapshot {
+	summary := pipeline.SummaryConfig
+	return types.EvaluationPipelineSnapshot{
+		MaxRounds: pipeline.MaxRounds, VectorThreshold: pipeline.VectorThreshold,
+		KeywordThreshold: pipeline.KeywordThreshold, EmbeddingTopK: pipeline.EmbeddingTopK,
+		RerankModelID: pipeline.RerankModelID, RerankTopK: pipeline.RerankTopK,
+		RerankThreshold: pipeline.RerankThreshold, ChatModelID: pipeline.ChatModelID,
+		FallbackStrategy: pipeline.FallbackStrategy, CitationEnabled: pipeline.CitationEnabled,
+		EnableRewrite: pipeline.EnableRewrite, EnableQueryExpansion: pipeline.EnableQueryExpansion,
+		QueryUnderstandModelID: pipeline.QueryUnderstandModelID,
+		Summary: types.EvaluationSummarySnapshot{
+			MaxTokens: summary.MaxTokens, RepeatPenalty: summary.RepeatPenalty,
+			TopK: summary.TopK, TopP: summary.TopP, FrequencyPenalty: summary.FrequencyPenalty,
+			PresencePenalty: summary.PresencePenalty, Temperature: summary.Temperature,
+			Seed: summary.Seed, MaxCompletionTokens: summary.MaxCompletionTokens,
+			Thinking: summary.Thinking, PromptSHA256: sha256Text(summary.Prompt),
+			ContextTemplateSHA256: sha256Text(summary.ContextTemplate),
+			NoMatchPrefixSHA256:   sha256Text(summary.NoMatchPrefix),
+		},
+		FallbackResponseSHA256:    sha256Text(pipeline.FallbackResponse),
+		FallbackPromptSHA256:      sha256Text(pipeline.FallbackPrompt),
+		RewritePromptSystemSHA256: sha256Text(pipeline.RewritePromptSystem),
+		RewritePromptUserSHA256:   sha256Text(pipeline.RewritePromptUser),
+	}
+}
+
+func fingerprintEvaluationConfig(config *types.EvaluationRunConfig, controlled bool) string {
+	pipeline := config.Pipeline
+	models := append([]types.EvaluationModelSnapshot(nil), config.Models...)
+	if controlled {
+		pipeline.ChatModelID = ""
+		models = models[:0]
+		for _, model := range config.Models {
+			if model.Role != "chat" {
+				models = append(models, model)
+			}
+		}
+	}
+	payload := struct {
+		SchemaVersion         int                              `json:"schema_version"`
+		DatasetFingerprint    string                           `json:"dataset_fingerprint"`
+		DatasetSamples        int                              `json:"dataset_samples"`
+		SourceKnowledgeBaseID string                           `json:"source_knowledge_base_id,omitempty"`
+		Chunking              types.ChunkingConfig             `json:"chunking"`
+		Pipeline              types.EvaluationPipelineSnapshot `json:"pipeline"`
+		Models                []types.EvaluationModelSnapshot  `json:"models"`
+		CodeVersion           string                           `json:"code_version"`
+	}{
+		SchemaVersion: config.SchemaVersion, DatasetFingerprint: config.DatasetFingerprint,
+		DatasetSamples: config.DatasetSamples, SourceKnowledgeBaseID: config.SourceKnowledgeBaseID,
+		Chunking: config.Chunking, Pipeline: pipeline, Models: models, CodeVersion: config.CodeVersion,
+	}
+	encoded, _ := json.Marshal(payload)
+	return fmt.Sprintf("sha256:%x", sha256.Sum256(encoded))
 }
 
 func snapshotEvaluationModel(role string, model *types.Model) types.EvaluationModelSnapshot {
@@ -731,10 +919,21 @@ func evaluationCodeVersion() string {
 		return revision
 	}
 	if info, ok := debug.ReadBuildInfo(); ok {
+		var revision string
+		modified := false
 		for _, setting := range info.Settings {
 			if setting.Key == "vcs.revision" && setting.Value != "" {
-				return setting.Value
+				revision = setting.Value
 			}
+			if setting.Key == "vcs.modified" && setting.Value == "true" {
+				modified = true
+			}
+		}
+		if revision != "" {
+			if modified {
+				return revision + "-dirty"
+			}
+			return revision
 		}
 	}
 	return "unknown"

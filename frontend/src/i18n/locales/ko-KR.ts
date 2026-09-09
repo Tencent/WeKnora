@@ -2192,7 +2192,7 @@ export default {
     copySuffix: ' 사본',
     builtinTag: '기본제공',
     confirmDelete: '모델 "{name}"을(를) 삭제하시겠습니까?',
-    usage: {
+    dependencyUsage: {
       title: '모델을 삭제할 수 없습니다',
       description: '모델 "{name}"이(가) 다음 설정에서 사용 중입니다. 각 설정을 열어 다른 모델로 변경한 후 다시 삭제하세요.',
       knowledgeBases: '지식 베이스 ({count})',
@@ -2376,6 +2376,30 @@ export default {
         wiki_generation: 'Wiki 콘텐츠 생성'
       }
     }
+  },
+  evaluationSettings: {
+    navLabel: 'RAG 평가',
+    title: 'RAG 평가',
+    description: '재현 가능한 평가를 실행하고 품질, 지연 시간, 토큰, 캐시 및 비용을 비교합니다.',
+    refresh: '새로고침', newRun: '새 평가',
+    newRunHint: '데이터셋을 고정하고 한 번에 하나의 변수만 변경하세요.',
+    dataset: '데이터셋', knowledgeBase: '지식 베이스', chatModel: '대화 모델', rerankModel: '재정렬 모델',
+    autoSelect: '시스템 기본값 사용', adminOnly: 'Viewer는 결과를 볼 수 있으며 실행에는 Admin 권한이 필요합니다.',
+    start: '평가 시작', reset: '필드 재설정', chatRequired: '재현 가능한 비교를 위해 대화 모델을 명시적으로 선택하세요.', comparison: '실행 비교',
+    comparisonHint: '첫 번째 실행이 기준선이며 최대 {count}개의 모델 또는 구성을 비교할 수 있습니다.',
+    comparable: '비교 가능성 검사 통과: 채팅 모델을 제외한 데이터셋, 지식 베이스, 청크, 파이프라인 및 의존 모델이 일치합니다.',
+    comparabilityUnknown: '일부 실행에 완전한 스냅샷이 없어 비교 가능성을 확인할 수 없습니다.', datasetDiffers: '데이터셋 내용이 다릅니다.',
+    knowledgeBaseDiffers: '소스 지식 베이스가 다릅니다.', chunkingDiffers: '청크 구성이 다릅니다.',
+    pipelineDiffers: '검색 또는 생성 파이프라인이 다릅니다.', modelDependencyDiffers: '임베딩 또는 리랭크 모델이 다릅니다.',
+    clear: '지우기', metric: '지표', base: '기준선', candidate: '후보', delta: '차이',
+    duration: '전체 소요 시간', cacheHitRate: '캐시 적중률', cost: '예상 비용',
+    history: '실행 기록', historyHint: '성공한 실행 2–4개를 선택하여 버전 또는 다중 모델을 비교하세요.',
+    total: '총 {count}회', empty: '평가 실행이 없습니다.', selectCompare: '비교 대상으로 선택',
+    exportEvidence: '증거 내보내기', exportSucceeded: '증거 보고서를 다운로드했습니다.', exportFailed: '증거 보고서를 내보내지 못했습니다.',
+    modelValue: '모델: {value}', knowledgeBaseValue: '지식 베이스: {value}', defaultConfiguration: '시스템 기본 구성', unknownValue: '알 수 없음',
+    loadFailed: '평가 데이터를 불러오지 못했습니다.', startFailed: '평가를 시작하지 못했습니다.', pollFailed: '평가 상태를 세 번 연속으로 가져오지 못했습니다. 새로 고침 후 다시 시도하세요.',
+    invalidHint: '성공한 대화 모델 호출이 없어 공식 비교에 사용할 수 없습니다.',
+    status: { pending: '대기 중', running: '실행 중', success: '성공', failed: '실패', invalid: '잘못된 결과', unknown: '알 수 없음' }
   },
   mcpSettings: {
     addUsageInstructions: "사용 안내 추가",

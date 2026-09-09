@@ -48,10 +48,87 @@ func TestReadRunDerivesEmbeddingProviderCallsFromEvaluationResult(t *testing.T) 
 
 func TestSummarizeCallsUsesCallsFallback(t *testing.T) {
 	input := runInput{Calls: []modelCall{{
-		Purpose: "wiki_summary",
-		Usage:   usage{CacheReadTokens: 30, CacheMissTokens: 70, CacheReported: true},
+		Purpose: "wiki_summary", DurationMS: 100,
+		Usage: usage{PromptTokens: 100, CacheReadTokens: 30, CacheMissTokens: 70, CacheReported: true},
 	}}}
 	summary := summarizeCalls(allCalls(input), "wiki_")
 	require.Equal(t, 1, summary.CallCount)
 	require.InDelta(t, 0.3, summary.CacheHitRate, 0.0001)
+	require.InDelta(t, 100, summary.MedianLatencyMS, 0.0001)
+	require.InDelta(t, 100, summary.P95LatencyMS, 0.0001)
+}
+
+func TestSummarizeCallsReportsMedianP95AndNormalizedCost(t *testing.T) {
+	calls := make([]modelCall, 0, 20)
+	for i := 1; i <= 20; i++ {
+		calls = append(calls, modelCall{
+			Purpose: "wiki_page", DurationMS: int64(i * 100), EstimatedCost: 0.01,
+			Usage: usage{PromptTokens: 100}, Pricing: pricing{Currency: "cny"},
+		})
+	}
+	summary := summarizeCalls(calls, "wiki_")
+	require.InDelta(t, 1050, summary.MedianLatencyMS, 0.0001)
+	require.InDelta(t, 1900, summary.P95LatencyMS, 0.0001)
+	require.InDelta(t, 0.1, summary.CostPerKPrompt["CNY"], 0.0001)
+}
+
+func TestValidateStrictPairAcceptsMatchedRepeatedCohorts(t *testing.T) {
+	before, after := matchedStrictRuns()
+	require.NoError(t, validateStrictPair(before, after, "wiki_"))
+}
+
+func TestValidateStrictPairRejectsUnmatchedWorkload(t *testing.T) {
+	before, after := matchedStrictRuns()
+	after.Experiment.WorkloadFingerprint = "sha256:different"
+	err := validateStrictPair(before, after, "wiki_")
+	require.EqualError(t, err, "workload_fingerprint must be non-empty and identical")
+}
+
+func TestValidateStrictPairRejectsDifferentCallSignatures(t *testing.T) {
+	before, after := matchedStrictRuns()
+	after.ModelCalls[0].PromptPrefixFingerprint = "hmac:different"
+	err := validateStrictPair(before, after, "wiki_")
+	require.EqualError(t, err, "Wiki call count or prompt-prefix signatures differ between cohorts")
+}
+
+func TestValidateStrictPairRejectsRepeatedColdSignature(t *testing.T) {
+	before, after := matchedStrictRuns()
+	before.ModelCalls[1].PromptPrefixFingerprint = before.ModelCalls[0].PromptPrefixFingerprint
+	after.ModelCalls[1].PromptPrefixFingerprint = after.ModelCalls[0].PromptPrefixFingerprint
+	err := validateStrictPair(before, after, "wiki_")
+	require.EqualError(t, err, "repetitions must equal the number of distinct matched Wiki call signatures")
+}
+
+func TestValidateStrictPairRejectsWarmOrFailedColdCohort(t *testing.T) {
+	before, after := matchedStrictRuns()
+	before.ModelCalls[0].Usage.CacheReadTokens = 10
+	before.ModelCalls[0].Usage.CacheMissTokens = 90
+	err := validateStrictPair(before, after, "wiki_")
+	require.EqualError(t, err, "cold cohort contains cache hits")
+
+	before, after = matchedStrictRuns()
+	before.ModelCalls[0].Success = false
+	err = validateStrictPair(before, after, "wiki_")
+	require.EqualError(t, err, `cold cohort: call for purpose "wiki_page" was not successful`)
+}
+
+func matchedStrictRuns() (runInput, runInput) {
+	protocol := experimentProtocol{
+		ProtocolVersion: 1, WorkloadFingerprint: "sha256:workload", ModelFingerprint: "sha256:model",
+		ConfigurationFingerprint: "sha256:config", Repetitions: 3,
+	}
+	before := runInput{
+		Experiment: protocol,
+		ModelCalls: []modelCall{
+			{ModelID: "model-1", Purpose: "wiki_page", PromptPrefixFingerprint: "hmac:prefix-1", Success: true, DurationMS: 100, Usage: usage{PromptTokens: 100, CacheMissTokens: 100, CacheReported: true}},
+			{ModelID: "model-1", Purpose: "wiki_page", PromptPrefixFingerprint: "hmac:prefix-2", Success: true, DurationMS: 120, Usage: usage{PromptTokens: 100, CacheMissTokens: 100, CacheReported: true}},
+			{ModelID: "model-1", Purpose: "wiki_page", PromptPrefixFingerprint: "hmac:prefix-3", Success: true, DurationMS: 140, Usage: usage{PromptTokens: 100, CacheMissTokens: 100, CacheReported: true}},
+		},
+	}
+	before.Experiment.Cohort = "cold"
+	after := before
+	after.Experiment.Cohort = "warm"
+	after.ModelCalls = append([]modelCall(nil), before.ModelCalls...)
+	after.ModelCalls[0].Usage = usage{PromptTokens: 100, CacheReadTokens: 80, CacheMissTokens: 20, CacheReported: true}
+	return before, after
 }
