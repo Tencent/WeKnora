@@ -32,7 +32,7 @@ export const useMenuStore = defineStore('menuStore', () => {
     { title: '', titleKey: 'menu.knowledgeBase', icon: 'zhishiku', path: 'knowledge-bases' },
     { title: '', titleKey: 'menu.agents', icon: 'agent', path: 'agents', requiredCapability: 'agents' },
     // 数据建模模块 (CUBE_ENABLE 关闭时后端 /semantic/info 不可达, 页面内为空态; 菜单常驻低噪音)
-    { title: '', titleKey: 'menu.semantic', icon: 'chart', path: 'semantic' },
+    { title: '', titleKey: 'menu.semantic', icon: 'semantic', path: 'semantic' },
     { title: '', titleKey: 'menu.organizations', icon: 'organization', path: 'organizations', requiredCapability: 'organizations' },
     { title: '', titleKey: 'menu.settings', icon: 'setting', path: 'settings' },
     { title: '', titleKey: 'menu.logout', icon: 'logout', path: 'logout' }

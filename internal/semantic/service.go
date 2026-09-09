@@ -526,6 +526,7 @@ type SaveModelInput struct {
 	DraftYAML        string   `json:"draft_yaml"`
 	AllowedGroups    []string `json:"allowed_groups"`
 	MemberVisibility string   `json:"member_visibility,omitempty"`
+	ExpectedVersion  int      `json:"expected_version,omitempty"`
 }
 
 // validateModelYAML parses + validates a draft against published model names.
@@ -589,6 +590,19 @@ func (e *Engine) UpdateModel(
 	if err != nil {
 		return nil, err
 	}
+	// Optimistic locking: detect concurrent edits. The frontend sends the
+	// version it loaded; if another user saved in between, the version
+	// won't match and we return a conflict.
+	if in.ExpectedVersion > 0 && m.Version != in.ExpectedVersion {
+		return nil, &ConflictError{Msg: fmt.Sprintf(
+			"model was modified by another user (current version: %d, expected: %d); please reload and retry",
+			m.Version, in.ExpectedVersion,
+		)}
+	}
+	// If DraftYAML is empty, keep the existing draft (metadata-only update).
+	if in.DraftYAML == "" {
+		in.DraftYAML = m.DraftYAML
+	}
 	doc, err := e.validateModelYAML(ctx, in.DraftYAML, m.Name)
 	if err != nil {
 		return nil, err
@@ -614,6 +628,7 @@ func (e *Engine) UpdateModel(
 		m.Kind = in.Kind
 	}
 	m.DraftYAML = in.DraftYAML
+	m.Version++
 	if in.AllowedGroups != nil {
 		m.AllowedGroups = StringListJSON(in.AllowedGroups)
 	}
@@ -632,6 +647,9 @@ func (e *Engine) DeleteModel(ctx context.Context, userID string, tenant uint64, 
 	m, err := e.repo.FindModel(ctx, tenant, id)
 	if err != nil {
 		return err
+	}
+	if !e.canManageModel(ctx, m, userID) {
+		return &ConflictError{Msg: "only the creator or an admin can delete this model"}
 	}
 	if m.Status == ModelStatusPublished {
 		if err := e.deployer.UnpublishModel(m.TenantID, m.Name); err != nil {
@@ -783,6 +801,27 @@ func (e *Engine) Publish(
 	return &PublishResult{Status: m.Status, Version: next}, nil
 }
 
+// canManageModel reports whether the user can perform destructive operations
+// (publish / unpublish / delete / rollback) on a model. The creator always
+// can; tenant admins and system admins can manage anyone's models.
+// Matches the KB OwnedKBOrAdmin pattern.
+func (e *Engine) canManageModel(ctx context.Context, m *SemanticModel, userID string) bool {
+	if m.CreatedBy == userID {
+		return true
+	}
+	// Tenant admins (owner/admin) can manage all models in the tenant.
+	isTenantAdmin, err := e.repo.IsTenantAdmin(ctx, m.TenantID, userID)
+	if err == nil && isTenantAdmin {
+		return true
+	}
+	// System admins can manage models across all tenants.
+	isSysAdmin, err := e.repo.IsSystemAdmin(ctx, userID)
+	if err != nil {
+		return false
+	}
+	return isSysAdmin
+}
+
 func (e *Engine) markPublishFailed(ctx context.Context, m *SemanticModel, msg string) {
 	m.Status = ModelStatusPublishFailed
 	m.LastError = msg
@@ -831,6 +870,9 @@ func (e *Engine) Rollback(
 	}
 	if v.ModelID != m.ID {
 		return nil, fmt.Errorf("version does not match the model")
+	}
+	if !e.canManageModel(ctx, m, userID) {
+		return nil, &ConflictError{Msg: "only the creator or an admin can roll back this model"}
 	}
 	m.DraftYAML = v.YAML
 	m.AllowedGroups = v.AllowedGroups
@@ -1025,7 +1067,13 @@ func (e *Engine) Preview(
 	if err != nil {
 		return nil, err
 	}
-	return e.client.Load(uctx, q.toCubeQuery(e.cfg.MaxPreviewRows))
+	resp, err := e.client.Load(uctx, q.toCubeQuery(e.cfg.MaxPreviewRows))
+	if err != nil {
+		return nil, err
+	}
+	e.audit(ctx, tenant, userID, AuditModelQuery, "model:"+m.Name,
+		map[string]interface{}{"rows": len(resp.Data), "measures": q.Measures, "dimensions": q.Dimensions})
+	return resp, nil
 }
 
 // QueryForUser executes a Cube query under the caller's identity (agent tools).
@@ -1043,6 +1091,8 @@ func (e *Engine) QueryForUser(
 	if err != nil {
 		return nil, err
 	}
+	e.audit(ctx, tenantID, userID, AuditModelQuery, "model:query",
+		map[string]interface{}{"rows": len(resp.Data), "measures": q.Measures, "dimensions": q.Dimensions})
 	// Attach the generated SQL for transparency (dry-run, no extra DB cost).
 	if sqlResp, sqlErr := e.client.SQL(uctx, q.toCubeQuery(e.cfg.MaxPreviewRows)); sqlErr == nil && len(sqlResp.SQL) > 0 { //nolint:lll // long but readable
 		resp.GeneratedSQL = sqlResp.SQL
@@ -1235,3 +1285,17 @@ func setViewPolicy(
 // corrupting each other (e.g. A publishes while B writes a broken model,
 // causing the whole schema to fail compilation and A to be falsely marked failed).
 var publishMu sync.Mutex
+
+// canManageModel reports whether the user can perform destructive operations
+// (publish / unpublish / delete / rollback) on a model. The creator always
+// can; admins can manage anyone's models. Matches the KB OwnedKBOrAdmin pattern.
+func canManageModel(model *SemanticModel, userID string, isAdmin bool) bool {
+	return model.CreatedBy == userID || isAdmin
+}
+
+// canEditModel reports whether the user can modify a model's draft.
+// Contributors can edit any model (same as upstream KB edit-on-create pattern
+// for draft collaboration), but destructive ops require canManageModel.
+func canEditModel(_ *SemanticModel, _ string, _ bool) bool {
+	return true // any contributor can edit drafts; per-model ownership checked at delete/publish
+}

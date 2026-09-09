@@ -2,7 +2,7 @@
   <div class="connections-tab">
     <!-- 卡片网格: 对齐知识库/智能体列表的卡片语言 -->
     <div v-if="modelValue.length" class="card-grid">
-      <div v-for="c in modelValue" :key="c.id" class="kb-style-card conn-card" @click="openEdit(c)">
+      <div v-for="c in modelValue" :key="c.id" class="kb-style-card conn-card" @click="canManage && openEdit(c)">
         <div class="card-header">
           <span class="card-title" :title="c.name">
             <span class="card-title-text">{{ c.title || c.name }}</span>
@@ -14,7 +14,7 @@
             </div>
             <template #content>
               <div class="popup-menu" @click.stop>
-                <div class="popup-menu-item" @click.stop="openEdit(c)">
+                <div v-if="canManage" class="popup-menu-item" @click.stop="openEdit(c)">
                   <t-icon class="menu-icon" name="setting" />
                   <span>{{ t('semantic.conn.edit') }}</span>
                 </div>

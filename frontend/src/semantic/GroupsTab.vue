@@ -2,7 +2,7 @@
   <div class="groups-tab">
     <!-- 卡片网格: 对齐知识库/智能体列表的卡片语言 -->
     <div v-if="modelValue.length" class="card-grid">
-      <div v-for="g in modelValue" :key="g.id" class="kb-style-card group-card" @click="openEdit(g)">
+      <div v-for="g in modelValue" :key="g.id" class="kb-style-card group-card" @click="canManage && openEdit(g)">
         <div class="card-header">
           <span class="card-title" :title="g.name">
             <span class="card-title-text">{{ g.title || g.name }}</span>
@@ -14,15 +14,15 @@
             </div>
             <template #content>
               <div class="popup-menu" @click.stop>
-                <div class="popup-menu-item" @click.stop="openMembers(g)">
+                <div v-if="canManage" class="popup-menu-item" @click.stop="openMembers(g)">
                   <t-icon class="menu-icon" name="usergroup" />
                   <span>{{ t('semantic.group.members') }}</span>
                 </div>
-                <div class="popup-menu-item" @click.stop="openEdit(g)">
+                <div v-if="canManage" class="popup-menu-item" @click.stop="openEdit(g)">
                   <t-icon class="menu-icon" name="edit" />
                   <span>{{ t('semantic.group.edit') }}</span>
                 </div>
-                <div class="popup-menu-item delete" @click.stop="confirmDelete(g)">
+                <div v-if="canManage" class="popup-menu-item delete" @click.stop="confirmDelete(g)">
                   <t-icon class="menu-icon" name="delete" />
                   <span>{{ t('semantic.group.delete') }}</span>
                 </div>

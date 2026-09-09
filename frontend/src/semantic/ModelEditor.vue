@@ -224,7 +224,7 @@
                 <div class="footer-actions">
                   <t-button variant="default" @click="emit('update:visible', false)">{{ t('semantic.group.cancel') }}</t-button>
                   <t-button v-if="canEdit" variant="outline" :loading="saving" @click="save">{{ t('semantic.model.editor.save') }}</t-button>
-                  <t-button v-if="canPublish" theme="primary" :loading="publishing" @click="noteVisible = true">{{ t('semantic.model.publish') }}</t-button>
+                  <t-button v-if="canManageThis" theme="primary" :loading="publishing" @click="noteVisible = true">{{ t('semantic.model.publish') }}</t-button>
                 </div>
               </div>
             </div>
@@ -274,6 +274,7 @@ const props = defineProps<{
   groups: DataGroup[]
   canEdit: boolean
   canPublish: boolean
+  currentUserId: string
 }>()
 const emit = defineEmits<{
   (e: 'update:visible', v: boolean): void
@@ -359,6 +360,7 @@ const allMemberNames = computed(() => {
 
 const isCube = computed(() => model.value?.kind !== 'view')
 const isPublished = computed(() => model.value?.status === 'published')
+const canManageThis = computed(() => props.canPublish || model.value?.created_by === props.currentUserId)
 const statusLabel = computed(() => {
   const s = model.value?.status
   if (s === 'published') return t('semantic.model.statusPublished')
@@ -548,7 +550,8 @@ async function save(): Promise<SemanticModel | null> {
       kind: model.value!.kind,
       draft_yaml: currentYaml(),
       allowed_groups: form.value.allowed_groups,
-      member_visibility: JSON.stringify(memberVis.value)
+      member_visibility: JSON.stringify(memberVis.value),
+      expected_version: model.value?.version || 0
     })
     model.value = updated
     emit('saved', updated)

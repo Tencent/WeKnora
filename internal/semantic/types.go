@@ -247,6 +247,7 @@ const (
 	AuditModelCreate      = "model.create"
 	AuditModelUpdate      = "model.update"
 	AuditModelDelete      = "model.delete"
+	AuditModelQuery       = "model.query"
 	AuditModelPublish     = "model.publish"
 	AuditModelUnpublish   = "model.unpublish"
 	AuditModelRollback    = "model.rollback"

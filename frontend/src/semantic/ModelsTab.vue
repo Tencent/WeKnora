@@ -26,7 +26,7 @@
                   <t-icon class="menu-icon" name="history" />
                   <span>{{ t('semantic.model.versions') }}</span>
                 </div>
-                <template v-if="canPublish">
+                <template v-if="canManageModel(m)">
                   <div class="popup-menu-item" @click.stop="publish(m)">
                     <t-icon class="menu-icon" name="cloud-upload" />
                     <span>{{ t('semantic.model.publish') }}</span>
@@ -124,7 +124,7 @@
               <div class="version-note">{{ v.note || '-' }}</div>
               <div class="version-meta">{{ v.published_by }} · {{ v.published_at }}</div>
             </div>
-            <t-button v-if="canPublish" size="small" variant="outline" @click="rollback(v)">
+            <t-button v-if="canManageModel(editing!)" size="small" variant="outline" @click="rollback(v)">
               {{ t('semantic.model.rollback') }}
             </t-button>
           </div>
@@ -140,6 +140,7 @@
       :groups="groups"
       :can-edit="canEdit"
       :can-publish="canPublish"
+      :current-user-id="currentUserId"
       @saved="onSaved"
       @published="emit('changed')"
     />
@@ -177,6 +178,7 @@ const props = defineProps<{
   spaceSelection: string
   canEdit: boolean
   canPublish: boolean
+  currentUserId: string
   cubeReady: boolean
 }>()
 const emit = defineEmits<{ (e: 'changed'): void }>()
@@ -264,6 +266,11 @@ const visibleModels = computed(() => {
 })
 
 const count = computed(() => models.value.length)
+const currentUserId = computed(() => props.currentUserId)
+
+function canManageModel(m: SemanticModel) {
+  return m.created_by === currentUserId.value || props.canPublish
+}
 const favoritesCount = computed(() => models.value.filter(m => favoriteIds.value.has(m.id)).length)
 const mineCount = computed(() => models.value.filter(m => m.created_by === authStore.currentUserId).length)
 defineExpose({ openCreate, count, favoritesCount, mineCount })

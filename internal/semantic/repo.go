@@ -256,6 +256,23 @@ func (r *Repository) UserGroupNames(ctx context.Context, tenantID uint64, userID
 	return names, err
 }
 
+// IsTenantAdmin checks whether the user has an owner or admin role in the
+// given tenant (via the tenant_members table).
+func (r *Repository) IsTenantAdmin(ctx context.Context, tenantID uint64, userID string) (bool, error) {
+	if userID == "" {
+		return false, nil
+	}
+	var role string
+	err := r.db.WithContext(ctx).Raw(
+		`SELECT role FROM tenant_members WHERE tenant_id = ? AND user_id = ? AND deleted_at IS NULL`,
+		tenantID, userID,
+	).Scan(&role).Error
+	if err != nil {
+		return false, err
+	}
+	return role == "owner" || role == "admin", nil
+}
+
 // IsSystemAdmin looks up the platform admin flag on the users table.
 func (r *Repository) IsSystemAdmin(ctx context.Context, userID string) (bool, error) {
 	if userID == "" {

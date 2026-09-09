@@ -60,6 +60,7 @@
             :space-selection="spaceSelection"
             :can-edit="canEdit"
             :can-publish="isAdmin"
+            :current-user-id="authStore.currentUserId"
             :cube-ready="!!info?.cube_ready"
           />
         </div>
