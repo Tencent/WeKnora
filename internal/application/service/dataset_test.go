@@ -38,6 +38,16 @@ func TestDatasetServiceLoadsBuiltInDefaultDataset(t *testing.T) {
 	require.NotEmpty(t, pairs)
 }
 
+func TestDatasetServiceLoadsBundledRhinoTopic3Dataset(t *testing.T) {
+	service := &DatasetService{rootDir: filepath.Join("..", "..", "..", "dataset")}
+	pairs, err := service.GetDatasetByID(context.Background(), "rhino-topic3-zh")
+
+	require.NoError(t, err)
+	require.Len(t, pairs, 4)
+	require.Equal(t, 101, pairs[0].QID)
+	require.Equal(t, "课题三本地验收代号是什么？", pairs[0].Question)
+}
+
 func TestDatasetServiceTreatsEmptyIDAsDefault(t *testing.T) {
 	service := &DatasetService{rootDir: filepath.Join("..", "..", "..", "dataset")}
 	pairs, err := service.GetDatasetByID(context.Background(), "  ")

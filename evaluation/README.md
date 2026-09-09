@@ -104,13 +104,30 @@ chunking configuration for the submission report.
 
 `-strict` rejects the report unless both cohorts have identical non-empty
 workload, model, and configuration fingerprints; the same repetition count of
-at least three; and one-to-one Wiki model/purpose/prompt-prefix signatures,
-with each distinct prefix appearing once in each cohort. It
+at least three; and one-to-one Wiki model/purpose/full-request signatures,
+with each distinct request appearing once in each cohort. The request body is
+never stored; only its deployment-keyed HMAC is retained. It
 also rejects cold hits, warm zero-hit results, failed calls, and missing
 provider cache telemetry. The report includes median and P95 latency plus cost
 per 1,000 prompt tokens. No data deletion is needed: use a fixed test workload
 that has never run for the cold cohort, then replay it unchanged immediately
 for the warm cohort.
+
+The evaluation page also exposes a **Strict Wiki cache A/B** action. It uses
+the production Wiki page-update prompt shape, creates three mutually isolated
+cold requests, and immediately replays byte-identical warm requests. This is
+six calls to the selected model, but it neither reads nor mutates Wiki pages.
+The downloaded JSON includes complete-request HMACs, provider cache counters,
+median/P95 latency, code/workload/configuration fingerprints, strict validation,
+and a report SHA-256, without prompt or response bodies. Verify it with:
+
+```bash
+go run ./cmd/evidenceverify -report wiki-cache-benchmark-<id>.json
+```
+
+The controlled A/B establishes the causal effect for identical requests. The
+time-bounded real `wiki_*` usage on the model-usage page describes live Wiki
+traffic; neither evidence type is presented as the other.
 
 ## Real provider evidence
 

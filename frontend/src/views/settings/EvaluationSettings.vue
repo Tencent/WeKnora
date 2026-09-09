@@ -72,6 +72,47 @@
       </div>
     </section>
 
+    <section class="evaluation-panel cache-benchmark-panel">
+      <div class="panel-heading">
+        <div>
+          <h3>{{ t('evaluationSettings.cacheBenchmarkTitle') }}</h3>
+          <p>{{ t('evaluationSettings.cacheBenchmarkHint') }}</p>
+        </div>
+        <div class="run-buttons">
+          <t-button
+            theme="primary"
+            :loading="benchmarking"
+            :disabled="!canRun || !form.chat_id"
+            @click="runCacheBenchmark"
+          >{{ t('evaluationSettings.cacheBenchmarkStart') }}</t-button>
+          <t-button v-if="cacheBenchmark" variant="outline" @click="exportCacheBenchmark">
+            {{ t('evaluationSettings.exportEvidence') }}
+          </t-button>
+        </div>
+      </div>
+      <p class="benchmark-cost-hint">{{ t('evaluationSettings.cacheBenchmarkCostHint') }}</p>
+      <div v-if="cacheBenchmark" class="benchmark-result">
+        <div class="comparison-status" :data-comparable="cacheBenchmark.strict_validation.passed">
+          {{ cacheBenchmark.strict_validation.passed
+            ? t('evaluationSettings.cacheBenchmarkPassed')
+            : t('evaluationSettings.cacheBenchmarkFailed', { reason: cacheBenchmark.strict_validation.reason || '—' }) }}
+        </div>
+        <div class="benchmark-grid">
+          <article v-for="cohort in benchmarkCohorts" :key="cohort.key" class="repeat-card">
+            <strong>{{ cohort.label }}</strong>
+            <dl>
+              <div><dt>{{ t('evaluationSettings.calls') }}</dt><dd>{{ cohort.value.usage.call_count }}</dd></div>
+              <div><dt>{{ t('evaluationSettings.cacheHitRate') }}</dt><dd>{{ formatValue(cohort.value.usage.cache_hit_rate, 'percent') }}</dd></div>
+              <div><dt>{{ t('evaluationSettings.medianDuration') }}</dt><dd>{{ formatDuration(cohort.value.median_latency_ms) }}</dd></div>
+              <div><dt>{{ t('evaluationSettings.p95Duration') }}</dt><dd>{{ formatDuration(cohort.value.p95_latency_ms) }}</dd></div>
+              <div><dt>Token</dt><dd>{{ formatInteger(cohort.value.usage.total_tokens) }}</dd></div>
+            </dl>
+          </article>
+        </div>
+        <small class="report-hash">SHA-256: {{ cacheBenchmark.report_sha256 }}</small>
+      </div>
+    </section>
+
     <section v-if="comparisonRows.length" class="evaluation-panel comparison-panel">
       <div class="panel-heading">
         <div>
@@ -109,6 +150,46 @@
       </div>
     </section>
 
+    <section v-if="repeatedAggregates.length" class="evaluation-panel">
+      <div class="panel-heading">
+        <div>
+          <h3>{{ t('evaluationSettings.repeatSummary') }}</h3>
+          <p>{{ t('evaluationSettings.repeatSummaryHint') }}</p>
+        </div>
+      </div>
+      <div class="repeat-grid">
+        <article v-for="aggregate in pagedRepeatedAggregates" :key="aggregate.key" class="repeat-card">
+          <div class="repeat-heading">
+            <strong>{{ aggregate.model }}</strong>
+            <span>{{ t('evaluationSettings.repeatCount', { count: aggregate.runs }) }}</span>
+          </div>
+          <dl>
+            <div><dt>{{ t('evaluationSettings.medianRecall') }}</dt><dd>{{ optionalValue(aggregate.recallMedian, 'percent') }}</dd></div>
+            <div><dt>{{ t('evaluationSettings.medianDuration') }}</dt><dd>{{ optionalValue(aggregate.durationMedianMS, 'duration') }}</dd></div>
+            <div><dt>{{ t('evaluationSettings.p95Duration') }}</dt><dd>{{ optionalValue(aggregate.durationP95MS, 'duration') }}</dd></div>
+            <div><dt>{{ t('evaluationSettings.medianTokens') }}</dt><dd>{{ optionalValue(aggregate.tokensMedian, 'integer') }}</dd></div>
+            <div><dt>{{ t('evaluationSettings.medianCacheHitRate') }}</dt><dd>{{ optionalValue(aggregate.cacheHitRateMedian, 'percent') }}</dd></div>
+            <div><dt>{{ t('evaluationSettings.medianCost') }}</dt><dd>{{ aggregate.cost ? `${aggregate.cost.median.toFixed(6)} ${aggregate.cost.currency}` : '—' }}</dd></div>
+          </dl>
+          <div v-if="aggregate.durationP95MS" class="latency-bars" :aria-label="t('evaluationSettings.latencyDistribution')">
+            <div><span>{{ t('evaluationSettings.medianShort') }}</span><i :style="{ width: `${latencyMedianWidth(aggregate)}%` }" /></div>
+            <div><span>P95</span><i style="width: 100%" /></div>
+          </div>
+        </article>
+      </div>
+      <div v-if="repeatedAggregates.length > repeatPageSize" class="pagination-row">
+        <span>{{ t('evaluationSettings.pageStatus', { current: repeatPage, total: repeatPageCount }) }}</span>
+        <t-pagination
+          v-model="repeatPage"
+          :total="repeatedAggregates.length"
+          :page-size="repeatPageSize"
+          :show-jumper="false"
+          :show-page-size="false"
+          size="small"
+        />
+      </div>
+    </section>
+
     <section class="evaluation-panel">
       <div class="panel-heading">
         <div>
@@ -119,7 +200,7 @@
       </div>
       <div v-if="!runPage.items.length && !loading" class="empty-state">{{ t('evaluationSettings.empty') }}</div>
       <div class="run-list">
-        <article v-for="run in runPage.items" :key="run.task.id" class="run-card" :class="{ selected: selectedRunIDs.includes(run.task.id), invalid: isInvalidRun(run) }">
+        <article v-for="run in pagedHistoryRuns" :key="run.task.id" class="run-card" :class="{ selected: selectedRunIDs.includes(run.task.id), invalid: isInvalidRun(run) }">
           <label class="run-select">
             <input type="checkbox" :checked="selectedRunIDs.includes(run.task.id)" :disabled="!isSelectableRun(run)" @change="toggleRun(run.task.id)" />
             <span>{{ t('evaluationSettings.selectCompare') }}</span>
@@ -147,6 +228,17 @@
           </div>
         </article>
       </div>
+      <div v-if="runPage.total > historyPageSize" class="pagination-row">
+        <span>{{ t('evaluationSettings.pageStatus', { current: historyPage, total: historyPageCount }) }}</span>
+        <t-pagination
+          v-model="historyPage"
+          :total="runPage.total"
+          :page-size="historyPageSize"
+          :show-jumper="false"
+          :show-page-size="false"
+          size="small"
+        />
+      </div>
     </section>
   </div>
 </template>
@@ -156,18 +248,22 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
+import { aggregateRepeatedRuns, type RepeatRunAggregate } from '@/utils/evaluationStatistics'
+import { clampPage, pageCount, pageItems } from '@/utils/evaluationPagination'
 import { listModels, type ModelConfig } from '@/api/model'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import {
   getEvaluationDatasets,
   getEvaluationEvidence,
   getEvaluationResult,
-  getEvaluationRuns,
+  getAllEvaluationRuns,
+  runWikiCacheBenchmark,
   startEvaluation,
   type EvaluationDataset,
   type EvaluationRunPage,
   type EvaluationRunSummary,
   type EvaluationTask,
+  type WikiCacheBenchmarkEvidence,
 } from '@/api/evaluation'
 
 const { t, locale } = useI18n()
@@ -175,15 +271,21 @@ const authStore = useAuthStore()
 const loading = ref(false)
 const starting = ref(false)
 const exportingRunID = ref('')
+const benchmarking = ref(false)
+const cacheBenchmark = ref<WikiCacheBenchmarkEvidence | null>(null)
 const datasets = ref<EvaluationDataset[]>([])
 const models = ref<ModelConfig[]>([])
 const knowledgeBases = ref<Array<{ id: string; name: string }>>([])
 const runPage = ref<EvaluationRunPage>({ items: [], total: 0, limit: 50, offset: 0 })
 const activeRun = ref<EvaluationRunSummary | null>(null)
 const selectedRunIDs = ref<string[]>([])
+const repeatPage = ref(1)
+const historyPage = ref(1)
 const form = reactive({ dataset_id: 'default', knowledge_base_id: '', chat_id: '', rerank_id: '' })
 const evaluationFormStoragePrefix = 'weknora_evaluation_form_v1'
 const comparisonLimit = 4
+const repeatPageSize = 2
+const historyPageSize = 5
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 let consecutivePollFailures = 0
 
@@ -192,6 +294,15 @@ const chatModels = computed(() => models.value.filter(model => model.type === 'K
 const rerankModels = computed(() => models.value.filter(model => model.type === 'Rerank' && model.id))
 const selectedDataset = computed(() => datasets.value.find(item => item.id === form.dataset_id))
 const selectedRuns = computed(() => selectedRunIDs.value.map(id => runPage.value.items.find(run => run.task.id === id)).filter(Boolean) as EvaluationRunSummary[])
+const repeatedAggregates = computed(() => aggregateRepeatedRuns(runPage.value.items))
+const repeatPageCount = computed(() => pageCount(repeatedAggregates.value.length, repeatPageSize))
+const historyPageCount = computed(() => pageCount(runPage.value.total, historyPageSize))
+const pagedRepeatedAggregates = computed(() => pageItems(repeatedAggregates.value, repeatPage.value, repeatPageSize))
+const pagedHistoryRuns = computed(() => pageItems(runPage.value.items, historyPage.value, historyPageSize))
+const benchmarkCohorts = computed(() => cacheBenchmark.value ? [
+  { key: 'cold', label: t('evaluationSettings.coldCohort'), value: cacheBenchmark.value.cold },
+  { key: 'warm', label: t('evaluationSettings.warmCohort'), value: cacheBenchmark.value.warm },
+] : [])
 const comparisonWarnings = computed(() => {
   if (selectedRuns.value.length < 2) return []
   const [base, ...candidates] = selectedRuns.value
@@ -256,7 +367,7 @@ async function loadPage() {
   loading.value = true
   try {
     const [datasetRows, modelRows, kbResponse, runs] = await Promise.all([
-      getEvaluationDatasets(), listModels(), listKnowledgeBases({ creator: 'all' }), getEvaluationRuns(50, 0),
+      getEvaluationDatasets(), listModels(), listKnowledgeBases({ creator: 'all' }), getAllEvaluationRuns(),
     ])
     datasets.value = datasetRows
     models.value = modelRows
@@ -306,6 +417,38 @@ async function exportEvidence(taskID: string) {
   } finally {
     exportingRunID.value = ''
   }
+}
+
+async function runCacheBenchmark() {
+  if (!form.chat_id) return
+  benchmarking.value = true
+  cacheBenchmark.value = null
+  try {
+    cacheBenchmark.value = await runWikiCacheBenchmark(form.chat_id)
+    if (cacheBenchmark.value.strict_validation.passed) {
+      MessagePlugin.success(t('evaluationSettings.cacheBenchmarkPassed'))
+    } else {
+      MessagePlugin.warning(t('evaluationSettings.cacheBenchmarkFailed', {
+        reason: cacheBenchmark.value.strict_validation.reason || '—',
+      }))
+    }
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('evaluationSettings.cacheBenchmarkRunFailed'))
+  } finally {
+    benchmarking.value = false
+  }
+}
+
+function exportCacheBenchmark() {
+  if (!cacheBenchmark.value) return
+  const blob = new Blob([`${JSON.stringify(cacheBenchmark.value, null, 2)}\n`], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `wiki-cache-benchmark-${cacheBenchmark.value.benchmark_id}.json`
+  anchor.click()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+  MessagePlugin.success(t('evaluationSettings.exportSucceeded'))
 }
 
 function schedulePoll() {
@@ -421,6 +564,9 @@ const modelLabel = (model: ModelConfig) => model.display_name || model.name
 const formatInteger = (value: number) => new Intl.NumberFormat(locale.value).format(value || 0)
 const formatDate = (value: string) => value ? new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—'
 const formatDuration = (value: number) => value >= 1000 ? `${(value / 1000).toFixed(2)} s` : `${value || 0} ms`
+const optionalValue = (value: number | undefined, format: ComparisonRow['format']) => value === undefined ? '—' : formatValue(value, format)
+const latencyMedianWidth = (aggregate: RepeatRunAggregate) => aggregate.durationMedianMS && aggregate.durationP95MS
+  ? Math.max(4, Math.min(100, aggregate.durationMedianMS / aggregate.durationP95MS * 100)) : 0
 function formatValue(value: number, format: ComparisonRow['format']) {
   if (format === 'percent') return `${(value * 100).toFixed(2)}%`
   if (format === 'duration') return formatDuration(value)
@@ -441,6 +587,12 @@ function deltaClass(delta: number, higherIsBetter: boolean) {
   return (delta > 0) === higherIsBetter ? 'delta-positive' : 'delta-negative'
 }
 
+watch(() => repeatedAggregates.value.length, total => {
+  repeatPage.value = clampPage(repeatPage.value, total, repeatPageSize)
+})
+watch(() => runPage.value.total, total => {
+  historyPage.value = clampPage(historyPage.value, total, historyPageSize)
+})
 watch(form, value => {
   try {
     sessionStorage.setItem(evaluationFormStorageKey(), JSON.stringify(value))
@@ -466,6 +618,10 @@ h2, h3, p { margin: 0; }
 .run-actions { margin-top: 16px; color: var(--td-text-color-secondary); font-size: 13px; }
 .run-buttons { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .dataset-error, .active-run { margin-top: 14px; padding: 12px; border-radius: 8px; background: var(--td-warning-color-light); color: var(--td-warning-color); }
+.benchmark-cost-hint { margin-top: 12px; color: var(--td-text-color-secondary); font-size: 12px; }
+.benchmark-result { margin-top: 14px; }
+.benchmark-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.report-hash { display: block; margin-top: 10px; overflow-wrap: anywhere; color: var(--td-text-color-placeholder); }
 .progress-track { height: 6px; margin-top: 10px; overflow: hidden; border-radius: 999px; background: var(--td-bg-color-secondarycontainer); }
 .progress-track span { display: block; height: 100%; background: var(--td-brand-color); transition: width .2s ease; }
 .run-list { display: grid; gap: 10px; margin-top: 14px; }
@@ -489,9 +645,22 @@ th:first-child, td:first-child { text-align: left; }
 td small { display: block; margin-top: 2px; font-size: 11px; }
 .comparison-status { margin-top: 12px; padding: 9px 11px; border-radius: 7px; color: var(--td-warning-color); background: var(--td-warning-color-light); }
 .comparison-status[data-comparable='true'] { color: var(--td-success-color); background: var(--td-success-color-light); }
+.repeat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 14px; }
+.repeat-card { padding: 14px; border: 1px solid var(--td-component-stroke); border-radius: 9px; background: var(--td-bg-color-secondarycontainer); }
+.repeat-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.repeat-heading span { color: var(--td-text-color-secondary); font-size: 12px; }
+.repeat-card dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin: 14px 0; }
+.repeat-card dl div { min-width: 0; }
+.repeat-card dt { color: var(--td-text-color-secondary); font-size: 11px; }
+.repeat-card dd { margin: 3px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.latency-bars { display: grid; gap: 7px; padding-top: 12px; border-top: 1px solid var(--td-component-stroke); }
+.latency-bars div { display: grid; grid-template-columns: 44px 1fr; align-items: center; gap: 8px; color: var(--td-text-color-secondary); font-size: 11px; }
+.latency-bars i { display: block; height: 6px; border-radius: 999px; background: var(--td-brand-color); }
+.latency-bars div:last-child i { opacity: .35; }
 .delta-positive { color: var(--td-success-color); }
 .delta-negative { color: var(--td-error-color); }
 .delta-neutral { color: var(--td-text-color-placeholder); }
+.pagination-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; color: var(--td-text-color-secondary); font-size: 12px; }
 .empty-state { padding: 32px; text-align: center; color: var(--td-text-color-placeholder); }
-@media (max-width: 720px) { .evaluation-form { grid-template-columns: 1fr; } .evaluation-header, .panel-heading { align-items: flex-start; } }
+@media (max-width: 720px) { .evaluation-form, .benchmark-grid, .repeat-card dl { grid-template-columns: 1fr; } .evaluation-header, .panel-heading { align-items: flex-start; } .pagination-row { align-items: flex-start; flex-direction: column; } }
 </style>

@@ -26,12 +26,13 @@ func (o *observableChat) Chat(
 	opts *ChatOptions,
 ) (*types.ChatResponse, error) {
 	startedAt := time.Now()
+	requestFingerprint := RequestFingerprint(ctx, messages, opts)
 	response, err := o.inner.Chat(ctx, messages, opts)
 	var usage types.TokenUsage
 	if response != nil {
 		usage = response.Usage
 	}
-	o.observe(ctx, usage, time.Since(startedAt), err)
+	o.observe(ctx, usage, time.Since(startedAt), requestFingerprint, err)
 	return response, err
 }
 
@@ -41,9 +42,10 @@ func (o *observableChat) ChatStream(
 	opts *ChatOptions,
 ) (<-chan types.StreamResponse, error) {
 	startedAt := time.Now()
+	requestFingerprint := RequestFingerprint(ctx, messages, opts)
 	stream, err := o.inner.ChatStream(ctx, messages, opts)
 	if err != nil || stream == nil {
-		o.observe(ctx, types.TokenUsage{}, time.Since(startedAt), err)
+		o.observe(ctx, types.TokenUsage{}, time.Since(startedAt), requestFingerprint, err)
 		return stream, err
 	}
 
@@ -61,18 +63,25 @@ func (o *observableChat) ChatStream(
 			}
 			observed <- response
 		}
-		o.observe(ctx, usage, time.Since(startedAt), streamErr)
+		o.observe(ctx, usage, time.Since(startedAt), requestFingerprint, streamErr)
 	}()
 	return observed, nil
 }
 
-func (o *observableChat) observe(ctx context.Context, usage types.TokenUsage, duration time.Duration, err error) {
+func (o *observableChat) observe(
+	ctx context.Context,
+	usage types.TokenUsage,
+	duration time.Duration,
+	requestFingerprint string,
+	err error,
+) {
 	purpose, prefixFingerprint := types.LLMCallMetadataFromContext(ctx)
 	observation := types.LLMCallObservation{
 		ModelType: types.ModelTypeKnowledgeQA,
 		ModelID:   o.inner.GetModelID(), ModelName: o.inner.GetModelName(),
 		Purpose: purpose, PromptPrefixFingerprint: prefixFingerprint,
-		Usage: usage, Pricing: o.pricing,
+		RequestFingerprint: requestFingerprint,
+		Usage:              usage, Pricing: o.pricing,
 		EstimatedCost: types.EstimateLLMCallCost(usage, o.pricing),
 		DurationMS:    duration.Milliseconds(), Success: err == nil,
 	}

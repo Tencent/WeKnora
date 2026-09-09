@@ -112,6 +112,7 @@ func (r *ModelCallRecorder) ObserveLLMCall(observation types.LLMCallObservation)
 	// diagnostic error field through the request observer.
 	observation.Error = ""
 	observation.PromptPrefixFingerprint = r.protectFingerprint(observation.PromptPrefixFingerprint)
+	observation.RequestFingerprint = r.protectFingerprint(observation.RequestFingerprint)
 	select {
 	case r.queue <- modelObservabilityEvent{call: &observation}:
 	default:

@@ -62,6 +62,7 @@ func TestObservableChatRecordsUsageAndMetadata(t *testing.T) {
 	require.Equal(t, "test-model", observation.ModelName)
 	require.Equal(t, "knowledge_qa", observation.Purpose)
 	require.Equal(t, "prefix-hash", observation.PromptPrefixFingerprint)
+	require.Equal(t, RequestFingerprint(context.Background(), nil, nil), observation.RequestFingerprint)
 	require.Equal(t, 100, observation.Usage.TotalTokens)
 	require.True(t, observation.Pricing.Enabled)
 	require.Equal(t, "USD", observation.Pricing.Currency)

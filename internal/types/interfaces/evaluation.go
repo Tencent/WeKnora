@@ -23,6 +23,8 @@ type EvaluationService interface {
 	EvaluationDatasets(ctx context.Context) ([]types.EvaluationDataset, error)
 	// EvaluationRuns lists tenant-scoped evaluation history.
 	EvaluationRuns(ctx context.Context, limit, offset int) (*types.EvaluationRunPage, error)
+	// WikiCacheBenchmark runs a controlled, prompt-free cold/warm Wiki replay.
+	WikiCacheBenchmark(ctx context.Context, modelID string) (*types.WikiCacheBenchmarkEvidence, error)
 }
 
 // Metrics defines interface for computing evaluation metrics
