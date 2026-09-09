@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	customknowledge "github.com/Tencent/WeKnora/internal/custom/service/knowledge"
 	transcriptservice "github.com/Tencent/WeKnora/internal/custom/service/transcript"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -87,8 +89,48 @@ func v2WriteContextFor(videoID, generation string) context.Context {
 	return WithToolExecContext(context.Background(), &ToolExecContext{
 		SessionID: "session-1", ProductionTaskID: "job-1", ToolCallID: "call-1",
 		ProductionVideoID: videoID, ProductionGeneration: generation,
-		PinnedSkillNames: []string{"extract-video-knowledge"},
+		ProductionJobType: "graph",
+		PinnedSkillNames:  []string{"extract-video-knowledge"},
 	})
+}
+
+func TestWikiWritePageReturnsCompleteKnowledgeContractRepairGuidance(t *testing.T) {
+	tool := NewWikiWritePageTool(&sourceRefWikiService{}, []string{"kb-1"}, nil, NewWikiRouteResolver())
+	content := `---
+type: knowledge_object
+primary_type: entity
+entity_sub_type: ai_system
+knowledge_object_id: candidate-1
+source_video_id: video-1
+source_document_id: source-1
+transcript_generation: generation-1
+audit_status: aligned
+information_nature: 机制
+classification_confidence: 0.9
+evidence_sentence_ids: [evidence-real]
+source_refs: [source-1]
+structure_fields:
+  role: 自主执行任务
+---
+# AI Agent`
+	args, err := json.Marshal(map[string]any{
+		"slug": "entity/ai-agent", "title": "AI Agent", "summary": "AI Agent",
+		"content": content, "page_type": "index", "source_refs": []string{"source-1"},
+	})
+	require.NoError(t, err)
+
+	result, err := tool.Execute(v2WriteContext(), args)
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	for _, expected := range []string{
+		"type and primary_type must be equal",
+		"entity_sub_type must be one of person, organization, product, technology, industry, place",
+		"audit_status must be passed",
+		"evidence_ids must contain 1-3 IDs",
+		"structure_fields must use only the selected type's canonical keys",
+	} {
+		require.Contains(t, result.Error, expected)
+	}
 }
 
 func transcriptSourceKnowledge(t *testing.T, sourceID, videoID, generation string) *types.Knowledge {
@@ -527,6 +569,27 @@ source_refs: [source-1]
 	}
 }
 
+func TestWikiWritePageRejectsOrdinaryPageInProductionGraph(t *testing.T) {
+	service := &sourceRefWikiService{}
+	tool := NewWikiWritePageTool(service, []string{"kb-1"}, nil, NewWikiRouteResolver())
+	args, err := json.Marshal(map[string]any{
+		"slug": "concept/incomplete", "title": "普通页面", "summary": "普通页面",
+		"content": "---\ntype: concept\n---\n\n# 普通页面\n\n正文。", "page_type": "index",
+	})
+	require.NoError(t, err)
+
+	ctx := WithToolExecContext(context.Background(), &ToolExecContext{
+		SessionID: "session-1", ProductionTaskID: "job-1", ProductionVideoID: "video-1",
+		ProductionGeneration: "generation-1", ProductionJobType: "graph",
+		ToolCallID: "call-1", PinnedSkillNames: []string{"extract-video-knowledge"},
+	})
+	result, err := tool.Execute(ctx, args)
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Equal(t, "production graph writes require a complete knowledge object identity", result.Error)
+	require.Equal(t, 0, service.createCount)
+}
+
 func TestWikiWritePageAuditsV2VideoIndex(t *testing.T) {
 	service := &sourceRefWikiService{page: &types.WikiPage{
 		ID: "video-index-1", KnowledgeBaseID: "kb-1", Slug: "video/video-1", PageType: "index", Status: types.WikiPageStatusPublished,
@@ -550,7 +613,7 @@ source_refs: [source-1]
 # 测试视频_知识底座`
 	args, err := json.Marshal(map[string]any{
 		"slug": "video/video-1", "title": "测试视频_知识底座", "summary": "测试视频知识索引",
-		"content": content, "page_type": "index", "source_refs": []string{"source-1"},
+		"content": content, "page_type": "index",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -570,6 +633,9 @@ source_refs: [source-1]
 	}
 	if _, exists := result.Data["canonical_wiki_page_id"]; exists {
 		t.Fatalf("video index must not be returned as a canonical knowledge object: %+v", result.Data)
+	}
+	if len(service.page.SourceRefs) != 1 || !strings.HasPrefix(service.page.SourceRefs[0], "source-1|") {
+		t.Fatalf("video index source_refs were not resolved from frontmatter: %+v", service.page.SourceRefs)
 	}
 }
 
@@ -745,6 +811,110 @@ relations: []
 	}
 	if service.createCount != 0 || service.updateCount != 0 {
 		t.Fatalf("invalid video index reached persistence: creates=%d updates=%d", service.createCount, service.updateCount)
+	}
+}
+
+func TestWikiWritePagePersistsValidatedRelationsWhenUpdatingCanonicalPage(t *testing.T) {
+	targetContent := `---
+knowledge_object_id: ko-target
+type: methodology
+primary_type: methodology
+title: 目标方法
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+information_nature: 方法论
+classification_confidence: 0.9
+evidence_ids: [ev-2]
+source_refs: [doc-1]
+core_content: 这是一个可重复执行的方法。
+structure_fields:
+  input: 输入材料
+  steps: 先读取，再执行
+relations: []
+---
+
+# 目标方法
+
+## 一句话概述
+
+这是一个可重复执行的方法。`
+	content := `---
+knowledge_object_id: ko-source
+type: concept
+primary_type: concept
+title: 有效概念
+source_video_id: video-1
+source_document_id: doc-1
+transcript_generation: generation-1
+audit_status: passed
+information_nature: 概念
+classification_confidence: 0.9
+evidence_ids: [ev-1]
+source_refs: [doc-1]
+core_content: 这是一个有效概念。
+structure_fields:
+  definition: 这是定义
+  components: 这是组成
+relations:
+  - relation_id: relation-1
+    relation_type: explains
+    target_object_id: ko-target
+    target_wiki_page_id: page-target
+    evidence_ids: [ev-1]
+    time_range: 00:00-00:10
+    confidence: 0.9
+---
+
+# 有效概念
+
+## 一句话概述
+
+这是一个有效概念。`
+	storedContent := strings.Replace(content, `relations:
+  - relation_id: relation-1
+    relation_type: explains
+    target_object_id: ko-target
+    target_wiki_page_id: page-target
+    evidence_ids: [ev-1]
+    time_range: 00:00-00:10
+    confidence: 0.9`, "relations: []", 1)
+	targetPage := &types.WikiPage{
+		ID: "page-target", KnowledgeBaseID: "kb-1", Slug: "methodology/target",
+		Title: "目标方法", PageType: "index", Status: types.WikiPageStatusPublished, Content: targetContent,
+	}
+	service := &sourceRefWikiService{
+		page: &types.WikiPage{
+			ID: "page-source", KnowledgeBaseID: "kb-1", Slug: "concept/source",
+			Title: "有效概念", PageType: "index", Status: types.WikiPageStatusPublished, Content: storedContent,
+		},
+		pagesByID: map[string]*types.WikiPage{"page-target": targetPage},
+	}
+	tool := NewWikiWritePageTool(service, []string{"kb-1"}, nil, NewWikiRouteResolver()).
+		WithSemanticIdentityAdapter(customknowledge.RuleSemanticIdentityAdapter{})
+	args, err := json.Marshal(map[string]any{
+		"slug":      "concept/source",
+		"title":     "有效概念",
+		"summary":   "这是一个有效概念。",
+		"content":   content,
+		"page_type": "index",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := tool.Execute(v2WriteContext(), args)
+	if err != nil {
+		t.Fatalf("Execute returned transport error: %v", err)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("validated relation update failed: %+v", result)
+	}
+	if service.createCount != 0 || service.updateCount != 1 {
+		t.Fatalf("validated relation persistence = creates=%d updates=%d", service.createCount, service.updateCount)
+	}
+	if !strings.Contains(service.page.Content, "target_wiki_page_id: page-target") {
+		t.Fatalf("validated relation was discarded during canonical merge:\n%s", service.page.Content)
 	}
 }
 
@@ -952,7 +1122,7 @@ func TestWikiWritePageNormalizesDecoratedTitleBeforeFirstPersistence(t *testing.
 	service := &sourceRefWikiService{}
 	tool := NewWikiWritePageTool(service, []string{"kb-1"}, nil, NewWikiRouteResolver())
 	incoming := semanticEntityWikiPage(
-		"", "entity/codex-entity", "Codex（实体）", "codex-generated",
+		"", "entity/codex-entity", "Codex【实体】", "codex-generated",
 		"Codex 是能够读写本地文件并调用工具的 AI 助手。",
 	)
 	args, err := json.Marshal(map[string]any{
@@ -973,7 +1143,7 @@ func TestWikiWritePageNormalizesDecoratedTitleBeforeFirstPersistence(t *testing.
 	if service.page.Title != "Codex" || result.Data["title"] != "Codex" {
 		t.Fatalf("canonical title was not persisted: page=%q data=%#v", service.page.Title, result.Data)
 	}
-	for _, forbidden := range []string{"title: Codex（实体）", "canonical_name: Codex（实体）", "# Codex（实体）"} {
+	for _, forbidden := range []string{"title: Codex（实体）", "canonical_name: Codex（实体）", "# Codex（实体）", "title: Codex【实体】", "canonical_name: Codex【实体】", "# Codex【实体】"} {
 		if strings.Contains(service.page.Content, forbidden) {
 			t.Fatalf("type decoration leaked through %q:\n%s", forbidden, service.page.Content)
 		}
@@ -1052,8 +1222,9 @@ func TestWikiWritePageFailsClosedWhenSemanticAdapterIsUncertain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result == nil || result.Success || !strings.Contains(result.Error, "uncertain") {
-		t.Fatalf("uncertain semantic result must fail closed: %+v", result)
+	if result == nil || !result.Success || result.Data["status"] != "review_required" ||
+		!strings.Contains(result.Output, "uncertain") {
+		t.Fatalf("uncertain semantic result must return review_required: %+v", result)
 	}
 	if service.createCount != 0 || service.updateCount != 0 {
 		t.Fatalf("uncertain semantic result reached persistence: creates=%d updates=%d", service.createCount, service.updateCount)
@@ -1086,8 +1257,9 @@ func TestWikiWritePageRejectsDifferentObjectAtExistingSlug(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result == nil || result.Success || !strings.Contains(result.Error, "different knowledge object") {
-		t.Fatalf("different object at occupied slug must be rejected: %+v", result)
+	if result == nil || !result.Success || result.Data["status"] != "review_required" ||
+		!strings.Contains(result.Output, "different knowledge object") {
+		t.Fatalf("different object at occupied slug must return review_required: %+v", result)
 	}
 	if service.createCount != 0 || service.updateCount != 0 {
 		t.Fatalf("slug collision reached persistence: creates=%d updates=%d", service.createCount, service.updateCount)
@@ -1142,8 +1314,9 @@ func TestWikiWritePageRejectsSameNameDifferentType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result == nil || result.Success || !strings.Contains(result.Error, "uncertain") {
-		t.Fatalf("same-name type conflict must fail closed: %+v", result)
+	if result == nil || !result.Success || result.Data["status"] != "review_required" ||
+		!strings.Contains(result.Output, "uncertain") {
+		t.Fatalf("same-name type conflict must return review_required: %+v", result)
 	}
 	if service.createCount != 0 || service.updateCount != 0 {
 		t.Fatalf("type conflict reached persistence: creates=%d updates=%d", service.createCount, service.updateCount)
@@ -1162,8 +1335,9 @@ func TestWikiWritePageRejectsMultipleCanonicalMatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result == nil || result.Success || !strings.Contains(result.Error, "multiple canonical object IDs") {
-		t.Fatalf("multiple canonical matches must be rejected: %+v", result)
+	if result == nil || !result.Success || result.Data["status"] != "review_required" ||
+		!strings.Contains(result.Output, "multiple canonical object IDs") {
+		t.Fatalf("multiple canonical matches must return review_required: %+v", result)
 	}
 	if service.createCount != 0 || service.updateCount != 0 {
 		t.Fatalf("multiple canonical matches reached persistence: creates=%d updates=%d", service.createCount, service.updateCount)

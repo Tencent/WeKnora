@@ -28,6 +28,18 @@ type wikiWritePageTool struct {
 	semanticAdapter  customknowledge.SemanticIdentityAdapter
 }
 
+type semanticReviewRequiredError struct {
+	reason string
+}
+
+func (e *semanticReviewRequiredError) Error() string {
+	return e.reason
+}
+
+func reviewRequired(reason string) error {
+	return &semanticReviewRequiredError{reason: strings.TrimSpace(reason)}
+}
+
 // WithSemanticIdentityAdapter injects the WeKnora semantic identity service.
 // Knowledge-object comparisons fail closed when no adapter is configured.
 func (t *wikiWritePageTool) WithSemanticIdentityAdapter(adapter customknowledge.SemanticIdentityAdapter) *wikiWritePageTool {
@@ -50,7 +62,7 @@ func NewWikiWritePageTool(
 	return &wikiWritePageTool{
 		BaseTool: NewBaseTool(
 			ToolWikiWritePage,
-			"Create a new Wiki page or completely overwrite an existing one. Automatically handles outbound links.",
+			"Create a new Wiki page or completely overwrite an existing one. Automatically handles outbound links. In a production video graph task, drafting page content in the final answer does not write it: call this tool for each passed candidate. A review_required result is an expected identity decision; stop only that candidate and continue with the others.",
 			json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -170,7 +182,7 @@ func (t *wikiWritePageTool) executeUnlocked(ctx context.Context, args json.RawMe
 	if customknowledge.IsWikiObjectCandidate(params.Content) {
 		validation, validationErr := customknowledge.ValidateWikiObjectWritePage(params.Content, params.PageType, "", "")
 		if validationErr != nil {
-			return &types.ToolResult{Success: false, Error: "Invalid knowledge object content contract: " + validationErr.Error()}, nil
+			return &types.ToolResult{Success: false, Error: "Invalid knowledge object content contract: " + validationErr.Error() + ". " + customknowledge.WikiObjectWriteRepairHint(params.Content)}, nil
 		}
 		relations, relationErr := customknowledge.ParseWikiObjectRelations(params.Content)
 		if relationErr != nil {
@@ -178,6 +190,9 @@ func (t *wikiWritePageTool) executeUnlocked(ctx context.Context, args json.RawMe
 		}
 		validation.Relations = relations
 		canonicalTitle := customknowledge.CanonicalKnowledgeTitle(validation.Title)
+		if canonicalTitle == "" {
+			return &types.ToolResult{Success: false, Error: "Invalid knowledge object title: knowledge type decoration cannot be the entire title"}, nil
+		}
 		if canonicalTitle != validation.Title {
 			canonicalContent, rewriteErr := customknowledge.RewriteWikiObjectIdentity(
 				params.Content, validation.KnowledgeObjectID, canonicalTitle,
@@ -193,6 +208,9 @@ func (t *wikiWritePageTool) executeUnlocked(ctx context.Context, args json.RawMe
 			}
 			validation.Relations = relations
 		}
+		// The page metadata title is a separate field from the Wiki H1. Keep
+		// both canonical even when the tool caller supplied a decorated title.
+		params.Title = canonicalTitle
 		sourceObject = &validation
 		productionSourceRefs = append([]string(nil), validation.SourceRefs...)
 		productionContent = params.Content
@@ -220,6 +238,14 @@ func (t *wikiWritePageTool) executeUnlocked(ctx context.Context, args json.RawMe
 			params.Content, params.PageType, params.Slug, strings.TrimPrefix(params.Slug, "video/"), "", "",
 		); err != nil {
 			return &types.ToolResult{Success: false, Error: "Invalid video knowledge index contract: " + err.Error()}, nil
+		}
+		// The model can correctly include source_refs in the required index
+		// frontmatter while omitting the duplicate tool argument. Recover that
+		// structured value here, then run it through the same scope authorization
+		// below. Object pages retain their stricter evidence-derived fallback.
+		if params.SourceRefs == nil {
+			sourceRefs := customknowledge.VideoKnowledgeIndexSourceRefs(params.Content)
+			params.SourceRefs = &sourceRefs
 		}
 	} else {
 		// WeKnora reserves summary and knowledge_base as storage page types. Keep
@@ -279,6 +305,20 @@ func (t *wikiWritePageTool) executeUnlocked(ctx context.Context, args json.RawMe
 		var semanticErr error
 		semanticPage, semanticValidation, semanticErr = t.resolveSemanticKnowledgeObject(ctx, kbID, existingPage, *sourceObject)
 		if semanticErr != nil {
+			var reviewErr *semanticReviewRequiredError
+			if errors.As(semanticErr, &reviewErr) {
+				return &types.ToolResult{
+					Success: true,
+					Output:  "Knowledge object requires review and was not written: " + reviewErr.Error(),
+					Data: map[string]interface{}{
+						"display_type": "wiki_write_page",
+						"status":       "review_required",
+						"title":        sourceObject.Title,
+						"slug":         params.Slug,
+						"reason":       reviewErr.Error(),
+					},
+				}, nil
+			}
 			return &types.ToolResult{Success: false, Error: "Semantic knowledge identity is unresolved: " + semanticErr.Error()}, nil
 		}
 		if semanticValidation.KnowledgeObjectID != "" {
@@ -338,6 +378,9 @@ func (t *wikiWritePageTool) executeUnlocked(ctx context.Context, args json.RawMe
 	existingV2Page := isProtectedKnowledgeV2Page(existingPage)
 	if existingV2Page && sourceObject == nil && !strings.HasPrefix(params.Slug, "video/") {
 		return &types.ToolResult{Success: false, Error: protectedKnowledgeV2MutationError}, nil
+	}
+	if productionGraphWrite(ctx) && sourceObject == nil && !strings.HasPrefix(params.Slug, "video/") {
+		return &types.ToolResult{Success: false, Error: "production graph writes require a complete knowledge object identity"}, nil
 	}
 	requiresV2Provenance := sourceObject != nil || strings.HasPrefix(params.Slug, "video/") || existingV2Page
 	auditSourceRefs := resolvedRefs
@@ -441,6 +484,13 @@ func (t *wikiWritePageTool) executeUnlocked(ctx context.Context, args json.RawMe
 		Output:  output,
 		Data:    data,
 	}, nil
+}
+
+func productionGraphWrite(ctx context.Context) bool {
+	meta, ok := ToolExecFromContext(ctx)
+	return ok && meta != nil && strings.TrimSpace(meta.ProductionTaskID) != "" &&
+		strings.TrimSpace(meta.ProductionVideoID) != "" && strings.TrimSpace(meta.ProductionGeneration) != "" &&
+		strings.EqualFold(strings.TrimSpace(meta.ProductionJobType), "graph")
 }
 
 type knowledgeV2AuditSeed struct {
@@ -604,19 +654,27 @@ func (t *wikiWritePageTool) resolveSemanticKnowledgeObject(
 				return nil, customknowledge.WikiObjectValidation{}, fmt.Errorf("semantic identity adapter failed: %w", compareErr)
 			}
 			if assessment.Decision == "uncertain" {
-				return nil, customknowledge.WikiObjectValidation{}, fmt.Errorf("semantic identity is uncertain: %s", assessment.Reason)
+				return nil, customknowledge.WikiObjectValidation{}, reviewRequired(fmt.Sprintf("semantic identity is uncertain: %s", assessment.Reason))
 			}
 			if assessment.Decision == "same_object" && assessment.Confidence <= 0 {
 				return nil, customknowledge.WikiObjectValidation{}, fmt.Errorf("semantic identity adapter returned invalid confidence")
 			}
 			if assessment.Decision == "same_object" || sourceCandidate.KnowledgeObjectID == candidate.KnowledgeObjectID {
-				return existingPage, candidate, nil
+				// Reusing a page must not make the first compound or type-decorated
+				// title permanent. Keep the existing object ID, but choose the
+				// deterministic canonical surface name across both candidates.
+				canonical := candidate
+				if customknowledge.CanonicalIdentityLess(sourceCandidate, candidateIdentity) {
+					canonical.Title = sourceCandidate.Title
+				}
+				canonical.Title = customknowledge.CanonicalKnowledgeTitle(canonical.Title)
+				return existingPage, canonical, nil
 			}
 			if assessment.Decision == "different_object" {
-				return nil, customknowledge.WikiObjectValidation{}, fmt.Errorf(
+				return nil, customknowledge.WikiObjectValidation{}, reviewRequired(fmt.Sprintf(
 					"Wiki page %s already belongs to a different knowledge object: %s",
 					existingPage.ID, assessment.Reason,
-				)
+				))
 			}
 			return nil, customknowledge.WikiObjectValidation{}, fmt.Errorf(
 				"semantic identity adapter returned invalid decision %q", assessment.Decision,
@@ -656,10 +714,10 @@ func (t *wikiWritePageTool) resolveSemanticKnowledgeObject(
 			}
 			switch assessment.Decision {
 			case "uncertain":
-				return nil, customknowledge.WikiObjectValidation{}, fmt.Errorf(
+				return nil, customknowledge.WikiObjectValidation{}, reviewRequired(fmt.Sprintf(
 					"candidate %s (%s) is uncertain against Wiki page %s (%s): %s",
 					source.Title, source.KnowledgeType, page.ID, candidate.KnowledgeType, assessment.Reason,
-				)
+				))
 			case "same_object":
 				if assessment.Confidence <= 0 {
 					return nil, customknowledge.WikiObjectValidation{}, fmt.Errorf("semantic identity adapter returned invalid confidence")
@@ -687,10 +745,10 @@ func (t *wikiWritePageTool) resolveSemanticKnowledgeObject(
 	canonicalIndex := 0
 	for index, match := range matches {
 		if strings.TrimSpace(match.validation.KnowledgeObjectID) != canonicalObjectID {
-			return nil, customknowledge.WikiObjectValidation{}, fmt.Errorf(
+			return nil, customknowledge.WikiObjectValidation{}, reviewRequired(fmt.Sprintf(
 				"candidate %s matches multiple canonical object IDs %s and %s; reconcile historical duplicates first",
 				source.Title, canonicalObjectID, match.validation.KnowledgeObjectID,
-			)
+			))
 		}
 		if customknowledge.CanonicalIdentityLess(match.identity, matches[canonicalIndex].identity) {
 			canonicalIndex = index

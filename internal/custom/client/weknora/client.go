@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/custom/config"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // Client WeKnora HTTP 客户端
@@ -48,10 +49,11 @@ func (c *Client) KBID() string { return c.kbID }
 
 // ManualKnowledgeInput 是 WeKnora 手工 Markdown 知识的公开请求契约。
 type ManualKnowledgeInput struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
-	Status  string `json:"status"`
-	Channel string `json:"channel"`
+	Title         string                           `json:"title"`
+	Content       string                           `json:"content"`
+	Status        string                           `json:"status"`
+	Channel       string                           `json:"channel"`
+	ProcessConfig *types.KnowledgeProcessOverrides `json:"process_config,omitempty"`
 }
 
 // ManualKnowledgeResult 是创建手工知识后需要的最小响应字段。

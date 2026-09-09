@@ -219,3 +219,22 @@ func TestKnowledgePostProcessRetriesWikiTriggerWithoutDoubleAccounting(t *testin
 		queue.taskTypes,
 	)
 }
+
+func TestKnowledgePostProcessSkipsWikiForKnowledgeOverride(t *testing.T) {
+	const knowledgeID = "knowledge-wiki-disabled"
+	pendingRepo := &wikiEnqueueFailurePendingRepo{}
+	queue := &wikiEnqueueFailureTaskQueue{}
+	service, repo := newWikiEnqueueTestService(knowledgeID, pendingRepo, queue)
+	require.NoError(t, repo.knowledge.SetProcessOverrides(&types.KnowledgeProcessOverrides{
+		WikiEnabled: processConfigBoolPtr(false),
+	}))
+
+	err := service.Handle(context.Background(), newWikiEnqueuePostProcessTask(t, knowledgeID))
+
+	require.NoError(t, err)
+	assert.Equal(t, types.ParseStatusFinalizing, repo.knowledge.ParseStatus)
+	assert.Equal(t, 1, repo.expectedSubtasks, "summary remains enabled")
+	assert.Zero(t, pendingRepo.seedCalls)
+	assert.Nil(t, pendingRepo.seededOp)
+	assert.Equal(t, []string{types.TypeSummaryGeneration}, queue.taskTypes)
+}

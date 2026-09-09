@@ -227,6 +227,11 @@ func mergeCanonicalWikiObject(canonicalContent, incomingContent string) (string,
 	}
 	sort.SliceStable(contributions, func(i, j int) bool { return contributionKey(contributions[i]) < contributionKey(contributions[j]) })
 	base["evidence_contributions"] = contributions
+	// The first extraction stage submits an empty relation list. Keep existing
+	// edges in that case, but persist the validated non-empty second-stage list.
+	if relations, ok := incoming["relations"].([]any); ok && len(relations) > 0 {
+		base["relations"] = relations
+	}
 
 	base["source_refs"] = unionStrings(sourceRefsFromContributions(contributions))
 	base["evidence_ids"] = unionStrings(evidenceIDsFromContributions(contributions))

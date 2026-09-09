@@ -5,6 +5,13 @@ import (
 	"strings"
 )
 
+// VideoKnowledgeIndexSourceRefs returns the source document references already
+// validated as part of a video index page's frontmatter.
+func VideoKnowledgeIndexSourceRefs(content string) []string {
+	frontmatter, _ := parseWikiFrontmatter(content)
+	return stringSliceValue(frontmatter["source_refs"])
+}
+
 // ValidateVideoKnowledgeIndexPage owns the storage and identity contract for
 // the fixed video/<video-id> Wiki index namespace.
 func ValidateVideoKnowledgeIndexPage(

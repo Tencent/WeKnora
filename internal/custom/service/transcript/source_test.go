@@ -111,6 +111,9 @@ func TestSourceWriterReusesSameGeneration(t *testing.T) {
 	for _, kbID := range gateway.kbIDs {
 		require.Equal(t, "kb-1", kbID)
 	}
+	require.NotNil(t, gateway.created[0].ProcessConfig)
+	require.NotNil(t, gateway.created[0].ProcessConfig.WikiEnabled)
+	require.False(t, *gateway.created[0].ProcessConfig.WikiEnabled)
 }
 
 func TestSourceWriterDoesNotReuseLegacyBindingWithoutKnowledgeBase(t *testing.T) {

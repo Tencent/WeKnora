@@ -15,6 +15,7 @@ const (
 	SourceValidationInvalid     = "source_document_invalid"
 	SourceValidationIdentity    = "source_identity_mismatch"
 	SourceValidationDuration    = "source_duration_mismatch"
+	SourceValidationEvidence    = "source_evidence_mismatch"
 )
 
 // SourceValidationError keeps a stable machine-readable code while retaining
@@ -77,6 +78,65 @@ func ValidateSourceContent(content, videoID, generation string, durationSeconds 
 		return FullVideoDocument{}, sourceValidation(SourceValidationDuration, fmt.Sprintf("source duration %d does not match video duration %d", doc.DurationSeconds, durationSeconds))
 	}
 	return doc, nil
+}
+
+// EvidenceManifestItem is the active sentence mapping persisted alongside
+// the evidence chunks. Text remains in WeKnora and is intentionally omitted.
+type EvidenceManifestItem struct {
+	EvidenceSentenceID string
+	SourceSentenceID   string
+	SpeakerID          string
+	StartMs            int
+	EndMs              int
+}
+
+func normalizedEvidenceSpeakerID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "0"
+	}
+	return value
+}
+
+// ValidateSourceEvidenceManifest prevents a source document from being used
+// when its sentence identities diverge from the active evidence chunks.
+func ValidateSourceEvidenceManifest(doc FullVideoDocument, manifest []EvidenceManifestItem) error {
+	if err := Validate(doc); err != nil {
+		return sourceValidation(SourceValidationInvalid, err.Error())
+	}
+	marks := make([]struct {
+		TimeMark
+		SpeakerID string
+	}, 0, len(manifest))
+	for _, chapter := range doc.Chapters {
+		for _, paragraph := range chapter.Paragraphs {
+			for _, mark := range paragraph.TimeMarks {
+				marks = append(marks, struct {
+					TimeMark
+					SpeakerID string
+				}{TimeMark: mark, SpeakerID: paragraph.SpeakerID})
+			}
+		}
+	}
+	if len(marks) != len(manifest) {
+		return sourceValidation(SourceValidationEvidence, fmt.Sprintf("sentence count differs: source=%d manifest=%d", len(marks), len(manifest)))
+	}
+	for ordinal, mark := range marks {
+		item := manifest[ordinal]
+		switch {
+		case strings.TrimSpace(mark.EvidenceSentenceID) != strings.TrimSpace(item.EvidenceSentenceID):
+			return sourceValidation(SourceValidationEvidence, fmt.Sprintf("sentence %d evidence ID differs", ordinal))
+		case strings.TrimSpace(mark.SourceSentenceID) != strings.TrimSpace(item.SourceSentenceID):
+			return sourceValidation(SourceValidationEvidence, fmt.Sprintf("sentence %d source sentence ID differs", ordinal))
+		case normalizedEvidenceSpeakerID(mark.SpeakerID) != normalizedEvidenceSpeakerID(item.SpeakerID):
+			return sourceValidation(SourceValidationEvidence, fmt.Sprintf("sentence %d speaker ID differs", ordinal))
+		case mark.StartMs != item.StartMs:
+			return sourceValidation(SourceValidationEvidence, fmt.Sprintf("sentence %d start time differs", ordinal))
+		case mark.EndMs != item.EndMs:
+			return sourceValidation(SourceValidationEvidence, fmt.Sprintf("sentence %d end time differs", ordinal))
+		}
+	}
+	return nil
 }
 
 // FullVideoDocument is the stable, Wiki-only representation of one complete

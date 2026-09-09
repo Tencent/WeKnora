@@ -120,6 +120,24 @@ func enrichChunkContent(c *types.Chunk) string {
 	return content
 }
 
+func writeSourceDocumentChunk(output *strings.Builder, chunk *types.Chunk, outputType, content string) {
+	if chunk == nil {
+		return
+	}
+	typeAttribute := ""
+	if strings.TrimSpace(outputType) != "" {
+		typeAttribute = fmt.Sprintf(` type="%s"`, outputType)
+	}
+	fmt.Fprintf(
+		output,
+		`<chunk chunk_id="%s" index="%d"%s>`+"\n%s\n</chunk>\n",
+		chunk.ID,
+		chunk.ChunkIndex+1,
+		typeAttribute,
+		content,
+	)
+}
+
 func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	var params struct {
 		KnowledgeID     string `json:"knowledge_id"`
@@ -250,7 +268,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 					reachedMax = true
 					break
 				}
-				fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\" type=\"range\">\n%s\n</chunk>\n", chunkNum, chunkContent)
+				writeSourceDocumentChunk(&chunksOutput, c, "range", chunkContent)
 				appendFormattedChunk(c, chunkContent)
 				matchCount++
 				continue
@@ -270,18 +288,18 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 					// Output previous chunk for context
 					if prevChunk != nil && !outputtedIndices[prevChunk.ChunkIndex] {
 						prevContent := enrichChunkContent(prevChunk)
-						fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\" type=\"context_before\">\n%s\n</chunk>\n", prevChunk.ChunkIndex+1, prevContent)
+						writeSourceDocumentChunk(&chunksOutput, prevChunk, "context_before", prevContent)
 						appendFormattedChunk(prevChunk, prevContent)
 						outputtedIndices[prevChunk.ChunkIndex] = true
 					}
 				}
 
 				if !outputtedIndices[c.ChunkIndex] {
-					matchAttr := ""
+					outputType := ""
 					if re != nil {
-						matchAttr = ` type="match"`
+						outputType = "match"
 					}
-					fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\"%s>\n%s\n</chunk>\n", c.ChunkIndex+1, matchAttr, chunkContent)
+					writeSourceDocumentChunk(&chunksOutput, c, outputType, chunkContent)
 					appendFormattedChunk(c, chunkContent)
 					outputtedIndices[c.ChunkIndex] = true
 				}
@@ -291,7 +309,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 				}
 			} else if forceOutputNext {
 				if !outputtedIndices[c.ChunkIndex] {
-					fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\" type=\"context_after\">\n%s\n</chunk>\n", c.ChunkIndex+1, chunkContent)
+					writeSourceDocumentChunk(&chunksOutput, c, "context_after", chunkContent)
 					appendFormattedChunk(c, chunkContent)
 					outputtedIndices[c.ChunkIndex] = true
 				}

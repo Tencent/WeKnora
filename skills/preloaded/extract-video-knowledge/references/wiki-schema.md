@@ -55,8 +55,8 @@ evidence_contribution:
 规则：
 
 - `source_document_id` 与 `source_refs` 的唯一值相同；证据、分块和 Wiki 页面 ID 不能代填源文档 ID。
-- `evidence_ids` 包含 1–3 个当前代次的最小充分证据；`field_evidence` 只能引用本组 `evidence_ids`。
-- `chunk_refs` 与证据一一可回查，`time_range` 能定位视频播放位置。
+- `evidence_ids` 包含 1–3 个当前代次的最小充分证据，只能逐字复制源文档 `evidence_sentence_ids` 中存在的值；禁止填写样例 ID、`ev-001`、`c1`、段落号或自造缩写。`field_evidence` 只能引用本组 `evidence_ids`。
+- `chunk_refs` 只使用读取工具返回的真实 `chunk_id`，并与证据一一可回查；`time_range` 能定位视频播放位置。
 - 同一视频同一代次重跑时，服务端覆盖该组贡献；跨视频提交时，服务端新增贡献。
 - Skill 不提交证据正文，不汇总 `evidence_contributions`，也不删除其他来源贡献。
 - 服务端必须保留规范页的对象 ID、规范标题和页面 ID；合并时不得把当前候选正文覆盖为另一视频的证据正文。
@@ -69,11 +69,11 @@ evidence_contribution:
 |---|---|---|
 | `created` | 创建新的规范身份和规范页 | 回读并使用返回身份 |
 | `reused` | 复用已有规范身份和规范页，更新当前贡献 | 回读并使用返回身份 |
-| `review_required` | 同名异义、类型冲突、多目标命中、事实冲突或语义不确定 | 标记问题并停止该候选 |
+| `review_required` | 同名异义、类型冲突、多目标命中、事实冲突或语义不确定；工具调用本身成功，但没有写页面 | 标记问题、停止该候选并继续其他候选 |
 
 成功结果必须包含 `knowledge_object_id`、`canonical_wiki_page_id`、规范 `title` 和 `slug`。若当前工具返回字段名仍为 `wiki_page_id`，将其视为 `canonical_wiki_page_id` 的兼容名称。任何返回字段为空或回读不一致都视为写入失败。
 
-Skill 不根据搜索结果直接覆盖页面，不从标题推测页面 ID 或 slug，不在 `review_required` 后换一个 slug 新建页面。
+Skill 不根据搜索结果直接覆盖页面，不从标题推测页面 ID 或 slug，不在 `review_required` 后换一个 slug 新建页面。最终回答中的 Markdown 或 YAML 不会触发写入，所有 `passed` 候选必须实际调用 `wiki_write_page`。
 
 ## 5. 页面正文
 
@@ -84,6 +84,8 @@ Skill 不根据搜索结果直接覆盖页面，不从标题推测页面 ID 或 
 Skill 提交的正文只包含当前候选有证据支持的内容；已有规范页的内容合并、字段证据重算和其他贡献保留由服务端完成。
 
 ## 6. 正式关系
+
+正式关系名称与五类对象方向矩阵以机器可读的 [relation-contract.json](relation-contract.json) 为唯一契约；下表是面向阅读的中文说明。
 
 | 中文 | `relation_type` | 方向 | 含义 |
 |---|---|---|---|
@@ -96,7 +98,9 @@ Skill 提交的正文只包含当前候选有证据支持的内容；已有规�
 | 补充 | `complements` | 双向 | A 与 B 共同形成更完整解释 |
 | 涉及 | `involves` | A → B | 案例、方法或洞察 A 涉及实体 B |
 
-每条关系包含 `relation_id`、`relation_type`、`target_object_id`、`target_wiki_page_id`、`evidence_ids`、`time_range` 和 `confidence`。两端都是 `passed` 对象，目标只使用写入工具返回并回读确认的规范身份。相邻出现、标题相似、关键词重合和普通双链不构成正式关系。
+Skill 补写关系时提交 `relation_id`、`relation_type`、`target_object_id`、`target_wiki_page_id`、`evidence_ids`、`time_range` 和 `confidence`。服务端按“来源对象 + 关系类型 + 目标对象”合并为一条规范关系，并把本次证据转换为 `evidence_contributions`；每组贡献必须包含 `video_id`、`transcript_generation`、`evidence_ids`、`time_range`、`confidence` 和 `quality_status`。同一视频同一代次重跑只替换自己的关系贡献，其他视频贡献必须保留。图谱按关系贡献的视频与代次投影，不能因为两个对象都属于某视频就推断该关系也属于该视频。
+
+两端都是 `passed` 对象，目标只使用写入工具返回并回读确认的规范身份。相邻出现、标题相似、关键词重合和普通双链不构成正式关系。
 
 ## 7. 两阶段写入
 
@@ -125,3 +129,5 @@ source_refs: [doc-V002]
 ```
 
 索引页包含视频分类、五类数量、规范页面索引、视频概要和审计警示。它不设置 `primary_type`，也不进入五类列表或 Graph。索引只能使用工具返回的规范页面身份，同一规范页面不得因多个候选或贡献重复出现。
+
+索引页不得设置 `id` 或 `knowledge_object_id`；这两个字段会把它路由到五类对象契约并导致写入失败。至少一张对象页成功写入并按返回身份回读后，才允许写索引页。

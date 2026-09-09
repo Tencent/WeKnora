@@ -160,3 +160,33 @@ func TestValidateSourceContentRejectsEmptyOversizeIdentityAndDuration(t *testing
 		t.Fatalf("expected duration validation error, got %v", err)
 	}
 }
+
+func TestValidateSourceEvidenceManifestRejectsDivergentEvidenceMapping(t *testing.T) {
+	input := validDocumentInput()
+	input.Chapters[0].Paragraphs[0].SpeakerID = "0"
+	doc, err := Build(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := []EvidenceManifestItem{
+		{EvidenceSentenceID: "evs:v1:one", SourceSentenceID: "s-1", SpeakerID: "0", StartMs: 1000, EndMs: 2000},
+		{EvidenceSentenceID: "evs:v1:two", SourceSentenceID: "s-2", SpeakerID: "0", StartMs: 2000, EndMs: 3000},
+	}
+	if err := ValidateSourceEvidenceManifest(doc, manifest); err != nil {
+		t.Fatalf("matching source and evidence manifest should pass: %v", err)
+	}
+
+	for name, mutate := range map[string]func([]EvidenceManifestItem){
+		"evidence ID": func(items []EvidenceManifestItem) { items[0].EvidenceSentenceID = "evs:v1:different" },
+		"speaker ID":  func(items []EvidenceManifestItem) { items[0].SpeakerID = "speaker-2" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := append([]EvidenceManifestItem(nil), manifest...)
+			mutate(changed)
+			err := ValidateSourceEvidenceManifest(doc, changed)
+			if err == nil || !strings.Contains(err.Error(), SourceValidationEvidence) {
+				t.Fatalf("expected stable evidence mismatch error, got %v", err)
+			}
+		})
+	}
+}

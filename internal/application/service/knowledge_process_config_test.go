@@ -68,6 +68,19 @@ func TestResolveProcessConfig_GraphDisabled(t *testing.T) {
 	require.False(t, eff.GraphEnabled)
 }
 
+func TestResolveProcessConfig_WikiDisabledForSingleKnowledge(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		IndexingStrategy: types.IndexingStrategy{WikiEnabled: true},
+	}
+	eff := ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+		WikiEnabled: processConfigBoolPtr(false),
+	})
+
+	require.False(t, eff.WikiEnabled)
+}
+
 func TestResolveProcessConfig_GraphRequiresExtractEnabled(t *testing.T) {
 	t.Parallel()
 

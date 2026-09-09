@@ -9,6 +9,7 @@ type KnowledgeProcessOverrides struct {
 	ASRConfig                *ASRConfig                `json:"asr_config,omitempty"`
 	QuestionGenerationConfig *QuestionGenerationConfig `json:"question_generation_config,omitempty"`
 	GraphEnabled             *bool                     `json:"graph_enabled,omitempty"`
+	WikiEnabled              *bool                     `json:"wiki_enabled,omitempty"`
 	ExtractConfig            *ExtractConfig            `json:"extract_config,omitempty"`
 	// ParserEngineOverrides passes key-value configuration to docreader parsers
 	// (e.g. pdf_force_scanned=true). Merged with workspace-level overrides in the
@@ -24,5 +25,6 @@ type EffectiveProcessConfig struct {
 	ASRConfig                ASRConfig
 	QuestionGenerationConfig QuestionGenerationConfig
 	GraphEnabled             bool
+	WikiEnabled              bool
 	ExtractConfig            ExtractConfig
 }

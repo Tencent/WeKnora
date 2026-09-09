@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/custom/config"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCreateManualKnowledgeUsesPublicEndpointAndAPIKey(t *testing.T) {
@@ -46,6 +48,28 @@ func TestCreateManualKnowledgeUsesPublicEndpointAndAPIKey(t *testing.T) {
 	if got.Title != "transcript/video-1/000000" || got.Content != "原文" || got.Status != "publish" || got.Channel != "api" {
 		t.Fatalf("request = %#v", got)
 	}
+}
+
+func TestCreateManualKnowledgeSendsProcessConfig(t *testing.T) {
+	var got ManualKnowledgeInput
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"id":"knowledge-1","knowledge_base_id":"kb-1"}}`))
+	}))
+	defer server.Close()
+
+	wikiEnabled := false
+	client := New(config.WeKnoraConfig{BaseURL: server.URL, KBID: "kb-1"})
+	_, err := client.CreateManualKnowledge(context.Background(), "", ManualKnowledgeInput{
+		Title: "source", Content: "content",
+		ProcessConfig: &types.KnowledgeProcessOverrides{WikiEnabled: &wikiEnabled},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, got.ProcessConfig)
+	require.NotNil(t, got.ProcessConfig.WikiEnabled)
+	require.False(t, *got.ProcessConfig.WikiEnabled)
 }
 
 func TestCreateManualKnowledgeRejectsEmptyResponseID(t *testing.T) {

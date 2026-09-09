@@ -45,6 +45,7 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		ASRConfig:                kb.ASRConfig,
 		QuestionGenerationConfig: defaultQuestionGenerationConfig(kb),
 		GraphEnabled:             kb.IsGraphEnabled(),
+		WikiEnabled:              kb.IsWikiEnabled(),
 		ExtractConfig:            derefExtractConfig(kb.ExtractConfig),
 	}
 	if overrides == nil {
@@ -82,6 +83,9 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	}
 	if overrides.GraphEnabled != nil {
 		eff.GraphEnabled = *overrides.GraphEnabled
+	}
+	if overrides.WikiEnabled != nil {
+		eff.WikiEnabled = *overrides.WikiEnabled
 	}
 	if overrides.ExtractConfig != nil {
 		eff.ExtractConfig = mergeExtractConfig(eff.ExtractConfig, overrides.ExtractConfig)

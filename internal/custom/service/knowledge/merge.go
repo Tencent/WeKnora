@@ -485,6 +485,67 @@ func rejectForeignStructureFields(raw any, allowed []string) error {
 	return nil
 }
 
+func knowledgeStructureRequiredCombination(knowledgeType KnowledgeType, entitySubType string) string {
+	switch knowledgeType {
+	case TypeEntity:
+		return "at least one identity, role, or use attribute allowed for entity_sub_type " + strings.TrimSpace(entitySubType)
+	case TypeConcept:
+		return "definition plus at least one of components, mechanism, distinction"
+	case TypeMethodology:
+		return "steps plus at least one of input, criteria, output, applicability"
+	case TypeCase:
+		return "context and actions plus at least one of outcome, retrospective"
+	case TypeInsight:
+		return "claim and reasoning"
+	default:
+		return "use the canonical fields for the selected knowledge type"
+	}
+}
+
+// WikiObjectWriteRepairHint gives the Agent a complete repair checklist after
+// a rejected write so it does not exhaust retries fixing one field at a time.
+func WikiObjectWriteRepairHint(content string) string {
+	frontmatter, _ := parseWikiFrontmatter(content)
+	primary := strings.ToLower(strings.TrimSpace(stringValue(frontmatter["primary_type"])))
+	rawType := strings.ToLower(strings.TrimSpace(stringValue(frontmatter["type"])))
+	selected := primary
+	if _, ok := wikiObjectTypes[selected]; !ok {
+		selected = rawType
+	}
+	knowledgeType, ok := wikiObjectTypes[selected]
+
+	parts := []string{
+		"complete repair checklist: type and primary_type must be equal and one of entity, concept, methodology, case, insight",
+		"page_type must be index",
+		"audit_status must be passed",
+		"classification_confidence must be a number greater than 0 and at most 1",
+		"evidence_ids must contain 1-3 IDs copied from the active source document (do not use evidence_sentence_ids)",
+		"source_document_id is required and source_refs must contain that exact ID",
+		"structure_fields must use only the selected type's canonical keys",
+	}
+	if !ok {
+		return strings.Join(parts, "; ")
+	}
+
+	entitySubType := strings.ToLower(strings.TrimSpace(stringValue(frontmatter["entity_sub_type"])))
+	if knowledgeType == TypeEntity {
+		parts = append(parts, "entity_sub_type must be one of person, organization, product, technology, industry, place")
+		if !IsEntitySubType(entitySubType) {
+			return strings.Join(parts, "; ")
+		}
+	} else {
+		parts = append(parts, "entity_sub_type must be omitted")
+		entitySubType = ""
+	}
+	allowed := frameworkKeys(knowledgeType, entitySubType)
+	parts = append(parts,
+		"information_nature must be "+knowledgeInformationNature(knowledgeType, entitySubType),
+		"allowed structure_fields: "+strings.Join(allowed, ", "),
+		"required structure_fields: "+knowledgeStructureRequiredCombination(knowledgeType, entitySubType),
+	)
+	return strings.Join(parts, "; ")
+}
+
 type IdentityCandidate struct {
 	KnowledgeObjectID    string
 	KnowledgeType        KnowledgeType
@@ -682,13 +743,15 @@ func NormalizeIdentity(value string) string {
 	return builder.String()
 }
 
-var identityTypeDecorationPattern = regexp.MustCompile(`(?i)[\s_-]*(?:[（(]\s*(?:实体|概念|案例|方法论|方法|洞察|entity|concept|case|methodology|method|insight)\s*[）)])\s*$`)
+var identityTypeDecorationPattern = regexp.MustCompile(`(?i)[\s_-]*(?:[（(]\s*(?:实体|概念|案例|方法论|方法|洞察|entity|concept|case|methodology|method|insight)\s*[）)]|【\s*(?:实体|概念|案例|方法论|方法|洞察|entity|concept|case|methodology|method|insight)\s*】|\[\s*(?:实体|概念|案例|方法论|方法|洞察|entity|concept|case|methodology|method|insight)\s*\])\s*$`)
+var leadingIdentityTypeDecorationPattern = regexp.MustCompile(`(?i)^\s*(?:[（(]\s*(?:实体|概念|案例|方法论|方法|洞察|entity|concept|case|methodology|method|insight)\s*[）)]|【\s*(?:实体|概念|案例|方法论|方法|洞察|entity|concept|case|methodology|method|insight)\s*】|\[\s*(?:实体|概念|案例|方法论|方法|洞察|entity|concept|case|methodology|method|insight)\s*\])[\s_-]*`)
 
 func stripIdentityTypeDecoration(value string) string {
 	previous := ""
 	for value != previous {
 		previous = value
 		value = identityTypeDecorationPattern.ReplaceAllString(strings.TrimSpace(value), "")
+		value = leadingIdentityTypeDecorationPattern.ReplaceAllString(strings.TrimSpace(value), "")
 	}
 	return strings.TrimSpace(value)
 }

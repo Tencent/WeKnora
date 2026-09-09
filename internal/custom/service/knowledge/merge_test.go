@@ -304,11 +304,14 @@ func TestCompareIdentityUsesSemanticContentAfterRemovingTypeDecoration(t *testin
 
 func TestCanonicalKnowledgeTitleRemovesOnlyTypeDecoration(t *testing.T) {
 	tests := map[string]string{
-		"Codex（实体）":                  "Codex",
-		"第二大脑 (concept)":             "第二大脑",
+		"Codex（实体）":              "Codex",
+		"Codex【实体】":              "Codex",
+		"【概念】第二大脑":               "第二大脑",
+		"[方法论] 用户访谈":             "用户访谈",
+		"第二大脑 (concept)":         "第二大脑",
 		"个人知识库五关标准（概念）（concept）": "个人知识库五关标准",
-		"AI Agent 第二大脑":              "AI Agent 第二大脑",
-		"Codex 企业版":                   "Codex 企业版",
+		"AI Agent 第二大脑":          "AI Agent 第二大脑",
+		"Codex 企业版":              "Codex 企业版",
 	}
 	for input, want := range tests {
 		if got := CanonicalKnowledgeTitle(input); got != want {

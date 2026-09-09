@@ -187,6 +187,10 @@ func TestSkillQueryUsesTranscriptKnowledgeIDAsSourceDocument(t *testing.T) {
 	require.Contains(t, query, "audit_status: aligned")
 	require.Contains(t, query, "索引只引用工具已返回并回读的规范页面")
 	require.Contains(t, query, "连续语义窗口")
+	require.Contains(t, query, "最终报告不能代替 wiki_write_page 工具调用")
+	require.Contains(t, query, "evidence_sentence_ids")
+	require.Contains(t, query, "继续处理其他候选")
+	require.Contains(t, query, "至少一次成功写入并回读")
 	require.Contains(t, query, "不得使用示例、占位内容或 mock 数据")
 	require.NotContains(t, query, "每个实体和每个知识原子都要写入独立 Wiki 页面")
 	require.NotContains(t, query, "methodology: input、steps、criteria、output、applicability")
@@ -237,12 +241,17 @@ func TestTranscriptKnowledgeIDsUsesEveryCurrentChunk(t *testing.T) {
 	require.Equal(t, []string{"knowledge-1", "knowledge-2"}, ids)
 }
 
-func TestWikiInputFullDocumentDoesNotReadTranscriptChunks(t *testing.T) {
+func TestWikiInputFullDocumentValidatesTranscriptChunks(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoTranscriptSource{}))
 	video := model.Video{ID: "video-1", Title: "测试视频", DurationSeconds: 20, TranscriptGeneration: "generation-1"}
 	require.NoError(t, db.Create(&video).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptChunk{
+		VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 0,
+		EvidenceSentenceID: "e-1", SourceSegmentID: "s-1", SpeakerID: "0", StartMs: 100, EndMs: 1000,
+		KnowledgeID: "chunk-1", ContentHash: "chunk-hash", Status: "completed",
+	}).Error)
 	require.NoError(t, db.Create(&model.VideoTranscriptSource{ID: "binding-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, KnowledgeBaseID: "knowledge-kb", KnowledgeID: "source-1", ContentHash: "hash", Status: transcriptservice.SourceStatusCreated}).Error)
 	doc, err := transcriptservice.Build(transcriptservice.Input{
 		VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, Title: video.Title, DurationSeconds: video.DurationSeconds,
@@ -257,6 +266,50 @@ func TestWikiInputFullDocumentDoesNotReadTranscriptChunks(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, TranscriptInputModeFullDocument, input.Mode)
 	require.Equal(t, []string{"source-1"}, input.KnowledgeIDs)
+}
+
+func TestGraphRunRejectsSourceEvidenceMismatchBeforeAgent(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoTranscriptSource{}))
+	video := model.Video{ID: "video-1", Title: "测试视频", DurationSeconds: 20, TranscriptGeneration: "generation-1"}
+	require.NoError(t, db.Create(&video).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptChunk{
+		VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 0,
+		EvidenceSentenceID: "evs:v1:active", SourceSegmentID: "s-1", SpeakerID: "0", StartMs: 100, EndMs: 1000,
+		KnowledgeID: "chunk-1", ContentHash: "chunk-hash", Status: "completed",
+	}).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptSource{
+		ID: "binding-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration,
+		KnowledgeBaseID: "knowledge-kb", KnowledgeID: "source-1", ContentHash: "source-hash", Status: transcriptservice.SourceStatusCreated,
+	}).Error)
+	doc, err := transcriptservice.Build(transcriptservice.Input{
+		VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, Title: video.Title, DurationSeconds: video.DurationSeconds,
+		Chapters: []transcriptservice.InputChapter{{Index: 0, Title: "开场", Paragraphs: []transcriptservice.InputParagraph{{Index: 0, Sentences: []transcriptservice.InputSentence{{
+			SourceSentenceID: "s-1", EvidenceSentenceID: "evs:v1:stale", Text: "正文", StartMs: 100, EndMs: 1000,
+		}}}}}},
+	})
+	require.NoError(t, err)
+	jsonText, err := doc.JSON()
+	require.NoError(t, err)
+	agent := &countingAgentClient{}
+	handler := BaseSkillHandler{
+		DB: db, AgentClient: agent, KnowledgeBaseID: "knowledge-kb",
+		SourceReader: sourceReaderStub{value: weknora.ManualKnowledgeResult{
+			ID: "source-1", KnowledgeBaseID: "knowledge-kb", Content: transcriptservice.SourceContent(doc, jsonText, "source-hash"),
+		}},
+	}
+	job := &model.VideoProcessingJob{
+		ID: "job-1", VideoID: video.ID, JobType: skill.JobGraph, TranscriptGeneration: video.TranscriptGeneration,
+		InputPayload: `{"transcript_input_mode":"full_document","transcript_source_knowledge_id":"source-1"}`,
+	}
+
+	err = handler.run(t.Context(), job, &video, skill.JobGraph)
+	require.ErrorContains(t, err, transcriptservice.SourceValidationEvidence)
+	category, code := ClassifyProcessingError(err)
+	require.Equal(t, ErrorCategoryResponseParse, category)
+	require.Equal(t, transcriptservice.SourceValidationEvidence, code)
+	require.Zero(t, agent.calls)
 }
 
 func TestWikiInputFullDocumentRejectsMissingSource(t *testing.T) {
@@ -338,6 +391,14 @@ func graphSourceReader(t *testing.T, video *model.Video) sourceReaderStub {
 		ID: "source-1", KnowledgeBaseID: "knowledge-kb",
 		Content: transcriptservice.SourceContent(doc, jsonText, "hash"),
 	}}
+}
+
+func graphTranscriptChunk(video *model.Video) *model.VideoTranscriptChunk {
+	return &model.VideoTranscriptChunk{
+		VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 0,
+		KnowledgeID: "chunk-1", EvidenceSentenceID: "e-1", SourceSegmentID: "s-1",
+		SpeakerID: "0", StartMs: 100, EndMs: 1000, ContentHash: "hash", Status: "completed",
+	}
 }
 
 func p3IndexContent(videoID, generation, title string) string {
@@ -430,7 +491,7 @@ func TestGraphHandlerRejectsUncontractedNativeWiki(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoTranscriptSource{}, &model.VideoProcessingJob{}))
 	video := &model.Video{ID: "video-1", Title: "测试视频", DurationSeconds: 20, TranscriptGeneration: "generation-1", SummaryWikiPageID: "summary-1"}
 	require.NoError(t, db.Create(video).Error)
-	require.NoError(t, db.Create(&model.VideoTranscriptChunk{VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 0, KnowledgeID: "chunk-1", ContentHash: "hash", Status: "completed"}).Error)
+	require.NoError(t, db.Create(graphTranscriptChunk(video)).Error)
 	require.NoError(t, db.Create(&model.VideoTranscriptSource{ID: "binding-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, KnowledgeBaseID: "knowledge-kb", KnowledgeID: "source-1", ContentHash: "source-hash", Status: "created"}).Error)
 	job := &model.VideoProcessingJob{ID: "job-1", VideoID: video.ID, JobType: skill.JobGraph, TranscriptGeneration: video.TranscriptGeneration, InputPayload: `{"transcript_source_knowledge_id":"source-1"}`}
 	require.NoError(t, db.Create(job).Error)
@@ -600,7 +661,7 @@ func TestGraphHandlerRepairsMixedInvalidP3InsteadOfMarkingItComplete(t *testing.
 	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoTranscriptSource{}, &model.VideoProcessingJob{}))
 	video := &model.Video{ID: "video-1", Title: "测试视频", TranscriptGeneration: "generation-1"}
 	require.NoError(t, db.Create(video).Error)
-	require.NoError(t, db.Create(&model.VideoTranscriptChunk{VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 0, KnowledgeID: "chunk-1", EvidenceSentenceID: "e-1", ContentHash: "hash", Status: "completed"}).Error)
+	require.NoError(t, db.Create(graphTranscriptChunk(video)).Error)
 	require.NoError(t, db.Create(&model.VideoTranscriptSource{ID: "binding-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, KnowledgeBaseID: "knowledge-kb", KnowledgeID: "source-1", ContentHash: "source-hash", Status: "created"}).Error)
 	job := &model.VideoProcessingJob{ID: "job-1", VideoID: video.ID, JobType: skill.JobGraph, TranscriptGeneration: video.TranscriptGeneration, InputPayload: `{"transcript_source_knowledge_id":"source-1"}`}
 	require.NoError(t, db.Create(job).Error)
@@ -651,7 +712,7 @@ func TestGraphHandlerRequestsOneContractRepairWithValidationDetails(t *testing.T
 	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoTranscriptSource{}, &model.VideoProcessingJob{}))
 	video := &model.Video{ID: "video-1", Title: "测试视频", DurationSeconds: 20, TranscriptGeneration: "generation-1"}
 	require.NoError(t, db.Create(video).Error)
-	require.NoError(t, db.Create(&model.VideoTranscriptChunk{VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 0, KnowledgeID: "chunk-1", ContentHash: "hash", Status: "completed"}).Error)
+	require.NoError(t, db.Create(graphTranscriptChunk(video)).Error)
 	require.NoError(t, db.Create(&model.VideoTranscriptSource{ID: "binding-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, KnowledgeBaseID: "knowledge-kb", KnowledgeID: "source-1", ContentHash: "source-hash", Status: "created"}).Error)
 	job := &model.VideoProcessingJob{ID: "job-1", VideoID: video.ID, JobType: skill.JobGraph, TranscriptGeneration: video.TranscriptGeneration, InputPayload: `{"transcript_source_knowledge_id":"source-1"}`}
 	require.NoError(t, db.Create(job).Error)

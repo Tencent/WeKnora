@@ -15,6 +15,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/wikiaudit"
 )
 
@@ -155,8 +156,10 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 	}
 	action := "created"
 	if knowledge == nil {
+		wikiEnabled := false
 		value, createErr := w.Gateway.CreateManualKnowledge(ctx, w.KBID, weknora.ManualKnowledgeInput{
 			Title: title, Content: SourceContent(doc, documentJSON, hash), Status: "publish", Channel: "api",
+			ProcessConfig: &types.KnowledgeProcessOverrides{WikiEnabled: &wikiEnabled},
 		})
 		if createErr != nil {
 			return result, w.fail(binding.ID, result, fmt.Errorf("create transcript source: %w", createErr))
