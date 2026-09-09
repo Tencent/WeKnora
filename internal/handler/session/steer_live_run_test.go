@@ -460,3 +460,31 @@ func TestRebindSteerKeepsEventWhenAppendFails(t *testing.T) {
 	require.Len(t, old, 1)
 	assert.Equal(t, "late-1", old[0].ID)
 }
+
+func TestSteerMessageRejectsDifferentExpectedRun(t *testing.T) {
+	h := &Handler{
+		sessionService: &steerOwnedSessionStub{},
+		messageService: &steerMessageLookupStub{msg: &types.Message{ID: "new-run", IsCompleted: false}},
+		streamManager:  &steerLiveRunLookupStub{assistantID: "new-run"},
+	}
+	w := postSteer(t, newSteerLiveRunRouter(h),
+		`{"query":"keep going","delivery":"inject","expected_assistant_message_id":"old-run"}`)
+	assert.Equal(t, http.StatusConflict, w.Code)
+}
+
+func TestSteerRetryFindsConsumedReceiptAfterRunCompleted(t *testing.T) {
+	mgr := stream.NewMemoryStreamManager()
+	ctx := context.Background()
+	id := "7c2f7062-c80a-480e-ac21-c509b6210936"
+	evt := steerEventWithDelivery(id, "more", steerDeliveryInject)
+	evt.Data[steerDataConsumed] = true
+	require.NoError(t, mgr.AppendSteerEvents(ctx, "sess-1", "old-run", []interfaces.StreamEvent{evt}))
+	h := &Handler{
+		sessionService: &steerOwnedSessionStub{}, messageService: &steerMessageLookupStub{}, streamManager: mgr,
+	}
+	w := postSteer(t, newSteerLiveRunRouter(h),
+		`{"query":"more","delivery":"inject","expected_assistant_message_id":"old-run","steer_id":"`+id+`"}`)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "already_injected")
+	assert.NotContains(t, w.Body.String(), "new_run")
+}

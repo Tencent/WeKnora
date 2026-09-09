@@ -170,15 +170,32 @@ func (r *RedisStreamManager) AppendSteerEvents(
 		payloads = append(payloads, eventJSON)
 	}
 
-	pipe := r.client.Pipeline()
-	pipe.RPush(ctx, key, payloads...)
-	pipe.Expire(ctx, key, r.ttl)
-	pipe.Expire(ctx, r.buildLiveRunKey(sessionID), r.ttl)
-	if _, err := pipe.Exec(ctx); err != nil {
+	// Deduplication is atomic with append: a timed-out POST can be retried
+	// while another replica is still accepting the same client ID.
+	args := append([]interface{}{int64(r.ttl / time.Second)}, payloads...)
+	if err := steerAppendUnique.Run(ctx, r.client, []string{key}, args...).Err(); err != nil {
 		return fmt.Errorf("failed to append steer events to Redis: %w", err)
 	}
+	_ = r.client.Expire(ctx, r.buildLiveRunKey(sessionID), r.ttl).Err()
 	return nil
 }
+
+var steerAppendUnique = redis.NewScript(`
+local seen = {}
+for _, raw in ipairs(redis.call('LRANGE', KEYS[1], 0, -1)) do
+  local ok, event = pcall(cjson.decode, raw)
+  if ok and event.id then seen[event.id] = true end
+end
+for i = 2, #ARGV do
+  local event = cjson.decode(ARGV[i])
+  if not event.id or event.id == '' or not seen[event.id] then
+    redis.call('RPUSH', KEYS[1], ARGV[i])
+    if event.id then seen[event.id] = true end
+  end
+end
+redis.call('EXPIRE', KEYS[1], ARGV[1])
+return 1
+`)
 
 // GetSteerEvents drains the steer sub-list starting fromOffset.
 func (r *RedisStreamManager) GetSteerEvents(

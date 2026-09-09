@@ -9,16 +9,17 @@ export type SteerQueueItem = {
   mentioned_items?: unknown[]
   promoting?: boolean
   awaitingIdleSend?: boolean
-  // True while POST /steer is in flight. The overlay uses a client-side
-  // id until the server replies with the durable one; promote/remove are
-  // disabled in that window so they cannot hit /steer/{client_id}.
+  // True while POST /steer is in flight. The stable client UUID is also the
+  // durable server ID; disable actions until its queue entry exists.
   pending?: boolean
+  failed?: boolean
+  expected_assistant_message_id?: string
   client_id?: string
 }
 
 /**
  * Append a message to a running agent turn.
- * Returns { success, status: 'queued' | 'new_run', steer_id?, delivery?, assistant_message_id? }.
+ * Returns { success, status: 'queued' | 'already_injected' | 'new_run', steer_id?, delivery?, assistant_message_id? }.
  * - delivery 'after' (default): waits until the current run exits, then starts a follow-up turn.
  * - delivery 'inject': the running engine injects it at the next round boundary.
  * - 'new_run': no run is live; the caller should fall back to a normal send.
@@ -30,9 +31,13 @@ export async function steerSession(
   query: string,
   mentionedItems: any[] = [],
   delivery: SteerDelivery = 'after',
+  expectedAssistantMessageId?: string,
+  steerId?: string,
 ) {
   return post(`/api/v1/sessions/${session_id}/steer`, {
     query,
+    expected_assistant_message_id: expectedAssistantMessageId,
+    steer_id: steerId,
     mentioned_items: mentionedItems,
     channel: 'web',
     delivery,

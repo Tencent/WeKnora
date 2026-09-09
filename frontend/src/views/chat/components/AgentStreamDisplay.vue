@@ -1,5 +1,5 @@
 <template>
-  <div ref="rootElement" class="agent-stream-display" :class="{ 'is-embedded': embeddedMode, 'is-rag-mode': ragMode }">
+  <div ref="rootElement" class="agent-stream-display" :class="{ 'is-embedded': embeddedMode, 'is-rag-mode': ragMode, 'is-steer-prefix': session?.steerForked }">
 
     <!-- Collapsed intermediate steps (tree root) -->
     <div v-if="shouldShowCollapsedSteps" class="tree-container">
@@ -28,7 +28,7 @@
         />
         <template v-for="(event, index) in visibleIntermediateEvents" :key="getEventKey(event, index)">
           <div v-if="event && event.type" class="tree-child"
-            :class="{ 'tree-child-last': !isConversationDone && index === visibleIntermediateEvents.length - 1 }">
+            :class="{ 'tree-child-last': !isSegmentDone && index === visibleIntermediateEvents.length - 1 }">
             <div class="tree-branch"></div>
             <div class="tree-child-content">
               <!-- Plan Task Change Event -->
@@ -246,9 +246,9 @@
     </div>
 
     <!-- Event Stream (non-tree mode: before answer starts, or answer events) -->
-    <div v-if="!ragMode || displayEvents.length > 0 || showAgentActivityIndicator" ref="streamingStepsContainer"
+    <div v-if="displayEvents.length > 0 || showMemoryRow || showAgentActivityIndicator" ref="streamingStepsContainer"
       class="streaming-steps-container" :class="{
-        'streaming-steps-constrained': !answerEverStarted && !isConversationDone,
+        'streaming-steps-constrained': !answerEverStarted && !isSegmentDone,
         'is-streaming-timeline': showStreamingTimeline
       }">
       <!-- Recalled memory leads the timeline: it is what the turn knew before it
@@ -546,7 +546,8 @@
   <picturePreview :reviewImg="imagePreviewVisible" :reviewUrl="imagePreviewUrl" @closePreImg="closeImagePreview" />
 
   <!-- Wiki Page Detail Drawer -->
-  <t-drawer v-model:visible="wikiDrawerVisible" :header="wikiDrawerPage?.title || ''" size="480px" :footer="false"
+  <!-- Mount on demand: a hidden TDesign drawer steals focus when each response mounts. -->
+  <t-drawer v-if="wikiDrawerVisible" v-model:visible="wikiDrawerVisible" :header="wikiDrawerPage?.title || ''" size="480px" :footer="false"
     placement="right" attach="body" :show-overlay="true" :close-btn="true" :close-on-overlay-click="true"
     class="wiki-graph-drawer">
     <template v-if="wikiDrawerPage">
@@ -587,6 +588,7 @@
 </template>
 
 <script setup lang="ts">
+import { isAssistantTurnComplete } from '@/utils/steerStreamFork';
 import { ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
@@ -1547,36 +1549,9 @@ watch(eventStream, (stream) => {
 }, { deep: true, immediate: true });
 
 
-// Check if conversation is done (based on answer event with done=true or stop event)
-const isConversationDone = computed(() => {
-  if (props.session?.steerForked) return true
-  const stream = eventStream.value;
-  if (!stream || stream.length === 0) {
-    console.log('[Collapse] No stream or empty stream');
-    return false;
-  }
-
-  // Check for stop event (user cancelled)
-  const stopEvent = stream.find((e: any) => e.type === 'stop');
-  if (stopEvent) {
-    console.log('[Collapse] Found stop event, conversation done');
-    return true;
-  }
-
-  const completeEvent = stream.find((e: any) => e.type === 'agent_complete');
-  if (completeEvent) {
-    console.log('[Collapse] Found complete event, conversation done');
-    return true;
-  }
-
-  // Check for answer event with done=true. Exclude superseded preambles: a
-  // retracted tool-round preamble is also closed with done=true, but the agent
-  // keeps running, so it must not mark the whole conversation as finished.
-  const answerEvents = stream.filter((e: any) => e.type === 'answer' && !e.superseded);
-  const doneAnswer = answerEvents.find((e: any) => e.done === true);
-
-  return !!doneAnswer;
-});
+// A steer boundary stops local animation without completing or folding the task.
+const isConversationDone = computed(() => isAssistantTurnComplete(props.session));
+const isSegmentDone = computed(() => Boolean(props.session?.steerForked) || isConversationDone.value);
 
 const streamingMermaidSvgCache = ref<string[]>([]);
 let streamingMermaidRenderTask: Promise<void> | null = null;
@@ -1603,7 +1578,7 @@ const activeAnswerEventRef = computed(() => {
 // full instead of replaying.
 const { displayed: typedAnswer } = useTypewriter(
   () => activeAnswerMarkdown.value,
-  () => isConversationDone.value,
+  () => isSegmentDone.value,
 );
 
 const cacheStreamingMermaidSvg = async () => {
@@ -1629,7 +1604,7 @@ const cacheStreamingMermaidSvg = async () => {
   }
 };
 
-watch(isConversationDone, (done) => {
+watch(isSegmentDone, (done) => {
   if (!done) {
     streamingMermaidSvgCache.value = [];
     streamingMermaidRenderTask = null;
@@ -1656,7 +1631,7 @@ watch(activeAnswerMarkdown, () => {
 const answerFullyRendered = computed(
   () =>
     !props.session?.steerForked &&
-    isConversationDone.value &&
+    isSegmentDone.value &&
     typedAnswer.value.length >= activeAnswerMarkdown.value.length,
 );
 watch(answerFullyRendered, (ready) => {
@@ -1696,7 +1671,7 @@ const hasPendingStreamingActivity = computed(() => {
 // feedback-less timeline. Once a real pending step exists it carries its own
 // shimmer, and once answer text starts the stream itself is enough feedback.
 const showAgentActivityIndicator = computed(() => {
-  if (isConversationDone.value) return false;
+  if (isSegmentDone.value) return false;
   if (props.ragMode || hasAnswerStarted.value) return false;
   return !hasPendingStreamingActivity.value;
 });
@@ -1734,7 +1709,7 @@ const finalContent = computed(() => {
     return null;
   }
 
-  if (!isConversationDone.value) {
+  if (!isSegmentDone.value) {
     return null;
   }
 
@@ -1779,7 +1754,7 @@ const finalContent = computed(() => {
 
 // Count intermediate steps (after merging consecutive thinking events, matching what user sees in tree)
 const intermediateStepsCount = computed(() => {
-  if (!hasAnswerStarted.value && !isConversationDone.value) return 0;
+  if (!hasAnswerStarted.value && !isSegmentDone.value) return 0;
   // Count only thinking and tool_call events (exclude plan_task_change, etc.)
   return intermediateEvents.value.filter(
     (e: any) => e.type === 'thinking' || e.type === 'tool_call'
@@ -1791,12 +1766,12 @@ const intermediateStepsCount = computed(() => {
 // over-counts what the user perceives as agent loops (a single loop emits one
 // thinking card plus its tool calls).
 const reasoningRoundsCount = computed(() => {
-  if (!hasAnswerStarted.value && !isConversationDone.value) return 0;
+  if (!hasAnswerStarted.value && !isSegmentDone.value) return 0;
   return intermediateEvents.value.filter((e: any) => e.type === 'thinking').length;
 });
 
 const toolCallsCount = computed(() => {
-  if (!hasAnswerStarted.value && !isConversationDone.value) return 0;
+  if (!hasAnswerStarted.value && !isSegmentDone.value) return 0;
   return intermediateEvents.value.filter((e: any) => e.type === 'tool_call').length;
 });
 
@@ -2545,7 +2520,7 @@ agentRenderer.image = function agentImageRenderer(token) {
     artifacts: artifactList.value,
     labels: artifactRefLabels.value,
     context: artifactRefContext.value,
-    streaming: !isConversationDone.value,
+    streaming: !isSegmentDone.value,
   });
   if (artifactHtml !== null) return artifactHtml;
   return defaultImageRenderer.call(this, token);
@@ -2561,7 +2536,7 @@ const prepareAgentMarkdown = (markdown: string, cachedSvgHtml?: CachedMermaidSvg
   const cache = cachedSvgHtml ?? streamingMermaidSvgCache.value;
   // Keep masking after the turn ends when SVG is already cached so v-html /
   // v-stable-html cannot replace a painted diagram with mermaid source.
-  const mermaidSafe = !isConversationDone.value || hasCachedMermaidSvg(cache)
+  const mermaidSafe = !isSegmentDone.value || hasCachedMermaidSvg(cache)
     ? prepareStreamingMermaidMarkdown(markdown, cache)
     : replaceIncompleteMermaidWithPlaceholder(markdown);
   return mermaidSafe.replace(/<(?:kb|web)\b[^>]*$/i, '');
@@ -2578,7 +2553,7 @@ const renderAgentMarkdown = (
     renderer: agentRenderer,
     escapeMarkdown,
     sanitizeHtml: sanitizeMarkdownHTML,
-    streaming: !isConversationDone.value,
+    streaming: !isSegmentDone.value,
     knowledgeReferences: getReferencesForDrawer(),
     cachedMermaidSvgHtml: streamingMermaidSvgCache.value,
     prepareMarkdown: prepareAgentMarkdown,
@@ -3156,6 +3131,11 @@ const handleAddToKnowledge = (answerEvent: any) => {
   --stream-brand-12: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
   --stream-brand-15: color-mix(in srgb, var(--td-brand-color) 15%, transparent);
   --stream-brand-20: color-mix(in srgb, var(--td-brand-color) 20%, transparent);
+
+  &.is-steer-prefix {
+    margin-bottom: 0;
+    .tree-container { margin-bottom: 0; }
+  }
 
   &.is-rag-mode {
     margin-top: 0;

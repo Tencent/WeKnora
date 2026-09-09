@@ -2,6 +2,24 @@ import { markRaw } from 'vue'
 
 export type ChatMessage = Record<string, unknown>
 
+/** Display a steer immediately; the receipt, not this preview, splits execution. */
+export function previewSteerMessage(list: ChatMessage[], item: { steer_id: string; content: string; mentioned_items?: unknown[] }): ChatMessage {
+  const existing = list.find(m => m.role === 'user' && m.steer_id === item.steer_id)
+  if (existing) return existing
+  const message: ChatMessage = {
+    id: `steer-user-${item.steer_id}`, steer_id: item.steer_id,
+    role: 'user', content: item.content, mentioned_items: item.mentioned_items || [],
+    isSteer: true, is_completed: true, _steerPending: true,
+  }
+  list.push(message)
+  return message
+}
+
+export function discardSteerPreview(list: ChatMessage[], steerId: string): void {
+  const index = list.findIndex(m => m.steer_id === steerId && m._steerPending)
+  if (index >= 0) list.splice(index, 1)
+}
+
 /**
  * The row id the server knows this assistant message by.
  *
@@ -28,7 +46,7 @@ export function sealAssistantSegment(message: ChatMessage): void {
   for (const raw of stream) {
     if (!raw || typeof raw !== 'object') continue
     const event = raw as ChatMessage
-    if (event.type === 'thinking') {
+    if (event.type === 'thinking' || event.type === 'answer') {
       event.done = true
       event.thinking = false
     }
@@ -48,6 +66,9 @@ export function forkAfterInjectedUser(
   // "Already split" means the bubble sits *between* two segments of this turn.
   // A bubble merely sitting above the live assistant is the opposite case —
   // it still has to be moved underneath it.
+  userMessage.isSteer = true
+  delete userMessage._steerPending
+  delete userMessage._steerFailed
   const existingIdx = list.indexOf(userMessage)
   if (existingIdx > 0) {
     const before = list[existingIdx - 1]
@@ -56,9 +77,14 @@ export function forkAfterInjectedUser(
       before?.role === 'assistant' &&
       before.request_id === sourceAssistant.request_id &&
       after?.role === 'assistant' &&
-      !after.is_completed &&
       after.request_id === sourceAssistant.request_id
     ) {
+      sealAssistantSegment(before)
+      if (after._steerReplayPending) {
+        delete after._steerReplayPending
+        after.is_completed = false
+        after.steerForked = false
+      }
       return after
     }
   }
@@ -122,7 +148,7 @@ function eventTime(event: ChatMessage): number {
 
 function isTrailingTurnEvent(event: ChatMessage): boolean {
   if (event.type === 'agent_complete' || event.type === 'stop') return true
-  return event.type === 'answer' && event.done === true && !event.superseded
+  return event.type === 'answer' && event.done === true && !event.superseded && !event.intermediate_answer
 }
 
 export function expandSteerForksInHistory(messages: ChatMessage[]): ChatMessage[] {
@@ -159,20 +185,34 @@ export function expandSteerForksInHistory(messages: ChatMessage[]): ChatMessage[
     }
 
     const stream = Array.isArray(item.agentEventStream) ? (item.agentEventStream as ChatMessage[]) : []
+    const boundaryIDs = stream.filter(e => e.type === 'user_message_injected').map(e => e.user_message_id)
+    const hasBoundaries = boundaryIDs.length > 0
+    if (hasBoundaries) {
+      forks.sort((a, b) => {
+        const ai = boundaryIDs.indexOf(a.id), bi = boundaryIDs.indexOf(b.id)
+        return (ai < 0 ? Infinity : ai) - (bi < 0 ? Infinity : bi)
+      })
+    }
     const cuts = forks.map((user) => {
       const parsed = Date.parse(String(user.created_at || ''))
       return Number.isNaN(parsed) ? 0 : parsed
     })
     const buckets: ChatMessage[][] = Array.from({ length: forks.length + 1 }, () => [])
     const trailing: ChatMessage[] = []
+    let segmentIndex = 0
     for (const event of stream) {
+      if (event.type === 'user_message_injected') {
+        const index = forks.findIndex(user => user.id === event.user_message_id)
+        if (index >= 0) segmentIndex = index + 1
+        continue
+      }
       if (isTrailingTurnEvent(event)) {
         trailing.push(event)
         continue
       }
       const t = eventTime(event)
-      let idx = 0
-      while (idx < cuts.length && t >= cuts[idx]) idx += 1
+      let idx = hasBoundaries ? segmentIndex : 0
+      while (!hasBoundaries && idx < cuts.length && t >= cuts[idx]) idx += 1
       buckets[idx].push(event)
     }
     buckets[buckets.length - 1].push(...trailing)
@@ -197,6 +237,7 @@ export function expandSteerForksInHistory(messages: ChatMessage[]): ChatMessage[
             assistant_message_id: persistedId,
           }
       segment.agentEventStream = markRaw(buckets[s])
+      if (s > 0) segment.used_memories = undefined
       if (isLast) {
         segment.content = original.content
         segment.artifacts = original.artifacts
@@ -207,15 +248,54 @@ export function expandSteerForksInHistory(messages: ChatMessage[]): ChatMessage[
       } else {
         segment.steerForked = true
         segment.is_completed = true
-        segment.content = ''
+        segment.content = buckets[s].filter(e => e.type === 'answer' && !e.superseded).map(e => e.content || '').join('')
         segment.artifacts = undefined
         segment.usage = undefined
         segment.knowledge_references = []
       }
       out.push(segment)
-      if (s < forks.length) out.push(forks[s])
+      if (s < forks.length) {
+        forks[s].isSteer = true
+        out.push(forks[s])
+      }
     }
     i = j - 1
   }
   return out
+}
+
+export function steerStepEvents(step: ChatMessage): ChatMessage[] {
+  const events: ChatMessage[] = []
+  if (Array.isArray(step.user_messages_before)) {
+    for (const id of step.user_messages_before) {
+      events.push({ type: 'user_message_injected', user_message_id: id })
+    }
+  }
+  return events
+}
+
+/** A continue-stream replays from offset zero. Keep row identities, but rebuild
+ * every segment from that log rather than appending old events onto the tail. */
+export function resetSteerTurnForReplay(list: ChatMessage[], requestId: string): ChatMessage | undefined {
+  const segments = list.filter(m => m.role === 'assistant' && m.request_id === requestId)
+  if (!segments.some(m => m.steerForked)) return undefined
+  for (const segment of segments) {
+    segment.content = ''
+    segment.agentEventStream = []
+    segment._eventMap = new Map()
+    segment._pendingToolCalls = new Map()
+    segment.is_completed = true
+    segment._steerReplayPending = true
+  }
+  segments[0].is_completed = false
+  segments[0].steerForked = false
+  delete segments[0]._steerReplayPending
+  return segments[0]
+}
+
+/** Individual answer.done events close a message, not the running task. */
+export function isAssistantTurnComplete(message: ChatMessage | undefined): boolean {
+  if (!message || message.steerForked) return false
+  return Boolean(message.is_completed) || (Array.isArray(message.agentEventStream) &&
+    message.agentEventStream.some(e => e.type === 'agent_complete' || e.type === 'stop'))
 }

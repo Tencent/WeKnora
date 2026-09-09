@@ -413,6 +413,12 @@ func IsPipelineToolCallID(id string) bool {
 type AgentStep struct {
 	Iteration int    `json:"iteration"` // Iteration number (0-indexed)
 	Thought   string `json:"thought"`   // LLM's reasoning/thinking (Think phase)
+	// UserMessagesBefore records consumed steer rows in delivery order, before
+	// this model response. Unlike timestamps, this remains unambiguous on replay.
+	UserMessagesBefore []string `json:"user_messages_before,omitempty"`
+	// IntermediateAnswer preserves a plain answer followed by a loop-end steer.
+	// The canonical final answer is still stored in Message.Content.
+	IntermediateAnswer bool `json:"intermediate_answer,omitempty"`
 	// ReasoningContent stores the OpenAI-protocol reasoning_content emitted by the
 	// model in this round. Persisted on AgentStep so cross-turn replay can put it
 	// back on the assistant message — required by MiMo / DeepSeek V3.2+ thinking
@@ -439,12 +445,13 @@ func (s *AgentStep) GetObservations() []string {
 
 // AgentState tracks the execution state of an agent across iterations
 type AgentState struct {
-	CurrentRound  int             `json:"current_round"`  // Current round number
-	RoundSteps    []AgentStep     `json:"round_steps"`    // All steps taken so far in the current round
-	IsComplete    bool            `json:"is_complete"`    // Whether agent has finished
-	FinalAnswer   string          `json:"final_answer"`   // The final answer to the query
-	KnowledgeRefs []*SearchResult `json:"knowledge_refs"` // Collected knowledge references
-	TurnUsage     TokenUsage      `json:"turn_usage"`     // LLM token usage accumulated across every round of this turn
+	PendingSteerMessages []string        `json:"-"`
+	CurrentRound         int             `json:"current_round"`  // Current round number
+	RoundSteps           []AgentStep     `json:"round_steps"`    // All steps taken so far in the current round
+	IsComplete           bool            `json:"is_complete"`    // Whether agent has finished
+	FinalAnswer          string          `json:"final_answer"`   // The final answer to the query
+	KnowledgeRefs        []*SearchResult `json:"knowledge_refs"` // Collected knowledge references
+	TurnUsage            TokenUsage      `json:"turn_usage"`     // LLM usage accumulated across this turn
 }
 
 // FunctionDefinition represents a function definition for LLM function calling

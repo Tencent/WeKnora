@@ -3,7 +3,7 @@ import { markRaw, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ensureRagPipelineHistoryStream } from '@/utils/rag-pipeline-history'
 import { applyMessageCreatedAt, bindServerTurnTimestamps, ensureMessageCreatedAt } from '@/utils/messageTimestamp'
-import { expandSteerForksInHistory, forkAfterInjectedUser } from '@/utils/steerStreamFork'
+import { expandSteerForksInHistory, forkAfterInjectedUser, steerStepEvents, resetSteerTurnForReplay } from '@/utils/steerStreamFork'
 
 export type ChatMessage = Record<string, unknown>
 
@@ -163,6 +163,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     return Array.isArray(refs) ? refs : []
   }
 
+  const replaySegments = new Map<string, ChatMessage>()
+
   /** Match the in-flight assistant row by request id or assistant message id. */
   const resolveActiveAssistantMessage = (data: ChatMessage) => {
     const dataId = data.id as string | undefined
@@ -170,6 +172,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       (data.assistant_message_id as string | undefined) ||
       currentAssistantMessageId.value ||
       undefined
+
+    if (dataId && replaySegments.has(dataId)) return replaySegments.get(dataId)
 
     const matched = findLastMessage((item) => {
       if (item.role !== 'assistant') return false
@@ -326,6 +330,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     if (agentSteps && Array.isArray(agentSteps) && agentSteps.length > 0) {
       agentSteps.forEach((rawStep) => {
         const step = rawStep as ChatMessage
+        events.push(...steerStepEvents(step))
         const stepTimestamp = step.timestamp ? new Date(String(step.timestamp)).getTime() : 0
         const toolCalls = step.tool_calls
         const hasToolCalls = toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0
@@ -346,6 +351,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           })
         }
         const preambleText = step.thought && String(step.thought).trim() ? String(step.thought) : ''
+        if (preambleText && step.intermediate_answer) {
+          events.push({ type: 'answer', event_id: `step-${step.iteration}-answer`,
+            content: preambleText, done: true, intermediate_answer: true, timestamp: stepTimestamp || undefined })
+        }
         if (preambleText && hasToolCalls) {
           events.push({
             type: 'answer',
@@ -941,8 +950,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           )
           alreadyInList = Boolean(injectedUser)
           if (!injectedUser) {
-            // Queued messages live in the composer overlay, never as chat
-            // rows, so the first delivery builds the bubble here.
+            // A restored event or promoted follow-up may arrive before its preview.
             injectedUser = {
               id: injectedId || steerId,
               role: 'user',
@@ -953,6 +961,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             }
             if (data.created_at) applyMessageCreatedAt(injectedUser, data.created_at)
           }
+          if (injectedId) injectedUser.id = injectedId
+          if (data.created_at) applyMessageCreatedAt(injectedUser, data.created_at)
         }
         if (injectedUser) {
           if (dataId && !injectedUser.request_id) injectedUser.request_id = dataId
@@ -962,6 +972,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             injectedUser,
             steerId,
           )
+          if (dataId && replaySegments.has(dataId)) replaySegments.set(dataId, continuation)
           if (!alreadyInList) emitMessageCreated(injectedUser)
           if (continuation !== message) {
             emitMessageCreated(continuation)
@@ -972,6 +983,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         break
       }
       case 'complete': {
+        if (dataId) replaySegments.delete(dataId)
         log('[Agent] Complete event received')
         applyFinalArtifactContent(message, (dataPayload as any)?.final_content)
         loading.value = false
@@ -1040,6 +1052,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     })
 
     if (data.response_type === 'agent_query') {
+      if (data.id) replaySegments.delete(String(data.id))
+      const replay = resetSteerTurnForReplay(messagesList, String(data.id || ''))
+      if (replay) replaySegments.set(String(data.id), replay)
       if (data.id) {
         const earlyMsg = getTrailingIncompleteAssistant()
         if (earlyMsg) earlyMsg.request_id = data.id
@@ -1055,7 +1070,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         request_id: (data.data as ChatMessage | undefined)?.request_id,
       })
 
-      let existingMessage = findLastMessage(
+      let existingMessage = replay || findLastMessage(
         (item) =>
           item.role === 'assistant' &&
           (item.id === data.id || item.request_id === data.id),
@@ -1144,6 +1159,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         log('[Stop Event] Generation stopped')
         const stoppedMessage = resolveActiveAssistantMessage(data)
         if (stoppedMessage) markAssistantStopped(stoppedMessage)
+        if (data.id) replaySegments.delete(String(data.id))
         loading.value = false
         isReplying.value = false
         currentAssistantMessageId.value = ''

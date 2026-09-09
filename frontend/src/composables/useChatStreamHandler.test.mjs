@@ -1,8 +1,32 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import vm from 'node:vm'
+import ts from 'typescript'
+import { resetSteerTurnForReplay } from '../utils/steerStreamFork.ts'
 
 const source = readFileSync(new URL('./useChatStreamHandler.ts', import.meta.url), 'utf8')
+
+test('replaying agent_query binds the first segment and preserves distinct row IDs', () => {
+  const messagesList = [
+    { id: 'a', role: 'assistant', request_id: 'r', steerForked: true, is_completed: true },
+    { id: 'u', role: 'user', request_id: 'r' },
+    { id: 'a:steer:1', assistant_message_id: 'a', role: 'assistant', request_id: 'r', is_completed: false },
+  ]
+  const start = source.indexOf("if (data.response_type === 'agent_query')")
+  const block = source.slice(start, source.indexOf('const isAgentOnlyResponse', start))
+  const replaySegments = new Map()
+  const process = vm.runInNewContext(ts.transpile(`(data) => { ${block} }`), {
+    messagesList, replaySegments, resetSteerTurnForReplay,
+    currentAssistantMessageId: { value: 'a' },
+    getTrailingIncompleteAssistant: () => [...messagesList].reverse().find(m => m.role === 'assistant' && !m.is_completed),
+    findLastMessage: fn => [...messagesList].reverse().find(fn),
+    log() {}, ensureAgentMessageShell() {}, bindServerTurnTimestamps() {}, onAgentQuery() {},
+  })
+  process({ response_type: 'agent_query', id: 'r', assistant_message_id: 'a' })
+  assert.deepEqual(messagesList.map(m => m.id), ['a', 'u', 'a:steer:1'])
+  assert.equal(replaySegments.get('r'), messagesList[0])
+})
 
 test('failed tool results keep stdout/output instead of replacing it with the short error', () => {
   assert.match(source, /toolCallEvent\.output = dataPayload\.output \|\| data\.content/)

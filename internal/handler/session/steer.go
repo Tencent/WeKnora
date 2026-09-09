@@ -39,9 +39,13 @@ const steerDataUserMessageID = "user_message_id"
 
 // SteerMessageRequest is the payload of POST /sessions/:session_id/steer.
 type SteerMessageRequest struct {
-	Query          string                 `json:"query" binding:"required"`
-	MentionedItems []MentionedItemRequest `json:"mentioned_items,omitempty"`
-	Channel        string                 `json:"channel,omitempty"`
+	// Optional for older clients. New clients pin delivery to the run they see
+	// and supply a stable ID so a consume event may precede the HTTP response.
+	ExpectedAssistantMessageID string                 `json:"expected_assistant_message_id,omitempty"`
+	SteerID                    string                 `json:"steer_id,omitempty"`
+	Query                      string                 `json:"query" binding:"required"`
+	MentionedItems             []MentionedItemRequest `json:"mentioned_items,omitempty"`
+	Channel                    string                 `json:"channel,omitempty"`
 	// Delivery is "after" (default) or "inject". See the constants above.
 	Delivery string `json:"delivery,omitempty"`
 }
@@ -495,6 +499,27 @@ func (h *Handler) SteerMessage(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if req.SteerID != "" && req.ExpectedAssistantMessageID != "" {
+		previous, _, err := h.streamManager.GetSteerEvents(ctx, sessionID, req.ExpectedAssistantMessageID, 0)
+		if err != nil {
+			_ = c.Error(errors.NewServiceUnavailableError("Failed to look up previous delivery"))
+			return
+		}
+		for _, delivered := range previous {
+			if delivered.ID == req.SteerID && steerEventConsumed(delivered) {
+				if delivered.Content != query {
+					_ = c.Error(errors.NewConflictError("steer_id already belongs to another message"))
+					return
+				}
+				c.JSON(200, gin.H{"success": true, "status": "already_injected", "steer_id": req.SteerID})
+				return
+			}
+		}
+	}
+	if req.ExpectedAssistantMessageID != "" && assistantID != "" && req.ExpectedAssistantMessageID != assistantID {
+		_ = c.Error(errors.NewConflictError("The active turn changed; retry the message"))
+		return
+	}
 	if assistantID == "" {
 		// No run is live: the message starts a brand-new run via the normal
 		// AgentQA path. The request returns immediately and the SSE stream
@@ -513,13 +538,33 @@ func (h *Handler) SteerMessage(c *gin.Context) {
 		_ = c.Error(errors.NewInternalServerError("Failed to check steer queue"))
 		return
 	}
+
+	steerID := req.SteerID
+	if steerID == "" {
+		steerID = uuid.New().String()
+	} else if _, err := uuid.Parse(steerID); err != nil {
+		_ = c.Error(errors.NewBadRequestError("invalid steer_id"))
+		return
+	}
+	for _, existingEvent := range existing {
+		if existingEvent.ID == steerID {
+			if existingEvent.Content != query {
+				_ = c.Error(errors.NewConflictError("steer_id already belongs to another message"))
+				return
+			}
+			c.JSON(200, gin.H{
+				"success": true, "status": "queued", "steer_id": steerID,
+				"assistant_message_id": assistantID, "delivery": steerDeliveryOfEvent(existingEvent),
+			})
+			return
+		}
+	}
 	pending := len(selectSteerBacklog(existing, nil))
 	if pending >= maxSteerQueueDepth {
 		_ = c.Error(errors.NewBadRequestError("too many queued messages for the running turn"))
 		return
 	}
 
-	steerID := uuid.New().String()
 	evt := steerEvent(steerID, query, convertMentionedItems(req.MentionedItems), req.Channel)
 	evt.Data["delivery"] = delivery
 	if err := h.streamManager.AppendSteerEvents(ctx, sessionID, assistantID,

@@ -4,6 +4,14 @@ import (
 	"context"
 )
 
+// SteerMessageContent adds delivery context only to model input. The persisted
+// user message and the UI always retain the user's original text.
+func SteerMessageContent(content string) string {
+	return "<steer_message>\n" + content + "\n</steer_message>\n<continue_task>\n" +
+		"This is guidance for the task in progress. Apply it and continue unfinished work " +
+		"unless the user explicitly changes or cancels the task.\n</continue_task>"
+}
+
 // SteerSink abstracts the handler-side back half of mid-run message
 // injection: draining the queued steer events and persisting accepted
 // messages. Declared in types (not agent/interfaces) because both packages

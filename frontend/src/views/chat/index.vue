@@ -98,7 +98,8 @@
                   仅对极少数尚未拿到 id 的本地占位消息 fallback 到 role+created_at+index。
                 -->
                     <div v-for="(session, index) in messagesList"
-                        :key="session.id || `${session.role}-${session.created_at}-${index}`" class="msg-item-wrapper">
+                        :key="session.id || `${session.role}-${session.created_at}-${index}`" class="msg-item-wrapper"
+                        :class="{ 'is-steer-prefix': session.steerForked, 'is-empty-segment': session.role === 'assistant' && !shouldRenderAssistantMessage(session) }">
                         <MessageTimestamp v-if="shouldShowConversationTimestamp(messagesList, index)"
                             :value="session.created_at" />
 
@@ -107,7 +108,10 @@
                             :class="{ 'is-minimap-target': session.id && session.id === minimapTargetId }">
                             <usermsg :content="session.content" :mentioned_items="session.mentioned_items"
                                 :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"
-                                :session-id="session_id">
+                                :session-id="session_id"
+                                :steer-failed="Boolean(session._steerFailed)"
+                                @retry-steer="handleRetrySteer(session.steer_id)"
+                                @remove-steer="handleRemoveSteer(session.steer_id)">
                             </usermsg>
                         </div>
                         <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)"
@@ -143,16 +147,17 @@
             </div>
         </transition>
         <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
-            <InputField ref="inputFieldRef"
+            <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount"
                 @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles)"
                 @steer-msg="(query, mentionedItems, delivery) => handleSteerMsg(query, mentionedItems, delivery)"
                 @promote-steer="handlePromoteSteer"
                 @remove-steer="handleRemoveSteer"
+                @retry-steer="handleRetrySteer"
                 @stop-generation="handleStopGeneration"
                 @stop-confirmed="handleStopConfirmed"
                 @stop-failed="handleStopFailed" :isReplying="isReplying" :sessionId="session_id"
                 :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"
-                :queuedSteers="steerQueue" :canSteer="isAgentStreamSession()"></InputField>
+                :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()"></InputField>
         </div>
     </div>
     <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
@@ -178,7 +183,7 @@ import { getSuggestedQuestions } from "@/api/agent/index";
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { useStream } from '../../api/chat/streame'
 import { listSteerSession, promoteSteerSession, removeSteerSession, steerSession } from '@/api/chat/steer';
-import { persistedAssistantId } from '@/utils/steerStreamFork';
+import { persistedAssistantId, previewSteerMessage, discardSteerPreview } from '@/utils/steerStreamFork';
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -239,6 +244,8 @@ const uiStore = useUIStore();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
 const { t } = useI18n();
 const { firstQuery, firstMentionedItems, firstModelId, firstImageFiles, firstAttachmentFiles } = storeToRefs(usemenuStore);
+// Capture before the initial send consumes firstQuery; the child focuses after mounting.
+const focusComposerOnMount = Boolean(firstQuery.value);
 const { onChunk, error, isStreaming, startStream, stopStream, lastStreamRequest } = useStream();
 /** Snapshot of the in-flight HTTP request for attaching to the next assistant message. */
 const pendingStreamDebug = ref(null);
@@ -639,7 +646,11 @@ const hydrateSteerQueue = async ({ onlyWhenLive = false } = {}) => {
             content: item.content || '',
             delivery: item.delivery === 'inject' ? 'inject' : 'after',
             mentioned_items: item.mentioned_items || [],
-        }));
+            expected_assistant_message_id: res.assistant_message_id,
+        })).concat(steerQueue.value.filter(item => item.failed && !items.some(remote => remote.steer_id === item.steer_id)));
+        for (const item of steerQueue.value) {
+            if (item.delivery === 'inject') previewSteerMessage(messagesList, item);
+        }
     } catch (e) {
         console.warn('[Steer] Failed to restore queue:', e);
     }
@@ -738,6 +749,7 @@ const {
         dropSteerQueueItem(steerId);
     },
     onGenerationStopped: () => {
+        for (const item of steerQueue.value) discardSteerPreview(messagesList, item.steer_id);
         steerQueue.value = [];
     },
     onTurnComplete: (message) => {
@@ -803,6 +815,7 @@ const handleStopGeneration = () => {
 };
 
 const handleStopConfirmed = () => {
+    for (const item of steerQueue.value) discardSteerPreview(messagesList, item.steer_id);
     steerQueue.value = [];
 };
 
@@ -820,97 +833,135 @@ const dropSteerQueueItem = (steerId) => {
 const findSteerQueueItem = (steerId) =>
     steerQueue.value.find((item) => item.steer_id === steerId);
 
-const makeSteerClientId = () =>
-    `steer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const makeSteerClientId = () => {
+    // getRandomValues also works on HTTP deployments without randomUUID.
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+};
 
-// 追加消息到正在运行的 agent turn。默认 delivery=after，排队显示在输入框上方；
-// 点「立即发送」再 promote 为 inject。注入后的时间线分叉复用 forkAfterInjectedUser。
-const handleSteerMsg = async (value, mentionedItems = [], delivery = 'after') => {
+// Enter queues a follow-up; an explicit inject appears in the transcript immediately.
+const handleSteerMsg = async (value, mentionedItems = [], delivery = 'after', retryId = '') => {
     if (!session_id.value || !value?.trim()) return;
-    if (!isReplying.value) {
+    if (!isReplying.value && !retryId) {
         // 空闲时没有运行中的 turn 可排队：直接走正常发送，而不是把
         // steering（服务端为 handleSteer/指定事务）当隐形 sendMsg 用。
         await sendMsg(value, '', mentionedItems);
         return;
     }
-    const clientId = makeSteerClientId();
-    steerQueue.value.push({
+    const requestSessionId = session_id.value;
+    const clientId = retryId || makeSteerClientId();
+    const retryItem = retryId ? findSteerQueueItem(retryId) : null;
+    const expectedId = retryItem?.expected_assistant_message_id || currentAssistantMessageId.value;
+    if (retryItem) { retryItem.pending = true; retryItem.failed = false; }
+    else steerQueue.value.push({
         steer_id: clientId,
         client_id: clientId,
+        expected_assistant_message_id: expectedId,
         content: value,
         delivery,
         mentioned_items: mentionedItems,
         pending: true,
     });
+    if (delivery === 'inject') {
+        const preview = previewSteerMessage(messagesList, findSteerQueueItem(clientId));
+        delete preview._steerFailed;
+        scrollToBottom(true);
+    }
     try {
-        const res = await steerSession(session_id.value, value, mentionedItems, delivery);
+        const res = await steerSession(requestSessionId, value, mentionedItems, delivery, expectedId, clientId);
+        if (session_id.value !== requestSessionId) return;
+        if (res?.status === 'already_injected') {
+            dropSteerQueueItem(clientId);
+            const preview = messagesList.find(m => m.steer_id === clientId);
+            if (preview) delete preview._steerPending;
+            MessagePlugin.info(t('input.messages.steerAlreadyInjected'));
+            return;
+        }
         if (res?.status === 'new_run') {
             const item = findSteerQueueItem(clientId);
             // Still attached to a stream: aborting it to POST AgentQA races the
-            // finishing turn and can start a second engine. Keep the chip and
+            // finishing turn and can start a second engine. Keep the message and
             // send once the current SSE completes.
             if (isReplying.value || isStreaming.value) {
                 if (item) {
                     item.pending = false;
                     item.awaitingIdleSend = true;
-                    item.delivery = 'after';
                 }
                 return;
             }
             dropSteerQueueItem(clientId);
+            discardSteerPreview(messagesList, clientId);
             await sendMsg(value, '', mentionedItems);
             return;
         }
         const item = findSteerQueueItem(clientId);
         if (item) {
-            // The server id is the durable one — promote/remove and the
-            // injected-event correlation all go through it. client_id stays
-            // so handlePromoteSteer can still find the row while the swap
-            // is rendering.
+            // The server echoes the stable client UUID used by SSE receipts.
             if (res?.steer_id) item.steer_id = res.steer_id;
             item.pending = false;
         }
     } catch (e) {
         console.error('[Steer] Failed to queue message:', e);
-        dropSteerQueueItem(clientId);
+        if (session_id.value !== requestSessionId) return;
+        const item = findSteerQueueItem(clientId);
+        if (!item) return; // The delivery receipt may have already consumed it.
+        item.pending = false;
+        item.failed = true;
+        const preview = messagesList.find(m => m.steer_id === clientId && m._steerPending);
+        if (preview) preview._steerFailed = true;
+        if (e?.status === 409) item.expected_assistant_message_id = currentAssistantMessageId.value;
         MessagePlugin.error(e?.message || t('input.messages.steerFailed'));
     }
+};
+
+const handleRetrySteer = async (steerId) => {
+    const item = findSteerQueueItem(steerId);
+    if (!item || item.pending) return;
+    await handleSteerMsg(item.content, item.mentioned_items || [], item.delivery, steerId);
 };
 
 const handlePromoteSteer = async (steerId) => {
     if (!session_id.value || !steerId) return;
     const item = findSteerQueueItem(steerId) || steerQueue.value.find((entry) => entry.client_id === steerId);
     if (!item || item.delivery === 'inject') return;
+    if (item.pending || item.promoting || item.failed) return;
+    const requestSessionId = session_id.value;
     item.promoting = true;
+    item.delivery = 'inject';
+    previewSteerMessage(messagesList, item);
+    scrollToBottom(true);
     try {
-        // Promote needs the durable server id; a pending item only has the
-        // client-side one. isPending doesn't disable the button yet, so guard
-        // here to keep the queue handlers total.
-        if (item.pending) {
-            MessagePlugin.info(t('input.messages.steerPromoteFailed'));
-            return;
-        }
-        const res = await promoteSteerSession(session_id.value, item.steer_id);
+        const res = await promoteSteerSession(requestSessionId, item.steer_id);
+        if (session_id.value !== requestSessionId) return;
         if (res?.status === 'already_injected') {
             dropSteerQueueItem(item.steer_id);
+            const preview = messagesList.find(m => m.steer_id === item.steer_id);
+            if (preview) delete preview._steerPending;
             MessagePlugin.info(t('input.messages.steerAlreadyInjected'));
             return;
         }
         if (res?.status === 'new_run') {
             if (isReplying.value || isStreaming.value) {
                 item.awaitingIdleSend = true;
-                item.delivery = 'after';
                 return;
             }
             const content = item.content;
             const mentions = item.mentioned_items || [];
             dropSteerQueueItem(steerId);
+            discardSteerPreview(messagesList, steerId);
             await sendMsg(content, '', mentions);
             return;
         }
         item.delivery = 'inject';
     } catch (e) {
         console.error('[Steer] Failed to promote queued message:', e);
+        if (session_id.value !== requestSessionId) return;
+        if (!findSteerQueueItem(steerId)) return;
+        item.delivery = 'after';
+        discardSteerPreview(messagesList, steerId);
         MessagePlugin.error(e?.message || t('input.messages.steerPromoteFailed'));
     } finally {
         item.promoting = false;
@@ -932,14 +983,16 @@ const handleRemoveSteer = async (steerId) => {
                 return;
             }
             if (res?.status === 'gone') {
+                discardSteerPreview(messagesList, steerId);
                 dropSteerQueueItem(steerId);
                 return;
             }
-            if (res && res.removed === false) {
+            if (res && res.removed === false && !item.failed) {
                 MessagePlugin.error(t('input.messages.steerRemoveFailed'));
                 return;
             }
         }
+        discardSteerPreview(messagesList, steerId);
         dropSteerQueueItem(steerId);
     } catch (e) {
         console.error('[Steer] Failed to remove queued message:', e);
@@ -955,6 +1008,7 @@ const flushSteerAfterTurn = async (completedAssistantId) => {
     const awaiting = steerQueue.value.filter((item) => item.awaitingIdleSend);
     if (awaiting.length) {
         const batch = awaiting.slice();
+        for (const item of batch) discardSteerPreview(messagesList, item.steer_id);
         steerQueue.value = steerQueue.value.filter((item) => !item.awaitingIdleSend);
         const first = batch[0];
         await sendMsg(first.content, '', first.mentioned_items || []);
@@ -967,7 +1021,7 @@ const flushSteerAfterTurn = async (completedAssistantId) => {
 };
 
 const attachSteerFollowUp = async (completedAssistantId) => {
-    const queued = steerQueue.value.slice();
+    const queued = steerQueue.value.filter(item => !item.failed);
     if (!queued.length || attachingSteerFollowUp || !session_id.value) return;
     const sessionId = session_id.value;
     attachingSteerFollowUp = true;
@@ -999,12 +1053,19 @@ const attachSteerFollowUp = async (completedAssistantId) => {
                         (q) => q.content === persisted.content && !claimed.has(q.steer_id)
                     );
                     if (queuedMatch) claimed.add(queuedMatch.steer_id);
-                    messagesList.push({
+                    const userRow = {
                         ...persisted,
                         mentioned_items: queuedMatch?.mentioned_items?.length
                             ? queuedMatch.mentioned_items
                             : persisted.mentioned_items,
-                    });
+                    };
+                    const preview = queuedMatch && messagesList.find(m => m.steer_id === queuedMatch.steer_id && m._steerPending);
+                    if (preview) {
+                        delete preview._steerPending;
+                        delete preview._steerFailed;
+                        delete preview.isSteer;
+                        Object.assign(preview, userRow);
+                    } else messagesList.push(userRow);
                 }
                 // Rows that made it into the transcript are no longer queued.
                 for (const steerId of claimed) dropSteerQueueItem(steerId);
@@ -1038,7 +1099,7 @@ const attachSteerFollowUp = async (completedAssistantId) => {
             loading.value = false;
             isReplying.value = false;
             MessagePlugin.error(t('input.messages.steerFollowUpTimeout'));
-        } else if (steerQueue.value.length) {
+        } else if (steerQueue.value.some(item => !item.failed)) {
             // startStream awaits the whole SSE. The follow-up's onTurnComplete
             // therefore runs while attachingSteerFollowUp is still true and
             // no-ops. Chain remaining after-items once that guard drops.
@@ -1521,7 +1582,7 @@ onBeforeRouteUpdate((to, from, next) => {
     &.is-embedded :deep(.answers-input) .t-textarea__inner {
         width: 100% !important;
         min-height: 48px !important;
-        padding: 10px 14px 48px 14px;
+        padding: 10px 14px;
     }
 }
 
@@ -1721,6 +1782,8 @@ onBeforeRouteUpdate((to, from, next) => {
     */
     .msg-item-wrapper {
         contain: layout style;
+        &.is-empty-segment { display: none; }
+        &.is-steer-prefix { margin-bottom: -4px; }
     }
 
     .message-row {

@@ -66,7 +66,8 @@ func (e *AgentEngine) drainSteerMessages(
 			logger.Warnf(ctx, "[Agent] Steer persist failed for %s, leaving event pending", steerID)
 			continue
 		}
-		*messagesPtr = append(*messagesPtr, chat.Message{Role: "user", Content: content})
+		*messagesPtr = append(*messagesPtr, chat.Message{Role: "user", Content: types.SteerMessageContent(content)})
+		state.PendingSteerMessages = append(state.PendingSteerMessages, userMessageID)
 		_ = e.eventBus.Emit(ctx, event.Event{
 			ID:        generateEventID("injected"),
 			Type:      event.EventUserMessageInjected,

@@ -137,7 +137,15 @@ func (m *MemoryStreamManager) AppendSteerEvents(
 	stream.mu.Lock()
 	defer stream.mu.Unlock()
 
+	seen := make(map[string]bool, len(stream.steerEvents))
+	for _, event := range stream.steerEvents {
+		seen[event.ID] = true
+	}
 	for i := range events {
+		if events[i].ID != "" && seen[events[i].ID] {
+			continue
+		}
+		seen[events[i].ID] = true
 		if events[i].Timestamp.IsZero() {
 			events[i].Timestamp = time.Now()
 		}

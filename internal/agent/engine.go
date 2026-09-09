@@ -731,12 +731,14 @@ func (e *AgentEngine) runReActIteration(
 
 	// Create agent step
 	step := types.AgentStep{
-		Iteration:        state.CurrentRound,
-		Thought:          response.Content,
-		ReasoningContent: response.ReasoningContent,
-		ToolCalls:        make([]types.ToolCall, 0),
-		Timestamp:        time.Now(),
+		UserMessagesBefore: state.PendingSteerMessages,
+		Iteration:          state.CurrentRound,
+		Thought:            response.Content,
+		ReasoningContent:   response.ReasoningContent,
+		ToolCalls:          make([]types.ToolCall, 0),
+		Timestamp:          time.Now(),
 	}
+	state.PendingSteerMessages = nil
 
 	// If the request was cancelled while the LLM was streaming (e.g. the
 	// user pressed "stop"), the stream driver still returns a usable
@@ -751,7 +753,7 @@ func (e *AgentEngine) runReActIteration(
 	if ctx.Err() != nil {
 		logger.Warnf(ctx, "[Agent][Round-%d] Context cancelled during LLM call; preserving partial step",
 			round)
-		if step.Thought != "" || len(step.ToolCalls) > 0 {
+		if step.Thought != "" || len(step.ToolCalls) > 0 || len(step.UserMessagesBefore) > 0 {
 			state.RoundSteps = append(state.RoundSteps, step)
 		}
 		return iterOutcomeBreak, nil
@@ -766,6 +768,7 @@ func (e *AgentEngine) runReActIteration(
 		if verdict.emptyContent {
 			*emptyRetries++
 			if *emptyRetries <= maxEmptyResponseRetries {
+				state.PendingSteerMessages = step.UserMessagesBefore
 				logger.Warnf(ctx, "[Agent][Round-%d] Empty content with stop - retrying (%d/%d)",
 					round, *emptyRetries, maxEmptyResponseRetries)
 				*messagesPtr = append(*messagesPtr, chat.Message{
@@ -799,6 +802,7 @@ func (e *AgentEngine) runReActIteration(
 				})
 				injected := e.drainSteerMessages(ctx, state, messagesPtr, sessionID, assistantMessageID)
 				if injected > 0 {
+					verdict.step.IntermediateAnswer = true
 					state.RoundSteps = append(state.RoundSteps, verdict.step)
 					if !e.withinIterationBudget(nextRound) {
 						e.steerOverruns++
