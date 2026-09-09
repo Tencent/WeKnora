@@ -100,11 +100,12 @@ type offlineEvalPrediction struct {
 
 // This entry point runs only deterministic, in-memory production functions.
 // It does not instantiate repositories, queues, model clients, or credentials.
+// Synthetic regression results do not establish human learning gains.
 func TestLearningOfflineEvaluation(t *testing.T) {
 	raw := offlineEvalRead(t, "testdata/offline_eval.json")
 	hash := fmt.Sprintf("%x", sha256.Sum256(raw))
 	if hash != offlineEvalDataSHA256 {
-		t.Fatalf("fixture changed: sha256=%s; review labels and update the evaluation report before repinning", hash)
+		t.Fatalf("fixture changed: sha256=%s; review fixture provenance and labels before repinning", hash)
 	}
 	var data offlineEvalData
 	decoder := json.NewDecoder(bytes.NewReader(raw))
