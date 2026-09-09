@@ -3,10 +3,11 @@ import type { VideoData, VideoCategory } from '@/types/videohub'
 const CATEGORY_MAP: Record<string, { category: VideoCategory; name: string }> = {
   interview: { category: 'interview', name: '访谈' },
   training: { category: 'training', name: '培训' },
-  salon: { category: 'salon', name: '研讨' },
+  salon: { category: 'salon', name: '会议' },
+  meeting: { category: 'meeting', name: '会议' },
   general: { category: 'general', name: '通用' },
   tutorial: { category: 'training', name: '培训' },
-  lecture: { category: 'salon', name: '研讨' },
+  lecture: { category: 'salon', name: '会议' },
   case_analysis: { category: 'general', name: '通用' },
 }
 
@@ -28,12 +29,14 @@ export function formatDuration(seconds: number): string {
 
 export function mapVideo(v: any, response?: any): VideoData {
   const cat = CATEGORY_MAP[v.video_type] || { category: 'general' as VideoCategory, name: '通用' }
+  const videoTypeGenerated = v.video_type_generated === true
   const durationSeconds = Number(v.duration_seconds) || 0
   return {
     id: v.id,
     title: v.title,
     category: cat.category,
-    categoryName: cat.name,
+    categoryName: videoTypeGenerated ? cat.name : '',
+    videoTypeGenerated,
     status: v.status || '',
     initiallyAvailable: isVideoInitiallyAvailable({
       status: v.status,

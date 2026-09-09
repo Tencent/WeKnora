@@ -195,9 +195,19 @@ function handleRetryStarted(stage: string) {
 }
 function handleStageCompleted(stage: string) {
   if (!video.value) return
+  if (stage === 'summary') {
+    void refreshCompletedSummary(video.value)
+    return
+  }
   const module = contentModuleForStage(stage)
   if (module === 'all') void loadContent(video.value)
   else if (module) void refreshContentModule(module, video.value)
+}
+async function refreshCompletedSummary(videoData: VideoData) {
+  const nextVideo = await fetchVideoDetail(videoData.id)
+  if (video.value?.id !== videoData.id) return
+  video.value = { ...nextVideo, subtitles: video.value.subtitles }
+  await refreshContentModule('summary', video.value)
 }
 function reloadContentModule(module: VideoContentModule) {
   if (video.value) void refreshContentModule(module, video.value)

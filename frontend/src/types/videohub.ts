@@ -1,4 +1,4 @@
-export type VideoCategory = 'interview' | 'training' | 'salon' | 'general'
+export type VideoCategory = 'interview' | 'training' | 'salon' | 'meeting' | 'general'
 
 export interface KnowledgePoint {
   id: string
@@ -158,6 +158,7 @@ export interface VideoData {
   title: string
   category: VideoCategory
   categoryName: string
+  videoTypeGenerated?: boolean
   status?: string
   initiallyAvailable?: boolean
   duration: string

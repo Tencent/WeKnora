@@ -1,6 +1,6 @@
 import { get } from '@/utils/request'
 import type { SummarySection, VideoCategory } from '@/types/videohub'
-import { parseStructuredSummary, type StructuredSummaryResponse } from './contentParsing'
+import { parseStructuredSummary, parseSummaryVideoType, type StructuredSummaryResponse } from './contentParsing'
 
 export interface SummaryResponse {
   videoId: string
@@ -23,9 +23,10 @@ export async function fetchSummary(videoId: string, category: VideoCategory): Pr
     summary_user_edited?: boolean
   } = await get(`/api/custom/videos/${videoId}/summary`)
   if (!response.summary) throw new Error('智能总结未返回结构化内容')
+  const summaryCategory = parseSummaryVideoType(response.summary)
   return {
     videoId,
-    category,
+    category: summaryCategory,
     sections: parseStructuredSummary(response.summary, category),
     transcriptGeneration: response.transcript_generation,
     summaryVersion: response.artifact_version,

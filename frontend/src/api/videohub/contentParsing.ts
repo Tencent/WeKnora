@@ -11,6 +11,7 @@ import type {
   SummaryEvidence,
   SummarySection,
   SubtitleCue,
+  VideoCategory,
 } from '@/types/videohub'
 
 interface MarkdownSection {
@@ -302,29 +303,33 @@ export function parseOutlineWikiPage(content: string, durationSeconds = 0): Chap
   })
 }
 
-const SUMMARY_TITLES: Record<string, readonly string[]> = {
-  interview: ['一、人物背景', '二、经历与决策', '三、核心观点', '四、原则与思维模型', '五、案例与证据', '六、反思与边界'],
-  training: ['一、目标与受众', '二、知识地图', '三、核心概念', '四、方法与步骤', '五、示例与异常', '六、练习与应用'],
-  salon: ['一、活动与参与者', '二、议题与观点', '三、观点交锋', '四、案例与问答', '五、共识与分歧', '六、探索方向'],
-  general: ['一、定位与问题', '二、主张与论证', '三、证据与案例', '四、限定与反方', '五、影响与建议'],
-}
+const SUMMARY_SCHEMA_VERSIONS = new Set([1, 2])
+const SUMMARY_VIDEO_TYPES = new Set<VideoCategory>(['interview', 'training', 'salon', 'meeting', 'general'])
 
 export interface StructuredSummaryResponse {
   schemaVersion?: number
   videoType?: string
+  classification?: unknown
   sections?: unknown
 }
 
-export function parseStructuredSummary(response: StructuredSummaryResponse, category: string): SummarySection[] {
-  const titles = SUMMARY_TITLES[category]
-  if (response.schemaVersion !== 1 || response.videoType !== category || !Array.isArray(response.sections) || response.sections.length !== titles.length) {
+export function parseSummaryVideoType(response: StructuredSummaryResponse): VideoCategory {
+  if (typeof response.videoType !== 'string' || !SUMMARY_VIDEO_TYPES.has(response.videoType as VideoCategory)) {
+    throw new Error('智能总结视频类型无效')
+  }
+  return response.videoType as VideoCategory
+}
+
+export function parseStructuredSummary(response: StructuredSummaryResponse, _previousCategory?: string): SummarySection[] {
+  parseSummaryVideoType(response)
+  if (!SUMMARY_SCHEMA_VERSIONS.has(response.schemaVersion ?? 0) || !Array.isArray(response.sections)) {
     throw new Error('智能总结结构不符合当前模板')
   }
   return response.sections.map((rawSection, sectionIndex) => {
     if (!rawSection || typeof rawSection !== 'object') throw new Error(`智能总结第 ${sectionIndex + 1} 章无效`)
     const section = rawSection as Record<string, unknown>
-    if (section.title !== titles[sectionIndex] || typeof section.id !== 'string' || !section.id.trim() || !Array.isArray(section.blocks) || section.blocks.length === 0) {
-      throw new Error(`智能总结章节标题或内容不符合模板：${titles[sectionIndex]}`)
+    if (typeof section.title !== 'string' || !section.title.trim() || typeof section.id !== 'string' || !section.id.trim() || !Array.isArray(section.blocks)) {
+      throw new Error(`智能总结第 ${sectionIndex + 1} 章标题或内容无效`)
     }
     return {
       id: section.id,
@@ -469,7 +474,7 @@ export function mapRelatedKnowledgeResponse(videoId: string, response: BackendRe
       seconds: Number.isFinite(Number(item.seconds)) ? Number(item.seconds) : item.timestamp ? parseTimestamp(item.timestamp) : 0,
       video_id: item.video_id || '',
       video_title: item.video_title || '关联视频',
-      video_category: item.video_type === 'interview' ? 'interview' : item.video_type === 'tutorial' || item.video_type === 'training' ? 'training' : item.video_type === 'lecture' || item.video_type === 'salon' ? 'salon' : 'general',
+      video_category: item.video_type === 'interview' ? 'interview' : item.video_type === 'tutorial' || item.video_type === 'training' ? 'training' : item.video_type === 'meeting' ? 'meeting' : item.video_type === 'lecture' || item.video_type === 'salon' ? 'salon' : 'general',
       relation_description: item.relation_description || '与当前内容存在知识关联。',
       source_chapter: item.source_chapter?.trim() || item.source_chapter_title?.trim() || item.chapter_title?.trim() || '',
     }))

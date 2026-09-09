@@ -73,7 +73,7 @@ test('summary accepts the typed JSON contract and preserves block evidence', () 
 test('summary renders every category using the backend wire contract', () => {
   const titles: Record<string, string[]> = {
     interview: ['一、人物背景', '二、经历与决策', '三、核心观点', '四、原则与思维模型', '五、案例与证据', '六、反思与边界'],
-    training: ['一、目标与受众', '二、知识地图', '三、核心概念', '四、方法与步骤', '五、示例与异常', '六、练习与应用'],
+    training: ['一、学习目标、适用对象与前置知识', '二、培训内容体系', '三、核心知识要点与原文金句', '四、方法、操作步骤与判断标准', '五、案例、工具使用与互动问答', '六、练习、自测与应用清单'],
     salon: ['一、活动与参与者', '二、议题与观点', '三、观点交锋', '四、案例与问答', '五、共识与分歧', '六、探索方向'],
     general: ['一、定位与问题', '二、主张与论证', '三、证据与案例', '四、限定与反方', '五、影响与建议'],
   }
@@ -109,12 +109,59 @@ test('summary renders every category using the backend wire contract', () => {
   }
 })
 
-test('summary rejects Markdown content and template deviations', () => {
-  assert.throws(() => parseStructuredSummary({
+test('summary keeps evidence-free template sections empty', () => {
+  const titles = ['一、学习目标、适用对象与前置知识', '二、培训内容体系', '三、核心知识要点与原文金句', '四、方法、操作步骤与判断标准', '五、案例、工具使用与互动问答', '六、练习、自测与应用清单']
+  const sections = parseStructuredSummary({
     schemaVersion: 1,
+    videoType: 'training',
+    sections: titles.map((title, index) => ({
+      id: `training-section-${index + 1}`,
+      title,
+      blocks: [],
+    })),
+  }, 'training')
+
+  assert.equal(sections.length, titles.length)
+  assert.ok(sections.every(section => section.blocks.length === 0))
+})
+
+test('summary renders v2 eight-section meetings from the response type even when the previous category is stale', () => {
+  const titles = ['一、会议总结', '二、会议基本信息', '三、关键议题和共识', '四、会议分歧点', '五、会议讨论详情', '六、待办事项', '七、遗留和搁置议题', '八、其他']
+  const sections = parseStructuredSummary({
+    schemaVersion: 2,
+    videoType: 'meeting',
+    classification: { confidence: 0.9, reason: '会议形成决策', evidenceChunkIds: ['chunk-1', 'chunk-2'] },
+    sections: titles.map((title, index) => ({ id: `meeting-v2-${index + 1}`, title, blocks: [] })),
+  }, 'general')
+
+  assert.equal(sections.length, 8)
+  assert.equal(sections[0].title, '一、会议总结')
+  assert.equal(sections[7].title, '八、其他')
+})
+
+test('summary keeps legacy v1 seven-section meetings readable', () => {
+  const titles = ['一、会议目标与参与者', '二、核心议题与背景', '三、事实、方案与约束', '四、重要决策', '五、分歧与待决策事项', '六、行动项与后续安排', '七、结果与验证']
+  const sections = parseStructuredSummary({
+    schemaVersion: 1,
+    videoType: 'meeting',
+    sections: titles.map((title, index) => ({ id: `meeting-v1-${index + 1}`, title, blocks: [] })),
+  })
+
+  assert.equal(sections.length, 7)
+  assert.equal(sections[0].title, '一、会议目标与参与者')
+})
+
+test('summary rejects unknown schema versions and malformed sections', () => {
+  assert.throws(() => parseStructuredSummary({
+	schemaVersion: 3,
     videoType: 'interview',
-    sections: [{ id: 'section-1', title: '自定义标题', blocks: [] }],
+	sections: [],
   }, 'interview'))
+  assert.throws(() => parseStructuredSummary({
+    schemaVersion: 2,
+    videoType: 'meeting',
+    sections: [{ id: '', title: '', blocks: [] }],
+  }))
 })
 
 test('summary rejects evidence_refs that do not match evidence timing', () => {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   assertSupportedKnowledgeContract,
+  resolveProcessingErrorMessage,
   resolveProcessingFailureMessage,
   SUPPORTED_KNOWLEDGE_CONTRACT_VERSION,
 } from './videoProcessingStatus.ts'
@@ -10,6 +11,14 @@ import {
 test('frontend explicitly accepts the backend knowledge contract version', () => {
   assert.doesNotThrow(() => assertSupportedKnowledgeContract(SUPPORTED_KNOWLEDGE_CONTRACT_VERSION))
   assert.throws(() => assertSupportedKnowledgeContract('p3-wiki-object/v2'), /契约版本不兼容/)
+})
+
+test('summary generation failures use stable business messages', () => {
+  assert.match(resolveProcessingErrorMessage('llm_connection_closed'), /连接提前关闭/)
+  assert.match(resolveProcessingErrorMessage('llm_stream_incomplete'), /内容不完整/)
+  assert.match(resolveProcessingErrorMessage('llm_deadline_exceeded'), /生成超时/)
+  assert.match(resolveProcessingErrorMessage('llm_stream_idle_timeout'), /生成超时/)
+  assert.match(resolveProcessingErrorMessage('summary_contract_invalid'), /契约/)
 })
 
 test('knowledge contract failure is not presented as an untriggered task', () => {

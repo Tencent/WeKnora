@@ -114,6 +114,7 @@ function needsEnhancement(video: VideoData): boolean {
     || video.status === 'initializing'
     || !video.poster_url
     || video.durationSeconds <= 0
+    || !video.videoTypeGenerated
 }
 
 function mergeVideo(video: VideoData) {
