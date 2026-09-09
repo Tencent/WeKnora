@@ -32,6 +32,11 @@ import '@xterm/xterm/css/xterm.css';
 import { useSandboxTerminal, type SandboxTerminalStatus } from '@/composables/useSandboxTerminal';
 import { useTheme } from '@/composables/useTheme';
 import { createPtyEchoPredictor } from '@/utils/ptyEchoPredictor';
+import {
+    PTY_PROMPT_NUDGE,
+    PTY_PROMPT_NUDGE_DELAY_MS,
+    xtermBufferLooksEmpty,
+} from '@/utils/ptyPromptNudge';
 
 const props = defineProps<{
     sessionId: string;
@@ -173,6 +178,7 @@ let fitAddon: FitAddon | null = null;
 let echo: ReturnType<typeof createPtyEchoPredictor> | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let resizeDebounce: ReturnType<typeof setTimeout> | null = null;
+let promptNudgeTimer: ReturnType<typeof setTimeout> | null = null;
 let unmounted = false;
 
 function writeToXterm(chunk: string | Uint8Array) {
@@ -203,28 +209,19 @@ function mountTerminal() {
         echo?.onLocal(data);
         terminal.sendInput(data);
     });
-    // 必须在 connect 之后、但在有输出要展示时注册；composable 会先冲出缓冲的提示符。
-    terminal.onOutput((data) => echo?.onRemote(data));
 
     resizeObserver = new ResizeObserver(() => {
         if (resizeDebounce) clearTimeout(resizeDebounce);
-        resizeDebounce = setTimeout(() => {
-            if (!fitAddon || !xterm) return;
-            try {
-                fitAddon.fit();
-                terminal.resize(xterm.cols, xterm.rows);
-            } catch {
-                // fit 在容器尺寸为 0 时会抛错，忽略即可。
-            }
-        }, 100);
+        resizeDebounce = setTimeout(() => applyFit(), 100);
     });
     resizeObserver.observe(containerRef.value || terminalHost.value);
-    try {
-        fitAddon.fit();
-    } catch {
-        // 首帧布局未就绪时忽略。
-    }
-    terminal.resize(xterm.cols, xterm.rows);
+    // Fit BEFORE flushing buffered PTY bytes. FitAddon.fit() calls
+    // _renderService.clear() when the default 80x24 becomes the panel size,
+    // which would wipe a prompt painted a moment earlier and leave only the
+    // cursor until the next keystroke.
+    applyFit();
+    terminal.onOutput((data) => echo?.onRemote(data));
+    schedulePromptNudge();
     void nextTick(() => {
         requestAnimationFrame(() => fitAndFocus());
     });
@@ -237,6 +234,8 @@ function unmountTerminal() {
     resizeObserver = null;
     if (resizeDebounce) clearTimeout(resizeDebounce);
     resizeDebounce = null;
+    if (promptNudgeTimer) clearTimeout(promptNudgeTimer);
+    promptNudgeTimer = null;
     xterm?.dispose();
     xterm = null;
     fitAddon = null;
@@ -246,7 +245,8 @@ function unmountTerminal() {
 // 创建或唤醒沙箱；组件挂载本身不连接，所以打开面板不会产生任何计费副作用。
 function start() {
     unmountTerminal();
-    terminal.connect({ provision: true });
+    const { cols, rows } = estimatePtySize();
+    terminal.connect({ provision: true, cols, rows });
 }
 
 watch(isDarkTheme, (dark) => {
@@ -278,13 +278,56 @@ onBeforeUnmount(() => {
     unmountTerminal();
 });
 
-function fitAndFocus() {
+function estimatePtySize() {
+    const el = containerRef.value;
+    const width = Math.max(0, (el?.clientWidth ?? 0) - 16);
+    const height = Math.max(0, (el?.clientHeight ?? 0) - 16);
+    return {
+        cols: Math.max(20, Math.floor(width / 8) || 80),
+        rows: Math.max(8, Math.floor(height / 17) || 24),
+    };
+}
+
+function xtermVisibleBufferEmpty(): boolean {
+    if (!xterm) return true;
+    const buf = xterm.buffer.active;
+    const origin = buf.viewportY;
+    return xtermBufferLooksEmpty(
+        (row) => buf.getLine(origin + row)?.translateToString(true),
+        xterm.rows,
+    );
+}
+
+// Pty.Connect does not replay a prompt that bash already printed, and a
+// no-op resize (same 80x24 as Create) does not SIGWINCH. Ctrl-L asks
+// readline to redraw without running a command.
+function schedulePromptNudge() {
+    if (promptNudgeTimer) clearTimeout(promptNudgeTimer);
+    promptNudgeTimer = setTimeout(() => {
+        promptNudgeTimer = null;
+        if (unmounted || !xterm || status.value !== 'ready') return;
+        if (!xtermVisibleBufferEmpty()) return;
+        const cols = Math.max(2, xterm.cols);
+        const rows = Math.max(2, xterm.rows);
+        terminal.resize(cols, rows - 1);
+        terminal.resize(cols, rows);
+        terminal.sendInput(PTY_PROMPT_NUDGE);
+    }, PTY_PROMPT_NUDGE_DELAY_MS);
+}
+
+function applyFit() {
+    if (!xterm) return;
     try {
         fitAddon?.fit();
     } catch {
-        // 容器尚未完成布局时忽略。
+        // fit 在容器尺寸为 0 时会抛错，忽略即可。
     }
-    if (xterm) terminal.resize(xterm.cols, xterm.rows);
+    terminal.resize(xterm.cols, xterm.rows);
+    xterm.refresh(0, xterm.rows - 1);
+}
+
+function fitAndFocus() {
+    applyFit();
     xterm?.focus();
 }
 

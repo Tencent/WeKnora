@@ -87,7 +87,7 @@ export type SandboxTerminalSession = {
    * 按钮才应该传 true：创建沙箱是要计费的真实基础设施，不能是打开面板的副
    * 作用。自动重连一律不带，查不到沙箱就退回让用户确认。
    */
-  connect: (options?: { provision?: boolean }) => void
+  connect: (options?: { provision?: boolean; cols?: number; rows?: number }) => void
   /** 发送键盘输入（xterm onData 的原始字符串）。 */
   sendInput: (data: string) => void
   /** 同步终端尺寸；ready 后调用。 */
@@ -118,6 +118,7 @@ export function useSandboxTerminal(
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let pingTimer: ReturnType<typeof setInterval> | null = null
   let pendingResize: { cols: number; rows: number } | null = null
+  let pendingGeometry: { cols: number; rows: number } | null = null
   // 刷新 / 关面板会拆掉这个闭包；PID 写在 sessionStorage，重挂时才能带 pty_id。
   let lastPid: number | null = readStoredPtyId(sessionId.value)
   // 当前这次连接是否带创建意图。只由 connect({ provision: true }) 置真。
@@ -186,6 +187,10 @@ export function useSandboxTerminal(
       }
       if (lastPid && lastPid > 0) {
         query.set('pty_id', String(lastPid))
+      }
+      if (pendingGeometry) {
+        query.set('cols', String(pendingGeometry.cols))
+        query.set('rows', String(pendingGeometry.rows))
       }
       const socket = new WebSocket(
         `${resolveWsBase()}/api/v1/sessions/${encodeURIComponent(sid)}/sandbox/terminal?${query.toString()}`,
@@ -351,6 +356,10 @@ export function useSandboxTerminal(
       clearReconnectTimer()
       allowProvision = options?.provision === true
       reconnectAttempt = 0
+      const cols = options?.cols
+      const rows = options?.rows
+      pendingGeometry =
+        cols && rows && cols > 0 && rows > 0 ? { cols, rows } : null
       void openSocket()
     },
     sendInput(data) {
