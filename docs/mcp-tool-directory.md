@@ -42,7 +42,7 @@ MCP 配置分两步，使用现有 SettingDrawer，步骤导航沿用沙箱的�
 
 1. `registerMCPTools` 筛选当前租户及 Agent 授权范围内的启用服务，安装受权限约束的目录。生产路径注入只读快照 loader；目录缺失时（升级后尚未同步）可在已授权连接上 live `tools/list` 并写入当前主体的快照。OAuth 服务在预加载阶段不会 live 连接（避免弹出授权窗）；对话内工具执行上下文中才允许 live-fill。连接已变更的 stale 快照不会自动 live-fill，必须在设置页显式刷新。
 2. `PrepareMCPTools` 预读数据库快照，不连接上游。读取最多 8 路并发，初始等待窗口 1 秒，整体受请求取消及 30 秒超时约束。未就绪服务仍展示在来源目录中。
-3. 首轮模型只看到两个入口 `discover_mcp_tools` / `call_mcp_tool`，以及服务级名称、用途说明和状态。来源摘要有 16 KiB 总预算，超出时提示通过 `list_servers` 分页枚举；每个工具的完整描述和 schema 不在首轮 tools 中。
+3. 首轮模型只看到两个入口 `discover_mcp_tools` / `call_mcp_tool`，以及服务级名称、用途说明和状态。来源摘要有 16 KiB 总预算：能放下时模型应直接 `list_tools` / `describe`，不要先 `list_servers`；超出时才提示通过 `list_servers` 分页枚举。每个工具的完整描述和 schema 不在首轮 tools 中。
 4. 模型按服务 `list_tools` / `search`，再 `describe` 一个具体工具。`describe` 返回完整描述、schema、原始服务 instructions、人工使用说明、`function_name` 和 `tool_ref`，并记录本次 engine 已读取的定义版本。
 5. 下一次模型请求前，`RefreshMCPTools` 把已 describe、或本会话历史里已经用过的工具发布为普通函数。新 engine 会从对话历史恢复 `mcp_*` 函数名和 `call_mcp_tool` 的 `tool_ref`，避免多轮必须重新 describe。也可继续用 `call_mcp_tool` 兼容代理调用。目录操作和后台读取线程不会在并行执行期间修改 registry。
 6. 实际执行目标 MCP 工具时才建立所需连接。权限、审批、OAuth 等待、参数校验和结果处理继续走原有执行链。

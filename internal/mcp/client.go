@@ -406,6 +406,32 @@ func (c *mcpGoClient) Initialize(ctx context.Context) (*InitializeResult, error)
 	c.metadataMu.Lock()
 	c.instructions = result.Instructions
 	c.metadataMu.Unlock()
+	serviceName := secutils.SanitizeForLog(c.service.Name)
+	logger.Debugf(
+		ctx,
+		"MCP initialize handshake service=%s protocol=%s name=%s version=%s title=%s",
+		serviceName,
+		result.ProtocolVersion,
+		secutils.SanitizeForLog(result.ServerInfo.Name),
+		secutils.SanitizeForLog(result.ServerInfo.Version),
+		secutils.SanitizeForLog(result.ServerInfo.Title),
+	)
+	if result.Instructions == "" && result.ServerInfo.Description == "" {
+		logger.Debugf(
+			ctx,
+			"MCP initialize optional docs absent service=%s description_len=0 instructions_len=0",
+			serviceName,
+		)
+	} else {
+		logger.Debugf(
+			ctx,
+			"MCP initialize docs service=%s description_len=%d instructions_len=%d instructions_preview=%q",
+			serviceName,
+			len(result.ServerInfo.Description),
+			len(result.Instructions),
+			mcpTextPreview(result.Instructions, 240),
+		)
+	}
 
 	return &InitializeResult{
 		ProtocolVersion: result.ProtocolVersion,
@@ -646,4 +672,16 @@ func (c *mcpGoClient) IsConnected() bool {
 // GetServiceID returns the service ID
 func (c *mcpGoClient) GetServiceID() string {
 	return c.service.ID
+}
+
+func mcpTextPreview(s string, maxRunes int) string {
+	s = secutils.SanitizeForLog(s)
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "..."
 }

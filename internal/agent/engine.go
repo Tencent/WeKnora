@@ -326,8 +326,8 @@ func (e *AgentEngine) Execute(
 	// Get tool definitions for function calling
 	tools := e.buildToolsForLLM()
 	toolListStr := strings.Join(listToolNames(tools), ", ")
-	logger.Infof(ctx, "[Agent] Ready: %d messages, %d tools [%s], %d images",
-		len(messages), len(tools), toolListStr, len(imgs))
+	logger.Infof(ctx, "[Agent] Ready: %d messages, %d tools [%s], mcp_catalog=%d chars, %d images",
+		len(messages), len(tools), toolListStr, mcpCatalogDescriptionLen(tools), len(imgs))
 	common.PipelineInfo(ctx, "Agent", "tools_ready", map[string]interface{}{
 		"session_id": sessionID,
 		"tool_count": len(tools),

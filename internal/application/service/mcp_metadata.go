@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -177,6 +178,39 @@ func (s *mcpServiceService) RefreshMCPMetadata(
 	if err != nil {
 		return nil, fmt.Errorf("could not refresh complete MCP directory: %w", err)
 	}
+	const maxLoggedTools = 30
+	logged := 0
+	for i, tool := range listed {
+		if tool == nil {
+			continue
+		}
+		if logged >= maxLoggedTools {
+			logger.Debugf(
+				refreshCtx,
+				"MCP metadata omitted remaining tools from debug listing service_id=%s",
+				service.ID,
+			)
+			break
+		}
+		logger.Debugf(
+			refreshCtx,
+			"MCP metadata tool[%d] service_id=%s name=%s description_len=%d schema_len=%d",
+			i,
+			service.ID,
+			tool.Name,
+			len(tool.Description),
+			len(tool.InputSchema),
+		)
+		logged++
+	}
+	logger.Debugf(
+		refreshCtx,
+		"MCP metadata listed %d tools service_id=%s instructions_len=%d server_description_len=%d",
+		len(listed),
+		service.ID,
+		len(init.Instructions),
+		len(init.ServerInfo.Description),
+	)
 	return s.commitMCPMetadata(
 		refreshCtx,
 		tenant,

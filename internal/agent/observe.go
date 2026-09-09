@@ -747,6 +747,15 @@ func listToolNames(ts []chat.Tool) []string {
 	return names
 }
 
+func mcpCatalogDescriptionLen(ts []chat.Tool) int {
+	for _, t := range ts {
+		if t.Function.Name == agenttools.ToolDiscoverMCPTools {
+			return len(t.Function.Description)
+		}
+	}
+	return 0
+}
+
 // buildToolsForLLM builds the tools list for LLM function calling
 func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
 	functionDefs := e.toolRegistry.GetModelFunctionDefinitions()

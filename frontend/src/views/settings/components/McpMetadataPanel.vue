@@ -28,6 +28,17 @@
             <span>{{ t('mcpMetadata.toolCount', { count: snapshot.tools.length }) }}</span>
             <span v-if="snapshot.server_name">{{ snapshot.server_name }} {{ snapshot.server_version }}</span>
             <span>{{ t('mcpMetadata.syncedAt') }} {{ formatTime(snapshot.synced_at) }}</span>
+            <t-tooltip
+              v-if="!snapshot.instructions && !snapshot.server_description"
+              :content="t('mcpMetadata.noServerDocumentation')"
+              placement="top"
+              show-arrow
+              :overlay-inner-style="{ maxWidth: '360px', whiteSpace: 'normal' }"
+            >
+              <button type="button" class="snapshot-meta__help" :aria-label="t('mcpMetadata.noServerDocumentation')">
+                <t-icon name="help-circle" size="16px" />
+              </button>
+            </t-tooltip>
           </p>
           <details v-if="snapshot.instructions || snapshot.server_description" class="server-documentation">
             <summary>{{ t('mcpMetadata.serverDocumentation') }}</summary>
@@ -161,10 +172,26 @@ onBeforeUnmount(() => { generation++; emit('busy', false); emit('synced', false)
 .snapshot-meta {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px 12px;
   margin: 10px 0 0;
   font-size: 12px;
   line-height: 1.5;
+  color: var(--td-text-color-secondary);
+}
+
+.snapshot-meta__help {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  cursor: help;
+}
+
+.snapshot-meta__help:hover,
+.snapshot-meta__help:focus-visible {
   color: var(--td-text-color-secondary);
 }
 

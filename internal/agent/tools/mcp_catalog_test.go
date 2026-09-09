@@ -134,6 +134,44 @@ func TestMCPCatalogRegistrationDoesNotConnect(t *testing.T) {
 	require.ErrorContains(t, err, "already registered")
 }
 
+func discoverDescription(t *testing.T, r *ToolRegistry) string {
+	t.Helper()
+	tool, ok := r.tools[ToolDiscoverMCPTools].(*MCPDiscoverTool)
+	require.True(t, ok)
+	tool.advertiseSources = true
+	return tool.Description()
+}
+
+func TestDiscoverDescriptionSkipsListServersWhenDirectoryFits(t *testing.T) {
+	_, r, _, _, _ := catalogFixture(t, 1)
+	d := discoverDescription(t, r)
+	require.Contains(t, d, `"server_id":"server-1"`)
+	require.Contains(t, d, "do not call list_servers first")
+	require.NotContains(t, d, "Further configured services")
+}
+
+func TestDiscoverDescriptionUsesListServersWhenDirectoryOverflows(t *testing.T) {
+	ctx := catalogTestContext()
+	services := make([]*types.MCPService, 0, 250)
+	for i := 0; i < 250; i++ {
+		services = append(services, &types.MCPService{
+			ID:          fmt.Sprintf("server-%03d", i),
+			Name:        fmt.Sprintf("svc-%03d", i),
+			Description: strings.Repeat("d", 200),
+			Enabled:     true,
+		})
+	}
+	c := newMCPCatalog(ctx, services, nil, func(context.Context, *types.MCPService) ([]*MCPTool, error) {
+		return nil, nil
+	}, nil)
+	r := NewToolRegistry()
+	installMCPCatalog(r, c)
+	d := discoverDescription(t, r)
+	require.Contains(t, d, "Further configured services")
+	require.Contains(t, d, `"server_id":"server-000"`)
+	require.NotContains(t, d, "This listing is complete")
+}
+
 func TestMCPCatalogEnumeratesAllToolsWithoutSchemas(t *testing.T) {
 	ctx, r, _, _, calls := catalogFixture(t, 125)
 	before, _ := json.Marshal(r.GetModelFunctionDefinitions())
@@ -151,9 +189,11 @@ func TestMCPCatalogEnumeratesAllToolsWithoutSchemas(t *testing.T) {
 			map[string]any{"mode": "list_tools", "server_id": "server-1", "limit": 17, "cursor": cursor},
 		)
 		require.Equal(t, 125, page.Total)
+		require.Equal(t, "订单", page.ServerName)
 		for _, tool := range page.Tools {
 			require.False(t, found[tool.Name])
 			found[tool.Name] = true
+			require.Equal(t, "订单", tool.ServerName)
 			require.Empty(t, tool.ToolRef, "listing must not expose callable references")
 		}
 		if !page.HasMore {

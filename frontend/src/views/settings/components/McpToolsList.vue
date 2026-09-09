@@ -108,7 +108,7 @@ onBeforeUnmount(() => { generation++; emit('busy', false) })
 .tool-expand { flex-shrink: 0; display: flex; align-items: center; gap: 4px; font-size: 12px; line-height: 1.7; color: var(--td-text-color-placeholder); }
 .tool-heading:hover .tool-expand { color: var(--td-brand-color); }
 .tool-description { margin: 6px 0 0; font-size: 12px; line-height: 1.65; color: var(--td-text-color-secondary); overflow-wrap: anywhere; white-space: pre-wrap; }
-.tool-description.is-collapsed { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tool-description.is-collapsed { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .tool-controls { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; margin-top: 10px; }
 .tool-control { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; line-height: 20px; color: var(--td-text-color-secondary); cursor: pointer; }
 .tool-schema { margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: var(--td-bg-color-secondarycontainer); }
