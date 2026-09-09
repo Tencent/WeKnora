@@ -465,20 +465,23 @@ func loadMCPDirectory(
 	gate approval.MCPApproval,
 	oauthSess *MCPOAuthSession,
 	metadata *MCPMetadataIO,
+	live bool,
 ) ([]*types.MCPTool, string, error) {
 	if metadata == nil || metadata.Get == nil {
 		return loadMCPServiceTools(loadCtx, service, mcpManager, gate, oauthSess)
 	}
 	tenant, _ := types.TenantIDFromContext(loadCtx)
-	snapshot, err := metadata.Get(loadCtx, tenant, service.ID)
-	if err != nil {
-		return nil, "", err
-	}
-	if snapshot != nil && snapshot.Stale {
-		return nil, "", fmt.Errorf("MCP directory is stale; refresh Tools in Settings > MCP management")
-	}
-	if snapshot != nil {
-		return snapshot.Tools, snapshot.Instructions, nil
+	if !live {
+		snapshot, err := metadata.Get(loadCtx, tenant, service.ID)
+		if err != nil {
+			return nil, "", err
+		}
+		if snapshot != nil && snapshot.Stale {
+			return nil, "", fmt.Errorf("MCP directory is stale; refresh Tools in Settings > MCP management")
+		}
+		if snapshot != nil {
+			return snapshot.Tools, snapshot.Instructions, nil
+		}
 	}
 	if service.AuthConfig.IsOAuth() {
 		if _, ok := ToolExecFromContext(loadCtx); !ok {
@@ -516,11 +519,11 @@ func RegisterMCPTools(
 		ctx,
 		services,
 		gate,
-		func(loadCtx context.Context, service *types.MCPService) ([]*MCPTool, error) {
+		func(loadCtx context.Context, service *types.MCPService, live bool) ([]*MCPTool, error) {
 			meta, _ := ToolExecFromContext(loadCtx)
 			oauthSess := oauthSessionFromToolExec(loadCtx, meta).withAuthWaitTimeout(authWaitTimeoutSeconds)
 			definitions, instructions, err := loadMCPDirectory(
-				loadCtx, service, mcpManager, gate, oauthSess, metadata,
+				loadCtx, service, mcpManager, gate, oauthSess, metadata, live,
 			)
 			if err != nil {
 				return nil, err

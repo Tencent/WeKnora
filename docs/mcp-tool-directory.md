@@ -32,7 +32,7 @@ MCP 配置分两步，使用现有 SettingDrawer，步骤导航沿用沙箱的�
 ## API
 
 - `GET /api/v1/mcp-services/:id/metadata`：只读库，未同步返回 `data:null`，旧连接的快照返回 `stale:true`；Viewer 及以上权限。
-- `POST /api/v1/mcp-services/:id/metadata/refresh`：显式连接并同步。静态认证写入租户共享快照，OAuth 写入当前用户快照；Viewer 及以上可调用，以便对话内授权后落库。刷新失败对外返回笼统错误，不带回上游地址。
+- `POST /api/v1/mcp-services/:id/metadata/refresh`：显式连接并同步。静态认证写入租户共享快照，需要 Admin（或具备 MCP 管理能力的 API key）；OAuth 写入当前用户快照，Viewer 及以上可调用，以便对话内授权后落库。刷新失败对外返回笼统错误，不带回上游地址。
 - 服务原有 POST / PUT 接收 `description` 和 `usage_instructions`。凭证继续走独立子资源，编辑说明不会覆盖密钥。
 - 旧 `/test`、`/tools` 和 `/resources` API 保留原有行为；新分步页面不通过它们读取缓存。
 
@@ -40,7 +40,7 @@ MCP 配置分两步，使用现有 SettingDrawer，步骤导航沿用沙箱的�
 
 **入库不等于全量发送给模型。** 默认使用普通函数调用实现应用层按需加载，不依赖 Responses 或 Anthropic 的原生 tool-search 协议。
 
-1. `registerMCPTools` 筛选当前租户及 Agent 授权范围内的启用服务，安装受权限约束的目录。生产路径注入只读快照 loader；目录缺失时（升级后尚未同步）可在已授权连接上 live `tools/list` 并写入当前主体的快照。OAuth 服务在预加载阶段不会 live 连接（避免弹出授权窗）；对话内工具执行上下文中才允许 live-fill。连接已变更的 stale 快照不会自动 live-fill，必须在设置页显式刷新。
+1. `registerMCPTools` 筛选当前租户及 Agent 授权范围内的启用服务，安装受权限约束的目录。生产路径注入只读快照 loader；目录缺失时（升级后尚未同步）可在已授权连接上 live `tools/list` 并写入当前主体的快照。OAuth 服务在预加载阶段不会 live 连接（避免弹出授权窗）；对话内工具执行上下文中才允许 live-fill。连接已变更的 stale 快照不会在预加载时 live-fill。模型调用 `list_tools` 且 `refresh=true` 时会重新拉取上游并尝试落库；设置页刷新对静态认证需要 Admin，OAuth 仍可由授权用户同步。
 2. `PrepareMCPTools` 预读数据库快照，不连接上游。读取最多 8 路并发，初始等待窗口 1 秒，整体受请求取消及 30 秒超时约束。未就绪服务仍展示在来源目录中。
 3. 首轮模型只看到两个入口 `discover_mcp_tools` / `call_mcp_tool`，以及服务级名称、用途说明和状态。来源摘要有 16 KiB 总预算：能放下时模型应直接 `list_tools` / `describe`，不要先 `list_servers`；超出时才提示通过 `list_servers` 分页枚举。每个工具的完整描述和 schema 不在首轮 tools 中。
 4. 模型按服务 `list_tools` / `search`，再 `describe` 一个具体工具。`describe` 返回完整描述、schema、原始服务 instructions、人工使用说明、`function_name` 和 `tool_ref`，并记录本次 engine 已读取的定义版本。

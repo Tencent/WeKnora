@@ -152,6 +152,12 @@ func (s anthropicToolStream) calls() []types.LLMToolCall {
 	var calls []types.LLMToolCall
 	for _, index := range indexes {
 		tool := s[index]
+		if !tool.closed {
+			// A cut-off stream often starts the next tool_use with {}. Executing
+			// that empty object is worse than omitting it: the model never
+			// asked to run an incomplete call.
+			continue
+		}
 		call := tool.call
 		call.Function.Arguments = tool.initial
 		if tool.json.Len() > 0 {

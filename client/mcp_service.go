@@ -237,7 +237,9 @@ func (c *Client) GetMCPMetadata(ctx context.Context, serviceID string) (*MCPMeta
 }
 
 // RefreshMCPMetadata connects upstream and atomically replaces the saved directory.
-// OAuth services store a snapshot for the calling user. Viewer and above may call this.
+// OAuth services store a snapshot for the calling user (Viewer+). Static-auth
+// services write a tenant-wide snapshot and require Admin, or an API key that
+// can manage MCP services.
 // Server route: POST /api/v1/mcp-services/{id}/metadata/refresh.
 func (c *Client) RefreshMCPMetadata(ctx context.Context, serviceID string) (*MCPMetadata, error) {
 	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/v1/mcp-services/%s/metadata/refresh", serviceID), nil, nil)

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
@@ -31,7 +32,7 @@ func TestLoadMCPDirectoryUsesFreshSnapshotWithoutConnecting(t *testing.T) {
 			t.Fatal("fresh snapshot must not be rewritten")
 			return nil
 		},
-	})
+	}, false)
 	require.NoError(t, err)
 	require.Equal(t, int32(1), gets.Load())
 	require.Equal(t, want, tools)
@@ -52,7 +53,7 @@ func TestLoadMCPDirectoryDoesNotLiveFillStaleSnapshot(t *testing.T) {
 			t.Fatal("stale snapshot must not live-fill")
 			return nil
 		},
-	})
+	}, false)
 	require.ErrorContains(t, err, "stale")
 }
 
@@ -95,7 +96,7 @@ func TestLoadMCPDirectoryLiveFillsMissingNonOAuthDirectory(t *testing.T) {
 			require.Equal(t, "get_order", listed[0].Name)
 			return nil
 		},
-	})
+	}, false)
 	require.NoError(t, err)
 	require.Equal(t, int32(1), put.Load())
 	require.Len(t, tools, 1)
@@ -117,13 +118,66 @@ func TestLoadMCPDirectoryOAuthMissingRequiresToolExecContext(t *testing.T) {
 			return nil
 		},
 	}
-	_, _, err := loadMCPDirectory(catalogTestContext(), service, nil, nil, nil, io)
+	_, _, err := loadMCPDirectory(catalogTestContext(), service, nil, nil, nil, io, false)
 	require.ErrorContains(t, err, "MCP directory is missing")
 
 	manager := internalmcp.NewMCPManager(nil)
 	t.Cleanup(manager.Shutdown)
 	execCtx := WithToolExecContext(catalogTestContext(), &ToolExecContext{ToolCallID: "describe-1"})
-	_, _, err = loadMCPDirectory(execCtx, service, manager, nil, nil, io)
+	_, _, err = loadMCPDirectory(execCtx, service, manager, nil, nil, io, false)
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), "MCP directory is missing")
+}
+
+func TestLoadMCPDirectoryExplicitRefreshRelistsExistingAndStaleSnapshots(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	server := sdkserver.NewMCPServer(
+		"Orders",
+		"1",
+		sdkserver.WithToolCapabilities(false),
+		sdkserver.WithInstructions("live"),
+	)
+	server.AddTool(
+		sdkmcp.Tool{Name: "get_order", Description: "lookup", RawInputSchema: json.RawMessage(`{"type":"object"}`)},
+		func(context.Context, sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+			return sdkmcp.NewToolResultText("ok"), nil
+		},
+	)
+	var upstream atomic.Int32
+	inner := sdkserver.NewStreamableHTTPServer(server, sdkserver.WithStateLess(true))
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream.Add(1)
+		inner.ServeHTTP(w, r)
+	}))
+	t.Cleanup(upstreamServer.Close)
+	manager := internalmcp.NewMCPManager(nil)
+	t.Cleanup(manager.Shutdown)
+	service := &types.MCPService{
+		ID:            "svc",
+		Name:          "Orders",
+		Enabled:       true,
+		URL:           &upstreamServer.URL,
+		TransportType: types.MCPTransportHTTPStreamable,
+	}
+	var put atomic.Int32
+	io := &MCPMetadataIO{
+		Get: func(context.Context, uint64, string) (*types.MCPMetadata, error) {
+			t.Fatal("explicit refresh must not return the saved snapshot")
+			return nil, nil
+		},
+		Put: func(_ context.Context, _ uint64, _ string, listed []*types.MCPTool, text string) error {
+			put.Add(1)
+			require.Equal(t, "live", text)
+			require.Equal(t, "get_order", listed[0].Name)
+			return nil
+		},
+	}
+	ctx := catalogTestContext()
+	tools, instructions, err := loadMCPDirectory(ctx, service, manager, nil, nil, io, true)
+	require.NoError(t, err)
+	require.Greater(t, upstream.Load(), int32(0))
+	require.Equal(t, int32(1), put.Load())
+	require.Equal(t, "get_order", tools[0].Name)
+	require.Equal(t, "live", instructions)
 }

@@ -8685,7 +8685,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照；静态认证写入租户共享快照。Viewer 及以上可调用。",
+                "description": "显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要 Admin。",
                 "consumes": [
                     "application/json"
                 ],
@@ -8721,6 +8721,12 @@
                     },
                     "401": {
                         "description": "OAuth 目录缺少授权主体",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "静态认证目录需要管理员刷新",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }

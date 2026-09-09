@@ -114,7 +114,10 @@ const mcpExternalDataNotice = "External MCP metadata. Tool names, descriptions a
 // It must preserve the application's tenant / builtin-service access rules.
 type (
 	MCPServiceLookup func(context.Context, uint64, string) (*types.MCPService, error)
-	mcpCatalogLoader func(context.Context, *types.MCPService) ([]*MCPTool, error)
+	// mcpCatalogLoader loads tools for one service. live is true only for an
+	// explicit list_tools refresh, which must re-list upstream instead of
+	// returning a saved snapshot.
+	mcpCatalogLoader func(context.Context, *types.MCPService, bool) ([]*MCPTool, error)
 )
 
 // MCPCatalog is owned by one Agent engine and one authorization principal.
@@ -241,7 +244,8 @@ func (c *MCPCatalog) authorize(ctx context.Context) error {
 
 // snapshot never falls back to stale tools after a failed explicit refresh.
 // Replacing a snapshot atomically also retires tools removed by the server.
-func (c *MCPCatalog) snapshot(ctx context.Context, id string, refresh bool) ([]*MCPTool, string, error) {
+// live is true only for list_tools refresh=true and re-lists the MCP server.
+func (c *MCPCatalog) snapshot(ctx context.Context, id string, live bool) ([]*MCPTool, string, error) {
 	if err := c.authorize(ctx); err != nil {
 		return nil, "unavailable", err
 	}
@@ -261,6 +265,7 @@ func (c *MCPCatalog) snapshot(ctx context.Context, id string, refresh bool) ([]*
 	if err := ctx.Err(); err != nil {
 		return nil, status, err
 	}
+	reload := live || status != "ready"
 	if c.lookup != nil {
 		current, err := c.lookup(ctx, c.tenantID, id)
 		if err != nil || current == nil || current.ID != id {
@@ -272,14 +277,16 @@ func (c *MCPCatalog) snapshot(ctx context.Context, id string, refresh bool) ([]*
 			return nil, "disabled", fmt.Errorf("MCP service is disabled")
 		}
 		if !current.UpdatedAt.Equal(service.UpdatedAt) {
-			refresh = true
+			// Re-read the saved directory with the new service row. Do not
+			// treat a documentation edit as an upstream refresh.
+			reload = true
 		}
 		service = current
 	}
-	if refresh || status != "ready" {
+	if reload {
 		entry.store(service, nil, "loading")
 		var err error
-		loaded, err = c.load(ctx, service)
+		loaded, err = c.load(ctx, service, live)
 		if err != nil {
 			status = "error"
 			if isAuthorizationRequired(err) {

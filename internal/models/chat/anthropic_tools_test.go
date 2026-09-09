@@ -91,9 +91,13 @@ func TestAnthropicToolStreamParallelFragmentsAndIncompleteCalls(t *testing.T) {
 			parsed, err := parseAnthropicSSE(strings.NewReader(body))
 			require.NoError(t, err)
 			require.Equal(t, test.reason, parsed.FinishReason)
-			require.Len(t, parsed.ToolCalls, 2)
 			require.JSONEq(t, `{"id":"42"}`, parsed.ToolCalls[0].Function.Arguments)
-			require.Equal(t, "{}", parsed.ToolCalls[1].Function.Arguments)
+			if test.name == "complete" {
+				require.Len(t, parsed.ToolCalls, 2)
+				require.Equal(t, "{}", parsed.ToolCalls[1].Function.Arguments)
+			} else {
+				require.Len(t, parsed.ToolCalls, 1, "unclosed tool_use must not be emitted for execution")
+			}
 			channel := make(chan types.StreamResponse, 8)
 			processAnthropicStream(
 				context.Background(),

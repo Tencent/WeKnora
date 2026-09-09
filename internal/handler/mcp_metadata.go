@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	stderrors "errors"
 	"net/http"
 
@@ -30,7 +31,7 @@ func (h *MCPServiceHandler) GetMCPMetadata(c *gin.Context) { h.mcpMetadata(c, fa
 
 // RefreshMCPMetadata godoc
 // @Summary      同步 MCP 工具目录
-// @Description  显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照；静态认证写入租户共享快照。Viewer 及以上可调用。
+// @Description  显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要 Admin。
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
@@ -38,6 +39,7 @@ func (h *MCPServiceHandler) GetMCPMetadata(c *gin.Context) { h.mcpMetadata(c, fa
 // @Success      200  {object}  map[string]interface{}  "同步后的目录快照"
 // @Failure      400  {object}  errors.AppError         "目录不完整或校验失败"
 // @Failure      401  {object}  errors.AppError         "OAuth 目录缺少授权主体"
+// @Failure      403  {object}  errors.AppError         "静态认证目录需要管理员刷新"
 // @Failure      404  {object}  errors.AppError         "服务不存在"
 // @Failure      409  {object}  errors.AppError         "刷新期间连接配置已变更"
 // @Failure      503  {object}  errors.AppError         "元数据存储不可用"
@@ -62,6 +64,19 @@ func (h *MCPServiceHandler) mcpMetadata(c *gin.Context, refresh bool) {
 	var snapshot *types.MCPMetadata
 	var err error
 	if refresh {
+		service, getErr := h.mcpServiceService.GetMCPServiceByID(ctx, tenant, id)
+		if getErr != nil || service == nil {
+			logger.ErrorWithFields(ctx, getErr, map[string]interface{}{
+				"service_id": secutils.SanitizeForLog(id),
+				"refresh":    true,
+			})
+			_ = c.Error(mcpMetadataAppError(types.ErrMCPServiceNotFound, true))
+			return
+		}
+		if !service.AuthConfig.IsOAuth() && !mayWriteSharedMCPMetadata(ctx) {
+			_ = c.Error(errors.NewForbiddenError("Refreshing a shared MCP directory requires an administrator"))
+			return
+		}
 		snapshot, err = svc.RefreshMCPMetadata(ctx, tenant, id)
 	} else {
 		snapshot, err = svc.GetMCPMetadata(ctx, tenant, id)
@@ -75,6 +90,19 @@ func (h *MCPServiceHandler) mcpMetadata(c *gin.Context, refresh bool) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": snapshot})
+}
+
+// mayWriteSharedMCPMetadata is the extra gate for static-auth catalogs. The
+// route stays Viewer+ so OAuth users can persist their own snapshot after
+// authorizing in chat. API keys already passed manage-MCP; JWT callers need Admin.
+func mayWriteSharedMCPMetadata(ctx context.Context) bool {
+	if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		return true
+	}
+	if types.IsSystemAdminFromContext(ctx) {
+		return true
+	}
+	return types.CallerFromContext(ctx).Role.HasPermission(types.TenantRoleAdmin)
 }
 
 func mcpMetadataAppError(err error, refresh bool) *errors.AppError {

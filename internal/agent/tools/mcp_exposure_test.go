@@ -35,7 +35,7 @@ func TestMCPDirectExposurePreservesEveryDescriptionAndRawSchema(t *testing.T) {
 		ctx,
 		[]*types.MCPService{server},
 		gate,
-		func(context.Context, *types.MCPService) ([]*MCPTool, error) {
+		func(context.Context, *types.MCPService, bool) ([]*MCPTool, error) {
 			var tools []*MCPTool
 			for _, name := range []string{
 				"查询", "查询!", "get-order", "get_order", "Get_Order",
@@ -168,7 +168,7 @@ func TestMCPDirectExposureLateStartupAndNonInteractiveContext(t *testing.T) {
 		ctx,
 		[]*types.MCPService{fast, slow},
 		nil,
-		func(ctx context.Context, service *types.MCPService) ([]*MCPTool, error) {
+		func(ctx context.Context, service *types.MCPService, _ bool) ([]*MCPTool, error) {
 			if _, ok := ToolExecFromContext(ctx); ok {
 				return nil, errors.New("startup leaked interactive context")
 			}
@@ -210,7 +210,7 @@ func TestMCPDirectExposureRevalidatesIdentityPolicyAndSchema(t *testing.T) {
 		ctx,
 		[]*types.MCPService{service},
 		gate,
-		func(_ context.Context, s *types.MCPService) ([]*MCPTool, error) {
+		func(_ context.Context, s *types.MCPService, _ bool) ([]*MCPTool, error) {
 			return []*MCPTool{NewMCPTool(s, &types.MCPTool{Name: "get", InputSchema: schema}, nil, gate, 0)}, nil
 		},
 		func(context.Context, uint64, string) (*types.MCPService, error) {
@@ -263,7 +263,7 @@ func TestMCPDeferredSourcesStaySmallAndOnlyDescribedToolsLoad(t *testing.T) {
 		ctx,
 		[]*types.MCPService{service},
 		nil,
-		func(context.Context, *types.MCPService) ([]*MCPTool, error) {
+		func(context.Context, *types.MCPService, bool) ([]*MCPTool, error) {
 			result := make([]*MCPTool, 1000)
 			for i := range result {
 				result[i] = NewMCPTool(
