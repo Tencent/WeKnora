@@ -151,6 +151,16 @@ func TestMCPUsageGeneration(t *testing.T) {
 	require.Equal(t, 512, models.chat.options.MaxTokens)
 }
 
+func TestMCPUsageGenerationInFrench(t *testing.T) {
+	h, svc, models := usageHandlerFixture()
+	models.chat.result.Content = "Consulte les journaux par module et par période."
+	w := usageRequest(h, http.MethodPost, `{"language":"fr-FR"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, models.chat.messages[0].Content, "Output language: French.")
+	require.Contains(t, w.Body.String(), models.chat.result.Content)
+	require.Nil(t, svc.updated, "generation must not persist the result")
+}
+
 func TestMCPUsageGenerationRejectsUnavailableInputs(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
