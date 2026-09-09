@@ -1,43 +1,43 @@
-## Guided Learning Evaluation
+## 引导式学习评估
 
-Topic4 has a reproducible synthetic check of next-topic ranking, response prediction, and learning state. On this fixed set, production ranking beats both baselines in aggregate; BKT response prediction loses to the fixed-prior baseline. **Human learning gains remain unmeasured.**
+课题四提供了一套可复现的合成评估，用于检查下一主题排序、答题预测和学习状态。在这份固定数据集上，生产排序的汇总结果优于两个基线；BKT 答题预测弱于固定先验基线。**人类学习增益尚未测量。**
 
-### Reproduce
+### 复现方法
 
-From the repository root:
+在仓库根目录执行：
 
 ```sh
 go test ./internal/application/service/learning -run TestLearningOfflineEvaluation -v -count=1
 ```
 
-The Go toolchain required by `go.mod` and its module dependencies must already be installed or cached. This test needs no credentials, model, database, Redis, Docker, or network service. With Go 1.26.0 on `PATH`, disable toolchain/module downloads explicitly:
+环境中必须已经安装或缓存 `go.mod` 要求的 Go 工具链及其模块依赖。该测试无需凭证、模型、数据库、Redis、Docker 或网络服务。`PATH` 中存在 Go 1.26.0 时，可显式禁用工具链和模块下载：
 
 ```sh
 GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test ./internal/application/service/learning -run TestLearningOfflineEvaluation -v -count=1
 ```
 
-The recorded run used the cached Go 1.26.0 binary at `/home/liudebao/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/bin/go` with those offline settings. The workstation's base `go` is 1.24.4; `GOTOOLCHAIN=local` requires selecting the newer binary first. A fresh machine cannot bootstrap uncached Go dependencies offline.
+记录结果时使用了缓存的 Go 1.26.0 二进制文件 `/home/liudebao/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64/bin/go`，并采用上述离线设置。工作站基础 `go` 版本为 1.24.4；设置 `GOTOOLCHAIN=local` 前，必须先选用较新的二进制文件。全新机器无法在离线状态下引导安装未缓存的 Go 依赖。
 
-The command prints every case, selected topic IDs, metrics, sample counts, dataset hash, production algorithm version, and ranking/BKT source hashes. `-count=1` avoids cached test results. Failed arithmetic, state, or fixture guards prevent measurement; failed case checks prevent aggregate reporting. There is no assertion that production must beat a baseline.
+命令会输出每个用例、选中的主题 ID、指标、样本数、数据集哈希、生产算法版本，以及排序/BKT 源码哈希。`-count=1` 用于避免复用测试缓存。算术、状态或夹具保护检查失败时，不执行测量；用例检查失败时，不输出汇总结果。测试未断言生产算法必须优于基线。
 
-### Dataset Identity
+### 数据集标识
 
-The [fixture](../internal/application/service/learning/testdata/offline_eval.json) is `topic4-synthetic-v1`, schema 1. Its raw-byte SHA-256 is pinned by the [test](../internal/application/service/learning/offline_eval_test.go):
+[夹具](../internal/application/service/learning/testdata/offline_eval.json)版本为 `topic4-synthetic-v1`，schema 1。[测试](../internal/application/service/learning/offline_eval_test.go)固定了其原始字节的 SHA-256：
 
-Revision on 2026-09-09: changed/missing-source state snapshots now retain historical counts and timestamps while showing `review_due` and the prior probability. Ranking labels, candidate sets and prediction observations are unchanged. The memory stub now exercises the retrieval-conditioned affinity API. The results below were rerun after these corrections.
+2026-09-09 修订：来源变更/缺失的状态快照现在会保留历史计数和时间戳，同时显示 `review_due` 和先验概率。排序标签、候选集和预测观测保持不变。记忆桩现已覆盖带检索条件的亲和度 API。以下结果均在修正后重新运行得到。
 
 ```text
 8bc5d4d5fe393466ba5abd27f74f4c47301a887f88e8d6170d376b6cf3f43237
 ```
 
-Recorded on 2026-09-09, with fixed evaluation time `2026-09-09T12:00:00Z`:
+结果记录于 2026-09-09，固定评估时间为 `2026-09-09T12:00:00Z`：
 
-- 8 ranking scenarios, 12 distinct synthetic topics, 64 candidate occurrences; 8 candidates per scenario.
-- 9 state snapshots covering unseen, read-only, uncredited probability, learning, insufficient answers, mastered, due, changed evidence, and missing evidence.
-- 8 separate synthetic learner-topic traces, 21 training observations, 24 heldout observations, 12 heldout correct answers. Every trace has three heldout observations; one has no training history.
-- Algorithm `bkt-v1`; no model or prompt version applies because no model is called.
+- 8 个排序场景，12 个不同的合成主题，共出现 64 个候选项；每个场景包含 8 个候选项。
+- 9 个状态快照，覆盖未见、仅读、概率不计入掌握度、学习中、答题数不足、已掌握、到期、证据变更和证据缺失。
+- 8 条不同的合成学习者-主题轨迹，包含 21 条训练观测、24 条留出观测和 12 条留出正确答案。每条轨迹均有三条留出观测；其中一条没有训练历史。
+- 算法为 `bkt-v1`；由于未调用模型，不涉及模型版本或提示词版本。
 
-Production source SHA-256 values for this measurement:
+本次测量对应的生产源码 SHA-256：
 
 ```text
 internal/application/service/learning/recommend.go
@@ -46,26 +46,26 @@ internal/types/learning_algorithm.go
 d29487c87997cd36edb63abd563163fd69fdd2668ab157ed4614407e2ba10cd3
 ```
 
-The implementation assistant explicitly hand-authored the goals, metadata, relevance labels, and answer traces after reading production code. Labels were pinned before the first measured run and were not adjusted after seeing results. There are no real user records or independent human annotations. Reused topics and the paired interest scenarios are correlated; 64 candidate occurrences do not represent 64 independent users or tasks.
+实现助手阅读生产代码后，人工编写了目标、元数据、相关性标签和答题轨迹。标签在首次测量运行前固定，查看结果后未作调整。数据中没有真实用户记录或独立人工标注。重复使用的主题与成对的兴趣场景存在相关性；64 次候选项出现记录不代表 64 个独立用户或任务。
 
-### Ranking Protocol
+### 排序评估协议
 
-The harness constructs production `LearningNode` values, projects state with `LearningNodePublic`, then calls the actual private `rankRecommendations` in package `learning`. It scores the returned order, including page-kind diversity and the reserved final exploration slot.
+评估程序构造生产代码中的 `LearningNode` 值，通过 `LearningNodePublic` 投影状态，然后调用 `learning` 包内实际使用的私有函数 `rankRecommendations`。评分对象为该函数返回的顺序，其中包含页面类型多样性处理和预留的最后一个探索位。
 
-After the first run, a product correction excluded mastered/not-due topics and placed due review ahead of page-kind diversity. Labels were retained and rerun. This is a development-set comparison, not an untouched heldout ranking evaluation. Original macro NDCG was 0.717003; the corrected value below is 0.813841.
+首次运行后，产品逻辑经过修正：排除已掌握且未到复习时间的主题，并将到期复习的优先级置于页面类型多样性之前。标签保持不变，随后重新运行评估。本结果属于开发集比较，不构成未触碰留出集的排序评估。原始宏平均 NDCG 为 0.717003；修正后的结果如下，为 0.813841。
 
-Production weights are `0.45*review_need + 0.25*graph_frontier + 0.20*interest_match + 0.10*content_quality`. Both baselines receive the same candidates:
+生产权重为 `0.45*review_need + 0.25*graph_frontier + 0.20*interest_match + 0.10*content_quality`。两个基线接收相同的候选项：
 
-- `degree_only`: descending hand-assigned Wiki link degree, then ascending topic ID. Degree describes a hypothetical larger Wiki, not edges inferred from this small candidate subset.
-- `cold_start`: descending source-metadata quality, then ascending topic ID. Quality is `(min(chunk_count,3) + 3*has_nonblank_summary)/6`. It ignores degree, personal state, interests, and relatedness. This is an explicitly defined evaluation baseline, not a claim about a separate deployed cold-start algorithm.
+- `degree_only`：先按人工指定的 Wiki 链接度降序排列，再按主题 ID 升序排列。链接度描述的是一个假设的更大规模 Wiki，并非从这组小型候选子集推断出的边。
+- `cold_start`：先按来源元数据质量降序排列，再按主题 ID 升序排列。质量计算公式为 `(min(chunk_count,3) + 3*has_nonblank_summary)/6`。该基线忽略链接度、个人状态、兴趣和相关性。它是明确定义的评估基线，不代表另有一套已部署的冷启动算法。
 
-Labels express the stated goal: 3 immediate priority, 2 useful next practice, 1 acceptable exploration, 0 no immediate relevance. They are not computed from production scores. The interest-on/off pair has identical candidates and labels; only the supplied interest list changes.
+标签表达预设目标：3 表示应立即处理，2 表示适合作为下一项练习，1 表示可接受的探索，0 表示当前无相关性。标签不由生产分数计算得出。兴趣开启/关闭这一对场景采用完全相同的候选项和标签，仅传入的兴趣列表不同。
 
-`DCG@5 = sum((2^relevance_i - 1)/log2(i+1))`, with ranks starting at 1. `NDCG@5` divides by the ideal top-five DCG from all candidates. `Recall@5` is retrieved candidates with label > 0 divided by all candidates with label > 0, including those outside the returned five. No-positive cases are defined as zero for both metrics and checked arithmetically. Aggregate results are an unweighted mean over scenarios.
+`DCG@5 = sum((2^relevance_i - 1)/log2(i+1))`，排名从 1 开始。`NDCG@5` 除以从全部候选项计算出的理想前五名 DCG。`Recall@5` 为已检索且标签 > 0 的候选项数量除以全部标签 > 0 的候选项数量，分母包含返回的五项之外的候选项。对于不存在正例的场景，两个指标均定义为零，并通过算术检查验证。汇总结果为各场景的未加权平均值。
 
-Measured values, with higher being better:
+测量值如下，数值越高越好：
 
-| Scenario | Production NDCG | Degree NDCG | Cold NDCG | Production Recall | Degree Recall | Cold Recall |
+| 场景 | 生产 NDCG | `degree_only` NDCG | `cold_start` NDCG | 生产 Recall | `degree_only` Recall | `cold_start` Recall |
 | --- | --- | --- | --- | --- | --- | --- |
 | due_review_priority | 0.939490 | 0.484568 | 0.521337 | 0.833333 | 0.500000 | 0.666667 |
 | related_frontier | 0.953888 | 0.281521 | 0.296158 | 1.000000 | 0.500000 | 0.500000 |
@@ -75,46 +75,46 @@ Measured values, with higher being better:
 | freshness_reset | 0.895830 | 0.698658 | 0.607774 | 0.800000 | 0.800000 | 0.600000 |
 | cold_start | 0.815366 | 0.902402 | 0.949658 | 0.714286 | 0.571429 | 0.714286 |
 | kind_diversity_tradeoff | 1.000000 | 0.973495 | 0.884972 | 1.000000 | 0.800000 | 0.600000 |
-| Macro mean | 0.813841 | 0.554398 | 0.595027 | 0.777827 | 0.537054 | 0.588244 |
+| 宏平均 | 0.813841 | 0.554398 | 0.595027 | 0.777827 | 0.537054 | 0.588244 |
 
-Production still loses NDCG to degree in 2/8 scenarios and to cold start in 3/8. Exploration and nonurgent diversity can lower immediate graded relevance. The correction prevents mastered pages from displacing due practice; it does not establish a general ranking advantage on real learners.
+生产排序的 NDCG 在 2/8 个场景中仍低于 degree 基线，在 3/8 个场景中仍低于 cold start 基线。探索机制和非紧急的多样性处理可能降低即时分级相关性。这项修正可防止已掌握页面挤占到期练习，但无法证明该排序对真实学习者具有普遍优势。
 
-### Prediction Protocol
+### 预测评估协议
 
-Each trace uses fixed prior mastery `p=0.20`, transition `0.15`, slip `0.10`, and guess `0.25`. Production `LearningAssess` applies only the strictly chronological training prefix, dated September 1-3. Holdout observations are dated September 4-6. Validation rejects overlapping/out-of-order timestamps, repeated question IDs within a trace, missing labels, future observations, and empty holdouts.
+每条轨迹均采用固定的先验掌握概率 `p=0.20`、转移概率 `0.15`、失误概率 `0.10` 和猜测概率 `0.25`。生产代码中的 `LearningAssess` 仅处理严格按时间排序的训练前缀，日期为 9 月 1 日至 3 日。留出观测日期为 9 月 4 日至 6 日。验证会拒绝时间戳重叠或乱序、同一轨迹内问题 ID 重复、标签缺失、未来观测和空留出集。
 
-The model is frozen at the split. All three heldout answers receive the training-only response probability:
+模型在数据切分点冻结。三条留出答案均使用仅由训练数据得到的答题概率：
 
 ```text
 q = P(correct response) = 0.90*p + 0.25*(1-p)
 ```
 
-Heldout outcomes never update mastery, select parameters, or enter the predictor. This frozen-tail protocol does not measure online adaptation during the holdout. The baselines always predict `q=0.25` for four-option chance and `q=0.38` for the fixed mastery prior. Scoring latent `p=0.20` directly as a correct-response probability would be incorrect.
+留出结果不会更新掌握度、参与参数选择或进入预测器。该冻结尾部协议不测量留出阶段的在线适应能力。四选一随机基线始终预测 `q=0.25`，固定掌握度先验基线始终预测 `q=0.38`。将隐变量 `p=0.20` 直接作为答对概率进行评分是错误的。
 
-`Brier = mean((q-y)^2)`. `LogLoss = mean(-y*ln(q) - (1-y)*ln(1-q))`, using natural logs. Both are micro-averaged over the 24 heldout observations; lower is better. No parameters are fitted and no outcomes are sampled from BKT to manufacture agreement.
+`Brier = mean((q-y)^2)`。`LogLoss = mean(-y*ln(q) - (1-y)*ln(1-q))`，其中使用自然对数。两个指标均在 24 条留出观测上计算微平均值，数值越低越好。评估未拟合任何参数，也未从 BKT 采样结果来人为制造一致性。
 
-| Predictor | Brier | Log Loss |
+| 预测器 | Brier | Log Loss |
 | --- | --- | --- |
-| BKT response | 0.277601 | 0.780492 |
-| Fixed chance, q=0.25 | 0.312500 | 0.836988 |
-| Fixed prior response, q=0.38 | 0.264400 | 0.722810 |
+| BKT 答题预测 | 0.277601 | 0.780492 |
+| 固定随机概率，q=0.25 | 0.312500 | 0.836988 |
+| 固定先验答题概率，q=0.38 | 0.264400 | 0.722810 |
 
-The steady-success trace gives BKT Brier `0.016127`; success followed by all wrong heldout answers gives `0.762145`. The reversal is retained. Aggregate BKT loss is worse than fixed prior, so this fixture provides no evidence of a general predictive advantage over that baseline.
+持续答对轨迹的 BKT Brier 为 `0.016127`；训练阶段答对、随后留出答案全部错误的轨迹为 `0.762145`。该反转样本予以保留。BKT 的汇总损失高于固定先验，因此该夹具无法提供 BKT 相对该基线具有普遍预测优势的证据。
 
-### Arithmetic And State
+### 算术与状态检查
 
-Golden constants were independently calculated using rational hidden-state masses and checked with separate fraction arithmetic, not obtained from the production functions. For example, a first correct answer changes the known posterior to `9/19`, transitioned mastery to `21/38`, and next response chance to `463/760`. Twelve fixed prefixes cover both correct and incorrect transitions, including every training pattern in the dataset.
+黄金常量使用有理数隐状态质量独立计算，并通过单独的分数运算校验，未从生产函数中取得。例如，首次答对后，已掌握状态的后验概率变为 `9/19`，转移后的掌握概率变为 `21/38`，下一次答对概率变为 `463/760`。十二个固定前缀覆盖答对和答错两类转移，以及数据集中的全部训练模式。
 
-The metric golden retrieves grades `[3,0,1,0,2]` against ideal `[3,2,2,1,0]`: NDCG is `0.8001649902816075` and Recall is `3/4`. Two predictions, `(q=0.25,y=1)` and `(q=0.75,y=0)`, give Brier `9/16` and log loss `ln(4)`. Separate checks cover weighted recommendation arithmetic, reason codes, baseline ordering/ties, and reversed-input determinism.
+指标黄金样例检索到的等级为 `[3,0,1,0,2]`，理想等级为 `[3,2,2,1,0]`：NDCG 为 `0.8001649902816075`，Recall 为 `3/4`。两条预测 `(q=0.25,y=1)` 和 `(q=0.75,y=0)` 的 Brier 为 `9/16`，log loss 为 `ln(4)`。其他独立检查覆盖推荐加权运算、原因代码、基线排序与并列处理，以及输入逆序时的确定性。
 
-State checks exercise production projection, optional-memory familiarity, assessment reset, inclusive mastery/review thresholds, and review intervals. Reading and familiar-document signals never add mastery credit. Changed/missing stamps hide old credit; assessment on a new source starts from the prior and preserves familiarity. These are in-memory state checks; persistence, answer idempotency, admission, and source-fetch correctness remain the responsibility of the separate backend tests.
+状态检查覆盖生产状态投影、可选记忆熟悉度、评估重置、包含边界值的掌握/复习阈值和复习间隔。阅读信号和熟悉文档信号不会增加掌握度。来源标记发生变更或缺失时，旧的掌握记录会被隐藏；针对新来源的评估从先验概率开始，同时保留熟悉度。这些检查仅覆盖内存状态；持久化、答题幂等性、准入和来源获取正确性仍由独立的后端测试负责。
 
-### Evidence Limits
+### 证据边界
 
-This is a small, assistant-authored proxy/regression benchmark whose author knew the algorithm. It is neither blinded nor independent, and its scenario mix can strongly change aggregate results. It cannot establish population calibration, statistical significance, learner retention, or human learning improvement. No participant count, human-label agreement, or human effect size is claimed.
+这是一个由了解算法的助手编写的小型代理/回归基准。评估未采用盲法，也不具备独立性；场景构成可能显著影响汇总结果。该评估无法证明总体校准性、统计显著性、学习者知识保持效果或人类学习提升。本文不主张任何参与者数量、人工标签一致性或人类效应量。
 
-Candidate retrieval, full-graph recall, real memory switches, UUID admission, live source validation, and quiz generation are outside this harness. Short topic IDs, chunk references, degree values, and source stamps are synthetic metadata. In particular, the missing-evidence scenario values revisiting a topic; it does not assert that a quiz can be served from missing evidence. Related-topic links are not prerequisite evidence.
+候选项检索、全图召回、真实记忆开关、UUID 准入、在线来源验证和测验生成均不在该评估程序的覆盖范围内。短主题 ID、分块引用、链接度值和来源标记均为合成元数据。证据缺失场景只评估再次访问某个主题的价值，不表示可以依据缺失证据提供测验。相关主题链接不能作为先修关系的证据。
 
-Successful source validation checks quotation and freshness consistency; it is not semantic proof that a question or explanation is correct. A blinded pass using the same underlying model can share the generator's errors. Same-model agreement is not an independent human check and is not measured here.
+来源验证成功仅表示引文与新鲜度一致，不能在语义层面证明问题或解释正确。使用同一底层模型进行盲检时，仍可能复现生成器的错误。同模型一致性不属于独立人工检查，本评估也未测量该指标。
 
-For claims beyond these fixtures, collect consented, independently reviewed cases and temporally heldout real answers with a stated sampling policy. Human learning-gain claims additionally require an appropriate participant study. Preserve this fixture's labels when changing algorithms; changes to scenarios, labels, or metric definitions require a new dataset version, hash, and measured report.
+如需提出超出这些夹具范围的结论，应按明确的抽样策略收集已获授权、经过独立审核的案例，以及按时间留出的真实答题数据。关于人类学习增益的结论还需要适当的参与者研究。修改算法时必须保留该夹具的标签；场景、标签或指标定义发生变化时，必须更新数据集版本和哈希，并重新生成测量报告。

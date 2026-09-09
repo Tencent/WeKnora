@@ -1,50 +1,50 @@
-## Guided Learning
+## 引导式学习（Guided Learning）
 
-Guided learning connects Wiki pages to a personal practice history. A learner reads a source-backed topic, answers a multiple-choice question, and receives a reproducible mastery estimate and a next-topic recommendation. The feature adds personal learning tables, a Wiki learning panel and three Agent tools; existing memory and retrieval behavior is unchanged.
+Guided Learning 将 Wiki 页面与个人练习历史关联。学习者阅读有来源依据的主题、回答单选题后，可获得可复现的掌握度估计和下一主题推荐。该功能新增个人学习表、Wiki 学习面板和三个 Agent 工具；现有记忆与检索行为不变。
 
-Baseline: `3e6010e7`, branch `feat/guided-learning`. This design supersedes the old local `docs/dev/guided-learning-design.md` draft.
+基线为 `3e6010e7`，分支为 `feat/guided-learning`。本设计取代本地旧稿 `docs/dev/guided-learning-design.md`。
 
-### Scope
+### 范围
 
-- Explicit per-user opt-in. Learning can run without long-term memory; optional interest and document-affinity signals obey existing memory switches.
-- V1 admits authenticated Web users and Wiki content owned by their active workspace. Shared knowledge bases, shared Agents, API keys, IM and Embed identities are excluded.
-- A published entity/concept/synthesis/comparison Wiki page is a topic. Its UUID is the identity. Rename preserves UUID and history; ordinary graph links express related topics, never prerequisites.
-- Three source-backed single-choice questions per quiz. Answers are submitted by the human through HTTP, never through an Agent tool.
-- Personal overview, deterministic recommendations, Wiki graph overlay, explanations with source quotes, export and physical deletion are included.
-- Long course plans, inferred prerequisite graphs, subjective grading, learning-state merging between unrelated pages and semantic recommendation embeddings are deferred.
+- 用户需显式选择启用。学习功能不依赖长期记忆；可选的兴趣和文档亲和度信号受现有记忆开关控制。
+- V1 仅允许通过认证的 Web 用户访问其当前工作区拥有的 Wiki 内容，不包含共享知识库、共享 Agent、API key、IM 和 Embed 身份。
+- 已发布的 entity、concept、synthesis 或 comparison 类型 Wiki 页面均可作为主题，并以 UUID 标识。重命名保留 UUID 和历史记录；普通图谱链接仅表示相关主题，不表示前置关系。
+- 每次测验包含三道有来源依据的单选题。用户通过 HTTP 提交答案，Agent 工具不提交答案。
+- 功能包含个人概览、确定性推荐、Wiki 图谱叠加层、带原文引用的解析、导出和物理删除。
+- V1 暂不实现长期课程计划、推断式前置关系图、主观题评分、无关页面间的学习状态合并和基于语义嵌入的推荐。
 
-### Evidence And Mastery
+### 证据与掌握度
 
-Reading and historical document citations affect familiarity only. BKT updates use server-graded first answers to distinct questions. Every answer records the question fingerprint, current source stamp, before/after probability and algorithm version. Replaying an attempt or guessing the same question again never increases mastery.
+阅读记录和历史文档引用仅影响熟悉度。BKT 只使用服务端判分的不同题目首次作答结果更新掌握度。每次作答记录题目指纹、当前来源戳、更新前后概率和算法版本；重放作答或重复猜测同一道题不会提高掌握度。
 
-The default BKT model uses initial mastery 0.20, learning transition 0.15, guess 0.25 (four options), and slip 0.10. A topic is marked mastered only with at least three distinct answers and probability >= 0.85. Review intervals are 1, 3, 7, 14 and 30 days. The probability is an uncalibrated model estimate, not a measured human proficiency score.
+默认 BKT 参数为：初始掌握度 0.20、学习转移概率 0.15、猜对概率 0.25（四个选项）、失误概率 0.10。主题至少有三道不同题目的作答记录且概率 >= 0.85 时，才标记为已掌握。复习间隔为 1、3、7、14 和 30 天。该概率是未经校准的模型估计值，不代表实测的人类能力水平。
 
-Quiz generation uses current enabled source chunks in the same live knowledge base. Question schemas, four distinct options, answer index and exact normalized evidence quotations are checked deterministically. A separate blinded model pass answers each proposed question from its source evidence and rejects disagreements or ambiguity. These checks reduce generation errors; they do not prove pedagogical quality or replace human review.
+测验基于同一在线知识库中当前启用的来源分块生成。系统以确定性规则检查题目 schema、四个互异选项、答案索引和精确归一化后的证据引文。独立的盲测模型仅根据来源证据回答每道候选题，并拒绝答案不一致或存在歧义的题目。这些检查用于减少生成错误，无法证明教学质量，也不能替代人工审核。
 
-Source stamps include the actual page input, page version, source membership, chunk IDs, revisions and content hashes. Freshness is checked before generation, publication, serving a quiz and accepting an answer. Missing, disabled, moved or changed evidence makes the quiz stale. No old answer updates current mastery.
+来源戳包含实际页面输入、页面版本、来源成员关系、分块 ID、修订版本和内容哈希。生成、发布、提供测验和接收答案前均检查来源新鲜度。证据缺失、停用、移动或变更后，测验标记为过期；旧答案不会更新当前掌握度。
 
-### Execution And Isolation
+### 执行与隔离
 
-PostgreSQL is authoritative for profile, quiz, questions, attempts and mastery. SQLite has equivalent migrations for Lite. Asynq carries wake-up messages only. Quiz claims use expiring leases with fencing tokens; a bounded periodic recovery scan recreates missing triggers and reclaims expired claims.
+个人画像、测验、题目、作答和掌握度以 PostgreSQL 为权威数据源，Lite 使用等价的 SQLite 迁移。Asynq 仅传递唤醒消息。测验任务通过带 fencing token 的到期 lease 领取；有界的周期恢复扫描负责补建缺失触发器并回收过期任务。
 
-Opt-out and deletion serialize with quiz publication and answer submission through the profile row. A monotonic epoch invalidates old work, including a delete/re-enable race. Transactions recheck live KB/page/source bindings; no transaction is held across a model call. Recovery also removes data for deleted content. HTTP, tools and worker publication each enforce their own admission checks.
+退出学习和删除操作通过个人画像行，与测验发布及答案提交串行化。单调递增的 epoch 使旧任务失效，包括删除后重新启用产生的竞态。事务内重新检查实时 KB、页面和来源绑定，模型调用期间不持有事务。恢复流程也会删除已移除内容的数据。HTTP、工具和 worker 发布环节分别执行准入检查。
 
-Each quiz snapshots its complete source-document ID set. Export and recovery physically remove quizzes, answers and matching-source mastery when a document is deleted or moved out of scope, even if Wiki cleanup preserves the page and removes its old references. A newer assessment from surviving sources remains intact. Ordinary content edits stale a quiz without deleting historical answers.
+每次测验保存完整的来源文档 ID 集合。文档被删除或移出范围时，导出和恢复流程会物理删除测验、答案及来源匹配的掌握度记录，即使 Wiki 清理保留页面并移除旧引用。基于剩余来源完成的较新评估不受影响。普通内容编辑仅将测验标记为过期，不删除历史答案。
 
-The immutable authenticated Caller supplies the personal tenant, paired with the Web principal's StorageID. An execution-tenant mismatch is rejected. Agent tools accept only complete KB scopes in v1; narrowed document/tag scopes cannot widen into a whole learning graph.
+不可变的认证 Caller 提供个人租户，并与 Web principal 的 StorageID 配对。执行租户不匹配时拒绝请求。V1 的 Agent 工具只接受完整 KB 范围；按文档或标签收窄的范围不能扩展为完整学习图谱。
 
-Model input contains source material and no personal profile or prior answers. Generation and validation calls use content-redacted diagnostics. API DTOs omit answer keys and explanations until submission. Agent transcripts contain quiz IDs and public state only, never answer keys. Privacy controls remain available after opt-out.
+模型输入只包含来源材料，不包含个人画像或历史答案。生成和验证调用使用内容脱敏诊断。API DTO 在提交答案前不返回正确答案和解析。Agent transcript 只记录测验 ID 和公开状态，不记录正确答案。用户退出学习后仍可使用隐私控制。
 
-### Recommendation
+### 推荐
 
-Bounded candidates come from due practice, related topics, title/alias interest matches and cold-start topics. Ranking uses `0.45 * review_need + 0.25 * graph_frontier + 0.20 * interest_match + 0.10 * content_quality`, deterministic tie-breaking, diversity selection and a reserved exploration position. Scores and reason codes travel with each recommendation; the UI and Agent must not invent reasons.
+候选集有明确上限，来源包括到期复习、相关主题、标题或别名兴趣匹配以及冷启动主题。排序公式为 `0.45 * review_need + 0.25 * graph_frontier + 0.20 * interest_match + 0.10 * content_quality`，并采用并列时的确定性排序规则、多样性选择和一个预留探索位。每条推荐均携带分数和原因码；UI 和 Agent 不得自行编造原因。
 
-### Validation
+### 验证
 
-- Unit tests: BKT golden sequences, independent prediction checks, quote/schema validation, recommendation scoring and idempotency.
-- Database tests: PostgreSQL and SQLite migrations, concurrent submissions, epoch/lease races, deletion and stale-source fences.
-- Integration: generated quizzes with a real configured model; adversarial/malformed responses use fakes.
-- Browser: opt-in, recommendation, source reading, quiz submission, graph state, refresh, export and deletion across desktop/mobile.
-- Effectiveness: a checked-in synthetic offline benchmark compares recommendations and predictions with named baselines. Report dataset hash, sample count, model/prompt version and measured outcomes. Human learning gains and human-label agreement remain unmeasured unless real participants provide evidence.
+- 单元测试：BKT 黄金序列、独立预测检查、引文与 schema 校验、推荐评分和幂等性。
+- 数据库测试：PostgreSQL 和 SQLite 迁移、并发提交、epoch/lease 竞态、删除及过期来源防护。
+- 集成测试：使用已配置的真实模型生成测验；对抗性或格式错误响应使用测试替身。
+- 浏览器测试：覆盖桌面端和移动端的启用、推荐、来源阅读、测验提交、图谱状态、刷新、导出和删除。
+- 效果评估：提交到仓库的合成离线基准使用具名基线对比推荐和预测结果。报告需包含数据集哈希、样本量、模型与提示词版本及实测结果。除非真实参与者提供证据，否则人类学习收益和人工标签一致性仍未测量。
 
-Implementation contracts and progress: [development tasks](guided-learning-contract.md). Runtime configuration and credentials live in ignored `.runtime/`, outside versioned artifacts.
+实现契约与进度见[开发任务](guided-learning-contract.md)。运行时配置和凭证位于已忽略的 `.runtime/`，不进入版本化产物。

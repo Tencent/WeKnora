@@ -1,44 +1,44 @@
-# Guided Learning
+# 引导式学习
 
-Guided learning adds personal practice to a Wiki knowledge base. It recommends topics, generates source-backed multiple-choice questions and records a reproducible estimate from your submitted answers.
+引导式学习为 Wiki 知识库增加个人练习功能：推荐主题、生成带来源证据的选择题，并根据已提交答案记录可复现的掌握度估计。
 
-## Availability
+## 适用范围
 
-This version supports signed-in Web users and Wiki-enabled knowledge bases owned by their active workspace. Shared knowledge bases, shared Agents, API keys, IM and embedded clients are excluded. The workspace's Wiki synthesis model, or its summary model fallback, must be configured for question generation.
+本版本支持已登录 Web 用户，以及当前工作区自有且已启用 Wiki 的知识库。共享知识库、共享 Agent、API key、IM 和嵌入式客户端不在支持范围内。生成题目前，需配置工作区的 Wiki 综合模型或备用摘要模型。
 
-Learning starts disabled. Open a Wiki knowledge base and turn on **Personal learning history** in the learning panel. This consent is separate from long-term memory. Existing memory interests and document affinity contribute only when their own controls permit it; learning also works with memory off.
+学习功能默认关闭。打开 Wiki 知识库，在学习面板中启用 **个人学习历史**。该授权与长期记忆相互独立；已有的记忆兴趣和文档亲和度仅在各自开关允许时参与计算，关闭记忆后仍可使用学习功能。
 
-## Practice
+## 练习流程
 
-1. Open a recommended topic and read its Wiki content and sources.
-2. Select **Practice this page**. Generation runs asynchronously; the panel reports pending, ready or failed status.
-3. Select one option and submit. The server returns correctness, an explanation and source quotations only after submission.
-4. Refresh or reopen the page to retrieve the saved result. Retrying the same submission does not count twice.
+1. 打开推荐主题，阅读 Wiki 内容和来源。
+2. 选择 **练习本页**。题目异步生成，面板会显示 `pending`（等待中）、`ready`（可作答）或 `failed`（失败）。
+3. 选择一个选项并提交。提交后，服务端才会返回正误、解析和来源引文。
+4. 刷新或重新打开页面可查看已保存结果。重复提交同一答案不会重复计数。
 
-Only published entity, concept, synthesis and comparison pages are eligible. A quiz also requires current enabled source-document chunks linked by that page. An index, summary, incomplete source or outdated reference may have no usable quiz evidence.
+只有已发布的 `entity`、`concept`、`synthesis` 和 `comparison` 页面可以生成测验，且页面必须关联当前已启用的来源文档分块。`index`、`summary` 页面、来源不完整或引用过期时，可能没有可用的测验证据。
 
-If the page, source content or generation configuration changes, the old quiz becomes stale and cannot be submitted. Prepare a fresh quiz from the current sources. Ordinary page renames retain the topic identity and history.
+页面、来源内容或生成配置发生变化后，旧测验会过期，无法继续提交。此时需按当前来源重新生成。常规页面重命名会保留主题标识和历史。
 
-## State
+## 学习状态
 
-**Familiar** means a page was visited or its source documents were used repeatedly. It does not imply a correct answer or mastery.
+**Familiar（熟悉）** 表示访问过页面，或多次使用过其来源文档；该状态不能说明答题正确或已经掌握。
 
-Practice uses Bayesian Knowledge Tracing with fixed initial mastery 0.20, learning transition 0.15, guess 0.25 and slip 0.10. At least three distinct credited answers and an estimate of 0.85 are required for the mastered label. Review intervals range from one to thirty days. Changed-source history remains visible, with current mastery reset to its prior pending reassessment.
+练习采用贝叶斯知识追踪（BKT），固定参数为：初始掌握度 0.20、学习转移 0.15、猜测 0.25、失误 0.10。至少需要三道不同题目的有效作答，且估计值达到 0.85，才会标记为 mastered。复习间隔为 1 至 30 天。来源变化后仍保留历史记录，当前掌握度会重置为先验值，等待重新评估。
 
-These defaults have not been calibrated on real learners. A displayed probability is an algorithmic estimate, not proof of proficiency. Existing Wiki links identify related topics; they do not establish prerequisite courses.
+这些默认参数尚未在真实学习者上校准。显示的概率仅为算法估计，无法证明实际熟练程度。现有 Wiki 链接只用于识别相关主题，不能据此建立先修课程关系。
 
-## Agent
+## Agent 使用
 
-Select the **Guided Learning** built-in Agent, configure its chat model and select a workspace-owned Wiki knowledge base. Its tools can read your overview, recommend topics and prepare a quiz card. The Agent cannot opt in for you, submit answers or change your mastery. Expand the tool result to open a quiz, including after reloading the conversation.
+选择内置 **Guided Learning** Agent，配置对话模型，并选择当前工作区自有的 Wiki 知识库。其工具可读取个人概览、推荐主题并生成测验卡片。Agent 无权代替用户授权、提交答案或修改掌握度。展开工具结果即可打开测验，重新加载对话后仍然有效。
 
-## Privacy
+## 隐私
 
-The learning panel offers export and clear controls for the current knowledge base or your entire workspace learning profile. These controls remain available after opt-out. Clearing removes questions, practice history and mastery records in scope; a minimal disabled consent/epoch record remains to prevent a delayed worker from restoring deleted data. A knowledge-base clear also fences queued quizzes for the profile.
+学习面板支持导出或清除当前知识库的数据，也可处理整个工作区的个人学习档案。退出授权后，这些控件仍可使用。清除操作会删除范围内的题目、练习历史和掌握度记录；系统仅保留一条最小化的禁用授权与 epoch 记录，防止延迟 worker 恢复已删除数据。清除单个知识库还会阻断该学习档案中已排队的测验。
 
-Deleting or moving a source document out of scope removes affected quizzes and their saved answers, even when a multi-source Wiki page survives. Export enforces this immediately; background recovery also performs the cleanup. A later assessment using surviving sources is preserved.
+来源文档被删除、移出当前范围后，相关测验和已保存答案会一并删除；多来源 Wiki 页面继续存在时也执行该规则。导出会立即执行清理，后台恢复流程也会处理。之后基于保留来源完成的评估不会被删除。
 
-Question generation sends bounded Wiki/source text to the configured model provider. It does not send your interests, profile or previous answers. Answer keys are stored server-side and excluded from ordinary model/request diagnostics and Agent transcripts. Exports do not expose unanswered keys.
+生成题目时，系统只向已配置的模型供应商发送有长度限制的 Wiki 和来源文本，不发送用户兴趣、个人档案或历史答案。答案保存在服务端，不进入常规模型或请求诊断，也不写入 Agent 对话记录。导出文件不会包含未作答题目的答案。
 
-## Verification
+## 验证边界
 
-The design, current scope and reproducible synthetic evaluation are in [guided-learning.md](../../docs/guided-learning.md) and [guided-learning-evaluation.md](../../docs/guided-learning-evaluation.md). Offline scores do not establish human learning gains. Source-quote validation and a blinded model check reduce errors but do not prove that every generated question is correct.
+设计、当前范围和可复现的合成评估见 [guided-learning.md](../../docs/guided-learning.md) 与 [guided-learning-evaluation.md](../../docs/guided-learning-evaluation.md)。离线分数无法说明真人学习收益。来源引文校验和模型盲测可以减少错误，但不能证明每道生成题都正确。

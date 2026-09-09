@@ -1,23 +1,23 @@
-## Delivery Contract
+## 交付契约
 
-All HTTP paths begin `/api/v1/learning`. Success envelope: `{success:true,data:...}`.
-Web JWT only, current workspace owned KBs only. Personal scope always comes from authenticated Caller and Principal.
+所有 HTTP 路径均以 `/api/v1/learning` 开头，成功响应格式为 `{success:true,data:...}`。
+仅支持 Web JWT 和当前工作区拥有的知识库。个人数据范围始终由已认证的 Caller 和 Principal 确定。
 
-### HTTP
+### HTTP 接口
 
-- GET/PUT `/settings`, PUT body `{enabled:bool}` -> LearningSettings
-- GET `/overview?knowledge_base_id=` -> LearningOverview
-- GET `/nodes/:id` (page UUID) -> LearningNodeView
-- GET `/recommendations?knowledge_base_id=&limit=5` (max20) -> LearningRecommendation[]
-- POST `/nodes/:id/view` -> null
-- POST `/overlay` body `{knowledge_base_id,slugs:[]}` (max2000) -> LearningNodeView[]
-- POST `/question-sets` body `{page_id}` -> LearningQuizView
-- GET `/question-sets/:id` -> LearningQuizView
-- POST `/attempts` body `{question_id,option_id,attempt_id}` -> LearningAnswerResult
-- GET `/export?knowledge_base_id=` (optional KB) -> LearningExport
-- DELETE `/profile?knowledge_base_id=` (optional KB) -> LearningClearResult
+- GET/PUT `/settings`；PUT 请求体 `{enabled:bool}`，返回 LearningSettings
+- GET `/overview?knowledge_base_id=`，返回 LearningOverview
+- GET `/nodes/:id`（页面 UUID），返回 LearningNodeView
+- GET `/recommendations?knowledge_base_id=&limit=5`（最大 20），返回 LearningRecommendation[]
+- POST `/nodes/:id/view`，返回 null
+- POST `/overlay`；请求体 `{knowledge_base_id,slugs:[]}`（最大 2000），返回 LearningNodeView[]
+- POST `/question-sets`；请求体 `{page_id}`，返回 LearningQuizView
+- GET `/question-sets/:id`，返回 LearningQuizView
+- POST `/attempts`；请求体 `{question_id,option_id,attempt_id}`，返回 LearningAnswerResult
+- GET `/export?knowledge_base_id=`（KB 可选），返回 LearningExport
+- DELETE `/profile?knowledge_base_id=`（KB 可选），返回 LearningClearResult
 
-### DTOs
+### DTO
 
 ```typescript
 type LearningSettings = { enabled:boolean; algorithm_version:string }
@@ -57,9 +57,9 @@ type LearningAnswerResult = {
 type LearningClearResult = {deleted_attempts:number; deleted_mastery:number; deleted_quizzes:number}
 ```
 
-### Go Service
+### Go 服务
 
-`learning.NewService` returns `interfaces.LearningService`.
+`learning.NewService` 返回 `interfaces.LearningService`。
 
 ```go
 GetSettings(context.Context) (*types.LearningSettings, error)
@@ -78,21 +78,20 @@ Handle(context.Context, *asynq.Task) error
 Recover(context.Context) error
 ```
 
-Stable errors in types: ErrLearningForbidden, ErrLearningDisabled, ErrLearningNotFound, ErrLearningStale, ErrLearningNotReady, ErrLearningConflict, ErrLearningInvalid, ErrLearningBusy, ErrLearningEvidence.
-Task `types.TypeLearningGenerate = "learning:generate"` uses existing QueueQuestion in both synchronous and Asynq dispatchers.
-Generation and blind-verification calls use `types.WithLLMContentRedacted(ctx)`.
-New migrations: PG 000092, SQLite 000014.
+types 中的稳定错误：ErrLearningForbidden、ErrLearningDisabled、ErrLearningNotFound、ErrLearningStale、ErrLearningNotReady、ErrLearningConflict、ErrLearningInvalid、ErrLearningBusy、ErrLearningEvidence。
 
-### Progress
+任务 `types.TypeLearningGenerate = "learning:generate"` 在同步调度器和 Asynq 调度器中均使用现有 QueueQuestion。生成和盲测验证调用使用 `types.WithLLMContentRedacted(ctx)`。新增迁移：PG 000092、SQLite 000014。
 
-- [x] Baseline and worktree.
-- [x] Design and cross-module contracts.
-- [x] Backend, migrations, algorithms and tests.
-- [x] Wiki rename preserving identity.
-- [x] HTTP, workers, recovery, Agent tools.
-- [x] Wiki panel, graph overlay, quiz and privacy UI.
-- [x] Isolated runtime and real model validation.
-- [x] PostgreSQL/race, frontend and browser tests.
-- [x] Reproducible evaluation and runbook, final integration checks.
+### 进度
 
-Results and reproduction commands: [acceptance report](guided-learning-acceptance.md).
+- [x] 基线与 worktree。
+- [x] 设计与跨模块契约。
+- [x] 后端、迁移、算法和测试。
+- [x] Wiki 重命名并保留身份标识。
+- [x] HTTP、worker、恢复流程和 Agent 工具。
+- [x] Wiki 面板、图谱叠加层、测验和隐私 UI。
+- [x] 隔离运行时和真实模型验证。
+- [x] PostgreSQL/race、前端和浏览器测试。
+- [x] 可复现评估、runbook 和最终集成检查。
+
+结果与复现命令见[验收报告](guided-learning-acceptance.md)。
