@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -13,6 +14,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+const maxFinalAnswerSegments = 4
+
+const finalAnswerContinuationPrompt = "The previous assistant message was cut off by the output token limit. " +
+	"Continue exactly where it stopped. Do not repeat or summarize earlier content. " +
+	"Preserve the original language and structure, and finish the answer."
 
 func finalAnswerImageRequirement(hasRetrievedImage bool) string {
 	if !hasRetrievedImage {
@@ -94,73 +101,130 @@ Now generate the final answer:`, query, imageRequirement)
 
 	// Generate a single ID for this entire final answer stream
 	answerID := generateEventID("answer")
-	logger.Debugf(ctx, "[Agent][FinalAnswer] AnswerID: %s", answerID)
-	answerDoneEmitted := false
+	return e.streamAnswerSegments(ctx, messages, state, sessionID, answerID, "", maxFinalAnswerSegments)
+}
 
-	budget := e.clampCompletionBudgetToContext(e.tokenEstimator.EstimateMessages(messages))
-	llmResult, err := e.streamLLMToEventBus(
-		ctx,
-		messages,
-		&chat.ChatOptions{
-			Temperature:         e.config.Temperature,
-			MaxCompletionTokens: budget,
-			PromptCacheKey:      sessionID,
-		}, // Thinking disabled for final answer synthesis
-		func(chunk *types.StreamResponse, fullContent string) {
-			// Defensive filter: only emit answer content, skip thinking chunks
-			if chunk.ResponseType == types.ResponseTypeThinking {
+// streamAnswerSegments keeps a truncated answer in one stream and one persisted
+// value. Continuations have no tools: an output limit is not another ReAct step.
+func (e *AgentEngine) streamAnswerSegments(
+	ctx context.Context, messages []chat.Message, state *types.AgentState,
+	sessionID, answerID, prefix string, maxSegments int,
+) error {
+	logger.Debugf(ctx, "[Agent][FinalAnswer] AnswerID: %s", answerID)
+	fullAnswer := prefix
+	finishReason := ""
+	segments := 0
+	thinking := false
+	for segment := 0; segment < maxSegments; segment++ {
+		if err := ctx.Err(); err != nil {
+			state.FinalAnswer = fullAnswer
+			return err
+		}
+		budget := e.clampCompletionBudgetToContext(e.tokenEstimator.EstimateMessages(messages))
+		splitter := agenttools.NewThinkStreamSplitter()
+		var segmentContent strings.Builder
+		emitAnswer := func(content string) {
+			if content == "" {
 				return
 			}
-			if chunk.Content != "" {
-				logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(chunk.Content))
-				e.eventBus.Emit(ctx, event.Event{
-					ID:        answerID,
-					Type:      event.EventAgentFinalAnswer,
-					SessionID: sessionID,
-					Data: event.AgentFinalAnswerData{
-						Content: chunk.Content,
-						Done:    chunk.Done,
-					},
-				})
-				if chunk.Done {
-					answerDoneEmitted = true
+			segmentContent.WriteString(content)
+			_ = e.eventBus.Emit(ctx, event.Event{
+				ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+				Data: event.AgentFinalAnswerData{Content: content, Done: false},
+			})
+		}
+		llmResult, err := e.streamLLMToEventBus(
+			ctx,
+			messages,
+			&chat.ChatOptions{
+				Temperature:         e.config.Temperature,
+				MaxCompletionTokens: budget,
+				PromptCacheKey:      sessionID,
+				Thinking:            &thinking,
+			}, // Thinking disabled for final answer synthesis
+			func(chunk *types.StreamResponse, _ string) {
+				// Defensive filter: only emit answer content, skip thinking chunks.
+				// The provider's Done marker closes one segment, not necessarily the
+				// whole answer: length-limited segments are continued below.
+				if chunk.ResponseType == types.ResponseTypeThinking || chunk.Content == "" {
+					return
 				}
-			}
-		},
-	)
-	if err != nil {
-		logger.Errorf(ctx, "[Agent][FinalAnswer] Final answer generation failed: %v", err)
-		common.PipelineError(ctx, "Agent", "final_answer_stream_failed", map[string]interface{}{
-			"session_id": sessionID,
-			"error":      err.Error(),
-		})
-		return err
-	}
-
-	if !answerDoneEmitted {
-		e.eventBus.Emit(ctx, event.Event{
-			ID:        answerID,
-			Type:      event.EventAgentFinalAnswer,
-			SessionID: sessionID,
-			Data: event.AgentFinalAnswerData{
-				Content: "",
-				Done:    true,
+				_, answer := splitter.Feed(chunk.Content)
+				emitAnswer(answer)
 			},
-		})
-	}
+		)
+		_, tail := splitter.Flush()
+		emitAnswer(tail)
+		fullAnswer += segmentContent.String()
+		// Keep already generated text even when the provider fails mid-stream.
+		if llmResult != nil && llmResult.Usage != nil {
+			state.TurnUsage.Accumulate(*llmResult.Usage)
+		}
+		state.FinalAnswer = agenttools.StripThinkBlocks(fullAnswer)
+		if err == nil {
+			err = ctx.Err()
+		}
+		if err != nil {
+			logger.Errorf(ctx, "[Agent][FinalAnswer] Final answer generation failed: %v", err)
+			common.PipelineError(ctx, "Agent", "final_answer_stream_failed", map[string]interface{}{
+				"session_id": sessionID,
+				"error":      err.Error(),
+			})
+			return err
+		}
 
-	// The synthesis call is often the largest of the turn — fold its usage
-	// into the turn aggregate like every ReAct round.
-	if llmResult.Usage != nil {
-		state.TurnUsage.Accumulate(*llmResult.Usage)
-	}
+		segments++
+		finishReason = llmResult.FinishReason
 
-	// Safety net: strip any residual <think> blocks that may have leaked through
-	fullAnswer := agenttools.StripThinkBlocks(llmResult.Content)
+		// Preserve segment-edge whitespace until every continuation is joined.
+		// StripThinkBlocks trims its input, so applying it per segment would turn
+		// "first half " + "second half" into "first halfsecond half".
+		segmentAnswer := segmentContent.String()
+		if strings.TrimSpace(segmentAnswer) == "" {
+			return fmt.Errorf("final answer generation returned no answer content (finish_reason=%s)", finishReason)
+		}
+		if !isLengthFinishReason(finishReason) {
+			break
+		}
+		if segments >= maxSegments {
+			logger.Warnf(ctx, "[Agent][FinalAnswer] Still length-limited after %d segments; stopping continuation",
+				segments)
+			common.PipelineWarn(ctx, "Agent", "final_answer_continuation_exhausted", map[string]interface{}{
+				"session_id": sessionID,
+				"segments":   segments,
+			})
+			return fmt.Errorf("answer reached the continuation limit; partial answer was preserved")
+		}
+
+		logger.Infof(ctx, "[Agent][FinalAnswer] Segment %d hit the completion-token cap; continuing", segments)
+		if segmentAnswer != "" {
+			messages = append(messages, chat.Message{Role: "assistant", Content: segmentAnswer})
+		}
+		messages = append(messages, chat.Message{Role: "user", Content: finalAnswerContinuationPrompt})
+	}
+	// Safety net: strip residual inline <think> blocks once, after segment
+	// boundaries have been preserved.
+	fullAnswer = agenttools.StripThinkBlocks(fullAnswer)
+
+	// Close the single user-visible answer stream only after every continuation
+	// segment has finished. Closing each provider segment made the UI persist a
+	// partial answer before the continuation could arrive.
+	_ = e.eventBus.Emit(ctx, event.Event{
+		ID:        answerID,
+		Type:      event.EventAgentFinalAnswer,
+		SessionID: sessionID,
+		Data: event.AgentFinalAnswerData{
+			Content: "",
+			Done:    true,
+		},
+	})
+
 	logger.Infof(ctx, "[Agent][FinalAnswer] Final answer generated: %d characters", len(fullAnswer))
 	common.PipelineInfo(ctx, "Agent", "final_answer_done", map[string]interface{}{
-		"session_id": sessionID,
-		"answer_len": len(fullAnswer),
+		"session_id":    sessionID,
+		"answer_len":    len(fullAnswer),
+		"segments":      segments,
+		"finish_reason": finishReason,
 	})
 	state.FinalAnswer = fullAnswer
 	return nil
@@ -183,7 +247,9 @@ func (e *AgentEngine) handleMaxIterations(
 		common.PipelineError(ctx, "Agent", "final_answer_failed", map[string]interface{}{
 			"error": err.Error(),
 		})
-		state.FinalAnswer = "Sorry, I was unable to generate a complete answer."
+		if state.FinalAnswer == "" {
+			state.FinalAnswer = "Sorry, I was unable to generate a complete answer."
+		}
 	}
 	state.IsComplete = true
 }

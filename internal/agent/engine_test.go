@@ -884,10 +884,224 @@ func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *
 	err := engine.streamFinalAnswerToEventBus(context.Background(), "test query", state, "sess-1")
 
 	require.NoError(t, err)
-	require.Len(t, finalAnswerEvents, 2)
+	require.GreaterOrEqual(t, len(finalAnswerEvents), 2)
 	assert.False(t, finalAnswerEvents[0].Done)
-	assert.True(t, finalAnswerEvents[1].Done)
-	assert.Equal(t, "final answer", finalAnswerEvents[0].Content+finalAnswerEvents[1].Content,
+	assert.True(t, finalAnswerEvents[len(finalAnswerEvents)-1].Done)
+	var answerContent string
+	var doneCount int
+	for _, answerEvent := range finalAnswerEvents {
+		answerContent += answerEvent.Content
+		if answerEvent.Done {
+			doneCount++
+		}
+	}
+	assert.Equal(t, 1, doneCount)
+	assert.Equal(t, "final answer", answerContent,
 		"a decoder may hold a short suffix until Done to rule out a split model handle")
 	assert.Equal(t, "final answer", state.FinalAnswer)
+}
+
+func TestStreamFinalAnswerToEventBus_ContinuesLengthLimitedAnswer(t *testing.T) {
+	mock := &mockChat{
+		responses: []mockResponse{
+			{chunks: []types.StreamResponse{{
+				ResponseType: types.ResponseTypeAnswer,
+				Content:      "first half ",
+				Done:         true,
+				FinishReason: "length",
+				Usage:        &types.TokenUsage{CompletionTokens: 10, TotalTokens: 20},
+			}}},
+			{chunks: []types.StreamResponse{{
+				ResponseType: types.ResponseTypeAnswer,
+				Content:      "second half",
+				Done:         true,
+				FinishReason: "stop",
+				Usage:        &types.TokenUsage{CompletionTokens: 5, TotalTokens: 10},
+			}}},
+		},
+	}
+
+	engine := newTestEngine(t, mock)
+	var answerContent string
+	var doneCount int
+	engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.AgentFinalAnswerData)
+		require.True(t, ok)
+		answerContent += data.Content
+		if data.Done {
+			doneCount++
+		}
+		return nil
+	})
+
+	state := &types.AgentState{}
+	err := engine.streamFinalAnswerToEventBus(context.Background(), "test query", state, "sess-1")
+
+	require.NoError(t, err)
+	require.Len(t, mock.calls, 2)
+	assert.Equal(t, "first half second half", answerContent)
+	assert.Equal(t, "first half second half", state.FinalAnswer)
+	assert.Equal(t, 1, doneCount, "continuation segments must share one completion marker")
+	assert.Equal(t, 15, state.TurnUsage.CompletionTokens)
+	assert.Equal(t, 30, state.TurnUsage.TotalTokens)
+
+	continuedMessages := mock.calls[1]
+	require.GreaterOrEqual(t, len(continuedMessages), 2)
+	assert.Equal(t, "assistant", continuedMessages[len(continuedMessages)-2].Role)
+	assert.Equal(t, "first half ", continuedMessages[len(continuedMessages)-2].Content)
+	assert.Equal(t, "user", continuedMessages[len(continuedMessages)-1].Role)
+	assert.Equal(t, finalAnswerContinuationPrompt, continuedMessages[len(continuedMessages)-1].Content)
+}
+
+func TestStreamFinalAnswerToEventBus_BoundsLengthContinuations(t *testing.T) {
+	responses := make([]mockResponse, maxFinalAnswerSegments)
+	for i := range responses {
+		responses[i] = mockResponse{chunks: []types.StreamResponse{{
+			ResponseType: types.ResponseTypeAnswer,
+			Content:      fmt.Sprintf("part-%d ", i+1),
+			Done:         true,
+			FinishReason: "length",
+		}}}
+	}
+	mock := &mockChat{responses: responses}
+	engine := newTestEngine(t, mock)
+	var doneCount int
+	engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		if data, ok := evt.Data.(event.AgentFinalAnswerData); ok && data.Done {
+			doneCount++
+		}
+		return nil
+	})
+
+	state := &types.AgentState{}
+	err := engine.streamFinalAnswerToEventBus(context.Background(), "test query", state, "sess-1")
+
+	require.ErrorContains(t, err, "continuation limit")
+	assert.Equal(t, maxFinalAnswerSegments, mock.callCount)
+	assert.Equal(t, "part-1 part-2 part-3 part-4", state.FinalAnswer)
+	assert.Equal(t, 0, doneCount, "an exhausted continuation must not signal successful completion")
+}
+
+func TestExecuteLoop_ContinuesTruncatedAnswerWithoutAnotherReasoningRound(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{
+		{chunks: []types.StreamResponse{{Content: "first half ", Done: true, FinishReason: "length"}}},
+		{chunks: []types.StreamResponse{{Content: "second half", Done: true, FinishReason: "stop"}}},
+	}}
+	engine := newTestEngine(t, model)
+	var streamed, persisted string
+	ids := map[string]bool{}
+	doneCount := 0
+	engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		data := evt.Data.(event.AgentFinalAnswerData)
+		streamed += data.Content
+		ids[evt.ID] = true
+		if data.Done {
+			doneCount++
+		}
+		return nil
+	})
+	engine.eventBus.On(event.EventAgentComplete, func(_ context.Context, evt event.Event) error {
+		persisted = evt.Data.(event.AgentCompleteData).FinalAnswer
+		return nil
+	})
+	state, err := engine.executeLoop(context.Background(), &types.AgentState{},
+		"query", emptyMessages(), emptyTools(), "session", "message")
+	require.NoError(t, err)
+	require.Equal(t, "first half second half", state.FinalAnswer)
+	require.Equal(t, state.FinalAnswer, streamed)
+	require.Equal(t, state.FinalAnswer, persisted)
+	require.Len(t, state.RoundSteps, 1)
+	require.Len(t, ids, 1)
+	require.Equal(t, 1, doneCount)
+	require.Equal(t, 2, model.callCount)
+	require.Empty(t, model.opts[1].Tools)
+	require.NotNil(t, model.opts[1].Thinking)
+	require.False(t, *model.opts[1].Thinking)
+	require.Equal(t, finalAnswerContinuationPrompt, model.calls[1][len(model.calls[1])-1].Content)
+}
+
+func TestStreamFinalAnswerRejectsThinkingOnlyCompletion(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeThinking, Content: "reasoning only", Done: true, FinishReason: "stop"},
+	}}}}
+	engine := newTestEngine(t, model)
+	state := &types.AgentState{}
+	err := engine.streamFinalAnswerToEventBus(context.Background(), "query", state, "session")
+	require.ErrorContains(t, err, "no answer content")
+	require.Empty(t, state.FinalAnswer)
+}
+
+func TestExecuteLoopEmptyContinuationPersistsFailureMessage(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{
+		{chunks: []types.StreamResponse{{Done: true, FinishReason: "length"}}},
+		{chunks: []types.StreamResponse{{Done: true, FinishReason: "stop"}}},
+	}}
+	engine := newTestEngine(t, model)
+	state, err := engine.executeLoop(context.Background(), &types.AgentState{},
+		"query", emptyMessages(), emptyTools(), "session", "message")
+	require.ErrorContains(t, err, "no answer content")
+	require.NotEmpty(t, state.FinalAnswer)
+	require.False(t, state.IsComplete)
+	require.Equal(t, 2, model.callCount)
+}
+
+func TestStreamAnswerSegmentsCancelledDoesNotStartAnotherCall(t *testing.T) {
+	model := &mockChat{}
+	engine := newTestEngine(t, model)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	state := &types.AgentState{}
+	err := engine.streamAnswerSegments(ctx, emptyMessages(), state, "session", "answer", "partial answer", 3)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, model.callCount)
+	require.Equal(t, "partial answer", state.FinalAnswer)
+}
+
+func TestStreamAnswerSegmentsPreservesPartialOnProviderError(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{Content: "next part"},
+		{ResponseType: types.ResponseTypeError, Content: "upstream disconnected"},
+	}}}}
+	engine := newTestEngine(t, model)
+	state := &types.AgentState{}
+	err := engine.streamAnswerSegments(context.Background(), emptyMessages(), state,
+		"session", "answer", "first part ", 3)
+	require.ErrorContains(t, err, "upstream disconnected")
+	require.Equal(t, "first part next part", state.FinalAnswer)
+	require.Equal(t, 1, model.callCount)
+}
+
+func TestEmptyContinuationDoesNotDeclarePrefixComplete(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{Done: true, FinishReason: "stop"},
+	}}}}
+	engine := newTestEngine(t, model)
+	state := &types.AgentState{}
+	err := engine.streamAnswerSegments(context.Background(), emptyMessages(), state,
+		"session", "answer", "unfinished prefix", 3)
+	require.ErrorContains(t, err, "no answer content")
+	require.Equal(t, "unfinished prefix", state.FinalAnswer)
+}
+
+func TestExecuteLoopThinkingOnlyLengthSwitchesToAnswer(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{
+		{chunks: []types.StreamResponse{{
+			ResponseType: types.ResponseTypeThinking, Content: "reasoning", Done: true, FinishReason: "length",
+		}}},
+		{chunks: []types.StreamResponse{{
+			Content: "<think>hidden</think>complete answer", Done: true, FinishReason: "stop",
+		}}},
+	}}
+	engine := newTestEngine(t, model)
+	var streamed string
+	engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		streamed += evt.Data.(event.AgentFinalAnswerData).Content
+		return nil
+	})
+	state, err := engine.executeLoop(context.Background(), &types.AgentState{},
+		"query", emptyMessages(), emptyTools(), "session", "message")
+	require.NoError(t, err)
+	require.Equal(t, "complete answer", state.FinalAnswer)
+	require.Equal(t, state.FinalAnswer, streamed)
+	require.Equal(t, 2, model.callCount)
 }

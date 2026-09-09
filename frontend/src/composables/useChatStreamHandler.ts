@@ -825,7 +825,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           }
           if (responseType === 'error' && !toolName) {
             const errorMsg = String(data.content || t('chat.processError'))
-            message.content = errorMsg
+            message.content = message.content || errorMsg
             message.is_completed = true
             isReplying.value = false
             loading.value = false
@@ -836,7 +836,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           }
         } else if (responseType === 'error') {
           const errorMsg = String(data.content || t('chat.processError'))
-          message.content = errorMsg
+          message.content = message.content || errorMsg
           message.is_completed = true
           isReplying.value = false
           loading.value = false
@@ -863,7 +863,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           stream.push(answerEvent)
           if (eventId) eventMap.set(eventId, answerEvent)
         }
-        if (!answerEvent.content && message.content && String(message.content).trim()) {
+        if (
+          !answerEvent.content && message.content && String(message.content).trim() &&
+          !stream.some((event) => event !== answerEvent && event.type === 'answer' && !event.superseded)
+        ) {
           answerEvent.content = message.content
         }
         if (data.content) {
