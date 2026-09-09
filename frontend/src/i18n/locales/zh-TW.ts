@@ -4250,7 +4250,7 @@ export default {
     defaultChannelNameWithAgent: '{agent} · 網頁嵌入',
     welcomeMessage: '歡迎語',
     welcomePlaceholder: '你好，有什麼可以幫您？',
-    welcomeMessageDesc: '訪客開啟嵌入聊天后、尚未發言時展示；留空則不顯示',
+    welcomeMessageDesc: '訪客開啟嵌入聊天後、尚未發言時展示；留空則不顯示',
     showSuggestedQuestions: '推薦問題',
     showSuggestedQuestionsDesc: '訪客未發言前展示快捷提問，內容來自智慧體配置與關聯知識庫',
     originsHint: '每行一個完整來源地址（如 https://shop.example.com），至少填寫一個；支援 *.example.com 子域通配',
