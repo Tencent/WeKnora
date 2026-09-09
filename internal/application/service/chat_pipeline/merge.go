@@ -349,6 +349,13 @@ func (p *PluginMerge) resolveParentChunks(
 				continue
 			}
 			hitImageInfo := r.ImageInfo
+			// The hit chunk itself carries the recognized text (Content is
+			// the OCR text / caption stored by the multimodal pipeline).
+			// Save it before the parent expansion overwrites the field:
+			// force-scanned PDFs cut the parent markdown from image
+			// placeholders only, so dropping the child body used to empty
+			// the context sent to the model (#3052).
+			childRecognizedContent := r.Content
 			contentSource := textParent
 			if textParent.ParentChunkID != "" {
 				if grandparent, found := parentMap[textParent.ParentChunkID]; found &&
@@ -366,6 +373,14 @@ func (p *PluginMerge) resolveParentChunks(
 			textContent := searchutil.PruneMarkdownImagesByImageInfo(textParent.Content, r.ImageInfo)
 			parentContent := searchutil.PruneMarkdownImagesByImageInfo(contentSource.Content, r.ImageInfo)
 			r.Content = searchutil.JoinChunkContent(parentContent, textContent, "\n\n")
+			// Re-attach the recognized text after the parent/grandparent
+			// markdown. JoinChunkContent collapses duplicates, so when the
+			// surrounding text already covers the OCR/caption body nothing
+			// is added.
+			r.Content = searchutil.JoinChunkContent(r.Content, childRecognizedContent, "\n\n")
+			r.ImageInfo = searchutil.ClearImageInfoTextMatchingBody(
+				r.ImageInfo, childRecognizedContent, r.ChunkType,
+			)
 			r.ContentRewritten = true
 			pipelineInfo(ctx, "Merge", "image_parent_resolve", map[string]interface{}{
 				"child_id":   r.ID,

@@ -1,19 +1,19 @@
 <view class="page">
   <view class="card hero">
-    <view class="title">WeKnora Knowledge</view>
-    <view class="muted">Import a web page into a selected knowledge base from WeChat.</view>
+    <view class="title">{{knowledgeTitle}}</view>
+    <view class="muted">{{knowledgeSubtitle}}</view>
   </view>
 
   <view class="card section">
     <view wx:if="{{needsSettings}}" class="notice">
-      Configure the WeKnora API base URL and API key before loading knowledge bases.
-      <button bindtap="openSettings" class="secondary">Open Settings</button>
+      <view>{{needsSettingsText}}</view>
+      <button bindtap="openSettings" class="secondary">{{openSettingsText}}</button>
     </view>
 
     <view class="field">
-      <text class="label">Knowledge Base</text>
+      <text class="label">{{knowledgeBaseLabel}}</text>
       <picker range="{{knowledgeBaseNames}}" value="{{selectedIndex}}" bindchange="onKnowledgeBaseChange">
-        <view class="picker-value">{{selectedKnowledgeBaseName || "Tap to select"}}</view>
+        <view class="picker-value">{{displayKnowledgeBaseName}}</view>
       </picker>
       <view wx:if="{{statusMessage}}" class="status-message">{{statusMessage}}</view>
       <view wx:if="{{knowledgeBaseNames.length}}" class="knowledge-list">
@@ -29,15 +29,15 @@
       </view>
     </view>
 
-    <button bindtap="loadKnowledgeBases" loading="{{loading}}">Refresh knowledge bases</button>
+    <button bindtap="loadKnowledgeBases" loading="{{loading}}">{{refreshText}}</button>
   </view>
 
   <view class="card section">
     <view class="field">
-      <text class="label">URL</text>
-      <input value="{{url}}" placeholder="https://github.com/Tencent/WeKnora" bindinput="onUrlInput" />
+      <text class="label">{{urlLabel}}</text>
+      <input value="{{url}}" placeholder="{{urlPlaceholder}}" bindinput="onUrlInput" />
     </view>
 
-    <button bindtap="importURL" loading="{{importing}}" disabled="{{!selectedKnowledgeBaseId || !url}}">Import URL</button>
+    <button bindtap="importURL" loading="{{importing}}" disabled="{{!selectedKnowledgeBaseId || !url}}">{{importUrlText}}</button>
   </view>
 </view>

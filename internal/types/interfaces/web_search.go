@@ -14,6 +14,13 @@ type WebSearchProvider interface {
 	Search(ctx context.Context, query string, maxResults int, includeDate bool) ([]*types.WebSearchResult, error)
 }
 
+// FilteredWebSearchProvider explicitly supports per-call region and freshness filters.
+// Providers without this capability must not silently discard requested filters.
+type FilteredWebSearchProvider interface {
+	SearchWithFilters(ctx context.Context, query string, maxResults int, includeDate bool,
+		filters types.WebSearchFilters) ([]*types.WebSearchResult, error)
+}
+
 // WebSearchService defines the interface for web search services
 type WebSearchService interface {
 	// Search performs a web search using the provider entity identified by providerID.

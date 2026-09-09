@@ -18,21 +18,30 @@ const (
 
 // MCPService represents an MCP service configuration
 type MCPService struct {
-	ID             string             `json:"id"`
-	TenantID       uint64             `json:"tenant_id"`
-	Name           string             `json:"name"`
-	Description    string             `json:"description"`
-	Enabled        bool               `json:"enabled"`
-	TransportType  MCPTransportType   `json:"transport_type"`
-	URL            *string            `json:"url,omitempty"`
-	Headers        map[string]string  `json:"headers"`
-	AuthConfig     *MCPAuthConfig     `json:"auth_config"`
-	AdvancedConfig *MCPAdvancedConfig `json:"advanced_config"`
-	StdioConfig    *MCPStdioConfig    `json:"stdio_config,omitempty"`
-	EnvVars        map[string]string  `json:"env_vars,omitempty"`
-	IsBuiltin      bool               `json:"is_builtin"`
-	CreatedAt      string             `json:"created_at"`
-	UpdatedAt      string             `json:"updated_at"`
+	ID                string             `json:"id"`
+	TenantID          uint64             `json:"tenant_id"`
+	Name              string             `json:"name"`
+	Description       string             `json:"description"`
+	UsageInstructions string             `json:"usage_instructions,omitempty"`
+	Enabled           bool               `json:"enabled"`
+	TransportType     MCPTransportType   `json:"transport_type"`
+	URL               *string            `json:"url,omitempty"`
+	Headers           map[string]string  `json:"headers"`
+	AuthConfig        *MCPAuthConfig     `json:"auth_config"`
+	AdvancedConfig    *MCPAdvancedConfig `json:"advanced_config"`
+	StdioConfig       *MCPStdioConfig    `json:"stdio_config,omitempty"`
+	EnvVars           map[string]string  `json:"env_vars,omitempty"`
+	IsBuiltin         bool               `json:"is_builtin"`
+	CreatedAt         string             `json:"created_at"`
+	UpdatedAt         string             `json:"updated_at"`
+	Catalog           *MCPCatalogSummary `json:"catalog,omitempty"`
+}
+
+// MCPCatalogSummary is the list-card view of a saved MCP directory.
+type MCPCatalogSummary struct {
+	ToolCount int    `json:"tool_count"`
+	Stale     bool   `json:"stale"`
+	SyncedAt  string `json:"synced_at"`
 }
 
 // MCPAuthConfig represents authentication configuration for MCP service.
@@ -189,6 +198,58 @@ func (c *Client) GetMCPServiceTools(ctx context.Context, serviceID string) ([]*M
 	var result struct {
 		Success bool       `json:"success"`
 		Data    []*MCPTool `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// MCPMetadata is a persisted MCP tool directory. A nil result from GetMCPMetadata
+// means the service has never been synchronized. Stale is true when the saved
+// connection no longer matches the current configuration.
+type MCPMetadata struct {
+	ServiceID         string     `json:"service_id"`
+	Tools             []*MCPTool `json:"tools"`
+	Instructions      string     `json:"instructions"`
+	ServerName        string     `json:"server_name"`
+	ServerVersion     string     `json:"server_version"`
+	ServerDescription string     `json:"server_description"`
+	SyncedAt          string     `json:"synced_at"`
+	Stale             bool       `json:"stale"`
+}
+
+// GetMCPMetadata reads the saved tool directory without connecting upstream.
+// Server route: GET /api/v1/mcp-services/{id}/metadata.
+func (c *Client) GetMCPMetadata(ctx context.Context, serviceID string) (*MCPMetadata, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/mcp-services/%s/metadata", serviceID), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Success bool         `json:"success"`
+		Data    *MCPMetadata `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// RefreshMCPMetadata connects upstream and atomically replaces the saved directory.
+// OAuth services store a snapshot for the calling user (Viewer+). Static-auth
+// services write a tenant-wide snapshot and require Admin, or an API key that
+// can manage MCP services.
+// Server route: POST /api/v1/mcp-services/{id}/metadata/refresh.
+func (c *Client) RefreshMCPMetadata(ctx context.Context, serviceID string) (*MCPMetadata, error) {
+	path := fmt.Sprintf("/api/v1/mcp-services/%s/metadata/refresh", serviceID)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Success bool         `json:"success"`
+		Data    *MCPMetadata `json:"data"`
 	}
 	if err := parseResponse(resp, &result); err != nil {
 		return nil, err

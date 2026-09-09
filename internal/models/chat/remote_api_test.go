@@ -188,8 +188,8 @@ func TestBuildChatCompletionRequest_GPT5MaxCompletionTokens(t *testing.T) {
 				assert.EqualValues(t, 0, req.FrequencyPenalty, "frequency_penalty must be omitted")
 				assert.EqualValues(t, 0, req.PresencePenalty, "presence_penalty must be omitted")
 			} else {
-				assert.Equal(t, 128, req.MaxTokens)
-				assert.Equal(t, 0, req.MaxCompletionTokens)
+				assert.Zero(t, req.MaxTokens, "non-reasoning OpenAI/Azure send max_completion_tokens only")
+				assert.Equal(t, 128, req.MaxCompletionTokens)
 				assert.InDelta(t, 0.7, req.Temperature, 1e-6)
 			}
 		})

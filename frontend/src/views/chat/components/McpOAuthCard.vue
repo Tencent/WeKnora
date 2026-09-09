@@ -39,6 +39,7 @@ import {
   getMCPOAuthAuthorizeURL,
   getMCPOAuthStatus,
   resolveMCPOAuth,
+  refreshMCPMetadata,
   MCP_OAUTH_CALLBACK_PATH,
 } from '@/api/mcp-service'
 import {
@@ -229,6 +230,11 @@ const authorize = async () => {
             )
           } else {
             await resolveMCPOAuth(props.pendingId, { service_id: props.serviceId, decision: 'authorize' })
+            try {
+              await refreshMCPMetadata(props.serviceId)
+            } catch {
+              /* next describe/list will live-fill this user's directory */
+            }
           }
           MessagePlugin.success(t('agentStream.mcpOAuth.authorizedToast'))
         } catch (e: any) {

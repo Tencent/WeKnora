@@ -23,13 +23,14 @@ func TestResolveSplitsReadsFromWrites(t *testing.T) {
 	read, modified := extractFileOps("", []chat.Message{
 		toolCallMsg("write_sandbox_file", `{"path":"/workspace/output/deck.html","content":"<html>"}`),
 		toolCallMsg("edit_sandbox_file", `{"path":"/workspace/output/deck.html","old_string":"a"}`),
-		toolCallMsg("read_sandbox_file", `{"path":"/workspace/input/notes.txt"}`),
+		toolCallMsg("read_file", `{"path":"/workspace/input/notes.txt"}`),
+		toolCallMsg("read_file", `{"path":"skill://pdf/SKILL.md"}`),
 		toolCallMsg("shell_exec", `{"command":"ls"}`),
 	}).resolve()
 
 	// Written then edited is one entry, not two.
 	assert.Equal(t, []string{"/workspace/output/deck.html"}, modified)
-	assert.Equal(t, []string{"/workspace/input/notes.txt"}, read)
+	assert.Equal(t, []string{"/workspace/input/notes.txt", "skill://pdf/SKILL.md"}, read)
 }
 
 // A file the agent read and then rewrote is only interesting as something it

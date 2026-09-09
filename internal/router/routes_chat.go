@@ -64,6 +64,15 @@ func RegisterSessionRoutes(
 		sessions.GET("/:id/attachments/:attachment_id/preview", handler.PreviewTemporaryDocument)
 		sessions.DELETE("/:id/attachments/:attachment_id", handler.DeleteTemporaryDocument)
 		sessions.POST("/:session_id/stop", handler.StopSession)
+		sessions.POST("/:session_id/sandbox/terminal-ticket", handler.IssueSandboxTerminalTicket)
+		// Mid-run message injection: append a user message to the turn that is
+		// currently generating. Accepts even when no run is live (the client
+		// then falls back to a normal send), mirroring StopSession's ownership
+		// rules.
+		sessions.POST("/:session_id/steer", handler.SteerMessage)
+		sessions.GET("/:id/steer", handler.ListSteerMessages)
+		sessions.DELETE("/:id/steer/:steer_id", handler.DeleteSteerMessage)
+		sessions.POST("/:session_id/steer/:steer_id/inject", handler.PromoteSteerMessage)
 		// POST and DELETE share this path but gin maintains a separate radix tree
 		// per HTTP verb, and the existing trees use different wildcard names
 		// (POST uses :session_id, DELETE uses :id). Use whatever matches each
@@ -119,4 +128,21 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGua
 	{
 		knowledgeSearch.POST("", handler.SearchKnowledge)
 	}
+}
+
+// RegisterSandboxTerminalRoutes registers the interactive-terminal WebSocket.
+//
+// Like the IM callback routes this is registered BEFORE the global auth
+// middleware: a browser WebSocket handshake cannot carry the
+// Authorization / X-API-Key headers, so a short-lived session-bound ticket
+// travels in the ticket query parameter. The handler authenticates itself
+// via service.ParseSandboxTerminalTicket + CheckSandboxTerminalAuth +
+// middleware.AttachAuthenticatedUser (not the 24h access JWT). The ticket
+// is bound to the minting access-token id; the open PTY rechecks that
+// token, user, membership, and session ownership about once a minute.
+//
+// The wildcard is :id because this GET joins the same radix tree as
+// /sessions/:id (gin requires identical wildcard names per tree).
+func RegisterSandboxTerminalRoutes(r *gin.Engine, sessionHandler *session.Handler) {
+	r.GET("/api/v1/sessions/:id/sandbox/terminal", sessionHandler.SandboxTerminalWS)
 }

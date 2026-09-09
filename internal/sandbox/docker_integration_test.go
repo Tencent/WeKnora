@@ -306,7 +306,7 @@ func TestDockerBackendScriptExecutionRefreshesActivityMarkerIntegration(t *testi
 	if err != nil || len(summaries) != 1 {
 		t.Fatalf("expected exactly one container: %v %#v", err, summaries)
 	}
-	handle, err := client.Connect(ctx, summaries[0].ID)
+	handle, err := client.Connect(ctx, RemoteConnectRequest{SandboxID: summaries[0].ID})
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -468,7 +468,7 @@ func TestDockerBackendArtifactBootstrapDoesNotFollowSymlinkIntegration(t *testin
 	if err != nil || len(summaries) != 1 {
 		t.Fatalf("expected exactly one container for the session: %v %#v", err, summaries)
 	}
-	handle, err := client.Connect(ctx, summaries[0].ID)
+	handle, err := client.Connect(ctx, RemoteConnectRequest{SandboxID: summaries[0].ID})
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -506,8 +506,13 @@ func TestDockerBackendArtifactBootstrapDoesNotFollowSymlinkIntegration(t *testin
 	}
 
 	// Any further execution runs the bootstrap against the planted path.
-	if second := runDockerScript(t, ctx, manager, sessionID, `print('after')`); second == nil {
-		t.Fatal("second execution returned no result")
+	_, err = manager.Execute(ctx, &ExecuteConfig{
+		Script: "conformance.py", ScriptContent: `print('after')`,
+		SessionID: sessionID, Timeout: time.Minute, SkipValidation: true,
+		Env: map[string]string{skillOutputEnvVar: SessionOutputRoot},
+	})
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("bootstrap must preserve and report the symlink before execution: %v", err)
 	}
 
 	if after := ownerOfEtc(); after != "root:root" {

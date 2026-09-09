@@ -22,27 +22,38 @@ import (
 // only a boolean per credential field so the frontend can render a
 // "configured / not configured" badge without an additional round-trip.
 type MCPServiceResponse struct {
-	ID             string                   `json:"id"`
-	TenantID       uint64                   `json:"tenant_id"`
-	Name           string                   `json:"name"`
-	Description    string                   `json:"description"`
-	Enabled        bool                     `json:"enabled"`
-	TransportType  types.MCPTransportType   `json:"transport_type"`
-	URL            *string                  `json:"url,omitempty"`
-	Headers        types.MCPHeaders         `json:"headers,omitempty"`
-	AuthConfig     *MCPAuthConfigResponse   `json:"auth_config,omitempty"`
-	AdvancedConfig *types.MCPAdvancedConfig `json:"advanced_config,omitempty"`
-	StdioConfig    *types.MCPStdioConfig    `json:"stdio_config,omitempty"`
-	EnvVars        types.MCPEnvVars         `json:"env_vars,omitempty"`
-	IsBuiltin      bool                     `json:"is_builtin"`
-	CreatedAt      time.Time                `json:"created_at"`
-	UpdatedAt      time.Time                `json:"updated_at"`
+	UsageInstructions string                   `json:"usage_instructions"`
+	ID                string                   `json:"id"`
+	TenantID          uint64                   `json:"tenant_id"`
+	Name              string                   `json:"name"`
+	Description       string                   `json:"description"`
+	Enabled           bool                     `json:"enabled"`
+	TransportType     types.MCPTransportType   `json:"transport_type"`
+	URL               *string                  `json:"url,omitempty"`
+	Headers           types.MCPHeaders         `json:"headers,omitempty"`
+	AuthConfig        *MCPAuthConfigResponse   `json:"auth_config,omitempty"`
+	AdvancedConfig    *types.MCPAdvancedConfig `json:"advanced_config,omitempty"`
+	StdioConfig       *types.MCPStdioConfig    `json:"stdio_config,omitempty"`
+	EnvVars           types.MCPEnvVars         `json:"env_vars,omitempty"`
+	IsBuiltin         bool                     `json:"is_builtin"`
+	CreatedAt         time.Time                `json:"created_at"`
+	UpdatedAt         time.Time                `json:"updated_at"`
 	// Credentials is the per-field "configured?" map. Embedded on the main
 	// response so the credential UI doesn't need a follow-up GET. The
 	// frontend never sees the actual secret value — only whether one is
 	// stored. Omitted entirely for builtin services (they can't have
 	// per-tenant credentials).
 	Credentials map[string]CredentialFieldMetadata `json:"credentials,omitempty"`
+	// Catalog is the persisted tool-directory summary for list cards.
+	// Omitted when this principal has never synchronized the service.
+	Catalog *MCPCatalogSummary `json:"catalog,omitempty"`
+}
+
+// MCPCatalogSummary is the list-card view of a saved MCP directory.
+type MCPCatalogSummary struct {
+	ToolCount int       `json:"tool_count"`
+	Stale     bool      `json:"stale"`
+	SyncedAt  time.Time `json:"synced_at"`
 }
 
 // MCPAuthConfigResponse intentionally has no APIKey or Token fields. Their
@@ -75,20 +86,21 @@ func NewMCPServiceResponse(ctx context.Context, svc *types.MCPService) *MCPServi
 	}
 	includeDetail := CanViewIntegrationSecrets(ctx)
 	resp := &MCPServiceResponse{
-		ID:             svc.ID,
-		TenantID:       svc.TenantID,
-		Name:           svc.Name,
-		Description:    svc.Description,
-		Enabled:        svc.Enabled,
-		TransportType:  svc.TransportType,
-		URL:            svc.URL,
-		Headers:        svc.Headers,
-		AdvancedConfig: svc.AdvancedConfig,
-		StdioConfig:    svc.StdioConfig,
-		EnvVars:        svc.EnvVars,
-		IsBuiltin:      svc.IsBuiltin,
-		CreatedAt:      svc.CreatedAt,
-		UpdatedAt:      svc.UpdatedAt,
+		ID:                svc.ID,
+		TenantID:          svc.TenantID,
+		Name:              svc.Name,
+		Description:       svc.Description,
+		UsageInstructions: svc.UsageInstructions,
+		Enabled:           svc.Enabled,
+		TransportType:     svc.TransportType,
+		URL:               svc.URL,
+		Headers:           svc.Headers,
+		AdvancedConfig:    svc.AdvancedConfig,
+		StdioConfig:       svc.StdioConfig,
+		EnvVars:           svc.EnvVars,
+		IsBuiltin:         svc.IsBuiltin,
+		CreatedAt:         svc.CreatedAt,
+		UpdatedAt:         svc.UpdatedAt,
 	}
 	if !includeDetail {
 		resp.Headers = nil
@@ -134,6 +146,31 @@ func NewMCPServiceResponses(ctx context.Context, svcs []*types.MCPService) []*MC
 		out = append(out, NewMCPServiceResponse(ctx, s))
 	}
 	return out
+}
+
+// AttachMCPCatalogs copies persisted directory counts onto list/detail responses.
+func AttachMCPCatalogs(
+	resp []*MCPServiceResponse,
+	services []*types.MCPService,
+	summaries map[string]*types.MCPMetadataSummary,
+) {
+	if len(resp) != len(services) || summaries == nil {
+		return
+	}
+	for i, service := range services {
+		if resp[i] == nil || service == nil {
+			continue
+		}
+		summary := summaries[service.ID]
+		if summary == nil {
+			continue
+		}
+		resp[i].Catalog = &MCPCatalogSummary{
+			ToolCount: summary.ToolCount,
+			Stale:     summary.ConfigFingerprint != types.MCPConfigFingerprint(service),
+			SyncedAt:  summary.SyncedAt,
+		}
+	}
 }
 
 // CredentialsResponse is the shared shape returned by PUT

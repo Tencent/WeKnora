@@ -1,5 +1,19 @@
-*
-!dist
-!nginx.conf
-!nginx-api-proxy.conf
-!docker-entrypoint.sh
+# Keep build context lean; multi-stage Dockerfile needs sources, not dist.
+node_modules
+dist
+dist-ssr
+coverage
+logs
+*.log
+.DS_Store
+.vscode
+.idea
+*.local
+*.tsbuildinfo
+package.json.md5
+*.md
+.env
+.env.*
+.gitignore
+.dockerignore
+Dockerfile

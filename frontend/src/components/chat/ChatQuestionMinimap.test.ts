@@ -76,9 +76,11 @@ test('does not paint the first question green on hover-open', () => {
   assert.doesNotMatch(component, /question-minimap__row:hover,\s*\.question-minimap__row--active/)
 })
 
-test('highlights the matching tick for the peaked question', () => {
+test('highlights visible messages without losing them when previewing another tick', () => {
   assert.match(component, /peakId/)
-  assert.match(component, /tick\.id === peakId/)
+  assert.match(component, /highlightedIds\.has\(tick\.id\)/)
+  assert.match(component, /new Set\(visibleIds\.value\)/)
+  assert.match(composable, /visibleMessageIds\(measured, el\.scrollTop, el\.clientHeight\)/)
 })
 
 test('keeps the preview card at 13px instead of inheriting the chat 20px type', () => {

@@ -16,20 +16,22 @@ var persistStripFields = map[string][]string{
 // persistStripFieldsByTool drops binary / duplicate blobs. stdout/stderr stay
 // (compacted separately) so a history reload can still render the card.
 var persistStripFieldsByTool = map[string][]string{
-	ToolShellExec:        {"content", "content_base64"},
-	ToolReadSandboxFile:  {"content", "content_base64"},
-	ToolWriteSandboxFile: {"content", "content_base64"},
-	ToolEditSandboxFile:  {"content", "content_base64"},
+	ToolReadFile:              {"content", "content_base64", "instructions"},
+	ToolShellExec:             {"content", "content_base64"},
+	LegacyToolReadSandboxFile: {"content", "content_base64"},
+	ToolWriteSandboxFile:      {"content", "content_base64"},
+	ToolEditSandboxFile:       {"content", "content_base64"},
 }
 
 // clientStripFieldsByTool is the lighter omit list for live SSE. The UI
 // needs stdout/stderr to render a terminal card; those streams are already
 // capped by the tool. Persist still uses persistStripFieldsByTool.
 var clientStripFieldsByTool = map[string][]string{
-	ToolShellExec:        {"content", "content_base64"},
-	ToolReadSandboxFile:  {"content", "content_base64"},
-	ToolWriteSandboxFile: {"content", "content_base64"},
-	ToolEditSandboxFile:  {"content", "content_base64"},
+	ToolReadFile:              {"content", "content_base64", "instructions"},
+	ToolShellExec:             {"content", "content_base64"},
+	LegacyToolReadSandboxFile: {"content", "content_base64"},
+	ToolWriteSandboxFile:      {"content", "content_base64"},
+	ToolEditSandboxFile:       {"content", "content_base64"},
 }
 
 const historicalSandboxOutputChars = 4 * 1024
@@ -166,7 +168,7 @@ func CompactToolOutputForHistory(toolName string, result *types.ToolResult) stri
 }
 
 func isSandboxContentTool(toolName string) bool {
-	return toolName == ToolShellExec || toolName == ToolReadSandboxFile || toolName == ToolExecuteSkillScript
+	return toolName == ToolShellExec || toolName == ToolReadFile || toolName == LegacyToolReadSandboxFile || toolName == LegacyToolExecuteSkillScript
 }
 
 // failedToolVisibleContent keeps stdout/stderr (in Output) when a tool fails.

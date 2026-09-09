@@ -33,6 +33,46 @@ func (s *transcriptStreams) GetEvents(
 	return s.events[from:], len(s.events), nil
 }
 
+func (s *transcriptStreams) AppendSteerEvents(
+	_ context.Context, _, _ string, _ []interfaces.StreamEvent,
+) error {
+	return s.err
+}
+
+func (s *transcriptStreams) GetSteerEvents(
+	_ context.Context, _, _ string, from int,
+) ([]interfaces.StreamEvent, int, error) {
+	return nil, from, nil
+}
+
+func (s *transcriptStreams) UpdateSteerEventData(
+	context.Context, string, string, string, map[string]interface{},
+) (bool, error) {
+	return false, nil
+}
+
+func (s *transcriptStreams) DeleteSteerEvent(
+	context.Context, string, string, string,
+) (bool, error) {
+	return false, nil
+}
+
+func (s *transcriptStreams) SetLiveRun(context.Context, string, string, string) error {
+	return nil
+}
+
+func (s *transcriptStreams) ClaimLiveRun(context.Context, string, string, string) error {
+	return nil
+}
+
+func (s *transcriptStreams) GetLiveRun(context.Context, string) (string, string, error) {
+	return "", "", nil
+}
+
+func (s *transcriptStreams) ClearLiveRun(context.Context, string, string) error {
+	return nil
+}
+
 func (s *transcriptStreams) types() []types.ResponseType {
 	out := make([]types.ResponseType, 0, len(s.events))
 	for _, evt := range s.events {

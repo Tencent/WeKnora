@@ -183,7 +183,7 @@ build_docreader_image() {
     fi
 }
 
-# 构建前端镜像
+# 构建前端镜像（多阶段：npm 在 builder 内执行，无需宿主机预构建 dist）
 build_frontend_image() {
     log_info "构建前端镜像 (weknora-ui)..."
     
@@ -192,11 +192,11 @@ build_frontend_image() {
     # 获取版本信息（用于注入前端 commit hash）
     get_version_info
 
-    log_info "构建前端静态资源..."
-    VITE_IS_DOCKER=true VITE_FRONTEND_COMMIT="$COMMIT_ID" "$SCRIPT_DIR/build_frontend_dist.sh"
-
     docker build \
         --platform $PLATFORM \
+        --build-arg VITE_FRONTEND_COMMIT="$COMMIT_ID" \
+        ${NPM_REGISTRY:+--build-arg NPM_REGISTRY="$NPM_REGISTRY"} \
+        ${NODE_MAX_OLD_SPACE_SIZE:+--build-arg NODE_MAX_OLD_SPACE_SIZE="$NODE_MAX_OLD_SPACE_SIZE"} \
         -f frontend/Dockerfile \
         -t wechatopenai/weknora-ui:latest \
         frontend/

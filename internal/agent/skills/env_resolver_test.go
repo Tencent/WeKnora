@@ -1,7 +1,6 @@
 package skills
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -29,14 +28,20 @@ func TestApplyResolvedEnvAddsNewKeysAndKeepsExistingOnes(t *testing.T) {
 	require.Equal(t, "/workspace/output", env[artifactHistoryEnvVar])
 }
 
-func TestApplySessionPackagePathPrependsPythonAndNodePath(t *testing.T) {
-	env := map[string]string{pythonPathEnvVar: "/already"}
+// Python is deliberately absent here: the skill's venv interpreter carries its
+// own packages, so an injected PYTHONPATH would only be able to shadow them.
+func TestApplySkillNodePathAppendsAfterTheCallersValue(t *testing.T) {
+	skillDir := sandbox.SkillsImageRoot + "/律师助手"
 
-	applySessionPackagePath(env, "律师助手")
+	env := map[string]string{nodePathEnvVar: "/already"}
+	applySkillNodePath(env, skillDir)
+	require.Equal(t, "/already:"+skillDir+"/node_modules", env[nodePathEnvVar])
 
-	dir := sandbox.SessionSkillPackageDir("律师助手")
-	require.Equal(t, dir+":/already", env[pythonPathEnvVar])
-	require.Equal(t, dir, env[nodePathEnvVar])
+	empty := map[string]string{}
+	applySkillNodePath(empty, skillDir)
+	require.Equal(t, skillDir+"/node_modules", empty[nodePathEnvVar],
+		"a caller that supplied nothing must not get a leading separator")
+	require.NotContains(t, empty, pythonPathEnvVar)
 }
 
 // The message is read by the agent and relayed verbatim to a person, so it has
@@ -57,95 +62,4 @@ func TestMissingSkillEnvErrorMessageNamesSkillVarsAndWhereToSetThem(t *testing.T
 	require.True(t, errors.As(err, &typed))
 	require.Equal(t, "web-search", typed.SkillName)
 	require.Equal(t, []string{"TAVILY_API_KEY", "SERP_TOKEN"}, typed.Names)
-}
-
-// stubEnvResolver records what ExecuteScript asked it for.
-type stubEnvResolver struct {
-	env     map[string]string
-	missing []string
-	err     error
-
-	calls []string
-}
-
-func (r *stubEnvResolver) ResolveEnv(
-	_ context.Context, skillName string,
-) (map[string]string, []string, error) {
-	r.calls = append(r.calls, skillName)
-	return r.env, r.missing, r.err
-}
-
-func TestExecuteScriptBlocksOnMissingRequiredEnv(t *testing.T) {
-	dir := preloadedSkillDir(t, "web-search", "search the web")
-	sandboxMgr := &recordingSandboxManager{}
-	resolver := &stubEnvResolver{missing: []string{"TAVILY_API_KEY"}}
-	mgr := NewManager(&ManagerConfig{SkillDirs: []string{dir}, Enabled: true}, sandboxMgr).
-		WithEnvResolver(resolver)
-	require.NoError(t, mgr.Initialize(context.Background()))
-
-	result, err := mgr.ExecuteScript(context.Background(), "web-search", "scripts/run.py", nil, "")
-
-	require.Nil(t, result)
-	var missing *MissingSkillEnvError
-	require.ErrorAs(t, err, &missing)
-	require.Equal(t, "web-search", missing.SkillName)
-	require.Equal(t, []string{"TAVILY_API_KEY"}, missing.Names)
-	// The whole point of blocking is that the script never runs.
-	require.Zero(t, sandboxMgr.calls)
-	require.Nil(t, sandboxMgr.config)
-}
-
-func TestExecuteScriptPropagatesResolverError(t *testing.T) {
-	dir := preloadedSkillDir(t, "web-search", "search the web")
-	sandboxMgr := &recordingSandboxManager{}
-	boom := errors.New("load user envs: connection refused")
-	mgr := NewManager(&ManagerConfig{SkillDirs: []string{dir}, Enabled: true}, sandboxMgr).
-		WithEnvResolver(&stubEnvResolver{err: boom})
-	require.NoError(t, mgr.Initialize(context.Background()))
-
-	_, err := mgr.ExecuteScript(context.Background(), "web-search", "scripts/run.py", nil, "")
-
-	require.ErrorIs(t, err, boom)
-	require.Zero(t, sandboxMgr.calls)
-}
-
-func TestExecuteScriptInjectsResolvedEnvOnceKeyedBySkillName(t *testing.T) {
-	dir := preloadedSkillDir(t, "web-search", "search the web")
-	sandboxMgr := &recordingSandboxManager{}
-	resolver := &stubEnvResolver{env: map[string]string{
-		"TAVILY_API_KEY":     "user-key",
-		artifactOutputEnvVar: "/tmp/hijacked",
-	}}
-	mgr := NewManager(&ManagerConfig{SkillDirs: []string{dir}, Enabled: true}, sandboxMgr).
-		WithEnvResolver(resolver)
-	require.NoError(t, mgr.Initialize(context.Background()))
-
-	_, err := mgr.ExecuteScript(context.Background(), "web-search", "scripts/run.py", nil, "")
-
-	require.NoError(t, err)
-	require.Equal(t, []string{"web-search"}, resolver.calls)
-	require.Equal(t, 1, sandboxMgr.calls)
-	require.NotNil(t, sandboxMgr.config)
-	require.Equal(t, "user-key", sandboxMgr.config.Env["TAVILY_API_KEY"])
-	require.Equal(t, "/workspace/output", sandboxMgr.config.Env[artifactOutputEnvVar])
-}
-
-// Without a resolver the execution path must stay exactly as it was.
-func TestExecuteScriptWithoutResolverInjectsNothingExtra(t *testing.T) {
-	dir := preloadedSkillDir(t, "web-search", "search the web")
-	sandboxMgr := &recordingSandboxManager{}
-	mgr := NewManager(&ManagerConfig{SkillDirs: []string{dir}, Enabled: true}, sandboxMgr)
-	require.NoError(t, mgr.Initialize(context.Background()))
-
-	_, err := mgr.ExecuteScript(context.Background(), "web-search", "scripts/run.py", nil, "")
-
-	require.NoError(t, err)
-	require.Equal(t, 1, sandboxMgr.calls)
-	injected := map[string]bool{}
-	for _, name := range InjectedSandboxEnvVars() {
-		injected[name] = true
-	}
-	for key := range sandboxMgr.config.Env {
-		require.True(t, injected[key], "injected env %q is not in InjectedSandboxEnvVars", key)
-	}
 }

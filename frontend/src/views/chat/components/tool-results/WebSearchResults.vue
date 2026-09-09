@@ -34,10 +34,10 @@
               </div>
             </div>
             
-            <div v-if="result.published_at" class="result-meta">
+            <div v-if="result.published_at || result.age" class="result-meta">
               <span class="meta-item">
                 <t-icon name="time" class="meta-icon" />
-                {{ formatDate(result.published_at) }}
+                {{ result.published_at ? formatDate(result.published_at) : result.age }}
               </span>
             </div>
           </div>

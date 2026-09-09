@@ -301,7 +301,8 @@
 
               <t-form-item :label="$t('auth.confirmPassword')" name="confirmPassword">
                 <t-input v-model="registerData.confirmPassword" :placeholder="$t('auth.confirmPasswordPlaceholder')"
-                  type="password" autocomplete="new-password" size="large" :disabled="loading" @enter="handleRegister" />
+                  type="password" autocomplete="new-password" size="large" :disabled="loading"
+                  @enter="handleRegister" />
               </t-form-item>
 
               <t-button type="submit" theme="primary" size="large" block :loading="loading" class="submit-button">
@@ -437,7 +438,8 @@ const languageOptions = [
   { value: 'zh-CN', label: '简体中文', shortLabel: '中文', flag: '🇨🇳' },
   { value: 'en-US', label: 'English', shortLabel: 'EN', flag: '🇺🇸' },
   { value: 'ru-RU', label: 'Русский', shortLabel: 'RU', flag: '🇷🇺' },
-  { value: 'ko-KR', label: '한국어', shortLabel: '한국어', flag: '🇰🇷' }
+  { value: 'ko-KR', label: '한국어', shortLabel: '한국어', flag: '🇰🇷' },
+  { value: 'ja-JP', label: '日本語', shortLabel: '日本語', flag: '🇯🇵' }
 ]
 
 const currentLanguage = computed(() => locale.value)
@@ -1182,7 +1184,7 @@ onMounted(async () => {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding: 40px 50px 100px 30px;
+  padding: 112px 50px 100px 30px;
   box-sizing: border-box;
   position: relative;
 }

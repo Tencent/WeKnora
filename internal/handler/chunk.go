@@ -231,7 +231,12 @@ func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 			c.Error(errors.NewConflictError("Chunk was modified by another user; refresh and retry"))
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		var appErr *errors.AppError
+		if stderrors.As(err, &appErr) {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewInternalServerError(err.Error()))
+		}
 		return
 	}
 
@@ -289,7 +294,12 @@ func (h *ChunkHandler) RevertChunk(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		var appErr *errors.AppError
+		if stderrors.As(err, &appErr) {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewBadRequestError(err.Error()))
+		}
 		return
 	}
 	knowledge, getErr := h.kgService.GetKnowledgeByID(c.Request.Context(), knowledgeID)

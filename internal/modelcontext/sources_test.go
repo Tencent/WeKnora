@@ -1,6 +1,7 @@
 package modelcontext
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -345,7 +346,7 @@ func TestModelOutputWebFetchPreservesPartialFailureStatus(t *testing.T) {
 		},
 	})
 
-	require.Contains(t, output, `<page id="w1" status="success" view="full">`)
+	require.Contains(t, output, `<page id="w1" status="success" view="excerpt">`)
 	require.Contains(t, output, "verified page content")
 	require.Contains(t, output, `<page id="w2" status="failed" retryable="false" error_code="http_403">`)
 	require.Contains(t, output, `<error>access denied</error>`)
@@ -372,7 +373,7 @@ func TestModelOutputWebFetchAllFailuresIncludeSearchFallback(t *testing.T) {
 	})
 
 	require.Contains(t, output, `status="failed" retryable="true" error_code="dns_failed"`)
-	require.Contains(t, output, "Stop expanding web searches")
+	require.Contains(t, output, "use another relevant source")
 	require.Contains(t, output, "page content was not verified")
 }
 
@@ -396,7 +397,7 @@ func TestModelOutputWebFetchAllFailuresStillStructuredWhenToolNotSuccessful(t *t
 	})
 
 	require.Contains(t, output, `status="failed" retryable="true" error_code="dns_failed"`)
-	require.Contains(t, output, "Stop expanding web searches")
+	require.Contains(t, output, "use another relevant source")
 	require.NotContains(t, output, "Error: all page fetches failed")
 }
 
@@ -549,4 +550,24 @@ func TestModelOutputDoesNotRegisterInternalSchemesAsWebSources(t *testing.T) {
 		`<web url="https://example.com/page" title="" />`,
 		registry.ExpandText(`<ref id="w1"/>`),
 	)
+}
+
+func TestModelOutputWebFetchKeepsEveryPageAndAccurateContinuation(t *testing.T) {
+	registry := newSourceRegistry()
+	rows := []map[string]interface{}{}
+	for i := 0; i < 8; i++ {
+		rows = append(rows, map[string]interface{}{
+			"url": fmt.Sprintf("https://example.com/%d", i), "status": "success",
+			"raw_content": strings.Repeat("文字", 5000), "offset": 100, "content_length": 20000, "truncated": true,
+		})
+	}
+	output := registry.ModelOutput(&types.ToolResult{
+		Success: true, Data: map[string]interface{}{"display_type": "web_fetch_results", "results": rows},
+	})
+	for i := 1; i <= 8; i++ {
+		require.Contains(t, output, fmt.Sprintf(`url="w%d" next_offset="2100"`, i))
+	}
+	require.Equal(t, 8, strings.Count(output, `<content truncated="true">文字`))
+	require.NotContains(t, output, `view="full"`)
+	require.Contains(t, output, `trust="untrusted"`)
 }

@@ -198,7 +198,7 @@ func (l *remoteSessionLifecycle) resolveLocked(
 	l.consumeTurnRebuild(ctx, key)
 
 	if binding != nil {
-		handle, replace, err := l.connectBinding(ctx, *binding)
+		handle, replace, err := l.connectBinding(ctx, key, *binding)
 		if err != nil {
 			return nil, err
 		}
@@ -231,6 +231,7 @@ func (l *remoteSessionLifecycle) resolveLocked(
 
 func (l *remoteSessionLifecycle) connectBinding(
 	ctx context.Context,
+	key SessionSandboxKey,
 	binding SessionSandboxBinding,
 ) (RemoteSandboxHandle, bool, error) {
 	summary, err := l.client.Get(ctx, binding.SandboxID)
@@ -254,7 +255,10 @@ func (l *remoteSessionLifecycle) connectBinding(
 		return nil, true, nil
 	}
 
-	handle, err := l.client.Connect(ctx, binding.SandboxID)
+	handle, err := l.client.Connect(ctx, RemoteConnectRequest{
+		SandboxID:          binding.SandboxID,
+		TrafficAccessToken: binding.TrafficAccessToken,
+	})
 	if err != nil {
 		if CanReplaceRemoteBinding(err) {
 			return nil, true, nil
@@ -264,7 +268,52 @@ func (l *remoteSessionLifecycle) connectBinding(
 	if err := l.validateHandle(handle, binding.SandboxID); err != nil {
 		return nil, false, err
 	}
+	persistInboundToken(ctx, l.bindings, key, binding, handle)
 	return handle, false, nil
+}
+
+// persistInboundToken writes a provider-reissued traffic token back onto the
+// binding. Connect may return a fresher credential than Redis has (pause then
+// resume); without this a later restart restores the stale copy, data-plane
+// calls 403, and CanReplaceRemoteBinding will not swap the binding.
+func persistInboundToken(
+	ctx context.Context,
+	store SessionSandboxBindingStore,
+	key SessionSandboxKey,
+	binding SessionSandboxBinding,
+	handle RemoteSandboxHandle,
+) {
+	if store == nil {
+		return
+	}
+	token := InboundTokenOf(handle)
+	if token == "" || token == binding.TrafficAccessToken {
+		return
+	}
+	if _, err := store.ReplaceTrafficTokenIfMatch(ctx, key, binding, token); err != nil {
+		log.Printf(
+			"[sandbox] persist inbound token of session %s failed: %v",
+			key.SessionID, err,
+		)
+	}
+}
+
+// inboundTokenRequired reports whether the resolved create policy requires
+// the per-sandbox traffic token on every data-plane call. Production resolve
+// always sets AllowPublicTraffic=false. nil means the policy was never
+// resolved (baseline configs and some tests) and predates the token.
+func (l *remoteSessionLifecycle) inboundTokenRequired() bool {
+	allowPublic := l.createRequest.Network.AllowPublicTraffic
+	return allowPublic != nil && !*allowPublic
+}
+
+// missingRequiredInboundToken reports a handle that would 403 on every
+// data-plane call: the provider issues a traffic token, this config requires
+// it, and the handle does not have one. Docker is excluded because its handle
+// does not implement RemoteInboundTokenCarrier.
+func (l *remoteSessionLifecycle) missingRequiredInboundToken(handle RemoteSandboxHandle) bool {
+	_, carriesInboundToken := handle.(RemoteInboundTokenCarrier)
+	return carriesInboundToken && l.inboundTokenRequired() && InboundTokenOf(handle) == ""
 }
 
 func (l *remoteSessionLifecycle) recoverOwnedSandbox(
@@ -305,7 +354,7 @@ func (l *remoteSessionLifecycle) recoverOwnedSandbox(
 				summary.ID,
 			)
 		}
-		handle, err := l.client.Connect(ctx, summary.ID)
+		handle, err := l.client.Connect(ctx, RemoteConnectRequest{SandboxID: summary.ID})
 		if err != nil {
 			if CanReplaceRemoteBinding(err) {
 				continue
@@ -315,6 +364,42 @@ func (l *remoteSessionLifecycle) recoverOwnedSandbox(
 		if err := l.validateHandle(handle, summary.ID); err != nil {
 			return nil, false, err
 		}
+		// A sandbox recovered by metadata has no binding to supply its inbound
+		// token, and both token-carrying providers issue that token only at
+		// create time. Adopting one under a closed-inbound policy would wedge
+		// the session: every data-plane call answers 403, which httpErrorKind
+		// classifies as authentication rather than NotFound, so
+		// CanReplaceRemoteBinding never lets the binding be replaced.
+		//
+		// The test is whether the provider HAS the concept, not whether the
+		// token is empty. Docker's handle omits RemoteInboundTokenCarrier
+		// because it has no inbound credential and no provider gateway, so an
+		// empty token there means "not applicable" rather than "lost" — and
+		// destroying a healthy container over it would cost /workspace on
+		// every binding loss.
+		if l.missingRequiredInboundToken(handle) {
+			// Deleting rather than walking away is safe for the same reason
+			// cleanupOwnedDuplicates below is: this loop holds the lifecycle
+			// lock for key, and l.metadata(key) scopes every candidate to this
+			// session. It is also necessary, because nothing in-tree reclaims
+			// orphans (ReapOrphanSandboxes has no production caller) and
+			// Connect above has already resumed this sandbox and refreshed its
+			// TTL, so leaving it would strand a billable sandbox per restart.
+			log.Printf(
+				"[sandbox] deleting remote sandbox %s of session %s: "+
+					"adopted by metadata without the inbound traffic token "+
+					"this config's network policy requires",
+				summary.ID, key.SessionID,
+			)
+			if err := l.cleanupSandboxID(ctx, summary.ID); err != nil {
+				return nil, false, fmt.Errorf(
+					"delete unusable owned remote sandbox %q: %w",
+					summary.ID,
+					err,
+				)
+			}
+			continue
+		}
 		if err := l.cleanupOwnedDuplicates(ctx, summaries, summary.ID, metadata); err != nil {
 			return nil, false, err
 		}
@@ -322,7 +407,16 @@ func (l *remoteSessionLifecycle) recoverOwnedSandbox(
 		if templateID == "" {
 			templateID = l.createRequest.TemplateID
 		}
-		binding := l.newBinding(key, summary.ID, templateID, summary.StartedAt)
+		// Reached only when inbound is public or the provider re-issued the
+		// token above, so an empty token here is a policy that does not need
+		// one rather than a credential we lost.
+		binding := l.newBinding(
+			key,
+			summary.ID,
+			templateID,
+			InboundTokenOf(handle),
+			summary.StartedAt,
+		)
 		created, err := l.bindings.Create(ctx, key, binding)
 		if err != nil {
 			return nil, false, fmt.Errorf("bind owned remote sandbox: %w", err)
@@ -363,6 +457,19 @@ func (l *remoteSessionLifecycle) createAndBind(
 	if err := l.validateHandle(handle, ""); err != nil {
 		return nil, errors.Join(err, l.cleanupCreated(ctx, handle))
 	}
+	// Same 403 wedge as metadata adoption: the provider issues this token
+	// only at create time, and authentication errors are not replaceable.
+	// Binding an empty token would leave the session permanently stuck, so
+	// fail the create and destroy the unusable sandbox instead.
+	if l.missingRequiredInboundToken(handle) {
+		return nil, errors.Join(
+			fmt.Errorf(
+				"create remote sandbox %q: inbound traffic token missing under a closed-inbound policy",
+				handle.ID(),
+			),
+			l.cleanupCreated(ctx, handle),
+		)
+	}
 
 	exists, checkErr := l.sessionChecker.SessionExists(ctx, key)
 	if checkErr != nil {
@@ -379,6 +486,7 @@ func (l *remoteSessionLifecycle) createAndBind(
 		key,
 		handle.ID(),
 		request.TemplateID,
+		InboundTokenOf(handle),
 		l.now().UTC(),
 	)
 	created, bindErr := l.bindings.Create(ctx, key, binding)
@@ -437,7 +545,10 @@ func (l *remoteSessionLifecycle) connectKnownWinner(
 			l.client.Provider(),
 		)
 	}
-	handle, replace, err := l.connectBinding(ctx, winner)
+	handle, replace, err := l.connectBinding(ctx, SessionSandboxKey{
+		TenantID:  winner.TenantID,
+		SessionID: winner.SessionID,
+	}, winner)
 	if err != nil {
 		return nil, err
 	}
@@ -584,20 +695,22 @@ func (l *remoteSessionLifecycle) newBinding(
 	key SessionSandboxKey,
 	sandboxID string,
 	templateID string,
+	trafficAccessToken string,
 	createdAt time.Time,
 ) SessionSandboxBinding {
 	if createdAt.IsZero() {
 		createdAt = l.now().UTC()
 	}
 	return SessionSandboxBinding{
-		Version:    SessionSandboxBindingVersion,
-		Provider:   l.client.Provider(),
-		TenantID:   key.TenantID,
-		SessionID:  key.SessionID,
-		SandboxID:  sandboxID,
-		TemplateID: templateID,
-		CreatedAt:  createdAt.UTC(),
-		ConfigID:   l.sandboxConfigID,
+		Version:            SessionSandboxBindingVersion,
+		Provider:           l.client.Provider(),
+		TenantID:           key.TenantID,
+		SessionID:          key.SessionID,
+		SandboxID:          sandboxID,
+		TemplateID:         templateID,
+		CreatedAt:          createdAt.UTC(),
+		ConfigID:           l.sandboxConfigID,
+		TrafficAccessToken: trafficAccessToken,
 	}
 }
 

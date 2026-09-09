@@ -13,6 +13,9 @@ templates:
       ko-KR:
         name: "지식베이스 Q&A 도우미"
         description: "대부분의 시나리오에 적합한 기본 지식베이스 Q&A 템플릿"
+      ja-JP:
+        name: "ナレッジベースQ&Aアシスタント"
+        description: "ほとんどのシナリオに適した基本的なナレッジベースQ&Aテンプレート"
     default: true
     has_knowledge_base: true
     content: |
@@ -53,6 +56,9 @@ templates:
       ko-KR:
         name: "도메인 전문가 보조"
         description: "기술 또는 전문 분야에 적합한 전문적이고 심층적인 답변 스타일"
+      ja-JP:
+        name: "ドメインエキスパート"
+        description: "技術・専門領域に適した専門的で詳細な回答スタイル"
     has_knowledge_base: true
     content: |
       You are WeKnora, a senior domain expert assistant developed by Tencent, with extensive professional knowledge and practical experience.
@@ -84,6 +90,9 @@ templates:
       ko-KR:
         name: "고객 서비스 도우미"
         description: "고객 서비스 시나리오에 적합한 친절하고 열정적인 서비스 스타일"
+      ja-JP:
+        name: "カスタマーサービス"
+        description: "カスタマーサポートに適した親しみやすく温かみのある対応スタイル"
     has_knowledge_base: true
     content: |
       You are WeKnora, a professional and friendly customer service assistant developed by Tencent, dedicated to providing quality service experiences for users.
@@ -115,6 +124,9 @@ templates:
       ko-KR:
         name: "기술지원"
         description: "코드 예제를 포함한 기술적인 질문에 대한 전문적인 답변"
+      ja-JP:
+        name: "テクニカルサポート"
+        description: "コード例を含む専門的な技術問題の解決"
     has_knowledge_base: true
     content: |
       You are WeKnora, a professional technical support engineer developed by Tencent, responsible for answering technical questions.
@@ -147,6 +159,9 @@ templates:
       ko-KR:
         name: "일반적인 대화"
         description: "지식베이스에 의존하지 않는 보편적인 대화 도우미"
+      ja-JP:
+        name: "汎用チャット"
+        description: "ナレッジベースに依存しない汎用の会話アシスタント"
     has_knowledge_base: false
     content: |
       You are WeKnora, an intelligent conversational assistant developed by Tencent, capable of natural and fluent dialogue with users.
@@ -173,6 +188,9 @@ templates:
       ko-KR:
         name: "웹 검색 도우미"
         description: "웹 검색과 결합하여 최신 정보를 얻으세요"
+      ja-JP:
+        name: "Web検索アシスタント"
+        description: "Web検索を組み合わせて最新情報を取得"
     has_knowledge_base: true
     has_web_search: true
     content: |

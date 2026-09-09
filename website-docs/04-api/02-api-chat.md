@@ -1,6 +1,6 @@
 # API 参考：会话、消息与聊天
 
-路由注册：`internal/router/router.go` 的 `RegisterSessionRoutes`、`RegisterChatRoutes`、`RegisterMessageRoutes`。Handler：`internal/handler/session/`（handler.go、qa.go、stream.go、title.go、temporary_document.go）、`internal/handler/message.go`、`internal/handler/message_suggestion.go`。
+创建和管理会话，读取消息与临时附件，并通过 SSE 获取知识问答或智能体回答。
 
 会话为“用户私有”资源，handler 内部强制归属校验；路由层为 Viewer+。API key：会话/聊天需 `chat` capability（或 full-access）；消息搜索需 `message_history`；知识检索需 `retrieve`。
 
@@ -365,3 +365,34 @@ curl "$BASE/api/v1/messages/s-1/load?limit=20" -H "X-API-Key: $API_KEY"
 ```bash
 curl -X DELETE $BASE/api/v1/messages/s-1/m-1 -H "Authorization: Bearer $TOKEN"
 ```
+
+## 会话生成文件
+
+以下接口要求 Viewer+，API Key 需 chat 或 full-access，并按会话归属校验。不存在或不可访问的会话返回 404。
+
+| 方法 | 路径 | 响应 |
+| --- | --- | --- |
+| GET | `/api/v1/sessions/:id/artifacts` | 200 `{success:true,data:[Artifact]}`，汇总会话文件 |
+| GET | `/api/v1/sessions/:id/messages/:message_id/artifacts` | 同上，仅本条消息文件 |
+| GET | `/api/v1/sessions/:id/messages/:message_id/artifacts/:index/download` | 200 文件流，Content-Disposition: attachment |
+
+Artifact 字段：index、handle（可选 resource:// 引用）、file_name、file_type、file_size、source_path、mod_time、created_at。响应不返回底层对象存储 URL。下载 index 从 0 开始，必须使用对应消息列表的索引，不能拿会话汇总索引直接拼消息下载地址。非法索引返回 400，越界或文件不存在返回 404。
+
+```bash
+curl "$BASE/api/v1/sessions/session-1/messages/message-1/artifacts" \
+  -H "Authorization: Bearer $TOKEN"
+curl "$BASE/api/v1/sessions/session-1/messages/message-1/artifacts/0/download" \
+  -H "Authorization: Bearer $TOKEN" -o result.pdf
+```
+
+### 回答中的图片和文件引用
+
+`GET /api/v1/sessions/:id/messages/:message_id/files?file_path=...` 是消息级鉴权代理。file_path 传该消息引用的资源句柄或受支持的存储引用，客户端应 URL 编码。后端校验消息访问权、资源与消息的绑定及知识库/共享 Agent 的当前访问权；任意文件路径不能凭会话 ID 访问。授权撤销后旧消息引用也会被拒绝。适用于共享 Agent、组织共享库回答图片与消息产物，详见[文件访问](../03-features/21-file-access.md)。
+
+### 每轮用量
+
+消息返回持久化的 usage，Agent 完成事件携带 turn_usage；包含本轮各用途模型调用聚合结果。工具调用自身并不都产生 Token，用量以提供商返回或后端已采集的记录为准。字段见[可观测性](../03-features/16-observability.md)。
+
+## 实现参考
+
+路由注册：`internal/router/router.go` 的 `RegisterSessionRoutes`、`RegisterChatRoutes`、`RegisterMessageRoutes`。Handler：`internal/handler/session/`（handler.go、qa.go、stream.go、title.go、temporary_document.go）、`internal/handler/message.go`、`internal/handler/message_suggestion.go`。

@@ -16,6 +16,9 @@ templates:
       ko-KR:
         name: "인사 응답"
         description: "인사 의도에 대한 시스템 프롬프트"
+      ja-JP:
+        name: "挨拶への応答"
+        description: "挨拶の意図に対するシステムプロンプト"
     content: |
       You are WeKnora, a professional and friendly intelligent assistant developed by Tencent.
       The user is greeting you, expressing thanks, or saying farewell.
@@ -38,6 +41,9 @@ templates:
       ko-KR:
         name: "잡담 응답"
         description: "일상적인 대화를 위한 시스템 프롬프트"
+      ja-JP:
+        name: "雑談への応答"
+        description: "雑談の意図に対するシステムプロンプト"
     content: |
       You are WeKnora, a professional and friendly intelligent assistant developed by Tencent, with broad general knowledge.
       The user is engaging in casual conversation that does not require document retrieval.
@@ -62,6 +68,9 @@ templates:
       ko-KR:
         name: "후속 응답"
         description: "대화 기록을 참조하는 후속 질문에 대한 시스템 프롬프트"
+      ja-JP:
+        name: "追加質問への応答"
+        description: "会話履歴を参照する追加質問に対するシステムプロンプト"
     content: |
       You are WeKnora, a professional intelligent assistant developed by Tencent.
       The user is asking a follow-up question that refers to your previous conversation.
@@ -86,6 +95,9 @@ templates:
       ko-KR:
         name: "이미지 분석 응답"
         description: "순수 이미지 이해 의도를 위한 시스템 프롬프트"
+      ja-JP:
+        name: "画像分析への応答"
+        description: "画像のみを理解する意図に対するシステムプロンプト"
     content: |
       You are WeKnora, a professional intelligent assistant developed by Tencent, with image analysis capabilities.
       The user wants you to describe, analyze, translate, or extract information from the attached image(s).
@@ -109,6 +121,9 @@ templates:
       ko-KR:
         name: "요약 응답"
         description: "대화 요약 의도를 위한 시스템 프롬프트"
+      ja-JP:
+        name: "要約への応答"
+        description: "会話要約の意図に対するシステムプロンプト"
     content: |
       You are WeKnora, a professional intelligent assistant developed by Tencent, skilled at information organization and summarization.
       The user wants you to summarize, organize, or distill the previous conversation.
@@ -132,6 +147,9 @@ templates:
       ko-KR:
         name: "웹 검색 불가 응답"
         description: "웹 검색 의도가 감지되었지만 웹 검색이 활성화되지 않은 경우의 시스템 프롬프트"
+      ja-JP:
+        name: "Web検索利用不可の応答"
+        description: "Web検索の意図を検出したがWeb検索が有効でない場合のシステムプロンプト"
     content: |
       You are WeKnora, a professional intelligent assistant developed by Tencent.
       You are currently acting as a knowledge assistant whose primary usage scenario is question answering based on the user's personal knowledge base.
@@ -158,6 +176,9 @@ templates:
       ko-KR:
         name: "문서 분석 응답"
         description: "순수 문서 이해 의도를 위한 시스템 프롬프트"
+      ja-JP:
+        name: "ドキュメント分析への応答"
+        description: "ドキュメントのみを理解する意図に対するシステムプロンプト"
     content: |
       You are WeKnora, a professional intelligent assistant developed by Tencent, with document analysis capabilities.
       The user wants you to describe, analyze, summarize, translate, or extract information from the attached document(s) or file(s).

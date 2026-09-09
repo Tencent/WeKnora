@@ -2,6 +2,7 @@ package skills
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,6 +49,30 @@ Use this skill when testing.
 
 	t.Logf("Parsed skill: name=%s, description=%s, instructions_len=%d",
 		skill.Name, skill.Description, len(skill.Instructions))
+}
+
+func TestParseSkillFileUTF8BOM(t *testing.T) {
+	for _, newline := range []string{"\n", "\r\n"} {
+		t.Run(fmt.Sprintf("newline=%q", newline), func(t *testing.T) {
+			content := "\ufeff---\nname: test-skill\ndescription: A test skill.\n---\nKeep this \ufeff character.\n"
+			content = strings.ReplaceAll(content, "\n", newline)
+			skill, err := ParseSkillFile(content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if skill.Name != "test-skill" || skill.Description != "A test skill." ||
+				skill.Instructions != "Keep this \ufeff character." {
+				t.Fatalf("unexpected parsed skill: %+v", skill)
+			}
+			metadata, err := ParseSkillMetadata(content)
+			if err != nil || metadata.Name != "test-skill" {
+				t.Fatalf("unexpected metadata: %+v, error: %v", metadata, err)
+			}
+		})
+	}
+	if _, err := ParseSkillFile("\ufeff# Missing frontmatter"); err == nil {
+		t.Fatal("BOM must not bypass frontmatter validation")
+	}
 }
 
 func TestSkillValidation(t *testing.T) {

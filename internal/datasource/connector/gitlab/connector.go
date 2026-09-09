@@ -404,7 +404,24 @@ func (c *Connector) item(ctx context.Context, p *project, ref, file string) (typ
 		return types.FetchedItem{}, err
 	}
 	id := fmt.Sprintf("gitlab:%s:%d:%s:%s", c.canonicalBase, p.ID, ref, file)
-	return types.FetchedItem{ExternalID: id, Title: p.PathWithNamespace + "/" + file, FileName: knowledgeRelativePath(p.Name, ref, file), Content: body, ContentType: "text/plain", UpdatedAt: time.Now().UTC(), SourceResourceID: fmt.Sprint(p.ID), Metadata: map[string]string{"channel": types.ConnectorTypeGitLab, "source_type": "gitlab", "gitlab_project_id": fmt.Sprint(p.ID), "gitlab_ref": ref, "gitlab_path": file, "gitlab_url": p.WebURL + "/-/blob/" + ref + "/" + file}}, nil
+	// UpdatedAt is intentionally left unset: the file's last commit time is not
+	// fetched here, and a fetch timestamp would be a fabricated source time.
+	return types.FetchedItem{
+		ExternalID:       id,
+		Title:            p.PathWithNamespace + "/" + file,
+		FileName:         knowledgeRelativePath(p.Name, ref, file),
+		Content:          body,
+		ContentType:      "text/plain",
+		SourceResourceID: fmt.Sprint(p.ID),
+		Metadata: map[string]string{
+			"channel":           types.ConnectorTypeGitLab,
+			"source_type":       "gitlab",
+			"gitlab_project_id": fmt.Sprint(p.ID),
+			"gitlab_ref":        ref,
+			"gitlab_path":       file,
+			"gitlab_url":        p.WebURL + "/-/blob/" + ref + "/" + file,
+		},
+	}, nil
 }
 
 // knowledgeRelativePath maps a repository file to the KB folder convention:

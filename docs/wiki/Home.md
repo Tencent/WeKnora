@@ -26,7 +26,7 @@ aliases: [Home, Index, wiki首页]
 | [MCP功能使用说明](核心功能/MCP功能使用说明.md) | MCP 服务的用户操作指南 |
 | [内置MCP服务管理](核心功能/内置MCP服务管理.md) | 内置 MCP 服务的系统级管理 |
 | [内置模型管理](核心功能/内置模型管理.md) | 内置模型的系统级管理 |
-| [Agent技能系统](核心功能/Agent技能系统.md) | Agent Skills 扩展机制与预加载技能 |
+| [Agent技能系统](核心功能/Agent技能系统.md) | Agent Skills 扩展机制与沙箱技能 |
 
 ## 集成与扩展
 

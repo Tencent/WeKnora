@@ -167,7 +167,7 @@ types still accept and serve them — so a rename on either side fails CI instea
 
 ## Compatibility
 
-Verified against dsh `0.1.0-rc.8` and WeKnora `0.7.2`. dsh is in developer preview and states that breaking changes
+Verified against dsh `0.1.0-rc.8` and WeKnora `0.8.0`. dsh is in developer preview and states that breaking changes
 will happen; this package deliberately has **no runtime dependencies** and hands `ctx.tools.register()` a plain object,
 so it does not pin any harness package version. If a harness release changes the tool-definition contract, open an issue
 against this repository.

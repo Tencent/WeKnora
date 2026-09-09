@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -133,5 +135,60 @@ func TestRequireRole_NilAuditServiceDoesNotPanic(t *testing.T) {
 		RequireRole(types.TenantRoleAdmin, cfgRBAC(true)))
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 even with nil audit service, got %d", w.Code)
+	}
+}
+
+func TestOwnershipAuditOnlyRecordsPolicyDenials(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		creator    string
+		lookupErr  error
+		disabled   bool
+		status     int
+		auditCalls int
+	}{
+		{name: "creator allowed", creator: "u1", status: http.StatusOK},
+		{name: "policy denied", creator: "other", status: http.StatusForbidden, auditCalls: 1},
+		{
+			name: "not found passes to handler",
+			lookupErr: fmt.Errorf("load: %w",
+				ErrResourceNotFound),
+			status: http.StatusOK,
+		},
+
+		{
+			name:      "database failure",
+			lookupErr: errors.New("database unavailable"),
+			status:    http.StatusServiceUnavailable,
+		},
+
+		{
+			name:      "lookup returned denial sentinel",
+			lookupErr: ErrOwnershipForbidden,
+			status:    http.StatusServiceUnavailable,
+		},
+
+		{name: "enforcement disabled", disabled: true, creator: "other", status: http.StatusOK},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			audit := &stubDenyAudit{}
+			lookup := func(*gin.Context) (string, error) {
+				if tt.disabled {
+					t.Fatal("disabled enforcement must skip lookup")
+				}
+				return tt.creator, tt.lookupErr
+			}
+			w := auditableHarness(t, types.TenantRoleContributor, "u1", 7, audit,
+				RequireOwnershipOrRole(types.TenantRoleAdmin, lookup, cfgRBAC(!tt.disabled)))
+			if w.Code != tt.status || len(audit.calls) != tt.auditCalls {
+				t.Fatalf(
+					"status=%d audit calls=%d; want status=%d audit calls=%d",
+					w.Code,
+					len(audit.calls),
+					tt.status,
+					tt.auditCalls,
+				)
+			}
+		})
 	}
 }

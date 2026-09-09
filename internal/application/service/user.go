@@ -1229,6 +1229,9 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	if isRefreshTokenClaims(claims) {
 		return nil, 0, errors.New("refresh token cannot be used as access token")
 	}
+	if isSandboxTerminalTicketClaims(claims) {
+		return nil, 0, errors.New("terminal ticket cannot be used as access token")
+	}
 
 	// Check if token is revoked
 	tokenRecord, err := s.tokenRepo.GetTokenByValue(ctx, tokenString)
@@ -1252,9 +1255,50 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	return user, activeTenantID, nil
 }
 
+func redactAuthToken(token *types.AuthToken) *types.AuthToken {
+	if token == nil {
+		return nil
+	}
+	cp := *token
+	cp.Token = ""
+	return &cp
+}
+
+// GetAccessTokenByValue looks up the stored token row for a JWT string.
+// The JWT itself is stripped so callers cannot log or re-play it.
+func (s *userService) GetAccessTokenByValue(ctx context.Context, tokenString string) (*types.AuthToken, error) {
+	tokenString = strings.TrimSpace(tokenString)
+	if tokenString == "" {
+		return nil, apprepo.ErrTokenNotFound
+	}
+	token, err := s.tokenRepo.GetTokenByValue(ctx, tokenString)
+	if err != nil {
+		return nil, err
+	}
+	return redactAuthToken(token), nil
+}
+
+// GetAccessTokenByID looks up a stored token row by primary key.
+func (s *userService) GetAccessTokenByID(ctx context.Context, id string) (*types.AuthToken, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, apprepo.ErrTokenNotFound
+	}
+	token, err := s.tokenRepo.GetTokenByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return redactAuthToken(token), nil
+}
+
 func isRefreshTokenClaims(claims jwt.MapClaims) bool {
 	tokenType, ok := claims["type"].(string)
 	return ok && tokenType == "refresh"
+}
+
+func isSandboxTerminalTicketClaims(claims jwt.MapClaims) bool {
+	tokenType, ok := claims["type"].(string)
+	return ok && tokenType == sandboxTerminalTicketType
 }
 
 func userIDFromSignedToken(tokenString string) (string, error) {

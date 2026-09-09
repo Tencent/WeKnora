@@ -4,8 +4,16 @@ package types
 type ContextKey string
 
 const (
-	// TenantIDContextKey is the context key for tenant ID
+	// TenantIDContextKey scopes execution (repository/model queries).
 	TenantIDContextKey ContextKey = "TenantID"
+	// CallerContextKey captures the authenticated resource caller.
+	CallerContextKey ContextKey = "ResourceCaller"
+	// KBGrantsContextKey carries immutable operation grants.
+	KBGrantsContextKey ContextKey = "ResourceKBGrants"
+	// KBTransferContextKey carries one admitted resource pair.
+	KBTransferContextKey ContextKey = "ResourceKBTransfer"
+	// SharedAgentGrantContextKey carries an authorized agent read scope.
+	SharedAgentGrantContextKey ContextKey = "ResourceSharedAgentGrant"
 	// TenantInfoContextKey is the context key for tenant information
 	TenantInfoContextKey ContextKey = "TenantInfo"
 	// RequestIDContextKey is the context key for request ID

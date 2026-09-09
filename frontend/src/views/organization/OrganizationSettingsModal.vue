@@ -265,7 +265,7 @@
                         <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.editorPerm1') }}</li>
                         <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.editorPerm2') }}</li>
                         <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.useSharedAgentsPerm') }}</li>
-                        <li><t-icon name="close" class="close-icon" />{{ $t('organization.editor.shareKBPerm') }}</li>
+                        <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.shareKBPerm') }}</li>
                         <li><t-icon name="close" class="close-icon" />{{ $t('organization.editor.editorPerm3') }}</li>
                       </ul>
                     </div>
@@ -1098,7 +1098,7 @@ const orgRoleMatrix: Record<OrgRole, OrgRolePerm[]> = {
     { key: 'viewerPerm1', has: true },
     { key: 'editorPerm1', has: true },
     { key: 'useSharedAgentsPerm', has: true },
-    { key: 'shareKBPerm', has: false },
+    { key: 'shareKBPerm', has: true },
     { key: 'adminPerm1', has: false },
   ],
   viewer: [

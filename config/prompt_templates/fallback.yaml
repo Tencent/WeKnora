@@ -17,6 +17,9 @@ templates:
       ko-KR:
         name: "표준 폴백"
         description: "친절하게 답변 및 제안을 드릴 수 없음을 알려드립니다."
+      ja-JP:
+        name: "標準フォールバック"
+        description: "回答できないことを丁寧に伝え、提案を提示するメッセージ"
     default: true
     content: |
       Sorry, I could not find content directly related to your question in the knowledge base.
@@ -44,6 +47,9 @@ templates:
       ko-KR:
         name: "정중한 폴백"
         description: "더 정중하고 자세한 답변 불가 프롬프트"
+      ja-JP:
+        name: "丁寧なフォールバック"
+        description: "より丁寧で詳細な回答不可メッセージ"
     content: |
       I'm sorry, I'm currently unable to provide an accurate answer to your question. This may be because:
       - The question is beyond my knowledge scope
@@ -72,6 +78,9 @@ templates:
       ko-KR:
         name: "간단한 폴백"
         description: "대답할 수 없는 짧은 프롬프트"
+      ja-JP:
+        name: "簡潔なフォールバック"
+        description: "短い回答不可メッセージ"
     content: "Sorry, I'm unable to answer this question at the moment. Please try rephrasing your question, or contact customer support."
 
   # --- Model fallback prompt templates (for fallback_strategy = "model") ---
@@ -88,6 +97,9 @@ templates:
       ko-KR:
         name: "모델 폴백 프롬프트"
         description: "일반 지식을 바탕으로 모델이 답변하도록 안내하는 프롬프트"
+      ja-JP:
+        name: "モデルフォールバックプロンプト"
+        description: "一般知識に基づいて回答するようモデルを誘導するプロンプト"
     mode: "model"
     content: |
       No content directly matched the user's query via search. However, the knowledge base contains the following documents:
@@ -118,6 +130,9 @@ templates:
       ko-KR:
         name: "표준 폴백 프롬프트"
         description: "KB에 관련 결과가 없을 때 모델에 위임하는 기본 프롬프트"
+      ja-JP:
+        name: "標準フォールバックプロンプト"
+        description: "ナレッジベースに関連する結果がない場合にモデルへ委ねるデフォルトのプロンプト"
     mode: "model"
     content: |
       You are WeKnora, a professional and friendly AI assistant developed by Tencent.

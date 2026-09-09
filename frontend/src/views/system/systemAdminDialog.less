@@ -1,0 +1,75 @@
+/* Shared in-place popup chrome for SystemAdmin actions (create user /
+   reset password). Matches TenantMembers invite / UserProfile password
+   popups: t-popup teleports to body, so this must be global CSS. */
+
+.system-admin-action-popup-overlay {
+  z-index: 3050 !important;
+
+  .t-popup__content {
+    padding: 14px 16px !important;
+    min-width: 300px;
+    max-width: min(360px, calc(100vw - 24px));
+    max-height: min(480px, calc(100vh - 96px));
+    overflow-y: auto;
+    border-radius: 12px !important;
+    background: var(--td-bg-color-container) !important;
+    border: 0.5px solid var(--td-component-stroke) !important;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.03),
+      0 2px 4px rgba(0, 0, 0, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.1) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  }
+}
+
+:root[theme-mode='dark'] .system-admin-action-popup-overlay .t-popup__content {
+  background: rgba(36, 36, 36, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow:
+    0 0 0 0.5px rgba(255, 255, 255, 0.05),
+    0 2px 4px rgba(0, 0, 0, 0.12),
+    0 8px 32px rgba(0, 0, 0, 0.28) !important;
+}
+
+.system-admin-action-popup-anchor {
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.system-admin-action-popup-inner {
+  max-width: 100%;
+}
+
+.system-admin-action-popup-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--td-text-color-primary);
+}
+
+.system-admin-action-popup-hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
+}
+
+.system-admin-action-popup-form {
+  .t-form__item {
+    margin-bottom: 14px;
+
+    &:last-child {
+      margin-bottom: 4px;
+    }
+  }
+}
+
+.system-admin-action-popup-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}

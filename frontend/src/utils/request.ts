@@ -4,12 +4,53 @@ import { generateRandomString, MAX_FILE_SIZE_MB, MAX_SKILL_BUNDLE_SIZE_MB } from
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
 import { isSkillBundleUploadUrl } from './uploadLimit';
+import {
+  forceReloginRedirect,
+  isEmbedPage,
+  refreshAccessTokenShared,
+} from './authRefresh';
+
+export { forceReloginRedirect, refreshAccessTokenShared };
 
 const t = (key: string) => i18n.global.t(key)
 
 // API基础URL
 const BASE_URL = getApiBaseUrl();
 
+/**
+ * Response payload augmented with the HTTP status code.
+ *
+ * `$httpStatus` lets callers distinguish outcomes that share a success shape.
+ * Defined as a non-enumerable property, so it stays invisible to object spread,
+ * JSON.stringify and Object.keys and never leaks into downstream payloads.
+ *
+ * Guaranteed only for JSON responses (objects/arrays). Blob, string and SSE
+ * stream responses do not carry it at runtime, so only read `$httpStatus`
+ * when the payload is known to be an object.
+ */
+export type WithStatus<T> = T & {
+  /** HTTP status code of the response. Non-enumerable. See {@link WithStatus}. */
+  readonly $httpStatus: number
+};
+
+const HTTP_STATUS_KEY = '$httpStatus';
+
+/**
+ * Attach the non-enumerable `$httpStatus` property to a response payload
+ * in place and return it. Primitives pass through untouched.
+ * See {@link WithStatus} for where the property is guaranteed.
+ */
+function withHttpStatus<T>(data: T, status: number): T {
+  if (data !== null && typeof data === 'object') {
+    Object.defineProperty(data, HTTP_STATUS_KEY, {
+      value: status,
+      enumerable: false,
+      configurable: true,
+      writable: false,
+    });
+  }
+  return data;
+}
 
 // 创建Axios实例
 const instance = axios.create({
@@ -68,10 +109,6 @@ instance.interceptors.request.use(
   }
 );
 
-// Token刷新标志，防止多个请求同时刷新token
-let isRefreshing = false;
-let failedQueue: Array<{ resolve: Function; reject: Function }> = [];
-
 // Share-link endpoints (/auth/invitations/lookup, /auth/register-by-invite)
 // are reachable by anonymous users opening an invite link. A 401 from these
 // must surface to the page (e.g. expired token), not trigger the
@@ -84,40 +121,14 @@ function isPublicAuthRequest(url?: string): boolean {
   return PUBLIC_AUTH_PATHS.some(p => url.includes(p));
 }
 
-// 处理队列中的请求
-const processQueue = (error: any, token: string | null = null) => {
-  failedQueue.forEach(({ resolve, reject }) => {
-    if (error) {
-      reject(error);
-    } else {
-      resolve(token);
-    }
-  });
-  
-  failedQueue = [];
-};
-
-function isEmbedPage(): boolean {
-  if (typeof window === 'undefined') return false;
-  return window.location.pathname.startsWith('/embed/');
-}
-
-function redirectToLogin() {
-  if (typeof window === 'undefined') return;
-  if (window.location.pathname === '/login') return;
-  // Embed 渠道用 Embed token 鉴权，匿名访问不应被踢到登录页
-  if (isEmbedPage()) return;
-  window.location.href = '/login';
-}
-
 instance.interceptors.response.use(
   (response) => {
     // 根据业务状态码处理逻辑
     const { status, data } = response;
     if (status >= 200 && status < 300) {
-      return data;
+      return withHttpStatus(data, status);
     } else {
-      return Promise.reject(data);
+      return Promise.reject(withHttpStatus(data, status));
     }
   },
   async (error: any) => {
@@ -133,7 +144,7 @@ instance.interceptors.response.use(
       const msg = typeof data === 'object'
         ? (typeof data?.error === 'string' ? data.error : (data?.error?.message || data?.message))
         : data;
-      return Promise.reject({ status, message: msg || t('error.invalidCredentials') });
+      return Promise.reject(withHttpStatus({ status, message: msg || t('error.invalidCredentials') }, status));
     }
 
     // Embed 调试页/挂件：无 JWT 时直接拒绝，勿走 refresh → /login
@@ -142,88 +153,38 @@ instance.interceptors.response.use(
       const msg = typeof data === 'object'
         ? (typeof data?.error === 'string' ? data.error : (data?.error?.message || data?.message))
         : data;
-      return Promise.reject({ status, message: msg || t('error.invalidCredentials') });
+      return Promise.reject(withHttpStatus({ status, message: msg || t('error.invalidCredentials') }, status));
     }
 
     // 如果是401错误且不是刷新token的请求，尝试刷新token
     if (error.response.status === 401 && !originalRequest._retry && !originalRequest.url?.includes('/auth/refresh')) {
-      if (isRefreshing) {
-        // 如果正在刷新token，将请求加入队列
-        return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
-        }).then(token => {
-          originalRequest.headers['Authorization'] = 'Bearer ' + token;
-          return instance(originalRequest);
-        }).catch(err => {
-          return Promise.reject(err);
-        });
-      }
-      
       originalRequest._retry = true;
-      isRefreshing = true;
-      
-      const refreshToken = localStorage.getItem('weknora_refresh_token');
-      
-      if (refreshToken) {
-        try {
-          // 动态导入refresh token API
-          const { refreshToken: refreshTokenAPI } = await import('../api/auth/index');
-          const response = await refreshTokenAPI(refreshToken);
-          
-          if (response.success && response.data) {
-            const { token, refreshToken: newRefreshToken } = response.data;
-            
-            // 更新localStorage中的token
-            localStorage.setItem('weknora_token', token);
-            localStorage.setItem('weknora_refresh_token', newRefreshToken);
-            
-            // 更新请求头
-            originalRequest.headers['Authorization'] = 'Bearer ' + token;
-            
-            // 处理队列中的请求
-            processQueue(null, token);
-            
-            return instance(originalRequest);
-          } else {
-            throw new Error(response.message || t('error.tokenRefreshFailed'));
-          }
-        } catch (refreshError) {
-          // 刷新失败，清除所有token并跳转到登录页
-          localStorage.removeItem('weknora_token');
-          localStorage.removeItem('weknora_refresh_token');
-          localStorage.removeItem('weknora_user');
-          localStorage.removeItem('weknora_tenant');
-          
-          processQueue(refreshError, null);
-          
-          redirectToLogin();
-          
-          return Promise.reject(refreshError);
-        } finally {
-          isRefreshing = false;
-        }
-      } else {
-        // 没有refresh token，直接跳转到登录页
-        localStorage.removeItem('weknora_token');
-        localStorage.removeItem('weknora_user');
-        localStorage.removeItem('weknora_tenant');
-        
-        redirectToLogin();
-        
-        return Promise.reject({ message: t('error.pleaseRelogin') });
+      try {
+        const token = await refreshAccessTokenShared({
+          messages: {
+            pleaseRelogin: t('error.pleaseRelogin'),
+            tokenRefreshFailed: t('error.tokenRefreshFailed'),
+          },
+        });
+        originalRequest.headers['Authorization'] = 'Bearer ' + token;
+        return instance(originalRequest);
+      } catch (refreshError) {
+        // refreshAccessTokenShared already cleared credentials and redirected.
+        return Promise.reject(refreshError);
       }
     }
     
     // 处理 Nginx 413 Request Entity Too Large
-    if (error.response.status === 413) {
+    const ERR_ENTITY_TOO_LARGE = 413;
+    if (error.response.status === ERR_ENTITY_TOO_LARGE) {
       const skillUpload = isSkillBundleUploadUrl(error.config?.url)
-      return Promise.reject({ 
-        status: 413, 
+      return Promise.reject(withHttpStatus({
+        status: ERR_ENTITY_TOO_LARGE,
         message: skillUpload
           ? i18n.global.t('settings.sandbox.skillBundleTooLarge', { size: MAX_SKILL_BUNDLE_SIZE_MB })
           : i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }),
         success: false
-      });
+      }, ERR_ENTITY_TOO_LARGE));
     }
 
     const { status, data } = error.response;
@@ -242,16 +203,16 @@ instance.interceptors.response.use(
     } else if (typeof data === 'string') {
       errorMessage = data;
     }
-    return Promise.reject({ 
-      status, 
+    return Promise.reject(withHttpStatus({
+      status,
       message: errorMessage,
       ...(typeof data === 'object' ? data : {}) 
-    });
+    }, status));
   }
 );
 
-export function get<T = any>(url: string, config?: any): Promise<T> {
-  return instance.get<T>(url, config) as unknown as Promise<T>;
+export function get<T = any>(url: string, config?: any): Promise<WithStatus<T>> {
+  return instance.get<T>(url, config) as unknown as Promise<WithStatus<T>>;
 }
 
 export async function getDown(url: string): Promise<Blob> {
@@ -266,7 +227,7 @@ export function postUpload(
   data = {},
   onUploadProgress?: (progressEvent: any) => void,
   config: any = {},
-): Promise<any> {
+): Promise<WithStatus<any>> {
   return instance.post(url, data, {
     ...config,
     headers: {
@@ -279,6 +240,7 @@ export function postUpload(
 }
 
 export function postChat<T = any>(url: string, data = {}): Promise<T> {
+  // SSE stream: body is a string, so no `$httpStatus` is attached (see WithStatus).
   return instance.post(url, data, {
     headers: {
       "Content-Type": "text/event-stream;charset=utf-8",
@@ -287,18 +249,18 @@ export function postChat<T = any>(url: string, data = {}): Promise<T> {
   }) as unknown as Promise<T>;
 }
 
-export function post<T = any>(url: string, data = {}, config?: any): Promise<T> {
-  return instance.post<T>(url, data, config) as unknown as Promise<T>;
+export function post<T = any>(url: string, data = {}, config?: any): Promise<WithStatus<T>> {
+  return instance.post<T>(url, data, config) as unknown as Promise<WithStatus<T>>;
 }
 
-export function put<T = any>(url: string, data = {}, config?: any): Promise<T> {
-  return instance.put<T>(url, data, config) as unknown as Promise<T>;
+export function put<T = any>(url: string, data = {}, config?: any): Promise<WithStatus<T>> {
+  return instance.put<T>(url, data, config) as unknown as Promise<WithStatus<T>>;
 }
 
-export function patch<T = any>(url: string, data = {}, config?: any): Promise<T> {
-  return instance.patch<T>(url, data, config) as unknown as Promise<T>;
+export function patch<T = any>(url: string, data = {}, config?: any): Promise<WithStatus<T>> {
+  return instance.patch<T>(url, data, config) as unknown as Promise<WithStatus<T>>;
 }
 
-export function del<T = any>(url: string, data?: any): Promise<T> {
-  return instance.delete<T>(url, { data }) as unknown as Promise<T>;
+export function del<T = any>(url: string, data?: any): Promise<WithStatus<T>> {
+  return instance.delete<T>(url, { data }) as unknown as Promise<WithStatus<T>>;
 }

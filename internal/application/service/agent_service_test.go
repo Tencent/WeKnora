@@ -91,6 +91,9 @@ func (stubSessionFileStore) WriteSessionInputFile(context.Context, string, strin
 func (stubSessionFileStore) WriteSessionWorkspaceFile(context.Context, string, string, []byte) error {
 	return nil
 }
+func (stubSessionFileStore) WriteSessionWorkspaceFiles(context.Context, string, []sandbox.SessionWorkspaceFile) error {
+	return nil
+}
 func (stubSessionFileStore) RemoveSessionInputPath(context.Context, string, string) error { return nil }
 
 func (s *fakeAgentKnowledgeService) ListPagedKnowledgeByKnowledgeBaseID(
@@ -163,11 +166,11 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
 		require.NoError(t, err)
 		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolReadSkill))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolExecuteSkillScript))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSkill))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolExecuteSkillScript))
 		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles),
 			"session file tools only accept /workspace; the installer must write the skill tree via shell_exec")
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolReadSandboxFile))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
 		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolWriteSandboxFile))
 		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolEditSandboxFile))
 		require.Nil(t, engine.(*agent.AgentEngine).GetSkillsManager())
@@ -198,7 +201,7 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec),
 			"shell_exec follows SkillsEnabled; an agent with skills off gets no shell")
 		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadSandboxFile))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
 		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolWriteSandboxFile))
 		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolEditSandboxFile))
 		require.Nil(t, engine.(*agent.AgentEngine).GetSkillsManager())
@@ -227,11 +230,11 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec))
 		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadSandboxFile))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
 		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolWriteSandboxFile))
 		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolEditSandboxFile))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolReadSkill))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolExecuteSkillScript))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSkill))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolExecuteSkillScript))
 		require.Nil(t, engine.(*agent.AgentEngine).GetSkillsManager())
 	})
 
@@ -257,12 +260,14 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
 		require.NoError(t, err)
 		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadSandboxFile))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
 		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolWriteSandboxFile))
 		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolEditSandboxFile))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadSkill))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolExecuteSkillScript))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSkill))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSandboxFile))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolExecuteSkillScript))
 		require.NotNil(t, engine.(*agent.AgentEngine).GetSkillsManager())
 	})
 
@@ -291,8 +296,10 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 		require.NoError(t, err)
 		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
 		require.NoError(t, err)
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadSkill))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolExecuteSkillScript))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSkill))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSandboxFile))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolExecuteSkillScript))
 		mgr := engine.(*agent.AgentEngine).GetSkillsManager()
 		require.NotNil(t, mgr)
 		var names []string
@@ -320,8 +327,8 @@ func TestSkillToolsFollowSkillsEnabled(t *testing.T) {
 		}, registry)
 
 		require.NoError(t, err)
-		require.False(t, toolRegistered(registry, tools.ToolReadSkill))
-		require.False(t, toolRegistered(registry, tools.ToolExecuteSkillScript))
+		require.False(t, toolRegistered(registry, tools.LegacyToolReadSkill))
+		require.False(t, toolRegistered(registry, tools.LegacyToolExecuteSkillScript))
 		require.False(t, toolRegistered(registry, tools.ToolShellExec),
 			"shell_exec is registered by registerSandboxShellIfAllowed, not initializeSkillsManager")
 	})
@@ -342,8 +349,9 @@ func TestSkillToolsFollowSkillsEnabled(t *testing.T) {
 		}, registry)
 
 		require.NoError(t, err)
-		require.True(t, toolRegistered(registry, tools.ToolReadSkill))
-		require.True(t, toolRegistered(registry, tools.ToolExecuteSkillScript))
+		require.True(t, toolRegistered(registry, tools.ToolReadFile))
+		require.False(t, toolRegistered(registry, tools.LegacyToolReadSkill))
+		require.False(t, toolRegistered(registry, tools.LegacyToolExecuteSkillScript))
 		require.False(t, toolRegistered(registry, tools.ToolShellExec),
 			"shell_exec is registered separately from the skills manager")
 	})
@@ -379,11 +387,11 @@ func TestCreateAgentEngineShellFollowsSkillsEnabledWithoutInstalledSkills(t *tes
 	require.NoError(t, err)
 	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec),
 		"an agent with skills enabled must have shell_exec even when no ready skill exists yet")
-	require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolReadSkill),
+	require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSkill),
 		"an empty sandbox must not be offered skill tools that cannot succeed")
-	require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolExecuteSkillScript))
-	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles))
-	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadSandboxFile))
+	require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolExecuteSkillScript))
+	require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles))
+	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
 	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolWriteSandboxFile))
 	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolEditSandboxFile))
 	require.Nil(t, engine.(*agent.AgentEngine).GetSkillsManager())
@@ -425,7 +433,7 @@ func TestSkillsManagerOffersTheInjectedInstalledSkills(t *testing.T) {
 		require.Equal(t, []string{"pdf-tools"}, skillNamesOf(mgr))
 	})
 
-	t.Run("host preloaded skills are not offered beside the sandbox image", func(t *testing.T) {
+	t.Run("host skills are not offered beside the sandbox image", func(t *testing.T) {
 		dir := t.TempDir()
 		skillDir := filepath.Join(dir, "document-analyzer")
 		require.NoError(t, os.MkdirAll(skillDir, 0o755))
@@ -448,7 +456,7 @@ func TestSkillsManagerOffersTheInjectedInstalledSkills(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, []string{"pdf-tools"}, skillNamesOf(mgr),
-			"the host skills/preloaded tree is not what the sandbox image carries")
+			"a host skill directory is not what the sandbox image carries")
 	})
 
 	t.Run("injected rows are offered", func(t *testing.T) {

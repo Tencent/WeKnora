@@ -16,6 +16,9 @@ templates:
       ko-KR:
         name: "표준 재작성 (의도 분류 포함)"
         description: "질문 재작성, 의도 분류 및 이미지/첨부 파일 분석을 포함한 기본 템플릿"
+      ja-JP:
+        name: "標準リライト（意図分類あり）"
+        description: "質問のリライト、意図分類、画像・添付ファイル分析を含むデフォルトのテンプレート"
     default: true
     content: |
       You are an intelligent assistant that performs THREE tasks on the user's question:
@@ -140,6 +143,9 @@ templates:
       ko-KR:
         name: "표준 재작성"
         description: "참조를 제거하고 누락을 완료하기 위한 표준 재작성 규칙"
+      ja-JP:
+        name: "標準リライト"
+        description: "指示語の解決と省略の補完を行う標準的なリライトルール"
     content: |
       You are a professional question rewriting assistant. Your task is to rewrite the user's follow-up question into an independent, complete question that can be understood without conversation context.
 
@@ -179,6 +185,9 @@ templates:
       ko-KR:
         name: "엄격하게 다시 작성됨"
         description: "문제가 완전하고 독립적인지 확인하기 위해 더 엄격한 재작성 요구 사항"
+      ja-JP:
+        name: "厳格なリライト"
+        description: "質問の完全性と独立性をより厳密に確保するリライト要件"
     content: |
       You are a question rewriting expert. Rewrite the user's question into a complete, independent question.
 

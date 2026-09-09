@@ -173,9 +173,9 @@ func (s *dockerIdleSweeper) ttlFor(summary RemoteSandboxSummary) time.Duration {
 // lastActivity returns when the container last ran a command, falling back to
 // when it started for a sandbox that has not executed anything yet.
 //
-// The marker lives inside the container and has to be writable by the
-// unprivileged sandbox account, so its mtime is attacker-influenced: a script
-// can `touch -d` it. A timestamp in the future is the one form of that which
+// The marker lives inside the container and has to be writable by the account
+// the execs run as, so its mtime is attacker-influenced: a script can
+// `touch -d` it. A timestamp in the future is the one form of that which
 // would disable reclamation permanently, so it is refused outright and the
 // container falls back to its start time. Backdating only makes a sandbox look
 // idle sooner, which costs the container that did it and nothing else.

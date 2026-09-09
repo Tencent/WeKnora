@@ -235,7 +235,7 @@ func TestCompactToolOutputForHistory_failedSkillScriptKeepsStdout(t *testing.T) 
 	stdout := `{"chart":{"success":false,"error":{"error":"X轴字段不存在：工作项目","available":["name","value"]}}}`
 	output := "=== Script Execution: smart-charts/scripts/cli.py ===\n\n**Exit Code**: 1\n\n## Standard Output\n\n```\n" + stdout + "\n```\n"
 	errMsg := "Script exited with code 1\n\n[Analyze the error above and try a different approach.]"
-	history := CompactToolOutputForHistory(ToolExecuteSkillScript, &types.ToolResult{
+	history := CompactToolOutputForHistory(LegacyToolExecuteSkillScript, &types.ToolResult{
 		Success: false,
 		Output:  output,
 		Error:   errMsg,
@@ -259,7 +259,7 @@ func TestSanitizeAgentStepsForStorage_skillScriptKeepsStreamsOnFailure(t *testin
 	output := "=== Script Execution: smart-charts/scripts/cli.py ===\n\n" + stdout
 	steps := []types.AgentStep{{
 		ToolCalls: []types.ToolCall{{
-			Name: ToolExecuteSkillScript,
+			Name: LegacyToolExecuteSkillScript,
 			Result: &types.ToolResult{
 				Success: false,
 				Output:  output,

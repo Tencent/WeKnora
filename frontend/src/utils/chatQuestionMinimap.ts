@@ -30,8 +30,9 @@ export type ChatMessageLike = {
   attachments?: unknown[]
 }
 
-export type UserQuestion = {
+export type OutlineMessage = {
   id: string
+  role: 'user' | 'assistant'
   content: string
   hasAttachments: boolean
   answerContent: string
@@ -56,15 +57,15 @@ export function shouldShowQuestionMinimap(overflowing: boolean, questionCount: n
   return overflowing && questionCount >= 2
 }
 
-export function collectUserQuestions(messages: ChatMessageLike[]): UserQuestion[] {
-  const questions: UserQuestion[] = []
+export function collectOutlineMessages(messages: ChatMessageLike[]): OutlineMessage[] {
+  const questions: OutlineMessage[] = []
 
   for (let index = 0; index < messages.length; index++) {
     const message = messages[index]
-    if (message.role !== 'user' || !message.id) continue
+    if ((message.role !== 'user' && message.role !== 'assistant') || !message.id) continue
 
     let answerContent = ''
-    for (let next = index + 1; next < messages.length; next++) {
+    for (let next = index + 1; message.role === 'user' && next < messages.length; next++) {
       const following = messages[next]
       if (following.role === 'user') break
       if (following.role === 'assistant') {
@@ -75,6 +76,7 @@ export function collectUserQuestions(messages: ChatMessageLike[]): UserQuestion[
 
     questions.push({
       id: message.id,
+      role: message.role,
       content: message.content ?? '',
       hasAttachments:
         (message.images?.length ?? 0) > 0 || (message.attachments?.length ?? 0) > 0,
@@ -83,6 +85,19 @@ export function collectUserQuestions(messages: ChatMessageLike[]): UserQuestion[
   }
 
   return questions
+}
+
+/** Include partially visible messages and long answers spanning the viewport. */
+export function visibleMessageIds(
+  items: Array<{ id: string; offsetTop: number; offsetBottom: number }>,
+  scrollTop: number,
+  clientHeight: number,
+): Set<string> {
+  if (clientHeight <= 0) return new Set()
+  const bottom = scrollTop + clientHeight
+  return new Set(items.filter(item => (
+    item.offsetBottom > item.offsetTop && item.offsetBottom > scrollTop && item.offsetTop < bottom
+  )).map(item => item.id))
 }
 
 export function questionDisplayText(

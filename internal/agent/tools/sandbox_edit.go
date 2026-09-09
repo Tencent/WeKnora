@@ -47,50 +47,9 @@ type SandboxFileEditor interface {
 
 var editSandboxFileTool = BaseTool{
 	name: ToolEditSandboxFile,
-	description: `Replace exact text in an existing sandbox file without rewriting the whole file.
-
-## Usage
-- Use this after ` + "`write_sandbox_file`" + ` (or a previous edit) when only a
-  few lines need to change — a wrong output path, a typo, a constant.
-- Every change goes in ` + "`edits`" + `, an array of
-  ` + "`{old_string, new_string}`" + ` — an array of one for a single change.
-- Changing several places in one file: send them all in ONE call. Do not call
-  this tool once per change.
-- ` + "`old_string`" + ` must match the file exactly, including whitespace and
-  quotes. Include a few surrounding lines so the match is unique.
-- Every ` + "`old_string`" + ` is matched against the ORIGINAL file, not against
-  the result of earlier entries, so entries must not overlap. If two changes
-  touch the same lines, merge them into one entry.
-- Keep each ` + "`old_string`" + ` as small as it can be while staying unique; do
-  not pad with unchanged lines to bridge distant edits.
-- Default: each snippet must occur exactly once. Set ` + "`replace_all`" + ` on an
-  entry only when you intentionally want every occurrence of it changed.
-- Do NOT call ` + "`write_sandbox_file`" + ` with the full file to fix one line.
-- ` + pythonQuoteGuidance + `
-
-## When to Use
-- A script failed because one path, import, or constant is wrong.
-- Renaming a variable or output filename that appears once (or everywhere
-  with ` + "`replace_all`" + `).
-- Deleting a short block by setting ` + "`new_string`" + ` to empty.
-
-## When NOT to Use
-- Creating a new file — use ` + "`write_sandbox_file`" + `.
-- Replacing most of the file — rewrite with ` + "`write_sandbox_file`" + `.
-- Editing under ` + "`/workspace/input`" + ` (attachments are read-only).
-- Binary files.
-
-## Path Rules
-- ` + "`path`" + ` MUST be an absolute path under ` + "`/workspace`" + `, not under
-  ` + "`/workspace/input`" + `, and not ` + "`/workspace`" + ` or ` + "`/workspace/output`" + `
-  themselves.
-
-## Size Handling
-` + fmt.Sprintf("- The file (and the result) must stay within %d bytes.", maxWriteSandboxBytes) + `
-
-## Returns
-- The path, how many replacements were made, and the new byte count.
-  File contents are not echoed back.`,
+	description: `Apply exact text replacements to an existing text file under /workspace, excluding /workspace/input.
+Read the relevant content first. Send edits as an array, even for one replacement. Every old_string matches the original file, must be unique unless replace_all=true, and must not overlap another edit. Include enough surrounding text to identify the intended occurrence.
+All replacements are validated before writing; a failed match leaves the file unchanged. The result includes a diff. Use write_sandbox_file for new files.`,
 	schema: utils.GenerateSchema[EditSandboxFileInput](),
 }
 
@@ -136,7 +95,7 @@ func (l *sandboxEditList) UnmarshalJSON(data []byte) error {
 // attaches to. Every replacement goes in edits[], and a single-element array is
 // the ordinary way to change one thing.
 type EditSandboxFileInput struct {
-	Path  string          `json:"path" jsonschema:"Absolute sandbox path of an existing text file under /workspace (not /workspace/input)."`                                                                                                                                                                                   //nolint:lll // one-line struct tag
+	Path  string          `json:"path" jsonschema:"Absolute or /workspace-relative sandbox path of an existing text file under /workspace (not /workspace/input)."`                                                                                                                                                            //nolint:lll // one-line struct tag
 	Edits sandboxEditList `json:"edits" jsonschema:"Replacements to apply, as an array even for a single change. Each old_string is matched against the original file, not against the result of earlier edits, so they must not overlap. Send every change to one file in one call rather than calling the tool repeatedly."` //nolint:lll // one-line struct tag
 }
 
@@ -189,7 +148,7 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 		}, nil
 	}
 
-	clean := path.Clean(trimmed)
+	clean := sandbox.ResolveWorkspacePath(trimmed)
 	rootDir, ok := matchingWritableRoot(clean)
 	if !ok {
 		return &types.ToolResult{
@@ -326,9 +285,10 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 	attachSandboxDiffStats(data, added, removed)
 	return &types.ToolResult{
-		Success: true,
-		Output:  output,
-		Data:    data,
+		Success:     true,
+		Output:      output,
+		OutputFiles: sandboxOutputLinks(clean),
+		Data:        data,
 	}, nil
 }
 

@@ -92,29 +92,28 @@ func knowledgeBaseScopesForPrompt(config *types.AgentConfig) ([]string, map[stri
 
 // agentService implements agent-related business logic
 type agentService struct {
-	cfg                   *config.Config
-	modelService          interfaces.ModelService
-	mcpServiceService     interfaces.MCPServiceService
-	mcpManager            *mcp.MCPManager
-	eventBus              *event.EventBus
-	db                    *gorm.DB
-	webSearchService      interfaces.WebSearchService
-	knowledgeBaseService  interfaces.KnowledgeBaseService
-	knowledgeService      interfaces.KnowledgeService
-	fileService           interfaces.FileService
-	chunkService          interfaces.ChunkService
-	duckdb                *sql.DB
-	webSearchStateService interfaces.WebSearchStateService
-	wikiPageService       interfaces.WikiPageService
-	tenantService         interfaces.TenantService
-	messageService        interfaces.MessageService
-	memoryService         interfaces.MemoryService
-	storageResolver       interfaces.StorageBackendResolver
-	toolApprovalGate      approval.MCPApproval
-	sandboxMgr            sandbox.Manager
-	sandboxResolver       sandbox.TenantSandboxResolver
-	sandboxPinner         *SessionSandboxPinner
-	sandboxPolicy         WorkspaceSandboxPolicy
+	cfg                  *config.Config
+	modelService         interfaces.ModelService
+	mcpServiceService    interfaces.MCPServiceService
+	mcpManager           *mcp.MCPManager
+	eventBus             *event.EventBus
+	db                   *gorm.DB
+	webSearchService     interfaces.WebSearchService
+	knowledgeBaseService interfaces.KnowledgeBaseService
+	knowledgeService     interfaces.KnowledgeService
+	fileService          interfaces.FileService
+	chunkService         interfaces.ChunkService
+	duckdb               *sql.DB
+	wikiPageService      interfaces.WikiPageService
+	tenantService        interfaces.TenantService
+	messageService       interfaces.MessageService
+	memoryService        interfaces.MemoryService
+	storageResolver      interfaces.StorageBackendResolver
+	toolApprovalGate     approval.MCPApproval
+	sandboxMgr           sandbox.Manager
+	sandboxResolver      sandbox.TenantSandboxResolver
+	sandboxPinner        *SessionSandboxPinner
+	sandboxPolicy        WorkspaceSandboxPolicy
 }
 
 // NewAgentService creates a new agent service
@@ -131,7 +130,6 @@ func NewAgentService(
 	db *gorm.DB,
 	webSearchService interfaces.WebSearchService,
 	duckdb *sql.DB,
-	webSearchStateService interfaces.WebSearchStateService,
 	wikiPageService interfaces.WikiPageService,
 	tenantService interfaces.TenantService,
 	messageService interfaces.MessageService,
@@ -144,29 +142,28 @@ func NewAgentService(
 	sandboxPolicy WorkspaceSandboxPolicy,
 ) interfaces.AgentService {
 	return &agentService{
-		cfg:                   cfg,
-		modelService:          modelService,
-		knowledgeBaseService:  knowledgeBaseService,
-		knowledgeService:      knowledgeService,
-		fileService:           fileService,
-		chunkService:          chunkService,
-		mcpServiceService:     mcpServiceService,
-		mcpManager:            mcpManager,
-		eventBus:              eventBus,
-		db:                    db,
-		webSearchService:      webSearchService,
-		duckdb:                duckdb,
-		webSearchStateService: webSearchStateService,
-		wikiPageService:       wikiPageService,
-		tenantService:         tenantService,
-		messageService:        messageService,
-		memoryService:         memoryService,
-		storageResolver:       storageResolver,
-		toolApprovalGate:      toolApprovalGate,
-		sandboxMgr:            sandboxMgr,
-		sandboxResolver:       sandboxResolver,
-		sandboxPinner:         sandboxPinner,
-		sandboxPolicy:         sandboxPolicy,
+		cfg:                  cfg,
+		modelService:         modelService,
+		knowledgeBaseService: knowledgeBaseService,
+		knowledgeService:     knowledgeService,
+		fileService:          fileService,
+		chunkService:         chunkService,
+		mcpServiceService:    mcpServiceService,
+		mcpManager:           mcpManager,
+		eventBus:             eventBus,
+		db:                   db,
+		webSearchService:     webSearchService,
+		duckdb:               duckdb,
+		wikiPageService:      wikiPageService,
+		tenantService:        tenantService,
+		messageService:       messageService,
+		memoryService:        memoryService,
+		storageResolver:      storageResolver,
+		toolApprovalGate:     toolApprovalGate,
+		sandboxMgr:           sandboxMgr,
+		sandboxResolver:      sandboxResolver,
+		sandboxPinner:        sandboxPinner,
+		sandboxPolicy:        sandboxPolicy,
 	}
 }
 
@@ -199,16 +196,17 @@ func (s *agentService) CreateAgentEngine(
 	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID); err != nil {
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
-	s.registerMCPTools(ctx, toolRegistry, config, eventBus, sessionID, assistantMessageID)
+	s.registerMCPTools(ctx, toolRegistry, config)
 
-	// File tools are a pure sandbox capability independent of the
-	// skill switch: register them whenever the workspace sandbox supports a
-	// session filesystem, even when skills are disabled.
-	s.registerSandboxFileTools(ctx, toolRegistry, sessionID, config)
-	// shell_exec follows SkillsEnabled (or install mode), not the presence
-	// of a ready skill. Register it independently of the skills manager so a
-	// fresh or still-installing sandbox still has a shell.
+	// Register the shell first: file discovery needs a separate tool only
+	// when no shell is available. File access still follows the sandbox
+	// capability independently of the existing SkillsEnabled execution gate.
 	s.registerSandboxShellIfAllowed(ctx, toolRegistry, sessionID, config)
+	s.registerSandboxFileTools(ctx, toolRegistry, sessionID, config)
+	s.registerWebPageFiles(ctx, toolRegistry, config, sessionID, assistantMessageID)
+	// Advertise cached service summaries independently of @mentions. Concrete
+	// tool definitions are published after describe, before the next model request.
+	toolRegistry.PrepareMCPTools(ctx)
 
 	// 3. Resolve knowledge base and selected document metadata
 	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
@@ -248,16 +246,14 @@ func (s *agentService) CreateAgentEngine(
 		}
 	}
 
-	// TenantSkills is the sandbox image. SkillDirs is the host
-	// skills/preloaded tree and is no longer filled on the QA path; it
-	// remains so tests (and any caller that still points at a host
-	// directory) can construct a manager.
+	// TenantSkills is the sandbox image. SkillDirs is a host skill tree used
+	// by tests (and any caller that still points at a host directory); the
+	// QA path no longer fills it.
 	//
 	// The shell is registered above by registerSandboxShellIfAllowed and
 	// follows SkillsEnabled rather than requiring a ready skill to already
 	// exist. offerSkills only gates the skills manager that feeds the model
-	// the installed-skill list (and the read_skill / execute_skill_script
-	// tools that need it). A sandbox whose skills are still installing —
+	// the installed-skill list and the read_file / shell_exec environment. A sandbox whose skills are still installing —
 	// or that simply has none yet — therefore gets a shell without an
 	// empty skills manager or skill tools that cannot succeed.
 	offerSkills := config.SkillsEnabled &&
@@ -281,8 +277,6 @@ func (s *agentService) registerMCPTools(
 	ctx context.Context,
 	toolRegistry *tools.ToolRegistry,
 	config *types.AgentConfig,
-	eventBus *event.EventBus,
-	sessionID, assistantMessageID string,
 ) {
 	tenantID := uint64(0)
 	if tid, ok := types.TenantIDFromContext(ctx); ok {
@@ -330,25 +324,20 @@ func (s *agentService) registerMCPTools(
 		}
 	}
 	if len(enabledServices) > 0 {
-		var regCtx *tools.MCPOAuthSession
-		if eventBus != nil && sessionID != "" && assistantMessageID != "" {
-			regCtx = &tools.MCPOAuthSession{
-				EventBus:               eventBus,
-				SessionID:              sessionID,
-				AssistantMessageID:     assistantMessageID,
-				ApprovalCtx:            ctx,
-				AuthWaitTimeoutSeconds: config.MCPAuthWaitTimeout,
-			}
+		metadataService, ok := s.mcpServiceService.(interfaces.MCPMetadataService)
+		if !ok {
+			logger.Warnf(ctx, "MCP metadata storage is unavailable")
+			return
 		}
 		registered, err := tools.RegisterMCPTools(
-			ctx, toolRegistry, enabledServices, s.mcpManager, s.toolApprovalGate, regCtx,
+			ctx, toolRegistry, enabledServices, s.mcpManager, s.toolApprovalGate,
+			config.MCPAuthWaitTimeout, s.mcpServiceService.GetMCPServiceByID,
+			&tools.MCPMetadataIO{Get: metadataService.GetMCPMetadata, Put: metadataService.PersistMCPMetadata},
 		)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to register MCP tools: %v", err)
-		} else if registered == 0 {
-			logger.Warnf(ctx, "No MCP tools registered from %d enabled service(s)", len(enabledServices))
+			logger.Warnf(ctx, "Failed to register MCP directory: %v", err)
 		} else {
-			logger.Infof(ctx, "Registered %d MCP tool(s) from %d enabled service(s)", registered, len(enabledServices))
+			logger.Infof(ctx, "Registered %d MCP service(s) for on-demand discovery", registered)
 		}
 	}
 }
@@ -382,7 +371,7 @@ func (s *agentService) resolveKBAndDocInfos(
 	return kbInfos, selectedDocs
 }
 
-// registerSandboxFileTools registers list_sandbox_files / read_sandbox_file /
+// registerSandboxFileTools registers list_sandbox_files / read_file /
 // write_sandbox_file / edit_sandbox_file.
 //
 // These expose per-session filesystem access and are a pure sandbox
@@ -421,8 +410,10 @@ func (s *agentService) registerSandboxFileTools(
 		return
 	}
 	if store := sessionSandboxFileStore(sandboxMgr); store != nil {
-		toolRegistry.RegisterTool(tools.NewListSandboxFilesTool(store))
-		toolRegistry.RegisterTool(tools.NewReadSandboxFileTool(store))
+		if _, err := toolRegistry.GetTool(tools.ToolShellExec); err != nil {
+			toolRegistry.RegisterTool(tools.NewListSandboxFilesTool(store))
+		}
+		toolRegistry.RegisterTool(tools.NewReadFileTool(store))
 		// The per-round completion budget, not a fixed byte count, is what
 		// bounds one write; the tool advertises a limit derived from it.
 		toolRegistry.RegisterTool(tools.NewWriteSandboxFileTool(
@@ -430,10 +421,10 @@ func (s *agentService) registerSandboxFileTools(
 			types.AgentRoundMaxCompletionTokensFor(config.MaxCompletionTokens, config.SandboxConfigID),
 		))
 		toolRegistry.RegisterTool(tools.NewEditSandboxFileTool(store))
-		logger.Infof(ctx, "Registered list_sandbox_files, read_sandbox_file, write_sandbox_file, and edit_sandbox_file tools")
+		logger.Infof(ctx, "Registered sandbox file primitives (listing is a no-shell fallback)")
 	} else {
 		logger.Infof(ctx, "Sandbox backend does not advertise session filesystem capability; "+
-			"list_sandbox_files/read_sandbox_file/write_sandbox_file/edit_sandbox_file not registered")
+			"list_sandbox_files/read_file/write_sandbox_file/edit_sandbox_file not registered")
 	}
 }
 
@@ -578,9 +569,6 @@ func (s *agentService) initializeSkillsManager(
 	if source := s.tenantSkillSource(ctx, config); source != nil {
 		skillsManager.WithTenantSource(source)
 	}
-	if resolver := s.userEnvResolver(ctx, config); resolver != nil {
-		skillsManager.WithEnvResolver(resolver)
-	}
 
 	// Initialize (discover skills)
 	if err := skillsManager.Initialize(ctx); err != nil {
@@ -591,14 +579,25 @@ func (s *agentService) initializeSkillsManager(
 	// skill installer agent must have shell_exec WITHOUT execute_skill_script,
 	// since it is the thing installing skills. shell_exec itself is registered
 	// by registerSandboxShellIfAllowed, not here.
-	if config.SkillsEnabled {
-		toolRegistry.RegisterTool(tools.NewReadSkillTool(skillsManager))
-		logger.Infof(ctx, "Registered read_skill tool")
+	shellEnabled := false
+	if tool, err := toolRegistry.GetTool(tools.ToolShellExec); err == nil {
+		if shell, ok := tool.(*tools.ShellExecTool); ok {
+			shell.WithSkillEnvironment(skillsManager)
+			shellEnabled = true
+		}
 	}
-
-	if sandboxMgr.GetType() != sandbox.SandboxTypeDisabled && config.SkillsEnabled {
-		toolRegistry.RegisterTool(tools.NewExecuteSkillScriptTool(skillsManager))
-		logger.Infof(ctx, "Registered execute_skill_script tool")
+	if config.SkillsEnabled {
+		var reader *tools.ReadFileTool
+		if tool, err := toolRegistry.GetTool(tools.ToolReadFile); err == nil {
+			reader, _ = tool.(*tools.ReadFileTool)
+		}
+		if reader == nil {
+			// Instructions remain readable without a session filesystem.
+			reader = tools.NewReadFileTool(nil)
+			toolRegistry.RegisterTool(reader)
+		}
+		reader.WithSkills(skillsManager, shellEnabled)
+		logger.Infof(ctx, "Attached skill resources to read_file")
 	}
 
 	return skillsManager, nil
@@ -623,7 +622,7 @@ func (s *agentService) tenantSkillSource(
 	// The closure captures the engine-creation context because loadBundle
 	// takes no context of its own. That is the turn's context today -
 	// CreateAgentEngine and engine.Execute are called back to back with the
-	// same ctx - so it stays live for as long as read_skill can be called. If
+	// same ctx - so it stays live for as long as skill resources can be read. If
 	// a caller ever creates the engine under a shorter-lived context, bundle
 	// downloads start failing for installed skills only, and loadBundle needs
 	// a ctx parameter.
@@ -637,7 +636,7 @@ func (s *agentService) tenantSkillSource(
 // names a catalog is answered from the definition's zip, but the definition is
 // mutable — registering the same skill again stores a new object and updates
 // the catalog ref, while this sandbox goes on running the image built from the
-// previous bytes. read_skill is documented as serving what was installed, so a
+// previous bytes. Skill resources serve what was installed, so a
 // definition that has moved on is reported rather than substituted.
 func (s *agentService) loadInstalledSkillBundle(
 	ctx context.Context, tenantID uint64, row *types.TenantSkillEntity,
@@ -734,7 +733,7 @@ func (s *agentService) skillEnvCapture(config *types.AgentConfig) tools.SkillEnv
 	}
 }
 
-// readSkillBundle downloads one uploaded skill archive. It backs read_skill for
+// readSkillBundle downloads one uploaded skill archive. It backs skill resource reads for
 // installed skills: the image holds the executable copy, but reading a file out
 // of it would need a live sandbox, and the archive is byte-identical to what
 // was installed.
@@ -914,6 +913,9 @@ func (s *agentService) registerTools(
 		logger.Infof(ctx, "Pure Agent Mode: Knowledge base tools filtered out, remaining: %v", allowedTools)
 	}
 
+	// Web capabilities follow the runtime switch even if a saved allowlist names them.
+	allowedTools = withoutString(allowedTools, tools.ToolWebSearch)
+	allowedTools = withoutString(allowedTools, tools.ToolWebFetch)
 	// If web search is enabled, add web_search to allowedTools
 	if config.WebSearchEnabled {
 		allowedTools = append(allowedTools, tools.ToolWebSearch)
@@ -1047,17 +1049,13 @@ func (s *agentService) registerTools(
 		case tools.ToolWebSearch:
 			toolToRegister = tools.NewWebSearchTool(
 				s.webSearchService,
-				s.knowledgeBaseService,
-				s.knowledgeService,
-				s.webSearchStateService,
-				sessionID,
 				config.WebSearchMaxResults,
 				config.WebSearchProviderID,
 			)
 			logger.Infof(ctx, "Registered web_search tool for session: %s, maxResults: %d, providerID: %s", sessionID, config.WebSearchMaxResults, config.WebSearchProviderID)
 
 		case tools.ToolWebFetch:
-			toolToRegister = tools.NewWebFetchTool(chatModel)
+			toolToRegister = tools.NewWebFetchTool()
 			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
 
 		case tools.ToolDataAnalysis:
@@ -1095,8 +1093,8 @@ func (s *agentService) registerTools(
 		case tools.ToolWikiDeletePage:
 			toolToRegister = tools.NewWikiDeletePageTool(s.wikiPageService, wikiKBIDs, wikiRoutes)
 
-		case tools.ToolShellExec, tools.ToolReadSkill, tools.ToolExecuteSkillScript,
-			tools.ToolListSandboxFiles, tools.ToolReadSandboxFile, tools.ToolWriteSandboxFile,
+		case tools.ToolShellExec, tools.ToolReadFile, tools.LegacyToolReadSkill, tools.LegacyToolExecuteSkillScript,
+			tools.ToolListSandboxFiles, tools.LegacyToolReadSandboxFile, tools.ToolWriteSandboxFile,
 			tools.ToolEditSandboxFile:
 			// Bound to the resolved sandbox manager in registerSandboxFileTools
 			// / registerSandboxShellIfAllowed / initializeSkillsManager.
@@ -1414,6 +1412,7 @@ func (s *agentService) attachPinnedMCPToolNames(
 			continue
 		}
 		info.ToolNames = append([]string(nil), byService[info.ID]...)
+		info.Discoverable = registry.HasMCPServer(info.ID)
 	}
 }
 

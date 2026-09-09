@@ -149,6 +149,10 @@ func (s *mcpServiceService) UpdateMCPService(
 		return fmt.Errorf("stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead")
 	}
 
+	if updateFields["usage_instructions"] {
+		existing.UsageInstructions = service.UsageInstructions
+	}
+
 	// Store old enabled state BEFORE any updates
 	oldEnabled := existing.Enabled
 
@@ -202,12 +206,12 @@ func (s *mcpServiceService) UpdateMCPService(
 		// Only overwrite OAuth config when explicitly provided, so a partial
 		// PUT that carries only custom_headers does not wipe an existing
 		// auth_type / scopes. (Empty/absent is treated as "no change".)
-		if service.AuthConfig.AuthType != types.MCPAuthNone {
+		if updateFields["auth_type"] || service.AuthConfig.AuthType != types.MCPAuthNone {
 			existing.AuthConfig.AuthType = service.AuthConfig.AuthType
 		}
 		// APIKeyHeader is non-secret; empty means "use default X-API-Key", so a
 		// partial PUT that omits it is treated as no-change (mirrors scopes).
-		if service.AuthConfig.APIKeyHeader != "" {
+		if updateFields["api_key_header"] || service.AuthConfig.APIKeyHeader != "" {
 			existing.AuthConfig.APIKeyHeader = service.AuthConfig.APIKeyHeader
 		}
 		if service.AuthConfig.Scopes != nil {

@@ -309,3 +309,24 @@ func TestWikiConfig_JSONRoundTrip_WithGranularity(t *testing.T) {
 		t.Errorf("legacy row should normalize to standard")
 	}
 }
+
+func TestWikiFolderPathSegmentsKeepTypeLikeFolderNames(t *testing.T) {
+	got := WikiFolderPathSegments("概念/ 概念 /Concepts//实体")
+	want := []string{"概念", "概念", "Concepts", "实体"}
+	if len(got) != len(want) {
+		t.Fatalf("segments = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("segments[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if WikiFolderPathSegments("  ") != nil {
+		t.Fatalf("blank path must yield nil")
+	}
+	// The model-label cleaner still drops the same names, which is why folder
+	// paths must not go through it.
+	if cleaned := CleanWikiCategoryPath([]string{"概念"}); len(cleaned) != 0 {
+		t.Fatalf("CleanWikiCategoryPath(概念) = %v, want empty", cleaned)
+	}
+}

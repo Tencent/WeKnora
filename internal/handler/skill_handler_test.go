@@ -60,7 +60,7 @@ func TestListSkillsHidesThePickerWhenNoSandboxConfigIsSelected(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.True(t, body.Success)
-	require.Empty(t, body.Data, "preloaded and unscoped skills must not appear in @")
+	require.Empty(t, body.Data, "unscoped skills must not appear in @")
 	require.False(t, body.SkillsAvailable)
 	require.Empty(t, lister.configID)
 }

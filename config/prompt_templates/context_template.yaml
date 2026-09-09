@@ -13,6 +13,9 @@ templates:
       ko-KR:
         name: "표준 템플릿"
         description: "참조 및 질문을 명확하게 표시하는 기본 상황별 템플릿"
+      ja-JP:
+        name: "標準テンプレート"
+        description: "参考資料と質問を明確に提示する基本的なコンテキストテンプレート"
     default: true
     has_knowledge_base: true
     content: |
@@ -36,6 +39,9 @@ templates:
       ko-KR:
         name: "상세 템플릿"
         description: "자세한 지침과 답변 요구 사항이 포함된 완전한 템플릿"
+      ja-JP:
+        name: "詳細テンプレート"
+        description: "詳細な説明と回答要件を含む完全なテンプレート"
     has_knowledge_base: true
     content: |
       ## Task Description
@@ -71,6 +77,9 @@ templates:
       ko-KR:
         name: "간단한 템플릿"
         description: "간단한 Q&A 시나리오에 적합한 간소화된 템플릿 형식"
+      ja-JP:
+        name: "シンプルテンプレート"
+        description: "簡単なQ&Aシナリオに適した最小限のテンプレート形式"
     has_knowledge_base: true
     content: |
       Reference materials:
@@ -93,6 +102,9 @@ templates:
       ko-KR:
         name: "Q&A 템플릿"
         description: "Q&A 시나리오에 최적화된 템플릿"
+      ja-JP:
+        name: "Q&Aテンプレート"
+        description: "Q&Aシナリオ向けに最適化されたテンプレート"
     has_knowledge_base: true
     content: |
       You need to answer a question. Below are potentially relevant materials:

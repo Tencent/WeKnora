@@ -1281,7 +1281,16 @@ func normalizeWikiHierarchy(page *types.WikiPage) {
 	}
 	page.ParentSlug = strings.TrimSpace(page.ParentSlug)
 
-	cleanPath := types.StringArray(types.CleanWikiCategoryPath(page.CategoryPath))
+	// A page filed in a folder mirrors the folder tree exactly: its
+	// category_path was derived from the validated folder path, so the
+	// model-noise cleaning (which drops type-like labels such as "概念") must
+	// not rewrite it. Only pages without a folder carry model-authored labels.
+	var cleanPath types.StringArray
+	if strings.TrimSpace(page.FolderID) != "" {
+		cleanPath = types.StringArray(types.TrimWikiFolderSegments(page.CategoryPath))
+	} else {
+		cleanPath = types.StringArray(types.CleanWikiCategoryPath(page.CategoryPath))
+	}
 	page.CategoryPath = cleanPath
 	page.Depth = len(cleanPath)
 
@@ -1366,13 +1375,12 @@ func (s *wikiPageService) UpdateIssueStatus(ctx context.Context, issueID string,
 
 // --- Folder tree (wiki_folders) ---
 
-// wikiFolderSegments splits a materialized folder path ("AI/RAG") into cleaned
-// segments. Empty/blank path yields nil (the wiki root).
+// wikiFolderSegments splits a materialized folder path ("AI/RAG") into its
+// literal segments. Empty/blank path yields nil (the wiki root). Folder names
+// are authoritative, so a folder named like a page type ("概念", "Concepts")
+// is kept rather than dropped as model noise.
 func wikiFolderSegments(path string) []string {
-	if strings.TrimSpace(path) == "" {
-		return nil
-	}
-	return types.CleanWikiCategoryPath(strings.Split(path, "/"))
+	return types.WikiFolderPathSegments(path)
 }
 
 // applyFolderToPage refreshes a page's derived category_path cache from its

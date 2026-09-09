@@ -121,3 +121,14 @@ func TestApplyAuthHeaders(t *testing.T) {
 		})
 	}
 }
+
+func TestMCPTextPreview(t *testing.T) {
+	got := mcpTextPreview("hello\nworld", 80)
+	if got != "hello world" {
+		t.Fatalf("newlines: got %q", got)
+	}
+	got = mcpTextPreview("一二三四五", 3)
+	if got != "一二三..." {
+		t.Fatalf("truncate: got %q", got)
+	}
+}

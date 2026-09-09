@@ -162,27 +162,30 @@ func dataKeys(data map[string]interface{}) []string {
 
 // toolDisplayNames maps internal tool names to user-friendly display labels.
 var toolDisplayNames = map[string]string{
-	agenttools.ToolThinking:            "深度思考",
-	agenttools.ToolTodoWrite:           "制定计划",
-	agenttools.ToolGrepChunks:          "关键词搜索",
-	agenttools.ToolKnowledgeSearch:     "知识搜索",
-	agenttools.ToolListKnowledgeChunks: "查看文档分块",
-	agenttools.ToolQueryKnowledgeGraph: "查询知识图谱",
-	agenttools.ToolGetDocumentInfo:     "获取文档信息",
-	agenttools.ToolSearchConversations: "回顾历史对话",
-	agenttools.ToolSearchMemory:        "查询长期记忆",
-	agenttools.ToolDatabaseQuery:       "查询数据",
-	agenttools.ToolDataAnalysis:        "数据分析",
-	agenttools.ToolDataSchema:          "查看数据结构",
-	agenttools.ToolWebSearch:           "搜索网页",
-	agenttools.ToolWebFetch:            "获取网页",
-	agenttools.ToolExecuteSkillScript:  "执行技能脚本",
-	agenttools.ToolReadSkill:           "读取技能",
-	agenttools.ToolListSandboxFiles:    "列出沙箱文件",
-	agenttools.ToolReadSandboxFile:     "读取沙箱文件",
-	agenttools.ToolWriteSandboxFile:    "写入沙箱文件",
-	agenttools.ToolEditSandboxFile:     "编辑沙箱文件",
-	agenttools.ToolShellExec:           "执行沙箱命令",
+	agenttools.ToolDiscoverMCPTools:         "查看外部工具",
+	agenttools.ToolCallMCPTool:              "调用外部工具",
+	agenttools.ToolThinking:                 "深度思考",
+	agenttools.ToolTodoWrite:                "制定计划",
+	agenttools.ToolGrepChunks:               "关键词搜索",
+	agenttools.ToolKnowledgeSearch:          "知识搜索",
+	agenttools.ToolListKnowledgeChunks:      "查看文档分块",
+	agenttools.ToolQueryKnowledgeGraph:      "查询知识图谱",
+	agenttools.ToolGetDocumentInfo:          "获取文档信息",
+	agenttools.ToolSearchConversations:      "回顾历史对话",
+	agenttools.ToolSearchMemory:             "查询长期记忆",
+	agenttools.ToolDatabaseQuery:            "查询数据",
+	agenttools.ToolDataAnalysis:             "数据分析",
+	agenttools.ToolDataSchema:               "查看数据结构",
+	agenttools.ToolWebSearch:                "搜索网页",
+	agenttools.ToolWebFetch:                 "获取网页",
+	agenttools.LegacyToolExecuteSkillScript: "执行技能脚本",
+	agenttools.LegacyToolReadSkill:          "读取技能",
+	agenttools.ToolReadFile:                 "读取文件",
+	agenttools.ToolListSandboxFiles:         "列出沙箱文件",
+	agenttools.LegacyToolReadSandboxFile:    "读取沙箱文件",
+	agenttools.ToolWriteSandboxFile:         "写入沙箱文件",
+	agenttools.ToolEditSandboxFile:          "编辑沙箱文件",
+	agenttools.ToolShellExec:                "执行沙箱命令",
 }
 
 // toolHintSensitiveArgs lists tools whose arguments should NOT be shown in hints
@@ -294,11 +297,22 @@ func (e *AgentEngine) executeToolCallsParallel(
 	results := make([]types.ToolCall, n)
 	var mu sync.Mutex
 	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(8)
 
 	for i, tc := range response.ToolCalls {
 		i, tc := i, tc // capture loop vars
+		if !agenttools.CanRunConcurrently(tc.Function.Name) {
+			// Drain preceding reads before a mutation, and finish the mutation
+			// before starting later reads. Preserve model order across barriers.
+			_ = g.Wait()
+			results[i] = e.runToolCall(ctx, tc, i, iteration, round, sessionID, assistantMessageID)
+			g, gCtx = errgroup.WithContext(ctx)
+			g.SetLimit(8)
+			continue
+		}
+		readCtx := gCtx
 		g.Go(func() error {
-			toolCall := e.runToolCall(gCtx, tc, i, iteration, round, sessionID, assistantMessageID)
+			toolCall := e.runToolCall(readCtx, tc, i, iteration, round, sessionID, assistantMessageID)
 			mu.Lock()
 			results[i] = toolCall
 			mu.Unlock()
@@ -332,7 +346,7 @@ func (e *AgentEngine) emitToolOutcome(
 		SessionID: sessionID,
 		Data: event.AgentToolResultData{
 			ToolCallID: toolCall.ID,
-			ToolName:   toolCall.Name,
+			ToolName:   toolCall.ExecutionName(),
 			Output:     result.Output,
 			Error:      result.Error,
 			Success:    result.Success,
@@ -348,8 +362,8 @@ func (e *AgentEngine) emitToolOutcome(
 		SessionID: sessionID,
 		Data: event.AgentActionData{
 			Iteration:  iteration,
-			ToolName:   toolCall.Name,
-			ToolInput:  toolCall.Args,
+			ToolName:   toolCall.ExecutionName(),
+			ToolInput:  toolCall.ExecutionArgs(),
 			ToolOutput: result.Output,
 			Success:    result.Success,
 			Error:      result.Error,
@@ -443,20 +457,31 @@ func (e *AgentEngine) runToolCall(
 		}
 	}
 
+	// Keep the provider-visible proxy call intact; resolve a separate target
+	// identity for live events, persisted presentation and tracing.
+	var target *types.ToolCallTarget
+	if len(tc.UnresolvedHandles) == 0 {
+		target = e.toolRegistry.MCPCallTarget(ctx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
+	}
+	executionName, executionArgs := tc.Function.Name, args
+	if target != nil {
+		executionName, executionArgs = target.Name, target.Args
+	}
+
 	logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
 
 	toolCallStartTime := time.Now()
 
 	// Emit tool hint for UI progress display
-	toolHint := formatToolHint(tc.Function.Name, args)
+	toolHint := formatToolHint(executionName, executionArgs)
 	e.eventBus.Emit(ctx, event.Event{
 		ID:        tc.ID + "-tool-hint",
 		Type:      event.EventAgentToolCall,
 		SessionID: sessionID,
 		Data: event.AgentToolCallData{
 			ToolCallID: tc.ID,
-			ToolName:   tc.Function.Name,
-			Arguments:  agenttools.SanitizeSandboxFileCallArgs(tc.Function.Name, args),
+			ToolName:   executionName,
+			Arguments:  agenttools.SanitizeSandboxFileCallArgs(executionName, executionArgs),
 			Iteration:  iteration,
 			Hint:       toolHint,
 		},
@@ -465,7 +490,7 @@ func (e *AgentEngine) runToolCall(
 	common.PipelineInfo(ctx, "Agent", "tool_call_start", map[string]interface{}{
 		"iteration":    iteration,
 		"round":        round,
-		"tool":         tc.Function.Name,
+		"tool":         executionName,
 		"tool_call_id": tc.ID,
 		"tool_index":   fmt.Sprintf("%d/%s", i+1, total),
 	})
@@ -479,10 +504,14 @@ func (e *AgentEngine) runToolCall(
 	// (toolHintSensitiveArgs) because it exposes implementation details.
 	// Mirror that policy for Langfuse: redact raw arguments to avoid
 	// leaking raw SQL into the observability backend.
-	toolSpanInput := buildToolSpanInput(tc, args, toolHintSensitiveArgs[tc.Function.Name])
+	toolSpanInput := buildToolSpanInput(tc, executionArgs, toolHintSensitiveArgs[executionName])
+	if target != nil {
+		toolSpanInput["mcp_service"] = target.ServiceName
+		toolSpanInput["mcp_tool"] = target.ToolName
+	}
 	argumentResolution, _ := toolSpanInput["argument_resolution"].(string)
 	toolCtx, toolSpan := mgr.StartSpan(ctx, langfuse.SpanOptions{
-		Name:  "agent.tool." + tc.Function.Name,
+		Name:  "agent.tool." + executionName,
 		Input: toolSpanInput,
 		Metadata: map[string]interface{}{
 			"iteration":               iteration,
@@ -527,6 +556,7 @@ func (e *AgentEngine) runToolCall(
 	duration := time.Since(toolCallStartTime).Milliseconds()
 
 	toolCall := types.ToolCall{
+		Target:           target,
 		ID:               tc.ID,
 		Name:             tc.Function.Name,
 		Args:             args,
@@ -558,7 +588,7 @@ func (e *AgentEngine) runToolCall(
 	pipelineFields := map[string]interface{}{
 		"iteration":    iteration,
 		"round":        round,
-		"tool":         tc.Function.Name,
+		"tool":         executionName,
 		"tool_call_id": tc.ID,
 		"duration_ms":  duration,
 		"success":      toolSuccess,

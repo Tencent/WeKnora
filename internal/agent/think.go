@@ -252,7 +252,6 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	parallelToolCalls := true
 	opts := &chat.ChatOptions{
 		Temperature:         e.config.Temperature,
-		MaxTokens:           budget,
 		MaxCompletionTokens: budget,
 		Tools:               tools,
 		Thinking:            e.config.Thinking,

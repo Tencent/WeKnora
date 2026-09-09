@@ -37,6 +37,7 @@ export const SYSTEM_GLOBAL_AUDIT_ACTIONS = [
   'system.api_key_revoked',
   'system.admin_revoked',
   'system.user_password_reset',
+  'system.user_created',
   'system.queue_task_retried',
   'system.queue_task_deleted',
   'system.queue_task_run_now',

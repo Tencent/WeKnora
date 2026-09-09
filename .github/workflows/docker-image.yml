@@ -11,7 +11,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  NODE_VERSION: "24"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
@@ -26,19 +25,6 @@ jobs:
         run: |
           eval "$(./scripts/get_version.sh env)"
           echo "commit_id=$COMMIT_ID" >> $GITHUB_OUTPUT
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build frontend
-        env:
-          VITE_IS_DOCKER: true
-          VITE_FRONTEND_COMMIT: ${{ steps.version.outputs.commit_id }}
-        run: ./scripts/build_frontend_dist.sh
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -62,6 +48,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           file: frontend/Dockerfile
           context: ./frontend
+          build-args: |
+            VITE_FRONTEND_COMMIT=${{ steps.version.outputs.commit_id }}
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha,scope=build-ui

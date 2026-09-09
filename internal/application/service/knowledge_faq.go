@@ -32,32 +32,9 @@ func (s *knowledgeService) ListFAQEntries(ctx context.Context,
 		return nil, err
 	}
 
-	// Check if this is a shared knowledge base access
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	effectiveTenantID := tenantID
-
-	// If the kb belongs to a different tenant, check for shared access
-	if kb.TenantID != tenantID {
-		// Get user ID from context
-		userIDVal := ctx.Value(types.UserIDContextKey)
-		if userIDVal == nil {
-			return nil, werrors.NewForbiddenError("无权访问该知识库")
-		}
-		_ = userIDVal.(string) // userID retained only for legacy log fields
-		callerTenantRole := types.TenantRoleFromContext(ctx)
-
-		// Check if the caller's tenant has at least viewer permission via org sharing.
-		hasPermission, err := s.kbShareService.HasTenantKBPermission(ctx, kbID, tenantID, callerTenantRole, types.OrgRoleViewer)
-		if err != nil || !hasPermission {
-			return nil, werrors.NewForbiddenError("无权访问该知识库")
-		}
-
-		// Use the source tenant ID for data access
-		sourceTenantID, err := s.kbShareService.GetKBSourceTenant(ctx, kbID)
-		if err != nil {
-			return nil, werrors.NewForbiddenError("无权访问该知识库")
-		}
-		effectiveTenantID = sourceTenantID
+	effectiveTenantID, err := resolveKBReadTenant(ctx, kb, s.kbShareService)
+	if err != nil {
+		return nil, err
 	}
 
 	faqKnowledge, err := s.findFAQKnowledge(ctx, effectiveTenantID, kb.ID)
@@ -141,7 +118,7 @@ func (s *knowledgeService) CreateFAQEntry(ctx context.Context,
 		return nil, werrors.NewBadRequestError("请求体不能为空")
 	}
 
-	kb, err := s.validateFAQKnowledgeBase(ctx, kbID)
+	kb, ctx, err := s.writableFAQKnowledgeBase(ctx, kbID)
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +319,7 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 	if payload == nil {
 		return nil, werrors.NewBadRequestError("请求体不能为空")
 	}
-	kb, err := s.validateFAQKnowledgeBase(ctx, kbID)
+	kb, ctx, err := s.writableFAQKnowledgeBase(ctx, kbID)
 	if err != nil {
 		return nil, err
 	}
@@ -510,7 +487,7 @@ func (s *knowledgeService) AddSimilarQuestions(ctx context.Context,
 		return nil, werrors.NewBadRequestError("相似问列表不能为空")
 	}
 
-	kb, err := s.validateFAQKnowledgeBase(ctx, kbID)
+	kb, ctx, err := s.writableFAQKnowledgeBase(ctx, kbID)
 	if err != nil {
 		return nil, err
 	}
@@ -655,7 +632,7 @@ func (s *knowledgeService) AddSimilarQuestions(ctx context.Context,
 func (s *knowledgeService) UpdateFAQEntryStatus(ctx context.Context,
 	kbID string, entryID string, isEnabled bool,
 ) error {
-	kb, err := s.validateFAQKnowledgeBase(ctx, kbID)
+	kb, ctx, err := s.writableFAQKnowledgeBase(ctx, kbID)
 	if err != nil {
 		return err
 	}
@@ -704,7 +681,7 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 	if req == nil || (len(req.ByID) == 0 && len(req.ByTag) == 0) {
 		return nil
 	}
-	kb, err := s.validateFAQKnowledgeBase(ctx, kbID)
+	kb, ctx, err := s.writableFAQKnowledgeBase(ctx, kbID)
 	if err != nil {
 		return err
 	}
@@ -713,25 +690,17 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 	enabledUpdates := make(map[string]bool)
 	tagUpdates := make(map[string]string)
 
-	// Convert exclude seq_ids to UUIDs
-	excludeUUIDs := make([]string, 0, len(req.ExcludeIDs))
-	if len(req.ExcludeIDs) > 0 {
-		excludeChunks, err := s.chunkRepo.ListChunksBySeqID(ctx, tenantID, req.ExcludeIDs)
-		if err == nil {
-			for _, c := range excludeChunks {
-				excludeUUIDs = append(excludeUUIDs, c.ID)
-			}
-		}
+	plan, err := s.planFAQFields(ctx, kb, req)
+	if err != nil {
+		return err
 	}
+	excludeUUIDs := plan.excludeIDs
 
 	// Handle ByTag updates first (by tag seq_id)
 	if len(req.ByTag) > 0 {
-		for tagSeqID, update := range req.ByTag {
-			// Convert tag seq_id to UUID
-			tag, err := s.tagRepo.GetBySeqID(ctx, tenantID, tagSeqID)
-			if err != nil {
-				return werrors.NewNotFoundError(fmt.Sprintf("标签 %d 不存在", tagSeqID))
-			}
+		for _, tagSeqID := range sortedFAQIDs(req.ByTag) {
+			update := req.ByTag[tagSeqID]
+			tag := plan.tags[tagSeqID]
 
 			var setFlags, clearFlags types.ChunkFlags
 
@@ -748,10 +717,7 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 			var newTagUUID *string
 			if update.TagID != nil {
 				if *update.TagID > 0 {
-					newTag, err := s.tagRepo.GetBySeqID(ctx, tenantID, *update.TagID)
-					if err != nil {
-						return werrors.NewNotFoundError(fmt.Sprintf("标签 %d 不存在", *update.TagID))
-					}
+					newTag := plan.tags[*update.TagID]
 					newTagUUID = &newTag.ID
 				} else {
 					emptyStr := ""
@@ -766,6 +732,19 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 			)
 			if err != nil {
 				return err
+			}
+
+			// Preserve group changes when an explicit ByID patch follows it.
+			for _, id := range affectedIDs {
+				if chunk := plan.chunksByID[id]; chunk != nil {
+					if update.IsEnabled != nil {
+						chunk.IsEnabled = *update.IsEnabled
+					}
+					chunk.Flags = (chunk.Flags | setFlags) &^ clearFlags
+					if newTagUUID != nil {
+						chunk.TagID = *newTagUUID
+					}
+				}
 			}
 
 			// Collect affected IDs for retriever sync
@@ -786,33 +765,15 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 
 	// Handle ByID updates (by entry seq_id)
 	if len(req.ByID) > 0 {
-		entrySeqIDs := make([]int64, 0, len(req.ByID))
-		for entrySeqID := range req.ByID {
-			entrySeqIDs = append(entrySeqIDs, entrySeqID)
-		}
-		chunks, err := s.chunkRepo.ListChunksBySeqID(ctx, tenantID, entrySeqIDs)
-		if err != nil {
-			return err
-		}
-
-		// Build chunk seq_id to chunk map
-		chunkBySeqID := make(map[int64]*types.Chunk)
-		for _, chunk := range chunks {
-			chunkBySeqID[chunk.SeqID] = chunk
-		}
+		chunkBySeqID := plan.chunks
 
 		setFlags := make(map[string]types.ChunkFlags)
 		clearFlags := make(map[string]types.ChunkFlags)
 		chunksToUpdate := make([]*types.Chunk, 0)
 
-		for entrySeqID, update := range req.ByID {
-			chunk, exists := chunkBySeqID[entrySeqID]
-			if !exists {
-				continue
-			}
-			if chunk.KnowledgeBaseID != kb.ID || chunk.ChunkType != types.ChunkTypeFAQ {
-				continue
-			}
+		for _, entrySeqID := range sortedFAQIDs(req.ByID) {
+			update := req.ByID[entrySeqID]
+			chunk := chunkBySeqID[entrySeqID]
 
 			needUpdate := false
 
@@ -839,10 +800,7 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 			if update.TagID != nil {
 				var newTagID string
 				if *update.TagID > 0 {
-					newTag, err := s.tagRepo.GetBySeqID(ctx, tenantID, *update.TagID)
-					if err != nil {
-						return werrors.NewNotFoundError(fmt.Sprintf("标签 %d 不存在", *update.TagID))
-					}
+					newTag := plan.tags[*update.TagID]
 					newTagID = newTag.ID
 				}
 				if chunk.TagID != newTagID {
@@ -900,7 +858,7 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 
 // UpdateFAQEntryTag updates the tag assigned to an FAQ entry.
 func (s *knowledgeService) UpdateFAQEntryTag(ctx context.Context, kbID string, entryID string, tagID *string) error {
-	kb, err := s.validateFAQKnowledgeBase(ctx, kbID)
+	kb, ctx, err := s.writableFAQKnowledgeBase(ctx, kbID)
 	if err != nil {
 		return err
 	}
@@ -948,104 +906,15 @@ func (s *knowledgeService) UpdateFAQEntryTag(ctx context.Context, kbID string, e
 // UpdateFAQEntryTagBatch updates tags for FAQ entries in batch.
 // Key: entry seq_id, Value: tag seq_id (nil to remove tag)
 func (s *knowledgeService) UpdateFAQEntryTagBatch(ctx context.Context, kbID string, updates map[int64]*int64) error {
-	if len(updates) == 0 {
-		return nil
+	req := &types.FAQEntryFieldsBatchUpdate{ByID: make(map[int64]types.FAQEntryFieldsUpdate, len(updates))}
+	for id, tag := range updates {
+		value := int64(0) // nil in the tag API means remove the tag.
+		if tag != nil {
+			value = *tag
+		}
+		req.ByID[id] = types.FAQEntryFieldsUpdate{TagID: &value}
 	}
-	kb, err := s.validateFAQKnowledgeBase(ctx, kbID)
-	if err != nil {
-		return err
-	}
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-
-	// Get all chunks in batch by seq_id
-	entrySeqIDs := make([]int64, 0, len(updates))
-	for entrySeqID := range updates {
-		entrySeqIDs = append(entrySeqIDs, entrySeqID)
-	}
-	chunks, err := s.chunkRepo.ListChunksBySeqID(ctx, tenantID, entrySeqIDs)
-	if err != nil {
-		return err
-	}
-
-	// Build chunk seq_id to chunk map
-	chunkBySeqID := make(map[int64]*types.Chunk)
-	for _, chunk := range chunks {
-		chunkBySeqID[chunk.SeqID] = chunk
-	}
-
-	// Build tag seq_id set for validation
-	tagSeqIDSet := make(map[int64]bool)
-	for _, tagSeqID := range updates {
-		if tagSeqID != nil && *tagSeqID > 0 {
-			tagSeqIDSet[*tagSeqID] = true
-		}
-	}
-
-	// Validate all tags in batch by seq_id
-	tagMap := make(map[int64]*types.KnowledgeTag)
-	if len(tagSeqIDSet) > 0 {
-		tagSeqIDs := make([]int64, 0, len(tagSeqIDSet))
-		for tagSeqID := range tagSeqIDSet {
-			tagSeqIDs = append(tagSeqIDs, tagSeqID)
-		}
-		tags, err := s.tagRepo.GetBySeqIDs(ctx, tenantID, tagSeqIDs)
-		if err != nil {
-			return err
-		}
-		for _, tag := range tags {
-			if tag.KnowledgeBaseID != kb.ID {
-				return werrors.NewBadRequestError(fmt.Sprintf("标签 %d 不属于当前知识库", tag.SeqID))
-			}
-			tagMap[tag.SeqID] = tag
-		}
-	}
-
-	// Update chunks
-	chunksToUpdate := make([]*types.Chunk, 0)
-	for entrySeqID, tagSeqID := range updates {
-		chunk, exists := chunkBySeqID[entrySeqID]
-		if !exists {
-			continue
-		}
-		if chunk.KnowledgeBaseID != kb.ID || chunk.ChunkType != types.ChunkTypeFAQ {
-			continue
-		}
-
-		var resolvedTagID string
-		if tagSeqID != nil && *tagSeqID > 0 {
-			tag, ok := tagMap[*tagSeqID]
-			if !ok {
-				return werrors.NewBadRequestError(fmt.Sprintf("标签 %d 不存在", *tagSeqID))
-			}
-			resolvedTagID = tag.ID
-		}
-
-		chunk.TagID = resolvedTagID
-		chunk.UpdatedAt = time.Now()
-		chunksToUpdate = append(chunksToUpdate, chunk)
-	}
-
-	if len(chunksToUpdate) > 0 {
-		if err := s.chunkRepo.UpdateChunks(ctx, chunksToUpdate); err != nil {
-			return err
-		}
-
-		// Sync tag updates to retriever engines
-		tagUpdates := make(map[string]string)
-		for _, chunk := range chunksToUpdate {
-			tagUpdates[chunk.ID] = chunk.TagID
-		}
-		retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
-			ctx, s.retrieveEngine, s.ownership, tenantID, kb.VectorStoreID)
-		if err != nil {
-			return err
-		}
-		if err := retrieveEngine.BatchUpdateChunkTagID(ctx, tagUpdates); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return s.UpdateFAQEntryFieldsBatch(ctx, kbID, req)
 }
 
 // SearchFAQEntries searches FAQ entries using hybrid search.
@@ -1389,41 +1258,47 @@ func (s *knowledgeService) DeleteFAQEntries(ctx context.Context,
 	if len(entrySeqIDs) == 0 {
 		return werrors.NewBadRequestError("请选择需要删除的 FAQ 条目")
 	}
-	kb, err := s.validateFAQKnowledgeBase(ctx, kbID)
+	kb, ctx, err := s.writableFAQKnowledgeBase(ctx, kbID)
 	if err != nil {
 		return err
 	}
 
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	var faqKnowledge *types.Knowledge
-	chunksToRemove := make([]*types.Chunk, 0, len(entrySeqIDs))
-	for _, seqID := range entrySeqIDs {
-		if seqID <= 0 {
-			continue
-		}
-		chunk, err := s.chunkRepo.GetChunkBySeqID(ctx, tenantID, seqID)
-		if err != nil {
-			return werrors.NewNotFoundError("FAQ条目不存在")
-		}
-		if chunk.KnowledgeBaseID != kb.ID || chunk.ChunkType != types.ChunkTypeFAQ {
-			return werrors.NewBadRequestError("包含无效的 FAQ 条目")
-		}
-		if err := s.chunkService.DeleteChunk(ctx, chunk.ID); err != nil {
-			return err
-		}
-		if faqKnowledge == nil {
-			faqKnowledge, err = s.repo.GetKnowledgeByID(ctx, tenantID, chunk.KnowledgeID)
+	selected, err := s.loadFAQWriteChunks(ctx, kb, entrySeqIDs)
+	if err != nil {
+		return err
+	}
+	chunksToRemove := make([]*types.Chunk, 0, len(selected))
+	knowledges := make(map[string]*types.Knowledge)
+	groups := make(map[string][]*types.Chunk)
+	for _, id := range sortedFAQIDs(selected) {
+		chunk := selected[id]
+		if knowledges[chunk.KnowledgeID] == nil {
+			knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, chunk.KnowledgeID)
 			if err != nil {
 				return err
 			}
+			if knowledge == nil || knowledge.TenantID != tenantID || knowledge.KnowledgeBaseID != kb.ID ||
+				knowledge.Type != types.KnowledgeTypeFAQ {
+				return werrors.NewForbiddenError("FAQ 文档不属于当前知识库")
+			}
+			knowledges[chunk.KnowledgeID] = knowledge
 		}
+		groups[chunk.KnowledgeID] = append(groups[chunk.KnowledgeID], chunk)
 		chunksToRemove = append(chunksToRemove, chunk)
 	}
-	if len(chunksToRemove) > 0 && faqKnowledge != nil {
-		if err := s.deleteFAQChunkVectors(ctx, kb, faqKnowledge, chunksToRemove); err != nil {
+	// All entries and parent documents are authorized before any deletion.
+	for _, chunk := range chunksToRemove {
+		if err := s.chunkService.DeleteChunk(ctx, chunk.ID); err != nil {
 			return err
 		}
 	}
+	for id, chunks := range groups {
+		if err := s.deleteFAQChunkVectors(ctx, kb, knowledges[id], chunks); err != nil {
+			return err
+		}
+	}
+
 	details := map[string]any{"count": len(chunksToRemove), "source_type": "faq"}
 	titles := make([]string, 0, len(chunksToRemove))
 	for _, chunk := range chunksToRemove {
@@ -1629,6 +1504,9 @@ func (s *knowledgeService) validateFAQKnowledgeBase(ctx context.Context, kbID st
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
 		return nil, err
+	}
+	if kb == nil || kb.ID != kbID {
+		return nil, werrors.NewNotFoundError("知识库不存在")
 	}
 	kb.EnsureDefaults()
 	if kb.Type != types.KnowledgeBaseTypeFAQ {
@@ -1906,7 +1784,9 @@ func (s *knowledgeService) buildFAQTagResolver(
 	if len(seqIDs) > 0 {
 		if tags, err := s.tagRepo.GetBySeqIDs(ctx, tenantID, seqIDs); err == nil {
 			for _, t := range tags {
-				seqIDToUUID[t.SeqID] = t.ID
+				if validateFAQTagScope(t, tenantID, kbID) == nil {
+					seqIDToUUID[t.SeqID] = t.ID
+				}
 			}
 		} else {
 			logger.Warnf(ctx, "buildFAQTagResolver: batch GetBySeqIDs failed (%d ids), fallback per-entry: %v",
@@ -1952,6 +1832,9 @@ func (s *knowledgeService) resolveTagID(ctx context.Context, kbID string, payloa
 		tag, err := s.tagRepo.GetBySeqID(ctx, tenantID, payload.TagID)
 		if err != nil {
 			return "", fmt.Errorf("failed to find tag by seq_id %d: %w", payload.TagID, err)
+		}
+		if err := validateFAQTagScope(tag, tenantID, kbID); err != nil {
+			return "", err
 		}
 		return tag.ID, nil
 	}

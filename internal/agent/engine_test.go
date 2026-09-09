@@ -665,7 +665,7 @@ func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
 			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
 		require.NoError(t, err)
 		require.Len(t, mock.opts, 1)
-		assert.Equal(t, 4096, mock.opts[0].MaxTokens)
+		assert.Zero(t, mock.opts[0].MaxTokens)
 		assert.Equal(t, 4096, mock.opts[0].MaxCompletionTokens)
 	})
 
@@ -680,7 +680,7 @@ func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
 			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
 		require.NoError(t, err)
 		require.Len(t, mock.opts, 1)
-		assert.Equal(t, types.DefaultSmartReasoningMaxCompletionTokens, mock.opts[0].MaxTokens)
+		assert.Zero(t, mock.opts[0].MaxTokens)
 		assert.Equal(t, types.DefaultSmartReasoningMaxCompletionTokens, mock.opts[0].MaxCompletionTokens)
 	})
 
@@ -697,7 +697,7 @@ func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
 			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
 		require.NoError(t, err)
 		require.Len(t, mock.opts, 1)
-		assert.Equal(t, types.DefaultAgentMaxCompletionTokens, mock.opts[0].MaxTokens)
+		assert.Zero(t, mock.opts[0].MaxTokens)
 		assert.Equal(t, types.DefaultAgentMaxCompletionTokens, mock.opts[0].MaxCompletionTokens)
 	})
 
@@ -712,7 +712,7 @@ func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
 			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
 		require.NoError(t, err)
 		require.Len(t, mock.opts, 1)
-		assert.Equal(t, 64000, mock.opts[0].MaxTokens)
+		assert.Zero(t, mock.opts[0].MaxTokens)
 		assert.Equal(t, 64000, mock.opts[0].MaxCompletionTokens)
 	})
 }
