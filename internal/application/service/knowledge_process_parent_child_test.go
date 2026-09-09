@@ -41,6 +41,10 @@ func (s *parentChildChunkService) DeleteEmbedProgressByKnowledgeID(context.Conte
 	return nil
 }
 
+func (s *parentChildChunkService) MarkChunksEmbedded(context.Context, string, []string) error {
+	return nil
+}
+
 func (s *parentChildChunkService) CreateChunks(_ context.Context, chunks []*types.Chunk) error {
 	s.created = append([]*types.Chunk(nil), chunks...)
 	return nil
