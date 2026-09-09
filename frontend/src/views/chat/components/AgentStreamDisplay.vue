@@ -1033,10 +1033,14 @@ const artifactPreviewIndex = ref<number | null>(null);
 function openArtifactDrawer(previewIndex: number | null = null) {
   if (!hasArtifacts.value) return;
   if (sandboxPanel && !props.embeddedMode) {
-    sandboxPanel.open('artifacts', {
-      messageId: messageIdForArtifacts.value,
-      previewIndex,
-    });
+    if (previewIndex == null) {
+      sandboxPanel.toggleArtifacts(messageIdForArtifacts.value);
+    } else {
+      sandboxPanel.open('artifacts', {
+        messageId: messageIdForArtifacts.value,
+        previewIndex,
+      });
+    }
     return;
   }
   artifactPreviewIndex.value = previewIndex;

@@ -297,8 +297,14 @@ function startResize(event: MouseEvent) {
   }
 
   &.is-active {
-    color: var(--td-brand-color);
-    background: var(--td-brand-color-light);
+    color: var(--td-text-color-primary);
+    background: var(--td-bg-color-secondarycontainer);
+    font-weight: 500;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-text-color-secondary);
+    outline-offset: -2px;
   }
 }
 
@@ -307,11 +313,12 @@ function startResize(event: MouseEvent) {
   height: 16px;
   padding: 0 5px;
   border-radius: 8px;
-  background: var(--td-brand-color);
-  color: #fff;
+  background: color-mix(in srgb, var(--td-text-color-primary) 8%, transparent);
+  color: var(--td-text-color-secondary);
   font-size: 11px;
   line-height: 16px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .chat-sandbox-panel__body {
