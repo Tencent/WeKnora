@@ -967,9 +967,22 @@ func (h *Handler) persistTurnMessages(ctx context.Context, reqCtx *qaRequestCont
 	if reqCtx.userMessageID == "" {
 		userMessageAttachments := reqCtx.attachments
 		if len(reqCtx.attachmentMetas) > 0 {
-			userMessageAttachments = append(append(types.MessageAttachments{}, reqCtx.attachments...), reqCtx.attachmentMetas...)
+			userMessageAttachments = append(
+				append(types.MessageAttachments{}, reqCtx.attachments...),
+				reqCtx.attachmentMetas...,
+			)
 		}
-		userMsg, err := h.createUserMessage(ctx, reqCtx.sessionID, reqCtx.query, reqCtx.requestID, reqCtx.mentionedItems, convertImageAttachments(reqCtx.images), userMessageAttachments, reqCtx.channel, reqCtx.suggestionAttribution)
+		userMsg, err := h.createUserMessage(
+			ctx,
+			reqCtx.sessionID,
+			reqCtx.query,
+			reqCtx.requestID,
+			reqCtx.mentionedItems,
+			convertImageAttachments(reqCtx.images),
+			userMessageAttachments,
+			reqCtx.channel,
+			reqCtx.suggestionAttribution,
+		)
 		if err != nil {
 			return err
 		}
@@ -1054,7 +1067,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	if mode == qaModeAgent {
 		if err := h.rejectIfOtherAgentRunLive(ctx, reqCtx); err != nil {
 			if reqCtx.c != nil && !reqCtx.skipSSE {
-				reqCtx.c.Error(err)
+				_ = reqCtx.c.Error(err)
 			} else {
 				logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
 			}
@@ -1086,7 +1099,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	// reload shows the attachments even though their content is selected later.
 	if err := h.persistTurnMessages(ctx, reqCtx); err != nil {
 		if reqCtx.c != nil && !reqCtx.skipSSE {
-			reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
+			_ = reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
 		} else {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
 		}
@@ -1104,7 +1117,9 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	// client that reloads the queue sees an empty one and drops messages the
 	// user can still see in the composer.
 	if len(reqCtx.steerCarryOver) > 0 && reqCtx.assistantMessage != nil {
-		if err := h.streamManager.AppendSteerEvents(ctx, sessionID, reqCtx.assistantMessage.ID, reqCtx.steerCarryOver); err != nil {
+		if err := h.streamManager.AppendSteerEvents(
+			ctx, sessionID, reqCtx.assistantMessage.ID, reqCtx.steerCarryOver,
+		); err != nil {
 			logger.Warnf(ctx, "steer carry-over append failed for session %s: %v", sessionID, err)
 		}
 	}
@@ -1118,9 +1133,9 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		h.rollbackTurnMessages(ctx, reqCtx, createdUser, createdAssistant)
 		if reqCtx.c != nil && !reqCtx.skipSSE {
 			if stderrors.Is(streamCtx.liveRunErr, stream.ErrLiveRunExists) {
-				reqCtx.c.Error(errors.NewConflictError("another turn is already running in this session"))
+				_ = reqCtx.c.Error(errors.NewConflictError("another turn is already running in this session"))
 			} else {
-				reqCtx.c.Error(errors.NewServiceUnavailableError("Failed to publish running turn"))
+				_ = reqCtx.c.Error(errors.NewServiceUnavailableError("Failed to publish running turn"))
 			}
 		}
 		return

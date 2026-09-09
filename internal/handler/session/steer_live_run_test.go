@@ -215,8 +215,8 @@ func (s *steerPersistingMessageStub) GetMessage(_ context.Context, _, id string)
 	if !ok {
 		return nil, errors.New("not found")
 	}
-	copy := *msg
-	return &copy, nil
+	cloned := *msg
+	return &cloned, nil
 }
 
 // The previous run's ClearLiveRun used to run before the follow-up had an

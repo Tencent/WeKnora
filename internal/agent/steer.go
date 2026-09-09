@@ -67,7 +67,7 @@ func (e *AgentEngine) drainSteerMessages(
 			continue
 		}
 		*messagesPtr = append(*messagesPtr, chat.Message{Role: "user", Content: content})
-		e.eventBus.Emit(ctx, event.Event{
+		_ = e.eventBus.Emit(ctx, event.Event{
 			ID:        generateEventID("injected"),
 			Type:      event.EventUserMessageInjected,
 			SessionID: sessionID,

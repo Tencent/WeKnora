@@ -336,11 +336,11 @@ func (h *Handler) liveAgentRun(ctx context.Context, sessionID string) (string, e
 // resolveLiveAgentRun is the HTTP wrapper around liveAgentRun: a lookup
 // failure becomes a retryable 503 so the client toasts instead of starting
 // a second turn. ok is false when the handler has already written the error.
-func (h *Handler) resolveLiveAgentRun(c *gin.Context, ctx context.Context, sessionID string) (string, bool) {
+func (h *Handler) resolveLiveAgentRun(ctx context.Context, c *gin.Context, sessionID string) (string, bool) {
 	assistantID, err := h.liveAgentRun(ctx, sessionID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		c.Error(errors.NewServiceUnavailableError("Failed to look up running turn"))
+		_ = c.Error(errors.NewServiceUnavailableError("Failed to look up running turn"))
 		return "", false
 	}
 	return assistantID, true
@@ -441,7 +441,7 @@ func mentionedItemsToRaw(items types.MentionedItems) []interface{} {
 
 // SteerMessage godoc
 // @Summary      向运行中的对话追加消息
-// @Description  在 agent 正在生成回复时追加一条用户消息。delivery=after（默认）等当前 turn 结束后再作为下一次提问发出；delivery=inject 在下一轮注入当前 turn。若没有正在运行的 turn，返回 new_run。
+// @Description  向运行中的 agent turn 追加用户消息（after 排队 / inject 注入）。无活 turn 时返回 new_run。
 // @Tags         问答
 // @Accept       json
 // @Produce      json
@@ -458,28 +458,28 @@ func (h *Handler) SteerMessage(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
 	if sessionID == "" {
-		c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
+		_ = c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
 		return
 	}
 
 	var req SteerMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	query := strings.TrimSpace(req.Query)
 	if query == "" {
-		c.Error(errors.NewBadRequestError("query must not be empty"))
+		_ = c.Error(errors.NewBadRequestError("query must not be empty"))
 		return
 	}
 	if len([]rune(query)) > maxSteerQueryLength {
-		c.Error(errors.NewBadRequestError("query too long"))
+		_ = c.Error(errors.NewBadRequestError("query too long"))
 		return
 	}
 	delivery, err := parseSteerDelivery(req.Delivery)
 	if err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
@@ -487,11 +487,11 @@ func (h *Handler) SteerMessage(c *gin.Context) {
 	// use the strict owner scope and reject cross-tenant access.
 	if _, err := h.sessionService.GetOwnedSession(ctx, sessionID); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		c.Error(errors.NewNotFoundError("Session not found"))
+		_ = c.Error(errors.NewNotFoundError("Session not found"))
 		return
 	}
 
-	assistantID, ok := h.resolveLiveAgentRun(c, ctx, sessionID)
+	assistantID, ok := h.resolveLiveAgentRun(ctx, c, sessionID)
 	if !ok {
 		return
 	}
@@ -510,12 +510,12 @@ func (h *Handler) SteerMessage(c *gin.Context) {
 	existing, _, err := h.streamManager.GetSteerEvents(ctx, sessionID, assistantID, 0)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		c.Error(errors.NewInternalServerError("Failed to check steer queue"))
+		_ = c.Error(errors.NewInternalServerError("Failed to check steer queue"))
 		return
 	}
 	pending := len(selectSteerBacklog(existing, nil))
 	if pending >= maxSteerQueueDepth {
-		c.Error(errors.NewBadRequestError("too many queued messages for the running turn"))
+		_ = c.Error(errors.NewBadRequestError("too many queued messages for the running turn"))
 		return
 	}
 
@@ -525,14 +525,14 @@ func (h *Handler) SteerMessage(c *gin.Context) {
 	if err := h.streamManager.AppendSteerEvents(ctx, sessionID, assistantID,
 		[]interfaces.StreamEvent{evt}); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		c.Error(errors.NewInternalServerError("Failed to queue message"))
+		_ = c.Error(errors.NewInternalServerError("Failed to queue message"))
 		return
 	}
 
 	queuedOn, status, err := h.rebindSteerIfLiveRunMoved(ctx, sessionID, assistantID, evt)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		c.Error(errors.NewInternalServerError("Failed to queue message"))
+		_ = c.Error(errors.NewInternalServerError("Failed to queue message"))
 		return
 	}
 	if status == "new_run" {
@@ -571,17 +571,17 @@ func (h *Handler) PromoteSteerMessage(c *gin.Context) {
 	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
 	steerID := c.Param("steer_id")
 	if sessionID == "" || steerID == "" {
-		c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
+		_ = c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
 		return
 	}
 
 	if _, err := h.sessionService.GetOwnedSession(ctx, sessionID); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		c.Error(errors.NewNotFoundError("Session not found"))
+		_ = c.Error(errors.NewNotFoundError("Session not found"))
 		return
 	}
 
-	assistantID, ok := h.resolveLiveAgentRun(c, ctx, sessionID)
+	assistantID, ok := h.resolveLiveAgentRun(ctx, c, sessionID)
 	if !ok {
 		return
 	}
@@ -593,7 +593,7 @@ func (h *Handler) PromoteSteerMessage(c *gin.Context) {
 	events, _, err := h.streamManager.GetSteerEvents(ctx, sessionID, assistantID, 0)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		c.Error(errors.NewInternalServerError("Failed to update queued message"))
+		_ = c.Error(errors.NewInternalServerError("Failed to update queued message"))
 		return
 	}
 	for _, evt := range events {
@@ -614,11 +614,11 @@ func (h *Handler) PromoteSteerMessage(c *gin.Context) {
 			"session_id": sessionID,
 			"steer_id":   steerID,
 		})
-		c.Error(errors.NewInternalServerError("Failed to update queued message"))
+		_ = c.Error(errors.NewInternalServerError("Failed to update queued message"))
 		return
 	}
 	if !updated {
-		c.Error(errors.NewNotFoundError("Queued message not found"))
+		_ = c.Error(errors.NewNotFoundError("Queued message not found"))
 		return
 	}
 
@@ -652,17 +652,17 @@ func (h *Handler) ListSteerMessages(c *gin.Context) {
 		sessionID = secutils.SanitizeForLog(c.Param("session_id"))
 	}
 	if sessionID == "" {
-		c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
+		_ = c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
 		return
 	}
 
 	if _, err := h.sessionService.GetOwnedSession(ctx, sessionID); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		c.Error(errors.NewNotFoundError("Session not found"))
+		_ = c.Error(errors.NewNotFoundError("Session not found"))
 		return
 	}
 
-	assistantID, ok := h.resolveLiveAgentRun(c, ctx, sessionID)
+	assistantID, ok := h.resolveLiveAgentRun(ctx, c, sessionID)
 	if !ok {
 		return
 	}
@@ -674,7 +674,7 @@ func (h *Handler) ListSteerMessages(c *gin.Context) {
 	events, _, err := h.streamManager.GetSteerEvents(ctx, sessionID, assistantID, 0)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		c.Error(errors.NewInternalServerError("Failed to load queued messages"))
+		_ = c.Error(errors.NewInternalServerError("Failed to load queued messages"))
 		return
 	}
 
@@ -706,17 +706,17 @@ func (h *Handler) DeleteSteerMessage(c *gin.Context) {
 	}
 	steerID := c.Param("steer_id")
 	if sessionID == "" || steerID == "" {
-		c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
+		_ = c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
 		return
 	}
 
 	if _, err := h.sessionService.GetOwnedSession(ctx, sessionID); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		c.Error(errors.NewNotFoundError("Session not found"))
+		_ = c.Error(errors.NewNotFoundError("Session not found"))
 		return
 	}
 
-	assistantID, ok := h.resolveLiveAgentRun(c, ctx, sessionID)
+	assistantID, ok := h.resolveLiveAgentRun(ctx, c, sessionID)
 	if !ok {
 		return
 	}
@@ -731,7 +731,7 @@ func (h *Handler) DeleteSteerMessage(c *gin.Context) {
 	events, _, err := h.streamManager.GetSteerEvents(ctx, sessionID, assistantID, 0)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		c.Error(errors.NewInternalServerError("Failed to delete queued message"))
+		_ = c.Error(errors.NewInternalServerError("Failed to delete queued message"))
 		return
 	}
 	for _, evt := range events {
@@ -752,7 +752,7 @@ func (h *Handler) DeleteSteerMessage(c *gin.Context) {
 			"session_id": sessionID,
 			"steer_id":   steerID,
 		})
-		c.Error(errors.NewInternalServerError("Failed to delete queued message"))
+		_ = c.Error(errors.NewInternalServerError("Failed to delete queued message"))
 		return
 	}
 
@@ -854,7 +854,9 @@ func (h *Handler) claimNextSteerFollowUp(
 	}
 	backlog := selectSteerBacklog(all, injected)
 	if len(backlog) == 0 {
-		if lateAll, _, lateErr := h.streamManager.GetSteerEvents(ctx, prevReqCtx.sessionID, prevMessageID, 0); lateErr == nil {
+		if lateAll, _, lateErr := h.streamManager.GetSteerEvents(
+			ctx, prevReqCtx.sessionID, prevMessageID, 0,
+		); lateErr == nil {
 			backlog = selectSteerBacklog(lateAll, injected)
 		}
 		if len(backlog) == 0 {
@@ -905,7 +907,9 @@ func (h *Handler) claimNextSteerFollowUp(
 		h.rollbackTurnMessages(ctx, &followUp, true, true)
 		return nil, false
 	}
-	if err := h.streamManager.ClaimLiveRun(ctx, followUp.sessionID, followUp.assistantMessage.ID, followUp.requestID); err != nil {
+	if err := h.streamManager.ClaimLiveRun(
+		ctx, followUp.sessionID, followUp.assistantMessage.ID, followUp.requestID,
+	); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": followUp.sessionID,
 		})
@@ -925,7 +929,9 @@ func (h *Handler) claimNextSteerFollowUp(
 	}
 
 	if len(followUp.steerCarryOver) > 0 {
-		if err := h.streamManager.AppendSteerEvents(ctx, followUp.sessionID, followUp.assistantMessage.ID, followUp.steerCarryOver); err != nil {
+		if err := h.streamManager.AppendSteerEvents(
+			ctx, followUp.sessionID, followUp.assistantMessage.ID, followUp.steerCarryOver,
+		); err != nil {
 			logger.Warnf(ctx, "steer carry-over append failed for session %s: %v", followUp.sessionID, err)
 		} else {
 			followUp.steerCarryOver = nil
@@ -934,7 +940,9 @@ func (h *Handler) claimNextSteerFollowUp(
 	return &followUp, true
 }
 
-func (h *Handler) markSteerEventsConsumed(ctx context.Context, sessionID, assistantID string, events []interfaces.StreamEvent) {
+func (h *Handler) markSteerEventsConsumed(
+	ctx context.Context, sessionID, assistantID string, events []interfaces.StreamEvent,
+) {
 	for _, evt := range events {
 		if _, err := h.streamManager.UpdateSteerEventData(ctx, sessionID, assistantID, evt.ID,
 			map[string]interface{}{steerDataConsumed: true}); err != nil {

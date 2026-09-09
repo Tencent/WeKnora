@@ -128,7 +128,7 @@ func (m *MemoryStreamManager) GetEvents(
 
 // AppendSteerEvents appends control events to the dedicated steer sub-list.
 func (m *MemoryStreamManager) AppendSteerEvents(
-	ctx context.Context,
+	_ context.Context,
 	sessionID, messageID string,
 	events []interfaces.StreamEvent,
 ) error {
@@ -149,7 +149,7 @@ func (m *MemoryStreamManager) AppendSteerEvents(
 
 // GetSteerEvents drains the steer sub-list starting fromOffset.
 func (m *MemoryStreamManager) GetSteerEvents(
-	ctx context.Context,
+	_ context.Context,
 	sessionID, messageID string,
 	fromOffset int,
 ) ([]interfaces.StreamEvent, int, error) {

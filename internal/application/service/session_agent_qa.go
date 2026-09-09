@@ -502,7 +502,9 @@ func applyPerRequestMCPScope(
 		return
 	}
 	mentioned := dedupPreservingOrder(requested)
-	effective, mode := resolvePerRequestMCPScope(mentioned, agentPresetMCPs, agentConfig.MCPSelectionMode, isSharedAgent)
+	effective, mode := resolvePerRequestMCPScope(
+		mentioned, agentPresetMCPs, agentConfig.MCPSelectionMode, isSharedAgent,
+	)
 	if len(effective) == 0 {
 		logger.Warnf(ctx, "Ignoring @MCP scope outside agent preset: requested=%v agent=%v shared=%v",
 			requested, agentPresetMCPs, isSharedAgent)

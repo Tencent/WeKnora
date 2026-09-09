@@ -430,7 +430,7 @@ func (e *AgentEngine) closeAnswerStream(ctx context.Context, sessionID, answerID
 	if e.eventBus == nil || answerID == "" {
 		return
 	}
-	e.eventBus.Emit(ctx, event.Event{
+	_ = e.eventBus.Emit(ctx, event.Event{
 		ID:        answerID,
 		Type:      event.EventAgentFinalAnswer,
 		SessionID: sessionID,

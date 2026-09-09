@@ -189,12 +189,15 @@ func TestExecuteLoopInjectsBeforeNextLLMCall(t *testing.T) {
 	// Round 1: model calls a tool; Round 2: model answers and stops.
 	model := &mockChat{responses: []mockResponse{
 		{chunks: []types.StreamResponse{
-			{ResponseType: types.ResponseTypeAnswer, Content: "let me check",
+			{
+				ResponseType: types.ResponseTypeAnswer,
+				Content:      "let me check",
 				ToolCalls: []types.LLMToolCall{{
 					ID:       "tc1",
 					Type:     "function",
 					Function: types.FunctionCall{Name: "counting_tool", Arguments: "{}"},
-				}}},
+				}},
+			},
 		}},
 		{chunks: []types.StreamResponse{
 			{ResponseType: types.ResponseTypeAnswer, Content: "done", Done: true},
