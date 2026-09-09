@@ -215,6 +215,7 @@ func (e *Engine) tick(ctx context.Context, pool workerPool) error {
 	}
 	for {
 		var job model.VideoProcessingJob
+		var claimedAttempt int
 		err := e.db.Transaction(func(tx *gorm.DB) error {
 			lockClause := "FOR UPDATE SKIP LOCKED"
 			// SQLite is used by the unit tests and does not support PostgreSQL's
@@ -237,10 +238,11 @@ func (e *Engine) tick(ctx context.Context, pool workerPool) error {
 				return nil // 无可处理任务
 			}
 			now := time.Now().UTC()
+			claimedAttempt = job.AttemptCount + 1
 			return tx.Model(&job).Updates(map[string]any{
 				"status":        "running",
 				"started_at":    now,
-				"attempt_count": job.AttemptCount + 1,
+				"attempt_count": claimedAttempt,
 			}).Error
 		})
 		if err != nil {
@@ -250,7 +252,9 @@ func (e *Engine) tick(ctx context.Context, pool workerPool) error {
 			return nil
 		}
 		job.Status = "running"
-		job.AttemptCount++
+		// GORM applies map update values back to Model(&job), so incrementing the
+		// struct here would count one dispatch twice.
+		job.AttemptCount = claimedAttempt
 		e.dispatch(ctx, &job)
 	}
 }

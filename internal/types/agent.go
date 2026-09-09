@@ -62,6 +62,7 @@ type AgentConfig struct {
 	ProductionTaskID     string   `json:"-"` // Content pipeline task owning this Agent run
 	ProductionVideoID    string   `json:"-"`
 	ProductionGeneration string   `json:"-"`
+	ProductionJobType    string   `json:"-"`
 	// SharedAgentReadOnly prevents a shared agent from mutating resources in
 	// its source workspace. It is set from the verified share relation, never
 	// inferred from a client-provided tenant ID.
@@ -254,11 +255,13 @@ func (s *AgentStep) GetObservations() []string {
 
 // AgentState tracks the execution state of an agent across iterations
 type AgentState struct {
-	CurrentRound  int             `json:"current_round"`  // Current round number
-	RoundSteps    []AgentStep     `json:"round_steps"`    // All steps taken so far in the current round
-	IsComplete    bool            `json:"is_complete"`    // Whether agent has finished
-	FinalAnswer   string          `json:"final_answer"`   // The final answer to the query
-	KnowledgeRefs []*SearchResult `json:"knowledge_refs"` // Collected knowledge references
+	CurrentRound            int             `json:"current_round"` // Current round number
+	RoundSteps              []AgentStep     `json:"round_steps"`   // All steps taken so far in the current round
+	IsComplete              bool            `json:"is_complete"`   // Whether agent has finished
+	FinalAnswer             string          `json:"final_answer"`  // The final answer to the query
+	CompletionStatus        string          `json:"completion_status,omitempty"`
+	CompletionFailureReason string          `json:"completion_failure_reason,omitempty"`
+	KnowledgeRefs           []*SearchResult `json:"knowledge_refs"` // Collected knowledge references
 }
 
 // FunctionDefinition represents a function definition for LLM function calling

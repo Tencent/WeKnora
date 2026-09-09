@@ -18,6 +18,7 @@ type QARequest struct {
 	ProductionTaskID     string             // Server-side content pipeline task that owns this Agent run
 	ProductionVideoID    string             // Video identity encoded in the pipeline session
 	ProductionGeneration string             // Transcript generation encoded in the pipeline session
+	ProductionJobType    string             // Content pipeline stage encoded in the signed request
 	ImageURLs            []string           // Image URLs for multimodal input
 	ImageDescription     string             // VLM-generated image description (fallback for non-vision models)
 	UserMessageID        string             // Created user message ID

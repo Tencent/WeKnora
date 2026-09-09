@@ -719,6 +719,10 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	completeData := map[string]interface{}{
 		"total_steps":       data.TotalSteps,
 		"total_duration_ms": data.TotalDurationMs,
+		"outcome":           data.Outcome,
+	}
+	if data.FailureReason != "" {
+		completeData["failure_reason"] = data.FailureReason
 	}
 	// Attach the freshly-collected artifacts so the frontend can render the
 	// download button without waiting for a page refresh. We strip the

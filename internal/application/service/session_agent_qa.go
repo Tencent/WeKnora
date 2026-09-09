@@ -291,6 +291,7 @@ func (s *sessionService) buildAgentConfig(
 		ProductionTaskID:            req.ProductionTaskID,
 		ProductionVideoID:           req.ProductionVideoID,
 		ProductionGeneration:        req.ProductionGeneration,
+		ProductionJobType:           req.ProductionJobType,
 	}
 
 	// Falls back to global configuration if no specific timeout is set for the agent.

@@ -409,6 +409,16 @@ loop:
 					totalTC)
 				_ = e.streamFinalAnswerToEventBus(ctx, query, state, sessionID)
 				state.IsComplete = true
+				if e.requiresAuditedProductionGraphWrite() && !e.hasAuditedProductionGraphWrite(state) {
+					state.CompletionStatus = "failed"
+					state.CompletionFailureReason = "production_graph_missing_audited_wiki_write"
+				} else {
+					state.CompletionStatus = "succeeded"
+					state.CompletionFailureReason = ""
+				}
+			} else {
+				state.CompletionStatus = "failed"
+				state.CompletionFailureReason = "context_cancelled"
 			}
 			return state, ctx.Err()
 		default:
@@ -440,7 +450,13 @@ loop:
 	// complete answer." message, which then leaks to the UI as the final
 	// answer for a conversation the user deliberately stopped.
 	if !state.IsComplete && ctx.Err() == nil {
-		e.handleMaxIterations(ctx, query, state, sessionID)
+		if e.requiresAuditedProductionGraphWrite() && !e.hasAuditedProductionGraphWrite(state) {
+			state.IsComplete = true
+			state.CompletionStatus = "failed"
+			state.CompletionFailureReason = "production_graph_missing_audited_wiki_write"
+		} else {
+			e.handleMaxIterations(ctx, query, state, sessionID)
+		}
 	}
 
 	return state, nil
@@ -581,6 +597,13 @@ func (e *AgentEngine) runReActIteration(
 				round, *consecutiveSameContent+1, response.FinishReason)
 			state.FinalAnswer = response.Content
 			state.IsComplete = true
+			if e.requiresAuditedProductionGraphWrite() && !e.hasAuditedProductionGraphWrite(state) {
+				state.CompletionStatus = "failed"
+				state.CompletionFailureReason = "production_graph_missing_audited_wiki_write"
+			} else {
+				state.CompletionStatus = "succeeded"
+				state.CompletionFailureReason = ""
+			}
 			return iterOutcomeBreak, nil
 		}
 	} else {
@@ -638,11 +661,25 @@ func (e *AgentEngine) runReActIteration(
 				round, maxEmptyResponseRetries)
 			state.FinalAnswer = "I'm sorry, I was unable to generate a response. Please try again."
 			state.IsComplete = true
+			state.CompletionStatus = "failed"
+			state.CompletionFailureReason = "empty_response"
 			state.RoundSteps = append(state.RoundSteps, verdict.step)
 			return iterOutcomeBreak, nil
 		}
+		if e.requiresAuditedProductionGraphWrite() && !e.hasAuditedProductionGraphWrite(state) {
+			logger.Warnf(ctx, "[Agent][Round-%d] Production graph attempted to finish without an audited wiki_write_page", round)
+			state.RoundSteps = append(state.RoundSteps, verdict.step)
+			*messagesPtr = append(*messagesPtr, chat.Message{
+				Role: "user",
+				Content: "The production graph is not complete: no successful audited wiki_write_page has been recorded. " +
+					"Inspect the last tool error, submit a complete V2 knowledge object or video index payload, and call wiki_write_page again. Do not answer with prose until a write succeeds.",
+			})
+			return iterOutcomeNext, nil
+		}
 		state.FinalAnswer = verdict.finalAnswer
 		state.IsComplete = true
+		state.CompletionStatus = "succeeded"
+		state.CompletionFailureReason = ""
 		state.RoundSteps = append(state.RoundSteps, verdict.step)
 		return iterOutcomeBreak, nil
 	}
@@ -673,6 +710,37 @@ func (e *AgentEngine) runReActIteration(
 	})
 
 	return iterOutcomeNext, nil
+}
+
+func (e *AgentEngine) requiresAuditedProductionGraphWrite() bool {
+	return e != nil && e.config != nil &&
+		strings.TrimSpace(e.config.ProductionTaskID) != "" &&
+		strings.TrimSpace(e.config.ProductionVideoID) != "" &&
+		strings.TrimSpace(e.config.ProductionGeneration) != "" &&
+		strings.EqualFold(strings.TrimSpace(e.config.ProductionJobType), "graph")
+}
+
+func (e *AgentEngine) hasAuditedProductionGraphWrite(state *types.AgentState) bool {
+	if state == nil {
+		return false
+	}
+	wantTaskID := strings.TrimSpace(e.config.ProductionTaskID)
+	for _, step := range state.RoundSteps {
+		for _, call := range step.ToolCalls {
+			if call.Name != agenttools.ToolWikiWritePage || call.Result == nil || !call.Result.Success {
+				continue
+			}
+			productionSource, ok := call.Result.Data["production_source"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			taskID, _ := productionSource["task_id"].(string)
+			if strings.TrimSpace(taskID) == wantTaskID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // String returns a stable label for Langfuse output payloads.

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -36,6 +37,7 @@ func (t *countingTool) Execute(context.Context, json.RawMessage) (*types.ToolRes
 
 type mockResponse struct {
 	chunks []types.StreamResponse
+	err    error
 }
 
 type mockChat struct {
@@ -58,6 +60,9 @@ func (m *mockChat) ChatStream(
 	resp := m.responses[m.callCount]
 	m.calls = append(m.calls, append([]chat.Message(nil), messages...))
 	m.callCount++
+	if resp.err != nil {
+		return nil, resp.err
+	}
 
 	ch := make(chan types.StreamResponse, len(resp.chunks))
 	for _, chunk := range resp.chunks {
@@ -532,6 +537,85 @@ func TestExecuteLoop_NaturalStop_DoesNotDuplicateAnswer(t *testing.T) {
 	assert.GreaterOrEqual(t, doneCount, 1, "a Done marker must close the answer stream")
 }
 
+func TestExecuteLoop_EmptyNaturalStopIsFailedCompletion(t *testing.T) {
+	mock := &mockChat{
+		responses: []mockResponse{
+			{chunks: []types.StreamResponse{{Done: true, FinishReason: "stop"}}},
+			{chunks: []types.StreamResponse{{Done: true, FinishReason: "stop"}}},
+			{chunks: []types.StreamResponse{{Done: true, FinishReason: "stop"}}},
+		},
+	}
+
+	engine := newTestEngine(t, mock)
+	state := &types.AgentState{}
+	_, err := engine.executeLoop(context.Background(), state, "test query",
+		emptyMessages(), emptyTools(), "sess-1", "msg-1")
+	require.NoError(t, err)
+	assert.Equal(t, "failed", state.CompletionStatus)
+	assert.Equal(t, "empty_response", state.CompletionFailureReason)
+}
+
+func TestExecuteLoop_SynthesizedAnswerAfterLLMFailureRemainsFailed(t *testing.T) {
+	mock := &mockChat{responses: []mockResponse{
+		{chunks: []types.StreamResponse{{
+			ToolCalls: []types.LLMToolCall{{ID: "call-1", Type: "function", Function: types.FunctionCall{Name: "lookup", Arguments: `{}`}}},
+			Done:      true, FinishReason: "tool_calls",
+		}}},
+		{err: errors.New("fatal model failure")},
+		{chunks: []types.StreamResponse{{ResponseType: types.ResponseTypeAnswer, Content: "Recovered user-facing answer", Done: true, FinishReason: "stop"}}},
+	}}
+	engine := newTestEngine(t, mock)
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	engine.toolRegistry.RegisterTool(newCountingTool("lookup"))
+	state := &types.AgentState{}
+	var completion event.AgentCompleteData
+	engine.eventBus.On(event.EventAgentComplete, func(_ context.Context, evt event.Event) error {
+		completion, _ = evt.Data.(event.AgentCompleteData)
+		return nil
+	})
+
+	_, err := engine.executeLoop(t.Context(), state, "test query", emptyMessages(), nil, "sess-1", "msg-1")
+	require.NoError(t, err)
+	require.True(t, state.IsComplete)
+	require.Equal(t, "Recovered user-facing answer", state.FinalAnswer)
+	require.Equal(t, "failed", state.CompletionStatus)
+	require.Equal(t, "llm_call_failed_after_tool_results", state.CompletionFailureReason)
+	require.Equal(t, "failed", completion.Outcome)
+	require.Equal(t, "llm_call_failed_after_tool_results", completion.FailureReason)
+}
+
+func TestExecuteLoop_ProductionGraphRejectsProseCompletionUntilAuditedWrite(t *testing.T) {
+	mock := &mockChat{responses: []mockResponse{
+		{chunks: []types.StreamResponse{{
+			ToolCalls: []types.LLMToolCall{{ID: "write-bad", Type: "function", Function: types.FunctionCall{Name: agenttools.ToolWikiWritePage, Arguments: `{}`}}},
+			Done:      true, FinishReason: "tool_calls",
+		}}},
+		{chunks: []types.StreamResponse{{ResponseType: types.ResponseTypeAnswer, Content: "I could not write it.", Done: true, FinishReason: "stop"}}},
+		{chunks: []types.StreamResponse{{
+			ToolCalls: []types.LLMToolCall{{ID: "write-good", Type: "function", Function: types.FunctionCall{Name: agenttools.ToolWikiWritePage, Arguments: `{}`}}},
+			Done:      true, FinishReason: "tool_calls",
+		}}},
+		{chunks: []types.StreamResponse{{ResponseType: types.ResponseTypeAnswer, Content: "Graph written.", Done: true, FinishReason: "stop"}}},
+	}}
+	engine := newTestEngine(t, mock, func(cfg *types.AgentConfig) {
+		cfg.ProductionTaskID = "job-1"
+		cfg.ProductionVideoID = "video-1"
+		cfg.ProductionGeneration = "generation-1"
+		cfg.ProductionJobType = "graph"
+	})
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	engine.toolRegistry.RegisterTool(&graphWriteSequenceTool{BaseTool: agenttools.NewBaseTool(
+		agenttools.ToolWikiWritePage, "test", json.RawMessage(`{"type":"object"}`),
+	)})
+	state := &types.AgentState{}
+
+	_, err := engine.executeLoop(t.Context(), state, "build graph", emptyMessages(), nil, "sess-1", "msg-1")
+	require.NoError(t, err)
+	require.Equal(t, 4, mock.callCount)
+	require.Equal(t, "succeeded", state.CompletionStatus)
+	require.Equal(t, "Graph written.", state.FinalAnswer)
+}
+
 // TestExecuteLoop_EndTurnTerminates ensures Anthropic-style end_turn is treated
 // like OpenAI's stop when no tool calls are present. Otherwise the ReAct loop
 // keeps asking the model again and streams repeated answer chunks.
@@ -553,6 +637,25 @@ func TestExecuteLoop_EndTurnTerminates(t *testing.T) {
 	assert.True(t, state.IsComplete)
 	assert.Equal(t, "The answer.", state.FinalAnswer)
 	assert.Equal(t, 1, mock.callCount, "end_turn must end the loop after the first model call")
+}
+
+type graphWriteSequenceTool struct {
+	agenttools.BaseTool
+	calls int
+}
+
+func (t *graphWriteSequenceTool) Execute(context.Context, json.RawMessage) (*types.ToolResult, error) {
+	t.calls++
+	if t.calls == 1 {
+		return &types.ToolResult{Success: false, Error: "incomplete knowledge object identity"}, nil
+	}
+	return &types.ToolResult{
+		Success: true,
+		Output:  "written",
+		Data: map[string]interface{}{
+			"production_source": map[string]interface{}{"task_id": "job-1"},
+		},
+	}, nil
 }
 
 func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *testing.T) {

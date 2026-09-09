@@ -477,6 +477,7 @@ func (e *AgentEngine) runToolCall(
 		ProductionTaskID:     e.config.ProductionTaskID,
 		ProductionVideoID:    e.config.ProductionVideoID,
 		ProductionGeneration: e.config.ProductionGeneration,
+		ProductionJobType:    e.config.ProductionJobType,
 		UserID:               principal.StorageID(),
 		// ApprovalCtx keeps the round-level ctx without the per-tool execution timeout,
 		// so MCP tool human-approval (issue #1173) can legitimately block longer.

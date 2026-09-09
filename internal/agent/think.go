@@ -458,6 +458,8 @@ func (e *AgentEngine) callLLMWithRetry(
 				return nil, fmt.Errorf("LLM call failed: %w (synthesis also failed: %v)", err, synthErr)
 			}
 			state.IsComplete = true
+			state.CompletionStatus = "failed"
+			state.CompletionFailureReason = "llm_call_failed_after_tool_results"
 			return nil, nil // graceful degradation succeeded
 		}
 

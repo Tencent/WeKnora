@@ -51,6 +51,7 @@ type qaRequestContext struct {
 	productionTaskID      string
 	productionVideoID     string
 	productionGeneration  string
+	productionJobType     string
 	summaryModelID        string
 	webSearchEnabled      bool
 	mentionedItems        types.MentionedItems
@@ -93,6 +94,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		ProductionTaskID:     rc.productionTaskID,
 		ProductionVideoID:    rc.productionVideoID,
 		ProductionGeneration: rc.productionGeneration,
+		ProductionJobType:    rc.productionJobType,
 		ImageURLs:            imageURLs,
 		ImageDescription:     imageDescription,
 		UserMessageID:        rc.userMessageID,
@@ -402,6 +404,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		productionTaskID:      productionIdentity.TaskID,
 		productionVideoID:     productionIdentity.VideoID,
 		productionGeneration:  productionIdentity.TranscriptGeneration,
+		productionJobType:     productionIdentity.JobType,
 		summaryModelID:        secutils.SanitizeForLog(request.SummaryModelID),
 		webSearchEnabled:      request.WebSearchEnabled,
 		mentionedItems:        convertMentionedItems(request.MentionedItems),
@@ -425,6 +428,7 @@ type pipelineProductionIdentity struct {
 	TaskID               string
 	VideoID              string
 	TranscriptGeneration string
+	JobType              string
 }
 
 func productionIdentityFromSignedRequest(
@@ -447,7 +451,7 @@ func productionIdentityFromSignedRequest(
 		return pipelineProductionIdentity{}, contentprovenance.ErrMismatchedRequest
 	}
 	return pipelineProductionIdentity{
-		TaskID: envelope.TaskID, VideoID: envelope.VideoID, TranscriptGeneration: envelope.TranscriptGeneration,
+		TaskID: envelope.TaskID, VideoID: envelope.VideoID, TranscriptGeneration: envelope.TranscriptGeneration, JobType: envelope.JobType,
 	}, nil
 }
 

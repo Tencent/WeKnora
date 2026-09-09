@@ -173,6 +173,11 @@ func (e *AgentEngine) handleMaxIterations(
 			"error": err.Error(),
 		})
 		state.FinalAnswer = "Sorry, I was unable to generate a complete answer."
+		state.CompletionStatus = "failed"
+		state.CompletionFailureReason = "final_answer_generation_failed"
+	} else {
+		state.CompletionStatus = "succeeded"
+		state.CompletionFailureReason = ""
 	}
 	state.IsComplete = true
 }
@@ -181,6 +186,14 @@ func (e *AgentEngine) handleMaxIterations(
 func (e *AgentEngine) emitCompletionEvent(
 	ctx context.Context, state *types.AgentState, sessionID, messageID string, startTime time.Time,
 ) {
+	outcome := state.CompletionStatus
+	if outcome == "" {
+		if state.IsComplete {
+			outcome = "succeeded"
+		} else {
+			outcome = "failed"
+		}
+	}
 	// Convert knowledge refs to interface{} slice for event data
 	knowledgeRefsInterface := make([]interface{}, 0, len(state.KnowledgeRefs))
 	for _, ref := range state.KnowledgeRefs {
@@ -193,6 +206,8 @@ func (e *AgentEngine) emitCompletionEvent(
 		SessionID: sessionID,
 		Data: event.AgentCompleteData{
 			FinalAnswer:     state.FinalAnswer,
+			Outcome:         outcome,
+			FailureReason:   state.CompletionFailureReason,
 			KnowledgeRefs:   knowledgeRefsInterface,
 			AgentSteps:      state.RoundSteps, // Include detailed execution steps for message storage
 			TotalSteps:      len(state.RoundSteps),

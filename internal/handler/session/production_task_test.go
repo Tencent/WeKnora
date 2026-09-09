@@ -28,6 +28,7 @@ func TestProductionIdentityComesFromSignedPipelineRequest(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, pipelineProductionIdentity{
 		TaskID: "job-1", VideoID: "video-1", TranscriptGeneration: "generation-1",
+		JobType: "graph",
 	}, identity)
 
 	identity, err = productionIdentityFromSignedRequest(

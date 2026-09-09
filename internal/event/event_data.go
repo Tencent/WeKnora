@@ -137,6 +137,8 @@ type AgentCompleteData struct {
 	SessionID       string                 `json:"session_id"`
 	TotalSteps      int                    `json:"total_steps"`
 	FinalAnswer     string                 `json:"final_answer"`
+	Outcome         string                 `json:"outcome,omitempty"`
+	FailureReason   string                 `json:"failure_reason,omitempty"`
 	KnowledgeRefs   []interface{}          `json:"knowledge_refs,omitempty"` // []*types.SearchResult
 	AgentSteps      interface{}            `json:"agent_steps,omitempty"`    // []types.AgentStep - detailed execution steps
 	TotalDurationMs int64                  `json:"total_duration_ms"`

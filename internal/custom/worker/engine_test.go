@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -212,6 +213,34 @@ func TestPendingDraftJobsRequireExplicitOptIn(t *testing.T) {
 	if len(enabled) != 1 || enabled[0].ID != "draft-opt-in" {
 		t.Fatalf("draft jobs with explicit opt-in = %#v, want draft-opt-in", enabled)
 	}
+}
+
+func TestTickIncrementsAttemptOncePerDispatch(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoProcessingJob{}))
+
+	video := model.Video{
+		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusReady,
+		TranscriptGeneration: "generation-1",
+	}
+	job := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "graph", Status: "pending",
+		TranscriptGeneration: video.TranscriptGeneration, AttemptCount: 0, MaxAttempts: 3,
+		IdempotencyKey: "graph:" + video.ID + ":" + video.TranscriptGeneration,
+	}
+	require.NoError(t, db.Create(&video).Error)
+	require.NoError(t, db.Create(&job).Error)
+
+	handler := &recordingFailingHandler{jobType: "graph", err: errors.New("graph failed")}
+	engine := NewEngine(db, &config.WorkerConfig{}, handler)
+	require.NoError(t, engine.tick(t.Context(), enhancementPool))
+
+	require.Equal(t, []int{1, 2, 3}, handler.attempts)
+	var persisted model.VideoProcessingJob
+	require.NoError(t, db.First(&persisted, "id = ?", job.ID).Error)
+	require.Equal(t, 3, persisted.AttemptCount)
+	require.Equal(t, "failed", persisted.Status)
 }
 
 func TestRetireAutomaticDraftJobs(t *testing.T) {
@@ -659,6 +688,19 @@ func (h *failingHandler) Run(context.Context, *model.VideoProcessingJob, *model.
 
 type stubHandler struct {
 	jobType string
+}
+
+type recordingFailingHandler struct {
+	jobType  string
+	err      error
+	attempts []int
+}
+
+func (h *recordingFailingHandler) JobType() string { return h.jobType }
+
+func (h *recordingFailingHandler) Run(_ context.Context, job *model.VideoProcessingJob, _ *model.Video) error {
+	h.attempts = append(h.attempts, job.AttemptCount)
+	return h.err
 }
 
 func (h *stubHandler) JobType() string { return h.jobType }
