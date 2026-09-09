@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "default",
+  "name": "WeKnora built-in QA sample",
+  "description": "Built-in deterministic sample for the WeKnora evaluation pipeline.",
+  "language": "mixed",
+  "scenario": "general-rag",
+  "source": "WeKnora repository",
+  "license": "same-as-repository",
+  "coverage_dimensions": [
+    "retrieval",
+    "reranking",
+    "answer-generation"
+  ]
+}

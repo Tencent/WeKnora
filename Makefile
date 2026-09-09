@@ -111,8 +111,9 @@ test:
 # Topic 3 deterministic acceptance command. Reports are written to the current
 # directory so the command output and submitted artifacts use identical data.
 evaluation-gate:
-	go test ./internal/application/service/metric ./internal/application/service/chat_pipeline ./internal/application/service ./internal/config ./internal/models/chat ./internal/models/embedding ./cmd/evalgate ./cmd/cachebench
-	go run ./cmd/evalgate -result evaluation/fixtures/regression_result.json -baseline evaluation/baseline.json -report evaluation-report.json
+	go test ./internal/application/service/metric ./internal/application/service/chat_pipeline ./internal/application/service ./internal/config ./internal/models/chat ./internal/models/embedding ./cmd/retrievalgate ./cmd/evalgate ./cmd/cachebench
+	go run ./cmd/retrievalgate -out evaluation-pipeline-result.json
+	go run ./cmd/evalgate -result evaluation-pipeline-result.json -reference-result evaluation/fixtures/regression_reference.json -baseline evaluation/baseline.json -report evaluation-report.json
 	go run ./cmd/cachebench -before evaluation/fixtures/cache_before.json -after evaluation/fixtures/cache_after.json -report cache-comparison.json
 
 # Clean build artifacts

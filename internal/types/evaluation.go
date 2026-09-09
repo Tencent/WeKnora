@@ -109,6 +109,7 @@ type EvaluationUsage struct {
 	CacheReportedCalls    int                `json:"cache_reported_calls"`
 	CacheHitCalls         int                `json:"cache_hit_calls"`
 	CacheHitRate          float64            `json:"cache_hit_rate"`
+	CacheCoverageRate     float64            `json:"cache_coverage_rate"`
 	ModelDurationMS       int64              `json:"model_duration_ms"`
 	AverageModelLatencyMS float64            `json:"average_model_latency_ms"`
 	PricedCalls           int                `json:"priced_calls"`
@@ -119,10 +120,32 @@ type EvaluationUsage struct {
 // ModelUsageStat aggregates persisted evaluation, chat, Wiki, and background
 // traffic for one model in a tenant. It contains no prompt or response bodies.
 type ModelUsageStat struct {
-	ModelID   string          `json:"model_id"`
-	ModelName string          `json:"model_name"`
-	ModelType ModelType       `json:"model_type"`
-	Usage     EvaluationUsage `json:"usage"`
+	ModelID        string                   `json:"model_id"`
+	ModelName      string                   `json:"model_name"`
+	ModelType      ModelType                `json:"model_type"`
+	Usage          EvaluationUsage          `json:"usage"`
+	Purposes       []ModelPurposeUsageStat  `json:"purposes,omitempty"`
+	EmbeddingCache *EmbeddingCacheUsageStat `json:"embedding_cache,omitempty"`
+}
+
+// EmbeddingCacheUsageStat reports cache effectiveness separately from provider
+// token caching. A deduplicated input is repeated within one batch and therefore
+// avoids a provider computation without being a stored-cache hit.
+type EmbeddingCacheUsageStat struct {
+	LookupCount         int     `json:"lookup_count"`
+	HitCount            int     `json:"hit_count"`
+	MissCount           int     `json:"miss_count"`
+	DeduplicatedCount   int     `json:"deduplicated_count"`
+	AvoidedComputations int     `json:"avoided_computations"`
+	HitRate             float64 `json:"hit_rate"`
+	AvoidedRate         float64 `json:"avoided_rate"`
+}
+
+// ModelPurposeUsageStat breaks a model's aggregate down by a secret-free call
+// purpose such as knowledge_qa or wiki_page_modify.
+type ModelPurposeUsageStat struct {
+	Purpose string          `json:"purpose"`
+	Usage   EvaluationUsage `json:"usage"`
 }
 
 // EvaluationModelCall describes one model call without storing prompt content.

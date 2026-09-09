@@ -18,7 +18,7 @@ import (
 func TestEvaluationStoragePersistsAcrossInstances(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "evaluation.db")), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&evaluationRecord{}, &evaluationModelCallRecord{}))
+	require.NoError(t, db.AutoMigrate(&evaluationRecord{}, &evaluationModelCallRecord{}, &embeddingCacheUsageRecord{}))
 
 	ctx := context.Background()
 	startedAt := time.Now().UTC().Truncate(time.Millisecond)
@@ -72,7 +72,7 @@ func TestEvaluationStoragePersistsAcrossInstances(t *testing.T) {
 func TestModelUsagePreservesCostsForMultipleModels(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "model-usage.db")), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&evaluationRecord{}, &evaluationModelCallRecord{}))
+	require.NoError(t, db.AutoMigrate(&evaluationRecord{}, &evaluationModelCallRecord{}, &embeddingCacheUsageRecord{}))
 	storage := newEvaluationStorage(db)
 	ctx := context.Background()
 
@@ -100,10 +100,36 @@ func TestModelUsagePreservesCostsForMultipleModels(t *testing.T) {
 	require.InDelta(t, 0.2, byID["model-b"].Usage.CostByCurrency["CNY"], 0.000001)
 }
 
+func TestModelUsageIncludesTenantScopedEmbeddingCache(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "embedding-cache-usage.db")), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&evaluationModelCallRecord{}, &embeddingCacheUsageRecord{}))
+	now := time.Now().UTC()
+	require.NoError(t, db.Create([]embeddingCacheUsageRecord{
+		{ID: "cache-1", TenantID: 7, ModelID: "embed-1", ModelName: "Embedding A", LookupCount: 5, HitCount: 2, MissCount: 2, DeduplicatedCount: 1, AvoidedComputations: 3, CreatedAt: now},
+		{ID: "cache-2", TenantID: 7, ModelID: "embed-1", ModelName: "Embedding A", LookupCount: 3, HitCount: 1, MissCount: 2, AvoidedComputations: 1, CreatedAt: now},
+		{ID: "other-tenant", TenantID: 8, ModelID: "embed-1", ModelName: "Embedding A", LookupCount: 100, HitCount: 100, AvoidedComputations: 100, CreatedAt: now},
+	}).Error)
+
+	stats, err := newEvaluationStorage(db).modelUsage(context.Background(), 7, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, stats, 1)
+	require.Equal(t, "embed-1", stats[0].ModelID)
+	require.Equal(t, types.ModelTypeEmbedding, stats[0].ModelType)
+	require.NotNil(t, stats[0].EmbeddingCache)
+	require.Equal(t, 8, stats[0].EmbeddingCache.LookupCount)
+	require.Equal(t, 3, stats[0].EmbeddingCache.HitCount)
+	require.Equal(t, 4, stats[0].EmbeddingCache.MissCount)
+	require.Equal(t, 1, stats[0].EmbeddingCache.DeduplicatedCount)
+	require.Equal(t, 4, stats[0].EmbeddingCache.AvoidedComputations)
+	require.InDelta(t, 0.375, stats[0].EmbeddingCache.HitRate, 0.000001)
+	require.InDelta(t, 0.5, stats[0].EmbeddingCache.AvoidedRate, 0.000001)
+}
+
 func TestEvaluationStorageReturnsTaskNotFound(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "evaluation.db")), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&evaluationRecord{}, &evaluationModelCallRecord{}))
+	require.NoError(t, db.AutoMigrate(&evaluationRecord{}, &evaluationModelCallRecord{}, &embeddingCacheUsageRecord{}))
 
 	_, err = newEvaluationStorage(db).get(context.Background(), "missing")
 	require.EqualError(t, err, "task not found")
@@ -113,7 +139,7 @@ func TestEvaluationStorageAggregatesModelCalls(t *testing.T) {
 	t.Setenv("WEKNORA_MODEL_CALL_FINGERPRINT_KEY", "evaluation-test-secret")
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "evaluation.db")), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&evaluationRecord{}, &evaluationModelCallRecord{}))
+	require.NoError(t, db.AutoMigrate(&evaluationRecord{}, &evaluationModelCallRecord{}, &embeddingCacheUsageRecord{}))
 
 	ctx := context.Background()
 	startedAt := time.Now().UTC()
@@ -167,6 +193,7 @@ func TestEvaluationStorageAggregatesModelCalls(t *testing.T) {
 	require.EqualValues(t, 400, loaded.Usage.ModelDurationMS)
 	require.Equal(t, 200.0, loaded.Usage.AverageModelLatencyMS)
 	require.InDelta(t, float64(40)/150, loaded.Usage.CacheHitRate, 0.0001)
+	require.InDelta(t, 1, loaded.Usage.CacheCoverageRate, 0.0001)
 	require.Equal(t, 1, loaded.Usage.PricedCalls)
 	require.Equal(t, 1, loaded.Usage.UnpricedCalls)
 	require.InDelta(t, 0.0012, loaded.Usage.CostByCurrency["USD"], 0.0000001)
@@ -192,6 +219,18 @@ func TestEvaluationStorageAggregatesModelCalls(t *testing.T) {
 	require.Equal(t, 2, stats[0].Usage.CallCount)
 	require.Equal(t, 150, stats[0].Usage.PromptTokens)
 	require.InDelta(t, 0.0012, stats[0].Usage.CostByCurrency["USD"], 0.0000001)
+	require.Len(t, stats[0].Purposes, 2)
+	purposes := map[string]types.EvaluationUsage{}
+	for _, purpose := range stats[0].Purposes {
+		purposes[purpose.Purpose] = purpose.Usage
+	}
+	require.Equal(t, 1, purposes["query_rewrite"].CallCount)
+	require.Equal(t, 120, purposes["query_rewrite"].TotalTokens)
+	require.InDelta(t, 0.4, purposes["query_rewrite"].CacheHitRate, 0.0001)
+	require.InDelta(t, 0.0012, purposes["query_rewrite"].CostByCurrency["USD"], 0.0000001)
+	require.Equal(t, 1, purposes["knowledge_qa"].CallCount)
+	require.Equal(t, 1, purposes["knowledge_qa"].FailedCalls)
+	require.Empty(t, purposes["knowledge_qa"].CostByCurrency)
 
 	require.NoError(t, storage.db.Model(&evaluationModelCallRecord{}).
 		Where("purpose = ?", "query_rewrite").
@@ -203,6 +242,31 @@ func TestEvaluationStorageAggregatesModelCalls(t *testing.T) {
 	require.Equal(t, 1, windowStats[0].Usage.CallCount)
 	require.Equal(t, 50, windowStats[0].Usage.PromptTokens)
 	require.Empty(t, windowStats[0].Usage.CostByCurrency)
+	require.Len(t, windowStats[0].Purposes, 1)
+	require.Equal(t, "knowledge_qa", windowStats[0].Purposes[0].Purpose)
+	require.Equal(t, 50, windowStats[0].Purposes[0].Usage.PromptTokens)
+
+	finishedAt := startedAt.Add(time.Minute)
+	require.NoError(t, storage.update(ctx, detail.Task.ID, func(current *types.EvaluationDetail) {
+		current.Task.Status = types.EvaluationStatueSuccess
+		current.Task.EndTime = &finishedAt
+	}))
+	require.NoError(t, storage.db.Where("task_id = ?", detail.Task.ID).
+		Delete(&evaluationModelCallRecord{}).Error)
+	afterRetention, err := newEvaluationStorage(db).get(ctx, detail.Task.ID)
+	require.NoError(t, err)
+	require.Empty(t, afterRetention.ModelCalls)
+	require.NotNil(t, afterRetention.Usage)
+	require.Equal(t, 2, afterRetention.Usage.CallCount)
+	require.Equal(t, 170, afterRetention.Usage.TotalTokens)
+	require.InDelta(t, 0.0012, afterRetention.Usage.CostByCurrency["USD"], 0.0000001)
+	require.NoError(t, newEvaluationStorage(db).update(ctx, detail.Task.ID, func(current *types.EvaluationDetail) {
+		current.Task.Finished = current.Task.Total
+	}))
+	afterTerminalRewrite, err := newEvaluationStorage(db).get(ctx, detail.Task.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, afterTerminalRewrite.Usage.CallCount)
+	require.Equal(t, 170, afterTerminalRewrite.Usage.TotalTokens)
 }
 
 func TestEvaluationStorageProtectsFingerprintAndDropsProviderError(t *testing.T) {

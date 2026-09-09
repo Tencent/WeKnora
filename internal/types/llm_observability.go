@@ -71,6 +71,26 @@ type LLMCallObserver interface {
 	ObserveLLMCall(observation LLMCallObservation)
 }
 
+// EmbeddingCacheObservation describes secret-free cache effectiveness. Lookup
+// count is input based; DeduplicatedCount captures repeated inputs collapsed
+// within one batch before a provider call.
+type EmbeddingCacheObservation struct {
+	TenantID            uint64
+	ModelID             string
+	ModelName           string
+	LookupCount         int
+	HitCount            int
+	MissCount           int
+	DeduplicatedCount   int
+	AvoidedComputations int
+}
+
+// EmbeddingCacheObserver is optional and implemented by the process recorder.
+// It is separate from LLMCallObserver because a cache hit is not a model call.
+type EmbeddingCacheObserver interface {
+	ObserveEmbeddingCache(observation EmbeddingCacheObservation)
+}
+
 type llmCallObserverContextKey struct{}
 
 var processLLMCallObserver struct {
@@ -110,6 +130,26 @@ func DispatchLLMCallObservation(ctx context.Context, observation LLMCallObservat
 	}
 	observation.TenantID = tenantID
 	observer.ObserveLLMCall(observation)
+}
+
+// DispatchEmbeddingCacheObservation sends cache effectiveness to the global
+// recorder. Evaluation requests use a task-scoped model-call observer, but
+// cache lookups still belong in the tenant-wide cache aggregate.
+func DispatchEmbeddingCacheObservation(ctx context.Context, observation EmbeddingCacheObservation) {
+	tenantID, tenantScoped := TenantIDFromContext(ctx)
+	if !tenantScoped || tenantID == 0 {
+		return
+	}
+	observer, ok := GlobalLLMCallObserver()
+	if !ok {
+		return
+	}
+	cacheObserver, ok := observer.(EmbeddingCacheObserver)
+	if !ok {
+		return
+	}
+	observation.TenantID = tenantID
+	cacheObserver.ObserveEmbeddingCache(observation)
 }
 
 // WithLLMCallObserver attaches a request-scoped model-call observer.

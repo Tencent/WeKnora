@@ -1,0 +1,69 @@
+{
+  "experiment": "embedding-cache-rebuild-ollama-2026-08-30",
+  "executed_at": "2026-08-30T12:45:18+08:00",
+  "provider": "Ollama",
+  "model": "nomic-embed-text:latest",
+  "dimension": 768,
+  "source_table": "embedding_cache_usage_events",
+  "privacy": {
+    "prompt_or_document_body_exported": false,
+    "api_key_exported": false,
+    "tenant_identifier_exported": false
+  },
+  "controls": {
+    "same_tenant": true,
+    "same_embedding_model": true,
+    "same_chunking_configuration": true,
+    "same_file_hash": "0c2196044c7ed4725698bf80a5781315",
+    "same_file_name_for_accepted_comparison": true,
+    "backend_restarted_after_cold_run": true,
+    "existing_records_deleted": false
+  },
+  "cold": {
+    "knowledge_base": "课题三-Embedding缓存验收",
+    "file_name": "第一轮-冷缓存-重新上传.md",
+    "started_at": "2026-08-30T12:25:56+08:00",
+    "completed_at": "2026-08-30T12:27:41+08:00",
+    "lookup_count": 17,
+    "cache_hits": 0,
+    "provider_computations": 17,
+    "avoided_computations": 0,
+    "cache_hit_rate": 0.0
+  },
+  "warm_after_restart": {
+    "knowledge_base": "课题三-Embedding缓存验收-持久化复验",
+    "file_name": "第一轮-冷缓存-重新上传.md",
+    "started_at": "2026-08-30T12:43:35+08:00",
+    "completed_at": "2026-08-30T12:45:18+08:00",
+    "lookup_count": 17,
+    "cache_hits": 4,
+    "provider_computations": 13,
+    "avoided_computations": 4,
+    "cache_hit_rate": 0.235294
+  },
+  "delta": {
+    "provider_computations_saved": 4,
+    "provider_computation_reduction_rate": 0.235294,
+    "cache_hit_rate_delta": 0.235294
+  },
+  "deterministic_document_chunks": {
+    "cold_provider_computations": 4,
+    "warm_provider_computations": 0,
+    "warm_cache_hits": 4,
+    "provider_computation_reduction_rate": 1.0
+  },
+  "generated_content": {
+    "lookup_count": 13,
+    "cache_hits": 0,
+    "provider_computations": 13,
+    "explanation": "The summary and generated questions were regenerated and were not byte-identical embedding inputs."
+  },
+  "excluded_control_run": {
+    "knowledge_base": "课题三-Embedding缓存验收-暖缓存",
+    "file_name": "第二轮-暖缓存.md",
+    "lookup_count": 17,
+    "cache_hits": 0,
+    "reason": "The document title is prepended to chunk embedding input, so changing the filename changed the cache key."
+  },
+  "conclusion": "After a backend restart, identical fixed document chunks were served from the durable tenant-scoped cache. Total provider computations fell by 23.53%; the deterministic document-chunk stage fell by 100%."
+}

@@ -18,7 +18,7 @@ func TestEvaluatePassesThresholds(t *testing.T) {
 		"metric":{"retrieval_metrics":{"recall":0.8}},
 		"usage":{"cache_hit_rate":0.4,"cost_by_currency":{"USD":0.05}}
 	}`)
-	report := evaluate(result, baseline{
+	report := evaluate(result, nil, baseline{
 		RequireSuccess: true, RequireComplete: true,
 		Minimum: map[string]float64{"metric.retrieval_metrics.recall": 0.75},
 		Maximum: map[string]float64{"task.duration_ms": 2000, "usage.cost_by_currency.USD": 0.1},
@@ -68,7 +68,7 @@ func TestEvaluateReportsMissingAndRegression(t *testing.T) {
 		"task":{"status":3,"total":10,"finished":8},
 		"metric":{"retrieval_metrics":{"recall":0.4}}
 	}`)
-	report := evaluate(result, baseline{
+	report := evaluate(result, nil, baseline{
 		RequireSuccess: true, RequireComplete: true,
 		Minimum: map[string]float64{"metric.retrieval_metrics.recall": 0.75},
 		Maximum: map[string]float64{"usage.cost_by_currency.USD": 0.1},
@@ -84,7 +84,7 @@ func TestEvaluateIdentifiesRecallRegression(t *testing.T) {
 		"task":{"status":2,"total":10,"finished":10},
 		"metric":{"retrieval_metrics":{"recall":0.4}}
 	}`)
-	report := evaluate(result, baseline{
+	report := evaluate(result, nil, baseline{
 		RequireSuccess:  true,
 		RequireComplete: true,
 		Minimum: map[string]float64{
@@ -100,6 +100,50 @@ func TestEvaluateIdentifiesRecallRegression(t *testing.T) {
 	require.Equal(t, 0.5, recallCheck.Expected)
 	require.Equal(t, 0.4, recallCheck.Actual)
 	require.False(t, recallCheck.Passed)
+}
+
+func TestEvaluateComparesCandidateWithReference(t *testing.T) {
+	reference := decodeResult(t, `{
+		"metric":{"retrieval_metrics":{"recall":0.80}},
+		"task":{"duration_ms":1000}
+	}`)
+	candidate := decodeResult(t, `{
+		"metric":{"retrieval_metrics":{"recall":0.76}},
+		"task":{"duration_ms":1250}
+	}`)
+	report := evaluate(candidate, reference, baseline{
+		MaximumDecrease: map[string]float64{"metric.retrieval_metrics.recall": 0.05},
+		MaximumIncrease: map[string]float64{"task.duration_ms": 200},
+	})
+
+	require.False(t, report.Passed)
+	require.Len(t, report.Checks, 2)
+	recallCheck := report.Checks[0]
+	require.True(t, recallCheck.Passed)
+	require.NotNil(t, recallCheck.Reference)
+	require.InDelta(t, 0.80, *recallCheck.Reference, 1e-9)
+	require.NotNil(t, recallCheck.Delta)
+	require.InDelta(t, -0.04, *recallCheck.Delta, 1e-9)
+	durationCheck := report.Checks[1]
+	require.False(t, durationCheck.Passed)
+	require.InDelta(t, 250, *durationCheck.Delta, 1e-9)
+}
+
+func TestEvaluateReportsMissingReferenceValue(t *testing.T) {
+	candidate := decodeResult(t, `{"metric":{"retrieval_metrics":{"recall":0.76}}}`)
+	report := evaluate(candidate, map[string]any{}, baseline{
+		MaximumDecrease: map[string]float64{"metric.retrieval_metrics.recall": 0.05},
+	})
+
+	require.False(t, report.Passed)
+	require.Equal(t, "reference value is missing or not numeric", report.Checks[0].Error)
+	require.Nil(t, report.Checks[0].Reference)
+	require.Nil(t, report.Checks[0].Delta)
+}
+
+func TestValidateBaselineRejectsNegativeRelativeTolerance(t *testing.T) {
+	err := validateBaseline(baseline{MaximumDecrease: map[string]float64{"metric.recall": -0.01}})
+	require.ErrorContains(t, err, "must not be negative")
 }
 
 func TestUnwrapAPIData(t *testing.T) {

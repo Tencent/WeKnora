@@ -168,6 +168,25 @@ func (e *EvaluationHandler) GetModelUsage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": stats})
 }
 
+// GetEvaluationDatasets lists manifest-backed datasets and their readiness.
+// @Summary      获取评测数据集
+// @Description  列出可选择的数据集及其语言、场景、覆盖维度和文件完整性
+// @Tags         评估
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /evaluation/datasets [get]
+func (e *EvaluationHandler) GetEvaluationDatasets(c *gin.Context) {
+	datasets, err := e.evaluationService.EvaluationDatasets(c.Request.Context())
+	if err != nil {
+		logger.ErrorWithFields(c.Request.Context(), err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": datasets})
+}
+
 func parseOptionalRFC3339(raw string) (*time.Time, error) {
 	if raw == "" {
 		return nil, nil

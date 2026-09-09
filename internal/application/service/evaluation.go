@@ -75,6 +75,7 @@ type evaluationRecord struct {
 	Params     json.RawMessage `gorm:"type:jsonb;not null"`
 	RunConfig  json.RawMessage `gorm:"type:jsonb;not null"`
 	Metric     json.RawMessage `gorm:"type:jsonb"`
+	Usage      json.RawMessage `gorm:"type:jsonb;not null"`
 	StartedAt  time.Time       `gorm:"not null"`
 	FinishedAt *time.Time
 	DurationMS int64 `gorm:"not null;default:0"`
@@ -119,7 +120,12 @@ func (e *evaluationStorage) get(ctx context.Context, taskID string) (*types.Eval
 		return nil, err
 	}
 	detail.ModelCalls = calls
-	detail.Usage = usage
+	// Call-level telemetry is intentionally retained for a limited period. The
+	// immutable aggregate stored on the task keeps old evaluation reports useful
+	// after those privacy-sensitive detail rows expire.
+	if len(calls) > 0 || detail.Usage == nil {
+		detail.Usage = usage
+	}
 	return detail, nil
 }
 
@@ -147,6 +153,15 @@ func (e *evaluationStorage) update(
 		return err
 	}
 	fn(detail)
+	if detail.Task.Status == types.EvaluationStatueSuccess || detail.Task.Status == types.EvaluationStatueFailed {
+		_, usage, usageErr := e.getModelCalls(ctx, taskID)
+		if usageErr != nil {
+			return fmt.Errorf("aggregate terminal evaluation usage: %w", usageErr)
+		}
+		if usage.CallCount > 0 || detail.Usage == nil {
+			detail.Usage = usage
+		}
+	}
 	record, err := evaluationDetailToRecord(detail)
 	if err != nil {
 		return err
@@ -167,10 +182,14 @@ func evaluationDetailToRecord(detail *types.EvaluationDetail) (*evaluationRecord
 	if err != nil {
 		return nil, fmt.Errorf("marshal evaluation metric: %w", err)
 	}
+	usage, err := json.Marshal(detail.Usage)
+	if err != nil {
+		return nil, fmt.Errorf("marshal evaluation usage: %w", err)
+	}
 	return &evaluationRecord{
 		ID: detail.Task.ID, TenantID: detail.Task.TenantID, DatasetID: detail.Task.DatasetID,
 		Status: detail.Task.Status, ErrMsg: detail.Task.ErrMsg, Total: detail.Task.Total,
-		Finished: detail.Task.Finished, Params: params, RunConfig: runConfig, Metric: metric,
+		Finished: detail.Task.Finished, Params: params, RunConfig: runConfig, Metric: metric, Usage: usage,
 		StartedAt: detail.Task.StartTime, FinishedAt: detail.Task.EndTime,
 		DurationMS: detail.Task.DurationMS,
 	}, nil
@@ -195,6 +214,13 @@ func evaluationRecordToDetail(record *evaluationRecord) (*types.EvaluationDetail
 			return nil, fmt.Errorf("unmarshal evaluation run config: %w", err)
 		}
 	}
+	var usage *types.EvaluationUsage
+	if len(record.Usage) > 0 && string(record.Usage) != "null" && string(record.Usage) != "{}" {
+		usage = &types.EvaluationUsage{}
+		if err := json.Unmarshal(record.Usage, usage); err != nil {
+			return nil, fmt.Errorf("unmarshal evaluation usage: %w", err)
+		}
+	}
 	return &types.EvaluationDetail{
 		Task: &types.EvaluationTask{
 			ID: record.ID, TenantID: record.TenantID, DatasetID: record.DatasetID,
@@ -205,6 +231,7 @@ func evaluationRecordToDetail(record *evaluationRecord) (*types.EvaluationDetail
 		Params:    &params,
 		RunConfig: runConfig,
 		Metric:    metric,
+		Usage:     usage,
 	}, nil
 }
 
@@ -240,6 +267,12 @@ func (e *EvaluationService) ModelUsage(
 	ctx context.Context, startTime, endTime *time.Time,
 ) ([]types.ModelUsageStat, error) {
 	return e.evaluationStorage.modelUsage(ctx, types.MustTenantIDFromContext(ctx), startTime, endTime)
+}
+
+// EvaluationDatasets returns the manifest-backed dataset catalog used by the
+// evaluation UI. It performs no model calls and is safe for Viewer access.
+func (e *EvaluationService) EvaluationDatasets(ctx context.Context) ([]types.EvaluationDataset, error) {
+	return e.dataset.ListDatasets(ctx)
 }
 
 // Evaluation starts a new evaluation task with given parameters
