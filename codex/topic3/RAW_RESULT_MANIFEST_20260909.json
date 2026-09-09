@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "hash_mode": "text_lf_canonical_v1",
+  "artifacts": [
+    {"path":"codex/topic3/results/evaluation_10000_1788794712449_9efddf10_topic310.json","sha256":"813fe92f2a0beb7594d1262721edab067e6080291e76e231802b04cc55e105be","bytes":614166},
+    {"path":"codex/topic3/results/batch-20260908-102705/evaluations/evaluation_10000_1788834534663_0f70aa99_topic310.json","sha256":"773b6a40c11454570bbc46428f29ca2104b4f7b922de5930d1b97c99aaf257e3","bytes":533314},
+    {"path":"codex/topic3/results/batch-20260908-102705/evaluations/evaluation_10000_1788834610459_35427e40_topic310.json","sha256":"bf35b684f4264aec06a5d13761e3683389be4e855676c69c06e2449693f0f365","bytes":586763},
+    {"path":"codex/topic3/results/batch-20260908-102705/evaluations/evaluation_10000_1788834692250_c3dd5d6f_topic310.json","sha256":"01bdfd3c25ffcd6b3616758422f3ff3b86a2ebb0e3d74efdf747aa33aa6ad009","bytes":529086},
+    {"path":"codex/topic3/results/batch-20260908-102705/evaluations/evaluation_10000_1788834772784_ca2f7960_topic310.json","sha256":"c46293f741e8ee0dfe6958e5e25812d355a3449b4a05de6094e5c34da03377e4","bytes":567718},
+    {"path":"codex/topic3/results/batch-20260908-102705/evaluations/evaluation_10000_1788834857895_17cce79e_topic310.json","sha256":"03cc6fed0219cbc33dde3103fc1195551cc954b2dbd14c62a35652e091495067","bytes":600409},
+    {"path":"codex/topic3/results/batch-20260908-102705/evaluations/evaluation_10000_1788834961206_7144ab59_topic310.json","sha256":"112f99424cc1e438b14893c1495896e1601262e2212fb005c63debd768031568","bytes":560911},
+    {"path":"codex/topic3/results/batch-20260908-102705/evaluations/evaluation_10000_1788835049100_3d88a6cf_topic310.json","sha256":"f7e1ac9313c86d7fa8a022f2a375becb4199d7472c4d7b4f36bc484103ffb98c","bytes":589076},
+    {"path":"codex/topic3/results/batch-20260908-102705/evaluations/evaluation_10000_1788835131055_d7cf6f2c_topic310.json","sha256":"7036a4620cdbfd16762d89527306cd521889a77cd2e7e10fa4d9ece80679a872","bytes":595215},
+    {"path":"codex/topic3/results/batch-20260908-102705/evaluations/evaluation_10000_1788835206801_ef83c740_topic310.json","sha256":"2ef789e676bc868d1e822e66ea00bdea9def71448cd7c484a1ea33dcef6be98d","bytes":554338},
+    {"path":"codex/topic3/results/batch-20260908-102705/negative-evaluation/evaluation_10000_1788835996055_d20aee26_topic310.json","sha256":"663e658db32b73c071770e7521739c5b5a2aec5ab9ba573465f155b21657c7a5","bytes":420090},
+    {"path":"codex/topic3/results/clean-reproduction-20260908-210144/clean-reproduction-report.json","sha256":"13790ad3fc612765da1c9915e578dd9aaeadbe2b93c834811a31eed6ef1c4754","bytes":2001},
+    {"path":"codex/topic3/results/clean-reproduction-20260908-210144/clean-reproduction-report.md","sha256":"cabcaf193217ab8e108e16232f3f853ad1b345e158b1147d88376c4879aeafd3","bytes":571},
+    {"path":"codex/topic3/results/clean-reproduction-20260908-210144/evaluation.json","sha256":"3041ec13d40f7c1ebdfc2697e7b176f9558ecbe1fdb921a99ff2fd17ed149865","bytes":42988},
+    {"path":"codex/topic3/results/clean-reproduction-20260908-210144/wiki-prefix-probe.json","sha256":"5c39b356ad746e9891789e12a0ed4f5dd2ce96c2d731d5e199d6b36bc57c2880","bytes":678}
+  ]
+}

@@ -78,7 +78,7 @@
 | GitHub Actions配置文件 | 已实现并在 Fork PR 中通过 |
 | Required status check | 已配置并完成正常、退化和阻断验证 |
 | 空数据库1题真实复现 | 已真实验收；1/1完成，重启后可查询，Wiki探针有效 |
-| 最终Commit、Tag、submission.yaml | 待完成 |
+| 最终Commit、Tag、submission.yaml | 已完成；Tag `rhino-2026-final-3` 指向 `de08cc8b004cec83ed4835a737d36eab45cb6d3a` |
 
 ## 6. 已知限制
 

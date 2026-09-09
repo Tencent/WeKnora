@@ -13,6 +13,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 TOPIC = ROOT / "codex" / "topic3"
 MANIFEST = TOPIC / "EVIDENCE_MANIFEST_20260908.json"
 CORE_SNAPSHOT = TOPIC / "CORE_SOURCE_SNAPSHOT_20260908.json"
+RAW_RESULT_MANIFEST = TOPIC / "RAW_RESULT_MANIFEST_20260909.json"
+DATASET_FILES = ["queries.parquet", "corpus.parquet", "answers.parquet", "qrels.parquet", "qas.parquet"]
 SECRET_PATTERN = re.compile(r"sk-[A-Za-z0-9._-]{20,}")
 TEXT_SUFFIXES = {
     ".go",
@@ -31,7 +33,9 @@ TEXT_SUFFIXES = {
 
 
 def load(path: pathlib.Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    # Windows PowerShell 5.1 may emit UTF-8 with a BOM. Accept it without
+    # rewriting immutable experiment artifacts.
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def canonical_bytes(path: pathlib.Path) -> bytes:
@@ -50,13 +54,25 @@ def canonical_size(path: pathlib.Path) -> int:
     return len(canonical_bytes(path))
 
 
-def verify() -> list[str]:
-    errors: list[str] = []
-    manifest = load(MANIFEST)
-    if manifest.get("status") != "ALL_COMPLETE":
-        errors.append("evidence manifest is not ALL_COMPLETE")
+def repo_path(value: str) -> pathlib.Path:
+    """Interpret recorded repository paths on both Windows and POSIX."""
+    return ROOT.joinpath(*value.replace("\\", "/").split("/"))
+
+
+def dataset_fingerprint(dataset_id: str) -> str:
+    """Match the byte fingerprint used by the Go evaluation service."""
+    digest = hashlib.sha256()
+    dataset_dir = TOPIC / "datasets" / dataset_id
+    for name in DATASET_FILES:
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update((dataset_dir / name).read_bytes())
+    return digest.hexdigest()
+
+
+def verify_manifest(manifest: dict, errors: list[str]) -> None:
     for item in manifest.get("artifacts", []):
-        path = ROOT / item["path"]
+        path = repo_path(item["path"])
         if not path.is_file():
             errors.append(f"missing artifact: {item['path']}")
             continue
@@ -68,9 +84,30 @@ def verify() -> list[str]:
             if SECRET_PATTERN.search(path.read_text(encoding="utf-8", errors="ignore")):
                 errors.append(f"possible API key in artifact: {item['path']}")
 
+
+def verify() -> list[str]:
+    errors: list[str] = []
+    manifest = load(MANIFEST)
+    if manifest.get("status") != "ALL_COMPLETE":
+        errors.append("evidence manifest is not ALL_COMPLETE")
+    verify_manifest(manifest, errors)
+    verify_manifest(load(RAW_RESULT_MANIFEST), errors)
+
     baseline = TOPIC / "baseline.json"
     if sha256(baseline) != manifest.get("baseline_sha256"):
         errors.append("formal baseline SHA-256 mismatch")
+    baseline_data = load(baseline)
+    if dataset_fingerprint(baseline_data["dataset_id"]) != baseline_data.get("dataset_sha256"):
+        errors.append("committed dataset does not match the formal baseline fingerprint")
+    baseline_source = repo_path(baseline_data["source_result"])
+    if not baseline_source.is_file():
+        errors.append("formal baseline source result is missing")
+    elif not any(
+        item.get("path") == baseline_data["source_result"]
+        and item.get("sha256") == sha256(baseline_source)
+        for item in load(RAW_RESULT_MANIFEST).get("artifacts", [])
+    ):
+        errors.append("formal baseline source canonical SHA-256 mismatch")
 
     core_snapshot = load(CORE_SNAPSHOT)
     for item in core_snapshot.get("files", []):
@@ -99,6 +136,13 @@ def verify() -> list[str]:
             errors.append(f"incomplete cache run: {row.get('phase')}:{row.get('repetition')}")
         if metric.get("recall") != 1 or metric.get("mrr") != 1:
             errors.append(f"retrieval metric changed: {row.get('phase')}:{row.get('repetition')}")
+        result_path = repo_path(row.get("result", ""))
+        if not result_path.is_file():
+            errors.append(f"missing raw evaluation result: {row.get('result')}")
+        else:
+            result = load(result_path)
+            if result.get("snapshot", {}).get("dataset_sha256") != baseline_data.get("dataset_sha256"):
+                errors.append(f"dataset fingerprint changed: {row.get('phase')}:{row.get('repetition')}")
     if not cache.get("summary", {}).get("warm_reduced_real_calls"):
         errors.append("warm cache did not reduce real embedding calls")
     if len(wiki.get("runs", [])) != 8:
@@ -107,6 +151,11 @@ def verify() -> list[str]:
         errors.append("a Wiki output quality check failed")
     if not negative.get("regression_rejected"):
         errors.append("negative control was not rejected")
+    clean = load(TOPIC / "results" / "clean-reproduction-20260908-210144" / "clean-reproduction-report.json")
+    if clean.get("status") != "REPRO_COMPLETE":
+        errors.append("clean reproduction is not REPRO_COMPLETE")
+    if clean.get("evaluation", {}).get("finished") != 1 or not clean.get("evaluation", {}).get("persisted_after_restart"):
+        errors.append("clean reproduction evaluation or restart persistence failed")
     return errors
 
 

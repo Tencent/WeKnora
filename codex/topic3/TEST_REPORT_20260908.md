@@ -39,8 +39,8 @@
 
 全仓扫描会命中官方文档和既有测试中的示例字符串，例如 `sk-your-dashscope-api-key`。这些不是本次用户密钥。新增课题文件中只有安全单元测试使用的明显假值 `sk-example-secret-value-1234567890`；正式结果和证据清单未发现密钥。
 
-## 尚未执行
+## 后续完成情况（2026-09-09 更新）
 
-- GitHub Fork 推送、Actions 运行及 required status check：等待用户提供 Fork 地址和 GitHub ID。
-- 空数据库1题真实复现及一次 Wiki 固定前缀校准：必须在固定 Commit 的全新检出中进行，且需要用户在新环境输入密钥。
-- 最终 Tag、`submission.yaml` 和邮件草稿：必须在上述验收完成后生成。
+- GitHub Fork、Actions 与 required status check：已完成并有正常通过、退化失败、禁止合并三类证据。
+- 空数据库真实复现：已完成1题真实评测和重启持久化验证；Wiki探针有效。正式8次Wiki实验仍如实记录为未观察到隐式缓存命中。
+- 最终 Tag、`submission.yaml` 和邮件草稿：已完成。原 Tag 保持不可移动。
