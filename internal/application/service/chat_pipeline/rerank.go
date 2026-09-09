@@ -200,7 +200,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		sr.Metadata["base_score"] = fmt.Sprintf("%.4f", base)
 		modelScore := rr.RelevanceScore
 		sr.Metadata["model_score"] = fmt.Sprintf("%.4f", modelScore)
-		sr.Score = compositeScore(sr, modelScore, base)
+		sr.Score = searchutil.CompositeScore(sr.KnowledgeSource, modelScore, base)
 
 		// Apply FAQ score boost if enabled
 		if chatManage.FAQPriorityEnabled && chatManage.FAQScoreBoost > 1.0 &&
@@ -220,7 +220,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		reranked = append(reranked, sr)
 	}
 
-	final := applyMMR(ctx, reranked, chatManage, min(len(reranked), max(1, chatManage.RerankTopK)), 0.7)
+	final := applyMMR(ctx, reranked, min(len(reranked), max(1, chatManage.RerankTopK)), 0.7)
 	chatManage.RerankResult = final
 
 	// Log composite top scores and MMR selection summary
@@ -454,11 +454,13 @@ func compositeScore(sr *types.SearchResult, modelScore, baseScore float64) float
 	return composite
 }
 
-// applyMMR applies the MMR algorithm to the search results with pre-computed token sets
+// applyMMR applies the MMR algorithm to the search results with pre-computed
+// token sets. Scoring and selection live in searchutil.ApplyMMR; this wrapper
+// keeps the pipeline-specific concerns: parallel tokenization of enriched
+// passages and the mmr_start/mmr_done pipeline events.
 func applyMMR(
 	ctx context.Context,
 	results []*types.SearchResult,
-	chatManage *types.ChatManage,
 	k int,
 	lambda float64,
 ) []*types.SearchResult {
@@ -476,60 +478,13 @@ func applyMMR(
 		return searchutil.TokenizeSimple(getEnrichedPassage(ctx, r))
 	})
 
-	selected := make([]*types.SearchResult, 0, k)
-	selectedTokenSets := make([]map[string]struct{}, 0, k)
-	selectedIndices := make(map[int]struct{})
-
-	for len(selected) < k && len(selectedIndices) < len(results) {
-		bestIdx := -1
-		bestScore := -1.0
-
-		for i, r := range results {
-			if _, isSelected := selectedIndices[i]; isSelected {
-				continue
-			}
-
-			relevance := r.Score
-			redundancy := 0.0
-
-			// Use pre-computed token sets for redundancy calculation
-			for _, selTokens := range selectedTokenSets {
-				sim := searchutil.Jaccard(allTokenSets[i], selTokens)
-				if sim > redundancy {
-					redundancy = sim
-				}
-			}
-
-			mmr := lambda*relevance - (1.0-lambda)*redundancy
-			if mmr > bestScore {
-				bestScore = mmr
-				bestIdx = i
-			}
-		}
-
-		if bestIdx < 0 {
-			break
-		}
-
-		selected = append(selected, results[bestIdx])
-		selectedTokenSets = append(selectedTokenSets, allTokenSets[bestIdx])
-		selectedIndices[bestIdx] = struct{}{}
-	}
-
-	// Compute average redundancy among selected using pre-computed token sets
-	avgRed := 0.0
-	if len(selected) > 1 {
-		pairs := 0
-		for i := 0; i < len(selectedTokenSets); i++ {
-			for j := i + 1; j < len(selectedTokenSets); j++ {
-				avgRed += searchutil.Jaccard(selectedTokenSets[i], selectedTokenSets[j])
-				pairs++
-			}
-		}
-		if pairs > 0 {
-			avgRed /= float64(pairs)
-		}
-	}
+	selected, avgRed := searchutil.ApplyMMR(
+		results,
+		func(r *types.SearchResult) float64 { return r.Score },
+		allTokenSets,
+		k,
+		lambda,
+	)
 	pipelineInfo(ctx, "Rerank", "mmr_done", map[string]interface{}{
 		"selected":       len(selected),
 		"avg_redundancy": fmt.Sprintf("%.4f", avgRed),
