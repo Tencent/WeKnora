@@ -11,12 +11,18 @@ both mainstream and unknown models without a second hand-fed source of vendor
 knowledge.
 
 Catalog format decision (supersedes the doc's models.dev-compatibility plan):
-models.json is WeKnora's **own schema**, self-defined. The upstream models.dev
-api.json is a reference example only — verified across all 213 providers, it
-carries only `reasoning` + `reasoning_options` and no level information, which
-is why a community-compatible schema could not prefill levels anyway. Our own
-format carries per-model thinking levels, context window, max output, and
-input modalities as first-class fields.
+models.json is WeKnora's **own schema**, self-defined. Correction to the
+proposal's data fact: the 4.5 MB api.json snapshot the doc verified carried
+only `reasoning` + `reasoning_options`; the current 6 MB upstream api.json
+ALSO carries level data — `reasoning_options: [{type: "effort", values:
+[low/medium/high/…]}, {type: "toggle"}, {type: "budget_tokens", min}]` — so
+levels for most thinking vendors (OpenAI, DeepSeek, Volcengine, Zhipu,
+Google) ARE now sourceable. The own schema is still preferred: values outside
+the platform vocabulary (none/minimal) need filtering, vendor ids carry
+date/-latest suffixes needing normalization, and continuous vendors
+(budget_tokens) still map through adapter-private tables (design §4.3). The
+embedded LOCAL seed (internal/models/catalog/data/models.json, 15 providers /
+857 models) is converted from the upstream api.json with those rules applied.
 
 Selected levels are user configuration: once saved they are final (ADR 0001).
 

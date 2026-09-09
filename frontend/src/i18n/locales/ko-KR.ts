@@ -2402,8 +2402,21 @@ export default {
       maxConcurrencyLabel: '백그라운드 동시 실행 상한',
       maxConcurrencyPlaceholder: '0이면 전역 기본값 사용',
       maxConcurrencyDesc: '문서 인덱싱/보강 등 백그라운드 작업이 이 모델을 호출하는 동시 실행 수를 제한합니다(모델별로 모든 복제본이 공유). 0 또는 비워 두면 전역 기본값을 사용하며, 대화형 채팅에는 영향을 주지 않습니다.',
-      thinkingControlLabel: '사고 모드 매개변수 형식',
-      thinkingControlDesc: '에이전트 「사고 모드」 켜기/끄기 시 API에 어떻게 기록할지 결정합니다. 벤더/모델에 따라 미리 선택되며, 실제 API와 다르면 문서에 맞게 수정하세요. 「전송 안 함」을 선택하면 에이전트 「사고 모드」 스위치가 효과가 없습니다.',
+      thinkingToggleLabel: '사고 스위치',
+      thinkingToggleDesc: '끄면 요청에 사고 파라미터를 담지 않습니다. 레벨 선택에는 영향이 없습니다.',
+      selectedLevelsLabel: '지원되는 사고 레벨',
+      selectedLevelsPlaceholder: '이 모델이 지원하는 레벨 선택',
+      selectedLevelsDesc: '벤더 레벨 어휘에서 이 모델이 실제로 지원하는 레벨을 선택하세요. 비워 두면 미지정입니다.',
+      thinkingLevelLabel: '기본 사고 레벨',
+      thinkingLevelPlaceholder: '비움 = 어댑터가 결정',
+      thinkingLevelDesc: '사용자/에이전트가 레벨을 지정하지 않았을 때 쓰이는 기본 레벨입니다. 비워 두면 어댑터가 결정합니다(벤더 기본값 사용 또는 레벨 파라미터 미전송).',
+      thinkingLevelsUnsupportedHint: '이 모델은 사고 강도 조절을 지원하지 않습니다',
+      maxOutputTokensLabel: '최대 출력 토큰',
+      maxOutputTokensPlaceholder: '비워 두면 제한 없음',
+      maxOutputTokensDesc: '이 모델이 한 번의 응답에서 생성할 수 있는 최대 토큰 수입니다. 비워 두면 제한하지 않습니다.',
+      sourceCatalog: '카탈로그',
+      visionDisabledHint: '현재 벤더는 이미지 입력을 지원한다고 선언하지 않았습니다',
+      dimensionOverrideDisabledHint: '현재 벤더는 사용자 지정 출력 차원을 지원한다고 선언하지 않았습니다',
       dimensionHint: '모델이 선택되었습니다. "차원 감지" 버튼을 클릭하여 벡터 차원을 자동으로 가져옵니다',
       loadModelListFailed: '모델 목록 로드 실패',
       listRefreshed: '목록이 새로고침되었습니다',
@@ -2536,23 +2549,12 @@ export default {
         baseUrlEmpty: 'Base URL은 비워둘 수 없습니다',
         baseUrlInvalid: 'Base URL 형식이 올바르지 않습니다. 유효한 URL을 입력해주세요'
       },
-      thinkingControl: {
-        thinkingType: {
-          label: 'thinking.type',
-          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3 등, LKEAP 기본값; R1은 「전송 안 함」)'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: 'Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: '사용자 정의 OpenAI 호환, NVIDIA NIM, vLLM / 로컬 Qwen 배포'
-        },
-        none: {
-          label: '사고 매개변수 전송 안 함',
-          hint: '에이전트 「사고 모드」 스위치가 효과 없음, 요청에 사고 관련 매개변수를 보내지 않음'
-        }
+      thinkingLevels: {
+        low: '낮음',
+        medium: '중간',
+        high: '높음',
+        xhigh: '매우 높음',
+        max: '최대'
       },
       volcengine: {
         accessKeyLabel: 'Access Key ID',

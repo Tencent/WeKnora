@@ -2402,8 +2402,21 @@ export default {
       maxConcurrencyLabel: 'Лимит фоновой параллельности',
       maxConcurrencyPlaceholder: '0 — использовать глобальное значение',
       maxConcurrencyDesc: 'Ограничивает число одновременных фоновых вызовов (индексация/обогащение) к этой модели, общее для модели по всем репликам. 0 или пусто — используется глобальное значение по умолчанию; интерактивный чат не затрагивается.',
-      thinkingControlLabel: 'Формат параметров режима размышления',
-      thinkingControlDesc: 'Определяет, как переключатель «Режим размышления» агента записывается в API. При возможности выбирается по поставщику/модели; при несоответствии измените по документации API. При выборе «Не отправлять» переключатель «Режим размышления» агента не действует.',
+      thinkingToggleLabel: 'Переключатель размышления',
+      thinkingToggleDesc: 'Когда выключено, запрос не содержит параметров размышления; на выбор уровней не влияет.',
+      selectedLevelsLabel: 'Поддерживаемые уровни размышления',
+      selectedLevelsPlaceholder: 'Выберите уровни, которые поддерживает модель',
+      selectedLevelsDesc: 'Отметьте уровни из словаря вендора, которые модель реально поддерживает; пусто = не задано.',
+      thinkingLevelLabel: 'Уровень размышления по умолчанию',
+      thinkingLevelPlaceholder: 'Пусто = решает адаптер',
+      thinkingLevelDesc: 'Уровень по умолчанию, когда пользователь/агент его не указал; пусто — решает адаптер (вендор по умолчанию или без параметра уровня).',
+      thinkingLevelsUnsupportedHint: 'Эта модель не поддерживает регулировку силы размышления',
+      maxOutputTokensLabel: 'Максимум выходных токенов',
+      maxOutputTokensPlaceholder: 'Пусто = без ограничения',
+      maxOutputTokensDesc: 'Сколько токенов модель может сгенерировать за один ответ. Пусто — без ограничения.',
+      sourceCatalog: 'Каталог',
+      visionDisabledHint: 'Текущий вендор не заявляет поддержку входных изображений',
+      dimensionOverrideDisabledHint: 'Текущий вендор не заявляет поддержку пользовательской размерности вывода',
       dimensionHint: 'Модель выбрана. Нажмите «Определить размерность», чтобы автоматически получить значение.',
       loadModelListFailed: 'Не удалось загрузить список моделей',
       listRefreshed: 'Список обновлён',
@@ -2536,23 +2549,12 @@ export default {
         baseUrlEmpty: 'Base URL не может быть пустым',
         baseUrlInvalid: 'Недопустимый Base URL, введите корректный адрес'
       },
-      thinkingControl: {
-        thinkingType: {
-          label: 'thinking.type',
-          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3 и др.; по умолчанию для LKEAP; для R1 — «Не отправлять»)'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: 'Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: 'Пользовательские OpenAI-совместимые шлюзы, NVIDIA NIM, vLLM / локальный Qwen'
-        },
-        none: {
-          label: 'Не отправлять параметры размышления',
-          hint: 'Переключатель «Режим размышления» агента не действует; параметры размышления не отправляются в запросе'
-        }
+      thinkingLevels: {
+        low: 'Низкий',
+        medium: 'Средний',
+        high: 'Высокий',
+        xhigh: 'Очень высокий',
+        max: 'Максимум'
       },
       volcengine: {
         accessKeyLabel: 'Access Key ID',

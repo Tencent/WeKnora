@@ -215,10 +215,22 @@
             </div>
           </template>
 
-          <!-- 模型名称 -->
+          <!-- 模型名称 / 模型 ID。远程 chat/vllm 用可搜索下拉（远端列表探测）+ 自由输入。 -->
           <div class="form-item">
             <label class="form-label required">{{ $t('model.modelName') }}</label>
-            <t-input v-model="formData.modelName" :placeholder="getModelNamePlaceholder()"
+            <t-select
+              v-if="showRemoteModelSelect"
+              v-model="formData.modelName"
+              filterable
+              creatable
+              clearable
+              :loading="probingRemoteModels"
+              :options="remoteModelOptions"
+              :placeholder="getModelNamePlaceholder()"
+              :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'"
+              @create="onRemoteModelCreate"
+            />
+            <t-input v-else v-model="formData.modelName" :placeholder="getModelNamePlaceholder()"
               :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'" />
           </div>
 
@@ -338,52 +350,84 @@
         <div v-if="activeModelType === 'embedding'" class="form-item">
           <label class="form-label">{{ $t('model.editor.dimensionOverrideLabel') }}</label>
           <div class="vision-toggle">
-            <t-switch v-model="formData.supportsDimensionOverride" />
+            <t-switch v-model="formData.supportsDimensionOverride" :disabled="dimensionOverrideDisabled" />
             <span class="form-desc form-desc--inline">{{ $t('model.editor.dimensionOverrideDesc') }}</span>
           </div>
+          <p v-if="dimensionOverrideDisabled" class="form-desc">{{ $t('model.editor.dimensionOverrideDisabledHint') }}</p>
         </div>
 
-        <!-- Chat / VLM: context window. Agent compaction sizes itself from this. -->
+        <!-- Chat / VLM: context window + max output tokens. Agent compaction sizes itself from this. -->
         <div v-if="activeModelType === 'chat' || activeModelType === 'vllm'" class="form-item">
-          <label class="form-label">{{ $t('model.editor.contextWindowLabel') }}</label>
+          <label class="form-label">
+            {{ $t('model.editor.contextWindowLabel') }}
+            <span v-if="prefillBadge('contextWindow')" class="prefill-source">{{ prefillBadge('contextWindow') }}</span>
+          </label>
           <t-input v-model.number="formData.contextWindow" type="number" :min="1024" :max="10000000"
-            :placeholder="$t('model.editor.contextWindowPlaceholder', { value: DEFAULT_MODEL_CONTEXT_WINDOW })" />
+            :placeholder="$t('model.editor.contextWindowPlaceholder', { value: DEFAULT_MODEL_CONTEXT_WINDOW })"
+            @change="markManualField('contextWindow')" />
           <p class="form-desc">{{ $t('model.editor.contextWindowDesc') }}</p>
         </div>
 
-        <!-- Chat: supports vision toggle (VLLM models are inherently multimodal) -->
+        <div v-if="activeModelType === 'chat' || activeModelType === 'vllm'" class="form-item">
+          <label class="form-label">
+            {{ $t('model.editor.maxOutputTokensLabel') }}
+            <span v-if="prefillBadge('maxOutputTokens')" class="prefill-source">{{ prefillBadge('maxOutputTokens') }}</span>
+          </label>
+          <t-input v-model.number="formData.maxOutputTokens" type="number" :min="1" :max="10000000"
+            :placeholder="$t('model.editor.maxOutputTokensPlaceholder')"
+            @change="markManualField('maxOutputTokens')" />
+          <p class="form-desc">{{ $t('model.editor.maxOutputTokensDesc') }}</p>
+        </div>
+
+        <!-- Chat: 输入模态开关（原「支持视觉」，迁移为 chat 分片 input_modalities） -->
         <div v-if="activeModelType === 'chat'" class="form-item">
           <label class="form-label">{{ $t('model.editor.supportsVisionLabel') }}</label>
           <div class="vision-toggle">
-            <t-switch v-model="formData.supportsVision" />
+            <t-switch v-model="visionChecked" :disabled="visionToggleDisabled"
+              @change="markManualField('inputModalities')" />
             <span class="form-desc form-desc--inline">{{ $t('model.editor.supportsVisionDesc') }}</span>
           </div>
+          <p v-if="visionToggleDisabled" class="form-desc">{{ $t('model.editor.visionDisabledHint') }}</p>
         </div>
 
-        <!-- Chat + 远程 API：思考模式参数格式 -->
-        <div v-if="showThinkingControlField" class="form-item">
-          <label class="form-label">{{ $t('model.editor.thinkingControlLabel') }}</label>
-          <t-select
-            v-model="formData.thinkingControl"
-            :key="`thinking-${formData.id}-${formData.thinkingControl}`"
-            :popup-props="{ overlayClassName: 'thinking-control-select-popup' }"
-            @change="onThinkingControlManualPick"
-          >
-            <t-option
-              v-for="opt in thinkingControlOptions"
-              :key="opt.value"
-              :value="opt.value"
-              :label="opt.label"
-              :show-overflow-tooltip="false"
-            >
-              <div class="thinking-control-option">
-                <span class="thinking-control-option__title">{{ opt.label }}</span>
-                <span class="thinking-control-option__hint">{{ opt.hint }}</span>
-              </div>
-            </t-option>
-          </t-select>
-          <p class="form-desc">{{ $t('model.editor.thinkingControlDesc') }}</p>
-        </div>
+        <!-- Chat + 远程 API：思考开关与档位（厂商能力声明驱动，D2/D3） -->
+        <template v-if="showThinkingSection">
+          <div v-if="canDisableThinking" class="form-item">
+            <label class="form-label">{{ $t('model.editor.thinkingToggleLabel') }}</label>
+            <div class="vision-toggle">
+              <t-switch v-model="formData.thinkingEnabled" @change="markManualField('thinkingEnabled')" />
+              <span class="form-desc form-desc--inline">{{ $t('model.editor.thinkingToggleDesc') }}</span>
+            </div>
+          </div>
+
+          <div v-if="!hasThinkingLevels" class="form-item">
+            <p class="form-desc">{{ $t('model.editor.thinkingLevelsUnsupportedHint') }}</p>
+          </div>
+
+          <template v-else>
+            <div class="form-item">
+              <label class="form-label">
+                {{ $t('model.editor.selectedLevelsLabel') }}
+                <span v-if="prefillBadge('selectedLevels')" class="prefill-source">{{ prefillBadge('selectedLevels') }}</span>
+              </label>
+              <t-select v-model="formData.selectedLevels" multiple clearable :min-collapsed-num="4"
+                :options="thinkingLevelOptions" :placeholder="$t('model.editor.selectedLevelsPlaceholder')"
+                @change="onSelectedLevelsChange" />
+              <p class="form-desc">{{ $t('model.editor.selectedLevelsDesc') }}</p>
+            </div>
+
+            <div class="form-item">
+              <label class="form-label">
+                {{ $t('model.editor.thinkingLevelLabel') }}
+                <span v-if="prefillBadge('thinkingLevel')" class="prefill-source">{{ prefillBadge('thinkingLevel') }}</span>
+              </label>
+              <t-select v-model="formData.thinkingLevel" clearable :options="defaultLevelOptions"
+                :placeholder="$t('model.editor.thinkingLevelPlaceholder')"
+                @change="markManualField('thinkingLevel')" />
+              <p class="form-desc">{{ $t('model.editor.thinkingLevelDesc') }}</p>
+            </div>
+          </template>
+        </template>
 
         <!--
           Background concurrency cap for this model. Only chat / embedding / vllm
@@ -410,15 +454,14 @@ import {
   getWeKnoraCloudStatus,
   putModelCredentials,
   deleteModelCredentialField,
+  probeRemoteCatalog,
+  fetchModelCatalog,
   type ModelCredentialField,
+  type RemoteCatalogModel,
+  type CatalogModelEntry,
 } from '@/api/model'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
-import {
-  defaultThinkingControl,
-  resolveThinkingControl,
-  type ThinkingControlValue,
-} from '@/utils/thinkingControl'
 import { DEFAULT_MODEL_CONTEXT_WINDOW } from '@/utils/contextWindow'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import CredentialResource, {
@@ -450,8 +493,16 @@ interface ModelFormData {
   contextWindow?: number
   /** 后台任务对该模型的并发上限；0/undefined 表示沿用全局默认。仅 chat/embedding/vllm 生效。 */
   maxConcurrency?: number
-  /** extra_config.thinking_control — how agent thinking on/off maps to API fields. */
-  thinkingControl?: string
+  /** chat 分片：单次回复最大输出 token */
+  maxOutputTokens?: number
+  /** chat 分片：思考开关 */
+  thinkingEnabled?: boolean
+  /** chat 分片：默认思考档位（空 = 适配器自决） */
+  thinkingLevel?: string
+  /** chat 分片：该模型支持的档位子集 */
+  selectedLevels?: string[]
+  /** chat 分片：输入模态（['text'] / ['text','image']） */
+  inputModalities?: string[]
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
   customHeaders?: CustomHeaderItem[]
   /** LKEAP Rerank：腾讯云 SecretKey（创建时写入 app_secret） */
@@ -501,141 +552,10 @@ const modelTypeChoices = computed(() => ([
 const apiProviderOptions = ref<ModelProviderOption[]>([])
 const loadingProviders = ref(false)
 
-// 硬编码的后备 Provider 配置 (当 API 不可用时使用)
-const fallbackProviderOptions = computed(() => [
-  {
-    value: 'openai',
-    label: t('model.editor.providers.openai.label'),
-    defaultUrls: {
-      chat: 'https://api.openai.com/v1',
-      embedding: 'https://api.openai.com/v1',
-      rerank: 'https://api.openai.com/v1',
-      vllm: 'https://api.openai.com/v1',
-      asr: 'https://api.openai.com/v1'
-    },
-    description: t('model.editor.providers.openai.description'),
-    modelTypes: ['chat', 'embedding', 'vllm', 'asr']
-  },
-  {
-    value: 'azure_openai',
-    label: t('model.editor.providers.azure_openai.label'),
-    defaultUrls: {
-      chat: 'https://{resource}.openai.azure.com',
-      embedding: 'https://{resource}.openai.azure.com',
-      vllm: 'https://{resource}.openai.azure.com',
-      asr: 'https://{resource}.openai.azure.com'
-    },
-    description: t('model.editor.providers.azure_openai.description'),
-    modelTypes: ['chat', 'embedding', 'vllm', 'asr']
-  },
-  {
-    value: 'aliyun',
-    label: t('model.editor.providers.aliyun.label'),
-    defaultUrls: {
-      chat: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      embedding: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      rerank: 'https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank',
-      vllm: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-    },
-    description: t('model.editor.providers.aliyun.description'),
-    modelTypes: ['chat', 'embedding', 'rerank', 'vllm']
-  },
-  {
-    value: 'zhipu',
-    label: t('model.editor.providers.zhipu.label'),
-    defaultUrls: {
-      chat: 'https://open.bigmodel.cn/api/paas/v4',
-      embedding: 'https://open.bigmodel.cn/api/paas/v4/embeddings',
-      vllm: 'https://open.bigmodel.cn/api/paas/v4'
-    },
-    description: t('model.editor.providers.zhipu.description'),
-    modelTypes: ['chat', 'embedding', 'vllm']
-  },
-  {
-    value: 'openrouter',
-    label: t('model.editor.providers.openrouter.label'),
-    defaultUrls: {
-      chat: 'https://openrouter.ai/api/v1',
-      embedding: 'https://openrouter.ai/api/v1'
-    },
-    description: t('model.editor.providers.openrouter.description'),
-    modelTypes: ['chat', 'embedding']
-  },
-  {
-    value: 'litellm',
-    label: t('model.editor.providers.litellm.label'),
-    defaultUrls: {
-      chat: 'http://your_litellm_proxy/v1',
-      embedding: 'http://your_litellm_proxy/v1',
-      vllm: 'http://your_litellm_proxy/v1'
-    },
-    description: t('model.editor.providers.litellm.description'),
-    modelTypes: ['chat', 'embedding', 'vllm']
-  },
-  {
-    value: 'requesty',
-    label: t('model.editor.providers.requesty.label'),
-    defaultUrls: {
-      chat: 'https://router.requesty.ai/v1',
-      embedding: 'https://router.requesty.ai/v1'
-    },
-    description: t('model.editor.providers.requesty.description'),
-    modelTypes: ['chat', 'embedding']
-  },
-  {
-    value: 'gemini',
-    label: t('model.editor.providers.gemini.label'),
-    defaultUrls: {
-      chat: 'https://generativelanguage.googleapis.com/v1beta/openai',
-      embedding: 'https://generativelanguage.googleapis.com/v1beta'
-    },
-    description: t('model.editor.providers.gemini.description'),
-    modelTypes: ['chat', 'embedding']
-  },
-  {
-    value: 'siliconflow',
-    label: t('model.editor.providers.siliconflow.label'),
-    defaultUrls: {
-      chat: 'https://api.siliconflow.cn/v1',
-      embedding: 'https://api.siliconflow.cn/v1',
-      rerank: 'https://api.siliconflow.cn/v1'
-    },
-    description: t('model.editor.providers.siliconflow.description'),
-    modelTypes: ['chat', 'embedding', 'rerank']
-  },
-  {
-    value: 'jina',
-    label: t('model.editor.providers.jina.label'),
-    defaultUrls: {
-      embedding: 'https://api.jina.ai/v1',
-      rerank: 'https://api.jina.ai/v1'
-    },
-    description: t('model.editor.providers.jina.description'),
-    modelTypes: ['embedding', 'rerank']
-  },
-  {
-    value: 'nvidia',
-    label: t('model.editor.providers.nvidia.label'),
-    defaultUrls: {
-      chat: 'https://integrate.api.nvidia.com/v1',
-      embedding: 'https://integrate.api.nvidia.com/v1',
-      rerank: 'https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking',
-      vllm: 'https://integrate.api.nvidia.com/v1',
-    },
-    description: t('model.editor.providers.nvidia.description'),
-    modelTypes: ['chat', 'embedding', 'rerank', 'vllm']
-  },
-  {
-    value: 'novita',
-    label: t('model.editor.providers.novita.label'),
-    defaultUrls: {
-      chat: 'https://api.novita.ai/openai/v1',
-      embedding: 'https://api.novita.ai/openai/v1',
-      vllm: 'https://api.novita.ai/openai/v1',
-    },
-    description: t('model.editor.providers.novita.description'),
-    modelTypes: ['chat', 'embedding', 'vllm']
-  },
+// 兜底厂商：仅保留「自定义 (OpenAI 兼容)」。预置厂商清单以能力声明 API
+// （/models/providers）为唯一来源；API 不可用时长尾厂商不再前端硬编码，
+// 用户可先用 generic 手填 Base URL 接入。
+const fallbackProviderOptions = computed<ModelProviderOption[]>(() => [
   {
     value: 'generic',
     label: t('model.editor.providers.generic.label'),
@@ -685,51 +605,217 @@ const dialogVisible = computed({
   get: () => props.visible,
   set: (val) => emit('update:visible', val)
 })
-
-const showThinkingControlField = computed(() =>
-  activeModelType.value === 'chat' && formData.value.source === 'remote',
-)
-
-const resolvedThinkingControl = (): ThinkingControlValue =>
-  defaultThinkingControl(
-    formData.value.provider || '',
-    formData.value.modelName || '',
-  )
-
-/** 用户是否手动改过思考参数格式（改过则不再自动覆盖，直到换服务商） */
-const thinkingControlManual = ref(false)
 /** 正在从 modelData 灌入表单，忽略厂商/来源控件的程序化 change 副作用 */
 const hydratingForm = ref(false)
 
-const onThinkingControlManualPick = () => {
-  thinkingControlManual.value = true
+// ---- 能力声明（来源：/models/providers，前端零厂商字段知识） ----
+const activeProviderCaps = computed(() =>
+  apiProviderOptions.value.find(p => p.value === formData.value.provider)?.capabilities
+)
+
+/** Chat 类型远程模型的思考能力声明（选项/开关的渲染依据）。 */
+const chatThinkingCaps = computed(() => (
+  activeModelType.value === 'chat' && formData.value.source === 'remote'
+    ? activeProviderCaps.value?.chat?.thinking
+    : undefined
+))
+
+const showThinkingSection = computed(() => chatThinkingCaps.value?.supported === true)
+const canDisableThinking = computed(() => chatThinkingCaps.value?.can_disable !== false)
+const hasThinkingLevels = computed(() => (chatThinkingCaps.value?.supported_levels?.length ?? 0) > 0)
+
+const levelLabel = (level: string) => {
+  const key = `model.editor.thinkingLevels.${level}`
+  return te(key) ? t(key) : level
 }
 
-const syncThinkingControlToForm = (force = false) => {
-  if (!showThinkingControlField.value) return
-  if (!force && !isEdit.value && thinkingControlManual.value) return
-  formData.value.thinkingControl = resolvedThinkingControl()
-}
+const thinkingLevelOptions = computed(() =>
+  (chatThinkingCaps.value?.supported_levels ?? []).map(v => ({ label: levelLabel(v), value: v }))
+)
 
-const applyThinkingControlFromModelData = () => {
-  if (!props.modelData || activeModelType.value !== 'chat' || formData.value.source !== 'remote') return
-  thinkingControlManual.value = !!props.modelData.thinkingControl
-  formData.value.thinkingControl = resolveThinkingControl(
-    props.modelData.thinkingControl,
-    formData.value.provider || props.modelData.provider || '',
-    formData.value.modelName || props.modelData.modelName || '',
-  )
-}
-
-const thinkingControlOptions = computed(() => {
-  const keys = ['none', 'chatTemplateKwargs', 'enableThinking', 'thinkingType'] as const
-  const values = ['none', 'chat_template_kwargs', 'enable_thinking', 'thinking_type'] as const
-  return keys.map((key, i) => ({
-    value: values[i],
-    label: t(`model.editor.thinkingControl.${key}.label`),
-    hint: t(`model.editor.thinkingControl.${key}.hint`),
-  }))
+/** 默认档单选：优先取用户勾选的档位子集，未勾选时回退厂商枚举。 */
+const defaultLevelOptions = computed(() => {
+  const values = formData.value.selectedLevels?.length
+    ? formData.value.selectedLevels
+    : (chatThinkingCaps.value?.supported_levels ?? [])
+  return values.map(v => ({ label: levelLabel(v), value: v }))
 })
+
+/** 厂商能力未声明图像输入时置灰视觉开关。 */
+const visionToggleDisabled = computed(() => {
+  const mods = activeProviderCaps.value?.chat?.input_modalities
+  return activeModelType.value === 'chat'
+    && formData.value.source === 'remote'
+    && !!mods && !mods.includes('image')
+})
+
+const visionChecked = computed({
+  get: () => formData.value.inputModalities?.includes('image') ?? formData.value.supportsVision ?? false,
+  set: (v: boolean) => {
+    formData.value.inputModalities = v ? ['text', 'image'] : ['text']
+    formData.value.supportsVision = v
+  },
+})
+
+const dimensionOverrideDisabled = computed(() =>
+  activeModelType.value === 'embedding'
+  && activeProviderCaps.value?.embedding
+  && activeProviderCaps.value.embedding.can_override_dimension === false
+)
+
+// ---- 目录预填（design §5.3 取值链 / ADR 0001 保存即终态） ----
+type PrefillSource = 'catalog' | 'remote'
+const PREFILL_FIELDS = ['contextWindow', 'maxOutputTokens', 'inputModalities', 'selectedLevels', 'thinkingLevel', 'thinkingEnabled'] as const
+type PrefillField = (typeof PREFILL_FIELDS)[number]
+const PREFILL_BADGE_KEYS: Record<PrefillSource, string> = {
+  catalog: 'model.editor.sourceCatalog',
+  remote: 'model.editor.sourceRemote',
+}
+
+const prefillSource = ref<Partial<Record<PrefillField, PrefillSource>>>({})
+const manualFields = ref<Set<PrefillField>>(new Set())
+/** 编辑已存模型打开后为 true：已存值优先，预填不覆盖；换模型 ID 视为新选择后解除（D1 推论）。 */
+const prefillBlocked = ref(false)
+
+const prefillBadge = (field: PrefillField) => {
+  const src = prefillSource.value[field]
+  return src ? t(PREFILL_BADGE_KEYS[src]) : ''
+}
+
+const markManualField = (field: PrefillField) => {
+  manualFields.value.add(field)
+  delete prefillSource.value[field]
+}
+
+function applyPrefill(meta: CatalogModelEntry, source: PrefillSource) {
+  if (prefillBlocked.value) return
+  const f = formData.value
+  const set = (field: PrefillField, hasValue: boolean, assign: () => void) => {
+    // 手改 > 已预填（接口元数据优先于目录） > 未填
+    if (!hasValue || manualFields.value.has(field) || prefillSource.value[field]) return
+    assign()
+    prefillSource.value[field] = source
+  }
+  set('contextWindow', !!meta.context_window, () => { f.contextWindow = meta.context_window })
+  set('maxOutputTokens', !!meta.max_output_tokens, () => { f.maxOutputTokens = meta.max_output_tokens })
+  set('inputModalities', !!meta.input_modalities?.length, () => {
+    f.inputModalities = [...(meta.input_modalities as string[])]
+    f.supportsVision = meta.input_modalities?.includes('image') ?? false
+  })
+  if (meta.thinking?.supported && showThinkingSection.value) {
+    const providerLevels = chatThinkingCaps.value?.supported_levels
+    const levels = (meta.thinking.levels ?? []).filter(
+      l => !providerLevels?.length || providerLevels.includes(l),
+    )
+    set('selectedLevels', levels.length > 0, () => { f.selectedLevels = [...levels] })
+    set('thinkingLevel', !!meta.thinking.default_level, () => {
+      f.thinkingLevel = meta.thinking?.default_level || ''
+      if (f.thinkingLevel && f.thinkingEnabled === undefined) f.thinkingEnabled = true
+    })
+  }
+}
+
+// ---- 远端模型列表探测（可搜索下拉数据源，POST /models/remote-catalog） ----
+const remoteModels = ref<RemoteCatalogModel[]>([])
+const probingRemoteModels = ref(false)
+let probeSequence = 0
+
+const showRemoteModelSelect = computed(() =>
+  (activeModelType.value === 'chat' || activeModelType.value === 'vllm')
+  && formData.value.source === 'remote'
+  && formData.value.provider !== 'weknoracloud'
+)
+
+const remoteModelOptions = computed(() =>
+  remoteModels.value.map(m => ({
+    value: m.id,
+    label: m.display_name ? `${m.id} · ${m.display_name}` : m.id,
+  }))
+)
+
+const onRemoteModelCreate = (value: string | number) => {
+  formData.value.modelName = String(value)
+}
+
+const probeRemoteModels = async () => {
+  if (!showRemoteModelSelect.value || !formData.value.provider) return
+  const seq = ++probeSequence
+  probingRemoteModels.value = true
+  try {
+    // 编辑模式 apiKey 不在表单里：传 model_id 让后端用存储凭证兜底
+    const payload = isEdit.value && props.modelData?.id
+      ? { provider: formData.value.provider, model_id: props.modelData.id, base_url: formData.value.baseUrl || '' }
+      : { provider: formData.value.provider, base_url: formData.value.baseUrl || '', api_key: formData.value.apiKey || '' }
+    const result = await probeRemoteCatalog(payload)
+    if (seq !== probeSequence) return
+    remoteModels.value = result.available ? (result.models ?? []) : []
+  } catch {
+    if (seq === probeSequence) remoteModels.value = []
+  } finally {
+    if (seq === probeSequence) probingRemoteModels.value = false
+  }
+}
+
+// ---- models.json 目录查询（GET /models/catalog?provider=X） ----
+const catalogCache = ref<Record<string, Record<string, CatalogModelEntry>>>({})
+
+const normalizeModelId = (id: string) =>
+  id.trim().toLowerCase().replace(/-latest$/i, '').replace(/-\d{8}$/i, '')
+
+const lookupCatalogEntry = (provider: string, modelId: string): CatalogModelEntry | null => {
+  const models = catalogCache.value[provider]
+  if (!models) return null
+  const id = modelId.trim()
+  if (!id) return null
+  return models[id] ?? models[id.toLowerCase()] ?? models[normalizeModelId(id)] ?? null
+}
+
+const ensureCatalogLoaded = async (provider: string) => {
+  if (!provider || catalogCache.value[provider]) return
+  try {
+    const result = await fetchModelCatalog(provider)
+    if (result.available && result.providers) {
+      catalogCache.value = {
+        ...catalogCache.value,
+        ...Object.fromEntries(
+          Object.entries(result.providers).map(([key, value]) => [key, value.models ?? {}]),
+        ),
+      }
+    } else {
+      catalogCache.value[provider] = {}
+    }
+  } catch {
+    catalogCache.value[provider] = {}
+  }
+}
+
+/** 换模型 ID = 新选择：按取值链预填（接口元数据 → 目录 → 留空）。 */
+const prefillForModelId = async (modelId: string) => {
+  if (!showRemoteModelSelect.value || !modelId.trim() || !formData.value.provider) return
+  // 新一轮预填：清掉上一轮的来源标注（手动字段保留标注清除权）
+  for (const field of PREFILL_FIELDS) {
+    if (!manualFields.value.has(field)) delete prefillSource.value[field]
+  }
+  const provider = formData.value.provider
+  const id = modelId.trim()
+  // 1) 接口元数据
+  const remoteHit = remoteModels.value.find(m => m.id === id)
+  if (remoteHit?.meta) applyPrefill(remoteHit.meta, 'remote')
+  // 2) models.json 目录（补齐接口元数据未覆盖的字段）
+  await ensureCatalogLoaded(provider)
+  const entry = lookupCatalogEntry(provider, id)
+  if (entry) applyPrefill(entry, 'catalog')
+}
+
+/** 用户勾选档位后：默认档若不在子集内则清空（子集是默认档的选项来源）。 */
+const onSelectedLevelsChange = (value: unknown) => {
+  markManualField('selectedLevels')
+  const levels = Array.isArray(value) ? value.map(String) : []
+  const current = formData.value.thinkingLevel
+  if (current && !levels.includes(current)) {
+    formData.value.thinkingLevel = ''
+  }
+}
 
 // Header icon for the SettingDrawer — uses the same TDesign icon name table
 // as the model card list, so the drawer's leading badge visually matches the
@@ -898,7 +984,11 @@ const formData = ref<ModelFormData>({
   supportsVision: false,
   contextWindow: undefined,
   maxConcurrency: undefined,
-  thinkingControl: defaultThinkingControl('generic', ''),
+  maxOutputTokens: undefined,
+  thinkingEnabled: undefined,
+  thinkingLevel: '',
+  selectedLevels: [],
+  inputModalities: ['text'],
   customHeaders: [],
   appSecret: '',
   lkeapRegion: 'ap-guangzhou',
@@ -1034,7 +1124,6 @@ const selectModelType = async (type: EditorModelType) => {
   }
   if (type !== 'chat') {
     formData.value.supportsVision = false
-    thinkingControlManual.value = false
   }
   remoteChecked.value = false
   remoteAvailable.value = false
@@ -1047,10 +1136,6 @@ const selectModelType = async (type: EditorModelType) => {
     formData.value.baseUrl = ''
   } else {
     handleProviderChange(formData.value.provider || 'generic')
-  }
-  if (showThinkingControlField.value && !isEdit.value) {
-    thinkingControlManual.value = false
-    syncThinkingControlToForm(true)
   }
 }
 
@@ -1089,8 +1174,11 @@ watch(() => props.visible, (val) => {
           customHeaders: Array.isArray(props.modelData.customHeaders)
             ? props.modelData.customHeaders.map(h => ({ key: h.key, value: h.value }))
             : [],
+          inputModalities: props.modelData.inputModalities
+            ?? (props.modelData.supportsVision ? ['text', 'image'] : ['text']),
         }
-        applyThinkingControlFromModelData()
+        // 已存值优先：预填不覆盖（D1 保存即终态）；换模型 ID 时解除
+        prefillBlocked.value = true
       } else if (lastOpenedModelId.value !== null || !formData.value.id) {
         // 上次是编辑某个模型，或第一次新增 → 重置成空白
         resetForm()
@@ -1109,10 +1197,6 @@ watch(() => props.visible, (val) => {
         checkWkcCredentialStatus()
       }
 
-      if (showThinkingControlField.value && !isEdit.value) {
-        thinkingControlManual.value = false
-        syncThinkingControlToForm(true)
-      }
     } finally {
       nextTick(() => {
         hydratingForm.value = false
@@ -1123,7 +1207,6 @@ watch(() => props.visible, (val) => {
 
 // 重置表单
 const resetForm = () => {
-  thinkingControlManual.value = false
   formData.value = {
     id: generateId(),
     name: '', // 保留字段但不使用，保存时用 modelName
@@ -1140,7 +1223,11 @@ const resetForm = () => {
     supportsVision: false,
     contextWindow: undefined,
     maxConcurrency: undefined,
-    thinkingControl: defaultThinkingControl('generic', ''),
+    maxOutputTokens: undefined,
+    thinkingEnabled: undefined,
+    thinkingLevel: '',
+    selectedLevels: [],
+    inputModalities: ['text'],
     customHeaders: [],
     appSecret: '',
     lkeapRegion: 'ap-guangzhou',
@@ -1154,8 +1241,13 @@ const resetForm = () => {
   dimensionSuccess.value = false
   dimensionMessage.value = ''
   showApiKey.value = false
+  // 预填/探测状态一并清空
+  manualFields.value = new Set()
+  prefillSource.value = {}
+  prefillBlocked.value = false
+  remoteModels.value = []
+  probingRemoteModels.value = false
 }
-
 // 处理厂商选择变化 (自动填充默认 URL)
 const handleProviderChange = (value: string) => {
   const provider = providerOptions.value.find(opt => opt.value === value)
@@ -1180,39 +1272,26 @@ const handleProviderChange = (value: string) => {
   if (value === 'weknoracloud') {
     checkWkcCredentialStatus()
   }
-  if (hydratingForm.value) return
-  if (activeModelType.value !== 'chat' || formData.value.source !== 'remote') return
-  if (!isEdit.value) {
-    thinkingControlManual.value = false
-    syncThinkingControlToForm(true)
-    return
-  }
-  // 编辑时仅用户主动换厂商才跟随默认
-  thinkingControlManual.value = false
-  syncThinkingControlToForm(true)
 }
+
+let probeTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(
   () => [formData.value.source, formData.value.provider, formData.value.modelName] as const,
   ([source, provider, modelName], [prevSource, prevProvider, prevModelName]) => {
-    if (hydratingForm.value || isEdit.value) return
-    if (activeModelType.value !== 'chat' || source !== 'remote') return
+    if (hydratingForm.value) return
     if (source === prevSource && provider === prevProvider && modelName === prevModelName) return
 
-    const providerChanged = provider !== prevProvider
+    // 远端模型列表探测（防抖）：新建用已填 base_url+api_key，编辑用存储凭证
+    if (showRemoteModelSelect.value) {
+      if (probeTimer) clearTimeout(probeTimer)
+      probeTimer = setTimeout(() => { void probeRemoteModels() }, 500)
+    }
 
-    if (providerChanged) {
-      thinkingControlManual.value = false
-      syncThinkingControlToForm(true)
-      return
-    }
-    if (!thinkingControlManual.value) {
-      syncThinkingControlToForm(true)
-      return
-    }
-    const prevDefault = defaultThinkingControl(prevProvider || '', prevModelName || '')
-    if (formData.value.thinkingControl === prevDefault) {
-      syncThinkingControlToForm(true)
+    // 换模型 ID = 新选择：按取值链重新预填（D1 推论）；仅换来源/厂商不触发
+    if (modelName !== prevModelName) {
+      prefillBlocked.value = false
+      void prefillForModelId(modelName)
     }
   },
 )
@@ -1693,15 +1772,6 @@ watch(() => formData.value.source, () => {
   downloadProgress.value = 0
   currentDownloadModel.value = ''
 
-  if (
-    !hydratingForm.value
-    && !isEdit.value
-    && formData.value.source === 'remote'
-    && activeModelType.value === 'chat'
-  ) {
-    thinkingControlManual.value = false
-    syncThinkingControlToForm(true)
-  }
 })
 
 // 监听模型名称变化，清理维度检测状态
@@ -2335,42 +2405,23 @@ const handleCancel = () => {
     font-size: 13px;
   }
 }
+
+// 预填来源标注（目录 / 接口），跟在字段标签后面
+.prefill-source {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--td-text-color-secondary);
+  background-color: var(--td-bg-color-secondarycontainer);
+  vertical-align: middle;
+}
 </style>
 
 <!-- 非 scoped 样式：t-select popup 渲染到 body 下，scoped 样式无法覆盖 -->
 <style lang="less">
-.thinking-control-select-popup {
-  min-width: 22rem;
-  max-width: min(28rem, calc(100vw - 2rem));
-  padding: 4px;
-
-  .t-select-option {
-    height: auto !important;
-    padding: 8px 10px;
-    border-radius: 6px;
-    margin: 2px 0;
-    white-space: normal;
-  }
-}
-
-.thinking-control-option {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  line-height: 1.35;
-  min-width: 0;
-
-  &__title {
-    font-size: 13px;
-    color: var(--td-text-color-primary);
-  }
-
-  &__hint {
-    font-size: 12px;
-    color: var(--td-text-color-placeholder);
-    word-break: break-word;
-  }
-}
 
 .provider-select-popup {
   // 容器留点呼吸：避免选项贴着 popup 圆角

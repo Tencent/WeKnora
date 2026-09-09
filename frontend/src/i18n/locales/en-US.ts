@@ -4340,25 +4340,27 @@ export default {
       maxConcurrencyLabel: 'Background concurrency limit',
       maxConcurrencyPlaceholder: '0 = use global default',
       maxConcurrencyDesc: 'Caps concurrent background (ingestion/enrichment) calls to this model, shared per model across all replicas. 0 or empty falls back to the global default; interactive chat is never affected.',
-      thinkingControlLabel: 'Thinking mode request format',
-      thinkingControlDesc: 'Controls how the agent’s “Thinking mode” on/off switch is written to the API. We pre-select based on vendor/model when possible; change it to match your API docs. With “Do not send”, the agent Thinking mode switch has no effect.',
-      thinkingControl: {
-        none: {
-          label: 'Do not send thinking fields',
-          hint: 'Agent “Thinking mode” switch has no effect; thinking parameters are not sent in requests'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: 'Custom OpenAI-compatible gateways, NVIDIA NIM, vLLM / local Qwen'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: 'Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo'
-        },
-        thinkingType: {
-          label: 'thinking.type',
-          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3, etc.; default for LKEAP; use “Do not send” for R1)'
-        }
+      thinkingToggleLabel: 'Thinking switch',
+      thinkingToggleDesc: 'When off, requests carry no thinking parameters; level selection is unaffected.',
+      selectedLevelsLabel: 'Supported thinking levels',
+      selectedLevelsPlaceholder: 'Select the levels this model supports',
+      selectedLevelsDesc: 'Pick the levels from the vendor vocabulary this model actually supports; leave empty for unspecified.',
+      thinkingLevelLabel: 'Default thinking level',
+      thinkingLevelPlaceholder: 'Empty = adapter decides',
+      thinkingLevelDesc: 'Level used when the user/agent does not specify one; empty lets the adapter decide (vendor default or no level parameter).',
+      thinkingLevelsUnsupportedHint: 'This model does not support thinking strength control',
+      maxOutputTokensLabel: 'Max output tokens',
+      maxOutputTokensPlaceholder: 'Empty = unlimited',
+      maxOutputTokensDesc: 'How many tokens this model may generate in one response. Leave empty for no limit.',
+      sourceCatalog: 'Catalog',
+      visionDisabledHint: 'The current vendor does not declare image input support',
+      dimensionOverrideDisabledHint: 'The current vendor does not declare custom output dimension support',
+      thinkingLevels: {
+        low: 'Low',
+        medium: 'Medium',
+        high: 'High',
+        xhigh: 'Extra High',
+        max: 'Max'
       },
       dimensionHint: 'Model selected. Click "Detect Dimension" to fetch the vector dimension automatically.',
       loadModelListFailed: 'Failed to load model list',

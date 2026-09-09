@@ -366,15 +366,21 @@ function convertToLegacyFormat(model: ModelConfig) {
     dimension: model.parameters.embedding_parameters?.dimension,
     supportsDimensionOverride: model.parameters.embedding_parameters?.supports_dimension_override || false,
     isBuiltin: model.is_builtin || false,
-    supportsVision: model.parameters.supports_vision || false,
-    contextWindow: model.parameters.context_window || undefined,
+    // chat 分片优先，顶层扁平字段回落（迁移期双读，design §8）
+    supportsVision: model.parameters.chat?.input_modalities?.includes('image')
+      || model.parameters.supports_vision
+      || false,
+    contextWindow: model.parameters.chat?.context_window || model.parameters.context_window || undefined,
     maxConcurrency: model.parameters.max_concurrency,
+    maxOutputTokens: model.parameters.chat?.max_output_tokens || model.parameters.max_output_tokens || undefined,
+    inputModalities: model.parameters.chat?.input_modalities,
+    thinkingEnabled: model.parameters.chat?.thinking_enabled,
+    thinkingLevel: model.parameters.chat?.thinking_level || '',
+    selectedLevels: model.parameters.chat?.selected_levels,
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
       : [],
     lkeapRegion: model.parameters.extra_config?.region || 'ap-guangzhou',
-    // 原始存库值，编辑弹窗内再 resolve（避免打开时被推断值覆盖）
-    thinkingControl: model.parameters.extra_config?.thinking_control,
     _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
     // Preserve the credential metadata map so the editor dialog can render
     // the "Configured" state without an extra round-trip.
@@ -606,16 +612,34 @@ const handleModelSave = async (modelData: any) => {
     if (modelData.provider === 'lkeap' && saveType === 'rerank') {
       extraConfig.region = (modelData.lkeapRegion || 'ap-guangzhou').trim()
     }
-    if (
-      saveType === 'chat'
-      && modelData.source === 'remote'
-      && modelData.thinkingControl
-    ) {
-      extraConfig.thinking_control = modelData.thinkingControl
-    }
     const extraConfigFields = Object.keys(extraConfig).length > 0
       ? { extra_config: extraConfig }
       : {}
+
+    // Chat 分片（KnowledgeQA）：思考档位、输入模态、上下文/输出预算一律写分片，
+    // 不再写 extra_config.thinking_control 与顶层扁平字段（design §3/D3）。
+    const chatShard: NonNullable<ModelConfig['parameters']['chat']> = {}
+    if (saveType === 'chat') {
+      if (Number(modelData.contextWindow) >= 1024) {
+        chatShard.context_window = Math.round(Number(modelData.contextWindow))
+      }
+      if (Number(modelData.maxOutputTokens) > 0) {
+        chatShard.max_output_tokens = Math.round(Number(modelData.maxOutputTokens))
+      }
+      chatShard.input_modalities = modelData.inputModalities?.length
+        ? modelData.inputModalities
+        : ['text']
+      if (modelData.thinkingEnabled !== undefined) {
+        chatShard.thinking_enabled = modelData.thinkingEnabled
+      }
+      if (modelData.thinkingLevel) {
+        chatShard.thinking_level = modelData.thinkingLevel
+      }
+      if (modelData.selectedLevels?.length) {
+        chatShard.selected_levels = modelData.selectedLevels
+      }
+    }
+    const chatShardFields = Object.keys(chatShard).length > 0 ? { chat: chatShard } : {}
 
     const apiModelData: ModelConfig = {
       name: modelData.modelName.trim(),
@@ -638,14 +662,15 @@ const handleModelSave = async (modelData: any) => {
           }
         } : {}),
         ...(saveType === 'vllm' ? {
-          supports_vision: true
-        } : saveType === 'chat' ? {
-          supports_vision: modelData.supportsVision ?? false
+          supports_vision: true,
+          ...(Number(modelData.contextWindow) >= 1024
+            ? { context_window: Math.round(Number(modelData.contextWindow)) }
+            : {}),
+          ...(Number(modelData.maxOutputTokens) > 0
+            ? { max_output_tokens: Math.round(Number(modelData.maxOutputTokens)) }
+            : {})
         } : {}),
-        ...((saveType === 'chat' || saveType === 'vllm')
-          && Number(modelData.contextWindow) >= 1024
-          ? { context_window: Math.round(Number(modelData.contextWindow)) }
-          : {}),
+        ...chatShardFields,
         // 后台并发上限：仅 chat/embedding/vllm 受治理，>0 才写入（0/空沿用全局默认）。
         ...(['chat', 'embedding', 'vllm'].includes(saveType)
           && Number(modelData.maxConcurrency) > 0

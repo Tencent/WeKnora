@@ -2404,8 +2404,21 @@ export default {
       maxConcurrencyLabel: '后台并发上限',
       maxConcurrencyPlaceholder: '0 表示使用全局默认',
       maxConcurrencyDesc: '限制文档入库/富化等后台任务对该模型的并发调用数（按模型全副本共享）。0 或留空表示沿用全局默认；不影响交互式对话。',
-      thinkingControlLabel: '思考模式参数格式',
-      thinkingControlDesc: '决定智能体「思考模式」开/关时如何写入 API。已尝试按厂商/模型预选，若与实际情况不符请按 API 文档手动修改；选「不写入」时，智能体「思考模式」开关不生效。',
+      thinkingToggleLabel: '思考开关',
+      thinkingToggleDesc: '关闭后请求不携带思考参数；档位选择不受影响。',
+      selectedLevelsLabel: '支持的思考档位',
+      selectedLevelsPlaceholder: '选择该模型支持的档位',
+      selectedLevelsDesc: '从厂商档位词表中勾选该模型实际支持的档位；留空表示未指定。',
+      thinkingLevelLabel: '默认思考档位',
+      thinkingLevelPlaceholder: '留空 = 适配器自决',
+      thinkingLevelDesc: '用户/智能体未指定档位时使用的默认档；留空由适配器决定（用厂商默认或不发档位参数）。',
+      thinkingLevelsUnsupportedHint: '该模型不支持思考强度调节',
+      maxOutputTokensLabel: '最大输出 token',
+      maxOutputTokensPlaceholder: '留空 = 不限制',
+      maxOutputTokensDesc: '该模型单次回复最多生成的 token 数。留空则不做限制。',
+      sourceCatalog: '目录',
+      visionDisabledHint: '当前厂商未声明支持图像输入',
+      dimensionOverrideDisabledHint: '当前厂商未声明支持自定义输出维度',
       dimensionHint: '模型已选择，点击"检测维度"按钮自动获取向量维度',
       loadModelListFailed: '加载模型列表失败',
       listRefreshed: '列表已刷新',
@@ -2538,23 +2551,12 @@ export default {
         baseUrlEmpty: 'Base URL 不能为空',
         baseUrlInvalid: 'Base URL 格式不正确，请输入有效的 URL'
       },
-      thinkingControl: {
-        thinkingType: {
-          label: 'thinking.type',
-          hint: '火山引擎 Ark；腾讯云 LKEAP（DeepSeek V3 等，选 LKEAP 时默认此项；R1 请改「不写入」）'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: '阿里云 DashScope：qwen3、qwen-plus、qwen-max、qwen-turbo'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: '自定义 OpenAI 兼容、NVIDIA NIM、vLLM / 本地 Qwen 部署'
-        },
-        none: {
-          label: '不写入思考参数',
-          hint: '智能体「思考模式」开关不生效，不会在请求中写入思考相关参数'
-        }
+      thinkingLevels: {
+        low: '低',
+        medium: '中',
+        high: '高',
+        xhigh: '超高',
+        max: '最大'
       },
       volcengine: {
         accessKeyLabel: 'Access Key ID',

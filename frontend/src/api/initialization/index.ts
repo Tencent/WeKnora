@@ -579,6 +579,53 @@ export function fabriTag(request: FabriTagRequest): Promise<FabriTagResponse> {
     });
 }
 
+// 能力声明分片 — 镜像后端 internal/models/provider/capabilities.go 的 JSON 形状。
+// 前端按模型 type 只取对应分片（chat/embedding/rerank/asr），零厂商字段知识。
+export interface ProviderThinkingCaps {
+    supported: boolean;         // 思考是否可控制
+    can_disable: boolean;       // 是否可关闭（强制思考模型为 false）
+    supported_levels?: string[]; // 平台五档词表子集（low/medium/high/xhigh/max）
+    default_level?: string;      // 用户留空时的厂商级默认档
+}
+
+export interface ProviderChatCaps {
+    thinking: ProviderThinkingCaps;
+    input_modalities?: string[]; // text/image/audio
+    protocol: string;            // openai_chat / anthropic_messages / google_genai / ollama
+    parallel_tool_calls: boolean;
+}
+
+export interface ProviderEmbeddingCaps {
+    can_override_dimension: boolean;
+    dimensions?: number[];
+    max_batch_size?: number;
+}
+
+export interface ProviderCapabilities {
+    common: {
+        streaming: boolean;
+        health_probe: boolean;
+        token_counting: boolean;
+        usage_reporting: string; // full / partial / none
+        model_listing: { supported: boolean };
+    };
+    chat?: ProviderChatCaps;
+    embedding?: ProviderEmbeddingCaps;
+    rerank?: Record<string, never>;
+    asr?: Record<string, never>;
+}
+
+// 厂商声明的动态配置字段（如 Azure OpenAI 的 api_version）。
+export interface ProviderExtraField {
+    key: string;
+    label: string;
+    type: string; // "string" | "number" | "boolean" | "select"
+    required: boolean;
+    default: string;
+    placeholder?: string;
+    options?: { label: string; value: string }[];
+}
+
 // 模型厂商信息类型
 export interface ModelProviderOption {
     value: string;        // provider 标识符
@@ -586,6 +633,8 @@ export interface ModelProviderOption {
     description: string;  // 描述
     defaultUrls: Record<string, string>;  // 按模型类型区分的默认 URL
     modelTypes: string[]; // 支持的模型类型
+    capabilities?: ProviderCapabilities; // 能力声明分片（后端 EffectiveCapabilities 下发）
+    extraFields?: ProviderExtraField[];  // 动态配置字段
 }
 
 // 获取模型厂商列表
