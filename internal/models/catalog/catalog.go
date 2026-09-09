@@ -26,6 +26,7 @@ var embeddedCatalog []byte
 // arbitrary URLs are rejected (安全约束, PRD).
 type Source string
 
+// Source values for WEKNORA_MODELS_CATALOG.
 const (
 	SourceGitHub Source = "GITHUB"
 	SourceCNB    Source = "CNB"
@@ -47,26 +48,26 @@ var mirrorURLs = map[Source]string{
 // Catalog is the parsed models.json. Providers maps WeKnora provider ids to
 // their known model entries.
 type Catalog struct {
-	Version   string                   `json:"version"`
-	Providers map[string]CatalogModels `json:"providers"`
+	Version   string            `json:"version"`
+	Providers map[string]Models `json:"providers"`
 }
 
-// CatalogModels groups one provider's known models.
-type CatalogModels struct {
-	Models map[string]CatalogModel `json:"models"`
+// Models groups one provider's known models.
+type Models struct {
+	Models map[string]Model `json:"models"`
 }
 
-// CatalogModel is the per-model parameter entry (design §5.4 schema).
-type CatalogModel struct {
-	ContextWindow   int              `json:"context_window,omitempty"`
-	MaxOutputTokens int              `json:"max_output_tokens,omitempty"`
-	InputModalities []string         `json:"input_modalities,omitempty"`
-	Thinking        *CatalogThinking `json:"thinking,omitempty"`
+// Model is the per-model parameter entry (design §5.4 schema).
+type Model struct {
+	ContextWindow   int       `json:"context_window,omitempty"`
+	MaxOutputTokens int       `json:"max_output_tokens,omitempty"`
+	InputModalities []string  `json:"input_modalities,omitempty"`
+	Thinking        *Thinking `json:"thinking,omitempty"`
 }
 
-// CatalogThinking mirrors the provider ThinkingCaps shape so a catalog hit
+// Thinking mirrors the provider ThinkingCaps shape so a catalog hit
 // can prefill the model record's level selection (ADR 0002).
-type CatalogThinking struct {
+type Thinking struct {
 	Supported    bool     `json:"supported"`
 	CanDisable   bool     `json:"can_disable"`
 	Levels       []string `json:"levels,omitempty"`
@@ -116,14 +117,14 @@ func Get() *Catalog {
 // LookupModel finds a model entry by provider + model id: exact id first,
 // then the normalized id (lowercase, trailing -latest / -YYYYMMDD stripped —
 // vendor ids commonly carry them, design §5.10.3 型号匹配归一化).
-func LookupModel(providerName, modelID string) (CatalogModel, bool) {
+func LookupModel(providerName, modelID string) (Model, bool) {
 	cat := Get()
 	if cat == nil || providerName == "" || modelID == "" {
-		return CatalogModel{}, false
+		return Model{}, false
 	}
 	prov, ok := cat.Providers[strings.ToLower(providerName)]
 	if !ok {
-		return CatalogModel{}, false
+		return Model{}, false
 	}
 	if m, ok := prov.Models[modelID]; ok {
 		return m, true
@@ -132,7 +133,7 @@ func LookupModel(providerName, modelID string) (CatalogModel, bool) {
 		m, ok := prov.Models[norm]
 		return m, ok
 	}
-	return CatalogModel{}, false
+	return Model{}, false
 }
 
 // normalizeModelID lowercases and strips trailing -latest / -YYYYMMDD
@@ -197,7 +198,7 @@ func fetchRemote(ctx context.Context, url string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetch %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("fetch %s: status %d", url, resp.StatusCode)
 	}

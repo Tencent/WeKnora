@@ -44,8 +44,8 @@ type ChatOptions struct {
 	// (see ResolveThinkingLevel).
 	ThinkingLevel     string          `json:"thinking_level,omitempty"`
 	Tools             []Tool          `json:"tools,omitempty"`               // 可用工具列表
-	ToolChoice        string          `json:"tool_choice,omitempty"`         // "auto", "required", "none", or specific tool
-	ParallelToolCalls *bool           `json:"parallel_tool_calls,omitempty"` // 是否允许并行工具调用（默认 nil 表示由模型决定）
+	ToolChoice        string          `json:"tool_choice,omitempty"`         // "auto", "required", "none", or a tool
+	ParallelToolCalls *bool           `json:"parallel_tool_calls,omitempty"` // 是否允许并行工具调用（nil 表示由模型决定）
 	Format            json.RawMessage `json:"format,omitempty"`              // 响应格式定义
 	// PromptCacheKey is the provider routing key (OpenAI prompt_cache_key).
 	// Empty falls back to the session ID on the call context.

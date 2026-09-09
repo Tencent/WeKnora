@@ -8,6 +8,7 @@ import "github.com/Tencent/WeKnora/internal/types"
 // (design.md §4.3), so the vocabulary stays clean.
 type Level string
 
+// Level values — the platform thinking-level vocabulary (五档词表).
 const (
 	LevelLow    Level = "low"
 	LevelMedium Level = "medium"
@@ -19,6 +20,7 @@ const (
 // Modality is an input modality a chat model may accept.
 type Modality string
 
+// Modality values — input modalities a chat model may declare.
 const (
 	ModalityText  Modality = "text"
 	ModalityImage Modality = "image"
@@ -28,6 +30,7 @@ const (
 // ProtocolFamily identifies the wire protocol a chat model speaks.
 type ProtocolFamily string
 
+// ProtocolFamily values — the wire protocols a chat model can speak.
 const (
 	ProtocolOpenAIChat        ProtocolFamily = "openai_chat"
 	ProtocolAnthropicMessages ProtocolFamily = "anthropic_messages"
@@ -40,6 +43,7 @@ const (
 // deferred (ADR 0003) — near-zero cost now, avoids a second pass later.
 type UsageReporting string
 
+// UsageReporting values — how completely a provider reports token usage.
 const (
 	UsageFull    UsageReporting = "full"
 	UsagePartial UsageReporting = "partial"
@@ -52,8 +56,8 @@ const (
 // and the frontend hides both the toggle and the level control.
 type ThinkingCaps struct {
 	Supported       bool    `json:"supported"`                  // can thinking be controlled at all
-	CanDisable      bool    `json:"can_disable"`                // can it be turned off (false for forced-thinking models)
-	SupportedLevels []Level `json:"supported_levels,omitempty"` // subset of the platform vocabulary; dropdown options
+	CanDisable      bool    `json:"can_disable"`                // can thinking be turned off (forced-thinking: false)
+	SupportedLevels []Level `json:"supported_levels,omitempty"` // platform vocabulary subset; dropdown options
 	DefaultLevel    Level   `json:"default_level,omitempty"`    // provider-level fallback when the user leaves it empty
 }
 
@@ -75,7 +79,7 @@ type CommonCaps struct {
 // ChatCaps holds chat-specific capabilities (KnowledgeQA + VLLM share this).
 type ChatCaps struct {
 	Thinking          ThinkingCaps   `json:"thinking"`
-	InputModalities   []Modality     `json:"input_modalities,omitempty"` // provider-level upper bound; model-level narrows
+	InputModalities   []Modality     `json:"input_modalities,omitempty"` // provider-level bound; models narrow
 	Protocol          ProtocolFamily `json:"protocol"`
 	ParallelToolCalls bool           `json:"parallel_tool_calls"`
 }

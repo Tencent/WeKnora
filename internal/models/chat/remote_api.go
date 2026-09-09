@@ -164,9 +164,9 @@ func (c *RemoteAPIChat) resolveThinkingLevelOpts(opts *ChatOptions) *ChatOptions
 	if resolved == opts.ThinkingLevel {
 		return opts // no change — avoid a copy
 	}
-	copy := *opts
-	copy.ThinkingLevel = resolved
-	return &copy
+	cloned := *opts
+	cloned.ThinkingLevel = resolved
+	return &cloned
 }
 
 // buildOutbound assembles the final outbound request: the body to send, the
@@ -229,8 +229,14 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 }
 
 // chatOnce is one Chat attempt (build outbound → invoke → parse). The retry
-// orchestration lives in Chat; each attempt re-runs the full funnel.
-func (c *RemoteAPIChat) chatOnce(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
+// orchestration lives in Chat; each attempt re-runs the full funnel. The
+// thinking level resolves once here so the image-strip retry below shapes the
+// exact same wire parameters as the first attempt (design §4.2 single
+// convergence point).
+func (c *RemoteAPIChat) chatOnce(
+	ctx context.Context, messages []Message, opts *ChatOptions,
+) (*types.ChatResponse, error) {
+	opts = c.resolveThinkingLevelOpts(opts)
 	body, endpoint, useRawHTTP, err := c.buildOutbound(ctx, messages, opts, false)
 	if err != nil {
 		return nil, err
@@ -244,7 +250,8 @@ func (c *RemoteAPIChat) chatOnce(ctx context.Context, messages []Message, opts *
 	resp, err := c.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		if isMultimodalNotSupportedError(err) {
-			logger.Warnf(ctx, "[LLM Request] Model %s does not support multimodal, retrying without images", c.modelName)
+			logger.Warnf(ctx, "[LLM Request] Model %s does not support multimodal, retrying without images",
+				c.modelName)
 			cleaned := stripImagesFromMessages(messages)
 			req = c.shapedRequest(cleaned, opts, false)
 			resp, err = c.client.CreateChatCompletion(ctx, req)
@@ -346,6 +353,7 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 func (c *RemoteAPIChat) chatStreamOnce(
 	ctx context.Context, cancel context.CancelFunc, messages []Message, opts *ChatOptions,
 ) (<-chan types.StreamResponse, error) {
+	opts = c.resolveThinkingLevelOpts(opts) // same convergence as chatOnce
 	body, endpoint, useRawHTTP, err := c.buildOutbound(ctx, messages, opts, true)
 	if err != nil {
 		return nil, err

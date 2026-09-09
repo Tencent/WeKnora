@@ -829,7 +829,7 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 const catalogProbeRateLimit = 10
 
 var (
-	catalogProbeMu    sync.Mutex
+	catalogProbeMu      sync.Mutex
 	catalogProbeWindows = map[uint64]*catalogProbeWindow{}
 )
 
@@ -914,7 +914,6 @@ type ProbeRemoteCatalogRequest struct {
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      429      {object}  errors.AppError         "探测频率超限"
 // @Security     Bearer
-// @Security     ApiKeyAuth
 // @Router       /models/remote-catalog [post]
 func (h *ModelHandler) ProbeRemoteCatalog(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -922,11 +921,11 @@ func (h *ModelHandler) ProbeRemoteCatalog(c *gin.Context) {
 
 	var req ProbeRemoteCatalogRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	if !allowCatalogProbe(tenantID) {
-		c.Error(errors.NewTooManyRequestsError("remote catalog probe rate limit exceeded"))
+		_ = c.Error(errors.NewTooManyRequestsError("remote catalog probe rate limit exceeded"))
 		return
 	}
 
@@ -934,7 +933,7 @@ func (h *ModelHandler) ProbeRemoteCatalog(c *gin.Context) {
 	if apiKey == "" && req.ModelID != "" {
 		model, err := h.service.GetModelByID(ctx, req.ModelID)
 		if err != nil || model == nil {
-			c.Error(errors.NewNotFoundError("model not found"))
+			_ = c.Error(errors.NewNotFoundError("model not found"))
 			return
 		}
 		apiKey = model.Parameters.APIKey

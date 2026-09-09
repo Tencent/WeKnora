@@ -87,15 +87,22 @@ func TestResolveThinkingLevel(t *testing.T) {
 			callLevel:      "",
 			modelLevel:     "",
 			selectedLevels: []string{"high"},
-			caps:           provider.ThinkingCaps{Supported: true, SupportedLevels: []provider.Level{provider.LevelLow, provider.LevelMedium, provider.LevelHigh}, DefaultLevel: provider.LevelMedium},
-			want:           "", // medium not in selected {high}; no tier usable
+			caps: provider.ThinkingCaps{
+				Supported:       true,
+				SupportedLevels: []provider.Level{provider.LevelLow, provider.LevelMedium, provider.LevelHigh},
+				DefaultLevel:    provider.LevelMedium,
+			},
+			want: "", // medium not in selected {high}; no tier usable
 		},
 		{
 			name:       "forced-thinking model with CanDisable=false still resolves a level",
 			callLevel:  "",
 			modelLevel: "high",
-			caps:       provider.ThinkingCaps{Supported: true, CanDisable: false, SupportedLevels: []provider.Level{provider.LevelHigh}, DefaultLevel: provider.LevelHigh},
-			want:       "high",
+			caps: provider.ThinkingCaps{
+				Supported: true, CanDisable: false,
+				SupportedLevels: []provider.Level{provider.LevelHigh}, DefaultLevel: provider.LevelHigh,
+			},
+			want: "high",
 		},
 	}
 

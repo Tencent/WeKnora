@@ -19,7 +19,9 @@ func TestProtocolFor(t *testing.T) {
 
 func TestThinkingCapsFor(t *testing.T) {
 	t.Run("standard three-level vendors", func(t *testing.T) {
-		for _, name := range []ProviderName{ProviderOpenAI, ProviderAnthropic, ProviderGemini, ProviderAliyun, ProviderDeepSeek} {
+		for _, name := range []ProviderName{
+			ProviderOpenAI, ProviderAnthropic, ProviderGemini, ProviderAliyun, ProviderDeepSeek,
+		} {
 			caps := thinkingCapsFor(name)
 			assert.True(t, caps.Supported, "%s supports thinking", name)
 			assert.True(t, caps.CanDisable, "%s can disable thinking", name)

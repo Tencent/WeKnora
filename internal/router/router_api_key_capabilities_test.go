@@ -353,6 +353,12 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 		t.Fatalf("system capabilities should be readable by any valid API key: %#v", capabilitiesPolicy)
 	}
 
+	// POST /models/remote-catalog 携带用户提供的密钥做探测 — 默认 fail-closed，
+	// 不对任何 API key 开放（design §5.10.2：仅 JWT）。
+	if _, ok := g.apiKeyAuthorizer.Lookup(http.MethodPost, "/api/v1/models/remote-catalog"); ok {
+		t.Fatal("remote catalog probe must stay JWT-only (default-deny for API keys)")
+	}
+
 	cases := []struct {
 		method string
 		path   string

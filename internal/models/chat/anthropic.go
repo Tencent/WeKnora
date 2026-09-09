@@ -163,7 +163,9 @@ func (c *AnthropicChat) Chat(ctx context.Context, messages []Message, opts *Chat
 }
 
 // chatOnce is one Chat attempt for the Anthropic Messages protocol.
-func (c *AnthropicChat) chatOnce(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
+func (c *AnthropicChat) chatOnce(
+	ctx context.Context, messages []Message, opts *ChatOptions,
+) (*types.ChatResponse, error) {
 	reqBody := c.buildRequest(ctx, messages, opts)
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {

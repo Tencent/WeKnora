@@ -20,10 +20,10 @@ import (
 // it; most OpenAI-compatible /models responses carry ids only, so parameters
 // come from the catalog tier instead.
 type RemoteModel struct {
-	ID          string       `json:"id"`
-	DisplayName string       `json:"display_name,omitempty"`
-	OwnedBy     string       `json:"owned_by,omitempty"`
-	Meta        CatalogModel `json:"meta,omitempty"`
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name,omitempty"`
+	OwnedBy     string `json:"owned_by,omitempty"`
+	Meta        Model  `json:"meta,omitempty"`
 }
 
 // defaultProbeTimeout bounds remote listing probes (design §5.10.2: 8s).
@@ -75,7 +75,7 @@ func ListRemoteModels(ctx context.Context, providerName, baseURL, apiKey string)
 	if err != nil {
 		return nil, fmt.Errorf("list models: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, fmt.Errorf("list models: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))

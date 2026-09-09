@@ -65,7 +65,7 @@ func TestListRemoteModelsLive(t *testing.T) {
 		if r.URL.Path != "/models" && r.URL.Path != "/v1/models" {
 			t.Errorf("unexpected list path %q", r.URL.Path)
 		}
-		w.Write([]byte(`{"data":[{"id":"m-a","owned_by":"org"},{"id":"m-b"},{"id":""}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"m-a","owned_by":"org"},{"id":"m-b"},{"id":""}]}`))
 	}))
 	defer srv.Close()
 

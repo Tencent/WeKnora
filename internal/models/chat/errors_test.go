@@ -24,14 +24,22 @@ func TestClassifyStatusBody(t *testing.T) {
 		{"429 → rate limited", http.StatusTooManyRequests, `{"error":"rate limit"}`, ErrRateLimited},
 		{"500 → upstream", http.StatusInternalServerError, "internal error", ErrProviderUpstream},
 		{"503 → upstream", http.StatusServiceUnavailable, "overloaded", ErrProviderUpstream},
-		{"400 context length → context exceeded", http.StatusBadRequest,
-			`This model's maximum context length is 8192 tokens`, ErrContextExceeded},
-		{"400 context_length_exceeded → context exceeded", http.StatusBadRequest,
-			`{"error":{"code":"context_length_exceeded"}}`, ErrContextExceeded},
-		{"400 dashscope input range → context exceeded", http.StatusBadRequest,
-			`Range of input length should be [1, 30000]`, ErrContextExceeded},
-		{"400 content policy → content policy", http.StatusBadRequest,
-			`{"error":{"code":"content_policy_violation"}}`, ErrContentPolicy},
+		{
+			"400 context length → context exceeded", http.StatusBadRequest,
+			`This model's maximum context length is 8192 tokens`, ErrContextExceeded,
+		},
+		{
+			"400 context_length_exceeded → context exceeded", http.StatusBadRequest,
+			`{"error":{"code":"context_length_exceeded"}}`, ErrContextExceeded,
+		},
+		{
+			"400 dashscope input range → context exceeded", http.StatusBadRequest,
+			`Range of input length should be [1, 30000]`, ErrContextExceeded,
+		},
+		{
+			"400 content policy → content policy", http.StatusBadRequest,
+			`{"error":{"code":"content_policy_violation"}}`, ErrContentPolicy,
+		},
 		{"400 other → upstream non-retryable", http.StatusBadRequest, `{"error":"bad param"}`, ErrProviderUpstream},
 	}
 	for _, tt := range tests {
@@ -65,7 +73,8 @@ func TestClassifyError(t *testing.T) {
 		apiErr := &openai.APIError{HTTPStatusCode: 429, Message: "rate limited"}
 		pe := ClassifyError(apiErr)
 		assert.Equal(t, ErrRateLimited, pe.Kind)
-		require.True(t, errors.Is(ClassifyError(apiErr), apiErr) || pe.Err == nil || pe.Err == apiErr || pe.Err == error(apiErr))
+		require.True(t, errors.Is(ClassifyError(apiErr), apiErr) ||
+			pe.Err == nil || pe.Err == apiErr || pe.Err == error(apiErr))
 	})
 
 	t.Run("provider error passes through unchanged", func(t *testing.T) {

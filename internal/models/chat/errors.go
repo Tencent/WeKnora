@@ -19,6 +19,7 @@ import (
 // error strings, which drift across vendors.
 type ErrorKind string
 
+// ErrorKind values — the unified provider-failure taxonomy.
 const (
 	ErrAuth             ErrorKind = "auth"
 	ErrRateLimited      ErrorKind = "rate_limited"

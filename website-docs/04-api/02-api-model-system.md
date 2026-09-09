@@ -30,7 +30,7 @@ curl "$BASE/api/v1/models/catalog?provider=openai" -H "Authorization: Bearer $TO
 
 ### POST /api/v1/models/remote-catalog
 
-用途：后端代理探测厂商模型列表（密钥不出服务端；未保存配置可直接探测，已存模型传 `model_id` 复用凭证）。权限：Admin+。每租户每分钟限 10 次。
+用途：后端代理探测厂商模型列表（密钥不出服务端；未保存配置可直接探测，已存模型传 `model_id` 复用凭证）。权限：Admin+（仅 JWT；因携带用户提供的密钥做探测，不对 API key 开放）。每租户每分钟限 10 次。
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
