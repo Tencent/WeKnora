@@ -28,6 +28,12 @@ func (r *parentChildKnowledgeRepo) UpdateKnowledge(
 	return nil
 }
 
+func (r *parentChildKnowledgeRepo) FinalizeKnowledgeWithStorage(
+	_ context.Context, _ *types.Knowledge, _ uint64, _ int64,
+) error {
+	return nil
+}
+
 type parentChildChunkService struct {
 	interfaces.ChunkRepository
 	created []*types.Chunk
