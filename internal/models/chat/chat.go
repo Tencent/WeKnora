@@ -178,6 +178,7 @@ func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, err
 	}
 	c, err = wrapChatDebug(c, err)
 	c, err = wrapChatLangfuse(c, err)
+	c, err = wrapChatObservability(c, config.ExtraConfig, err)
 	// Outermost: hold the per-model concurrency slot only around the real
 	// provider round-trip, so the wait is excluded from debug/langfuse timing.
 	return wrapChatConcurrency(c, config.MaxConcurrency, err)
