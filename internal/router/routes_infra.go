@@ -86,6 +86,7 @@ func RegisterEvaluationRoutes(r *gin.RouterGroup, handler *handler.EvaluationHan
 	evaluationRoutes := g.apiKeyGroup(r.Group("/evaluation"), apiKeyRunEvaluations(apiKeyFullAccess()))
 	{
 		evaluationRoutes.POST("", g.Admin(), handler.Evaluation)
+		evaluationRoutes.POST("/wiki-cache-benchmark", g.Admin(), handler.WikiCacheBenchmark)
 		evaluationRoutes.GET("/datasets", g.Viewer(), handler.GetEvaluationDatasets)
 		evaluationRoutes.GET("/runs", g.Viewer(), handler.GetEvaluationRuns)
 		evaluationRoutes.GET("/model-usage", g.Viewer(), handler.GetModelUsage)

@@ -39,6 +39,7 @@ type modelCall struct {
 	ModelType               string  `json:"model_type"`
 	Purpose                 string  `json:"purpose"`
 	PromptPrefixFingerprint string  `json:"prompt_prefix_fingerprint"`
+	RequestFingerprint      string  `json:"request_fingerprint"`
 	Usage                   usage   `json:"usage"`
 	Pricing                 pricing `json:"pricing"`
 	EstimatedCost           float64 `json:"estimated_cost"`
@@ -234,7 +235,7 @@ func validateStrictPair(before, after runInput, purposePrefix string) error {
 		return fmt.Errorf("warm cohort: %w", err)
 	}
 	if !equalSignatureCounts(beforeSignatures, afterSignatures) {
-		return errors.New("Wiki call count or prompt-prefix signatures differ between cohorts")
+		return errors.New("Wiki call count or request signatures differ between cohorts")
 	}
 	if len(beforeSignatures) != before.Experiment.Repetitions {
 		return errors.New("repetitions must equal the number of distinct matched Wiki call signatures")
@@ -268,10 +269,10 @@ func strictCallSignatures(calls []modelCall, purposePrefix string) (map[string]i
 		if !call.Success {
 			return nil, fmt.Errorf("call for purpose %q was not successful", call.Purpose)
 		}
-		if call.ModelID == "" || call.PromptPrefixFingerprint == "" {
-			return nil, errors.New("every Wiki call must include model_id and prompt_prefix_fingerprint")
+		if call.ModelID == "" || call.RequestFingerprint == "" {
+			return nil, errors.New("every Wiki call must include model_id and request_fingerprint")
 		}
-		signatures[call.ModelID+"\x00"+call.Purpose+"\x00"+call.PromptPrefixFingerprint]++
+		signatures[call.ModelID+"\x00"+call.Purpose+"\x00"+call.RequestFingerprint]++
 	}
 	if len(signatures) == 0 {
 		return nil, errors.New("no matching Wiki calls found")

@@ -18,6 +18,7 @@ type evaluationModelCallRecord struct {
 	ModelName                 string          `gorm:"size:255;not null"`
 	Purpose                   string          `gorm:"size:100"`
 	PromptPrefixFingerprint   string          `gorm:"size:128"`
+	RequestFingerprint        string          `gorm:"size:128"`
 	PromptTokens              int
 	CompletionTokens          int
 	TotalTokens               int
@@ -87,6 +88,9 @@ func (e *evaluationStorage) recordModelCall(
 	observation.PromptPrefixFingerprint = protectModelCallFingerprint(
 		observation.PromptPrefixFingerprint, e.fingerprintKey,
 	)
+	observation.RequestFingerprint = protectModelCallFingerprint(
+		observation.RequestFingerprint, e.fingerprintKey,
+	)
 	record := newModelCallRecord(&taskIDCopy, tenantID, observation, time.Now().UTC())
 	return e.db.WithContext(ctx).Create(record).Error
 }
@@ -103,7 +107,8 @@ func newModelCallRecord(
 		ID: uuid.NewString(), TaskID: taskID, TenantID: tenantID, ModelType: observation.ModelType,
 		ModelID: observation.ModelID, ModelName: observation.ModelName,
 		Purpose: observation.Purpose, PromptPrefixFingerprint: observation.PromptPrefixFingerprint,
-		PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens,
+		RequestFingerprint: observation.RequestFingerprint,
+		PromptTokens:       usage.PromptTokens, CompletionTokens: usage.CompletionTokens,
 		TotalTokens: usage.TotalTokens, CachedTokens: usage.CachedTokens,
 		CacheReadTokens: usage.CacheReadTokens, CacheWriteTokens: usage.CacheWriteTokens,
 		CacheMissTokens: usage.CacheMissTokens, CacheReported: usage.CacheReported,
@@ -143,7 +148,8 @@ func (e *evaluationStorage) getModelCalls(
 			ID: record.ID, ModelID: record.ModelID, ModelName: record.ModelName,
 			ModelType: record.ModelType,
 			Purpose:   record.Purpose, PromptPrefixFingerprint: record.PromptPrefixFingerprint,
-			Usage: callUsage,
+			RequestFingerprint: record.RequestFingerprint,
+			Usage:              callUsage,
 			Pricing: types.LLMTokenPricing{
 				Enabled: record.PricingConfigured, Currency: record.Currency,
 				InputPerMillion:      record.InputPricePerMillion,

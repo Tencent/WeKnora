@@ -335,6 +335,7 @@ func buildEvaluationEvidenceReport(detail *types.EvaluationDetail) *types.Evalua
 			ID: call.ID, ModelID: call.ModelID, ModelName: call.ModelName,
 			ModelType: call.ModelType, Purpose: call.Purpose,
 			PromptPrefixFingerprint: call.PromptPrefixFingerprint,
+			RequestFingerprint:      call.RequestFingerprint,
 			Usage:                   call.Usage, Pricing: call.Pricing, EstimatedCost: call.EstimatedCost,
 			DurationMS: call.DurationMS, Success: call.Success, CreatedAt: call.CreatedAt,
 		})

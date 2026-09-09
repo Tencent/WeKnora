@@ -95,12 +95,39 @@ export interface EvaluationEvidenceReport {
   warnings?: string[]
 }
 
+export interface WikiCacheBenchmarkCohort {
+  model_calls: Array<Record<string, unknown>>
+  usage: EvaluationUsage
+  median_latency_ms: number
+  p95_latency_ms: number
+}
+
+export interface WikiCacheBenchmarkEvidence {
+  schema_version: number
+  benchmark_id: string
+  generated_at: string
+  code_version: string
+  model_id: string
+  model_name: string
+  repetitions: number
+  workload_sha256: string
+  configuration_sha256: string
+  cold: WikiCacheBenchmarkCohort
+  warm: WikiCacheBenchmarkCohort
+  strict_validation: { passed: boolean; reason?: string }
+  warnings?: string[]
+  report_sha256: string
+}
+
 export interface EvaluationRunSummary {
   task: EvaluationTask
   run_config?: {
+    dataset_id?: string
     dataset_fingerprint?: string
     dataset_samples?: number
     code_version?: string
+    config_fingerprint?: string
+    controlled_fingerprint?: string
     source_knowledge_base_id?: string
     chunking?: Record<string, unknown>
     pipeline?: Record<string, unknown>
@@ -141,6 +168,25 @@ export async function getEvaluationRuns(limit = 50, offset = 0): Promise<Evaluat
   return { items: [], total: 0, limit, offset }
 }
 
+// Evaluation summaries omit per-sample evidence and are small enough to load in
+// bounded API pages. Keeping the complete tenant history client-side preserves
+// cross-page comparison selections and lets repeated-run cohorts use all runs.
+export async function getAllEvaluationRuns(): Promise<EvaluationRunPage> {
+  const pageSize = 100
+  const first = await getEvaluationRuns(pageSize, 0)
+  const items = [...first.items]
+  let offset = first.items.length
+
+  while (offset < first.total) {
+    const page = await getEvaluationRuns(pageSize, offset)
+    if (!page.items.length) break
+    items.push(...page.items)
+    offset += page.items.length
+  }
+
+  return { items, total: first.total, limit: items.length, offset: 0 }
+}
+
 export async function startEvaluation(request: StartEvaluationRequest): Promise<EvaluationRunSummary> {
   const response: any = await post('/api/v1/evaluation', request)
   if (!response?.success || !response.data) throw new Error('Invalid evaluation response')
@@ -168,4 +214,12 @@ export async function getEvaluationModelUsage(range: EvaluationModelUsageRange =
   })
   if (!response?.success || !Array.isArray(response.data)) return []
   return response.data
+}
+
+export async function runWikiCacheBenchmark(chatModelID: string): Promise<WikiCacheBenchmarkEvidence> {
+  const response: any = await post('/api/v1/evaluation/wiki-cache-benchmark', { chat_id: chatModelID })
+  if (!response?.report_sha256 || !response?.cold || !response?.warm) {
+    throw new Error('Invalid Wiki cache benchmark response')
+  }
+  return response
 }

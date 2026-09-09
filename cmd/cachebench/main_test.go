@@ -84,17 +84,17 @@ func TestValidateStrictPairRejectsUnmatchedWorkload(t *testing.T) {
 	require.EqualError(t, err, "workload_fingerprint must be non-empty and identical")
 }
 
-func TestValidateStrictPairRejectsDifferentCallSignatures(t *testing.T) {
+func TestValidateStrictPairRejectsDifferentRequestFingerprints(t *testing.T) {
 	before, after := matchedStrictRuns()
-	after.ModelCalls[0].PromptPrefixFingerprint = "hmac:different"
+	after.ModelCalls[0].RequestFingerprint = "hmac:different"
 	err := validateStrictPair(before, after, "wiki_")
-	require.EqualError(t, err, "Wiki call count or prompt-prefix signatures differ between cohorts")
+	require.EqualError(t, err, "Wiki call count or request signatures differ between cohorts")
 }
 
 func TestValidateStrictPairRejectsRepeatedColdSignature(t *testing.T) {
 	before, after := matchedStrictRuns()
-	before.ModelCalls[1].PromptPrefixFingerprint = before.ModelCalls[0].PromptPrefixFingerprint
-	after.ModelCalls[1].PromptPrefixFingerprint = after.ModelCalls[0].PromptPrefixFingerprint
+	before.ModelCalls[1].RequestFingerprint = before.ModelCalls[0].RequestFingerprint
+	after.ModelCalls[1].RequestFingerprint = after.ModelCalls[0].RequestFingerprint
 	err := validateStrictPair(before, after, "wiki_")
 	require.EqualError(t, err, "repetitions must equal the number of distinct matched Wiki call signatures")
 }
@@ -120,9 +120,9 @@ func matchedStrictRuns() (runInput, runInput) {
 	before := runInput{
 		Experiment: protocol,
 		ModelCalls: []modelCall{
-			{ModelID: "model-1", Purpose: "wiki_page", PromptPrefixFingerprint: "hmac:prefix-1", Success: true, DurationMS: 100, Usage: usage{PromptTokens: 100, CacheMissTokens: 100, CacheReported: true}},
-			{ModelID: "model-1", Purpose: "wiki_page", PromptPrefixFingerprint: "hmac:prefix-2", Success: true, DurationMS: 120, Usage: usage{PromptTokens: 100, CacheMissTokens: 100, CacheReported: true}},
-			{ModelID: "model-1", Purpose: "wiki_page", PromptPrefixFingerprint: "hmac:prefix-3", Success: true, DurationMS: 140, Usage: usage{PromptTokens: 100, CacheMissTokens: 100, CacheReported: true}},
+			{ModelID: "model-1", Purpose: "wiki_page", RequestFingerprint: "hmac:request-1", Success: true, DurationMS: 100, Usage: usage{PromptTokens: 100, CacheMissTokens: 100, CacheReported: true}},
+			{ModelID: "model-1", Purpose: "wiki_page", RequestFingerprint: "hmac:request-2", Success: true, DurationMS: 120, Usage: usage{PromptTokens: 100, CacheMissTokens: 100, CacheReported: true}},
+			{ModelID: "model-1", Purpose: "wiki_page", RequestFingerprint: "hmac:request-3", Success: true, DurationMS: 140, Usage: usage{PromptTokens: 100, CacheMissTokens: 100, CacheReported: true}},
 		},
 	}
 	before.Experiment.Cohort = "cold"

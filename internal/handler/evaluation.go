@@ -32,6 +32,10 @@ type EvaluationRequest struct {
 	RerankModelID   string `json:"rerank_id"`         // ID of rerank model to use
 }
 
+type WikiCacheBenchmarkRequest struct {
+	ChatModelID string `json:"chat_id" binding:"required"`
+}
+
 // Evaluation godoc
 // @Summary      执行评估
 // @Description  对知识库进行评估测试
@@ -88,6 +92,35 @@ func (e *EvaluationHandler) Evaluation(c *gin.Context) {
 		"success": true,
 		"data":    task,
 	})
+}
+
+// WikiCacheBenchmark runs a controlled three-pair cold/warm replay through the
+// production Wiki prompt-cache path and returns a body-free evidence report.
+// @Summary      执行 Wiki 缓存严格 A/B
+// @Description  使用同一模型执行三组完整请求一致的冷暖对照并导出证据
+// @Tags         评估
+// @Accept       json
+// @Produce      json
+// @Param        request  body  WikiCacheBenchmarkRequest  true  "Wiki 缓存评测参数"
+// @Success      200  {object}  types.WikiCacheBenchmarkEvidence
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /evaluation/wiki-cache-benchmark [post]
+func (e *EvaluationHandler) WikiCacheBenchmark(c *gin.Context) {
+	var request WikiCacheBenchmarkRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	report, err := e.evaluationService.WikiCacheBenchmark(
+		c.Request.Context(), secutils.SanitizeForLog(request.ChatModelID),
+	)
+	if err != nil {
+		logger.ErrorWithFields(c.Request.Context(), err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, report)
 }
 
 // GetEvaluationRequest contains parameters for getting evaluation result

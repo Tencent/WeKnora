@@ -49,7 +49,7 @@ func (p LLMTokenPricing) Normalize() LLMTokenPricing {
 
 // LLMCallObservation is the provider-independent telemetry emitted for one
 // completed model call. Prompt content is intentionally excluded; only the
-// stable prefix fingerprint is retained for cache analysis.
+// stable prefix and full-request fingerprints are retained for cache analysis.
 type LLMCallObservation struct {
 	TenantID                uint64
 	ModelType               ModelType
@@ -57,6 +57,7 @@ type LLMCallObservation struct {
 	ModelName               string
 	Purpose                 string
 	PromptPrefixFingerprint string
+	RequestFingerprint      string
 	Usage                   TokenUsage
 	Pricing                 LLMTokenPricing
 	EstimatedCost           float64

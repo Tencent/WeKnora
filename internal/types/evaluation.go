@@ -215,6 +215,7 @@ type EvaluationModelCall struct {
 	ModelType               ModelType       `json:"model_type"`
 	Purpose                 string          `json:"purpose,omitempty"`
 	PromptPrefixFingerprint string          `json:"prompt_prefix_fingerprint,omitempty"`
+	RequestFingerprint      string          `json:"request_fingerprint,omitempty"`
 	Usage                   TokenUsage      `json:"usage"`
 	Pricing                 LLMTokenPricing `json:"pricing"`
 	EstimatedCost           float64         `json:"estimated_cost"`
@@ -222,6 +223,41 @@ type EvaluationModelCall struct {
 	Success                 bool            `json:"success"`
 	Error                   string          `json:"error,omitempty"`
 	CreatedAt               time.Time       `json:"created_at"`
+}
+
+// WikiCacheBenchmarkEvidence is a portable, prompt-free record of a controlled
+// cold/warm replay through the production Wiki chat path.
+type WikiCacheBenchmarkEvidence struct {
+	SchemaVersion    int                       `json:"schema_version"`
+	BenchmarkID      string                    `json:"benchmark_id"`
+	GeneratedAt      time.Time                 `json:"generated_at"`
+	CodeVersion      string                    `json:"code_version"`
+	ModelID          string                    `json:"model_id"`
+	ModelName        string                    `json:"model_name"`
+	Repetitions      int                       `json:"repetitions"`
+	WorkloadSHA256   string                    `json:"workload_sha256"`
+	ConfigurationSHA string                    `json:"configuration_sha256"`
+	Cold             WikiCacheBenchmarkCohort  `json:"cold"`
+	Warm             WikiCacheBenchmarkCohort  `json:"warm"`
+	StrictValidation WikiCacheStrictValidation `json:"strict_validation"`
+	Warnings         []string                  `json:"warnings,omitempty"`
+	ReportSHA256     string                    `json:"report_sha256"`
+}
+
+// WikiCacheBenchmarkCohort contains only metadata and provider usage; prompt
+// and response bodies are intentionally excluded.
+type WikiCacheBenchmarkCohort struct {
+	Calls           []EvaluationEvidenceCall `json:"model_calls"`
+	Usage           EvaluationUsage          `json:"usage"`
+	MedianLatencyMS float64                  `json:"median_latency_ms"`
+	P95LatencyMS    float64                  `json:"p95_latency_ms"`
+}
+
+// WikiCacheStrictValidation records whether the two cohorts meet the evidence
+// protocol rather than merely reporting a favorable cache percentage.
+type WikiCacheStrictValidation struct {
+	Passed bool   `json:"passed"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // String returns JSON representation of EvaluationTask
@@ -297,6 +333,7 @@ type EvaluationEvidenceCall struct {
 	ModelType               ModelType       `json:"model_type"`
 	Purpose                 string          `json:"purpose,omitempty"`
 	PromptPrefixFingerprint string          `json:"prompt_prefix_fingerprint,omitempty"`
+	RequestFingerprint      string          `json:"request_fingerprint,omitempty"`
 	Usage                   TokenUsage      `json:"usage"`
 	Pricing                 LLMTokenPricing `json:"pricing"`
 	EstimatedCost           float64         `json:"estimated_cost"`

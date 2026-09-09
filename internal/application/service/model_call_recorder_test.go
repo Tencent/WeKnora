@@ -32,7 +32,8 @@ func TestModelCallRecorderFlushesTenantMetadataOnStop(t *testing.T) {
 	recorder.Start(t.Context())
 	recorder.ObserveLLMCall(types.LLMCallObservation{
 		TenantID: 7, ModelID: "m-1", ModelName: "test-model", Purpose: "wiki_page_modify",
-		PromptPrefixFingerprint: "raw-prefix", Usage: types.TokenUsage{PromptTokens: 10, TotalTokens: 10},
+		PromptPrefixFingerprint: "raw-prefix", RequestFingerprint: "raw-request",
+		Usage:   types.TokenUsage{PromptTokens: 10, TotalTokens: 10},
 		Success: true,
 	})
 	recorder.ObserveEmbeddingCache(types.EmbeddingCacheObservation{
@@ -52,6 +53,9 @@ func TestModelCallRecorderFlushesTenantMetadataOnStop(t *testing.T) {
 	mac := hmac.New(sha256.New, []byte("test-secret"))
 	_, _ = mac.Write([]byte("raw-prefix"))
 	require.Equal(t, hex.EncodeToString(mac.Sum(nil)), records[0].PromptPrefixFingerprint)
+	mac.Reset()
+	_, _ = mac.Write([]byte("raw-request"))
+	require.Equal(t, hex.EncodeToString(mac.Sum(nil)), records[0].RequestFingerprint)
 
 	var cacheRecords []embeddingCacheUsageRecord
 	require.NoError(t, db.Find(&cacheRecords).Error)
@@ -73,7 +77,8 @@ func TestModelCallRecorderDoesNotPersistUnscopedCallsOrRawFingerprint(t *testing
 	recorder.ObserveLLMCall(types.LLMCallObservation{TenantID: 0, ModelName: "ignored", Success: true})
 	recorder.ObserveLLMCall(types.LLMCallObservation{
 		TenantID: 9, ModelName: "kept", PromptPrefixFingerprint: "must-not-be-stored",
-		Success: false, Error: "request excerpt must-not-be-stored",
+		RequestFingerprint: "request-must-not-be-stored",
+		Success:            false, Error: "request excerpt must-not-be-stored",
 	})
 	recorder.Stop()
 
@@ -81,6 +86,7 @@ func TestModelCallRecorderDoesNotPersistUnscopedCallsOrRawFingerprint(t *testing
 	require.NoError(t, db.Find(&records).Error)
 	require.Len(t, records, 1)
 	require.Equal(t, "", records[0].PromptPrefixFingerprint)
+	require.Equal(t, "", records[0].RequestFingerprint)
 	require.Equal(t, "", records[0].ErrMsg)
 }
 

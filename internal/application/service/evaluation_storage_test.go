@@ -317,7 +317,8 @@ func TestEvaluationStorageProtectsFingerprintAndDropsProviderError(t *testing.T)
 
 	require.NoError(t, storage.recordModelCall(t.Context(), "task-privacy", 17, types.LLMCallObservation{
 		ModelName: "privacy-model", PromptPrefixFingerprint: "raw-stable-prefix",
-		Error: "provider error containing a request excerpt", Success: false,
+		RequestFingerprint: "raw-full-request",
+		Error:              "provider error containing a request excerpt", Success: false,
 	}))
 
 	var record evaluationModelCallRecord
@@ -326,6 +327,9 @@ func TestEvaluationStorageProtectsFingerprintAndDropsProviderError(t *testing.T)
 	_, _ = mac.Write([]byte("raw-stable-prefix"))
 	require.Equal(t, hex.EncodeToString(mac.Sum(nil)), record.PromptPrefixFingerprint)
 	require.NotEqual(t, "raw-stable-prefix", record.PromptPrefixFingerprint)
+	mac.Reset()
+	_, _ = mac.Write([]byte("raw-full-request"))
+	require.Equal(t, hex.EncodeToString(mac.Sum(nil)), record.RequestFingerprint)
 	require.Empty(t, record.ErrMsg)
 
 	// A missing key must fail closed: omit the fingerprint instead of storing a
@@ -333,9 +337,11 @@ func TestEvaluationStorageProtectsFingerprintAndDropsProviderError(t *testing.T)
 	t.Setenv("WEKNORA_MODEL_CALL_FINGERPRINT_KEY", "")
 	unkeyedStorage := newEvaluationStorage(db)
 	require.NoError(t, unkeyedStorage.recordModelCall(t.Context(), "task-no-key", 17, types.LLMCallObservation{
-		ModelName: "no-key-model", PromptPrefixFingerprint: "must-not-be-stored", Success: true,
+		ModelName: "no-key-model", PromptPrefixFingerprint: "must-not-be-stored",
+		RequestFingerprint: "request-must-not-be-stored", Success: true,
 	}))
 	var unkeyedRecord evaluationModelCallRecord
 	require.NoError(t, db.Where("model_name = ?", "no-key-model").First(&unkeyedRecord).Error)
 	require.Empty(t, unkeyedRecord.PromptPrefixFingerprint)
+	require.Empty(t, unkeyedRecord.RequestFingerprint)
 }

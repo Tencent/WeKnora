@@ -36,16 +36,50 @@ func verify(reader io.Reader) error {
 	if err != nil {
 		return err
 	}
+	var kind struct {
+		BenchmarkID string `json:"benchmark_id"`
+	}
+	if err := json.Unmarshal(data, &kind); err != nil {
+		return fmt.Errorf("parse report: %w", err)
+	}
+	if kind.BenchmarkID != "" {
+		var report types.WikiCacheBenchmarkEvidence
+		if err := json.Unmarshal(data, &report); err != nil {
+			return fmt.Errorf("parse report: %w", err)
+		}
+		return verifyWikiCacheReport(&report)
+	}
 	var report types.EvaluationEvidenceReport
 	if err := json.Unmarshal(data, &report); err != nil {
 		return fmt.Errorf("parse report: %w", err)
 	}
+	return verifyEvaluationReport(&report)
+}
+
+func verifyEvaluationReport(report *types.EvaluationEvidenceReport) error {
 	if report.ReportSHA256 == "" {
 		return errors.New("report_sha256 is empty")
 	}
 	want := report.ReportSHA256
 	report.ReportSHA256 = ""
 	canonical, err := json.Marshal(&report)
+	if err != nil {
+		return fmt.Errorf("canonicalize report: %w", err)
+	}
+	got := fmt.Sprintf("sha256:%x", sha256.Sum256(canonical))
+	if got != want {
+		return fmt.Errorf("checksum mismatch: got %s, want %s", got, want)
+	}
+	return nil
+}
+
+func verifyWikiCacheReport(report *types.WikiCacheBenchmarkEvidence) error {
+	if report.ReportSHA256 == "" {
+		return errors.New("report_sha256 is empty")
+	}
+	want := report.ReportSHA256
+	report.ReportSHA256 = ""
+	canonical, err := json.Marshal(report)
 	if err != nil {
 		return fmt.Errorf("canonicalize report: %w", err)
 	}
