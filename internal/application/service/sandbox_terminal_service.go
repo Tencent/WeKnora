@@ -55,10 +55,10 @@ func NewSandboxTerminalService(
 
 // OpenSessionTerminal attaches to the session's currently bound sandbox
 // without ever creating or resuming one. This is the path a panel open and
-// an automatic reconnect take: a running sandbox is attached, a paused one
-// reports ErrSandboxPaused, and a missing one reports
-// ErrNoLiveSessionSandbox. Opening a panel must not conjure or wake a
-// microVM.
+// an automatic reconnect take: a running sandbox is attached, a bound
+// sandbox that is not confirmed running reports ErrSandboxPaused, and a
+// missing one reports ErrNoLiveSessionSandbox. Opening a panel must not
+// conjure or wake a microVM.
 //
 // The WebSocket handler turns those errors into SANDBOX_PAUSED /
 // SANDBOX_NOT_BOUND frames the UI answers with an explicit button. That

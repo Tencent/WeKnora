@@ -49,4 +49,6 @@ case ";${PROMPT_COMMAND-};" in
 		fi
 		;;
 esac
-export PS1 PROMPT_COMMAND
+# PS1 and PROMPT_COMMAND stay shell-local. Exporting PS1 makes child
+# processes look interactive (`[ -z "$PS1" ]`); exporting PROMPT_COMMAND
+# without `export -f weknora_set_pty_prompt` breaks nested bash.

@@ -838,9 +838,10 @@ func (m *SessionBoundManager) SessionTerminalManager() SessionTerminalManager {
 // session. It is strictly lookup-only: with no live binding it returns
 // ErrNoLiveSessionSandbox instead of provisioning, because the terminal
 // entry point lacks the config-pin context that agent-driven creation
-// relies on. A paused sandbox returns ErrSandboxPaused unless
-// opts.AllowResume is set — Connect would wake it. A backend that cannot
-// stream PTYs (Docker) returns ErrTerminalUnsupported, not "no sandbox".
+// relies on. A bound sandbox that is not confirmed running returns
+// ErrSandboxPaused unless opts.AllowResume is set — Connect would wake a
+// paused instance. A backend that cannot stream PTYs (Docker) returns
+// ErrTerminalUnsupported, not "no sandbox".
 func (m *SessionBoundManager) OpenSessionTerminal(
 	ctx context.Context,
 	sessionID string,
@@ -851,14 +852,17 @@ func (m *SessionBoundManager) OpenSessionTerminal(
 		return nil, ErrTerminalUnsupported
 	}
 	if !opts.AllowResume {
-		state, found, err := m.peekBoundSandboxState(ctx, sessionID)
+		state, bound, err := m.peekBoundSandboxState(ctx, sessionID)
 		if err != nil {
 			return nil, err
 		}
-		if !found {
+		if !bound {
 			return nil, ErrNoLiveSessionSandbox
 		}
-		if state == RemoteStatePaused {
+		// Only a List-confirmed running sandbox is safe to Connect:
+		// paused/transitioning Connect resumes (and re-bills), and a
+		// list miss with a stale binding is not "no sandbox".
+		if state != RemoteStateRunning {
 			return nil, ErrSandboxPaused
 		}
 	}
@@ -945,8 +949,10 @@ func (m *SessionBoundManager) resolveSession(
 }
 
 // peekBoundSandboxState reads provider listing for the bound sandbox without
-// Connect. E2B/Cube Connect resumes a paused instance, so the lookup-only
-// terminal path must List first.
+// Connect. The bool is "a binding exists for this provider", not "List
+// returned a row": a list miss still reports bound so lookup cannot pretend
+// the session has no sandbox. E2B/Cube Connect resumes a paused instance,
+// so the lookup-only terminal path must List first.
 func (m *SessionBoundManager) peekBoundSandboxState(
 	ctx context.Context,
 	sessionID string,
@@ -984,7 +990,10 @@ func (m *SessionBoundManager) peekBoundSandboxState(
 			return summary.State, true, nil
 		}
 	}
-	return "", false, nil
+	// Binding exists but the provider list did not return it (lag, metadata
+	// mismatch, or a state outside the filter). That is not "no sandbox":
+	// the UI should ask before Connect, which would resume a paused VM.
+	return RemoteStateUnknown, true, nil
 }
 
 // lookupSessionHandle reads the authoritative binding and, when one exists

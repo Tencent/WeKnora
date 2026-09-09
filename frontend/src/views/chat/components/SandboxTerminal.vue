@@ -33,7 +33,6 @@ import { useSandboxTerminal, type SandboxTerminalStatus } from '@/composables/us
 import { useTheme } from '@/composables/useTheme';
 import { createPtyEchoPredictor } from '@/utils/ptyEchoPredictor';
 import {
-    PTY_PROMPT_NUDGE,
     PTY_PROMPT_NUDGE_DELAY_MS,
     xtermBufferLooksEmpty,
 } from '@/utils/ptyPromptNudge';
@@ -131,7 +130,7 @@ const { status } = terminal;
 const statusText = computed(() => {
     switch (status.value as SandboxTerminalStatus) {
         case 'paused':
-            return t('chat.sandbox.notStarted');
+            return t('chat.sandbox.paused');
         case 'connecting':
             return t('chat.sandbox.connecting');
         case 'needs_provision':
@@ -308,9 +307,10 @@ function xtermVisibleBufferEmpty(): boolean {
     );
 }
 
-// Pty.Connect does not replay a prompt that bash already printed, and a
-// no-op resize (same 80x24 as Create) does not SIGWINCH. Ctrl-L asks
-// readline to redraw without running a command.
+// Pty.Connect does not replay a prompt bash already printed. A same-size
+// resize is a no-op; flipping rows by 1 sends SIGWINCH so readline (and
+// TUIs) redraw. Do not inject Ctrl-L or Enter: that would go to whatever
+// is running in a reattached PTY.
 function schedulePromptNudge() {
     if (promptNudgeTimer) clearTimeout(promptNudgeTimer);
     promptNudgeTimer = setTimeout(() => {
@@ -321,7 +321,6 @@ function schedulePromptNudge() {
         const rows = Math.max(2, xterm.rows);
         terminal.resize(cols, rows - 1);
         terminal.resize(cols, rows);
-        terminal.sendInput(PTY_PROMPT_NUDGE);
     }, PTY_PROMPT_NUDGE_DELAY_MS);
 }
 

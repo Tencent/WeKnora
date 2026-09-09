@@ -1,6 +1,3 @@
-/** Readline clear-screen (Ctrl-L). Redraws the current prompt without running a command. */
-export const PTY_PROMPT_NUDGE = '\x0c'
-
 /** Wait for in-flight PTY bytes before deciding the screen is empty. */
 export const PTY_PROMPT_NUDGE_DELAY_MS = 120
 

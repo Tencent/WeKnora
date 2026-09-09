@@ -130,7 +130,13 @@ const terminalRef = ref<{ focus?: () => void } | null>(null)
 watch(
   () => [panel?.visible.value, panel?.activeTab.value] as const,
   ([visible, tab]) => {
-    if (visible && tab === 'terminal') {
+    if (!visible) {
+      // Drop the lazy-mount flag so reopening on Files does not remount
+      // SandboxTerminal (which would lookup-connect a PTY and refresh TTL).
+      terminalMounted.value = false
+      return
+    }
+    if (tab === 'terminal') {
       terminalMounted.value = true
       void nextTick(() => terminalRef.value?.focus?.())
     }

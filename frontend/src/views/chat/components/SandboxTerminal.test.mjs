@@ -40,10 +40,13 @@ test('PTY output attaches after the first fit so FitAddon cannot wipe the prompt
   assert.match(terminal, /xterm\.refresh\(0,\s*xterm\.rows\s*-\s*1\)/)
 })
 
-test('empty PTY screen is nudged with readline clear-screen, not enter', () => {
-  assert.match(terminal, /PTY_PROMPT_NUDGE/)
+test('empty PTY screen is nudged with SIGWINCH, not keystrokes', () => {
   assert.match(terminal, /schedulePromptNudge/)
   assert.match(terminal, /estimatePtySize/)
+  assert.match(terminal, /resize\(cols,\s*rows\s*-\s*1\)/)
+  assert.doesNotMatch(terminal, /sendInput\(PTY_PROMPT_NUDGE\)/)
+  assert.doesNotMatch(terminal, /sendInput\('\\x0c'\)/)
+  assert.doesNotMatch(terminal, /sendInput\('\\r'\)/)
 })
 
 test('panel open looks up a running sandbox and only provisions on an explicit click', () => {
@@ -52,6 +55,7 @@ test('panel open looks up a running sandbox and only provisions on an explicit c
   assert.match(terminal, /connect\(\{ provision: false/)
   assert.match(terminal, /connect\(\{ provision: true/)
   assert.match(terminal, /status === 'paused'/)
+  assert.match(terminal, /chat\.sandbox\.paused/)
   assert.doesNotMatch(terminal, /not_started/)
 })
 
@@ -67,4 +71,9 @@ test('interactive bash defines Debian-style ls aliases', () => {
   assert.match(out, /alias l='ls -CF'/)
   assert.match(out, /alias ls='ls --color=auto'/)
   assert.match(out, /alias grep='grep --color=auto'/)
+})
+
+test('interactive prompt script does not export PS1 or PROMPT_COMMAND', () => {
+  assert.doesNotMatch(prompt, /export PS1/)
+  assert.doesNotMatch(prompt, /export PROMPT_COMMAND/)
 })
