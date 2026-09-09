@@ -7,6 +7,8 @@
 # Bold green / blue (01;32, 01;34) map onto theme.css brand green in xterm.
 # Root uses the same green as a normal user — not Debian's warning red.
 #
+# Also enables Debian-style interactive aliases (ll, la, l, colored ls/grep).
+#
 # Sourced from profile.d and bashrc. E2B's template provisioner later
 # appends PS1='\w $ '; PROMPT_COMMAND reapplies this prompt so that cannot
 # stick. No-op for non-bash (Debian /etc/profile is also read by dash).
@@ -18,6 +20,23 @@ weknora_set_pty_prompt() {
 }
 
 weknora_set_pty_prompt
+
+# Debian/Ubuntu interactive shortcuts. Aliases only apply in interactive
+# shells, so skill scripts still see the real ls/grep.
+case "$-" in
+*i*)
+	if command -v dircolors >/dev/null 2>&1; then
+		eval "$(dircolors -b)"
+	fi
+	alias ls='ls --color=auto'
+	alias grep='grep --color=auto'
+	alias fgrep='fgrep --color=auto'
+	alias egrep='egrep --color=auto'
+	alias ll='ls -alF'
+	alias la='ls -A'
+	alias l='ls -CF'
+	;;
+esac
 
 case ";${PROMPT_COMMAND-};" in
 	*weknora_set_pty_prompt*) ;;
