@@ -77,7 +77,7 @@ function mount(component, props = {}) {
   })
   const passthrough = { setup: (_, { slots }) => () => vue.h('div', slots.default?.()) }
   const app = renderer.createApp(component, props)
-  for (const name of ['t-drawer', 't-button', 't-select', 't-tabs', 't-tab-panel', 't-icon', 't-loading']) {
+  for (const name of ['t-drawer', 't-button', 't-select', 't-tabs', 't-tab-panel', 't-icon', 't-loading', 't-textarea']) {
     app.component(name, passthrough)
   }
   const root = { children: [] }
@@ -91,6 +91,62 @@ function mount(component, props = {}) {
   }
   return { app, state: app._instance.setupState, find }
 }
+
+test('command textarea uses one TDesign keydown callback with composition-safe shortcuts', async t => {
+  const commands = []
+  class TerminalStub {
+    options = {}
+    loadAddon() {}
+    open() {}
+    onData() {}
+    onBinary() {}
+    onResize() {}
+    focus() {}
+    dispose() {}
+  }
+  const component = compileComponent('./WorkbenchTerminal.vue', {
+    '@xterm/xterm': { Terminal: TerminalStub },
+    '@xterm/addon-fit': { FitAddon: class {} },
+    '@xterm/xterm/css/xterm.css': {},
+    '@/utils/api-base': { getApiBaseUrl: () => '/api/v1' },
+    '@/utils/sandboxWorkbench': workbenchUtils,
+    '@/utils/sandboxTerminal': {
+      SandboxTerminal: class {
+        constructor(options) { this.options = options }
+        connect() { this.options.onPhase('ready') }
+        command(value) { commands.push(value); return true }
+        dispose() {}
+      },
+    },
+  }, {
+    window: { location: { href: 'https://weknora.test/chat/session' } },
+    ResizeObserver: class { observe() {} disconnect() {} },
+    requestAnimationFrame: () => 1,
+    cancelAnimationFrame() {},
+  }, true)
+  const h = mount(component, { api: {}, signal: new AbortController().signal, active: true })
+  t.after(() => h.app.unmount())
+  await flush()
+  const textarea = h.find(node => node.onKeydown !== undefined)
+  assert.equal(typeof textarea.onKeydown, 'function', 'TDesign rejects arrays of keydown callbacks')
+  for (const [event, submit] of [
+    [{ key: 'Enter', ctrlKey: true }, true],
+    [{ key: 'Enter', metaKey: true }, true],
+    [{ key: 'Enter', ctrlKey: true, metaKey: true }, true],
+    [{ key: 'Enter' }, false],
+    [{ key: 'a', ctrlKey: true }, false],
+    [{ key: 'Enter', ctrlKey: true, isComposing: true }, false],
+    [{ key: 'Enter', metaKey: true, keyCode: 229 }, false],
+  ]) {
+    h.state.command = 'printf shortcut'
+    const before = commands.length
+    let prevented = false
+    textarea.onKeydown(h.state.command, { e: { ...event, preventDefault() { prevented = true } } })
+    assert.equal(commands.length, before + Number(submit), JSON.stringify(event))
+    assert.equal(prevented, submit, JSON.stringify(event))
+    assert.equal(h.state.command, submit ? '' : 'printf shortcut')
+  }
+})
 
 function mountArtifacts() {
   const requests = []

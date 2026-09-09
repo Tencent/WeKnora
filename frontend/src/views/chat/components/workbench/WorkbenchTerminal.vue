@@ -22,7 +22,7 @@
       <t-textarea
         v-model="command" :disabled="phase !== 'ready'" :autosize="{ minRows: 1, maxRows: 4 }"
         :placeholder="t('workbench.command')" :aria-label="t('workbench.command')"
-        @keydown.ctrl.enter.prevent="run" @keydown.meta.enter.prevent="run"
+        @keydown="onCommandKeydown"
       />
       <t-button v-if="phase === 'running' || phase === 'starting'" shape="square" variant="outline" :title="t('workbench.interrupt')" :aria-label="t('workbench.interrupt')" @click="connection?.interrupt()">
         <template #icon><t-icon name="stop-circle" /></template>
@@ -87,6 +87,12 @@ function run() {
     error.value = ''
     terminal?.focus()
   }
+}
+
+function onCommandKeydown(_value: string, { e }: { e: KeyboardEvent }) {
+  if (e.isComposing || e.keyCode === 229 || e.key !== 'Enter' || (!e.ctrlKey && !e.metaKey)) return
+  e.preventDefault()
+  run()
 }
 
 function dispose() {
