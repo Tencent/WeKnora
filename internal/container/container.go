@@ -205,6 +205,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewTenantInvitationService))
 	must(container.Provide(service.NewAuditLogService))
 	must(container.Provide(service.NewAuditLogRetentionRunner))
+	must(container.Provide(service.NewModelCallRecorder))
+	must(container.Provide(service.NewEmbeddingCachePersistence))
 	must(container.Provide(service.NewKnowledgeBaseService))
 	must(container.Provide(service.NewOrganizationService))
 	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
@@ -373,6 +375,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
 	must(container.Invoke(startAuditLogRetention))
 	logger.Debugf(ctx, "[Container] Audit log retention runner registered")
+	must(container.Invoke(startModelCallRecorder))
+	logger.Debugf(ctx, "[Container] Model call recorder registered")
+	must(container.Invoke(startEmbeddingCachePersistence))
+	logger.Debugf(ctx, "[Container] Durable embedding cache registered")
 	must(container.Provide(service.NewHousekeepingService))
 	must(container.Invoke(startHousekeepingService))
 	logger.Debugf(ctx, "[Container] Knowledge housekeeping runner registered")
@@ -1807,6 +1813,26 @@ func startAuditLogRetention(
 	runner.Start(context.Background())
 	cleaner.RegisterWithName("AuditLogRetentionRunner", func() error {
 		runner.Stop()
+		return nil
+	})
+}
+
+func startModelCallRecorder(
+	recorder *service.ModelCallRecorder, cleaner interfaces.ResourceCleaner,
+) {
+	recorder.Start(context.Background())
+	cleaner.RegisterWithName("ModelCallRecorder", func() error {
+		recorder.Stop()
+		return nil
+	})
+}
+
+func startEmbeddingCachePersistence(
+	cache *service.EmbeddingCachePersistence, cleaner interfaces.ResourceCleaner,
+) {
+	cache.Start(context.Background())
+	cleaner.RegisterWithName("EmbeddingCachePersistence", func() error {
+		cache.Stop()
 		return nil
 	})
 }

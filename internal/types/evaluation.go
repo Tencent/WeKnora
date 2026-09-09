@@ -57,9 +57,42 @@ type EvaluationTask struct {
 type EvaluationDetail struct {
 	Task       *EvaluationTask       `json:"task"`                  // Evaluation task info
 	Params     *ChatManage           `json:"params"`                // Evaluation parameters
+	RunConfig  *EvaluationRunConfig  `json:"run_config,omitempty"`  // Reproducible experiment snapshot
 	Metric     *MetricResult         `json:"metric,omitempty"`      // Evaluation metrics
 	Usage      *EvaluationUsage      `json:"usage,omitempty"`       // Aggregated model usage
 	ModelCalls []EvaluationModelCall `json:"model_calls,omitempty"` // Structured model calls
+}
+
+// EvaluationRunConfig is an immutable, secret-free snapshot of everything
+// needed to explain and reproduce an evaluation run. IDs alone are not enough:
+// datasets and model rows can change after a run, so their content/config
+// fingerprints are retained alongside the effective chunking and RAG options.
+type EvaluationRunConfig struct {
+	SchemaVersion             int                       `json:"schema_version"`
+	DatasetID                 string                    `json:"dataset_id"`
+	DatasetFingerprint        string                    `json:"dataset_fingerprint"`
+	DatasetSamples            int                       `json:"dataset_samples"`
+	SourceKnowledgeBaseID     string                    `json:"source_knowledge_base_id,omitempty"`
+	EvaluationKnowledgeBaseID string                    `json:"evaluation_knowledge_base_id"`
+	Chunking                  ChunkingConfig            `json:"chunking"`
+	Pipeline                  PipelineRequest           `json:"pipeline"`
+	Models                    []EvaluationModelSnapshot `json:"models"`
+	CodeVersion               string                    `json:"code_version"`
+}
+
+// EvaluationModelSnapshot identifies the exact non-secret model configuration
+// used by a run. ConfigFingerprint excludes credentials and custom headers.
+type EvaluationModelSnapshot struct {
+	Role              string      `json:"role"`
+	ID                string      `json:"id"`
+	Name              string      `json:"name"`
+	DisplayName       string      `json:"display_name,omitempty"`
+	Type              ModelType   `json:"type"`
+	Source            ModelSource `json:"source"`
+	Provider          string      `json:"provider,omitempty"`
+	Dimensions        int         `json:"dimensions,omitempty"`
+	ConfigFingerprint string      `json:"config_fingerprint"`
+	UpdatedAt         time.Time   `json:"updated_at"`
 }
 
 // EvaluationUsage aggregates model-call telemetry for one evaluation run.
@@ -83,10 +116,12 @@ type EvaluationUsage struct {
 	CostByCurrency        map[string]float64 `json:"cost_by_currency"`
 }
 
-// ModelUsageStat aggregates evaluation traffic for one model in a tenant.
+// ModelUsageStat aggregates persisted evaluation, chat, Wiki, and background
+// traffic for one model in a tenant. It contains no prompt or response bodies.
 type ModelUsageStat struct {
 	ModelID   string          `json:"model_id"`
 	ModelName string          `json:"model_name"`
+	ModelType ModelType       `json:"model_type"`
 	Usage     EvaluationUsage `json:"usage"`
 }
 
@@ -95,6 +130,7 @@ type EvaluationModelCall struct {
 	ID                      string          `json:"id"`
 	ModelID                 string          `json:"model_id"`
 	ModelName               string          `json:"model_name"`
+	ModelType               ModelType       `json:"model_type"`
 	Purpose                 string          `json:"purpose,omitempty"`
 	PromptPrefixFingerprint string          `json:"prompt_prefix_fingerprint,omitempty"`
 	Usage                   TokenUsage      `json:"usage"`

@@ -67,13 +67,10 @@ func (o *observableChat) ChatStream(
 }
 
 func (o *observableChat) observe(ctx context.Context, usage types.TokenUsage, duration time.Duration, err error) {
-	observer, ok := types.LLMCallObserverFromContext(ctx)
-	if !ok {
-		return
-	}
 	purpose, prefixFingerprint := types.LLMCallMetadataFromContext(ctx)
 	observation := types.LLMCallObservation{
-		ModelID: o.inner.GetModelID(), ModelName: o.inner.GetModelName(),
+		ModelType: types.ModelTypeKnowledgeQA,
+		ModelID:   o.inner.GetModelID(), ModelName: o.inner.GetModelName(),
 		Purpose: purpose, PromptPrefixFingerprint: prefixFingerprint,
 		Usage: usage, Pricing: o.pricing,
 		EstimatedCost: types.EstimateLLMCallCost(usage, o.pricing),
@@ -82,7 +79,7 @@ func (o *observableChat) observe(ctx context.Context, usage types.TokenUsage, du
 	if err != nil {
 		observation.Error = err.Error()
 	}
-	observer.ObserveLLMCall(observation)
+	types.DispatchLLMCallObservation(ctx, observation)
 }
 
 type modelStreamError struct {

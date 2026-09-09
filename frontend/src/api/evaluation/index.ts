@@ -26,8 +26,18 @@ export interface EvaluationModelUsageStat {
   usage: EvaluationUsage
 }
 
-export async function getEvaluationModelUsage(): Promise<EvaluationModelUsageStat[]> {
-  const response: any = await get('/api/v1/evaluation/model-usage')
+export interface EvaluationModelUsageRange {
+  startTime?: string
+  endTime?: string
+}
+
+export async function getEvaluationModelUsage(range: EvaluationModelUsageRange = {}): Promise<EvaluationModelUsageStat[]> {
+  const response: any = await get('/api/v1/evaluation/model-usage', {
+    params: {
+      ...(range.startTime ? { start_time: range.startTime } : {}),
+      ...(range.endTime ? { end_time: range.endTime } : {}),
+    },
+  })
   if (!response?.success || !Array.isArray(response.data)) return []
   return response.data
 }

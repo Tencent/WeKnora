@@ -429,6 +429,25 @@
             <p class="form-desc">{{ pricingLabels.unit }}</p>
           </template>
         </div>
+
+        <div v-if="activeModelType === 'embedding'" class="form-item pricing-config">
+          <label class="form-label">{{ embeddingCacheLabels.title }}</label>
+          <div class="vision-toggle">
+            <t-switch v-model="formData.embeddingCacheEnabled" />
+            <span class="form-desc form-desc--inline">{{ embeddingCacheLabels.description }}</span>
+          </div>
+          <div v-if="formData.embeddingCacheEnabled" class="pricing-config__grid">
+            <label>
+              <span>{{ embeddingCacheLabels.ttl }}</span>
+              <t-input v-model.number="formData.embeddingCacheTTLSeconds" type="number" :min="1" />
+            </label>
+            <label>
+              <span>{{ embeddingCacheLabels.maxEntries }}</span>
+              <t-input v-model.number="formData.embeddingCacheMaxEntries" type="number" :min="1" />
+            </label>
+          </div>
+          <p v-if="formData.embeddingCacheEnabled" class="form-desc">{{ embeddingCacheLabels.note }}</p>
+        </div>
       </section>
 
     </t-form>
@@ -489,6 +508,9 @@ interface ModelFormData {
   outputPricePerMillion?: number
   cacheReadPricePerMillion?: number
   cacheWritePricePerMillion?: number
+  embeddingCacheEnabled?: boolean
+  embeddingCacheTTLSeconds?: number
+  embeddingCacheMaxEntries?: number
   /** extra_config.thinking_control — how agent thinking on/off maps to API fields. */
   thinkingControl?: string
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
@@ -513,7 +535,7 @@ const uiStore = useUIStore()
 const pricingLabels = computed(() => {
   const lang = String(locale.value).toLowerCase()
   if (lang.startsWith('zh')) return {
-    title: 'Token 成本估算', description: '为评测调用计算成本并保存价格快照', currency: '币种',
+    title: 'Token 成本估算', description: '为模型调用计算成本并保存价格快照', currency: '币种',
     input: '普通输入', output: '模型输出', cacheRead: '缓存读取', cacheWrite: '缓存写入', unit: '单价单位：每百万 Token',
   }
   if (lang.startsWith('ko')) return {
@@ -525,8 +547,28 @@ const pricingLabels = computed(() => {
     input: 'Обычный ввод', output: 'Вывод модели', cacheRead: 'Чтение кэша', cacheWrite: 'Запись кэша', unit: 'Цена за миллион токенов',
   }
   return {
-    title: 'Token cost estimation', description: 'Estimate evaluation cost and preserve a pricing snapshot', currency: 'Currency',
+    title: 'Token cost estimation', description: 'Estimate model-call cost and preserve a pricing snapshot', currency: 'Currency',
     input: 'Regular input', output: 'Model output', cacheRead: 'Cache read', cacheWrite: 'Cache write', unit: 'Price per one million tokens',
+  }
+})
+
+const embeddingCacheLabels = computed(() => {
+  const lang = String(locale.value).toLowerCase()
+  if (lang.startsWith('zh')) return {
+    title: 'Embedding 向量缓存', description: '相同模型与文本直接复用向量，减少重复调用',
+    ttl: '有效期（秒）', maxEntries: '进程最大缓存条目', note: '缓存键只保存模型配置指纹和文本哈希，不保存原文。',
+  }
+  if (lang.startsWith('ko')) return {
+    title: 'Embedding 벡터 캐시', description: '같은 모델과 텍스트의 벡터를 재사용합니다',
+    ttl: '유효 기간(초)', maxEntries: '프로세스 최대 항목', note: '캐시 키에는 모델 지문과 텍스트 해시만 저장됩니다.',
+  }
+  if (lang.startsWith('ru')) return {
+    title: 'Кэш векторов Embedding', description: 'Повторно использует вектор для той же модели и текста',
+    ttl: 'Срок действия (сек.)', maxEntries: 'Максимум записей на процесс', note: 'Ключ хранит только отпечаток модели и хэш текста.',
+  }
+  return {
+    title: 'Embedding vector cache', description: 'Reuse vectors for the same model and text',
+    ttl: 'TTL (seconds)', maxEntries: 'Maximum entries per process', note: 'Keys contain only a model fingerprint and text hash, never the original text.',
   }
 })
 
@@ -963,6 +1005,9 @@ const formData = ref<ModelFormData>({
   outputPricePerMillion: 0,
   cacheReadPricePerMillion: 0,
   cacheWritePricePerMillion: 0,
+  embeddingCacheEnabled: true,
+  embeddingCacheTTLSeconds: 86400,
+  embeddingCacheMaxEntries: 10000,
   thinkingControl: defaultThinkingControl('generic', ''),
   customHeaders: [],
   appSecret: '',
@@ -1211,6 +1256,9 @@ const resetForm = () => {
     outputPricePerMillion: 0,
     cacheReadPricePerMillion: 0,
     cacheWritePricePerMillion: 0,
+    embeddingCacheEnabled: true,
+    embeddingCacheTTLSeconds: 86400,
+    embeddingCacheMaxEntries: 10000,
     thinkingControl: defaultThinkingControl('generic', ''),
     customHeaders: [],
     appSecret: '',

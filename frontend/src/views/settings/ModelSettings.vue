@@ -45,6 +45,11 @@
       <t-tab-panel value="asr" :label="`${$t('modelSettings.typeShort.asr')}(${countByType('asr')})`" />
     </t-tabs>
 
+    <div class="usage-range-filter">
+      <span>{{ usageLabels.range }}</span>
+      <t-select v-model="usageRange" size="small" :options="usageRangeOptions" />
+    </div>
+
     <t-loading :loading="loading" size="small" class="model-list-loading">
       <div v-if="!loading && filteredModels.length === 0 && !authStore.hasRole('admin')" class="empty-state">
         <t-empty :description="emptyHint" />
@@ -360,26 +365,48 @@ watch(
 // 模型列表数据
 const allModels = ref<ModelConfig[]>([])
 const modelUsageByID = ref<Record<string, EvaluationUsage>>({})
+const usageRange = ref<'24h' | '7d' | '30d' | 'all'>('30d')
 
 const usageLabels = computed(() => {
   const lang = String(locale.value).toLowerCase()
   if (lang.startsWith('zh')) return {
     calls: '调用', tokens: 'Token', cache: '缓存', cacheHitRate: '缓存命中率',
-    estimatedCost: '评测估算成本', unpriced: '该模型尚未配置 Token 单价', costUnknown: '成本未配置',
+    estimatedCost: '估算成本', unpriced: '该模型尚未配置 Token 单价', costUnknown: '成本未配置', range: '用量区间',
   }
   if (lang.startsWith('ko')) return {
     calls: '호출', tokens: 'Token', cache: '캐시', cacheHitRate: '캐시 적중률',
-    estimatedCost: '평가 예상 비용', unpriced: 'Token 가격이 설정되지 않음', costUnknown: '비용 미설정',
+    estimatedCost: '평가 예상 비용', unpriced: 'Token 가격이 설정되지 않음', costUnknown: '비용 미설정', range: '사용 기간',
   }
   if (lang.startsWith('ru')) return {
     calls: 'Вызовы', tokens: 'Token', cache: 'Кэш', cacheHitRate: 'Доля попаданий в кэш',
-    estimatedCost: 'Расчётная стоимость оценки', unpriced: 'Цена токенов не настроена', costUnknown: 'Нет цены',
+    estimatedCost: 'Расчётная стоимость оценки', unpriced: 'Цена токенов не настроена', costUnknown: 'Нет цены', range: 'Период',
   }
   return {
     calls: 'Calls', tokens: 'Tokens', cache: 'Cache', cacheHitRate: 'Cache hit rate',
-    estimatedCost: 'Estimated evaluation cost', unpriced: 'Token pricing is not configured', costUnknown: 'Cost unavailable',
+    estimatedCost: 'Estimated cost', unpriced: 'Token pricing is not configured', costUnknown: 'Cost unavailable', range: 'Usage period',
   }
 })
+
+const usageRangeOptions = computed(() => {
+  const lang = String(locale.value).toLowerCase()
+  const labels = lang.startsWith('zh')
+    ? ['最近 24 小时', '最近 7 天', '最近 30 天', '全部时间']
+    : ['Last 24 hours', 'Last 7 days', 'Last 30 days', 'All time']
+  return [
+    { label: labels[0], value: '24h' },
+    { label: labels[1], value: '7d' },
+    { label: labels[2], value: '30d' },
+    { label: labels[3], value: 'all' },
+  ]
+})
+
+const selectedUsageRange = () => {
+  if (usageRange.value === 'all') return {}
+  const durations = { '24h': 24, '7d': 24 * 7, '30d': 24 * 30 }
+  const end = new Date()
+  const start = new Date(end.getTime() - durations[usageRange.value] * 60 * 60 * 1000)
+  return { startTime: start.toISOString(), endTime: end.toISOString() }
+}
 
 const modelUsage = (model: any) => modelUsageByID.value[model.id]
 const formatInteger = (value: number) => new Intl.NumberFormat(locale.value).format(value || 0)
@@ -439,6 +466,9 @@ function convertToLegacyFormat(model: ModelConfig) {
     outputPricePerMillion: Number(model.parameters.extra_config?.output_price_per_million || 0),
     cacheReadPricePerMillion: Number(model.parameters.extra_config?.cache_read_price_per_million || 0),
     cacheWritePricePerMillion: Number(model.parameters.extra_config?.cache_write_price_per_million || 0),
+    embeddingCacheEnabled: model.parameters.extra_config?.embedding_cache_enabled !== 'false',
+    embeddingCacheTTLSeconds: Number(model.parameters.extra_config?.embedding_cache_ttl_seconds || 86400),
+    embeddingCacheMaxEntries: Number(model.parameters.extra_config?.embedding_cache_max_entries || 10000),
     _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
     // Preserve the credential metadata map so the editor dialog can render
     // the "Configured" state without an extra round-trip.
@@ -546,7 +576,7 @@ const loadModels = async () => {
   try {
     const [models, usageStats] = await Promise.all([
       listModels(),
-      getEvaluationModelUsage().catch((error) => {
+      getEvaluationModelUsage(selectedUsageRange()).catch((error) => {
         console.warn('加载评测模型用量失败:', error)
         return []
       }),
@@ -563,6 +593,10 @@ const loadModels = async () => {
     loading.value = false
   }
 }
+
+watch(usageRange, () => {
+  loadModels()
+})
 
 // 打开添加对话框；类型在抽屉内选择，此处仅按当前 Tab 预填默认值
 const openAddDialog = () => {
@@ -691,6 +725,11 @@ const handleModelSave = async (modelData: any) => {
       extraConfig.output_price_per_million = String(Math.max(0, Number(modelData.outputPricePerMillion) || 0))
       extraConfig.cache_read_price_per_million = String(Math.max(0, Number(modelData.cacheReadPricePerMillion) || 0))
       extraConfig.cache_write_price_per_million = String(Math.max(0, Number(modelData.cacheWritePricePerMillion) || 0))
+    }
+    if (saveType === 'embedding') {
+      extraConfig.embedding_cache_enabled = String(modelData.embeddingCacheEnabled !== false)
+      extraConfig.embedding_cache_ttl_seconds = String(Math.max(1, Number(modelData.embeddingCacheTTLSeconds) || 86400))
+      extraConfig.embedding_cache_max_entries = String(Math.max(1, Number(modelData.embeddingCacheMaxEntries) || 10000))
     }
     const extraConfigFields = Object.keys(extraConfig).length > 0
       ? { extra_config: extraConfig }
@@ -1027,6 +1066,20 @@ onMounted(() => {
 
   :deep(.t-tabs__content) {
     display: none;
+  }
+}
+
+.usage-range-filter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 8px 0 16px;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+
+  :deep(.t-select__wrap) {
+    width: 160px;
   }
 }
 

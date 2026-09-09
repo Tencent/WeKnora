@@ -10,13 +10,14 @@ import (
 )
 
 type evaluationModelCallRecord struct {
-	ID                        string `gorm:"primaryKey;size:36"`
-	TaskID                    string `gorm:"size:255;not null;index"`
-	TenantID                  uint64 `gorm:"not null;index"`
-	ModelID                   string `gorm:"size:255"`
-	ModelName                 string `gorm:"size:255;not null"`
-	Purpose                   string `gorm:"size:100"`
-	PromptPrefixFingerprint   string `gorm:"size:128"`
+	ID                        string          `gorm:"primaryKey;size:36"`
+	TaskID                    *string         `gorm:"size:255;index"`
+	TenantID                  uint64          `gorm:"not null;index"`
+	ModelType                 types.ModelType `gorm:"size:32;not null"`
+	ModelID                   string          `gorm:"size:255"`
+	ModelName                 string          `gorm:"size:255;not null"`
+	Purpose                   string          `gorm:"size:100"`
+	PromptPrefixFingerprint   string          `gorm:"size:128"`
 	PromptTokens              int
 	CompletionTokens          int
 	TotalTokens               int
@@ -62,10 +63,29 @@ func (e *evaluationStorage) recordModelCall(
 	tenantID uint64,
 	observation types.LLMCallObservation,
 ) error {
+	taskIDCopy := taskID
+	// Evaluation calls use a request-scoped observer, so they do not pass
+	// through ModelCallRecorder. Apply the same privacy policy here: never store
+	// provider errors (which may contain request excerpts), and HMAC-protect the
+	// stable prefix fingerprint with the deployment secret.
+	observation.Error = ""
+	observation.PromptPrefixFingerprint = protectModelCallFingerprint(
+		observation.PromptPrefixFingerprint, e.fingerprintKey,
+	)
+	record := newModelCallRecord(&taskIDCopy, tenantID, observation, time.Now().UTC())
+	return e.db.WithContext(ctx).Create(record).Error
+}
+
+func newModelCallRecord(
+	taskID *string,
+	tenantID uint64,
+	observation types.LLMCallObservation,
+	createdAt time.Time,
+) *evaluationModelCallRecord {
 	usage := observation.Usage
 	pricing := observation.Pricing.Normalize()
-	record := &evaluationModelCallRecord{
-		ID: uuid.NewString(), TaskID: taskID, TenantID: tenantID,
+	return &evaluationModelCallRecord{
+		ID: uuid.NewString(), TaskID: taskID, TenantID: tenantID, ModelType: observation.ModelType,
 		ModelID: observation.ModelID, ModelName: observation.ModelName,
 		Purpose: observation.Purpose, PromptPrefixFingerprint: observation.PromptPrefixFingerprint,
 		PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens,
@@ -78,9 +98,8 @@ func (e *evaluationStorage) recordModelCall(
 		CacheReadPricePerMillion:  pricing.CacheReadPerMillion,
 		CacheWritePricePerMillion: pricing.CacheWritePerMillion,
 		EstimatedCost:             observation.EstimatedCost, DurationMS: observation.DurationMS,
-		Success: observation.Success, ErrMsg: observation.Error, CreatedAt: time.Now().UTC(),
+		Success: observation.Success, ErrMsg: observation.Error, CreatedAt: createdAt,
 	}
-	return e.db.WithContext(ctx).Create(record).Error
 }
 
 func (e *evaluationStorage) getModelCalls(
@@ -107,7 +126,8 @@ func (e *evaluationStorage) getModelCalls(
 		}
 		calls = append(calls, types.EvaluationModelCall{
 			ID: record.ID, ModelID: record.ModelID, ModelName: record.ModelName,
-			Purpose: record.Purpose, PromptPrefixFingerprint: record.PromptPrefixFingerprint,
+			ModelType: record.ModelType,
+			Purpose:   record.Purpose, PromptPrefixFingerprint: record.PromptPrefixFingerprint,
 			Usage: callUsage,
 			Pricing: types.LLMTokenPricing{
 				Enabled: record.PricingConfigured, Currency: record.Currency,
@@ -167,6 +187,7 @@ func finalizeEvaluationUsage(usage *types.EvaluationUsage) {
 type modelUsageAggregateRow struct {
 	ModelID            string
 	ModelName          string
+	ModelType          types.ModelType
 	CallCount          int
 	SuccessfulCalls    int
 	FailedCalls        int
@@ -192,10 +213,19 @@ type modelCostAggregateRow struct {
 func (e *evaluationStorage) modelUsage(
 	ctx context.Context,
 	tenantID uint64,
+	startTime, endTime *time.Time,
 ) ([]types.ModelUsageStat, error) {
 	var rows []modelUsageAggregateRow
-	err := e.db.WithContext(ctx).Model(&evaluationModelCallRecord{}).
-		Select(`model_id, MAX(model_name) AS model_name,
+	usageQuery := e.db.WithContext(ctx).Model(&evaluationModelCallRecord{}).
+		Where("tenant_id = ?", tenantID)
+	if startTime != nil {
+		usageQuery = usageQuery.Where("created_at >= ?", *startTime)
+	}
+	if endTime != nil {
+		usageQuery = usageQuery.Where("created_at <= ?", *endTime)
+	}
+	err := usageQuery.
+		Select(`model_id, MAX(model_name) AS model_name, MAX(model_type) AS model_type,
 			COUNT(*) AS call_count,
 			SUM(CASE WHEN success THEN 1 ELSE 0 END) AS successful_calls,
 			SUM(CASE WHEN success THEN 0 ELSE 1 END) AS failed_calls,
@@ -210,7 +240,6 @@ func (e *evaluationStorage) modelUsage(
 			COALESCE(SUM(duration_ms), 0) AS model_duration_ms,
 			SUM(CASE WHEN pricing_configured THEN 1 ELSE 0 END) AS priced_calls,
 			SUM(CASE WHEN pricing_configured THEN 0 ELSE 1 END) AS unpriced_calls`).
-		Where("tenant_id = ?", tenantID).
 		Group("model_id").
 		Order("model_name ASC").
 		Scan(&rows).Error
@@ -219,7 +248,7 @@ func (e *evaluationStorage) modelUsage(
 	}
 
 	stats := make([]types.ModelUsageStat, 0, len(rows))
-	byModelID := make(map[string]*types.ModelUsageStat, len(rows))
+	indexByModelID := make(map[string]int, len(rows))
 	for _, row := range rows {
 		usage := types.EvaluationUsage{
 			CallCount: row.CallCount, SuccessfulCalls: row.SuccessfulCalls,
@@ -233,22 +262,29 @@ func (e *evaluationStorage) modelUsage(
 		}
 		finalizeEvaluationUsage(&usage)
 		stats = append(stats, types.ModelUsageStat{
-			ModelID: row.ModelID, ModelName: row.ModelName, Usage: usage,
+			ModelID: row.ModelID, ModelName: row.ModelName, ModelType: row.ModelType, Usage: usage,
 		})
-		byModelID[row.ModelID] = &stats[len(stats)-1]
+		indexByModelID[row.ModelID] = len(stats) - 1
 	}
 
 	var costs []modelCostAggregateRow
-	if err := e.db.WithContext(ctx).Model(&evaluationModelCallRecord{}).
+	costQuery := e.db.WithContext(ctx).Model(&evaluationModelCallRecord{}).
+		Where("tenant_id = ? AND pricing_configured = ?", tenantID, true)
+	if startTime != nil {
+		costQuery = costQuery.Where("created_at >= ?", *startTime)
+	}
+	if endTime != nil {
+		costQuery = costQuery.Where("created_at <= ?", *endTime)
+	}
+	if err := costQuery.
 		Select("model_id, currency, COALESCE(SUM(estimated_cost), 0) AS cost").
-		Where("tenant_id = ? AND pricing_configured = ?", tenantID, true).
 		Group("model_id, currency").
 		Scan(&costs).Error; err != nil {
 		return nil, err
 	}
 	for _, cost := range costs {
-		if stat := byModelID[cost.ModelID]; stat != nil {
-			stat.Usage.CostByCurrency[cost.Currency] = cost.Cost
+		if index, ok := indexByModelID[cost.ModelID]; ok {
+			stats[index].Usage.CostByCurrency[cost.Currency] = cost.Cost
 		}
 	}
 	return stats, nil
