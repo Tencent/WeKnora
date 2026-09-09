@@ -914,7 +914,7 @@ func looksLikeJSON(contentType string, body []byte) bool {
 }
 
 func looksLikeSkillMarkdown(body []byte) bool {
-	trimmed := bytes.TrimSpace(body)
+	trimmed := bytes.TrimSpace(bytes.TrimPrefix(body, []byte("\ufeff")))
 	if !bytes.HasPrefix(trimmed, []byte("---")) {
 		return false
 	}
