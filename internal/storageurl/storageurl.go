@@ -15,11 +15,11 @@ package storageurl
 
 import (
 	"context"
-	"regexp"
 	"strings"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
@@ -27,11 +27,7 @@ import (
 // legacy `provider://` paths, and canonical `storage://<backend-id>/provider://`
 // paths. The trailing character class stops at Markdown/HTML delimiters so a
 // reference inside `![alt](…)` or `src="…"` is matched without them.
-var Pattern = regexp.MustCompile(
-	`\b(?:resource://[0-9A-Za-z_-]+|` +
-		`(?:storage://[0-9A-Za-z_-]+/)?` +
-		`(?:local|minio|s3|cos|tos|oss|obs|ks3)://[^\s)\]>"]+)`,
-)
+var Pattern = types.StorageReferencePattern
 
 // IsHTTPURL reports whether s is an http(s) URL — the only form an external
 // client can fetch; any provider scheme (oss://, local://, …) is not. Scheme

@@ -373,6 +373,7 @@ func TestE2BRemoteClientProviderAndCapabilities(t *testing.T) {
 		SupportsFilesystemEnumeration: true,
 		SupportsSnapshots:             true,
 		SupportsVolumes:               false,
+		SupportsTerminals:             true,
 	}, client.Capabilities())
 }
 

@@ -6,18 +6,17 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
+	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/config"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
-
-	"github.com/Tencent/WeKnora/internal/application/repository"
-	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
-	"github.com/Tencent/WeKnora/internal/sandbox"
 )
 
 func sessionUserIDFromContext(ctx context.Context) string {
@@ -495,7 +494,7 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 			return
 		}
 		if len(knowledgeIDs) > 0 {
-			if err := s.knowledgeService.DeleteKnowledgeList(bgCtx, knowledgeIDs); err != nil {
+			if err := deleteReferencedKnowledge(bgCtx, s.knowledgeService, "", knowledgeIDs); err != nil {
 				logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", id, err)
 			}
 		}
@@ -572,7 +571,7 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 				return
 			}
 			if len(knowledgeIDs) > 0 {
-				if err := s.knowledgeService.DeleteKnowledgeList(bgCtx, knowledgeIDs); err != nil {
+				if err := deleteReferencedKnowledge(bgCtx, s.knowledgeService, "", knowledgeIDs); err != nil {
 					logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", sessionID, err)
 				}
 			}
@@ -629,7 +628,7 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 					return
 				}
 				if len(knowledgeIDs) > 0 {
-					if err := s.knowledgeService.DeleteKnowledgeList(bgCtx, knowledgeIDs); err != nil {
+					if err := deleteReferencedKnowledge(bgCtx, s.knowledgeService, "", knowledgeIDs); err != nil {
 						logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", sessionID, err)
 					}
 				}

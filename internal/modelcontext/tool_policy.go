@@ -45,6 +45,7 @@ var sourceKeySpaces = map[string]sourceKeySpace{
 }
 
 type toolHandlePolicy struct {
+	opaqueOutput        bool // MCP bridge payloads use external identities and schemas.
 	sourceIDKeys        map[string]struct{}
 	sourceTextKeys      map[string]struct{}
 	sourceOutput        bool
@@ -58,7 +59,9 @@ type toolHandlePolicy struct {
 // alone are deliberately insufficient: a dynamic MCP tool may use the same
 // name with unrelated semantics and must remain opaque.
 var toolHandlePolicies = map[string]toolHandlePolicy{
-	"read_file": {},
+	"discover_mcp_tools": {opaqueOutput: true},
+	"call_mcp_tool":      {opaqueOutput: true},
+	"read_file":          {},
 	"knowledge_search": {
 		sourceIDKeys: map[string]struct{}{"knowledge_base_ids": {}},
 		sourceOutput: true,
@@ -197,8 +200,8 @@ func sourceCompactionAllowed(toolName string) bool {
 	if toolName == "" {
 		return true
 	}
-	_, ok := toolHandlePolicies[toolName]
-	return ok
+	policy, ok := toolHandlePolicies[toolName]
+	return ok && !policy.opaqueOutput
 }
 
 // decodeToolPolicies handles the deliberately small set of arguments whose
@@ -344,4 +347,31 @@ func walkJSONValue(key string, value interface{}, rewrite func(key, value string
 		}
 	}
 	return value
+}
+
+// Some providers double-encode items. Unwrap only this built-in's array before
+// resolving source handles; doing it at Execute time leaves nested wN values
+// unresolved. ModelArguments has already retained the exact provider payload.
+func normalizeWebFetchItems(calls []types.LLMToolCall) {
+	for i := range calls {
+		if calls[i].Function.Name != "web_fetch" {
+			continue
+		}
+		var args map[string]json.RawMessage
+		if json.Unmarshal([]byte(calls[i].Function.Arguments), &args) != nil {
+			continue
+		}
+		var wrapped string
+		if json.Unmarshal(args["items"], &wrapped) != nil {
+			continue
+		}
+		var items []json.RawMessage
+		if json.Unmarshal([]byte(wrapped), &items) != nil || len(items) == 0 {
+			continue
+		}
+		args["items"] = json.RawMessage(wrapped)
+		if encoded, err := json.Marshal(args); err == nil {
+			calls[i].Function.Arguments = string(encoded)
+		}
+	}
 }

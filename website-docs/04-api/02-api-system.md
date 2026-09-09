@@ -1,14 +1,20 @@
 # API 参考：系统与平台管理
 
-这一组是部署级接口：读系统信息，以及系统管理员专属的平台控制面（全局设置、运行时队列、平台 API Key、跨空间审计、重置密码）。功能说明见[平台管理与系统管理员](../03-features/20-platform-admin.md)。
-
-路由注册：`internal/router/routes_auth_tenant.go` 的 `RegisterSystemAdminRoutes` 与 `RegisterSystemRoutes`。Handler：`internal/handler/system.go`、`internal/handler/audit_log.go`。
+提供部署级系统信息和平台管理接口，包括全局设置、任务队列、平台 API Key、跨空间审计和用户密码重置。功能说明见[平台管理与系统管理员](../03-features/20-platform-admin.md)。
 
 `/system/admin/*` 全组挂 `SystemAdmin()` 守卫；平台 API Key 按能力细分（`system_settings_read/manage`、`system_runtime_read/manage`、`system_tenants_read/manage`、`system_audit_read`）。
 
 ## 系统信息（/api/v1/system）
 
 Handler: `internal/handler/system.go`。API key：`manage_vector_stores`/full。本组响应使用 `{"code":0,"msg":"success","data":...}` 包装。
+
+### GET /api/v1/system/capabilities
+
+Viewer+；API Key 可读。返回 `{code:0,data:{edition,capabilities}}`，每个 capability 给出 supported/reason。前端据部署版本、实际注册路由和 Docker 开关控制菜单入口；隐藏菜单不代替后端权限校验。
+
+```bash
+curl "$BASE/api/v1/system/capabilities" -H "Authorization: Bearer $TOKEN"
+```
 
 ### GET /api/v1/system/info
 
@@ -107,6 +113,25 @@ curl -X POST $BASE/api/v1/system/admin/revoke -H "Authorization: Bearer $TOKEN" 
 
 ```bash
 curl $BASE/api/v1/system/admin/list -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /api/v1/system/admin/users/create
+
+仅系统管理员；此接口不开放给 platform API Key。请求字段：username（2–50 字符）、email（合法邮箱）、password（可选或 null 自动生成）。显式空字符串仍要经过密码策略校验，不视为自动生成。
+
+| HTTP 状态 | 响应与含义 |
+| --- | --- |
+| 201 | `{user:UserInfo,generated_password?}`，新建；仅自动生成时返回密码 |
+| 200 | `{user:UserInfo}`，已有身份，不修改账号或密码 |
+| 400 | 参数或密码策略不满足 |
+| 409 | 邮箱与用户名对应不同身份 |
+
+这是原始响应对象，没有 success/data 包装，也没有 idempotent 字段。用 HTTP 状态区分新增与已有账号。空间分配遵循 auth.default_tenant_mode。
+
+```bash
+curl -i -X POST "$BASE/api/v1/system/admin/users/create" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"username":"alice","email":"alice@example.com"}'
 ```
 
 ### POST /api/v1/system/admin/users/reset-password
@@ -242,3 +267,7 @@ curl -X POST $BASE/api/v1/system/admin/tenants/apply-default-storage-quota -H "A
 ```bash
 curl $BASE/api/v1/system/admin/audit-log -H "Authorization: Bearer $TOKEN"
 ```
+
+## 实现参考
+
+路由注册：`internal/router/routes_auth_tenant.go` 的 `RegisterSystemAdminRoutes` 与 `RegisterSystemRoutes`。Handler：`internal/handler/system.go`、`internal/handler/audit_log.go`。

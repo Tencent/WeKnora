@@ -34,6 +34,11 @@ type anthropicContentBlock struct {
 	Type         string                 `json:"type"`
 	Text         string                 `json:"text,omitempty"`
 	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+	ID           string                 `json:"id,omitempty"`
+	Name         string                 `json:"name,omitempty"`
+	Input        json.RawMessage        `json:"input,omitempty"`
+	ToolUseID    string                 `json:"tool_use_id,omitempty"`
+	Content      any                    `json:"content,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -42,13 +47,15 @@ type anthropicMessage struct {
 }
 
 type anthropicRequest struct {
-	Model       string             `json:"model"`
-	MaxTokens   int                `json:"max_tokens"`
-	Stream      bool               `json:"stream,omitempty"`
-	System      any                `json:"system,omitempty"`
-	Messages    []anthropicMessage `json:"messages"`
-	Temperature *float64           `json:"temperature,omitempty"`
-	TopP        *float64           `json:"top_p,omitempty"`
+	Model       string               `json:"model"`
+	MaxTokens   int                  `json:"max_tokens"`
+	Stream      bool                 `json:"stream,omitempty"`
+	System      any                  `json:"system,omitempty"`
+	Messages    []anthropicMessage   `json:"messages"`
+	Temperature *float64             `json:"temperature,omitempty"`
+	TopP        *float64             `json:"top_p,omitempty"`
+	Tools       []anthropicTool      `json:"tools,omitempty"`
+	ToolChoice  *anthropicToolChoice `json:"tool_choice,omitempty"`
 }
 
 type anthropicResponse struct {
@@ -56,8 +63,11 @@ type anthropicResponse struct {
 	Type    string `json:"type"`
 	Role    string `json:"role"`
 	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+		Type  string          `json:"type"`
+		Text  string          `json:"text"`
+		ID    string          `json:"id"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
 	} `json:"content"`
 	StopReason string `json:"stop_reason"`
 	Usage      struct {
@@ -73,8 +83,10 @@ type anthropicResponse struct {
 }
 
 type anthropicStreamEvent struct {
-	Type    string `json:"type"`
-	Message *struct {
+	Type         string                 `json:"type"`
+	Index        int                    `json:"index"`
+	ContentBlock *anthropicContentBlock `json:"content_block,omitempty"`
+	Message      *struct {
 		Usage struct {
 			InputTokens              int  `json:"input_tokens"`
 			OutputTokens             int  `json:"output_tokens"`
@@ -83,9 +95,10 @@ type anthropicStreamEvent struct {
 		} `json:"usage"`
 	} `json:"message,omitempty"`
 	Delta *struct {
-		Type       string `json:"type"`
-		Text       string `json:"text"`
-		StopReason string `json:"stop_reason"`
+		Type        string `json:"type"`
+		Text        string `json:"text"`
+		StopReason  string `json:"stop_reason"`
+		PartialJSON string `json:"partial_json"`
 	} `json:"delta,omitempty"`
 	Usage *struct {
 		InputTokens              int  `json:"input_tokens"`
@@ -281,26 +294,10 @@ func (c *AnthropicChat) buildRequest(_ context.Context, messages []Message, opts
 		}
 	}
 
-	var systemParts []string
-	for _, msg := range messages {
-		content := strings.TrimSpace(msg.Content)
-		if content == "" {
-			content = textFromMultiContent(msg.MultiContent)
-		}
-		if content == "" {
-			continue
-		}
-		switch msg.Role {
-		case "system":
-			systemParts = append(systemParts, content)
-		case "assistant":
-			req.Messages = append(req.Messages, anthropicMessage{Role: "assistant", Content: content})
-		case "user":
-			req.Messages = append(req.Messages, anthropicMessage{Role: "user", Content: content})
-		default:
-			req.Messages = append(req.Messages, anthropicMessage{Role: "user", Content: content})
-		}
-	}
+	anthropicToolOptions(&req, opts)
+	systemParts, converted := anthropicMessages(messages)
+	req.Messages = converted
+
 	systemText := strings.Join(systemParts, "\n\n")
 	retention := resolveCacheRetention(opts)
 	marker := cacheControlFor(retention, "1h")
@@ -343,7 +340,14 @@ func textFromMultiContent(parts []MessageContentPart) string {
 
 func (c *AnthropicChat) parseResponse(resp *anthropicResponse) *types.ChatResponse {
 	parts := make([]string, 0, len(resp.Content))
+	var calls []types.LLMToolCall
 	for _, part := range resp.Content {
+		if part.Type == "tool_use" {
+			calls = append(calls, types.LLMToolCall{
+				ID: part.ID, Type: "function",
+				Function: types.FunctionCall{Name: part.Name, Arguments: string(part.Input)},
+			})
+		}
 		if part.Type == "text" && part.Text != "" {
 			parts = append(parts, part.Text)
 		}
@@ -362,7 +366,8 @@ func (c *AnthropicChat) parseResponse(resp *anthropicResponse) *types.ChatRespon
 		resp.Usage.CacheReadInputTokens != nil || resp.Usage.CacheCreationInputTokens != nil)
 	return &types.ChatResponse{
 		Content:      strings.Join(parts, ""),
-		FinishReason: resp.StopReason,
+		FinishReason: anthropicToolStream{}.finishReason(resp.StopReason),
+		ToolCalls:    calls,
 		Usage:        usage,
 	}
 }
@@ -370,6 +375,7 @@ func (c *AnthropicChat) parseResponse(resp *anthropicResponse) *types.ChatRespon
 func parseAnthropicSSE(reader io.Reader) (*types.ChatResponse, error) {
 	sseReader := NewSSEReader(reader)
 	var contentParts []string
+	toolStream := anthropicToolStream{}
 	var finishReason string
 	var inputTokens int
 	var outputTokens int
@@ -399,6 +405,7 @@ func parseAnthropicSSE(reader io.Reader) (*types.ChatResponse, error) {
 		if streamEvent.Error != nil && streamEvent.Error.Message != "" {
 			return nil, fmt.Errorf("API stream error: %s", streamEvent.Error.Message)
 		}
+		toolStream.consume(streamEvent)
 		if streamEvent.Message != nil {
 			inputTokens = max(inputTokens, streamEvent.Message.Usage.InputTokens)
 			outputTokens = max(outputTokens, streamEvent.Message.Usage.OutputTokens)
@@ -437,7 +444,8 @@ func parseAnthropicSSE(reader io.Reader) (*types.ChatResponse, error) {
 
 	return &types.ChatResponse{
 		Content:      strings.Join(contentParts, ""),
-		FinishReason: finishReason,
+		FinishReason: toolStream.finishReason(finishReason),
+		ToolCalls:    toolStream.calls(),
 		Usage:        usage,
 	}, nil
 }
@@ -445,68 +453,70 @@ func parseAnthropicSSE(reader io.Reader) (*types.ChatResponse, error) {
 func processAnthropicStream(ctx context.Context, model string, resp *http.Response, streamChan chan types.StreamResponse) {
 	defer close(streamChan)
 	defer resp.Body.Close()
-
 	sseReader := NewSSEReader(resp.Body)
 	var usage *types.TokenUsage
 	var finishReason string
-
+	toolStream := anthropicToolStream{}
+	emit := func(chunk types.StreamResponse) bool {
+		select {
+		case streamChan <- chunk:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	finish := func(err error) {
+		chunk := types.StreamResponse{
+			ResponseType: types.ResponseTypeAnswer, Done: true, Usage: usage,
+			ToolCalls: toolStream.calls(), FinishReason: toolStream.finishReason(finishReason),
+		}
+		if err != nil {
+			chunk.ResponseType, chunk.Content = types.ResponseTypeError, err.Error()
+			chunk.FinishReason = types.FinishReasonIncomplete
+		}
+		logUsage(ctx, model, usage)
+		emit(chunk)
+	}
 	for {
 		event, err := sseReader.ReadEvent()
 		if err != nil {
 			if err == io.EOF {
-				logUsage(ctx, model, usage)
-				streamChan <- types.StreamResponse{
-					ResponseType: types.ResponseTypeAnswer,
-					Content:      "",
-					Done:         true,
-					Usage:        usage,
-					FinishReason: finishReason,
-				}
+				finish(nil)
 			} else {
-				streamChan <- types.StreamResponse{
-					ResponseType: types.ResponseTypeError,
-					Content:      err.Error(),
-					Done:         true,
-				}
+				finish(err)
 			}
 			return
 		}
 		if event.Done {
-			logUsage(ctx, model, usage)
-			streamChan <- types.StreamResponse{
-				ResponseType: types.ResponseTypeAnswer,
-				Content:      "",
-				Done:         true,
-				Usage:        usage,
-				FinishReason: finishReason,
-			}
+			finish(nil)
 			return
 		}
 		if len(event.Data) == 0 {
 			continue
 		}
-
 		var streamEvent anthropicStreamEvent
 		if err := json.Unmarshal(event.Data, &streamEvent); err != nil {
-			streamChan <- types.StreamResponse{
-				ResponseType: types.ResponseTypeError,
-				Content:      fmt.Sprintf("decode SSE response: %v", err),
-				Done:         true,
-			}
+			finish(fmt.Errorf("decode SSE response: %w", err))
 			return
 		}
 		if streamEvent.Error != nil && streamEvent.Error.Message != "" {
-			streamChan <- types.StreamResponse{
-				ResponseType: types.ResponseTypeError,
-				Content:      streamEvent.Error.Message,
-				Done:         true,
-			}
+			finish(fmt.Errorf("API stream error: %s", streamEvent.Error.Message))
 			return
+		}
+		toolStream.consume(streamEvent)
+		if streamEvent.Type == "content_block_start" && streamEvent.ContentBlock != nil &&
+			streamEvent.ContentBlock.Type == "tool_use" {
+			block := streamEvent.ContentBlock
+			if !emit(types.StreamResponse{
+				ResponseType: types.ResponseTypeToolCall,
+				Data:         map[string]interface{}{"tool_call_id": block.ID, "tool_name": block.Name},
+			}) {
+				return
+			}
 		}
 		if streamEvent.Message != nil {
 			usage = mergeAnthropicUsage(usage, streamEvent.Message.Usage.InputTokens,
-				streamEvent.Message.Usage.OutputTokens,
-				streamEvent.Message.Usage.CacheReadInputTokens,
+				streamEvent.Message.Usage.OutputTokens, streamEvent.Message.Usage.CacheReadInputTokens,
 				streamEvent.Message.Usage.CacheCreationInputTokens)
 		}
 		if streamEvent.Delta != nil {
@@ -514,18 +524,21 @@ func processAnthropicStream(ctx context.Context, model string, resp *http.Respon
 				finishReason = streamEvent.Delta.StopReason
 			}
 			if streamEvent.Delta.Type == "text_delta" && streamEvent.Delta.Text != "" {
-				streamChan <- types.StreamResponse{
-					ResponseType: types.ResponseTypeAnswer,
-					Content:      streamEvent.Delta.Text,
-					Done:         false,
+				if !emit(types.StreamResponse{
+					ResponseType: types.ResponseTypeAnswer, Content: streamEvent.Delta.Text,
+				}) {
+					return
 				}
 			}
 		}
 		if streamEvent.Usage != nil {
 			usage = mergeAnthropicUsage(usage, streamEvent.Usage.InputTokens,
-				streamEvent.Usage.OutputTokens,
-				streamEvent.Usage.CacheReadInputTokens,
+				streamEvent.Usage.OutputTokens, streamEvent.Usage.CacheReadInputTokens,
 				streamEvent.Usage.CacheCreationInputTokens)
+		}
+		if streamEvent.Type == "message_stop" {
+			finish(nil)
+			return
 		}
 	}
 }

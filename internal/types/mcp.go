@@ -22,6 +22,9 @@ const (
 
 // MCPService represents an MCP (Model Context Protocol) service configuration
 type MCPService struct {
+	// UsageInstructions is maintained locally and is not overwritten by directory refresh.
+	UsageInstructions string `json:"usage_instructions" gorm:"type:text;not null;default:''"`
+
 	ID             string             `json:"id"                     gorm:"type:varchar(36);primaryKey"`
 	TenantID       uint64             `json:"tenant_id"              gorm:"uniqueIndex:idx_tenant_name"`
 	Name           string             `json:"name"                   gorm:"type:varchar(255);not null;uniqueIndex:idx_tenant_name"`

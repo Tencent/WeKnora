@@ -226,6 +226,16 @@ func (m *SessionBoundManager) GetType() SandboxType {
 	return m.activeType
 }
 
+// TerminalIdleDisconnect is how long an open PTY may sit idle before the
+// WebSocket is closed. Missing or out-of-range workspace values are clamped
+// onto the built-in default so a stored 0 still disconnects.
+func (m *SessionBoundManager) TerminalIdleDisconnect() time.Duration {
+	if m == nil || m.config == nil {
+		return DefaultTerminalIdleDisconnect
+	}
+	return EffectiveTerminalIdleDisconnect(m.config.TerminalIdleDisconnect)
+}
+
 // GetSandbox exposes a diagnostic Sandbox for callers that need to inspect
 // availability. Returns a stateless RemoteSandbox surface for the current
 // provider.
@@ -809,6 +819,46 @@ func (m *SessionBoundManager) SessionFileStore() SessionFileStore {
 	}
 	return m
 }
+
+// SessionTerminalManager advertises the interactive-terminal capability while
+// a real remote backend is active and the provider implements PTY streaming
+// (E2B and Cube do; Docker does not).
+func (m *SessionBoundManager) SessionTerminalManager() SessionTerminalManager {
+	if m == nil || m.remoteDisabled() {
+		return nil
+	}
+	if _, ok := TerminalManagerFrom(m.client); !ok {
+		return nil
+	}
+	return m
+}
+
+// OpenSessionTerminal opens a PTY on the sandbox currently bound to the
+// session. It is strictly lookup-only: with no live binding it returns
+// ErrNoLiveSessionSandbox instead of provisioning, because the terminal
+// entry point lacks the config-pin context that agent-driven creation
+// relies on. A backend that cannot stream PTYs (Docker) returns
+// ErrTerminalUnsupported, not "no sandbox".
+func (m *SessionBoundManager) OpenSessionTerminal(
+	ctx context.Context,
+	sessionID string,
+	opts RemoteTerminalOptions,
+) (RemoteTerminalSession, error) {
+	terminal, ok := TerminalManagerFrom(m.client)
+	if !ok {
+		return nil, ErrTerminalUnsupported
+	}
+	handle, found, err := m.lookupSessionHandle(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrNoLiveSessionSandbox
+	}
+	return terminal.OpenTerminal(ctx, handle, opts)
+}
+
+var _ SessionTerminalProvider = (*SessionBoundManager)(nil)
 
 // Cleanup marks the manager closed. Session sandboxes are not force-deleted
 // here: their lifecycle is authoritative in the binding store and would

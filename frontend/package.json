@@ -20,6 +20,8 @@
     "@types/dompurify": "^3.2.0",
     "@types/papaparse": "^5.5.2",
     "@vue-office/pptx": "^1.0.1",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "axios": "^1.16.0",
     "docx-preview": "^0.3.7",
     "dompurify": "^3.4.11",

@@ -358,3 +358,28 @@ func TestBuildAssistantHistoryMessages_ReplaysReasoningContent(t *testing.T) {
 	assert.Empty(t, got[1].ReasoningContent)
 	assert.Empty(t, got[2].ReasoningContent)
 }
+
+func TestMCPProxyHistoryRetainsProtocolCallAndTarget(t *testing.T) {
+	msg := &types.Message{Role: "assistant", AgentSteps: types.AgentSteps{{ToolCalls: []types.ToolCall{{
+		ID: "proxy-id", Name: "call_mcp_tool",
+		Args: map[string]any{"tool_ref": "mcpt_ref", "arguments": map[string]any{"id": "42"}},
+		Target: &types.ToolCallTarget{
+			Name:        "mcp_orders_get",
+			Args:        map[string]any{"id": "42"},
+			ServiceName: "Orders",
+			ToolName:    "get",
+		},
+		Result: &types.ToolResult{Success: true, Output: "ok"},
+	}}}}}
+	data, err := json.Marshal(msg.AgentSteps)
+	require.NoError(t, err)
+	var restored types.AgentSteps
+	require.NoError(t, json.Unmarshal(data, &restored))
+	msg.AgentSteps = restored
+	require.Equal(t, "mcp_orders_get", restored[0].ToolCalls[0].Target.Name)
+	history := buildAssistantHistoryMessages(msg)
+	require.Len(t, history, 2)
+	require.Equal(t, "call_mcp_tool", history[0].ToolCalls[0].Function.Name)
+	require.Contains(t, history[0].ToolCalls[0].Function.Arguments, "tool_ref")
+	require.Equal(t, "proxy-id", history[1].ToolCallID)
+}

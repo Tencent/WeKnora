@@ -87,7 +87,7 @@ func TestPrepareMessagesWithModelContextKeepsWebSeparateFromChunks(t *testing.T)
 	}
 
 	messages, refs := prepareMessagesWithModelContext(context.Background(), manage)
-	require.Contains(t, messages[1].Content, `<retrieval type="web" mode="search">`)
+	require.Contains(t, messages[1].Content, `<retrieval type="web" mode="search" trust="untrusted">`)
 	require.Contains(t, messages[1].Content, `<page id="w1" title="Example">`)
 	require.NotContains(t, messages[1].Content, `<chunk id="c1"`)
 	require.Equal(t,

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -236,7 +237,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		tenantID := c.GetUint64(types.TenantIDContextKey.String())
 		attachmentRuntimeCtx := ctx
 		if effectiveTenantID != 0 {
-			attachmentRuntimeCtx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+			attachmentRuntimeCtx = types.WithExecutionTenant(ctx, effectiveTenantID)
 		}
 
 		// Use ASR only when the agent has audio upload enabled.
@@ -631,8 +632,16 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 	baseCtx := reqCtx.ctx
 	if reqCtx.effectiveTenantID != 0 && h.tenantService != nil {
 		if tenant, err := h.tenantService.GetTenantByID(reqCtx.ctx, reqCtx.effectiveTenantID); err == nil && tenant != nil {
-			baseCtx = context.WithValue(context.WithValue(reqCtx.ctx, types.TenantIDContextKey, reqCtx.effectiveTenantID), types.TenantInfoContextKey, tenant)
-			logger.Infof(reqCtx.ctx, "Using effective tenant %d for shared agent (model/KB/MCP)", reqCtx.effectiveTenantID)
+			baseCtx = types.WithExecutionTenant(reqCtx.ctx, reqCtx.effectiveTenantID)
+			if reqCtx.customAgent != nil {
+				baseCtx = access.WithSharedAgent(baseCtx, reqCtx.customAgent)
+			}
+			baseCtx = context.WithValue(baseCtx, types.TenantInfoContextKey, tenant)
+			logger.Infof(
+				reqCtx.ctx,
+				"Using effective tenant %d for shared agent (model/KB/MCP)",
+				reqCtx.effectiveTenantID,
+			)
 		}
 	}
 	// The session's sandbox stays bound to the session owner even when the

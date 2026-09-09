@@ -126,6 +126,27 @@ type SessionInstallCapabilityProvider interface {
 	SessionInstallShellExecutor() SessionInstallShellExecutor
 }
 
+// SessionTerminalManager opens interactive PTYs on the sandbox bound to a
+// session. Like the file store it is provider-neutral: the WebSocket
+// handler bridges browser terminal frames to it without knowing whether
+// E2B or Cube serves the session.
+type SessionTerminalManager interface {
+	// OpenSessionTerminal connects to the session's currently bound sandbox
+	// and opens a PTY. It is lookup-only: when no live sandbox is bound it
+	// returns ErrNoLiveSessionSandbox instead of provisioning one, because
+	// the terminal entry point lacks the agent's config-pin context and
+	// must not create microVMs as a side effect. A backend that cannot
+	// stream PTYs returns ErrTerminalUnsupported, not "no sandbox".
+	OpenSessionTerminal(ctx context.Context, sessionID string, opts RemoteTerminalOptions) (RemoteTerminalSession, error)
+}
+
+// SessionTerminalProvider is implemented by managers that MAY offer
+// interactive terminals. The accessor returns nil when the current runtime
+// cannot honour the capability.
+type SessionTerminalProvider interface {
+	SessionTerminalManager() SessionTerminalManager
+}
+
 // SessionTurnHolder marks the start and end of one chat turn on a session's
 // sandbox. While the turn is open, a stale image mark waits: the first
 // resolve of the turn may rebuild, later resolves of the same turn keep the

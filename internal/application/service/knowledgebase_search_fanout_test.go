@@ -415,27 +415,35 @@ func (f *fakeRetrieveEngineService) Retrieve(ctx context.Context, p types.Retrie
 func (f *fakeRetrieveEngineService) Index(context.Context, embedding.Embedder, *types.IndexInfo, []types.RetrieverType) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) BatchIndex(context.Context, embedding.Embedder, []*types.IndexInfo, []types.RetrieverType) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) EstimateStorageSize(context.Context, embedding.Embedder, []*types.IndexInfo, []types.RetrieverType) int64 {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) CopyIndices(context.Context, string, map[string]string, map[string]string, string, int, string) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) DeleteByChunkIDList(context.Context, []string, int, string) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) DeleteBySourceIDList(context.Context, []string, int, string) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) DeleteByKnowledgeIDList(context.Context, []string, int, string) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) BatchUpdateChunkEnabledStatus(context.Context, map[string]bool) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) BatchUpdateChunkTagID(context.Context, map[string]string) error {
 	panic("unused")
 }
@@ -455,9 +463,11 @@ func (r *fakeFanoutRegistry) Register(interfaces.RetrieveEngineService) error { 
 func (r *fakeFanoutRegistry) GetRetrieveEngineService(types.RetrieverEngineType) (interfaces.RetrieveEngineService, error) {
 	return nil, stderrors.New("not used in fan-out tests")
 }
+
 func (r *fakeFanoutRegistry) GetAllRetrieveEngineServices() []interfaces.RetrieveEngineService {
 	return nil
 }
+
 func (r *fakeFanoutRegistry) GetByStoreID(id string) (interfaces.RetrieveEngineService, error) {
 	if svc, ok := r.byStore[id]; ok {
 		return svc, nil
@@ -775,7 +785,7 @@ func TestRetrieveFromStores_PerGroupTimeout(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // fakeKBShareForAuth implements just enough of KBShareService for the
-// authorizeKBAccess test matrix. Only HasTenantKBPermission is exercised;
+// authorizeKBAccess test matrix. Only CheckTenantKBPermission is exercised;
 // the embedded interface keeps the type assignable.
 type fakeKBShareForAuth struct {
 	// allowed maps kbID → tenantID → allowed. Mirrors the Plan 3 (#1303)
@@ -785,17 +795,10 @@ type fakeKBShareForAuth struct {
 	interfaces.KBShareService
 }
 
-func (f *fakeKBShareForAuth) HasTenantKBPermission(
-	_ context.Context, kbID string, callerTenantID uint64,
-	_ types.TenantRole, _ types.OrgMemberRole,
-) (bool, error) {
-	if f.err != nil {
-		return false, f.err
-	}
-	if perTenant, ok := f.allowed[kbID]; ok {
-		return perTenant[callerTenantID], nil
-	}
-	return false, nil
+func (f *fakeKBShareForAuth) CheckTenantKBPermission(
+	_ context.Context, kbID string, callerTenantID uint64, _ types.TenantRole,
+) (types.OrgMemberRole, bool, error) {
+	return types.OrgRoleViewer, f.allowed[kbID][callerTenantID], f.err
 }
 
 func ctxWithTenantForAuth(tenantID uint64) context.Context {
@@ -809,7 +812,7 @@ func TestAuthorizeKBAccess_SameTenantAllPass(t *testing.T) {
 		{ID: "kb-1", TenantID: 7},
 		{ID: "kb-2", TenantID: 7},
 	}
-	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs, 7)
+	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs)
 	require.NoError(t, err)
 }
 
@@ -825,7 +828,7 @@ func TestAuthorizeKBAccess_ForeignTenantWithShare_OK(t *testing.T) {
 		{ID: "kb-own", TenantID: 7},
 		{ID: "kb-foreign", TenantID: 99},
 	}
-	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs, 7)
+	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs)
 	require.NoError(t, err)
 }
 
@@ -840,7 +843,7 @@ func TestAuthorizeKBAccess_ForeignTenantNoShare_NotFound(t *testing.T) {
 	kbs := []*types.KnowledgeBase{
 		{ID: "kb-foreign", TenantID: 99},
 	}
-	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs, 7)
+	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs)
 	require.Error(t, err)
 	app, ok := apperrors.IsAppError(err)
 	require.True(t, ok, "expected typed AppError, got %T", err)
@@ -853,7 +856,7 @@ func TestAuthorizeKBAccess_PermissionLookupError_500(t *testing.T) {
 	share := &fakeKBShareForAuth{err: stderrors.New("share infra down")}
 	s := &knowledgeBaseService{kbShareService: share}
 	kbs := []*types.KnowledgeBase{{ID: "kb-foreign", TenantID: 99}}
-	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs, 7)
+	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs)
 	require.Error(t, err)
 	app, ok := apperrors.IsAppError(err)
 	require.True(t, ok)
@@ -863,7 +866,7 @@ func TestAuthorizeKBAccess_PermissionLookupError_500(t *testing.T) {
 func TestAuthorizeKBAccess_EmptyKBs_OK(t *testing.T) {
 	t.Parallel()
 	s := &knowledgeBaseService{kbShareService: &fakeKBShareForAuth{}}
-	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), nil, 7)
+	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), nil)
 	require.NoError(t, err)
 }
 

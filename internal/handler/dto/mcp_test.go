@@ -103,3 +103,19 @@ func TestMCPServiceResponse_NilSafe(t *testing.T) {
 	assert.Nil(t, NewMCPServiceResponse(adminContext(), nil))
 	assert.Equal(t, []*MCPServiceResponse{}, NewMCPServiceResponses(adminContext(), nil))
 }
+
+func TestAttachMCPCatalogs_MarksStaleWithoutCopyingTools(t *testing.T) {
+	svc := &types.MCPService{ID: "svc-1", TransportType: types.MCPTransportSSE}
+	resp := NewMCPServiceResponses(adminContext(), []*types.MCPService{svc})
+	AttachMCPCatalogs(resp, []*types.MCPService{svc}, map[string]*types.MCPMetadataSummary{
+		"svc-1": {ServiceID: "svc-1", ToolCount: 3, ConfigFingerprint: "old"},
+	})
+	require := assert.New(t)
+	require.NotNil(resp[0].Catalog)
+	require.Equal(3, resp[0].Catalog.ToolCount)
+	require.True(resp[0].Catalog.Stale)
+	body, err := json.Marshal(resp[0])
+	require.NoError(err)
+	require.NotContains(string(body), `"tools"`)
+	require.Contains(string(body), `"tool_count":3`)
+}
