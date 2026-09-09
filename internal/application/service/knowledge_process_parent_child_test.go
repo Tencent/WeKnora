@@ -37,6 +37,10 @@ func (s *parentChildChunkService) DeleteChunksByKnowledgeID(context.Context, uin
 	return nil
 }
 
+func (s *parentChildChunkService) DeleteEmbedProgressByKnowledgeID(context.Context, string) error {
+	return nil
+}
+
 func (s *parentChildChunkService) CreateChunks(_ context.Context, chunks []*types.Chunk) error {
 	s.created = append([]*types.Chunk(nil), chunks...)
 	return nil
