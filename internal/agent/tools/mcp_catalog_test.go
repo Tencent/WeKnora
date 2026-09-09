@@ -117,6 +117,7 @@ func TestMCPCatalogRegistrationDoesNotConnect(t *testing.T) {
 		nil,
 		0,
 		nil,
+		nil,
 	)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
@@ -129,7 +130,7 @@ func TestMCPCatalogRegistrationDoesNotConnect(t *testing.T) {
 	require.Len(t, page.Servers, 1)
 	require.Equal(t, "not_loaded", page.Servers[0].Status)
 	// A nil manager would panic if registration or list_servers connected.
-	_, err = RegisterMCPTools(ctx, r, []*types.MCPService{{ID: "svc", Enabled: true}}, nil, nil, 0, nil)
+	_, err = RegisterMCPTools(ctx, r, []*types.MCPService{{ID: "svc", Enabled: true}}, nil, nil, 0, nil, nil)
 	require.ErrorContains(t, err, "already registered")
 }
 

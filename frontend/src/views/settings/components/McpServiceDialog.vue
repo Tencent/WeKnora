@@ -4,7 +4,7 @@
     :title="mode === 'add' ? t('mcpServiceDialog.addTitle') : t('mcpServiceDialog.editTitle')"
     :class="`mcp-drawer mcp-drawer--${formData.transport_type}`"
     :confirm-loading="submitting"
-    :confirm-disabled="metadataBusy"
+    :confirm-disabled="metadataBusy || (step === 1 && !toolsSynced)"
     :confirm-text="t(step === 0 ? 'mcpMetadata.saveNext' : 'common.save')"
     width="680px"
     :min-width="560"
@@ -350,7 +350,7 @@
           </div>
         </section>
         <McpMetadataPanel v-if="currentService?.id" :key="currentService.id" :service-id="currentService.id"
-          :disabled="submitting" @busy="metadataBusy = $event" />
+          :disabled="submitting" @busy="metadataBusy = $event" @synced="toolsSynced = $event" />
       </template>
     </t-form>
   </SettingDrawer>
@@ -403,6 +403,7 @@ const savedService = ref<MCPService | null>(null)
 const currentService = computed(() => savedService.value ?? props.service)
 const step = ref(0)
 const metadataBusy = ref(false)
+const toolsSynced = ref(false)
 const formRef = ref<FormInstanceFunctions>()
 const submitting = ref(false)
 const { t } = useI18n()
@@ -836,6 +837,7 @@ watch(
     }
     savedService.value = service
     step.value = 0
+    toolsSynced.value = false
     // 同时重置代码导入区域，避免上一个服务残留的粘贴内容/报错漂到新表单
     codeImportOpen.value = false
     codeImportText.value = ''
@@ -929,6 +931,8 @@ function buildPayload(asCreate: boolean): Partial<MCPService> {
 
 async function saveConnection(): Promise<MCPService | null> {
   if (submitting.value) return null
+  const valid = await formRef.value?.validate()
+  if (valid !== true) return null
   if (!formData.value.name.trim()) { MessagePlugin.warning(t('mcpServiceDialog.rules.nameRequired')); return null }
   try { const url = new URL(formData.value.url); if (!['https:', 'http:'].includes(url.protocol)) throw new Error('url') }
   catch { MessagePlugin.warning(t('mcpServiceDialog.rules.urlInvalid')); return null }
@@ -953,6 +957,10 @@ async function handleNext() {
 const handleSubmit = async () => {
   const id = currentService.value?.id
   if (!id || submitting.value || metadataBusy.value) return
+  if (!toolsSynced.value) {
+    MessagePlugin.warning(t('mcpMetadata.syncRequired'))
+    return
+  }
   submitting.value = true
   try {
     await updateMCPService(id, { description: formData.value.description, usage_instructions: formData.value.usage_instructions })

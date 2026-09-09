@@ -64,22 +64,24 @@ func TestMCPExposureWithoutMentionReachesProviderAndExecutes(t *testing.T) {
 			defer manager.Shutdown()
 			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 			registry := agenttools.NewToolRegistry()
-			var readers []func(context.Context, uint64, string) (*types.MCPMetadata, error)
+			var metadata *agenttools.MCPMetadataIO
 			if deferred {
-				readers = append(readers, func(context.Context, uint64, string) (*types.MCPMetadata, error) {
-					return &types.MCPMetadata{
-						Instructions: "Order IDs belong to the external customer system.",
-						Tools: []*types.MCPTool{
-							{
-								Name:        "get_order",
-								Description: description,
-								InputSchema: json.RawMessage(
-									`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`,
-								),
+				metadata = &agenttools.MCPMetadataIO{
+					Get: func(context.Context, uint64, string) (*types.MCPMetadata, error) {
+						return &types.MCPMetadata{
+							Instructions: "Order IDs belong to the external customer system.",
+							Tools: []*types.MCPTool{
+								{
+									Name:        "get_order",
+									Description: description,
+									InputSchema: json.RawMessage(
+										`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`,
+									),
+								},
 							},
-						},
-					}, nil
-				})
+						}, nil
+					},
+				}
 			}
 			_, err := agenttools.RegisterMCPTools(
 				ctx,
@@ -99,7 +101,8 @@ func TestMCPExposureWithoutMentionReachesProviderAndExecutes(t *testing.T) {
 				nil,
 				0,
 				nil,
-				readers...)
+				metadata,
+			)
 			require.NoError(t, err)
 			if deferred {
 				registry.PrepareMCPTools(ctx)

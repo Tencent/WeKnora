@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -163,6 +165,32 @@ func (r *ToolRegistry) prepareMCPToolsWithMode(ctx context.Context, grace time.D
 	r.RefreshMCPTools(ctx)
 }
 
+// RememberMCPHistory republishes tools this session already described or called
+// so a new engine does not require another describe round.
+func (r *ToolRegistry) RememberMCPHistory(messages []chat.Message) {
+	c := r.mcpCatalog()
+	if c == nil {
+		return
+	}
+	for _, msg := range messages {
+		for _, call := range msg.ToolCalls {
+			name := call.Function.Name
+			if name == ToolCallMCPTool {
+				var args struct {
+					ToolRef string `json:"tool_ref"`
+				}
+				if json.Unmarshal([]byte(call.Function.Arguments), &args) == nil && args.ToolRef != "" {
+					c.historyRefs.Store(args.ToolRef, true)
+				}
+				continue
+			}
+			if strings.HasPrefix(name, "mcp_") && name != ToolDiscoverMCPTools {
+				c.historyNames.Store(name, true)
+			}
+		}
+	}
+}
+
 // RefreshMCPTools publishes ready definitions between model requests, including
 // catalogs loaded by discovery/OAuth or refreshed after the initial request.
 // No network discovery occurs here. Policy checks remain fresh even when the
@@ -209,9 +237,10 @@ func (r *ToolRegistry) RefreshMCPTools(ctx context.Context) {
 			continue
 		}
 		for _, tool := range visible {
-			if !r.mcpDirect && !c.describedRef(mcpToolRef(tool)) {
+			if !r.mcpDirect && !c.advertised(tool) {
 				continue
 			}
+			c.rememberAdvertised(tool)
 			bound := NewMCPTool(tool.service, tool.mcpTool, tool.mcpManager, tool.gate, tool.authWaitTimeoutSeconds)
 			bound.registeredName = mcpRegisteredName(tool)
 			bound.serverInstructions = tool.serverInstructions

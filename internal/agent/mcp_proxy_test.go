@@ -49,6 +49,7 @@ func TestAgentMCPProxyKeepsTargetEventsAndProtocolHistory(t *testing.T) {
 		nil,
 		0,
 		nil,
+		nil,
 	)
 	require.NoError(t, err)
 	engine := newTestEngine(t, &mockChat{})

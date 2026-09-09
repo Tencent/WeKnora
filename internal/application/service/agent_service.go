@@ -331,7 +331,8 @@ func (s *agentService) registerMCPTools(
 		}
 		registered, err := tools.RegisterMCPTools(
 			ctx, toolRegistry, enabledServices, s.mcpManager, s.toolApprovalGate,
-			config.MCPAuthWaitTimeout, s.mcpServiceService.GetMCPServiceByID, metadataService.GetMCPMetadata,
+			config.MCPAuthWaitTimeout, s.mcpServiceService.GetMCPServiceByID,
+			&tools.MCPMetadataIO{Get: metadataService.GetMCPMetadata, Put: metadataService.PersistMCPMetadata},
 		)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to register MCP directory: %v", err)

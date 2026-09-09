@@ -4,7 +4,23 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"time"
+)
+
+var (
+	// ErrMCPServiceNotFound is returned when the workspace cannot see this MCP service.
+	ErrMCPServiceNotFound = errors.New("MCP service not found")
+	// ErrMCPOAuthPrincipalRequired is returned when an OAuth directory is read without a user.
+	ErrMCPOAuthPrincipalRequired = errors.New("OAuth metadata requires an authenticated principal")
+	// ErrMCPMetadataStorage is returned when the metadata repository is unavailable.
+	ErrMCPMetadataStorage = errors.New("MCP metadata storage is unavailable")
+	// ErrMCPMetadataConnectionChanged is returned when a refresh races a connection edit.
+	ErrMCPMetadataConnectionChanged = errors.New("MCP connection changed during refresh")
+	// ErrMCPMetadataTooLarge is returned when the serialized directory exceeds 8 MiB.
+	ErrMCPMetadataTooLarge = errors.New("MCP metadata exceeds the 8 MiB storage limit")
+	// ErrMCPMetadataInvalidTools is returned when the listed directory has empty or duplicate names.
+	ErrMCPMetadataInvalidTools = errors.New("MCP directory contains empty or duplicate tool names")
 )
 
 // MCPMetadata is a complete, explicitly synchronized directory. OAuth snapshots

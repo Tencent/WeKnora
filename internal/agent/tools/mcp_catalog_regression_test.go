@@ -94,7 +94,7 @@ func TestMCPCatalogPreservesAndValidatesRawSchemaOverHTTP(t *testing.T) {
 	}
 	ctx, registry := catalogTestContext(), NewToolRegistry()
 	gate := &modifiedArgsGate{}
-	_, err := RegisterMCPTools(ctx, registry, []*types.MCPService{service}, manager, gate, 0, nil)
+	_, err := RegisterMCPTools(ctx, registry, []*types.MCPService{service}, manager, gate, 0, nil, nil)
 	require.NoError(t, err)
 	page := discoverPage(ctx, t, registry, map[string]any{"mode": "list_tools", "server_id": "test"})
 	require.Len(t, page.Tools, 2, "read every protocol page")

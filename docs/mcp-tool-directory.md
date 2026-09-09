@@ -5,7 +5,7 @@
 MCP 配置分两步，使用现有 SettingDrawer，步骤导航沿用沙箱的圆形编号与连接线，分组使用标题和细分隔线。
 
 1. **连接配置**：名称、启用状态、传输协议、URL、请求头、认证及超时。保存后进入第二步；OAuth 授权仍按用户独立进行。
-2. **工具与用途说明**：编辑用途摘要和使用说明；优先展示已保存的 Tools 清单，明确显示同步时间、原始服务说明及是否需要重新同步。点击“连接并拉取 Tools / 刷新 Tools”才会访问 MCP Server。工具启用和审批开关即时保存。
+2. **工具与用途说明**：编辑用途摘要和使用说明。进入本步时若还没有目录，会自动连接并拉取 Tools；已保存的目录直接展示，只有点刷新才会再次访问 MCP Server。连接已变更的旧目录不会自动覆盖，需手动刷新。工具启用和审批开关即时保存。
 
 编辑时无需为展示 Tools 再次连接上游。首次使用旧服务需要同步一次：此前数据库只有工具的启用/审批设置，没有完整工具目录可以迁移。
 
@@ -32,7 +32,7 @@ MCP 配置分两步，使用现有 SettingDrawer，步骤导航沿用沙箱的�
 ## API
 
 - `GET /api/v1/mcp-services/:id/metadata`：只读库，未同步返回 `data:null`，旧连接的快照返回 `stale:true`；Viewer 及以上权限。
-- `POST /api/v1/mcp-services/:id/metadata/refresh`：显式连接并同步；Admin 权限。
+- `POST /api/v1/mcp-services/:id/metadata/refresh`：显式连接并同步。静态认证写入租户共享快照，OAuth 写入当前用户快照；Viewer 及以上可调用，以便对话内授权后落库。刷新失败对外返回笼统错误，不带回上游地址。
 - 服务原有 POST / PUT 接收 `description` 和 `usage_instructions`。凭证继续走独立子资源，编辑说明不会覆盖密钥。
 - 旧 `/test`、`/tools` 和 `/resources` API 保留原有行为；新分步页面不通过它们读取缓存。
 
@@ -40,11 +40,11 @@ MCP 配置分两步，使用现有 SettingDrawer，步骤导航沿用沙箱的�
 
 **入库不等于全量发送给模型。** 默认使用普通函数调用实现应用层按需加载，不依赖 Responses 或 Anthropic 的原生 tool-search 协议。
 
-1. `registerMCPTools` 筛选当前租户及 Agent 授权范围内的启用服务，安装受权限约束的目录，注入只读持久快照的 loader。
+1. `registerMCPTools` 筛选当前租户及 Agent 授权范围内的启用服务，安装受权限约束的目录。生产路径注入只读快照 loader；目录缺失时（升级后尚未同步）可在已授权连接上 live `tools/list` 并写入当前主体的快照。OAuth 服务在预加载阶段不会 live 连接（避免弹出授权窗）；对话内工具执行上下文中才允许 live-fill。连接已变更的 stale 快照不会自动 live-fill，必须在设置页显式刷新。
 2. `PrepareMCPTools` 预读数据库快照，不连接上游。读取最多 8 路并发，初始等待窗口 1 秒，整体受请求取消及 30 秒超时约束。未就绪服务仍展示在来源目录中。
 3. 首轮模型只看到两个入口 `discover_mcp_tools` / `call_mcp_tool`，以及服务级名称、用途说明和状态。来源摘要有 16 KiB 总预算，超出时提示通过 `list_servers` 分页枚举；每个工具的完整描述和 schema 不在首轮 tools 中。
 4. 模型按服务 `list_tools` / `search`，再 `describe` 一个具体工具。`describe` 返回完整描述、schema、原始服务 instructions、人工使用说明、`function_name` 和 `tool_ref`，并记录本次 engine 已读取的定义版本。
-5. 下一次模型请求前，`RefreshMCPTools` 只把已 describe 且仍获准的工具发布为普通函数。也可继续用 `call_mcp_tool` 兼容代理调用。目录操作和后台读取线程不会在并行执行期间修改 registry。
+5. 下一次模型请求前，`RefreshMCPTools` 把已 describe、或本会话历史里已经用过的工具发布为普通函数。新 engine 会从对话历史恢复 `mcp_*` 函数名和 `call_mcp_tool` 的 `tool_ref`，避免多轮必须重新 describe。也可继续用 `call_mcp_tool` 兼容代理调用。目录操作和后台读取线程不会在并行执行期间修改 registry。
 6. 实际执行目标 MCP 工具时才建立所需连接。权限、审批、OAuth 等待、参数校验和结果处理继续走原有执行链。
 
 没有 mention 也能看到所有获准服务；mention 只设置优先使用项，不缩小或扩大 Agent 配置的 `all / selected / none` 授权范围。
@@ -68,7 +68,7 @@ MCP 配置分两步，使用现有 SettingDrawer，步骤导航沿用沙箱的�
 
 当前 engine 的目录绑定租户、调用主体及有效 OAuth 主体。读取和执行重新检查服务配置、工具策略；缓存不缓存权限决策。新增到 Agent 授权范围外的服务不会自动进入当前目录。运行时 `list_tools(refresh:true)` 重新读取持久快照，上游同步由管理页面显式发起。
 
-具体函数使用原始服务 ID 和工具名生成稳定哈希后缀，避免 Unicode、大小写、标点、超长名称清洗后冲突。调用引用绑定服务、原始工具名和 schema，旧 schema 被替换后无法沿用旧引用。新 engine 需要重新 describe。
+具体函数使用原始服务 ID 和工具名生成稳定哈希后缀，避免 Unicode、大小写、标点、超长名称清洗后冲突。调用引用绑定服务、原始工具名和 schema，旧 schema 被替换后无法沿用旧引用。新 engine 会根据会话历史恢复已用过的函数，无需再 describe 一次。
 
 完整 JSON Schema 校验覆盖组合约束、额外属性、嵌套结构和本地引用。验证器不访问外部 URL 或文件。参数转换和审批后的修改也经过校验。定义结果超过预算会明确失败或整体替换为说明，不使用半截 JSON。
 

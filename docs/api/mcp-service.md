@@ -13,6 +13,8 @@ MCP（Model Context Protocol）服务管理接口，提供 MCP 服务的 CRUD、
 | DELETE | `/mcp-services/:id`                               | 删除 MCP 服务                                 |
 | POST   | `/mcp-services/:id/test`                          | 测试 MCP 服务连通性                           |
 | GET    | `/mcp-services/:id/tools`                         | 获取 MCP 服务工具列表                         |
+| GET    | `/mcp-services/:id/metadata`                      | 读取已保存的工具目录（不连接上游）            |
+| POST   | `/mcp-services/:id/metadata/refresh`              | 连接上游并同步完整工具目录                    |
 | GET    | `/mcp-services/:id/resources`                     | 获取 MCP 服务资源列表                         |
 | GET    | `/mcp-services/:id/tool-approvals`                | 列出该服务下各工具的人工审批策略 |
 | PUT    | `/mcp-services/:id/tool-approvals/:tool_name`     | 设置/更新某工具的人工审批策略  |
@@ -34,6 +36,7 @@ MCP（Model Context Protocol）服务管理接口，提供 MCP 服务的 CRUD、
 | stdio_config     | object  | 条件 | stdio 传输配置，包含 `command`、`args`；当 `transport_type` 为 `stdio` 时必填                  |
 | env_vars         | object  | 否   | 环境变量（stdio 场景常用）                                                                    |
 | enabled          | boolean | 否   | 是否启用                                                                                      |
+| usage_instructions | string | 否   | 给模型看的服务级使用说明；刷新工具目录时不会覆盖                              |
 
 **请求**:
 
@@ -335,6 +338,64 @@ curl --location --request POST 'http://localhost:8080/api/v1/mcp-services/mcp-00
     "success": true
 }
 ```
+
+## GET `/mcp-services/:id/metadata` - 读取已保存的工具目录
+
+只读数据库，不连接上游 MCP Server。未同步时 `data` 为 `null`。连接或认证配置变更后，旧快照仍返回，但 `stale` 为 `true`，运行时不会使用。OAuth 目录按当前授权主体隔离，不会回退到其他用户或租户共享快照。Viewer 及以上可调用。
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/mcp-services/mcp-00000001/metadata' \
+--header 'X-API-Key: sk-xxxxx'
+```
+
+**响应**（已同步）:
+
+```json
+{
+    "success": true,
+    "data": {
+        "service_id": "mcp-00000001",
+        "tools": [
+            {
+                "name": "get_weather",
+                "description": "获取指定城市的天气信息",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "city": {"type": "string"}
+                    },
+                    "required": ["city"]
+                }
+            }
+        ],
+        "instructions": "Use IATA city codes.",
+        "server_name": "weather",
+        "server_version": "1.0",
+        "server_description": "Weather MCP",
+        "synced_at": "2026-09-09T02:00:00Z",
+        "stale": false
+    }
+}
+```
+
+未同步时 `data` 为 `null`。常见错误：服务不存在 `404`；OAuth 目录缺少授权主体 `401`。
+
+## POST `/mcp-services/:id/metadata/refresh` - 同步工具目录
+
+显式连接上游并原子替换完整目录。静态认证写入租户共享快照；OAuth 服务写入当前用户的快照。Viewer 及以上可调用，以便对话内授权后的用户保存自己的目录。刷新失败保留原快照，响应不会带回上游 URL 等连接细节。
+
+连接配置在刷新过程中被改写时返回 `409`。目录过大或不完整返回 `400`。
+
+**请求**:
+
+```curl
+curl --location --request POST 'http://localhost:8080/api/v1/mcp-services/mcp-00000001/metadata/refresh' \
+--header 'X-API-Key: sk-xxxxx'
+```
+
+成功响应形状与 `GET /mcp-services/:id/metadata` 相同。
 
 ## GET `/mcp-services/:id/tools` - 获取 MCP 服务工具列表
 

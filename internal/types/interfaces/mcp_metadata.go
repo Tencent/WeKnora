@@ -16,6 +16,8 @@ type MCPMetadataRepository interface {
 type MCPMetadataService interface {
 	// GetMCPMetadata reads only persisted metadata; nil means never synchronized.
 	GetMCPMetadata(context.Context, uint64, string) (*types.MCPMetadata, error)
+	// PersistMCPMetadata stores a complete directory already listed on an authorized connection.
+	PersistMCPMetadata(context.Context, uint64, string, []*types.MCPTool, string) error
 	// RefreshMCPMetadata explicitly connects and atomically replaces a complete snapshot.
 	RefreshMCPMetadata(context.Context, uint64, string) (*types.MCPMetadata, error)
 }

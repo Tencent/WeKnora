@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/event"
 	internalmcp "github.com/Tencent/WeKnora/internal/mcp"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 	sdkmcp "github.com/mark3labs/mcp-go/mcp"
@@ -125,7 +126,7 @@ func TestMCPDirectExecutionPreservesValidationApprovalAndImages(t *testing.T) {
 	ctx := catalogTestContext()
 	registry := NewToolRegistry()
 	gate := &proxyApprovalGate{}
-	_, err := RegisterMCPTools(ctx, registry, []*types.MCPService{service}, manager, gate, 0, nil)
+	_, err := RegisterMCPTools(ctx, registry, []*types.MCPService{service}, manager, gate, 0, nil, nil)
 	require.NoError(t, err)
 	registry.prepareMCPTools(ctx, time.Second)
 	name := MCPToolNamesByServiceID(registry)[service.ID][0]
@@ -306,4 +307,40 @@ func TestMCPDeferredSourcesStaySmallAndOnlyDescribedToolsLoad(t *testing.T) {
 	tool, err := r.GetTool(described["function_name"].(string))
 	require.NoError(t, err)
 	require.Contains(t, tool.Description(), "DO-NOT-SEND-ALL-DESCRIPTIONS")
+}
+
+func TestMCPHistoryRestoresAdvertisedFunctions(t *testing.T) {
+	restore := func(t *testing.T, history func(*MCPTool) chat.Message) {
+		t.Helper()
+		ctx, r, c, _, _ := catalogFixture(t, 1)
+		snapshot, _, err := c.snapshot(ctx, "server-1", false)
+		require.NoError(t, err)
+		require.Len(t, snapshot, 1)
+		require.Len(t, r.GetModelFunctionDefinitions(), 2)
+		r.mcpPrepared = true
+		r.RememberMCPHistory([]chat.Message{history(snapshot[0])})
+		r.RefreshMCPTools(ctx)
+		_, err = r.GetTool(mcpRegisteredName(snapshot[0]))
+		require.NoError(t, err)
+	}
+
+	restore(t, func(tool *MCPTool) chat.Message {
+		return chat.Message{
+			Role: "assistant",
+			ToolCalls: []chat.ToolCall{{
+				Function: chat.FunctionCall{Name: mcpRegisteredName(tool)},
+			}},
+		}
+	})
+	restore(t, func(tool *MCPTool) chat.Message {
+		return chat.Message{
+			Role: "assistant",
+			ToolCalls: []chat.ToolCall{{
+				Function: chat.FunctionCall{
+					Name:      ToolCallMCPTool,
+					Arguments: `{"tool_ref":"` + mcpToolRef(tool) + `"}`,
+				},
+			}},
+		}
+	})
 }

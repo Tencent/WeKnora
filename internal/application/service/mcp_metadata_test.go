@@ -103,7 +103,18 @@ func TestMCPMetadataRefreshAndOfflineEditing(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, got.Stale)
 	_, err = metadata.GetMCPMetadata(ctx, 2, "svc")
-	require.Error(t, err, "another tenant must not access the snapshot")
+	require.ErrorIs(t, err, types.ErrMCPServiceNotFound, "another tenant must not access the snapshot")
+	require.NoError(t, metadata.PersistMCPMetadata(
+		ctx,
+		1,
+		"svc",
+		[]*types.MCPTool{{Name: "live", Description: "from chat", InputSchema: schema}},
+		"from-chat",
+	))
+	got, err = metadata.GetMCPMetadata(ctx, 1, "svc")
+	require.NoError(t, err)
+	require.Equal(t, "live", got.Tools[0].Name)
+	require.Equal(t, "from-chat", got.Instructions)
 
 	// OAuth metadata belongs to the effective authorizing user, not the admin
 	// who happened to create the shared service configuration.
@@ -125,5 +136,5 @@ func TestMCPMetadataRefreshAndOfflineEditing(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, got, "never fall back to another user's or a formerly shared snapshot")
 	_, err = metadata.GetMCPMetadata(ctx, 1, "svc")
-	require.Error(t, err, "OAuth metadata cannot be read without a principal")
+	require.ErrorIs(t, err, types.ErrMCPOAuthPrincipalRequired, "OAuth metadata cannot be read without a principal")
 }

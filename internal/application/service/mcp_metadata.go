@@ -17,32 +17,127 @@ func metadataPrincipal(ctx context.Context, service *types.MCPService) (string, 
 	}
 	p := types.MCPOAuthPrincipalFromContext(ctx).StorageID()
 	if p == "" {
-		return "", fmt.Errorf("OAuth metadata requires an authenticated principal")
+		return "", types.ErrMCPOAuthPrincipalRequired
 	}
 	return p, nil
 }
 
-func (s *mcpServiceService) GetMCPMetadata(ctx context.Context, tenant uint64, id string) (*types.MCPMetadata, error) {
+func (s *mcpServiceService) metadataRepo() (interfaces.MCPMetadataRepository, error) {
+	repo, ok := s.mcpServiceRepo.(interfaces.MCPMetadataRepository)
+	if !ok {
+		return nil, types.ErrMCPMetadataStorage
+	}
+	return repo, nil
+}
+
+func (s *mcpServiceService) loadServiceForMetadata(
+	ctx context.Context,
+	tenant uint64,
+	id string,
+) (*types.MCPService, string, interfaces.MCPMetadataRepository, error) {
 	service, err := s.mcpServiceRepo.GetByID(ctx, tenant, id)
 	if err != nil {
-		return nil, err
+		return nil, "", nil, err
 	}
 	if service == nil || tenant == 0 {
-		return nil, fmt.Errorf("MCP service not found")
+		return nil, "", nil, types.ErrMCPServiceNotFound
 	}
 	principal, err := metadataPrincipal(ctx, service)
 	if err != nil {
-		return nil, err
+		return nil, "", nil, err
 	}
-	repo, ok := s.mcpServiceRepo.(interfaces.MCPMetadataRepository)
-	if !ok {
-		return nil, fmt.Errorf("MCP metadata storage is unavailable")
+	repo, err := s.metadataRepo()
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return service, principal, repo, nil
+}
+
+func (s *mcpServiceService) GetMCPMetadata(ctx context.Context, tenant uint64, id string) (*types.MCPMetadata, error) {
+	service, principal, repo, err := s.loadServiceForMetadata(ctx, tenant, id)
+	if err != nil {
+		return nil, err
 	}
 	snapshot, err := repo.GetMetadata(ctx, tenant, id, principal)
 	if err == nil && snapshot != nil {
 		snapshot.Stale = snapshot.ConfigFingerprint != types.MCPConfigFingerprint(service)
 	}
 	return snapshot, err
+}
+
+func (s *mcpServiceService) commitMCPMetadata(
+	ctx context.Context,
+	tenant uint64,
+	service *types.MCPService,
+	principal string,
+	listed []*types.MCPTool,
+	instructions, serverName, serverVersion, serverDescription string,
+	started time.Time,
+) (*types.MCPMetadata, error) {
+	repo, err := s.metadataRepo()
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool)
+	for _, tool := range listed {
+		if tool == nil || tool.Name == "" || seen[tool.Name] {
+			return nil, types.ErrMCPMetadataInvalidTools
+		}
+		seen[tool.Name] = true
+	}
+	if listed == nil {
+		listed = []*types.MCPTool{}
+	}
+	snapshot := &types.MCPMetadata{
+		TenantID:          tenant,
+		ServiceID:         service.ID,
+		Principal:         principal,
+		ConfigFingerprint: types.MCPConfigFingerprint(service),
+		Tools:             listed,
+		Instructions:      instructions,
+		ServerName:        serverName,
+		ServerVersion:     serverVersion,
+		ServerDescription: serverDescription,
+		SyncedAt:          started,
+	}
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > 8*1024*1024 {
+		return nil, types.ErrMCPMetadataTooLarge
+	}
+	current, err := s.mcpServiceRepo.GetByID(ctx, tenant, service.ID)
+	if err != nil {
+		return nil, err
+	}
+	if current == nil || types.MCPConfigFingerprint(current) != snapshot.ConfigFingerprint {
+		return nil, types.ErrMCPMetadataConnectionChanged
+	}
+	if err := repo.SaveMetadata(ctx, snapshot); err != nil {
+		return nil, err
+	}
+	return s.GetMCPMetadata(ctx, tenant, service.ID)
+}
+
+// PersistMCPMetadata writes a complete directory already listed on an authorized
+// connection. It is how a chatting OAuth user stores their own snapshot without
+// an admin settings refresh.
+func (s *mcpServiceService) PersistMCPMetadata(
+	ctx context.Context,
+	tenant uint64,
+	id string,
+	listed []*types.MCPTool,
+	instructions string,
+) error {
+	service, principal, _, err := s.loadServiceForMetadata(ctx, tenant, id)
+	if err != nil {
+		return err
+	}
+	_, err = s.commitMCPMetadata(
+		ctx, tenant, service, principal, listed, instructions, "", "", "", time.Now().UTC(),
+	)
+	return err
 }
 
 // Refresh performs no user operations and never publishes a partial tools/list.
@@ -53,20 +148,9 @@ func (s *mcpServiceService) RefreshMCPMetadata(
 	tenant uint64,
 	id string,
 ) (*types.MCPMetadata, error) {
-	service, err := s.mcpServiceRepo.GetByID(ctx, tenant, id)
+	service, principal, _, err := s.loadServiceForMetadata(ctx, tenant, id)
 	if err != nil {
 		return nil, err
-	}
-	if service == nil || tenant == 0 {
-		return nil, fmt.Errorf("MCP service not found")
-	}
-	principal, err := metadataPrincipal(ctx, service)
-	if err != nil {
-		return nil, err
-	}
-	repo, ok := s.mcpServiceRepo.(interfaces.MCPMetadataRepository)
-	if !ok {
-		return nil, fmt.Errorf("MCP metadata storage is unavailable")
 	}
 	started := time.Now().UTC()
 	config := &mcp.ClientConfig{Service: service}
@@ -77,55 +161,32 @@ func (s *mcpServiceService) RefreshMCPMetadata(
 	}
 	client, err := mcp.NewMCPClient(config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not refresh MCP directory: %w", err)
 	}
 	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := client.Connect(refreshCtx); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not refresh MCP directory: %w", err)
 	}
 	defer func() { _ = client.Disconnect() }()
 	init, err := client.Initialize(refreshCtx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not refresh MCP directory: %w", err)
 	}
 	listed, err := client.ListTools(refreshCtx)
 	if err != nil {
 		return nil, fmt.Errorf("could not refresh complete MCP directory: %w", err)
 	}
-	seen := make(map[string]bool)
-	for _, tool := range listed {
-		if tool == nil || tool.Name == "" || seen[tool.Name] {
-			return nil, fmt.Errorf("MCP directory contains empty or duplicate tool names")
-		}
-		seen[tool.Name] = true
-	}
-	if listed == nil {
-		listed = []*types.MCPTool{}
-	}
-	snapshot := &types.MCPMetadata{
-		TenantID: tenant, ServiceID: id, Principal: principal,
-		ConfigFingerprint: types.MCPConfigFingerprint(service), Tools: listed,
-		Instructions: init.Instructions, ServerName: init.ServerInfo.Name,
-		ServerVersion: init.ServerInfo.Version, ServerDescription: init.ServerInfo.Description,
-		SyncedAt: started,
-	}
-	raw, err := json.Marshal(snapshot)
-	if err != nil {
-		return nil, err
-	}
-	if len(raw) > 8*1024*1024 {
-		return nil, fmt.Errorf("MCP metadata exceeds the 8 MiB storage limit")
-	}
-	current, err := s.mcpServiceRepo.GetByID(refreshCtx, tenant, id)
-	if err != nil {
-		return nil, err
-	}
-	if current == nil || types.MCPConfigFingerprint(current) != snapshot.ConfigFingerprint {
-		return nil, fmt.Errorf("MCP connection changed during refresh; refresh the saved configuration again")
-	}
-	if err := repo.SaveMetadata(refreshCtx, snapshot); err != nil {
-		return nil, err
-	}
-	return s.GetMCPMetadata(refreshCtx, tenant, id)
+	return s.commitMCPMetadata(
+		refreshCtx,
+		tenant,
+		service,
+		principal,
+		listed,
+		init.Instructions,
+		init.ServerInfo.Name,
+		init.ServerInfo.Version,
+		init.ServerInfo.Description,
+		started,
+	)
 }

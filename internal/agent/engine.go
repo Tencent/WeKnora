@@ -318,6 +318,10 @@ func (e *AgentEngine) Execute(
 		imgs = imageURLs[0]
 	}
 	messages := e.buildMessagesWithLLMContext(systemPrompt, query, sessionID, llmContext, imgs)
+	if e.toolRegistry != nil {
+		e.toolRegistry.RememberMCPHistory(messages)
+		e.toolRegistry.RefreshMCPTools(ctx)
+	}
 
 	// Get tool definitions for function calling
 	tools := e.buildToolsForLLM()

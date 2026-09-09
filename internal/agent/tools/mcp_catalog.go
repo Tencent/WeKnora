@@ -122,6 +122,8 @@ type MCPCatalog struct {
 	oauthPrincipal string
 	servers        map[string]*mcpCatalogServer
 	described      sync.Map // Definition references successfully returned by describe in this engine.
+	historyNames   sync.Map // Function names already used in this session's history.
+	historyRefs    sync.Map // call_mcp_tool refs already used in this session's history.
 	preloadOnce    sync.Once
 	preloadDone    chan struct{}
 	load           mcpCatalogLoader
@@ -336,6 +338,30 @@ func mcpToolRef(tool *MCPTool) string {
 func (c *MCPCatalog) describedRef(ref string) bool {
 	_, ok := c.described.Load(ref)
 	return ok
+}
+
+func (c *MCPCatalog) knownCallableRef(ref string) bool {
+	if c.describedRef(ref) {
+		return true
+	}
+	_, ok := c.historyRefs.Load(ref)
+	return ok
+}
+
+func (c *MCPCatalog) advertised(tool *MCPTool) bool {
+	ref := mcpToolRef(tool)
+	if c.describedRef(ref) {
+		return true
+	}
+	if _, ok := c.historyRefs.Load(ref); ok {
+		return true
+	}
+	_, ok := c.historyNames.Load(mcpRegisteredName(tool))
+	return ok
+}
+
+func (c *MCPCatalog) rememberAdvertised(tool *MCPTool) {
+	c.described.Store(mcpToolRef(tool), true)
 }
 
 func shortMCPDescription(s string) string {
@@ -780,7 +806,7 @@ func (t *MCPCallTool) resolve(ctx context.Context, raw json.RawMessage) (*MCPToo
 			if err := t.catalog.checkEnabled(ctx, tool); err != nil {
 				return nil, nil, err
 			}
-			if !t.catalog.describedRef(ref) {
+			if !t.catalog.knownCallableRef(ref) {
 				return nil, nil, fmt.Errorf(
 					"tool schema has not been described; use discover_mcp_tools(mode=\"describe\", "+
 						"server_id=%q, tool_name=%q) before calling",
@@ -835,7 +861,7 @@ func (r *ToolRegistry) MCPCallTarget(ctx context.Context, name string, raw json.
 		return nil
 	}
 	tool := proxy.catalog.cachedTool(ref)
-	if tool == nil || !proxy.catalog.describedRef(ref) {
+	if tool == nil || !proxy.catalog.knownCallableRef(ref) {
 		// Listing caches the target, but presentation must stay on call_mcp_tool
 		// until describe has returned this exact schema reference.
 		return nil

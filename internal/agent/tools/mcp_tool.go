@@ -450,6 +450,55 @@ func sanitizeName(name string) string {
 	return result.String()
 }
 
+// MCPMetadataIO reads persisted directories and optionally writes a snapshot
+// listed from an already-authorized live connection. Put must not be used to
+// publish a partial tools/list.
+type MCPMetadataIO struct {
+	Get func(context.Context, uint64, string) (*types.MCPMetadata, error)
+	Put func(context.Context, uint64, string, []*types.MCPTool, string) error
+}
+
+func loadMCPDirectory(
+	loadCtx context.Context,
+	service *types.MCPService,
+	mcpManager *mcp.MCPManager,
+	gate approval.MCPApproval,
+	oauthSess *MCPOAuthSession,
+	metadata *MCPMetadataIO,
+) ([]*types.MCPTool, string, error) {
+	if metadata == nil || metadata.Get == nil {
+		return loadMCPServiceTools(loadCtx, service, mcpManager, gate, oauthSess)
+	}
+	tenant, _ := types.TenantIDFromContext(loadCtx)
+	snapshot, err := metadata.Get(loadCtx, tenant, service.ID)
+	if err != nil {
+		return nil, "", err
+	}
+	if snapshot != nil && snapshot.Stale {
+		return nil, "", fmt.Errorf("MCP directory is stale; refresh Tools in Settings > MCP management")
+	}
+	if snapshot != nil {
+		return snapshot.Tools, snapshot.Instructions, nil
+	}
+	if service.AuthConfig.IsOAuth() {
+		if _, ok := ToolExecFromContext(loadCtx); !ok {
+			return nil, "", fmt.Errorf("MCP directory is missing; authorize this service, then refresh Tools")
+		}
+	}
+	definitions, instructions, err := loadMCPServiceTools(loadCtx, service, mcpManager, gate, oauthSess)
+	if err != nil {
+		return nil, "", err
+	}
+	if metadata.Put != nil {
+		if persistErr := metadata.Put(loadCtx, tenant, service.ID, definitions, instructions); persistErr != nil {
+			logger.GetLogger(loadCtx).Warnf(
+				"Failed to persist MCP directory for service %s: %v", service.Name, persistErr,
+			)
+		}
+	}
+	return definitions, instructions, nil
+}
+
 // RegisterMCPTools installs a scoped directory and call proxy without connecting
 // to MCP servers or advertising their full schemas. The count is services, not
 // tools: discovery occurs on demand during tool execution.
@@ -461,7 +510,7 @@ func RegisterMCPTools(
 	gate approval.MCPApproval,
 	authWaitTimeoutSeconds int,
 	lookup MCPServiceLookup,
-	metadataReaders ...func(context.Context, uint64, string) (*types.MCPMetadata, error),
+	metadata *MCPMetadataIO,
 ) (int, error) {
 	catalog := newMCPCatalog(
 		ctx,
@@ -470,24 +519,9 @@ func RegisterMCPTools(
 		func(loadCtx context.Context, service *types.MCPService) ([]*MCPTool, error) {
 			meta, _ := ToolExecFromContext(loadCtx)
 			oauthSess := oauthSessionFromToolExec(loadCtx, meta).withAuthWaitTimeout(authWaitTimeoutSeconds)
-			var definitions []*types.MCPTool
-			var instructions string
-			var err error
-			if len(metadataReaders) > 0 && metadataReaders[0] != nil {
-				tenant, _ := types.TenantIDFromContext(loadCtx)
-				var snapshot *types.MCPMetadata
-				snapshot, err = metadataReaders[0](loadCtx, tenant, service.ID)
-				if err == nil {
-					if snapshot == nil || snapshot.Stale {
-						err = fmt.Errorf("MCP directory is missing or stale; " +
-							"refresh Tools in Settings > MCP management")
-					} else {
-						definitions, instructions = snapshot.Tools, snapshot.Instructions
-					}
-				}
-			} else {
-				definitions, instructions, err = loadMCPServiceTools(loadCtx, service, mcpManager, gate, oauthSess)
-			}
+			definitions, instructions, err := loadMCPDirectory(
+				loadCtx, service, mcpManager, gate, oauthSess, metadata,
+			)
 			if err != nil {
 				return nil, err
 			}
