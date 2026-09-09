@@ -3,6 +3,7 @@ import type { ComposerTranslation } from 'vue-i18n'
 const discoveryFields = [
   'mode', 'servers', 'tools', 'total', 'has_more', 'next_cursor', 'next_step',
   'notice', 'status', 'name', 'description', 'input_schema', 'tool_ref', 'server_id',
+  'server_name',
 ] as const
 
 function record(value: unknown): Record<string, unknown> {
@@ -27,6 +28,22 @@ export function parseMcpDiscovery(output?: string, data?: unknown): Record<strin
   return { ...parsed, ...discoveryOverlay(data) }
 }
 
+export function mcpDescriptionLead(text: string): string {
+  const trimmed = text.trim()
+  if (!trimmed) return ''
+  const beforeHeading = trimmed.split(/\n#{1,6}\s+/)[0] || trimmed
+  const withoutHeadings = beforeHeading.replace(/^#{1,6}\s+/gm, '')
+  const firstBlock = withoutHeadings.split(/\n\s*\n/)[0] || withoutHeadings
+  return firstBlock.replace(/\s+/g, ' ').trim()
+}
+
+export function mcpDescriptionNeedsExpand(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed) return false
+  if (trimmed.includes('\n')) return true
+  return [...mcpDescriptionLead(trimmed)].length > 80
+}
+
 export function mcpDiscoveryRows(data: Record<string, unknown>) {
   const source = data.mode === 'list_servers' ? data.servers : data.tools
   if (!Array.isArray(source)) return []
@@ -35,8 +52,10 @@ export function mcpDiscoveryRows(data: Record<string, unknown>) {
     if (typeof row.name !== 'string') return []
     return [{
       name: row.name,
-      description: typeof row.description === 'string' ? row.description : '',
+      description: typeof row.usage_instructions === 'string' && row.usage_instructions
+        ? row.usage_instructions : typeof row.description === 'string' ? row.description : '',
       status: typeof row.status === 'string' ? row.status : '',
+      serverName: typeof row.server_name === 'string' ? row.server_name : '',
     }]
   })
 }
@@ -86,8 +105,10 @@ export function getMcpToolTitle(t: ComposerTranslation, event: {
     describe: 'agentStream.mcp.describeTool',
   }
   const label = t(event.tool_name === 'call_mcp_tool' ? 'agentStream.mcp.callTool' : keys[String(mode)] || 'agentStream.mcp.discoverTools')
-  const name = mode === 'describe' ? data.name || args.tool_name : ''
-  const title = name && typeof name === 'string' ? `${label}：${name}` : label
+  const describeName = mode === 'describe' ? data.name || args.tool_name : ''
+  const serverName = typeof data.server_name === 'string' ? data.server_name : ''
+  const suffix = describeName || ((mode === 'list_tools' || mode === 'search') ? serverName : '')
+  const title = suffix && typeof suffix === 'string' ? `${label}：${suffix}` : label
   if (event.pending) return t('agentStream.toolStatus.calling', { name: title })
   if (event.success === false) return t('agentStream.toolStatus.calledFailed', { name: title })
   return title

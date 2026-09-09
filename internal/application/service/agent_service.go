@@ -204,6 +204,9 @@ func (s *agentService) CreateAgentEngine(
 	s.registerSandboxShellIfAllowed(ctx, toolRegistry, sessionID, config)
 	s.registerSandboxFileTools(ctx, toolRegistry, sessionID, config)
 	s.registerWebPageFiles(ctx, toolRegistry, config, sessionID, assistantMessageID)
+	// Advertise cached service summaries independently of @mentions. Concrete
+	// tool definitions are published after describe, before the next model request.
+	toolRegistry.PrepareMCPTools(ctx)
 
 	// 3. Resolve knowledge base and selected document metadata
 	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
@@ -321,9 +324,15 @@ func (s *agentService) registerMCPTools(
 		}
 	}
 	if len(enabledServices) > 0 {
+		metadataService, ok := s.mcpServiceService.(interfaces.MCPMetadataService)
+		if !ok {
+			logger.Warnf(ctx, "MCP metadata storage is unavailable")
+			return
+		}
 		registered, err := tools.RegisterMCPTools(
 			ctx, toolRegistry, enabledServices, s.mcpManager, s.toolApprovalGate,
 			config.MCPAuthWaitTimeout, s.mcpServiceService.GetMCPServiceByID,
+			&tools.MCPMetadataIO{Get: metadataService.GetMCPMetadata, Put: metadataService.PersistMCPMetadata},
 		)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to register MCP directory: %v", err)

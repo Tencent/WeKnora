@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -22,6 +23,9 @@ const (
 
 // MCPService represents an MCP (Model Context Protocol) service configuration
 type MCPService struct {
+	// UsageInstructions is maintained locally and is not overwritten by directory refresh.
+	UsageInstructions string `json:"usage_instructions" gorm:"type:text;not null;default:''"`
+
 	ID             string             `json:"id"                     gorm:"type:varchar(36);primaryKey"`
 	TenantID       uint64             `json:"tenant_id"              gorm:"uniqueIndex:idx_tenant_name"`
 	Name           string             `json:"name"                   gorm:"type:varchar(255);not null;uniqueIndex:idx_tenant_name"`
@@ -38,6 +42,15 @@ type MCPService struct {
 	CreatedAt      time.Time          `json:"created_at"`
 	UpdatedAt      time.Time          `json:"updated_at"`
 	DeletedAt      gorm.DeletedAt     `json:"deleted_at"             gorm:"index"`
+}
+
+// EffectiveUsageInstructions preserves documentation on legacy services until
+// they are edited through the single usage-instructions field.
+func (s *MCPService) EffectiveUsageInstructions() string {
+	if text := strings.TrimSpace(s.UsageInstructions); text != "" {
+		return text
+	}
+	return strings.TrimSpace(s.Description)
 }
 
 // MCPHeaders represents HTTP headers as a map

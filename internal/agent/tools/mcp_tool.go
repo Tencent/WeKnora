@@ -31,6 +31,8 @@ type MCPTool struct {
 	schemaOnce             sync.Once
 	schema                 *jsonschema.Schema
 	schemaErr              error
+	registeredName         string
+	serverInstructions     string
 }
 
 // NewMCPTool creates a new MCP tool wrapper. authWaitTimeoutSeconds carries the
@@ -58,6 +60,9 @@ func NewMCPTool(
 //
 // Note: OpenAI API requires tool names to match ^[a-zA-Z0-9_-]+$ and max 64 chars.
 func (t *MCPTool) Name() string {
+	if t.registeredName != "" {
+		return t.registeredName
+	}
 	serviceName := sanitizeName(t.service.Name)
 	toolName := sanitizeName(t.mcpTool.Name)
 	name := fmt.Sprintf("mcp_%s_%s", serviceName, toolName)
@@ -445,6 +450,58 @@ func sanitizeName(name string) string {
 	return result.String()
 }
 
+// MCPMetadataIO reads persisted directories and optionally writes a snapshot
+// listed from an already-authorized live connection. Put must not be used to
+// publish a partial tools/list.
+type MCPMetadataIO struct {
+	Get func(context.Context, uint64, string) (*types.MCPMetadata, error)
+	Put func(context.Context, uint64, string, []*types.MCPTool, string) error
+}
+
+func loadMCPDirectory(
+	loadCtx context.Context,
+	service *types.MCPService,
+	mcpManager *mcp.MCPManager,
+	gate approval.MCPApproval,
+	oauthSess *MCPOAuthSession,
+	metadata *MCPMetadataIO,
+	live bool,
+) ([]*types.MCPTool, string, error) {
+	if metadata == nil || metadata.Get == nil {
+		return loadMCPServiceTools(loadCtx, service, mcpManager, gate, oauthSess)
+	}
+	tenant, _ := types.TenantIDFromContext(loadCtx)
+	if !live {
+		snapshot, err := metadata.Get(loadCtx, tenant, service.ID)
+		if err != nil {
+			return nil, "", err
+		}
+		if snapshot != nil && snapshot.Stale {
+			return nil, "", fmt.Errorf("MCP directory is stale; refresh Tools in Settings > MCP management")
+		}
+		if snapshot != nil {
+			return snapshot.Tools, snapshot.Instructions, nil
+		}
+	}
+	if service.AuthConfig.IsOAuth() {
+		if _, ok := ToolExecFromContext(loadCtx); !ok {
+			return nil, "", fmt.Errorf("MCP directory is missing; authorize this service, then refresh Tools")
+		}
+	}
+	definitions, instructions, err := loadMCPServiceTools(loadCtx, service, mcpManager, gate, oauthSess)
+	if err != nil {
+		return nil, "", err
+	}
+	if metadata.Put != nil {
+		if persistErr := metadata.Put(loadCtx, tenant, service.ID, definitions, instructions); persistErr != nil {
+			logger.GetLogger(loadCtx).Warnf(
+				"Failed to persist MCP directory for service %s: %v", service.Name, persistErr,
+			)
+		}
+	}
+	return definitions, instructions, nil
+}
+
 // RegisterMCPTools installs a scoped directory and call proxy without connecting
 // to MCP servers or advertising their full schemas. The count is services, not
 // tools: discovery occurs on demand during tool execution.
@@ -456,15 +513,18 @@ func RegisterMCPTools(
 	gate approval.MCPApproval,
 	authWaitTimeoutSeconds int,
 	lookup MCPServiceLookup,
+	metadata *MCPMetadataIO,
 ) (int, error) {
 	catalog := newMCPCatalog(
 		ctx,
 		services,
 		gate,
-		func(loadCtx context.Context, service *types.MCPService) ([]*MCPTool, error) {
+		func(loadCtx context.Context, service *types.MCPService, live bool) ([]*MCPTool, error) {
 			meta, _ := ToolExecFromContext(loadCtx)
 			oauthSess := oauthSessionFromToolExec(loadCtx, meta).withAuthWaitTimeout(authWaitTimeoutSeconds)
-			definitions, err := loadMCPServiceTools(loadCtx, service, mcpManager, gate, oauthSess)
+			definitions, instructions, err := loadMCPDirectory(
+				loadCtx, service, mcpManager, gate, oauthSess, metadata, live,
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -475,7 +535,9 @@ func RegisterMCPTools(
 					continue
 				}
 				seen[definition.Name] = true
-				tools = append(tools, NewMCPTool(service, definition, mcpManager, gate, authWaitTimeoutSeconds))
+				tool := NewMCPTool(service, definition, mcpManager, gate, authWaitTimeoutSeconds)
+				tool.serverInstructions = instructions
+				tools = append(tools, tool)
 			}
 			return tools, nil
 		},
@@ -503,7 +565,7 @@ func loadMCPServiceTools(
 	mcpManager *mcp.MCPManager,
 	gate approval.MCPApproval,
 	regOAuth *MCPOAuthSession,
-) ([]*types.MCPTool, error) {
+) ([]*types.MCPTool, string, error) {
 	const listToolsTimeout = 30 * time.Second
 	toolCallID := "mcp-discover-" + service.ID
 	if meta, ok := ToolExecFromContext(ctx); ok && meta != nil {
@@ -514,7 +576,7 @@ func loadMCPServiceTools(
 	)
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("Failed to create MCP client for service %s: %v", service.Name, err)
-		return nil, err
+		return nil, "", err
 	}
 
 	// For stdio transport, ensure connection is released after listing tools
@@ -543,7 +605,7 @@ func loadMCPServiceTools(
 		)
 		if err != nil {
 			logger.GetLogger(ctx).Errorf("Failed to reconnect MCP client for service %s: %v", service.Name, err)
-			return nil, err
+			return nil, "", err
 		}
 
 		retryCtx, retryCancel := context.WithTimeout(ctx, listToolsTimeout)
@@ -553,10 +615,14 @@ func loadMCPServiceTools(
 
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("Failed to list tools from MCP service %s: %v", service.Name, err)
-		return nil, err
+		return nil, "", err
 	}
 
-	return mcpTools, nil
+	instructions := ""
+	if provider, ok := client.(interface{ ServerInstructions() string }); ok {
+		instructions = provider.ServerInstructions()
+	}
+	return mcpTools, instructions, nil
 }
 
 // MCPToolNamesByServiceID returns registered MCP tool names grouped by service ID.
@@ -571,6 +637,9 @@ func MCPToolNamesByServiceID(registry *ToolRegistry) map[string][]string {
 			continue
 		}
 		mcpTool, ok := tool.(*MCPTool)
+		if direct, directOK := tool.(*MCPRegisteredTool); directOK {
+			mcpTool, ok = direct.MCPTool, true
+		}
 		if !ok || mcpTool.service == nil {
 			continue
 		}

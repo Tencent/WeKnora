@@ -54,11 +54,11 @@
                     />
                   </span>
                 </t-tooltip>
-                <t-icon
-                  :name="expandedToolIndex === index ? 'chevron-up' : 'chevron-down'"
-                  class="mtr-chevron"
-                />
               </div>
+              <t-icon
+                :name="expandedToolIndex === index ? 'chevron-up' : 'chevron-down'"
+                class="mtr-chevron"
+              />
             </div>
             <div
               v-if="tool.description"

@@ -515,18 +515,23 @@ func TestFetchSkillArchiveFollowsGitHubHandoff(t *testing.T) {
 }
 
 func TestFetchSkillArchiveFromSkillMarkdown(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/markdown")
-		_, _ = w.Write([]byte(validSkillMD))
-	}))
-	t.Cleanup(server.Close)
-	allowLoopbackSkillFetch(t)
+	for _, prefix := range []string{"", "\ufeff"} {
+		t.Run(fmt.Sprintf("prefix=%q", prefix), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/markdown")
+				_, _ = w.Write([]byte(prefix + validSkillMD))
+			}))
+			t.Cleanup(server.Close)
+			allowLoopbackSkillFetch(t)
 
-	got, err := fetchSkillArchive(t.Context(), server.URL+"/SKILL.md", server.Client())
-	require.NoError(t, err)
-	bundle, err := ParseSkillBundle(got)
-	require.NoError(t, err)
-	require.Equal(t, "pdf-tools", bundle.Name)
+			got, err := fetchSkillArchive(t.Context(), server.URL+"/SKILL.md", server.Client())
+			require.NoError(t, err)
+			bundle, err := ParseSkillBundle(got)
+			require.NoError(t, err)
+			require.Equal(t, "pdf-tools", bundle.Name)
+			require.Equal(t, []byte(prefix+validSkillMD), bundle.Files["SKILL.md"])
+		})
+	}
 }
 
 func TestParseSkillBundleNestedRemoteArchive(t *testing.T) {

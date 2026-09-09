@@ -597,18 +597,21 @@ const skillMentionItems = computed<MentionItem[]>(() => {
   });
 });
 
+const toMCPMentionItem = (svc: MCPService): MentionItem => ({
+  id: svc.id,
+  name: svc.name,
+  type: 'mcp',
+  description: svc.usage_instructions || svc.description || '',
+  toolCount: svc.catalog?.tool_count,
+  catalogStale: Boolean(svc.catalog?.stale),
+  catalogSynced: Boolean(svc.catalog),
+});
+
 const selectedMCPItems = computed<MentionItem[]>(() => {
   return selectedMCPServiceIds.value
     .map((id: string) => mcpServices.value.find(service => service.id === id))
     .filter((svc): svc is MCPService => !!svc && isMCPAllowedByAgent(svc))
-    .map((svc) => {
-      return {
-        id: svc.id,
-        name: svc.name,
-        type: 'mcp' as const,
-        description: svc.description || '',
-      };
-    });
+    .map(toMCPMentionItem);
 });
 
 // 合并所有选中项（用于输入框内显示）
@@ -1355,13 +1358,8 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     if (mcpMode !== 'none') {
       mcpItems = mcpServices.value
         .filter(service => isMCPAllowedByAgent(service))
-        .filter(service => !q || service.name?.toLowerCase().includes(q.toLowerCase()) || (service.description || '').toLowerCase().includes(q.toLowerCase()))
-        .map(service => ({
-          id: service.id,
-          name: service.name,
-          type: 'mcp' as const,
-          description: service.description || '',
-        }));
+        .filter(service => !q || service.name?.toLowerCase().includes(q.toLowerCase()) || (service.usage_instructions || service.description || '').toLowerCase().includes(q.toLowerCase()))
+        .map(toMCPMentionItem);
     }
 
     const skillsMode = agentSkillsSelectionMode.value;
