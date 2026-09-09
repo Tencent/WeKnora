@@ -1,0 +1,15 @@
+services:
+  frontend:
+    container_name: WeKnora-topic3-repro-frontend
+
+  app:
+    container_name: WeKnora-topic3-repro-app
+
+  docreader:
+    container_name: WeKnora-topic3-repro-docreader
+
+  postgres:
+    container_name: WeKnora-topic3-repro-postgres
+
+  redis:
+    container_name: WeKnora-topic3-repro-redis

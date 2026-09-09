@@ -24,12 +24,14 @@ var ErrModelNotFound = errors.New("model not found")
 
 // modelService implements the model service interface
 type modelService struct {
-	repo          interfaces.ModelRepository
-	kbRepo        interfaces.KnowledgeBaseRepository
-	agentRepo     interfaces.CustomAgentRepository
-	ollamaService *ollama.OllamaService
-	pooler        embedding.EmbedderPooler
-	tenantService interfaces.TenantService
+	repo               interfaces.ModelRepository
+	kbRepo             interfaces.KnowledgeBaseRepository
+	agentRepo          interfaces.CustomAgentRepository
+	ollamaService      *ollama.OllamaService
+	pooler             embedding.EmbedderPooler
+	tenantService      interfaces.TenantService
+	embeddingCacheRepo interfaces.EmbeddingCacheRepository
+	modelUsageRepo     interfaces.ModelUsageRepository
 }
 
 // NewModelService creates a new model service instance
@@ -39,14 +41,18 @@ func NewModelService(repo interfaces.ModelRepository,
 	ollamaService *ollama.OllamaService,
 	pooler embedding.EmbedderPooler,
 	tenantService interfaces.TenantService,
+	embeddingCacheRepo interfaces.EmbeddingCacheRepository,
+	modelUsageRepo interfaces.ModelUsageRepository,
 ) interfaces.ModelService {
 	return &modelService{
-		repo:          repo,
-		kbRepo:        kbRepo,
-		agentRepo:     agentRepo,
-		ollamaService: ollamaService,
-		pooler:        pooler,
-		tenantService: tenantService,
+		repo:               repo,
+		kbRepo:             kbRepo,
+		agentRepo:          agentRepo,
+		ollamaService:      ollamaService,
+		pooler:             pooler,
+		tenantService:      tenantService,
+		embeddingCacheRepo: embeddingCacheRepo,
+		modelUsageRepo:     modelUsageRepo,
 	}
 }
 
@@ -433,7 +439,7 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 	}
 
 	logger.Info(ctx, "Embedding model initialized successfully")
-	return embedder, nil
+	return wrapEmbeddingCache(embedder, s.embeddingCacheRepo, s.modelUsageRepo, model.TenantID, model), nil
 }
 
 // GetEmbeddingModelForTenant retrieves and initializes an embedding model for a specific tenant
@@ -481,7 +487,7 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 	}
 
 	logger.Info(ctx, "Cross-tenant embedding model initialized successfully")
-	return embedder, nil
+	return wrapEmbeddingCache(embedder, s.embeddingCacheRepo, s.modelUsageRepo, tenantID, model), nil
 }
 
 // GetRerankModel retrieves and initializes a reranking model instance
@@ -510,7 +516,8 @@ func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rera
 	}
 
 	logger.Info(ctx, "Rerank model initialized successfully")
-	return reranker, nil
+	tenantID := types.MustTenantIDFromContext(ctx)
+	return wrapRerankUsage(reranker, s.modelUsageRepo, tenantID), nil
 }
 
 // GetChatModel retrieves and initializes a chat model instance

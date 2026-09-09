@@ -18,6 +18,7 @@
 
 # 构建和依赖文件
 node_modules/
+frontend/.npm-cache/
 /dist/
 /build/
 *.log
@@ -48,6 +49,10 @@ frontend/.vite
 frontend/chrome-extension/
 WeKnora-Chrome-Extension
 packages/protoc-3.19.4-linux-x86_64.zip
+
+# Topic 3 failed/debug batches stay local; the accepted batch is committed.
+/codex/topic3/results/batch-20260908-010413/
+/codex/topic3/results/batch-20260908-092214/
 
 Claude.md
 

@@ -271,6 +271,27 @@ For each candidate slug (listed in <candidate_slugs> below), select the chunk ID
 - A chunk CAN be cited by multiple candidates if it genuinely discusses multiple of them.
 - If a chunk is overly long or mixes unrelated topics, still cite it for every candidate it discusses.
 
+### Deterministic citation decision procedure
+Apply the following procedure consistently. These rules are deliberately stable across batches so identical evidence receives identical treatment:
+1. Read the complete candidate list before judging any chunk. Treat the candidate slug as the canonical identity; names and aliases are matching aids only.
+2. For every chunk, identify explicit subjects first. Then test each relevant candidate independently. A shared word, category, employer, product family, location, or abbreviation is not sufficient unless the text clearly refers to that exact candidate.
+3. Accept direct factual evidence: definitions, properties, dates, quantities, actions, ownership, membership, dependencies, comparisons, procedures, causes, effects, limitations, or attributed claims about the candidate.
+4. Reject navigation text, headings without factual content, keyword lists, boilerplate, bibliography-only occurrences, unrelated examples, and sentences where the candidate is merely named.
+5. Resolve pronouns or shortened names only when their antecedent is unambiguous inside the same chunk. Do not use information from another chunk to repair an ambiguous reference.
+6. Do not infer facts from world knowledge. Do not convert absence into a negative claim. Do not treat similarity between names as identity.
+7. When a chunk contains both a general concept and a concrete named entity, cite both only if the wording supplies useful evidence about both. Otherwise cite only the item actually discussed.
+8. Keep every accepted chunk ID exactly once per candidate. Preserve the chunk ID spelling and never invent, normalize, sort by guessed relevance, or combine IDs.
+9. Before returning JSON, verify that every cited ID exists in the current chunks, every output slug is either a supplied candidate or a fully specified new slug, and every citation has substantive textual support.
+10. If evidence is uncertain, omit the citation. Precision is more important than maximizing the number of links.
+
+### Boundary examples
+- "Acme released Model X in 2025" supports both Acme and Model X when both are candidates.
+- "Companies such as Acme" is normally only a passing mention and does not support a company profile.
+- "This method reduces retrieval latency by 20%" supports the method only when the method is unambiguously identified in that same chunk.
+- A section title containing a candidate name with no explanatory sentence is not evidence.
+- A chunk describing a product does not automatically support its manufacturer unless the manufacturer relationship is explicitly stated.
+- Repeated mentions without any concrete information remain non-substantive.
+
 ### Secondary task: new slugs
 If this batch reveals a significant entity/concept that is **NOT** in <candidate_slugs>, you may add it under "new_slugs" so it gets incorporated. Only add genuinely new, substantively-discussed items. Do NOT rediscover items already listed in <candidate_slugs> — reuse their slug if they are already candidates.
 

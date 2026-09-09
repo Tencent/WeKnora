@@ -1,0 +1,24 @@
+{
+  "formal_batch": "batch-20260908-102705",
+  "status": "ALL_COMPLETE",
+  "hash_mode": "text_lf_canonical_v1",
+  "baseline_sha256": "12fbe9ca1938eee6abe15cc3f7c1e5d92a9b3ca9ab584f4bd8f77b76af0967cf",
+  "notes": [
+    "Only this batch is used as the formal local acceptance batch.",
+    "Earlier failed batches are diagnostic evidence and are excluded from formal metrics.",
+    "API keys are not stored in these artifacts.",
+    "Text artifacts use LF-canonical SHA-256 and byte counts so verification is stable on Windows and Linux."
+  ],
+  "artifacts": [
+    {"path":"codex/topic3/results/batch-20260908-102705/acceptance-report.json","sha256":"9702a3512b31b219e754bb04c29d6eea9c52171d2c2ea2bc83549dc87956906d","bytes":1002,"purpose":"machine-readable acceptance summary"},
+    {"path":"codex/topic3/results/batch-20260908-102705/acceptance-report.md","sha256":"3c01ed1c554bbf50be97a1ae4cd950294621e6f2507e37399a3e257d758e5cf4","bytes":539,"purpose":"human-readable acceptance summary"},
+    {"path":"codex/topic3/results/batch-20260908-102705/cache-benchmark.json","sha256":"9e19fcad0a155425e6f4b0e5628bcf019cc5b854c2096b2ad6ae6d5089d8a121","bytes":30527,"purpose":"nine-run embedding cache experiment"},
+    {"path":"codex/topic3/results/batch-20260908-102705/checkpoint.json","sha256":"7a10c8f4ef85f41e05e925e8ab1a7ccb3f8f8d671a0c17cb1e0bbf6aa1eeba6e","bytes":3126,"purpose":"stage and resume audit trail"},
+    {"path":"codex/topic3/results/batch-20260908-102705/manifest.json","sha256":"9702a3512b31b219e754bb04c29d6eea9c52171d2c2ea2bc83549dc87956906d","bytes":1002,"purpose":"formal batch manifest"},
+    {"path":"codex/topic3/results/batch-20260908-102705/negative-control.json","sha256":"d16f4d0e80cbcfdd9f57911989f779b3c72ae2d3a4ebd691e827b5a63509180a","bytes":1033,"purpose":"real retrieval degradation evidence"},
+    {"path":"codex/topic3/results/batch-20260908-102705/postcheck.json","sha256":"82a15d44dca64ef1a41777ed9ffd188b417b97684291950a4aab96fc05283bcd","bytes":273,"purpose":"database, baseline, secret and health postcheck"},
+    {"path":"codex/topic3/results/batch-20260908-102705/preflight.json","sha256":"e32bf927eafbb8a784e527b9310cefb56a1fda801fdbcf443c1a37923a261002","bytes":634,"purpose":"free preflight evidence"},
+    {"path":"codex/topic3/results/batch-20260908-102705/wiki-cache-benchmark.json","sha256":"28219109035a8a6ccf851d127d65554f6490bfbbce2fa8e9d02fa1566fe646fb","bytes":6246,"purpose":"eight-call Wiki prompt-cache comparison"},
+    {"path":"codex/topic3/results/batch-20260908-102705/wiki-cache-benchmark.pre-threshold-failure.json","sha256":"a77421bd55f9babee62298ea455af96ada4dce0e3f947756ec7e05b9816630c6","bytes":750,"purpose":"preserved diagnostic result before prefix correction"}
+  ]
+}

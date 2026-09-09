@@ -1,0 +1,34 @@
+{
+  "result": "codex\\topic3\\results\\batch-20260908-102705\\negative-evaluation\\evaluation_10000_1788835996055_d20aee26_topic310.json",
+  "task": {
+    "id": "evaluation_10000_1788835996055_d20aee26_topic310",
+    "tenant_id": 10000,
+    "dataset_id": "topic3-10",
+    "start_time": "2026-09-08T10:53:16.056553633+08:00",
+    "end_time": "2026-09-08T10:54:43.014332955+08:00",
+    "duration_ms": 86964,
+    "status": 2,
+    "total": 10,
+    "finished": 10
+  },
+  "metric": {
+    "retrieval_metrics": {
+      "precision": 0,
+      "recall": 0,
+      "ndcg3": 0,
+      "ndcg10": 0,
+      "mrr": 0,
+      "map": 0
+    },
+    "generation_metrics": {
+      "bleu1": 0.11450936456047182,
+      "bleu2": 0.07416412424622693,
+      "bleu4": 0.040968928749275255,
+      "rouge1": 0.24154044765648736,
+      "rouge2": 0.06449121061312996,
+      "rougel": 0.22613526296250958
+    }
+  },
+  "regression_rejected": true,
+  "expected_error": "retrieval regression: recall dropped by 1.000000 (> 0.030000); mrr dropped by 1.000000 (> 0.030000)"
+}

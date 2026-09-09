@@ -1,0 +1,139 @@
+{
+  "batch_id": "batch-20260908-102705",
+  "status": "ALL_COMPLETE",
+  "started_at": "2026-09-08T02:27:05.502012Z",
+  "completed": [
+    {
+      "stage": "preflight",
+      "at": "2026-09-08T02:28:50.247398Z",
+      "detail": null
+    },
+    {
+      "stage": "cache:disabled:1",
+      "at": "2026-09-08T02:30:10.434458Z",
+      "detail": null
+    },
+    {
+      "stage": "cache:disabled:2",
+      "at": "2026-09-08T02:31:32.213596Z",
+      "detail": null
+    },
+    {
+      "stage": "cache:disabled:3",
+      "at": "2026-09-08T02:32:48.033374Z",
+      "detail": null
+    },
+    {
+      "stage": "cache:cold:1",
+      "at": "2026-09-08T02:34:17.596497Z",
+      "detail": null
+    },
+    {
+      "stage": "cache:cold:2",
+      "at": "2026-09-08T02:36:00.911986Z",
+      "detail": null
+    },
+    {
+      "stage": "cache:cold:3",
+      "at": "2026-09-08T02:37:29.091230Z",
+      "detail": null
+    },
+    {
+      "stage": "cache:warm:1",
+      "at": "2026-09-08T02:38:51.040171Z",
+      "detail": null
+    },
+    {
+      "stage": "cache:warm:2",
+      "at": "2026-09-08T02:40:06.792123Z",
+      "detail": null
+    },
+    {
+      "stage": "cache:warm:3",
+      "at": "2026-09-08T02:41:43.804676Z",
+      "detail": null
+    },
+    {
+      "stage": "cache-benchmark",
+      "at": "2026-09-08T02:41:48.161144Z",
+      "detail": null
+    },
+    {
+      "stage": "wiki:legacy:0:warmup",
+      "at": "2026-09-08T02:41:49.241309Z",
+      "detail": null
+    },
+    {
+      "stage": "resume-preflight",
+      "at": "2026-09-08T02:53:05.763579Z",
+      "detail": null
+    },
+    {
+      "stage": "cache-benchmark-reused",
+      "at": "2026-09-08T02:53:05.766093Z",
+      "detail": null
+    },
+    {
+      "stage": "wiki:legacy:0:warmup",
+      "at": "2026-09-08T02:53:06.689480Z",
+      "detail": null
+    },
+    {
+      "stage": "wiki:optimized:0:warmup",
+      "at": "2026-09-08T02:53:07.495989Z",
+      "detail": null
+    },
+    {
+      "stage": "wiki:legacy:1:measure",
+      "at": "2026-09-08T02:53:08.147057Z",
+      "detail": null
+    },
+    {
+      "stage": "wiki:optimized:1:measure",
+      "at": "2026-09-08T02:53:08.912274Z",
+      "detail": null
+    },
+    {
+      "stage": "wiki:legacy:2:measure",
+      "at": "2026-09-08T02:53:09.510028Z",
+      "detail": null
+    },
+    {
+      "stage": "wiki:optimized:2:measure",
+      "at": "2026-09-08T02:53:10.222097Z",
+      "detail": null
+    },
+    {
+      "stage": "wiki:legacy:3:measure",
+      "at": "2026-09-08T02:53:10.855785Z",
+      "detail": null
+    },
+    {
+      "stage": "wiki:optimized:3:measure",
+      "at": "2026-09-08T02:53:11.571065Z",
+      "detail": null
+    },
+    {
+      "stage": "wiki-benchmark",
+      "at": "2026-09-08T02:53:11.574079Z",
+      "detail": null
+    },
+    {
+      "stage": "negative-control",
+      "at": "2026-09-08T02:54:48.256408Z",
+      "detail": null
+    },
+    {
+      "stage": "postcheck",
+      "at": "2026-09-08T02:54:53.879876Z",
+      "detail": null
+    }
+  ],
+  "resume_history": [
+    {
+      "at": "2026-09-08T02:51:17.950311Z",
+      "runner_version": "2026-09-08.3"
+    }
+  ],
+  "completed_at": "2026-09-08T02:54:53.880876Z"
+}

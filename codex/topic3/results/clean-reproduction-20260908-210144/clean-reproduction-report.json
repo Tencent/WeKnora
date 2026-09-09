@@ -1,0 +1,46 @@
+﻿{
+    "status":  "REPRO_COMPLETE",
+    "completed_at":  "2026-09-08T13:02:11.8837602Z",
+    "commit":  "a8e4137067d5356ffe65abdeb679b14669e12fca",
+    "compose_project":  "weknora-topic3-repro",
+    "isolated_volumes":  [
+                             "weknora-topic3-repro_data-files",
+                             "weknora-topic3-repro_docreader-tmp",
+                             "weknora-topic3-repro_postgres-data"
+                         ],
+    "database_before":  {
+                            "migration":  "83|false",
+                            "evaluations":  0,
+                            "unfinished":  0,
+                            "usages":  1,
+                            "embedding_cache":  0
+                        },
+    "database_after":  {
+                           "migration":  "83|false",
+                           "evaluations":  1,
+                           "unfinished":  0,
+                           "usages":  8,
+                           "embedding_cache":  6
+                       },
+    "task_id":  "evaluation_10000_1788872504293_368d9956_default",
+    "models":  {
+                   "chat":  "daac9baf-1bd9-481b-a308-698e229b1f7e",
+                   "rerank":  "ddcd62f8-20e2-4fd9-8020-752a067dca9d",
+                   "embedding":  "7c6677b8-90e1-48d7-9be2-929919a88e56"
+               },
+    "source_knowledge_base_id":  "c2258c44-a7ce-4b64-a3fc-71aa0eb10081",
+    "evaluation":  {
+                       "status":  2,
+                       "finished":  1,
+                       "persisted_after_restart":  true,
+                       "total":  1
+                   },
+    "wiki":  {
+                 "expected_found":  true,
+                 "output_valid":  true,
+                 "prompt_tokens":  1293,
+                 "prefix_fingerprint":  "30a27474fe91dac7",
+                 "cache_status":  "miss"
+             },
+    "limitation":  "Provider usage reports total prompt tokens, not a separate exact token count for the stable prefix."
+}

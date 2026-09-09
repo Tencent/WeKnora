@@ -1,0 +1,199 @@
+{
+  "sequence": [
+    "legacy:0:warmup",
+    "optimized:0:warmup",
+    "legacy:1:measure",
+    "optimized:1:measure",
+    "legacy:2:measure",
+    "optimized:2:measure",
+    "legacy:3:measure",
+    "optimized:3:measure"
+  ],
+  "runs": [
+    {
+      "layout": "legacy",
+      "sample": 0,
+      "purpose": "topic3_wiki_cache_legacy",
+      "prefix_fingerprint": "6c896115d44c8213",
+      "expected_slug": "entity/weknora",
+      "output": "{\n  \"citations\": {\n    \"entity/weknora\": [\n      \"c001\"\n    ]\n  },\n  \"new_slugs\": []\n}",
+      "output_valid": true,
+      "expected_found": true,
+      "usage": {
+        "prompt_tokens": 1293,
+        "completion_tokens": 41,
+        "total_tokens": 1334,
+        "cache_miss_tokens": 1293,
+        "cache_reported": true,
+        "cache_status": "miss"
+      },
+      "duration_ms": 889,
+      "stage": "warmup",
+      "estimated_cost_cny": 0.00029140000000000004
+    },
+    {
+      "layout": "optimized",
+      "sample": 0,
+      "purpose": "topic3_wiki_cache_optimized",
+      "prefix_fingerprint": "30a27474fe91dac7",
+      "expected_slug": "entity/weknora",
+      "output": "{\n  \"citations\": {\n    \"entity/weknora\": [\n      \"c001\"\n    ]\n  },\n  \"new_slugs\": []\n}",
+      "output_valid": true,
+      "expected_found": true,
+      "usage": {
+        "prompt_tokens": 1293,
+        "completion_tokens": 41,
+        "total_tokens": 1334,
+        "cache_miss_tokens": 1293,
+        "cache_reported": true,
+        "cache_status": "miss"
+      },
+      "duration_ms": 787,
+      "stage": "warmup",
+      "estimated_cost_cny": 0.00029140000000000004
+    },
+    {
+      "layout": "legacy",
+      "sample": 1,
+      "purpose": "topic3_wiki_cache_legacy",
+      "prefix_fingerprint": "6c896115d44c8213",
+      "expected_slug": "concept/embedding-cache",
+      "output": "{\n  \"citations\": {\n    \"concept/embedding-cache\": [\n      \"c002\"\n    ]\n  },\n  \"new_slugs\": []\n}",
+      "output_valid": true,
+      "expected_found": true,
+      "usage": {
+        "prompt_tokens": 1291,
+        "completion_tokens": 41,
+        "total_tokens": 1332,
+        "cache_miss_tokens": 1291,
+        "cache_reported": true,
+        "cache_status": "miss"
+      },
+      "duration_ms": 630,
+      "stage": "measure",
+      "estimated_cost_cny": 0.000291
+    },
+    {
+      "layout": "optimized",
+      "sample": 1,
+      "purpose": "topic3_wiki_cache_optimized",
+      "prefix_fingerprint": "30a27474fe91dac7",
+      "expected_slug": "concept/embedding-cache",
+      "output": "{\n  \"citations\": {\n    \"concept/embedding-cache\": [\n      \"c002\"\n    ]\n  },\n  \"new_slugs\": []\n}",
+      "output_valid": true,
+      "expected_found": true,
+      "usage": {
+        "prompt_tokens": 1291,
+        "completion_tokens": 41,
+        "total_tokens": 1332,
+        "cache_miss_tokens": 1291,
+        "cache_reported": true,
+        "cache_status": "miss"
+      },
+      "duration_ms": 757,
+      "stage": "measure",
+      "estimated_cost_cny": 0.000291
+    },
+    {
+      "layout": "legacy",
+      "sample": 2,
+      "purpose": "topic3_wiki_cache_legacy",
+      "prefix_fingerprint": "6c896115d44c8213",
+      "expected_slug": "concept/regression-check",
+      "output": "{\n  \"citations\": {\n    \"concept/regression-check\": [\n      \"c003\"\n    ]\n  },\n  \"new_slugs\": []\n}",
+      "output_valid": true,
+      "expected_found": true,
+      "usage": {
+        "prompt_tokens": 1300,
+        "completion_tokens": 41,
+        "total_tokens": 1341,
+        "cache_miss_tokens": 1300,
+        "cache_reported": true,
+        "cache_status": "miss"
+      },
+      "duration_ms": 590,
+      "stage": "measure",
+      "estimated_cost_cny": 0.0002928
+    },
+    {
+      "layout": "optimized",
+      "sample": 2,
+      "purpose": "topic3_wiki_cache_optimized",
+      "prefix_fingerprint": "30a27474fe91dac7",
+      "expected_slug": "concept/regression-check",
+      "output": "{\n  \"citations\": {\n    \"concept/regression-check\": [\n      \"c003\"\n    ]\n  },\n  \"new_slugs\": []\n}",
+      "output_valid": true,
+      "expected_found": true,
+      "usage": {
+        "prompt_tokens": 1300,
+        "completion_tokens": 41,
+        "total_tokens": 1341,
+        "cache_miss_tokens": 1300,
+        "cache_reported": true,
+        "cache_status": "miss"
+      },
+      "duration_ms": 701,
+      "stage": "measure",
+      "estimated_cost_cny": 0.0002928
+    },
+    {
+      "layout": "legacy",
+      "sample": 3,
+      "purpose": "topic3_wiki_cache_legacy",
+      "prefix_fingerprint": "6c896115d44c8213",
+      "expected_slug": "concept/formal-baseline",
+      "output": "{\n  \"citations\": {\n    \"concept/formal-baseline\": [\n      \"c004\"\n    ]\n  },\n  \"new_slugs\": []\n}",
+      "output_valid": true,
+      "expected_found": true,
+      "usage": {
+        "prompt_tokens": 1291,
+        "completion_tokens": 42,
+        "total_tokens": 1333,
+        "cache_miss_tokens": 1291,
+        "cache_reported": true,
+        "cache_status": "miss"
+      },
+      "duration_ms": 620,
+      "stage": "measure",
+      "estimated_cost_cny": 0.0002918
+    },
+    {
+      "layout": "optimized",
+      "sample": 3,
+      "purpose": "topic3_wiki_cache_optimized",
+      "prefix_fingerprint": "30a27474fe91dac7",
+      "expected_slug": "concept/formal-baseline",
+      "output": "{\n  \"citations\": {\n    \"concept/formal-baseline\": [\n      \"c004\"\n    ]\n  },\n  \"new_slugs\": []\n}",
+      "output_valid": true,
+      "expected_found": true,
+      "usage": {
+        "prompt_tokens": 1291,
+        "completion_tokens": 42,
+        "total_tokens": 1333,
+        "cache_miss_tokens": 1291,
+        "cache_reported": true,
+        "cache_status": "miss"
+      },
+      "duration_ms": 708,
+      "stage": "measure",
+      "estimated_cost_cny": 0.0002918
+    }
+  ],
+  "summary": {
+    "legacy": {
+      "calls": 3,
+      "cache_reported_calls": 3,
+      "cache_read_tokens": 0,
+      "estimated_cost_cny": 0.0008756,
+      "mean_duration_ms": 613.3333333333334
+    },
+    "optimized": {
+      "calls": 3,
+      "cache_reported_calls": 3,
+      "cache_read_tokens": 0,
+      "estimated_cost_cny": 0.0008756,
+      "mean_duration_ms": 722.0
+    }
+  },
+  "conclusion": "not_observed"
+}

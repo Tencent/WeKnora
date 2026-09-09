@@ -1,0 +1,93 @@
+name: topic3-regression
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_negative_demo:
+        description: "Run the deliberately failing regression demonstration"
+        required: false
+        default: false
+        type: boolean
+      run_real_evaluation:
+        description: "Run one real evaluation (uses configured secret and may cost money)"
+        required: false
+        default: false
+        type: boolean
+jobs:
+  deterministic-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Unit tests for Topic 3 backend and Wiki prompt layout
+        run: go test ./internal/agent ./internal/application/repository ./internal/application/service
+      - name: Topic 3 runner authentication tests
+        run: python -m unittest codex.topic3.test_topic3 -v
+      - name: Verify frozen evidence and experiment source hashes
+        run: python codex/topic3/verify_evidence.py
+      - name: Frontend type check and production build
+        working-directory: frontend
+        run: |
+          npm ci --cache .npm-cache
+          npm run type-check
+          npm run build
+      - name: Normal regression comparison passes
+        run: python codex/topic3/topic3.py check --baseline codex/topic3/baseline.json --current codex/topic3/baseline.json
+      - name: Deliberate retrieval degradation is rejected
+        run: |
+          if python codex/topic3/topic3.py check --baseline codex/topic3/baseline.json --current codex/topic3/fixtures/current-degraded.json; then
+            echo "negative control unexpectedly passed"
+            exit 1
+          fi
+      - name: Upload deterministic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: topic3-deterministic-evidence
+          path: |
+            codex/topic3/EVIDENCE_MANIFEST_20260908.json
+            codex/topic3/CORE_SOURCE_SNAPSHOT_20260908.json
+            codex/topic3/baseline.json
+            codex/topic3/fixtures/current-degraded.json
+
+  negative-demo:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_negative_demo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Expected red job proving the gate rejects degradation
+        run: python codex/topic3/topic3.py check --baseline codex/topic3/baseline.json --current codex/topic3/fixtures/current-degraded.json
+
+  real-evaluation:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_real_evaluation && vars.TOPIC3_REAL_EVAL_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start WeKnora
+        run: python codex/topic3/topic3.py up
+      - name: Run real evaluation
+        env:
+          TOPIC3_TOKEN: ${{ secrets.TOPIC3_TOKEN }}
+          TOPIC3_KB_ID: ${{ vars.TOPIC3_KB_ID }}
+          TOPIC3_DATASET_ID: ${{ vars.TOPIC3_DATASET_ID }}
+          TOPIC3_CHAT_MODEL_ID: ${{ vars.TOPIC3_CHAT_MODEL_ID }}
+          TOPIC3_RERANK_MODEL_ID: ${{ vars.TOPIC3_RERANK_MODEL_ID }}
+          TOPIC3_EVAL_CONCURRENCY: "1"
+          TOPIC3_CODE_COMMIT: ${{ github.sha }}
+          TOPIC3_PROMPT_VERSION: weknora-v0.7.2-topic3
+          TOPIC3_PRICE_VERSION: ${{ vars.TOPIC3_PRICE_VERSION }}
+        run: python codex/topic3/topic3.py eval

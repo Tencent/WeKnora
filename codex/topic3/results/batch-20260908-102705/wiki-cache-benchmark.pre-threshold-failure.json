@@ -1,0 +1,28 @@
+{
+  "sequence": [
+    "legacy:0:warmup"
+  ],
+  "runs": [
+    {
+      "layout": "legacy",
+      "sample": 0,
+      "purpose": "topic3_wiki_cache_legacy",
+      "prefix_fingerprint": "6c896115d44c8213",
+      "expected_slug": "entity/weknora",
+      "output": "{\n  \"citations\": {\n    \"entity/weknora\": [\n      \"c001\"\n    ]\n  },\n  \"new_slugs\": []\n}",
+      "output_valid": true,
+      "expected_found": true,
+      "usage": {
+        "prompt_tokens": 776,
+        "completion_tokens": 41,
+        "total_tokens": 817,
+        "cache_miss_tokens": 776,
+        "cache_reported": true,
+        "cache_status": "miss"
+      },
+      "duration_ms": 1068,
+      "stage": "warmup",
+      "estimated_cost_cny": 0.00018800000000000002
+    }
+  ]
+}

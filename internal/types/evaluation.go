@@ -9,6 +9,21 @@ import (
 	"github.com/yanyiwu/gojieba"
 )
 
+// EvaluationRun is the durable database representation of an evaluation.
+// Detail keeps the public API snapshot intact while the scalar columns support
+// tenant-safe history queries without decoding JSON in SQL.
+type EvaluationRun struct {
+	ID        string           `gorm:"primaryKey;column:id" json:"id"`
+	TenantID  uint64           `gorm:"column:tenant_id;not null;index:idx_evaluation_runs_tenant_created" json:"tenant_id"`
+	DatasetID string           `gorm:"column:dataset_id;not null" json:"dataset_id"`
+	Status    EvaluationStatue `gorm:"column:status;not null" json:"status"`
+	Detail    json.RawMessage  `gorm:"column:detail;type:jsonb;not null" json:"-"`
+	CreatedAt time.Time        `gorm:"column:created_at;autoCreateTime;index:idx_evaluation_runs_tenant_created" json:"created_at"`
+	UpdatedAt time.Time        `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (EvaluationRun) TableName() string { return "evaluation_runs" }
+
 // Jieba is a global instance of Chinese text segmentation tool
 var Jieba *gojieba.Jieba = newJieba()
 
@@ -43,9 +58,11 @@ type EvaluationTask struct {
 	TenantID  uint64 `json:"tenant_id"`  // Tenant/Organization ID
 	DatasetID string `json:"dataset_id"` // Dataset ID for evaluation
 
-	StartTime time.Time        `json:"start_time"`        // Task start time
-	Status    EvaluationStatue `json:"status"`            // Current task status
-	ErrMsg    string           `json:"err_msg,omitempty"` // Error message if failed
+	StartTime  time.Time        `json:"start_time"` // Task start time
+	EndTime    *time.Time       `json:"end_time,omitempty"`
+	DurationMS int64            `json:"duration_ms,omitempty"`
+	Status     EvaluationStatue `json:"status"`            // Current task status
+	ErrMsg     string           `json:"err_msg,omitempty"` // Error message if failed
 
 	Total    int `json:"total,omitempty"`    // Total items to evaluate
 	Finished int `json:"finished,omitempty"` // Completed items count
@@ -53,9 +70,54 @@ type EvaluationTask struct {
 
 // EvaluationDetail contains detailed evaluation information
 type EvaluationDetail struct {
-	Task   *EvaluationTask `json:"task"`             // Evaluation task info
-	Params *ChatManage     `json:"params"`           // Evaluation parameters
-	Metric *MetricResult   `json:"metric,omitempty"` // Evaluation metrics
+	Task     *EvaluationTask     `json:"task"`   // Evaluation task info
+	Params   *ChatManage         `json:"params"` // Evaluation parameters
+	Snapshot *EvaluationSnapshot `json:"snapshot,omitempty"`
+	Metric   *MetricResult       `json:"metric,omitempty"` // Evaluation metrics
+	Items    []*EvaluationItem   `json:"items,omitempty"`
+}
+
+// EvaluationSnapshot records the identities needed to explain and reproduce a
+// run. Unknown build metadata stays explicit rather than being invented.
+type EvaluationSnapshot struct {
+	DatasetSHA256          string `json:"dataset_sha256"`
+	SourceKnowledgeBaseID  string `json:"source_knowledge_base_id"`
+	RuntimeKnowledgeBaseID string `json:"runtime_knowledge_base_id"`
+	ChatModelID            string `json:"chat_model_id"`
+	EmbeddingModelID       string `json:"embedding_model_id"`
+	RerankModelID          string `json:"rerank_model_id"`
+	CodeCommit             string `json:"code_commit"`
+	PromptVersion          string `json:"prompt_version"`
+	PriceVersion           string `json:"price_version"`
+	Currency               string `json:"currency"`
+	Concurrency            int    `json:"concurrency"`
+}
+
+// WikiCacheProbeResult is one bounded, fixed-input prompt-cache observation.
+// It intentionally contains no provider credential or caller supplied prompt.
+type WikiCacheProbeResult struct {
+	Layout            string     `json:"layout"`
+	Sample            int        `json:"sample"`
+	Purpose           string     `json:"purpose"`
+	PrefixFingerprint string     `json:"prefix_fingerprint"`
+	ExpectedSlug      string     `json:"expected_slug"`
+	Output            string     `json:"output"`
+	OutputValid       bool       `json:"output_valid"`
+	ExpectedFound     bool       `json:"expected_found"`
+	Usage             TokenUsage `json:"usage"`
+	DurationMS        int64      `json:"duration_ms"`
+}
+
+type EvaluationItem struct {
+	Index           int             `json:"index"`
+	QuestionID      int             `json:"question_id"`
+	Question        string          `json:"question"`
+	ReferenceAnswer string          `json:"reference_answer"`
+	GeneratedAnswer string          `json:"generated_answer"`
+	SearchResults   []*SearchResult `json:"search_results,omitempty"`
+	RerankResults   []*SearchResult `json:"rerank_results,omitempty"`
+	Metric          *MetricResult   `json:"metric,omitempty"`
+	DurationMS      int64           `json:"duration_ms"`
 }
 
 // String returns JSON representation of EvaluationTask

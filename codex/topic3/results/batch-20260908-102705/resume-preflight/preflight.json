@@ -1,0 +1,24 @@
+{
+  "status": "passed",
+  "migration": "83:false",
+  "services": [
+    "app",
+    "docreader",
+    "frontend",
+    "postgres",
+    "redis"
+  ],
+  "baseline_source_sha256": "ff2599a8dacd2d6e0bba7927c965a53301b873afa6ccca77c0c8ec9b656c75e8",
+  "database_before": {
+    "evaluation_runs": 13,
+    "unfinished_evaluations": 0,
+    "model_usage_rows": 437,
+    "embedding_cache_rows": 162
+  },
+  "fixed_ids": {
+    "knowledge_base": "22459db3-db22-4682-9e9b-0b06a382f533",
+    "chat": "8b9e4baa-ed26-4bd2-a940-fd51d7390a69",
+    "rerank": "63a4ddf0-f689-42a1-8208-9ca57a234234",
+    "embedding": "6c09f3b5-9b65-43c9-b67b-7d1576cb1ac6"
+  }
+}
