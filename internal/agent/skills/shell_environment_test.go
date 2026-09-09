@@ -23,6 +23,7 @@ func TestShellEnvironmentSelectsOnlyAllowedInstalledSkills(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, wrapped, sandbox.ShellQuote(command))
 	require.Contains(t, wrapped, "/pdf/.venv/bin")
+	require.Contains(t, wrapped, "/pdf/.weknora/bin")
 	require.Contains(t, wrapped, "--noprofile --norc")
 	require.Equal(t, "caller", actual["TOKEN"])
 	require.Equal(t, "/workspace/custom", actual["PYTHONPATH"],

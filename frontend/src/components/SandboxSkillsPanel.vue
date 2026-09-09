@@ -255,6 +255,8 @@
               :session-id="managedSkill.install_session_id || ''"
               :message-id="managedSkill.install_message_id || ''"
               :live="managedSkill.status === 'installing'"
+              :can-retry="managedSkill.status === 'ready' || managedSkill.status === 'failed'"
+              @restarted="loadSkills()"
             />
           </section>
         </template>
@@ -495,6 +497,8 @@
                               :session-id="skill.install_session_id || ''"
                               :message-id="skill.install_message_id || ''"
                               :live="skill.status === 'installing'"
+                              :can-retry="skill.status === 'ready' || skill.status === 'failed'"
+                              @restarted="loadSkills()"
                             />
                           </div>
                         </div>

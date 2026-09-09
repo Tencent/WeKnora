@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { webcrypto } from 'node:crypto'
 import vm from 'node:vm'
 import test from 'node:test'
+import { makeSteerClientId } from '../../utils/steerId.ts'
 import ts from 'typescript'
 import { reactive } from 'vue'
 import { previewSteerMessage, discardSteerPreview, forkAfterInjectedUser, reconcileSteerMessageId } from '../../utils/steerStreamFork.ts'
@@ -18,7 +19,7 @@ function harness(overrides = {}) {
   const state = {
     session_id: { value: 'session' }, currentAssistantMessageId: { value: 'assistant' },
     isReplying: { value: true }, isStreaming: { value: true },
-    steerQueue: { value: [] }, messagesList: reactive([]), crypto: webcrypto,
+    steerQueue: { value: [] }, messagesList: reactive([]), crypto: webcrypto, makeSteerClientId,
     previewSteerMessage, discardSteerPreview, reconcileSteerMessageId,
     scrollToBottom() {}, sendMsg() { throw new Error('must not start a second run') },
     MessagePlugin: { info() {}, error() {} }, t: key => key,
