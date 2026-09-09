@@ -10,7 +10,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
 
-const SchemaVersion = 1
+const (
+	SchemaVersion       = 2
+	legacySchemaVersion = 1
+)
 
 type BlockKind string
 
@@ -74,18 +77,28 @@ type Section struct {
 	Blocks []Block `json:"blocks"`
 }
 
+// Classification records why the current transcript was routed to a summary
+// framework. It is optional when reading historical summaries.
+type Classification struct {
+	Confidence       float64  `json:"confidence"`
+	Reason           string   `json:"reason"`
+	EvidenceChunkIDs []string `json:"evidenceChunkIds"`
+}
+
 type Document struct {
-	SchemaVersion int       `json:"schemaVersion"`
-	VideoType     string    `json:"videoType"`
-	Sections      []Section `json:"sections"`
+	SchemaVersion  int             `json:"schemaVersion"`
+	VideoType      string          `json:"videoType"`
+	Classification *Classification `json:"classification,omitempty"`
+	Sections       []Section       `json:"sections"`
 }
 
 func (document *Document) UnmarshalJSON(data []byte) error {
 	var payload struct {
-		SchemaVersion       *int      `json:"schemaVersion"`
-		LegacySchemaVersion *int      `json:"schema_version"`
-		VideoType           string    `json:"videoType"`
-		Sections            []Section `json:"sections"`
+		SchemaVersion       *int            `json:"schemaVersion"`
+		LegacySchemaVersion *int            `json:"schema_version"`
+		VideoType           string          `json:"videoType"`
+		Classification      *Classification `json:"classification"`
+		Sections            []Section       `json:"sections"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return err
@@ -102,6 +115,7 @@ func (document *Document) UnmarshalJSON(data []byte) error {
 		document.SchemaVersion = *schemaVersion
 	}
 	document.VideoType = payload.VideoType
+	document.Classification = payload.Classification
 	document.Sections = payload.Sections
 	return nil
 }
@@ -121,12 +135,12 @@ var frameworks = map[string][]FrameworkSection{
 		{ID: "reflection-boundaries", Title: "六、反思与边界"},
 	},
 	"training": {
-		{ID: "goals-audience", Title: "一、目标与受众"},
-		{ID: "knowledge-map", Title: "二、知识地图"},
-		{ID: "core-concepts", Title: "三、核心概念"},
-		{ID: "methods-steps", Title: "四、方法与步骤"},
-		{ID: "examples-exceptions", Title: "五、示例与异常"},
-		{ID: "practice-application", Title: "六、练习与应用"},
+		{ID: "learning-goals-audience-prerequisites", Title: "一、学习目标、适用对象与前置知识"},
+		{ID: "training-content-system", Title: "二、培训内容体系"},
+		{ID: "knowledge-highlights-quotes", Title: "三、核心知识要点与原文金句"},
+		{ID: "methods-steps-criteria", Title: "四、方法、操作步骤与判断标准"},
+		{ID: "cases-tools-qa", Title: "五、案例、工具使用与互动问答"},
+		{ID: "practice-assessment-application", Title: "六、练习、自测与应用清单"},
 	},
 	"salon": {
 		{ID: "event-participants", Title: "一、活动与参与者"},
@@ -135,6 +149,16 @@ var frameworks = map[string][]FrameworkSection{
 		{ID: "cases-qa", Title: "四、案例与问答"},
 		{ID: "consensus-differences", Title: "五、共识与分歧"},
 		{ID: "exploration-directions", Title: "六、探索方向"},
+	},
+	"meeting": {
+		{ID: "meeting-summary", Title: "一、会议总结"},
+		{ID: "meeting-basic-information", Title: "二、会议基本信息"},
+		{ID: "key-topics-consensus", Title: "三、关键议题和共识"},
+		{ID: "meeting-disagreements", Title: "四、会议分歧点"},
+		{ID: "discussion-details", Title: "五、会议讨论详情"},
+		{ID: "action-items", Title: "六、待办事项"},
+		{ID: "deferred-topics", Title: "七、遗留和搁置议题"},
+		{ID: "other", Title: "八、其他"},
 	},
 	"general": {
 		{ID: "positioning-problem", Title: "一、定位与问题"},
@@ -145,9 +169,48 @@ var frameworks = map[string][]FrameworkSection{
 	},
 }
 
+var frameworkOrder = []string{"interview", "training", "salon", "meeting", "general"}
+
+var legacyTrainingFramework = []FrameworkSection{
+	{ID: "goals-audience", Title: "一、目标与受众"},
+	{ID: "knowledge-map", Title: "二、知识地图"},
+	{ID: "core-concepts", Title: "三、核心概念"},
+	{ID: "methods-steps", Title: "四、方法与步骤"},
+	{ID: "examples-exceptions", Title: "五、示例与异常"},
+	{ID: "practice-application", Title: "六、练习与应用"},
+}
+
+var legacyMeetingFramework = []FrameworkSection{
+	{ID: "meeting-goals-participants", Title: "一、会议目标与参与者"},
+	{ID: "core-topics-background", Title: "二、核心议题与背景"},
+	{ID: "facts-options-constraints", Title: "三、事实、方案与约束"},
+	{ID: "important-decisions", Title: "四、重要决策"},
+	{ID: "differences-pending-decisions", Title: "五、分歧与待决策事项"},
+	{ID: "actions-next-steps", Title: "六、行动项与后续安排"},
+	{ID: "results-verification", Title: "七、结果与验证"},
+}
+
 func Framework(videoType string) ([]FrameworkSection, bool) {
 	framework, ok := frameworks[videoType]
 	return framework, ok
+}
+
+// Frameworks returns the supported frameworks in a deterministic routing order.
+func Frameworks() []struct {
+	VideoType string
+	Sections  []FrameworkSection
+} {
+	result := make([]struct {
+		VideoType string
+		Sections  []FrameworkSection
+	}, 0, len(frameworkOrder))
+	for _, videoType := range frameworkOrder {
+		result = append(result, struct {
+			VideoType string
+			Sections  []FrameworkSection
+		}{VideoType: videoType, Sections: frameworks[videoType]})
+	}
+	return result
 }
 
 func NormalizeEvidenceChunkIDs(document *Document, chunks []transcript.Chunk) {
@@ -155,6 +218,13 @@ func NormalizeEvidenceChunkIDs(document *Document, chunks []transcript.Chunk) {
 	for _, chunk := range chunks {
 		aliases[chunk.ID] = chunk.ID
 		aliases[fmt.Sprintf("%s|%06d", chunk.ID, chunk.Index)] = chunk.ID
+	}
+	if document.Classification != nil {
+		for index, chunkID := range document.Classification.EvidenceChunkIDs {
+			if normalized, ok := aliases[chunkID]; ok {
+				document.Classification.EvidenceChunkIDs[index] = normalized
+			}
+		}
 	}
 	for sectionIndex := range document.Sections {
 		section := &document.Sections[sectionIndex]
@@ -178,11 +248,37 @@ func Parse(content string) (Document, error) {
 }
 
 func ParseStored(content string) (Document, error) {
-	return Parse(stripFrontmatter(content))
+	document, err := Parse(stripFrontmatter(content))
+	if err != nil {
+		return Document{}, err
+	}
+	normalizeLegacyTrainingFramework(&document)
+	return document, nil
+}
+
+func normalizeLegacyTrainingFramework(document *Document) {
+	if document.VideoType != "training" || len(document.Sections) != len(legacyTrainingFramework) {
+		return
+	}
+	for index, expected := range legacyTrainingFramework {
+		section := document.Sections[index]
+		if section.ID != expected.ID || section.Title != expected.Title {
+			return
+		}
+	}
+	for index, current := range frameworks["training"] {
+		document.Sections[index].ID = current.ID
+		document.Sections[index].Title = current.Title
+	}
 }
 
 func ValidateStored(document Document, expectedVideoType string) error {
-	if err := Validate(document, expectedVideoType, nil); err != nil {
+	framework, err := storedFramework(document)
+	if err != nil {
+		return err
+	}
+	requireClassification := document.SchemaVersion == SchemaVersion
+	if err := validateDocument(document, expectedVideoType, nil, framework, requireClassification); err != nil {
 		return err
 	}
 	for _, section := range document.Sections {
@@ -210,6 +306,28 @@ func ValidateStored(document Document, expectedVideoType string) error {
 		}
 	}
 	return nil
+}
+
+func storedFramework(document Document) ([]FrameworkSection, error) {
+	switch document.SchemaVersion {
+	case SchemaVersion:
+		framework, ok := Framework(strings.TrimSpace(document.VideoType))
+		if !ok {
+			return nil, fmt.Errorf("unsupported video type: %s", document.VideoType)
+		}
+		return framework, nil
+	case legacySchemaVersion:
+		if document.VideoType == "meeting" && len(document.Sections) == len(legacyMeetingFramework) {
+			return legacyMeetingFramework, nil
+		}
+		framework, ok := Framework(strings.TrimSpace(document.VideoType))
+		if !ok {
+			return nil, fmt.Errorf("unsupported video type: %s", document.VideoType)
+		}
+		return framework, nil
+	default:
+		return nil, fmt.Errorf("unsupported summary schema version: %d", document.SchemaVersion)
+	}
 }
 
 // ValidateEnhancement ensures a knowledge-enhanced summary keeps the
@@ -262,15 +380,34 @@ func sameStringSet(left, right []string) bool {
 }
 
 func Validate(document Document, expectedVideoType string, knownChunkIDs map[string]struct{}) error {
-	framework, ok := Framework(expectedVideoType)
-	if !ok {
-		return fmt.Errorf("unsupported video type: %s", expectedVideoType)
-	}
 	if document.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("unsupported summary schema version: %d", document.SchemaVersion)
 	}
-	if document.VideoType != expectedVideoType {
+	framework, ok := Framework(strings.TrimSpace(document.VideoType))
+	if !ok {
+		return fmt.Errorf("unsupported video type: %s", document.VideoType)
+	}
+	return validateDocument(document, expectedVideoType, knownChunkIDs, framework, true)
+}
+
+func validateDocument(document Document, expectedVideoType string, knownChunkIDs map[string]struct{}, framework []FrameworkSection, requireClassification bool) error {
+	expectedVideoType = strings.TrimSpace(expectedVideoType)
+	if expectedVideoType == "" {
+		expectedVideoType = strings.TrimSpace(document.VideoType)
+	}
+	if _, ok := Framework(expectedVideoType); !ok {
+		return fmt.Errorf("unsupported video type: %s", expectedVideoType)
+	}
+	if strings.TrimSpace(document.VideoType) != expectedVideoType {
 		return fmt.Errorf("summary video type mismatch: expected %s got %s", expectedVideoType, document.VideoType)
+	}
+	if requireClassification && document.Classification == nil {
+		return fmt.Errorf("summary classification is required for schema version %d", document.SchemaVersion)
+	}
+	if document.Classification != nil {
+		if err := validateClassification(*document.Classification, document.VideoType, knownChunkIDs); err != nil {
+			return err
+		}
 	}
 	if len(document.Sections) != len(framework) {
 		return fmt.Errorf("summary section count mismatch: expected %d got %d", len(framework), len(document.Sections))
@@ -280,9 +417,6 @@ func Validate(document Document, expectedVideoType string, knownChunkIDs map[str
 		expected := framework[sectionIndex]
 		if strings.TrimSpace(section.ID) != expected.ID || strings.TrimSpace(section.Title) != expected.Title {
 			return fmt.Errorf("summary section %d must be %q", sectionIndex+1, expected.Title)
-		}
-		if len(section.Blocks) == 0 {
-			return fmt.Errorf("summary section %q has no blocks", section.Title)
 		}
 		for blockIndex, block := range section.Blocks {
 			if strings.TrimSpace(block.ID) == "" || strings.TrimSpace(block.Text) == "" {
@@ -318,6 +452,50 @@ func Validate(document Document, expectedVideoType string, knownChunkIDs map[str
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// ValidateClassification requires the routing explanation on newly generated
+// summaries while keeping historical summaries readable when the field is absent.
+func ValidateClassification(document Document, knownChunkIDs map[string]struct{}) error {
+	if document.Classification == nil {
+		return fmt.Errorf("summary classification is required for newly generated summaries")
+	}
+	return validateClassification(*document.Classification, document.VideoType, knownChunkIDs)
+}
+
+func validateClassification(classification Classification, videoType string, knownChunkIDs map[string]struct{}) error {
+	if math.IsNaN(classification.Confidence) || math.IsInf(classification.Confidence, 0) || classification.Confidence < 0 || classification.Confidence > 1 {
+		return fmt.Errorf("summary classification confidence must be between 0 and 1")
+	}
+	if classification.Confidence < 0.75 && strings.TrimSpace(videoType) != "general" {
+		return fmt.Errorf("low-confidence summary classification must use general")
+	}
+	if strings.TrimSpace(classification.Reason) == "" {
+		return fmt.Errorf("summary classification reason is required")
+	}
+	if len(classification.EvidenceChunkIDs) == 0 {
+		return fmt.Errorf("summary classification has no evidence")
+	}
+	seen := make(map[string]struct{}, len(classification.EvidenceChunkIDs))
+	for _, chunkID := range classification.EvidenceChunkIDs {
+		chunkID = strings.TrimSpace(chunkID)
+		if chunkID == "" {
+			return fmt.Errorf("summary classification has an empty evidence chunk ID")
+		}
+		if _, duplicate := seen[chunkID]; duplicate {
+			continue
+		}
+		seen[chunkID] = struct{}{}
+		if knownChunkIDs != nil {
+			if _, exists := knownChunkIDs[chunkID]; !exists {
+				return fmt.Errorf("summary classification references unknown evidence chunk %q", chunkID)
+			}
+		}
+	}
+	if videoType == "meeting" && len(seen) < 2 {
+		return fmt.Errorf("meeting classification requires evidence from at least two chunks")
 	}
 	return nil
 }

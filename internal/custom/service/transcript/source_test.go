@@ -44,7 +44,10 @@ func (g *sourceGateway) CreateManualKnowledge(_ context.Context, kbID string, in
 	}
 	g.created = append(g.created, input)
 	g.kbIDs = append(g.kbIDs, kbID)
-	value := weknora.ManualKnowledgeResult{ID: uuid.NewString(), KnowledgeBaseID: kbID, Title: input.Title, ParseStatus: "completed"}
+	value := weknora.ManualKnowledgeResult{
+		ID: uuid.NewString(), KnowledgeBaseID: kbID, Title: input.Title,
+		Content: input.Content, ParseStatus: "completed",
+	}
 	if g.items == nil {
 		g.items = make(map[string]weknora.ManualKnowledgeResult)
 	}
@@ -114,6 +117,7 @@ func TestSourceWriterReusesSameGeneration(t *testing.T) {
 	require.NotNil(t, gateway.created[0].ProcessConfig)
 	require.NotNil(t, gateway.created[0].ProcessConfig.WikiEnabled)
 	require.False(t, *gateway.created[0].ProcessConfig.WikiEnabled)
+	require.Equal(t, "测试视频", gateway.created[0].Title)
 }
 
 func TestSourceWriterDoesNotReuseLegacyBindingWithoutKnowledgeBase(t *testing.T) {
@@ -153,12 +157,55 @@ func TestSourceWriterDoesNotReuseLegacyBindingWithoutKnowledgeBase(t *testing.T)
 func TestSourceWriterRejectsRemoteOwnershipMismatch(t *testing.T) {
 	db := openSourceTestDB(t)
 	gateway := &sourceGateway{items: map[string]weknora.ManualKnowledgeResult{
-		"wrong": {ID: "wrong", KnowledgeBaseID: "evidence-kb", Title: SourceTitle("video-1", "generation-1"), ParseStatus: "completed"},
+		"wrong": {ID: "wrong", KnowledgeBaseID: "evidence-kb", Title: SourceTitle("测试视频"), ParseStatus: "completed"},
 	}}
 	writer := &SourceWriter{DB: db, Gateway: gateway, KBID: "knowledge-kb"}
 	_, err := writer.Ensure(context.Background(), SourceInput{Document: sourceTestDocument(t, "generation-1", "第一句")})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), SourceOwnershipMismatch)
+}
+
+func TestSourceWriterDoesNotReuseSameTitleFromAnotherTranscript(t *testing.T) {
+	db := openSourceTestDB(t)
+	oldDoc := sourceTestDocument(t, "generation-old", "旧转写")
+	oldJSON, err := oldDoc.JSON()
+	require.NoError(t, err)
+	oldHash := fmt.Sprintf("%x", sha256.Sum256([]byte(oldJSON)))
+	gateway := &sourceGateway{items: map[string]weknora.ManualKnowledgeResult{
+		"old": {
+			ID: "old", KnowledgeBaseID: "kb-1", Title: SourceTitle(oldDoc.Title),
+			Content: SourceContent(oldDoc, oldJSON, oldHash), ParseStatus: "completed",
+		},
+	}}
+	writer := &SourceWriter{DB: db, Gateway: gateway, KBID: "kb-1"}
+
+	result, err := writer.Ensure(context.Background(), SourceInput{Document: sourceTestDocument(t, "generation-1", "新转写")})
+	require.NoError(t, err)
+	require.Equal(t, "created", result.Action)
+	require.NotEqual(t, "old", result.KnowledgeID)
+	require.Len(t, gateway.created, 1)
+	require.Equal(t, "测试视频", gateway.created[0].Title)
+}
+
+func TestSourceWriterReconcilesMatchingDocumentNamedAfterVideo(t *testing.T) {
+	db := openSourceTestDB(t)
+	doc := sourceTestDocument(t, "generation-1", "第一句")
+	documentJSON, err := doc.JSON()
+	require.NoError(t, err)
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(documentJSON)))
+	gateway := &sourceGateway{items: map[string]weknora.ManualKnowledgeResult{
+		"existing": {
+			ID: "existing", KnowledgeBaseID: "kb-1", Title: SourceTitle(doc.Title),
+			Content: SourceContent(doc, documentJSON, hash), ParseStatus: "completed",
+		},
+	}}
+	writer := &SourceWriter{DB: db, Gateway: gateway, KBID: "kb-1"}
+
+	result, err := writer.Ensure(context.Background(), SourceInput{Document: doc})
+	require.NoError(t, err)
+	require.Equal(t, "reconciled", result.Action)
+	require.Equal(t, "existing", result.KnowledgeID)
+	require.Empty(t, gateway.created)
 }
 
 func TestSourceWriterSeparatesGenerationsAndRejectsHashChange(t *testing.T) {

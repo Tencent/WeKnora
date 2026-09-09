@@ -6,6 +6,7 @@ const (
 	Interview = "interview"
 	Training  = "training"
 	Salon     = "salon"
+	Meeting   = "meeting"
 	General   = "general"
 )
 
@@ -18,6 +19,8 @@ func Normalize(value string) string {
 		return Training
 	case "lecture", Salon:
 		return Salon
+	case Meeting:
+		return Meeting
 	case "case_analysis", "case", General, "":
 		return General
 	default:

@@ -9,6 +9,7 @@ func TestNormalizeUsesSingleBusinessVocabulary(t *testing.T) {
 		"training":      Training,
 		"lecture":       Salon,
 		"salon":         Salon,
+		"meeting":       Meeting,
 		"case_analysis": General,
 		"general":       General,
 		"unknown":       General,

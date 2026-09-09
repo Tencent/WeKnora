@@ -28,7 +28,7 @@ func TestVideoListReturnsUploadedVideosWhileEnhancementsRun(t *testing.T) {
 		{ID: uuid.NewString(), Title: "uploaded without cover", Status: model.VideoStatusUploaded, FileURL: "source", UploadedAt: &now, CreatedAt: now.Add(-7 * time.Minute)},
 		{ID: uuid.NewString(), Title: "initializing without cover", Status: model.VideoStatusInitializing, FileURL: "source", UploadedAt: &now, CreatedAt: now.Add(-6 * time.Minute)},
 		{ID: uuid.NewString(), Title: "uploaded with cover", Status: model.VideoStatusUploaded, FileURL: "source", ThumbnailURL: "poster", UploadedAt: &now, CreatedAt: now.Add(-5 * time.Minute)},
-		{ID: uuid.NewString(), Title: "completed", Status: model.VideoStatusCompleted, FileURL: "source", ThumbnailURL: "poster", DurationSeconds: 30, UploadedAt: &now, CreatedAt: now.Add(-4 * time.Minute)},
+		{ID: uuid.NewString(), Title: "completed", Status: model.VideoStatusCompleted, FileURL: "source", ThumbnailURL: "poster", DurationSeconds: 30, VideoType: "meeting", SummaryWikiPageID: "summary-page", UploadedAt: &now, CreatedAt: now.Add(-4 * time.Minute)},
 		{ID: uuid.NewString(), Title: "processing", Status: model.VideoStatusProcessing, FileURL: "source", ThumbnailURL: "poster", DurationSeconds: 20, UploadedAt: &now, CreatedAt: now.Add(-3 * time.Minute)},
 		{ID: uuid.NewString(), Title: "ready", Status: model.VideoStatusReady, FileURL: "source", ThumbnailURL: "poster", DurationSeconds: 10, UploadedAt: &now, CreatedAt: now.Add(-2 * time.Minute)},
 		{ID: uuid.NewString(), Title: "ready without cover", Status: model.VideoStatusReady, FileURL: "source", UploadedAt: &now, CreatedAt: now.Add(-1 * time.Minute)},
@@ -63,6 +63,8 @@ func TestVideoListReturnsUploadedVideosWhileEnhancementsRun(t *testing.T) {
 			DurationSeconds        int    `json:"duration_seconds"`
 			ProcessingErrorSummary string `json:"processing_error_summary"`
 			InitiallyAvailable     bool   `json:"initially_available"`
+			VideoType              string `json:"video_type"`
+			VideoTypeGenerated     bool   `json:"video_type_generated"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
@@ -84,8 +86,11 @@ func TestVideoListReturnsUploadedVideosWhileEnhancementsRun(t *testing.T) {
 		if item.FileURL == "" || item.PlayURL == "" || !item.InitiallyAvailable {
 			t.Fatalf("initially available video metadata = %#v", item)
 		}
-		if item.Title == "completed" && (item.CoverURL != "poster" || item.ThumbnailURL != "poster" || item.DurationSeconds != 30) {
+		if item.Title == "completed" && (item.CoverURL != "poster" || item.ThumbnailURL != "poster" || item.DurationSeconds != 30 || item.VideoType != "meeting" || !item.VideoTypeGenerated) {
 			t.Fatalf("completed video media metadata = %#v", item)
+		}
+		if item.Title != "completed" && item.VideoTypeGenerated {
+			t.Fatalf("video type must stay pending before a final summary exists: %#v", item)
 		}
 	}
 	// 文件已合并的视频立即出现；封面和时长由后台异步补齐。
@@ -157,6 +162,24 @@ func TestVideoDetailUsesInitialAvailability(t *testing.T) {
 			}
 			if payload.PlayURL != tc.fileURL || payload.CoverURL != tc.thumbnailURL {
 				t.Fatalf("detail media URLs = %#v, want play_url=%q cover_url=%q", payload, tc.fileURL, tc.thumbnailURL)
+			}
+		})
+	}
+}
+
+func TestVideoDetailMarksTypeGeneratedOnlyAfterFinalSummaryExists(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		summaryWikiPageID string
+		expected          bool
+	}{
+		{name: "upload default", expected: false},
+		{name: "model generated", summaryWikiPageID: "summary-page", expected: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := videoDetailPayload(model.Video{VideoType: "training", SummaryWikiPageID: tc.summaryWikiPageID})
+			if actual, ok := payload["video_type_generated"].(bool); !ok || actual != tc.expected {
+				t.Fatalf("video_type_generated = %#v, want %v", payload["video_type_generated"], tc.expected)
 			}
 		})
 	}

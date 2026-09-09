@@ -399,7 +399,7 @@ func (h *ProcessingHandler) stageArtifactAvailable(ctx context.Context, video mo
 	}
 	if job.JobType == "summary" {
 		document, parseErr := summary.ParseStored(page.Content)
-		return parseErr == nil && summary.ValidateStored(document, video.VideoType) == nil
+		return parseErr == nil && summary.ValidateStored(document, "") == nil
 	}
 	document, parseErr := outline.Parse(page.Content)
 	if parseErr != nil {

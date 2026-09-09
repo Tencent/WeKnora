@@ -17,7 +17,10 @@ func summaryScope() SummaryReferenceScope {
 
 func validSummary() summary.Document {
 	framework, _ := summary.Framework("general")
-	document := summary.Document{SchemaVersion: summary.SchemaVersion, VideoType: "general"}
+	document := summary.Document{
+		SchemaVersion: summary.SchemaVersion, VideoType: "general",
+		Classification: &summary.Classification{Confidence: 0.9, Reason: "转写内容属于通用讨论", EvidenceChunkIDs: []string{"chunk-1"}},
+	}
 	for _, section := range framework {
 		document.Sections = append(document.Sections, summary.Section{
 			ID: section.ID, Title: section.Title,

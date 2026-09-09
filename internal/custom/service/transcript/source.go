@@ -149,12 +149,35 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 		return result, fmt.Errorf("mark transcript source creating: %w", updateErr)
 	}
 
-	title := SourceTitle(videoID, generation)
+	title := SourceTitle(doc.Title)
 	knowledge, findErr := w.Gateway.FindManualKnowledgeByTitle(ctx, w.KBID, title)
 	if findErr != nil {
 		return result, w.fail(binding.ID, result, fmt.Errorf("reconcile transcript source: %w", findErr))
 	}
 	action := "created"
+	var verified *weknora.ManualKnowledgeResult
+	if knowledge != nil {
+		if err := validateSourceKnowledgeBase(knowledge.KnowledgeBaseID, w.KBID); err != nil {
+			return result, w.fail(binding.ID, result, err)
+		}
+		candidate, getErr := w.Gateway.GetKnowledge(ctx, knowledge.ID)
+		if getErr != nil {
+			return result, w.fail(binding.ID, result, fmt.Errorf("verify transcript source %s: %w", knowledge.ID, getErr))
+		}
+		if err := validateSourceKnowledgeBase(candidate.KnowledgeBaseID, w.KBID); err != nil {
+			return result, w.fail(binding.ID, result, err)
+		}
+		if sourceDocumentMatches(candidate.Content, videoID, generation, doc.DurationSeconds, hash) {
+			knowledge = &candidate
+			verified = &candidate
+			action = "reconciled"
+		} else {
+			// Display titles are intentionally human-readable and therefore not
+			// unique. Never reuse a same-title document from another video or
+			// transcript generation.
+			knowledge = nil
+		}
+	}
 	if knowledge == nil {
 		wikiEnabled := false
 		value, createErr := w.Gateway.CreateManualKnowledge(ctx, w.KBID, weknora.ManualKnowledgeInput{
@@ -165,8 +188,6 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 			return result, w.fail(binding.ID, result, fmt.Errorf("create transcript source: %w", createErr))
 		}
 		knowledge = &value
-	} else {
-		action = "reconciled"
 	}
 	if knowledge == nil || strings.TrimSpace(knowledge.ID) == "" {
 		return result, w.fail(binding.ID, result, fmt.Errorf("transcript source returned empty knowledge id"))
@@ -174,18 +195,21 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 	if err := validateSourceKnowledgeBase(knowledge.KnowledgeBaseID, w.KBID); err != nil {
 		return result, w.fail(binding.ID, result, err)
 	}
-	parsed, getErr := w.Gateway.GetKnowledge(ctx, knowledge.ID)
-	if getErr != nil {
-		return result, w.fail(binding.ID, result, fmt.Errorf("verify transcript source %s: %w", knowledge.ID, getErr))
+	if verified == nil {
+		parsed, getErr := w.Gateway.GetKnowledge(ctx, knowledge.ID)
+		if getErr != nil {
+			return result, w.fail(binding.ID, result, fmt.Errorf("verify transcript source %s: %w", knowledge.ID, getErr))
+		}
+		verified = &parsed
 	}
-	if strings.EqualFold(strings.TrimSpace(parsed.ParseStatus), "failed") {
-		message := strings.TrimSpace(parsed.ErrorMessage)
+	if strings.EqualFold(strings.TrimSpace(verified.ParseStatus), "failed") {
+		message := strings.TrimSpace(verified.ErrorMessage)
 		if message == "" {
 			message = "WeKnora source document parse failed"
 		}
 		return result, w.fail(binding.ID, result, fmt.Errorf("verify transcript source: %s", message))
 	}
-	if err := validateSourceKnowledgeBase(parsed.KnowledgeBaseID, w.KBID); err != nil {
+	if err := validateSourceKnowledgeBase(verified.KnowledgeBaseID, w.KBID); err != nil {
 		return result, w.fail(binding.ID, result, err)
 	}
 	if err := w.DB.WithContext(ctx).Model(&model.VideoTranscriptSource{}).Where("id = ?", binding.ID).Updates(map[string]any{
@@ -239,8 +263,21 @@ func (w *SourceWriter) fail(bindingID string, result SourceResult, sourceErr err
 	return sourceErr
 }
 
-func SourceTitle(videoID, generation string) string {
-	return "video-transcript-source/" + strings.TrimSpace(videoID) + "/" + strings.TrimSpace(generation)
+func SourceTitle(videoTitle string) string {
+	return strings.TrimSpace(videoTitle)
+}
+
+func sourceDocumentMatches(content, videoID, generation string, durationSeconds int, expectedHash string) bool {
+	doc, err := ValidateSourceContent(content, videoID, generation, durationSeconds)
+	if err != nil {
+		return false
+	}
+	documentJSON, err := doc.JSON()
+	if err != nil {
+		return false
+	}
+	actualHash := fmt.Sprintf("%x", sha256.Sum256([]byte(documentJSON)))
+	return actualHash == expectedHash
 }
 
 func SourceContent(doc FullVideoDocument, documentJSON, hash string) string {

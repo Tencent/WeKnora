@@ -48,6 +48,7 @@ func (h *VideoHandler) List(c *gin.Context) {
 		ID                     string `json:"id"`
 		Title                  string `json:"title"`
 		VideoType              string `json:"video_type"`
+		VideoTypeGenerated     bool   `json:"video_type_generated"`
 		Status                 string `json:"status"`
 		DurationSeconds        int    `json:"duration_seconds"`
 		FileURL                string `json:"file_url"`
@@ -65,6 +66,7 @@ func (h *VideoHandler) List(c *gin.Context) {
 			ID:                     v.ID,
 			Title:                  v.Title,
 			VideoType:              v.VideoType,
+			VideoTypeGenerated:     videoTypeGenerated(v),
 			Status:                 v.Status,
 			DurationSeconds:        v.DurationSeconds,
 			FileURL:                v.FileURL,
@@ -235,6 +237,7 @@ func videoDetailPayload(video model.Video) gin.H {
 		"id":                           video.ID,
 		"title":                        video.Title,
 		"video_type":                   video.VideoType,
+		"video_type_generated":         videoTypeGenerated(video),
 		"duration_seconds":             video.DurationSeconds,
 		"file_url":                     video.FileURL,
 		"play_url":                     video.FileURL,
@@ -262,4 +265,8 @@ func videoDetailPayload(video model.Video) gin.H {
 		"created_at":                   video.CreatedAt,
 		"updated_at":                   video.UpdatedAt,
 	}
+}
+
+func videoTypeGenerated(video model.Video) bool {
+	return strings.TrimSpace(video.SummaryWikiPageID) != ""
 }

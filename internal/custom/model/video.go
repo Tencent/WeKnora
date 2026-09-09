@@ -12,7 +12,7 @@ import (
 type Video struct {
 	ID                       string         `gorm:"type:varchar(36);primaryKey" json:"id"`
 	Title                    string         `gorm:"type:varchar(255);not null" json:"title"`
-	VideoType                string         `gorm:"type:varchar(50);index" json:"video_type"` // interview/training/salon/general
+	VideoType                string         `gorm:"type:varchar(50);index" json:"video_type"` // interview/training/salon/meeting/general
 	DurationSeconds          int            `json:"duration_seconds"`
 	FileURL                  string         `gorm:"type:text" json:"file_url"`
 	TranscriptionSourceURL   string         `gorm:"type:text" json:"-"`
@@ -98,7 +98,7 @@ type VideoProcessingJob struct {
 // VideoSummaryFramework 视频类型 → 总结框架路由
 type VideoSummaryFramework struct {
 	ID        string    `gorm:"type:varchar(36);primaryKey" json:"id"`
-	VideoType string    `gorm:"type:varchar(50);uniqueIndex" json:"video_type"` // interview/training/salon/general
+	VideoType string    `gorm:"type:varchar(50);uniqueIndex" json:"video_type"` // interview/training/salon/meeting/general
 	Framework string    `gorm:"type:text" json:"framework"`                     // 总结框架定义（JSON）
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

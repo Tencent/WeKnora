@@ -23,7 +23,19 @@ func ClassifyProcessingError(err error) (string, string) {
 		return "", ""
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return ErrorCategoryTimeout, "timeout"
+		return ErrorCategoryTimeout, "llm_deadline_exceeded"
+	}
+	var connectionClosed interface{ ConnectionClosed() bool }
+	if errors.As(err, &connectionClosed) && connectionClosed.ConnectionClosed() {
+		return ErrorCategoryExternalTask, "llm_connection_closed"
+	}
+	var incompleteOutput interface{ IncompleteOutput() bool }
+	if errors.As(err, &incompleteOutput) && incompleteOutput.IncompleteOutput() {
+		return ErrorCategoryResponseParse, "llm_stream_incomplete"
+	}
+	var streamTimeout interface{ StreamTimeoutPhase() string }
+	if errors.As(err, &streamTimeout) {
+		return ErrorCategoryTimeout, "llm_stream_" + streamTimeout.StreamTimeoutPhase() + "_timeout"
 	}
 	message := strings.ToLower(err.Error())
 	if containsAny(message, "p3 knowledge object validation failed", "knowledge object content contract", "knowledge object relation contract") {
@@ -37,6 +49,8 @@ func ClassifyProcessingError(err error) (string, string) {
 		return ErrorCategoryResponseParse, "transcript_source_validation"
 	}
 	switch {
+	case containsAny(message, "validate summary output", "validate summary classification", "resolve summary evidence"):
+		return ErrorCategoryResponseParse, "summary_contract_invalid"
 	case containsAny(message, "timeout", "deadline exceeded", "超时"):
 		return ErrorCategoryTimeout, "timeout"
 	case containsAny(message, "status 401", "status 403", "unauthorized", "forbidden", "invalidaccesskey", "signature", "鉴权失败", "认证失败"):

@@ -32,6 +32,7 @@ type recordingDirectContentLLM struct {
 	jsonPrompts   []string
 	completeCalls int
 	jsonCalls     int
+	streamCalls   int
 }
 
 func (f *recordingDirectContentLLM) Complete(context.Context, string) (string, error) {
@@ -50,6 +51,7 @@ func (f *recordingDirectContentLLM) CompleteJSON(_ context.Context, prompt strin
 }
 
 func (f *recordingDirectContentLLM) Stream(context.Context, string, func(string) error) (string, error) {
+	f.streamCalls++
 	return f.output, nil
 }
 
@@ -116,7 +118,7 @@ func TestParseLLMJSONResponseRejectsHTMLWithoutJSON(t *testing.T) {
 
 func TestSummaryRetryPromptRejectsInventedEvidenceIDs(t *testing.T) {
 	prompt := "原始提示"
-	errorMessage := `validate summary output: summary section "一、目标与受众" references unknown evidence chunk "unknown"`
+	errorMessage := `validate summary output: summary section "一、学习目标、适用对象与前置知识" references unknown evidence chunk "unknown"`
 	retryPrompt := prompt + "\n上一轮总结未通过严格校验，必须修正后重新输出完整 JSON。校验错误：" + errorMessage + "。只能从上文转写分块列表复制 evidenceChunkIds，不得创造、猜测或引用不存在的 ID；可以使用纯知识 ID或带 |分片序号的显示 ID，系统会归一化。"
 	for _, expected := range []string{"上一轮总结未通过严格校验", "unknown", "不得创造、猜测或引用不存在的 ID", "系统会归一化"} {
 		if !strings.Contains(retryPrompt, expected) {
@@ -199,7 +201,7 @@ func TestBuildDirectContentPromptIncludesSummaryFrameworkAndJSONContract(t *test
 	if err != nil {
 		t.Fatalf("buildDirectContentPrompt returned error: %v", err)
 	}
-	for _, expected := range []string{"schemaVersion", "videoType", "evidenceChunkIds", "一、目标与受众", "六、练习与应用", "不要输出 Markdown"} {
+	for _, expected := range []string{`"schemaVersion":2`, "videoType", "evidenceChunkIds", "一、学习目标、适用对象与前置知识", "六、练习、自测与应用清单", "blocks:[]", "不得使用常识、推测", "不要输出 Markdown"} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("summary prompt does not contain %q: %s", expected, prompt)
 		}
@@ -209,8 +211,9 @@ func TestBuildDirectContentPromptIncludesSummaryFrameworkAndJSONContract(t *test
 func TestSummaryPromptCoversEverySupportedVideoType(t *testing.T) {
 	for videoType, framework := range map[string][]string{
 		"interview": {"一、人物背景", "六、反思与边界"},
-		"training":  {"一、目标与受众", "六、练习与应用"},
+		"training":  {"一、学习目标、适用对象与前置知识", "六、练习、自测与应用清单"},
 		"salon":     {"一、活动与参与者", "六、探索方向"},
+		"meeting":   {"一、会议总结", "八、其他"},
 		"general":   {"一、定位与问题", "五、影响与建议"},
 	} {
 		prompt, err := buildDirectContentPrompt(&model.Video{Title: "视频一", VideoType: videoType}, skill.JobSummary, []transcript.Chunk{{ID: "chunk-1", Index: 0, Content: "原文内容"}})
@@ -225,10 +228,25 @@ func TestSummaryPromptCoversEverySupportedVideoType(t *testing.T) {
 	}
 }
 
+func TestSummaryPromptRoutesFromTranscriptInsteadOfUploadType(t *testing.T) {
+	prompt, err := buildDirectContentPrompt(&model.Video{Title: "视频一", VideoType: "training"}, skill.JobSummary, []transcript.Chunk{{ID: "chunk-1", Index: 0, Content: "会议讨论上线范围并确定负责人。"}})
+	if err != nil {
+		t.Fatalf("buildDirectContentPrompt returned error: %v", err)
+	}
+	for _, expected := range []string{"先依据完整转写判断主类型", "classification", `meeting=[{"id":"meeting-summary","title":"一、会议总结"}`, `{"id":"other","title":"八、其他"}]`, "原则上不超过 140 字", "遵循 SMART 原则", "没有则写‘无’", "禁止混用其他类型章节", "上传时视频类型提示（仅弱提示"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("auto-routing prompt missing %q: %s", expected, prompt)
+		}
+	}
+}
+
 func TestSummaryContractResolvesEvidenceFromTranscriptChunks(t *testing.T) {
 	document := summary.Document{
-		SchemaVersion: 1,
+		SchemaVersion: summary.SchemaVersion,
 		VideoType:     "general",
+		Classification: &summary.Classification{
+			Confidence: 0.9, Reason: "转写内容属于通用讨论", EvidenceChunkIDs: []string{"chunk-1"},
+		},
 		Sections: []summary.Section{{
 			ID: "positioning-problem", Title: "一、定位与问题",
 			Blocks: []summary.Block{{ID: "block-1", Kind: summary.BlockKindParagraph, Text: "观点", EvidenceChunkIDs: []string{"chunk-1"}}},
@@ -351,6 +369,155 @@ func TestSummaryDraftReadsMPSResultWithoutEvidenceIndex(t *testing.T) {
 	require.NotEmpty(t, chunks[0].EvidenceSentenceID)
 	require.Equal(t, "开场说明", transcript.OriginalText(chunks[0].Content))
 	require.Equal(t, 30200, chunks[1].EndMs)
+}
+
+func TestSummaryDraftUsesCompleteJSONForStrictStructuredOutput(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoProcessingJob{}))
+
+	video := &model.Video{ID: "video-json", Title: "结构化总结", VideoType: "general", TranscriptGeneration: "generation-1"}
+	require.NoError(t, db.Create(video).Error)
+	payload, err := json.Marshal(map[string]any{"mps_result": mps.Result{Segments: []mps.Segment{{
+		SourceSegmentID: "mps:test:000000", Text: "讨论产品目标并确定下一步。", StartMs: 0, EndMs: 10_000, SpeakerID: "speaker-1",
+	}}}})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.VideoProcessingJob{
+		ID: "transcription-json", VideoID: video.ID, JobType: "transcription", IdempotencyKey: "transcription-json", ResultPayload: string(payload),
+	}).Error)
+	job := &model.VideoProcessingJob{
+		ID: "summary-json", VideoID: video.ID, JobType: skill.JobSummary, ResultStage: "draft",
+		TranscriptGeneration: video.TranscriptGeneration, IdempotencyKey: "summary-json", InputPayload: `{"transcription_job_id":"transcription-json"}`,
+	}
+	require.NoError(t, db.Create(job).Error)
+
+	framework, ok := summary.Framework("general")
+	require.True(t, ok)
+	document := summary.Document{
+		SchemaVersion: summary.SchemaVersion,
+		VideoType:     "general",
+		Classification: &summary.Classification{
+			Confidence: 0.9, Reason: "转写内容属于通用讨论", EvidenceChunkIDs: []string{"mps:test:000000"},
+		},
+	}
+	for index, section := range framework {
+		document.Sections = append(document.Sections, summary.Section{
+			ID: section.ID, Title: section.Title,
+			Blocks: []summary.Block{{
+				ID: fmt.Sprintf("block-%d", index+1), Kind: summary.BlockKindParagraph,
+				Text: "原文未明确更多信息。", EvidenceChunkIDs: []string{"mps:test:000000"},
+			}},
+		})
+	}
+	output, err := json.Marshal(document)
+	require.NoError(t, err)
+	completion := &recordingDirectContentLLM{output: string(output), jsonErrors: []error{invalidJSONCompletionError{}}}
+
+	wikiServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodGet {
+			http.NotFound(writer, request)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusCreated)
+		_, _ = writer.Write([]byte(`{"id":"summary-page","slug":"summary/video-json/draft","version":1}`))
+	}))
+	defer wikiServer.Close()
+	wiki := weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: wikiServer.URL, KBID: "content-kb"})
+	evidenceClient := weknora.New(config.WeKnoraConfig{BaseURL: wikiServer.URL, KBID: "evidence-kb"})
+	handler := &DirectContentHandler{
+		DB: db, LLM: completion, WeKnora: evidenceClient, Wiki: wiki,
+		Orchestrator: skill.NewOrchestrator(db, wiki, "content-kb"), KnowledgeKBID: "content-kb", Job: skill.JobSummary,
+	}
+
+	require.NoError(t, handler.Run(t.Context(), job, video))
+	require.Equal(t, 2, completion.jsonCalls)
+	require.Zero(t, completion.completeCalls)
+	require.Zero(t, completion.streamCalls)
+	require.Contains(t, completion.jsonPrompts[1], "上一轮总结未通过严格校验")
+	require.Contains(t, completion.jsonPrompts[1], "model returned invalid JSON")
+}
+
+func TestFinalOutlineRetriesInvalidJSONThroughStructuredCompletion(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoProcessingJob{}))
+
+	video := &model.Video{ID: "video-outline-json", Title: "会议视频", VideoType: "meeting", DurationSeconds: 10, TranscriptGeneration: "generation-1"}
+	require.NoError(t, db.Create(video).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptChunk{
+		VideoID: video.ID, Generation: video.TranscriptGeneration, Revision: 1, ChunkIndex: 0,
+		KnowledgeID: "knowledge-1", EvidenceSentenceID: "evs:v1:first", SourceSegmentID: "mps:test:000000",
+		StartMs: 0, EndMs: 10_000, ContentHash: "hash-1", Status: "completed",
+	}).Error)
+	job := &model.VideoProcessingJob{
+		ID: "outline-json", VideoID: video.ID, JobType: skill.JobOutline, ResultStage: "final",
+		TranscriptGeneration: video.TranscriptGeneration, IdempotencyKey: "outline-json",
+	}
+	require.NoError(t, db.Create(job).Error)
+
+	outlineOutput := `{"schema_version":1,"chapters":[{"chapter_index":1,"chapter_title":"会议任务确认","start_seconds":0,"end_seconds":10,"chapter_summary":"讨论目标并确认后续任务。","knowledge_points":[{"title":"确认任务","seconds":5,"evidence_chunk_ids":["knowledge-1"]}],"evidence_chunk_ids":["knowledge-1"]}]}`
+	completion := &recordingDirectContentLLM{output: outlineOutput, jsonErrors: []error{invalidJSONCompletionError{}}}
+
+	var storedPage weknora.WikiPage
+	wikiServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(request.URL.Path, "/api/v1/chunks/knowledge-1") {
+			payload, _ := json.Marshal(map[string]any{"success": true, "data": []weknora.KnowledgeChunk{{
+				ID: "chunk-1", KnowledgeID: "knowledge-1",
+				Content: evidenceContentForSummary("evs:v1:first", "mps:test:000000", "generation-1", 0, 10_000, "讨论目标并确认后续任务。"), ChunkIndex: 0,
+			}}, "total": 1})
+			_, _ = writer.Write(payload)
+			return
+		}
+		if request.Method == http.MethodGet && request.URL.Query().Has("page") {
+			pages := []weknora.WikiPage{}
+			if storedPage.ID != "" {
+				pages = append(pages, storedPage)
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{"pages": pages, "total": len(pages), "page": 1, "page_size": 100, "total_pages": 1})
+			return
+		}
+		if request.Method == http.MethodGet {
+			if storedPage.ID == "" {
+				http.NotFound(writer, request)
+				return
+			}
+			_ = json.NewEncoder(writer).Encode(storedPage)
+			return
+		}
+		if request.Method == http.MethodPost {
+			var input struct {
+				Slug     string `json:"slug"`
+				Title    string `json:"title"`
+				PageType string `json:"page_type"`
+				Status   string `json:"status"`
+				Content  string `json:"content"`
+			}
+			require.NoError(t, json.NewDecoder(request.Body).Decode(&input))
+			storedPage = weknora.WikiPage{ID: "outline-page", Slug: input.Slug, Title: input.Title, PageType: input.PageType, Status: input.Status, Content: input.Content, Version: 1}
+			writer.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(writer).Encode(storedPage)
+			return
+		}
+		http.Error(writer, "unexpected request", http.StatusBadRequest)
+	}))
+	defer wikiServer.Close()
+	wiki := weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: wikiServer.URL, KBID: "content-kb"})
+	evidenceClient := weknora.New(config.WeKnoraConfig{BaseURL: wikiServer.URL, KBID: "evidence-kb"})
+	handler := &DirectContentHandler{
+		DB: db, LLM: completion, WeKnora: evidenceClient, Wiki: wiki,
+		Orchestrator: skill.NewOrchestrator(db, wiki, "content-kb"), KnowledgeKBID: "content-kb", Job: skill.JobOutline,
+	}
+
+	require.NoError(t, handler.Run(t.Context(), job, video))
+	require.Equal(t, 2, completion.jsonCalls)
+	require.Zero(t, completion.completeCalls)
+	require.Contains(t, completion.jsonPrompts[1], "上一轮章节导航未通过严格校验")
+	require.Contains(t, completion.jsonPrompts[1], "model returned invalid JSON")
+	var updated model.Video
+	require.NoError(t, db.First(&updated, "id = ?", video.ID).Error)
+	require.Equal(t, "outline-page", updated.OutlineWikiPageID)
 }
 
 func TestSummaryFinalReadsCurrentEvidenceIndex(t *testing.T) {

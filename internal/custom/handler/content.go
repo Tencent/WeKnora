@@ -849,7 +849,7 @@ func (h *ContentHandler) readWikiPageCandidate(ctx context.Context, video *model
 		if parseErr != nil {
 			return nil, &contentArtifactFailure{httpStatus: http.StatusInternalServerError, code: "artifact_invalid", message: "summary page is not valid JSON"}
 		}
-		if validateErr := summary.ValidateStored(document, video.VideoType); validateErr != nil {
+		if validateErr := summary.ValidateStored(document, ""); validateErr != nil {
 			return nil, &contentArtifactFailure{httpStatus: http.StatusInternalServerError, code: "artifact_invalid", message: validateErr.Error()}
 		}
 		summaryDocument = &document

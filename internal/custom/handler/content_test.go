@@ -15,7 +15,82 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/outline"
+	"github.com/Tencent/WeKnora/internal/custom/service/summary"
 )
+
+func TestSummaryEndpointUsesDocumentTypeWhenVideoProjectionLags(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID: uuid.NewString(), Title: "video", Status: model.VideoStatusCompleted, VideoType: "general",
+		TranscriptGeneration: "generation-1", SummaryWikiPageID: "summary-v2",
+	}
+	require.NoError(t, db.Create(&video).Error)
+	framework, ok := summary.Framework("meeting")
+	require.True(t, ok)
+	document := summary.Document{
+		SchemaVersion: summary.SchemaVersion, VideoType: "meeting",
+		Classification: &summary.Classification{Confidence: 0.9, Reason: "会议形成决策", EvidenceChunkIDs: []string{"chunk-1", "chunk-2"}},
+	}
+	for _, section := range framework {
+		document.Sections = append(document.Sections, summary.Section{ID: section.ID, Title: section.Title, Blocks: []summary.Block{}})
+	}
+	payload, err := json.Marshal(document)
+	require.NoError(t, err)
+	server := newContentWikiTestServer(t, video.ID, map[string]weknora.WikiPage{
+		"summary-v2": {ID: "summary-v2", Slug: "summary/" + video.ID, PageType: "index", Content: summaryTestPage(video.ID, string(payload))},
+	})
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/summary", nil)
+	NewContentHandler(db, weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL}), "kb-1").Summary(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var response WikiPageResp
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.NotNil(t, response.Summary)
+	require.Equal(t, "meeting", response.Summary.VideoType)
+	require.Len(t, response.Summary.Sections, 8)
+}
+
+func TestSummaryEndpointReadsLegacySevenSectionMeeting(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{ID: uuid.NewString(), Title: "video", Status: model.VideoStatusCompleted, VideoType: "meeting", TranscriptGeneration: "generation-1", SummaryWikiPageID: "summary-v1"}
+	require.NoError(t, db.Create(&video).Error)
+	legacySections := []summary.Section{
+		{ID: "meeting-goals-participants", Title: "一、会议目标与参与者", Blocks: []summary.Block{}},
+		{ID: "core-topics-background", Title: "二、核心议题与背景", Blocks: []summary.Block{}},
+		{ID: "facts-options-constraints", Title: "三、事实、方案与约束", Blocks: []summary.Block{}},
+		{ID: "important-decisions", Title: "四、重要决策", Blocks: []summary.Block{}},
+		{ID: "differences-pending-decisions", Title: "五、分歧与待决策事项", Blocks: []summary.Block{}},
+		{ID: "actions-next-steps", Title: "六、行动项与后续安排", Blocks: []summary.Block{}},
+		{ID: "results-verification", Title: "七、结果与验证", Blocks: []summary.Block{}},
+	}
+	payload, err := json.Marshal(summary.Document{SchemaVersion: 1, VideoType: "meeting", Sections: legacySections})
+	require.NoError(t, err)
+	server := newContentWikiTestServer(t, video.ID, map[string]weknora.WikiPage{
+		"summary-v1": {ID: "summary-v1", Slug: "summary/" + video.ID, PageType: "index", Content: summaryTestPage(video.ID, string(payload))},
+	})
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/summary", nil)
+	NewContentHandler(db, weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL}), "kb-1").Summary(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var response WikiPageResp
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.NotNil(t, response.Summary)
+	require.Len(t, response.Summary.Sections, 7)
+}
+
+func summaryTestPage(videoID, payload string) string {
+	return "---\ntype: typed_summary\nsource_video_id: " + videoID + "\ntranscript_generation: generation-1\n---\n\n" + payload
+}
 
 func TestSummaryNotGeneratedReturnsStructuredStageStatus(t *testing.T) {
 	db := openTestVideoDB(t)

@@ -131,6 +131,7 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 	pageTitle := ""
 	pageSummary := ""
 	pageBody := ""
+	generatedSummaryType := ""
 	var outlineDocument outline.Document
 	if h.Job == skill.JobOutline {
 		knownChunkIDs := make(map[string]struct{}, len(chunks))
@@ -192,7 +193,7 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		for attempt := 0; attempt < 2; attempt++ {
 			generationPrompt := prompt
 			if attempt > 0 {
-				generationPrompt = prompt + "\n上一轮总结未通过严格校验，必须修正后重新输出完整 JSON。校验错误：" + validationErr.Error() + "。字段名必须严格使用 schemaVersion、videoType、sections、evidenceChunkIds，禁止使用 schema_version、video_type、evidence_chunk_ids；schemaVersion 必须为数字 1。只能从上文转写分块列表复制 evidenceChunkIds，不得创造、猜测或引用不存在的 ID；可以使用纯知识 ID或带 |分片序号的显示 ID，系统会归一化。"
+				generationPrompt = prompt + fmt.Sprintf("\n上一轮总结未通过严格校验，必须修正后重新输出完整 JSON。校验错误：%s。字段名必须严格使用 schemaVersion、videoType、classification、sections、evidenceChunkIds，禁止使用 schema_version、video_type、evidence_chunk_ids；schemaVersion 必须为数字 %d。classification 必须包含 confidence、reason 和 evidenceChunkIds；先确认 videoType，再从候选模板中逐项复制该类型的全部 section.id 和 section.title，禁止使用其他类型的章节、禁止改名、禁止遗漏；只能从上文转写分块列表复制判型和正文 evidenceChunkIds，不得创造、猜测或引用不存在的 ID；可以使用纯知识 ID或带 |分片序号的显示 ID，系统会归一化。", validationErr.Error(), summary.SchemaVersion)
 			}
 			raw, err = h.LLM.CompleteJSON(ctx, generationPrompt)
 			if err != nil {
@@ -208,9 +209,21 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 				continue
 			}
 			summary.NormalizeEvidenceChunkIDs(&document, chunks)
-			if err := summary.Validate(document, video.VideoType, knownChunkIDs); err != nil {
+			expectedVideoType := video.VideoType
+			if h.Job == skill.JobSummary {
+				// The first summary is routed from the transcript itself. The upload
+				// type is only a weak hint and must not lock the framework.
+				expectedVideoType = ""
+			}
+			if err := summary.Validate(document, expectedVideoType, knownChunkIDs); err != nil {
 				validationErr = fmt.Errorf("validate %s output: %w", h.Job, err)
 				continue
+			}
+			if h.Job == skill.JobSummary {
+				if err := summary.ValidateClassification(document, knownChunkIDs); err != nil {
+					validationErr = fmt.Errorf("validate %s classification: %w", h.Job, err)
+					continue
+				}
 			}
 			if err := summary.ResolveEvidence(&document, chunks); err != nil {
 				validationErr = fmt.Errorf("resolve %s evidence: %w", h.Job, err)
@@ -226,6 +239,7 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 					continue
 				}
 			}
+			generatedSummaryType = document.VideoType
 			validationErr = nil
 			break
 		}
@@ -265,6 +279,11 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 	})
 	if err != nil {
 		return fmt.Errorf("save %s page: %w", h.Job, err)
+	}
+	if h.Job == skill.JobSummary && job.ResultStage != "draft" && generatedSummaryType != "" {
+		if err := h.DB.WithContext(ctx).Model(&model.Video{}).Where("id = ?", video.ID).Update("video_type", generatedSummaryType).Error; err != nil {
+			return fmt.Errorf("save classified video type: %w", err)
+		}
 	}
 	result, _ := json.Marshal(map[string]any{
 		"provider":              "llm",
@@ -822,13 +841,13 @@ func buildDirectContentPrompt(video *model.Video, jobType string, chunks []trans
 		builder.WriteString("章节必须覆盖从 0 秒开始到最后一个有效转写时间点，并按时间顺序排列；视频末尾没有转写内容时，不得伪造章节或时间范围。优先生成 4～8 章，只有主题发生明显转折时才拆章。时间只填数字秒数，不要填格式化时间字符串。每章只保留 1～2 个全片关键知识点，只有存在独立结论、方法或动作时才增加，绝不为覆盖每句转写而切碎；全片最多 12 个。合并同义观点、例子和论据。\n")
 		builder.WriteString("章节核心内容控制在 80 个汉字以内，知识点标题控制在 10 个汉字以内。知识点标题必须是短语或结论式短标题，使用“方法名”“动作+对象”或“核心结论”结构，不写完整句。每个章节必须有核心内容和至少一个知识点；evidence_chunk_ids 必须使用给定转写分块 ID，不要拼接分块序号。\n")
 	case skill.JobSummary:
-		builder.WriteString(summaryPrompt(video.VideoType, false))
+		builder.WriteString(summaryPrompt("", false))
 	case skill.JobSummaryEnhance:
 		builder.WriteString(summaryPrompt(video.VideoType, true))
 	default:
 		return "", fmt.Errorf("unsupported direct content job: %s", jobType)
 	}
-	builder.WriteString(fmt.Sprintf("视频标题：%s\n视频类型：%s\n转写分块：每个分块使用 ID=转写分块ID、EVIDENCE_SENTENCE_ID=不可变证据句ID、TIME_MS=开始毫秒-结束毫秒；evidence chunk ID 只复制 ID= 后的值，原文依据和时间跳转必须通过同一分块回溯到 EVIDENCE_SENTENCE_ID。\n", video.Title, video.VideoType))
+	builder.WriteString(fmt.Sprintf("视频标题：%s\n上传时视频类型提示（仅弱提示，不得单独决定模板）：%s\n转写分块：每个分块使用 ID=转写分块ID、EVIDENCE_SENTENCE_ID=不可变证据句ID、TIME_MS=开始毫秒-结束毫秒；evidence chunk ID 只复制 ID= 后的值，原文依据和时间跳转必须通过同一分块回溯到 EVIDENCE_SENTENCE_ID。\n", video.Title, video.VideoType))
 	for _, chunk := range chunks {
 		builder.WriteString(fmt.Sprintf("ID=%s\nEVIDENCE_SENTENCE_ID=%s\nTIME_MS=%d-%d\n%s\n\n", chunk.ID, chunk.EvidenceSentenceID, chunk.StartMs, chunk.EndMs, transcript.OriginalText(chunk.Content)))
 	}
@@ -840,22 +859,62 @@ func buildDirectContentPrompt(video *model.Video, jobType string, chunks []trans
 
 func summaryPrompt(videoType string, enhancement bool) string {
 	framework, ok := summary.Framework(videoType)
-	if !ok {
+	if videoType != "" && !ok {
 		return fmt.Sprintf("视频类型 %q 没有可用的总结框架。\n", videoType)
 	}
-	sectionShape := make([]string, 0, len(framework))
-	for _, section := range framework {
-		sectionShape = append(sectionShape, fmt.Sprintf(`{"id":%q,"title":%q,"blocks":[{"id":"block-1","kind":"paragraph","text":"本节内容","evidenceChunkIds":["转写分块ID"]}]}`, section.ID, section.Title))
+	frameworks := []struct {
+		videoType string
+		sections  []summary.FrameworkSection
+	}{}
+	if videoType == "" {
+		for _, candidate := range summary.Frameworks() {
+			frameworks = append(frameworks, struct {
+				videoType string
+				sections  []summary.FrameworkSection
+			}{videoType: candidate.VideoType, sections: candidate.Sections})
+		}
+	} else {
+		frameworks = append(frameworks, struct {
+			videoType string
+			sections  []summary.FrameworkSection
+		}{videoType: videoType, sections: framework})
+	}
+	sectionShape := make([]string, 0)
+	frameworkDescriptions := make([]string, 0, len(frameworks))
+	for _, candidate := range frameworks {
+		if videoType != "" {
+			for _, section := range candidate.sections {
+				sectionShape = append(sectionShape, fmt.Sprintf(`{"id":%q,"title":%q,"blocks":[{"id":"block-1","kind":"paragraph","text":"本节内容","evidenceChunkIds":["转写分块ID"]}]}`, section.ID, section.Title))
+			}
+		}
+		frameworkDescriptions = append(frameworkDescriptions, fmt.Sprintf("%s=%s", candidate.videoType, frameworkIdentity(candidate.sections)))
+	}
+	if videoType == "" {
+		sectionShape = append(sectionShape, `{"id":"选中类型的章节ID","title":"选中类型的标准标题","blocks":[{"id":"block-1","kind":"paragraph","text":"本节内容","evidenceChunkIds":["转写分块ID"]}]}`)
 	}
 	mode := "生成"
 	if enhancement {
 		mode = "生成增强版"
 	}
+	videoTypeContract := `"videoType":"从候选类型中选择"`
+	if videoType != "" {
+		videoTypeContract = fmt.Sprintf(`"videoType":%q`, videoType)
+	}
+	classificationContract := `"classification":{"confidence":0.91,"reason":"基于转写的简短判型理由","evidenceChunkIds":["判型证据分块ID"]}`
 	return fmt.Sprintf("任务：%s类型化智能总结。只返回一个 JSON 对象，不要输出 Markdown、代码围栏、解释文字、HTML 或 XML。\n"+
-		"JSON 契约：必须返回 {\"schemaVersion\":1,\"videoType\":%q,\"sections\":[%s]}。sections 必须严格按以下标题和顺序输出：%s。\n"+
-		"每个 section 必须包含至少一个 block；block.kind 只能是 paragraph 或 bullet，block.text 必须是可直接展示的纯文本，不得包含 Markdown 标记；每个 block 必须提供 evidenceChunkIds，且只能引用给定转写分块 ID。一个 block 可以引用多个分块。knowledge_refs 与 evidence_refs 由系统在保存前生成，不要自行编造或输出。\n"+
-		"章节证据不足时保留章节并明确写出信息不足，不得删除、合并、改名或补充转写之外的事实。%s\n",
-		mode, videoType, strings.Join(sectionShape, ","), frameworkTitles(framework), enhancementInstruction(enhancement))
+		"先依据完整转写判断主类型，再匹配模板。候选类型及固定章节 ID、标题：%s。确定 videoType 后，sections 必须逐项复制该类型的完整固定章节，禁止混用其他类型章节。\n"+
+		"JSON 契约：必须返回 {\"schemaVersion\":%d,%s,%s,\"sections\":[%s]}。sections 必须严格按选中类型的标题和顺序输出：%s。\n"+
+		"每个 section 必须包含 blocks 数组。有可靠原文证据时才生成 block；block.kind 只能是 paragraph 或 bullet，block.text 必须是可直接展示的纯文本，不得包含 Markdown 标记；每个非空 block 必须提供 evidenceChunkIds，且只能引用给定转写分块 ID。一个 block 可以引用多个分块。knowledge_refs 与 evidence_refs 由系统在保存前生成，不要自行编造或输出。\n"+
+		"选择 training 时，以“培训内容体系”为主干，按讲师真实授课顺序详细还原知识；背景引入、理论讲解、案例分析、实操演示、互动问答只是常见顺序，不得强行补齐。保留原文出现的案例细节和工具使用说明；原文金句必须逐字引用，不得改写成讲师引语；方法必须写清原文明示的步骤和判断标准。固定培训章节必须全部保留，原文没有可靠依据的章节必须输出 blocks:[]，不得创建“未提及”“信息不足”“无”等占位内容，不得使用常识、推测或知识增强信息补齐原文不存在的事实。\n"+
+		"不得删除、合并或改名章节。非培训类型的缺失内容按对应模板规则处理。判型置信度低于 0.75 时必须选择 general；会议判型至少引用两段不同位置的转写分块。%s%s\n",
+		mode, strings.Join(frameworkDescriptions, "；"), summary.SchemaVersion, videoTypeContract, classificationContract, strings.Join(sectionShape, ","), strings.Join(frameworkDescriptions, "；"), meetingSummaryInstruction(videoType), enhancementInstruction(enhancement))
+}
+
+func meetingSummaryInstruction(videoType string) string {
+	if videoType != "" && videoType != "meeting" {
+		return ""
+	}
+	return "当 videoType=meeting 时：一、会议总结采用电梯演讲式表达，概括核心问题、主要共识或最终定调，原则上不超过 140 字；二、会议基本信息至少包含参会时间、参会人员、会议类型，缺失项写‘会议中未明确’；三、关键议题和共识按议题组织，每项包含决策内容、决策逻辑，可选后续影响；四、会议分歧点只记录原文明示且尚未消除的分歧；五、会议讨论详情按逻辑覆盖全部实质讨论，不按发言顺序复述；六、待办事项遵循 SMART 原则，每项包含事项描述、负责人、截止时间，可选优先级与状态，缺失项写‘会议中未明确’；七、遗留和搁置议题每项包含搁置内容、搁置原因、后续计划；八、其他只记录前述章节未覆盖的信息，没有则写‘无’。"
 }
 
 func frameworkTitles(framework []summary.FrameworkSection) string {
@@ -864,6 +923,14 @@ func frameworkTitles(framework []summary.FrameworkSection) string {
 		titles = append(titles, section.Title)
 	}
 	return strings.Join(titles, "、")
+}
+
+func frameworkIdentity(framework []summary.FrameworkSection) string {
+	sections := make([]string, 0, len(framework))
+	for _, section := range framework {
+		sections = append(sections, fmt.Sprintf(`{"id":%q,"title":%q}`, section.ID, section.Title))
+	}
+	return "[" + strings.Join(sections, ",") + "]"
 }
 
 func enhancementInstruction(enhancement bool) string {

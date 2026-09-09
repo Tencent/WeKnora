@@ -11,6 +11,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	llmclient "github.com/Tencent/WeKnora/internal/custom/client/llm"
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 )
@@ -475,7 +476,7 @@ func TestContentFailureStoresCategoryAndKeepsVideoPlayable(t *testing.T) {
 	if err := db.First(&gotJob, "id = ?", job.ID).Error; err != nil {
 		t.Fatalf("load job: %v", err)
 	}
-	if gotJob.Status != "failed" || gotJob.ErrorCategory != "timeout" || gotJob.ErrorCode != "timeout" {
+	if gotJob.Status != "failed" || gotJob.ErrorCategory != "timeout" || gotJob.ErrorCode != "llm_deadline_exceeded" {
 		t.Fatalf("failed job = %#v", gotJob)
 	}
 	var gotVideo model.Video
@@ -571,7 +572,11 @@ func TestClassifyProcessingError(t *testing.T) {
 		category string
 		code     string
 	}{
-		{name: "timeout", err: context.DeadlineExceeded, category: "timeout", code: "timeout"},
+		{name: "timeout", err: context.DeadlineExceeded, category: "timeout", code: "llm_deadline_exceeded"},
+		{name: "stream connection closed", err: &llmclient.ConnectionClosedError{Err: errors.New("EOF")}, category: "external_task", code: "llm_connection_closed"},
+		{name: "stream incomplete", err: &llmclient.IncompleteOutputError{Reason: "missing completion marker"}, category: "response_parse", code: "llm_stream_incomplete"},
+		{name: "stream idle timeout", err: &llmclient.StreamTimeoutError{Phase: "idle"}, category: "timeout", code: "llm_stream_idle_timeout"},
+		{name: "summary contract", err: errors.New("validate summary output: section count mismatch"), category: "response_parse", code: "summary_contract_invalid"},
 		{name: "configuration", err: errors.New("听悟 client 未配置"), category: "configuration_auth", code: "configuration_missing"},
 		{name: "authentication", err: errors.New("tingwu create status 401: InvalidAccessKeyId"), category: "configuration_auth", code: "authentication_failed"},
 		{name: "rate limit", err: errors.New("tingwu create status 429: rate limit exceeded"), category: "external_task", code: "external_task_failed"},
