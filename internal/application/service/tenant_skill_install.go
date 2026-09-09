@@ -87,6 +87,13 @@ func (s *TenantSkillService) installSkillArchive(
 func (s *TenantSkillService) installParsedSkill(
 	ctx context.Context, tenantID uint64, configID string, bundle *SkillBundle, archive []byte, instructions ...string,
 ) (string, error) {
+	return s.installParsedSkillFrom(ctx, tenantID, configID, bundle, archive, nil, instructions...)
+}
+
+func (s *TenantSkillService) installParsedSkillFrom(
+	ctx context.Context, tenantID uint64, configID string, bundle *SkillBundle, archive []byte,
+	original *types.TenantSkillEntity, instructions ...string,
+) (string, error) {
 	if bundle == nil {
 		return "", fmt.Errorf("skill bundle is required")
 	}
@@ -97,6 +104,9 @@ func (s *TenantSkillService) installParsedSkill(
 	existing, err := s.skills.GetSkillByName(ctx, tenantID, configID, bundle.Name)
 	if err != nil {
 		return "", err
+	}
+	if original != nil && existing != nil {
+		return "", apperrors.NewConflictError("target already has this skill; it was preserved")
 	}
 	guidance := strings.TrimSpace(strings.Join(instructions, "\n"))
 	if len([]rune(guidance)) > 10000 {
@@ -138,6 +148,9 @@ func (s *TenantSkillService) installParsedSkill(
 			if !isSkillNameConflict(err) {
 				return "", err
 			}
+			if original != nil {
+				return "", apperrors.NewConflictError("target already has this skill; it was preserved")
+			}
 			// Two first-time uploads of the same name raced the unique index.
 			// Take the row that won rather than surfacing a 500.
 			winner, lookupErr := s.skills.GetSkillByName(ctx, tenantID, configID, bundle.Name)
@@ -155,29 +168,37 @@ func (s *TenantSkillService) installParsedSkill(
 		}
 	}
 
-	// The zip lives on the catalog, not on this sandbox: uninstalling from
-	// the last config must not take the definition's files with it. The
-	// install row only stores CatalogID; readers follow that to the zip.
-	catalog, err := s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, true)
-	if err != nil {
-		failCtx, cancelFail := s.cleanupContext(ctx)
-		defer cancelFail()
-		storeErr := fmt.Errorf("store bundle: %w", err)
-		logger.Errorf(ctx, "[skill] store bundle failed tenant=%d config=%s skill=%s name=%s: %v",
-			tenantID, configID, skillID, bundle.Name, err)
-		s.failSkill(failCtx, tenantID, configID, skillID, bundle, storeErr)
-		return "", fmt.Errorf("store bundle for skill %s: %w", skillID, err)
-	}
-	if err := s.pointInstallAtCatalog(ctx, &types.TenantSkillEntity{
-		ID: skillID, TenantID: tenantID, SandboxConfigID: configID,
-	}, catalog); err != nil {
-		failCtx, cancelFail := s.cleanupContext(ctx)
-		defer cancelFail()
-		storeErr := fmt.Errorf("store bundle: %w", err)
-		logger.Errorf(ctx, "[skill] store bundle failed tenant=%d config=%s skill=%s name=%s: %v",
-			tenantID, configID, skillID, bundle.Name, err)
-		s.failSkill(failCtx, tenantID, configID, skillID, bundle, storeErr)
-		return "", fmt.Errorf("store bundle for skill %s: %w", skillID, err)
+	if original != nil {
+		if err := s.pinMigratedBundle(ctx, tenantID, configID, skillID, original, archive); err != nil {
+			s.failSkill(ctx, tenantID, configID, skillID, bundle, err)
+			return "", err
+		}
+	} else {
+		// The zip lives on the catalog, not on this sandbox: uninstalling from
+		// the last config must not take the definition's files with it. The
+		// install row only stores CatalogID; readers follow that to the zip.
+		catalog, err := s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, true)
+		if err != nil {
+			failCtx, cancelFail := s.cleanupContext(ctx)
+			defer cancelFail()
+			storeErr := fmt.Errorf("store bundle: %w", err)
+			logger.Errorf(ctx, "[skill] store bundle failed tenant=%d config=%s skill=%s name=%s: %v",
+				tenantID, configID, skillID, bundle.Name, err)
+			s.failSkill(failCtx, tenantID, configID, skillID, bundle, storeErr)
+			return "", fmt.Errorf("store bundle for skill %s: %w", skillID, err)
+		}
+		if err := s.pointInstallAtCatalog(ctx, &types.TenantSkillEntity{
+			ID: skillID, TenantID: tenantID, SandboxConfigID: configID,
+		}, catalog); err != nil {
+			failCtx, cancelFail := s.cleanupContext(ctx)
+			defer cancelFail()
+			storeErr := fmt.Errorf("store bundle: %w", err)
+			logger.Errorf(ctx, "[skill] store bundle failed tenant=%d config=%s skill=%s name=%s: %v",
+				tenantID, configID, skillID, bundle.Name, err)
+			s.failSkill(failCtx, tenantID, configID, skillID, bundle, storeErr)
+			return "", fmt.Errorf("store bundle for skill %s: %w", skillID, err)
+		}
+
 	}
 
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
@@ -473,6 +494,7 @@ func (s *TenantSkillService) runInstall(
 	}); err != nil {
 		return err
 	}
+	builtinManifest := builtinSkillsForSnapshot(ctx, mgr, sess.ID)
 	ref, err := s.createSnapshot(ctx, mgr, sess.ID, snapshotName)
 	if err != nil {
 		return err
@@ -487,7 +509,9 @@ func (s *TenantSkillService) runInstall(
 	}
 
 	// 8. Switch the pointer. One DB write; everything after this is cleanup.
-	if err := s.switchImagePointer(ctx, tenantID, configID, ref.ID, generation, builtFingerprint); err != nil {
+	if err := s.switchImagePointer(
+		ctx, tenantID, configID, ref.ID, generation, builtFingerprint, builtinManifest,
+	); err != nil {
 		s.abandonSnapshot(cleanupBase, tenantID, mgr, installRowID, ref.ID)
 		return err
 	}
@@ -763,6 +787,9 @@ type installerJob struct {
 func (s *TenantSkillService) installDependenciesAndVerify(
 	ctx context.Context, job installerJob,
 ) (err error) {
+	if handled, builtinErr := s.tryPreinstalledBuiltin(ctx, job); handled {
+		return builtinErr
+	}
 	run, err := s.openInstallerRun(ctx, job.tenantID, job.sess, job.skillDir, job.transcript)
 	if err != nil {
 		job.transcript.Finish(context.WithoutCancel(ctx), err)
@@ -1546,6 +1573,7 @@ func (s *TenantSkillService) switchImagePointer(
 	snapshotID string,
 	generation int,
 	builtFingerprint string,
+	builtinManifest ...*types.BuiltinSkillsManifest,
 ) error {
 	cfgEntity, err := s.configs.GetByID(ctx, tenantID, configID)
 	if err != nil {
@@ -1569,9 +1597,14 @@ func (s *TenantSkillService) switchImagePointer(
 		)
 	}
 
+	var manifest *types.BuiltinSkillsManifest
+	if len(builtinManifest) > 0 {
+		manifest = builtinManifest[0]
+	}
 	// Only the SkillImage portion is touched; everything else in the entity is
 	// whatever the latest read says it is.
 	cfgEntity.Config.SkillImage = &types.SkillImageConfig{
+		BuiltinSkills:    manifest,
 		SnapshotID:       snapshotID,
 		Generation:       generation,
 		BuiltAt:          s.now(),

@@ -767,7 +767,23 @@ export interface SandboxSkillImage {
   owner_fingerprint?: string
 }
 
+export interface BuiltinSkillsManifest {
+  schema_version: number
+  profile: string
+  version: string
+  skills: { name: string; digest: string; verified: boolean }[]
+}
+
+export interface TemplateSkillsDeclaration {
+  provider: string
+  endpoint: string
+  template_id: string
+  revision: string
+  manifest: BuiltinSkillsManifest
+}
+
 export interface SandboxConfig {
+  template_skills?: TemplateSkillsDeclaration
   sandbox_type?: string
   default_timeout_sec?: number
   terminal_idle_disconnect_sec?: number
@@ -859,6 +875,8 @@ export interface SandboxCheckResult {
 }
 
 export interface SandboxTemplate {
+  builtin_skills?: BuiltinSkillsManifest
+  builtin_skill_names?: string[]
   id: string
   name: string
   status?: string

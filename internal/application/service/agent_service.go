@@ -257,18 +257,20 @@ func (s *agentService) CreateAgentEngine(
 	// or that simply has none yet — therefore gets a shell without an
 	// empty skills manager or skill tools that cannot succeed.
 	offerSkills := config.SkillsEnabled &&
-		(len(config.SkillDirs) > 0 || len(config.TenantSkills) > 0)
+		(len(config.SkillDirs) > 0 || len(config.TenantSkills) > 0 || config.SandboxConfigID != "")
 	if offerSkills {
 		skillsManager, err := s.initializeSkillsManager(ctx, sessionID, config, toolRegistry)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to initialize skills manager: %v", err)
-		} else if skillsManager != nil {
+		} else if skillsManager != nil && (len(config.SkillDirs) > 0 || len(skillsManager.GetAllMetadata()) > 0) {
 			engine.SetSkillsManager(skillsManager)
 			logger.Infof(ctx, "Skills manager initialized with %d skills",
 				len(skillsManager.GetAllMetadata()))
 		}
 	}
 
+	// Initialization may have removed versions absent from this session image.
+	engine.SetPinnedMentions(pinnedMCP, s.resolvePinnedSkillInfos(config, engine.GetSkillsManager()))
 	return engine, nil
 }
 
@@ -558,6 +560,10 @@ func (s *agentService) initializeSkillsManager(
 
 	logger.Infof(ctx, "Workspace sandbox in use: config=%s type=%s", configID, sandboxMgr.GetType())
 
+	// Reconcile against the session image, including old-image rollout pins.
+	hadTenantSkills := len(config.TenantSkills) > 0
+	config.TenantSkills = reconcileRuntimeSkills(ctx, sandboxMgr, sessionID, config.TenantSkills)
+
 	// Create skills manager
 	skillsConfig := &skills.ManagerConfig{
 		SkillDirs:     config.SkillDirs,
@@ -566,7 +572,22 @@ func (s *agentService) initializeSkillsManager(
 	}
 
 	skillsManager := skills.NewManager(skillsConfig, sandboxMgr)
-	if source := s.tenantSkillSource(ctx, config); source != nil {
+	var manifest *types.BuiltinSkillsManifest
+	if reader, ok := sandboxMgr.(interface {
+		BuiltinSkillsForRun(context.Context, string) (*types.BuiltinSkillsManifest, error)
+	}); ok {
+		manifest, err = reader.BuiltinSkillsForRun(ctx, sessionID)
+		if err != nil {
+			logger.Warnf(ctx, "Read template skill metadata: %v", err)
+		}
+	}
+	if manifest != nil || hadTenantSkills || len(config.TenantSkills) > 0 {
+		source, err := skills.MergeImageSkillSources(
+			s.tenantSkillSource(ctx, config), skills.NewBuiltinSkillSource(manifest),
+		)
+		if err != nil {
+			return nil, err
+		}
 		skillsManager.WithTenantSource(source)
 	}
 
@@ -1427,7 +1448,9 @@ func fallbackPinnedMCPInfos(ids []string) []*agent.PinnedMCPServiceInfo {
 	return result
 }
 
-func (s *agentService) resolvePinnedSkillInfos(config *types.AgentConfig) []*agent.PinnedSkillInfo {
+func (s *agentService) resolvePinnedSkillInfos(
+	config *types.AgentConfig, runtime ...*skills.Manager,
+) []*agent.PinnedSkillInfo {
 	if len(config.PinnedSkillNames) == 0 {
 		return nil
 	}
@@ -1449,9 +1472,23 @@ func (s *agentService) resolvePinnedSkillInfos(config *types.AgentConfig) []*age
 		}
 	}
 
+	// The manager already merged preinstalled and installed sources, filtered
+	// the agent's whitelist, and reconciled this session's image.
+	if len(runtime) > 0 {
+		descByName = make(map[string]string)
+		if runtime[0] != nil {
+			for _, meta := range runtime[0].GetAllMetadata() {
+				descByName[meta.Name] = meta.Description
+			}
+		}
+	}
+
 	result := make([]*agent.PinnedSkillInfo, 0, len(config.PinnedSkillNames))
 	for _, name := range config.PinnedSkillNames {
 		if name == "" {
+			continue
+		}
+		if _, available := descByName[name]; len(runtime) > 0 && !available {
 			continue
 		}
 		result = append(result, &agent.PinnedSkillInfo{

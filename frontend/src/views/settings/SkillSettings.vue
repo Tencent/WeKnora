@@ -11,7 +11,15 @@
       <p class="section-description">{{ $t('settings.skills.description') }}</p>
     </div>
 
-    <div v-if="loading" class="loading-container">
+    <div class="skill-view-tabs" role="tablist">
+      <button v-for="tab in ['mine', 'discover']" :key="tab" type="button" role="tab"
+        :aria-selected="activeView === tab" :class="{ active: activeView === tab }" @click="activeView = tab">
+        {{ t(tab === 'mine' ? 'skillDiscovery.mySkills' : 'skillDiscovery.title') }}
+      </button>
+    </div>
+    <SkillDiscovery v-if="activeView === 'discover'" :catalog="catalog" :configs="records"
+      @install="onDiscoveryInstall" @migrated="loadCatalog()" />
+    <div v-else-if="loading" class="loading-container">
       <t-loading :text="$t('common.loading')" />
     </div>
 
@@ -64,7 +72,7 @@
                 {{ compactText(item.description) }}
               </p>
               <div v-for="view in [installsView(item)]" :key="'installs'" class="skill-card__installs">
-                <span v-if="view.installs.length === 0 && !view.canAdd" class="skill-card__installs-label">
+                <span v-if="view.installs.length === 0 && view.preinstalled.length === 0 && !view.canAdd" class="skill-card__installs-label">
                   {{ $t('settings.skills.noInstalls') }}
                 </span>
                 <button v-else-if="!view.needsPanel" type="button" class="skill-card__chip"
@@ -89,6 +97,15 @@
                   </button>
                   <template #content>
                     <div class="skill-install-panel">
+                      <template v-if="view.preinstalled.length">
+                        <p class="skill-install-panel__group">{{ $t('skillDiscovery.cardBuiltins') }}</p>
+                        <div v-for="cfg in view.preinstalled" :key="`builtin-${cfg.id}`" class="skill-install-panel__item skill-install-panel__item--preinstalled" :title="$t('skillDiscovery.alreadyPreinstalled')">
+                          <SandboxBackendBadge :type="cfg.sandbox_type" size="xs" />
+                          <span class="skill-install-panel__name">{{ cfg.name }}</span>
+                          <span class="skill-install-panel__preset">{{ $t('skillDiscovery.preinstalledShort') }}</span>
+                        </div>
+                        <div v-if="view.installs.length || view.available.length" class="skill-install-panel__split" role="separator" />
+                      </template>
                       <template v-if="view.installs.length > 0">
                         <p class="skill-install-panel__group">{{ $t('settings.skills.installPanelGroup') }}</p>
                         <button v-for="inst in view.installs" :key="inst.skill_id" type="button"
@@ -107,10 +124,10 @@
                         <p class="skill-install-panel__group">{{ $t('settings.skills.installPanelAvailable') }}</p>
                         <button v-for="cfg in view.available" :key="cfg.id" type="button"
                           class="skill-install-panel__item skill-install-panel__item--available"
-                          :title="sandboxMetaLine(cfg)" @click="openInstallTo(item, cfg)">
+                          :title="sandboxMetaLine(cfg)" :disabled="item.builtin && !targetsLoaded" @click="openInstallTo(item, cfg)">
                           <SandboxBackendBadge :type="cfg.sandbox_type" size="xs" />
                           <span class="skill-install-panel__name">{{ cfg.name }}</span>
-                          <t-icon name="add" size="14px" class="skill-install-panel__add" />
+                          <t-icon :name="item.builtin && !targetsLoaded ? 'time' : 'add'" size="14px" class="skill-install-panel__add" />
                         </button>
                       </template>
                     </div>
@@ -264,11 +281,11 @@
       </template>
     </SettingDrawer>
 
-    <SettingDrawer v-model:visible="showInstall" :title="$t('settings.skills.installToSandbox')"
+    <SettingDrawer v-model:visible="showInstall" :title="installActionText"
       :description="installDrawerDesc" :icon="SKILL_ICON" width="560px" :min-width="480" :max-width="760"
       storage-key="setting-drawer:width:skill-catalog-install" :confirm-loading="installing"
       :confirm-disabled="installConfirmDisabled" :confirm-text="installConfirmText" @confirm="onInstallDrawerConfirm">
-      <p class="installer-model-hint">{{ $t('settings.skills.installToSandboxDesc') }}</p>
+      <p class="installer-model-hint">{{ $t(installCatalog?.builtin ? 'skillDiscovery.activationHint' : 'settings.skills.installToSandboxDesc') }}</p>
       <section v-if="installPickRows.length > 0" class="setting-drawer__section">
         <div class="sandbox-pick-list">
           <div v-for="row in installPickRows" :key="row.cfg.id" class="sandbox-pick-row"
@@ -279,7 +296,7 @@
                 <SandboxBackendBadge :type="row.cfg.sandbox_type" size="sm" />
                 <span class="sandbox-pick__text">
                   <span class="sandbox-pick__name">{{ row.cfg.name }}</span>
-                  <span class="sandbox-pick__meta">{{ sandboxMetaLine(row.cfg) }}</span>
+                  <span class="sandbox-pick__meta">{{ row.builtinStatus === 'unknown' ? $t('skillDiscovery.canInstallManually') : sandboxMetaLine(row.cfg) }}</span>
                 </span>
               </span>
             </t-checkbox>
@@ -305,12 +322,22 @@
         </div>
       </section>
       <p v-else class="installer-model-hint">{{ $t('settings.skills.noSandboxToInstall') }}</p>
-      <section v-if="installTargetIds.length > 0" class="setting-drawer__section">
+      <section v-if="installTargetIds.length > 0 && !installCatalog?.builtin" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillInstallerModel') }}</h4>
         <p class="installer-model-hint">{{ $t('settings.sandbox.skillInstallerModelHint') }}</p>
         <ModelSelector model-type="KnowledgeQA" :selected-model-id="installerModelId"
           :disabled="savingInstallerModel || installing" @update:selected-model-id="onInstallerModelChange" />
       </section>
+      <div v-if="installCatalog?.builtin && installPickRows.some(row => row.install?.status === 'failed')" class="builtin-activation-help">
+        <p>{{ $t('skillDiscovery.activationFailedHint') }}</p>
+        <t-button v-for="row in installPickRows.filter(row => row.install?.status === 'failed')" :key="row.cfg.id"
+          theme="default" variant="text" size="small" @click="openManageFromPick(installCatalog?.id, row.install!)">
+          {{ row.cfg.name }} · {{ $t('skillDiscovery.activationDetails') }}
+        </t-button>
+        <t-button theme="default" variant="outline" size="small" @click="uiStore.openSettings('sandbox')">
+          {{ $t('settings.skills.goSandboxSettings') }}
+        </t-button>
+      </div>
     </SettingDrawer>
 
     <SettingDrawer v-model:visible="showManage" :title="manageTitle" :description="manageDesc" :icon="SKILL_ICON"
@@ -327,6 +354,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { createSkillResourceCache } from '@/stores/skillResourceCache'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon, DeleteIcon, FolderIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -334,6 +362,7 @@ import SandboxSkillsPanel from '@/components/SandboxSkillsPanel.vue'
 import SkillFilesDrawer from '@/components/SkillFilesDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import SkillDiscovery from '@/components/settings/SkillDiscovery.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useConfigSkillInstallProgress } from '@/composables/useConfigSkillInstallProgress'
@@ -343,6 +372,9 @@ import { MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils'
 import {
   deleteSkillCatalog,
   installSkillCatalog,
+  listSkills,
+  registerBuiltinSkill,
+  type DiscoverySkill,
   listSkillCatalog,
   registerSkillCatalogFromFile,
   registerSkillCatalogFromSource,
@@ -369,6 +401,16 @@ const { t } = useI18n()
 const uiStore = useUIStore()
 const confirmDelete = useConfirmDelete()
 
+const activeView = ref('mine')
+function onDiscoveryInstall(entry: DiscoverySkill) {
+  const registered = catalog.value.find(row => row.name === entry.name && row.builtin)
+  openInstall(registered || {
+    id: '', name: entry.name, version: entry.version, builtin: true,
+    description: entry.description['en-US'] || '', installations: [], created_at: '', updated_at: '',
+  })
+  pendingBuiltinSkill.value = entry
+}
+
 const loading = ref(false)
 const records = ref<SandboxConfigRecord[]>([])
 const catalog = ref<SkillCatalogItem[]>([])
@@ -385,6 +427,51 @@ const addSessionIds = ref<string[]>([])
 const installTargetIds = ref<string[]>([])
 const installSessionIds = ref<string[]>([])
 const installCatalog = ref<SkillCatalogItem | null>(null)
+const pendingBuiltinSkill = ref<DiscoverySkill | null>(null)
+const targetSkills = ref<Record<string, Awaited<ReturnType<typeof listSkills>> | null>>({})
+const targetSkillCache = createSkillResourceCache(listSkills)
+const targetsLoaded = ref(false)
+const builtinTargetsLoading = ref(false)
+let builtinTargetRequest = 0
+let targetSkillsGeneration = 0
+function isPreinstalledTarget(item: SkillCatalogItem, configId: string): boolean {
+  if (!item.builtin) return false
+  const response = targetSkills.value[configId]
+  return !!(response?.builtin_skills?.skills || response?.data?.filter(skill => skill.source === 'builtin'))
+    ?.some(skill => skill.name === item.name)
+}
+const builtinTargetStatus = computed(() => {
+  const item = installCatalog.value
+  const result: Record<string, 'preinstalled' | 'installed' | 'unknown'> = {}
+  if (!item) return result
+  for (const cfg of skillConfigs.value) {
+    result[cfg.id] = isPreinstalledTarget(item, cfg.id) ? 'preinstalled'
+      : targetSkills.value[cfg.id]?.data?.some(skill => skill.name === item.name) ? 'installed' : 'unknown'
+  }
+  return result
+})
+async function refreshTargetSkills() {
+  const generation = targetSkillsGeneration
+  const queue = [...skillConfigs.value]
+  await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
+    while (queue.length && generation === targetSkillsGeneration) {
+      const cfg = queue.shift()!
+      const response = await targetSkillCache.get(cfg.id).catch(() => null)
+      if (generation === targetSkillsGeneration) targetSkills.value[cfg.id] = response
+    }
+  }))
+  if (generation === targetSkillsGeneration) targetsLoaded.value = true
+}
+async function loadBuiltinTargets(item: SkillCatalogItem) {
+  const request = ++builtinTargetRequest
+  if (!item.builtin) { builtinTargetsLoading.value = false; return }
+  builtinTargetsLoading.value = true
+  await refreshTargetSkills()
+  if (request !== builtinTargetRequest) return
+  builtinTargetsLoading.value = false
+  prunePicks(installTargetIds, installPickRows.value)
+}
+
 const manageRecord = ref<SandboxConfigRecord | null>(null)
 const manageSkillId = ref('')
 const manageTitle = ref('')
@@ -455,19 +542,27 @@ const addPrimaryText = computed(() => {
   return t('settings.skills.addFinish')
 })
 
+const installActionText = computed(() => t('settings.skills.installToSandbox'))
 const installConfirmText = computed(() =>
   installTargetIds.value.length > 0
-    ? t('settings.skills.installToSandbox')
+    ? installActionText.value
     : t('settings.skills.addFinish'),
 )
 
 const installConfirmDisabled = computed(() =>
-  installing.value || (installTargetIds.value.length > 0 && !installerModelId.value),
+  installing.value || builtinTargetsLoading.value || (installTargetIds.value.length > 0 && !installCatalog.value?.builtin && !installerModelId.value),
 )
 
-const installPickRows = computed(() =>
-  sandboxPickRows(catalogItemById(installCatalog.value?.id), 'remaining', installSessionIds.value),
-)
+const installPickRows = computed(() => {
+  const item = catalogItemById(installCatalog.value?.id) || installCatalog.value
+  const rows = sandboxPickRows(item, item?.builtin ? 'all' : 'remaining', installSessionIds.value)
+  if (!item?.builtin) return rows
+  return rows.map((row): SandboxPickRow => {
+    const status: SandboxPickRow['builtinStatus'] = builtinTargetsLoading.value ? 'checking' : builtinTargetStatus.value[row.cfg.id]
+    const present = status === 'preinstalled' || status === 'installed'
+    return { ...row, builtinStatus: status, selectable: row.selectable && !builtinTargetsLoading.value && !present, ready: row.ready || present }
+  })
+})
 
 const addPickRows = computed(() =>
   sandboxPickRows(catalogItemById(registeredCatalog.value?.id), 'all', addSessionIds.value),
@@ -531,6 +626,7 @@ function sandboxMetaLine(record: SandboxConfigRecord): string {
 }
 
 type SandboxPickRow = {
+  builtinStatus?: 'preinstalled' | 'installed' | 'unknown' | 'checking'
   cfg: SandboxConfigRecord
   install?: SkillCatalogInstall
   selectable: boolean
@@ -582,6 +678,9 @@ function sandboxPickPercent(row: SandboxPickRow): number | null {
 }
 
 function sandboxPickStatus(row: SandboxPickRow): string {
+  if (row.builtinStatus === 'checking') return t('skillDiscovery.checkingPreinstalled')
+  if (row.builtinStatus === 'preinstalled') return t('skillDiscovery.alreadyPreinstalled')
+  if (row.builtinStatus === 'installed') return t('skillDiscovery.alreadyInstalled')
   if (row.install && isInstallBusy(row.install)) return installStatusText(row.install)
   if (row.ready) return t('settings.sandbox.skillStatusReady')
   return sandboxMetaLine(row.cfg)
@@ -688,7 +787,7 @@ function installPriority(item: SkillCatalogItem, inst: SkillCatalogInstall): num
 function unusedTargets(item: SkillCatalogItem): SandboxConfigRecord[] {
   const live = new Set(liveInstalls(item).map((inst) => inst.sandbox_config_id))
   return skillConfigs.value
-    .filter((cfg) => !live.has(cfg.id))
+    .filter((cfg) => !live.has(cfg.id) && !isPreinstalledTarget(item, cfg.id))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
 }
 
@@ -699,16 +798,21 @@ function installsView(item: SkillCatalogItem) {
     return installName(a).localeCompare(installName(b), undefined, { sensitivity: 'base' })
   })
   const available = unusedTargets(item)
+  const preinstalled = skillConfigs.value.filter(cfg => isPreinstalledTarget(item, cfg.id))
   return {
+    preinstalled,
     installs,
     available,
     canAdd: available.length > 0,
-    needsPanel: installs.length + available.length > 1,
+    needsPanel: preinstalled.length > 0 || installs.length + available.length > 1 || (item.builtin && !targetsLoaded.value),
   }
 }
 
 function installSummary(item: SkillCatalogItem, view: ReturnType<typeof installsView>): string {
-  if (view.installs.length === 0) return t('settings.skills.installToSandbox')
+  if (item.builtin && !targetsLoaded.value) return t('skillDiscovery.checkingPreinstalled')
+  if (view.preinstalled.length === 1 && !view.installs.length) return t('skillDiscovery.preinstalledOnName', { name: view.preinstalled[0].name })
+  if (view.preinstalled.length) return `${t('skillDiscovery.preinstalledSandboxCount', { count: view.preinstalled.length })}${view.installs.length ? ` · ${t('skillDiscovery.cardInstalled')} ${view.installs.length}` : ''}`
+  if (view.installs.length === 0) return t(item.builtin ? 'skillDiscovery.activate' : 'settings.skills.installToSandbox')
   if (view.installs.length === 1) {
     return t('settings.skills.installedOnName', { name: installName(view.installs[0]) })
   }
@@ -717,13 +821,13 @@ function installSummary(item: SkillCatalogItem, view: ReturnType<typeof installs
 
 function chipClass(item: SkillCatalogItem, view: ReturnType<typeof installsView>): (string | undefined)[] {
   return [
-    view.installs.length === 0 ? 'skill-card__chip--idle' : 'skill-card__chip--installed',
+    view.installs.length + view.preinstalled.length === 0 ? 'skill-card__chip--idle' : 'skill-card__chip--installed',
     view.installs[0] ? installEntryClass(item, view.installs[0]) : undefined,
   ]
 }
 
 function installSummaryTooltip(item: SkillCatalogItem, view: ReturnType<typeof installsView>): string {
-  const lines = view.installs.map((inst) => installTooltip(item, inst))
+  const lines = [...view.preinstalled.map(cfg => `${cfg.name} · ${t('skillDiscovery.alreadyPreinstalled')}`), ...view.installs.map(inst => installTooltip(item, inst))]
   for (const cfg of view.available) {
     const meta = sandboxMetaLine(cfg)
     lines.push(
@@ -732,7 +836,7 @@ function installSummaryTooltip(item: SkillCatalogItem, view: ReturnType<typeof i
         : `${cfg.name} · ${t('settings.skills.installPanelAvailable')}`,
     )
   }
-  if (lines.length === 0) return t('settings.skills.installToSandbox')
+  if (lines.length === 0) return t(item.builtin ? 'skillDiscovery.activate' : 'settings.skills.installToSandbox')
   return lines.join('\n')
 }
 
@@ -758,11 +862,14 @@ function openManageFromPanel(item: SkillCatalogItem, inst: SkillCatalogInstall) 
 }
 
 function openInstallTo(item: SkillCatalogItem, cfg: SandboxConfigRecord) {
+  if (isPreinstalledTarget(item, cfg.id)) return
   openPanelId.value = ''
+  pendingBuiltinSkill.value = null
   installCatalog.value = item
+  void loadBuiltinTargets(item)
   installSessionIds.value = []
   installTargetIds.value = [cfg.id]
-  void loadInstallerModel()
+  if (!item.builtin) void loadInstallerModel()
   showInstall.value = true
 }
 
@@ -859,11 +966,13 @@ function addPreviousStep() {
 }
 
 function openInstall(item: SkillCatalogItem) {
+  pendingBuiltinSkill.value = null
   installCatalog.value = item
+  void loadBuiltinTargets(item)
   installSessionIds.value = []
   const remaining = targetsFor(item)
-  installTargetIds.value = remaining.length === 1 ? [remaining[0].id] : []
-  void loadInstallerModel()
+  installTargetIds.value = !item.builtin && remaining.length === 1 ? [remaining[0].id] : []
+  if (!item.builtin) void loadInstallerModel()
   showInstall.value = true
 }
 
@@ -1081,15 +1190,23 @@ function onInstallDrawerConfirm() {
 
 async function confirmInstall() {
   const item = installCatalog.value
-  const targets = [...installTargetIds.value]
-  if (!item || targets.length === 0) return
+  const allowed = new Set(installPickRows.value.filter(row => row.selectable).map(row => row.cfg.id))
+  const targets = installTargetIds.value.filter(id => allowed.has(id))
+  if (!item || targets.length === 0 || builtinTargetsLoading.value) return
   installing.value = true
   try {
-    await ensureInstallerModelIfNeeded(targets)
-    const res = await installSkillCatalog(item.id, targets)
+    if (!item.builtin) await ensureInstallerModelIfNeeded(targets)
+    let catalogId = item.id
+    if (!catalogId && pendingBuiltinSkill.value) {
+      catalogId = (await registerBuiltinSkill(pendingBuiltinSkill.value.id)).data.id
+      installCatalog.value = { ...item, id: catalogId }
+    }
+    if (!catalogId) return
+    const res = await installSkillCatalog(catalogId, targets)
     const failed = catalogInstallFailedCount(res)
     if (failed > 0) {
       MessagePlugin.warning(t('settings.skills.installPartial', { failed }))
+      if (item.builtin) showInstall.value = true
     } else {
       MessagePlugin.success(t('settings.skills.installAccepted'))
     }
@@ -1097,6 +1214,7 @@ async function confirmInstall() {
     await loadCatalog()
     prunePicks(installTargetIds, installPickRows.value)
   } catch (e: any) {
+    if (item.builtin) showInstall.value = true
     MessagePlugin.error(e?.message || t('settings.sandbox.skillUploadFailed'))
   } finally {
     installing.value = false
@@ -1160,6 +1278,7 @@ async function load() {
   try {
     const [configRes] = await Promise.all([listSandboxConfigs(), loadCatalog()])
     records.value = configRes?.data || []
+    void refreshTargetSkills()
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.skills.loadFailed'))
   } finally {
@@ -1219,6 +1338,9 @@ watch(busyPickTargets, (targets) => {
 
 onMounted(load)
 onUnmounted(() => {
+  targetSkillsGeneration++
+  builtinTargetRequest++
+  targetSkillCache.clear()
   stopPoll()
   stopInstallProgress()
   if (focusTimer != null) window.clearTimeout(focusTimer)
@@ -1226,6 +1348,29 @@ onUnmounted(() => {
 </script>
 
 <style lang="less" scoped>
+.builtin-activation-help { margin-top: 16px; color: var(--td-text-color-secondary); font-size: 13px; line-height: 1.7; }
+.skill-view-tabs {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  margin-bottom: 20px;
+  button {
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    padding: 12px 0;
+    cursor: pointer;
+    color: var(--td-text-color-secondary);
+    font-size: 14px;
+  }
+  button.active {
+    border-bottom-color: var(--td-text-color-primary);
+    color: var(--td-text-color-primary);
+    font-weight: 600;
+  }
+  button:focus-visible { outline: 2px solid var(--td-text-color-secondary); outline-offset: 3px; }
+}
+
 .skill-settings {
   width: 100%;
 }
@@ -2036,4 +2181,6 @@ onUnmounted(() => {
   font-weight: 500;
   color: var(--td-brand-color);
 }
+.skill-install-panel__item--preinstalled { box-sizing: border-box; cursor: default; }
+.skill-install-panel__preset { flex-shrink: 0; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--td-text-color-placeholder); }
 </style>

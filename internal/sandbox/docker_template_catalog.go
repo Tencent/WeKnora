@@ -27,6 +27,8 @@ import (
 	"sync"
 	"time"
 
+	builtin "github.com/Tencent/WeKnora/internal/builtin/skills"
+
 	"github.com/moby/moby/client"
 )
 
@@ -70,20 +72,22 @@ func (c *DockerRemoteClient) ListTemplates(ctx context.Context) ([]RemoteTemplat
 				continue
 			}
 			standard := isStandardTemplateImage(tag)
-			if !standard && !snapshot && image.Labels[dockerTemplateLabel] != "true" && tag != configured {
+			if !standard && !snapshot && image.Labels[dockerTemplateLabel] != "true" &&
+				image.Labels[builtin.ManifestLabel] == "" && tag != configured {
 				continue
 			}
 			if tag == configured {
 				configuredPresent = true
 			}
 			templates = append(templates, RemoteTemplate{
-				ID:        tag,
-				Name:      tag,
-				Status:    "ready",
-				Image:     tag,
-				Version:   image.ID,
-				Standard:  standard,
-				CreatedAt: time.Unix(image.Created, 0).UTC().Format(time.RFC3339),
+				BuiltinSkills: builtin.ParseManifest(image.Labels[builtin.ManifestLabel]),
+				ID:            tag,
+				Name:          tag,
+				Status:        "ready",
+				Image:         tag,
+				Version:       image.ID,
+				Standard:      standard,
+				CreatedAt:     time.Unix(image.Created, 0).UTC().Format(time.RFC3339),
 			})
 		}
 	}

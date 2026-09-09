@@ -72,3 +72,22 @@ source archive together. Archives are unmodified Go module proxy ZIPs, including
 their original copyright notices. Verify them with `go mod download -json` and
 the module's `go.sum` entry before updating. `scripts/check-license-bundle.sh`
 checks the pins and packaging inputs without downloading dependencies.
+
+## Built-in skill resources
+
+The reviewed resource subsets under `internal/builtin/skills/packages` include:
+
+- Nous Research / hermes-agent: xlsx, docx, powerpoint and pdf resources (MIT).
+- K-Dense / scientific-agent-skills: exploratory-data-analysis, statistical-analysis
+  and scientific-visualization resources (MIT).
+
+Each package preserves its upstream LICENSE and UPSTREAM.md. Exact upstream
+commits, selected source paths and SHA-256 values are in
+`internal/builtin/skills/sources.lock.json`. WeKnora maintains adapted SKILL.md,
+runtime manifests and verification helpers separately. The browser controller
+and `weknora_*` helpers are authored in this repository under its MIT license.
+Playwright and Chromium are installed as runtime dependencies, not copied into
+the application source. The image includes their respective notices.
+
+Anthropic document skills and Tencent BrowserSkill are external recommendations:
+the discovery catalog contains self-authored descriptions and links only.

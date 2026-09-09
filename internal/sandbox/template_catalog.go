@@ -3,6 +3,8 @@ package sandbox
 import (
 	"context"
 	"strings"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 const StandardTemplateName = "weknora"
@@ -20,6 +22,9 @@ const TemplateStatusUntagged = "untagged"
 // RemoteTemplate is the provider-neutral template projection returned to the
 // settings UI. IDs remain opaque; users choose a readable name and status.
 type RemoteTemplate struct {
+	BuiltinSkillNames []string                     `json:"builtin_skill_names"`
+	BuiltinSkills     *types.BuiltinSkillsManifest `json:"builtin_skills,omitempty"`
+
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Status    string `json:"status,omitempty"`

@@ -31,6 +31,12 @@ type SessionShellExecutor interface {
 	) (*ExecuteResult, error)
 }
 
+// SessionLiveShellExecutor inspects a running session without provisioning,
+// resuming, or replacing its image. Used by passive browser previews.
+type SessionLiveShellExecutor interface {
+	ExecLiveSessionCommand(context.Context, string, string, time.Duration) (*ExecuteResult, error)
+}
+
 // SessionFileStore is the effective per-session filesystem view a manager
 // offers callers that need to inspect, stage, or clean up files inside the
 // session's remote sandbox. It is intentionally provider-neutral: entries

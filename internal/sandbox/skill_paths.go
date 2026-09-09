@@ -12,9 +12,12 @@ const (
 	// It is outside /workspace on purpose: /workspace is per-session scratch
 	// and is wiped before every snapshot.
 	SkillsImageRoot = "/opt/weknora/tenant/skills"
+	// BuiltinSkillsImageRoot is the script root for preinstalled skill packages.
+	BuiltinSkillsImageRoot = "/opt/weknora/builtin/skills"
 
-	// SkillsManifestPath lists what the image claims to contain. It is a
-	// troubleshooting aid, never the source of truth for execution.
+	// SkillsManifestPath records the installed resources carried by an image.
+	// Runtime intersects it with ready/enabled database rows; it cannot grant
+	// a skill by itself or substitute for installation verification.
 	SkillsManifestPath = SkillsImageRoot + "/.manifest.json"
 )
 
@@ -106,7 +109,7 @@ func ValidatedSessionOutputDir(dir string) (string, bool) {
 func ValidatedImageSkillDir(skillDir string) (string, bool) {
 	clean := path.Clean(strings.TrimSpace(skillDir))
 	expected, err := SkillDirFor(path.Base(clean))
-	if err != nil || expected != clean {
+	if err != nil || (expected != clean && path.Join(BuiltinSkillsImageRoot, path.Base(clean)) != clean) {
 		return "", false
 	}
 	return clean, true
@@ -133,6 +136,9 @@ func InterpreterSkillDir(remotePath, skillDir string) (string, bool) {
 func SkillNameFromImagePath(p string) (name string, inImage bool) {
 	clean := path.Clean(strings.TrimSpace(p))
 	root := path.Clean(SkillsImageRoot)
+	if clean == BuiltinSkillsImageRoot || strings.HasPrefix(clean, BuiltinSkillsImageRoot+"/") {
+		root = BuiltinSkillsImageRoot
+	}
 	if clean == root {
 		return "", true
 	}
@@ -157,6 +163,9 @@ func SkillDirForImageScript(scriptPath string) (string, bool) {
 	}
 	clean := path.Clean(strings.TrimSpace(scriptPath))
 	dir, err := SkillDirFor(name)
+	if strings.HasPrefix(clean, BuiltinSkillsImageRoot+"/") {
+		dir = path.Join(BuiltinSkillsImageRoot, name)
+	}
 	if err != nil || clean == dir {
 		return "", false
 	}

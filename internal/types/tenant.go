@@ -624,6 +624,8 @@ func (c *StorageEngineConfig) Scan(value interface{}) error {
 // It is self-contained: provider fields are not inherited from process
 // environment. Leaving a required provider field empty is rejected on save.
 type TenantSandboxConfig struct {
+	TemplateSkills *TemplateSkillsDeclaration `json:"template_skills,omitempty"`
+
 	// SandboxType is cube, e2b, or docker; disabled is the hidden policy row.
 	SandboxType string `json:"sandbox_type,omitempty"`
 
@@ -837,6 +839,7 @@ func (c *TenantSandboxConfig) RebuildsExistingOnSkillChange() bool {
 //
 // It holds no secrets, so it is not encrypted by TenantSandboxConfig.Value.
 type SkillImageConfig struct {
+	BuiltinSkills *BuiltinSkillsManifest `json:"builtin_skills,omitempty"`
 	// SnapshotID is the currently effective snapshot; empty = base template.
 	SnapshotID string `json:"snapshot_id,omitempty"`
 	// Generation increments on every successful install/remove, for naming

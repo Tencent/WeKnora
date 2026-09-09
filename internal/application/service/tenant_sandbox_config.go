@@ -628,6 +628,7 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 	if err != nil {
 		return nil, err
 	}
+	sandbox.ApplyTemplateSkills(effective, templates)
 	result := &SandboxTemplateCatalog{Templates: deduplicateSandboxTemplates(templates)}
 	usable := pickStandardTemplate(result.Templates)
 	if usable != nil {

@@ -115,6 +115,10 @@
             <div v-if="targetSummary(record)" class="sandbox-card__url" :title="targetSummary(record)">
               {{ targetSummary(record) }}
             </div>
+            <SandboxSkillsSummary v-if="!isLegacyRecord(record)"
+              :builtin="skillSummaries[record.id]?.builtin"
+              :installed="skillSummaries[record.id]?.installed"
+              :usable-installed-names="skillSummaries[record.id]?.usableInstalledNames" />
             <ul v-if="cardWarnings[record.id]?.length" class="sandbox-card__warnings">
               <li v-for="item in cardWarnings[record.id]" :key="item.key">
                 <t-icon name="error-circle" size="12px" />
@@ -208,12 +212,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import SandboxConfigEditorDrawer from '@/components/SandboxConfigEditorDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
+import SandboxSkillsSummary from '@/components/settings/SandboxSkillsSummary.vue'
+import { listSkills, type BuiltinSkillsSummary } from '@/api/skill'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { getSession } from '@/api/chat/index'
@@ -223,6 +229,8 @@ import {
   getSandboxConfigInventory,
   isNamedSandboxBackend,
   listSandboxConfigs,
+  listConfigSkills,
+  type ConfigSkill,
   NAMED_SANDBOX_BACKEND_TYPES,
   parseSandboxConflict,
   setSandboxWorkspacePolicy,
@@ -458,11 +466,46 @@ function buildCardWarnings(record: SandboxConfigRecord): CardWarning[] {
   return warnings
 }
 
+type CardSkills = { builtin?: BuiltinSkillsSummary | null; installed?: ConfigSkill[] | null; usableInstalledNames?: string[] }
+const skillSummaries = ref<Record<string, CardSkills>>({})
+let summaryGeneration = 0
+onUnmounted(() => { summaryGeneration++ })
+
+// Show the list immediately; slow provider metadata must not delay its cards.
+// At most three configurations are queried at once. Failed reads are unknown,
+// never an assertion that the sandbox has no skills.
+async function loadSkillSummaries(configs: SandboxConfigRecord[]) {
+  const generation = ++summaryGeneration
+  skillSummaries.value = {}
+  const queue = configs.filter(record => !isLegacyRecord(record))[Symbol.iterator]()
+  await Promise.all(Array.from({ length: 3 }, async () => {
+    while (generation === summaryGeneration) {
+      const next = queue.next()
+      if (next.done) return
+      const id = next.value.id
+      const update = (value: Partial<CardSkills>) => {
+        if (generation === summaryGeneration) skillSummaries.value[id] = { ...skillSummaries.value[id], ...value }
+      }
+      await Promise.all([
+        listSkills(id).then(response => {
+          const builtin = response.data.filter(skill => skill.source === 'builtin')
+          update({
+            builtin: response.builtin_skills || (builtin.length ? { known: true, skills: builtin, version: builtin[0].version, unavailable: 0 } : null),
+            usableInstalledNames: response.data.filter(skill => skill.source !== 'builtin').map(skill => skill.name),
+          })
+        }).catch(() => update({ builtin: null })),
+        listConfigSkills(id).then(response => update({ installed: response.data || [] })).catch(() => update({ installed: null })),
+      ])
+    }
+  }))
+}
+
 async function load() {
   loading.value = true
   try {
     const res = await listSandboxConfigs()
     records.value = res?.data || []
+    void loadSkillSummaries(records.value)
     workspaceScriptsDisabled.value = res?.workspace_scripts_disabled === true
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.sandbox.loadFailed'))

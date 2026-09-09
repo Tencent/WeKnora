@@ -239,6 +239,7 @@ func (s *TenantSkillService) runRemove(
 	}); err != nil {
 		return err
 	}
+	builtinManifest := builtinSkillsForSnapshot(ctx, mgr, sess.ID)
 	ref, err := s.createSnapshot(ctx, mgr, sess.ID, snapshotName)
 	if err != nil {
 		return err
@@ -252,7 +253,9 @@ func (s *TenantSkillService) runRemove(
 		return err
 	}
 
-	if err := s.switchImagePointer(ctx, tenantID, configID, ref.ID, generation, builtFingerprint); err != nil {
+	if err := s.switchImagePointer(
+		ctx, tenantID, configID, ref.ID, generation, builtFingerprint, builtinManifest,
+	); err != nil {
 		s.abandonSnapshot(cleanupBase, tenantID, mgr, removeRowID, ref.ID)
 		return err
 	}

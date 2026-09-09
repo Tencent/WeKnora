@@ -73,6 +73,8 @@
           <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '100%', type: 'rect' }]" />
         </div>
 
+        <SandboxBrowser v-if="panel?.activeTab.value === 'browser'" :key="sessionId" :session-id="sessionId"
+          :agent-id="agentId" :agent-source-tenant-id="agentSourceTenantId" />
         <div v-if="panel?.activeTab.value === 'desktop'" class="chat-sandbox-panel__placeholder">
           <t-icon name="desktop" size="28px" />
           <p>{{ t('chat.sandbox.desktopPlaceholder') }}</p>
@@ -92,6 +94,7 @@ import {
   type SandboxPanelTab,
 } from '@/composables/useChatSandboxPanel'
 import SandboxTerminal from '@/views/chat/components/SandboxTerminal.vue'
+import SandboxBrowser from '@/views/chat/components/SandboxBrowser.vue'
 import ChatArtifactsPanel from '@/views/chat/components/ChatArtifactsPanel.vue'
 import type { SessionArtifactItem } from '@/utils/sessionArtifacts'
 
@@ -119,6 +122,7 @@ const panel = useChatSandboxPanel()
 const tabs = computed(() => [
   { id: 'artifacts' as SandboxPanelTab, icon: 'folder', label: t('chat.sandbox.tabArtifacts') },
   { id: 'terminal' as SandboxPanelTab, icon: 'terminal', label: t('chat.sandbox.tabTerminal') },
+  { id: 'browser' as SandboxPanelTab, icon: 'internet', label: t('sandboxBrowser.title') },
   { id: 'desktop' as SandboxPanelTab, icon: 'desktop', label: t('chat.sandbox.tabDesktop') },
 ])
 
