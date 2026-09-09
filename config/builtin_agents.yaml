@@ -7,6 +7,9 @@ builtin_agents:
     avatar: ""
     is_builtin: true
     i18n:
+      fr-FR:
+        name: "Réponse rapide"
+        description: "Questions-réponses RAG sur la base de connaissances pour des réponses rapides et précises"
       default:
         name: "Quick Answer"
         description: "Knowledge base RAG Q&A for fast and accurate answers"
@@ -50,6 +53,9 @@ builtin_agents:
     avatar: ""
     is_builtin: true
     i18n:
+      fr-FR:
+        name: "Raisonnement avancé"
+        description: "Raisonnement ReAct en plusieurs étapes avec appel d’outils"
       default:
         name: "Smart Reasoning"
         description: "ReAct reasoning framework with multi-step thinking and tool calling"
@@ -98,6 +104,9 @@ builtin_agents:
     avatar: "📊"
     is_builtin: true
     i18n:
+      fr-FR:
+        name: "Analyste de données"
+        description: "Agent spécialisé dans les requêtes SQL et l’analyse statistique de fichiers CSV et Excel"
       default:
         name: "Data Analyst"
         description: "Professional data analysis agent with SQL query and statistical analysis for CSV/Excel files"
@@ -143,6 +152,9 @@ builtin_agents:
     avatar: "📚"
     is_builtin: true
     i18n:
+      fr-FR:
+        name: "Questions-réponses Wiki"
+        description: "Agent spécialisé dans les réponses fondées sur les bases de connaissances Wiki"
       default:
         name: "Wiki Questioner"
         description: "Specialized agent for answering questions based on Wiki knowledge bases"
@@ -187,6 +199,9 @@ builtin_agents:
     avatar: "🔧"
     is_builtin: true
     i18n:
+      fr-FR:
+        name: "Correcteur Wiki"
+        description: "Agent spécialisé dans la révision des pages Wiki à partir des problèmes détectés lors des inspections"
       default:
         name: "Wiki Fixer"
         description: "Specialized agent for revising Wiki pages based on inspection issues"
@@ -237,6 +252,9 @@ builtin_agents:
     avatar: "📦"
     is_builtin: true
     i18n:
+      fr-FR:
+        name: "Installateur de compétences"
+        description: "Agent interne qui installe une compétence importée et ses dépendances dans l’image du bac à sable"
       default:
         name: "Skill Installer"
         description: "Internal agent that installs an uploaded skill and its dependencies into the sandbox image"

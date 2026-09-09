@@ -4,6 +4,9 @@ templates:
     name: "Knowledge Base Q&A"
     description: "Standard template for answering questions based on knowledge base content"
     i18n:
+      fr-FR:
+        name: "Assistant de base de connaissances"
+        description: "Modèle de questions-réponses sur la base de connaissances adapté à la plupart des usages"
       zh-CN:
         name: "知识库问答助手"
         description: "基础的知识库问答模板，适用于大多数场景"
@@ -47,6 +50,9 @@ templates:
     name: "Domain Expert"
     description: "Expert template for in-depth domain-specific answers"
     i18n:
+      fr-FR:
+        name: "Expert du domaine"
+        description: "Réponses professionnelles et approfondies dans les domaines techniques"
       zh-CN:
         name: "领域专家助手"
         description: "专业深入的解答风格，适合技术或专业领域"
@@ -81,6 +87,9 @@ templates:
     name: "Customer Service"
     description: "Friendly and professional customer service template"
     i18n:
+      fr-FR:
+        name: "Service client"
+        description: "Style convivial et chaleureux pour l’assistance aux clients"
       zh-CN:
         name: "客服助手"
         description: "友善热情的服务风格，适合客户服务场景"
@@ -115,6 +124,9 @@ templates:
     name: "Technical Support"
     description: "Template for technical problem diagnosis and solutions"
     i18n:
+      fr-FR:
+        name: "Assistance technique"
+        description: "Résolution de problèmes techniques avec des exemples de code"
       zh-CN:
         name: "技术支持"
         description: "专业的技术问题解答，包含代码示例"
@@ -150,6 +162,9 @@ templates:
     name: "General Chat"
     description: "General conversation template without knowledge base"
     i18n:
+      fr-FR:
+        name: "Discussion générale"
+        description: "Assistant de discussion généraliste sans base de connaissances"
       zh-CN:
         name: "通用对话"
         description: "不依赖知识库的通用对话助手"
@@ -179,6 +194,9 @@ templates:
     name: "Web Search Assistant"
     description: "Intelligent assistant template with web search capabilities"
     i18n:
+      fr-FR:
+        name: "Assistant de recherche Web"
+        description: "Utilise la recherche Web pour obtenir des informations à jour"
       zh-CN:
         name: "网络搜索助手"
         description: "结合网络搜索获取最新信息"

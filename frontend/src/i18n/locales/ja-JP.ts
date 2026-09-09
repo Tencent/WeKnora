@@ -4522,6 +4522,7 @@ export default {
     builtinTag: '組み込み'
   },
   language: {
+    frFR: 'Français',
     zhCN: '简体中文',
     enUS: 'English',
     ruRU: 'Русский',

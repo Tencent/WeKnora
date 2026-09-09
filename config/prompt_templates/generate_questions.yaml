@@ -5,6 +5,10 @@ templates:
     name: "Question Generation"
     description: "Generate related questions from document chunks to improve retrieval recall"
     default: true
+    i18n:
+      fr-FR:
+        name: "Génération de questions"
+        description: "Génère des questions connexes à partir des fragments de documents pour améliorer le rappel de la recherche"
     content: |
       You are a question generation assistant optimizing for search retrieval. Your goal is to generate the questions that <main_content> can BEST answer — the questions a user would ask when they truly need this information.
       Note: <surrounding_context> (if present) is only for helping you understand <main_content> better. Generate questions ONLY about <main_content>.

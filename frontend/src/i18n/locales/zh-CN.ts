@@ -2414,6 +2414,7 @@ export default {
     close: '关闭设置'
   },
   language: {
+    frFR: 'Français',
     zhCN: '简体中文',
     enUS: 'English',
     ruRU: 'Русский',

@@ -8,6 +8,9 @@ templates:
     name: "Standard Fallback"
     description: "Standard fallback response template"
     i18n:
+      fr-FR:
+        name: "Réponse de secours standard"
+        description: "Message convivial proposant des suggestions lorsqu’aucune réponse ne peut être donnée"
       zh-CN:
         name: "标准兜底"
         description: "友好告知无法回答并提供建议"
@@ -38,6 +41,9 @@ templates:
     name: "Polite Fallback"
     description: "More polite and friendly fallback response"
     i18n:
+      fr-FR:
+        name: "Réponse de secours courtoise"
+        description: "Message plus courtois et détaillé lorsqu’aucune réponse ne peut être donnée"
       zh-CN:
         name: "礼貌兜底"
         description: "更加礼貌详细的无法回答提示"
@@ -69,6 +75,9 @@ templates:
     name: "Brief Fallback"
     description: "Short fallback response"
     i18n:
+      fr-FR:
+        name: "Réponse de secours brève"
+        description: "Message court lorsqu’aucune réponse ne peut être donnée"
       zh-CN:
         name: "简洁兜底"
         description: "简短的无法回答提示"
@@ -88,6 +97,9 @@ templates:
     name: "Model Fallback"
     description: "Fallback prompt that delegates to the model for generation"
     i18n:
+      fr-FR:
+        name: "Instructions de secours du modèle"
+        description: "Instructions pour guider le modèle vers une réponse fondée sur ses connaissances générales"
       zh-CN:
         name: "模型兜底提示"
         description: "引导模型基于通用知识回答的提示词"
@@ -121,6 +133,9 @@ templates:
     name: "Standard Fallback Prompt"
     description: "Default prompt that delegates to the model when KB has no relevant results"
     i18n:
+      fr-FR:
+        name: "Instructions de secours standard"
+        description: "Instructions par défaut qui sollicitent le modèle lorsque la base ne contient aucun résultat pertinent"
       zh-CN:
         name: "标准兜底 Prompt"
         description: "知识库无相关结果时引导模型回答的默认提示词"

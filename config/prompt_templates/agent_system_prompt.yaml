@@ -5,6 +5,9 @@ templates:
     name: "Pure Agent"
     description: "System prompt for Pure Agent mode (no Knowledge Bases)"
     i18n:
+      fr-FR:
+        name: "Agent autonome"
+        description: "Instructions système du mode Agent autonome, sans base de connaissances"
       zh-CN:
         name: "纯智能体"
         description: "纯智能体模式的系统提示词（不使用知识库）"
@@ -33,6 +36,9 @@ templates:
     name: "Progressive RAG Agent"
     description: "System prompt for Progressive Agentic RAG mode with Knowledge Bases"
     i18n:
+      fr-FR:
+        name: "Agent RAG progressif"
+        description: "Instructions système du mode RAG agentique progressif avec bases de connaissances"
       zh-CN:
         name: "渐进式 RAG 智能体"
         description: "带知识库的渐进式检索增强生成智能体系统提示词"
@@ -72,6 +78,9 @@ templates:
     name: "Data Analyst"
     description: "System prompt for Data Analyst agent with DuckDB SQL analysis"
     i18n:
+      fr-FR:
+        name: "Analyste de données"
+        description: "Instructions système de l’agent d’analyse de données avec requêtes SQL DuckDB"
       zh-CN:
         name: "数据分析师"
         description: "基于 DuckDB SQL 的数据分析智能体系统提示词"
@@ -124,6 +133,9 @@ templates:
     name: "Wiki Researcher"
     description: "System prompt for Wiki Researcher agent with knowledge graph traversal"
     i18n:
+      fr-FR:
+        name: "Chercheur Wiki"
+        description: "Instructions système de l’agent de recherche Wiki avec parcours du graphe de connaissances"
       zh-CN:
         name: "维基研究员"
         description: "专用于 Wiki 知识库图谱导航与深度阅读的智能体系统提示词"
@@ -195,6 +207,9 @@ templates:
     name: "Wiki Fixer System Prompt"
     description: "System prompt for repairing and optimizing Wiki pages based on linter issues"
     i18n:
+      fr-FR:
+        name: "Instructions du correcteur Wiki"
+        description: "Instructions système pour corriger et optimiser les pages Wiki à partir des problèmes détectés par l’analyseur"
       zh-CN:
         name: "Wiki 修复系统提示词"
         description: "用于根据巡检问题修复和优化 Wiki 页面的系统提示词"
@@ -278,6 +293,9 @@ templates:
     name: "Hybrid RAG + Wiki Agent"
     description: "System prompt for agents working on KBs where BOTH Wiki and chunk (vector/keyword) indexes are enabled."
     i18n:
+      fr-FR:
+        name: "Agent hybride RAG + Wiki"
+        description: "Instructions système pour les bases disposant du Wiki et de la recherche dans les fragments"
       zh-CN:
         name: "Wiki + RAG 混合智能体"
         description: "同时启用 Wiki 与向量/关键词索引的知识库场景下使用的系统提示词"
@@ -407,6 +425,9 @@ templates:
     name: "Skill Installer System Prompt"
     description: "System prompt for installing an uploaded skill and its dependencies into the sandbox image"
     i18n:
+      fr-FR:
+        name: "Instructions de l’installateur de compétences"
+        description: "Instructions système pour installer une compétence importée et ses dépendances dans l’image du bac à sable"
       zh-CN:
         name: "技能安装系统提示词"
         description: "用于把上传的技能及其依赖装进沙箱镜像的系统提示词"

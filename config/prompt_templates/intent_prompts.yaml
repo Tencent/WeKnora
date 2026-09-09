@@ -7,6 +7,9 @@ templates:
     name: "Greeting Response"
     description: "System prompt for greeting intents"
     i18n:
+      fr-FR:
+        name: "Réponse aux salutations"
+        description: "Instructions système pour répondre aux salutations"
       zh-CN:
         name: "问候回复"
         description: "针对问候意图的系统提示词"
@@ -32,6 +35,9 @@ templates:
     name: "Chitchat Response"
     description: "System prompt for casual conversation"
     i18n:
+      fr-FR:
+        name: "Conversation informelle"
+        description: "Instructions système pour les conversations informelles"
       zh-CN:
         name: "闲聊回复"
         description: "针对闲聊意图的系统提示词"
@@ -59,6 +65,9 @@ templates:
     name: "Follow-up Response"
     description: "System prompt for follow-up questions referencing conversation history"
     i18n:
+      fr-FR:
+        name: "Réponse aux questions de suivi"
+        description: "Instructions système pour les questions de suivi portant sur l’historique de la conversation"
       zh-CN:
         name: "追问回复"
         description: "针对上下文追问意图的系统提示词"
@@ -86,6 +95,9 @@ templates:
     name: "Image Analysis Response"
     description: "System prompt for pure image understanding"
     i18n:
+      fr-FR:
+        name: "Réponse d’analyse d’image"
+        description: "Instructions système pour comprendre une image sans recherche documentaire"
       zh-CN:
         name: "图片分析回复"
         description: "针对纯图片理解意图的系统提示词"
@@ -112,6 +124,9 @@ templates:
     name: "Summarize Response"
     description: "System prompt for conversation summarization"
     i18n:
+      fr-FR:
+        name: "Résumé de conversation"
+        description: "Instructions système pour résumer la conversation"
       zh-CN:
         name: "总结回复"
         description: "针对对话总结意图的系统提示词"
@@ -138,6 +153,9 @@ templates:
     name: "Web Search Unavailable Response"
     description: "System prompt when web search intent is detected but web search is not enabled"
     i18n:
+      fr-FR:
+        name: "Recherche Web indisponible"
+        description: "Instructions système lorsqu’une intention de recherche Web est détectée mais que cette fonctionnalité est désactivée"
       zh-CN:
         name: "网络搜索不可用回复"
         description: "当检测到网络搜索意图但未开启网络搜索时的系统提示词"
@@ -167,6 +185,9 @@ templates:
     name: "Document Analysis Response"
     description: "System prompt for pure document understanding"
     i18n:
+      fr-FR:
+        name: "Réponse d’analyse de document"
+        description: "Instructions système pour comprendre un document sans recherche complémentaire"
       zh-CN:
         name: "文档分析回复"
         description: "针对纯文档/文件理解意图的系统提示词"

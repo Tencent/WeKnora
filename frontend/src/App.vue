@@ -14,12 +14,7 @@ import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
 import { renderWorkspaceNotifyContent } from '@/utils/workspaceNotifyContent'
 
-// TDesign locale configs
-import enUSConfig from 'tdesign-vue-next/esm/locale/en_US'
-import zhCNConfig from 'tdesign-vue-next/esm/locale/zh_CN'
-import koKRConfig from 'tdesign-vue-next/esm/locale/ko_KR'
-import jaJPConfig from 'tdesign-vue-next/esm/locale/ja_JP'
-import ruRUConfig from 'tdesign-vue-next/esm/locale/ru_RU'
+import { getTDesignLocale } from '@/i18n/tdesign'
 
 const { locale, t, tm } = useI18n()
 const { formatRole, roleIcon } = useRoleLabel()
@@ -27,15 +22,9 @@ const router = useRouter()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
 
-const tdLocaleMap: Record<string, object> = {
-  'en-US': enUSConfig,
-  'zh-CN': zhCNConfig,
-  'ko-KR': koKRConfig,
-  'ja-JP': jaJPConfig,
-  'ru-RU': ruRUConfig,
-}
+const tdGlobalConfig = computed(() => getTDesignLocale(locale.value))
 
-const tdGlobalConfig = computed(() => tdLocaleMap[locale.value] || enUSConfig)
+watch(locale, (value) => { document.documentElement.lang = value }, { immediate: true })
 
 const decodeOIDCResult = (encoded: string) => {
   const normalized = encoded.replace(/-/g, '+').replace(/_/g, '/')

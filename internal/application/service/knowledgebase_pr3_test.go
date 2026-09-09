@@ -536,6 +536,31 @@ func TestDuplicateKnowledgeBase_UsesLocalizedEnglishSuffix(t *testing.T) {
 	assert.Equal(t, "Source KB Copy", target.Name)
 }
 
+func TestDuplicateKnowledgeBase_UsesFrenchNames(t *testing.T) {
+	for _, tc := range []struct{ name, source, existing, want string }{
+		{"named", "Documentation", "", "Documentation Copie"},
+		{"unnamed", "", "", "Base de connaissances Copie"},
+		{"collision", "Documentation", "Documentation Copie", "Documentation Copie 2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeKBRepo()
+			repo.rows["src"] = &types.KnowledgeBase{
+				ID: "src", Name: tc.source, Type: types.KnowledgeBaseTypeDocument, TenantID: 1,
+			}
+			if tc.existing != "" {
+				repo.rows["existing"] = &types.KnowledgeBase{
+					ID: "existing", Name: tc.existing, Type: types.KnowledgeBaseTypeDocument, TenantID: 1,
+				}
+			}
+			svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
+			ctx := context.WithValue(ctxWithTenant(1), types.LanguageContextKey, "fr-FR")
+			target, err := svc.DuplicateKnowledgeBase(ctx, "src")
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, target.Name)
+		})
+	}
+}
+
 func copyTaskTestContext(t *testing.T, repo *fakeKBRepo, dst string) context.Context {
 	t.Helper()
 	target := repo.rows[dst]

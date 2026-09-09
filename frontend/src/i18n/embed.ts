@@ -1,4 +1,6 @@
 import { createI18n } from 'vue-i18n'
+import frFR from './locales/embed/fr-FR.ts'
+import { SUPPORTED_LOCALES } from './resolveDefaultLocale.ts'
 
 const messages = {
   "zh-CN": {
@@ -1960,7 +1962,6 @@ const ruEmbedPublish = {
   },
 } as const
 
-const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'ko-KR', 'ja-JP', 'ru-RU'] as const
 export type EmbedLocale = (typeof SUPPORTED_LOCALES)[number]
 
 /** Isolated from the main app `locale` key so embed preview never hijacks admin UI language. */
@@ -1969,6 +1970,7 @@ export const EMBED_LOCALE_STORAGE_KEY = 'weknora-embed-locale'
 /** Map host-provided locale strings to a supported embed locale tag. */
 export function normalizeEmbedLocale(raw: string): EmbedLocale {
   const s = raw.trim().toLowerCase()
+  if (s === 'fr' || s.startsWith('fr-') || s.startsWith('fr_')) return 'fr-FR'
   if (s.startsWith('en')) return 'en-US'
   if (s.startsWith('ko')) return 'ko-KR'
   if (s.startsWith('ja')) return 'ja-JP'
@@ -1988,7 +1990,7 @@ function resolveBrowserEmbedLocale(): EmbedLocale {
   return nav ? normalizeEmbedLocale(nav) : 'zh-CN'
 }
 
-function resolveInitialEmbedLocale(): EmbedLocale {
+export function resolveInitialEmbedLocale(): EmbedLocale {
   const fromUrl = readEmbedLocaleFromUrl()
   if (fromUrl) return normalizeEmbedLocale(fromUrl)
 
@@ -2006,19 +2008,23 @@ function resolveInitialEmbedLocale(): EmbedLocale {
 
 const locale = resolveInitialEmbedLocale()
 
+/** The actual runtime bundles, also consumed by the locale audits. */
+export const EMBED_MESSAGES = {
+  'zh-CN': messages['zh-CN'],
+  'en-US': messages['en-US'],
+  'ko-KR': deepMerge(messages['en-US'], koEmbedPublish),
+  'ja-JP': messages['ja-JP'],
+  'ru-RU': deepMerge(messages['en-US'], ruEmbedPublish),
+  'fr-FR': frFR,
+}
+
 const i18n = createI18n({
   legacy: false,
   locale,
   fallbackLocale: 'en-US',
   globalInjection: true,
   warnHtmlMessage: false,
-  messages: {
-    'zh-CN': messages['zh-CN'],
-    'en-US': messages['en-US'],
-    'ko-KR': deepMerge(messages['en-US'], koEmbedPublish),
-    'ja-JP': messages['ja-JP'],
-    'ru-RU': deepMerge(messages['en-US'], ruEmbedPublish),
-  },
+  messages: EMBED_MESSAGES,
 })
 
 type LocaleRef = { value: string }

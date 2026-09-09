@@ -2,6 +2,18 @@ package types
 
 import "testing"
 
+func TestNormalizeEmbedDefaultLocale(t *testing.T) {
+	for input, want := range map[string]string{
+		"fr-FR": "fr-FR", " fr-FR ": "fr-FR", "en-US": "en-US",
+		"zh-CN": "zh-CN", "ja-JP": "ja-JP", "ko-KR": "ko-KR", "ru-RU": "ru-RU",
+		"": "", "fr": "", "FR-fr": "", "es-ES": "", `fr-FR";alert(1)`: "",
+	} {
+		if got := NormalizeEmbedDefaultLocale(input); got != want {
+			t.Errorf("NormalizeEmbedDefaultLocale(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestNormalizeEmbedWidgetPosition(t *testing.T) {
 	cases := map[string]string{
 		"bottom-right":       DefaultEmbedWidgetPosition,
