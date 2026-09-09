@@ -32,7 +32,7 @@ export default {
     createFailed: '建立平台 API Key 失敗',
     capabilityHints: {
       tenantsRead: '列出、搜尋和檢視所有空間。',
-      tenantsManage: '建立、更新、刪除空間及應用全域性空間配置。',
+      tenantsManage: '建立、更新、刪除空間及應用全域空間配置。',
       settingsRead: '讀取平台級執行設定。',
       settingsManage: '更新和重置平台級執行設定。',
       runtimeRead: '檢視任務佇列和任務詳情。',
@@ -567,7 +567,7 @@ export default {
       quickstart: '快速開始',
       subtitle: '在終端中管理知識庫和文件、檢索內容併發起問答，也可透過指令碼或 MCP 接入 AI 工具。',
       title: 'WeKnora CLI',
-      verifyDesc: '檢查服務與認證狀態，並列出當前賬號可訪問的知識庫。',
+      verifyDesc: '檢查服務與認證狀態，並列出當前帳號可訪問的知識庫。',
       verifyTitle: '驗證連線'
     }
   },
@@ -856,7 +856,7 @@ export default {
     }
   },
   agentEditor: {
-    builtinHint: '這是內建智慧體，名稱和描述不可修改，但可以調整配置引數',
+    builtinHint: '這是內建智慧體，名稱和描述不可修改，但可以調整配置參數',
     fileTypes: {
       label: '支援的檔案型別',
       desc: '限制可選擇的檔案型別，留空表示支援所有型別',
@@ -892,7 +892,7 @@ export default {
       label: '聊天附件解析策略',
       desc: '為不同檔案型別指定解析引擎，僅對當前智慧體的聊天附件生效',
       waitTimeoutLabel: '附件解析等待超時（秒）',
-      waitTimeoutDesc: '單輪問答等待附件解析完成的最長時間，超時後未完成的附件會被跳過。大檔案 / 掃描件可調大。0 表示使用全域性預設。'
+      waitTimeoutDesc: '單輪問答等待附件解析完成的最長時間，超時後未完成的附件會被跳過。大檔案 / 掃描件可調大。0 表示使用全域預設。'
     },
     audioUpload: {
       label: '語音上傳',
@@ -914,8 +914,8 @@ export default {
       imageUnderstandingLabel: '附件圖片理解 / 掃描件 OCR',
       imageUnderstandingDesc: '對圖片型 PDF/PPT 等掃描件，當解析不出文字時用 VLM 進行 OCR 識別。開啟會增加解析耗時，預設關閉。',
       ocrMaxPagesLabel: '掃描件 OCR 最大頁數',
-      ocrMaxPagesDesc: '掃描件送入 VLM 做 OCR 的最大頁數，越多覆蓋越全但越慢、越貴。0 表示使用全域性預設。',
-      useGlobalDefault: '0 = 全域性預設',
+      ocrMaxPagesDesc: '掃描件送入 VLM 做 OCR 的最大頁數，越多覆蓋越全但越慢、越貴。0 表示使用全域預設。',
+      useGlobalDefault: '0 = 全域預設',
       storageProvider: '圖片儲存',
       storageProviderDesc: '選擇圖片檔案的儲存引擎，留空則使用系統預設',
       storageProviderPlaceholder: '選擇儲存引擎',
@@ -984,7 +984,7 @@ export default {
       empty: '暫無 IM 渠道',
       unnamed: '未命名渠道',
       docLink: '檢視接入文件',
-      wecomConsole: '企業微信管理後臺',
+      wecomConsole: '企業微信管理後台',
       feishuConsole: '飛書開放平台',
       larkConsole: 'Lark 開放平台',
       slackConsole: 'Slack API 控制檯',
@@ -1393,14 +1393,14 @@ export default {
       waitingStatus: '等待稽核',
       targetWithTool: '{service} › {tool}',
       titleWithTarget: '人工稽核 · {service} › {tool}',
-      argsLabel: '呼叫引數',
+      argsLabel: '呼叫參數',
       argsModified: '已修改',
       countdownShort: '{seconds}s',
       approve: '透過並執行',
       reject: '拒絕',
       approvedTag: '已透過',
       rejectedTag: '已拒絕',
-      invalidJson: '引數不是合法 JSON',
+      invalidJson: '參數不是合法 JSON',
       submitted: '已提交',
       submitFailed: '提交失敗',
       userRejected: '使用者拒絕'
@@ -1410,7 +1410,7 @@ export default {
       describeTool: '讀取工具定義',
       discoverTools: '發現 MCP 工具',
       failed: 'MCP 操作失敗',
-      fullSchema: '完整引數定義',
+      fullSchema: '完整參數定義',
       listServers: '檢視 MCP 服務',
       listTools: '檢視 MCP 工具',
       moreAvailable: '還有更多結果',
@@ -1509,7 +1509,7 @@ export default {
       description: '選擇此知識庫要寫入的向量儲存。繫結不可更改 — 如需將現有 KB 遷移到其他儲存，請建立新 KB 並重新索引。',
       loading: '正在載入向量儲存列表...',
       engineLabel: '向量儲存',
-      engineDesc: '從全域性向量儲存配置中選擇，或保持系統預設以使用空間的 RETRIEVE_DRIVER 引擎。',
+      engineDesc: '從全域向量儲存配置中選擇，或保持系統預設以使用空間的 RETRIEVE_DRIVER 引擎。',
       boundLabel: '已繫結的向量儲存',
       systemDefault: '系統預設',
       immutableHint: '建立後不可更改。如需遷移，請建立一個繫結到目標儲存的新 KB 並重新索引。',
@@ -1539,7 +1539,7 @@ export default {
   commandPalette: {
     placeholder: '搜尋知識庫、檔案、對話…',
     clearRecent: '清除',
-    retrieval: '檢索引數',
+    retrieval: '檢索參數',
     untitledSession: '未命名對話',
     hotkey: {
       select: '選擇',
@@ -1551,7 +1551,7 @@ export default {
     empty: {
       noResults: '沒有找到匹配結果',
       askAi: '直接向 AI 提問',
-      adjustRetrieval: '調整檢索引數'
+      adjustRetrieval: '調整檢索參數'
     },
     quick: {
       newChat: '新建對話',
@@ -2050,7 +2050,7 @@ export default {
       imageFile: '圖片檔案',
       audioFile: '音訊檔案',
       chooseFile: '選擇檔案',
-      parameters: '請求引數',
+      parameters: '請求參數',
       thinking: '思考模式',
       thinkingDesc: '僅對支援思考模式的模型生效',
       systemPrompt: 'System Prompt',
@@ -2380,7 +2380,7 @@ export default {
   model: {
     modelName: '模型名稱',
     defaultTag: '預設',
-    addModelInSettings: '前往全域性設定新增模型',
+    addModelInSettings: '前往全域設定新增模型',
     loadFailed: '載入模型列表失敗',
     selectModelPlaceholder: '請選擇模型',
     searchPlaceholder: '搜尋模型...',
@@ -2421,7 +2421,7 @@ export default {
       dimensionFailed: '檢測失敗，請手動輸入維度',
       remoteDimensionDetected: '檢測到向量維度：{value}',
       dimensionOverrideLabel: '自定義輸出維度',
-      dimensionOverrideDesc: '僅在確認該模型支援 dimensions 引數時開啟；預設只使用檢測到的實際維度。',
+      dimensionOverrideDesc: '僅在確認該模型支援 dimensions 參數時開啟；預設只使用檢測到的實際維度。',
       supportsVisionLabel: '支援視覺/多模態',
       supportsVisionDesc: '模型是否支援圖片等多模態輸入',
       contextWindowLabel: '上下文視窗',
@@ -2429,10 +2429,10 @@ export default {
       contextWindowDesc: '該模型一次請求能容納的 token 數。智慧體壓縮對話歷史會按此上限工作。留空則使用預設 200000（200K）。請按廠商文件填寫真實值，填大會導致壓縮不觸發、上游直接拒絕請求。',
       contextWindowDefaultHint: '未設定，使用預設 {value}',
       contextWindowTokens: '{count} tokens',
-      maxConcurrencyLabel: '後臺併發上限',
-      maxConcurrencyPlaceholder: '0 表示使用全域性預設',
-      maxConcurrencyDesc: '限制文件入庫/富化等後臺任務對該模型的併發呼叫數（按模型全副本共享）。0 或留空表示沿用全域性預設；不影響互動式對話。',
-      thinkingControlLabel: '思考模式引數格式',
+      maxConcurrencyLabel: '後台併發上限',
+      maxConcurrencyPlaceholder: '0 表示使用全域預設',
+      maxConcurrencyDesc: '限制文件入庫/富化等後台任務對該模型的併發呼叫數（按模型全副本共享）。0 或留空表示沿用全域預設；不影響互動式對話。',
+      thinkingControlLabel: '思考模式參數格式',
       thinkingControlDesc: '決定智慧體「思考模式」開/關時如何寫入 API。已嘗試按廠商/模型預選，若與實際情況不符請按 API 文件手動修改；選「不寫入」時，智慧體「思考模式」開關不生效。',
       dimensionHint: '模型已選擇，點選"檢測維度"按鈕自動獲取向量維度',
       loadModelListFailed: '載入模型列表失敗',
@@ -2580,8 +2580,8 @@ export default {
           hint: '自定義 OpenAI 相容、NVIDIA NIM、vLLM / 本地 Qwen 部署'
         },
         none: {
-          label: '不寫入思考引數',
-          hint: '智慧體「思考模式」開關不生效，不會在請求中寫入思考相關引數'
+          label: '不寫入思考參數',
+          hint: '智慧體「思考模式」開關不生效，不會在請求中寫入思考相關參數'
         }
       },
       volcengine: {
@@ -2668,7 +2668,7 @@ export default {
       toolsTitle: '可用工具',
       resourcesTitle: '可用資源',
       descriptionLabel: '描述',
-      schemaLabel: '引數結構',
+      schemaLabel: '參數結構',
       emptyDescription: '該服務未提供工具或資源',
       requireApproval: '需人工稽核',
       requireApprovalTip: '開啟後，Agent 呼叫該工具前會暫停並等待確認，適用於可能改庫/刪檔案等高危操作',
@@ -2888,7 +2888,7 @@ export default {
       },
       keyDescriptions: {
         model: {
-          max_concurrency: '後臺任務（文件入庫/富化）對單個模型的預設併發上限，按模型 ID 全副本共享。每次呼叫實時讀取，修改後立即生效、無需重啟。0 或負數表示關閉預設限制（各模型仍會尊重自身在模型管理裡配置的上限）。僅影響後臺任務，不影響互動式對話。'
+          max_concurrency: '後台任務（文件入庫/富化）對單個模型的預設併發上限，按模型 ID 全副本共享。每次呼叫實時讀取，修改後立即生效、無需重啟。0 或負數表示關閉預設限制（各模型仍會尊重自身在模型管理裡配置的上限）。僅影響後台任務，不影響互動式對話。'
         },
         asynq: {
           core_concurrency: '文件解析與手工重解析的每例項保底併發，可額外借用共享彈性池；修改後需重啟。',
@@ -2950,7 +2950,7 @@ export default {
       },
       runtime: {
         title: '任務佇列執行時',
-        description: '後臺任務佇列的實時負載，以及各獨立 worker 池的每例項併發配置。支援檢視任務明細和安全管理，每 5 秒自動重新整理。',
+        description: '後台任務佇列的實時負載，以及各獨立 worker 池的每例項併發配置。支援檢視任務明細和安全管理，每 5 秒自動重新整理。',
         refresh: '重新整理',
         autoRefresh: '自動重新整理（每 5 秒）',
         loading: '載入中...',
@@ -3000,7 +3000,7 @@ export default {
           enrichment: '摘要、圖片、圖譜與問題生成',
           maintenance: '資料源同步、批處理與刪除清理',
           shared: '由核心解析與內容富化按積壓借用',
-          wiki: 'Wiki 內容生成與全域性收尾'
+          wiki: 'Wiki 內容生成與全域收尾'
         },
         pools: {
           core: '核心解析',
@@ -3012,11 +3012,11 @@ export default {
         },
         models: {
           title: '模型併發佔用',
-          description: '觀察後臺任務實際進入模型服務時的併發佔用；上方是任務排程，這裡是模型服務限流，兩者處於不同處理階段。',
-          scope: '佔用為叢集全域性 · 等待為當前例項',
-          disabled: '模型後臺併發治理未啟用。可在全域性設定中配置模型預設併發上限。',
-          empty: '暫無模型呼叫資料；模型首次執行後臺任務後會出現在這裡。',
-          backgroundOnly: '僅統計後臺任務，不包含互動式對話',
+          description: '觀察後台任務實際進入模型服務時的併發佔用；上方是任務排程，這裡是模型服務限流，兩者處於不同處理階段。',
+          scope: '佔用為叢集全域 · 等待為當前例項',
+          disabled: '模型後台併發治理未啟用。可在全域設定中配置模型預設併發上限。',
+          empty: '暫無模型呼叫資料；模型首次執行後台任務後會出現在這裡。',
+          backgroundOnly: '僅統計後台任務，不包含互動式對話',
           status: {
             queued: '限流中',
             full: '已滿載'
@@ -3173,7 +3173,7 @@ export default {
         runtime: {
           tab: '執行與併發 {count}',
           title: '執行與併發',
-          description: '配置後臺任務池與模型服務的併發容量。',
+          description: '配置後台任務池與模型服務的併發容量。',
           restartHint: 'Worker 配置需重啟生效'
         },
         tenant: {
@@ -3199,15 +3199,15 @@ export default {
         confirmBtn: '建立使用者',
         confirmPasswordLabel: '確認新密碼',
         confirmPasswordPlaceholder: '再次輸入新密碼',
-        description: '開通一個新的本地使用者賬號。如果平台的預設空間模式設定為「自動建立個人空間」，該使用者會像自助註冊的使用者一樣，同時獲得一個個人空間。',
+        description: '開通一個新的本地使用者帳號。如果平台的預設空間模式設定為「自動建立個人空間」，該使用者會像自助註冊的使用者一樣，同時獲得一個個人空間。',
         dialogTitle: '建立新使用者',
         emailLabel: '信箱',
         emailPlaceholder: '請輸入有效的信箱地址',
         failed: '建立使用者失敗',
         generated: {
           acknowledgeBtn: '我已儲存密碼',
-          copyBtn: '複製賬號情報',
-          copySuccess: '賬號情報已複製到剪貼簿',
+          copyBtn: '複製帳號情報',
+          copySuccess: '帳號情報已複製到剪貼簿',
           emailLabel: '信箱',
           passwordLabel: '生成的密碼',
           successBody: '已為該使用者生成一個隨機密碼。此密碼只會顯示一次。',
@@ -3599,8 +3599,8 @@ export default {
       languagePlaceholder: '例如 zh、en，留空自動檢測'
     },
     multimodal: {
-      title: '影象處理配置',
-      description: '配置影象內容理解能力，啟用後支援圖片等非文字內容的解析和檢索'
+      title: '影像處理配置',
+      description: '配置影像內容理解能力，啟用後支援圖片等非文字內容的解析和檢索'
     },
     chunking: {
       title: '分塊設定',
@@ -4078,7 +4078,7 @@ export default {
       advanced: '高階設定',
       faq: 'FAQ 設定',
       graph: '知識圖譜',
-      multimodal: '影象處理',
+      multimodal: '影像處理',
       asr: '音訊處理',
       datasource: '資料源',
       share: '共享管理',
@@ -4093,7 +4093,7 @@ export default {
     },
     activity: {
       title: '活動記錄',
-      description: '檢視這個知識庫的重要變更與後臺任務入口，記錄預設遵循審計日誌保留策略。',
+      description: '檢視這個知識庫的重要變更與後台任務入口，記錄預設遵循審計日誌保留策略。',
       allOutcomes: '全部結果',
       allActions: '全部操作',
       refresh: '重新整理',
@@ -4243,7 +4243,7 @@ export default {
     hideKey: '隱藏金鑰',
     createTitle: '新建嵌入渠道',
     name: '名稱',
-    nameDesc: '後臺管理用，用於列表與渠道識別',
+    nameDesc: '後台管理用，用於列表與渠道識別',
     namePlaceholder: '例如：官網客服',
     nameDefaultHint: '預設為「智慧體名 · 網頁嵌入」，可自行修改；留空儲存時也會使用該名稱',
     defaultChannelName: '網頁嵌入',
@@ -4803,7 +4803,7 @@ export default {
   },
   retrievalSettings: {
     title: '搜尋設定',
-    description: '配置知識庫搜尋和訊息搜尋的全域性檢索引數',
+    description: '配置知識庫搜尋和訊息搜尋的全域檢索參數',
     embeddingTopKLabel: '向量檢索數量 (Top K)',
     vectorThresholdLabel: '向量相似度閾值',
     keywordThresholdLabel: '關鍵詞匹配閾值',
@@ -4846,7 +4846,7 @@ export default {
     writeModeExplicit: '僅顯式記錄',
     writeModeAuto: '自動提煉',
     writeModeExplicitHint: '只記錄成員明確說「記住：……」的內容，以及在記憶頁手動新增的條目，不額外呼叫模型。',
-    writeModeAutoHint: '在此基礎上，會話結束後在後臺呼叫一次模型，從成員自己說過的話裡提煉值得長期保留的內容。',
+    writeModeAutoHint: '在此基礎上，會話結束後在後台呼叫一次模型，從成員自己說過的話裡提煉值得長期保留的內容。',
     extractModelLabel: '提煉模型',
     extractModelDescription: '留空則使用該次會話所用的模型。',
     extractDelayLabel: '挖掘延遲',
@@ -5138,7 +5138,7 @@ export default {
     modelManagement: '模型管理',
     webSearchConfig: '網路搜尋',
     autoCheckUpdate: '自動下載更新',
-    autoCheckUpdateDesc: '開啟後自動檢查並在後臺下載最新版本安裝包。',
+    autoCheckUpdateDesc: '開啟後自動檢查並在後台下載最新版本安裝包。',
     vectorStoreEngine: '向量資料庫引擎',
     parserEngine: '解析引擎',
     storageEngine: '儲存引擎',
@@ -5151,7 +5151,7 @@ export default {
     system: '系統設定',
     storage: {
       title: '儲存引擎',
-      description: '配置文件與圖片的儲存方式。此處設定各引擎引數，知識庫中僅選擇使用哪個引擎。',
+      description: '配置文件與圖片的儲存方式。此處設定各引擎參數，知識庫中僅選擇使用哪個引擎。',
       basicSection: '基本配置',
       modeSection: '部署模式',
       credentialsSection: '憑證',
@@ -5298,7 +5298,7 @@ export default {
       docs: '文件',
       loadFailed: '載入解析引擎列表失敗',
       ensureDocreaderConnected: '請先確保 DocReader 服務已透過環境變數配置並已連線',
-      checkDoneStatusUpdated: '已使用當前填寫引數檢測，上方狀態已更新',
+      checkDoneStatusUpdated: '已使用當前填寫參數檢測，上方狀態已更新',
       checkSuccess: '測試連線成功',
       checkFailed: '檢測失敗',
       saveSuccess: '儲存成功',
@@ -5812,7 +5812,7 @@ export default {
       stepDescriptions: {
         connection: '先配置後端並驗證連線，透過後再從叢集載入模板。',
         template: '選擇當前叢集返回且已經就緒的執行模板。',
-        runtime: '配置執行引數和環境變數，然後儲存。',
+        runtime: '配置執行參數和環境變數，然後儲存。',
         skills: '把技能裝進這份配置的沙箱映象；配置已儲存後可隨時回來增刪。'
       },
       terminalIdleDisconnect: '互動式終端空閒斷開（秒）',
@@ -5874,7 +5874,7 @@ export default {
       promptsConfig: '提示詞',
       promptsConfigDesc: '配置系統提示詞、上下文模板、意圖/改寫/兜底提示詞',
       modelConfig: '模型配置',
-      modelConfigDesc: '配置對話模型、ReRank 等輔助模型及生成引數',
+      modelConfigDesc: '配置對話模型、ReRank 等輔助模型及生成參數',
       toolsConfig: '工具配置',
       toolsConfigDesc: '配置 Agent 可以使用的工具',
       knowledgeConfig: '知識庫',
@@ -6169,7 +6169,7 @@ export default {
     head: {
       stagesDone: '主流程階段',
       stagesProgress: '當前階段',
-      postprocessTasks: '後臺任務：執行中 {running} / 失敗 {failed} / 已完成 {completed}',
+      postprocessTasks: '後台任務：執行中 {running} / 失敗 {failed} / 已完成 {completed}',
       completedWithActiveTrace: '處理已完成，但仍有 {n} 個 Trace 任務處於活動狀態',
       attempt: '嘗試',
       updated: '更新於'
