@@ -82,7 +82,7 @@
           <t-button
             theme="primary"
             :loading="benchmarking"
-            :disabled="!canRun || !form.chat_id"
+            :disabled="!canRun || !benchmarkChatID"
             @click="runCacheBenchmark"
           >{{ t('evaluationSettings.cacheBenchmarkStart') }}</t-button>
           <t-button v-if="cacheBenchmark" variant="outline" @click="exportCacheBenchmark">
@@ -90,6 +90,12 @@
           </t-button>
         </div>
       </div>
+      <label class="benchmark-model-picker">
+        <span>{{ t('evaluationSettings.cacheBenchmarkModel') }}</span>
+        <t-select v-model="benchmarkChatID" :placeholder="t('evaluationSettings.chatRequired')">
+          <t-option v-for="model in chatModels" :key="model.id" :value="model.id" :label="modelLabel(model)" />
+        </t-select>
+      </label>
       <p class="benchmark-cost-hint">{{ t('evaluationSettings.cacheBenchmarkCostHint') }}</p>
       <div v-if="cacheBenchmark" class="benchmark-result">
         <div class="comparison-status" :data-comparable="cacheBenchmark.strict_validation.passed">
@@ -106,8 +112,20 @@
               <div><dt>{{ t('evaluationSettings.medianDuration') }}</dt><dd>{{ formatDuration(cohort.value.median_latency_ms) }}</dd></div>
               <div><dt>{{ t('evaluationSettings.p95Duration') }}</dt><dd>{{ formatDuration(cohort.value.p95_latency_ms) }}</dd></div>
               <div><dt>Token</dt><dd>{{ formatInteger(cohort.value.usage.total_tokens) }}</dd></div>
+              <div><dt>{{ t('evaluationSettings.cost') }}</dt><dd>{{ formatCohortCost(cohort.value.usage) }}</dd></div>
             </dl>
           </article>
+        </div>
+        <div v-if="benchmarkCostComparison" class="benchmark-savings">
+          {{ benchmarkCostComparison.saved >= 0
+            ? t('evaluationSettings.cacheBenchmarkSavings', {
+              amount: `${benchmarkCostComparison.saved.toFixed(6)} ${benchmarkCostComparison.currency}`,
+              percent: `${(benchmarkCostComparison.rate * 100).toFixed(2)}%`,
+            })
+            : t('evaluationSettings.cacheBenchmarkIncrease', {
+              amount: `${Math.abs(benchmarkCostComparison.saved).toFixed(6)} ${benchmarkCostComparison.currency}`,
+              percent: `${(Math.abs(benchmarkCostComparison.rate) * 100).toFixed(2)}%`,
+            }) }}
         </div>
         <small class="report-hash">SHA-256: {{ cacheBenchmark.report_sha256 }}</small>
       </div>
@@ -260,6 +278,7 @@ import {
   runWikiCacheBenchmark,
   startEvaluation,
   type EvaluationDataset,
+  type EvaluationUsage,
   type EvaluationRunPage,
   type EvaluationRunSummary,
   type EvaluationTask,
@@ -273,6 +292,7 @@ const starting = ref(false)
 const exportingRunID = ref('')
 const benchmarking = ref(false)
 const cacheBenchmark = ref<WikiCacheBenchmarkEvidence | null>(null)
+const benchmarkChatID = ref('')
 const datasets = ref<EvaluationDataset[]>([])
 const models = ref<ModelConfig[]>([])
 const knowledgeBases = ref<Array<{ id: string; name: string }>>([])
@@ -303,6 +323,21 @@ const benchmarkCohorts = computed(() => cacheBenchmark.value ? [
   { key: 'cold', label: t('evaluationSettings.coldCohort'), value: cacheBenchmark.value.cold },
   { key: 'warm', label: t('evaluationSettings.warmCohort'), value: cacheBenchmark.value.warm },
 ] : [])
+const benchmarkCostComparison = computed(() => {
+  if (!cacheBenchmark.value) return null
+  const coldUsage = cacheBenchmark.value.cold.usage
+  const warmUsage = cacheBenchmark.value.warm.usage
+  if (coldUsage.unpriced_calls > 0 || warmUsage.unpriced_calls > 0) return null
+  const coldCurrencies = Object.keys(coldUsage.cost_by_currency || {})
+  const warmCurrencies = Object.keys(warmUsage.cost_by_currency || {})
+  if (coldCurrencies.length !== 1 || warmCurrencies.length !== 1 || coldCurrencies[0] !== warmCurrencies[0]) return null
+  const currency = coldCurrencies[0]
+  const cold = coldUsage.cost_by_currency[currency]
+  const warm = warmUsage.cost_by_currency[currency]
+  if (!Number.isFinite(cold) || !Number.isFinite(warm) || cold <= 0) return null
+  const saved = cold - warm
+  return { currency, cold, warm, saved, rate: saved / cold }
+})
 const comparisonWarnings = computed(() => {
   if (selectedRuns.value.length < 2) return []
   const [base, ...candidates] = selectedRuns.value
@@ -379,6 +414,7 @@ async function loadPage() {
     }
     if (form.knowledge_base_id && !knowledgeBases.value.some(item => item.id === form.knowledge_base_id)) form.knowledge_base_id = ''
     if (form.chat_id && !chatModels.value.some(item => item.id === form.chat_id)) form.chat_id = ''
+    if (benchmarkChatID.value && !chatModels.value.some(item => item.id === benchmarkChatID.value)) benchmarkChatID.value = ''
     if (form.rerank_id && !rerankModels.value.some(item => item.id === form.rerank_id)) form.rerank_id = ''
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('evaluationSettings.loadFailed'))
@@ -420,11 +456,11 @@ async function exportEvidence(taskID: string) {
 }
 
 async function runCacheBenchmark() {
-  if (!form.chat_id) return
+  if (!benchmarkChatID.value) return
   benchmarking.value = true
   cacheBenchmark.value = null
   try {
-    cacheBenchmark.value = await runWikiCacheBenchmark(form.chat_id)
+    cacheBenchmark.value = await runWikiCacheBenchmark(benchmarkChatID.value)
     if (cacheBenchmark.value.strict_validation.passed) {
       MessagePlugin.success(t('evaluationSettings.cacheBenchmarkPassed'))
     } else {
@@ -561,6 +597,12 @@ function runLabel(run: EvaluationRunSummary, index: number): string {
 const statusLabel = (status: number) => t(`evaluationSettings.status.${['pending', 'running', 'success', 'failed'][status] || 'unknown'}`)
 const progressPercent = (task: EvaluationTask) => task.total ? Math.min(100, (task.finished || 0) / task.total * 100) : 0
 const modelLabel = (model: ModelConfig) => model.display_name || model.name
+function formatCohortCost(usage: EvaluationUsage): string {
+  if (usage.unpriced_calls > 0) return '—'
+  const costs = Object.entries(usage.cost_by_currency || {}).filter(([, value]) => Number.isFinite(value))
+  if (!costs.length) return '—'
+  return costs.map(([currency, value]) => `${value.toFixed(6)} ${currency}`).join(' + ')
+}
 const formatInteger = (value: number) => new Intl.NumberFormat(locale.value).format(value || 0)
 const formatDate = (value: string) => value ? new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—'
 const formatDuration = (value: number) => value >= 1000 ? `${(value / 1000).toFixed(2)} s` : `${value || 0} ms`
@@ -613,6 +655,8 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
 h2, h3, p { margin: 0; }
 .evaluation-header p, .panel-heading p { margin-top: 5px; color: var(--td-text-color-secondary); }
 .evaluation-panel { padding: 18px; border: 1px solid var(--td-component-stroke); border-radius: 12px; background: var(--td-bg-color-container); }
+.benchmark-model-picker { display: grid; grid-template-columns: minmax(120px, 180px) minmax(240px, 420px); align-items: center; gap: 12px; margin-top: 16px; }
+.benchmark-model-picker > span { color: var(--td-text-color-secondary); font-size: 13px; }
 .evaluation-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
 .evaluation-form label { display: flex; flex-direction: column; gap: 7px; color: var(--td-text-color-secondary); font-size: 13px; }
 .run-actions { margin-top: 16px; color: var(--td-text-color-secondary); font-size: 13px; }
@@ -621,6 +665,7 @@ h2, h3, p { margin: 0; }
 .benchmark-cost-hint { margin-top: 12px; color: var(--td-text-color-secondary); font-size: 12px; }
 .benchmark-result { margin-top: 14px; }
 .benchmark-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.benchmark-savings { margin-top: 12px; padding: 10px 12px; border-radius: 8px; color: var(--td-success-color); background: var(--td-success-color-light); font-size: 13px; }
 .report-hash { display: block; margin-top: 10px; overflow-wrap: anywhere; color: var(--td-text-color-placeholder); }
 .progress-track { height: 6px; margin-top: 10px; overflow: hidden; border-radius: 999px; background: var(--td-bg-color-secondarycontainer); }
 .progress-track span { display: block; height: 100%; background: var(--td-brand-color); transition: width .2s ease; }
@@ -662,5 +707,5 @@ td small { display: block; margin-top: 2px; font-size: 11px; }
 .delta-neutral { color: var(--td-text-color-placeholder); }
 .pagination-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; color: var(--td-text-color-secondary); font-size: 12px; }
 .empty-state { padding: 32px; text-align: center; color: var(--td-text-color-placeholder); }
-@media (max-width: 720px) { .evaluation-form, .benchmark-grid, .repeat-card dl { grid-template-columns: 1fr; } .evaluation-header, .panel-heading { align-items: flex-start; } .pagination-row { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 720px) { .evaluation-form, .benchmark-model-picker, .benchmark-grid, .repeat-card dl { grid-template-columns: 1fr; } .evaluation-header, .panel-heading { align-items: flex-start; } .pagination-row { align-items: flex-start; flex-direction: column; } }
 </style>

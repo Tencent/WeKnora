@@ -5,10 +5,16 @@ on:
     paths:
       - 'cmd/evalgate/**'
       - 'cmd/cachebench/**'
+      - 'cmd/evidenceverify/**'
       - 'cmd/retrievalgate/**'
       - 'evaluation/**'
       - 'frontend/src/api/evaluation/**'
+      - 'frontend/src/api/model/modelUsage*'
+      - 'frontend/src/components/ModelEditorDialog.vue'
+      - 'frontend/src/utils/evaluation*'
+      - 'frontend/src/views/settings/EvaluationSettings*'
       - 'frontend/src/views/settings/ModelSettings.vue'
+      - 'frontend/src/views/settings/Settings.vue'
       - 'frontend/src/i18n/locales/**'
       - 'frontend/package.json'
       - 'frontend/package-lock.json'
@@ -25,6 +31,7 @@ on:
       - 'internal/models/embedding/**'
       - 'internal/models/rerank/**'
       - 'internal/types/evaluation.go'
+      - 'internal/types/interfaces/evaluation.go'
       - 'internal/types/llm_observability.go'
       - 'migrations/sqlite/000014_evaluation_tasks*'
       - 'migrations/sqlite/000015_evaluation_model_calls*'
@@ -35,15 +42,17 @@ on:
       - 'migrations/sqlite/000020_embedding_cache_entries*'
       - 'migrations/sqlite/000021_evaluation_usage_snapshot*'
       - 'migrations/sqlite/000022_embedding_cache_usage*'
-      - 'migrations/versioned/000092_evaluation_tasks*'
-      - 'migrations/versioned/000093_evaluation_model_calls*'
-      - 'migrations/versioned/000094_evaluation_model_call_cost*'
-      - 'migrations/versioned/000095_global_model_call_observability*'
-      - 'migrations/versioned/000096_evaluation_run_config*'
-      - 'migrations/versioned/000097_model_call_types*'
-      - 'migrations/versioned/000098_embedding_cache_entries*'
-      - 'migrations/versioned/000099_evaluation_usage_snapshot*'
-      - 'migrations/versioned/000100_embedding_cache_usage*'
+      - 'migrations/sqlite/000023_model_call_request_fingerprint*'
+      - 'migrations/versioned/000093_evaluation_tasks*'
+      - 'migrations/versioned/000094_evaluation_model_calls*'
+      - 'migrations/versioned/000095_evaluation_model_call_cost*'
+      - 'migrations/versioned/000096_global_model_call_observability*'
+      - 'migrations/versioned/000097_evaluation_run_config*'
+      - 'migrations/versioned/000098_model_call_types*'
+      - 'migrations/versioned/000099_embedding_cache_entries*'
+      - 'migrations/versioned/000100_evaluation_usage_snapshot*'
+      - 'migrations/versioned/000101_embedding_cache_usage*'
+      - 'migrations/versioned/000102_model_call_request_fingerprint*'
       - '.env.example'
       - 'Makefile'
       - '.github/workflows/evaluation-regression.yml'
@@ -130,7 +139,7 @@ jobs:
           path: cache-comparison.json
           if-no-files-found: warn
 
-  model-usage-ui:
+  evaluation-ui:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -142,6 +151,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
-      - name: Type-check model usage page and API integration
+      - name: Test evaluation and model usage UI
+        working-directory: frontend
+        run: npm test
+      - name: Type-check and build evaluation UI
         working-directory: frontend
         run: npm run build-with-types

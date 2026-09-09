@@ -2405,9 +2405,11 @@ export default {
     loadFailed: '评测数据加载失败。', startFailed: '评测启动失败。', pollFailed: '评测状态连续获取失败，请刷新后重试。',
     invalidHint: '没有成功的对话模型调用，不可用于正式对比。',
     cacheBenchmarkTitle: 'Wiki 缓存严格 A/B', cacheBenchmarkHint: '用真实 Wiki 更新提示结构执行 3 组隔离冷请求，再逐字重放暖请求；只导出指纹和用量。',
-    cacheBenchmarkStart: '运行严格 A/B（6 次调用）', cacheBenchmarkCostHint: '会立即调用当前对话模型 6 次，可能消耗远程模型额度；不会修改 Wiki 页面。',
+    cacheBenchmarkModel: '实验对话模型',
+    cacheBenchmarkStart: '运行严格 A/B（6 次调用）', cacheBenchmarkCostHint: '会立即调用上方选择的实验模型 6 次，可能消耗远程模型额度；不会修改 Wiki 页面。',
     cacheBenchmarkPassed: '严格校验通过：三组冷暖请求逐一一致，且暖组存在 Provider 上报的缓存命中。',
     cacheBenchmarkFailed: '严格校验未通过：{reason}', cacheBenchmarkRunFailed: 'Wiki 缓存 A/B 运行失败。',
+    cacheBenchmarkSavings: '暖缓存组比冷缓存组节省 {amount}（下降 {percent}）。', cacheBenchmarkIncrease: '暖缓存组比冷缓存组增加 {amount}（上升 {percent}）。',
     coldCohort: '冷缓存组', warmCohort: '暖缓存组', calls: '调用次数',
     status: { pending: '等待中', running: '运行中', success: '已成功', failed: '已失败', invalid: '结果无效', unknown: '未知' }
   },

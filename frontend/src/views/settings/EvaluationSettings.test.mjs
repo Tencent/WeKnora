@@ -58,7 +58,13 @@ test('repeated summaries and evaluation history use fixed pagination sizes', () 
 
 test('strict Wiki cache benchmark discloses cost, validates pairs, and exports evidence', () => {
   assert.match(source, /runWikiCacheBenchmark/)
+  assert.match(source, /v-model="benchmarkChatID"/)
+  assert.match(source, /runWikiCacheBenchmark\(benchmarkChatID\.value\)/)
+  assert.doesNotMatch(source, /runWikiCacheBenchmark\(form\.chat_id\)/)
   assert.match(source, /cacheBenchmarkCostHint/)
+  assert.match(source, /formatCohortCost\(cohort\.value\.usage\)/)
+  assert.match(source, /benchmarkCostComparison/)
+  assert.match(source, /unpriced_calls > 0/)
   assert.match(source, /strict_validation\.passed/)
   assert.match(source, /coldCohort/)
   assert.match(source, /warmCohort/)

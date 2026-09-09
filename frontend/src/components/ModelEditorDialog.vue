@@ -427,6 +427,7 @@
               </label>
             </div>
             <p class="form-desc">{{ pricingLabels.unit }}</p>
+            <p class="form-desc pricing-config__note">{{ pricingLabels.note }}</p>
           </template>
         </div>
 
@@ -536,19 +537,28 @@ const pricingLabels = computed(() => {
   const lang = String(locale.value).toLowerCase()
   if (lang.startsWith('zh')) return {
     title: 'Token 成本估算', description: '为模型调用计算成本并保存价格快照', currency: '币种',
-    input: '普通输入', output: '模型输出', cacheRead: '缓存读取', cacheWrite: '缓存写入', unit: '单价单位：每百万 Token',
+    input: '普通输入', output: '模型输出', cacheRead: '缓存读取', cacheWrite: '缓存创建', unit: '单价单位：每百万 Token',
+    note: '请按 Provider 的计费口径填写；0 表示该类 Token 确实免费，不会自动继承普通输入单价。隐式缓存若按普通输入价收取创建 Token，应将“缓存创建”设为普通输入单价。',
+  }
+  if (lang.startsWith('ja')) return {
+    title: 'Token コスト見積もり', description: 'モデル呼び出しのコストを計算し、価格スナップショットを保存します', currency: '通貨',
+    input: '通常入力', output: 'モデル出力', cacheRead: 'キャッシュ読み取り', cacheWrite: 'キャッシュ作成', unit: '単価：100万 Token あたり',
+    note: 'Provider の課金方式に従って入力してください。0 は無料を意味し、通常入力単価を自動継承しません。暗黙的キャッシュの作成が通常入力単価で課金される場合は、同じ単価を設定してください。',
   }
   if (lang.startsWith('ko')) return {
     title: 'Token 비용 추정', description: '평가 호출 비용과 가격 스냅샷을 저장합니다', currency: '통화',
-    input: '일반 입력', output: '모델 출력', cacheRead: '캐시 읽기', cacheWrite: '캐시 쓰기', unit: '단가: 백만 Token당',
+    input: '일반 입력', output: '모델 출력', cacheRead: '캐시 읽기', cacheWrite: '캐시 생성', unit: '단가: 백만 Token당',
+    note: 'Provider의 과금 방식에 따라 입력하세요. 0은 무료를 뜻하며 일반 입력 단가를 자동 상속하지 않습니다. 암시적 캐시 생성이 일반 입력 단가로 과금되면 같은 단가를 설정하세요.',
   }
   if (lang.startsWith('ru')) return {
     title: 'Оценка стоимости токенов', description: 'Расчёт стоимости и сохранение снимка цен', currency: 'Валюта',
-    input: 'Обычный ввод', output: 'Вывод модели', cacheRead: 'Чтение кэша', cacheWrite: 'Запись кэша', unit: 'Цена за миллион токенов',
+    input: 'Обычный ввод', output: 'Вывод модели', cacheRead: 'Чтение кэша', cacheWrite: 'Создание кэша', unit: 'Цена за миллион токенов',
+    note: 'Укажите цены по правилам Provider. Ноль означает, что токены бесплатны, и не наследует цену обычного ввода. Если создание неявного кэша оплачивается как обычный ввод, укажите ту же цену.',
   }
   return {
     title: 'Token cost estimation', description: 'Estimate model-call cost and preserve a pricing snapshot', currency: 'Currency',
-    input: 'Regular input', output: 'Model output', cacheRead: 'Cache read', cacheWrite: 'Cache write', unit: 'Price per one million tokens',
+    input: 'Regular input', output: 'Model output', cacheRead: 'Cache read', cacheWrite: 'Cache creation', unit: 'Price per one million tokens',
+    note: 'Enter prices using the Provider billing rules. Zero means those tokens are actually free; it does not inherit the regular input price. If implicit-cache creation is billed as regular input, use the same price.',
   }
 })
 

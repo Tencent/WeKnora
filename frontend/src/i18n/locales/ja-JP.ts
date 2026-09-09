@@ -4881,9 +4881,11 @@ export default {
     loadFailed: '評価データの読み込みに失敗しました。', startFailed: '評価の開始に失敗しました。', pollFailed: '評価ステータスの取得に3回連続で失敗しました。更新して再試行してください。',
     invalidHint: '成功したチャットモデル呼び出しがないため、正式な比較には使用できません。',
     cacheBenchmarkTitle: 'Wiki キャッシュ厳密 A/B', cacheBenchmarkHint: '本番 Wiki 更新形式の分離されたコールド要求を3件実行し、同一バイト列のウォーム要求を再生します。指紋と使用量のみを出力します。',
-    cacheBenchmarkStart: '厳密 A/B を実行（6回）', cacheBenchmarkCostHint: '選択したチャットモデルを直ちに6回呼び出すため、リモートモデルの枠を消費する場合があります。Wiki ページは変更しません。',
+    cacheBenchmarkModel: 'ベンチマーク用チャットモデル',
+    cacheBenchmarkStart: '厳密 A/B を実行（6回）', cacheBenchmarkCostHint: '上で選択したベンチマークモデルを直ちに6回呼び出すため、リモートモデルの枠を消費する場合があります。Wiki ページは変更しません。',
     cacheBenchmarkPassed: '厳密検証に合格しました。3組の要求が一致し、Provider がウォームキャッシュヒットを報告しました。',
     cacheBenchmarkFailed: '厳密検証に失敗しました：{reason}', cacheBenchmarkRunFailed: 'Wiki キャッシュ A/B の実行に失敗しました。',
+    cacheBenchmarkSavings: 'ウォーム群はコールド群より {amount} 節約（{percent} 減）。', cacheBenchmarkIncrease: 'ウォーム群はコールド群より {amount} 増加（{percent} 増）。',
     coldCohort: 'コールド群', warmCohort: 'ウォーム群', calls: '呼び出し回数',
     status: { pending: '待機中', running: '実行中', success: '成功', failed: '失敗', invalid: '無効な結果', unknown: '不明' }
   },

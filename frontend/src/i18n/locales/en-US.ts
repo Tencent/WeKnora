@@ -4881,9 +4881,11 @@ export default {
     loadFailed: 'Failed to load evaluation data.', startFailed: 'Failed to start evaluation.', pollFailed: 'Failed to refresh the evaluation status three times. Please refresh and try again.',
     invalidHint: 'No chat-model call succeeded, so this run cannot be used in a formal comparison.',
     cacheBenchmarkTitle: 'Strict Wiki cache A/B', cacheBenchmarkHint: 'Run three isolated cold requests shaped like production Wiki updates, then replay byte-identical warm requests; export fingerprints and usage only.',
-    cacheBenchmarkStart: 'Run strict A/B (6 calls)', cacheBenchmarkCostHint: 'This immediately calls the selected chat model six times and may consume remote-model quota. Wiki pages are not modified.',
+    cacheBenchmarkModel: 'Benchmark chat model',
+    cacheBenchmarkStart: 'Run strict A/B (6 calls)', cacheBenchmarkCostHint: 'This immediately calls the benchmark model selected above six times and may consume remote-model quota. Wiki pages are not modified.',
     cacheBenchmarkPassed: 'Strict validation passed: all three cold/warm request pairs match and the provider reported warm cache hits.',
     cacheBenchmarkFailed: 'Strict validation failed: {reason}', cacheBenchmarkRunFailed: 'Failed to run the Wiki cache A/B benchmark.',
+    cacheBenchmarkSavings: 'The warm cohort saves {amount} versus cold ({percent} lower).', cacheBenchmarkIncrease: 'The warm cohort costs {amount} more than cold ({percent} higher).',
     coldCohort: 'Cold cohort', warmCohort: 'Warm cohort', calls: 'Calls',
     status: { pending: 'Pending', running: 'Running', success: 'Succeeded', failed: 'Failed', invalid: 'Invalid result', unknown: 'Unknown' }
   },

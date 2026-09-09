@@ -2403,9 +2403,11 @@ export default {
     loadFailed: '평가 데이터를 불러오지 못했습니다.', startFailed: '평가를 시작하지 못했습니다.', pollFailed: '평가 상태를 세 번 연속으로 가져오지 못했습니다. 새로 고침 후 다시 시도하세요.',
     invalidHint: '성공한 대화 모델 호출이 없어 공식 비교에 사용할 수 없습니다.',
     cacheBenchmarkTitle: '엄격한 Wiki 캐시 A/B', cacheBenchmarkHint: '실제 Wiki 업데이트 형식의 분리된 콜드 요청 3개를 실행한 뒤 바이트 단위로 동일한 웜 요청을 재생하며 지문과 사용량만 내보냅니다.',
-    cacheBenchmarkStart: '엄격한 A/B 실행(6회)', cacheBenchmarkCostHint: '선택한 채팅 모델을 즉시 6회 호출하므로 원격 모델 할당량을 사용할 수 있습니다. Wiki 페이지는 변경하지 않습니다.',
+    cacheBenchmarkModel: '벤치마크 채팅 모델',
+    cacheBenchmarkStart: '엄격한 A/B 실행(6회)', cacheBenchmarkCostHint: '위에서 선택한 벤치마크 모델을 즉시 6회 호출하므로 원격 모델 할당량을 사용할 수 있습니다. Wiki 페이지는 변경하지 않습니다.',
     cacheBenchmarkPassed: '엄격한 검증을 통과했습니다. 세 요청 쌍이 일치하고 Provider가 웜 캐시 적중을 보고했습니다.',
     cacheBenchmarkFailed: '엄격한 검증 실패: {reason}', cacheBenchmarkRunFailed: 'Wiki 캐시 A/B 실행에 실패했습니다.',
+    cacheBenchmarkSavings: '웜 그룹은 콜드 그룹보다 {amount} 절감되었습니다({percent} 감소).', cacheBenchmarkIncrease: '웜 그룹은 콜드 그룹보다 {amount} 증가했습니다({percent} 증가).',
     coldCohort: '콜드 그룹', warmCohort: '웜 그룹', calls: '호출 수',
     status: { pending: '대기 중', running: '실행 중', success: '성공', failed: '실패', invalid: '잘못된 결과', unknown: '알 수 없음' }
   },
