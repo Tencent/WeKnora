@@ -5,10 +5,12 @@ import { openMermaidFullscreen } from '@/utils/mermaidViewer.ts'
 import {
   buildCodeBlockHtml,
   buildMermaidBlockHtml,
+  buildMermaidErrorFragment,
   attachMarkdownEnhancementListeners,
   highlightCodeBlocksInContainer,
   syncMermaidExpandButtons,
 } from '@/utils/markdownEnhancements'
+import { encodeMermaidRenderError } from '@/utils/mermaidStreaming'
 
 hljs.registerAliases('mermaid', { languageName: 'plaintext' })
 
@@ -211,22 +213,57 @@ export const createMermaidCodeRenderer = (idPrefix: string) => {
   }
 }
 
-export const renderMermaidToSvg = async (code: string, id?: string): Promise<string | null> => {
-  if (!code.trim()) return null
+const MERMAID_ERROR_MESSAGE_MAX_LINES = 4
+const MERMAID_ERROR_MESSAGE_MAX_CHARS = 300
+
+function mermaidErrorMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e)
+  // UnknownDiagramError repeats the entire diagram after "for text:"; the
+  // source is already available in the collapsible block under the message.
+  const withoutSource = raw.replace(/\s*for text:[\s\S]*$/, '').trim()
+  const lines = withoutSource.split('\n').slice(0, MERMAID_ERROR_MESSAGE_MAX_LINES).join('\n')
+  return lines.length > MERMAID_ERROR_MESSAGE_MAX_CHARS
+    ? `${lines.slice(0, MERMAID_ERROR_MESSAGE_MAX_CHARS)}…`
+    : lines
+}
+
+type MermaidRenderResult = { svg: string } | { error: string }
+
+// Shared by renderMermaidToSvg (existing string|null contract, kept for
+// document-preview.vue and any other simple caller) and the chat render
+// paths, which also need the caught message to show the user something
+// more useful than a silently-dropped diagram.
+//
+// Returns null only when mermaid itself could not be loaded/initialised —
+// that is not a diagram problem, so callers leave the slot unresolved and a
+// later pass retries. An {error} is always a genuine parse/render failure.
+async function renderMermaidDiagnostic(code: string, id?: string): Promise<MermaidRenderResult | null> {
+  let mermaid: Awaited<ReturnType<typeof getMermaid>>
   try {
-    const mermaid = await getMermaid()
+    mermaid = await getMermaid()
     ensureMermaidInitialized()
     await initPromise
+  } catch (e) {
+    console.error('Mermaid load error:', e)
+    return null
+  }
+  try {
     await mermaid.parse(code)
     // Mermaid reuses the render id as the SVG root id. Always mint a fresh
     // one so a later render cannot collide with an SVG already in the DOM.
     const renderId = `${id || 'mermaid'}-${++mermaidCount}`
     const { svg } = await mermaid.render(renderId, code)
-    return svg
+    return { svg }
   } catch (e) {
     console.error('Mermaid rendering error:', e)
-    return null
+    return { error: mermaidErrorMessage(e) }
   }
+}
+
+export const renderMermaidToSvg = async (code: string, id?: string): Promise<string | null> => {
+  if (!code.trim()) return null
+  const result = await renderMermaidDiagnostic(code, id)
+  return result && 'svg' in result ? result.svg : null
 }
 
 function mermaidSourceFromElement(el: HTMLElement): string {
@@ -242,8 +279,15 @@ export async function appendMermaidSvgCache(
   const next = cache.slice()
   while (next.length < codes.length) {
     const i = next.length
-    const svg = await renderMermaidToSvg(codes[i], `${idPrefix}-${i}`)
-    next.push(svg || '')
+    const result = await renderMermaidDiagnostic(codes[i], `${idPrefix}-${i}`)
+    if (!result) {
+      // Mermaid unavailable: leave the slot unresolved so it is retried.
+      next.push('')
+    } else if ('svg' in result) {
+      next.push(result.svg)
+    } else {
+      next.push(encodeMermaidRenderError(codes[i], result.error))
+    }
   }
   return next
 }
@@ -261,12 +305,13 @@ export const renderMermaidInContainer = async (
     'pre[data-mermaid="false"], .chat-mermaid-block__canvas[data-mermaid="false"]',
   )
   for (const el of mermaidElements) {
+    let code = ''
     try {
       if (el.querySelector('svg')) {
         el.setAttribute('data-mermaid', 'true')
         continue
       }
-      const code = mermaidSourceFromElement(el)
+      code = mermaidSourceFromElement(el)
       if (!code) continue
       await mermaid.parse(code)
       const renderId = `mermaid-render-${++mermaidCount}`
@@ -276,6 +321,8 @@ export const renderMermaidInContainer = async (
       el.setAttribute('data-mermaid', 'true')
     } catch (e) {
       console.error('Mermaid rendering error:', e)
+      el.innerHTML = buildMermaidErrorFragment(code, mermaidErrorMessage(e))
+      el.setAttribute('data-mermaid', 'error')
       continue
     }
   }

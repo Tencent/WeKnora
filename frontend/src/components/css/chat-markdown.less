@@ -325,6 +325,59 @@
     border-radius: 0;
   }
 
+  :deep(.chat-mermaid-block__canvas[data-mermaid="error"]),
+  :deep(pre.mermaid[data-mermaid="error"]) {
+    cursor: default;
+    text-align: left;
+    white-space: normal;
+  }
+
+  :deep(.chat-mermaid-block__error) {
+    font-family: var(--app-font-family);
+  }
+
+  // Mermaid parse errors are multi-line ("Parse error on line N:" + the
+  // offending source line + a caret marker); keep those breaks readable.
+  :deep(.chat-mermaid-block__error-message) {
+    margin: 0 0 8px;
+    color: var(--td-error-color);
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  :deep(.chat-mermaid-block__error-source) {
+    font-size: 12px;
+
+    summary {
+      cursor: pointer;
+      color: var(--td-text-color-secondary);
+
+      &:hover {
+        color: var(--td-text-color-primary);
+      }
+    }
+  }
+
+  // Specificity must match the generic `pre:not(...):not(...)` rule above so
+  // this later rule wins for the error source block.
+  :deep(.chat-mermaid-block__error-source pre.chat-mermaid-block__error-code) {
+    margin: 8px 0 0;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 88%, var(--td-bg-color-container));
+    overflow-x: auto;
+    white-space: pre;
+    font-size: 12px;
+    line-height: 1.5;
+
+    code {
+      background: transparent;
+      padding: 0;
+    }
+  }
+
   :deep(pre.mermaid:not(.chat-mermaid-block__canvas)) {
     margin: 0.75em 0;
     padding: 20px 16px;

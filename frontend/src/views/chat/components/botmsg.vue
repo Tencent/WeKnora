@@ -418,7 +418,9 @@ onUpdated(() => {
         await hydrateProtectedFileImages(parentMd.value);
         await hydrateArtifactImages(parentMd.value, artifactRefContext.value);
         refreshMarkdownEnhancements(parentMd.value);
-        if (props.session?.is_completed) {
+        // Wait for the typewriter to catch up, not just the backend completion
+        // event: a fence that is still being typed out is not yet a diagram.
+        if (answerFullyRendered.value) {
             await renderMermaidInContainer(parentMd.value);
         }
     });

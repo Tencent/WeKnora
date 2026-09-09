@@ -826,7 +826,9 @@ export default {
     reset: '重置',
     download: '下载图片',
     close: '关闭',
-    downloading: '下载中...'
+    downloading: '下载中...',
+    renderError: '图表渲染失败',
+    showSource: '查看图表源码'
   },
   faqManager: {
     import: {
