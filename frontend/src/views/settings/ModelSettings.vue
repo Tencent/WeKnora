@@ -123,6 +123,26 @@
                 </span>
               </template>
             </p>
+            <div v-if="modelUsage(model)?.call_count" class="model-card__usage" @click.stop>
+              <span class="model-card__usage-item" :title="usageLabels.calls">
+                {{ usageLabels.calls }} {{ formatInteger(modelUsage(model)!.call_count) }}
+              </span>
+              <span class="model-card__usage-item" :title="usageLabels.tokens">
+                {{ usageLabels.tokens }} {{ formatCompact(modelUsage(model)!.total_tokens) }}
+              </span>
+              <span v-if="modelUsage(model)!.cache_reported_calls > 0" class="model-card__usage-item"
+                :title="usageLabels.cacheHitRate">
+                {{ usageLabels.cache }} {{ formatPercent(modelUsage(model)!.cache_hit_rate) }}
+              </span>
+              <span v-if="modelUsage(model)!.priced_calls > 0" class="model-card__usage-item model-card__usage-item--cost"
+                :title="usageLabels.estimatedCost">
+                {{ formatCosts(modelUsage(model)!.cost_by_currency) }}
+              </span>
+              <span v-else-if="modelUsage(model)!.unpriced_calls > 0" class="model-card__usage-item model-card__usage-item--muted"
+                :title="usageLabels.unpriced">
+                {{ usageLabels.costUnknown }}
+              </span>
+            </div>
           </div>
         </div>
         <button
@@ -289,6 +309,7 @@ import {
   type ModelUsageDetails,
   type ModelUsageResourceKind,
 } from '@/api/model'
+import { getEvaluationModelUsage, type EvaluationUsage } from '@/api/evaluation'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
 import { focusKbEditorSection } from '@/config/contextualGuides'
@@ -299,7 +320,7 @@ import {
   effectiveContextWindow,
 } from '@/utils/contextWindow'
 
-const { t, te } = useI18n()
+const { t, te, locale } = useI18n()
 const authStore = useAuthStore()
 const uiStore = useUIStore()
 const chatResources = useChatResourcesStore()
@@ -338,6 +359,43 @@ watch(
 
 // 模型列表数据
 const allModels = ref<ModelConfig[]>([])
+const modelUsageByID = ref<Record<string, EvaluationUsage>>({})
+
+const usageLabels = computed(() => {
+  const lang = String(locale.value).toLowerCase()
+  if (lang.startsWith('zh')) return {
+    calls: '调用', tokens: 'Token', cache: '缓存', cacheHitRate: '缓存命中率',
+    estimatedCost: '评测估算成本', unpriced: '该模型尚未配置 Token 单价', costUnknown: '成本未配置',
+  }
+  if (lang.startsWith('ko')) return {
+    calls: '호출', tokens: 'Token', cache: '캐시', cacheHitRate: '캐시 적중률',
+    estimatedCost: '평가 예상 비용', unpriced: 'Token 가격이 설정되지 않음', costUnknown: '비용 미설정',
+  }
+  if (lang.startsWith('ru')) return {
+    calls: 'Вызовы', tokens: 'Token', cache: 'Кэш', cacheHitRate: 'Доля попаданий в кэш',
+    estimatedCost: 'Расчётная стоимость оценки', unpriced: 'Цена токенов не настроена', costUnknown: 'Нет цены',
+  }
+  return {
+    calls: 'Calls', tokens: 'Tokens', cache: 'Cache', cacheHitRate: 'Cache hit rate',
+    estimatedCost: 'Estimated evaluation cost', unpriced: 'Token pricing is not configured', costUnknown: 'Cost unavailable',
+  }
+})
+
+const modelUsage = (model: any) => modelUsageByID.value[model.id]
+const formatInteger = (value: number) => new Intl.NumberFormat(locale.value).format(value || 0)
+const formatCompact = (value: number) => new Intl.NumberFormat(locale.value, {
+  notation: 'compact', maximumFractionDigits: 1,
+}).format(value || 0)
+const formatPercent = (value: number) => new Intl.NumberFormat(locale.value, {
+  style: 'percent', maximumFractionDigits: 1,
+}).format(value || 0)
+const formatCosts = (costs: Record<string, number>) => Object.entries(costs || {})
+  .sort(([left], [right]) => left.localeCompare(right))
+  .map(([currency, amount]) => `${currency} ${amount.toLocaleString(locale.value, {
+    minimumFractionDigits: amount > 0 && amount < 0.01 ? 6 : 2,
+    maximumFractionDigits: amount > 0 && amount < 0.01 ? 6 : 2,
+  })}`)
+  .join(' · ')
 
 // 后端 type → 前端分组 type 的映射
 const backendTypeToModelType: Record<string, ModelType> = {
@@ -375,6 +433,12 @@ function convertToLegacyFormat(model: ModelConfig) {
     lkeapRegion: model.parameters.extra_config?.region || 'ap-guangzhou',
     // 原始存库值，编辑弹窗内再 resolve（避免打开时被推断值覆盖）
     thinkingControl: model.parameters.extra_config?.thinking_control,
+    pricingEnabled: model.parameters.extra_config?.pricing_enabled === 'true',
+    pricingCurrency: model.parameters.extra_config?.pricing_currency || 'USD',
+    inputPricePerMillion: Number(model.parameters.extra_config?.input_price_per_million || 0),
+    outputPricePerMillion: Number(model.parameters.extra_config?.output_price_per_million || 0),
+    cacheReadPricePerMillion: Number(model.parameters.extra_config?.cache_read_price_per_million || 0),
+    cacheWritePricePerMillion: Number(model.parameters.extra_config?.cache_write_price_per_million || 0),
     _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
     // Preserve the credential metadata map so the editor dialog can render
     // the "Configured" state without an extra round-trip.
@@ -480,11 +544,18 @@ const emptyHint = computed(() => {
 const loadModels = async () => {
   loading.value = true
   try {
-    const models = await listModels()
+    const [models, usageStats] = await Promise.all([
+      listModels(),
+      getEvaluationModelUsage().catch((error) => {
+        console.warn('加载评测模型用量失败:', error)
+        return []
+      }),
+    ])
     allModels.value = models
     // 设置页自己 listModels 之后立刻写回空间级缓存。否则对话输入栏 /
     // 智能体编辑器会继续拿 60s TTL 里的旧 context_window，刷新页面才对。
     chatResources.replaceModels(models)
+    modelUsageByID.value = Object.fromEntries(usageStats.map(stat => [stat.model_id, stat.usage]))
   } catch (error: any) {
     console.error('加载模型列表失败:', error)
     MessagePlugin.error(error.message)
@@ -612,6 +683,14 @@ const handleModelSave = async (modelData: any) => {
       && modelData.thinkingControl
     ) {
       extraConfig.thinking_control = modelData.thinkingControl
+    }
+    if (saveType === 'chat' && modelData.pricingEnabled) {
+      extraConfig.pricing_enabled = 'true'
+      extraConfig.pricing_currency = String(modelData.pricingCurrency || 'USD').trim().toUpperCase()
+      extraConfig.input_price_per_million = String(Math.max(0, Number(modelData.inputPricePerMillion) || 0))
+      extraConfig.output_price_per_million = String(Math.max(0, Number(modelData.outputPricePerMillion) || 0))
+      extraConfig.cache_read_price_per_million = String(Math.max(0, Number(modelData.cacheReadPricePerMillion) || 0))
+      extraConfig.cache_write_price_per_million = String(Math.max(0, Number(modelData.cacheWritePricePerMillion) || 0))
     }
     const extraConfigFields = Object.keys(extraConfig).length > 0
       ? { extra_config: extraConfig }
@@ -1154,6 +1233,35 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.model-card__usage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 6px;
+}
+
+.model-card__usage-item {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+
+  &--cost {
+    color: var(--td-success-color);
+    background: color-mix(in srgb, var(--td-success-color) 9%, transparent);
+  }
+
+  &--muted {
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 .model-card__sep {

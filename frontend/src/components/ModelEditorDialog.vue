@@ -396,6 +396,39 @@
             :placeholder="$t('model.editor.maxConcurrencyPlaceholder')" />
           <p class="form-desc">{{ $t('model.editor.maxConcurrencyDesc') }}</p>
         </div>
+
+        <div v-if="activeModelType === 'chat'" class="form-item pricing-config">
+          <label class="form-label">{{ pricingLabels.title }}</label>
+          <div class="vision-toggle">
+            <t-switch v-model="formData.pricingEnabled" />
+            <span class="form-desc form-desc--inline">{{ pricingLabels.description }}</span>
+          </div>
+          <template v-if="formData.pricingEnabled">
+            <div class="pricing-config__currency">
+              <label class="form-label">{{ pricingLabels.currency }}</label>
+              <t-input v-model="formData.pricingCurrency" maxlength="16" placeholder="USD / CNY" />
+            </div>
+            <div class="pricing-config__grid">
+              <label>
+                <span>{{ pricingLabels.input }}</span>
+                <t-input v-model.number="formData.inputPricePerMillion" type="number" :min="0" />
+              </label>
+              <label>
+                <span>{{ pricingLabels.output }}</span>
+                <t-input v-model.number="formData.outputPricePerMillion" type="number" :min="0" />
+              </label>
+              <label>
+                <span>{{ pricingLabels.cacheRead }}</span>
+                <t-input v-model.number="formData.cacheReadPricePerMillion" type="number" :min="0" />
+              </label>
+              <label>
+                <span>{{ pricingLabels.cacheWrite }}</span>
+                <t-input v-model.number="formData.cacheWritePricePerMillion" type="number" :min="0" />
+              </label>
+            </div>
+            <p class="form-desc">{{ pricingLabels.unit }}</p>
+          </template>
+        </div>
       </section>
 
     </t-form>
@@ -450,6 +483,12 @@ interface ModelFormData {
   contextWindow?: number
   /** 后台任务对该模型的并发上限；0/undefined 表示沿用全局默认。仅 chat/embedding/vllm 生效。 */
   maxConcurrency?: number
+  pricingEnabled?: boolean
+  pricingCurrency?: string
+  inputPricePerMillion?: number
+  outputPricePerMillion?: number
+  cacheReadPricePerMillion?: number
+  cacheWritePricePerMillion?: number
   /** extra_config.thinking_control — how agent thinking on/off maps to API fields. */
   thinkingControl?: string
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
@@ -468,8 +507,28 @@ interface Props {
   modelData?: ModelFormData | null
 }
 
-const { t, te } = useI18n()
+const { t, te, locale } = useI18n()
 const uiStore = useUIStore()
+
+const pricingLabels = computed(() => {
+  const lang = String(locale.value).toLowerCase()
+  if (lang.startsWith('zh')) return {
+    title: 'Token 成本估算', description: '为评测调用计算成本并保存价格快照', currency: '币种',
+    input: '普通输入', output: '模型输出', cacheRead: '缓存读取', cacheWrite: '缓存写入', unit: '单价单位：每百万 Token',
+  }
+  if (lang.startsWith('ko')) return {
+    title: 'Token 비용 추정', description: '평가 호출 비용과 가격 스냅샷을 저장합니다', currency: '통화',
+    input: '일반 입력', output: '모델 출력', cacheRead: '캐시 읽기', cacheWrite: '캐시 쓰기', unit: '단가: 백만 Token당',
+  }
+  if (lang.startsWith('ru')) return {
+    title: 'Оценка стоимости токенов', description: 'Расчёт стоимости и сохранение снимка цен', currency: 'Валюта',
+    input: 'Обычный ввод', output: 'Вывод модели', cacheRead: 'Чтение кэша', cacheWrite: 'Запись кэша', unit: 'Цена за миллион токенов',
+  }
+  return {
+    title: 'Token cost estimation', description: 'Estimate evaluation cost and preserve a pricing snapshot', currency: 'Currency',
+    input: 'Regular input', output: 'Model output', cacheRead: 'Cache read', cacheWrite: 'Cache write', unit: 'Price per one million tokens',
+  }
+})
 
 const props = withDefaults(defineProps<Props>(), {
   visible: false,
@@ -898,6 +957,12 @@ const formData = ref<ModelFormData>({
   supportsVision: false,
   contextWindow: undefined,
   maxConcurrency: undefined,
+  pricingEnabled: false,
+  pricingCurrency: 'USD',
+  inputPricePerMillion: 0,
+  outputPricePerMillion: 0,
+  cacheReadPricePerMillion: 0,
+  cacheWritePricePerMillion: 0,
   thinkingControl: defaultThinkingControl('generic', ''),
   customHeaders: [],
   appSecret: '',
@@ -1140,6 +1205,12 @@ const resetForm = () => {
     supportsVision: false,
     contextWindow: undefined,
     maxConcurrency: undefined,
+    pricingEnabled: false,
+    pricingCurrency: 'USD',
+    inputPricePerMillion: 0,
+    outputPricePerMillion: 0,
+    cacheReadPricePerMillion: 0,
+    cacheWritePricePerMillion: 0,
     thinkingControl: defaultThinkingControl('generic', ''),
     customHeaders: [],
     appSecret: '',
@@ -2247,6 +2318,33 @@ const handleCancel = () => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.pricing-config {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  &__currency {
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+  }
+
+  &__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      color: var(--td-text-color-secondary);
+      font-size: 12px;
+    }
+  }
 }
 
 // Ollama不可用提示样式
