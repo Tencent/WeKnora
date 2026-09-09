@@ -34,6 +34,25 @@ func TestBuildSentenceIsDeterministicAndGenerationScoped(t *testing.T) {
 	}
 }
 
+func TestBuildSentenceNormalizesMissingSpeakerToCanonicalDefault(t *testing.T) {
+	input := Input{
+		VideoID: "video-1", TranscriptGeneration: "generation-1", Ordinal: 0,
+		SourceSentenceID: "source-1", Text: "真实原文", StartMs: 100, EndMs: 900,
+	}
+	missing, err := BuildSentence(input)
+	if err != nil {
+		t.Fatalf("BuildSentence returned error: %v", err)
+	}
+	input.SpeakerID = "0"
+	explicit, err := BuildSentence(input)
+	if err != nil {
+		t.Fatalf("BuildSentence returned error: %v", err)
+	}
+	if missing.SpeakerID != "0" || missing.ID != explicit.ID {
+		t.Fatalf("missing speaker was not canonicalized: missing=%+v explicit=%+v", missing, explicit)
+	}
+}
+
 func TestValidateManifestRequiresOneToOneCurrentGenerationMapping(t *testing.T) {
 	inputs := []Input{
 		{VideoID: "video-1", TranscriptGeneration: "generation-1", Ordinal: 0, SourceSentenceID: "s1", Text: "第一句", SpeakerID: "a", StartMs: 0, EndMs: 1000},

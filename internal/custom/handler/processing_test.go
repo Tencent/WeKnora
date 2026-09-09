@@ -35,6 +35,12 @@ func (g *processingSourceGateway) CreateManualKnowledge(_ context.Context, kbID 
 	}, nil
 }
 
+func (g *processingSourceGateway) UpdateManualKnowledge(_ context.Context, id string, input weknora.ManualKnowledgeInput) (weknora.ManualKnowledgeResult, error) {
+	return weknora.ManualKnowledgeResult{
+		ID: id, KnowledgeBaseID: "knowledge-kb", Title: input.Title, Content: input.Content, ParseStatus: "completed",
+	}, nil
+}
+
 func (g *processingSourceGateway) GetKnowledge(context.Context, string) (weknora.ManualKnowledgeResult, error) {
 	return weknora.ManualKnowledgeResult{
 		ID: "backfilled-source", KnowledgeBaseID: "knowledge-kb", ParseStatus: "completed",

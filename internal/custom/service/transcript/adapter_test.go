@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/custom/service/evidence"
 )
 
 func TestBuildFromJSONMapsMPSResultEnvelope(t *testing.T) {
@@ -245,6 +247,31 @@ func TestBuildFromJSONMapsSubtitleWorkerPayload(t *testing.T) {
 	}
 	if got := doc.Chapters[0].Paragraphs[0].Text; got != "worker result" {
 		t.Fatalf("worker payload text = %q", got)
+	}
+}
+
+func TestBuildFromJSONNormalizesMissingSpeakerBeforeEvidenceIdentity(t *testing.T) {
+	doc, err := BuildFromJSON(RawInput{
+		VideoID: "video-missing-speaker", TranscriptGeneration: "generation-missing-speaker",
+		Title: "无说话人转写", DurationSeconds: 2, Provider: "tingwu",
+		Payload: []byte(`{"paragraphs":[{"paragraph_id":"p-1","sentences":[{"sentence_id":"s-1","text":"真实原文","start_ms":100,"end_ms":900}]}],"language":"zh"}`),
+	})
+	if err != nil {
+		t.Fatalf("BuildFromJSON returned error: %v", err)
+	}
+	paragraph := doc.Chapters[0].Paragraphs[0]
+	if paragraph.SpeakerID != "0" {
+		t.Fatalf("paragraph speaker = %q, want canonical default 0", paragraph.SpeakerID)
+	}
+	wantID, err := evidence.BuildEvidenceSentenceID(evidence.Input{
+		VideoID: "video-missing-speaker", TranscriptGeneration: "generation-missing-speaker",
+		Ordinal: 0, SourceSentenceID: "s-1", Text: "真实原文", SpeakerID: "0", StartMs: 100, EndMs: 900,
+	})
+	if err != nil {
+		t.Fatalf("BuildEvidenceSentenceID returned error: %v", err)
+	}
+	if got := paragraph.TimeMarks[0].EvidenceSentenceID; got != wantID {
+		t.Fatalf("evidence ID = %q, want %q", got, wantID)
 	}
 }
 

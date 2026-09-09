@@ -389,6 +389,55 @@ func (c *Client) CreateManualKnowledge(ctx context.Context, kbID string, input M
 	return out.Data, nil
 }
 
+// UpdateManualKnowledge updates an existing manual Markdown knowledge through
+// the public API so metadata, chunks, embeddings, and audit behavior remain
+// owned by WeKnora.
+func (c *Client) UpdateManualKnowledge(ctx context.Context, knowledgeID string, input ManualKnowledgeInput) (ManualKnowledgeResult, error) {
+	if strings.TrimSpace(knowledgeID) == "" {
+		return ManualKnowledgeResult{}, fmt.Errorf("weknora knowledge_id 未配置")
+	}
+	if strings.TrimSpace(input.Title) == "" || strings.TrimSpace(input.Content) == "" {
+		return ManualKnowledgeResult{}, fmt.Errorf("manual knowledge title/content 不能为空")
+	}
+	if input.Status == "" {
+		input.Status = "publish"
+	}
+	if input.Channel == "" {
+		input.Channel = "api"
+	}
+	body, err := json.Marshal(input)
+	if err != nil {
+		return ManualKnowledgeResult{}, err
+	}
+	u := fmt.Sprintf("%s/api/v1/knowledge/manual/%s", strings.TrimRight(c.baseURL, "/"), url.PathEscape(knowledgeID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body))
+	if err != nil {
+		return ManualKnowledgeResult{}, err
+	}
+	c.setHeaders(req)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return ManualKnowledgeResult{}, fmt.Errorf("weknora manual update: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		buf, _ := io.ReadAll(resp.Body)
+		return ManualKnowledgeResult{}, fmt.Errorf("weknora manual update status %d: %s", resp.StatusCode, string(buf))
+	}
+	var out struct {
+		Success bool                  `json:"success"`
+		Data    knowledgeResponseData `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return ManualKnowledgeResult{}, fmt.Errorf("decode weknora manual update response: %w", err)
+	}
+	result := out.Data.result()
+	if !out.Success || result.ID == "" || result.ID != knowledgeID {
+		return ManualKnowledgeResult{}, fmt.Errorf("weknora manual update returned unexpected knowledge id")
+	}
+	return result, nil
+}
+
 // FindManualKnowledgeByTitle 用稳定标题对已成功但未写入本地检查点的请求做重试对账。
 func (c *Client) FindManualKnowledgeByTitle(ctx context.Context, kbID, title string) (*ManualKnowledgeResult, error) {
 	if kbID == "" {

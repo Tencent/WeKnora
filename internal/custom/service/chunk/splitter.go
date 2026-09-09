@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/evidence"
 	"github.com/Tencent/WeKnora/internal/custom/service/subtitle"
 	"github.com/Tencent/WeKnora/internal/custom/service/videotype"
 )
@@ -43,10 +44,7 @@ func (s *Splitter) Split(in SplitInputs) []SplitResult {
 	out := make([]SplitResult, 0, len(in.Paragraphs)*2)
 	chunkIdx := 0
 	for pIdx, p := range in.Paragraphs {
-		speaker := p.SpeakerID
-		if speaker == "" {
-			speaker = "0"
-		}
+		speaker := evidence.NormalizeSpeakerID(p.SpeakerID)
 		for _, s := range p.Sentences {
 			text := strings.TrimSpace(s.Text)
 			if text == "" {

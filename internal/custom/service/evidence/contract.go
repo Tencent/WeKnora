@@ -14,6 +14,17 @@ import (
 
 const contractVersion = "v1"
 
+// NormalizeSpeakerID keeps evidence identity stable when a provider omits
+// speaker diarization. Every producer must apply the same default before
+// deriving or comparing an evidence sentence ID.
+func NormalizeSpeakerID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "0"
+	}
+	return value
+}
+
 // Input is the minimum source mapping needed to freeze one evidence sentence.
 type Input struct {
 	VideoID              string
@@ -48,7 +59,7 @@ func BuildSentence(input Input) (Sentence, error) {
 	input.TranscriptGeneration = strings.TrimSpace(input.TranscriptGeneration)
 	input.SourceSentenceID = strings.TrimSpace(input.SourceSentenceID)
 	input.Text = strings.TrimSpace(input.Text)
-	input.SpeakerID = strings.TrimSpace(input.SpeakerID)
+	input.SpeakerID = NormalizeSpeakerID(input.SpeakerID)
 	if input.VideoID == "" {
 		return Sentence{}, fmt.Errorf("video id is required")
 	}

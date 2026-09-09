@@ -85,6 +85,51 @@ func TestCreateManualKnowledgeRejectsEmptyResponseID(t *testing.T) {
 	}
 }
 
+func TestUpdateManualKnowledgeUsesPublicEndpointAndAPIKey(t *testing.T) {
+	var got ManualKnowledgeInput
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPut, r.Method)
+		require.Equal(t, "/api/v1/knowledge/manual/knowledge-1", r.URL.Path)
+		require.Equal(t, "secret", r.Header.Get("X-API-Key"))
+		require.Equal(t, "tenant-1", r.Header.Get("X-Tenant-ID"))
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"id":"knowledge-1","knowledge_base_id":"kb-1"}}`))
+	}))
+	defer server.Close()
+
+	wikiEnabled := false
+	client := New(config.WeKnoraConfig{BaseURL: server.URL, APIKey: "secret", TenantID: "tenant-1"})
+	result, err := client.UpdateManualKnowledge(context.Background(), "knowledge-1", ManualKnowledgeInput{
+		Title: "source", Content: "content",
+		ProcessConfig: &types.KnowledgeProcessOverrides{WikiEnabled: &wikiEnabled},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "knowledge-1", result.ID)
+	require.Equal(t, "source", got.Title)
+	require.Equal(t, "content", got.Content)
+	require.Equal(t, "publish", got.Status)
+	require.Equal(t, "api", got.Channel)
+	require.NotNil(t, got.ProcessConfig)
+	require.NotNil(t, got.ProcessConfig.WikiEnabled)
+	require.False(t, *got.ProcessConfig.WikiEnabled)
+}
+
+func TestUpdateManualKnowledgeRejectsEmptyOrUnexpectedKnowledgeID(t *testing.T) {
+	client := New(config.WeKnoraConfig{BaseURL: "http://weknora.test"})
+	_, err := client.UpdateManualKnowledge(context.Background(), "", ManualKnowledgeInput{Title: "title", Content: "content"})
+	require.ErrorContains(t, err, "knowledge_id")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"data":{"id":"another-knowledge"}}`))
+	}))
+	defer server.Close()
+	client = New(config.WeKnoraConfig{BaseURL: server.URL})
+	_, err = client.UpdateManualKnowledge(context.Background(), "knowledge-1", ManualKnowledgeInput{Title: "title", Content: "content"})
+	require.ErrorContains(t, err, "unexpected knowledge id")
+}
+
 func TestGetKnowledgeUsesMetadataContentWhenTopLevelContentIsEmpty(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/knowledge/knowledge-1" {

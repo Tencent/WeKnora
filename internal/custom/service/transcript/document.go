@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/Tencent/WeKnora/internal/custom/service/evidence"
 )
 
 const MaxSourceDocumentBytes = 8 << 20
@@ -90,14 +92,6 @@ type EvidenceManifestItem struct {
 	EndMs              int
 }
 
-func normalizedEvidenceSpeakerID(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "0"
-	}
-	return value
-}
-
 // ValidateSourceEvidenceManifest prevents a source document from being used
 // when its sentence identities diverge from the active evidence chunks.
 func ValidateSourceEvidenceManifest(doc FullVideoDocument, manifest []EvidenceManifestItem) error {
@@ -128,7 +122,7 @@ func ValidateSourceEvidenceManifest(doc FullVideoDocument, manifest []EvidenceMa
 			return sourceValidation(SourceValidationEvidence, fmt.Sprintf("sentence %d evidence ID differs", ordinal))
 		case strings.TrimSpace(mark.SourceSentenceID) != strings.TrimSpace(item.SourceSentenceID):
 			return sourceValidation(SourceValidationEvidence, fmt.Sprintf("sentence %d source sentence ID differs", ordinal))
-		case normalizedEvidenceSpeakerID(mark.SpeakerID) != normalizedEvidenceSpeakerID(item.SpeakerID):
+		case evidence.NormalizeSpeakerID(mark.SpeakerID) != evidence.NormalizeSpeakerID(item.SpeakerID):
 			return sourceValidation(SourceValidationEvidence, fmt.Sprintf("sentence %d speaker ID differs", ordinal))
 		case mark.StartMs != item.StartMs:
 			return sourceValidation(SourceValidationEvidence, fmt.Sprintf("sentence %d start time differs", ordinal))
@@ -137,6 +131,49 @@ func ValidateSourceEvidenceManifest(doc FullVideoDocument, manifest []EvidenceMa
 		}
 	}
 	return nil
+}
+
+// normalizeEvidenceIdentity upgrades the one legacy representation where an
+// omitted speaker was hashed as empty while evidence chunks used the canonical
+// default "0". It changes no source text, timing, ordering, or source IDs.
+func normalizeEvidenceIdentity(doc FullVideoDocument) (FullVideoDocument, bool, error) {
+	changed := false
+	ordinal := 0
+	for chapterIndex := range doc.Chapters {
+		chapter := &doc.Chapters[chapterIndex]
+		for paragraphIndex := range chapter.Paragraphs {
+			paragraph := &chapter.Paragraphs[paragraphIndex]
+			speakerID := evidence.NormalizeSpeakerID(paragraph.SpeakerID)
+			if paragraph.SpeakerID != speakerID {
+				paragraph.SpeakerID = speakerID
+				changed = true
+			}
+			if len(paragraph.EvidenceSentenceIDs) != len(paragraph.TimeMarks) {
+				return FullVideoDocument{}, false, fmt.Errorf("paragraph evidence identity count differs from time marks")
+			}
+			for markIndex := range paragraph.TimeMarks {
+				mark := &paragraph.TimeMarks[markIndex]
+				sentence, err := evidence.BuildSentence(evidence.Input{
+					VideoID: doc.VideoID, TranscriptGeneration: doc.TranscriptGeneration,
+					Ordinal: ordinal, SourceSentenceID: mark.SourceSentenceID, Text: mark.Text,
+					SpeakerID: speakerID, StartMs: mark.StartMs, EndMs: mark.EndMs,
+				})
+				if err != nil {
+					return FullVideoDocument{}, false, fmt.Errorf("normalize evidence sentence %d: %w", ordinal, err)
+				}
+				if mark.EvidenceSentenceID != sentence.ID || paragraph.EvidenceSentenceIDs[markIndex] != sentence.ID {
+					mark.EvidenceSentenceID = sentence.ID
+					paragraph.EvidenceSentenceIDs[markIndex] = sentence.ID
+					changed = true
+				}
+				ordinal++
+			}
+		}
+	}
+	if err := Validate(doc); err != nil {
+		return FullVideoDocument{}, false, err
+	}
+	return doc, changed, nil
 }
 
 // FullVideoDocument is the stable, Wiki-only representation of one complete
