@@ -586,7 +586,7 @@ const onClickScrollToBottom = () => {
 // Images and other rich Markdown content can grow after the SSE chunk that
 // introduced them. Follow those delayed height changes while the user remains
 // at the live edge; preserve position when they intentionally scroll upward.
-useStickyBottomOnResize(scrollContainer, userHasScrolledUp, scrollToBottom);
+useStickyBottomOnResize(scrollContainer, userHasScrolledUp);
 
 const debounce = (fn, delay) => {
     let timer
