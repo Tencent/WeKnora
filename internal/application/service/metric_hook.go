@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -51,7 +53,7 @@ var metricCalculators = []struct {
 }
 
 // Append calculates and stores metrics for given input
-func (m *MetricList) Append(metricInput *types.MetricInput) {
+func (m *MetricList) Append(metricInput *types.MetricInput) *types.MetricResult {
 	result := &types.MetricResult{}
 	// Calculate all configured metrics
 	for _, c := range metricCalculators {
@@ -60,6 +62,7 @@ func (m *MetricList) Append(metricInput *types.MetricInput) {
 	}
 	logger.Infof(context.Background(), "metric: %v", result)
 	m.results = append(m.results, result)
+	return result
 }
 
 // Avg calculates average of all stored metric results
@@ -95,6 +98,8 @@ type qaPairMetric struct {
 	searchResult []*types.SearchResult
 	rerankResult []*types.SearchResult
 	chatResponse *types.ChatResponse
+	metric       *types.MetricResult
+	evidence     *types.EvaluationSampleEvidence
 }
 
 // NewHookMetric creates a new HookMetric with given capacity
@@ -146,17 +151,17 @@ func (h *HookMetric) recordFinish(index int) {
 	// which passage it came from.
 	qaPair := h.qaPairMetricList[index].qaPair
 	retrievalIDs := make([]int, 0, len(retrievalSource))
+	retrievedEvidence := make([]types.EvaluationRetrievedEvidence, 0, len(retrievalSource))
 	seen := make(map[int]struct{})
-	for _, r := range retrievalSource {
-		if r.Content == "" {
-			continue
-		}
+	for rank, r := range retrievalSource {
+		var matchedPID *int
 		for i, passage := range qaPair.Passages {
-			if passage == "" {
+			if passage == "" || r.Content == "" {
 				continue
 			}
 			if strings.Contains(passage, r.Content) || strings.Contains(r.Content, passage) {
 				pid := qaPair.PIDs[i]
+				matchedPID = &pid
 				if _, ok := seen[pid]; !ok {
 					seen[pid] = struct{}{}
 					retrievalIDs = append(retrievalIDs, pid)
@@ -164,6 +169,11 @@ func (h *HookMetric) recordFinish(index int) {
 				break
 			}
 		}
+		retrievedEvidence = append(retrievedEvidence, types.EvaluationRetrievedEvidence{
+			Rank: rank + 1, DatasetPassageID: matchedPID, ChunkID: r.ID,
+			KnowledgeID: r.KnowledgeID, ChunkIndex: r.ChunkIndex, Score: r.Score,
+			MatchType: r.MatchType, ContentSHA256: sha256Text(r.Content),
+		})
 	}
 
 	// Get generated text if available
@@ -183,12 +193,31 @@ func (h *HookMetric) recordFinish(index int) {
 	// Thread-safe append of metrics
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.metricResults.Append(metricInput)
+	itemMetric := h.metricResults.Append(metricInput)
+	h.qaPairMetricList[index].metric = itemMetric
+	h.qaPairMetricList[index].evidence = &types.EvaluationSampleEvidence{
+		Index: index, QuestionID: qaPair.QID, AnswerID: qaPair.AID,
+		QuestionSHA256: sha256Text(qaPair.Question), ReferenceAnswerSHA256: sha256Text(qaPair.Answer),
+		ResponseSHA256: sha256Text(generatedTexts), ResponseBytes: len([]byte(generatedTexts)),
+		Retrieved: retrievedEvidence, RetrievalMetrics: itemMetric.RetrievalMetrics,
+		GenerationMetrics: itemMetric.GenerationMetrics,
+	}
 }
 
 // MetricResult returns the averaged metric results
 func (h *HookMetric) MetricResult() *types.MetricResult {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.metricResults.Avg()
+	result := h.metricResults.Avg()
+	result.Samples = make([]types.EvaluationSampleEvidence, 0, len(h.qaPairMetricList))
+	for _, item := range h.qaPairMetricList {
+		if item != nil && item.evidence != nil {
+			result.Samples = append(result.Samples, *item.evidence)
+		}
+	}
+	return result
+}
+
+func sha256Text(value string) string {
+	return fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(value)))
 }

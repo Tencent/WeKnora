@@ -15,10 +15,14 @@ type EvaluationService interface {
 	) (*types.EvaluationDetail, error)
 	// EvaluationResult retrieves evaluation result by task ID
 	EvaluationResult(ctx context.Context, taskID string) (*types.EvaluationDetail, error)
+	// EvaluationEvidence returns a deterministic, secret-free proof bundle.
+	EvaluationEvidence(ctx context.Context, taskID string) (*types.EvaluationEvidenceReport, error)
 	// ModelUsage returns tenant-scoped model-call aggregates from evaluation runs.
 	ModelUsage(ctx context.Context, startTime, endTime *time.Time) ([]types.ModelUsageStat, error)
 	// EvaluationDatasets lists datasets available to the evaluation UI.
 	EvaluationDatasets(ctx context.Context) ([]types.EvaluationDataset, error)
+	// EvaluationRuns lists tenant-scoped evaluation history.
+	EvaluationRuns(ctx context.Context, limit, offset int) (*types.EvaluationRunPage, error)
 }
 
 // Metrics defines interface for computing evaluation metrics

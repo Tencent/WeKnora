@@ -118,6 +118,7 @@ jobs:
       - name: Verify cache comparison example
         run: >-
           go run ./cmd/cachebench
+          -strict
           -before evaluation/fixtures/cache_before.json
           -after evaluation/fixtures/cache_after.json
           -report cache-comparison.json

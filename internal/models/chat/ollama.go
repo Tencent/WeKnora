@@ -137,7 +137,7 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 
 	var responseContent string
 	var toolCalls []types.LLMToolCall
-	var promptTokens, completionTokens int
+	var usage types.TokenUsage
 
 	// 使用 Ollama 客户端发送请求
 	err := c.ollamaService.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
@@ -148,10 +148,10 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 		}
 		toolCalls = c.toolCallTo(resp.Message.ToolCalls)
 
-		// 获取token计数
-		if resp.EvalCount > 0 {
-			promptTokens = resp.PromptEvalCount
-			completionTokens = resp.EvalCount - promptTokens
+		// Ollama reports prompt_eval_count and eval_count independently.
+		// eval_count is the generated-token count, not the combined total.
+		if resp.PromptEvalCount > 0 || resp.EvalCount > 0 {
+			usage = tokenUsageFromOllamaCounts(resp.PromptEvalCount, resp.EvalCount)
 		}
 
 		return nil
@@ -160,11 +160,6 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 		return nil, fmt.Errorf("聊天请求失败: %w", err)
 	}
 
-	usage := types.TokenUsage{
-		PromptTokens:     promptTokens,
-		CompletionTokens: completionTokens,
-		TotalTokens:      promptTokens + completionTokens,
-	}
 	usage.MarkPromptCacheUnsupported()
 	logUsage(ctx, c.modelName, &usage)
 
@@ -256,11 +251,8 @@ func (c *OllamaChat) ChatStream(
 			if resp.Done {
 				var usage *types.TokenUsage
 				if resp.PromptEvalCount > 0 || resp.EvalCount > 0 {
-					usage = &types.TokenUsage{
-						PromptTokens:     resp.PromptEvalCount,
-						CompletionTokens: resp.EvalCount,
-						TotalTokens:      resp.PromptEvalCount + resp.EvalCount,
-					}
+					normalized := tokenUsageFromOllamaCounts(resp.PromptEvalCount, resp.EvalCount)
+					usage = &normalized
 					usage.MarkPromptCacheUnsupported()
 				}
 				logUsage(ctx, c.modelName, usage)
@@ -285,6 +277,17 @@ func (c *OllamaChat) ChatStream(
 	}()
 
 	return streamChan, nil
+}
+
+// tokenUsageFromOllamaCounts keeps streaming and non-streaming usage aligned.
+// Ollama's eval_count is completion-only; treating it as a total produces
+// negative completion counts whenever the prompt is longer than the answer.
+func tokenUsageFromOllamaCounts(promptTokens, completionTokens int) types.TokenUsage {
+	return types.TokenUsage{
+		PromptTokens:     max(promptTokens, 0),
+		CompletionTokens: max(completionTokens, 0),
+		TotalTokens:      max(promptTokens, 0) + max(completionTokens, 0),
+	}
 }
 
 // 确保模型可用

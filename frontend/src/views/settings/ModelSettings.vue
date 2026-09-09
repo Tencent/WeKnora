@@ -222,20 +222,20 @@
 
     <t-dialog
       v-model:visible="showUsageDialog"
-      :header="$t('modelSettings.usage.title')"
+      :header="$t('modelSettings.dependencyUsage.title')"
       :footer="false"
       width="680px"
       destroy-on-close
     >
       <div v-if="usageConflict" class="model-usage-dialog">
         <p class="model-usage-dialog__description">
-          {{ $t('modelSettings.usage.description', { name: usageConflictModelName }) }}
+          {{ $t('modelSettings.dependencyUsage.description', { name: usageConflictModelName }) }}
         </p>
 
         <div class="model-usage-dialog__content">
           <section v-if="usageConflict.knowledge_bases.length" class="model-usage-group">
             <h3>
-              {{ $t('modelSettings.usage.knowledgeBases', {
+              {{ $t('modelSettings.dependencyUsage.knowledgeBases', {
                 count: modelUsageResourceCount(usageConflict.knowledge_bases, usageConflict.knowledge_base_total)
               }) }}
             </h3>
@@ -260,7 +260,7 @@
                   size="small"
                   @click="openUsageResource('knowledge_base', resource.id, resource.bindings)"
                 >
-                  {{ $t('modelSettings.usage.openConfiguration') }}
+                  {{ $t('modelSettings.dependencyUsage.openConfiguration') }}
                 </t-button>
               </li>
             </ul>
@@ -268,7 +268,7 @@
               v-if="modelUsageListTruncated(usageConflict.knowledge_bases, usageConflict.knowledge_base_total)"
               class="model-usage-truncated"
             >
-              {{ $t('modelSettings.usage.truncated', {
+              {{ $t('modelSettings.dependencyUsage.truncated', {
                 shown: usageConflict.knowledge_bases.length,
                 total: modelUsageResourceCount(usageConflict.knowledge_bases, usageConflict.knowledge_base_total)
               }) }}
@@ -276,7 +276,7 @@
           </section>
 
           <section v-if="usageConflict.agents.length" class="model-usage-group">
-            <h3>{{ $t('modelSettings.usage.agents', {
+            <h3>{{ $t('modelSettings.dependencyUsage.agents', {
               count: modelUsageResourceCount(usageConflict.agents, usageConflict.agent_total)
             }) }}</h3>
             <ul>
@@ -300,7 +300,7 @@
                   size="small"
                   @click="openUsageResource('agent', resource.id, resource.bindings)"
                 >
-                  {{ $t('modelSettings.usage.openConfiguration') }}
+                  {{ $t('modelSettings.dependencyUsage.openConfiguration') }}
                 </t-button>
               </li>
             </ul>
@@ -308,7 +308,7 @@
               v-if="modelUsageListTruncated(usageConflict.agents, usageConflict.agent_total)"
               class="model-usage-truncated"
             >
-              {{ $t('modelSettings.usage.truncated', {
+              {{ $t('modelSettings.dependencyUsage.truncated', {
                 shown: usageConflict.agents.length,
                 total: modelUsageResourceCount(usageConflict.agents, usageConflict.agent_total)
               }) }}
@@ -316,7 +316,7 @@
           </section>
 
           <section v-if="usageConflict.long_term_memory.bindings.length" class="model-usage-group">
-            <h3>{{ $t('modelSettings.usage.longTermMemory') }}</h3>
+            <h3>{{ $t('modelSettings.dependencyUsage.longTermMemory') }}</h3>
             <div class="model-usage-memory">
               <div class="model-usage-bindings">
                 <t-tag

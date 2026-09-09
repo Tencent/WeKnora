@@ -7,6 +7,8 @@
 | GET  | `/evaluation/`            | 获取评估任务结果                  |
 | POST | `/evaluation/`            | 创建评估任务                      |
 | GET  | `/evaluation/datasets`    | 获取可选择的数据集及就绪状态       |
+| GET  | `/evaluation/runs`        | 分页获取当前租户的评测历史          |
+| GET  | `/evaluation/evidence`    | 导出可校验的单次评测证据报告         |
 | GET  | `/evaluation/model-usage` | 按模型和时间范围获取租户模型用量   |
 
 > 注：服务端路由带尾斜杠（Gin 会自动从 `/evaluation` 重定向到 `/evaluation/`），下方示例为方便阅读用了 `/evaluation`。
@@ -124,6 +126,65 @@ curl --location 'http://localhost:8080/api/v1/evaluation/datasets' \
 `default` 为兼容原目录结构，映射到 `<根目录>/samples/`。完整 manifest 和五个 Parquet
 Schema 见 [`dataset/README_zh.md`](../../dataset/README_zh.md)。
 
+## GET `/evaluation/runs` - 获取评测历史
+
+按开始时间倒序返回当前租户的评测运行。列表只包含任务状态、无密钥运行快照、指标和
+聚合用量，不批量返回 Prompt 配置或逐次模型调用记录；需要查看完整单次详情时，使用
+`GET /evaluation?task_id=...`。
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `limit` | int | 否 | 每页数量，1–100，默认 20 |
+| `offset` | int | 否 | 偏移量，0–1000000，默认 0 |
+
+```bash
+curl --location 'http://localhost:8080/api/v1/evaluation/runs?limit=20&offset=0' \
+  --header 'X-API-Key: sk-xxxxx'
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "task": {
+          "id": "evaluation-1-default-uuid",
+          "tenant_id": 1,
+          "dataset_id": "default",
+          "status": 2,
+          "duration_ms": 12000
+        },
+        "metric": {"retrieval_metrics": {"recall": 0.92}},
+        "usage": {"call_count": 12, "total_tokens": 9600}
+      }
+    ],
+    "total": 1,
+    "limit": 20,
+    "offset": 0
+  }
+}
+```
+
+## GET `/evaluation/evidence` - 导出评测证据
+
+该接口按当前租户读取指定任务，返回确定性 JSON 证据包。证据包含代码版本、数据集与
+配置指纹、聚合及逐样本指标、检索排名和模型调用元数据；不包含 `params`、Prompt、
+问题、参考答案、生成回答或检索正文。旧运行仍可导出，但会通过 `warnings` 明确标记
+当时尚未采集的证据字段。
+
+```bash
+curl --location \
+  'http://localhost:8080/api/v1/evaluation/evidence?task_id=evaluation-1-default-uuid' \
+  --header 'X-API-Key: sk-xxxxx' \
+  --output evaluation-evidence.json
+
+go run ./cmd/evidenceverify -report evaluation-evidence.json
+```
+
+校验时将 `report_sha256` 置空，对 Go 结构的紧凑 JSON 编码计算 SHA-256。仓库内的
+`evidenceverify` 已实现该规则。该校验用于发现导出后的内容改动，不等同于来源数字签名。
+
 ## GET `/evaluation/model-usage` - 获取模型用量
 
 该接口聚合当前租户在评测、普通问答、Wiki 和后台任务中的模型调用。数据来自
@@ -191,9 +252,9 @@ curl --location \
 | 字段              | 类型   | 必填 | 说明                                            |
 | ----------------- | ------ | ---- | ----------------------------------------------- |
 | dataset_id        | string | 否   | `GET /evaluation/datasets` 返回的数据集 ID；默认 `default` |
-| knowledge_base_id | string | 是   | 评估使用的知识库 ID                              |
-| chat_id           | string | 是   | 评估使用的对话模型 ID                            |
-| rerank_id         | string | 是   | 评估使用的重排序模型 ID                          |
+| knowledge_base_id | string | 否   | 参考知识库 ID；缺省时使用系统默认分块和 Embedding 配置 |
+| chat_id           | string | 否   | 对话模型 ID；缺省时自动选择默认 Chat 模型              |
+| rerank_id         | string | 否   | 重排序模型 ID；缺省时自动选择默认 Rerank 模型          |
 
 **请求**:
 

@@ -33,6 +33,7 @@ Embedding 输入 ──► 进程内缓存 ──► 租户级持久缓存 ─�
 - 使用租户隔离的数据库缓存复用相同模型、相同文本的 Embedding 向量。
 - 对 Precision、Recall、NDCG@10、MRR、ROUGE-L、耗时和费用执行绝对值与相对退化双门禁。
 - 提供可执行的退化用例，证明 Recall 下降会真正使 CI 失败。
+- 为每条样本保存检索排名、逐项指标和内容哈希，并导出带 SHA-256 校验的证据报告。
 - 提供中、英、俄、韩四种界面文案，未知调用用途安全回退为可读文本。
 
 ## 需求与实现对应
@@ -45,6 +46,7 @@ Embedding 输入 ──► 进程内缓存 ──► 租户级持久缓存 ─�
 | 降低重复 Embedding 计算 | 进程内缓存加租户级持久化缓存，支持 TTL | Ollama 冷/暖索引重建实验 |
 | 防止质量回退 | 生产检索路径生成结果，同时检查最低分与相对基线的差值 | `make evaluation-gate` 和云端 CI |
 | 保护租户数据和提示词 | 不接收 Prompt/响应正文；按租户查询和缓存 | 隐私设计、隔离测试和 30 天清理策略 |
+| 证明结果并非事后反推 | 记录代码、数据集、配置、模型和逐样本指纹，导出确定性报告 | “导出证据”按钮与 `evidenceverify` 校验器 |
 
 ## 用户界面
 
@@ -63,6 +65,24 @@ Embedding 输入 ──► 进程内缓存 ──► 租户级持久缓存 ─�
 模型用量接口和返回字段见[评测功能 API](../docs/api/evaluation.md)。接口只返回当前租户的数据，
 支持使用 RFC3339 格式的 `start_time`、`end_time` 限定时间范围。
 
+在 **设置 → RAG 评测 → 评测历史** 中，成功运行可点击“导出证据”。新版本运行会包含：
+
+- 实际代码提交号，以及数据集、完整配置和受控变量配置的 SHA-256；
+- 每条样本的 QID/AID、检索顺序、匹配数据集 PID、得分和逐项指标；
+- 问题、参考答案、模型回答及检索正文的 SHA-256，不包含这些正文；
+- 原始模型调用的 Token、缓存、费用、耗时、用途和时间戳。
+
+下载后可在仓库根目录执行完整性复核：
+
+```bash
+go run ./cmd/evidenceverify -report evaluation-evidence-任务ID.json
+```
+
+输出 `evaluation evidence checksum verified` 说明报告自服务器生成后未发生改动。
+SHA-256 是完整性校验而非身份签名；结果可信度还依赖报告中的代码提交号、冻结数据集指纹、
+配置指纹，以及同协议重新运行所得结果。旧运行因当时没有逐样本采集，会在导出报告中带有
+`per_sample_evidence_unavailable`，不能冒充新版本的完整证据。
+
 ## 隐私、隔离与保留策略
 
 全局可观测记录只包含：
@@ -73,6 +93,7 @@ Embedding 输入 ──► 进程内缓存 ──► 租户级持久缓存 ─�
 - 可选的稳定前缀 HMAC 指纹。
 
 模型调用观察类型不接收 Prompt 或响应正文，Provider 错误文本也不会写入全局记录。
+评测运行快照中的 Prompt、上下文模板和回退文本也只保存 SHA-256，不保存正文。
 如果未配置独立的 HMAC 密钥，则不保存前缀指纹；配置后使用 HMAC-SHA256 保护，
 不应复用 JWT、数据库或模型 API 密钥。
 
@@ -148,6 +169,7 @@ CI 还会运行 [`fixtures/regression_degraded.json`](./fixtures/regression_degr
 
 ```bash
 go run ./cmd/cachebench \
+  -strict \
   -before evaluation/fixtures/cache_before.json \
   -after evaluation/fixtures/cache_after.json \
   -report cache-comparison.json
@@ -156,6 +178,12 @@ go run ./cmd/cachebench \
 [`fixtures/cache_before.json`](./fixtures/cache_before.json) 和
 [`fixtures/cache_after.json`](./fixtures/cache_after.json) 是验证计算器与 CI 的确定性样例，
 不是线上模型测量值。真实实验结果单独保存在 `evidence/`，避免把样例数据包装成真实收益。
+
+`-strict` 会先校验冷、暖组的工作负载、模型和配置指纹完全一致，两组重复次数
+相同且至少三次，Wiki 调用的模型、用途和提示词前缀指纹也必须一一成对；每个不同前缀在冷、暖组各出现一次。冷组出现命中、
+暖组零命中、调用失败或缺少供应商缓存数据都会直接使验收失败。报告同时输出
+中位数、P95 延迟和每千 Prompt Token 归一化成本。不需要删除任何数据：使用从未执行过的固定
+测试文档完成冷组，随后立即原样重放为暖组即可。
 
 ## 真实实验一：百炼 Wiki 缓存
 

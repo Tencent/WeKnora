@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -131,6 +133,35 @@ func (e *EvaluationHandler) GetEvaluationResult(c *gin.Context) {
 	})
 }
 
+// GetEvaluationEvidence returns a deterministic report whose SHA-256 can be
+// recomputed after clearing report_sha256. It contains no prompt or answer text.
+// @Summary      导出评测证据
+// @Description  导出当前租户指定评测任务的可审计、无正文证据包
+// @Tags         评估
+// @Produce      json
+// @Param        task_id  query  string  true  "评估任务ID"
+// @Success      200  {object}  types.EvaluationEvidenceReport
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /evaluation/evidence [get]
+func (e *EvaluationHandler) GetEvaluationEvidence(c *gin.Context) {
+	var request GetEvaluationRequest
+	if err := c.ShouldBind(&request); err != nil {
+		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	report, err := e.evaluationService.EvaluationEvidence(
+		c.Request.Context(), secutils.SanitizeForLog(request.TaskID),
+	)
+	if err != nil {
+		logger.ErrorWithFields(c.Request.Context(), err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.Header("Content-Disposition", "attachment; filename=evaluation-evidence.json")
+	c.JSON(http.StatusOK, report)
+}
+
 // GetModelUsage returns tenant-scoped usage across evaluation, chat, Wiki, and
 // background model calls. Prompt and response bodies are never returned.
 // @Summary      获取模型用量
@@ -185,6 +216,49 @@ func (e *EvaluationHandler) GetEvaluationDatasets(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": datasets})
+}
+
+// GetEvaluationRuns returns a tenant-scoped page of evaluation history.
+// @Summary      获取评测历史
+// @Description  按开始时间倒序列出当前租户的任务、指标、运行快照和聚合用量
+// @Tags         评估
+// @Produce      json
+// @Param        limit   query  int  false  "每页数量（1-100，默认 20）"
+// @Param        offset  query  int  false  "偏移量（默认 0）"
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /evaluation/runs [get]
+func (e *EvaluationHandler) GetEvaluationRuns(c *gin.Context) {
+	limit, err := boundedQueryInt(c, "limit", 20, 1, 100)
+	if err != nil {
+		c.Error(errors.NewBadRequestError("Invalid limit").WithDetails(err.Error()))
+		return
+	}
+	offset, err := boundedQueryInt(c, "offset", 0, 0, 1_000_000)
+	if err != nil {
+		c.Error(errors.NewBadRequestError("Invalid offset").WithDetails(err.Error()))
+		return
+	}
+	page, err := e.evaluationService.EvaluationRuns(c.Request.Context(), limit, offset)
+	if err != nil {
+		logger.ErrorWithFields(c.Request.Context(), err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": page})
+}
+
+func boundedQueryInt(c *gin.Context, name string, fallback, minimum, maximum int) (int, error) {
+	raw := c.Query(name)
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < minimum || value > maximum {
+		return 0, fmt.Errorf("%s must be an integer between %d and %d", name, minimum, maximum)
+	}
+	return value, nil
 }
 
 func parseOptionalRFC3339(raw string) (*time.Time, error) {
