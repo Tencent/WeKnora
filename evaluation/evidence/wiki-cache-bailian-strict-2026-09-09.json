@@ -1,0 +1,254 @@
+{
+  "schema_version": 1,
+  "benchmark_id": "18ad4112-0ff0-4db5-bf77-95cf07c041b0",
+  "generated_at": "2026-09-09T01:57:27.81195Z",
+  "code_version": "0ffea0d9",
+  "model_id": "27e75fbc-9a07-4461-9caa-fcd3d14df136",
+  "model_name": "qwen3.7-plus",
+  "repetitions": 3,
+  "workload_sha256": "sha256:b5d695c3f741b2af87b7518845ee9f994a478c1ad2538e51a9b8ff9a6290db08",
+  "configuration_sha256": "sha256:3fb9c133581c260c70238fb0961484ab1935aa9b5d4a60c97f8aecdf6d70b7bd",
+  "cold": {
+    "model_calls": [
+      {
+        "id": "d4b5284d-9d77-4e3d-a678-ea4a1a63943f",
+        "model_id": "27e75fbc-9a07-4461-9caa-fcd3d14df136",
+        "model_name": "qwen3.7-plus",
+        "model_type": "KnowledgeQA",
+        "purpose": "wiki_cache_benchmark_scenario-1",
+        "prompt_prefix_fingerprint": "4ac17a9688e5beffd1d1f9c08fca9d4b3406ba49bc09583fb93c1e7b83e462f9",
+        "request_fingerprint": "eadd8d43d8fa797233f1e183e61e8a053d96153e506be9d68bd4e0ece47541b9",
+        "usage": {
+          "prompt_tokens": 2093,
+          "completion_tokens": 90,
+          "total_tokens": 2183,
+          "cache_write_tokens": 2085,
+          "cache_miss_tokens": 2093,
+          "cache_reported": true,
+          "cache_status": "miss"
+        },
+        "pricing": {
+          "enabled": true,
+          "currency": "CNY",
+          "input_per_million": 2,
+          "output_per_million": 8,
+          "cache_read_per_million": 0.4,
+          "cache_write_per_million": 2
+        },
+        "estimated_cost": 0.004906,
+        "duration_ms": 3219,
+        "success": true,
+        "created_at": "2026-09-09T01:57:31.031773Z"
+      },
+      {
+        "id": "2021b267-33d9-4bf4-b011-86fbfeaf8d21",
+        "model_id": "27e75fbc-9a07-4461-9caa-fcd3d14df136",
+        "model_name": "qwen3.7-plus",
+        "model_type": "KnowledgeQA",
+        "purpose": "wiki_cache_benchmark_scenario-2",
+        "prompt_prefix_fingerprint": "f31528f54d3767e0048705d68641bce8a5666cbb19b9125cee0ab425549aa388",
+        "request_fingerprint": "110b6252bb1d80c099dafab34ff922146a82bed046af2170bfe07d530688a667",
+        "usage": {
+          "prompt_tokens": 2093,
+          "completion_tokens": 94,
+          "total_tokens": 2187,
+          "cache_write_tokens": 2085,
+          "cache_miss_tokens": 2093,
+          "cache_reported": true,
+          "cache_status": "miss"
+        },
+        "pricing": {
+          "enabled": true,
+          "currency": "CNY",
+          "input_per_million": 2,
+          "output_per_million": 8,
+          "cache_read_per_million": 0.4,
+          "cache_write_per_million": 2
+        },
+        "estimated_cost": 0.004938,
+        "duration_ms": 2557,
+        "success": true,
+        "created_at": "2026-09-09T01:57:33.589911Z"
+      },
+      {
+        "id": "6748999c-5384-48b4-89b1-f32f7c4cf9c3",
+        "model_id": "27e75fbc-9a07-4461-9caa-fcd3d14df136",
+        "model_name": "qwen3.7-plus",
+        "model_type": "KnowledgeQA",
+        "purpose": "wiki_cache_benchmark_scenario-3",
+        "prompt_prefix_fingerprint": "d1d12a406c9b49a264825aad109efb1966debc8f4da9705f73d1aa9d7af6d205",
+        "request_fingerprint": "f541748dc37aff3ce5c1a541f43f03f5cc6cf5a728b3be79177ddcc91bd5c606",
+        "usage": {
+          "prompt_tokens": 2093,
+          "completion_tokens": 96,
+          "total_tokens": 2189,
+          "cache_write_tokens": 2085,
+          "cache_miss_tokens": 2093,
+          "cache_reported": true,
+          "cache_status": "miss"
+        },
+        "pricing": {
+          "enabled": true,
+          "currency": "CNY",
+          "input_per_million": 2,
+          "output_per_million": 8,
+          "cache_read_per_million": 0.4,
+          "cache_write_per_million": 2
+        },
+        "estimated_cost": 0.004954,
+        "duration_ms": 2675,
+        "success": true,
+        "created_at": "2026-09-09T01:57:36.265203Z"
+      }
+    ],
+    "usage": {
+      "call_count": 3,
+      "successful_calls": 3,
+      "failed_calls": 0,
+      "prompt_tokens": 6279,
+      "completion_tokens": 280,
+      "total_tokens": 6559,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 6255,
+      "cache_miss_tokens": 6279,
+      "cache_reported_calls": 3,
+      "cache_hit_calls": 0,
+      "cache_hit_rate": 0,
+      "cache_coverage_rate": 1,
+      "model_duration_ms": 8451,
+      "average_model_latency_ms": 2817,
+      "priced_calls": 3,
+      "unpriced_calls": 0,
+      "cost_by_currency": {
+        "CNY": 0.014797999999999999
+      }
+    },
+    "median_latency_ms": 2675,
+    "p95_latency_ms": 3219
+  },
+  "warm": {
+    "model_calls": [
+      {
+        "id": "5e54d6c9-f003-4536-8f9a-57319dcf713d",
+        "model_id": "27e75fbc-9a07-4461-9caa-fcd3d14df136",
+        "model_name": "qwen3.7-plus",
+        "model_type": "KnowledgeQA",
+        "purpose": "wiki_cache_benchmark_scenario-1",
+        "prompt_prefix_fingerprint": "4ac17a9688e5beffd1d1f9c08fca9d4b3406ba49bc09583fb93c1e7b83e462f9",
+        "request_fingerprint": "eadd8d43d8fa797233f1e183e61e8a053d96153e506be9d68bd4e0ece47541b9",
+        "usage": {
+          "prompt_tokens": 2093,
+          "completion_tokens": 95,
+          "total_tokens": 2188,
+          "cached_tokens": 2085,
+          "cache_read_tokens": 2085,
+          "cache_miss_tokens": 8,
+          "cache_reported": true,
+          "cache_status": "hit"
+        },
+        "pricing": {
+          "enabled": true,
+          "currency": "CNY",
+          "input_per_million": 2,
+          "output_per_million": 8,
+          "cache_read_per_million": 0.4,
+          "cache_write_per_million": 2
+        },
+        "estimated_cost": 0.00161,
+        "duration_ms": 2256,
+        "success": true,
+        "created_at": "2026-09-09T01:57:38.522266Z"
+      },
+      {
+        "id": "27d1776a-3e9b-42e5-ac4d-438930a908db",
+        "model_id": "27e75fbc-9a07-4461-9caa-fcd3d14df136",
+        "model_name": "qwen3.7-plus",
+        "model_type": "KnowledgeQA",
+        "purpose": "wiki_cache_benchmark_scenario-2",
+        "prompt_prefix_fingerprint": "f31528f54d3767e0048705d68641bce8a5666cbb19b9125cee0ab425549aa388",
+        "request_fingerprint": "110b6252bb1d80c099dafab34ff922146a82bed046af2170bfe07d530688a667",
+        "usage": {
+          "prompt_tokens": 2093,
+          "completion_tokens": 93,
+          "total_tokens": 2186,
+          "cached_tokens": 2085,
+          "cache_read_tokens": 2085,
+          "cache_miss_tokens": 8,
+          "cache_reported": true,
+          "cache_status": "hit"
+        },
+        "pricing": {
+          "enabled": true,
+          "currency": "CNY",
+          "input_per_million": 2,
+          "output_per_million": 8,
+          "cache_read_per_million": 0.4,
+          "cache_write_per_million": 2
+        },
+        "estimated_cost": 0.001594,
+        "duration_ms": 2364,
+        "success": true,
+        "created_at": "2026-09-09T01:57:40.887232Z"
+      },
+      {
+        "id": "f1bf215b-b444-41f7-a0c2-6b52db3b30fa",
+        "model_id": "27e75fbc-9a07-4461-9caa-fcd3d14df136",
+        "model_name": "qwen3.7-plus",
+        "model_type": "KnowledgeQA",
+        "purpose": "wiki_cache_benchmark_scenario-3",
+        "prompt_prefix_fingerprint": "d1d12a406c9b49a264825aad109efb1966debc8f4da9705f73d1aa9d7af6d205",
+        "request_fingerprint": "f541748dc37aff3ce5c1a541f43f03f5cc6cf5a728b3be79177ddcc91bd5c606",
+        "usage": {
+          "prompt_tokens": 2093,
+          "completion_tokens": 96,
+          "total_tokens": 2189,
+          "cached_tokens": 2085,
+          "cache_read_tokens": 2085,
+          "cache_miss_tokens": 8,
+          "cache_reported": true,
+          "cache_status": "hit"
+        },
+        "pricing": {
+          "enabled": true,
+          "currency": "CNY",
+          "input_per_million": 2,
+          "output_per_million": 8,
+          "cache_read_per_million": 0.4,
+          "cache_write_per_million": 2
+        },
+        "estimated_cost": 0.001618,
+        "duration_ms": 2397,
+        "success": true,
+        "created_at": "2026-09-09T01:57:43.284814Z"
+      }
+    ],
+    "usage": {
+      "call_count": 3,
+      "successful_calls": 3,
+      "failed_calls": 0,
+      "prompt_tokens": 6279,
+      "completion_tokens": 284,
+      "total_tokens": 6563,
+      "cache_read_tokens": 6255,
+      "cache_write_tokens": 0,
+      "cache_miss_tokens": 24,
+      "cache_reported_calls": 3,
+      "cache_hit_calls": 3,
+      "cache_hit_rate": 0.9961777353081701,
+      "cache_coverage_rate": 1,
+      "model_duration_ms": 7017,
+      "average_model_latency_ms": 2339,
+      "priced_calls": 3,
+      "unpriced_calls": 0,
+      "cost_by_currency": {
+        "CNY": 0.004822
+      }
+    },
+    "median_latency_ms": 2364,
+    "p95_latency_ms": 2397
+  },
+  "strict_validation": {
+    "passed": true
+  },
+  "report_sha256": "sha256:7f4d1de8e1d094f26a23f3be040114cd607dab8c9037e6ec9a52d8d04aa22b3a"
+}

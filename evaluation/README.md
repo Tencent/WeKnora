@@ -4,6 +4,8 @@ English | [简体中文](./README_CN.md)
 
 This directory contains the deterministic quality, latency, and cost gate used
 by pull requests and the scheduled CI job.
+It is the delivery documentation for Rhino-Bird Open Source Practice Topic 3,
+**Quality Evaluation Baseline and Cost Observability**.
 
 ## Run locally
 
@@ -131,16 +133,29 @@ traffic; neither evidence type is presented as the other.
 
 ## Real provider evidence
 
-`evidence/wiki-cache-bailian-2026-08-30.json` and its Markdown companion record
-a real Aliyun Bailian `qwen3.7-plus` Wiki run over the two checked-in synthetic
-Markdown inputs. The evidence contains no prompt, response, API key, or tenant
-identifier. The accompanying `.sql` file is read-only and reproduces the cache,
-cost, latency, and Wiki-page aggregates from the retained database rows.
+[`evidence/rag-model-comparison-2026-09-08.md`](./evidence/rag-model-comparison-2026-09-08.md)
+records a controlled comparison between Bailian `qwen3.7-plus` and local
+`qwen2:7b` on the four-sample `rhino-topic3-zh` dataset, plus the three-run
+Bailian repeat summary. It publishes metrics, controlled fingerprints, source
+report checksums, privacy decisions, and limitations without publishing local
+tenant or resource UUIDs.
 
-The report intentionally distinguishes positive and negative results: Wiki
-cache-read tokens and normalized input cost improved, while latency did not
-improve in that run. The deterministic fixture remains a calculator/CI example;
-it is not substituted for this real-provider evidence.
+[`evidence/wiki-cache-bailian-strict-2026-09-09.json`](./evidence/wiki-cache-bailian-strict-2026-09-09.json) and its
+[Markdown report](./evidence/wiki-cache-bailian-strict-2026-09-09.md) are the
+primary real-provider Wiki cache evidence. Three isolated cold requests were
+paired one-to-one with byte-identical warm replays on Aliyun Bailian
+`qwen3.7-plus`. Strict validation passed: cache hit rate increased from 0% to
+99.62%, estimated cost fell from 0.014798 CNY to 0.004822 CNY (67.41%), median
+latency fell 11.63%, and P95 latency fell 25.54%. The JSON contains no prompt,
+response, API key, or tenant identifier and can be checked with
+`cmd/evidenceverify`.
+
+The earlier `evidence/wiki-cache-bailian-2026-08-30.*` files remain retained
+for traceability as an exploratory live-Wiki run; its raw JSON is unchanged.
+Its cache telemetry remains useful, but its cost conclusions are invalid because
+implicit cache creation was incorrectly configured as free. The Markdown
+companion carries an explicit erratum. The deterministic fixture remains only a
+calculator/CI example and is not substituted for real-provider evidence.
 
 `evidence/embedding-cache-ollama-2026-08-30.json` and its Markdown/SQL
 companions record a real local Ollama index-rebuild comparison. After a backend

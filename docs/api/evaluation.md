@@ -149,7 +149,7 @@ curl --location 'http://localhost:8080/api/v1/evaluation/runs?limit=20&offset=0'
     "items": [
       {
         "task": {
-          "id": "evaluation-1-default-uuid",
+          "id": "evaluation_1_1788792322769_f51acdc7_default",
           "tenant_id": 1,
           "dataset_id": "default",
           "status": 2,
@@ -175,7 +175,7 @@ curl --location 'http://localhost:8080/api/v1/evaluation/runs?limit=20&offset=0'
 
 ```bash
 curl --location \
-  'http://localhost:8080/api/v1/evaluation/evidence?task_id=evaluation-1-default-uuid' \
+  'http://localhost:8080/api/v1/evaluation/evidence?task_id=evaluation_1_1788792322769_f51acdc7_default' \
   --header 'X-API-Key: sk-xxxxx' \
   --output evaluation-evidence.json
 
