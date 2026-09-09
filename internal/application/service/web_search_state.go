@@ -121,7 +121,7 @@ func (s *webSearchStateService) DeleteWebSearchTempKBState(ctx context.Context, 
 
 	// Delete all knowledge items
 	for _, kid := range state.KnowledgeIDs {
-		if delErr := s.knowledgeService.DeleteKnowledge(ctx, kid); delErr != nil {
+		if delErr := deleteReferencedKnowledge(ctx, s.knowledgeService, state.KBID, []string{kid}); delErr != nil {
 			logger.Warnf(ctx, "Failed to delete temp knowledge %s: %v", kid, delErr)
 		}
 	}

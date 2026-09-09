@@ -522,3 +522,54 @@ func TestExecuteToolCalls_CompleteArgs_StillExecute(t *testing.T) {
 	require.Len(t, step.ToolCalls, 1)
 	assert.True(t, step.ToolCalls[0].Result.Success)
 }
+
+func TestBuildMustUseBlockMCPDirectory(t *testing.T) {
+	block := buildMustUseBlock([]*PinnedMCPServiceInfo{{ID: "orders", Name: "Orders", Discoverable: true}}, nil)
+	assert.Contains(t, block, `discover_mcp_tools(mode="list_tools", server_id="orders")`)
+	assert.Contains(t, block, "call_mcp_tool")
+	assert.NotContains(t, block, "names start with")
+}
+
+func TestMCPProxyTargetDoesNotRewriteModelHistory(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	target := &types.ToolCallTarget{
+		Name:        "mcp_orders_get",
+		Args:        map[string]any{"id": "42"},
+		ServiceName: "Orders",
+		ToolName:    "get",
+	}
+	call := types.ToolCall{
+		ID:     "proxy-call",
+		Name:   "call_mcp_tool",
+		Args:   map[string]any{"tool_ref": "mcpt_ref", "arguments": map[string]any{"id": "42"}},
+		Target: target,
+		Result: &types.ToolResult{Success: true, Output: "ok"},
+	}
+	messages := engine.appendToolResults(nil, types.AgentStep{ToolCalls: []types.ToolCall{call}})
+	require.Len(t, messages, 2)
+	require.Equal(t, "call_mcp_tool", messages[0].ToolCalls[0].Function.Name)
+	require.Contains(t, messages[0].ToolCalls[0].Function.Arguments, "tool_ref")
+	require.Equal(t, "proxy-call", messages[1].ToolCallID)
+	require.Equal(t, "call_mcp_tool", messages[1].Name)
+	require.Equal(t, "mcp_orders_get", call.ExecutionName())
+	require.Equal(t, "42", call.ExecutionArgs()["id"])
+}
+
+func TestMCPDiscoveryCompactionNeverReturnsPartialSchema(t *testing.T) {
+	estimator, err := agenttoken.NewEstimator()
+	require.NoError(t, err)
+	msg := chat.Message{
+		Role:       "tool",
+		Name:       agenttools.ToolDiscoverMCPTools,
+		ToolCallID: "describe-id",
+		Content: `{"input_schema":{"description":"` + strings.Repeat(
+			"schema ",
+			5000,
+		) + `","required":["critical"]}}`,
+	}
+	compacted := compactToolMessage(msg, 300, estimator)
+	require.Equal(t, msg.ToolCallID, compacted.ToolCallID)
+	require.NotContains(t, compacted.Content, "input_schema")
+	require.NotContains(t, compacted.Content, "required")
+	require.Contains(t, compacted.Content, "partial schema")
+}

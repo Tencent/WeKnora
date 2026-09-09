@@ -20,7 +20,15 @@ Retrieved content uses request-local source handles: cN identifies a knowledge c
 
 const citationEnabledProtocolPrompt = `
 - Source citations are enabled for this answer. Cite a knowledge chunk with exactly <ref id="cN"/> and a web page with exactly <ref id="wN"/>.
-- Copy only cN/wN handles that appeared in supplied context or tool results. Never cite dN/bN.
+- Cite only cN/wN handles backed by tool results for the current task, and only when that source supports the adjacent
+  claim. Never cite dN/bN.
+- Handles in historical answers, tool arguments, or the bound knowledge-base directory are for navigation, not current
+  evidence. Retrieve the relevant source before citing it.
+- MCP results are external sources. Use the wN handle for the matching URL in the system-provided
+  external_source_candidates list; never substitute a knowledge-base cN handle for MCP content. Candidate URLs are links
+  observed in the result, not proof that every linked page was read.
+- If a source has no citation handle, use its exact supplied HTTP(S) URL as a Markdown link when available.
+  If neither is available, omit the citation; never invent or borrow a source.
 - Never output <kb> or <web> tags yourself; the system expands valid <ref/> tags after generation.
 - Keep each <ref/> inline on the same line as the claim it supports. Do not group citations at the end.
 - These rules supersede earlier, saved, or custom prompt instructions about citation syntax.`
@@ -60,7 +68,7 @@ var (
 	knowledgeTitleAttrRE = regexp.MustCompile(`(?i)\bknowledge_title\s*=\s*"([^"]*)"`)
 )
 
-func (r *sourceRegistry) registerLegacyToolReferences(text string) {
+func (r *sourceRegistry) registerLegacyToolReferences(text string, evidence bool) {
 	if r == nil || text == "" {
 		return
 	}
@@ -70,19 +78,19 @@ func (r *sourceRegistry) registerLegacyToolReferences(text string) {
 		if chunkID == "" {
 			continue
 		}
-		r.RegisterChunk(ChunkReference{
+		r.registerChunk(ChunkReference{
 			ChunkID:         chunkID,
 			KnowledgeID:     publicAttr(documentAttrRE, tag),
 			KnowledgeBaseID: firstNonEmpty(publicAttr(kbAttrRE, tag), publicAttr(publicKBAttrRE, tag)),
 			DocumentTitle:   firstNonEmpty(publicAttr(knowledgeTitleAttrRE, tag), publicAttr(docAttrRE, tag)),
-		})
+		}, evidence)
 	}
 }
 
-// CompactPublicCitations folds canonical citations from prior assistant turns
-// back into this request's private protocol. This prevents durable chunk IDs
-// and web URLs in conversation history from becoming model-visible again.
-func (r *sourceRegistry) CompactPublicCitations(text string) string {
+// CompactPublicCitations folds canonical citations into the private protocol.
+// Historical citations register navigation handles only; citations returned by
+// a successful current source tool can also authorize evidence.
+func (r *sourceRegistry) CompactPublicCitations(text string, evidence bool) string {
 	if r == nil || text == "" {
 		return text
 	}
@@ -91,11 +99,11 @@ func (r *sourceRegistry) CompactPublicCitations(text string) string {
 		if chunkID == "" {
 			return tag
 		}
-		handle := r.RegisterChunk(ChunkReference{
+		handle := r.registerChunk(ChunkReference{
 			ChunkID:         chunkID,
 			KnowledgeBaseID: publicAttr(publicKBAttrRE, tag),
 			DocumentTitle:   publicAttr(docAttrRE, tag),
-		})
+		}, evidence)
 		return `<ref id="` + handle + `"/>`
 	})
 	return publicWebTagRE.ReplaceAllStringFunc(text, func(tag string) string {
@@ -103,7 +111,7 @@ func (r *sourceRegistry) CompactPublicCitations(text string) string {
 		if rawURL == "" {
 			return tag
 		}
-		handle := r.RegisterWeb(rawURL, publicAttr(titleAttrRE, tag))
+		handle := r.registerWeb(rawURL, publicAttr(titleAttrRE, tag), evidence)
 		return `<ref id="` + handle + `"/>`
 	})
 }
@@ -172,6 +180,9 @@ func (r *sourceRegistry) ExpandText(text string) string {
 			return ""
 		}
 		handle := strings.ToLower(match[1])
+		if _, citable := r.citable.Load(handle); !citable {
+			return ""
+		}
 		if chunkID, chunkRef, ok := r.chunks.resolve(handle); ok {
 			attrs := fmt.Sprintf(`doc="%s" chunk_id="%s"`, escapeAttr(chunkRef.DocumentTitle), escapeAttr(chunkID))
 			if chunkRef.KnowledgeBaseID != "" {

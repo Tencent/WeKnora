@@ -155,6 +155,47 @@ func (s *resourceCatalog) Bind(ctx context.Context, reference, ownerType, ownerI
 	})
 }
 
+func (s *resourceCatalog) IsReferencedByKnowledgeBase(
+	ctx context.Context,
+	tenantID uint64,
+	kbID, reference string,
+) (bool, error) {
+	physical, resource, err := s.ResolvePath(ctx, reference)
+	if err != nil {
+		return false, err
+	}
+	if resource == nil {
+		resource, err = s.repo.GetByTenantLocation(ctx, tenantID, resourceLocationHash(physical))
+		if err != nil {
+			return false, err
+		}
+	}
+	if resource == nil || resource.TenantID != tenantID {
+		return false, nil
+	}
+	return s.repo.IsReferencedByKnowledgeBase(ctx, tenantID, kbID, resource.ID)
+}
+
+// GetMessageFileBindings resolves registered aliases before reading authoritative origins.
+func (s *resourceCatalog) GetMessageFileBindings(
+	ctx context.Context, tenantID uint64, reference, messageID string,
+) (*types.MessageFileBindings, error) {
+	physical, resource, err := s.ResolvePath(ctx, reference)
+	if err != nil {
+		return nil, err
+	}
+	if resource == nil {
+		resource, err = s.repo.GetByTenantLocation(ctx, tenantID, resourceLocationHash(physical))
+		if err != nil {
+			return nil, err
+		}
+	}
+	if resource == nil || resource.TenantID != tenantID {
+		return &types.MessageFileBindings{}, nil
+	}
+	return s.repo.GetMessageFileBindings(ctx, tenantID, resource.ID, messageID)
+}
+
 // Release implements interfaces.ResourceCatalog.
 //
 // Unbinding and counting are deliberately not a single transaction. A racing

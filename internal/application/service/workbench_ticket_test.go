@@ -57,7 +57,8 @@ func TestWorkbenchTicketsRedisReplayExpiryAndBinding(t *testing.T) {
 	require.ErrorIs(t, err, ErrWorkbenchTicket)
 	ticket, err = s.IssueTicket(ctx, "session", "http://localhost:15173")
 	require.NoError(t, err)
-	require.NoError(t, s.deps.DB.Exec("UPDATE tenant_members SET status='suspended' WHERE user_id='alice'").Error)
+	db := s.deps.Sessions.(workbenchTestSessions).db
+	require.NoError(t, db.Exec("UPDATE tenant_members SET status='suspended' WHERE user_id='alice'").Error)
 	_, err = s.ConsumeTicket(context.Background(), ticket.Ticket, "http://localhost:15173")
 	require.ErrorIs(t, err, ErrWorkbenchDenied)
 }
@@ -65,7 +66,7 @@ func TestWorkbenchTicketsRedisReplayExpiryAndBinding(t *testing.T) {
 func TestWorkbenchRedisLeaseCompareRenewAndFailClosed(t *testing.T) {
 	rdb := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: rdb.Addr(), MaxRetries: -1, DialTimeout: 100 * time.Millisecond})
-	defer client.Close()
+	t.Cleanup(func() { _ = client.Close() })
 	store := &redisWorkbenchStore{client: client, prefix: "test:"}
 	ctx := context.Background()
 	require.NoError(t, store.acquire(ctx, "session", "user", "first"))
@@ -98,7 +99,8 @@ func TestWorkbenchRedisAuthenticatedConsoleQuotas(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < WorkbenchMaxAuthenticatedConsolesUser; i++ {
-		require.NoError(t, store.acquire(ctx, "same-user-"+strings.Repeat("x", i+1), "user", "user-token-"+strings.Repeat("x", i+1)))
+		suffix := strings.Repeat("x", i+1)
+		require.NoError(t, store.acquire(ctx, "same-user-"+suffix, "user", "user-token-"+suffix))
 	}
 	require.ErrorIs(t, store.acquire(ctx, "same-user-over", "user", "over"), ErrWorkbenchBusy)
 	require.NoError(t, store.acquire(ctx, "different-user", "other-user", "other"))

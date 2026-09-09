@@ -560,15 +560,20 @@ func (r *knowledgeRepository) UpdateKnowledgeColumns(
 // to normal queries and have not moved out of the transient deleting state.
 func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
 	ctx context.Context,
-	id string,
+	tenantID uint64,
+	kbID, id string,
 	values map[string]interface{},
 ) (bool, error) {
-	if len(values) == 0 {
+	if tenantID == 0 || kbID == "" || len(values) == 0 {
 		return false, nil
 	}
 	result := r.db.WithContext(ctx).
 		Model(&types.Knowledge{}).
-		Where("id = ? AND parse_status = ?", id, types.ParseStatusDeleting).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND id = ? AND parse_status = ?",
+			tenantID,
+			kbID,
+			id,
+			types.ParseStatusDeleting).
 		Updates(values)
 	if result.Error != nil {
 		return false, result.Error

@@ -15,6 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// Workbench ticket and console bounds apply across all API replicas.
 const (
 	WorkbenchTicketTTL                    = 30 * time.Second
 	WorkbenchMaxAuthenticatedConsoles     = 256
@@ -23,6 +24,7 @@ const (
 	workbenchMemoryLimit                  = 2048
 )
 
+// WorkbenchIdentity binds a single-use ticket to its web user, session and origin.
 type WorkbenchIdentity struct {
 	TenantID  uint64    `json:"tenant_id"`
 	UserID    string    `json:"user_id"`
@@ -31,6 +33,7 @@ type WorkbenchIdentity struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+// Context restores only the verified web identity needed for reauthorization.
 func (i WorkbenchIdentity) Context(ctx context.Context) context.Context {
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, i.TenantID)
 	ctx = context.WithValue(ctx, types.UserIDContextKey, i.UserID)
@@ -38,6 +41,7 @@ func (i WorkbenchIdentity) Context(ctx context.Context) context.Context {
 	return types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalWebUser, ID: i.UserID})
 }
 
+// WorkbenchTicket is returned over authenticated HTTP and consumed in a socket frame.
 type WorkbenchTicket struct {
 	Ticket        string `json:"ticket"`
 	ExpiresIn     int    `json:"expires_in"`
@@ -57,6 +61,7 @@ func workbenchHash(value string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// IssueTicket authorizes the session and stores only the random ticket's hash.
 func (s *WorkbenchService) IssueTicket(ctx context.Context, sessionID, origin string) (*WorkbenchTicket, error) {
 	status, err := s.Status(ctx, sessionID)
 	if err != nil {
@@ -87,6 +92,7 @@ func (s *WorkbenchService) IssueTicket(ctx context.Context, sessionID, origin st
 	return &WorkbenchTicket{token, int(WorkbenchTicketTTL.Seconds()), "/api/v1/sandbox-terminal"}, nil
 }
 
+// ConsumeTicket atomically consumes a ticket and rechecks its current permissions.
 func (s *WorkbenchService) ConsumeTicket(ctx context.Context, ticket, origin string) (WorkbenchIdentity, error) {
 	if !s.Enabled() {
 		return WorkbenchIdentity{}, ErrWorkbenchDisabled
@@ -118,12 +124,14 @@ type workbenchStore interface {
 	release(context.Context, string, string, string) error
 }
 
+// WorkbenchLease holds deployment, user and session console slots under one token.
 type WorkbenchLease struct {
 	store               workbenchStore
 	sessionKey, userKey string
 	token               string
 }
 
+// AcquireConsole reauthorizes the identity before claiming bounded console slots.
 func (s *WorkbenchService) AcquireConsole(ctx context.Context, i WorkbenchIdentity) (*WorkbenchLease, error) {
 	if s.store == nil {
 		return nil, ErrWorkbenchUnavailable
@@ -143,9 +151,12 @@ func (s *WorkbenchService) AcquireConsole(ctx context.Context, i WorkbenchIdenti
 	return &WorkbenchLease{s.store, sessionKey, userKey, token}, nil
 }
 
+// Renew extends the slots only while this lease token still owns them.
 func (l *WorkbenchLease) Renew(ctx context.Context) error {
 	return l.store.renew(ctx, l.sessionKey, l.userKey, l.token)
 }
+
+// Release deletes only the slots still owned by this lease token.
 func (l *WorkbenchLease) Release(ctx context.Context) error {
 	return l.store.release(ctx, l.sessionKey, l.userKey, l.token)
 }
@@ -230,6 +241,7 @@ redis.call('PEXPIRE', KEYS[2], ARGV[2] * 2)
 redis.call('PEXPIRE', KEYS[3], ARGV[2] * 2)
 return 1
 `)
+
 var workbenchReleaseScript = redis.NewScript(`
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
 redis.call('DEL', KEYS[1])
@@ -248,7 +260,8 @@ func (s *redisWorkbenchStore) renew(ctx context.Context, sessionKey, userKey, to
 }
 
 func (s *redisWorkbenchStore) release(ctx context.Context, sessionKey, userKey, token string) error {
-	if _, err := workbenchReleaseScript.Run(ctx, s.client, s.consoleKeys(sessionKey, userKey), token).Result(); err != nil {
+	_, err := workbenchReleaseScript.Run(ctx, s.client, s.consoleKeys(sessionKey, userKey), token).Result()
+	if err != nil {
 		return ErrWorkbenchUnavailable
 	}
 	return nil
@@ -267,7 +280,11 @@ type memoryWorkbenchStore struct {
 }
 
 func newMemoryWorkbenchStore() *memoryWorkbenchStore {
-	return &memoryWorkbenchStore{tickets: make(map[string]WorkbenchIdentity), leases: make(map[string]workbenchMemoryLease), now: time.Now}
+	return &memoryWorkbenchStore{
+		tickets: make(map[string]WorkbenchIdentity),
+		leases:  make(map[string]workbenchMemoryLease),
+		now:     time.Now,
+	}
 }
 
 func (s *memoryWorkbenchStore) purge() {

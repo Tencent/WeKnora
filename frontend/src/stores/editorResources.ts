@@ -15,6 +15,7 @@ import { listMCPServices, type MCPService } from '@/api/mcp-service'
 import { listSkillCatalog, listSkills, type SkillCatalogItem, type SkillInfo } from '@/api/skill'
 import { getAgentTypePresets, getPlaceholders, type AgentTypePreset, type PlaceholdersResponse } from '@/api/agent'
 import { getTenantRetrievalConfig } from '@/api/retrieval'
+import { isStorageConfigDenied } from './storageEngineAccess'
 
 const CACHE_TTL_MS = 60_000
 
@@ -87,7 +88,15 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   async function ensureStorageEngine(force = false): Promise<void> {
     return runOnce('storageEngine', force, async () => {
       const [configRes, statusRes] = await Promise.all([
-        getStorageEngineConfig(),
+        // The config endpoint is admin-only (it carries integration secrets),
+        // while every creator — Contributors included — needs the status list
+        // to pick a usable provider. A permission rejection on the config
+        // call must therefore degrade to "no admin config", not break the
+        // whole editor dependency chain (#2991).
+        getStorageEngineConfig().catch((error: unknown) => {
+          if (isStorageConfigDenied(error)) return null
+          throw error
+        }),
         getStorageEngineStatus(),
       ])
       storageConfig.value = configRes?.data ?? null

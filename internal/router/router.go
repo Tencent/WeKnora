@@ -178,6 +178,12 @@ func NewRouter(params RouterParams) *gin.Engine {
 	serveResourceGrants(r, params.ResourceCatalog, params.TenantService, params.FileService, params.StorageBackendResolver)
 	RegisterWorkbenchPublicRoutes(r, params.WorkbenchHandler)
 
+	// Sandbox terminal WebSocket (self-authenticated via a short-lived
+	// query ticket — see RegisterSandboxTerminalRoutes; browsers cannot set
+	// auth headers on the WS handshake, so this must precede the global Auth
+	// middleware). The ticket is minted by an authenticated POST.
+	RegisterSandboxTerminalRoutes(r, params.SessionHandler)
+
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
 

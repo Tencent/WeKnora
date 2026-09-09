@@ -68,6 +68,12 @@
       :data="toolData as ReadSkillData"
     />
 
+    <McpToolResult
+      v-else-if="displayType === 'mcp_discovery' || displayType === 'mcp_call'"
+      :discovery="displayType === 'mcp_discovery'" :data="toolData"
+      :output="output" :arguments="toolArguments" :success="success"
+    />
+
     <!-- Fallback: Display raw output -->
     <div v-else class="fallback-output">
       <div class="fallback-header">
@@ -122,15 +128,17 @@ import ShellExecResult from './tool-results/ShellExecResult.vue';
 import SandboxFilesResult from './tool-results/SandboxFilesResult.vue';
 import WriteSandboxFileResult from './tool-results/WriteSandboxFileResult.vue';
 import ReadSkillResult from './tool-results/ReadSkillResult.vue';
+import McpToolResult from './tool-results/McpToolResult.vue';
 
 interface Props {
+  success?: boolean;
   displayType?: DisplayType;
   toolData?: Record<string, any>;
   output?: string;
   arguments?: Record<string, any>;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), { success: undefined });
 
 const displayType = computed(() => props.displayType);
 const toolData = computed(() => props.toolData || {});

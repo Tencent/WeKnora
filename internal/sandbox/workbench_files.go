@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 )
 
+// Workbench filesystem limits bound decoded content, directory entries and RPCs.
 const (
 	WorkbenchMaxFileBytes = 8 << 20
 	WorkbenchMaxEntries   = 500
@@ -28,6 +29,7 @@ const (
 	workbenchExecTimeout  = 15 * time.Second
 )
 
+// Workbench filesystem errors omit provider output and caller file contents.
 var (
 	ErrWorkbenchPath        = errors.New("sandbox: invalid workbench path or file type")
 	ErrWorkbenchNotFound    = errors.New("sandbox: workbench path not found")
@@ -53,12 +55,14 @@ type WorkbenchFileRequest struct {
 	Content   []byte `json:"content,omitempty"`
 }
 
+// WorkbenchFileResult carries a bounded listing or file payload.
 type WorkbenchFileResult struct {
 	Path    string               `json:"path"`
 	Entries []WorkbenchFileEntry `json:"entries"`
 	Content []byte               `json:"content,omitempty"`
 }
 
+// WorkbenchFileEntry describes one regular file or directory below the output root.
 type WorkbenchFileEntry struct {
 	Name       string    `json:"name"`
 	Path       string    `json:"path"`
@@ -91,8 +95,7 @@ func WorkbenchFileProviderFrom(mgr Manager) (SessionWorkbenchFileProvider, bool)
 
 func (m *SessionBoundManager) workbenchEnabled() bool {
 	return m != nil && !m.remoteDisabled() && m.client != nil &&
-		workbenchPrivateExecSupported(m.client) && m.GetType() == m.client.Provider() &&
-		!workbenchRuntimeKnownIncompatible(m, workbenchRuntimeFiles)
+		workbenchPrivateExecSupported(m.client) && m.GetType() == m.client.Provider()
 }
 
 type workbenchPrivateExecCapability interface {
@@ -110,6 +113,8 @@ func workbenchPrivateExecSupported(client RemoteSandboxClient) bool {
 	return ok && capability.SupportsPrivateWorkbenchExec()
 }
 
+// SessionWorkbenchFileProvider exposes descriptor-relative file operations when
+// the backend provides payload-safe exec. Runtime probes remain per sandbox.
 func (m *SessionBoundManager) SessionWorkbenchFileProvider() SessionWorkbenchFileProvider {
 	if !m.workbenchEnabled() {
 		return nil
@@ -126,9 +131,6 @@ var workbenchFileHelper string
 func (m *SessionBoundManager) WorkbenchFiles(
 	ctx context.Context, sessionID string, req WorkbenchFileRequest,
 ) (*WorkbenchFileResult, error) {
-	if m != nil && workbenchRuntimeKnownIncompatible(m, workbenchRuntimeFiles) {
-		return nil, ErrWorkbenchRuntimeIncompatible
-	}
 	if !m.workbenchEnabled() || m.bindings == nil || m.checker == nil {
 		return nil, ErrWorkbenchUnavailable
 	}

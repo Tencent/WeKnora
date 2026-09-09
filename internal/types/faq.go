@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/longbridgeapp/opencc"
+	"github.com/Tencent/WeKnora/internal/textconv"
 )
 
 // FAQChunkMetadata 定义 FAQ 条目在 Chunk.Metadata 中的结构
@@ -571,18 +571,6 @@ const (
 	URLKeepDomainAndPath
 )
 
-// t2sConverter 繁体转简体转换器（单例）
-var t2sConverter *opencc.OpenCC
-
-func init() {
-	var err error
-	t2sConverter, err = opencc.New("t2s") // Traditional to Simplified
-	if err != nil {
-		// 初始化失败时使用空转换器，不影响其他功能
-		t2sConverter = nil
-	}
-}
-
 // NormalizeQuestion 对问题文本进行归一化处理以提高向量匹配命中率
 // 处理顺序参考: query = convert_st(trim_url(query.lower().strip().strip("？。，；、：""！?.,;!:'\"")), 1)
 // 1. 去除首尾空白
@@ -749,14 +737,7 @@ func parseURL(raw string) (domain, path string) {
 
 // toSimplified 繁体中文转简体中文
 func toSimplified(s string) string {
-	if t2sConverter == nil {
-		return s
-	}
-	result, err := t2sConverter.Convert(s)
-	if err != nil {
-		return s
-	}
-	return result
+	return textconv.ToSimplified(s)
 }
 
 // toHalfWidth 将全角字符转换为半角字符

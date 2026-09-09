@@ -475,3 +475,14 @@ func lastExecRequest(t *testing.T, client *fakeRemoteClient) RemoteExecRequest {
 	require.NotEmpty(t, client.execRequests)
 	return client.execRequests[len(client.execRequests)-1]
 }
+
+// Direct callers of OpenSessionTerminal (tests, a future handler that skips
+// the service layer) must not see "no live sandbox" when the backend simply
+// cannot stream PTYs. The service layer already maps this, but the manager
+// is the source of truth.
+func TestSessionBoundManagerOpenSessionTerminalUnsupportedBackend(t *testing.T) {
+	mgr, _ := newSessionManagerExecTestHarness(t)
+	_, err := mgr.OpenSessionTerminal(context.Background(), "session-a", RemoteTerminalOptions{})
+	require.ErrorIs(t, err, ErrTerminalUnsupported)
+	require.NotErrorIs(t, err, ErrNoLiveSessionSandbox)
+}

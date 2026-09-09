@@ -82,7 +82,9 @@ func (f *fakeFileService) SaveFile(_ context.Context, _ *multipart.FileHeader, _
 	panic("SaveFile should not be called by ArtifactCollector")
 }
 
-func (f *fakeFileService) SaveBytes(_ context.Context, data []byte, tenantID uint64, fileName string, _ bool) (string, error) {
+func (f *fakeFileService) SaveBytes(
+	_ context.Context, data []byte, tenantID uint64, fileName string, _ bool,
+) (string, error) {
 	if f.saveErr != nil {
 		return "", f.saveErr
 	}
@@ -117,7 +119,9 @@ type resourceRefFileService struct {
 	handle string
 }
 
-func (f *resourceRefFileService) SaveBytes(_ context.Context, data []byte, tenantID uint64, fileName string, _ bool) (string, error) {
+func (f *resourceRefFileService) SaveBytes(
+	_ context.Context, data []byte, tenantID uint64, _ string, _ bool,
+) (string, error) {
 	if f.saved == nil {
 		f.saved = map[string][]byte{}
 	}
@@ -152,12 +156,15 @@ type fakeCatalog struct {
 func (c *fakeCatalog) Register(context.Context, uint64, string, interfaces.ResourceRegistration) (string, error) {
 	return "", nil
 }
+
 func (c *fakeCatalog) Resolve(context.Context, string) (*types.StoredResource, error) {
 	return nil, nil
 }
+
 func (c *fakeCatalog) ResolvePath(_ context.Context, v string) (string, *types.StoredResource, error) {
 	return v, nil, nil
 }
+
 func (c *fakeCatalog) Bind(_ context.Context, ref, ownerType, ownerID, relation string) error {
 	c.binds = append(c.binds, bindCall{ref, ownerType, ownerID, relation})
 	return c.bindErr
@@ -174,9 +181,11 @@ func (c *fakeCatalog) Release(_ context.Context, ref, ownerType, ownerID string)
 	}
 	return -1, nil
 }
+
 func (c *fakeCatalog) CreateAccessGrant(context.Context, string, time.Duration) (string, error) {
 	return "", nil
 }
+
 func (c *fakeCatalog) ResolveAccessGrant(context.Context, string) (*types.StoredResource, error) {
 	return nil, nil
 }
@@ -185,11 +194,13 @@ func (c *fakeCatalog) ResolveAccessGrant(context.Context, string) (*types.Stored
 // Tests
 // -----------------------------------------------------------------------------
 
-func newTestCollector(src *fakeSandboxSource, store *fakeStore, fs *fakeFileService, max int64) *ArtifactCollector {
+func newTestCollector(
+	src *fakeSandboxSource, store *fakeStore, fs *fakeFileService, maxBytes int64,
+) *ArtifactCollector {
 	// catalog is nil here: these tests use a fakeFileService that returns raw
 	// "fake://" paths, so no resource binding is attempted. Binding behaviour
 	// is covered separately in TestArtifactCollector_BindsResourceToMessage.
-	return NewArtifactCollector(src, fs, store, nil, ArtifactCollectorConfig{MaxFileBytes: max})
+	return NewArtifactCollector(src, fs, store, nil, ArtifactCollectorConfig{MaxFileBytes: maxBytes})
 }
 
 func testArtifactBaseline(entries ...sandbox.RemoteDirEntry) ArtifactTurnBaseline {
@@ -287,8 +298,14 @@ func TestArtifactCollector_CollectsNewFiles(t *testing.T) {
 	src := &fakeSandboxSource{
 		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
-				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
-				{Name: "summary.txt", Path: "/workspace/output/summary.txt", Type: sandbox.RemoteEntryFile, Size: 3, ModTime: mustParseTime("2026-07-10T10:20:34Z")},
+				{
+					Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile,
+					Size: 4, ModTime: mustParseTime("2026-07-10T10:20:33Z"),
+				},
+				{
+					Name: "summary.txt", Path: "/workspace/output/summary.txt", Type: sandbox.RemoteEntryFile,
+					Size: 3, ModTime: mustParseTime("2026-07-10T10:20:34Z"),
+				},
 			},
 		},
 		contents: map[string][]byte{
@@ -375,7 +392,10 @@ func TestArtifactCollector_SkipsWorkbenchFilePresentAtTurnStart(t *testing.T) {
 	src := &fakeSandboxSource{
 		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
-				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
+				{
+					Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile,
+					Size: 4, ModTime: mustParseTime("2026-07-10T10:20:33Z"),
+				},
 			},
 		},
 		contents: map[string][]byte{
@@ -415,7 +435,10 @@ func TestArtifactCollector_ReattachesOnMtimeChange(t *testing.T) {
 			"sess-1": {
 				// Same path as the baseline, but a newer mtime: the agent
 				// modified it during this turn, so it must be attached.
-				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:21:00Z")},
+				{
+					Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile,
+					Size: 4, ModTime: mustParseTime("2026-07-10T10:21:00Z"),
+				},
 			},
 		},
 		contents: map[string][]byte{
@@ -449,8 +472,14 @@ func TestArtifactCollector_SkipsOversize(t *testing.T) {
 	src := &fakeSandboxSource{
 		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
-				{Name: "huge.bin", Path: "/workspace/output/huge.bin", Type: sandbox.RemoteEntryFile, Size: 1024, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
-				{Name: "ok.txt", Path: "/workspace/output/ok.txt", Type: sandbox.RemoteEntryFile, Size: 3, ModTime: mustParseTime("2026-07-10T10:20:34Z")},
+				{
+					Name: "huge.bin", Path: "/workspace/output/huge.bin", Type: sandbox.RemoteEntryFile,
+					Size: 1024, ModTime: mustParseTime("2026-07-10T10:20:33Z"),
+				},
+				{
+					Name: "ok.txt", Path: "/workspace/output/ok.txt", Type: sandbox.RemoteEntryFile,
+					Size: 3, ModTime: mustParseTime("2026-07-10T10:20:34Z"),
+				},
 			},
 		},
 		contents: map[string][]byte{
@@ -480,7 +509,10 @@ func TestArtifactCollector_SkipsOversizeAfterRead(t *testing.T) {
 	src := &fakeSandboxSource{
 		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
-				{Name: "lying.bin", Path: "/workspace/output/lying.bin", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
+				{
+					Name: "lying.bin", Path: "/workspace/output/lying.bin", Type: sandbox.RemoteEntryFile,
+					Size: 4, ModTime: mustParseTime("2026-07-10T10:20:33Z"),
+				},
 			},
 		},
 		contents: map[string][]byte{
@@ -550,8 +582,14 @@ func TestArtifactCollector_UploadFailureIsPerFile(t *testing.T) {
 	src := &fakeSandboxSource{
 		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
-				{Name: "a.txt", Path: "/workspace/output/a.txt", Type: sandbox.RemoteEntryFile, Size: 1, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
-				{Name: "b.txt", Path: "/workspace/output/b.txt", Type: sandbox.RemoteEntryFile, Size: 1, ModTime: mustParseTime("2026-07-10T10:20:34Z")},
+				{
+					Name: "a.txt", Path: "/workspace/output/a.txt", Type: sandbox.RemoteEntryFile,
+					Size: 1, ModTime: mustParseTime("2026-07-10T10:20:33Z"),
+				},
+				{
+					Name: "b.txt", Path: "/workspace/output/b.txt", Type: sandbox.RemoteEntryFile,
+					Size: 1, ModTime: mustParseTime("2026-07-10T10:20:34Z"),
+				},
 			},
 		},
 		contents: map[string][]byte{
@@ -581,8 +619,14 @@ func TestArtifactCollector_FiltersDirectories(t *testing.T) {
 				// The production ListSessionFiles never yields dirs, but the
 				// collector must defensively skip anything with Type=="dir"
 				// so alternate SandboxArtifactSource impls stay safe.
-				{Name: "sub", Path: "/workspace/output/sub", Type: sandbox.RemoteEntryDir, Size: 0, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
-				{Name: "a.txt", Path: "/workspace/output/a.txt", Type: sandbox.RemoteEntryFile, Size: 1, ModTime: mustParseTime("2026-07-10T10:20:34Z")},
+				{
+					Name: "sub", Path: "/workspace/output/sub", Type: sandbox.RemoteEntryDir,
+					ModTime: mustParseTime("2026-07-10T10:20:33Z"),
+				},
+				{
+					Name: "a.txt", Path: "/workspace/output/a.txt", Type: sandbox.RemoteEntryFile,
+					Size: 1, ModTime: mustParseTime("2026-07-10T10:20:34Z"),
+				},
 			},
 		},
 		contents: map[string][]byte{
@@ -607,7 +651,10 @@ func TestArtifactCollector_BindsResourceToMessage(t *testing.T) {
 	src := &fakeSandboxSource{
 		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
-				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
+				{
+					Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile,
+					Size: 4, ModTime: mustParseTime("2026-07-10T10:20:33Z"),
+				},
 			},
 		},
 		contents: map[string][]byte{
@@ -643,7 +690,10 @@ func TestArtifactCollector_BindFailureDoesNotDropArtifact(t *testing.T) {
 	src := &fakeSandboxSource{
 		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
-				{Name: "a.txt", Path: "/workspace/output/a.txt", Type: sandbox.RemoteEntryFile, Size: 1, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
+				{
+					Name: "a.txt", Path: "/workspace/output/a.txt", Type: sandbox.RemoteEntryFile,
+					Size: 1, ModTime: mustParseTime("2026-07-10T10:20:33Z"),
+				},
 			},
 		},
 		contents: map[string][]byte{"/workspace/output/a.txt": []byte("a")},

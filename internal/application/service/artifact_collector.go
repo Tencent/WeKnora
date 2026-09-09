@@ -211,7 +211,9 @@ func (c *ArtifactCollector) resolveSessionSource(
 	if c.resolver == nil {
 		return c.source, c.source != nil, nil
 	}
-	tenantID, _ := types.SandboxTenantIDFromContext(ctx)
+	// Shared agents resolve configs in their resource tenant, while the
+	// unchanged SandboxTenantID keeps filesystem reads in the session's binding.
+	tenantID, _ := types.TenantIDFromContext(ctx)
 	configID, err := sandboxConfigForExistingSandbox(ctx, c.pinner, sessionID)
 	if err != nil {
 		return nil, false, fmt.Errorf("read sandbox pin: %w", err)
@@ -412,7 +414,8 @@ func (c *ArtifactCollector) collect(
 		// exactly this branch: either the sandbox was already reaped or
 		// the skill wrote to a different directory. Logging the exact
 		// (session, dir) pair makes it a 30-second grep to confirm.
-		logger.Infof(ctx, "[ArtifactCollector] no entries under %s (session=%s) — sandbox reaped or skill wrote elsewhere",
+		logger.Infof(ctx,
+			"[ArtifactCollector] no entries under %s (session=%s); sandbox reaped or skill wrote elsewhere",
 			outputDir, sessionID)
 		return nil, nil
 	}
@@ -555,7 +558,9 @@ func (c *ArtifactCollector) bindArtifactResource(ctx context.Context, ref, messa
 // ReferencedHistory returns only artifacts from this session explicitly named
 // in the answer. Bind these immutable versions to the new message as well, so
 // deleting their original message cannot invalidate a later reference.
-func (c *ArtifactCollector) ReferencedHistory(ctx context.Context, sessionID, messageID, content string) types.MessageArtifacts {
+func (c *ArtifactCollector) ReferencedHistory(
+	ctx context.Context, sessionID, messageID, content string,
+) types.MessageArtifacts {
 	if c == nil || c.store == nil {
 		return nil
 	}

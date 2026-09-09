@@ -8,6 +8,7 @@ import (
 // ArtifactKind is a presentation hint, not permission to execute active content.
 type ArtifactKind string
 
+// Artifact kinds select display icons without granting execution permission.
 const (
 	ArtifactPresentation ArtifactKind = "presentation"
 	ArtifactWebPage      ArtifactKind = "web_page"
@@ -18,6 +19,7 @@ const (
 	ArtifactOther        ArtifactKind = "other"
 )
 
+// ArtifactKindForFile derives a display kind from a file's extension.
 func ArtifactKindForFile(name string) ArtifactKind {
 	switch strings.ToLower(path.Ext(name)) {
 	case ".pptx":

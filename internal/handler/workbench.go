@@ -16,12 +16,28 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 )
 
+type workbenchService interface {
+	Enabled() bool
+	Authorize(context.Context, string) (*types.Session, error)
+	Status(context.Context, string) (*service.WorkbenchStatus, error)
+	Bind(context.Context, string, string) (*service.WorkbenchStatus, error)
+	Files(context.Context, string, sandbox.WorkbenchFileRequest) (*sandbox.WorkbenchFileResult, error)
+	Audit(context.Context, string, int) ([]*types.AuditLog, error)
+	IssueTicket(context.Context, string, string) (*service.WorkbenchTicket, error)
+	ConsumeTicket(context.Context, string, string) (service.WorkbenchIdentity, error)
+	AcquireConsole(context.Context, service.WorkbenchIdentity) (*service.WorkbenchLease, error)
+	OpenTerminal(context.Context, string, sandbox.CommandTerminalRequest) (*service.WorkbenchExecution, error)
+}
+
+// WorkbenchHandler serves authorized workspace files, commands and audit records.
 type WorkbenchHandler struct {
-	service         *service.WorkbenchService
+	service         workbenchService
 	origins         map[string]bool
 	unauthenticated chan struct{}
 	authTimeout     time.Duration
@@ -35,8 +51,13 @@ type WorkbenchHandler struct {
 	shuttingDown    bool
 }
 
+// NewWorkbenchHandler validates the origin allowlist when workbench is enabled.
 func NewWorkbenchHandler(s *service.WorkbenchService) (*WorkbenchHandler, error) {
-	h := &WorkbenchHandler{service: s, origins: make(map[string]bool), unauthenticated: make(chan struct{}, 64), authTimeout: 5 * time.Second, recheckInterval: 5 * time.Second, writeTimeout: 5 * time.Second, consoles: make(map[*workbenchConsole]struct{}), sockets: make(map[io.Closer]struct{})}
+	h := &WorkbenchHandler{
+		service: s, origins: make(map[string]bool), unauthenticated: make(chan struct{}, 64),
+		authTimeout: 5 * time.Second, recheckInterval: 5 * time.Second, writeTimeout: 5 * time.Second,
+		consoles: make(map[*workbenchConsole]struct{}), sockets: make(map[io.Closer]struct{}),
+	}
 	if s == nil || !s.Enabled() {
 		return h, nil
 	}
@@ -130,7 +151,9 @@ func (h *WorkbenchHandler) Shutdown(ctx context.Context) error {
 
 func workbenchOrigin(raw string) (string, error) {
 	u, err := url.Parse(raw)
-	if err != nil || u == nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" || strings.ContainsAny(raw, "\t\r\n ,\\#?") {
+	if err != nil || u == nil || (u.Scheme != "https" && u.Scheme != "http") ||
+		u.Host == "" || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" ||
+		u.ForceQuery || u.Fragment != "" || u.Opaque != "" || strings.ContainsAny(raw, "\t\r\n ,\\#?") {
 		return "", service.ErrWorkbenchInvalid
 	}
 	return u.Scheme + "://" + strings.ToLower(u.Host), nil
@@ -213,9 +236,23 @@ func workbenchError(err error) (int, string, string) {
 }
 
 func workbenchHTTPError(c *gin.Context, err error) {
-	status, code, message := workbenchError(err)
+	status, _, message := workbenchError(err)
+	code := apperrors.ErrServiceUnavailable
+	switch status {
+	case http.StatusBadRequest, http.StatusRequestEntityTooLarge:
+		code = apperrors.ErrBadRequest
+	case http.StatusUnauthorized:
+		code = apperrors.ErrUnauthorized
+	case http.StatusForbidden:
+		code = apperrors.ErrForbidden
+	case http.StatusNotFound:
+		code = apperrors.ErrNotFound
+	case http.StatusConflict:
+		code = apperrors.ErrConflict
+	}
 	c.Header("Cache-Control", "no-store")
-	c.AbortWithStatusJSON(status, gin.H{"success": false, "error": gin.H{"code": code, "message": message}})
+	_ = c.Error(&apperrors.AppError{Code: code, Message: message, HTTPCode: status})
+	c.Abort()
 }
 
 func decodeWorkbenchJSON(c *gin.Context, value any) error {
@@ -232,11 +269,13 @@ func decodeWorkbenchJSON(c *gin.Context, value any) error {
 	return nil
 }
 
+// Status reads the session binding and advertised capabilities.
 func (h *WorkbenchHandler) Status(c *gin.Context) {
 	data, err := h.service.Status(c.Request.Context(), workbenchSessionID(c))
 	workbenchJSON(c, data, err)
 }
 
+// Bind initializes the workspace on the requested sandbox configuration.
 func (h *WorkbenchHandler) Bind(c *gin.Context) {
 	var request struct {
 		ConfigID string `json:"config_id"`
@@ -249,6 +288,7 @@ func (h *WorkbenchHandler) Bind(c *gin.Context) {
 	workbenchJSON(c, data, err)
 }
 
+// Ticket issues a single-use, origin-bound command console credential.
 func (h *WorkbenchHandler) Ticket(c *gin.Context) {
 	if !h.Enabled() {
 		workbenchHTTPError(c, service.ErrWorkbenchDisabled)
@@ -263,24 +303,32 @@ func (h *WorkbenchHandler) Ticket(c *gin.Context) {
 	workbenchJSON(c, data, err)
 }
 
+// ListFiles enumerates one directory within the session output root.
 func (h *WorkbenchHandler) ListFiles(c *gin.Context) {
-	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), sandbox.WorkbenchFileRequest{Operation: "list", Path: c.Query("path")})
+	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), sandbox.WorkbenchFileRequest{
+		Operation: "list", Path: c.Query("path"),
+	})
 	workbenchJSON(c, data, err)
 }
 
+// Download serves an output file as an attachment, never as active content.
 func (h *WorkbenchHandler) Download(c *gin.Context) {
 	filePath := c.Query("path")
-	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), sandbox.WorkbenchFileRequest{Operation: "read", Path: filePath})
+	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), sandbox.WorkbenchFileRequest{
+		Operation: "read", Path: filePath,
+	})
 	if err != nil {
 		workbenchHTTPError(c, err)
 		return
 	}
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": path.Base(filePath)}))
+	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": path.Base(filePath)})
+	c.Header("Content-Disposition", disposition)
 	c.Data(http.StatusOK, "application/octet-stream", data.Content)
 }
 
+// Upload validates a bounded multipart request before writing an output file.
 func (h *WorkbenchHandler) Upload(c *gin.Context) {
 	if _, err := h.service.Authorize(c.Request.Context(), workbenchSessionID(c)); err != nil {
 		workbenchHTTPError(c, err)
@@ -357,6 +405,7 @@ func readWorkbenchUpload(c *gin.Context) (sandbox.WorkbenchFileRequest, error) {
 	return sandbox.WorkbenchFileRequest{Operation: "write", Path: destination, Content: content}, nil
 }
 
+// Directory creates a directory inside the session output root.
 func (h *WorkbenchHandler) Directory(c *gin.Context) {
 	var request struct {
 		Path string `json:"path"`
@@ -365,10 +414,13 @@ func (h *WorkbenchHandler) Directory(c *gin.Context) {
 		workbenchHTTPError(c, err)
 		return
 	}
-	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), sandbox.WorkbenchFileRequest{Operation: "mkdir", Path: request.Path})
+	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), sandbox.WorkbenchFileRequest{
+		Operation: "mkdir", Path: request.Path,
+	})
 	workbenchJSON(c, data, err)
 }
 
+// Rename moves an output path without overwriting an existing destination.
 func (h *WorkbenchHandler) Rename(c *gin.Context) {
 	var request struct {
 		Path    string `json:"path"`
@@ -378,15 +430,21 @@ func (h *WorkbenchHandler) Rename(c *gin.Context) {
 		workbenchHTTPError(c, err)
 		return
 	}
-	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), sandbox.WorkbenchFileRequest{Operation: "rename", Path: request.Path, NewPath: request.NewPath})
+	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), sandbox.WorkbenchFileRequest{
+		Operation: "rename", Path: request.Path, NewPath: request.NewPath,
+	})
 	workbenchJSON(c, data, err)
 }
 
+// Remove deletes an output file or empty directory.
 func (h *WorkbenchHandler) Remove(c *gin.Context) {
-	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), sandbox.WorkbenchFileRequest{Operation: "remove", Path: c.Query("path")})
+	data, err := h.service.Files(c.Request.Context(), workbenchSessionID(c), sandbox.WorkbenchFileRequest{
+		Operation: "remove", Path: c.Query("path"),
+	})
 	workbenchJSON(c, data, err)
 }
 
+// Audit lists the bounded audit history for this session and user.
 func (h *WorkbenchHandler) Audit(c *gin.Context) {
 	limit, err := strconv.Atoi(c.DefaultQuery("limit", "100"))
 	if err != nil || limit < 1 {

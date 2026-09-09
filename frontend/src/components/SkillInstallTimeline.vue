@@ -1,23 +1,48 @@
 <template>
   <section class="skill-timeline" :class="{ 'skill-timeline--compact': compact }" :aria-busy="loading">
-    <t-loading v-if="loading && messages.length === 0" size="small" />
-    <p v-else-if="messages.length === 0" class="skill-timeline__empty">
-      {{ live
-        ? $t('settings.sandbox.skillTranscriptWaiting')
-        : $t('settings.sandbox.skillTranscriptEmpty') }}
-    </p>
-    <template v-else>
-      <div v-for="(msg, index) in messages" :key="msg.id || index" class="skill-timeline__turn">
-        <pre v-if="msg.role === 'user'" class="skill-timeline__prompt">{{ msg.content }}</pre>
-        <AgentStreamDisplay
-          v-else
-          :session="msg"
-          :session-id="sessionId"
-          :user-query="''"
-          embedded-mode
-        />
+    <div class="skill-timeline__content">
+      <t-loading v-if="loading && messages.length === 0" size="small" />
+      <p v-else-if="messages.length === 0" class="skill-timeline__empty">
+        {{ live
+          ? $t('settings.sandbox.skillTranscriptWaiting')
+          : $t('settings.sandbox.skillTranscriptEmpty') }}
+      </p>
+      <template v-else>
+        <div v-for="(msg, index) in messages" :key="msg.id || index" class="skill-timeline__turn">
+          <pre v-if="msg.role === 'user'" class="skill-timeline__prompt">{{ msg.content }}</pre>
+          <AgentStreamDisplay
+            v-else
+            :session="msg"
+            :session-id="sessionId"
+            :user-query="''"
+            embedded-mode
+          />
+        </div>
+      </template>
+      <div v-for="item in guidance.messages" :key="item.id" class="skill-timeline__guidance-message">
+        <span>{{ $t(`settings.sandbox.skillGuidance.${item.status}`) }}</span>
+        <p>{{ item.content }}</p>
       </div>
-    </template>
+    </div>
+    <div v-if="live || canRetry" class="skill-timeline__guidance">
+      <t-textarea
+        v-model="guidanceText"
+        :placeholder="$t('settings.sandbox.skillGuidance.placeholder')"
+        :maxlength="10000"
+        :autosize="{ minRows: 2, maxRows: 6 }"
+        :disabled="sendingGuidance"
+      />
+      <p v-if="guidanceError" role="alert" class="skill-timeline__guidance-error">{{ guidanceError }}</p>
+      <div class="skill-timeline__guidance-actions">
+        <span v-if="live && !guidance.accepting">{{ $t('settings.sandbox.skillGuidance.unavailable') }}</span>
+        <t-button
+          size="small"
+          :loading="sendingGuidance"
+          :disabled="!guidanceText.trim() || (live && !guidance.accepting)"
+          @click="sendGuidance"
+        >{{ $t(live ? 'settings.sandbox.skillGuidance.send' : 'settings.sandbox.skillGuidance.retry') }}</t-button>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -26,9 +51,10 @@ import { onUnmounted, reactive, ref, watch } from 'vue'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { useChatStreamHandler } from '@/composables/useChatStreamHandler'
 import { getMessageList } from '@/api/chat'
-import { configSkillTranscriptUrl } from '@/api/system'
+import { configSkillTranscriptUrl, getConfigSkillGuidance, steerConfigSkill, reinstallConfigSkill, type SkillInstallGuidanceState } from '@/api/system'
 import { getApiBaseUrl } from '@/utils/api-base'
 import { generateRandomString } from '@/utils/index'
+import { makeSteerClientId } from '@/utils/steerId'
 import AgentStreamDisplay from '@/views/chat/components/AgentStreamDisplay.vue'
 import i18n from '@/i18n'
 
@@ -43,7 +69,79 @@ const props = defineProps<{
   // not hit /transcript.
   live?: boolean
   compact?: boolean
+  canRetry?: boolean
 }>()
+
+const emit = defineEmits<{ restarted: [] }>()
+const guidance = ref<SkillInstallGuidanceState>({ accepting: false, messages: [] })
+const guidanceText = ref('')
+const guidanceError = ref('')
+const sendingGuidance = ref(false)
+let guidanceEpoch = 0
+let guidanceTimer: ReturnType<typeof setTimeout> | undefined
+// Keep the same ID after an uncertain response so Retry cannot enqueue twice.
+let pendingSend: { messageId: string; content: string; id: string } | undefined
+
+async function refreshGuidance(epoch: number) {
+  try {
+    const res = await getConfigSkillGuidance(props.configId, props.skillId)
+    if (epoch !== guidanceEpoch) return
+    guidance.value = res.data
+  } catch {
+    if (epoch === guidanceEpoch) guidance.value.accepting = false
+  }
+  if (epoch === guidanceEpoch && props.live) {
+    guidanceTimer = setTimeout(() => void refreshGuidance(epoch), 1500)
+  }
+}
+
+async function sendGuidance() {
+  const content = guidanceText.value.trim()
+  if (!content || sendingGuidance.value || (props.live ? !guidance.value.accepting : !props.canRetry)) return
+  const epoch = guidanceEpoch
+  const target = { configId: props.configId, skillId: props.skillId, messageId: props.messageId }
+  sendingGuidance.value = true
+  guidanceError.value = ''
+  try {
+    if (props.live) {
+      if (!pendingSend || pendingSend.messageId !== target.messageId || pendingSend.content !== content) {
+        pendingSend = { messageId: target.messageId, content, id: makeSteerClientId() }
+      }
+      await steerConfigSkill(target.configId, target.skillId, {
+        expected_message_id: target.messageId, steer_id: pendingSend.id, content,
+      })
+      if (epoch !== guidanceEpoch) return
+      // A failed refresh after a successful POST must not turn Retry into a duplicate send.
+      if (!guidance.value.messages.some(item => item.id === pendingSend!.id)) {
+        guidance.value.messages.push({ id: pendingSend.id, content, status: 'pending' })
+      }
+      pendingSend = undefined
+    } else {
+      await reinstallConfigSkill(target.configId, target.skillId, content)
+      if (epoch !== guidanceEpoch) return
+      emit('restarted')
+    }
+    guidanceText.value = ''
+  } catch (err: any) {
+    if (epoch === guidanceEpoch) {
+      guidanceError.value = err?.response?.data?.error?.message || err?.message || i18n.global.t('settings.sandbox.skillGuidance.failed')
+    }
+  } finally {
+    sendingGuidance.value = false
+  }
+}
+
+watch(
+  () => [props.configId, props.skillId, props.messageId, props.live] as const,
+  () => {
+    const epoch = ++guidanceEpoch
+    clearTimeout(guidanceTimer)
+    guidance.value = { accepting: false, messages: [] }
+    if (props.configId && props.skillId) void refreshGuidance(epoch)
+  },
+  { immediate: true },
+)
+onUnmounted(() => { guidanceEpoch++; clearTimeout(guidanceTimer) })
 
 const messages = reactive<any[]>([])
 const loading = ref(false)
@@ -233,7 +331,53 @@ onUnmounted(stop)
 </script>
 
 <style scoped lang="less">
+.skill-timeline__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.skill-timeline__guidance {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  flex-shrink: 0;
+  margin-top: 12px;
+  padding-top: 12px;
+  background: var(--td-bg-color-container, #fff);
+  border-top: 1px solid var(--td-component-stroke, #e7e7e7);
+
+  // Cover the timeline's padding too, so scrolling text cannot peek around
+  // the sticky composer. Its z-index keeps this backdrop above the transcript.
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0 calc(-1 * var(--skill-guidance-gutter, 12px)) calc(-1 * var(--skill-guidance-bottom-gap, 12px));
+    z-index: -1;
+    background: inherit;
+    pointer-events: none;
+  }
+}
+.skill-timeline__guidance-message {
+  margin: 8px 0;
+  padding: 8px;
+  background: var(--td-bg-color-container);
+  border-radius: 6px;
+  span { font-size: 12px; color: var(--td-text-color-secondary); }
+  p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+.skill-timeline__guidance-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+  span { flex: 1; font-size: 12px; color: var(--td-text-color-secondary); }
+}
+.skill-timeline__guidance-error { color: var(--td-error-color); font-size: 12px; }
+
 .skill-timeline {
+  display: flex;
+  flex-direction: column;
   padding: 12px;
   background: var(--td-bg-color-secondarycontainer, #f7f7f7);
   border: 1px solid var(--td-component-stroke, #e7e7e7);

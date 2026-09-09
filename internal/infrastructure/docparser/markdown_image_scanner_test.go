@@ -201,3 +201,39 @@ func TestSplitMarkdownImageTarget(t *testing.T) {
 		})
 	}
 }
+
+func TestStripMarkdownImages(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "simple image",
+			input: "before ![a](images/a.png) after",
+			want:  "before  after",
+		},
+		{
+			name:  "title containing right paren",
+			input: `![a](images/a.png "阶段 1) 结果")`,
+			want:  "",
+		},
+		{
+			name:  "prose around image",
+			input: "See figure: ![fig](resource://x) below.",
+			want:  "See figure:  below.",
+		},
+		{
+			name:  "escaped image marker is kept",
+			input: `\![a](images/a.png) kept`,
+			want:  `\![a](images/a.png) kept`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := StripMarkdownImages(tt.input); got != tt.want {
+				t.Fatalf("StripMarkdownImages(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

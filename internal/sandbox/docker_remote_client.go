@@ -208,7 +208,9 @@ func (h *dockerSandboxHandle) Provider() RemoteProvider    { return SandboxTypeD
 func (h *dockerSandboxHandle) Metadata() map[string]string { return h.metadata }
 
 // Provider identifies this backend.
-func (c *DockerRemoteClient) Provider() RemoteProvider           { return SandboxTypeDocker }
+func (c *DockerRemoteClient) Provider() RemoteProvider { return SandboxTypeDocker }
+
+// SupportsPrivateWorkbenchExec permits helpers that keep stdin out of logs.
 func (c *DockerRemoteClient) SupportsPrivateWorkbenchExec() bool { return true }
 
 // Capabilities reports what this backend can do.
@@ -229,8 +231,9 @@ func (c *DockerRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		// docker commit produces a local image whose tag is a template ID,
 		// which is what skill install uses on Cube/E2B. The snapshot is
 		// filesystem-only (no memory) and lives on this daemon.
-		SupportsSnapshots: true,
-		SupportsVolumes:   false,
+		SupportsSnapshots:        true,
+		SupportsVolumes:          false,
+		SupportsCommandTerminals: true,
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -14,49 +13,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These endpoints and tokens are public development-only values from
-// .runtime/README.md. Never fall back to a user's environment or credentials.
-//
-//	WORKBENCH_FILES_LOCAL_INTEGRATION=1 go test -tags=workbench_integration \
-//	  ./internal/sandbox -run '^TestWorkbenchFilesLocalIntegration' -v -timeout=12m
-func TestWorkbenchFilesLocalIntegration(t *testing.T) {
-	if os.Getenv("WORKBENCH_FILES_LOCAL_INTEGRATION") != "1" {
-		t.Skip("set WORKBENCH_FILES_LOCAL_INTEGRATION=1 for the documented local runtime")
-	}
+// Opt in with -tags=workbench_integration and dedicated WORKBENCH_TEST_* settings.
+// Docker and E2B are selected independently; either may run on a remote host.
+func TestWorkbenchFilesIntegration(t *testing.T) {
 	for _, backend := range []SandboxType{SandboxTypeDocker, SandboxTypeE2B} {
 		t.Run(string(backend), func(t *testing.T) {
-			cfg := DefaultConfig()
-			cfg.Type = backend
-			cfg.AllowPrivateEndpoints = true
-			cfg.DockerHost = "unix:///var/run/docker.sock"
-			cfg.DockerImage = "weknora-wb-sandbox:python-pptx-v1"
-			cfg.E2BAPIURL = "http://127.0.0.1:18080/e2b/v1"
-			cfg.E2BProxyURL = "http://127.0.0.1:18080"
-			cfg.E2BSandboxDomain = "localhost"
-			cfg.E2BAPIKey = "weknora-wb-local-api-token-00000001"
-			cfg.E2BTemplate = "weknora-wb-python"
-			cfg.E2BSandboxTTL = 10 * time.Minute
-			cfg.E2BHTTPTimeout = time.Minute
-			var client RemoteSandboxClient
-			var err error
-			if backend == SandboxTypeDocker {
-				client, err = NewDockerRemoteClient(cfg)
-			} else {
-				client, err = NewE2BRemoteClientWithPool(cfg,
-					NewSandboxGatewayTransportPoolWithPolicy(nil, OutboundURLPolicy{AllowPrivate: true}))
-			}
-			require.NoError(t, err)
+			cfg := workbenchRealBackendConfig(t, backend)
+			client := newWorkbenchIntegrationClient(t, cfg)
 			ctx, cancel := context.WithTimeout(types.WithSandboxTenantID(context.Background(), 777), 5*time.Minute)
 			defer cancel()
 			require.NoError(t, client.Health(ctx))
 			manager, err := NewSessionBoundManager(SessionBoundManagerConfig{
 				Config: cfg, Client: client, Store: NewMemorySessionSandboxBindingStore(),
-				Checker: PermissiveSessionExistenceChecker{}, ConfigID: "workbench-files-integration", SkipHealthProbe: true,
+				Checker:  PermissiveSessionExistenceChecker{},
+				ConfigID: "workbench-files-integration", SkipHealthProbe: true,
 			})
 			require.NoError(t, err)
-			session := fmt.Sprintf("weknora-wb-files-%d", time.Now().UnixNano())
+			session := fmt.Sprintf("weknora-wb-files-%s-%d", backend, time.Now().UnixNano())
 			t.Cleanup(func() {
-				cleanupCtx, cleanupCancel := context.WithTimeout(types.WithSandboxTenantID(context.Background(), 777), time.Minute)
+				cleanupCtx, cleanupCancel := context.WithTimeout(
+					types.WithSandboxTenantID(context.Background(), 777), time.Minute,
+				)
 				defer cleanupCancel()
 				require.NoError(t, manager.DestroySession(cleanupCtx, session))
 			})
@@ -93,7 +70,9 @@ func TestWorkbenchFilesLocalIntegration(t *testing.T) {
 			content := bytes.Repeat([]byte{0, 255, 2, 3}, WorkbenchMaxFileBytes/4)
 			run(WorkbenchFileRequest{Operation: "write", Path: "large.bin", Content: content})
 			require.Equal(t, content, run(WorkbenchFileRequest{Operation: "read", Path: "large.bin"}).Content)
-			fails(WorkbenchFileRequest{Operation: "write", Path: "over.bin", Content: append(content, 0)}, ErrWorkbenchTooLarge)
+			fails(WorkbenchFileRequest{
+				Operation: "write", Path: "over.bin", Content: append(content, 0),
+			}, ErrWorkbenchTooLarge)
 			run(WorkbenchFileRequest{Operation: "remove", Path: "large.bin"})
 			t.Log("8 MiB write/read passed; exercising hostile filesystem fixtures")
 

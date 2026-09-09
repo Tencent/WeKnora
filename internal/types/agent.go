@@ -359,6 +359,8 @@ type ToolResult struct {
 
 // ToolCall represents a single tool invocation within an agent step
 type ToolCall struct {
+	// Target identifies the actual proxy target; Name/Args retain the model call for replay.
+	Target           *ToolCallTarget        `json:"target,omitempty"`
 	ID               string                 `json:"id"`                          // Function call ID from LLM
 	Name             string                 `json:"name"`                        // Tool name
 	Args             map[string]interface{} `json:"args"`                        // Tool arguments
@@ -366,6 +368,31 @@ type ToolCall struct {
 	Reflection       string                 `json:"reflection,omitempty"`        // Agent's reflection on this tool call result (if enabled)
 	Duration         int64                  `json:"duration"`                    // Execution time in milliseconds
 	ProviderMetadata ToolCallMetadata       `json:"provider_metadata,omitempty"` // Provider-specific tool-call state for replay
+}
+
+// ToolCallTarget identifies a resolved invocation without rewriting the model's
+// function call, which must be preserved for history replay and provider state.
+type ToolCallTarget struct {
+	Name        string                 `json:"name"`
+	Args        map[string]interface{} `json:"args"`
+	ServiceName string                 `json:"service_name"`
+	ToolName    string                 `json:"tool_name"`
+}
+
+// ExecutionName returns the resolved target name for presentation and tracing.
+func (t ToolCall) ExecutionName() string {
+	if t.Target != nil {
+		return t.Target.Name
+	}
+	return t.Name
+}
+
+// ExecutionArgs returns the resolved target arguments without changing replay data.
+func (t ToolCall) ExecutionArgs() map[string]interface{} {
+	if t.Target != nil {
+		return t.Target.Args
+	}
+	return t.Args
 }
 
 // PipelineToolCallIDPrefix marks a persisted tool call the model never made.
@@ -386,6 +413,12 @@ func IsPipelineToolCallID(id string) bool {
 type AgentStep struct {
 	Iteration int    `json:"iteration"` // Iteration number (0-indexed)
 	Thought   string `json:"thought"`   // LLM's reasoning/thinking (Think phase)
+	// UserMessagesBefore records consumed steer rows in delivery order, before
+	// this model response. Unlike timestamps, this remains unambiguous on replay.
+	UserMessagesBefore []string `json:"user_messages_before,omitempty"`
+	// IntermediateAnswer preserves a plain answer followed by a loop-end steer.
+	// The canonical final answer is still stored in Message.Content.
+	IntermediateAnswer bool `json:"intermediate_answer,omitempty"`
 	// ReasoningContent stores the OpenAI-protocol reasoning_content emitted by the
 	// model in this round. Persisted on AgentStep so cross-turn replay can put it
 	// back on the assistant message — required by MiMo / DeepSeek V3.2+ thinking
@@ -412,12 +445,13 @@ func (s *AgentStep) GetObservations() []string {
 
 // AgentState tracks the execution state of an agent across iterations
 type AgentState struct {
-	CurrentRound  int             `json:"current_round"`  // Current round number
-	RoundSteps    []AgentStep     `json:"round_steps"`    // All steps taken so far in the current round
-	IsComplete    bool            `json:"is_complete"`    // Whether agent has finished
-	FinalAnswer   string          `json:"final_answer"`   // The final answer to the query
-	KnowledgeRefs []*SearchResult `json:"knowledge_refs"` // Collected knowledge references
-	TurnUsage     TokenUsage      `json:"turn_usage"`     // LLM token usage accumulated across every round of this turn
+	PendingSteerMessages []string        `json:"-"`
+	CurrentRound         int             `json:"current_round"`  // Current round number
+	RoundSteps           []AgentStep     `json:"round_steps"`    // All steps taken so far in the current round
+	IsComplete           bool            `json:"is_complete"`    // Whether agent has finished
+	FinalAnswer          string          `json:"final_answer"`   // The final answer to the query
+	KnowledgeRefs        []*SearchResult `json:"knowledge_refs"` // Collected knowledge references
+	TurnUsage            TokenUsage      `json:"turn_usage"`     // LLM usage accumulated across this turn
 }
 
 // FunctionDefinition represents a function definition for LLM function calling

@@ -18,7 +18,10 @@ func TestWorkbenchSocketAuthTimeoutAndSemaphore(t *testing.T) {
 	f.h.authTimeout = 100 * time.Millisecond
 	f.h.unauthenticated = make(chan struct{}, 1)
 	first := f.socket(t)
-	_, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(f.server.URL, "http")+"/api/v1/sandbox-terminal", http.Header{"Origin": []string{"http://127.0.0.1:15173"}})
+	_, response, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(f.server.URL, "http")+"/api/v1/sandbox-terminal",
+		http.Header{"Origin": []string{"http://127.0.0.1:15173"}},
+	)
 	require.Error(t, err)
 	require.Equal(t, http.StatusServiceUnavailable, response.StatusCode)
 	_ = response.Body.Close()
@@ -43,7 +46,10 @@ func TestWorkbenchShutdownClosesUnauthenticatedSocket(t *testing.T) {
 
 func TestWorkbenchSocketRejectsQueryCredential(t *testing.T) {
 	f := newWorkbenchHandlerFixture(t)
-	_, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(f.server.URL, "http")+"/api/v1/sandbox-terminal?ticket=not-accepted", http.Header{"Origin": []string{"http://127.0.0.1:15173"}})
+	_, response, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(f.server.URL, "http")+"/api/v1/sandbox-terminal?ticket=not-accepted",
+		http.Header{"Origin": []string{"http://127.0.0.1:15173"}},
+	)
 	require.Error(t, err)
 	require.Equal(t, http.StatusBadRequest, response.StatusCode)
 	_ = response.Body.Close()
@@ -107,10 +113,14 @@ func TestWorkbenchBackpressureCancelsAndOutputLimitClosesProcess(t *testing.T) {
 	ctx, cancel = context.WithCancel(f.ctx)
 	defer cancel()
 	command := &workbenchCommand{cancel: cancel}
-	w = &workbenchConsole{handler: f.h, ctx: ctx, cancel: cancel, identity: service.WorkbenchIdentity{TenantID: 7, UserID: "alice", SessionID: "session"}, outgoing: make(chan workbenchOutput, 32), active: command}
+	w = &workbenchConsole{
+		handler: f.h, ctx: ctx, cancel: cancel,
+		identity: service.WorkbenchIdentity{TenantID: 7, UserID: "alice", SessionID: "session"},
+		outgoing: make(chan workbenchOutput, 32), active: command,
+	}
 	w.outputBytes.Store(service.WorkbenchMaxOutputBytes)
 	w.workers.Add(1)
-	w.execute(ctx, command, sandbox.TerminalRequest{Command: "echo excess", Cols: 80, Rows: 24})
+	w.execute(ctx, command, sandbox.CommandTerminalRequest{Command: "echo excess", Cols: 80, Rows: 24})
 	terminal := <-f.manager.terminals
 	require.True(t, terminal.closed.Load())
 	require.Error(t, ctx.Err())

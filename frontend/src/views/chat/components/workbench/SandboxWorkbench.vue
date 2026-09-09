@@ -26,8 +26,20 @@
         <t-button type="submit" :loading="binding" :disabled="!configId || policyDisabled">{{ t('workbench.bind') }}</t-button>
         <span v-if="!configsLoading && !configs.length" class="binding-note">{{ t('workbench.noConfigs') }}</span>
         <span v-if="policyDisabled" class="binding-note">{{ t('workbench.states.policy_denied') }}</span>
-        <span v-if="configError" class="workbench-error" role="alert">{{ configError }}</span>
       </form>
+      <div v-else-if="status?.config_id" class="workbench-binding">
+        <t-button
+          data-workbench-reinitialize
+          variant="outline"
+          :loading="binding"
+          :disabled="loading || policyDisabled"
+          :title="t('workbench.reinitializeHint')"
+          @click="bind"
+        >
+          {{ t('workbench.reinitialize') }}
+        </t-button>
+      </div>
+      <div v-if="configError" class="workbench-error" role="alert">{{ configError }}</div>
       <details v-if="status?.limits && status.config_id" class="workbench-limits">
         <summary>{{ t('workbench.limits') }}</summary>
         <dl>
@@ -45,12 +57,14 @@
         <t-tab-panel value="audit" :label="t('workbench.audit')" />
       </t-tabs>
       <WorkbenchTerminal
-        v-if="canUseTerminal" v-show="tab === 'terminal'" :api="api" :signal="scope.signal"
+        v-if="canUseTerminal" v-show="tab === 'terminal'" :key="`terminal:${runtimeRevision}`"
+        :api="api" :signal="scope.signal"
         :active="tab === 'terminal'" @changed="onTerminalChanged"
       />
       <div v-else-if="tab === 'terminal' && !loading" class="workbench-empty">{{ capabilityLabel('terminal') }}</div>
       <WorkbenchFiles
-        v-if="canUseFiles" v-show="tab === 'files'" :api="api" :signal="scope.signal"
+        v-if="canUseFiles" v-show="tab === 'files'" :key="`files:${runtimeRevision}`"
+        :api="api" :signal="scope.signal"
         :active="tab === 'files'" :revision="fileRevision" :max-bytes="maxBytes"
       />
       <div v-else-if="tab === 'files' && !loading" class="workbench-empty">{{ capabilityLabel('files') }}</div>
@@ -91,6 +105,7 @@ const configsLoading = ref(false)
 const policyDisabled = ref(false)
 const binding = ref(false)
 const tab = ref('terminal')
+const runtimeRevision = ref(0)
 const fileRevision = ref(0)
 const recordRevision = ref(0)
 const media = window.matchMedia('(max-width: 1199px)')
@@ -153,15 +168,27 @@ async function refreshStatus() {
 }
 
 async function bind() {
-  if (!configId.value || binding.value || policyDisabled.value || scope.signal.aborted) return
+  const targetConfigId = status.value?.config_id || configId.value
+  if (!targetConfigId || binding.value || policyDisabled.value || scope.signal.aborted) return
   ++statusRequest
   binding.value = true
   configError.value = ''
+  statusError.value = ''
   try {
-    const result = await api.bind(configId.value)
-    if (!scope.signal.aborted) { status.value = result; fileRevision.value++; recordRevision.value++ }
-  } catch (error) { if (!scope.signal.aborted) configError.value = workbenchError(error) || t('workbench.requestFailed') }
-  finally { if (!scope.signal.aborted) { binding.value = false; loading.value = false } }
+    const result = await api.bind(targetConfigId)
+    if (scope.signal.aborted) return
+    status.value = result
+    runtimeRevision.value++
+    fileRevision.value++
+    recordRevision.value++
+  } catch (error) {
+    if (!scope.signal.aborted) configError.value = workbenchError(error) || t('workbench.requestFailed')
+  } finally {
+    if (!scope.signal.aborted) {
+      binding.value = false
+      loading.value = false
+    }
+  }
 }
 
 function onTerminalChanged() {

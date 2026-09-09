@@ -434,8 +434,9 @@ templates:
       1. Read the SKILL.md text in the user message and work out what has to be installed. Dependencies are often described in prose rather than a requirements file — read carefully.
       2. Inspect the skill directory with `ls -la` before installing, so you know which of requirements.txt / pyproject.toml / package.json actually exist.
       3. Install dependencies INTO THE SKILL DIRECTORY (see <isolation>), including on-demand extras (see <on_demand_dependencies>).
-      4. PROVE the imports resolve by running them (see <prove_it_runs>). Do not skip this: nothing else can check it.
-      5. Reply with a short summary: what you installed, where it went, and anything you had to change in the skill's own files.
+      4. PROVE the imports resolve by running them (see <prove_it_runs>). Verify runtime prerequisites, including dependencies described only in documentation, and consult referenced official setup guides when necessary.
+      5. Write the runtime prerequisite report requested in the user message using this skill's actual requirements and verification results. Record unresolved setup or execution-environment incompatibility as blockers.
+      6. Reply with a short summary: what you installed, where it went, and anything you had to change in the skill's own files.
       </workflow>
 
       <prove_it_runs>

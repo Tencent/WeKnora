@@ -22,10 +22,13 @@ var terminalRunner string
 //go:embed terminal_control.py
 var terminalControl string
 
-const terminalCleanupTimeout = 10 * time.Second
-const terminalOperationTimeout = 5 * time.Second
-const terminalBufferLimit = 256 * 1024
+const (
+	terminalCleanupTimeout   = 10 * time.Second
+	terminalOperationTimeout = 5 * time.Second
+	terminalBufferLimit      = 256 * 1024
+)
 
+// ErrTerminalOutputLimit stops command PTYs whose unread output fills the buffer.
 var ErrTerminalOutputLimit = errors.New("sandbox: terminal unread output exceeds 256 KiB")
 
 type terminalProcess struct {
@@ -37,7 +40,7 @@ type terminalProcess struct {
 }
 
 type terminalResult struct {
-	exit TerminalExit
+	exit CommandTerminalExit
 	err  error
 }
 
@@ -58,9 +61,11 @@ type commandTerminal struct {
 	ops       context.Context
 }
 
-func startCommandTerminal(ctx context.Context, req TerminalRequest, client RemoteSandboxClient,
-	handle RemoteSandboxHandle, open func(context.Context, []string, string, TerminalRequest) (*terminalProcess, error),
-) (Terminal, error) {
+func startCommandTerminal(
+	ctx context.Context, req CommandTerminalRequest, client RemoteSandboxClient,
+	handle RemoteSandboxHandle,
+	open func(context.Context, []string, string, CommandTerminalRequest) (*terminalProcess, error),
+) (CommandTerminal, error) {
 	req, err := normalizeTerminalRequest(req)
 	if err != nil {
 		return nil, err
@@ -69,9 +74,11 @@ func startCommandTerminal(ctx context.Context, req TerminalRequest, client Remot
 		return nil, err
 	}
 	token := "weknora-terminal-" + uuid.NewString()
-	argv := []string{"python3", "-I", "-u", "-c", terminalRunner, token,
+	argv := []string{
+		"python3", "-I", "-u", "-c", terminalRunner, token,
 		strconv.FormatFloat(req.Timeout.Seconds(), 'f', 9, 64), strconv.Itoa(req.CPUSeconds),
-		strconv.FormatInt(req.MemoryBytes, 10), strconv.Itoa(int(req.Cols)), strconv.Itoa(int(req.Rows)), req.Command}
+		strconv.FormatInt(req.MemoryBytes, 10), strconv.Itoa(int(req.Cols)), strconv.Itoa(int(req.Rows)), req.Command,
+	}
 	streamCtx, cancelStream := context.WithTimeout(context.WithoutCancel(ctx), req.Timeout+45*time.Second)
 	stopOpening := context.AfterFunc(ctx, cancelStream)
 	openTimer := time.AfterFunc(30*time.Second, cancelStream)
@@ -84,11 +91,14 @@ func startCommandTerminal(ctx context.Context, req TerminalRequest, client Remot
 		// Never retry it. The runner also enforces its deadline independently.
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalCleanupTimeout)
 		defer cancel()
-		return nil, errors.Join(terminalProviderError("start", err), controlTerminal(cleanupCtx, client, handle, token, "stop"))
+		cleanupErr := controlTerminal(cleanupCtx, client, handle, token, "stop")
+		return nil, errors.Join(terminalProviderError("start", err), cleanupErr)
 	}
 	ops, cancelOps := context.WithCancel(context.WithoutCancel(ctx))
-	t := &commandTerminal{process: process, client: client, handle: handle, token: token,
-		done: make(chan struct{}), stop: make(chan struct{}), ops: ops}
+	t := &commandTerminal{
+		process: process, client: client, handle: handle, token: token,
+		done: make(chan struct{}), stop: make(chan struct{}), ops: ops,
+	}
 	t.readable = sync.NewCond(&t.mu)
 	readDone := make(chan terminalResult, 1)
 	go func() {
@@ -106,19 +116,19 @@ func startCommandTerminal(ctx context.Context, req TerminalRequest, client Remot
 		case result = <-readDone:
 			readFinished = true
 		case <-ctx.Done():
-			result.exit = TerminalExit{ExitCode: -1, Reason: "canceled"}
+			result.exit = CommandTerminalExit{ExitCode: -1, Reason: "canceled"}
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				result.exit.Reason = "timeout"
 			}
 		case <-timer.C:
-			result.exit = TerminalExit{ExitCode: 124, Reason: "timeout"}
+			result.exit = CommandTerminalExit{ExitCode: 124, Reason: "timeout"}
 		case <-t.stop:
-			result.exit = TerminalExit{ExitCode: -1, Reason: "closed"}
+			result.exit = CommandTerminalExit{ExitCode: -1, Reason: "closed"}
 		}
 		if !readFinished || result.err != nil {
 			t.mu.Lock()
 			if t.closed && errors.Is(result.err, io.ErrClosedPipe) {
-				result = terminalResult{exit: TerminalExit{ExitCode: -1, Reason: "closed"}}
+				result = terminalResult{exit: CommandTerminalExit{ExitCode: -1, Reason: "closed"}}
 			}
 			t.mu.Unlock()
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalCleanupTimeout)
@@ -150,7 +160,7 @@ func startCommandTerminal(ctx context.Context, req TerminalRequest, client Remot
 	return t, nil
 }
 
-func terminalExitFor(code int) TerminalExit {
+func terminalExitFor(code int) CommandTerminalExit {
 	reason := "exited"
 	switch code {
 	case 124:
@@ -160,13 +170,17 @@ func terminalExitFor(code int) TerminalExit {
 	case 152:
 		reason = "cpu_limit"
 	}
-	return TerminalExit{ExitCode: code, Reason: reason}
+	return CommandTerminalExit{ExitCode: code, Reason: reason}
 }
 
-func controlTerminal(ctx context.Context, client RemoteSandboxClient, handle RemoteSandboxHandle, token, op string) error {
-	result, err := client.Exec(ctx, handle, RemoteExecRequest{Command: "python3",
-		Args: []string{"-I", "-u", "-c", terminalControl, token, op},
-		User: DefaultSandboxExecUser, Timeout: 6 * time.Second})
+func controlTerminal(
+	ctx context.Context, client RemoteSandboxClient, handle RemoteSandboxHandle, token, op string,
+) error {
+	result, err := client.Exec(ctx, handle, RemoteExecRequest{
+		Command: "python3",
+		Args:    []string{"-I", "-u", "-c", terminalControl, token, op},
+		User:    DefaultSandboxExecUser, Timeout: 6 * time.Second,
+	})
 	if err != nil {
 		return terminalProviderError(op, err)
 	}
@@ -241,12 +255,12 @@ func (t *commandTerminal) Close() error {
 	return t.result.err
 }
 
-func (t *commandTerminal) Wait(ctx context.Context) (TerminalExit, error) {
+func (t *commandTerminal) Wait(ctx context.Context) (CommandTerminalExit, error) {
 	select {
 	case <-t.done:
 		return t.result.exit, t.result.err
 	case <-ctx.Done():
-		return TerminalExit{}, ctx.Err()
+		return CommandTerminalExit{}, ctx.Err()
 	}
 }
 

@@ -230,6 +230,13 @@ func (s *sessionService) AgentQA(
 		}
 	}
 
+	// Mid-run steering: when the caller supplied a sink, the engine will drain
+	// user-appended messages at every round boundary and persist accepted ones
+	// through it. Nil (IM/embed) keeps the old behaviour untouched.
+	if req.SteerSink != nil {
+		engine.SetSteerSink(req.SteerSink)
+	}
+
 	agentQuery := req.Query
 	var agentImageURLs []string
 	if agentModelSupportsVision && len(req.ImageURLs) > 0 {
@@ -477,8 +484,8 @@ func applyPerRequestSkillScope(
 		requested, agentConfig.AllowedSkills, agentConfig.PinnedSkillNames)
 }
 
-// applyPerRequestMCPScope narrows the agent's MCP services to the @MCP mentions
-// for this turn and records the pinned set for the <must_use> hint. It is a
+// applyPerRequestMCPScope pins authorized @MCP mentions for the <must_use> hint,
+// preserving access to the rest of the agent's configured services. It is a
 // no-op when no services were mentioned or MCP selection is disabled.
 func applyPerRequestMCPScope(
 	ctx context.Context,
@@ -495,22 +502,22 @@ func applyPerRequestMCPScope(
 		return
 	}
 	mentioned := dedupPreservingOrder(requested)
-	effective, mode := resolvePerRequestMCPScope(mentioned, agentPresetMCPs, agentConfig.MCPSelectionMode, isSharedAgent)
+	effective, _ := resolvePerRequestMCPScope(
+		mentioned, agentPresetMCPs, agentConfig.MCPSelectionMode, isSharedAgent,
+	)
 	if len(effective) == 0 {
 		logger.Warnf(ctx, "Ignoring @MCP scope outside agent preset: requested=%v agent=%v shared=%v",
 			requested, agentPresetMCPs, isSharedAgent)
 		return
 	}
-	agentConfig.MCPSelectionMode = mode
-	agentConfig.MCPServices = effective
-	agentConfig.PinnedMCPServiceIDs = intersectPreservingRequestOrder(requested, agentConfig.MCPServices)
-	logger.Infof(ctx, "Applied per-request @MCP scope: requested=%v mode=%s effective=%v",
-		requested, agentConfig.MCPSelectionMode, agentConfig.MCPServices)
+	agentConfig.PinnedMCPServiceIDs = effective
+	logger.Infof(ctx, "Applied per-request @MCP priority: requested=%v mode=%s pinned=%v",
+		requested, agentConfig.MCPSelectionMode, effective)
 }
 
-// resolvePerRequestMCPScope narrows MCP registration for a per-turn @mention.
-// selectionMode "none" rejects all mentions. Shared agents never register MCP
-// services outside the agent preset.
+// resolvePerRequestMCPScope selects authorized mentions for per-turn priority.
+// It does not modify the registration scope. Shared agents may only pin services
+// in the agent preset, and selectionMode "none" rejects all mentions.
 func resolvePerRequestMCPScope(
 	mentioned, agentMCPs []string,
 	selectionMode string,

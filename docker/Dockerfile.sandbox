@@ -68,6 +68,14 @@ RUN groupadd -g 1000 user && \
 RUN mkdir -p /workspace/input /workspace/output && \
     chown -R user:user /workspace
 
+# Classic user@host:path prompt (colored). E2B's provisioner later appends
+# `PS1='\w $ '`; the script reapplies this prompt via PROMPT_COMMAND so
+# Cube, Docker, and E2B all show the same Debian-style line.
+COPY docker/sandbox-pty-prompt.sh /etc/weknora/pty-prompt.sh
+RUN echo '. /etc/weknora/pty-prompt.sh' > /etc/profile.d/zz-weknora-prompt.sh && \
+    echo '. /etc/weknora/pty-prompt.sh' >> /root/.bashrc && \
+    echo '. /etc/weknora/pty-prompt.sh' >> /home/user/.bashrc
+
 WORKDIR /workspace
 USER root
 

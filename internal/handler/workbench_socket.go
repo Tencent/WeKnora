@@ -70,7 +70,12 @@ func (h *WorkbenchHandler) Terminal(c *gin.Context) {
 	var releaseOnce sync.Once
 	releaseSlot := func() { releaseOnce.Do(func() { <-h.unauthenticated }) }
 	defer releaseSlot()
-	upgrader := websocket.Upgrader{HandshakeTimeout: h.authTimeout, ReadBufferSize: 4096, WriteBufferSize: 4096, CheckOrigin: func(r *http.Request) bool { _, err := h.requestOrigin(r, true); return err == nil }}
+	upgrader := websocket.Upgrader{
+		HandshakeTimeout: h.authTimeout,
+		ReadBufferSize:   4096,
+		WriteBufferSize:  4096,
+		CheckOrigin:      func(r *http.Request) bool { _, err := h.requestOrigin(r, true); return err == nil },
+	}
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		return
@@ -116,9 +121,22 @@ func (h *WorkbenchHandler) Terminal(c *gin.Context) {
 	}
 	releaseSlot()
 	limits := service.DefaultWorkbenchLimits()
-	ctx, cancel := context.WithTimeout(identity.Context(c.Request.Context()), time.Duration(limits.SessionTimeoutSeconds)*time.Second)
+	ctx, cancel := context.WithTimeout(
+		identity.Context(c.Request.Context()),
+		time.Duration(limits.SessionTimeoutSeconds)*time.Second,
+	)
 	_ = conn.SetReadDeadline(time.Now().Add(time.Duration(limits.SessionTimeoutSeconds) * time.Second))
-	console := &workbenchConsole{handler: h, conn: conn, ctx: ctx, cancel: cancel, identity: identity, lease: lease, outgoing: make(chan workbenchOutput, 32), cols: 80, rows: 24}
+	console := &workbenchConsole{
+		handler:  h,
+		conn:     conn,
+		ctx:      ctx,
+		cancel:   cancel,
+		identity: identity,
+		lease:    lease,
+		outgoing: make(chan workbenchOutput, 32),
+		cols:     80,
+		rows:     24,
+	}
 	if !h.registerConsole(console) {
 		cancel()
 		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -239,7 +257,7 @@ func (w *workbenchConsole) failure(err error) {
 
 func (w *workbenchConsole) writeLoop() {
 	defer w.workers.Done()
-	defer w.conn.Close()
+	defer func() { _ = w.conn.Close() }()
 	defer w.cancel()
 	for {
 		select {
@@ -279,7 +297,9 @@ func (w *workbenchConsole) recheckLoop() {
 }
 
 func (w *workbenchConsole) handle(frame workbenchClientFrame) bool {
-	if frame.Type != "command" && frame.Command != "" || frame.Type != "stdin" && (frame.Data != "" || frame.Encoding != "") || frame.Type != "resize" && (frame.Cols != 0 || frame.Rows != 0) {
+	if frame.Type != "command" && frame.Command != "" ||
+		frame.Type != "stdin" && (frame.Data != "" || frame.Encoding != "") ||
+		frame.Type != "resize" && (frame.Cols != 0 || frame.Rows != 0) {
 		w.failure(service.ErrWorkbenchInvalid)
 		return false
 	}
@@ -298,12 +318,15 @@ func (w *workbenchConsole) handle(frame workbenchClientFrame) bool {
 			return true
 		}
 		cols, rows := w.cols, w.rows
-		ctx, cancel := context.WithTimeout(w.ctx, time.Duration(service.DefaultWorkbenchLimits().CommandTimeoutSeconds)*time.Second)
+		ctx, cancel := context.WithTimeout(
+			w.ctx,
+			time.Duration(service.DefaultWorkbenchLimits().CommandTimeoutSeconds)*time.Second,
+		)
 		command := &workbenchCommand{cancel: cancel}
 		w.active = command
 		w.mu.Unlock()
 		w.workers.Add(1)
-		go w.execute(ctx, command, sandbox.TerminalRequest{Command: frame.Command, Cols: cols, Rows: rows})
+		go w.execute(ctx, command, sandbox.CommandTerminalRequest{Command: frame.Command, Cols: cols, Rows: rows})
 		return true
 	case "resize":
 		if frame.Cols == 0 || frame.Rows == 0 || frame.Cols > 500 || frame.Rows > 500 {
@@ -365,7 +388,11 @@ func (w *workbenchConsole) handle(frame workbenchClientFrame) bool {
 	return true
 }
 
-func (w *workbenchConsole) execute(ctx context.Context, command *workbenchCommand, request sandbox.TerminalRequest) {
+func (w *workbenchConsole) execute(
+	ctx context.Context,
+	command *workbenchCommand,
+	request sandbox.CommandTerminalRequest,
+) {
 	defer w.workers.Done()
 	defer command.cancel()
 	defer func() {
@@ -405,7 +432,8 @@ func (w *workbenchConsole) execute(ctx context.Context, command *workbenchComman
 	for {
 		n, err := execution.Terminal.Read(buffer)
 		if n > 0 {
-			if w.outputBytes.Add(int64(n)) > service.WorkbenchMaxOutputBytes || !w.enqueue(websocket.BinaryMessage, append([]byte(nil), buffer[:n]...)) {
+			if w.outputBytes.Add(int64(n)) > service.WorkbenchMaxOutputBytes ||
+				!w.enqueue(websocket.BinaryMessage, append([]byte(nil), buffer[:n]...)) {
 				readErr = service.ErrWorkbenchUnavailable
 				w.cancel()
 				closeTerminal()
@@ -433,12 +461,19 @@ func (w *workbenchConsole) execute(ctx context.Context, command *workbenchComman
 	exit = service.NormalizeWorkbenchTerminalExit(exit, operationErr)
 	if err := execution.Finish(exit, operationErr); err != nil {
 		w.failure(err)
-		exit = sandbox.TerminalExit{ExitCode: -1, Reason: "unknown"}
+		exit = sandbox.CommandTerminalExit{ExitCode: -1, Reason: "unknown"}
 	}
 	w.mu.Lock()
 	if w.active == command {
 		w.active = nil
 	}
 	w.mu.Unlock()
-	w.json(map[string]any{"type": "exit", "execution_id": execution.ExecutionID, "exit_code": exit.ExitCode, "reason": exit.Reason})
+	w.json(
+		map[string]any{
+			"type":         "exit",
+			"execution_id": execution.ExecutionID,
+			"exit_code":    exit.ExitCode,
+			"reason":       exit.Reason,
+		},
+	)
 }

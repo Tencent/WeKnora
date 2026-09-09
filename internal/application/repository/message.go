@@ -346,7 +346,7 @@ func (r *messageRepository) ListSessionArtifactMessages(
 		Select("id AS message_id", "artifacts", "created_at").
 		Where("session_id = ? AND role = ?", sessionID, "assistant").
 		Where("artifacts IS NOT NULL")
-	switch r.db.Dialector.Name() {
+	switch r.db.Name() {
 	case "postgres":
 		query = query.Where("jsonb_array_length(artifacts) > 0")
 	case "mysql":

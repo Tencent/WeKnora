@@ -16,10 +16,10 @@ const (
 	workbenchRuntimeContract     = "weknora-workbench-runtime/v1"
 	workbenchProbeTimeout        = 10 * time.Second
 	workbenchRuntimeCacheTTL     = 30 * time.Minute
-	workbenchRuntimeConfigLimit  = 1024
 	workbenchRuntimeSandboxLimit = 4096
 )
 
+// ErrWorkbenchRuntimeIncompatible reports a failed sandbox-local runtime probe.
 var ErrWorkbenchRuntimeIncompatible = errors.New("sandbox: workbench runtime contract unavailable")
 
 //go:embed terminal_runtime_probe.py
@@ -69,22 +69,18 @@ type workbenchRuntimeCacheEntry struct {
 
 type workbenchRuntimeStateCache struct {
 	mu           sync.Mutex
-	runtimes     map[workbenchRuntimeKey]workbenchRuntimeCacheEntry
 	sandboxes    map[workbenchSandboxRuntimeKey]workbenchRuntimeCacheEntry
-	runtimeLimit int
 	sandboxLimit int
 	ttl          time.Duration
 	now          func() time.Time
 }
 
 func newWorkbenchRuntimeStateCache(
-	runtimeLimit, sandboxLimit int,
+	sandboxLimit int,
 	ttl time.Duration,
 ) *workbenchRuntimeStateCache {
 	return &workbenchRuntimeStateCache{
-		runtimes:     make(map[workbenchRuntimeKey]workbenchRuntimeCacheEntry),
 		sandboxes:    make(map[workbenchSandboxRuntimeKey]workbenchRuntimeCacheEntry),
-		runtimeLimit: runtimeLimit,
 		sandboxLimit: sandboxLimit,
 		ttl:          ttl,
 		now:          time.Now,
@@ -96,22 +92,6 @@ func (c *workbenchRuntimeStateCache) expired(
 	now time.Time,
 ) bool {
 	return c.ttl > 0 && now.Sub(entry.checkedAt) > c.ttl
-}
-
-func (c *workbenchRuntimeStateCache) loadRuntime(
-	key workbenchRuntimeKey,
-) (workbenchRuntimeSupport, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	entry, found := c.runtimes[key]
-	if !found {
-		return workbenchRuntimeSupport{}, false
-	}
-	if c.expired(entry, c.now()) {
-		delete(c.runtimes, key)
-		return workbenchRuntimeSupport{}, false
-	}
-	return entry.support, true
 }
 
 func (c *workbenchRuntimeStateCache) loadSandbox(
@@ -131,7 +111,6 @@ func (c *workbenchRuntimeStateCache) loadSandbox(
 }
 
 func (c *workbenchRuntimeStateCache) store(
-	runtimeKey workbenchRuntimeKey,
 	sandboxKey workbenchSandboxRuntimeKey,
 	support workbenchRuntimeSupport,
 ) {
@@ -139,31 +118,15 @@ func (c *workbenchRuntimeStateCache) store(
 	defer c.mu.Unlock()
 	now := c.now()
 	entry := workbenchRuntimeCacheEntry{support: support, checkedAt: now}
-	c.runtimes[runtimeKey] = entry
 	c.sandboxes[sandboxKey] = entry
 	c.pruneLocked(now)
 }
 
 func (c *workbenchRuntimeStateCache) pruneLocked(now time.Time) {
-	for key, entry := range c.runtimes {
-		if c.expired(entry, now) {
-			delete(c.runtimes, key)
-		}
-	}
 	for key, entry := range c.sandboxes {
 		if c.expired(entry, now) {
 			delete(c.sandboxes, key)
 		}
-	}
-	for len(c.runtimes) > c.runtimeLimit {
-		var oldestKey workbenchRuntimeKey
-		var oldest time.Time
-		for key, entry := range c.runtimes {
-			if oldest.IsZero() || entry.checkedAt.Before(oldest) {
-				oldestKey, oldest = key, entry.checkedAt
-			}
-		}
-		delete(c.runtimes, oldestKey)
 	}
 	for len(c.sandboxes) > c.sandboxLimit {
 		var oldestKey workbenchSandboxRuntimeKey
@@ -177,16 +140,55 @@ func (c *workbenchRuntimeStateCache) pruneLocked(now time.Time) {
 	}
 }
 
-// Tenant managers are rebuilt per request. The binding store and config
-// identity remain stable, so this cache lets a later lookup-only Status report
-// an incompatibility learned by an explicit initialization without probing or
-// allocating a sandbox itself. TTL and count caps prevent deleted sandbox IDs
-// and retired configs from accumulating for the lifetime of the process.
+// Runtime failures describe one mutable sandbox, not every session using its
+// template. Status reads the current binding before consulting this bounded
+// cache, without connecting to a provider or allocating a sandbox.
 var workbenchRuntimeCache = newWorkbenchRuntimeStateCache(
-	workbenchRuntimeConfigLimit,
 	workbenchRuntimeSandboxLimit,
 	workbenchRuntimeCacheTTL,
 )
+
+// WorkbenchRuntimeStatus contains cached probe results for a session's current
+// sandbox. Unknown results must not suppress static provider capabilities.
+type WorkbenchRuntimeStatus struct {
+	Known    bool
+	Terminal bool
+	Files    bool
+}
+
+// SessionWorkbenchRuntimeReporter inspects runtime support without provisioning,
+// reconnecting, or probing. Errors reading the binding must fail closed.
+type SessionWorkbenchRuntimeReporter interface {
+	WorkbenchRuntimeStatus(context.Context, string) (WorkbenchRuntimeStatus, error)
+}
+
+// WorkbenchRuntimeStatus reads only the binding store and local probe cache.
+func (m *SessionBoundManager) WorkbenchRuntimeStatus(
+	ctx context.Context, sessionID string,
+) (WorkbenchRuntimeStatus, error) {
+	runtimeKey, ok := workbenchRuntimeCacheKey(m)
+	if !ok {
+		return WorkbenchRuntimeStatus{}, ErrWorkbenchUnavailable
+	}
+	key, err := m.sessionKey(ctx, sessionID)
+	if err != nil {
+		return WorkbenchRuntimeStatus{}, err
+	}
+	binding, err := m.bindings.Get(ctx, key)
+	if err != nil || binding == nil {
+		return WorkbenchRuntimeStatus{}, err
+	}
+	if err := binding.Validate(key); err != nil {
+		return WorkbenchRuntimeStatus{}, err
+	}
+	if binding.Provider != m.GetType() || binding.ConfigID != m.lifecycle.sandboxConfigID {
+		return WorkbenchRuntimeStatus{}, nil
+	}
+	state, known := workbenchRuntimeCache.loadSandbox(workbenchSandboxRuntimeKey{
+		runtime: runtimeKey, id: binding.SandboxID,
+	})
+	return WorkbenchRuntimeStatus{Known: known, Terminal: state.terminal, Files: state.files}, nil
+}
 
 // SessionWorkbenchInitializer provisions the bound session only on an explicit
 // workbench initialization action. File reads remain lookup-only operations.
@@ -194,6 +196,8 @@ type SessionWorkbenchInitializer interface {
 	EnsureWorkbenchSession(context.Context, string) error
 }
 
+// EnsureWorkbenchSession initializes the pinned sandbox and refreshes its probe
+// even after a cached failure. GET status never enters this allocation path.
 func (m *SessionBoundManager) EnsureWorkbenchSession(
 	ctx context.Context,
 	sessionID string,
@@ -287,9 +291,6 @@ func (m *SessionBoundManager) ensureWorkbenchRuntime(
 			}
 			return ErrWorkbenchRuntimeIncompatible
 		}
-		if workbenchRuntimeKnownIncompatible(m, requirement) {
-			return ErrWorkbenchRuntimeIncompatible
-		}
 	}
 	if err := ctx.Err(); err != nil {
 		return errors.Join(ErrWorkbenchRuntimeIncompatible, err)
@@ -317,7 +318,7 @@ func (m *SessionBoundManager) ensureWorkbenchRuntime(
 	if result.ExitCode == 0 && len(result.Stdout) <= 1024 && len(result.Stderr) <= 1024 {
 		state, _ = validWorkbenchRuntimeReply(result.Stdout)
 	}
-	workbenchRuntimeCache.store(key, sandboxKey, state)
+	workbenchRuntimeCache.store(sandboxKey, state)
 	if !state.meets(requirement) {
 		return ErrWorkbenchRuntimeIncompatible
 	}
@@ -347,17 +348,6 @@ func validWorkbenchRuntimeReply(raw string) (workbenchRuntimeSupport, bool) {
 		return workbenchRuntimeSupport{}, false
 	}
 	return workbenchRuntimeSupport{terminal: reply.Terminal, files: reply.Files}, true
-}
-
-func workbenchRuntimeKnownIncompatible(
-	m *SessionBoundManager, requirement workbenchRuntimeRequirement,
-) bool {
-	key, ok := workbenchRuntimeCacheKey(m)
-	if !ok {
-		return false
-	}
-	state, found := workbenchRuntimeCache.loadRuntime(key)
-	return found && !state.meets(requirement)
 }
 
 func workbenchRuntimeCacheKey(m *SessionBoundManager) (workbenchRuntimeKey, bool) {
@@ -394,4 +384,7 @@ func workbenchRuntimeCacheKey(m *SessionBoundManager) (workbenchRuntimeKey, bool
 	return key, true
 }
 
-var _ SessionWorkbenchInitializer = (*SessionBoundManager)(nil)
+var (
+	_ SessionWorkbenchInitializer     = (*SessionBoundManager)(nil)
+	_ SessionWorkbenchRuntimeReporter = (*SessionBoundManager)(nil)
+)

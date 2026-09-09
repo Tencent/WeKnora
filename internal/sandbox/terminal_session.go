@@ -7,22 +7,27 @@ import (
 	"time"
 )
 
-func remoteTerminalFrom(client RemoteSandboxClient) (remoteTerminalProvider, bool) {
+func remoteCommandTerminalFrom(client RemoteSandboxClient) (remoteCommandTerminalProvider, bool) {
+	if client == nil || !client.Capabilities().SupportsCommandTerminals {
+		return nil, false
+	}
 	switch wrapped := client.(type) {
 	case *langfuseRemoteClient:
-		return remoteTerminalFrom(wrapped.inner)
+		return remoteCommandTerminalFrom(wrapped.inner)
 	case *langfuseSnapshotClient:
-		return remoteTerminalFrom(wrapped.inner)
+		return remoteCommandTerminalFrom(wrapped.inner)
 	}
-	provider, ok := client.(remoteTerminalProvider)
+	provider, ok := client.(remoteCommandTerminalProvider)
 	return provider, ok
 }
 
-func (m *SessionBoundManager) SessionTerminalProvider() SessionTerminalProvider {
-	if m == nil || m.remoteDisabled() || workbenchRuntimeKnownIncompatible(m, workbenchRuntimeTerminal) {
+// SessionCommandTerminalProvider advertises bounded command PTYs independently
+// of the interactive terminal's reconnect capability and sandbox-local probes.
+func (m *SessionBoundManager) SessionCommandTerminalProvider() SessionCommandTerminalProvider {
+	if m == nil || m.remoteDisabled() {
 		return nil
 	}
-	if _, ok := remoteTerminalFrom(m.client); !ok {
+	if _, ok := remoteCommandTerminalFrom(m.client); !ok {
 		return nil
 	}
 	if _, ok := m.bindings.(sessionTurnLeaseStore); !ok {
@@ -31,18 +36,17 @@ func (m *SessionBoundManager) SessionTerminalProvider() SessionTerminalProvider 
 	return m
 }
 
-// OpenSessionTerminal holds a reference-counted session turn until execution
+// OpenSessionCommandTerminal holds a reference-counted session turn until execution
 // AND process cleanup finish. Begin/resolve/consume happen under the lifecycle
 // lock, so a concurrent image invalidation cannot replace the active sandbox.
 // Nested chat/terminal turns share the same lease. At most every 30 seconds
 // the lease and remote idle TTL are renewed; a failed renewal stops execution.
 // Explicit session deletion can still destroy a running sandbox.
-func (m *SessionBoundManager) OpenSessionTerminal(ctx context.Context, sessionID string, req TerminalRequest) (Terminal, error) {
+func (m *SessionBoundManager) OpenSessionCommandTerminal(
+	ctx context.Context, sessionID string, req CommandTerminalRequest,
+) (CommandTerminal, error) {
 	if err := m.requireRemoteBackend(); err != nil {
 		return nil, err
-	}
-	if workbenchRuntimeKnownIncompatible(m, workbenchRuntimeTerminal) {
-		return nil, ErrWorkbenchRuntimeIncompatible
 	}
 	req, err := normalizeTerminalRequest(req)
 	if err != nil {
@@ -52,7 +56,7 @@ func (m *SessionBoundManager) OpenSessionTerminal(ctx context.Context, sessionID
 	if err != nil {
 		return nil, err
 	}
-	provider, ok := remoteTerminalFrom(m.client)
+	provider, ok := remoteCommandTerminalFrom(m.client)
 	if !ok {
 		return nil, errors.New("sandbox: native session PTY unavailable")
 	}
@@ -84,7 +88,7 @@ func (m *SessionBoundManager) OpenSessionTerminal(ctx context.Context, sessionID
 		if err != nil {
 			return err
 		}
-		// The ordinary resolve logs consumption failures. Terminal must fail
+		// The ordinary resolve logs consumption failures. CommandTerminal must fail
 		// closed: otherwise the next resolve could replace its running image.
 		return leaser.ConsumeTurnRebuild(lockCtx, key)
 	})
@@ -98,13 +102,13 @@ func (m *SessionBoundManager) OpenSessionTerminal(ctx context.Context, sessionID
 		return nil, errors.Join(err, release())
 	}
 	ctx, span := startSandboxSpan(ctx, "sandbox.terminal", terminalSpanInput(req), sandboxHandleMeta(handle))
-	inner, err := provider.OpenTerminal(ctx, handle, req)
+	inner, err := provider.OpenCommandTerminal(ctx, handle, req)
 	if err != nil {
 		err = errors.Join(terminalProviderError("start", err), release())
 		span.Finish(nil, nil, err)
 		return nil, err
 	}
-	t := &sessionTerminal{Terminal: inner, done: make(chan struct{})}
+	t := &sessionTerminal{CommandTerminal: inner, done: make(chan struct{})}
 	heartbeat := terminalHeartbeatInterval(m.config, m.GetType())
 	go func() {
 		for {
@@ -133,15 +137,18 @@ func (m *SessionBoundManager) OpenSessionTerminal(ctx context.Context, sessionID
 					SandboxID: handle.ID(), TrafficAccessToken: InboundTokenOf(handle),
 				})
 				leaseErr = terminalProviderError("keepalive", err)
-				if leaseErr == nil && (refreshed == nil || refreshed.ID() != handle.ID() || refreshed.Provider() != handle.Provider()) {
+				if leaseErr == nil && (refreshed == nil || refreshed.ID() != handle.ID() ||
+					refreshed.Provider() != handle.Provider()) {
 					leaseErr = errors.New("sandbox: terminal keepalive returned a mismatched handle")
 				}
 			}
 			cancel()
 			if leaseErr != nil || !active || rebuild {
 				closeErr := inner.Close()
-				t.result = terminalResult{exit: TerminalExit{ExitCode: -1, Reason: "lease_lost"},
-					err: errors.Join(errors.New("sandbox: terminal turn lease lost"), leaseErr, closeErr, release())}
+				t.result = terminalResult{
+					exit: CommandTerminalExit{ExitCode: -1, Reason: "lease_lost"},
+					err:  errors.Join(errors.New("sandbox: terminal turn lease lost"), leaseErr, closeErr, release()),
+				}
 				break
 			}
 		}
@@ -151,7 +158,7 @@ func (m *SessionBoundManager) OpenSessionTerminal(ctx context.Context, sessionID
 	return t, nil
 }
 
-func terminalSpanInput(req TerminalRequest) map[string]interface{} {
+func terminalSpanInput(req CommandTerminalRequest) map[string]interface{} {
 	// Only the service audit layer owns redacted command content. Truncation
 	// does not redact inline tokens, and even stdout may contain credentials.
 	return map[string]interface{}{
@@ -179,24 +186,24 @@ func terminalHeartbeatInterval(cfg *Config, provider SandboxType) time.Duration 
 }
 
 type sessionTerminal struct {
-	Terminal
+	CommandTerminal
 	done   chan struct{}
 	result terminalResult
 }
 
-func (t *sessionTerminal) Wait(ctx context.Context) (TerminalExit, error) {
+func (t *sessionTerminal) Wait(ctx context.Context) (CommandTerminalExit, error) {
 	select {
 	case <-t.done:
 		return t.result.exit, t.result.err
 	case <-ctx.Done():
-		return TerminalExit{}, ctx.Err()
+		return CommandTerminalExit{}, ctx.Err()
 	}
 }
 
 func (t *sessionTerminal) Close() error {
-	err := t.Terminal.Close()
+	err := t.CommandTerminal.Close()
 	<-t.done
 	return errors.Join(err, t.result.err)
 }
 
-var _ SessionTerminalProvider = (*SessionBoundManager)(nil)
+var _ SessionCommandTerminalProvider = (*SessionBoundManager)(nil)

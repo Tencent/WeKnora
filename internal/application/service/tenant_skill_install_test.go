@@ -1966,6 +1966,7 @@ type installFixture struct {
 	// beforeExecute runs at the moment the engine would start, so a test can
 	// observe the state an attaching console would see mid-install.
 	beforeExecute func()
+	afterExecute  func()
 	// beforeSeed runs on the first image file write, so a test can prove the
 	// transcript locators landed before the minutes-long copy begins.
 	beforeSeed func()
@@ -3143,7 +3144,8 @@ func (s *installAgentService) CreateAgentEngine(
 func (s *installAgentService) ValidateConfig(*types.AgentConfig) error { return nil }
 
 type installAgentEngine struct {
-	fx *installFixture
+	sink types.SteerSink
+	fx   *installFixture
 }
 
 func (e *installAgentEngine) Execute(
@@ -3159,15 +3161,38 @@ func (e *installAgentEngine) Execute(
 	}
 	e.fx.agentPrompts = append(e.fx.agentPrompts, prompt)
 	e.fx.record("agent-execute")
+	if e.sink != nil {
+		events, _, err := e.sink.PollSteer(context.Background(), "sess-1", e.fx.currentInstallMessageID(), 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, evt := range events {
+			e.sink.PersistSteerMessage(
+				context.Background(), "sess-1", e.fx.currentInstallMessageID(),
+				evt["id"].(string), evt["content"].(string), nil, "web",
+			)
+		}
+	}
+	if e.fx.afterExecute != nil {
+		e.fx.afterExecute()
+	}
 	if e.fx.agentDelay > 0 {
 		time.Sleep(e.fx.agentDelay)
 	}
 	if e.fx.agentErr != nil {
 		return nil, e.fx.agentErr
 	}
+	if e.fx.sandboxMgr.files == nil {
+		e.fx.sandboxMgr.files = map[string][]byte{}
+	}
+	reportPath := path.Join(e.fx.engineConfig.SkillInstallDir(), ".weknora", "install-report.json")
+	if _, exists := e.fx.sandboxMgr.files[reportPath]; !exists {
+		e.fx.sandboxMgr.files[reportPath] = []byte(`{"commands":[],"blockers":[]}`)
+	}
 	return &types.AgentState{IsComplete: true}, nil
 }
-func (e *installAgentEngine) SetMemoryPrompt(string) {}
+func (e *installAgentEngine) SetMemoryPrompt(string)            {}
+func (e *installAgentEngine) SetSteerSink(sink types.SteerSink) { e.sink = sink }
 
 type installSessionService struct {
 	fx *installFixture
@@ -3412,4 +3437,12 @@ func TestSeededSkillHelperIsDirectlyExecutable(t *testing.T) {
 	info, err := os.Stat(helper)
 	require.NoError(t, err)
 	require.NotZero(t, info.Mode().Perm()&0o200, "the executable skill remains writable")
+}
+
+func (f *installFixture) currentInstallMessageID() string {
+	row, _ := f.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	if row == nil {
+		return ""
+	}
+	return row.InstallMessageID
 }

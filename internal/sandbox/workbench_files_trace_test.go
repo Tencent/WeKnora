@@ -50,7 +50,7 @@ func TestWorkbenchTracePayloadRedaction(t *testing.T) {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			defer unzip.Close()
+			defer func() { _ = unzip.Close() }()
 			reader = unzip
 		}
 		body, err := io.ReadAll(io.LimitReader(reader, 2<<20))
@@ -71,7 +71,7 @@ func TestWorkbenchTracePayloadRedaction(t *testing.T) {
 		FlushAt: 1, FlushInterval: time.Hour, QueueSize: 256, RequestTimeout: 5 * time.Second, SampleRate: 1,
 	})
 	require.NoError(t, err)
-	defer tracer.Shutdown(context.Background())
+	defer func() { _ = tracer.Shutdown(context.Background()) }()
 	mgr, client, ctx := workbenchHarness(t, true)
 	const secretPath = "synthetic-sensitive-file-name.txt"
 	const secretBody = "synthetic-sensitive-file-body"
@@ -142,7 +142,10 @@ func TestWorkbenchTracePayloadRedaction(t *testing.T) {
 	for _, span := range spans {
 		encoded, err := json.Marshal(span)
 		require.NoError(t, err)
-		for _, secret := range []string{secretPath, secretBody, base64.StdEncoding.EncodeToString([]byte(secretBody)), base64.StdEncoding.EncodeToString(content)} {
+		for _, secret := range []string{
+			secretPath, secretBody,
+			base64.StdEncoding.EncodeToString([]byte(secretBody)), base64.StdEncoding.EncodeToString(content),
+		} {
 			if bytes.Contains(encoded, []byte(secret)) {
 				t.Errorf("exported span %q contains synthetic path/body marker", span.Name)
 			}
@@ -185,6 +188,7 @@ func TestWorkbenchTracePayloadRedaction(t *testing.T) {
 	require.GreaterOrEqual(t, workbenchSpans, 8)
 	require.Equal(t, 1, ordinarySpans)
 	if !t.Failed() {
-		t.Logf("captured %d helper exec spans through real OTLP: fixed preview and output counts only; no raw or base64 path/body markers; ordinary tracing preserved", workbenchSpans)
+		t.Logf("captured %d helper exec spans: no raw or base64 path/body markers; ordinary tracing preserved",
+			workbenchSpans)
 	}
 }

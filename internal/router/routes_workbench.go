@@ -17,7 +17,8 @@ func workbenchAwareRequestLogger() gin.HandlerFunc {
 	ordinary := middleware.Logger()
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
-		if path != "/api/v1/sandbox-terminal" && !(strings.HasPrefix(path, "/api/v1/sessions/") && strings.Contains(path, "/sandbox/")) {
+		isSessionSandbox := strings.HasPrefix(path, "/api/v1/sessions/") && strings.Contains(path, "/sandbox/")
+		if path != "/api/v1/sandbox-terminal" && !isSessionSandbox {
 			ordinary(c)
 			return
 		}
@@ -38,6 +39,7 @@ func RegisterWorkbenchPublicRoutes(r *gin.Engine, h *handler.WorkbenchHandler) {
 	}
 }
 
+// RegisterWorkbenchRoutes adds web-only session operations after authentication.
 func RegisterWorkbenchRoutes(r *gin.RouterGroup, h *handler.WorkbenchHandler) {
 	if h == nil {
 		return
@@ -52,7 +54,7 @@ func RegisterWorkbenchRoutes(r *gin.RouterGroup, h *handler.WorkbenchHandler) {
 	// Existing Gin method trees use :session_id for POST and :id for GET/DELETE.
 	group.GET("/:id/sandbox/workbench", h.Status)
 	group.POST("/:session_id/sandbox/workbench", h.Bind)
-	group.POST("/:session_id/sandbox/terminal-ticket", h.Ticket)
+	group.POST("/:session_id/sandbox/command-ticket", h.Ticket)
 	group.GET("/:id/sandbox/files", h.ListFiles)
 	group.GET("/:id/sandbox/files/download", h.Download)
 	group.POST("/:session_id/sandbox/files", h.Upload)

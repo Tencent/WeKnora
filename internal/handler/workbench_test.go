@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -19,6 +20,8 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -39,9 +42,7 @@ type workbenchHandlerSessions struct {
 func (s workbenchHandlerSessions) GetOwnedSession(ctx context.Context, id string) (*types.Session, error) {
 	tid, _ := types.TenantIDFromContext(ctx)
 	uid, _ := types.UserIDFromContext(ctx)
-	var row types.Session
-	err := s.db.WithContext(ctx).Where("id = ? AND tenant_id = ? AND user_id = ?", id, tid, uid).Take(&row).Error
-	return &row, err
+	return repository.NewSessionRepository(s.db).Get(ctx, tid, uid, id)
 }
 
 type workbenchHandlerPolicy struct {
@@ -58,7 +59,9 @@ type workbenchHandlerConfigs struct {
 	repository.TenantSandboxConfigRepository
 }
 
-func (workbenchHandlerConfigs) GetByID(_ context.Context, tenant uint64, id string) (*types.TenantSandboxConfigEntity, error) {
+func (workbenchHandlerConfigs) GetByID(
+	_ context.Context, tenant uint64, id string,
+) (*types.TenantSandboxConfigEntity, error) {
 	if tenant != 7 || id != "config" {
 		return nil, nil
 	}
@@ -100,18 +103,28 @@ type workbenchHandlerManager struct {
 	lastFile  sandbox.WorkbenchFileRequest
 }
 
-func (m *workbenchHandlerManager) GetType() sandbox.SandboxType                         { return sandbox.SandboxTypeDocker }
+func (m *workbenchHandlerManager) GetType() sandbox.SandboxType { return sandbox.SandboxTypeDocker }
+
 func (m *workbenchHandlerManager) EnsureWorkbenchSession(context.Context, string) error { return nil }
-func (m *workbenchHandlerManager) WorkbenchFiles(_ context.Context, _ string, r sandbox.WorkbenchFileRequest) (*sandbox.WorkbenchFileResult, error) {
+func (m *workbenchHandlerManager) WorkbenchFiles(
+	_ context.Context, _ string, r sandbox.WorkbenchFileRequest,
+) (*sandbox.WorkbenchFileResult, error) {
 	m.lastFile = r
 	if m.fileErr != nil {
 		return nil, m.fileErr
 	}
-	return &sandbox.WorkbenchFileResult{Path: r.Path, Entries: []sandbox.WorkbenchFileEntry{}, Content: []byte("hello")}, nil
+	return &sandbox.WorkbenchFileResult{
+		Path: r.Path, Entries: []sandbox.WorkbenchFileEntry{}, Content: []byte("hello"),
+	}, nil
 }
-func (m *workbenchHandlerManager) OpenSessionTerminal(context.Context, string, sandbox.TerminalRequest) (sandbox.Terminal, error) {
+
+func (m *workbenchHandlerManager) OpenSessionCommandTerminal(
+	context.Context, string, sandbox.CommandTerminalRequest,
+) (sandbox.CommandTerminal, error) {
 	reader, writer := io.Pipe()
-	terminal := &workbenchPipeTerminal{reader: reader, writer: writer, done: make(chan struct{}), resized: make(chan [2]uint16, 2)}
+	terminal := &workbenchPipeTerminal{
+		reader: reader, writer: writer, done: make(chan struct{}), resized: make(chan [2]uint16, 2),
+	}
 	m.opened.Add(1)
 	m.terminals <- terminal
 	go func() { _, _ = writer.Write([]byte("early output\n")) }()
@@ -124,7 +137,7 @@ type workbenchPipeTerminal struct {
 	done    chan struct{}
 	resized chan [2]uint16
 	once    sync.Once
-	exit    sandbox.TerminalExit
+	exit    sandbox.CommandTerminalExit
 	closed  atomic.Bool
 }
 
@@ -133,33 +146,38 @@ func (p *workbenchPipeTerminal) Input(_ context.Context, b []byte) error {
 	_, err := p.writer.Write(append([]byte("input:"), b...))
 	return err
 }
+
 func (p *workbenchPipeTerminal) Resize(_ context.Context, cols, rows uint16) error {
 	p.resized <- [2]uint16{cols, rows}
 	return nil
 }
+
 func (p *workbenchPipeTerminal) finish(code int, reason string) {
 	p.once.Do(func() {
-		p.exit = sandbox.TerminalExit{ExitCode: code, Reason: reason}
+		p.exit = sandbox.CommandTerminalExit{ExitCode: code, Reason: reason}
 		_ = p.writer.Close()
 		close(p.done)
 	})
 }
+
 func (p *workbenchPipeTerminal) Interrupt(context.Context) error {
 	p.finish(130, "interrupted")
 	return nil
 }
+
 func (p *workbenchPipeTerminal) Close() error {
 	p.closed.Store(true)
 	p.finish(-1, "closed")
 	_ = p.reader.Close()
 	return nil
 }
-func (p *workbenchPipeTerminal) Wait(ctx context.Context) (sandbox.TerminalExit, error) {
+
+func (p *workbenchPipeTerminal) Wait(ctx context.Context) (sandbox.CommandTerminalExit, error) {
 	select {
 	case <-p.done:
 		return p.exit, nil
 	case <-ctx.Done():
-		return sandbox.TerminalExit{}, ctx.Err()
+		return sandbox.CommandTerminalExit{}, ctx.Err()
 	}
 }
 
@@ -196,22 +214,30 @@ func newWorkbenchHandlerFixture(t *testing.T) *workbenchHandlerFixture {
 		require.NoError(t, db.Exec(sql).Error)
 	}
 	require.NoError(t, db.AutoMigrate(&types.Session{}))
-	require.NoError(t, db.Model(&types.Session{}).Create(map[string]any{"id": "session", "tenant_id": 7, "user_id": "alice", "sandbox_config_id": "config"}).Error)
+	require.NoError(t, db.Model(&types.Session{}).Create(map[string]any{
+		"id": "session", "tenant_id": 7, "user_id": "alice", "sandbox_config_id": "config",
+	}).Error)
 	rdb := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: rdb.Addr(), MaxRetries: -1})
 	t.Cleanup(func() { _ = client.Close() })
 	manager := &workbenchHandlerManager{terminals: make(chan *workbenchPipeTerminal, 8)}
 	audit, policy := &workbenchHandlerAudit{}, &workbenchHandlerPolicy{}
-	svc := service.NewWorkbenchService(service.WorkbenchServiceDeps{DB: db, Redis: client, Sessions: workbenchHandlerSessions{db: db}, Policy: policy, Pinner: service.NewSessionSandboxPinner(db), Resolver: workbenchHandlerResolver{manager: manager}, Configs: workbenchHandlerConfigs{}, Audit: audit})
+	svc := service.NewWorkbenchService(service.WorkbenchServiceDeps{
+		Authorization: repository.NewWorkbenchAuthorizationRepository(db),
+		Redis:         client, Sessions: workbenchHandlerSessions{db: db}, Policy: policy,
+		Pinner: service.NewSessionSandboxPinner(db), Resolver: workbenchHandlerResolver{manager: manager},
+		Configs: workbenchHandlerConfigs{}, Audit: audit,
+	})
 	h, err := NewWorkbenchHandler(svc)
 	require.NoError(t, err)
 	h.recheckInterval = 50 * time.Millisecond
 	ctx := (service.WorkbenchIdentity{TenantID: 7, UserID: "alice", SessionID: "session"}).Context(context.Background())
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
+	r.Use(middleware.ErrorHandler())
 	r.GET("/api/v1/sandbox-terminal", h.Terminal)
 	r.Use(func(c *gin.Context) { c.Request = c.Request.WithContext(ctx); c.Next() })
-	r.POST("/sessions/:id/sandbox/terminal-ticket", h.Ticket)
+	r.POST("/sessions/:id/sandbox/command-ticket", h.Ticket)
 	r.POST("/sessions/:id/sandbox/files", h.Upload)
 	r.GET("/sessions/:id/sandbox/files/download", h.Download)
 	r.GET("/sessions/:id/sandbox/workbench", h.Status)
@@ -226,9 +252,13 @@ func (f *workbenchHandlerFixture) ticket(t *testing.T) string {
 	require.NoError(t, err)
 	return ticket.Ticket
 }
+
 func (f *workbenchHandlerFixture) socket(t *testing.T) *websocket.Conn {
 	t.Helper()
-	conn, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(f.server.URL, "http")+"/api/v1/sandbox-terminal", http.Header{"Origin": []string{"http://127.0.0.1:15173"}})
+	conn, response, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(f.server.URL, "http")+"/api/v1/sandbox-terminal",
+		http.Header{"Origin": []string{"http://127.0.0.1:15173"}},
+	)
 	if response != nil && response.Body != nil {
 		_ = response.Body.Close()
 	}
@@ -236,6 +266,7 @@ func (f *workbenchHandlerFixture) socket(t *testing.T) *websocket.Conn {
 	t.Cleanup(func() { _ = conn.Close() })
 	return conn
 }
+
 func readWorkbenchEvent(t *testing.T, conn *websocket.Conn, expected string) map[string]any {
 	t.Helper()
 	require.NoError(t, conn.SetReadDeadline(time.Now().Add(3*time.Second)))
@@ -247,6 +278,7 @@ func readWorkbenchEvent(t *testing.T, conn *websocket.Conn, expected string) map
 	require.Equal(t, expected, event["type"], string(raw))
 	return event
 }
+
 func authenticateWorkbenchSocket(t *testing.T, conn *websocket.Conn, ticket string) {
 	t.Helper()
 	require.NoError(t, conn.WriteJSON(map[string]any{"type": "auth", "ticket": ticket}))
@@ -274,7 +306,9 @@ func TestWorkbenchSocketStreamingInputResizeInterrupt(t *testing.T) {
 	require.Equal(t, websocket.BinaryMessage, kind)
 	require.Equal(t, "input:hello\n", string(raw))
 	binary := []byte{0, 0x80, 0xff}
-	require.NoError(t, conn.WriteJSON(map[string]any{"type": "stdin", "encoding": "base64", "data": base64.StdEncoding.EncodeToString(binary)}))
+	require.NoError(t, conn.WriteJSON(map[string]any{
+		"type": "stdin", "encoding": "base64", "data": base64.StdEncoding.EncodeToString(binary),
+	}))
 	kind, raw, err = conn.ReadMessage()
 	require.NoError(t, err)
 	require.Equal(t, websocket.BinaryMessage, kind)
@@ -290,7 +324,9 @@ func TestWorkbenchSocketStreamingInputResizeInterrupt(t *testing.T) {
 	event = readWorkbenchEvent(t, conn, "exit")
 	require.EqualValues(t, 130, event["exit_code"])
 	require.Equal(t, "interrupted", event["reason"])
-	require.Eventually(t, func() bool { return terminal.closed.Load() && f.audit.count() == 2 }, time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		return terminal.closed.Load() && f.audit.count() == 2
+	}, time.Second, 10*time.Millisecond)
 	require.NoError(t, conn.WriteJSON(map[string]any{"type": "ping"}))
 	readWorkbenchEvent(t, conn, "pong")
 }
@@ -312,7 +348,9 @@ func TestWorkbenchSocketReplayLeaseAndDisconnect(t *testing.T) {
 	require.NoError(t, err)
 	terminal := <-f.manager.terminals
 	require.NoError(t, first.Close())
-	require.Eventually(t, func() bool { return terminal.closed.Load() && f.audit.count() == 2 }, 2*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		return terminal.closed.Load() && f.audit.count() == 2
+	}, 2*time.Second, 10*time.Millisecond)
 }
 
 func TestWorkbenchSocketPeriodicRevocation(t *testing.T) {
@@ -325,7 +363,9 @@ func TestWorkbenchSocketPeriodicRevocation(t *testing.T) {
 	require.NoError(t, err)
 	terminal := <-f.manager.terminals
 	f.policy.disabled.Store(true)
-	require.Eventually(t, func() bool { return terminal.closed.Load() && f.audit.count() == 2 }, 2*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		return terminal.closed.Load() && f.audit.count() == 2
+	}, 2*time.Second, 10*time.Millisecond)
 }
 
 func TestWorkbenchHandlerShutdownWaitsForAuthenticatedConsoles(t *testing.T) {
@@ -346,7 +386,10 @@ func TestWorkbenchHandlerShutdownWaitsForAuthenticatedConsoles(t *testing.T) {
 	_, _, err = conn.ReadMessage()
 	require.Error(t, err)
 
-	_, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(f.server.URL, "http")+"/api/v1/sandbox-terminal", http.Header{"Origin": []string{"http://127.0.0.1:15173"}})
+	_, response, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(f.server.URL, "http")+"/api/v1/sandbox-terminal",
+		http.Header{"Origin": []string{"http://127.0.0.1:15173"}},
+	)
 	require.Error(t, err)
 	require.Equal(t, http.StatusServiceUnavailable, response.StatusCode)
 	_ = response.Body.Close()
@@ -364,8 +407,13 @@ func TestWorkbenchSocketAuditFailureNoLaunch(t *testing.T) {
 
 func TestWorkbenchSocketOriginAndFraming(t *testing.T) {
 	f := newWorkbenchHandlerFixture(t)
-	for _, origin := range []string{"", "null", "https://evil.example", "http://127.0.0.1:15173.evil.example", "http://127.0.0.1:15173/path"} {
-		_, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(f.server.URL, "http")+"/api/v1/sandbox-terminal", http.Header{"Origin": []string{origin}})
+	for _, origin := range []string{
+		"", "null", "https://evil.example", "http://127.0.0.1:15173.evil.example", "http://127.0.0.1:15173/path",
+	} {
+		_, response, err := websocket.DefaultDialer.Dial(
+			"ws"+strings.TrimPrefix(f.server.URL, "http")+"/api/v1/sandbox-terminal",
+			http.Header{"Origin": []string{origin}},
+		)
 		require.Error(t, err)
 		require.Equal(t, 403, response.StatusCode)
 		_ = response.Body.Close()
@@ -373,7 +421,11 @@ func TestWorkbenchSocketOriginAndFraming(t *testing.T) {
 	for _, frame := range []struct {
 		kind int
 		data string
-	}{{websocket.BinaryMessage, `{"type":"auth"}`}, {websocket.TextMessage, `{"type":"command","command":"echo no"}`}, {websocket.TextMessage, strings.Repeat("x", service.WorkbenchMaxFrameBytes+1)}} {
+	}{
+		{websocket.BinaryMessage, `{"type":"auth"}`},
+		{websocket.TextMessage, `{"type":"command","command":"echo no"}`},
+		{websocket.TextMessage, strings.Repeat("x", service.WorkbenchMaxFrameBytes+1)},
+	} {
 		conn := f.socket(t)
 		require.NoError(t, conn.WriteMessage(frame.kind, []byte(frame.data)))
 		_ = conn.SetReadDeadline(time.Now().Add(time.Second))
@@ -394,7 +446,7 @@ func TestWorkbenchTicketHTTPOrigin(t *testing.T) {
 		origin string
 		status int
 	}{{"http://127.0.0.1:15173", 200}, {"http://evil.example", 403}, {"", 200}} {
-		r := httptest.NewRequest("POST", "/sessions/session/sandbox/terminal-ticket", nil)
+		r := httptest.NewRequest("POST", "/sessions/session/sandbox/command-ticket", nil)
 		if test.origin != "" {
 			r.Header.Set("Origin", test.origin)
 		}
@@ -414,10 +466,12 @@ func TestWorkbenchDisabledSkipsOriginConfigurationValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, h)
 	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/sessions/session/sandbox/terminal-ticket", nil)
-	c.Request.Header.Set("Origin", "not-an-origin")
-	h.Ticket(c)
+	router := gin.New()
+	router.Use(middleware.ErrorHandler())
+	router.POST("/sessions/:id/sandbox/command-ticket", h.Ticket)
+	request := httptest.NewRequest(http.MethodPost, "/sessions/session/sandbox/command-ticket", nil)
+	request.Header.Set("Origin", "not-an-origin")
+	router.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusNotFound, recorder.Code)
 }
 
@@ -426,12 +480,19 @@ func TestWorkbenchMultipartPathsAndDownload(t *testing.T) {
 	for _, test := range []struct {
 		destination, filename string
 		status                int
-	}{{"nested/renamed.txt", "file.txt", 200}, {"../outside", "file.txt", 400}, {"ok.txt", "../bad.txt", 400}, {"ok.txt", "a\\b.txt", 400}, {"", "file.txt", 400}} {
+	}{
+		{"nested/renamed.txt", "file.txt", 200},
+		{"../outside", "file.txt", 400},
+		{"ok.txt", "../bad.txt", 400},
+		{"ok.txt", "a\\b.txt", 400},
+		{"", "file.txt", 400},
+	} {
 		var body bytes.Buffer
 		writer := multipart.NewWriter(&body)
 		require.NoError(t, writer.WriteField("path", test.destination))
 		header := textproto.MIMEHeader{}
-		header.Set("Content-Disposition", `form-data; name="file"; filename="`+strings.ReplaceAll(test.filename, `\`, `\\`)+`"`)
+		disposition := `form-data; name="file"; filename="` + strings.ReplaceAll(test.filename, `\`, `\\`) + `"`
+		header.Set("Content-Disposition", disposition)
 		part, err := writer.CreatePart(header)
 		require.NoError(t, err)
 		_, err = io.WriteString(part, "payload")
@@ -463,8 +524,121 @@ func TestWorkbenchErrorNeverExposesProviderSecrets(t *testing.T) {
 	for _, test := range []struct {
 		err    error
 		status int
-	}{{sandbox.ErrWorkbenchConflict, 409}, {sandbox.ErrWorkbenchNotFound, 404}, {sandbox.ErrWorkbenchPath, 400}, {sandbox.ErrWorkbenchTooLarge, 413}} {
+	}{
+		{sandbox.ErrWorkbenchConflict, 409},
+		{sandbox.ErrWorkbenchNotFound, 404},
+		{sandbox.ErrWorkbenchPath, 400},
+		{sandbox.ErrWorkbenchTooLarge, 413},
+	} {
 		status, _, _ := workbenchError(test.err)
 		require.Equal(t, test.status, status)
+	}
+}
+
+type workbenchHTTPErrorService struct {
+	workbenchService
+	err   error
+	calls int
+}
+
+func (s *workbenchHTTPErrorService) Status(context.Context, string) (*service.WorkbenchStatus, error) {
+	s.calls++
+	return nil, s.err
+}
+
+func assertWorkbenchHTTPError(
+	t *testing.T, recorder *httptest.ResponseRecorder, status int, code apperrors.ErrorCode,
+) {
+	t.Helper()
+	require.Equal(t, status, recorder.Code)
+	var body struct {
+		Success bool               `json:"success"`
+		Error   apperrors.AppError `json:"error"`
+	}
+	// Decoding directly into AppError rejects a string-valued code.
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
+	require.False(t, body.Success)
+	require.Equal(t, code, body.Error.Code)
+	require.NotEmpty(t, body.Error.Message)
+	for _, secret := range []string{"SECRET", "PID123", "sandboxID456"} {
+		require.NotContains(t, recorder.Body.String(), secret)
+	}
+}
+
+func TestWorkbenchHTTPErrorsUseErrorHandler(t *testing.T) {
+	for _, test := range []struct {
+		err    error
+		status int
+		code   apperrors.ErrorCode
+	}{
+		{service.ErrWorkbenchDisabled, 404, apperrors.ErrNotFound},
+		{service.ErrWorkbenchDenied, 403, apperrors.ErrForbidden},
+		{service.ErrWorkbenchSession, 404, apperrors.ErrNotFound},
+		{service.ErrWorkbenchPolicy, 403, apperrors.ErrForbidden},
+		{service.ErrWorkbenchTicket, 401, apperrors.ErrUnauthorized},
+		{service.ErrWorkbenchInvalid, 400, apperrors.ErrBadRequest},
+		{sandbox.ErrWorkbenchPath, 400, apperrors.ErrBadRequest},
+		{sandbox.ErrWorkbenchNotFound, 404, apperrors.ErrNotFound},
+		{sandbox.ErrWorkbenchConflict, 409, apperrors.ErrConflict},
+		{sandbox.ErrWorkbenchTooLarge, 413, apperrors.ErrBadRequest},
+		{service.ErrWorkbenchUnbound, 409, apperrors.ErrConflict},
+		{service.ErrWorkbenchBusy, 409, apperrors.ErrConflict},
+		{service.ErrWorkbenchCapability, 409, apperrors.ErrConflict},
+		{service.ErrWorkbenchAudit, 503, apperrors.ErrServiceUnavailable},
+		{service.ErrWorkbenchUnavailable, 503, apperrors.ErrServiceUnavailable},
+		{errors.New("provider failure"), 503, apperrors.ErrServiceUnavailable},
+	} {
+		t.Run(test.err.Error(), func(t *testing.T) {
+			stub := &workbenchHTTPErrorService{err: fmt.Errorf("SECRET PID123 sandboxID456: %w", test.err)}
+			h := &WorkbenchHandler{service: stub}
+			router := gin.New()
+			router.Use(middleware.ErrorHandler(), func(c *gin.Context) {
+				c.Next()
+				require.True(t, c.IsAborted())
+				require.False(t, c.Writer.Written(), "only ErrorHandler should write the error response")
+				require.Len(t, c.Errors, 1)
+				require.IsType(t, &apperrors.AppError{}, c.Errors.Last().Err)
+			})
+			router.GET("/sessions/:id/sandbox/workbench", h.Status, func(*gin.Context) {
+				t.Error("error response did not abort the handler chain")
+			})
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/sessions/session/sandbox/workbench", nil))
+			assertWorkbenchHTTPError(t, recorder, test.status, test.code)
+			require.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
+			require.Equal(t, 1, stub.calls)
+		})
+	}
+}
+
+func TestWorkbenchHTTPMiddlewareAndHandlerUseNumericCodes(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		tenant uint64
+		status int
+		code   apperrors.ErrorCode
+		calls  int
+	}{
+		{"middleware missing tenant", 0, 401, apperrors.ErrUnauthorized, 0},
+		{"middleware wrong tenant", 8, 403, apperrors.ErrForbidden, 0},
+		{"handler refusal", 7, 403, apperrors.ErrForbidden, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			stub := &workbenchHTTPErrorService{err: service.ErrWorkbenchDenied}
+			h := &WorkbenchHandler{service: stub}
+			router := gin.New()
+			router.Use(middleware.ErrorHandler(), func(c *gin.Context) {
+				ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, test.tenant)
+				c.Request = c.Request.WithContext(ctx)
+				c.Next()
+			})
+			router.GET("/tenants/:id/sessions/:session_id/sandbox/workbench",
+				middleware.RequirePathTenantMatch(nil), h.Status)
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/tenants/7/sessions/session/sandbox/workbench", nil)
+			router.ServeHTTP(recorder, request)
+			assertWorkbenchHTTPError(t, recorder, test.status, test.code)
+			require.Equal(t, test.calls, stub.calls)
+		})
 	}
 }

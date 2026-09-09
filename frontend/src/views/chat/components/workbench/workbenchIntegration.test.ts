@@ -19,6 +19,21 @@ test('scope invalidation includes session, route, user, tenant, logout, close an
   assert.match(chat, /referencesDrawer.close\(\);\s*workbenchVisible.value = true/)
 })
 
+test('upstream panel owns the header entry and exposes a distinct feature-gated workbench action', () => {
+  const header = read('../../../../components/ChatHeader.vue')
+  const sidePanel = read('../../../../components/chat/SandboxSidePanel.vue')
+  assert.doesNotMatch(header, /sandbox-workbench-toggle|toggle-workbench/)
+  assert.match(chat, /class="sandbox-header-toggle__btn"/)
+  assert.match(chat, /@click="sandboxPanel.open\(\)"/)
+  assert.match(chat, /:workbench-enabled="workbenchEnabled" @open-workbench="openWorkbench"/)
+  assert.match(sidePanel, /v-if="workbenchEnabled"/)
+  assert.match(sidePanel, /id="sandbox-workbench-toggle"/)
+  assert.match(sidePanel, /t\('workbench.open'\)/)
+  assert.match(sidePanel, /@click="emit\('open-workbench'\)"/)
+  assert.match(chat, /<SandboxSidePanel v-if="!embeddedMode && !workbenchVisible"/)
+  assert.match(chat, /watch\(sandboxPanel.visible, visible => \{ if \(visible\) closeWorkbench\(\)/)
+})
+
 test('terminal output and resizing are bounded and idle input stays disabled', () => {
   assert.match(terminal, /scrollback: 3000/)
   assert.match(terminal, /TERMINAL_OUTPUT_BYTES - writtenBytes/)

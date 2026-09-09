@@ -162,6 +162,8 @@ func dataKeys(data map[string]interface{}) []string {
 
 // toolDisplayNames maps internal tool names to user-friendly display labels.
 var toolDisplayNames = map[string]string{
+	agenttools.ToolDiscoverMCPTools:         "查看外部工具",
+	agenttools.ToolCallMCPTool:              "调用外部工具",
 	agenttools.ToolThinking:                 "深度思考",
 	agenttools.ToolTodoWrite:                "制定计划",
 	agenttools.ToolGrepChunks:               "关键词搜索",
@@ -344,7 +346,7 @@ func (e *AgentEngine) emitToolOutcome(
 		SessionID: sessionID,
 		Data: event.AgentToolResultData{
 			ToolCallID: toolCall.ID,
-			ToolName:   toolCall.Name,
+			ToolName:   toolCall.ExecutionName(),
 			Output:     result.Output,
 			Error:      result.Error,
 			Success:    result.Success,
@@ -360,8 +362,8 @@ func (e *AgentEngine) emitToolOutcome(
 		SessionID: sessionID,
 		Data: event.AgentActionData{
 			Iteration:  iteration,
-			ToolName:   toolCall.Name,
-			ToolInput:  toolCall.Args,
+			ToolName:   toolCall.ExecutionName(),
+			ToolInput:  toolCall.ExecutionArgs(),
 			ToolOutput: result.Output,
 			Success:    result.Success,
 			Error:      result.Error,
@@ -455,20 +457,31 @@ func (e *AgentEngine) runToolCall(
 		}
 	}
 
+	// Keep the provider-visible proxy call intact; resolve a separate target
+	// identity for live events, persisted presentation and tracing.
+	var target *types.ToolCallTarget
+	if len(tc.UnresolvedHandles) == 0 {
+		target = e.toolRegistry.MCPCallTarget(ctx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
+	}
+	executionName, executionArgs := tc.Function.Name, args
+	if target != nil {
+		executionName, executionArgs = target.Name, target.Args
+	}
+
 	logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
 
 	toolCallStartTime := time.Now()
 
 	// Emit tool hint for UI progress display
-	toolHint := formatToolHint(tc.Function.Name, args)
+	toolHint := formatToolHint(executionName, executionArgs)
 	e.eventBus.Emit(ctx, event.Event{
 		ID:        tc.ID + "-tool-hint",
 		Type:      event.EventAgentToolCall,
 		SessionID: sessionID,
 		Data: event.AgentToolCallData{
 			ToolCallID: tc.ID,
-			ToolName:   tc.Function.Name,
-			Arguments:  agenttools.SanitizeSandboxFileCallArgs(tc.Function.Name, args),
+			ToolName:   executionName,
+			Arguments:  agenttools.SanitizeSandboxFileCallArgs(executionName, executionArgs),
 			Iteration:  iteration,
 			Hint:       toolHint,
 		},
@@ -477,7 +490,7 @@ func (e *AgentEngine) runToolCall(
 	common.PipelineInfo(ctx, "Agent", "tool_call_start", map[string]interface{}{
 		"iteration":    iteration,
 		"round":        round,
-		"tool":         tc.Function.Name,
+		"tool":         executionName,
 		"tool_call_id": tc.ID,
 		"tool_index":   fmt.Sprintf("%d/%s", i+1, total),
 	})
@@ -491,10 +504,14 @@ func (e *AgentEngine) runToolCall(
 	// (toolHintSensitiveArgs) because it exposes implementation details.
 	// Mirror that policy for Langfuse: redact raw arguments to avoid
 	// leaking raw SQL into the observability backend.
-	toolSpanInput := buildToolSpanInput(tc, args, toolHintSensitiveArgs[tc.Function.Name])
+	toolSpanInput := buildToolSpanInput(tc, executionArgs, toolHintSensitiveArgs[executionName])
+	if target != nil {
+		toolSpanInput["mcp_service"] = target.ServiceName
+		toolSpanInput["mcp_tool"] = target.ToolName
+	}
 	argumentResolution, _ := toolSpanInput["argument_resolution"].(string)
 	toolCtx, toolSpan := mgr.StartSpan(ctx, langfuse.SpanOptions{
-		Name:  "agent.tool." + tc.Function.Name,
+		Name:  "agent.tool." + executionName,
 		Input: toolSpanInput,
 		Metadata: map[string]interface{}{
 			"iteration":               iteration,
@@ -539,6 +556,7 @@ func (e *AgentEngine) runToolCall(
 	duration := time.Since(toolCallStartTime).Milliseconds()
 
 	toolCall := types.ToolCall{
+		Target:           target,
 		ID:               tc.ID,
 		Name:             tc.Function.Name,
 		Args:             args,
@@ -570,7 +588,7 @@ func (e *AgentEngine) runToolCall(
 	pipelineFields := map[string]interface{}{
 		"iteration":    iteration,
 		"round":        round,
-		"tool":         tc.Function.Name,
+		"tool":         executionName,
 		"tool_call_id": tc.ID,
 		"duration_ms":  duration,
 		"success":      toolSuccess,

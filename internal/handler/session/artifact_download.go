@@ -2,16 +2,19 @@ package session
 
 import (
 	stderrors "errors"
-	"io"
 	"mime"
 	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	appservice "github.com/Tencent/WeKnora/internal/application/service"
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/filetransport"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
@@ -51,7 +54,7 @@ func (h *Handler) ListSessionArtifacts(c *gin.Context) {
 	ctx := c.Request.Context()
 	sessionID := secutils.SanitizeForLog(paramSessionID(c))
 	if sessionID == "" {
-		c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
+		_ = c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
 		return
 	}
 
@@ -59,10 +62,10 @@ func (h *Handler) ListSessionArtifacts(c *gin.Context) {
 	// unknown / non-owned sessions matches the rest of the session routes.
 	if _, err := h.sessionService.GetSession(ctx, sessionID); err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
-			c.Error(errors.NewNotFoundError(err.Error()))
+			_ = c.Error(errors.NewNotFoundError(err.Error()))
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -70,7 +73,7 @@ func (h *Handler) ListSessionArtifacts(c *gin.Context) {
 	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > 100 {
-			c.Error(errors.NewBadRequestError("limit must be between 1 and 100"))
+			_ = c.Error(errors.NewBadRequestError("limit must be between 1 and 100"))
 			return
 		}
 		limit = parsed
@@ -84,15 +87,15 @@ func (h *Handler) ListSessionArtifacts(c *gin.Context) {
 	)
 	if err != nil {
 		if stderrors.Is(err, appservice.ErrInvalidArtifactCursor) {
-			c.Error(errors.NewBadRequestError("invalid artifact cursor"))
+			_ = c.Error(errors.NewBadRequestError("invalid artifact cursor"))
 			return
 		}
 		logger.Errorf(ctx, "list session artifacts failed: session=%s err=%v", sessionID, err)
-		c.Error(errors.NewInternalServerError("failed to list session artifacts"))
+		_ = c.Error(errors.NewInternalServerError("failed to list session artifacts"))
 		return
 	}
 	if page == nil {
-		c.Error(errors.NewInternalServerError("failed to list session artifacts"))
+		_ = c.Error(errors.NewInternalServerError("failed to list session artifacts"))
 		return
 	}
 
@@ -134,22 +137,22 @@ func (h *Handler) ListMessageArtifacts(c *gin.Context) {
 	sessionID := secutils.SanitizeForLog(paramSessionID(c))
 	messageID := secutils.SanitizeForLog(c.Param("message_id"))
 	if sessionID == "" || messageID == "" {
-		c.Error(errors.NewBadRequestError("session_id and message_id are required"))
+		_ = c.Error(errors.NewBadRequestError("session_id and message_id are required"))
 		return
 	}
 
 	if _, err := h.sessionService.GetSession(ctx, sessionID); err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
-			c.Error(errors.NewNotFoundError(err.Error()))
+			_ = c.Error(errors.NewNotFoundError(err.Error()))
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
 	msg, err := h.messageService.GetMessage(ctx, sessionID, messageID)
 	if err != nil || msg == nil {
-		c.Error(errors.NewNotFoundError("message not found"))
+		_ = c.Error(errors.NewNotFoundError("message not found"))
 		return
 	}
 
@@ -188,12 +191,12 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 	messageID := secutils.SanitizeForLog(c.Param("message_id"))
 	indexParam := c.Param("index")
 	if sessionID == "" || messageID == "" || indexParam == "" {
-		c.Error(errors.NewBadRequestError("session_id, message_id and index are required"))
+		_ = c.Error(errors.NewBadRequestError("session_id, message_id and index are required"))
 		return
 	}
 	index, err := strconv.Atoi(indexParam)
 	if err != nil || index < 0 {
-		c.Error(errors.NewBadRequestError("invalid artifact index"))
+		_ = c.Error(errors.NewBadRequestError("invalid artifact index"))
 		return
 	}
 
@@ -202,53 +205,90 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 	// both "not found" and "forbidden" without leaking existence.
 	if _, err := h.sessionService.GetSession(ctx, sessionID); err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
-			c.Error(errors.NewNotFoundError(err.Error()))
+			_ = c.Error(errors.NewNotFoundError(err.Error()))
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
 	msg, err := h.messageService.GetMessage(ctx, sessionID, messageID)
 	if err != nil || msg == nil {
-		c.Error(errors.NewNotFoundError("message not found"))
+		_ = c.Error(errors.NewNotFoundError("message not found"))
 		return
 	}
 	if index >= len(msg.Artifacts) {
-		c.Error(errors.NewNotFoundError("artifact index out of range"))
+		_ = c.Error(errors.NewNotFoundError("artifact index out of range"))
 		return
 	}
 	artifact := msg.Artifacts[index]
 	if artifact.URL == "" {
-		c.Error(errors.NewNotFoundError("artifact storage path missing"))
+		_ = c.Error(errors.NewNotFoundError("artifact storage path missing"))
 		return
 	}
 
 	if h.fileService == nil {
-		c.Error(errors.NewInternalServerError("file service unavailable"))
+		_ = c.Error(errors.NewInternalServerError("file service unavailable"))
 		return
 	}
-	reader, err := h.fileService.GetFile(ctx, artifact.URL)
+	file, err := access.ResolveMessageArtifact(ctx, msg, index, h.agentShareService, h.resourceCatalog,
+		access.MessageKBShareAuthorizer{ShareGuard: h.kbShareService, KBs: h.knowledgebaseService})
+	if err != nil {
+		_ = c.Error(errors.NewNotFoundError("artifact not accessible"))
+		return
+	}
+	ctx = types.WithExecutionTenant(ctx, file.OwnerTenantID)
+	fileService := h.fileService
+	if h.tenantService != nil {
+		tenant, lookupErr := h.tenantService.GetTenantByID(ctx, file.OwnerTenantID)
+		if lookupErr != nil || tenant == nil {
+			_ = c.Error(errors.NewNotFoundError("artifact workspace unavailable"))
+			return
+		}
+		backendID, providerPath, scoped := types.ParseStorageBackendPath(file.Path)
+		if !scoped {
+			providerPath = file.Path
+		}
+		if file.StorageBackendID != "" {
+			backendID = file.StorageBackendID
+		}
+		var ok bool
+		fileService, _, ok = filesvc.ResolveTenantFileServiceWithFallback(
+			ctx,
+			"artifact download",
+			tenant,
+			backendID,
+			types.ParseProviderScheme(providerPath),
+			storageurl.LocalStorageBaseDir(),
+			h.storageResolver,
+			h.fileService,
+		)
+		if !ok {
+			_ = c.Error(errors.NewNotFoundError("artifact storage unavailable"))
+			return
+		}
+	}
+	reader, err := fileService.GetFile(ctx, file.Path)
 	if err != nil {
 		logger.Warnf(ctx, "artifact download read failed: session=%s message=%s idx=%d err=%v",
 			sessionID, messageID, index, err)
-		c.Error(errors.NewNotFoundError("artifact blob missing"))
+		_ = c.Error(errors.NewNotFoundError("artifact blob missing"))
 		return
 	}
-	defer reader.Close()
-
-	// Force download semantics — artifacts are never rendered inline, matching
-	// the /files endpoint's active-content protection.
-	c.Header("Content-Type", mimeTypeFor(artifact.FileName))
-	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("Content-Disposition", buildAttachmentHeader(artifact.FileName))
-	if artifact.FileSize > 0 {
-		c.Header("Content-Length", strconv.FormatInt(artifact.FileSize, 10))
-	}
-	c.Status(http.StatusOK)
-	if _, err := io.Copy(c.Writer, reader); err != nil {
-		logger.Warnf(ctx, "artifact download stream failed: session=%s message=%s idx=%d err=%v",
-			sessionID, messageID, index, err)
+	if err := filetransport.Serve(c.Writer, c.Request, reader, filetransport.Options{
+		Filename: artifact.FileName, Download: true, ContentType: mimeTypeFor(artifact.FileName),
+		Disposition:  buildAttachmentHeader(artifact.FileName),
+		Size:         artifact.FileSize,
+		CacheControl: "private, no-store",
+	}); err != nil {
+		logger.Warnf(
+			ctx,
+			"artifact download stream failed: session=%s message=%s idx=%d err=%v",
+			sessionID,
+			messageID,
+			index,
+			err,
+		)
 	}
 }
 

@@ -1,6 +1,6 @@
 # API 参考：Agent、MCP 与技能
 
-路由注册：`internal/router/router.go` 的 `RegisterCustomAgentRoutes`、`RegisterMCPServiceRoutes`、`RegisterSkillRoutes`、`RegisterUserFavoriteRoutes`。Handler：`internal/handler/custom_agent.go`、`internal/handler/mcp_service.go`、`internal/handler/mcp_credentials.go`、`internal/handler/mcp_oauth.go`、`internal/handler/skill_handler.go`、`internal/handler/user_resource_favorite.go`。
+管理智能体、MCP 服务及其凭据、技能和资源收藏。智能体的工具范围与调用审批配置通过本组接口维护。
 
 ## Agent（/api/v1/agents）
 
@@ -125,7 +125,8 @@ curl "$BASE/api/v1/agents/agent-1/suggested-questions?limit=6" -H "X-API-Key: $A
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `name` | string | 是 | 名称 |
-| `description` | string | 否 | 描述 |
+| `description` | string | 否 | 旧版描述，兼容保留；管理界面统一编辑 `usage_instructions` |
+| `usage_instructions` | string | 配置完成时必填 | 服务用途、适用场景和关键约束；第一步仅保存连接时可省略 |
 | `enabled` | bool | 否 | 启用 |
 | `transport_type` | string | 是 | `sse` / `http-streamable` / `stdio` |
 | `url` | *string | 否 | 服务 URL（SSE/HTTP） |
@@ -162,12 +163,24 @@ curl $BASE/api/v1/mcp-services/mcp-1 -H "Authorization: Bearer $TOKEN"
 
 用途：部分更新（map 语义；`auth_config` 中不可携带 api_key/token）。权限：Admin+。字段同创建（均可选）。
 
+提交 `usage_instructions` 时必须为去除首尾空白后非空的字符串，最长 16000 字符。仅修改连接或启用状态时可省略该字段，原值保持不变。
+
 响应：200 `{"success":true,"data":{MCPServiceResponse}}`
 
 ```bash
 curl -X PUT $BASE/api/v1/mcp-services/mcp-1 -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"enabled":false}'
 ```
+
+### POST /api/v1/mcp-services/:id/usage-instructions/generate
+
+用途：根据已同步、未过期的 MCP 工具目录生成精简使用说明。权限：Admin+；API key 需要 `manage_mcp_services` 或 full。
+
+请求：`{"language":"zh-CN"}`。支持 `zh-CN`、`en-US`、`ja-JP`、`ko-KR`、`ru-RU`，默认中文。
+
+优先使用空间默认的可用对话模型，否则使用首个可用对话模型。输入包括服务名称、服务端说明和已启用工具的名称、描述；OAuth 目录沿用当前用户的授权范围。不会连接 MCP、调用工具或自动保存生成结果。
+
+响应：200 `{"success":true,"data":{"usage_instructions":"按模块和时间范围查询远程日志；已有查询 ID 时读取对应日志。"}}`。生成目标为 2–3 句简短说明，最多 500 字符；用户可编辑后通过 PUT 保存。目录未同步、过期、无启用工具或无可用对话模型时返回 400。
 
 ### DELETE /api/v1/mcp-services/:id
 
@@ -222,7 +235,7 @@ curl -X DELETE $BASE/api/v1/mcp-services/mcp-1/credentials/token -H "Authorizati
 
 ### GET /api/v1/mcp-services/:id/tool-approvals
 
-用途：工具人工审批策略列表。权限：Viewer+。响应：200 `{"success":true,"data":[{service_id,tool_name,require_approval,...}]}`
+用途：工具启停与人工审批策略列表。权限：Viewer+。响应：200 `{"success":true,"data":[{service_id,tool_name,require_approval,enabled,...}]}`
 
 ```bash
 curl $BASE/api/v1/mcp-services/mcp-1/tool-approvals -H "Authorization: Bearer $TOKEN"
@@ -230,7 +243,7 @@ curl $BASE/api/v1/mcp-services/mcp-1/tool-approvals -H "Authorization: Bearer $T
 
 ### PUT /api/v1/mcp-services/:id/tool-approvals/:tool_name
 
-用途：设置某工具是否需人工审批。权限：Admin+。请求体：`{"require_approval":true}`（必填）。
+用途：更新某工具的 enabled（启停）和 require_approval（人工审批）。权限：Admin+。两者至少提供一个，省略的字段保持原值；无记录默认启用且不要求审批。
 
 响应：200 `{"success":true}`
 
@@ -334,35 +347,15 @@ curl -X POST $BASE/api/v1/agent/mcp-oauth-resolutions/p-1 -H "Authorization: Bea
 curl -X POST $BASE/api/v1/agent/mcp-oauth-resolutions/p-1/cancel -H "Authorization: Bearer $TOKEN"
 ```
 
-## 技能（/api/v1/skills）
+## 技能、沙箱与个人变量
 
-### GET /api/v1/skills
+`GET /api/v1/skills?sandbox_config_id=...` 返回指定配置下可用技能的名称/说明及 skills_available。目录收录、安装、模板、进度、文件与个人变量的完整接口见[沙箱与技能 API](02-api-sandbox-skills.md)。
 
-用途：当前沙箱配置上可执行的已安装技能列表（只读）。查询参数 `sandbox_config_id`；不传则列表为空。权限：Viewer+。Handler: `internal/handler/skill_handler.go`
+智能体 config 增加 `sandbox_config_id`；与 skills_selection_mode、selected_skills 一起决定可用技能。shell/文件工具按后端能力注册，旧 read_skill / execute_skill_script 不再注册。
 
-响应：200 `{"success":true,"data":[{name,description}],"skills_available":bool}`
+## 长期记忆
 
-```bash
-curl $BASE/api/v1/skills -H "Authorization: Bearer $TOKEN"
-```
-
-安装、停用、文件浏览与环境变量走沙箱配置前缀 `/api/v1/sandbox-configs/{id}/skills*` 以及 `/api/v1/me/env-vars*`，完整示例见仓库 [`docs/api/skill.md`](../../docs/api/skill.md)。
-
-## 长期记忆（/api/v1/memory）
-
-跨会话记忆始终绑定当前调用者，路径里没有 subject id。权限：Viewer+；API Key 必须 full-access。Handler: `internal/handler/memory.go`
-
-| 方法 | 路径 | 用途 |
-| --- | --- | --- |
-| GET/PUT | `/memory/settings` | 个人开关（空间级开关由管理员在租户设置里改） |
-| GET/POST/DELETE | `/memory/items` | 列出 / 手动新增 / 清空 |
-| PUT/DELETE | `/memory/items/{id}` | 修改 / 删除 |
-| POST | `/memory/items/{id}/confirm` `/reject` | 确认或否决推断出的记忆 |
-| GET | `/memory/topics` `/memory/documents` | 主题计数、文档亲和度 |
-| GET | `/memory/export` | JSON 导出 |
-| POST | `/memory/consolidate` | 立刻整理 |
-
-完整字段与 curl 见仓库 [`docs/api/memory.md`](../../docs/api/memory.md)。
+智能体 config 的 `memory_enabled` 为 nil 时继承空间，false 禁用本智能体的记忆读写。个人管理、主题/文档偏好、导出与立即整理见[长期记忆 API](02-api-memory.md)，使用步骤见[跨会话长期记忆](../03-features/23-memory.md)。
 
 ## 用户收藏（/api/v1/user/favorites）
 
@@ -398,3 +391,7 @@ curl -X POST $BASE/api/v1/user/favorites -H "Authorization: Bearer $TOKEN" \
 ```bash
 curl -X DELETE $BASE/api/v1/user/favorites/kb/kb-1 -H "Authorization: Bearer $TOKEN"
 ```
+
+## 实现参考
+
+路由注册：`internal/router/router.go` 的 `RegisterCustomAgentRoutes`、`RegisterMCPServiceRoutes`、`RegisterSkillRoutes`、`RegisterUserFavoriteRoutes`。Handler：`internal/handler/custom_agent.go`、`internal/handler/mcp_service.go`、`internal/handler/mcp_credentials.go`、`internal/handler/mcp_oauth.go`、`internal/handler/skill_handler.go`、`internal/handler/user_resource_favorite.go`。

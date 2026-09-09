@@ -53,7 +53,15 @@ type sandboxSkillService interface {
 	InstallSkillFromSource(
 		ctx context.Context, tenantID uint64, configID, source string,
 	) (string, error)
-	ReinstallSkill(ctx context.Context, tenantID uint64, configID, skillID string) (string, error)
+	ReinstallSkill(
+		ctx context.Context, tenantID uint64, configID, skillID string, instructions ...string,
+	) (string, error)
+	InstallGuidance(
+		ctx context.Context, tenantID uint64, configID, skillID string,
+	) (*service.SkillInstallGuidanceState, error)
+	SteerInstall(
+		ctx context.Context, tenantID uint64, configID, skillID, expectedMessageID, steerID, content string,
+	) error
 	StopSkill(ctx context.Context, tenantID uint64, configID, skillID string) (*types.TenantSkillEntity, error)
 	RemoveSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
 	LastProgress(
@@ -392,8 +400,15 @@ func (h *SandboxSkillHandler) installFromSource(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /sandbox-configs/{id}/skills/{skillId}/reinstall [post]
 func (h *SandboxSkillHandler) Reinstall(c *gin.Context) {
+	var req struct {
+		Instructions string `json:"instructions" binding:"max=10000"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
+		_ = c.Error(apperrors.NewBadRequestError("invalid reinstall instructions"))
+		return
+	}
 	skillID, err := h.service.ReinstallSkill(
-		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), c.Param("skillId"),
+		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), c.Param("skillId"), req.Instructions,
 	)
 	if err != nil {
 		respondSkillServiceError(c, err)
@@ -883,4 +898,40 @@ func setSandboxSkillSSEHeaders(c *gin.Context) {
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Accel-Buffering", "no")
+}
+
+// InstallGuidance exposes only the guidance for this tenant/config/skill's current run.
+func (h *SandboxSkillHandler) InstallGuidance(c *gin.Context) {
+	state, err := h.service.InstallGuidance(
+		c.Request.Context(),
+		sandboxConfigTenantID(c),
+		c.Param("id"),
+		c.Param("skillId"),
+	)
+	if err != nil {
+		respondSkillServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": state})
+}
+
+// SteerInstall accepts administrator guidance for the displayed installation run.
+func (h *SandboxSkillHandler) SteerInstall(c *gin.Context) {
+	var req struct {
+		ExpectedMessageID string `json:"expected_message_id" binding:"required"`
+		SteerID           string `json:"steer_id" binding:"required"`
+		Content           string `json:"content" binding:"required,max=10000"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(apperrors.NewBadRequestError("invalid install guidance"))
+		return
+	}
+	if err := h.service.SteerInstall(
+		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), c.Param("skillId"),
+		req.ExpectedMessageID, req.SteerID, req.Content,
+	); err != nil {
+		respondSkillServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true})
 }

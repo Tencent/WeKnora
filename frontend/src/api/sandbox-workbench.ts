@@ -66,7 +66,7 @@ export function createWorkbenchApi(sessionId: string, transport: WorkbenchTransp
   return {
     status: () => data(transport.get<Envelope<WorkbenchStatus>>(`${base}/workbench`, options)),
     bind: (configId: string) => data(transport.post<Envelope<WorkbenchStatus>>(`${base}/workbench`, { config_id: configId }, options)),
-    ticket: () => data(transport.post<Envelope<TerminalTicket>>(`${base}/terminal-ticket`, {}, options)),
+    ticket: () => data(transport.post<Envelope<TerminalTicket>>(`${base}/command-ticket`, {}, options)),
     files: (path = '') => data(transport.get<Envelope<WorkbenchDirectory>>(`${base}/files?${pathQuery(path)}`, options)),
     download: async (path: string) => {
       const blob = await transport.get<Blob>(`${base}/files/download?${pathQuery(path)}`, { ...options, responseType: 'blob' })

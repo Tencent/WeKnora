@@ -1,8 +1,10 @@
 # API 参考：租户（空间）与成员
 
-路由注册：`internal/router/router.go` 的 `RegisterTenantRoutes`。Handler：`internal/handler/tenant.go`、`internal/handler/tenant_member.go`、`internal/handler/tenant_invitation.go`、`internal/handler/tenant_invite_link.go`、`internal/handler/audit_log.go`。
+管理工作空间、成员、邀请、API Key 和审计日志。操作作用于当前活跃空间，跨空间访问按接口权限校验。
 
 所有 `/tenants/:id/*` 路由在组级挂载 `PathTenantMatch()`（`internal/middleware/access.go`）：URL 中的 `:id` 必须等于当前活跃空间（跨空间超管例外），防止越权操作他人空间。
+
+租户 `memory_config` 配置字段及个人记忆接口见[长期记忆 API](02-api-memory.md)。空间管理员更新配置时提交要保留的完整对象。
 
 ## 空间生命周期
 
@@ -98,7 +100,7 @@ curl -X DELETE $BASE/api/v1/tenants/1 -H "Authorization: Bearer $TOKEN"
 
 ## 空间 KV 配置
 
-`:key` 为配置键而非空间 ID（空间取自认证上下文），可选值：`web-search-config`、`prompt-templates`、`parser-engine-config`、`storage-engine-config`、`chat-history-config`、`retrieval-config`。
+`:key` 为配置键而非空间 ID（空间取自认证上下文），可选值：`web-search-config`、`prompt-templates`、`parser-engine-config`、`storage-engine-config`、`chat-history-config`、`retrieval-config`、`memory-config`。
 
 ### GET /api/v1/tenants/kv/:key
 
@@ -151,6 +153,18 @@ curl $BASE/api/v1/tenants/1/api-keys -H "Authorization: Bearer $TOKEN"
 curl -X POST $BASE/api/v1/tenants/1/api-keys -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"name":"ingest-bot","capabilities":["ingest","retrieve"],"knowledge_base_ids":["kb-1"]}'
+```
+
+### PUT /api/v1/tenants/:id/api-keys/:key_id
+
+Owner，仅 JWT。更新已有 Key 的 name、full_access、knowledge_base_ids、capabilities、expires_at_unix，授权字段按整份配置提交；不是只改一个字段的 PATCH。expires_at_unix 省略或 null 会清除已有到期时间。更改权限后使用同一 token，新授权在后续认证时生效，不重新返回明文。
+
+返回 200 `{success,data:APIKeyResponse}`，Key 脱敏；非法能力/知识库范围返回 400，不存在返回 404。
+
+```bash
+curl -X PUT "$BASE/api/v1/tenants/1/api-keys/5" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"search-bot","full_access":false,"knowledge_base_ids":["kb-1"],"capabilities":["retrieve"]}'
 ```
 
 ### DELETE /api/v1/tenants/:id/api-keys/:key_id
@@ -365,3 +379,7 @@ curl "$BASE/api/v1/tenants/1/audit-log?limit=50" -H "Authorization: Bearer $TOKE
 ```bash
 curl $BASE/api/v1/knowledge-bases/kb-1/activity -H "Authorization: Bearer $TOKEN"
 ```
+
+## 实现参考
+
+路由注册：`internal/router/router.go` 的 `RegisterTenantRoutes`。Handler：`internal/handler/tenant.go`、`internal/handler/tenant_member.go`、`internal/handler/tenant_invitation.go`、`internal/handler/tenant_invite_link.go`、`internal/handler/audit_log.go`。

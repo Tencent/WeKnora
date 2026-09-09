@@ -26,7 +26,7 @@ test('workbench requests use the finalized session-scoped contract and cancellat
   await api.download('reports/file & name.txt')
   const base = '/api/v1/sessions/session%20%2F%3F/sandbox'
   assert.deepEqual(calls.map(({ method, url }) => [method, url]), [
-    ['get', `${base}/workbench`], ['post', `${base}/workbench`], ['post', `${base}/terminal-ticket`],
+    ['get', `${base}/workbench`], ['post', `${base}/workbench`], ['post', `${base}/command-ticket`],
     ['get', `${base}/files?path=folder+%26+name`], ['postUpload', `${base}/files`],
     ['post', `${base}/directories`], ['patch', `${base}/files`],
     ['del', `${base}/files?path=reports%2Fnew.txt`], ['get', `${base}/audit`],

@@ -1,100 +1,149 @@
 # Sandbox Workbench
 
-The workbench adds a command console and file manager to a chat session's existing sandbox. It reuses the session config pin, Docker/E2B/Cube lifecycle and artifact previews. The ReAct loop and buffered `shell_exec` contract stay unchanged.
+工作台为会话沙箱提供受限命令终端、文件管理和产物预览，默认关闭，通过 `WEKNORA_SANDBOX_WORKBENCH_ENABLED=true` 开启。
+它复用会话绑定的具名配置与 Docker、E2B、Cube provider，不在 WeKnora 宿主机执行命令，也不改变 Agent 的 ReAct 流程或 `shell_exec` 契约。
+Shell 可以访问本会话沙箱内的文件；宿主机和跨会话隔离依赖后端部署，文件管理的路径限制不能约束 Shell。
 
-Baseline: official main `647848f3`, after v0.8.0 (`1edcd54b`). Local host execution is excluded.
+部署入口：[Docker 后端](sandbox-docker-backend.md) · [E2B 协议接入](sandbox-protocol.md) · [集群与模板](sandbox-cluster.md)。技能安装见 [Agent Skills](agent-skills.md)，示例见 [Skills 示例](../examples/skills/README.md)。
 
-## Scope
+## 部署条件
 
-- Submit a command, receive live PTY output, send stdin, resize, interrupt and close.
-- Browse `/workspace/output`, upload/download, create directories, rename, delete files or empty directories.
-- Reuse PPTX/HTML/spreadsheet preview and durable message artifacts.
-- Ship an original `presentation-builder` Skill using python-pptx.
-- Verify Docker Engine and a real E2B-compatible Agent-Sandbox backend on Kind. Kind provides container isolation, not MicroVM isolation.
+工作台要求有效的 Web 用户、当前空间成员身份、会话所有权，以及允许脚本执行的空间策略。首次使用需显式绑定具名沙箱配置；已有会话继续使用原配置，客户端不能指定 provider 的 sandbox ID 或进程 ID。
 
-The surface is opt-in (`WEKNORA_SANDBOX_WORKBENCH_ENABLED=true`). It requires an active web user, active workspace membership, session ownership, a named sandbox config and workspace policy permitting scripts. Clients never choose provider sandbox/process IDs. Files, secrets and evidence from local runs stay under ignored `.runtime/`.
-
-## Deployment
-
-Set the application origin explicitly when using a reverse proxy:
+反向代理部署应明确配置浏览器访问的应用 Origin：
 
 ```dotenv
 WEKNORA_SANDBOX_WORKBENCH_ENABLED=true
 WEKNORA_SANDBOX_WORKBENCH_ORIGINS=https://weknora.example.com
 ```
 
-Redis is required for multi-instance ticket consumption and console leases. The in-memory alternative requires `WEKNORA_SANDBOX_WORKBENCH_SINGLE_INSTANCE=true`. Missing shared state fails closed and is not advertised as terminal capability. Vite and the supplied nginx proxy pass WebSocket upgrades; production ingress must do the same. Authentication remains in the first socket frame, so proxies must not log frame payloads. Authenticated consoles are capped at 256 per deployment and four per user; each session still permits one console.
+多实例必须配置 Redis，共享一次性 ticket 和终端租约。仅单实例可设置 `WEKNORA_SANDBOX_WORKBENCH_SINGLE_INSTANCE=true` 使用内存存储；缺少共享状态时不开放终端。Redis 应启用认证并限制网络访问。
 
-| Backend | Terminal | File API | Verification |
+代理须支持 WebSocket Upgrade，连接超时需覆盖控制台寿命。认证 ticket 只出现在首帧，代理不能记录帧内容。每会话最多一个工作台控制台，每用户最多四个，部署内最多 256 个。
+
+| 后端 | 命令终端 | 文件管理 | 部署约束 |
 | --- | --- | --- | --- |
-| Docker Engine | Native TTY exec | Descriptor-based helper | Real local runtime |
-| E2B protocol | envd PTY | Descriptor-based helper | Agent-Sandbox 0.8.3 on Kind |
-| Cube | envd adapter | Disabled | Protocol tests only; native deployment not tested |
+| Docker | Engine TTY exec | 支持 | 管理员需另行启用 Docker；容器共享宿主机内核 |
+| E2B 兼容后端 | envd PTY | 支持 | 控制面、envd、模板和入站认证均须可用；隔离级别由实现决定 |
+| Cube | envd 适配器 | 关闭 | 文件 helper 所需的专用日志脱敏边界尚未接入 |
 
-Cube file access remains disabled because its existing command logger does not provide the helper-specific redaction boundary. The local E2B implementation supports create/execute with an explicit template ID but returns 404 for the E2B template catalog. That provider's Settings template picker is not covered by this delivery. No E2B Cloud or MicroVM claim follows from the Kind tests.
+标准运行环境由 [`docker/Dockerfile.sandbox`](../docker/Dockerfile.sandbox) 提供。自定义镜像需具备 Python 3、Bash、Linux `/proc` 和 `prctl`；文件 helper 另需目录描述符 API 及 `renameat2(RENAME_NOREPLACE)`。E2B 模板还需由部署方按所用控制面要求提供 envd。
 
-## Terminal Contract
+## 两种终端
 
-Each submitted command launches a separate shell process with a PTY. Stdin is accepted only during execution. Audit records cover server-accepted launches, not arbitrary nested shell commands or terminal keystrokes. No process starts until its accepted audit record is durable.
+工作台的 `CommandTerminal` 每次提交启动一个独立的受限 Shell 命令，只在运行期间接收 stdin。命令退出、取消或 `Close` 时终止执行并清理后代进程；断线后重新申请 ticket，不重放上一条命令。启动结果不确定时也不自动重试。
 
-An optional terminal interface provides byte-stream reads, input, resize, interrupt, wait and close. Missing capability fails closed. Docker uses native Engine TTY exec; remote adapters use envd's documented Connect process protocol. Existing buffered Exec behavior is preserved. Explicit initialization probes a versioned runtime contract: terminal needs Python 3, Bash, Linux `/proc` and `prctl`; the file helper additionally requires descriptor APIs and `renameat2(RENAME_NOREPLACE)`. A failed probe suppresses only the unsupported capability without allocating from status reads. Probe results expire after 30 minutes and are capped at 1,024 config states and 4,096 sandbox states so retired configs and reaped sandbox IDs cannot accumulate in process memory.
+会话交互 Shell 使用 `RemoteTerminalSession`：`Close` 只 detach 传输连接，Shell 可继续保留并供后续重连。两套接口都使用现有 `SessionBoundManager` 和 provider，生命周期语义不同，调用方不能混用。
 
-Docker reconnect refreshes the sandbox activity marker before starting an idle sweep. Initialization also holds the session lifecycle lock and a temporary turn lease across workspace preparation and probing; a provider-confirmed reclaim or removal conflict is re-resolved once. This prevents an expired container from being deleted between reconnect and its first command without retrying ambiguous launches.
+显式初始化会准备工作目录并探测运行时契约。探测结果仅缓存到对应 sandbox，最多 4096 项、TTL 30 分钟；失败只影响该 sandbox。状态查询只读 binding 和本地缓存，不连接后端、不创建沙箱。修复镜像或运行环境后，显式 Bind 会强制重新探测。
 
-There is one command per console and a bounded connection lifetime. Frame size, dimensions, output queue, total output, CPU time, address space and wall duration are capped. UTF-8 and binary terminal input are converted to explicit byte frames and split below the negotiated JSON frame limit. Cancellation performs explicit cleanup with a fresh deadline; closing a transport alone does not establish process termination. An ambiguous launch is never automatically retried. Session ownership and workspace policy are rechecked every five seconds and before each command, while high-frequency stdin/resize/ping frames only renew the lease. Process shutdown cancels and waits for hijacked WebSocket consoles before resource cleanup.
+默认限额如下；客户端以状态接口和 socket 的 `ready` 帧返回值为准。
 
-Defaults are 120 seconds per command, 30 minutes per console, 60 CPU seconds and 512 MiB address space per process. The supervisor accounts for descendant CPU use and cleans remaining descendants after exit or cancellation. Address space is not a container-wide memory reservation: use the backend's memory/PID limits for aggregate containment. Resource exhaustion terminates the command; it does not automatically destroy the session sandbox or its files.
+| 项目 | 限额 |
+| --- | --- |
+| 单命令时长 / 控制台寿命 | 120 秒 / 30 分钟 |
+| CPU 时间 | 命令及后代累计 60 秒 |
+| 地址空间 | 每进程 512 MiB |
+| 命令文本 / JSON 帧 | 8 KiB / 16 KiB |
+| 未读取输出缓冲 / 控制台累计输出 | 256 KiB / 32 MiB |
+| 终端尺寸 | 行、列各不超过 500 |
 
-The distinction between container CPU shares and CPU-time exhaustion is retained. Resource checks must report what was actually enforced. Arbitrary shell commands can access files inside their own sandbox; the file API's path boundary does not confine shell execution. Host and cross-session isolation depend on provider configuration.
+地址空间限制不等于整个沙箱的内存上限，CPU 时间也不等于容器 CPU 配额；部署方仍需配置容器或 MicroVM 的内存、CPU、PID 限额。超限会结束命令，沙箱及文件不会因此自动销毁。
 
-## HTTP And Socket
+服务端每五秒及每次启动命令前重新检查身份和空间策略。stdin、resize、ping 只续租；权限撤销、租约丢失或连接结束后，服务端用独立清理期限终止命令，关闭传输本身不作为进程已退出的证据。
 
-Authenticated API base: `/api/v1/sessions/{id}/sandbox`.
+## 文件与预览
 
-| Method | Suffix | Purpose |
-| --- | --- | --- |
-| GET | `/workbench` | Inspect pinned config/capabilities without allocation |
-| POST | `/workbench` | Bind `{config_id}` and initialize on first use; retain existing pin |
-| POST | `/terminal-ticket` | Issue single-use ticket, TTL 30 seconds |
-| GET | `/files?path=...` | List a bounded directory |
-| GET | `/files/download?path=...` | Download one regular file |
-| POST | `/files` | Multipart full relative destination `path` + `file`, no overwrite |
-| POST | `/directories` | Create `{path}` |
-| PATCH | `/files` | Rename `{path,new_path}`, no overwrite |
-| DELETE | `/files?path=...` | Delete file or empty directory |
-| GET | `/audit` | Session-scoped workbench audit entries |
+文件路径是 `/workspace/output` 下的相对 POSIX 路径。拒绝绝对路径、`..`、反斜线和控制字符；不允许符号链接、多硬链接文件、设备、FIFO 或 socket。helper 以 Python 隔离模式运行，通过目录描述符和 `O_NOFOLLOW` 完成路径遍历及实际操作，避免检查后替换路径的竞态。
 
-Gin wildcard names follow each existing method tree. The socket endpoint is `/api/v1/sandbox-terminal`. The first frame is `{type:"auth",ticket:"..."}`; tickets never enter URLs. Redis stores hashes and consumes atomically. Memory storage is for single-instance deployments only. Origin must match issuance and the allowed application origin. Current user, membership and session are checked again before use.
+每目录最多列出 500 项，单文件读取或上传最多 8 MiB。上传经临时 inode 完整写入、同步及校验后原子发布；上传和重命名均不覆盖目标。删除仅支持文件和空目录。
 
-Client frames: `command` with `command`; `stdin` with base64 `data` and `encoding:"base64"`; `resize` with `cols/rows`; `interrupt`; `ping`. Server JSON frames: `ready`, `started`, `exit` with `exit_code/reason`, `error` with `code/message`, `pong`. Binary server frames carry merged PTY bytes. A disconnected console obtains a new ticket; it never reruns the previous command.
+实时文件与消息产物分别展示。消息产物使用消息内索引标识，分页列表保留 `message_id` 和 `artifact_index`，不能用列表位置推算下载地址。Agent 只持久化本轮新增或变化的输出，预先上传且未变化的工作台文件不会自动成为回答产物。
 
-## Files And Preview
+预览先检查内容，再调用文档查看器：
 
-Paths are relative POSIX names under `/workspace/output`. Reject absolute paths, `..`, backslashes, NUL and control characters. A Python isolated-mode helper walks directories using descriptors and `O_NOFOLLOW`; actual operations use those descriptors, avoiding a separate realpath-check/open race. New files are fully written, synced and verified through a random staging inode before an atomic no-replace publish; failures remove the owned staging inode. Reject symlinks, devices, sockets and multiply-linked files. Listing is capped at 500 entries; reads/uploads at 8 MiB. Upload and rename cannot overwrite. Recursive deletion is excluded.
+- PPTX、XLSX 最多 2048 个 ZIP 条目，单条目解压后 8 MiB、合计 32 MiB；表格最多 10 万个单元格。拒绝外部关系、不安全路径、DTD 和实体。
+- HTML 和表格 HTML 放在 opaque-origin iframe，CSP 禁止脚本和外部请求，不授予同源、表单、弹窗或顶层导航权限。
+- PNG、JPEG、GIF、WebP 在浏览器解码前检查文件头，每边最多 4096 像素、合计 1200 万像素。
+- 工作台的 PDF、DOCX、音视频仅下载；普通聊天和知识库预览保持原有行为。产物 `kind` 仅作展示提示，不授予执行权限。
 
-Persisted artifacts keep message-local identity; the session listing additionally exposes `message_id` and `artifact_index` through stable `(created_at,id)` cursor pages. The Agent records an output-directory baseline before each turn and persists only files created or changed during that turn, so pre-existing Workbench uploads remain live files rather than assistant artifacts. A Workbench-specific preview adapter validates content before delegating safe blobs to the common document viewer. Workbench HTML previews deny external requests and omit same-origin, images, forms, popups and top-navigation permissions.
+## 接入与审计
 
-PPTX/XLSX archives are checked before the existing viewers consume them: at most 2,048 entries, 8 MiB per expanded entry, 32 MiB total and 100,000 spreadsheet cells. External relationships, unsafe archive paths, DTDs and entities are rejected. Spreadsheet HTML and untrusted HTML render in an opaque CSP-restricted iframe. Direct PNG/JPEG/GIF/WebP previews are header-checked before browser decoding and capped at 4,096 pixels per dimension and 12 million pixels. Workbench PDF/DOCX/audio/video previews remain download-only; ordinary chat/knowledge previews keep their existing behavior. The `kind` artifact field is a display hint, with extension-based fallback for old messages; it never grants execution permission.
+HTTP 入口位于 `/api/v1/sessions/{id}/sandbox`，提供工作台状态、显式绑定、文件操作和会话审计。受限命令使用 `POST /api/v1/sessions/{id}/sandbox/command-ticket` 申请 ticket；原 `terminal-ticket` 路由保留给会话交互 Shell，两者不能互换。
 
-The original [presentation-builder Skill](../examples/skills/presentation-builder/SKILL.md) accepts bounded JSON and produces local PPTX files without external templates or downloads. Dependencies are pinned. Text runs carry explicit styles for compatibility with the browser renderer.
+工作台 WebSocket 位于 `/api/v1/sandbox-terminal`，首帧使用 `{ "type": "auth", "ticket": "..." }`，ticket 不放进 URL，30 秒过期且只可消费一次。申请与消费时的 Origin 必须一致并符合应用配置，消费时再次检查当前身份和会话权限。
 
-## Audit
+控制消息使用 JSON；stdin 使用 base64 字节并按帧限额拆分，服务端二进制帧携带合并后的 PTY 输出。接入细节见[路由](../internal/router/routes_workbench.go)、[前端 API](../frontend/src/api/sandbox-workbench.ts)和[帧处理](../internal/handler/workbench_socket.go)。
 
-Audit intent is durable before a command or file mutation starts. Audit failure refuses the action. Completion records include tenant, actor, session, execution ID, outcome, duration and exit code. Command text is never persisted; accepted records contain only `[REDACTED]` and its byte count. Stdin, environment values, tickets and provider credentials are excluded. The existing audit retention policy applies.
+命令与文件变更必须先持久化 accepted 审计，写入失败则拒绝启动。结束记录含租户、操作者、会话、执行 ID、耗时、退出码和结果。命令文本只记 `[REDACTED]` 与字节数，不记录 stdin、环境变量值、ticket 或后端凭据。审计覆盖服务端接受的启动动作，不记录 Shell 内嵌命令和每次键盘输入。
 
-## Acceptance
+## 自动化测试
 
-Run tests for early output, stdin, resize, interrupt, timeout and descendant cleanup on two real backends. Verify tenant/session isolation, expired/reused tickets, invalid origins, policy revocation, unsafe paths and symlink races, output limits, durable audit, CPU/memory/wall limits, and PPTX/HTML/table previews. Protocol mocks supplement real runtime tests. Record skipped checks and provider limitations explicitly.
+从仓库根目录运行不依赖真实后端的检查：
 
 ```bash
-go test ./...
-go vet ./...
-go test -race ./internal/sandbox ./internal/handler ./internal/handler/session ./internal/router ./internal/types
-go test -race ./internal/application/service -run '^TestWorkbench'
+go test ./internal/sandbox ./internal/handler ./internal/handler/session ./internal/router
+go test ./internal/application/service -run '^TestWorkbench'
+python3 -B -I internal/sandbox/workbench_files_test.py
 ```
 
-Real-runtime terminal tests are opt-in with `-tags=sandbox_terminal_integration`; file tests require `-tags=workbench_integration` and `WORKBENCH_FILES_LOCAL_INTEGRATION=1`. Their configuration targets local test backends only. Run frontend tests, type-check and build with the scripts in `frontend/package.json`.
+真实测试仅识别 `WORKBENCH_TEST_*`，不会读取生产 E2B 凭据、Docker context 或通用 `DOCKER_HOST`。配置缺失时只跳过对应后端；配置完整后的连接失败会使测试失败。它们会创建沙箱、执行资源限制测试并在结束时销毁自己的会话，应使用专用测试账号或 daemon。
 
-`npm run test:workbench-browser` checks live-file and persisted-artifact renderers, external OOXML rejection, oversized-image rejection, HTML credential/network isolation and existing Office-preview compatibility. CI generates the PPTX through the bundled `presentation-builder`, starts Vite and runs these Playwright checks. Local runs may supply `PREVIEW_ARTIFACT_DIR` containing `agent-workbench-demo.pptx`, `workbench-report.html` and `backend-summary.csv`.
+### Docker 准备
 
-The full service race suite exposes pre-existing races in three test mocks (`tenant_api_key_test.go`, `tenant_sandbox_config_test.go`, `tenant_skill_catalog_test.go`), reproduced on the unchanged baseline. Workbench-specific race checks and the ordinary complete Go suite pass. The local `.runtime/README.md` records deployment, evidence paths and exact reproduction commands.
+在有权限访问测试 daemon 的 Linux 主机上，从仓库根目录构建标准镜像，无需安装 PPTX 依赖：
+
+```bash
+export WORKBENCH_TEST_DOCKER_HOST=unix:///var/run/docker.sock
+export WORKBENCH_TEST_DOCKER_IMAGE=weknora-sandbox:workbench-test
+docker --host "$WORKBENCH_TEST_DOCKER_HOST" build \
+  -f docker/Dockerfile.sandbox --target sandbox \
+  -t "$WORKBENCH_TEST_DOCKER_IMAGE" .
+```
+
+远程 daemon 使用 `tcp://host:2376`，同时设置 `WORKBENCH_TEST_DOCKER_TLS_CERT_PATH`，指向测试执行机上的 `ca.pem`、`cert.pem`、`key.pem` 目录。构建镜像时用相同地址和证书：
+
+```bash
+docker --host "$WORKBENCH_TEST_DOCKER_HOST" --tlsverify \
+  --tlscacert "$WORKBENCH_TEST_DOCKER_TLS_CERT_PATH/ca.pem" \
+  --tlscert "$WORKBENCH_TEST_DOCKER_TLS_CERT_PATH/cert.pem" \
+  --tlskey "$WORKBENCH_TEST_DOCKER_TLS_CERT_PATH/key.pem" build \
+  -f docker/Dockerfile.sandbox --target sandbox \
+  -t "$WORKBENCH_TEST_DOCKER_IMAGE" .
+```
+
+私网 TCP 地址还需 `WORKBENCH_TEST_DOCKER_ALLOW_PRIVATE=true`。测试容器使用 `network=none`，不需要出网；镜像必须存在于所配置的 daemon 上。
+
+### E2B 准备
+
+按[协议接入](sandbox-protocol.md)和[模板部署](sandbox-cluster.md)准备专用后端及可用模板。推荐以标准 `sandbox` 镜像为基础，由所用平台注入或配置 envd。模板应支持 root 执行、可写 `/workspace`、PTY、入站认证及上述运行时契约；测试不创建模板、不假定模板名称，也不依赖模板目录 API。
+
+部署方显式提供以下环境变量，不要将凭据提交到仓库：
+
+| 变量 | 要求 |
+| --- | --- |
+| `WORKBENCH_TEST_E2B_API_URL` | 必填。测试控制面；E2B Cloud 显式填 `https://api.e2b.app` |
+| `WORKBENCH_TEST_E2B_API_KEY` | 必填。专用测试凭据 |
+| `WORKBENCH_TEST_E2B_TEMPLATE` | 必填。部署方已准备的模板 ID 或别名 |
+| `WORKBENCH_TEST_E2B_SANDBOX_DOMAIN` | 必填。对应的数据面域名；E2B Cloud 为 `e2b.app` |
+| `WORKBENCH_TEST_E2B_PROXY_URL` | 自建后端的数据面网关；E2B Cloud 留空 |
+| `WORKBENCH_TEST_E2B_ALLOW_PRIVATE` | 私网或 loopback 端点需显式设为 `true` |
+
+keepalive 测试使用 3 秒 TTL，运行 5 秒命令并检查实际续租请求；测试控制面须支持该 TTL。Kubernetes 容器后端的测试结果不代表 MicroVM 隔离能力。
+
+### 执行命令
+
+配置任一后端后，可分别运行或同时启用两组 build tag：
+
+```bash
+go test -tags=sandbox_terminal_integration ./internal/sandbox \
+  -run '^TestTerminalReal' -count=1 -v -timeout=15m
+go test -tags=workbench_integration ./internal/sandbox \
+  -run '^TestWorkbenchFilesIntegration$' -count=1 -v -timeout=15m
+go test -tags='sandbox_terminal_integration workbench_integration' ./internal/sandbox \
+  -run '^TestWorkbenchIntegrationConfig$' -count=1 -v
+```
+
+终端测试覆盖提前输出、二进制 stdin、resize、interrupt、CPU/地址空间/输出限额及后代清理；文件测试覆盖 8 MiB 往返、特殊节点、路径注入和不覆盖写入。套件未配置后端时的 skip 不能计作真实运行通过。测试进程被强制结束时，应在测试控制面检查遗留沙箱。
+
+前端测试、类型检查和构建见 `frontend/package.json`。浏览器安全检查与 PPTX fixture 的完整准备命令见 [Skills 示例](../examples/skills/README.md#本地测试与预览)。[Frontend CI](../.github/workflows/frontend.yml) 会生成 fixture 并运行 builder、文件 helper 和浏览器安全测试，不需要真实沙箱凭据。

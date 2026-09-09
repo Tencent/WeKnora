@@ -28,28 +28,37 @@ type workbenchTestClient struct {
 
 func (c *workbenchTestClient) SupportsPrivateWorkbenchExec() bool { return true }
 
-func (c *workbenchTestClient) Exec(ctx context.Context, handle RemoteSandboxHandle, req RemoteExecRequest) (*RemoteExecResult, error) {
+func (c *workbenchTestClient) Exec(
+	ctx context.Context,
+	handle RemoteSandboxHandle,
+	req RemoteExecRequest,
+) (*RemoteExecResult, error) {
 	if req.Command == "python3" && len(req.Args) == 3 && req.Args[0] == "-I" &&
 		req.Args[1] == "-c" && req.Args[2] == terminalRuntimeProbe {
 		c.probeCalls++
 		if c.probeResult != nil || c.probeErr != nil {
 			return c.probeResult, c.probeErr
 		}
-		return &RemoteExecResult{Stdout: `{"contract":"weknora-workbench-runtime/v1","terminal":true,"files":true}`}, nil
+		return &RemoteExecResult{
+			Stdout: `{"contract":"weknora-workbench-runtime/v1","terminal":true,"files":true}`,
+		}, nil
 	}
-	c.fakeRemoteClient.Exec(ctx, handle, req)
+	if _, err := c.fakeRemoteClient.Exec(ctx, handle, req); err != nil {
+		return nil, err
+	}
 	return c.run(ctx, handle, req)
 }
 
-func (c *workbenchTestClient) OpenTerminal(
-	context.Context, RemoteSandboxHandle, TerminalRequest,
-) (Terminal, error) {
+func (c *workbenchTestClient) OpenCommandTerminal(
+	context.Context, RemoteSandboxHandle, CommandTerminalRequest,
+) (CommandTerminal, error) {
 	return nil, errors.New("test terminal was not expected to open")
 }
 
 func workbenchHarness(t *testing.T, bound bool) (*SessionBoundManager, *workbenchTestClient, context.Context) {
 	t.Helper()
 	client := &workbenchTestClient{fakeRemoteClient: newFakeRemoteClient(SandboxTypeDocker)}
+	client.capabilities.SupportsCommandTerminals = true
 	client.omitsInboundTokenCarrier = true
 	client.run = func(context.Context, RemoteSandboxHandle, RemoteExecRequest) (*RemoteExecResult, error) {
 		return &RemoteExecResult{Stdout: `{"ok":true,"result":{"path":"","entries":[]}}`}, nil
@@ -70,25 +79,52 @@ func workbenchHarness(t *testing.T, bound bool) (*SessionBoundManager, *workbenc
 }
 
 func TestWorkbenchPathValidation(t *testing.T) {
-	for _, p := range []string{"/etc/passwd", "..", "../a", "a/../b", ".", "a/./b", "a//b", "a/", `a\b`,
+	for _, p := range []string{
+		"/etc/passwd", "..", "../a", "a/../b", ".", "a/./b", "a//b", "a/", `a\b`,
 		`C:/a`, "a\x00b", "a\nb", "a\tb", "a\x7fb", "a\u0085b", string([]byte{0xff}),
-		strings.Repeat("a", 256), strings.Repeat("a/", 128) + "b", ".weknora-workbench-reserved"} {
+		strings.Repeat("a", 256), strings.Repeat("a/", 128) + "b", ".weknora-workbench-reserved",
+	} {
 		t.Run(p, func(t *testing.T) {
 			require.ErrorIs(t, validateWorkbenchPath(p, false), ErrWorkbenchPath)
-			require.ErrorIs(t, validateWorkbenchRequest(WorkbenchFileRequest{Operation: "rename", Path: "a", NewPath: p}), ErrWorkbenchPath)
+			require.ErrorIs(
+				t,
+				validateWorkbenchRequest(WorkbenchFileRequest{Operation: "rename", Path: "a", NewPath: p}),
+				ErrWorkbenchPath,
+			)
 		})
 	}
-	for _, p := range []string{"file", "a/b", "spaced name", "';$(touch x);.txt", "WEKNORA_STDIN_EOF", "\u4e2d\u6587.txt"} {
+	for _, p := range []string{
+		"file", "a/b", "spaced name", "';$(touch x);.txt", "WEKNORA_STDIN_EOF", "\u4e2d\u6587.txt",
+	} {
 		require.NoError(t, validateWorkbenchPath(p, false))
 	}
 	require.NoError(t, validateWorkbenchRequest(WorkbenchFileRequest{Operation: "list"}))
 	for _, op := range []string{"read", "write", "mkdir", "rename", "remove", "unknown", "_upload_begin"} {
 		require.ErrorIs(t, validateWorkbenchRequest(WorkbenchFileRequest{Operation: op}), ErrWorkbenchPath)
 	}
-	require.ErrorIs(t, validateWorkbenchRequest(WorkbenchFileRequest{Operation: "read", Path: "a", NewPath: "b"}), ErrWorkbenchPath)
-	require.ErrorIs(t, validateWorkbenchRequest(WorkbenchFileRequest{Operation: "read", Path: "a", Content: []byte("x")}), ErrWorkbenchPath)
-	require.NoError(t, validateWorkbenchRequest(WorkbenchFileRequest{Operation: "write", Path: "a", Content: make([]byte, WorkbenchMaxFileBytes)}))
-	require.ErrorIs(t, validateWorkbenchRequest(WorkbenchFileRequest{Operation: "write", Path: "a", Content: make([]byte, WorkbenchMaxFileBytes+1)}), ErrWorkbenchTooLarge)
+	require.ErrorIs(
+		t,
+		validateWorkbenchRequest(WorkbenchFileRequest{Operation: "read", Path: "a", NewPath: "b"}),
+		ErrWorkbenchPath,
+	)
+	require.ErrorIs(
+		t,
+		validateWorkbenchRequest(WorkbenchFileRequest{Operation: "read", Path: "a", Content: []byte("x")}),
+		ErrWorkbenchPath,
+	)
+	require.NoError(
+		t,
+		validateWorkbenchRequest(
+			WorkbenchFileRequest{Operation: "write", Path: "a", Content: make([]byte, WorkbenchMaxFileBytes)},
+		),
+	)
+	require.ErrorIs(
+		t,
+		validateWorkbenchRequest(
+			WorkbenchFileRequest{Operation: "write", Path: "a", Content: make([]byte, WorkbenchMaxFileBytes+1)},
+		),
+		ErrWorkbenchTooLarge,
+	)
 }
 
 type workbenchManagerWrapper struct {
@@ -108,7 +144,11 @@ func TestWorkbenchCapabilityFailsClosed(t *testing.T) {
 	provider, ok = WorkbenchFileProviderFrom(wrapper)
 	require.True(t, ok)
 	require.Same(t, mgr, provider)
-	require.False(t, workbenchPrivateExecSupported(&CubeRemoteClient{}), "Cube's command logger must not receive workbench bodies")
+	require.False(
+		t,
+		workbenchPrivateExecSupported(&CubeRemoteClient{}),
+		"Cube's command logger must not receive workbench bodies",
+	)
 	require.True(t, workbenchPrivateExecSupported(&E2BRemoteClient{}))
 	var nilManager *SessionBoundManager
 	for _, disabled := range []Manager{nil, nilManager, NewDisabledManager()} {
@@ -151,7 +191,11 @@ func TestWorkbenchSessionLookupDoesNotProvision(t *testing.T) {
 
 func TestWorkbenchSessionOwnershipAndMissingRemote(t *testing.T) {
 	mgr, client, ctx := workbenchHarness(t, true)
-	_, err := mgr.WorkbenchFiles(types.WithSandboxTenantID(ctx, 778), "workbench-test", WorkbenchFileRequest{Operation: "list"})
+	_, err := mgr.WorkbenchFiles(
+		types.WithSandboxTenantID(ctx, 778),
+		"workbench-test",
+		WorkbenchFileRequest{Operation: "list"},
+	)
 	require.ErrorIs(t, err, ErrWorkbenchUnavailable)
 	mgr.checker.(*fakeSessionExistenceChecker).setExists(false)
 	_, err = mgr.WorkbenchFiles(ctx, "workbench-test", WorkbenchFileRequest{Operation: "list"})
@@ -168,7 +212,11 @@ func TestWorkbenchSessionOwnershipAndMissingRemote(t *testing.T) {
 
 func TestWorkbenchFixedExecProtocol(t *testing.T) {
 	mgr, client, ctx := workbenchHarness(t, true)
-	req := WorkbenchFileRequest{Operation: "write", Path: "WEKNORA_STDIN_EOF';$(echo x).bin", Content: []byte{0, 255, 13, 10}}
+	req := WorkbenchFileRequest{
+		Operation: "write",
+		Path:      "WEKNORA_STDIN_EOF';$(echo x).bin",
+		Content:   []byte{0, 255, 13, 10},
+	}
 	client.run = func(ctx context.Context, _ RemoteSandboxHandle, remote RemoteExecRequest) (*RemoteExecResult, error) {
 		require.Equal(t, "python3", remote.Command)
 		require.Equal(t, []string{"-I", "-c", workbenchFileHelper}, remote.Args)
@@ -183,7 +231,9 @@ func TestWorkbenchFixedExecProtocol(t *testing.T) {
 		var decoded WorkbenchFileRequest
 		require.NoError(t, json.Unmarshal([]byte(remote.Stdin), &decoded))
 		require.Equal(t, req, decoded)
-		result, err := json.Marshal(workbenchWireReply{OK: true, Result: &WorkbenchFileResult{Path: req.Path, Entries: []WorkbenchFileEntry{}}})
+		result, err := json.Marshal(
+			workbenchWireReply{OK: true, Result: &WorkbenchFileResult{Path: req.Path, Entries: []WorkbenchFileEntry{}}},
+		)
 		require.NoError(t, err)
 		return &RemoteExecResult{Stdout: string(result)}, nil
 	}
@@ -207,7 +257,12 @@ func TestWorkbenchProtocolErrors(t *testing.T) {
 		{"conflict", &RemoteExecResult{Stdout: `{"ok":false,"code":"conflict"}`}, nil, ErrWorkbenchConflict},
 		{"size", &RemoteExecResult{Stdout: `{"ok":false,"code":"too_large"}`}, nil, ErrWorkbenchTooLarge},
 		{"unknown code", &RemoteExecResult{Stdout: `{"ok":false,"code":"future"}`}, nil, ErrWorkbenchUnavailable},
-		{"stderr hidden", &RemoteExecResult{ExitCode: 1, Stderr: "sensitive remote data"}, nil, ErrWorkbenchUnavailable},
+		{
+			"stderr hidden",
+			&RemoteExecResult{ExitCode: 1, Stderr: "sensitive remote data"},
+			nil,
+			ErrWorkbenchUnavailable,
+		},
 		{"killed", &RemoteExecResult{Killed: true}, nil, ErrWorkbenchUnavailable},
 		{"nil", nil, nil, ErrWorkbenchUnavailable},
 		{"transport", nil, errors.New("transport failed"), ErrWorkbenchUnavailable},
@@ -217,11 +272,31 @@ func TestWorkbenchProtocolErrors(t *testing.T) {
 		{"unknown field", &RemoteExecResult{Stdout: `{"ok":true,"extra":"x"}`}, nil, ErrWorkbenchUnavailable},
 		{"mixed status", &RemoteExecResult{Stdout: `{"ok":true,"code":"path"}`}, nil, ErrWorkbenchUnavailable},
 		{"missing result", &RemoteExecResult{Stdout: `{"ok":true}`}, nil, ErrWorkbenchUnavailable},
-		{"wrong path", &RemoteExecResult{Stdout: `{"ok":true,"result":{"path":"/etc","entries":[]}}`}, nil, ErrWorkbenchUnavailable},
+		{
+			"wrong path",
+			&RemoteExecResult{Stdout: `{"ok":true,"result":{"path":"/etc","entries":[]}}`},
+			nil,
+			ErrWorkbenchUnavailable,
+		},
 		{"nil entries", &RemoteExecResult{Stdout: `{"ok":true,"result":{"path":""}}`}, nil, ErrWorkbenchUnavailable},
-		{"unexpected content", &RemoteExecResult{Stdout: `{"ok":true,"result":{"path":"","entries":[],"content":"eA=="}}`}, nil, ErrWorkbenchUnavailable},
-		{"bad base64", &RemoteExecResult{Stdout: `{"ok":true,"result":{"path":"","entries":[],"content":"?!"}}`}, nil, ErrWorkbenchUnavailable},
-		{"oversized stdout", &RemoteExecResult{Stdout: strings.Repeat("x", workbenchMaxResponse+1)}, nil, ErrWorkbenchTooLarge},
+		{
+			"unexpected content",
+			&RemoteExecResult{Stdout: `{"ok":true,"result":{"path":"","entries":[],"content":"eA=="}}`},
+			nil,
+			ErrWorkbenchUnavailable,
+		},
+		{
+			"bad base64",
+			&RemoteExecResult{Stdout: `{"ok":true,"result":{"path":"","entries":[],"content":"?!"}}`},
+			nil,
+			ErrWorkbenchUnavailable,
+		},
+		{
+			"oversized stdout",
+			&RemoteExecResult{Stdout: strings.Repeat("x", workbenchMaxResponse+1)},
+			nil,
+			ErrWorkbenchTooLarge,
+		},
 		{"oversized stderr", &RemoteExecResult{Stderr: strings.Repeat("x", 4097)}, nil, ErrWorkbenchTooLarge},
 	}
 	for _, tc := range cases {
@@ -259,7 +334,11 @@ func TestWorkbenchResultValidation(t *testing.T) {
 		require.Error(t, err)
 	}
 	_, err := validateWorkbenchResult(WorkbenchFileRequest{Operation: "read", Path: "a"}, &workbenchWireReply{
-		Result: &WorkbenchFileResult{Path: "a", Entries: []WorkbenchFileEntry{}, Content: make([]byte, WorkbenchMaxFileBytes+1)},
+		Result: &WorkbenchFileResult{
+			Path:    "a",
+			Entries: []WorkbenchFileEntry{},
+			Content: make([]byte, WorkbenchMaxFileBytes+1),
+		},
 	})
 	require.ErrorIs(t, err, ErrWorkbenchTooLarge)
 }
@@ -311,7 +390,9 @@ func TestWorkbenchChunkedUploadProtocol(t *testing.T) {
 			content := bytes.Repeat([]byte{0, 255, 1, 2}, WorkbenchMaxFileBytes/4)
 			var uploaded []byte
 			var operations []string
-			client.run = func(_ context.Context, _ RemoteSandboxHandle, remote RemoteExecRequest) (*RemoteExecResult, error) {
+			client.run = func(
+				_ context.Context, _ RemoteSandboxHandle, remote RemoteExecRequest,
+			) (*RemoteExecResult, error) {
 				require.LessOrEqual(t, len(remote.Stdin), workbenchMaxRequest)
 				// Existing SDKs lower the complete request to one bash argument.
 				require.Less(t, len(wrapWithStdin(buildShellLine(remote.Command, remote.Args), remote.Stdin)), 128<<10)
@@ -346,7 +427,11 @@ func TestWorkbenchChunkedUploadProtocol(t *testing.T) {
 				require.NoError(t, err)
 				return &RemoteExecResult{Stdout: string(payload)}, nil
 			}
-			_, err := mgr.WorkbenchFiles(ctx, "workbench-test", WorkbenchFileRequest{Operation: "write", Path: "large", Content: content})
+			_, err := mgr.WorkbenchFiles(
+				ctx,
+				"workbench-test",
+				WorkbenchFileRequest{Operation: "write", Path: "large", Content: content},
+			)
 			if failChunk {
 				require.ErrorIs(t, err, ErrWorkbenchUnavailable)
 				require.NotContains(t, operations, "write")
@@ -371,7 +456,8 @@ func TestWorkbenchPythonDescriptorSuite(t *testing.T) {
 	require.True(t, ok)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, python, "-I", filepath.Join(filepath.Dir(source), "workbench_files_test.py")).CombinedOutput()
+	out, err := exec.CommandContext(ctx, python, "-I", filepath.Join(filepath.Dir(source), "workbench_files_test.py")).
+		CombinedOutput()
 	require.NoError(t, err, "%s", out)
 	t.Logf("%s", out)
 }

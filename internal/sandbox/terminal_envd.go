@@ -15,12 +15,14 @@ import (
 // The pinned go-e2b keeps envd credentials/domain private. Capture only the
 // exact SDK create/connect response requested by this caller, and replay it
 // unchanged to the SDK. No extra connect, credential cache, or SDK fork.
-type terminalCredentialKey struct{}
-type terminalCredentials struct {
-	SandboxID   string `json:"sandboxID"`
-	AccessToken string `json:"envdAccessToken"`
-	Domain      string `json:"domain"`
-}
+type (
+	terminalCredentialKey struct{}
+	terminalCredentials   struct {
+		SandboxID   string `json:"sandboxID"`
+		AccessToken string `json:"envdAccessToken"`
+		Domain      string `json:"domain"`
+	}
+)
 
 type terminalCredentialTransport struct{ next http.RoundTripper }
 
@@ -59,7 +61,10 @@ type terminalEnvdClient struct {
 	trafficToken string
 }
 
-func (c *E2BRemoteClient) OpenTerminal(ctx context.Context, handle RemoteSandboxHandle, req TerminalRequest) (Terminal, error) {
+// OpenCommandTerminal starts a bounded command through the E2B envd endpoint.
+func (c *E2BRemoteClient) OpenCommandTerminal(
+	ctx context.Context, handle RemoteSandboxHandle, req CommandTerminalRequest,
+) (CommandTerminal, error) {
 	h, ok := handle.(*e2bRemoteHandle)
 	if !ok || h == nil || h.ID() == "" || h.terminal.SandboxID != h.ID() || c.terminalHTTP == nil {
 		return nil, errors.New("sandbox: E2B terminal requires a lifecycle-issued handle")
@@ -71,18 +76,25 @@ func (c *E2BRemoteClient) OpenTerminal(ctx context.Context, handle RemoteSandbox
 	if domain == "" {
 		domain = "e2b.app"
 	}
-	wire := &terminalEnvdClient{http: c.terminalHTTP, base: fmt.Sprintf("https://49983-%s.%s", h.ID(), domain),
-		accessToken: h.terminal.AccessToken, trafficToken: h.TrafficAccessToken()}
+	wire := &terminalEnvdClient{
+		http: c.terminalHTTP, base: fmt.Sprintf("https://49983-%s.%s", h.ID(), domain),
+		accessToken: h.terminal.AccessToken, trafficToken: h.TrafficAccessToken(),
+	}
 	return startCommandTerminal(ctx, req, c, handle, wire.open)
 }
 
-func (c *CubeRemoteClient) OpenTerminal(ctx context.Context, handle RemoteSandboxHandle, req TerminalRequest) (Terminal, error) {
+// OpenCommandTerminal starts a bounded command through the Cube envd endpoint.
+func (c *CubeRemoteClient) OpenCommandTerminal(
+	ctx context.Context, handle RemoteSandboxHandle, req CommandTerminalRequest,
+) (CommandTerminal, error) {
 	h, ok := handle.(*cubeRemoteHandle)
 	if !ok || h == nil || h.sb == nil || h.ID() == "" || c.terminalHTTP == nil {
 		return nil, errors.New("sandbox: Cube terminal requires a lifecycle-issued handle")
 	}
-	wire := &terminalEnvdClient{http: c.terminalHTTP, base: "https://" + h.sb.GetHost(CubeEnvdPort),
-		accessToken: h.sb.EnvdAccessToken, trafficToken: h.TrafficAccessToken()}
+	wire := &terminalEnvdClient{
+		http: c.terminalHTTP, base: "https://" + h.sb.GetHost(CubeEnvdPort),
+		accessToken: h.sb.EnvdAccessToken, trafficToken: h.TrafficAccessToken(),
+	}
 	return startCommandTerminal(ctx, req, c, handle, wire.open)
 }
 
@@ -127,7 +139,9 @@ type terminalEnvdEvent struct {
 	} `json:"end"`
 }
 
-func (c *terminalEnvdClient) request(ctx context.Context, method string, payload any, stream bool) (*http.Response, error) {
+func (c *terminalEnvdClient) request(
+	ctx context.Context, method string, payload any, stream bool,
+) (*http.Response, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -140,7 +154,9 @@ func (c *terminalEnvdClient) request(ctx context.Context, method string, payload
 		raw = frame
 		contentType = "application/connect+json"
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/process.Process/"+method, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, c.base+"/process.Process/"+method, bytes.NewReader(raw),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +189,7 @@ func (c *terminalEnvdClient) unary(ctx context.Context, method string, payload a
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024+1))
 	if err != nil {
 		return err
@@ -233,7 +249,9 @@ func readTerminalEnvdEvent(src io.Reader) (*terminalEnvdEvent, error) {
 	return &message.Event, nil
 }
 
-func (c *terminalEnvdClient) open(ctx context.Context, argv []string, token string, req TerminalRequest) (*terminalProcess, error) {
+func (c *terminalEnvdClient) open(
+	ctx context.Context, argv []string, token string, req CommandTerminalRequest,
+) (*terminalProcess, error) {
 	var payload terminalEnvdStart
 	payload.Process.Cmd, payload.Process.Args = argv[0], argv[1:]
 	payload.Process.Envs = map[string]string{"TERM": "xterm-256color", "LANG": "C.UTF-8"}
@@ -324,5 +342,7 @@ func (c *terminalEnvdClient) open(ctx context.Context, argv []string, token stri
 	}, nil
 }
 
-var _ remoteTerminalProvider = (*E2BRemoteClient)(nil)
-var _ remoteTerminalProvider = (*CubeRemoteClient)(nil)
+var (
+	_ remoteCommandTerminalProvider = (*E2BRemoteClient)(nil)
+	_ remoteCommandTerminalProvider = (*CubeRemoteClient)(nil)
+)

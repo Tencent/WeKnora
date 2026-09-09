@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"log"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -224,6 +225,16 @@ func (m *SessionBoundManager) GetType() SandboxType {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.activeType
+}
+
+// TerminalIdleDisconnect is how long an open PTY may sit idle before the
+// WebSocket is closed. Missing or out-of-range workspace values are clamped
+// onto the built-in default so a stored 0 still disconnects.
+func (m *SessionBoundManager) TerminalIdleDisconnect() time.Duration {
+	if m == nil || m.config == nil {
+		return DefaultTerminalIdleDisconnect
+	}
+	return EffectiveTerminalIdleDisconnect(m.config.TerminalIdleDisconnect)
 }
 
 // GetSandbox exposes a diagnostic Sandbox for callers that need to inspect
@@ -810,6 +821,63 @@ func (m *SessionBoundManager) SessionFileStore() SessionFileStore {
 	return m
 }
 
+// SessionTerminalManager advertises the interactive-terminal capability while
+// a real remote backend is active and the provider implements PTY streaming
+// (E2B and Cube do; Docker does not).
+func (m *SessionBoundManager) SessionTerminalManager() SessionTerminalManager {
+	if m == nil || m.remoteDisabled() {
+		return nil
+	}
+	if _, ok := TerminalManagerFrom(m.client); !ok {
+		return nil
+	}
+	return m
+}
+
+// OpenSessionTerminal opens a PTY on the sandbox currently bound to the
+// session. It is strictly lookup-only: with no live binding it returns
+// ErrNoLiveSessionSandbox instead of provisioning, because the terminal
+// entry point lacks the config-pin context that agent-driven creation
+// relies on. A bound sandbox that is not confirmed running returns
+// ErrSandboxPaused unless opts.AllowResume is set — Connect would wake a
+// paused instance. A backend that cannot stream PTYs (Docker) returns
+// ErrTerminalUnsupported, not "no sandbox".
+func (m *SessionBoundManager) OpenSessionTerminal(
+	ctx context.Context,
+	sessionID string,
+	opts RemoteTerminalOptions,
+) (RemoteTerminalSession, error) {
+	terminal, ok := TerminalManagerFrom(m.client)
+	if !ok {
+		return nil, ErrTerminalUnsupported
+	}
+	if !opts.AllowResume {
+		state, bound, err := m.peekBoundSandboxState(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if !bound {
+			return nil, ErrNoLiveSessionSandbox
+		}
+		// Only a List-confirmed running sandbox is safe to Connect:
+		// paused/transitioning Connect resumes (and re-bills), and a
+		// list miss with a stale binding is not "no sandbox".
+		if state != RemoteStateRunning {
+			return nil, ErrSandboxPaused
+		}
+	}
+	handle, found, err := m.lookupSessionHandle(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrNoLiveSessionSandbox
+	}
+	return terminal.OpenTerminal(ctx, handle, opts)
+}
+
+var _ SessionTerminalProvider = (*SessionBoundManager)(nil)
+
 // Cleanup marks the manager closed. Session sandboxes are not force-deleted
 // here: their lifecycle is authoritative in the binding store and would
 // leak to any other WeKnora replica if this replica reaped them on shutdown.
@@ -878,6 +946,54 @@ func (m *SessionBoundManager) resolveSession(
 		return nil, err
 	}
 	return m.lifecycle.Resolve(ctx, key)
+}
+
+// peekBoundSandboxState reads provider listing for the bound sandbox without
+// Connect. The bool is "a binding exists for this provider", not "List
+// returned a row": a list miss still reports bound so lookup cannot pretend
+// the session has no sandbox. E2B/Cube Connect resumes a paused instance,
+// so the lookup-only terminal path must List first.
+func (m *SessionBoundManager) peekBoundSandboxState(
+	ctx context.Context,
+	sessionID string,
+) (RemoteSandboxState, bool, error) {
+	if m.remoteDisabled() || strings.TrimSpace(sessionID) == "" {
+		return "", false, nil
+	}
+	key, err := m.sessionKey(ctx, sessionID)
+	if err != nil {
+		return "", false, err
+	}
+	binding, err := m.bindings.Get(ctx, key)
+	if err != nil {
+		return "", false, fmt.Errorf("sandbox: read session binding: %w", err)
+	}
+	if binding == nil || binding.Provider != m.client.Provider() {
+		return "", false, nil
+	}
+	summaries, err := m.client.List(ctx, RemoteListFilter{
+		Metadata: map[string]string{
+			remoteMetadataTenantID:  strconv.FormatUint(key.TenantID, 10),
+			remoteMetadataSessionID: key.SessionID,
+		},
+		States: []RemoteSandboxState{
+			RemoteStateRunning,
+			RemoteStatePaused,
+			RemoteStateTransitioning,
+		},
+	})
+	if err != nil {
+		return "", false, fmt.Errorf("sandbox: list session sandbox: %w", err)
+	}
+	for _, summary := range summaries {
+		if summary.ID == binding.SandboxID {
+			return summary.State, true, nil
+		}
+	}
+	// Binding exists but the provider list did not return it (lag, metadata
+	// mismatch, or a state outside the filter). That is not "no sandbox":
+	// the UI should ask before Connect, which would resume a paused VM.
+	return RemoteStateUnknown, true, nil
 }
 
 // lookupSessionHandle reads the authoritative binding and, when one exists

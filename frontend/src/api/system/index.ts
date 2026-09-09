@@ -770,6 +770,7 @@ export interface SandboxSkillImage {
 export interface SandboxConfig {
   sandbox_type?: string
   default_timeout_sec?: number
+  terminal_idle_disconnect_sec?: number
   allow_private_endpoints?: boolean
   env_vars?: Record<string, string>
   volume_mount?: SandboxVolumeMountConfig
@@ -1132,10 +1133,11 @@ export function installConfigSkillFromSource(
 export function reinstallConfigSkill(
   configId: string,
   skillId: string,
+  instructions = '',
 ): Promise<{ data: { skill_id: string } }> {
   return post(
     `/api/v1/sandbox-configs/${configId}/skills/${skillId}/reinstall`,
-    {},
+    { instructions },
   ) as unknown as Promise<{ data: { skill_id: string } }>
 }
 
@@ -1228,4 +1230,19 @@ export function getConfigSkillFile(
   return get(`/api/v1/sandbox-configs/${configId}/skills/${skillId}/files/content`, {
     params: { path },
   }) as unknown as Promise<{ data: ConfigSkillFileContent }>
+}
+
+export interface SkillInstallGuidanceState {
+  accepting: boolean
+  messages: Array<{ id: string; content: string; status: 'pending' | 'injected' | 'unprocessed' }>
+}
+
+export function getConfigSkillGuidance(configId: string, skillId: string) {
+  return get(`/api/v1/sandbox-configs/${configId}/skills/${skillId}/guidance`) as unknown as Promise<{ data: SkillInstallGuidanceState }>
+}
+
+export function steerConfigSkill(configId: string, skillId: string, payload: {
+  expected_message_id: string; steer_id: string; content: string
+}) {
+  return post(`/api/v1/sandbox-configs/${configId}/skills/${skillId}/guidance`, payload)
 }

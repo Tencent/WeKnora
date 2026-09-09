@@ -53,7 +53,9 @@ func TestBuildDeploymentCapabilitiesReflectsWorkbenchLifecycle(t *testing.T) {
 		t.Fatalf("disabled workbench capability = %#v", capability)
 	}
 
-	enabled := BuildDeploymentCapabilities("standard", DeploymentFeatureAvailability{Workbench: true, WorkbenchEnabled: true})
+	enabled := BuildDeploymentCapabilities("standard", DeploymentFeatureAvailability{
+		Workbench: true, WorkbenchEnabled: true,
+	})
 	if !enabled.Capabilities["sandbox.workbench"].Supported {
 		t.Fatal("enabled workbench handler must expose sandbox.workbench")
 	}

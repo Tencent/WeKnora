@@ -14,7 +14,9 @@ type dockerTerminalResizeAPI interface {
 	ExecResize(context.Context, string, client.ExecResizeOptions) (client.ExecResizeResult, error)
 }
 
-func (a *dockerRPCTimeoutAPI) ExecResize(ctx context.Context, id string, opts client.ExecResizeOptions) (client.ExecResizeResult, error) {
+func (a *dockerRPCTimeoutAPI) ExecResize(
+	ctx context.Context, id string, opts client.ExecResizeOptions,
+) (client.ExecResizeResult, error) {
 	api, ok := a.inner.(dockerTerminalResizeAPI)
 	if !ok {
 		return client.ExecResizeResult{}, errors.New("sandbox: Docker exec resize unavailable")
@@ -24,8 +26,11 @@ func (a *dockerRPCTimeoutAPI) ExecResize(ctx context.Context, id string, opts cl
 	return api.ExecResize(ctx, id, opts)
 }
 
-func (c *DockerRemoteClient) OpenTerminal(ctx context.Context, handle RemoteSandboxHandle, req TerminalRequest) (Terminal, error) {
-	id, err := dockerHandleID("OpenTerminal", handle)
+// OpenCommandTerminal uses Engine TTY exec for a bounded command process tree.
+func (c *DockerRemoteClient) OpenCommandTerminal(
+	ctx context.Context, handle RemoteSandboxHandle, req CommandTerminalRequest,
+) (CommandTerminal, error) {
+	id, err := dockerHandleID("OpenCommandTerminal", handle)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +38,9 @@ func (c *DockerRemoteClient) OpenTerminal(ctx context.Context, handle RemoteSand
 	if !ok {
 		return nil, errors.New("sandbox: Docker native PTY unavailable")
 	}
-	return startCommandTerminal(ctx, req, c, handle, func(ctx context.Context, argv []string, token string, req TerminalRequest) (*terminalProcess, error) {
+	return startCommandTerminal(ctx, req, c, handle, func(
+		ctx context.Context, argv []string, token string, req CommandTerminalRequest,
+	) (*terminalProcess, error) {
 		size := client.ConsoleSize{Width: uint(req.Cols), Height: uint(req.Rows)}
 		created, err := c.api.ExecCreate(ctx, id, client.ExecCreateOptions{
 			Cmd: argv, TTY: true, AttachStdin: true, AttachStdout: true, AttachStderr: true,
@@ -46,12 +53,12 @@ func (c *DockerRemoteClient) OpenTerminal(ctx context.Context, handle RemoteSand
 			Env: []string{"TERM=xterm-256color", "LANG=C.UTF-8"},
 		})
 		if err != nil {
-			return nil, dockerError("OpenTerminal", err)
+			return nil, dockerError("OpenCommandTerminal", err)
 		}
 		// ExecAttach starts the process. An ambiguous response is never retried.
 		attached, err := c.api.ExecAttach(ctx, created.ID, client.ExecAttachOptions{TTY: true, ConsoleSize: size})
 		if err != nil {
-			return nil, dockerError("OpenTerminal", err)
+			return nil, dockerError("OpenCommandTerminal", err)
 		}
 		writes := make(chan struct{}, 1)
 		return &terminalProcess{
@@ -88,7 +95,10 @@ func (c *DockerRemoteClient) OpenTerminal(ctx context.Context, handle RemoteSand
 					return err
 				}
 				canceled := make(chan struct{})
-				stop := context.AfterFunc(ctx, func() { _ = attached.Conn.SetWriteDeadline(time.Now()); close(canceled) })
+				stop := context.AfterFunc(ctx, func() {
+					_ = attached.Conn.SetWriteDeadline(time.Now())
+					close(canceled)
+				})
 				defer func() {
 					if !stop() {
 						<-canceled
@@ -108,11 +118,13 @@ func (c *DockerRemoteClient) OpenTerminal(ctx context.Context, handle RemoteSand
 				return nil
 			},
 			resize: func(ctx context.Context, cols, rows uint16) error {
-				_, err := resize.ExecResize(ctx, created.ID, client.ExecResizeOptions{Width: uint(cols), Height: uint(rows)})
+				_, err := resize.ExecResize(ctx, created.ID, client.ExecResizeOptions{
+					Width: uint(cols), Height: uint(rows),
+				})
 				return dockerError("TerminalResize", err)
 			},
 		}, nil
 	})
 }
 
-var _ remoteTerminalProvider = (*DockerRemoteClient)(nil)
+var _ remoteCommandTerminalProvider = (*DockerRemoteClient)(nil)

@@ -110,14 +110,6 @@
         </div>
       </template>
     </t-popup>
-    <t-button
-      v-if="workbenchEnabled" id="sandbox-workbench-toggle" class="chat-header__workbench"
-      variant="text" shape="square" size="small" :disabled="!session"
-      :aria-label="t('workbench.title')" :title="t('workbench.title')" :aria-expanded="workbenchVisible"
-      @click="emit('toggle-workbench')"
-    >
-      <template #icon><t-icon name="terminal" size="16px" /></template>
-    </t-button>
   </header>
 </template>
 
@@ -149,11 +141,8 @@ type MenuMode = 'menu' | 'clear' | 'delete'
 const props = defineProps<{
   session: ChatHeaderSession | null
   hasReferencesPanel?: boolean
-  workbenchEnabled?: boolean
   workbenchVisible?: boolean
 }>()
-
-const emit = defineEmits<{ 'toggle-workbench': [] }>()
 
 const { t } = useI18n()
 const busyAction = ref('')
@@ -428,9 +417,6 @@ function handleMenuClick(data: { value: string }): void {
     }
   }
 }
-
-.chat-header__workbench { flex-shrink: 0; color: var(--td-text-color-secondary); }
-.chat-header__workbench[aria-expanded='true'] { color: var(--td-brand-color); }
 
 .chat-header__edit {
   flex: 1 1 auto;

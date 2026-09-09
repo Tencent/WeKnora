@@ -10,6 +10,8 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/handler"
+	sessionhandler "github.com/Tencent/WeKnora/internal/handler/session"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -23,12 +25,21 @@ func TestWorkbenchLoggerOmitsTicketsBodiesAndQueries(t *testing.T) {
 	r := gin.New()
 	r.ContextWithFallback = true
 	r.Use(func(c *gin.Context) {
-		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), types.LoggerContextKey, logrus.NewEntry(log)))
+		c.Request = c.Request.WithContext(
+			context.WithValue(c.Request.Context(), types.LoggerContextKey, logrus.NewEntry(log)),
+		)
 		c.Next()
 	})
 	r.Use(workbenchAwareRequestLogger())
-	r.POST("/api/v1/sessions/:id/sandbox/terminal-ticket", func(c *gin.Context) { c.JSON(200, gin.H{"success": true, "data": gin.H{"ticket": "response-secret"}}) })
-	req := httptest.NewRequest("POST", "/api/v1/sessions/session/sandbox/terminal-ticket?ticket=query-secret", strings.NewReader(`{"command":"request-secret"}`))
+	r.POST(
+		"/api/v1/sessions/:id/sandbox/command-ticket",
+		func(c *gin.Context) { c.JSON(200, gin.H{"success": true, "data": gin.H{"ticket": "response-secret"}}) },
+	)
+	req := httptest.NewRequest(
+		"POST",
+		"/api/v1/sessions/session/sandbox/command-ticket?ticket=query-secret",
+		strings.NewReader(`{"command":"request-secret"}`),
+	)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -47,13 +58,37 @@ func TestWorkbenchRoutesWildcardCompatibilityAndPreAuthSocket(t *testing.T) {
 	require.NoError(t, err)
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
+	r.Use(middleware.ErrorHandler())
 	RegisterWorkbenchPublicRoutes(r, h)
+	sessionHandler := &sessionhandler.Handler{}
+	RegisterSandboxTerminalRoutes(r, sessionHandler)
 	r.Use(func(c *gin.Context) { c.AbortWithStatus(http.StatusUnauthorized) })
 	v1 := r.Group("/api/v1")
-	v1.GET("/sessions/:id", func(*gin.Context) {})
-	v1.POST("/sessions/:session_id/stop", func(*gin.Context) {})
-	v1.DELETE("/sessions/:id", func(*gin.Context) {})
+	g := &rbacGuards{}
+	RegisterSessionRoutes(v1, sessionHandler, &handler.MessageSuggestionHandler{}, g)
 	require.NotPanics(t, func() { RegisterWorkbenchRoutes(v1, h) })
+
+	routes := make(map[string]bool)
+	for _, route := range r.Routes() {
+		routes[route.Method+" "+route.Path] = true
+	}
+	for _, path := range []string{
+		"GET /api/v1/sandbox-terminal",
+		"GET /api/v1/sessions/:id/sandbox/terminal",
+		"POST /api/v1/sessions/:session_id/sandbox/terminal-ticket",
+		"POST /api/v1/sessions/:session_id/sandbox/command-ticket",
+	} {
+		require.True(t, routes[path], path)
+	}
+	_, terminalPolicy := g.apiKeyAuthorizer.Lookup(
+		http.MethodPost, "/api/v1/sessions/:session_id/sandbox/terminal-ticket",
+	)
+	require.True(t, terminalPolicy)
+	_, commandPolicy := g.apiKeyAuthorizer.Lookup(
+		http.MethodPost, "/api/v1/sessions/:session_id/sandbox/command-ticket",
+	)
+	require.False(t, commandPolicy, "command terminals must remain web-only")
+
 	for _, test := range []struct {
 		method, path string
 		status       int
@@ -61,6 +96,7 @@ func TestWorkbenchRoutesWildcardCompatibilityAndPreAuthSocket(t *testing.T) {
 		{"GET", "/api/v1/sandbox-terminal", 404},
 		{"GET", "/api/v1/sessions/one/sandbox/workbench", 401},
 		{"POST", "/api/v1/sessions/one/sandbox/terminal-ticket", 401},
+		{"POST", "/api/v1/sessions/one/sandbox/command-ticket", 401},
 		{"PATCH", "/api/v1/sessions/one/sandbox/files", 401},
 	} {
 		w := httptest.NewRecorder()

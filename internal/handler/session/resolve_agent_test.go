@@ -156,3 +156,36 @@ func TestResolveAgent_FallsBackToLocalAgentWithoutSourceSelector(t *testing.T) {
 	require.Equal(t, uint64(0), effectiveTenantID)
 	require.False(t, sharedReadOnly)
 }
+
+func TestTerminalProvisionConfigID_UsesSharedAgentSandboxConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(
+		http.MethodGet,
+		"/?agent_id=builtin-smart-reasoning&agent_source_tenant_id=84",
+		nil,
+	)
+	c.Set(types.UserIDContextKey.String(), "user-1")
+	c.Set(types.TenantIDContextKey.String(), uint64(7))
+	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(7))
+	c.Request = c.Request.WithContext(ctx)
+
+	sharedAgent := &types.CustomAgent{
+		ID:       "builtin-smart-reasoning",
+		TenantID: 84,
+		Config:   types.CustomAgentConfig{SandboxConfigID: "shared-cfg"},
+	}
+	h := &Handler{
+		agentShareService: &resolveAgentShareStub{agent: sharedAgent},
+		customAgentService: &resolveOwnAgentStub{agent: &types.CustomAgent{
+			ID:       "builtin-smart-reasoning",
+			TenantID: 7,
+			Config:   types.CustomAgentConfig{SandboxConfigID: "local-cfg"},
+		}},
+	}
+
+	require.Equal(t, "", h.terminalProvisionConfigID(ctx, c, false),
+		"lookup-only connects must not resolve an agent config")
+	require.Equal(t, "shared-cfg", h.terminalProvisionConfigID(ctx, c, true))
+}

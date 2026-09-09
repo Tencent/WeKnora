@@ -64,8 +64,11 @@ function openPreview(item: ArtifactMeta) {
 }
 
 async function refresh() {
+  if (!current()) return
   const version = ++request
   loading.value = true
+  // Pagination belongs to this generation; stale requests cannot release its busy state.
+  loadingMore.value = false
   cursor.value = ''
   hasMore.value = false
   error.value = ''
@@ -81,7 +84,7 @@ async function refresh() {
 }
 
 async function loadMore() {
-  if (!hasMore.value || !cursor.value || loadingMore.value || !current()) return
+  if (loading.value || !hasMore.value || !cursor.value || loadingMore.value || !current()) return
   const version = request
   loadingMore.value = true
   error.value = ''

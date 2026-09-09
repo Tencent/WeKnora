@@ -16,9 +16,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
-	"gorm.io/gorm"
 )
 
+// Workbench errors are safe sentinels shared with the HTTP and socket adapters.
 var (
 	ErrWorkbenchDisabled    = errors.New("workbench is disabled")
 	ErrWorkbenchDenied      = errors.New("active web user and workspace membership required")
@@ -33,6 +33,7 @@ var (
 	ErrWorkbenchBusy        = errors.New("session console is already in use")
 )
 
+// Workbench request and stream limits apply independently of provider limits.
 const (
 	WorkbenchMaxFileBytes    = 8 << 20
 	WorkbenchMaxCommandBytes = 8192
@@ -40,6 +41,7 @@ const (
 	WorkbenchMaxOutputBytes  = 32 << 20
 )
 
+// WorkbenchLimits describes the resource limits enforced on each console.
 type WorkbenchLimits struct {
 	CommandTimeoutSeconds int   `json:"command_timeout_seconds"`
 	SessionTimeoutSeconds int   `json:"session_timeout_seconds"`
@@ -50,10 +52,14 @@ type WorkbenchLimits struct {
 	MaxFrameBytes         int64 `json:"max_frame_bytes"`
 }
 
+// DefaultWorkbenchLimits returns the server-enforced console limits.
 func DefaultWorkbenchLimits() WorkbenchLimits {
-	return WorkbenchLimits{120, 1800, 60, 512 << 20, WorkbenchMaxFileBytes, WorkbenchMaxOutputBytes, WorkbenchMaxFrameBytes}
+	return WorkbenchLimits{
+		120, 1800, 60, 512 << 20, WorkbenchMaxFileBytes, WorkbenchMaxOutputBytes, WorkbenchMaxFrameBytes,
+	}
 }
 
+// WorkbenchStatus describes the session binding and available capabilities.
 type WorkbenchStatus struct {
 	Available    bool            `json:"available"`
 	Reason       string          `json:"reason,omitempty"`
@@ -65,16 +71,17 @@ type WorkbenchStatus struct {
 	Limits       WorkbenchLimits `json:"limits"`
 }
 
+// WorkbenchServiceDeps supplies authorization, configuration and audit stores.
 type WorkbenchServiceDeps struct {
 	dig.In
-	DB       *gorm.DB
-	Redis    *redis.Client
-	Sessions interfaces.SessionService
-	Policy   WorkspaceSandboxPolicy
-	Pinner   *SessionSandboxPinner
-	Resolver sandbox.TenantSandboxResolver
-	Configs  repository.TenantSandboxConfigRepository
-	Audit    interfaces.AuditLogRepository
+	Authorization interfaces.WorkbenchAuthorizationRepository
+	Redis         *redis.Client
+	Sessions      interfaces.SessionService
+	Policy        WorkspaceSandboxPolicy
+	Pinner        *SessionSandboxPinner
+	Resolver      sandbox.TenantSandboxResolver
+	Configs       repository.TenantSandboxConfigRepository
+	Audit         interfaces.AuditLogRepository
 }
 
 // WorkbenchService owns authorization and auditing. Provider managers and their
@@ -85,8 +92,11 @@ type WorkbenchService struct {
 	store   workbenchStore
 }
 
+// NewWorkbenchService enables workbench access only when explicitly configured.
 func NewWorkbenchService(deps WorkbenchServiceDeps) *WorkbenchService {
-	s := &WorkbenchService{deps: deps, enabled: strings.EqualFold(os.Getenv("WEKNORA_SANDBOX_WORKBENCH_ENABLED"), "true")}
+	s := &WorkbenchService{
+		deps: deps, enabled: strings.EqualFold(os.Getenv("WEKNORA_SANDBOX_WORKBENCH_ENABLED"), "true"),
+	}
 	if deps.Redis != nil {
 		namespace := strings.TrimSpace(os.Getenv("WEKNORA_REDIS_NAMESPACE"))
 		if namespace == "" {
@@ -99,6 +109,7 @@ func NewWorkbenchService(deps WorkbenchServiceDeps) *WorkbenchService {
 	return s
 }
 
+// Enabled reports whether this deployment opted into workbench access.
 func (s *WorkbenchService) Enabled() bool { return s != nil && s.enabled }
 
 func (s *WorkbenchService) authorizeIdentity(ctx context.Context, sessionID string) (*types.Session, error) {
@@ -118,57 +129,37 @@ func (s *WorkbenchService) authorizeIdentity(ctx context.Context, sessionID stri
 	if sessionID == "" || len(sessionID) > 128 {
 		return nil, ErrWorkbenchSession
 	}
-	if s.deps.DB == nil || s.deps.Sessions == nil {
+	if s.deps.Authorization == nil || s.deps.Sessions == nil {
 		return nil, ErrWorkbenchUnavailable
 	}
-	// Project only authorization fields, bypassing cached tenant objects and
-	// all admin/home-tenant fallbacks in the general middleware.
-	var user types.User
-	if err := s.deps.DB.WithContext(ctx).Select("id", "is_active").Where("id = ?", uid).Take(&user).Error; err != nil {
-		return nil, workbenchIdentityError(err)
+	identity, err := s.deps.Authorization.GetAuthorization(ctx, tid, uid)
+	if err != nil {
+		return nil, ErrWorkbenchUnavailable
 	}
-	if !user.IsActive {
-		return nil, ErrWorkbenchDenied
-	}
-	var tenant types.Tenant
-	if err := s.deps.DB.WithContext(ctx).Select("id", "status").Where("id = ?", tid).Take(&tenant).Error; err != nil {
-		return nil, workbenchIdentityError(err)
-	}
-	if tenant.Status != "active" {
-		return nil, ErrWorkbenchDenied
-	}
-	var member types.TenantMember
-	if err := s.deps.DB.WithContext(ctx).Select("user_id", "tenant_id", "status").Where("user_id = ? AND tenant_id = ?", uid, tid).Take(&member).Error; err != nil {
-		return nil, workbenchIdentityError(err)
-	}
-	if member.Status != types.TenantMemberStatusActive {
+	if identity == nil || identity.UserID != uid || identity.TenantID != tid ||
+		!identity.UserActive || identity.TenantStatus != "active" ||
+		identity.MemberStatus != types.TenantMemberStatusActive {
 		return nil, ErrWorkbenchDenied
 	}
 	session, err := s.deps.Sessions.GetOwnedSession(ctx, sessionID)
 	if err != nil {
-		if errors.Is(err, apperrors.ErrSessionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, apperrors.ErrSessionNotFound) {
 			return nil, ErrWorkbenchSession
 		}
 		return nil, ErrWorkbenchUnavailable
 	}
-	if session == nil || session.ID != sessionID || session.TenantID != tid || session.UserID != uid || types.SessionRequiresAdminConsoleRead(session, session.IMPlatform) {
+	if session == nil || session.ID != sessionID || session.TenantID != tid || session.UserID != uid ||
+		types.SessionRequiresAdminConsoleRead(session, session.IMPlatform) {
 		return nil, ErrWorkbenchSession
 	}
-	var imCount int64
-	if err := s.deps.DB.WithContext(ctx).Table("im_channel_sessions AS ics").Joins("JOIN sessions AS s ON s.id = ics.session_id").Where("s.tenant_id = ? AND ics.session_id = ?", tid, sessionID).Count(&imCount).Error; err != nil {
+	hasIM, err := s.deps.Authorization.HasIMSession(ctx, tid, sessionID)
+	if err != nil {
 		return nil, ErrWorkbenchUnavailable
 	}
-	if imCount != 0 {
+	if hasIM {
 		return nil, ErrWorkbenchSession
 	}
 	return session, nil
-}
-
-func workbenchIdentityError(err error) error {
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ErrWorkbenchDenied
-	}
-	return ErrWorkbenchUnavailable
 }
 
 // Authorize runs before socket authentication, on its five-second timer and
@@ -191,7 +182,9 @@ func (s *WorkbenchService) Authorize(ctx context.Context, sessionID string) (*ty
 	return session, nil
 }
 
-func (s *WorkbenchService) manager(ctx context.Context, tenantID uint64, configID string) (sandbox.Manager, error) {
+func (s *WorkbenchService) manager(
+	ctx context.Context, tenantID uint64, configID string,
+) (sandbox.Manager, error) {
 	if configID == "" {
 		return nil, ErrWorkbenchUnbound
 	}
@@ -202,7 +195,8 @@ func (s *WorkbenchService) manager(ctx context.Context, tenantID uint64, configI
 	if err != nil {
 		return nil, ErrWorkbenchUnavailable
 	}
-	if entity == nil || entity.TenantID != tenantID || entity.ID != configID || types.IsSandboxWorkspacePolicyRow(entity) {
+	if entity == nil || entity.TenantID != tenantID || entity.ID != configID ||
+		types.IsSandboxWorkspacePolicyRow(entity) {
 		return nil, ErrWorkbenchCapability
 	}
 	if entity.IsCordoned(time.Now(), types.SandboxCordonLease) {
@@ -218,11 +212,26 @@ func (s *WorkbenchService) manager(ctx context.Context, tenantID uint64, configI
 	return mgr, nil
 }
 
-func workbenchStatus(configID string, mgr sandbox.Manager, consoleAvailable bool) *WorkbenchStatus {
-	_, terminal := sandbox.TerminalProviderFrom(mgr)
+func workbenchStatus(
+	ctx context.Context, sessionID, configID string, mgr sandbox.Manager, consoleAvailable bool,
+) (*WorkbenchStatus, error) {
+	_, terminal := sandbox.CommandTerminalProviderFrom(mgr)
 	_, files := sandbox.WorkbenchFileProviderFrom(mgr)
 	terminal = terminal && consoleAvailable
-	status := &WorkbenchStatus{ConfigID: configID, Available: terminal || files, State: "bound", Root: sandbox.SessionOutputRoot, Limits: DefaultWorkbenchLimits(), Capabilities: map[string]bool{"terminal": terminal, "files": files}}
+	if reporter, ok := mgr.(sandbox.SessionWorkbenchRuntimeReporter); ok {
+		runtime, err := reporter.WorkbenchRuntimeStatus(ctx, sessionID)
+		if err != nil {
+			return nil, ErrWorkbenchUnavailable
+		}
+		if runtime.Known {
+			terminal = terminal && runtime.Terminal
+			files = files && runtime.Files
+		}
+	}
+	status := &WorkbenchStatus{
+		ConfigID: configID, Available: terminal || files, State: "bound", Root: sandbox.SessionOutputRoot,
+		Limits: DefaultWorkbenchLimits(), Capabilities: map[string]bool{"terminal": terminal, "files": files},
+	}
 	if mgr != nil {
 		status.Provider = string(mgr.GetType())
 	}
@@ -232,7 +241,7 @@ func workbenchStatus(configID string, mgr sandbox.Manager, consoleAvailable bool
 	} else if !status.Available {
 		status.Reason = "capability_unavailable"
 	}
-	return status
+	return status, nil
 }
 
 // Status only inspects the pin and capabilities, with no provider operation,
@@ -243,16 +252,20 @@ func (s *WorkbenchService) Status(ctx context.Context, sessionID string) (*Workb
 		return nil, err
 	}
 	if session.SandboxConfigID == "" {
-		return workbenchStatus("", nil, s.store != nil), nil
+		return workbenchStatus(ctx, sessionID, "", nil, s.store != nil)
 	}
 	mgr, err := s.manager(ctx, session.TenantID, session.SandboxConfigID)
 	if err != nil {
 		return nil, err
 	}
-	return workbenchStatus(session.SandboxConfigID, mgr, s.store != nil), nil
+	sandboxCtx := types.WithSandboxTenantID(ctx, session.TenantID)
+	return workbenchStatus(sandboxCtx, sessionID, session.SandboxConfigID, mgr, s.store != nil)
 }
 
-func (s *WorkbenchService) Bind(ctx context.Context, sessionID, configID string) (status *WorkbenchStatus, retErr error) {
+// Bind pins an authorized configuration and initializes its session workspace.
+func (s *WorkbenchService) Bind(
+	ctx context.Context, sessionID, configID string,
+) (status *WorkbenchStatus, retErr error) {
 	session, err := s.Authorize(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -300,13 +313,18 @@ func (s *WorkbenchService) Bind(ctx context.Context, sessionID, configID string)
 	if !ok {
 		return nil, ErrWorkbenchCapability
 	}
-	if err := initializer.EnsureWorkbenchSession(types.WithSandboxTenantID(ctx, session.TenantID), sessionID); err != nil {
+	sandboxCtx := types.WithSandboxTenantID(ctx, session.TenantID)
+	if err := initializer.EnsureWorkbenchSession(sandboxCtx, sessionID); err != nil {
 		return nil, ErrWorkbenchUnavailable
+	}
+	status, err = workbenchStatus(sandboxCtx, sessionID, winner, mgr, s.store != nil)
+	if err != nil {
+		return nil, err
 	}
 	if err := audit.finish(0, "completed", nil); err != nil {
 		return nil, err
 	}
-	return workbenchStatus(winner, mgr, s.store != nil), nil
+	return status, nil
 }
 
 // ValidateWorkbenchPath does not normalize away invalid input. The provider

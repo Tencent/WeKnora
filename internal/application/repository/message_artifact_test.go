@@ -33,8 +33,18 @@ func TestListSessionArtifactMessagesUsesStableCursorAndFiltersEmptyRows(t *testi
 	rows := []*types.Message{
 		first,
 		{SessionID: "session-1", Role: "assistant", CreatedAt: firstTime},
-		{SessionID: "session-1", Role: "user", CreatedAt: firstTime, Artifacts: types.MessageArtifacts{{FileName: "user.txt"}}},
-		{SessionID: "other-session", Role: "assistant", CreatedAt: firstTime, Artifacts: types.MessageArtifacts{{FileName: "foreign.txt"}}},
+		{
+			SessionID: "session-1",
+			Role:      "user",
+			CreatedAt: firstTime,
+			Artifacts: types.MessageArtifacts{{FileName: "user.txt"}},
+		},
+		{
+			SessionID: "other-session",
+			Role:      "assistant",
+			CreatedAt: firstTime,
+			Artifacts: types.MessageArtifacts{{FileName: "foreign.txt"}},
+		},
 		second,
 		later,
 	}
