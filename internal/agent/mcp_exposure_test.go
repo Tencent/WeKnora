@@ -31,6 +31,7 @@ func TestMCPExposureWithoutMentionReachesProviderAndExecutes(t *testing.T) {
 	for _, variant := range []string{
 		"openai", "anthropic", "openai-deferred", "anthropic-deferred",
 		"openai-proxy-deferred", "anthropic-proxy-deferred",
+		"openai-string-proxy-deferred", "anthropic-string-proxy-deferred",
 	} {
 		t.Run(variant, func(t *testing.T) {
 			provider := strings.Split(variant, "-")[0]
@@ -192,8 +193,12 @@ func TestMCPExposureWithoutMentionReachesProviderAndExecutes(t *testing.T) {
 				assert.Contains(t, string(payload["tools"]), "Order IDs belong to the external customer system.")
 				if (!deferred && call == 1) || (deferred && call == 3) {
 					if proxyCall {
+						arguments := `{"tool_ref":"mt1","arguments":{"id":"42"}}`
+						if strings.Contains(variant, "-string-") {
+							arguments = `{"tool_ref":"mt1","arguments":"{\"id\":\"42\"}"}`
+						}
 						streamMCPTestCall(w, provider, agenttools.ToolCallMCPTool, "call_order",
-							`{"tool_ref":"mt1","arguments":{"id":"42"}}`)
+							arguments)
 						return
 					}
 					if provider == "openai" {

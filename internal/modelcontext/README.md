@@ -85,6 +85,13 @@ registered; `input_schema`, `call_mcp_tool.arguments`, and external execution
 results remain opaque. Arguments are restored before authorization, validation,
 execution, persistence and UI events. Unknown routing handles fail closed.
 
+For model-emitted `call_mcp_tool` calls, one extra JSON-string encoding of the
+`arguments` envelope is accepted only when it contains a complete JSON object
+(including `{}`). Normalization runs before resource-handle decoding; original
+model arguments are retained for tracing. Nested business strings are unchanged,
+and malformed JSON, arrays, `null`, and further encoding layers remain invalid.
+The canonical object still passes the existing routing, schema and approval checks.
+
 ## Wiki routing
 
 `WikiRouteResolver` is intentionally separate. It stores server-side

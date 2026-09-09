@@ -651,6 +651,6 @@ func TestMCPCallInvalidArgumentsExplainObjectEnvelope(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, result.Success)
 		require.Contains(t, result.Error, "JSON object, not a JSON-encoded string")
-		require.Contains(t, result.Error, `"arguments":{"order_id":"123"}`)
+		require.Contains(t, result.Error, `"arguments":{}`)
 	}
 }

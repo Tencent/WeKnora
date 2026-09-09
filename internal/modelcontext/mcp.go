@@ -6,7 +6,40 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/types"
 )
+
+// normalizeMCPCallArguments tolerates one extra JSON encoding of the bridge's
+// arguments envelope. Run after preserving ModelArguments and before decoding
+// resource handles so audit/UI/execution all use the same canonical object.
+// This is not JSON repair: incomplete JSON, null, arrays and further string
+// layers remain invalid, and remote business fields are never coerced here.
+func normalizeMCPCallArguments(calls []types.LLMToolCall) {
+	for i := range calls {
+		if calls[i].Function.Name != "call_mcp_tool" {
+			continue
+		}
+		var envelope map[string]json.RawMessage
+		if json.Unmarshal([]byte(calls[i].Function.Arguments), &envelope) != nil {
+			continue
+		}
+		var wrapped string
+		if json.Unmarshal(envelope["arguments"], &wrapped) != nil {
+			continue
+		}
+		var object map[string]json.RawMessage
+		if json.Unmarshal([]byte(wrapped), &object) != nil || object == nil {
+			continue
+		}
+		// Retain raw number literals and nested values instead of round-tripping
+		// through float64 or recursively decoding business strings.
+		envelope["arguments"] = json.RawMessage(wrapped)
+		encoded, err := json.Marshal(envelope)
+		if err == nil {
+			calls[i].Function.Arguments = string(encoded)
+		}
+	}
+}
 
 // MCP routing identities belong to our bridge, not to the remote tool schema.
 // Rewrite only explicit envelope fields; never walk an external input_schema,

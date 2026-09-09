@@ -83,8 +83,8 @@ const mcpCallSchema = `{
       "type": "string"
     },
     "arguments": {
-      "description": "Original tool parameters as a JSON object matching input_schema, never a JSON-encoded string.",
-      "examples": [{"order_id": "123"}],
+      "description": "JSON object matching input_schema. Use {} for no parameters; do not JSON-stringify it.",
+      "examples": [{}, {"order_id": "123"}],
       "type": "object"
     }
   },
@@ -95,10 +95,10 @@ const mcpCallSchema = `{
   "additionalProperties": false
 }`
 
-const mcpCallArgumentsHint = ` Read the tool with discover_mcp_tools(mode="describe", ` +
-	`server_id=..., tool_name=...) first. Use its tool_ref and pass arguments as a JSON object, ` +
-	`not a JSON-encoded string; for example ` +
-	`{"tool_ref":"<describe reference>","arguments":{"order_id":"123"}} (use the actual input_schema fields).`
+const mcpCallArgumentsHint = ` Pass arguments as a JSON object, not a JSON-encoded string. ` +
+	`For a tool with no parameters use {"tool_ref":"<describe reference>","arguments":{}}; ` +
+	`otherwise match its input_schema. If the definition is unavailable, use ` +
+	`discover_mcp_tools(mode="describe", server_id=..., tool_name=...).`
 
 const maxMCPDefinitionChars = 256 * 1024
 

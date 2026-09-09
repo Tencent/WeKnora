@@ -125,3 +125,73 @@ func TestMCPUnknownRoutingHandlesFailClosedOnlyAtTheEnvelope(t *testing.T) {
 	require.Equal(t, ArgumentResolutionUnresolved, calls[0].ArgumentResolution)
 	require.Equal(t, ArgumentResolutionUnresolved, calls[1].ArgumentResolution)
 }
+
+func TestMCPStringArgumentsNormalizeOnlyOneCompleteObject(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		arguments  any
+		normalized bool
+	}{
+		{"empty object", "{}", true},
+		{"whitespace", " \n { } \t", true},
+		{"nested business string", `{"query":"{\"id\":1}","items":[{"enabled":true}]}`, true},
+		{"already an object", map[string]any{"query": "{}"}, false},
+		{"null", nil, false},
+		{"encoded null", "null", false},
+		{"array", "[]", false},
+		{"scalar", "123", false},
+		{"empty string", "", false},
+		{"malformed", `{"id":`, false},
+		{"trailing content", `{} {}`, false},
+		{"another encoding layer", `"{}"`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := NewRegistry(false)
+			raw, err := json.Marshal(map[string]any{"tool_ref": mcpTestRef, "arguments": tc.arguments})
+			require.NoError(t, err)
+			calls := []types.LLMToolCall{{Function: types.FunctionCall{Name: "call_mcp_tool", Arguments: string(raw)}}}
+			r.DecodeToolCalls(calls)
+			require.Equal(t, string(raw), calls[0].ModelArguments)
+			if tc.normalized {
+				require.Equal(t, ArgumentResolutionResolved, calls[0].ArgumentResolution)
+				var envelope map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal([]byte(calls[0].Function.Arguments), &envelope))
+				require.JSONEq(t, tc.arguments.(string), string(envelope["arguments"]))
+			} else {
+				require.JSONEq(t, string(raw), calls[0].Function.Arguments)
+				require.Equal(t, ArgumentResolutionUnchanged, calls[0].ArgumentResolution)
+			}
+			first := calls[0]
+			r.DecodeToolCalls(calls)
+			require.Equal(t, first, calls[0], "stream completion may decode the same call again")
+		})
+	}
+}
+
+func TestMCPStringArgumentsDecodeResourcesAndKeepOtherToolsOpaque(t *testing.T) {
+	r := NewRegistry(false)
+	const resource = "resource://AbCdEfGhIjKlMnOpQrStUv"
+	require.Equal(t, "res://0001", r.CompactKnownText(resource))
+	r.ModelToolResultForTool("discover_mcp_tools", &types.ToolResult{
+		Success: true, Output: `{"tool_ref":"` + mcpTestRef + `"}`,
+	})
+	raw := `{"tool_ref":"mt1","arguments":"{\"file\":\"res://0001\",\"knowledge_id\":\"d1\"}"}`
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{Name: "call_mcp_tool", Arguments: raw}}}
+	r.DecodeToolCalls(calls)
+	require.JSONEq(t, `{"tool_ref":"`+mcpTestRef+`","arguments":{"file":"`+resource+`","knowledge_id":"d1"}}`,
+		calls[0].Function.Arguments)
+	require.Equal(t, raw, calls[0].ModelArguments)
+	require.Empty(t, calls[0].UnresolvedHandles)
+	for _, name := range []string{"mcp_external_tool", "discover_mcp_tools", "read_file"} {
+		original := `{"arguments":"{\"id\":1}"}`
+		calls := []types.LLMToolCall{{Function: types.FunctionCall{Name: name, Arguments: original}}}
+		r.DecodeToolCalls(calls)
+		require.JSONEq(t, original, calls[0].Function.Arguments)
+	}
+	unknown := []types.LLMToolCall{{Function: types.FunctionCall{
+		Name: "call_mcp_tool", Arguments: `{"tool_ref":"mt1","arguments":"{\"file\":\"res://9999\"}"}`,
+	}}}
+	r.DecodeToolCalls(unknown)
+	require.Equal(t, []string{"res://9999"}, unknown[0].UnresolvedHandles)
+	require.Equal(t, ArgumentResolutionPartiallyResolved, unknown[0].ArgumentResolution)
+}
