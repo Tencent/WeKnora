@@ -322,6 +322,11 @@ type responseVerdict struct {
 	finalAnswer  string
 	emptyContent bool // LLM returned stop with no tool calls and empty content
 	step         types.AgentStep
+	// answerID is the EventAgentFinalAnswer id to close with Done:true if
+	// this round actually finishes. Natural-stop must not close the stream
+	// before the loop-end steer drain: a pending inject continues the turn,
+	// and a premature Done tells the client the session is idle.
+	answerID string
 }
 
 // isNaturalStopFinishReason reports whether a provider finish reason means the
@@ -444,21 +449,16 @@ func (e *AgentEngine) analyzeResponse(
 				})
 			}
 		}
-		e.eventBus.Emit(ctx, event.Event{
-			ID:        answerID,
-			Type:      event.EventAgentFinalAnswer,
-			SessionID: sessionID,
-			Data: event.AgentFinalAnswerData{
-				Content: "",
-				Done:    true,
-			},
-		})
+		// Do not emit Done:true here. The caller drains any loop-end inject
+		// first; a premature close makes the client think the turn is idle
+		// while the engine is about to continue.
 
 		return responseVerdict{
 			isDone:       true,
 			finalAnswer:  response.Content,
 			emptyContent: response.Content == "",
 			step:         step,
+			answerID:     answerID,
 		}
 	}
 
@@ -569,6 +569,14 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 	var lines []string
 	for _, svc := range mcpServices {
 		if svc == nil {
+			continue
+		}
+		if svc.Discoverable && len(svc.ToolNames) > 0 {
+			lines = append(lines, fmt.Sprintf(
+				"Use relevant available MCP functions for service @%s (server_id=%q) before "+
+					"answering. Their descriptions identify the service and original tool names; use "+
+					"discover_mcp_tools if the service needs reconnection or authentication.",
+				sanitizeMustUseField(svc.Name), sanitizeMustUseField(svc.ID)))
 			continue
 		}
 		if svc.Discoverable {
@@ -692,7 +700,7 @@ func (e *AgentEngine) registerRuntimeReferences() {
 				if title == "" {
 					title = doc.FileName
 				}
-				e.modelContext.RegisterChunk(modelcontext.ChunkReference{
+				e.modelContext.RegisterContextChunk(modelcontext.ChunkReference{
 					ChunkID:         doc.ChunkID,
 					KnowledgeID:     doc.KnowledgeID,
 					KnowledgeBaseID: firstNonEmptyAgent(doc.KnowledgeBaseID, kb.ID),
@@ -739,6 +747,15 @@ func listToolNames(ts []chat.Tool) []string {
 	return names
 }
 
+func mcpCatalogDescriptionLen(ts []chat.Tool) int {
+	for _, t := range ts {
+		if t.Function.Name == agenttools.ToolDiscoverMCPTools {
+			return len(t.Function.Description)
+		}
+	}
+	return 0
+}
+
 // buildToolsForLLM builds the tools list for LLM function calling
 func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
 	functionDefs := e.toolRegistry.GetModelFunctionDefinitions()
@@ -754,7 +771,7 @@ func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
 		})
 	}
 
-	return tools
+	return e.modelContext.EncodeTools(tools)
 }
 
 // appendToolResults adds tool results to the in-turn message history following

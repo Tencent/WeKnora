@@ -11,7 +11,11 @@ import (
 	"gorm.io/gorm"
 )
 
-func (r *learningRepository) SubmitAnswer(ctx context.Context, scope interfaces.LearningScope, input types.LearningAnswer) (*types.LearningAnswerResult, error) {
+func (r *learningRepository) SubmitAnswer(
+	ctx context.Context,
+	scope interfaces.LearningScope,
+	input types.LearningAnswer,
+) (*types.LearningAnswerResult, error) {
 	if input.QuestionID == "" || len(input.QuestionID) > 36 || input.OptionID == "" || len(input.OptionID) > 36 ||
 		strings.TrimSpace(input.AttemptID) != input.AttemptID || input.AttemptID == "" || len(input.AttemptID) > 64 {
 		return nil, types.ErrLearningInvalid
@@ -63,7 +67,10 @@ func (r *learningRepository) SubmitAnswer(ctx context.Context, scope interfaces.
 			return nil
 		}
 		var answered int64
-		if err := learningScope(tx, scope).Model(&types.LearningAttempt{}).Where("question_id = ?", question.ID).Count(&answered).Error; err != nil {
+		if err := learningScope(tx, scope).Model(&types.LearningAttempt{}).
+			Where("question_id = ?", question.ID).
+			Count(&answered).
+			Error; err != nil {
 			return err
 		}
 		if answered > 0 {
@@ -71,7 +78,8 @@ func (r *learningRepository) SubmitAnswer(ctx context.Context, scope interfaces.
 		}
 		var credits int64
 		if err := learningScope(tx, scope).Model(&types.LearningAttempt{}).
-			Where("page_id = ? AND fingerprint = ? AND credited = ?", q.PageID, question.Fingerprint, true).Count(&credits).Error; err != nil {
+			Where("page_id = ? AND fingerprint = ? AND credited = ?", q.PageID, question.Fingerprint, true).
+			Count(&credits).Error; err != nil {
 			return err
 		}
 		m, err := learningMastery(tx, scope, page)
@@ -88,13 +96,35 @@ func (r *learningRepository) SubmitAnswer(ctx context.Context, scope interfaces.
 				return err
 			}
 		}
-		result = &types.LearningAnswerResult{AttemptID: input.AttemptID, QuestionID: question.ID, SelectedOption: input.OptionID,
-			Correct: correct, CorrectOption: question.CorrectOption, Explanation: question.Explanation, Evidence: question.Evidence,
-			Mastery: types.LearningMasteryState(m, q.SourceStamp, now)}
-		return tx.Create(&types.LearningAttempt{TenantID: scope.TenantID, SubjectID: scope.SubjectID, AttemptID: input.AttemptID,
-			QuestionID: question.ID, QuizID: q.ID, PageID: q.PageID, KnowledgeBaseID: q.KnowledgeBaseID,
-			Fingerprint: question.Fingerprint, SourceStamp: q.SourceStamp, Before: before, After: after, Credited: credits == 0,
-			AlgorithmVersion: types.LearningAlgorithmVersion, Result: *result, CreatedAt: now}).Error
+		result = &types.LearningAnswerResult{
+			AttemptID:      input.AttemptID,
+			QuestionID:     question.ID,
+			SelectedOption: input.OptionID,
+			Correct:        correct,
+			CorrectOption:  question.CorrectOption,
+			Explanation:    question.Explanation,
+			Evidence:       question.Evidence,
+			Mastery:        types.LearningMasteryState(m, q.SourceStamp, now),
+		}
+		return tx.Create(
+			&types.LearningAttempt{
+				TenantID:         scope.TenantID,
+				SubjectID:        scope.SubjectID,
+				AttemptID:        input.AttemptID,
+				QuestionID:       question.ID,
+				QuizID:           q.ID,
+				PageID:           q.PageID,
+				KnowledgeBaseID:  q.KnowledgeBaseID,
+				Fingerprint:      question.Fingerprint,
+				SourceStamp:      q.SourceStamp,
+				Before:           before,
+				After:            after,
+				Credited:         credits == 0,
+				AlgorithmVersion: types.LearningAlgorithmVersion,
+				Result:           *result,
+				CreatedAt:        now,
+			},
+		).Error
 	})
 	if err != nil {
 		return nil, err

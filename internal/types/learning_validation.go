@@ -5,6 +5,7 @@ import (
 	"unicode/utf8"
 )
 
+// LearningClip truncates text to a byte limit without splitting UTF-8 characters.
 func LearningClip(s string, bytes int) string {
 	if len(s) <= bytes {
 		return s
@@ -16,6 +17,7 @@ func LearningClip(s string, bytes int) string {
 	return s
 }
 
+// LearningValidateQuestions checks question shape, uniqueness and source evidence.
 func LearningValidateQuestions(source *LearningSource, questions []LearningQuestion) error {
 	if source == nil || len(questions) != 3 {
 		return ErrLearningEvidence
@@ -28,7 +30,9 @@ func LearningValidateQuestions(source *LearningSource, questions []LearningQuest
 	for _, q := range questions {
 		fp := LearningFingerprint(q.Prompt)
 		if strings.TrimSpace(q.Prompt) == "" || len(q.Prompt) > 1000 || fingerprints[fp] || len(q.Options) != 4 ||
-			strings.TrimSpace(q.Explanation) == "" || len(q.Explanation) > 2000 || len(q.Evidence) == 0 || len(q.Evidence) > 3 {
+			strings.TrimSpace(
+				q.Explanation,
+			) == "" || len(q.Explanation) > 2000 || len(q.Evidence) == 0 || len(q.Evidence) > 3 {
 			return ErrLearningEvidence
 		}
 		fingerprints[fp] = true
@@ -46,7 +50,8 @@ func LearningValidateQuestions(source *LearningSource, questions []LearningQuest
 		for _, e := range q.Evidence {
 			c := chunks[e.ChunkID]
 			quote := LearningNormalize(e.Quote)
-			if c == nil || c.KnowledgeID != e.KnowledgeID || len(e.Quote) > 1000 || utf8.RuneCountInString(quote) < 10 ||
+			if c == nil || c.KnowledgeID != e.KnowledgeID || len(e.Quote) > 1000 ||
+				utf8.RuneCountInString(quote) < 10 ||
 				!strings.Contains(LearningNormalize(LearningClip(c.Content, LearningChunkBytes)), quote) {
 				return ErrLearningEvidence
 			}

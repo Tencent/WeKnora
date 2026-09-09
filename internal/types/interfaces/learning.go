@@ -2,10 +2,12 @@ package interfaces
 
 import (
 	"context"
+
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
 )
 
+// LearningService provides private practice and progress for authenticated learners.
 type LearningService interface {
 	GetSettings(context.Context) (*types.LearningSettings, error)
 	SetEnabled(context.Context, bool) (*types.LearningSettings, error)
@@ -23,13 +25,13 @@ type LearningService interface {
 	Recover(context.Context) error
 }
 
-// Scope is resolved only from explicit immutable Web authentication context.
+// LearningScope is resolved only from explicit immutable Web authentication context.
 type LearningScope struct {
 	TenantID  uint64
 	SubjectID string
 }
 
-// Repository operations own all transactions, including profile fencing and
+// LearningRepository owns all transactions, including profile fencing and
 // source binding checks. No database handle or transaction reaches the service.
 type LearningRepository interface {
 	Settings(context.Context, LearningScope) (*types.LearningSettings, error)

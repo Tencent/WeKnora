@@ -18,7 +18,13 @@ type service struct {
 	memory interfaces.MemoryService
 }
 
-func NewService(repo interfaces.LearningRepository, models interfaces.ModelService, tasks interfaces.TaskEnqueuer, memory interfaces.MemoryService) interfaces.LearningService {
+// NewService wires private learning operations to persistence, models, tasks and optional memory.
+func NewService(
+	repo interfaces.LearningRepository,
+	models interfaces.ModelService,
+	tasks interfaces.TaskEnqueuer,
+	memory interfaces.MemoryService,
+) interfaces.LearningService {
 	return &service{repo: repo, models: models, tasks: tasks, memory: memory}
 }
 

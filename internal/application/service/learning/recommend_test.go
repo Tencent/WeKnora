@@ -24,6 +24,7 @@ func (m *fakeMemory) DocumentAffinity(context.Context, []string) map[string]int 
 	m.reads++
 	return map[string]int{m.knowledgeID: types.MemoryDocAffinityMinHits}
 }
+
 func (m *fakeMemory) RetrievalContextFor(context.Context) interfaces.RetrievalContext {
 	m.reads++
 	return interfaces.RetrievalContext{Background: "PERSONAL_MEMORY_SECRET", Interests: []string{"transactions"}}
@@ -61,7 +62,13 @@ func TestLearningRecommendationsWeightsDiversityExplorationDeterminism(t *testin
 	nodes := []*types.LearningNode{}
 	views := []*types.LearningNodeView{}
 	for i, kind := range []string{"concept", "concept", "entity", "comparison", "synthesis"} {
-		p := &types.WikiPage{ID: fmt.Sprint(i), Title: "Transactions", PageType: kind, Summary: "summary", ChunkRefs: types.StringArray{"a", "b", "c"}}
+		p := &types.WikiPage{
+			ID:        fmt.Sprint(i),
+			Title:     "Transactions",
+			PageType:  kind,
+			Summary:   "summary",
+			ChunkRefs: types.StringArray{"a", "b", "c"},
+		}
 		n := &types.LearningNode{Page: p, Related: i < 2}
 		v := types.LearningNodePublic(n, now)
 		if i < 4 {
@@ -75,7 +82,13 @@ func TestLearningRecommendationsWeightsDiversityExplorationDeterminism(t *testin
 	require.InDelta(t, 1., result[0].Score, 1e-12)
 	require.Equal(t, "1", result[1].PageID, "a due concept must not be displaced by type diversity")
 	for _, r := range result {
-		require.InDelta(t, .45*r.Components.ReviewNeed+.25*r.Components.GraphFrontier+.20*r.Components.InterestMatch+.10*r.Components.ContentQuality, r.Score, 1e-12)
+		require.InDelta(
+			t,
+			.45*r.Components.ReviewNeed+.25*r.Components.GraphFrontier+
+				.20*r.Components.InterestMatch+.10*r.Components.ContentQuality,
+			r.Score,
+			1e-12,
+		)
 	}
 	for i, j := 0, len(nodes)-1; i < j; i, j = i+1, j-1 {
 		nodes[i], nodes[j] = nodes[j], nodes[i]
@@ -88,7 +101,9 @@ func TestLearningRecommendationsNeverDisplaceDuePracticeWithMasteredKinds(t *tes
 	nodes := []*types.LearningNode{}
 	views := []*types.LearningNodeView{}
 	for i, kind := range []string{"concept", "concept", "entity", "comparison"} {
-		node := &types.LearningNode{Page: &types.WikiPage{ID: fmt.Sprint(i), Title: "Topic", PageType: kind, Summary: "Summary"}}
+		node := &types.LearningNode{
+			Page: &types.WikiPage{ID: fmt.Sprint(i), Title: "Topic", PageType: kind, Summary: "Summary"},
+		}
 		view := types.LearningNodePublic(node, time.Now())
 		view.Mastery.State = "mastered"
 		nodes, views = append(nodes, node), append(views, view)
@@ -138,7 +153,13 @@ func TestLearningLeaseCASAndOptOutFence(t *testing.T) {
 	duplicate, err := f.repo.Claim(context.Background(), payload)
 	require.NoError(t, err)
 	require.Nil(t, duplicate)
-	require.NoError(t, f.db.Model(&types.LearningQuiz{}).Where("id = ?", q.ID).Update("lease_until", time.Now().UTC().Add(-time.Minute)).Error)
+	require.NoError(
+		t,
+		f.db.Model(&types.LearningQuiz{}).
+			Where("id = ?", q.ID).
+			Update("lease_until", time.Now().UTC().Add(-time.Minute)).
+			Error,
+	)
 	second, err := f.repo.Claim(context.Background(), payload)
 	require.NoError(t, err)
 	require.NotNil(t, second)

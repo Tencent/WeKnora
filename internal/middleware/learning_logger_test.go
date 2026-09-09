@@ -28,7 +28,11 @@ func TestLearningAccessLogNeverCapturesAssessmentContent(t *testing.T) {
 		require.Contains(t, string(body), "learner-private-choice")
 		c.JSON(200, gin.H{"correct_option": "private-key", "explanation": "private-explanation"})
 	})
-	request := httptest.NewRequest("POST", "/api/v1/learning/attempts?answer=private-query", strings.NewReader(`{"option_id":"learner-private-choice"}`))
+	request := httptest.NewRequest(
+		"POST",
+		"/api/v1/learning/attempts?answer=private-query",
+		strings.NewReader(`{"option_id":"learner-private-choice"}`),
+	)
 	request.Header.Set("Content-Type", "application/json")
 	request = request.WithContext(context.WithValue(request.Context(), types.LoggerContextKey, logrus.NewEntry(log)))
 	response := httptest.NewRecorder()

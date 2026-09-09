@@ -1,76 +1,83 @@
-# MCP 工具目录与按需调用
+# MCP 配置、持久目录与按需调用
 
-Agent 的 MCP 主路径使用 `discover_mcp_tools` 和 `call_mcp_tool`，不再把每个 MCP 工具的完整 schema 放进初始模型请求。现有 Agent / 请求级服务选择范围保持有效。
+## 设置页面
 
-## 使用顺序
+MCP 配置分两步，使用现有 SettingDrawer，步骤导航沿用沙箱的圆形编号与连接线，分组使用标题和细分隔线。
 
-```json
-{"mode":"list_servers","limit":20}
-```
+1. **连接配置**：名称、启用状态、传输协议、URL、请求头、认证及超时。保存后进入第二步；OAuth 授权仍按用户独立进行。
+2. **工具与用途说明**：编辑用途摘要和使用说明。进入本步时若还没有目录，会自动连接并拉取 Tools；已保存的目录直接展示，只有点刷新才会再次访问 MCP Server。连接已变更的旧目录不会自动覆盖，需手动刷新。工具启用和审批开关即时保存。
 
-从结果获取 `server_id`，再读取该服务的工具目录：
+编辑时无需为展示 Tools 再次连接上游。首次使用旧服务需要同步一次：此前数据库只有工具的启用/审批设置，没有完整工具目录可以迁移。
 
-```json
-{"mode":"list_tools","server_id":"目录中的服务ID","limit":20}
-```
+## 存储及字段来源
 
-列表仅提供名称和摘要，以及读取定义的下一步提示，不返回可调用引用。按返回的原始名称读取完整定义：
+迁移 `000092_mcp_metadata` 新增服务使用说明及持久目录表。
 
-```json
-{"mode":"describe","server_id":"目录中的服务ID","tool_name":"get_order"}
-```
+| 数据 | 存储位置 | 来源与更新方式 |
+|---|---|---|
+| 服务名称、用途摘要 | `mcp_services.name / description` | 人工配置 |
+| 使用说明 | `mcp_services.usage_instructions` | 人工配置；刷新不会覆盖 |
+| 原始服务说明 | `mcp_metadata.instructions` | `initialize.result.instructions` |
+| 服务端名称、版本及简介 | `mcp_metadata.server_name / server_version / server_description` | `initialize.result.serverInfo` |
+| 工具名称、完整描述、完整 schema | `mcp_metadata.tools` JSONB | 完整分页读取 `tools/list` 后原子保存 |
+| 同步时间、连接指纹 | `mcp_metadata.synced_at / config_fingerprint` | 后端生成；指纹不返回前端 |
+| 工具启用、审批策略 | 原有 `mcp_tool_approvals` | 单独保存；同步不会覆盖 |
 
-模型使用 `call_mcp_tool` 调用：
+目录按 `(tenant_id, service_id, principal)` 隔离。非 OAuth 服务在同一租户内共享一份快照；OAuth 服务使用有效授权主体的 StorageID，同一服务可以有多份用户目录，不回退读取其他用户的快照。主表的服务列表查询不会携带完整 Tools JSON。
 
-```json
-{"tool_ref":"describe 返回的引用","arguments":{"order_id":"123"}}
-```
+连接指纹覆盖传输方式、URL、请求头、认证配置、stdio 配置和环境变量。密钥只参与指纹计算，不写入目录或模型上下文。修改用途文字不使目录失效；修改连接或认证配置后，旧目录仍可在管理页面查看，但标为 stale，不参与运行时工具加载。
 
-`arguments` 必须是符合目标 schema 的 JSON 对象，不能是 JSON 编码后的字符串。调用入口会检查当前 engine 是否已成功返回该引用对应的完整定义；仅列目录、读取其他工具或沿用未读取的新 schema 引用均不能执行。格式错误返回对象示例和读取定义的提示。
+刷新使用独立连接，30 秒超时；获取全部工具成功后才写库。失败保留原有快照，页面展示本次错误；不把不完整目录发布成成功结果。成功返回空列表则移除旧工具。刷新前后核对连接指纹，较早开始的慢刷新不能覆盖较新快照。现有客户端限制为 100 页、2,000 个工具及单个 schema 256 KiB；完整快照另有 8 MiB 上限，超限明确失败。
 
-`search` 是限定单个服务的名称 / 描述子串匹配，可忽略大小写；不是 BM25 或跨语言语义检索。空结果时使用 `list_tools` 完整枚举，再精确 `describe`，工具可达性不依赖搜索排名。
+## API
 
-## 目录、连接和权限
+- `GET /api/v1/mcp-services/:id/metadata`：只读库，未同步返回 `data:null`，旧连接的快照返回 `stale:true`；Viewer 及以上权限。
+- `POST /api/v1/mcp-services/:id/metadata/refresh`：显式连接并同步。静态认证写入租户共享快照，需要 Admin（或具备 MCP 管理能力的 API key）；OAuth 写入当前用户快照，Viewer 及以上可调用，以便对话内授权后落库。刷新失败对外返回笼统错误，不带回上游地址。
+- 服务原有 POST / PUT 接收 `description` 和 `usage_instructions`。凭证继续走独立子资源，编辑说明不会覆盖密钥。
+- 旧 `/test`、`/tools` 和 `/resources` API 保留原有行为；新分步页面不通过它们读取缓存。
 
-- 启动只读取配置中的获准服务并安装两个入口，不连接所有服务。工具描述中包含最多约 2,000 字符的服务摘要，其余服务通过分页目录读取。
-- 工具元数据在每个 Agent engine 内按服务缓存；不同请求的目录不共享。目录绑定租户、调用主体及有效 OAuth 主体。
-- `list_tools` / `describe` / `search` 首次访问指定服务时才连接、列工具，继续复用既有 MCPManager 连接和 OAuth 流程。
-- 成功目录在本次 engine 中复用；`list_tools` 支持 `refresh:true`，刷新时不能带 cursor。刷新失败不回退到旧目录。
-- 目标读取与调用会重新获取服务配置并检查单工具策略。服务禁用、不可访问、配置版本变化都会被处理；新加入 Agent 范围外的服务不会自动扩权。
-- 列目录通过现有策略服务批量读取权限，工具数量增加不会增加数据库查询次数；精确描述与调用解析只检查目标工具。工具定义缓存不缓存权限决策，自定义旧版 gate 可继续使用逐工具检查接口。
-- 运行中状态包括 `not_loaded`、`loading`、`ready`、`needs_auth`、`error`、`disabled`、`unavailable`。服务列表展示缓存的最近观察状态，目标访问负责重新验证。
-- 当前不增加持久元数据缓存、跨请求缓存、后台自动刷新或 MCP 通知订阅。后续扩展须保留相同权限边界。
+## 模型暴露链路
 
-## 分页与定义完整性
+**入库不等于全量发送给模型。** 默认使用普通函数调用实现应用层按需加载，不依赖 Responses 或 Anthropic 的原生 tool-search 协议。
 
-列表默认 20 项，最大 50 项。输出预算较小时自动缩小单页，返回完整 JSON 和 `next_cursor`；一直跟随 cursor，直到 `has_more=false`。工具游标绑定查询和可见记录，权限或目录变化导致游标失效时，需从第一页重新枚举。服务列表游标绑定有序服务 ID，正常加载导致的状态变化不会使游标失效。
+1. `registerMCPTools` 筛选当前租户及 Agent 授权范围内的启用服务，安装受权限约束的目录。生产路径注入只读快照 loader；目录缺失时（升级后尚未同步）可在已授权连接上 live `tools/list` 并写入当前主体的快照。OAuth 服务在预加载阶段不会 live 连接（避免弹出授权窗）；对话内工具执行上下文中才允许 live-fill。连接已变更的 stale 快照不会在预加载时 live-fill。模型调用 `list_tools` 且 `refresh=true` 时会重新拉取上游并尝试落库；设置页刷新对静态认证需要 Admin，OAuth 仍可由授权用户同步。
+2. `PrepareMCPTools` 预读数据库快照，不连接上游。读取最多 8 路并发，初始等待窗口 1 秒，整体受请求取消及 30 秒超时约束。未就绪服务仍展示在来源目录中。
+3. 首轮模型只看到两个入口 `discover_mcp_tools` / `call_mcp_tool`，以及服务级名称、用途说明和状态。来源摘要有 16 KiB 总预算：能放下时模型应直接 `list_tools` / `describe`，不要先 `list_servers`；超出时才提示通过 `list_servers` 分页枚举。每个工具的完整描述和 schema 不在首轮 tools 中。
+4. 模型按服务 `list_tools` / `search`，再 `describe` 一个具体工具。`describe` 返回完整描述、schema、原始服务 instructions、人工使用说明、`function_name` 和 `tool_ref`，并记录本次 engine 已读取的定义版本。
+5. 下一次模型请求前，`RefreshMCPTools` 把已 describe、或本会话历史里已经用过的工具发布为普通函数。新 engine 会从对话历史恢复 `mcp_*` 函数名和 `call_mcp_tool` 的 `tool_ref`，避免多轮必须重新 describe。也可继续用 `call_mcp_tool` 兼容代理调用。目录操作和后台读取线程不会在并行执行期间修改 registry。
+6. 实际执行目标 MCP 工具时才建立所需连接。权限、审批、OAuth 等待、参数校验和结果处理继续走原有执行链。
 
-MCP 客户端通过现有认证 transport 读取原始 `inputSchema`，保留顶层组合约束、`definitions` 和引用路径；不经过 SDK 的固定 schema 结构转换。客户端读取全部服务端分页，并在重复游标、分页失败或取消时拒绝发布不完整目录。
+没有 mention 也能看到所有获准服务；mention 只设置优先使用项，不缩小或扩大 Agent 配置的 `all / selected / none` 授权范围。
 
-服务端 URL 由租户配置，属于不可信端点：协议分页上限为 100 页、2,000 个工具，单个 `inputSchema` 上限 256 Ki 字节。恶意或自循环服务无法用互不重复的游标在超时前无限增长目录；超限直接报错，不发布部分目录。
+`PrepareMCPToolsDirect` 保留全量函数暴露的兼容路径，生产默认不使用。OpenAI 兼容和 Anthropic Messages 都支持上述普通函数的按需加载；Anthropic 适配器支持 tools、tool_use、并行 tool_result 和流式参数拼接。截断的参数流不会作为完整调用执行。
 
-工具引用由服务 ID、原始工具名及 schema 生成，不使用有损的函数名清洗结果，避免中文名称、大小写或截断造成的调用冲突。刷新后 schema 变化会使旧引用失效。新的 engine 中如引用尚未载入，需先重新发现。
+## 与 Codex 的对应和边界
 
-`describe` 返回完整 schema，单条完整结果硬上限为 256 Ki 字符；超限明确报错，不返回半截 JSON。Agent 上下文预算不足时，目录结果整体替换为说明，不能把截断后的参数定义用于调用。列表摘要与精确描述有不同的预算，避免将每个工具的长说明提前加入上下文。
+对照 `openai/codex@2cbbf0c9b542a36a1c3284b5e804917635b6f666`：
 
-## 执行与历史
+- `codex-rs/codex-mcp/src/rmcp_client.rs`：初始化后读取工具目录，普通 MCP 的 namespace description 来自 `initialize.instructions`；Apps 使用 Connector 元数据。
+- `codex-rs/core/src/mcp_tool_exposure.rs`：工具搜索启用时 Deferred，否则 Direct。
+- `codex-rs/core/src/tools/handlers/tool_search_spec.rs`：首轮按来源去重展示名称及可选说明；world state 已声明来源时省略重复列表。
+- `codex-rs/core/src/tools/handlers/mcp.rs` / `tool_search.rs`：逐工具元数据构建后台 BM25 索引，命中后加载完整工具定义。
 
-代理解析到当前目录的 MCPTool，并复用 registry 的目标参数转换、校验、输出处理和 MCPTool 的权限、审批、OAuth、SSRF 安全客户端及结果链。MCP 图片和内容项保持原有处理；代理不能转调用内置工具或代理自身。
+本项目采用相同的“来源可感知、具体定义按需加载”原则，但当前检索是单服务名称/描述子串匹配，加分页枚举和精确 describe，不是 Codex 的原生 BM25 tool_search 协议。持久化管理目录也是本项目的服务端设计，不宣称照搬 Codex 的存储方式。
 
-MCP 参数使用完整 JSON Schema 校验，覆盖嵌套对象、数组、组合约束、额外属性以及本地引用。按 schema 声明选择方言，未声明时使用 2020-12；schema 编译结果按工具快照缓存。验证器不读取外部 URL 或文件，无法解析的外部引用明确报错。审批修改后的参数也会重新校验，并整体替换原参数。内置工具继续使用原有校验规则。
+## 目录完整性、权限和历史
 
-`ToolCall.Name / Args / ID / ProviderMetadata` 保留模型原始调用，用于当前轮及跨轮回放。新增 `ToolCall.Target` 保存实际服务、工具名和内层参数，供界面和日志展示。实时事件使用目标名称，历史恢复也读取 target；不通过改写模型调用来实现展示。
+列表默认 20 项、最大 50 项。遵循 `next_cursor` 直到 `has_more=false`；列表摘要不提供可调用引用，必须 describe 完整定义。搜索为空时可以不带 query 枚举，工具可达性不依赖搜索排名。
 
-聊天时间线为目录发现和代理调用提供专用名称、图标和结果展示：目录显示服务或工具摘要、分页数量与状态；定义显示参数、必填标记和可展开的完整 schema；代理入口失败显示错误信息。历史中仅存于 `output` 的目录 JSON 也可以解析展示，实际目标工具继续沿用 MCP 结果抽屉。
+当前 engine 的目录绑定租户、调用主体及有效 OAuth 主体。读取和执行重新检查服务配置、工具策略；缓存不缓存权限决策。新增到 Agent 授权范围外的服务不会自动进入当前目录。运行时 `list_tools(refresh:true)` 重新读取持久快照，上游同步由管理页面显式发起。
 
-MCP schema 和外部返回值保持外部身份语义，不参与 WeKnora 知识库 ID 的改写。用户显式 @MCP 时，提示语指向目录读取，不再依赖初始请求中的原生 MCP 函数名前缀。
+具体函数使用原始服务 ID 和工具名生成稳定哈希后缀，避免 Unicode、大小写、标点、超长名称清洗后冲突。调用引用绑定服务、原始工具名和 schema，旧 schema 被替换后无法沿用旧引用。新 engine 会根据会话历史恢复已用过的函数，无需再 describe 一次。
 
-## 间接提示注入
+完整 JSON Schema 校验覆盖组合约束、额外属性、嵌套结构和本地引用。验证器不访问外部 URL 或文件。参数转换和审批后的修改也经过校验。定义结果超过预算会明确失败或整体替换为说明，不使用半截 JSON。
 
-目录先于任何工具结果到达模型，工具名、说明和 schema 都由远端服务撰写。原先由每个 MCP 工具的 `[MCP Service: X (external)]` 描述前缀承担的信任边界，现由 `list_tools` / `search` / `describe` 结果中的 `notice` 字段承担，声明其为数据而非指令。标记随数据走而不是放在工具定义里：历史压缩会让工具定义远离它所限定的文本。`list_servers` 返回的是本地配置的服务名，不带标记。定义内容按原文返回，不做删改，只声明信任级别；`call_mcp_tool` 的执行结果保留原有的 untrusted 前缀。标记按页而非按条，避免为每条摘要付出前缀开销。
+`ToolCall.Name / Args / ID / ProviderMetadata` 保留模型原始调用；`ToolCall.Target` 保存实际服务、工具名及内层参数，供界面和日志展示。工具图片、外部标识及内容项沿用现有处理，不改写成知识库身份。
+
+服务端元数据是外部使用文档，不具有覆盖用户请求或权限策略的权威。函数说明带 external 前缀；目录结果的 notice 和执行结果的 untrusted 标记保留。人工说明与服务端原文分别保存、展示。
 
 ## 验证
 
-覆盖目录全量分页、精确读取、搜索漏召回后的枚举、权限及游标变化、跨身份拒绝、名称冲突、schema 变更后旧引用、刷新失败、取消和并发读取。另有注入型工具说明的信任标记，以及协议分页/工具数/schema 体积上限的测试。HTTP MCP 集成测试覆盖原始 schema 保留、服务端分页、目标参数校验/转换、审批修改及拒绝、图片结果、实际目标事件与原始调用回放。另有 1,000 个工具下的权限查询次数回归测试，以及外部 schema 资源不被读取的测试。
+覆盖完整 Tools/schema 入库及离线读取、刷新失败保留快照、较旧刷新不覆盖新快照、成功空目录、连接变更失效、人工说明保留、租户及 OAuth 主体隔离。1,000 个工具时，默认首轮仍只暴露来源和入口，describe 后只加载目标工具。
 
-原生 Claude / Responses 延迟工具协议、Code Mode 和常用 MCP 工具直出不属于当前默认路径；目录与模型可见定义的接口已经分开，后续可以增加独立适配。本次不引入向量搜索或额外部署组件。
+HTTP 集成测试覆盖 OpenAI / Anthropic 两种适配器的 Direct 和按需加载流程，验证未 mention 的模型请求、缓存发现阶段无上游请求、实际 MCP 执行和调用历史回传。既有权限、分页、schema、审批及图片回归测试继续保留。

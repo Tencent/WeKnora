@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// LearningInitialMastery is the prior probability before any assessed practice.
 const LearningInitialMastery = 0.20
 
 // LearningBKT applies observation Bayes update followed by the learning
@@ -25,6 +26,7 @@ func LearningBKT(prior float64, correct bool) float64 {
 	return posterior + (1-posterior)*0.15
 }
 
+// LearningMasteryState projects mastery while accounting for stale sources and review deadlines.
 func LearningMasteryState(m *LearningMastery, stamp string, now time.Time) LearningMasteryView {
 	v := LearningMasteryView{State: "unseen", PMastery: LearningInitialMastery}
 	if m == nil {
@@ -53,6 +55,7 @@ func LearningMasteryState(m *LearningMastery, stamp string, now time.Time) Learn
 	return v
 }
 
+// LearningAssess records an answer and returns the mastery probabilities before and after it.
 func LearningAssess(m *LearningMastery, stamp string, correct bool, now time.Time) (float64, float64) {
 	if m.SourceStamp != stamp || m.Attempts == 0 {
 		m.PMastery, m.Attempts, m.Correct, m.ConsecutiveCorrect = LearningInitialMastery, 0, 0, 0
@@ -73,15 +76,17 @@ func LearningAssess(m *LearningMastery, stamp string, correct bool, now time.Tim
 	return before, m.PMastery
 }
 
+// LearningNormalize trims and collapses whitespace.
 func LearningNormalize(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// Prompt-only deduplication is deliberately conservative. Reordering or
+// LearningFingerprint hashes only the normalized prompt. Reordering or
 // replacing distractors must not turn the same question into fresh credit.
 func LearningFingerprint(prompt string) string {
 	h := sha256.Sum256([]byte(strings.ToLower(LearningNormalize(prompt))))
 	return hex.EncodeToString(h[:])
 }
 
+// LearningNodePublic projects a topic's familiarity and assessed mastery for clients.
 func LearningNodePublic(n *LearningNode, now time.Time) *LearningNodeView {
 	p := n.Page
 	return &LearningNodeView{
@@ -92,6 +97,7 @@ func LearningNodePublic(n *LearningNode, now time.Time) *LearningNodeView {
 	}
 }
 
+// LearningEligiblePage reports whether a live published Wiki page supports practice.
 func LearningEligiblePage(p *WikiPage) bool {
 	if p == nil || p.DeletedAt.Valid || p.Status != WikiPageStatusPublished {
 		return false

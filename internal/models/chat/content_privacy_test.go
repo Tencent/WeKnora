@@ -20,13 +20,26 @@ import (
 
 type privateAssessmentModel struct{}
 
-func (privateAssessmentModel) ChatStream(context.Context, []Message, *ChatOptions) (<-chan types.StreamResponse, error) {
+func (privateAssessmentModel) ChatStream(
+	context.Context,
+	[]Message,
+	*ChatOptions,
+) (<-chan types.StreamResponse, error) {
 	return nil, errors.New("unexpected streaming assessment")
 }
+
 func (privateAssessmentModel) GetModelName() string { return "assessment-model" }
 func (privateAssessmentModel) GetModelID() string   { return "assessment-id" }
-func (privateAssessmentModel) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
-	return &types.ChatResponse{Content: "answer-key-private", Usage: types.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}}, errors.New("provider-error-private")
+
+func (privateAssessmentModel) Chat(
+	context.Context,
+	[]Message,
+	*ChatOptions,
+) (*types.ChatResponse, error) {
+	return &types.ChatResponse{
+		Content: "answer-key-private",
+		Usage:   types.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+	}, errors.New("provider-error-private")
 }
 
 func TestLearningModelContentRedactedInOTLPAndRequestLogs(t *testing.T) {
@@ -40,7 +53,11 @@ func TestLearningModelContentRedactedInOTLPAndRequestLogs(t *testing.T) {
 				w.WriteHeader(400)
 				return
 			}
-			defer z.Close()
+			defer func() {
+				if err := z.Close(); err != nil {
+					t.Errorf("close gzip request reader: %v", err)
+				}
+			}()
 			reader = z
 		}
 		data, err := io.ReadAll(reader)
@@ -55,7 +72,17 @@ func TestLearningModelContentRedactedInOTLPAndRequestLogs(t *testing.T) {
 		w.WriteHeader(200)
 	}))
 	defer server.Close()
-	cfg := langfuse.Config{Enabled: true, Host: server.URL, PublicKey: "test-public", SecretKey: "test-secret", FlushAt: 1, FlushInterval: time.Millisecond, QueueSize: 32, RequestTimeout: time.Second, SampleRate: 1}
+	cfg := langfuse.Config{
+		Enabled:        true,
+		Host:           server.URL,
+		PublicKey:      "test-public",
+		SecretKey:      "test-secret",
+		FlushAt:        1,
+		FlushInterval:  time.Millisecond,
+		QueueSize:      32,
+		RequestTimeout: time.Second,
+		SampleRate:     1,
+	}
 	mgr, err := langfuse.Init(cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { _, _ = langfuse.Init(langfuse.Config{}) })

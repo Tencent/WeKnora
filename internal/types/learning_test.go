@@ -69,8 +69,15 @@ func TestLearningAssessmentFreshnessReviewAndFamiliarity(t *testing.T) {
 }
 
 func TestLearningPrivateRecordsNeverMarshalKeys(t *testing.T) {
-	for _, v := range []any{LearningQuestion{CorrectOption: "SECRET", Explanation: "SECRET", Evidence: []LearningEvidence{{Quote: "SECRET"}}},
-		LearningAttempt{Result: LearningAnswerResult{CorrectOption: "SECRET"}}, LearningQuiz{SourceStamp: "SECRET"}} {
+	for _, v := range []any{
+		LearningQuestion{
+			CorrectOption: "SECRET",
+			Explanation:   "SECRET",
+			Evidence:      []LearningEvidence{{Quote: "SECRET"}},
+		},
+		LearningAttempt{Result: LearningAnswerResult{CorrectOption: "SECRET"}},
+		LearningQuiz{SourceStamp: "SECRET"},
+	} {
 		b, err := json.Marshal(v)
 		require.NoError(t, err)
 		require.Equal(t, "{}", string(b))

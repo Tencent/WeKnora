@@ -2,10 +2,14 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"errors"
+	"net"
 	"strings"
 	"time"
 
+	applogger "github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/mattn/go-sqlite3"
@@ -16,10 +20,18 @@ import (
 
 type learningRepository struct{ db *gorm.DB }
 
+// NewLearningRepository creates a repository with content-free database diagnostics.
 func NewLearningRepository(db *gorm.DB) interfaces.LearningRepository {
 	// SQL diagnostics can contain serialized answer keys. Never inherit a
 	// debug logger on this repository, including in test/runtime debug mode.
-	return &learningRepository{db: db.Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent), NowFunc: func() time.Time { return time.Now().UTC() }})}
+	return &learningRepository{
+		db: db.Session(
+			&gorm.Session{
+				Logger:  logger.Default.LogMode(logger.Silent),
+				NowFunc: func() time.Time { return time.Now().UTC() },
+			},
+		),
+	}
 }
 
 func learningScope(db *gorm.DB, s interfaces.LearningScope) *gorm.DB {
@@ -31,13 +43,16 @@ func validLearningScope(s interfaces.LearningScope) bool {
 		len(s.SubjectID) > len(types.PrincipalWebUser)+1 && len(s.SubjectID) <= 128
 }
 
-func learningDBError(err error) error {
+func learningDBError(ctx context.Context, err error) error {
 	if err == nil {
 		return nil
 	}
-	for _, known := range []error{types.ErrLearningForbidden, types.ErrLearningDisabled, types.ErrLearningNotFound,
+	for _, known := range []error{
+		types.ErrLearningForbidden, types.ErrLearningDisabled, types.ErrLearningNotFound,
 		types.ErrLearningStale, types.ErrLearningNotReady, types.ErrLearningConflict, types.ErrLearningInvalid,
-		types.ErrLearningBusy, types.ErrLearningEvidence, context.Canceled, context.DeadlineExceeded} {
+		types.ErrLearningBusy, types.ErrLearningEvidence, types.ErrLearningUnavailable,
+		context.Canceled, context.DeadlineExceeded,
+	} {
 		if errors.Is(err, known) {
 			return known
 		}
@@ -45,7 +60,32 @@ func learningDBError(err error) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return types.ErrLearningNotFound
 	}
-	return types.ErrLearningBusy
+	if learningRetryable(err) {
+		return types.ErrLearningBusy
+	}
+
+	// Driver messages can embed SQL, credentials or answers. Keep only bounded
+	// diagnostic codes; never log or return the original error chain.
+	fields := applogger.Fields{"component": "learning_repository", "error_class": "database"}
+	var pg interface{ SQLState() string }
+	var sq sqlite3.Error
+	var network net.Error
+	switch {
+	case errors.As(err, &pg):
+		fields["error_class"] = "postgres"
+		code := pg.SQLState()
+		if len(code) == 5 && strings.Trim(code, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") == "" {
+			fields["sqlstate"] = code
+		}
+	case errors.As(err, &sq):
+		fields["error_class"], fields["sqlite_code"] = "sqlite", int(sq.Code)
+	case errors.Is(err, driver.ErrBadConn), errors.Is(err, sql.ErrConnDone):
+		fields["error_class"] = "connection"
+	case errors.As(err, &network):
+		fields["error_class"] = "network"
+	}
+	applogger.ErrorWithFields(ctx, nil, fields)
+	return types.ErrLearningUnavailable
 }
 
 func learningRetryable(err error) bool {
@@ -61,7 +101,7 @@ func (r *learningRepository) transaction(ctx context.Context, f func(*gorm.DB) e
 	for i := 0; ; i++ {
 		err := r.db.WithContext(ctx).Transaction(f)
 		if !learningRetryable(err) || i == 7 {
-			return learningDBError(err)
+			return learningDBError(ctx, err)
 		}
 		select {
 		case <-ctx.Done():
@@ -72,7 +112,8 @@ func (r *learningRepository) transaction(ctx context.Context, f func(*gorm.DB) e
 }
 
 func (r *learningRepository) profileTx(ctx context.Context, scope interfaces.LearningScope, create, enabled bool,
-	f func(*gorm.DB, *types.LearningProfile) error) error {
+	f func(*gorm.DB, *types.LearningProfile) error,
+) error {
 	if !validLearningScope(scope) {
 		return types.ErrLearningForbidden
 	}
@@ -103,34 +144,45 @@ func (r *learningRepository) profileTx(ctx context.Context, scope interfaces.Lea
 }
 
 func learningShare(db *gorm.DB) *gorm.DB {
-	if db.Dialector.Name() == "postgres" {
+	if db.Name() == "postgres" {
 		return db.Clauses(clause.Locking{Strength: "SHARE"})
 	}
 	return db
 }
 
-func (r *learningRepository) Settings(ctx context.Context, scope interfaces.LearningScope) (*types.LearningSettings, error) {
+func (r *learningRepository) Settings(
+	ctx context.Context,
+	scope interfaces.LearningScope,
+) (*types.LearningSettings, error) {
 	if !validLearningScope(scope) {
 		return nil, types.ErrLearningForbidden
 	}
 	var p types.LearningProfile
 	err := learningScope(r.db.WithContext(ctx), scope).First(&p).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, learningDBError(err)
+		return nil, learningDBError(ctx, err)
 	}
 	return &types.LearningSettings{Enabled: p.Enabled, AlgorithmVersion: types.LearningAlgorithmVersion}, nil
 }
 
-func (r *learningRepository) SetEnabled(ctx context.Context, scope interfaces.LearningScope, enabled bool) (*types.LearningSettings, error) {
+func (r *learningRepository) SetEnabled(
+	ctx context.Context,
+	scope interfaces.LearningScope,
+	enabled bool,
+) (*types.LearningSettings, error) {
 	err := r.profileTx(ctx, scope, true, false, func(tx *gorm.DB, p *types.LearningProfile) error {
 		if p.Enabled == enabled {
 			return nil
 		}
-		if err := learningScope(tx, scope).Model(p).Updates(map[string]any{"enabled": enabled, "epoch": p.Epoch + 1}).Error; err != nil {
+		if err := learningScope(tx, scope).Model(p).
+			Updates(map[string]any{"enabled": enabled, "epoch": p.Epoch + 1}).
+			Error; err != nil {
 			return err
 		}
-		return learningScope(tx, scope).Model(&types.LearningQuiz{}).Where("status IN ?", []string{"pending", "running", "ready"}).
-			Updates(map[string]any{"status": "stale", "lease_token": "", "lease_until": nil}).Error
+		return learningScope(tx, scope).Model(&types.LearningQuiz{}).
+			Where("status IN ?", []string{"pending", "running", "ready"}).
+			Updates(map[string]any{"status": "stale", "lease_token": "", "lease_until": nil}).
+			Error
 	})
 	if err != nil {
 		return nil, err
@@ -151,7 +203,10 @@ func learningKB(tx *gorm.DB, tenant uint64, id string) (*types.KnowledgeBase, er
 
 func learningPage(tx *gorm.DB, tenant uint64, id string) (*types.WikiPage, *types.KnowledgeBase, error) {
 	var initial types.WikiPage
-	if err := tx.Select("id", "knowledge_base_id").Where("id = ? AND tenant_id = ?", id, tenant).First(&initial).Error; err != nil {
+	if err := tx.Select("id", "knowledge_base_id").
+		Where("id = ? AND tenant_id = ?", id, tenant).
+		First(&initial).
+		Error; err != nil {
 		return nil, nil, err
 	}
 	kb, err := learningKB(tx, tenant, initial.KnowledgeBaseID)
@@ -159,7 +214,9 @@ func learningPage(tx *gorm.DB, tenant uint64, id string) (*types.WikiPage, *type
 		return nil, nil, err
 	}
 	var p types.WikiPage
-	err = learningShare(tx).Where("id = ? AND tenant_id = ? AND knowledge_base_id = ?", id, tenant, kb.ID).First(&p).Error
+	err = learningShare(tx).Where("id = ? AND tenant_id = ? AND knowledge_base_id = ?", id, tenant, kb.ID).
+		First(&p).
+		Error
 	if err != nil {
 		return nil, nil, err
 	}
@@ -170,8 +227,9 @@ func learningPage(tx *gorm.DB, tenant uint64, id string) (*types.WikiPage, *type
 }
 
 func learningPages(tx *gorm.DB, tenant uint64, kb string) *gorm.DB {
-	return tx.Model(&types.WikiPage{}).Where("tenant_id = ? AND knowledge_base_id = ? AND status = ? AND page_type IN ?",
-		tenant, kb, types.WikiPageStatusPublished, []string{"entity", "concept", "synthesis", "comparison"})
+	return tx.Model(&types.WikiPage{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND status = ? AND page_type IN ?",
+			tenant, kb, types.WikiPageStatusPublished, []string{"entity", "concept", "synthesis", "comparison"})
 }
 
 func learningMastery(tx *gorm.DB, scope interfaces.LearningScope, p *types.WikiPage) (*types.LearningMastery, error) {
@@ -183,14 +241,19 @@ func learningMastery(tx *gorm.DB, scope interfaces.LearningScope, p *types.WikiP
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-	return &types.LearningMastery{TenantID: scope.TenantID, SubjectID: scope.SubjectID, PageID: p.ID,
-		KnowledgeBaseID: p.KnowledgeBaseID, PMastery: types.LearningInitialMastery}, nil
+	return &types.LearningMastery{
+		TenantID: scope.TenantID, SubjectID: scope.SubjectID, PageID: p.ID,
+		KnowledgeBaseID: p.KnowledgeBaseID, PMastery: types.LearningInitialMastery,
+	}, nil
 }
 
 func learningSaveMastery(tx *gorm.DB, m *types.LearningMastery) error {
 	scope := interfaces.LearningScope{TenantID: m.TenantID, SubjectID: m.SubjectID}
 	var n int64
-	if err := learningScope(tx, scope).Model(&types.LearningMastery{}).Where("page_id <> ?", m.PageID).Count(&n).Error; err != nil {
+	if err := learningScope(tx, scope).Model(&types.LearningMastery{}).
+		Where("page_id <> ?", m.PageID).
+		Count(&n).
+		Error; err != nil {
 		return err
 	}
 	if n >= types.LearningMaxNodes {

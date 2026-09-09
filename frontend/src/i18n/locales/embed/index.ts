@@ -9,8 +9,10 @@
 export {
   applyEmbedLocale,
   EMBED_LOCALE_STORAGE_KEY,
+  EMBED_MESSAGES,
   normalizeEmbedLocale,
   readEmbedLocaleFromUrl,
+  SUPPORTED_LOCALES,
   syncEmbedLocaleFromUrl,
   type EmbedLocale,
 } from '@/i18n/embed'

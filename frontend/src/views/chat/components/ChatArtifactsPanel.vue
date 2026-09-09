@@ -14,9 +14,7 @@
           <t-icon name="chevron-left" size="18px" />
         </template>
       </t-button>
-      <div class="artifact-panel-header-icon">
-        <t-icon :name="getFileIcon(previewItem.file_name)" />
-      </div>
+      <ArtifactFileIcon class="artifact-panel-header-icon" :file-name="previewItem.file_name" />
       <div class="artifact-panel-header-title" :title="previewItem.file_name">{{ previewItem.file_name }}</div>
       <t-button
         class="artifact-download"
@@ -24,6 +22,7 @@
         shape="square"
         size="small"
         :title="$t('agent.artifactDrawer.download')"
+        :aria-label="$t('agent.artifactDrawer.download')"
         :loading="isDownloading(previewItem)"
         @click="handleDownload(previewItem)"
       >
@@ -54,49 +53,67 @@
       <span>{{ $t('chat.sandbox.artifactsEmpty') }}</span>
     </div>
     <template v-else>
+      <div class="artifact-filters">
+        <div class="artifact-scope" role="group" :aria-label="$t('chat.sandbox.artifactScope')">
+          <button
+            v-if="focusedMessageId"
+            type="button"
+            :aria-pressed="scope === 'current'"
+            @click="scope = 'current'"
+          >
+            {{ $t('chat.sandbox.artifactsCurrent') }}
+            <span>{{ currentItems.length }}</span>
+          </button>
+          <button type="button" :aria-pressed="scope === 'all'" @click="scope = 'all'">
+            {{ $t('chat.sandbox.artifactsAll') }}
+            <span>{{ items.length }}</span>
+          </button>
+        </div>
+        <t-input
+          v-model="searchQuery"
+          class="artifact-search"
+          :placeholder="$t('chat.sandbox.artifactsSearch')"
+          :aria-label="$t('chat.sandbox.artifactsSearch')"
+          clearable
+        >
+          <template #prefix-icon><t-icon name="search" size="16px" /></template>
+        </t-input>
+      </div>
       <div v-if="collecting" class="artifact-panel-banner">
         <t-icon name="loading" class="artifact-panel-banner-spin" />
         <span>{{ $t('agent.artifactDrawer.collecting') }}</span>
       </div>
-      <ul ref="listRef" class="artifact-list">
+      <div v-if="!visibleItems.length" class="artifact-panel-empty">
+        <t-icon name="search" size="24px" />
+        <span>{{ $t('chat.sandbox.artifactsNoMatches') }}</span>
+      </div>
+      <ul v-show="visibleItems.length" ref="listRef" class="artifact-list">
         <li
-          v-for="item in items"
+          v-for="item in visibleItems"
           :key="`${item.messageId}:${item.index}-${item.file_name}`"
           class="artifact-item is-previewable"
-          :class="{ 'is-focused': isFocused(item) }"
           :data-message-id="item.messageId"
           :data-artifact-index="item.index"
           @click="openPreview(item)"
         >
-          <span class="artifact-icon">
-            <t-icon :name="getFileIcon(item.file_name)" />
-          </span>
-          <div class="artifact-body">
-            <div class="artifact-name" :title="item.file_name">{{ item.file_name }}</div>
-            <div class="artifact-meta">
-              <span>{{ formatArtifactSize(item.file_size) }}</span>
-              <span class="artifact-meta-sep">·</span>
-              <span>{{ formatArtifactDateTime(item.created_at) }}</span>
-            </div>
-          </div>
-          <t-button
-            class="artifact-preview-btn"
-            variant="text"
-            shape="square"
-            size="small"
-            :title="$t('agent.artifactDrawer.preview')"
-            @click.stop="openPreview(item)"
-          >
-            <template #icon>
-              <t-icon name="browse" size="16px" />
-            </template>
-          </t-button>
+          <button type="button" class="artifact-open" :title="$t('agent.artifactDrawer.preview')">
+            <ArtifactFileIcon :file-name="item.file_name" />
+            <span class="artifact-body">
+              <span class="artifact-name" :title="item.file_name">{{ item.file_name }}</span>
+              <span class="artifact-meta">
+                <span>{{ formatArtifactSize(item.file_size) }}</span>
+                <span class="artifact-meta-sep">·</span>
+                <span>{{ formatArtifactDateTime(item.created_at) }}</span>
+              </span>
+            </span>
+          </button>
           <t-button
             class="artifact-download"
             variant="text"
             shape="square"
             size="small"
             :title="$t('agent.artifactDrawer.download')"
+            :aria-label="$t('agent.artifactDrawer.download')"
             :loading="isDownloading(item)"
             @click.stop="handleDownload(item)"
           >
@@ -115,7 +132,6 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { downloadArtifact } from '@/api/chat'
-import { getFileIcon } from '@/utils/files'
 import { resolveFilePreviewExt } from '@/utils/filePreview'
 import {
   formatArtifactDateTime,
@@ -124,6 +140,7 @@ import {
 } from '@/utils/sessionArtifacts'
 import { useChatSandboxPanel, type ArtifactPanelFocusState } from '@/composables/useChatSandboxPanel'
 import DocumentPreview from '@/components/document-preview.vue'
+import ArtifactFileIcon from './ArtifactFileIcon.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -144,6 +161,14 @@ const listRef = ref<HTMLElement | null>(null)
 const previewItem = ref<SessionArtifactItem | null>(null)
 const downloading = reactive<Record<string, boolean>>({})
 const focusedMessageId = ref<string | null>(null)
+const scope = ref<'current' | 'all'>('all')
+const searchQuery = ref('')
+const currentItems = computed(() => props.items.filter((item) => item.messageId === focusedMessageId.value))
+const visibleItems = computed(() => {
+  const items = scope.value === 'current' ? currentItems.value : props.items
+  const query = searchQuery.value.trim().toLocaleLowerCase()
+  return query ? items.filter((item) => item.file_name.toLocaleLowerCase().includes(query)) : items
+})
 
 const previewFileType = computed(() => {
   const item = previewItem.value
@@ -157,10 +182,6 @@ function downloadKey(item: SessionArtifactItem): string {
 
 function isDownloading(item: SessionArtifactItem): boolean {
   return !!downloading[downloadKey(item)]
-}
-
-function isFocused(item: SessionArtifactItem): boolean {
-  return !!focusedMessageId.value && item.messageId === focusedMessageId.value
 }
 
 function findItem(messageId: string, previewIndex?: number | null): SessionArtifactItem | undefined {
@@ -181,11 +202,24 @@ function applyFocus(focus: ArtifactPanelFocusState | null | undefined) {
   }
   previewItem.value = null
   void nextTick(() => {
-    const rows = listRef.value?.querySelectorAll<HTMLElement>('[data-message-id]')
-    if (!rows) return
+    const container = listRef.value
+    if (!container) return
+    const rows = container.querySelectorAll<HTMLElement>('[data-message-id]')
     for (const row of rows) {
       if (row.getAttribute('data-message-id') === focus.messageId) {
-        row.scrollIntoView({ block: 'nearest' })
+        // Keep positioning inside the list: scrollIntoView can also scroll the
+        // outer page horizontally while the fixed panel is sliding into view.
+        const itemRect = row.getBoundingClientRect()
+        const containerRect = container.getBoundingClientRect()
+        let nextTop: number | null = null
+        if (itemRect.top < containerRect.top) {
+          nextTop = container.scrollTop + itemRect.top - containerRect.top
+        } else if (itemRect.bottom > containerRect.bottom) {
+          nextTop = container.scrollTop + itemRect.bottom - containerRect.bottom
+        }
+        if (nextTop !== null) {
+          container.scrollTo({ top: Math.max(0, nextTop), behavior: 'instant' })
+        }
         break
       }
     }
@@ -194,7 +228,11 @@ function applyFocus(focus: ArtifactPanelFocusState | null | undefined) {
 
 watch(
   () => panel?.artifactFocus.value,
-  (focus) => applyFocus(focus),
+  (focus) => {
+    scope.value = focus?.messageId ? 'current' : 'all'
+    searchQuery.value = ''
+    applyFocus(focus)
+  },
   { immediate: true },
 )
 
@@ -203,6 +241,8 @@ watch(
   () => {
     previewItem.value = null
     focusedMessageId.value = null
+    scope.value = 'all'
+    searchQuery.value = ''
     panel?.clearArtifactFocus()
   },
 )
@@ -218,7 +258,9 @@ watch(
       if (!next) previewItem.value = null
       return
     }
-    applyFocus(panel?.artifactFocus.value)
+    if (scope.value === 'current' && !searchQuery.value.trim()) {
+      applyFocus(panel?.artifactFocus.value)
+    }
   },
 )
 
@@ -286,16 +328,8 @@ async function handleDownload(item: SessionArtifactItem) {
 }
 
 .artifact-panel-header-icon {
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(7, 192, 95, 0.1);
-  color: var(--td-brand-color);
-  font-size: 15px;
+  width: 26px;
+  height: 32px;
 }
 
 .artifact-panel-header-title {
@@ -353,7 +387,7 @@ async function handleDownload(item: SessionArtifactItem) {
 
 .artifact-list {
   margin: 0;
-  padding: 4px 8px 12px;
+  padding: 0 4px 12px;
   list-style: none;
   overflow: auto;
   flex: 1;
@@ -363,14 +397,9 @@ async function handleDownload(item: SessionArtifactItem) {
 .artifact-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 6px;
-  border-bottom: 1px solid var(--td-component-stroke);
+  gap: 12px;
+  padding: 12px 8px;
   border-radius: 8px;
-
-  &:last-child {
-    border-bottom: none;
-  }
 
   &.is-previewable {
     cursor: pointer;
@@ -380,27 +409,58 @@ async function handleDownload(item: SessionArtifactItem) {
     background: var(--td-bg-color-container-hover);
   }
 
-  &:hover .artifact-icon {
-    color: var(--td-brand-color);
-  }
+}
 
-  &.is-focused {
-    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+.artifact-filters {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 12px 12px;
+}
+
+.artifact-scope {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer);
+
+  button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--td-text-color-secondary);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+
+    &[aria-pressed='true'] {
+      background: var(--td-bg-color-container);
+      color: var(--td-text-color-primary);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+    }
+
+    span {
+      color: var(--td-text-color-placeholder);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
   }
 }
 
-.artifact-icon {
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-secondary);
-  transition: color 0.15s ease;
+.artifact-search :deep(.t-input) {
+  border-radius: 7px;
 }
 
 .artifact-body {
@@ -408,9 +468,31 @@ async function handleDownload(item: SessionArtifactItem) {
   min-width: 0;
 }
 
+.artifact-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--td-text-color-secondary);
+    outline-offset: 4px;
+  }
+}
+
 .artifact-name {
+  display: block;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.01em;
   line-height: 1.35;
   color: var(--td-text-color-primary);
@@ -433,10 +515,27 @@ async function handleDownload(item: SessionArtifactItem) {
   opacity: 0.6;
 }
 
-.artifact-preview-btn,
-.artifact-download {
+.artifact-download.t-button {
   flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
   color: var(--td-text-color-secondary);
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  &:not(.t-is-disabled):not(.t-is-loading):hover {
+    background: color-mix(in srgb, var(--td-text-color-primary) 10%, var(--td-bg-color-container));
+    color: var(--td-text-color-primary);
+  }
+
+  &:not(.t-is-disabled):not(.t-is-loading):active {
+    background: color-mix(in srgb, var(--td-text-color-primary) 16%, var(--td-bg-color-container));
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-text-color-secondary);
+    outline-offset: 2px;
+  }
 
   :deep(.t-button__icon) {
     margin: 0;

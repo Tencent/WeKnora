@@ -19,7 +19,10 @@ type renameCapableWikiService struct {
 	err      error
 }
 
-func (s *renameCapableWikiService) RenamePage(_ context.Context, req interfaces.WikiPageRenameRequest) (*interfaces.WikiPageRenameResult, error) {
+func (s *renameCapableWikiService) RenamePage(
+	_ context.Context,
+	req interfaces.WikiPageRenameRequest,
+) (*interfaces.WikiPageRenameResult, error) {
 	s.requests = append(s.requests, req)
 	return s.result, s.err
 }
@@ -30,7 +33,9 @@ func newRenameToolService() *renameCapableWikiService {
 	renamed := *page
 	renamed.Slug = "concept/new"
 	return &renameCapableWikiService{
-		fakeWikiPageService: &fakeWikiPageService{pages: map[string]*types.WikiPage{wikiPageKey("kb-a", page.Slug): page}},
+		fakeWikiPageService: &fakeWikiPageService{
+			pages: map[string]*types.WikiPage{wikiPageKey("kb-a", page.Slug): page},
+		},
 		result: &interfaces.WikiPageRenameResult{Page: &renamed, AffectedPages: []*types.WikiPage{
 			&renamed, {ID: "incoming-uuid", Slug: "concept/from"}, {ID: "outgoing-uuid", Slug: "concept/to"},
 		}},
@@ -42,10 +47,19 @@ func TestWikiRenameToolUsesOptionalAtomicCapability(t *testing.T) {
 	routes := NewWikiRouteResolver()
 	routes.remember("concept/old", "kb-a")
 	tool := NewWikiRenamePageTool(svc, []string{"kb-b", "kb-a"}, routes)
-	result, err := tool.Execute(context.Background(), json.RawMessage(`{"slug":" Concept/Old ","new_slug":" Concept/New ","knowledge_base_id":"kb-b"}`))
+	result, err := tool.Execute(
+		context.Background(),
+		json.RawMessage(`{"slug":" Concept/Old ","new_slug":" Concept/New ","knowledge_base_id":"kb-b"}`),
+	)
 	require.NoError(t, err)
 	require.True(t, result.Success, result.Error)
-	require.Equal(t, []interfaces.WikiPageRenameRequest{{KnowledgeBaseID: "kb-a", PageID: "stable-page-uuid", OldSlug: "concept/old", NewSlug: "concept/new"}}, svc.requests)
+	require.Equal(
+		t,
+		[]interfaces.WikiPageRenameRequest{
+			{KnowledgeBaseID: "kb-a", PageID: "stable-page-uuid", OldSlug: "concept/old", NewSlug: "concept/new"},
+		},
+		svc.requests,
+	)
 	data := result.Data
 	require.Equal(t, "stable-page-uuid", data["page_id"])
 	require.Equal(t, 2, data["updated_count"])
@@ -60,7 +74,10 @@ func TestWikiRenameToolUsesOptionalAtomicCapability(t *testing.T) {
 
 func TestWikiRenameToolFailsUnsupportedWithoutFallback(t *testing.T) {
 	legacy := newRenameToolService().fakeWikiPageService
-	result, err := NewWikiRenamePageTool(legacy, []string{"kb-a"}).Execute(context.Background(), json.RawMessage(`{"slug":"concept/old","new_slug":"concept/new"}`))
+	result, err := NewWikiRenamePageTool(
+		legacy,
+		[]string{"kb-a"},
+	).Execute(context.Background(), json.RawMessage(`{"slug":"concept/old","new_slug":"concept/new"}`))
 	require.NoError(t, err)
 	require.False(t, result.Success)
 	require.Contains(t, result.Error, interfaces.ErrWikiRenameUnsupported.Error())
@@ -68,12 +85,20 @@ func TestWikiRenameToolFailsUnsupportedWithoutFallback(t *testing.T) {
 }
 
 func TestWikiRenameToolFailureKeepsOldRoute(t *testing.T) {
-	for _, renameErr := range []error{repository.ErrWikiPageSlugConflict, repository.ErrWikiPageConflict, errors.New("transaction failed")} {
+	for _, renameErr := range []error{
+		repository.ErrWikiPageSlugConflict,
+		repository.ErrWikiPageConflict,
+		errors.New("transaction failed"),
+	} {
 		t.Run(renameErr.Error(), func(t *testing.T) {
 			svc := newRenameToolService()
 			svc.err = renameErr
 			routes := NewWikiRouteResolver()
-			result, err := NewWikiRenamePageTool(svc, []string{"kb-a"}, routes).Execute(context.Background(), json.RawMessage(`{"slug":"concept/old","new_slug":"concept/new"}`))
+			result, err := NewWikiRenamePageTool(
+				svc,
+				[]string{"kb-a"},
+				routes,
+			).Execute(context.Background(), json.RawMessage(`{"slug":"concept/old","new_slug":"concept/new"}`))
 			require.NoError(t, err)
 			require.False(t, result.Success)
 			require.Contains(t, result.Error, renameErr.Error())
@@ -86,7 +111,14 @@ func TestWikiRenameToolFailureKeepsOldRoute(t *testing.T) {
 }
 
 func TestWikiRenameToolRejectsAmbiguityAndInvalidArguments(t *testing.T) {
-	for _, scenario := range []string{"ambiguous", "backend-failure", "malformed-json", "invalid-slug", "same-slug", "empty-scope"} {
+	for _, scenario := range []string{
+		"ambiguous",
+		"backend-failure",
+		"malformed-json",
+		"invalid-slug",
+		"same-slug",
+		"empty-scope",
+	} {
 		t.Run(scenario, func(t *testing.T) {
 			svc := newRenameToolService()
 			args, kbIDs := `{"slug":"concept/old","new_slug":"concept/new"}`, []string{"kb-a", "kb-b"}
@@ -115,7 +147,10 @@ func TestWikiRenameToolRejectsAmbiguityAndInvalidArguments(t *testing.T) {
 func TestWikiRenameToolReportsCommittedSyncWarning(t *testing.T) {
 	svc := newRenameToolService()
 	svc.result.SyncWarnings = []string{"Rename committed; retrieval sync needs attention"}
-	result, err := NewWikiRenamePageTool(svc, []string{"kb-a"}).Execute(context.Background(), json.RawMessage(`{"slug":"concept/old","new_slug":"concept/new"}`))
+	result, err := NewWikiRenamePageTool(
+		svc,
+		[]string{"kb-a"},
+	).Execute(context.Background(), json.RawMessage(`{"slug":"concept/old","new_slug":"concept/new"}`))
 	require.NoError(t, err)
 	require.True(t, result.Success)
 	require.Contains(t, result.Output, "Rename committed; retrieval sync needs attention")

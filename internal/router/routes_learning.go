@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// RegisterLearningRoutes registers Web-only endpoints for personal learning.
 // Deliberately not an apiKeyGroup: learning records belong to a human, and
 // neither a full-access nor a platform key may inherit that person's profile.
 func RegisterLearningRoutes(r *gin.RouterGroup, h *handler.LearningHandler, g *rbacGuards) {
@@ -15,7 +16,16 @@ func RegisterLearningRoutes(r *gin.RouterGroup, h *handler.LearningHandler, g *r
 	routes := r.Group("/learning", g.Viewer(), func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
 		if !tools.LearningWebCallerAllowed(c.Request.Context()) {
-			c.AbortWithStatusJSON(403, gin.H{"success": false, "error": gin.H{"code": "learning_forbidden", "message": "Learning requires a Web user in their active workspace."}})
+			c.AbortWithStatusJSON(
+				403,
+				gin.H{
+					"success": false,
+					"error": gin.H{
+						"code":    "learning_forbidden",
+						"message": "Learning requires a Web user in their active workspace.",
+					},
+				},
+			)
 			return
 		}
 		c.Next()

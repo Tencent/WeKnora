@@ -12,7 +12,7 @@ import (
 // can survive deletion and remove the source from its current references.
 func learningRemovedSourceQuizzes(tx *gorm.DB) *gorm.DB {
 	refs := "json_each(x.source_knowledge_ids)"
-	if tx.Dialector.Name() == "postgres" {
+	if tx.Name() == "postgres" {
 		refs = "jsonb_array_elements_text(x.source_knowledge_ids::jsonb)"
 	}
 	return tx.Table("learning_quizzes AS x").Select("x.*").Where(
@@ -26,7 +26,10 @@ func learningQuizSourcesGone(tx *gorm.DB, q *types.LearningQuiz) (bool, error) {
 		return true, nil
 	}
 	var kb types.KnowledgeBase
-	err := learningShare(tx).Select("id").Where("id = ? AND tenant_id = ?", q.KnowledgeBaseID, q.TenantID).First(&kb).Error
+	err := learningShare(tx).Select("id").
+		Where("id = ? AND tenant_id = ?", q.KnowledgeBaseID, q.TenantID).
+		First(&kb).
+		Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return true, nil
 	}

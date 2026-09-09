@@ -13,7 +13,14 @@ import (
 	"gorm.io/gorm"
 )
 
-func learningAnsweredQuiz(t *testing.T, db *gorm.DB, scope interfaces.LearningScope, p *types.WikiPage, c *types.Chunk, variation string) *types.LearningQuizView {
+func learningAnsweredQuiz(
+	t *testing.T,
+	db *gorm.DB,
+	scope interfaces.LearningScope,
+	p *types.WikiPage,
+	c *types.Chunk,
+	variation string,
+) *types.LearningQuizView {
 	t.Helper()
 	repo, ctx := NewLearningRepository(db), context.Background()
 	_, err := repo.SetEnabled(ctx, scope, true)
@@ -39,7 +46,9 @@ func learningAnsweredQuiz(t *testing.T, db *gorm.DB, scope interfaces.LearningSc
 
 func TestLearningDeletedSourcePurgesSurvivingPageHistory(t *testing.T) {
 	for _, dialect := range []string{"sqlite", "postgres"} {
-		for _, action := range []string{"export", "recover", "uncited_source", "hard_delete", "move_tenant", "new_assessment"} {
+		for _, action := range []string{
+			"export", "recover", "uncited_source", "hard_delete", "move_tenant", "new_assessment",
+		} {
 			t.Run(dialect+"/"+action, func(t *testing.T) {
 				db, ctx := learningTestDB(t, dialect), context.Background()
 				repo := NewLearningRepository(db)
@@ -49,8 +58,10 @@ func TestLearningDeletedSourcePurgesSurvivingPageHistory(t *testing.T) {
 				require.NoError(t, db.Save(p).Error)
 				healthyPage, healthyChunk := learningSeed(t, db)
 				healthy := learningAnsweredQuiz(t, db, scope, healthyPage, healthyChunk, "healthy ")
-				secondDoc := &types.Knowledge{ID: uuid.NewString(), TenantID: 7, KnowledgeBaseID: p.KnowledgeBaseID,
-					EnableStatus: "enabled", ParseStatus: "completed", CustomMetadata: types.JSON("{}")}
+				secondDoc := &types.Knowledge{
+					ID: uuid.NewString(), TenantID: 7, KnowledgeBaseID: p.KnowledgeBaseID,
+					EnableStatus: "enabled", ParseStatus: "completed", CustomMetadata: types.JSON("{}"),
+				}
 				require.NoError(t, db.Create(secondDoc).Error)
 				secondChunk := *c
 				secondChunk.ID, secondChunk.KnowledgeID = uuid.NewString(), secondDoc.ID
@@ -65,13 +76,20 @@ func TestLearningDeletedSourcePurgesSurvivingPageHistory(t *testing.T) {
 					removedID, remainingChunk = secondDoc.ID, c
 				}
 				// Wiki cleanup can prune a source reference without deleting the page.
-				p.SourceRefs, p.ChunkRefs = types.StringArray{remainingChunk.KnowledgeID}, types.StringArray{remainingChunk.ID}
+				p.SourceRefs, p.ChunkRefs = types.StringArray{
+					remainingChunk.KnowledgeID,
+				}, types.StringArray{
+					remainingChunk.ID,
+				}
 				require.NoError(t, db.Save(p).Error)
 				switch action {
 				case "hard_delete":
 					require.NoError(t, db.Unscoped().Where("id = ?", removedID).Delete(&types.Knowledge{}).Error)
 				case "move_tenant":
-					require.NoError(t, db.Model(&types.Knowledge{}).Where("id = ?", removedID).Update("tenant_id", 8).Error)
+					require.NoError(
+						t,
+						db.Model(&types.Knowledge{}).Where("id = ?", removedID).Update("tenant_id", 8).Error,
+					)
 				default:
 					require.NoError(t, db.Where("id = ?", removedID).Delete(&types.Knowledge{}).Error)
 				}

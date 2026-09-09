@@ -192,6 +192,14 @@ func (e *AgentEngine) handleMaxIterations(
 func (e *AgentEngine) emitCompletionEvent(
 	ctx context.Context, state *types.AgentState, sessionID, messageID string, startTime time.Time,
 ) {
+	steps := state.RoundSteps
+	if len(state.PendingSteerMessages) > 0 {
+		// A stop or model failure can arrive after delivery but before the next
+		// response exists. Preserve that boundary without inventing an answer.
+		steps = append(append([]types.AgentStep(nil), steps...), types.AgentStep{
+			Iteration: state.CurrentRound, UserMessagesBefore: state.PendingSteerMessages,
+		})
+	}
 	// Convert knowledge refs to interface{} slice for event data
 	knowledgeRefsInterface := make([]interface{}, 0, len(state.KnowledgeRefs))
 	for _, ref := range state.KnowledgeRefs {
@@ -205,7 +213,7 @@ func (e *AgentEngine) emitCompletionEvent(
 		Data: event.AgentCompleteData{
 			FinalAnswer:     state.FinalAnswer,
 			KnowledgeRefs:   knowledgeRefsInterface,
-			AgentSteps:      state.RoundSteps, // Include detailed execution steps for message storage
+			AgentSteps:      steps,
 			Usage:           turnUsage(state),
 			TotalSteps:      len(state.RoundSteps),
 			TotalDurationMs: time.Since(startTime).Milliseconds(),

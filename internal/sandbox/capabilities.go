@@ -135,8 +135,11 @@ type SessionTerminalManager interface {
 	// and opens a PTY. It is lookup-only: when no live sandbox is bound it
 	// returns ErrNoLiveSessionSandbox instead of provisioning one, because
 	// the terminal entry point lacks the agent's config-pin context and
-	// must not create microVMs as a side effect. A backend that cannot
-	// stream PTYs returns ErrTerminalUnsupported, not "no sandbox".
+	// must not create microVMs as a side effect. A bound sandbox that is
+	// not confirmed running returns ErrSandboxPaused unless opts.AllowResume
+	// is set, so a panel open cannot silently resume (and re-bill) a paused
+	// instance. A backend that cannot stream PTYs returns
+	// ErrTerminalUnsupported, not "no sandbox".
 	OpenSessionTerminal(ctx context.Context, sessionID string, opts RemoteTerminalOptions) (RemoteTerminalSession, error)
 }
 

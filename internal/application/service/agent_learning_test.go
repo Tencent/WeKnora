@@ -28,7 +28,11 @@ type learningAgentKB struct {
 }
 
 func (s learningAgentKB) GetKnowledgeBaseByIDOnly(context.Context, string) (*types.KnowledgeBase, error) {
-	return &types.KnowledgeBase{ID: "kb", TenantID: s.tenant, IndexingStrategy: types.IndexingStrategy{WikiEnabled: s.wiki}}, nil
+	return &types.KnowledgeBase{
+		ID:               "kb",
+		TenantID:         s.tenant,
+		IndexingStrategy: types.IndexingStrategy{WikiEnabled: s.wiki},
+	}, nil
 }
 
 func TestLearningToolsOnlyRegisterForOptedInWebUsersWithWholeOwnedWiki(t *testing.T) {
@@ -59,16 +63,29 @@ func TestLearningToolsOnlyRegisterForOptedInWebUsersWithWholeOwnedWiki(t *testin
 			if test.narrow {
 				scope.KnowledgeIDs = []string{"doc"}
 			}
-			cfg := &types.AgentConfig{KnowledgeBases: []string{"kb"}, SearchTargets: types.SearchTargets{scope}, SharedAgentReadOnly: test.shared,
-				AllowedTools: []string{tools.ToolGetLearningProfile, tools.ToolRecommendLearningTopics, tools.ToolPrepareLearningQuiz}}
+			cfg := &types.AgentConfig{
+				KnowledgeBases:      []string{"kb"},
+				SearchTargets:       types.SearchTargets{scope},
+				SharedAgentReadOnly: test.shared,
+				AllowedTools: []string{
+					tools.ToolGetLearningProfile,
+					tools.ToolRecommendLearningTopics,
+					tools.ToolPrepareLearningQuiz,
+				},
+			}
 			if test.unrequested {
 				cfg.AllowedTools = []string{tools.ToolThinking}
 			}
 			settings := &learningAgentSettings{enabled: test.enabled}
-			svc := &agentService{learningService: settings, knowledgeBaseService: learningAgentKB{tenant: test.tenant, wiki: test.wiki}}
+			svc := &agentService{
+				learningService:      settings,
+				knowledgeBaseService: learningAgentKB{tenant: test.tenant, wiki: test.wiki},
+			}
 			registry := tools.NewToolRegistry()
 			require.NoError(t, svc.registerTools(ctx, registry, cfg, nil, nil, "session"))
-			for _, name := range []string{tools.ToolGetLearningProfile, tools.ToolRecommendLearningTopics, tools.ToolPrepareLearningQuiz} {
+			for _, name := range []string{
+				tools.ToolGetLearningProfile, tools.ToolRecommendLearningTopics, tools.ToolPrepareLearningQuiz,
+			} {
 				require.Equal(t, test.want, hasTool(registry, name))
 			}
 			if test.unrequested {

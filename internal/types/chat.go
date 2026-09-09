@@ -250,6 +250,21 @@ const (
 	// MemoryRecalled: the long-term memories injected into this answer, so
 	// the UI can show and let the user delete what influenced it.
 	ResponseTypeMemoryRecalled ResponseType = "memory_recalled"
+	// ResponseTypeSteer is the per-run control signal a client POSTs while a
+	// turn is still running. It rides the same StreamManager keyspace as the
+	// stop event but in a dedicated sub-list (AppendSteerEvents/GetSteerEvents)
+	// so it never appears on the user-visible SSE stream. The running engine
+	// drains it at the next round boundary (SteerSink.PollSteer) or, when the
+	// loop has already exited, the run's teardown paths hand it to the next
+	// run — unless the turn was stopped, in which case it is discarded.
+	ResponseTypeSteer ResponseType = "steer"
+	// ResponseTypeUserMessageInjected is emitted on the user-visible stream
+	// right after a steered message was accepted into the running turn: a
+	// user-role DB row has been persisted under the run's request_id and the
+	// text was appended to the agent's message list. The frontend uses it to
+	// move the queued message out of the composer overlay and into the
+	// transcript.
+	ResponseTypeUserMessageInjected ResponseType = "user_message_injected"
 	// ResponseTypeContextCompacted is older conversation summarized away to
 	// fit the context window. Surfaced because it changes what the agent
 	// remembers — an answer that forgets an earlier instruction is otherwise

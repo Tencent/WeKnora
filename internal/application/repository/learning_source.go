@@ -30,8 +30,12 @@ func learningSourceForPage(tx *gorm.DB, p *types.WikiPage, kb *types.KnowledgeBa
 	docIDs := p.SourceKnowledgeIDs()
 	sort.Strings(docIDs)
 	var docs []*types.Knowledge
-	err := learningShare(tx).Where("tenant_id = ? AND knowledge_base_id = ? AND id IN ? AND enable_status = ? AND parse_status = ?",
-		p.TenantID, p.KnowledgeBaseID, docIDs, "enabled", types.ParseStatusCompleted).Order("id").Find(&docs).Error
+	err := learningShare(tx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND id IN ? AND enable_status = ? AND parse_status = ?",
+			p.TenantID, p.KnowledgeBaseID, docIDs, "enabled", types.ParseStatusCompleted).
+		Order("id").
+		Find(&docs).
+		Error
 	if err != nil {
 		return nil, err
 	}
@@ -42,8 +46,14 @@ func learningSourceForPage(tx *gorm.DB, p *types.WikiPage, kb *types.KnowledgeBa
 	sort.Strings(refs)
 	selected := refs[:min(len(refs), types.LearningMaxChunks)]
 	var chunks []*types.Chunk
-	err = learningShare(tx).Where("tenant_id = ? AND knowledge_base_id = ? AND knowledge_id IN ? AND id IN ? AND is_enabled = ? AND index_status = ? AND chunk_type IN ?",
-		p.TenantID, p.KnowledgeBaseID, docIDs, selected, true, "ready", []string{types.ChunkTypeText, types.ChunkTypeParentText, types.ChunkTypeImageOCR}).Order("id").Find(&chunks).Error
+	err = learningShare(tx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND knowledge_id IN ? AND id IN ? "+
+			"AND is_enabled = ? AND index_status = ? AND chunk_type IN ?",
+			p.TenantID, p.KnowledgeBaseID, docIDs, selected, true, "ready",
+			[]string{types.ChunkTypeText, types.ChunkTypeParentText, types.ChunkTypeImageOCR}).
+		Order("id").
+		Find(&chunks).
+		Error
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +71,12 @@ func learningSourceForPage(tx *gorm.DB, p *types.WikiPage, kb *types.KnowledgeBa
 	for _, c := range chunks {
 		stamps = append(stamps, learningChunkHash(c))
 	}
-	return &types.LearningSource{Page: p, Chunks: chunks, Stamp: learningSourceStamp(p, kb, stamps), ModelID: learningModelID(kb)}, nil
+	return &types.LearningSource{
+		Page:    p,
+		Chunks:  chunks,
+		Stamp:   learningSourceStamp(p, kb, stamps),
+		ModelID: learningModelID(kb),
+	}, nil
 }
 
 type learningChunkStamp struct {
@@ -91,17 +106,24 @@ func learningSourceStamp(p *types.WikiPage, kb *types.KnowledgeBase, chunks []le
 		Version                                       int
 		Aliases, Sources, ChunkRefs                   []string
 		Chunks                                        []learningChunkStamp
-	}{Tenant: p.TenantID, ModelID: learningModelID(kb), PromptVersion: types.LearningPromptVersion,
+	}{
+		Tenant: p.TenantID, ModelID: learningModelID(kb), PromptVersion: types.LearningPromptVersion,
 		PageID: p.ID, KB: p.KnowledgeBaseID, Title: p.Title, Summary: p.Summary, Content: p.Content,
 		PageType: p.PageType, Version: p.Version, Aliases: p.Aliases,
-		Sources: append([]string(nil), p.SourceRefs...), ChunkRefs: refs, Chunks: chunks}
+		Sources: append([]string(nil), p.SourceRefs...), ChunkRefs: refs, Chunks: chunks,
+	}
 	sort.Strings(stamp.Sources)
 	b, _ := json.Marshal(stamp)
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }
 
-func learningNode(tx *gorm.DB, scope interfaces.LearningScope, p *types.WikiPage, kb *types.KnowledgeBase) (*types.LearningNode, error) {
+func learningNode(
+	tx *gorm.DB,
+	scope interfaces.LearningScope,
+	p *types.WikiPage,
+	kb *types.KnowledgeBase,
+) (*types.LearningNode, error) {
 	m, err := learningMastery(tx, scope, p)
 	if err != nil {
 		return nil, err

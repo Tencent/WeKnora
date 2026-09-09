@@ -11,7 +11,11 @@ import (
 	"gorm.io/gorm"
 )
 
-func (r *learningRepository) Node(ctx context.Context, scope interfaces.LearningScope, id string) (*types.LearningNode, error) {
+func (r *learningRepository) Node(
+	ctx context.Context,
+	scope interfaces.LearningScope,
+	id string,
+) (*types.LearningNode, error) {
 	var result *types.LearningNode
 	err := r.profileTx(ctx, scope, false, true, func(tx *gorm.DB, _ *types.LearningProfile) error {
 		p, kb, err := learningPage(tx, scope.TenantID, id)
@@ -40,7 +44,12 @@ func (r *learningRepository) RecordView(ctx context.Context, scope interfaces.Le
 	})
 }
 
-func (r *learningRepository) Overlay(ctx context.Context, scope interfaces.LearningScope, kbID string, slugs []string) ([]*types.LearningNode, error) {
+func (r *learningRepository) Overlay(
+	ctx context.Context,
+	scope interfaces.LearningScope,
+	kbID string,
+	slugs []string,
+) ([]*types.LearningNode, error) {
 	if len(slugs) > types.LearningMaxNodes {
 		return nil, types.ErrLearningInvalid
 	}
@@ -55,7 +64,15 @@ func (r *learningRepository) Overlay(ctx context.Context, scope interfaces.Learn
 			return nil
 		}
 		var pages []*types.WikiPage
-		err = learningPages(tx, scope.TenantID, kbID).Where("slug IN ?", slugs).Order("id").Limit(types.LearningMaxNodes).Find(&pages).Error
+		err = learningPages(
+			tx,
+			scope.TenantID,
+			kbID,
+		).Where("slug IN ?", slugs).
+			Order("id").
+			Limit(types.LearningMaxNodes).
+			Find(&pages).
+			Error
 		if err != nil {
 			return err
 		}
@@ -65,8 +82,16 @@ func (r *learningRepository) Overlay(ctx context.Context, scope interfaces.Learn
 	return result, err
 }
 
-func (r *learningRepository) Overview(ctx context.Context, scope interfaces.LearningScope, kbID string) (*types.LearningOverview, error) {
-	result := &types.LearningOverview{Enabled: true, AlgorithmVersion: types.LearningAlgorithmVersion, KnowledgeBaseID: kbID}
+func (r *learningRepository) Overview(
+	ctx context.Context,
+	scope interfaces.LearningScope,
+	kbID string,
+) (*types.LearningOverview, error) {
+	result := &types.LearningOverview{
+		Enabled:          true,
+		AlgorithmVersion: types.LearningAlgorithmVersion,
+		KnowledgeBaseID:  kbID,
+	}
 	err := r.profileTx(ctx, scope, false, true, func(tx *gorm.DB, _ *types.LearningProfile) error {
 		kb, err := learningKB(tx, scope.TenantID, kbID)
 		if err != nil {
@@ -79,7 +104,15 @@ func (r *learningRepository) Overview(ctx context.Context, scope interfaces.Lear
 		result.TotalNodes, result.Counts = int(total), types.LearningCounts{Unseen: int(total)}
 		ids := learningScope(tx, scope).Model(&types.LearningMastery{}).Select("page_id").Where("attempts > 0")
 		var pages []*types.WikiPage
-		if err := learningPages(tx, scope.TenantID, kbID).Where("id IN (?)", ids).Order("id").Limit(types.LearningMaxNodes).Find(&pages).Error; err != nil {
+		if err := learningPages(
+			tx,
+			scope.TenantID,
+			kbID,
+		).Where("id IN (?)", ids).
+			Order("id").
+			Limit(types.LearningMaxNodes).
+			Find(&pages).
+			Error; err != nil {
 			return err
 		}
 		nodes, err := learningNodes(tx, scope, pages, kb)
@@ -104,7 +137,12 @@ func (r *learningRepository) Overview(ctx context.Context, scope interfaces.Lear
 	return result, err
 }
 
-func (r *learningRepository) Candidates(ctx context.Context, scope interfaces.LearningScope, kbID string, interests []string) ([]*types.LearningNode, error) {
+func (r *learningRepository) Candidates(
+	ctx context.Context,
+	scope interfaces.LearningScope,
+	kbID string,
+	interests []string,
+) ([]*types.LearningNode, error) {
 	result := []*types.LearningNode{}
 	err := r.profileTx(ctx, scope, false, true, func(tx *gorm.DB, _ *types.LearningProfile) error {
 		result = []*types.LearningNode{}
@@ -125,15 +163,23 @@ func (r *learningRepository) Candidates(ctx context.Context, scope interfaces.Le
 		}
 		base := func() *gorm.DB { return learningPages(tx, scope.TenantID, kbID) }
 		var due []string
-		if err := learningScope(tx, scope).Model(&types.LearningMastery{}).Where("knowledge_base_id = ? AND attempts > 0", kbID).
-			Order("next_review_at, page_id").Limit(64).Pluck("page_id", &due).Error; err != nil {
+		if err := learningScope(tx, scope).Model(&types.LearningMastery{}).
+			Where("knowledge_base_id = ? AND attempts > 0", kbID).
+			Order("next_review_at, page_id").
+			Limit(64).
+			Pluck("page_id", &due).
+			Error; err != nil {
 			return err
 		}
 		if err := add(base().Where("id IN ?", due).Order("id")); err != nil {
 			return err
 		}
 		var seeds []*types.WikiPage
-		seedIDs := learningScope(tx, scope).Model(&types.LearningMastery{}).Select("page_id").Where("knowledge_base_id = ?", kbID).Order("page_id").Limit(32)
+		seedIDs := learningScope(tx, scope).Model(&types.LearningMastery{}).
+			Select("page_id").
+			Where("knowledge_base_id = ?", kbID).
+			Order("page_id").
+			Limit(32)
 		if err := base().Where("id IN (?)", seedIDs).Order("id").Find(&seeds).Error; err != nil {
 			return err
 		}

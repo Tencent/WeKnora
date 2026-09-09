@@ -111,6 +111,13 @@ var (
 	// Unlike Execute, these entry points never provision: creating a sandbox
 	// needs the agent's config-pin context, which they do not carry.
 	ErrNoLiveSessionSandbox = errors.New("session has no live sandbox")
+	// ErrSandboxPaused is returned by lookup-only terminal opens when the
+	// session has a bound sandbox that is not confirmed running (paused,
+	// transitioning, or missing from the provider list). Connect would
+	// resume a paused instance and start billing again; the UI must get
+	// an explicit click first. Distinct from ErrNoLiveSessionSandbox,
+	// which means there is no binding to resume.
+	ErrSandboxPaused = errors.New("session sandbox is paused")
 	// ErrTerminalUnsupported is returned when the active backend cannot
 	// stream PTYs (Docker, a disabled manager). Distinct from
 	// ErrNoLiveSessionSandbox: the session may well have a live sandbox,

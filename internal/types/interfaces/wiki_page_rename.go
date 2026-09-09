@@ -8,6 +8,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// ErrWikiRenameUnsupported indicates that identity-preserving rename is unavailable.
 var ErrWikiRenameUnsupported = errors.New("identity-preserving wiki rename is not supported")
 
 // WikiPageRenameRequest binds a rename to the UUID resolved by the caller.
@@ -19,6 +20,7 @@ type WikiPageRenameRequest struct {
 	NewSlug         string
 }
 
+// WikiPageRenameResult contains renamed pages and post-commit synchronization warnings.
 type WikiPageRenameResult struct {
 	Page *types.WikiPage
 	// AffectedPages includes Page and every live page whose links or parent

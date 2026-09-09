@@ -78,9 +78,9 @@ Handle(context.Context, *asynq.Task) error
 Recover(context.Context) error
 ```
 
-types 中的稳定错误：ErrLearningForbidden、ErrLearningDisabled、ErrLearningNotFound、ErrLearningStale、ErrLearningNotReady、ErrLearningConflict、ErrLearningInvalid、ErrLearningBusy、ErrLearningEvidence。
+types 中的稳定错误：ErrLearningForbidden、ErrLearningDisabled、ErrLearningNotFound、ErrLearningStale、ErrLearningNotReady、ErrLearningConflict、ErrLearningInvalid、ErrLearningBusy、ErrLearningEvidence、ErrLearningUnavailable。数据库锁竞争或容量限制返回 429，未知数据库故障返回 500；诊断只记录安全类别和数据库错误码，不包含 SQL 参数或原始错误正文。
 
-任务 `types.TypeLearningGenerate = "learning:generate"` 在同步调度器和 Asynq 调度器中均使用现有 QueueQuestion。生成和盲测验证调用使用 `types.WithLLMContentRedacted(ctx)`。新增迁移：PG 000092、SQLite 000014。
+任务 `types.TypeLearningGenerate = "learning:generate"` 在同步调度器和 Asynq 调度器中均使用现有 QueueQuestion。生成和盲测验证调用使用 `types.WithLLMContentRedacted(ctx)`。新增迁移：PG 000093、SQLite 000014。PG 000092 由主线 MCP 元数据迁移占用。
 
 ### 进度
 

@@ -32,7 +32,13 @@ func (s *learningHandlerFake) SubmitAnswer(context.Context, types.LearningAnswer
 }
 
 func TestLearningHTTPStrictRequestsAndNoStore(t *testing.T) {
-	for _, body := range []string{`{}`, `{"enabled":null}`, `{"enabled":true,"subject_id":"other"}`, `{"enabled":true} {}`, `null`} {
+	for _, body := range []string{
+		`{}`,
+		`{"enabled":null}`,
+		`{"enabled":true,"subject_id":"other"}`,
+		`{"enabled":true} {}`,
+		`null`,
+	} {
 		t.Run(body, func(t *testing.T) {
 			svc := &learningHandlerFake{}
 			h := NewLearningHandler(svc)
@@ -66,7 +72,13 @@ func TestLearningAnswerCannotSupplyGradeOrIdentity(t *testing.T) {
 	svc := &learningHandlerFake{}
 	r := gin.New()
 	r.POST("/attempts", NewLearningHandler(svc).SubmitAnswer)
-	for _, extra := range []string{`"correct":true`, `"p_mastery":1`, `"tenant_id":8`, `"subject_id":"bob"`, `"correct_option":"a"`} {
+	for _, extra := range []string{
+		`"correct":true`,
+		`"p_mastery":1`,
+		`"tenant_id":8`,
+		`"subject_id":"bob"`,
+		`"correct_option":"a"`,
+	} {
 		w := httptest.NewRecorder()
 		body := `{"question_id":"q","option_id":"a","attempt_id":"attempt",` + extra + `}`
 		r.ServeHTTP(w, httptest.NewRequest("POST", "/attempts", strings.NewReader(body)))
@@ -84,8 +96,12 @@ func TestLearningHTTPErrorsHideWrappedProviderPayloads(t *testing.T) {
 		err    error
 		status int
 	}{
-		{types.ErrLearningDisabled, 403}, {types.ErrLearningNotFound, 404}, {types.ErrLearningStale, 409},
-		{types.ErrLearningConflict, 409}, {types.ErrLearningEvidence, 422}, {types.ErrLearningBusy, 429},
+		{types.ErrLearningDisabled, 403},
+		{types.ErrLearningNotFound, 404},
+		{types.ErrLearningStale, 409},
+		{types.ErrLearningConflict, 409},
+		{types.ErrLearningEvidence, 422},
+		{types.ErrLearningBusy, 429},
 	} {
 		status, _, _ := learningHTTPError(test.err)
 		require.Equal(t, test.status, status)

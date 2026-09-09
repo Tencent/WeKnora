@@ -118,11 +118,22 @@ func TestLearningOfflineEvaluation(t *testing.T) {
 	topics, states := offlineEvalValidateData(t, data)
 	t.Logf("dataset=%s sha256=%s algorithm=%s go=%s model=none prompt=none",
 		data.ID, hash, types.LearningAlgorithmVersion, runtime.Version())
-	t.Logf("rank=rankRecommendations weights=0.45/0.25/0.20/0.10 kind_diversity=true reserved_exploration=true rank_sha256=%x bkt_sha256=%x",
+	t.Logf(
+		"rank=rankRecommendations weights=0.45/0.25/0.20/0.10 kind_diversity=true "+
+			"reserved_exploration=true rank_sha256=%x bkt_sha256=%x",
 		sha256.Sum256(offlineEvalRead(t, "recommend.go")),
-		sha256.Sum256(offlineEvalRead(t, "../../../types/learning_algorithm.go")))
-	t.Logf("synthetic_only=true ranking_cases=%d topics=%d state_cases=%d prediction_sequences=%d now=%s",
-		len(data.RankingCases), len(data.Topics), len(data.States), len(data.PredictionCases), data.Now.Format(time.RFC3339))
+		sha256.Sum256(offlineEvalRead(t, "../../../types/learning_algorithm.go")),
+	)
+	t.Logf(
+		"synthetic_only=true ranking_cases=%d topics=%d state_cases=%d prediction_sequences=%d now=%s",
+		len(
+			data.RankingCases,
+		),
+		len(data.Topics),
+		len(data.States),
+		len(data.PredictionCases),
+		data.Now.Format(time.RFC3339),
+	)
 
 	if !t.Run("golden_arithmetic", offlineEvalGoldenArithmetic) ||
 		!t.Run("states_and_freshness", func(t *testing.T) { offlineEvalStates(t, data, states) }) ||
@@ -233,7 +244,10 @@ func offlineEvalRead(t *testing.T, path string) []byte {
 	return b
 }
 
-func offlineEvalValidateData(t *testing.T, d offlineEvalData) (map[string]offlineEvalTopic, map[string]offlineEvalState) {
+func offlineEvalValidateData(
+	t *testing.T,
+	d offlineEvalData,
+) (map[string]offlineEvalTopic, map[string]offlineEvalState) {
 	t.Helper()
 	if d.SchemaVersion != 1 || d.ID == "" || d.AlgorithmVersion != types.LearningAlgorithmVersion ||
 		d.Provenance == "" || d.LabelPolicy == "" || d.PredictionPolicy == "" || d.Now.IsZero() ||
@@ -242,10 +256,13 @@ func offlineEvalValidateData(t *testing.T, d offlineEvalData) (map[string]offlin
 	}
 	topics := map[string]offlineEvalTopic{}
 	for _, topic := range d.Topics {
-		if _, exists := topics[topic.ID]; exists || topic.ID == "" || topic.Title == "" || topic.Chunks < 0 || topic.Degree < 0 {
+		if _, exists := topics[topic.ID]; exists || topic.ID == "" || topic.Title == "" || topic.Chunks < 0 ||
+			topic.Degree < 0 {
 			t.Fatalf("invalid or duplicate topic: %+v", topic)
 		}
-		if !types.LearningEligiblePage(&types.WikiPage{PageType: topic.PageType, Status: types.WikiPageStatusPublished}) {
+		if !types.LearningEligiblePage(
+			&types.WikiPage{PageType: topic.PageType, Status: types.WikiPageStatusPublished},
+		) {
 			t.Fatalf("ineligible topic kind: %s", topic.ID)
 		}
 		topics[topic.ID] = topic
@@ -300,8 +317,14 @@ func offlineEvalNode(topic offlineEvalTopic, state offlineEvalState) *types.Lear
 	node := &types.LearningNode{Page: page, SourceStamp: state.CurrentSourceStamp}
 	if m := state.Mastery; m != nil {
 		node.Mastery = &types.LearningMastery{
-			PMastery: m.PMastery, Attempts: m.Attempts, Correct: m.Correct, ConsecutiveCorrect: m.ConsecutiveCorrect,
-			LastAssessedAt: m.LastAssessedAt, NextReviewAt: m.NextReviewAt, ViewedAt: m.ViewedAt, SourceStamp: m.SourceStamp,
+			PMastery:           m.PMastery,
+			Attempts:           m.Attempts,
+			Correct:            m.Correct,
+			ConsecutiveCorrect: m.ConsecutiveCorrect,
+			LastAssessedAt:     m.LastAssessedAt,
+			NextReviewAt:       m.NextReviewAt,
+			ViewedAt:           m.ViewedAt,
+			SourceStamp:        m.SourceStamp,
 		}
 	}
 	return node
@@ -387,7 +410,11 @@ func offlineEvalValidateSequence(c offlineEvalPrediction, now time.Time) error {
 		for _, o := range partition {
 			if o.QuestionID == "" || seen[o.QuestionID] || o.Correct == nil ||
 				o.At.IsZero() || !o.At.After(previous) || o.At.After(now) {
-				return fmt.Errorf("%s: require distinct questions and strictly increasing train-then-heldout timestamps: %s", c.ID, o.QuestionID)
+				return fmt.Errorf(
+					"%s: require distinct questions and strictly increasing train-then-heldout timestamps: %s",
+					c.ID,
+					o.QuestionID,
+				)
 			}
 			seen[o.QuestionID], previous = true, o.At
 		}
@@ -471,7 +498,10 @@ func offlineEvalGoldenArithmetic(t *testing.T) {
 		for i, answer := range golden.Answers {
 			correct := answer == 'C'
 			p = types.LearningBKT(p, correct)
-			train = append(train, offlineEvalObservation{At: time.Date(2026, 9, i+1, 12, 0, 0, 0, time.UTC), Correct: &correct})
+			train = append(
+				train,
+				offlineEvalObservation{At: time.Date(2026, 9, i+1, 12, 0, 0, 0, time.UTC), Correct: &correct},
+			)
 		}
 		offlineEvalClose(t, golden.Answers+" BKT", p, golden.P)
 		offlineEvalClose(t, golden.Answers+" response mapping", offlineEvalResponseChance(p), golden.Q)
@@ -514,12 +544,22 @@ func offlineEvalGoldenArithmetic(t *testing.T) {
 		t.Fatalf("cold-start baseline order/saturation/tie breaking: %v", got)
 	}
 
-	node := offlineEvalNode(offlineEvalTopic{ID: "golden", Title: "Bayesian model", Aliases: []string{"Knowledge tracing"},
-		PageType: "concept", Summary: "Summary", Chunks: 2}, offlineEvalState{})
+	node := offlineEvalNode(
+		offlineEvalTopic{
+			ID: "golden", Title: "Bayesian model", Aliases: []string{"Knowledge tracing"},
+			PageType: "concept", Summary: "Summary", Chunks: 2,
+		},
+		offlineEvalState{},
+	)
 	node.Related = true
 	view := types.LearningNodePublic(node, time.Time{})
 	view.Mastery = types.LearningMasteryView{State: "learning", PMastery: 0.4}
-	r := rankRecommendations([]*types.LearningNode{node}, []*types.LearningNodeView{view}, []string{" KNOWLEDGE   TRACING "}, 1)[0]
+	r := rankRecommendations(
+		[]*types.LearningNode{node},
+		[]*types.LearningNodeView{view},
+		[]string{" KNOWLEDGE   TRACING "},
+		1,
+	)[0]
 	offlineEvalClose(t, "review component", r.Components.ReviewNeed, 3.0/5)
 	offlineEvalClose(t, "related component", r.Components.GraphFrontier, 1)
 	offlineEvalClose(t, "alias interest component", r.Components.InterestMatch, 1)
@@ -552,7 +592,13 @@ func offlineEvalStates(t *testing.T, d offlineEvalData, states map[string]offlin
 			}
 			view := types.LearningNodePublic(node, d.Now)
 			if view.Familiar != state.Familiar || !reflect.DeepEqual(view.Mastery, state.Expected) {
-				t.Fatalf("got familiar=%v mastery=%+v; want familiar=%v mastery=%+v", view.Familiar, view.Mastery, state.Familiar, state.Expected)
+				t.Fatalf(
+					"got familiar=%v mastery=%+v; want familiar=%v mastery=%+v",
+					view.Familiar,
+					view.Mastery,
+					state.Familiar,
+					state.Expected,
+				)
 			}
 			if node.Mastery != nil && !reflect.DeepEqual(*node.Mastery, before) {
 				t.Fatal("public state projection mutated stored evidence")
@@ -575,7 +621,11 @@ func offlineEvalStates(t *testing.T, d offlineEvalData, states map[string]offlin
 				node.Mastery = &types.LearningMastery{}
 			}
 			node.Mastery.ViewedAt = &d.Now
-			if got := types.LearningNodePublic(node, d.Now); !got.Familiar || !reflect.DeepEqual(got.Mastery, state.Expected) {
+			if got := types.LearningNodePublic(
+				node,
+				d.Now,
+			); !got.Familiar ||
+				!reflect.DeepEqual(got.Mastery, state.Expected) {
 				t.Fatal("a stored read marker changed mastery")
 			}
 		})
@@ -612,7 +662,9 @@ func offlineEvalStates(t *testing.T, d offlineEvalData, states map[string]offlin
 
 func offlineEvalTemporalGuards(t *testing.T, d offlineEvalData) {
 	original := d.PredictionCases[0]
-	for _, mutation := range []string{"split_overlap", "duplicate_question", "out_of_order", "future", "missing_label", "empty_holdout"} {
+	for _, mutation := range []string{
+		"split_overlap", "duplicate_question", "out_of_order", "future", "missing_label", "empty_holdout",
+	} {
 		c := original
 		c.Train, c.Heldout = slices.Clone(c.Train), slices.Clone(c.Heldout)
 		switch mutation {

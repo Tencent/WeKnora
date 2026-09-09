@@ -293,7 +293,8 @@ func compactToolSummary(success bool, errMsg string, data map[string]interface{}
 	}
 	switch stringField(data, "display_type") {
 	case "learning_quiz":
-		return "Prepared a personal quiz card. Fetch current state in the learning interface; no answer key is available to the Agent."
+		return "Prepared a personal quiz card. Fetch current state in the learning interface; " +
+			"no answer key is available to the Agent."
 	case "learning_profile":
 		return "Read a learning overview. Refresh the profile before making new mastery claims."
 	case "learning_recommendations":

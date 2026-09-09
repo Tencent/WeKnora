@@ -8,7 +8,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-func rankRecommendations(nodes []*types.LearningNode, views []*types.LearningNodeView, interests []string, limit int) []*types.LearningRecommendation {
+func rankRecommendations(
+	nodes []*types.LearningNode,
+	views []*types.LearningNodeView,
+	interests []string,
+	limit int,
+) []*types.LearningRecommendation {
 	if limit <= 0 {
 		return []*types.LearningRecommendation{}
 	}
@@ -60,7 +65,10 @@ func rankRecommendations(nodes []*types.LearningNode, views []*types.LearningNod
 			reasons = append(reasons, "explore")
 		}
 		score := 0.45*c.ReviewNeed + 0.25*c.GraphFrontier + 0.20*c.InterestMatch + 0.10*c.ContentQuality
-		pool = append(pool, &types.LearningRecommendation{LearningNodeView: *v, Score: score, Components: c, ReasonCodes: reasons})
+		pool = append(
+			pool,
+			&types.LearningRecommendation{LearningNodeView: *v, Score: score, Components: c, ReasonCodes: reasons},
+		)
 	}
 	sort.Slice(pool, func(i, j int) bool {
 		if pool[i].Score != pool[j].Score {

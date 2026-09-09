@@ -24,7 +24,8 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-const evidenceText = "A transaction commits all its writes atomically. A lease expires after its deadline. A primary key uniquely identifies a row."
+const evidenceText = "A transaction commits all its writes atomically. " +
+	"A lease expires after its deadline. A primary key uniquely identifies a row."
 
 type fakeModels struct {
 	interfaces.ModelService
@@ -44,7 +45,11 @@ type fakeChat struct {
 	t         *testing.T
 }
 
-func (f *fakeChat) Chat(ctx context.Context, messages []chat.Message, _ *chat.ChatOptions) (*types.ChatResponse, error) {
+func (f *fakeChat) Chat(
+	ctx context.Context,
+	messages []chat.Message,
+	_ *chat.ChatOptions,
+) (*types.ChatResponse, error) {
 	f.mu.Lock()
 	i := f.calls
 	f.calls++
@@ -107,7 +112,10 @@ func webContext(tenant uint64, user string) context.Context {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "learning.db")+"?_busy_timeout=5000&_journal_mode=WAL&_foreign_keys=1"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	db, err := gorm.Open(
+		sqlite.Open(filepath.Join(t.TempDir(), "learning.db")+"?_busy_timeout=5000&_journal_mode=WAL&_foreign_keys=1"),
+		&gorm.Config{Logger: logger.Default.LogMode(logger.Silent)},
+	)
 	require.NoError(t, err)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
@@ -117,20 +125,68 @@ func newFixture(t *testing.T) *fixture {
 	migration, err := os.ReadFile("../../../../migrations/sqlite/000014_learning.up.sql")
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(string(migration)).Error)
-	kb := &types.KnowledgeBase{ID: uuid.NewString(), TenantID: 7, Name: "Test", IndexingStrategy: types.IndexingStrategy{WikiEnabled: true}, WikiConfig: &types.WikiConfig{SynthesisModelID: "model"}}
+	kb := &types.KnowledgeBase{
+		ID:               uuid.NewString(),
+		TenantID:         7,
+		Name:             "Test",
+		IndexingStrategy: types.IndexingStrategy{WikiEnabled: true},
+		WikiConfig:       &types.WikiConfig{SynthesisModelID: "model"},
+	}
 	require.NoError(t, db.Create(kb).Error)
-	doc := &types.Knowledge{ID: uuid.NewString(), TenantID: 7, KnowledgeBaseID: kb.ID, EnableStatus: "enabled", ParseStatus: "completed", CustomMetadata: types.JSON("{}")}
+	doc := &types.Knowledge{
+		ID:              uuid.NewString(),
+		TenantID:        7,
+		KnowledgeBaseID: kb.ID,
+		EnableStatus:    "enabled",
+		ParseStatus:     "completed",
+		CustomMetadata:  types.JSON("{}"),
+	}
 	require.NoError(t, db.Create(doc).Error)
-	chunk := &types.Chunk{ID: uuid.NewString(), TenantID: 7, KnowledgeBaseID: kb.ID, KnowledgeID: doc.ID, Content: evidenceText, IsEnabled: true, IndexStatus: "ready"}
+	chunk := &types.Chunk{
+		ID:              uuid.NewString(),
+		TenantID:        7,
+		KnowledgeBaseID: kb.ID,
+		KnowledgeID:     doc.ID,
+		Content:         evidenceText,
+		IsEnabled:       true,
+		IndexStatus:     "ready",
+	}
 	require.NoError(t, db.Create(chunk).Error)
-	page := &types.WikiPage{ID: uuid.NewString(), TenantID: 7, KnowledgeBaseID: kb.ID, Slug: "concept/transactions", Title: "Transactions",
-		PageType: "concept", Status: "published", Content: evidenceText, Summary: "Atomic transactions", Version: 1,
-		SourceRefs: types.StringArray{doc.ID + "|Source"}, ChunkRefs: types.StringArray{chunk.ID}}
+	page := &types.WikiPage{
+		ID:              uuid.NewString(),
+		TenantID:        7,
+		KnowledgeBaseID: kb.ID,
+		Slug:            "concept/transactions",
+		Title:           "Transactions",
+		PageType:        "concept",
+		Status:          "published",
+		Content:         evidenceText,
+		Summary:         "Atomic transactions",
+		Version:         1,
+		SourceRefs:      types.StringArray{doc.ID + "|Source"},
+		ChunkRefs:       types.StringArray{chunk.ID},
+	}
 	require.NoError(t, db.Create(page).Error)
-	model := &fakeChat{t: t, responses: []string{generationResponse(chunk), `{"answers":[{"index":3,"ambiguous":false},{"index":2,"ambiguous":false},{"index":1,"ambiguous":false}]}`}}
+	model := &fakeChat{
+		t: t,
+		responses: []string{
+			generationResponse(chunk),
+			`{"answers":[{"index":3,"ambiguous":false},{"index":2,"ambiguous":false},{"index":1,"ambiguous":false}]}`,
+		},
+	}
 	tasks := &fakeTasks{}
 	repo := repository.NewLearningRepository(db)
-	f := &fixture{db: db, repo: repo, ctx: webContext(7, "alice"), scope: interfaces.LearningScope{TenantID: 7, SubjectID: "web_user:alice"}, page: page, chunk: chunk, kb: kb, model: model, tasks: tasks}
+	f := &fixture{
+		db:    db,
+		repo:  repo,
+		ctx:   webContext(7, "alice"),
+		scope: interfaces.LearningScope{TenantID: 7, SubjectID: "web_user:alice"},
+		page:  page,
+		chunk: chunk,
+		kb:    kb,
+		model: model,
+		tasks: tasks,
+	}
 	f.svc = NewService(repo, fakeModels{client: model}, tasks, nil)
 	return f
 }
@@ -139,9 +195,20 @@ func generationResponse(c *types.Chunk) string {
 	questions := make([]proposedQuestion, 3)
 	zero := 0
 	for i := range questions {
-		questions[i] = proposedQuestion{Prompt: fmt.Sprintf("Which statement about atomic transactions is supported (%d)?", i),
-			Options: []string{"All writes commit together", "Only half commit", "No writes commit", "Keys may duplicate"}, AnswerIndex: &zero,
-			Explanation: "PRIVATE_EXPLANATION: the source states atomic commitment.", Evidence: []types.LearningEvidence{{ChunkID: c.ID, KnowledgeID: c.KnowledgeID, Quote: "A transaction commits all its writes atomically."}}}
+		questions[i] = proposedQuestion{
+			Prompt: fmt.Sprintf("Which statement about atomic transactions is supported (%d)?", i),
+			Options: []string{
+				"All writes commit together",
+				"Only half commit",
+				"No writes commit",
+				"Keys may duplicate",
+			},
+			AnswerIndex: &zero,
+			Explanation: "PRIVATE_EXPLANATION: the source states atomic commitment.",
+			Evidence: []types.LearningEvidence{
+				{ChunkID: c.ID, KnowledgeID: c.KnowledgeID, Quote: "A transaction commits all its writes atomically."},
+			},
+		}
 	}
 	b, _ := json.Marshal(map[string]any{"questions": questions})
 	return string(b)
@@ -243,9 +310,11 @@ func TestLearningStrictIdentityAndIsolation(t *testing.T) {
 	q := f.ready(t)
 	legacy := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 	legacy = context.WithValue(legacy, types.UserIDContextKey, "alice")
-	contexts := []context.Context{context.Background(), legacy, types.WithExecutionTenant(f.ctx, 8),
+	contexts := []context.Context{
+		context.Background(), legacy, types.WithExecutionTenant(f.ctx, 8),
 		types.WithPrincipal(f.ctx, types.Principal{Type: types.PrincipalWebUser, ID: "bob"}),
-		types.WithTenantAPIKeyScope(f.ctx, types.TenantAPIKeyScope{})}
+		types.WithTenantAPIKeyScope(f.ctx, types.TenantAPIKeyScope{}),
+	}
 	for _, kind := range []string{types.PrincipalAPITenant, types.PrincipalIMUser, types.PrincipalEmbedVisitor} {
 		contexts = append(contexts, types.WithPrincipal(f.ctx, types.Principal{Type: kind, ID: "alice"}))
 	}
@@ -258,7 +327,10 @@ func TestLearningStrictIdentityAndIsolation(t *testing.T) {
 		require.NoError(t, err)
 		_, err = f.svc.GetQuiz(ctx, q.ID)
 		require.ErrorIs(t, err, types.ErrLearningNotFound)
-		_, err = f.svc.SubmitAnswer(ctx, types.LearningAnswer{QuestionID: q.Questions[0].ID, OptionID: "0", AttemptID: "a"})
+		_, err = f.svc.SubmitAnswer(
+			ctx,
+			types.LearningAnswer{QuestionID: q.Questions[0].ID, OptionID: "0", AttemptID: "a"},
+		)
 		require.ErrorIs(t, err, types.ErrLearningNotFound)
 	}
 	_, err := f.svc.Node(webContext(8, "alice"), f.page.ID)
@@ -266,7 +338,9 @@ func TestLearningStrictIdentityAndIsolation(t *testing.T) {
 }
 
 func TestLearningRejectMalformedOrUnverifiedModel(t *testing.T) {
-	for _, kind := range []string{"malformed", "unknown", "duplicate", "quote", "option", "missing_index", "disagree", "ambiguous", "provider"} {
+	for _, kind := range []string{
+		"malformed", "unknown", "duplicate", "quote", "option", "missing_index", "disagree", "ambiguous", "provider",
+	} {
 		t.Run(kind, func(t *testing.T) {
 			f := newFixture(t)
 			switch kind {
@@ -277,13 +351,22 @@ func TestLearningRejectMalformedOrUnverifiedModel(t *testing.T) {
 			case "duplicate":
 				f.model.responses[0] = `{"questions":[],"questions":[]}`
 			case "quote":
-				f.model.responses[0] = strings.ReplaceAll(f.model.responses[0], "A transaction commits all its writes atomically.", "Fabricated evidence not in the original source.")
+				f.model.responses[0] = strings.ReplaceAll(
+					f.model.responses[0],
+					"A transaction commits all its writes atomically.",
+					"Fabricated evidence not in the original source.",
+				)
 			case "option":
-				f.model.responses[0] = strings.ReplaceAll(f.model.responses[0], "Only half commit", "All writes commit together")
+				f.model.responses[0] = strings.ReplaceAll(
+					f.model.responses[0],
+					"Only half commit",
+					"All writes commit together",
+				)
 			case "missing_index":
 				f.model.responses[0] = strings.ReplaceAll(f.model.responses[0], `"answer_index":0,`, "")
 			case "disagree":
-				f.model.responses[1] = `{"answers":[{"index":0,"ambiguous":false},{"index":0,"ambiguous":false},{"index":0,"ambiguous":false}]}`
+				f.model.responses[1] = "{\"answers\":[{\"index\":0,\"ambiguous\":false}," +
+					"{\"index\":0,\"ambiguous\":false},{\"index\":0,\"ambiguous\":false}]}"
 			case "ambiguous":
 				f.model.responses[1] = strings.ReplaceAll(f.model.responses[1], "false", "true")
 			case "provider":
@@ -317,9 +400,17 @@ func TestLearningSourceFreshnessAtEveryBoundary(t *testing.T) {
 		"membership": func(f *fixture) {
 			require.NoError(t, f.db.Model(f.page).Update("chunk_refs", types.StringArray{}).Error)
 		},
-		"disabled_chunk": func(f *fixture) { require.NoError(t, f.db.Model(f.chunk).Update("is_enabled", false).Error) },
+		"disabled_chunk": func(f *fixture) {
+			require.NoError(t, f.db.Model(f.chunk).Update("is_enabled", false).Error)
+		},
 		"moved_document": func(f *fixture) {
-			require.NoError(t, f.db.Model(&types.Knowledge{}).Where("id = ?", f.chunk.KnowledgeID).Update("knowledge_base_id", "elsewhere").Error)
+			require.NoError(
+				t,
+				f.db.Model(&types.Knowledge{}).
+					Where("id = ?", f.chunk.KnowledgeID).
+					Update("knowledge_base_id", "elsewhere").
+					Error,
+			)
 		},
 		"deleted_kb": func(f *fixture) { require.NoError(t, f.db.Delete(f.kb).Error) },
 	}
@@ -347,7 +438,10 @@ func TestLearningSourceFreshnessAtEveryBoundary(t *testing.T) {
 					mutate(f)
 				}
 				if boundary == "answer" {
-					_, err := f.svc.SubmitAnswer(f.ctx, types.LearningAnswer{QuestionID: questionID, OptionID: "0", AttemptID: "a"})
+					_, err := f.svc.SubmitAnswer(
+						f.ctx,
+						types.LearningAnswer{QuestionID: questionID, OptionID: "0", AttemptID: "a"},
+					)
 					require.ErrorIs(t, err, types.ErrLearningStale)
 				}
 				q, err := f.svc.GetQuiz(f.ctx, q.ID)
@@ -374,7 +468,10 @@ func TestLearningConcurrentFirstAnswerAndRegenerationFingerprint(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, err := f.svc.SubmitAnswer(f.ctx, types.LearningAnswer{QuestionID: q.Questions[0].ID, OptionID: "0", AttemptID: fmt.Sprintf("race%d", i)})
+			_, err := f.svc.SubmitAnswer(
+				f.ctx,
+				types.LearningAnswer{QuestionID: q.Questions[0].ID, OptionID: "0", AttemptID: fmt.Sprintf("race%d", i)},
+			)
 			errs <- err
 		}(i)
 	}
@@ -390,7 +487,10 @@ func TestLearningConcurrentFirstAnswerAndRegenerationFingerprint(t *testing.T) {
 	}
 	require.Equal(t, 1, successes)
 	for i := 1; i < 3; i++ {
-		_, err := f.svc.SubmitAnswer(f.ctx, types.LearningAnswer{QuestionID: q.Questions[i].ID, OptionID: "0", AttemptID: fmt.Sprint(i)})
+		_, err := f.svc.SubmitAnswer(
+			f.ctx,
+			types.LearningAnswer{QuestionID: q.Questions[i].ID, OptionID: "0", AttemptID: fmt.Sprint(i)},
+		)
 		require.NoError(t, err)
 	}
 	f.model.responses = append(f.model.responses, f.model.responses...)
@@ -400,7 +500,10 @@ func TestLearningConcurrentFirstAnswerAndRegenerationFingerprint(t *testing.T) {
 	require.NoError(t, f.svc.Handle(context.Background(), f.tasks.tasks[len(f.tasks.tasks)-1]))
 	newQuiz, err = f.svc.GetQuiz(f.ctx, newQuiz.ID)
 	require.NoError(t, err)
-	a, err := f.svc.SubmitAnswer(f.ctx, types.LearningAnswer{QuestionID: newQuiz.Questions[0].ID, OptionID: "0", AttemptID: "repeat"})
+	a, err := f.svc.SubmitAnswer(
+		f.ctx,
+		types.LearningAnswer{QuestionID: newQuiz.Questions[0].ID, OptionID: "0", AttemptID: "repeat"},
+	)
 	require.NoError(t, err)
 	require.Equal(t, 3, a.Mastery.Attempts)
 	var count int64

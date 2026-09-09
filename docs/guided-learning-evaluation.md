@@ -39,11 +39,13 @@ GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test ./internal/application/service
 
 本次测量对应的生产源码 SHA-256：
 
+2026-09-10 按仓库 lint 规范调整格式和注释后，重新运行评估，全部指标保持不变。以下为调整后的源码哈希；数据集和标签未修改。
+
 ```text
 internal/application/service/learning/recommend.go
-524c1d259a9cfb928208ac939614c4be25e30862a64af93dbec03d6ae5ad79a8
+660d2ec238ed7ca3fbc304b889629a71282ac0e90bd34b7cf33ece41be1442c8
 internal/types/learning_algorithm.go
-d29487c87997cd36edb63abd563163fd69fdd2668ab157ed4614407e2ba10cd3
+0b55c130e57dbabefec6adde95404fecfe28bfc61fc72268c3c91a6962518211
 ```
 
 实现助手阅读生产代码后，人工编写了目标、元数据、相关性标签和答题轨迹。标签在首次测量运行前固定，查看结果后未作调整。数据中没有真实用户记录或独立人工标注。重复使用的主题与成对的兴趣场景存在相关性；64 次候选项出现记录不代表 64 个独立用户或任务。

@@ -6,7 +6,7 @@
                 <t-icon v-if="status === 'connecting'" name="loading" size="24px"
                     class="sandbox-terminal__spinner" />
                 <t-icon
-                    v-else-if="status === 'not_started' || status === 'needs_provision' || status === 'no_sandbox'"
+                    v-else-if="status === 'paused' || status === 'needs_provision' || status === 'no_sandbox'"
                     name="terminal" size="28px" />
                 <t-icon v-else-if="status === 'unsupported'" name="error-circle" size="28px" />
                 <t-icon v-else-if="status === 'idle'" name="time" size="28px" />
@@ -24,7 +24,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, toRef, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -32,6 +32,10 @@ import '@xterm/xterm/css/xterm.css';
 import { useSandboxTerminal, type SandboxTerminalStatus } from '@/composables/useSandboxTerminal';
 import { useTheme } from '@/composables/useTheme';
 import { createPtyEchoPredictor } from '@/utils/ptyEchoPredictor';
+import {
+    PTY_PROMPT_NUDGE_DELAY_MS,
+    xtermBufferLooksEmpty,
+} from '@/utils/ptyPromptNudge';
 
 const props = defineProps<{
     sessionId: string;
@@ -68,6 +72,10 @@ const onSystemThemeChange = (event: MediaQueryListEvent) => {
 };
 prefersDark?.addEventListener('change', onSystemThemeChange);
 
+// ANSI palette: ls --color uses the usual dircolors mapping (dir=blue,
+// exec=green, link=cyan). Only the green slots stay WeKnora brand so
+// user@host (01;32) matches the product color; path (01;34) stays blue
+// like directories.
 function xtermTheme(dark: boolean) {
     return dark
         ? {
@@ -76,6 +84,18 @@ function xtermTheme(dark: boolean) {
             cursor: '#e6e6e6',
             cursorAccent: '#1a1a1a',
             selectionBackground: '#3a3a3a',
+            red: '#c64751',
+            brightRed: '#de6670',
+            green: '#06b04d',
+            brightGreen: '#07c05f',
+            yellow: '#c4a000',
+            brightYellow: '#fce94f',
+            blue: '#3465a4',
+            brightBlue: '#729fcf',
+            magenta: '#75507b',
+            brightMagenta: '#ad7fa8',
+            cyan: '#06989a',
+            brightCyan: '#34e2e2',
         }
         : {
             background: '#ffffff',
@@ -83,6 +103,18 @@ function xtermTheme(dark: boolean) {
             cursor: '#242424',
             cursorAccent: '#ffffff',
             selectionBackground: '#d0d7de',
+            red: '#e34d59',
+            brightRed: '#f36d78',
+            green: '#06b04d',
+            brightGreen: '#07c05f',
+            yellow: '#c4a000',
+            brightYellow: '#c4a000',
+            blue: '#3465a4',
+            brightBlue: '#729fcf',
+            magenta: '#75507b',
+            brightMagenta: '#ad7fa8',
+            cyan: '#06989a',
+            brightCyan: '#34e2e2',
         };
 }
 
@@ -97,8 +129,8 @@ const { status } = terminal;
 
 const statusText = computed(() => {
     switch (status.value as SandboxTerminalStatus) {
-        case 'not_started':
-            return t('chat.sandbox.notStarted');
+        case 'paused':
+            return t('chat.sandbox.paused');
         case 'connecting':
             return t('chat.sandbox.connecting');
         case 'needs_provision':
@@ -118,11 +150,11 @@ const statusText = computed(() => {
     }
 });
 
-// 覆盖层上那颗按钮的文案；空串表示这个状态没有可执行的动作。
-// 每次点击都视为"用户确认"，因此允许后端创建或唤醒沙箱——面板本身永远不会。
+// 覆盖层按钮：暂停用「启动终端」，尚未创建用「创建并启动」。点击才允许
+// 创建或唤醒；打开面板时的 lookup 不会做这两件事。
 const actionLabel = computed(() => {
     switch (status.value as SandboxTerminalStatus) {
-        case 'not_started':
+        case 'paused':
             return t('chat.sandbox.start');
         case 'needs_provision':
             return t('chat.sandbox.createAndStart');
@@ -145,6 +177,7 @@ let fitAddon: FitAddon | null = null;
 let echo: ReturnType<typeof createPtyEchoPredictor> | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let resizeDebounce: ReturnType<typeof setTimeout> | null = null;
+let promptNudgeTimer: ReturnType<typeof setTimeout> | null = null;
 let unmounted = false;
 
 function writeToXterm(chunk: string | Uint8Array) {
@@ -175,28 +208,19 @@ function mountTerminal() {
         echo?.onLocal(data);
         terminal.sendInput(data);
     });
-    // 必须在 connect 之后、但在有输出要展示时注册；composable 会先冲出缓冲的提示符。
-    terminal.onOutput((data) => echo?.onRemote(data));
 
     resizeObserver = new ResizeObserver(() => {
         if (resizeDebounce) clearTimeout(resizeDebounce);
-        resizeDebounce = setTimeout(() => {
-            if (!fitAddon || !xterm) return;
-            try {
-                fitAddon.fit();
-                terminal.resize(xterm.cols, xterm.rows);
-            } catch {
-                // fit 在容器尺寸为 0 时会抛错，忽略即可。
-            }
-        }, 100);
+        resizeDebounce = setTimeout(() => applyFit(), 100);
     });
     resizeObserver.observe(containerRef.value || terminalHost.value);
-    try {
-        fitAddon.fit();
-    } catch {
-        // 首帧布局未就绪时忽略。
-    }
-    terminal.resize(xterm.cols, xterm.rows);
+    // Fit BEFORE flushing buffered PTY bytes. FitAddon.fit() calls
+    // _renderService.clear() when the default 80x24 becomes the panel size,
+    // which would wipe a prompt painted a moment earlier and leave only the
+    // cursor until the next keystroke.
+    applyFit();
+    terminal.onOutput((data) => echo?.onRemote(data));
+    schedulePromptNudge();
     void nextTick(() => {
         requestAnimationFrame(() => fitAndFocus());
     });
@@ -209,17 +233,30 @@ function unmountTerminal() {
     resizeObserver = null;
     if (resizeDebounce) clearTimeout(resizeDebounce);
     resizeDebounce = null;
+    if (promptNudgeTimer) clearTimeout(promptNudgeTimer);
+    promptNudgeTimer = null;
     xterm?.dispose();
     xterm = null;
     fitAddon = null;
 }
 
-// 覆盖层上唯一的连接入口。provision: true 表示这是用户的显式确认，允许后端
-// 创建或唤醒沙箱；组件挂载本身不连接，所以打开面板不会产生任何计费副作用。
+// 覆盖层上唯一会创建或唤醒沙箱的入口。provision: true 表示这是用户的显式
+// 确认。组件挂载只做 lookup：运行中的沙箱直接连上，暂停或尚未创建才停在
+// 覆盖层等点击。
 function start() {
     unmountTerminal();
-    terminal.connect({ provision: true });
+    const { cols, rows } = estimatePtySize();
+    terminal.connect({ provision: true, cols, rows });
 }
+
+function connectLookup() {
+    const { cols, rows } = estimatePtySize();
+    terminal.connect({ provision: false, cols, rows });
+}
+
+onMounted(() => {
+    connectLookup();
+});
 
 watch(isDarkTheme, (dark) => {
     if (xterm) xterm.options.theme = xtermTheme(dark);
@@ -250,13 +287,56 @@ onBeforeUnmount(() => {
     unmountTerminal();
 });
 
-function fitAndFocus() {
+function estimatePtySize() {
+    const el = containerRef.value;
+    const width = Math.max(0, (el?.clientWidth ?? 0) - 16);
+    const height = Math.max(0, (el?.clientHeight ?? 0) - 16);
+    return {
+        cols: Math.max(20, Math.floor(width / 8) || 80),
+        rows: Math.max(8, Math.floor(height / 17) || 24),
+    };
+}
+
+function xtermVisibleBufferEmpty(): boolean {
+    if (!xterm) return true;
+    const buf = xterm.buffer.active;
+    const origin = buf.viewportY;
+    return xtermBufferLooksEmpty(
+        (row) => buf.getLine(origin + row)?.translateToString(true),
+        xterm.rows,
+    );
+}
+
+// Pty.Connect does not replay a prompt bash already printed. A same-size
+// resize is a no-op; flipping rows by 1 sends SIGWINCH so readline (and
+// TUIs) redraw. Do not inject Ctrl-L or Enter: that would go to whatever
+// is running in a reattached PTY.
+function schedulePromptNudge() {
+    if (promptNudgeTimer) clearTimeout(promptNudgeTimer);
+    promptNudgeTimer = setTimeout(() => {
+        promptNudgeTimer = null;
+        if (unmounted || !xterm || status.value !== 'ready') return;
+        if (!xtermVisibleBufferEmpty()) return;
+        const cols = Math.max(2, xterm.cols);
+        const rows = Math.max(2, xterm.rows);
+        terminal.resize(cols, rows - 1);
+        terminal.resize(cols, rows);
+    }, PTY_PROMPT_NUDGE_DELAY_MS);
+}
+
+function applyFit() {
+    if (!xterm) return;
     try {
         fitAddon?.fit();
     } catch {
-        // 容器尚未完成布局时忽略。
+        // fit 在容器尺寸为 0 时会抛错，忽略即可。
     }
-    if (xterm) terminal.resize(xterm.cols, xterm.rows);
+    terminal.resize(xterm.cols, xterm.rows);
+    xterm.refresh(0, xterm.rows - 1);
+}
+
+function fitAndFocus() {
+    applyFit();
     xterm?.focus();
 }
 

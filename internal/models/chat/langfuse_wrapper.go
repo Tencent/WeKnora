@@ -35,13 +35,7 @@ func (l *langfuseChat) Chat(ctx context.Context, messages []Message, opts *ChatO
 		Model:           l.inner.GetModelName(),
 		Input:           buildLangfuseMessages(messages),
 		ModelParameters: buildLangfuseModelParams(opts),
-		Metadata: map[string]interface{}{
-			"model_id":                  l.inner.GetModelID(),
-			"streaming":                 false,
-			"has_tools":                 opts != nil && len(opts.Tools) > 0,
-			"call_purpose":              purpose,
-			"prompt_prefix_fingerprint": prefixFingerprint,
-		},
+		Metadata:        buildLangfuseChatMetadata(l.inner.GetModelID(), purpose, prefixFingerprint, false, opts),
 	})
 
 	resp, err := l.inner.Chat(genCtx, messages, opts)
@@ -58,7 +52,9 @@ func (l *langfuseChat) Chat(ctx context.Context, messages []Message, opts *ChatO
 	return resp, err
 }
 
-func (l *langfuseChat) chatContentRedacted(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
+func (l *langfuseChat) chatContentRedacted(
+	ctx context.Context, messages []Message, opts *ChatOptions,
+) (*types.ChatResponse, error) {
 	mgr := langfuse.GetManager()
 	if !mgr.Enabled() {
 		return l.inner.Chat(ctx, messages, opts)
@@ -69,7 +65,11 @@ func (l *langfuseChat) chatContentRedacted(ctx context.Context, messages []Messa
 		Model:           l.inner.GetModelName(),
 		Input:           "[content redacted]",
 		ModelParameters: buildLangfuseModelParams(opts),
-		Metadata:        map[string]interface{}{"model_id": l.inner.GetModelID(), "call_purpose": purpose, "content_redacted": true},
+		Metadata: map[string]interface{}{
+			"model_id":         l.inner.GetModelID(),
+			"call_purpose":     purpose,
+			"content_redacted": true,
+		},
 	})
 	resp, err := l.inner.Chat(genCtx, messages, opts)
 	var usage *langfuse.TokenUsage
@@ -101,13 +101,7 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 		Model:           l.inner.GetModelName(),
 		Input:           buildLangfuseMessages(messages),
 		ModelParameters: buildLangfuseModelParams(opts),
-		Metadata: map[string]interface{}{
-			"model_id":                  l.inner.GetModelID(),
-			"streaming":                 true,
-			"has_tools":                 opts != nil && len(opts.Tools) > 0,
-			"call_purpose":              purpose,
-			"prompt_prefix_fingerprint": prefixFingerprint,
-		},
+		Metadata:        buildLangfuseChatMetadata(l.inner.GetModelID(), purpose, prefixFingerprint, true, opts),
 	})
 
 	ch, err := l.inner.ChatStream(genCtx, messages, opts)
@@ -171,6 +165,48 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 
 func snapshotLangfuseToolCalls(toolCalls []types.LLMToolCall) []types.LLMToolCall {
 	return append([]types.LLMToolCall(nil), toolCalls...)
+}
+
+const (
+	langfuseDiscoverMCPTool = "discover_mcp_tools"
+	langfuseMCPCatalogRunes = 8000
+)
+
+func buildLangfuseChatMetadata(
+	modelID, purpose, prefixFingerprint string,
+	streaming bool,
+	opts *ChatOptions,
+) map[string]interface{} {
+	meta := map[string]interface{}{
+		"model_id":                  modelID,
+		"streaming":                 streaming,
+		"has_tools":                 opts != nil && len(opts.Tools) > 0,
+		"call_purpose":              purpose,
+		"prompt_prefix_fingerprint": prefixFingerprint,
+	}
+	if opts == nil || len(opts.Tools) == 0 {
+		return meta
+	}
+	names := make([]string, 0, len(opts.Tools))
+	for _, tool := range opts.Tools {
+		names = append(names, tool.Function.Name)
+		if tool.Function.Name == langfuseDiscoverMCPTool && tool.Function.Description != "" {
+			meta["mcp_catalog"] = truncateLangfuseText(tool.Function.Description, langfuseMCPCatalogRunes)
+		}
+	}
+	meta["tool_names"] = names
+	return meta
+}
+
+func truncateLangfuseText(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "…"
 }
 
 func buildLangfuseMessages(messages []Message) []map[string]interface{} {

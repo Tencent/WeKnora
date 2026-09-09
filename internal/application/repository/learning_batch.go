@@ -12,7 +12,12 @@ import (
 // Bulk display paths do not acquire content row locks. Their state describes
 // the read snapshot; grading and publication independently recheck live input
 // under locks. Hash chunks in batches to bound resident source content.
-func learningNodes(tx *gorm.DB, scope interfaces.LearningScope, pages []*types.WikiPage, kb *types.KnowledgeBase) ([]*types.LearningNode, error) {
+func learningNodes(
+	tx *gorm.DB,
+	scope interfaces.LearningScope,
+	pages []*types.WikiPage,
+	kb *types.KnowledgeBase,
+) ([]*types.LearningNode, error) {
 	result := make([]*types.LearningNode, 0, len(pages))
 	if len(pages) == 0 {
 		return result, nil
@@ -56,8 +61,13 @@ func learningNodes(tx *gorm.DB, scope interfaces.LearningScope, pages []*types.W
 	validDocs := map[string]bool{}
 	for start := 0; start < len(docIDs); start += 500 {
 		var found []string
-		if err := tx.Model(&types.Knowledge{}).Where("tenant_id = ? AND knowledge_base_id = ? AND id IN ? AND enable_status = ? AND parse_status = ?",
-			scope.TenantID, kb.ID, docIDs[start:min(start+500, len(docIDs))], "enabled", types.ParseStatusCompleted).Pluck("id", &found).Error; err != nil {
+		if err := tx.Model(&types.Knowledge{}).
+			Where(
+				"tenant_id = ? AND knowledge_base_id = ? AND id IN ? AND enable_status = ? AND parse_status = ?",
+				scope.TenantID, kb.ID, docIDs[start:min(start+500, len(docIDs))], "enabled", types.ParseStatusCompleted,
+			).
+			Pluck("id", &found).
+			Error; err != nil {
 			return nil, err
 		}
 		for _, id := range found {
@@ -67,9 +77,18 @@ func learningNodes(tx *gorm.DB, scope interfaces.LearningScope, pages []*types.W
 	stamps := map[string]learningChunkStamp{}
 	for start := 0; start < len(chunkIDs); start += 200 {
 		var chunks []*types.Chunk
-		if err := tx.Select("id", "knowledge_id", "content", "content_revision").Where("tenant_id = ? AND knowledge_base_id = ? AND id IN ? AND is_enabled = ? AND index_status = ? AND chunk_type IN ?",
-			scope.TenantID, kb.ID, chunkIDs[start:min(start+200, len(chunkIDs))], true, "ready",
-			[]string{types.ChunkTypeText, types.ChunkTypeParentText, types.ChunkTypeImageOCR}).Find(&chunks).Error; err != nil {
+		if err := tx.Select("id", "knowledge_id", "content", "content_revision").
+			Where(
+				"tenant_id = ? AND knowledge_base_id = ? AND id IN ? "+
+					"AND is_enabled = ? AND index_status = ? AND chunk_type IN ?",
+				scope.TenantID, kb.ID, chunkIDs[start:min(start+200, len(chunkIDs))], true, "ready",
+				[]string{
+					types.ChunkTypeText,
+					types.ChunkTypeParentText,
+					types.ChunkTypeImageOCR,
+				}).
+			Find(&chunks).
+			Error; err != nil {
 			return nil, err
 		}
 		for _, c := range chunks {
@@ -81,7 +100,9 @@ func learningNodes(tx *gorm.DB, scope interfaces.LearningScope, pages []*types.W
 	for _, p := range pages {
 		n := &types.LearningNode{Page: p, Mastery: byPage[p.ID]}
 		result = append(result, n)
-		if n.Mastery == nil || n.Mastery.Attempts == 0 || len(p.ChunkRefs) == 0 || len(p.ChunkRefs) > 256 || len(p.SourceRefs) == 0 || len(p.SourceRefs) > 64 {
+		if n.Mastery == nil || n.Mastery.Attempts == 0 || len(p.ChunkRefs) == 0 || len(p.ChunkRefs) > 256 ||
+			len(p.SourceRefs) == 0 ||
+			len(p.SourceRefs) > 64 {
 			continue
 		}
 		members := map[string]bool{}

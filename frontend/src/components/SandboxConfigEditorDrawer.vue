@@ -677,15 +677,13 @@
 
       <section v-if="currentStepKey === 'runtime'" class="setting-drawer__section">
         <div class="section-title-row">
-          <div>
-            <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.sectionEnvironment') }}</h4>
-            <p class="section-help section-help--under-title">{{ $t('settings.sandbox.envVarsHint') }}</p>
-          </div>
+          <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.sectionEnvironment') }}</h4>
           <t-button variant="text" size="small" @click="envRows.push({ key: '', value: '' })">
             <template #icon><t-icon name="add" /></template>
             {{ $t('settings.sandbox.addRow') }}
           </t-button>
         </div>
+        <p class="section-help section-help--under-title">{{ $t('settings.sandbox.envVarsHint') }}</p>
         <div v-if="envRows.length" class="env-rows">
           <div v-for="(row, index) in envRows" :key="index" class="env-row">
             <t-input v-model="row.key" :placeholder="$t('settings.sandbox.envKey')" class="env-key" />
@@ -2360,6 +2358,7 @@ onUnmounted(stopTemplatePolling)
   &--under-title {
     margin-top: 5px;
     max-width: 540px;
+    white-space: pre-line;
   }
 
   /* Sits under an input inside the same form item. */

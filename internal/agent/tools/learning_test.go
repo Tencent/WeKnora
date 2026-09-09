@@ -30,9 +30,13 @@ func (s *learningToolService) Overview(ctx context.Context, kbID string) (*types
 
 func (s *learningToolService) PrepareQuiz(context.Context, string) (*types.LearningQuizView, error) {
 	s.calls++
-	return &types.LearningQuizView{ID: "quiz", Status: "ready", Questions: []types.LearningQuestionView{{
-		ID: "q", Answered: true, Result: &types.LearningAnswerResult{CorrectOption: "private-answer", Explanation: "private-explanation"},
-	}}}, nil
+	return &types.LearningQuizView{ID: "quiz", Status: "ready", Questions: []types.LearningQuestionView{
+		{
+			ID:       "q",
+			Answered: true,
+			Result:   &types.LearningAnswerResult{CorrectOption: "private-answer", Explanation: "private-explanation"},
+		},
+	}}, nil
 }
 
 type learningToolWiki struct{ interfaces.WikiPageService }
@@ -44,10 +48,19 @@ func (learningToolWiki) GetPageBySlug(context.Context, string, string) (*types.W
 func TestLearningToolsDoNotDiscloseAnswersFromAnExistingQuiz(t *testing.T) {
 	svc := &learningToolService{}
 	tool := NewLearningTool(ToolPrepareLearningQuiz, svc, learningToolWiki{}, []string{"kb"}, nil)
-	result, err := tool.Execute(learningToolContext(), json.RawMessage(`{"knowledge_base_id":"kb","slug":"concept/rag"}`))
+	result, err := tool.Execute(
+		learningToolContext(),
+		json.RawMessage(`{"knowledge_base_id":"kb","slug":"concept/rag"}`),
+	)
 	require.NoError(t, err)
 	require.True(t, result.Success)
-	for _, data := range []any{result, SanitizeToolResultForClient(tool.Name(), result), SanitizeAgentStepsForStorage([]types.AgentStep{{ToolCalls: []types.ToolCall{{Name: tool.Name(), Result: result}}}})} {
+	for _, data := range []any{
+		result,
+		SanitizeToolResultForClient(tool.Name(), result),
+		SanitizeAgentStepsForStorage([]types.AgentStep{
+			{ToolCalls: []types.ToolCall{{Name: tool.Name(), Result: result}}},
+		}),
+	} {
 		encoded, err := json.Marshal(data)
 		require.NoError(t, err)
 		require.NotContains(t, string(encoded), "private-answer")
@@ -57,7 +70,13 @@ func TestLearningToolsDoNotDiscloseAnswersFromAnExistingQuiz(t *testing.T) {
 }
 
 func TestLearningToolsDenyMachineAndBorrowedScopes(t *testing.T) {
-	for _, kind := range []string{types.PrincipalAPITenant, types.PrincipalAPIPlatform, types.PrincipalAPIExternalUser, types.PrincipalIMUser, types.PrincipalEmbedVisitor} {
+	for _, kind := range []string{
+		types.PrincipalAPITenant,
+		types.PrincipalAPIPlatform,
+		types.PrincipalAPIExternalUser,
+		types.PrincipalIMUser,
+		types.PrincipalEmbedVisitor,
+	} {
 		t.Run(kind, func(t *testing.T) {
 			svc := &learningToolService{}
 			tool := NewLearningTool(ToolGetLearningProfile, svc, nil, []string{"kb"}, nil)
@@ -70,7 +89,12 @@ func TestLearningToolsDenyMachineAndBorrowedScopes(t *testing.T) {
 	}
 	require.False(t, LearningWebCallerAllowed(types.WithExecutionTenant(learningToolContext(), 8)))
 	require.False(t, LearningWebCallerAllowed(context.Background()))
-	require.False(t, LearningWebCallerAllowed(types.WithPrincipal(learningToolContext(), types.Principal{Type: types.PrincipalWebUser, ID: "bob"})))
+	require.False(
+		t,
+		LearningWebCallerAllowed(
+			types.WithPrincipal(learningToolContext(), types.Principal{Type: types.PrincipalWebUser, ID: "bob"}),
+		),
+	)
 }
 
 func TestLearningToolsRespectKBAndMemoryRestrictions(t *testing.T) {

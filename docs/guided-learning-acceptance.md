@@ -4,7 +4,19 @@
 
 设计见 [guided-learning.md](guided-learning.md)，用户流程见[功能指南](../website-docs/03-features/22-guided-learning.md)，算法和数据集限制见[评估说明](guided-learning-evaluation.md)。
 
-### 验证记录
+### PR 审查修复
+
+2026-09-10 合入官方 `main`（`b60351f8`），同时保留 MCP 路由句柄和学习工具策略。学习迁移改为 PostgreSQL `000093`，避免与主线 `000092_mcp_metadata` 冲突；SQLite 仍为 `000014`。文档站的仓库外相对链接已改为 GitHub 链接。
+
+数据库未知故障返回 `learning_unavailable` / HTTP 500；可重试锁竞争和容量限制继续返回 429。日志只保留错误类别和安全数据库错误码，不记录 SQL、参数或原始错误正文。
+
+本轮结果：Go 全仓测试、`go vet`、定向 race、真实 PostgreSQL/SQLite 仓储测试通过；增量 golangci-lint v2.12.2 为 0 项问题；前端 808 项测试、类型检查和生产构建通过；文档站构建通过。迁移源加载、MCP/学习策略共存、缺表及断连分类有新增回归测试。未重跑真实模型和浏览器端到端验收，下面保留的是首版记录。
+
+本地日志分别为 `.runtime/logs/pr3145-fix-go-all.log`、`pr3145-fix-lint.log`、`pr3145-fix-postgres.log`、`pr3145-fix-race.log`、`pr3145-fix-frontend-tests.log`、`pr3145-fix-frontend-types.log`、`pr3145-fix-frontend-build.log` 和 `pr3145-fix-docs-build.log`，均未进入版本控制。
+
+本次只处理四项 P1/P2 问题和合并冲突；本机取证材料整理、恢复扫描和 Wiki 重命名锁范围仍为单独的 P3 工作。
+
+### 首版验证记录
 
 记录时间为本地时间 2026-09-09，证据文件名使用 UTC。下列日志路径均相对于当前工作树中已忽略的 `.runtime/` 目录。
 

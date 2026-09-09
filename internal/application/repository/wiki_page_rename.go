@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// ErrWikiPageSlugConflict indicates that the destination slug is already in use.
 var ErrWikiPageSlugConflict = errors.New("wiki page slug already exists")
 
 var _ interfaces.WikiPageRenamer = (*wikiPageRepository)(nil)
@@ -62,7 +63,8 @@ func (r *wikiPageRepository) RenamePage(
 		}
 		incoming := slices.Clone(result.Page.InLinks)
 		for _, page := range pages {
-			if slices.Contains(page.OutLinks, req.OldSlug) || renameWikiLinkContent(page.Content, req.OldSlug, req.NewSlug) != page.Content {
+			if slices.Contains(page.OutLinks, req.OldSlug) ||
+				renameWikiLinkContent(page.Content, req.OldSlug, req.NewSlug) != page.Content {
 				if !slices.Contains(incoming, page.Slug) {
 					incoming = append(incoming, page.Slug)
 				}
@@ -149,7 +151,8 @@ func (r *wikiPageRepository) RenamePage(
 }
 
 func validateWikiRename(req interfaces.WikiPageRenameRequest) error {
-	if strings.TrimSpace(req.KnowledgeBaseID) == "" || strings.TrimSpace(req.PageID) == "" || strings.TrimSpace(req.OldSlug) == "" {
+	if strings.TrimSpace(req.KnowledgeBaseID) == "" || strings.TrimSpace(req.PageID) == "" ||
+		strings.TrimSpace(req.OldSlug) == "" {
 		return errors.New("knowledge_base_id, page_id and old_slug are required")
 	}
 	slug := req.NewSlug
@@ -224,8 +227,12 @@ func (r *chunkRepository) UpdateRenamedWikiChunk(
 			return ErrWikiPageConflict
 		}
 		write := tx.Model(&types.Chunk{}).
-			Where("id = ? AND tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ? AND content_revision = ? AND updated_at = ?",
-				chunk.ID, page.TenantID, page.KnowledgeBaseID, types.ChunkTypeWikiPage, chunk.ContentRevision, expectedUpdatedAt).
+			Where(
+				"id = ? AND tenant_id = ? AND knowledge_base_id = ? "+
+					"AND chunk_type = ? AND content_revision = ? AND updated_at = ?",
+				chunk.ID, page.TenantID, page.KnowledgeBaseID,
+				types.ChunkTypeWikiPage, chunk.ContentRevision, expectedUpdatedAt,
+			).
 			Updates(map[string]interface{}{
 				"content": chunk.Content, "content_hash": chunk.ContentHash, "metadata": chunk.Metadata,
 				"index_status": chunk.IndexStatus, "updated_at": chunk.UpdatedAt,

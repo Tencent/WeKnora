@@ -207,3 +207,9 @@ func SkillInterpreterCommand(skillDir, scriptPath string) (string, []string) {
 		return "/bin/sh", []string{scriptPath}
 	}
 }
+
+// SkillCommandPath is shared by normal skill execution and installation verification.
+func SkillCommandPath(dir string) string {
+	return path.Join(dir, ".venv", "bin") + ":" +
+		path.Join(dir, "node_modules", ".bin") + ":" + path.Join(dir, ".weknora", "bin")
+}

@@ -54,17 +54,21 @@ func NewSandboxTerminalService(
 }
 
 // OpenSessionTerminal attaches to the session's currently bound sandbox
-// without ever creating or rebuilding one. This is the path a page load and
-// an automatic reconnect take: opening a panel must not conjure a microVM.
+// without ever creating or resuming one. This is the path a panel open and
+// an automatic reconnect take: a running sandbox is attached, a bound
+// sandbox that is not confirmed running reports ErrSandboxPaused, and a
+// missing one reports ErrNoLiveSessionSandbox. Opening a panel must not
+// conjure or wake a microVM.
 //
-// When the session has no live sandbox it reports
-// sandbox.ErrNoLiveSessionSandbox, which the WebSocket handler turns into
-// the SANDBOX_NOT_BOUND frame the UI answers with an explicit "create and
-// start" button. That confirmed click is what calls EnsureSessionTerminal.
+// The WebSocket handler turns those errors into SANDBOX_PAUSED /
+// SANDBOX_NOT_BOUND frames the UI answers with an explicit button. That
+// confirmed click is what calls EnsureSessionTerminal.
 //
 // Error contract (the WebSocket handler maps these onto protocol error
 // frames):
 //   - sandbox.ErrNoLiveSessionSandbox — the session has no bound sandbox.
+//   - sandbox.ErrSandboxPaused — the bound sandbox is paused; resume needs
+//     an explicit click (EnsureSessionTerminal with AllowResume).
 //   - ErrTerminalUnsupported — the resolved backend cannot stream PTYs
 //     (Docker, disabled manager).
 //   - any other error — resolution or provider failure.
@@ -73,6 +77,7 @@ func (s *SandboxTerminalService) OpenSessionTerminal(
 	sessionID string,
 	opts sandbox.RemoteTerminalOptions,
 ) (*SessionTerminal, error) {
+	opts.AllowResume = false
 	mgr, _, err := s.resolveSessionManager(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -134,6 +139,7 @@ func (s *SandboxTerminalService) EnsureSessionTerminal(
 	sandboxConfigID string,
 	opts sandbox.RemoteTerminalOptions,
 ) (*SessionTerminal, error) {
+	opts.AllowResume = true
 	mgr, _, err := s.resolveSessionManager(ctx, sessionID)
 	if err == nil {
 		terminal, terr := s.openOnManager(ctx, mgr, sessionID, opts)
@@ -141,9 +147,9 @@ func (s *SandboxTerminalService) EnsureSessionTerminal(
 			return terminal, nil
 		}
 		// The pin names the config but the sandbox itself is gone
-		// (reclaimed or paused out of band). The config context is right
-		// here, so rebuild on it instead of treating the session as
-		// sandbox-less and asking the caller for an agent.
+		// (reclaimed out of band). Resume of a paused instance already
+		// happened above via AllowResume. Rebuild only when there is
+		// nothing left to connect to.
 		if errors.Is(terr, sandbox.ErrNoLiveSessionSandbox) {
 			if perr := s.provisionOnManager(ctx, mgr, sessionID); perr == nil {
 				if terminal, retryErr := s.openOnManager(ctx, mgr, sessionID, opts); retryErr == nil {

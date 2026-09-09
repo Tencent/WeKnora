@@ -41,4 +41,4 @@
 
 ## 验证边界
 
-设计、当前范围和可复现的合成评估见 [guided-learning.md](../../docs/guided-learning.md) 与 [guided-learning-evaluation.md](../../docs/guided-learning-evaluation.md)。离线分数无法说明真人学习收益。来源引文校验和模型盲测可以减少错误，但不能证明每道生成题都正确。
+设计、当前范围和可复现的合成评估见仓库中的[设计说明](https://github.com/Tencent/WeKnora/blob/main/docs/guided-learning.md)与[评估说明](https://github.com/Tencent/WeKnora/blob/main/docs/guided-learning-evaluation.md)。离线分数无法说明真人学习收益。来源引文校验和模型盲测可以减少错误，但不能证明每道生成题都正确。

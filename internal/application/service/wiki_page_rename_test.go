@@ -32,13 +32,18 @@ func (r *wikiRenameChunkRepo) GetChunkByID(_ context.Context, _ uint64, id strin
 		return nil, r.getErr
 	}
 	if chunk := r.chunks[id]; chunk != nil {
-		copy := *chunk
-		return &copy, nil
+		cloned := *chunk
+		return &cloned, nil
 	}
 	return nil, repository.ErrChunkNotFound
 }
 
-func (r *wikiRenameChunkRepo) UpdateRenamedWikiChunk(_ context.Context, _ *types.WikiPage, chunk *types.Chunk, expectedUpdatedAt time.Time) error {
+func (r *wikiRenameChunkRepo) UpdateRenamedWikiChunk(
+	_ context.Context,
+	_ *types.WikiPage,
+	chunk *types.Chunk,
+	expectedUpdatedAt time.Time,
+) error {
 	r.updates++
 	if r.updateErr != nil {
 		return r.updateErr
@@ -46,12 +51,15 @@ func (r *wikiRenameChunkRepo) UpdateRenamedWikiChunk(_ context.Context, _ *types
 	if !r.chunks[chunk.ID].UpdatedAt.Equal(expectedUpdatedAt) {
 		return repository.ErrChunkRevisionConflict
 	}
-	copy := *chunk
-	r.chunks[chunk.ID] = &copy
+	cloned := *chunk
+	r.chunks[chunk.ID] = &cloned
 	return nil
 }
 
-func newWikiRenameService(t *testing.T, chunks interfaces.ChunkRepository) (*gorm.DB, interfaces.WikiPageRepository, interfaces.WikiPageService, *types.WikiPage) {
+func newWikiRenameService(
+	t *testing.T,
+	chunks interfaces.ChunkRepository,
+) (*gorm.DB, interfaces.WikiPageRepository, interfaces.WikiPageService, *types.WikiPage) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -59,22 +67,36 @@ func newWikiRenameService(t *testing.T, chunks interfaces.ChunkRepository) (*gor
 	require.NoError(t, err)
 	pool.SetMaxOpenConns(1)
 	t.Cleanup(func() { require.NoError(t, pool.Close()) })
-	require.NoError(t, db.AutoMigrate(&types.WikiPage{}, &types.WikiPageRevision{}, &types.WikiPageIssue{}, &types.WikiFolder{}))
+	require.NoError(
+		t,
+		db.AutoMigrate(&types.WikiPage{}, &types.WikiPageRevision{}, &types.WikiPageIssue{}, &types.WikiFolder{}),
+	)
 	require.NoError(t, db.Migrator().DropIndex(&types.WikiPage{}, "idx_kb_slug"))
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX idx_wiki_pages_kb_slug
 		ON wiki_pages (knowledge_base_id, slug) WHERE deleted_at IS NULL`).Error)
 	repo := repository.NewWikiPageRepository(db)
 	svc := NewWikiPageService(repo, chunks, nil, nil, nil)
 	page, err := svc.CreatePage(context.Background(), &types.WikiPage{
-		TenantID: 42, KnowledgeBaseID: "kb-a", Slug: "concept/old", Title: "Topic", Content: "original content",
-		PageType: types.WikiPageTypeConcept, SourceRefs: types.StringArray{"doc-id|Source"}, ChunkRefs: types.StringArray{"source-chunk"},
+		TenantID:        42,
+		KnowledgeBaseID: "kb-a",
+		Slug:            "concept/old",
+		Title:           "Topic",
+		Content:         "original content",
+		PageType:        types.WikiPageTypeConcept,
+		SourceRefs:      types.StringArray{"doc-id|Source"},
+		ChunkRefs:       types.StringArray{"source-chunk"},
 	})
 	require.NoError(t, err)
 	return db, repo, svc, page
 }
 
 func renameServiceRequest(page *types.WikiPage) interfaces.WikiPageRenameRequest {
-	return interfaces.WikiPageRenameRequest{KnowledgeBaseID: page.KnowledgeBaseID, PageID: page.ID, OldSlug: page.Slug, NewSlug: "concept/new"}
+	return interfaces.WikiPageRenameRequest{
+		KnowledgeBaseID: page.KnowledgeBaseID,
+		PageID:          page.ID,
+		OldSlug:         page.Slug,
+		NewSlug:         "concept/new",
+	}
 }
 
 func TestWikiRenameServiceKeepsHistoryAccessible(t *testing.T) {
@@ -175,11 +197,19 @@ func TestWikiRenameServiceSyncsRewrittenBodiesAndExposesReindexLimit(t *testing.
 }
 
 func TestWikiRenameServiceSyncFailuresDoNotUndoRename(t *testing.T) {
-	for _, scenario := range []string{"missing", "read-error", "write-error", "metadata-error", "wrong-kb", "source-chunk"} {
+	for _, scenario := range []string{
+		"missing", "read-error", "write-error", "metadata-error", "wrong-kb", "source-chunk",
+	} {
 		t.Run(scenario, func(t *testing.T) {
 			chunks := &wikiRenameChunkRepo{chunks: make(map[string]*types.Chunk)}
 			_, repo, svc, page := newWikiRenameService(t, chunks)
-			chunk := &types.Chunk{ID: "wp-" + page.ID, TenantID: page.TenantID, KnowledgeBaseID: page.KnowledgeBaseID, ChunkType: types.ChunkTypeWikiPage, Content: page.Content}
+			chunk := &types.Chunk{
+				ID:              "wp-" + page.ID,
+				TenantID:        page.TenantID,
+				KnowledgeBaseID: page.KnowledgeBaseID,
+				ChunkType:       types.ChunkTypeWikiPage,
+				Content:         page.Content,
+			}
 			chunks.chunks[chunk.ID] = chunk
 			switch scenario {
 			case "missing":
@@ -228,7 +258,11 @@ func TestWikiRenameServiceDoesNotSyncAfterCollision(t *testing.T) {
 	chunks := &wikiRenameChunkRepo{}
 	_, repo, svc, page := newWikiRenameService(t, chunks)
 	_, err := svc.CreatePage(context.Background(), &types.WikiPage{
-		TenantID: page.TenantID, KnowledgeBaseID: page.KnowledgeBaseID, Slug: "concept/new", Title: "Existing", PageType: types.WikiPageTypeConcept,
+		TenantID:        page.TenantID,
+		KnowledgeBaseID: page.KnowledgeBaseID,
+		Slug:            "concept/new",
+		Title:           "Existing",
+		PageType:        types.WikiPageTypeConcept,
 	})
 	require.NoError(t, err)
 	result, err := svc.(interfaces.WikiPageRenamer).RenamePage(context.Background(), renameServiceRequest(page))

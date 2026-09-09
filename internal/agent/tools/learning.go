@@ -24,6 +24,7 @@ func LearningWebCallerAllowed(ctx context.Context) bool {
 		tenant == caller.TenantID && principal.Type == types.PrincipalWebUser && principal.ID == caller.UserID
 }
 
+// IsLearningTool reports whether name identifies a personal learning tool.
 func IsLearningTool(name string) bool {
 	return name == ToolGetLearningProfile || name == ToolRecommendLearningTopics || name == ToolPrepareLearningQuiz
 }
@@ -52,27 +53,52 @@ type learningTool struct {
 	memoryEnabled *bool
 }
 
-func NewLearningTool(name string, svc interfaces.LearningService, wiki interfaces.WikiPageService, kbIDs []string, memoryEnabled *bool) types.Tool {
-	description := "Read your opted-in learning overview for a bound Wiki knowledge base. Mastery is a BKT estimate from assessed practice, not document familiarity."
+// NewLearningTool creates a learning tool restricted to the supplied Wiki knowledge bases.
+func NewLearningTool(
+	name string,
+	svc interfaces.LearningService,
+	wiki interfaces.WikiPageService,
+	kbIDs []string,
+	memoryEnabled *bool,
+) types.Tool {
+	description := "Read your opted-in learning overview for a bound Wiki knowledge base. " +
+		"Mastery is a BKT estimate from assessed practice, not document familiarity."
 	properties := map[string]any{
-		"knowledge_base_id": map[string]any{"type": "string", "description": "A bound, workspace-owned Wiki knowledge base ID (bN)."},
+		"knowledge_base_id": map[string]any{
+			"type":        "string",
+			"description": "A bound, workspace-owned Wiki knowledge base ID (bN).",
+		},
 	}
 	required := []string{"knowledge_base_id"}
 	switch name {
 	case ToolRecommendLearningTopics:
-		description = "Recommend next Wiki topics using the user's assessed practice, related pages and optional interests. Quote only the returned reason codes. Related links are not prerequisites. Read the recommended Wiki page before explaining its content."
+		description = "Recommend next Wiki topics using the user's assessed practice, " +
+			"related pages and optional interests. Quote only the returned reason codes. " +
+			"Related links are not prerequisites. Read the recommended Wiki page before explaining its content."
 		properties["limit"] = map[string]any{"type": "integer", "minimum": 1, "maximum": 10}
 	case ToolPrepareLearningQuiz:
-		description = "Prepare a source-backed quiz for a Wiki page. Returns a quiz card reference only; the human answers in the interface. Never answer for the learner or infer mastery from conversation. A pending quiz is generated asynchronously; do not poll with repeated tool calls."
-		properties["slug"] = map[string]any{"type": "string", "description": "Exact Wiki slug from wiki_search/wiki_read_page, such as concept/rag."}
+		description = "Prepare a source-backed quiz for a Wiki page. Returns a quiz card reference only; " +
+			"the human answers in the interface. Never answer for the learner or infer mastery from conversation. " +
+			"A pending quiz is generated asynchronously; do not poll with repeated tool calls."
+		properties["slug"] = map[string]any{
+			"type":        "string",
+			"description": "Exact Wiki slug from wiki_search/wiki_read_page, such as concept/rag.",
+		}
 		required = append(required, "slug")
 	case ToolGetLearningProfile:
 	default:
 		return nil
 	}
-	schema, _ := json.Marshal(map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false})
-	return &learningTool{BaseTool: NewBaseTool(name, description, schema), service: svc, wiki: wiki,
-		kbIDs: append([]string(nil), kbIDs...), memoryEnabled: memoryEnabled}
+	schema, _ := json.Marshal(
+		map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false},
+	)
+	return &learningTool{
+		BaseTool:      NewBaseTool(name, description, schema),
+		service:       svc,
+		wiki:          wiki,
+		kbIDs:         append([]string(nil), kbIDs...),
+		memoryEnabled: memoryEnabled,
+	}
 }
 
 func (t *learningTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
@@ -131,7 +157,8 @@ func (t *learningTool) Execute(ctx context.Context, args json.RawMessage) (*type
 		// The authenticated UI fetches the current quiz separately from the model.
 		data["display_type"], data["quiz_id"] = "learning_quiz", quiz.ID
 		data["page_id"], data["title"], data["status"] = page.ID, page.Title, quiz.Status
-		data["instruction"] = "The learner can open the quiz card. Do not supply answers or repeatedly poll a pending quiz."
+		data["instruction"] = "The learner can open the quiz card. " +
+			"Do not supply answers or repeatedly poll a pending quiz."
 	}
 	encoded, err := json.Marshal(data)
 	if err != nil {
@@ -144,9 +171,11 @@ func learningFailure(err error) *types.ToolResult {
 	message := "Learning request failed. Try again later."
 	switch {
 	case errors.Is(err, types.ErrLearningForbidden), errors.Is(err, types.ErrLearningNotFound):
-		message = "Learning is unavailable for this caller or knowledge scope. It requires a workspace-owned Wiki KB and a Web user."
+		message = "Learning is unavailable for this caller or knowledge scope. " +
+			"It requires a workspace-owned Wiki KB and a Web user."
 	case errors.Is(err, types.ErrLearningDisabled):
-		message = "Learning is not enabled by the user. They can enable it in the Wiki learning panel; tools cannot opt in for them."
+		message = "Learning is not enabled by the user. " +
+			"They can enable it in the Wiki learning panel; tools cannot opt in for them."
 	case errors.Is(err, types.ErrLearningStale):
 		message = "The source changed. Open the Wiki learning panel to prepare a fresh quiz."
 	case errors.Is(err, types.ErrLearningEvidence):

@@ -127,7 +127,9 @@ func TestWikiRenamePreservesIdentityHistoryMasterySourcesAndLinks(t *testing.T) 
 		deleted := makeWikiPage("kb-a", "concept/deleted", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
 		deleted.Content = "[[concept/old]]"
 		deleted.DeletedAt = gorm.DeletedAt{Time: time.Now(), Valid: true}
-		for _, p := range []*types.WikiPage{page, incoming, target, uncached, archived, child, other, unrelated, deleted} {
+		for _, p := range []*types.WikiPage{
+			page, incoming, target, uncached, archived, child, other, unrelated, deleted,
+		} {
 			require.NoError(t, repo.Create(ctx, p))
 		}
 		revision := makeWikiRevision(page, 6, types.WikiEditSourceUser)
@@ -142,7 +144,8 @@ func TestWikiRenamePreservesIdentityHistoryMasterySourcesAndLinks(t *testing.T) 
 		// A test-only learning row proves that a UUID-keyed personal relation
 		// survives without depending on another agent's learning implementation.
 		require.NoError(t, db.Exec(`CREATE TABLE rename_mastery_probe (
-			page_id VARCHAR(36) PRIMARY KEY REFERENCES wiki_pages(id), p_mastery DOUBLE PRECISION, answers INTEGER)`).Error)
+			page_id VARCHAR(36) PRIMARY KEY REFERENCES wiki_pages(id),
+			p_mastery DOUBLE PRECISION, answers INTEGER)`).Error)
 		require.NoError(t, db.Exec("INSERT INTO rename_mastery_probe VALUES (?, ?, ?)", page.ID, 0.87, 5).Error)
 		before := snapshotWikiRename(t, db)
 		original, err := repo.GetByID(ctx, page.ID)
@@ -171,7 +174,11 @@ func TestWikiRenamePreservesIdentityHistoryMasterySourcesAndLinks(t *testing.T) 
 		require.Equal(t, "concept/new", stored.ParentSlug)
 		require.Equal(t, "Self [[concept/new]] and [[concept/target|Target]].", stored.Content)
 		require.Equal(t, "See [[concept/new| original label ]].", stored.Summary)
-		require.ElementsMatch(t, []string{"concept/new", "concept/from", "concept/uncached", "concept/archived"}, stored.InLinks)
+		require.ElementsMatch(
+			t,
+			[]string{"concept/new", "concept/from", "concept/uncached", "concept/archived"},
+			stored.InLinks,
+		)
 		require.Equal(t, types.StringArray{"concept/new", "concept/target"}, stored.OutLinks)
 		_, err = repo.GetBySlug(ctx, "kb-a", "concept/old")
 		require.ErrorIs(t, err, ErrWikiPageNotFound)
@@ -241,7 +248,10 @@ func TestWikiRenameUsesLiveKBSlugConstraint(t *testing.T) {
 		for _, p := range []*types.WikiPage{page, deleted, other} {
 			require.NoError(t, db.Create(p).Error)
 		}
-		result, err := NewWikiPageRepository(db).(interfaces.WikiPageRenamer).RenamePage(context.Background(), wikiRenameRequest(page))
+		result, err := NewWikiPageRepository(db).(interfaces.WikiPageRenamer).RenamePage(
+			context.Background(),
+			wikiRenameRequest(page),
+		)
 		require.NoError(t, err)
 		require.Equal(t, page.ID, result.Page.ID)
 		var count int64
@@ -254,22 +264,30 @@ func TestWikiRenameRollsBackAllWritesOnIssueFailure(t *testing.T) {
 	withWikiRenameDB(t, func(t *testing.T, db *gorm.DB) {
 		page := makeWikiPage("kb-a", "concept/old", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
 		other := makeWikiPage("kb-a", "concept/from", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
-		other.Content, other.ParentSlug, other.OutLinks = "[[concept/old]]", "concept/old", types.StringArray{"concept/old"}
+		other.Content, other.ParentSlug, other.OutLinks = "[[concept/old]]", "concept/old", types.StringArray{
+			"concept/old",
+		}
 		require.NoError(t, db.Create(page).Error)
 		require.NoError(t, db.Create(other).Error)
 		require.NoError(t, db.Create(makeWikiRevision(page, 1, types.WikiEditSourceUser)).Error)
 		before := snapshotWikiRename(t, db)
 		injected := errors.New("injected issue write failure")
 		writes := 0
-		require.NoError(t, db.Callback().Update().Before("gorm:update").Register("test:rename_failure", func(tx *gorm.DB) {
-			if tx.Statement.Table == "wiki_pages" {
-				writes++
-			}
-			if tx.Statement.Table == "wiki_page_issues" {
-				tx.AddError(injected)
-			}
-		}))
-		result, err := NewWikiPageRepository(db).(interfaces.WikiPageRenamer).RenamePage(context.Background(), wikiRenameRequest(page))
+		require.NoError(
+			t,
+			db.Callback().Update().Before("gorm:update").Register("test:rename_failure", func(tx *gorm.DB) {
+				if tx.Statement.Table == "wiki_pages" {
+					writes++
+				}
+				if tx.Statement.Table == "wiki_page_issues" {
+					_ = tx.AddError(injected)
+				}
+			}),
+		)
+		result, err := NewWikiPageRepository(db).(interfaces.WikiPageRenamer).RenamePage(
+			context.Background(),
+			wikiRenameRequest(page),
+		)
 		require.ErrorIs(t, err, injected)
 		require.Nil(t, result)
 		require.Equal(t, 2, writes, "failure must happen after both page writes")
@@ -285,18 +303,32 @@ func TestWikiRenameCASFencesVersionAndMetadataChanges(t *testing.T) {
 				require.NoError(t, db.Create(page).Error)
 				before := snapshotWikiRename(t, db)
 				injected := false
-				require.NoError(t, db.Callback().Update().Before("gorm:update").Register("test:rename_cas", func(tx *gorm.DB) {
-					if injected || tx.Statement.Table != "wiki_pages" {
-						return
-					}
-					injected = true
-					if field == "version" {
-						tx.AddError(tx.Exec("UPDATE wiki_pages SET version = version + 1 WHERE id = ?", page.ID).Error)
-					} else {
-						tx.AddError(tx.Exec("UPDATE wiki_pages SET updated_at = ? WHERE id = ?", page.UpdatedAt.Add(time.Second), page.ID).Error)
-					}
-				}))
-				result, err := NewWikiPageRepository(db).(interfaces.WikiPageRenamer).RenamePage(context.Background(), wikiRenameRequest(page))
+				require.NoError(
+					t,
+					db.Callback().Update().Before("gorm:update").Register("test:rename_cas", func(tx *gorm.DB) {
+						if injected || tx.Statement.Table != "wiki_pages" {
+							return
+						}
+						injected = true
+						if field == "version" {
+							_ = tx.AddError(
+								tx.Exec("UPDATE wiki_pages SET version = version + 1 WHERE id = ?", page.ID).Error,
+							)
+						} else {
+							_ = tx.AddError(
+								tx.Exec(
+									"UPDATE wiki_pages SET updated_at = ? WHERE id = ?",
+									page.UpdatedAt.Add(time.Second),
+									page.ID,
+								).Error,
+							)
+						}
+					}),
+				)
+				result, err := NewWikiPageRepository(db).(interfaces.WikiPageRenamer).RenamePage(
+					context.Background(),
+					wikiRenameRequest(page),
+				)
 				require.ErrorIs(t, err, ErrWikiPageConflict)
 				require.Nil(t, result)
 				require.Equal(t, before, snapshotWikiRename(t, db))
@@ -311,15 +343,26 @@ func TestWikiRenameConstraintRaceRollsBack(t *testing.T) {
 		require.NoError(t, db.Create(page).Error)
 		before := snapshotWikiRename(t, db)
 		injected := false
-		require.NoError(t, db.Callback().Update().Before("gorm:update").Register("test:rename_collision", func(tx *gorm.DB) {
-			if injected || tx.Statement.Table != "wiki_pages" {
-				return
-			}
-			injected = true
-			conflict := makeWikiPage("kb-a", "concept/new", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
-			tx.AddError(tx.Session(&gorm.Session{NewDB: true}).Create(conflict).Error)
-		}))
-		result, err := NewWikiPageRepository(db).(interfaces.WikiPageRenamer).RenamePage(context.Background(), wikiRenameRequest(page))
+		require.NoError(
+			t,
+			db.Callback().Update().Before("gorm:update").Register("test:rename_collision", func(tx *gorm.DB) {
+				if injected || tx.Statement.Table != "wiki_pages" {
+					return
+				}
+				injected = true
+				conflict := makeWikiPage(
+					"kb-a",
+					"concept/new",
+					types.WikiPageTypeConcept,
+					types.WikiPageStatusPublished,
+				)
+				_ = tx.AddError(tx.Session(&gorm.Session{NewDB: true}).Create(conflict).Error)
+			}),
+		)
+		result, err := NewWikiPageRepository(db).(interfaces.WikiPageRenamer).RenamePage(
+			context.Background(),
+			wikiRenameRequest(page),
+		)
 		require.ErrorIs(t, err, ErrWikiPageSlugConflict)
 		require.Nil(t, result)
 		require.Equal(t, before, snapshotWikiRename(t, db))
@@ -336,7 +379,10 @@ func TestWikiRenameRejectsStaleIdentityAndInvalidRequests(t *testing.T) {
 		{KnowledgeBaseID: "kb-b", PageID: page.ID, OldSlug: page.Slug, NewSlug: "concept/new"},
 		{},
 	}
-	for _, slug := range []string{"", page.Slug, "CONCEPT/New", "concept//new", "concept/new|label", "concept/new';DROP TABLE wiki_pages;--", strings.Repeat("a", 256)} {
+	for _, slug := range []string{
+		"", page.Slug, "CONCEPT/New", "concept//new", "concept/new|label",
+		"concept/new';DROP TABLE wiki_pages;--", strings.Repeat("a", 256),
+	} {
 		req := wikiRenameRequest(page)
 		req.NewSlug = slug
 		requests = append(requests, req)
@@ -393,7 +439,10 @@ func TestWikiRenameConcurrentDestinationHasOneWinner(t *testing.T) {
 		for _, page := range []*types.WikiPage{first, second} {
 			go func() {
 				<-start
-				_, err := NewWikiPageRepository(db).(interfaces.WikiPageRenamer).RenamePage(ctx, wikiRenameRequest(page))
+				_, err := NewWikiPageRepository(db).(interfaces.WikiPageRenamer).RenamePage(
+					ctx,
+					wikiRenameRequest(page),
+				)
 				done <- err
 			}()
 		}
@@ -453,13 +502,25 @@ func TestWikiRenameChunkSyncIsConditionalAndNeverUpserts(t *testing.T) {
 		require.Equal(t, "source", stored.SourceContent)
 		require.False(t, stored.IsEnabled)
 		require.Equal(t, 3, stored.ContentRevision)
-		require.ErrorIs(t, updater.UpdateRenamedWikiChunk(context.Background(), page, chunk, expected), ErrChunkRevisionConflict)
+		require.ErrorIs(
+			t,
+			updater.UpdateRenamedWikiChunk(context.Background(), page, chunk, expected),
+			ErrChunkRevisionConflict,
+		)
 		require.NoError(t, db.Model(&types.WikiPage{}).Where("id = ?", page.ID).Update("slug", "concept/newer").Error)
-		require.ErrorIs(t, updater.UpdateRenamedWikiChunk(context.Background(), page, stored, stored.UpdatedAt), ErrWikiPageConflict)
+		require.ErrorIs(
+			t,
+			updater.UpdateRenamedWikiChunk(context.Background(), page, stored, stored.UpdatedAt),
+			ErrWikiPageConflict,
+		)
 		page, err = NewWikiPageRepository(db).GetByID(context.Background(), page.ID)
 		require.NoError(t, err)
 		require.NoError(t, db.Where("id = ?", chunkID).Delete(&types.Chunk{}).Error)
-		require.ErrorIs(t, updater.UpdateRenamedWikiChunk(context.Background(), page, stored, stored.UpdatedAt), ErrChunkRevisionConflict)
+		require.ErrorIs(
+			t,
+			updater.UpdateRenamedWikiChunk(context.Background(), page, stored, stored.UpdatedAt),
+			ErrChunkRevisionConflict,
+		)
 		var liveCount int64
 		require.NoError(t, db.Model(&types.Chunk{}).Where("id = ?", chunkID).Count(&liveCount).Error)
 		require.Zero(t, liveCount)

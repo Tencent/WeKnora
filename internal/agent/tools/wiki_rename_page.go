@@ -107,7 +107,13 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 		}
 	}
 	updatedCount := len(updatedSlugs)
-	outputMsg := fmt.Sprintf("Successfully renamed page [[%s]] to [[%s]], preserving its ID and history, and updated %d related pages.", params.Slug, params.NewSlug, updatedCount)
+	outputMsg := fmt.Sprintf(
+		"Successfully renamed page [[%s]] to [[%s]], preserving its ID and history, "+
+			"and updated %d related pages.",
+		params.Slug,
+		params.NewSlug,
+		updatedCount,
+	)
 	if updatedCount > 0 {
 		outputMsg += fmt.Sprintf("\n- Affected pages: %s", strings.Join(updatedSlugs, ", "))
 	}

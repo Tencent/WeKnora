@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -48,6 +49,7 @@ func TestAgentMCPProxyKeepsTargetEventsAndProtocolHistory(t *testing.T) {
 		manager,
 		nil,
 		0,
+		nil,
 		nil,
 	)
 	require.NoError(t, err)
@@ -109,4 +111,87 @@ func TestAgentMCPProxyKeepsTargetEventsAndProtocolHistory(t *testing.T) {
 	require.JSONEq(t, string(raw), messages[0].ToolCalls[0].Function.Arguments)
 	require.Equal(t, "model-proxy-id", messages[1].ToolCallID)
 	require.Len(t, engine.buildToolsForLLM(), 2, "discovery must not advertise individual MCP schemas")
+}
+
+func TestAgentMCPStringArgumentsKeepValidationAndAudit(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	var executions atomic.Int32
+	server := sdkserver.NewMCPServer("object-envelope", "1", sdkserver.WithToolCapabilities(false))
+	server.AddTool(sdkmcp.NewTool("币种列表"),
+		func(_ context.Context, request sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+			executions.Add(1)
+			require.Empty(t, request.GetArguments())
+			return sdkmcp.NewToolResultText("CNY,USD"), nil
+		})
+	server.AddTool(sdkmcp.NewTool("convert", sdkmcp.WithString("currency", sdkmcp.Required())),
+		func(context.Context, sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+			executions.Add(1)
+			return sdkmcp.NewToolResultText("converted"), nil
+		})
+	httpServer := httptest.NewServer(sdkserver.NewStreamableHTTPServer(server, sdkserver.WithStateLess(true)))
+	defer httpServer.Close()
+	manager := internalmcp.NewMCPManager(nil)
+	defer manager.Shutdown()
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	registry := agenttools.NewToolRegistry()
+	_, err := agenttools.RegisterMCPTools(ctx, registry, []*types.MCPService{{
+		ID: "currency", TenantID: 7, Name: "Currency", Enabled: true,
+		URL: &httpServer.URL, TransportType: types.MCPTransportHTTPStreamable,
+	}}, manager, nil, 0, nil, nil)
+	require.NoError(t, err)
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = registry
+	var starts []event.AgentToolCallData
+	engine.eventBus.On(event.EventAgentToolCall, func(_ context.Context, evt event.Event) error {
+		starts = append(starts, evt.Data.(event.AgentToolCallData))
+		return nil
+	})
+	describe := func(name string) string {
+		raw, _ := json.Marshal(map[string]any{"mode": "describe", "server_id": "currency", "tool_name": name})
+		result, err := registry.ExecuteTool(ctx, agenttools.ToolDiscoverMCPTools, raw)
+		require.NoError(t, err)
+		require.True(t, result.Success, result.Error)
+		modelResult := engine.modelContext.ModelToolResultForTool(agenttools.ToolDiscoverMCPTools, result)
+		var definition struct {
+			ToolRef string `json:"tool_ref"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(modelResult), &definition))
+		return definition.ToolRef
+	}
+	emptyRef := describe("币种列表")
+	requiredRef := describe("convert")
+	for _, tc := range []struct {
+		ref       string
+		arguments any
+		success   bool
+	}{
+		{emptyRef, "{}", true},
+		{requiredRef, "{}", false},
+		{emptyRef, "null", false},
+		{emptyRef, "[]", false},
+		{emptyRef, `{"currency":`, false},
+		{"mt99", "{}", false},
+	} {
+		raw, err := json.Marshal(map[string]any{"tool_ref": tc.ref, "arguments": tc.arguments})
+		require.NoError(t, err)
+		calls := []types.LLMToolCall{{ID: "proxy", Function: types.FunctionCall{
+			Name: agenttools.ToolCallMCPTool, Arguments: string(raw),
+		}}}
+		engine.modelContext.DecodeToolCalls(calls)
+		result := engine.runToolCall(ctx, calls[0], 0, 1, 1, "session", "message")
+		require.Equal(t, tc.success, result.Result.Success, result.Result.Error)
+		if tc.success {
+			require.Equal(t, map[string]any{}, result.Args["arguments"])
+			require.Empty(t, starts[len(starts)-1].Arguments, "UI sees actual empty arguments, not a JSON string")
+			audit := buildToolSpanInput(calls[0], result.Args, false)
+			require.Equal(t, "{}", audit["model_arguments"].(map[string]any)["arguments"])
+			require.Equal(t, "resolved", audit["argument_resolution"])
+			require.Equal(t, result.Args, audit["resolved_arguments"])
+		} else if tc.ref == requiredRef {
+			require.Contains(t, result.Result.Error, "currency",
+				"target schema must still reject a missing required field")
+		}
+	}
+	require.EqualValues(t, 1, executions.Load(), "only the valid parameterless call may reach the MCP server")
 }

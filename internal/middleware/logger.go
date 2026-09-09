@@ -173,7 +173,8 @@ func Logger() gin.HandlerFunc {
 		// 读取请求体（在Next之前读取，因为Next会消费body）
 		var requestBody string
 		privateLearning := strings.HasPrefix(path, "/api/v1/learning/") || path == "/api/v1/learning"
-		if !privateLearning && (c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") {
+		if !privateLearning &&
+			(c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") {
 			requestBody = readRequestBody(c)
 		}
 

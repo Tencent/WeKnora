@@ -15,3 +15,9 @@ test('artifacts is the first sandbox panel tab', () => {
   assert.doesNotMatch(panel, /chat-sandbox-panel__title/)
   assert.doesNotMatch(panel, /<h3/)
 })
+
+test('closing the panel drops the terminal mount flag so Files reopen does not reconnect', () => {
+  assert.match(panel, /if\s*\(!visible\)/)
+  assert.match(panel, /terminalMounted\.value = false/)
+  assert.match(panel, /tab === 'terminal'/)
+})

@@ -11,9 +11,21 @@ import (
 	"gorm.io/gorm"
 )
 
-func learningQuizPublic(tx *gorm.DB, scope interfaces.LearningScope, q *types.LearningQuiz, page *types.WikiPage) (*types.LearningQuizView, error) {
-	v := &types.LearningQuizView{ID: q.ID, PageID: q.PageID, KnowledgeBaseID: q.KnowledgeBaseID, Status: q.Status,
-		ErrorCode: q.ErrorCode, Questions: []types.LearningQuestionView{}, AlgorithmVersion: types.LearningAlgorithmVersion}
+func learningQuizPublic(
+	tx *gorm.DB,
+	scope interfaces.LearningScope,
+	q *types.LearningQuiz,
+	page *types.WikiPage,
+) (*types.LearningQuizView, error) {
+	v := &types.LearningQuizView{
+		ID:               q.ID,
+		PageID:           q.PageID,
+		KnowledgeBaseID:  q.KnowledgeBaseID,
+		Status:           q.Status,
+		ErrorCode:        q.ErrorCode,
+		Questions:        []types.LearningQuestionView{},
+		AlgorithmVersion: types.LearningAlgorithmVersion,
+	}
 	if page != nil {
 		v.Slug, v.Title = page.Slug, page.Title
 	}
@@ -44,14 +56,22 @@ func learningQuizPublic(tx *gorm.DB, scope interfaces.LearningScope, q *types.Le
 
 func learningStaleQuiz(tx *gorm.DB, q *types.LearningQuiz) error {
 	q.Status, q.ErrorCode, q.LeaseToken, q.LeaseUntil = "stale", "source_changed", "", nil
-	return tx.Model(q).Updates(map[string]any{"status": q.Status, "error_code": q.ErrorCode, "lease_token": "", "lease_until": nil}).Error
+	return tx.Model(q).
+		Updates(map[string]any{"status": q.Status, "error_code": q.ErrorCode, "lease_token": "", "lease_until": nil}).
+		Error
 }
 
 func learningEvidenceGone(err error) bool {
-	return errors.Is(err, types.ErrLearningEvidence) || errors.Is(err, types.ErrLearningNotFound) || errors.Is(err, gorm.ErrRecordNotFound)
+	return errors.Is(err, types.ErrLearningEvidence) || errors.Is(err, types.ErrLearningNotFound) ||
+		errors.Is(err, gorm.ErrRecordNotFound)
 }
 
-func learningFreshQuiz(tx *gorm.DB, scope interfaces.LearningScope, p *types.LearningProfile, q *types.LearningQuiz) (*types.WikiPage, error) {
+func learningFreshQuiz(
+	tx *gorm.DB,
+	scope interfaces.LearningScope,
+	p *types.LearningProfile,
+	q *types.LearningQuiz,
+) (*types.WikiPage, error) {
 	source, err := learningSource(tx, scope.TenantID, q.PageID)
 	if err != nil && !learningEvidenceGone(err) {
 		return nil, err
@@ -60,7 +80,9 @@ func learningFreshQuiz(tx *gorm.DB, scope interfaces.LearningScope, p *types.Lea
 	if source != nil {
 		page = source.Page
 	}
-	if q.Status != "stale" && (err != nil || source.Stamp != q.SourceStamp || source.Page.KnowledgeBaseID != q.KnowledgeBaseID || q.Epoch != p.Epoch) {
+	if q.Status != "stale" &&
+		(err != nil || source.Stamp != q.SourceStamp || source.Page.KnowledgeBaseID != q.KnowledgeBaseID ||
+			q.Epoch != p.Epoch) {
 		if err := learningStaleQuiz(tx, q); err != nil {
 			return nil, err
 		}
@@ -68,7 +90,11 @@ func learningFreshQuiz(tx *gorm.DB, scope interfaces.LearningScope, p *types.Lea
 	return page, nil
 }
 
-func (r *learningRepository) PrepareQuiz(ctx context.Context, scope interfaces.LearningScope, pageID string) (*types.LearningQuizView, *types.LearningGeneratePayload, error) {
+func (r *learningRepository) PrepareQuiz(
+	ctx context.Context,
+	scope interfaces.LearningScope,
+	pageID string,
+) (*types.LearningQuizView, *types.LearningGeneratePayload, error) {
 	var result *types.LearningQuizView
 	var wake *types.LearningGeneratePayload
 	err := r.profileTx(ctx, scope, false, true, func(tx *gorm.DB, p *types.LearningProfile) error {
@@ -81,19 +107,26 @@ func (r *learningRepository) PrepareQuiz(ctx context.Context, scope interfaces.L
 			return types.ErrLearningEvidence
 		}
 		var existing types.LearningQuiz
-		err = learningScope(tx, scope).Where("page_id = ? AND status IN ?", pageID, []string{"pending", "running", "ready"}).
-			Order("created_at DESC, id DESC").First(&existing).Error
+		err = learningScope(tx, scope).
+			Where("page_id = ? AND status IN ?", pageID, []string{"pending", "running", "ready"}).
+			Order("created_at DESC, id DESC").
+			First(&existing).
+			Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
 		if err == nil {
-			if existing.Epoch != p.Epoch || existing.SourceStamp != source.Stamp || existing.KnowledgeBaseID != source.Page.KnowledgeBaseID {
+			if existing.Epoch != p.Epoch || existing.SourceStamp != source.Stamp ||
+				existing.KnowledgeBaseID != source.Page.KnowledgeBaseID {
 				if err := learningStaleQuiz(tx, &existing); err != nil {
 					return err
 				}
 			} else {
 				var answered int64
-				if err := learningScope(tx, scope).Model(&types.LearningAttempt{}).Where("quiz_id = ?", existing.ID).Count(&answered).Error; err != nil {
+				if err := learningScope(tx, scope).Model(&types.LearningAttempt{}).
+					Where("quiz_id = ?", existing.ID).
+					Count(&answered).
+					Error; err != nil {
 					return err
 				}
 				if existing.Status != "ready" || answered < 3 {
@@ -106,7 +139,10 @@ func (r *learningRepository) PrepareQuiz(ctx context.Context, scope interfaces.L
 			}
 		}
 		var active, total int64
-		if err := learningScope(tx, scope).Model(&types.LearningQuiz{}).Where("status IN ?", []string{"pending", "running"}).Count(&active).Error; err != nil {
+		if err := learningScope(tx, scope).Model(&types.LearningQuiz{}).
+			Where("status IN ?", []string{"pending", "running"}).
+			Count(&active).
+			Error; err != nil {
 			return err
 		}
 		if err := learningScope(tx, scope).Model(&types.LearningQuiz{}).Count(&total).Error; err != nil {
@@ -115,10 +151,12 @@ func (r *learningRepository) PrepareQuiz(ctx context.Context, scope interfaces.L
 		if active >= 4 || total >= 1000 {
 			return types.ErrLearningBusy
 		}
-		q := &types.LearningQuiz{ID: uuid.NewString(), TenantID: scope.TenantID, SubjectID: scope.SubjectID,
+		q := &types.LearningQuiz{
+			ID: uuid.NewString(), TenantID: scope.TenantID, SubjectID: scope.SubjectID,
 			PageID: pageID, KnowledgeBaseID: source.Page.KnowledgeBaseID, Epoch: p.Epoch, SourceStamp: source.Stamp,
 			SourceKnowledgeIDs: source.Page.SourceKnowledgeIDs(),
-			Status:             "pending", ModelID: source.ModelID, PromptVersion: types.LearningPromptVersion}
+			Status:             "pending", ModelID: source.ModelID, PromptVersion: types.LearningPromptVersion,
+		}
 		if err := tx.Create(q).Error; err != nil {
 			return err
 		}
@@ -132,7 +170,11 @@ func (r *learningRepository) PrepareQuiz(ctx context.Context, scope interfaces.L
 	return result, wake, nil
 }
 
-func (r *learningRepository) GetQuiz(ctx context.Context, scope interfaces.LearningScope, id string) (*types.LearningQuizView, error) {
+func (r *learningRepository) GetQuiz(
+	ctx context.Context,
+	scope interfaces.LearningScope,
+	id string,
+) (*types.LearningQuizView, error) {
 	var result *types.LearningQuizView
 	err := r.profileTx(ctx, scope, false, true, func(tx *gorm.DB, p *types.LearningProfile) error {
 		var q types.LearningQuiz
@@ -149,14 +191,17 @@ func (r *learningRepository) GetQuiz(ctx context.Context, scope interfaces.Learn
 	return result, err
 }
 
-func (r *learningRepository) Claim(ctx context.Context, payload types.LearningGeneratePayload) (*types.LearningClaim, error) {
+func (r *learningRepository) Claim(
+	ctx context.Context,
+	payload types.LearningGeneratePayload,
+) (*types.LearningClaim, error) {
 	var initial types.LearningQuiz
 	err := r.db.WithContext(ctx).Where("id = ? AND epoch = ?", payload.QuizID, payload.Epoch).First(&initial).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, learningDBError(err)
+		return nil, learningDBError(ctx, err)
 	}
 	scope := interfaces.LearningScope{TenantID: initial.TenantID, SubjectID: initial.SubjectID}
 	var result *types.LearningClaim
@@ -178,7 +223,11 @@ func (r *learningRepository) Claim(ctx context.Context, payload types.LearningGe
 			return nil
 		}
 		if q.Claims >= 3 {
-			return tx.Model(&q).Updates(map[string]any{"status": "failed", "error_code": "generation_exhausted", "lease_until": nil, "lease_token": ""}).Error
+			return tx.Model(&q).
+				Updates(map[string]any{
+					"status": "failed", "error_code": "generation_exhausted", "lease_until": nil, "lease_token": "",
+				}).
+				Error
 		}
 		source, err := learningSource(tx, scope.TenantID, q.PageID)
 		if err != nil && !learningEvidenceGone(err) {
@@ -188,8 +237,11 @@ func (r *learningRepository) Claim(ctx context.Context, payload types.LearningGe
 			return learningStaleQuiz(tx, &q)
 		}
 		until, token := now.Add(types.LearningLeaseDuration), uuid.NewString()
-		res := tx.Model(&types.LearningQuiz{}).Where("id = ? AND epoch = ? AND lease_token = ? AND status = ?", q.ID, q.Epoch, q.LeaseToken, q.Status).
-			Updates(map[string]any{"status": "running", "lease_token": token, "lease_until": until, "claims": q.Claims + 1})
+		res := tx.Model(&types.LearningQuiz{}).
+			Where("id = ? AND epoch = ? AND lease_token = ? AND status = ?", q.ID, q.Epoch, q.LeaseToken, q.Status).
+			Updates(map[string]any{
+				"status": "running", "lease_token": token, "lease_until": until, "claims": q.Claims + 1,
+			})
 		if res.Error != nil {
 			return res.Error
 		}
@@ -204,7 +256,11 @@ func (r *learningRepository) Claim(ctx context.Context, payload types.LearningGe
 	return result, err
 }
 
-func (r *learningRepository) Publish(ctx context.Context, claim *types.LearningClaim, questions []types.LearningQuestion) error {
+func (r *learningRepository) Publish(
+	ctx context.Context,
+	claim *types.LearningClaim,
+	questions []types.LearningQuestion,
+) error {
 	if claim == nil {
 		return types.ErrLearningInvalid
 	}
@@ -216,8 +272,11 @@ func (r *learningRepository) Publish(ctx context.Context, claim *types.LearningC
 			return types.ErrLearningStale
 		}
 		var q types.LearningQuiz
-		err := learningScope(tx, scope).Where("id = ? AND status = ? AND epoch = ? AND lease_token = ? AND lease_until > ?",
-			claim.Quiz.ID, "running", p.Epoch, claim.Quiz.LeaseToken, time.Now().UTC()).First(&q).Error
+		err := learningScope(tx, scope).
+			Where("id = ? AND status = ? AND epoch = ? AND lease_token = ? AND lease_until > ?",
+				claim.Quiz.ID, "running", p.Epoch, claim.Quiz.LeaseToken, time.Now().UTC()).
+			First(&q).
+			Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return types.ErrLearningStale
 		}
@@ -273,7 +332,10 @@ func (r *learningRepository) Fail(ctx context.Context, claim *types.LearningClai
 			return nil
 		}
 		return learningScope(tx, scope).Model(&types.LearningQuiz{}).
-			Where("id = ? AND epoch = ? AND status = ? AND lease_token = ? AND lease_until > ?", claim.Quiz.ID, p.Epoch, "running", claim.Quiz.LeaseToken, time.Now().UTC()).
+			Where(
+				"id = ? AND epoch = ? AND status = ? AND lease_token = ? AND lease_until > ?",
+				claim.Quiz.ID, p.Epoch, "running", claim.Quiz.LeaseToken, time.Now().UTC(),
+			).
 			Updates(map[string]any{"status": "failed", "error_code": code, "lease_token": "", "lease_until": nil}).Error
 	})
 }

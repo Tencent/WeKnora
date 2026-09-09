@@ -117,6 +117,7 @@ func (h *AgentStreamHandler) Subscribe() {
 	h.eventBus.On(event.EventAgentReferences, h.handleReferences)
 	h.eventBus.On(event.EventMemoryRecalled, h.handleMemoryRecalled)
 	h.eventBus.On(event.EventContextCompacted, h.handleContextCompacted)
+	h.eventBus.On(event.EventUserMessageInjected, h.handleUserMessageInjected)
 	h.eventBus.On(event.EventAgentFinalAnswer, h.handleFinalAnswer)
 	h.eventBus.On(event.EventAgentReflection, h.handleReflection)
 	h.eventBus.On(event.EventError, h.handleError)
@@ -643,6 +644,33 @@ func (h *AgentStreamHandler) handleSessionTitle(ctx context.Context, evt event.E
 		logger.GetLogger(h.ctx).Warn("Append session title event to stream failed (stream may have ended)", "error", err)
 	}
 
+	return nil
+}
+
+// handleUserMessageInjected forwards a mid-run message injection to the
+// user-visible stream so the frontend can flip its optimistic "queued"
+// bubble into a normal message of the running turn. The event carries the
+// steer ID the client generated queue time, so correlation is exact.
+func (h *AgentStreamHandler) handleUserMessageInjected(_ context.Context, evt event.Event) error {
+	data, ok := evt.Data.(event.UserMessageInjectedData)
+	if !ok {
+		return nil
+	}
+
+	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID:        evt.ID,
+		Type:      types.ResponseTypeUserMessageInjected,
+		Done:      true,
+		Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"steer_id":        data.SteerID,
+			"message_id":      data.MessageID,
+			"content":         data.Content,
+			"user_message_id": data.UserMessageID,
+		},
+	}); err != nil {
+		logger.GetLogger(h.ctx).Error("Append user message injected event to stream failed", "error", err)
+	}
 	return nil
 }
 

@@ -390,6 +390,7 @@ func BuildSystemPromptWithOptions(
 		language = options.Language
 	}
 	basePrompt = renderPromptPlaceholdersWithStatus(template, knowledgeBases, webSearchEnabled, currentTime, language)
+	basePrompt += "\n\n" + steerGuidance
 
 	if options != nil {
 		basePrompt += formatGroundingGuidance(options.SelectedTools)
@@ -405,6 +406,14 @@ func BuildSystemPromptWithOptions(
 
 	return basePrompt
 }
+
+// Apply to custom prompts too: mid-run delivery is a harness capability.
+const steerGuidance = "<steering_guidance>\n" +
+	"Messages in <steer_message> guide the task in progress. Apply them in context; " +
+	"respond briefly when appropriate, then continue unfinished work. Preserve unfinished objectives, " +
+	"accepted constraints and useful tool results unless explicitly changed. " +
+	"Acknowledging guidance alone does not complete the task. Follow explicit cancellation or replacement requests. " +
+	"Hide delivery tags. Untagged subsequent requests are ordinary user messages.\n</steering_guidance>"
 
 // GetPureAgentSystemPrompt returns the Pure Agent system prompt from config templates.
 // The template must be defined in config/prompt_templates/agent_system_prompt.yaml

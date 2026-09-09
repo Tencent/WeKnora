@@ -13,17 +13,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// LearningHandler serves personal learning requests for authenticated Web users.
 type LearningHandler struct{ service interfaces.LearningService }
 
+// NewLearningHandler creates an HTTP handler for the learning service.
 func NewLearningHandler(svc interfaces.LearningService) *LearningHandler {
 	return &LearningHandler{service: svc}
 }
 
+// GetSettings returns the caller's personal learning settings.
 func (h *LearningHandler) GetSettings(c *gin.Context) {
 	data, err := h.service.GetSettings(c.Request.Context())
 	h.respond(c, data, err)
 }
 
+// SetEnabled updates whether personal learning is enabled for the caller.
 func (h *LearningHandler) SetEnabled(c *gin.Context) {
 	var input struct {
 		Enabled *bool `json:"enabled"`
@@ -39,16 +43,19 @@ func (h *LearningHandler) SetEnabled(c *gin.Context) {
 	h.respond(c, data, err)
 }
 
+// Overview returns the caller's learning overview for a Wiki knowledge base.
 func (h *LearningHandler) Overview(c *gin.Context) {
 	data, err := h.service.Overview(c.Request.Context(), c.Query("knowledge_base_id"))
 	h.respond(c, data, err)
 }
 
+// Node returns the caller's learning state for a Wiki page.
 func (h *LearningHandler) Node(c *gin.Context) {
 	data, err := h.service.Node(c.Request.Context(), c.Param("id"))
 	h.respond(c, data, err)
 }
 
+// Recommendations returns suggested Wiki topics for the caller to study.
 func (h *LearningHandler) Recommendations(c *gin.Context) {
 	limit, err := strconv.Atoi(c.DefaultQuery("limit", "5"))
 	if err != nil || limit < 1 || limit > 20 {
@@ -59,10 +66,12 @@ func (h *LearningHandler) Recommendations(c *gin.Context) {
 	h.respond(c, data, err)
 }
 
+// RecordView records a Wiki page view for the caller.
 func (h *LearningHandler) RecordView(c *gin.Context) {
 	h.respond(c, nil, h.service.RecordView(c.Request.Context(), c.Param("id")))
 }
 
+// Overlay returns the caller's learning states for the requested Wiki slugs.
 func (h *LearningHandler) Overlay(c *gin.Context) {
 	var input struct {
 		KnowledgeBaseID string   `json:"knowledge_base_id"`
@@ -79,6 +88,7 @@ func (h *LearningHandler) Overlay(c *gin.Context) {
 	h.respond(c, data, err)
 }
 
+// PrepareQuiz requests a source-backed quiz for a Wiki page.
 func (h *LearningHandler) PrepareQuiz(c *gin.Context) {
 	var input struct {
 		PageID string `json:"page_id"`
@@ -94,11 +104,13 @@ func (h *LearningHandler) PrepareQuiz(c *gin.Context) {
 	h.respond(c, data, err)
 }
 
+// GetQuiz returns a quiz owned by the caller.
 func (h *LearningHandler) GetQuiz(c *gin.Context) {
 	data, err := h.service.GetQuiz(c.Request.Context(), c.Param("id"))
 	h.respond(c, data, err)
 }
 
+// SubmitAnswer submits the caller's selected quiz option for assessment.
 func (h *LearningHandler) SubmitAnswer(c *gin.Context) {
 	var input types.LearningAnswer
 	if !decodeLearningRequest(c, &input) {
@@ -108,11 +120,13 @@ func (h *LearningHandler) SubmitAnswer(c *gin.Context) {
 	h.respond(c, data, err)
 }
 
+// Export returns the caller's learning records for the requested scope.
 func (h *LearningHandler) Export(c *gin.Context) {
 	data, err := h.service.Export(c.Request.Context(), c.Query("knowledge_base_id"))
 	h.respond(c, data, err)
 }
 
+// Clear deletes the caller's learning records for the requested scope.
 func (h *LearningHandler) Clear(c *gin.Context) {
 	data, err := h.service.Clear(c.Request.Context(), c.Query("knowledge_base_id"))
 	h.respond(c, data, err)
@@ -171,7 +185,10 @@ func decodeLearningRequest(c *gin.Context, target any) bool {
 		}
 	}
 	if err != nil {
-		c.AbortWithStatusJSON(400, gin.H{"success": false, "error": gin.H{"code": "learning_invalid", "message": "Invalid learning request."}})
+		c.AbortWithStatusJSON(
+			400,
+			gin.H{"success": false, "error": gin.H{"code": "learning_invalid", "message": "Invalid learning request."}},
+		)
 		return false
 	}
 	return true

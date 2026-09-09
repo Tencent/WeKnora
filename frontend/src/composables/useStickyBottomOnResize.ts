@@ -11,34 +11,31 @@ import { onMounted, onUnmounted, type Ref } from 'vue'
 export function useStickyBottomOnResize(
   scrollContainer: Ref<HTMLElement | null>,
   userHasScrolledUp: Ref<boolean>,
-  scrollToBottom: () => void,
 ): void {
   let resizeObserver: ResizeObserver | null = null
-  let scrollFrame: number | null = null
 
-  const scheduleFollow = () => {
-    if (userHasScrolledUp.value || scrollFrame !== null) return
+  const followResize = () => {
+    if (userHasScrolledUp.value) return
+    const container = scrollContainer.value
+    if (!container) return
 
-    scrollFrame = requestAnimationFrame(() => {
-      scrollFrame = null
-      if (!userHasScrolledUp.value) scrollToBottom()
-    })
+    // ResizeObserver runs after layout, before paint. Deferring to rAF here
+    // paints one frame with a trailing steer bubble displaced by the growing
+    // answer, then snaps it back on the next frame. Correct the scroll offset
+    // now; changing scrollTop does not resize the observed message list.
+    container.scrollTop = container.scrollHeight
   }
 
   onMounted(() => {
     const messageList = scrollContainer.value?.firstElementChild
     if (!messageList || typeof ResizeObserver === 'undefined') return
 
-    resizeObserver = new ResizeObserver(scheduleFollow)
+    resizeObserver = new ResizeObserver(followResize)
     resizeObserver.observe(messageList)
   })
 
   onUnmounted(() => {
     resizeObserver?.disconnect()
     resizeObserver = null
-    if (scrollFrame !== null) {
-      cancelAnimationFrame(scrollFrame)
-      scrollFrame = null
-    }
   })
 }

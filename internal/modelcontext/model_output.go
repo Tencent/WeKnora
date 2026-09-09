@@ -23,6 +23,14 @@ func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
 	if result == nil {
 		return ""
 	}
+	// Legacy-format output from a current source tool is evidence too. Replay
+	// registration alone must never grant this eligibility.
+	if result.Success {
+		r.registerLegacyToolReferences(result.Output, true)
+		copyResult := *result
+		copyResult.Output = r.CompactPublicCitations(result.Output, true)
+		result = &copyResult
+	}
 	displayType := stringValue(result.Data, "display_type")
 	if displayType == "web_fetch_results" {
 		return r.modelWebFetchOutput(mapsValue(result.Data["results"]), result.Output)
@@ -64,7 +72,7 @@ func (r *sourceRegistry) registerStructuredReferences(raw string) {
 	walk = func(key string, value interface{}) {
 		switch typed := value.(type) {
 		case string:
-			r.registerSourceIDByKey(key, typed)
+			r.registerSourceIDByKey(key, typed, true)
 		case []interface{}:
 			for _, item := range typed {
 				walk(key, item)
@@ -82,7 +90,7 @@ func (r *sourceRegistry) modelDatabaseQueryOutput(rows []map[string]interface{},
 	for _, row := range rows {
 		for key, raw := range row {
 			if value, ok := raw.(string); ok {
-				r.registerSourceIDByKey(key, value)
+				r.registerSourceIDByKey(key, value, true)
 			}
 		}
 	}
