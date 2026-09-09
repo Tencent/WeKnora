@@ -73,10 +73,10 @@ const onSystemThemeChange = (event: MediaQueryListEvent) => {
 };
 prefersDark?.addEventListener('change', onSystemThemeChange);
 
-// ANSI slots match frontend/src/assets/theme/theme.css so the sandbox
-// prompt (bold green/blue) and ls --color use WeKnora brand/error/warning
-// instead of xterm.js defaults. 01;32 → brightGreen (user@host),
-// 01;34 → brightBlue (path); both map to brand green.
+// ANSI palette: ls --color uses the usual dircolors mapping (dir=blue,
+// exec=green, link=cyan). Only the green slots stay WeKnora brand so
+// user@host (01;32) matches the product color; path (01;34) stays blue
+// like directories.
 function xtermTheme(dark: boolean) {
     return dark
         ? {
@@ -89,14 +89,14 @@ function xtermTheme(dark: boolean) {
             brightRed: '#de6670',
             green: '#06b04d',
             brightGreen: '#07c05f',
-            yellow: '#dc7633',
-            brightYellow: '#e8935c',
-            blue: '#049b38',
-            brightBlue: '#07c05f',
-            magenta: '#c9353f',
-            brightMagenta: '#f36d78',
-            cyan: '#00a870',
-            brightCyan: '#08dd6e',
+            yellow: '#c4a000',
+            brightYellow: '#fce94f',
+            blue: '#3465a4',
+            brightBlue: '#729fcf',
+            magenta: '#75507b',
+            brightMagenta: '#ad7fa8',
+            cyan: '#06989a',
+            brightCyan: '#34e2e2',
         }
         : {
             background: '#ffffff',
@@ -108,14 +108,14 @@ function xtermTheme(dark: boolean) {
             brightRed: '#f36d78',
             green: '#06b04d',
             brightGreen: '#07c05f',
-            yellow: '#ed7b2f',
-            brightYellow: '#f2995f',
-            blue: '#049b38',
-            brightBlue: '#07c05f',
-            magenta: '#c9353f',
-            brightMagenta: '#f36d78',
-            cyan: '#00a870',
-            brightCyan: '#08dd6e',
+            yellow: '#c4a000',
+            brightYellow: '#c4a000',
+            blue: '#3465a4',
+            brightBlue: '#729fcf',
+            magenta: '#75507b',
+            brightMagenta: '#ad7fa8',
+            cyan: '#06989a',
+            brightCyan: '#34e2e2',
         };
 }
 

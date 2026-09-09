@@ -4,8 +4,9 @@
 # \W is the last directory only (e.g. /opt/weknora/skills → skills),
 # so deep cwd does not blow the prompt width.
 #
-# Bold green / blue (01;32, 01;34) map onto theme.css brand green in xterm.
-# Root uses the same green as a normal user — not Debian's warning red.
+# Bold green (01;32) is user@host; bold blue (01;34) is the path — the
+# usual Debian colors, so ls --color can keep directories blue and
+# executables green. Root uses the same green as a normal user.
 #
 # Also enables Debian-style interactive aliases (ll, la, l, colored ls/grep).
 #

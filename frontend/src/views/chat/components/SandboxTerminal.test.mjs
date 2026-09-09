@@ -10,10 +10,13 @@ const promptUrl = new URL('../../../../../docker/sandbox-pty-prompt.sh', import.
 const prompt = readFileSync(promptUrl, 'utf8')
 const promptPath = fileURLToPath(promptUrl)
 
-test('xterm palette and PTY prompt use WeKnora brand green', () => {
+test('xterm palette keeps prompt green but ls directories blue', () => {
   assert.match(theme, /--td-brand-color-4: #07c05f/)
   assert.match(terminal, /brightGreen: '#07c05f'/)
-  assert.match(terminal, /brightBlue: '#07c05f'/)
+  assert.match(terminal, /brightBlue: '#729fcf'/)
+  assert.doesNotMatch(terminal, /brightBlue: '#07c05f'/)
+  assert.match(terminal, /brightCyan: '#34e2e2'/)
+  assert.doesNotMatch(terminal, /brightCyan: '#08dd6e'/)
   assert.match(prompt, /\\033\[01;32m/)
   assert.match(prompt, /\\033\[01;34m/)
   assert.doesNotMatch(prompt, /\\033\[01;31m/)
