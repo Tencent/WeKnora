@@ -755,6 +755,49 @@ func TestE2BRemoteClientListTemplatesIgnoresSpawnCount(t *testing.T) {
 	require.Equal(t, "waiting", templates[0].Status)
 }
 
+func TestE2BBuildStandardTemplateOverridesPtyPrompt(t *testing.T) {
+	var startBody struct {
+		FromImage string `json:"fromImage"`
+		Steps     []struct {
+			Type string   `json:"type"`
+			Args []string `json:"args"`
+		} `json:"steps"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/templates":
+			writeJSON(w, http.StatusOK, []map[string]any{})
+		case r.Method == http.MethodPost && r.URL.Path == "/v3/templates":
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"templateID": "tpl-new",
+				"buildID":    "build-new",
+				"names":      []string{StandardTemplateName},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v2/templates/tpl-new/builds/build-new":
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&startBody))
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewE2BRemoteClient(&Config{
+		E2BAPIKey:     "key-test",
+		E2BAPIURL:     server.URL,
+		E2BSandboxTTL: time.Minute,
+	})
+	require.NoError(t, err)
+
+	got, err := client.EnsureStandardTemplate(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "tpl-new", got.ID)
+	require.Equal(t, DefaultDockerImage, startBody.FromImage)
+	require.NotEmpty(t, startBody.Steps)
+	require.Equal(t, "run", startBody.Steps[0].Type)
+	require.Equal(t, e2bPtyPromptOverrideCmd, startBody.Steps[0].Args[0])
+}
+
 func TestNormalizeE2BTemplateBuildStatus(t *testing.T) {
 	tests := map[string]string{
 		"READY":      "ready",

@@ -68,6 +68,10 @@ const onSystemThemeChange = (event: MediaQueryListEvent) => {
 };
 prefersDark?.addEventListener('change', onSystemThemeChange);
 
+// ANSI slots match frontend/src/assets/theme/theme.css so the sandbox
+// prompt (bold green/blue) and ls --color use WeKnora brand/error/warning
+// instead of xterm.js defaults. 01;32 → brightGreen (user@host),
+// 01;34 → brightBlue (path); both map to brand green.
 function xtermTheme(dark: boolean) {
     return dark
         ? {
@@ -76,6 +80,18 @@ function xtermTheme(dark: boolean) {
             cursor: '#e6e6e6',
             cursorAccent: '#1a1a1a',
             selectionBackground: '#3a3a3a',
+            red: '#c64751',
+            brightRed: '#de6670',
+            green: '#06b04d',
+            brightGreen: '#07c05f',
+            yellow: '#dc7633',
+            brightYellow: '#e8935c',
+            blue: '#049b38',
+            brightBlue: '#07c05f',
+            magenta: '#c9353f',
+            brightMagenta: '#f36d78',
+            cyan: '#00a870',
+            brightCyan: '#08dd6e',
         }
         : {
             background: '#ffffff',
@@ -83,6 +99,18 @@ function xtermTheme(dark: boolean) {
             cursor: '#242424',
             cursorAccent: '#ffffff',
             selectionBackground: '#d0d7de',
+            red: '#e34d59',
+            brightRed: '#f36d78',
+            green: '#06b04d',
+            brightGreen: '#07c05f',
+            yellow: '#ed7b2f',
+            brightYellow: '#f2995f',
+            blue: '#049b38',
+            brightBlue: '#07c05f',
+            magenta: '#c9353f',
+            brightMagenta: '#f36d78',
+            cyan: '#00a870',
+            brightCyan: '#08dd6e',
         };
 }
 

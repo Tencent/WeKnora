@@ -396,8 +396,17 @@ func (c *E2BRemoteClient) DeleteSupersededStandardTemplates(ctx context.Context,
 	return nil
 }
 
+// e2bPtyPromptOverrideCmd re-sources the image prompt after E2B's
+// template provisioner appends `PS1='\w $ '` to bashrc. Harmless if the
+// image already sources /etc/weknora/pty-prompt.sh (PROMPT_COMMAND wins
+// either way); required when rebuilding from an older image that does not.
+const e2bPtyPromptOverrideCmd = `. /etc/weknora/pty-prompt.sh 2>/dev/null; ` +
+	`for f in /root/.bashrc /home/user/.bashrc /etc/profile.d/zz-weknora-prompt.sh; do ` +
+	`grep -q /etc/weknora/pty-prompt.sh "$f" 2>/dev/null || echo '. /etc/weknora/pty-prompt.sh' >> "$f"; ` +
+	`done`
+
 func (c *E2BRemoteClient) buildStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
-	builder := e2b.NewTemplate().FromImage(DefaultDockerImage)
+	builder := e2b.NewTemplate().FromImage(DefaultDockerImage).RunCmd(e2bPtyPromptOverrideCmd)
 	build, err := builder.BuildInBackground(ctx, c.client, e2b.BuildConfig{
 		Name: StandardTemplateName,
 		// Creating a sandbox from a plain template name or ID resolves the
