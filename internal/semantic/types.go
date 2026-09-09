@@ -8,6 +8,7 @@ package semantic
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,15 @@ import (
 	"github.com/Tencent/WeKnora/internal/semantic/dbinspector"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+// ErrConflict marks a business conflict (e.g. slug already exists).
+var ErrConflict = errors.New("conflict")
+
+// ConflictError wraps a user-facing conflict message.
+type ConflictError struct{ Msg string }
+
+func (e *ConflictError) Error() string { return e.Msg }
+func (e *ConflictError) Unwrap() error { return ErrConflict }
 
 // Connection types with guided support (test + schema browsing).
 const (

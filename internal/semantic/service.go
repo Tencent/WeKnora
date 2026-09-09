@@ -232,7 +232,7 @@ func (e *Engine) CreateConnection(
 		return nil, fmt.Errorf("database type is required")
 	}
 	if _, err := e.repo.FindConnectionByName(ctx, tenant, in.Name); err == nil {
-		return nil, fmt.Errorf("connection slug %s already exists", in.Name)
+		return nil, &ConflictError{Msg: fmt.Sprintf("connection slug %s already exists", in.Name)}
 	} else if !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
@@ -328,7 +328,7 @@ func (e *Engine) DeleteConnection(ctx context.Context, userID string, tenant uin
 		return err
 	}
 	if n > 0 {
-		return fmt.Errorf("connection is still referenced by %d model(s); delete or re-point those models first", n)
+		return &ConflictError{Msg: fmt.Sprintf("connection is still referenced by %d model(s); delete or re-point those models first", n)}
 	}
 	if err := e.repo.DeleteConnection(ctx, conn); err != nil {
 		return err
@@ -595,7 +595,7 @@ func (e *Engine) UpdateModel(
 	}
 	_, name, _ := doc.Identity()
 	if name != m.Name && m.Status == ModelStatusPublished {
-		return nil, fmt.Errorf("model name cannot change while published; unpublish first")
+		return nil, &ConflictError{Msg: "model name cannot change while published; unpublish first"}
 	}
 	m.Name = name
 	if in.Title != "" {
@@ -775,7 +775,7 @@ func (e *Engine) Publish(
 	}
 	if err := e.repo.SaveModelVersion(ctx, &SemanticModelVersion{
 		TenantID: tenant, ModelID: m.ID, Version: next, YAML: yamlText,
-		AllowedGroups: m.AllowedGroups, Note: note, PublishedBy: userID, PublishedAt: now,
+		AllowedGroups: m.AllowedGroups, MemberVisibility: m.MemberVisibility, Note: note, PublishedBy: userID, PublishedAt: now,
 	}); err != nil {
 		logger.Warnf(ctx, "[semantic] version snapshot failed: %v", err)
 	}
@@ -834,6 +834,7 @@ func (e *Engine) Rollback(
 	}
 	m.DraftYAML = v.YAML
 	m.AllowedGroups = v.AllowedGroups
+	m.MemberVisibility = v.MemberVisibility
 	if err := e.repo.SaveModel(ctx, m); err != nil {
 		return nil, err
 	}

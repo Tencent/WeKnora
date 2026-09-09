@@ -73,12 +73,16 @@ func (h *Handler) tenantOf(c *gin.Context) (uint64, string, bool) {
 // (the original error is logged server-side only, preventing internal
 // details like hosts, usernames, or SQL fragments from reaching the client).
 func (h *Handler) respondError(c *gin.Context, err error) {
-	if errors.Is(err, ErrNotFound) {
+	switch {
+	case errors.Is(err, ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "resource not found"})
-		return
+	case errors.Is(err, ErrConflict):
+		// ConflictError 的具体消息是业务可读的，安全透出
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	default:
+		logger.Errorf(c.Request.Context(), "[semantic] internal error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 	}
-	logger.Errorf(c.Request.Context(), "[semantic] %v", err)
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 }
 
 func unauthorized(c *gin.Context) {
