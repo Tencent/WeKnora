@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -301,6 +302,96 @@ func TestBuildAssistantHistoryMessages_SkillScriptFailureKeepsStdout(t *testing.
 	assert.Equal(t, "tool", got[1].Role)
 	assert.Contains(t, got[1].Content, "X轴字段不存在：工作项目")
 	assert.Contains(t, got[1].Content, "Error: Script exited with code 1")
+}
+
+// A steered turn has more than one user message: the original question plus
+// whatever the user injected while the agent was working, all sharing the
+// run's request ID. Replaying only one of them would hand the next turn a
+// conversation that never happened — typically losing the original question,
+// since the injected message is the newer row.
+func TestBuildTurnBodyMessages_KeepsMidRunUsersInPlace(t *testing.T) {
+	firstStep := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)
+	secondStep := firstStep.Add(2 * time.Minute)
+
+	assistant := &types.Message{
+		Role:    "assistant",
+		Content: "Both are covered in the guide.",
+		AgentSteps: types.AgentSteps{
+			{
+				Iteration: 0,
+				Thought:   "Search for A.",
+				Timestamp: firstStep,
+				ToolCalls: []types.ToolCall{{
+					ID:     "call_a",
+					Name:   agenttools.ToolKnowledgeSearch,
+					Args:   map[string]interface{}{"query": "A"},
+					Result: &types.ToolResult{Success: true, Output: "found A"},
+				}},
+			},
+			{
+				Iteration: 1,
+				Thought:   "Now search for B.",
+				Timestamp: secondStep,
+				ToolCalls: []types.ToolCall{{
+					ID:     "call_b",
+					Name:   agenttools.ToolKnowledgeSearch,
+					Args:   map[string]interface{}{"query": "B"},
+					Result: &types.ToolResult{Success: true, Output: "found B"},
+				}},
+			},
+		},
+	}
+	midRun := []*types.Message{{
+		Role:      "user",
+		Content:   "also check B",
+		CreatedAt: firstStep.Add(time.Minute),
+	}}
+
+	got := buildTurnBodyMessages(assistant, midRun)
+	require.Len(t, got, 6)
+
+	assert.Equal(t, "assistant", got[0].Role)
+	assert.Equal(t, "tool", got[1].Role)
+	assert.Equal(t, "found A", got[1].Content)
+
+	// The injected message belongs between the round it interrupted and the
+	// round it caused, not bolted onto either end.
+	assert.Equal(t, chat.Message{Role: "user", Content: "also check B"}, got[2])
+
+	assert.Equal(t, "assistant", got[3].Role)
+	assert.Equal(t, "tool", got[4].Role)
+	assert.Equal(t, "found B", got[4].Content)
+	assert.Equal(t, chat.Message{Role: "assistant", Content: "Both are covered in the guide."}, got[5])
+}
+
+// A message injected after the last tool round still has to appear before the
+// answer, or the turn reads as if the agent answered a question it was never
+// asked.
+func TestBuildTurnBodyMessages_LateMidRunUserPrecedesAnswer(t *testing.T) {
+	step := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)
+	assistant := &types.Message{
+		Role:    "assistant",
+		Content: "Here you go.",
+		AgentSteps: types.AgentSteps{{
+			Iteration: 0,
+			Timestamp: step,
+			ToolCalls: []types.ToolCall{{
+				ID:     "call_a",
+				Name:   agenttools.ToolKnowledgeSearch,
+				Result: &types.ToolResult{Success: true, Output: "found"},
+			}},
+		}},
+	}
+	midRun := []*types.Message{{
+		Role:      "user",
+		Content:   "and keep it short",
+		CreatedAt: step.Add(time.Minute),
+	}}
+
+	got := buildTurnBodyMessages(assistant, midRun)
+	require.Len(t, got, 4)
+	assert.Equal(t, chat.Message{Role: "user", Content: "and keep it short"}, got[2])
+	assert.Equal(t, chat.Message{Role: "assistant", Content: "Here you go."}, got[3])
 }
 
 // TestFilterNonTerminalToolCalls confirms a legacy final_answer entry is

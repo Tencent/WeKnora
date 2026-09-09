@@ -70,50 +70,95 @@ func LoadAgentHistory(
 		return []chat.Message{}, nil
 	}
 
-	type pair struct {
-		user      *types.Message
+	// A turn is not always one user message. Mid-run steering persists every
+	// injected message under the running turn's request ID, so a turn can be
+	// user → tools → user → tools → answer. Keeping only the last user row
+	// would drop the original question from the next turn's context.
+	type turn struct {
+		users     []*types.Message
 		assistant *types.Message
 		createdAt time.Time
 	}
-	pairs := make(map[string]*pair)
+	turns := make(map[string]*turn)
 	for _, msg := range rows {
-		p, ok := pairs[msg.RequestID]
+		t, ok := turns[msg.RequestID]
 		if !ok {
-			p = &pair{}
-			pairs[msg.RequestID] = p
+			t = &turn{}
+			turns[msg.RequestID] = t
 		}
 		switch msg.Role {
 		case "user":
-			p.user = msg
-			if p.createdAt.IsZero() || msg.CreatedAt.Before(p.createdAt) {
-				p.createdAt = msg.CreatedAt
+			t.users = append(t.users, msg)
+			if t.createdAt.IsZero() || msg.CreatedAt.Before(t.createdAt) {
+				t.createdAt = msg.CreatedAt
 			}
 		case "assistant":
-			p.assistant = msg
+			t.assistant = msg
 		}
 	}
 
-	completePairs := make([]*pair, 0, len(pairs))
-	for _, p := range pairs {
-		if p.user != nil && p.assistant != nil && p.assistant.IsCompleted {
-			completePairs = append(completePairs, p)
+	completeTurns := make([]*turn, 0, len(turns))
+	for _, t := range turns {
+		if len(t.users) > 0 && t.assistant != nil && t.assistant.IsCompleted {
+			sort.SliceStable(t.users, func(i, j int) bool {
+				return t.users[i].CreatedAt.Before(t.users[j].CreatedAt)
+			})
+			completeTurns = append(completeTurns, t)
 		}
 	}
 
-	sort.Slice(completePairs, func(i, j int) bool {
-		return completePairs[i].createdAt.Before(completePairs[j].createdAt)
+	sort.Slice(completeTurns, func(i, j int) bool {
+		return completeTurns[i].createdAt.Before(completeTurns[j].createdAt)
 	})
 
-	if len(completePairs) > maxRounds {
-		completePairs = completePairs[len(completePairs)-maxRounds:]
+	if len(completeTurns) > maxRounds {
+		completeTurns = completeTurns[len(completeTurns)-maxRounds:]
 	}
 
-	out := make([]chat.Message, 0, len(completePairs)*4)
-	for _, p := range completePairs {
-		out = append(out, buildUserHistoryMessage(p.user))
-		out = append(out, buildAssistantHistoryMessages(p.assistant)...)
+	out := make([]chat.Message, 0, len(completeTurns)*4)
+	for _, t := range completeTurns {
+		out = append(out, buildUserHistoryMessage(t.users[0]))
+		out = append(out, buildTurnBodyMessages(t.assistant, t.users[1:])...)
 	}
 	return out, nil
+}
+
+// buildTurnBodyMessages replays one turn's assistant work with any mid-run
+// user messages put back where they happened. Steered messages arrive between
+// tool rounds, so replaying them all up-front (or dropping them) would tell
+// the model a different story than the one it lived through: it would look
+// like the user asked for everything before any tool ran.
+//
+// Steps carry a timestamp; a user row belongs before the first step that
+// starts after it. Anything left over lands just before the final answer.
+func buildTurnBodyMessages(assistant *types.Message, midRunUsers []*types.Message) []chat.Message {
+	if len(midRunUsers) == 0 {
+		return buildAssistantHistoryMessages(assistant)
+	}
+
+	out := make([]chat.Message, 0, len(assistant.AgentSteps)*2+len(midRunUsers)+1)
+	next := 0
+	for _, step := range assistant.AgentSteps {
+		stepMsgs := buildAgentStepMessages(step)
+		if len(stepMsgs) == 0 {
+			continue
+		}
+		for next < len(midRunUsers) &&
+			!step.Timestamp.IsZero() &&
+			midRunUsers[next].CreatedAt.Before(step.Timestamp) {
+			out = append(out, buildUserHistoryMessage(midRunUsers[next]))
+			next++
+		}
+		out = append(out, stepMsgs...)
+	}
+	for ; next < len(midRunUsers); next++ {
+		out = append(out, buildUserHistoryMessage(midRunUsers[next]))
+	}
+
+	if final := finalAnswerHistoryMessage(assistant); final != nil {
+		out = append(out, *final)
+	}
+	return out
 }
 
 // buildUserHistoryMessage converts a stored user message into the chat.Message
@@ -144,39 +189,59 @@ func buildUserHistoryMessage(m *types.Message) chat.Message {
 func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
 	msgs := make([]chat.Message, 0, len(m.AgentSteps)*2+1)
 	for _, step := range m.AgentSteps {
-		nonTerminalCalls := filterNonTerminalToolCalls(step.ToolCalls)
-		if len(nonTerminalCalls) == 0 {
-			continue
-		}
-		assistantMsg := chat.Message{
-			Role:             "assistant",
-			Content:          step.Thought,
-			ReasoningContent: step.ReasoningContent,
-			ToolCalls:        make([]chat.ToolCall, 0, len(nonTerminalCalls)),
-		}
-		for _, tc := range nonTerminalCalls {
-			argsJSON, _ := json.Marshal(tc.Args)
-			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, chat.ToolCall{
-				ID:               tc.ID,
-				Type:             "function",
-				ProviderMetadata: tc.ProviderMetadata,
-				Function: chat.FunctionCall{
-					Name:      tc.Name,
-					Arguments: string(argsJSON),
-				},
-			})
-		}
-		msgs = append(msgs, assistantMsg)
-		for _, tc := range nonTerminalCalls {
-			msgs = append(msgs, chat.Message{
-				Role:       "tool",
-				Content:    toolCallOutput(tc),
-				ToolCallID: tc.ID,
-				Name:       tc.Name,
-			})
-		}
+		msgs = append(msgs, buildAgentStepMessages(step)...)
+	}
+	if final := finalAnswerHistoryMessage(m); final != nil {
+		msgs = append(msgs, *final)
+	}
+	return msgs
+}
+
+// buildAgentStepMessages expands one persisted step into the OpenAI-shaped
+// assistant + tool pair. Steps whose only calls were terminal or synthetic
+// produce nothing, so callers can treat an empty result as "not a real round".
+func buildAgentStepMessages(step types.AgentStep) []chat.Message {
+	nonTerminalCalls := filterNonTerminalToolCalls(step.ToolCalls)
+	if len(nonTerminalCalls) == 0 {
+		return nil
+	}
+	assistantMsg := chat.Message{
+		Role:             "assistant",
+		Content:          step.Thought,
+		ReasoningContent: step.ReasoningContent,
+		ToolCalls:        make([]chat.ToolCall, 0, len(nonTerminalCalls)),
+	}
+	for _, tc := range nonTerminalCalls {
+		argsJSON, _ := json.Marshal(tc.Args)
+		assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, chat.ToolCall{
+			ID:               tc.ID,
+			Type:             "function",
+			ProviderMetadata: tc.ProviderMetadata,
+			Function: chat.FunctionCall{
+				Name:      tc.Name,
+				Arguments: string(argsJSON),
+			},
+		})
 	}
 
+	msgs := make([]chat.Message, 0, len(nonTerminalCalls)+1)
+	msgs = append(msgs, assistantMsg)
+	for _, tc := range nonTerminalCalls {
+		msgs = append(msgs, chat.Message{
+			Role:       "tool",
+			Content:    toolCallOutput(tc),
+			ToolCallID: tc.ID,
+			Name:       tc.Name,
+		})
+	}
+	return msgs
+}
+
+// finalAnswerHistoryMessage is the canonical answer of a turn, or nil when the
+// turn produced no text (stopped, or answered purely through tools). The
+// generated-file markers belong to that turn, so they are relabeled before
+// being replayed into a later turn's history.
+func finalAnswerHistoryMessage(m *types.Message) *chat.Message {
 	finalContent := agentHistoryThinkTagRegex.ReplaceAllString(m.Content, "")
 	// Version clarification was written for that message's turn, not this one.
 	finalContent = strings.NewReplacer(
@@ -184,10 +249,10 @@ func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
 		"\n\nFile generated this turn: ![", "\n\nFile generated in that historical turn: ![",
 	).Replace(finalContent)
 	finalContent = strings.TrimSpace(finalContent)
-	if finalContent != "" {
-		msgs = append(msgs, chat.Message{Role: "assistant", Content: finalContent})
+	if finalContent == "" {
+		return nil
 	}
-	return msgs
+	return &chat.Message{Role: "assistant", Content: finalContent}
 }
 
 // legacyFinalAnswerToolName is the name of the now-removed final_answer tool.
