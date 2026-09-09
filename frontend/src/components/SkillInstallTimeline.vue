@@ -1,47 +1,47 @@
 <template>
   <section class="skill-timeline" :class="{ 'skill-timeline--compact': compact }" :aria-busy="loading">
-    <t-loading v-if="loading && messages.length === 0" size="small" />
-    <p v-else-if="messages.length === 0" class="skill-timeline__empty">
-      {{ live
-        ? $t('settings.sandbox.skillTranscriptWaiting')
-        : $t('settings.sandbox.skillTranscriptEmpty') }}
-    </p>
-    <template v-else>
-      <div v-for="(msg, index) in messages" :key="msg.id || index" class="skill-timeline__turn">
-        <pre v-if="msg.role === 'user'" class="skill-timeline__prompt">{{ msg.content }}</pre>
-        <AgentStreamDisplay
-          v-else
-          :session="msg"
-          :session-id="sessionId"
-          :user-query="''"
-          embedded-mode
-        />
-      </div>
-    </template>
-    <div class="skill-timeline__guidance">
+    <div class="skill-timeline__content">
+      <t-loading v-if="loading && messages.length === 0" size="small" />
+      <p v-else-if="messages.length === 0" class="skill-timeline__empty">
+        {{ live
+          ? $t('settings.sandbox.skillTranscriptWaiting')
+          : $t('settings.sandbox.skillTranscriptEmpty') }}
+      </p>
+      <template v-else>
+        <div v-for="(msg, index) in messages" :key="msg.id || index" class="skill-timeline__turn">
+          <pre v-if="msg.role === 'user'" class="skill-timeline__prompt">{{ msg.content }}</pre>
+          <AgentStreamDisplay
+            v-else
+            :session="msg"
+            :session-id="sessionId"
+            :user-query="''"
+            embedded-mode
+          />
+        </div>
+      </template>
       <div v-for="item in guidance.messages" :key="item.id" class="skill-timeline__guidance-message">
         <span>{{ $t(`settings.sandbox.skillGuidance.${item.status}`) }}</span>
         <p>{{ item.content }}</p>
       </div>
-      <template v-if="live || canRetry">
-        <t-textarea
-          v-model="guidanceText"
-          :placeholder="$t('settings.sandbox.skillGuidance.placeholder')"
-          :maxlength="10000"
-          :autosize="{ minRows: 2, maxRows: 6 }"
-          :disabled="sendingGuidance"
-        />
-        <p v-if="guidanceError" role="alert" class="skill-timeline__guidance-error">{{ guidanceError }}</p>
-        <div class="skill-timeline__guidance-actions">
-          <span v-if="live && !guidance.accepting">{{ $t('settings.sandbox.skillGuidance.unavailable') }}</span>
-          <t-button
-            size="small"
-            :loading="sendingGuidance"
-            :disabled="!guidanceText.trim() || (live && !guidance.accepting)"
-            @click="sendGuidance"
-          >{{ $t(live ? 'settings.sandbox.skillGuidance.send' : 'settings.sandbox.skillGuidance.retry') }}</t-button>
-        </div>
-      </template>
+    </div>
+    <div v-if="live || canRetry" class="skill-timeline__guidance">
+      <t-textarea
+        v-model="guidanceText"
+        :placeholder="$t('settings.sandbox.skillGuidance.placeholder')"
+        :maxlength="10000"
+        :autosize="{ minRows: 2, maxRows: 6 }"
+        :disabled="sendingGuidance"
+      />
+      <p v-if="guidanceError" role="alert" class="skill-timeline__guidance-error">{{ guidanceError }}</p>
+      <div class="skill-timeline__guidance-actions">
+        <span v-if="live && !guidance.accepting">{{ $t('settings.sandbox.skillGuidance.unavailable') }}</span>
+        <t-button
+          size="small"
+          :loading="sendingGuidance"
+          :disabled="!guidanceText.trim() || (live && !guidance.accepting)"
+          @click="sendGuidance"
+        >{{ $t(live ? 'settings.sandbox.skillGuidance.send' : 'settings.sandbox.skillGuidance.retry') }}</t-button>
+      </div>
     </div>
   </section>
 </template>
@@ -331,7 +331,32 @@ onUnmounted(stop)
 </script>
 
 <style scoped lang="less">
-.skill-timeline__guidance { margin-top: 12px; }
+.skill-timeline__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.skill-timeline__guidance {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  flex-shrink: 0;
+  margin-top: 12px;
+  padding-top: 12px;
+  background: var(--td-bg-color-container, #fff);
+  border-top: 1px solid var(--td-component-stroke, #e7e7e7);
+
+  // Cover the timeline's padding too, so scrolling text cannot peek around
+  // the sticky composer. Its z-index keeps this backdrop above the transcript.
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0 calc(-1 * var(--skill-guidance-gutter, 12px)) calc(-1 * var(--skill-guidance-bottom-gap, 12px));
+    z-index: -1;
+    background: inherit;
+    pointer-events: none;
+  }
+}
 .skill-timeline__guidance-message {
   margin: 8px 0;
   padding: 8px;
@@ -351,6 +376,8 @@ onUnmounted(stop)
 .skill-timeline__guidance-error { color: var(--td-error-color); font-size: 12px; }
 
 .skill-timeline {
+  display: flex;
+  flex-direction: column;
   padding: 12px;
   background: var(--td-bg-color-secondarycontainer, #f7f7f7);
   border: 1px solid var(--td-component-stroke, #e7e7e7);

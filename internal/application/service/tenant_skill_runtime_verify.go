@@ -12,26 +12,24 @@ import (
 )
 
 const skillInstallRuntimeInstructions = `
-Runtime prerequisites and completion report (required even for Markdown-only skills):
-- No requirements.txt/package.json does NOT mean no dependencies. Identify external CLI binaries, system
-  libraries, and external services/devices from SKILL.md, including its prerequisites and linked official
-  setup documentation. Read those guides with shell tools when needed.
-- Documentation saying "installed separately" describes a prerequisite, not permission to skip it. Check
-  availability and install missing CLI dependencies in this sandbox where supported. Put standalone
-  binaries in <skill-dir>/.weknora/bin (on PATH when a session selects this skill); do not rely on root's
-  ~/.local/bin or an export that only lasts one shell call. Use the explicit path during installation.
-- Verify required commands with --version/--help and the documented readiness check. A successful package
-  download is not proof of readiness.
-- Assess compatibility with THIS remote sandbox. A browser extension/local daemon on the user's computer,
-  local IPC/127.0.0.1, interactive login, or unavailable hardware may not be reachable here. Install what
-  can be installed; report precisely what still requires user action or a different environment. Do not
-  silently substitute a different tool or claim readiness.
-- With write_skill_file, create .weknora/install-report.json containing exactly:
-  {"commands":["bsk"],"blockers":["Describe an unresolved external prerequisite here"]}
-  commands lists every required runtime CLI (bare executable names, no arguments), including existing
-  ones. blockers lists unresolved setup/compatibility requirements, never credentials. Use empty arrays
-  only when there really are none. Do not put ordinary per-user API keys here; declare them in
-  requirements.json instead.
+Runtime prerequisites and completion report (required for every skill):
+- Identify runtime prerequisites from the skill's documentation and manifests, including dependencies
+  described only in prose. Consult referenced official setup guides when needed.
+- Check availability and install missing dependencies supported by this sandbox within the installer
+  scope. Put standalone CLI binaries in <skill-dir>/.weknora/bin (on PATH when a session selects this
+  skill). Use the explicit path during installation so verification does not depend on temporary shell
+  configuration.
+- Verify required commands with documented, non-destructive checks. Assess whether required capabilities
+  are available in this execution environment and whether dependencies outside it are reachable. Report
+  unresolved setup or compatibility requirements precisely; do not silently substitute a different tool.
+- With write_skill_file, create .weknora/install-report.json as a JSON object with two required fields:
+  - commands: an array of strings listing every runtime CLI required by this skill, including those
+    already installed. Each entry must be a bare executable name without paths or arguments.
+  - blockers: an array of strings describing unresolved setup or compatibility requirements found
+    during verification.
+  Populate both arrays from this skill's actual requirements and verification results, without
+  placeholder entries. Use an empty array when there are no entries for that field. Never include
+  credentials; declare ordinary per-user API keys in .weknora/requirements.json instead of blockers.
 - The server refuses missing/invalid reports, missing commands, and unresolved blockers. Do not remove a
   required command or blocker merely to pass verification. Only remove a blocker after verifying it is
   resolved.

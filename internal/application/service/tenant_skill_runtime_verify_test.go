@@ -98,13 +98,27 @@ func TestRunInstallDoesNotSnapshotUnresolvedExternalPrerequisites(t *testing.T) 
 	require.Len(t, fx.agentPrompts, 1, "an external setup blocker must not trigger pointless package retries")
 }
 
-func TestInstallPromptRequiresExternalPrerequisites(t *testing.T) {
+func TestRuntimeReportPromptsDoNotPrescribeSkillSpecificValues(t *testing.T) {
 	fx := newInstallFixture(t)
-	prompt := buildInstallPrompt(installSkillDir, fx.bundle, nil)
-	for _, text := range []string{
-		"No requirements.txt/package.json does NOT mean no dependencies",
-		"installed separately", "install-report.json", "127.0.0.1", ".weknora/bin",
-	} {
-		require.Contains(t, strings.ToLower(prompt), strings.ToLower(text))
+	fx.bundle.Files = map[string][]byte{
+		"SKILL.md": []byte("Summarize supplied text. No external commands are required."),
+	}
+	prompts := map[string]string{
+		"install": buildInstallPrompt(installSkillDir, fx.bundle, nil),
+		"repair": buildRepairPrompt(installSkillDir, &skillVerificationError{
+			Language: "runtime prerequisites", Problems: []string{"Missing install-report.json"},
+		}),
+	}
+	for name, prompt := range prompts {
+		t.Run(name, func(t *testing.T) {
+			for _, field := range []string{".weknora/install-report.json", "commands:", "blockers:"} {
+				require.Contains(t, prompt, field)
+			}
+			for _, leakedExample := range []string{
+				"bsk", "browser extension", "127.0.0.1", "Describe an unresolved external prerequisite here",
+			} {
+				require.NotContains(t, strings.ToLower(prompt), strings.ToLower(leakedExample))
+			}
+		})
 	}
 }
