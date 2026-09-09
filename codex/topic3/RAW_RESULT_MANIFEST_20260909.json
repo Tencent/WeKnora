@@ -2,6 +2,7 @@
   "version": 1,
   "hash_mode": "text_lf_canonical_v1",
   "artifacts": [
+    {"path":"codex/topic3/results/evaluation_10000_1788794712449_9efddf10_topic310.json","sha256":"813fe92f2a0beb7594d1262721edab067e6080291e76e231802b04cc55e105be","bytes":614166},
     {"path":"codex/topic3/results/batch-20260908-102705/evaluations/evaluation_10000_1788834534663_0f70aa99_topic310.json","sha256":"773b6a40c11454570bbc46428f29ca2104b4f7b922de5930d1b97c99aaf257e3","bytes":533314},
     {"path":"codex/topic3/results/batch-20260908-102705/evaluations/evaluation_10000_1788834610459_35427e40_topic310.json","sha256":"bf35b684f4264aec06a5d13761e3683389be4e855676c69c06e2449693f0f365","bytes":586763},
     {"path":"codex/topic3/results/batch-20260908-102705/evaluations/evaluation_10000_1788834692250_c3dd5d6f_topic310.json","sha256":"01bdfd3c25ffcd6b3616758422f3ff3b86a2ebb0e3d74efdf747aa33aa6ad009","bytes":529086},

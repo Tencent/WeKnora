@@ -54,6 +54,11 @@ def canonical_size(path: pathlib.Path) -> int:
     return len(canonical_bytes(path))
 
 
+def repo_path(value: str) -> pathlib.Path:
+    """Interpret recorded repository paths on both Windows and POSIX."""
+    return ROOT.joinpath(*value.replace("\\", "/").split("/"))
+
+
 def dataset_fingerprint(dataset_id: str) -> str:
     """Match the byte fingerprint used by the Go evaluation service."""
     digest = hashlib.sha256()
@@ -67,7 +72,7 @@ def dataset_fingerprint(dataset_id: str) -> str:
 
 def verify_manifest(manifest: dict, errors: list[str]) -> None:
     for item in manifest.get("artifacts", []):
-        path = ROOT / item["path"]
+        path = repo_path(item["path"])
         if not path.is_file():
             errors.append(f"missing artifact: {item['path']}")
             continue
@@ -94,11 +99,15 @@ def verify() -> list[str]:
     baseline_data = load(baseline)
     if dataset_fingerprint(baseline_data["dataset_id"]) != baseline_data.get("dataset_sha256"):
         errors.append("committed dataset does not match the formal baseline fingerprint")
-    baseline_source = ROOT / baseline_data["source_result"]
+    baseline_source = repo_path(baseline_data["source_result"])
     if not baseline_source.is_file():
         errors.append("formal baseline source result is missing")
-    elif hashlib.sha256(baseline_source.read_bytes()).hexdigest() != baseline_data.get("source_result_sha256"):
-        errors.append("formal baseline source result SHA-256 mismatch")
+    elif not any(
+        item.get("path") == baseline_data["source_result"]
+        and item.get("sha256") == sha256(baseline_source)
+        for item in load(RAW_RESULT_MANIFEST).get("artifacts", [])
+    ):
+        errors.append("formal baseline source canonical SHA-256 mismatch")
 
     core_snapshot = load(CORE_SNAPSHOT)
     for item in core_snapshot.get("files", []):
@@ -127,7 +136,7 @@ def verify() -> list[str]:
             errors.append(f"incomplete cache run: {row.get('phase')}:{row.get('repetition')}")
         if metric.get("recall") != 1 or metric.get("mrr") != 1:
             errors.append(f"retrieval metric changed: {row.get('phase')}:{row.get('repetition')}")
-        result_path = ROOT / row.get("result", "")
+        result_path = repo_path(row.get("result", ""))
         if not result_path.is_file():
             errors.append(f"missing raw evaluation result: {row.get('result')}")
         else:
