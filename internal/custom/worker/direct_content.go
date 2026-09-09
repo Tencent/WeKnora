@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -24,12 +25,20 @@ import (
 
 type DirectContentHandler struct {
 	DB            *gorm.DB
-	LLM           *llm.Client
+	LLM           directContentLLM
 	WeKnora       *weknora.Client // fixed evidence adapter
 	Wiki          *weknora.WikiClient
 	Orchestrator  *skill.Orchestrator
 	KnowledgeKBID string
 	Job           string
+}
+
+type directContentLLM interface {
+	Complete(context.Context, string) (string, error)
+	CompleteJSON(context.Context, string) (string, error)
+	Stream(context.Context, string, func(string) error) (string, error)
+	Model() string
+	PromptVersion() string
 }
 
 func NewDirectContentHandler(db *gorm.DB, client *llm.Client, wk *weknora.Client, wiki *weknora.WikiClient, orchestrator *skill.Orchestrator, jobType string) *DirectContentHandler {
@@ -107,15 +116,14 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		return fmt.Errorf("unknown direct content job: %s", h.Job)
 	}
 	raw := ""
-	if h.Job == skill.JobOutline && job.ResultStage == "draft" {
+	isStreamingOutlineDraft := h.Job == skill.JobOutline && job.ResultStage == "draft"
+	if isStreamingOutlineDraft {
 		raw, err = h.streamOutlineDraft(ctx, prompt, video, generation, chunks, contract.WriteSlug(video.ID)+"/draft", job.ID)
 		if err != nil && (strings.Contains(err.Error(), "stream contains no content") || strings.Contains(err.Error(), "decode llm stream event")) {
 			// Some OpenAI-compatible gateways accept stream=true but still return
 			// one regular completion. Preserve compatibility with those gateways.
 			raw, err = h.LLM.Complete(ctx, prompt)
 		}
-	} else {
-		raw, err = h.LLM.Complete(ctx, prompt)
 	}
 	if err != nil {
 		return fmt.Errorf("generate %s: %w", h.Job, err)
@@ -135,10 +143,18 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		}
 		var validationErr error
 		for attempt := 0; attempt < 2; attempt++ {
-			if attempt > 0 {
-				raw, err = h.LLM.Complete(ctx, outlineRetryPrompt(prompt, validationErr))
+			if !isStreamingOutlineDraft || attempt > 0 {
+				generationPrompt := prompt
+				if attempt > 0 {
+					generationPrompt = outlineRetryPrompt(prompt, validationErr)
+				}
+				raw, err = h.LLM.CompleteJSON(ctx, generationPrompt)
 				if err != nil {
-					return fmt.Errorf("generate %s retry: %w", h.Job, err)
+					validationErr = fmt.Errorf("generate %s output: %w", h.Job, err)
+					if isInvalidStructuredOutput(err) {
+						continue
+					}
+					return validationErr
 				}
 			}
 			outlineDocument = outline.Document{}
@@ -174,12 +190,17 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		var document summary.Document
 		var validationErr error
 		for attempt := 0; attempt < 2; attempt++ {
+			generationPrompt := prompt
 			if attempt > 0 {
-				retryPrompt := prompt + "\n上一轮总结未通过严格校验，必须修正后重新输出完整 JSON。校验错误：" + validationErr.Error() + "。字段名必须严格使用 schemaVersion、videoType、sections、evidenceChunkIds，禁止使用 schema_version、video_type、evidence_chunk_ids；schemaVersion 必须为数字 1。只能从上文转写分块列表复制 evidenceChunkIds，不得创造、猜测或引用不存在的 ID；可以使用纯知识 ID或带 |分片序号的显示 ID，系统会归一化。"
-				raw, err = h.LLM.Complete(ctx, retryPrompt)
-				if err != nil {
-					return fmt.Errorf("generate %s retry: %w", h.Job, err)
+				generationPrompt = prompt + "\n上一轮总结未通过严格校验，必须修正后重新输出完整 JSON。校验错误：" + validationErr.Error() + "。字段名必须严格使用 schemaVersion、videoType、sections、evidenceChunkIds，禁止使用 schema_version、video_type、evidence_chunk_ids；schemaVersion 必须为数字 1。只能从上文转写分块列表复制 evidenceChunkIds，不得创造、猜测或引用不存在的 ID；可以使用纯知识 ID或带 |分片序号的显示 ID，系统会归一化。"
+			}
+			raw, err = h.LLM.CompleteJSON(ctx, generationPrompt)
+			if err != nil {
+				validationErr = fmt.Errorf("generate %s output: %w", h.Job, err)
+				if isInvalidStructuredOutput(err) {
+					continue
 				}
+				return validationErr
 			}
 			document = summary.Document{}
 			if err := parseLLMJSONResponse(raw, &document); err != nil {
@@ -284,6 +305,11 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		return err
 	}
 	return nil
+}
+
+func isInvalidStructuredOutput(err error) bool {
+	var invalid interface{ InvalidOutput() bool }
+	return errors.As(err, &invalid) && invalid.InvalidOutput()
 }
 
 // bindSummaryKnowledgeRefs is deliberately deterministic: the model chooses
