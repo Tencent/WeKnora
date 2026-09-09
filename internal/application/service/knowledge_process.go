@@ -484,129 +484,129 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	if !resume {
 		// === Parent-Child Chunking: create parent chunks first ===
 		var parentDBChunks []*types.Chunk // indexed by ParsedParentChunk position
-	if hasParentChild {
-		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
-		for i, pc := range options.ParentChunks {
-			parentDBChunks[i] = &types.Chunk{
+		if hasParentChild {
+			parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
+			for i, pc := range options.ParentChunks {
+				parentDBChunks[i] = &types.Chunk{
+					ID:              uuid.New().String(),
+					TenantID:        knowledge.TenantID,
+					KnowledgeID:     knowledge.ID,
+					KnowledgeBaseID: knowledge.KnowledgeBaseID,
+					Content:         pc.Content,
+					ChunkIndex:      pc.Seq,
+					IsEnabled:       true,
+					CreatedAt:       time.Now(),
+					UpdatedAt:       time.Now(),
+					StartAt:         pc.Start,
+					EndAt:           pc.End,
+					ChunkType:       types.ChunkTypeParentText,
+				}
+			}
+			// Set prev/next links for parent chunks
+			for i := range parentDBChunks {
+				if i > 0 {
+					parentDBChunks[i-1].NextChunkID = parentDBChunks[i].ID
+					parentDBChunks[i].PreChunkID = parentDBChunks[i-1].ID
+				}
+			}
+			logger.Infof(ctx, "Created %d parent chunks for parent-child strategy", len(parentDBChunks))
+		}
+
+		// 重新分配容量，考虑图片相关的Chunk + parent chunks
+		parentCount := len(options.ParentChunks)
+		insertChunks := make([]*types.Chunk, 0, len(chunks)+imageChunkCount+parentCount)
+		// Add parent chunks first (they go into DB but NOT into the vector index)
+		if hasParentChild {
+			insertChunks = append(insertChunks, parentDBChunks...)
+		}
+
+		for idx, chunkData := range chunks {
+			if strings.TrimSpace(chunkData.Content) == "" {
+				continue
+			}
+
+			// 创建主文本Chunk
+			textChunk := &types.Chunk{
 				ID:              uuid.New().String(),
 				TenantID:        knowledge.TenantID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
-				Content:         pc.Content,
-				ChunkIndex:      pc.Seq,
+				Content:         chunkData.Content,
+				ContextHeader:   chunkData.ContextHeader,
+				ChunkIndex:      int(chunkData.Seq),
 				IsEnabled:       true,
 				CreatedAt:       time.Now(),
 				UpdatedAt:       time.Now(),
-				StartAt:         pc.Start,
-				EndAt:           pc.End,
-				ChunkType:       types.ChunkTypeParentText,
+				StartAt:         int(chunkData.Start),
+				EndAt:           int(chunkData.End),
+				ChunkType:       types.ChunkTypeText,
+			}
+
+			// Wire up ParentChunkID for child chunks
+			if hasParentChild && chunkData.ParentIndex >= 0 && chunkData.ParentIndex < len(parentDBChunks) {
+				textChunk.ParentChunkID = parentDBChunks[chunkData.ParentIndex].ID
+			}
+
+			chunks[idx].ChunkID = textChunk.ID
+			insertChunks = append(insertChunks, textChunk)
+		}
+
+		// Sort chunks by index for proper ordering
+		sort.Slice(insertChunks, func(i, j int) bool {
+			return insertChunks[i].ChunkIndex < insertChunks[j].ChunkIndex
+		})
+
+		// Collect retrievable text chunks only. ParentChunkID only controls parent expansion after retrieval.
+		// When ParentChunkID is empty, retrieval keeps the standalone child content without loading a parent.
+		textChunks = make([]*types.Chunk, 0, len(chunks))
+		for _, chunk := range insertChunks {
+			if chunk.ChunkType == types.ChunkTypeText {
+				textChunks = append(textChunks, chunk)
 			}
 		}
-		// Set prev/next links for parent chunks
-		for i := range parentDBChunks {
-			if i > 0 {
-				parentDBChunks[i-1].NextChunkID = parentDBChunks[i].ID
-				parentDBChunks[i].PreChunkID = parentDBChunks[i-1].ID
+
+		// 设置文本Chunk之间的前后关系 (skip if parent-child, children don't need prev/next links)
+		if !hasParentChild {
+			for i, chunk := range textChunks {
+				if i > 0 {
+					textChunks[i-1].NextChunkID = chunk.ID
+				}
+				if i < len(textChunks)-1 {
+					textChunks[i+1].PreChunkID = chunk.ID
+				}
 			}
 		}
-		logger.Infof(ctx, "Created %d parent chunks for parent-child strategy", len(parentDBChunks))
-	}
 
-	// 重新分配容量，考虑图片相关的Chunk + parent chunks
-	parentCount := len(options.ParentChunks)
-	insertChunks := make([]*types.Chunk, 0, len(chunks)+imageChunkCount+parentCount)
-	// Add parent chunks first (they go into DB but NOT into the vector index)
-	if hasParentChild {
-		insertChunks = append(insertChunks, parentDBChunks...)
-	}
-
-	for idx, chunkData := range chunks {
-		if strings.TrimSpace(chunkData.Content) == "" {
-			continue
-		}
-
-		// 创建主文本Chunk
-		textChunk := &types.Chunk{
-			ID:              uuid.New().String(),
-			TenantID:        knowledge.TenantID,
-			KnowledgeID:     knowledge.ID,
-			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Content:         chunkData.Content,
-			ContextHeader:   chunkData.ContextHeader,
-			ChunkIndex:      int(chunkData.Seq),
-			IsEnabled:       true,
-			CreatedAt:       time.Now(),
-			UpdatedAt:       time.Now(),
-			StartAt:         int(chunkData.Start),
-			EndAt:           int(chunkData.End),
-			ChunkType:       types.ChunkTypeText,
-		}
-
-		// Wire up ParentChunkID for child chunks
-		if hasParentChild && chunkData.ParentIndex >= 0 && chunkData.ParentIndex < len(parentDBChunks) {
-			textChunk.ParentChunkID = parentDBChunks[chunkData.ParentIndex].ID
-		}
-
-		chunks[idx].ChunkID = textChunk.ID
-		insertChunks = append(insertChunks, textChunk)
-	}
-
-	// Sort chunks by index for proper ordering
-	sort.Slice(insertChunks, func(i, j int) bool {
-		return insertChunks[i].ChunkIndex < insertChunks[j].ChunkIndex
-	})
-
-	// Collect retrievable text chunks only. ParentChunkID only controls parent expansion after retrieval.
-	// When ParentChunkID is empty, retrieval keeps the standalone child content without loading a parent.
-	textChunks = make([]*types.Chunk, 0, len(chunks))
-	for _, chunk := range insertChunks {
-		if chunk.ChunkType == types.ChunkTypeText {
-			textChunks = append(textChunks, chunk)
-		}
-	}
-
-	// 设置文本Chunk之间的前后关系 (skip if parent-child, children don't need prev/next links)
-	if !hasParentChild {
-		for i, chunk := range textChunks {
-			if i > 0 {
-				textChunks[i-1].NextChunkID = chunk.ID
-			}
-			if i < len(textChunks)-1 {
-				textChunks[i+1].PreChunkID = chunk.ID
-			}
-		}
-	}
-
-	// Check if knowledge is being deleted/cancelled before writing chunks.
-	// Nothing has been persisted yet, so both branches just bail.
-	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
-		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk write: %s", status, knowledge.ID)
+		// Check if knowledge is being deleted/cancelled before writing chunks.
+		// Nothing has been persisted yet, so both branches just bail.
+		if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
+			logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk write: %s", status, knowledge.ID)
 			return nil
-	}
+		}
 
-	// Save chunks to database — ALWAYS, regardless of indexing strategy.
-	// Chunks are needed for wiki generation, graph extraction, and summary generation
-	// even when vector/keyword indexing is disabled.
-	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
-		"chunks_planned": len(insertChunks),
-	})
-	if err := s.chunkRepo.CreateChunks(ctx, insertChunks); err != nil {
-		knowledge.ParseStatus = types.ParseStatusFailed
-		knowledge.ErrorMessage = err.Error()
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
-		s.failStage(ctx, knowledge.ID, types.StageChunking,
-			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
+		// Save chunks to database — ALWAYS, regardless of indexing strategy.
+		// Chunks are needed for wiki generation, graph extraction, and summary generation
+		// even when vector/keyword indexing is disabled.
+		s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
+			"chunks_planned": len(insertChunks),
+		})
+		if err := s.chunkRepo.CreateChunks(ctx, insertChunks); err != nil {
+			knowledge.ParseStatus = types.ParseStatusFailed
+			knowledge.ErrorMessage = err.Error()
+			knowledge.UpdatedAt = time.Now()
+			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.failStage(ctx, knowledge.ID, types.StageChunking,
+				werrors.ErrCodeChunkingFailed, "create chunks failed", err)
 			return fmt.Errorf("create chunks: %w", err)
-	}
-	totalChunkChars := 0
-	for _, c := range insertChunks {
-		totalChunkChars += len(c.Content)
-	}
-	s.endStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
-		"chunks_written":   len(insertChunks),
-		"total_text_chars": totalChunkChars,
-	})
+		}
+		totalChunkChars := 0
+		for _, c := range insertChunks {
+			totalChunkChars += len(c.Content)
+		}
+		s.endStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
+			"chunks_written":   len(insertChunks),
+			"total_text_chars": totalChunkChars,
+		})
 	} else {
 		// Resume path: persisted chunk rows are reused; only stage metadata is
 		// refreshed before embedding the chunks that are still missing.
@@ -623,6 +623,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Create index information and perform vector indexing — only when vector/keyword is enabled.
 	// Chunks are ALWAYS saved to DB (above) because wiki and graph need them even without vector indexing.
 	var totalStorageSize int64
+	var storageDelta int64
 	if kb.NeedsEmbeddingModel() && embeddingModel != nil {
 		embedInput := types.JSONMap{
 			"chunks_to_embed": len(textChunks),
