@@ -228,6 +228,10 @@ func (kbCleanupChunkRepo) DeleteChunksByKnowledgeID(context.Context, uint64, str
 	return nil
 }
 
+func (kbCleanupChunkRepo) DeleteEmbedProgressByKnowledgeID(context.Context, string) error {
+	return nil
+}
+
 type kbCleanupModelService struct {
 	interfaces.ModelService
 }
