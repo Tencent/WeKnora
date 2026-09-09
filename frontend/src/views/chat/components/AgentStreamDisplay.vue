@@ -603,6 +603,7 @@ import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
 import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 import { useArtifactArriveMotion } from '@/composables/useArtifactArriveMotion';
 import { useChatSandboxPanel } from '@/composables/useChatSandboxPanel';
+import { persistedAssistantId } from '@/utils/steerStreamFork';
 import ChatMemoryStep from './ChatMemoryStep.vue';
 import { useChatMemoryRow, type UsedMemory } from '@/composables/useChatMemoryRow';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
@@ -1025,7 +1026,7 @@ const artifactsCollecting = computed(() => isCollectingSkillArtifacts(props.sess
 const artifactButtonCollecting = computed(() => artifactsCollecting.value && !hasArtifacts.value);
 const sessionIdForArtifacts = computed(() => props.sessionId ?? '');
 const messageIdForArtifacts = computed(() =>
-  String(props.session?.id || props.session?.request_id || ''),
+  persistedAssistantId(props.session) || String(props.session?.request_id || ''),
 );
 // Set when the drawer is opened from an inline artifact card in the answer, so
 // it lands on that file's preview instead of the list.

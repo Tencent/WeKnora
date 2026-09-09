@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs'
 import { webcrypto } from 'node:crypto'
 import vm from 'node:vm'
 import test from 'node:test'
-import { previewSteerMessage, discardSteerPreview, forkAfterInjectedUser } from '../../utils/steerStreamFork.ts'
+import ts from 'typescript'
+import { reactive } from 'vue'
+import { previewSteerMessage, discardSteerPreview, forkAfterInjectedUser, reconcileSteerMessageId } from '../../utils/steerStreamFork.ts'
 
 const source = readFileSync(new URL('./index.vue', import.meta.url), 'utf8')
 const handlers = source.slice(source.indexOf('const dropSteerQueueItem ='), source.indexOf('let attachingSteerFollowUp ='))
@@ -16,8 +18,8 @@ function harness(overrides = {}) {
   const state = {
     session_id: { value: 'session' }, currentAssistantMessageId: { value: 'assistant' },
     isReplying: { value: true }, isStreaming: { value: true },
-    steerQueue: { value: [] }, messagesList: [], crypto: webcrypto,
-    previewSteerMessage, discardSteerPreview,
+    steerQueue: { value: [] }, messagesList: reactive([]), crypto: webcrypto,
+    previewSteerMessage, discardSteerPreview, reconcileSteerMessageId,
     scrollToBottom() {}, sendMsg() { throw new Error('must not start a second run') },
     MessagePlugin: { info() {}, error() {} }, t: key => key,
     console: { error() {} }, ...overrides,
@@ -90,4 +92,64 @@ test('failed promotion restores the after queue and removes only its optimistic 
   await h.handlePromoteSteer('queued')
   assert.equal(h.state.steerQueue.value[0].delivery, 'after')
   assert.equal(h.state.messagesList.length, 0)
+})
+
+const streamSource = readFileSync(new URL('../../composables/useChatStreamHandler.ts', import.meta.url), 'utf8')
+const receiptStart = streamSource.indexOf("case 'user_message_injected': {")
+const receiptEnd = streamSource.indexOf("case 'complete':", receiptStart)
+assert.ok(receiptStart >= 0 && receiptEnd > receiptStart)
+const receipt = ts.transpile(`() => { switch ('user_message_injected') {
+  ${streamSource.slice(receiptStart, receiptEnd)}
+} }`)
+
+function receiveInjection(h, steerId, userId) {
+  vm.runInNewContext(receipt, {
+    messagesList: h.state.messagesList,
+    message: h.state.messagesList.findLast(m => m.role === 'assistant'),
+    dataPayload: { steer_id: steerId, user_message_id: userId, content: '写到Docx' },
+    data: {}, dataId: 'request', replaySegments: new Map(),
+    forkAfterInjectedUser, log() {}, emitMessageCreated() {}, onAgentChunkBound() {},
+    onUserMessageInjected(id) {
+      const index = h.state.steerQueue.value.findIndex(item => item.steer_id === id)
+      if (index >= 0) h.state.steerQueue.value.splice(index, 1)
+    },
+  })()
+}
+
+for (const receiptFirst of [false, true]) {
+  test(`server-assigned steer ID reconciles the optimistic bubble when SSE arrives ${receiptFirst ? 'before' : 'after'} HTTP`, async () => {
+    const request = deferred()
+    const h = harness({ steerSession: () => request.promise })
+    h.state.messagesList.push({ id: 'assistant', role: 'assistant', request_id: 'request', is_completed: false })
+    const sending = h.handleSteerMsg('写到Docx', [{ id: 'mention' }], 'inject')
+    if (receiptFirst) receiveInjection(h, 'server-steer', 'persisted-user')
+    request.resolve({ status: 'queued', steer_id: 'server-steer' })
+    await sending
+    if (!receiptFirst) receiveInjection(h, 'server-steer', 'persisted-user')
+    const users = h.state.messagesList.filter(m => m.role === 'user')
+    assert.equal(users.length, 1)
+    assert.equal(users[0].id, 'persisted-user')
+    assert.equal(users[0]._steerPending, undefined)
+    assert.equal(users[0].mentioned_items[0].id, 'mention')
+    assert.equal(h.state.steerQueue.value.length, 0)
+    assert.deepEqual(h.state.messagesList.map(m => m.role), ['assistant', 'user', 'assistant'])
+  })
+}
+
+test('concurrent identical injects reconcile by their HTTP receipts without merging distinct messages', async () => {
+  const first = deferred(), second = deferred()
+  let calls = 0
+  const h = harness({ steerSession: () => (++calls === 1 ? first.promise : second.promise) })
+  h.state.messagesList.push({ id: 'assistant', role: 'assistant', request_id: 'request', is_completed: false })
+  const sendingFirst = h.handleSteerMsg('写到Docx', [{ id: 'first' }], 'inject')
+  const sendingSecond = h.handleSteerMsg('写到Docx', [{ id: 'second' }], 'inject')
+  receiveInjection(h, 'server-first', 'user-first')
+  receiveInjection(h, 'server-second', 'user-second')
+  second.resolve({ status: 'queued', steer_id: 'server-second' })
+  await sendingSecond
+  first.resolve({ status: 'queued', steer_id: 'server-first' })
+  await sendingFirst
+  const users = h.state.messagesList.filter(m => m.role === 'user')
+  assert.deepEqual(users.map(m => [m.id, m.mentioned_items[0].id]), [['user-first', 'first'], ['user-second', 'second']])
+  assert.equal(h.state.steerQueue.value.length, 0)
 })

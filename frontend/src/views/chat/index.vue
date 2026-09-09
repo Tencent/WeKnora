@@ -183,7 +183,7 @@ import { getSuggestedQuestions } from "@/api/agent/index";
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { useStream } from '../../api/chat/streame'
 import { listSteerSession, promoteSteerSession, removeSteerSession, steerSession } from '@/api/chat/steer';
-import { persistedAssistantId, previewSteerMessage, discardSteerPreview } from '@/utils/steerStreamFork';
+import { persistedAssistantId, previewSteerMessage, discardSteerPreview, reconcileSteerMessageId } from '@/utils/steerStreamFork';
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -873,15 +873,25 @@ const handleSteerMsg = async (value, mentionedItems = [], delivery = 'after', re
     try {
         const res = await steerSession(requestSessionId, value, mentionedItems, delivery, expectedId, clientId);
         if (session_id.value !== requestSessionId) return;
-        if (res?.status === 'already_injected') {
+        const serverId = res?.steer_id || clientId;
+        const received = reconcileSteerMessageId(messagesList, clientId, serverId);
+        const queued = findSteerQueueItem(clientId);
+        if (received && !received._steerPending) {
+            // The SSE receipt can arrive before the HTTP response, including
+            // when an older backend generated a different steer ID.
             dropSteerQueueItem(clientId);
-            const preview = messagesList.find(m => m.steer_id === clientId);
+        } else if (queued) {
+            queued.steer_id = serverId;
+        }
+        if (res?.status === 'already_injected') {
+            dropSteerQueueItem(serverId);
+            const preview = messagesList.find(m => m.steer_id === serverId);
             if (preview) delete preview._steerPending;
             MessagePlugin.info(t('input.messages.steerAlreadyInjected'));
             return;
         }
         if (res?.status === 'new_run') {
-            const item = findSteerQueueItem(clientId);
+            const item = findSteerQueueItem(serverId);
             // Still attached to a stream: aborting it to POST AgentQA races the
             // finishing turn and can start a second engine. Keep the message and
             // send once the current SSE completes.
@@ -892,15 +902,13 @@ const handleSteerMsg = async (value, mentionedItems = [], delivery = 'after', re
                 }
                 return;
             }
-            dropSteerQueueItem(clientId);
-            discardSteerPreview(messagesList, clientId);
+            dropSteerQueueItem(serverId);
+            discardSteerPreview(messagesList, serverId);
             await sendMsg(value, '', mentionedItems);
             return;
         }
-        const item = findSteerQueueItem(clientId);
+        const item = findSteerQueueItem(serverId);
         if (item) {
-            // The server echoes the stable client UUID used by SSE receipts.
-            if (res?.steer_id) item.steer_id = res.steer_id;
             item.pending = false;
         }
     } catch (e) {

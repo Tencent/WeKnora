@@ -20,6 +20,23 @@ export function discardSteerPreview(list: ChatMessage[], steerId: string): void 
   if (index >= 0) list.splice(index, 1)
 }
 
+/** Reconcile older servers that assign their own ID instead of echoing the client UUID. */
+export function reconcileSteerMessageId(list: ChatMessage[], clientId: string, serverId: string): ChatMessage | undefined {
+  const preview = list.find(m => m.role === 'user' && m.steer_id === clientId)
+  const received = list.find(m => m.role === 'user' && m.steer_id === serverId)
+  if (preview && received && preview !== received && preview._steerPending) {
+    // SSE may have already inserted the persisted row. Keep its position and
+    // server metadata while preserving mentions from the optimistic message.
+    if (Array.isArray(preview.mentioned_items) && preview.mentioned_items.length) {
+      received.mentioned_items = preview.mentioned_items
+    }
+    list.splice(list.indexOf(preview), 1)
+    return received
+  }
+  if (preview) preview.steer_id = serverId
+  return received || preview
+}
+
 /**
  * The row id the server knows this assistant message by.
  *
