@@ -150,23 +150,66 @@ python dataset/qa_dataset.py show \
 
 ## Input Data Format
 
+### Dataset directory and manifest
+
+The built-in `dataset_id=default` resolves to `dataset/samples/`. A custom ID
+such as `support-en-v1` resolves to `dataset/support-en-v1/`. Set
+`WEKNORA_EVALUATION_DATASET_DIR` to use another dataset root. IDs must contain
+1–64 letters, digits, dots, underscores, or hyphens and cannot contain path
+separators.
+
+Every evaluable directory must also contain `manifest.json`:
+
+```json
+{
+  "schema_version": 1,
+  "id": "support-en-v1",
+  "name": "English support QA v1",
+  "description": "Covers refunds, delivery, and account questions",
+  "language": "en",
+  "scenario": "customer-support",
+  "source": "redacted internal tickets",
+  "license": "internal-evaluation-only",
+  "created_at": "2026-09-06",
+  "coverage_dimensions": ["single-hop", "multi-hop", "no-answer"]
+}
+```
+
+`schema_version`, `id`, and a non-empty `name` are required, and the manifest
+ID must exactly match the requested `dataset_id`. The remaining fields document
+provenance and coverage. Before any background evaluation or model call starts,
+the service also rejects invalid Parquet types, empty text, duplicate IDs,
+dangling relations, or a question without both a relevant passage and answer.
+
 ### Queries File (queries.parquet)
 | Column | Type | Description |
 |--------|------|-------------|
-| id | string | Unique query identifier |
+| id | int64 | Unique query identifier |
 | text | string | The actual question text |
 
 ### Corpus File (corpus.parquet)
 | Column | Type | Description |
 |--------|------|-------------|
-| id | string | Unique passage/document identifier |
+| id | int64 | Unique passage/document identifier |
 | text | string | The passage/document content |
 
 ### Qrels File (qrels.parquet)
 | Column | Type | Description |
 |--------|------|-------------|
-| qid | string | Query ID (matches queries.id) |
-| pid | string | Passage ID (matches corpus.id) |
+| qid | int64 | Query ID (matches queries.id) |
+| pid | int64 | Passage ID (matches corpus.id) |
+
+### Answers File (answers.parquet)
+| Column | Type | Description |
+|--------|------|-------------|
+| id | int64 | Unique answer identifier |
+| text | string | Reference answer text |
+
+### QA Mapping File (qas.parquet)
+| Column | Type | Description |
+|--------|------|-------------|
+| qid | int64 | Query ID (matches queries.id) |
+| aid | int64 | Answer ID (matches answers.id) |
 
 ## Output Files
 

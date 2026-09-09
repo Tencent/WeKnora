@@ -61,10 +61,7 @@
             'model-card--builtin': model.isBuiltin,
             'model-card--clickable': isModelCardClickable(model),
           },
-        ]" :role="isModelCardClickable(model) ? 'button' : undefined"
-          :tabindex="isModelCardClickable(model) ? 0 : undefined"
-          @click="onModelCardClick($event, model._modelType, model)"
-          @keydown.enter="onModelCardClick($event, model._modelType, model)">
+        ]" @click="onModelCardClick($event, model._modelType, model)">
           <div class="model-card__badge" :aria-label="typeLabel(model._modelType)">
             <t-icon :name="typeIcon(model._modelType)" size="18px" />
           </div>
@@ -128,7 +125,7 @@
                 </span>
               </template>
             </p>
-            <div v-if="modelUsage(model)?.call_count" class="model-card__usage" @click.stop>
+            <div v-if="hasModelUsage(model)" class="model-card__usage" @click.stop>
               <span class="model-card__usage-item" :title="usageLabels.calls">
                 {{ usageLabels.calls }} {{ formatInteger(modelUsage(model)!.call_count) }}
               </span>
@@ -136,17 +133,75 @@
                 {{ usageLabels.tokens }} {{ formatCompact(modelUsage(model)!.total_tokens) }}
               </span>
               <span v-if="modelUsage(model)!.cache_reported_calls > 0" class="model-card__usage-item"
-                :title="usageLabels.cacheHitRate">
+                :title="cacheMetricTitle(modelUsage(model)!)">
                 {{ usageLabels.cache }} {{ formatPercent(modelUsage(model)!.cache_hit_rate) }}
               </span>
-              <span v-if="modelUsage(model)!.priced_calls > 0" class="model-card__usage-item model-card__usage-item--cost"
-                :title="usageLabels.estimatedCost">
+              <span v-if="modelUsage(model)?.priced_calls" class="model-card__usage-item model-card__usage-item--cost"
+                :title="modelUsage(model)!.unpriced_calls > 0 ? usageLabels.partialCost : usageLabels.estimatedCost">
                 {{ formatCosts(modelUsage(model)!.cost_by_currency) }}
+                <template v-if="modelUsage(model)!.unpriced_calls > 0"> · {{ usageLabels.partial }}</template>
               </span>
-              <span v-else-if="modelUsage(model)!.unpriced_calls > 0" class="model-card__usage-item model-card__usage-item--muted"
+              <span v-else-if="modelUsage(model)?.unpriced_calls" class="model-card__usage-item model-card__usage-item--muted"
                 :title="usageLabels.unpriced">
                 {{ usageLabels.costUnknown }}
               </span>
+              <span v-if="embeddingCacheUsage(model)?.lookup_count" class="model-card__usage-item model-card__usage-item--cache"
+                :title="usageLabels.embeddingCacheHint">
+                {{ usageLabels.embeddingCache }} {{ formatPercent(embeddingCacheUsage(model)!.hit_rate) }}
+              </span>
+              <span v-if="embeddingCacheUsage(model)?.avoided_computations" class="model-card__usage-item"
+                :title="usageLabels.embeddingAvoidedHint">
+                {{ usageLabels.embeddingAvoided }} {{ formatInteger(embeddingCacheUsage(model)!.avoided_computations) }}
+              </span>
+              <span v-if="wikiSummary(model)" class="model-card__usage-item model-card__usage-item--wiki">
+                Wiki {{ formatInteger(wikiSummary(model)!.call_count) }} {{ usageLabels.callsUnit }}
+              </span>
+              <button
+                v-if="modelPurposes(model).length"
+                type="button"
+                class="model-card__usage-toggle"
+                :aria-expanded="isUsageExpanded(model)"
+                @click.stop="toggleUsageDetails(model)"
+              >
+                {{ isUsageExpanded(model) ? usageLabels.hideDetails : usageLabels.details }}
+                <t-icon :name="isUsageExpanded(model) ? 'chevron-up' : 'chevron-down'" size="12px" />
+              </button>
+            </div>
+            <div v-if="isUsageExpanded(model)" class="model-card__purpose-list" @click.stop>
+              <div v-if="wikiSummary(model)" class="model-card__wiki-summary">
+                <strong>{{ usageLabels.wikiSummary }}</strong>
+                <span>{{ usageLabels.calls }} {{ formatInteger(wikiSummary(model)!.call_count) }}</span>
+                <span>{{ usageLabels.tokens }} {{ formatCompact(wikiSummary(model)!.total_tokens) }}</span>
+                <span v-if="wikiSummary(model)!.cache_reported_calls > 0">
+                  {{ usageLabels.cache }} {{ formatPercent(wikiSummary(model)!.cache_hit_rate) }}
+                </span>
+                <span v-if="wikiSummary(model)!.priced_calls > 0">
+                  {{ formatCosts(wikiSummary(model)!.cost_by_currency) }}
+                  <template v-if="wikiSummary(model)!.unpriced_calls > 0"> · {{ usageLabels.partial }}</template>
+                </span>
+                <span v-else-if="wikiSummary(model)!.unpriced_calls > 0">{{ usageLabels.costUnknown }}</span>
+              </div>
+              <div v-for="purpose in modelPurposes(model)" :key="purpose.purpose || '_unspecified'"
+                class="model-card__purpose-row">
+                <div class="model-card__purpose-heading">
+                  <span>{{ purposeLabel(purpose.purpose) }}</span>
+                  <span>{{ formatInteger(purpose.usage.call_count) }} {{ usageLabels.callsUnit }}</span>
+                </div>
+                <div class="model-card__purpose-bar" aria-hidden="true">
+                  <span :style="{ width: purposeBarWidth(model, purpose.usage.call_count) }" />
+                </div>
+                <div class="model-card__purpose-metrics">
+                  <span>{{ usageLabels.tokens }} {{ formatCompact(purpose.usage.total_tokens) }}</span>
+                  <span v-if="purpose.usage.cache_reported_calls > 0">
+                    {{ usageLabels.cache }} {{ formatPercent(purpose.usage.cache_hit_rate) }}
+                  </span>
+                  <span v-if="purpose.usage.priced_calls > 0" :title="purpose.usage.unpriced_calls > 0 ? usageLabels.partialCost : usageLabels.estimatedCost">
+                    {{ formatCosts(purpose.usage.cost_by_currency) }}
+                    <template v-if="purpose.usage.unpriced_calls > 0"> · {{ usageLabels.partial }}</template>
+                  </span>
+                  <span v-else-if="purpose.usage.unpriced_calls > 0">{{ usageLabels.costUnknown }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -282,6 +337,14 @@
         </div>
       </div>
     </t-dialog>
+    <div v-if="usageLoading || usageError || usageIsEmpty" class="usage-load-state" role="status">
+      <span v-if="usageLoading">{{ usageLabels.loading }}</span>
+      <template v-else-if="usageError">
+        <span>{{ usageLabels.loadFailed }}</span>
+        <button type="button" @click="loadUsage">{{ usageLabels.retry }}</button>
+      </template>
+      <span v-else>{{ usageLabels.noData }}</span>
+    </div>
 
     <!-- 模型编辑器抽屉 -->
     <ModelEditorDialog v-model:visible="showDialog" :model-type="currentModelType" :model-data="editingModel"
@@ -314,7 +377,7 @@ import {
   type ModelUsageDetails,
   type ModelUsageResourceKind,
 } from '@/api/model'
-import { getEvaluationModelUsage, type EvaluationUsage } from '@/api/evaluation'
+import { getEvaluationModelUsage, type EvaluationModelUsageStat, type EvaluationUsage } from '@/api/evaluation'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
 import { focusKbEditorSection } from '@/config/contextualGuides'
@@ -341,6 +404,8 @@ const usageConflictModelName = ref('')
 const currentModelType = ref<ModelType>('chat')
 const editingModel = ref<any>(null)
 const loading = ref(true)
+const usageLoading = ref(false)
+const usageError = ref(false)
 const activeTypeFilter = ref<FilterType>('all')
 
 const MODEL_TAB_TYPES: FilterType[] = ['chat', 'embedding', 'rerank', 'vllm', 'asr']
@@ -365,40 +430,42 @@ watch(
 // 模型列表数据
 const allModels = ref<ModelConfig[]>([])
 const modelUsageByID = ref<Record<string, EvaluationUsage>>({})
+const modelUsageStatsByID = ref<Record<string, EvaluationModelUsageStat>>({})
+const expandedUsageModels = ref<Record<string, boolean>>({})
 const usageRange = ref<'24h' | '7d' | '30d' | 'all'>('30d')
 
-const usageLabels = computed(() => {
-  const lang = String(locale.value).toLowerCase()
-  if (lang.startsWith('zh')) return {
-    calls: '调用', tokens: 'Token', cache: '缓存', cacheHitRate: '缓存命中率',
-    estimatedCost: '估算成本', unpriced: '该模型尚未配置 Token 单价', costUnknown: '成本未配置', range: '用量区间',
-  }
-  if (lang.startsWith('ko')) return {
-    calls: '호출', tokens: 'Token', cache: '캐시', cacheHitRate: '캐시 적중률',
-    estimatedCost: '평가 예상 비용', unpriced: 'Token 가격이 설정되지 않음', costUnknown: '비용 미설정', range: '사용 기간',
-  }
-  if (lang.startsWith('ru')) return {
-    calls: 'Вызовы', tokens: 'Token', cache: 'Кэш', cacheHitRate: 'Доля попаданий в кэш',
-    estimatedCost: 'Расчётная стоимость оценки', unpriced: 'Цена токенов не настроена', costUnknown: 'Нет цены', range: 'Период',
-  }
-  return {
-    calls: 'Calls', tokens: 'Tokens', cache: 'Cache', cacheHitRate: 'Cache hit rate',
-    estimatedCost: 'Estimated cost', unpriced: 'Token pricing is not configured', costUnknown: 'Cost unavailable', range: 'Usage period',
-  }
-})
+const usageLabels = computed(() => ({
+  calls: t('modelSettings.usage.calls'),
+  callsUnit: t('modelSettings.usage.callsUnit'),
+  tokens: t('modelSettings.usage.tokens'),
+  cache: t('modelSettings.usage.cache'),
+  cacheHitRate: t('modelSettings.usage.cacheHitRate'),
+  cacheCoverage: t('modelSettings.usage.cacheCoverage'),
+  estimatedCost: t('modelSettings.usage.estimatedCost'),
+  unpriced: t('modelSettings.usage.unpriced'),
+  costUnknown: t('modelSettings.usage.costUnknown'),
+  range: t('modelSettings.usage.range'),
+  details: t('modelSettings.usage.details'),
+  hideDetails: t('modelSettings.usage.hideDetails'),
+  partial: t('modelSettings.usage.partial'),
+  partialCost: t('modelSettings.usage.partialCost'),
+  embeddingCache: t('modelSettings.usage.embeddingCache'),
+  embeddingCacheHint: t('modelSettings.usage.embeddingCacheHint'),
+  embeddingAvoided: t('modelSettings.usage.embeddingAvoided'),
+  embeddingAvoidedHint: t('modelSettings.usage.embeddingAvoidedHint'),
+  wikiSummary: t('modelSettings.usage.wikiSummary'),
+  loading: t('modelSettings.usage.loading'),
+  loadFailed: t('modelSettings.usage.loadFailed'),
+  retry: t('modelSettings.usage.retry'),
+  noData: t('modelSettings.usage.noData'),
+}))
 
-const usageRangeOptions = computed(() => {
-  const lang = String(locale.value).toLowerCase()
-  const labels = lang.startsWith('zh')
-    ? ['最近 24 小时', '最近 7 天', '最近 30 天', '全部时间']
-    : ['Last 24 hours', 'Last 7 days', 'Last 30 days', 'All time']
-  return [
-    { label: labels[0], value: '24h' },
-    { label: labels[1], value: '7d' },
-    { label: labels[2], value: '30d' },
-    { label: labels[3], value: 'all' },
-  ]
-})
+const usageRangeOptions = computed(() => [
+  { label: t('modelSettings.usage.range24h'), value: '24h' },
+  { label: t('modelSettings.usage.range7d'), value: '7d' },
+  { label: t('modelSettings.usage.range30d'), value: '30d' },
+  { label: t('modelSettings.usage.rangeAll'), value: 'all' },
+])
 
 const selectedUsageRange = () => {
   if (usageRange.value === 'all') return {}
@@ -409,6 +476,54 @@ const selectedUsageRange = () => {
 }
 
 const modelUsage = (model: any) => modelUsageByID.value[model.id]
+const modelPurposes = (model: any) => modelUsageStatsByID.value[model.id]?.purposes || []
+const embeddingCacheUsage = (model: any) => modelUsageStatsByID.value[model.id]?.embedding_cache
+const hasModelUsage = (model: any) => Boolean(modelUsage(model)?.call_count || embeddingCacheUsage(model)?.lookup_count)
+const usageIsEmpty = computed(() => !loading.value && !usageLoading.value && !usageError.value
+  && allModels.value.length > 0 && Object.keys(modelUsageStatsByID.value).length === 0)
+const wikiSummary = (model: any): EvaluationUsage | null => {
+  const wikiPurposes = modelPurposes(model).filter(item => item.purpose.startsWith('wiki_'))
+  if (!wikiPurposes.length) return null
+  const result: EvaluationUsage = {
+    call_count: 0, successful_calls: 0, failed_calls: 0, prompt_tokens: 0,
+    completion_tokens: 0, total_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
+    cache_miss_tokens: 0, cache_reported_calls: 0, cache_hit_calls: 0, cache_hit_rate: 0,
+    cache_coverage_rate: 0,
+    model_duration_ms: 0, average_model_latency_ms: 0, priced_calls: 0, unpriced_calls: 0,
+    cost_by_currency: {},
+  }
+  for (const { usage } of wikiPurposes) {
+    for (const key of ['call_count', 'successful_calls', 'failed_calls', 'prompt_tokens', 'completion_tokens',
+      'total_tokens', 'cache_read_tokens', 'cache_write_tokens', 'cache_miss_tokens', 'cache_reported_calls',
+      'cache_hit_calls', 'model_duration_ms', 'priced_calls', 'unpriced_calls'] as const) {
+      result[key] += usage[key]
+    }
+    for (const [currency, cost] of Object.entries(usage.cost_by_currency || {})) {
+      result.cost_by_currency[currency] = (result.cost_by_currency[currency] || 0) + cost
+    }
+  }
+  const reportedPromptTokens = result.cache_read_tokens + result.cache_miss_tokens
+  result.cache_hit_rate = reportedPromptTokens > 0 ? result.cache_read_tokens / reportedPromptTokens : 0
+  result.cache_coverage_rate = result.call_count > 0 ? result.cache_reported_calls / result.call_count : 0
+  result.average_model_latency_ms = result.call_count > 0 ? result.model_duration_ms / result.call_count : 0
+  return result
+}
+const isUsageExpanded = (model: any) => Boolean(expandedUsageModels.value[model.id])
+const toggleUsageDetails = (model: any) => {
+  expandedUsageModels.value = {
+    ...expandedUsageModels.value,
+    [model.id]: !expandedUsageModels.value[model.id],
+  }
+}
+const purposeLabel = (purpose: string) => {
+  if (!purpose) return t('modelSettings.usage.purposes.unspecified')
+  const key = `modelSettings.usage.purposes.${purpose}`
+  return te(key) ? t(key) : purpose.replaceAll('_', ' ')
+}
+const purposeBarWidth = (model: any, callCount: number) => {
+  const maxCalls = Math.max(...modelPurposes(model).map(item => item.usage.call_count), 1)
+  return `${Math.max((callCount / maxCalls) * 100, 3)}%`
+}
 const formatInteger = (value: number) => new Intl.NumberFormat(locale.value).format(value || 0)
 const formatCompact = (value: number) => new Intl.NumberFormat(locale.value, {
   notation: 'compact', maximumFractionDigits: 1,
@@ -416,6 +531,8 @@ const formatCompact = (value: number) => new Intl.NumberFormat(locale.value, {
 const formatPercent = (value: number) => new Intl.NumberFormat(locale.value, {
   style: 'percent', maximumFractionDigits: 1,
 }).format(value || 0)
+const cacheMetricTitle = (usage: EvaluationUsage) =>
+  `${usageLabels.value.cacheHitRate} · ${usageLabels.value.cacheCoverage} ${formatPercent(usage.cache_coverage_rate)}`
 const formatCosts = (costs: Record<string, number>) => Object.entries(costs || {})
   .sort(([left], [right]) => left.localeCompare(right))
   .map(([currency, amount]) => `${currency} ${amount.toLocaleString(locale.value, {
@@ -571,21 +688,35 @@ const emptyHint = computed(() => {
 })
 
 // 加载模型列表
+let usageRequestID = 0
+const loadUsage = async () => {
+  const requestID = ++usageRequestID
+  usageLoading.value = true
+  usageError.value = false
+  try {
+    const usageStats = await getEvaluationModelUsage(selectedUsageRange())
+    if (requestID !== usageRequestID) return
+    modelUsageByID.value = Object.fromEntries(usageStats.map(stat => [stat.model_id, stat.usage]))
+    modelUsageStatsByID.value = Object.fromEntries(usageStats.map(stat => [stat.model_id, stat]))
+  } catch (error) {
+    if (requestID !== usageRequestID) return
+    console.warn('加载模型用量失败:', error)
+    modelUsageByID.value = {}
+    modelUsageStatsByID.value = {}
+    usageError.value = true
+  } finally {
+    if (requestID === usageRequestID) usageLoading.value = false
+  }
+}
+
 const loadModels = async () => {
   loading.value = true
   try {
-    const [models, usageStats] = await Promise.all([
-      listModels(),
-      getEvaluationModelUsage(selectedUsageRange()).catch((error) => {
-        console.warn('加载评测模型用量失败:', error)
-        return []
-      }),
-    ])
+    const models = await listModels()
     allModels.value = models
     // 设置页自己 listModels 之后立刻写回空间级缓存。否则对话输入栏 /
     // 智能体编辑器会继续拿 60s TTL 里的旧 context_window，刷新页面才对。
     chatResources.replaceModels(models)
-    modelUsageByID.value = Object.fromEntries(usageStats.map(stat => [stat.model_id, stat.usage]))
   } catch (error: any) {
     console.error('加载模型列表失败:', error)
     MessagePlugin.error(error.message)
@@ -595,7 +726,7 @@ const loadModels = async () => {
 }
 
 watch(usageRange, () => {
-  loadModels()
+  loadUsage()
 })
 
 // 打开添加对话框；类型在抽屉内选择，此处仅按当前 Tab 预填默认值
@@ -955,6 +1086,7 @@ function getModelType(type: ModelType): 'KnowledgeQA' | 'Embedding' | 'Rerank' |
 
 onMounted(() => {
   loadModels()
+  loadUsage()
 })
 </script>
 
@@ -1315,6 +1447,123 @@ onMounted(() => {
   &--muted {
     color: var(--td-text-color-placeholder);
   }
+
+  &--cache {
+    color: var(--td-brand-color);
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
+  }
+
+  &--wiki {
+    color: #7a4d00;
+    background: rgba(184, 92, 0, 0.09);
+  }
+}
+
+.model-card__usage-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 20px;
+  padding: 1px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--td-brand-color);
+  font: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 1px;
+    border-radius: 4px;
+  }
+}
+
+.model-card__purpose-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 9px 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 72%, transparent);
+}
+
+.model-card__purpose-row {
+  min-width: 0;
+}
+
+.model-card__wiki-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  color: var(--td-text-color-secondary);
+  font-size: 10px;
+
+  strong {
+    width: 100%;
+    color: var(--td-text-color-primary);
+    font-size: 11px;
+  }
+}
+
+.model-card__purpose-heading,
+.model-card__purpose-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.model-card__purpose-heading {
+  color: var(--td-text-color-primary);
+  font-size: 11px;
+  font-weight: 500;
+
+  span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  span:last-child {
+    flex-shrink: 0;
+    color: var(--td-text-color-secondary);
+    font-weight: 400;
+  }
+}
+
+.model-card__purpose-bar {
+  height: 4px;
+  margin: 4px 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--td-bg-color-component);
+
+  span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--td-brand-color);
+  }
+}
+
+.model-card__purpose-metrics {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  color: var(--td-text-color-secondary);
+  font-size: 10px;
+
+  span + span::before {
+    margin-right: 8px;
+    color: var(--td-text-color-placeholder);
+    content: '·';
+  }
 }
 
 .model-card__sep {
@@ -1460,5 +1709,48 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   margin-top: 20px;
+}
+.usage-load-state {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+
+  button {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--td-brand-color);
+    font: inherit;
+    cursor: pointer;
+  }
+}
+
+@media (max-width: 640px) {
+  .section-header__top {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .usage-range-filter,
+  .usage-load-state {
+    justify-content: flex-start;
+  }
+
+  .usage-range-filter :deep(.t-select__wrap) {
+    width: min(100%, 220px);
+  }
+
+  .model-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .model-card {
+    padding: 12px;
+  }
 }
 </style>

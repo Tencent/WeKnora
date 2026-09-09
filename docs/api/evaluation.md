@@ -6,6 +6,7 @@
 | ---- | ------------------------- | -------------------------------- |
 | GET  | `/evaluation/`            | 获取评估任务结果                  |
 | POST | `/evaluation/`            | 创建评估任务                      |
+| GET  | `/evaluation/datasets`    | 获取可选择的数据集及就绪状态       |
 | GET  | `/evaluation/model-usage` | 按模型和时间范围获取租户模型用量   |
 
 > 注：服务端路由带尾斜杠（Gin 会自动从 `/evaluation` 重定向到 `/evaluation/`），下方示例为方便阅读用了 `/evaluation`。
@@ -91,6 +92,38 @@ curl --location 'http://localhost:8080/api/v1/evaluation?task_id=c34563ad-b09f-4
 }
 ```
 
+## GET `/evaluation/datasets` - 获取评测数据集
+
+该接口读取数据集根目录中的 `manifest.json`，返回名称、语言、场景、来源和覆盖维度，
+供评测页面选择。`available=false` 表示 manifest 或五个必需 Parquet 文件不完整；
+发起评测时还会再次执行字段类型、重复 ID 和 qid/pid/aid 关系校验，失败后不会调用模型。
+
+```bash
+curl --location 'http://localhost:8080/api/v1/evaluation/datasets' \
+  --header 'X-API-Key: sk-xxxxx'
+```
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "schema_version": 1,
+      "id": "default",
+      "name": "WeKnora built-in QA sample",
+      "language": "mixed",
+      "scenario": "general-rag",
+      "coverage_dimensions": ["retrieval", "reranking", "answer-generation"],
+      "available": true
+    }
+  ]
+}
+```
+
+自定义 `dataset_id` 对应 `<WEKNORA_EVALUATION_DATASET_DIR>/<dataset_id>/`；内置
+`default` 为兼容原目录结构，映射到 `<根目录>/samples/`。完整 manifest 和五个 Parquet
+Schema 见 [`dataset/README_zh.md`](../../dataset/README_zh.md)。
+
 ## GET `/evaluation/model-usage` - 获取模型用量
 
 该接口聚合当前租户在评测、普通问答、Wiki 和后台任务中的模型调用。数据来自
@@ -157,7 +190,7 @@ curl --location \
 
 | 字段              | 类型   | 必填 | 说明                                            |
 | ----------------- | ------ | ---- | ----------------------------------------------- |
-| dataset_id        | string | 是   | 评估数据集，目前仅支持 `default`（官方测试集）   |
+| dataset_id        | string | 否   | `GET /evaluation/datasets` 返回的数据集 ID；默认 `default` |
 | knowledge_base_id | string | 是   | 评估使用的知识库 ID                              |
 | chat_id           | string | 是   | 评估使用的对话模型 ID                            |
 | rerank_id         | string | 是   | 评估使用的重排序模型 ID                          |

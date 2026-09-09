@@ -1,0 +1,28 @@
+{
+  "success": true,
+  "data": {
+    "task": {
+      "id": "evaluation-production-pipeline-reference",
+      "status": 2,
+      "total": 1,
+      "finished": 1,
+      "duration_ms": 0
+    },
+    "metric": {
+      "retrieval_metrics": {
+        "precision": 0.6666666666666666,
+        "recall": 1,
+        "ndcg10": 0.6934264036172708,
+        "mrr": 0.5
+      },
+      "generation_metrics": {
+        "rougel": 1
+      }
+    },
+    "usage": {
+      "cost_by_currency": {
+        "USD": 0
+      }
+    }
+  }
+}

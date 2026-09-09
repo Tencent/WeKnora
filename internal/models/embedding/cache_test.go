@@ -23,6 +23,16 @@ type cacheTestPersistentBackend struct {
 	vectors map[string][]float32
 }
 
+type cacheObservationCollector struct {
+	observations []types.EmbeddingCacheObservation
+}
+
+func (*cacheObservationCollector) ObserveLLMCall(types.LLMCallObservation) {}
+
+func (c *cacheObservationCollector) ObserveEmbeddingCache(observation types.EmbeddingCacheObservation) {
+	c.observations = append(c.observations, observation)
+}
+
 func (b *cacheTestPersistentBackend) Get(
 	_ context.Context, keys []string, _ time.Time,
 ) (map[string][]float32, error) {
@@ -129,6 +139,32 @@ func TestCachedEmbedderBatchPreservesOrderAndDeduplicates(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, [][]float32{cacheTestVector("b"), cacheTestVector("a")}, second)
 	require.Equal(t, 1, inner.batchCalls)
+}
+
+func TestCachedEmbedderReportsHitsMissesAndBatchDeduplication(t *testing.T) {
+	collector := &cacheObservationCollector{}
+	types.SetGlobalLLMCallObserver(collector)
+	t.Cleanup(func() { types.SetGlobalLLMCallObserver(nil) })
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(42))
+	inner := &cacheTestEmbedder{modelID: t.Name()}
+	cached := newTestCachedEmbedder(inner)
+
+	_, err := cached.BatchEmbed(ctx, []string{"a", "b", "a"})
+	require.NoError(t, err)
+	_, err = cached.BatchEmbed(ctx, []string{"b", "a"})
+	require.NoError(t, err)
+
+	require.Len(t, collector.observations, 2)
+	require.Equal(t, types.EmbeddingCacheObservation{
+		TenantID: 42, ModelID: t.Name(), ModelName: "cache-test",
+		LookupCount: 3, HitCount: 0, MissCount: 2, DeduplicatedCount: 1,
+		AvoidedComputations: 1,
+	}, collector.observations[0])
+	require.Equal(t, types.EmbeddingCacheObservation{
+		TenantID: 42, ModelID: t.Name(), ModelName: "cache-test",
+		LookupCount: 2, HitCount: 2, MissCount: 0, DeduplicatedCount: 0,
+		AvoidedComputations: 2,
+	}, collector.observations[1])
 }
 
 func TestCachedEmbedderPooledPathOnlyFetchesMisses(t *testing.T) {

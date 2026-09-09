@@ -138,6 +138,7 @@ type cachedEmbedder struct {
 func (c *cachedEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	key := c.key(ctx, text)
 	if vector, ok := c.store.get(key, c.now()); ok {
+		c.observeCache(ctx, 1, 1, 0, 0)
 		return vector, nil
 	}
 	if backend := c.persistentBackend(ctx); backend != nil {
@@ -145,11 +146,13 @@ func (c *cachedEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 		if err == nil {
 			if vector, ok := vectors[key]; ok {
 				c.store.put(key, vector, c.now().Add(c.options.ttl), c.options.maxEntries)
+				c.observeCache(ctx, 1, 1, 0, 0)
 				return cloneVector(vector), nil
 			}
 		}
 	}
 	vector, err := c.inner.Embed(ctx, text)
+	c.observeCache(ctx, 1, 0, 1, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -187,15 +190,23 @@ func (c *cachedEmbedder) batchEmbed(
 	misses := make([]miss, 0, len(texts))
 	missByKey := make(map[string]int, len(texts))
 	now := c.now()
+	hitCount := 0
+	deduplicatedCount := 0
+	missCount := 0
+	defer func() {
+		c.observeCache(ctx, len(texts), hitCount, missCount, deduplicatedCount)
+	}()
 
 	for index, text := range texts {
 		key := c.key(ctx, text)
 		if vector, ok := c.store.get(key, now); ok {
 			results[index] = vector
+			hitCount++
 			continue
 		}
 		if missIndex, ok := missByKey[key]; ok {
 			misses[missIndex].indices = append(misses[missIndex].indices, index)
+			deduplicatedCount++
 			continue
 		}
 		missByKey[key] = len(misses)
@@ -215,6 +226,7 @@ func (c *cachedEmbedder) batchEmbed(
 					continue
 				}
 				c.store.put(item.key, vector, now.Add(c.options.ttl), c.options.maxEntries)
+				hitCount += len(item.indices)
 				for _, resultIndex := range item.indices {
 					results[resultIndex] = cloneVector(vector)
 				}
@@ -222,6 +234,7 @@ func (c *cachedEmbedder) batchEmbed(
 			misses = remaining
 		}
 	}
+	missCount = len(misses)
 	if len(misses) == 0 {
 		return results, nil
 	}
@@ -250,6 +263,19 @@ func (c *cachedEmbedder) batchEmbed(
 	}
 	c.persist(ctx, persistentVectors, expiresAt)
 	return results, nil
+}
+
+func (c *cachedEmbedder) observeCache(
+	ctx context.Context, lookups, hits, misses, deduplicated int,
+) {
+	if lookups <= 0 {
+		return
+	}
+	types.DispatchEmbeddingCacheObservation(ctx, types.EmbeddingCacheObservation{
+		ModelID: c.inner.GetModelID(), ModelName: c.inner.GetModelName(),
+		LookupCount: lookups, HitCount: hits, MissCount: misses,
+		DeduplicatedCount: deduplicated, AvoidedComputations: hits + deduplicated,
+	})
 }
 
 func (c *cachedEmbedder) key(ctx context.Context, text string) string {

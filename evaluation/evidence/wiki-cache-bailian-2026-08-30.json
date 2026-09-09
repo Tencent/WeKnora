@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "evidence_type": "real_provider_measurement",
+  "captured_at": "2026-08-30T01:34:00+08:00",
+  "provider": "aliyun",
+  "region": "cn-beijing",
+  "model": {
+    "id": "27e75fbc-9a07-4461-9caa-fcd3d14df136",
+    "name": "qwen3.7-plus",
+    "display_name": "百炼 qwen3.7-plus",
+    "type": "KnowledgeQA"
+  },
+  "knowledge_base": {
+    "id": "e8e60ff5-7c2f-4948-831e-13fed2652360",
+    "name": "Topic 3 Wiki Cache Acceptance",
+    "generated_pages": 13,
+    "published_pages": 13
+  },
+  "inputs": [
+    {
+      "file": "evaluation/fixtures/wiki-cache-acceptance-a.md",
+      "sha256": "e7fcb06435a5e6b00ea3dca284b975fe6ef59de55f08f2ef85c435f9adbec44d",
+      "parse_status": "completed",
+      "summary_status": "completed"
+    },
+    {
+      "file": "evaluation/fixtures/wiki-cache-acceptance-b.md",
+      "sha256": "b984989f0b55ae9a2c42b50f6c4ab4375e8323197451caf984579cc01e58015a",
+      "parse_status": "completed",
+      "summary_status": "completed"
+    }
+  ],
+  "measurement_window": {
+    "start_utc": "2026-08-29T17:32:32Z",
+    "end_utc": "2026-08-29T17:33:00Z",
+    "purpose": "wiki_page_modify",
+    "source_table": "evaluation_model_calls"
+  },
+  "cold_miss": {
+    "calls": 4,
+    "prompt_tokens": 10620,
+    "completion_tokens": 1003,
+    "cache_read_tokens": 0,
+    "cache_miss_tokens": 10620,
+    "token_cache_hit_rate": 0.0,
+    "average_duration_ms": 6058.0,
+    "estimated_total_cost_cny": 0.029264,
+    "estimated_cost_per_1000_prompt_tokens_cny": 0.00275556,
+    "estimated_input_cost_per_1000_prompt_tokens_cny": 0.002
+  },
+  "warm_hit": {
+    "calls": 6,
+    "prompt_tokens": 16411,
+    "completion_tokens": 2692,
+    "cache_read_tokens": 6528,
+    "cache_miss_tokens": 9883,
+    "token_cache_hit_rate": 0.3978,
+    "maximum_single_call_hit_rate": 0.6298,
+    "average_duration_ms": 9025.0,
+    "estimated_total_cost_cny": 0.0439132,
+    "estimated_cost_per_1000_prompt_tokens_cny": 0.00267584,
+    "estimated_input_cost_per_1000_prompt_tokens_cny": 0.0013635
+  },
+  "comparison": {
+    "token_cache_hit_rate_delta": 0.3978,
+    "estimated_input_cost_per_1000_prompt_tokens_reduction_rate": 0.31825,
+    "estimated_total_cost_per_1000_prompt_tokens_reduction_rate": 0.02893,
+    "average_duration_ms_delta": 2967.0,
+    "latency_improved": false
+  },
+  "pricing_snapshot_cny_per_million_tokens": {
+    "input": 2.0,
+    "output": 8.0,
+    "cache_read": 0.4,
+    "cache_write": 0.0
+  },
+  "privacy": {
+    "prompt_or_response_body_exported": false,
+    "api_key_exported": false,
+    "tenant_identifier_exported": false
+  },
+  "limitations": [
+    "Cold and warm cohorts are consecutive Wiki operations over the same two-document batch, not byte-identical request payloads.",
+    "Estimated costs use configured public list prices; the actual bill may be zero because the account used free inference quota.",
+    "Latency did not improve in this run because the warm cohort generated more completion tokens and included one long-tail call.",
+    "Two published entity pages share the title RhinoCache; records are retained for follow-up and were not deleted."
+  ]
+}

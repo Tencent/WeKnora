@@ -5,9 +5,11 @@ on:
     paths:
       - 'cmd/evalgate/**'
       - 'cmd/cachebench/**'
+      - 'cmd/retrievalgate/**'
       - 'evaluation/**'
       - 'frontend/src/api/evaluation/**'
       - 'frontend/src/views/settings/ModelSettings.vue'
+      - 'frontend/src/i18n/locales/**'
       - 'frontend/package.json'
       - 'frontend/package-lock.json'
       - 'internal/config/config.go'
@@ -24,16 +26,24 @@ on:
       - 'internal/models/rerank/**'
       - 'internal/types/evaluation.go'
       - 'internal/types/llm_observability.go'
-      - 'migrations/sqlite/000014_evaluation_model_calls*'
-      - 'migrations/sqlite/000015_evaluation_model_call_cost*'
-      - 'migrations/sqlite/000016_global_model_call_observability*'
-      - 'migrations/sqlite/000018_model_call_types*'
-      - 'migrations/sqlite/000019_embedding_cache_entries*'
-      - 'migrations/versioned/000088_evaluation_model_calls*'
-      - 'migrations/versioned/000089_evaluation_model_call_cost*'
-      - 'migrations/versioned/000090_global_model_call_observability*'
-      - 'migrations/versioned/000092_model_call_types*'
-      - 'migrations/versioned/000093_embedding_cache_entries*'
+      - 'migrations/sqlite/000014_evaluation_tasks*'
+      - 'migrations/sqlite/000015_evaluation_model_calls*'
+      - 'migrations/sqlite/000016_evaluation_model_call_cost*'
+      - 'migrations/sqlite/000017_global_model_call_observability*'
+      - 'migrations/sqlite/000018_evaluation_run_config*'
+      - 'migrations/sqlite/000019_model_call_types*'
+      - 'migrations/sqlite/000020_embedding_cache_entries*'
+      - 'migrations/sqlite/000021_evaluation_usage_snapshot*'
+      - 'migrations/sqlite/000022_embedding_cache_usage*'
+      - 'migrations/versioned/000092_evaluation_tasks*'
+      - 'migrations/versioned/000093_evaluation_model_calls*'
+      - 'migrations/versioned/000094_evaluation_model_call_cost*'
+      - 'migrations/versioned/000095_global_model_call_observability*'
+      - 'migrations/versioned/000096_evaluation_run_config*'
+      - 'migrations/versioned/000097_model_call_types*'
+      - 'migrations/versioned/000098_embedding_cache_entries*'
+      - 'migrations/versioned/000099_evaluation_usage_snapshot*'
+      - 'migrations/versioned/000100_embedding_cache_usage*'
       - '.env.example'
       - 'Makefile'
       - '.github/workflows/evaluation-regression.yml'
@@ -61,11 +71,14 @@ jobs:
           ./internal/config
           ./internal/models/chat
           ./internal/models/embedding
-          ./cmd/evalgate ./cmd/cachebench
-      - name: Verify checked-in regression fixture
+          ./cmd/retrievalgate ./cmd/evalgate ./cmd/cachebench
+      - name: Generate and gate production-pipeline result
+        run: go run ./cmd/retrievalgate -out evaluation-pipeline-result.json
+      - name: Verify generated production-pipeline result
         run: >-
           go run ./cmd/evalgate
-          -result evaluation/fixtures/regression_result.json
+          -result evaluation-pipeline-result.json
+          -reference-result evaluation/fixtures/regression_reference.json
           -baseline evaluation/baseline.json
           -report evaluation-report.json
       - name: Prove a recall regression is rejected and identified
@@ -73,13 +86,14 @@ jobs:
         run: |
           if go run ./cmd/evalgate \
             -result evaluation/fixtures/regression_degraded.json \
+            -reference-result evaluation/fixtures/regression_reference.json \
             -baseline evaluation/baseline.json \
             -report evaluation-degraded-report.json; then
             echo "expected the degraded evaluation to fail" >&2
             exit 1
           fi
           grep -q '"path": "metric.retrieval_metrics.recall"' evaluation-degraded-report.json
-          grep -A5 '"path": "metric.retrieval_metrics.recall"' evaluation-degraded-report.json | grep -q '"passed": false'
+          grep -A8 '"path": "metric.retrieval_metrics.recall"' evaluation-degraded-report.json | grep -q '"passed": false'
       - name: Upload regression report
         if: always()
         uses: actions/upload-artifact@v4
@@ -94,6 +108,13 @@ jobs:
           name: evaluation-degradation-proof
           path: evaluation-degraded-report.json
           if-no-files-found: warn
+      - name: Upload production-pipeline result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-production-pipeline-result
+          path: evaluation-pipeline-result.json
+          if-no-files-found: error
       - name: Verify cache comparison example
         run: >-
           go run ./cmd/cachebench
@@ -122,4 +143,4 @@ jobs:
         run: npm ci
       - name: Type-check model usage page and API integration
         working-directory: frontend
-        run: npm run type-check
+        run: npm run build-with-types

@@ -17,6 +17,8 @@ type EvaluationService interface {
 	EvaluationResult(ctx context.Context, taskID string) (*types.EvaluationDetail, error)
 	// ModelUsage returns tenant-scoped model-call aggregates from evaluation runs.
 	ModelUsage(ctx context.Context, startTime, endTime *time.Time) ([]types.ModelUsageStat, error)
+	// EvaluationDatasets lists datasets available to the evaluation UI.
+	EvaluationDatasets(ctx context.Context) ([]types.EvaluationDataset, error)
 }
 
 // Metrics defines interface for computing evaluation metrics
@@ -35,4 +37,6 @@ type EvalHook interface {
 type DatasetService interface {
 	// GetDatasetByID retrieves QA pairs from dataset by ID
 	GetDatasetByID(ctx context.Context, datasetID string) ([]*types.QAPair, error)
+	// ListDatasets returns manifest metadata and readiness for each dataset directory.
+	ListDatasets(ctx context.Context) ([]types.EvaluationDataset, error)
 }
