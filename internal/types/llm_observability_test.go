@@ -36,3 +36,19 @@ func TestEstimateLLMCallCostClampsInconsistentCounters(t *testing.T) {
 	}
 	require.InDelta(t, 0.0001, EstimateLLMCallCost(usage, pricing), 0.0000001)
 }
+
+type globalObserverStub struct{}
+
+func (globalObserverStub) ObserveLLMCall(LLMCallObservation) {}
+
+func TestGlobalLLMCallObserver(t *testing.T) {
+	SetGlobalLLMCallObserver(globalObserverStub{})
+	t.Cleanup(func() { SetGlobalLLMCallObserver(nil) })
+	observer, ok := GlobalLLMCallObserver()
+	require.True(t, ok)
+	require.NotNil(t, observer)
+	SetGlobalLLMCallObserver(nil)
+	observer, ok = GlobalLLMCallObserver()
+	require.False(t, ok)
+	require.Nil(t, observer)
+}

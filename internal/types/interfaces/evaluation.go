@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -15,7 +16,7 @@ type EvaluationService interface {
 	// EvaluationResult retrieves evaluation result by task ID
 	EvaluationResult(ctx context.Context, taskID string) (*types.EvaluationDetail, error)
 	// ModelUsage returns tenant-scoped model-call aggregates from evaluation runs.
-	ModelUsage(ctx context.Context) ([]types.ModelUsageStat, error)
+	ModelUsage(ctx context.Context, startTime, endTime *time.Time) ([]types.ModelUsageStat, error)
 }
 
 // Metrics defines interface for computing evaluation metrics

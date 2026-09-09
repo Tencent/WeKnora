@@ -83,3 +83,49 @@ func TestObservableChatRecordsFailures(t *testing.T) {
 	require.False(t, observer.observations[0].Success)
 	require.Equal(t, "provider unavailable", observer.observations[0].Error)
 }
+
+func TestObservableChatUsesTenantScopedGlobalObserver(t *testing.T) {
+	global := &collectingLLMObserver{}
+	types.SetGlobalLLMCallObserver(global)
+	t.Cleanup(func() { types.SetGlobalLLMCallObserver(nil) })
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(42))
+	ctx = types.WithLLMCallMetadata(ctx, "wiki_page_modify", "stable-prefix")
+	inner := &observabilityFakeChat{response: &types.ChatResponse{}}
+
+	wrapped, err := wrapChatObservability(inner, nil, nil)
+	require.NoError(t, err)
+	_, err = wrapped.Chat(ctx, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, global.observations, 1)
+	require.Equal(t, uint64(42), global.observations[0].TenantID)
+	require.Equal(t, "wiki_page_modify", global.observations[0].Purpose)
+}
+
+func TestObservableChatSkipsUnscopedGlobalObservation(t *testing.T) {
+	global := &collectingLLMObserver{}
+	types.SetGlobalLLMCallObserver(global)
+	t.Cleanup(func() { types.SetGlobalLLMCallObserver(nil) })
+	inner := &observabilityFakeChat{response: &types.ChatResponse{}}
+
+	wrapped, err := wrapChatObservability(inner, nil, nil)
+	require.NoError(t, err)
+	_, err = wrapped.Chat(context.Background(), nil, nil)
+	require.NoError(t, err)
+	require.Empty(t, global.observations)
+}
+
+func TestObservableChatPrefersRequestObserverOverGlobal(t *testing.T) {
+	global := &collectingLLMObserver{}
+	local := &collectingLLMObserver{}
+	types.SetGlobalLLMCallObserver(global)
+	t.Cleanup(func() { types.SetGlobalLLMCallObserver(nil) })
+	ctx := types.WithLLMCallObserver(context.Background(), local)
+	inner := &observabilityFakeChat{response: &types.ChatResponse{}}
+
+	wrapped, err := wrapChatObservability(inner, nil, nil)
+	require.NoError(t, err)
+	_, err = wrapped.Chat(ctx, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, local.observations, 1)
+	require.Empty(t, global.observations)
+}

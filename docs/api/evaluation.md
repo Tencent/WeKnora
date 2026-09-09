@@ -2,10 +2,11 @@
 
 [返回目录](./README.md)
 
-| 方法 | 路径           | 描述                  |
-| ---- | -------------- | --------------------- |
-| GET  | `/evaluation/` | 获取评估任务结果       |
-| POST | `/evaluation/` | 创建评估任务          |
+| 方法 | 路径                      | 描述                             |
+| ---- | ------------------------- | -------------------------------- |
+| GET  | `/evaluation/`            | 获取评估任务结果                  |
+| POST | `/evaluation/`            | 创建评估任务                      |
+| GET  | `/evaluation/model-usage` | 按模型和时间范围获取租户模型用量   |
 
 > 注：服务端路由带尾斜杠（Gin 会自动从 `/evaluation` 重定向到 `/evaluation/`），下方示例为方便阅读用了 `/evaluation`。
 
@@ -87,6 +88,66 @@ curl --location 'http://localhost:8080/api/v1/evaluation?task_id=c34563ad-b09f-4
         }
     },
     "success": true
+}
+```
+
+## GET `/evaluation/model-usage` - 获取模型用量
+
+该接口聚合当前租户在评测、普通问答、Wiki 和后台任务中的模型调用。数据来自
+`evaluation_model_calls` 表，只包含模型、用途、Token、缓存、费用、耗时和成功状态，
+不保存也不返回 Prompt 或响应正文。
+
+**参数说明（查询参数）**:
+
+| 字段         | 类型   | 必填 | 说明                       |
+| ------------ | ------ | ---- | -------------------------- |
+| `start_time` | string | 否   | RFC3339 开始时间，包含边界   |
+| `end_time`   | string | 否   | RFC3339 结束时间，包含边界   |
+
+开始时间晚于结束时间或时间格式无效时返回 400。两个参数都省略时查询当前租户保留期内
+的全部记录。
+
+**请求**:
+
+```bash
+curl --location \
+  'http://localhost:8080/api/v1/evaluation/model-usage?start_time=2026-08-01T00:00:00Z&end_time=2026-09-01T00:00:00Z' \
+  --header 'X-API-Key: sk-xxxxx'
+```
+
+**响应**:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "model_id": "model-uuid",
+      "model_name": "qwen3",
+      "model_type": "KnowledgeQA",
+      "usage": {
+        "call_count": 12,
+        "successful_calls": 12,
+        "failed_calls": 0,
+        "prompt_tokens": 8400,
+        "completion_tokens": 1200,
+        "total_tokens": 9600,
+        "cache_read_tokens": 3200,
+        "cache_write_tokens": 0,
+        "cache_miss_tokens": 5200,
+        "cache_reported_calls": 12,
+        "cache_hit_calls": 7,
+        "cache_hit_rate": 0.3809523809,
+        "model_duration_ms": 18400,
+        "average_model_latency_ms": 1533.3333333,
+        "priced_calls": 12,
+        "unpriced_calls": 0,
+        "cost_by_currency": {
+          "USD": 0.042
+        }
+      }
+    }
+  ]
 }
 ```
 
