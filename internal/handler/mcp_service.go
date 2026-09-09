@@ -6,6 +6,7 @@ import (
 	stderrors "errors"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -23,6 +24,7 @@ type MCPServiceHandler struct {
 	mcpServiceService      interfaces.MCPServiceService
 	mcpToolApprovalService interfaces.MCPToolApprovalService
 	toolApprovalGate       *approval.Gate
+	modelService           interfaces.ModelService
 }
 
 // NewMCPServiceHandler creates a new MCP service handler
@@ -30,11 +32,13 @@ func NewMCPServiceHandler(
 	mcpServiceService interfaces.MCPServiceService,
 	mcpToolApprovalService interfaces.MCPToolApprovalService,
 	toolApprovalGate *approval.Gate,
+	modelService interfaces.ModelService,
 ) *MCPServiceHandler {
 	return &MCPServiceHandler{
 		mcpServiceService:      mcpServiceService,
 		mcpToolApprovalService: mcpToolApprovalService,
 		toolApprovalGate:       toolApprovalGate,
+		modelService:           modelService,
 	}
 }
 
@@ -227,7 +231,13 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	// Track which fields are being updated
 	updateFields := make(map[string]bool)
 
-	if instructions, ok := updateData["usage_instructions"].(string); ok {
+	if raw, exists := updateData["usage_instructions"]; exists {
+		instructions, ok := raw.(string)
+		instructions = strings.TrimSpace(instructions)
+		if !ok || instructions == "" || utf8.RuneCountInString(instructions) > 16000 {
+			_ = c.Error(errors.NewBadRequestError("Usage instructions must contain between 1 and 16000 characters"))
+			return
+		}
 		service.UsageInstructions = instructions
 		updateFields["usage_instructions"] = true
 	}

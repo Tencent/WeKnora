@@ -4707,6 +4707,8 @@ export default {
     }
   },
   mcpSettings: {
+    addUsageInstructions: "使用方法を追加",
+    noUsageInstructions: "使用方法は未入力です",
     title: 'MCPサービス',
     description: 'エージェントモードでツールやリソースを利用するための外部MCP（Model Context Protocol）サービスを管理します',
     enabled: '有効',
@@ -4961,8 +4963,13 @@ export default {
     "usageHint": "モデルはこの概要を読んでから必要なツールを読み込みます。更新しても入力内容は保持されます。",
     "summary": "用途の概要",
     "summaryPlaceholder": "例：注文状況、配送状況、返金履歴を確認する。",
-    "usageInstructions": "使用方法（任意）",
-    "instructionsPlaceholder": "利用場面、ツールの選択方法、業務用語などを記入してください。",
+    "usageInstructions": "使用方法",
+    "instructionsPlaceholder": "サービスの用途、利用場面、重要な制約を簡潔に記載してください。",
+    "generateUsage": "AI で生成",
+    "generateHint": "同期済みの有効なツールから簡潔な説明を生成します。編集して保存すると反映されます。",
+    "instructionsRequired": "使用方法を入力してください",
+    "generated": "生成しました。内容を確認して保存してください。",
+    "generateFailed": "生成に失敗しました。ツールの同期と利用可能なチャットモデルの設定を確認して再試行してください。",
     "saveNext": "保存して次へ"
 },
   mcpServiceDialog: {

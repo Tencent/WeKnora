@@ -142,6 +142,75 @@ func discoverDescription(t *testing.T, r *ToolRegistry) string {
 	return tool.Description()
 }
 
+func TestMCPDiscoverySchemaConstrainsServerIdentity(t *testing.T) {
+	ctx := catalogTestContext()
+	const id = "8f7a5b68-a7ab-4565-b6f3-1cae2578f040"
+	service := &types.MCPService{ID: id, Name: "amap-maps", Enabled: true}
+	loads := 0
+	catalog := newMCPCatalog(ctx, []*types.MCPService{service}, nil,
+		func(_ context.Context, selected *types.MCPService, _ bool) ([]*MCPTool, error) {
+			loads++
+			require.Equal(t, id, selected.ID)
+			return []*MCPTool{catalogTestTool(selected, "maps_geo", "Geocode an address", nil)}, nil
+		}, nil)
+	r := NewToolRegistry()
+	installMCPCatalog(r, catalog)
+	discovery, err := r.GetTool(ToolDiscoverMCPTools)
+	require.NoError(t, err)
+	var schema struct {
+		Properties map[string]struct {
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+	}
+	require.NoError(t, json.Unmarshal(discovery.Parameters(), &schema))
+	require.Equal(t, []string{id}, schema.Properties["server_id"].Enum)
+	for _, invalid := range []string{
+		"8f7a5b68-a7ab-4565-b6f3-1cae3198f1a4", service.Name, "outside-scope",
+	} {
+		raw, marshalErr := json.Marshal(map[string]any{"mode": "list_tools", "server_id": invalid})
+		require.NoError(t, marshalErr)
+		result, callErr := r.ExecuteTool(ctx, ToolDiscoverMCPTools, raw)
+		require.NoError(t, callErr)
+		require.False(t, result.Success)
+		require.Contains(t, result.Error, id, "validation supplies the exact allowed ID for recovery")
+	}
+	require.Zero(t, loads, "invalid identities must not be repaired or sent to a server")
+	page := discoverPage(ctx, t, r, map[string]any{"mode": "list_tools", "server_id": id})
+	require.Len(t, page.Tools, 1)
+	require.Equal(t, 1, loads)
+
+	empty := NewToolRegistry()
+	installMCPCatalog(empty, newMCPCatalog(ctx, nil, nil, nil, nil))
+	discovery, err = empty.GetTool(ToolDiscoverMCPTools)
+	require.NoError(t, err)
+	require.NotContains(t, string(discovery.Parameters()), `"enum":[]`)
+	page = discoverPage(ctx, t, empty, map[string]any{"mode": "list_servers"})
+	require.Empty(t, page.Servers)
+}
+
+func TestMCPCatalogUsesUsageInstructionsForRouting(t *testing.T) {
+	ctx, _, catalog, _, _ := catalogFixture(t, 1)
+	service := catalog.servers["server-1"].service
+	service.UsageInstructions = "Find orders by customer and date"
+	service.Description = "obsolete description"
+	registry := NewToolRegistry()
+	installMCPCatalog(registry, catalog)
+	tool := registry.tools[ToolDiscoverMCPTools].(*MCPDiscoverTool)
+	require.Contains(t, tool.BaseTool.Description(), service.UsageInstructions)
+	require.NotContains(t, tool.BaseTool.Description(), service.Description)
+	page := discoverPage(ctx, t, registry, map[string]any{"mode": "list_servers"})
+	require.Equal(t, service.UsageInstructions, page.Servers[0].UsageInstructions)
+	result, err := registry.ExecuteTool(ctx, ToolDiscoverMCPTools, json.RawMessage(
+		`{"mode":"describe","server_id":"server-1","tool_name":"tool_000"}`,
+	))
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+	require.Contains(t, result.Output, service.UsageInstructions)
+	service.UsageInstructions = ""
+	page = discoverPage(ctx, t, registry, map[string]any{"mode": "list_servers"})
+	require.Equal(t, service.Description, page.Servers[0].UsageInstructions)
+}
+
 func TestDiscoverDescriptionSkipsListServersWhenDirectoryFits(t *testing.T) {
 	_, r, _, _, _ := catalogFixture(t, 1)
 	d := discoverDescription(t, r)

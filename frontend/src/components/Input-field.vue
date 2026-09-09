@@ -589,7 +589,7 @@ const toMCPMentionItem = (svc: MCPService): MentionItem => ({
   id: svc.id,
   name: svc.name,
   type: 'mcp',
-  description: svc.description || '',
+  description: svc.usage_instructions || svc.description || '',
   toolCount: svc.catalog?.tool_count,
   catalogStale: Boolean(svc.catalog?.stale),
   catalogSynced: Boolean(svc.catalog),
@@ -1346,7 +1346,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     if (mcpMode !== 'none') {
       mcpItems = mcpServices.value
         .filter(service => isMCPAllowedByAgent(service))
-        .filter(service => !q || service.name?.toLowerCase().includes(q.toLowerCase()) || (service.description || '').toLowerCase().includes(q.toLowerCase()))
+        .filter(service => !q || service.name?.toLowerCase().includes(q.toLowerCase()) || (service.usage_instructions || service.description || '').toLowerCase().includes(q.toLowerCase()))
         .map(toMCPMentionItem);
     }
 

@@ -165,6 +165,7 @@ func RegisterMCPServiceRoutes(
 		// (Viewer+), or a tenant-wide snapshot for static auth (Admin+ in the
 		// handler). GET /tools remains Viewer+ and does not persist.
 		mcpServices.POST("/:id/metadata/refresh", g.Viewer(), handler.RefreshMCPMetadata)
+		mcpServices.POST("/:id/usage-instructions/generate", g.Admin(), handler.GenerateMCPUsageInstructions)
 		// Get MCP service resources — Viewer+
 		mcpServices.GET("/:id/resources", g.Viewer(), handler.GetMCPServiceResources)
 		// Per-field credential subresource: secrets never travel via the main

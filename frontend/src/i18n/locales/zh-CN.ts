@@ -1951,8 +1951,13 @@ export default {
     "usageHint": "模型先读取服务用途，再按需加载具体工具。以下内容由你维护，刷新不会覆盖。",
     "summary": "用途摘要",
     "summaryPlaceholder": "例如：查询订单状态、物流进度和退款记录。",
-    "usageInstructions": "使用说明（可选）",
-    "instructionsPlaceholder": "补充适用场景、工具选择建议或业务术语。",
+    "usageInstructions": "使用说明",
+    "instructionsPlaceholder": "简要说明服务用途、适用场景和关键使用约束。",
+    "generateUsage": "AI 生成",
+    "generateHint": "根据已同步且启用的 Tools 生成精简说明，填入后可编辑，保存后生效。",
+    "instructionsRequired": "使用说明不能为空",
+    "generated": "已生成，请检查后保存",
+    "generateFailed": "生成失败，请确认 Tools 已同步且已配置可用的对话模型后重试。",
     "saveNext": "保存并下一步"
 },
   mcpServiceDialog: {
@@ -2210,6 +2215,8 @@ export default {
     }
   },
   mcpSettings: {
+    addUsageInstructions: "添加使用说明",
+    noUsageInstructions: "尚未填写使用说明",
     title: 'MCP 服务管理',
     description: '管理外部 MCP (Model Context Protocol) 服务，在 Agent 模式下调用外部工具和资源',
     enabled: '已启用',

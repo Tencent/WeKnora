@@ -4707,6 +4707,8 @@ export default {
     }
   },
   mcpSettings: {
+    addUsageInstructions: "Add usage instructions",
+    noUsageInstructions: "No usage instructions yet",
     title: 'MCP Services',
     description: 'Manage external MCP (Model Context Protocol) services for tools/resources in Agent mode',
     enabled: 'Enabled',
@@ -4961,8 +4963,13 @@ export default {
     "usageHint": "Models read this overview before loading specific tools. Your text is preserved when refreshing.",
     "summary": "Usage summary",
     "summaryPlaceholder": "For example: Look up order status, shipping progress, and refunds.",
-    "usageInstructions": "Usage instructions (optional)",
-    "instructionsPlaceholder": "Add use cases, tool selection guidance, or business terminology.",
+    "usageInstructions": "Usage instructions",
+    "instructionsPlaceholder": "Briefly describe the purpose, use cases, and key constraints.",
+    "generateUsage": "Generate with AI",
+    "generateHint": "Generate concise instructions from synced, enabled tools. Edit the result and save to apply it.",
+    "instructionsRequired": "Usage instructions are required",
+    "generated": "Generated. Review and save to apply.",
+    "generateFailed": "Generation failed. Check that tools are synced and an active chat model is configured, then retry.",
     "saveNext": "Save and continue"
 },
   mcpServiceDialog: {

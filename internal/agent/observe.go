@@ -771,7 +771,7 @@ func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
 		})
 	}
 
-	return tools
+	return e.modelContext.EncodeTools(tools)
 }
 
 // appendToolResults adds tool results to the in-turn message history following

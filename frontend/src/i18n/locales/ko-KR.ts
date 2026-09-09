@@ -1949,8 +1949,13 @@ export default {
     "usageHint": "모델은 이 개요를 읽은 후 필요한 도구를 불러옵니다. 새로 고침해도 입력한 내용은 유지됩니다.",
     "summary": "용도 요약",
     "summaryPlaceholder": "예: 주문 상태, 배송 진행 상황 및 환불 내역 조회.",
-    "usageInstructions": "사용 안내 (선택 사항)",
-    "instructionsPlaceholder": "사용 사례, 도구 선택 안내 또는 업무 용어를 입력하세요.",
+    "usageInstructions": "사용 안내",
+    "instructionsPlaceholder": "서비스의 용도, 사용 상황, 주요 제약을 간결하게 설명하세요.",
+    "generateUsage": "AI로 생성",
+    "generateHint": "동기화된 활성 도구를 바탕으로 간결한 안내를 생성합니다. 수정 후 저장하면 적용됩니다.",
+    "instructionsRequired": "사용 안내를 입력해 주세요",
+    "generated": "생성되었습니다. 검토 후 저장해 주세요.",
+    "generateFailed": "생성에 실패했습니다. 도구 동기화와 사용 가능한 대화 모델 설정을 확인한 후 다시 시도하세요.",
     "saveNext": "저장하고 다음"
 },
   mcpServiceDialog: {
@@ -2208,6 +2213,8 @@ export default {
     }
   },
   mcpSettings: {
+    addUsageInstructions: "사용 안내 추가",
+    noUsageInstructions: "아직 사용 안내가 없습니다",
     title: 'MCP 서비스 관리',
     description: '외부 MCP (Model Context Protocol) 서비스를 관리합니다. Agent 모드에서 외부 도구와 리소스를 호출합니다',
     enabled: '활성화됨',

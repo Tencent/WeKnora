@@ -24,7 +24,9 @@ const mcpDiscoveryDescription = "" +
 	"have a server_id, list_tools (or search), then describe an exact tool. " +
 	"Server IDs and tool names must come from this directory. Only describe returns " +
 	"a callable tool_ref. Call call_mcp_tool with that tool_ref and arguments " +
-	"matching input_schema. Follow next_cursor until has_more is false; an empty " +
+	"matching input_schema. Wait for each discovery result before issuing dependent calls. " +
+	"Never construct tool_ref from a service name, tool name, or function_name. " +
+	"Follow next_cursor until has_more is false; an empty " +
 	"page does not mean a capability is unconfigured when a server is unavailable. " +
 	"Search is an optional case-insensitive substring filter on names and " +
 	"descriptions within one server; if it misses, use list_tools without a query. " +
@@ -45,9 +47,11 @@ const mcpDiscoverySchema = `{
       ]
     },
     "server_id": {
+      "description": "Copy server_id from source summaries or list_servers, not the service name. Never guess.",
       "type": "string"
     },
     "tool_name": {
+      "description": "For describe, copy an exact name from list_tools or search. Do not guess from summaries.",
       "type": "string"
     },
     "query": {
@@ -75,7 +79,7 @@ const mcpCallSchema = `{
   "type": "object",
   "properties": {
     "tool_ref": {
-      "description": "Reference returned by a successful describe of the exact tool in this engine.",
+      "description": "Copy tool_ref verbatim from describe. Never construct it from service, tool or function names.",
       "type": "string"
     },
     "arguments": {
@@ -149,7 +153,6 @@ type mcpCatalogServer struct {
 type mcpServerSummary struct {
 	ServerID          string `json:"server_id"`
 	Name              string `json:"name"`
-	Description       string `json:"description,omitempty"`
 	Status            string `json:"status"`
 	Instructions      string `json:"instructions,omitempty"`
 	UsageInstructions string `json:"usage_instructions,omitempty"`
@@ -454,7 +457,8 @@ func (t *MCPDiscoverTool) Description() string {
 		b.WriteString("MCP tools are available without an @mention. The sources below are server-level " +
 			"summaries, not individual tool definitions. Inspect/search a relevant server, then " +
 			"describe an exact tool to load its complete function for the next model request. Use " +
-			"the returned function_name with its schema, or call_mcp_tool with its tool_ref. A " +
+			"the loaded function directly with its schema. The call_mcp_tool proxy becomes available " +
+			"after a callable definition is loaded; it accepts only the returned tool_ref. A " +
 			"missing or stale saved directory must be refreshed in Settings > MCP management. ")
 	}
 	b.WriteString(mcpDiscoveryDescription)
@@ -489,9 +493,9 @@ func (s *mcpCatalogServer) summary(id string) mcpServerSummary {
 		instructions = string(r[:512]) + "... (read describe for complete server instructions)"
 	}
 	return mcpServerSummary{
-		ServerID: id, Name: s.service.Name, Description: shortMCPDescription(s.service.Description),
+		ServerID: id, Name: s.service.Name,
 		Status: s.status, Instructions: instructions,
-		UsageInstructions: shortMCPDescription(s.service.UsageInstructions),
+		UsageInstructions: shortMCPDescription(s.service.EffectiveUsageInstructions()),
 	}
 }
 
@@ -500,6 +504,33 @@ type MCPCallTool struct {
 	BaseTool
 	catalog  *MCPCatalog
 	registry *ToolRegistry
+}
+
+// Parameters advertises only references whose complete definitions are in the
+// current function list. Execution still revalidates scope, schema and policy.
+func (t *MCPCallTool) Parameters() json.RawMessage {
+	var refs []string
+	if t.registry != nil && t.registry.mcpPrepared {
+		for _, registered := range t.registry.tools {
+			if tool, ok := registered.(*MCPRegisteredTool); ok {
+				refs = append(refs, tool.ref)
+			}
+		}
+	}
+	sort.Strings(refs)
+	return mcpSchemaWithEnum(mcpCallSchema, "tool_ref", refs)
+}
+
+func mcpSchemaWithEnum(raw, key string, values []string) json.RawMessage {
+	if len(values) == 0 {
+		return json.RawMessage(raw)
+	}
+	var schema map[string]any
+	_ = json.Unmarshal([]byte(raw), &schema)
+	properties := schema["properties"].(map[string]any)
+	properties[key].(map[string]any)["enum"] = values
+	encoded, _ := json.Marshal(schema)
+	return encoded
 }
 
 func installMCPCatalog(registry *ToolRegistry, c *MCPCatalog) {
@@ -515,10 +546,10 @@ func installMCPCatalog(registry *ToolRegistry, c *MCPCatalog) {
 		service := c.servers[id].service
 		row, _ := json.Marshal(
 			mcpServerSummary{
-				ServerID:    id,
-				Name:        service.Name,
-				Description: shortMCPDescription(service.Description),
-				Status:      "not_loaded",
+				ServerID:          id,
+				Name:              service.Name,
+				UsageInstructions: shortMCPDescription(service.EffectiveUsageInstructions()),
+				Status:            "not_loaded",
 			},
 		)
 		if utf8.RuneCountInString(preview)+utf8.RuneCount(row) > 2000 {
@@ -531,9 +562,14 @@ func installMCPCatalog(registry *ToolRegistry, c *MCPCatalog) {
 			"use list_servers only for services that do not fit this preview:\n",
 		len(ids),
 	) + preview
+	// IDs are stable for this scoped catalog. Enumerate them in the schema so
+	// models select an authorized identifier instead of reproducing a free-form
+	// UUID from prose. Omit the enum for an empty catalog so list_servers remains
+	// a valid call even with providers that reject empty enum definitions.
+	discoveryParameters := mcpSchemaWithEnum(mcpDiscoverySchema, "server_id", ids)
 	registry.RegisterTool(
 		&MCPDiscoverTool{
-			BaseTool: NewBaseTool(ToolDiscoverMCPTools, description, json.RawMessage(mcpDiscoverySchema)),
+			BaseTool: NewBaseTool(ToolDiscoverMCPTools, description, discoveryParameters),
 			catalog:  c,
 		},
 	)
@@ -667,7 +703,7 @@ func (t *MCPDiscoverTool) Execute(ctx context.Context, raw json.RawMessage) (*ty
 						}
 						return ""
 					}(),
-					UsageInstructions: tool.service.UsageInstructions,
+					UsageInstructions: tool.service.EffectiveUsageInstructions(),
 					InputSchema:       tool.Parameters(),
 				})
 				if result != nil && utf8.RuneCountInString(result.Output) > maxMCPDefinitionChars {
@@ -835,7 +871,9 @@ func (t *MCPCallTool) resolve(ctx context.Context, raw json.RawMessage) (*MCPToo
 	known := t.catalog.cachedTool(ref)
 	if known == nil {
 		return nil, nil, fmt.Errorf(
-			"unknown tool_ref; use discover_mcp_tools to list and describe the tool in this turn",
+			"unknown tool_ref; do not construct references from names. Copy server_id from " +
+				"discover_mcp_tools source summaries (or list_servers), then list_tools and describe " +
+				"the exact tool. Wait for describe and copy its tool_ref verbatim before retrying",
 		)
 	}
 	visible, _, err := t.catalog.snapshot(ctx, known.service.ID, false)

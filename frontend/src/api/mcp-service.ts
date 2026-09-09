@@ -306,3 +306,8 @@ export async function refreshMCPMetadata(id: string): Promise<MCPMetadata> {
   const response: any = await post(`/api/v1/mcp-services/${id}/metadata/refresh`, {})
   return response.data
 }
+
+export async function generateMCPUsageInstructions(id: string, language: string): Promise<string> {
+  const response: any = await post(`/api/v1/mcp-services/${id}/usage-instructions/generate`, { language }, { timeout: 65000 })
+  return response.data.usage_instructions
+}
