@@ -221,6 +221,11 @@ func (m *MemoryStreamManager) DeleteSteerEvent(
 		if stream.steerEvents[i].ID != eventID {
 			continue
 		}
+		if stream.steerEvents[i].Data != nil {
+			if consumed, _ := stream.steerEvents[i].Data["consumed"].(bool); consumed {
+				return false, nil
+			}
+		}
 		stream.steerEvents = append(stream.steerEvents[:i], stream.steerEvents[i+1:]...)
 		stream.lastUpdated = time.Now()
 		return true, nil

@@ -65,7 +65,13 @@ type AgentEngine struct {
 	// Drained at every round boundary; nil disables mid-run injection.
 	steerSink         types.SteerSink
 	allowSteerOverrun bool // one extra ReAct round after a loop-end inject past MaxIterations
+	steerOverruns     int  // how many times this turn has already used the extra round
 }
+
+// maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
+// lets a last-moment nudge revise the answer; further injects stay queued for
+// a follow-up turn instead of stretching the same run indefinitely.
+const maxSteerOverruns = 1
 
 // ImageDescriberFunc generates a text description of an image.
 // Signature matches vlm.VLM.Predict so it can be injected without importing the vlm package.
@@ -768,16 +774,26 @@ func (e *AgentEngine) runReActIteration(
 		// Loop-end inject: a user message queued while this finishing round
 		// ran should keep the agent going instead of emitting a final answer.
 		// Content-filter stops are terminal and do not take this path.
+		// Past MaxIterations only the first inject gets an extra round;
+		// anything after that stays in the queue for a follow-up turn.
 		if response.FinishReason != "content_filter" {
-			*messagesPtr = append(*messagesPtr, chat.Message{
-				Role:             "assistant",
-				Content:          verdict.finalAnswer,
-				ReasoningContent: response.ReasoningContent,
-			})
-			if injected := e.drainSteerMessages(ctx, state, messagesPtr, sessionID, assistantMessageID); injected > 0 {
-				state.RoundSteps = append(state.RoundSteps, verdict.step)
-				e.allowSteerOverrun = true
-				return iterOutcomeNext, nil
+			nextRound := state.CurrentRound + 1
+			canContinue := e.withinIterationBudget(nextRound) || e.steerOverruns < maxSteerOverruns
+			if canContinue {
+				*messagesPtr = append(*messagesPtr, chat.Message{
+					Role:             "assistant",
+					Content:          verdict.finalAnswer,
+					ReasoningContent: response.ReasoningContent,
+				})
+				injected := e.drainSteerMessages(ctx, state, messagesPtr, sessionID, assistantMessageID)
+				if injected > 0 {
+					state.RoundSteps = append(state.RoundSteps, verdict.step)
+					if !e.withinIterationBudget(nextRound) {
+						e.steerOverruns++
+						e.allowSteerOverrun = true
+					}
+					return iterOutcomeNext, nil
+				}
 			}
 		}
 		state.FinalAnswer = verdict.finalAnswer

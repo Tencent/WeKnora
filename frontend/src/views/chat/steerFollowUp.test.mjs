@@ -93,8 +93,32 @@ test('steer lookup failure does not start a second turn', () => {
   assert.notEqual(newRun, -1)
   assert.notEqual(catchIdx, -1)
   assert.ok(newRun < catchIdx, 'new_run fallback must sit in the try, not the catch')
-  assert.match(fn.slice(newRun, catchIdx), /await sendMsg\(/)
+  const newRunBlock = fn.slice(newRun, catchIdx)
+  assert.match(newRunBlock, /awaitingIdleSend/)
+  assert.match(newRunBlock, /isReplying/)
+  assert.match(newRunBlock, /await sendMsg\(/)
   assert.doesNotMatch(fn.slice(catchIdx), /sendMsg\(/)
+})
+
+test('new_run while a stream is live does not abort it', () => {
+  const start = source.indexOf('const handleSteerMsg = async')
+  const end = source.indexOf('const handlePromoteSteer = async', start)
+  const fn = source.slice(start, end)
+  const newRun = fn.indexOf("if (res?.status === 'new_run')")
+  const catchIdx = fn.indexOf('} catch (e) {')
+  const block = fn.slice(newRun, catchIdx)
+  assert.match(block, /isStreaming/)
+  assert.doesNotMatch(block, /stopStream\(/)
+})
+
+test('turn complete flushes idle new_run sends before attaching a follow-up', () => {
+  assert.match(source, /const flushSteerAfterTurn = async/)
+  assert.match(source, /awaitingIdleSend/)
+  const start = source.indexOf('onTurnComplete:')
+  const end = source.indexOf('});', start)
+  const hook = source.slice(start, end)
+  assert.match(hook, /flushSteerAfterTurn\(persistedAssistantId\(message\)\)/)
+  assert.doesNotMatch(hook, /attachSteerFollowUp\(persistedAssistantId\(message\)\)/)
 })
 
 test('remaining overlay after-items chain after a follow-up stream ends', () => {
@@ -129,8 +153,11 @@ test('follow-up attach keys off the persisted assistant id, not a fork id', () =
   assert.notEqual(start, -1)
   assert.notEqual(end, -1)
   const hook = source.slice(start, end)
-  assert.match(hook, /attachSteerFollowUp\(persistedAssistantId\(message\)\)/)
+  assert.match(hook, /flushSteerAfterTurn\(persistedAssistantId\(message\)\)/)
   assert.doesNotMatch(hook, /attachSteerFollowUp\(message\?\.id\)/)
+  const flushStart = source.indexOf('const flushSteerAfterTurn = async')
+  const flushEnd = source.indexOf('const attachSteerFollowUp = async', flushStart)
+  assert.match(source.slice(flushStart, flushEnd), /attachSteerFollowUp\(completedAssistantId\)/)
 })
 
 // A stop that arrives over SSE (other tab, /stop API) discards the server

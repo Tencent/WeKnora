@@ -169,3 +169,30 @@ func TestSetupSSEStreamNoSinkForKnowledgeQAEvenWithAgentModeAgent(t *testing.T) 
 	require.NoError(t, err)
 	assert.Empty(t, liveID)
 }
+
+func TestSetupSSEStreamDoesNotWriteSSEWhenLiveRunFails(t *testing.T) {
+	streams := stream.NewMemoryStreamManager()
+	require.NoError(t, streams.SetLiveRun(t.Context(), "sess-5", "other-assist", "req-other"))
+	h := &Handler{streamManager: streams}
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/", nil)
+
+	reqCtx := &qaRequestContext{
+		c:           c,
+		ctx:         t.Context(),
+		sessionID:   "sess-5",
+		requestID:   "req-5",
+		session:     &types.Session{ID: "sess-5"},
+		customAgent: &types.CustomAgent{ID: "agent-1"},
+		assistantMessage: &types.Message{
+			ID: "assist-5", SessionID: "sess-5", Role: "assistant", CreatedAt: time.Now(),
+		},
+	}
+	streamCtx := h.setupSSEStream(reqCtx, false, qaModeAgent)
+	require.True(t, streamCtx.liveRunFailed)
+	assert.NotEqual(t, "text/event-stream", w.Header().Get("Content-Type"),
+		"SetLiveRun failure must not start an SSE response the client cannot recover from")
+}

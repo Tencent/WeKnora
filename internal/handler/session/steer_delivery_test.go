@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/stream"
@@ -175,7 +176,7 @@ func TestPollSteerMarksConsumedDurably(t *testing.T) {
 	events, _, err := sink.PollSteer(ctx, "sess", "assist", 0)
 	require.NoError(t, err)
 	require.Len(t, events, 1)
-	require.NotEmpty(t, sink.PersistSteerMessage(ctx, "sess", "assist", "a", "do it now", nil))
+	require.NotEmpty(t, sink.PersistSteerMessage(ctx, "sess", "assist", "a", "do it now", nil, "web"))
 
 	stored, _, err := mgr.GetSteerEvents(ctx, "sess", "assist", 0)
 	require.NoError(t, err)
@@ -290,4 +291,60 @@ func steerEventWithDelivery(id, query, delivery string) interfaces.StreamEvent {
 	evt := steerEvent(id, query, nil, "web")
 	evt.Data["delivery"] = delivery
 	return evt
+}
+
+type steerUpdateFailingManager struct {
+	interfaces.StreamManager
+}
+
+func (s *steerUpdateFailingManager) UpdateSteerEventData(
+	context.Context, string, string, string, map[string]interface{},
+) (bool, error) {
+	return false, errors.New("cas exhausted")
+}
+
+func TestPersistSteerMessageRollsBackRowWhenConsumeFails(t *testing.T) {
+	inner := stream.NewMemoryStreamManager()
+	ctx := context.Background()
+	require.NoError(t, inner.AppendSteerEvents(ctx, "sess", "assist", []interfaces.StreamEvent{
+		steerEventWithDelivery("a", "do it now", steerDeliveryInject),
+	}))
+	msgs := &steerPersistingMessageStub{}
+	sink := newSteerSink(ctx, "sess", "req", &types.Message{ID: "assist"}, msgs,
+		&steerUpdateFailingManager{StreamManager: inner})
+	assert.Empty(t, sink.PersistSteerMessage(ctx, "sess", "assist", "a", "do it now", nil, "web"))
+	assert.Empty(t, msgs.byID, "failed consume must delete the user row so a retry cannot duplicate it")
+}
+
+func TestPersistSteerMessageIsIdempotentAfterConsume(t *testing.T) {
+	mgr := stream.NewMemoryStreamManager()
+	ctx := context.Background()
+	require.NoError(t, mgr.AppendSteerEvents(ctx, "sess", "assist", []interfaces.StreamEvent{
+		steerEventWithDelivery("a", "do it now", steerDeliveryInject),
+	}))
+	msgs := &steerPersistingMessageStub{}
+	sink := newSteerSink(ctx, "sess", "req", &types.Message{ID: "assist"}, msgs, mgr)
+	first := sink.PersistSteerMessage(ctx, "sess", "assist", "a", "do it now", nil, "api")
+	require.NotEmpty(t, first)
+	second := sink.PersistSteerMessage(ctx, "sess", "assist", "a", "do it now", nil, "api")
+	assert.Equal(t, first, second)
+	assert.Equal(t, 1, msgs.n)
+	assert.Equal(t, "api", msgs.byID[first].Channel)
+}
+
+func TestDeleteConsumedSteerEventIsNoOp(t *testing.T) {
+	mgr := stream.NewMemoryStreamManager()
+	ctx := context.Background()
+	evt := steerEventWithDelivery("a", "already in the model", steerDeliveryInject)
+	evt.Data[steerDataConsumed] = true
+	require.NoError(t, mgr.AppendSteerEvents(ctx, "sess", "assist", []interfaces.StreamEvent{evt}))
+
+	ok, err := mgr.DeleteSteerEvent(ctx, "sess", "assist", "a")
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	stored, _, err := mgr.GetSteerEvents(ctx, "sess", "assist", 0)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, "a", stored[0].ID)
 }

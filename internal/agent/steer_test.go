@@ -40,7 +40,7 @@ func (s *fakeSteerSink) PollSteer(
 }
 
 func (s *fakeSteerSink) PersistSteerMessage(
-	_ context.Context, _, _, steerID, content string, mentionedItems types.MentionedItems,
+	_ context.Context, _, _, steerID, content string, mentionedItems types.MentionedItems, _ string,
 ) string {
 	if s.failPersist {
 		return ""
@@ -417,6 +417,61 @@ func TestExecuteLoopLastRoundInjectRunsAnotherReActRound(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, model.calls, 2)
 	assert.Equal(t, "revised after steer", state.FinalAnswer)
+}
+
+type sequencedSteerSink struct {
+	fakeSteerSink
+	byPoll map[int][]map[string]interface{}
+	polls  int
+}
+
+func (s *sequencedSteerSink) PollSteer(
+	ctx context.Context, sessionID, messageID string, lastOffset int,
+) ([]map[string]interface{}, int, error) {
+	s.polls++
+	if batch, ok := s.byPoll[s.polls]; ok {
+		s.queued = batch
+	} else {
+		s.queued = nil
+	}
+	return s.fakeSteerSink.PollSteer(ctx, sessionID, messageID, lastOffset)
+}
+
+// A second loop-end inject after the extra overrun round must not keep the
+// turn alive. MaxIterations would otherwise be unbounded for a user who
+// keeps sending delivery=inject.
+func TestExecuteLoopSecondOverrunDoesNotContinue(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{
+		{chunks: []types.StreamResponse{
+			{ResponseType: types.ResponseTypeAnswer, Content: "first draft", Done: true, FinishReason: "stop"},
+		}},
+		{chunks: []types.StreamResponse{
+			{ResponseType: types.ResponseTypeAnswer, Content: "revised after steer", Done: true, FinishReason: "stop"},
+		}},
+		{chunks: []types.StreamResponse{
+			{ResponseType: types.ResponseTypeAnswer, Content: "should not run", Done: true, FinishReason: "stop"},
+		}},
+	}}
+	engine := newTestEngine(t, model, withMaxIterations(1))
+	engine.eventBus = event.NewEventBus()
+	sink := &sequencedSteerSink{
+		byPoll: map[int][]map[string]interface{}{
+			2: {steerEntry("s1", "rewrite this from the cost angle")},
+			4: {steerEntry("s2", "and again")},
+		},
+	}
+	engine.SetSteerSink(sink)
+
+	state := &types.AgentState{RoundSteps: []types.AgentStep{}}
+	messages := []chat.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "write a draft"},
+	}
+	_, err := engine.executeLoop(context.Background(), state, "write a draft", messages, nil, "sess", "msg")
+	require.NoError(t, err)
+	require.Len(t, model.calls, 2)
+	assert.Equal(t, "revised after steer", state.FinalAnswer)
+	assert.Equal(t, []string{"rewrite this from the cost angle"}, sink.persisted)
 }
 
 // agentRegistryForTest builds a registry with one counting tool so the loop

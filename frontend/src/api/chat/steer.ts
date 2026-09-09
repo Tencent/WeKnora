@@ -8,6 +8,7 @@ export type SteerQueueItem = {
   delivery: SteerDelivery
   mentioned_items?: unknown[]
   promoting?: boolean
+  awaitingIdleSend?: boolean
   // True while POST /steer is in flight. The overlay uses a client-side
   // id until the server replies with the durable one; promote/remove are
   // disabled in that window so they cannot hit /steer/{client_id}.

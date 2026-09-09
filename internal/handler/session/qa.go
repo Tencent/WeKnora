@@ -648,19 +648,6 @@ type sseStreamContext struct {
 
 // setupSSEStream sets up the SSE streaming context
 func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, mode qaMode) *sseStreamContext {
-	if !reqCtx.skipSSE {
-		setSSEHeaders(reqCtx.c)
-	}
-
-	// Write initial agent_query event
-	h.writeAgentQueryEvent(
-		reqCtx.ctx,
-		reqCtx.sessionID,
-		reqCtx.userMessageID,
-		reqCtx.userCreatedAt,
-		reqCtx.assistantMessage,
-	)
-
 	// Base context for async work: when using shared agent, use source tenant for model/KB/MCP resolution
 	baseCtx := reqCtx.ctx
 	if reqCtx.effectiveTenantID != 0 && h.tenantService != nil {
@@ -693,7 +680,6 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 		baseCtx = types.ApplyAgentMemoryPreference(baseCtx, reqCtx.customAgent.Config.MemoryEnabled)
 	}
 
-	// Create EventBus and cancellable context
 	eventBus := event.NewEventBus()
 	asyncCtx, cancel := context.WithCancel(logger.CloneContext(baseCtx))
 
@@ -711,6 +697,10 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 	// messages until the Redis TTL expires. The sink is also mirrored onto
 	// reqCtx so the async goroutine's buildQARequest() picks it up — the
 	// streamCtx copy alone is never read by the QA call path.
+	//
+	// SetLiveRun happens before SSE headers: a 409/503 after text/event-stream
+	// has started cannot change the status, and the client would sit on a
+	// stream nobody will write to.
 	if mode == qaModeAgent && reqCtx.customAgent != nil {
 		streamCtx.steerSink = newSteerSink(
 			asyncCtx, reqCtx.sessionID, reqCtx.requestID, reqCtx.assistantMessage,
@@ -718,9 +708,6 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 		)
 		reqCtx.steerSink = streamCtx.steerSink
 
-		// Publish this run as the session's live turn so mid-run "append a
-		// message" requests find it from any replica. Cleared on executeQA's
-		// agent-mode teardown path.
 		if err := h.streamManager.SetLiveRun(
 			logger.CloneContext(baseCtx), reqCtx.sessionID,
 			reqCtx.assistantMessage.ID, reqCtx.requestID,
@@ -730,8 +717,21 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 			})
 			streamCtx.liveRunFailed = true
 			streamCtx.liveRunErr = err
+			return streamCtx
 		}
 	}
+
+	if !reqCtx.skipSSE {
+		setSSEHeaders(reqCtx.c)
+	}
+
+	h.writeAgentQueryEvent(
+		reqCtx.ctx,
+		reqCtx.sessionID,
+		reqCtx.userMessageID,
+		reqCtx.userCreatedAt,
+		reqCtx.assistantMessage,
+	)
 
 	// Setup stop event handler
 	h.setupStopEventHandler(eventBus, reqCtx.sessionID, reqCtx.session.TenantID, reqCtx.assistantMessage, cancel)
@@ -963,6 +963,7 @@ const (
 // new assistant instead of seeing an empty session. executeQA skips work that
 // is already done when those IDs are populated.
 func (h *Handler) persistTurnMessages(ctx context.Context, reqCtx *qaRequestContext) error {
+	createdUser := false
 	if reqCtx.userMessageID == "" {
 		userMessageAttachments := reqCtx.attachments
 		if len(reqCtx.attachmentMetas) > 0 {
@@ -974,6 +975,7 @@ func (h *Handler) persistTurnMessages(ctx context.Context, reqCtx *qaRequestCont
 		}
 		reqCtx.userMessageID = userMsg.ID
 		reqCtx.userCreatedAt = userMsg.CreatedAt
+		createdUser = true
 	}
 	if reqCtx.assistantMessage == nil {
 		reqCtx.assistantMessage = &types.Message{
@@ -987,11 +989,35 @@ func (h *Handler) persistTurnMessages(ctx context.Context, reqCtx *qaRequestCont
 	if reqCtx.assistantMessage.ID == "" {
 		assistantMessagePtr, err := h.createAssistantMessage(ctx, reqCtx.assistantMessage)
 		if err != nil {
+			h.rollbackTurnMessages(ctx, reqCtx, createdUser, false)
 			return err
 		}
 		reqCtx.assistantMessage = assistantMessagePtr
 	}
 	return nil
+}
+
+// rollbackTurnMessages deletes user/assistant rows this request just created
+// so a failed SetLiveRun / ClaimLiveRun cannot leave an orphan turn in history.
+func (h *Handler) rollbackTurnMessages(ctx context.Context, reqCtx *qaRequestContext, user, assistant bool) {
+	if h.messageService == nil || reqCtx == nil {
+		return
+	}
+	sessionID := reqCtx.sessionID
+	if user && reqCtx.userMessageID != "" {
+		if err := h.messageService.DeleteMessage(ctx, sessionID, reqCtx.userMessageID); err != nil {
+			logger.Warnf(ctx, "turn rollback failed for user message %s: %v", reqCtx.userMessageID, err)
+		} else {
+			reqCtx.userMessageID = ""
+		}
+	}
+	if assistant && reqCtx.assistantMessage != nil && reqCtx.assistantMessage.ID != "" {
+		if err := h.messageService.DeleteMessage(ctx, sessionID, reqCtx.assistantMessage.ID); err != nil {
+			logger.Warnf(ctx, "turn rollback failed for assistant message %s: %v", reqCtx.assistantMessage.ID, err)
+		} else {
+			reqCtx.assistantMessage.ID = ""
+		}
+	}
 }
 
 func (h *Handler) rejectIfOtherAgentRunLive(ctx context.Context, reqCtx *qaRequestContext) error {
@@ -1053,6 +1079,9 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		}
 	}
 
+	createdUser := reqCtx.userMessageID == ""
+	createdAssistant := reqCtx.assistantMessage == nil || reqCtx.assistantMessage.ID == ""
+
 	// Create user message. Include pre-uploaded document metadata so history
 	// reload shows the attachments even though their content is selected later.
 	if err := h.persistTurnMessages(ctx, reqCtx); err != nil {
@@ -1083,6 +1112,10 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	// Setup SSE stream
 	streamCtx := h.setupSSEStream(reqCtx, generateTitle, mode)
 	if streamCtx.liveRunFailed {
+		if streamCtx.cancel != nil {
+			streamCtx.cancel()
+		}
+		h.rollbackTurnMessages(ctx, reqCtx, createdUser, createdAssistant)
 		if reqCtx.c != nil && !reqCtx.skipSSE {
 			if stderrors.Is(streamCtx.liveRunErr, stream.ErrLiveRunExists) {
 				reqCtx.c.Error(errors.NewConflictError("another turn is already running in this session"))
@@ -1185,10 +1218,21 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 						injected = streamCtx.steerSink.InjectedIDs()
 					}
 					h.discardSteerBacklog(updateCtx, sessionID, streamCtx.assistantMessage.ID, injected)
+					h.completeAssistantMessage(
+						updateCtx, streamCtx.assistantMessage, reqCtx.query, reqCtx.userMessageID,
+					)
 				} else {
-					h.kickNextRunFromSteerBacklog(updateCtx, reqCtx, streamCtx)
+					kicked := h.kickNextRunFromSteerBacklog(updateCtx, reqCtx, streamCtx)
+					h.completeAssistantMessage(
+						updateCtx, streamCtx.assistantMessage, reqCtx.query, reqCtx.userMessageID,
+					)
+					// A /steer that landed while we were completing still sits
+					// on this run. Claim it before ClearLiveRun so it is not
+					// stranded on a list nobody will drain.
+					if !kicked {
+						h.kickNextRunFromSteerBacklog(updateCtx, reqCtx, streamCtx)
+					}
 				}
-				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query, reqCtx.userMessageID)
 				if err := h.streamManager.ClearLiveRun(
 					updateCtx, sessionID, streamCtx.assistantMessage.ID,
 				); err != nil {

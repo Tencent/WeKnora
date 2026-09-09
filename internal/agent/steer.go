@@ -61,7 +61,7 @@ func (e *AgentEngine) drainSteerMessages(
 		}
 		steerID := getString(evt, "id")
 		userMessageID := e.steerSink.PersistSteerMessage(ctx, sessionID, messageID, steerID, content,
-			types.MentionedItemsFromRaw(evt["mentioned_items"]))
+			types.MentionedItemsFromRaw(evt["mentioned_items"]), getString(evt, "channel"))
 		if userMessageID == "" {
 			logger.Warnf(ctx, "[Agent] Steer persist failed for %s, leaving event pending", steerID)
 			continue

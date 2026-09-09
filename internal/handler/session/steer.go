@@ -33,6 +33,10 @@ const (
 // depth guard and the follow-up backlog all read the same flag.
 const steerDataConsumed = "consumed"
 
+// steerDataUserMessageID is the persisted user-row ID written alongside the
+// consumed flag so a retried drain can reuse the row instead of inserting again.
+const steerDataUserMessageID = "user_message_id"
+
 // SteerMessageRequest is the payload of POST /sessions/:session_id/steer.
 type SteerMessageRequest struct {
 	Query          string                 `json:"query" binding:"required"`
@@ -203,12 +207,21 @@ func steerEventToRaw(evt interfaces.StreamEvent) map[string]interface{} {
 func (s *steerSink) PersistSteerMessage(
 	ctx context.Context, sessionID, messageID, steerID, content string,
 	mentionedItems types.MentionedItems,
+	channel string,
 ) string {
 	if s.messageService == nil {
 		s.unmarkInjected(steerID)
 		return ""
 	}
-	channel := "web"
+	if existing := s.persistedUserMessageID(ctx, sessionID, messageID, steerID); existing != "" {
+		s.mu.Lock()
+		s.lastUserMessageID = existing
+		s.mu.Unlock()
+		return existing
+	}
+	if strings.TrimSpace(channel) == "" {
+		channel = "web"
+	}
 	msg, err := s.messageService.CreateMessage(ctx, &types.Message{
 		SessionID:      sessionID,
 		Role:           "user",
@@ -228,20 +241,50 @@ func (s *steerSink) PersistSteerMessage(
 		return ""
 	}
 	updated, err := s.streamManager.UpdateSteerEventData(ctx, sessionID, messageID, steerID,
-		map[string]interface{}{steerDataConsumed: true})
+		map[string]interface{}{
+			steerDataConsumed:      true,
+			steerDataUserMessageID: msg.ID,
+		})
 	if err != nil {
 		logger.Warnf(ctx, "steer consume flag failed for session %s steer %s: %v",
 			sessionID, steerID, err)
 	}
 	if !updated {
-		// Deleted concurrently after persist. Do not inject into the model.
+		// Deleted concurrently, or the CAS gave up. The user row must not
+		// stay around for a retry to insert a second copy of the same steer.
+		if delErr := s.messageService.DeleteMessage(ctx, sessionID, msg.ID); delErr != nil {
+			logger.Warnf(ctx, "steer persist rollback failed for session %s message %s: %v",
+				sessionID, msg.ID, delErr)
+		}
 		s.unmarkInjected(steerID)
+		if existing := s.persistedUserMessageID(ctx, sessionID, messageID, steerID); existing != "" {
+			s.mu.Lock()
+			s.lastUserMessageID = existing
+			s.mu.Unlock()
+			return existing
+		}
 		return ""
 	}
 	s.mu.Lock()
 	s.lastUserMessageID = msg.ID
 	s.mu.Unlock()
 	return msg.ID
+}
+
+func (s *steerSink) persistedUserMessageID(ctx context.Context, sessionID, messageID, steerID string) string {
+	if s.streamManager == nil || steerID == "" {
+		return ""
+	}
+	events, _, err := s.streamManager.GetSteerEvents(ctx, sessionID, messageID, 0)
+	if err != nil {
+		return ""
+	}
+	for _, evt := range events {
+		if evt.ID == steerID {
+			return getString(evt.Data, steerDataUserMessageID)
+		}
+	}
+	return ""
 }
 
 // LastPersistedUserMessageID exposes the ID of the most recently persisted
@@ -770,13 +813,13 @@ func (h *Handler) kickNextRunFromSteerBacklog(
 	ctx context.Context,
 	prevReqCtx *qaRequestContext,
 	prevStreamCtx *sseStreamContext,
-) {
+) bool {
 	followUp, ok := h.claimNextSteerFollowUp(ctx, prevReqCtx, prevStreamCtx)
 	if !ok {
 		followUp, ok = h.claimNextSteerFollowUp(ctx, prevReqCtx, prevStreamCtx)
 	}
 	if !ok {
-		return
+		return false
 	}
 
 	go func() {
@@ -787,6 +830,7 @@ func (h *Handler) kickNextRunFromSteerBacklog(
 		}()
 		h.executeQA(followUp, qaModeAgent, false)
 	}()
+	return true
 }
 
 // claimNextSteerFollowUp persists the follow-up turn and SetLiveRun's it so
@@ -832,7 +876,7 @@ func (h *Handler) claimNextSteerFollowUp(
 	if followUp.channel == "" {
 		followUp.channel = "web"
 	}
-	h.applyFollowUpMentions(&followUp, first.Data["mentioned_items"])
+	h.applyFollowUpMentions(ctx, &followUp, first.Data["mentioned_items"])
 	followUp.assistantMessage = &types.Message{
 		SessionID:   prevReqCtx.sessionID,
 		Role:        "assistant",
@@ -854,15 +898,18 @@ func (h *Handler) claimNextSteerFollowUp(
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": prevReqCtx.sessionID,
 		})
+		h.rollbackTurnMessages(ctx, &followUp, true, true)
 		return nil, false
 	}
 	if followUp.assistantMessage == nil || followUp.assistantMessage.ID == "" {
+		h.rollbackTurnMessages(ctx, &followUp, true, true)
 		return nil, false
 	}
 	if err := h.streamManager.ClaimLiveRun(ctx, followUp.sessionID, followUp.assistantMessage.ID, followUp.requestID); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": followUp.sessionID,
 		})
+		h.rollbackTurnMessages(ctx, &followUp, true, true)
 		return nil, false
 	}
 
@@ -909,13 +956,16 @@ func (h *Handler) rebindSteerIfLiveRunMoved(
 	if current == appendedOn {
 		return appendedOn, "queued", nil
 	}
-	_, _ = h.streamManager.DeleteSteerEvent(ctx, sessionID, appendedOn, evt.ID)
 	if current == "" {
+		// Leave the event on the finished run. Deleting it here would drop
+		// the user's text when the client cannot (and must not) abort a
+		// still-open SSE to start a new AgentQA.
 		return "", "new_run", nil
 	}
 	if err := h.streamManager.AppendSteerEvents(ctx, sessionID, current, []interfaces.StreamEvent{evt}); err != nil {
 		return "", "", err
 	}
+	_, _ = h.streamManager.DeleteSteerEvent(ctx, sessionID, appendedOn, evt.ID)
 	return current, "queued", nil
 }
 
@@ -936,7 +986,16 @@ func mentionedItemsToRequests(items types.MentionedItems) []MentionedItemRequest
 	return out
 }
 
-func (h *Handler) applyFollowUpMentions(followUp *qaRequestContext, raw interface{}) {
+func (h *Handler) applyFollowUpMentions(ctx context.Context, followUp *qaRequestContext, raw interface{}) {
+	snapshot := followUpMentionSnapshot{
+		mentionedItems:   followUp.mentionedItems,
+		knowledgeBaseIDs: append([]string(nil), followUp.knowledgeBaseIDs...),
+		knowledgeIDs:     append([]string(nil), followUp.knowledgeIDs...),
+		mcpServiceIDs:    append([]string(nil), followUp.mcpServiceIDs...),
+		skillNames:       append([]string(nil), followUp.skillNames...),
+		tagIDs:           append([]string(nil), followUp.tagIDs...),
+		tagScopes:        append([]types.TagScope(nil), followUp.tagScopes...),
+	}
 	items := rawToMentionedItems(raw)
 	followUp.mentionedItems = items
 	reqs := mentionedItemsToRequests(items)
@@ -948,6 +1007,41 @@ func (h *Handler) applyFollowUpMentions(followUp *qaRequestContext, raw interfac
 	followUp.tagIDs = dedupRequestStrings(append(followUp.tagIDs, mentionedIDsByType(reqs, "tag")...))
 	followUp.tagScopes = mergeTagScopesFromRequestIDs(
 		tagScopesFromMentionedItems(reqs), followUp.tagIDs, followUp.knowledgeBaseIDs)
+
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(
+		ctx, followUp.knowledgeBaseIDs, followUp.knowledgeIDs,
+	); err != nil {
+		logger.Warnf(ctx, "dropping follow-up mentions outside API key KB scope: %v", err)
+		restoreFollowUpMentions(followUp, snapshot)
+		return
+	}
+	if err := validateUnscopedTagIDs(
+		orphanTagIDsForScope(followUp.tagIDs, tagScopesFromMentionedItems(reqs)),
+		followUp.knowledgeBaseIDs,
+	); err != nil {
+		logger.Warnf(ctx, "dropping follow-up mentions with unscoped tags: %v", err)
+		restoreFollowUpMentions(followUp, snapshot)
+	}
+}
+
+type followUpMentionSnapshot struct {
+	mentionedItems   types.MentionedItems
+	knowledgeBaseIDs []string
+	knowledgeIDs     []string
+	mcpServiceIDs    []string
+	skillNames       []string
+	tagIDs           []string
+	tagScopes        []types.TagScope
+}
+
+func restoreFollowUpMentions(followUp *qaRequestContext, snapshot followUpMentionSnapshot) {
+	followUp.mentionedItems = snapshot.mentionedItems
+	followUp.knowledgeBaseIDs = snapshot.knowledgeBaseIDs
+	followUp.knowledgeIDs = snapshot.knowledgeIDs
+	followUp.mcpServiceIDs = snapshot.mcpServiceIDs
+	followUp.skillNames = snapshot.skillNames
+	followUp.tagIDs = snapshot.tagIDs
+	followUp.tagScopes = snapshot.tagScopes
 }
 
 // rawToMentionedItems rebuilds typed mentions from the JSON-safe raw shape

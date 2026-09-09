@@ -200,6 +200,13 @@ func (s *steerPersistingMessageStub) CreateMessage(_ context.Context, msg *types
 	return &out, nil
 }
 
+func (s *steerPersistingMessageStub) DeleteMessage(_ context.Context, _, id string) error {
+	if s.byID != nil {
+		delete(s.byID, id)
+	}
+	return nil
+}
+
 func (s *steerPersistingMessageStub) GetMessage(_ context.Context, _, id string) (*types.Message, error) {
 	if s.byID == nil {
 		return nil, errors.New("not found")
@@ -352,7 +359,7 @@ func TestApplyFollowUpMentionsMergesKBAndMCP(t *testing.T) {
 		knowledgeBaseIDs: []string{"kb-old"},
 		mcpServiceIDs:    []string{"mcp-old"},
 	}
-	h.applyFollowUpMentions(followUp, []interface{}{
+	h.applyFollowUpMentions(t.Context(), followUp, []interface{}{
 		map[string]interface{}{"id": "kb-new", "type": "kb", "name": "New KB"},
 		map[string]interface{}{"id": "mcp-new", "type": "mcp", "name": "MCP"},
 	})
@@ -384,4 +391,72 @@ func TestPersistTurnMessagesSkipsWhenAlreadyClaimed(t *testing.T) {
 	}
 	require.NoError(t, h.persistTurnMessages(t.Context(), reqCtx))
 	assert.Equal(t, 0, msgs.n)
+}
+
+type steerClaimFailingManager struct {
+	interfaces.StreamManager
+}
+
+func (s *steerClaimFailingManager) ClaimLiveRun(context.Context, string, string, string) error {
+	return errors.New("redis down")
+}
+
+type steerAppendFailingManager struct {
+	interfaces.StreamManager
+}
+
+func (s *steerAppendFailingManager) AppendSteerEvents(
+	context.Context, string, string, []interfaces.StreamEvent,
+) error {
+	return errors.New("redis down")
+}
+
+func TestClaimNextSteerFollowUpClaimFailureRollsBackMessages(t *testing.T) {
+	ctx := t.Context()
+	inner := stream.NewMemoryStreamManager()
+	require.NoError(t, inner.SetLiveRun(ctx, "sess-1", "assist-A", "req-A"))
+	require.NoError(t, inner.AppendSteerEvents(ctx, "sess-1", "assist-A", []interfaces.StreamEvent{
+		steerEventWithDelivery("after-1", "do this next", steerDeliveryAfter),
+	}))
+
+	msgs := &steerPersistingMessageStub{}
+	h := &Handler{
+		sessionService: &steerOwnedSessionStub{},
+		messageService: msgs,
+		streamManager:  &steerClaimFailingManager{StreamManager: inner},
+	}
+	followUp, ok := h.claimNextSteerFollowUp(ctx, &qaRequestContext{sessionID: "sess-1"},
+		&sseStreamContext{assistantMessage: &types.Message{ID: "assist-A"}})
+	assert.False(t, ok)
+	assert.Nil(t, followUp)
+	assert.Empty(t, msgs.byID, "ClaimLiveRun failure must not leave a follow-up turn in the database")
+
+	old, _, err := inner.GetSteerEvents(ctx, "sess-1", "assist-A", 0)
+	require.NoError(t, err)
+	require.Len(t, old, 1)
+	assert.False(t, steerEventConsumed(old[0]), "backlog must stay pending so a retry can claim it")
+}
+
+func TestRebindSteerKeepsEventWhenAppendFails(t *testing.T) {
+	ctx := t.Context()
+	inner := stream.NewMemoryStreamManager()
+	require.NoError(t, inner.SetLiveRun(ctx, "sess-1", "assist-A", "req-A"))
+	h := &Handler{
+		sessionService: &steerOwnedSessionStub{},
+		messageService: &steerMessageLookupStub{
+			msg: &types.Message{ID: "assist-B", SessionID: "sess-1", IsCompleted: false},
+		},
+		streamManager: &steerAppendFailingManager{StreamManager: inner},
+	}
+	evt := steerEventWithDelivery("late-1", "landed on A", steerDeliveryAfter)
+	require.NoError(t, inner.AppendSteerEvents(ctx, "sess-1", "assist-A", []interfaces.StreamEvent{evt}))
+	require.NoError(t, inner.ClaimLiveRun(ctx, "sess-1", "assist-B", "req-B"))
+
+	_, _, err := h.rebindSteerIfLiveRunMoved(ctx, "sess-1", "assist-A", evt)
+	require.Error(t, err)
+
+	old, _, err := inner.GetSteerEvents(ctx, "sess-1", "assist-A", 0)
+	require.NoError(t, err)
+	require.Len(t, old, 1)
+	assert.Equal(t, "late-1", old[0].ID)
 }

@@ -742,7 +742,7 @@ const {
     },
     onTurnComplete: (message) => {
         void loadFollowUpSuggestions(message, true);
-        void attachSteerFollowUp(persistedAssistantId(message));
+        void flushSteerAfterTurn(persistedAssistantId(message));
     },
 });
 
@@ -845,6 +845,18 @@ const handleSteerMsg = async (value, mentionedItems = [], delivery = 'after') =>
     try {
         const res = await steerSession(session_id.value, value, mentionedItems, delivery);
         if (res?.status === 'new_run') {
+            const item = findSteerQueueItem(clientId);
+            // Still attached to a stream: aborting it to POST AgentQA races the
+            // finishing turn and can start a second engine. Keep the chip and
+            // send once the current SSE completes.
+            if (isReplying.value || isStreaming.value) {
+                if (item) {
+                    item.pending = false;
+                    item.awaitingIdleSend = true;
+                    item.delivery = 'after';
+                }
+                return;
+            }
             dropSteerQueueItem(clientId);
             await sendMsg(value, '', mentionedItems);
             return;
@@ -885,6 +897,11 @@ const handlePromoteSteer = async (steerId) => {
             return;
         }
         if (res?.status === 'new_run') {
+            if (isReplying.value || isStreaming.value) {
+                item.awaitingIdleSend = true;
+                item.delivery = 'after';
+                return;
+            }
             const content = item.content;
             const mentions = item.mentioned_items || [];
             dropSteerQueueItem(steerId);
@@ -933,6 +950,21 @@ const handleRemoveSteer = async (steerId) => {
 };
 
 let attachingSteerFollowUp = false;
+
+const flushSteerAfterTurn = async (completedAssistantId) => {
+    const awaiting = steerQueue.value.filter((item) => item.awaitingIdleSend);
+    if (awaiting.length) {
+        const batch = awaiting.slice();
+        steerQueue.value = steerQueue.value.filter((item) => !item.awaitingIdleSend);
+        const first = batch[0];
+        await sendMsg(first.content, '', first.mentioned_items || []);
+        for (const rest of batch.slice(1)) {
+            await handleSteerMsg(rest.content, rest.mentioned_items || [], rest.delivery || 'after');
+        }
+        return;
+    }
+    void attachSteerFollowUp(completedAssistantId);
+};
 
 const attachSteerFollowUp = async (completedAssistantId) => {
     const queued = steerQueue.value.slice();
