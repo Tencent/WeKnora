@@ -2,6 +2,9 @@ name: topic3-regression
 
 on:
   pull_request:
+  schedule:
+    # Weekly deterministic-only regression audit. Paid jobs remain manual-only.
+    - cron: "0 18 * * 1"
   workflow_dispatch:
     inputs:
       run_negative_demo:
@@ -57,6 +60,7 @@ jobs:
           name: topic3-deterministic-evidence
           path: |
             codex/topic3/EVIDENCE_MANIFEST_20260908.json
+            codex/topic3/RAW_RESULT_MANIFEST_20260909.json
             codex/topic3/CORE_SOURCE_SNAPSHOT_20260908.json
             codex/topic3/baseline.json
             codex/topic3/fixtures/current-degraded.json

@@ -103,7 +103,7 @@ TOPIC3_CHAT_OUTPUT_PRICE_PER_MILLION_CNY=
 
 ## CI 与合并门禁
 
-`.github/workflows/topic3-regression.yml` 支持 PR 自动检查和手动运行，不再定时运行。正常的退化fixture会被检查器拒绝、但确定性任务保持绿色。手动勾选 `run_negative_demo` 可产生专门的预期红灯证据。
+`.github/workflows/topic3-regression.yml` 支持 PR 自动检查、每周一 UTC 18:00（北京时间周二 02:00）确定性定时检查和手动运行。定时任务只运行免费检查，不调用真实模型。正常的退化 fixture 会被检查器拒绝、但确定性任务保持绿色。手动勾选 `run_negative_demo` 可产生专门的预期红灯证据。GitHub 的定时工作流只读取默认分支，因此合并本次修订后还需确认默认分支包含该工作流。
 
 真实评测不会由PR或定时任务触发。只有手动运行时同时勾选 `run_real_evaluation`，并配置仓库变量 `TOPIC3_REAL_EVAL_ENABLED=true`、模型 ID 及 Secret `TOPIC3_TOKEN`，才会产生真实调用和费用。
 

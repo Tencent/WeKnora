@@ -11,7 +11,7 @@ PR：<https://github.com/szt1107/WeKnora/pull/1>
 - Required status check 为 `topic3-regression / deterministic-checks`。
 - PR 自动运行确定性测试，不调用真实模型。
 - 真实模型评测只能由人工勾选 `run_real_evaluation` 后触发。
-- CI 已取消每日定时运行，避免无意义消耗运行时间。
+- 原验收版本未启用定时运行；2026-09-09 补充了每周一次、仅运行确定性检查的 schedule，绝不自动触发付费评测。该配置合并并位于默认分支后生效。
 
 ## 负例阻断证据
 
@@ -36,4 +36,4 @@ PR：<https://github.com/szt1107/WeKnora/pull/1>
 
 ## 验收结论
 
-本项已经同时证明：正常结果可以通过、不合格结果会失败、失败的 Required 检查能够阻止合并。PR 目前继续保持未合并状态，等待空数据库复现和最终材料完成。
+本项已经同时证明：正常结果可以通过、不合格结果会失败、失败的 Required 检查能够阻止合并。PR #1 已于 2026-09-09 合并；提交材料 PR #2 也已合并。

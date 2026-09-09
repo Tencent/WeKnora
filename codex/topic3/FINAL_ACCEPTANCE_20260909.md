@@ -12,7 +12,7 @@
 | 检索质量 | 9轮 Recall/MRR 均为 1.0 |
 | Wiki 对照 | 8/8 真实调用有效；本次未观察到厂商缓存命中 |
 | 回归负例 | Recall/MRR 从 1.0 降为 0，0.03 门禁正确拒绝 |
-| GitHub CI | PR #1 最新候选版本 3 项成功、2 项按设计跳过 |
+| GitHub CI | PR #1 已合并；确定性检查通过，付费任务按设计不自动运行 |
 | Required Check | 已验证正常通过、退化失败及失败时禁止合并 |
 | 空数据库复现 | 独立 Compose、迁移 83、1/1 完成，重启后仍可查询 |
 | 密钥检查 | 干净复现结果实际匹配 0 条 API Key |
@@ -20,14 +20,14 @@
 ## 版本与证据
 
 - Fork：`https://github.com/szt1107/WeKnora`
-- PR：`https://github.com/szt1107/WeKnora/pull/1`
-- 候选分支：`codex/topic3-initial`
-- 当前候选 Commit：`8ccaabda22437d38d978585f016fda86456e9c4c`
+- PR：`https://github.com/szt1107/WeKnora/pull/1`（已合并）
+- 正式分支：`topic3-v0.7.2-base`
+- 冻结 Tag Commit：`de08cc8b004cec83ed4835a737d36eab45cb6d3a`
 - 正式本地实验：`codex/topic3/results/batch-20260908-102705/`
 - 干净复现：`codex/topic3/results/clean-reproduction-20260908-210144/`
 - 正式基线：`codex/topic3/baseline.json`
 
-最终代码以合并后的 `rhino-2026-final-3` Tag 为准。`submission.yaml` 在 Tag 固定后生成，并记录该 Tag 对应的完整 Commit SHA。
+已冻结版本以不可移动 Tag `rhino-2026-final-3` 为准；`submission.yaml` 已在 Tag 固定后生成并通过 PR #2 合入。2026-09-09 的补强工作只增加定时确定性检查、原始结果哈希校验和文档勘误，不移动原 Tag；如需把补强内容作为提交版本，另建补充 Tag，须先确认主办方接受方式。
 
 ## 已知边界
 
