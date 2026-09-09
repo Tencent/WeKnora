@@ -548,7 +548,27 @@ export default {
       embed: '網頁嵌入',
       api: 'API 整合',
       chrome: 'Chrome 外掛',
-      claw: 'Claw Skill'
+      claw: 'Claw Skill',
+      cli: 'CLI'
+    },
+    cli: {
+      commandsDesc: '將 KB_ID 替換為知識庫 ID，按需替換檔案路徑、檢索詞和問題。上傳後的文件需解析完成才能檢索。',
+      commandsTitle: '常用命令',
+      connectDesc: '建立並啟用名為 weknora 的連線設定，然後使用郵箱和密碼登入。如果已有同名設定，請更換名稱，並同步修改 MCP 示例中的設定名。',
+      connectTitle: '連線當前服務',
+      copied: '已複製',
+      copy: '複製',
+      docs: '檢視 CLI 文件',
+      docsHint: '安裝說明與完整命令參考',
+      installDesc: '目前支援原始碼構建，需要 Git 和 Go 1.26+。以下示例適用於 macOS / Linux，PATH 設定僅在當前終端生效；長期使用請將二進位制放入 PATH 目錄。',
+      installTitle: '安裝 CLI',
+      mcpDesc: '完成登入後，將以下設定新增到支援 stdio 的 MCP 客戶端。若客戶端無法找到 weknora，請將 command 改為二進位制的絕對路徑。',
+      mcpTitle: '接入 MCP 客戶端',
+      quickstart: '快速開始',
+      subtitle: '在終端中管理知識庫和文件、檢索內容併發起問答，也可透過指令碼或 MCP 接入 AI 工具。',
+      title: 'WeKnora CLI',
+      verifyDesc: '檢查服務與認證狀態，並列出當前賬號可訪問的知識庫。',
+      verifyTitle: '驗證連線'
     }
   },
   datasource: {
@@ -1384,6 +1404,29 @@ export default {
       submitted: '已提交',
       submitFailed: '提交失敗',
       userRejected: '使用者拒絕'
+    },
+    mcp: {
+      callTool: '呼叫 MCP 工具',
+      describeTool: '讀取工具定義',
+      discoverTools: '發現 MCP 工具',
+      failed: 'MCP 操作失敗',
+      fullSchema: '完整引數定義',
+      listServers: '檢視 MCP 服務',
+      listTools: '檢視 MCP 工具',
+      moreAvailable: '還有更多結果',
+      required: '必填',
+      result: '執行結果',
+      searchTools: '搜尋 MCP 工具',
+      showing: '已顯示 {count} / {total} 項',
+      status: {
+        disabled: '已禁用',
+        error: '連線失敗',
+        loading: '載入中',
+        needs_auth: '需要授權',
+        not_loaded: '未載入',
+        ready: '可用',
+        unavailable: '不可用'
+      }
     }
   },
   kbSettings: {
@@ -2331,7 +2374,8 @@ export default {
     selectLanguage: '選擇語言',
     language: '語言',
     languageDescription: '選擇介面顯示語言',
-    languageSaved: '語言設定已儲存'
+    languageSaved: '語言設定已儲存',
+    jaJP: '日本語'
   },
   model: {
     modelName: '模型名稱',
@@ -2728,6 +2772,7 @@ export default {
           'system.api_key_revoked': '吊銷平臺 API Key',
           'system.admin_revoked': '回收系統管理員',
           'system.user_password_reset': '重置使用者密碼',
+          'system.user_created': '建立使用者',
           'system.queue_task_retried': '重新執行失敗任務',
           'system.queue_task_deleted': '清除失敗任務記錄',
           'system.queue_task_run_now': '立即執行佇列任務',
@@ -3147,6 +3192,49 @@ export default {
         tier1: '在此頁面儲存過的項（帶「已覆蓋」徽章）— 始終以這裡的值為準，環境變數會被忽略。',
         tier2: '未在此處儲存過的項 — 如果環境變數裡有就用環境變數，否則用程式內建預設值。',
         tier3: '若想讓某項重新由環境變數控制，點選該行的「重置」按鈕即可清除當前 UI 設定。'
+      },
+      createUser: {
+        action: '建立使用者',
+        autoGenerateLabel: '自動生成隨機密碼',
+        confirmBtn: '建立使用者',
+        confirmPasswordLabel: '確認新密碼',
+        confirmPasswordPlaceholder: '再次輸入新密碼',
+        description: '開通一個新的本地使用者賬號。如果平臺的預設空間模式設定為「自動建立個人空間」，該使用者會像自助註冊的使用者一樣，同時獲得一個個人空間。',
+        dialogTitle: '建立新使用者',
+        emailLabel: '郵箱',
+        emailPlaceholder: '請輸入有效的郵箱地址',
+        failed: '建立使用者失敗',
+        generated: {
+          acknowledgeBtn: '我已儲存密碼',
+          copyBtn: '複製賬號情報',
+          copySuccess: '賬號情報已複製到剪貼簿',
+          emailLabel: '郵箱',
+          passwordLabel: '生成的密碼',
+          successBody: '已為該使用者生成一個隨機密碼。此密碼只會顯示一次。',
+          successTitle: '使用者已建立',
+          usernameLabel: '使用者名稱'
+        },
+        label: '建立使用者',
+        missingPassword: '使用者已建立，但未返回生成的密碼。請使用重置密碼來還原訪問。',
+        newPasswordLabel: '新密碼',
+        newPasswordPlaceholder: '8-32 個字元，包含字母和數字',
+        success: '使用者已建立',
+        successIdempotent: '使用者已存在，未做任何更改',
+        usernameLabel: '使用者名稱',
+        usernamePlaceholder: '2-50 個字元',
+        validation: {
+          confirmRequired: '請再次輸入新密碼',
+          emailInvalid: '請輸入有效的郵箱地址',
+          emailRequired: '請輸入郵箱',
+          passwordLength: '密碼長度必須為 8-32 個字元',
+          passwordLetter: '密碼必須包含字母',
+          passwordMismatch: '兩次輸入的密碼不一致',
+          passwordNumber: '密碼必須包含數字',
+          passwordRequired: '請輸入新密碼',
+          usernameLength: '使用者名稱長度必須為 2-50 個字元',
+          usernameRequired: '請輸入使用者名稱'
+        },
+        warning: '這是高風險操作。請仔細核對使用者名稱和郵箱——它們將作為該使用者登入的唯一憑據。'
       }
     },
     messages: {
@@ -3429,7 +3517,29 @@ export default {
       yesterday: '昨天 {time}',
       thisYear: '{month}月{day}日 {time}',
       otherYear: '{year}年{month}月{day}日 {time}'
-    }
+    },
+    sandbox: {
+      artifactsEmpty: '本會話尚未生成可下載的檔案',
+      authRevoked: '登入狀態已失效，終端已斷開。請重新登入後再連線。',
+      connecting: '正在連線沙箱…',
+      createAndStart: '建立並啟動',
+      desktopPlaceholder: '桌面視覺化即將支援',
+      disconnected: '連線已斷開',
+      idleDisconnected: '終端空閒已斷開，沙箱將按工作區 TTL 自行暫停。可重新連線。',
+      needsProvision: '本會話當前沒有執行中的沙箱環境。建立並啟動會建立一個沙箱，並按工作區設定計費。',
+      noSandbox: '會話尚未建立沙箱，且當前智慧體未設定沙箱後端，無法確定在哪個後端建立。請切換到設定了沙箱的智慧體，或傳送一條需要執行程式碼的訊息。',
+      notStarted: '終端尚未啟動。啟動後會連線本會話的沙箱環境；若沙箱不存在或已暫停，將為你建立或喚醒它。',
+      panelTitle: '沙箱視覺化',
+      retry: '重新連線',
+      sessionEnded: '終端會話已結束',
+      start: '啟動終端',
+      tabArtifacts: '產物',
+      tabDesktop: '桌面',
+      tabTerminal: '終端',
+      unsupported: '當前沙箱後端不支援互動終端'
+    },
+    webFetchContentRange: '字元範圍 {start}–{end}，共 {total} 字元',
+    webFetchPartialContent: '部分頁面內容'
   },
   knowledgeEditor: {
     titleCreate: '新建知識庫',
@@ -5704,7 +5814,9 @@ export default {
         template: '選擇當前叢集返回且已經就緒的執行模板。',
         runtime: '配置執行引數和環境變數，然後儲存。',
         skills: '把技能裝進這份配置的沙箱映象；配置已儲存後可隨時回來增刪。'
-      }
+      },
+      terminalIdleDisconnect: '互動式終端空閒斷開（秒）',
+      terminalIdleDisconnectHelp: '開啟終端後，這段時間內沒有鍵盤輸入或終端輸出就斷開連線，沙箱隨後按 TTL 自行暫停。留空按 900 秒；最短 60 秒，最長 24 小時。'
     }
   },
   agent: {
@@ -6450,7 +6562,11 @@ export default {
       fromOrg: '來自空間',
       sharedAt: '共享於',
       lastUpdated: '最後更新'
-    }
+    },
+    deletePending: '刪除尚未完成，請稍後重新整理檢視結果。',
+    deleteStatusUnavailable: '暫時無法確認刪除結果，請稍後重新整理檢視文件狀態。',
+    deleteSubmitted: '刪除任務已提交，正在等待完成。',
+    deleteTaskFailed: '刪除任務失敗，請檢視文件錯誤詳情後重試。'
   },
   resourceOrigin: {
     mine: '我建立',
@@ -6748,7 +6864,8 @@ export default {
       assistant: '助手',
       attachments: '附件',
       references: '引用'
-    }
+    },
+    toggleSandboxPanel: '沙箱終端'
   },
   menu: {
     knowledgeBase: '知識庫',
@@ -6775,6 +6892,7 @@ export default {
     logoutSuccess: '已退出登入',
     myChats: '我的對話',
     apiChats: 'API 會話',
-    noSessions: '暫無對話'
+    noSessions: '暫無對話',
+    sessionInProgress: '會話進行中'
   }
 }
