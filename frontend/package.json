@@ -13,6 +13,7 @@
     "test": "tsx --test",
     "check-i18n": "tsx --test src/i18n/localeKeyAudit.test.ts",
     "scan-i18n-gaps": "tsx src/i18n/localeGapScan.ts",
+    "review-i18n-changes": "tsx src/i18n/localeChanges.ts",
     "regenerate-i18n-locales": "tsx src/i18n/regeneratePrunedLocales.ts"
   },
   "dependencies": {
@@ -23,6 +24,7 @@
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "axios": "^1.16.0",
+    "dayjs": "1.11.19",
     "docx-preview": "^0.3.7",
     "dompurify": "^3.4.11",
     "highlight.js": "^11.11.1",

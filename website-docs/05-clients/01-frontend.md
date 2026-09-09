@@ -18,7 +18,7 @@ WeKnora 的 Web 前端是一个基于 **Vue 3 + TypeScript + Vite** 的单页应
 | UI 组件库 | TDesign (tdesign-vue-next) | ^1.19.2 | 配合 `tdesign-icons-vue-next` 0.4.4（版本被 overrides 锁定） |
 | 状态管理 | Pinia | ^3.0.4 | 全部 store 位于 `frontend/src/stores/` |
 | 路由 | Vue Router | ^4.5.0 | `createWebHistory`，见 `frontend/src/router/index.ts` |
-| 多语言 | vue-i18n | ^11.4.2 | zh-CN / en-US / ru-RU / ko-KR / ja-JP |
+| 多语言 | vue-i18n | ^11.4.2 | zh-CN / en-US / ru-RU / ko-KR / ja-JP / fr-FR |
 | HTTP | axios | ^1.16.0 | 统一实例封装于 `frontend/src/utils/request.ts` |
 | SSE 流式 | @microsoft/fetch-event-source | ^2.0.1 | 聊天流式回复，见 `frontend/src/api/chat/streame.ts` |
 | Markdown 渲染 | marked / marked-katex-extension / katex / highlight.js / mermaid | — | 聊天答案富文本渲染（公式、代码高亮、图表） |
@@ -57,7 +57,7 @@ flowchart TB
 
     subgraph io["数据访问层"]
         API["API 封装 (src/api)<br/>axios 实例 + SSE 流式"]
-        I18N["多语言 (src/i18n)<br/>zh-CN / en-US / ru-RU / ko-KR / ja-JP"]
+        I18N["多语言 (src/i18n)<br/>zh-CN / en-US / ru-RU / ko-KR / ja-JP / fr-FR"]
         WAILS["桌面绑定 (src/wailsjs)<br/>Wails 自动生成"]
     end
 
@@ -301,7 +301,7 @@ RAG 流水线的可视化进度（`views/chat/components/RagPipelineProgress.vue
 
 `frontend/docker-entrypoint.sh`（运行时配置注入）：
 
-1. 生成 `/usr/share/nginx/html/config.js`，把 `MAX_FILE_SIZE_MB`（默认 50）与 `DEFAULT_LOCALE`（可选，默认空）写入 `window.__RUNTIME_CONFIG__` 供前端运行时读取；entrypoint 仅允许 `zh-CN|en-US|ru-RU|ko-KR|ja-JP`，非法值会被丢弃；
+1. 生成 `/usr/share/nginx/html/config.js`，把 `MAX_FILE_SIZE_MB`（默认 50）与 `DEFAULT_LOCALE`（可选，默认空）写入 `window.__RUNTIME_CONFIG__` 供前端运行时读取；entrypoint 仅允许 `zh-CN|en-US|ru-RU|ko-KR|ja-JP|fr-FR`，非法值会被丢弃；
 2. 用 `envsubst` 渲染 nginx 模板，可配置环境变量：`MAX_FILE_SIZE_MB`、`DEFAULT_LOCALE`、`APP_HOST`（默认 `app`）、`APP_PORT`（默认 `8080`）、`APP_SCHEME`（默认 `http`，远程 HTTPS 后端可设 `https`）；
 3. 前台启动 nginx。
 

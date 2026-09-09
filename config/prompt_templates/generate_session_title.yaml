@@ -4,6 +4,10 @@ templates:
     name: "Standard Title"
     description: "Generate a concise session title from user's question"
     default: true
+    i18n:
+      fr-FR:
+        name: "Titre standard"
+        description: "Génère un titre de conversation concis à partir de la question de l’utilisateur"
     content: |
       Generate a short session title based on the user's question.
 

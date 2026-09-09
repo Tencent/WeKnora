@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { EMBED_MESSAGES } from './embed.ts'
 
 import {
   LOCALE_BUNDLES,
@@ -157,15 +158,8 @@ for (const [root, files] of tmRoots) {
 }
 
 // embed bundle audit
-const embedFile = join(dirname(fileURLToPath(import.meta.url)), 'embed.ts')
-const embedSource = readFileSync(embedFile, 'utf8')
-const embedMessagesMatch = embedSource.match(/const messages = (\{[\s\S]*?\n\}) as const/)
-const embedMessages = embedMessagesMatch
-  ? (Function(`"use strict"; return (${embedMessagesMatch[1]});`)() as Record<string, unknown>)
-  : {}
-
 const embedKeysByLocale = Object.fromEntries(
-  Object.entries(embedMessages).map(([locale, bundle]) => [locale, flattenMessages(bundle)]),
+  Object.entries(EMBED_MESSAGES).map(([locale, bundle]) => [locale, flattenMessages(bundle)]),
 ) as Record<string, Set<string>>
 
 const embedStaticKeys = new Set<string>()

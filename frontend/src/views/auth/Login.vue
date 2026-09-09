@@ -382,7 +382,7 @@ const { formatRole, roleIcon } = useRoleLabel()
 const modules = [Autoplay, EffectFade, Pagination]
 
 // Carousel slides data
-const slides = [
+const slides = computed(() => [
   {
     image: screenshot4,
     title: t('platform.carousel.agenticRagTitle'),
@@ -403,7 +403,7 @@ const slides = [
     title: t('platform.carousel.smartDocRetrievalTitle'),
     description: t('platform.carousel.smartDocRetrievalDesc')
   }
-]
+])
 
 // Form references
 const formRef = ref()
@@ -439,7 +439,8 @@ const languageOptions = [
   { value: 'en-US', label: 'English', shortLabel: 'EN', flag: '🇺🇸' },
   { value: 'ru-RU', label: 'Русский', shortLabel: 'RU', flag: '🇷🇺' },
   { value: 'ko-KR', label: '한국어', shortLabel: '한국어', flag: '🇰🇷' },
-  { value: 'ja-JP', label: '日本語', shortLabel: '日本語', flag: '🇯🇵' }
+  { value: 'ja-JP', label: '日本語', shortLabel: '日本語', flag: '🇯🇵' },
+  { value: 'fr-FR', label: 'Français', shortLabel: 'FR', flag: '🇫🇷' }
 ]
 
 const currentLanguage = computed(() => locale.value)

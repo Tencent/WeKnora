@@ -4,6 +4,9 @@ templates:
     name: "Standard Template"
     description: "Standard context formatting template"
     i18n:
+      fr-FR:
+        name: "Modèle standard"
+        description: "Modèle de contexte présentant clairement les références et les questions"
       zh-CN:
         name: "标准模板"
         description: "基础的上下文模板，清晰展示参考资料和问题"
@@ -30,6 +33,9 @@ templates:
     name: "Detailed Template"
     description: "Context template with detailed instructions"
     i18n:
+      fr-FR:
+        name: "Modèle détaillé"
+        description: "Modèle complet avec des instructions et des exigences détaillées"
       zh-CN:
         name: "详细模板"
         description: "包含详细说明和回答要求的完整模板"
@@ -68,6 +74,9 @@ templates:
     name: "Simple Template"
     description: "Simple context template"
     i18n:
+      fr-FR:
+        name: "Modèle simple"
+        description: "Modèle minimal adapté aux questions-réponses simples"
       zh-CN:
         name: "简洁模板"
         description: "精简的模板格式，适合简单问答场景"
@@ -93,6 +102,9 @@ templates:
     name: "Q&A Template"
     description: "Template specialized for Q&A scenarios"
     i18n:
+      fr-FR:
+        name: "Modèle de questions-réponses"
+        description: "Modèle optimisé pour les questions-réponses"
       zh-CN:
         name: "问答模板"
         description: "针对问答场景优化的模板"

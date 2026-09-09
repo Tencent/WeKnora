@@ -5,6 +5,10 @@ templates:
     name: "Entity Extraction"
     description: "Extract entities from text for knowledge graph construction"
     default: true
+    i18n:
+      fr-FR:
+        name: "Extraction d’entités"
+        description: "Extrait les entités du texte pour construire le graphe de connaissances"
     content: |
       ## Task
       Extract all entities from the user-provided text that match the following entity types:
@@ -95,6 +99,10 @@ templates:
     name: "Relationship Extraction"
     description: "Extract relationships between entities for knowledge graph construction"
     default: true
+    i18n:
+      fr-FR:
+        name: "Extraction de relations"
+        description: "Extrait les relations entre les entités pour construire le graphe de connaissances"
     content: |
       ## Task
       From the user-provided entity array, extract explicit relationships between entities to form a structured relationship network.

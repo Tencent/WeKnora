@@ -18,7 +18,13 @@ test('resolveDefaultLocale trims whitespace around supported tags', () => {
 })
 
 test('resolveDefaultLocale rejects unknown values', () => {
-  assert.equal(resolveDefaultLocale('fr-FR'), BUILT_IN_DEFAULT)
+  assert.equal(resolveDefaultLocale('es-ES'), BUILT_IN_DEFAULT)
   assert.equal(resolveDefaultLocale('en-US"};alert(1);//'), BUILT_IN_DEFAULT)
   assert.equal(resolveDefaultLocale('   '), BUILT_IN_DEFAULT)
+})
+
+test('French can be selected as the runtime or build-time default', () => {
+  assert.equal(resolveDefaultLocale('fr-FR', 'en-US'), 'fr-FR')
+  assert.equal(resolveDefaultLocale(undefined, 'fr-FR'), 'fr-FR')
+  assert.equal(resolveDefaultLocale(' fr-FR '), 'fr-FR')
 })

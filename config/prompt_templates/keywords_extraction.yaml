@@ -4,6 +4,10 @@ templates:
     name: "Standard Keywords Extraction"
     description: "Extract important keywords from user's question for retrieval"
     default: true
+    i18n:
+      fr-FR:
+        name: "Extraction standard de mots-clés"
+        description: "Extrait les mots-clés importants de la question de l’utilisateur pour la recherche"
     content: |
       # Role
       You are a professional keyword extraction assistant. Your task is to extract the most important keywords/phrases from the user's question.

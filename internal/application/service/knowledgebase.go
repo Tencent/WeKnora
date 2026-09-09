@@ -1265,6 +1265,8 @@ func duplicateKBCopySuffix(locale string) string {
 		return " 사본"
 	case strings.HasPrefix(locale, "ru"):
 		return " копия"
+	case strings.HasPrefix(locale, "fr"):
+		return " Copie"
 	default:
 		return " Copy"
 	}
@@ -1279,6 +1281,8 @@ func duplicateKBDefaultName(locale string) string {
 		return "지식베이스"
 	case strings.HasPrefix(locale, "ru"):
 		return "База знаний"
+	case strings.HasPrefix(locale, "fr"):
+		return "Base de connaissances"
 	default:
 		return "Knowledge Base"
 	}

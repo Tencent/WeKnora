@@ -2419,6 +2419,7 @@ export default {
     close: 'Закрыть настройки'
   },
   language: {
+    frFR: 'Français',
     zhCN: '简体中文',
     enUS: 'English',
     ruRU: 'Русский',

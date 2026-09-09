@@ -34,6 +34,9 @@ agent_type_presets:
   # --------------------------------------------------------------------------
   - id: "rag-qa"
     i18n:
+      fr-FR:
+        label: "Questions-réponses RAG"
+        description: "Recherche fondée sur les fragments de documents. Adaptée aux bases de documents ou de FAQ sans Wiki."
       default:
         label: "RAG Q&A"
         description: "Evidence-based retrieval over document chunks. Best for document or FAQ KBs without Wiki."
@@ -70,6 +73,9 @@ agent_type_presets:
   # --------------------------------------------------------------------------
   - id: "wiki-qa"
     i18n:
+      fr-FR:
+        label: "Questions-réponses Wiki"
+        description: "Réponses fondées sur le Wiki : recherche, lecture et navigation entre les pages. Nécessite une base de connaissances avec le Wiki activé."
       default:
         label: "Wiki Q&A"
         description: "Wiki-first answering: search, read and follow links across wiki pages. Requires a Wiki-enabled KB."
@@ -104,6 +110,9 @@ agent_type_presets:
   # --------------------------------------------------------------------------
   - id: "hybrid-rag-wiki"
     i18n:
+      fr-FR:
+        label: "Hybride (Wiki + RAG)"
+        description: "Utilise les pages Wiki pour la navigation et le contexte, puis les fragments de documents pour des citations précises. Nécessite des bases avec le Wiki et l’indexation des fragments activés."
       default:
         label: "Hybrid (Wiki + RAG)"
         description: "Uses wiki pages for navigation and context, then drills into chunks for precise quotes. Requires KBs with BOTH Wiki and chunk indexing."
@@ -154,6 +163,9 @@ agent_type_presets:
   # --------------------------------------------------------------------------
   - id: "data-analysis"
     i18n:
+      fr-FR:
+        label: "Analyse de données"
+        description: "Requêtes SQL et statistiques sur des fichiers tabulaires (CSV / Excel). À associer à une base contenant des fichiers de données."
       default:
         label: "Data Analysis"
         description: "SQL queries and statistics over tabular files (CSV / Excel). Pair with a KB that holds data files."
@@ -198,6 +210,9 @@ agent_type_presets:
   # --------------------------------------------------------------------------
   - id: "custom"
     i18n:
+      fr-FR:
+        label: "Personnalisé"
+        description: "Contrôle complet : choisissez manuellement les outils, les instructions et les bases de connaissances accessibles."
       default:
         label: "Custom"
         description: "Full control. Manually pick tools, prompt and KB scope."

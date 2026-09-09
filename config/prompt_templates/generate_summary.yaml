@@ -4,6 +4,10 @@ templates:
     name: "Standard Summary"
     description: "Generate a concise document summary"
     default: true
+    i18n:
+      fr-FR:
+        name: "Résumé standard"
+        description: "Génère un résumé concis du document"
     content: |
       You are a precise document summarization expert. Your task is to summarize the core content of the document provided by the user, basing the summary STRICTLY on the text the user supplies — never on a filename, title, file extension, or any other external clue.
 

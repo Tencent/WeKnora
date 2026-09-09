@@ -1,5 +1,6 @@
 import { get, post, put, del } from '@/utils/request'
 import { resolveEmbedBaseUrl } from '@/utils/embedBaseUrl'
+import type { SupportedLocale } from '@/i18n/resolveDefaultLocale'
 
 export interface EmbedChannel {
   id: string
@@ -47,7 +48,7 @@ export interface EmbedChannelPublicConfig {
   default_locale?: string
 }
 
-export type EmbedLocaleTag = 'zh-CN' | 'en-US' | 'ko-KR' | 'ja-JP' | 'ru-RU' | ''
+export type EmbedLocaleTag = SupportedLocale | ''
 
 export interface EmbedChannelStats {
   session_count: number
