@@ -63,6 +63,7 @@ func (r *Registry) mcpSourceCandidates(output string) string {
 		return ""
 	}
 	return "\n\n<external_source_candidates>\n" +
-		"System-indexed links from this MCP result. Cite the matching wN only when the result supports the claim; a link alone does not mean the linked page was read. Do not use KB cN handles for this external content.\n" +
+		"System-indexed links from this MCP result. Cite the matching wN only when the result supports the claim; " +
+		"a link alone does not mean the linked page was read. Do not use KB cN handles for this external content.\n" +
 		rows.String() + "</external_source_candidates>"
 }

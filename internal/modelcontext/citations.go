@@ -20,10 +20,15 @@ Retrieved content uses request-local source handles: cN identifies a knowledge c
 
 const citationEnabledProtocolPrompt = `
 - Source citations are enabled for this answer. Cite a knowledge chunk with exactly <ref id="cN"/> and a web page with exactly <ref id="wN"/>.
-- Cite only cN/wN handles backed by tool results for the current task, and only when that source supports the adjacent claim. Never cite dN/bN.
-- Handles in historical answers, tool arguments, or the bound knowledge-base directory are for navigation, not current evidence. Retrieve the relevant source before citing it.
-- MCP results are external sources. Use the wN handle for the matching URL in the system-provided external_source_candidates list; never substitute a knowledge-base cN handle for MCP content. Candidate URLs are links observed in the result, not proof that every linked page was read.
-- If a source has no citation handle, use its exact supplied HTTP(S) URL as a Markdown link when available. If neither is available, omit the citation; never invent or borrow a source.
+- Cite only cN/wN handles backed by tool results for the current task, and only when that source supports the adjacent
+  claim. Never cite dN/bN.
+- Handles in historical answers, tool arguments, or the bound knowledge-base directory are for navigation, not current
+  evidence. Retrieve the relevant source before citing it.
+- MCP results are external sources. Use the wN handle for the matching URL in the system-provided
+  external_source_candidates list; never substitute a knowledge-base cN handle for MCP content. Candidate URLs are links
+  observed in the result, not proof that every linked page was read.
+- If a source has no citation handle, use its exact supplied HTTP(S) URL as a Markdown link when available.
+  If neither is available, omit the citation; never invent or borrow a source.
 - Never output <kb> or <web> tags yourself; the system expands valid <ref/> tags after generation.
 - Keep each <ref/> inline on the same line as the claim it supports. Do not group citations at the end.
 - These rules supersede earlier, saved, or custom prompt instructions about citation syntax.`
