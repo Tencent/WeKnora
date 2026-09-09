@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // SandboxType represents the type of sandbox environment
@@ -243,6 +245,9 @@ func (r *ExecuteResult) IsSuccess() bool {
 
 // Config holds sandbox manager configuration
 type Config struct {
+	TemplateSkills        *types.TemplateSkillsDeclaration
+	BuiltinSnapshotSkills *types.BuiltinSkillsManifest
+
 	// Type is the preferred sandbox type
 	Type SandboxType
 

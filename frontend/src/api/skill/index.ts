@@ -3,6 +3,8 @@ import type { ConfigSkillFileContent, ConfigSkillFileEntry } from "../system";
 
 // Skill信息
 export interface SkillInfo {
+  source?: "builtin";
+  version?: string;
   name: string;
   description: string;
 }
@@ -20,6 +22,7 @@ export interface SkillCatalogInstall {
 }
 
 export interface SkillCatalogItem {
+  builtin?: boolean;
   id: string;
   name: string;
   version?: string;
@@ -37,11 +40,18 @@ export interface SkillCatalogRegisterResult {
   description?: string;
 }
 
+export interface BuiltinSkillsSummary {
+  known: boolean;
+  version?: string;
+  skills: SkillInfo[];
+  unavailable: number;
+}
+
 // 获取当前沙箱配置上可执行的 Skills；未传 sandboxConfigId 或
 // skills_available 为 false 时，前端应隐藏/禁用 Skills 配置
-export function listSkills(sandboxConfigId?: string) {
-  return get<{ data: SkillInfo[]; skills_available?: boolean }>('/api/v1/skills', {
-    params: sandboxConfigId ? { sandbox_config_id: sandboxConfigId } : {},
+export function listSkills(sandboxConfigId?: string, sessionId?: string) {
+  return get<{ data: SkillInfo[]; skills_available?: boolean; builtin_skills?: BuiltinSkillsSummary }>('/api/v1/skills', {
+    params: { sandbox_config_id: sandboxConfigId || undefined, session_id: sessionId || undefined },
   });
 }
 
@@ -85,4 +95,50 @@ export function getCatalogSkillFile(catalogId: string, path: string) {
   return get<{ data: ConfigSkillFileContent }>(`/api/v1/skills/catalog/${catalogId}/files/content`, {
     params: { path },
   });
+}
+
+export interface DiscoverySkill {
+  runtime: 'sandbox' | 'publisher' | 'local_browser'
+  id: string
+  name: string
+  title: Record<string, string>
+  description: Record<string, string>
+  category: 'office' | 'analysis' | 'browser'
+  distribution: 'builtin' | 'external_link'
+  publisher: string
+  license: string
+  source_url: string
+  license_url: string
+  docs_url?: string
+  version?: string
+  digest?: string
+}
+
+export interface SkillMigrationItem {
+  skill_id: string
+  name: string
+  version: string
+  sha256: string
+  blocker?: string
+}
+
+export function listSkillDiscovery() {
+  return get<{ data: DiscoverySkill[] }>('/api/v1/skills/discovery')
+}
+
+export function registerBuiltinSkill(id: string) {
+  return post<{ data: SkillCatalogRegisterResult }>(`/api/v1/skills/discovery/${encodeURIComponent(id)}/register`, {})
+}
+
+export function previewSkillMigration(source: string, target: string) {
+  return post<{ data: SkillMigrationItem[] }>('/api/v1/skills/migration', {
+    source_config_id: source, target_config_id: target, preview: true,
+  }, { timeout: 120000 })
+}
+
+export function migrateSkills(source: string, target: string, skills: SkillMigrationItem[]) {
+  return post<{ data: { installs: Record<string, string>; errors: Record<string, string> } }>('/api/v1/skills/migration', {
+    source_config_id: source, target_config_id: target, preview: false,
+    skills: skills.filter(item => !item.blocker).map(({ skill_id, sha256 }) => ({ skill_id, sha256 })),
+  }, { timeout: 120000 })
 }

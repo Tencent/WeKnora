@@ -1,0 +1,37 @@
+# Build the existing lightweight runtime first (see build_sandbox_office.sh).
+# The default target remains plain Docker/E2B; Cube explicitly selects cube.
+ARG SANDBOX_BASE=weknora-sandbox:base
+FROM ${SANDBOX_BASE} AS office-browser
+USER root
+ENV UV_PYTHON_INSTALL_DIR=/opt/weknora/python \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/weknora/browsers \
+    MPLBACKEND=Agg
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libreoffice-writer libreoffice-calc libreoffice-impress poppler-utils \
+    fonts-noto-cjk fonts-liberation fontconfig \
+    && rm -rf /var/lib/apt/lists/*
+# An independent Python version avoids changing existing lightweight images.
+RUN uv python install 3.12.11
+ENV PYTHONDONTWRITEBYTECODE=1
+# Older ARM VM hosts can report unsupported OpenSSL CPU extensions. Keep the
+# portable code path so the same verified PDF runtime works on those hosts.
+# This variable has no effect on non-ARM OpenSSL builds.
+ENV OPENSSL_armcap=0
+COPY internal/builtin/skills/packages /opt/weknora/builtin/skills
+COPY docker/install-builtin-skills.py /opt/weknora/install-builtin-skills.py
+RUN --mount=type=cache,target=/root/.cache/uv python3 /opt/weknora/install-builtin-skills.py
+ARG BUILTIN_SKILLS_MANIFEST
+LABEL org.weknora.skills.manifest=$BUILTIN_SKILLS_MANIFEST
+LABEL com.weknora.sandbox.template="true"
+LABEL org.weknora.sandbox.profile="office-browser" \
+      org.weknora.skills.version="2026.09.2"
+WORKDIR /workspace
+
+FROM ghcr.io/tencentcloud/cubesandbox-base:2026.16 AS cube-base
+FROM office-browser AS cube
+COPY --from=cube-base /usr/bin/envd /usr/bin/envd
+COPY --from=cube-base /usr/local/bin/cube-entrypoint.sh /usr/local/bin/cube-entrypoint.sh
+EXPOSE 49983
+ENTRYPOINT ["/usr/local/bin/cube-entrypoint.sh"]
+
+FROM office-browser AS sandbox

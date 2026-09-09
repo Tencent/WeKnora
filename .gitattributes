@@ -15,3 +15,6 @@ cli/acceptance/testdata/**/*.json text eol=lf
 # picking either side (task state lives in task.json, not index.md). See
 # .trellis/spec/cli/backend/directory-structure.md for details.
 .trellis/workspace/*/journal-*.md merge=union
+
+# Preserve the original license bytes included in the digest-pinned browser bundle.
+internal/builtin/skills/packages/browser/LICENSE whitespace=-blank-at-eol

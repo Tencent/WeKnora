@@ -75,6 +75,8 @@ const sessionLifecycleCleanupTimeout = 30 * time.Second
 // (ExecuteConfig, session-scoped shell/file APIs) and the provider-neutral
 // RemoteSandboxClient contract.
 type SessionBoundManager struct {
+	metadataClient RemoteSandboxClient
+
 	config    *Config
 	validator *ScriptValidator
 
@@ -187,15 +189,18 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 	}
 
 	m := &SessionBoundManager{
-		config:     cfg,
-		validator:  NewScriptValidator(),
-		client:     client,
-		bindings:   deps.Store,
-		checker:    deps.Checker,
-		lifecycle:  lifecycle,
-		ephemeral:  NewRemoteSandbox(client, createRequest),
-		activeType: provider,
+		metadataClient: deps.Client,
+		config:         cfg,
+		validator:      NewScriptValidator(),
+		client:         client,
+		bindings:       deps.Store,
+		checker:        deps.Checker,
+		lifecycle:      lifecycle,
+		ephemeral:      NewRemoteSandbox(client, createRequest),
+		activeType:     provider,
 	}
+
+	lifecycle.prepareCreate = m.prepareBuiltinCreate
 
 	// Per-tenant managers are rebuilt on every request, so probing here would
 	// add a remote round-trip to each one. When a tenant explicitly configures
@@ -798,6 +803,38 @@ func (m *SessionBoundManager) SessionShellExecutor() SessionShellExecutor {
 		return nil
 	}
 	return m
+}
+
+// ExecLiveSessionCommand executes only in an existing running session sandbox.
+func (m *SessionBoundManager) ExecLiveSessionCommand(
+	ctx context.Context, sessionID, command string, timeout time.Duration,
+) (*ExecuteResult, error) {
+	if err := m.requireRemoteBackend(); err != nil {
+		return nil, err
+	}
+	state, bound, err := m.peekBoundSandboxState(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !bound {
+		return nil, ErrNoLiveSessionSandbox
+	}
+	if state != RemoteStateRunning {
+		return nil, ErrSandboxPaused
+	}
+	handle, found, err := m.lookupSessionHandle(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrNoLiveSessionSandbox
+	}
+	start := time.Now()
+	result, execErr := m.client.Exec(ctx, handle, RemoteExecRequest{
+		Command: command, Shell: true, WorkDir: SessionWorkspaceRoot,
+		User: DefaultSandboxExecUser, Timeout: timeout,
+	})
+	return remoteExecuteResult(result, execErr, time.Since(start)), nil
 }
 
 // SessionInstallShellExecutor advertises the privileged install-mode shell.

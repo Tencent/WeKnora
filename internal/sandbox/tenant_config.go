@@ -51,6 +51,8 @@ func ResolveEffectiveConfig(
 	// scoped: from here on the stored config is the only source for endpoints,
 	// credentials, domains and templates.
 	clearProviderFields(&effective)
+	effective.TemplateSkills = tenantCfg.TemplateSkills
+	effective.BuiltinSnapshotSkills = nil
 
 	if tenantCfg.SandboxType != "" {
 		resolved, err := ParseSandboxType(tenantCfg.SandboxType)
@@ -144,12 +146,14 @@ func ResolveEffectiveConfig(
 			tenantCfg.SkillImage, "cube", effective.CubeAPIKey, effective.CubeAPIURL,
 		); snapshot != "" {
 			effective.CubeTemplate = snapshot
+			effective.BuiltinSnapshotSkills = tenantCfg.SkillImage.BuiltinSkills
 		}
 	case SandboxTypeE2B:
 		if snapshot := skillImageTemplateOverride(
 			tenantCfg.SkillImage, "e2b", effective.E2BAPIKey, effective.E2BAPIURL,
 		); snapshot != "" {
 			effective.E2BTemplate = snapshot
+			effective.BuiltinSnapshotSkills = tenantCfg.SkillImage.BuiltinSkills
 		}
 	case SandboxTypeDocker:
 		// Deliberately computed from the STORED docker block, not from

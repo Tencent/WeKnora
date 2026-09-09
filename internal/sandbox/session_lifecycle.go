@@ -37,6 +37,8 @@ type SessionExistenceChecker interface {
 // remoteSessionLifecycle coordinates one provider's persistent sandboxes using
 // an authoritative binding store. It contains no provider-native types.
 type remoteSessionLifecycle struct {
+	prepareCreate func(context.Context, RemoteCreateRequest) RemoteCreateRequest
+
 	client          RemoteSandboxClient
 	bindings        SessionSandboxBindingStore
 	sessionChecker  SessionExistenceChecker
@@ -450,6 +452,9 @@ func (l *remoteSessionLifecycle) createAndBind(
 	}
 	request.EnvVars = cloneMetadata(l.createRequest.EnvVars)
 
+	if l.prepareCreate != nil {
+		request = l.prepareCreate(ctx, request)
+	}
 	handle, err := l.client.Create(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("create remote sandbox: %w", err)

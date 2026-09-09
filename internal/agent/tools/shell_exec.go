@@ -810,6 +810,10 @@ func hasInlineEvalFlag(command string) bool {
 
 func skillNameFromShellCommand(command string) string {
 	idx := strings.Index(command, sandbox.SkillsImageRoot+"/")
+	builtinIndex := strings.Index(command, sandbox.BuiltinSkillsImageRoot+"/")
+	if builtinIndex >= 0 && (idx < 0 || builtinIndex < idx) {
+		idx = builtinIndex
+	}
 	if idx < 0 {
 		return ""
 	}

@@ -361,7 +361,7 @@ const agentSelectedSkills = computed<string[]>(() => {
 });
 
 const isSkillAllowedByAgent = (skillName: string) => {
-  if (!settingsStore.isAgentStreamMode || !editorResources.skillsAvailable) return false;
+  if (!settingsStore.isAgentStreamMode) return false;
   const mode = agentSkillsSelectionMode.value;
   if (mode === 'none') return false;
   if (mode === 'selected') return agentSelectedSkills.value.includes(skillName);
@@ -1215,7 +1215,11 @@ const updateModelDropdownPosition = () => {
 
 // Mention Logic
 let lastMentionQuery = '';
+let mentionRequestRevision = 0;
+const mentionSkillContext = () => JSON.stringify([selectedAgentId.value, settingsStore.selectedAgentSourceTenantId, currentAgentConfig.value?.sandbox_config_id, props.sessionId]);
 const loadMentionItems = async (q: string, resetIndex = true, append = false) => {
+  const revision = ++mentionRequestRevision;
+  const skillContext = mentionSkillContext();
   console.log('[Mention] loadMentionItems called with query:', q, 'append:', append);
 
   if (!append) {
@@ -1369,8 +1373,11 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
 
     const skillsMode = agentSkillsSelectionMode.value;
     if (skillsMode !== 'none') {
-      await editorResources.ensureSkills(currentAgentConfig.value?.sandbox_config_id);
-      skillItems = editorResources.skills
+      const configId = currentAgentConfig.value?.sandbox_config_id;
+      const agentId = selectedAgentId.value;
+      const available = await editorResources.ensureSkills(configId, false, props.sessionId || undefined);
+      skillItems = (agentId === selectedAgentId.value && configId === currentAgentConfig.value?.sandbox_config_id
+        && available?.skills_available !== false ? available?.data || [] : [])
         .filter(skill => isSkillAllowedByAgent(skill.name))
         .map(skill => ({
           id: skill.name,
@@ -1475,6 +1482,8 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   } else {
     mentionHasMore.value = false;
   }
+
+  if (revision !== mentionRequestRevision || skillContext !== mentionSkillContext()) return;
 
   if (append) {
     // Append file items to existing list
