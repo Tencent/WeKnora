@@ -551,6 +551,17 @@ func TestExecuteLoop_EmptyContentWithStop_ShouldNotCompleteWithEmpty(t *testing.
 	}
 
 	engine := newTestEngine(t, mock)
+	var answerContent string
+	var doneCount int
+	engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		if data, ok := evt.Data.(event.AgentFinalAnswerData); ok {
+			answerContent += data.Content
+			if data.Done {
+				doneCount++
+			}
+		}
+		return nil
+	})
 	state := &types.AgentState{}
 	ctx := context.Background()
 
@@ -561,6 +572,8 @@ func TestExecuteLoop_EmptyContentWithStop_ShouldNotCompleteWithEmpty(t *testing.
 	assert.NotEmpty(t, state.FinalAnswer,
 		"BUG: FinalAnswer is empty when LLM returns empty content with stop. "+
 			"analyzeResponse() should not allow empty content to be accepted as final answer.")
+	assert.Equal(t, state.FinalAnswer, answerContent)
+	assert.Equal(t, 1, doneCount, "empty retry attempts must not emit terminal answer events")
 }
 
 // ---------------------------------------------------------------------------
@@ -604,6 +617,17 @@ func TestExecuteLoop_EmptyThenNonEmpty_ShouldRetryAndComplete(t *testing.T) {
 	}
 
 	engine := newTestEngine(t, mock)
+	var answerContent string
+	var doneCount int
+	engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		if data, ok := evt.Data.(event.AgentFinalAnswerData); ok {
+			answerContent += data.Content
+			if data.Done {
+				doneCount++
+			}
+		}
+		return nil
+	})
 	state := &types.AgentState{}
 	ctx := context.Background()
 
@@ -612,6 +636,8 @@ func TestExecuteLoop_EmptyThenNonEmpty_ShouldRetryAndComplete(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, state.IsComplete)
 	assert.Equal(t, "Here is the answer.", state.FinalAnswer)
+	assert.Equal(t, state.FinalAnswer, answerContent)
+	assert.Equal(t, 1, doneCount, "the empty first attempt must not terminate downstream consumers")
 }
 
 // ---------------------------------------------------------------------------
