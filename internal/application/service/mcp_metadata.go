@@ -66,6 +66,49 @@ func (s *mcpServiceService) GetMCPMetadata(ctx context.Context, tenant uint64, i
 	return snapshot, err
 }
 
+func (s *mcpServiceService) ListMCPMetadataSummaries(
+	ctx context.Context,
+	tenant uint64,
+	services []*types.MCPService,
+) (map[string]*types.MCPMetadataSummary, error) {
+	out := make(map[string]*types.MCPMetadataSummary, len(services))
+	if len(services) == 0 {
+		return out, nil
+	}
+	repo, err := s.metadataRepo()
+	if err != nil {
+		return out, nil
+	}
+	principals := []string{""}
+	if p := types.MCPOAuthPrincipalFromContext(ctx).StorageID(); p != "" {
+		principals = append(principals, p)
+	}
+	rows, err := repo.ListMetadataSummaries(ctx, tenant, principals)
+	if err != nil {
+		return nil, err
+	}
+	byKey := make(map[string]*types.MCPMetadataSummary, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		byKey[row.ServiceID+"\x00"+row.Principal] = row
+	}
+	for _, service := range services {
+		if service == nil {
+			continue
+		}
+		principal, err := metadataPrincipal(ctx, service)
+		if err != nil {
+			continue
+		}
+		if row := byKey[service.ID+"\x00"+principal]; row != nil {
+			out[service.ID] = row
+		}
+	}
+	return out, nil
+}
+
 func (s *mcpServiceService) commitMCPMetadata(
 	ctx context.Context,
 	tenant uint64,

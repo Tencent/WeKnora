@@ -2310,6 +2310,9 @@ export default {
     readOnlyFromAgent: 'Read-only in this conversation; not shown in Knowledge Base list',
     faqCount: '{count} Q&A entries',
     kbCount: '{count} documents',
+    mcpToolCount: '{count} tools',
+    mcpNotSynced: 'Tools not synced yet',
+    mcpStale: 'Needs resync',
     belongsToKb: 'Knowledge base: ',
     belongsToOrg: 'Space: ',
     noCompatibleKbForAgent: 'This agent\'s tools don\'t match any knowledge base\'s capabilities in scope, so nothing can be referenced.'
@@ -4728,7 +4731,10 @@ export default {
     },
     deleteConfirmBody: 'Delete MCP service "{name}"? This action cannot be undone.',
     unnamed: 'Unnamed',
-    builtin: 'Built-in'
+    builtin: 'Built-in',
+    toolCount: '{count} tools',
+    toolsNotSynced: 'Tools not synced',
+    toolsStale: 'Needs resync'
   },
   modelSettings: {
     title: 'Model Settings',
@@ -4917,8 +4923,13 @@ export default {
   mcpMetadata: {
     "searchTools": "Search tool names or descriptions",
     "retry": "Retry",
-    "hideParameters": "Hide parameters",
+    "details": "Details",
+    "description": "Description",
     "parameters": "Parameters",
+    "required": "Required",
+    "fullSchema": "Full definition",
+    "noDescription": "No description",
+    "noParameters": "No parameter definition",
     "enabled": "Enabled",
     "approval": "Require approval",
     "noTools": "No matching tools",

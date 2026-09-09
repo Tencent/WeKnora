@@ -140,6 +140,11 @@
             </div>
             <div class="item-main">
               <span class="name">{{ item.name }}</span>
+              <span
+                v-if="item.type === 'mcp' && item.catalogSynced"
+                class="count"
+                :class="{ 'is-stale': item.catalogStale }"
+              >{{ item.toolCount ?? 0 }}</span>
             </div>
           </div>
           <template #content>
@@ -148,7 +153,19 @@
                 <span class="detail-name">{{ item.name }}</span>
               </div>
               <p v-if="item.description" class="detail-desc">{{ item.description }}</p>
-              <div class="detail-meta">
+              <div v-if="item.type === 'mcp'" class="detail-meta">
+                <span class="detail-kb">
+                  <t-icon name="tools" class="detail-icon" />
+                  <span v-if="item.catalogSynced" class="detail-value">
+                    {{ $t('mentionDetail.mcpToolCount', { count: item.toolCount ?? 0 }) }}
+                  </span>
+                  <span v-else class="detail-value">{{ $t('mentionDetail.mcpNotSynced') }}</span>
+                </span>
+                <span v-if="item.catalogSynced && item.catalogStale" class="detail-stale">
+                  {{ $t('mentionDetail.mcpStale') }}
+                </span>
+              </div>
+              <div v-else-if="item.kbName || item.serviceName" class="detail-meta">
                 <span v-if="item.kbName" class="detail-kb">
                   <t-icon name="folder" class="detail-icon" />
                   <span class="detail-label">{{ $t('mentionDetail.belongsToKb') }}</span>
@@ -751,7 +768,10 @@ const scrollToItem = (index: number) => {
 /* 知识库 / 文件 - 无背景，与整体一致 */
 .kb-icon,
 .faq-icon,
-.file-icon {
+.file-icon,
+.mcp-icon,
+.skill-icon,
+.tag-icon {
   background: transparent;
   color: var(--td-text-color-secondary, #666);
 }
@@ -791,6 +811,10 @@ const scrollToItem = (index: number) => {
   font-size: var(--td-font-size-mark-small, 12px);
   font-variant-numeric: tabular-nums;
   color: var(--td-text-color-placeholder, #999);
+}
+
+.count.is-stale {
+  color: var(--td-warning-color, #e37318);
 }
 
 .org-name {
@@ -967,5 +991,8 @@ const scrollToItem = (index: number) => {
 .mention-detail-content .detail-value.clickable:hover {
   color: var(--td-brand-color, #07c05f);
   text-decoration-color: var(--td-brand-color, #07c05f);
+}
+.mention-detail-content .detail-stale {
+  color: var(--td-warning-color, #e37318);
 }
 </style>

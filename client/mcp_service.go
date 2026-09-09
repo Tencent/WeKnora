@@ -34,6 +34,14 @@ type MCPService struct {
 	IsBuiltin         bool               `json:"is_builtin"`
 	CreatedAt         string             `json:"created_at"`
 	UpdatedAt         string             `json:"updated_at"`
+	Catalog           *MCPCatalogSummary `json:"catalog,omitempty"`
+}
+
+// MCPCatalogSummary is the list-card view of a saved MCP directory.
+type MCPCatalogSummary struct {
+	ToolCount int    `json:"tool_count"`
+	Stale     bool   `json:"stale"`
+	SyncedAt  string `json:"synced_at"`
 }
 
 // MCPAuthConfig represents authentication configuration for MCP service.

@@ -61,3 +61,41 @@ func TestMCPMetadataPersistsCompleteScopedSnapshotsAndRejectsOlderWrites(t *test
 	require.NoError(t, err)
 	require.Empty(t, got.Tools, "successful empty directories retire removed tools")
 }
+
+func TestListMetadataSummariesCountsToolsWithoutReturningPayloads(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.MCPMetadata{}))
+	repo := &mcpServiceRepository{db: db}
+	ctx := context.Background()
+	require.NoError(t, repo.SaveMetadata(ctx, &types.MCPMetadata{
+		TenantID:          1,
+		ServiceID:         "svc",
+		Principal:         "",
+		ConfigFingerprint: "fp",
+		SyncedAt:          time.Now().UTC(),
+		Tools: []*types.MCPTool{
+			{Name: "a", Description: "secret-sized description"},
+			{Name: "b"},
+		},
+	}))
+	require.NoError(t, repo.SaveMetadata(ctx, &types.MCPMetadata{
+		TenantID:  1,
+		ServiceID: "oauth",
+		Principal: "user:a",
+		SyncedAt:  time.Now().UTC(),
+		Tools:     []*types.MCPTool{{Name: "only-a"}},
+	}))
+	rows, err := repo.ListMetadataSummaries(ctx, 1, []string{"", "user:a"})
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	byID := map[string]*types.MCPMetadataSummary{}
+	for _, row := range rows {
+		byID[row.ServiceID] = row
+	}
+	require.Equal(t, 2, byID["svc"].ToolCount)
+	require.Equal(t, 1, byID["oauth"].ToolCount)
+	other, err := repo.ListMetadataSummaries(ctx, 1, []string{"user:b"})
+	require.NoError(t, err)
+	require.Empty(t, other)
+}

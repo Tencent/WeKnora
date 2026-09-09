@@ -41,6 +41,9 @@ type MCPServiceService interface {
 	// ListMCPServices lists all MCP services for a tenant
 	ListMCPServices(ctx context.Context, tenantID uint64) ([]*types.MCPService, error)
 
+	// ListMCPMetadataSummaries returns persisted directory counts for the list UI.
+	ListMCPMetadataSummaries(context.Context, uint64, []*types.MCPService) (map[string]*types.MCPMetadataSummary, error)
+
 	// ListMCPServicesByIDs retrieves multiple MCP services by IDs
 	ListMCPServicesByIDs(ctx context.Context, tenantID uint64, ids []string) ([]*types.MCPService, error)
 

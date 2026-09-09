@@ -44,6 +44,16 @@ type MCPServiceResponse struct {
 	// stored. Omitted entirely for builtin services (they can't have
 	// per-tenant credentials).
 	Credentials map[string]CredentialFieldMetadata `json:"credentials,omitempty"`
+	// Catalog is the persisted tool-directory summary for list cards.
+	// Omitted when this principal has never synchronized the service.
+	Catalog *MCPCatalogSummary `json:"catalog,omitempty"`
+}
+
+// MCPCatalogSummary is the list-card view of a saved MCP directory.
+type MCPCatalogSummary struct {
+	ToolCount int       `json:"tool_count"`
+	Stale     bool      `json:"stale"`
+	SyncedAt  time.Time `json:"synced_at"`
 }
 
 // MCPAuthConfigResponse intentionally has no APIKey or Token fields. Their
@@ -136,6 +146,31 @@ func NewMCPServiceResponses(ctx context.Context, svcs []*types.MCPService) []*MC
 		out = append(out, NewMCPServiceResponse(ctx, s))
 	}
 	return out
+}
+
+// AttachMCPCatalogs copies persisted directory counts onto list/detail responses.
+func AttachMCPCatalogs(
+	resp []*MCPServiceResponse,
+	services []*types.MCPService,
+	summaries map[string]*types.MCPMetadataSummary,
+) {
+	if len(resp) != len(services) || summaries == nil {
+		return
+	}
+	for i, service := range services {
+		if resp[i] == nil || service == nil {
+			continue
+		}
+		summary := summaries[service.ID]
+		if summary == nil {
+			continue
+		}
+		resp[i].Catalog = &MCPCatalogSummary{
+			ToolCount: summary.ToolCount,
+			Stale:     summary.ConfigFingerprint != types.MCPConfigFingerprint(service),
+			SyncedAt:  summary.SyncedAt,
+		}
+	}
 }
 
 // CredentialsResponse is the shared shape returned by PUT

@@ -2310,6 +2310,9 @@ export default {
     readOnlyFromAgent: 'この会話内でのみ読み取り専用。ナレッジベース一覧には表示されません',
     faqCount: 'Q&A{count}件',
     kbCount: 'ドキュメント{count}件',
+    mcpToolCount: 'ツール{count}件',
+    mcpNotSynced: 'ツール未同期',
+    mcpStale: '再同期が必要',
     belongsToKb: 'ナレッジベース: ',
     belongsToOrg: '共有スペース: ',
     noCompatibleKbForAgent: 'このエージェントのツールはスコープ内のナレッジベースの機能と一致しないため、参照できるナレッジベースがありません。'
@@ -4728,7 +4731,10 @@ export default {
     },
     deleteConfirmBody: 'MCPサービス「{name}」を削除しますか？この操作は取り消せません。',
     unnamed: '名称未設定',
-    builtin: '組み込み'
+    builtin: '組み込み',
+    toolCount: '{count} 個のツール',
+    toolsNotSynced: 'ツール未同期',
+    toolsStale: '再同期が必要'
   },
   modelSettings: {
     title: 'モデル設定',
@@ -4917,8 +4923,13 @@ export default {
   mcpMetadata: {
     "searchTools": "ツール名や説明を検索",
     "retry": "再試行",
-    "hideParameters": "パラメーターを閉じる",
+    "details": "詳細",
+    "description": "説明",
     "parameters": "パラメーター",
+    "required": "必須",
+    "fullSchema": "完全な定義",
+    "noDescription": "説明はありません",
+    "noParameters": "パラメータ定義はありません",
     "enabled": "有効",
     "approval": "承認が必要",
     "noTools": "該当するツールはありません",

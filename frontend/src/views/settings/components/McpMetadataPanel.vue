@@ -17,6 +17,49 @@
         </t-button>
       </div>
       <p class="form-desc">{{ t('mcpMetadata.cacheHint') }}</p>
+      <p v-if="snapshot" class="snapshot-meta">
+        <span>{{ t('mcpMetadata.toolCount', { count: snapshot.tools.length }) }}</span>
+        <span v-if="snapshot.server_name">{{ snapshot.server_name }} {{ snapshot.server_version }}</span>
+        <span>{{ t('mcpMetadata.syncedAt') }} {{ formatTime(snapshot.synced_at) }}</span>
+        <t-tooltip
+          v-if="!hasServerDocumentation"
+          :content="t('mcpMetadata.noServerDocumentation')"
+          placement="top"
+          show-arrow
+          :overlay-inner-style="{ maxWidth: '360px', whiteSpace: 'normal' }"
+        >
+          <button type="button" class="snapshot-meta__help" :aria-label="t('mcpMetadata.noServerDocumentation')">
+            <t-icon name="help-circle" size="16px" />
+          </button>
+        </t-tooltip>
+        <t-popup
+          v-else
+          v-model:visible="docsOpen"
+          trigger="click"
+          placement="bottom-left"
+          attach="body"
+          destroy-on-close
+          overlay-class-name="mcp-server-docs-popup-overlay"
+          :overlay-inner-style="{ padding: 0 }"
+        >
+          <button
+            type="button"
+            class="snapshot-meta__docs"
+            :aria-expanded="docsOpen"
+            :aria-label="t('mcpMetadata.serverDocumentation')"
+          >
+            <span>{{ t('mcpMetadata.serverDocumentation') }}</span>
+            <t-icon name="chevron-down" size="14px" />
+          </button>
+          <template #content>
+            <div class="server-docs-popup" @click.stop>
+              <div class="server-docs-popup__title">{{ t('mcpMetadata.serverDocumentation') }}</div>
+              <p v-if="snapshot.server_description">{{ snapshot.server_description }}</p>
+              <pre v-if="snapshot.instructions">{{ snapshot.instructions }}</pre>
+            </div>
+          </template>
+        </t-popup>
+      </p>
     </div>
     <t-loading :loading="busy" size="small" :text="busy ? t('mcpMetadata.fetching') : ''">
       <div class="metadata-body">
@@ -24,27 +67,6 @@
         <p v-else-if="snapshot?.stale" class="form-desc form-desc--warn">{{ t('mcpMetadata.stale') }}</p>
         <p v-else-if="!busy && !snapshot" class="form-desc">{{ t('mcpMetadata.notSynced') }}</p>
         <template v-if="snapshot">
-          <p class="snapshot-meta">
-            <span>{{ t('mcpMetadata.toolCount', { count: snapshot.tools.length }) }}</span>
-            <span v-if="snapshot.server_name">{{ snapshot.server_name }} {{ snapshot.server_version }}</span>
-            <span>{{ t('mcpMetadata.syncedAt') }} {{ formatTime(snapshot.synced_at) }}</span>
-            <t-tooltip
-              v-if="!snapshot.instructions && !snapshot.server_description"
-              :content="t('mcpMetadata.noServerDocumentation')"
-              placement="top"
-              show-arrow
-              :overlay-inner-style="{ maxWidth: '360px', whiteSpace: 'normal' }"
-            >
-              <button type="button" class="snapshot-meta__help" :aria-label="t('mcpMetadata.noServerDocumentation')">
-                <t-icon name="help-circle" size="16px" />
-              </button>
-            </t-tooltip>
-          </p>
-          <details v-if="snapshot.instructions || snapshot.server_description" class="server-documentation">
-            <summary>{{ t('mcpMetadata.serverDocumentation') }}</summary>
-            <p v-if="snapshot.server_description">{{ snapshot.server_description }}</p>
-            <pre v-if="snapshot.instructions">{{ snapshot.instructions }}</pre>
-          </details>
           <p class="form-desc">{{ t('mcpMetadata.policyHint') }}</p>
           <McpToolsList :tools="snapshot.tools" :service-id="snapshot.stale ? undefined : serviceId" @busy="onPolicyBusy" />
         </template>
@@ -66,9 +88,11 @@ const snapshot = ref<MCPMetadata | null>(null)
 const loading = ref(false)
 const refreshing = ref(false)
 const policyBusy = ref(false)
+const docsOpen = ref(false)
 const error = ref('')
 let generation = 0
 const busy = computed(() => loading.value || (refreshing.value && !snapshot.value))
+const hasServerDocumentation = computed(() => !!(snapshot.value?.instructions || snapshot.value?.server_description))
 
 function onPolicyBusy(busyPolicy: boolean) {
   policyBusy.value = busyPolicy
@@ -77,6 +101,7 @@ function onPolicyBusy(busyPolicy: boolean) {
 
 function setSnapshot(saved: MCPMetadata | null) {
   snapshot.value = saved
+  docsOpen.value = false
   emit('synced', !!(saved && !saved.stale))
 }
 
@@ -151,7 +176,7 @@ onBeforeUnmount(() => { generation++; emit('busy', false); emit('synced', false)
 }
 
 .form-desc {
-  margin: 5px 0 0;
+  margin: 4px 0 0;
   font-size: 12px;
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
@@ -166,56 +191,102 @@ onBeforeUnmount(() => { generation++; emit('busy', false); emit('synced', false)
 }
 
 .metadata-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   min-height: 48px;
+}
+
+.metadata-body .form-desc {
+  margin: 0;
 }
 
 .snapshot-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 12px;
-  margin: 10px 0 0;
+  gap: 4px 10px;
+  margin: 4px 0 0;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.4;
   color: var(--td-text-color-secondary);
 }
 
-.snapshot-meta__help {
+.snapshot-meta__help,
+.snapshot-meta__docs {
   display: inline-flex;
   align-items: center;
+  gap: 2px;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--td-text-color-placeholder);
+  cursor: pointer;
+}
+
+.snapshot-meta__docs {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.snapshot-meta__help {
   cursor: help;
 }
 
 .snapshot-meta__help:hover,
-.snapshot-meta__help:focus-visible {
-  color: var(--td-text-color-secondary);
+.snapshot-meta__help:focus-visible,
+.snapshot-meta__docs:hover,
+.snapshot-meta__docs:focus-visible,
+.snapshot-meta__docs[aria-expanded='true'] {
+  color: var(--td-brand-color);
+}
+</style>
+
+<!-- t-popup attaches to body; z-index must sit above SettingDrawer (2500). -->
+<style lang="less">
+.mcp-server-docs-popup-overlay {
+  z-index: 3100 !important;
+
+  .t-popup__content {
+    padding: 0 !important;
+    width: 400px;
+    max-width: calc(100vw - 24px);
+    border-radius: 12px !important;
+    background: var(--td-bg-color-container) !important;
+    border: 0.5px solid var(--td-component-stroke) !important;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.03),
+      0 2px 4px rgba(0, 0, 0, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.1) !important;
+  }
+
+  .server-docs-popup {
+    padding: 14px 16px 12px;
+    max-height: min(70vh, 420px);
+    overflow: auto;
+  }
+
+  .server-docs-popup__title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+  }
+
+  .server-docs-popup p,
+  .server-docs-popup pre {
+    margin: 8px 0 0;
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--td-text-color-secondary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
 }
 
-.server-documentation {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--td-text-color-secondary);
-}
-
-.server-documentation summary {
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--td-text-color-primary);
-}
-
-.server-documentation pre,
-.server-documentation p {
-  margin: 8px 0 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font: inherit;
-  max-height: 260px;
-  overflow: auto;
+:root[theme-mode='dark'] .mcp-server-docs-popup-overlay .t-popup__content {
+  background: rgba(36, 36, 36, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
 }
 </style>

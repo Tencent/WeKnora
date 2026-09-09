@@ -87,6 +87,19 @@
                 <span class="service-card__desc" :title="service.description">{{ service.description }}</span>
               </template>
             </div>
+            <div
+              class="service-card__tools"
+              :class="{ 'is-stale': service.catalog?.stale, 'is-missing': !service.catalog }"
+            >
+              <template v-if="service.catalog">
+                {{ $t('mcpSettings.toolCount', { count: service.catalog.tool_count }) }}
+                <template v-if="service.catalog.stale">
+                  <span class="service-card__sep">·</span>
+                  <span>{{ $t('mcpSettings.toolsStale') }}</span>
+                </template>
+              </template>
+              <template v-else>{{ $t('mcpSettings.toolsNotSynced') }}</template>
+            </div>
             <div v-if="service.url" class="service-card__url" :title="service.url">
               {{ service.url }}
             </div>
@@ -632,5 +645,20 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+}
+
+.service-card__tools {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-text-color-secondary);
+
+  &.is-missing,
+  &.is-stale {
+    color: var(--td-text-color-placeholder);
+  }
+
+  &.is-stale {
+    color: var(--td-warning-color);
+  }
 }
 </style>

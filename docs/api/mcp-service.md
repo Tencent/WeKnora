@@ -116,7 +116,7 @@ curl --location 'http://localhost:8080/api/v1/mcp-services' \
 
 ## GET `/mcp-services` - 获取 MCP 服务列表
 
-返回当前空间已配置的所有 MCP 服务。
+返回当前空间已配置的所有 MCP 服务。每条记录可带 `catalog`：已保存工具目录的数量与是否过期；从未同步时该字段省略。
 
 **请求**:
 
@@ -149,6 +149,11 @@ curl --location 'http://localhost:8080/api/v1/mcp-services' \
                 "retry_delay": 1
             },
             "is_builtin": false,
+            "catalog": {
+                "tool_count": 12,
+                "stale": false,
+                "synced_at": "2026-09-09T12:00:00+08:00"
+            },
             "created_at": "2025-08-12T10:00:00+08:00",
             "updated_at": "2025-08-12T10:00:00+08:00"
         },

@@ -39,6 +39,16 @@ type MCPMetadata struct {
 	Stale             bool       `json:"stale"              gorm:"-"`
 }
 
+// MCPMetadataSummary is the list-card view of a snapshot: counts only, no tool payloads.
+type MCPMetadataSummary struct {
+	ServiceID         string    `gorm:"column:service_id"`
+	Principal         string    `gorm:"column:principal"`
+	ConfigFingerprint string    `gorm:"column:config_fingerprint"`
+	ToolCount         int       `gorm:"column:tool_count"`
+	SyncedAt          time.Time `gorm:"column:synced_at"`
+	ServerName        string    `gorm:"column:server_name"`
+}
+
 // TableName returns the directory snapshot table.
 func (MCPMetadata) TableName() string { return "mcp_metadata" }
 

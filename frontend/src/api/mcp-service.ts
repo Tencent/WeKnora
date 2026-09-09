@@ -47,6 +47,11 @@ export interface MCPService {
   credentials?: Record<McpCredentialField, CredentialFieldMetadata>
   created_at?: string
   updated_at?: string
+  catalog?: {
+    tool_count: number
+    stale: boolean
+    synced_at: string
+  }
 }
 
 export interface MCPTool {
