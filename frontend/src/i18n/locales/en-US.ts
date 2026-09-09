@@ -3403,7 +3403,7 @@ export default {
         notStarted: 'The terminal is not running yet. Starting it connects to this conversation\'s sandbox, creating or resuming one if none is available.',
         start: 'Start terminal',
         connecting: 'Connecting to sandbox…',
-        needsProvision: 'This conversation has no running sandbox. Creating one starts a new sandbox, billed according to your workspace configuration.',
+        needsProvision: 'This conversation has no running sandbox. Creating one starts a new sandbox.',
         createAndStart: 'Create and start',
         noSandbox: 'No sandbox yet, and the current agent has no sandbox backend configured, so there is nowhere to create one. Switch to an agent with a sandbox configured, or send a message that runs code.',
         unsupported: 'The current sandbox backend does not support interactive terminals',

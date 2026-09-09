@@ -6,7 +6,7 @@
                 <t-icon v-if="status === 'connecting'" name="loading" size="24px"
                     class="sandbox-terminal__spinner" />
                 <t-icon
-                    v-else-if="status === 'not_started' || status === 'needs_provision' || status === 'no_sandbox'"
+                    v-else-if="status === 'paused' || status === 'needs_provision' || status === 'no_sandbox'"
                     name="terminal" size="28px" />
                 <t-icon v-else-if="status === 'unsupported'" name="error-circle" size="28px" />
                 <t-icon v-else-if="status === 'idle'" name="time" size="28px" />
@@ -24,7 +24,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, toRef, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -130,7 +130,7 @@ const { status } = terminal;
 
 const statusText = computed(() => {
     switch (status.value as SandboxTerminalStatus) {
-        case 'not_started':
+        case 'paused':
             return t('chat.sandbox.notStarted');
         case 'connecting':
             return t('chat.sandbox.connecting');
@@ -151,11 +151,11 @@ const statusText = computed(() => {
     }
 });
 
-// 覆盖层上那颗按钮的文案；空串表示这个状态没有可执行的动作。
-// 每次点击都视为"用户确认"，因此允许后端创建或唤醒沙箱——面板本身永远不会。
+// 覆盖层按钮：暂停用「启动终端」，尚未创建用「创建并启动」。点击才允许
+// 创建或唤醒；打开面板时的 lookup 不会做这两件事。
 const actionLabel = computed(() => {
     switch (status.value as SandboxTerminalStatus) {
-        case 'not_started':
+        case 'paused':
             return t('chat.sandbox.start');
         case 'needs_provision':
             return t('chat.sandbox.createAndStart');
@@ -241,13 +241,23 @@ function unmountTerminal() {
     fitAddon = null;
 }
 
-// 覆盖层上唯一的连接入口。provision: true 表示这是用户的显式确认，允许后端
-// 创建或唤醒沙箱；组件挂载本身不连接，所以打开面板不会产生任何计费副作用。
+// 覆盖层上唯一会创建或唤醒沙箱的入口。provision: true 表示这是用户的显式
+// 确认。组件挂载只做 lookup：运行中的沙箱直接连上，暂停或尚未创建才停在
+// 覆盖层等点击。
 function start() {
     unmountTerminal();
     const { cols, rows } = estimatePtySize();
     terminal.connect({ provision: true, cols, rows });
 }
+
+function connectLookup() {
+    const { cols, rows } = estimatePtySize();
+    terminal.connect({ provision: false, cols, rows });
+}
+
+onMounted(() => {
+    connectLookup();
+});
 
 watch(isDarkTheme, (dark) => {
     if (xterm) xterm.options.theme = xtermTheme(dark);

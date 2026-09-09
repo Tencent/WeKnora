@@ -3,8 +3,8 @@ import { post } from '@/utils/request'
 import { readStoredPtyId, writeStoredPtyId } from '@/utils/sandboxPtyId'
 
 export type SandboxTerminalStatus =
-  /** 尚未连接：打开面板不会碰后端，等用户显式启动。 */
-  | 'not_started'
+  /** 查询到会话沙箱已暂停；唤醒需要用户确认。 */
+  | 'paused'
   | 'connecting'
   | 'ready'
   /** 查到会话没有运行中的沙箱；创建需要用户确认。 */
@@ -66,6 +66,7 @@ function statusFromErrorCode(
   if (code === 'SANDBOX_NOT_BOUND') {
     return provisionAttempted ? 'no_sandbox' : 'needs_provision'
   }
+  if (code === 'SANDBOX_PAUSED') return 'paused'
   if (code === 'TERMINAL_UNSUPPORTED') return 'unsupported'
   if (code === 'IDLE_DISCONNECTED') return 'idle'
   if (code === 'AUTH_REVOKED') return 'unauthorized'
@@ -83,9 +84,9 @@ export type SandboxTerminalSession = {
   /**
    * 连接并打开终端；已在连接中时幂等。
    *
-   * provision 表示"这是用户的显式动作，允许后端创建或重建沙箱"。只有点击
-   * 按钮才应该传 true：创建沙箱是要计费的真实基础设施，不能是打开面板的副
-   * 作用。自动重连一律不带，查不到沙箱就退回让用户确认。
+   * provision 表示"这是用户的显式动作，允许后端创建或唤醒沙箱"。只有点击
+   * 按钮才应该传 true：创建/唤醒沙箱是要计费的真实基础设施。打开面板时的
+   * 自动连接一律不带：运行中的沙箱直接挂上，暂停或尚未创建则退回让用户确认。
    */
   connect: (options?: { provision?: boolean; cols?: number; rows?: number }) => void
   /** 发送键盘输入（xterm onData 的原始字符串）。 */
@@ -106,7 +107,7 @@ export function useSandboxTerminal(
   agentId: Ref<string | undefined>,
   agentSourceTenantId: Ref<string | number | null | undefined> = ref(undefined),
 ): SandboxTerminalSession {
-  const status = ref<SandboxTerminalStatus>('not_started')
+  const status = ref<SandboxTerminalStatus>('connecting')
 
   let ws: WebSocket | null = null
   let opening = false
@@ -239,6 +240,7 @@ export function useSandboxTerminal(
       if (
         event.code === 1008
         || reason === 'SANDBOX_NOT_BOUND'
+        || reason === 'SANDBOX_PAUSED'
         || reason === 'TERMINAL_UNSUPPORTED'
         || reason === 'IDLE_DISCONNECTED'
         || reason === 'AUTH_REVOKED'
@@ -248,15 +250,16 @@ export function useSandboxTerminal(
         } else if (status.value === 'ready' || status.value === 'connecting') {
           status.value = 'error'
         }
-        // idle / unauthorized：shell 还在沙箱里，PID 必须留下才能重挂。
+        // idle / unauthorized / paused：shell 还在沙箱里，PID 必须留下才能重挂。
         // 沙箱没了或后端不支持：PID 已无效，清掉以免下次 Create 撞上死进程。
-        if (status.value !== 'idle' && status.value !== 'unauthorized') {
+        if (status.value !== 'idle' && status.value !== 'unauthorized' && status.value !== 'paused') {
           rememberPid(null)
         }
         return
       }
       if (
         status.value !== 'needs_provision'
+        && status.value !== 'paused'
         && status.value !== 'no_sandbox'
         && status.value !== 'unsupported'
         && status.value !== 'exited'
@@ -301,7 +304,7 @@ export function useSandboxTerminal(
       }
       case 'error': {
         status.value = statusFromErrorCode(frame.code, allowProvision)
-        if (status.value !== 'idle' && status.value !== 'unauthorized') {
+        if (status.value !== 'idle' && status.value !== 'unauthorized' && status.value !== 'paused') {
           rememberPid(null)
         }
         break

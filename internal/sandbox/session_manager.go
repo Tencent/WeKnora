@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"log"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -837,8 +838,9 @@ func (m *SessionBoundManager) SessionTerminalManager() SessionTerminalManager {
 // session. It is strictly lookup-only: with no live binding it returns
 // ErrNoLiveSessionSandbox instead of provisioning, because the terminal
 // entry point lacks the config-pin context that agent-driven creation
-// relies on. A backend that cannot stream PTYs (Docker) returns
-// ErrTerminalUnsupported, not "no sandbox".
+// relies on. A paused sandbox returns ErrSandboxPaused unless
+// opts.AllowResume is set — Connect would wake it. A backend that cannot
+// stream PTYs (Docker) returns ErrTerminalUnsupported, not "no sandbox".
 func (m *SessionBoundManager) OpenSessionTerminal(
 	ctx context.Context,
 	sessionID string,
@@ -847,6 +849,18 @@ func (m *SessionBoundManager) OpenSessionTerminal(
 	terminal, ok := TerminalManagerFrom(m.client)
 	if !ok {
 		return nil, ErrTerminalUnsupported
+	}
+	if !opts.AllowResume {
+		state, found, err := m.peekBoundSandboxState(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, ErrNoLiveSessionSandbox
+		}
+		if state == RemoteStatePaused {
+			return nil, ErrSandboxPaused
+		}
 	}
 	handle, found, err := m.lookupSessionHandle(ctx, sessionID)
 	if err != nil {
@@ -928,6 +942,49 @@ func (m *SessionBoundManager) resolveSession(
 		return nil, err
 	}
 	return m.lifecycle.Resolve(ctx, key)
+}
+
+// peekBoundSandboxState reads provider listing for the bound sandbox without
+// Connect. E2B/Cube Connect resumes a paused instance, so the lookup-only
+// terminal path must List first.
+func (m *SessionBoundManager) peekBoundSandboxState(
+	ctx context.Context,
+	sessionID string,
+) (RemoteSandboxState, bool, error) {
+	if m.remoteDisabled() || strings.TrimSpace(sessionID) == "" {
+		return "", false, nil
+	}
+	key, err := m.sessionKey(ctx, sessionID)
+	if err != nil {
+		return "", false, err
+	}
+	binding, err := m.bindings.Get(ctx, key)
+	if err != nil {
+		return "", false, fmt.Errorf("sandbox: read session binding: %w", err)
+	}
+	if binding == nil || binding.Provider != m.client.Provider() {
+		return "", false, nil
+	}
+	summaries, err := m.client.List(ctx, RemoteListFilter{
+		Metadata: map[string]string{
+			remoteMetadataTenantID:  strconv.FormatUint(key.TenantID, 10),
+			remoteMetadataSessionID: key.SessionID,
+		},
+		States: []RemoteSandboxState{
+			RemoteStateRunning,
+			RemoteStatePaused,
+			RemoteStateTransitioning,
+		},
+	})
+	if err != nil {
+		return "", false, fmt.Errorf("sandbox: list session sandbox: %w", err)
+	}
+	for _, summary := range summaries {
+		if summary.ID == binding.SandboxID {
+			return summary.State, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // lookupSessionHandle reads the authoritative binding and, when one exists

@@ -46,6 +46,15 @@ test('empty PTY screen is nudged with readline clear-screen, not enter', () => {
   assert.match(terminal, /estimatePtySize/)
 })
 
+test('panel open looks up a running sandbox and only provisions on an explicit click', () => {
+  assert.match(terminal, /connectLookup/)
+  assert.match(terminal, /onMounted\(\(\) => \{\s*connectLookup\(\)/)
+  assert.match(terminal, /connect\(\{ provision: false/)
+  assert.match(terminal, /connect\(\{ provision: true/)
+  assert.match(terminal, /status === 'paused'/)
+  assert.doesNotMatch(terminal, /not_started/)
+})
+
 test('interactive bash defines Debian-style ls aliases', () => {
   const out = execFileSync('bash', [
     '--norc',

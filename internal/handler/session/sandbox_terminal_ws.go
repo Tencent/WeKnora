@@ -70,6 +70,7 @@ var terminalAuthRecheckInterval = time.Minute
 // Protocol error codes sent as HTTP close reasons and on error frames.
 const (
 	terminalErrNotBound    = "SANDBOX_NOT_BOUND"
+	terminalErrPaused      = "SANDBOX_PAUSED"
 	terminalErrUnsupported = "TERMINAL_UNSUPPORTED"
 	terminalErrInternal    = "INTERNAL"
 	terminalErrIdle        = "IDLE_DISCONNECTED"
@@ -196,9 +197,10 @@ func (h *Handler) SandboxTerminalWS(c *gin.Context) {
 
 	// Provisioning is opt-in per connect, because it creates (or resumes and
 	// re-bills) a microVM and this is a GET. A bare handshake — panel opened,
-	// tab restored, background reconnect — stays lookup-only and reports
-	// SANDBOX_NOT_BOUND, which the UI turns into an explicit "create and
-	// start" button. Only that confirmed click sets provision=1.
+	// tab restored, background reconnect — stays lookup-only: a running
+	// sandbox is attached, a paused one reports SANDBOX_PAUSED, and a
+	// missing one reports SANDBOX_NOT_BOUND. Only a confirmed click sets
+	// provision=1, which may create or resume.
 	allowProvision := terminalFlagParam(c.Query("provision"))
 	sandboxConfigID := h.terminalProvisionConfigID(ctx, c, allowProvision)
 
@@ -383,6 +385,8 @@ func terminalErrorFrame(err error) (code, message string) {
 	switch {
 	case stderrors.Is(err, sandbox.ErrNoLiveSessionSandbox):
 		return terminalErrNotBound, "session has no live sandbox"
+	case stderrors.Is(err, sandbox.ErrSandboxPaused):
+		return terminalErrPaused, "session sandbox is paused"
 	case stderrors.Is(err, service.ErrTerminalUnsupported):
 		return terminalErrUnsupported, "sandbox backend does not support terminals"
 	default:
