@@ -216,6 +216,17 @@ type ContextCompactedData struct {
 	SplitTurn bool `json:"split_turn,omitempty"`
 }
 
+// UserMessageInjectedData reports that a message the user appended while the
+// run was in flight was accepted into the running turn: a user-role row has
+// been persisted under the run's request ID and the text was appended to the
+// agent's message list, so the next LLM call already sees it.
+type UserMessageInjectedData struct {
+	SteerID       string `json:"steer_id"`   // Correlates with the queued steer event
+	Content       string `json:"content"`    // The injected text, as sent to the model
+	MessageID     string `json:"message_id"` // Durable assistant message of the run
+	UserMessageID string `json:"user_message_id,omitempty"`
+}
+
 // AgentReflectionData represents agent reflection data
 type AgentReflectionData struct {
 	ToolCallID string `json:"tool_call_id"` // Tool call ID for tracking

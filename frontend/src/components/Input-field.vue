@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch, nextTick, h } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch, nextTick, h, type PropType } from "vue";
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import { onBeforeRouteUpdate } from 'vue-router';
@@ -10,6 +10,7 @@ import { useMenuStore } from '@/stores/menu';
 import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { stopSession } from '@/api/chat';
+import type { SteerQueueItem } from '@/api/chat/steer';
 import { useOrganizationStore } from '@/stores/organization';
 import KnowledgeBaseSelector from './KnowledgeBaseSelector.vue';
 import MentionSelector from './MentionSelector.vue';
@@ -516,6 +517,17 @@ const props = defineProps({
   embeddedMode: {
     type: Boolean,
     default: false
+  },
+  queuedSteers: {
+    type: Array as PropType<SteerQueueItem[]>,
+    default: () => []
+  },
+  // Only agent turns have a loop that can take a mid-run message. In a
+  // quick-answer session the composer keeps its old behaviour: Stop is the
+  // only action while a reply is streaming.
+  canSteer: {
+    type: Boolean,
+    default: false
   }
 });
 
@@ -589,7 +601,7 @@ const toMCPMentionItem = (svc: MCPService): MentionItem => ({
   id: svc.id,
   name: svc.name,
   type: 'mcp',
-  description: svc.description || '',
+  description: svc.usage_instructions || svc.description || '',
   toolCount: svc.catalog?.tool_count,
   catalogStale: Boolean(svc.catalog?.stale),
   catalogSynced: Boolean(svc.catalog),
@@ -1346,7 +1358,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     if (mcpMode !== 'none') {
       mcpItems = mcpServices.value
         .filter(service => isMCPAllowedByAgent(service))
-        .filter(service => !q || service.name?.toLowerCase().includes(q.toLowerCase()) || (service.description || '').toLowerCase().includes(q.toLowerCase()))
+        .filter(service => !q || service.name?.toLowerCase().includes(q.toLowerCase()) || (service.usage_instructions || service.description || '').toLowerCase().includes(q.toLowerCase()))
         .map(toMCPMentionItem);
     }
 
@@ -1892,6 +1904,13 @@ watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
 const emit = defineEmits<{
   (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[]): void;
   (e: 'stop-generation'): void;
+  (e: 'stop-confirmed'): void;
+  (e: 'stop-failed'): void;
+  // Mid-run send queues until the current run exits (delivery=after).
+  // Empty input while replying shows Stop; typed text also shows Send.
+  (e: 'steer-msg', query: string, mentionedItems: MentionRequestItem[], delivery: 'inject' | 'after'): void;
+  (e: 'promote-steer', steerId: string): void;
+  (e: 'remove-steer', steerId: string): void;
 }>();
 
 const createSession = async (val: string) => {
@@ -1900,7 +1919,37 @@ const createSession = async (val: string) => {
     return;
   }
   if (props.isReplying) {
-    return MessagePlugin.error(t('input.messages.replying'));
+    if (!props.canSteer) {
+      // Quick-answer turns have no round boundary to take a message at, and
+      // no follow-up handoff on teardown — queueing here would park the
+      // message until it expired. Stop first.
+      MessagePlugin.info(t('input.messages.replying'));
+      return;
+    }
+    // Mid-run steering: queue until the current run exits (delivery=after).
+    // Attachments are intentionally not allowed on the steer path — the
+    // running turn already resolved its own scope.
+    if (uploadedAttachments.value.some(item => item.status === 'uploading')) {
+      MessagePlugin.warning(t('input.messages.steerAttachmentPending'));
+      return;
+    }
+    if (uploadedAttachments.value.length || uploadedImages.value.length) {
+      MessagePlugin.warning(t('input.messages.steerHasAttachments'));
+      return;
+    }
+    const steerMentions: MentionRequestItem[] = allSelectedItems.value.map(item => ({
+      id: item.id,
+      name: item.name,
+      type: item.type,
+      kb_type: item.type === 'kb' ? (item.kbType || 'document') : undefined,
+      kb_id: item.kbId,
+      kb_name: item.kbName,
+      service_id: item.serviceId,
+      skill_name: item.skillName,
+    }));
+    emit('steer-msg', val.trim(), steerMentions, 'after');
+    clearvalue();
+    return;
   }
   // Only block while the file is still uploading (no document ID yet). Once
   // uploaded, sending is allowed even if parsing is still in progress: the
@@ -2488,14 +2537,15 @@ const handleStop = async () => {
 
   console.log('[Stop] Stopping generation for message:', props.assistantMessageId);
 
-  // 发送 stop 事件，通知父组件立即清除 loading 状态
   emit('stop-generation');
 
   try {
     await stopSession(props.sessionId, props.assistantMessageId);
+    emit('stop-confirmed');
     MessagePlugin.success(t('input.messages.stopSuccess'));
   } catch (error) {
     console.error('Failed to stop session:', error);
+    emit('stop-failed');
     MessagePlugin.error(t('input.messages.stopFailed'));
   }
 }
@@ -2520,6 +2570,28 @@ defineExpose({
     <!-- Hidden file input for image upload -->
     <input ref="imageInputRef" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple
       style="display:none" @change="handleImageSelect" />
+    <div v-if="queuedSteers.length" class="steer-queue" role="list" :aria-label="$t('input.steerQueueWaiting')">
+      <div v-for="item in queuedSteers" :key="item.steer_id" class="steer-queue-item" role="listitem">
+        <span class="steer-queue-text">{{ item.content }}</span>
+        <div class="steer-queue-actions">
+          <button
+            v-if="item.delivery !== 'inject'"
+            type="button"
+            class="steer-queue-send-now"
+            :disabled="item.promoting || item.pending"
+            @click="emit('promote-steer', item.steer_id)"
+          >{{ $t('input.steerQueueSendNow') }}</button>
+          <span v-else class="steer-queue-hint">{{ $t('input.steerQueueInjecting') }}</span>
+          <button
+            type="button"
+            class="steer-queue-remove"
+            :aria-label="$t('common.remove')"
+            :disabled="item.promoting || item.pending"
+            @click="emit('remove-steer', item.steer_id)"
+          >×</button>
+        </div>
+      </div>
+    </div>
     <!-- 富文本输入框容器 -->
     <div class="rich-input-container" data-guide="chat-input">
       <!-- 图片预览区域 -->
@@ -2741,10 +2813,10 @@ defineExpose({
           </div>
         </Teleport>
 
-        <!-- 右侧控制按钮组 -->
+        <!-- 右侧控制：回复中且输入为空是停止，一旦输入新内容同一位置变成发送 -->
         <div class="control-right">
-          <!-- 停止按钮（仅在回复中时显示） -->
-          <t-tooltip v-if="isReplying" :content="$t('input.stopGeneration')" placement="top">
+          <t-tooltip v-if="isReplying" :content="$t('input.stopGeneration')"
+            placement="top">
             <div @click="handleStop" class="control-btn stop-btn">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <rect x="5" y="5" width="6" height="6" rx="1" />
@@ -2752,8 +2824,7 @@ defineExpose({
             </div>
           </t-tooltip>
 
-          <!-- 发送按钮 -->
-          <div v-if="!isReplying" @click="createSession(query)" class="control-btn send-btn" data-guide="chat-send"
+          <div v-if="!isReplying || query.trim()" @click="createSession(query)" class="control-btn send-btn" data-guide="chat-send"
             :class="{ 'disabled': !query.length }">
             <img src="../assets/img/sending-aircraft.svg" :alt="$t('input.send')" />
           </div>
@@ -2790,7 +2861,8 @@ const getImgSrc = (url: string) => {
   transform: translateX(-50%);
   width: 100%;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
 
   &.is-embedded {
     position: relative;
@@ -2799,9 +2871,101 @@ const getImgSrc = (url: string) => {
     transform: none;
     z-index: auto;
 
-    .rich-input-container {
+    .rich-input-container,
+    .steer-queue {
       max-width: 100%;
     }
+  }
+}
+
+.steer-queue {
+  width: 100%;
+  max-width: 960px;
+  margin-bottom: 8px;
+  background: var(--td-bg-color-container, #fff);
+  border: 1px solid var(--td-component-stroke, #dcdcdc);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.steer-queue-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+}
+
+.steer-queue-item + .steer-queue-item {
+  border-top: 1px solid var(--td-component-stroke, #dcdcdc);
+}
+
+.steer-queue-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--td-text-color-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.steer-queue-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+  padding-top: 1px;
+}
+
+.steer-queue-send-now {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--td-brand-color, #07C05F);
+  font-size: 12px;
+  line-height: 22px;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
+.steer-queue-hint {
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 22px;
+  color: var(--td-text-color-secondary);
+}
+
+.steer-queue-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--td-text-color-placeholder, #999);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+    color: var(--td-text-color-primary);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 }
 

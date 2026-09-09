@@ -975,6 +975,46 @@ func (m *transcriptStreamManager) GetEvents(
 	return out, len(m.events), nil
 }
 
+func (m *transcriptStreamManager) AppendSteerEvents(
+	_ context.Context, _, _ string, _ []interfaces.StreamEvent,
+) error {
+	return nil
+}
+
+func (m *transcriptStreamManager) GetSteerEvents(
+	_ context.Context, _, _ string, from int,
+) ([]interfaces.StreamEvent, int, error) {
+	return nil, from, nil
+}
+
+func (m *transcriptStreamManager) UpdateSteerEventData(
+	context.Context, string, string, string, map[string]interface{},
+) (bool, error) {
+	return false, nil
+}
+
+func (m *transcriptStreamManager) DeleteSteerEvent(
+	context.Context, string, string, string,
+) (bool, error) {
+	return false, nil
+}
+
+func (m *transcriptStreamManager) SetLiveRun(context.Context, string, string, string) error {
+	return nil
+}
+
+func (m *transcriptStreamManager) ClaimLiveRun(context.Context, string, string, string) error {
+	return nil
+}
+
+func (m *transcriptStreamManager) GetLiveRun(context.Context, string) (string, string, error) {
+	return "", "", nil
+}
+
+func (m *transcriptStreamManager) ClearLiveRun(context.Context, string, string) error {
+	return nil
+}
+
 func (m *transcriptStreamManager) readKey() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()

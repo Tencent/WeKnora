@@ -230,6 +230,13 @@ func (s *sessionService) AgentQA(
 		}
 	}
 
+	// Mid-run steering: when the caller supplied a sink, the engine will drain
+	// user-appended messages at every round boundary and persist accepted ones
+	// through it. Nil (IM/embed) keeps the old behaviour untouched.
+	if req.SteerSink != nil {
+		engine.SetSteerSink(req.SteerSink)
+	}
+
 	agentQuery := req.Query
 	var agentImageURLs []string
 	if agentModelSupportsVision && len(req.ImageURLs) > 0 {
@@ -495,7 +502,9 @@ func applyPerRequestMCPScope(
 		return
 	}
 	mentioned := dedupPreservingOrder(requested)
-	effective, _ := resolvePerRequestMCPScope(mentioned, agentPresetMCPs, agentConfig.MCPSelectionMode, isSharedAgent)
+	effective, _ := resolvePerRequestMCPScope(
+		mentioned, agentPresetMCPs, agentConfig.MCPSelectionMode, isSharedAgent,
+	)
 	if len(effective) == 0 {
 		logger.Warnf(ctx, "Ignoring @MCP scope outside agent preset: requested=%v agent=%v shared=%v",
 			requested, agentPresetMCPs, isSharedAgent)

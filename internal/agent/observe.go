@@ -322,6 +322,11 @@ type responseVerdict struct {
 	finalAnswer  string
 	emptyContent bool // LLM returned stop with no tool calls and empty content
 	step         types.AgentStep
+	// answerID is the EventAgentFinalAnswer id to close with Done:true if
+	// this round actually finishes. Natural-stop must not close the stream
+	// before the loop-end steer drain: a pending inject continues the turn,
+	// and a premature Done tells the client the session is idle.
+	answerID string
 }
 
 // isNaturalStopFinishReason reports whether a provider finish reason means the
@@ -444,21 +449,16 @@ func (e *AgentEngine) analyzeResponse(
 				})
 			}
 		}
-		e.eventBus.Emit(ctx, event.Event{
-			ID:        answerID,
-			Type:      event.EventAgentFinalAnswer,
-			SessionID: sessionID,
-			Data: event.AgentFinalAnswerData{
-				Content: "",
-				Done:    true,
-			},
-		})
+		// Do not emit Done:true here. The caller drains any loop-end inject
+		// first; a premature close makes the client think the turn is idle
+		// while the engine is about to continue.
 
 		return responseVerdict{
 			isDone:       true,
 			finalAnswer:  response.Content,
 			emptyContent: response.Content == "",
 			step:         step,
+			answerID:     answerID,
 		}
 	}
 
@@ -771,7 +771,7 @@ func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
 		})
 	}
 
-	return tools
+	return e.modelContext.EncodeTools(tools)
 }
 
 // appendToolResults adds tool results to the in-turn message history following

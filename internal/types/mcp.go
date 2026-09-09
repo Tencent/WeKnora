@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -41,6 +42,15 @@ type MCPService struct {
 	CreatedAt      time.Time          `json:"created_at"`
 	UpdatedAt      time.Time          `json:"updated_at"`
 	DeletedAt      gorm.DeletedAt     `json:"deleted_at"             gorm:"index"`
+}
+
+// EffectiveUsageInstructions preserves documentation on legacy services until
+// they are edited through the single usage-instructions field.
+func (s *MCPService) EffectiveUsageInstructions() string {
+	if text := strings.TrimSpace(s.UsageInstructions); text != "" {
+		return text
+	}
+	return strings.TrimSpace(s.Description)
 }
 
 // MCPHeaders represents HTTP headers as a map

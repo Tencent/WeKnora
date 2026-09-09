@@ -33,8 +33,10 @@ func TestFrenchBuiltinAgentMetadata(t *testing.T) {
 		assert.Equal(t, entry.I18n["fr-FR"].Description, agent.Description)
 	}
 	// Changing the UI locale must preserve an existing agent's user settings.
-	agent := &CustomAgent{ID: BuiltinQuickAnswerID, TenantID: 1, Name: "Quick Answer",
-		Config: CustomAgentConfig{SystemPrompt: "Custom instructions", Temperature: 0.42}}
+	agent := &CustomAgent{
+		ID: BuiltinQuickAnswerID, TenantID: 1, Name: "Quick Answer",
+		Config: CustomAgentConfig{SystemPrompt: "Custom instructions", Temperature: 0.42},
+	}
 	before := agent.Config
 	ApplyBuiltinAgentLocalization(ctx, agent)
 	assert.Equal(t, "Réponse rapide", agent.Name)

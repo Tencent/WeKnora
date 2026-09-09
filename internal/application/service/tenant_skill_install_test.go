@@ -3167,7 +3167,8 @@ func (e *installAgentEngine) Execute(
 	}
 	return &types.AgentState{IsComplete: true}, nil
 }
-func (e *installAgentEngine) SetMemoryPrompt(string) {}
+func (e *installAgentEngine) SetMemoryPrompt(string)       {}
+func (e *installAgentEngine) SetSteerSink(types.SteerSink) {}
 
 type installSessionService struct {
 	fx *installFixture

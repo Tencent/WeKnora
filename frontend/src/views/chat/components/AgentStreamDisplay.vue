@@ -1549,6 +1549,7 @@ watch(eventStream, (stream) => {
 
 // Check if conversation is done (based on answer event with done=true or stop event)
 const isConversationDone = computed(() => {
+  if (props.session?.steerForked) return true
   const stream = eventStream.value;
   if (!stream || stream.length === 0) {
     console.log('[Collapse] No stream or empty stream');
@@ -1653,7 +1654,10 @@ watch(activeAnswerMarkdown, () => {
 // yet. Hydrating too early would find nothing and leave a permanent placeholder
 // (until a manual reload). Waiting for full reveal guarantees the image exists.
 const answerFullyRendered = computed(
-  () => isConversationDone.value && typedAnswer.value.length >= activeAnswerMarkdown.value.length,
+  () =>
+    !props.session?.steerForked &&
+    isConversationDone.value &&
+    typedAnswer.value.length >= activeAnswerMarkdown.value.length,
 );
 watch(answerFullyRendered, (ready) => {
   emit('render-complete-change', ready);
@@ -2055,6 +2059,10 @@ const intermediateEvents = computed(() => {
   const hidden = hiddenThinkingEventIds.value;
   return result.filter((e: any) => {
     if (e.type === 'answer' || e.type === 'agent_complete') return false;
+    // Mid-run injected user messages render as normal user bubbles in the
+    // message list, not inside the steps tree — the tree template has no
+    // branch for this type and would otherwise emit an empty node.
+    if (e.type === 'user_message_injected') return false;
     if (e.type === 'thinking' && e.event_id && hidden.has(e.event_id)) return false;
     return true;
   });
@@ -2072,7 +2080,12 @@ const displayEvents = computed(() => {
     return [];
   }
 
-  const result = buildFullEventList(stream);
+  const result = buildFullEventList(stream).filter(
+    // Injected user messages render as normal user bubbles in the message
+    // list — never inside the agent timeline (the template has no branch for
+    // the type and would render an empty card).
+    (e: any) => e.type !== 'user_message_injected',
+  );
 
   // Quick-answer RAG: pipeline steps (including attachment prep) live in
   // RagPipelineProgress; this component only renders the answer stream.

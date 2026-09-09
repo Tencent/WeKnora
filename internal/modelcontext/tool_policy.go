@@ -45,6 +45,8 @@ var sourceKeySpaces = map[string]sourceKeySpace{
 }
 
 type toolHandlePolicy struct {
+	mcpRoutingKey       string // Only the bridge's top-level argument, never external arguments.
+	mcpDirectoryOutput  bool
 	opaqueOutput        bool // MCP bridge payloads use external identities and schemas.
 	sourceIDKeys        map[string]struct{}
 	sourceTextKeys      map[string]struct{}
@@ -59,8 +61,8 @@ type toolHandlePolicy struct {
 // alone are deliberately insufficient: a dynamic MCP tool may use the same
 // name with unrelated semantics and must remain opaque.
 var toolHandlePolicies = map[string]toolHandlePolicy{
-	"discover_mcp_tools": {opaqueOutput: true},
-	"call_mcp_tool":      {opaqueOutput: true},
+	"discover_mcp_tools": {opaqueOutput: true, mcpRoutingKey: "server_id", mcpDirectoryOutput: true},
+	"call_mcp_tool":      {opaqueOutput: true, mcpRoutingKey: "tool_ref"},
 	"read_file":          {},
 	"knowledge_search": {
 		sourceIDKeys: map[string]struct{}{"knowledge_base_ids": {}},
@@ -242,6 +244,7 @@ func (r *Registry) encodeReplayedToolPolicies(call *chat.ToolCall) {
 	if !ok {
 		return
 	}
+	call.Function.Arguments = r.encodeMCPArguments(call.Function.Name, call.Function.Arguments)
 	call.Function.Arguments = rewriteJSONStringValues(
 		call.Function.Arguments,
 		func(key, value string) string {
@@ -281,8 +284,8 @@ func (r *Registry) unresolvedPrivateToolHandles(toolName, raw string) []string {
 }
 
 // encodeToolPrivateResult registers and compacts identifiers that are local to
-// one built-in tool family. Wiki issue IDs are the only such identity today;
-// MCP tools remain opaque unless they add an explicit policy here.
+// one built-in tool family. MCP routing fields have an explicit envelope
+// policy; remote schemas, arguments and execution results remain opaque.
 func (r *Registry) encodeToolPrivateResult(toolName, output string) string {
 	if r == nil || output == "" {
 		return output
@@ -290,6 +293,9 @@ func (r *Registry) encodeToolPrivateResult(toolName, output string) string {
 	policy, ok := toolHandlePolicies[toolName]
 	if !ok {
 		return output
+	}
+	if policy.mcpDirectoryOutput {
+		return r.encodeMCPDirectory(output)
 	}
 	if len(policy.encodedIssueIDKeys) > 0 {
 		output = rewriteJSONStringValues(output, func(key, value string) string {

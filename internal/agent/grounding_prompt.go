@@ -44,6 +44,8 @@ Content grounding (applies to answers AND generated deliverables):
 		b.WriteString("- Connected MCP services provide external capabilities even without an @mention. " +
 			"Read the source summaries in discover_mcp_tools. If a server_id is already listed, " +
 			"inspect or search that server without list_servers, then describe the exact tool. " +
+			"Copy server_id from the directory, not the service name. Wait for discovery results " +
+			"before dependent calls; never guess tool names, function names, or tool_ref. " +
 			"Its full function definition becomes available on the " +
 			"next request. Use already loaded functions directly. Missing functions do not prove " +
 			"that a capability is unconfigured; missing or stale saved directories require a " +

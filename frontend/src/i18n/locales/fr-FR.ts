@@ -1221,7 +1221,7 @@ export default {
       cardTimeout: 'Délai d’expiration : {sec} s',
       cardTtl: 'Durée de vie du bac à sable : {sec} s',
       cardVolumeMounted: 'Volume monté',
-      cardEnvVars: '{count} env vars',
+      cardEnvVars: '{count} variables d’environnement',
       cardPrivateEndpoints: 'Points de terminaison privés autorisés',
       templateNotConfigured: 'Modèle non configuré',
       imageNotConfigured: 'Image non configurée',
@@ -1586,7 +1586,7 @@ export default {
       addModelsEmbeddingFailed: 'Le test de connexion de vectorisation a échoué; n\'a pas pu détecter la dimension vectorielle',
       addModelsDisplayName: {
         chat: 'Chat WeKnoraCloud',
-        embedding: 'WeKnoraCloud Embedding',
+        embedding: 'Vectorisation WeKnoraCloud',
         rerank: 'ReRank WeKnoraCloud',
         vllm: 'Vision WeKnoraCloud'
       }
@@ -2444,7 +2444,18 @@ export default {
     noModel: 'Aucun modèle disponible',
     stopGeneration: 'Arrêter la génération',
     send: 'Envoyer',
+    steerQueueSendNow: 'Envoyer maintenant',
+    steerQueueWaiting: 'Sera envoyé à la fin de la réponse en cours',
+    steerQueueInjecting: 'En attente de la prochaine étape de réflexion',
     messages: {
+      steerAttachmentPending: 'La pièce jointe est encore en cours d’importation. Veuillez patienter.',
+      steerHasAttachments: 'Les pièces jointes ne peuvent pas être ajoutées à une réponse en cours. Retirez-les ou attendez la fin de la réponse pour les envoyer.',
+      steerFailed: 'Impossible d’ajouter le message. Veuillez réessayer.',
+      steerPromoteFailed: 'Impossible d’envoyer le message maintenant. Veuillez réessayer.',
+      steerRemoveFailed: 'Impossible de retirer le message en attente. Veuillez réessayer.',
+      steerAlreadyInjected: 'Ce message a déjà été pris en compte dans la réponse en cours.',
+      steerFollowUpTimeout: 'La réponse suivante n’a pas démarré à temps. Veuillez renvoyer le message.',
+      steerNoActiveRun: 'Aucune réponse n’est en cours. Envoyez le message directement.',
       enterContent: 'Saisissez d’abord un message.',
       replying: 'Une réponse est en cours. Veuillez patienter.',
       agentSwitchedOn: 'Mode Raisonnement avancé activé',
@@ -2818,7 +2829,7 @@ export default {
     sidebar: {
       basic: 'Informations de base',
       models: 'Configuration du modèle',
-      vectorStore: 'Vector Store',
+      vectorStore: 'Stockage vectoriel',
       chunking: 'Paramètres de découpage',
       storage: 'Moteur de stockage',
       advanced: 'Paramètres avancés',
@@ -2857,7 +2868,7 @@ export default {
       contentInstructionsLabel: 'Instructions relatives au contenu Wiki',
       contentInstructionsTip: 'Contrôlez l\'accent et le ton des résumés, des pages et de l\'index. Les règles relatives à la citation, à la fusion et aux faits demeurent la propriété du système. Reproduire le contenu existant pour appliquer les changements.',
       contentInstructionsPlaceholder: 'Par exemple : utiliser un ton d\'examen légal et mettre l\'accent sur les propriétaires, les délais et les risques…',
-      extractionInstructionsLabel: 'Wiki Extraction Focus',
+      extractionInstructionsLabel: 'Priorités d’extraction du Wiki',
       extractionInstructionsTip: 'Décrivez les entités de domaine et les concepts à prioriser sans remplacer le système JSON et le protocole de citation.',
       extractionInstructionsPlaceholder: 'Par exemple : prioriser les produits, les versions, les organisations, les propriétaires et les concepts techniques de base…',
       extractionGranularityTip: 'Contrôle combien d\'entités/concepts Wiki sont extraits par document. Plus fin = indice plus serré, plus grossier = plus complet',
@@ -2911,7 +2922,7 @@ export default {
       newPageTitlePlaceholder: 'Entrez un titre de page',
       newPageSlugLabel: 'Slug (adresse de la page)',
       newPageSlugPlaceholder: 'Ex. : concept/my-topic',
-      newPageSlugHint: 'Letters/digits/dashes, "/" for hierarchy; cannot be changed later',
+      newPageSlugHint: 'Lettres, chiffres et tirets ; « / » pour la hiérarchie. Ne pourra plus être modifié ensuite.',
       newPageTypeLabel: 'Type de page',
       newPageContentLabel: 'Contenu (facultatif)',
       newPageMissingFields: 'Le titre et l’identifiant d’URL sont obligatoires',
@@ -3271,7 +3282,7 @@ export default {
         samplePlaceholder: 'Coller un extrait de Markdown / un texte simple pour voir comment la configuration actuelle le couperait…',
         presetLabel: 'Charger un exemple :',
         samples: {
-          markdown: 'Markdown doc',
+          markdown: 'Document Markdown',
           faq: 'Liste de FAQ',
           chapter: 'Chapitres PDF',
           plain: 'Texte courant'
@@ -4707,7 +4718,9 @@ export default {
     }
   },
   mcpSettings: {
-    title: 'MCP Services',
+    addUsageInstructions: 'Ajouter des instructions d’utilisation',
+    noUsageInstructions: 'Aucune instruction d’utilisation pour le moment',
+    title: 'Services MCP',
     description: 'Gérer les services externes de MCP (Modèle Context Protocol) pour les outils/ressources en mode Agent',
     enabled: 'Activé',
     disabled: 'Désactivé',
@@ -4960,8 +4973,13 @@ export default {
     usageHint: 'Les modèles ont lu cette vue d\'ensemble avant de charger des outils spécifiques. Votre texte est conservé lorsque rafraîchissant.',
     summary: 'Résumé de l\'utilisation',
     summaryPlaceholder: 'Par exemple: Rechercher l\'état de la commande, les progrès de l\'expédition, et les remboursements.',
-    usageInstructions: 'Mode d\'emploi (facultatif)',
-    instructionsPlaceholder: 'Ajouter des cas d\'utilisation, des conseils de sélection d\'outils ou une terminologie d\'affaires.',
+    usageInstructions: 'Instructions d’utilisation',
+    instructionsPlaceholder: 'Décrivez brièvement l’objectif, les cas d’utilisation et les principales contraintes.',
+    generateUsage: 'Générer avec l’IA',
+    generateHint: 'Génère des instructions concises à partir des outils synchronisés et activés. Relisez le résultat, modifiez-le si nécessaire, puis enregistrez-le pour l’appliquer.',
+    instructionsRequired: 'Les instructions d’utilisation sont obligatoires',
+    generated: 'Instructions générées. Relisez-les puis enregistrez-les pour les appliquer.',
+    generateFailed: 'Échec de la génération. Vérifiez que les outils sont synchronisés et qu’un modèle de discussion actif est configuré, puis réessayez.',
     saveNext: 'Enregistrer et continuer'
   },
   mcpServiceDialog: {
@@ -5429,7 +5447,7 @@ export default {
   },
   kbSettings: {
     vectorStore: {
-      title: 'Vector Store',
+      title: 'Stockage vectoriel',
       description: 'Choisissez quel vecteur stocke cette base de connaissances écrit. La liaison est permanente — pour déplacer un KB existant vers un autre magasin, créer un nouveau KB et réindexer.',
       loading: 'Chargement des stockages vectoriels…',
       engineLabel: 'Stockage vectoriel',
@@ -5886,8 +5904,8 @@ export default {
       writeWarning: 'Modifie le contenu du Wiki',
       dangerTag: 'Écrire',
       statusNoKb: 'Aucune base de connaissances n\'est liée',
-      kbMetricRag: 'RAG KBs',
-      kbMetricWiki: 'Wiki KBs',
+      kbMetricRag: 'Bases RAG',
+      kbMetricWiki: 'Bases Wiki',
       statusInactive: '{count} outil(s) coché(s) ne peut pas prendre effet avec la configuration actuelle',
       effectiveLabel: 'Outils effectifs',
       effectiveDesc: 'Calculé à partir de la configuration actuelle — ce sont les outils que l\'agent sera en mesure d\'appeler',
@@ -5951,7 +5969,7 @@ export default {
       yunzhijiaAppId: 'ID de l\'application (téléchargement de l\'image)',
       yunzhijiaAppIdPlaceholder: 'Identificateur d\'application Yunzhijia Open Platform',
       yunzhijiaAppSecret: 'App Secret (téléchargement d\'image)',
-      yunzhijiaAppSecretPlaceholder: 'Yunzhijia Open Platform App Secret',
+      yunzhijiaAppSecretPlaceholder: 'Secret d’application de la plateforme Yunzhijia',
       yunzhijiaAppCredentialHint: 'Utilisé pour obtenir appAccessToken et télécharger des images envoyées par les utilisateurs.',
       yunzhijiaTimeout: 'Délai d’expiration HTTP (secondes)',
       yunzhijiaTimeoutHint: 'Délai d\'envoi des réponses via l\'URL du message Envoyer, par défaut 10 secondes',
@@ -6011,7 +6029,7 @@ export default {
       kbIncompatibleWarn: '{count} Les KB sélectionnés ne sont pas compatibles avec ce type, s\'il vous plaît ajuster manuellement.'
     },
     mcp: {
-      label: 'MCP Services',
+      label: 'Services MCP',
       desc: 'Sélectionnez les services MCP disponibles pour l\'Agent',
       selectLabel: 'Sélectionner les services MCP',
       selectDesc: 'Sélectionnez les services MCP pour activer',
@@ -6068,7 +6086,7 @@ export default {
       enableDesc: 'Les réponses aux questions posées seront hiérarchisées par rapport aux documents réguliers, ce qui améliorera la précision des réponses.',
       thresholdLabel: 'Seuil de réponse directe',
       thresholdDesc: 'Lorsque la similitude entre la question et FAQ dépasse cette valeur, utilisez directement la réponse FAQ',
-      boostLabel: 'FAQ Score Boost',
+      boostLabel: 'Majoration du score des FAQ',
       boostDesc: 'Multiplier les scores de pertinence de la FAQ par ce facteur pour les classer plus haut'
     },
     dataAnalysis: {
@@ -6285,7 +6303,7 @@ export default {
     },
     field: {
       appId: 'ID de l\'application',
-      appSecret: 'App Secret',
+      appSecret: 'Secret de l’application',
       integrationToken: 'Jeton d\'intégration',
       apiToken: 'Jeton API',
       imaClientId: 'ClientID IMA',
@@ -6521,7 +6539,7 @@ export default {
       signedRequestStep0Hint: '# Mettez le JWT dans {headerName} — pas le secret HMAC',
       requestExampleCreateSession: '# 1. Créer une session',
       requestExampleAgentChat: '# 2. Chat de l\'agent (SSE; remplacer <session_id> avec l\'identifiant de l\'étape 1)',
-      requestExampleJwtPlaceholder: '<JWT signed by your backend>',
+      requestExampleJwtPlaceholder: '<JWT signé par votre serveur>',
       requestExample: 'Exemple de requête',
       playgroundTitle: 'Console de test API',
       playgroundDesc: 'Envoyer des requêtes réelles avec la clé API actuelle et le mode d\'identité pour vérifier la création de session, le chat d\'agent et la sortie SSE.',

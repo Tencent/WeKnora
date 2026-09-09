@@ -65,6 +65,14 @@ func RegisterSessionRoutes(
 		sessions.DELETE("/:id/attachments/:attachment_id", handler.DeleteTemporaryDocument)
 		sessions.POST("/:session_id/stop", handler.StopSession)
 		sessions.POST("/:session_id/sandbox/terminal-ticket", handler.IssueSandboxTerminalTicket)
+		// Mid-run message injection: append a user message to the turn that is
+		// currently generating. Accepts even when no run is live (the client
+		// then falls back to a normal send), mirroring StopSession's ownership
+		// rules.
+		sessions.POST("/:session_id/steer", handler.SteerMessage)
+		sessions.GET("/:id/steer", handler.ListSteerMessages)
+		sessions.DELETE("/:id/steer/:steer_id", handler.DeleteSteerMessage)
+		sessions.POST("/:session_id/steer/:steer_id/inject", handler.PromoteSteerMessage)
 		// POST and DELETE share this path but gin maintains a separate radix tree
 		// per HTTP verb, and the existing trees use different wildcard names
 		// (POST uses :session_id, DELETE uses :id). Use whatever matches each

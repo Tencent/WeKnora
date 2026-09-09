@@ -203,6 +203,9 @@ func (r *ToolRegistry) RefreshMCPTools(ctx context.Context) {
 	if c == nil {
 		return
 	}
+	// Keep the proxy executable for history, but do not offer an empty call
+	// surface to the model. Publish it only alongside a usable full definition.
+	r.deferred[ToolCallMCPTool] = true
 	for name, tool := range r.tools {
 		if _, ok := tool.(*MCPRegisteredTool); ok {
 			delete(r.tools, name)
@@ -245,6 +248,7 @@ func (r *ToolRegistry) RefreshMCPTools(ctx context.Context) {
 			bound.registeredName = mcpRegisteredName(tool)
 			bound.serverInstructions = tool.serverInstructions
 			r.RegisterTool(&MCPRegisteredTool{MCPTool: bound, catalog: c, ref: mcpToolRef(tool)})
+			r.deferred[ToolCallMCPTool] = false
 		}
 	}
 }
