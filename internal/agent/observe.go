@@ -700,7 +700,7 @@ func (e *AgentEngine) registerRuntimeReferences() {
 				if title == "" {
 					title = doc.FileName
 				}
-				e.modelContext.RegisterChunk(modelcontext.ChunkReference{
+				e.modelContext.RegisterContextChunk(modelcontext.ChunkReference{
 					ChunkID:         doc.ChunkID,
 					KnowledgeID:     doc.KnowledgeID,
 					KnowledgeBaseID: firstNonEmptyAgent(doc.KnowledgeBaseID, kb.ID),

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -34,6 +35,9 @@ type webMeta struct {
 // round). Handles are never persisted or accepted across requests.
 type sourceRegistry struct {
 	citationsEnabled bool
+	// Addressable IDs from history, directory entries, and tool arguments are
+	// not evidence until a current tool result supplies the source.
+	citable sync.Map // handle -> true; registrations may run concurrently
 
 	chunks *handleTable[ChunkReference]
 	docs   *handleTable[struct{}]
@@ -74,6 +78,10 @@ func knownHandle[M any](table *handleTable[M], id string) string {
 }
 
 func (r *sourceRegistry) RegisterChunk(ref ChunkReference) string {
+	return r.registerChunk(ref, true)
+}
+
+func (r *sourceRegistry) registerChunk(ref ChunkReference, evidence bool) string {
 	if r == nil {
 		return ""
 	}
@@ -84,7 +92,11 @@ func (r *sourceRegistry) RegisterChunk(ref ChunkReference) string {
 	if shortSourceHandleRE.MatchString(ref.ChunkID) {
 		return knownHandle(r.chunks, ref.ChunkID)
 	}
-	return r.chunks.register(ref.ChunkID, ref.ChunkID, ref, mergeChunkReference)
+	handle := r.chunks.register(ref.ChunkID, ref.ChunkID, ref, mergeChunkReference)
+	if evidence {
+		r.citable.Store(handle, true)
+	}
+	return handle
 }
 
 func mergeChunkReference(dst *ChunkReference, src ChunkReference) {
@@ -128,6 +140,10 @@ func (r *sourceRegistry) RegisterKnowledgeBase(id string) string {
 }
 
 func (r *sourceRegistry) RegisterWeb(rawURL, title string) string {
+	return r.registerWeb(rawURL, title, true)
+}
+
+func (r *sourceRegistry) registerWeb(rawURL, title string, evidence bool) string {
 	rawURL = strings.TrimSpace(rawURL)
 	if r == nil || rawURL == "" {
 		return ""
@@ -137,11 +153,15 @@ func (r *sourceRegistry) RegisterWeb(rawURL, title string) string {
 	}
 	// Dedup on the canonical (fragment-stripped) URL while decoding back to
 	// the raw URL the model was originally shown.
-	return r.webs.register(canonicalWebURL(rawURL), rawURL, webMeta{title: title}, func(dst *webMeta, src webMeta) {
+	handle := r.webs.register(canonicalWebURL(rawURL), rawURL, webMeta{title: title}, func(dst *webMeta, src webMeta) {
 		if dst.title == "" && src.title != "" {
 			dst.title = src.title
 		}
 	})
+	if evidence {
+		r.citable.Store(handle, true)
+	}
+	return handle
 }
 
 func canonicalWebURL(raw string) string {
@@ -277,14 +297,14 @@ func (r *sourceRegistry) EncodeMessagesWithPolicies(
 	for i := range out {
 		processToolResult := out[i].Role == "tool" && (resultPolicy == nil || resultPolicy(out[i].Name))
 		if out[i].Role == "assistant" || processToolResult {
-			out[i].Content = r.CompactPublicCitations(out[i].Content)
-			out[i].ReasoningContent = r.CompactPublicCitations(out[i].ReasoningContent)
+			out[i].Content = r.CompactPublicCitations(out[i].Content, false)
+			out[i].ReasoningContent = r.CompactPublicCitations(out[i].ReasoningContent, false)
 		}
 		if len(out[i].MultiContent) > 0 {
 			out[i].MultiContent = append([]chat.MessageContentPart(nil), out[i].MultiContent...)
 			for j := range out[i].MultiContent {
 				if out[i].MultiContent[j].Type == "text" && (out[i].Role == "assistant" || processToolResult) {
-					out[i].MultiContent[j].Text = r.CompactPublicCitations(out[i].MultiContent[j].Text)
+					out[i].MultiContent[j].Text = r.CompactPublicCitations(out[i].MultiContent[j].Text, false)
 				}
 			}
 		}
@@ -301,7 +321,7 @@ func (r *sourceRegistry) EncodeMessagesWithPolicies(
 	}
 	for i := range out {
 		if out[i].Role == "tool" && (resultPolicy == nil || resultPolicy(out[i].Name)) {
-			r.registerLegacyToolReferences(out[i].Content)
+			r.registerLegacyToolReferences(out[i].Content, false)
 			out[i].Content = r.CompactKnownText(out[i].Content)
 		}
 		for j := range out[i].ToolCalls {
@@ -426,7 +446,7 @@ func (r *sourceRegistry) registerToolArgumentValue(key string, value interface{}
 	switch typed := value.(type) {
 	case string:
 		if allowed(strings.ToLower(key)) {
-			r.registerSourceIDByKey(key, typed)
+			r.registerSourceIDByKey(key, typed, false)
 		}
 	case []interface{}:
 		for _, item := range typed {
@@ -444,7 +464,7 @@ func (r *sourceRegistry) registerToolArgumentValue(key string, value interface{}
 // sourceKeySpaces — the same table that gates handle decode — so the recognized
 // key set (and the http/https guard for web references) cannot drift between
 // registration and decoding.
-func (r *sourceRegistry) registerSourceIDByKey(key, value string) {
+func (r *sourceRegistry) registerSourceIDByKey(key, value string, evidence bool) {
 	value = strings.TrimSpace(value)
 	if value == "" || shortSourceHandleRE.MatchString(value) {
 		return
@@ -455,7 +475,7 @@ func (r *sourceRegistry) registerSourceIDByKey(key, value string) {
 	}
 	switch space {
 	case spaceChunk:
-		r.RegisterChunk(ChunkReference{ChunkID: value})
+		r.registerChunk(ChunkReference{ChunkID: value}, evidence)
 	case spaceDocument:
 		r.RegisterDocument(value)
 	case spaceDocumentRef:
@@ -468,7 +488,7 @@ func (r *sourceRegistry) registerSourceIDByKey(key, value string) {
 		// (res://, storage providers) must never enter the web handle space,
 		// where CompactKnownText would rewrite them a second time.
 		if parsed, err := url.Parse(value); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
-			r.RegisterWeb(value, "")
+			r.registerWeb(value, "", evidence)
 		}
 	}
 }

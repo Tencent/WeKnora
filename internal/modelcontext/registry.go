@@ -208,6 +208,15 @@ func (r *Registry) RegisterChunk(ref ChunkReference) string {
 	return r.sources.RegisterChunk(ref)
 }
 
+// RegisterContextChunk makes a directory entry addressable by tools without
+// allowing it to substantiate an answer before retrieval.
+func (r *Registry) RegisterContextChunk(ref ChunkReference) string {
+	if r == nil || r.sources == nil {
+		return ""
+	}
+	return r.sources.registerChunk(ref, false)
+}
+
 func (r *Registry) RegisterDocument(id string) string {
 	if r == nil || r.sources == nil {
 		return ""
@@ -291,6 +300,9 @@ func (r *Registry) ModelToolResultForTool(toolName string, result *types.ToolRes
 	// built-ins; dynamic MCP output remains fully opaque.
 	if sourceCompactionAllowed(toolName) {
 		modelOutput = r.sources.CompactKnownText(modelOutput)
+	}
+	if result.Success && (toolName == "call_mcp_tool" || strings.HasPrefix(toolName, "mcp_")) {
+		modelOutput += r.mcpSourceCandidates(result.Output)
 	}
 	return r.resources.EncodeText(modelOutput) + outputFilesPrompt(result)
 }

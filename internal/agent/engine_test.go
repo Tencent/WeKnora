@@ -142,6 +142,42 @@ func TestStreamLLMSummarySlugSurvivesDocumentCompaction(t *testing.T) {
 	require.NotContains(t, result.ToolCalls[0].Function.Arguments, "res://")
 }
 
+// Reproduce an MCP-only turn following a property-management answer, with
+// unrelated FAQ entries injected by the bound-KB directory.
+func TestStreamMCPAnswerRejectsUnretrievedKnowledgeCitations(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: `KM文章<ref id="c`},
+		{ResponseType: types.ResponseTypeAnswer, Content: `3"/><ref id="c1"/><ref id="c2"/> 正确来源<ref id="w`},
+		{ResponseType: types.ResponseTypeAnswer, Content: `1"/>`, Done: true, FinishReason: "stop"},
+	}}}}
+	engine := newTestEngine(t, model)
+	engine.knowledgeBasesInfo = []*KnowledgeBaseInfo{{
+		ID: "faq-kb", Name: "FAQ TEST", Type: "faq", RecentDocs: []RecentDocInfo{
+			{ChunkID: "faq-1", Title: "什么是 WeKnora？", FAQStandardQuestion: "什么是 WeKnora？"},
+			{ChunkID: "faq-2", Title: "如何创建知识库？", FAQStandardQuestion: "如何创建知识库？"},
+		},
+	}}
+	userTurn := engine.RenderUserTurnContent("session", "KM上有趣的事情")
+	const article = "https://km.woa.com/articles/show/669504?jumpfrom=kmmcp"
+	toolResult := engine.modelContext.ModelToolResultForTool("call_mcp_tool", &types.ToolResult{
+		Success: true, Output: "标题: AI玩法\n摘要: Computer Use 案例\n链接: " + article,
+	})
+	var emitted strings.Builder
+	result, err := engine.streamLLMToEventBus(context.Background(), []chat.Message{
+		{Role: "assistant", Content: `物业工作<kb doc="9月13日周报.docx" chunk_id="weekly-report" />`},
+		{Role: "user", Content: userTurn},
+		{Role: "tool", Name: "call_mcp_tool", Content: toolResult},
+	}, nil, func(chunk *types.StreamResponse, _ string) {
+		emitted.WriteString(chunk.Content)
+	})
+	require.NoError(t, err)
+	want := `KM文章 正确来源<web url="` + article + `" title="" />`
+	require.Equal(t, want, result.Content)
+	require.Equal(t, want, emitted.String(), "invalid references must not reach SSE even transiently")
+	require.Contains(t, model.calls[0][2].Content, `<source id="w1"`)
+	require.Contains(t, model.calls[0][1].Content, `chunk_id="c1"`, "FAQ handles remain available for retrieval")
+}
+
 // Reproduces the round that ended a 40-round conversation: the stream broke
 // while serializing a large write_sandbox_file call, after a short preamble had
 // already streamed. Treating that as a completed turn let the preamble stand in
