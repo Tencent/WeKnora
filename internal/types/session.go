@@ -46,6 +46,9 @@ type SummaryConfig struct {
 	MaxCompletionTokens int `json:"max_completion_tokens"`
 	// Thinking - whether to enable thinking mode
 	Thinking *bool `json:"thinking"`
+	// ThinkingLevel is the resolved platform thinking level for this call
+	// (session request > agent > model defaults are folded in by the service).
+	ThinkingLevel string `json:"thinking_level,omitempty"`
 }
 
 // ContextCompressionStrategy represents the strategy for context compression

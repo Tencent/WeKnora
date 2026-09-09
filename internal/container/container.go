@@ -80,6 +80,7 @@ import (
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
+	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/limiter"
@@ -464,6 +465,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// persistence succeeded immediately before trigger enqueue failed). Re-arm
 	// them only after the matching handlers are ready.
 	must(container.Invoke(recoverPendingWikiTasks))
+
+	// Model-parameter catalog (design §5.4): async pull, never blocks or
+	// fails startup — an unavailable catalog only degrades form prefill.
+	go catalog.Init(ctx)
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container

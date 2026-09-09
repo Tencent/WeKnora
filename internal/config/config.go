@@ -143,6 +143,7 @@ type SummaryConfig struct {
 	MaxCompletionTokens int     `yaml:"max_completion_tokens" json:"max_completion_tokens"`
 	NoMatchPrefix       string  `yaml:"no_match_prefix"       json:"no_match_prefix"`
 	Thinking            *bool   `yaml:"thinking"              json:"thinking"`
+	ThinkingLevel       string  `yaml:"thinking_level"        json:"thinking_level"`
 
 	// Prompt template ID fields — resolved to text by backfillConversationDefaults
 	PromptID          string `yaml:"prompt_id"           json:"prompt_id"`

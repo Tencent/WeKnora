@@ -6,12 +6,14 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -635,6 +637,9 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	if newParams.ExtraConfig == nil {
 		newParams.ExtraConfig = model.Parameters.ExtraConfig
 	}
+	if newParams.Chat == nil {
+		newParams.Chat = model.Parameters.Chat
+	}
 	model.Parameters = newParams
 
 	model.Source = req.Source
@@ -709,11 +714,13 @@ func (h *ModelHandler) DeleteModel(c *gin.Context) {
 
 // ModelProviderDTO 模型厂商信息 DTO
 type ModelProviderDTO struct {
-	Value       string            `json:"value"`       // provider 标识符
-	Label       string            `json:"label"`       // 显示名称
-	Description string            `json:"description"` // 描述
-	DefaultURLs map[string]string `json:"defaultUrls"` // 按模型类型区分的默认 URL
-	ModelTypes  []string          `json:"modelTypes"`  // 支持的模型类型
+	Value        string                      `json:"value"`                 // provider 标识符
+	Label        string                      `json:"label"`                 // 显示名称
+	Description  string                      `json:"description"`           // 描述
+	DefaultURLs  map[string]string           `json:"defaultUrls"`           // 按模型类型区分的默认 URL
+	ModelTypes   []string                    `json:"modelTypes"`            // 支持的模型类型
+	Capabilities provider.Capabilities       `json:"capabilities"`          // 能力声明分片（前端按 type 渲染）
+	ExtraFields  []provider.ExtraFieldConfig `json:"extraFields,omitempty"` // 动态配置字段
 }
 
 // modelTypeToFrontend 将后端 ModelType 转换为前端兼容的字符串
@@ -798,11 +805,13 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 		}
 
 		result = append(result, ModelProviderDTO{
-			Value:       string(p.Name),
-			Label:       p.DisplayName,
-			Description: p.Description,
-			DefaultURLs: defaultURLs,
-			ModelTypes:  modelTypes,
+			Value:        string(p.Name),
+			Label:        p.DisplayName,
+			Description:  p.Description,
+			DefaultURLs:  defaultURLs,
+			ModelTypes:   modelTypes,
+			Capabilities: p.EffectiveCapabilities(),
+			ExtraFields:  p.ExtraFields,
 		})
 	}
 
@@ -811,4 +820,146 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 		"success": true,
 		"data":    result,
 	})
+}
+
+// --- Model catalog & remote listing (design §5.10) ---
+
+// catalogProbeRateLimit caps backend-probe calls per tenant per minute to
+// keep the endpoint from becoming an external-scanning channel (design §5.10.2).
+const catalogProbeRateLimit = 10
+
+var (
+	catalogProbeMu    sync.Mutex
+	catalogProbeWindows = map[uint64]*catalogProbeWindow{}
+)
+
+type catalogProbeWindow struct {
+	start time.Time
+	count int
+}
+
+func allowCatalogProbe(tenantID uint64) bool {
+	now := time.Now()
+	catalogProbeMu.Lock()
+	defer catalogProbeMu.Unlock()
+	w, ok := catalogProbeWindows[tenantID]
+	if !ok || now.Sub(w.start) >= time.Minute {
+		if len(catalogProbeWindows) > 1024 {
+			catalogProbeWindows = map[uint64]*catalogProbeWindow{} // crude GC
+		}
+		catalogProbeWindows[tenantID] = &catalogProbeWindow{start: now, count: 1}
+		return true
+	}
+	w.count++
+	return w.count <= catalogProbeRateLimit
+}
+
+// GetModelCatalog godoc
+// @Summary      获取模型参数目录
+// @Description  返回内置 models.json 目录（按 provider 过滤可选），用于配置表单预填
+// @Tags         模型管理
+// @Produce      json
+// @Param        provider  query     string  false  "厂商标识（不传返回全部）"
+// @Success      200       {object}  map[string]interface{}  "目录数据"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/catalog [get]
+func (h *ModelHandler) GetModelCatalog(c *gin.Context) {
+	cat := catalog.Get()
+	if cat == nil {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"available": false}})
+		return
+	}
+	if filter := c.Query("provider"); filter != "" {
+		prov, ok := cat.Providers[strings.ToLower(filter)]
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"data":    gin.H{"available": false, "reason": "provider not in catalog"},
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+			"available": true,
+			"version":   cat.Version,
+			"providers": gin.H{strings.ToLower(filter): prov},
+		}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"available": true,
+		"version":   cat.Version,
+		"providers": cat.Providers,
+	}})
+}
+
+// ProbeRemoteCatalogRequest carries the connection info for a backend
+// listing probe. APIKey is only present for unsaved configurations; saved
+// models reuse stored credentials via ModelID (design §5.10.2).
+type ProbeRemoteCatalogRequest struct {
+	Provider string `json:"provider" binding:"required"`
+	BaseURL  string `json:"base_url"`
+	APIKey   string `json:"api_key,omitempty"`
+	ModelID  string `json:"model_id,omitempty"`
+}
+
+// ProbeRemoteCatalog godoc
+// @Summary      探测远端模型列表
+// @Description  后端代理探测厂商模型列表（密钥不出服务端；未保存配置可直接探测）
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      ProbeRemoteCatalogRequest  true  "厂商连接信息"
+// @Success      200      {object}  map[string]interface{}  "模型列表或失败原因"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Failure      429      {object}  errors.AppError         "探测频率超限"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/remote-catalog [post]
+func (h *ModelHandler) ProbeRemoteCatalog(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID, _ := types.TenantIDFromContext(ctx)
+
+	var req ProbeRemoteCatalogRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	if !allowCatalogProbe(tenantID) {
+		c.Error(errors.NewTooManyRequestsError("remote catalog probe rate limit exceeded"))
+		return
+	}
+
+	apiKey := strings.TrimSpace(req.APIKey)
+	if apiKey == "" && req.ModelID != "" {
+		model, err := h.service.GetModelByID(ctx, req.ModelID)
+		if err != nil || model == nil {
+			c.Error(errors.NewNotFoundError("model not found"))
+			return
+		}
+		apiKey = model.Parameters.APIKey
+		if req.BaseURL == "" {
+			req.BaseURL = model.Parameters.BaseURL
+		}
+	}
+
+	models, err := catalog.ListRemoteModels(ctx, req.Provider, req.BaseURL, apiKey)
+	if err != nil {
+		// Failure degrades, never blocks (design §5.10.2): the frontend
+		// switches to manual entry with the reason. Keys are never logged.
+		logger.Warnf(ctx, "[remote-catalog] probe failed for provider %s: %v",
+			secutils.SanitizeForLog(req.Provider), err)
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+			"available": false,
+			"reason":    err.Error(),
+		}})
+		return
+	}
+
+	logger.Infof(ctx, "[remote-catalog] probe ok for provider %s: %d models",
+		secutils.SanitizeForLog(req.Provider), len(models))
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"available": true,
+		"models":    models,
+	}})
 }

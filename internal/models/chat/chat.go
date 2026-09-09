@@ -33,15 +33,20 @@ type ChatOptions struct {
 	// Callers may set either; CompletionBudget() prefers MaxCompletionTokens.
 	// The outbound Chat Completions JSON carries exactly one of max_tokens or
 	// max_completion_tokens, chosen per provider (see wireCompletionTokenField).
-	MaxTokens           int             `json:"max_tokens"`
-	MaxCompletionTokens int             `json:"max_completion_tokens"`
-	FrequencyPenalty    float64         `json:"frequency_penalty"`             // 频率惩罚
-	PresencePenalty     float64         `json:"presence_penalty"`              // 存在惩罚
-	Thinking            *bool           `json:"thinking"`                      // 是否启用思考
-	Tools               []Tool          `json:"tools,omitempty"`               // 可用工具列表
-	ToolChoice          string          `json:"tool_choice,omitempty"`         // "auto", "required", "none", or specific tool
-	ParallelToolCalls   *bool           `json:"parallel_tool_calls,omitempty"` // 是否允许并行工具调用（默认 nil 表示由模型决定）
-	Format              json.RawMessage `json:"format,omitempty"`              // 响应格式定义
+	MaxTokens           int     `json:"max_tokens"`
+	MaxCompletionTokens int     `json:"max_completion_tokens"`
+	FrequencyPenalty    float64 `json:"frequency_penalty"` // 频率惩罚
+	PresencePenalty     float64 `json:"presence_penalty"`  // 存在惩罚
+	Thinking            *bool   `json:"thinking"`          // 是否启用思考
+	// ThinkingLevel carries the platform thinking level (low/medium/high/
+	// xhigh/max). Empty means "not set at call level" — the wire layer
+	// resolves model-level and provider-default fallbacks
+	// (see ResolveThinkingLevel).
+	ThinkingLevel     string          `json:"thinking_level,omitempty"`
+	Tools             []Tool          `json:"tools,omitempty"`               // 可用工具列表
+	ToolChoice        string          `json:"tool_choice,omitempty"`         // "auto", "required", "none", or specific tool
+	ParallelToolCalls *bool           `json:"parallel_tool_calls,omitempty"` // 是否允许并行工具调用（默认 nil 表示由模型决定）
+	Format            json.RawMessage `json:"format,omitempty"`              // 响应格式定义
 	// PromptCacheKey is the provider routing key (OpenAI prompt_cache_key).
 	// Empty falls back to the session ID on the call context.
 	PromptCacheKey string `json:"-"`
@@ -139,6 +144,12 @@ type ChatConfig struct {
 	CustomHeaders map[string]string
 	AppID         string
 	AppSecret     string // 加密值，由工厂函数调用方传入，在 NewWeKnoraCloudChat 中使用前已解密
+	// ThinkingLevel is the model record's stored default level (platform
+	// vocabulary). Empty means the user never picked one (ADR 0002).
+	ThinkingLevel string
+	// SelectedLevels is the model record's user-picked/catalog-hit level set.
+	// Empty means no model-level constraint; provider caps still bound.
+	SelectedLevels []string
 }
 
 // ConfigFromModel 根据 types.Model 构造 ChatConfig。
@@ -149,7 +160,7 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *ChatConfig {
 	if m == nil {
 		return nil
 	}
-	return &ChatConfig{
+	cfg := &ChatConfig{
 		ModelID:        m.ID,
 		APIKey:         m.Parameters.APIKey,
 		BaseURL:        m.Parameters.BaseURL,
@@ -162,6 +173,11 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *ChatConfig {
 		AppID:          appID,
 		AppSecret:      appSecret,
 	}
+	if m.Parameters.Chat != nil {
+		cfg.ThinkingLevel = m.Parameters.Chat.ThinkingLevel
+		cfg.SelectedLevels = m.Parameters.Chat.SelectedLevels
+	}
+	return cfg
 }
 
 // NewChat 创建聊天实例

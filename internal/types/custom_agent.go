@@ -129,6 +129,10 @@ type CustomAgentConfig struct {
 	MaxCompletionTokens int `yaml:"max_completion_tokens" json:"max_completion_tokens"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `yaml:"thinking" json:"thinking"`
+	// ThinkingLevel overrides the model-level default thinking level for this
+	// agent (platform vocabulary: low/medium/high/xhigh/max). Empty means
+	// "use the model record's level".
+	ThinkingLevel string `yaml:"thinking_level" json:"thinking_level"`
 	// Whether final answers include knowledge/web source citations. Nil defaults to true
 	// so agents saved before this option was introduced keep their existing behavior.
 	CitationEnabled *bool `yaml:"citation_enabled" json:"citation_enabled"`

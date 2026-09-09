@@ -228,8 +228,9 @@ type azureReasoningProvider struct{ azureProvider }
 func (azureReasoningProvider) Matches(model string) bool {
 	return provider.IsOpenAIReasoningOrGPT5Model(model)
 }
-func (azureReasoningProvider) ShapeRequest(req *openai.ChatCompletionRequest, _ *ChatOptions, _ bool) {
+func (azureReasoningProvider) ShapeRequest(req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool) {
 	shapeOpenAIReasoning(req)
+	applyReasoningEffort(req, opts)
 }
 
 // --- OpenAI reasoning / GPT-5: no sampling params, must use max_completion_tokens ---
@@ -240,8 +241,9 @@ func (openAIReasoningProvider) Name() provider.ProviderName { return provider.Pr
 func (openAIReasoningProvider) Matches(model string) bool {
 	return provider.IsOpenAIReasoningOrGPT5Model(model)
 }
-func (openAIReasoningProvider) ShapeRequest(req *openai.ChatCompletionRequest, _ *ChatOptions, _ bool) {
+func (openAIReasoningProvider) ShapeRequest(req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool) {
 	shapeOpenAIReasoning(req)
+	applyReasoningEffort(req, opts)
 }
 
 // --- Moonshot: v1 models accept only temperature=1 ---
@@ -272,6 +274,23 @@ func shapeOpenAIReasoning(req *openai.ChatCompletionRequest) {
 		req.MaxCompletionTokens = req.MaxTokens
 	}
 	req.MaxTokens = 0
+}
+
+// applyReasoningEffort passes the resolved thinking level through to OpenAI's
+// reasoning_effort field (design §4.3 "OpenAI 直接透传档位值"). Only called by
+// the reasoning adapters, whose Matches gate already restricts this to
+// o-series / GPT-5 models — non-reasoning models never see this field. The
+// level arrives already resolved (call > model > provider default) via
+// RemoteAPIChat.resolveThinkingLevelOpts; its value space is the provider
+// caps' SupportedLevels, which for OpenAI is {low, medium, high} — the exact
+// reasoning_effort enum, so no translation is needed. Per design §4.1 the
+// level only carries meaning when thinking is explicitly enabled; off/unset
+// suppresses it.
+func applyReasoningEffort(req *openai.ChatCompletionRequest, opts *ChatOptions) {
+	if opts == nil || opts.ThinkingLevel == "" || opts.Thinking == nil || !*opts.Thinking {
+		return
+	}
+	req.ReasoningEffort = opts.ThinkingLevel
 }
 
 // providerRegistry is ordered: more specific adapters (those with a real

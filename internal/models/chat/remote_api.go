@@ -36,6 +36,16 @@ type RemoteAPIChat struct {
 	adapter providerAdapter
 	// thinkingOverride 来自 extra_config.thinking_control，非 nil 时覆盖 adapter.Thinking()。
 	thinkingOverride ThinkingStrategy
+	// modelThinkingLevel is the stored level on the model record (Chat shard);
+	// selectedLevels is the user-picked/catalog-hit subset. buildOutbound
+	// resolves the effective level via ResolveThinkingLevel (design §4.2)
+	// before the wire layer maps it (OpenAI reasoning_effort passthrough;
+	// continuous-vendor numeric mapping deferred pending vendor docs).
+	modelThinkingLevel string
+	selectedLevels     []string
+	// thinkingCaps is the provider-level thinking capability, cached at
+	// construction so buildOutbound can resolve without a registry lookup per call.
+	thinkingCaps provider.ThinkingCaps
 }
 
 // NewRemoteAPIChat 创建远程 API 聊天实例
@@ -98,18 +108,31 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 		}
 	}
 
+	// Cache the provider-level thinking caps so buildOutbound resolves the
+	// effective level without a registry lookup per call. GetOrDefault keeps
+	// generic (no-thinking) behavior for unknown providers.
+	var thinkingCaps provider.ThinkingCaps
+	if p, ok := provider.Get(providerName); ok {
+		if chatCaps := p.Info().EffectiveCapabilities().Chat; chatCaps != nil {
+			thinkingCaps = chatCaps.Thinking
+		}
+	}
+
 	return &RemoteAPIChat{
-		modelName:        modelName,
-		client:           openai.NewClientWithConfig(config),
-		modelID:          chatConfig.ModelID,
-		baseURL:          strings.TrimRight(config.BaseURL, "/"),
-		apiKey:           apiKey,
-		provider:         providerName,
-		appID:            chatConfig.AppID,
-		appSecret:        chatConfig.AppSecret,
-		customHeaders:    chatConfig.CustomHeaders,
-		adapter:          resolveProvider(providerName, modelName),
-		thinkingOverride: parseThinkingOverride(chatConfig.ExtraConfig),
+		modelName:          modelName,
+		client:             openai.NewClientWithConfig(config),
+		modelID:            chatConfig.ModelID,
+		baseURL:            strings.TrimRight(config.BaseURL, "/"),
+		apiKey:             apiKey,
+		provider:           providerName,
+		appID:              chatConfig.AppID,
+		appSecret:          chatConfig.AppSecret,
+		customHeaders:      chatConfig.CustomHeaders,
+		adapter:            resolveProvider(providerName, modelName),
+		thinkingOverride:   parseThinkingOverride(chatConfig.ExtraConfig),
+		modelThinkingLevel: chatConfig.ThinkingLevel,
+		selectedLevels:     chatConfig.SelectedLevels,
+		thinkingCaps:       thinkingCaps,
 	}, nil
 }
 
@@ -127,6 +150,25 @@ func (c *RemoteAPIChat) shapedRequest(messages []Message, opts *ChatOptions, isS
 	return req
 }
 
+// resolveThinkingLevelOpts returns a shallow copy of opts with the thinking
+// level resolved through the full chain (design §4.2): the call-level value
+// (session>agent, already folded by the service layer) wins; otherwise the
+// model record's level; otherwise the provider default. The copy avoids
+// mutating the caller's ChatOptions. Empty result means "emit no level
+// parameter" — the wire layer's signal to let the upstream provider decide.
+func (c *RemoteAPIChat) resolveThinkingLevelOpts(opts *ChatOptions) *ChatOptions {
+	if opts == nil {
+		return opts
+	}
+	resolved := ResolveThinkingLevel(opts.ThinkingLevel, c.modelThinkingLevel, c.selectedLevels, c.thinkingCaps)
+	if resolved == opts.ThinkingLevel {
+		return opts // no change — avoid a copy
+	}
+	copy := *opts
+	copy.ThinkingLevel = resolved
+	return &copy
+}
+
 // buildOutbound assembles the final outbound request: the body to send, the
 // endpoint override (empty for the standard endpoint), and whether the raw HTTP
 // path is required. This is the single place that composes adapter + thinking,
@@ -134,7 +176,7 @@ func (c *RemoteAPIChat) shapedRequest(messages []Message, opts *ChatOptions, isS
 func (c *RemoteAPIChat) buildOutbound(
 	ctx context.Context, messages []Message, opts *ChatOptions, isStream bool,
 ) (body any, endpoint string, useRawHTTP bool, err error) {
-	req := c.shapedRequest(messages, opts, isStream)
+	req := c.shapedRequest(messages, c.resolveThinkingLevelOpts(opts), isStream)
 
 	thinking := c.thinkingOverride
 	if thinking == nil {
@@ -179,27 +221,36 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	// 调用方若显式设置了更短或更长的 deadline，都会被原样尊重。
 	timeoutCtx, cancel := withLLMTimeout(ctx, defaultChatTimeout)
 	defer cancel()
+	// Provider-level retry (design §4.6): rate limits / 5xx / network failures
+	// retry with backoff; auth / context-exceeded / content policy fail fast.
+	return withProviderRetry(timeoutCtx, func(context.Context) (*types.ChatResponse, error) {
+		return c.chatOnce(timeoutCtx, messages, opts)
+	})
+}
 
-	body, endpoint, useRawHTTP, err := c.buildOutbound(timeoutCtx, messages, opts, false)
+// chatOnce is one Chat attempt (build outbound → invoke → parse). The retry
+// orchestration lives in Chat; each attempt re-runs the full funnel.
+func (c *RemoteAPIChat) chatOnce(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
+	body, endpoint, useRawHTTP, err := c.buildOutbound(ctx, messages, opts, false)
 	if err != nil {
 		return nil, err
 	}
 	if useRawHTTP {
-		return c.chatWithRawHTTP(timeoutCtx, endpoint, body, opts)
+		return c.chatWithRawHTTP(ctx, endpoint, body, opts)
 	}
 
 	req := *(body.(*openai.ChatCompletionRequest))
-	c.logRequest(timeoutCtx, req, false)
-	resp, err := c.client.CreateChatCompletion(timeoutCtx, req)
+	c.logRequest(ctx, req, false)
+	resp, err := c.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		if isMultimodalNotSupportedError(err) {
-			logger.Warnf(timeoutCtx, "[LLM Request] Model %s does not support multimodal, retrying without images", c.modelName)
+			logger.Warnf(ctx, "[LLM Request] Model %s does not support multimodal, retrying without images", c.modelName)
 			cleaned := stripImagesFromMessages(messages)
 			req = c.shapedRequest(cleaned, opts, false)
-			resp, err = c.client.CreateChatCompletion(timeoutCtx, req)
+			resp, err = c.client.CreateChatCompletion(ctx, req)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("create chat completion: %w", err)
+			return nil, wrapInvokeError("create chat completion", err)
 		}
 	}
 
@@ -207,7 +258,7 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	if err != nil {
 		return nil, err
 	}
-	logUsage(timeoutCtx, c.modelName, &result.Usage)
+	logUsage(ctx, c.modelName, &result.Usage)
 	return result, nil
 }
 
@@ -250,7 +301,7 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, classifyStatusBody(resp.StatusCode, string(body))
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -273,44 +324,61 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 	return result, nil
 }
 
-// ChatStream 进行流式聊天
 func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
-	// 仅在调用方未设置 deadline 时附加兜底超时；流式调用默认超时更长，
-	// 因为带思考/推理的模型可能数十秒甚至几分钟才产出首 token。
 	timeoutCtx, cancel := withLLMTimeout(ctx, defaultStreamTimeout)
-
-	body, endpoint, useRawHTTP, err := c.buildOutbound(timeoutCtx, messages, opts, true)
+	// Provider-level retry (design §4.6), scoped to the pre-stream window:
+	// each attempt builds the request and opens the stream; once the goroutine
+	// starts feeding the channel, failures stream through as chunks and are no
+	// longer retryable (the consumer has already seen earlier chunks).
+	ch, err := withProviderRetry(timeoutCtx, func(context.Context) (<-chan types.StreamResponse, error) {
+		return c.chatStreamOnce(timeoutCtx, cancel, messages, opts)
+	})
 	if err != nil {
 		cancel()
 		return nil, err
 	}
+	return ch, nil
+}
+
+// chatStreamOnce is one stream attempt. Error paths deliberately do NOT call
+// cancel: the retry wrapper may re-run the attempt, and a canceled context
+// would kill the retry. The outer ChatStream cancels on terminal failure.
+func (c *RemoteAPIChat) chatStreamOnce(
+	ctx context.Context, cancel context.CancelFunc, messages []Message, opts *ChatOptions,
+) (<-chan types.StreamResponse, error) {
+	body, endpoint, useRawHTTP, err := c.buildOutbound(ctx, messages, opts, true)
+	if err != nil {
+		return nil, err
+	}
 	if useRawHTTP {
-		ch, err := c.chatStreamWithRawHTTP(timeoutCtx, endpoint, body, opts)
-		return wrapStreamCancel(ch, err, cancel)
+		ch, err := c.chatStreamWithRawHTTP(ctx, endpoint, body, opts)
+		if err != nil {
+			return nil, err // no cancel — the attempt may be retried
+		}
+		return wrapStreamCancel(ch, nil, cancel)
 	}
 
 	req := *(body.(*openai.ChatCompletionRequest))
-	c.logRequest(timeoutCtx, req, true)
+	c.logRequest(ctx, req, true)
 
 	streamDumper := newStreamPacketDumper(c.modelName, &req)
 	if streamDumper != nil {
-		logger.Infof(timeoutCtx, "[LLM Stream Raw Dump] writing packets to %s", streamDumper.Path())
+		logger.Infof(ctx, "[LLM Stream Raw Dump] writing packets to %s", streamDumper.Path())
 	}
 
 	streamChan := make(chan types.StreamResponse)
 
-	stream, err := c.client.CreateChatCompletionStream(timeoutCtx, req)
+	stream, err := c.client.CreateChatCompletionStream(ctx, req)
 	if err != nil {
 		if isMultimodalNotSupportedError(err) {
-			logger.Warnf(timeoutCtx, "[LLM Stream] Model %s does not support multimodal, retrying without images", c.modelName)
+			logger.Warnf(ctx, "[LLM Stream] Model %s does not support multimodal, retrying without images", c.modelName)
 			cleaned := stripImagesFromMessages(messages)
 			req = c.shapedRequest(cleaned, opts, true)
-			stream, err = c.client.CreateChatCompletionStream(timeoutCtx, req)
+			stream, err = c.client.CreateChatCompletionStream(ctx, req)
 		}
 		if err != nil {
-			cancel()
 			close(streamChan)
-			return nil, fmt.Errorf("create chat completion stream: %w", err)
+			return nil, wrapInvokeError("create chat completion stream", err)
 		}
 	}
 
@@ -319,7 +387,7 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 		if streamDumper != nil {
 			defer streamDumper.Close()
 		}
-		c.processStream(timeoutCtx, stream, streamChan, streamDumper)
+		c.processStream(ctx, stream, streamChan, streamDumper)
 	}()
 
 	return streamChan, nil
@@ -384,7 +452,7 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, classifyStatusBody(resp.StatusCode, string(body))
 	}
 
 	streamChan := make(chan types.StreamResponse)

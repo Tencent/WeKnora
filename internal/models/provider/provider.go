@@ -109,6 +109,10 @@ type ProviderInfo struct {
 	ModelTypes   []types.ModelType          // 支持的模型类型
 	RequiresAuth bool                       // 是否需要 API key
 	ExtraFields  []ExtraFieldConfig         // 额外配置字段
+	// Capabilities is the optional explicit capability declaration. When zero,
+	// EffectiveCapabilities synthesizes a provider-level default from ModelTypes
+	// and Name (capabilities.go). Providers override only what differs.
+	Capabilities Capabilities
 }
 
 // GetDefaultURL 获取指定模型类型的默认 URL
@@ -121,6 +125,18 @@ func (p ProviderInfo) GetDefaultURL(modelType types.ModelType) string {
 		return url
 	}
 	return ""
+}
+
+// EffectiveCapabilities returns the capability declaration the frontend and
+// runtime should consume. An explicit ProviderInfo.Capabilities (non-zero)
+// wins; otherwise a provider-level default is synthesized from ModelTypes and
+// Name (capabilities.go). This keeps "one capability declaration per adapter"
+// cheap: adapters set only what deviates from the default.
+func (p ProviderInfo) EffectiveCapabilities() Capabilities {
+	if p.Capabilities.isZero() {
+		return defaultCapabilities(p.Name, p.ModelTypes)
+	}
+	return p.Capabilities
 }
 
 // ExtraFieldConfig 定义提供者的额外配置字段

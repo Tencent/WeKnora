@@ -99,8 +99,8 @@ func (s *sessionService) AgentQA(
 	modelContextWindow := 0
 	if effectiveModelID != "" {
 		if modelInfo, err := s.modelService.GetModelByID(ctx, effectiveModelID); err == nil && modelInfo != nil {
-			agentModelSupportsVision = modelInfo.Parameters.SupportsVision
-			modelContextWindow = modelInfo.Parameters.ContextWindow
+			agentModelSupportsVision = modelInfo.Parameters.GetSupportsVision()
+			modelContextWindow = modelInfo.Parameters.GetContextWindow()
 		}
 	}
 	agentConfig.MaxContextTokens = types.AgentMaxContextTokens(
@@ -300,6 +300,7 @@ func (s *sessionService) buildAgentConfig(
 		MCPServices:                 customAgent.Config.MCPServices,
 		MCPAuthWaitTimeout:          customAgent.Config.MCPAuthWaitTimeout,
 		Thinking:                    customAgent.Config.Thinking,
+		ThinkingLevel:               customAgent.Config.ThinkingLevel,
 		CitationEnabled:             customAgent.Config.CitationEnabled,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
@@ -311,6 +312,11 @@ func (s *sessionService) buildAgentConfig(
 	// Falls back to global configuration if no specific timeout is set for the agent.
 	if agentConfig.LLMCallTimeout == 0 && s.cfg.Agent != nil && s.cfg.Agent.LLMCallTimeout > 0 {
 		agentConfig.LLMCallTimeout = s.cfg.Agent.LLMCallTimeout
+	}
+
+	// Session-level thinking level wins over the agent config (design §4.2).
+	if req.ThinkingLevel != "" {
+		agentConfig.ThinkingLevel = req.ThinkingLevel
 	}
 
 	// Configure skills based on CustomAgentConfig

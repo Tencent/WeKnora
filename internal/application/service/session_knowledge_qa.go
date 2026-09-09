@@ -64,6 +64,7 @@ func (s *sessionService) KnowledgeQA(
 		NoMatchPrefix:       s.cfg.Conversation.Summary.NoMatchPrefix,
 		MaxCompletionTokens: s.cfg.Conversation.Summary.MaxCompletionTokens,
 		Thinking:            s.cfg.Conversation.Summary.Thinking,
+		ThinkingLevel:       s.cfg.Conversation.Summary.ThinkingLevel,
 	}
 	fallbackStrategy := types.FallbackStrategy(s.cfg.Conversation.FallbackStrategy)
 	if fallbackStrategy == "" {
@@ -76,7 +77,7 @@ func (s *sessionService) KnowledgeQA(
 	var vlmModelID string
 	if chatModelID != "" {
 		if chatModelInfo, err := s.modelService.GetModelByID(ctx, chatModelID); err == nil && chatModelInfo != nil {
-			chatModelSupportsVision = chatModelInfo.Parameters.SupportsVision
+			chatModelSupportsVision = chatModelInfo.Parameters.GetSupportsVision()
 		}
 	}
 	if req.CustomAgent != nil {
@@ -152,6 +153,14 @@ func (s *sessionService) KnowledgeQA(
 	// Apply custom agent overrides (system prompt, temperature, retrieval params,
 	// rewrite, fallback, FAQ strategy, history turns)
 	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
+
+	// Thinking-level resolution for the knowledge QA path (design §4.2):
+	// agent overrides were just folded in; the per-request value wins last.
+	// The model-record default is applied at the wire layer (Phase D),
+	// where the adapter also owns provider-default fallback.
+	if req.ThinkingLevel != "" {
+		chatManage.SummaryConfig.ThinkingLevel = req.ThinkingLevel
+	}
 
 	// An agent may opt out of long-term memory. The preference is per-request
 	// rather than per-user, so it travels in the context that the recall

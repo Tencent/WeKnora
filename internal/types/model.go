@@ -120,6 +120,23 @@ type EmbeddingParameters struct {
 	SupportsDimensionOverride bool `yaml:"supports_dimension_override" json:"supports_dimension_override"`
 }
 
+// ChatParameters holds chat/vlm-specific configuration. KnowledgeQA and VLLM
+// share this shard (design §3). New chat fields live here; the deprecated
+// top-level SupportsVision / ContextWindow / MaxOutputTokens on ModelParameters
+// are still read through the Get* accessors below during the migration window
+// (design §8) so legacy rows keep working. Rerank/ASR have no type-specific
+// parameters today, so they get no shard until they do (ponytail: no empty
+// structs).
+type ChatParameters struct {
+	ContextWindow     int      `yaml:"context_window,omitempty"     json:"context_window,omitempty"`
+	MaxOutputTokens   int      `yaml:"max_output_tokens,omitempty"   json:"max_output_tokens,omitempty"`
+	ThinkingEnabled   *bool    `yaml:"thinking_enabled,omitempty"    json:"thinking_enabled,omitempty"`
+	ThinkingLevel     string   `yaml:"thinking_level,omitempty"      json:"thinking_level,omitempty"`
+	SelectedLevels    []string `yaml:"selected_levels,omitempty"     json:"selected_levels,omitempty"`
+	ParallelToolCalls *bool    `yaml:"parallel_tool_calls,omitempty" json:"parallel_tool_calls,omitempty"`
+	InputModalities   []string `yaml:"input_modalities,omitempty"    json:"input_modalities,omitempty"`
+}
+
 type ModelParameters struct {
 	BaseURL             string              `yaml:"base_url"             json:"base_url"`
 	APIKey              string              `yaml:"api_key"              json:"api_key"`
@@ -128,12 +145,22 @@ type ModelParameters struct {
 	ParameterSize       string              `yaml:"parameter_size"       json:"parameter_size"` // Ollama model parameter size (e.g., "7B", "13B", "70B")
 	Provider            string              `yaml:"provider"             json:"provider"`       // Provider identifier: openai, aliyun, zhipu, generic
 	ExtraConfig         map[string]string   `yaml:"extra_config"         json:"extra_config"`   // Provider-specific configuration
+	// Chat is the chat/vlm-specific parameter shard (design §3). Nil for
+	// non-chat models and for legacy rows saved before sharding; the Get*
+	// accessors below read it first and fall back to the deprecated
+	// top-level fields, so existing records keep working through the
+	// migration window (design §8).
+	Chat *ChatParameters `yaml:"chat,omitempty" json:"chat,omitempty"`
 	// CustomHeaders 允许在调用远程模型 API 时附加自定义 HTTP 请求头，
 	// 用途类似 Python OpenAI SDK 的 extra_headers 参数，
 	// 常见场景包括透传企业网关鉴权信息、追踪 ID、路由标识等。
 	// 保留字段（Authorization、api-key、Content-Type、Accept 等）会在运行期被忽略以避免破坏签名/鉴权流程。
-	CustomHeaders  map[string]string `yaml:"custom_headers,omitempty" json:"custom_headers,omitempty"`
-	SupportsVision bool              `yaml:"supports_vision"      json:"supports_vision"` // Whether the model accepts image/multimodal input
+	CustomHeaders map[string]string `yaml:"custom_headers,omitempty" json:"custom_headers,omitempty"`
+	// Deprecated: use Chat.InputModalities. Kept for the migration window;
+	// read via GetSupportsVision().
+	SupportsVision bool `yaml:"supports_vision" json:"supports_vision"`
+	// Deprecated: use Chat.ContextWindow / Chat.MaxOutputTokens. Kept for the
+	// migration window; read via GetContextWindow() / GetMaxOutputTokens().
 	// ContextWindow is the model's total context window in tokens and
 	// MaxOutputTokens the most it emits in one response. Both are provider
 	// facts the agent cannot discover but has to act on: the context window is
@@ -152,6 +179,50 @@ type ModelParameters struct {
 	// WeKnoraCloud 厂商专用凭证
 	AppID     string `yaml:"app_id,omitempty"     json:"app_id,omitempty"`
 	AppSecret string `yaml:"app_secret,omitempty" json:"app_secret,omitempty"` // AES-256 加密存储，实际承载上游 API Key
+}
+
+// GetContextWindow reads the context window, preferring the Chat shard and
+// falling back to the deprecated top-level field (migration window, design §8).
+func (p *ModelParameters) GetContextWindow() int {
+	if p.Chat != nil && p.Chat.ContextWindow != 0 {
+		return p.Chat.ContextWindow
+	}
+	return p.ContextWindow
+}
+
+// GetMaxOutputTokens reads the max output budget, preferring the Chat shard.
+func (p *ModelParameters) GetMaxOutputTokens() int {
+	if p.Chat != nil && p.Chat.MaxOutputTokens != 0 {
+		return p.Chat.MaxOutputTokens
+	}
+	return p.MaxOutputTokens
+}
+
+// GetSupportsVision reports whether the model accepts image input. The Chat
+// shard expresses this as InputModalities; the deprecated top-level
+// SupportsVision is the legacy fallback. A non-nil Chat shard is authoritative
+// even when it lists no image modality, so a migrated row that dropped vision
+// does not resurrect the stale legacy bool.
+func (p *ModelParameters) GetSupportsVision() bool {
+	if p.Chat != nil {
+		for _, m := range p.Chat.InputModalities {
+			if m == "image" {
+				return true
+			}
+		}
+		return false
+	}
+	return p.SupportsVision
+}
+
+// EnsureChat returns the Chat shard, allocating it on first use. Writers go
+// through this so new values land only in the shard (design §8: write-side is
+// shard-only; the deprecated top-level fields are never written again).
+func (p *ModelParameters) EnsureChat() *ChatParameters {
+	if p.Chat == nil {
+		p.Chat = &ChatParameters{}
+	}
+	return p.Chat
 }
 
 // Per-response redaction for Model now lives in dto.NewModelResponse. The

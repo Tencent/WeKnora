@@ -23,6 +23,13 @@ type AnthropicChat struct {
 	baseURL       string
 	apiKey        string
 	customHeaders map[string]string
+	// modelThinkingLevel / selectedLevels are the model record's stored
+	// thinking config (Chat shard); buildRequest resolves the effective level
+	// through them plus the provider default (design §4.2) and maps it to
+	// thinking.budget_tokens (design §4.3 continuous-vendor收编).
+	modelThinkingLevel string
+	selectedLevels     []string
+	thinkingCaps       provider.ThinkingCaps
 }
 
 type anthropicCacheControl struct {
@@ -49,6 +56,16 @@ type anthropicRequest struct {
 	Messages    []anthropicMessage `json:"messages"`
 	Temperature *float64           `json:"temperature,omitempty"`
 	TopP        *float64           `json:"top_p,omitempty"`
+	// Thinking carries the extended-thinking block. The API requires
+	// max_tokens > thinking.budget_tokens; buildRequest enforces this.
+	Thinking *anthropicThinkingConfig `json:"thinking,omitempty"`
+}
+
+// anthropicThinkingConfig is the Messages-API thinking block:
+// {"type": "enabled", "budget_tokens": N}.
+type anthropicThinkingConfig struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
 }
 
 type anthropicResponse struct {
@@ -114,24 +131,44 @@ func NewAnthropicChat(config *ChatConfig) (*AnthropicChat, error) {
 		baseURL = provider.AnthropicBaseURL
 	}
 
+	// Cache the provider-level thinking caps for level resolution (same
+	// pattern as RemoteAPIChat; the Anthropic path does not go through the
+	// OpenAI-compatible funnel).
+	var thinkingCaps provider.ThinkingCaps
+	if p, ok := provider.Get(provider.ProviderAnthropic); ok {
+		if chatCaps := p.Info().EffectiveCapabilities().Chat; chatCaps != nil {
+			thinkingCaps = chatCaps.Thinking
+		}
+	}
+
 	return &AnthropicChat{
-		modelName:     config.ModelName,
-		modelID:       config.ModelID,
-		baseURL:       baseURL,
-		apiKey:        config.APIKey,
-		customHeaders: config.CustomHeaders,
+		modelName:          config.ModelName,
+		modelID:            config.ModelID,
+		baseURL:            baseURL,
+		apiKey:             config.APIKey,
+		customHeaders:      config.CustomHeaders,
+		modelThinkingLevel: config.ThinkingLevel,
+		selectedLevels:     config.SelectedLevels,
+		thinkingCaps:       thinkingCaps,
 	}, nil
 }
 
 func (c *AnthropicChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
+	timeoutCtx, cancel := withLLMTimeout(ctx, defaultChatTimeout)
+	defer cancel()
+	// Provider-level retry (design §4.6), same policy as the OpenAI family.
+	return withProviderRetry(timeoutCtx, func(context.Context) (*types.ChatResponse, error) {
+		return c.chatOnce(timeoutCtx, messages, opts)
+	})
+}
+
+// chatOnce is one Chat attempt for the Anthropic Messages protocol.
+func (c *AnthropicChat) chatOnce(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
 	reqBody := c.buildRequest(ctx, messages, opts)
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
-
-	ctx, cancel := withLLMTimeout(ctx, defaultChatTimeout)
-	defer cancel()
 
 	endpoint := c.endpoint()
 	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
@@ -149,7 +186,7 @@ func (c *AnthropicChat) Chat(ctx context.Context, messages []Message, opts *Chat
 
 	resp, err := rawHTTPClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, wrapInvokeError("send request", err)
 	}
 	defer resp.Body.Close()
 
@@ -164,7 +201,7 @@ func (c *AnthropicChat) Chat(ctx context.Context, messages []Message, opts *Chat
 			return nil, err
 		}
 		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-			return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, chatResp.Content)
+			return nil, classifyStatusBody(resp.StatusCode, chatResp.Content)
 		}
 		logUsage(ctx, c.modelName, &chatResp.Usage)
 		return chatResp, nil
@@ -176,9 +213,9 @@ func (c *AnthropicChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		if chatResp.Error != nil && chatResp.Error.Message != "" {
-			return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, chatResp.Error.Message)
+			return nil, classifyStatusBody(resp.StatusCode, chatResp.Error.Message)
 		}
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, classifyStatusBody(resp.StatusCode, string(body))
 	}
 
 	result := c.parseResponse(&chatResp)
@@ -187,6 +224,23 @@ func (c *AnthropicChat) Chat(ctx context.Context, messages []Message, opts *Chat
 }
 
 func (c *AnthropicChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
+	// Retry scoped to the pre-stream window: build + send + status check.
+	// Once processAnthropicStream starts feeding the channel, failures are
+	// no longer retryable (the consumer has seen earlier chunks).
+	resp, err := withProviderRetry(ctx, func(context.Context) (*http.Response, error) {
+		return c.openStream(ctx, messages, opts)
+	})
+	if err != nil {
+		return nil, err
+	}
+	streamChan := make(chan types.StreamResponse)
+	go processAnthropicStream(ctx, c.modelName, resp, streamChan)
+	return streamChan, nil
+}
+
+// openStream builds and sends one streaming request, returning the live
+// response or a classified error. The caller owns closing resp on success.
+func (c *AnthropicChat) openStream(ctx context.Context, messages []Message, opts *ChatOptions) (*http.Response, error) {
 	reqBody := c.buildRequest(ctx, messages, opts)
 	reqBody.Stream = true
 	jsonData, err := json.Marshal(reqBody)
@@ -211,17 +265,14 @@ func (c *AnthropicChat) ChatStream(ctx context.Context, messages []Message, opts
 
 	resp, err := rawHTTPClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, wrapInvokeError("send request", err)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, classifyStatusBody(resp.StatusCode, string(body))
 	}
-
-	streamChan := make(chan types.StreamResponse)
-	go processAnthropicStream(ctx, c.modelName, resp, streamChan)
-	return streamChan, nil
+	return resp, nil
 }
 
 func (c *AnthropicChat) GetModelName() string {
@@ -279,6 +330,24 @@ func (c *AnthropicChat) buildRequest(_ context.Context, messages []Message, opts
 			topP := opts.TopP
 			req.TopP = &topP
 		}
+		// Extended thinking (design §4.3 continuous-vendor收编): resolve the
+		// level through the same chain the OpenAI funnel uses, then map it to
+		// thinking.budget_tokens. Only enabled thinking carries the block —
+		// nil (model default) and false (off) leave the request unchanged,
+		// preserving the pre-thinking behavior for existing callers.
+		if opts.Thinking != nil && *opts.Thinking {
+			level := ResolveThinkingLevel(opts.ThinkingLevel, c.modelThinkingLevel, c.selectedLevels, c.thinkingCaps)
+			if budget := anthropicBudgetTokens(level); budget > 0 {
+				// The Messages API requires max_tokens > thinking.budget_tokens:
+				// the budget is carved out of the output ceiling, so raise the
+				// ceiling to keep room for the answer itself when the caller's
+				// completion budget does not already exceed the thinking budget.
+				if req.MaxTokens <= budget {
+					req.MaxTokens = budget + 4096
+				}
+				req.Thinking = &anthropicThinkingConfig{Type: "enabled", BudgetTokens: budget}
+			}
+		}
 	}
 
 	var systemParts []string
@@ -326,6 +395,25 @@ func (c *AnthropicChat) buildRequest(_ context.Context, messages []Message, opts
 		}
 	}
 	return req
+}
+
+// anthropicBudgetTokens maps the platform thinking level to an Anthropic
+// thinking budget (design §4.3: low→2K / medium→8K / high→16K
+// budget_tokens). Levels outside the mapping (xhigh/max, or empty) return 0 —
+// no thinking block is emitted and the model keeps its own default. Anthropic
+// provider caps declare SupportedLevels {low, medium, high}, so the resolver
+// never produces xhigh/max here; the 0 return is a defensive fallback.
+func anthropicBudgetTokens(level string) int {
+	switch level {
+	case "low":
+		return 2048
+	case "medium":
+		return 8192
+	case "high":
+		return 16384
+	default:
+		return 0
+	}
 }
 
 func textFromMultiContent(parts []MessageContentPart) string {

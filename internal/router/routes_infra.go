@@ -22,6 +22,10 @@ func RegisterModelRoutes(
 	{
 		// 获取模型厂商列表 — Viewer+
 		models.GET("/providers", g.Viewer(), handler.ListModelProviders)
+		// 获取模型参数目录（表单预填取值链第 2 级）— Viewer+
+		models.GET("/catalog", g.Viewer(), handler.GetModelCatalog)
+		// 后端代理探测远端模型列表（密钥不出服务端）— Admin+
+		models.POST("/remote-catalog", g.Admin(), handler.ProbeRemoteCatalog)
 		// 创建模型 — Admin+
 		models.POST("", g.Admin(), handler.CreateModel)
 		// 获取模型列表 — Viewer+
