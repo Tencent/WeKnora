@@ -419,6 +419,23 @@ func (s *knowledgeBaseService) ListKnowledgeBasesByTenantID(ctx context.Context,
 		})
 		return nil, err
 	}
+	if key, ok := types.TenantAPIKeyScopeFromContext(ctx); ok && key.KnowledgeBasePermissions != nil {
+		permissions := kbReadPermissions(ctx, s.kbShareService)
+		filtered := make([]*types.KnowledgeBase, 0, len(kbs))
+		for _, kb := range kbs {
+			if kb == nil || !key.AllowsKnowledgeBase(kb.ID) {
+				continue
+			}
+			allowed, err := permissions.Check(kb.ID, kb.TenantID, types.OrgRoleViewer)
+			if err != nil {
+				return nil, err
+			}
+			if allowed {
+				filtered = append(filtered, kb)
+			}
+		}
+		kbs = filtered
+	}
 	for _, kb := range kbs {
 		kb.EnsureDefaults()
 		switch kb.Type {

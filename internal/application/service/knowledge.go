@@ -784,7 +784,28 @@ func (s *knowledgeService) GetKnowledgeBatch(ctx context.Context,
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	return s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
+	rows, err := s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
+	if err != nil {
+		return nil, err
+	}
+	if key, ok := types.TenantAPIKeyScopeFromContext(ctx); ok && key.KnowledgeBasePermissions != nil {
+		permissions := kbReadPermissions(ctx, s.kbShareService)
+		filtered := make([]*types.Knowledge, 0, len(rows))
+		for _, row := range rows {
+			if row == nil || !key.AllowsKnowledgeBase(row.KnowledgeBaseID) {
+				continue
+			}
+			allowed, err := permissions.Check(row.KnowledgeBaseID, row.TenantID, types.OrgRoleViewer)
+			if err != nil {
+				return nil, err
+			}
+			if allowed {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
+	return rows, nil
 }
 
 // GetKnowledgeBatchWithSharedAccess retrieves knowledge by IDs, including items from shared KBs the user has access to.
@@ -1090,6 +1111,23 @@ func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, 
 
 // SearchKnowledgeForScopes searches knowledge within the given scopes (e.g. for shared agent context).
 func (s *knowledgeService) SearchKnowledgeForScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error) {
+	if key, ok := types.TenantAPIKeyScopeFromContext(ctx); ok && key.KnowledgeBasePermissions != nil {
+		permissions := kbReadPermissions(ctx, s.kbShareService)
+		filtered := make([]types.KnowledgeSearchScope, 0, len(scopes))
+		for _, scope := range scopes {
+			if !key.AllowsKnowledgeBase(scope.KBID) {
+				continue
+			}
+			allowed, err := permissions.Check(scope.KBID, scope.TenantID, types.OrgRoleViewer)
+			if err != nil {
+				return nil, false, 0, err
+			}
+			if allowed {
+				filtered = append(filtered, scope)
+			}
+		}
+		scopes = filtered
+	}
 	if len(scopes) == 0 {
 		return nil, false, 0, nil
 	}

@@ -36,7 +36,8 @@ func WithSharedAgent(ctx context.Context, agent *types.CustomAgent) context.Cont
 // HasKBGrant checks only previously resolved resource access. It never infers
 // ownership from the execution tenant, and always reapplies API-key scope.
 func HasKBGrant(ctx context.Context, kbID string, tenantID uint64, required types.OrgMemberRole) bool {
-	if !required.IsValid() || types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbID) != nil {
+	if !required.IsValid() || types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbID) != nil ||
+		!allowsAPIKeyKBPermission(ctx, kbID, required) {
 		return false
 	}
 	caller := types.CallerFromContext(ctx)
@@ -50,6 +51,9 @@ func HasKBGrant(ctx context.Context, kbID string, tenantID uint64, required type
 			grant.permission.HasPermission(required) {
 			return true
 		}
+	}
+	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok && scope.KnowledgeBasePermissions != nil {
+		return false // Granular keys must resolve cross-workspace KB shares directly.
 	}
 	grant, ok := ctx.Value(types.SharedAgentGrantContextKey).(agentGrant)
 	return ok && caller.TenantID != 0 && required == types.OrgRoleViewer && grant.caller == caller &&
@@ -83,6 +87,9 @@ func (p *KBPermissions) Check(kbID string, ownerTenantID uint64, required types.
 	if err := types.AuthorizeTenantAPIKeyKnowledgeBases(p.ctx, kbID); err != nil {
 		return false, err
 	}
+	if !allowsAPIKeyKBPermission(p.ctx, kbID, required) {
+		return false, ErrForbidden
+	}
 	if (p.caller.TenantID == ownerTenantID && required == types.OrgRoleViewer) ||
 		HasKBGrant(p.ctx, kbID, ownerTenantID, required) {
 		return true, nil
@@ -91,4 +98,21 @@ func (p *KBPermissions) Check(kbID string, ownerTenantID uint64, required types.
 		return false, nil
 	}
 	return p.shares.Check(kbID, required)
+}
+
+// Resource grants cannot outlive a narrower API-key scope, even when a service
+// is invoked directly without the HTTP operation projection.
+func allowsAPIKeyKBPermission(ctx context.Context, kbID string, required types.OrgMemberRole) bool {
+	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	if !ok || scope.KnowledgeBasePermissions == nil {
+		return true
+	}
+	permission := types.APIKeyKBRead
+	switch required {
+	case types.OrgRoleEditor:
+		permission = types.APIKeyKBWrite
+	case types.OrgRoleAdmin:
+		permission = types.APIKeyKBManage
+	}
+	return scope.AllowsKnowledgeBasePermission(kbID, permission)
 }

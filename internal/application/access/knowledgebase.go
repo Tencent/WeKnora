@@ -104,6 +104,9 @@ func ResolveKB(ctx context.Context, request KBRequest, kb *types.KnowledgeBase, 
 	if err := types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kb.ID); err != nil {
 		return nil, err
 	}
+	if !allowsAPIKeyKBPermission(ctx, kb.ID, required) {
+		return nil, ErrForbidden
+	}
 	request.Caller = request.Caller.Normalize()
 	if caller, ok := ctx.Value(types.CallerContextKey).(types.Caller); ok && caller != request.Caller {
 		return nil, ErrForbidden
@@ -123,6 +126,11 @@ func ResolveKB(ctx context.Context, request KBRequest, kb *types.KnowledgeBase, 
 		if err == nil && shared && permission.HasPermission(required) {
 			return grant(permission)
 		}
+	}
+	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok && scope.KnowledgeBasePermissions != nil {
+		// A delegated shared-KB grant requires a live direct share. A different
+		// shared agent must not resurrect it after that share is revoked.
+		return nil, ErrForbidden
 	}
 	if required != types.OrgRoleViewer || agents == nil {
 		return nil, ErrForbidden

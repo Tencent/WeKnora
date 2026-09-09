@@ -32,9 +32,10 @@ var versionedSQLiteColumns = map[string][]string{
 	"embed_channels":     {"allow_memory"},                   // 000060
 	"mcp_oauth_tokens":   {"principal_type", "principal_id"}, // 000064
 	"mcp_tool_approvals": {"enabled"},                        // 000091
+	"tenant_api_keys":    {"knowledge_base_permissions"},     // 000093
 }
 
-const expectedSQLiteMigrationVersion = 13
+const expectedSQLiteMigrationVersion = 14
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -261,4 +262,40 @@ func copySQLiteMigrationsV4(t *testing.T, repoRoot string) string {
 		require.NoError(t, os.WriteFile(filepath.Join(destDir, name), data, 0o600))
 	}
 	return dest
+}
+
+func TestSQLiteAPIKeyPermissionRollbackDoesNotWidenKeys(t *testing.T) {
+	db := openSQLiteDB(t, filepath.Join(t.TempDir(), "keys.db"))
+	_, err := db.Exec("CREATE TABLE tenant_api_keys (id INTEGER PRIMARY KEY, revoked_at DATETIME)")
+	require.NoError(t, err)
+	_, err = db.Exec("INSERT INTO tenant_api_keys (id) VALUES (1)")
+	require.NoError(t, err)
+	root := sqliteRepoRoot(t)
+	up, err := os.ReadFile(filepath.Join(root, "migrations/sqlite/000014_api_key_kb_permissions.up.sql"))
+	require.NoError(t, err)
+	_, err = db.Exec(string(up))
+	require.NoError(t, err)
+	var legacyIsNull bool
+	require.NoError(
+		t,
+		db.QueryRow("SELECT knowledge_base_permissions IS NULL FROM tenant_api_keys WHERE id=1").Scan(&legacyIsNull),
+	)
+	require.True(t, legacyIsNull)
+	_, err = db.Exec(
+		`INSERT INTO tenant_api_keys (id, knowledge_base_permissions) VALUES (2, '{}'), (3, '{"kb":"read"}')`,
+	)
+	require.NoError(t, err)
+	down, err := os.ReadFile(filepath.Join(root, "migrations/sqlite/000014_api_key_kb_permissions.down.sql"))
+	require.NoError(t, err)
+	_, err = db.Exec(string(down))
+	require.NoError(t, err)
+	for _, id := range []int{1, 2, 3} {
+		var revoked bool
+		require.NoError(
+			t,
+			db.QueryRow("SELECT revoked_at IS NOT NULL FROM tenant_api_keys WHERE id=?", id).Scan(&revoked),
+		)
+		require.Equal(t, id != 1, revoked)
+	}
+	require.False(t, sqliteColumnExists(t, db, "tenant_api_keys", "knowledge_base_permissions"))
 }

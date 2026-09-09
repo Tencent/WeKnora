@@ -16,7 +16,8 @@
 | PUT    | `/tenants/:id`             | 更新空间信息                                      |
 | DELETE | `/tenants/:id`             | 删除空间                                          |
 | GET    | `/tenants/:id/api-keys`    | 列出空间 API Key（Owner）                         |
-| POST   | `/tenants/:id/api-keys`    | 创建带角色的 API Key（Owner）                  |
+| POST   | `/tenants/:id/api-keys`    | 创建 API Key（Owner）                  |
+| PUT    | `/tenants/:id/api-keys/:key_id` | 更新 API Key 配置（Owner）              |
 | DELETE | `/tenants/:id/api-keys/:key_id` | 吊销指定 API Key（Owner）                   |
 | GET    | `/tenants/:id/api-principal-config` | 获取 API Key 用户身份配置（Owner）          |
 | PUT    | `/tenants/:id/api-principal-config` | 更新 API Key 用户身份配置（Owner）          |
@@ -355,12 +356,55 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/tenants/10000' \
 
 自 scoped API Key 改造后，密钥以独立记录存储，支持：
 
-- **role**：`viewer`（只读 + 语义检索 POST）、`contributor`（知识库写入）、`admin`（空间级管理，不含 `/api-keys` 管理面）
-- **knowledge_base_ids**：可选，将 Key 限制在指定知识库
+- **capabilities**：整把 Key 的能力上限，例如 `retrieve`、`chat`、`ingest`、`manage_kbs`；`full_access` 表示空间级全权
+- **knowledge_base_ids**：旧版统一授权的知识库白名单，配置时仅接受本工作空间的库
+- **knowledge_base_permissions**：逐库授权，可选本工作空间及直接共享给该工作空间的库
 - **吊销**：`DELETE /tenants/:id/api-keys/:key_id`
 - **过期**：创建时可选 `expires_at_unix`
 
 空间 Key 固定绑定创建时的空间。路由级 capability 鉴权与 KB 访问守卫会在 `X-API-Key` 认证后继续强制执行。
+
+### 逐库授权
+
+逐库权限编辑器组件预览（示例数据）：
+
+![逐库权限编辑器](../images/api-key-kb-permissions.png)
+
+`POST /tenants/:id/api-keys` 和 `PUT /tenants/:id/api-keys/:key_id` 均支持：
+
+```json
+{
+  "name": "document-integration",
+  "full_access": false,
+  "capabilities": ["retrieve", "chat", "ingest", "manage_kbs"],
+  "knowledge_base_permissions": {
+    "kb-a": "read",
+    "kb-b": "write",
+    "shared-kb-c": "manage"
+  }
+}
+```
+
+| 级别 | 对该库允许的操作上限 |
+| --- | --- |
+| `read` | 读取、检索、聊天引用 |
+| `write` | 包含读取，并允许写入内容；管理绑定该库的数据源也需要至少此级别 |
+| `manage` | 包含内容写入，并允许修改库设置及路由允许的库生命周期操作 |
+
+逐库级别不会授予整把 Key 未勾选的能力。例如 `write` 仍需 `ingest` 才能上传，`manage` 仍需 `manage_kbs` 才能修改库设置。创建新库由 `manage_kbs` 控制，新库不会自动加入逐库授权。
+
+- 省略 `knowledge_base_permissions` 或传 `null`：保留旧的统一授权语义；旧白名单为空时仍表示不限制库范围。
+- 传 `{}`：不允许访问任何知识库。它不会变成“全部知识库”。
+- 非空对象：只有列出的库可访问，每个库按自己的级别授权。不能同时传非空 `knowledge_base_ids`。
+- 更新为完整配置替换；编辑逐库 Key 时须带回 `knowledge_base_permissions`。`full_access=true` 会清空两种库范围。
+- 共享库创建授权时校验当前权限，访问时继续校验共享关系与工作空间成员权限；撤销或降权会作用于后续请求。仅通过共享智能体可见的库不能作为独立共享库授权，不能用智能体重新获得已撤销的直接共享访问。
+- 共享库的 `write` / `manage` 要求当前共享至少为 editor；删除源库、清空内容及修改共享关系仍受各自的所有权和能力限制。
+- 使用 `GET /shared-knowledge-bases` 获取可见的直接共享库；`retrieve` Key 可调用，结果与 Key 的知识库范围取交集。普通 `/knowledge-bases` 列表仍返回本工作空间的库。
+- 此配置适用于工作空间 Key。平台 Key 保持现有能力和白名单模型。
+
+存储使用可空 JSON 列：PostgreSQL migration 000093、SQLite migration 000014；现有记录为 NULL，无需转换。回滚时会先吊销逐库 Key，防止丢失逐库限制后权限扩大。
+
+实现集中在 `types/tenant_api_key_permissions.go`（模型与操作投影）、`middleware/api_key_gate.go`（路由能力到操作级别）、`application/access`（资源及实时共享权限）。前端编辑器独立于集成设置页；其他接口继续复用现有的知识库范围检查。
 
 ### 平台 API Key
 
@@ -403,7 +447,7 @@ Principal **仅**用于按终端用户隔离以下能力：
 - **MCP OAuth** 访问令牌（同一空间下不同外部用户各自授权，token 互不共用）
 - 对话内 MCP OAuth 提示、MCP 工具审批等与终端用户绑定的流程
 
-Principal **不会**缩小 API Key 的 HTTP 路由权限：路由访问由 Key 的 `role` 控制；空间内 RBAC 角色与 `role` 一致。知识库、Agent 等资源的细粒度访问另受 KB 守卫约束。
+Principal **不会**缩小 API Key 的 HTTP 路由权限：路由访问由 Key 的 `full_access` / `capabilities` 控制，逐库访问再与知识库授权取交集。知识库、Agent 等资源的细粒度访问另受 KB 守卫约束。
 
 ### 模式与安全假设
 

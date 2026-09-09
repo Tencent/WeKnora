@@ -608,7 +608,7 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 
 func filterKnowledgeBasesForAPIKeyScope(ctx context.Context, kbs []*types.KnowledgeBase) []*types.KnowledgeBase {
 	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
-	if !ok || len(scope.KnowledgeBaseIDs) == 0 {
+	if !ok || !scope.IsKnowledgeBaseRestricted() {
 		return kbs
 	}
 	filtered := make([]*types.KnowledgeBase, 0, len(kbs))

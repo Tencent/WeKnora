@@ -93,6 +93,9 @@ export type TenantAPIKeyCapability =
   | 'system_runtime_manage'
   | 'system_audit_read'
 
+export type APIKeyKBPermission = 'read' | 'write' | 'manage'
+export type APIKeyKBPermissions = Record<string, APIKeyKBPermission>
+
 export interface TenantAPIKey {
   id: number
   scope_type?: 'tenant' | 'platform'
@@ -100,6 +103,7 @@ export interface TenantAPIKey {
   api_key: string
   full_access: boolean
   knowledge_base_ids: string[] | null
+  knowledge_base_permissions?: APIKeyKBPermissions | null
   capabilities?: TenantAPIKeyCapability[]
   last_used_at?: string
   expires_at?: string
@@ -114,6 +118,7 @@ export interface CreateTenantAPIKeyPayload {
   name: string
   full_access?: boolean
   knowledge_base_ids?: string[]
+  knowledge_base_permissions?: APIKeyKBPermissions | null
   capabilities?: TenantAPIKeyCapability[]
   expires_at_unix?: number
 }
@@ -122,6 +127,7 @@ export interface UpdateTenantAPIKeyPayload {
   name: string
   full_access: boolean
   knowledge_base_ids: string[]
+  knowledge_base_permissions?: APIKeyKBPermissions | null
   capabilities: TenantAPIKeyCapability[]
   expires_at_unix?: number
 }

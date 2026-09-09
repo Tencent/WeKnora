@@ -16,14 +16,16 @@ import (
 // choose a target workspace per request. KeyHash is used for authentication
 // lookup; APIKey is stored encrypted when SYSTEM_AES_KEY is set.
 type TenantAPIKey struct {
-	ID               uint64          `json:"id" gorm:"primaryKey;autoIncrement"`
-	TenantID         *uint64         `json:"tenant_id,omitempty" gorm:"index"`
-	ScopeType        APIKeyScopeType `json:"scope_type" gorm:"type:varchar(16);not null;default:tenant;index"`
-	Name             string          `json:"name" gorm:"type:varchar(128);not null"`
-	KeyHash          string          `json:"-" gorm:"type:varchar(64);not null;uniqueIndex"`
-	APIKey           string          `json:"api_key" gorm:"column:api_key;type:text;not null;default:''"`
-	FullAccess       bool            `json:"full_access" gorm:"not null;default:false"`
-	KnowledgeBaseIDs StringArray     `json:"knowledge_base_ids" gorm:"type:jsonb;not null;default:'[]'"`
+	ID        uint64          `json:"id" gorm:"primaryKey;autoIncrement"`
+	TenantID  *uint64         `json:"tenant_id,omitempty" gorm:"index"`
+	ScopeType APIKeyScopeType `json:"scope_type" gorm:"type:varchar(16);not null;default:tenant;index"`
+	Name      string          `json:"name" gorm:"type:varchar(128);not null"`
+	KeyHash   string          `json:"-" gorm:"type:varchar(64);not null;uniqueIndex"`
+	APIKey    string          `json:"api_key" gorm:"column:api_key;type:text;not null;default:''"`
+
+	FullAccess               bool                `json:"full_access" gorm:"not null;default:false"`
+	KnowledgeBaseIDs         StringArray         `json:"knowledge_base_ids" gorm:"type:jsonb;not null;default:'[]'"`
+	KnowledgeBasePermissions APIKeyKBPermissions `json:"knowledge_base_permissions" gorm:"type:jsonb"`
 	// Capabilities are bounded grants for non-full-access keys. Each
 	// capability maps to an integration persona (retrieval, chat, ingest,
 	// tenant infrastructure management, and history access). KB scoping
@@ -267,11 +269,14 @@ func (k *TenantAPIKey) AfterFind(tx *gorm.DB) error {
 
 // TenantAPIKeyScope is the request-context projection used by middleware.
 type TenantAPIKeyScope struct {
-	KeyID            uint64
-	ScopeType        APIKeyScopeType
-	FullAccess       bool
-	KnowledgeBaseIDs StringArray
-	Capabilities     StringArray
+	KeyID                    uint64
+	ScopeType                APIKeyScopeType
+	FullAccess               bool
+	KnowledgeBaseIDs         StringArray
+	KnowledgeBasePermissions APIKeyKBPermissions
+	// KnowledgeBasePermission is the operation selected by the route gate; empty means read.
+	KnowledgeBasePermission APIKeyKBPermission
+	Capabilities            StringArray
 }
 
 func WithTenantAPIKeyScope(ctx context.Context, scope TenantAPIKeyScope) context.Context {
@@ -290,12 +295,20 @@ func TenantAPIKeyScopeFromContext(ctx context.Context) (TenantAPIKeyScope, bool)
 }
 
 func (s TenantAPIKeyScope) Normalize() TenantAPIKeyScope {
+	if s.KnowledgeBasePermission == "" {
+		s.KnowledgeBasePermission = APIKeyKBRead
+	}
+	if s.KnowledgeBasePermissions != nil {
+		s.KnowledgeBaseIDs = s.KnowledgeBasePermissions.IDs(s.KnowledgeBasePermission)
+	}
 	return TenantAPIKeyScope{
-		KeyID:            s.KeyID,
-		ScopeType:        NormalizeAPIKeyScopeType(s.ScopeType),
-		FullAccess:       s.FullAccess,
-		KnowledgeBaseIDs: normalizeIDArray(s.KnowledgeBaseIDs),
-		Capabilities:     NormalizeAPIKeyCapabilities(s.Capabilities),
+		KeyID:                    s.KeyID,
+		ScopeType:                NormalizeAPIKeyScopeType(s.ScopeType),
+		FullAccess:               s.FullAccess,
+		KnowledgeBaseIDs:         normalizeIDArray(s.KnowledgeBaseIDs),
+		KnowledgeBasePermissions: s.KnowledgeBasePermissions.Clone(),
+		KnowledgeBasePermission:  s.KnowledgeBasePermission,
+		Capabilities:             NormalizeAPIKeyCapabilities(s.Capabilities),
 	}
 }
 
@@ -323,7 +336,7 @@ func (s TenantAPIKeyScope) AllowsKnowledgeBase(kbID string) bool {
 		return false
 	}
 	s = s.Normalize()
-	if len(s.KnowledgeBaseIDs) == 0 {
+	if !s.IsKnowledgeBaseRestricted() {
 		return true
 	}
 	for _, allowed := range s.KnowledgeBaseIDs {
@@ -335,12 +348,12 @@ func (s TenantAPIKeyScope) AllowsKnowledgeBase(kbID string) bool {
 }
 
 func (s TenantAPIKeyScope) IsKnowledgeBaseRestricted() bool {
-	return len(s.Normalize().KnowledgeBaseIDs) > 0
+	return s.KnowledgeBasePermissions != nil || len(s.KnowledgeBaseIDs) > 0
 }
 
 func (s TenantAPIKeyScope) AllowsKnowledgeBases(kbIDs []string) bool {
 	s = s.Normalize()
-	if len(s.KnowledgeBaseIDs) == 0 {
+	if !s.IsKnowledgeBaseRestricted() {
 		return true
 	}
 	if len(kbIDs) == 0 {

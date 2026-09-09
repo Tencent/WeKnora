@@ -180,6 +180,17 @@ func transferAPIScope(
 		!scope.HasCapability(capability) {
 		return ErrForbidden
 	}
+	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		required := types.APIKeyKBManage
+		if operation == KBTransferMove {
+			required = types.APIKeyKBWrite
+		}
+		for _, id := range ids {
+			if !scope.AllowsKnowledgeBasePermission(id, required) {
+				return ErrForbidden
+			}
+		}
+	}
 	return nil
 }
 

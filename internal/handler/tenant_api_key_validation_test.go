@@ -11,7 +11,7 @@ func TestValidateTenantAPIKeyRequestRequiresCapabilitiesForScopedKey(t *testing.
 	err := validateTenantAPIKeyRequest(context.Background(), nil, 1, tenantAPIKeyCreateRequest{
 		Name:       "integration",
 		FullAccess: false,
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("expected validation error for scoped key without capabilities")
 	}
@@ -21,7 +21,7 @@ func TestValidateTenantAPIKeyRequestAllowsFullAccessWithoutCapabilities(t *testi
 	if err := validateTenantAPIKeyRequest(context.Background(), nil, 1, tenantAPIKeyCreateRequest{
 		Name:       "owner",
 		FullAccess: true,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("full-access key validation error = %v", err)
 	}
 }
@@ -31,7 +31,7 @@ func TestValidateTenantAPIKeyRequestAcceptsScopedKeyWithCapability(t *testing.T)
 		Name:         "chat",
 		FullAccess:   false,
 		Capabilities: []string{"chat"},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("scoped key validation error = %v", err)
 	}
 }

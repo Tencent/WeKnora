@@ -32,7 +32,8 @@ export const DEFAULT_TENANT_API_KEY_CAPABILITIES = new Set<TenantAPIKeyCapabilit
 ])
 
 export const KB_SCOPED_API_KEY_CAPABILITIES = new Set<TenantAPIKeyCapability>([
-  'retrieve', 'chat', 'ingest', 'manage_kbs', 'manage_agents', 'manage_datasources',
+  'retrieve', 'chat', 'read_agents', 'ingest', 'manage_kbs', 'manage_agents', 'manage_datasources',
+  'message_history', 'run_evaluations', 'manage_channels',
 ])
 
 export const TENANT_API_KEY_CAPABILITY_GROUPS: ApiKeyCapabilityGroup[] = [

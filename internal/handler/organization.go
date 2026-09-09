@@ -1244,6 +1244,9 @@ func (h *OrganizationHandler) ListOrgShares(c *gin.Context) {
 
 	response := make([]types.KnowledgeBaseShareResponse, 0, len(shares))
 	for _, s := range shares {
+		if types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, s.KnowledgeBaseID) != nil {
+			continue
+		}
 		// Effective permission for current user = min(share permission, my role in org)
 		effectivePerm := s.Permission
 		if !myRoleInOrg.HasPermission(s.Permission) {
@@ -1301,6 +1304,13 @@ func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
 
 	tenantID := types.MustTenantIDFromContext(ctx)
 	callerTenantRole := types.TenantRoleFromContext(ctx)
+	key, hasKey := types.TenantAPIKeyScopeFromContext(ctx)
+	granularKey := hasKey && key.KnowledgeBasePermissions != nil
+	if granularKey {
+		// Resolve the workspace share ceiling, then apply this key's per-KB
+		// ceiling below. The compatibility Viewer role is not its authority.
+		callerTenantRole = types.TenantRoleOwner
+	}
 
 	sharedKBs, err := h.shareService.ListSharedKnowledgeBases(ctx, tenantID, callerTenantRole)
 	if err != nil {
@@ -1317,7 +1327,24 @@ func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
 	// metadata (share_id, organization_id, etc.) is preserved as-is.
 	rows := make([]map[string]interface{}, 0, len(sharedKBs))
 	for _, info := range sharedKBs {
-		rows = append(rows, sharedKBRow(info, nil))
+		if info == nil || info.KnowledgeBase == nil {
+			continue
+		}
+		if types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, info.KnowledgeBase.ID) != nil {
+			continue
+		}
+		row := sharedKBRow(info, nil)
+		if granularKey {
+			ceiling := types.OrgRoleViewer
+			canWrite := key.HasCapability(types.APIKeyCapabilityIngest) ||
+				key.HasCapability(types.APIKeyCapabilityManageKnowledgeBases) ||
+				key.HasCapability(types.APIKeyCapabilityManageDataSources)
+			if key.KnowledgeBasePermissions[info.KnowledgeBase.ID].Allows(types.APIKeyKBWrite) && canWrite {
+				ceiling = types.OrgRoleEditor
+			}
+			row["permission"] = types.MinOrgRole(info.Permission, ceiling)
+		}
+		rows = append(rows, row)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1683,6 +1710,24 @@ func (h *OrganizationHandler) ListOrganizationSharedKnowledgeBases(c *gin.Contex
 	// ("share endpoints never leak vector-store metadata").
 	rows := make([]map[string]interface{}, 0, len(list))
 	for _, item := range list {
+		if item == nil || item.KnowledgeBase == nil {
+			continue
+		}
+		if types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, item.KnowledgeBase.ID) != nil {
+			continue
+		}
+		if key, ok := types.TenantAPIKeyScopeFromContext(ctx); ok && key.KnowledgeBasePermissions != nil &&
+			item.SourceFromAgent != nil && !item.IsMine {
+			_, shared, err := h.shareService.CheckTenantKBPermission(
+				ctx,
+				item.KnowledgeBase.ID,
+				tenantID,
+				callerTenantRole,
+			)
+			if err != nil || !shared {
+				continue
+			}
+		}
 		extras := map[string]interface{}{"is_mine": item.IsMine}
 		if item.SourceFromAgent != nil {
 			extras["source_from_agent"] = item.SourceFromAgent

@@ -66,11 +66,12 @@ func (r *tenantAPIKeyRepository) UpdateAPIKey(
 		Where("id = ? AND tenant_id = ? AND scope_type = ? AND revoked_at IS NULL",
 			id, tenantID, types.APIKeyScopeTenant).
 		Updates(map[string]any{
-			"name":               update.Name,
-			"full_access":        update.FullAccess,
-			"knowledge_base_ids": update.KnowledgeBaseIDs,
-			"capabilities":       update.Capabilities,
-			"expires_at":         update.ExpiresAt,
+			"name":                       update.Name,
+			"full_access":                update.FullAccess,
+			"knowledge_base_ids":         update.KnowledgeBaseIDs,
+			"knowledge_base_permissions": update.KnowledgeBasePermissions,
+			"capabilities":               update.Capabilities,
+			"expires_at":                 update.ExpiresAt,
 		})
 	if res.Error != nil {
 		return nil, res.Error

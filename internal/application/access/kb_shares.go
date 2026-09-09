@@ -32,6 +32,13 @@ func NewKBSharePermissions(
 	tenantID uint64,
 	role types.TenantRole,
 ) *KBSharePermissions {
+	// Granular machine credentials derive their ceiling from per-KB grants,
+	// not the compatibility Viewer role in auth middleware. The lookup still
+	// intersects live share permission and workspace membership. Keep legacy
+	// API keys and human role caps unchanged.
+	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok && scope.KnowledgeBasePermissions != nil {
+		role = types.TenantRoleOwner
+	}
 	return &KBSharePermissions{
 		ctx:      ctx,
 		lookup:   lookup,
@@ -57,6 +64,9 @@ func (p *KBSharePermissions) Permission(kbID string) (types.OrgMemberRole, bool,
 
 // Check tests the required role against the cached organization permission.
 func (p *KBSharePermissions) Check(kbID string, required types.OrgMemberRole) (bool, error) {
+	if !allowsAPIKeyKBPermission(p.ctx, kbID, required) {
+		return false, nil
+	}
 	role, shared, err := p.Permission(kbID)
 	return err == nil && shared && role.IsValid() && required.IsValid() && role.HasPermission(required), err
 }

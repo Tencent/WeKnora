@@ -121,8 +121,39 @@ func (a *APIKeyRouteAuthorizer) Middleware() gin.HandlerFunc {
 			})
 			return
 		}
+		policy, _ := a.Lookup(c.Request.Method, c.FullPath())
+		scope = scope.ForKnowledgeBasePermission(policy.knowledgeBasePermission(scope))
+		c.Request = c.Request.WithContext(types.WithTenantAPIKeyScope(c.Request.Context(), scope))
 		c.Next()
 	}
+}
+
+// The route capability decides the KB operation, not the HTTP verb (search is
+// often POST). Any-of policies accept the least privilege among capabilities
+// the key actually holds. Non-KB capabilities only allow reading KB references.
+func (p APIKeyRoutePolicy) knowledgeBasePermission(scope types.TenantAPIKeyScope) types.APIKeyKBPermission {
+	required := types.APIKeyKBManage
+	matched := false
+	for _, capability := range p.Capabilities {
+		if !scope.HasCapability(capability) {
+			continue
+		}
+		permission := types.APIKeyKBRead
+		switch capability {
+		case types.APIKeyCapabilityIngest, types.APIKeyCapabilityManageDataSources:
+			permission = types.APIKeyKBWrite
+		case types.APIKeyCapabilityManageKnowledgeBases:
+			permission = types.APIKeyKBManage
+		}
+		if required.Allows(permission) {
+			required = permission
+		}
+		matched = true
+	}
+	if !matched {
+		return types.APIKeyKBRead
+	}
+	return required
 }
 
 // authorize applies the declared policy to an API-key scope. Absent policy =>

@@ -34,7 +34,15 @@ func NewTenantAPIKeyService(repo interfaces.TenantAPIKeyRepository) interfaces.T
 func (s *tenantAPIKeyService) CreateAPIKey(
 	ctx context.Context, req interfaces.TenantAPIKeyCreateRequest,
 ) (*interfaces.TenantAPIKeyCreateResult, error) {
+	if !req.FullAccess {
+		if err := types.ValidateAPIKeyKBPermissions(req.KnowledgeBasePermissions, req.KnowledgeBaseIDs); err != nil {
+			return nil, err
+		}
+	}
 	scopeType := types.NormalizeAPIKeyScopeType(req.ScopeType)
+	if scopeType == types.APIKeyScopePlatform && req.KnowledgeBasePermissions != nil {
+		return nil, errors.New("per-knowledge-base permissions require a tenant API key")
+	}
 	if scopeType == types.APIKeyScopeTenant && req.TenantID == 0 {
 		return nil, errors.New("tenant_id is required")
 	}
@@ -63,18 +71,20 @@ func (s *tenantAPIKeyService) CreateAPIKey(
 		tenantID = &req.TenantID
 	}
 	key := &types.TenantAPIKey{
-		TenantID:         tenantID,
-		ScopeType:        scopeType,
-		Name:             name,
-		KeyHash:          hashTenantAPIKey(token),
-		APIKey:           token,
-		FullAccess:       req.FullAccess,
-		KnowledgeBaseIDs: normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
-		Capabilities:     capabilities,
-		ExpiresAt:        expiresAt,
+		TenantID:                 tenantID,
+		ScopeType:                scopeType,
+		Name:                     name,
+		KeyHash:                  hashTenantAPIKey(token),
+		APIKey:                   token,
+		FullAccess:               req.FullAccess,
+		KnowledgeBaseIDs:         normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
+		KnowledgeBasePermissions: req.KnowledgeBasePermissions.Clone(),
+		Capabilities:             capabilities,
+		ExpiresAt:                expiresAt,
 	}
 	if key.FullAccess {
 		key.KnowledgeBaseIDs = nil
+		key.KnowledgeBasePermissions = nil
 		key.Capabilities = nil
 	}
 	if err := s.repo.CreateAPIKey(ctx, key); err != nil {
@@ -138,6 +148,11 @@ func (s *tenantAPIKeyService) UpdateAPIKey(
 	if req.TenantID == 0 {
 		return nil, errors.New("tenant_id is required")
 	}
+	if !req.FullAccess {
+		if err := types.ValidateAPIKeyKBPermissions(req.KnowledgeBasePermissions, req.KnowledgeBaseIDs); err != nil {
+			return nil, err
+		}
+	}
 	if req.APIKeyID == 0 {
 		return nil, errors.New("api_key_id is required")
 	}
@@ -155,14 +170,16 @@ func (s *tenantAPIKeyService) UpdateAPIKey(
 		expiresAt = &utc
 	}
 	key := &types.TenantAPIKey{
-		Name:             name,
-		FullAccess:       req.FullAccess,
-		KnowledgeBaseIDs: normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
-		Capabilities:     capabilities,
-		ExpiresAt:        expiresAt,
+		Name:                     name,
+		FullAccess:               req.FullAccess,
+		KnowledgeBaseIDs:         normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
+		KnowledgeBasePermissions: req.KnowledgeBasePermissions.Clone(),
+		Capabilities:             capabilities,
+		ExpiresAt:                expiresAt,
 	}
 	if key.FullAccess {
 		key.KnowledgeBaseIDs = nil
+		key.KnowledgeBasePermissions = nil
 		key.Capabilities = nil
 	}
 	return s.repo.UpdateAPIKey(ctx, req.TenantID, req.APIKeyID, key)

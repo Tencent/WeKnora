@@ -210,6 +210,11 @@ func RequireKBAccess(
 		// KBs; that way embedding queries hit the right tenant
 		// regardless of whether RBAC enforcement is active.
 		enforcing := rbacEnforcementEnabled(cfg)
+		if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok && scope.KnowledgeBasePermissions != nil {
+			// Machine delegation must fail closed even during the human RBAC
+			// rollout. Otherwise a revoked share could still rewrite tenants.
+			enforcing = true
+		}
 
 		grant, err := resolveKBAccess(ctx, c, kbID, requiredPermission, kbService, kbShareService, agentShareService)
 		switch {

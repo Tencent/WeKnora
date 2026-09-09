@@ -149,7 +149,9 @@
                       </td>
                       <td>
                         <span class="api-key-knowledge-scope">
-                          {{ formatKeyKnowledgeScope(key.knowledge_base_ids) }}
+                          {{ key.knowledge_base_permissions != null
+                            ? formatGranularKnowledgeScope(key.knowledge_base_permissions)
+                            : formatKeyKnowledgeScope(key.knowledge_base_ids) }}
                         </span>
                       </td>
                       <td>
@@ -550,14 +552,12 @@
           <div class="api-key-dialog-row__label">
             <label>{{ $t('integrations.api.apiKeyKnowledgeScope') }}</label>
           </div>
-          <t-select
-            v-model="apiKeyForm.knowledge_base_ids"
-            multiple
-            filterable
-            clearable
+          <APIKeyKnowledgePermissions
+            v-model="apiKeyForm.knowledge_base_permissions"
+            v-model:legacy-ids="apiKeyForm.knowledge_base_ids"
+            :options="knowledgeBases"
+            :capabilities="selectedCapabilityValues"
             :loading="knowledgeBasesLoading"
-            :options="knowledgeBaseOptions"
-            :placeholder="$t('integrations.api.apiKeyKnowledgeScopePlaceholder')"
           />
         </div>
       </div>
@@ -653,16 +653,13 @@
           <div class="api-key-dialog-row__label">
             <label>{{ $t('integrations.api.apiKeyKnowledgeScope') }}</label>
           </div>
-          <t-select
-            v-model="editingAPIKeyForm.knowledge_base_ids"
-            multiple
-            filterable
-            clearable
+          <APIKeyKnowledgePermissions
+            v-model="editingAPIKeyForm.knowledge_base_permissions"
+            v-model:legacy-ids="editingAPIKeyForm.knowledge_base_ids"
+            :options="knowledgeBases"
+            :capabilities="editingSelectedCapabilities"
             :loading="knowledgeBasesLoading"
-            :options="knowledgeBaseOptions"
-            :placeholder="$t('integrations.api.apiKeyKnowledgeScopePlaceholder')"
           />
-          <p class="scope-hint">{{ $t('integrations.api.editApiKeyScopeHint') }}</p>
         </div>
       </div>
     </SettingDrawer>
@@ -689,9 +686,12 @@ import {
   type APIPrincipalConfig,
   type APIPrincipalMode,
   type TenantAPIKey,
+  type APIKeyKBPermissions,
   type TenantAPIKeyCapability,
 } from '@/api/tenant'
 import { listKnowledgeBases } from '@/api/knowledge-base'
+import { listSharedKnowledgeBases } from '@/api/organization'
+import APIKeyKnowledgePermissions from './APIKeyKnowledgePermissions.vue'
 import { getApiBaseUrl } from '@/utils/api-base'
 import {
   DEFAULT_TENANT_API_KEY_CAPABILITIES,
@@ -700,7 +700,7 @@ import {
   TENANT_API_KEY_CAPABILITY_GROUPS,
   type ApiKeyCapabilityGroup,
 } from '@/config/apiKeyCapabilities'
-import { normalizeAPIKeyKnowledgeBaseIDs } from './apiKeyScope'
+import { normalizeAPIKeyKnowledgeBaseIDs, cloneAPIKeyKBPermissions, type APIKeyKnowledgeBaseOption } from './apiKeyScope'
 import { consumeApiPlaygroundSSE } from './apiPlaygroundSSE'
 
 const { t } = useI18n()
@@ -722,7 +722,7 @@ const apiKeyScopeDialogVisible = ref(false)
 const apiKeyScopeSaving = ref(false)
 const editingAPIKey = ref<TenantAPIKey | null>(null)
 const knowledgeBasesLoading = ref(false)
-const knowledgeBases = ref<Array<{ id: string; name: string }>>([])
+const knowledgeBases = ref<APIKeyKnowledgeBaseOption[]>([])
 const secretInput = ref('')
 /** Plaintext of the last secret successfully saved in this page session. */
 const lastSavedSecretInput = ref('')
@@ -770,6 +770,7 @@ const editingCapabilitySelections = reactive<Record<TenantAPIKeyCapability, bool
 const editingAPIKeyForm = reactive({
   name: '',
   knowledge_base_ids: [] as string[],
+  knowledge_base_permissions: {} as APIKeyKBPermissions | null,
   tenant_full_enabled: false,
   expires_at_unix: undefined as number | undefined,
 })
@@ -806,6 +807,7 @@ function toggleEditingCapabilityGroup(group: ApiKeyCapabilityGroup, selected: bo
 const apiKeyForm = reactive({
   name: '',
   knowledge_base_ids: [] as string[],
+  knowledge_base_permissions: {} as APIKeyKBPermissions | null,
   // Tenant-full keys already cover every capability. Scoped keys default to
   // retrieval + chat + agent reads so a fresh integration can ask questions
   // and present an agent picker immediately.
@@ -983,11 +985,6 @@ const canAutoSave = computed(() => {
 const agentOptions = computed(() => agents.value.map((agent) => ({
   label: `${agent.name}${agent.is_builtin ? ` · ${t('integrations.api.playgroundBuiltin')}` : ''}`,
   value: agent.id,
-})))
-
-const knowledgeBaseOptions = computed(() => knowledgeBases.value.map((kb) => ({
-  label: kb.name || kb.id,
-  value: kb.id,
 })))
 
 const hasUnsavedSecretChange = computed(() => {
@@ -1186,14 +1183,32 @@ async function loadAPIKeys() {
 async function loadKnowledgeBaseOptions() {
   knowledgeBasesLoading.value = true
   try {
-    const resp: any = await listKnowledgeBases({ creator: 'all' })
-    const rows = Array.isArray(resp?.data) ? resp.data : []
-    knowledgeBases.value = rows.map((item: any) => ({
-      id: String(item.id),
-      name: item.name || item.id,
-    }))
-  } catch {
-    knowledgeBases.value = []
+    const [owned, shared] = await Promise.allSettled([
+      listKnowledgeBases({ creator: 'all' }),
+      listSharedKnowledgeBases(),
+    ])
+    const options = new Map<string, APIKeyKnowledgeBaseOption>()
+    if (owned.status === 'fulfilled') {
+      const rows = Array.isArray(owned.value?.data) ? owned.value.data : []
+      rows.forEach((item: any) => options.set(String(item.id), {
+        id: String(item.id), name: item.name || item.id, shared: false, maxPermission: 'manage',
+      }))
+    }
+    if (shared.status === 'fulfilled') {
+      for (const item of shared.value.data || []) {
+        const kb = item.knowledge_base
+        if (!kb || options.has(kb.id)) continue
+        options.set(kb.id, {
+          id: kb.id, name: kb.name || kb.id, shared: true,
+          source: `${item.org_name} · #${item.source_tenant_id}`,
+          maxPermission: item.permission === 'viewer' ? 'read' : 'manage',
+        })
+      }
+    }
+    knowledgeBases.value = [...options.values()]
+    if (owned.status === 'rejected' || shared.status === 'rejected') {
+      MessagePlugin.warning(t('integrations.api.kbPermissionLoadFailed'))
+    }
   } finally {
     knowledgeBasesLoading.value = false
   }
@@ -1437,6 +1452,7 @@ function openApiDoc() {
 function openCreateAPIKeyDialog() {
   apiKeyForm.name = ''
   apiKeyForm.knowledge_base_ids = []
+  apiKeyForm.knowledge_base_permissions = {}
   apiKeyForm.tenant_full_enabled = false
   API_KEY_CAPABILITIES.forEach((capability) => {
     capabilitySelections[capability] = DEFAULT_API_KEY_CAPABILITIES.has(capability)
@@ -1460,7 +1476,8 @@ async function createScopedAPIKey() {
       name: apiKeyForm.name.trim(),
       full_access: apiKeyFullAccessEnabled.value,
       // KB scoping only applies to capabilities that touch knowledge bases.
-      knowledge_base_ids: apiKeyKnowledgeScopeApplies.value ? apiKeyForm.knowledge_base_ids : [],
+      knowledge_base_ids: apiKeyKnowledgeScopeApplies.value && apiKeyForm.knowledge_base_permissions === null ? apiKeyForm.knowledge_base_ids : [],
+      knowledge_base_permissions: apiKeyFullAccessEnabled.value ? null : apiKeyForm.knowledge_base_permissions,
       // Capabilities only matter below full access; full access already covers them all.
       capabilities: apiKeyFullAccessEnabled.value ? [] : selectedCapabilities(),
     })
@@ -1484,6 +1501,7 @@ function openEditAPIKeyScope(key: TenantAPIKey) {
   editingAPIKeyForm.name = key.name
   editingAPIKeyForm.tenant_full_enabled = key.full_access
   editingAPIKeyForm.knowledge_base_ids = normalizeAPIKeyKnowledgeBaseIDs(key.knowledge_base_ids)
+  editingAPIKeyForm.knowledge_base_permissions = cloneAPIKeyKBPermissions(key.knowledge_base_permissions)
   const expiresAt = key.expires_at ? Date.parse(key.expires_at) : Number.NaN
   editingAPIKeyForm.expires_at_unix = Number.isNaN(expiresAt)
     ? undefined
@@ -1514,7 +1532,8 @@ async function saveAPIKeyConfiguration() {
       name: editingAPIKeyForm.name.trim(),
       full_access: editingAPIKeyFullAccessEnabled.value,
       capabilities: editingAPIKeyFullAccessEnabled.value ? [] : editingSelectedCapabilities.value,
-      knowledge_base_ids: editingKnowledgeScopeApplies.value ? editingAPIKeyForm.knowledge_base_ids : [],
+      knowledge_base_ids: editingKnowledgeScopeApplies.value && editingAPIKeyForm.knowledge_base_permissions === null ? editingAPIKeyForm.knowledge_base_ids : [],
+      knowledge_base_permissions: editingAPIKeyFullAccessEnabled.value ? null : editingAPIKeyForm.knowledge_base_permissions,
       expires_at_unix: editingAPIKeyForm.expires_at_unix,
     })
     if (!resp.success || !resp.data) {
@@ -1553,6 +1572,13 @@ async function deleteScopedAPIKey(id: number) {
   }
   MessagePlugin.success(t('integrations.api.deleteApiKeySuccess'))
   await loadAPIKeys()
+}
+
+function formatGranularKnowledgeScope(permissions: APIKeyKBPermissions): string {
+  const ids = Object.keys(permissions)
+  if (ids.length === 0) return t('integrations.api.kbPermissionEmpty')
+  const labels = { read: 'kbPermissionRead', write: 'kbPermissionWrite', manage: 'kbPermissionManage' }
+  return ids.map(id => `${knowledgeBases.value.find(kb => kb.id === id)?.name || id} (${t(`integrations.api.${labels[permissions[id]]}`)})`).join('、')
 }
 
 function formatKeyKnowledgeScope(ids: readonly string[] | null | undefined) {

@@ -106,6 +106,7 @@ func (r *fakeTenantAPIKeyRepo) UpdateAPIKey(
 			key.Name = update.Name
 			key.FullAccess = update.FullAccess
 			key.KnowledgeBaseIDs = append(types.StringArray(nil), update.KnowledgeBaseIDs...)
+			key.KnowledgeBasePermissions = update.KnowledgeBasePermissions.Clone()
 			key.Capabilities = append(types.StringArray(nil), update.Capabilities...)
 			key.ExpiresAt = update.ExpiresAt
 			cp := *key

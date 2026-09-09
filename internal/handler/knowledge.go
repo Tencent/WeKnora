@@ -2245,7 +2245,15 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		return
 	}
 
-	if scopes, restricted := tenantAPIKeySearchScopes(ctx); restricted {
+	lookupKB := func(ctx context.Context, id string) (*types.KnowledgeBase, error) {
+		return h.kbService.GetKnowledgeBaseByID(ctx, id)
+	}
+	scopes, restricted, scopeErr := resolveAPIKeySearchScopes(ctx, lookupKB, h.kbShareService)
+	if scopeErr != nil {
+		_ = c.Error(errors.NewServiceUnavailableError("cannot verify API key knowledge base search scope"))
+		return
+	}
+	if restricted {
 		if len(scopes) == 0 {
 			c.JSON(http.StatusOK, gin.H{
 				"success":  true,
