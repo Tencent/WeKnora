@@ -110,7 +110,8 @@ func NewAliyunEmbedder(apiKey, baseURL, modelName string,
 		truncatePromptTokens = 511
 	}
 
-	timeout := 60 * time.Second
+	runtimeConfig := loadEmbeddingRuntimeConfig()
+	timeout := runtimeConfig.Timeout
 
 	if err := validateEmbeddingBaseURL(baseURL); err != nil {
 		return nil, err
@@ -126,7 +127,7 @@ func NewAliyunEmbedder(apiKey, baseURL, modelName string,
 		dimensions:           dimensions,
 		modelID:              modelID,
 		timeout:              timeout,
-		maxRetries:           3,
+		maxRetries:           runtimeConfig.MaxRetries,
 	}, nil
 }
 

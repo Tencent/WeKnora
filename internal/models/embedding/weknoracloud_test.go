@@ -2,13 +2,21 @@ package embedding
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+type weKnoraCloudRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f weKnoraCloudRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func newWeKnoraCloudEmbedderTestServer(t *testing.T, response string) *WeKnoraCloudEmbedder {
 	t.Helper()
@@ -96,5 +104,38 @@ func TestWeKnoraCloudBatchEmbedRejectsMalformedResponse(t *testing.T) {
 				t.Fatalf("BatchEmbed error = %q, want it to contain %q", err, tt.wantErrMsg)
 			}
 		})
+	}
+}
+
+func TestWeKnoraCloudBatchEmbedRetriesTransportErrors(t *testing.T) {
+	attempts := 0
+	embedder := &WeKnoraCloudEmbedder{
+		modelName:  "test-embedding",
+		appID:      "test-app-id",
+		apiKey:     "test-api-key",
+		baseURL:    "https://cloud.example.test",
+		maxRetries: 1,
+		client: &http.Client{Transport: weKnoraCloudRoundTripper(func(req *http.Request) (*http.Response, error) {
+			attempts++
+			if attempts < 2 {
+				return nil, errors.New("temporary network failure")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"data":[{"index":0,"embedding":[0.1,0.2]}]}`)),
+				Request:    req,
+			}, nil
+		})},
+	}
+
+	got, err := embedder.BatchEmbed(context.Background(), []string{"first"})
+	if err != nil {
+		t.Fatalf("BatchEmbed returned error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("request attempts = %d, want 2", attempts)
+	}
+	if !reflect.DeepEqual(got, [][]float32{{0.1, 0.2}}) {
+		t.Fatalf("BatchEmbed result = %v, want [[0.1 0.2]]", got)
 	}
 }

@@ -62,6 +62,7 @@ func NewAzureOpenAIEmbedder(apiKey, baseURL, modelName string,
 	if truncatePromptTokens == 0 {
 		truncatePromptTokens = 511
 	}
+	runtimeConfig := loadEmbeddingRuntimeConfig()
 
 	if err := validateEmbeddingBaseURL(baseURL); err != nil {
 		return nil, err
@@ -75,8 +76,8 @@ func NewAzureOpenAIEmbedder(apiKey, baseURL, modelName string,
 		dimensions:           dimensions,
 		modelID:              modelID,
 		apiVersion:           apiVersion,
-		httpClient:           newEmbeddingHTTPClient(60 * time.Second),
-		maxRetries:           3,
+		httpClient:           newEmbeddingHTTPClient(runtimeConfig.Timeout),
+		maxRetries:           runtimeConfig.MaxRetries,
 		EmbedderPooler:       pooler,
 	}, nil
 }

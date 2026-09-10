@@ -51,7 +51,7 @@ type Config struct {
 	ModelID                   string            `json:"model_id"`
 	Provider                  string            `json:"provider"`
 	// MaxConcurrency caps concurrent background calls to this model; 0 falls
-	// back to the process-wide default (see limiter.GateN).
+	// back to WEKNORA_EMBED_MAX_CONCURRENCY.
 	MaxConcurrency int               `json:"max_concurrency"`
 	ExtraConfig    map[string]string `json:"extra_config"`
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
@@ -87,6 +87,14 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) Config {
 
 // NewEmbedder creates an embedder based on the configuration
 func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.OllamaService) (Embedder, error) {
+	runtimeConfig := loadEmbeddingRuntimeConfig()
+	if config.MaxConcurrency <= 0 {
+		config.MaxConcurrency = runtimeConfig.MaxConcurrency
+	}
+	logger.GetLogger(context.Background()).Infof(
+		"[Embedding] runtime config: timeout=%s max_retries=%d max_concurrency=%d",
+		runtimeConfig.Timeout, runtimeConfig.MaxRetries, config.MaxConcurrency,
+	)
 	e, err := newEmbedder(config, pooler, ollamaService)
 	if err != nil {
 		return e, err
