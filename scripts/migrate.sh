@@ -113,8 +113,21 @@ case "$1" in
         echo "Migrating to version $2..."
         migrate -path ${MIGRATIONS_DIR} -database ${DB_URL} goto $2
         ;;
+    repair)
+        echo "Repairing dirty migration state..."
+        CURRENT_VERSION=$(env migrate -path "${MIGRATIONS_DIR}" -database "${DB_URL}" version 2>&1 || true)
+        if echo "$CURRENT_VERSION" | grep -qi "dirty"; then
+            VERSION_NUM=$(echo "$CURRENT_VERSION" | grep -oE '[0-9]+' | head -1)
+            echo "Database is dirty at version $VERSION_NUM, forcing to version $((VERSION_NUM - 1))..."
+            env migrate -path "${MIGRATIONS_DIR}" -database "${DB_URL}" force -- "$((VERSION_NUM - 1))"
+            echo "Dirty flag cleared. Re-running migrations..."
+        else
+            echo "Database is not in dirty state (version: $CURRENT_VERSION). Running migrations anyway..."
+        fi
+        migrate -path ${MIGRATIONS_DIR} -database ${DB_URL} up
+        ;;
     *)
-        echo "Usage: $0 {up|down|create <migration_name>|version|force <version>|goto <version>}"
+        echo "Usage: $0 {up|down|create <migration_name>|version|force <version>|goto <version>|repair}"
         exit 1
         ;;
 esac
