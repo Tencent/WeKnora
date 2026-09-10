@@ -380,7 +380,7 @@ func TestRetrieveFilters_AppliesExcludeKnowledgeIDs(t *testing.T) {
 
 func TestRetrieveFilters_IncludeDisabled_SkipsIsEnabledClause(t *testing.T) {
 	t.Parallel()
-	f := &retrieveFilters{IncludeDisabled: true}
+	f := fromParams(types.RetrieveParams{IncludeDisabled: true})
 	clauses := f.toBoolMust()
 	for _, c := range clauses {
 		if term, ok := c["term"].(map[string]any); ok {

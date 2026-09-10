@@ -14,6 +14,7 @@ import (
 func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	chunks []*types.IndexWithScore,
 	skipEnrichment bool,
+	includeDisabled bool,
 ) ([]*types.SearchResult, error) {
 	if len(chunks) == 0 {
 		return nil, nil
@@ -82,7 +83,9 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	}
 
 	// Build final search results
-	searchResults := s.assembleSearchResults(ctx, chunks, chunkMap, knowledgeMap, index, skipEnrichment)
+	searchResults := s.assembleSearchResults(
+		ctx, chunks, chunkMap, knowledgeMap, index, skipEnrichment, includeDisabled,
+	)
 
 	searchutil.EnrichSearchResultsImageInfo(ctx, s.chunkRepo, tenantID, searchResults)
 
@@ -211,6 +214,7 @@ func (s *knowledgeBaseService) assembleSearchResults(
 	knowledgeMap map[string]*types.Knowledge,
 	idx *chunkIndex,
 	skipEnrichment bool,
+	includeDisabled bool,
 ) []*types.SearchResult {
 	var searchResults []*types.SearchResult
 	addedChunkIDs := make(map[string]bool)
@@ -225,7 +229,7 @@ func (s *knowledgeBaseService) assembleSearchResults(
 			logger.Debugf(ctx, "Chunk not found in chunkMap: %s", inputChunk.ChunkID)
 			continue
 		}
-		if !s.isSearchableChunk(chunk) {
+		if !s.isSearchableChunk(chunk, includeDisabled) {
 			invalidChunkCnt++
 			if len(invalidChunkSamples) < maxInvalidChunkLog {
 				invalidChunkSamples = append(invalidChunkSamples, chunk.ID+":"+chunk.ChunkType)
@@ -256,7 +260,7 @@ func (s *knowledgeBaseService) assembleSearchResults(
 	// Second pass: Add enrichment chunks (parent, nearby, relation)
 	if !skipEnrichment {
 		for chunkID, chunk := range chunkMap {
-			if addedChunkIDs[chunkID] || !s.isSearchableChunk(chunk) {
+			if addedChunkIDs[chunkID] || !s.isSearchableChunk(chunk, includeDisabled) {
 				continue
 			}
 
@@ -334,8 +338,8 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 }
 
 // isSearchableChunk checks if a chunk type should be included in search results.
-func (s *knowledgeBaseService) isSearchableChunk(chunk *types.Chunk) bool {
-	if chunk == nil || !chunk.IsEnabled {
+func (s *knowledgeBaseService) isSearchableChunk(chunk *types.Chunk, includeDisabled bool) bool {
+	if chunk == nil || (!includeDisabled && !chunk.IsEnabled) {
 		return false
 	}
 	// An edit is persisted before its retrieval artifacts are synchronized.

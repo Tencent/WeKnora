@@ -380,6 +380,7 @@ type FAQSearchRequest struct {
 	FirstPriorityTagIDs  []int64 `json:"first_priority_tag_ids"`  // 第一优先级标签ID列表，限定命中范围，优先级最高
 	SecondPriorityTagIDs []int64 `json:"second_priority_tag_ids"` // 第二优先级标签ID列表，限定命中范围，优先级低于第一优先级
 	OnlyRecommended      bool    `json:"only_recommended"`        // 是否仅返回推荐的条目
+	IncludeDisabled      bool    `json:"include_disabled"`        // 是否同时返回停用条目，仅用于FAQ管理搜索
 }
 
 // UntaggedTagName is the default tag name for entries without a tag

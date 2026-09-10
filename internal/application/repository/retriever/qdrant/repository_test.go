@@ -3,7 +3,19 @@ package qdrant
 import (
 	"testing"
 	"unicode/utf8"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func TestBaseFilterIncludesDisabledOnlyWhenRequested(t *testing.T) {
+	repository := &qdrantRepository{}
+	if got := repository.getBaseFilter(types.RetrieveParams{}); len(got.Must) != 1 {
+		t.Fatalf("default must condition count = %d, want 1", len(got.Must))
+	}
+	if got := repository.getBaseFilter(types.RetrieveParams{IncludeDisabled: true}); len(got.Must) != 0 {
+		t.Fatalf("include-disabled must condition count = %d, want 0", len(got.Must))
+	}
+}
 
 func TestNewQdrantValueMapSanitizesInvalidUTF8AndNUL(t *testing.T) {
 	malformed := "prefix" + string([]byte{0xff}) + "\x00suffix"

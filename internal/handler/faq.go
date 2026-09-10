@@ -367,7 +367,7 @@ func (h *FAQHandler) DeleteEntries(c *gin.Context) {
 
 // SearchFAQ godoc
 // @Summary      搜索FAQ
-// @Description  使用混合搜索在FAQ中搜索，支持两级优先级标签召回：first_priority_tag_ids优先级最高，second_priority_tag_ids次之
+// @Description  使用向量搜索在FAQ中搜索，支持两级优先级标签召回；include_disabled仅供管理场景显式包含停用条目
 // @Tags         FAQ管理
 // @Accept       json
 // @Produce      json

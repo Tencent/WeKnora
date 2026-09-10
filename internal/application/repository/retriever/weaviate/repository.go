@@ -476,10 +476,12 @@ func (w *weaviateRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTag
 
 func (w *weaviateRepository) getBaseFilter(params types.RetrieveParams) *filters.WhereBuilder {
 	var operands []*filters.WhereBuilder
-	operands = append(operands, filters.Where().
-		WithPath([]string{fieldIsEnabled}).
-		WithOperator(filters.Equal).
-		WithValueBoolean(true))
+	if !params.IncludeDisabled {
+		operands = append(operands, filters.Where().
+			WithPath([]string{fieldIsEnabled}).
+			WithOperator(filters.Equal).
+			WithValueBoolean(true))
+	}
 
 	if len(params.KnowledgeBaseIDs) > 0 {
 		operands = append(operands, filters.Where().

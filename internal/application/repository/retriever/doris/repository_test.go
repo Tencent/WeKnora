@@ -138,6 +138,16 @@ func TestWhereBuilder(t *testing.T) {
 		assert.Contains(t, clause, "knowledge_id NOT IN (?)")
 		assert.Contains(t, clause, "chunk_id NOT IN (?)")
 	})
+
+	t.Run("buildBaseFilter can include disabled", func(t *testing.T) {
+		w := buildBaseFilter(types.RetrieveParams{
+			KnowledgeBaseIDs: []string{"kb1"},
+			IncludeDisabled:  true,
+		})
+		clause, _ := w.build()
+		assert.NotContains(t, clause, "is_enabled")
+		assert.Contains(t, clause, "knowledge_base_id IN (?)")
+	})
 }
 
 // ---------------------------------------------------------------------------

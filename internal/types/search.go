@@ -241,6 +241,9 @@ type SearchParams struct {
 	TagIDs               []string  `json:"tag_ids"` // Tag IDs for filtering (used for FAQ priority filtering)
 	ScopeTagIDs          []string  `json:"scope_tag_ids,omitempty"`
 	OnlyRecommended      bool      `json:"only_recommended"`
+	// IncludeDisabled is an internal retrieval option. Public generic search
+	// endpoints must not bind it; only administrative callers may opt in.
+	IncludeDisabled bool `json:"-"`
 	// KnowledgeBaseIDs overrides the single KB ID passed to HybridSearch,
 	// allowing a single retrieval call to span multiple KBs that share the
 	// same embedding model. When empty, HybridSearch uses its own id parameter.

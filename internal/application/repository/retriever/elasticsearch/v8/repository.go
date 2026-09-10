@@ -321,11 +321,12 @@ func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams)
 	}
 
 	mustNot := make([]types.Query, 0)
-	// Exclude disabled chunks (is_enabled = false)
-	// Note: Historical data without is_enabled field will be included (not matching must_not)
-	mustNot = append(mustNot, types.Query{Term: map[string]types.TermQuery{
-		"is_enabled": {Value: false},
-	}})
+	// Historical data without is_enabled remains enabled by default.
+	if !params.IncludeDisabled {
+		mustNot = append(mustNot, types.Query{Term: map[string]types.TermQuery{
+			"is_enabled": {Value: false},
+		}})
+	}
 	if len(params.ExcludeKnowledgeIDs) > 0 {
 		mustNot = append(mustNot, types.Query{Terms: &types.TermsQuery{
 			TermsQuery: map[string]types.TermsQueryField{e.idField("knowledge_id"): params.ExcludeKnowledgeIDs},
