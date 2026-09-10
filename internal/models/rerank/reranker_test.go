@@ -78,6 +78,14 @@ func TestRankResultUnmarshalJSON(t *testing.T) {
 			expectedScore: 0.0,
 			expectError:   false,
 		},
+		{
+			name:          "negative index is preserved for pipeline validation",
+			input:         `{"index": -1, "document": "invalid provider result", "relevance_score": 0.99}`,
+			expectedText:  "invalid provider result",
+			expectedIndex: -1,
+			expectedScore: 0.99,
+			expectError:   false,
+		},
 	}
 
 	for _, tt := range tests {

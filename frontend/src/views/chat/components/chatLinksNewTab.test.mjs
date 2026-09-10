@@ -41,11 +41,15 @@ test('agent citations recover drawer references from retrieval tool events', () 
   )
   assert.match(
     agentStream,
+    /return mergeReferenceSources\(messageReferences, toolReferences\)/,
+  )
+  assert.match(
+    agentStream,
     /chunk_ids: group\.chunks\.map\(\(chunk\) => chunk\.chunk_id\)\.filter\(Boolean\)/,
   )
   assert.equal(
     agentStream.match(/knowledgeReferences: getReferencesForDrawer\(\)|getReferencesForDrawer\(\),/g)?.length,
-    3,
+    4,
   )
   assert.match(
     referenceDrawer,
