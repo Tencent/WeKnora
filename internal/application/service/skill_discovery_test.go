@@ -37,12 +37,12 @@ func TestBuiltinRegistrationPreservesSameNameCustomSkill(t *testing.T) {
 		Instructions: "user instructions",
 	}
 	require.NoError(t, fx.skillRepo.CreateCatalog(ctx, original))
-	_, err := fx.svc.RegisterBuiltin(ctx, 7, "pdf")
+	_, err := fx.svc.RegisterBuiltin(ctx, 7, "pdf", false)
 	require.Error(t, err)
 	stored, err := fx.skillRepo.GetCatalogByName(ctx, 7, "pdf")
 	require.NoError(t, err)
 	require.Equal(t, original, stored)
-	_, err = fx.svc.RegisterBuiltin(ctx, 7, "anthropic-pdf")
+	_, err = fx.svc.RegisterBuiltin(ctx, 7, "anthropic-pdf", false)
 	require.Error(t, err)
 }
 
@@ -59,6 +59,44 @@ func TestCatalogBuiltinFlagRequiresExactArchive(t *testing.T) {
 	require.False(t, catalogView(row, nil, nil).Builtin, "same name and version must not mislabel custom code")
 	row.Name = "anthropic-pdf"
 	require.False(t, catalogView(row, nil, nil).Builtin)
+}
+
+func TestBuiltinReplacementPreservesExistingInstallResources(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	oldArchive := zipBundle(t, map[string]string{
+		"SKILL.md": "---\nname: browser\ndescription: Previous browser skill\n" +
+			"version: 2026.09.2\n---\nOld instructions\n",
+	})
+	oldCatalog, err := fx.svc.RegisterCatalogFromArchive(ctx, 7, oldArchive)
+	require.NoError(t, err)
+	oldRef, oldDigest := oldCatalog.BundleRef, oldCatalog.BundleSHA256
+	require.NoError(t, fx.skillRepo.CreateSkill(ctx, &types.TenantSkillEntity{
+		ID: "old-browser", TenantID: 7, SandboxConfigID: "cfg-1", CatalogID: oldCatalog.ID,
+		Name: "browser", BundleSHA256: oldDigest, Status: types.SkillStatusReady, Enabled: true,
+	}))
+
+	_, err = fx.svc.RegisterBuiltin(ctx, 7, "browser", false)
+	require.Error(t, err, "different bytes must require explicit replacement")
+	require.Equal(t, 1, fx.savedBundles)
+	current, err := fx.svc.RegisterBuiltin(ctx, 7, "browser", true)
+	require.NoError(t, err)
+	require.Equal(t, oldCatalog.ID, current.ID)
+	require.Equal(t, builtin.Version, current.Version)
+	require.NotEqual(t, oldDigest, current.BundleSHA256)
+	installed, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "old-browser")
+	require.NoError(t, err)
+	require.Equal(t, oldRef, installed.BundleRef)
+	require.Equal(t, oldDigest, installed.BundleSHA256)
+	require.Equal(t, types.SkillStatusReady, installed.Status)
+	require.Empty(t, fx.deletedBundles)
+
+	files, err := fx.svc.ReadSkillFile(ctx, 7, "cfg-1", "old-browser", "SKILL.md")
+	require.NoError(t, err)
+	require.Contains(t, files.Content, "Old instructions")
+	_, err = fx.svc.RegisterBuiltin(ctx, 7, "browser", false)
+	require.NoError(t, err, "the current package can be registered again without replacement")
+	require.Equal(t, 2, fx.savedBundles)
 }
 
 func TestPinnedRuntimeOnlyOffersMatchingSkillVersions(t *testing.T) {

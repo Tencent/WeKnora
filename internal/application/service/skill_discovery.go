@@ -12,12 +12,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// RegisterBuiltin is create-only: discovering an official package must never
-// replace a user's same-name definition, including a concurrent registration.
+// RegisterBuiltin preserves same-name definitions unless replacement is explicit.
+// Replacement uses the catalog lifecycle to retain archives used by existing installs.
 func (s *TenantSkillService) RegisterBuiltin(
 	ctx context.Context,
 	tenantID uint64,
 	id string,
+	replaceExisting bool,
 ) (*types.TenantSkillCatalogEntity, error) {
 	archive, err := builtin.Archive(id)
 	if err != nil {
@@ -26,6 +27,9 @@ func (s *TenantSkillService) RegisterBuiltin(
 	bundle, err := ParseSkillBundle(archive)
 	if err != nil {
 		return nil, err
+	}
+	if replaceExisting {
+		return s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, true)
 	}
 	return s.createCatalogFromValidatedBundle(ctx, tenantID, bundle, archive)
 }

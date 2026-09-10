@@ -306,6 +306,9 @@
       storage-key="setting-drawer:width:skill-catalog-install" :confirm-loading="installing"
       :confirm-disabled="installConfirmDisabled" :confirm-text="installConfirmText" @confirm="onInstallDrawerConfirm">
       <p class="installer-model-hint">{{ $t(installCatalog?.builtin ? 'skillDiscovery.activationHint' : 'settings.skills.installToSandboxDesc') }}</p>
+      <div v-if="builtinRegistrationConflict" class="builtin-activation-help" role="status">
+        <p>{{ $t('skillDiscovery.replaceExistingHint', { name: installCatalog?.name, version: pendingBuiltinSkill?.version || '' }) }}</p>
+      </div>
       <section v-if="installPickRows.length > 0" class="setting-drawer__section">
         <section v-for="group in installPickGroups" :key="group.key" class="sandbox-pick-group">
           <h4 class="sandbox-pick-group__title">{{ t(group.label) }}<span>{{ group.rows.length }}</span></h4>
@@ -457,6 +460,7 @@ const addTargetIds = ref<string[]>([])
 const installTargetIds = ref<string[]>([])
 const installCatalog = ref<SkillCatalogItem | null>(null)
 const pendingBuiltinSkill = ref<DiscoverySkill | null>(null)
+const builtinRegistrationConflict = ref(false)
 const targetSkills = ref<Record<string, Awaited<ReturnType<typeof listSkills>> | null>>({})
 const targetSkillCache = createSkillResourceCache(listSkills)
 const targetsLoaded = ref(false)
@@ -580,7 +584,7 @@ const addPrimaryText = computed(() => {
 const installActionText = computed(() => t('settings.skills.installToSandbox'))
 const installConfirmText = computed(() =>
   installTargetIds.value.length > 0
-    ? installActionText.value
+    ? builtinRegistrationConflict.value ? t('skillDiscovery.replaceAndInstall') : installActionText.value
     : t('settings.skills.addFinish'),
 )
 
@@ -894,6 +898,7 @@ function openManageFromPanel(item: SkillCatalogItem, inst: SkillCatalogInstall) 
 }
 
 function openInstallTo(item: SkillCatalogItem, cfg: SandboxConfigRecord) {
+  builtinRegistrationConflict.value = false
   if (isPreinstalledTarget(item, cfg.id)) return
   openPanelId.value = ''
   pendingBuiltinSkill.value = null
@@ -1005,6 +1010,7 @@ function addPreviousStep() {
 }
 
 function openInstall(item: SkillCatalogItem) {
+  builtinRegistrationConflict.value = false
   pendingBuiltinSkill.value = null
   installCatalog.value = item
   void loadBuiltinTargets(item)
@@ -1252,13 +1258,25 @@ async function confirmInstall() {
   const item = installCatalog.value
   const allowed = new Set(installPickRows.value.filter(row => row.selectable).map(row => row.cfg.id))
   const targets = installTargetIds.value.filter(id => allowed.has(id))
-  if (!item || targets.length === 0 || builtinTargetsLoading.value) return
+  if (!item || targets.length === 0 || builtinTargetsLoading.value || installing.value) return
   installing.value = true
   try {
     if (!item.builtin) await ensureInstallerModelIfNeeded(targets)
     let catalogId = item.id
     if (!catalogId && pendingBuiltinSkill.value) {
-      catalogId = (await registerBuiltinSkill(pendingBuiltinSkill.value.id)).data.id
+      try {
+        catalogId = (await registerBuiltinSkill(pendingBuiltinSkill.value.id, builtinRegistrationConflict.value)).data.id
+      } catch (error: any) {
+        if (installCatalog.value !== item || !showInstall.value) return
+        if (error?.status === 409) {
+          builtinRegistrationConflict.value = true
+          showInstall.value = true
+          return
+        }
+        throw error
+      }
+      if (installCatalog.value !== item || !showInstall.value) return
+      builtinRegistrationConflict.value = false
       installCatalog.value = { ...item, id: catalogId }
     }
     if (!catalogId) return

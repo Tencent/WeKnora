@@ -22,6 +22,8 @@ export default {
       "commandFailed": "브라우저 작업 실패"
   },
   skillDiscovery: {
+    replaceAndInstall: "업데이트 및 설치",
+    replaceExistingHint: "공간 카탈로그에 내용이 다른 동일한 이름의 스킬 \"{name}\"이 있습니다. 계속하면 카탈로그를 내장 버전 {version}(으)로 변경하고 선택한 샌드박스에 설치합니다. 다른 샌드박스의 기존 설치는 자동으로 업데이트되지 않습니다.",
     community: '선택형 커뮤니티 스킬',
     communityHint: '고정 버전을 가져온 후 설치할 샌드박스를 선택하세요. 기본 이미지에는 포함되지 않습니다.',
     cardUnknownHint: "이 이미지에는 인식 가능한 스킬 목록이 없습니다. 샌드박스 설정에서 이미지 또는 템플릿을 확인하세요.",

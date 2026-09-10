@@ -22,6 +22,8 @@ export default {
     "commandFailed": "Browser command failed"
 },
   skillDiscovery: {
+    replaceAndInstall: "Update and install",
+    replaceExistingHint: "The workspace catalog already contains a different skill named \"{name}\". Continue to replace its catalog definition with built-in version {version} and install it into the selected sandboxes. Existing installations in other sandboxes will not be updated automatically.",
     community: 'Optional community skills',
     communityHint: 'Import a pinned version, then select a sandbox to install. These packages are not included in the default image.',
     cardUnknownHint: "This image has no recognized skill manifest. Check the image or template in the sandbox configuration.",

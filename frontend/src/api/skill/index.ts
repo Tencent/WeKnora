@@ -125,6 +125,8 @@ export function listSkillDiscovery() {
   return get<{ data: DiscoverySkill[] }>('/api/v1/skills/discovery')
 }
 
-export function registerBuiltinSkill(id: string) {
-  return post<{ data: SkillCatalogRegisterResult }>(`/api/v1/skills/discovery/${encodeURIComponent(id)}/register`, {})
+export function registerBuiltinSkill(id: string, replaceExisting = false) {
+  return post<{ data: SkillCatalogRegisterResult }>(`/api/v1/skills/discovery/${encodeURIComponent(id)}/register`, {
+    replace_existing: replaceExisting,
+  })
 }

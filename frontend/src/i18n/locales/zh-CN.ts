@@ -22,6 +22,8 @@ export default {
     "commandFailed": "浏览器操作失败"
 },
   skillDiscovery: {
+    replaceAndInstall: "更新并安装",
+    replaceExistingHint: "空间目录已有内容不同的同名技能「{name}」。继续将目录更新为内置版本 {version}，并安装到所选沙箱；其他沙箱的现有安装不会自动更新。",
     community: '社区可选技能',
     communityHint: '按需导入固定版本，再选择沙箱安装；不占用默认镜像空间。',
     cardUnknownHint: "当前镜像尚未提供可识别的技能清单，可在沙箱配置中检查镜像或模板。",

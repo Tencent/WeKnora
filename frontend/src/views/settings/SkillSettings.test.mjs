@@ -167,3 +167,52 @@ test('prompt advances to sandbox selection without searching, then starts the in
   assert.equal(state.promptInstallIds.value['cfg-1'], 'job-1')
   assert.doesNotMatch(source, /registerSkillCatalogFromPrompt|promptSelection|promptFind/)
 })
+
+test('builtin name conflicts offer explicit replacement before installing into a fresh sandbox', async () => {
+  const { transpile } = await import('typescript')
+  const { runInNewContext } = await import('node:vm')
+  const handler = source.slice(source.indexOf('async function confirmInstall()'), source.indexOf('async function removeCatalog('))
+  const requests = []
+  const state = {
+    installCatalog: { value: { id: '', name: 'browser', builtin: true } },
+    pendingBuiltinSkill: { value: { id: 'browser', version: '2026.09.5' } },
+    installTargetIds: { value: ['fresh-office-core'] },
+    installPickRows: { value: [{ cfg: { id: 'fresh-office-core' }, selectable: true }] },
+    builtinTargetsLoading: { value: false }, builtinRegistrationConflict: { value: false },
+    installing: { value: false }, showInstall: { value: true },
+    registerBuiltinSkill: async (id, replace) => {
+      requests.push({ id, replace })
+      if (!replace) throw { status: 409, message: 'different skill' }
+      return { data: { id: 'existing-browser-catalog' } }
+    },
+    installSkillCatalog: async (id, targets) => {
+      requests.push({ id, targets: Array.from(targets) })
+      return { data: { installs: { 'fresh-office-core': 'install-job' } } }
+    },
+    MessagePlugin: { success() {}, warning() {}, error(error) { throw new Error(error) } },
+    catalogInstallFailedCount: () => 0, loadCatalog: async () => {}, prunePicks() {}, t: key => key,
+  }
+  runInNewContext(transpile(handler), state)
+  await state.confirmInstall()
+  assert.equal(state.builtinRegistrationConflict.value, true)
+  assert.equal(state.installing.value, false)
+  assert.equal(requests.length, 1, 'a catalog conflict must not start a sandbox installation')
+  await state.confirmInstall()
+  assert.deepEqual(requests, [
+    { id: 'browser', replace: false },
+    { id: 'browser', replace: true },
+    { id: 'existing-browser-catalog', targets: ['fresh-office-core'] },
+  ])
+  assert.equal(state.builtinRegistrationConflict.value, false)
+  assert.equal(state.installCatalog.value.id, 'existing-browser-catalog')
+
+  // A delayed conflict must not reopen a drawer that the user has closed.
+  state.installCatalog.value = { id: '', name: 'browser', builtin: true }
+  state.registerBuiltinSkill = async () => {
+    state.showInstall.value = false
+    throw { status: 409 }
+  }
+  await state.confirmInstall()
+  assert.equal(state.showInstall.value, false)
+  assert.equal(state.builtinRegistrationConflict.value, false)
+})
