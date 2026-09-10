@@ -116,6 +116,42 @@ type KnowledgeListFilter struct {
 	// FolderScope selects whether FolderPath matches exactly or includes
 	// descendant folders. FolderScopeAny (the default) ignores folders.
 	FolderScope KnowledgeFolderScope
+	// SortBy 指定列表排序字段；公开列表接口会显式提供默认值。
+	SortBy KnowledgeListSortField
+	// SortOrder 指定升序或降序；零值与 desc 等价。
+	SortOrder KnowledgeListSortOrder
+}
+
+// KnowledgeListSortField 是知识文件列表允许使用的排序字段。
+type KnowledgeListSortField string
+
+const (
+	KnowledgeListSortByUpdatedAt KnowledgeListSortField = "updated_at"
+	KnowledgeListSortByCreatedAt KnowledgeListSortField = "created_at"
+	KnowledgeListSortByFileName  KnowledgeListSortField = "file_name"
+)
+
+// Valid 返回排序字段是否属于公开接口允许的白名单。
+func (field KnowledgeListSortField) Valid() bool {
+	switch field {
+	case KnowledgeListSortByUpdatedAt, KnowledgeListSortByCreatedAt, KnowledgeListSortByFileName:
+		return true
+	default:
+		return false
+	}
+}
+
+// KnowledgeListSortOrder 是知识文件列表允许使用的排序方向。
+type KnowledgeListSortOrder string
+
+const (
+	KnowledgeListSortAscending  KnowledgeListSortOrder = "asc"
+	KnowledgeListSortDescending KnowledgeListSortOrder = "desc"
+)
+
+// Valid 返回排序方向是否属于公开接口允许的白名单。
+func (order KnowledgeListSortOrder) Valid() bool {
+	return order == KnowledgeListSortAscending || order == KnowledgeListSortDescending
 }
 
 // Knowledge represents a knowledge entity in the system.
