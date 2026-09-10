@@ -422,6 +422,19 @@ export function updateKnowledgeMetadata(knowledgeId: string, customMetadata: Rec
   return put(`/api/v1/knowledge/${knowledgeId}`, { custom_metadata: customMetadata });
 }
 
+// 批量替换同一知识库内文档的自定义元数据。传入空对象会清空所选文档的元数据。
+export function batchUpdateKnowledgeMetadata(
+  kbId: string,
+  ids: string[],
+  customMetadata: Record<string, unknown>,
+) {
+  return put('/api/v1/knowledge/metadata', {
+    kb_id: kbId,
+    ids,
+    custom_metadata: customMetadata,
+  });
+}
+
 export function updateKnowledgeSummary(knowledgeId: string, description: string) {
   return put(`/api/v1/knowledge/${knowledgeId}`, { description });
 }

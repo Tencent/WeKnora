@@ -8,6 +8,7 @@ defineProps<{
   deleteLoading?: boolean;
   reparseLoading?: boolean;
   tagLoading?: boolean;
+  metadataLoading?: boolean;
   // When true the bar stays visible even with 0 selections, so users can exit
   // batch mode from here without selecting anything first.
   visible?: boolean;
@@ -21,6 +22,7 @@ const emit = defineEmits<{
   (e: 'delete'): void;
   (e: 'reparse'): void;
   (e: 'batchTag'): void;
+  (e: 'batchMetadata'): void;
   (e: 'moveToFolder', folderPath: string): void;
 }>();
 
@@ -45,23 +47,30 @@ const folderPickerVisible = ref(false);
             :confirm-btn="{ content: t('knowledgeBase.confirmBatchReparse'), theme: 'warning' }"
             :cancel-btn="{ content: t('common.cancel') }" placement="top" @confirm="emit('reparse')">
             <t-button theme="default" variant="outline" size="small"
-              :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading" :loading="reparseLoading" @click.stop>
+              :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading || metadataLoading" :loading="reparseLoading" @click.stop>
               <template #icon><t-icon name="refresh" size="14px" /></template>
               {{ t('knowledgeBase.rebuildDocument') }}
             </t-button>
           </t-popconfirm>
 
           <t-button theme="default" variant="outline" size="small"
-            :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading" :loading="tagLoading"
+            :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading || metadataLoading" :loading="tagLoading"
             @click="emit('batchTag')">
             <template #icon><t-icon name="discount" size="14px" /></template>
             {{ t('knowledgeBase.batchTag') }}
           </t-button>
 
+          <t-button theme="default" variant="outline" size="small"
+            :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading || metadataLoading"
+            :loading="metadataLoading" @click="emit('batchMetadata')">
+            <template #icon><t-icon name="edit" size="14px" /></template>
+            {{ t('knowledgeBase.batchMetadata') }}
+          </t-button>
+
           <t-popup v-if="showMoveToFolder" v-model:visible="folderPickerVisible" trigger="click"
             placement="top" overlay-class-name="card-more" destroy-on-close>
             <t-button theme="default" variant="outline" size="small"
-              :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading">
+              :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading || metadataLoading">
               <template #icon><t-icon name="folder" size="14px" /></template>
               {{ t('knowledgeBase.moveToFolder.action') }}
             </t-button>
@@ -77,7 +86,7 @@ const folderPickerVisible = ref(false);
             :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
             :cancel-btn="{ content: t('common.cancel') }" placement="top" @confirm="emit('delete')">
             <t-button theme="danger" variant="outline" size="small"
-              :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading" :loading="deleteLoading" @click.stop>
+              :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading || metadataLoading" :loading="deleteLoading" @click.stop>
               <template #icon><t-icon name="delete" size="14px" /></template>
               {{ t('knowledgeBase.batchDelete') }}
             </t-button>

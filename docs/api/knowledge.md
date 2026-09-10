@@ -16,6 +16,7 @@
 | GET    | `/knowledge/batch`                         | 按 ID 列表批量获取知识                     |
 | GET    | `/knowledge/:id`                           | 获取知识详情                               |
 | PUT    | `/knowledge/:id`                           | 更新知识（标题/描述/标签等）               |
+| PUT    | `/knowledge/metadata`                      | 批量替换知识的自定义元数据                 |
 | DELETE | `/knowledge/:id`                           | 删除单条知识                               |
 | PUT    | `/knowledge/manual/:id`                    | 更新手工 Markdown 知识                     |
 | POST   | `/knowledge/:id/reparse`                   | 重新解析知识（异步）                       |
@@ -389,6 +390,37 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 ```
 
 `moved_count` 为 0 表示源文件夹不存在或已是 no-op。
+
+## PUT `/knowledge/metadata` - 批量替换自定义元数据
+
+为同一知识库内最多 200 条知识统一设置自定义元数据。接口会替换每条知识原有的
+`custom_metadata`，发送空对象 `{}` 可清空所选文档的全部自定义元数据。元数据字段
+最多 20 个，值只能是字符串、数字、布尔值或 `null`；权限要求与批量移动文件夹一致，
+调用者必须是知识库创建者或空间 Admin，且具有 Editor 级别以上权限。
+
+**请求体**:
+
+```json
+{
+  "kb_id": "kb-123",
+  "ids": ["knowledge-1", "knowledge-2"],
+  "custom_metadata": {
+    "department": "research",
+    "summary_style": "technical"
+  }
+}
+```
+
+**响应**（200 OK）:
+
+```json
+{
+  "success": true,
+  "data": {
+    "updated_count": 2
+  }
+}
+```
 
 ## POST `/knowledge/folder` - 批量移动知识到文件夹
 
