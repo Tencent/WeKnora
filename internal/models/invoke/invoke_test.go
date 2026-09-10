@@ -203,6 +203,31 @@ func TestApplyCustomHeaders(t *testing.T) {
 	assert.Empty(t, req.Header.Values("Transfer-Encoding"))
 }
 
+// Auth headers are ALWAYS protected at the entry (P2 review finding 3 — v1
+// reservedHeaderKeys behavior), even when the adapter declared no
+// ProtectedHeaders of its own: overriding Authorization / Api-Key /
+// X-Api-Key / X-Goog-Api-Key would break vendor auth.
+func TestApplyCustomHeadersAuthHeadersAlwaysProtected(t *testing.T) {
+	req := &Request{
+		Header: http.Header{
+			"Authorization":  []string{"Bearer adapter"},
+			"Api-Key":        []string{"adapter-az"},
+			"X-Goog-Api-Key": []string{"adapter-g"},
+		},
+		// NOTE: no ProtectedHeaders — protection comes from isAuthHeader.
+	}
+	applyCustomHeaders(req, map[string]string{
+		"Authorization":  "Bearer attacker",
+		"api-key":        "attacker-az", // case-insensitive
+		"x-goog-api-key": "attacker-g",
+		"X-Custom":       "user-value", // free header still applies
+	})
+	assert.Equal(t, []string{"Bearer adapter"}, req.Header.Values("Authorization"))
+	assert.Equal(t, []string{"adapter-az"}, req.Header.Values("Api-Key"))
+	assert.Equal(t, []string{"adapter-g"}, req.Header.Values("X-Goog-Api-Key"))
+	assert.Equal(t, []string{"user-value"}, req.Header.Values("X-Custom"))
+}
+
 func TestChatRetriesOn429ThenSucceeds(t *testing.T) {
 	allowLoopbackSSRF(t)
 	var calls atomic.Int32

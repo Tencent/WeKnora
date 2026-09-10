@@ -1,0 +1,23 @@
+{
+  "scenario": "embedding_zhipu",
+  "behavior": [
+    "body {model,input,truncate_prompt_tokens:511} — NO encoding_format (v1 ZhipuEmbedRequest has no such field)"
+  ],
+  "requests": [
+    {
+      "path": "/embeddings",
+      "headers": {
+        "Authorization": "Bearer sk-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "embedding-3",
+        "input": [
+          "a",
+          "b"
+        ],
+        "truncate_prompt_tokens": 511
+      }
+    }
+  ]
+}

@@ -20,11 +20,13 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/provider"
 )
 
-// OllamaAdapter serves the chat and list facets for provider "ollama".
+// OllamaAdapter serves the chat, embedding and list facets for provider
+// "ollama".
 type OllamaAdapter struct{}
 
 var (
 	_ invoke.ChatAdapter       = (*OllamaAdapter)(nil)
+	_ invoke.EmbeddingAdapter  = (*OllamaAdapter)(nil)
 	_ invoke.ListModelsAdapter = (*OllamaAdapter)(nil)
 )
 
@@ -50,6 +52,7 @@ func (a *OllamaAdapter) Capabilities() provider.Capabilities {
 			InputModalities: []provider.Modality{provider.ModalityText, provider.ModalityImage},
 			Protocol:        provider.ProtocolOllama,
 		},
+		Embedding:   &provider.EmbeddingCaps{},                                           // /api/embed facet (P2)
 		Credentials: []provider.CredentialFieldSpec{{Key: provider.CredentialKeyAPIKey}}, // optional (§6.8)
 	}
 }
@@ -278,6 +281,81 @@ func (a *OllamaAdapter) ParseChatResponse(_ int, _ http.Header, body []byte) (*i
 			TotalTokens:      promptTokens + completionTokens,
 		},
 	}, nil
+}
+
+// --- Embedding facet (P2, port of v1 embedding/ollama.go minus the retired
+// auto-pull): native /api/embed, wire shape mirrors the v1 ollama SDK
+// EmbedRequest field order. design §11: missing-model auto-pull is retired —
+// unavailable models surface as a provider error and are pulled from the
+// model-management UI instead. ---
+
+type ollamaEmbedRequest struct {
+	Model      string         `json:"model"`
+	Input      []string       `json:"input"`
+	Truncate   *bool          `json:"truncate,omitempty"`
+	Dimensions int            `json:"dimensions,omitempty"`
+	Options    map[string]any `json:"options"`
+}
+
+type ollamaEmbedResponse struct {
+	Embeddings      [][]float32 `json:"embeddings"`
+	PromptEvalCount int         `json:"prompt_eval_count,omitempty"`
+	EvalCount       int         `json:"eval_count,omitempty"`
+}
+
+// BuildEmbeddingRequest ports v1 OllamaEmbedder.BatchEmbed: num_ctx carries
+// the truncation budget (constructor default 511) with Truncate=true; the SDK
+// always serialized an (optionally empty) options object.
+func (a *OllamaAdapter) BuildEmbeddingRequest(
+	ep invoke.Endpoint, model string, opts *invoke.EmbeddingOptions,
+) (*invoke.Request, error) {
+	if strings.TrimSpace(ep.BaseURL) == "" {
+		return nil, fmt.Errorf("ollama provider: base URL is required")
+	}
+	if model == "" {
+		// v1 constructor fallback.
+		model = "nomic-embed-text"
+	}
+	truncate := opts.TruncatePromptTokens
+	if truncate == 0 {
+		truncate = 511
+	}
+	req := ollamaEmbedRequest{
+		Model:   model,
+		Input:   opts.Inputs,
+		Options: make(map[string]any),
+	}
+	req.Options["num_ctx"] = truncate
+	t := true
+	req.Truncate = &t
+	if opts.SupportsDimensionOverride && opts.Dimensions > 0 {
+		req.Dimensions = opts.Dimensions
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	header := http.Header{}
+	header.Set("Content-Type", "application/json")
+	return &invoke.Request{
+		Method:  http.MethodPost,
+		URL:     strings.TrimRight(ep.BaseURL, "/") + "/api/embed",
+		Header:  header,
+		Body:    body,
+		Timeout: embeddingRequestTimeout,
+	}, nil
+}
+
+// ParseEmbeddingResponse maps the embeddings array verbatim (the v1 SDK path
+// performed no count or usage handling).
+func (a *OllamaAdapter) ParseEmbeddingResponse(
+	_ int, _ http.Header, body []byte,
+) (*invoke.EmbeddingResponse, error) {
+	var resp ollamaEmbedResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, invoke.ClassifyError(fmt.Errorf("decode response: %w", err))
+	}
+	return &invoke.EmbeddingResponse{Vectors: resp.Embeddings}, nil
 }
 
 // --- ListModels facet (design §7.1, new in v2): GET /api/tags ---

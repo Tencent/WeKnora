@@ -74,7 +74,10 @@ func envDurationSeconds(key string, fallback time.Duration) time.Duration {
 //   - chat:      WEKNORA_LLM_CHAT_TIMEOUT_SECONDS   (default 300s)
 //   - stream:    WEKNORA_LLM_STREAM_TIMEOUT_SECONDS (default 600s)
 //   - asr:       fixed 300s
-//   - embedding/rerank: chat timeout (no legacy env of their own)
+//   - embedding/rerank: no legacy env of their own. v1 embedding clients
+//     ran a fixed 60s http.Client.Timeout — the embedding adapters set
+//     Request.Timeout=60s explicitly (P2); this chat fallback only applies
+//     if a build omits it. rerank migrates in P3 with the same pattern.
 //
 // VLM calls ride the chat facet through Chat(); callers that need the legacy
 // VLM_HTTP_TIMEOUT_SECONDS (180s) posture pass a ctx deadline or an adapter

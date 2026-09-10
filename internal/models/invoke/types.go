@@ -352,10 +352,20 @@ func (s *StreamBridgeState) Set(key string, value any) {
 
 // --- Embedding / Rerank / ASR / Listing facet types (design §6.1) ---
 
-// EmbeddingOptions requests vectors for the given inputs.
+// EmbeddingOptions requests vectors for the given inputs. TruncatePromptTokens
+// and SupportsDimensionOverride ride from the model record (the caller-side
+// embedder fills them once at construction); each adapter gates them exactly
+// as its v1 client did, so zero values mean "vendor default" here.
 type EmbeddingOptions struct {
 	Inputs     []string
 	Dimensions int
+	// TruncatePromptTokens: v1 per-vendor defaults apply when zero (511 for
+	// openai-shape vendors carrying truncate_prompt_tokens; ignored by
+	// vendors whose API has no such param).
+	TruncatePromptTokens int
+	// SupportsDimensionOverride gates the dimensions wire param
+	// (v1: supportsDimensionOverride && dimensions > 0).
+	SupportsDimensionOverride bool
 }
 
 // EmbeddingResponse returns one vector per input.

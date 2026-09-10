@@ -1,0 +1,24 @@
+{
+  "scenario": "embedding_volcengine_single",
+  "behavior": [
+    "POST {base}/api/v3/embeddings/multimodal; body {model,input:[{type:text,text}],dimensions?}; one vector per request (multi-input fans out per call)"
+  ],
+  "requests": [
+    {
+      "path": "/api/v3/embeddings/multimodal",
+      "headers": {
+        "Authorization": "Bearer ark-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "doubao-embedding",
+        "input": [
+          {
+            "type": "text",
+            "text": "one"
+          }
+        ]
+      }
+    }
+  ]
+}

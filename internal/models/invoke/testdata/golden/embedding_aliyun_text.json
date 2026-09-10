@@ -1,0 +1,24 @@
+{
+  "scenario": "embedding_aliyun_text",
+  "behavior": [
+    "text model → openai shape at {base}/compatible-mode/v1/embeddings (URL preserved when it already contains /compatible-mode/)"
+  ],
+  "requests": [
+    {
+      "path": "/compatible-mode/v1/embeddings",
+      "headers": {
+        "Authorization": "Bearer sk-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "text-embedding-v4",
+        "input": [
+          "hello",
+          "world"
+        ],
+        "encoding_format": "float",
+        "truncate_prompt_tokens": 511
+      }
+    }
+  ]
+}

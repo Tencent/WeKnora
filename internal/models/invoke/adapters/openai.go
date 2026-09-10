@@ -401,19 +401,48 @@ var openAIFamilyProviders = []provider.ProviderName{
 	provider.ProviderNvidia,
 	provider.ProviderNovita,
 	provider.ProviderAzureOpenAI,
+	// Embedding-only vendor (P2): no chat facet; the init loop registers it
+	// through the jinaEmbeddingAdapter branch.
+	provider.ProviderJina,
 }
 
 func init() {
 	for _, name := range openAIFamilyProviders {
 		caps := chatCapsFor(name)
-		if caps == nil {
-			// Not a chat provider (e.g. jina) — registration lock #2 requires
-			// a non-nil Chat shard for a ChatAdapter implementation.
-			continue
-		}
-		adapter := &openaiAdapter{name: name, spec: specFor(name), caps: caps}
-		if err := invoke.Default.Register(adapter); err != nil {
-			panic(fmt.Sprintf("invoke/adapters: register openai-family adapter %s: %v", name, err))
+		ecaps := embeddingCapsFor(name)
+		switch {
+		case caps != nil && ecaps != nil && name == provider.ProviderVolcengine:
+			// Ark multimodal embedding is single-input-per-request — register
+			// the marked composite so the entry fans batches out per input.
+			adapter := &volcengineEmbeddingAdapter{openaiEmbeddingAdapter{
+				openaiAdapter: openaiAdapter{name: name, spec: specFor(name), caps: caps},
+				espec:         embedSpecFor(name),
+			}}
+			if err := invoke.Default.Register(adapter); err != nil {
+				panic(fmt.Sprintf("invoke/adapters: register volcengine adapter %s: %v", name, err))
+			}
+		case caps != nil && ecaps != nil:
+			// Dual-facet vendor: one registry entry serving chat + embedding.
+			adapter := &openaiEmbeddingAdapter{
+				openaiAdapter: openaiAdapter{name: name, spec: specFor(name), caps: caps},
+				espec:         embedSpecFor(name),
+			}
+			if err := invoke.Default.Register(adapter); err != nil {
+				panic(fmt.Sprintf("invoke/adapters: register openai-family adapter %s: %v", name, err))
+			}
+		case caps != nil:
+			// Chat-only vendor (deepseek/minimax/moonshot/qiniu/mimo/longcat/
+			// lkeap — no embedding shard in the catalog).
+			adapter := &openaiAdapter{name: name, spec: specFor(name), caps: caps}
+			if err := invoke.Default.Register(adapter); err != nil {
+				panic(fmt.Sprintf("invoke/adapters: register openai-family adapter %s: %v", name, err))
+			}
+		case ecaps != nil:
+			// Embedding-only vendor (jina) — no chat facet to pair with.
+			adapter := &jinaEmbeddingAdapter{name: name}
+			if err := invoke.Default.Register(adapter); err != nil {
+				panic(fmt.Sprintf("invoke/adapters: register embedding-only adapter %s: %v", name, err))
+			}
 		}
 	}
 }

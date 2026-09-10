@@ -39,6 +39,17 @@ type EmbeddingAdapter interface {
 	ParseEmbeddingResponse(status int, header http.Header, body []byte) (*EmbeddingResponse, error)
 }
 
+// SingleInputEmbedder is the OPTIONAL EmbeddingAdapter refinement for vendors
+// whose embedding API returns ONE vector per request (volcengine multimodal).
+// Multi-input batches cannot be expressed as one Build→Execute, so the Embed
+// entry fans them out per input and reassembles in order (v1 client loop;
+// entry-side orchestration, §6.4 image-retry precedent). Adapters that accept
+// a batch input array do NOT implement it.
+type SingleInputEmbedder interface {
+	EmbeddingAdapter
+	SingleInputPerRequest() bool
+}
+
 // RerankAdapter serves the rerank facet.
 type RerankAdapter interface {
 	Adapter

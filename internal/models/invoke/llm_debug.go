@@ -238,3 +238,64 @@ func truncateForDebug(s string, maxRunes int) string {
 	}
 	return string(runes[:maxRunes]) + fmt.Sprintf("...(%d chars)", len(runes))
 }
+
+// logEmbeddingDebug ports the v1 embedding debug record (embedding/llm_debug.go
+// logEmbeddingDebug) byte-for-byte: CallType "Embedding", an Input section with
+// per-text length + newline-escaped previews, an Output section with per-vector
+// dims + first-3 values.
+func logEmbeddingDebug(
+	ctx context.Context, model string,
+	opts *EmbeddingOptions, resp *EmbeddingResponse,
+	callErr error, dur time.Duration,
+) {
+	if !logger.LLMDebugEnabled() {
+		return
+	}
+
+	record := &logger.LLMCallRecord{
+		CallType: "Embedding",
+		Model:    model,
+		Duration: dur,
+	}
+
+	var inputs []string
+	if opts != nil {
+		inputs = opts.Inputs
+	}
+	// Input section: show each text with a preview
+	var inputBuf strings.Builder
+	fmt.Fprintf(&inputBuf, "count=%d\n", len(inputs))
+	for i, t := range inputs {
+		preview := strings.ReplaceAll(t, "\n", "\\n")
+		preview = logger.TruncateRunes(preview, 200)
+		fmt.Fprintf(&inputBuf, "[%d] (len=%d) %s\n", i, len([]rune(t)), preview)
+	}
+	record.Sections = append(record.Sections, logger.RecordSection{Title: "Input", Content: inputBuf.String()})
+
+	// Output section
+	if resp != nil && resp.Vectors != nil {
+		var outBuf strings.Builder
+		fmt.Fprintf(&outBuf, "count=%d\n", len(resp.Vectors))
+		for i, vec := range resp.Vectors {
+			if len(vec) > 0 {
+				fmt.Fprintf(&outBuf, "[%d] dims=%d, first_3=[%.6f, %.6f, %.6f]\n", i, len(vec),
+					safeVecIdx(vec, 0), safeVecIdx(vec, 1), safeVecIdx(vec, 2))
+			} else {
+				fmt.Fprintf(&outBuf, "[%d] empty\n", i)
+			}
+		}
+		record.Sections = append(record.Sections, logger.RecordSection{Title: "Output", Content: outBuf.String()})
+	}
+
+	if callErr != nil {
+		record.Error = callErr.Error()
+	}
+	logger.LLMDebugLog(ctx, record)
+}
+
+func safeVecIdx(v []float32, i int) float32 {
+	if i < len(v) {
+		return v[i]
+	}
+	return 0
+}

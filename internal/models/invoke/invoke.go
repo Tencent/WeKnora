@@ -422,8 +422,63 @@ func toLLMToolCalls(calls []ToolCall) []types.LLMToolCall {
 	return out
 }
 
-// Embed runs one embedding call.
+// Embed runs one embedding call. Langfuse tracking and the llm_debug record
+// mirror the v1 decorator stack (langfuseEmbedder outermost, debugEmbedder
+// below it); vendors whose API yields one vector per request are fanned out
+// per input (v1 volcengine loop), so callers always pass the full batch.
 func Embed(ctx context.Context, m *ModelConfig, opts *EmbeddingOptions) (*EmbeddingResponse, error) {
+	start := time.Now()
+	gen := startEmbeddingLangfuse(ctx, m, opts)
+	resp, err := embedWithFanOut(ctx, m, opts)
+	gen.finishEmbedding(resp, opts.Inputs, err)
+	logEmbeddingDebug(ctx, m.ModelName, opts, resp, err, time.Since(start))
+	return resp, err
+}
+
+// embedWithFanOut dispatches one facet call, or — for SingleInputEmbedder
+// vendors with a multi-input batch — one facet call per input, serially
+// (v1 loop semantics; the sub-batch pooler above this entry already bounds
+// provider burst), reassembling vectors in input order with summed usage.
+func embedWithFanOut(ctx context.Context, m *ModelConfig, opts *EmbeddingOptions) (*EmbeddingResponse, error) {
+	if len(opts.Inputs) <= 1 {
+		return embedOnce(ctx, m, opts)
+	}
+	a, err := resolveAdapter(m.Provider)
+	if err != nil {
+		return nil, err
+	}
+	if _, single := a.(SingleInputEmbedder); !single {
+		return embedOnce(ctx, m, opts)
+	}
+	vectors := make([][]float32, len(opts.Inputs))
+	var total Usage
+	for i, input := range opts.Inputs {
+		one := &EmbeddingOptions{
+			Inputs:                    []string{input},
+			Dimensions:                opts.Dimensions,
+			TruncatePromptTokens:      opts.TruncatePromptTokens,
+			SupportsDimensionOverride: opts.SupportsDimensionOverride,
+		}
+		resp, err := embedOnce(ctx, m, one)
+		if err != nil {
+			return nil, err
+		}
+		if len(resp.Vectors) != 1 {
+			return nil, &ProviderError{
+				Kind: ErrProviderUpstream,
+				Message: fmt.Sprintf("embedding: single-input vendor returned %d vectors for 1 input",
+					len(resp.Vectors)),
+			}
+		}
+		vectors[i] = resp.Vectors[0]
+		total.PromptTokens += resp.Usage.PromptTokens
+		total.CompletionTokens += resp.Usage.CompletionTokens
+		total.TotalTokens += resp.Usage.TotalTokens
+	}
+	return &EmbeddingResponse{Vectors: vectors, Usage: total}, nil
+}
+
+func embedOnce(ctx context.Context, m *ModelConfig, opts *EmbeddingOptions) (*EmbeddingResponse, error) {
 	return invokeFacet(ctx, m, ModelKindEmbedding, func(a Adapter, ep Endpoint) (*Request, error) {
 		return a.(EmbeddingAdapter).BuildEmbeddingRequest(ep, m.ModelName, opts)
 	}, func(a Adapter, r *RawResult) (*EmbeddingResponse, error) {
@@ -533,9 +588,11 @@ func asProviderError(err error, target **ProviderError) bool {
 }
 
 // applyCustomHeaders overlays user custom headers after Build (design §6.4):
-// user headers MAY override adapter defaults, EXCEPT ① adapter-declared
-// protected headers (signatures/auth-critical/multipart Content-Type) and
-// ② transport management headers, which are unconditionally dropped.
+// user headers MAY override adapter defaults (e.g. a self-hosted gateway
+// changing Content-Type), EXCEPT ① adapter-declared protected headers
+// (signature/multipart-boundary critical), ② transport management headers,
+// and ③ vendor auth headers (isAuthHeader, always protected — v1
+// reservedHeaderKeys behavior).
 func applyCustomHeaders(req *Request, custom map[string]string) {
 	if len(custom) == 0 {
 		return
@@ -549,7 +606,7 @@ func applyCustomHeaders(req *Request, custom map[string]string) {
 	}
 	for k, v := range custom {
 		name := strings.TrimSpace(k)
-		if name == "" || isTransportHeader(name) {
+		if name == "" || isTransportHeader(name) || isAuthHeader(name) {
 			continue
 		}
 		if _, keepOut := protected[strings.ToLower(name)]; keepOut {
@@ -559,10 +616,22 @@ func applyCustomHeaders(req *Request, custom map[string]string) {
 	}
 }
 
+// isAuthHeader is the always-protected vendor auth set (v1
+// reservedHeaderKeys minus content-type — P2 review finding 3): the entry is
+// the single funnel for every facet, so adapters cannot forget to declare
+// their own auth header (anthropic/weknoracloud keep explicit
+// ProtectedHeaders for vendor-specific signature headers). Content-Type is
+// deliberately overridable (design §6.4 self-hosted-gateway ruling).
+func isAuthHeader(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "authorization", "api-key", "x-api-key", "x-goog-api-key":
+		return true
+	}
+	return false
+}
+
 // isTransportHeader covers the hop-by-hop / transport-management set formerly
-// handled by reservedHeaderKeys (v1 internal/utils/extraheaders.go); auth
-// headers are NOT here — their protection is the adapter's ProtectedHeaders
-// declaration.
+// handled by reservedHeaderKeys (v1 internal/utils/extraheaders.go).
 func isTransportHeader(name string) bool {
 	switch strings.ToLower(name) {
 	case "host", "content-length", "connection", "transfer-encoding", "accept-encoding":

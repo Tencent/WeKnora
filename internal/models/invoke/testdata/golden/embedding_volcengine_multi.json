@@ -1,0 +1,56 @@
+{
+  "scenario": "embedding_volcengine_multi",
+  "behavior": [
+    "3 inputs → 3 sequential requests (v1 loop); entry-level fan-out must reproduce this"
+  ],
+  "requests": [
+    {
+      "path": "/api/v3/embeddings/multimodal",
+      "headers": {
+        "Authorization": "Bearer ark-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "doubao-embedding",
+        "input": [
+          {
+            "type": "text",
+            "text": "one"
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/v3/embeddings/multimodal",
+      "headers": {
+        "Authorization": "Bearer ark-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "doubao-embedding",
+        "input": [
+          {
+            "type": "text",
+            "text": "two"
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/v3/embeddings/multimodal",
+      "headers": {
+        "Authorization": "Bearer ark-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "doubao-embedding",
+        "input": [
+          {
+            "type": "text",
+            "text": "three"
+          }
+        ]
+      }
+    }
+  ]
+}

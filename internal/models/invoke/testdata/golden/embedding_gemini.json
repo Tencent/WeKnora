@@ -1,0 +1,40 @@
+{
+  "scenario": "embedding_gemini",
+  "behavior": [
+    "POST {base}/models/{model}:batchEmbedContents; X-Goog-Api-Key; body {requests:[{model:models/…,content:{parts:[{text}]},output_dimensionality?}]}"
+  ],
+  "requests": [
+    {
+      "path": "/models/gemini-embedding-001:batchEmbedContents",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "requests": [
+          {
+            "model": "models/gemini-embedding-001",
+            "content": {
+              "parts": [
+                {
+                  "text": "a"
+                }
+              ]
+            },
+            "output_dimensionality": 768
+          },
+          {
+            "model": "models/gemini-embedding-001",
+            "content": {
+              "parts": [
+                {
+                  "text": "b"
+                }
+              ]
+            },
+            "output_dimensionality": 768
+          }
+        ]
+      }
+    }
+  ]
+}

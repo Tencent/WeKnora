@@ -1,0 +1,23 @@
+{
+  "scenario": "embedding_azure",
+  "behavior": [
+    "POST {base}/openai/deployments/{model}/embeddings?api-version=2024-10-21; Api-Key header; body {model,input,encoding_format:float}"
+  ],
+  "requests": [
+    {
+      "path": "/openai/deployments/my-deployment/embeddings",
+      "query": "api-version=2024-10-21",
+      "headers": {
+        "Api-Key": "az-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "my-deployment",
+        "input": [
+          "q"
+        ],
+        "encoding_format": "float"
+      }
+    }
+  ]
+}
