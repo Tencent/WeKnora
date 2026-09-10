@@ -38,6 +38,16 @@ test('graph page keeps one refresh action and removes partial status banners', (
   assert.match(scene, /defineExpose\(\{ refresh \}\)/)
 })
 
+test('graph page shows actual canvas node counts only in filters', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const source = readFileSync(join(here, 'KnowledgeGraph.vue'), 'utf8')
+
+  assert.doesNotMatch(source, /knowledge-graph__count|visibleCount|visibleRelationCount|counts\.scope_nodes/)
+  assert.match(source, /catalogTotal\.value = next\.nodes\.length/)
+  assert.match(source, /next\.nodes\.filter\(node => node\.attributes\.includes\(item\)\)\.length/)
+  assert.match(source, /\[attribute\]: next\.nodes\.length/)
+})
+
 test('scene relation lines open only the relation type and summary', () => {
   const here = dirname(fileURLToPath(import.meta.url))
   const scene = readFileSync(join(here, '../../components/videohub/SceneView.vue'), 'utf8')
