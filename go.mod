@@ -92,6 +92,8 @@ require (
 	gorm.io/gorm v1.31.1
 )
 
+require gorm.io/driver/mysql v1.6.0
+
 require (
 	cloud.google.com/go/auth v0.20.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect

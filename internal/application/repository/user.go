@@ -261,8 +261,15 @@ func (r *userRepository) SearchUsers(ctx context.Context, query string, limit in
 	var users []*types.User
 	searchPattern := "%" + query + "%"
 
+	// Postgres uses ILIKE for case-insensitive matching; MySQL (utf8mb4_*_ci
+	// collation) and SQLite (ASCII case-insensitive) use plain LIKE.
+	likeExpr := "username LIKE ? OR email LIKE ?"
+	if r.db.Dialector.Name() == "postgres" {
+		likeExpr = "username ILIKE ? OR email ILIKE ?"
+	}
+
 	dbQuery := r.db.WithContext(ctx).
-		Where("username ILIKE ? OR email ILIKE ?", searchPattern, searchPattern).
+		Where(likeExpr, searchPattern, searchPattern).
 		Where("is_active = ?", true).
 		Order("username ASC")
 
