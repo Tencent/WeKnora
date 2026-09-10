@@ -133,6 +133,21 @@ func ValidateSourceEvidenceManifest(doc FullVideoDocument, manifest []EvidenceMa
 	return nil
 }
 
+// NormalizeSourceEvidenceManifest rebuilds canonical speaker and evidence
+// identity from the source document, then proves it matches the active chunk
+// manifest. Source text, ordering, source IDs and timing are never replaced
+// from the manifest.
+func NormalizeSourceEvidenceManifest(doc FullVideoDocument, manifest []EvidenceManifestItem) (FullVideoDocument, bool, error) {
+	normalized, changed, err := normalizeEvidenceIdentity(doc)
+	if err != nil {
+		return FullVideoDocument{}, false, sourceValidation(SourceValidationEvidence, err.Error())
+	}
+	if err := ValidateSourceEvidenceManifest(normalized, manifest); err != nil {
+		return FullVideoDocument{}, false, err
+	}
+	return normalized, changed, nil
+}
+
 // normalizeEvidenceIdentity upgrades the one legacy representation where an
 // omitted speaker was hashed as empty while evidence chunks used the canonical
 // default "0". It changes no source text, timing, ordering, or source IDs.

@@ -35,6 +35,7 @@ type BaseSkillHandler struct {
 	DB              *gorm.DB
 	AgentClient     AgentClient
 	SourceReader    TranscriptSourceReader
+	SourceWriter    *transcriptservice.SourceWriter
 	Orchestrator    *skill.Orchestrator
 	AgentID         string
 	KnowledgeBaseID string
@@ -186,6 +187,9 @@ func (h *BaseSkillHandler) wikiInput(ctx context.Context, job *model.VideoProces
 		if err != nil {
 			return wikiInputManifest{}, fmt.Errorf("transcript source read: %w", err)
 		}
+		if actual := strings.TrimSpace(knowledge.KnowledgeBaseID); actual != "" && actual != h.KnowledgeBaseID {
+			return wikiInputManifest{}, fmt.Errorf("knowledge_base_routing:source_ownership_mismatch: expected=%s actual=%s", h.KnowledgeBaseID, actual)
+		}
 		doc, err := transcriptservice.ValidateSourceContent(knowledge.Content, video.ID, generation, video.DurationSeconds)
 		if err != nil {
 			return wikiInputManifest{}, err
@@ -210,10 +214,37 @@ func (h *BaseSkillHandler) wikiInput(ctx context.Context, job *model.VideoProces
 			})
 		}
 		if err := transcriptservice.ValidateSourceEvidenceManifest(doc, manifest); err != nil {
-			return wikiInputManifest{}, err
-		}
-		if actual := strings.TrimSpace(knowledge.KnowledgeBaseID); actual != "" && actual != h.KnowledgeBaseID {
-			return wikiInputManifest{}, fmt.Errorf("knowledge_base_routing:source_ownership_mismatch: expected=%s actual=%s", h.KnowledgeBaseID, actual)
+			normalized, changed, normalizeErr := transcriptservice.NormalizeSourceEvidenceManifest(doc, manifest)
+			if normalizeErr != nil {
+				return wikiInputManifest{}, normalizeErr
+			}
+			if !changed {
+				return wikiInputManifest{}, err
+			}
+			if h.SourceWriter == nil {
+				return wikiInputManifest{}, fmt.Errorf("transcript_source_validation:source_repair_unavailable: source document writer is not configured")
+			}
+			repaired, repairErr := h.SourceWriter.Ensure(ctx, transcriptservice.SourceInput{Document: normalized, TaskID: job.ID})
+			if repairErr != nil {
+				return wikiInputManifest{}, fmt.Errorf("transcript source repair: %w", repairErr)
+			}
+			if repaired.KnowledgeID != sourceID || repaired.KnowledgeBaseID != h.KnowledgeBaseID {
+				return wikiInputManifest{}, fmt.Errorf("transcript_source_validation:source_binding_invalid: repaired source identity changed")
+			}
+			knowledge, err = h.SourceReader.GetKnowledge(ctx, sourceID)
+			if err != nil {
+				return wikiInputManifest{}, fmt.Errorf("transcript source reread after repair: %w", err)
+			}
+			if actual := strings.TrimSpace(knowledge.KnowledgeBaseID); actual != "" && actual != h.KnowledgeBaseID {
+				return wikiInputManifest{}, fmt.Errorf("knowledge_base_routing:source_ownership_mismatch: expected=%s actual=%s", h.KnowledgeBaseID, actual)
+			}
+			doc, err = transcriptservice.ValidateSourceContent(knowledge.Content, video.ID, generation, video.DurationSeconds)
+			if err != nil {
+				return wikiInputManifest{}, err
+			}
+			if err := transcriptservice.ValidateSourceEvidenceManifest(doc, manifest); err != nil {
+				return wikiInputManifest{}, err
+			}
 		}
 		return wikiInputManifest{Mode: mode, SourceID: sourceID, KnowledgeIDs: []string{sourceID}}, nil
 	case TranscriptInputModeEvidence:

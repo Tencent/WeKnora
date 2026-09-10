@@ -33,6 +33,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/knowledgegraph"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
+	transcriptservice "github.com/Tencent/WeKnora/internal/custom/service/transcript"
 	"github.com/Tencent/WeKnora/internal/custom/worker"
 )
 
@@ -164,6 +165,7 @@ func main() {
 			DB:              db,
 			AgentClient:     agentClient,
 			SourceReader:    knowledgeWeKnoraCli,
+			SourceWriter:    transcriptservice.NewSourceWriter(db, knowledgeWeKnoraCli),
 			Orchestrator:    orchestrator,
 			AgentID:         contentAgentID,
 			KnowledgeBaseID: roles.Knowledge,

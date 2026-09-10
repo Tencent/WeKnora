@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/evidence"
 	customknowledge "github.com/Tencent/WeKnora/internal/custom/service/knowledge"
 	"github.com/Tencent/WeKnora/internal/custom/service/knowledgegraph"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
@@ -27,6 +29,49 @@ import (
 
 type sourceReaderStub struct {
 	value weknora.ManualKnowledgeResult
+}
+
+type repairingSourceGateway struct {
+	item    weknora.ManualKnowledgeResult
+	reads   int
+	updates int
+}
+
+type countingSourceReader struct {
+	gateway *repairingSourceGateway
+	reads   int
+}
+
+func (r *countingSourceReader) GetKnowledge(ctx context.Context, id string) (weknora.ManualKnowledgeResult, error) {
+	r.reads++
+	return r.gateway.GetKnowledge(ctx, id)
+}
+
+func (g *repairingSourceGateway) FindManualKnowledgeByTitle(context.Context, string, string) (*weknora.ManualKnowledgeResult, error) {
+	return nil, nil
+}
+
+func (g *repairingSourceGateway) CreateManualKnowledge(context.Context, string, weknora.ManualKnowledgeInput) (weknora.ManualKnowledgeResult, error) {
+	return weknora.ManualKnowledgeResult{}, fmt.Errorf("unexpected source creation")
+}
+
+func (g *repairingSourceGateway) UpdateManualKnowledge(_ context.Context, id string, input weknora.ManualKnowledgeInput) (weknora.ManualKnowledgeResult, error) {
+	if id != g.item.ID {
+		return weknora.ManualKnowledgeResult{}, fmt.Errorf("unexpected knowledge id %s", id)
+	}
+	g.updates++
+	g.item.Title = input.Title
+	g.item.Content = input.Content
+	g.item.ParseStatus = "completed"
+	return g.item, nil
+}
+
+func (g *repairingSourceGateway) GetKnowledge(_ context.Context, id string) (weknora.ManualKnowledgeResult, error) {
+	if id != g.item.ID {
+		return weknora.ManualKnowledgeResult{}, fmt.Errorf("unexpected knowledge id %s", id)
+	}
+	g.reads++
+	return g.item, nil
 }
 
 func TestAuthenticatedProductionJobRequiresPersistedIdentityMatch(t *testing.T) {
@@ -266,6 +311,141 @@ func TestWikiInputFullDocumentValidatesTranscriptChunks(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, TranscriptInputModeFullDocument, input.Mode)
 	require.Equal(t, []string{"source-1"}, input.KnowledgeIDs)
+}
+
+func TestWikiInputFullDocumentRepairsBoundLegacySpeakerIdentityAndRereads(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoTranscriptSource{}))
+	video := model.Video{ID: "video-1", Title: "测试视频", DurationSeconds: 20, TranscriptGeneration: "generation-1"}
+	require.NoError(t, db.Create(&video).Error)
+	canonicalEvidenceID, err := evidence.BuildEvidenceSentenceID(evidence.Input{
+		VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration,
+		Ordinal: 0, SourceSentenceID: "s-1", Text: "正文", SpeakerID: "0", StartMs: 100, EndMs: 1000,
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.VideoTranscriptChunk{
+		VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 0,
+		EvidenceSentenceID: canonicalEvidenceID, SourceSegmentID: "s-1", SpeakerID: "0", StartMs: 100, EndMs: 1000,
+		KnowledgeID: "chunk-1", ContentHash: "chunk-hash", Status: "completed",
+	}).Error)
+	require.NoError(t, db.Create(&model.VideoTranscriptSource{
+		ID: "binding-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration,
+		KnowledgeBaseID: "knowledge-kb", KnowledgeID: "source-1", ContentHash: "legacy-hash", Status: transcriptservice.SourceStatusCreated,
+	}).Error)
+	legacy, err := transcriptservice.Build(transcriptservice.Input{
+		VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, Title: video.Title, DurationSeconds: video.DurationSeconds,
+		Chapters: []transcriptservice.InputChapter{{Index: 0, Title: "开场", Paragraphs: []transcriptservice.InputParagraph{{Index: 0, Sentences: []transcriptservice.InputSentence{{
+			SourceSentenceID: "s-1", EvidenceSentenceID: "evs:v1:legacy-empty-speaker", Text: "正文", StartMs: 100, EndMs: 1000,
+		}}}}}},
+	})
+	require.NoError(t, err)
+	legacyJSON, err := legacy.JSON()
+	require.NoError(t, err)
+	gateway := &repairingSourceGateway{item: weknora.ManualKnowledgeResult{
+		ID: "source-1", KnowledgeBaseID: "knowledge-kb", Title: video.Title,
+		Content: transcriptservice.SourceContent(legacy, legacyJSON, "legacy-hash"), ParseStatus: "completed",
+	}}
+	reader := &countingSourceReader{gateway: gateway}
+	handler := BaseSkillHandler{
+		DB: db, KnowledgeBaseID: "knowledge-kb", SourceReader: reader,
+		SourceWriter: &transcriptservice.SourceWriter{DB: db, Gateway: gateway, KBID: "knowledge-kb"},
+	}
+	job := &model.VideoProcessingJob{
+		ID: "job-1", VideoID: video.ID, JobType: skill.JobGraph, TranscriptGeneration: video.TranscriptGeneration,
+		InputPayload: `{"transcript_input_mode":"full_document","transcript_source_knowledge_id":"source-1"}`,
+	}
+
+	input, err := handler.wikiInput(t.Context(), job, &video, skill.JobGraph)
+	require.NoError(t, err)
+	require.Equal(t, TranscriptInputModeFullDocument, input.Mode)
+	require.Equal(t, []string{"source-1"}, input.KnowledgeIDs)
+	require.Equal(t, 1, gateway.updates)
+	require.Equal(t, 2, reader.reads)
+
+	var binding model.VideoTranscriptSource
+	require.NoError(t, db.First(&binding, "id = ?", "binding-1").Error)
+	require.NotEqual(t, "legacy-hash", binding.ContentHash)
+}
+
+func TestWikiInputFullDocumentRejectsLegacyRepairBeyondEvidenceIdentity(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		mutate func(*transcriptservice.FullVideoDocument)
+	}{
+		{
+			name: "text",
+			mutate: func(doc *transcriptservice.FullVideoDocument) {
+				doc.Chapters[0].Paragraphs[0].Text = "其他正文"
+				doc.Chapters[0].Paragraphs[0].TimeMarks[0].Text = "其他正文"
+				doc.Chapters[0].ContinuousText = "其他正文"
+				doc.ContinuousText = "其他正文"
+			},
+		},
+		{
+			name: "time",
+			mutate: func(doc *transcriptservice.FullVideoDocument) {
+				doc.Chapters[0].Paragraphs[0].EndMs = 1100
+				doc.Chapters[0].Paragraphs[0].TimeMarks[0].EndMs = 1100
+				doc.Chapters[0].EndMs = 1100
+			},
+		},
+		{
+			name: "source sentence id",
+			mutate: func(doc *transcriptservice.FullVideoDocument) {
+				doc.Chapters[0].Paragraphs[0].SourceSentenceIDs[0] = "other-source"
+				doc.Chapters[0].Paragraphs[0].TimeMarks[0].SourceSentenceID = "other-source"
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+			require.NoError(t, err)
+			require.NoError(t, db.AutoMigrate(&model.VideoTranscriptChunk{}, &model.VideoTranscriptSource{}))
+			video := model.Video{ID: "video-1", Title: "测试视频", DurationSeconds: 20, TranscriptGeneration: "generation-1"}
+			canonicalEvidenceID, err := evidence.BuildEvidenceSentenceID(evidence.Input{
+				VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration,
+				Ordinal: 0, SourceSentenceID: "s-1", Text: "正文", SpeakerID: "0", StartMs: 100, EndMs: 1000,
+			})
+			require.NoError(t, err)
+			require.NoError(t, db.Create(&model.VideoTranscriptChunk{
+				VideoID: video.ID, Generation: video.TranscriptGeneration, ChunkIndex: 0,
+				EvidenceSentenceID: canonicalEvidenceID, SourceSegmentID: "s-1", SpeakerID: "0", StartMs: 100, EndMs: 1000,
+				KnowledgeID: "chunk-1", ContentHash: "chunk-hash", Status: "completed",
+			}).Error)
+			require.NoError(t, db.Create(&model.VideoTranscriptSource{
+				ID: "binding-1", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration,
+				KnowledgeBaseID: "knowledge-kb", KnowledgeID: "source-1", ContentHash: "legacy-hash", Status: transcriptservice.SourceStatusCreated,
+			}).Error)
+			legacy, err := transcriptservice.Build(transcriptservice.Input{
+				VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, Title: video.Title, DurationSeconds: video.DurationSeconds,
+				Chapters: []transcriptservice.InputChapter{{Index: 0, Title: "开场", Paragraphs: []transcriptservice.InputParagraph{{Index: 0, Sentences: []transcriptservice.InputSentence{{
+					SourceSentenceID: "s-1", EvidenceSentenceID: "evs:v1:legacy-empty-speaker", Text: "正文", StartMs: 100, EndMs: 1000,
+				}}}}}},
+			})
+			require.NoError(t, err)
+			testCase.mutate(&legacy)
+			legacyJSON, err := legacy.JSON()
+			require.NoError(t, err)
+			gateway := &repairingSourceGateway{item: weknora.ManualKnowledgeResult{
+				ID: "source-1", KnowledgeBaseID: "knowledge-kb", Title: video.Title,
+				Content: transcriptservice.SourceContent(legacy, legacyJSON, "legacy-hash"), ParseStatus: "completed",
+			}}
+			reader := &countingSourceReader{gateway: gateway}
+			handler := BaseSkillHandler{
+				DB: db, KnowledgeBaseID: "knowledge-kb", SourceReader: reader,
+				SourceWriter: &transcriptservice.SourceWriter{DB: db, Gateway: gateway, KBID: "knowledge-kb"},
+			}
+
+			_, err = handler.wikiInput(t.Context(), &model.VideoProcessingJob{
+				ID: "job-1", VideoID: video.ID, JobType: skill.JobGraph, TranscriptGeneration: video.TranscriptGeneration,
+				InputPayload: `{"transcript_input_mode":"full_document","transcript_source_knowledge_id":"source-1"}`,
+			}, &video, skill.JobGraph)
+			require.ErrorContains(t, err, transcriptservice.SourceValidationEvidence)
+			require.Zero(t, gateway.updates)
+			require.Equal(t, 1, reader.reads)
+		})
+	}
 }
 
 func TestGraphRunRejectsSourceEvidenceMismatchBeforeAgent(t *testing.T) {
