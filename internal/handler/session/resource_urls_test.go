@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -238,6 +239,30 @@ func TestHandleAgentEventsForSSE_FlushesHeldContentOnStop(t *testing.T) {
 		indexOf(body, `"response_type":"stop"`),
 		"held content must precede the stop notification",
 	)
+}
+
+func TestHandleAgentEventsForSSE_StopsOnTerminalError(t *testing.T) {
+	h := &Handler{streamManager: &stubStreamManager{events: []interfaces.StreamEvent{
+		{ID: "err-1", Type: types.ResponseTypeError, Content: "upstream failed", Done: true},
+	}}}
+	c, _ := newTestGinContext(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.Request = c.Request.WithContext(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		h.handleAgentEventsForSSE(ctx, c, "sess1", "msg1", "req-1", nil, false, publicStreamRewriter())
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		cancel()
+		<-done
+		t.Fatal("terminal error did not stop SSE streaming")
+	}
 }
 
 func TestHoldbackKeyRoundTrip(t *testing.T) {
