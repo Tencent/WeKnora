@@ -2457,6 +2457,7 @@ export default {
     kbLockedByAgent: '現在のエージェントによりナレッジベース設定がロックされています',
     kbDisabledByAgent: '現在のエージェントによりナレッジベースが無効になっています',
     modelLockedByAgent: '現在のエージェントによりモデル選択がロックされています',
+    thinkingLevelResetToast: 'モデルを切り替えたため、選択していた思考レベルは新しいモデルではサポートされず、デフォルトにリセットされました。',
     imageUploadDisabledByAgent: 'このエージェントでは画像アップロードが有効になっていません',
     goToAgentSettings: 'エージェント設定に移動'
   },
@@ -4254,7 +4255,16 @@ export default {
       testFailed: 'テストに失敗しました'
     }
   },
+  thinking: {
+    unsupportedHint: '現在のモデルは思考モードに対応していません',
+    levelLabel: '思考レベル',
+    levelPlaceholder: 'モデルのデフォルトに従う',
+    reset: 'リセット',
+  },
   model: {
+    credentials: {
+      apiKey: 'API Key',
+    },
     modelName: 'モデル名',
     defaultTag: 'デフォルト',
     addModelInSettings: 'モデルを追加するにはシステム設定を開いてください',
@@ -4349,6 +4359,8 @@ export default {
       thinkingLevelPlaceholder: '空欄 = アダプターに任せる',
       thinkingLevelDesc: 'ユーザー/エージェントがレベルを指定しない場合に使われるデフォルトです。空欄ならアダプターが決定します（ベンダのデフォルトまたはレベルパラメータなし）。',
       thinkingLevelsUnsupportedHint: 'このモデルは思考強度の調整に対応していません',
+      appIdLabel: 'App ID',
+      appSecretLabel: 'App Secret',
       maxOutputTokensLabel: '最大出力トークン数',
       maxOutputTokensPlaceholder: '空欄 = 無制限',
       maxOutputTokensDesc: 'このモデルが 1 回の応答で生成できる最大トークン数です。空欄なら制限しません。',
@@ -4384,7 +4396,8 @@ export default {
         modelNameMax: 'モデル名は100文字以内で入力してください',
         baseUrlRequired: 'ベースURLを入力してください',
         baseUrlEmpty: 'ベースURLは空にできません',
-        baseUrlInvalid: 'ベースURLが無効です。有効なURLを入力してください'
+        baseUrlInvalid: 'ベースURLが無効です。有効なURLを入力してください',
+        credentialRequired: '{field}を入力してください'
       },
       providerLabel: 'プロバイダ',
       providerPlaceholder: 'モデルプロバイダを選択',
@@ -5625,6 +5638,7 @@ export default {
   },
   agentEditor: {
     builtinHint: 'これは組み込みエージェントです。名前と説明は変更できませんが、設定パラメータは調整できます。',
+    thinkingLevelResetToast: 'モデルを切り替えたため、選択していた思考レベルは新しいモデルではサポートされず、デフォルトにリセットされました。',
     navGroups: {
       basic: '基本',
       knowledge: 'ナレッジと検索',

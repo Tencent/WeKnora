@@ -852,6 +852,7 @@ export default {
   },
   agentEditor: {
     builtinHint: '这是内置智能体，名称和描述不可修改，但可以调整配置参数',
+    thinkingLevelResetToast: '已切换模型，思考档位不在新模型支持范围内，已重置为跟随默认',
     fileTypes: {
       label: '支持的文件类型',
       desc: '限制可选择的文件类型，留空表示支持所有类型',
@@ -2349,7 +2350,16 @@ export default {
     languageDescription: '选择界面显示语言',
     languageSaved: '语言设置已保存'
   },
+  thinking: {
+    unsupportedHint: '当前模型不支持思考',
+    levelLabel: '思考档位',
+    levelPlaceholder: '跟随模型默认',
+    reset: '重置',
+  },
   model: {
+    credentials: {
+      apiKey: 'API Key',
+    },
     modelName: '模型名称',
     defaultTag: '默认',
     addModelInSettings: '前往全局设置添加模型',
@@ -2430,6 +2440,8 @@ export default {
       connectionConfigError: '连接失败，请检查配置',
       downloadStarted: '开始下载 {name}',
       downloadCompleted: '{name} 下载完成',
+      appIdLabel: 'App ID',
+      appSecretLabel: 'App Secret',
       downloadFailed: '{name} 下载失败',
       downloadStartFailed: '启动下载失败',
       ollamaUnavailable: 'Ollama服务不可用，无法选择本地模型',
@@ -2549,7 +2561,8 @@ export default {
         modelNameMax: '模型名称不能超过100个字符',
         baseUrlRequired: '请输入 Base URL',
         baseUrlEmpty: 'Base URL 不能为空',
-        baseUrlInvalid: 'Base URL 格式不正确，请输入有效的 URL'
+        baseUrlInvalid: 'Base URL 格式不正确，请输入有效的 URL',
+        credentialRequired: '请填写{field}'
       },
       thinkingLevels: {
         low: '低',
@@ -4416,6 +4429,7 @@ export default {
     kbLockedByAgent: '当前智能体已锁定知识库配置',
     kbDisabledByAgent: '当前智能体已禁用知识库功能',
     modelLockedByAgent: '当前智能体已锁定模型配置',
+    thinkingLevelResetToast: '已切换模型，思考档位不在新模型支持范围内，已重置为跟随默认',
     imageUploadDisabledByAgent: '当前智能体未启用图片上传',
     goToAgentSettings: '去设置智能体',
     messages: {

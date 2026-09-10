@@ -362,6 +362,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     modelName: model.name,
     baseUrl: model.parameters.base_url || '',
     apiKey: '',
+    appId: '',
     provider: model.parameters.provider || '',
     dimension: model.parameters.embedding_parameters?.dimension,
     supportsDimensionOverride: model.parameters.embedding_parameters?.supports_dimension_override || false,
@@ -608,6 +609,10 @@ const handleModelSave = async (modelData: any) => {
     const trimmedAppSecret = (modelData.appSecret ?? '').trim()
     const appSecretFields: { app_secret?: string } =
       !editingModel.value && trimmedAppSecret ? { app_secret: trimmedAppSecret } : {}
+    // app_id 槽位（design §6.8 三槽凭证）：同样仅在创建时随请求携带，空 = 不设置。
+    const trimmedAppId = (modelData.appId ?? '').trim()
+    const appIdFields: { app_id?: string } =
+      !editingModel.value && trimmedAppId ? { app_id: trimmedAppId } : {}
     const extraConfig: Record<string, string> = {}
     if (modelData.provider === 'lkeap' && saveType === 'rerank') {
       extraConfig.region = (modelData.lkeapRegion || 'ap-guangzhou').trim()
@@ -651,6 +656,7 @@ const handleModelSave = async (modelData: any) => {
         base_url: modelData.baseUrl?.trim() || '',
         ...apiKeyFields,
         ...appSecretFields,
+        ...appIdFields,
         provider: modelData.provider || '',
         ...extraConfigFields,
         ...(Object.keys(customHeadersMap).length > 0 ? { custom_headers: customHeadersMap } : {}),

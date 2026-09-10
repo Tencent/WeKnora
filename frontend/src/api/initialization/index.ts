@@ -613,6 +613,16 @@ export interface ProviderCapabilities {
     embedding?: ProviderEmbeddingCaps;
     rerank?: Record<string, never>;
     asr?: Record<string, never>;
+    // 厂商需要的凭证槽位；weknoracloud 声明为空数组（凭证在空间级设置）。
+    credentials?: ProviderCredentialFieldSpec[];
+}
+
+// 厂商凭证槽位声明（design §6.8）：前端据此动态渲染凭证表单。
+// 镜像后端 internal/models/provider/capabilities.go 的 CredentialFieldSpec。
+export interface ProviderCredentialFieldSpec {
+    key: string;        // 固定三槽：api_key / app_id / app_secret
+    required: boolean;
+    label_key?: string; // 前端 i18n key
 }
 
 // 厂商声明的动态配置字段（如 Azure OpenAI 的 api_version）。

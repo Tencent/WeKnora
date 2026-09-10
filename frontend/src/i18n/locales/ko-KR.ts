@@ -850,6 +850,7 @@ export default {
   },
   agentEditor: {
     builtinHint: '내장 에이전트입니다. 이름과 설명은 수정할 수 없지만, 설정 매개변수는 조정할 수 있습니다.',
+    thinkingLevelResetToast: '모델이 변경되어 선택한 사고 레벨이 새 모델에서 지원되지 않으므로 기본값 따르기로 초기화되었습니다.',
     fileTypes: {
       label: '지원 파일 유형',
       desc: '선택 가능한 파일 유형을 제한합니다. 비워두면 모든 유형을 지원합니다.',
@@ -2347,7 +2348,16 @@ export default {
     languageDescription: '인터페이스 표시 언어 선택',
     languageSaved: '언어 설정이 저장되었습니다'
   },
+  thinking: {
+    unsupportedHint: '현재 모델은 사고 모드를 지원하지 않습니다',
+    levelLabel: '사고 레벨',
+    levelPlaceholder: '모델 기본값 따르기',
+    reset: '초기화',
+  },
   model: {
+    credentials: {
+      apiKey: 'API Key',
+    },
     modelName: '모델 이름',
     defaultTag: '기본값',
     addModelInSettings: '전역 설정에서 모델 추가하기',
@@ -2411,6 +2421,8 @@ export default {
       thinkingLevelPlaceholder: '비움 = 어댑터가 결정',
       thinkingLevelDesc: '사용자/에이전트가 레벨을 지정하지 않았을 때 쓰이는 기본 레벨입니다. 비워 두면 어댑터가 결정합니다(벤더 기본값 사용 또는 레벨 파라미터 미전송).',
       thinkingLevelsUnsupportedHint: '이 모델은 사고 강도 조절을 지원하지 않습니다',
+      appIdLabel: 'App ID',
+      appSecretLabel: 'App Secret',
       maxOutputTokensLabel: '최대 출력 토큰',
       maxOutputTokensPlaceholder: '비워 두면 제한 없음',
       maxOutputTokensDesc: '이 모델이 한 번의 응답에서 생성할 수 있는 최대 토큰 수입니다. 비워 두면 제한하지 않습니다.',
@@ -2547,7 +2559,8 @@ export default {
         modelNameMax: '모델 이름은 100자를 초과할 수 없습니다',
         baseUrlRequired: 'Base URL을 입력해주세요',
         baseUrlEmpty: 'Base URL은 비워둘 수 없습니다',
-        baseUrlInvalid: 'Base URL 형식이 올바르지 않습니다. 유효한 URL을 입력해주세요'
+        baseUrlInvalid: 'Base URL 형식이 올바르지 않습니다. 유효한 URL을 입력해주세요',
+        credentialRequired: '{field}을(를) 입력해주세요'
       },
       thinkingLevels: {
         low: '낮음',
@@ -4414,6 +4427,7 @@ export default {
     kbLockedByAgent: '현재 에이전트가 지식베이스 구성을 잠갔습니다.',
     kbDisabledByAgent: '현재 에이전트가 지식베이스 기능을 비활성화했습니다.',
     modelLockedByAgent: '현재 에이전트는 모델 구성을 잠갔습니다.',
+    thinkingLevelResetToast: '모델이 변경되어 선택한 사고 레벨이 새 모델에서 지원되지 않으므로 기본값 따르기로 초기화되었습니다.',
     imageUploadDisabledByAgent: '현재 에이전트에서 이미지 업로드가 활성화되지 않았습니다',
     goToAgentSettings: '에이전트 설정으로 이동',
     messages: {

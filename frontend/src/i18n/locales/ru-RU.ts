@@ -850,6 +850,7 @@ export default {
   },
   agentEditor: {
     builtinHint: 'Это встроенный агент. Имя и описание нельзя изменить, но можно настроить параметры конфигурации.',
+    thinkingLevelResetToast: 'Модель переключена. Выбранный уровень размышления не поддерживается новой моделью и сброшен на значение по умолчанию.',
     fileTypes: {
       label: 'Поддерживаемые типы файлов',
       desc: 'Ограничение выбираемых типов файлов. Пустое поле — все типы поддерживаются.',
@@ -2347,7 +2348,16 @@ export default {
     languageDescription: 'Выберите язык отображения интерфейса',
     languageSaved: 'Настройки языка сохранены'
   },
+  thinking: {
+    unsupportedHint: 'Текущая модель не поддерживает режим размышления',
+    levelLabel: 'Уровень размышления',
+    levelPlaceholder: 'По умолчанию для модели',
+    reset: 'Сбросить',
+  },
   model: {
+    credentials: {
+      apiKey: 'API Key',
+    },
     modelName: 'Название модели',
     defaultTag: 'По умолчанию',
     addModelInSettings: 'Перейти в общие настройки для добавления моделей',
@@ -2411,6 +2421,8 @@ export default {
       thinkingLevelPlaceholder: 'Пусто = решает адаптер',
       thinkingLevelDesc: 'Уровень по умолчанию, когда пользователь/агент его не указал; пусто — решает адаптер (вендор по умолчанию или без параметра уровня).',
       thinkingLevelsUnsupportedHint: 'Эта модель не поддерживает регулировку силы размышления',
+      appIdLabel: 'App ID',
+      appSecretLabel: 'App Secret',
       maxOutputTokensLabel: 'Максимум выходных токенов',
       maxOutputTokensPlaceholder: 'Пусто = без ограничения',
       maxOutputTokensDesc: 'Сколько токенов модель может сгенерировать за один ответ. Пусто — без ограничения.',
@@ -2547,7 +2559,8 @@ export default {
         modelNameMax: 'Название модели не может превышать 100 символов',
         baseUrlRequired: 'Введите Base URL',
         baseUrlEmpty: 'Base URL не может быть пустым',
-        baseUrlInvalid: 'Недопустимый Base URL, введите корректный адрес'
+        baseUrlInvalid: 'Недопустимый Base URL, введите корректный адрес',
+        credentialRequired: 'Заполните поле «{field}»'
       },
       thinkingLevels: {
         low: 'Низкий',
@@ -4414,6 +4427,7 @@ export default {
     kbLockedByAgent: 'Knowledge base configuration is locked by the current agent',
     kbDisabledByAgent: 'Knowledge base is disabled by the current agent',
     modelLockedByAgent: 'Model selection is locked by the current agent',
+    thinkingLevelResetToast: 'Модель переключена. Выбранный уровень размышления не поддерживается новой моделью и сброшен на значение по умолчанию.',
     imageUploadDisabledByAgent: 'Image upload is not enabled for this agent',
     goToAgentSettings: 'Go to agent settings',
     messages: {

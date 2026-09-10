@@ -27,6 +27,8 @@ import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
+import ThinkingControls from './ThinkingControls.vue';
+import { listModelProviders, type ModelProviderOption } from '@/api/initialization';
 import {
   kbSatisfiesAgentRequirements,
   deriveKbFilterForAgent,
@@ -63,8 +65,7 @@ const {
   chatModels: availableModels,
   webSearchProviders,
 } = storeToRefs(chatResources);
-const { t, locale } = useI18n();
-
+const { t, te, locale } = useI18n();
 let query = ref("");
 const showKbSelector = ref(false);
 
@@ -1048,6 +1049,75 @@ const selectedModel = computed(() => {
   return availableModels.value.find(model => model.id === selectedModelId.value);
 });
 
+// ---- 会话级思考覆盖（design §8.1.3）：内存态不持久化，随 QA 请求发送 thinking_level ----
+const sessionThinking = ref<{ enabled: boolean; level: string }>({ enabled: false, level: '' });
+const showThinkingPanel = ref(false);
+const chatProviderOptions = ref<ModelProviderOption[]>([]);
+
+const loadThinkingCaps = async () => {
+  try {
+    chatProviderOptions.value = await listModelProviders('chat');
+  } catch (e) {
+    console.error('Failed to load chat provider capabilities', e);
+  }
+};
+
+const selectedModelThinkingCaps = computed(() => {
+  const provider = selectedModel.value?.parameters.provider;
+  if (!provider) return undefined;
+  return chatProviderOptions.value.find(p => p.value === provider)?.capabilities?.chat?.thinking;
+});
+
+const selectedModelChatShard = computed(() => selectedModel.value?.parameters.chat);
+
+/** 未开思考的模型整块隐藏（触发按钮 + 面板）。 */
+const thinkingSupported = computed(() => selectedModelThinkingCaps.value?.supported === true);
+
+/** single 档位 options = (分片子集 ?? 厂商枚举) ∩ 厂商枚举（与 ThinkingControls 内规则一致）。 */
+const sessionThinkingLevelOptions = computed(() => {
+  const levels = selectedModelThinkingCaps.value?.supported_levels ?? [];
+  const shard = selectedModelChatShard.value?.selected_levels ?? [];
+  return shard.length ? levels.filter(l => shard.includes(l)) : levels;
+});
+
+const sessionThinkingActive = computed(() => sessionThinking.value.enabled && !!sessionThinking.value.level);
+
+const sessionThinkingTriggerLabel = computed(() => {
+  if (!sessionThinkingActive.value) return t('thinking.levelLabel');
+  const level = sessionThinking.value.level;
+  const key = `model.editor.thinkingLevels.${level}`;
+  return `${t('thinking.levelLabel')} · ${te(key) ? t(key) : level}`;
+});
+
+const sessionThinkingValue = computed({
+  get: () => ({ enabled: sessionThinking.value.enabled, level: sessionThinking.value.level }),
+  set: (v) => {
+    sessionThinking.value.enabled = v.enabled ?? false;
+    sessionThinking.value.level = v.level || '';
+  },
+});
+
+/** 重置为跟随智能体/模型默认（空 = 不发 thinking_level）。 */
+const resetSessionThinking = () => {
+  sessionThinking.value = { enabled: false, level: '' };
+};
+
+// 会话中切模型：已选档位 ∉ 新模型集合 → 清空 + toast（同 §8.1.2 规则）
+watch(selectedModelId, () => {
+  const level = sessionThinking.value.level;
+  if (!level) return;
+  const options = sessionThinkingLevelOptions.value;
+  if (options.length > 0 && !options.includes(level)) {
+    resetSessionThinking();
+    MessagePlugin.warning(t('input.thinkingLevelResetToast'));
+  }
+});
+
+// 会话切换：会话级覆盖是内存态，不跨会话携带
+watch(() => props.sessionId, () => {
+  resetSessionThinking();
+});
+
 // 模型展示名：本空间列表中有则用名称；若为共享智能体且其 model_id 不在本空间列表中则显示“共享智能体配置的模型”
 const selectedModelDisplayName = computed(() => {
   if (selectedModel.value) return modelDisplayName(selectedModel.value);
@@ -1795,6 +1865,7 @@ onMounted(() => {
     loadChatModels(),
     loadAgents(),
     loadMCPServices(),
+    loadThinkingCaps(),
   ]);
   window.addEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
 
@@ -1892,7 +1963,7 @@ watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
 }, { deep: true });
 
 const emit = defineEmits<{
-  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[]): void;
+  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[], thinkingLevel?: string): void;
   (e: 'stop-generation'): void;
 }>();
 
@@ -1991,7 +2062,8 @@ const createSession = async (val: string) => {
   // detached DOM element (which causes getComputedStyle to throw).
   const textarea = getTextareaEl();
   if (textarea) textarea.blur();
-  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles);
+  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles,
+    sessionThinkingActive.value ? sessionThinking.value.level : '');
 
   // Clean up image previews
   uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
@@ -2705,6 +2777,33 @@ defineExpose({
               </div>
             </div>
           </t-tooltip>
+
+          <!-- 思考控制（会话级覆盖 design §8.1.3）：未开思考的模型整块隐藏；嵌入页不暴露 -->
+          <t-popup v-if="thinkingSupported && !embeddedMode" v-model="showThinkingPanel" trigger="click"
+            placement="top-left" :overlay-inner-class-name="'thinking-panel-popup'">
+            <div class="model-display">
+              <div class="model-selector-trigger thinking-trigger" :class="{ active: sessionThinkingActive }">
+                <t-icon name="lightbulb" size="14px" />
+                <span class="model-selector-name">{{ sessionThinkingTriggerLabel }}</span>
+              </div>
+            </div>
+            <template #content>
+              <div class="thinking-panel" @click.stop>
+                <ThinkingControls
+                  v-model="sessionThinkingValue"
+                  edit-mode="single"
+                  :caps="selectedModelThinkingCaps"
+                  :chat-shard="selectedModelChatShard"
+                />
+                <div class="thinking-panel__footer">
+                  <t-button variant="text" size="small" :disabled="!sessionThinkingActive"
+                    @click="resetSessionThinking">
+                    {{ $t('thinking.reset') }}
+                  </t-button>
+                </div>
+              </div>
+            </template>
+          </t-popup>
         </div>
 
         <Teleport to="body">
@@ -3507,6 +3606,20 @@ const getImgSrc = (url: string) => {
   }
 }
 
+.thinking-trigger {
+  min-width: 0;
+
+  &.active {
+    border-color: var(--td-brand-color);
+    color: var(--td-brand-color);
+
+    .model-selector-name {
+      color: var(--td-brand-color);
+    }
+  }
+}
+
+
 .model-selector-name {
   flex: 1;
   font-size: 12px;
@@ -3839,6 +3952,21 @@ const getImgSrc = (url: string) => {
   &:hover {
     color: var(--td-brand-color-active);
     text-decoration: underline;
+  }
+}
+</style>
+
+<!-- 非 scoped 样式：t-popup 面板渲染到 body 下，scoped 无法命中 -->
+<style lang="less">
+/* 思考面板（会话级思考覆盖 design §8.1.3） */
+.thinking-panel {
+  width: 280px;
+  padding: 12px;
+
+  .thinking-panel__footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
   }
 }
 </style>

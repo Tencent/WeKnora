@@ -245,46 +245,49 @@
             <t-input v-model="formData.baseUrl" :placeholder="getBaseUrlPlaceholder()" />
           </div>
 
-          <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
-            <label class="form-label">{{
-              isSignedRerank ? signedRerankAccessKeyLabel : $t('model.editor.apiKeyOptional')
-            }}</label>
-            <!--
-              Edit mode: credentials live behind the /credentials subresource
-              of the model — managed by the shared CredentialResource card,
-              which now renders an INPUT-LOOKING row (32px tall, same border
-              + radius as t-input) so it sits flush with the Base URL field
-              above and the 自定义请求头 controls below — no more
-              "card inside a card" feel.
-              Create mode: the resource doesn't exist yet, so we render a
-              plain password input with a leading lock icon and a trailing
-              show/hide eye toggle.
-            -->
-            <CredentialResource v-if="isEdit && props.modelData?.id" :api="credentialApi" :fields="credentialFields"
-              :meta="credentialMeta" />
-            <t-input v-else v-model="formData.apiKey" :type="showApiKey ? 'text' : 'password'"
-              :placeholder="isSignedRerank ? signedRerankAccessKeyPlaceholder : apiKeyPlaceholder"
-              class="api-key-input" autocomplete="off" spellcheck="false">
-              <template #prefix-icon><t-icon name="lock-on" /></template>
-              <template #suffix-icon>
-                <t-icon
-                  :name="showApiKey ? 'browse-off' : 'browse'"
-                  class="api-key-toggle"
-                  :aria-label="showApiKey ? 'Hide' : 'Show'"
-                  @click.stop="showApiKey = !showApiKey"
-                />
-              </template>
-            </t-input>
-            <p v-if="isSignedRerank" class="form-desc">{{ signedRerankCredentialHint }}</p>
-          </div>
-
-          <!-- AK/SK Rerank 创建模式：SecretKey（编辑模式由 CredentialResource 管理） -->
-          <div v-if="isSignedRerank && !isEdit" class="form-item">
-            <label class="form-label required">{{ signedRerankSecretKeyLabel }}</label>
-            <t-input v-model="formData.appSecret" type="password"
-              :placeholder="signedRerankSecretKeyPlaceholder" autocomplete="off" spellcheck="false">
-              <template #prefix-icon><t-icon name="lock-on" /></template>
-            </t-input>
+          <!--
+            凭证表单：按所选厂商 Credentials spec（/models/providers 下发，
+            design §6.8）动态渲染，切厂商字段组跟随。weknoracloud spec=[]
+            → 整块不渲染（沿用空间级设置 + wkcCredentialState 状态提示）。
+            Edit mode: credentials live behind the /credentials subresource
+            of the model — managed by the shared CredentialResource card
+            (Configured 状态元数据卡片，不做掩码字符串).
+            Create mode: the resource doesn't exist yet, so each spec slot
+            renders a plain password input with a leading lock icon and a
+            trailing show/hide eye toggle. 空值提交 = 不携带（不修改）。
+          -->
+          <div v-if="credentialBlockVisible" class="form-item">
+            <!-- 编辑模式：单字段时父级出 label（与 CredentialResource 约定一致） -->
+            <template v-if="isEdit && props.modelData?.id">
+              <label v-if="credentialFields.length === 1" class="form-label">
+                {{ credentialFields[0].label }}
+              </label>
+              <CredentialResource :api="credentialApi" :fields="credentialFields" :meta="credentialMeta" />
+            </template>
+            <!-- 创建模式：按 spec 逐槽渲染密码输入 -->
+            <template v-else>
+              <div v-for="field in credentialFields" :key="field.key" class="form-item credential-create-item">
+                <label class="form-label" :class="{ required: isCredentialRequired(field.key) }">{{ field.label }}</label>
+                <t-input
+                  :model-value="credentialValue(field.key)"
+                  :type="revealedCredentialKeys.has(field.key) ? 'text' : 'password'"
+                  :placeholder="credentialPlaceholder(field.key)"
+                  class="api-key-input" autocomplete="off" spellcheck="false"
+                  @update:model-value="(v: string) => setCredentialValue(field.key, v)"
+                >
+                  <template #prefix-icon><t-icon name="lock-on" /></template>
+                  <template #suffix-icon>
+                    <t-icon
+                      :name="revealedCredentialKeys.has(field.key) ? 'browse-off' : 'browse'"
+                      class="api-key-toggle"
+                      :aria-label="revealedCredentialKeys.has(field.key) ? 'Hide' : 'Show'"
+                      @click.stop="toggleCredentialReveal(field.key)"
+                    />
+                  </template>
+                </t-input>
+              </div>
+              <p v-if="isSignedRerank" class="form-desc">{{ signedRerankCredentialHint }}</p>
+            </template>
           </div>
 
           <div v-if="isLkeapRerank" class="form-item">
@@ -390,43 +393,22 @@
           <p v-if="visionToggleDisabled" class="form-desc">{{ $t('model.editor.visionDisabledHint') }}</p>
         </div>
 
-        <!-- Chat + 远程 API：思考开关与档位（厂商能力声明驱动，D2/D3） -->
+        <!-- Chat + 远程 API：思考开关与档位（能力声明驱动；共享组件 design §8.1.1，
+             levels 多选形态 + 徽章插槽，chat+remote 门控保留在本调用侧） -->
         <template v-if="showThinkingSection">
-          <div v-if="canDisableThinking" class="form-item">
-            <label class="form-label">{{ $t('model.editor.thinkingToggleLabel') }}</label>
-            <div class="vision-toggle">
-              <t-switch v-model="formData.thinkingEnabled" @change="markManualField('thinkingEnabled')" />
-              <span class="form-desc form-desc--inline">{{ $t('model.editor.thinkingToggleDesc') }}</span>
-            </div>
-          </div>
-
-          <div v-if="!hasThinkingLevels" class="form-item">
-            <p class="form-desc">{{ $t('model.editor.thinkingLevelsUnsupportedHint') }}</p>
-          </div>
-
-          <template v-else>
-            <div class="form-item">
-              <label class="form-label">
-                {{ $t('model.editor.selectedLevelsLabel') }}
-                <span v-if="prefillBadge('selectedLevels')" class="prefill-source">{{ prefillBadge('selectedLevels') }}</span>
-              </label>
-              <t-select v-model="formData.selectedLevels" multiple clearable :min-collapsed-num="4"
-                :options="thinkingLevelOptions" :placeholder="$t('model.editor.selectedLevelsPlaceholder')"
-                @change="onSelectedLevelsChange" />
-              <p class="form-desc">{{ $t('model.editor.selectedLevelsDesc') }}</p>
-            </div>
-
-            <div class="form-item">
-              <label class="form-label">
-                {{ $t('model.editor.thinkingLevelLabel') }}
-                <span v-if="prefillBadge('thinkingLevel')" class="prefill-source">{{ prefillBadge('thinkingLevel') }}</span>
-              </label>
-              <t-select v-model="formData.thinkingLevel" clearable :options="defaultLevelOptions"
-                :placeholder="$t('model.editor.thinkingLevelPlaceholder')"
-                @change="markManualField('thinkingLevel')" />
-              <p class="form-desc">{{ $t('model.editor.thinkingLevelDesc') }}</p>
-            </div>
-          </template>
+          <ThinkingControls
+            v-model="thinkingControlsValue"
+            edit-mode="levels"
+            :caps="chatThinkingCaps"
+            @manual="onThinkingManual"
+          >
+            <template #badge="{ field }">
+              <span v-if="field === 'selectedLevels' && prefillBadge('selectedLevels')"
+                class="prefill-source">{{ prefillBadge('selectedLevels') }}</span>
+              <span v-else-if="field === 'level' && prefillBadge('thinkingLevel')"
+                class="prefill-source">{{ prefillBadge('thinkingLevel') }}</span>
+            </template>
+          </ThinkingControls>
         </template>
 
         <!--
@@ -469,6 +451,7 @@ import CredentialResource, {
   type CredentialResourceApi,
 } from '@/components/credentials/CredentialResource.vue'
 import { shouldShowOllamaUnavailableTip } from '@/components/modelEditorSourceState'
+import ThinkingControls from '@/components/ThinkingControls.vue'
 
 interface CustomHeaderItem {
   key: string
@@ -501,7 +484,8 @@ interface ModelFormData {
   thinkingLevel?: string
   /** chat 分片：该模型支持的档位子集 */
   selectedLevels?: string[]
-  /** chat 分片：输入模态（['text'] / ['text','image']） */
+  /** 凭证槽位：App ID（design §6.8 三槽之一） */
+  appId?: string
   inputModalities?: string[]
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
   customHeaders?: CustomHeaderItem[]
@@ -621,25 +605,25 @@ const chatThinkingCaps = computed(() => (
 ))
 
 const showThinkingSection = computed(() => chatThinkingCaps.value?.supported === true)
-const canDisableThinking = computed(() => chatThinkingCaps.value?.can_disable !== false)
-const hasThinkingLevels = computed(() => (chatThinkingCaps.value?.supported_levels?.length ?? 0) > 0)
 
-const levelLabel = (level: string) => {
-  const key = `model.editor.thinkingLevels.${level}`
-  return te(key) ? t(key) : level
-}
-
-const thinkingLevelOptions = computed(() =>
-  (chatThinkingCaps.value?.supported_levels ?? []).map(v => ({ label: levelLabel(v), value: v }))
-)
-
-/** 默认档单选：优先取用户勾选的档位子集，未勾选时回退厂商枚举。 */
-const defaultLevelOptions = computed(() => {
-  const values = formData.value.selectedLevels?.length
-    ? formData.value.selectedLevels
-    : (chatThinkingCaps.value?.supported_levels ?? [])
-  return values.map(v => ({ label: levelLabel(v), value: v }))
+/** ThinkingControls（levels 形态）的双向桥：值落在 chat 分片对应表单字段上。 */
+const thinkingControlsValue = computed({
+  get: () => ({
+    enabled: formData.value.thinkingEnabled,
+    level: formData.value.thinkingLevel,
+    selectedLevels: formData.value.selectedLevels,
+  }),
+  set: (v) => {
+    formData.value.thinkingEnabled = v.enabled
+    formData.value.thinkingLevel = v.level ?? ''
+    formData.value.selectedLevels = v.selectedLevels ?? []
+  },
 })
+
+/** 组件字段名 → 预填追踪字段名（徽章来源标注清除）。 */
+const onThinkingManual = (field: 'enabled' | 'selectedLevels' | 'level') => {
+  markManualField(field === 'enabled' ? 'thinkingEnabled' : field === 'level' ? 'thinkingLevel' : 'selectedLevels')
+}
 
 /** 厂商能力未声明图像输入时置灰视觉开关。 */
 const visionToggleDisabled = computed(() => {
@@ -807,15 +791,6 @@ const prefillForModelId = async (modelId: string) => {
   if (entry) applyPrefill(entry, 'catalog')
 }
 
-/** 用户勾选档位后：默认档若不在子集内则清空（子集是默认档的选项来源）。 */
-const onSelectedLevelsChange = (value: unknown) => {
-  markManualField('selectedLevels')
-  const levels = Array.isArray(value) ? value.map(String) : []
-  const current = formData.value.thinkingLevel
-  if (current && !levels.includes(current)) {
-    formData.value.thinkingLevel = ''
-  }
-}
 
 // Header icon for the SettingDrawer — uses the same TDesign icon name table
 // as the model card list, so the drawer's leading badge visually matches the
@@ -866,23 +841,78 @@ const signedRerankCredentialHint = computed(() => (
     : t('model.editor.lkeap.rerankCredentialHint')
 ))
 
-// Credential resource binding for the shared <CredentialResource> component.
+// ---- 凭证表单动态渲染（design §6.8：按所选厂商 Credentials spec，切厂商字段组跟随） ----
+
+/** 三槽固定词表（后端 CredentialFieldSpec.Key）：槽位 → 表单字段。 */
+const CREDENTIAL_SLOT_FIELDS: Record<string, keyof ModelFormData> = {
+  api_key: 'apiKey',
+  app_id: 'appId',
+  app_secret: 'appSecret',
+}
+const CREDENTIAL_SLOT_KEYS = Object.keys(CREDENTIAL_SLOT_FIELDS) as ModelCredentialField[]
+
+/** 厂商声明的凭证槽位 spec；能力声明未加载（API 兜底路径）时为 undefined。 */
+const providerCredentialSpec = computed(() => activeProviderCaps.value?.credentials)
+
+/** 槽位 label：签名 rerank 专属标注 > spec.label_key > 槽位默认文案。 */
+const credentialLabel = (key: ModelCredentialField, labelKey?: string): string => {
+  if (isSignedRerank.value && key === 'api_key') return signedRerankAccessKeyLabel.value
+  if (isSignedRerank.value && key === 'app_secret') return signedRerankSecretKeyLabel.value
+  if (labelKey && te(labelKey)) return t(labelKey)
+  if (key === 'app_id') return t('model.editor.appIdLabel')
+  if (key === 'app_secret') return t('model.editor.appSecretLabel')
+  return t('model.editor.apiKeyOptional')
+}
+
 const credentialFields = computed<CredentialFieldDef<ModelCredentialField>[]>(() => {
-  const fields: CredentialFieldDef<ModelCredentialField>[] = [
-    {
-      key: 'api_key',
-      label: (isSignedRerank.value
-        ? signedRerankAccessKeyLabel.value
-        : t('model.editor.apiKeyOptional')) as string,
-    },
-  ]
-  if (formData.value.provider === 'weknoracloud') {
-    fields.push({ key: 'app_secret', label: 'App Secret' })
-  } else if (isSignedRerank.value) {
-    fields.push({ key: 'app_secret', label: signedRerankSecretKeyLabel.value as string })
+  const spec = providerCredentialSpec.value
+  if (!spec) {
+    // 兜底：能力声明不可用时维持 v1 字段组
+    const fields: CredentialFieldDef<ModelCredentialField>[] = [
+      { key: 'api_key', label: credentialLabel('api_key') },
+    ]
+    if (isSignedRerank.value) {
+      fields.push({ key: 'app_secret', label: signedRerankSecretKeyLabel.value as string })
+    }
+    return fields
   }
+  const fields = spec
+    .filter(f => (CREDENTIAL_SLOT_KEYS as string[]).includes(f.key))
+    .map(f => ({ key: f.key as ModelCredentialField, label: credentialLabel(f.key as ModelCredentialField, f.label_key) }))
   return fields
 })
+
+/** spec 为权威可见性来源（weknoracloud spec=[] → 整块隐藏）；spec 未加载时沿用 v1 判断。 */
+const credentialBlockVisible = computed(() => {
+  if (formData.value.source !== 'remote') return false
+  if (providerCredentialSpec.value) return credentialFields.value.length > 0
+  return formData.value.provider !== 'weknoracloud'
+})
+
+const isCredentialRequired = (key: string) =>
+  providerCredentialSpec.value?.find(f => f.key === key)?.required === true
+
+const credentialValue = (key: string) =>
+  formData.value[CREDENTIAL_SLOT_FIELDS[key]] as string | undefined ?? ''
+
+const setCredentialValue = (key: string, value: string) => {
+  ;(formData.value as any)[CREDENTIAL_SLOT_FIELDS[key]] = value
+}
+
+const credentialPlaceholder = (key: string) => {
+  if (key === 'api_key' && isSignedRerank.value) return signedRerankAccessKeyPlaceholder.value
+  if (key === 'app_secret' && isSignedRerank.value) return signedRerankSecretKeyPlaceholder.value
+  return t('model.editor.apiKeyPlaceholder')
+}
+
+// Create 模式密码输入的明文预览开关（按槽位记忆，关抽屉时清空）。
+const revealedCredentialKeys = ref<Set<string>>(new Set())
+const toggleCredentialReveal = (key: string) => {
+  const next = new Set(revealedCredentialKeys.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  revealedCredentialKeys.value = next
+}
 
 const credentialApi = computed<CredentialResourceApi<ModelCredentialField>>(() => {
   const id = props.modelData?.id ?? ''
@@ -900,23 +930,19 @@ const credentialApi = computed<CredentialResourceApi<ModelCredentialField>>(() =
 // Initial credential metadata. ModelSettings.convertToLegacyFormat
 // preserves `credentials` from the main ListModels response so the card
 // renders the correct "Configured" state on dialog open.
-const credentialMeta = computed(() => (props.modelData as any)?.credentials ?? {
-  api_key: { configured: false },
-  app_secret: { configured: false },
+const credentialMeta = computed(() => {
+  const stored = (props.modelData as any)?.credentials ?? {}
+  const meta: Record<string, { configured: boolean }> = {}
+  for (const field of credentialFields.value) {
+    meta[field.key] = stored[field.key] ?? { configured: false }
+  }
+  return meta
 })
-
-// Placeholder hint for the create-mode API key input. Edit mode replaces
-// this input entirely with a <CredentialResource> card.
-const apiKeyPlaceholder = computed(() => t('model.editor.apiKeyPlaceholder'))
 
 const formRef = ref()
 const saving = ref(false)
-// Toggles the create-mode API key input between masked and plain text. Lets
-// the user proofread a freshly pasted secret without losing the password
-// affordance for everyday use. Reset every time the drawer closes (see
-// reset block in the visible watcher) so we never leak the previous value
-// across editor sessions.
-const showApiKey = ref(false)
+// Create 模式明文预览开关 revealedCredentialKeys 声明见凭证动态渲染区；
+// 每次抽屉关闭时重置（见 visible watcher 的 reset 块），避免跨编辑会话残留。
 const modelChecked = ref(false)
 const modelAvailable = ref(false)
 const checking = ref(false)
@@ -977,6 +1003,7 @@ const formData = ref<ModelFormData>({
   displayName: '',
   baseUrl: '',
   apiKey: '',
+  appId: '',
   dimension: undefined,
   supportsDimensionOverride: false,
   interfaceType: 'ollama',
@@ -1171,6 +1198,8 @@ watch(() => props.visible, (val) => {
         formData.value = {
           ...props.modelData,
           apiKey: '',
+          appId: '',
+          appSecret: '',
           customHeaders: Array.isArray(props.modelData.customHeaders)
             ? props.modelData.customHeaders.map(h => ({ key: h.key, value: h.value }))
             : [],
@@ -1216,6 +1245,7 @@ const resetForm = () => {
     displayName: '',
     baseUrl: '',
     apiKey: '',
+    appId: '',
     dimension: undefined, // 默认不填，让用户手动输入或通过检测按钮获取
     supportsDimensionOverride: false,
     interfaceType: undefined,
@@ -1240,7 +1270,7 @@ const resetForm = () => {
   dimensionChecked.value = false
   dimensionSuccess.value = false
   dimensionMessage.value = ''
-  showApiKey.value = false
+  revealedCredentialKeys.value = new Set()
   // 预填/探测状态一并清空
   manualFields.value = new Set()
   prefillSource.value = {}
@@ -1622,6 +1652,20 @@ const handleConfirm = async () => {
         new URL(formData.value.baseUrl.trim())
       } catch {
         MessagePlugin.warning(t('model.editor.validation.baseUrlInvalid'))
+        return
+      }
+    }
+
+    // 创建模式：spec 标记 required 的凭证槽位必须填写（编辑模式凭证由
+    // CredentialResource 独立管理，不在此校验）。
+    if (!isEdit.value && credentialBlockVisible.value) {
+      const missing = credentialFields.value.find(
+        f => isCredentialRequired(f.key) && !credentialValue(f.key).trim(),
+      )
+      if (missing) {
+        MessagePlugin.warning(
+          t('model.editor.validation.credentialRequired', { field: missing.label }),
+        )
         return
       }
     }

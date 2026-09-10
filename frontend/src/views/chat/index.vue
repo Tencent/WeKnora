@@ -126,7 +126,7 @@
         </transition>
         <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
             <InputField ref="inputFieldRef"
-                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles)"
+                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, thinkingLevel) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, thinkingLevel)"
                 @stop-generation="handleStopGeneration" :isReplying="isReplying" :sessionId="session_id"
                 :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"></InputField>
         </div>
@@ -721,7 +721,7 @@ const handleStopGeneration = () => {
     // 保留 currentAssistantMessageId，Input-field 仍需用它调用 stop API
 };
 
-const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = []) => {
+const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], thinkingLevel = '') => {
     stopStream();
     prepareForNewOutgoingMessage();
     activitySessionId.value = String(session_id.value);
@@ -890,6 +890,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         agent_source_tenant_id: selectedAgentSourceTenantId,
         web_search_enabled: webSearchEnabled,
         summary_model_id: modelId,
+        thinking_level: thinkingLevel || undefined,
         mcp_service_ids: requestMcpServiceIds,
         skill_names: requestSkillNames,
         tag_ids: tagIds,

@@ -2457,6 +2457,7 @@ export default {
     kbLockedByAgent: 'Knowledge base configuration is locked by the current agent',
     kbDisabledByAgent: 'Knowledge base is disabled by the current agent',
     modelLockedByAgent: 'Model selection is locked by the current agent',
+    thinkingLevelResetToast: 'Model switched. The selected thinking level is not supported by the new model and has been reset to follow the default.',
     imageUploadDisabledByAgent: 'Image upload is not enabled for this agent',
     goToAgentSettings: 'Go to agent settings'
   },
@@ -4254,7 +4255,16 @@ export default {
       testFailed: 'Test failed'
     }
   },
+  thinking: {
+    unsupportedHint: 'The current model does not support thinking',
+    levelLabel: 'Thinking level',
+    levelPlaceholder: 'Follow model default',
+    reset: 'Reset',
+  },
   model: {
+    credentials: {
+      apiKey: 'API Key',
+    },
     modelName: 'Model Name',
     defaultTag: 'Default',
     addModelInSettings: 'Go to global settings to add models',
@@ -4349,6 +4359,8 @@ export default {
       thinkingLevelPlaceholder: 'Empty = adapter decides',
       thinkingLevelDesc: 'Level used when the user/agent does not specify one; empty lets the adapter decide (vendor default or no level parameter).',
       thinkingLevelsUnsupportedHint: 'This model does not support thinking strength control',
+      appIdLabel: 'App ID',
+      appSecretLabel: 'App Secret',
       maxOutputTokensLabel: 'Max output tokens',
       maxOutputTokensPlaceholder: 'Empty = unlimited',
       maxOutputTokensDesc: 'How many tokens this model may generate in one response. Leave empty for no limit.',
@@ -4384,7 +4396,8 @@ export default {
         modelNameMax: 'Model name cannot exceed 100 characters',
         baseUrlRequired: 'Please enter the Base URL',
         baseUrlEmpty: 'Base URL cannot be empty',
-        baseUrlInvalid: 'Invalid Base URL, please enter a valid URL'
+        baseUrlInvalid: 'Invalid Base URL, please enter a valid URL',
+        credentialRequired: 'Please fill in {field}'
       },
       providerLabel: 'Provider',
       providerPlaceholder: 'Select model provider',
@@ -5625,6 +5638,7 @@ export default {
   },
   agentEditor: {
     builtinHint: 'This is a built-in agent. Name and description cannot be modified, but configuration parameters can be adjusted.',
+    thinkingLevelResetToast: 'Model switched. The selected thinking level is not supported by the new model and has been reset to follow the default.',
     navGroups: {
       basic: 'Basics',
       knowledge: 'Knowledge & Retrieval',
