@@ -259,3 +259,10 @@ func TestIsLikelyLanguageTag(t *testing.T) {
 		})
 	}
 }
+
+func TestNewExtractorUsesGraphOutputBudget(t *testing.T) {
+	extractor := NewExtractor(nil, nil)
+	if got := extractor.chatOpt.MaxTokens; got != 8192 {
+		t.Fatalf("MaxTokens = %d, want 8192", got)
+	}
+}
