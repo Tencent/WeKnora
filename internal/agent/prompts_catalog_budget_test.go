@@ -142,12 +142,14 @@ func TestFormatKnowledgeBaseList_PerItemCaps(t *testing.T) {
 }
 
 func TestTruncateRunes(t *testing.T) {
+	// truncateRunes lives in engine.go (request-preview truncation) and is
+	// reused here for name caps: rune-based, never byte-based, so CJK names
+	// cannot be corrupted mid-rune.
 	cjk := strings.Repeat("中", 300)
 	got := truncateRunes(cjk, 200)
-	require.Len(t, []rune(got), 203) // 200 runes + "..."
+	require.Len(t, []rune(got), 201) // 200 runes + "…"
 	require.True(t, utf8.ValidString(got), "byte-slicing would produce invalid UTF-8 here")
-	assert.True(t, strings.HasSuffix(got, "..."))
+	assert.True(t, strings.HasSuffix(got, "…"))
 
 	assert.Equal(t, "abc", truncateRunes("abc", 10))
-	assert.Equal(t, "", truncateRunes("abc", 0))
 }

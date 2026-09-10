@@ -311,19 +311,6 @@ func renderKnowledgeBaseEntry(b *strings.Builder, kb *KnowledgeBaseInfo, tier ca
 	b.WriteString("</knowledge_base>\n")
 }
 
-// truncateRunes shortens s to at most maxRunes characters (never bytes —
-// names are commonly multi-byte), appending an ellipsis when truncated.
-func truncateRunes(s string, maxRunes int) string {
-	if maxRunes <= 0 {
-		return ""
-	}
-	runes := []rune(s)
-	if len(runes) <= maxRunes {
-		return s
-	}
-	return strings.TrimSpace(string(runes[:maxRunes])) + "..."
-}
-
 // renderPromptPlaceholders renders placeholders in the prompt template.
 //
 // Supported placeholders:
