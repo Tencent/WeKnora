@@ -645,6 +645,17 @@ func (e *AgentEngine) runReActIteration(
 		currentTokens = e.tokenEstimator.EstimateMessages(managed)
 	}
 
+	// Fail fast when this round's request cannot possibly fit the window.
+	// Compaction only reclaims history, so a turn that is born over budget —
+	// an oversized runtime catalog, for example (#3158) — would otherwise
+	// burn a full window of prompt tokens on every futile round. Tool schemas
+	// ride on every request but are deliberately excluded from the compaction
+	// trigger, so they are added back here.
+	if err := e.guardRequestBudget(ctx, round, currentTokens, tools); err != nil {
+		retErr = err
+		return iterOutcomeBreak, err
+	}
+
 	// Mid-run steering: drain any user messages queued while the previous
 	// round was thinking/executing tools. Runs after compression (injected
 	// text stays inside the protected tail) and before lastSentMsgCount is

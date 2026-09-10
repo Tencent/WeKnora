@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -126,78 +127,201 @@ func AvailablePlaceholders() []PlaceholderDefinition {
 	return result
 }
 
-// formatKnowledgeBaseList formats knowledge base information as XML for the prompt
+// Runtime-catalog budgeting (#3158): the bound-KB block is part of the user
+// message that every LLM call of a turn re-sends, so an uncapped catalog — a
+// kb=all agent over a multi-KB tenant — exceeds the context window before the
+// first response and burns that window again on every round of a turn that can
+// never succeed. The budget is measured in runes (≈ characters, not bytes;
+// names and descriptions are commonly CJK) and degrades uniformly for every
+// bound KB, in the order that hurts routing least: FAQ answers go first
+// (questions are the routing signal, answers are retrievable content), then
+// per-KB document entries and descriptions; the one-line identity row
+// (id/name/type/doc_count) is the last thing to go.
+const (
+	// maxRuntimeCatalogRunes caps the rendered <knowledge_bases> block:
+	// roughly four full-detail KBs, or ~60 identity rows.
+	maxRuntimeCatalogRunes = 8192
+
+	// kbNameMaxRunes caps one KB or document name wherever it renders.
+	kbNameMaxRunes = 80
+
+	// kbDescriptionMaxRunes caps one KB description wherever it renders.
+	kbDescriptionMaxRunes = 200
+
+	// faqAnswerMaxRunes caps one FAQ answer; the full answer remains
+	// retrievable through the FAQ tools.
+	faqAnswerMaxRunes = 200
+)
+
+// catalogDetailTier selects how much per-KB detail the catalog carries. The
+// whole catalog renders at one tier so the model sees a uniform shape for
+// every bound KB.
+type catalogDetailTier int
+
+const (
+	// catalogTierFull renders descriptions, recent documents and FAQ
+	// questions with answers, each item under its own rune cap.
+	catalogTierFull catalogDetailTier = iota
+	// catalogTierNoFAQAnswers drops FAQ answers but keeps the questions.
+	catalogTierNoFAQAnswers
+	// catalogTierIdentity keeps only the one-line identity row per KB.
+	catalogTierIdentity
+)
+
+// formatKnowledgeBaseList formats knowledge base information as XML for the
+// prompt, within the runtime-catalog rune budget.
 func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 	if len(kbInfos) == 0 {
 		return "<knowledge_bases />"
 	}
+	// The identity tier's renderer caps its own row list, so it always fits;
+	// richer tiers are returned only when they fit whole.
+	for _, tier := range []catalogDetailTier{catalogTierFull, catalogTierNoFAQAnswers} {
+		if rendered := renderKBCatalog(kbInfos, tier); utf8.RuneCountInString(rendered) <= maxRuntimeCatalogRunes {
+			return rendered
+		}
+	}
+	return renderKBCatalog(kbInfos, catalogTierIdentity)
+}
 
+// renderKBCatalog renders every bound KB at the given detail tier.
+func renderKBCatalog(kbInfos []*KnowledgeBaseInfo, tier catalogDetailTier) string {
 	var b strings.Builder
 	b.WriteString("<knowledge_bases>\n")
-	for _, kb := range kbInfos {
-		kbType := kb.Type
-		if kbType == "" {
-			kbType = "document"
+	if tier == catalogTierIdentity {
+		renderKBCatalogIdentityRows(&b, kbInfos)
+	} else {
+		for _, kb := range kbInfos {
+			renderKnowledgeBaseEntry(&b, kb, tier)
 		}
-		capsAttr := ""
-		if len(kb.Capabilities) > 0 {
-			capsAttr = fmt.Sprintf(" capabilities=\"%s\"", strings.Join(kb.Capabilities, ","))
-		}
-		b.WriteString(fmt.Sprintf("<knowledge_base id=\"%s\" name=\"%s\" type=\"%s\" doc_count=\"%d\"%s>\n",
-			kb.ID, kb.Name, kbType, kb.DocCount, capsAttr))
-		if kb.Description != "" {
-			b.WriteString(fmt.Sprintf("<description>%s</description>\n", kb.Description))
-		}
-
-		if len(kb.RecentDocs) > 0 {
-			if kbType == "faq" {
-				b.WriteString("<faq_entries>\n")
-				for j, doc := range kb.RecentDocs {
-					if j >= 10 {
-						break
-					}
-					question := doc.FAQStandardQuestion
-					if question == "" {
-						question = doc.FileName
-					}
-					b.WriteString(fmt.Sprintf("<faq chunk_id=\"%s\" knowledge_id=\"%s\" created_at=\"%s\">\n",
-						doc.ChunkID, doc.KnowledgeID, doc.CreatedAt))
-					b.WriteString(fmt.Sprintf("<question>%s</question>\n", question))
-					if len(doc.FAQAnswers) > 0 {
-						for _, ans := range doc.FAQAnswers {
-							b.WriteString(fmt.Sprintf("<answer>%s</answer>\n", ans))
-						}
-					}
-					b.WriteString("</faq>\n")
-				}
-				b.WriteString("</faq_entries>\n")
-			} else {
-				b.WriteString("<recent_documents>\n")
-				for j, doc := range kb.RecentDocs {
-					if j >= 2 {
-						break
-					}
-					docName := doc.Title
-					if docName == "" {
-						docName = doc.FileName
-					}
-					fileSize := formatFileSize(doc.FileSize)
-					b.WriteString(fmt.Sprintf("<document knowledge_id=\"%s\" type=\"%s\" file_size=\"%s\" created_at=\"%s\">\n",
-						doc.KnowledgeID, doc.Type, fileSize, doc.CreatedAt))
-					b.WriteString(fmt.Sprintf("<name>%s</name>\n", docName))
-					if doc.Description != "" {
-						summary := formatDocSummary(doc.Description, 120)
-						b.WriteString(fmt.Sprintf("<summary>%s</summary>\n", summary))
-					}
-					b.WriteString("</document>\n")
-				}
-				b.WriteString("</recent_documents>\n")
-			}
-		}
-		b.WriteString("</knowledge_base>\n")
 	}
 	b.WriteString("</knowledge_bases>")
 	return b.String()
+}
+
+// kbIdentityLine renders the one identity row every tier depends on for
+// routing: id, name, type, document count and capabilities. The row is
+// rendered without its closing token: richer tiers append ">\n" and nested
+// content, the identity tier appends " />\n".
+func kbIdentityLine(kb *KnowledgeBaseInfo) string {
+	kbType := kb.Type
+	if kbType == "" {
+		kbType = "document"
+	}
+	capsAttr := ""
+	if len(kb.Capabilities) > 0 {
+		capsAttr = fmt.Sprintf(" capabilities=\"%s\"", escapeXMLAttr(strings.Join(kb.Capabilities, ",")))
+	}
+	return fmt.Sprintf("<knowledge_base id=\"%s\" name=\"%s\" type=\"%s\" doc_count=\"%d\"%s",
+		escapeXMLAttr(kb.ID),
+		escapeXMLAttr(truncateRunes(kb.Name, kbNameMaxRunes)),
+		escapeXMLAttr(kbType),
+		kb.DocCount,
+		capsAttr)
+}
+
+// identityNoteAllowance reserves room for the trailing omitted-count note so
+// the note's own cost never pushes the block past the budget. It covers notes
+// naming up to 999 omitted KBs.
+const identityNoteAllowance = 96
+
+// renderKBCatalogIdentityRows emits one self-closing identity row per KB,
+// stopping when the budget is exhausted and summarizing the remainder in a
+// trailing note. The omitted KBs stay registered in the request's handle
+// table, so id-bearing tool calls against them still resolve.
+func renderKBCatalogIdentityRows(b *strings.Builder, kbInfos []*KnowledgeBaseInfo) {
+	remaining := maxRuntimeCatalogRunes - len("<knowledge_bases>\n") - len("</knowledge_bases>") - identityNoteAllowance
+	omitted := 0
+	for _, kb := range kbInfos {
+		line := kbIdentityLine(kb) + " />\n"
+		n := utf8.RuneCountInString(line)
+		if n > remaining {
+			omitted++
+			continue
+		}
+		remaining -= n
+		b.WriteString(line)
+	}
+	if omitted > 0 {
+		b.WriteString(fmt.Sprintf(
+			"<note>%d more knowledge bases are bound for this turn but not listed.</note>\n",
+			omitted))
+	}
+}
+
+func renderKnowledgeBaseEntry(b *strings.Builder, kb *KnowledgeBaseInfo, tier catalogDetailTier) {
+	b.WriteString(kbIdentityLine(kb) + ">\n")
+	if kb.Description != "" {
+		b.WriteString(fmt.Sprintf("<description>%s</description>\n",
+			escapeXMLAttr(formatDocSummary(kb.Description, kbDescriptionMaxRunes))))
+	}
+	if len(kb.RecentDocs) == 0 {
+		b.WriteString("</knowledge_base>\n")
+		return
+	}
+	kbType := kb.Type
+	if kbType == "" {
+		kbType = "document"
+	}
+	if kbType == "faq" {
+		b.WriteString("<faq_entries>\n")
+		for j, doc := range kb.RecentDocs {
+			if j >= 10 {
+				break
+			}
+			question := doc.FAQStandardQuestion
+			if question == "" {
+				question = doc.FileName
+			}
+			b.WriteString(fmt.Sprintf("<faq chunk_id=\"%s\" knowledge_id=\"%s\" created_at=\"%s\">\n",
+				escapeXMLAttr(doc.ChunkID), escapeXMLAttr(doc.KnowledgeID), escapeXMLAttr(doc.CreatedAt)))
+			b.WriteString(fmt.Sprintf("<question>%s</question>\n", escapeXMLAttr(question)))
+			if tier == catalogTierFull {
+				for _, ans := range doc.FAQAnswers {
+					b.WriteString(fmt.Sprintf("<answer>%s</answer>\n",
+						escapeXMLAttr(formatDocSummary(ans, faqAnswerMaxRunes))))
+				}
+			}
+			b.WriteString("</faq>\n")
+		}
+		b.WriteString("</faq_entries>\n")
+	} else {
+		b.WriteString("<recent_documents>\n")
+		for j, doc := range kb.RecentDocs {
+			if j >= 2 {
+				break
+			}
+			docName := doc.Title
+			if docName == "" {
+				docName = doc.FileName
+			}
+			fileSize := formatFileSize(doc.FileSize)
+			b.WriteString(fmt.Sprintf("<document knowledge_id=\"%s\" type=\"%s\" file_size=\"%s\" created_at=\"%s\">\n",
+				escapeXMLAttr(doc.KnowledgeID), escapeXMLAttr(doc.Type),
+				escapeXMLAttr(fileSize), escapeXMLAttr(doc.CreatedAt)))
+			b.WriteString(fmt.Sprintf("<name>%s</name>\n", escapeXMLAttr(truncateRunes(docName, kbNameMaxRunes))))
+			if doc.Description != "" {
+				b.WriteString(fmt.Sprintf("<summary>%s</summary>\n",
+					escapeXMLAttr(formatDocSummary(doc.Description, 120))))
+			}
+			b.WriteString("</document>\n")
+		}
+		b.WriteString("</recent_documents>\n")
+	}
+	b.WriteString("</knowledge_base>\n")
+}
+
+// truncateRunes shortens s to at most maxRunes characters (never bytes —
+// names are commonly multi-byte), appending an ellipsis when truncated.
+func truncateRunes(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return strings.TrimSpace(string(runes[:maxRunes])) + "..."
 }
 
 // renderPromptPlaceholders renders placeholders in the prompt template.

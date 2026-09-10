@@ -66,6 +66,34 @@ func (e *AgentEngine) manageContextWindow(
 	return trimmed, changed || ok
 }
 
+// guardRequestBudget rejects the round when the projected request — message
+// history plus the tool schemas attached to every call — cannot fit the
+// model's context window with the reserved response room. Unlike the
+// compaction trigger it accounts for tool schemas (Estimator.EstimateTools);
+// unlike compaction it fails the turn outright, because a request that is
+// over the window before any response is generated is not something history
+// compaction can fix. No window configured means nothing to guard against.
+func (e *AgentEngine) guardRequestBudget(
+	ctx context.Context, round, currentTokens int, tools []chat.Tool,
+) error {
+	if e.config == nil || e.config.MaxContextTokens <= 0 || e.tokenEstimator == nil {
+		return nil
+	}
+	toolTokens := e.tokenEstimator.EstimateTools(tools)
+	projected := currentTokens + toolTokens
+	usable := e.config.MaxContextTokens - e.contextReserveTokens()
+	if projected <= usable {
+		return nil
+	}
+	err := fmt.Errorf(
+		"agent request exceeds the model context window: estimated %d tokens "+
+			"(%d history + %d tool schemas) against %d usable of %d — "+
+			"shrink the bound knowledge-base scope or switch to a model with a larger window",
+		projected, currentTokens, toolTokens, usable, e.config.MaxContextTokens)
+	logger.Errorf(ctx, "[Agent][Round-%d] %v", round, err)
+	return err
+}
+
 // runCompaction performs one compaction and reports whether the context
 // actually got smaller. A false return means no further attempt this turn will
 // help either, and the caller must not keep retrying: a compaction that frees
