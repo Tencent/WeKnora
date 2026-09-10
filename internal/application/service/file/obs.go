@@ -28,6 +28,8 @@ type obsFileService struct {
 	proxyDomain string
 }
 
+const obsScheme = "obs://"
+
 type obsEndpointResolver struct {
 	url string
 }
@@ -118,33 +120,39 @@ func (s *obsFileService) CheckConnectivity(ctx context.Context) error {
 }
 
 func (s *obsFileService) parseObsFilePath(filePath string) (string, error) {
-	prefix := s.getPrifix()
-
-	if strings.HasPrefix(filePath, prefix) {
-		rest := strings.TrimPrefix(filePath, prefix)
-		// With proxy domain: path is {prefix}/{objectKey} (no bucket name)
-		if s.proxyDomain != "" {
-			rest = strings.TrimPrefix(rest, "/")
-			if rest != "" {
-				return rest, nil
-			}
-			return "", fmt.Errorf("invalid OBS file path: %s", filePath)
-		}
-		// Without proxy domain: path is {prefix}/{bucketName}/{objectKey}
+	if strings.HasPrefix(filePath, obsScheme) {
+		rest := strings.TrimPrefix(filePath, obsScheme)
 		parts := strings.SplitN(rest, "/", 2)
 		if len(parts) == 2 && parts[0] == s.bucketName && parts[1] != "" {
 			return parts[1], nil
 		}
 		return "", fmt.Errorf("invalid OBS file path: %s", filePath)
 	}
+
+	if s.proxyDomain != "" {
+		prefix := s.proxyDomain + "/"
+		if strings.HasPrefix(filePath, prefix) {
+			objectKey := strings.TrimPrefix(filePath, prefix)
+			if objectKey != "" {
+				return objectKey, nil
+			}
+			return "", fmt.Errorf("invalid OBS file path: %s", filePath)
+		}
+	}
+
+	// Preserve support for legacy callers that pass a bare object key.
 	return filePath, nil
 }
 
-func (s *obsFileService) getPrifix() string {
-	if s.proxyDomain != "" {
-		return s.proxyDomain + "/"
+func (s *obsFileService) buildObsFilePath(objectKey string) string {
+	return fmt.Sprintf("%s%s/%s", obsScheme, s.bucketName, strings.TrimPrefix(objectKey, "/"))
+}
+
+func (s *obsFileService) ownsObsFilePath(filePath string) bool {
+	if strings.HasPrefix(filePath, obsScheme) {
+		return true
 	}
-	return "obs://"
+	return s.proxyDomain != "" && strings.HasPrefix(filePath, s.proxyDomain+"/")
 }
 
 func (s *obsFileService) SaveFile(ctx context.Context,
@@ -181,11 +189,7 @@ func (s *obsFileService) SaveFile(ctx context.Context,
 	if err != nil {
 		return "", fmt.Errorf("failed to upload file to OBS: %w", err)
 	}
-	prefix := s.getPrifix()
-	if s.proxyDomain != "" {
-		return fmt.Sprintf("%s%s", prefix, objectKey), nil
-	}
-	return fmt.Sprintf("%s%s/%s", prefix, s.bucketName, objectKey), nil
+	return s.buildObsFilePath(objectKey), nil
 }
 
 func (s *obsFileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
@@ -249,7 +253,7 @@ func (s *obsFileService) CopyFile(ctx context.Context,
 	// Reject paths that do not use this service's prefix (proxy domain or obs://).
 	// parseObsFilePath falls back to returning the raw input for unknown prefixes,
 	// so guard explicitly here to detect cross-backend sources.
-	if !strings.HasPrefix(srcPath, s.getPrifix()) {
+	if !s.ownsObsFilePath(srcPath) {
 		return "", fmt.Errorf("obs copy rejected source %q: %w", srcPath, ErrCrossBackendCopy)
 	}
 	srcKey, err := s.parseObsFilePath(srcPath)
@@ -276,13 +280,7 @@ func (s *obsFileService) CopyFile(ctx context.Context,
 		return "", fmt.Errorf("failed to copy file in OBS: %w", err)
 	}
 
-	prefix := s.getPrifix()
-	var newPath string
-	if s.proxyDomain != "" {
-		newPath = fmt.Sprintf("%s%s", prefix, destKey)
-	} else {
-		newPath = fmt.Sprintf("%s%s/%s", prefix, s.bucketName, destKey)
-	}
+	newPath := s.buildObsFilePath(destKey)
 	logger.Infof(ctx, "Copied OBS object %s to %s", srcPath, newPath)
 	return newPath, nil
 }
@@ -316,9 +314,5 @@ func (s *obsFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 		return "", fmt.Errorf("failed to upload bytes to OBS: %w", err)
 	}
 
-	prefix := s.getPrifix()
-	if s.proxyDomain != "" {
-		return fmt.Sprintf("%s%s", prefix, objectKey), nil
-	}
-	return fmt.Sprintf("%s%s/%s", prefix, s.bucketName, objectKey), nil
+	return s.buildObsFilePath(objectKey), nil
 }
