@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import UploadConfirmDialog from '@/views/knowledge/components/UploadConfirmDialog.vue'
+import UploadProgressDialog from '@/views/knowledge/components/UploadProgressDialog.vue'
 import { useUploadConfirmStore } from '@/stores/uploadConfirm'
 
 const uploadConfirmStore = useUploadConfirmStore()
@@ -30,4 +31,5 @@ const handleCancel = () => {
     @confirm="handleConfirm"
     @cancel="handleCancel"
   />
+  <UploadProgressDialog />
 </template>

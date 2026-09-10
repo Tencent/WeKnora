@@ -3,6 +3,7 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 
 const dialog = readFileSync(new URL('./UploadConfirmDialog.vue', import.meta.url), 'utf8')
+const progressDialog = readFileSync(new URL('./UploadProgressDialog.vue', import.meta.url), 'utf8')
 const host = readFileSync(new URL('../../../components/UploadConfirmHost.vue', import.meta.url), 'utf8')
 const knowledgeBase = readFileSync(new URL('../KnowledgeBase.vue', import.meta.url), 'utf8')
 const platform = readFileSync(new URL('../../platform/index.vue', import.meta.url), 'utf8')
@@ -77,4 +78,22 @@ test('uses section navigation with inline chunking controls and advanced options
   assert.match(dialog, /statusFull/)
   assert.match(dialog, /data-section="multimodal"/)
   assert.doesNotMatch(dialog, /<KBChunkingSettings/)
+})
+
+test('shows byte progress for every file in a confirmed upload batch', () => {
+  assert.match(host, /UploadProgressDialog/)
+  assert.match(progressDialog, /<t-progress/)
+  assert.match(progressDialog, /knowledgeFileUploadStart/)
+  assert.match(progressDialog, /knowledgeFileUploadProgress/)
+  assert.match(progressDialog, /knowledgeFileUploadComplete/)
+  assert.match(progressDialog, /v-for="task in tasks"/)
+  assert.match(progressDialog, /v-if="!isActive"/)
+
+  const queuedBeforeUpload = knowledgeBase.indexOf('uploadTasks.forEach')
+  const uploadLoop = knowledgeBase.indexOf('for (const [index, file] of files.entries())')
+  assert.ok(queuedBeforeUpload >= 0 && uploadLoop > queuedBeforeUpload, 'the modal should list the full batch before upload starts')
+  assert.match(knowledgeBase, /uploadKnowledgeFile\(targetKbId, uploadData, progressEvent =>/)
+  assert.match(knowledgeBase, /getUploadProgressPercentage\(progressEvent\)/)
+  assert.match(knowledgeBase, /dispatchKnowledgeUploadEvent\('knowledgeFileUploadProgress'/)
+  assert.match(knowledgeBase, /dispatchKnowledgeUploadEvent\('knowledgeFileUploadComplete'/)
 })
