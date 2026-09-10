@@ -1335,7 +1335,8 @@ const appendFiles = (incoming: File[]) => {
   }
 }
 
-const appendUrl = (url: string) => {
+const appendUrl = (payload: { url: string; crawlDepth: number }) => {
+  const { url } = payload
   if (localUrls.value.includes(url)) {
     MessagePlugin.warning(t('uploadConfirm.urlDuplicate'))
     return

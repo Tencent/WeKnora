@@ -41,7 +41,7 @@
       :header="t('knowledgeBase.importURLTitle')"
       :confirm-btn="{ content: t('common.confirm'), theme: 'primary' }"
       :cancel-btn="{ content: t('common.cancel') }"
-      width="500px"
+      width="520px"
       @confirm="handleUrlDialogConfirm"
       @cancel="handleUrlDialogCancel"
     >
@@ -55,6 +55,24 @@
           @enter="handleUrlDialogConfirm"
         />
         <div class="url-input-tip">{{ t('knowledgeBase.urlTip') }}</div>
+
+        <div class="url-crawl-section">
+          <div class="url-crawl-header">
+            <t-switch v-model="crawlEnabled" size="medium" />
+            <span class="url-crawl-title">{{ t('knowledgeBase.crawlEnabledLabel') }}</span>
+          </div>
+          <div v-if="crawlEnabled" class="url-crawl-options">
+            <div class="url-crawl-row">
+              <span class="url-crawl-label">{{ t('knowledgeBase.crawlDepthLabel') }}</span>
+              <t-select
+                v-model="crawlDepth"
+                :options="crawlDepthOptions"
+                :style="{ width: '120px' }"
+              />
+            </div>
+            <div class="url-crawl-tip">{{ t('knowledgeBase.crawlTip') }}</div>
+          </div>
+        </div>
       </div>
     </t-dialog>
   </div>
@@ -88,7 +106,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   files: [files: File[]]
-  url: [url: string]
+  url: [payload: { url: string; crawlDepth: number }]
   manual: []
 }>()
 
@@ -98,6 +116,14 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const folderInputRef = ref<HTMLInputElement | null>(null)
 const urlDialogVisible = ref(false)
 const urlInputValue = ref('')
+const crawlEnabled = ref(false)
+const crawlDepth = ref(1)
+
+const crawlDepthOptions = computed(() => [
+  { label: t('knowledgeBase.crawlDepth1'), value: 1 },
+  { label: t('knowledgeBase.crawlDepth2'), value: 2 },
+  { label: t('knowledgeBase.crawlDepth3'), value: 3 },
+])
 
 const tooltipText = computed(() => props.tooltip || t('knowledgeBase.addDocument'))
 
@@ -139,6 +165,8 @@ const handleActionSelect = (data: { value: string }) => {
       break
     case 'importURL':
       urlInputValue.value = ''
+      crawlEnabled.value = false
+      crawlDepth.value = 1
       urlDialogVisible.value = true
       break
     case 'manualCreate':
@@ -198,18 +226,23 @@ const handleUrlDialogConfirm = () => {
     MessagePlugin.warning(t('knowledgeBase.invalidURL'))
     return
   }
+  const depth = crawlEnabled.value ? crawlDepth.value : 0
   urlDialogVisible.value = false
   urlInputValue.value = ''
-  emit('url', url)
+  emit('url', { url, crawlDepth: depth })
 }
 
 const handleUrlDialogCancel = () => {
   urlDialogVisible.value = false
   urlInputValue.value = ''
+  crawlEnabled.value = false
+  crawlDepth.value = 1
 }
 
 const openUrlDialog = () => {
   urlInputValue.value = ''
+  crawlEnabled.value = false
+  crawlDepth.value = 1
   urlDialogVisible.value = true
 }
 
@@ -246,6 +279,49 @@ defineExpose({ openUrlDialog })
     font-size: 12px;
     line-height: 1.5;
     color: var(--td-text-color-placeholder);
+  }
+
+  .url-crawl-section {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--td-component-stroke);
+
+    .url-crawl-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .url-crawl-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--td-text-color-primary);
+    }
+
+    .url-crawl-options {
+      margin-top: 12px;
+      padding: 12px;
+      background: var(--td-bg-color-secondarycontainer);
+      border-radius: 6px;
+    }
+
+    .url-crawl-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .url-crawl-label {
+      font-size: 13px;
+      color: var(--td-text-color-secondary);
+    }
+
+    .url-crawl-tip {
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--td-text-color-placeholder);
+    }
   }
 }
 </style>
