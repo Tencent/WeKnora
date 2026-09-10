@@ -10,6 +10,7 @@ import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
 import { sanitizeHTML, sanitizeMarkdownHTML } from '@/utils/security';
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
+import { buildHtmlPreview } from '@/utils/htmlPreview';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { renderMermaidToSvg } from '@/utils/mermaidShared';
 import {
@@ -405,7 +406,8 @@ async function loadPreview() {
       }
       case 'html': {
         if (allowsHtmlScriptPreview()) {
-          blobUrl.value = URL.createObjectURL(blob);
+          const previewHtml = buildHtmlPreview(await blob.text());
+          blobUrl.value = URL.createObjectURL(new Blob([previewHtml], { type: 'text/html;charset=utf-8' }));
         }
         await renderText(blob, ft || 'html');
         break;
