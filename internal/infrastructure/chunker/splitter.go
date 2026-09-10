@@ -398,7 +398,10 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 		return nil
 	}
 
-	const absoluteMaxSize = 7500
+	// Keep oversized protected Markdown blocks under a conservative emergency
+	// ceiling to reduce the chance of exceeding common embedding input limits.
+	// Ordinary chunks still follow the knowledge base's smaller ChunkSize.
+	const absoluteMaxSize = 4096
 
 	ht := newHeaderTracker()
 
@@ -418,14 +421,31 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 				curLen = 0
 			}
 
-			// Update header state even for oversized units
+			// Update header state even for oversized units. Keep a long table row
+			// source-backed and carry its active table header separately so parent-
+			// child splitting can preserve offsets while still embedding the context.
 			ht.update(u.text)
+			headers := ht.getHeaders()
+			headersLen := runeLen(headers)
+			const contextSeparatorLen = 2 // "\n\n" inserted by EmbeddingContent
+			if headersLen+contextSeparatorLen > absoluteMaxSize/2 ||
+				headerAlreadyPresent(headers, "", u.text) ||
+				headerColumnMismatch(headers, u.text) {
+				headers = ""
+				headersLen = 0
+			}
+			bodyLimit := absoluteMaxSize - headersLen
+			if headers != "" {
+				bodyLimit -= contextSeparatorLen
+			}
 
-			// Split this oversized unit into smaller chunks
+			// Split this oversized unit into smaller chunks. Unlike the legacy
+			// emergency path, retain the configured overlap so lowering the ceiling
+			// does not reduce recall for content that previously stayed atomic.
 			runes := []rune(u.text)
 			offset := 0
 			for offset < len(runes) {
-				chunkEnd := offset + absoluteMaxSize
+				chunkEnd := offset + bodyLimit
 				if chunkEnd > len(runes) {
 					chunkEnd = len(runes)
 				} else {
@@ -439,12 +459,23 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 
 				chunkText := string(runes[offset:chunkEnd])
 				chunks = append(chunks, Chunk{
-					Content: chunkText,
-					Seq:     len(chunks),
-					Start:   u.start + offset,
-					End:     u.start + chunkEnd,
+					Content:       chunkText,
+					ContextHeader: headers,
+					Seq:           len(chunks),
+					Start:         u.start + offset,
+					End:           u.start + chunkEnd,
 				})
-				offset = chunkEnd
+				nextOffset := chunkEnd
+				if chunkEnd < len(runes) && chunkOverlap > 0 {
+					// Emergency overlap is capped at half the body budget. Without
+					// this guard, a configured overlap >= bodyLimit advances by one
+					// rune per chunk and can amplify one unit into thousands of chunks.
+					overlap := min(chunkOverlap, bodyLimit/2, chunkEnd-offset-1)
+					if overlap > 0 {
+						nextOffset -= overlap
+					}
+				}
+				offset = nextOffset
 			}
 			continue
 		}
@@ -883,6 +914,7 @@ func SplitTextParentChild(text string, parentCfg, childCfg SplitterConfig) Paren
 			sub.Seq = childSeq
 			sub.Start += parent.Start
 			sub.End += parent.Start
+			sub.ContextHeader = mergeBreadcrumbs(parent.ContextHeader, sub.ContextHeader)
 			children = append(children, ChildChunk{
 				Chunk:       sub,
 				ParentIndex: parentIndex,
