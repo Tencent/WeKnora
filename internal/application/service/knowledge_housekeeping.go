@@ -1,8 +1,8 @@
 // Package service: knowledge housekeeping.
 //
-// HousekeepingService periodically scans for knowledge rows that have been
-// stuck in "processing" longer than any reasonable execution window and
-// marks them as failed. This is the safety net that catches anything the
+// HousekeepingService periodically scans for knowledge rows and trace spans
+// that have been stuck longer than any reasonable execution window and marks
+// them as failed. This is the safety net that catches anything the
 // other defences (asynq retry, dead-letter callback, image_multimodal
 // finalize-on-last-attempt) miss — for example:
 //
@@ -32,6 +32,8 @@ import (
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 )
+
+const staleSpanTimeoutErrorCode = "STALE_SPAN_TIMEOUT"
 
 // HousekeepingService runs background sweeps to recover stuck rows.
 type HousekeepingService struct {
@@ -89,6 +91,15 @@ func (h *HousekeepingService) Start(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	// The periodic cron does not run until the next five-minute boundary.
+	// Close spans orphaned by a previous process immediately so a restart
+	// repairs the trace UI without waiting for that first tick. This startup
+	// pass only touches terminal knowledge rows, so it cannot race queued or
+	// currently executing work while the task system is still bootstrapping.
+	threshold := h.staleThreshold()
+	h.recoverStaleOpenSpans(
+		context.Background(), time.Now().Add(-threshold), threshold,
+	)
 	h.cron.Start()
 	h.started = true
 	logger.Infof(ctx, "[Housekeeping] started with 5-minute sweep")
@@ -197,6 +208,13 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 			queueSkipped)
 	}
 
+	// A child span can be left running even after its parent knowledge row is
+	// terminal (for example when a Wiki reducer is interrupted after the
+	// parent finalizer completes). Such rows are invisible to Sweep A because
+	// completed/failed knowledge is intentionally not considered stuck.
+	// Repair those orphan trace rows independently.
+	h.recoverStaleOpenSpans(ctx, cutoff, threshold)
+
 	// Sweep B: knowledge summary stuck. Summary is post-parse; threshold
 	// is shorter because summary tasks are bounded by a single LLM call.
 	// No span heartbeat exists for the summary stage (it lives in a
@@ -209,6 +227,50 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 		logger.Warnf(ctx, "[Housekeeping] summary sweep failed: %v", resSummary.Error)
 	} else if resSummary.RowsAffected > 0 {
 		logger.Infof(ctx, "[Housekeeping] recovered %d stuck summary rows", resSummary.RowsAffected)
+	}
+}
+
+// recoverStaleOpenSpans fails pending/running spans that have exceeded the
+// housekeeping threshold after their owning knowledge became terminal.
+//
+// The terminal-parent gate is what makes this safe: an old span under a
+// processing/finalizing knowledge may still belong to a slow live task and is
+// handled by Sweep A's heartbeat + queue checks instead. The created_at
+// fallback covers old pending rows that never received started_at; the direct
+// started_at branch remains compatible with the existing status/time index.
+func (h *HousekeepingService) recoverStaleOpenSpans(
+	ctx context.Context, cutoff time.Time, threshold time.Duration,
+) {
+	terminalKnowledgeIDs := h.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Select("id").
+		Where("parse_status IN ?", []string{
+			types.ParseStatusCompleted,
+			types.ParseStatusFailed,
+		})
+
+	now := time.Now()
+	res := h.db.WithContext(ctx).
+		Model(&types.KnowledgeProcessingSpan{}).
+		Where("status IN ?", []string{
+			types.SpanStatusPending,
+			types.SpanStatusRunning,
+		}).
+		Where("started_at < ? OR (started_at IS NULL AND created_at < ?)", cutoff, cutoff).
+		Where("knowledge_id IN (?)", terminalKnowledgeIDs).
+		Updates(map[string]interface{}{
+			"status":        types.SpanStatusFailed,
+			"error_code":    staleSpanTimeoutErrorCode,
+			"error_message": "span left open after parent knowledge became terminal for more than " + threshold.String(),
+			"finished_at":   now,
+			"updated_at":    now,
+		})
+	if res.Error != nil {
+		logger.Warnf(ctx, "[Housekeeping] stale span sweep failed: %v", res.Error)
+	} else if res.RowsAffected > 0 {
+		logger.Infof(ctx,
+			"[Housekeeping] recovered %d stale open span(s) owned by terminal knowledge (threshold=%s)",
+			res.RowsAffected, threshold)
 	}
 }
 
