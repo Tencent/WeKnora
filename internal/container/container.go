@@ -1095,7 +1095,7 @@ func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 		if baseDir == "" {
 			baseDir = "/data/files"
 		}
-		externalURL := strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL"))
+		externalURL := config.ConfiguredExternalURL()
 		return file.NewLocalFileService(baseDir, externalURL), nil
 	case "dummy":
 		return file.NewDummyFileService(), nil

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -118,7 +119,7 @@ func BuildFileServiceForProvider(
 		return svc
 	}
 	if provider == "local" {
-		externalURL := strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL"))
+		externalURL := config.ConfiguredExternalURL()
 		return filesvc.NewLocalFileService(baseDir, externalURL)
 	}
 	if defaultSvc != nil {

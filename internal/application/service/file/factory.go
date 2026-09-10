@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -41,7 +42,7 @@ func NewFileServiceFromStorageConfig(
 				baseDir = safeBaseDir
 			}
 		}
-		externalURL := strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL"))
+		externalURL := config.ConfiguredExternalURL()
 		return NewLocalFileService(baseDir, externalURL), p, nil
 
 	case "minio":

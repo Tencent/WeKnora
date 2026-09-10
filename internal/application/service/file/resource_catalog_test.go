@@ -109,3 +109,17 @@ func TestResourceCatalogFileServiceReturnsShortExternalGrantURL(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "https://weknora.example.com/r/GrantTokenAbCdEfGhIjKl", externalURL)
 }
+
+func TestResourceCatalogFileServiceUsesFrontendBaseURLFallback(t *testing.T) {
+	t.Setenv("APP_EXTERNAL_URL", "")
+	t.Setenv("FRONTEND_BASE_URL", "https://frontend.example.com///")
+	inner := &physicalFileStub{savedPath: "local://7/exports/a.png"}
+	catalog := &catalogStub{}
+	svc := NewResourceCatalogFileService(inner, catalog)
+
+	ref, err := svc.SaveBytes(context.Background(), []byte("image"), 7, "a.png", false)
+	require.NoError(t, err)
+	externalURL, err := svc.GetFileURL(context.Background(), ref)
+	require.NoError(t, err)
+	require.Equal(t, "https://frontend.example.com/r/GrantTokenAbCdEfGhIjKl", externalURL)
+}
