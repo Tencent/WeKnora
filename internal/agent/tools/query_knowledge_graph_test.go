@@ -13,8 +13,10 @@ import (
 )
 
 type stubKnowledgeBaseService struct {
-	kb      *types.KnowledgeBase
-	results []*types.SearchResult
+	kb       *types.KnowledgeBase
+	results  []*types.SearchResult
+	graph    *types.GraphData
+	graphErr error
 }
 
 func (s *stubKnowledgeBaseService) CreateKnowledgeBase(context.Context, *types.KnowledgeBase) (*types.KnowledgeBase, error) {
@@ -67,6 +69,13 @@ func (s *stubKnowledgeBaseService) HybridSearch(context.Context, string, types.S
 	return s.results, nil
 }
 
+func (s *stubKnowledgeBaseService) SearchGraphNodes(_ context.Context, _ string, entities []string) (*types.GraphData, error) {
+	if s.graphErr != nil {
+		return nil, s.graphErr
+	}
+	return s.graph, nil
+}
+
 func (s *stubKnowledgeBaseService) GetQueryEmbedding(context.Context, string, string) ([]float32, error) {
 	return nil, nil
 }
@@ -99,6 +108,8 @@ func (s *stubKnowledgeBaseService) ProcessKBDelete(context.Context, *asynq.Task)
 }
 
 func TestQueryKnowledgeGraph_ReportsConfiguredEntityAndRelationTypes(t *testing.T) {
+	// No chunk service and no chat model: the tool must keep its retrieval-only
+	// behavior (graph traversal skipped) and still summarize the config.
 	tool := NewQueryKnowledgeGraphTool(&stubKnowledgeBaseService{
 		kb: &types.KnowledgeBase{
 			ID: "kb-1",
@@ -148,7 +159,7 @@ func TestQueryKnowledgeGraph_ReportsConfiguredEntityAndRelationTypes(t *testing.
 				MatchType:      types.MatchTypeEmbedding,
 			},
 		},
-	})
+	}, nil, nil)
 
 	args, err := json.Marshal(QueryKnowledgeGraphInput{
 		KnowledgeBaseIDs: []string{"kb-1"},

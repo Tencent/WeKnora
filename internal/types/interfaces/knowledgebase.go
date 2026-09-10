@@ -95,6 +95,12 @@ type KnowledgeBaseService interface {
 	//   - Possible errors such as not existing, insufficient permissions, search engine errors, etc.
 	HybridSearch(ctx context.Context, id string, params types.SearchParams) ([]*types.SearchResult, error)
 
+	// SearchGraphNodes traverses the knowledge graph of a knowledge base for
+	// the given entity names, returning the matched nodes (with their chunk
+	// references) and the relations around them. Callers should treat an error
+	// as "graph backend unavailable" and fall back to retrieval-only paths.
+	SearchGraphNodes(ctx context.Context, id string, entities []string) (*types.GraphData, error)
+
 	// GetQueryEmbedding computes the query embedding using the embedding model
 	// associated with the given knowledge base. This allows callers to pre-compute
 	// and reuse embeddings across multiple KBs that share the same model.
