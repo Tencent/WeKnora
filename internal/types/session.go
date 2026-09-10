@@ -210,7 +210,8 @@ func SanitizeClientSessionDescription(incoming, existing string) string {
 // Source values: "web" (user chats, no IM/embed), "embed" / "embed:{channelID}",
 // "api" (all API-key sessions, Admin+ only), or an IM platform name
 // (e.g. "feishu", "wechat"). IM and embed sources are also Admin+ only.
-// AgentID currently only filters sessions that have an IM channel mapping.
+// AgentID filters sessions whose last request state or IM channel mapping used
+// the agent.
 type SessionListQuery struct {
 	TenantID uint64
 	UserID   string
