@@ -2,6 +2,9 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	builtin "github.com/Tencent/WeKnora/internal/builtin/skills"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -59,5 +63,29 @@ func TestBuiltinRegistrationRequiresExplicitReplacement(t *testing.T) {
 			require.Equal(t, uint64(testSkillTenantID), catalog.tenant)
 			require.Equal(t, "browser", catalog.id)
 		})
+	}
+}
+
+func TestListDiscoveryIncludesInstallArchiveDigest(t *testing.T) {
+	h := NewSkillHandler(&fakeUsableSkillLister{}, &fakeBuiltinRegistration{})
+	r := newCatalogRouter(h)
+	r.GET("/skills/discovery", h.ListDiscovery)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/skills/discovery", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	var response struct {
+		Data []builtin.Entry `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.NotEmpty(t, response.Data)
+	for _, entry := range response.Data {
+		if entry.Distribution != "builtin" {
+			require.Empty(t, entry.BundleSHA256)
+			continue
+		}
+		archive, err := builtin.Archive(entry.ID)
+		require.NoError(t, err)
+		sum := sha256.Sum256(archive)
+		require.Equal(t, hex.EncodeToString(sum[:]), entry.BundleSHA256, entry.ID)
 	}
 }

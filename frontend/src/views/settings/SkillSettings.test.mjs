@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { isSkillInstallOutdated } from './skillUpgrade.ts'
 
 const source = readFileSync(new URL('./SkillSettings.vue', import.meta.url), 'utf8')
 
@@ -110,6 +111,7 @@ test('sandbox groups include existing installations and update by installation s
   const context = {
     skillConfigs: { value: configs },
     liveInstalls: item => item.installations,
+    isSkillInstallOutdated,
     isInstallBusy: install => ['installing', 'removing'].includes(install.status),
   }
   runInNewContext(transpile(groups + rows), context)
@@ -240,9 +242,79 @@ test('installation feedback stays on its sandbox row and closing does not imply 
   current.busy = false
   current.ready = true
   assert.equal(state.readFooter().busy, false, 'an old failure must not affect current progress')
-  state.installTargetIds.value = ['new-target']
-  assert.equal(state.readFooter().text, 'settings.skills.installToSandbox')
+  state.installTargetIds.value = ['office-core']
+  assert.equal(state.readFooter().text, 'skillDiscovery.installSelected')
   state.builtinRegistrationConflict.value = true
-  assert.equal(state.readFooter().text, 'skillDiscovery.replaceAndInstall')
+  assert.equal(state.readFooter().text, 'skillDiscovery.installSelected')
   assert.doesNotMatch(source, /activationFailedHint|installPickRows\.filter\(row => row\.install\?\.status === 'failed'\)/)
+})
+
+test('outdated ready installs are selectable in the upgrade group; current and busy installs are not', async () => {
+  const { transpile } = await import('typescript')
+  const { runInNewContext } = await import('node:vm')
+  const groups = source.slice(source.indexOf('function groupSandboxPicks('), source.indexOf('const installPickGroups'))
+  const rows = source.slice(source.indexOf('function sandboxPickRows('), source.indexOf('function sandboxPickPercent('))
+  const context = {
+    skillConfigs: { value: ['old', 'current', 'busy'].map(id => ({ id })) },
+    liveInstalls: item => item.installations,
+    isSkillInstallOutdated,
+    isInstallBusy: install => ['installing', 'removing'].includes(install.status),
+  }
+  runInNewContext(transpile(groups + rows), context)
+  const picks = context.sandboxPickRows({ bundle_sha256: 'new', installations: [
+    { sandbox_config_id: 'old', status: 'ready', bundle_sha256: 'old' },
+    { sandbox_config_id: 'current', status: 'ready', bundle_sha256: 'new' },
+    { sandbox_config_id: 'busy', status: 'installing', bundle_sha256: 'old' },
+  ] })
+  assert.equal(picks[0].selectable, true)
+  assert.equal(picks[1].selectable, false)
+  assert.equal(picks[2].selectable, false)
+  assert.equal(context.groupSandboxPicks(picks)[0].key, 'updates')
+  assert.equal(context.groupSandboxPicks(picks)[0].rows[0].cfg.id, 'old')
+})
+
+test('discovery upgrades keep the requested bundle while catalog progress refreshes', async () => {
+  const { transpile } = await import('typescript')
+  const { runInNewContext } = await import('node:vm')
+  const handler = source.slice(source.indexOf('async function onDiscoveryInstall('), source.indexOf('const loading = ref'))
+  const picker = source.slice(source.indexOf('const installPickRows = computed'), source.indexOf('const installInProgress'))
+  const old = { id: 'existing', name: 'browser', builtin: true, bundle_sha256: 'old', version: '1', installations: [{ sandbox_config_id: 'docker', bundle_sha256: 'old', status: 'ready' }] }
+  const state = {
+    catalog: { value: [old] }, installCatalog: { value: null }, pendingBuiltinSkill: { value: null }, builtinRegistrationConflict: { value: false },
+    builtinTargetsLoading: { value: false }, builtinTargetStatus: { value: { docker: 'outdated' } },
+    computed: fn => ({ get value() { return fn() } }), catalogItemById: id => id === old.id ? old : null,
+    openInstall(item) { state.installCatalog.value = item },
+    sandboxPickRows(item) { return [{ cfg: { id: 'docker' }, install: item.installations[0], upgrade: isSkillInstallOutdated(item, item.installations[0]), ready: true, selectable: false, busy: false }] },
+  }
+  runInNewContext(transpile(handler + picker + '\nglobalThis.picks = () => installPickRows.value;'), state)
+  await state.onDiscoveryInstall({ id: 'browser', name: 'browser', distribution: 'builtin', bundle_sha256: 'new', version: '2', description: {} })
+  assert.equal(state.installCatalog.value.id, '', 'must register the desired package before installing')
+  assert.equal(state.installCatalog.value.bundle_sha256, 'new')
+  assert.equal(state.builtinRegistrationConflict.value, true)
+  assert.equal(state.picks()[0].selectable, true)
+  assert.equal(state.picks()[0].ready, false)
+  old.installations = [{ sandbox_config_id: 'docker', bundle_sha256: 'new', status: 'ready' }]
+  state.builtinTargetStatus.value.docker = 'installed'
+  assert.equal(state.picks()[0].selectable, false)
+  assert.equal(state.picks()[0].ready, true)
+})
+
+
+test('install action names distinguish upgrades, installs and mixed selections', async () => {
+  const { transpile } = await import('typescript')
+  const { runInNewContext } = await import('node:vm')
+  const footer = source.slice(source.indexOf('const installActionText'), source.indexOf('const installConfirmDisabled'))
+  const state = {
+    computed: fn => ({ get value() { return fn() } }), t: (key, values) => ({ key, ...values }),
+    installTargetIds: { value: [] },
+    installPickRows: { value: [{ cfg: { id: 'update' }, upgrade: true }, { cfg: { id: 'new' }, upgrade: false }] },
+  }
+  runInNewContext(transpile(footer + '\nglobalThis.action = () => installConfirmText.value;'), state)
+  assert.equal(state.action().key, 'common.close')
+  state.installTargetIds.value = ['update']
+  assert.deepEqual(state.action(), { key: 'skillDiscovery.upgradeSelected', count: 1 })
+  state.installTargetIds.value = ['new']
+  assert.deepEqual(state.action(), { key: 'skillDiscovery.installSelected', count: 1 })
+  state.installTargetIds.value = ['update', 'new']
+  assert.deepEqual(state.action(), { key: 'skillDiscovery.installAndUpgradeSelected', installs: 1, upgrades: 1 })
 })

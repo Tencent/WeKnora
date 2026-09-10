@@ -322,6 +322,17 @@ func terminalPIDParam(raw string) uint32 {
 // WebSocket. The access JWT stays on this authenticated POST and never
 // appears in the WS URL (or nginx access logs of that handshake).
 func (h *Handler) IssueSandboxTerminalTicket(c *gin.Context) {
+	h.issueSandboxTicket(c, service.IssueSandboxTerminalTicket)
+}
+
+// IssueSandboxBrowserTicket issues a session-scoped browser stream ticket.
+func (h *Handler) IssueSandboxBrowserTicket(c *gin.Context) {
+	h.issueSandboxTicket(c, service.IssueSandboxBrowserTicket)
+}
+
+func (h *Handler) issueSandboxTicket(
+	c *gin.Context, issue func(string, uint64, string, string, time.Duration) (string, error),
+) {
 	ctx := c.Request.Context()
 	sessionID := strings.TrimSpace(c.Param("session_id"))
 	if sessionID == "" {
@@ -364,7 +375,7 @@ func (h *Handler) IssueSandboxTerminalTicket(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
-	ticket, err := service.IssueSandboxTerminalTicket(userID, tenantID, sessionID, record.ID, 0)
+	ticket, err := issue(userID, tenantID, sessionID, record.ID, 0)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue ticket"})

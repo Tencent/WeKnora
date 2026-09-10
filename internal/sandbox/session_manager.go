@@ -690,6 +690,8 @@ func (m *SessionBoundManager) WriteSessionFile(
 // flags select the installer working-directory allowlist and bootstrap. Both
 // ordinary and install calls currently execute as root.
 type ShellExecOptions struct {
+	OnOutput func(stream string, chunk []byte)
+
 	WorkDir string
 	Timeout time.Duration
 	Env     map[string]string
@@ -781,12 +783,13 @@ func (m *SessionBoundManager) ExecShellCommandWithOptions(
 
 	start := time.Now()
 	execResult, execErr := m.client.Exec(ctx, handle, RemoteExecRequest{
-		Command: command,
-		Shell:   true,
-		Env:     opts.Env,
-		WorkDir: workDir,
-		User:    user,
-		Timeout: timeout,
+		Command:  command,
+		OnOutput: commandOutputCallback(ctx, opts.OnOutput),
+		Shell:    true,
+		Env:      opts.Env,
+		WorkDir:  workDir,
+		User:     user,
+		Timeout:  timeout,
 	})
 	duration := time.Since(start)
 	return remoteExecuteResult(execResult, execErr, duration), nil

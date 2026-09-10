@@ -77,3 +77,17 @@ func TestSandboxTerminalTicketRejectsMissingTokenIDClaim(t *testing.T) {
 	_, err = ParseSandboxTerminalTicket(raw)
 	require.Error(t, err)
 }
+
+func TestBrowserTicketsCannotOpenTerminals(t *testing.T) {
+	ticket, err := IssueSandboxBrowserTicket("user-1", 42, "sess-9", "tok-1", time.Minute)
+	require.NoError(t, err)
+	claims, err := ParseSandboxBrowserTicket(ticket)
+	require.NoError(t, err)
+	require.Equal(t, "sess-9", claims.SessionID)
+	_, err = ParseSandboxTerminalTicket(ticket)
+	require.Error(t, err)
+	terminal, err := IssueSandboxTerminalTicket("user-1", 42, "sess-9", "tok-1", time.Minute)
+	require.NoError(t, err)
+	_, err = ParseSandboxBrowserTicket(terminal)
+	require.Error(t, err)
+}

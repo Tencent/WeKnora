@@ -812,6 +812,10 @@ func (c *E2BRemoteClient) Exec(
 
 	start := time.Now()
 	options := []e2b.RunOption{}
+	if request.OnOutput != nil {
+		options = append(options, e2b.WithOnStdout(func(p []byte) { request.OnOutput("stdout", p) }),
+			e2b.WithOnStderr(func(p []byte) { request.OnOutput("stderr", p) }))
+	}
 	if request.WorkDir != "" {
 		options = append(options, e2b.WithCwd(request.WorkDir))
 	}

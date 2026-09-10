@@ -18,6 +18,7 @@ import (
 // browser lives in the authenticated session's pinned sandbox and uses a Unix
 // socket, so no provider port, CDP endpoint or traffic token reaches the client.
 type BrowserCommand struct {
+	Stream   bool    `json:"stream,omitempty"`
 	Phase    string  `json:"phase,omitempty"`
 	Action   string  `json:"action"`
 	Token    string  `json:"token,omitempty"`
@@ -38,6 +39,8 @@ func (cmd BrowserCommand) Validate() error {
 		default:
 			return fmt.Errorf("invalid pointer phase")
 		}
+	}
+	if cmd.Action == "pointer" || cmd.Action == "hover" {
 		if math.IsNaN(cmd.X) || math.IsInf(cmd.X, 0) || math.IsNaN(cmd.Y) || math.IsInf(cmd.Y, 0) || cmd.X < 0 ||
 			cmd.X > 1280 ||
 			cmd.Y < 0 ||
@@ -57,6 +60,7 @@ func (cmd BrowserCommand) Validate() error {
 		"scroll",
 		"type",
 		"press",
+		"hover",
 		"pointer":
 	default:
 		return fmt.Errorf("unsupported browser action")
@@ -88,26 +92,8 @@ func (s *SandboxTerminalService) BrowserCommand(
 	if err != nil {
 		return nil, err
 	}
-	root := "/opt/weknora/tenant/skills/browser"
-	if reader, ok := mgr.(sandbox.SessionBuiltinSkillsReader); ok {
-		manifest, err := reader.BuiltinSkills(ctx, sessionID)
-		if err == nil {
-			for _, entry := range builtin.CompatibleEntries(manifest) {
-				if entry.Name == "browser" {
-					root = builtin.ImageRoot + "/browser"
-				}
-			}
-		}
-	}
-	// A workspace-installed controller keeps precedence over a same-named
-	// preloaded one. Both paths are fixed server-side.
-	chooseRoot := "root=" + sandbox.ShellQuote(root) + "; "
-	if root != "/opt/weknora/tenant/skills/browser" {
-		chooseRoot += "if [ -x /opt/weknora/tenant/skills/browser/.venv/bin/python ] && " +
-			"[ -f /opt/weknora/tenant/skills/browser/scripts/browser.py ]; " +
-			"then root=/opt/weknora/tenant/skills/browser; fi; "
-	}
-	root = `"$root"`
+	chooseRoot := browserRootCommand(ctx, mgr, sessionID)
+	root := `"$root"`
 	cmd := chooseRoot + "if [ -x " + root + "/.venv/bin/python ] && [ -f " + root + "/scripts/browser.py ]; then " +
 		root + "/.venv/bin/python " + root + "/scripts/browser.py --ui-request " +
 		sandbox.ShellQuote(base64.StdEncoding.EncodeToString(payload)) +
@@ -163,4 +149,48 @@ func (s *SandboxTerminalService) StartSessionBrowser(
 		return nil, err
 	}
 	return s.BrowserCommand(ctx, sessionID, command)
+}
+
+func browserRootCommand(ctx context.Context, mgr sandbox.Manager, sessionID string) string {
+	root := "/opt/weknora/tenant/skills/browser"
+	if reader, ok := mgr.(sandbox.SessionBuiltinSkillsReader); ok {
+		manifest, err := reader.BuiltinSkills(ctx, sessionID)
+		if err == nil {
+			for _, entry := range builtin.CompatibleEntries(manifest) {
+				if entry.Name == "browser" {
+					root = builtin.ImageRoot + "/browser"
+				}
+			}
+		}
+	}
+	// A workspace-installed controller keeps precedence over a same-named
+	// preloaded one. Both paths are fixed server-side.
+	chooseRoot := "root=" + sandbox.ShellQuote(root) + "; "
+	if root != "/opt/weknora/tenant/skills/browser" {
+		chooseRoot += "if [ -x /opt/weknora/tenant/skills/browser/.venv/bin/python ] && " +
+			"[ -f /opt/weknora/tenant/skills/browser/scripts/browser.py ]; " +
+			"then root=/opt/weknora/tenant/skills/browser; fi; "
+	}
+	return chooseRoot
+}
+
+// OpenBrowserStream launches only the installed session bridge. It accepts no
+// endpoint, process id or command from the browser client.
+func (s *SandboxTerminalService) OpenBrowserStream(
+	ctx context.Context, sessionID, token string,
+) (sandbox.RemoteTerminalSession, error) {
+	if len(token) < 24 || len(token) > 128 {
+		return nil, fmt.Errorf("invalid browser control token")
+	}
+	mgr, _, err := s.resolveSessionManager(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	streams, ok := mgr.(sandbox.SessionCommandStreamManager)
+	if !ok {
+		return nil, fmt.Errorf("sandbox does not support browser streaming")
+	}
+	command := browserRootCommand(ctx, mgr, sessionID) +
+		`exec "$root/.venv/bin/python" -u "$root/scripts/stream.py" --token ` + sandbox.ShellQuote(token)
+	return streams.OpenSessionCommandStream(ctx, sessionID, command)
 }

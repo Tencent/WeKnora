@@ -152,13 +152,13 @@
     },
     "category": "browser",
     "distribution": "builtin",
-    "publisher": "WeKnora",
-    "license": "MIT",
-    "source_url": "https://github.com/Tencent/WeKnora",
-    "license_url": "https://github.com/Tencent/WeKnora/blob/main/LICENSE",
+    "publisher": "Vercel Labs / WeKnora",
+    "license": "Apache-2.0",
+    "source_url": "https://github.com/vercel-labs/agent-browser",
+    "license_url": "https://github.com/vercel-labs/agent-browser/blob/v0.37.1/LICENSE",
     "runtime": "sandbox",
-    "docs_url": "https://playwright.dev/python/docs/intro",
-    "version": "2026.09.5"
+    "docs_url": "https://agent-browser.dev",
+    "version": "2026.09.7"
   },
   {
     "id": "tencent-browser-skill",

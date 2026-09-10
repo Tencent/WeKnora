@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -18,7 +20,20 @@ type skillDiscoveryService interface {
 
 // ListDiscovery returns built-in skill and external recommendation metadata.
 func (h *SkillHandler) ListDiscovery(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": builtin.List()})
+	entries := builtin.List()
+	for i := range entries {
+		if entries[i].Distribution != "builtin" {
+			continue
+		}
+		archive, err := builtin.Archive(entries[i].ID)
+		if err != nil {
+			_ = c.Error(apperrors.NewInternalServerError("failed to read builtin skill archive"))
+			return
+		}
+		sum := sha256.Sum256(archive)
+		entries[i].BundleSHA256 = hex.EncodeToString(sum[:])
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": entries})
 }
 
 // RegisterBuiltin registers an embedded package, replacing a definition only on request.

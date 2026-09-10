@@ -10,6 +10,7 @@ export interface SkillInfo {
 }
 
 export interface SkillCatalogInstall {
+	version?: string;
   skill_id: string;
   sandbox_config_id: string;
   sandbox_config_name?: string;
@@ -104,6 +105,8 @@ export function getCatalogSkillFile(catalogId: string, path: string) {
 }
 
 export interface DiscoverySkill {
+	/** SHA-256 of the reproducible install archive, distinct from the file manifest digest. */
+	bundle_sha256?: string
   runtime: 'sandbox' | 'publisher' | 'local_browser'
   id: string
   name: string

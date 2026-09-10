@@ -1,5 +1,22 @@
 export default {
   sandboxBrowser: {
+    fit: "フィット",
+    fitWidth: "幅に合わせる",
+    actualSize: "実際のサイズ（100%）",
+
+    live: "ライブ",
+    connecting: "接続中",
+    snapshot: "画像プレビュー",
+    back: "戻る",
+    reload: "ページを再読み込み",
+    viewHint: "操作権を取得するとページを操作できます。",
+    controlHint: "ページの入力欄をクリックして入力・貼り付けできます。日本語入力にも対応しています。",
+    textTooLong: "1回の入力は10,000文字までです。分けて貼り付けてください。",
+    textLabel: "ページに入力する文字",
+    inputViewHint: "操作権を取得して文字を入力",
+
+    liveHint: "リアルタイム表示。操作中はエージェントが待機し、パネルを閉じると操作権を返します。",
+    connectingHint: "リアルタイム表示に接続中…",
     pointerUpgradeHint: "このセッションのブラウザはドラッグに未対応です。office-browser-2026.09.2 以降のイメージで新しいセッションを開始してください。",
     resume: "ブラウザを再開",
     pausedHint: "サンドボックスは一時停止中です。再開するとブラウザを使用できます。",
@@ -22,6 +39,20 @@ export default {
       "commandFailed": "ブラウザー操作に失敗しました"
   },
   skillDiscovery: {
+    catalogWillUpdate: "スキルカタログも更新されます",
+    chooseTargets: "インストール・更新先を選択",
+    installNotes: "インストールの詳細",
+    upgradeTo: "更新先",
+    contentUpdate: "スキルの内容が更新されています",
+    installAndUpgradeSelected: "インストール {installs} · 更新 {upgrades}",
+    upgradeSelected: "更新（{count}）",
+    installSelected: "インストール（{count}）",
+
+    upgradeAvailable: "更新可能",
+    installOrUpgrade: "インストール / 更新",
+    installedContentDiffers: "インストール済みの内容が対象バージョンと異なります",
+    upgradeHint: "更新後、新しいセッションは新バージョンを使用します。既存のセッションは元のスナップショットを使用します。",
+
     previousInstallFailed: "前回のインストールに失敗",
     installContinuesInBackground: "閉じてもインストールは続行されます。スキルカードから進捗を確認できます。",
     replaceAndInstall: "更新してインストール",
@@ -1518,6 +1549,8 @@ export default {
       },
       skillTranscriptEmpty: 'このインストールには記録が残っていません。',
       skillTranscriptWaiting: 'インストールを開始しました。処理ログを待っています…',
+      installCommandRunning: "コマンド実行中",
+      installCommandWaiting: "出力を待っています。経過時間は更新されます。",
       skillFiles: 'ファイルを表示',
       skillFilesTitle: 'ファイル',
       skillFilesEmpty: 'このスキルには参照できるファイルがまだありません。',

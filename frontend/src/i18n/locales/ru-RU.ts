@@ -1,5 +1,22 @@
 export default {
   sandboxBrowser: {
+    fit: "По ширине",
+    fitWidth: "По ширине панели",
+    actualSize: "Исходный размер (100%)",
+
+    live: "В реальном времени",
+    connecting: "Подключение",
+    snapshot: "Снимки экрана",
+    back: "Назад",
+    reload: "Обновить страницу",
+    viewHint: "Возьмите управление, чтобы взаимодействовать со страницей.",
+    controlHint: "Нажмите поле на странице, чтобы печатать или вставлять текст. Поддерживается IME.",
+    textTooLong: "За один раз можно ввести до 10 000 символов. Вставляйте текст частями.",
+    textLabel: "Текст для страницы",
+    inputViewHint: "Возьмите управление для ввода текста",
+
+    liveHint: "Прямая трансляция. Агент ждёт во время управления; закрытие панели возвращает управление.",
+    connectingHint: "Подключение к прямой трансляции…",
     pointerUpgradeHint: "Браузер этой сессии не поддерживает перетаскивание. Начните новую сессию с образом office-browser-2026.09.2 или новее.",
     resume: "Возобновить браузер",
     pausedHint: "Песочница приостановлена. Возобновите её для работы с браузером.",
@@ -22,6 +39,20 @@ export default {
       "commandFailed": "Ошибка действия в браузере"
   },
   skillDiscovery: {
+    catalogWillUpdate: "Каталог навыков также будет обновлён",
+    chooseTargets: "Выберите песочницы для установки или обновления",
+    installNotes: "Подробности установки",
+    upgradeTo: "Обновить до",
+    contentUpdate: "Содержимое навыка изменилось",
+    installAndUpgradeSelected: "Установить {installs} · Обновить {upgrades}",
+    upgradeSelected: "Обновить ({count})",
+    installSelected: "Установить ({count})",
+
+    upgradeAvailable: "Доступны обновления",
+    installOrUpgrade: "Установить / обновить",
+    installedContentDiffers: "Установленное содержимое отличается от целевой версии",
+    upgradeHint: "Новые сеансы используют обновлённую версию. Текущие сеансы сохраняют исходный снимок навыков.",
+
     previousInstallFailed: "Предыдущая установка не удалась",
     installContinuesInBackground: "Установка продолжится после закрытия. Следить за ней можно в карточке навыка.",
     replaceAndInstall: "Обновить и установить",
@@ -5654,6 +5685,8 @@ export default {
       },
       skillTranscriptEmpty: 'This install left no transcript.',
       skillTranscriptWaiting: 'Install has started. Waiting for the process log…',
+      installCommandRunning: "Команда выполняется",
+      installCommandWaiting: "Ожидание вывода команды. Время выполнения обновляется.",
       skillFiles: 'Просмотреть файлы',
       skillFilesTitle: 'Файлы',
       skillFilesEmpty: 'У этого навыка пока нет файлов для просмотра.',

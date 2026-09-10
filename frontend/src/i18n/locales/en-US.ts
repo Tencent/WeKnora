@@ -1,5 +1,22 @@
 export default {
   sandboxBrowser: {
+    fit: "Fit",
+    fitWidth: "Fit to width",
+    actualSize: "Actual size (100%)",
+
+    live: "Live",
+    connecting: "Connecting",
+    snapshot: "Snapshots",
+    back: "Back",
+    reload: "Reload page",
+    viewHint: "Take control to interact with the page.",
+    controlHint: "Click a field on the page to type or paste, including IME input.",
+    textTooLong: "Enter up to 10,000 characters at a time. Please paste in smaller parts.",
+    textLabel: "Text for the page",
+    inputViewHint: "Take control to enter text",
+
+    liveHint: "Live preview. The agent waits during takeover; closing the panel releases control.",
+    connectingHint: "Connecting to live preview…",
     pointerUpgradeHint: "This session uses a browser controller without dragging support. Start a new session with office-browser-2026.09.2 or a newer image.",
     resume: "Resume browser",
     pausedHint: "The sandbox is paused. Resume it to continue using the browser.",
@@ -22,6 +39,20 @@ export default {
     "commandFailed": "Browser command failed"
 },
   skillDiscovery: {
+    catalogWillUpdate: "The skill catalog will also be updated",
+    chooseTargets: "Select sandboxes to install or upgrade",
+    installNotes: "Installation details",
+    upgradeTo: "Upgrade to",
+    contentUpdate: "Skill content has changed",
+    installAndUpgradeSelected: "Install {installs} · Upgrade {upgrades}",
+    upgradeSelected: "Upgrade ({count})",
+    installSelected: "Install ({count})",
+
+    upgradeAvailable: "Updates available",
+    installOrUpgrade: "Install / upgrade",
+    installedContentDiffers: "Installed content differs from the target version",
+    upgradeHint: "New sessions use the upgraded version. Existing sessions keep their original skill snapshot.",
+
     previousInstallFailed: "Previous installation failed",
     installContinuesInBackground: "Installation will continue after closing. View progress from the skill card.",
     replaceAndInstall: "Update and install",
@@ -1518,6 +1549,8 @@ export default {
       },
       skillTranscriptEmpty: 'This install left no transcript.',
       skillTranscriptWaiting: 'Install has started. Waiting for the process log…',
+      installCommandRunning: "Command running",
+      installCommandWaiting: "Waiting for command output. Elapsed time continues to update.",
       skillFiles: 'View files',
       skillFilesTitle: 'Files',
       skillFilesEmpty: 'This skill has no files to browse yet.',

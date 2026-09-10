@@ -82,7 +82,7 @@ func TestBuiltinReplacementPreservesExistingInstallResources(t *testing.T) {
 	current, err := fx.svc.RegisterBuiltin(ctx, 7, "browser", true)
 	require.NoError(t, err)
 	require.Equal(t, oldCatalog.ID, current.ID)
-	require.Equal(t, builtin.Version, current.Version)
+	require.Equal(t, "2026.09.7", current.Version)
 	require.NotEqual(t, oldDigest, current.BundleSHA256)
 	installed, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "old-browser")
 	require.NoError(t, err)

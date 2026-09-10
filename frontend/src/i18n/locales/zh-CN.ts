@@ -1,5 +1,22 @@
 export default {
   sandboxBrowser: {
+    fit: "适应",
+    fitWidth: "适应宽度",
+    actualSize: "实际大小（100%）",
+
+    live: "实时",
+    connecting: "连接中",
+    snapshot: "截图预览",
+    back: "后退",
+    reload: "刷新网页",
+    viewHint: "点击接管后，可在画面中操作网页。",
+    controlHint: "点击网页输入框即可打字或粘贴，支持中文输入法。",
+    textTooLong: "单次输入最多支持 10,000 个字符，请分段粘贴。",
+    textLabel: "网页文字输入",
+    inputViewHint: "接管后可向网页输入文字",
+
+    liveHint: "实时画面。接管期间智能体会等待，关闭面板后交还控制。",
+    connectingHint: "正在连接实时画面…",
     pointerUpgradeHint: "当前会话的浏览器版本不支持拖动。请使用 office-browser-2026.09.2 或更新镜像开启新会话。",
     resume: "恢复浏览器",
     pausedHint: "沙箱已暂停，点击恢复即可继续使用浏览器。",
@@ -22,6 +39,20 @@ export default {
     "commandFailed": "浏览器操作失败"
 },
   skillDiscovery: {
+    catalogWillUpdate: "将同步更新技能目录",
+    chooseTargets: "选择要安装或升级的沙箱",
+    installNotes: "安装说明",
+    upgradeTo: "升级至",
+    contentUpdate: "技能内容有更新",
+    installAndUpgradeSelected: "安装 {installs} · 升级 {upgrades}",
+    upgradeSelected: "升级（{count}）",
+    installSelected: "安装（{count}）",
+
+    upgradeAvailable: "可升级",
+    installOrUpgrade: "安装 / 升级",
+    installedContentDiffers: "已安装内容与目标版本不同",
+    upgradeHint: "升级后，新会话使用新版本；已开始的会话继续使用原有技能快照。",
+
     previousInstallFailed: "上次安装失败",
     installContinuesInBackground: "关闭后会继续安装，可在技能卡片中查看进度。",
     replaceAndInstall: "更新并安装",
@@ -5656,6 +5687,8 @@ export default {
       },
       skillTranscriptEmpty: '这次安装没有留下记录。',
       skillTranscriptWaiting: '安装已开始，正在等待过程记录…',
+      installCommandRunning: "命令执行中",
+      installCommandWaiting: "等待命令输出，耗时持续更新。",
       skillFiles: '查看文件',
       skillFilesTitle: '文件',
       skillFilesEmpty: '该技能还没有可查看的文件。',

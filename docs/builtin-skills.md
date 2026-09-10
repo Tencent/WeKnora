@@ -134,6 +134,15 @@ Cube/E2B 查询沙箱创建时保存的清单。暂停的沙箱不会被唤醒�
 自行添加到目录的技能仍使用原有安装、验证、快照和回滚流程。
 这条安装流程和模板自带技能的直接使用互相独立。
 
+安装代理以技能包的 `SKILL.md` 运行配置为准，不会因为上游文档列出可选依赖就全部安装。
+存在 `requirements.lock` 时按锁文件及哈希安装，不再另行升级其中的依赖。
+Python 校验会核对实际安装版本与声明的版本约束（包括锁文件中的间接依赖），并检查原始依赖清单未被改写；
+版本不匹配会进入修复流程，恢复声明版本后重新验证。
+安装日志显示当前命令、耗时和最近的输出。Docker 与 E2B 会在命令执行期间持续推送输出；
+Cube 当前 SDK 仍只返回最终输出，执行期间显示耗时和等待状态。日志预览有长度和推送频率限制，不进入模型上下文。
+普通对话中的 `shell_exec` 也通过 `command_output` 事件显示当前命令的耗时和实时输出，
+按 `tool_call_id` 归入对应步骤。进度不代表工具完成；最终结果到达后沿用原有结果卡片，历史记录仍以最终工具结果为准。
+
 向新沙箱安装内置技能时，如果空间目录已有内容不同的同名技能，安装抽屉会说明冲突并提供
 「更新并安装」。确认后将目录更新为当前内置版本，再安装到所选沙箱；其他沙箱的已有安装
 仍保留原包和版本。空间目录的同名冲突不代表目标镜像已经包含该技能。
@@ -154,12 +163,17 @@ Cube/E2B 查询沙箱创建时保存的清单。暂停的沙箱不会被唤醒�
 替换沙箱，也不会启动浏览器。旧版/自定义 browser 在运行中的沙箱里通过固定文件检查识别；
 未启动或暂停时保留已注册、就绪的 browser 入口，实际启动后再验证控制器。
 
-内置 `browser` 使用 Playwright 驱动无头 Chromium。同一沙箱中的模型 CLI 和聊天侧栏
-「浏览器」页共用一个控制器。无需额外桌面、VNC 或开放 CDP 端口。
+内置 `browser`（2026.09.7）使用固定版本 agent-browser 0.37.1 的 Rust 原生程序，通过 CDP 控制 Chromium，不依赖 Playwright 或 Node。它仍需安装 Chromium；office-core 不包含浏览器，browser 按需安装。安装器对 AMD64/ARM64 二进制校验 SHA-256，浏览器版本记录在安装结果中，并随沙箱快照保留。
+
+模型通过 `shell_exec` 的 `skill_name="browser"` 调用 `agent-browser`，先读取 `agent-browser skills get core` 获取安装版本自带的上游说明，再使用 `snapshot`、`get text`、`get html` 等原生命令。WeKnora 的 Python 适配层只管理会话、操作串行化和人工接管，实时传输使用锁定哈希的 websocket-client，模型 CLI 与聊天侧栏共用同一个浏览器。无需额外桌面、VNC 或开放 CDP 端口。
+
+已有安装继续使用其固定源码和运行时，不会自动替换为新版本。需要迁移的沙箱应显式安装新版 browser，并在使用新快照的会话中验证。
 
 - 模型可通过 browser 技能打开网页；用户也可直接点击「启动浏览器 / 恢复浏览器」，无需先进入终端。首次启动按当前智能体解析沙箱配置，已有会话继续使用绑定配置。
-- 预览通过已鉴权的会话接口每两秒拉取截图；这是轮询预览，不是视频流。后台刷新不切换 loading 状态，失败保留上一帧；新截图解码完成后再替换，避免闪烁。
-- 接管后支持点击、拖动、滚动、按键、文本输入和导航。拖动使用真实的鼠标按下、移动、松开事件；等待中的移动合并为最新位置，取消、失焦或交还控制会释放按键。中文及较长文本可以使用预览下方的输入框。
+- 新版预览接入 agent-browser 原生 WebSocket 流，JPEG 质量 80，最多 10 FPS，前端绘制后再 ACK，避免慢连接积压旧帧。画面和操作通过会话专用 WebSocket 及沙箱执行通道转发，不开放浏览器端口。默认缩放至面板宽度，可切换为实际大小（100%）查看小字；两种显示方式使用相同的远端坐标映射。旧版控制器仍每两秒拉取截图。
+- 浏览器面板固定地址栏，连续滚动会合并发送，不会切换输入框的禁用状态。browser 2026.09.7 增加 `cursor` 能力：接管后通过现有实时连接查询悬停元素的光标，仅接受标准 CSS 光标名称。旧版仍可操作，以十字光标提示接管；更新技能并使用新快照创建会话后可同步网页光标。
+- 握手使用两分钟有效、仅限指定会话浏览器的票据，不能用于终端。连接期间定期复核登录令牌、空间权限和会话归属。关闭或隐藏面板时断开流、释放接管；断线重连使用递增间隔，后台连接不会创建或唤醒沙箱。
+- 接管后支持点击、拖动、滚动、按键、文本输入和导航。拖动使用真实的鼠标按下、移动、松开事件；等待中的移动合并为最新位置，取消、失焦或交还控制会释放按键。点击网页输入框后可直接打字和粘贴；中文在输入法组词结束后一次提交，候选输入位置跟随最近一次点击。交还控制或失焦会停止输入。
 - 接管租约阻止模型和另一个面板同时操作浏览器。关闭面板会释放；断线或页面进入后台后，租约最多 35 秒过期。
 - 打开预览不会创建、唤醒或更换沙箱。仅用户主动点击启动或恢复时才允许创建或恢复，暂停和未启动状态使用就地提示。
 - 浏览器控制器只监听沙箱内部 Unix socket。接口不接受任意 shell、脚本或远程浏览器地址，每次调用检查会话归属和空间权限。
@@ -167,6 +181,12 @@ Cube/E2B 查询沙箱创建时保存的清单。暂停的沙箱不会被唤醒�
 
 拖动要求浏览器控制器声明 `pointer` 能力；不支持时会明确提示。按需安装当前 browser
 后，在使用新快照的会话中即可使用拖动。
+
+### Lightpanda 评估
+
+2026-09-10 在 Linux ARM64 上实测 agent-browser 0.37.1 + Lightpanda 0.4.0：打开本地测试页面、读取 text/html、snapshot、fill 和按选择器 click 可用；PNG 截图仅有简化文本布局，JPEG 返回 `Page.captureScreenshot: unsupported screenshot format`。当前侧栏依赖 JPEG 预览和真实页面布局，因此不直接切换到 Lightpanda。它可以作为后续不需要完整预览的抓取模式单独评估；不能把返回成功的 CDP 命令当作与 Chromium 视觉行为等价。
+
+参考：[agent-browser 的 Lightpanda 支持](https://agent-browser.dev/engines/lightpanda)、[Lightpanda 截图能力说明](https://lightpanda.io/docs/reference/mcp-tools)。
 
 ## 社区技能
 
@@ -187,7 +207,7 @@ Agent 在维护沙箱的临时目录中根据用户提供的文档、命令、�
 python3 scripts/vendor_builtin_skills.py
 go test ./internal/builtin/skills ./internal/application/service ./internal/handler/... ./internal/router ./internal/sandbox
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_builtin_browser.py
-# Python 环境须安装 browser/requirements.lock 和匹配的 Chromium
+# Linux 环境先运行 browser/scripts/install.py --with-browser 安装原生程序及 Chromium
 PYTHONDONTWRITEBYTECODE=1 WEKNORA_TEST_BROWSER=1 python3 scripts/test_builtin_browser.py
 cd frontend
 npm run type-check
@@ -211,3 +231,5 @@ and layout helpers do not call image-size; this does not certify all third-party
 or future author scripts. Do not use `npm audit fix --force` here: its proposed
 PptxGenJS downgrade to 1.1.5 would break the selected API. This remains a known
 dependency limitation to consider before a production rollout.
+
+技能安装抽屉按安装包 SHA-256 比较版本，差异项放在“可升级”分组，可直接更新，无需先卸载。同名同版本但内容变更也会识别为可升级；升级后的新会话使用新安装，已有会话保留绑定的快照。

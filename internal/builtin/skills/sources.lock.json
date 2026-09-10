@@ -517,6 +517,99 @@
         }
       ],
       "selection": "Reviewed resource subset; WeKnora adaptation files are maintained separately."
+    },
+    {
+      "repository": "vercel-labs/agent-browser",
+      "commit": "72007a6788d863611b23bed0b59d0d659c638d8e",
+      "license_path": "LICENSE",
+      "skills": [
+        {
+          "name": "browser",
+          "path": "skills/agent-browser"
+        }
+      ],
+      "files": [
+        {
+          "path": "packages/browser/LICENSE",
+          "source_path": "LICENSE",
+          "sha256": "014bb31e83d5c2e76aea1cc6e82217346ab41362f32cb355ad0f5c10aa0aeaff"
+        },
+        {
+          "path": "packages/browser/UPSTREAM_SKILL.md",
+          "source_path": "skills/agent-browser/SKILL.md",
+          "sha256": "3a7520e64de2dfaa516b6721c001e84e06e3c06a187b82af029ae721540ebfac"
+        },
+        {
+          "path": "packages/browser/upstream-core/CORE.md",
+          "source_path": "skill-data/core/SKILL.md",
+          "sha256": "ff313b33217b827dc5d51a7a349033cbc59bf25744b0ed2ae2bebd9b1c32f5ab"
+        },
+        {
+          "path": "packages/browser/upstream-core/references/authentication.md",
+          "source_path": "skill-data/core/references/authentication.md",
+          "sha256": "2bb23127dcbb9b49c3b9680cb6d95d66fa6c48c941cb63dff65099e61b6ccae1"
+        },
+        {
+          "path": "packages/browser/upstream-core/references/commands.md",
+          "source_path": "skill-data/core/references/commands.md",
+          "sha256": "fc7a1ec8a334bfa83f0458af71d9d6c8f8a9a60a8a5780e801a21f2a276cf517"
+        },
+        {
+          "path": "packages/browser/upstream-core/references/profiling.md",
+          "source_path": "skill-data/core/references/profiling.md",
+          "sha256": "15f1e6c7994d7471a274dc1476992d0ec178acd91f8b626e0d6f24a4dbef738f"
+        },
+        {
+          "path": "packages/browser/upstream-core/references/proxy-support.md",
+          "source_path": "skill-data/core/references/proxy-support.md",
+          "sha256": "53565b92ca2421c3dcf0e71a31fb911f717da56f97ca5f6ef1623ecfd8b72b5a"
+        },
+        {
+          "path": "packages/browser/upstream-core/references/session-management.md",
+          "source_path": "skill-data/core/references/session-management.md",
+          "sha256": "d57c6ad8f72adf4fe4c83f414d8a360927d740e344905fe666d2af739be497ed"
+        },
+        {
+          "path": "packages/browser/upstream-core/references/snapshot-refs.md",
+          "source_path": "skill-data/core/references/snapshot-refs.md",
+          "sha256": "c2aa75f5a3c1b34a72d53c06b68cc97d8a3c295134257d48f315cdff1c06455d"
+        },
+        {
+          "path": "packages/browser/upstream-core/references/streaming.md",
+          "source_path": "skill-data/core/references/streaming.md",
+          "sha256": "92d10ccffb1d15f2d00179b3f8ae28797e483d7efb9e980633d50cca54793efc"
+        },
+        {
+          "path": "packages/browser/upstream-core/references/trust-boundaries.md",
+          "source_path": "skill-data/core/references/trust-boundaries.md",
+          "sha256": "011b72f87af0002beb8475b9c50baf70067737e89ca9f09ff6ce2b03a456b33c"
+        },
+        {
+          "path": "packages/browser/upstream-core/references/video-recording.md",
+          "source_path": "skill-data/core/references/video-recording.md",
+          "sha256": "b526834922236754871008977255cf6560432d4667a32c3196c5a5f2f21ef949"
+        },
+        {
+          "path": "packages/browser/upstream-core/references/webgpu.md",
+          "source_path": "skill-data/core/references/webgpu.md",
+          "sha256": "f7307651439a45fb8b6dcdfc29c29bf8c70736245282bfee367bdc0b5d2fc94d"
+        },
+        {
+          "path": "packages/browser/upstream-core/templates/authenticated-session.sh",
+          "source_path": "skill-data/core/templates/authenticated-session.sh",
+          "sha256": "1fa9926c36dbe71191120ce067e5e3babe732cd1cc605020f3bd04dc430aa58c"
+        },
+        {
+          "path": "packages/browser/upstream-core/templates/capture-workflow.sh",
+          "source_path": "skill-data/core/templates/capture-workflow.sh",
+          "sha256": "bf3f3a2f8413773891d9fa400d2a2fddf6d73ffc7a9b2fa00f797f944171c3d5"
+        },
+        {
+          "path": "packages/browser/upstream-core/templates/form-automation.sh",
+          "source_path": "skill-data/core/templates/form-automation.sh",
+          "sha256": "b86836986d339f736b15ca78cf3d566e845a6293ae25a5b00aa520b837572650"
+        }
+      ]
     }
   ]
 }

@@ -19,6 +19,11 @@
           />
         </div>
       </template>
+      <SandboxCommandProgress
+        v-if="live && commandOutput && !commandOutput.done"
+        :progress="commandOutput"
+        class="skill-timeline__command"
+      />
       <div v-for="item in guidance.messages" :key="item.id" class="skill-timeline__guidance-message">
         <span>{{ $t(`settings.sandbox.skillGuidance.${item.status}`) }}</span>
         <p>{{ item.content }}</p>
@@ -55,6 +60,7 @@ import { configSkillTranscriptUrl, getConfigSkillGuidance, steerConfigSkill, rei
 import { getApiBaseUrl } from '@/utils/api-base'
 import { generateRandomString } from '@/utils/index'
 import { makeSteerClientId } from '@/utils/steerId'
+import SandboxCommandProgress from './SandboxCommandProgress.vue'
 import AgentStreamDisplay from '@/views/chat/components/AgentStreamDisplay.vue'
 import i18n from '@/i18n'
 
@@ -144,6 +150,7 @@ watch(
 onUnmounted(() => { guidanceEpoch++; clearTimeout(guidanceTimer) })
 
 const messages = reactive<any[]>([])
+const commandOutput = ref<{ command: string; started_at: string; output: string; done: boolean } | null>(null)
 const loading = ref(false)
 const isReplying = ref(false)
 const currentAssistantMessageId = ref('')
@@ -244,6 +251,10 @@ async function follow(run: number): Promise<boolean> {
       } catch {
         return
       }
+      if (frame.response_type === 'install_output') {
+        commandOutput.value = frame.data || null
+        return
+      }
       if (frame.response_type === 'install_prompt') {
         applyPrompt(frame.content || '')
         return
@@ -269,6 +280,7 @@ async function open() {
   const run = ++openRun
   closed = false
   messages.splice(0, messages.length)
+  commandOutput.value = null
   const stale = () => run !== openRun || closed
   try {
     // A finished install already has durable rows. Replaying the event log
@@ -453,4 +465,5 @@ onUnmounted(stop)
 .skill-timeline--compact :deep(.agent-stream-display .answer-content.markdown-content h3) {
   font-size: 12px;
 }
+.skill-timeline__command { margin: 8px 0 12px 42px; }
 </style>

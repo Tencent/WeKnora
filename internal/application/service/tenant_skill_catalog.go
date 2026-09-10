@@ -25,6 +25,7 @@ type SkillCatalogInstallView struct {
 	Enabled           bool      `json:"enabled"`
 	Error             string    `json:"error,omitempty"`
 	BundleSHA256      string    `json:"bundle_sha256,omitempty"`
+	Version           string    `json:"version,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
@@ -158,6 +159,7 @@ func installView(
 		Enabled:         row.Enabled,
 		Error:           row.Error,
 		BundleSHA256:    row.BundleSHA256,
+		Version:         row.Version,
 		UpdatedAt:       row.UpdatedAt,
 	}
 	if cfg := configByID[row.SandboxConfigID]; cfg != nil {

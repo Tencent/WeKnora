@@ -43,6 +43,7 @@ type Entry struct {
 	DocsURL       string            `json:"docs_url,omitempty"`
 	Version       string            `json:"version,omitempty"`
 	Digest        string            `json:"digest,omitempty"`
+	BundleSHA256  string            `json:"bundle_sha256,omitempty"`
 }
 
 // List returns catalog entries with digests for embedded resources.

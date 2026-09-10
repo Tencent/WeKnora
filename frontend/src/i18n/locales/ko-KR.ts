@@ -1,5 +1,22 @@
 export default {
   sandboxBrowser: {
+    fit: "맞춤",
+    fitWidth: "너비에 맞추기",
+    actualSize: "실제 크기 (100%)",
+
+    live: "실시간",
+    connecting: "연결 중",
+    snapshot: "스크린샷 미리보기",
+    back: "뒤로",
+    reload: "페이지 새로고침",
+    viewHint: "제어권을 가져오면 페이지를 조작할 수 있습니다.",
+    controlHint: "페이지의 입력란을 클릭해 입력하거나 붙여넣으세요. 한글 입력을 지원합니다.",
+    textTooLong: "한 번에 10,000자까지 입력할 수 있습니다. 나누어 붙여넣으세요.",
+    textLabel: "페이지에 입력할 텍스트",
+    inputViewHint: "제어권을 가져온 후 입력하세요",
+
+    liveHint: "실시간 화면입니다. 직접 제어 중에는 에이전트가 기다리며, 패널을 닫으면 제어가 반환됩니다.",
+    connectingHint: "실시간 화면에 연결 중…",
     pointerUpgradeHint: "현재 세션의 브라우저는 드래그를 지원하지 않습니다. office-browser-2026.09.2 이상 이미지로 새 세션을 시작하세요.",
     resume: "브라우저 재개",
     pausedHint: "샌드박스가 일시 중지되었습니다. 재개하면 브라우저를 사용할 수 있습니다.",
@@ -22,6 +39,20 @@ export default {
       "commandFailed": "브라우저 작업 실패"
   },
   skillDiscovery: {
+    catalogWillUpdate: "스킬 카탈로그도 업데이트됩니다",
+    chooseTargets: "설치하거나 업그레이드할 샌드박스 선택",
+    installNotes: "설치 안내",
+    upgradeTo: "업그레이드 대상",
+    contentUpdate: "스킬 내용이 변경되었습니다",
+    installAndUpgradeSelected: "설치 {installs} · 업그레이드 {upgrades}",
+    upgradeSelected: "업그레이드 ({count})",
+    installSelected: "설치 ({count})",
+
+    upgradeAvailable: "업그레이드 가능",
+    installOrUpgrade: "설치 / 업그레이드",
+    installedContentDiffers: "설치된 내용이 대상 버전과 다릅니다",
+    upgradeHint: "새 세션은 업그레이드된 버전을 사용하며, 기존 세션은 원래 스킬 스냅샷을 유지합니다.",
+
     previousInstallFailed: "이전 설치 실패",
     installContinuesInBackground: "닫아도 설치가 계속됩니다. 스킬 카드에서 진행 상황을 확인할 수 있습니다.",
     replaceAndInstall: "업데이트 및 설치",
@@ -5654,6 +5685,8 @@ export default {
       },
       skillTranscriptEmpty: 'This install left no transcript.',
       skillTranscriptWaiting: 'Install has started. Waiting for the process log…',
+      installCommandRunning: "명령 실행 중",
+      installCommandWaiting: "명령 출력을 기다리는 중입니다. 경과 시간은 계속 업데이트됩니다.",
       skillFiles: '파일 보기',
       skillFilesTitle: '파일',
       skillFilesEmpty: '이 스킬에서 볼 수 있는 파일이 아직 없습니다.',

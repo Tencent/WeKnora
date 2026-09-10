@@ -79,13 +79,26 @@ jobs:
         run: |
           go test ./internal/builtin/skills ./internal/agent/skills ./internal/sandbox
           python3 scripts/test_install_builtin_skills.py
+          python3 scripts/test_builtin_browser.py
       - name: Build and verify Docker/E2B image
         run: |
           bash scripts/build_sandbox_office.sh sandbox weknora-sandbox:ci "$PROFILE"
           python3 scripts/verify_sandbox_image.py weknora-sandbox:ci --profile "$PROFILE"
           DOCKER_INTEGRATION_IMAGE=weknora-sandbox:ci DOCKER_INTEGRATION_PROFILE="$PROFILE" \
             go test -tags docker_integration ./internal/sandbox ./internal/agent/skills \
-            -run '^(TestDockerBuiltinSkillsIntegration|TestBuiltinShellEnvironmentIntegration)$' -count=1 -v
+            -run '^(TestDockerBuiltinSkillsIntegration|TestBuiltinShellEnvironmentIntegration|TestDockerCommandStreamIntegration|TestDockerInstallOutputIntegration)$' -count=1 -v
+      - name: Verify optional agent-browser installation
+        run: |
+          docker run --rm --user root -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$PWD/internal/builtin/skills/packages/browser:/src:ro" \
+            -v "$PWD/scripts/test_builtin_browser.py:/test_browser.py:ro" \
+            weknora-sandbox:ci sh -ec '
+              cp -R /src /tmp/browser
+              python3 /tmp/browser/scripts/install.py --with-browser
+              /tmp/browser/.venv/bin/python /tmp/browser/scripts/weknora_smoke.py --report
+              WEKNORA_TEST_BROWSER=1 WEKNORA_BROWSER_SCRIPT=/tmp/browser/scripts/browser.py \
+                /tmp/browser/.venv/bin/python /test_browser.py
+            '
       - name: Build and verify Cube image
         if: matrix.arch == 'amd64'
         run: |
