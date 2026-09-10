@@ -95,18 +95,28 @@ test('detail panel keeps incoming graph relations when Wiki detail has outgoing 
   assert.match(source, /edge\.source_title/)
 })
 
-test('detail panel groups formal and reading relations with graph targets', () => {
+test('detail panel groups relations by target knowledge type', () => {
   const here = dirname(fileURLToPath(import.meta.url))
   const source = readFileSync(join(here, '../../components/videohub/NodeDetailPanel.vue'), 'utf8')
 
   assert.match(source, /<h3>知识关系/)
-  assert.match(source, /<h4>正式关系/)
-  assert.match(source, /<h4>阅读关联/)
-  assert.match(source, /getRelationDescription\(title, edge\.type, outgoing\)/)
+  assert.match(source, /关联实体/)
+  assert.match(source, /关联概念/)
+  assert.match(source, /关联方法论/)
+  assert.match(source, /关联案例/)
+  assert.match(source, /关联洞察/)
+  assert.match(source, /v-if="relationGroups\.length"/)
+  assert.match(source, /links: links\.filter\(link => link\.knowledgeType === group\.key\)/)
   assert.match(source, /在图谱中查看\$\{link\.title\}/)
   assert.match(source, /@click="selectGraphNode\(link\)"/)
   assert.match(source, /targetPageId/)
+  assert.doesNotMatch(source, /正式关系/)
+  assert.doesNotMatch(source, /阅读关联/)
   assert.doesNotMatch(source, />延伸阅读</)
+  assert.doesNotMatch(source, /type: '延伸关系'/)
+  assert.match(source, /\.node-panel__relation-group \{ display: grid; grid-template-columns: max-content minmax\(0, 1fr\);/)
+  assert.match(source, /\.node-panel__relation-group h4 \{[^}]*white-space: nowrap;/)
+  assert.match(source, /\.node-panel__relation-group \.node-panel__links button,[^}]*text-overflow: ellipsis; white-space: nowrap;/)
 })
 
 test('graph controls keep stable height and dense labels do not overlap', () => {
