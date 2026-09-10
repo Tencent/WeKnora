@@ -48,6 +48,13 @@ spec:
           env:
             - name: STORAGE_TYPE
               value: {{ .Values.docreader.env.STORAGE_TYPE | quote }}
+            - name: DOCREADER_IMAGE_OUTPUT_DIR
+              value: /tmp/docreader
+          volumeMounts:
+            {{- if .Values.docreader.sharedVolume.enabled }}
+            - name: docreader-tmp
+              mountPath: /tmp/docreader
+            {{- end }}
           resources:
             {{- toYaml .Values.docreader.resources | nindent 12 }}
           # gRPC health check using grpc_health_probe
@@ -69,6 +76,17 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 3
+      volumes:
+        {{- if .Values.docreader.sharedVolume.enabled }}
+        - name: docreader-tmp
+          {{- if eq .Values.docreader.sharedVolume.type "pvc" }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.docreader.sharedVolume.pvcName | default (printf "%s-docreader-tmp" (include "weknora.fullname" .)) }}
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ .Values.docreader.sharedVolume.sizeLimit | default "5Gi" }}
+          {{- end }}
+        {{- end }}
       {{- with .Values.docreader.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
