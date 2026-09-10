@@ -807,6 +807,13 @@ func isWikiPageInAttempt(page weknora.WikiPage, baseline skill.WikiPageBaseline)
 }
 
 func isCurrentP3ObjectCandidate(page weknora.WikiPage, videoID, generation string) bool {
+	// Reconciled legacy pages are deliberately preserved as drafts. They are
+	// not active P3 candidates and must not poison a later graph validation
+	// attempt merely because they retain the video's generation metadata.
+	if strings.EqualFold(strings.TrimSpace(page.Status), "draft") ||
+		strings.EqualFold(strings.TrimSpace(page.Status), "archived") {
+		return false
+	}
 	frontmatter := page.ParsedFrontmatter()
 	parsedIdentityMatches := strings.TrimSpace(wikiFrontmatterString(frontmatter, "source_video_id")) == strings.TrimSpace(videoID) &&
 		strings.TrimSpace(wikiFrontmatterString(frontmatter, "transcript_generation")) == strings.TrimSpace(generation)

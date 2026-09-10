@@ -1007,6 +1007,44 @@ func TestInspectP3KnowledgeAfterIgnoresUnchangedHistoricalInvalidPage(t *testing
 	require.Contains(t, strings.Join(invalid, "; "), "video index page was not created or updated in the current attempt")
 }
 
+func TestInspectP3KnowledgeIgnoresQuarantinedDraftPage(t *testing.T) {
+	db := p3EvidenceDB(t)
+	video := &model.Video{ID: "video-1", Title: "测试视频", TranscriptGeneration: "generation-1"}
+	index := weknora.WikiPage{
+		ID: "index-1", Slug: "video/video-1", PageType: "index",
+		Content: p3IndexContent(video.ID, video.TranscriptGeneration, video.Title), Version: 2,
+	}
+	valid := weknora.WikiPage{
+		ID: "object-new", Slug: "concept/object-new", PageType: "index", Version: 1,
+		Content: strings.Replace(p3ConceptContent(video.ID, video.TranscriptGeneration), "knowledge_object_id: object-1", "knowledge_object_id: object-new", 1),
+	}
+	quarantined := weknora.WikiPage{
+		ID: "object-old", Slug: "concept/object-old", PageType: "index", Status: "draft", Version: 3,
+		Content: "---\n" +
+			"type: legacy_draft\n" +
+			"source_video_id: " + video.ID + "\n" +
+			"transcript_generation: " + video.TranscriptGeneration + "\n" +
+			"audit_status: failed\n" +
+			"---\n\n# 历史隔离页\n",
+	}
+	server := p3WikiServer(t, []weknora.WikiPage{index, valid, quarantined})
+	defer server.Close()
+	handler := BaseSkillHandler{
+		DB: db, KnowledgeBaseID: "knowledge-kb",
+		Orchestrator: skill.NewOrchestrator(
+			db, weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL}),
+			"knowledge-kb",
+		),
+	}
+
+	artifacts, invalid, err := handler.inspectP3Knowledge(t.Context(), video.ID, video.TranscriptGeneration, video.Title)
+	require.NoError(t, err)
+	require.Empty(t, invalid)
+	require.NotNil(t, artifacts)
+	require.Equal(t, "index-1", artifacts.Index.ID)
+	require.Equal(t, 1, artifacts.ObjectCount)
+}
+
 func TestInspectP3KnowledgeAfterRejectsUnchangedHistoricalSemanticDuplicate(t *testing.T) {
 	db := p3EvidenceDB(t)
 	video := &model.Video{ID: "video-1", Title: "测试视频", TranscriptGeneration: "generation-1"}
