@@ -2,9 +2,11 @@ package handler
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -118,14 +120,16 @@ func TestFAQListEntriesRejectsInvalidEnabledFilter(t *testing.T) {
 
 	service := &faqListKnowledgeServiceStub{}
 	handler := &FAQHandler{knowledgeService: service}
-	context, _ := gin.CreateTestContext(httptest.NewRecorder())
-	context.Params = gin.Params{{Key: "id", Value: "kb-1"}}
-	context.Request = httptest.NewRequest("GET", "/faq/entries?is_enabled=invalid", nil)
+	router := gin.New()
+	router.Use(middleware.ErrorHandler())
+	router.GET("/knowledge-bases/:id/faq/entries", handler.ListEntries)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest("GET", "/knowledge-bases/kb-1/faq/entries?is_enabled=invalid", nil)
 
-	handler.ListEntries(context)
+	router.ServeHTTP(recorder, request)
 
-	if len(context.Errors) != 1 {
-		t.Fatalf("errors = %d, want 1", len(context.Errors))
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
 	}
 	if service.callCount != 0 {
 		t.Fatalf("service call count = %d, want 0", service.callCount)
