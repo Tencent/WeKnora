@@ -50,6 +50,7 @@ type Config struct {
 	SupportsDimensionOverride bool              `json:"supports_dimension_override"`
 	ModelID                   string            `json:"model_id"`
 	Provider                  string            `json:"provider"`
+	TenantID                  uint64            `json:"tenant_id"`
 	// MaxConcurrency caps concurrent background calls to this model; 0 falls
 	// back to the process-wide default (see limiter.GateN).
 	MaxConcurrency int               `json:"max_concurrency"`
@@ -72,6 +73,7 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) Config {
 		BaseURL:                   m.Parameters.BaseURL,
 		APIKey:                    m.Parameters.APIKey,
 		ModelID:                   m.ID,
+		TenantID:                  m.TenantID,
 		ModelName:                 m.Name,
 		Dimensions:                m.Parameters.EmbeddingParameters.Dimension,
 		SupportsDimensionOverride: m.Parameters.EmbeddingParameters.SupportsDimensionOverride,
@@ -104,7 +106,7 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	if langfuse.GetManager().Enabled() {
 		e = &langfuseEmbedder{inner: e}
 	}
-	return e, nil
+	return wrapEmbeddingCache(e, config.TenantID, pooler), nil
 }
 
 func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.OllamaService) (Embedder, error) {
