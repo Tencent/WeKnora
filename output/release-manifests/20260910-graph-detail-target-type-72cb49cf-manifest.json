@@ -1,0 +1,95 @@
+{
+  "release_date": "2026-09-10",
+  "source_commit": "72cb49cf665b7e4dfa40f82df52f30f473fcce34",
+  "pull_request": "https://github.com/lizi586586-code/vidsage/pull/23",
+  "branch": "custom/main",
+  "scope": "group knowledge graph detail relations by target knowledge type and navigate to the selected target in place",
+  "deployment_path": "/opt/vidsage",
+  "services_changed": [
+    "frontend"
+  ],
+  "services_unchanged": [
+    "custom-backend",
+    "app",
+    "postgres",
+    "minio",
+    "redis",
+    "neo4j",
+    "docreader"
+  ],
+  "source_files": [
+    "frontend/src/components/videohub/NodeDetailPanel.vue",
+    "frontend/src/views/videohub/KnowledgeGraph.test.ts"
+  ],
+  "excluded_scope": [
+    "training scenario changes",
+    "training orchestration changes",
+    "backend changes",
+    "database changes"
+  ],
+  "images": {
+    "frontend": {
+      "tag": "lizi586586/vidsage-ui:custom-v0.7.2-20260910142117-72cb49cf",
+      "architecture": "linux/amd64",
+      "image_id": "sha256:63c198dae17f5e3099cf6bbf78742f150a71018e178f7d71dfe05d16b5bcfdbd",
+      "archive": "/tmp/vidsage-ui-custom-v0.7.2-20260910142117-72cb49cf.tar.gz",
+      "archive_sha256": "a939b9291f48ab3b4bd590e00908c19ce5f5fbae1ab72b2d68229739ba36d8fb"
+    },
+    "custom-backend": {
+      "status": "unchanged",
+      "tag": "lizi586586/vidsage-custom-backend:custom-v0.7.2-20260910132114-8ac20f23"
+    },
+    "app": {
+      "status": "unchanged",
+      "tag": "lizi586586/vidsage-app:custom-v0.7.2-20260910123810-5818e2bf"
+    }
+  },
+  "rollback": {
+    "compose_backup": "/opt/vidsage/docker-compose.cloud.yml.bak-release-graph-detail-72cb49cf-20260910142507",
+    "env_backup": "/opt/vidsage/.env.bak-release-graph-detail-72cb49cf-20260910142507",
+    "previous_frontend": "lizi586586/vidsage-ui:custom-v0.7.2-20260910015155-150ce9da",
+    "strategy": "Restore both backups and recreate only frontend with both Compose files, --no-deps, and --no-build."
+  },
+  "tests": {
+    "knowledge_graph_tests": "9/9 passed",
+    "frontend_type_check": "passed",
+    "frontend_production_build": "passed"
+  },
+  "acceptance": {
+    "compose_config": "passed",
+    "nginx_config": "passed",
+    "frontend_image_matches_release": true,
+    "custom_backend_health": "healthy",
+    "app_health": "healthy",
+    "public_http": {
+      "/": 200,
+      "/platform/graph": 200,
+      "/api/custom/ping": 200
+    },
+    "public_ping_repeated": "10/10 passed",
+    "public_videos_response": {
+      "status": 200,
+      "content_length": 1508,
+      "complete_json": true
+    },
+    "public_assets": {
+      "main": "main-B53y0h1l.js",
+      "knowledge_graph": "KnowledgeGraph-DyGrbf_q.js"
+    },
+    "browser": {
+      "authenticated": true,
+      "skill_detail_groups": [
+        "关联方法论",
+        "关联洞察"
+      ],
+      "target_clicked": "Skill 创建五步法",
+      "target_detail_group": "关联概念",
+      "in_place_navigation": "passed"
+    }
+  },
+  "notes": [
+    "Only WeKnora-frontend was recreated in production.",
+    "The primary development worktree and its uncommitted training changes were not used for the release build.",
+    "The first server archive checksum comparison stopped before docker load because the expected value was entered incorrectly; deployment resumed only after the local and server SHA-256 values were confirmed identical."
+  ]
+}
