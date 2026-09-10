@@ -1283,6 +1283,126 @@ func TestWikiWritePageSharesCanonicalIdentityAcrossVideosWithoutOverwritingEvide
 	}
 }
 
+func TestWikiWritePageRejectsKnowledgeObjectIDCollisionAtDifferentSlug(t *testing.T) {
+	existing := semanticInsightWikiPage(
+		"three-rules-page", "insight/three-skill-rules", "Skill 好用的三条经验", "shared-insight-001",
+		"video-1", "doc-1", "generation-1", "ev-1",
+		"要让 Skill 比别人好用，应坚持单一专一、规则具体并经过反复迭代打磨。",
+	)
+	service := &sourceRefWikiService{semanticPages: []*types.WikiPage{existing}}
+	tool := NewWikiWritePageTool(service, []string{"kb-1"}, nil, NewWikiRouteResolver()).
+		WithSemanticIdentityAdapter(customknowledge.RuleSemanticIdentityAdapter{})
+	incoming := semanticInsightWikiPage(
+		"", "insight/workflow-vs-agent-four-differences", "AI工作流与AI Agent的四大本质差别", "shared-insight-001",
+		"video-2", "doc-2", "generation-2", "ev-2",
+		"AI工作流由人预设固定步骤，AI Agent自主规划决策，两者在目标设定、执行路径和自由度上存在四大本质差别。",
+	)
+	args, err := json.Marshal(map[string]any{
+		"slug": incoming.Slug, "title": incoming.Title, "summary": incoming.Summary,
+		"content": incoming.Content, "page_type": incoming.PageType,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := tool.Execute(v2WriteContextFor("video-2", "generation-2"), args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.Success {
+		t.Fatalf("knowledge object ID collision must be rejected: %+v", result)
+	}
+	for _, required := range []string{
+		"already used by a different knowledge object",
+		"Skill 好用的三条经验",
+		"assign a new unique knowledge_object_id",
+		"AI工作流与AI Agent的四大本质差别",
+	} {
+		if !strings.Contains(result.Error, required) {
+			t.Fatalf("collision rejection missing %q: %s", required, result.Error)
+		}
+	}
+	if service.createCount != 0 || service.updateCount != 0 {
+		t.Fatalf("knowledge object ID collision reached persistence: creates=%d updates=%d", service.createCount, service.updateCount)
+	}
+}
+
+func TestWikiWritePageAllowsReusedKnowledgeObjectIDForEquivalentInsight(t *testing.T) {
+	canonical := semanticInsightWikiPage(
+		"three-rules-page", "insight/three-skill-rules", "Skill 好用的三条经验", "shared-insight-001",
+		"video-1", "doc-1", "generation-1", "ev-1",
+		"要让 Skill 比别人好用，应坚持单一专一、规则具体并经过反复迭代打磨。",
+	)
+	service := &sourceRefWikiService{semanticPages: []*types.WikiPage{canonical}}
+	tool := NewWikiWritePageTool(service, []string{"kb-1"}, nil, NewWikiRouteResolver()).
+		WithSemanticIdentityAdapter(customknowledge.RuleSemanticIdentityAdapter{})
+	// Same knowledge object across videos: the writer reuses the canonical
+	// object ID on purpose, so the collision gate must not block this write.
+	incoming := semanticInsightWikiPage(
+		"", "insight/three-skill-rules-video-2", "Skill 好用的三条经验", "shared-insight-001",
+		"video-2", "doc-2", "generation-2", "ev-2",
+		"Skill 要比别人好用，需要保持单一专一、规则具体，并经过反复迭代打磨。",
+	)
+	args, err := json.Marshal(map[string]any{
+		"slug": incoming.Slug, "title": incoming.Title, "summary": incoming.Summary,
+		"content": incoming.Content, "page_type": incoming.PageType,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := tool.Execute(v2WriteContextFor("video-2", "generation-2"), args)
+	if err != nil || result == nil || !result.Success {
+		t.Fatalf("equivalent insight with reused object ID failed: result=%+v err=%v", result, err)
+	}
+	if service.createCount != 0 || service.updateCount != 1 {
+		t.Fatalf("equivalent insight persistence = creates:%d updates:%d", service.createCount, service.updateCount)
+	}
+	if service.page.Slug != canonical.Slug || service.page.ID != canonical.ID {
+		t.Fatalf("canonical insight page was not reused: %#v", service.page)
+	}
+	for _, required := range []string{
+		"knowledge_object_id: shared-insight-001", "video_id: video-2", "ev-2", "doc-2",
+	} {
+		if !strings.Contains(service.page.Content, required) {
+			t.Fatalf("canonical insight content missing %q:\n%s", required, service.page.Content)
+		}
+	}
+}
+
+func semanticInsightWikiPage(id, slug, title, objectID, videoID, docID, generation, evidenceID, core string) *types.WikiPage {
+	content := fmt.Sprintf(`---
+knowledge_object_id: %s
+type: insight
+primary_type: insight
+title: %s
+canonical_name: %s
+source_video_id: %s
+source_document_id: %s
+transcript_generation: %s
+audit_status: passed
+information_nature: 洞察
+classification_confidence: 0.92
+evidence_ids: [%s]
+source_refs: [%s]
+core_content: %s
+structure_fields:
+  claim: %s
+  reasoning: 从多个视频的实践观察归纳得出
+relations: []
+---
+
+# %s
+
+## 一句话概述
+
+%s`, objectID, title, title, videoID, docID, generation, evidenceID, docID, core, core, title, core)
+	return &types.WikiPage{
+		ID: id, KnowledgeBaseID: "kb-1", Slug: slug, Title: title, Summary: core,
+		PageType: "index", Status: types.WikiPageStatusPublished, Content: content,
+	}
+}
+
 func TestWikiWritePageFailsClosedWhenSemanticAdapterIsUncertain(t *testing.T) {
 	canonical := semanticEntityWikiPage(
 		"canonical-page", "entity/deepseek", "DeepSeek", "deepseek-canonical",

@@ -724,6 +724,19 @@ func (t *wikiWritePageTool) resolveSemanticKnowledgeObject(
 				}
 				matches = append(matches, semanticMatch{page: page, validation: candidate, identity: candidateIdentity})
 			case "different_object":
+				// The knowledge_object_id is the KB-global object identity. A
+				// different_object verdict on the same ID means the model is
+				// trying to attach unrelated knowledge to an existing object;
+				// read-side aggregation would silently merge both pages into
+				// one node and swallow one of them. Reject and require a new
+				// unique ID instead.
+				if candidateID := strings.TrimSpace(candidate.KnowledgeObjectID); candidateID != "" &&
+					candidateID == strings.TrimSpace(sourceCandidate.KnowledgeObjectID) {
+					return nil, customknowledge.WikiObjectValidation{}, fmt.Errorf(
+						"knowledge_object_id %s is already used by a different knowledge object %q (%s) on Wiki page %s (%s); assign a new unique knowledge_object_id for %q and retry the write",
+						candidateID, candidate.Title, candidate.KnowledgeType, page.ID, page.Slug, source.Title,
+					)
+				}
 			default:
 				return nil, customknowledge.WikiObjectValidation{}, fmt.Errorf(
 					"semantic identity adapter returned invalid decision %q", assessment.Decision,
