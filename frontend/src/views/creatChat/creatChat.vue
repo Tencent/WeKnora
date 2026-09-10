@@ -248,6 +248,9 @@ const handleKBEditorSuccess = (kbId: string) => {
     display: flex;
     justify-content: center;
     align-items: center;
+    min-width: 0;
+    padding: 24px;
+    box-sizing: border-box;
     // position: relative;
 }
 
@@ -257,6 +260,7 @@ const handleKBEditorSuccess = (kbId: string) => {
     align-items: center;
     width: 100%;
     max-width: 960px;
+    min-width: 0;
     gap: 24px;
 
     :deep(.answers-input) {
@@ -363,43 +367,17 @@ const handleKBEditorSuccess = (kbId: string) => {
     }
 }
 
-@media (max-width: 1250px) and (min-width: 1045px) {
-    .answers-input {
-        transform: translateX(-329px);
+@media (max-width: 768px) {
+    .dialogue-wrap {
+        padding: 16px 12px;
     }
 
-    :deep(.t-textarea__inner) {
-        width: 654px !important;
-    }
-}
-
-@media (max-width: 1045px) {
-    .answers-input {
-        transform: translateX(-250px);
+    .dialogue-answers {
+        gap: 16px;
     }
 
-    :deep(.t-textarea__inner) {
-        width: 500px !important;
-    }
-}
-
-@media (max-width: 750px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 340px !important;
-    }
-}
-
-@media (max-width: 600px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 300px !important;
+    .dialogue-title {
+        font-size: 22px;
     }
 }
 </style>

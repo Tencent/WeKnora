@@ -2785,7 +2785,8 @@ defineExpose({
           <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
             :disabled="!isModelLockedByAgent">
             <div class="model-display" :class="{ 'agent-controlled': isModelLockedByAgent }">
-              <div ref="modelButtonRef" class="model-selector-trigger" @click.stop="toggleModelSelector">
+              <div ref="modelButtonRef" class="model-selector-trigger" :title="selectedModelDisplayName"
+                @click.stop="toggleModelSelector">
                 <span class="model-selector-name">
                   {{ selectedModelDisplayName }}
                 </span>
@@ -2977,6 +2978,7 @@ const getImgSrc = (url: string) => {
   position: relative;
   width: 100%;
   max-width: 960px;
+  min-width: 0;
   background: var(--td-bg-color-container, #FFF);
   border-radius: 12px;
   border: 1px solid var(--td-component-stroke, #dcdcdc);
@@ -3588,6 +3590,72 @@ const getImgSrc = (url: string) => {
   img {
     width: 16px;
     height: 16px;
+  }
+}
+
+/* 移动端输入区域 */
+@media (max-width: 768px) {
+  .answers-input {
+    min-width: 0;
+    padding: 0 12px;
+    box-sizing: border-box;
+  }
+
+  :deep(.t-textarea__inner) {
+    min-height: 96px !important;
+    padding: 12px 12px 52px;
+  }
+
+  .control-bar {
+    left: 12px;
+    right: 12px;
+    flex-wrap: nowrap;
+    max-height: none;
+    gap: 6px;
+  }
+
+  .control-left {
+    flex-wrap: nowrap;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  .control-right {
+    flex-shrink: 0;
+    gap: 4px;
+  }
+
+  .agent-mode-btn {
+    max-width: 124px;
+  }
+
+  .agent-mode-text {
+    min-width: 0;
+    max-width: 88px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .model-display {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-left: 0;
+  }
+
+  .model-selector-trigger {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .model-selector-name {
+    min-width: 0;
   }
 }
 
