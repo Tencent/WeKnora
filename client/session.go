@@ -313,9 +313,10 @@ func (c *Client) KnowledgeQAStream(
 		// Empty line indicates the end of an event
 		if line == "" {
 			if dataBuffer != "" {
-				debugLogger.Debug("sse_data_processing", "data", dataBuffer, "event_type", eventType)
+				data := completeSSEData(dataBuffer)
+				debugLogger.Debug("sse_data_processing", "data", data, "event_type", eventType)
 				var streamResponse StreamResponse
-				if err := json.Unmarshal([]byte(dataBuffer), &streamResponse); err != nil {
+				if err := json.Unmarshal([]byte(data), &streamResponse); err != nil {
 					debugLogger.Debug("sse_parse_failed", "error", err)
 					return fmt.Errorf("failed to parse SSE data: %w", err)
 				}
@@ -344,7 +345,7 @@ func (c *Client) KnowledgeQAStream(
 
 		// Process lines with data: prefix
 		if strings.HasPrefix(line, "data:") {
-			dataBuffer = line[5:] // Remove "data:" prefix
+			dataBuffer = appendSSEDataLine(dataBuffer, line)
 		}
 	}
 
@@ -399,8 +400,9 @@ func (c *Client) ContinueStream(
 		// Empty line indicates the end of an event
 		if line == "" {
 			if dataBuffer != "" && eventType == "message" {
+				data := completeSSEData(dataBuffer)
 				var streamResponse StreamResponse
-				if err := json.Unmarshal([]byte(dataBuffer), &streamResponse); err != nil {
+				if err := json.Unmarshal([]byte(data), &streamResponse); err != nil {
 					return fmt.Errorf("failed to parse SSE data: %w", err)
 				}
 
@@ -410,9 +412,9 @@ func (c *Client) ContinueStream(
 				if streamResponse.ResponseType == ResponseTypeError && streamResponse.Done {
 					return NewSSEStreamError(streamResponse.Content)
 				}
-				dataBuffer = ""
-				eventType = ""
 			}
+			dataBuffer = ""
+			eventType = ""
 			continue
 		}
 
@@ -423,7 +425,7 @@ func (c *Client) ContinueStream(
 
 		// Process lines with data: prefix
 		if strings.HasPrefix(line, "data:") {
-			dataBuffer = line[5:] // Remove "data:" prefix
+			dataBuffer = appendSSEDataLine(dataBuffer, line)
 		}
 	}
 
