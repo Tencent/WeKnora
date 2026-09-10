@@ -15,7 +15,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -507,7 +506,7 @@ type extractionResources struct {
 	knowledgeBase  *types.KnowledgeBase
 	tenant         *types.Tenant
 	invokeCfg      *invoke.ModelConfig
-	embeddingModel embedding.Embedder
+	embeddingModel interfaces.Embedder
 	retrieveEngine *retriever.CompositeRetrieveEngine
 }
 
@@ -735,7 +734,7 @@ func (s *DataTableSummaryService) indexToVectorDB(
 	ctx context.Context,
 	chunks []*types.Chunk,
 	engine *retriever.CompositeRetrieveEngine,
-	embedder embedding.Embedder,
+	embedder interfaces.Embedder,
 ) error {
 	// 构建索引信息列表
 	indexInfoList := make([]*types.IndexInfo, 0, len(chunks))

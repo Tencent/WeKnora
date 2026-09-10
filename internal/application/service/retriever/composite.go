@@ -10,7 +10,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -196,7 +195,7 @@ func (c *CompositeRetrieveEngine) concurrentExecWithError(
 
 // Index saves vector embeddings to all registered repositories
 func (c *CompositeRetrieveEngine) Index(ctx context.Context,
-	embedder embedding.Embedder, indexInfo *types.IndexInfo,
+	embedder interfaces.Embedder, indexInfo *types.IndexInfo,
 ) error {
 	err := c.concurrentExecWithError(ctx, func(ctx context.Context, engineInfo *engineInfo) error {
 		if err := engineInfo.retrieveEngine.Index(ctx, embedder, indexInfo, engineInfo.retrieverType); err != nil {
@@ -210,7 +209,7 @@ func (c *CompositeRetrieveEngine) Index(ctx context.Context,
 
 // BatchIndex batch saves vector embeddings to all registered repositories
 func (c *CompositeRetrieveEngine) BatchIndex(ctx context.Context,
-	embedder embedding.Embedder, indexInfoList []*types.IndexInfo,
+	embedder interfaces.Embedder, indexInfoList []*types.IndexInfo,
 ) error {
 	// Deduplicate sourceIDs
 	indexInfoList = common.Deduplicate(func(info *types.IndexInfo) string { return info.SourceID }, indexInfoList...)
@@ -300,7 +299,7 @@ func (c *CompositeRetrieveEngine) DeleteByKnowledgeIDList(ctx context.Context,
 
 // EstimateStorageSize estimates the storage size required for the provided index information
 func (c *CompositeRetrieveEngine) EstimateStorageSize(ctx context.Context,
-	embedder embedding.Embedder, indexInfoList []*types.IndexInfo,
+	embedder interfaces.Embedder, indexInfoList []*types.IndexInfo,
 ) int64 {
 	sum := atomic.Int64{}
 	err := c.concurrentExecWithError(ctx, func(ctx context.Context, engineInfo *engineInfo) error {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -44,10 +43,10 @@ func (s *parentChildChunkService) CreateChunks(_ context.Context, chunks []*type
 
 type parentChildModelService struct {
 	interfaces.ModelService
-	embedder embedding.Embedder
+	embedder interfaces.Embedder
 }
 
-func (s parentChildModelService) GetEmbeddingModel(context.Context, string) (embedding.Embedder, error) {
+func (s parentChildModelService) GetEmbeddingModel(context.Context, string) (interfaces.Embedder, error) {
 	return s.embedder, nil
 }
 
@@ -62,7 +61,7 @@ func (parentChildEmbedder) BatchEmbed(context.Context, []string) ([][]float32, e
 }
 
 func (parentChildEmbedder) BatchEmbedWithPool(
-	context.Context, embedding.Embedder, []string,
+	context.Context, interfaces.Embedder, []string,
 ) ([][]float32, error) {
 	return [][]float32{{1}}, nil
 }
@@ -91,14 +90,14 @@ func (e *parentChildRetrieveEngine) DeleteByKnowledgeIDList(
 }
 
 func (e *parentChildRetrieveEngine) EstimateStorageSize(
-	context.Context, embedding.Embedder, []*types.IndexInfo, []types.RetrieverType,
+	context.Context, interfaces.Embedder, []*types.IndexInfo, []types.RetrieverType,
 ) int64 {
 	return 0
 }
 
 func (e *parentChildRetrieveEngine) BatchIndex(
 	_ context.Context,
-	_ embedding.Embedder,
+	_ interfaces.Embedder,
 	infos []*types.IndexInfo,
 	_ []types.RetrieverType,
 ) error {

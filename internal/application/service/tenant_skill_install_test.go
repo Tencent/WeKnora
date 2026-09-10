@@ -24,7 +24,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/models/asr"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -3307,11 +3306,11 @@ func (s *installModelService) ClearModelCredential(context.Context, string, stri
 	return nil
 }
 
-func (s *installModelService) GetEmbeddingModel(context.Context, string) (embedding.Embedder, error) {
+func (s *installModelService) GetEmbeddingModel(context.Context, string) (interfaces.Embedder, error) {
 	return nil, nil
 }
 
-func (s *installModelService) GetEmbeddingModelForTenant(context.Context, string, uint64) (embedding.Embedder, error) {
+func (s *installModelService) GetEmbeddingModelForTenant(context.Context, string, uint64) (interfaces.Embedder, error) {
 	return nil, nil
 }
 

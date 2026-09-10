@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/errors"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -142,13 +141,19 @@ func (m *mockEngineService) Retrieve(_ context.Context, _ types.RetrieveParams) 
 	return nil, nil
 }
 func (m *mockEngineService) Support() []types.RetrieverType { return nil }
-func (m *mockEngineService) Index(_ context.Context, _ embedding.Embedder, _ *types.IndexInfo, _ []types.RetrieverType) error {
+func (m *mockEngineService) Index(
+	_ context.Context, _ interfaces.Embedder, _ *types.IndexInfo, _ []types.RetrieverType,
+) error {
 	return nil
 }
-func (m *mockEngineService) BatchIndex(_ context.Context, _ embedding.Embedder, _ []*types.IndexInfo, _ []types.RetrieverType) error {
+func (m *mockEngineService) BatchIndex(
+	_ context.Context, _ interfaces.Embedder, _ []*types.IndexInfo, _ []types.RetrieverType,
+) error {
 	return nil
 }
-func (m *mockEngineService) EstimateStorageSize(_ context.Context, _ embedding.Embedder, _ []*types.IndexInfo, _ []types.RetrieverType) int64 {
+func (m *mockEngineService) EstimateStorageSize(
+	_ context.Context, _ interfaces.Embedder, _ []*types.IndexInfo, _ []types.RetrieverType,
+) int64 {
 	return 0
 }
 func (m *mockEngineService) CopyIndices(_ context.Context, _ string, _ map[string]string, _ map[string]string, _ string, _ int, _ string) error {

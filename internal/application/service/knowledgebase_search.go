@@ -7,9 +7,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -30,7 +30,7 @@ func (s *knowledgeBaseService) GetQueryEmbedding(ctx context.Context, kbID strin
 	}
 
 	currentTenantID := types.MustTenantIDFromContext(ctx)
-	var embeddingModel embedding.Embedder
+	var embeddingModel interfaces.Embedder
 
 	if kb.TenantID != currentTenantID {
 		embeddingModel, err = s.modelService.GetEmbeddingModelForTenant(ctx, kb.EmbeddingModelID, kb.TenantID)
@@ -58,7 +58,7 @@ func (s *knowledgeBaseService) GetQueryEmbedding(ctx context.Context, kbID strin
 // provider returning a different vector size is reported as the misleading
 // generic 2201 "bound store unavailable" error (or, for dimension-partitioned
 // stores, silently produces no matches).
-func validateQueryEmbeddingDimension(model embedding.Embedder, actual int) error {
+func validateQueryEmbeddingDimension(model interfaces.Embedder, actual int) error {
 	if model == nil || actual == 0 {
 		return nil
 	}
@@ -490,7 +490,7 @@ func (s *knowledgeBaseService) resolveQueryEmbedding(
 
 	logger.Infof(ctx, "Getting embedding model, model ID: %s", kb.EmbeddingModelID)
 
-	var embeddingModel embedding.Embedder
+	var embeddingModel interfaces.Embedder
 	var err error
 	if kb.TenantID != currentTenantID {
 		logger.Infof(ctx, "Cross-tenant knowledge base detected, using source tenant's embedding model. KB tenant: %d, current tenant: %d", kb.TenantID, currentTenantID)

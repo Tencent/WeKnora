@@ -81,7 +81,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/models/catalog"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	_ "github.com/Tencent/WeKnora/internal/models/invoke/adapters" // invoke adapter registration (§6.2)
 	"github.com/Tencent/WeKnora/internal/models/limiter"
@@ -214,7 +213,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewSpanTracker))
 	must(container.Provide(service.NewChunkService))
 	must(container.Provide(service.NewKnowledgeTagService))
-	must(container.Provide(embedding.NewBatchEmbedder))
+	must(container.Provide(service.NewBatchEmbedPooler))
 	must(container.Provide(service.NewModelService))
 	must(container.Provide(service.NewDatasetService))
 	must(container.Provide(service.NewEvaluationService))

@@ -18,7 +18,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -316,7 +315,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// Get embedding model for vectorization — only needed when vector/keyword indexing is enabled
-	var embeddingModel embedding.Embedder
+	var embeddingModel interfaces.Embedder
 	if kb.NeedsEmbeddingModel() {
 		var err error
 		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)

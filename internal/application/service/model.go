@@ -10,7 +10,6 @@ import (
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
@@ -29,7 +28,7 @@ type modelService struct {
 	kbRepo        interfaces.KnowledgeBaseRepository
 	agentRepo     interfaces.CustomAgentRepository
 	ollamaService *ollama.OllamaService
-	pooler        embedding.EmbedderPooler
+	pooler        interfaces.EmbedderPooler
 	tenantService interfaces.TenantService
 }
 
@@ -38,7 +37,7 @@ func NewModelService(repo interfaces.ModelRepository,
 	kbRepo interfaces.KnowledgeBaseRepository,
 	agentRepo interfaces.CustomAgentRepository,
 	ollamaService *ollama.OllamaService,
-	pooler embedding.EmbedderPooler,
+	pooler interfaces.EmbedderPooler,
 	tenantService interfaces.TenantService,
 ) interfaces.ModelService {
 	return &modelService{
@@ -587,22 +586,23 @@ func (s *modelService) getModelUsageDetails(
 }
 
 // GetEmbeddingModel retrieves and initializes an embedding model instance
-// Takes a model ID and returns an Embedder interface implementation
-func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (embedding.Embedder, error) {
+// Takes a model ID and returns an Embedder interface implementation.
+// The client is rebuilt from the model record through the shared constructor
+// (BuildModelConfig) on every call — production and the test-connection path
+// share the same mapping (v1 ConfigFromModel promise).
+func (s *modelService) GetEmbeddingModel(ctx context.Context, modelID string) (interfaces.Embedder, error) {
 	// Get the model details
-	model, err := s.GetModelByID(ctx, modelId)
+	model, err := s.GetModelByID(ctx, modelID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id": modelId,
+			"model_id": modelID,
 		})
 		return nil, err
 	}
 
 	logger.Infof(ctx, "Getting embedding model: %s, source: %s", model.Name, model.Source)
 
-	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
-
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	embedder, err := s.newEmbedderForModel(ctx, model)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -618,18 +618,20 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 // GetEmbeddingModelForTenant retrieves and initializes an embedding model for a specific tenant
 // This is used for cross-tenant knowledge base sharing where the embedding model from
 // the source tenant must be used to ensure vector compatibility
-func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId string, tenantID uint64) (embedding.Embedder, error) {
+func (s *modelService) GetEmbeddingModelForTenant(
+	ctx context.Context, modelID string, tenantID uint64,
+) (interfaces.Embedder, error) {
 	// Check if model ID is empty
-	if modelId == "" {
+	if modelID == "" {
 		logger.Error(ctx, "Model ID is empty")
 		return nil, errors.New("model ID cannot be empty")
 	}
 
 	// Fetch model from repository using the specified tenant ID
-	model, err := s.repo.GetByID(ctx, tenantID, modelId)
+	model, err := s.repo.GetByID(ctx, tenantID, modelID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id":  modelId,
+			"model_id":  modelID,
 			"tenant_id": tenantID,
 		})
 		return nil, err
@@ -647,9 +649,7 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 
 	logger.Infof(ctx, "Getting cross-tenant embedding model: %s, source: %s, tenant: %d", model.Name, model.Source, tenantID)
 
-	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
-
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	embedder, err := s.newEmbedderForModel(ctx, model)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -661,6 +661,24 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 
 	logger.Info(ctx, "Cross-tenant embedding model initialized successfully")
 	return embedder, nil
+}
+
+// newEmbedderForModel builds the invoke-backed embedder for one record: the
+// shared constructor (credential three slots, WeKnoraCloud tenant fallback,
+// legacy local-record mapping) plus the record's EmbeddingParameters shard.
+func (s *modelService) newEmbedderForModel(ctx context.Context, model *types.Model) (interfaces.Embedder, error) {
+	cfg, err := s.BuildModelConfig(ctx, model)
+	if err != nil {
+		return nil, err
+	}
+	params := &model.Parameters
+	return newInvokeEmbedder(
+		cfg,
+		params.EmbeddingParameters.Dimension,
+		params.EmbeddingParameters.SupportsDimensionOverride,
+		params.EmbeddingParameters.TruncatePromptTokens,
+		s.pooler,
+	), nil
 }
 
 // GetRerankModel retrieves and initializes a reranking model instance

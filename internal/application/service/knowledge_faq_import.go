@@ -16,9 +16,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
@@ -1376,7 +1376,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 ) (err error) {
 	// 保存知识库和embedding模型信息，用于清理索引
 	var kb *types.KnowledgeBase
-	var embeddingModel embedding.Embedder
+	var embeddingModel interfaces.Embedder
 	totalEntries := len(payload.Entries) + processedCount
 
 	// Recovery机制：如果发生任何错误或panic，回滚所有已创建的chunks和索引数据
@@ -1840,7 +1840,7 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 	kb *types.KnowledgeBase,
 	knowledge *types.Knowledge,
 	chunk *types.Chunk,
-	embeddingModel embedding.Embedder,
+	embeddingModel interfaces.Embedder,
 	oldStandardQuestion string,
 	oldSimilarQuestions []string,
 	oldAnswers []string,
@@ -2018,7 +2018,7 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 
 func (s *knowledgeService) indexFAQChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge,
-	chunks []*types.Chunk, embeddingModel embedding.Embedder,
+	chunks []*types.Chunk, embeddingModel interfaces.Embedder,
 	adjustStorage bool, needDelete bool,
 ) error {
 	if len(chunks) == 0 {
@@ -2607,7 +2607,7 @@ func (s *knowledgeService) executeFAQMergeOperations(
 	taskID string,
 	kb *types.KnowledgeBase,
 	faqKnowledge *types.Knowledge,
-	embeddingModel embedding.Embedder,
+	embeddingModel interfaces.Embedder,
 	indexMode types.FAQIndexMode,
 	mergeOps []faqMergeOperation,
 	progress *types.FAQImportProgress,

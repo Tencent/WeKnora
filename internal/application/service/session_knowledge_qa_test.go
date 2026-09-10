@@ -6,11 +6,11 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/models/asr"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	invoketest "github.com/Tencent/WeKnora/internal/models/invoke/invoketest"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -79,11 +79,11 @@ func (s *stubModelService) ClearModelCredential(context.Context, string, string)
 	return nil
 }
 
-func (s *stubModelService) GetEmbeddingModel(context.Context, string) (embedding.Embedder, error) {
+func (s *stubModelService) GetEmbeddingModel(context.Context, string) (interfaces.Embedder, error) {
 	return nil, nil
 }
 
-func (s *stubModelService) GetEmbeddingModelForTenant(context.Context, string, uint64) (embedding.Embedder, error) {
+func (s *stubModelService) GetEmbeddingModelForTenant(context.Context, string, uint64) (interfaces.Embedder, error) {
 	return nil, nil
 }
 

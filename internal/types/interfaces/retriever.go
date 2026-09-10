@@ -3,7 +3,6 @@ package interfaces
 import (
 	"context"
 
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -102,21 +101,21 @@ type RetrieveEngineRegistry interface {
 type RetrieveEngineService interface {
 	// Index indexes the index info
 	Index(ctx context.Context,
-		embedder embedding.Embedder,
+		embedder Embedder,
 		indexInfo *types.IndexInfo,
 		retrieverTypes []types.RetrieverType,
 	) error
 
 	// BatchIndex indexes the index info list
 	BatchIndex(ctx context.Context,
-		embedder embedding.Embedder,
+		embedder Embedder,
 		indexInfoList []*types.IndexInfo,
 		retrieverTypes []types.RetrieverType,
 	) error
 
 	// EstimateStorageSize estimates the storage size
 	EstimateStorageSize(ctx context.Context,
-		embedder embedding.Embedder,
+		embedder Embedder,
 		indexInfoList []*types.IndexInfo,
 		retrieverTypes []types.RetrieverType,
 	) int64

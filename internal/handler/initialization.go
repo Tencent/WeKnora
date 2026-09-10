@@ -22,7 +22,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
@@ -62,7 +61,7 @@ type InitializationHandler struct {
 	knowledgeService interfaces.KnowledgeService
 	ollamaService    *ollama.OllamaService
 	documentReader   interfaces.DocumentReader
-	pooler           embedding.EmbedderPooler
+	pooler           interfaces.EmbedderPooler
 	storageResolver  interfaces.StorageBackendResolver
 }
 
@@ -76,7 +75,7 @@ func NewInitializationHandler(
 	knowledgeService interfaces.KnowledgeService,
 	ollamaService *ollama.OllamaService,
 	documentReader interfaces.DocumentReader,
-	pooler embedding.EmbedderPooler,
+	pooler interfaces.EmbedderPooler,
 	storageResolver interfaces.StorageBackendResolver,
 ) *InitializationHandler {
 	return &InitializationHandler{
@@ -1856,15 +1855,18 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		}
 	}
 
-	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
-	if !ok {
+	// WeKnoraCloud 凭证解析收敛到 BuildModelConfig 内部（租户回退一致），
+	// 这里仅校验空间上下文存在（v1 行为保留）。
+	if _, _, ok := h.resolveTenantWeKnoraCloudCreds(ctx); !ok {
 		logger.Error(ctx, "Tenant info not found")
 		c.Error(errors.NewBadRequestError("空间信息未找到"))
 		return
 	}
 
 	model := h.buildTestModel(&req, types.ModelTypeEmbedding, types.ModelSourceRemote)
-	emb, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), h.pooler, h.ollamaService)
+	// 临时表单模型经唯一共享构造函数走 invoke 入口（§6.1/§6.8）：凭证三槽、
+	// WeKnoraCloud 租户回退、存量 provider/base_url 映射与生产路径完全一致。
+	invokeCfg, err := h.modelService.BuildModelConfig(ctx, model)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"model": utils.SanitizeForLog(req.ModelName)})
 		c.JSON(http.StatusOK, gin.H{
@@ -1873,8 +1875,14 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		})
 		return
 	}
-
-	vec, err := emb.Embed(ctx, "hello")
+	resp, err := invoke.Embed(ctx, invokeCfg, &invoke.EmbeddingOptions{
+		Inputs: []string{"hello"},
+		// 表单 embedding 参数与生产路径同源（v1 ConfigFromModel 承诺）：
+		// buildTestModel 已填 EmbeddingParameters，逐字段透传。
+		Dimensions:                model.Parameters.EmbeddingParameters.Dimension,
+		TruncatePromptTokens:      model.Parameters.EmbeddingParameters.TruncatePromptTokens,
+		SupportsDimensionOverride: model.Parameters.EmbeddingParameters.SupportsDimensionOverride,
+	})
 	if err != nil {
 		logger.Error(ctx, "Failed to call embedder", err)
 		c.JSON(http.StatusOK, gin.H{
@@ -1883,11 +1891,21 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		})
 		return
 	}
+	if len(resp.Vectors) == 0 || len(resp.Vectors[0]) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    gin.H{`available`: false, `message`: "调用Embedding失败: 空向量返回", `dimension`: 0},
+		})
+		return
+	}
+	// 单输入调用：Vectors[0] 即本次文本的向量，维度 = len(Vectors[0])
+	//（v1 Embed 返回单 []float32，len 即维度）。
+	dimension := len(resp.Vectors[0])
 
-	logger.Infof(ctx, "Embedding test succeeded, dimension: %d", len(vec))
+	logger.Infof(ctx, "Embedding test succeeded, dimension: %d", dimension)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    gin.H{`available`: true, `message`: fmt.Sprintf("测试成功，向量维度=%d", len(vec)), `dimension`: len(vec)},
+		"data":    gin.H{`available`: true, `message`: fmt.Sprintf("测试成功，向量维度=%d", dimension), `dimension`: dimension},
 	})
 }
 

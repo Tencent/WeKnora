@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -175,7 +174,7 @@ func (s *stubModelService) ListModels(context.Context) ([]*types.Model, error) {
 
 func (s *stubModelService) GetEmbeddingModel(
 	_ context.Context, modelID string,
-) (embedding.Embedder, error) {
+) (interfaces.Embedder, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.requestedEmbedID = modelID
@@ -438,7 +437,7 @@ func (e *stubEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]floa
 }
 
 func (e *stubEmbedder) BatchEmbedWithPool(
-	ctx context.Context, _ embedding.Embedder, texts []string,
+	ctx context.Context, _ interfaces.Embedder, texts []string,
 ) ([][]float32, error) {
 	return e.BatchEmbed(ctx, texts)
 }
