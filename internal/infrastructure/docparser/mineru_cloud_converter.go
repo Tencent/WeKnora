@@ -350,7 +350,10 @@ func (c *MinerUCloudReader) extractDoneResult(_ context.Context, item *extractRe
 
 // --- ZIP handling ---
 
-var imgRefPattern = regexp.MustCompile(`!\[[^\]]*\]\(([^)]+)\)`)
+var (
+	imgRefPattern     = regexp.MustCompile(`!\[[^\]]*\]\(([^)]+)\)`)
+	htmlImgRefPattern = regexp.MustCompile(`(?i)<img\b[^>]*\ssrc\s*=\s*(?:"([^"]+)"|'([^']+)')`)
+)
 
 func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, error) {
 	if err := utils.ValidateURLForSSRF(zipURL); err != nil {
@@ -406,8 +409,19 @@ func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, error) {
 	// Extract referenced images
 	var imageRefs []types.ImageRef
 	seen := map[string]bool{}
+	var referencedPaths []string
 	for _, match := range imgRefPattern.FindAllStringSubmatch(mdText, -1) {
+		referencedPaths = append(referencedPaths, match[1])
+	}
+	for _, match := range htmlImgRefPattern.FindAllStringSubmatch(mdText, -1) {
 		imgPath := match[1]
+		if imgPath == "" {
+			imgPath = match[2]
+		}
+		referencedPaths = append(referencedPaths, imgPath)
+	}
+
+	for _, imgPath := range referencedPaths {
 		if strings.HasPrefix(imgPath, "http://") || strings.HasPrefix(imgPath, "https://") || strings.HasPrefix(imgPath, "data:") {
 			continue
 		}
