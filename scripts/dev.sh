@@ -61,6 +61,7 @@ show_help() {
     echo "  logs       查看服务日志"
     echo "  status     查看服务状态"
     echo "  app        启动后端应用（本地运行）"
+    echo "  debug      在容器内启动 Delve，等待 IDE 远程调试连接"
     echo "  frontend   启动前端开发服务器（本地运行）"
     echo "  help       显示此帮助信息"
     echo ""
@@ -82,6 +83,7 @@ show_help() {
     echo "  $0 start --full             # 启动所有服务"
     echo "  make dev-start DEV_ARGS=--odl-hybrid   # 同上（Makefile 传参）"
     echo "  $0 app                      # 在另一个终端启动后端"
+    echo "  $0 debug                    # 容器内调试后端，Delve 默认监听 127.0.0.1:40000"
     echo "  $0 frontend                 # 在另一个终端启动前端"
 }
 
@@ -533,6 +535,35 @@ start_app() {
     fi
 }
 
+# 在容器中启动 Delve 远程调试。基础设施与 app-debug 使用同一个 Compose
+# project/network；Delve 只映射到宿主机 loopback，避免暴露无认证的调试端口。
+start_debug() {
+    log_info "启动容器化 Delve 远程调试..."
+
+    if ! check_docker; then
+        return 1
+    fi
+
+    cd "$PROJECT_ROOT"
+
+    local debug_env_file="${WEKNORA_DEBUG_ENV_FILE:-.env}"
+    if [ ! -f "$debug_env_file" ]; then
+        log_error "调试环境文件不存在: $debug_env_file"
+        log_info "请先运行: cp .env.example .env"
+        return 1
+    fi
+
+    log_info "Delve 地址: ${DELVE_BIND:-127.0.0.1}:${DELVE_PORT:-40000}"
+    log_info "源码路径映射: $PROJECT_ROOT -> /workspace"
+    log_info "Delve 会在程序入口等待；请在 IDE 连接后继续执行"
+
+    WEKNORA_DEBUG_ENV_FILE="$debug_env_file" \
+        "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD \
+        -f docker-compose.dev.yml \
+        -f docker-compose.debug.yml \
+        up --build app-debug
+}
+
 # 启动前端（本地）
 start_frontend() {
     log_info "启动前端开发服务器..."
@@ -584,6 +615,9 @@ case "$CMD" in
         ;;
     app)
         start_app
+        ;;
+    debug)
+        start_debug
         ;;
     frontend)
         start_frontend
