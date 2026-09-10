@@ -26,6 +26,18 @@ func NewBackendScopedFileService(backendID string, inner interfaces.FileService)
 	return &backendScopedFileService{backendID: backendID, inner: inner}
 }
 
+// storageBackendInnerPath strips the canonical storage://<backend-id>/ wrapper
+// from path when present. Drivers wrapped in backendScopedFileService already
+// unwrap through it; drivers reached bare (process-global env storage, legacy
+// tenants) call this first so canonical paths produced by the resource catalog
+// resolve to their provider path instead of failing scheme/bucket validation.
+func storageBackendInnerPath(path string) string {
+	if _, inner, ok := types.ParseStorageBackendPath(path); ok {
+		return inner
+	}
+	return path
+}
+
 func (s *backendScopedFileService) unwrap(path string) (string, error) {
 	id, inner, ok := types.ParseStorageBackendPath(path)
 	if !ok {
