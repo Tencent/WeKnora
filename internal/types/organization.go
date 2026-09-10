@@ -282,10 +282,12 @@ type SourceFromAgentInfo struct {
 
 // OrganizationSharedKnowledgeBaseItem is used by GET /organizations/:id/shared-knowledge-bases (space-scoped list including mine).
 // When SourceFromAgent is set, the KB is from a shared agent's config (no direct KB share); show as read-only and "来自智能体 XXX".
+// SourceFromAgents records every shared agent carrying the KB, including KBs that also have a direct share record.
 type OrganizationSharedKnowledgeBaseItem struct {
 	SharedKnowledgeBaseInfo
-	IsMine          bool                 `json:"is_mine"`
-	SourceFromAgent *SourceFromAgentInfo `json:"source_from_agent,omitempty"`
+	IsMine           bool                  `json:"is_mine"`
+	SourceFromAgent  *SourceFromAgentInfo  `json:"source_from_agent,omitempty"`
+	SourceFromAgents []SourceFromAgentInfo `json:"source_from_agents,omitempty"`
 }
 
 // OrganizationSharedAgentItem is used by GET /organizations/:id/shared-agents (space-scoped list including mine).
