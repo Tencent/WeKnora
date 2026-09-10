@@ -22,6 +22,8 @@ export default {
     "commandFailed": "浏览器操作失败"
 },
   skillDiscovery: {
+    previousInstallFailed: "上次安装失败",
+    installContinuesInBackground: "关闭后会继续安装，可在技能卡片中查看进度。",
     replaceAndInstall: "更新并安装",
     replaceExistingHint: "空间目录已有内容不同的同名技能「{name}」。继续将目录更新为内置版本 {version}，并安装到所选沙箱；其他沙箱的现有安装不会自动更新。",
     community: '社区可选技能',
@@ -55,7 +57,6 @@ export default {
     preinstalledReady: "选择此模板后可直接在智能体中使用，无需安装。",
     templateBuiltins: "模板自带技能",
     activationDetails: "查看详情",
-    activationFailedHint: "安装未完成。请查看详情后重试，或检查沙箱配置。",
     activate: "启用到沙箱",
     activationHint: "仅安装到你选择的沙箱。已预装的环境可直接使用，无需重复安装。",
     localBrowser: "本机浏览器 · 需安装扩展",

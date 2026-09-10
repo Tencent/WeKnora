@@ -22,6 +22,8 @@ export default {
       "commandFailed": "ブラウザー操作に失敗しました"
   },
   skillDiscovery: {
+    previousInstallFailed: "前回のインストールに失敗",
+    installContinuesInBackground: "閉じてもインストールは続行されます。スキルカードから進捗を確認できます。",
     replaceAndInstall: "更新してインストール",
     replaceExistingHint: "スペースには内容の異なる同名スキル「{name}」があります。続行するとカタログを組み込みバージョン {version} に更新し、選択したサンドボックスにインストールします。他のサンドボックスの既存インストールは自動更新されません。",
     community: '追加のコミュニティスキル',
@@ -55,7 +57,6 @@ export default {
     preinstalledReady: "このテンプレートを選択するとエージェントですぐに使えます。インストールは不要です。",
     templateBuiltins: "テンプレート内蔵スキル",
     activationDetails: "詳細を見る",
-    activationFailedHint: "インストールが完了しませんでした。詳細を確認して再試行するか、サンドボックスの設定を確認してください。",
     activate: "サンドボックスで有効化",
     activationHint: "選択したサンドボックスにだけインストールします。内蔵済みの場合、追加のインストールは不要です。",
       "localBrowser": "ローカルブラウザー · 拡張機能が必要",

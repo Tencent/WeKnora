@@ -343,6 +343,11 @@
                   {{ $t('settings.skills.viewInstallProgress') }}
                 </t-button>
               </div>
+              <div v-if="sandboxPickFailed(row)" class="sandbox-pick__failure">
+                <t-button theme="default" variant="text" size="small" @click="openManageFromPick(installCatalog?.id, row.install!)">
+                  {{ $t('skillDiscovery.previousInstallFailed') }} · {{ $t('skillDiscovery.activationDetails') }}
+                </t-button>
+              </div>
             </div>
           </div>
         </section>
@@ -354,16 +359,18 @@
         <ModelSelector model-type="KnowledgeQA" :selected-model-id="installerModelId"
           :disabled="savingInstallerModel || installing" @update:selected-model-id="onInstallerModelChange" />
       </section>
-      <div v-if="installCatalog?.builtin && installPickRows.some(row => row.install?.status === 'failed')" class="builtin-activation-help">
-        <p>{{ $t('skillDiscovery.activationFailedHint') }}</p>
-        <t-button v-for="row in installPickRows.filter(row => row.install?.status === 'failed')" :key="row.cfg.id"
-          theme="default" variant="text" size="small" @click="openManageFromPick(installCatalog?.id, row.install!)">
-          {{ row.cfg.name }} · {{ $t('skillDiscovery.activationDetails') }}
+      <template #footer-left>
+        <span v-if="installInProgress" class="install-background-hint">{{ $t('skillDiscovery.installContinuesInBackground') }}</span>
+      </template>
+      <template #footer-right>
+        <t-button v-if="installTargetIds.length > 0" theme="default" variant="outline" @click="showInstall = false">
+          {{ $t('common.cancel') }}
         </t-button>
-        <t-button theme="default" variant="outline" size="small" @click="uiStore.openSettings('sandbox')">
-          {{ $t('settings.skills.goSandboxSettings') }}
+        <t-button :theme="installTargetIds.length > 0 ? 'primary' : 'default'"
+          :loading="installing" :disabled="installConfirmDisabled" @click="onInstallDrawerConfirm">
+          {{ installConfirmText }}
         </t-button>
-      </div>
+      </template>
     </SettingDrawer>
 
     <SettingDrawer v-model:visible="showManage" :title="manageTitle" :description="manageDesc" :icon="SKILL_ICON"
@@ -585,7 +592,7 @@ const installActionText = computed(() => t('settings.skills.installToSandbox'))
 const installConfirmText = computed(() =>
   installTargetIds.value.length > 0
     ? builtinRegistrationConflict.value ? t('skillDiscovery.replaceAndInstall') : installActionText.value
-    : t('settings.skills.addFinish'),
+    : t('common.close'),
 )
 
 const installConfirmDisabled = computed(() =>
@@ -602,6 +609,8 @@ const installPickRows = computed(() => {
     return { ...row, builtinStatus: status, selectable: row.selectable && !builtinTargetsLoading.value && !present, ready: row.ready || present }
   })
 })
+
+const installInProgress = computed(() => installPickRows.value.some(row => row.install?.status === 'installing'))
 
 const addPickRows = computed(() => {
   if (addMethod.value !== 'prompt') return sandboxPickRows(catalogItemById(registeredCatalog.value?.id))
@@ -710,6 +719,10 @@ function sandboxPickRows(item: SkillCatalogItem | null): SandboxPickRow[] {
         ready,
       }
     })
+}
+
+function sandboxPickFailed(row: SandboxPickRow): boolean {
+  return row.install?.status === 'failed' && !row.ready && !row.busy
 }
 
 function sandboxPickPercent(row: SandboxPickRow): number | null {
@@ -2228,6 +2241,22 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.install-background-hint {
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
+.sandbox-pick__failure {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
+
+  :deep(.t-button) {
+    color: var(--td-error-color);
+    font-size: 12px;
+  }
 }
 
 .sandbox-pick__progress {

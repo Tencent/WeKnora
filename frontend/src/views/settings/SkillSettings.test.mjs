@@ -216,3 +216,33 @@ test('builtin name conflicts offer explicit replacement before installing into a
   assert.equal(state.showInstall.value, false)
   assert.equal(state.builtinRegistrationConflict.value, false)
 })
+
+test('installation feedback stays on its sandbox row and closing does not imply success', async () => {
+  const { transpile } = await import('typescript')
+  const { runInNewContext } = await import('node:vm')
+  const failed = source.slice(source.indexOf('function sandboxPickFailed('), source.indexOf('function sandboxPickPercent('))
+  const footer = source.slice(source.indexOf('const installActionText'), source.indexOf('const installConfirmDisabled'))
+  const progress = source.slice(source.indexOf('const installInProgress'), source.indexOf('const addPickRows'))
+  const current = { cfg: { id: 'office-core' }, install: { status: 'installing' }, busy: true, ready: false }
+  const previous = { cfg: { id: 'docker-test' }, install: { status: 'failed' }, busy: false, ready: false }
+  const state = {
+    computed: fn => ({ get value() { return fn() } }), t: key => key,
+    installTargetIds: { value: [] }, builtinRegistrationConflict: { value: false },
+    installPickRows: { value: [previous, current] },
+  }
+  runInNewContext(transpile(failed + footer + progress + '\nglobalThis.readFooter = () => ({ text: installConfirmText.value, busy: installInProgress.value });'), state)
+  assert.equal(state.sandboxPickFailed(current), false)
+  assert.equal(state.sandboxPickFailed(previous), true)
+  assert.equal(state.sandboxPickFailed({ ...previous, ready: true }), false)
+  assert.equal(state.readFooter().text, 'common.close')
+  assert.equal(state.readFooter().busy, true)
+  current.install.status = 'ready'
+  current.busy = false
+  current.ready = true
+  assert.equal(state.readFooter().busy, false, 'an old failure must not affect current progress')
+  state.installTargetIds.value = ['new-target']
+  assert.equal(state.readFooter().text, 'settings.skills.installToSandbox')
+  state.builtinRegistrationConflict.value = true
+  assert.equal(state.readFooter().text, 'skillDiscovery.replaceAndInstall')
+  assert.doesNotMatch(source, /activationFailedHint|installPickRows\.filter\(row => row\.install\?\.status === 'failed'\)/)
+})

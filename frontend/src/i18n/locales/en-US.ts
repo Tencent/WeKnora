@@ -22,6 +22,8 @@ export default {
     "commandFailed": "Browser command failed"
 },
   skillDiscovery: {
+    previousInstallFailed: "Previous installation failed",
+    installContinuesInBackground: "Installation will continue after closing. View progress from the skill card.",
     replaceAndInstall: "Update and install",
     replaceExistingHint: "The workspace catalog already contains a different skill named \"{name}\". Continue to replace its catalog definition with built-in version {version} and install it into the selected sandboxes. Existing installations in other sandboxes will not be updated automatically.",
     community: 'Optional community skills',
@@ -55,7 +57,6 @@ export default {
     preinstalledReady: "Available to agents with this template. No installation needed.",
     templateBuiltins: "Included skills",
     activationDetails: "View details",
-    activationFailedHint: "Installation did not complete. Review the details and retry, or check the sandbox configuration.",
     activate: "Enable in sandbox",
     activationHint: "Install only into selected sandboxes. Preinstalled environments are ready to use and need no installation.",
     localBrowser: "Local browser · extension required",

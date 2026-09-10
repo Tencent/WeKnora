@@ -22,6 +22,8 @@ export default {
       "commandFailed": "브라우저 작업 실패"
   },
   skillDiscovery: {
+    previousInstallFailed: "이전 설치 실패",
+    installContinuesInBackground: "닫아도 설치가 계속됩니다. 스킬 카드에서 진행 상황을 확인할 수 있습니다.",
     replaceAndInstall: "업데이트 및 설치",
     replaceExistingHint: "공간 카탈로그에 내용이 다른 동일한 이름의 스킬 \"{name}\"이 있습니다. 계속하면 카탈로그를 내장 버전 {version}(으)로 변경하고 선택한 샌드박스에 설치합니다. 다른 샌드박스의 기존 설치는 자동으로 업데이트되지 않습니다.",
     community: '선택형 커뮤니티 스킬',
@@ -55,7 +57,6 @@ export default {
     preinstalledReady: "이 템플릿을 선택하면 에이전트에서 바로 사용할 수 있습니다. 설치가 필요 없습니다.",
     templateBuiltins: "템플릿 내장 스킬",
     activationDetails: "상세 보기",
-    activationFailedHint: "설치를 완료하지 못했습니다. 세부 내용을 확인하고 다시 시도하거나 샌드박스 설정을 확인하세요.",
     activate: "샌드박스에서 활성화",
     activationHint: "선택한 샌드박스에만 설치합니다. 사전 설치된 환경은 추가 설치 없이 사용할 수 있습니다.",
       "localBrowser": "로컬 브라우저 · 확장 프로그램 필요",
