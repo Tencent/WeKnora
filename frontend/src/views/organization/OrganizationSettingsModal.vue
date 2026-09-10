@@ -464,7 +464,7 @@
                             <span class="member-name">
                               {{ memberPrimaryLabel(row) }}
                               <span v-if="isOwnerMember(row)" class="owner-tag">{{ $t('organization.owner') }}</span>
-                              <span v-if="row.user_id === authStore.currentUserId" class="me-tag">{{ $t('common.me')
+                              <span v-if="row.tenant_id === authStore.currentTenantId" class="me-tag">{{ $t('common.me')
                               }}</span>
                             </span>
                             <span v-if="memberSecondaryLabel(row)" class="member-email">{{ memberSecondaryLabel(row)
@@ -1240,21 +1240,15 @@ function joinRequestApplicantSecondary(req: JoinRequestResponse): string {
   return ''
 }
 
-// 成员行的主标题：优先展示「空间名」，回退到代表用户名 / 空间 ID。Plan 3
-// 之后每一行成员都对应一个空间，UI 必须先于代表用户呈现空间身份，
-// 否则用户会误以为这是按"人"加进来的。
+// 成员行始终以空间为主身份。代表用户只用于辅助展示，不能在空间名
+// 缺失时取代空间身份，否则同一空间的其他用户会误以为自己不在列表中。
 const memberPrimaryLabel = (m: OrganizationMember): string => {
-  return m.tenant_name || m.username || `tenant#${m.tenant_id}`
+  return m.tenant_name || `${t('organization.members.columns.member')} #${m.tenant_id}`
 }
 
-// 副标题：主标题展示的是空间名时，副标题展示代表用户名；如果主标题已经
-// 是用户名（无 tenant_name 时的回退），副标题留空，避免重复信息。
-// 邮箱在空间成员列表里没什么用（不是邀请人需要联系的对象），不展示。
+// 副标题展示代表用户名，仅作为展示和审计信息。
 const memberSecondaryLabel = (m: OrganizationMember): string => {
-  if (m.tenant_name && m.username) {
-    return m.username
-  }
-  return ''
+  return m.username || ''
 }
 
 // Owner identification is tenant-keyed after Plan 3 (#1303): the org's
