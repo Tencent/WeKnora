@@ -149,7 +149,9 @@ test('diagram zoom exits native fullscreen before opening its body-mounted viewe
 test('toolbar reserves layout space in normal and fullscreen modes and keeps exit visible on errors', async () => {
   const { descriptor } = parse(source)
   assert.match(descriptor.template.content, /v-if="isFullscreen \|\|/)
-  assert.match(descriptor.template.content, /\{\{ isFullscreen \? \$t\('preview.exitFullscreen'\)/)
+  assert.match(descriptor.template.content, /:aria-label="isFullscreen \? \$t\('preview.exitFullscreen'\)/)
+  assert.match(descriptor.template.content, /<Teleport :to="toolbarTarget \|\| 'body'" :disabled="isFullscreen \|\| !toolbarTarget">/)
+  assert.doesNotMatch(descriptor.template.content, /\{\{ isFullscreen \? \$t\('preview.exitFullscreen'\)/)
   const result = await compileStyleAsync({
     source: descriptor.styles[0].content, filename: 'document-preview.vue', id: 'preview', preprocessLang: 'less',
   })

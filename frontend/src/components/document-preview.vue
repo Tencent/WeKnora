@@ -41,6 +41,8 @@ const props = defineProps<{
   fileName: string;
   active: boolean;
   fillHeight?: boolean;
+  /** Place preview actions beside the host header's download button. */
+  toolbarTarget?: HTMLElement | null;
 }>();
 
 const loading = ref(false);
@@ -479,23 +481,28 @@ onUnmounted(() => {
 <template>
   <div ref="previewRoot" tabindex="-1" :aria-label="fileName" class="document-preview" :class="{ 'is-fullscreen': isFullscreen, 'fill-height': fillHeight }">
     <!-- Toolbar -->
-    <div class="preview-toolbar" v-if="isFullscreen || (!loading && !error && previewType !== 'unsupported')">
-      <span v-if="isFullscreen" class="preview-toolbar-title" :title="fileName">{{ fileName }}</span>
-      <div class="preview-toolbar-actions">
-        <t-button
-          v-if="previewType === 'html' && allowsHtmlScriptPreview()"
-          theme="default" variant="text" size="small"
-          @click="htmlViewMode = htmlViewMode === 'render' ? 'source' : 'render'"
-        >
-          <template #icon><t-icon :name="htmlViewMode === 'render' ? 'code' : 'browse'" /></template>
-          {{ htmlViewMode === 'render' ? $t('preview.htmlSource') : $t('preview.htmlRendered') }}
-        </t-button>
-        <t-button theme="default" variant="outline" size="small" :aria-pressed="isFullscreen" @click="toggleFullscreen">
-          <template #icon><t-icon :name="isFullscreen ? 'fullscreen-exit' : 'fullscreen'" /></template>
-          {{ isFullscreen ? $t('preview.exitFullscreen') : $t('preview.fullscreen') }}
-        </t-button>
+    <Teleport :to="toolbarTarget || 'body'" :disabled="isFullscreen || !toolbarTarget">
+      <div class="preview-toolbar" :class="{ 'is-inline': toolbarTarget && !isFullscreen }" v-if="isFullscreen || (!loading && !error && previewType !== 'unsupported')">
+        <span v-if="isFullscreen" class="preview-toolbar-title" :title="fileName">{{ fileName }}</span>
+        <div class="preview-toolbar-actions">
+          <t-button
+            v-if="previewType === 'html' && allowsHtmlScriptPreview()"
+            theme="default" variant="text" size="small" shape="square"
+            :title="htmlViewMode === 'render' ? $t('preview.htmlSource') : $t('preview.htmlRendered')"
+            :aria-label="htmlViewMode === 'render' ? $t('preview.htmlSource') : $t('preview.htmlRendered')"
+            @click="htmlViewMode = htmlViewMode === 'render' ? 'source' : 'render'"
+          >
+            <template #icon><t-icon :name="htmlViewMode === 'render' ? 'code' : 'browse'" /></template>
+          </t-button>
+          <t-button theme="default" variant="text" size="small" shape="square" :aria-pressed="isFullscreen"
+            :title="isFullscreen ? $t('preview.exitFullscreen') : $t('preview.fullscreen')"
+            :aria-label="isFullscreen ? $t('preview.exitFullscreen') : $t('preview.fullscreen')"
+            @click="toggleFullscreen">
+            <template #icon><t-icon :name="isFullscreen ? 'fullscreen-exit' : 'fullscreen'" /></template>
+          </t-button>
+        </div>
       </div>
-    </div>
+    </Teleport>
 
     <!-- Loading -->
     <div v-if="loading" class="preview-loading">
@@ -770,6 +777,13 @@ onUnmounted(() => {
   font-weight: 500;
 }
 
+.preview-toolbar.is-inline {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+
 .preview-toolbar-actions {
   display: flex;
   align-items: center;
@@ -777,6 +791,19 @@ onUnmounted(() => {
   justify-content: flex-end;
   gap: 8px;
   margin-left: auto;
+
+  :deep(.t-button) {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    color: @text-secondary;
+  }
+
+  :deep(.t-button__icon) {
+    margin: 0;
+    font-size: 16px;
+  }
 }
 
 // ── States ──
