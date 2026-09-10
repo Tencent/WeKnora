@@ -12,6 +12,7 @@
 | GET    | `/knowledge-bases/:id/knowledge`           | 列出知识库下的知识（支持分页/筛选）         |
 | GET    | `/knowledge-bases/:id/knowledge/folders`   | 获取知识库文件夹目录树                       |
 | PUT    | `/knowledge-bases/:id/knowledge/folders`   | 重命名或移动文件夹（含子目录）               |
+| DELETE | `/knowledge-bases/:id/knowledge/folders`   | 删除文件夹及其子目录中的全部知识（异步任务） |
 | DELETE | `/knowledge-bases/:id/knowledge`           | 清空知识库下的所有知识（异步任务）         |
 | GET    | `/knowledge/batch`                         | 按 ID 列表批量获取知识                     |
 | GET    | `/knowledge/:id`                           | 获取知识详情                               |

@@ -109,6 +109,10 @@
                       <t-icon name="edit" class="menu-icon" />
                       <span>{{ t('knowledgeBase.folderTree.rename') }}</span>
                     </div>
+                    <div class="popup-menu-item danger" @click="onFolderMenuDelete(row)">
+                      <t-icon name="delete" class="menu-icon" />
+                      <span>{{ t('knowledgeBase.folderTree.delete') }}</span>
+                    </div>
                   </div>
                 </template>
               </t-popup>
@@ -149,6 +153,7 @@ const emit = defineEmits<{
   select: [path: string]
   'update:collapsed': [collapsed: boolean]
   rename: [payload: { from: string; to: string }]
+  delete: [payload: { path: string; name: string; count: number }]
 }>()
 
 const { t } = useI18n()
@@ -193,6 +198,11 @@ const onFolderMenuVisible = (path: string, visible: boolean) => {
 const onFolderMenuRename = async (row: FolderRow) => {
   menuOpenPath.value = null
   await startRename(row)
+}
+
+const onFolderMenuDelete = (row: FolderRow) => {
+  menuOpenPath.value = null
+  emit('delete', { path: row.path, name: row.name, count: row.totalCount })
 }
 
 const cancelRename = () => {
@@ -455,6 +465,10 @@ watch(
 
 .kb-folder-row__menu {
   min-width: 140px;
+}
+
+.popup-menu-item.danger {
+  color: var(--td-error-color);
 }
 
 .kb-folder-row__rename {

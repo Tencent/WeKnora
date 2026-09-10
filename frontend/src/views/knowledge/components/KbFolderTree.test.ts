@@ -22,6 +22,11 @@ test('only real folders expose a rename affordance', () => {
   assert.match(tree, /onFolderMenuRename/)
 })
 
+test('editable folders expose deletion and pass the full subtree count to confirmation', () => {
+  assert.match(tree, /knowledgeBase\.folderTree\.delete/)
+  assert.match(tree, /emit\('delete', \{ path: row\.path, name: row\.name, count: row\.totalCount \}\)/)
+})
+
 // Picking a folder is a small, reversible action, so it stays a popup: in the row
 // menu it is another level of the menu that is already open, and in the batch bar
 // it hangs off the button. Neither should escalate to a modal dialog.

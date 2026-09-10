@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick } from "vue";
-import { MessagePlugin } from "tdesign-vue-next";
+import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { useRoute, useRouter } from 'vue-router';
@@ -39,6 +39,7 @@ import {
   listKnowledgeFolders,
   moveKnowledgeToFolder,
   renameKnowledgeFolder,
+  deleteKnowledgeFolder,
   downKnowledgeDetails,
   type KnowledgeFolderTree,
 } from "@/api/knowledge-base/index";
@@ -869,6 +870,46 @@ const handleFolderRename = async ({ from, to }: { from: string; to: string }) =>
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('knowledgeBase.folderTree.renameFailed'));
   }
+};
+
+const handleFolderDelete = ({ path, name, count }: { path: string; name: string; count: number }) => {
+  const dialog = DialogPlugin.confirm({
+    header: t('knowledgeBase.folderTree.deleteConfirmTitle'),
+    body: t('knowledgeBase.folderTree.deleteConfirmBody', { name, count }),
+    confirmBtn: t('knowledgeBase.folderTree.deleteConfirm'),
+    cancelBtn: t('common.cancel'),
+    theme: 'danger',
+    onConfirm: async () => {
+      dialog.update({ confirmBtn: { content: t('knowledgeBase.folderTree.deleting'), loading: true } });
+      try {
+        const res: any = await deleteKnowledgeFolder(kbId.value, path);
+        if (res?.success === false) throw new Error(res.message);
+        if (selectedFolderPath.value === path || selectedFolderPath.value.startsWith(`${path}/`)) {
+          selectedFolderPath.value = ROOT_FOLDER_PATH;
+        }
+        dialog.destroy();
+        MessagePlugin.info(t('knowledgeBase.folderTree.deleteSubmitted'));
+        await Promise.all([loadKnowledgeList(), loadFolderTree(kbId.value)]);
+        const ids: string[] = res?.data?.knowledge_ids || [];
+        if (ids.length) {
+          const result = await waitForKnowledgeDeletion(ids, async (queryIds) => {
+            const query = new URLSearchParams();
+            queryIds.forEach(id => query.append('ids', id));
+            return await batchQueryKnowledge(query.toString(), kbId.value) as any;
+          });
+          if (result === 'completed') MessagePlugin.success(t('knowledgeBase.folderTree.deleteSuccess'));
+          else if (result === 'failed') MessagePlugin.error(t('knowledgeBase.folderTree.deleteFailed'));
+        } else {
+          MessagePlugin.success(t('knowledgeBase.folderTree.deleteSuccess'));
+        }
+        await Promise.all([loadKnowledgeList(), loadFolderTree(kbId.value)]);
+      } catch (error: any) {
+        dialog.update({ confirmBtn: t('knowledgeBase.folderTree.deleteConfirm') });
+        MessagePlugin.error(error?.message || t('knowledgeBase.folderTree.deleteFailed'));
+      }
+    },
+    onCancel: () => dialog.destroy(),
+  });
 };
 
 const handleFolderTreeCollapsedChange = (value: boolean) => {
@@ -2420,7 +2461,7 @@ async function createNewSession(value: string): Promise<void> {
           <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :tree="folderTree" :selected-path="selectedFolderPath"
             :loading="folderTreeLoading" :can-edit="canEdit"
             @select="handleFolderSelect" @update:collapsed="handleFolderTreeCollapsedChange"
-            @rename="handleFolderRename" />
+            @rename="handleFolderRename" @delete="handleFolderDelete" />
           <div class="tag-content">
             <div class="doc-card-area">
               <nav v-if="showFolderTree" class="doc-folder-path"
