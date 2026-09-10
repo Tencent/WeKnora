@@ -1,0 +1,81 @@
+{
+  "scenario": "aliyun_cache_control_breakpoints",
+  "behavior": [
+    "promptCachePolicyFor(aliyun): sendCacheControl",
+    "cache_control ephemeral ttl=1h on system + last conversation message",
+    "rewrite forces raw HTTP path (map-form body)"
+  ],
+  "requests": [
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "max_completion_tokens": 64,
+        "messages": [
+          {
+            "content": [
+              {
+                "cache_control": {
+                  "type": "ephemeral",
+                  "ttl": "1h"
+                },
+                "text": "You are a chemistry expert.",
+                "type": "text"
+              }
+            ],
+            "role": "system"
+          },
+          {
+            "content": [
+              {
+                "cache_control": {
+                  "type": "ephemeral",
+                  "ttl": "1h"
+                },
+                "text": "Ethanol properties?",
+                "type": "text"
+              }
+            ],
+            "role": "user"
+          }
+        ],
+        "model": "qwen2.5-72b-instruct"
+      }
+    }
+  ],
+  "response": {
+    "id": "chatcmpl-1",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "golden-model",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "Hello there"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15
+    }
+  },
+  "client": {
+    "content": "Hello there",
+    "finish_reason": "stop",
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15,
+      "cache_reported": false,
+      "cache_status": "unreported"
+    }
+  }
+}

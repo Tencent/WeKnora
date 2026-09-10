@@ -1,0 +1,100 @@
+{
+  "scenario": "anthropic_thinking_levels_chat",
+  "behavior": [
+    "anthropicBudgetTokens: low=2048 medium=8192 high=16384 (three requests in order)",
+    "max_tokens raised to budget+4096 when budget \u003e= caller budget",
+    "ResolveThinkingLevel via provider caps (same chain as OpenAI funnel)"
+  ],
+  "requests": [
+    {
+      "path": "/v1/messages",
+      "headers": {
+        "Anthropic-Version": "2023-06-01",
+        "Content-Type": "application/json",
+        "X-Api-Key": "test-key"
+      },
+      "body": {
+        "model": "claude-sonnet-4-5",
+        "max_tokens": 6144,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Hi",
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              }
+            ]
+          }
+        ],
+        "thinking": {
+          "type": "enabled",
+          "budget_tokens": 2048
+        }
+      }
+    },
+    {
+      "path": "/v1/messages",
+      "headers": {
+        "Anthropic-Version": "2023-06-01",
+        "Content-Type": "application/json",
+        "X-Api-Key": "test-key"
+      },
+      "body": {
+        "model": "claude-sonnet-4-5",
+        "max_tokens": 12288,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Hi",
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              }
+            ]
+          }
+        ],
+        "thinking": {
+          "type": "enabled",
+          "budget_tokens": 8192
+        }
+      }
+    },
+    {
+      "path": "/v1/messages",
+      "headers": {
+        "Anthropic-Version": "2023-06-01",
+        "Content-Type": "application/json",
+        "X-Api-Key": "test-key"
+      },
+      "body": {
+        "model": "claude-sonnet-4-5",
+        "max_tokens": 20480,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Hi",
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              }
+            ]
+          }
+        ],
+        "thinking": {
+          "type": "enabled",
+          "budget_tokens": 16384
+        }
+      }
+    }
+  ]
+}

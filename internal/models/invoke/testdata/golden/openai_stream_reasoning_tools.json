@@ -1,0 +1,128 @@
+{
+  "scenario": "openai_stream_reasoning_tools",
+  "behavior": [
+    "StreamOptions.IncludeUsage auto-set for streams",
+    "reasoning_content delta -\u003e thinking chunks + single thinking-done marker",
+    "tool_call deltas assembled across chunks (name dedup, args concat)",
+    "tool-call name notification chunk (ResponseTypeToolCall)",
+    "EOF path emits final Done chunk with ordered tool calls + usage + finish_reason",
+    "tools carried in request; tool_choice omitted"
+  ],
+  "requests": [
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Accept": "text/event-stream",
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "gpt-4o-mini",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Weather in SF?"
+          }
+        ],
+        "max_completion_tokens": 256,
+        "stream": true,
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "description": "Get weather",
+              "parameters": {
+                "type": "object"
+              }
+            }
+          }
+        ],
+        "stream_options": {
+          "include_usage": true
+        }
+      }
+    }
+  ],
+  "sse_response": [
+    "data: {\"id\":\"chatcmpl-stream-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null}]}",
+    "",
+    "data: {\"id\":\"chatcmpl-stream-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"Let me check the weather.\"},\"finish_reason\":null}]}",
+    "",
+    "data: {\"id\":\"chatcmpl-stream-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"},\"finish_reason\":null}]}",
+    "",
+    "data: {\"id\":\"chatcmpl-stream-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":null}]}",
+    "",
+    "data: {\"id\":\"chatcmpl-stream-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}",
+    "",
+    "data: {\"id\":\"chatcmpl-stream-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"city\\\":\"}}]},\"finish_reason\":null}]}",
+    "",
+    "data: {\"id\":\"chatcmpl-stream-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"SF\\\"}\"}}]},\"finish_reason\":null}]}",
+    "",
+    "data: {\"id\":\"chatcmpl-stream-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"finish_reason\":\"tool_calls\"},\"finish_reason\":null}]}",
+    "",
+    "data: {\"id\":\"chatcmpl-stream-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":21,\"completion_tokens\":9,\"total_tokens\":30}}",
+    "",
+    "data: [DONE]",
+    ""
+  ],
+  "client": [
+    {
+      "id": "",
+      "response_type": "thinking",
+      "content": "Let me check the weather.",
+      "done": false
+    },
+    {
+      "id": "",
+      "response_type": "thinking",
+      "content": "",
+      "done": true
+    },
+    {
+      "id": "",
+      "response_type": "answer",
+      "content": "Hel",
+      "done": false
+    },
+    {
+      "id": "",
+      "response_type": "answer",
+      "content": "lo",
+      "done": false
+    },
+    {
+      "id": "",
+      "response_type": "tool_call",
+      "content": "",
+      "done": false,
+      "data": {
+        "tool_call_id": "call_1",
+        "tool_name": "get_weather"
+      }
+    },
+    {
+      "id": "",
+      "response_type": "answer",
+      "content": "",
+      "done": true,
+      "tool_calls": [
+        {
+          "id": "call_1",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\"city\":\"SF\"}"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 21,
+        "completion_tokens": 9,
+        "total_tokens": 30,
+        "cache_reported": false,
+        "cache_status": "unreported"
+      }
+    }
+  ]
+}

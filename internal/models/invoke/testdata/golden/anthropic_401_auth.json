@@ -1,0 +1,42 @@
+{
+  "scenario": "anthropic_401_auth",
+  "behavior": [
+    "non-2xx JSON error body -\u003e classifyStatusBody via error.message",
+    "single attempt (auth non-retryable)",
+    "401 -\u003e ErrAuth"
+  ],
+  "requests": [
+    {
+      "path": "/v1/messages",
+      "headers": {
+        "Anthropic-Version": "2023-06-01",
+        "Content-Type": "application/json",
+        "X-Api-Key": "test-key"
+      },
+      "body": {
+        "model": "claude-sonnet-4-5",
+        "max_tokens": 16,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Hi",
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "error": {
+    "Kind": "auth",
+    "Status": 401,
+    "Message": "invalid x-api-key",
+    "Err": null
+  }
+}

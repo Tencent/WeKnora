@@ -1,0 +1,66 @@
+{
+  "scenario": "openai_reasoning_effort_levels",
+  "behavior": [
+    "reasoning_effort per level: low, medium, high (three requests in order)",
+    "level passes ResolveThinkingLevel (call value within provider SupportedLevels)"
+  ],
+  "requests": [
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Accept": "application/json",
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "gpt-5-mini",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hi"
+          }
+        ],
+        "max_completion_tokens": 256,
+        "reasoning_effort": "low"
+      }
+    },
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Accept": "application/json",
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "gpt-5-mini",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hi"
+          }
+        ],
+        "max_completion_tokens": 256,
+        "reasoning_effort": "medium"
+      }
+    },
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Accept": "application/json",
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "gpt-5-mini",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hi"
+          }
+        ],
+        "max_completion_tokens": 256,
+        "reasoning_effort": "high"
+      }
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "scenario": "weknoracloud_multimodal_downgrade",
+  "behavior": [
+    "TransformMessages flattens MultiContent to newline-joined text (images dropped)",
+    "tool_calls / tool_call_id / name preserved through downgrade",
+    "signature covers the downgraded body (body MD5 in HMAC params)"
+  ],
+  "requests": [
+    {
+      "path": "/api/v1/chat/completions",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Api-Key": "secret-456",
+        "X-Appid": "app-123",
+        "X-Nonce": "\u003cnonce\u003e",
+        "X-Request-Id": "\u003crequest-id\u003e",
+        "X-Signature": "\u003chmac-md5\u003e",
+        "X-Timestamp": "\u003cunix-seconds\u003e"
+      },
+      "body": {
+        "max_completion_tokens": 128,
+        "messages": [
+          {
+            "content": "You are helpful.",
+            "role": "system"
+          },
+          {
+            "content": "Look at this:\nAnd this.",
+            "role": "user"
+          },
+          {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"q\":\"x\"}",
+                  "name": "lookup"
+                },
+                "id": "call_1",
+                "type": "function"
+              }
+            ]
+          },
+          {
+            "content": "{\"result\":\"ok\"}",
+            "name": "lookup",
+            "role": "tool",
+            "tool_call_id": "call_1"
+          }
+        ],
+        "model": "weknora-chat"
+      }
+    }
+  ],
+  "response": {
+    "id": "chatcmpl-1",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "golden-model",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "Hello there"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15
+    }
+  },
+  "client": {
+    "content": "Hello there",
+    "finish_reason": "stop",
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15,
+      "cache_reported": false,
+      "cache_status": "unsupported"
+    }
+  }
+}

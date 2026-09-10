@@ -133,10 +133,15 @@ func (p ProviderInfo) GetDefaultURL(modelType types.ModelType) string {
 // Name (capabilities.go). This keeps "one capability declaration per adapter"
 // cheap: adapters set only what deviates from the default.
 func (p ProviderInfo) EffectiveCapabilities() Capabilities {
-	if p.Capabilities.isZero() {
-		return defaultCapabilities(p.Name, p.ModelTypes)
+	caps := p.Capabilities
+	if caps.isZero() {
+		caps = defaultCapabilities(p.Name, p.ModelTypes)
+	} else if caps.Credentials == nil {
+		// Explicit capability declarations win, but an unset credential spec
+		// still synthesizes from the provider knowledge table (§6.8).
+		caps.Credentials = credentialsFor(p.Name)
 	}
-	return p.Capabilities
+	return caps
 }
 
 // ExtraFieldConfig 定义提供者的额外配置字段

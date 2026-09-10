@@ -1,0 +1,61 @@
+{
+  "scenario": "zhipu_plain_chat",
+  "behavior": [
+    "no chat adapter for zhipu -\u003e baseProvider (Bearer, standard endpoint)",
+    "completion budget on max_tokens (zhipu wire field)",
+    "SDK path"
+  ],
+  "requests": [
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Accept": "application/json",
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "glm-4",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hi"
+          }
+        ],
+        "max_tokens": 128,
+        "temperature": 0.6
+      }
+    }
+  ],
+  "response": {
+    "id": "chatcmpl-1",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "golden-model",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "Hello there"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15
+    }
+  },
+  "client": {
+    "content": "Hello there",
+    "finish_reason": "stop",
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15,
+      "cache_reported": false,
+      "cache_status": "unsupported"
+    }
+  }
+}

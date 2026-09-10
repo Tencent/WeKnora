@@ -106,6 +106,25 @@ type ASRCaps struct {
 	Streaming    bool     `json:"streaming"`
 }
 
+// CredentialFieldSpec declares one credential slot a provider needs (design
+// v2 §6.8). The frontend renders credential forms from this spec — zero
+// vendor hardcoding in UI or storage. Key aligns with the three fixed
+// ModelParameters slots (api_key/app_id/app_secret); semantics are the
+// adapter's business (api_key covers Bearer/x-api-key/api-key style tokens).
+type CredentialFieldSpec struct {
+	Key      string `json:"key"`
+	Required bool   `json:"required"`
+	// LabelKey is the frontend i18n key for the field label.
+	LabelKey string `json:"label_key,omitempty"`
+}
+
+// Credential slot keys — fixed storage vocabulary (design §6.8).
+const (
+	CredentialKeyAPIKey    = "api_key"
+	CredentialKeyAppID     = "app_id"
+	CredentialKeyAppSecret = "app_secret"
+)
+
 // Capabilities is the per-type capability declaration carried by ProviderInfo.
 // Shards are nil when the provider does not serve that model type, mirroring the
 // parameter sharding in ModelParameters (design §2). The frontend renders only
@@ -116,13 +135,45 @@ type Capabilities struct {
 	Embedding *EmbeddingCaps `json:"embedding,omitempty"`
 	Rerank    *RerankCaps    `json:"rerank,omitempty"`
 	ASR       *ASRCaps       `json:"asr,omitempty"`
+	// Credentials declares the credential slots the provider needs (§6.8);
+	// the frontend renders its credential form from this spec.
+	Credentials []CredentialFieldSpec `json:"credentials,omitempty"`
 }
 
 // isZero reports whether c is the unset zero value, used by
 // ProviderInfo.EffectiveCapabilities to decide explicit-vs-synthesized.
-// Capabilities is comparable (no slice/map fields), so a plain == works.
+// Credentials (a slice) breaks plain ==, so compare field-wise.
 func (c Capabilities) isZero() bool {
-	return c == Capabilities{}
+	return c.Common == CommonCaps{} && c.Chat == nil && c.Embedding == nil &&
+		c.Rerank == nil && c.ASR == nil && len(c.Credentials) == 0
+}
+
+// credentialsFor returns the provider-level credential declaration (§6.8):
+// openai-family/anthropic take a required api_key; self-hosted/custom
+// deployments (generic, ollama) take an optional one; weknoracloud declares
+// NO per-model credentials — its credentials live in space-level settings
+// with tenant fallback (empty slice, not nil, so the DTO shows `[]`).
+// lkeap/volcengine additionally take an optional app_secret: their rerank
+// facades are Tencent/Volcengine AK/SK signed (SecretId=api_key,
+// SecretKey=app_secret; missing → constructor error at call time, see
+// rerank/lkeap_reranker.go:44 / rerank/volcengine_reranker.go). Chat/embedding
+// paths need only api_key, hence optional at the provider-level spec.
+func credentialsFor(name ProviderName) []CredentialFieldSpec {
+	switch name {
+	case ProviderWeKnoraCloud:
+		return []CredentialFieldSpec{}
+	case ProviderGeneric:
+		// 自定义/自部署（含本地 Ollama 记录，P1c 构造点映射后归入 generic/
+		// ollama 适配器）：凭证可空（匿名可达的服务）。
+		return []CredentialFieldSpec{{Key: CredentialKeyAPIKey}}
+	case ProviderLKEAP, ProviderVolcengine:
+		return []CredentialFieldSpec{
+			{Key: CredentialKeyAPIKey, Required: true, LabelKey: "model.credentials.apiKey"},
+			{Key: CredentialKeyAppSecret, LabelKey: "model.editor.appSecretLabel"},
+		}
+	default:
+		return []CredentialFieldSpec{{Key: CredentialKeyAPIKey, Required: true, LabelKey: "model.credentials.apiKey"}}
+	}
 }
 
 // protocolFor maps a provider to its chat wire protocol.
@@ -204,5 +255,6 @@ func defaultCapabilities(name ProviderName, modelTypes []types.ModelType) Capabi
 	if serves(types.ModelTypeASR) {
 		caps.ASR = &ASRCaps{}
 	}
+	caps.Credentials = credentialsFor(name)
 	return caps
 }

@@ -1,0 +1,36 @@
+{
+  "scenario": "openai_401_auth",
+  "behavior": [
+    "single attempt (auth failures are non-retryable)",
+    "classifyStatusBody: 401 -\u003e ErrAuth"
+  ],
+  "requests": [
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Accept": "application/json",
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "gpt-4o-mini",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hi"
+          }
+        ],
+        "max_completion_tokens": 8
+      }
+    }
+  ],
+  "error": {
+    "Kind": "auth",
+    "Status": 401,
+    "Message": "create chat completion: Incorrect API key provided",
+    "Err": {
+      "message": "Incorrect API key provided",
+      "type": "invalid_request_error"
+    }
+  }
+}

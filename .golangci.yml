@@ -4,10 +4,18 @@ linters:
     - lll           # 控制行宽
     - govet
     - revive
+    - exhaustive    # 仅检查标注 //exhaustive:enforce 的 switch（如适配器 role 映射）
   settings:
     lll:
       line-length: 120
       tab-width: 4
+    exhaustive:
+      explicit-exhaustive-switch: true
+    errcheck:
+      exclude-functions:
+        # gin.Context.Error returns the error for chaining; repo-wide the return is
+        # deliberately ignored (64 pre-existing bare calls).
+        - (*github.com/gin-gonic/gin.Context).Error
   exclusions:
     paths:
       # swag embeds OpenAPI as single-line JSON strings; line-length is not meaningful.

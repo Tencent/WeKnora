@@ -1,0 +1,55 @@
+{
+  "scenario": "ollama_plain_chat",
+  "behavior": [
+    "ensureModelAvailable: heartbeat + list (fake) precedes chat",
+    "chat request: model, messages, stream=false, options{temperature,num_predict}",
+    "usage: prompt=PromptEvalCount, completion=EvalCount-PromptEvalCount (v1 口径，golden 如实录)",
+    "usage.MarkPromptCacheUnsupported (ollama 无缓存计数)"
+  ],
+  "requests": [
+    {
+      "path": "/api/chat",
+      "headers": {
+        "Accept": "application/x-ndjson",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "testmodel",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are local."
+          },
+          {
+            "role": "user",
+            "content": "Hi"
+          }
+        ],
+        "stream": false,
+        "options": {
+          "num_predict": 64,
+          "temperature": 0.7
+        }
+      }
+    }
+  ],
+  "response": {
+    "message": {
+      "role": "assistant",
+      "content": "Hello"
+    },
+    "done": true,
+    "prompt_eval_count": 10,
+    "eval_count": 5
+  },
+  "client": {
+    "content": "Hello",
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": -5,
+      "total_tokens": 5,
+      "cache_reported": false,
+      "cache_status": "unsupported"
+    }
+  }
+}

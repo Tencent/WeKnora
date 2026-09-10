@@ -1,0 +1,67 @@
+{
+  "scenario": "generic_vllm_kwargs_stream",
+  "behavior": [
+    "genericProvider -\u003e chatTemplateKwargs: chat_template_kwargs.enable_thinking=true",
+    "kwargs mutation forces raw HTTP path",
+    "completion budget on max_tokens (generic wire field)",
+    "stream_options include_usage in request; usage chunk consumed"
+  ],
+  "requests": [
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Accept": "text/event-stream",
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "Qwen2.5-32B-Instruct",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好"
+          }
+        ],
+        "max_tokens": 128,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        },
+        "chat_template_kwargs": {
+          "enable_thinking": true
+        }
+      }
+    }
+  ],
+  "sse_response": [
+    "data: {\"id\":\"chatcmpl-vllm\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"你好\"},\"finish_reason\":null}]}",
+    "",
+    "data: {\"id\":\"chatcmpl-vllm\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"finish_reason\":\"stop\"},\"finish_reason\":null}]}",
+    "",
+    "data: {\"id\":\"chatcmpl-vllm\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4,\"total_tokens\":16}}",
+    "",
+    "data: [DONE]",
+    ""
+  ],
+  "client": [
+    {
+      "id": "",
+      "response_type": "answer",
+      "content": "你好",
+      "done": false
+    },
+    {
+      "id": "",
+      "response_type": "answer",
+      "content": "",
+      "done": true,
+      "usage": {
+        "prompt_tokens": 12,
+        "completion_tokens": 4,
+        "total_tokens": 16,
+        "cache_reported": false,
+        "cache_status": "unsupported"
+      }
+    }
+  ]
+}

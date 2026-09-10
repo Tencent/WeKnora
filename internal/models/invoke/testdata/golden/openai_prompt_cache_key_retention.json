@@ -1,0 +1,68 @@
+{
+  "scenario": "openai_prompt_cache_key_retention",
+  "behavior": [
+    "promptCachePolicyFor(openai): sendKey + sendAffinity",
+    "body rewritten to map form: prompt_cache_key injected",
+    "CacheRetention long -\u003e prompt_cache_retention 24h",
+    "rewrite forces raw HTTP path",
+    "x-session-affinity header carries clamped session id"
+  ],
+  "requests": [
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json",
+        "X-Session-Affinity": "sess-abc123"
+      },
+      "body": {
+        "max_completion_tokens": 64,
+        "messages": [
+          {
+            "content": "You are helpful.",
+            "role": "system"
+          },
+          {
+            "content": "Hi",
+            "role": "user"
+          }
+        ],
+        "model": "gpt-4o-mini",
+        "prompt_cache_key": "sess-abc123",
+        "prompt_cache_retention": "24h"
+      }
+    }
+  ],
+  "response": {
+    "id": "chatcmpl-1",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "golden-model",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "Hello there"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15
+    }
+  },
+  "client": {
+    "content": "Hello there",
+    "finish_reason": "stop",
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15,
+      "cache_reported": false,
+      "cache_status": "unreported"
+    }
+  }
+}
