@@ -3878,46 +3878,48 @@ const applyPromptTemplateDefaults = (cfg: PromptTemplatesConfig | null) => {
 
 // 加载依赖数据（复用空间级缓存，避免重复请求）
 const loadDependencies = async () => {
-  try {
-    await Promise.all([
-      chatResources.ensureModels(),
-      chatResources.ensureKnowledgeBases(),
-      chatResources.ensureWebSearchProviders(),
-      chatResources.ensureSandboxConfigs(),
-      editorResources.prefetchAgentEditorDeps(),
-    ]);
+  const dependencyResults = await Promise.allSettled([
+    chatResources.ensureModels(),
+    chatResources.ensureKnowledgeBases(),
+    chatResources.ensureWebSearchProviders(),
+    chatResources.ensureSandboxConfigs(),
+    editorResources.prefetchAgentEditorDeps(),
+  ]);
 
-    if (chatResources.allModels.length > 0) {
-      allModels.value = chatResources.allModels;
+  for (const result of dependencyResults) {
+    if (result.status === 'rejected') {
+      console.warn('Failed to load an agent editor dependency', result.reason);
     }
-
-    const myKbs = chatResources.rawKnowledgeBases.map((kb: any) => mapKbToOption(kb, false));
-    const myKbIds = new Set(myKbs.map(kb => kb.value));
-    const sharedKbs = (orgStore.sharedKnowledgeBases || [])
-      .filter((shared: any) => shared.knowledge_base && !myKbIds.has(shared.knowledge_base.id))
-      .map((shared: any) => mapKbToOption(shared.knowledge_base, true, shared.org_name));
-    kbOptions.value = [...myKbs, ...sharedKbs];
-
-    agentTypePresets.value = editorResources.agentTypePresets as AgentTypePreset[];
-    applyPromptTemplateDefaults(editorResources.promptTemplates);
-
-    storageEngineStatus.value = editorResources.storageStatus;
-
-    webSearchProviderList.value = chatResources.webSearchProviders as WebSearchProviderEntity[];
-
-    if (editorResources.placeholders) {
-      placeholderData.value = editorResources.placeholders;
-    }
-
-    const rc = editorResources.tenantRetrievalConfig as Record<string, number> | null;
-    if (rc?.embedding_top_k) defaultEmbeddingTopK.value = rc.embedding_top_k;
-    if (rc?.keyword_threshold !== undefined) defaultKeywordThreshold.value = rc.keyword_threshold;
-    if (rc?.vector_threshold !== undefined) defaultVectorThreshold.value = rc.vector_threshold;
-    if (rc?.rerank_top_k) defaultRerankTopK.value = rc.rerank_top_k;
-    if (rc?.rerank_threshold !== undefined) defaultRerankThreshold.value = rc.rerank_threshold;
-  } catch (e) {
-    console.error('Failed to load dependencies', e);
   }
+
+  if (chatResources.allModels.length > 0) {
+    allModels.value = chatResources.allModels;
+  }
+
+  const myKbs = chatResources.rawKnowledgeBases.map((kb: any) => mapKbToOption(kb, false));
+  const myKbIds = new Set(myKbs.map(kb => kb.value));
+  const sharedKbs = (orgStore.sharedKnowledgeBases || [])
+    .filter((shared: any) => shared.knowledge_base && !myKbIds.has(shared.knowledge_base.id))
+    .map((shared: any) => mapKbToOption(shared.knowledge_base, true, shared.org_name));
+  kbOptions.value = [...myKbs, ...sharedKbs];
+
+  agentTypePresets.value = editorResources.agentTypePresets as AgentTypePreset[];
+  applyPromptTemplateDefaults(editorResources.promptTemplates);
+
+  storageEngineStatus.value = editorResources.storageStatus;
+
+  webSearchProviderList.value = chatResources.webSearchProviders as WebSearchProviderEntity[];
+
+  if (editorResources.placeholders) {
+    placeholderData.value = editorResources.placeholders;
+  }
+
+  const rc = editorResources.tenantRetrievalConfig as Record<string, number> | null;
+  if (rc?.embedding_top_k) defaultEmbeddingTopK.value = rc.embedding_top_k;
+  if (rc?.keyword_threshold !== undefined) defaultKeywordThreshold.value = rc.keyword_threshold;
+  if (rc?.vector_threshold !== undefined) defaultVectorThreshold.value = rc.vector_threshold;
+  if (rc?.rerank_top_k) defaultRerankTopK.value = rc.rerank_top_k;
+  if (rc?.rerank_threshold !== undefined) defaultRerankThreshold.value = rc.rerank_threshold;
 };
 
 // 跳转到模型管理页面添加模型
