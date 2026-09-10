@@ -22,7 +22,7 @@ package token
 import (
 	"fmt"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/tiktoken-go/tokenizer"
 )
 
@@ -57,7 +57,7 @@ func NewEstimator() (*Estimator, error) {
 
 // EstimateMessages returns the estimated token count for a slice of messages.
 // Prefer using API Usage for the full context and this method only for deltas.
-func (e *Estimator) EstimateMessages(messages []chat.Message) int {
+func (e *Estimator) EstimateMessages(messages []invoke.Message) int {
 	total := 0
 	for i := range messages {
 		total += e.EstimateMessage(&messages[i])
@@ -88,10 +88,10 @@ func (e *Estimator) EstimateString(s string) int {
 // 26k — compaction then cut in the wrong place, freed almost nothing, and ran
 // again the next round. Reasoning content is counted alongside text and tool
 // calls for that reason.
-func (e *Estimator) EstimateMessage(msg *chat.Message) int {
+func (e *Estimator) EstimateMessage(msg *invoke.Message) int {
 	tokens := perMessageOverhead
-	tokens += e.EstimateString(msg.Role)
-	tokens += e.EstimateString(msg.Content)
+	tokens += e.EstimateString(string(msg.Role))
+	tokens += e.EstimateString(msg.Text())
 	tokens += e.EstimateString(msg.Name)
 	tokens += e.EstimateString(msg.ToolCallID)
 	tokens += e.EstimateString(msg.ReasoningContent)
@@ -106,20 +106,15 @@ func (e *Estimator) EstimateMessage(msg *chat.Message) int {
 	return tokens
 }
 
-// estimateImageParts counts multimodal content. MultiContent is the assembled
-// representation actually sent to the provider, so when it is present the raw
-// Images list is the same pictures counted a second time.
-func (e *Estimator) estimateImageParts(msg *chat.Message) int {
-	if len(msg.MultiContent) == 0 {
-		return len(msg.Images) * estimatedImageTokens
-	}
+// estimateImageParts counts multimodal content. Images ride on the message's
+// part list (invoke.Part.Image); text parts are already counted by msg.Text(),
+// so only images are counted here.
+func (e *Estimator) estimateImageParts(msg *invoke.Message) int {
 	tokens := 0
-	for _, part := range msg.MultiContent {
-		if part.ImageURL != nil || part.Type == "image_url" {
+	for _, part := range msg.Content {
+		if part.Image != nil {
 			tokens += estimatedImageTokens
-			continue
 		}
-		tokens += e.EstimateString(part.Text)
 	}
 	return tokens
 }
@@ -128,12 +123,12 @@ func (e *Estimator) estimateImageParts(msg *chat.Message) int {
 // request. They are part of the prompt the provider bills. They are not part
 // of the compaction trigger, which estimates messages only; use this for
 // diagnostics and request-budget clamping, not for ShouldCompact.
-func (e *Estimator) EstimateTools(tools []chat.Tool) int {
+func (e *Estimator) EstimateTools(tools []invoke.ToolDef) int {
 	total := 0
 	for _, tool := range tools {
-		total += e.EstimateString(tool.Function.Name)
-		total += e.EstimateString(tool.Function.Description)
-		total += e.EstimateString(string(tool.Function.Parameters))
+		total += e.EstimateString(tool.Name)
+		total += e.EstimateString(tool.Description)
+		total += e.EstimateString(string(tool.Parameters))
 		total += perToolDefOverhead
 	}
 	return total

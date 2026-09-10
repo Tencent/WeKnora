@@ -11,7 +11,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -64,7 +64,7 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 
 	query := chatManage.Query
 
-	model, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	model, err := buildChatModelConfig(ctx, p.modelService, chatManage.ChatModelID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get model, session_id: %s, error: %v", chatManage.SessionID, err)
 		return next()
@@ -153,26 +153,26 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 
 // Extractor is a struct for extracting entities
 type Extractor struct {
-	chat     chat.Chat
+	cfg      *invoke.ModelConfig
 	formater *Formater
 	template *types.PromptTemplateStructured
-	chatOpt  *chat.ChatOptions
+	chatOpt  *invoke.ChatOptions
 }
 
 // NewExtractor creates a new extractor
 func NewExtractor(
-	chatModel chat.Chat,
+	cfg *invoke.ModelConfig,
 	template *types.PromptTemplateStructured,
 ) Extractor {
 	think := false
 	return Extractor{
-		chat:     chatModel,
+		cfg:      cfg,
 		formater: NewFormater(),
 		template: template,
-		chatOpt: &chat.ChatOptions{
-			Temperature: 0.3,
-			MaxTokens:   4096,
-			Thinking:    &think,
+		chatOpt: &invoke.ChatOptions{
+			Temperature:         0.3,
+			MaxCompletionTokens: 4096,
+			Thinking:            &think,
 		},
 	}
 }
@@ -180,12 +180,9 @@ func NewExtractor(
 // Extract extracts entities from content
 func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphData, error) {
 	generator := NewQAPromptGenerator(e.formater, e.template)
-
-	// logger.Debugf(ctx, "chat system: %s", generator.System(ctx))
-	// logger.Debugf(ctx, "chat user: %s", generator.User(ctx, content))
-
+	e.chatOpt.Messages = generator.Render(ctx, content)
 	modelCtx := types.WithLLMCallMetadata(ctx, "entity_extraction", "")
-	chatResponse, err := e.chat.Chat(modelCtx, generator.Render(ctx, content), e.chatOpt)
+	chatResponse, err := invoke.Chat(modelCtx, e.cfg, e.chatOpt)
 	if err != nil {
 		logger.Errorf(ctx, "failed to chat: %v", err)
 		return nil, err
@@ -280,16 +277,10 @@ func (qa *QAPromptGenerator) User(ctx context.Context, question string) string {
 }
 
 // Render renders a prompt
-func (qa *QAPromptGenerator) Render(ctx context.Context, question string) []chat.Message {
-	return []chat.Message{
-		{
-			Role:    "system",
-			Content: qa.System(ctx),
-		},
-		{
-			Role:    "user",
-			Content: qa.User(ctx, question),
-		},
+func (qa *QAPromptGenerator) Render(ctx context.Context, question string) []invoke.Message {
+	return []invoke.Message{
+		invoke.TextMessage("system", qa.System(ctx)),
+		invoke.TextMessage("user", qa.User(ctx, question)),
 	}
 }
 

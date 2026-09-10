@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 )
 
 // The summary is injected as a `user` message rather than a second `system`
@@ -23,10 +23,10 @@ type Preparation struct {
 	// FirstKeptIdx is where the verbatim tail begins.
 	FirstKeptIdx int
 	// MessagesToSummarize are the complete turns being replaced by prose.
-	MessagesToSummarize []chat.Message
+	MessagesToSummarize []invoke.Message
 	// TurnPrefixMessages is the discarded head of a split turn, summarized
 	// separately so the retained tail still has its originating request.
-	TurnPrefixMessages []chat.Message
+	TurnPrefixMessages []invoke.Message
 	IsSplitTurn        bool
 	// PreviousSummary is the prior compaction's text, updated in place rather
 	// than summarized again.
@@ -41,7 +41,7 @@ type Preparation struct {
 // keep-recent budget, or the last compaction already left nothing to remove.
 // That nil is the guard against the failure mode where every round spends a
 // summarization call on a context it cannot shrink.
-func Prepare(messages []chat.Message, s Settings, estimator *agenttoken.Estimator) *Preparation {
+func Prepare(messages []invoke.Message, s Settings, estimator *agenttoken.Estimator) *Preparation {
 	if estimator == nil || len(messages) == 0 {
 		return nil
 	}
@@ -53,10 +53,10 @@ func Prepare(messages []chat.Message, s Settings, estimator *agenttoken.Estimato
 	boundaryStart := historyStart(messages)
 	previousSummary := ""
 	for i := len(messages) - 1; i >= boundaryStart; i-- {
-		if messages[i].Kind != chat.MessageKindCompactionSummary {
+		if messages[i].Kind != invoke.MessageKindCompactionSummary {
 			continue
 		}
-		previousSummary = unwrapSummary(messages[i].Content)
+		previousSummary = unwrapSummary(messages[i].Text())
 		boundaryStart = i + 1
 		break
 	}
@@ -72,7 +72,7 @@ func Prepare(messages []chat.Message, s Settings, estimator *agenttoken.Estimato
 	}
 	toSummarize := cloneRange(messages, boundaryStart, historyEnd)
 
-	var turnPrefix []chat.Message
+	var turnPrefix []invoke.Message
 	if cut.IsSplitTurn {
 		turnPrefix = cloneRange(messages, cut.TurnStartIdx, cut.FirstKeptIdx)
 	}
@@ -94,9 +94,9 @@ func Prepare(messages []chat.Message, s Settings, estimator *agenttoken.Estimato
 
 // Apply rebuilds the message list as system prompt, summary, and the verbatim
 // tail. Nothing between the system prompt and the cut point survives.
-func Apply(messages []chat.Message, p *Preparation, summary string) []chat.Message {
+func Apply(messages []invoke.Message, p *Preparation, summary string) []invoke.Message {
 	tailStart := min(max(p.FirstKeptIdx, 0), len(messages))
-	out := make([]chat.Message, 0, 2+len(messages)-tailStart)
+	out := make([]invoke.Message, 0, 2+len(messages)-tailStart)
 	if historyStart(messages) == 1 {
 		out = append(out, messages[0])
 	}
@@ -106,11 +106,11 @@ func Apply(messages []chat.Message, p *Preparation, summary string) []chat.Messa
 
 // SummaryMessage wraps summary text in the envelope the model sees, tagged so
 // the next compaction recognizes it as its own output.
-func SummaryMessage(summary string) chat.Message {
-	return chat.Message{
+func SummaryMessage(summary string) invoke.Message {
+	return invoke.Message{
 		Role:    "user",
-		Kind:    chat.MessageKindCompactionSummary,
-		Content: summaryPrefix + summary + summarySuffix,
+		Kind:    invoke.MessageKindCompactionSummary,
+		Content: []invoke.Part{{Text: summaryPrefix + summary + summarySuffix}},
 	}
 }
 
@@ -129,7 +129,7 @@ func unwrapSummary(content string) string {
 	return strings.TrimSpace(content[start:end])
 }
 
-func cloneRange(messages []chat.Message, start, end int) []chat.Message {
+func cloneRange(messages []invoke.Message, start, end int) []invoke.Message {
 	if start < 0 {
 		start = 0
 	}
@@ -139,7 +139,7 @@ func cloneRange(messages []chat.Message, start, end int) []chat.Message {
 	if start >= end {
 		return nil
 	}
-	out := make([]chat.Message, end-start)
+	out := make([]invoke.Message, end-start)
 	copy(out, messages[start:end])
 	return out
 }

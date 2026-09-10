@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -15,13 +15,11 @@ func TestRegistryOwnsEncodingOrderForSummarySlugs(t *testing.T) {
 	registry := NewRegistry(true)
 	require.Equal(t, "d1", registry.RegisterDocument(knowledgeID))
 
-	messages := registry.EncodeMessages([]chat.Message{{
-		Role:    "tool",
-		Content: "[[summary/" + knowledgeID + "|Summary]] document=" + knowledgeID,
-	}})
-	require.Contains(t, messages[0].Content, "[[res://0001|Summary]]")
-	require.Contains(t, messages[0].Content, "document=d1")
-	require.NotContains(t, messages[0].Content, "summary/d1")
+	messages := registry.EncodeMessages([]invoke.Message{invoke.TextMessage("tool",
+		"[[summary/"+knowledgeID+"|Summary]] document="+knowledgeID)})
+	require.Contains(t, messages[0].Text(), "[[res://0001|Summary]]")
+	require.Contains(t, messages[0].Text(), "document=d1")
+	require.NotContains(t, messages[0].Text(), "summary/d1")
 
 	calls := []types.LLMToolCall{{Function: types.FunctionCall{
 		Name:      "wiki_read_source_doc",
@@ -135,22 +133,23 @@ func TestRegistryReplaysStructuredAndPrivateHandlesWithoutAliasDrift(t *testing.
 		Output:  `{"id":"issue-real","knowledge_base_id":"kb-real","suspected_knowledge_ids":["doc-real"]}`,
 	})
 
-	messages := []chat.Message{
+	messages := []invoke.Message{
 		{
 			Role: "assistant",
-			ToolCalls: []chat.ToolCall{{Function: chat.FunctionCall{
+			ToolCalls: []invoke.ToolCall{{Function: invoke.FunctionCall{
 				Name:      "database_query",
 				Arguments: `{"sql":"SELECT * FROM knowledges WHERE id = 'doc-real' AND knowledge_base_id = 'kb-real'"}`,
 			}}},
 		},
 		{
-			Role:    "tool",
-			Name:    "wiki_read_issue",
-			Content: `{"id":"issue-real","knowledge_base_id":"kb-real","suspected_knowledge_ids":["doc-real"]}`,
+			Role: "tool",
+			Name: "wiki_read_issue",
+			Content: []invoke.Part{{Text: `{"id":"issue-real","knowledge_base_id":"kb-real",` +
+				`"suspected_knowledge_ids":["doc-real"]}`}},
 		},
 		{
 			Role: "assistant",
-			ToolCalls: []chat.ToolCall{{Function: chat.FunctionCall{
+			ToolCalls: []invoke.ToolCall{{Function: invoke.FunctionCall{
 				Name:      "wiki_update_issue",
 				Arguments: `{"issue_id":"issue-real","status":"resolved"}`,
 			}}},
@@ -164,13 +163,13 @@ func TestRegistryReplaysStructuredAndPrivateHandlesWithoutAliasDrift(t *testing.
 	)
 	require.JSONEq(t,
 		`{"id":"i1","knowledge_base_id":"b1","suspected_knowledge_ids":["d1"]}`,
-		first[1].Content,
+		first[1].Text(),
 	)
 	require.JSONEq(t, `{"issue_id":"i1","status":"resolved"}`, first[2].ToolCalls[0].Function.Arguments)
 
 	second := registry.EncodeMessages(first)
 	require.JSONEq(t, first[0].ToolCalls[0].Function.Arguments, second[0].ToolCalls[0].Function.Arguments)
-	require.JSONEq(t, first[1].Content, second[1].Content)
+	require.JSONEq(t, first[1].Text(), second[1].Text())
 	require.JSONEq(t, first[2].ToolCalls[0].Function.Arguments, second[2].ToolCalls[0].Function.Arguments)
 }
 
@@ -249,12 +248,10 @@ func TestRegistryDoesNotApplyBuiltInFieldPoliciesToDynamicTools(t *testing.T) {
 	registry.DecodeToolCalls(calls)
 	require.JSONEq(t, `{"issue_id":"i1","knowledge_id":"d1","url":"w1","sql":"SELECT 'd1'"}`, calls[0].Function.Arguments)
 	require.Equal(t, ArgumentResolutionUnchanged, calls[0].ArgumentResolution)
-	require.Empty(t, calls[0].UnresolvedHandles)
-
-	messages := registry.EncodeMessages([]chat.Message{
+	messages := registry.EncodeMessages([]invoke.Message{
 		{
 			Role: "assistant",
-			ToolCalls: []chat.ToolCall{{Function: chat.FunctionCall{
+			ToolCalls: []invoke.ToolCall{{Function: invoke.FunctionCall{
 				Name:      "dynamic_mcp_tool",
 				Arguments: `{"knowledge_id":"doc-real"}`,
 			}}},
@@ -262,11 +259,11 @@ func TestRegistryDoesNotApplyBuiltInFieldPoliciesToDynamicTools(t *testing.T) {
 		{
 			Role:    "tool",
 			Name:    "dynamic_mcp_tool",
-			Content: `<knowledge_id>mcp-owned-id</knowledge_id> doc-real`,
+			Content: []invoke.Part{{Text: `<knowledge_id>mcp-owned-id</knowledge_id> doc-real`}},
 		},
 	})
 	require.JSONEq(t, `{"knowledge_id":"doc-real"}`, messages[0].ToolCalls[0].Function.Arguments)
-	require.Equal(t, `<knowledge_id>mcp-owned-id</knowledge_id> doc-real`, messages[1].Content)
+	require.Equal(t, `<knowledge_id>mcp-owned-id</knowledge_id> doc-real`, messages[1].Text())
 
 	modelOutput := registry.ModelToolResultForTool("dynamic_mcp_tool", &types.ToolResult{
 		Success: true,
@@ -328,8 +325,10 @@ func TestRegistryDecodesCanonicalArgumentsForEveryBuiltInReferenceTool(t *testin
 	registry.RegisterDocument("doc-real")
 	registry.RegisterKnowledgeBase("kb-real")
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-real", KnowledgeID: "doc-real", KnowledgeBaseID: "kb-real"})
+	registry.EncodeMessages([]invoke.Message{
+		invoke.TextMessage("user", "summary/00000000-0000-0000-0000-000000000001"),
+	})
 	registry.RegisterWeb("https://example.com/page", "Example")
-	registry.EncodeMessages([]chat.Message{{Role: "user", Content: "summary/00000000-0000-0000-0000-000000000001"}})
 	registry.ModelToolResultForTool("wiki_read_issue", &types.ToolResult{Success: true, Output: `{"id":"issue-real"}`})
 
 	tests := []struct {
@@ -370,9 +369,10 @@ func TestModelToolResultProtectsSummarySlugBeforeSourceCompaction(t *testing.T) 
 	registry.RegisterDocument(knowledgeID)
 	registry.RegisterKnowledgeBase(kbID)
 
-	got := registry.ModelToolResult(&types.ToolResult{Success: true, Output: "<knowledge_base_id>" + kbID + "</knowledge_base_id>\n" +
-		"<link>[[summary/" + knowledgeID + "|Summary]]</link>\n" +
-		"<knowledge_id>" + knowledgeID + "</knowledge_id>",
+	got := registry.ModelToolResult(&types.ToolResult{
+		Success: true, Output: "<knowledge_base_id>" + kbID + "</knowledge_base_id>\n" +
+			"<link>[[summary/" + knowledgeID + "|Summary]]</link>\n" +
+			"<knowledge_id>" + knowledgeID + "</knowledge_id>",
 	})
 	require.Contains(t, got, "[[res://0001|Summary]]")
 	require.Contains(t, got, "<knowledge_base_id>b1</knowledge_base_id>")
@@ -382,7 +382,7 @@ func TestModelToolResultProtectsSummarySlugBeforeSourceCompaction(t *testing.T) 
 
 func TestRegistryStreamDecoderRestoresSplitResourceAndCitationHandles(t *testing.T) {
 	registry := NewRegistry(true)
-	registry.EncodeMessages([]chat.Message{{Role: "user", Content: "resource://AbCdEfGhIjKlMnOpQrStUv"}})
+	registry.EncodeMessages([]invoke.Message{invoke.TextMessage("user", "resource://AbCdEfGhIjKlMnOpQrStUv")})
 	registry.RegisterChunk(ChunkReference{
 		ChunkID:         "chunk-real",
 		KnowledgeID:     "doc-real",

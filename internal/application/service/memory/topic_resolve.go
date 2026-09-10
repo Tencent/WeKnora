@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -231,7 +231,7 @@ func (s *Service) adjudicateTopics(
 		logger.Warnf(ctx, "memory: no model available to resolve %d new topics", len(unresolved))
 		return
 	}
-	chatModel, err := s.modelService.GetChatModel(ctx, modelID)
+	chatModel, err := buildMemoryModelConfig(ctx, s.modelService, modelID)
 	if err != nil || chatModel == nil {
 		logger.Warnf(ctx, "memory: topic adjudication model unavailable: %v", err)
 		return
@@ -250,10 +250,11 @@ func (s *Service) adjudicateTopics(
 	// Thinking off, for the reason given on completeExtraction. Silently
 	// getting nothing back here would send every rephrasing to its own row.
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
-		{Role: "system", Content: topicAdjudicationPrompt},
-		{Role: "user", Content: b.String()},
-	}, &chat.ChatOptions{
+	response, err := invoke.Chat(ctx, chatModel, &invoke.ChatOptions{
+		Messages: []invoke.Message{
+			invoke.TextMessage("system", topicAdjudicationPrompt),
+			invoke.TextMessage("user", b.String()),
+		},
 		Temperature:         0,
 		MaxCompletionTokens: 800,
 		Thinking:            &thinking,

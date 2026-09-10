@@ -13,7 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -68,17 +68,17 @@ type graphBuilder struct {
 	entityMap        map[string]*types.Entity       // Entities indexed by ID
 	entityMapByTitle map[string]*types.Entity       // Entities indexed by title
 	relationshipMap  map[string]*types.Relationship // Relationship mapping
-	chatModel        chat.Chat
+	invokeCfg        *invoke.ModelConfig
 	chunkGraph       map[string]map[string]*ChunkRelation // Document chunk relationship graph
 	mutex            sync.RWMutex                         // Mutex for concurrent operations
 }
 
 // NewGraphBuilder creates a new graph builder
-func NewGraphBuilder(config *config.Config, chatModel chat.Chat) types.GraphBuilder {
+func NewGraphBuilder(config *config.Config, invokeCfg *invoke.ModelConfig) types.GraphBuilder {
 	logger.Info(context.Background(), "Creating new graph builder")
 	return &graphBuilder{
 		config:           config,
-		chatModel:        chatModel,
+		invokeCfg:        invokeCfg,
 		entityMap:        make(map[string]*types.Entity),
 		entityMapByTitle: make(map[string]*types.Entity),
 		relationshipMap:  make(map[string]*types.Relationship),
@@ -107,20 +107,15 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 
 	// Create prompt for entity extraction
 	thinking := false
-	messages := []chat.Message{
-		{
-			Role:    "system",
-			Content: b.renderGraphExtractionPrompt(ctx, b.config.Conversation.ExtractEntitiesPrompt),
-		},
-		{
-			Role:    "user",
-			Content: chunk.Content,
-		},
+	messages := []invoke.Message{
+		invoke.TextMessage("system", b.renderGraphExtractionPrompt(ctx, b.config.Conversation.ExtractEntitiesPrompt)),
+		invoke.TextMessage("user", chunk.Content),
 	}
 
 	// Call LLM to extract entities
 	log.Debug("Calling LLM to extract entities")
-	resp, err := b.chatModel.Chat(ctx, messages, &chat.ChatOptions{
+	resp, err := invoke.Chat(ctx, b.invokeCfg, &invoke.ChatOptions{
+		Messages:    messages,
 		Temperature: DefaultLLMTemperature,
 		Thinking:    &thinking,
 	})
@@ -218,20 +213,16 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 
 	// Create relationship extraction prompt
 	thinking := false
-	messages := []chat.Message{
-		{
-			Role:    "system",
-			Content: b.renderGraphExtractionPrompt(ctx, b.config.Conversation.ExtractRelationshipsPrompt),
-		},
-		{
-			Role:    "user",
-			Content: fmt.Sprintf("Entities: %s\n\nText: %s", string(entitiesJSON), content),
-		},
+	messages := []invoke.Message{
+		invoke.TextMessage("system",
+			b.renderGraphExtractionPrompt(ctx, b.config.Conversation.ExtractRelationshipsPrompt)),
+		invoke.TextMessage("user", fmt.Sprintf("Entities: %s\n\nText: %s", string(entitiesJSON), content)),
 	}
 
 	// Call LLM to extract relationships
 	log.Debug("Calling LLM to extract relationships")
-	resp, err := b.chatModel.Chat(ctx, messages, &chat.ChatOptions{
+	resp, err := invoke.Chat(ctx, b.invokeCfg, &invoke.ChatOptions{
+		Messages:    messages,
 		Temperature: DefaultLLMTemperature,
 		Thinking:    &thinking,
 	})

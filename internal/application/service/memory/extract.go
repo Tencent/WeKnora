@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -949,7 +949,7 @@ func (s *Service) callExtractionModel(
 			"no chat model available for memory extraction; " +
 				"configure one under workspace memory settings")
 	}
-	chatModel, err := s.modelService.GetChatModel(ctx, modelID)
+	chatModel, err := buildMemoryModelConfig(ctx, s.modelService, modelID)
 	if err != nil {
 		return extractionResponse{}, fmt.Errorf("get extraction model: %w", err)
 	}
@@ -1006,13 +1006,14 @@ func (s *Service) callExtractionModel(
 // reasoning buys nothing, and on a model that reasons by default it consumes
 // the entire completion budget and returns an empty string.
 func (s *Service) completeExtraction(
-	ctx context.Context, chatModel chat.Chat, userPrompt string, budget int,
-) (*types.ChatResponse, error) {
+	ctx context.Context, chatModel *invoke.ModelConfig, userPrompt string, budget int,
+) (*invoke.ChatResponse, error) {
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
-		{Role: "system", Content: extractionSystemPrompt},
-		{Role: "user", Content: userPrompt},
-	}, &chat.ChatOptions{
+	response, err := invoke.Chat(ctx, chatModel, &invoke.ChatOptions{
+		Messages: []invoke.Message{
+			invoke.TextMessage("system", extractionSystemPrompt),
+			invoke.TextMessage("user", userPrompt),
+		},
 		Temperature:         0,
 		MaxCompletionTokens: budget,
 		Thinking:            &thinking,
@@ -1027,7 +1028,7 @@ func (s *Service) completeExtraction(
 // isTruncated reports whether a response ran out of room before saying anything
 // usable. An empty body is treated as truncation even without the finish
 // reason, because some providers report neither.
-func isTruncated(response *types.ChatResponse) bool {
+func isTruncated(response *invoke.ChatResponse) bool {
 	if response == nil {
 		return true
 	}

@@ -276,7 +276,6 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 				RerankThreshold:  e.config.Conversation.RerankThreshold,
 				ChatModelID:      chatModelID,
 				SummaryConfig: types.SummaryConfig{
-					MaxTokens:           e.config.Conversation.Summary.MaxTokens,
 					RepeatPenalty:       e.config.Conversation.Summary.RepeatPenalty,
 					TopK:                e.config.Conversation.Summary.TopK,
 					TopP:                e.config.Conversation.Summary.TopP,

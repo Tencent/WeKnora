@@ -3,7 +3,7 @@ package modelcontext
 import (
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,10 +45,10 @@ func TestRegistryLeavesEntitySlugUntouched(t *testing.T) {
 func TestRegistryEncodesMessageCopies(t *testing.T) {
 	r := newResourceRegistry()
 	ref := "resource://AbCdEfGhIjKlMnOpQrStUv"
-	original := []chat.Message{{Role: "tool", Content: ref}}
+	original := []invoke.Message{invoke.TextMessage("tool", ref)}
 	encoded := r.EncodeMessages(original)
-	require.Equal(t, ref, original[0].Content)
-	require.Equal(t, "res://0001", encoded[0].Content)
+	require.Equal(t, ref, original[0].Text())
+	require.Equal(t, "res://0001", encoded[0].Text())
 }
 
 func TestStreamDecoderRestoresSplitAlias(t *testing.T) {

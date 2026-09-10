@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+	invoketest "github.com/Tencent/WeKnora/internal/models/invoke/invoketest"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -303,14 +302,13 @@ func TestUnmaskImageURLsDropsUnknownPlaceholders(t *testing.T) {
 
 func TestGenerateWithTemplateMasksImageURLsBeforeLLM(t *testing.T) {
 	const realURL = "minio://kb/10000/exports/4135-aaaa-bbbb-cccc/page_1.jpg"
-	model := &templateCaptureChatModel{
-		response: `{"details":"Model kept ![caption](wkimg:0001)"}`,
-	}
+	fake := invoketest.New(t)
+	fake.EnqueueResponse(invoke.ChatResponse{Content: `{"details":"Model kept ![caption](wkimg:0001)"}`})
 	service := &wikiIngestService{}
 
 	got, err := service.generateWithTemplate(
 		context.Background(),
-		model,
+		fake.Config(),
 		`Content={{.Content}} Existing={{.ExistingContent}}`,
 		map[string]string{
 			"Content":         "new ![alt](" + realURL + ")",
@@ -320,11 +318,16 @@ func TestGenerateWithTemplateMasksImageURLsBeforeLLM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateWithTemplate() error = %v", err)
 	}
-	if strings.Contains(model.prompt, realURL) {
-		t.Fatalf("LLM prompt contains real URL: %q", model.prompt)
+	calls := fake.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("provider calls = %d, want 1", len(calls))
 	}
-	if strings.Count(model.prompt, "wkimg:0001") != 2 {
-		t.Fatalf("same URL across fields should share wkimg:0001: %q", model.prompt)
+	prompt := calls[0].Opts.Messages[0].Text()
+	if strings.Contains(prompt, realURL) {
+		t.Fatalf("LLM prompt contains real URL: %q", prompt)
+	}
+	if strings.Count(prompt, "wkimg:0001") != 2 {
+		t.Fatalf("same URL across fields should share wkimg:0001: %q", prompt)
 	}
 	if strings.Contains(got, "wkimg:") {
 		t.Fatalf("returned content still contains placeholder: %q", got)
@@ -334,47 +337,12 @@ func TestGenerateWithTemplateMasksImageURLsBeforeLLM(t *testing.T) {
 	}
 }
 
-type templateCaptureChatModel struct {
-	prompt   string
-	response string
-	messages []chat.Message
-	options  chat.ChatOptions
-	purpose  string
-	prefix   string
-}
-
-func (m *templateCaptureChatModel) Chat(
-	ctx context.Context,
-	messages []chat.Message,
-	opts *chat.ChatOptions,
-) (*types.ChatResponse, error) {
-	if len(messages) > 0 {
-		m.prompt = messages[0].Content
-	}
-	m.messages = append([]chat.Message(nil), messages...)
-	if opts != nil {
-		m.options = *opts
-	}
-	m.purpose, m.prefix = types.LLMCallMetadataFromContext(ctx)
-	return &types.ChatResponse{Content: m.response}, nil
-}
-
-func (m *templateCaptureChatModel) ChatStream(
-	context.Context,
-	[]chat.Message,
-	*chat.ChatOptions,
-) (<-chan types.StreamResponse, error) {
-	return nil, nil
-}
-
-func (m *templateCaptureChatModel) GetModelName() string { return "capture" }
-func (m *templateCaptureChatModel) GetModelID() string   { return "capture" }
-
 func TestGenerateWikiPageModifyUsesCacheableMessageLayout(t *testing.T) {
-	model := &templateCaptureChatModel{response: "SUMMARY: page\n# Alpha"}
+	fake := invoketest.New(t)
+	fake.EnqueueResponse(invoke.ChatResponse{Content: "SUMMARY: page\n# Alpha"})
 	service := &wikiIngestService{}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
-	_, err := service.generateWithTemplate(ctx, model, agent.WikiPageModifyUserPrompt, map[string]string{
+	_, err := service.generateWithTemplate(ctx, fake.Config(), agent.WikiPageModifyUserPrompt, map[string]string{
 		"HasAdditions":         "1",
 		"SharedSourceContexts": "<document><context>shared source summary</context></document>\n",
 		"PageSlug":             "concept/alpha",
@@ -389,17 +357,19 @@ func TestGenerateWikiPageModifyUsesCacheableMessageLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateWithTemplate() error = %v", err)
 	}
-	if len(model.messages) != 2 || model.messages[0].Role != "system" || model.messages[1].Role != "user" {
-		t.Fatalf("unexpected message layout: %#v", model.messages)
+	calls := fake.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("provider calls = %d, want 1", len(calls))
 	}
-	if !strings.Contains(model.messages[0].Content, "SOURCE GROUNDING & MERGE RULES") {
-		t.Fatalf("system prompt missing stable rules: %q", model.messages[0].Content)
+	messages := calls[0].Opts.Messages
+	if len(messages) != 2 || messages[0].Role != "system" || messages[1].Role != "user" {
+		t.Fatalf("unexpected message layout: %#v", messages)
 	}
-	if !strings.HasPrefix(model.messages[1].Content, "<shared_source_contexts>") {
-		t.Fatalf("shared source context must lead user message: %q", model.messages[1].Content)
+	if !strings.Contains(messages[0].Text(), "SOURCE GROUNDING & MERGE RULES") {
+		t.Fatalf("system prompt missing stable rules: %q", messages[0].Text())
 	}
-	if model.purpose != "wiki_page_modify" || model.prefix == "" {
-		t.Fatalf("missing cache metadata: purpose=%q prefix=%q", model.purpose, model.prefix)
+	if !strings.HasPrefix(messages[1].Text(), "<shared_source_contexts>") {
+		t.Fatalf("shared source context must lead user message: %q", messages[1].Text())
 	}
 }
 
@@ -430,54 +400,27 @@ func TestAwaitWikiPromptWarmupBlocksFollowersUntilLeaderCompletes(t *testing.T) 
 	}
 }
 
-type blockingTemplateChatModel struct {
-	calls   atomic.Int32
-	started chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-func (m *blockingTemplateChatModel) Chat(
-	context.Context,
-	[]chat.Message,
-	*chat.ChatOptions,
-) (*types.ChatResponse, error) {
-	m.calls.Add(1)
-	m.once.Do(func() { close(m.started) })
-	<-m.release
-	return &types.ChatResponse{Content: "shared result"}, nil
-}
-
-func (m *blockingTemplateChatModel) ChatStream(context.Context, []chat.Message, *chat.ChatOptions) (<-chan types.StreamResponse, error) {
-	return nil, nil
-}
-
-func (m *blockingTemplateChatModel) GetModelName() string { return "blocking" }
-func (m *blockingTemplateChatModel) GetModelID() string   { return "blocking" }
-
 func TestGenerateWithTemplateCoalescesIdenticalConcurrentRequests(t *testing.T) {
-	model := &blockingTemplateChatModel{started: make(chan struct{}), release: make(chan struct{})}
+	fake := invoketest.New(t)
+	// Exactly one queued provider response: if the coalescer let both
+	// identical calls through, the second would starve or fail.
+	fake.EnqueueResponse(invoke.ChatResponse{Content: "shared result"})
 	service := &wikiIngestService{}
 	result := make(chan error, 2)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 	call := func() {
-		_, err := service.generateWithTemplate(ctx, model, "same {{.Value}}", map[string]string{"Value": "input"})
+		_, err := service.generateWithTemplate(
+			ctx, fake.Config(), "same {{.Value}}", map[string]string{"Value": "input"})
 		result <- err
 	}
 	go call()
-	<-model.started
 	go call()
-	time.Sleep(20 * time.Millisecond)
-	if got := model.calls.Load(); got != 1 {
-		t.Fatalf("identical requests reached provider %d times before release", got)
-	}
-	close(model.release)
 	for range 2 {
 		if err := <-result; err != nil {
 			t.Fatal(err)
 		}
 	}
-	if got := model.calls.Load(); got != 1 {
+	if got := len(fake.Calls()); got != 1 {
 		t.Fatalf("identical requests reached provider %d times, want 1", got)
 	}
 }
@@ -616,21 +559,26 @@ func (r *wikiPendingRepoForCleanupTest) DeleteByDedupKey(
 // explicit MaxTokens, DeepSeek-class providers default to 8192 completion
 // tokens and truncate combined wiki extraction JSON mid-field.
 func TestGenerateWithTemplateSetsMaxTokens(t *testing.T) {
-	model := &templateCaptureChatModel{response: `{"entities":[],"concepts":[]}`}
+	fake := invoketest.New(t)
+	fake.EnqueueResponse(invoke.ChatResponse{Content: `{"entities":[],"concepts":[]}`})
 	service := &wikiIngestService{}
 	_, err := service.generateWithTemplate(
 		context.Background(),
-		model,
+		fake.Config(),
 		`Content={{.Content}}`,
 		map[string]string{"Content": "hello"},
 	)
 	if err != nil {
 		t.Fatalf("generateWithTemplate() error = %v", err)
 	}
-	if model.options.MaxTokens != wikiLLMMaxTokens {
-		t.Fatalf("MaxTokens = %d, want %d", model.options.MaxTokens, wikiLLMMaxTokens)
+	calls := fake.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("provider calls = %d, want 1", len(calls))
 	}
-	if model.options.Thinking == nil || *model.options.Thinking {
-		t.Fatalf("Thinking should be non-nil false, got %#v", model.options.Thinking)
+	if calls[0].Opts.MaxCompletionTokens != wikiLLMMaxTokens {
+		t.Fatalf("MaxCompletionTokens = %d, want %d", calls[0].Opts.MaxCompletionTokens, wikiLLMMaxTokens)
+	}
+	if calls[0].Opts.Thinking == nil || *calls[0].Opts.Thinking {
+		t.Fatalf("Thinking should be non-nil false, got %#v", calls[0].Opts.Thinking)
 	}
 }

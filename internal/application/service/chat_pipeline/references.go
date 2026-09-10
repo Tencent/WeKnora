@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/modelcontext"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -15,7 +15,7 @@ import (
 func prepareMessagesWithModelContext(
 	ctx context.Context,
 	chatManage *types.ChatManage,
-) ([]chat.Message, *modelcontext.Registry) {
+) ([]invoke.Message, *modelcontext.Registry) {
 	citationsEnabled := chatManage == nil || chatManage.CitationsEnabled()
 	registry := modelcontext.NewRegistry(citationsEnabled)
 	if chatManage == nil {
@@ -23,7 +23,9 @@ func prepareMessagesWithModelContext(
 	}
 	messages := prepareMessagesWithHistory(chatManage)
 	if len(messages) > 0 {
-		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + registry.ProtocolPrompt()
+		messages[0].Content = []invoke.Part{
+			{Text: strings.TrimRight(messages[0].Text(), " \t\r\n") + registry.ProtocolPrompt()},
+		}
 	}
 	if len(chatManage.MergeResult) == 0 || len(messages) == 0 {
 		return messages, registry
@@ -85,13 +87,14 @@ func prepareMessagesWithModelContext(
 	last := len(messages) - 1
 	replaced := false
 	for _, index := range []int{0, last} {
-		if chatManage.RenderedContexts != "" && strings.Contains(messages[index].Content, chatManage.RenderedContexts) {
-			messages[index].Content = strings.ReplaceAll(messages[index].Content, chatManage.RenderedContexts, modelContexts)
+		if chatManage.RenderedContexts != "" && strings.Contains(messages[index].Text(), chatManage.RenderedContexts) {
+			messages[index].Content = []invoke.Part{{Text: strings.ReplaceAll(
+				messages[index].Text(), chatManage.RenderedContexts, modelContexts)}}
 			replaced = true
 		}
 	}
 	if !replaced {
-		messages[last].Content = modelContexts + "\n\n" + messages[last].Content
+		messages[last].Content = []invoke.Part{{Text: modelContexts + "\n\n" + messages[last].Text()}}
 	}
 	return messages, registry
 }

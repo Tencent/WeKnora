@@ -21,7 +21,7 @@ import (
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -1968,15 +1968,15 @@ func unionTools(configured, required []string) []string {
 // workspace can no longer resolve.
 func (s *TenantSkillService) resolveInstallerModel(
 	ctx context.Context, tenantID uint64, agent *types.CustomAgent,
-) (chat.Chat, error) {
+) (*invoke.ModelConfig, error) {
 	if s.models == nil {
 		return nil, errors.New("model service is not configured")
 	}
 	if agent != nil {
 		if modelID := strings.TrimSpace(agent.Config.ModelID); modelID != "" {
-			model, err := s.models.GetChatModel(ctx, modelID)
-			if err == nil && model != nil {
-				return model, nil
+			record, err := s.models.GetModelByID(ctx, modelID)
+			if err == nil && record != nil {
+				return s.models.BuildModelConfig(ctx, record)
 			}
 			logger.Warnf(ctx,
 				"[skill] installer agent model %s is unusable (%v); falling back to the workspace default",
@@ -1990,13 +1990,13 @@ func (s *TenantSkillService) resolveInstallerModel(
 	for _, model := range models {
 		if model != nil && model.Type == types.ModelTypeKnowledgeQA &&
 			model.Status == types.ModelStatusActive && model.IsDefault {
-			return s.models.GetChatModel(ctx, model.ID)
+			return buildModelConfigByID(ctx, s.models, model.ID)
 		}
 	}
 	for _, model := range models {
 		if model != nil && model.Type == types.ModelTypeKnowledgeQA &&
 			model.Status == types.ModelStatusActive {
-			return s.models.GetChatModel(ctx, model.ID)
+			return buildModelConfigByID(ctx, s.models, model.ID)
 		}
 	}
 	return nil, fmt.Errorf("workspace %d has no active chat model for skill installer", tenantID)

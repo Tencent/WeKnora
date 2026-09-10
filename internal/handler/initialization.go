@@ -22,8 +22,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
-	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
@@ -1782,7 +1782,7 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
 		return
 	}
-	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
+	_, _, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
 	if !ok {
 		logger.Error(ctx, "Tenant info not found")
 		c.Error(errors.NewBadRequestError("空间信息未找到"))
@@ -1790,7 +1790,7 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 	}
 
 	model := h.buildTestModel(&req, types.ModelTypeKnowledgeQA, types.ModelSourceRemote)
-	available, message := h.checkChatModelConnection(ctx, model, appID, appSecret)
+	available, message := h.checkChatModelConnection(ctx, model)
 
 	logger.Infof(ctx, "Remote model check completed, available: %v, message: %s", available, message)
 
@@ -1914,24 +1914,26 @@ func classifyConnectionError(errMsg string) string {
 	}
 }
 
-// checkChatModelConnection 使用 chat 模块做一次最小化调用来测试连通性与鉴权。
-// 与生产路径走完全相同的 ConfigFromModel → NewChat 流程，因此 CustomHeaders、
-// ExtraConfig、Provider 等字段都会被正确透传。
+// checkChatModelConnection 做一次最小化调用来测试连通性与鉴权。临时表单模型
+// 经唯一共享构造函数 BuildModelConfig 走 invoke 入口（§6.1/§6.8）：凭证三槽、
+// WeKnoraCloud 租户回退、存量 provider/base_url 映射（ollama/generic）与生产
+// 路径完全一致，CustomHeaders、ExtraConfig 等字段都会被正确透传。
 func (h *InitializationHandler) checkChatModelConnection(
-	ctx context.Context, model *types.Model, appID, appSecret string,
+	ctx context.Context, model *types.Model,
 ) (bool, string) {
-	chatInstance, err := chat.NewChat(chat.ConfigFromModel(model, appID, appSecret), h.ollamaService)
+	invokeCfg, err := h.modelService.BuildModelConfig(ctx, model)
 	if err != nil {
 		return false, fmt.Sprintf("创建聊天实例失败: %v", err)
 	}
 
-	testMessages := []chat.Message{{Role: "user", Content: "test"}}
-	testOptions := &chat.ChatOptions{
-		MaxTokens: 1,
-		Thinking:  &[]bool{false}[0], // for dashscope.aliyuncs qwen3-32b
+	testMessages := []invoke.Message{invoke.TextMessage("user", "test")}
+	testOptions := &invoke.ChatOptions{
+		Messages:            testMessages,
+		MaxCompletionTokens: 1,
+		Thinking:            &[]bool{false}[0], // for dashscope.aliyuncs qwen3-32b
 	}
 
-	_, err = chatInstance.Chat(ctx, testMessages, testOptions)
+	_, err = invoke.Chat(ctx, invokeCfg, testOptions)
 	if err != nil {
 		errMsg := err.Error()
 		// 400 = endpoint reachable + auth ok, just a parameter mismatch
@@ -2433,7 +2435,13 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 	}
 
 	// 根据模型ID获取chat模型
-	chatModel, err := h.modelService.GetChatModel(ctx, req.ModelID)
+	record, err := h.modelService.GetModelByID(ctx, req.ModelID)
+	if err != nil {
+		logger.Error(ctx, "获取模型失败", err)
+		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
+		return
+	}
+	invokeCfg, err := h.modelService.BuildModelConfig(ctx, record)
 	if err != nil {
 		logger.Error(ctx, "获取模型失败", err)
 		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
@@ -2441,7 +2449,7 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 	}
 
 	// 调用模型服务进行文本关系提取
-	result, err := h.extractRelationsFromText(ctx, req.Text, req.Tags, chatModel)
+	result, err := h.extractRelationsFromText(ctx, req.Text, req.Tags, invokeCfg)
 	if err != nil {
 		logger.Error(ctx, "文本关系提取失败", err)
 		c.Error(errors.NewInternalServerError("文本关系提取失败: " + err.Error()))
@@ -2459,7 +2467,7 @@ func (h *InitializationHandler) extractRelationsFromText(
 	ctx context.Context,
 	text string,
 	tags []string,
-	chatModel chat.Chat,
+	invokeCfg *invoke.ModelConfig,
 ) (*TextRelationExtractionResponse, error) {
 	template := &types.PromptTemplateStructured{
 		Description: h.config.ExtractManager.ExtractGraph.Description,
@@ -2467,7 +2475,7 @@ func (h *InitializationHandler) extractRelationsFromText(
 		Examples:    h.config.ExtractManager.ExtractGraph.Examples,
 	}
 
-	extractor := chatpipeline.NewExtractor(chatModel, template)
+	extractor := chatpipeline.NewExtractor(invokeCfg, template)
 	graph, err := extractor.Extract(ctx, text)
 	if err != nil {
 		logger.Error(ctx, "文本关系提取失败", err)
@@ -2516,14 +2524,20 @@ func (h *InitializationHandler) FabriText(c *gin.Context) {
 		return
 	}
 
-	chatModel, err := h.modelService.GetChatModel(ctx, req.ModelID)
+	record, err := h.modelService.GetModelByID(ctx, req.ModelID)
+	if err != nil {
+		logger.Error(ctx, "获取模型失败", err)
+		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
+		return
+	}
+	invokeCfg, err := h.modelService.BuildModelConfig(ctx, record)
 	if err != nil {
 		logger.Error(ctx, "获取模型失败", err)
 		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
 		return
 	}
 
-	result, err := h.fabriText(ctx, req.Tags, chatModel)
+	result, err := h.fabriText(ctx, req.Tags, invokeCfg)
 	if err != nil {
 		logger.Error(ctx, "failed to generate fabri text", err)
 		c.Error(errors.NewInternalServerError("failed to generate fabri text: " + err.Error()))
@@ -2537,7 +2551,9 @@ func (h *InitializationHandler) FabriText(c *gin.Context) {
 }
 
 // fabriText generates example text
-func (h *InitializationHandler) fabriText(ctx context.Context, tags []string, chatModel chat.Chat) (string, error) {
+func (h *InitializationHandler) fabriText(
+	ctx context.Context, tags []string, invokeCfg *invoke.ModelConfig,
+) (string, error) {
 	content := h.config.ExtractManager.FabriText.WithNoTag
 	if len(tags) > 0 {
 		tagStr, _ := json.Marshal(tags)
@@ -2545,12 +2561,11 @@ func (h *InitializationHandler) fabriText(ctx context.Context, tags []string, ch
 	}
 
 	think := false
-	result, err := chatModel.Chat(ctx, []chat.Message{
-		{Role: "user", Content: content},
-	}, &chat.ChatOptions{
-		Temperature: 0.3,
-		MaxTokens:   4096,
-		Thinking:    &think,
+	result, err := invoke.Chat(ctx, invokeCfg, &invoke.ChatOptions{
+		Messages:            []invoke.Message{invoke.TextMessage("user", content)},
+		Temperature:         0.3,
+		MaxCompletionTokens: 4096,
+		Thinking:            &think,
 	})
 	if err != nil {
 		logger.Error(ctx, "生成示例文本失败", err)

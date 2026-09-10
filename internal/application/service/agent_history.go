@@ -10,7 +10,7 @@ import (
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -52,9 +52,9 @@ func LoadAgentHistory(
 	messageRepo interfaces.MessageRepository,
 	sessionID string,
 	maxRounds int,
-) ([]chat.Message, error) {
+) ([]invoke.Message, error) {
 	if maxRounds <= 0 {
-		return []chat.Message{}, nil
+		return []invoke.Message{}, nil
 	}
 
 	fetchLimit := maxRounds * agentHistoryFetchMultiplier
@@ -67,7 +67,7 @@ func LoadAgentHistory(
 		return nil, fmt.Errorf("load agent history: %w", err)
 	}
 	if len(rows) == 0 {
-		return []chat.Message{}, nil
+		return []invoke.Message{}, nil
 	}
 
 	type pair struct {
@@ -108,7 +108,7 @@ func LoadAgentHistory(
 		completePairs = completePairs[len(completePairs)-maxRounds:]
 	}
 
-	out := make([]chat.Message, 0, len(completePairs)*4)
+	out := make([]invoke.Message, 0, len(completePairs)*4)
 	for _, p := range completePairs {
 		out = append(out, buildUserHistoryMessage(p.user))
 		out = append(out, buildAssistantHistoryMessages(p.assistant)...)
@@ -122,7 +122,7 @@ func LoadAgentHistory(
 // context format, which must not be mixed into the current request protocol.
 // Image captions and attachments are reconstructed from their canonical DB
 // columns so useful user-provided context is retained without stale RAG data.
-func buildUserHistoryMessage(m *types.Message) chat.Message {
+func buildUserHistoryMessage(m *types.Message) invoke.Message {
 	content := m.Content
 	if captions := extractImageCaptionsFromMessage(m.Images); captions != "" {
 		content += "\n\n[用户上传图片内容]\n" + captions
@@ -130,7 +130,7 @@ func buildUserHistoryMessage(m *types.Message) chat.Message {
 	if len(m.Attachments) > 0 {
 		content += m.Attachments.BuildPrompt()
 	}
-	return chat.Message{Role: "user", Content: content}
+	return invoke.TextMessage("user", content)
 }
 
 // buildAssistantHistoryMessages reconstructs the assistant side of one
@@ -141,26 +141,26 @@ func buildUserHistoryMessage(m *types.Message) chat.Message {
 // AgentSteps from KnowledgeQA-mode turns are empty, in which case the result
 // is just the single final-answer assistant message — exactly mirroring how
 // the KnowledgeQA pipeline replays history today.
-func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
-	msgs := make([]chat.Message, 0, len(m.AgentSteps)*2+1)
+func buildAssistantHistoryMessages(m *types.Message) []invoke.Message {
+	msgs := make([]invoke.Message, 0, len(m.AgentSteps)*2+1)
 	for _, step := range m.AgentSteps {
 		nonTerminalCalls := filterNonTerminalToolCalls(step.ToolCalls)
 		if len(nonTerminalCalls) == 0 {
 			continue
 		}
-		assistantMsg := chat.Message{
+		assistantMsg := invoke.Message{
 			Role:             "assistant",
-			Content:          step.Thought,
+			Content:          []invoke.Part{{Text: step.Thought}},
 			ReasoningContent: step.ReasoningContent,
-			ToolCalls:        make([]chat.ToolCall, 0, len(nonTerminalCalls)),
+			ToolCalls:        make([]invoke.ToolCall, 0, len(nonTerminalCalls)),
 		}
 		for _, tc := range nonTerminalCalls {
 			argsJSON, _ := json.Marshal(tc.Args)
-			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, chat.ToolCall{
+			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, invoke.ToolCall{
 				ID:               tc.ID,
 				Type:             "function",
 				ProviderMetadata: tc.ProviderMetadata,
-				Function: chat.FunctionCall{
+				Function: invoke.FunctionCall{
 					Name:      tc.Name,
 					Arguments: string(argsJSON),
 				},
@@ -168,9 +168,9 @@ func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
 		}
 		msgs = append(msgs, assistantMsg)
 		for _, tc := range nonTerminalCalls {
-			msgs = append(msgs, chat.Message{
+			msgs = append(msgs, invoke.Message{
 				Role:       "tool",
-				Content:    toolCallOutput(tc),
+				Content:    []invoke.Part{{Text: toolCallOutput(tc)}},
 				ToolCallID: tc.ID,
 				Name:       tc.Name,
 			})
@@ -185,7 +185,7 @@ func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
 	).Replace(finalContent)
 	finalContent = strings.TrimSpace(finalContent)
 	if finalContent != "" {
-		msgs = append(msgs, chat.Message{Role: "assistant", Content: finalContent})
+		msgs = append(msgs, invoke.TextMessage("assistant", finalContent))
 	}
 	return msgs
 }

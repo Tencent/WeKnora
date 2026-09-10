@@ -19,7 +19,7 @@ import (
 	"strings"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 )
 
 const (
@@ -58,12 +58,12 @@ func appendUnique(list []string, path string) []string {
 // and wrote. previousSummary carries the block inherited from an earlier
 // compaction, which is no longer part of the message range being summarized
 // now that summaries are excluded from their own successor's input.
-func extractFileOps(previousSummary string, groups ...[]chat.Message) fileOps {
+func extractFileOps(previousSummary string, groups ...[]invoke.Message) fileOps {
 	var ops fileOps
 	ops.inherit(previousSummary)
 	for _, group := range groups {
 		for _, msg := range group {
-			ops.inherit(msg.Content)
+			ops.inherit(msg.Text())
 			for _, tc := range msg.ToolCalls {
 				path := toolCallPath(tc.Function.Arguments)
 				if path == "" {

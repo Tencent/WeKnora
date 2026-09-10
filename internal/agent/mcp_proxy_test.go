@@ -51,7 +51,7 @@ func TestAgentMCPProxyKeepsTargetEventsAndProtocolHistory(t *testing.T) {
 		nil,
 	)
 	require.NoError(t, err)
-	engine := newTestEngine(t, &mockChat{})
+	engine := newTestEngine(t, nil)
 	engine.toolRegistry = registry
 	var starts []event.AgentToolCallData
 	var outcomes []event.AgentToolResultData

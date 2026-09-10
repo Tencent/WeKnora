@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 )
 
 const (
@@ -26,7 +26,7 @@ const (
 // serializeConversation renders messages as a transcript rather than passing
 // them as a conversation. A model handed real messages tries to continue them;
 // handed a transcript, it summarizes them.
-func serializeConversation(messages []chat.Message) string {
+func serializeConversation(messages []invoke.Message) string {
 	var parts []string
 	for i := range messages {
 		msg := &messages[i]
@@ -34,7 +34,7 @@ func serializeConversation(messages []chat.Message) string {
 		case "system":
 			continue
 		case "user":
-			if content := truncate(msg.Content, textMaxChars); content != "" {
+			if content := truncate(msg.Text(), textMaxChars); content != "" {
 				parts = append(parts, "[User]: "+content)
 			}
 		case "assistant":
@@ -42,14 +42,14 @@ func serializeConversation(messages []chat.Message) string {
 				parts = append(parts,
 					"[Assistant thinking]: "+truncate(msg.ReasoningContent, textMaxChars))
 			}
-			if msg.Content != "" {
-				parts = append(parts, "[Assistant]: "+truncate(msg.Content, textMaxChars))
+			if msg.Text() != "" {
+				parts = append(parts, "[Assistant]: "+truncate(msg.Text(), textMaxChars))
 			}
 			if calls := serializeToolCalls(msg.ToolCalls); calls != "" {
 				parts = append(parts, "[Assistant tool calls]: "+calls)
 			}
 		case "tool":
-			if content := truncate(msg.Content, toolResultMaxChars); content != "" {
+			if content := truncate(msg.Text(), toolResultMaxChars); content != "" {
 				parts = append(parts, fmt.Sprintf("[Tool result %s]: %s", msg.Name, content))
 			}
 		}
@@ -57,7 +57,7 @@ func serializeConversation(messages []chat.Message) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func serializeToolCalls(calls []chat.ToolCall) string {
+func serializeToolCalls(calls []invoke.ToolCall) string {
 	if len(calls) == 0 {
 		return ""
 	}
@@ -106,22 +106,22 @@ func truncate(s string, maxChars int) string {
 // rawArchive is the fallback when the summarizer is unavailable. It is lossy
 // and unstructured, but it keeps the tool names and paths that the next round
 // needs in order not to redo finished work.
-func rawArchive(messages []chat.Message) string {
+func rawArchive(messages []invoke.Message) string {
 	var sb strings.Builder
 	sb.WriteString("Raw conversation archive (LLM summarization unavailable):\n\n")
 	for i := range messages {
 		msg := &messages[i]
 		switch msg.Role {
 		case "user":
-			fmt.Fprintf(&sb, "- User: %s\n", truncate(msg.Content, 500))
+			fmt.Fprintf(&sb, "- User: %s\n", truncate(msg.Text(), 500))
 		case "assistant":
 			if calls := serializeToolCalls(msg.ToolCalls); calls != "" {
-				fmt.Fprintf(&sb, "- Assistant [%s]: %s\n", calls, truncate(msg.Content, 500))
+				fmt.Fprintf(&sb, "- Assistant [%s]: %s\n", calls, truncate(msg.Text(), 500))
 				continue
 			}
-			fmt.Fprintf(&sb, "- Assistant: %s\n", truncate(msg.Content, 500))
+			fmt.Fprintf(&sb, "- Assistant: %s\n", truncate(msg.Text(), 500))
 		case "tool":
-			fmt.Fprintf(&sb, "- Tool[%s]: %s\n", msg.Name, truncate(msg.Content, 500))
+			fmt.Fprintf(&sb, "- Tool[%s]: %s\n", msg.Name, truncate(msg.Text(), 500))
 		}
 	}
 	return sb.String()

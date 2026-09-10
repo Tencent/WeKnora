@@ -53,19 +53,41 @@ func TestGroundingUsesRegistryInsteadOfConfiguration(t *testing.T) {
 		want       []string
 		absent     []string
 	}{
-		{"skill only with stale flags", []string{tools.ToolReadFile, tools.ToolShellExec}, true,
-			nil, []string{"Available knowledge tools:", "web_search is available", "web_fetch is available"}},
-		{"rag", []string{tools.ToolKnowledgeSearch, tools.ToolListKnowledgeChunks}, false,
-			[]string{"Available knowledge tools: knowledge_search, list_knowledge_chunks"}, []string{"wiki_search", "web_search is available"}},
-		{"wiki", []string{tools.ToolWikiReadPage, tools.ToolWikiSearch}, false,
-			[]string{"Available knowledge tools: wiki_search, wiki_read_page"}, []string{"knowledge_search", "web_search is available"}},
-		{"registered web", []string{tools.ToolWebSearch, tools.ToolWebFetch}, false,
-			[]string{"web_search is available", "web_fetch is available"}, []string{"Available knowledge tools:"}},
-		{"no tools", nil, false, nil,
-			[]string{"Available knowledge tools:", "web_search is available", "web_fetch is available"}},
+		{
+			"skill only with stale flags",
+			[]string{tools.ToolReadFile, tools.ToolShellExec},
+			true,
+			nil,
+			[]string{"Available knowledge tools:", "web_search is available", "web_fetch is available"},
+		},
+		{
+			"rag",
+			[]string{tools.ToolKnowledgeSearch, tools.ToolListKnowledgeChunks},
+			false,
+			[]string{"Available knowledge tools: knowledge_search, list_knowledge_chunks"},
+			[]string{"wiki_search", "web_search is available"},
+		},
+		{
+			"wiki",
+			[]string{tools.ToolWikiReadPage, tools.ToolWikiSearch},
+			false,
+			[]string{"Available knowledge tools: wiki_search, wiki_read_page"},
+			[]string{"knowledge_search", "web_search is available"},
+		},
+		{
+			"registered web",
+			[]string{tools.ToolWebSearch, tools.ToolWebFetch},
+			false,
+			[]string{"web_search is available", "web_fetch is available"},
+			[]string{"Available knowledge tools:"},
+		},
+		{
+			"no tools", nil, false, nil,
+			[]string{"Available knowledge tools:", "web_search is available", "web_fetch is available"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			engine := newTestEngine(t, &mockChat{})
+			engine := newTestEngine(t, nil)
 			engine.config.WebSearchEnabled = tc.webFlag
 			engine.config.AllowedTools = []string{tools.ToolKnowledgeSearch, tools.ToolWebSearch}
 			engine.toolRegistry = tools.NewToolRegistry()
@@ -85,7 +107,7 @@ func TestGroundingUsesRegistryInsteadOfConfiguration(t *testing.T) {
 }
 
 func TestPinnedGenerationSkillKeepsResearchAndKnowledgeScope(t *testing.T) {
-	engine := newTestEngine(t, &mockChat{})
+	engine := newTestEngine(t, nil)
 	engine.knowledgeBasesInfo = []*KnowledgeBaseInfo{{ID: "kb", Name: "Server operations", Capabilities: []string{"chunks"}}}
 	engine.SetPinnedMentions(nil, []*PinnedSkillInfo{{Name: "pptx-generator"}})
 	prompt := engine.RenderUserTurnContent("session", "如何在 Windows Server 2008 上连接 WiFi 网络？制作相关 PPT")

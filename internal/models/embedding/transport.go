@@ -29,7 +29,7 @@ func validateEmbeddingBaseURL(baseURL string) error {
 }
 
 // newEmbeddingHTTPClient returns an HTTP client with connection-level SSRF
-// protection and redirect validation, aligned with internal/models/chat/transport.go.
+// protection and redirect validation, aligned with the unified invoke executor.
 // All clients share sharedEmbeddingHTTPTransport so keep-alive connections are
 // pooled globally, while each keeps its own timeout.
 func newEmbeddingHTTPClient(timeout time.Duration) *http.Client {

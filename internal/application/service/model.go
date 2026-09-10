@@ -4,17 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
-	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
-	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -91,6 +91,112 @@ func (s *modelService) resolveWeKnoraCloudCredentials(ctx context.Context, param
 		appSecret = creds.AppSecret
 	}
 	return
+}
+
+// BuildModelConfig is the SINGLE shared constructor for the unified call
+// configuration (design §6.1/§6.8, P1c seam 6): every call path that turns a
+// model record into an invoke.ModelConfig goes through it, so the credential
+// assembly (three fixed slots + WeKnoraCloud tenant fallback) and the legacy
+// local-record mapping apply identically everywhere (continues
+// ConfigFromModel's "production and test paths share one mapping" promise).
+//
+// Credentials (§6.8): api_key/app_id/app_secret are lifted from Parameters
+// verbatim — Scan already decrypted them — and the WeKnoraCloud tenant
+// fallback is folded in here (model credentials empty →
+// tenant.Credentials.WeKnoraCloud fills the gaps). Missing this fallback
+// breaks EVERY space-level-credential WeKnoraCloud call.
+//
+// Legacy local-record mapping (§6.1): records with source=local or
+// interface_type=ollama call as Provider="ollama"; BaseURL keeps an existing
+// value (a trailing /v1 is stripped — legacy prefill wrote the OpenAI
+// compatible suffix, which the native adapter would turn into /v1/api/chat)
+// or is injected from OLLAMA_BASE_URL. Stored rows are never rewritten.
+func (s *modelService) BuildModelConfig(ctx context.Context, model *types.Model) (*invoke.ModelConfig, error) {
+	if model == nil {
+		return nil, errors.New("model is nil")
+	}
+	params := &model.Parameters
+	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, params)
+
+	// extra_config.remote_model_name overrides the wire model name (v1
+	// NewRemoteAPIChat semantics; embedding/rerank still honor it on the old
+	// path). Restored in the shared constructor so every caller maps the
+	// stored record identically.
+	modelName := model.Name
+	if override := strings.TrimSpace(params.ExtraConfig["remote_model_name"]); override != "" {
+		modelName = override
+	}
+
+	cfg := &invoke.ModelConfig{
+		ModelID:         model.ID,
+		ModelName:       modelName,
+		Provider:        params.Provider,
+		BaseURL:         params.BaseURL,
+		Credentials:     invoke.Credentials{APIKey: params.APIKey, AppID: appID, AppSecret: appSecret},
+		MaxConcurrency:  params.MaxConcurrency,
+		CustomHeaders:   params.CustomHeaders,
+		ExtraConfig:     params.ExtraConfig,
+		ContextWindow:   params.GetContextWindow(),
+		MaxOutputTokens: params.GetMaxOutputTokens(),
+	}
+	if params.Chat != nil {
+		cfg.ThinkingLevel = params.Chat.ThinkingLevel
+		cfg.SelectedLevels = params.Chat.SelectedLevels
+	}
+	applyLegacyLocalRecordMapping(model, cfg)
+	// Legacy records created before the provider field was mandatory carry an
+	// EMPTY Provider (custom vendors). v1 NewRemoteChat fell back to
+	// provider.DetectProvider(BaseURL) at dispatch with generic as the last
+	// resort (design §9: legacy generic records fold into the custom
+	// OpenAI-compatible fallback). The same detection runs here at the single
+	// construction point; stored rows stay untouched.
+	if cfg.Provider == "" {
+		cfg.Provider = string(provider.DetectProvider(cfg.BaseURL))
+	}
+	return cfg, nil
+}
+
+// applyLegacyLocalRecordMapping implements the §6.1 legacy-record rule:
+// source=local or interface_type=ollama → Provider="ollama", with the BaseURL
+// normalized by legacyOllamaBaseURL. The mapping is view-side only — the
+// stored record stays untouched.
+func applyLegacyLocalRecordMapping(model *types.Model, cfg *invoke.ModelConfig) {
+	isLocal := model.Source == types.ModelSourceLocal
+	isOllamaIface := strings.EqualFold(strings.TrimSpace(model.Parameters.InterfaceType), "ollama")
+	if !isLocal && !isOllamaIface {
+		return
+	}
+	cfg.Provider = "ollama"
+	cfg.BaseURL = legacyOllamaBaseURL(cfg.BaseURL)
+}
+
+// legacyOllamaBaseURL normalizes a legacy ollama record's base URL: keep an
+// existing value (a trailing /v1 is stripped — legacy prefill wrote the
+// OpenAI-compatible suffix, which the native adapter would turn into
+// /v1/api/chat) or inject OLLAMA_BASE_URL (default http://localhost:11434,
+// matching utils/ollama).
+func legacyOllamaBaseURL(baseURL string) string {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		baseURL = strings.TrimSpace(os.Getenv("OLLAMA_BASE_URL"))
+		if baseURL == "" {
+			baseURL = "http://localhost:11434"
+		}
+	}
+	return strings.TrimSuffix(baseURL, "/v1")
+}
+
+// buildModelConfigByID loads a model record by ID and assembles the unified
+// invoke.ModelConfig through the shared constructor (§6.1/§6.8). Package-wide
+// helper for the wave-2 caller sweep call sites.
+func buildModelConfigByID(
+	ctx context.Context, ms interfaces.ModelService, modelID string,
+) (*invoke.ModelConfig, error) {
+	record, err := ms.GetModelByID(ctx, modelID)
+	if err != nil {
+		return nil, err
+	}
+	return ms.BuildModelConfig(ctx, record)
 }
 
 // CreateModel creates a new model in the repository
@@ -266,7 +372,7 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 
 // UpdateModelCredentials writes one or more credential fields on the model's
 // Parameters jsonb. Models are not pooled per-instance the way MCP clients
-// are (each call to GetEmbeddingModel/GetChatModel rebuilds the client from
+// are (each call to GetEmbeddingModel rebuilds the client from
 // the current Parameters), so no explicit cache invalidation is required —
 // the next call will pick up the new credential automatically.
 func (s *modelService) UpdateModelCredentials(
@@ -584,85 +690,6 @@ func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rera
 
 	logger.Info(ctx, "Rerank model initialized successfully")
 	return reranker, nil
-}
-
-// GetChatModel retrieves and initializes a chat model instance
-// Takes a model ID and returns a Chat interface implementation
-func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.Chat, error) {
-	// Check if model ID is empty
-	if modelId == "" {
-		logger.Error(ctx, "Model ID is empty")
-		return nil, errors.New("model ID cannot be empty")
-	}
-
-	tenantID := types.MustTenantIDFromContext(ctx)
-
-	// Get the model directly from repository to avoid status checks
-	model, err := s.repo.GetByID(ctx, tenantID, modelId)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id":  modelId,
-			"tenant_id": tenantID,
-		})
-		return nil, err
-	}
-
-	if model == nil {
-		logger.Error(ctx, "Chat model not found")
-		return nil, ErrModelNotFound
-	}
-
-	logger.Infof(ctx, "Getting chat model: %s, source: %s", model.Name, model.Source)
-
-	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
-
-	chatModel, err := chat.NewChat(chat.ConfigFromModel(model, appID, appSecret), s.ollamaService)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id":   model.ID,
-			"model_name": model.Name,
-		})
-		return nil, err
-	}
-
-	return chatModel, nil
-}
-
-// GetVLMModel retrieves and initializes a vision language model instance.
-func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM, error) {
-	if modelId == "" {
-		return nil, errors.New("model ID cannot be empty")
-	}
-
-	tenantID := types.MustTenantIDFromContext(ctx)
-
-	model, err := s.repo.GetByID(ctx, tenantID, modelId)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id":  modelId,
-			"tenant_id": tenantID,
-		})
-		return nil, err
-	}
-
-	if model == nil {
-		return nil, ErrModelNotFound
-	}
-
-	logger.Infof(ctx, "Getting VLM model: %s, source: %s", model.Name, model.Source)
-
-	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
-
-	vlmModel, err := vlm.NewVLM(vlm.ConfigFromModel(model, appID, appSecret), s.ollamaService)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id":   model.ID,
-			"model_name": model.Name,
-		})
-		return nil, err
-	}
-
-	return vlmModel, nil
 }
 
 // Note: default model selection logic has been removed; models no longer

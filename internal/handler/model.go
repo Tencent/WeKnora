@@ -14,7 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/catalog"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -435,17 +435,22 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			c.Error(errors.NewBadRequestError("query cannot be empty"))
 			return
 		}
-		instance, callErr := h.service.GetChatModel(ctx, id)
+		record, callErr := h.service.GetModelByID(ctx, id)
 		if callErr != nil {
 			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
 			return
 		}
-		messages := make([]chat.Message, 0, 2)
-		if strings.TrimSpace(opts.SystemPrompt) != "" {
-			messages = append(messages, chat.Message{Role: "system", Content: opts.SystemPrompt})
+		invokeCfg, callErr := h.service.BuildModelConfig(ctx, record)
+		if callErr != nil {
+			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
+			return
 		}
-		messages = append(messages, chat.Message{Role: "user", Content: input})
-		chatOpts := &chat.ChatOptions{}
+		messages := make([]invoke.Message, 0, 2)
+		if strings.TrimSpace(opts.SystemPrompt) != "" {
+			messages = append(messages, invoke.TextMessage("system", opts.SystemPrompt))
+		}
+		messages = append(messages, invoke.TextMessage("user", input))
+		chatOpts := &invoke.ChatOptions{Messages: messages}
 		if opts.Temperature != nil {
 			chatOpts.Temperature = *opts.Temperature
 		}
@@ -453,17 +458,16 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			chatOpts.TopP = *opts.TopP
 		}
 		if opts.MaxTokens != nil {
-			chatOpts.MaxTokens = *opts.MaxTokens
+			chatOpts.MaxCompletionTokens = *opts.MaxTokens
 		}
 		chatOpts.Thinking = opts.Thinking
-		chatConfig := chat.ConfigFromModel(model, "", "")
-		thinkingControl := chat.EffectiveThinkingControl(chatConfig)
+		thinkingControl := invoke.EffectiveThinkingControl(invokeCfg)
 		observations["stream"] = true
 		observations["requested_thinking"] = opts.Thinking != nil && *opts.Thinking
 		observations["thinking_control"] = thinkingControl
 		observations["thinking_parameter_sent"] = opts.Thinking != nil && thinkingControl != "none"
 
-		stream, callErr := instance.ChatStream(ctx, messages, chatOpts)
+		stream, callErr := invoke.ChatStream(ctx, invokeCfg, chatOpts)
 		if callErr != nil {
 			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
 			return
@@ -506,12 +510,33 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			c.Error(errors.NewBadRequestError("image file is required"))
 			return
 		}
-		instance, callErr := h.service.GetVLMModel(ctx, id)
+		record, callErr := h.service.GetModelByID(ctx, id)
 		if callErr != nil {
 			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
 			return
 		}
-		result, callErr := instance.Predict(ctx, [][]byte{fileBytes}, input)
+		invokeCfg, callErr := h.service.BuildModelConfig(ctx, record)
+		if callErr != nil {
+			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
+			return
+		}
+		resp, callErr := invoke.Chat(ctx, invokeCfg, &invoke.ChatOptions{
+			// v1 vlm.Predict defaults: temperature 0.1, MaxTokens 5000, image
+			// inlined as a data URI with auto detail (text prompt first).
+			Temperature:         0.1,
+			MaxCompletionTokens: 5000,
+			Messages: []invoke.Message{{
+				Role: "user",
+				Content: []invoke.Part{
+					{Text: input},
+					{Image: &invoke.ImageRef{URL: invoke.ImageDataURI(fileBytes)}},
+				},
+			}},
+		})
+		result := ""
+		if resp != nil {
+			result = resp.Content
+		}
 		observations["answer_characters"] = len([]rune(result))
 		writeModelDebugResult(c, started, requestPreview, result, callErr, observations)
 	case types.ModelTypeASR:

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -145,13 +145,13 @@ func TestTopicMergeEval(t *testing.T) {
 		t.Skip("set WEKNORA_MEMORY_EVAL_MODEL (plus base URL / API key) to score topic merging")
 	}
 	set := loadTopicEvalSet(t)
-	chatModel, err := newEvalChatModel(modelID)
+	cfg, err := newEvalModelConfig(modelID)
 	require.NoError(t, err)
 
 	correct := 0
 	for _, c := range set.Cases {
 		user := fmt.Sprintf("已有主题：\n[0] %s\n\n新出现的说法：\n[0] %s\n", c.Tracked, c.Incoming)
-		decided, err := askTopicMerge(chatModel, user)
+		decided, err := askTopicMerge(cfg, user)
 		if err != nil {
 			t.Errorf("%s: %v", c.Name, err)
 			continue
@@ -168,12 +168,13 @@ func TestTopicMergeEval(t *testing.T) {
 
 // askTopicMerge runs the real adjudication prompt for one pair and reports
 // whether the model merged them.
-func askTopicMerge(chatModel chat.Chat, user string) (bool, error) {
+func askTopicMerge(cfg *invoke.ModelConfig, user string) (bool, error) {
 	thinking := false
-	response, err := chatModel.Chat(context.Background(), []chat.Message{
-		{Role: "system", Content: topicAdjudicationPrompt},
-		{Role: "user", Content: user},
-	}, &chat.ChatOptions{
+	response, err := invoke.Chat(context.Background(), cfg, &invoke.ChatOptions{
+		Messages: []invoke.Message{
+			invoke.TextMessage("system", topicAdjudicationPrompt),
+			invoke.TextMessage("user", user),
+		},
 		Temperature:         0,
 		MaxCompletionTokens: 800,
 		Thinking:            &thinking,

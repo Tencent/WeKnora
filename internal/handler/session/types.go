@@ -42,25 +42,39 @@ type ImageAttachment struct {
 
 // CreateKnowledgeQARequest defines the request structure for knowledge QA
 type CreateKnowledgeQARequest struct {
-	Query               string   `json:"query"              binding:"required"` // Query text for knowledge base search
-	KnowledgeBaseIDs    []string `json:"knowledge_base_ids"`                    // Selected knowledge base ID for this request
-	KnowledgeIds        []string `json:"knowledge_ids"`                         // Selected knowledge ID for this request
-	AgentEnabled        bool     `json:"agent_enabled"`                         // Whether agent mode is enabled for this request
-	AgentID             string   `json:"agent_id"`                              // Selected custom agent ID (backend resolves shared agent and its workspace from share relation)
-	AgentSourceTenantID uint64   `json:"agent_source_tenant_id,omitempty"`      // Optional disambiguator; backend still verifies the share relation
-	WebSearchEnabled    bool     `json:"web_search_enabled"`                    // Whether web search is enabled for this request
-	SummaryModelID      string   `json:"summary_model_id"`                      // Optional summary model ID for this request (overrides session default)
+	Query            string   `json:"query" binding:"required"` // Query text for knowledge base search
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`       // Selected knowledge base ID for this request
+	// KnowledgeIDs are the selected knowledge (file) IDs for this request.
+	KnowledgeIDs []string `json:"knowledge_ids"`
+	AgentEnabled bool     `json:"agent_enabled"` // Whether agent mode is enabled for this request
+	// AgentID selects the custom agent; the backend resolves the shared agent
+	// and its workspace from the share relation.
+	AgentID string `json:"agent_id"`
+	// AgentSourceTenantID disambiguates the share relation; the backend still
+	// verifies it.
+	AgentSourceTenantID uint64 `json:"agent_source_tenant_id,omitempty"`
+	WebSearchEnabled    bool   `json:"web_search_enabled"` // Whether web search is enabled for this request
+	// SummaryModelID overrides the session default summary model.
+	SummaryModelID string `json:"summary_model_id"`
 	// Optional per-request thinking level override (platform vocabulary).
-	ThinkingLevel         string                       `json:"thinking_level,omitempty"`
-	MCPServiceIDs         []string                     `json:"mcp_service_ids"`              // Per-request MCP services selected via @mention
-	SkillNames            []string                     `json:"skill_names"`                  // Per-request Skills selected via @mention
-	TagIDs                []string                     `json:"tag_ids"`                      // @mentioned tag IDs (display/debug; scoped via MentionedItems)
-	MentionedItems        []MentionedItemRequest       `json:"mentioned_items"`              // @mentioned knowledge bases and files
-	DisableTitle          bool                         `json:"disable_title"`                // Whether to disable auto title generation
-	Images                []ImageAttachment            `json:"images"`                       // Attached images for multimodal chat
-	AttachmentUploads     []AttachmentUpload           `json:"attachment_uploads,omitempty"` // Attached files (documents, audio, etc.)
-	AttachmentIDs         []string                     `json:"attachment_ids,omitempty"`     // Pre-uploaded session-scoped document IDs
-	Channel               string                       `json:"channel"`                      // Source channel: "web", "api", "im", etc.
+	ThinkingLevel string `json:"thinking_level,omitempty"`
+	// Per-request MCP services / Skills / @mentions (tag IDs are display and
+	// debug only; scoped via MentionedItems).
+	MCPServiceIDs  []string               `json:"mcp_service_ids"`
+	SkillNames     []string               `json:"skill_names"`
+	TagIDs         []string               `json:"tag_ids"`
+	MentionedItems []MentionedItemRequest `json:"mentioned_items"`
+	// DisableTitle turns off auto title generation.
+	DisableTitle bool `json:"disable_title"`
+	// Images: attached images for multimodal chat. AttachmentIDs: pre-uploaded
+	// session-scoped document IDs. AttachmentUploads: attached files.
+	Images        []ImageAttachment `json:"images"`
+	AttachmentIDs []string          `json:"attachment_ids,omitempty"`
+	// Channel: source channel, e.g. "web", "api", "im".
+	Channel string `json:"channel"`
+
+	AttachmentUploads []AttachmentUpload `json:"attachment_uploads,omitempty"` // attached files (docs, audio, etc.)
+
 	SuggestionAttribution *types.SuggestionAttribution `json:"suggestion_attribution,omitempty"`
 }
 

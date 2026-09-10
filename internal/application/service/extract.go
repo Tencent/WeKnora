@@ -15,8 +15,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -332,9 +332,9 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		return nil
 	}
 
-	chatModel, err := s.modelService.GetChatModel(ctx, p.ModelID)
+	invokeCfg, err := buildModelConfigByID(ctx, s.modelService, p.ModelID)
 	if err != nil {
-		logger.Errorf(ctx, "failed to get chat model: %v", err)
+		logger.Errorf(ctx, "failed to build chat model config: %v", err)
 		handleErr = err
 		return err
 	}
@@ -351,7 +351,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
-	extractor := chatpipeline.NewExtractor(chatModel, template)
+	extractor := chatpipeline.NewExtractor(invokeCfg, template)
 	graph, err := extractor.Extract(ctx, chunk.Content)
 	if err != nil {
 		handleErr = err
@@ -506,7 +506,7 @@ type extractionResources struct {
 	knowledge      *types.Knowledge
 	knowledgeBase  *types.KnowledgeBase
 	tenant         *types.Tenant
-	chatModel      chat.Chat
+	invokeCfg      *invoke.ModelConfig
 	embeddingModel embedding.Embedder
 	retrieveEngine *retriever.CompositeRetrieveEngine
 }
@@ -544,9 +544,9 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 	}
 
 	// 获取聊天模型（用于生成摘要）
-	chatModel, err := s.modelService.GetChatModel(ctx, payload.SummaryModel)
+	invokeCfg, err := buildModelConfigByID(ctx, s.modelService, payload.SummaryModel)
 	if err != nil {
-		logger.Errorf(ctx, "failed to get chat model: %v", err)
+		logger.Errorf(ctx, "failed to build chat model config: %v", err)
 		return nil, err
 	}
 
@@ -578,7 +578,7 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 		knowledge:      knowledge,
 		knowledgeBase:  kb,
 		tenant:         tenantInfo,
-		chatModel:      chatModel,
+		invokeCfg:      invokeCfg,
 		embeddingModel: embeddingModel,
 		retrieveEngine: retrieveEngine,
 	}, nil
@@ -668,7 +668,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 		}
 		customInstructions = ResolveProcessConfig(resources.knowledgeBase, processOverrides).ChunkingConfig.TableMetadataInstructions
 	}
-	tableDescription, err := s.generateTableDescription(ctx, resources.chatModel, tableSchema.TableName,
+	tableDescription, err := s.generateTableDescription(ctx, resources.invokeCfg, tableSchema.TableName,
 		schemaDesc, sampleDesc, customInstructions)
 	if err != nil {
 		logger.Errorf(ctx, "failed to generate table description: %v", err)
@@ -676,7 +676,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	}
 	logger.Debugf(ctx, "table describe of knowledge %s: %s", resources.knowledge.ID, tableDescription)
 
-	columnDescription, err := s.generateColumnDescriptions(ctx, resources.chatModel, tableSchema.TableName,
+	columnDescription, err := s.generateColumnDescriptions(ctx, resources.invokeCfg, tableSchema.TableName,
 		schemaDesc, sampleDesc, customInstructions)
 	if err != nil {
 		logger.Errorf(ctx, "failed to generate column descriptions: %v", err)
@@ -820,7 +820,7 @@ func (s *DataTableSummaryService) cleanupOnFailure(ctx context.Context, resource
 }
 
 // generateTableDescription generates a summary description for the entire table
-func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, chatModel chat.Chat,
+func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, invokeCfg *invoke.ModelConfig,
 	tableName, schemaDesc, sampleDesc, customInstructions string,
 ) (string, error) {
 	prompt := fmt.Sprintf(tableDescriptionPromptTemplate, tableName, schemaDesc, sampleDesc)
@@ -828,12 +828,11 @@ func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, 
 	// logger.Debugf(ctx, "generateTableDescription prompt: %s", prompt)
 
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
-		{Role: "user", Content: prompt},
-	}, &chat.ChatOptions{
-		Temperature: 0.3,
-		MaxTokens:   512,
-		Thinking:    &thinking,
+	response, err := invoke.Chat(ctx, invokeCfg, &invoke.ChatOptions{
+		Messages:            []invoke.Message{invoke.TextMessage("user", prompt)},
+		Temperature:         0.3,
+		MaxCompletionTokens: 512,
+		Thinking:            &thinking,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to generate table description: %w", err)
@@ -843,7 +842,7 @@ func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, 
 }
 
 // generateColumnDescriptions generates descriptions for each column in batch
-func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context, chatModel chat.Chat,
+func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context, invokeCfg *invoke.ModelConfig,
 	tableName, schemaDesc, sampleDesc, customInstructions string,
 ) (string, error) {
 	// Build batch prompt for all columns
@@ -853,12 +852,11 @@ func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context
 
 	// Call LLM once for all columns
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
-		{Role: "user", Content: prompt},
-	}, &chat.ChatOptions{
-		Temperature: 0.3,
-		MaxTokens:   2048,
-		Thinking:    &thinking,
+	response, err := invoke.Chat(ctx, invokeCfg, &invoke.ChatOptions{
+		Messages:            []invoke.Message{invoke.TextMessage("user", prompt)},
+		Temperature:         0.3,
+		MaxCompletionTokens: 2048,
+		Thinking:            &thinking,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to generate column descriptions: %w", err)

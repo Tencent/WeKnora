@@ -16,7 +16,7 @@ func TestAgentWebToolsFollowRuntimeSwitch(t *testing.T) {
 		config := &types.AgentConfig{
 			AllowedTools: []string{tools.ToolWebSearch, tools.ToolWebFetch}, WebSearchEnabled: enabled,
 		}
-		require.NoError(t, svc.registerTools(t.Context(), registry, config, nil, nil, "web-session"))
+		require.NoError(t, svc.registerTools(t.Context(), registry, config, nil, "web-session"))
 		for _, name := range []string{tools.ToolWebSearch, tools.ToolWebFetch} {
 			_, err := registry.GetTool(name)
 			assert.Equal(t, enabled, err == nil, name)

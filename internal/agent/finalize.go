@@ -9,7 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -44,9 +44,9 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	systemPrompt := e.buildSystemPrompt(ctx)
 	userTurn := e.RenderUserTurnContent(sessionID, query)
 
-	messages := []chat.Message{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userTurn},
+	messages := []invoke.Message{
+		invoke.TextMessage("system", systemPrompt),
+		invoke.TextMessage("user", userTurn),
 	}
 
 	// Add all tool call results as context
@@ -59,10 +59,8 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 				hasRetrievedImage = true
 			}
 			modelOutput := e.modelContext.ModelToolResultForTool(toolCall.Name, toolCall.Result)
-			messages = append(messages, chat.Message{
-				Role:    "user",
-				Content: fmt.Sprintf("Tool %s returned: %s", toolCall.Name, modelOutput),
-			})
+			messages = append(messages, invoke.TextMessage(
+				"user", fmt.Sprintf("Tool %s returned: %s", toolCall.Name, modelOutput)))
 			logger.Debugf(ctx, "[Agent][FinalAnswer] Added tool result [Step-%d][Tool-%d]: %s (output: %d chars)",
 				stepIdx+1, toolIdx+1, toolCall.Name, len(toolCall.Result.Output))
 		}
@@ -87,10 +85,7 @@ Requirements:
 
 Now generate the final answer:`, query, imageRequirement)
 
-	messages = append(messages, chat.Message{
-		Role:    "user",
-		Content: finalPrompt,
-	})
+	messages = append(messages, invoke.TextMessage("user", finalPrompt))
 
 	// Generate a single ID for this entire final answer stream
 	answerID := generateEventID("answer")
@@ -101,7 +96,7 @@ Now generate the final answer:`, query, imageRequirement)
 	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
-		&chat.ChatOptions{
+		&invoke.ChatOptions{
 			Temperature:         e.config.Temperature,
 			MaxCompletionTokens: budget,
 			PromptCacheKey:      sessionID,

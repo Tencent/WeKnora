@@ -16,7 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -35,7 +35,7 @@ const langfuseQueryPreview = 2000
 type AgentEngine struct {
 	config               *types.AgentConfig
 	toolRegistry         *agenttools.ToolRegistry
-	chatModel            chat.Chat
+	chatConfig           *invoke.ModelConfig
 	eventBus             *event.EventBus
 	knowledgeBasesInfo   []*KnowledgeBaseInfo    // Detailed knowledge base information for prompt
 	selectedDocs         []*SelectedDocumentInfo // User-selected documents (via @ mention)
@@ -64,13 +64,13 @@ type AgentEngine struct {
 }
 
 // ImageDescriberFunc generates a text description of an image.
-// Signature matches vlm.VLM.Predict so it can be injected without importing the vlm package.
+// Signature matches v1 vlm.Predict so it can be injected without any model-package import.
 type ImageDescriberFunc func(ctx context.Context, imgBytes []byte, prompt string) (string, error)
 
 // NewAgentEngine creates a new agent engine
 func NewAgentEngine(
 	config *types.AgentConfig,
-	chatModel chat.Chat,
+	chatConfig *invoke.ModelConfig,
 	toolRegistry *agenttools.ToolRegistry,
 	eventBus *event.EventBus,
 	knowledgeBasesInfo []*KnowledgeBaseInfo,
@@ -88,7 +88,7 @@ func NewAgentEngine(
 	engine := &AgentEngine{
 		config:               config,
 		toolRegistry:         toolRegistry,
-		chatModel:            chatModel,
+		chatConfig:           chatConfig,
 		eventBus:             eventBus,
 		knowledgeBasesInfo:   knowledgeBasesInfo,
 		selectedDocs:         selectedDocs,
@@ -98,7 +98,7 @@ func NewAgentEngine(
 		modelContext:         modelcontext.NewRegistry(config.CitationsEnabled()),
 	}
 
-	engine.compactor = compaction.New(chatModel, tokenEst, compaction.Settings{
+	engine.compactor = compaction.New(chatConfig, tokenEst, compaction.Settings{
 		Enabled:          true,
 		MaxContextTokens: config.MaxContextTokens,
 		ReserveTokens:    engine.contextReserveTokens(),
@@ -153,7 +153,7 @@ func (e *AgentEngine) SetMemoryPrompt(prompt string) {
 // NewAgentEngineWithSkills creates a new agent engine with skills support
 func NewAgentEngineWithSkills(
 	config *types.AgentConfig,
-	chatModel chat.Chat,
+	chatConfig *invoke.ModelConfig,
 	toolRegistry *agenttools.ToolRegistry,
 	eventBus *event.EventBus,
 	knowledgeBasesInfo []*KnowledgeBaseInfo,
@@ -164,7 +164,7 @@ func NewAgentEngineWithSkills(
 ) *AgentEngine {
 	engine := NewAgentEngine(
 		config,
-		chatModel,
+		chatConfig,
 		toolRegistry,
 		eventBus,
 		knowledgeBasesInfo,
@@ -213,7 +213,7 @@ func (e *AgentEngine) GetSkillsManager() *skills.Manager {
 //
 // The baseline already contains the assistant reply, as the `output` half of
 // the round that produced it. So the delta must start *after* that reply.
-func (e *AgentEngine) estimateCurrentTokens(messages []chat.Message) int {
+func (e *AgentEngine) estimateCurrentTokens(messages []invoke.Message) int {
 	if baseline := contextTokensFromUsage(e.lastUsage); baseline > 0 &&
 		e.lastSentMsgCount > 0 && e.lastSentMsgCount <= len(messages) {
 		return baseline + e.tokenEstimator.EstimateMessages(messages[e.deltaStart(messages):])
@@ -222,7 +222,7 @@ func (e *AgentEngine) estimateCurrentTokens(messages []chat.Message) int {
 }
 
 // deltaStart is the first message not already accounted for by e.lastUsage.
-func (e *AgentEngine) deltaStart(messages []chat.Message) int {
+func (e *AgentEngine) deltaStart(messages []invoke.Message) int {
 	start := e.lastSentMsgCount
 	// The reply to the previous request lands here. Its tokens are the usage's
 	// completion half, so skip it — but only if it is really there, since a
@@ -249,7 +249,7 @@ func contextTokensFromUsage(usage types.TokenUsage) int {
 func (e *AgentEngine) Execute(
 	ctx context.Context,
 	sessionID, messageID, query string,
-	llmContext []chat.Message,
+	llmContext []invoke.Message,
 	imageURLs ...[]string,
 ) (*types.AgentState, error) {
 	logger.Infof(ctx, "[Agent] Starting execution: session=%s, message=%s, query_len=%d, context_msgs=%d",
@@ -430,8 +430,8 @@ func (e *AgentEngine) executeLoop(
 	ctx context.Context,
 	state *types.AgentState,
 	query string,
-	messages []chat.Message,
-	tools []chat.Tool,
+	messages []invoke.Message,
+	tools []invoke.ToolDef,
 	sessionID string,
 	messageID string,
 ) (*types.AgentState, error) {
@@ -535,8 +535,8 @@ const (
 func (e *AgentEngine) runReActIteration(
 	parentCtx context.Context,
 	state *types.AgentState,
-	messagesPtr *[]chat.Message,
-	tools []chat.Tool,
+	messagesPtr *[]invoke.Message,
+	tools []invoke.ToolDef,
 	sessionID, assistantMessageID, query string,
 	emptyRetries, consecutiveSameContent *int,
 	lastResponseContent *string,
@@ -720,10 +720,8 @@ func (e *AgentEngine) runReActIteration(
 			if *emptyRetries <= maxEmptyResponseRetries {
 				logger.Warnf(ctx, "[Agent][Round-%d] Empty content with stop - retrying (%d/%d)",
 					round, *emptyRetries, maxEmptyResponseRetries)
-				*messagesPtr = append(*messagesPtr, chat.Message{
-					Role:    "user",
-					Content: "Please provide your complete answer now as plain text.",
-				})
+				*messagesPtr = append(*messagesPtr, invoke.TextMessage(
+					"user", "Please provide your complete answer now as plain text."))
 				return iterOutcomeContinue, nil
 			}
 			// Retries exhausted — use fallback message rather than empty answer

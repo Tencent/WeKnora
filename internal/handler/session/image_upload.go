@@ -8,6 +8,7 @@ import (
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -66,7 +67,12 @@ func (h *Handler) analyzeImageAttachments(ctx context.Context, images []ImageAtt
 		return
 	}
 
-	vlmModel, err := h.modelService.GetVLMModel(ctx, vlmModelID)
+	record, err := h.modelService.GetModelByID(ctx, vlmModelID)
+	if err != nil {
+		logger.Warnf(ctx, "No VLM model available for image analysis, skipping: %v", err)
+		return
+	}
+	invokeCfg, err := h.modelService.BuildModelConfig(ctx, record)
 	if err != nil {
 		logger.Warnf(ctx, "No VLM model available for image analysis, skipping: %v", err)
 		return
@@ -83,11 +89,22 @@ func (h *Handler) analyzeImageAttachments(ctx context.Context, images []ImageAtt
 			continue
 		}
 		prompt := buildImageAnalysisPrompt(userQuery)
-		analysis, analysisErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		resp, analysisErr := invoke.Chat(ctx, invokeCfg, &invoke.ChatOptions{
+			// v1 vlm.Predict defaults: temperature 0.1, MaxTokens 5000.
+			Temperature:         0.1,
+			MaxCompletionTokens: 5000,
+			Messages: []invoke.Message{{
+				Role: "user",
+				Content: []invoke.Part{
+					{Text: prompt},
+					{Image: &invoke.ImageRef{URL: invoke.ImageDataURI(imgBytes)}},
+				},
+			}},
+		})
 		if analysisErr != nil {
 			logger.Warnf(ctx, "VLM analysis failed for image %d: %v", i, analysisErr)
-		} else {
-			img.Caption = analysis
+		} else if resp != nil {
+			img.Caption = resp.Content
 		}
 	}
 }

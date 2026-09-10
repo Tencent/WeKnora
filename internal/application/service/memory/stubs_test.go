@@ -4,15 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/hibiken/asynq"
 )
 
@@ -117,6 +122,9 @@ func (s *stubMessageRepo) ListMessagesBySessionAfterTime(
 
 // stubModelService hands out a chat model that replays a canned response and
 // records what it was asked.
+// stubModelService builds the unified call configuration through a canned
+// chat adapter (own httptest server, no real vendor) and records what it was
+// asked.
 type stubModelService struct {
 	interfaces.ModelService
 
@@ -147,11 +155,14 @@ type stubModelService struct {
 	// prompts records every transcript the model was asked about, so a test
 	// can assert that no message went unread across several runs.
 	prompts []string
-	calls   int
+	// calls is how many times the model has been asked anything.
+	calls int
 	// failNext makes the next call fail, standing in for a provider outage.
 	failNext bool
 	// lastFormat records the response schema the caller asked for.
 	lastFormat json.RawMessage
+	// cfg is the unified call config handed out by BuildModelConfig.
+	cfg *invoke.ModelConfig
 }
 
 // workspaceModels is what ListModels returns, so a test can reproduce a
@@ -174,11 +185,77 @@ func (s *stubModelService) GetEmbeddingModel(
 	return s.embedder, nil
 }
 
-func (s *stubModelService) GetChatModel(_ context.Context, modelID string) (chat.Chat, error) {
+func (s *stubModelService) GetModelByID(_ context.Context, modelID string) (*types.Model, error) {
 	s.mu.Lock()
 	s.requestedModelID = modelID
 	s.mu.Unlock()
-	return &stubChatModel{owner: s}, nil
+	return &types.Model{}, nil
+}
+
+func (s *stubModelService) BuildModelConfig(context.Context, *types.Model) (*invoke.ModelConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cfg == nil {
+		s.startFake()
+	}
+	return s.cfg, nil
+}
+
+// startFake registers the canned chat adapter and its server once. The
+// registry swap is process-wide; memory tests run sequentially.
+func (s *stubModelService) startFake() {
+	_ = os.Setenv("SSRF_WHITELIST", "127.0.0.1,::1,localhost")
+	secutils.ResetSSRFWhitelistForTest()
+	secutils.ResetSSRFOutboundValidationCacheForTest()
+	srv := httptest.NewServer(http.HandlerFunc(s.handle))
+	r := &invoke.Registry{}
+	_ = r.Register(stubChatAdapter{owner: s})
+	invoke.Default = r
+	s.cfg = &invoke.ModelConfig{
+		Provider:  "memory-stub",
+		ModelID:   "m-1",
+		ModelName: "stub-model",
+		BaseURL:   srv.URL,
+	}
+}
+
+func (s *stubModelService) handle(w http.ResponseWriter, r *http.Request) {
+	var opts invoke.ChatOptions
+	_ = json.NewDecoder(r.Body).Decode(&opts)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var prompt strings.Builder
+	for i := range opts.Messages {
+		prompt.WriteString(opts.Messages[i].Text())
+		prompt.WriteString("\n")
+	}
+	s.calls++
+	s.lastPrompt = prompt.String()
+	s.lastFormat = opts.Format
+	s.lastBudget = opts.MaxCompletionTokens
+	s.lastThinking = opts.Thinking
+	s.prompts = append(s.prompts, prompt.String())
+
+	w.Header().Set("Content-Type", "application/json")
+	if s.failNext {
+		s.failNext = false
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"stub model outage"}}`))
+		return
+	}
+	if s.calls <= s.truncateUntilCall {
+		_ = json.NewEncoder(w).Encode(invoke.ChatResponse{Content: "", FinishReason: "length"})
+		return
+	}
+	body := s.response
+	for marker, canned := range s.responseFor {
+		if strings.Contains(prompt.String(), marker) {
+			body = canned
+			break
+		}
+	}
+	_ = json.NewEncoder(w).Encode(invoke.ChatResponse{Content: body, FinishReason: s.finishReason})
 }
 
 // callCount is how many times the model has been asked anything.
@@ -224,54 +301,50 @@ func (s *stubModelService) seenTranscripts() string {
 	return strings.Join(s.prompts, "\n---\n")
 }
 
-type stubChatModel struct {
+// stubChatAdapter is the canned chat facet the memory stub registers under the
+// "memory-stub" provider; the canned replies and recording live on the owner
+// stubModelService and are applied in handle().
+type stubChatAdapter struct {
 	owner *stubModelService
 }
 
-func (m *stubChatModel) Chat(
-	_ context.Context, messages []chat.Message, opts *chat.ChatOptions,
-) (*types.ChatResponse, error) {
-	var prompt strings.Builder
-	for _, message := range messages {
-		prompt.WriteString(message.Content)
-		prompt.WriteString("\n")
-	}
-	m.owner.mu.Lock()
-	defer m.owner.mu.Unlock()
-	m.owner.calls++
-	m.owner.lastPrompt = prompt.String()
-	if opts != nil {
-		m.owner.lastFormat = opts.Format
-		m.owner.lastBudget = opts.MaxCompletionTokens
-		m.owner.lastThinking = opts.Thinking
-	}
-	m.owner.prompts = append(m.owner.prompts, prompt.String())
-	if m.owner.failNext {
-		m.owner.failNext = false
-		return nil, errors.New("stub model outage")
-	}
-	if m.owner.calls <= m.owner.truncateUntilCall {
-		return &types.ChatResponse{Content: "", FinishReason: "length"}, nil
-	}
+func (a stubChatAdapter) Provider() string { return "memory-stub" }
 
-	body := m.owner.response
-	for marker, canned := range m.owner.responseFor {
-		if strings.Contains(prompt.String(), marker) {
-			body = canned
-			break
-		}
-	}
-	return &types.ChatResponse{Content: body, FinishReason: m.owner.finishReason}, nil
+func (a stubChatAdapter) Capabilities() provider.Capabilities {
+	return provider.Capabilities{Chat: &provider.ChatCaps{}}
 }
 
-func (m *stubChatModel) ChatStream(
-	_ context.Context, _ []chat.Message, _ *chat.ChatOptions,
-) (<-chan types.StreamResponse, error) {
-	return nil, errors.New("not used")
+func (a stubChatAdapter) BuildChatRequest(
+	ep invoke.Endpoint, _ string, opts *invoke.ChatOptions,
+) (*invoke.Request, error) {
+	body, err := json.Marshal(opts)
+	if err != nil {
+		return nil, err
+	}
+	return &invoke.Request{
+		Method: http.MethodPost,
+		URL:    ep.BaseURL + "/v1/chat/completions",
+		Header: http.Header{"Content-Type": []string{"application/json"}},
+		Body:   body,
+		Stream: opts != nil && opts.Stream,
+	}, nil
 }
 
-func (m *stubChatModel) GetModelName() string { return "stub" }
-func (m *stubChatModel) GetModelID() string   { return "stub" }
+func (a stubChatAdapter) ParseChatResponse(
+	_ int, _ http.Header, body []byte,
+) (*invoke.ChatResponse, error) {
+	var resp invoke.ChatResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (a stubChatAdapter) TranslateStreamEvent(
+	_ *invoke.StreamBridgeState, _ invoke.StreamChunk,
+) (*invoke.StreamEvent, error) {
+	return nil, nil
+}
 
 // stubEnqueueOptions captures the scheduling decisions a test cares about.
 type stubEnqueueOptions struct {

@@ -3,6 +3,7 @@ package chatpipeline
 import (
 	"context"
 
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -58,7 +59,7 @@ func (p *PluginChatCompletion) OnEvent(
 	pipelineInfo(ctx, "Completion", "model_call", map[string]interface{}{
 		"chat_model": chatManage.ChatModelID,
 	})
-	chatResponse, err := chatModel.Chat(ctx, chatMessages, opt)
+	chatResponse, err := invoke.Chat(ctx, chatModel, opt)
 	if err != nil {
 		pipelineError(ctx, "Completion", "model_call", map[string]interface{}{
 			"chat_model": chatManage.ChatModelID,
@@ -66,8 +67,9 @@ func (p *PluginChatCompletion) OnEvent(
 		})
 		return ErrModelCall.WithError(err)
 	}
-	modelContext.DecodeResponse(chatResponse)
-	if orphans := modelContext.OrphanResourceHandles(chatResponse.Content); len(orphans) > 0 {
+	typesResponse := chatResponse.ToTypes()
+	modelContext.DecodeResponse(typesResponse)
+	if orphans := modelContext.OrphanResourceHandles(typesResponse.Content); len(orphans) > 0 {
 		pipelineWarn(ctx, "Completion", "orphan_resource_handles", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 			"handles":    orphans,
@@ -75,11 +77,11 @@ func (p *PluginChatCompletion) OnEvent(
 	}
 
 	pipelineInfo(ctx, "Completion", "output", map[string]interface{}{
-		"answer_preview":    chatResponse.Content,
-		"finish_reason":     chatResponse.FinishReason,
-		"completion_tokens": chatResponse.Usage.CompletionTokens,
-		"prompt_tokens":     chatResponse.Usage.PromptTokens,
+		"answer_preview":    typesResponse.Content,
+		"finish_reason":     typesResponse.FinishReason,
+		"completion_tokens": typesResponse.Usage.CompletionTokens,
+		"prompt_tokens":     typesResponse.Usage.PromptTokens,
 	})
-	chatManage.ChatResponse = chatResponse
+	chatManage.ChatResponse = typesResponse
 	return next()
 }

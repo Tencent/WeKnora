@@ -303,7 +303,7 @@ func TestLongSilenceStartsANewSegment(t *testing.T) {
 	svc.ScheduleExtraction(ctx, "session-1", "m2", "model-1")
 	drainExtractions(t, svc, enqueuer)
 
-	require.Equal(t, 2, models.calls, "a six-hour gap must split the run into two calls")
+	require.Equal(t, 2, models.callCount(), "a six-hour gap must split the run into two calls")
 	seen := models.seenTranscripts()
 	require.Contains(t, seen, "上午聊的事")
 	require.Contains(t, seen, "晚上聊的事")
@@ -331,7 +331,7 @@ func TestSeparateSessionsAreSeparateSegments(t *testing.T) {
 	svc.ScheduleExtraction(ctx, "session-b", "b1", "model-1")
 	drainExtractions(t, svc, enqueuer)
 
-	require.Equal(t, 2, models.calls)
+	require.Equal(t, 2, models.callCount())
 	for _, prompt := range models.prompts {
 		block := transcriptBlock(prompt)
 		require.False(t, strings.Contains(block, "会话A的话") && strings.Contains(block, "会话B的话"),

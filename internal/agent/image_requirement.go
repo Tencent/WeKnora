@@ -3,7 +3,7 @@ package agent
 import (
 	"strings"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -32,17 +32,17 @@ func stepContainsMarkdownImage(step types.AgentStep) bool {
 	return false
 }
 
-func appendAgentRetrievedImageRequirement(messages []chat.Message) []chat.Message {
+func appendAgentRetrievedImageRequirement(messages []invoke.Message) []invoke.Message {
 	for _, message := range messages {
-		if strings.Contains(message.Content, agentRetrievedImageRequirementMarker) {
+		if strings.Contains(message.Text(), agentRetrievedImageRequirementMarker) {
 			return messages
 		}
 	}
 	// Append after the current prefix instead of editing the system prompt.
 	// Provider prompt caches are prefix matches: mutating the system block
 	// invalidates the tools and the whole transcript for every later round.
-	return append(messages, chat.Message{
-		Role:    "user",
-		Content: strings.TrimSpace(agentRetrievedImageSystemRequirement),
-	})
+	return append(messages, invoke.TextMessage(
+		"user",
+		strings.TrimSpace(agentRetrievedImageSystemRequirement),
+	))
 }

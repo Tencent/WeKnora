@@ -13,7 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -31,8 +31,8 @@ type streamLLMResult struct {
 // emitFunc: callback to emit each chunk event
 func (e *AgentEngine) streamLLMToEventBus(
 	ctx context.Context,
-	messages []chat.Message,
-	opts *chat.ChatOptions,
+	messages []invoke.Message,
+	opts *invoke.ChatOptions,
 	emitFunc func(chunk *types.StreamResponse, fullContent string),
 ) (*streamLLMResult, error) {
 	logger.Debugf(ctx, "[Agent][Stream] Starting LLM stream with %d messages", len(messages))
@@ -52,10 +52,15 @@ func (e *AgentEngine) streamLLMToEventBus(
 	lastChunkAt.Store(time.Now().UnixNano())
 
 	// Model-context encoding owns codec ordering and temporary-handle lifecycle.
+	// Messages ride inside opts for the unified entry (invoke.ChatStream).
 	messages = e.modelContext.EncodeMessages(messages)
-	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
+	if opts == nil {
+		opts = &invoke.ChatOptions{}
+	}
+	opts.Messages = messages
+	prefixFingerprint := invoke.PromptPrefixFingerprint(messages, opts)
 	llmCtx = types.WithLLMCallMetadata(llmCtx, "agent_round", prefixFingerprint)
-	stream, err := e.chatModel.ChatStream(llmCtx, messages, opts)
+	stream, err := invoke.ChatStream(llmCtx, e.chatConfig, opts)
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][Stream] Failed to start LLM stream: %v", err)
 		return nil, err
@@ -240,8 +245,8 @@ func watchStreamStall(
 // streamThinkingToEventBus streams the thinking process through EventBus
 func (e *AgentEngine) streamThinkingToEventBus(
 	ctx context.Context,
-	messages []chat.Message,
-	tools []chat.Tool,
+	messages []invoke.Message,
+	tools []invoke.ToolDef,
 	iteration int,
 	sessionID string,
 ) (*types.ChatResponse, error) {
@@ -250,7 +255,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		iteration+1, e.config.Temperature, len(tools), e.config.Thinking, budget)
 
 	parallelToolCalls := true
-	opts := &chat.ChatOptions{
+	opts := &invoke.ChatOptions{
 		Temperature:         e.config.Temperature,
 		MaxCompletionTokens: budget,
 		Tools:               tools,
@@ -479,7 +484,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 // the history in place: the caller has to keep the compacted list, or the next
 // round rebuilds the request that was just rejected.
 func (e *AgentEngine) callLLMWithRetry(
-	ctx context.Context, messagesPtr *[]chat.Message, tools []chat.Tool,
+	ctx context.Context, messagesPtr *[]invoke.Message, tools []invoke.ToolDef,
 	state *types.AgentState, query string, iteration int, sessionID string,
 ) (*types.ChatResponse, error) {
 	round := iteration + 1
@@ -499,21 +504,22 @@ func (e *AgentEngine) callLLMWithRetry(
 		msg := messages[i]
 		if msg.Role == "tool" {
 			logger.Debugf(ctx, "[Agent][Round-%d] msg[%d]: role=tool, name=%s, len=%d",
-				round, i, msg.Name, len(msg.Content))
+				round, i, msg.Name, len(msg.Text()))
 		} else if len(msg.ToolCalls) > 0 {
 			tcNames := make([]string, len(msg.ToolCalls))
 			for j, tc := range msg.ToolCalls {
 				tcNames[j] = tc.Function.Name
 			}
 			logger.Debugf(ctx, "[Agent][Round-%d] msg[%d]: role=%s, len=%d, tool_calls=%v",
-				round, i, msg.Role, len(msg.Content), tcNames)
+				round, i, msg.Role, len(msg.Text()), tcNames)
 		} else {
-			preview := msg.Content
+			content := msg.Text()
+			preview := content
 			if len(preview) > 100 {
 				preview = preview[:100] + "..."
 			}
 			logger.Debugf(ctx, "[Agent][Round-%d] msg[%d]: role=%s, len=%d, content=%s",
-				round, i, msg.Role, len(msg.Content), preview)
+				round, i, msg.Role, len(content), preview)
 		}
 	}
 	common.PipelineInfo(ctx, "Agent", "think_start", map[string]interface{}{

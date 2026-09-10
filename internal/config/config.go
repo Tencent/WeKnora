@@ -555,6 +555,11 @@ func LoadConfig() (*Config, error) {
 	if cfg.PromptTemplates != nil && cfg.Conversation != nil {
 		backfillConversationDefaults(&cfg)
 	}
+	// Deliberately OUTSIDE the PromptTemplates gate: a deployment with no
+	// prompt_templates directory (loadPromptTemplates returns nil) still gets
+	// its legacy summary.max_tokens migrated (model-mgmt v2 budget field
+	// unification — callers read only MaxCompletionTokens).
+	backfillSummaryBudget(&cfg)
 
 	// Load built-in agent definitions (i18n-aware) from builtin_agents.yaml
 	if err := types.LoadBuiltinAgentsConfig(configDir); err != nil {
@@ -943,6 +948,20 @@ func applyAuditDefaults(cfg *Config) {
 		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
 			cfg.Audit.RetentionDays = n
 		}
+	}
+}
+
+// backfillSummaryBudget migrates the legacy summary.max_tokens budget onto
+// MaxCompletionTokens (model-mgmt v2 budget field unification: callers read
+// only MaxCompletionTokens). Runs on every config load, independent of the
+// prompt-templates gate; an explicit max_completion_tokens always wins.
+func backfillSummaryBudget(cfg *Config) {
+	if cfg.Conversation == nil || cfg.Conversation.Summary == nil {
+		return
+	}
+	s := cfg.Conversation.Summary
+	if s.MaxCompletionTokens == 0 && s.MaxTokens > 0 {
+		s.MaxCompletionTokens = s.MaxTokens
 	}
 }
 

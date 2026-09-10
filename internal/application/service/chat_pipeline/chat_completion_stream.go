@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -62,7 +63,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		"system_prompt": chatMessages[0].Content,
 	})
 	pipelineInfo(ctx, "Stream", "user_message", map[string]interface{}{
-		"content": chatMessages[len(chatMessages)-1].Content,
+		"content": chatMessages[len(chatMessages)-1].Text(),
 	})
 	// EventBus is required for event-driven streaming
 	if chatManage.EventBus == nil {
@@ -81,7 +82,8 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	pipelineInfo(ctx, "Stream", "model_call", map[string]interface{}{
 		"chat_model": chatManage.ChatModelID,
 	})
-	responseChan, err := chatModel.ChatStream(ctx, chatMessages, opt)
+	opt.Messages = chatMessages
+	responseChan, err := invoke.ChatStream(ctx, chatModel, opt)
 	if err != nil {
 		pipelineError(ctx, "Stream", "model_call", map[string]interface{}{
 			"chat_model": chatManage.ChatModelID,

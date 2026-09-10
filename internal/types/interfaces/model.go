@@ -4,10 +4,9 @@ import (
 	"context"
 
 	"github.com/Tencent/WeKnora/internal/models/asr"
-	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
-	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -38,12 +37,16 @@ type ModelService interface {
 	GetEmbeddingModelForTenant(ctx context.Context, modelId string, tenantID uint64) (embedding.Embedder, error)
 	// GetRerankModel gets a rerank model
 	GetRerankModel(ctx context.Context, modelId string) (rerank.Reranker, error)
-	// GetChatModel gets a chat model
-	GetChatModel(ctx context.Context, modelId string) (chat.Chat, error)
-	// GetVLMModel gets a vision language model
-	GetVLMModel(ctx context.Context, modelId string) (vlm.VLM, error)
 	// GetASRModel gets an automatic speech recognition model
 	GetASRModel(ctx context.Context, modelId string) (asr.ASR, error)
+
+	// BuildModelConfig assembles the unified invoke.ModelConfig from a model
+	// record through the single shared constructor (design §6.1/§6.8): the
+	// three credential slots with the WeKnoraCloud tenant fallback plus the
+	// legacy local-record provider/base-url mapping. Wave-2 caller sweep
+	// routes every construction path (service, handler test-connection form
+	// models) through this.
+	BuildModelConfig(ctx context.Context, model *types.Model) (*invoke.ModelConfig, error)
 }
 
 // ModelRepository defines the model repository interface

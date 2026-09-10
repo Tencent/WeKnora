@@ -81,8 +81,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/models/catalog"
-	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+	_ "github.com/Tencent/WeKnora/internal/models/invoke/adapters" // invoke adapter registration (§6.2)
 	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
@@ -450,7 +451,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Wire the chat package's local image resolver so multimodal chat can read
 	// local:// images that live under a tenant's configured storage PathPrefix
 	// (which is not encoded in the local:// URL).
-	must(container.Invoke(registerChatLocalImageResolver))
+	must(container.Invoke(registerModelInvocationWiring))
 
 	// Router configuration
 	logger.Debugf(ctx, "[Container] Registering router and starting task server...")
@@ -474,18 +475,24 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	return container
 }
 
-// registerChatLocalImageResolver wires the chat package's LocalImageResolver
-// hook. Stored local:// URLs are relative to the resolved storage base dir and
-// do NOT encode the owning tenant's configured PathPrefix, so resolving them to
-// disk bytes requires rebuilding the FileService from that tenant's storage
-// config. The owning tenant is parsed from the URL's first path segment, which
-// correctly handles cross-tenant shared resources (e.g. shared KB images).
-func registerChatLocalImageResolver(
+// registerModelInvocationWiring wires the unified invoke entry (design §6.4):
+// the local image resolver feeds the entry's image preprocessing stage.
+func registerModelInvocationWiring(
 	tenantRepo interfaces.TenantRepository,
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
 ) {
-	chat.LocalImageResolver = func(storageURL string) ([]byte, bool) {
+	invoke.LocalImageResolver = buildLocalImageResolver(tenantRepo, storageResolver, resourceCatalog)
+}
+
+// buildLocalImageResolver constructs the stored-image → bytes resolver backing
+// the unified invoke entry's local image hook.
+func buildLocalImageResolver(
+	tenantRepo interfaces.TenantRepository,
+	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalog interfaces.ResourceCatalog,
+) func(storageURL string) ([]byte, bool) {
+	return func(storageURL string) ([]byte, bool) {
 		ctx := context.Background()
 		physicalPath, resource, err := resourceCatalog.ResolvePath(ctx, storageURL)
 		if err != nil {

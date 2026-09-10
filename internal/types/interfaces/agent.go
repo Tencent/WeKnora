@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -25,7 +25,7 @@ type AgentEngine interface {
 	Execute(
 		ctx context.Context,
 		sessionID, messageID, query string,
-		llmContext []chat.Message,
+		llmContext []invoke.Message,
 		imageURLs ...[]string,
 	) (*types.AgentState, error)
 
@@ -42,7 +42,7 @@ type AgentService interface {
 	CreateAgentEngine(
 		ctx context.Context,
 		config *types.AgentConfig,
-		chatModel chat.Chat,
+		chatConfig *invoke.ModelConfig,
 		rerankModel rerank.Reranker,
 		eventBus *event.EventBus,
 		sessionID, assistantMessageID string,

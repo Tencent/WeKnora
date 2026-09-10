@@ -5,14 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+	"github.com/Tencent/WeKnora/internal/models/invoke/invoketest"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,61 +33,52 @@ func (t *countingTool) Execute(context.Context, json.RawMessage) (*types.ToolRes
 }
 
 // ---------------------------------------------------------------------------
-// Mock: chat.Chat
+// LLM seam: invoketest.Fake (fake chat adapter + httptest, no real HTTP)
 // ---------------------------------------------------------------------------
 
-type mockResponse struct {
-	chunks []types.StreamResponse
+// ansChunk ports a v1 answer chunk (content delta and/or Done marker) to an
+// invoke.StreamEvent.
+func ansChunk(content string, done bool, finishReason string) invoke.StreamEvent {
+	ev := invoke.StreamEvent{Kind: invoke.StreamKindAnswer}
+	if content != "" {
+		ev.Delta = &invoke.ContentDelta{Text: content}
+	}
+	if done {
+		ev.Done = &invoke.FinishInfo{FinishReason: finishReason}
+	}
+	return ev
 }
 
-type mockChat struct {
-	mu        sync.Mutex
-	responses []mockResponse
-	calls     [][]chat.Message
-	opts      []*chat.ChatOptions
-	callCount int
-}
-
-func (m *mockChat) ChatStream(
-	_ context.Context,
-	messages []chat.Message,
-	opts *chat.ChatOptions,
-) (<-chan types.StreamResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.callCount >= len(m.responses) {
-		return nil, fmt.Errorf("unexpected ChatStream call #%d (only %d responses prepared)", m.callCount, len(m.responses))
+// thinkChunk ports a v1 thinking chunk to an invoke.StreamEvent. The
+// thinking-phase Done marker does not cross the invoke seam (one-event-per-
+// chunk contract, see adapters/ollama_stream.go): the caller closes the phase
+// when the first answer chunk arrives.
+func thinkChunk(content string) invoke.StreamEvent {
+	ev := invoke.StreamEvent{Kind: invoke.StreamKindThinking}
+	if content != "" {
+		ev.Delta = &invoke.ContentDelta{Text: content}
 	}
-	resp := m.responses[m.callCount]
-	m.calls = append(m.calls, append([]chat.Message(nil), messages...))
-	m.opts = append(m.opts, opts)
-	m.callCount++
-
-	ch := make(chan types.StreamResponse, len(resp.chunks))
-	for _, chunk := range resp.chunks {
-		ch <- chunk
-	}
-	close(ch)
-	return ch, nil
+	return ev
 }
 
 func TestStreamLLMResourceAliasesRoundTrip(t *testing.T) {
 	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
-	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
-		{ResponseType: types.ResponseTypeAnswer, Content: "![image](res://0"},
-		{ResponseType: types.ResponseTypeAnswer, Content: "001)", Done: true},
-	}}}}
-	engine := newTestEngine(t, model)
+	fake := invoketest.New(t)
+	fake.EnqueueStream(
+		ansChunk("![image](res://0", false, ""),
+		ansChunk("001)", true, ""),
+	)
+	engine := newTestEngine(t, fake)
 	result, err := engine.streamLLMToEventBus(
 		context.Background(),
-		[]chat.Message{{Role: "tool", Content: "source=" + ref}},
+		[]invoke.Message{invoke.TextMessage("tool", "source="+ref)},
 		nil,
 		nil,
 	)
 	require.NoError(t, err)
 	require.Equal(t, "![image]("+ref+")", result.Content)
-	require.Len(t, model.calls, 1)
-	require.Equal(t, "source=res://0001", model.calls[0][0].Content)
+	require.Len(t, fake.Calls(), 1)
+	require.Equal(t, "source=res://0001", fake.Calls()[0].Opts.Messages[0].Text())
 }
 
 // TestStreamLLMSummarySlugSurvivesDocumentCompaction is the regression guard for
@@ -99,39 +90,36 @@ func TestStreamLLMSummarySlugSurvivesDocumentCompaction(t *testing.T) {
 	const summarySlug = "summary/" + knowledgeID
 
 	// The model copies the protected token it saw back into a wiki_read call.
-	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
-		{
-			ResponseType: types.ResponseTypeAnswer,
-			Content:      "reading the summary",
-			ToolCalls: []types.LLMToolCall{{
-				Type: "function",
-				Function: types.FunctionCall{
-					Name:      "wiki_read_page",
-					Arguments: `{"slugs":["res://0001"]}`,
-				},
-			}},
-			Done:         true,
-			FinishReason: "tool_calls",
+	fake := invoketest.New(t)
+	fake.EnqueueStream(
+		ansChunk("reading the summary", false, ""),
+		invoke.StreamEvent{
+			Kind: invoke.StreamKindToolCall,
+			ToolCallDelta: &invoke.ToolCallDelta{
+				Type:      "function",
+				Name:      "wiki_read_page",
+				Arguments: `{"slugs":["res://0001"]}`,
+			},
 		},
-	}}}}
+		ansChunk("", true, "tool_calls"),
+	)
 
-	engine := newTestEngine(t, model)
+	engine := newTestEngine(t, fake)
+
 	// The document UUID is registered as citation alias d1, exactly as the RAG
 	// context (<document id="d1">…) would have registered it upstream.
 	require.Equal(t, "d1", engine.modelContext.RegisterDocument(knowledgeID))
 
-	toolMsg := chat.Message{
-		Role:    "tool",
-		Content: `<link>[[` + summarySlug + `|Weknora 试错记录.md - Summary]]</link>`,
-	}
+	toolMsg := invoke.TextMessage("tool",
+		`<link>[[`+summarySlug+`|Weknora 试错记录.md - Summary]]</link>`)
 	result, err := engine.streamLLMToEventBus(context.Background(),
-		[]chat.Message{toolMsg}, nil, nil)
+		[]invoke.Message{toolMsg}, nil, nil)
 	require.NoError(t, err)
 
 	// What the model actually saw must NOT contain the mangled slug; the UUID
 	// must have been aliased to a res:// token before citation compaction ran.
-	require.Len(t, model.calls, 1)
-	sent := model.calls[0][0].Content
+	require.Len(t, fake.Calls(), 1)
+	sent := fake.Calls()[0].Opts.Messages[0].Text()
 	require.NotContains(t, sent, "summary/d1",
 		"summary slug was clobbered by document-id compaction (encode ordering regressed)")
 	require.Contains(t, sent, "res://", "summary slug must be protected as a res:// token")
@@ -147,24 +135,28 @@ func TestStreamLLMSummarySlugSurvivesDocumentCompaction(t *testing.T) {
 // already streamed. Treating that as a completed turn let the preamble stand in
 // as the final answer and dropped the call, so the stream error must surface.
 func TestStreamLLMToEventBus_ErrorAfterContent_IsNotASuccessfulTurn(t *testing.T) {
-	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
-		{ResponseType: types.ResponseTypeAnswer, Content: "非常好，我已经获取了骨架模板。"},
-		{
-			ResponseType: types.ResponseTypeError,
-			Content:      "context deadline exceeded",
-			Done:         true,
-			FinishReason: types.FinishReasonIncomplete,
-			ToolCalls: []types.LLMToolCall{{
-				ID: "call-1",
-				Function: types.FunctionCall{
-					Name:      "write_sandbox_file",
-					Arguments: "{\"path\":\"/a.html\",\"content\":\"<htm",
-				},
-			}},
+	fake := invoketest.New(t)
+	fake.EnqueueStream(
+		ansChunk("非常好，我已经获取了骨架模板。", false, ""),
+		invoke.StreamEvent{
+			Kind:  invoke.StreamKindError,
+			Delta: &invoke.ContentDelta{Text: "context deadline exceeded"},
+			Done: &invoke.FinishInfo{
+				Incomplete: true,
+				ToolCalls: []invoke.ToolCall{{
+					ID:   "call-1",
+					Type: "function",
+					Function: invoke.FunctionCall{
+						Name:      "write_sandbox_file",
+						Arguments: `{"path":"/a.html","content":"<htm"`,
+					},
+				}},
+			},
 		},
-	}}}}
+	)
 
-	engine := newTestEngine(t, model)
+	engine := newTestEngine(t, fake)
+
 	result, err := engine.streamLLMToEventBus(context.Background(), nil, nil, nil)
 
 	require.Error(t, err, "a broken stream must not be reported as a completed turn")
@@ -177,11 +169,12 @@ func TestStreamLLMToEventBus_ErrorAfterContent_IsNotASuccessfulTurn(t *testing.T
 }
 
 func TestStreamLLMChunkReferenceExpandsBeforeEmission(t *testing.T) {
-	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
-		{ResponseType: types.ResponseTypeAnswer, Content: `answer <ref id="`},
-		{ResponseType: types.ResponseTypeAnswer, Content: `c1"/>`, Done: true},
-	}}}}
-	engine := newTestEngine(t, model)
+	fake := invoketest.New(t)
+	fake.EnqueueStream(
+		ansChunk(`answer <ref id="`, false, ""),
+		ansChunk(`c1"/>`, true, ""),
+	)
+	engine := newTestEngine(t, fake)
 	engine.modelContext.RegisterChunk(modelcontext.ChunkReference{
 		ChunkID:         "chunk-1",
 		KnowledgeBaseID: "kb-1",
@@ -193,7 +186,7 @@ func TestStreamLLMChunkReferenceExpandsBeforeEmission(t *testing.T) {
 }
 
 func TestRunToolCallRejectsUnresolvedHandlesBeforeExecution(t *testing.T) {
-	engine := newTestEngine(t, &mockChat{})
+	engine := newTestEngine(t, nil)
 	engine.toolRegistry = agenttools.NewToolRegistry()
 	tool := newCountingTool("test_unresolved")
 	engine.toolRegistry.RegisterTool(tool)
@@ -220,7 +213,7 @@ func TestRunToolCallRejectsUnresolvedHandlesBeforeExecution(t *testing.T) {
 
 func TestRunToolCallDecodesHandlesAfterJSONRepair(t *testing.T) {
 	newEngine := func() (*AgentEngine, *countingTool) {
-		engine := newTestEngine(t, &mockChat{})
+		engine := newTestEngine(t, nil)
 		engine.toolRegistry = agenttools.NewToolRegistry()
 		tool := newCountingTool(agenttools.ToolListKnowledgeChunks)
 		engine.toolRegistry.RegisterTool(tool)
@@ -257,13 +250,6 @@ func TestRunToolCallDecodesHandlesAfterJSONRepair(t *testing.T) {
 	require.Equal(t, "doc-real", known.Args["knowledge_id"])
 }
 
-func (m *mockChat) Chat(_ context.Context, _ []chat.Message, _ *chat.ChatOptions) (*types.ChatResponse, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *mockChat) GetModelName() string { return "mock-model" }
-func (m *mockChat) GetModelID() string   { return "mock-id" }
-
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
@@ -295,12 +281,12 @@ func withMaxContextTokens(n int) testEngineOption {
 }
 
 func TestWithinIterationBudgetUnlimited(t *testing.T) {
-	unlimited := newTestEngine(t, &mockChat{}, withMaxIterations(types.UnlimitedMaxIterations))
+	unlimited := newTestEngine(t, nil, withMaxIterations(types.UnlimitedMaxIterations))
 	require.True(t, unlimited.withinIterationBudget(0))
 	require.True(t, unlimited.withinIterationBudget(10_000))
 	require.Equal(t, "unlimited", unlimited.maxIterationsDisplay())
 
-	capped := newTestEngine(t, &mockChat{}, withMaxIterations(3))
+	capped := newTestEngine(t, nil, withMaxIterations(3))
 	require.True(t, capped.withinIterationBudget(0))
 	require.True(t, capped.withinIterationBudget(2))
 	require.False(t, capped.withinIterationBudget(3))
@@ -311,7 +297,7 @@ func TestWithinIterationBudgetUnlimited(t *testing.T) {
 // expressed as a fraction of the window gets this wrong in both directions —
 // too little room on a small window, needlessly early compaction on a big one.
 func TestContextCompactionThresholdReservesRoomForTheReply(t *testing.T) {
-	engine := newTestEngine(t, &mockChat{},
+	engine := newTestEngine(t, nil,
 		withMaxContextTokens(128000), withMaxCompletionTokens(24576))
 
 	// Reserve is the round's own output budget plus estimation slack.
@@ -320,13 +306,13 @@ func TestContextCompactionThresholdReservesRoomForTheReply(t *testing.T) {
 
 	// A tiny completion budget still keeps a floor of headroom, rather than
 	// letting history run to the very edge of the window.
-	small := newTestEngine(t, &mockChat{},
+	small := newTestEngine(t, nil,
 		withMaxContextTokens(128000), withMaxCompletionTokens(1024))
 	require.Equal(t, compaction.DefaultReserveTokens, small.contextReserveTokens())
 
 	// An unknown window disables compaction rather than guessing.
-	require.Nil(t, newTestEngine(t, &mockChat{}).compactor)
-	require.Zero(t, newTestEngine(t, &mockChat{}).compactor.Settings().Threshold())
+	require.Nil(t, newTestEngine(t, nil).compactor)
+	require.Zero(t, newTestEngine(t, nil).compactor.Settings().Threshold())
 }
 
 // The usage baseline already includes the assistant reply as its `output`
@@ -335,19 +321,19 @@ func TestContextCompactionThresholdReservesRoomForTheReply(t *testing.T) {
 // permanently — inflating the estimate enough to trigger compaction on a
 // context that is nowhere near the threshold.
 func TestEstimateCurrentTokensDoesNotDoubleCountTheReply(t *testing.T) {
-	engine := newTestEngine(t, &mockChat{}, withMaxContextTokens(128000))
+	engine := newTestEngine(t, nil, withMaxContextTokens(128000))
 
-	sent := []chat.Message{
-		{Role: "system", Content: "you are an agent"},
-		{Role: "user", Content: "do the thing"},
+	sent := []invoke.Message{
+		invoke.TextMessage("system", "you are an agent"),
+		invoke.TextMessage("user", "do the thing"),
 	}
-	reply := chat.Message{
-		Role:             "assistant",
-		Content:          "working on it",
-		ReasoningContent: strings.Repeat("deliberating carefully. ", 200),
+	reply := invoke.TextMessage("assistant", "working on it")
+	reply.ReasoningContent = strings.Repeat("deliberating carefully. ", 200)
+	toolResult := invoke.Message{
+		Role: "tool", Name: "t", ToolCallID: "c1",
+		Content: []invoke.Part{{Text: "result"}},
 	}
-	toolResult := chat.Message{Role: "tool", Name: "t", ToolCallID: "c1", Content: "result"}
-	messages := append(append([]chat.Message{}, sent...), reply, toolResult)
+	messages := append(append([]invoke.Message{}, sent...), reply, toolResult)
 
 	// The provider reported this round: 5000 in, and the reply as output.
 	replyTokens := engine.tokenEstimator.EstimateMessage(&reply)
@@ -372,21 +358,18 @@ func TestEstimateCurrentTokensDoesNotDoubleCountTheReply(t *testing.T) {
 // to a no-usage estimate — doing so made a 12k chat with 232 MCP tools look
 // like 117k and compact every round, including the first.
 func TestEstimateCurrentTokensDoesNotCountToolSchemasWithoutUsage(t *testing.T) {
-	engine := newTestEngine(t, &mockChat{}, withMaxContextTokens(128000))
+	engine := newTestEngine(t, nil, withMaxContextTokens(128000))
 
-	messages := []chat.Message{
-		{Role: "system", Content: "you are an agent"},
-		{Role: "user", Content: "do the thing"},
+	messages := []invoke.Message{
+		invoke.TextMessage("system", "you are an agent"),
+		invoke.TextMessage("user", "do the thing"),
 	}
-	tools := make([]chat.Tool, 80)
+	tools := make([]invoke.ToolDef, 80)
 	for i := range tools {
-		tools[i] = chat.Tool{
-			Type: "function",
-			Function: chat.FunctionDef{
-				Name:        fmt.Sprintf("tool_%d", i),
-				Description: strings.Repeat("does something useful. ", 80),
-				Parameters:  []byte(`{"type":"object","properties":{"path":{"type":"string"}}}`),
-			},
+		tools[i] = invoke.ToolDef{
+			Name:        fmt.Sprintf("tool_%d", i),
+			Description: strings.Repeat("does something useful. ", 80),
+			Parameters:  []byte(`{"type":"object","properties":{"path":{"type":"string"}}}`),
 		}
 	}
 
@@ -400,45 +383,39 @@ func TestEstimateCurrentTokensDoesNotCountToolSchemasWithoutUsage(t *testing.T) 
 		"a two-message conversation must not cross the threshold")
 }
 
-// summarizerChat counts summarization calls so a test can prove the engine is
-// not paying for one every round.
-type summarizerChat struct {
-	mockChat
-	calls int
-}
-
-func (s *summarizerChat) Chat(
-	context.Context, []chat.Message, *chat.ChatOptions,
-) (*types.ChatResponse, error) {
-	s.calls++
-	return &types.ChatResponse{Content: "## Goal\ndo the thing", FinishReason: "stop"}, nil
-}
+// Compaction summarization goes through invoketest.Fake non-stream
+// responses; the call count is read from fake.Calls().
 
 // The bug this replaces: inside one ReAct turn nothing was compactable, so
 // every round crossed the threshold, spent a summarization call, and freed
 // nothing. The loop is only broken if a second pass over the compacted context
 // declines to call the summarizer again.
 func TestContextCompactionDoesNotRunEveryRound(t *testing.T) {
-	llm := &summarizerChat{}
-	engine := newTestEngine(t, llm,
+	fake := invoketest.New(t)
+	fake.EnqueueResponse(invoke.ChatResponse{Content: "## Goal\ndo the thing", FinishReason: "stop"})
+	fake.EnqueueResponse(invoke.ChatResponse{Content: "## Goal\ndo the thing", FinishReason: "stop"})
+	engine := newTestEngine(t, fake,
 		withMaxContextTokens(40000), withMaxCompletionTokens(4000))
 
 	// One user message, then many assistant/tool rounds — a ReAct turn with
 	// no turn boundary anywhere in it.
-	messages := []chat.Message{
-		{Role: "system", Content: "you are an agent"},
-		{Role: "user", Content: "build me a deck"},
+	messages := []invoke.Message{
+		invoke.TextMessage("system", "you are an agent"),
+		invoke.TextMessage("user", "build me a deck"),
 	}
 	body := strings.Repeat("tool output content ", 400)
 	for i := 0; i < 20; i++ {
 		id := fmt.Sprintf("call-%d", i)
 		messages = append(messages,
-			chat.Message{Role: "assistant", ToolCalls: []chat.ToolCall{{
+			invoke.Message{Role: "assistant", ToolCalls: []invoke.ToolCall{{
 				ID:       id,
 				Type:     "function",
-				Function: chat.FunctionCall{Name: "write_sandbox_file", Arguments: `{"path":"/w/a.html"}`},
+				Function: invoke.FunctionCall{Name: "write_sandbox_file", Arguments: `{"path":"/w/a.html"}`},
 			}}},
-			chat.Message{Role: "tool", Name: "write_sandbox_file", ToolCallID: id, Content: body},
+			invoke.Message{
+				Role: "tool", Name: "write_sandbox_file", ToolCallID: id,
+				Content: []invoke.Part{{Text: body}},
+			},
 		)
 	}
 
@@ -451,7 +428,7 @@ func TestContextCompactionDoesNotRunEveryRound(t *testing.T) {
 	require.True(t, changed)
 	after := engine.tokenEstimator.EstimateMessages(compacted)
 	require.Less(t, after, before/2, "compaction has to actually free room")
-	callsAfterFirst := llm.calls
+	callsAfterFirst := len(fake.Calls())
 	require.Positive(t, callsAfterFirst)
 
 	// Second round over the already-compacted context: no LLM call, because
@@ -460,14 +437,14 @@ func TestContextCompactionDoesNotRunEveryRound(t *testing.T) {
 		context.Background(), compacted, 2, after,
 	)
 	require.False(t, changedAgain)
-	require.Equal(t, callsAfterFirst, llm.calls,
+	require.Equal(t, callsAfterFirst, len(fake.Calls()),
 		"a context that cannot shrink must not spend another summarization call")
 }
 
 // Asking for more output than the window can still hold is rejected outright
 // by the provider, which surfaces to the agent as an unexplained failure.
 func TestClampCompletionBudgetToContext(t *testing.T) {
-	engine := newTestEngine(t, &mockChat{},
+	engine := newTestEngine(t, nil,
 		withMaxContextTokens(32000), withMaxCompletionTokens(24576))
 
 	// Plenty of room: the configured budget is untouched.
@@ -482,23 +459,26 @@ func TestClampCompletionBudgetToContext(t *testing.T) {
 
 	// Unknown window means nothing to clamp against.
 	require.Equal(t, 24576,
-		newTestEngine(t, &mockChat{}, withMaxCompletionTokens(24576)).
+		newTestEngine(t, nil, withMaxCompletionTokens(24576)).
 			clampCompletionBudgetToContext(999999))
 }
 
 func TestBuildSystemPromptUsesInternalCitationSetting(t *testing.T) {
-	model := &mockChat{}
-	enabledEngine := newTestEngine(t, model)
+	enabledEngine := newTestEngine(t, nil)
 	require.Contains(t, enabledEngine.buildSystemPrompt(context.Background()), "Source citations are enabled")
 
-	disabledEngine := newTestEngine(t, model, withCitationsEnabled(false))
+	disabledEngine := newTestEngine(t, nil, withCitationsEnabled(false))
 	prompt := disabledEngine.buildSystemPrompt(context.Background())
 	require.Contains(t, prompt, "Source citations are disabled")
 	require.NotContains(t, prompt, "Source citations are enabled")
 }
 
-func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) *AgentEngine {
+func newTestEngine(t *testing.T, fake *invoketest.Fake, opts ...testEngineOption) *AgentEngine {
 	t.Helper()
+	if fake == nil {
+		// No LLM interaction expected; a bare fake still provides a valid config.
+		fake = invoketest.New(t)
+	}
 	cfg := &types.AgentConfig{
 		MaxIterations: 10,
 		Temperature:   0.7,
@@ -508,7 +488,7 @@ func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) 
 	}
 	engine := NewAgentEngine(
 		cfg,
-		chatModel,
+		fake.Config(),
 		nil,
 		event.NewEventBus(),
 		nil,
@@ -520,14 +500,14 @@ func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) 
 	return engine
 }
 
-func emptyMessages() []chat.Message {
-	return []chat.Message{
-		{Role: "system", Content: "You are a test agent."},
-		{Role: "user", Content: "test query"},
+func emptyMessages() []invoke.Message {
+	return []invoke.Message{
+		invoke.TextMessage("system", "You are a test agent."),
+		invoke.TextMessage("user", "test query"),
 	}
 }
 
-func emptyTools() []chat.Tool {
+func emptyTools() []invoke.ToolDef {
 	return nil
 }
 
@@ -542,15 +522,12 @@ func TestExecuteLoop_EmptyContentWithStop_ShouldNotCompleteWithEmpty(t *testing.
 	// analyzeResponse() returns verdict{isDone:true, finalAnswer:""} → BUG: empty answer.
 	//
 	// Prepare 3 responses for initial attempt + 2 retries (after fix).
-	mock := &mockChat{
-		responses: []mockResponse{
-			{chunks: []types.StreamResponse{{Done: true}}},
-			{chunks: []types.StreamResponse{{Done: true}}},
-			{chunks: []types.StreamResponse{{Done: true}}},
-		},
-	}
+	fake := invoketest.New(t)
+	fake.EnqueueStream()
+	fake.EnqueueStream()
+	fake.EnqueueStream()
 
-	engine := newTestEngine(t, mock)
+	engine := newTestEngine(t, fake)
 	state := &types.AgentState{}
 	ctx := context.Background()
 
@@ -568,15 +545,10 @@ func TestExecuteLoop_EmptyContentWithStop_ShouldNotCompleteWithEmpty(t *testing.
 // ---------------------------------------------------------------------------
 
 func TestExecuteLoop_NonEmptyContentWithStop_ShouldComplete(t *testing.T) {
-	mock := &mockChat{
-		responses: []mockResponse{
-			{chunks: []types.StreamResponse{
-				{Content: "Here is my answer", Done: true},
-			}},
-		},
-	}
+	fake := invoketest.New(t)
+	fake.EnqueueStream(ansChunk("Here is my answer", true, ""))
 
-	engine := newTestEngine(t, mock)
+	engine := newTestEngine(t, fake)
 	state := &types.AgentState{}
 	ctx := context.Background()
 
@@ -592,18 +564,13 @@ func TestExecuteLoop_NonEmptyContentWithStop_ShouldComplete(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestExecuteLoop_EmptyThenNonEmpty_ShouldRetryAndComplete(t *testing.T) {
-	mock := &mockChat{
-		responses: []mockResponse{
-			// Round 1: empty content → triggers retry + nudge
-			{chunks: []types.StreamResponse{{Done: true}}},
-			// Round 2: after nudge, LLM produces answer
-			{chunks: []types.StreamResponse{
-				{Content: "Here is the answer.", Done: true},
-			}},
-		},
-	}
+	fake := invoketest.New(t)
+	// Round 1: empty content → triggers retry + nudge
+	fake.EnqueueStream()
+	// Round 2: after nudge, LLM produces answer
+	fake.EnqueueStream(ansChunk("Here is the answer.", true, ""))
 
-	engine := newTestEngine(t, mock)
+	engine := newTestEngine(t, fake)
 	state := &types.AgentState{}
 	ctx := context.Background()
 
@@ -632,18 +599,13 @@ func TestStreamThinkingToEventBus_PropagatesFinishReason(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &mockChat{
-				responses: []mockResponse{
-					{chunks: []types.StreamResponse{
-						{Content: "test content", Done: true, FinishReason: tt.finishReason},
-					}},
-				},
-			}
+			fake := invoketest.New(t)
+			fake.EnqueueStream(ansChunk("test content", true, tt.finishReason))
 
-			engine := newTestEngine(t, mock)
+			engine := newTestEngine(t, fake)
 			ctx := context.Background()
-			msgs := []chat.Message{{Role: "user", Content: "test"}}
-			tools := []chat.Tool{}
+			msgs := []invoke.Message{invoke.TextMessage("user", "test")}
+			tools := []invoke.ToolDef{}
 
 			resp, err := engine.streamThinkingToEventBus(ctx, msgs, tools, 0, "sess-1")
 
@@ -655,65 +617,49 @@ func TestStreamThinkingToEventBus_PropagatesFinishReason(t *testing.T) {
 
 func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
 	t.Run("honors an explicit 4096 budget", func(t *testing.T) {
-		mock := &mockChat{
-			responses: []mockResponse{
-				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
-			},
-		}
-		engine := newTestEngine(t, mock, withMaxCompletionTokens(4096))
+		fake := invoketest.New(t)
+		fake.EnqueueStream(ansChunk("ok", true, "stop"))
+		engine := newTestEngine(t, fake, withMaxCompletionTokens(4096))
 		_, err := engine.streamThinkingToEventBus(context.Background(),
-			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
+			[]invoke.Message{invoke.TextMessage("user", "test")}, nil, 0, "sess-1")
 		require.NoError(t, err)
-		require.Len(t, mock.opts, 1)
-		assert.Zero(t, mock.opts[0].MaxTokens)
-		assert.Equal(t, 4096, mock.opts[0].MaxCompletionTokens)
+		require.Len(t, fake.Calls(), 1)
+		assert.Equal(t, 4096, fake.Calls()[0].Opts.MaxCompletionTokens)
 	})
 
 	t.Run("defaults when unset", func(t *testing.T) {
-		mock := &mockChat{
-			responses: []mockResponse{
-				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
-			},
-		}
-		engine := newTestEngine(t, mock)
+		fake := invoketest.New(t)
+		fake.EnqueueStream(ansChunk("ok", true, "stop"))
+		engine := newTestEngine(t, fake)
 		_, err := engine.streamThinkingToEventBus(context.Background(),
-			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
+			[]invoke.Message{invoke.TextMessage("user", "test")}, nil, 0, "sess-1")
 		require.NoError(t, err)
-		require.Len(t, mock.opts, 1)
-		assert.Zero(t, mock.opts[0].MaxTokens)
-		assert.Equal(t, types.DefaultSmartReasoningMaxCompletionTokens, mock.opts[0].MaxCompletionTokens)
+		require.Len(t, fake.Calls(), 1)
+		assert.Equal(t, types.DefaultSmartReasoningMaxCompletionTokens, fake.Calls()[0].Opts.MaxCompletionTokens)
 	})
 
 	t.Run("defaults to the write-file budget when a sandbox is bound", func(t *testing.T) {
-		mock := &mockChat{
-			responses: []mockResponse{
-				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
-			},
-		}
-		engine := newTestEngine(t, mock, func(cfg *types.AgentConfig) {
+		fake := invoketest.New(t)
+		fake.EnqueueStream(ansChunk("ok", true, "stop"))
+		engine := newTestEngine(t, fake, func(cfg *types.AgentConfig) {
 			cfg.SandboxConfigID = "cfg-a"
 		})
 		_, err := engine.streamThinkingToEventBus(context.Background(),
-			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
+			[]invoke.Message{invoke.TextMessage("user", "test")}, nil, 0, "sess-1")
 		require.NoError(t, err)
-		require.Len(t, mock.opts, 1)
-		assert.Zero(t, mock.opts[0].MaxTokens)
-		assert.Equal(t, types.DefaultAgentMaxCompletionTokens, mock.opts[0].MaxCompletionTokens)
+		require.Len(t, fake.Calls(), 1)
+		assert.Equal(t, types.DefaultAgentMaxCompletionTokens, fake.Calls()[0].Opts.MaxCompletionTokens)
 	})
 
 	t.Run("preserves explicit higher budget", func(t *testing.T) {
-		mock := &mockChat{
-			responses: []mockResponse{
-				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
-			},
-		}
-		engine := newTestEngine(t, mock, withMaxCompletionTokens(64000))
+		fake := invoketest.New(t)
+		fake.EnqueueStream(ansChunk("ok", true, "stop"))
+		engine := newTestEngine(t, fake, withMaxCompletionTokens(64000))
 		_, err := engine.streamThinkingToEventBus(context.Background(),
-			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
+			[]invoke.Message{invoke.TextMessage("user", "test")}, nil, 0, "sess-1")
 		require.NoError(t, err)
-		require.Len(t, mock.opts, 1)
-		assert.Zero(t, mock.opts[0].MaxTokens)
-		assert.Equal(t, 64000, mock.opts[0].MaxCompletionTokens)
+		require.Len(t, fake.Calls(), 1)
+		assert.Equal(t, 64000, fake.Calls()[0].Opts.MaxCompletionTokens)
 	})
 }
 
@@ -724,18 +670,15 @@ func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
 // content (ResponseTypeAnswer) must route the reasoning to thought events and
 // the answer live to final-answer events — never the reverse.
 func TestStreamThinkingToEventBus_RoutesReasoningAndAnswerSeparately(t *testing.T) {
-	mock := &mockChat{
-		responses: []mockResponse{
-			{chunks: []types.StreamResponse{
-				{ResponseType: types.ResponseTypeThinking, Content: "let me reason"},
-				{ResponseType: types.ResponseTypeThinking, Content: "", Done: true},
-				{ResponseType: types.ResponseTypeAnswer, Content: "The answer "},
-				{ResponseType: types.ResponseTypeAnswer, Content: "is 42.", Done: true, FinishReason: "stop"},
-			}},
-		},
-	}
+	fake := invoketest.New(t)
+	fake.EnqueueStream(
+		thinkChunk("let me reason"),
+		thinkChunk(""),
+		ansChunk("The answer ", false, ""),
+		ansChunk("is 42.", true, "stop"),
+	)
 
-	engine := newTestEngine(t, mock)
+	engine := newTestEngine(t, fake)
 	var thoughts, answers string
 	engine.eventBus.On(event.EventAgentThought, func(_ context.Context, evt event.Event) error {
 		if d, ok := evt.Data.(event.AgentThoughtData); ok {
@@ -765,18 +708,10 @@ func TestStreamThinkingToEventBus_RoutesReasoningAndAnswerSeparately(t *testing.
 // their reasoning routed to thought events and only the real answer streamed to
 // the final-answer area.
 func TestStreamThinkingToEventBus_SplitsInlineThinkBlock(t *testing.T) {
-	mock := &mockChat{
-		responses: []mockResponse{
-			{chunks: []types.StreamResponse{
-				{
-					ResponseType: types.ResponseTypeAnswer, Content: "<think>hidden reasoning</think>Visible answer.",
-					Done: true, FinishReason: "stop",
-				},
-			}},
-		},
-	}
+	fake := invoketest.New(t)
+	fake.EnqueueStream(ansChunk("<think>hidden reasoning</think>Visible answer.", true, "stop"))
 
-	engine := newTestEngine(t, mock)
+	engine := newTestEngine(t, fake)
 	var thoughts, answers string
 	engine.eventBus.On(event.EventAgentThought, func(_ context.Context, evt event.Event) error {
 		if d, ok := evt.Data.(event.AgentThoughtData); ok {
@@ -804,16 +739,13 @@ func TestStreamThinkingToEventBus_SplitsInlineThinkBlock(t *testing.T) {
 // the final-answer content appears exactly once instead of streaming under
 // Thinking and then "jumping" to a duplicate answer block.
 func TestExecuteLoop_NaturalStop_DoesNotDuplicateAnswer(t *testing.T) {
-	mock := &mockChat{
-		responses: []mockResponse{
-			{chunks: []types.StreamResponse{
-				{ResponseType: types.ResponseTypeAnswer, Content: "Hello "},
-				{ResponseType: types.ResponseTypeAnswer, Content: "world", Done: true, FinishReason: "stop"},
-			}},
-		},
-	}
+	fake := invoketest.New(t)
+	fake.EnqueueStream(
+		ansChunk("Hello ", false, ""),
+		ansChunk("world", true, "stop"),
+	)
 
-	engine := newTestEngine(t, mock)
+	engine := newTestEngine(t, fake)
 	var answerContent string
 	var doneCount int
 	engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
@@ -842,15 +774,10 @@ func TestExecuteLoop_NaturalStop_DoesNotDuplicateAnswer(t *testing.T) {
 // like OpenAI's stop when no tool calls are present. Otherwise the ReAct loop
 // keeps asking the model again and streams repeated answer chunks.
 func TestExecuteLoop_EndTurnTerminates(t *testing.T) {
-	mock := &mockChat{
-		responses: []mockResponse{
-			{chunks: []types.StreamResponse{
-				{ResponseType: types.ResponseTypeAnswer, Content: "The answer.", Done: true, FinishReason: "end_turn"},
-			}},
-		},
-	}
+	fake := invoketest.New(t)
+	fake.EnqueueStream(ansChunk("The answer.", true, "end_turn"))
 
-	engine := newTestEngine(t, mock)
+	engine := newTestEngine(t, fake)
 	state := &types.AgentState{}
 	_, err := engine.executeLoop(context.Background(), state, "test query",
 		emptyMessages(), emptyTools(), "sess-1", "msg-1")
@@ -858,20 +785,17 @@ func TestExecuteLoop_EndTurnTerminates(t *testing.T) {
 
 	assert.True(t, state.IsComplete)
 	assert.Equal(t, "The answer.", state.FinalAnswer)
-	assert.Equal(t, 1, mock.callCount, "end_turn must end the loop after the first model call")
+	assert.Equal(t, 1, len(fake.Calls()), "end_turn must end the loop after the first model call")
 }
 
 func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *testing.T) {
-	mock := &mockChat{
-		responses: []mockResponse{
-			{chunks: []types.StreamResponse{
-				{ResponseType: types.ResponseTypeAnswer, Content: "final answer", Done: false},
-				{ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: "stop"},
-			}},
-		},
-	}
+	fake := invoketest.New(t)
+	fake.EnqueueStream(
+		ansChunk("final answer", false, ""),
+		ansChunk("", true, "stop"),
+	)
 
-	engine := newTestEngine(t, mock)
+	engine := newTestEngine(t, fake)
 	var finalAnswerEvents []event.AgentFinalAnswerData
 	engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
 		data, ok := evt.Data.(event.AgentFinalAnswerData)

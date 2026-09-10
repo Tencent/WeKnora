@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/config"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -105,9 +105,11 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	// --- Build prompts ---
 	systemContent, userContent := p.buildPrompts(ctx, chatManage, historyList)
 
-	userMsg := chat.Message{Role: "user", Content: userContent}
+	userMsg := invoke.TextMessage("user", userContent)
 	if useImages {
-		userMsg.Images = chatManage.Images
+		for _, img := range chatManage.Images {
+			userMsg.Content = append(userMsg.Content, invoke.Part{Image: &invoke.ImageRef{URL: img}})
+		}
 	}
 
 	maxTokens := 150
@@ -118,10 +120,11 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	// --- Call model ---
 	thinking := false
 	modelCtx := types.WithLLMCallMetadata(ctx, "query_rewrite", "")
-	response, err := rewriteModel.Chat(modelCtx, []chat.Message{
-		{Role: "system", Content: systemContent},
-		userMsg,
-	}, &chat.ChatOptions{
+	response, err := invoke.Chat(modelCtx, rewriteModel, &invoke.ChatOptions{
+		Messages: []invoke.Message{
+			invoke.TextMessage("system", systemContent),
+			userMsg,
+		},
 		Temperature:         0.3,
 		MaxCompletionTokens: maxTokens,
 		Thinking:            &thinking,
@@ -227,10 +230,12 @@ func (p *PluginQueryUnderstand) loadHistory(ctx context.Context, chatManage *typ
 
 // selectModel picks the model for query understanding. When images are present
 // it prefers a vision-capable model. Returns (model, useImages).
-func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *types.ChatManage, hasImages bool) (chat.Chat, bool) {
+func (p *PluginQueryUnderstand) selectModel(
+	ctx context.Context, chatManage *types.ChatManage, hasImages bool,
+) (*invoke.ModelConfig, bool) {
 	if hasImages {
 		if chatManage.ChatModelSupportsVision {
-			m, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+			m, err := buildChatModelConfig(ctx, p.modelService, chatManage.ChatModelID)
 			if err == nil {
 				return m, true
 			}
@@ -240,7 +245,7 @@ func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *typ
 			})
 		}
 		if chatManage.VLMModelID != "" {
-			m, err := p.modelService.GetChatModel(ctx, chatManage.VLMModelID)
+			m, err := buildChatModelConfig(ctx, p.modelService, chatManage.VLMModelID)
 			if err == nil {
 				return m, true
 			}
@@ -259,7 +264,7 @@ func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *typ
 	if chatManage.QueryUnderstandModelID != "" {
 		textModelID = chatManage.QueryUnderstandModelID
 	}
-	m, err := p.modelService.GetChatModel(ctx, textModelID)
+	m, err := buildChatModelConfig(ctx, p.modelService, textModelID)
 	if err != nil {
 		// Fall back to ChatModelID when a dedicated query-understand model was
 		// configured but cannot be resolved (e.g. deleted / disabled).
@@ -269,7 +274,7 @@ func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *typ
 				"query_understand_model_id": chatManage.QueryUnderstandModelID,
 				"error":                     err.Error(),
 			})
-			if fallback, fbErr := p.modelService.GetChatModel(ctx, chatManage.ChatModelID); fbErr == nil {
+			if fallback, fbErr := buildChatModelConfig(ctx, p.modelService, chatManage.ChatModelID); fbErr == nil {
 				return fallback, false
 			}
 		}

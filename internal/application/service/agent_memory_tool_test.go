@@ -34,7 +34,7 @@ func registerToolsFor(
 	t.Helper()
 	registry := tools.NewToolRegistry()
 	svc := &agentService{memoryService: memory}
-	require.NoError(t, svc.registerTools(t.Context(), registry, config, nil, nil, "session-1"))
+	require.NoError(t, svc.registerTools(t.Context(), registry, config, nil, "session-1"))
 	return registry
 }
 
@@ -91,7 +91,7 @@ func TestMemorySearchIsSkippedWhenThereIsNoMemoryService(t *testing.T) {
 	svc := &agentService{}
 	require.NoError(t, svc.registerTools(t.Context(), registry,
 		&types.AgentConfig{AllowedTools: []string{tools.ToolThinking, tools.ToolSearchMemory}},
-		nil, nil, "session-1"))
+		nil, "session-1"))
 
 	require.False(t, hasTool(registry, tools.ToolSearchMemory))
 }

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -152,8 +152,7 @@ func (s *Service) reviewStore(
 	result.Reviewed = len(items)
 	result.Demoted = s.demoteStaleTasks(ctx, scope, items)
 	if force || len(items) >= consolidateMinItems {
-		result.Merged, result.Candidates, result.Skipped =
-			s.mergeRedundant(ctx, scope, cfg, modelID, items, force)
+		result.Merged, result.Candidates, result.Skipped = s.mergeRedundant(ctx, scope, cfg, modelID, items, force)
 	} else {
 		result.Skipped = types.MemoryConsolidationSkipTooFewItems
 	}
@@ -463,7 +462,7 @@ func (s *Service) callConsolidationModel(
 	if modelID == "" || s.modelService == nil {
 		return "", true
 	}
-	chatModel, err := s.modelService.GetChatModel(ctx, modelID)
+	chatModel, err := buildMemoryModelConfig(ctx, s.modelService, modelID)
 	if err != nil || chatModel == nil {
 		logger.Warnf(ctx, "memory: consolidation model unavailable: %v", err)
 		return "", true
@@ -479,10 +478,12 @@ func (s *Service) callConsolidationModel(
 	// model spends this whole budget on its own deliberation and returns
 	// nothing, which here would silently skip every merge.
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
-		{Role: "system", Content: consolidationSystemPrompt},
-		{Role: "user", Content: b.String()},
-	}, &chat.ChatOptions{
+	response, err := invoke.Chat(ctx, chatModel, &invoke.ChatOptions{
+		Messages: []invoke.Message{
+			invoke.TextMessage("system", consolidationSystemPrompt),
+			invoke.TextMessage("user", b.String()),
+		},
+
 		Temperature:         0,
 		MaxCompletionTokens: 600,
 		Thinking:            &thinking,
@@ -506,4 +507,16 @@ func (s *Service) callConsolidationModel(
 		return "", false
 	}
 	return strings.TrimSpace(parsed.Statement), false
+}
+
+// buildMemoryModelConfig resolves the memory model record and builds the
+// unified call configuration (design §6.1/§6.8 single shared constructor).
+func buildMemoryModelConfig(
+	ctx context.Context, modelService interfaces.ModelService, modelID string,
+) (*invoke.ModelConfig, error) {
+	model, err := modelService.GetModelByID(ctx, modelID)
+	if err != nil {
+		return nil, err
+	}
+	return modelService.BuildModelConfig(ctx, model)
 }

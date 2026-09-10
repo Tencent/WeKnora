@@ -18,8 +18,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -761,7 +761,7 @@ const summaryFallbackMaxRunes = 500
 // validateSummaryOutput rejects successful model responses that contain no
 // user-visible text. Treating whitespace-only output as an error lets Asynq
 // retry the summary task instead of persisting description="" as completed.
-func validateSummaryOutput(response *types.ChatResponse) (string, error) {
+func validateSummaryOutput(response *invoke.ChatResponse) (string, error) {
 	if response == nil {
 		return "", errEmptySummaryOutput
 	}
@@ -862,7 +862,7 @@ func sortChunksForSummary(chunks []*types.Chunk) []*types.Chunk {
 
 // getSummary generates a summary for knowledge content using an AI model
 func (s *knowledgeService) getSummary(ctx context.Context,
-	summaryModel chat.Chat, knowledge *types.Knowledge, chunks []*types.Chunk,
+	invokeCfg *invoke.ModelConfig, knowledge *types.Knowledge, chunks []*types.Chunk,
 ) (string, error) {
 	// Get knowledge info from the first chunk
 	if len(chunks) == 0 {
@@ -969,19 +969,14 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	})
 	thinking := false
 	modelCtx := types.WithLLMCallMetadata(ctx, "document_summary", "")
-	summary, err := summaryModel.Chat(modelCtx, []chat.Message{
-		{
-			Role:    "system",
-			Content: summaryPrompt,
+	summary, err := invoke.Chat(modelCtx, invokeCfg, &invoke.ChatOptions{
+		Messages: []invoke.Message{
+			invoke.TextMessage("system", summaryPrompt),
+			invoke.TextMessage("user", contentWithMetadata),
 		},
-		{
-			Role:    "user",
-			Content: contentWithMetadata,
-		},
-	}, &chat.ChatOptions{
-		Temperature: 0.3,
-		MaxTokens:   maxTokens,
-		Thinking:    &thinking,
+		Temperature:         0.3,
+		MaxCompletionTokens: maxTokens,
+		Thinking:            &thinking,
 	})
 	if err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("GetSummary failed")
@@ -1255,14 +1250,14 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 
 	// Initialize chat model for summary. Model resolution failures use the same
 	// retry budget and terminal first-chunk fallback as LLM request failures.
-	chatModel, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
+	invokeCfg, err := buildModelConfigByID(ctx, s.modelService, kb.SummaryModelID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get chat model: %v", err)
 		return handleRetryableSummaryFailure(fmt.Errorf("get chat model: %w", err))
 	}
 
 	// Generate summary
-	summary, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
+	summary, err := s.getSummary(ctx, invokeCfg, knowledge, textChunks)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate summary for knowledge %s: %v", payload.KnowledgeID, err)
 		// Surface the underlying LLM/IO error on the span so the trace UI
@@ -1641,7 +1636,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	})
 
 	// Initialize chat model
-	chatModel, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
+	invokeCfg, err := buildModelConfigByID(ctx, s.modelService, kb.SummaryModelID)
 	if err != nil {
 		exitStatus = "get_chat_model_failed"
 		logger.Errorf(ctx, "Failed to get chat model: %v", err)
@@ -1719,7 +1714,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 
 		generationRevision := chunk.ContentRevision
 		llmCallAttempts++
-		questions, err := s.generateQuestionsWithContext(ctx, chatModel, enrichContent(chunk), prevContent, nextContent,
+		questions, err := s.generateQuestionsWithContext(ctx, invokeCfg, enrichContent(chunk), prevContent, nextContent,
 			knowledge.Title, questionCount, customInstructions)
 		if err != nil {
 			llmCallFailed++
@@ -1952,7 +1947,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		}
 	}
 
-	chatModel, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
+	invokeCfg, err := buildModelConfigByID(ctx, s.modelService, kb.SummaryModelID)
 	if err != nil {
 		exitStatus = "get_chat_model_failed"
 		logger.Errorf(ctx, "Failed to get chat model: %v", err)
@@ -2059,7 +2054,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 
 		generationRevision := chunk.ContentRevision
 		questions, gerr := s.generateQuestionsWithContext(
-			ctx, chatModel, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount,
+			ctx, invokeCfg, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount,
 			customInstructions)
 		if gerr != nil {
 			llmCallFailed++
@@ -2131,7 +2126,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 
 // generateQuestionsWithContext generates questions for a chunk with surrounding context
 func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
-	chatModel chat.Chat, content, prevContent, nextContent, docName string, questionCount int,
+	invokeCfg *invoke.ModelConfig, content, prevContent, nextContent, docName string, questionCount int,
 	customInstructions string,
 ) ([]string, error) {
 	if content == "" || questionCount <= 0 {
@@ -2168,15 +2163,13 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 
 	thinking := false
 	modelCtx := types.WithLLMCallMetadata(ctx, "question_generation", "")
-	response, err := chatModel.Chat(modelCtx, []chat.Message{
-		{
-			Role:    "user",
-			Content: prompt,
+	response, err := invoke.Chat(modelCtx, invokeCfg, &invoke.ChatOptions{
+		Messages: []invoke.Message{
+			invoke.TextMessage("user", prompt),
 		},
-	}, &chat.ChatOptions{
-		Temperature: 0.7,
-		MaxTokens:   512,
-		Thinking:    &thinking,
+		Temperature:         0.7,
+		MaxCompletionTokens: 512,
+		Thinking:            &thinking,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate questions: %w", err)
@@ -2228,7 +2221,7 @@ func (s *knowledgeService) RegenerateChunkQuestions(
 	if kb.SummaryModelID == "" {
 		return nil, fmt.Errorf("summary model is required for question generation")
 	}
-	chatModel, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
+	invokeCfg, err := buildModelConfigByID(ctx, s.modelService, kb.SummaryModelID)
 	if err != nil {
 		return nil, err
 	}
@@ -2252,7 +2245,7 @@ func (s *knowledgeService) RegenerateChunkQuestions(
 		count = 10
 	}
 	questions, err := s.generateQuestionsWithContext(
-		ctx, chatModel, chunk.Content, resolveNeighbor(chunk.PreChunkID),
+		ctx, invokeCfg, chunk.Content, resolveNeighbor(chunk.PreChunkID),
 		resolveNeighbor(chunk.NextChunkID), knowledge.Title, count, config.CustomInstructions,
 	)
 	if err != nil {
@@ -2370,11 +2363,11 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 		return knowledge, generationErr
 	}
 
-	chatModel, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
+	invokeCfg, err := buildModelConfigByID(ctx, s.modelService, kb.SummaryModelID)
 	if err != nil {
 		return handleGenerationFailure(fmt.Errorf("get chat model: %w", err))
 	}
-	summary, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
+	summary, err := s.getSummary(ctx, invokeCfg, knowledge, textChunks)
 	if err != nil {
 		return handleGenerationFailure(err)
 	}

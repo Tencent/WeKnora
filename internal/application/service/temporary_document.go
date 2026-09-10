@@ -505,7 +505,7 @@ func (s *temporaryDocumentService) applyImageUnderstanding(
 func (s *temporaryDocumentService) understandImagesWithVLM(
 	ctx context.Context, vlmModelID string, images [][]byte, scanned, captionFallback bool,
 ) string {
-	model, err := s.modelService.GetVLMModel(ctx, vlmModelID)
+	cfg, err := buildModelConfigByID(ctx, s.modelService, vlmModelID)
 	if err != nil {
 		logger.Warnf(ctx, "temporary document VLM model load failed: %v", err)
 		return ""
@@ -533,7 +533,7 @@ func (s *temporaryDocumentService) understandImagesWithVLM(
 		go func(idx int, img []byte) {
 			defer wg.Done()
 			defer release()
-			ocrText, ocrErr := model.Predict(ctx, [][]byte{img}, ocrPrompt)
+			ocrText, ocrErr := invokeVLMPredict(ctx, cfg, img, ocrPrompt)
 			if ocrErr != nil {
 				logger.Warnf(ctx, "temporary document VLM OCR failed on image %d: %v", idx, ocrErr)
 				return
@@ -557,7 +557,7 @@ func (s *temporaryDocumentService) understandImagesWithVLM(
 	// OCR text. Text-rich images skip this entirely, saving a VLM round-trip.
 	if captionFallback && len(images) > 0 && len(images[0]) > 0 &&
 		ocrRunes < temporaryDocumentOCRSufficientRunes {
-		c, capErr := model.Predict(ctx, [][]byte{images[0]}, buildVLMCaptionPrompt(ctx, types.VLMConfig{}))
+		c, capErr := invokeVLMPredict(ctx, cfg, images[0], buildVLMCaptionPrompt(ctx, types.VLMConfig{}))
 		if capErr != nil {
 			logger.Warnf(ctx, "temporary document VLM caption failed: %v", capErr)
 		} else if caption := strings.TrimSpace(c); caption != "" {

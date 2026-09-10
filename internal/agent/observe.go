@@ -15,7 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -37,8 +37,8 @@ const (
 // currentTokens is the caller's best estimate of the current context size
 // (API-reported Usage when available, BPE estimation of messages otherwise).
 func (e *AgentEngine) manageContextWindow(
-	ctx context.Context, messages []chat.Message, round, currentTokens int,
-) ([]chat.Message, bool) {
+	ctx context.Context, messages []invoke.Message, round, currentTokens int,
+) ([]invoke.Message, bool) {
 	settings := e.compactor.Settings()
 	if !settings.ShouldCompact(currentTokens) {
 		return messages, false
@@ -71,8 +71,8 @@ func (e *AgentEngine) manageContextWindow(
 // help either, and the caller must not keep retrying: a compaction that frees
 // nothing still costs a full summarization round-trip.
 func (e *AgentEngine) runCompaction(
-	ctx context.Context, messages []chat.Message, round int, reason compaction.Reason,
-) ([]chat.Message, bool) {
+	ctx context.Context, messages []invoke.Message, round int, reason compaction.Reason,
+) ([]invoke.Message, bool) {
 	if e.compactor == nil {
 		return messages, false
 	}
@@ -169,8 +169,8 @@ func (e *AgentEngine) responseHitContextLimit(response *types.ChatResponse) bool
 // provider has already told us the window is full and the estimate that let us
 // get here is the thing not to be trusted.
 func (e *AgentEngine) forceCompaction(
-	ctx context.Context, messages []chat.Message, round int,
-) []chat.Message {
+	ctx context.Context, messages []invoke.Message, round int,
+) []invoke.Message {
 	compacted, ok := e.runCompaction(ctx, messages, round, compaction.ReasonOverflow)
 	if !ok {
 		trimmed, _ := e.trimToolResults(ctx, messages, round, e.compactor.Settings())
@@ -183,8 +183,8 @@ func (e *AgentEngine) forceCompaction(
 // of the window. It is the last resort: unlike compaction, what it removes is
 // gone without a summary standing in for it.
 func (e *AgentEngine) trimToolResults(
-	ctx context.Context, messages []chat.Message, round int, settings compaction.Settings,
-) ([]chat.Message, bool) {
+	ctx context.Context, messages []invoke.Message, round int, settings compaction.Settings,
+) ([]invoke.Message, bool) {
 	trimmed, ok := trimToolResultsToBudget(
 		messages, e.tokenEstimator, toolResultBudget(settings.MaxContextTokens),
 	)
@@ -219,10 +219,10 @@ func toolResultBudget(maxContextTokens int) int {
 // window is all recent by construction, and the one result big enough to
 // require trimming is as likely to sit at its head as its tail.
 func trimToolResultsToBudget(
-	messages []chat.Message,
+	messages []invoke.Message,
 	estimator *agenttoken.Estimator,
 	budget int,
-) ([]chat.Message, bool) {
+) ([]invoke.Message, bool) {
 	if estimator == nil || budget <= 0 || len(messages) == 0 {
 		return messages, false
 	}
@@ -239,11 +239,11 @@ func trimToolResultsToBudget(
 		return messages, false
 	}
 
-	out := append([]chat.Message(nil), messages...)
+	out := append([]invoke.Message(nil), messages...)
 	baseCosts := make(map[int]int, len(toolIndexes))
 	remaining := budget
 	for _, idx := range toolIndexes {
-		out[idx].Content = compactedToolResultMarker(messages[idx].Content)
+		out[idx].Content = []invoke.Part{{Text: compactedToolResultMarker(messages[idx].Text())}}
 		cost := estimator.EstimateMessage(&out[idx])
 		baseCosts[idx] = cost
 		remaining -= cost
@@ -276,16 +276,17 @@ func compactedToolResultMarker(content string) string {
 	)
 }
 
-func compactToolMessage(msg chat.Message, maxTokens int, estimator *agenttoken.Estimator) chat.Message {
-	runes := []rune(msg.Content)
+func compactToolMessage(msg invoke.Message, maxTokens int, estimator *agenttoken.Estimator) invoke.Message {
+	text := msg.Text()
+	runes := []rune(text)
 	base := msg
-	base.Content = compactedToolResultMarker(msg.Content)
+	base.Content = []invoke.Part{{Text: compactedToolResultMarker(text)}}
 	if msg.Name == agenttools.ToolDiscoverMCPTools {
 		// Catalog cursors and parameter schemas are structured protocol data.
 		// A head/tail preview can silently remove required fields or constraints.
-		base.Content = "[MCP directory result omitted to fit the context budget. Use smaller list pages. If " +
-			"a single describe result cannot fit, report that limitation; do not invoke a tool " +
-			"using a partial schema.]"
+		base.Content = []invoke.Part{{Text: "[MCP directory result omitted to fit the context budget. Use smaller " +
+			"list pages. If a single describe result cannot fit, report that limitation; " +
+			"do not invoke a tool using a partial schema.]"}}
 		return base
 	}
 	if len(runes) == 0 || estimator.EstimateMessage(&base) >= maxTokens {
@@ -299,12 +300,12 @@ func compactToolMessage(msg chat.Message, maxTokens int, estimator *agenttoken.E
 		head := keep / 4
 		tail := keep - head
 		candidate := base
-		candidate.Content = fmt.Sprintf(
+		candidate.Content = []invoke.Part{{Text: fmt.Sprintf(
 			"%s\n\n%s\n...[tool result preview omitted]...\n%s",
-			base.Content,
+			base.Text(),
 			string(runes[:head]),
 			string(runes[len(runes)-tail:]),
-		)
+		)}}
 		if estimator.EstimateMessage(&candidate) <= maxTokens {
 			best = candidate
 			low = keep + 1
@@ -730,27 +731,22 @@ func composeUserTurnContent(parts ...string) string {
 	return strings.Join(nonEmpty, "\n\n")
 }
 
-// listToolNames returns tool.function names for logging
-func listToolNames(ts []chat.Tool) []string {
+func listToolNames(ts []invoke.ToolDef) []string {
 	names := make([]string, 0, len(ts))
 	for _, t := range ts {
-		names = append(names, t.Function.Name)
+		names = append(names, t.Name)
 	}
 	return names
 }
 
-// buildToolsForLLM builds the tools list for LLM function calling
-func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
+func (e *AgentEngine) buildToolsForLLM() []invoke.ToolDef {
 	functionDefs := e.toolRegistry.GetModelFunctionDefinitions()
-	tools := make([]chat.Tool, 0, len(functionDefs))
+	tools := make([]invoke.ToolDef, 0, len(functionDefs))
 	for _, def := range functionDefs {
-		tools = append(tools, chat.Tool{
-			Type: "function",
-			Function: chat.FunctionDef{
-				Name:        def.Name,
-				Description: def.Description,
-				Parameters:  def.Parameters,
-			},
+		tools = append(tools, invoke.ToolDef{
+			Name:        def.Name,
+			Description: def.Description,
+			Parameters:  def.Parameters,
 		})
 	}
 
@@ -762,29 +758,26 @@ func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
 // the final AgentSteps are written to the assistant message by the SSE handler,
 // and rebuilt from DB on the next turn by service.LoadAgentHistory.
 func (e *AgentEngine) appendToolResults(
-	messages []chat.Message,
+	messages []invoke.Message,
 	step types.AgentStep,
-) []chat.Message {
+) []invoke.Message {
 	// Add assistant message with tool calls (if any)
 	if step.Thought != "" || len(step.ToolCalls) > 0 || step.ReasoningContent != "" {
-		assistantMsg := chat.Message{
-			Role:             "assistant",
-			Content:          step.Thought,
-			ReasoningContent: step.ReasoningContent,
-		}
+		assistantMsg := invoke.TextMessage("assistant", step.Thought)
+		assistantMsg.ReasoningContent = step.ReasoningContent
 
 		// Add tool calls to assistant message (following OpenAI format)
 		if len(step.ToolCalls) > 0 {
-			assistantMsg.ToolCalls = make([]chat.ToolCall, 0, len(step.ToolCalls))
+			assistantMsg.ToolCalls = make([]invoke.ToolCall, 0, len(step.ToolCalls))
 			for _, tc := range step.ToolCalls {
 				// Convert arguments back to JSON string
 				argsJSON, _ := json.Marshal(tc.Args)
 
-				assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, chat.ToolCall{
+				assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, invoke.ToolCall{
 					ID:               tc.ID,
 					Type:             "function",
 					ProviderMetadata: tc.ProviderMetadata,
-					Function: chat.FunctionCall{
+					Function: invoke.FunctionCall{
 						Name:      tc.Name,
 						Arguments: string(argsJSON),
 					},
@@ -799,9 +792,9 @@ func (e *AgentEngine) appendToolResults(
 	for _, toolCall := range step.ToolCalls {
 		resultContent := e.modelContext.ModelToolResultForTool(toolCall.Name, toolCall.Result)
 
-		toolMsg := chat.Message{
+		toolMsg := invoke.Message{
 			Role:       "tool",
-			Content:    resultContent,
+			Content:    []invoke.Part{{Text: resultContent}},
 			ToolCallID: toolCall.ID,
 			Name:       toolCall.Name,
 		}
@@ -845,13 +838,14 @@ var kbToolNames = map[string]bool{
 // redactHistoryKBResults replaces full KB tool results in historical context
 // with brief markers. This prevents the LLM from reusing stale retrieval data
 // when the knowledge base has been modified or switched between turns.
-func redactHistoryKBResults(llmContext []chat.Message) []chat.Message {
-	redacted := make([]chat.Message, 0, len(llmContext))
+func redactHistoryKBResults(llmContext []invoke.Message) []invoke.Message {
+	redacted := make([]invoke.Message, 0, len(llmContext))
 	for _, msg := range llmContext {
 		if msg.Role == "tool" && kbToolNames[msg.Name] {
-			redacted = append(redacted, chat.Message{
-				Role:       msg.Role,
-				Content:    "[Previous retrieval result omitted — knowledge base may have changed. Please perform a fresh search.]",
+			redacted = append(redacted, invoke.Message{
+				Role: msg.Role,
+				Content: []invoke.Part{{Text: "[Previous retrieval result omitted — knowledge base " +
+					"may have changed. Please perform a fresh search.]"}},
 				ToolCallID: msg.ToolCallID,
 				Name:       msg.Name,
 			})
@@ -865,15 +859,15 @@ func redactHistoryKBResults(llmContext []chat.Message) []chat.Message {
 // buildMessagesWithLLMContext builds the message array with LLM context
 func (e *AgentEngine) buildMessagesWithLLMContext(
 	systemPrompt, currentQuery, sessionID string,
-	llmContext []chat.Message,
+	llmContext []invoke.Message,
 	imageURLs []string,
-) []chat.Message {
-	messages := []chat.Message{
-		{Role: "system", Content: systemPrompt},
+) []invoke.Message {
+	messages := []invoke.Message{
+		invoke.TextMessage("system", systemPrompt),
 	}
 
 	if len(llmContext) > 0 {
-		var sanitized []chat.Message
+		var sanitized []invoke.Message
 		if e.config.RetainRetrievalHistory {
 			sanitized = llmContext
 			logger.Infof(context.Background(), "Retaining full retrieval history in context (RetainRetrievalHistory=true)")
@@ -898,10 +892,9 @@ func (e *AgentEngine) buildMessagesWithLLMContext(
 	// final synthesis. Calling buildRuntimeContextBlock directly here would put
 	// durable bound-KB/document IDs into the first model request before the
 	// request-local source registry had seen them.
-	userMsg := chat.Message{
-		Role:    "user",
-		Content: e.RenderUserTurnContent(sessionID, currentQuery),
-		Images:  imageURLs,
+	userMsg := invoke.TextMessage("user", e.RenderUserTurnContent(sessionID, currentQuery))
+	for _, u := range imageURLs {
+		userMsg.Content = append(userMsg.Content, invoke.Part{Image: &invoke.ImageRef{URL: u}})
 	}
 	messages = append(messages, userMsg)
 

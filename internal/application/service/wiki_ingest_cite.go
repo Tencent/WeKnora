@@ -11,7 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"golang.org/x/sync/errgroup"
 )
@@ -71,7 +71,7 @@ type citationPipelineOutcome struct {
 // returns an error — the caller can then fall back to the legacy extractor.
 func (s *wikiIngestService) extractCandidateSlugs(
 	ctx context.Context,
-	chatModel chat.Chat,
+	invokeCfg *invoke.ModelConfig,
 	kbID string,
 	content, lang string,
 	oldPageSlugs map[string]bool,
@@ -93,7 +93,7 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	}
 
 	granularity := batchCtx.ExtractionGranularity.Normalize()
-	raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
+	raw, err := s.generateWithTemplate(ctx, invokeCfg, agent.WikiCandidateSlugPrompt, map[string]string{
 		"Content":             content,
 		"Language":            lang,
 		"PreviousSlugs":       prevSlugsText,
@@ -115,7 +115,7 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	}
 
 	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
-		ctx, chatModel, kbID, result.Entities, result.Concepts, batchCtx,
+		ctx, invokeCfg, kbID, result.Entities, result.Concepts, batchCtx,
 	)
 
 	slugItems := make(map[string]extractedItem, len(result.Entities)+len(result.Concepts))
@@ -255,7 +255,7 @@ func renderChunksXML(batch chunkBatch) string {
 // likewise carry real chunk UUIDs in SourceChunks.
 func (s *wikiIngestService) classifyChunkCitations(
 	ctx context.Context,
-	chatModel chat.Chat,
+	invokeCfg *invoke.ModelConfig,
 	candidatesXML string,
 	chunks []*types.Chunk,
 	lang string,
@@ -280,7 +280,7 @@ func (s *wikiIngestService) classifyChunkCitations(
 		batchIdx := bi
 		eg.Go(func() error {
 			chunksXML := renderChunksXML(batch)
-			raw, err := s.generateWithTemplate(ectx, chatModel, agent.WikiChunkCitationPrompt, map[string]string{
+			raw, err := s.generateWithTemplate(ectx, invokeCfg, agent.WikiChunkCitationPrompt, map[string]string{
 				"CandidateSlugs": candidatesXML,
 				"ChunksXML":      chunksXML,
 				"Language":       lang,
