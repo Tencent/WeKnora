@@ -2589,6 +2589,10 @@ export default {
           label: 'LiteLLM',
           description: 'Self-hosted прокси к 100+ провайдерам (OpenAI, Anthropic, Gemini, Bedrock и др.). Замените URL-заглушку; localhost нужно добавить в SSRF_WHITELIST.'
         },
+        daoxe: {
+          label: 'Daoxe',
+          description: 'OpenAI-совместимый шлюз: сотни моделей (GPT, Claude, Gemini, DeepSeek, Qwen и др., ~25 провайдеров) через один эндпоинт.'
+        },
         zhipu: {
           label: 'Zhipu BigModel',
           description: 'glm-4.7, embedding-3, rerank, etc.'

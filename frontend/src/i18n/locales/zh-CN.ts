@@ -2591,6 +2591,10 @@ export default {
           label: 'LiteLLM',
           description: '自托管代理，统一接入 OpenAI、Anthropic、Gemini、Bedrock 等 100+ 厂商。请将占位 URL 换成可访问地址；localhost 需加入 SSRF_WHITELIST。'
         },
+        daoxe: {
+          label: 'Daoxe',
+          description: 'OpenAI 兼容网关，一个接口接入数百个模型（约 25 家上游厂商：GPT、Claude、Gemini、DeepSeek、Qwen 等）。'
+        },
         zhipu: {
           label: '智谱 BigModel',
           description: 'glm-4.7, embedding-3, rerank, etc.'

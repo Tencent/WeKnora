@@ -34,6 +34,7 @@ WeKnora 支持多种主流 AI 模型服务商，在创建模型时可通过 `par
 | `jina`         | Jina                         | Embedding, Rerank               |
 | `openrouter`   | OpenRouter                   | Chat, VLLM                      |
 | `litellm`      | LiteLLM (self-hosted proxy)  | Chat, Embedding, VLLM           |
+| `daoxe`        | Daoxe (OpenAI-compatible gateway) | Chat, Embedding, VLLM      |
 | `requesty`     | Requesty                     | Chat, Embedding, VLLM           |
 | `gemini`       | Google Gemini                | Chat                            |
 | `modelscope`   | 魔搭 ModelScope              | Chat, Embedding, VLLM           |

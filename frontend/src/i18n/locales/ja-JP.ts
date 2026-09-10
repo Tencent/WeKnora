@@ -4472,6 +4472,10 @@ export default {
           label: 'LiteLLM',
           description: '100以上のプロバイダ（OpenAI、Anthropic、Gemini、Bedrockなど）へのセルフホスト型プロキシです。プレースホルダのURLを置き換えてください。ループバックのホストにはSSRF_WHITELISTの設定が必要です。'
         },
+        daoxe: {
+          label: 'Daoxe',
+          description: 'OpenAI互換ゲートウェイ。1つのエンドポイントで数百のモデル（約25の上位プロバイダ：GPT、Claude、Gemini、DeepSeek、Qwenなど）に接続できます。'
+        },
         requesty: {
           label: 'Requesty',
           description: 'openai/gpt-4o-mini、anthropic/claude-sonnet-4-5など'

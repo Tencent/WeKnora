@@ -37,6 +37,7 @@ func TestWireCompletionTokenField(t *testing.T) {
 		provider.ProviderVolcengine:   completionTokenFieldMaxCompletionTokens,
 		provider.ProviderAliyun:       completionTokenFieldMaxCompletionTokens,
 		provider.ProviderLiteLLM:      completionTokenFieldMaxCompletionTokens,
+		provider.ProviderDaoxe:        completionTokenFieldMaxCompletionTokens,
 		provider.ProviderGemini:       completionTokenFieldMaxCompletionTokens,
 		provider.ProviderWeKnoraCloud: completionTokenFieldMaxCompletionTokens,
 		provider.ProviderHunyuan:      completionTokenFieldMaxCompletionTokens,

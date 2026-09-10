@@ -41,6 +41,8 @@ func TestDetectProvider(t *testing.T) {
 		{"https://litellm.example.com/v1", ProviderLiteLLM},
 		{LiteLLMBaseURL, ProviderLiteLLM},
 		{"http://localhost:4000/v1", ProviderGeneric},
+		{"https://api.daoxe.com/v1", ProviderDaoxe},
+		{DaoxeBaseURL, ProviderDaoxe},
 		{"https://router.requesty.ai/v1", ProviderRequesty},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", ProviderAliyun},
 		{"https://open.bigmodel.cn/api/paas/v4", ProviderZhipu},
@@ -377,5 +379,64 @@ func TestLiteLLMProviderValidation(t *testing.T) {
 			}
 		}
 		assert.True(t, foundEmbed, "LiteLLM should appear for embedding models")
+	})
+}
+
+func TestDaoxeProviderValidation(t *testing.T) {
+	p := &DaoxeProvider{}
+
+	t.Run("valid config", func(t *testing.T) {
+		config := &Config{
+			APIKey:    "test-key",
+			ModelName: "gpt-5.2-chat",
+		}
+		err := p.ValidateConfig(config)
+		assert.NoError(t, err)
+	})
+
+	t.Run("missing API key", func(t *testing.T) {
+		config := &Config{
+			ModelName: "gpt-5.2-chat",
+		}
+		err := p.ValidateConfig(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "API key")
+	})
+
+	t.Run("info", func(t *testing.T) {
+		info := p.Info()
+		assert.Equal(t, ProviderDaoxe, info.Name)
+		assert.Equal(t, "Daoxe", info.DisplayName)
+		assert.True(t, info.RequiresAuth)
+		assert.Equal(t, DaoxeBaseURL, info.DefaultURLs[types.ModelTypeKnowledgeQA])
+		assert.Equal(t, DaoxeBaseURL, info.DefaultURLs[types.ModelTypeEmbedding])
+		assert.Equal(t, DaoxeBaseURL, info.DefaultURLs[types.ModelTypeVLLM])
+		assert.Contains(t, info.ModelTypes, types.ModelTypeKnowledgeQA)
+		assert.Contains(t, info.ModelTypes, types.ModelTypeEmbedding)
+		assert.Contains(t, info.ModelTypes, types.ModelTypeVLLM)
+	})
+
+	t.Run("registered and listed", func(t *testing.T) {
+		got, ok := Get(ProviderDaoxe)
+		require.True(t, ok)
+		require.NotNil(t, got)
+
+		foundChat := false
+		for _, info := range ListByModelType(types.ModelTypeKnowledgeQA) {
+			if info.Name == ProviderDaoxe {
+				foundChat = true
+				break
+			}
+		}
+		assert.True(t, foundChat, "Daoxe should appear for chat models")
+
+		foundEmbed := false
+		for _, info := range ListByModelType(types.ModelTypeEmbedding) {
+			if info.Name == ProviderDaoxe {
+				foundEmbed = true
+				break
+			}
+		}
+		assert.True(t, foundEmbed, "Daoxe should appear for embedding models")
 	})
 }
