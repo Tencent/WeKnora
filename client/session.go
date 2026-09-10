@@ -342,9 +342,11 @@ func (c *Client) KnowledgeQAStream(
 			debugLogger.Debug("sse_event_type_set", "event_type", eventType)
 		}
 
-		// Process lines with data: prefix
+		// Process lines with data: prefix. Multiple data lines within one
+		// event are concatenated with a newline (SSE spec) instead of
+		// overwriting, so events split across several data lines parse.
 		if strings.HasPrefix(line, "data:") {
-			dataBuffer = line[5:] // Remove "data:" prefix
+			dataBuffer = appendSSEData(dataBuffer, line)
 		}
 	}
 
@@ -421,9 +423,11 @@ func (c *Client) ContinueStream(
 			eventType = line[6:] // Remove "event:" prefix
 		}
 
-		// Process lines with data: prefix
+		// Process lines with data: prefix. Multiple data lines within one
+		// event are concatenated with a newline (SSE spec) instead of
+		// overwriting, so events split across several data lines parse.
 		if strings.HasPrefix(line, "data:") {
-			dataBuffer = line[5:] // Remove "data:" prefix
+			dataBuffer = appendSSEData(dataBuffer, line)
 		}
 	}
 

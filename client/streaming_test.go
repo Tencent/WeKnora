@@ -281,3 +281,121 @@ func TestSearchResult_DecodesReferenceIndexes(t *testing.T) {
 		t.Errorf("SubChunkID=%v, want [s1 s2]", r.SubChunkID)
 	}
 }
+
+// splitJSONFrame renders v as a single SSE event whose JSON payload is split
+// across two `data:` lines at a structural comma, reproducing the multi-line
+// wire shape from Tencent/WeKnora#2121. A spec-compliant parser concatenates
+// the data lines with "\n" before parsing; the buggy parser kept only the
+// second fragment and failed to unmarshal.
+func splitJSONFrame(t *testing.T, w io.Writer, v interface{}, eventType string) {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(b)
+	i := strings.IndexByte(s, ',')
+	if i < 0 {
+		t.Fatalf("payload has no structural comma to split: %s", s)
+	}
+	if eventType != "" {
+		fmt.Fprintf(w, "event:%s\n", eventType)
+	}
+	fmt.Fprintf(w, "data: %s\ndata: %s\n\n", s[:i+1], s[i+1:])
+}
+
+// TestProcessAgentSSEStream_MultipleDataLinesReassemble is the regression test
+// for Tencent/WeKnora#2121: an agent-stream event split across multiple `data:`
+// lines must be reassembled before JSON parsing.
+func TestProcessAgentSSEStream_MultipleDataLinesReassemble(t *testing.T) {
+	var buf strings.Builder
+	splitJSONFrame(t, &buf, AgentStreamResponse{
+		ResponseType: AgentResponseTypeAnswer,
+		Content:      "hello",
+		Done:         false,
+	}, "")
+
+	var got []*AgentStreamResponse
+	err := (&Client{}).processAgentSSEStream(strings.NewReader(buf.String()),
+		func(r *AgentStreamResponse) error {
+			got = append(got, r)
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("multi-line agent event failed to parse: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("callbacks=%d, want 1", len(got))
+	}
+	if got[0].ResponseType != AgentResponseTypeAnswer || got[0].Content != "hello" || got[0].Done {
+		t.Errorf("got %+v, want {answer hello false}", got[0])
+	}
+}
+
+// TestKnowledgeQAStream_MultipleDataLinesReassemble covers the knowledge-QA
+// stream parser for Tencent/WeKnora#2121.
+func TestKnowledgeQAStream_MultipleDataLinesReassemble(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		splitJSONFrame(t, w, StreamResponse{ResponseType: ResponseTypeAnswer, Content: "hello"}, "")
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	var content string
+	err := c.KnowledgeQAStream(context.Background(), "sess", &KnowledgeQARequest{Query: "q"},
+		func(e *StreamResponse) error {
+			content = e.Content
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("multi-line knowledge event failed to parse: %v", err)
+	}
+	if content != "hello" {
+		t.Errorf("content=%q, want %q", content, "hello")
+	}
+}
+
+// TestContinueStream_MultipleDataLinesReassemble covers the continue-stream
+// parser for Tencent/WeKnora#2121.
+func TestContinueStream_MultipleDataLinesReassemble(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		splitJSONFrame(t, w, StreamResponse{ResponseType: ResponseTypeAnswer, Content: "hello"}, "message")
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	var content string
+	err := c.ContinueStream(context.Background(), "sess", "msg", func(e *StreamResponse) error {
+		content = e.Content
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("multi-line continue event failed to parse: %v", err)
+	}
+	if content != "hello" {
+		t.Errorf("content=%q, want %q", content, "hello")
+	}
+}
+
+// TestAppendSSEData unit-tests the shared SSE data-line accumulation helper.
+func TestAppendSSEData(t *testing.T) {
+	tests := []struct {
+		name      string
+		buf, line string
+		want      string
+	}{
+		{"first line strips one leading space", "", "data: {\"a\":1}", `{"a":1}`},
+		{"first line without space", "", "data:{\"a\":1}", `{"a":1}`},
+		{"second line joined with newline", `{"a":1,`, "data: \"b\":2}", "{\"a\":1,\n\"b\":2}"},
+		{"empty data line yields empty buffer", "", "data:", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := appendSSEData(tt.buf, tt.line); got != tt.want {
+				t.Fatalf("appendSSEData(%q, %q) = %q, want %q", tt.buf, tt.line, got, tt.want)
+			}
+		})
+	}
+}
