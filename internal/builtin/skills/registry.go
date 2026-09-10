@@ -21,27 +21,28 @@ var catalogJSON []byte
 var packages embed.FS
 
 // Version identifies the currently published built-in bundle.
-const Version = "2026.09.2"
+const Version = "2026.09.5"
 
 // ImageRoot is the installation directory for preloaded skill packages.
 const ImageRoot = "/opt/weknora/builtin/skills"
 
 // Entry describes an embedded skill or an external recommendation.
 type Entry struct {
-	Runtime      string            `json:"runtime"`
-	ID           string            `json:"id"`
-	Name         string            `json:"name"`
-	Title        map[string]string `json:"title"`
-	Description  map[string]string `json:"description"`
-	Category     string            `json:"category"`
-	Distribution string            `json:"distribution"`
-	Publisher    string            `json:"publisher"`
-	License      string            `json:"license"`
-	SourceURL    string            `json:"source_url"`
-	LicenseURL   string            `json:"license_url"`
-	DocsURL      string            `json:"docs_url,omitempty"`
-	Version      string            `json:"version,omitempty"`
-	Digest       string            `json:"digest,omitempty"`
+	Runtime       string            `json:"runtime"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	Title         map[string]string `json:"title"`
+	Description   map[string]string `json:"description"`
+	Category      string            `json:"category"`
+	Distribution  string            `json:"distribution"`
+	Publisher     string            `json:"publisher"`
+	License       string            `json:"license"`
+	SourceURL     string            `json:"source_url"`
+	LicenseURL    string            `json:"license_url"`
+	InstallSource string            `json:"install_source,omitempty"`
+	DocsURL       string            `json:"docs_url,omitempty"`
+	Version       string            `json:"version,omitempty"`
+	Digest        string            `json:"digest,omitempty"`
 }
 
 // List returns catalog entries with digests for embedded resources.
@@ -164,15 +165,17 @@ func MatchesArchiveDigest(name, digest string) bool {
 		return false
 	}
 	sum := sha256.Sum256(archive)
-	if hex.EncodeToString(sum[:]) == digest {
-		return true
+	return hex.EncodeToString(sum[:]) == digest
+}
+
+// FilesForEntry returns resources only when they match the declared package digest.
+func FilesForEntry(entry Entry) (map[string][]byte, error) {
+	files, err := Files(entry.ID)
+	if err != nil {
+		return nil, err
 	}
-	if name == "browser" {
-		oldArchive, err := archiveFiles(legacyBrowserFiles())
-		if err == nil {
-			oldSum := sha256.Sum256(oldArchive)
-			return hex.EncodeToString(oldSum[:]) == digest
-		}
+	if DigestFiles(files) != entry.Digest {
+		return nil, fmt.Errorf("unsupported skill digest: %s", entry.Name)
 	}
-	return false
+	return files, nil
 }

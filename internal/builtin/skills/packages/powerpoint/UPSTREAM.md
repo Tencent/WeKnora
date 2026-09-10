@@ -1,7 +1,6 @@
-# Upstream
+# Upstream source
 
-Source: https://github.com/NousResearch/hermes-agent/tree/e74c4a00ca77c662ffb44bc2986cf877df196dd3/skills/productivity/powerpoint
+OpenAI / openai/skills, commit `e6afb0d74cc75d220df2faf3dd6c635c2dc6a108`, directory `skills/.curated/slides`.
+Apache-2.0; see LICENSE. This is a reviewed public snapshot maintained by WeKnora; upstream retired this catalog.
 
-Commit: `e74c4a00ca77c662ffb44bc2986cf877df196dd3`
-
-WeKnora adapts SKILL.md, runtime paths and dependency manifests. Original instructions are preserved in UPSTREAM_SKILL.md for attribution and review.
+SKILL.md and runtime checks are WeKnora adaptations. UPSTREAM_SKILL.md and imported helpers retain their original bytes.

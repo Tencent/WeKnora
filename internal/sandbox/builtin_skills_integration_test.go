@@ -5,6 +5,7 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -25,12 +26,14 @@ func TestDockerBuiltinSkillsIntegration(t *testing.T) {
 	key := SessionSandboxKey{TenantID: dockerIntegrationTenantID, SessionID: sessionID}
 	manifest, err := mgr.BuiltinSkills(ctx, sessionID)
 	require.NoError(t, err)
-	require.Len(
-		t,
-		builtin.CompatibleEntries(manifest),
-		8,
-		"build the office-browser image with its manifest label first",
-	)
+	profile := os.Getenv("DOCKER_INTEGRATION_PROFILE")
+	if profile == "" {
+		profile = "office-core"
+	}
+	expected, err := builtin.PublishedManifestForProfile(profile)
+	require.NoError(t, err)
+	require.Equal(t, expected, manifest, "image must declare exactly the selected profile")
+	require.Len(t, builtin.CompatibleEntries(manifest), len(expected.Skills))
 	binding, err := mgr.bindings.Get(ctx, key)
 	require.NoError(t, err)
 	require.Nil(t, binding, "metadata discovery must not create a sandbox")

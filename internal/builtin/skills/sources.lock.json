@@ -1,267 +1,252 @@
 {
   "sources": [
     {
+      "repository": "openai/skills",
+      "commit": "45d05d75363abf13f99d09e899d61e07b8010685",
+      "license_path": "skills/.curated/doc/LICENSE.txt",
+      "skills": [
+        {
+          "name": "docx",
+          "path": "skills/.curated/doc"
+        }
+      ],
+      "files": [
+        {
+          "path": "packages/docx/UPSTREAM_SKILL.md",
+          "source_path": "skills/.curated/doc/SKILL.md",
+          "sha256": "0a635585817d1ac96e8e512114d08258b70f9e54ce0052078a258291ac13a8ed"
+        },
+        {
+          "path": "packages/docx/LICENSE",
+          "source_path": "skills/.curated/doc/LICENSE.txt",
+          "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+        },
+        {
+          "path": "packages/docx/scripts/render_docx.py",
+          "source_path": "skills/.curated/doc/scripts/render_docx.py",
+          "sha256": "52b3c3158913ebcad2ada7b8193970b70453239e255054aa2d60c1683af08751"
+        },
+        {
+          "path": "packages/docx/assets/doc.png",
+          "source_path": "skills/.curated/doc/assets/doc.png",
+          "sha256": "7eadf1088e5062f681dba6596173a1df13bbfbcddd8a8a9bb78fd2071947dcf8"
+        },
+        {
+          "path": "packages/docx/assets/doc-small.svg",
+          "source_path": "skills/.curated/doc/assets/doc-small.svg",
+          "sha256": "bd5415fbbfe72c66c1527411d61625731fdd2f75b25d1542510b6ddef699ebe0"
+        }
+      ]
+    },
+    {
+      "repository": "openai/skills",
+      "commit": "e6afb0d74cc75d220df2faf3dd6c635c2dc6a108",
+      "license_path": "skills/.curated/spreadsheet/LICENSE.txt",
+      "skills": [
+        {
+          "name": "xlsx",
+          "path": "skills/.curated/spreadsheet"
+        }
+      ],
+      "files": [
+        {
+          "path": "packages/xlsx/UPSTREAM_SKILL.md",
+          "source_path": "skills/.curated/spreadsheet/SKILL.md",
+          "sha256": "36baea99e96c77c13d15d24f9d53cd072ccbc120e810bf4e68049edb5b0f1d65"
+        },
+        {
+          "path": "packages/xlsx/LICENSE",
+          "source_path": "skills/.curated/spreadsheet/LICENSE.txt",
+          "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+        },
+        {
+          "path": "packages/xlsx/assets/spreadsheet.png",
+          "source_path": "skills/.curated/spreadsheet/assets/spreadsheet.png",
+          "sha256": "a5771930cd28ff46e6ed53aa8a08a25902ed71178d1cac642c178f659638d7aa"
+        },
+        {
+          "path": "packages/xlsx/assets/spreadsheet-small.svg",
+          "source_path": "skills/.curated/spreadsheet/assets/spreadsheet-small.svg",
+          "sha256": "403c95e0cea6f994221d3b6281ea4eb2ab15a0dd2c1156f2d412b4744df62f6b"
+        },
+        {
+          "path": "packages/xlsx/references/examples/openpyxl/read_existing_spreadsheet.py",
+          "source_path": "skills/.curated/spreadsheet/references/examples/openpyxl/read_existing_spreadsheet.py",
+          "sha256": "cf2f24d90174d92bd9044e95035ab4cf2e34a5faa355a2fa1898e49088e9ad02"
+        },
+        {
+          "path": "packages/xlsx/references/examples/openpyxl/create_basic_spreadsheet.py",
+          "source_path": "skills/.curated/spreadsheet/references/examples/openpyxl/create_basic_spreadsheet.py",
+          "sha256": "7c291b6230c9809145c8f7f216fd2b7d099b16b89d3fae0ab4d5a3d990c05418"
+        },
+        {
+          "path": "packages/xlsx/references/examples/openpyxl/styling_spreadsheet.py",
+          "source_path": "skills/.curated/spreadsheet/references/examples/openpyxl/styling_spreadsheet.py",
+          "sha256": "5427ca11beb2b408a5dede6af1fa868fa131ad2a435d40bb88e52c4a8de7bc67"
+        },
+        {
+          "path": "packages/xlsx/references/examples/openpyxl/create_spreadsheet_with_styling.py",
+          "source_path": "skills/.curated/spreadsheet/references/examples/openpyxl/create_spreadsheet_with_styling.py",
+          "sha256": "fbfd41b9eca17f0f274f4ce7bd8ead6bc9292d764fe3bc325a1fca57dbe954ea"
+        }
+      ]
+    },
+    {
+      "repository": "openai/skills",
+      "commit": "e6afb0d74cc75d220df2faf3dd6c635c2dc6a108",
+      "license_path": "skills/.curated/slides/LICENSE.txt",
+      "skills": [
+        {
+          "name": "powerpoint",
+          "path": "skills/.curated/slides"
+        }
+      ],
+      "files": [
+        {
+          "path": "packages/powerpoint/UPSTREAM_SKILL.md",
+          "source_path": "skills/.curated/slides/SKILL.md",
+          "sha256": "57ee0941f872546029bc45b5b0bd58d4a02d88b84d4e8e4275c466da5451efa6"
+        },
+        {
+          "path": "packages/powerpoint/LICENSE",
+          "source_path": "skills/.curated/slides/LICENSE.txt",
+          "sha256": "9a7110fc2d2f964038e5dc49128f908f29f47a574c961cba16085914e879cbda"
+        },
+        {
+          "path": "packages/powerpoint/references/pptxgenjs-helpers.md",
+          "source_path": "skills/.curated/slides/references/pptxgenjs-helpers.md",
+          "sha256": "7aabd51f5cd85614d90c24ced9c5d9a152d87ff103eb143ce1fb551581c335ea"
+        },
+        {
+          "path": "packages/powerpoint/scripts/detect_font.py",
+          "source_path": "skills/.curated/slides/scripts/detect_font.py",
+          "sha256": "07537d7181f79fb65e84810604ddd814165d1ac90481b208bb8b206048aa637d"
+        },
+        {
+          "path": "packages/powerpoint/scripts/render_slides.py",
+          "source_path": "skills/.curated/slides/scripts/render_slides.py",
+          "sha256": "a5fd2d975233e69f55c87c84a54b6ce5990a52e78293db5412bdc44cd528b4ea"
+        },
+        {
+          "path": "packages/powerpoint/scripts/slides_test.py",
+          "source_path": "skills/.curated/slides/scripts/slides_test.py",
+          "sha256": "916882b8a88b7fe39e76c9009cbef3afa6a29a9e626d160b198c04f7f6a6a69b"
+        },
+        {
+          "path": "packages/powerpoint/scripts/create_montage.py",
+          "source_path": "skills/.curated/slides/scripts/create_montage.py",
+          "sha256": "dd9688825147be710608b1511b2adfd774062027633980799bdf8a675b4a875f"
+        },
+        {
+          "path": "packages/powerpoint/scripts/ensure_raster_image.py",
+          "source_path": "skills/.curated/slides/scripts/ensure_raster_image.py",
+          "sha256": "3708b8ade8c7d6c46bb0915fbdfdbbd9880725db06aeb822ccebecc434ebe835"
+        },
+        {
+          "path": "packages/powerpoint/assets/slides.png",
+          "source_path": "skills/.curated/slides/assets/slides.png",
+          "sha256": "879c4ff68c3930ea609b4d9f018a91756a785fb263c30994b05ac53c6f1ca6a8"
+        },
+        {
+          "path": "packages/powerpoint/assets/slides-small.svg",
+          "source_path": "skills/.curated/slides/assets/slides-small.svg",
+          "sha256": "1e9354b508ece05e8902520826c6b6f48aa289335fa7759baf1c444b6be1cdab"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/layout.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/layout.js",
+          "sha256": "774076d2671697c56c9df7d968c7f46be337dd7d63508d75e0f6976237a5db96"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/util.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/util.js",
+          "sha256": "49554b6376f5bad986283fb78a4ecc55b33f17826348689bb7d0f13eb4e24dc2"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/code.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/code.js",
+          "sha256": "c80e641cbb1d16d1ca15bd9b1a5a595597825cd435cb4024cc95617a82109f0f"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/layout_builders.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/layout_builders.js",
+          "sha256": "e66d671e7edac49ded358d26f7929718019be72e031a090d957a31b4945ebbc3"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/index.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/index.js",
+          "sha256": "4416b22333646a1a0e0c4d63e34ca92c853323b410a9489250ffbcf4ccab7184"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/latex.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/latex.js",
+          "sha256": "abc4a111bf3fe0248a67d307a57e532c9a72591f71922ec198a1b6b14db47700"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/image.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/image.js",
+          "sha256": "b9034d39cc330b2e4d963b36c521a99b9fee56b6f79b81d342906d7e061e70d6"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/svg.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/svg.js",
+          "sha256": "911725defa53b54123d61f457707a163f8e41ffc06e9148c13f12ba8a0834ba7"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/text.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/text.js",
+          "sha256": "ba5f0e38929bd9a826397ca597618a23b89561a2c2f097d3289f5364611c7ccf"
+        }
+      ]
+    },
+    {
+      "repository": "openai/skills",
+      "commit": "49f948faa9258a0c61caceaf225e179651397431",
+      "license_path": "skills/.curated/pdf/LICENSE.txt",
+      "skills": [
+        {
+          "name": "pdf",
+          "path": "skills/.curated/pdf"
+        }
+      ],
+      "files": [
+        {
+          "path": "packages/pdf/UPSTREAM_SKILL.md",
+          "source_path": "skills/.curated/pdf/SKILL.md",
+          "sha256": "d108cf2b36355ab37eb5962933f4d09785ec002f3105c506129320209306b9d2"
+        },
+        {
+          "path": "packages/pdf/LICENSE",
+          "source_path": "skills/.curated/pdf/LICENSE.txt",
+          "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+        },
+        {
+          "path": "packages/pdf/assets/pdf.png",
+          "source_path": "skills/.curated/pdf/assets/pdf.png",
+          "sha256": "17da356d195d4e3fa24f9becbee6b8d9e60e13005762b5ab0809c520c76da6ee"
+        }
+      ]
+    },
+    {
       "repository": "NousResearch/hermes-agent",
       "license_path": "LICENSE",
       "skills": [
         {
           "name": "xlsx",
           "path": "skills/productivity/xlsx"
-        },
-        {
-          "name": "docx",
-          "path": "skills/productivity/docx"
-        },
-        {
-          "name": "powerpoint",
-          "path": "skills/productivity/powerpoint"
-        },
-        {
-          "name": "pdf",
-          "path": "skills/productivity/pdf"
         }
       ],
       "commit": "e74c4a00ca77c662ffb44bc2986cf877df196dd3",
       "files": [
-        {
-          "path": "packages/xlsx/LICENSE",
-          "source_path": "LICENSE",
-          "sha256": "8aa3c7717d57a68490c31eef4b57b6887e892f0566ff866078ebd76113d357e2"
-        },
-        {
-          "path": "packages/xlsx/UPSTREAM_SKILL.md",
-          "source_path": "skills/productivity/xlsx/SKILL.md",
-          "sha256": "b302d7ac997843a757ab3c11513ea012889ebdae32f842edb44faa9a4485f19b"
-        },
-        {
-          "path": "packages/xlsx/references/restructuring.md",
-          "source_path": "skills/productivity/xlsx/references/restructuring.md",
-          "sha256": "cef18a6ce1835c0c95c447db57491ec9b84a75d6137e0002499eb626abc77626"
-        },
-        {
-          "path": "packages/xlsx/scripts/csv_to_xlsx.py",
-          "source_path": "skills/productivity/xlsx/scripts/csv_to_xlsx.py",
-          "sha256": "c92331ed358a8ba762a67b408c594d4c12f19f571087a3605203fb68d8c8ca70"
-        },
-        {
-          "path": "packages/xlsx/scripts/xlsx_create.py",
-          "source_path": "skills/productivity/xlsx/scripts/xlsx_create.py",
-          "sha256": "29d797b1cdb6a51ed72e13aca5e891fc4d281825344f895719136ab360a4e92f"
-        },
-        {
-          "path": "packages/xlsx/scripts/xlsx_edit.py",
-          "source_path": "skills/productivity/xlsx/scripts/xlsx_edit.py",
-          "sha256": "05e9c12fa66610bf53909691c6852a7ee38216a6ffd018c0e4ac2da173ae6bd4"
-        },
-        {
-          "path": "packages/xlsx/scripts/xlsx_read.py",
-          "source_path": "skills/productivity/xlsx/scripts/xlsx_read.py",
-          "sha256": "5f8dc99437e4b65d72cac4f99ef25d383b477926d5ae31e0e8aae6fa3266d935"
-        },
         {
           "path": "packages/xlsx/scripts/xlsx_recalc.py",
           "source_path": "skills/productivity/xlsx/scripts/xlsx_recalc.py",
           "sha256": "e61d8ab12a330a1efd4339bcc419a2a2793bd9a64b87f264580f732cae62dbfa"
         },
         {
-          "path": "packages/xlsx/scripts/xlsx_restructure.py",
-          "source_path": "skills/productivity/xlsx/scripts/xlsx_restructure.py",
-          "sha256": "062871f70d1c09d105f4aa4b1d3b420238b2997c8d52d1cfaa8e8cacdb1756db"
-        },
-        {
-          "path": "packages/xlsx/scripts/xlsx_to_csv.py",
-          "source_path": "skills/productivity/xlsx/scripts/xlsx_to_csv.py",
-          "sha256": "1be6a866b20199e2b42e8937ad2ecfa2055c9877a34dac1b597bfa1d930720ea"
-        },
-        {
-          "path": "packages/xlsx/tests/test_xlsx_skill.py",
-          "source_path": "skills/productivity/xlsx/tests/test_xlsx_skill.py",
-          "sha256": "b842edca940a1daf30aa141d4240fe815c85e37638d6784e7b1c539fa1665797"
-        },
-        {
-          "path": "packages/docx/LICENSE",
+          "path": "packages/xlsx/LICENSE-HERMES",
           "source_path": "LICENSE",
           "sha256": "8aa3c7717d57a68490c31eef4b57b6887e892f0566ff866078ebd76113d357e2"
-        },
-        {
-          "path": "packages/docx/UPSTREAM_SKILL.md",
-          "source_path": "skills/productivity/docx/SKILL.md",
-          "sha256": "9678b14d5e7841d588b969f6a4696cd46bcc46c3e4ac1479edc7656a051aa5ff"
-        },
-        {
-          "path": "packages/docx/references/revisions-and-comments.md",
-          "source_path": "skills/productivity/docx/references/revisions-and-comments.md",
-          "sha256": "cd861f6e9ea77767b1a5e2ec3f48dd620b0664811d8f204c59c61571b408e9ba"
-        },
-        {
-          "path": "packages/docx/scripts/docx_comments.py",
-          "source_path": "skills/productivity/docx/scripts/docx_comments.py",
-          "sha256": "6687c2f8b8e4cdd2ea9d70da668417e8c26f30dead2b1a4b7bda07e34fbf67cf"
-        },
-        {
-          "path": "packages/docx/scripts/docx_common.py",
-          "source_path": "skills/productivity/docx/scripts/docx_common.py",
-          "sha256": "5f915ce8138d19344f80b218b3e81aac8332dc6b560774a6f2a9757f4fc2eaea"
-        },
-        {
-          "path": "packages/docx/scripts/docx_create.py",
-          "source_path": "skills/productivity/docx/scripts/docx_create.py",
-          "sha256": "8391869c97ab804374dddadff4fbebc060120c0b973d06133f84487cc2c442d5"
-        },
-        {
-          "path": "packages/docx/scripts/docx_edit.py",
-          "source_path": "skills/productivity/docx/scripts/docx_edit.py",
-          "sha256": "00feef0a58a318406077020a017dd0b2673daaef93e0bda81fa9437b237180ff"
-        },
-        {
-          "path": "packages/docx/scripts/docx_read.py",
-          "source_path": "skills/productivity/docx/scripts/docx_read.py",
-          "sha256": "4760617eea1b17d648f7a46f6718c22ec4a76a359e8f0ee9f6ffe921df9129de"
-        },
-        {
-          "path": "packages/docx/scripts/docx_revisions.py",
-          "source_path": "skills/productivity/docx/scripts/docx_revisions.py",
-          "sha256": "0b835b76b86a1a7bf607c7724a09a71af788cacec48058ae99b04dba6950b938"
-        },
-        {
-          "path": "packages/docx/scripts/docx_template.py",
-          "source_path": "skills/productivity/docx/scripts/docx_template.py",
-          "sha256": "aed1b1db212b72995bd47a28e6c9928a4d02d7596615f1dadf12cd43a4f34219"
-        },
-        {
-          "path": "packages/docx/scripts/docx_validate.py",
-          "source_path": "skills/productivity/docx/scripts/docx_validate.py",
-          "sha256": "64d4197ac4aa555384efaefa1cc392a863e2d05489acc04776c33ab1a591d024"
-        },
-        {
-          "path": "packages/docx/tests/test_docx_skill.py",
-          "source_path": "skills/productivity/docx/tests/test_docx_skill.py",
-          "sha256": "a6e5ef3595d2168b15a655c366dcebbcc3e2ced73a0e2e5f741c626148c8566d"
-        },
-        {
-          "path": "packages/powerpoint/LICENSE",
-          "source_path": "LICENSE",
-          "sha256": "8aa3c7717d57a68490c31eef4b57b6887e892f0566ff866078ebd76113d357e2"
-        },
-        {
-          "path": "packages/powerpoint/UPSTREAM_SKILL.md",
-          "source_path": "skills/productivity/powerpoint/SKILL.md",
-          "sha256": "b71d29d9809c4464d7f8d10afabf4f22f6a26c647cf7aacb6f9faf196ebe82f2"
-        },
-        {
-          "path": "packages/powerpoint/scripts/pptx_create.py",
-          "source_path": "skills/productivity/powerpoint/scripts/pptx_create.py",
-          "sha256": "90e60c1fad8c5e7c209acf6ecdebee43c26609bbcf9a7dc063207ad8a3091485"
-        },
-        {
-          "path": "packages/powerpoint/scripts/pptx_edit.py",
-          "source_path": "skills/productivity/powerpoint/scripts/pptx_edit.py",
-          "sha256": "feb5b09546f9f7fb5dfb4c9b2596b3acbaff9c021faf1985c42f618be0476f3f"
-        },
-        {
-          "path": "packages/powerpoint/scripts/pptx_from_template.py",
-          "source_path": "skills/productivity/powerpoint/scripts/pptx_from_template.py",
-          "sha256": "8537205a777ba541c826082a4395066881dfa63c3033151127b82a8fd82fdb8f"
-        },
-        {
-          "path": "packages/powerpoint/scripts/pptx_read.py",
-          "source_path": "skills/productivity/powerpoint/scripts/pptx_read.py",
-          "sha256": "b2a6e246e40a6728e5e0e8bf2c4cbe4f788ab8c40bdb1b89e339571a34fdbc71"
-        },
-        {
-          "path": "packages/powerpoint/scripts/pptx_render.py",
-          "source_path": "skills/productivity/powerpoint/scripts/pptx_render.py",
-          "sha256": "49ebe77fa453b5fb21e0a39c0601187399c26f60a399726744277ee098f06dd7"
-        },
-        {
-          "path": "packages/powerpoint/tests/test_powerpoint_skill.py",
-          "source_path": "skills/productivity/powerpoint/tests/test_powerpoint_skill.py",
-          "sha256": "da3262b8daa31ba2425845a8ce74adc033c89b8d2cf7b99f95a107f7e96b27f1"
-        },
-        {
-          "path": "packages/pdf/LICENSE",
-          "source_path": "LICENSE",
-          "sha256": "8aa3c7717d57a68490c31eef4b57b6887e892f0566ff866078ebd76113d357e2"
-        },
-        {
-          "path": "packages/pdf/UPSTREAM_SKILL.md",
-          "source_path": "skills/productivity/pdf/SKILL.md",
-          "sha256": "c16b9c159a3a0b49353bfcd10c498b02aef3d319207b1019aa7dc8db129d06ab"
-        },
-        {
-          "path": "packages/pdf/references/forms.md",
-          "source_path": "skills/productivity/pdf/references/forms.md",
-          "sha256": "471517e0b154fb765d04416f089b7e999103804b964a84675af49e2d53ee8da0"
-        },
-        {
-          "path": "packages/pdf/references/nano-pdf-editing.md",
-          "source_path": "skills/productivity/pdf/references/nano-pdf-editing.md",
-          "sha256": "2f0b15bd1ebbd45cf37ed257723ad63aa70b623b97f5242c886c14f8968cd773"
-        },
-        {
-          "path": "packages/pdf/references/ocr-extraction.md",
-          "source_path": "skills/productivity/pdf/references/ocr-extraction.md",
-          "sha256": "611f03bc3fdf7f29283bf609ee46362cef6bcbea91b965a74f37ddd8c513cd1e"
-        },
-        {
-          "path": "packages/pdf/scripts/_raster.py",
-          "source_path": "skills/productivity/pdf/scripts/_raster.py",
-          "sha256": "17ecfb8dd78b006e904d0f29e28172ce308a34588db99ec80b0f085d2a37b518"
-        },
-        {
-          "path": "packages/pdf/scripts/extract_marker.py",
-          "source_path": "skills/productivity/pdf/scripts/extract_marker.py",
-          "sha256": "a115ee1da5b88f7ab61c480ef9efb2b371350bed8f1cface7668898ba80aae38"
-        },
-        {
-          "path": "packages/pdf/scripts/extract_pymupdf.py",
-          "source_path": "skills/productivity/pdf/scripts/extract_pymupdf.py",
-          "sha256": "784d233ee9849ce78cddc8253c87172c06a0b62c41aff7215fd97b77766babc8"
-        },
-        {
-          "path": "packages/pdf/scripts/pdf_create.py",
-          "source_path": "skills/productivity/pdf/scripts/pdf_create.py",
-          "sha256": "2a7a7c06c608e82cc11684bb67ff9cdb3bf8cbe6df38c6f4b1096dd2686f993c"
-        },
-        {
-          "path": "packages/pdf/scripts/pdf_fill_form.py",
-          "source_path": "skills/productivity/pdf/scripts/pdf_fill_form.py",
-          "sha256": "d66d504d7f7fcb85c28881065c47dfbc6ac9b47294471531a7f013178c72a1ad"
-        },
-        {
-          "path": "packages/pdf/scripts/pdf_form_layout.py",
-          "source_path": "skills/productivity/pdf/scripts/pdf_form_layout.py",
-          "sha256": "f654e386a8b1e5a26a1530b16d36177310dd48c6cb589ec6cf3dc1898a8ccdf9"
-        },
-        {
-          "path": "packages/pdf/scripts/pdf_make_form.py",
-          "source_path": "skills/productivity/pdf/scripts/pdf_make_form.py",
-          "sha256": "a194791f2d6504da9e629976620ac227a18a6ea14784d428c4cf4f57fafd6c3d"
-        },
-        {
-          "path": "packages/pdf/scripts/pdf_merge.py",
-          "source_path": "skills/productivity/pdf/scripts/pdf_merge.py",
-          "sha256": "c1cf231f73b02790069227a4f711475b4b329c91e30e77826f24c05935674248"
-        },
-        {
-          "path": "packages/pdf/scripts/pdf_meta.py",
-          "source_path": "skills/productivity/pdf/scripts/pdf_meta.py",
-          "sha256": "989c2564bb31d8b20abd53a4d7f86a603c930bd868e0201ad4cdec92d5487460"
-        },
-        {
-          "path": "packages/pdf/scripts/pdf_page_image.py",
-          "source_path": "skills/productivity/pdf/scripts/pdf_page_image.py",
-          "sha256": "40ad843fd50bd6bd91af1fd53de1cff1faf885921294afd304d0abf0fe93e4e2"
-        },
-        {
-          "path": "packages/pdf/scripts/pdf_read.py",
-          "source_path": "skills/productivity/pdf/scripts/pdf_read.py",
-          "sha256": "7d623cbbb6319f9f161dd769972250b08c426c291ed0af1a8304bec20437bfb2"
-        },
-        {
-          "path": "packages/pdf/scripts/pdf_secure.py",
-          "source_path": "skills/productivity/pdf/scripts/pdf_secure.py",
-          "sha256": "65d0ba6733cb945e6147e4b46e0b6db0816096440b0f4fe24cc953307805e01b"
         }
       ],
       "selection": "Reviewed resource subset; WeKnora adaptation files are maintained separately."

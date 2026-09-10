@@ -1,7 +1,7 @@
 ---
 name: scientific-visualization
 description: Create publication figures with palette, sizing and export checks.
-version: 2026.09.1
+version: 2026.09.5
 license: MIT
 ---
 
@@ -18,12 +18,10 @@ rendering or recalculation: inspect returned JSON and actual output files.
 
 Install the exact dependency set with `uv pip install --python .venv/bin/python
 --require-hashes -r requirements.lock` in the skill directory (Python 3.12).
-requirements.txt documents the direct dependencies. The official office-browser
-image includes these dependencies. LibreOffice, Poppler and Noto CJK fonts are required
-for office rendering and formula recalculation. Browser automation uses headless
-Chromium; a Linux desktop or display server is not required.
-Optional OCR model downloads, Bayesian modeling packages and specialty data formats
-are not part of this baseline. Explain missing optional capabilities before using them.
+requirements.txt documents the direct dependencies. This skill is installed on demand;
+the office-core image does not preinstall its environment.
+Use Matplotlib for static PNG, SVG and PDF output, and Plotly for interactive charts.
+Plotly static export requires additional dependencies that are not included here.
 Do not install extras or upgrade libraries just because an upstream example mentions them.
 
 ## Workflow and reference

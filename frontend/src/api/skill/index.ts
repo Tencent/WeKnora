@@ -65,6 +65,12 @@ export function registerSkillCatalogFromSource(source: string) {
   });
 }
 
+export function installSkillFromPrompt(prompt: string, sandboxConfigIds: string[]) {
+  return post<{ data: { installs: Record<string, string>; errors?: Record<string, string> } }>(
+    '/api/v1/skills/catalog/install-prompt', { prompt, sandbox_config_ids: sandboxConfigIds },
+  );
+}
+
 export function registerSkillCatalogFromFile(
   file: File,
   onProgress?: (percent: number) => void,
@@ -104,7 +110,8 @@ export interface DiscoverySkill {
   title: Record<string, string>
   description: Record<string, string>
   category: 'office' | 'analysis' | 'browser'
-  distribution: 'builtin' | 'external_link'
+  distribution: 'builtin' | 'community' | 'external_link'
+  install_source?: string
   publisher: string
   license: string
   source_url: string
@@ -114,31 +121,10 @@ export interface DiscoverySkill {
   digest?: string
 }
 
-export interface SkillMigrationItem {
-  skill_id: string
-  name: string
-  version: string
-  sha256: string
-  blocker?: string
-}
-
 export function listSkillDiscovery() {
   return get<{ data: DiscoverySkill[] }>('/api/v1/skills/discovery')
 }
 
 export function registerBuiltinSkill(id: string) {
   return post<{ data: SkillCatalogRegisterResult }>(`/api/v1/skills/discovery/${encodeURIComponent(id)}/register`, {})
-}
-
-export function previewSkillMigration(source: string, target: string) {
-  return post<{ data: SkillMigrationItem[] }>('/api/v1/skills/migration', {
-    source_config_id: source, target_config_id: target, preview: true,
-  }, { timeout: 120000 })
-}
-
-export function migrateSkills(source: string, target: string, skills: SkillMigrationItem[]) {
-  return post<{ data: { installs: Record<string, string>; errors: Record<string, string> } }>('/api/v1/skills/migration', {
-    source_config_id: source, target_config_id: target, preview: false,
-    skills: skills.filter(item => !item.blocker).map(({ skill_id, sha256 }) => ({ skill_id, sha256 })),
-  }, { timeout: 120000 })
 }

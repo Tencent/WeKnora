@@ -180,6 +180,14 @@ func SkillVenvPython(skillDir string) string {
 	return path.Join(skillDir, ".venv", "bin", "python")
 }
 
+// BuiltinSkillRuntimeGuard fails before a builtin command can fall back to a
+// different environment. It runs in the same exec, without an extra round trip.
+func BuiltinSkillRuntimeGuard(dir string) string {
+	return "if [ ! -x " + ShellQuote(SkillVenvPython(dir)) + " ]; then printf '%s\\n' " +
+		ShellQuote("builtin skill runtime missing: "+dir+"; recreate the sandbox from a verified image") +
+		" >&2; exit 126; fi; "
+}
+
 // SkillInterpreterCommand picks how to run one script of a skill.
 //
 // The interpreter is derived per script rather than stored per skill: one skill
@@ -194,6 +202,10 @@ func SkillInterpreterCommand(skillDir, scriptPath string) (string, []string) {
 	case ".py":
 		venvPython := SkillVenvPython(skillDir)
 		script := ShellQuote(scriptPath)
+		if strings.HasPrefix(skillDir, BuiltinSkillsImageRoot+"/") {
+			return "/bin/sh", []string{"-c", BuiltinSkillRuntimeGuard(skillDir) +
+				fmt.Sprintf(`exec %s %s "$@"`, ShellQuote(venvPython), script), skillShellArgv0}
+		}
 		return "/bin/sh", []string{"-c", fmt.Sprintf(
 			`if [ -x %s ]; then exec %s %s "$@"; else exec python3 %s "$@"; fi`,
 			ShellQuote(venvPython), ShellQuote(venvPython), script, script,

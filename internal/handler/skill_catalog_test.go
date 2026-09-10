@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -201,4 +202,36 @@ func TestDeleteCatalogRefusesWhileInstalled(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/skills/catalog/cat-1", nil))
 	require.Equal(t, http.StatusConflict, w.Code)
+}
+
+type fakePromptCatalog struct {
+	fakeSkillCatalog
+	prompt  string
+	tenant  uint64
+	configs []string
+}
+
+func (f *fakePromptCatalog) InstallSkillsFromPrompt(
+	_ context.Context, tenant uint64, prompt string, configs []string,
+) (*service.CatalogInstallResult, error) {
+	f.prompt, f.tenant, f.configs = prompt, tenant, configs
+	return &service.CatalogInstallResult{Installs: map[string]string{"cfg-1": "install-job"}}, nil
+}
+
+func TestInstallPromptUsesAuthenticatedTenantAndStartsAsync(t *testing.T) {
+	catalog := &fakePromptCatalog{}
+	h := NewSkillHandler(nil, catalog)
+	router := newCatalogRouter(h)
+	router.POST("/skills/catalog/install-prompt", h.InstallPrompt)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/skills/catalog/install-prompt", strings.NewReader(
+		`{"prompt":"Follow docs to install ID 3044","sandbox_config_ids":["cfg-1"],"tenant_id":999}`,
+	))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	require.Equal(t, uint64(testSkillTenantID), catalog.tenant)
+	require.Equal(t, "Follow docs to install ID 3044", catalog.prompt)
+	require.Equal(t, []string{"cfg-1"}, catalog.configs)
+	require.Contains(t, w.Body.String(), "install-job")
 }

@@ -1,37 +1,25 @@
 ---
 name: xlsx
-description: Create and edit spreadsheets, formulas, charts and CSV files.
-version: 2026.09.1
-license: MIT
+description: Create, edit and analyze spreadsheets with openpyxl, pandas, formulas and verified recalculation.
+version: 2026.09.5
 ---
 
-# Excel workbooks
+# Spreadsheets
+
+Use openpyxl for `.xlsx` editing and formatting, pandas for CSV/TSV analysis, and native openpyxl charts for editable chart output. Preserve existing formulas, styles and references. Read only relevant `references/examples/openpyxl/` examples when needed.
+
+Prefer formulas for derived values; do not hardcode calculated results. Keep formulas readable with helper cells and correct absolute/relative references. Guard against division by zero, invalid ranges and circular references. Avoid functions unsupported by the target Excel/LibreOffice version.
+
+Create a clear hierarchy with a title, units, restrained header fills, appropriate date/currency/percentage formats, deliberate column widths and section spacing. Do not outline every cell. Distinguish editable inputs from formulas, and put source URLs in comments or a source column when external facts are used.
+
+openpyxl does not calculate formulas. Recalculate with `python "$WEKNORA_SKILL_DIR/scripts/xlsx_recalc.py" input.xlsx --out /tmp/task/recalculated.xlsx`, then open the result both with and without `data_only=True`: confirm formulas survive, cached values exist and there are no spreadsheet errors. Inspect the recalculation report. LibreOffice may alter unsupported Excel features; retain the original and disclose material changes.
+
+For layout review, convert relevant sheets to PDF with a task-specific LibreOffice profile and rasterize with `pdftoppm`. Inspect images if image viewing is available; otherwise report the gap. Set print areas and scaling to avoid many empty pages. Keep source data and verify expected row counts, totals and formulas after modifications.
 
 ## WeKnora runtime
 
-Use `read_file` for skill resources and `shell_exec` with skill_name="xlsx" for commands.
-Use $WEKNORA_SKILL_DIR for this package and its `.venv/bin/python` interpreter.
-Read inputs from /workspace/input. Write deliverables under $WEKNORA_SKILL_OUTPUT_DIR
-(default /workspace/output), and inspect the result before returning artifact links.
-Do not overwrite user inputs. Never treat a successful exit code alone as proof of
-rendering or recalculation: inspect returned JSON and actual output files.
+Run scripts with `shell_exec` and `skill_name: "xlsx"`; this selects the locked Python environment and sets `WEKNORA_SKILL_DIR`. Resolve bundled resources from that variable, never from a guessed working directory. Node dependencies resolve through the Skill's `node_modules` via `NODE_PATH`.
 
-Install the exact dependency set with `uv pip install --python .venv/bin/python
---require-hashes -r requirements.lock` in the skill directory (Python 3.12).
-requirements.txt documents the direct dependencies. The official office-browser
-image includes these dependencies. LibreOffice, Poppler and Noto CJK fonts are required
-for office rendering and formula recalculation. Browser automation uses headless
-Chromium; a Linux desktop or display server is not required.
-Optional OCR model downloads, Bayesian modeling packages and specialty data formats
-are not part of this baseline. Explain missing optional capabilities before using them.
-Do not install extras or upgrade libraries just because an upstream example mentions them.
+Use a task-specific temporary directory for scripts, previews and intermediates. Put only requested deliverables in the session's artifact/output directory. Respect user templates, language and scope. Read additional references only when needed; `UPSTREAM_SKILL.md` records provenance and is not a second mandatory entry point.
 
-## Workflow and reference
-
-Read UPSTREAM_SKILL.md for the workflow and script arguments, then the relevant
-references or scripts on demand. Its host-specific tool names and installation
-examples must be adapted to the WeKnora runtime above. Use `--help` to inspect
-CLI arguments. Do not assume other upstream skills or hosted services are available.
-
-Before completing installation, run `scripts/weknora_smoke.py --report` using the
-skill interpreter. This verifies real outputs and writes the runtime report.
+The image preinstalls `requirements.lock`. During installation on other images, use a local `.venv` and `uv pip install --python .venv/bin/python --require-hashes -r requirements.lock`. Do not mutate the environment during each task or install unrelated optional tools. Report a missing runtime capability explicitly. Run `scripts/weknora_smoke.py --report` as the installation check.

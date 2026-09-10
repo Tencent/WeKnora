@@ -21,7 +21,17 @@ type preinstalledManager struct {
 
 func (m *preinstalledManager) BuiltinSkillsForRun(context.Context, string) (*types.BuiltinSkillsManifest, error) {
 	m.lookups++
-	return builtin.PublishedManifest(), nil
+	manifest := builtin.PublishedManifest()
+	// Existing images may retain all eight skills even though new builds are core-only.
+	manifest.Profile = "office-browser"
+	for _, entry := range builtin.List() {
+		if entry.Distribution == "builtin" && entry.Category != "office" {
+			manifest.Skills = append(manifest.Skills, types.BuiltinSkillDeclaration{
+				Name: entry.Name, Digest: entry.Digest, Verified: true,
+			})
+		}
+	}
+	return manifest, nil
 }
 
 func TestAgentOffersBuiltinSkillsWithoutAnyInstallationRecords(t *testing.T) {

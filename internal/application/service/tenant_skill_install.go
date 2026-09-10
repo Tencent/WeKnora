@@ -87,13 +87,6 @@ func (s *TenantSkillService) installSkillArchive(
 func (s *TenantSkillService) installParsedSkill(
 	ctx context.Context, tenantID uint64, configID string, bundle *SkillBundle, archive []byte, instructions ...string,
 ) (string, error) {
-	return s.installParsedSkillFrom(ctx, tenantID, configID, bundle, archive, nil, instructions...)
-}
-
-func (s *TenantSkillService) installParsedSkillFrom(
-	ctx context.Context, tenantID uint64, configID string, bundle *SkillBundle, archive []byte,
-	original *types.TenantSkillEntity, instructions ...string,
-) (string, error) {
 	if bundle == nil {
 		return "", fmt.Errorf("skill bundle is required")
 	}
@@ -104,9 +97,6 @@ func (s *TenantSkillService) installParsedSkillFrom(
 	existing, err := s.skills.GetSkillByName(ctx, tenantID, configID, bundle.Name)
 	if err != nil {
 		return "", err
-	}
-	if original != nil && existing != nil {
-		return "", apperrors.NewConflictError("target already has this skill; it was preserved")
 	}
 	guidance := strings.TrimSpace(strings.Join(instructions, "\n"))
 	if len([]rune(guidance)) > 10000 {
@@ -148,9 +138,6 @@ func (s *TenantSkillService) installParsedSkillFrom(
 			if !isSkillNameConflict(err) {
 				return "", err
 			}
-			if original != nil {
-				return "", apperrors.NewConflictError("target already has this skill; it was preserved")
-			}
 			// Two first-time uploads of the same name raced the unique index.
 			// Take the row that won rather than surfacing a 500.
 			winner, lookupErr := s.skills.GetSkillByName(ctx, tenantID, configID, bundle.Name)
@@ -168,37 +155,29 @@ func (s *TenantSkillService) installParsedSkillFrom(
 		}
 	}
 
-	if original != nil {
-		if err := s.pinMigratedBundle(ctx, tenantID, configID, skillID, original, archive); err != nil {
-			s.failSkill(ctx, tenantID, configID, skillID, bundle, err)
-			return "", err
-		}
-	} else {
-		// The zip lives on the catalog, not on this sandbox: uninstalling from
-		// the last config must not take the definition's files with it. The
-		// install row only stores CatalogID; readers follow that to the zip.
-		catalog, err := s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, true)
-		if err != nil {
-			failCtx, cancelFail := s.cleanupContext(ctx)
-			defer cancelFail()
-			storeErr := fmt.Errorf("store bundle: %w", err)
-			logger.Errorf(ctx, "[skill] store bundle failed tenant=%d config=%s skill=%s name=%s: %v",
-				tenantID, configID, skillID, bundle.Name, err)
-			s.failSkill(failCtx, tenantID, configID, skillID, bundle, storeErr)
-			return "", fmt.Errorf("store bundle for skill %s: %w", skillID, err)
-		}
-		if err := s.pointInstallAtCatalog(ctx, &types.TenantSkillEntity{
-			ID: skillID, TenantID: tenantID, SandboxConfigID: configID,
-		}, catalog); err != nil {
-			failCtx, cancelFail := s.cleanupContext(ctx)
-			defer cancelFail()
-			storeErr := fmt.Errorf("store bundle: %w", err)
-			logger.Errorf(ctx, "[skill] store bundle failed tenant=%d config=%s skill=%s name=%s: %v",
-				tenantID, configID, skillID, bundle.Name, err)
-			s.failSkill(failCtx, tenantID, configID, skillID, bundle, storeErr)
-			return "", fmt.Errorf("store bundle for skill %s: %w", skillID, err)
-		}
-
+	// The zip lives on the catalog, not on this sandbox: uninstalling from
+	// the last config must not take the definition's files with it. The
+	// install row only stores CatalogID; readers follow that to the zip.
+	catalog, err := s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, true)
+	if err != nil {
+		failCtx, cancelFail := s.cleanupContext(ctx)
+		defer cancelFail()
+		storeErr := fmt.Errorf("store bundle: %w", err)
+		logger.Errorf(ctx, "[skill] store bundle failed tenant=%d config=%s skill=%s name=%s: %v",
+			tenantID, configID, skillID, bundle.Name, err)
+		s.failSkill(failCtx, tenantID, configID, skillID, bundle, storeErr)
+		return "", fmt.Errorf("store bundle for skill %s: %w", skillID, err)
+	}
+	if err := s.pointInstallAtCatalog(ctx, &types.TenantSkillEntity{
+		ID: skillID, TenantID: tenantID, SandboxConfigID: configID,
+	}, catalog); err != nil {
+		failCtx, cancelFail := s.cleanupContext(ctx)
+		defer cancelFail()
+		storeErr := fmt.Errorf("store bundle: %w", err)
+		logger.Errorf(ctx, "[skill] store bundle failed tenant=%d config=%s skill=%s name=%s: %v",
+			tenantID, configID, skillID, bundle.Name, err)
+		s.failSkill(failCtx, tenantID, configID, skillID, bundle, storeErr)
+		return "", fmt.Errorf("store bundle for skill %s: %w", skillID, err)
 	}
 
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
@@ -260,6 +239,15 @@ func (s *TenantSkillService) ReinstallSkill(
 	}
 	if skill == nil {
 		return "", apperrors.NewNotFoundError("skill not found")
+	}
+	if prompt := pendingSkillPrompt(skill); prompt != "" {
+		if guidance := strings.TrimSpace(strings.Join(instructions, "\n")); guidance != "" {
+			prompt += "\n" + guidance
+		}
+		if len([]rune(prompt)) > 10000 {
+			return "", apperrors.NewBadRequestError("install instructions exceed 10000 characters")
+		}
+		return s.startPromptInstall(ctx, tenantID, configID, prompt, skill)
 	}
 	// The zip is owned by the catalog. An empty install BundleRef is not
 	// itself a failure — fall through to skillBundleArchive, which is what
@@ -340,7 +328,7 @@ func (s *TenantSkillService) runInstall(
 	// It is deferred before it is stopped explicitly below, so a failure path
 	// still stops it ahead of the deferred failSkill.
 	stopHeartbeat := s.startInstallHeartbeat(ctx, tenantID, configID, skillID)
-	defer stopHeartbeat()
+	defer func() { stopHeartbeat() }()
 
 	// The name comes from SKILL.md and is already validated on parse, so a
 	// rejection here means the bundle was accepted by a looser rule than the
@@ -402,19 +390,33 @@ func (s *TenantSkillService) runInstall(
 	// the transcript as soon as the directory is ready, not after that copy.
 	transcript, prompt := s.beginInstallTranscript(ctx, tenantID, skillID, sess, mgr, skillDir, bundle, instructions...)
 
-	fileCount := 0
-	if bundle != nil {
-		fileCount = len(bundle.Files)
-	}
-	if fileCount > 0 {
-		logger.Infof(ctx, "[skill] seeding %d files for %s as one archive", fileCount, skillID)
-		s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
-			Percent: 28, Stage: "seeding",
-			Log: fmt.Sprintf("seeding %d files", fileCount),
-		})
-	}
-	if err := s.seedSkillFiles(ctx, mgr, sess.ID, skillDir, bundle); err != nil {
-		return err
+	defer func() { transcript.Finish(context.WithoutCancel(ctx), err) }()
+	if promptBundleRequest(bundle) != "" {
+		acquired, targetDir, acquireErr := s.acquirePromptSkill(
+			ctx, tenantID, configID, skillID, sess, mgr, skillDir, bundle, transcript, prompt, stopHeartbeat,
+		)
+		if acquireErr != nil {
+			return acquireErr
+		}
+		bundle, skillDir = acquired, targetDir
+		stopHeartbeat = s.startInstallHeartbeat(ctx, tenantID, configID, skillID)
+		prompt = buildInstallPrompt(skillDir, bundle, s.probeInstallTools(ctx, mgr, sess.ID))
+		transcript.RecordPrompt(prompt)
+	} else {
+		fileCount := 0
+		if bundle != nil {
+			fileCount = len(bundle.Files)
+		}
+		if fileCount > 0 {
+			logger.Infof(ctx, "[skill] seeding %d files for %s as one archive", fileCount, skillID)
+			s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
+				Percent: 28, Stage: "seeding",
+				Log: fmt.Sprintf("seeding %d files", fileCount),
+			})
+		}
+		if err := s.seedSkillFiles(ctx, mgr, sess.ID, skillDir, bundle); err != nil {
+			return err
+		}
 	}
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{Percent: 35, Stage: "seeded"})
 
@@ -725,7 +727,11 @@ func (s *TenantSkillService) beginInstallTranscript(
 	sess *types.Session, mgr sandbox.Manager, skillDir string, bundle *SkillBundle, instructions ...string,
 ) (*installTranscript, string) {
 	assistantMessageID := uuid.NewString()
-	prompt := buildInstallPrompt(skillDir, bundle, s.probeInstallTools(ctx, mgr, sess.ID))
+	toolchain := s.probeInstallTools(ctx, mgr, sess.ID)
+	prompt := buildInstallPrompt(skillDir, bundle, toolchain)
+	if request := promptBundleRequest(bundle); request != "" {
+		prompt = buildPromptInstallPrompt(skillDir, request, toolchain)
+	}
 	if guidance := strings.TrimSpace(strings.Join(instructions, "\n")); guidance != "" {
 		prompt += "\n\nAdditional instructions from the installing administrator:\n" + guidance
 	}
@@ -860,6 +866,7 @@ func (s *TenantSkillService) openInstallerRun(
 	sess *types.Session,
 	skillDir string,
 	transcript *installTranscript,
+	acquireSource ...bool,
 ) (*installerRun, error) {
 	if s.installerAgents == nil {
 		return nil, errors.New("custom agent service is not configured")
@@ -877,6 +884,10 @@ func (s *TenantSkillService) openInstallerRun(
 	}
 	agentConfig := installerAgentConfig(
 		installerAgentDefaults(ctx, tenantID), sess.SandboxConfigID, skillDir)
+	if len(acquireSource) > 0 && acquireSource[0] {
+		agentConfig.SystemPrompt = promptAcquisitionSystemPrompt
+		agentConfig.UseCustomSystemPrompt = true
+	}
 
 	chatModel, err := s.resolveInstallerModel(ctx, tenantID, record)
 	if err != nil {

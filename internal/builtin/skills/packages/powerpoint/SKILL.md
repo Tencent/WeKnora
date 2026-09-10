@@ -1,37 +1,31 @@
 ---
 name: powerpoint
-description: Build slides from templates and render presentation previews.
-version: 2026.09.1
-license: MIT
+description: Create and edit editable PowerPoint presentations with PptxGenJS, measured layouts, native charts and rendered checks.
+version: 2026.09.5
 ---
 
-# Presentations
+# PowerPoint
+
+Use for `.pptx` creation and editing. For a web presentation explicitly requested by the user, prefer the separately installed frontend-slides skill. Use PPT Master only when its richer SVG/template workflow is requested.
+
+## Authoring workflow
+
+1. Extract the audience, purpose and key conclusions from the request. Choose a concise narrative and a consistent theme before coding. Prefer conclusion-led titles, comparison diagrams, timelines and charts over repeated title-and-bullet slides.
+2. Write a Node CommonJS script using `require('pptxgenjs')`. Set `pptx.layout = 'LAYOUT_WIDE'`, explicit font sizes, margins and theme fonts. For Chinese/mixed content use `Noto Sans CJK SC` for the theme and text; confirm it with `fc-match`. Avoid unsupported emoji and use drawn shapes or verified glyphs instead.
+3. Use native editable text, shapes, tables and charts. Import measured layout helpers with `require(process.env.WEKNORA_SKILL_DIR + '/assets/pptxgenjs_helpers')`; see `references/pptxgenjs-helpers.md` only if needed. `scripts/weknora_example.cjs` demonstrates a title card and native comparison chart; adapt its design to the user's material rather than copying every slide.
+4. Measure text with `calcTextBox`/`autoFontSize` when useful. Match the measured and actual font. Reflow or split dense content as appropriate; there is no fixed bullet-count rejection gate. Do not reduce body text until it becomes unreadable. Use rich text runs only in the API's documented shape; never stringify an object into a slide.
+5. Export with `await pptx.writeFile({fileName: outputPath})`. Helpers such as `warnIfSlideHasOverlaps` and `warnIfSlideElementsOutOfBounds` can locate issues; review intentional overlaps rather than blindly rejecting them.
+6. Render with `python "$WEKNORA_SKILL_DIR/scripts/render_slides.py" deck.pptx --output_dir /tmp/task/previews`. Inspect the rendered images if an image-view tool is available. Check clipping, hierarchy, chart labels, CJK glyphs and color contrast. Extract PDF text with `pdftotext -layout` as a separate content check; it is not a substitute for visual inspection. If the Agent cannot view images, disclose that limitation instead of claiming visual review.
+7. If PDF is requested, convert the same final PPTX using LibreOffice with a task-specific profile: `soffice -env:UserInstallation=file:///tmp/task/lo --headless --convert-to pdf --outdir /tmp/task deck.pptx`. Verify the resulting file and move final PPTX/PDF to the artifact directory.
+
+## Dependencies
+
+PptxGenJS and the bundled layout helpers use the checked-in `package-lock.json`. On non-preinstalled images install once with `npm ci --omit=dev` in the Skill directory. Python dependencies support rendering and inspection, including python-pptx for inspecting/editing existing files. LibreOffice, Poppler and fonts are system prerequisites. Advanced helper integrations not in this lock (for example MathJax) are optional and must not be invoked without their dependency.
 
 ## WeKnora runtime
 
-Use `read_file` for skill resources and `shell_exec` with skill_name="powerpoint" for commands.
-Use $WEKNORA_SKILL_DIR for this package and its `.venv/bin/python` interpreter.
-Read inputs from /workspace/input. Write deliverables under $WEKNORA_SKILL_OUTPUT_DIR
-(default /workspace/output), and inspect the result before returning artifact links.
-Do not overwrite user inputs. Never treat a successful exit code alone as proof of
-rendering or recalculation: inspect returned JSON and actual output files.
+Run scripts with `shell_exec` and `skill_name: "powerpoint"`; this selects the locked Python environment and sets `WEKNORA_SKILL_DIR`. Resolve bundled resources from that variable, never from a guessed working directory. Node dependencies resolve through the Skill's `node_modules` via `NODE_PATH`.
 
-Install the exact dependency set with `uv pip install --python .venv/bin/python
---require-hashes -r requirements.lock` in the skill directory (Python 3.12).
-requirements.txt documents the direct dependencies. The official office-browser
-image includes these dependencies. LibreOffice, Poppler and Noto CJK fonts are required
-for office rendering and formula recalculation. Browser automation uses headless
-Chromium; a Linux desktop or display server is not required.
-Optional OCR model downloads, Bayesian modeling packages and specialty data formats
-are not part of this baseline. Explain missing optional capabilities before using them.
-Do not install extras or upgrade libraries just because an upstream example mentions them.
+Use a task-specific temporary directory for scripts, previews and intermediates. Put only requested deliverables in the session's artifact/output directory. Respect user templates, language and scope. Read additional references only when needed; `UPSTREAM_SKILL.md` records provenance and is not a second mandatory entry point.
 
-## Workflow and reference
-
-Read UPSTREAM_SKILL.md for the workflow and script arguments, then the relevant
-references or scripts on demand. Its host-specific tool names and installation
-examples must be adapted to the WeKnora runtime above. Use `--help` to inspect
-CLI arguments. Do not assume other upstream skills or hosted services are available.
-
-Before completing installation, run `scripts/weknora_smoke.py --report` using the
-skill interpreter. This verifies real outputs and writes the runtime report.
+The image preinstalls `requirements.lock`. During installation on other images, use a local `.venv` and `uv pip install --python .venv/bin/python --require-hashes -r requirements.lock`. Do not mutate the environment during each task or install unrelated optional tools. Report a missing runtime capability explicitly. Run `scripts/weknora_smoke.py --report` as the installation check.

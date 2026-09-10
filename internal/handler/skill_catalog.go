@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	stderrors "errors"
 	"io"
 	"net/http"
@@ -243,4 +244,32 @@ func catalogIDResponse(cat *types.TenantSkillCatalogEntity) gin.H {
 		"version":     cat.Version,
 		"description": cat.Description,
 	}
+}
+
+// InstallPrompt starts an asynchronous installation directly from administrator instructions.
+func (h *SkillHandler) InstallPrompt(c *gin.Context) {
+	installer, ok := h.catalog.(interface {
+		InstallSkillsFromPrompt(context.Context, uint64, string, []string) (*service.CatalogInstallResult, error)
+	})
+	if !ok {
+		_ = c.Error(apperrors.NewInternalServerError("prompt installation is not configured"))
+		return
+	}
+	limitJSONBody(c, 32*1024)
+	var req struct {
+		Prompt           string   `json:"prompt"`
+		SandboxConfigIDs []string `json:"sandbox_config_ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(apperrors.NewBadRequestError("invalid skill installation request"))
+		return
+	}
+	result, err := installer.InstallSkillsFromPrompt(
+		c.Request.Context(), sandboxConfigTenantID(c), req.Prompt, req.SandboxConfigIDs,
+	)
+	if err != nil {
+		respondSkillServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": result})
 }

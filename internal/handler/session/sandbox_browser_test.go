@@ -63,3 +63,31 @@ func TestBrowserPreviewReportsUnstartedSandboxWithoutAnHTTPError(t *testing.T) {
 	require.JSONEq(t, `{"success":true,"data":{"ok":false,"state":"not_bound"}}`, w.Body.String())
 	require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
 }
+
+func TestBrowserCapabilitiesChecksSessionOwnership(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &Handler{sessionService: browserOwnershipStub{}}
+	r := gin.New()
+	r.GET("/sessions/:id/sandbox/browser/capabilities", h.SandboxBrowserCapabilities)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/not-owned/sandbox/browser/capabilities", nil))
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+type browserCapabilitySessionStub struct{ ownedBrowserSessionStub }
+
+func (browserCapabilitySessionStub) SessionBrowserAvailable(context.Context, uint64, string, string) (bool, error) {
+	return false, nil
+}
+
+func TestBrowserCapabilitiesReportsUnavailableWithoutStartingSandbox(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &Handler{sessionService: browserCapabilitySessionStub{}}
+	r := gin.New()
+	r.GET("/sessions/:id/sandbox/browser/capabilities", h.SandboxBrowserCapabilities)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/owned/sandbox/browser/capabilities", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.JSONEq(t, `{"success":true,"data":{"available":false}}`, w.Body.String())
+	require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+}

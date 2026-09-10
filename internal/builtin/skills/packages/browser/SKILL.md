@@ -1,7 +1,7 @@
 ---
 name: browser
 description: Browse pages, fill forms, capture screenshots and take control in a session.
-version: 2026.09.2
+version: 2026.09.5
 license: MIT
 ---
 

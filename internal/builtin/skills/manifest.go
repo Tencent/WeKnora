@@ -2,6 +2,7 @@ package skills
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -11,13 +12,23 @@ const ManifestLabel = "org.weknora.skills.manifest"
 
 // PublishedManifest describes precisely the resources in this server release.
 func PublishedManifest() *types.BuiltinSkillsManifest {
-	m := &types.BuiltinSkillsManifest{SchemaVersion: 1, Profile: "office-browser", Version: Version}
-	for _, e := range List() {
-		if e.Distribution == "builtin" {
-			m.Skills = append(m.Skills, types.BuiltinSkillDeclaration{Name: e.Name, Digest: e.Digest, Verified: true})
-		}
-	}
+	m, _ := PublishedManifestForProfile("office-core")
 	return m
+}
+
+// PublishedManifestForProfile declares only the packages installed in this image tier.
+func PublishedManifestForProfile(profile string) (*types.BuiltinSkillsManifest, error) {
+	if profile != "office-core" {
+		return nil, fmt.Errorf("unknown builtin skills profile %q", profile)
+	}
+	m := &types.BuiltinSkillsManifest{SchemaVersion: 1, Profile: profile, Version: Version}
+	for _, e := range List() {
+		if e.Distribution != "builtin" || e.Category != "office" {
+			continue
+		}
+		m.Skills = append(m.Skills, types.BuiltinSkillDeclaration{Name: e.Name, Digest: e.Digest, Verified: true})
+	}
+	return m, nil
 }
 
 // ParseManifest decodes a bounded, supported manifest; invalid declarations return nil.
@@ -47,14 +58,10 @@ func CompatibleEntries(m *types.BuiltinSkillsManifest) []Entry {
 	var entries []Entry
 	for _, e := range List() {
 		d := declared[e.Name]
-		if e.Distribution == "builtin" && d.Verified &&
-			(d.Digest == e.Digest || isLegacyBrowserDigest(e.Name, d.Digest)) {
-			if d.Digest != e.Digest {
-				e.Digest = d.Digest
-				e.Version = "2026.09.1"
-			}
-			entries = append(entries, e)
+		if e.Distribution != "builtin" || !d.Verified || d.Digest != e.Digest {
+			continue
 		}
+		entries = append(entries, e)
 	}
 	return entries
 }

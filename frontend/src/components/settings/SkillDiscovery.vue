@@ -17,15 +17,15 @@
     <template v-else>
       <section v-for="group in groups" :key="group.kind" class="discovery-section">
         <div class="discovery-section__heading">
-          <h3>{{ t(`skillDiscovery.${group.kind === 'builtin' ? 'builtins' : 'recommended'}`) }}</h3>
+          <h3>{{ t(`skillDiscovery.${group.kind === 'builtin' ? 'builtins' : group.kind === 'community' ? 'community' : 'recommended'}`) }}</h3>
           <span>{{ group.items.length }}</span>
         </div>
-        <p class="discovery-section__description">{{ t(`skillDiscovery.${group.kind === 'builtin' ? 'builtinHint' : 'externalHint'}`) }}</p>
+        <p class="discovery-section__description">{{ t(`skillDiscovery.${group.kind === 'builtin' ? 'builtinHint' : group.kind === 'community' ? 'communityHint' : 'externalHint'}`) }}</p>
         <div class="discovery-grid">
           <article v-for="item in group.items" :key="item.id" class="discovery-card" :data-tone="tone(item)">
             <div class="discovery-card__top">
               <span class="discovery-icon"><t-icon :name="skillIcon(item)" size="22px" /></span>
-              <span class="discovery-kind">{{ t(item.distribution === 'builtin' ? `skillDiscovery.categories.${item.category}` : 'skillDiscovery.linkOnly') }}</span>
+              <span class="discovery-kind">{{ t(item.distribution !== 'external_link' ? `skillDiscovery.categories.${item.category}` : 'skillDiscovery.linkOnly') }}</span>
             </div>
             <h4>{{ localized(item.title) }}</h4>
             <p class="discovery-card__description">{{ localized(item.description) }}</p>
@@ -37,7 +37,7 @@
             </div>
             <div class="discovery-card__footer">
               <a :href="item.source_url" target="_blank" rel="noopener noreferrer">{{ t('skillDiscovery.source') }} <t-icon name="jump" size="13px" /></a>
-              <t-button v-if="item.distribution === 'builtin'" class="discovery-enable" theme="default" variant="outline" size="small"
+              <t-button v-if="item.distribution === 'builtin' || item.install_source" class="discovery-enable" theme="default" variant="outline" size="small"
                 @click="emit('install', item)">{{ t('settings.skills.installToSandbox') }}</t-button>
               <a v-else class="discovery-official" :href="item.docs_url || item.source_url" target="_blank" rel="noopener noreferrer">
                 {{ t('skillDiscovery.officialGuide') }} <t-icon name="jump" size="13px" />
@@ -48,76 +48,25 @@
       </section>
       <t-empty v-if="!groups.length" :description="t('skillDiscovery.noResults')" />
     </template>
-    <section class="discovery-migration">
-      <div><h3>{{ t('skillDiscovery.migrateTitle') }}</h3><p>{{ t('skillDiscovery.migrateHint') }}</p></div>
-      <t-button theme="default" variant="outline" @click="showMigration = true">{{ t('skillDiscovery.migrate') }}</t-button>
-    </section>
-    <SettingDrawer v-model:visible="showMigration" :title="t('skillDiscovery.migrateTitle')" width="620px"
-      :confirm-text="t(plan ? 'skillDiscovery.startMigration' : 'skillDiscovery.preview')" :confirm-loading="migrating"
-      :confirm-disabled="!sourceId || !targetId || (plan !== null && !plan.some(item => !item.blocker)) || !!migrationResult"
-      @confirm="migrationStep" @cancel="showMigration = false">
-      <div class="migration-form">
-        <p>{{ t('skillDiscovery.migrateDetails') }}</p>
-        <t-button theme="default" variant="outline" @click="uiStore.openSettings('sandbox')">{{ t('skillDiscovery.configureSandbox') }}</t-button>
-        <label>{{ t('skillDiscovery.sourceSandbox') }}</label>
-        <t-select v-model="sourceId" :disabled="migrating" :options="configOptions" />
-        <label>{{ t('skillDiscovery.targetSandbox') }}</label>
-        <t-select v-model="targetId" :disabled="migrating" :options="configOptions.filter(item => item.value !== sourceId)" />
-        <div v-if="migrationError" class="discovery-error" role="alert">{{ migrationError }}</div>
-        <div v-if="plan" class="migration-plan">
-          <t-empty v-if="!plan.length" :description="t('skillDiscovery.noSkillsToMigrate')" />
-          <article v-for="item in plan" :key="item.skill_id">
-            <div><strong>{{ item.name }}</strong><span>{{ item.version }}</span></div>
-            <code v-if="item.sha256" :title="item.sha256">SHA256 {{ item.sha256.slice(0, 16) }}…</code>
-            <p v-if="item.blocker">{{ t(`skillDiscovery.blockers.${item.blocker}`) }}</p>
-            <span v-else>{{ t('skillDiscovery.readyToMigrate') }}</span>
-          </article>
-        </div>
-        <div v-if="migrationResult" role="status">
-          <p>{{ t('skillDiscovery.migrationStarted', { count: Object.keys(migrationResult.installs).length }) }}</p>
-          <p v-for="(reason, name) in migrationResult.errors" :key="name">{{ name }}: {{ reason }}</p>
-        </div>
-      </div>
-    </SettingDrawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { MessagePlugin } from 'tdesign-vue-next'
-import SettingDrawer from './SettingDrawer.vue'
-import { useUIStore } from '@/stores/ui'
-import { listSkillDiscovery, previewSkillMigration, migrateSkills, type DiscoverySkill, type SkillCatalogItem, type SkillMigrationItem } from '@/api/skill'
-import type { SandboxConfigRecord } from '@/api/system'
+import { skillTone as tone, skillIcon, localizedSkillText } from '@/utils/skillPresentation'
+import { listSkillDiscovery, type DiscoverySkill } from '@/api/skill'
 
-const props = defineProps<{ catalog: SkillCatalogItem[]; configs: SandboxConfigRecord[] }>()
-const emit = defineEmits<{ install: [item: DiscoverySkill]; migrated: [] }>()
+const emit = defineEmits<{ install: [item: DiscoverySkill] }>()
 const { t, locale } = useI18n()
-const uiStore = useUIStore()
 const items = ref<DiscoverySkill[]>([])
 const loading = ref(true)
 const error = ref('')
 const search = ref('')
 const category = ref('all')
-const tone = (item: DiscoverySkill) => {
-  if (item.category === 'browser') return 'cyan'
-  if (item.category === 'analysis') return 'violet'
-  if (item.name.includes('xlsx')) return 'green'
-  if (item.name.includes('pdf')) return 'rose'
-  if (item.name.includes('ppt') || item.name === 'powerpoint') return 'amber'
-  return 'blue'
-}
-const skillIcon = (item: DiscoverySkill) => {
-  if (item.category === 'browser') return 'internet'
-  if (item.category === 'analysis') return 'chart-bar'
-  if (item.name.includes('xlsx')) return 'table'
-  if (item.name.includes('ppt') || item.name === 'powerpoint') return 'slideshow'
-  return 'file'
-}
-const localized = (value: Record<string, string>) => value[locale.value] || value['en-US'] || ''
+const localized = (value: Record<string, string>) => localizedSkillText(value, locale.value)
 const categories = computed(() => ['all', 'office', 'analysis', 'browser'].map(value => ({ value, label: t(`skillDiscovery.categories.${value}`) })))
-const groups = computed(() => ['builtin', 'external_link'].map(kind => ({ kind, items: items.value.filter(item => {
+const groups = computed(() => ['builtin', 'community', 'external_link'].map(kind => ({ kind, items: items.value.filter(item => {
   const query = search.value.trim().toLowerCase()
   return item.distribution === kind && (category.value === 'all' || category.value === item.category)
     && `${localized(item.title)} ${localized(item.description)} ${item.publisher} ${item.name}`.toLowerCase().includes(query)
@@ -127,29 +76,6 @@ async function load() {
   try { items.value = (await listSkillDiscovery()).data || [] }
   catch (err: any) { error.value = err?.message || t('skillDiscovery.loadFailed') }
   finally { loading.value = false }
-}
-const showMigration = ref(false)
-const sourceId = ref('')
-const targetId = ref('')
-const migrating = ref(false)
-const migrationError = ref('')
-const plan = ref<SkillMigrationItem[] | null>(null)
-const migrationResult = ref<{ installs: Record<string, string>; errors: Record<string, string> } | null>(null)
-const configOptions = computed(() => props.configs.filter(cfg => cfg.sandbox_type !== 'disabled').map(cfg => ({ label: cfg.name, value: cfg.id })))
-watch([sourceId, targetId], () => { plan.value = null; migrationResult.value = null; migrationError.value = '' })
-async function migrationStep() {
-  migrating.value = true; migrationError.value = ''
-  const source = sourceId.value, target = targetId.value
-  try {
-    if (!plan.value) {
-      const result = await previewSkillMigration(source, target)
-      if (source === sourceId.value && target === targetId.value) plan.value = result.data
-    } else {
-      migrationResult.value = (await migrateSkills(source, target, plan.value)).data
-      emit('migrated')
-    }
-  } catch (err: any) { migrationError.value = err?.message || t('skillDiscovery.migrationFailed') }
-  finally { migrating.value = false }
 }
 onMounted(load)
 </script>
@@ -188,9 +114,6 @@ onMounted(load)
 .discovery-card__description { margin: 0 0 16px; font-size: 13px; line-height: 1.7; color: var(--td-text-color-secondary); flex: 1; }
 .discovery-meta { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--td-text-color-placeholder); flex-wrap: wrap; }
 .discovery-card__footer { border-top: 1px solid var(--td-component-stroke); margin-top: 14px; padding-top: 13px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
-.discovery-migration { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 30px; padding: 20px 0; border-top: 1px solid var(--td-component-stroke); h3 { font-size: 14px; margin: 0 0 8px; } p { font-size: 13px; line-height: 1.7; color: var(--td-text-color-secondary); margin: 0; } .t-button { flex-shrink: 0; } }
 .discovery-error { margin: 14px 0; color: var(--td-error-color); font-size: 13px; }
-.migration-form { display: flex; flex-direction: column; gap: 14px; p { font-size: 13px; color: var(--td-text-color-secondary); line-height: 1.8; margin: 0; } label { margin-top: 8px; font-size: 13px; } .t-button { align-self: flex-start; } }
-.migration-plan article { padding: 14px 0; border-bottom: 1px solid var(--td-component-stroke); font-size: 12px; div { display: flex; gap: 12px; margin-bottom: 6px; } span, code { color: var(--td-text-color-secondary); } code { display: block; margin-bottom: 6px; } }
-@media (max-width: 600px) { .discovery-grid { grid-template-columns: 1fr; } .discovery-toolbar { flex-direction: column; .category-select { width: 100%; } } .discovery-migration { flex-direction: column; align-items: flex-start; } }
+@media (max-width: 600px) { .discovery-grid { grid-template-columns: 1fr; } .discovery-toolbar { flex-direction: column; .category-select { width: 100%; } } }
 </style>

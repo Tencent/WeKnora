@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	builtin "github.com/Tencent/WeKnora/internal/builtin/skills"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
@@ -90,4 +91,101 @@ func TestBrowserPointerValidation(t *testing.T) {
 	require.Error(t, (BrowserCommand{Action: "pointer", Phase: "unknown"}).Validate())
 	require.Error(t, (BrowserCommand{Action: "pointer", Phase: "move", X: 1281}).Validate())
 	require.Error(t, (BrowserCommand{Action: "pointer", Phase: "move", Y: -1}).Validate())
+}
+
+type browserCapabilityManager struct {
+	*browserLifecycleManager
+	manifest  *types.BuiltinSkillsManifest
+	sessionID string
+	installed bool
+}
+
+func (m *browserCapabilityManager) BuiltinSkills(
+	_ context.Context,
+	sessionID string,
+) (*types.BuiltinSkillsManifest, error) {
+	m.sessionID = sessionID
+	return m.manifest, nil
+}
+
+func (m *browserCapabilityManager) ExecLiveSessionCommand(
+	context.Context,
+	string,
+	string,
+	time.Duration,
+) (*sandbox.ExecuteResult, error) {
+	m.liveCalls++
+	if !m.running {
+		return nil, sandbox.ErrSandboxPaused
+	}
+	stdout := "no"
+	if m.installed {
+		stdout = "yes"
+	}
+	return &sandbox.ExecuteResult{Stdout: stdout}, nil
+}
+
+func TestBrowserCapabilityUsesLiveManifestAndNeverProvisions(t *testing.T) {
+	office, err := builtin.PublishedManifestForProfile("office-core")
+	require.NoError(t, err)
+	legacyBrowserManifest := builtin.PublishedManifest()
+	legacyBrowserManifest.Profile = "office-browser"
+	for _, entry := range builtin.List() {
+		if entry.Name == "browser" {
+			legacyBrowserManifest.Skills = append(legacyBrowserManifest.Skills, types.BuiltinSkillDeclaration{
+				Name: entry.Name, Digest: entry.Digest, Verified: true,
+			})
+		}
+	}
+
+	for _, tc := range []struct {
+		name                     string
+		manifest                 *types.BuiltinSkillsManifest
+		running, installed, want bool
+	}{
+		{"office running", office, true, false, false},
+		{"office paused", office, false, false, false},
+		{"legacy browser paused", legacyBrowserManifest, false, false, true},
+		{"custom controller", office, true, true, true},
+		{"unknown image", nil, true, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := &browserCapabilityManager{
+				browserLifecycleManager: &browserLifecycleManager{
+					capableManager: &capableManager{typ: sandbox.SandboxTypeDocker}, running: tc.running,
+				},
+				manifest: tc.manifest, installed: tc.installed,
+			}
+			available, err := sessionBrowserAvailable(context.Background(), mgr, "live-session", nil)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, available)
+			require.Equal(t, "live-session", mgr.sessionID,
+				"must query the actual session rather than the default template")
+			require.Zero(t, mgr.provisions)
+		})
+	}
+}
+
+func TestBrowserCapabilityKeepsPinnedConfigAndDoesNotPinNewSessions(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	pinner := NewSessionSandboxPinner(newPinTestDB(t))
+	_, err := pinner.Pin(ctx, "s-1", "pinned-office")
+	require.NoError(t, err)
+	office, err := builtin.PublishedManifestForProfile("office-core")
+	require.NoError(t, err)
+	mgr := &browserCapabilityManager{browserLifecycleManager: &browserLifecycleManager{
+		capableManager: &capableManager{typ: sandbox.SandboxTypeDocker},
+	}, manifest: office}
+	resolver := &sessionSkillResolver{mgr: mgr}
+	svc := &sessionService{sandboxResolver: resolver, sandboxPinner: pinner}
+	available, err := svc.SessionBrowserAvailable(ctx, 7, "s-1", "new-agent-config")
+	require.NoError(t, err)
+	require.False(t, available)
+	require.Equal(t, "pinned-office", resolver.configID)
+	_, err = svc.SessionBrowserAvailable(ctx, 7, "s-2", "new-agent-config")
+	require.NoError(t, err)
+	pin, err := pinner.Read(ctx, "s-2")
+	require.NoError(t, err)
+	require.Empty(t, pin)
+	require.Zero(t, mgr.provisions)
 }

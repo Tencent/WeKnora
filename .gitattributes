@@ -18,3 +18,5 @@ cli/acceptance/testdata/**/*.json text eol=lf
 
 # Preserve the original license bytes included in the digest-pinned browser bundle.
 internal/builtin/skills/packages/browser/LICENSE whitespace=-blank-at-eol
+# Upstream license is vendored byte-for-byte and covered by sources.lock.json.
+internal/builtin/skills/packages/powerpoint/LICENSE -text whitespace=cr-at-eol,-blank-at-eol

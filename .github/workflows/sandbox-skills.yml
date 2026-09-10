@@ -1,0 +1,174 @@
+name: Build and Verify Office Core Sandbox Images
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - 'docker/Dockerfile.sandbox*'
+      - 'docker/install-builtin-skills.py'
+      - 'docker/sandbox-pty-prompt.sh'
+      - 'internal/builtin/skills/**'
+      - 'internal/agent/skills/**'
+      - 'internal/application/service/skill_discovery*.go'
+      - 'internal/sandbox/**'
+      - 'cmd/builtin-skills-manifest/**'
+      - 'scripts/build_sandbox_office.sh'
+      - 'scripts/verify_sandbox_image.py'
+      - 'scripts/test_builtin_browser.py'
+      - 'scripts/test_builtin_powerpoint.py'
+      - 'scripts/test_install_builtin_skills.py'
+      - 'go.mod'
+      - 'go.sum'
+      - '.dockerignore'
+      - '.github/workflows/sandbox-skills.yml'
+  pull_request:
+    paths:
+      - 'docker/Dockerfile.sandbox*'
+      - 'docker/install-builtin-skills.py'
+      - 'docker/sandbox-pty-prompt.sh'
+      - 'internal/builtin/skills/**'
+      - 'internal/agent/skills/**'
+      - 'internal/application/service/skill_discovery*.go'
+      - 'internal/sandbox/**'
+      - 'cmd/builtin-skills-manifest/**'
+      - 'scripts/build_sandbox_office.sh'
+      - 'scripts/verify_sandbox_image.py'
+      - 'scripts/test_builtin_browser.py'
+      - 'scripts/test_builtin_powerpoint.py'
+      - 'scripts/test_install_builtin_skills.py'
+      - 'go.mod'
+      - 'go.sum'
+      - '.dockerignore'
+      - '.github/workflows/sandbox-skills.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skill-sandbox-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  BUILDKIT_PROGRESS: plain
+  PROFILE: office-core
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+        # Validate office dependencies on each native architecture.
+        arch: [amd64, arm64]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Test profile selection and runtime contracts
+        run: |
+          go test ./internal/builtin/skills ./internal/agent/skills ./internal/sandbox
+          python3 scripts/test_install_builtin_skills.py
+      - name: Build and verify Docker/E2B image
+        run: |
+          bash scripts/build_sandbox_office.sh sandbox weknora-sandbox:ci "$PROFILE"
+          python3 scripts/verify_sandbox_image.py weknora-sandbox:ci --profile "$PROFILE"
+          DOCKER_INTEGRATION_IMAGE=weknora-sandbox:ci DOCKER_INTEGRATION_PROFILE="$PROFILE" \
+            go test -tags docker_integration ./internal/sandbox ./internal/agent/skills \
+            -run '^(TestDockerBuiltinSkillsIntegration|TestBuiltinShellEnvironmentIntegration)$' -count=1 -v
+      - name: Build and verify Cube image
+        if: matrix.arch == 'amd64'
+        run: |
+          bash scripts/build_sandbox_office.sh cube weknora-sandbox:ci-cube "$PROFILE"
+          python3 scripts/verify_sandbox_image.py weknora-sandbox:ci-cube --profile "$PROFILE" --backend cube
+      - name: Login to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+      - name: Push verified architecture images
+        if: github.event_name != 'pull_request'
+        env:
+          REGISTRY_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p dist/release
+          image="$REGISTRY_USER/weknora-sandbox"
+          for backend in sandbox cube; do
+            if [[ "$backend" == cube && "$ARCH" != amd64 ]]; then continue; fi
+            local_tag=weknora-sandbox:ci
+            if [[ "$backend" == cube ]]; then local_tag=weknora-sandbox:ci-cube; fi
+            tag="$image:build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PROFILE-$backend-$ARCH"
+            docker tag "$local_tag" "$tag"
+            docker push "$tag"
+            docker image inspect "$tag" --format '{{index .RepoDigests 0}}' > "dist/release/$backend-$ARCH.ref"
+          done
+      - name: Upload skill manifest and verified image references
+        uses: actions/upload-artifact@v7
+        with:
+          name: sandbox-${{ env.PROFILE }}-${{ matrix.arch }}
+          path: |
+            dist/skills/*.skills.json
+            dist/release/*.ref
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: sandbox-${{ env.PROFILE }}-*
+          path: release
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-sandbox
+          flavor: suffix=-${{ env.PROFILE }},onlatest=true
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=raw,value=build-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Publish multi-platform and Cube tags
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          mapfile -t tags <<< "$IMAGE_TAGS"
+          args=()
+          cube_args=()
+          for tag in "${tags[@]}"; do
+            args+=(-t "$tag")
+            cube_args+=(-t "$tag-cube")
+          done
+          docker buildx imagetools create "${args[@]}" \
+            "$(cat release/release/sandbox-amd64.ref)" "$(cat release/release/sandbox-arm64.ref)"
+          docker buildx imagetools create "${cube_args[@]}" "$(cat release/release/cube-amd64.ref)"
+          # Release artifacts bind the exact pushed digest, source and skill declaration.
+          docker buildx imagetools inspect "${tags[0]}" --format '{{json .Manifest}}' > "release/$PROFILE.image.json"
+          docker buildx imagetools inspect "${tags[0]}-cube" --format '{{json .Manifest}}' > "release/$PROFILE-cube.image.json"
+          printf '%s\n' "$GITHUB_SHA" > release/source-commit.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sandbox-release-${{ env.PROFILE }}
+          path: release/
+          retention-days: 90

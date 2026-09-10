@@ -80,55 +80,51 @@
       </div>
       <div v-else-if="!loading" class="sandbox-grid">
         <div v-for="record in filteredRecords" :key="record.id" class="sandbox-card"
-          :class="[`sandbox-card--${record.sandbox_type}`, { 'sandbox-card--clickable': !isLegacyRecord(record) }]"
-          :role="isLegacyRecord(record) ? undefined : 'button'"
-          :tabindex="isLegacyRecord(record) ? undefined : 0"
-          @click="openCard(record)" @keydown.enter="openCard(record)">
-          <SandboxBackendBadge :type="record.sandbox_type" />
+          :class="[`sandbox-card--${record.sandbox_type}`, { 'sandbox-card--clickable': !isLegacyRecord(record), 'sandbox-card--expanded': expandedSkillsId === record.id }]"
+          @click="openCard(record)">
           <div class="sandbox-card__body">
             <div class="sandbox-card__header">
-              <h3 class="sandbox-card__title" :title="record.name">{{ record.name }}</h3>
+              <SandboxBackendBadge :type="record.sandbox_type" size="sm" />
+              <h3 class="sandbox-card__title" :title="record.name">
+                <span v-if="isLegacyRecord(record)">{{ record.name }}</span>
+                <button v-else type="button" class="sandbox-card__open" @click.stop="openCard(record)">{{ record.name }}</button>
+              </h3>
+              <span class="sandbox-card__type">{{ backendLabel(record.sandbox_type) }}</span>
               <t-tag v-if="isLegacyRecord(record)" theme="warning" variant="light" size="small">
                 {{ $t('settings.sandbox.legacyConfig') }}
               </t-tag>
-              <div class="sandbox-card__actions" @click.stop>
-                <t-dropdown
-                  :options="cardMenu(record)"
-                  placement="bottom-right"
-                  attach="body"
-                  trigger="click"
-                  @click="(data: any) => onMenuAction(data.value, record)"
-                >
-                  <t-button variant="text" shape="square" size="small" class="sandbox-card__more">
+              <div class="sandbox-card__actions" @click.stop @keydown.enter.stop @keydown.space.stop>
+                <t-dropdown :options="cardMenu(record)" placement="bottom-right" attach="body" trigger="click"
+                  @click="(data: any) => onMenuAction(data.value, record)">
+                  <t-button variant="text" shape="square" size="small" class="sandbox-card__more" :aria-label="$t('common.more')">
                     <t-icon name="ellipsis" />
                   </t-button>
                 </t-dropdown>
               </div>
             </div>
             <div class="sandbox-card__subtitle">
-              <span class="sandbox-card__type">{{ backendLabel(record.sandbox_type) }}</span>
-              <template v-if="record.description">
-                <span class="sandbox-card__sep">·</span>
-                <span class="sandbox-card__desc" :title="record.description">{{ record.description }}</span>
-              </template>
+              <span v-if="targetSummary(record)" class="sandbox-card__url" :title="targetSummary(record)">
+                {{ targetSummary(record) }}
+              </span>
+              <span v-if="targetSummary(record) && record.description" class="sandbox-card__sep">·</span>
+              <span v-if="record.description" class="sandbox-card__desc" :title="record.description">{{ record.description }}</span>
             </div>
-            <div v-if="targetSummary(record)" class="sandbox-card__url" :title="targetSummary(record)">
-              {{ targetSummary(record) }}
-            </div>
-            <SandboxSkillsSummary v-if="!isLegacyRecord(record)"
-              :builtin="skillSummaries[record.id]?.builtin"
-              :installed="skillSummaries[record.id]?.installed"
-              :usable-installed-names="skillSummaries[record.id]?.usableInstalledNames" />
             <ul v-if="cardWarnings[record.id]?.length" class="sandbox-card__warnings">
               <li v-for="item in cardWarnings[record.id]" :key="item.key">
                 <t-icon name="error-circle" size="12px" />
                 <span>{{ item.text }}</span>
               </li>
             </ul>
+            <SandboxSkillsSummary v-if="!isLegacyRecord(record)" class="sandbox-card__skills"
+              :expanded="expandedSkillsId === record.id" :catalog="builtinCatalog"
+              @update:expanded="expandedSkillsId = $event ? record.id : expandedSkillsId === record.id ? null : expandedSkillsId"
+              :builtin="skillSummaries[record.id]?.builtin"
+              :installed="skillSummaries[record.id]?.installed"
+              :usable-installed-names="skillSummaries[record.id]?.usableInstalledNames" />
           </div>
         </div>
         <button v-if="canCreateOnTab" type="button" class="sandbox-card sandbox-card--add" @click="openCreate">
-          <span class="sandbox-card--add__icon" aria-hidden="true"><t-icon name="add" /></span>
+          <span class="sandbox-card--add__icon"><t-icon name="add" /></span>
           <span class="sandbox-card--add__label">{{ $t('settings.sandbox.addConfig') }}</span>
         </button>
       </div>
@@ -212,14 +208,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import SandboxConfigEditorDrawer from '@/components/SandboxConfigEditorDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import SandboxSkillsSummary from '@/components/settings/SandboxSkillsSummary.vue'
-import { listSkills, type BuiltinSkillsSummary } from '@/api/skill'
+import { listSkills, listSkillDiscovery, type DiscoverySkill, type BuiltinSkillsSummary } from '@/api/skill'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { getSession } from '@/api/chat/index'
@@ -288,7 +284,7 @@ const filteredRecords = computed(() => {
   const base = activeType.value === 'all'
     ? records.value
     : records.value.filter((r) => r.sandbox_type === activeType.value)
-  return base
+  return [...base].sort((a, b) => backendTypes.indexOf(a.sandbox_type as typeof backendTypes[number]) - backendTypes.indexOf(b.sandbox_type as typeof backendTypes[number]))
 })
 
 const countByType = (type: string) =>
@@ -468,6 +464,9 @@ function buildCardWarnings(record: SandboxConfigRecord): CardWarning[] {
 
 type CardSkills = { builtin?: BuiltinSkillsSummary | null; installed?: ConfigSkill[] | null; usableInstalledNames?: string[] }
 const skillSummaries = ref<Record<string, CardSkills>>({})
+const builtinCatalog = ref<DiscoverySkill[]>([])
+const expandedSkillsId = ref<string | null>(null)
+watch(activeType, () => { expandedSkillsId.value = null })
 let summaryGeneration = 0
 onUnmounted(() => { summaryGeneration++ })
 
@@ -501,6 +500,7 @@ async function loadSkillSummaries(configs: SandboxConfigRecord[]) {
 }
 
 async function load() {
+  expandedSkillsId.value = null
   loading.value = true
   try {
     const res = await listSandboxConfigs()
@@ -614,6 +614,9 @@ async function forceRemove(record: SandboxConfigRecord) {
 
 onMounted(() => {
   void deploymentCapabilities.ensureLoaded()
+  void listSkillDiscovery().then(response => {
+    builtinCatalog.value = response.data.filter(item => item.distribution === 'builtin')
+  }).catch(() => { /* Runtime names remain available if display metadata cannot be loaded. */ })
   load()
 })
 </script>
@@ -807,103 +810,68 @@ onMounted(() => {
 
 .sandbox-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 12px;
-
-  .sandbox-card--add {
-    width: 100%;
-    height: 100%;
-  }
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 10px;
+  align-items: stretch;
 }
 
 .sandbox-card {
-  position: relative;
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 14px 14px 12px;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
   border: 1px solid var(--td-component-stroke);
   border-radius: 10px;
   background: var(--td-bg-color-container);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
-  min-width: 0;
 
-  &--clickable {
-    cursor: pointer;
-
-    &:hover {
-      border-color: var(--td-brand-color-3, var(--td-brand-color));
-      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
-  }
-
+  &--expanded, &--clickable:hover { border-color: var(--td-brand-color); }
+  &--clickable { cursor: pointer; }
   &--add {
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    min-height: 68px;
+    gap: 6px;
+    min-height: 100px;
     border-style: dashed;
     background: transparent;
     color: var(--td-text-color-placeholder);
     cursor: pointer;
     font: inherit;
-    text-align: center;
-
-    &:hover,
-    &:focus-visible {
+    &:hover, &:focus-visible {
       color: var(--td-brand-color);
       border-color: var(--td-brand-color);
-      box-shadow: none;
+      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
     }
-
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
-
     &__icon {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-      color: var(--td-brand-color);
-      font-size: 18px;
+      display: flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px; border-radius: 8px;
+      background: var(--td-bg-color-secondarycontainer); font-size: 18px;
     }
-
-    &__label {
-      font-size: 13px;
-      font-weight: 500;
-      line-height: 1.4;
-    }
+    &__label { font-size: 13px; font-weight: 500; line-height: 1.4; }
   }
 }
+
+.sandbox-card__skills { margin-top: auto; padding-top: 4px; border-top: 1px solid var(--td-component-stroke); }
 
 .sandbox-card__body {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
 }
 
 .sandbox-card__header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
+  min-height: 28px;
 }
 
 .sandbox-card__title {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   margin: 0;
   font-size: 14px;
@@ -915,11 +883,28 @@ onMounted(() => {
   white-space: nowrap;
 }
 
+.sandbox-card__open {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  &:hover { color: var(--td-brand-color); }
+  &:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: -2px; border-radius: 2px; }
+}
+
 .sandbox-card__subtitle {
+  min-height: 18px;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
   font-size: 12px;
   line-height: 1.4;
   color: var(--td-text-color-secondary);
@@ -927,7 +912,12 @@ onMounted(() => {
 }
 
 .sandbox-card__type {
-  font-weight: 500;
+  flex-shrink: 0;
+  padding: 0;
+  color: var(--td-text-color-secondary);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 18px;
 }
 
 .sandbox-card__sep {
@@ -971,6 +961,7 @@ onMounted(() => {
 }
 
 .sandbox-card__actions {
+  margin-left: auto;
   flex-shrink: 0;
 }
 
@@ -978,20 +969,13 @@ onMounted(() => {
   flex-shrink: 0;
   padding: 2px;
   color: var(--td-text-color-placeholder);
-  opacity: 0;
-  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+  transition: color 0.15s ease, background-color 0.15s ease;
 
   &:hover,
   &:focus-visible {
     color: var(--td-text-color-primary);
     background: var(--td-bg-color-secondarycontainer);
   }
-}
-
-.sandbox-card:hover .sandbox-card__more,
-.sandbox-card:focus-within .sandbox-card__more,
-.sandbox-card__actions:focus-within .sandbox-card__more {
-  opacity: 1;
 }
 
 .sandbox-docker-banner {

@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"path"
 	"strings"
 
@@ -29,6 +27,12 @@ func (s *TenantSkillService) RegisterBuiltin(
 	if err != nil {
 		return nil, err
 	}
+	return s.createCatalogFromValidatedBundle(ctx, tenantID, bundle, archive)
+}
+
+func (s *TenantSkillService) createCatalogFromValidatedBundle(
+	ctx context.Context, tenantID uint64, bundle *SkillBundle, archive []byte,
+) (*types.TenantSkillCatalogEntity, error) {
 	existing, err := s.skills.GetCatalogByName(ctx, tenantID, bundle.Name)
 	if err != nil {
 		return nil, err
@@ -85,8 +89,13 @@ func (s *TenantSkillService) tryPreinstalledBuiltin(ctx context.Context, job ins
 		return false, nil // Legacy/custom images retain the existing install path.
 	}
 	command := "test -x " + sandbox.ShellQuote(base+"/.venv/bin/python") +
-		" && ln -s " + sandbox.ShellQuote(base+"/.venv") + " " + sandbox.ShellQuote(job.skillDir+"/.venv") +
-		" && " + sandbox.ShellQuote(job.skillDir+"/.venv/bin/python") + " " +
+		" && ln -s " + sandbox.ShellQuote(base+"/.venv") + " " + sandbox.ShellQuote(job.skillDir+"/.venv")
+	if _, needsNode := job.bundle.Files["package-lock.json"]; needsNode {
+		command += " && test -d " + sandbox.ShellQuote(base+"/node_modules") +
+			" && ln -s " + sandbox.ShellQuote(base+"/node_modules") + " " +
+			sandbox.ShellQuote(job.skillDir+"/node_modules")
+	}
+	command += " && " + sandbox.ShellQuote(job.skillDir+"/.venv/bin/python") + " " +
 		sandbox.ShellQuote(job.skillDir+"/scripts/weknora_smoke.py") + " --report"
 	_, err = s.execInstall(ctx, job.mgr, job.sess.ID, command)
 	if err == nil {
@@ -102,170 +111,4 @@ func (s *TenantSkillService) tryPreinstalledBuiltin(ctx context.Context, job ins
 	}
 	job.transcript.Finish(context.WithoutCancel(ctx), err)
 	return true, err
-}
-
-// SkillMigrationItem describes a pinned source bundle and any migration blocker.
-type SkillMigrationItem struct {
-	SkillID string `json:"skill_id"`
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	SHA256  string `json:"sha256"`
-	Blocker string `json:"blocker,omitempty"`
-}
-
-// PlanSkillMigration pins each old installation's bytes. No fallback to a
-// newer catalog archive is permitted, even for legacy rows without a digest.
-func (s *TenantSkillService) PlanSkillMigration(
-	ctx context.Context,
-	tenantID uint64,
-	sourceID, targetID string,
-) ([]SkillMigrationItem, error) {
-	if sourceID == "" || targetID == "" || sourceID == targetID {
-		return nil, apperrors.NewBadRequestError("select two different sandbox configurations")
-	}
-	for _, id := range []string{sourceID, targetID} {
-		cfg, err := s.configs.GetByID(ctx, tenantID, id)
-		if err != nil {
-			return nil, err
-		}
-		if cfg == nil {
-			return nil, apperrors.NewNotFoundError("sandbox config not found")
-		}
-	}
-	rows, err := s.skills.ListSkillsByConfig(ctx, tenantID, sourceID)
-	if err != nil {
-		return nil, err
-	}
-	targets, err := s.skills.ListSkillsByConfig(ctx, tenantID, targetID)
-	if err != nil {
-		return nil, err
-	}
-	occupied := make(map[string]bool)
-	for _, row := range targets {
-		if row != nil {
-			occupied[row.Name] = true
-		}
-	}
-	items := make([]SkillMigrationItem, 0, len(rows))
-	for _, row := range rows {
-		if row == nil {
-			continue
-		}
-		item := SkillMigrationItem{SkillID: row.ID, Name: row.Name, Version: row.Version, SHA256: row.BundleSHA256}
-		switch {
-		case row.Status != types.SkillStatusReady:
-			item.Blocker = "source_not_ready"
-		case !row.Enabled:
-			item.Blocker = "source_disabled"
-		case occupied[row.Name]:
-			item.Blocker = "target_name_conflict"
-		case row.BundleSHA256 == "":
-			item.Blocker = "missing_digest"
-		default:
-			archive, err := s.skillBundleArchive(ctx, tenantID, sourceID, row.ID)
-			if err != nil || !archiveMatchesSHA(archive, row.BundleSHA256) {
-				item.Blocker = "missing_original_archive"
-			}
-		}
-		items = append(items, item)
-	}
-	return items, nil
-}
-
-// MigrateSkills validates the selected bundle versions before installing them into the target.
-func (s *TenantSkillService) MigrateSkills(
-	ctx context.Context,
-	tenantID uint64,
-	sourceID, targetID string,
-	selection []SkillMigrationItem,
-) (*CatalogInstallResult, error) {
-	if len(selection) == 0 || len(selection) > 100 {
-		return nil, apperrors.NewBadRequestError("select between 1 and 100 verified skills")
-	}
-	expected := make(map[string]string, len(selection))
-	for _, item := range selection {
-		expected[item.SkillID] = item.SHA256
-	}
-	items, err := s.PlanSkillMigration(ctx, tenantID, sourceID, targetID)
-	if err != nil {
-		return nil, err
-	}
-	result := &CatalogInstallResult{Installs: map[string]string{}, Errors: map[string]string{}}
-	for _, item := range items {
-		digest, selected := expected[item.SkillID]
-		if !selected {
-			continue
-		}
-		delete(expected, item.SkillID)
-		if digest == "" || digest != item.SHA256 {
-			result.Errors[item.Name] = "source_changed"
-			continue
-		}
-		if item.Blocker != "" {
-			result.Errors[item.Name] = item.Blocker
-			continue
-		}
-		archive, err := s.skillBundleArchive(ctx, tenantID, sourceID, item.SkillID)
-		if err == nil && !archiveMatchesSHA(archive, item.SHA256) {
-			err = errors.New("original archive changed")
-		}
-		if err == nil {
-			var skillID string
-			var bundle *SkillBundle
-			bundle, err = ParseSkillBundle(archive)
-			if err == nil {
-				original, lookupErr := s.skills.GetSkill(ctx, tenantID, sourceID, item.SkillID)
-				err = lookupErr
-				if err == nil &&
-					(original == nil || original.BundleSHA256 != item.SHA256 ||
-						!original.Enabled || original.Status != types.SkillStatusReady) {
-					err = errors.New("source installation changed; preview again")
-				}
-				if err == nil {
-					skillID, err = s.installParsedSkillFrom(ctx, tenantID, targetID, bundle, archive, original)
-				}
-			}
-			if err == nil {
-				result.Installs[item.Name] = skillID
-			}
-		}
-		if err != nil {
-			result.Errors[item.Name] = fmt.Sprint(err)
-		}
-	}
-	for id := range expected {
-		result.Errors[id] = "source_not_found"
-	}
-	return result, nil
-}
-
-// Store a separate archive reference for the migrated install. The workspace
-// catalog can already contain a newer version and must remain untouched.
-func (s *TenantSkillService) pinMigratedBundle(
-	ctx context.Context,
-	tenantID uint64,
-	configID, skillID string,
-	original *types.TenantSkillEntity,
-	archive []byte,
-) error {
-	holder := &types.TenantSkillCatalogEntity{ID: uuid.NewString(), TenantID: tenantID}
-	if _, _, err := s.storeCatalogBundle(ctx, tenantID, holder, archive, true); err != nil {
-		return err
-	}
-	row, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
-	if err != nil || row == nil {
-		s.deleteBundleBestEffort(ctx, tenantID, holder.BundleRef)
-		if err != nil {
-			return err
-		}
-		return errors.New("target installation disappeared")
-	}
-	row.BundleRef = holder.BundleRef
-	row.CatalogID = original.CatalogID
-	row.Envs = original.Envs
-	if err := s.skills.UpdateSkill(ctx, row); err != nil {
-		s.deleteBundleBestEffort(ctx, tenantID, holder.BundleRef)
-		return err
-	}
-	return nil
 }

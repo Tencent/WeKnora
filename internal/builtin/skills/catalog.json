@@ -12,12 +12,12 @@
     },
     "category": "office",
     "distribution": "builtin",
-    "publisher": "Nous Research",
-    "license": "MIT",
-    "source_url": "https://github.com/NousResearch/hermes-agent/tree/e74c4a00ca77c662ffb44bc2986cf877df196dd3/skills/productivity/xlsx",
-    "license_url": "https://github.com/NousResearch/hermes-agent/blob/e74c4a00ca77c662ffb44bc2986cf877df196dd3/LICENSE",
+    "publisher": "OpenAI / WeKnora",
+    "license": "Apache-2.0",
+    "source_url": "https://github.com/openai/skills/tree/e6afb0d74cc75d220df2faf3dd6c635c2dc6a108/skills/.curated/spreadsheet",
+    "license_url": "https://github.com/openai/skills/blob/e6afb0d74cc75d220df2faf3dd6c635c2dc6a108/skills/.curated/spreadsheet/LICENSE.txt",
     "runtime": "sandbox",
-    "version": "2026.09.1"
+    "version": "2026.09.5"
   },
   {
     "id": "docx",
@@ -27,17 +27,17 @@
       "en-US": "Word documents"
     },
     "description": {
-      "zh-CN": "生成、编辑 Word 文档，处理模板、批注与修订。",
-      "en-US": "Create and edit Word documents, templates, comments and revisions."
+      "zh-CN": "生成、编辑 Word 文档，检查版式与中英文字体。",
+      "en-US": "Create and edit Word documents with rendered layout and font checks."
     },
     "category": "office",
     "distribution": "builtin",
-    "publisher": "Nous Research",
-    "license": "MIT",
-    "source_url": "https://github.com/NousResearch/hermes-agent/tree/e74c4a00ca77c662ffb44bc2986cf877df196dd3/skills/productivity/docx",
-    "license_url": "https://github.com/NousResearch/hermes-agent/blob/e74c4a00ca77c662ffb44bc2986cf877df196dd3/LICENSE",
+    "publisher": "OpenAI / WeKnora",
+    "license": "Apache-2.0",
+    "source_url": "https://github.com/openai/skills/tree/45d05d75363abf13f99d09e899d61e07b8010685/skills/.curated/doc",
+    "license_url": "https://github.com/openai/skills/blob/45d05d75363abf13f99d09e899d61e07b8010685/skills/.curated/doc/LICENSE.txt",
     "runtime": "sandbox",
-    "version": "2026.09.1"
+    "version": "2026.09.5"
   },
   {
     "id": "powerpoint",
@@ -47,17 +47,17 @@
       "en-US": "Presentations"
     },
     "description": {
-      "zh-CN": "创建与修改幻灯片，使用模板并渲染预览。",
-      "en-US": "Build slides from templates and render presentation previews."
+      "zh-CN": "使用 PptxGenJS 生成可编辑演示文稿、原生图表，并渲染检查。",
+      "en-US": "Create editable presentations and native charts with PptxGenJS and rendered checks."
     },
     "category": "office",
     "distribution": "builtin",
-    "publisher": "Nous Research",
-    "license": "MIT",
-    "source_url": "https://github.com/NousResearch/hermes-agent/tree/e74c4a00ca77c662ffb44bc2986cf877df196dd3/skills/productivity/powerpoint",
-    "license_url": "https://github.com/NousResearch/hermes-agent/blob/e74c4a00ca77c662ffb44bc2986cf877df196dd3/LICENSE",
+    "publisher": "OpenAI / WeKnora",
+    "license": "Apache-2.0",
+    "source_url": "https://github.com/openai/skills/tree/e6afb0d74cc75d220df2faf3dd6c635c2dc6a108/skills/.curated/slides",
+    "license_url": "https://github.com/openai/skills/blob/e6afb0d74cc75d220df2faf3dd6c635c2dc6a108/skills/.curated/slides/LICENSE.txt",
     "runtime": "sandbox",
-    "version": "2026.09.1"
+    "version": "2026.09.5"
   },
   {
     "id": "pdf",
@@ -72,12 +72,12 @@
     },
     "category": "office",
     "distribution": "builtin",
-    "publisher": "Nous Research",
-    "license": "MIT",
-    "source_url": "https://github.com/NousResearch/hermes-agent/tree/e74c4a00ca77c662ffb44bc2986cf877df196dd3/skills/productivity/pdf",
-    "license_url": "https://github.com/NousResearch/hermes-agent/blob/e74c4a00ca77c662ffb44bc2986cf877df196dd3/LICENSE",
+    "publisher": "OpenAI / WeKnora",
+    "license": "Apache-2.0",
+    "source_url": "https://github.com/openai/skills/tree/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/pdf",
+    "license_url": "https://github.com/openai/skills/blob/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/pdf/LICENSE.txt",
     "runtime": "sandbox",
-    "version": "2026.09.1"
+    "version": "2026.09.5"
   },
   {
     "id": "exploratory-data-analysis",
@@ -97,7 +97,7 @@
     "source_url": "https://github.com/K-Dense-AI/scientific-agent-skills/tree/9cf7d9aea7d84754db4c167ab04b299d33c444bc/skills/exploratory-data-analysis",
     "license_url": "https://github.com/K-Dense-AI/scientific-agent-skills/blob/9cf7d9aea7d84754db4c167ab04b299d33c444bc/LICENSE.md",
     "runtime": "sandbox",
-    "version": "2026.09.1"
+    "version": "2026.09.5"
   },
   {
     "id": "statistical-analysis",
@@ -117,7 +117,7 @@
     "source_url": "https://github.com/K-Dense-AI/scientific-agent-skills/tree/9cf7d9aea7d84754db4c167ab04b299d33c444bc/skills/statistical-analysis",
     "license_url": "https://github.com/K-Dense-AI/scientific-agent-skills/blob/9cf7d9aea7d84754db4c167ab04b299d33c444bc/LICENSE.md",
     "runtime": "sandbox",
-    "version": "2026.09.1"
+    "version": "2026.09.5"
   },
   {
     "id": "scientific-visualization",
@@ -137,7 +137,7 @@
     "source_url": "https://github.com/K-Dense-AI/scientific-agent-skills/tree/9cf7d9aea7d84754db4c167ab04b299d33c444bc/skills/scientific-visualization",
     "license_url": "https://github.com/K-Dense-AI/scientific-agent-skills/blob/9cf7d9aea7d84754db4c167ab04b299d33c444bc/LICENSE.md",
     "runtime": "sandbox",
-    "version": "2026.09.1"
+    "version": "2026.09.5"
   },
   {
     "id": "browser",
@@ -158,87 +158,7 @@
     "license_url": "https://github.com/Tencent/WeKnora/blob/main/LICENSE",
     "runtime": "sandbox",
     "docs_url": "https://playwright.dev/python/docs/intro",
-    "version": "2026.09.2"
-  },
-  {
-    "id": "anthropic-docx",
-    "name": "docx",
-    "title": {
-      "zh-CN": "Anthropic Word",
-      "en-US": "Anthropic Word"
-    },
-    "description": {
-      "zh-CN": "Anthropic 官方技能参考。仅提供来源与使用文档，请通过官方支持的方式使用。",
-      "en-US": "Official Anthropic skill reference. Follow the publisher’s supported usage and license."
-    },
-    "category": "office",
-    "distribution": "external_link",
-    "publisher": "Anthropic",
-    "license": "Source-available",
-    "source_url": "https://github.com/anthropics/skills/tree/main/skills/docx",
-    "license_url": "https://github.com/anthropics/skills/blob/main/skills/docx/LICENSE.txt",
-    "docs_url": "https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview",
-    "runtime": "publisher"
-  },
-  {
-    "id": "anthropic-pdf",
-    "name": "pdf",
-    "title": {
-      "zh-CN": "Anthropic PDF",
-      "en-US": "Anthropic PDF"
-    },
-    "description": {
-      "zh-CN": "Anthropic 官方技能参考。仅提供来源与使用文档，请通过官方支持的方式使用。",
-      "en-US": "Official Anthropic skill reference. Follow the publisher’s supported usage and license."
-    },
-    "category": "office",
-    "distribution": "external_link",
-    "publisher": "Anthropic",
-    "license": "Source-available",
-    "source_url": "https://github.com/anthropics/skills/tree/main/skills/pdf",
-    "license_url": "https://github.com/anthropics/skills/blob/main/skills/pdf/LICENSE.txt",
-    "docs_url": "https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview",
-    "runtime": "publisher"
-  },
-  {
-    "id": "anthropic-pptx",
-    "name": "pptx",
-    "title": {
-      "zh-CN": "Anthropic PowerPoint",
-      "en-US": "Anthropic PowerPoint"
-    },
-    "description": {
-      "zh-CN": "Anthropic 官方技能参考。仅提供来源与使用文档，请通过官方支持的方式使用。",
-      "en-US": "Official Anthropic skill reference. Follow the publisher’s supported usage and license."
-    },
-    "category": "office",
-    "distribution": "external_link",
-    "publisher": "Anthropic",
-    "license": "Source-available",
-    "source_url": "https://github.com/anthropics/skills/tree/main/skills/pptx",
-    "license_url": "https://github.com/anthropics/skills/blob/main/skills/pptx/LICENSE.txt",
-    "docs_url": "https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview",
-    "runtime": "publisher"
-  },
-  {
-    "id": "anthropic-xlsx",
-    "name": "xlsx",
-    "title": {
-      "zh-CN": "Anthropic Excel",
-      "en-US": "Anthropic Excel"
-    },
-    "description": {
-      "zh-CN": "Anthropic 官方技能参考。仅提供来源与使用文档，请通过官方支持的方式使用。",
-      "en-US": "Official Anthropic skill reference. Follow the publisher’s supported usage and license."
-    },
-    "category": "office",
-    "distribution": "external_link",
-    "publisher": "Anthropic",
-    "license": "Source-available",
-    "source_url": "https://github.com/anthropics/skills/tree/main/skills/xlsx",
-    "license_url": "https://github.com/anthropics/skills/blob/main/skills/xlsx/LICENSE.txt",
-    "docs_url": "https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview",
-    "runtime": "publisher"
+    "version": "2026.09.5"
   },
   {
     "id": "tencent-browser-skill",
@@ -259,5 +179,47 @@
     "license_url": "https://github.com/Tencent/BrowserSkill/blob/main/LICENSE",
     "docs_url": "https://github.com/Tencent/BrowserSkill/blob/main/README.zh-CN.md",
     "runtime": "local_browser"
+  },
+  {
+    "id": "ppt-master",
+    "name": "ppt-master",
+    "title": {
+      "zh-CN": "PPT Master",
+      "en-US": "PPT Master"
+    },
+    "description": {
+      "zh-CN": "可选：SVG 驱动的演示文稿工作流，含模板与图标库；资源较大，按需安装。",
+      "en-US": "Optional SVG presentation workflow with templates and an extensive icon library; install on demand."
+    },
+    "category": "office",
+    "distribution": "community",
+    "publisher": "hugohe3",
+    "license": "MIT",
+    "source_url": "https://github.com/hugohe3/ppt-master/tree/c47602895b186e32e77d0ece4dfcab423ced5c0e/skills/ppt-master",
+    "license_url": "https://github.com/hugohe3/ppt-master/blob/c47602895b186e32e77d0ece4dfcab423ced5c0e/LICENSE",
+    "install_source": "https://github.com/hugohe3/ppt-master/tree/c47602895b186e32e77d0ece4dfcab423ced5c0e/skills/ppt-master",
+    "runtime": "sandbox",
+    "version": "c47602895b18"
+  },
+  {
+    "id": "frontend-slides",
+    "name": "frontend-slides",
+    "title": {
+      "zh-CN": "Frontend Slides",
+      "en-US": "Frontend Slides"
+    },
+    "description": {
+      "zh-CN": "可选：单文件 HTML 演示文稿、动画与视觉风格探索；浏览器预览和导出需浏览器能力。",
+      "en-US": "Optional self-contained HTML presentations with animation and visual style exploration; browser preview/export requires browser capability."
+    },
+    "category": "office",
+    "distribution": "community",
+    "publisher": "zarazhangrui",
+    "license": "MIT",
+    "source_url": "https://github.com/zarazhangrui/frontend-slides/tree/9906a34d640d2111f724544cbc50f7f130569ae1/plugins/frontend-slides/skills/frontend-slides",
+    "license_url": "https://github.com/zarazhangrui/frontend-slides/blob/9906a34d640d2111f724544cbc50f7f130569ae1/LICENSE",
+    "install_source": "https://github.com/zarazhangrui/frontend-slides/tree/9906a34d640d2111f724544cbc50f7f130569ae1/plugins/frontend-slides/skills/frontend-slides",
+    "runtime": "sandbox",
+    "version": "9906a34d640d"
   }
 ]

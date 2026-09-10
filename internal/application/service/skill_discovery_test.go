@@ -5,13 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/application/repository"
 	builtin "github.com/Tencent/WeKnora/internal/builtin/skills"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
 func TestBuiltinArchivesUseExistingInstallerFormat(t *testing.T) {
@@ -79,50 +76,6 @@ func TestPinnedRuntimeOnlyOffersMatchingSkillVersions(t *testing.T) {
 	require.Empty(t, skillsMatchingRuntimeManifest(rows, []byte(`invalid`)))
 }
 
-func TestMigrationBlocksMissingOriginalAndForeignConfiguration(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:migrate-discovery?mode=memory&cache=shared"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(
-		t,
-		db.AutoMigrate(
-			&types.TenantSkillEntity{},
-			&types.TenantSkillCatalogEntity{},
-			&types.TenantSandboxConfigEntity{},
-		),
-	)
-	configs := repository.NewTenantSandboxConfigRepository(db)
-	skills := repository.NewTenantSkillRepository(db)
-	ctx := context.Background()
-	for _, config := range []*types.TenantSandboxConfigEntity{
-		{ID: "old", TenantID: 7, Name: "old"},
-		{ID: "new", TenantID: 7, Name: "new"},
-		{ID: "foreign", TenantID: 8, Name: "foreign"},
-	} {
-		require.NoError(t, configs.Create(ctx, config))
-	}
-	for _, row := range []*types.TenantSkillEntity{
-		{ID: "legacy", TenantID: 7, SandboxConfigID: "old", Name: "pdf", Enabled: true, Status: types.SkillStatusReady},
-		{
-			ID: "lost", TenantID: 7, SandboxConfigID: "old", Name: "xlsx", Enabled: true,
-			Status: types.SkillStatusReady, BundleSHA256: strings.Repeat("b", 64),
-		},
-	} {
-		require.NoError(t, skills.CreateSkill(ctx, row))
-	}
-	svc := &TenantSkillService{skills: skills, configs: configs}
-	plan, err := svc.PlanSkillMigration(ctx, 7, "old", "new")
-	require.NoError(t, err)
-	blockers := map[string]string{}
-	for _, item := range plan {
-		blockers[item.Name] = item.Blocker
-	}
-	require.Equal(t, map[string]string{"pdf": "missing_digest", "xlsx": "missing_original_archive"}, blockers)
-	_, err = svc.PlanSkillMigration(ctx, 7, "old", "foreign")
-	require.Error(t, err)
-	_, err = svc.PlanSkillMigration(ctx, 7, "old", "old")
-	require.Error(t, err)
-}
-
 func TestBrowserCommandRejectsUnknownActionsAndOversizedPayloads(t *testing.T) {
 	for _, command := range []BrowserCommand{
 		{Action: "eval"}, {Action: "shell"}, {Action: "open", URL: strings.Repeat("x", 8193)},
@@ -167,30 +120,27 @@ func TestPreinstalledBuiltinRequiresExactDigestAndRealVerification(t *testing.T)
 	require.Error(t, err)
 }
 
-func TestMigrationPinsOldArchiveWithoutDowngradingCatalog(t *testing.T) {
+func TestPreinstalledPowerpointLinksLockedNodeEnvironment(t *testing.T) {
 	fx := newInstallFixture(t)
-	ctx := context.Background()
-	archive := []byte("the original pinned archive")
-	row, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	archive, err := builtin.Archive("powerpoint")
 	require.NoError(t, err)
-	row.BundleSHA256 = skillArchiveSHA256(archive)
-	require.NoError(t, fx.skillRepo.UpdateSkill(ctx, row))
-	newer := &types.TenantSkillCatalogEntity{
-		ID:           "cat-new",
-		TenantID:     7,
-		Name:         row.Name,
-		Version:      "2",
-		BundleSHA256: "new-digest",
+	bundle, err := ParseSkillBundle(archive)
+	require.NoError(t, err)
+	dir, err := sandbox.SkillDirFor("powerpoint")
+	require.NoError(t, err)
+	fx.sandboxMgr.files = map[string][]byte{
+		builtin.ImageRoot + "/powerpoint/.bundle-digest": []byte(builtin.DigestFiles(bundle.Files)),
+		dir + "/.weknora/install-report.json":            []byte(`{"commands":[],"blockers":[]}`),
 	}
-	require.NoError(t, fx.skillRepo.CreateCatalog(ctx, newer))
-	require.NoError(
-		t,
-		fx.svc.pinMigratedBundle(ctx, 7, "cfg-1", row.ID, &types.TenantSkillEntity{CatalogID: newer.ID}, archive),
-	)
-	stored, err := fx.skillRepo.GetCatalog(ctx, 7, newer.ID)
+	handled, err := fx.svc.tryPreinstalledBuiltin(context.Background(), installerJob{
+		tenantID: 7, configID: "cfg-1", skillID: "sk-1", bundle: bundle,
+		mgr: fx.sandboxMgr, sess: &types.Session{ID: "maintenance"}, skillDir: dir,
+	})
 	require.NoError(t, err)
-	require.Equal(t, newer, stored)
-	pinned, err := fx.svc.skillBundleArchive(ctx, 7, "cfg-1", row.ID)
-	require.NoError(t, err)
-	require.Equal(t, archive, pinned)
+	require.True(t, handled)
+	commands := strings.Join(fx.commands, "\n")
+	require.Contains(t, commands, "ln -s "+sandbox.ShellQuote(builtin.ImageRoot+"/powerpoint/node_modules")+
+		" "+sandbox.ShellQuote(dir+"/node_modules"))
+	require.Contains(t, commands, "weknora_smoke.py")
+	require.Empty(t, fx.agentPrompts)
 }

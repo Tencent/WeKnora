@@ -1,2 +1,4 @@
 python-pptx==1.0.2
 Pillow==11.3.0
+pdf2image==1.17.0
+numpy==2.2.6

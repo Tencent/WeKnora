@@ -2,12 +2,16 @@ package skills
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/url"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRegistryDistributionBoundary(t *testing.T) {
-	builtins, external := 0, 0
+	builtins, external, community := 0, 0, 0
 	seen := map[string]bool{}
 	for _, entry := range List() {
 		if seen[entry.ID] {
@@ -21,8 +25,19 @@ func TestRegistryDistributionBoundary(t *testing.T) {
 			}
 		}
 		archive, err := Archive(entry.ID)
-		if entry.Distribution == "external_link" {
-			external++
+		if entry.Distribution != "builtin" {
+			switch entry.Distribution {
+			case "external_link":
+				external++
+			case "community":
+				community++
+				u, err := url.Parse(entry.InstallSource)
+				if err != nil || u.Host != "github.com" || len(u.Path) < 50 {
+					t.Fatalf("community source is not pinned: %s", entry.ID)
+				}
+			default:
+				t.Fatalf("unknown distribution: %s", entry.Distribution)
+			}
 			if err == nil || archive != nil {
 				t.Fatalf("external entry %s returned executable resources", entry.ID)
 			}
@@ -55,12 +70,36 @@ func TestRegistryDistributionBoundary(t *testing.T) {
 			t.Fatal("modified instructions accepted as builtin")
 		}
 	}
-	if builtins != 8 || external != 5 {
+	if builtins != 8 || external != 1 || community != 2 {
 		t.Fatalf("unexpected catalog: %d builtins, %d external", builtins, external)
 	}
 	for _, id := range []string{"../pdf", "/pdf", "anthropic-pdf", "tencent-browser-skill"} {
 		if _, err := Files(id); err == nil {
 			t.Fatalf("accepted non-builtin path %q", id)
 		}
+	}
+}
+
+func TestResourceAccessRejectsStaleDigests(t *testing.T) {
+	for _, entry := range List() {
+		if entry.Distribution != "builtin" {
+			continue
+		}
+		t.Run(entry.ID, func(t *testing.T) {
+			files, err := FilesForEntry(entry)
+			require.NoError(t, err)
+			archive, err := Archive(entry.ID)
+			require.NoError(t, err)
+			digest := sha256.Sum256(archive)
+			require.True(t, MatchesArchiveDigest(entry.ID, hex.EncodeToString(digest[:])))
+			files["SKILL.md"] = []byte("retired development instructions")
+			entry.Digest = DigestFiles(files)
+			_, err = FilesForEntry(entry)
+			require.ErrorContains(t, err, "unsupported skill digest")
+			archive, err = archiveFiles(files)
+			require.NoError(t, err)
+			digest = sha256.Sum256(archive)
+			require.False(t, MatchesArchiveDigest(entry.ID, hex.EncodeToString(digest[:])))
+		})
 	}
 }

@@ -98,3 +98,72 @@ test('install step shows parsed skill and sandbox backend details', () => {
   assert.doesNotMatch(source, /t-alert/)
   assert.doesNotMatch(source, /registered-alert/)
 })
+
+// Execute the production row selectors to cover ready rows that used to be
+// filtered out entirely, and status updates across different backend types.
+test('sandbox groups include existing installations and update by installation status', async () => {
+  const { transpile } = await import('typescript')
+  const { runInNewContext } = await import('node:vm')
+  const groups = source.slice(source.indexOf('function groupSandboxPicks('), source.indexOf('const installPickGroups'))
+  const rows = source.slice(source.indexOf('function sandboxPickRows('), source.indexOf('function sandboxPickPercent('))
+  const configs = ['cube', 'e2b', 'docker', 'retry', 'busy', 'preinstalled'].map(id => ({ id, sandbox_type: id }))
+  const context = {
+    skillConfigs: { value: configs },
+    liveInstalls: item => item.installations,
+    isInstallBusy: install => ['installing', 'removing'].includes(install.status),
+  }
+  runInNewContext(transpile(groups + rows), context)
+  const item = { installations: [
+    { sandbox_config_id: 'cube', status: 'ready' },
+    { sandbox_config_id: 'docker', status: 'ready' },
+    { sandbox_config_id: 'retry', status: 'failed' },
+    { sandbox_config_id: 'busy', status: 'installing' },
+  ] }
+  let picks = context.sandboxPickRows(item)
+  picks.find(row => row.cfg.id === 'preinstalled').ready = true
+  const grouped = context.groupSandboxPicks(picks)
+  const ids = group => Array.from(group.rows, row => row.cfg.id)
+  assert.deepEqual(ids(grouped[0]), ['e2b', 'retry', 'busy'])
+  assert.deepEqual(ids(grouped[1]), ['cube', 'docker', 'preinstalled'])
+  assert.equal(picks.find(row => row.cfg.id === 'retry').selectable, true)
+  assert.equal(picks.find(row => row.cfg.id === 'busy').selectable, false)
+  assert.equal(picks.find(row => row.cfg.id === 'cube').selectable, false)
+  item.installations[3].status = 'ready'
+  picks = context.sandboxPickRows(item)
+  assert.ok(ids(context.groupSandboxPicks(picks)[1]).includes('busy'))
+  assert.equal(context.groupSandboxPicks([]).length, 0)
+  assert.doesNotMatch(source, /sandboxPickRows\(item,.*remaining/)
+})
+
+test('prompt advances to sandbox selection without searching, then starts the install job', async () => {
+  const { transpile } = await import('typescript')
+  const { runInNewContext } = await import('node:vm')
+  const handler = source.slice(source.indexOf('async function handleAddPrimary()'), source.indexOf('function onFileInputChange('))
+  const requests = []
+  const state = {
+    addPrimaryLoading: { value: false }, addPrimaryDisabled: { value: false },
+    addStep: { value: 0 }, addMethod: { value: 'prompt' }, addTargetIds: { value: [] },
+    skillPrompt: { value: 'Read the provided installation docs and install skill ID 3044' },
+    registeredCatalog: { value: null }, promptInstallIds: { value: {} },
+    addPickRows: { value: [{ cfg: { id: 'cfg-1' }, selectable: true }] },
+    addRequestGeneration: 0, installing: { value: false },
+    defaultAddTargets: () => ['cfg-1'],
+    ensureInstallerModelIfNeeded: async () => {},
+    installSkillFromPrompt: async (prompt, ids) => {
+      requests.push({ prompt, ids: Array.from(ids) })
+      return { data: { installs: { 'cfg-1': 'job-1' } } }
+    },
+    registerThenAdvance: () => { throw new Error('Prompt must not register/search first') },
+    catalogInstallFailedCount: () => 0,
+    MessagePlugin: { success() {}, error(error) { throw new Error(error) } },
+    loadCatalog: async () => {}, prunePicks() {}, t: key => key,
+  }
+  runInNewContext(transpile(handler), state)
+  await state.handleAddPrimary()
+  assert.equal(state.addStep.value, 1)
+  assert.equal(requests.length, 0)
+  await state.handleAddPrimary()
+  assert.deepEqual(requests, [{ prompt: state.skillPrompt.value, ids: ['cfg-1'] }])
+  assert.equal(state.promptInstallIds.value['cfg-1'], 'job-1')
+  assert.doesNotMatch(source, /registerSkillCatalogFromPrompt|promptSelection|promptFind/)
+})

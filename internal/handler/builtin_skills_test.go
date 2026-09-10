@@ -32,15 +32,18 @@ func TestSkillPickerMergesPreinstalledSkillsWithoutRegistration(t *testing.T) {
 		Data []SkillInfoResponse `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	require.Len(t, body.Data, 8)
+	require.Len(t, body.Data, 4)
 	require.Equal(t, SkillInfoResponse{Name: "pdf", Description: "workspace override"}, body.Data[0])
+	expectedVersions := map[string]string{}
+	for _, entry := range builtin.List() {
+		if entry.Distribution == "builtin" {
+			expectedVersions[entry.Name] = entry.Version
+		}
+	}
 	for _, entry := range body.Data[1:] {
 		require.Equal(t, "builtin", entry.Source)
-		expectedVersion := "2026.09.1"
-		if entry.Name == "browser" {
-			expectedVersion = builtin.Version
-		}
-		require.Equal(t, expectedVersion, entry.Version)
+		require.Contains(t, expectedVersions, entry.Name)
+		require.Equal(t, expectedVersions[entry.Name], entry.Version)
 	}
 }
 
@@ -67,7 +70,7 @@ func TestSkillSummaryDistinguishesUnknownEmptyAndOverriddenBuiltins(t *testing.T
 			name: "declared empty", manifest: &types.BuiltinSkillsManifest{SchemaVersion: 1, Version: "empty"},
 			known: true,
 		},
-		{name: "workspace override", manifest: builtin.PublishedManifest(), known: true, count: 8},
+		{name: "workspace override", manifest: builtin.PublishedManifest(), known: true, count: 4},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			lister := &manifestPickerLister{

@@ -1,50 +1,23 @@
 ---
 name: pdf
-description: Extract text and tables, merge PDFs, fill forms and render pages.
-version: 2026.09.1
-license: MIT
+description: Create, extract, merge and render PDF documents with embedded fonts and output verification.
+version: 2026.09.5
 ---
 
-# PDF toolkit
+# PDF documents
+
+Use pdfplumber or pypdf for text/table extraction and page operations; render with pypdfium2 or Poppler for layout inspection. Text extraction does not imply an OCR capability. If a scanned PDF has no text layer, explain the missing OCR dependency before choosing another route.
+
+For creation use ReportLab with an embedded TrueType font and deliberate page geometry. For Chinese/mixed text call `register_cjk_font()` from `scripts/weknora_fonts.py`; the image provides WenQuanYi Zen Hei as a TrueType collection. Use the returned font for all mixed text and Paragraph styles. Do not use ReportLab's default Helvetica for Chinese, non-embedded CID fallback, or insert spaces between Latin letters to repair layout. Avoid unsupported emoji. Text shaping, font metrics and embedding must agree.
+
+Use clear typographic hierarchy, headings, generous but consistent margins, restrained accent colors, tables/charts where they explain the content, and sensible pagination. Use ReportLab Platypus flowables for prose instead of manually positioning each line. If the user also requests PPTX or DOCX, create that editable source first and export the same source to PDF for consistency.
+
+After export, reopen the PDF, confirm page count and extract expected Chinese and Latin strings. Check embedded fonts with `pdffonts`. Render representative pages with `pdftoppm -png` and inspect them when image viewing is available. Look for clipped lines, missing glyphs and excessive word spacing. Without an image-view tool state that visual review could not be completed. Keep only the final deliverables in the artifact directory.
 
 ## WeKnora runtime
 
-Use `read_file` for skill resources and `shell_exec` with skill_name="pdf" for commands.
-Use $WEKNORA_SKILL_DIR for this package and its `.venv/bin/python` interpreter.
-Read inputs from /workspace/input. Write deliverables under $WEKNORA_SKILL_OUTPUT_DIR
-(default /workspace/output), and inspect the result before returning artifact links.
-Do not overwrite user inputs. Never treat a successful exit code alone as proof of
-rendering or recalculation: inspect returned JSON and actual output files.
+Run scripts with `shell_exec` and `skill_name: "pdf"`; this selects the locked Python environment and sets `WEKNORA_SKILL_DIR`. Resolve bundled resources from that variable, never from a guessed working directory. Node dependencies resolve through the Skill's `node_modules` via `NODE_PATH`.
 
-Install the exact dependency set with `uv pip install --python .venv/bin/python
---require-hashes -r requirements.lock` in the skill directory (Python 3.12).
-requirements.txt documents the direct dependencies. The official office-browser
-image includes these dependencies. LibreOffice, Poppler and Noto CJK fonts are required
-for office rendering and formula recalculation. Browser automation uses headless
-Chromium; a Linux desktop or display server is not required.
-Optional OCR model downloads, Bayesian modeling packages and specialty data formats
-are not part of this baseline. Explain missing optional capabilities before using them.
-Do not install extras or upgrade libraries just because an upstream example mentions them.
+Use a task-specific temporary directory for scripts, previews and intermediates. Put only requested deliverables in the session's artifact/output directory. Respect user templates, language and scope. Read additional references only when needed; `UPSTREAM_SKILL.md` records provenance and is not a second mandatory entry point.
 
-## Workflow and reference
-
-Read UPSTREAM_SKILL.md for the workflow and script arguments, then the relevant
-references or scripts on demand. Its host-specific tool names and installation
-examples must be adapted to the WeKnora runtime above. Use `--help` to inspect
-CLI arguments. Do not assume other upstream skills or hosted services are available.
-
-Before completing installation, run `scripts/weknora_smoke.py --report` using the
-skill interpreter. This verifies real outputs and writes the runtime report.
-
-## PDF transformations in this distribution
-
-This package includes a reviewed subset of the upstream resources. For page
-extraction, rotation, compression and text/PDF watermarks use the WeKnora helper
-below. The upstream `pdf_split.py`, `pdf_stamp.py` and `pdf_watermark.py` are not
-included; do not call those paths.
-
-```bash
-python "$WEKNORA_SKILL_DIR/scripts/weknora_pdf_transform.py" input.pdf --pages 1-3,7 -o selected.pdf
-python "$WEKNORA_SKILL_DIR/scripts/weknora_pdf_transform.py" input.pdf --text DRAFT -o draft.pdf
-python "$WEKNORA_SKILL_DIR/scripts/weknora_pdf_transform.py" input.pdf --stamp mark.pdf --under -o marked.pdf
-```
+The image preinstalls `requirements.lock`. During installation on other images, use a local `.venv` and `uv pip install --python .venv/bin/python --require-hashes -r requirements.lock`. Do not mutate the environment during each task or install unrelated optional tools. Report a missing runtime capability explicitly. Run `scripts/weknora_smoke.py --report` as the installation check.
