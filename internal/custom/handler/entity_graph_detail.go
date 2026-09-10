@@ -94,26 +94,68 @@ func (h *EntityGraphHandler) Detail(c *gin.Context) {
 	}
 
 	frontmatter := page.ParsedFrontmatter()
-	videoID := frontmatterString(frontmatter, "source_video_id")
-	var video model.Video
-	if err := h.db.WithContext(c.Request.Context()).First(&video, "id = ?", videoID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			graphFailure(c, http.StatusUnprocessableEntity, graphErrorSourceMissing, "source video not found", pageID)
+	contributions := detail.EvidenceContributions
+	if len(contributions) == 0 {
+		contributions = legacyReadContribution(frontmatter)
+	}
+	videoIDs := make([]string, 0, len(contributions)+1)
+	seenVideoIDs := map[string]struct{}{}
+	for _, contribution := range contributions {
+		if contribution.VideoID != "" {
+			videoIDs = append(videoIDs, contribution.VideoID)
+			seenVideoIDs[contribution.VideoID] = struct{}{}
+		}
+	}
+	if len(videoIDs) == 0 && frontmatterString(frontmatter, "source_video_id") != "" {
+		videoIDs = append(videoIDs, frontmatterString(frontmatter, "source_video_id"))
+	}
+	var videos []model.Video
+	if err := h.db.WithContext(c.Request.Context()).Where("id IN ?", videoIDs).Find(&videos).Error; err != nil {
+		graphFailure(c, http.StatusBadGateway, graphErrorReadFailed, "load source videos: "+err.Error(), pageID)
+		return
+	}
+	videoByID := make(map[string]model.Video, len(videos))
+	for _, item := range videos {
+		videoByID[item.ID] = item
+	}
+	activeContributions := make([]knowledge.EvidenceContribution, 0, len(contributions))
+	for _, contribution := range contributions {
+		video, exists := videoByID[contribution.VideoID]
+		if exists && video.TranscriptGeneration == contribution.TranscriptGeneration && strings.EqualFold(strings.TrimSpace(contribution.QualityStatus), "passed") {
+			activeContributions = append(activeContributions, contribution)
+		}
+	}
+	if len(activeContributions) == 0 {
+		graphFailure(c, http.StatusConflict, graphErrorGenerationMismatch, "Wiki page has no active evidence contribution", pageID)
+		return
+	}
+	evidence := make([]EntityGraphEvidence, 0)
+	chunkByEvidence := make(map[string]model.VideoTranscriptChunk)
+	chunkByIndex := make(map[string]model.VideoTranscriptChunk)
+	for _, contribution := range activeContributions {
+		video := videoByID[contribution.VideoID]
+		scoped := *detail
+		scoped.EvidenceIDs = contribution.EvidenceIDs
+		scoped.TranscriptGeneration = contribution.TranscriptGeneration
+		items, byEvidence, byIndex, evidenceErr := h.detailEvidence(c.Request.Context(), video, &scoped)
+		if evidenceErr != nil {
+			graphFailure(c, http.StatusUnprocessableEntity, graphErrorEvidenceInvalid, evidenceErr.Error(), pageID)
 			return
 		}
-		graphFailure(c, http.StatusBadGateway, graphErrorReadFailed, "load source video: "+err.Error(), pageID)
-		return
+		evidence = append(evidence, items...)
+		for key, item := range byEvidence {
+			chunkByEvidence[key] = item
+		}
+		for key, item := range byIndex {
+			chunkByIndex[key] = item
+		}
 	}
-	if strings.TrimSpace(video.TranscriptGeneration) == "" || detail.TranscriptGeneration != video.TranscriptGeneration {
-		graphFailure(c, http.StatusConflict, graphErrorGenerationMismatch, "Wiki page does not belong to the current transcript generation", pageID)
-		return
+	detail.EvidenceContributions = activeContributions
+	detail.EvidenceIDs = nil
+	for _, contribution := range activeContributions {
+		detail.EvidenceIDs = mergeUniqueStrings(detail.EvidenceIDs, contribution.EvidenceIDs)
 	}
-
-	evidence, chunkByEvidence, chunkByIndex, err := h.detailEvidence(c.Request.Context(), video, detail)
-	if err != nil {
-		graphFailure(c, http.StatusUnprocessableEntity, graphErrorEvidenceInvalid, err.Error(), pageID)
-		return
-	}
+	video := videoByID[activeContributions[0].VideoID]
 	detail.VideoID = video.ID
 	detail.VideoTitle = video.Title
 	detail.SourceVideoTitle = video.Title
@@ -126,7 +168,7 @@ func (h *EntityGraphHandler) Detail(c *gin.Context) {
 	adjacentEdges := make([]knowledgegraph.Edge, 0)
 	formalRelationDenominator := 0
 	status := graphStatusNotProjected
-	graph, queryErr := h.graph.Query(c.Request.Context(), knowledgegraph.Query{VideoID: video.ID, WikiPageID: pageID, Limit: 1})
+	graph, queryErr := h.graph.Query(c.Request.Context(), knowledgegraph.Query{WikiPageID: pageID, Limit: 1})
 	if queryErr != nil {
 		graphFailure(c, http.StatusBadGateway, graphErrorReadFailed, queryErr.Error(), pageID)
 		return
@@ -179,8 +221,6 @@ func (h *EntityGraphHandler) Detail(c *gin.Context) {
 		pageID,
 		adjacentEdges,
 		pageByID,
-		video.ID,
-		video.TranscriptGeneration,
 		chunkByEvidence,
 		chunkByIndex,
 	)
@@ -269,8 +309,6 @@ func formalRelationsForPage(
 	pageID string,
 	edges []knowledgegraph.Edge,
 	pages map[string]weknora.WikiPage,
-	videoID string,
-	generation string,
 	byEvidence map[string]model.VideoTranscriptChunk,
 	byIndex map[string]model.VideoTranscriptChunk,
 ) []EntityGraphEdge {
@@ -282,14 +320,14 @@ func formalRelationsForPage(
 		if weakWikiLinkEdge(edge) || !knowledgegraph.IsFormalRelationType(edge.RelationType) {
 			continue
 		}
-		if !graphEndpointCurrent(pages[edge.SourceWikiPageID], edge.SourceWikiPageID, videoID, generation, byEvidence, byIndex) ||
-			!graphEndpointCurrent(pages[edge.TargetWikiPageID], edge.TargetWikiPageID, videoID, generation, byEvidence, byIndex) {
-			continue
-		}
-		if !graphEvidenceIDsCurrent(edge.EvidenceIDs, videoID, generation, byEvidence, byIndex) {
+		if !graphEndpointActive(pages[edge.SourceWikiPageID], edge.SourceWikiPageID, byEvidence, byIndex) ||
+			!graphEndpointActive(pages[edge.TargetWikiPageID], edge.TargetWikiPageID, byEvidence, byIndex) {
 			continue
 		}
 		sourceDetail := graphKnowledgeDetail(pages[edge.SourceWikiPageID])
+		if sourceDetail == nil || !graphEvidenceIDsActive(edge.EvidenceIDs, sourceDetail.EvidenceContributions, byEvidence, byIndex) {
+			continue
+		}
 		targetDetail := graphKnowledgeDetail(pages[edge.TargetWikiPageID])
 		if sourceDetail == nil || targetDetail == nil {
 			continue
@@ -306,11 +344,9 @@ func formalRelationsForPage(
 	return result
 }
 
-func graphEndpointCurrent(
+func graphEndpointActive(
 	page weknora.WikiPage,
 	pageID string,
-	videoID string,
-	generation string,
 	byEvidence map[string]model.VideoTranscriptChunk,
 	byIndex map[string]model.VideoTranscriptChunk,
 ) bool {
@@ -318,12 +354,32 @@ func graphEndpointCurrent(
 		return false
 	}
 	detail := graphKnowledgeDetail(page)
-	if detail == nil || detail.KnowledgeObjectID == "" || detail.TranscriptGeneration != generation ||
-		strings.ToLower(strings.TrimSpace(detail.AuditStatus)) != "passed" || strings.TrimSpace(detail.CoreContent) == "" ||
-		frontmatterString(page.ParsedFrontmatter(), "source_video_id") != videoID || !displayableGraphDetail(detail) {
+	if detail == nil || detail.KnowledgeObjectID == "" || strings.ToLower(strings.TrimSpace(detail.AuditStatus)) != "passed" ||
+		strings.TrimSpace(detail.CoreContent) == "" || !displayableGraphDetail(detail) {
 		return false
 	}
-	return graphEvidenceIDsCurrent(detail.EvidenceIDs, videoID, generation, byEvidence, byIndex)
+	return graphEvidenceIDsActive(nil, detail.EvidenceContributions, byEvidence, byIndex)
+}
+
+func graphEvidenceIDsActive(
+	values []string,
+	contributions []knowledge.EvidenceContribution,
+	byEvidence map[string]model.VideoTranscriptChunk,
+	byIndex map[string]model.VideoTranscriptChunk,
+) bool {
+	for _, contribution := range contributions {
+		if !strings.EqualFold(strings.TrimSpace(contribution.QualityStatus), "passed") {
+			continue
+		}
+		candidateEvidence := values
+		if len(candidateEvidence) == 0 {
+			candidateEvidence = contribution.EvidenceIDs
+		}
+		if graphEvidenceIDsCurrent(candidateEvidence, contribution.VideoID, contribution.TranscriptGeneration, byEvidence, byIndex) {
+			return true
+		}
+	}
+	return false
 }
 
 func graphEvidenceIDsCurrent(

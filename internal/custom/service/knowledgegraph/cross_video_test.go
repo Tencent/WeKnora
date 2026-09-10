@@ -1,6 +1,7 @@
 package knowledgegraph
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
@@ -66,7 +67,31 @@ func TestBuildCrossVideoAssociationsIsStableAndDeduplicated(t *testing.T) {
 	inputs := []CrossVideoPage{pageB, pageA, pageB}
 	evidence := map[string][]CrossVideoEvidence{videoA.ID: {{ID: "ev-a", VideoID: videoA.ID, TranscriptGeneration: videoA.TranscriptGeneration, StartMs: 0, EndMs: 1}}, videoB.ID: {{ID: "ev-b", VideoID: videoB.ID, TranscriptGeneration: videoB.TranscriptGeneration, StartMs: 1, EndMs: 2}}}
 	result := BuildCrossVideoAssociations(videoA.ID, inputs, map[string]CrossVideoVideo{videoA.ID: videoA, videoB.ID: videoB}, evidence)
-	if len(result.Associations) != 1 || result.Associations[0].ID != pageA.ID+":shared_object:"+pageB.ID {
+	if len(result.Associations) != 1 || result.Associations[0].ID != strings.Join([]string{pageA.ID, "shared_object", pageB.ID, videoB.ID, videoB.TranscriptGeneration}, ":") {
+		t.Fatalf("associations = %#v", result.Associations)
+	}
+}
+
+func TestBuildCrossVideoAssociationsKeepsIDsUniqueForCanonicalPageContributions(t *testing.T) {
+	pageID := "40000000-0000-4000-8000-000000000001"
+	videos := map[string]CrossVideoVideo{
+		"video-a": {ID: "video-a", TranscriptGeneration: "gen-a", DurationSeconds: 10},
+		"video-b": {ID: "video-b", TranscriptGeneration: "gen-b", DurationSeconds: 10},
+		"video-c": {ID: "video-c", TranscriptGeneration: "gen-c", DurationSeconds: 10},
+	}
+	pages := []CrossVideoPage{
+		{ID: pageID, KnowledgeObjectID: "object", KnowledgeType: knowledge.TypeConcept, VideoID: "video-a", TranscriptGeneration: "gen-a", AuditStatus: "passed", EvidenceIDs: []string{"ev-a"}},
+		{ID: pageID, KnowledgeObjectID: "object", KnowledgeType: knowledge.TypeConcept, VideoID: "video-b", TranscriptGeneration: "gen-b", AuditStatus: "passed", EvidenceIDs: []string{"ev-b"}},
+		{ID: pageID, KnowledgeObjectID: "object", KnowledgeType: knowledge.TypeConcept, VideoID: "video-c", TranscriptGeneration: "gen-c", AuditStatus: "passed", EvidenceIDs: []string{"ev-c"}},
+	}
+	evidence := map[string][]CrossVideoEvidence{
+		"video-a": {{ID: "ev-a", VideoID: "video-a", TranscriptGeneration: "gen-a", StartMs: 0, EndMs: 1}},
+		"video-b": {{ID: "ev-b", VideoID: "video-b", TranscriptGeneration: "gen-b", StartMs: 1, EndMs: 2}},
+		"video-c": {{ID: "ev-c", VideoID: "video-c", TranscriptGeneration: "gen-c", StartMs: 2, EndMs: 3}},
+	}
+
+	result := BuildCrossVideoAssociations("video-a", pages, videos, evidence)
+	if len(result.Associations) != 2 || result.Associations[0].ID == result.Associations[1].ID {
 		t.Fatalf("associations = %#v", result.Associations)
 	}
 }

@@ -62,13 +62,14 @@ func conflictFields(left, right IdentityCandidate, comparison IdentityComparison
 // EvidenceContribution is the only source-specific data kept on a canonical
 // object page. Evidence text remains in the transcript knowledge base.
 type EvidenceContribution struct {
-	VideoID              string   `yaml:"video_id" json:"video_id"`
-	SourceDocumentID     string   `yaml:"source_document_id" json:"source_document_id"`
-	TranscriptGeneration string   `yaml:"transcript_generation" json:"transcript_generation"`
-	EvidenceIDs          []string `yaml:"evidence_ids,omitempty" json:"evidence_ids,omitempty"`
-	ChunkRefs            []string `yaml:"chunk_refs,omitempty" json:"chunk_refs,omitempty"`
-	TimeRange            string   `yaml:"time_range,omitempty" json:"time_range,omitempty"`
-	QualityStatus        string   `yaml:"quality_status" json:"quality_status"`
+	VideoID              string              `yaml:"video_id" json:"video_id"`
+	SourceDocumentID     string              `yaml:"source_document_id" json:"source_document_id"`
+	TranscriptGeneration string              `yaml:"transcript_generation" json:"transcript_generation"`
+	EvidenceIDs          []string            `yaml:"evidence_ids,omitempty" json:"evidence_ids,omitempty"`
+	ChunkRefs            []string            `yaml:"chunk_refs,omitempty" json:"chunk_refs,omitempty"`
+	TimeRange            string              `yaml:"time_range,omitempty" json:"time_range,omitempty"`
+	FieldEvidence        map[string][]string `yaml:"field_evidence,omitempty" json:"field_evidence,omitempty"`
+	QualityStatus        string              `yaml:"quality_status" json:"quality_status"`
 }
 
 // ParseEvidenceContributions reads the canonical contribution list and
@@ -104,6 +105,9 @@ func ParseEvidenceContributions(content string) ([]EvidenceContribution, error) 
 			}
 			if len(contribution.EvidenceIDs) == 0 {
 				return nil, fmt.Errorf("evidence_contributions[%d].evidence_ids must not be empty", index)
+			}
+			if err := validateContributionFieldEvidence(contribution); err != nil {
+				return nil, fmt.Errorf("evidence_contributions[%d]: %w", index, err)
 			}
 		}
 	}
@@ -148,10 +152,48 @@ func parseContributionItems(items []any) ([]EvidenceContribution, error) {
 			EvidenceIDs:          cleanStrings(stringSliceValue(values["evidence_ids"])),
 			ChunkRefs:            cleanStrings(stringSliceValue(values["chunk_refs"])),
 			TimeRange:            strings.TrimSpace(stringValue(values["time_range"])), QualityStatus: qualityStatus,
+			FieldEvidence: fieldEvidenceValue(values["field_evidence"]),
 		}
 		result = append(result, contribution)
 	}
 	return result, nil
+}
+
+func fieldEvidenceValue(raw any) map[string][]string {
+	values, ok := raw.(map[string]any)
+	if !ok || len(values) == 0 {
+		return nil
+	}
+	result := make(map[string][]string, len(values))
+	for field, evidence := range values {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		ids := cleanStrings(stringSliceValue(evidence))
+		if len(ids) > 0 {
+			result[field] = ids
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func validateContributionFieldEvidence(contribution EvidenceContribution) error {
+	allowed := make(map[string]struct{}, len(contribution.EvidenceIDs))
+	for _, id := range contribution.EvidenceIDs {
+		allowed[id] = struct{}{}
+	}
+	for field, ids := range contribution.FieldEvidence {
+		for _, id := range ids {
+			if _, ok := allowed[id]; !ok {
+				return fmt.Errorf("field_evidence.%s contains evidence ID %q outside this contribution", field, id)
+			}
+		}
+	}
+	return nil
 }
 
 // EnsureEvidenceContributions upgrades a newly submitted object to the
@@ -182,7 +224,6 @@ func mergeCanonicalWikiObject(canonicalContent, incomingContent string) (string,
 		}
 	}
 	base = cloneMap(base)
-
 	canonicalTitle := CanonicalKnowledgeTitle(firstNonEmptyString(stringValue(base["title"]), stringValue(base["canonical_name"]), firstWikiHeading(body), stringValue(incoming["title"])))
 	if canonicalTitle == "" {
 		return "", fmt.Errorf("canonical knowledge object title is required")
@@ -227,10 +268,33 @@ func mergeCanonicalWikiObject(canonicalContent, incomingContent string) (string,
 	}
 	sort.SliceStable(contributions, func(i, j int) bool { return contributionKey(contributions[i]) < contributionKey(contributions[j]) })
 	base["evidence_contributions"] = contributions
-	// The first extraction stage submits an empty relation list. Keep existing
-	// edges in that case, but persist the validated non-empty second-stage list.
-	if relations, ok := incoming["relations"].([]any); ok && len(relations) > 0 {
-		base["relations"] = relations
+
+	// First-stage writes intentionally submit an empty relation list. Preserve
+	// existing graph edges for those writes. A later non-empty relation pass
+	// replaces only the active video's evidence contribution on each canonical
+	// source/type/target edge.
+	if incomingRelationItems, ok := incoming["relations"].([]any); ok && len(incomingRelationItems) > 0 {
+		canonicalRelations, err := ParseWikiObjectRelations(canonicalContent)
+		if err != nil {
+			return "", err
+		}
+		incomingRelations, err := ParseWikiObjectRelations(incomingContent)
+		if err != nil {
+			return "", err
+		}
+		if len(incomingContributions) == 0 {
+			return "", fmt.Errorf("relation write requires an active evidence contribution")
+		}
+		activeContribution := incomingContributions[len(incomingContributions)-1]
+		legacyVideoID, legacyGeneration := legacyRelationScope(canonicalContent)
+		base["relations"] = mergeCanonicalRelations(
+			canonicalRelations,
+			incomingRelations,
+			legacyVideoID,
+			legacyGeneration,
+			activeContribution.VideoID,
+			activeContribution.TranscriptGeneration,
+		)
 	}
 
 	base["source_refs"] = unionStrings(sourceRefsFromContributions(contributions))
@@ -252,6 +316,72 @@ func mergeCanonicalWikiObject(canonicalContent, incomingContent string) (string,
 		return "", err
 	}
 	return "---\n" + strings.TrimSpace(string(encoded)) + "\n---\n\n" + strings.TrimSpace(rewrittenBody) + "\n", nil
+}
+
+func mergeCanonicalRelations(canonical, incoming []StructuredRelation, legacyVideoID, legacyGeneration, activeVideoID, activeGeneration string) []StructuredRelation {
+	byKey := make(map[string]StructuredRelation, len(canonical)+len(incoming))
+	for _, relation := range canonical {
+		relation = normalizeRelationContributions(relation, legacyVideoID, legacyGeneration)
+		kept := relation.EvidenceContributions[:0]
+		for _, contribution := range relation.EvidenceContributions {
+			if contribution.VideoID != activeVideoID || contribution.TranscriptGeneration != activeGeneration {
+				kept = append(kept, contribution)
+			}
+		}
+		relation.EvidenceContributions = kept
+		if len(kept) > 0 {
+			byKey[structuredRelationKey(relation)] = relation
+		}
+	}
+	for _, relation := range incoming {
+		relation = normalizeRelationContributions(relation, activeVideoID, activeGeneration)
+		key := structuredRelationKey(relation)
+		if existing, ok := byKey[key]; ok {
+			if existing.RelationID != "" {
+				relation.RelationID = existing.RelationID
+			}
+			relation.EvidenceContributions = append(existing.EvidenceContributions, relation.EvidenceContributions...)
+		}
+		byKey[key] = relation
+	}
+	result := make([]StructuredRelation, 0, len(byKey))
+	for _, relation := range byKey {
+		sort.SliceStable(relation.EvidenceContributions, func(i, j int) bool {
+			return relationContributionKey(relation.EvidenceContributions[i]) < relationContributionKey(relation.EvidenceContributions[j])
+		})
+		result = append(result, relation)
+	}
+	sort.SliceStable(result, func(i, j int) bool { return structuredRelationKey(result[i]) < structuredRelationKey(result[j]) })
+	return result
+}
+
+func normalizeRelationContributions(relation StructuredRelation, videoID, generation string) StructuredRelation {
+	if len(relation.EvidenceContributions) == 0 && len(relation.EvidenceIDs) > 0 && videoID != "" && generation != "" {
+		relation.EvidenceContributions = []RelationEvidenceContribution{{
+			VideoID: videoID, TranscriptGeneration: generation,
+			EvidenceIDs: cleanStrings(relation.EvidenceIDs), TimeRange: relation.TimeRange,
+			Confidence: relation.Confidence, QualityStatus: "passed",
+		}}
+	}
+	relation.EvidenceIDs, relation.TimeRange, relation.Confidence = nil, "", 0
+	return relation
+}
+
+func structuredRelationKey(relation StructuredRelation) string {
+	return strings.Join([]string{
+		strings.ToLower(strings.TrimSpace(relation.RelationType)),
+		strings.TrimSpace(relation.TargetObjectID),
+		strings.TrimSpace(relation.TargetWikiPageID),
+	}, "\x00")
+}
+
+func relationContributionKey(contribution RelationEvidenceContribution) string {
+	return strings.Join([]string{contribution.VideoID, contribution.TranscriptGeneration}, "\x00")
+}
+
+func legacyRelationScope(content string) (string, string) {
+	frontmatter, _ := parseWikiFrontmatter(content)
+	return strings.TrimSpace(stringValue(frontmatter["source_video_id"])), strings.TrimSpace(stringValue(frontmatter["transcript_generation"]))
 }
 
 func cloneMap(input map[string]any) map[string]any {

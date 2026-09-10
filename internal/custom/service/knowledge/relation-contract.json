@@ -1,0 +1,44 @@
+{
+  "version": "v2",
+  "relation_types": [
+    "part_of",
+    "explains",
+    "example_of",
+    "applies_to",
+    "supports",
+    "contradicts",
+    "complements",
+    "involves"
+  ],
+  "matrix": {
+    "entity": {
+      "entity": ["part_of"]
+    },
+    "concept": {
+      "entity": ["applies_to"],
+      "concept": ["complements", "contradicts", "part_of", "explains"],
+      "methodology": ["explains", "part_of"],
+      "case": ["applies_to"],
+      "insight": ["explains", "supports"]
+    },
+    "methodology": {
+      "entity": ["applies_to", "involves"],
+      "concept": ["explains", "applies_to"],
+      "methodology": ["complements", "part_of"],
+      "case": ["applies_to"],
+      "insight": ["supports"]
+    },
+    "case": {
+      "entity": ["involves"],
+      "concept": ["example_of"],
+      "methodology": ["example_of"],
+      "case": ["complements", "contradicts", "part_of"],
+      "insight": ["supports"]
+    },
+    "insight": {
+      "entity": ["involves"],
+      "concept": ["explains", "contradicts"],
+      "insight": ["complements", "contradicts", "supports"]
+    }
+  }
+}

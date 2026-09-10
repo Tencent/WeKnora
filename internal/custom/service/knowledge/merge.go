@@ -144,33 +144,46 @@ type DetailLink struct {
 // StructuredRelation is the only relation contract accepted by the product graph.
 // Wiki double-links remain a reading aid and are intentionally represented separately.
 type StructuredRelation struct {
-	RelationID       string   `json:"relation_id,omitempty"`
-	RelationType     string   `json:"relation_type"`
-	TargetObjectID   string   `json:"target_object_id"`
-	TargetWikiPageID string   `json:"target_wiki_page_id"`
-	TargetTitle      string   `json:"target_title,omitempty"`
-	TargetSlug       string   `json:"target_slug,omitempty"`
-	EvidenceIDs      []string `json:"evidence_ids"`
-	TimeRange        string   `json:"time_range"`
-	Confidence       float64  `json:"confidence"`
+	RelationID            string                         `yaml:"relation_id,omitempty" json:"relation_id,omitempty"`
+	RelationType          string                         `yaml:"relation_type" json:"relation_type"`
+	TargetObjectID        string                         `yaml:"target_object_id" json:"target_object_id"`
+	TargetWikiPageID      string                         `yaml:"target_wiki_page_id" json:"target_wiki_page_id"`
+	TargetTitle           string                         `yaml:"target_title,omitempty" json:"target_title,omitempty"`
+	TargetSlug            string                         `yaml:"target_slug,omitempty" json:"target_slug,omitempty"`
+	EvidenceIDs           []string                       `yaml:"evidence_ids,omitempty" json:"evidence_ids,omitempty"`
+	TimeRange             string                         `yaml:"time_range,omitempty" json:"time_range,omitempty"`
+	Confidence            float64                        `yaml:"confidence,omitempty" json:"confidence,omitempty"`
+	EvidenceContributions []RelationEvidenceContribution `yaml:"evidence_contributions,omitempty" json:"evidence_contributions,omitempty"`
+}
+
+// RelationEvidenceContribution scopes the proof for one canonical relation to
+// the video and transcript generation where that relation was observed.
+type RelationEvidenceContribution struct {
+	VideoID              string   `yaml:"video_id" json:"video_id"`
+	TranscriptGeneration string   `yaml:"transcript_generation" json:"transcript_generation"`
+	EvidenceIDs          []string `yaml:"evidence_ids" json:"evidence_ids"`
+	TimeRange            string   `yaml:"time_range" json:"time_range"`
+	Confidence           float64  `yaml:"confidence" json:"confidence"`
+	QualityStatus        string   `yaml:"quality_status" json:"quality_status"`
 }
 
 type WikiObjectValidation struct {
-	KnowledgeObjectID        string
-	KnowledgeType            KnowledgeType
-	EntitySubType            string
-	Title                    string
-	Aliases                  []string
-	CoreContent              string
-	SourceVideoID            string
-	TranscriptGeneration     string
-	AuditStatus              string
-	ClassificationConfidence float64
-	EvidenceIDs              []string
-	SourceRefs               []string
-	EvidenceContributions    []EvidenceContribution
-	StructureFields          map[string]string
-	Relations                []StructuredRelation
+	KnowledgeObjectID             string
+	KnowledgeType                 KnowledgeType
+	EntitySubType                 string
+	Title                         string
+	Aliases                       []string
+	CoreContent                   string
+	SourceVideoID                 string
+	TranscriptGeneration          string
+	AuditStatus                   string
+	ClassificationConfidence      float64
+	EvidenceIDs                   []string
+	SourceRefs                    []string
+	EvidenceContributions         []EvidenceContribution
+	EvidenceContributionsExplicit bool
+	StructureFields               map[string]string
+	Relations                     []StructuredRelation
 }
 
 var wikiObjectTypes = map[string]KnowledgeType{
@@ -246,12 +259,34 @@ func ValidateWikiObjectPage(content, pageType, expectedVideoID, expectedGenerati
 	}
 	result.Aliases = stringSliceValue(frontmatter["aliases"])
 	result.SourceVideoID = strings.TrimSpace(stringValue(frontmatter["source_video_id"]))
-	if result.SourceVideoID == "" || (strings.TrimSpace(expectedVideoID) != "" && result.SourceVideoID != strings.TrimSpace(expectedVideoID)) {
-		return result, fmt.Errorf("source_video_id does not match the active video")
-	}
 	result.TranscriptGeneration = strings.TrimSpace(stringValue(frontmatter["transcript_generation"]))
-	if result.TranscriptGeneration == "" || (strings.TrimSpace(expectedGeneration) != "" && result.TranscriptGeneration != strings.TrimSpace(expectedGeneration)) {
-		return result, fmt.Errorf("transcript_generation does not match the active generation")
+	// Canonical pages keep a legacy primary source for older readers, while
+	// evidence_contributions is the authoritative multi-video ownership index.
+	// A read scoped to another active contribution must therefore validate that
+	// contribution instead of rejecting the otherwise valid canonical page.
+	contributions, contributionErr := ParseEvidenceContributions(content)
+	if contributionErr != nil {
+		return result, contributionErr
+	}
+	expectedVideoID = strings.TrimSpace(expectedVideoID)
+	expectedGeneration = strings.TrimSpace(expectedGeneration)
+	if expectedVideoID != "" && expectedGeneration != "" &&
+		(result.SourceVideoID != expectedVideoID || result.TranscriptGeneration != expectedGeneration) {
+		matched := false
+		for _, contribution := range contributions {
+			if contribution.VideoID == expectedVideoID && contribution.TranscriptGeneration == expectedGeneration && strings.EqualFold(strings.TrimSpace(contribution.QualityStatus), "passed") {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return result, fmt.Errorf("source_video_id or transcript_generation does not match the active contribution")
+		}
+		result.SourceVideoID = expectedVideoID
+		result.TranscriptGeneration = expectedGeneration
+	}
+	if result.SourceVideoID == "" || result.TranscriptGeneration == "" {
+		return result, fmt.Errorf("source_video_id and transcript_generation are required")
 	}
 	result.AuditStatus = strings.ToLower(strings.TrimSpace(stringValue(frontmatter["audit_status"])))
 	if result.AuditStatus != "passed" {
@@ -272,14 +307,13 @@ func ValidateWikiObjectPage(content, pageType, expectedVideoID, expectedGenerati
 	if len(result.SourceRefs) == 0 {
 		return result, fmt.Errorf("source_refs must contain at least one source document ID")
 	}
-	contributions, contributionErr := ParseEvidenceContributions(content)
-	if contributionErr != nil {
-		return result, contributionErr
-	}
 	result.EvidenceContributions = contributions
+	_, hasContributionList := frontmatter["evidence_contributions"]
+	_, hasSingleContribution := frontmatter["evidence_contribution"]
+	result.EvidenceContributionsExplicit = hasContributionList || hasSingleContribution
 	result.StructureFields = structureFields(frontmatter["structure_fields"], body)
 	required := frameworkKeys(knowledgeType, entitySubType)
-	if err := rejectForeignStructureFields(frontmatter["structure_fields"], required); err != nil {
+	if err := rejectForeignStructureFieldsForType(frontmatter["structure_fields"], required, knowledgeType, entitySubType); err != nil {
 		return result, err
 	}
 	filled := 0
@@ -388,6 +422,33 @@ func ParseWikiObjectRelations(content string) ([]StructuredRelation, error) {
 			TimeRange:        strings.TrimSpace(stringValue(values["time_range"])),
 			Confidence:       floatValue(values["confidence"]),
 		}
+		if rawContributions, exists := values["evidence_contributions"]; exists && rawContributions != nil {
+			items, ok := rawContributions.([]any)
+			if !ok {
+				return nil, fmt.Errorf("relations[%d].evidence_contributions must be a list", index)
+			}
+			for contributionIndex, item := range items {
+				data, ok := item.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("relations[%d].evidence_contributions[%d] must be an object", index, contributionIndex)
+				}
+				contribution := RelationEvidenceContribution{
+					VideoID:              firstNonEmptyString(stringValue(data["video_id"]), stringValue(data["source_video_id"])),
+					TranscriptGeneration: strings.TrimSpace(stringValue(data["transcript_generation"])),
+					EvidenceIDs:          cleanStrings(stringSliceValue(data["evidence_ids"])),
+					TimeRange:            strings.TrimSpace(stringValue(data["time_range"])),
+					Confidence:           floatValue(data["confidence"]),
+					QualityStatus:        strings.ToLower(strings.TrimSpace(stringValue(data["quality_status"]))),
+				}
+				if contribution.QualityStatus == "" {
+					contribution.QualityStatus = "passed"
+				}
+				if contribution.VideoID == "" || contribution.TranscriptGeneration == "" || len(contribution.EvidenceIDs) == 0 || contribution.TimeRange == "" || contribution.Confidence <= 0 || contribution.Confidence > 1 {
+					return nil, fmt.Errorf("relations[%d].evidence_contributions[%d] requires video_id, transcript_generation, evidence_ids, time_range and confidence", index, contributionIndex)
+				}
+				relation.EvidenceContributions = append(relation.EvidenceContributions, contribution)
+			}
+		}
 		switch {
 		case relation.RelationID == "":
 			return nil, fmt.Errorf("relations[%d].relation_id is required", index)
@@ -397,11 +458,11 @@ func ParseWikiObjectRelations(content string) ([]StructuredRelation, error) {
 			return nil, fmt.Errorf("relations[%d].target_object_id is required", index)
 		case relation.TargetWikiPageID == "":
 			return nil, fmt.Errorf("relations[%d].target_wiki_page_id is required", index)
-		case len(relation.EvidenceIDs) == 0:
+		case len(relation.EvidenceContributions) == 0 && len(relation.EvidenceIDs) == 0:
 			return nil, fmt.Errorf("relations[%d].evidence_ids must contain at least one ID", index)
-		case relation.TimeRange == "":
+		case len(relation.EvidenceContributions) == 0 && relation.TimeRange == "":
 			return nil, fmt.Errorf("relations[%d].time_range is required", index)
-		case relation.Confidence <= 0 || relation.Confidence > 1:
+		case len(relation.EvidenceContributions) == 0 && (relation.Confidence <= 0 || relation.Confidence > 1):
 			return nil, fmt.Errorf("relations[%d].confidence must be between 0 and 1", index)
 		}
 		result = append(result, relation)
@@ -485,6 +546,32 @@ func rejectForeignStructureFields(raw any, allowed []string) error {
 	return nil
 }
 
+func rejectForeignStructureFieldsForType(raw any, allowed []string, knowledgeType KnowledgeType, entitySubType string) error {
+	if err := rejectForeignStructureFields(raw, allowed); err != nil {
+		values, _ := raw.(map[string]any)
+		for key := range values {
+			if !containsTrimmedValue(allowed, key) {
+				return fmt.Errorf(
+					"structure_fields.%s is not valid for this knowledge type (%s); allowed fields: %s; required combination: %s",
+					key, knowledgeType, strings.Join(allowed, ", "), knowledgeStructureRequiredCombination(knowledgeType, entitySubType),
+				)
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+func containsTrimmedValue(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
+}
+
 func knowledgeStructureRequiredCombination(knowledgeType KnowledgeType, entitySubType string) string {
 	switch knowledgeType {
 	case TypeEntity:
@@ -502,8 +589,10 @@ func knowledgeStructureRequiredCombination(knowledgeType KnowledgeType, entitySu
 	}
 }
 
-// WikiObjectWriteRepairHint gives the Agent a complete repair checklist after
-// a rejected write so it does not exhaust retries fixing one field at a time.
+// WikiObjectWriteRepairHint gives an Agent one complete, source-derived repair
+// checklist after a rejected raw Markdown write. Without it, validation stops
+// at the first error and the model can exhaust its iteration budget fixing one
+// field at a time.
 func WikiObjectWriteRepairHint(content string) string {
 	frontmatter, _ := parseWikiFrontmatter(content)
 	primary := strings.ToLower(strings.TrimSpace(stringValue(frontmatter["primary_type"])))
@@ -657,45 +746,37 @@ func CompareIdentity(left, right IdentityCandidate) IdentityComparison {
 	return result
 }
 
-// GroupSemanticIdentities returns connected semantic components. Identity is
-// transitive: once two surface forms independently resolve to the same anchor,
-// a partial third form must not split that canonical object by iteration order.
+// GroupSemanticIdentities returns deterministic anchor groups. Every member
+// must independently match the same canonical anchor; pairwise similarity is
+// not transitive and must never merge candidates through an intermediate page.
 func GroupSemanticIdentities(candidates []IdentityCandidate) [][]int {
-	parents := make([]int, len(candidates))
-	for index := range parents {
-		parents[index] = index
+	return groupSemanticIdentities(candidates, semanticIdentityEquivalent)
+}
+
+func groupSemanticIdentities(candidates []IdentityCandidate, equivalent func(IdentityCandidate, IdentityCandidate) bool) [][]int {
+	remaining := make(map[int]struct{}, len(candidates))
+	for index := range candidates {
+		remaining[index] = struct{}{}
 	}
-	var find func(int) int
-	find = func(index int) int {
-		if parents[index] != index {
-			parents[index] = find(parents[index])
-		}
-		return parents[index]
-	}
-	union := func(left, right int) {
-		leftRoot, rightRoot := find(left), find(right)
-		if leftRoot != rightRoot {
-			parents[rightRoot] = leftRoot
-		}
-	}
-	for left := range candidates {
-		for right := left + 1; right < len(candidates); right++ {
-			if semanticIdentityEquivalent(candidates[left], candidates[right]) {
-				union(left, right)
+	groups := make([][]int, 0, len(candidates))
+	for len(remaining) > 0 {
+		anchor := -1
+		for index := range remaining {
+			if anchor == -1 || CanonicalIdentityLess(candidates[index], candidates[anchor]) ||
+				(!CanonicalIdentityLess(candidates[anchor], candidates[index]) && index < anchor) {
+				anchor = index
 			}
 		}
-	}
-	groupByRoot := make(map[int]int, len(candidates))
-	groups := make([][]int, 0, len(candidates))
-	for index := range candidates {
-		root := find(index)
-		groupIndex, exists := groupByRoot[root]
-		if !exists {
-			groupIndex = len(groups)
-			groupByRoot[root] = groupIndex
-			groups = append(groups, nil)
+		group := []int{anchor}
+		delete(remaining, anchor)
+		for index := range remaining {
+			if equivalent(candidates[anchor], candidates[index]) {
+				group = append(group, index)
+				delete(remaining, index)
+			}
 		}
-		groups[groupIndex] = append(groups[groupIndex], index)
+		sort.Ints(group)
+		groups = append(groups, group)
 	}
 	return groups
 }

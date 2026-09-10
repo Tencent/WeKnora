@@ -725,10 +725,10 @@ func buildPendingRelations(parent ClassifiedKnowledge, objects []ClassifiedKnowl
 
 func relationForPair(left, right ClassifiedKnowledge, title string) (int, int, string, string) {
 	if left.PrimaryType == TypeCase && right.PrimaryType == TypeInsight {
-		return 0, 1, "derived_from", "案例产生该洞察，待 P4 确认目标页面后建立关系"
+		return 0, 1, "supports", "案例支持该洞察，待 P4 确认目标页面后建立关系"
 	}
 	if left.PrimaryType == TypeInsight && right.PrimaryType == TypeCase {
-		return 1, 0, "derived_from", "案例产生该洞察，待 P4 确认目标页面后建立关系"
+		return 1, 0, "supports", "案例支持该洞察，待 P4 确认目标页面后建立关系"
 	}
 	if left.PrimaryType == TypeMethodology && right.PrimaryType == TypeConcept {
 		return 0, 1, "explains", "方法论使用并解释该概念，待 P4 确认目标页面后建立关系"
@@ -867,12 +867,7 @@ func (result SplitResult) Validate() error {
 }
 
 func isPendingRelationType(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "contradicts", "complements", "explains", "example_of", "derived_from", "part_of":
-		return true
-	default:
-		return false
-	}
+	return IsFormalRelationType(value)
 }
 
 // SortSplitResult normalizes all evidence and relation/object ordering for

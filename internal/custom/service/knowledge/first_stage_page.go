@@ -34,6 +34,10 @@ type FirstStagePageExpectation struct {
 // level citation supports every structure field.
 func RenderFirstStageObjectPage(input FirstStagePageInput) (FirstStagePageRender, error) {
 	object := input.Object
+	object.Title = CanonicalKnowledgeTitle(object.Title)
+	if object.Title == "" {
+		return FirstStagePageRender{}, fmt.Errorf("knowledge object title cannot be only a type decoration")
+	}
 	fieldEvidence, err := NormalizeFirstStageFieldEvidence(object, input.FieldEvidence)
 	if err != nil {
 		return FirstStagePageRender{}, err

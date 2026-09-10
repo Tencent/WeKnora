@@ -27,7 +27,7 @@ func TestSplitCaseAndInsightPreservesEvidenceAndOnlyCreatesPendingRelations(t *t
 	if result.Objects[0].PrimaryType != TypeCase || result.Objects[1].PrimaryType != TypeInsight {
 		t.Fatalf("object types = %q, %q", result.Objects[0].PrimaryType, result.Objects[1].PrimaryType)
 	}
-	if len(result.Relations) != 1 || result.Relations[0].RelationType != "derived_from" {
+	if len(result.Relations) != 1 || result.Relations[0].RelationType != "supports" {
 		t.Fatalf("pending relations = %#v", result.Relations)
 	}
 	assertEvidenceSet(t, result.OriginalEvidenceIDs, result.Objects[0].EvidenceIDs, result.Objects[1].EvidenceIDs)

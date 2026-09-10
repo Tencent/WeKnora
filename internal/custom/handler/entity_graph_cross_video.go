@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
 	"github.com/Tencent/WeKnora/internal/custom/service/knowledgegraph"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -107,21 +108,36 @@ func (h *EntityGraphHandler) CrossVideo(c *gin.Context) {
 		if detail == nil {
 			continue
 		}
-		frontmatter := page.ParsedFrontmatter()
-		pageVideoID := strings.TrimSpace(frontmatterString(frontmatter, "source_video_id"))
-		if pageVideoID == "" || strings.TrimSpace(detail.KnowledgeObjectID) == "" {
+		if strings.TrimSpace(detail.KnowledgeObjectID) == "" {
 			continue
 		}
-		if requestedPage != "" && pageVideoID == videoID && page.ID != requestedPage {
+		contributions, contributionErr := knowledge.ParseEvidenceContributions(page.Content)
+		if contributionErr != nil {
 			continue
 		}
-		videoIDs[pageVideoID] = struct{}{}
-		crossPages = append(crossPages, knowledgegraph.CrossVideoPage{
-			ID: page.ID, KnowledgeObjectID: detail.KnowledgeObjectID, Title: detail.Title,
-			KnowledgeType: detail.KnowledgeType, VideoID: pageVideoID,
-			TranscriptGeneration: detail.TranscriptGeneration, AuditStatus: detail.AuditStatus,
-			EvidenceIDs: append([]string(nil), detail.EvidenceIDs...),
-		})
+		if len(contributions) == 0 {
+			contributions = detail.EvidenceContributions
+		}
+		if len(contributions) == 0 {
+			continue
+		}
+		for _, contribution := range contributions {
+			pageVideoID := strings.TrimSpace(contribution.VideoID)
+			generation := strings.TrimSpace(contribution.TranscriptGeneration)
+			if pageVideoID == "" || generation == "" || !strings.EqualFold(strings.TrimSpace(contribution.QualityStatus), "passed") {
+				continue
+			}
+			if requestedPage != "" && pageVideoID == videoID && page.ID != requestedPage {
+				continue
+			}
+			videoIDs[pageVideoID] = struct{}{}
+			crossPages = append(crossPages, knowledgegraph.CrossVideoPage{
+				ID: page.ID, KnowledgeObjectID: detail.KnowledgeObjectID, Title: detail.Title,
+				KnowledgeType: detail.KnowledgeType, VideoID: pageVideoID,
+				TranscriptGeneration: generation, AuditStatus: detail.AuditStatus,
+				EvidenceIDs: append([]string(nil), contribution.EvidenceIDs...),
+			})
+		}
 	}
 	if requestedPage != "" {
 		found := false

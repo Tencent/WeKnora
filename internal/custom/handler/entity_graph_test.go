@@ -198,7 +198,7 @@ func TestEntityGraphUsesProjectedWikiPageAsStableIdentity(t *testing.T) {
 
 func TestGraphKnowledgeDetailReadsLegacyStructureContainers(t *testing.T) {
 	page := weknora.WikiPage{
-		ID: "page-1", Slug: "concept/one", PageType: "index", Title: "关键概念",
+		ID: "page-1", Slug: "concept/one", PageType: "index", Title: "【概念】关键概念",
 		Content: `---
 knowledge_object_id: object-1
 type: concept
@@ -219,6 +219,9 @@ concept_structure:
 	detail := graphKnowledgeDetail(page)
 	if detail == nil {
 		t.Fatal("detail is nil")
+	}
+	if detail.Title != "关键概念" {
+		t.Fatalf("title = %q, want canonical title", detail.Title)
 	}
 	if len(detail.StructureFields) != 2 {
 		t.Fatalf("structure fields = %#v, want 2 fields", detail.StructureFields)

@@ -184,7 +184,7 @@ func BuildCrossVideoAssociations(currentVideoID string, pages []CrossVideoPage, 
 			seen[key] = struct{}{}
 			seenVideos[targetVideo.ID] = struct{}{}
 			result.Associations = append(result.Associations, CrossVideoAssociation{
-				ID:               source.ID + ":shared_object:" + target.ID,
+				ID:               strings.Join([]string{source.ID, "shared_object", target.ID, target.VideoID, target.TranscriptGeneration}, ":"),
 				SourceWikiPageID: source.ID, TargetWikiPageID: target.ID, KnowledgeObjectID: source.KnowledgeObjectID,
 				RelationType: "shared_object", RelationKind: "cross_video", RelationSource: "shared_object",
 				RelationDescription: "同一知识对象在其他视频中出现",

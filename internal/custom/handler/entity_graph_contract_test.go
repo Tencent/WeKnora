@@ -439,16 +439,46 @@ func TestFormalRelationsRequireCurrentValidEndpointsAndExcludeReadingEdges(t *te
 		{ID: "missing-target", SourceWikiPageID: graphContractPageID, TargetWikiPageID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", RelationType: "explains", EvidenceIDs: []string{"evs:v1:source"}},
 	}
 	pages := map[string]weknora.WikiPage{source.ID: source, target.ID: target, oldTarget.ID: oldTarget}
-	got := formalRelationsForPage(graphContractPageID, edges, pages, graphContractVideoID, graphContractGeneration, byEvidence, byIndex)
+	got := formalRelationsForPage(graphContractPageID, edges, pages, byEvidence, byIndex)
 	if len(got) != 1 || got[0].ID != "valid" {
 		t.Fatalf("formal relations = %#v", got)
 	}
 	if got[0].SourceTitle != "来源概念" || got[0].TargetTitle != "目标方法" || got[0].TargetSlug != "methodology/target" {
 		t.Fatalf("formal relation endpoints = %#v", got[0])
 	}
-	incoming := formalRelationsForPage(graphContractTargetID, edges, pages, graphContractVideoID, graphContractGeneration, byEvidence, byIndex)
+	incoming := formalRelationsForPage(graphContractTargetID, edges, pages, byEvidence, byIndex)
 	if len(incoming) != 1 || incoming[0].SourceTitle != "来源概念" || incoming[0].SourceSlug != "concept/source" {
 		t.Fatalf("incoming formal relations = %#v", incoming)
+	}
+}
+
+func TestFormalRelationsAcceptCanonicalEndpointContribution(t *testing.T) {
+	source := contractWikiPage(graphContractPageID, "concept/source", "concept", "来源概念", "evs:v1:source")
+	target := contractWikiPage(graphContractTargetID, "methodology/target", "methodology", "目标方法", "evs:v1:target")
+	target.Content = strings.Replace(target.Content, "source_video_id: "+graphContractVideoID, "source_video_id: other-video", 1)
+	target.Content = replaceGraphContractGeneration(target.Content, "other-generation")
+	target.Content = strings.Replace(target.Content, "structure_fields:", "evidence_contributions:\n  - video_id: other-video\n    source_document_id: source-other\n    transcript_generation: other-generation\n    evidence_ids: [evs:v1:other]\n    quality_status: passed\n  - video_id: "+graphContractVideoID+"\n    source_document_id: source-current\n    transcript_generation: "+graphContractGeneration+"\n    evidence_ids: [evs:v1:target]\n    quality_status: passed\nstructure_fields:", 1)
+
+	chunks := []model.VideoTranscriptChunk{
+		{VideoID: graphContractVideoID, Generation: graphContractGeneration, KnowledgeID: "knowledge-source", EvidenceSentenceID: "evs:v1:source", ChunkIndex: 0},
+		{VideoID: graphContractVideoID, Generation: graphContractGeneration, KnowledgeID: "knowledge-target", EvidenceSentenceID: "evs:v1:target", ChunkIndex: 1},
+	}
+	byEvidence := make(map[string]model.VideoTranscriptChunk)
+	byIndex := make(map[string]model.VideoTranscriptChunk)
+	for _, chunk := range chunks {
+		prefix := chunk.VideoID + "\x00" + chunk.Generation + "\x00"
+		byEvidence[prefix+chunk.KnowledgeID] = chunk
+		byEvidence[prefix+chunk.EvidenceSentenceID] = chunk
+		byIndex[prefix+strconv.Itoa(chunk.ChunkIndex)] = chunk
+	}
+	edges := []knowledgegraph.Edge{{
+		ID: "canonical-target", SourceWikiPageID: source.ID, TargetWikiPageID: target.ID,
+		RelationType: "explains", EvidenceIDs: []string{"evs:v1:source"},
+	}}
+
+	got := formalRelationsForPage(source.ID, edges, map[string]weknora.WikiPage{source.ID: source, target.ID: target}, byEvidence, byIndex)
+	if len(got) != 1 || got[0].ID != "canonical-target" {
+		t.Fatalf("formal relations = %#v", got)
 	}
 }
 

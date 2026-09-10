@@ -14,12 +14,8 @@ import (
 
 const relationConfidenceThreshold = 0.70
 
-var semanticRelationTypes = map[string]struct{}{
-	"contradicts": {}, "complements": {}, "explains": {}, "example_of": {}, "part_of": {},
-}
-
 var legacyRelationTypes = map[string]struct{}{
-	"derived_from": {}, "supports": {}, "related_to": {},
+	"derived_from": {}, "related_to": {},
 }
 
 // RelationInput is the P4 representation of a pending P3 relation. P3 only
@@ -47,15 +43,17 @@ type RelationAuditRecord struct {
 }
 
 type SemanticRelation struct {
-	RelationID       string   `json:"relation_id"`
-	SourceObjectID   string   `json:"source_object_id"`
-	SourceWikiPageID string   `json:"source_wiki_page_id"`
-	TargetObjectID   string   `json:"target_object_id"`
-	TargetWikiPageID string   `json:"target_wiki_page_id"`
-	RelationType     string   `json:"relation_type"`
-	EvidenceIDs      []string `json:"evidence_ids"`
-	Confidence       float64  `json:"confidence"`
-	TimeRange        string   `json:"time_range"`
+	RelationID           string   `json:"relation_id"`
+	SourceObjectID       string   `json:"source_object_id"`
+	SourceWikiPageID     string   `json:"source_wiki_page_id"`
+	TargetObjectID       string   `json:"target_object_id"`
+	TargetWikiPageID     string   `json:"target_wiki_page_id"`
+	RelationType         string   `json:"relation_type"`
+	EvidenceIDs          []string `json:"evidence_ids"`
+	Confidence           float64  `json:"confidence"`
+	TimeRange            string   `json:"time_range"`
+	SourceVideoID        string   `json:"source_video_id"`
+	TranscriptGeneration string   `json:"transcript_generation"`
 }
 
 // ReadingAssociation describes a Wiki double-link independently from a
@@ -160,6 +158,11 @@ func AuditRelations(inputs []RelationInput, pages []ObjectPageResult, expectedVi
 		audit := RelationAuditRecord{RelationInput: normalizeRelationInput(input)}
 		source, sourceOK := pageByCandidate[audit.SourceCandidateID]
 		target, targetOK := pageByCandidate[audit.TargetCandidateID]
+		if sourceOK && targetOK {
+			if normalized, ok := knowledge.NormalizeFormalRelationType(audit.RelationType, source.PrimaryType, target.PrimaryType); ok {
+				audit.RelationType = normalized
+			}
+		}
 		if sourceOK {
 			audit.SourceWikiPageID = source.WikiPageID
 		}
@@ -179,6 +182,7 @@ func AuditRelations(inputs []RelationInput, pages []ObjectPageResult, expectedVi
 					RelationID: audit.RelationID, SourceObjectID: source.CandidateID, SourceWikiPageID: source.WikiPageID,
 					TargetObjectID: target.CandidateID, TargetWikiPageID: target.WikiPageID, RelationType: audit.RelationType,
 					EvidenceIDs: append([]string(nil), audit.EvidenceIDs...), Confidence: audit.Confidence, TimeRange: audit.TimeRange,
+					SourceVideoID: audit.SourceVideoID, TranscriptGeneration: audit.TranscriptGeneration,
 				})
 			}
 		}
@@ -207,7 +211,7 @@ func validateRelation(input RelationInput, source ObjectPageResult, sourceOK boo
 	if _, ok := legacyRelationTypes[relationType]; ok {
 		return "rejected_legacy_relation_type", "legacy relation type is not in the current semantic contract"
 	}
-	if _, ok := semanticRelationTypes[relationType]; !ok {
+	if !knowledge.IsFormalRelationType(relationType) {
 		return "rejected", "relation type is not allowed"
 	}
 	if !sourceOK || !targetOK {
@@ -242,21 +246,7 @@ func validateRelation(input RelationInput, source ObjectPageResult, sourceOK boo
 }
 
 func relationAllowedForTypes(relationType string, source, target knowledge.KnowledgeType) bool {
-	allowed := map[knowledge.KnowledgeType]map[knowledge.KnowledgeType]map[string]struct{}{
-		knowledge.TypeConcept: {
-			knowledge.TypeConcept:     {"complements": {}, "contradicts": {}, "part_of": {}},
-			knowledge.TypeMethodology: {"explains": {}, "part_of": {}}, knowledge.TypeCase: {"example_of": {}}, knowledge.TypeInsight: {"explains": {}},
-		},
-		knowledge.TypeMethodology: {knowledge.TypeConcept: {"explains": {}}, knowledge.TypeMethodology: {"complements": {}, "part_of": {}}},
-		knowledge.TypeCase:        {knowledge.TypeConcept: {"example_of": {}}, knowledge.TypeMethodology: {"example_of": {}}},
-		knowledge.TypeInsight:     {knowledge.TypeConcept: {"explains": {}, "contradicts": {}}, knowledge.TypeInsight: {"complements": {}, "contradicts": {}}},
-	}
-	types, ok := allowed[source]
-	if !ok {
-		return false
-	}
-	_, ok = types[target][relationType]
-	return ok
+	return knowledge.IsRelationAllowedForTypes(relationType, source, target)
 }
 
 func normalizeRelationInput(input RelationInput) RelationInput {
@@ -397,10 +387,66 @@ func mergeSemanticRelations(content string, edges []SemanticRelation, writeReadi
 	if err != nil {
 		return "", false, 0, err
 	}
-	relations := make([]map[string]any, 0, len(edges))
-	for _, edge := range edges {
-		relations = append(relations, map[string]any{"relation_id": edge.RelationID, "relation_type": edge.RelationType, "target_object_id": edge.TargetObjectID, "target_wiki_page_id": edge.TargetWikiPageID, "evidence_ids": edge.EvidenceIDs, "confidence": edge.Confidence, "time_range": edge.TimeRange})
+	existing, err := knowledge.ParseWikiObjectRelations(content)
+	if err != nil {
+		return "", false, 0, err
 	}
+	videoID, generation := "", ""
+	if len(edges) > 0 {
+		videoID, generation = strings.TrimSpace(edges[0].SourceVideoID), strings.TrimSpace(edges[0].TranscriptGeneration)
+	}
+	if videoID == "" || generation == "" {
+		return "", false, 0, fmt.Errorf("relation evidence scope is required")
+	}
+	legacyVideoID := strings.TrimSpace(fmt.Sprint(fm["source_video_id"]))
+	legacyGeneration := strings.TrimSpace(fmt.Sprint(fm["transcript_generation"]))
+	relations := make([]knowledge.StructuredRelation, 0, len(existing)+len(edges))
+	for _, relation := range existing {
+		if len(relation.EvidenceContributions) == 0 && len(relation.EvidenceIDs) > 0 && legacyVideoID != "" && legacyGeneration != "" {
+			relation.EvidenceContributions = []knowledge.RelationEvidenceContribution{{
+				VideoID: legacyVideoID, TranscriptGeneration: legacyGeneration,
+				EvidenceIDs: relation.EvidenceIDs, TimeRange: relation.TimeRange,
+				Confidence: relation.Confidence, QualityStatus: "passed",
+			}}
+		}
+		relation.EvidenceIDs, relation.TimeRange, relation.Confidence = nil, "", 0
+		kept := relation.EvidenceContributions[:0]
+		for _, contribution := range relation.EvidenceContributions {
+			if contribution.VideoID != videoID || contribution.TranscriptGeneration != generation {
+				kept = append(kept, contribution)
+			}
+		}
+		relation.EvidenceContributions = kept
+		if len(kept) > 0 {
+			relations = append(relations, relation)
+		}
+	}
+	for _, edge := range edges {
+		key := relationKey(edge.RelationType, edge.TargetObjectID, edge.TargetWikiPageID)
+		index := -1
+		for candidateIndex := range relations {
+			if relationKey(relations[candidateIndex].RelationType, relations[candidateIndex].TargetObjectID, relations[candidateIndex].TargetWikiPageID) == key {
+				index = candidateIndex
+				break
+			}
+		}
+		contribution := knowledge.RelationEvidenceContribution{
+			VideoID: videoID, TranscriptGeneration: generation, EvidenceIDs: edge.EvidenceIDs,
+			TimeRange: edge.TimeRange, Confidence: edge.Confidence, QualityStatus: "passed",
+		}
+		if index >= 0 {
+			relations[index].EvidenceContributions = append(relations[index].EvidenceContributions, contribution)
+			continue
+		}
+		relations = append(relations, knowledge.StructuredRelation{
+			RelationID: edge.RelationID, RelationType: edge.RelationType,
+			TargetObjectID: edge.TargetObjectID, TargetWikiPageID: edge.TargetWikiPageID,
+			EvidenceContributions: []knowledge.RelationEvidenceContribution{contribution},
+		})
+	}
+	sort.SliceStable(relations, func(i, j int) bool {
+		return relationKey(relations[i].RelationType, relations[i].TargetObjectID, relations[i].TargetWikiPageID) < relationKey(relations[j].RelationType, relations[j].TargetObjectID, relations[j].TargetWikiPageID)
+	})
 	fm["relations"] = relations
 	if writeReadingLinks {
 		// Reading links are an explicit opt-in and never replace semantic edges.
@@ -416,6 +462,10 @@ func mergeSemanticRelations(content string, edges []SemanticRelation, writeReadi
 	}
 	updated := "---\n" + string(encoded) + "---" + body
 	return updated, updated != content, len(relations), nil
+}
+
+func relationKey(relationType, targetObjectID, targetWikiPageID string) string {
+	return strings.Join([]string{strings.ToLower(strings.TrimSpace(relationType)), strings.TrimSpace(targetObjectID), strings.TrimSpace(targetWikiPageID)}, "\x00")
 }
 
 func parsePageFrontmatter(content string) (map[string]any, string, error) {
@@ -457,11 +507,11 @@ func containsSemanticRelations(content string, edges []SemanticRelation) bool {
 	seen := map[string]struct{}{}
 	for _, item := range items {
 		if data, ok := item.(map[string]any); ok {
-			seen[fmt.Sprint(data["relation_id"])] = struct{}{}
+			seen[relationKey(fmt.Sprint(data["relation_type"]), fmt.Sprint(data["target_object_id"]), fmt.Sprint(data["target_wiki_page_id"]))] = struct{}{}
 		}
 	}
 	for _, edge := range edges {
-		if _, ok := seen[edge.RelationID]; !ok {
+		if _, ok := seen[relationKey(edge.RelationType, edge.TargetObjectID, edge.TargetWikiPageID)]; !ok {
 			return false
 		}
 	}

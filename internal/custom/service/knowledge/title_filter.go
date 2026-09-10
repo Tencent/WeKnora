@@ -153,6 +153,10 @@ func CleanTitle(raw string) (string, string) {
 	if value == "" {
 		return "", "empty_title"
 	}
+	value = CanonicalKnowledgeTitle(value)
+	if value == "" {
+		return "", "type_decoration_only"
+	}
 
 	value = stripTitleMarkup(value)
 	value = collapseTitleWhitespace(value)
@@ -196,6 +200,7 @@ func CleanTitle(raw string) (string, string) {
 		value, removed = stripTitleLeadingTransition(value)
 		transitionOnly = transitionOnly || removed
 		value = stripTitleTrailingDescriptor(value)
+		value = CanonicalKnowledgeTitle(value)
 		value = trimTitlePunctuation(value)
 		value = collapseTitleWhitespace(value)
 		if before == value {

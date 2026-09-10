@@ -95,6 +95,27 @@ func TestKnowledgeV2RuntimeCopyMatchesSource(t *testing.T) {
 	}
 }
 
+func TestKnowledgeV2RuntimeRelationContractMatchesEmbeddedRuntime(t *testing.T) {
+	runtimeDir := findSkillDir(t, filepath.Join("skills", "preloaded", "extract-video-knowledge"))
+	runtimeContract := readSkillFile(t, runtimeDir, "references/relation-contract.json")
+	if !bytes.Equal(runtimeContract, relationContractJSON) {
+		t.Fatal("embedded relation contract is not generated from the V2 runtime Skill")
+	}
+	if got := FormalRelationTypes(); strings.Join(got, ",") != "applies_to,complements,contradicts,example_of,explains,involves,part_of,supports" {
+		t.Fatalf("formal relation types = %v", got)
+	}
+}
+
+func TestLegacyDerivedFromOnlyMapsFromCaseToInsight(t *testing.T) {
+	mapped, ok := NormalizeFormalRelationType("derived_from", TypeCase, TypeInsight)
+	if !ok || mapped != "supports" {
+		t.Fatalf("case derived_from insight = %q, %v; want supports, true", mapped, ok)
+	}
+	if mapped, ok := NormalizeFormalRelationType("derived_from", TypeConcept, TypeInsight); ok || mapped != "derived_from" {
+		t.Fatalf("concept derived_from insight = %q, %v; want derived_from, false", mapped, ok)
+	}
+}
+
 func findSkillDir(t *testing.T, relativePath string) string {
 	t.Helper()
 	cwd, err := os.Getwd()

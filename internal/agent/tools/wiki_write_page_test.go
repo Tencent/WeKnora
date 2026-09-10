@@ -1063,6 +1063,90 @@ relations:
 	}
 }
 
+func TestWikiWritePageAcceptsRelationToCrossVideoCanonicalTargetWithActiveContribution(t *testing.T) {
+	targetContent := `---
+knowledge_object_id: target-object
+type: methodology
+primary_type: methodology
+title: Reused Method
+source_video_id: video-a
+transcript_generation: generation-a
+audit_status: passed
+information_nature: 方法论
+classification_confidence: 0.9
+evidence_ids: [target-evidence-a, target-evidence-b]
+source_refs: [target-document-a, target-document-b]
+evidence_contributions:
+  - video_id: video-a
+    source_document_id: target-document-a
+    transcript_generation: generation-a
+    evidence_ids: [target-evidence-a]
+    quality_status: passed
+  - video_id: video-b
+    source_document_id: target-document-b
+    transcript_generation: generation-b
+    evidence_ids: [target-evidence-b]
+    quality_status: passed
+core_content: A reusable method supported by both videos.
+structure_fields:
+  input: Source material
+  steps: Read and execute
+relations: []
+---
+
+# Reused Method`
+	service := &sourceRefWikiService{pagesByID: map[string]*types.WikiPage{
+		"target-page": {
+			ID: "target-page", KnowledgeBaseID: "kb-1", Slug: "methodology/reused-method",
+			Title: "Reused Method", PageType: "index", Status: types.WikiPageStatusPublished, Content: targetContent,
+		},
+	}}
+	tool := NewWikiWritePageTool(service, []string{"kb-1"}, nil, NewWikiRouteResolver())
+	sourceContent := `---
+knowledge_object_id: source-object
+type: concept
+primary_type: concept
+title: Source Concept
+source_video_id: video-b
+source_document_id: source-document-b
+transcript_generation: generation-b
+audit_status: passed
+information_nature: 概念
+classification_confidence: 0.9
+evidence_ids: [source-evidence-b]
+source_refs: [source-document-b]
+core_content: A concept that explains the reused method.
+structure_fields:
+  definition: A source concept
+  components: One component
+relations:
+  - relation_id: relation-1
+    relation_type: explains
+    target_object_id: target-object
+    target_wiki_page_id: target-page
+    evidence_ids: [source-evidence-b]
+    time_range: 00:00-00:10
+    confidence: 0.9
+---
+
+# Source Concept`
+	args, err := json.Marshal(map[string]any{
+		"slug": "concept/source-concept", "title": "Source Concept",
+		"summary": "A concept that explains the reused method.", "content": sourceContent, "page_type": "index",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := tool.Execute(v2WriteContextFor("video-b", "generation-b"), args)
+	if err != nil || result == nil || !result.Success {
+		t.Fatalf("relation to a canonical target with an active video contribution was rejected: result=%+v err=%v", result, err)
+	}
+	if service.createCount != 1 || service.updateCount != 0 {
+		t.Fatalf("valid source persistence = creates=%d updates=%d", service.createCount, service.updateCount)
+	}
+}
+
 func TestWikiWritePageReturnsPersistedWikiPageID(t *testing.T) {
 	service := &sourceRefWikiService{}
 	tool := NewWikiWritePageTool(service, []string{"kb-1"}, nil, NewWikiRouteResolver())

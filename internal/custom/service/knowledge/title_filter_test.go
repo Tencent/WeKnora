@@ -18,6 +18,8 @@ func TestCleanTitleRemovesWikiMarkdownTemplateAndQuestionMarkers(t *testing.T) {
 		{name: "chinese-number-and-transition", raw: "一、由此可见：AI 智能体的应用领域", want: "AI 智能体的应用领域"},
 		{name: "wiki-link-display", raw: "标题：[[Context Machine|Context Machine]]", want: "Context Machine"},
 		{name: "question-suffix", raw: "网络效应是什么？", want: "网络效应"},
+		{name: "square-type-suffix", raw: "AI Agent【概念】", want: "AI Agent"},
+		{name: "square-type-prefix", raw: "【方法论】用户访谈", want: "用户访谈"},
 	}
 
 	for _, tt := range tests {
@@ -33,6 +35,12 @@ func TestCleanTitleRemovesWikiMarkdownTemplateAndQuestionMarkers(t *testing.T) {
 				t.Fatalf("cleaned title still contains unstable whitespace/question marker: %q", got)
 			}
 		})
+	}
+}
+
+func TestCleanTitleRejectsTypeDecorationOnly(t *testing.T) {
+	if got, reason := CleanTitle("【实体】"); got != "" || reason != "type_decoration_only" {
+		t.Fatalf("CleanTitle type-only title = %q/%q, want rejection", got, reason)
 	}
 }
 

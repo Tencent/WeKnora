@@ -21,6 +21,17 @@ type semanticIdentityFakeChat struct {
 	calls    int
 }
 
+type semanticIdentityFakeCompleter struct {
+	response string
+	err      error
+	prompt   string
+}
+
+func (f *semanticIdentityFakeCompleter) Complete(_ context.Context, prompt string) (string, error) {
+	f.prompt = prompt
+	return f.response, f.err
+}
+
 func (f *semanticIdentityFakeChat) Chat(ctx context.Context, messages []chat.Message, options *chat.ChatOptions) (*types.ChatResponse, error) {
 	f.calls++
 	f.messages = messages
@@ -135,5 +146,88 @@ func TestModelSemanticIdentityAdapterBlocksTypeConflictWithoutModelCall(t *testi
 	assessment, err := NewModelSemanticIdentityAdapter(model).Compare(context.Background(), left, right)
 	if err != nil || assessment.Decision != "uncertain" || model.calls != 0 {
 		t.Fatalf("type conflict = %+v, calls=%d, err=%v", assessment, model.calls, err)
+	}
+}
+
+func TestCompletionModelSemanticIdentityAdapterUsesStructuredFailClosedContract(t *testing.T) {
+	left, right := semanticIdentityCandidates()
+	completer := &semanticIdentityFakeCompleter{response: `<think>比较定义、机制和适用范围。</think>
+{"decision":"same_object","confidence":0.93,"reason":"定义和机制一致","conflict_fields":[]}`}
+	assessment, err := NewCompletionModelSemanticIdentityAdapter(completer).Compare(context.Background(), left, right)
+	if err != nil {
+		t.Fatalf("Compare returned error: %v", err)
+	}
+	if assessment.Decision != "same_object" || assessment.Confidence != 0.93 {
+		t.Fatalf("assessment = %#v", assessment)
+	}
+	if !strings.Contains(completer.prompt, "不得通过传递关系") || !strings.Contains(completer.prompt, "candidate_a") {
+		t.Fatalf("prompt does not contain identity contract and candidates: %s", completer.prompt)
+	}
+	if !strings.Contains(completer.prompt, `"confidence":0.00`) || !strings.Contains(completer.prompt, "只能包含以下四个字段") {
+		t.Fatalf("prompt does not contain the explicit four-field output contract: %s", completer.prompt)
+	}
+}
+
+func TestCompletionModelSemanticIdentityAdapterRejectsUnclosedReasoningPrefix(t *testing.T) {
+	left, right := semanticIdentityCandidates()
+	completer := &semanticIdentityFakeCompleter{response: `<think>推理未闭合
+{"decision":"same_object","confidence":0.93,"reason":"定义和机制一致","conflict_fields":[]}`}
+	_, err := NewCompletionModelSemanticIdentityAdapter(completer).Compare(context.Background(), left, right)
+	if err == nil || !strings.Contains(err.Error(), "decode semantic identity response") {
+		t.Fatalf("unclosed reasoning prefix must fail closed, got %v", err)
+	}
+}
+
+func TestCompletionModelSemanticIdentityAdapterAcceptsCompleteJSONFence(t *testing.T) {
+	left, right := semanticIdentityCandidates()
+	completer := &semanticIdentityFakeCompleter{response: "```json\n{\"decision\":\"different_object\",\"confidence\":0.91,\"reason\":\"边界不同\",\"conflict_fields\":[]}\n```"}
+	assessment, err := NewCompletionModelSemanticIdentityAdapter(completer).Compare(context.Background(), left, right)
+	if err != nil || assessment.Decision != "different_object" {
+		t.Fatalf("complete JSON fence = %#v, err=%v", assessment, err)
+	}
+}
+
+func TestCompletionModelSemanticIdentityAdapterAcceptsNarrowResultWrappers(t *testing.T) {
+	left, right := semanticIdentityCandidates()
+	for _, response := range []string{
+		`{"result":"same_object","confidence":0.91,"reasoning":"核心机制一致","conflict_fields":[]}`,
+		`{"identity_verdict":"different_object","confidence":0.91,"reason":"适用范围不同","conflict_fields":["scope"]}`,
+		`{"result":{"decision":"uncertain","confidence":0.91,"reasoning":"信息不足","conflict_fields":["scope"]}}`,
+	} {
+		completer := &semanticIdentityFakeCompleter{response: response}
+		assessment, err := NewCompletionModelSemanticIdentityAdapter(completer).Compare(context.Background(), left, right)
+		if err != nil {
+			t.Fatalf("wrapper response was rejected: %s: %v", response, err)
+		}
+		if assessment.Confidence != 0.91 {
+			t.Fatalf("unexpected assessment: %#v", assessment)
+		}
+	}
+}
+
+func TestCompletionModelSemanticIdentityAdapterRejectsWrapperWithMissingContractFields(t *testing.T) {
+	left, right := semanticIdentityCandidates()
+	completer := &semanticIdentityFakeCompleter{response: `{"result":"same_object","reason":"核心机制一致"}`}
+	_, err := NewCompletionModelSemanticIdentityAdapter(completer).Compare(context.Background(), left, right)
+	if err == nil {
+		t.Fatalf("incomplete wrapper must fail closed, got %v", err)
+	}
+}
+
+func TestCompletionModelSemanticIdentityAdapterRejectsProseAroundJSONFence(t *testing.T) {
+	left, right := semanticIdentityCandidates()
+	completer := &semanticIdentityFakeCompleter{response: "结果如下：\n```json\n{\"decision\":\"different_object\",\"confidence\":0.91,\"reason\":\"边界不同\",\"conflict_fields\":[]}\n```"}
+	_, err := NewCompletionModelSemanticIdentityAdapter(completer).Compare(context.Background(), left, right)
+	if err == nil || !strings.Contains(err.Error(), "decode semantic identity response") {
+		t.Fatalf("prose around JSON fence must fail closed, got %v", err)
+	}
+}
+
+func TestCompletionModelSemanticIdentityAdapterRejectsLowConfidence(t *testing.T) {
+	left, right := semanticIdentityCandidates()
+	completer := &semanticIdentityFakeCompleter{response: `{"decision":"same_object","confidence":0.70,"reason":"信息不足","conflict_fields":[]}`}
+	_, err := NewCompletionModelSemanticIdentityAdapter(completer).Compare(context.Background(), left, right)
+	if err == nil || !strings.Contains(err.Error(), "below required") {
+		t.Fatalf("low-confidence response must fail closed, got %v", err)
 	}
 }

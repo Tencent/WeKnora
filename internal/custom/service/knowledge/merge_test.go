@@ -94,6 +94,39 @@ structure_fields:
 	}
 }
 
+func TestValidateWikiObjectPageReportsAllowedStructureFields(t *testing.T) {
+	content := `---
+knowledge_object_id: object-1
+type: concept
+primary_type: concept
+information_nature: 概念
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+classification_confidence: 0.92
+core_content: 智能体通过循环执行任务。
+evidence_ids: [evidence-1]
+source_refs: [source-document-1]
+structure_fields:
+  goal: 完成用户任务
+---
+# 思考行动观察循环`
+
+	_, err := ValidateWikiObjectPage(content, "index", "video-1", "generation-1")
+	if err == nil {
+		t.Fatal("expected invalid structure field to be rejected")
+	}
+	for _, want := range []string{
+		"structure_fields.goal is not valid for this knowledge type (concept)",
+		"allowed fields: definition, components, mechanism, distinction, examples, scope",
+		"required combination: definition plus at least one of components, mechanism, distinction",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not contain actionable hint %q", err, want)
+		}
+	}
+}
+
 func TestValidateWikiObjectPageSeparatesEvidenceIDsFromSourceRefs(t *testing.T) {
 	content := `---
 knowledge_object_id: object-1
@@ -332,7 +365,7 @@ func TestCompareIdentityUsesConceptMeaningWithoutBlindContainmentMerge(t *testin
 		},
 	}
 	aiAgentSecondBrain := IdentityCandidate{
-		KnowledgeObjectID: "second-brain-duplicate", KnowledgeType: TypeConcept, Title: "AI Agent 第二大脑（概念）",
+		KnowledgeObjectID: "second-brain-duplicate", KnowledgeType: TypeConcept, Title: "AI Agent第二大脑【概念】",
 		CoreContent:   "接入 AI Agent 后，Obsidian 从静态档案库升级为能够调用知识并执行工作的第二大脑。",
 		SourceVideoID: "video-1", TranscriptGeneration: "generation-1",
 		StructureFields: map[string]string{
@@ -456,5 +489,25 @@ func TestGroupSemanticIdentitiesKeepsDirectDuplicateTogetherWhenAnotherVariantIs
 	groups := GroupSemanticIdentities([]IdentityCandidate{canonical, partial, decorated})
 	if len(groups) != 1 {
 		t.Fatalf("direct semantic duplicate split by grouping order: %#v", groups)
+	}
+}
+
+func TestGroupSemanticIdentitiesDoesNotMergeThroughIntermediateCandidate(t *testing.T) {
+	candidates := []IdentityCandidate{
+		{KnowledgeObjectID: "a", Title: "A"},
+		{KnowledgeObjectID: "b", Title: "B"},
+		{KnowledgeObjectID: "c", Title: "C"},
+	}
+	equivalent := func(left, right IdentityCandidate) bool {
+		pair := left.KnowledgeObjectID + right.KnowledgeObjectID
+		return pair == "ab" || pair == "ba" || pair == "bc" || pair == "cb"
+	}
+
+	groups := groupSemanticIdentities(candidates, equivalent)
+	if len(groups) != 2 {
+		t.Fatalf("intermediate candidate caused a transitive merge: %#v", groups)
+	}
+	if len(groups[0]) != 2 || groups[0][0] != 0 || groups[0][1] != 1 || len(groups[1]) != 1 || groups[1][0] != 2 {
+		t.Fatalf("unexpected anchor groups: %#v", groups)
 	}
 }

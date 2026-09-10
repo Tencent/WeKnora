@@ -32,31 +32,32 @@ type EntityGraphEvidence struct {
 }
 
 type EntityGraphKnowledgeDetail struct {
-	ID                       string                         `json:"id"`
-	KnowledgeObjectID        string                         `json:"knowledge_object_id,omitempty"`
-	Slug                     string                         `json:"slug,omitempty"`
-	Title                    string                         `json:"title"`
-	VideoID                  string                         `json:"video_id,omitempty"`
-	VideoTitle               string                         `json:"video_title,omitempty"`
-	SourceVideoTitle         string                         `json:"source_video_title,omitempty"`
-	Timestamp                string                         `json:"timestamp,omitempty"`
-	Seconds                  int                            `json:"seconds,omitempty"`
-	KnowledgeType            knowledge.KnowledgeType        `json:"knowledge_type"`
-	PrimaryType              knowledge.KnowledgeType        `json:"primary_type,omitempty"`
-	EntitySubType            string                         `json:"entity_sub_type,omitempty"`
-	PageType                 string                         `json:"page_type,omitempty"`
-	CoreContent              string                         `json:"core_content,omitempty"`
-	StructureFields          []knowledge.DetailField        `json:"structure_fields,omitempty"`
-	EvidenceIDs              []string                       `json:"evidence_ids,omitempty"`
-	InformationNature        string                         `json:"information_nature,omitempty"`
-	TimeRange                string                         `json:"time_range,omitempty"`
-	TranscriptGeneration     string                         `json:"transcript_generation,omitempty"`
-	AuditStatus              string                         `json:"audit_status,omitempty"`
-	ClassificationConfidence float64                        `json:"classification_confidence,omitempty"`
-	Relations                []knowledge.StructuredRelation `json:"relations,omitempty"`
-	RelatedKnowledge         []knowledge.DetailLink         `json:"related_knowledge,omitempty"`
-	RelatedEntities          []knowledge.DetailLink         `json:"related_entities,omitempty"`
-	RelatedContent           []knowledge.DetailLink         `json:"related_content,omitempty"`
+	ID                       string                           `json:"id"`
+	KnowledgeObjectID        string                           `json:"knowledge_object_id,omitempty"`
+	Slug                     string                           `json:"slug,omitempty"`
+	Title                    string                           `json:"title"`
+	VideoID                  string                           `json:"video_id,omitempty"`
+	VideoTitle               string                           `json:"video_title,omitempty"`
+	SourceVideoTitle         string                           `json:"source_video_title,omitempty"`
+	Timestamp                string                           `json:"timestamp,omitempty"`
+	Seconds                  int                              `json:"seconds,omitempty"`
+	KnowledgeType            knowledge.KnowledgeType          `json:"knowledge_type"`
+	PrimaryType              knowledge.KnowledgeType          `json:"primary_type,omitempty"`
+	EntitySubType            string                           `json:"entity_sub_type,omitempty"`
+	PageType                 string                           `json:"page_type,omitempty"`
+	CoreContent              string                           `json:"core_content,omitempty"`
+	StructureFields          []knowledge.DetailField          `json:"structure_fields,omitempty"`
+	EvidenceIDs              []string                         `json:"evidence_ids,omitempty"`
+	EvidenceContributions    []knowledge.EvidenceContribution `json:"evidence_contributions,omitempty"`
+	InformationNature        string                           `json:"information_nature,omitempty"`
+	TimeRange                string                           `json:"time_range,omitempty"`
+	TranscriptGeneration     string                           `json:"transcript_generation,omitempty"`
+	AuditStatus              string                           `json:"audit_status,omitempty"`
+	ClassificationConfidence float64                          `json:"classification_confidence,omitempty"`
+	Relations                []knowledge.StructuredRelation   `json:"relations,omitempty"`
+	RelatedKnowledge         []knowledge.DetailLink           `json:"related_knowledge,omitempty"`
+	RelatedEntities          []knowledge.DetailLink           `json:"related_entities,omitempty"`
+	RelatedContent           []knowledge.DetailLink           `json:"related_content,omitempty"`
 }
 
 type EntityGraphNode struct {
@@ -233,6 +234,9 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *knowledg
 	seenVideoIDs := make(map[string]struct{})
 	for _, node := range source.Nodes {
 		addVideoID(&videoIDs, seenVideoIDs, node.SourceVideoID)
+		for _, videoID := range node.SourceVideoIDs {
+			addVideoID(&videoIDs, seenVideoIDs, videoID)
+		}
 	}
 	videoByID := make(map[string]model.Video, len(videoIDs))
 	chunkByEvidence := make(map[string]model.VideoTranscriptChunk)
@@ -361,34 +365,40 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *knowledg
 			reject(projected, rawGraphKnowledgeType(page.ParsedFrontmatter(), page.PageType), "knowledge_type_mismatch", "Wiki page type does not match the projected node")
 			continue
 		}
-		frontmatter := page.ParsedFrontmatter()
-		pageVideoID := frontmatterString(frontmatter, "source_video_id")
-		if detail.KnowledgeObjectID == "" || detail.TranscriptGeneration == "" || pageVideoID == "" || strings.TrimSpace(detail.CoreContent) == "" {
-			reject(projected, string(detail.KnowledgeType), graphErrorPageInvalid, "Wiki page identity, source, generation, or core content is incomplete")
+		if detail.KnowledgeObjectID == "" || strings.TrimSpace(detail.CoreContent) == "" {
+			reject(projected, string(detail.KnowledgeType), graphErrorPageInvalid, "Wiki page identity or core content is incomplete")
 			continue
 		}
-		if detail.KnowledgeObjectID != projected.KnowledgeObjectID || pageVideoID != projected.SourceVideoID ||
-			detail.TranscriptGeneration != projected.TranscriptGeneration ||
+		if detail.KnowledgeObjectID != projected.KnowledgeObjectID ||
 			strings.ToLower(detail.AuditStatus) != strings.ToLower(projected.AuditStatus) {
 			reject(projected, string(detail.KnowledgeType), "projection_identity_mismatch", "Wiki page identity does not match the projected node")
 			continue
 		}
-		video, videoExists := videoByID[pageVideoID]
-		if !videoExists {
-			reject(projected, string(detail.KnowledgeType), graphErrorSourceMissing, "source video does not exist")
-			continue
+		validContributions := make([]knowledge.EvidenceContribution, 0, len(detail.EvidenceContributions))
+		for _, contribution := range detail.EvidenceContributions {
+			video, exists := videoByID[contribution.VideoID]
+			if !exists || strings.TrimSpace(video.TranscriptGeneration) == "" || video.TranscriptGeneration != contribution.TranscriptGeneration || !strings.EqualFold(strings.TrimSpace(contribution.QualityStatus), "passed") {
+				continue
+			}
+			validContributions = append(validContributions, contribution)
 		}
-		if strings.TrimSpace(video.TranscriptGeneration) == "" || detail.TranscriptGeneration != video.TranscriptGeneration {
-			reject(projected, string(detail.KnowledgeType), graphErrorGenerationMismatch, "Wiki page does not belong to the current transcript generation")
+		if len(validContributions) == 0 {
+			reject(projected, string(detail.KnowledgeType), graphErrorGenerationMismatch, "Wiki page has no active evidence contribution")
 			continue
 		}
 		if !displayableGraphDetail(detail) {
 			reject(projected, string(detail.KnowledgeType), "content_quality_rejected", "Wiki page does not satisfy graph display quality")
 			continue
 		}
-		detail.VideoID = projected.SourceVideoID
-		detail.VideoTitle = video.Title
-		detail.SourceVideoTitle = video.Title
+		detail.EvidenceContributions = validContributions
+		detail.EvidenceIDs = nil
+		for _, contribution := range validContributions {
+			detail.EvidenceIDs = mergeUniqueStrings(detail.EvidenceIDs, contribution.EvidenceIDs)
+		}
+		firstVideo := videoByID[validContributions[0].VideoID]
+		detail.VideoID = firstVideo.ID
+		detail.VideoTitle = firstVideo.Title
+		detail.SourceVideoTitle = firstVideo.Title
 		if timestamp, seconds := wikiAnchorTimeline(detail.TimeRange); timestamp != "" {
 			detail.Timestamp = timestamp
 			detail.Seconds = seconds
@@ -417,35 +427,40 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *knowledg
 			item.VideoID, item.VideoTitle, item.VideoType = video.ID, video.Title, video.VideoType
 		}
 		evidenceValid := true
-		for _, evidenceID := range detail.EvidenceIDs {
-			chunk, ok := resolveEvidenceChunk(
-				chunkByEvidence,
-				chunkByIndex,
-				projected.SourceVideoID,
-				projected.TranscriptGeneration,
-				evidenceID,
-			)
-			if !ok {
-				evidenceValid = false
+		for _, contribution := range validContributions {
+			for _, evidenceID := range contribution.EvidenceIDs {
+				chunk, ok := resolveEvidenceChunk(
+					chunkByEvidence,
+					chunkByIndex,
+					contribution.VideoID,
+					contribution.TranscriptGeneration,
+					evidenceID,
+				)
+				if !ok {
+					evidenceValid = false
+					break
+				}
+				if item.VideoID == "" {
+					item.VideoID = chunk.VideoID
+				}
+				if video, ok := videoByID[chunk.VideoID]; ok {
+					item.VideoTitle = video.Title
+					item.VideoType = video.VideoType
+					detail.VideoID = video.ID
+					detail.VideoTitle = video.Title
+					detail.SourceVideoTitle = video.Title
+				}
+				item.Evidence = append(item.Evidence, EntityGraphEvidence{
+					VideoID: chunk.VideoID, VideoTitle: videoByID[chunk.VideoID].Title,
+					TranscriptGeneration: chunk.Generation, EvidenceSentenceID: chunk.EvidenceSentenceID,
+					KnowledgeID: chunk.KnowledgeID,
+					StartMs:     chunk.StartMs, EndMs: chunk.EndMs, Seconds: chunk.StartMs / 1000, ChunkIndex: chunk.ChunkIndex,
+					ChunkIDs: []string{chunk.KnowledgeID},
+				})
+			}
+			if !evidenceValid {
 				break
 			}
-			if item.VideoID == "" {
-				item.VideoID = chunk.VideoID
-			}
-			if video, ok := videoByID[chunk.VideoID]; ok {
-				item.VideoTitle = video.Title
-				item.VideoType = video.VideoType
-				detail.VideoID = video.ID
-				detail.VideoTitle = video.Title
-				detail.SourceVideoTitle = video.Title
-			}
-			item.Evidence = append(item.Evidence, EntityGraphEvidence{
-				VideoID: chunk.VideoID, VideoTitle: videoByID[chunk.VideoID].Title,
-				TranscriptGeneration: chunk.Generation, EvidenceSentenceID: chunk.EvidenceSentenceID,
-				KnowledgeID: chunk.KnowledgeID,
-				StartMs:     chunk.StartMs, EndMs: chunk.EndMs, Seconds: chunk.StartMs / 1000, ChunkIndex: chunk.ChunkIndex,
-				ChunkIDs: []string{chunk.KnowledgeID},
-			})
 		}
 		if !evidenceValid {
 			reject(projected, string(detail.KnowledgeType), graphErrorEvidenceInvalid, "Wiki page evidence is missing from the current transcript generation")
@@ -742,11 +757,30 @@ func graphEdgeEvidenceCurrent(edgeEvidence []string, source EntityGraphNode, byE
 		return false
 	}
 	for _, evidenceID := range edgeEvidence {
-		if _, ok := resolveEvidenceChunk(byEvidence, byIndex, source.VideoID, source.KnowledgeDetail.TranscriptGeneration, evidenceID); !ok {
+		found := false
+		for _, evidence := range source.Evidence {
+			if evidence.EvidenceSentenceID != evidenceID && evidence.KnowledgeID != evidenceID && !containsString(evidence.ChunkIDs, evidenceID) {
+				continue
+			}
+			if _, ok := resolveEvidenceChunk(byEvidence, byIndex, evidence.VideoID, evidence.TranscriptGeneration, evidenceID); ok {
+				found = true
+				break
+			}
+		}
+		if !found {
 			return false
 		}
 	}
 	return true
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func formatGraphTimestamp(seconds int) string {
@@ -775,12 +809,25 @@ func graphKnowledgeDetail(page weknora.WikiPage) *EntityGraphKnowledgeDetail {
 	}
 	parsed := wikiKnowledgeDetail(page.Content, mappedType, entitySubType)
 	mergeStructuredFrontmatter(&parsed, frontmatter, mappedType, entitySubType)
-	title := firstNonEmpty(frontmatterString(frontmatter, "title"), frontmatterString(frontmatter, "canonical_name"), firstMarkdownHeading(page.Content), page.Title, page.Slug)
+	title := knowledge.CanonicalKnowledgeTitle(firstNonEmpty(frontmatterString(frontmatter, "title"), frontmatterString(frontmatter, "canonical_name"), firstMarkdownHeading(page.Content), page.Title, page.Slug))
+	contributions, _ := knowledge.ParseEvidenceContributions(page.Content)
+	if len(contributions) == 0 {
+		contributions = legacyReadContribution(frontmatter)
+		if len(contributions) == 0 && len(parsed.EvidenceIDs) > 0 {
+			contributions = []knowledge.EvidenceContribution{{
+				VideoID:              frontmatterString(frontmatter, "source_video_id"),
+				SourceDocumentID:     firstNonEmpty(frontmatterString(frontmatter, "source_document_id"), parsed.EvidenceIDs[0]),
+				TranscriptGeneration: frontmatterString(frontmatter, "transcript_generation"),
+				EvidenceIDs:          append([]string(nil), parsed.EvidenceIDs...), QualityStatus: "passed",
+			}}
+		}
+	}
 	return &EntityGraphKnowledgeDetail{
 		ID: page.ID, KnowledgeObjectID: frontmatterString(frontmatter, "knowledge_object_id"),
 		Slug: page.Slug, Title: title, KnowledgeType: mappedType, PrimaryType: mappedType, EntitySubType: entitySubType, PageType: page.PageType,
 		CoreContent: parsed.CoreContent, StructureFields: parsed.StructureFields, EvidenceIDs: parsed.EvidenceIDs,
-		InformationNature: firstNonEmpty(parsed.InformationNature, informationNatureLabel(mappedType, entitySubType)), TimeRange: parsed.TimeRange,
+		EvidenceContributions: contributions,
+		InformationNature:     firstNonEmpty(parsed.InformationNature, informationNatureLabel(mappedType, entitySubType)), TimeRange: parsed.TimeRange,
 		TranscriptGeneration:     frontmatterString(frontmatter, "transcript_generation"),
 		AuditStatus:              frontmatterString(frontmatter, "audit_status"),
 		ClassificationConfidence: frontmatterFloat(frontmatter, "classification_confidence"),
@@ -1241,6 +1288,27 @@ func frontmatterStringSlice(raw any) []string {
 	default:
 		return nil
 	}
+}
+
+// legacyReadContribution builds a single evidence contribution from a page
+// that predates the evidence_contributions frontmatter, so cross-video reads
+// can still resolve ownership from the primary source fields.
+func legacyReadContribution(frontmatter map[string]any) []knowledge.EvidenceContribution {
+	videoID := frontmatterString(frontmatter, "source_video_id")
+	generation := frontmatterString(frontmatter, "transcript_generation")
+	evidenceIDs := frontmatterStringSlice(frontmatter["evidence_ids"])
+	if videoID == "" || generation == "" || len(evidenceIDs) == 0 {
+		return nil
+	}
+	return []knowledge.EvidenceContribution{{
+		VideoID:               videoID,
+		SourceDocumentID:      firstNonEmpty(frontmatterString(frontmatter, "source_document_id"), evidenceIDs[0]),
+		TranscriptGeneration: generation,
+		EvidenceIDs:           evidenceIDs,
+		ChunkRefs:             frontmatterStringSlice(frontmatter["chunk_refs"]),
+		TimeRange:             frontmatterString(frontmatter, "time_range"),
+		QualityStatus:         "passed",
+	}}
 }
 
 func frontmatterFloat(values map[string]any, key string) float64 {

@@ -25,69 +25,14 @@ const defaultNamespace = "VIDSAGE_KNOWLEDGE"
 const FormalRelationConfidenceThreshold = 0.70
 const knowledgePageTypes = "entity,concept,index"
 
-var allowedRelationTypes = map[string]struct{}{
-	"contradicts": {},
-	"complements": {},
-	"explains":    {},
-	"example_of":  {},
-	"part_of":     {},
-	"applies_to":  {},
-	"supports":    {},
-	"involves":    {},
-}
-
-// RelationMatrix is the frozen five-type semantic relationship contract.
-// The map is intentionally kept in this package so projection and read-time
-// validation cannot drift into separate, weaker rules.
-var RelationMatrix = map[knowledge.KnowledgeType]map[knowledge.KnowledgeType]map[string]struct{}{
-	knowledge.TypeEntity: {
-		knowledge.TypeEntity: {"part_of": {}},
-	},
-	knowledge.TypeConcept: {
-		knowledge.TypeEntity:      {"applies_to": {}},
-		knowledge.TypeConcept:     {"complements": {}, "contradicts": {}, "part_of": {}, "explains": {}},
-		knowledge.TypeMethodology: {"explains": {}, "part_of": {}},
-		knowledge.TypeCase:        {"applies_to": {}},
-		knowledge.TypeInsight:     {"explains": {}, "supports": {}},
-	},
-	knowledge.TypeMethodology: {
-		knowledge.TypeEntity:      {"applies_to": {}, "involves": {}},
-		knowledge.TypeConcept:     {"explains": {}, "applies_to": {}},
-		knowledge.TypeMethodology: {"complements": {}, "part_of": {}},
-		knowledge.TypeCase:        {"applies_to": {}},
-		knowledge.TypeInsight:     {"supports": {}},
-	},
-	knowledge.TypeCase: {
-		knowledge.TypeEntity:      {"involves": {}},
-		knowledge.TypeConcept:     {"example_of": {}},
-		knowledge.TypeMethodology: {"example_of": {}},
-		knowledge.TypeCase:        {"complements": {}, "contradicts": {}, "part_of": {}},
-		knowledge.TypeInsight:     {"supports": {}},
-	},
-	knowledge.TypeInsight: {
-		knowledge.TypeEntity:  {"involves": {}},
-		knowledge.TypeConcept: {"explains": {}, "contradicts": {}},
-		knowledge.TypeInsight: {"complements": {}, "contradicts": {}, "supports": {}},
-	},
-}
-
-// IsRelationAllowedForTypes applies the relationship matrix to one directed
-// source/target pair. Unknown types and relation names fail closed.
 func IsRelationAllowedForTypes(relationType string, source, target knowledge.KnowledgeType) bool {
-	relationType = strings.ToLower(strings.TrimSpace(relationType))
-	byTarget, ok := RelationMatrix[source]
-	if !ok {
-		return false
-	}
-	_, ok = byTarget[target][relationType]
-	return ok
+	return knowledge.IsRelationAllowedForTypes(relationType, source, target)
 }
 
 // IsFormalRelationType reports whether a relationship is part of the audited
 // product graph contract. Wiki reading links are represented separately.
 func IsFormalRelationType(value string) bool {
-	_, ok := allowedRelationTypes[strings.TrimSpace(value)]
-	return ok
+	return knowledge.IsFormalRelationType(value)
 }
 
 // ValidateFormalRelationCompletion verifies the batch-level completion gate.
@@ -145,6 +90,8 @@ type Node struct {
 	Summary                  string
 	SourceVideoID            string
 	TranscriptGeneration     string
+	SourceVideoIDs           []string
+	TranscriptGenerations    []string
 	AuditStatus              string
 	ClassificationConfidence float64
 	EvidenceIDs              []string
@@ -205,13 +152,13 @@ func buildGraphQueryStatements(namespace string) graphQueryStatements {
 	return graphQueryStatements{
 		count: fmt.Sprintf(`
 			MATCH (n:%s)
-			WHERE ($video_id = '' OR n.source_video_id = $video_id)
+			WHERE ($video_id = '' OR n.source_video_id = $video_id OR $video_id IN coalesce(n.source_video_ids, []))
 			  AND n.audit_status = 'passed'
 			  AND n.projection_version = 'wiki-v1'
 			RETURN coalesce(n.knowledge_type, '') AS knowledge_type, count(n) AS total`, namespace),
 		nodes: fmt.Sprintf(`
 			MATCH (n:%s)
-			WHERE ($video_id = '' OR n.source_video_id = $video_id)
+			WHERE ($video_id = '' OR n.source_video_id = $video_id OR $video_id IN coalesce(n.source_video_ids, []))
 			  AND ($wiki_page_id = '' OR n.wiki_page_id = $wiki_page_id)
 			  AND (size($types) = 0 OR n.knowledge_type IN $types)
 			  AND n.audit_status = 'passed'
@@ -223,7 +170,7 @@ func buildGraphQueryStatements(namespace string) graphQueryStatements {
 			MATCH (source:%s)-[r:KNOWLEDGE_RELATION]->(target:%s)
 			WHERE (($wiki_page_id <> '' AND (source.wiki_page_id = $wiki_page_id OR target.wiki_page_id = $wiki_page_id))
 			   OR ($wiki_page_id = '' AND source.wiki_page_id IN $node_ids AND target.wiki_page_id IN $node_ids))
-			  AND ($video_id = '' OR (source.source_video_id = $video_id AND target.source_video_id = $video_id))
+			  AND ($video_id = '' OR r.source_video_id = $video_id)
 			  AND source.audit_status = 'passed' AND target.audit_status = 'passed'
 			  AND source.projection_version = 'wiki-v1' AND target.projection_version = 'wiki-v1'
 			  AND r.projection_version = 'wiki-v1'
@@ -305,7 +252,8 @@ func (s *StoreImpl) ProjectVideo(ctx context.Context, video *model.Video, indexP
 
 	_, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		deleteRels := fmt.Sprintf(`
-			MATCH (n:%s {source_video_id: $video_id})-[r]-()
+			MATCH (n:%s)-[r]-()
+			WHERE r.source_video_id = $video_id
 			DELETE r`, s.namespace)
 		if err := runAndConsume(ctx, tx, deleteRels, map[string]any{
 			"video_id": video.ID,
@@ -314,7 +262,8 @@ func (s *StoreImpl) ProjectVideo(ctx context.Context, video *model.Video, indexP
 		}
 
 		deleteNodes := fmt.Sprintf(`
-			MATCH (n:%s {source_video_id: $video_id})
+			MATCH (n:%s)
+			WHERE n.source_video_id = $video_id OR $video_id IN coalesce(n.source_video_ids, [])
 			DETACH DELETE n`, s.namespace)
 		if err := runAndConsume(ctx, tx, deleteNodes, map[string]any{
 			"video_id": video.ID,
@@ -331,6 +280,8 @@ func (s *StoreImpl) ProjectVideo(ctx context.Context, video *model.Video, indexP
 				n.summary = row.summary,
 				n.source_video_id = row.source_video_id,
 				n.transcript_generation = row.transcript_generation,
+				n.source_video_ids = row.source_video_ids,
+				n.transcript_generations = row.transcript_generations,
 				n.audit_status = row.audit_status,
 				n.classification_confidence = row.classification_confidence,
 				n.evidence_ids = row.evidence_ids,
@@ -346,7 +297,7 @@ func (s *StoreImpl) ProjectVideo(ctx context.Context, video *model.Video, indexP
 			UNWIND $edges AS row
 			MATCH (source:%s {wiki_page_id: row.source_wiki_page_id})
 			MATCH (target:%s {wiki_page_id: row.target_wiki_page_id})
-			MERGE (source)-[r:KNOWLEDGE_RELATION {relation_id: row.relation_id}]->(target)
+			MERGE (source)-[r:KNOWLEDGE_RELATION {relation_id: row.relation_id, source_video_id: row.source_video_id, transcript_generation: row.transcript_generation}]->(target)
 			SET r.relation_type = row.relation_type,
 				r.confidence = row.confidence,
 				r.evidence_ids = row.evidence_ids,
@@ -420,6 +371,8 @@ func (s *StoreImpl) ProjectKnowledgeBase(ctx context.Context) error {
 				n.summary = row.summary,
 				n.source_video_id = row.source_video_id,
 				n.transcript_generation = row.transcript_generation,
+				n.source_video_ids = row.source_video_ids,
+				n.transcript_generations = row.transcript_generations,
 				n.audit_status = row.audit_status,
 				n.classification_confidence = row.classification_confidence,
 				n.evidence_ids = row.evidence_ids,
@@ -439,7 +392,7 @@ func (s *StoreImpl) ProjectKnowledgeBase(ctx context.Context) error {
 			UNWIND $edges AS row
 			MATCH (source:%s {wiki_page_id: row.source_wiki_page_id})
 			MATCH (target:%s {wiki_page_id: row.target_wiki_page_id})
-			MERGE (source)-[r:KNOWLEDGE_RELATION {relation_id: row.relation_id}]->(target)
+			MERGE (source)-[r:KNOWLEDGE_RELATION {relation_id: row.relation_id, source_video_id: row.source_video_id, transcript_generation: row.transcript_generation}]->(target)
 			SET r.relation_type = row.relation_type,
 				r.confidence = row.confidence,
 				r.evidence_ids = row.evidence_ids,
@@ -591,13 +544,15 @@ type wikiObject struct {
 }
 
 type relation struct {
-	ID               string
-	SourceWikiPageID string
-	RelationType     string
-	TargetObjectID   string
-	TargetWikiPageID string
-	EvidenceIDs      []string
-	Confidence       float64
+	ID                   string
+	SourceWikiPageID     string
+	RelationType         string
+	TargetObjectID       string
+	TargetWikiPageID     string
+	EvidenceIDs          []string
+	Confidence           float64
+	SourceVideoID        string
+	TranscriptGeneration string
 }
 
 func buildProjection(video *model.Video, pages []weknora.WikiPage) ([]wikiObject, []relation, error) {
@@ -605,14 +560,33 @@ func buildProjection(video *model.Video, pages []weknora.WikiPage) ([]wikiObject
 	return objects, edges, err
 }
 
-func buildKnowledgeBaseProjection(pages []weknora.WikiPage) ([]wikiObject, []relation) {
+func buildKnowledgeBaseProjection(pages []weknora.WikiPage, activeScopes ...map[string]string) ([]wikiObject, []relation) {
 	objects := make([]wikiObject, 0, len(pages))
 	objectByID := make(map[string]wikiObject, len(pages))
 	objectByPageID := make(map[string]wikiObject, len(pages))
 	for _, page := range pages {
-		object, ok := parseKnowledgeBaseObject(page)
+		preferredVideoID, preferredGeneration := "", ""
+		if len(activeScopes) > 0 {
+			preferredVideoID, preferredGeneration = activeContributionScope(page, activeScopes[0])
+		}
+		object, ok := parseKnowledgeBaseObject(page, preferredVideoID, preferredGeneration)
 		if !ok {
 			continue
+		}
+		allRelations, relationErr := parseRelations(page.ParsedFrontmatter()["relations"])
+		if relationErr == nil {
+			legacyVideoID := strings.TrimSpace(frontmatterString(page.ParsedFrontmatter(), "source_video_id"))
+			legacyGeneration := strings.TrimSpace(frontmatterString(page.ParsedFrontmatter(), "transcript_generation"))
+			object.Relations = object.Relations[:0]
+			for _, relation := range allRelations {
+				if relation.SourceVideoID == "" {
+					relation.SourceVideoID, relation.TranscriptGeneration = legacyVideoID, legacyGeneration
+				}
+				if len(activeScopes) > 0 && activeScopes[0][relation.SourceVideoID] != relation.TranscriptGeneration {
+					continue
+				}
+				object.Relations = append(object.Relations, relation)
+			}
 		}
 		objects = append(objects, object)
 		objectByID[object.KnowledgeObjectID] = object
@@ -623,12 +597,6 @@ func buildKnowledgeBaseProjection(pages []weknora.WikiPage) ([]wikiObject, []rel
 	seen := make(map[string]struct{})
 	for _, source := range objects {
 		for _, rel := range source.Relations {
-			if _, exists := allowedRelationTypes[rel.RelationType]; !exists {
-				continue
-			}
-			if rel.Confidence < FormalRelationConfidenceThreshold || len(rel.EvidenceIDs) == 0 {
-				continue
-			}
 			target, ok := objectByID[rel.TargetObjectID]
 			if !ok || target.WikiPageID != rel.TargetWikiPageID {
 				target, ok = objectByPageID[rel.TargetWikiPageID]
@@ -636,10 +604,18 @@ func buildKnowledgeBaseProjection(pages []weknora.WikiPage) ([]wikiObject, []rel
 			if !ok || target.WikiPageID == source.WikiPageID {
 				continue
 			}
+			if normalized, ok := knowledge.NormalizeFormalRelationType(rel.RelationType, source.KnowledgeType, target.KnowledgeType); ok {
+				rel.RelationType = normalized
+			} else {
+				continue
+			}
+			if rel.Confidence < FormalRelationConfidenceThreshold || len(rel.EvidenceIDs) == 0 {
+				continue
+			}
 			if !relationAllowedForKnowledgeTypes(rel.RelationType, source.KnowledgeType, target.KnowledgeType) {
 				continue
 			}
-			key := source.WikiPageID + "\x00" + rel.RelationType + "\x00" + target.WikiPageID
+			key := strings.Join([]string{source.WikiPageID, rel.RelationType, target.WikiPageID, rel.SourceVideoID, rel.TranscriptGeneration}, "\x00")
 			if _, exists := seen[key]; exists {
 				continue
 			}
@@ -654,7 +630,8 @@ func buildKnowledgeBaseProjection(pages []weknora.WikiPage) ([]wikiObject, []rel
 				ID: rel.ID, SourceWikiPageID: rel.SourceWikiPageID,
 				RelationType: rel.RelationType, TargetObjectID: rel.TargetObjectID,
 				TargetWikiPageID: rel.TargetWikiPageID, EvidenceIDs: rel.EvidenceIDs,
-				Confidence: rel.Confidence,
+				Confidence: rel.Confidence, SourceVideoID: rel.SourceVideoID,
+				TranscriptGeneration: rel.TranscriptGeneration,
 			})
 		}
 	}
@@ -667,24 +644,31 @@ func buildKnowledgeBaseProjectionForGenerations(
 ) ([]wikiObject, []relation) {
 	current := make([]weknora.WikiPage, 0, len(pages))
 	for _, page := range pages {
-		frontmatter := page.ParsedFrontmatter()
-		videoID := strings.TrimSpace(frontmatterString(frontmatter, "source_video_id"))
-		generation := strings.TrimSpace(frontmatterString(frontmatter, "transcript_generation"))
-		if videoID == "" || generation == "" || activeGenerations[videoID] != generation {
+		if !pageHasActiveContribution(page, activeGenerations) {
 			continue
 		}
 		current = append(current, page)
 	}
-	return buildKnowledgeBaseProjection(current)
+	return buildKnowledgeBaseProjection(current, activeGenerations)
 }
 
-func parseKnowledgeBaseObject(page weknora.WikiPage) (wikiObject, bool) {
+func parseKnowledgeBaseObject(page weknora.WikiPage, preferred ...string) (wikiObject, bool) {
 	if strings.TrimSpace(page.ID) == "" || strings.TrimSpace(page.Slug) == "" {
 		return wikiObject{}, false
 	}
 	frontmatter := page.ParsedFrontmatter()
 	sourceVideoID := strings.TrimSpace(frontmatterString(frontmatter, "source_video_id"))
 	transcriptGeneration := strings.TrimSpace(frontmatterString(frontmatter, "transcript_generation"))
+	if sourceVideoID == "" || transcriptGeneration == "" {
+		if contributions, err := knowledge.ParseEvidenceContributions(page.Content); err == nil && len(contributions) > 0 {
+			sourceVideoID = contributions[0].VideoID
+			transcriptGeneration = contributions[0].TranscriptGeneration
+		}
+	}
+	if len(preferred) >= 2 && pageHasContributionForScope(page.Content, preferred[0], preferred[1]) {
+		sourceVideoID = strings.TrimSpace(preferred[0])
+		transcriptGeneration = strings.TrimSpace(preferred[1])
+	}
 	if sourceVideoID == "" || transcriptGeneration == "" {
 		return wikiObject{}, false
 	}
@@ -696,6 +680,45 @@ func parseKnowledgeBaseObject(page weknora.WikiPage) (wikiObject, bool) {
 		return wikiObject{}, false
 	}
 	return object, true
+}
+
+func activeContributionScope(page weknora.WikiPage, activeGenerations map[string]string) (string, string) {
+	frontmatter := page.ParsedFrontmatter()
+	legacyVideoID := strings.TrimSpace(frontmatterString(frontmatter, "source_video_id"))
+	legacyGeneration := strings.TrimSpace(frontmatterString(frontmatter, "transcript_generation"))
+	if legacyVideoID != "" && activeGenerations[legacyVideoID] == legacyGeneration {
+		return legacyVideoID, legacyGeneration
+	}
+	contributions, err := knowledge.ParseEvidenceContributions(page.Content)
+	if err != nil {
+		return "", ""
+	}
+	for _, contribution := range contributions {
+		if strings.EqualFold(strings.TrimSpace(contribution.QualityStatus), "passed") && activeGenerations[contribution.VideoID] == contribution.TranscriptGeneration {
+			return contribution.VideoID, contribution.TranscriptGeneration
+		}
+	}
+	return "", ""
+}
+
+func pageHasActiveContribution(page weknora.WikiPage, activeGenerations map[string]string) bool {
+	frontmatter := page.ParsedFrontmatter()
+	legacyVideoID := strings.TrimSpace(frontmatterString(frontmatter, "source_video_id"))
+	legacyGeneration := strings.TrimSpace(frontmatterString(frontmatter, "transcript_generation"))
+	if legacyVideoID != "" && activeGenerations[legacyVideoID] == legacyGeneration {
+		return true
+	}
+	contributions, err := knowledge.ParseEvidenceContributions(page.Content)
+	if err != nil {
+		return false
+	}
+	for _, contribution := range contributions {
+		if strings.EqualFold(strings.TrimSpace(contribution.QualityStatus), "passed") &&
+			activeGenerations[contribution.VideoID] == contribution.TranscriptGeneration {
+			return true
+		}
+	}
+	return false
 }
 
 func legacyKnowledgeType(pageType string) knowledge.KnowledgeType {
@@ -830,7 +853,16 @@ func buildProjectionWithAudit(video *model.Video, pages []weknora.WikiPage) ([]w
 				TargetObjectID: rel.TargetObjectID, TargetWikiPageID: rel.TargetWikiPageID,
 				EvidenceIDs: append([]string(nil), rel.EvidenceIDs...), Confidence: rel.Confidence,
 			}
-			if _, exists := allowedRelationTypes[rel.RelationType]; !exists {
+			target, exists := objectByID[rel.TargetObjectID]
+			if !exists || target.WikiPageID != rel.TargetWikiPageID || pageByID[target.WikiPageID].ID == "" {
+				audit.Status, audit.Reason = "target_not_found", "target object ID and Wiki page ID do not resolve to the same current object"
+				audits = append(audits, audit)
+				continue
+			}
+			if normalized, ok := knowledge.NormalizeFormalRelationType(rel.RelationType, object.KnowledgeType, target.KnowledgeType); ok {
+				rel.RelationType = normalized
+				audit.RelationType = normalized
+			} else {
 				audit.Status, audit.Reason = "invalid_type", "relation type is not allowed"
 				audits = append(audits, audit)
 				continue
@@ -842,12 +874,6 @@ func buildProjectionWithAudit(video *model.Video, pages []weknora.WikiPage) ([]w
 			}
 			if len(rel.EvidenceIDs) == 0 {
 				audit.Status, audit.Reason = "insufficient_evidence", "relation has no evidence IDs"
-				audits = append(audits, audit)
-				continue
-			}
-			target, exists := objectByID[rel.TargetObjectID]
-			if !exists || target.WikiPageID != rel.TargetWikiPageID || pageByID[target.WikiPageID].ID == "" {
-				audit.Status, audit.Reason = "target_not_found", "target object ID and Wiki page ID do not resolve to the same current object"
 				audits = append(audits, audit)
 				continue
 			}
@@ -1046,8 +1072,10 @@ func parseObject(video *model.Video, page weknora.WikiPage) (wikiObject, bool, e
 	if auditStatus != "passed" {
 		return wikiObject{}, false, nil
 	}
-	if frontmatterString(fm, "source_video_id") != video.ID ||
-		frontmatterString(fm, "transcript_generation") != video.TranscriptGeneration {
+	legacyVideoID := frontmatterString(fm, "source_video_id")
+	legacyGeneration := frontmatterString(fm, "transcript_generation")
+	if (legacyVideoID != video.ID || legacyGeneration != video.TranscriptGeneration) &&
+		!pageHasContributionForScope(page.Content, video.ID, video.TranscriptGeneration) {
 		return wikiObject{}, false, nil
 	}
 	validation, validationErr := knowledge.ValidateWikiObjectPage(
@@ -1060,16 +1088,13 @@ func parseObject(video *model.Video, page weknora.WikiPage) (wikiObject, bool, e
 		// Pages outside the active video or non-object index pages are filtered
 		// by ownership before projection. A page that claims the active video
 		// but violates the object contract must fail the projection explicitly.
-		if frontmatterString(fm, "source_video_id") == video.ID {
+		if frontmatterString(fm, "source_video_id") == video.ID || pageHasContributionForScope(page.Content, video.ID, video.TranscriptGeneration) {
 			return wikiObject{}, false, fmt.Errorf("validate Wiki object %s: %w", page.ID, validationErr)
 		}
 		return wikiObject{}, false, nil
 	}
-	sourceVideoID := frontmatterString(fm, "source_video_id")
-	generation := frontmatterString(fm, "transcript_generation")
-	if sourceVideoID != video.ID || generation != video.TranscriptGeneration {
-		return wikiObject{}, false, nil
-	}
+	sourceVideoID := video.ID
+	generation := video.TranscriptGeneration
 	status := strings.ToLower(frontmatterString(fm, "audit_status"))
 	if status != "passed" {
 		return wikiObject{}, false, nil
@@ -1077,26 +1102,73 @@ func parseObject(video *model.Video, page weknora.WikiPage) (wikiObject, bool, e
 	mapped := validation.KnowledgeType
 	objectID := validation.KnowledgeObjectID
 	confidence := validation.ClassificationConfidence
-	relations, err := parseRelations(fm["relations"])
+	relations, err := parseRelations(fm["relations"], video.ID, video.TranscriptGeneration, legacyVideoID, legacyGeneration)
 	if err != nil {
 		return wikiObject{}, false, fmt.Errorf("parse relations for Wiki page %s: %w", page.ID, err)
 	}
 	evidence := validation.EvidenceIDs
+	if contribution, ok := contributionForScope(validation.EvidenceContributions, video.ID, video.TranscriptGeneration); ok {
+		evidence = append([]string(nil), contribution.EvidenceIDs...)
+	}
+	sourceVideoIDs, generations := contributionScopes(validation.EvidenceContributions, sourceVideoID, generation)
 	aliases := stringSliceValue(fm["aliases"])
 	if alias := strings.TrimSpace(stringValue(fm["alias"])); alias != "" {
 		aliases = append(aliases, alias)
 	}
-	title := firstNonEmpty(page.Title, frontmatterString(fm, "title"), frontmatterString(fm, "canonical_name"), page.Slug)
+	title := knowledge.CanonicalKnowledgeTitle(firstNonEmpty(page.Title, frontmatterString(fm, "title"), frontmatterString(fm, "canonical_name"), page.Slug))
 	return wikiObject{
 		Node: Node{
 			ID: "wiki:" + page.ID, WikiPageID: page.ID, KnowledgeObjectID: objectID,
 			KnowledgeType: mapped, Title: title, Summary: validation.CoreContent, SourceVideoID: sourceVideoID,
 			TranscriptGeneration: generation, AuditStatus: status,
+			SourceVideoIDs: sourceVideoIDs, TranscriptGenerations: generations,
 			ClassificationConfidence: confidence, EvidenceIDs: evidence,
 		},
 		EntitySubType: validation.EntitySubType, Aliases: aliases,
 		StructureFields: validation.StructureFields, Relations: relations,
 	}, true, nil
+}
+
+func pageHasContributionForScope(content, videoID, generation string) bool {
+	contributions, err := knowledge.ParseEvidenceContributions(content)
+	if err != nil {
+		return false
+	}
+	_, ok := contributionForScope(contributions, videoID, generation)
+	return ok
+}
+
+func contributionForScope(contributions []knowledge.EvidenceContribution, videoID, generation string) (knowledge.EvidenceContribution, bool) {
+	for _, contribution := range contributions {
+		if contribution.VideoID == strings.TrimSpace(videoID) && contribution.TranscriptGeneration == strings.TrimSpace(generation) &&
+			strings.EqualFold(strings.TrimSpace(contribution.QualityStatus), "passed") {
+			return contribution, true
+		}
+	}
+	return knowledge.EvidenceContribution{}, false
+}
+
+func contributionScopes(contributions []knowledge.EvidenceContribution, fallbackVideoID, fallbackGeneration string) ([]string, []string) {
+	videoIDs := make([]string, 0, len(contributions)+1)
+	generations := make([]string, 0, len(contributions)+1)
+	seen := make(map[string]struct{}, len(contributions))
+	for _, contribution := range contributions {
+		if !strings.EqualFold(strings.TrimSpace(contribution.QualityStatus), "passed") || contribution.VideoID == "" || contribution.TranscriptGeneration == "" {
+			continue
+		}
+		key := contribution.VideoID + "\x00" + contribution.TranscriptGeneration
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		videoIDs = append(videoIDs, contribution.VideoID)
+		generations = append(generations, contribution.TranscriptGeneration)
+	}
+	if len(videoIDs) == 0 && fallbackVideoID != "" && fallbackGeneration != "" {
+		videoIDs = []string{fallbackVideoID}
+		generations = []string{fallbackGeneration}
+	}
+	return videoIDs, generations
 }
 
 func containsAll(values, required []string) bool {
@@ -1114,7 +1186,7 @@ func containsAll(values, required []string) bool {
 	return true
 }
 
-func parseRelations(raw any) ([]relation, error) {
+func parseRelations(raw any, scope ...string) ([]relation, error) {
 	if raw == nil {
 		return nil, nil
 	}
@@ -1128,14 +1200,59 @@ func parseRelations(raw any) ([]relation, error) {
 		if !ok {
 			return nil, fmt.Errorf("relation item must be an object")
 		}
-		out = append(out, relation{
+		relation := relation{
 			ID:               firstNonEmpty(stringValue(data["relation_id"]), stringValue(data["id"])),
 			RelationType:     strings.TrimSpace(stringValue(data["relation_type"])),
 			TargetObjectID:   strings.TrimSpace(stringValue(data["target_object_id"])),
 			TargetWikiPageID: strings.TrimSpace(stringValue(data["target_wiki_page_id"])),
 			EvidenceIDs:      stringSliceValue(data["evidence_ids"]),
 			Confidence:       floatFrom(data["confidence"]),
-		})
+		}
+		if len(scope) >= 2 {
+			relation.SourceVideoID = strings.TrimSpace(scope[0])
+			relation.TranscriptGeneration = strings.TrimSpace(scope[1])
+		}
+		if rawContributions, exists := data["evidence_contributions"]; exists && rawContributions != nil {
+			contributions, ok := rawContributions.([]any)
+			if !ok {
+				return nil, fmt.Errorf("relation evidence_contributions must be a list")
+			}
+			matched := false
+			for _, rawContribution := range contributions {
+				contribution, ok := rawContribution.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("relation evidence contribution must be an object")
+				}
+				videoID := firstNonEmpty(stringValue(contribution["video_id"]), stringValue(contribution["source_video_id"]))
+				generation := strings.TrimSpace(stringValue(contribution["transcript_generation"]))
+				qualityStatus := strings.ToLower(strings.TrimSpace(stringValue(contribution["quality_status"])))
+				if qualityStatus == "" {
+					qualityStatus = "passed"
+				}
+				if len(scope) >= 2 && (videoID != strings.TrimSpace(scope[0]) || generation != strings.TrimSpace(scope[1])) {
+					continue
+				}
+				if qualityStatus != "passed" {
+					continue
+				}
+				relation.SourceVideoID, relation.TranscriptGeneration = videoID, generation
+				relation.EvidenceIDs = stringSliceValue(contribution["evidence_ids"])
+				relation.Confidence = floatFrom(contribution["confidence"])
+				matched = true
+				out = append(out, relation)
+				if len(scope) >= 2 {
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+			continue
+		} else if len(scope) >= 4 && (strings.TrimSpace(scope[0]) != strings.TrimSpace(scope[2]) || strings.TrimSpace(scope[1]) != strings.TrimSpace(scope[3])) {
+			// Legacy flat evidence belongs only to the page's legacy source scope.
+			continue
+		}
+		out = append(out, relation)
 	}
 	return out, nil
 }
@@ -1147,6 +1264,7 @@ func projectionNodes(nodes []wikiObject) []map[string]any {
 			"wiki_page_id": node.WikiPageID, "knowledge_object_id": node.KnowledgeObjectID,
 			"knowledge_type": string(node.KnowledgeType), "title": node.Title, "summary": node.Summary,
 			"source_video_id": node.SourceVideoID, "transcript_generation": node.TranscriptGeneration,
+			"source_video_ids": node.SourceVideoIDs, "transcript_generations": node.TranscriptGenerations,
 			"audit_status": node.AuditStatus, "classification_confidence": node.ClassificationConfidence,
 			"evidence_ids": node.EvidenceIDs,
 		})
@@ -1161,6 +1279,7 @@ func projectionEdges(edges []relation) []map[string]any {
 			"relation_id": edge.ID, "source_wiki_page_id": edge.SourceWikiPageID,
 			"target_wiki_page_id": edge.TargetWikiPageID, "relation_type": edge.RelationType,
 			"confidence": edge.Confidence, "evidence_ids": edge.EvidenceIDs,
+			"source_video_id": edge.SourceVideoID, "transcript_generation": edge.TranscriptGeneration,
 		})
 	}
 	return out
@@ -1175,6 +1294,8 @@ func nodeFromProps(props map[string]any) Node {
 		Title:             stringProp(props, "title"), Summary: stringProp(props, "summary"),
 		SourceVideoID:            stringProp(props, "source_video_id"),
 		TranscriptGeneration:     stringProp(props, "transcript_generation"),
+		SourceVideoIDs:           stringSliceProp(props, "source_video_ids"),
+		TranscriptGenerations:    stringSliceProp(props, "transcript_generations"),
 		AuditStatus:              stringProp(props, "audit_status"),
 		ClassificationConfidence: floatProp(props, "classification_confidence"),
 		EvidenceIDs:              stringSliceProp(props, "evidence_ids"),

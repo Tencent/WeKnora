@@ -23,7 +23,7 @@ func TestGraphQueryStatementsKeepReadContract(t *testing.T) {
 	}{
 		{
 			name: "count", statement: statements.count,
-			required: []string{"MATCH (n:TEST_GRAPH)", "n.source_video_id = $video_id", "n.audit_status = 'passed'", "n.projection_version = 'wiki-v1'"},
+			required: []string{"MATCH (n:TEST_GRAPH)", "n.source_video_id = $video_id", "$video_id IN coalesce(n.source_video_ids, [])", "n.audit_status = 'passed'", "n.projection_version = 'wiki-v1'"},
 		},
 		{
 			name: "nodes", statement: statements.nodes,
@@ -31,7 +31,7 @@ func TestGraphQueryStatementsKeepReadContract(t *testing.T) {
 		},
 		{
 			name: "edges", statement: statements.edges,
-			required: []string{"[r:KNOWLEDGE_RELATION]", "source.wiki_page_id = $wiki_page_id OR target.wiki_page_id = $wiki_page_id", "source.source_video_id = $video_id AND target.source_video_id = $video_id", "r.projection_version = 'wiki-v1'", "ORDER BY r.relation_id"},
+			required: []string{"[r:KNOWLEDGE_RELATION]", "source.wiki_page_id = $wiki_page_id OR target.wiki_page_id = $wiki_page_id", "r.source_video_id = $video_id", "r.projection_version = 'wiki-v1'", "ORDER BY r.relation_id"},
 		},
 	}
 	for _, check := range checks {
@@ -285,6 +285,215 @@ structure_fields:
 	)
 	require.Len(t, nodes, 1)
 	require.Equal(t, "current-page", nodes[0].WikiPageID)
+}
+
+func TestKnowledgeBaseProjectionUsesCanonicalContributionsAcrossVideos(t *testing.T) {
+	page := weknora.WikiPage{ID: "canonical-page", Slug: "concept/canonical", Title: "规范概念", PageType: "index", Content: `---
+knowledge_object_id: object-canonical
+type: concept
+primary_type: concept
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+information_nature: 概念
+classification_confidence: 0.9
+evidence_ids: [chunk-1, chunk-2]
+source_refs: [source-1, source-2]
+evidence_contributions:
+  - video_id: video-1
+    source_document_id: source-1
+    transcript_generation: generation-1
+    evidence_ids: [chunk-1]
+    quality_status: passed
+  - video_id: video-2
+    source_document_id: source-2
+    transcript_generation: generation-2
+    evidence_ids: [chunk-2]
+    quality_status: passed
+structure_fields:
+  definition: 两个视频共同定义的概念
+  mechanism: 通过证据贡献保持规范身份
+---
+# 规范概念
+
+一句话概述：同一规范概念来自两个视频。`}
+
+	nodes, _ := buildKnowledgeBaseProjectionForGenerations([]weknora.WikiPage{page}, map[string]string{"video-1": "generation-1", "video-2": "generation-2"})
+	require.Len(t, nodes, 1)
+	require.Equal(t, []string{"video-1", "video-2"}, nodes[0].SourceVideoIDs)
+	require.Equal(t, []string{"generation-1", "generation-2"}, nodes[0].TranscriptGenerations)
+}
+
+func TestBuildProjectionScopesFormalRelationEvidenceToVideoGeneration(t *testing.T) {
+	sharedContributions := `evidence_contributions:
+  - video_id: video-1
+    source_document_id: source-1
+    transcript_generation: generation-1
+    evidence_ids: [ev-1]
+    quality_status: passed
+  - video_id: video-2
+    source_document_id: source-2
+    transcript_generation: generation-2
+    evidence_ids: [ev-2]
+    quality_status: passed`
+	source := weknora.WikiPage{
+		ID: "page-1", Slug: "concept/shared", Title: "共享概念", PageType: "index",
+		Content: fmt.Sprintf(`---
+knowledge_object_id: object-1
+type: concept
+primary_type: concept
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+information_nature: 概念
+classification_confidence: 0.9
+evidence_ids: [ev-1, ev-2]
+source_refs: [source-1, source-2]
+core_content: 共享概念解释方法
+%s
+structure_fields:
+  definition: 共享概念定义
+  mechanism: 共享概念机制
+relations:
+  - relation_id: relation-1
+    relation_type: explains
+    target_object_id: object-2
+    target_wiki_page_id: page-2
+    evidence_contributions:
+      - video_id: video-1
+        transcript_generation: generation-1
+        evidence_ids: [ev-1]
+        time_range: 00:00:01.000-00:00:03.000
+        confidence: 0.9
+        quality_status: passed
+---
+# 共享概念`, sharedContributions),
+	}
+	target := weknora.WikiPage{
+		ID: "page-2", Slug: "methodology/shared", Title: "共享方法", PageType: "index",
+		Content: fmt.Sprintf(`---
+knowledge_object_id: object-2
+type: methodology
+primary_type: methodology
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+information_nature: 方法论
+classification_confidence: 0.9
+evidence_ids: [ev-1, ev-2]
+source_refs: [source-1, source-2]
+core_content: 共享方法内容
+%s
+structure_fields:
+  input: 方法输入
+  steps: 方法步骤
+---
+# 共享方法`, sharedContributions),
+	}
+
+	_, videoOneEdges, err := buildProjection(&model.Video{ID: "video-1", TranscriptGeneration: "generation-1"}, []weknora.WikiPage{source, target})
+	require.NoError(t, err)
+	require.Len(t, videoOneEdges, 1)
+	require.Equal(t, []string{"ev-1"}, videoOneEdges[0].EvidenceIDs)
+
+	_, videoTwoEdges, err := buildProjection(&model.Video{ID: "video-2", TranscriptGeneration: "generation-2"}, []weknora.WikiPage{source, target})
+	require.NoError(t, err)
+	require.Empty(t, videoTwoEdges)
+}
+
+func TestKnowledgeBaseProjectionKeepsEachActiveRelationContribution(t *testing.T) {
+	pages := []weknora.WikiPage{
+		{
+			ID: "page-1", Slug: "concept/shared", Title: "共享概念", PageType: "index",
+			Content: `---
+knowledge_object_id: object-1
+type: concept
+primary_type: concept
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+information_nature: 概念
+classification_confidence: 0.9
+evidence_ids: [ev-1, ev-2]
+source_refs: [source-1, source-2]
+core_content: 共享概念解释方法
+evidence_contributions:
+  - video_id: video-1
+    source_document_id: source-1
+    transcript_generation: generation-1
+    evidence_ids: [ev-1]
+    quality_status: passed
+  - video_id: video-2
+    source_document_id: source-2
+    transcript_generation: generation-2
+    evidence_ids: [ev-2]
+    quality_status: passed
+structure_fields:
+  definition: 共享概念定义
+  mechanism: 共享概念机制
+relations:
+  - relation_id: relation-1
+    relation_type: explains
+    target_object_id: object-2
+    target_wiki_page_id: page-2
+    evidence_contributions:
+      - video_id: video-1
+        transcript_generation: generation-1
+        evidence_ids: [ev-1]
+        time_range: 00:00:01.000-00:00:03.000
+        confidence: 0.9
+        quality_status: passed
+      - video_id: video-2
+        transcript_generation: generation-2
+        evidence_ids: [ev-2]
+        time_range: 00:00:04.000-00:00:06.000
+        confidence: 0.8
+        quality_status: passed
+---
+# 共享概念`,
+		},
+		{
+			ID: "page-2", Slug: "methodology/shared", Title: "共享方法", PageType: "index",
+			Content: `---
+knowledge_object_id: object-2
+type: methodology
+primary_type: methodology
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+information_nature: 方法论
+classification_confidence: 0.9
+evidence_ids: [ev-1, ev-2]
+source_refs: [source-1, source-2]
+core_content: 共享方法内容
+evidence_contributions:
+  - video_id: video-1
+    source_document_id: source-1
+    transcript_generation: generation-1
+    evidence_ids: [ev-1]
+    quality_status: passed
+  - video_id: video-2
+    source_document_id: source-2
+    transcript_generation: generation-2
+    evidence_ids: [ev-2]
+    quality_status: passed
+structure_fields:
+  input: 方法输入
+  steps: 方法步骤
+---
+# 共享方法`,
+		},
+	}
+
+	_, edges := buildKnowledgeBaseProjectionForGenerations(pages, map[string]string{
+		"video-1": "generation-1",
+		"video-2": "generation-2",
+	})
+	require.Len(t, edges, 2)
+	require.Equal(t, "video-1", edges[0].SourceVideoID)
+	require.Equal(t, []string{"ev-1"}, edges[0].EvidenceIDs)
+	require.Equal(t, "video-2", edges[1].SourceVideoID)
+	require.Equal(t, []string{"ev-2"}, edges[1].EvidenceIDs)
 }
 
 func TestBuildKnowledgeBaseProjectionUsesStructuredRelationsOnly(t *testing.T) {

@@ -21,32 +21,46 @@ func relationInput(id, source, target, typ string) RelationInput {
 func TestAuditRelationsSeparatesAcceptedLegacyMatrixAndMissingTargets(t *testing.T) {
 	pages := []ObjectPageResult{
 		relationPage("concept-1", "page-1", "concept/one", "concept"),
-		relationPage("case-1", "page-2", "case/one", "case"),
+		relationPage("method-1", "page-2", "methodology/one", "methodology"),
 	}
 	inputs := []RelationInput{
-		relationInput("r-1", "concept-1", "case-1", "example_of"),
-		relationInput("r-legacy", "concept-1", "case-1", "supports"),
-		relationInput("r-missing", "concept-1", "missing", "example_of"),
+		relationInput("r-1", "concept-1", "method-1", "explains"),
+		relationInput("r-legacy", "concept-1", "method-1", "derived_from"),
+		relationInput("r-missing", "concept-1", "missing", "explains"),
 	}
 	projection := AuditRelations(inputs, pages, "video-1", "gen-1", 10_000)
 	require.Len(t, projection.Semantic, 1)
 	require.Equal(t, "accepted", projection.Audits[0].Status)
 	require.Equal(t, "rejected_legacy_relation_type", projection.Audits[1].Status)
 	require.Equal(t, "deferred", projection.Audits[2].Status)
-	require.Equal(t, []string{"case-1"}, projection.Orphans)
+	require.Equal(t, []string{"method-1"}, projection.Orphans)
+}
+
+func TestAuditRelationsMapsLegacyCaseDerivedFromInsightToSupports(t *testing.T) {
+	pages := []ObjectPageResult{
+		relationPage("case-1", "page-1", "case/one", knowledge.TypeCase),
+		relationPage("insight-1", "page-2", "insight/one", knowledge.TypeInsight),
+	}
+	projection := AuditRelations(
+		[]RelationInput{relationInput("r-legacy", "case-1", "insight-1", "derived_from")},
+		pages, "video-1", "gen-1", 10_000,
+	)
+	require.Len(t, projection.Semantic, 1)
+	require.Equal(t, "supports", projection.Semantic[0].RelationType)
+	require.Equal(t, "accepted", projection.Audits[0].Status)
 }
 
 func TestAuditRelationsRejectsTypeConfidenceEvidenceTimeAndGeneration(t *testing.T) {
 	pages := []ObjectPageResult{
 		relationPage("concept-1", "page-1", "concept/one", "concept"),
-		relationPage("case-1", "page-2", "case/one", "case"),
+		relationPage("method-1", "page-2", "methodology/one", "methodology"),
 	}
 	cases := []struct {
 		name   string
 		mutate func(*RelationInput)
 		reason string
 	}{
-		{"matrix", func(v *RelationInput) { v.RelationType = "explains" }, "five-type matrix"},
+		{"matrix", func(v *RelationInput) { v.RelationType = "example_of" }, "five-type matrix"},
 		{"confidence", func(v *RelationInput) { v.Confidence = .69 }, "below 0.70"},
 		{"evidence", func(v *RelationInput) { v.EvidenceIDs = nil }, "evidence_ids"},
 		{"time", func(v *RelationInput) { v.TimeRange = "00:00:03.000-00:00:01.000" }, "time_range"},
@@ -54,7 +68,7 @@ func TestAuditRelationsRejectsTypeConfidenceEvidenceTimeAndGeneration(t *testing
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			input := relationInput("r", "concept-1", "case-1", "example_of")
+			input := relationInput("r", "concept-1", "method-1", "explains")
 			tc.mutate(&input)
 			projection := AuditRelations([]RelationInput{input}, pages, "video-1", "gen-1", 10_000)
 			require.Empty(t, projection.Semantic)
@@ -96,8 +110,8 @@ func (m *relationMemoryWiki) UpsertPage(_ context.Context, _ string, input wekno
 func TestPublishRelationsIsIdempotentAndPreservesSemanticReadingLayers(t *testing.T) {
 	content := "---\npage_type: index\ntype: concept\nprimary_type: concept\nknowledge_object_id: concept-1\nrelations: []\nrelated_content: []\n---\n\n# 网络效应\n"
 	wiki := &relationMemoryWiki{pages: map[string]weknora.WikiPage{"concept/one": {ID: "page-1", Slug: "concept/one", Title: "网络效应", PageType: "index", Status: "published", Content: content, Version: 1}, "case/one": {ID: "page-2", Slug: "case/one", Title: "案例", PageType: "index", Status: "published", Content: content, Version: 1}}}
-	pages := []ObjectPageResult{relationPage("concept-1", "page-1", "concept/one", "concept"), relationPage("case-1", "page-2", "case/one", "case")}
-	projection := AuditRelations([]RelationInput{relationInput("r-1", "concept-1", "case-1", "example_of")}, pages, "video-1", "gen-1", 10_000)
+	pages := []ObjectPageResult{relationPage("concept-1", "page-1", "concept/one", "concept"), relationPage("method-1", "page-2", "case/one", "methodology")}
+	projection := AuditRelations([]RelationInput{relationInput("r-1", "concept-1", "method-1", "explains")}, pages, "video-1", "gen-1", 10_000)
 	publisher := RelationPagePublisher{Wiki: wiki, KBID: "kb-1"}
 	first, err := publisher.PublishRelations(t.Context(), pages, projection)
 	require.NoError(t, err)
@@ -108,6 +122,57 @@ func TestPublishRelationsIsIdempotentAndPreservesSemanticReadingLayers(t *testin
 	require.NoError(t, err)
 	require.Equal(t, "unchanged", second[0].Action)
 	require.Equal(t, version, wiki.pages["concept/one"].Version)
+}
+
+func TestPublishRelationsPreservesEvidenceContributionsAcrossVideoGenerations(t *testing.T) {
+	content := `---
+page_type: index
+type: concept
+primary_type: concept
+knowledge_object_id: concept-1
+source_video_id: video-1
+transcript_generation: gen-1
+relations:
+  - relation_id: relation-1
+    relation_type: explains
+    target_object_id: methodology-1
+    target_wiki_page_id: page-2
+    evidence_contributions:
+      - video_id: video-1
+        transcript_generation: gen-1
+        evidence_ids: [ev-1]
+        time_range: 00:00:01.000-00:00:03.000
+        confidence: 0.9
+        quality_status: passed
+related_content: []
+---
+
+# 网络效应
+`
+	wiki := &relationMemoryWiki{pages: map[string]weknora.WikiPage{
+		"concept/one":     {ID: "page-1", Slug: "concept/one", Title: "网络效应", PageType: "index", Status: "published", Content: content, Version: 1},
+		"methodology/one": {ID: "page-2", Slug: "methodology/one", Title: "增长方法", PageType: "index", Status: "published", Content: content, Version: 1},
+	}}
+	pages := []ObjectPageResult{
+		{CandidateID: "concept-1", WikiPageID: "page-1", Slug: "concept/one", PrimaryType: knowledge.TypeConcept, SourceVideoID: "video-2", TranscriptGeneration: "gen-2"},
+		{CandidateID: "methodology-1", WikiPageID: "page-2", Slug: "methodology/one", PrimaryType: knowledge.TypeMethodology, SourceVideoID: "video-2", TranscriptGeneration: "gen-2"},
+	}
+	input := relationInput("relation-2", "concept-1", "methodology-1", "explains")
+	input.SourceVideoID = "video-2"
+	input.TranscriptGeneration = "gen-2"
+	input.EvidenceIDs = []string{"ev-2"}
+	projection := AuditRelations([]RelationInput{input}, pages, "video-2", "gen-2", 10_000)
+
+	_, err := (RelationPagePublisher{Wiki: wiki, KBID: "kb-1"}).PublishRelations(t.Context(), pages, projection)
+	require.NoError(t, err)
+	relations, err := knowledge.ParseWikiObjectRelations(wiki.pages["concept/one"].Content)
+	require.NoError(t, err)
+	require.Len(t, relations, 1)
+	require.Len(t, relations[0].EvidenceContributions, 2)
+	require.Equal(t, "video-1", relations[0].EvidenceContributions[0].VideoID)
+	require.Equal(t, []string{"ev-1"}, relations[0].EvidenceContributions[0].EvidenceIDs)
+	require.Equal(t, "video-2", relations[0].EvidenceContributions[1].VideoID)
+	require.Equal(t, []string{"ev-2"}, relations[0].EvidenceContributions[1].EvidenceIDs)
 }
 
 func TestPublishRelationsPreflightsTargetsBeforeWrite(t *testing.T) {
