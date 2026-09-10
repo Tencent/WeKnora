@@ -61,6 +61,7 @@ class DocReaderConfig:
     odl_hybrid_mode: str
     odl_hybrid_fallback: bool
     odl_markdown_with_html: bool
+    odl_warmup: bool
     pdf_render_max_workers: int
     pdf_render_parallelism: int
     pdf_render_dpi: int
@@ -98,6 +99,7 @@ def load_config() -> DocReaderConfig:
     odl_markdown_with_html = _get_bool(
         ["DOCREADER_ODL_MARKDOWN_WITH_HTML"], False
     )
+    odl_warmup = _get_bool(["DOCREADER_ODL_WARMUP"], True)
     pdf_render_max_workers = _get_int(["DOCREADER_PDF_RENDER_MAX_WORKERS"], 1)
     # Intra-document render parallelism: how many worker processes render the
     # scanned pages of a SINGLE PDF in parallel. pdfium is not thread-safe, so
@@ -140,6 +142,7 @@ def load_config() -> DocReaderConfig:
         odl_hybrid_mode=odl_hybrid_mode,
         odl_hybrid_fallback=odl_hybrid_fallback,
         odl_markdown_with_html=odl_markdown_with_html,
+        odl_warmup=odl_warmup,
         pdf_render_max_workers=pdf_render_max_workers,
         pdf_render_parallelism=pdf_render_parallelism,
         pdf_render_dpi=pdf_render_dpi,

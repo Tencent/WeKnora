@@ -306,6 +306,68 @@ def _run_convert(
     opendataloader_pdf.convert(**kwargs)
 
 
+def _minimal_warmup_pdf() -> bytes:
+    """Build a tiny but valid one-page PDF to feed the warmup convert.
+
+    Xref offsets are computed so the file is spec-valid; a blank page is
+    enough because the only goal is to trigger JVM + library initialization.
+    """
+    objects = [
+        b"<</Type/Catalog/Pages 2 0 R>>",
+        b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
+        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for i, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj".encode("ascii") + body + b"endobj\n"
+    xref_pos = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n".encode("ascii")
+    out += b"0000000000 65535 f \n"
+    for off in offsets:
+        out += f"{off:010d} 00000 n \n".encode("ascii")
+    out += (
+        f"trailer<</Size {len(objects) + 1}/Root 1 0 R>>\n"
+        f"startxref\n{xref_pos}\n%%EOF"
+    ).encode("ascii")
+    return bytes(out)
+
+
+def warmup_engine(
+    overrides: Optional[Mapping[str, Any]] = None,
+) -> Tuple[bool, str]:
+    """Warm the OpenDataLoader engine right after the service starts.
+
+    The first ``convert()`` in this process pays JVM startup plus library
+    initialization (20s+ on a cold container), which used to time out the
+    first knowledge-base import. Running one tiny conversion at boot moves
+    that cost off the request path. Best-effort by design: every failure is
+    reported as ``(False, reason)`` and must never affect serving.
+    """
+    import time
+
+    ok, msg = opendataloader_available(overrides, quick=True)
+    if not ok:
+        return False, msg
+
+    started = time.monotonic()
+    try:
+        max_workers = CONFIG.odl_max_workers
+        with parser_worker_limit("opendataloader", max_workers):
+            with tempfile.TemporaryDirectory(prefix="weknora-odl-warmup-") as tmp_dir:
+                pdf_path = os.path.join(tmp_dir, "warmup.pdf")
+                with open(pdf_path, "wb") as f:
+                    f.write(_minimal_warmup_pdf())
+                image_dir = os.path.join(tmp_dir, "images")
+                os.makedirs(image_dir, exist_ok=True)
+                _run_convert(pdf_path, tmp_dir, image_dir, overrides=overrides)
+    except Exception as e:  # noqa: BLE001 - warmup must never propagate
+        return False, f"{type(e).__name__}: {e}"
+    elapsed = time.monotonic() - started
+    return True, f"convert finished in {elapsed:.1f}s"
+
+
 class OpenDataLoaderParser(BaseParser):
     """Parse PDFs with OpenDataLoader (layout-aware markdown + external images)."""
 
