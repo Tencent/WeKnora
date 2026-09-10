@@ -353,6 +353,21 @@ func (s *chunkService) DeleteChunksByKnowledgeID(ctx context.Context, knowledgeI
 	return nil
 }
 
+// MarkChunksEmbedded records committed chunk vectors for embedding resume.
+func (s *chunkService) MarkChunksEmbedded(ctx context.Context, knowledgeID string, chunkIDs []string) error {
+	return s.chunkRepository.MarkChunksEmbedded(ctx, knowledgeID, chunkIDs)
+}
+
+// ListEmbeddedChunkIDs returns chunk IDs whose vectors are already committed.
+func (s *chunkService) ListEmbeddedChunkIDs(ctx context.Context, knowledgeID string) (map[string]struct{}, error) {
+	return s.chunkRepository.ListEmbeddedChunkIDs(ctx, knowledgeID)
+}
+
+// DeleteEmbedProgressByKnowledgeID clears resume progress for a knowledge.
+func (s *chunkService) DeleteEmbedProgressByKnowledgeID(ctx context.Context, knowledgeID string) error {
+	return s.chunkRepository.DeleteEmbedProgressByKnowledgeID(ctx, knowledgeID)
+}
+
 func (s *chunkService) DeleteByKnowledgeList(ctx context.Context, ids []string) error {
 	if _, err := loadKnowledgeWriteBatch(ctx, s.knowledgeRepo, s.kbRepository, ids); err != nil {
 		return err

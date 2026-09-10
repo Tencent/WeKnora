@@ -18,6 +18,12 @@ func newMCPToolApprovalTestRepo(t *testing.T) interfaces.MCPToolApprovalReposito
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_busy_timeout=5000", t.Name())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	// SQLite has a single-writer constraint; cap the pool at 1 so concurrent
+	// goroutines line up on the same connection instead of failing on
+	// "database table is locked" (mirrors setupKnowledgeTestDB).
+	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(&types.MCPToolApproval{}))
 	return NewMCPToolApprovalRepository(db)
 }

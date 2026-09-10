@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     last_faq_import_result TEXT DEFAULT NULL,
     channel VARCHAR(50) NOT NULL DEFAULT 'web',
     pending_subtasks_count INT NOT NULL DEFAULT 0,
+    chunk_fingerprint VARCHAR(64) NOT NULL DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     processed_at DATETIME,

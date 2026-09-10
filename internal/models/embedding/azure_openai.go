@@ -1,7 +1,6 @@
 package embedding
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,7 +22,6 @@ type AzureOpenAIEmbedder struct {
 	modelID                   string
 	apiVersion                string
 	httpClient                *http.Client
-	maxRetries                int
 	customHeaders             map[string]string
 	supportsDimensionOverride bool
 	EmbedderPooler
@@ -76,7 +74,6 @@ func NewAzureOpenAIEmbedder(apiKey, baseURL, modelName string,
 		modelID:              modelID,
 		apiVersion:           apiVersion,
 		httpClient:           newEmbeddingHTTPClient(60 * time.Second),
-		maxRetries:           3,
 		EmbedderPooler:       pooler,
 	}, nil
 }
@@ -130,7 +127,8 @@ func (e *AzureOpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([
 		if len(bodyStr) > 1000 {
 			bodyStr = bodyStr[:1000] + "... (truncated)"
 		}
-		return nil, fmt.Errorf("Azure Embedding API error: Http Status %s, Response: %s", resp.Status, bodyStr)
+		return nil, embedHTTPError(resp.StatusCode,
+			fmt.Sprintf("Azure Embedding API error: Http Status %s, Response: %s", resp.Status, bodyStr))
 	}
 
 	var response OpenAIEmbedResponse
@@ -145,41 +143,17 @@ func (e *AzureOpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([
 	return embeddings, nil
 }
 
+// doRequestWithRetry sends the request under the shared retry policy in
+// retry_http.go (429/5xx + Retry-After + exponential backoff).
 func (e *AzureOpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) (*http.Response, error) {
 	url := fmt.Sprintf("%s/openai/deployments/%s/embeddings?api-version=%s",
 		e.baseURL, e.modelName, e.apiVersion)
-
-	var resp *http.Response
-	var err error
-
-	for i := 0; i <= e.maxRetries; i++ {
-		if i > 0 {
-			backoffTime := time.Duration(1<<uint(i-1)) * time.Second
-			if backoffTime > 10*time.Second {
-				backoffTime = 10 * time.Second
-			}
-			select {
-			case <-time.After(backoffTime):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-
-		req, reqErr := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
-		if reqErr != nil {
-			err = reqErr
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("api-key", e.apiKey)
-		secutils.ApplyCustomHeaders(req, e.customHeaders)
-
-		resp, err = e.httpClient.Do(req)
-		if err == nil {
-			return resp, nil
-		}
-	}
-	return nil, err
+	return retryEmbeddingRequest(ctx, e.httpClient, http.MethodPost, url, jsonData,
+		func(req *http.Request) {
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("api-key", e.apiKey)
+			secutils.ApplyCustomHeaders(req, e.customHeaders)
+		})
 }
 
 func (e *AzureOpenAIEmbedder) supportsDimensionsParam() bool {

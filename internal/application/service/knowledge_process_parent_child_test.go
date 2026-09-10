@@ -28,12 +28,26 @@ func (r *parentChildKnowledgeRepo) UpdateKnowledge(
 	return nil
 }
 
+func (r *parentChildKnowledgeRepo) FinalizeKnowledgeWithStorage(
+	_ context.Context, _ *types.Knowledge, _ uint64, _ int64,
+) error {
+	return nil
+}
+
 type parentChildChunkService struct {
 	interfaces.ChunkRepository
 	created []*types.Chunk
 }
 
 func (s *parentChildChunkService) DeleteChunksByKnowledgeID(context.Context, uint64, string) error {
+	return nil
+}
+
+func (s *parentChildChunkService) DeleteEmbedProgressByKnowledgeID(context.Context, string) error {
+	return nil
+}
+
+func (s *parentChildChunkService) MarkChunksEmbedded(context.Context, string, []string) error {
 	return nil
 }
 

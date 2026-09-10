@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
@@ -317,6 +319,43 @@ func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *ty
 	}
 	err := r.db.WithContext(ctx).Omit(omit...).Save(knowledge).Error
 	return err
+}
+
+// FinalizeKnowledgeWithStorage persists the final knowledge state and applies
+// the tenant storage delta atomically. A retry sees both values from the same
+// committed transaction, so the delta cannot be applied twice or lost.
+func (r *knowledgeRepository) FinalizeKnowledgeWithStorage(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	tenantID uint64,
+	storageDelta int64,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		omit := omitFieldsOnUpdate
+		if knowledge.CustomMetadata == nil {
+			omit = append(append([]string{}, omitFieldsOnUpdate...), "custom_metadata")
+		}
+		if err := tx.Omit(omit...).Save(knowledge).Error; err != nil {
+			return err
+		}
+		if storageDelta == 0 {
+			return nil
+		}
+		var tenant types.Tenant
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&tenant, tenantID).Error; err != nil {
+			return err
+		}
+		newStorageUsed := tenant.StorageUsed + storageDelta
+		if tenant.StorageQuota > 0 && newStorageUsed > tenant.StorageQuota {
+			return fmt.Errorf("storage quota exceeded: need %d, have %d/%d", storageDelta, tenant.StorageUsed, tenant.StorageQuota)
+		}
+		if newStorageUsed < 0 {
+			newStorageUsed = 0
+		}
+		return tx.Model(&types.Tenant{}).
+			Where("id = ?", tenantID).
+			Update("storage_used", newStorageUsed).Error
+	})
 }
 
 // UpdateKnowledgeBatch updates knowledge items in batch

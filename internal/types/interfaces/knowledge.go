@@ -243,11 +243,14 @@ type KnowledgeRepository interface {
 		tenantID uint64, kbID string, page *types.Pagination, filter types.KnowledgeListFilter,
 	) ([]*types.Knowledge, int64, error)
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
+	// FinalizeKnowledgeWithStorage persists the final knowledge state and
+	// applies the tenant storage delta in one database transaction.
+	FinalizeKnowledgeWithStorage(ctx context.Context, knowledge *types.Knowledge, tenantID uint64, storageDelta int64) error
 	// UpdateKnowledgeForTransfer conditionally persists a transfer checkpoint
 	// and its storage delta in one transaction, without inserting missing rows.
 	UpdateKnowledgeForTransfer(ctx context.Context, before, after *types.Knowledge) error
-
 	// UpdateKnowledgeBatch updates knowledge items in batch
+
 	UpdateKnowledgeBatch(ctx context.Context, knowledgeList []*types.Knowledge) error
 	DeleteKnowledge(ctx context.Context, tenantID uint64, id string) error
 	DeleteKnowledgeList(ctx context.Context, tenantID uint64, ids []string) error
