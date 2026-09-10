@@ -33,7 +33,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -312,11 +311,8 @@ func (m *SessionBoundManager) ensureSessionWorkspaceDirs(
 func (m *SessionBoundManager) prepareSessionDirs(
 	ctx context.Context, handle RemoteSandboxHandle, user string, dirs ...string,
 ) (prepErr error) {
-	ctx, span := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
-		Name:     "sandbox.ensure_workspace",
-		Input:    map[string]interface{}{"directories": dirs, "user": user},
-		Metadata: sandboxHandleMeta(handle),
-	})
+	ctx, span := startSandboxSpan(ctx, "sandbox.ensure_workspace",
+		map[string]interface{}{"directories": dirs, "user": user}, sandboxHandleMeta(handle))
 	defer func() { span.Finish(nil, nil, prepErr) }()
 	result, err := m.client.Exec(ctx, handle, RemoteExecRequest{
 		Shell:   true,
