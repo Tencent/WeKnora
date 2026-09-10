@@ -1,8 +1,8 @@
 /**
  * Persist the remote shell PID across a tab refresh / panel remount.
  *
- * Close() on the server only disconnects the stream; the bash stays in the
- * sandbox so Pty.Connect can reattach. lastPid used to live only in the
+ * Reattach-capable providers leave bash in the sandbox so Pty.Connect can
+ * reconnect. lastPid used to live only in the
  * composable closure, so a refresh created a new shell and left the old
  * one orphaned. sessionStorage is tab-scoped: a new tab starts clean, this
  * tab's F5 does not.
@@ -38,6 +38,6 @@ export function writeStoredPtyId(sessionId: string, pid: number | null): void {
     }
     sessionStorage.setItem(key, String(pid))
   } catch {
-    // Private mode can throw; reattach then degrades to Create.
+    // Private mode can throw; the provider then degrades to Create.
   }
 }

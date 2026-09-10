@@ -53,6 +53,15 @@ func serveTerminalBridge(
 	pty *fakeTerminalSession,
 	authCheck func(context.Context) error,
 ) *websocket.Conn {
+	return serveTerminalBridgeWithReconnect(t, pty, true, authCheck)
+}
+
+func serveTerminalBridgeWithReconnect(
+	t *testing.T,
+	pty *fakeTerminalSession,
+	reattachable bool,
+	authCheck func(context.Context) error,
+) *websocket.Conn {
 	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -62,11 +71,15 @@ func serveTerminalBridge(
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		bridge := &terminalBridge{
-			conn:     conn,
-			ctx:      ctx,
-			cancel:   cancel,
-			session:  "sess-1",
-			terminal: &service.SessionTerminal{Session: pty, Backend: "fake"},
+			conn:    conn,
+			ctx:     ctx,
+			cancel:  cancel,
+			session: "sess-1",
+			terminal: &service.SessionTerminal{
+				Session:      pty,
+				Backend:      "fake",
+				Reattachable: reattachable,
+			},
 			// Idle disconnect off: these tests are about the auth watcher.
 			idleDisconnect: 0,
 			authCheck:      authCheck,
@@ -81,6 +94,16 @@ func serveTerminalBridge(
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
 	return client
+}
+
+func TestTerminalBridgeReadyFrameReportsReconnectCapability(t *testing.T) {
+	pty := newFakeTerminalSession()
+	client := serveTerminalBridgeWithReconnect(t, pty, false, nil)
+
+	ready := readTerminalFrame(t, client)
+	require.Equal(t, "ready", ready.Type)
+	require.Equal(t, uint32(4321), ready.PID)
+	require.False(t, ready.Reattachable)
 }
 
 func readTerminalFrame(t *testing.T, conn *websocket.Conn) terminalControlFrame {

@@ -434,6 +434,13 @@ type RemoteSandboxCapabilities struct {
 	// reject terminal features with an unsupported-backend error instead of
 	// failing after the WebSocket is upgraded.
 	SupportsTerminals bool
+
+	// SupportsTerminalReconnect is true when a terminal stream can reconnect
+	// to the same provider PTY after the client transport is lost. It is
+	// independent of SupportsReconnect, which only reconnects the sandbox.
+	// E2B and Cube expose PTY.Connect; Docker exec does not expose an attach
+	// operation for an already-running exec.
+	SupportsTerminalReconnect bool
 }
 
 // RemoteSandboxClient is the contract SessionBoundManager talks to. All

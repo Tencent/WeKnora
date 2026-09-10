@@ -31,9 +31,10 @@ type RemoteTerminalOptions struct {
 	// 256-colour value by the adapters so full-screen programs work.
 	Envs map[string]string
 
-	// AttachPID, when non-zero, asks the provider to reattach to an
-	// already-running PTY instead of creating a new shell. A failed
-	// reattach falls back to Create.
+	// AttachPID, when non-zero, asks a provider advertising
+	// SupportsTerminalReconnect to reattach to an already-running PTY instead
+	// of creating a new shell. A failed supported reattach falls back to
+	// Create. Providers without that capability ignore this value.
 	AttachPID uint32
 
 	// AllowResume lets OpenSessionTerminal Connect (and therefore wake) a
@@ -78,9 +79,10 @@ type RemoteTerminalSession interface {
 	// Resize changes the PTY window size.
 	Resize(ctx context.Context, cols, rows uint32) error
 
-	// Close disconnects WeKnora from the PTY without killing the remote
-	// process: the shell stays in the sandbox so a provider-native
-	// reconnect can re-attach. Safe to call more than once.
+	// Close disconnects WeKnora from the PTY. Providers advertising
+	// SupportsTerminalReconnect leave the shell available for a later attach;
+	// other providers may not be able to recover the process after transport
+	// loss. Safe to call more than once.
 	Close() error
 }
 

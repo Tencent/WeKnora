@@ -23,6 +23,7 @@ export type SandboxTerminalControlFrame = {
   message?: string
   pty_id?: number
   backend?: string
+  reattachable?: boolean
   exit_code?: number | null
   cols?: number
   rows?: number
@@ -122,6 +123,10 @@ export function useSandboxTerminal(
   let pendingGeometry: { cols: number; rows: number } | null = null
   // 刷新 / 关面板会拆掉这个闭包；PID 写在 sessionStorage，重挂时才能带 pty_id。
   let lastPid: number | null = readStoredPtyId(sessionId.value)
+  // Older servers omitted this field and supported reattach for every
+  // terminal backend they exposed. Treat omission as true for compatibility;
+  // current servers send the provider capability explicitly.
+  let reattachable = true
   // 当前这次连接是否带创建意图。只由 connect({ provision: true }) 置真。
   let allowProvision = false
 
@@ -186,7 +191,7 @@ export function useSandboxTerminal(
           query.set('agent_source_tenant_id', String(sourceTenant).trim())
         }
       }
-      if (lastPid && lastPid > 0) {
+      if (reattachable && lastPid && lastPid > 0) {
         query.set('pty_id', String(lastPid))
       }
       if (pendingGeometry) {
@@ -205,7 +210,7 @@ export function useSandboxTerminal(
       ws = null
       if (disposed) return
       status.value = 'error'
-      scheduleReconnect()
+      if (reattachable) scheduleReconnect()
       return
     } finally {
       opening = false
@@ -257,6 +262,13 @@ export function useSandboxTerminal(
         }
         return
       }
+      // A provider without same-PTY reconnect would create a fresh shell on
+      // every automatic retry and strand the old exec. Stop here and let the
+      // existing Retry action explicitly start a new terminal.
+      if (!reattachable) {
+        status.value = 'error'
+        return
+      }
       if (
         status.value !== 'needs_provision'
         && status.value !== 'paused'
@@ -286,7 +298,10 @@ export function useSandboxTerminal(
     switch (frame.type) {
       case 'ready':
         status.value = 'ready'
-        rememberPid(typeof frame.pty_id === 'number' ? frame.pty_id : null)
+        reattachable = frame.reattachable !== false
+        rememberPid(
+          reattachable && typeof frame.pty_id === 'number' ? frame.pty_id : null,
+        )
         reconnectAttempt = 0
         // 创建意图到此为止。它只用来解释 SANDBOX_NOT_BOUND：连上之前是"还没
         // 有沙箱，要不要建"，连上之后再收到就一定是"沙箱被回收了"。不复位会

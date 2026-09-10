@@ -53,6 +53,7 @@ type dockerEngineAPI interface {
 	) (client.ExecCreateResult, error)
 	ExecAttach(ctx context.Context, execID string, options client.ExecAttachOptions) (client.ExecAttachResult, error)
 	ExecInspect(ctx context.Context, execID string, options client.ExecInspectOptions) (client.ExecInspectResult, error)
+	ExecResize(ctx context.Context, execID string, options client.ExecResizeOptions) (client.ExecResizeResult, error)
 
 	// ContainerStatPath is the one archive endpoint this adapter uses, and only
 	// against the activity marker's fixed path. The copy endpoints are
