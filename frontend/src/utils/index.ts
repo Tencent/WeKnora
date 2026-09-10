@@ -42,6 +42,16 @@ export const MAX_SKILL_BUNDLE_SIZE_MB = Math.min(
 )
 export const MAX_SKILL_BUNDLE_SIZE_BYTES = MAX_SKILL_BUNDLE_SIZE_MB * 1024 * 1024
 
+// Executable formats the backend refuses even when listed in the extra
+// extensions config (chat attachments land in agent sandboxes). Mirrored from
+// temporaryDocumentBlockedExtensions in temporary_document.go — filtering here
+// keeps the picker from offering files the upload would only reject.
+const CHAT_ATTACHMENT_BLOCKED_EXTENSIONS = new Set([
+  '.exe', '.dll', '.so', '.dylib', '.msi',
+  '.com', '.scr', '.bat', '.cmd', '.jar',
+  '.ps1', '.vbs', '.hta',
+])
+
 // Deploy-time extra chat attachment extensions (comma-separated, e.g.
 // ".msg,.seq,.ab1"; the frontend entrypoint mirrors
 // WEKNORA_CHAT_ATTACHMENT_EXTRA_EXTENSIONS into the runtime config). Files
@@ -52,16 +62,6 @@ export const CHAT_ATTACHMENT_EXTRA_EXTENSIONS = parseChatAttachmentExtraExtensio
   window.__RUNTIME_CONFIG__?.CHAT_ATTACHMENT_EXTRA_EXTENSIONS
     ?? import.meta.env.VITE_CHAT_ATTACHMENT_EXTRA_EXTENSIONS,
 )
-
-// Executable formats the backend refuses even when listed in the extra
-// extensions config (chat attachments land in agent sandboxes). Mirrored from
-// temporaryDocumentBlockedExtensions in temporary_document.go — filtering here
-// keeps the picker from offering files the upload would only reject.
-const CHAT_ATTACHMENT_BLOCKED_EXTENSIONS = new Set([
-  '.exe', '.dll', '.so', '.dylib', '.msi',
-  '.com', '.scr', '.bat', '.cmd', '.jar',
-  '.ps1', '.vbs', '.hta',
-])
 
 function parseChatAttachmentExtraExtensions(raw: string | undefined | null): string[] {
   if (!raw) return []
