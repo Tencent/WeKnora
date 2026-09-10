@@ -153,6 +153,7 @@ type KnowledgeService interface {
 		keyword string,
 		searchField string,
 		sortOrder string,
+		isEnabled *bool,
 	) (*types.PageResult, error)
 	// UpsertFAQEntries imports or appends FAQ entries asynchronously.
 	// When DryRun is true, only validates entries without actually importing.
