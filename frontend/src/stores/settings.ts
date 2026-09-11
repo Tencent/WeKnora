@@ -21,7 +21,7 @@ interface Settings {
   selectedTools?: string[];
   modelConfig: ModelConfig;  // 模型配置
   ollamaConfig: OllamaConfig;  // Ollama配置
-  localBrowserEnabled: boolean; // Explicit source preference, independent of pairing
+  localBrowserEnabled: boolean; // Explicit source preference; composer activates it only while the extension is online
   webSearchEnabled: boolean;  // 网络搜索是否启用
   conversationModels: ConversationModels;
   selectedAgentId: string;  // 当前选中的智能体ID

@@ -134,11 +134,13 @@
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { get, post, getDown } from '@/utils/request'
+import { useBrowserConnectionStore } from '@/stores/browserConnection'
 import browserLogo from '@/assets/browserskill/logo.png'
 import BrowserSearchPreferences from './BrowserSearchPreferences.vue'
 interface Device { id: string; label: string; last_seen_at: string }
 interface Connection { enabled: boolean; connected: boolean; device?: Device; extension_available: boolean }
 const { t, locale } = useI18n()
+const browserConnection = useBrowserConnectionStore()
 const status = ref<Connection>({ enabled: false, connected: false, extension_available: false })
 const busy = ref(false), loaded = ref(false), error = ref(''), refreshError = ref(''), pairing = ref(''), copied = ref(false), copyFallback = ref(false), downloading = ref(false)
 const endpoint = '/api/v1/me/browser'
@@ -156,6 +158,7 @@ async function refresh() {
       if (current !== revision) { timer = setTimeout(refresh, 5000); return }
       if (result.data.device?.id && result.data.device.id !== status.value.device?.id) clearPairing()
       status.value = result.data; loaded.value = true; refreshError.value = ''
+      browserConnection.apply(result.data)
     }
   } catch (e: any) { if (alive) { refreshError.value = e?.message || t('localBrowser.failed') } }
   if (alive) timer = setTimeout(refresh, 5000)
@@ -180,7 +183,7 @@ async function disconnect() {
   busy.value = true; error.value = ''; revision++
   try {
     const result = await post<{ data: Connection }>(endpoint, { action: 'revoke' }, { signal: controller.signal })
-    if (alive) { status.value = result.data; clearPairing() }
+    if (alive) { status.value = result.data; clearPairing(); browserConnection.apply(result.data) }
   } catch (e: any) { if (alive) error.value = e?.message || t('localBrowser.failed') }
   finally { if (alive) busy.value = false }
 }
