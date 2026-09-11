@@ -389,6 +389,12 @@ type WikiPageRepository interface {
 	// DeleteByID soft-deletes a wiki page by ID.
 	DeleteByID(ctx context.Context, id string) error
 
+	// DeleteByKnowledgeBase removes all wiki rows owned by a knowledge base —
+	// pages, folders and issues are soft-deleted (they carry gorm.DeletedAt),
+	// revision snapshots are hard-deleted (no deleted_at column) — in one
+	// transaction. Used by the async KB-delete cleanup; a no-op for "".
+	DeleteByKnowledgeBase(ctx context.Context, kbID string) error
+
 	// Search performs full-text search on wiki pages within a knowledge base.
 	Search(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 
