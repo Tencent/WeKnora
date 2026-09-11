@@ -4,10 +4,11 @@ name: Go Lint
 # so pull requests are only judged on the code they introduce (`only-new-issues`).
 # That filter needs a pull request diff, which is why this workflow has no other
 # trigger; the companion go-lint-cache.yml keeps the caches this job restores
-# from warm on main.
+# from warm on main-update.
 
 on:
   pull_request:
+    branches: [main-update]
     paths:
       - "**/*.go"
       - "**/go.mod"

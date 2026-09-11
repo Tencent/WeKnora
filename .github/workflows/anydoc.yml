@@ -6,13 +6,14 @@ name: Anydoc
 
 on:
   push:
-    branches: [main]
+    branches: [main-update]
     paths:
       - "third_party/anydoc-go/**"
       - "scripts/build-anydoc-lib.sh"
       - "internal/infrastructure/docparser/**"
       - ".github/workflows/anydoc.yml"
   pull_request:
+    branches: [main-update]
     paths:
       - "third_party/anydoc-go/**"
       - "scripts/build-anydoc-lib.sh"

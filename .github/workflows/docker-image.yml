@@ -4,7 +4,7 @@ on:
     tags:
       - "v*"
     branches:
-      - main
+      - main-update
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

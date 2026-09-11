@@ -7,20 +7,21 @@ name: Build & Publish (mcp-server)
 # Release policy: publishing does NOT depend on tags. Bump the version in
 # mcp-server/pyproject.toml (and the synced version strings in setup.py,
 # __init__.py, weknora_mcp_server.py server_version, main.py --version),
-# merge to main, and the pipeline builds + publishes automatically.
+# merge to main-update, and the pipeline builds + publishes automatically.
 # A pre-publish check queries PyPI and skips upload if that version is
 # already published, so re-running on an unchanged version stays green.
 # Releases also still trigger on mcp-server-v* tags (back-compat).
 
 on:
   push:
-    branches: [main]
+    branches: [main-update]
     tags:
       - "mcp-server-v*"
     paths:
       - "mcp-server/**"
       - ".github/workflows/mcp-server.yml"
   pull_request:
+    branches: [main-update]
     paths:
       - "mcp-server/**"
       - ".github/workflows/mcp-server.yml"
@@ -61,7 +62,7 @@ jobs:
     name: Build sdist + wheel
     needs: test
     runs-on: ubuntu-latest
-    # Build on push to main, manual runs, and release tags — but never on PRs.
+    # Build on push to main-update, manual runs, and release tags — but never on PRs.
     if: github.event_name != 'pull_request'
     defaults:
       run:
@@ -97,10 +98,10 @@ jobs:
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
-    # Publish on push to main, manual runs (main/tags only), and release tags — never on PRs.
+    # Publish on push to main-update, manual runs (main-update/tags only), and release tags — never on PRs.
     if: >-
       github.event_name != 'pull_request' &&
-      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/mcp-server-v'))
+      (github.ref == 'refs/heads/main-update' || startsWith(github.ref, 'refs/tags/mcp-server-v'))
     permissions:
       id-token: write
     environment:

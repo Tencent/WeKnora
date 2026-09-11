@@ -5,7 +5,7 @@ name: App
 
 on:
   push:
-    branches: [main]
+    branches: [main-update]
     paths:
       - "**/*.go"
       - "!cli/**"
@@ -29,6 +29,7 @@ on:
       - "cmd/desktop/build/windows/installer/project.nsi"
       - ".github/workflows/app.yml"
   pull_request:
+    branches: [main-update]
     paths:
       - "**/*.go"
       - "!cli/**"
@@ -94,7 +95,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             # Compare base..head, not the PR merge commit, so files changed only
-            # on main after the branch point are not attributed to this PR.
+            # on main-update after the branch point are not attributed to this PR.
             diff_range="${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
           else
             base="$BASE_SHA"

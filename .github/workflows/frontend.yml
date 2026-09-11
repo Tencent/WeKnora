@@ -2,12 +2,13 @@ name: Frontend
 
 on:
   push:
-    branches: [main]
+    branches: [main-update]
     paths:
       - "frontend/**"
       - "scripts/build_frontend_dist.sh"
       - ".github/workflows/frontend.yml"
   pull_request:
+    branches: [main-update]
     paths:
       - "frontend/**"
       - "scripts/build_frontend_dist.sh"

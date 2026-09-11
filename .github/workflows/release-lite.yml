@@ -420,7 +420,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: main
+          ref: main-update
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Resolve version
@@ -448,5 +448,5 @@ jobs:
             echo "No changes to Formula"
           else
             git commit -m "formula: update weknora-lite to ${{ steps.ver.outputs.version }}"
-            git push origin main
+            git push origin main-update
           fi

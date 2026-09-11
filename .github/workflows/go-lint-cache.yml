@@ -1,7 +1,7 @@
 name: Go Lint Cache
 
 # Action caches written by a pull request run are scoped to that pull request,
-# so only runs on the default branch produce caches every pull request can
+# so only runs on the integration branch produce caches every pull request can
 # restore. Without this workflow each pull request would recompile the whole
 # package graph from scratch (~6 minutes for the root module, versus ~40s warm).
 #
@@ -11,7 +11,7 @@ name: Go Lint Cache
 
 on:
   push:
-    branches: [main]
+    branches: [main-update]
     paths:
       - "**/*.go"
       - "**/go.mod"
@@ -54,6 +54,6 @@ jobs:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: ${{ matrix.module }}
           # This workflow exists for its cache side effect only; the backlog of
-          # existing findings must not turn main red. The run still prints the
+          # existing findings must not turn main-update red. The run still prints the
           # full report, which makes a manual dispatch a useful backlog view.
           args: --issues-exit-code=0

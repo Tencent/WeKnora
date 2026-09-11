@@ -16,13 +16,14 @@ name: Build & Publish (dsh-weknora)
 
 on:
   push:
-    branches: [main]
+    branches: [main-update]
     tags:
       - "dsh-weknora-v*"
     paths:
       - "packages/dsh-weknora/**"
       - ".github/workflows/dsh-plugin.yml"
   pull_request:
+    branches: [main-update]
     paths:
       - "packages/dsh-weknora/**"
       - ".github/workflows/dsh-plugin.yml"

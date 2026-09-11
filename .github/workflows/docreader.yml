@@ -2,7 +2,7 @@ name: DocReader
 
 on:
   push:
-    branches: [main]
+    branches: [main-update]
     paths:
       - "docreader/**"
       - "go.mod"
@@ -12,6 +12,7 @@ on:
       - "docker/Dockerfile.odl-hybrid"
       - ".github/workflows/docreader.yml"
   pull_request:
+    branches: [main-update]
     paths:
       - "docreader/**"
       - "go.mod"

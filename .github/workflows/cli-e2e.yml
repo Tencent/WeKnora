@@ -16,6 +16,7 @@ on:
   workflow_dispatch:
   pull_request:
     types: [labeled, synchronize]
+    branches: [main-update]
     paths:
       - 'cli/**'
       - '.github/workflows/cli-e2e.yml'
