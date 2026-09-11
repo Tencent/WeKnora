@@ -780,7 +780,8 @@ async function expandRealCard(app) {
   if (await root.count() && !(await app.page.locator('.agent-stream-display .tree-children').count())) {
     await click(app, root, 'expand-real-agent-steps');
   }
-  const header = app.page.locator('.agent-stream-display .action-header').filter({ hasText: 'Prepare practice quiz' }).first();
+  const header = app.page.locator('.agent-stream-display .action-card:not(.thinking-event-card) > .action-header')
+    .filter({ hasText: /^Called Prepare practice quiz$/ }).first();
   await header.waitFor();
   if (!await app.page.locator('.learning-panel.compact').count()) await click(app, header, 'expand-real-quiz-tool');
 }
