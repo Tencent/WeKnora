@@ -222,6 +222,43 @@ func (e *AgentEngine) GetSkillsManager() *skills.Manager {
 	return e.skillsManager
 }
 
+// ensureTurnFitsContextWindow fails the turn before the LLM call when the
+// current request cannot fit the model's context window no matter what
+// compaction does. The recurring trigger is a birth defect rather than
+// accumulated history: the current turn's user message embeds a
+// runtime_context that alone exceeds the window (e.g. an oversized bound-KB
+// catalog), the compactor correctly declines to cut the current turn, and
+// every retry would resend the same oversized request for the rest of
+// maxIterations. One estimate check here replaces that entire futile run.
+// A zero/unknown MaxContextTokens keeps the previous behaviour: let the
+// provider judge.
+func (e *AgentEngine) ensureTurnFitsContextWindow(ctx context.Context, round, messageTokens int, tools []chat.Tool) error {
+	if e.config == nil || e.config.MaxContextTokens <= 0 {
+		return nil
+	}
+	requestTokens := messageTokens
+	// The pure message estimate excludes tool schemas (see
+	// estimateCurrentTokens); a usage baseline already billed them.
+	if contextTokensFromUsage(e.lastUsage) == 0 {
+		requestTokens += e.tokenEstimator.EstimateTools(tools)
+	}
+	window := e.config.MaxContextTokens - contextSafetyTokens
+	if requestTokens <= window {
+		return nil
+	}
+	logger.Warnf(ctx, "[Agent][Round-%d] Turn exceeds context window: est %d tokens (messages %d + tool schemas %d) vs %d available; aborting before the model call",
+		round, requestTokens, messageTokens, requestTokens-messageTokens, window)
+	common.PipelineWarn(ctx, "Agent", "context_window_exceeded", map[string]interface{}{
+		"round":          round,
+		"request_tokens": requestTokens,
+		"window_tokens":  window,
+	})
+	return fmt.Errorf(
+		"agent turn exceeds the model context window: estimated %d tokens against %d available and compaction cannot shrink the current turn; "+
+			"narrow the agent's bound knowledge bases or configure a model with a larger context window",
+		requestTokens, window)
+}
+
 // estimateCurrentTokens returns the best estimate of the current context token
 // count:
 //
@@ -663,6 +700,11 @@ func (e *AgentEngine) runReActIteration(
 	// updated (the injected text counts as new delta tokens for the next
 	// call), so the very next LLM call sees the user's addition.
 	e.drainSteerMessages(ctx, state, messagesPtr, sessionID, assistantMessageID)
+
+	if err := e.ensureTurnFitsContextWindow(ctx, round, currentTokens, tools); err != nil {
+		retErr = err
+		return iterOutcomeNext, err
+	}
 
 	logger.Infof(ctx, "[Agent][Round-%d/%s] Starting: %d messages, %d tools, est_tokens=%d",
 		round, e.maxIterationsDisplay(), len(*messagesPtr), len(tools), currentTokens)
