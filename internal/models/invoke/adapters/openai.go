@@ -101,10 +101,11 @@ func specFor(name invoke.ProviderName) openaiVendorSpec {
 		spec.forceRaw = true
 		spec.shape = shapeDeepSeek
 	case invoke.ProviderGemini:
-		// geminiProvider: ForceRawHTTP. Its tool thought-signature metadata
-		// injection has no channel in the neutral message model yet (§6.1) —
-		// signatures do not round-trip until that field lands (P5 native
-		// adapter supersedes this compatibility route anyway).
+		// UNREACHABLE since P5-1: gemini registers via GeminiAdapter (native
+		// generateContent route) and no openaiAdapter instance carries this
+		// name anymore. Kept as the compat-layer record: ForceRawHTTP let
+		// vendor-only fields survive the SDK marshal; tool thought-signature
+		// metadata had no channel in the neutral message model (§6.1).
 		spec.forceRaw = true
 	case invoke.ProviderAzureOpenAI:
 		spec.azure = true

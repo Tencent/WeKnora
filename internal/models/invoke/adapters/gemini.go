@@ -122,6 +122,10 @@ type geminiFunctionCall struct {
 }
 
 type geminiFunctionResponse struct {
+	// ID matches the issuing functionCall (doc: "the client to execute the
+	// functionCall and return the response with the matching id") — required
+	// to disambiguate parallel same-name calls.
+	ID       string          `json:"id,omitempty"`
 	Name     string          `json:"name"`
 	Response json.RawMessage `json:"response"`
 }
@@ -153,6 +157,10 @@ type geminiGenerationConfig struct {
 	PresencePenalty  *float64              `json:"presencePenalty,omitempty"`
 	FrequencyPenalty *float64              `json:"frequencyPenalty,omitempty"`
 	ThinkingConfig   *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+	// Structured output (doc §GenerationConfig): the schema rides natively —
+	// no prompt-side schema hint like the openai-compat layer needed.
+	ResponseMIMEType   string          `json:"responseMimeType,omitempty"`
+	ResponseJSONSchema json.RawMessage `json:"responseJsonSchema,omitempty"`
 }
 
 // geminiThinkingConfig maps the platform thinking vocabulary onto the two
@@ -247,6 +255,16 @@ func (a *GeminiAdapter) BuildChatRequest(
 	// neutral tool-result message carries only the call ID, so the name is
 	// recovered from the assistant turn that issued the call.
 	callNames := map[string]string{}
+	// Consecutive tool results merge into ONE user content carrying multiple
+	// functionResponse parts (the official parallel-calling shape) instead of
+	// N separate contents.
+	var pendingToolParts []geminiChatPart
+	flushTools := func() {
+		if len(pendingToolParts) > 0 {
+			req.Contents = append(req.Contents, geminiChatContent{Role: "user", Parts: pendingToolParts})
+			pendingToolParts = nil
+		}
+	}
 
 	for _, msg := range opts.Messages {
 		// A new invoke.Role must be mapped here explicitly, never silently
@@ -254,15 +272,21 @@ func (a *GeminiAdapter) BuildChatRequest(
 		//exhaustive:enforce
 		switch msg.Role {
 		case invoke.RoleSystem:
+			flushTools()
 			if text := msg.Text(); text != "" {
 				systemParts = append(systemParts, text)
 			}
 		case invoke.RoleUser:
-			req.Contents = append(req.Contents, geminiChatContent{
-				Role:  "user",
-				Parts: geminiUserParts(msg.Content),
-			})
+			flushTools()
+			parts, err := geminiUserParts(msg.Content)
+			if err != nil {
+				return nil, err
+			}
+			if len(parts) > 0 {
+				req.Contents = append(req.Contents, geminiChatContent{Role: "user", Parts: parts})
+			}
 		case invoke.RoleAssistant:
+			flushTools()
 			parts := make([]geminiChatPart, 0, len(msg.Content)+len(msg.ToolCalls))
 			if text := msg.Text(); text != "" {
 				parts = append(parts, geminiChatPart{Text: text})
@@ -293,23 +317,20 @@ func (a *GeminiAdapter) BuildChatRequest(
 			if err != nil {
 				return nil, fmt.Errorf("marshal tool response: %w", err)
 			}
-			req.Contents = append(req.Contents, geminiChatContent{
-				// The doc does not pin the role for functionResponse
-				// contents; role=user is the SDK-standard carrier.
-				Role: "user",
-				Parts: []geminiChatPart{{FunctionResponse: &geminiFunctionResponse{
-					Name:     name,
-					Response: payload,
-				}}},
-			})
+			pendingToolParts = append(pendingToolParts, geminiChatPart{FunctionResponse: &geminiFunctionResponse{
+				ID:       msg.ToolCallID,
+				Name:     name,
+				Response: payload,
+			}})
 		}
 	}
+	flushTools()
 	if text := strings.Join(systemParts, "\n\n"); text != "" {
 		req.SystemInstruction = &geminiChatContent{Parts: []geminiChatPart{{Text: text}}}
 	}
 
 	a.applyTools(&req, opts)
-	req.GenerationConfig = a.generationConfig(opts)
+	req.GenerationConfig = a.generationConfig(model, opts)
 
 	action := ":generateContent"
 	if opts.Stream {
@@ -369,7 +390,7 @@ func (a *GeminiAdapter) applyTools(req *geminiRequest, opts *invoke.ChatOptions)
 
 // generationConfig folds the sampling surface; zero values mean "do not
 // send" (invoke.ChatOptions semantics).
-func (a *GeminiAdapter) generationConfig(opts *invoke.ChatOptions) *geminiGenerationConfig {
+func (a *GeminiAdapter) generationConfig(model string, opts *invoke.ChatOptions) *geminiGenerationConfig {
 	cfg := &geminiGenerationConfig{}
 	sent := false
 	if opts.Temperature > 0 {
@@ -401,17 +422,13 @@ func (a *GeminiAdapter) generationConfig(opts *invoke.ChatOptions) *geminiGenera
 		cfg.FrequencyPenalty = &f
 		sent = true
 	}
-	if opts.Thinking != nil {
-		tc := &geminiThinkingConfig{}
-		if *opts.Thinking {
-			level := invoke.ResolveThinkingLevel(opts.ThinkingLevel, "", nil,
-				chatCapsFor(invoke.ProviderGemini).Thinking)
-			tc.ThinkingLevel = geminiThinkingLevel(level)
-		} else {
-			zero := 0
-			tc.ThinkingBudget = &zero
-		}
+	if tc := geminiThinkingConfigFor(model, opts); tc != nil {
 		cfg.ThinkingConfig = tc
+		sent = true
+	}
+	if len(opts.Format) > 0 {
+		cfg.ResponseMIMEType = "application/json"
+		cfg.ResponseJSONSchema = opts.Format
 		sent = true
 	}
 	if !sent {
@@ -420,9 +437,96 @@ func (a *GeminiAdapter) generationConfig(opts *invoke.ChatOptions) *geminiGenera
 	return cfg
 }
 
+// --- thinking dispatch (R1 修正：三族三机制，见 geminiThinkingFamily) ---
+
+// geminiThinkingFamily divides the lineup by thinking mechanism
+// (出处 ai.google.dev/gemini-api/docs/thinking 与 v1beta reference，2026-09 查证):
+//   - gemini-3*:      thinkingLevel 枚举制——budget 机制整体废弃（发了即 400）；
+//     不可关闭，最低档 pro=LOW、flash=MINIMAL
+//   - *2.5-flash*:    thinkingBudget 数值制（0=文档关闭机制）；thinkingLevel 发了即 400
+//   - *2.5-pro*:      thinkingBudget 数值制；不可关闭（最低 128），thinkingLevel 发了即 400
+//   - 其他（2.0 等）:  不支持 thinking 字段（发了即 400）
+//
+// 前缀匹配与 shapeFor/IsMoonshotFixedTempModel 同模式：封闭遗留集（2.5 世）
+// 查表，开放增长集（3 系+）枚举直传。
+func geminiThinkingFamily(model string) string {
+	name := strings.ToLower(model)
+	switch {
+	case strings.HasPrefix(name, "gemini-3"):
+		return "gemini3"
+	case strings.Contains(name, "2.5-flash"):
+		return "flash25"
+	case strings.Contains(name, "2.5-pro"):
+		return "pro25"
+	default:
+		return "other"
+	}
+}
+
+// geminiLevelBudget maps the platform levels onto REPRESENTATIVE budget values
+// for the 2.5-flash family (WeKnora policy values inside the documented
+// 0–24576 range — the anthropicBudgetTokens precedent: the vendor accepts any
+// in-range number, the table is our level semantics).
+func geminiLevelBudget(level string) int {
+	switch invoke.Level(level) {
+	case invoke.LevelLow:
+		return 1024
+	case invoke.LevelMedium:
+		return 8192
+	default: // high/xhigh/max
+		return 24576
+	}
+}
+
+// geminiThinkingConfigFor folds the user decision (opts.Thinking ×
+// opts.ThinkingLevel) onto the model family's mechanism. A nil result sends
+// no thinkingConfig at all — the model default, and the safe fallback for
+// every family where the requested semantics cannot be honored without a
+// 400 (2.5-pro off, non-thinking models).
+func geminiThinkingConfigFor(model string, opts *invoke.ChatOptions) *geminiThinkingConfig {
+	// TODO(裁定 #28)：ExtraConfig["thinking_mechanism"] 覆盖缝（网关改名/
+	// 机制迁移的逃生口）——折叠进 Endpoint 后在此覆盖 geminiThinkingFamily
+	// 的结果。本轮不做（需动 seam ④ 折叠面）。
+	mechanism := geminiThinkingFamily(model)
+
+	if opts.Thinking == nil {
+		return nil
+	}
+	switch mechanism {
+	case "gemini3": // thinkingLevel enum; budget would be a 400
+		tc := &geminiThinkingConfig{}
+		if *opts.Thinking {
+			tc.ThinkingLevel = geminiThinkingLevel(opts.ThinkingLevel)
+			yes := true
+			tc.IncludeThoughts = &yes // thought parts flow (bridge → Thinking deltas)
+		} else {
+			// Cannot be disabled — land on the floor shared by 3-pro/3-flash.
+			tc.ThinkingLevel = "LOW"
+		}
+		return tc
+	case "flash25": // thinkingBudget numeric; 0 is the documented off switch
+		tc := &geminiThinkingConfig{}
+		if *opts.Thinking {
+			b := geminiLevelBudget(opts.ThinkingLevel)
+			tc.ThinkingBudget = &b
+			yes := true
+			tc.IncludeThoughts = &yes
+		} else {
+			zero := 0
+			tc.ThinkingBudget = &zero
+		}
+		return tc
+	default: // pro25 (cannot disable) / other (field unsupported) / "none" —
+		// model default, never a 400
+		return nil
+	}
+}
+
 // geminiThinkingLevel maps the platform five-level vocabulary onto the
 // documented ThinkingLevel enum (doc: UNSPECIFIED/MINIMAL/LOW/MEDIUM/HIGH).
 // xhigh/max cap at HIGH — the enum has no higher rung.
+//
+//exhaustive:enforce — a new platform Level must be mapped explicitly.
 func geminiThinkingLevel(level string) string {
 	switch invoke.Level(level) {
 	case invoke.LevelLow:
@@ -431,15 +535,17 @@ func geminiThinkingLevel(level string) string {
 		return "MEDIUM"
 	case invoke.LevelHigh, invoke.LevelXHigh, invoke.LevelMax:
 		return "HIGH"
-	default:
-		return "MEDIUM"
 	}
+	return "MEDIUM"
 }
 
 // geminiUserParts maps user content: data-URI images become inlineData
 // (base64), any other URL becomes fileData (the Files-API URI form; the
 // public API rejects arbitrary https sources — the provider errors loudly).
-func geminiUserParts(parts []invoke.Part) []geminiChatPart {
+// A part-less result (nil) means the caller should SKIP the content: a
+// content with zero parts is a guaranteed 400 (the multimodal degradation
+// retry can strip a message to nothing).
+func geminiUserParts(parts []invoke.Part) ([]geminiChatPart, error) {
 	out := make([]geminiChatPart, 0, len(parts))
 	for _, p := range parts {
 		if p.Text != "" {
@@ -448,18 +554,21 @@ func geminiUserParts(parts []invoke.Part) []geminiChatPart {
 		if p.Image != nil {
 			if mime, b64, ok := parseDataURI(p.Image.URL); ok {
 				out = append(out, geminiChatPart{InlineData: &geminiBlob{MimeType: mime, Data: b64}})
+			} else if strings.HasPrefix(strings.ToLower(p.Image.URL), "data:") {
+				return nil, fmt.Errorf("gemini provider: malformed image data URI %q", p.Image.URL)
 			} else {
 				out = append(out, geminiChatPart{FileData: &geminiFileData{FileURI: p.Image.URL}})
 			}
 		}
 	}
 	if len(out) == 0 {
-		out = append(out, geminiChatPart{Text: ""})
+		return nil, nil
 	}
-	return out
+	return out, nil
 }
 
-// parseDataURI splits `data:<mime>;base64,<payload>`.
+// parseDataURI splits `data:<mime>;base64,<payload>` — both halves must be
+// non-empty (a malformed URI is reported to the caller, not smuggled through).
 func parseDataURI(raw string) (mime, b64 string, ok bool) {
 	const prefix = "data:"
 	if !strings.HasPrefix(raw, prefix) {
@@ -467,10 +576,15 @@ func parseDataURI(raw string) (mime, b64 string, ok bool) {
 	}
 	rest := raw[len(prefix):]
 	sep := strings.Index(rest, ";base64,")
-	if sep < 0 {
+	if sep <= 0 {
 		return "", "", false
 	}
-	return rest[:sep], rest[sep+len(";base64,"):], true
+	mime = rest[:sep]
+	b64 = rest[sep+len(";base64,"):]
+	if mime == "" || b64 == "" {
+		return "", "", false
+	}
+	return mime, b64, true
 }
 
 // geminiNativeBaseURL normalizes the configured base: the v1 dual-URL trap
@@ -494,12 +608,17 @@ func (a *GeminiAdapter) ParseChatResponse(_ int, _ http.Header, body []byte) (*i
 	}
 	// doc §PromptFeedback: no candidates at all means the prompt was blocked.
 	if resp.PromptFeedback != nil && resp.PromptFeedback.BlockReason != "" && len(resp.Candidates) == 0 {
-		return nil, invoke.ClassifyError(fmt.Errorf("gemini: prompt blocked (%s)", resp.PromptFeedback.BlockReason))
+		return nil, invoke.ClassifyError(
+			fmt.Errorf("gemini provider: prompt blocked (%s)", resp.PromptFeedback.BlockReason))
+	}
+	if len(resp.Candidates) == 0 {
+		// Blocked prompts carry promptFeedback; an empty body WITHOUT it is a
+		// degenerate response — error rather than a silently empty answer
+		// (openai-family parity: "no response from API").
+		return nil, invoke.ClassifyError(
+			fmt.Errorf("gemini provider: no response from API"))
 	}
 	out := &invoke.ChatResponse{}
-	if len(resp.Candidates) == 0 {
-		return out, nil
-	}
 	cand := resp.Candidates[0]
 	var thinking strings.Builder
 	if cand.Content != nil {
@@ -542,7 +661,11 @@ func (a *GeminiAdapter) ParseChatResponse(_ int, _ http.Header, body []byte) (*i
 
 // geminiFinishReason folds the vendor enum onto the platform vocabulary the
 // openai family emits (stop/length/content_filter/tool_calls); presence of
-// tool calls outranks the stop reason (openai convention).
+// tool calls outranks the stop reason (openai convention). The platform has
+// no "aborted" finish reason, so abnormal terminations (MALFORMED_FUNCTION_
+// CALL, TOO_MANY_TOOL_CALLS, MISSING_THOUGHT_SIGNATURE, ...) degrade to stop
+// — the raw enum is NOT preserved anywhere; when a downstream consumer ever
+// needs to distinguish them, the mapping (not the wire) must grow first.
 func geminiFinishReason(reason string, hasToolCalls bool) string {
 	if hasToolCalls {
 		return "tool_calls"
@@ -550,14 +673,15 @@ func geminiFinishReason(reason string, hasToolCalls bool) string {
 	switch reason {
 	case "MAX_TOKENS":
 		return "length"
-	case "SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY":
+	case "SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII",
+		"IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "ESCALATION":
+		// ESCALATION: "Request was filtered by an escalation rule" (doc) —
+		// a filter outcome like its siblings.
 		return "content_filter"
-	case "STOP", "":
-		return "stop"
 	default:
-		// RECITATION/LANGUAGE/OTHER/MALFORMED_FUNCTION_CALL/... — the
-		// generation is over either way; "stop" keeps downstream handling
-		// uniform while the raw enum stays visible in llm_debug output.
+		// STOP (natural end), RECITATION/LANGUAGE (flagged but benign to the
+		// caller), and the rare tool-protocol failures — all close the
+		// generation; "stop" keeps downstream handling uniform.
 		return "stop"
 	}
 }

@@ -437,8 +437,6 @@ func parseVolcengineEmbedding(_ int, _ http.Header, body []byte) (*invoke.Embedd
 // --- gemini: native batchEmbedContents (the v1 embedder was already native;
 // ported in P2, not deferred to the P5 generateContent work). ---
 
-const geminiEmbeddingBaseURL = "https://generativelanguage.googleapis.com/v1beta"
-
 type geminiBatchEmbedRequest struct {
 	Requests []geminiEmbedRequest `json:"requests"`
 }
@@ -468,10 +466,14 @@ func buildGeminiEmbedding(ep invoke.Endpoint, model string, opts *invoke.Embeddi
 	if model == "" {
 		return nil, fmt.Errorf("model name is required")
 	}
+	apiKey := strings.TrimSpace(ep.Credentials.APIKey)
+	if apiKey == "" {
+		return nil, fmt.Errorf("gemini provider: API key is required")
+	}
 	model = strings.TrimPrefix(model, "models/")
 	base := ep.BaseURL
 	if base == "" {
-		base = geminiEmbeddingBaseURL
+		base = invoke.GeminiBaseURL
 	}
 	base = strings.TrimRight(base, "/")
 	base = strings.TrimSuffix(base, "/openai")
@@ -495,7 +497,7 @@ func buildGeminiEmbedding(ep invoke.Endpoint, model string, opts *invoke.Embeddi
 	}
 	header := http.Header{}
 	header.Set("Content-Type", "application/json")
-	header.Set("X-Goog-Api-Key", ep.Credentials.APIKey)
+	header.Set("X-Goog-Api-Key", apiKey)
 	return &invoke.Request{
 		Method:  http.MethodPost,
 		URL:     fmt.Sprintf("%s/models/%s:batchEmbedContents", base, model),
@@ -563,8 +565,7 @@ func (a *openaiEmbeddingAdapter) embedBuildParse() (
 		return buildAliyunEmbedding, parseAliyunEmbedding
 	case invoke.ProviderVolcengine:
 		return buildVolcengineEmbedding, parseVolcengineEmbedding
-	case invoke.ProviderGemini:
-		return buildGeminiEmbedding, parseGeminiEmbedding
+	// gemini left this dispatch in P5-1: GeminiAdapter owns the native pair.
 	default:
 		spec := a.espec
 		return func(ep invoke.Endpoint, model string, opts *invoke.EmbeddingOptions) (*invoke.Request, error) {

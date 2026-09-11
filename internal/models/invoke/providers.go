@@ -117,8 +117,7 @@ const (
 
 	DeepSeekBaseURL = "https://api.deepseek.com/v1"
 
-	GeminiBaseURL             = "https://generativelanguage.googleapis.com/v1beta"
-	GeminiOpenAICompatBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
+	GeminiBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 
 	HunyuanBaseURL = "https://api.hunyuan.cloud.tencent.com/v1"
 

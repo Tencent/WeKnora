@@ -416,7 +416,10 @@ type ASRSegment struct {
 	Text  string
 }
 
-// ListOptions parameterizes remote model listing.
+// ListOptions parameterizes remote model listing (invoke.List, design
+// §5.10). BaseURL is SSRF-gated by the entry; Credentials carries the API
+// key (app-level credentials stay unused today — native adapters that need
+// them read Credentials.AppID/AppSecret).
 type ListOptions struct {
 	BaseURL     string
 	Credentials Credentials

@@ -5,12 +5,19 @@
 // vendor stream has no [DONE] sentinel — the frame bearing finishReason IS
 // the terminator, so the bridge emits its Done event right there (the entry
 // loop ends at EOF without calling the bridge again).
+//
+// Known limitation (裁定 #27): the entry's interrupted-stream path reads only
+// the openai tool assembler, so a MID-STREAM break loses the gemini tool
+// calls received so far (the terminator-frame path delivers them via
+// Done.ToolCalls). Fixing it needs an adapter-neutral partial-calls channel
+// in the entry — deliberately not done this round.
 
 package adapters
 
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 )
@@ -118,48 +125,71 @@ func (a *GeminiAdapter) TranslateStreamEvent(
 	if terminates {
 		state.Set("geminiFinish", cand.FinishReason)
 	}
+	// One frame may carry MULTIPLE parts (parallel function calls, text +
+	// call mix). The event contract allows ONE event per frame, so this is
+	// the openai-bridge fold (stream.go): EVERY part is absorbed first —
+	// calls into the accumulator (Done.ToolCalls delivers them all), texts
+	// concatenated — and only the first eligible fragment emits the frame's
+	// immediate event. Nothing is dropped.
+	var (
+		immediateKind string // "" | "call" | "thought" | "text" — FIRST fragment wins the slot
+		firstCall     geminiIdentifiedCall
+		frameText     strings.Builder
+		frameThought  strings.Builder
+	)
 	if cand.Content != nil {
 		for _, part := range cand.Content.Parts {
 			switch {
 			case part.FunctionCall != nil:
 				call := acc.addCall(part.FunctionCall)
-				if terminates {
-					continue // rides Done.ToolCalls in full
+				if immediateKind == "" && !terminates {
+					immediateKind, firstCall = "call", call
 				}
-				// Whole-call fragment: one delta carries name + full args.
-				return &invoke.StreamEvent{
-					Kind: invoke.StreamKindToolCall,
-					ToolCallDelta: &invoke.ToolCallDelta{
-						Index: call.index, ID: call.id, Type: "function",
-						Name: call.name, Arguments: call.args,
-					},
-				}, nil
 			case part.Thought:
-				if part.Text == "" {
-					continue
+				frameThought.WriteString(part.Text)
+				if immediateKind == "" && !terminates {
+					immediateKind = "thought"
 				}
-				if terminates {
-					continue // thought summaries after the answer are dropped
+			default:
+				frameText.WriteString(part.Text)
+				if immediateKind == "" && !terminates {
+					immediateKind = "text"
 				}
-				return &invoke.StreamEvent{
-					Kind:  invoke.StreamKindThinking,
-					Delta: &invoke.ContentDelta{Text: part.Text},
-				}, nil
-			case part.Text != "":
-				if terminates {
-					finalText += part.Text
-					continue
-				}
-				return &invoke.StreamEvent{
-					Kind:  invoke.StreamKindAnswer,
-					Delta: &invoke.ContentDelta{Text: part.Text},
-				}, nil
 			}
 		}
 	}
 
 	if terminates {
-		return geminiFinalEvent(acc, state, finalText), nil
+		// The finishReason frame terminates the vendor stream — fold its own
+		// text into Done.Delta (mapStreamEvent emits it before the Done
+		// chunk) and close with the accumulated usage and tool calls.
+		return geminiFinalEvent(acc, state, finalText+frameText.String()), nil
+	}
+	switch immediateKind {
+	case "call":
+		return &invoke.StreamEvent{
+			Kind: invoke.StreamKindToolCall,
+			ToolCallDelta: &invoke.ToolCallDelta{
+				Index: firstCall.index, ID: firstCall.id, Type: "function",
+				Name: firstCall.name, Arguments: firstCall.args,
+			},
+		}, nil
+	case "thought":
+		return &invoke.StreamEvent{
+			Kind:  invoke.StreamKindThinking,
+			Delta: &invoke.ContentDelta{Text: frameThought.String()},
+		}, nil
+	case "text":
+		return &invoke.StreamEvent{
+			Kind:  invoke.StreamKindAnswer,
+			Delta: &invoke.ContentDelta{Text: frameText.String()},
+		}, nil
+	}
+	if s := frameThought.String(); s != "" {
+		return &invoke.StreamEvent{
+			Kind:  invoke.StreamKindThinking,
+			Delta: &invoke.ContentDelta{Text: s},
+		}, nil
 	}
 	return nil, nil
 }

@@ -148,32 +148,56 @@ func TestGeminiImageParts(t *testing.T) {
 	assert.Equal(t, "https://example.com/pic.png", file["fileUri"])
 }
 
-func TestGeminiThinkingMapping(t *testing.T) {
+// TestGeminiThinkingByFamily pins the R1 fix: three model families, three
+// incompatible mechanisms — the same user decision must produce the wire
+// shape each family actually accepts (budget:0 on 2.5-pro / budget on 3.x
+// were the 400s the first cut shipped).
+func TestGeminiThinkingByFamily(t *testing.T) {
 	on := true
 	off := false
+	type want struct {
+		thinkingConfig map[string]any
+		absent         bool // no generationConfig at all
+	}
 	cases := []struct {
-		name string
-		thnk *bool
-		lvl  string
-		want map[string]any // expected generationConfig.thinkingConfig
+		name  string
+		model string
+		thnk  *bool
+		lvl   string
+		want  want
 	}{
-		{"nil sends nothing", nil, "", nil},
+		// gemini-3 family: thinkingLevel enum; "off" lands on the LOW floor.
 		{
-			"off sends budget zero", &off, "",
-			map[string]any{"thinkingBudget": float64(0)},
+			"3-pro on high", "gemini-3-pro", &on, "high",
+			want{thinkingConfig: map[string]any{"thinkingLevel": "HIGH", "includeThoughts": true}},
 		},
 		{
-			"low maps enum", &on, "low",
-			map[string]any{"thinkingLevel": "LOW"},
+			"3-pro off floors at LOW", "gemini-3-pro", &off, "",
+			want{thinkingConfig: map[string]any{"thinkingLevel": "LOW"}},
 		},
 		{
-			"high maps enum", &on, "high",
-			map[string]any{"thinkingLevel": "HIGH"},
+			"3-flash on low", "gemini-3-flash", &on, "low",
+			want{thinkingConfig: map[string]any{"thinkingLevel": "LOW", "includeThoughts": true}},
+		},
+		// 2.5-flash family: budget mechanism; 0 is the documented off switch.
+		{
+			"2.5-flash off sends budget zero", "gemini-2.5-flash", &off, "",
+			want{thinkingConfig: map[string]any{"thinkingBudget": float64(0)}},
 		},
 		{
-			"xhigh falls back to MEDIUM (outside gemini caps)", &on, "xhigh",
-			map[string]any{"thinkingLevel": "MEDIUM"},
+			"2.5-flash low budget", "gemini-2.5-flash", &on, "low",
+			want{thinkingConfig: map[string]any{"thinkingBudget": float64(1024), "includeThoughts": true}},
 		},
+		{
+			"2.5-flash high budget", "gemini-2.5-flash", &on, "high",
+			want{thinkingConfig: map[string]any{"thinkingBudget": float64(24576), "includeThoughts": true}},
+		},
+		// 2.5-pro: cannot be disabled, no level mechanism — never send anything.
+		{"2.5-pro off sends nothing", "gemini-2.5-pro", &off, "", want{absent: true}},
+		{"2.5-pro on sends nothing (default on)", "gemini-2.5-pro", &on, "high", want{absent: true}},
+		// Unknown family: safe default, never a 400.
+		{"unknown model sends nothing", "gemini-2.0-flash", &off, "", want{absent: true}},
+		{"nil thinking sends nothing", "gemini-3-pro", nil, "", want{absent: true}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -182,18 +206,34 @@ func TestGeminiThinkingMapping(t *testing.T) {
 				Thinking: tc.thnk, ThinkingLevel: tc.lvl,
 				Messages: []invoke.Message{invoke.TextMessage(invoke.RoleUser, "hi")},
 			}
-			req, err := a.BuildChatRequest(geminiTestEndpoint(), "gemini-2.5-flash", opts)
+			req, err := a.BuildChatRequest(geminiTestEndpoint(), tc.model, opts)
 			require.NoError(t, err)
 			body := decodeGeminiBody(t, req)
 			gc, ok := body["generationConfig"].(map[string]any)
-			if tc.want == nil {
+			if tc.want.absent {
 				assert.False(t, ok, "no generationConfig expected")
 				return
 			}
 			require.True(t, ok)
-			assert.Equal(t, tc.want, gc["thinkingConfig"])
+			assert.Equal(t, tc.want.thinkingConfig, gc["thinkingConfig"])
 		})
 	}
+}
+
+// P1-2: structured output maps onto the native schema channel (no prompt-side
+// hint like the compat layer needed).
+func TestGeminiFormatMapping(t *testing.T) {
+	a := &GeminiAdapter{}
+	opts := &invoke.ChatOptions{
+		Messages: []invoke.Message{invoke.TextMessage(invoke.RoleUser, "hi")},
+		Format:   json.RawMessage(`{"type":"object","properties":{"x":{"type":"number"}}}`),
+	}
+	req, err := a.BuildChatRequest(geminiTestEndpoint(), "gemini-2.5-flash", opts)
+	require.NoError(t, err)
+	gc := decodeGeminiBody(t, req)["generationConfig"].(map[string]any)
+	assert.Equal(t, "application/json", gc["responseMimeType"])
+	assert.JSONEq(t, `{"type":"object","properties":{"x":{"type":"number"}}}`,
+		stringify(t, gc["responseJsonSchema"]))
 }
 
 func TestGeminiParseChatResponse(t *testing.T) {
@@ -319,4 +359,45 @@ func TestGeminiChatStreamEndToEnd(t *testing.T) {
 	assert.Equal(t, 4, usage.prompt)
 	assert.Equal(t, 2, usage.completion)
 	assert.Equal(t, 6, usage.total)
+}
+
+// P1-1: a non-terminating frame with MULTIPLE parts folds everything — the
+// call enters the accumulator (Done.ToolCalls), the texts concatenate into
+// one delta (openai-bridge fold semantics; nothing dropped).
+func TestGeminiStreamMultiPartFrame(t *testing.T) {
+	a := &GeminiAdapter{}
+	state := invoke.NewStreamBridgeState()
+	frame := `{"candidates":[{"content":{"parts":[
+		{"text":"a"},{"functionCall":{"name":"f1","args":{}}},
+		{"text":"b"},{"functionCall":{"name":"f2","args":{}}}]}}]}`
+	ev, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(frame)})
+	require.NoError(t, err)
+	require.NotNil(t, ev)
+	assert.Equal(t, invoke.StreamKindAnswer, ev.Kind, "text wins the frame's single event slot")
+	assert.Equal(t, "ab", ev.Delta.Text)
+
+	// terminator frame: both accumulated calls ride Done.ToolCalls
+	term := `{"candidates":[{"content":{"parts":[{"text":"c"}]},"finishReason":"STOP"}]}`
+	ev, err = a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(term)})
+	require.NoError(t, err)
+	require.NotNil(t, ev.Done)
+	assert.Equal(t, "c", ev.Delta.Text, "terminator text rides Done.Delta")
+	assert.Equal(t, "tool_calls", ev.Done.FinishReason)
+	require.Len(t, ev.Done.ToolCalls, 2)
+	assert.Equal(t, "f1", ev.Done.ToolCalls[0].Function.Name)
+	assert.Equal(t, "f2", ev.Done.ToolCalls[1].Function.Name)
+}
+
+// A non-terminating call-only frame still streams the whole-call delta live.
+func TestGeminiStreamCallOnlyFrame(t *testing.T) {
+	a := &GeminiAdapter{}
+	state := invoke.NewStreamBridgeState()
+	frame := `{"candidates":[{"content":{"parts":[
+		{"functionCall":{"name":"f","args":{"x":1}}},
+		{"functionCall":{"name":"g","args":{"y":2}}}]}}]}`
+	ev, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(frame)})
+	require.NoError(t, err)
+	require.NotNil(t, ev.ToolCallDelta, "first call takes the frame's event slot")
+	assert.Equal(t, "f", ev.ToolCallDelta.Name)
+	assert.Equal(t, 0, ev.ToolCallDelta.Index)
 }

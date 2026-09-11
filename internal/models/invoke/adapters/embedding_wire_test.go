@@ -19,7 +19,7 @@ import (
 
 // gemini key header rides x-goog-api-key (unit-gated; golden allowlist drops it).
 func TestGeminiEmbeddingAuthHeader(t *testing.T) {
-	a := &openaiEmbeddingAdapter{openaiAdapter: openaiAdapter{name: "gemini"}}
+	a := &GeminiAdapter{}
 	req, err := a.BuildEmbeddingRequest(invoke.Endpoint{
 		BaseURL:     "https://generativelanguage.googleapis.com/v1beta",
 		Credentials: invoke.Credentials{APIKey: "g-key"},
@@ -33,9 +33,10 @@ func TestGeminiEmbeddingAuthHeader(t *testing.T) {
 // gemini baseURL normalization: trailing /openai suffix and trailing slash
 // are stripped (v1 constructor behavior — users paste the OpenAI-compat URL).
 func TestGeminiEmbeddingBaseURLStrip(t *testing.T) {
-	a := &openaiEmbeddingAdapter{openaiAdapter: openaiAdapter{name: "gemini"}}
+	a := &GeminiAdapter{}
 	req, err := a.BuildEmbeddingRequest(invoke.Endpoint{
-		BaseURL: "https://example.proxy/v1beta/openai/",
+		BaseURL:     "https://example.proxy/v1beta/openai/",
+		Credentials: invoke.Credentials{APIKey: "g-key"},
 	}, "gemini-embedding-001", &invoke.EmbeddingOptions{Inputs: []string{"x"}})
 	require.NoError(t, err)
 	require.Equal(t, "https://example.proxy/v1beta/models/gemini-embedding-001:batchEmbedContents", req.URL)

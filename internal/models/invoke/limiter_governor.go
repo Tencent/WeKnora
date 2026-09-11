@@ -9,7 +9,7 @@ import (
 )
 
 // The concurrency governor is process-wide, shared by every model-client layer
-// that fronts a provider (chat, vlm). Keeping the singleton in the invoke
+// that fronts a provider (chat incl. the VLM facet). Keeping the singleton in the invoke
 // package lets all of them gate against the same limiter and per-model limit
 // without importing each other. Wired once at startup (see
 // container.registerModelConcurrencyLimiter) via SetGovernor.
