@@ -650,6 +650,34 @@ func (s *Service) FamiliarKnowledgeIDs(ctx context.Context) []string {
 	return ids
 }
 
+// LearningDocuments returns the caller's document-use evidence without the
+// familiar-doc threshold used by the memory manager list. A single observed
+// use is meaningful for an "exploring" Wiki node even though it is not yet a
+// stable retrieval preference.
+func (s *Service) LearningDocuments(ctx context.Context, limit int) ([]*types.MemoryDocView, error) {
+	scope, err := ResolveScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// The export handler asks for one row past its 20k safety ceiling so it can
+	// truthfully mark a clipped learning profile. Interactive graph callers use
+	// much smaller limits.
+	if limit <= 0 || limit > 20001 {
+		limit = 2000
+	}
+	rows, err := s.repo.TopDocAffinity(ctx, scope, limit)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]*types.MemoryDocView, 0, len(rows))
+	for _, row := range rows {
+		if view := types.MemoryDocViewFromAffinity(row); view != nil {
+			views = append(views, view)
+		}
+	}
+	return views, nil
+}
+
 func (s *Service) topicWasForgotten(
 	ctx context.Context, scope interfaces.MemoryScope, labels ...string,
 ) bool {

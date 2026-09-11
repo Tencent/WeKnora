@@ -286,6 +286,11 @@ type MemoryService interface {
 	// source documents this person actually works from. Empty on any failure
 	// so callers can use it unconditionally.
 	FamiliarKnowledgeIDs(ctx context.Context) []string
+	// LearningDocuments returns every document-use signal for the caller,
+	// including one-off uses that have not crossed the "familiar" threshold.
+	// The Wiki learning overlay uses these objective counters as evidence; it
+	// never asks an LLM to invent a mastery score.
+	LearningDocuments(ctx context.Context, limit int) ([]*types.MemoryDocView, error)
 	// CreateItem adds a memory typed by the user in the memory manager.
 	CreateItem(ctx context.Context, kind, content string, importance int) (*types.MemoryItem, error)
 	// ConfirmItem accepts a memory the system inferred, so it starts being used.
