@@ -17,12 +17,14 @@ let server: ViteDevServer
 let Quiz: Component
 let Panel: Component
 let Renderer: Component
+let Legend: Component
+let Recommendations: Component
 before(async () => {
   server = await createServer({
     configFile: false, optimizeDeps: { noDiscovery: true, entries: [] },
     plugins: [{ name: 'learning-component-isolation', enforce: 'pre', load(id) {
       if (id.endsWith('/LearningResult.vue')) return '<script setup>defineProps(["data"])</script><template><div class="fresh-learning-ref" :data-quiz="data.quiz_id" :data-kb="data.knowledge_base_id" /></template>'
-      if (id.endsWith('.vue') && !['ToolResultRenderer.vue', 'LearningPanel.vue', 'LearningQuiz.vue', 'LearningFeedback.vue', 'LearningStateBadge.vue', 'LearningRecommendations.vue'].some(name => id.endsWith(`/${name}`))) return '<template><div /></template>'
+      if (id.endsWith('.vue') && !['ToolResultRenderer.vue', 'LearningPanel.vue', 'LearningQuiz.vue', 'LearningFeedback.vue', 'LearningStateBadge.vue', 'LearningRecommendations.vue', 'LearningLegend.vue'].some(name => id.endsWith(`/${name}`))) return '<template><div /></template>'
     } }, vue()],
     resolve: { alias: { '@': fileURLToPath(new URL('../../../', import.meta.url)) } },
     server: { middlewareMode: true, hmr: false }, appType: 'custom',
@@ -30,6 +32,8 @@ before(async () => {
   Quiz = (await server.ssrLoadModule('/src/views/knowledge/wiki/LearningQuiz.vue')).default
   Panel = (await server.ssrLoadModule('/src/views/knowledge/wiki/LearningPanel.vue')).default
   Renderer = (await server.ssrLoadModule('/src/views/chat/components/ToolResultRenderer.vue')).default
+  Legend = (await server.ssrLoadModule('/src/views/knowledge/wiki/LearningLegend.vue')).default
+  Recommendations = (await server.ssrLoadModule('/src/views/knowledge/wiki/LearningRecommendations.vue')).default
 })
 after(async () => { await server?.close() })
 const mastery = { state: 'learning', p_mastery: 0.6, attempts: 1, correct: 1, consecutive_correct: 1, source_stale: false }
@@ -110,6 +114,33 @@ test('privacy controls render when disabled and every learning locale resolves',
     const output = await render(Panel, { controller: controller(), scopeKey: 'scope', page: { title: 'Topic' } }, locale)
     assert.doesNotMatch(output, /learning\.(title|submit|privacy|overview)/)
   }
+})
+
+test('an Agent panel keeps the resume control after cancelling its initial quiz read', async () => {
+  const html = await render(Panel, {
+    controller: controller({ quiz: null, quizLoading: false, paused: true }),
+    scopeKey: 'tenant:user:kb',
+    compact: true,
+  })
+  assert.match(html, /Status checks paused/)
+  assert.match(html, /Check again/)
+})
+
+test('graph legend distinguishes all four mastery states and recommendations explain familiarity separately', async () => {
+  const legend = await render(Legend, {})
+  for (const label of ['Unassessed', 'Learning', 'Mastered', 'Review due']) assert.ok(legend.includes(label), label)
+  for (const color of ['#8c8c8c', '#0052d9', '#2ba471', '#e37318']) assert.ok(legend.includes(color), color)
+  const html = await render(Recommendations, { items: [{
+    page_id: 'page', slug: 'concept/page', title: '<script>Topic</script>', familiar: true,
+    mastery: { ...mastery, source_stale: true }, reason_codes: ['graph_frontier', '<unknown>'],
+  }] })
+  assert.match(html, /&lt;script&gt;Topic&lt;\/script&gt;/)
+  assert.match(html, /Related topic/)
+  assert.match(html, /&lt;unknown&gt;/)
+  assert.match(html, /Reading and source use indicate familiarity, not mastery/)
+  assert.match(html, /Model estimate: 60% \(uncalibrated\)/)
+  assert.match(html, /Sources changed/)
+  assert.doesNotMatch(html, /<script>|<unknown>/)
 })
 
 test('live and persisted tool results render fresh HTTP reference cards, not raw payloads', async () => {

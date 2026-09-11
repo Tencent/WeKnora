@@ -11,6 +11,8 @@
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
     "test": "tsx --test",
+    "test:e2e:config": "node --test e2e/guided-learning-config.test.mjs",
+    "test:e2e:guided-learning": "node --test e2e/guided-learning.spec.mjs",
     "check-i18n": "tsx --test src/i18n/localeKeyAudit.test.ts",
     "scan-i18n-gaps": "tsx src/i18n/localeGapScan.ts",
     "regenerate-i18n-locales": "tsx src/i18n/regeneratePrunedLocales.ts"
@@ -53,6 +55,7 @@
     "less": "^4.6.4",
     "less-loader": "^12.3.2",
     "npm-run-all2": "^8.0.4",
+    "playwright": "1.63.0",
     "tsx": "^4.23.1",
     "typescript": "~6.0.3",
     "vite": "^7.3.5",

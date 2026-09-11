@@ -205,6 +205,58 @@ make lint            # go vet
 - `tests/miniprogram/miniprogram.test.js` — 小程序客户端的集成测试（Node 测试脚本），是 `tests/` 目前唯一内容；
 - 前端：`cd frontend && npm run type-check`（vue-tsc）与 `npm test`（`tsx --test`，Node test runner）。
 
+### 引导式学习集成测试
+
+`scripts/seed-guided-learning.py` 通过公开 API 创建两组一次性用户、独立租户、知识库和模型配置，发布六份合成来源文档，再建立六个带来源分块引用的 Wiki 页面。脚本不依赖已有 `.runtime` 文件或其他工作区。
+
+使用 Python 3.10+ 和 Linux/macOS。按上方开发模式启动专用测试实例，开启注册并设置 `WEKNORA_AUTH_DEFAULT_TENANT_MODE=create_personal`、`WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS=false`。数据库迁移必须完成，异步任务处理正常。前端的 `VITE_DEV_PROXY_TARGET` 必须指向同一后端。请勿连接生产实例。
+
+以下命令在仓库根目录执行，服务端口按实际配置填写；脚本仅接受 HTTP loopback 地址：
+
+```bash
+export GL_RUNTIME_DIR=.runtime/guided-learning
+export GL_API_BASE=http://127.0.0.1:8080
+export GL_FRONTEND_BASE=http://127.0.0.1:5173
+
+# 通过当前进程环境提供 MODEL_NAME、MODEL_BASE_URL、MODEL_API_KEY。
+# 模型需支持 OpenAI 兼容的对话与 Tool Calling 接口，base URL 使用 HTTPS。
+# 或传 --model-env /path/to/model.env，文件须归当前用户所有且权限为 0600。
+python3 -B scripts/seed-guided-learning.py seed --consent-create-fixtures
+python3 -B scripts/seed-guided-learning.py opt-in --user learner_a
+python3 -B scripts/seed-guided-learning.py configure-agent --user learner_a
+python3 -B scripts/test-guided-learning-api.py inspect
+```
+
+seed 会触发实际文档解析、摘要和 Wiki 生成，消耗模型额度。只有来源达到 `completed`，且分块内容非空、`index_status=ready`、`is_enabled=true`，才生成清单。学习开关不会随 seed 开启；`opt-in` 单独授权指定账号。`opt-in`、`configure-agent` 和 `reparse` 均须显式指定 `--user learner_a|learner_b|all`，不读取模型密钥，也不创建账号；`configure-agent` 只绑定已有模型与知识库，不修改学习开关。
+
+`GL_RUNTIME_DIR` 只能位于当前仓库的 `.runtime/` 内。账号文件 `seed-accounts.json` 使用随机密码、权限 `0600`，绑定 API 地址和真实用户/租户 ID；`evidence/seed.json` 保存不含凭证的文档、页面与分块清单。运行结果写入同目录的 `evidence/`，这些文件全部被 Git 忽略。API/E2E 验收从清单取得模型 ID，不需要保留模型密钥。
+
+```bash
+# 离线夹具回归，不连接服务、不读取真实凭证
+python3 -B -m unittest discover -s scripts -p 'test_guided_learning_fixtures.py' -v
+
+# API：实际生成题目、判分、Agent 工具调用，以及 learner_b 隐私清理
+python3 -B scripts/test-guided-learning-api.py run --consent-learner-b
+
+# 浏览器依赖安装在本仓库，首次需安装 Chromium
+npm --prefix frontend ci
+npm --prefix frontend exec -- playwright install chromium
+npm --prefix frontend run test:e2e:config
+npm --prefix frontend run test:e2e:guided-learning
+```
+
+API 验收会清空 `learner_b` 的学习记录，不清除 `learner_a`。浏览器默认检查导航、图谱、来源、导出和隔离；`GL_RUN_QUIZ=1` 开启真实测验，`GL_ALLOW_LEARNER_B_CLEAR=1` 开启清空验证，`GL_RUN_MOCK_ERRORS=1` 开启单独标记的模拟错误用例。不要并行运行 seed、API 验收和浏览器验收。
+
+重复执行 seed 会复用已有账号、知识库和文档。若初始化中断，保留账号文件后重跑；解析失败时执行以下命令，再运行 seed。`reparse` 仅重提失败的来源，已运行的任务只等待，已完成的来源仍检查有效分块。等待上限通过 `--timeout` 设置，默认每份文档 900 秒，范围 1-3600 秒。
+
+```bash
+python3 -B scripts/seed-guided-learning.py reparse --user all
+# 仅在确认可以覆盖页面编辑、丢弃失效引用页面的历史后执行
+python3 -B scripts/seed-guided-learning.py seed --consent-create-fixtures --refresh-pages
+```
+
+引用变化时，`--refresh-pages` 会删除并重建对应页面；只有正文等可编辑字段变化时，使用带版本号的更新。未授权时两种变化均会拒绝覆盖。更换测试服务时使用新的 `GL_RUNTIME_DIR`，不要删除账号文件后重建同一组夹具。生成题目未通过校验时测试会失败，不会用模拟答案替代真实结果。
+
 ## 代码规范与提交流程 {#_5-代码规范与提交流程}
 
 ### Go 代码规范 {#_5-1-go-代码规范}

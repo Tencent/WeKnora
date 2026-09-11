@@ -34,7 +34,7 @@
         </div>
         <LearningRecommendations :items="state.recommendations" @open-page="$emit('open-page', $event)" />
       </div>
-      <div v-if="page || state.quiz || state.quizLoading || state.quizError" class="learning-practice">
+      <div v-if="page || state.quiz || state.quizLoading || state.quizError || state.paused || state.previousQuiz" class="learning-practice">
         <div v-if="state.node" class="page-state">
           <LearningStateBadge :state="state.node.mastery.state" :mastery="state.node.mastery" />
           <LearningStateBadge v-if="state.node.familiar" familiar />

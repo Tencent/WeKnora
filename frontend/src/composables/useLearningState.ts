@@ -3,6 +3,9 @@ import type { LearningApi, LearningSettings, LearningOverview, LearningNodeView,
 import { createLearningRequests, learningScopeKey, learningPrincipalKey, learningError, publicLearningQuiz, learningQuizPointers, learningChanges, POLL_LIMIT, pollDelay, waitForPoll, type LearningScope } from './learningHelpers'
 import { learningAttemptId } from './learningHelpers'
 
+// Privacy mutations outlive individual cards and affect every KB for a principal.
+const privacyMutations = new Set<string>()
+
 export type LearningContext = { scope: LearningScope; pageId?: string; quizId?: string; slugs?: string[] }
 export function useLearningState(context: () => LearningContext, api: LearningApi, options: {
   pointers?: ReturnType<typeof learningQuizPointers>
@@ -12,6 +15,7 @@ export function useLearningState(context: () => LearningContext, api: LearningAp
   const pointers = options.pointers || learningQuizPointers()
   const requests = createLearningRequests()
   const origin = Symbol('learning')
+  let disposed = false
   const state = reactive({
     epoch: 0,
     settings: null as LearningSettings | null,
@@ -41,7 +45,8 @@ export function useLearningState(context: () => LearningContext, api: LearningAp
     state.epoch++
     requests.reset(); resetPage()
     state.settings = null; state.overview = null; state.recommendations = []; state.overlay = []
-    state.loading = false; state.busy = false; state.exporting = false; state.error = ''; state.overlayError = ''; state.clearResult = null
+    state.loading = false; state.busy = privacyMutations.has(learningPrincipalKey(context().scope))
+    state.exporting = false; state.error = ''; state.overlayError = ''; state.clearResult = null
   }
   function failure(error: unknown): string {
     const code = learningError(error)
@@ -213,6 +218,7 @@ export function useLearningState(context: () => LearningContext, api: LearningAp
     const scope = { ...context().scope }
     const principal = learningPrincipalKey(scope)
     const kbId = action === 'clearKB' ? scope.kbId : undefined
+    privacyMutations.add(principal)
     reset(); state.busy = true
     pointers.clear(scope, action !== 'clearKB')
     // Every privacy mutation advances the server's profile-wide epoch.
@@ -220,7 +226,8 @@ export function useLearningState(context: () => LearningContext, api: LearningAp
     const ticket = requests.start('privacy')
     try {
       if (action === 'enable' || action === 'disable') {
-        const settings = await api.setEnabled(action === 'enable', ticket.signal)
+        // Aborting HTTP on navigation cannot cancel a committed privacy write.
+        const settings = await api.setEnabled(action === 'enable')
         if (ticket.current()) state.settings = settings
       } else {
         const result = await api.clear(kbId)
@@ -237,10 +244,15 @@ export function useLearningState(context: () => LearningContext, api: LearningAp
           if (action === 'enable' && context().quizId) void loadQuiz(context().quizId)
         }
       }
-    } catch (error) { if (ticket.current()) { state.busy = false; state.error = failure(error) } }
+    } catch (error) { if (ticket.current()) { state.error = failure(error); state.busy = false } }
     finally {
+      privacyMutations.delete(principal)
       // Other mounted cards must recover even when this card was unmounted.
       learningChanges.emit({ principal, origin, phase: 'reload' })
+      if (!disposed && state.busy && principal === learningPrincipalKey(context().scope)) {
+        state.busy = false
+        void initialize()
+      }
     }
   }
   async function exportData(all = false) {
@@ -280,7 +292,7 @@ export function useLearningState(context: () => LearningContext, api: LearningAp
     if (saved) void loadQuiz(saved)
   }, { flush: 'sync' })
   watch(() => JSON.stringify(context().slugs || []), () => { void overlay() }, { flush: 'sync' })
-  onScopeDispose(() => { unsubscribe(); reset() })
+  onScopeDispose(() => { disposed = true; unsubscribe(); reset() })
   const retryQuiz = () => loadQuiz(state.quiz?.id || context().quizId || '', !state.quiz && !context().quizId)
   return { state, initialize, refreshConsent, overview, overlay, loadNode, loadQuiz, retryQuiz, cancelQuiz, submit, privacy, exportData }
 }

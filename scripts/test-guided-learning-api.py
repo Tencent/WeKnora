@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Live acceptance for disposable .runtime learner_b. No API restart or SQL.
 
+python3 -B scripts/seed-guided-learning.py --help
 python3 -B scripts/test-guided-learning-api.py inspect
 python3 -B scripts/test-guided-learning-api.py run --consent-learner-b
 
@@ -10,14 +11,10 @@ Only ignored api-acceptance*.json evidence files are written at runtime.
 
 import argparse
 from collections import Counter
-import fcntl
 import json
 import math
 import os
 from pathlib import Path
-import re
-import shlex
-import stat
 import sys
 import time
 import urllib.error
@@ -25,9 +22,13 @@ import urllib.parse
 import urllib.request
 import uuid
 
-REPO = Path(__file__).resolve().parents[1]
+from guided_learning_fixtures import (
+    Client as FixtureClient, DEFAULT_API, REPO, SafeFailure, fixture_lock, identifier,
+    origin, prepare, private_text, require, runtime_root, strict_json, validate_state,
+)
+
 RUNTIME = REPO / ".runtime"
-API = "http://127.0.0.1:28081"
+API = DEFAULT_API
 PROMPT_VERSION = "learning-quiz-v1"
 TOOLS = {"get_learning_profile", "recommend_learning_topics", "prepare_learning_quiz",
          "wiki_search", "wiki_read_page", "wiki_read_source_doc", "thinking", "todo_write", "search_memory"}
@@ -39,128 +40,14 @@ ERROR_CODES = {"learning_forbidden", "learning_disabled", "learning_not_found",
                "invalid_evidence", "model_unavailable", "source_changed"}
 
 
-class SafeFailure(Exception):
-    """Messages must be fixed, nonsecret check names."""
-
-
-def require(condition, name):
-    if not condition:
-        raise SafeFailure(name)
-
-
-def unique_object(pairs):
-    result = {}
-    for key, value in pairs:
-        require(key not in result, "duplicate_json_key")
-        result[key] = value
-    return result
-
-
-def strict_json(raw):
-    def reject_constant(_value):
-        raise SafeFailure("nonfinite_json")
-    try:
-        return json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
-    except (ValueError, UnicodeError):
-        raise SafeFailure("invalid_json_redacted") from None
-
-
-def private_text(path):
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    with os.fdopen(fd) as stream:
-        info = os.fstat(stream.fileno())
-        require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
-                and stat.S_IMODE(info.st_mode) == 0o600, "private_file_permissions")
-        require(info.st_size <= 1024 * 1024, "private_file_size")
-        return stream.read()
-
-
-def private_model():
-    result = {}
-    for line in private_text(RUNTIME / "model.env").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        key, sep, value = line.removeprefix("export ").partition("=")
-        require(sep and re.fullmatch(r"[A-Z][A-Z0-9_]*", key)
-                and key not in result, "private_model_syntax")
-        values = shlex.split(value, comments=False)
-        require(len(values) == 1, "private_model_syntax")
-        result[key] = values[0]
-    selected = {}
-    for name, aliases in {"name": ("DEEPSEEK_MODEL", "MODEL_NAME"),
-                          "base_url": ("DEEPSEEK_BASE_URL", "MODEL_BASE_URL"),
-                          "api_key": ("DEEPSEEK_API_KEY", "MODEL_API_KEY")}.items():
-        values = [result[key] for key in aliases if result.get(key)]
-        require(values and len(set(values)) == 1, "private_model_aliases")
-        selected[name] = values[0]
-    url = urllib.parse.urlsplit(selected["base_url"])
-    require(url.scheme == "https" and url.hostname and not url.username
-            and not url.password and not url.query and not url.fragment, "private_model_origin")
-    require("deepseek" in selected["name"].lower(), "real_deepseek_required")
-    return selected
-
-
 def validate_origin(value):
-    require(value.rstrip("/").removesuffix("/api/v1") == API, "loopback_origin_only")
+    require(origin(value, api=True) == API, "seed_belongs_to_another_api")
     return API
 
 
-def identifier(value):
-    require(isinstance(value, str), "invalid_identifier")
-    try:
-        require(str(uuid.UUID(value)) == value, "invalid_identifier")
-    except ValueError:
-        raise SafeFailure("invalid_identifier") from None
-    return value
-
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
-class Client:
+class Client(FixtureClient):
     def __init__(self, token=None):
-        self.token = token
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-
-    def request(self, method, path, body=None):
-        require(path.startswith("/") and not path.startswith("//")
-                and "://" not in path and "#" not in path, "relative_api_path_only")
-        headers = {"Accept": "application/json"}
-        if self.token:
-            headers["Authorization"] = "Bearer " + self.token
-        data = None if body is None else json.dumps(body, allow_nan=False).encode()
-        if data is not None:
-            headers["Content-Type"] = "application/json"
-        return urllib.request.Request(API + "/api/v1" + path, data=data,
-                                      headers=headers, method=method)
-
-    def call(self, method, path, body=None, expected=(200,), timeout=45):
-        started = time.monotonic()
-        try:
-            response = self.opener.open(self.request(method, path, body), timeout=timeout)
-        except urllib.error.HTTPError as error:
-            response = error
-        except (urllib.error.URLError, TimeoutError, OSError):
-            raise SafeFailure("http_transport_failure_redacted") from None
-        with response:
-            status = response.code
-            raw = response.read(8 * 1024 * 1024 + 1)
-            require(len(raw) <= 8 * 1024 * 1024, "http_response_size")
-            value = strict_json(raw) if raw else {}
-            no_store = "no-store" in response.headers.get("Cache-Control", "")
-        require(status in expected, "unexpected_http_status_" + str(status))
-        if status < 300:
-            # Wiki endpoints return bare DTOs; learning endpoints require an envelope.
-            bare_wiki = path.startswith("/knowledgebase/") and "/wiki/" in path
-            require(isinstance(value, dict) and (bare_wiki or value.get("success") is True),
-                    "http_success_envelope")
-        return {"status": status, "data": value.get("data", value),
-                "error_code": value.get("error", {}).get("code")
-                if isinstance(value.get("error"), dict) else None,
-                "no_store": no_store, "seconds": round(time.monotonic() - started, 3)}
+        super().__init__(API, token)
 
 
 class Evidence:
@@ -198,11 +85,13 @@ class Evidence:
 
 def accounts():
     state = strict_json(private_text(RUNTIME / "seed-accounts.json"))
-    validate_origin(state["api_base"])
+    validate_state(state, API)
     require(set(state["users"]) == {"learner_a", "learner_b"}, "seed_user_scope")
     require(state["users"]["learner_a"]["tenant_id"] != state["users"]["learner_b"]["tenant_id"],
             "distinct_seed_tenants")
-    manifest = strict_json((RUNTIME / "evidence/seed.json").read_text())
+    manifest = strict_json(private_text(RUNTIME / "evidence/seed.json"))
+    require(not manifest.get("api_base") or origin(manifest["api_base"], api=True) == API,
+            "manifest_api_mismatch")
     clients = {}
     for label, user in state["users"].items():
         require(user["email"].endswith("@example.invalid")
@@ -212,7 +101,12 @@ def accounts():
         fixture = manifest["fixtures"][label]
         require(all(user[key] == fixture[key] for key in ("tenant_id", "knowledge_base_id", "model_id")),
                 "fresh_fixture_scope")
-        user["documents"], user["pages"] = fixture["documents"], fixture["pages"]
+        require(all(user[key] == fixture[key] for key in ("documents", "pages")), "fresh_fixture_content")
+        for doc_id in user["documents"].values():
+            identifier(doc_id)
+        for page in user["pages"].values():
+            identifier(page["page_id"])
+    for label, user in state["users"].items():
         result = Client().call("POST", "/auth/login", {
             "email": user["email"], "password": user["password"],
         })["data"]
@@ -232,7 +126,6 @@ def export_counts(value):
 
 
 def inspect(state, clients, evidence):
-    model = private_model()
     for label, client in clients.items():
         user = state["users"][label]
         settings = client.call("GET", "/learning/settings")
@@ -241,8 +134,10 @@ def inspect(state, clients, evidence):
         evidence.observed(label + "_export_counts", **export_counts(exported(client)))
         models = client.call("GET", "/models")["data"]
         registered = next((item for item in models if item["id"] == user["model_id"]), {})
-        require(evidence.check(label + "_registered_deepseek",
-                registered.get("name") == model["name"] and registered.get("source") == "remote",
+        expected_name = (state.get("model") or {}).get("name")
+        require(evidence.check(label + "_registered_remote_model",
+                bool(registered.get("name")) and registered.get("source") == "remote"
+                and (not expected_name or registered["name"] == expected_name),
                 model_id=user["model_id"]), "registered_model_mismatch")
         statuses = Counter()
         for doc_id in user["documents"].values():
@@ -636,24 +531,31 @@ def run_acceptance(args, state, clients, evidence):
 
 
 def main():
+    global RUNTIME, API
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("inspect", "run"))
-    parser.add_argument("--api-base", default=API)
+    parser.add_argument("--api-base", default=os.environ.get("GL_API_BASE"))
+    parser.add_argument("--runtime-dir", type=Path)
     parser.add_argument("--consent-learner-b", action="store_true")
     parser.add_argument("--source-timeout", type=int, default=180)
     parser.add_argument("--quiz-timeout", type=int, default=360)
     parser.add_argument("--agent-timeout", type=int, default=300)
     args = parser.parse_args()
-    validate_origin(args.api_base)
     require(args.command != "run" or args.consent_learner_b, "explicit_b_consent_required")
+    RUNTIME = runtime_root(args.runtime_dir)
+    prepare(RUNTIME)
+    state = strict_json(private_text(RUNTIME / "seed-accounts.json"))
+    API = origin(args.api_base or state["api_base"], api=True)
+    validate_state(state, API)
     require(180 <= args.quiz_timeout <= 900 and 180 <= args.agent_timeout <= 900
             and 1 <= args.source_timeout <= 900, "bounded_timeouts")
     evidence = Evidence(args.command)
     try:
-        state, clients = accounts()
-        inspect(state, clients, evidence)
-        if args.command == "run":
-            run_acceptance(args, state, clients, evidence)
+        with fixture_lock(RUNTIME):
+            state, clients = accounts()
+            inspect(state, clients, evidence)
+            if args.command == "run":
+                run_acceptance(args, state, clients, evidence)
     except Exception as error:
         name = str(error) if isinstance(error, SafeFailure) else "unexpected_exception_redacted"
         evidence.check(name, False)
@@ -663,10 +565,8 @@ def main():
 if __name__ == "__main__":
     os.umask(0o077)
     try:
-        # Lock the owned script itself; no lock file or shared runtime state is written.
-        with Path(__file__).open() as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            sys.exit(main())
-    except Exception:
-        print("Acceptance aborted; error details redacted.", file=sys.stderr)
+        sys.exit(main())
+    except Exception as error:
+        reason = str(error) if isinstance(error, SafeFailure) else "unexpected_error_redacted"
+        print("Acceptance aborted: " + reason + "; prepare fixtures with scripts/seed-guided-learning.py", file=sys.stderr)
         sys.exit(1)

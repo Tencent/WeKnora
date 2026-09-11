@@ -267,6 +267,186 @@ test('cross-panel privacy invalidation clears state immediately and blocks reads
   assert.equal(second.controller.state.busy, false)
 })
 
+test('privacy operations block newly mounted cards and KB switches until completion', async () => {
+  const mutation = deferred<{ deleted_attempts: number; deleted_mastery: number; deleted_quizzes: number }>()
+  const first = setup({ clear: () => mutation.promise })
+  const second = setup()
+  await tick()
+  const deletion = first.controller.privacy('clearKB')
+  const newcomer = setup()
+  second.context.scope.kbId = 'other'
+  first.context.scope.kbId = 'other'
+  const reads = second.calls.length
+  try {
+    await tick()
+    assert.equal(newcomer.controller.state.busy, true)
+    assert.equal(newcomer.calls.length, 0)
+    assert.equal(second.controller.state.busy, true)
+    assert.equal(second.calls.length, reads)
+    assert.equal(first.controller.state.busy, true)
+    await second.controller.exportData()
+    await second.controller.privacy('enable')
+    assert.equal(second.calls.length, reads)
+  } finally {
+    mutation.resolve({ deleted_attempts: 1, deleted_mastery: 1, deleted_quizzes: 1 })
+    await deletion
+    await tick()
+  }
+  for (const item of [first, second, newcomer]) {
+    assert.equal(item.controller.state.busy, false)
+    assert.equal(item.controller.state.settings?.enabled, true)
+    assert.equal(item.controller.state.overview?.knowledge_base_id, item.context.scope.kbId)
+  }
+})
+
+test('privacy completion recovers a revisited principal without blocking another principal', async () => {
+  const mutation = deferred<{ deleted_attempts: number; deleted_mastery: number; deleted_quizzes: number }>()
+  const first = setup({ clear: () => mutation.promise })
+  await tick()
+  const deletion = first.controller.privacy('clearAll')
+  first.context.scope.tenantId = 'other'
+  try {
+    await tick()
+    assert.equal(first.controller.state.busy, false)
+    assert.equal(first.controller.state.settings?.enabled, true)
+    first.context.scope.tenantId = 'tenant'
+    await tick()
+    assert.equal(first.controller.state.busy, true)
+    assert.equal(first.controller.state.settings, null)
+  } finally {
+    mutation.resolve({ deleted_attempts: 0, deleted_mastery: 0, deleted_quizzes: 0 })
+    await deletion
+    await tick()
+  }
+  assert.equal(first.controller.state.busy, false)
+  assert.equal((first.controller.state.settings as LearningSettings | null)?.enabled, true)
+})
+
+test('consent writes settle after navigation before releasing peer cards', async () => {
+  const mutation = deferred<LearningSettings>()
+  const first = setup({ setEnabled: () => mutation.promise })
+  const peer = setup()
+  await tick()
+  const changing = first.controller.privacy('disable')
+  assert.equal(first.calls.find(call => call.name === 'setEnabled')?.args[1], undefined)
+  first.context.scope.kbId = 'other'
+  await tick()
+  assert.equal(first.controller.state.busy, true)
+  assert.equal(peer.controller.state.busy, true)
+  first.stop()
+  assert.equal(peer.controller.state.busy, true)
+  mutation.resolve({ enabled: false, algorithm_version: 'bkt-v1' })
+  await changing; await tick()
+  assert.equal(peer.controller.state.busy, false)
+})
+
+test('privacy failures and origin unmount release other cards and discard pending personal reads', async () => {
+  for (const unmount of [false, true]) {
+    const mutation = deferred<{ deleted_attempts: number; deleted_mastery: number; deleted_quizzes: number }>()
+    const download = deferred<Record<string, unknown>>()
+    const first = setup({ clear: () => mutation.promise })
+    const second = setup({ export: () => download.promise })
+    await tick(); await second.controller.loadQuiz('', true)
+    const exporting = second.controller.exportData(true)
+    const deletion = first.controller.privacy('clearAll')
+    if (unmount) first.stop()
+    const newcomer = setup()
+    assert.equal(newcomer.controller.state.busy, true)
+    assert.equal(second.controller.state.quiz, null)
+    download.resolve({ secret: 'personal data' })
+    assert.equal(await exporting, undefined)
+    mutation.reject({ status: 429, error: { code: 'learning_busy' } })
+    await deletion; await tick()
+    for (const item of [second, newcomer]) {
+      assert.equal(item.controller.state.busy, false)
+      assert.equal(item.controller.state.settings?.enabled, true)
+    }
+    if (!unmount) {
+      assert.equal(first.controller.state.error, 'busy')
+      assert.equal(first.controller.state.busy, false)
+      await first.controller.initialize(); await tick()
+      assert.equal(first.controller.state.settings?.enabled, true)
+    }
+    first.stop(); second.stop(); newcomer.stop()
+  }
+})
+
+test('polling errors preserve the quiz reference and retry fetches it without generating another quiz', async () => {
+  let failing = true
+  const { controller, calls } = setup({
+    prepareQuiz: async () => quiz('pending'),
+    quiz: async () => {
+      if (failing) throw { status: 429, error: { code: 'learning_busy' } }
+      return quiz()
+    },
+  }, { wait: async () => {} })
+  await tick(); await controller.loadQuiz('', true)
+  assert.equal(controller.state.quizError, 'busy')
+  assert.equal(controller.state.quizLoading, false)
+  assert.equal(controller.state.quiz?.id, 'quiz')
+  assert.equal(controller.state.quiz?.questions.length, 0)
+  failing = false
+  await controller.retryQuiz()
+  assert.equal(controller.state.quizError, '')
+  assert.equal(controller.state.quiz?.status, 'ready')
+  assert.equal(calls.filter(call => call.name === 'prepareQuiz').length, 1)
+})
+
+test('cancelling an Agent quiz before its first response remains resumable', async () => {
+  const pending = deferred<LearningQuizView>()
+  let reads = 0
+  const { controller, context, calls } = setup({ quiz: () => ++reads === 1 ? pending.promise : Promise.resolve(quiz()) })
+  await tick()
+  context.pageId = undefined
+  context.quizId = 'quiz'
+  await tick()
+  controller.cancelQuiz()
+  pending.resolve(quiz())
+  await tick()
+  assert.equal(controller.state.quiz, null)
+  assert.equal(controller.state.paused, true)
+  await controller.retryQuiz()
+  assert.equal((controller.state.quiz as LearningQuizView | null)?.status, 'ready')
+  assert.equal(controller.state.paused, false)
+  assert.equal(calls.filter(call => call.name === 'prepareQuiz').length, 0)
+})
+
+test('recommendations and graph overlays keep only visible nodes in the current KB and recover after errors', async () => {
+  let failing = true
+  const recommendation = (kb = 'kb') => ({ ...node('page', kb), score: 1, reason_codes: ['review_due'],
+    components: { review_need: 1, graph_frontier: 0, interest_match: 0, content_quality: 1 } })
+  const { controller } = setup({
+    recommendations: async () => [recommendation(), recommendation('foreign')],
+    overlay: async () => {
+      if (failing) throw new Error('network')
+      return [node(), node('page', 'foreign'), node('hidden')]
+    },
+  })
+  await tick()
+  assert.deepEqual(controller.state.recommendations.map(item => item.knowledge_base_id), ['kb'])
+  assert.equal(controller.state.overlayError, 'request')
+  assert.equal(controller.state.overlay.length, 0)
+  failing = false
+  await controller.overlay()
+  assert.equal(controller.state.overlayError, '')
+  assert.deepEqual(controller.state.overlay.map(item => item.slug), ['concept/page'])
+})
+
+test('an assessment refreshes peer cards only within its tenant, user and KB', async () => {
+  const first = setup()
+  const peer = setup()
+  const foreign = setup()
+  foreign.context.scope.kbId = 'other'
+  await tick(); await first.controller.loadQuiz('', true); await peer.controller.loadQuiz('', true)
+  const peerCalls = peer.calls.length
+  const foreignCalls = foreign.calls.length
+  await first.controller.submit('question', 'a'); await tick()
+  for (const name of ['overview', 'recommendations', 'overlay', 'node', 'quiz']) {
+    assert.ok(peer.calls.slice(peerCalls).some(call => call.name === name), name)
+  }
+  assert.equal(foreign.calls.length, foreignCalls)
+})
+
 test('export results are discarded on logout and clear, even when transport ignores abort', async () => {
   const pending = deferred<Record<string, unknown>>()
   const { controller, context } = setup({ export: () => pending.promise })

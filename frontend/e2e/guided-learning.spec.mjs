@@ -1,17 +1,24 @@
 /**
- * Real-runtime Playwright E2E, using Node's test runner (no npm install/config).
+ * Real-runtime Playwright E2E, using Node's test runner and local Playwright.
  *
- *   node --test frontend/e2e/guided-learning.spec.mjs
- *   PLAYWRIGHT_MODULE_PATH=/absolute/path/to/node_modules/playwright node --test frontend/e2e/guided-learning.spec.mjs
+ *   cd frontend && npm ci && npx playwright install chromium
+ *   npm run test:e2e:config           offline validation only, no live fixtures
+ *   npm run test:e2e:guided-learning real calls against explicitly seeded data
  *
- * Defaults: API 127.0.0.1:28081, frontend 127.0.0.1:25173, seeded learner_a.
- * Only this isolated runtime is admitted. Private accounts are READ ONLY, 0600;
+ * GL_RUNTIME_DIR defaults to repo/.runtime; subdirectories there are allowed.
+ * Paths are checkout-relative or absolute, never symlinks or foreign paths.
+ * Reads seed-accounts.json and evidence/seed.json from that selected runtime.
+ * API comes from saved api_base; GL_API_BASE must normalize to that same origin.
+ * Frontend comes from saved frontend_base (legacy default 127.0.0.1:25173),
+ * with an explicit GL_FRONTEND_BASE loopback override. HTTP loopback only:
+ * 127.0.0.1, localhost, or [::1], at any valid port. No URL credentials or
+ * query/fragment/path; trailing slash and API /api/v1 suffix are normalized.
+ * Only disposable fixtures are admitted. Private accounts are READ ONLY, 0600;
  * fresh API login + in-memory storageState, never browser credential inputs.
  * No tracing, video, HAR, raw headers/auth responses, or on-disk storageState.
  * Node's runner avoids Playwright Test's automatic unredacted error contexts.
- * Reports/screenshots go ONLY beneath .runtime/evidence in a unique run folder.
- * GL_FRONTEND_BASE may be http://10.37.40.48:25173 for the same runtime.
- * GL_EVIDENCE_DIR may name a NEW folder beneath this checkout's evidence root.
+ * Reports/screenshots go ONLY beneath the chosen runtime/evidence directory.
+ * GL_EVIDENCE_DIR may name a NEW folder below it, with an existing owned parent.
  *
  * Approval gates (off by default):
  *   GL_RUN_QUIZ=1                real generation + server grading + reload;
@@ -38,11 +45,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
+import { FIXTURE_SLUGS } from './guided-learning-config.mjs';
+import { createEvidenceDirectory, loadFixtureRuntime, readFixtureManifest } from './guided-learning-runtime.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const API = 'http://127.0.0.1:28081';
-const FRONTEND = process.env.GL_FRONTEND_BASE || 'http://127.0.0.1:25173';
-assert.ok(['http://127.0.0.1:25173', 'http://localhost:25173', 'http://10.37.40.48:25173'].includes(FRONTEND), 'Only the isolated frontend is allowed');
+let API, FRONTEND, EVIDENCE, runtimePaths;
 const RUN_QUIZ = process.env.GL_RUN_QUIZ === '1';
 const CLEAR_B = process.env.GL_ALLOW_LEARNER_B_CLEAR === '1';
 const QUIZ_ACTOR = process.env.GL_QUIZ_ACTOR || 'learner_a';
@@ -58,12 +65,9 @@ const REPLAY_QUIZ = process.env.GL_REPLAY_QUIZ === '1';
 assert.ok(!REPLAY_QUIZ || (RUN_QUIZ && EXISTING_QUIZ && !CREATE_CARD), 'Replay needs GL_RUN_QUIZ + GL_EXISTING_QUIZ_ID, and no new card generation');
 const EXPECTED_PROMPT_VERSION = process.env.GL_EXPECT_PROMPT_VERSION || '';
 const CARD_SESSION = process.env.GL_CARD_SESSION_ID || '';
-const EVIDENCE_ROOT = path.join(ROOT, '.runtime/evidence');
-const EVIDENCE = path.resolve(process.env.GL_EVIDENCE_DIR || path.join(EVIDENCE_ROOT, `guided-learning-${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}`));
-assert.ok(EVIDENCE.startsWith(EVIDENCE_ROOT + path.sep), 'Evidence must stay under this runtime');
 const DESKTOP = { width: 1280, height: 900 };
 const MOBILE = { width: 390, height: 844 };
-const SLUGS = ['concept/topic4-retrieval', 'concept/topic4-feedback', 'concept/topic4-review'];
+const SLUGS = FIXTURE_SLUGS;
 const TITLES = ['Retrieval and Evidence', 'Assessment and Feedback', 'Review and Prerequisites'];
 const REASONS = { practice: 'Needs practice', source_changed: 'Sources changed', source_backed: 'Backed by sources', explore: 'Explore a new topic', review_due: 'Review due', review_need: 'Needs review', graph_frontier: 'Related topic', interest_match: 'Matches your interests', content_quality: 'Source quality', cold_start: 'Starting topic', exploration: 'Explore a new topic', related_topic: 'Related topic' };
 const COLORS = { unseen: '#8c8c8c', learning: '#0052d9', mastered: '#2ba471', review_due: '#e37318' };
@@ -102,34 +106,17 @@ async function sourceHashes() {
 }
 
 before(async () => {
-  const candidates = process.env.PLAYWRIGHT_MODULE_PATH ? [process.env.PLAYWRIGHT_MODULE_PATH] : [
-    'playwright', path.resolve(ROOT, '../WeKnora-sandbox-workbench/.runtime/node_modules/playwright'),
-    path.resolve(ROOT, '../WeKnora-sandbox-workbench/frontend/node_modules/playwright'),
-  ];
-  for (const candidate of candidates) { try { playwright = require(candidate); break; } catch { /* Explicit override never falls back. */ } }
-  assert.ok(playwright?.chromium && playwright?.request, 'Set PLAYWRIGHT_MODULE_PATH to an existing Playwright installation');
-  const privateFile = path.join(ROOT, '.runtime/seed-accounts.json');
-  const st = await fs.lstat(privateFile);
-  assert.ok(st.isFile() && !st.isSymbolicLink() && (st.mode & 0o777) === 0o600 && st.uid === process.getuid(), 'Seed state must be an owned regular 0600 file');
-  seed = JSON.parse(await fs.readFile(privateFile, 'utf8'));
+  const runtime = await loadFixtureRuntime(ROOT, process.env,
+    `guided-learning-${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}`);
+  ({ apiBase: API, frontendBase: FRONTEND, state: seed, fixtures: manifest, paths: runtimePaths } = runtime);
+  EVIDENCE = runtimePaths.evidenceDir;
   rememberSecrets(seed);
-  assert.equal(seed.api_base, API, 'Seed belongs to a different API');
-  const publicSeed = await fs.readFile(path.join(EVIDENCE_ROOT, 'seed.json'), 'utf8');
-  fixtureHashAtStart = createHash('sha256').update(publicSeed).digest('hex');
-  manifest = JSON.parse(publicSeed).fixtures;
-  for (const label of ['learner_a', 'learner_b']) {
-    assert.ok(seed.users[label] && manifest[label], 'Missing disposable fixture');
-    assert.equal(seed.users[label].knowledge_base_id, manifest[label].knowledge_base_id);
-    assert.equal(seed.users[label].tenant_id, manifest[label].tenant_id);
-    assert.ok(seed.users[label].email.endsWith('@example.invalid'), 'Refuse non-disposable account');
-    for (const slug of SLUGS) assert.equal(seed.users[label].pages[slug].page_id, manifest[label].pages[slug].page_id);
-  }
-  assert.notEqual(manifest.learner_a.tenant_id, manifest.learner_b.tenant_id);
-  // Refuse reuse/symlink destinations instead of overwriting another owner's run.
-  assert.equal(await fs.realpath(EVIDENCE_ROOT), EVIDENCE_ROOT, 'Evidence root must not be a symlink');
-  const evidenceParent = await fs.realpath(path.dirname(EVIDENCE));
-  assert.ok(evidenceParent === EVIDENCE_ROOT || evidenceParent.startsWith(EVIDENCE_ROOT + path.sep), 'Refuse an escaping evidence-parent symlink');
-  await fs.mkdir(EVIDENCE, { mode: 0o700 });
+  rememberSecrets(manifest);
+  fixtureHashAtStart = createHash('sha256').update(runtime.manifestText).digest('hex');
+  try { playwright = require(path.join(ROOT, 'frontend/node_modules/playwright')); }
+  catch { throw new Error('Install the pinned local Playwright with npm ci in frontend'); }
+  assert.ok(playwright?.chromium && playwright?.request, 'Local Playwright installation is incomplete');
+  await createEvidenceDirectory(runtimePaths);
   sourceAtStart = await sourceHashes();
   // Some development sandboxes disallow child-process OOM priority writes.
   // Single-process mode avoids those writes; this is a UI check, not a process-isolation test.
@@ -145,7 +132,7 @@ after(async () => {
   await writeJSON('summary.json', {
     startedSources: sourceAtStart, finishedSources: sourceAtEnd,
     sourceChangedDuringRun: JSON.stringify(sourceAtStart) !== JSON.stringify(sourceAtEnd),
-    fixtureHashAtStart, fixtureHashAtEnd: createHash('sha256').update(await fs.readFile(path.join(EVIDENCE_ROOT, 'seed.json'))).digest('hex'),
+    fixtureHashAtStart, fixtureHashAtEnd: createHash('sha256').update(await readFixtureManifest(runtimePaths)).digest('hex'),
     fixtures: Object.fromEntries(Object.entries(manifest).map(([label, fixture]) => [label, { tenant_id: fixture.tenant_id, knowledge_base_id: fixture.knowledge_base_id, pages: fixture.pages }])),
     specSha256AtReport: createHash('sha256').update(await fs.readFile(fileURLToPath(import.meta.url))).digest('hex'),
     browser: runBrowserVersion, frontend: FRONTEND, api: API,
