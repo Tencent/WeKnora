@@ -21,6 +21,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/hibiken/asynq"
+	"github.com/robfig/cron/v3"
 )
 
 // DataSourceService implements the DataSourceService interface
@@ -155,6 +156,17 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 	if err != nil {
 		return nil, err
 	}
+	if existing.Type == types.ConnectorTypeOutline {
+		var release func()
+		ctx, release, err = s.lockOutlineMutation(ctx, existing)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+		if ds.Type != existing.Type {
+			return nil, datasource.ErrInvalidConfig
+		}
+	}
 
 	if ds.KnowledgeBaseID == "" {
 		ds.KnowledgeBaseID = existing.KnowledgeBaseID
@@ -209,7 +221,15 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 		configActuallyChanged = !reflect.DeepEqual(*mergedCfg, *existingParsedCfg)
 	}
 	hasCreds := mergedCfg != nil && mergedCfg.HasConfiguredCredentials(ds.Type)
-	if hasCreds && (ds.Type != existing.Type || configActuallyChanged) {
+	if ds.Type == types.ConnectorTypeOutline {
+		ds.LastSyncCursor = existing.LastSyncCursor
+		if err := s.validateOutlineOptions(ds, mergedCfg); err != nil {
+			return nil, err
+		}
+	}
+	outlinePolicyChanged := ds.Type == types.ConnectorTypeOutline &&
+		(ds.SyncDeletions != existing.SyncDeletions || ds.Status != existing.Status)
+	if hasCreds && (ds.Type != existing.Type || configActuallyChanged || outlinePolicyChanged) {
 		if err := s.validateDataSourceConfig(ctx, ds); err != nil {
 			return nil, err
 		}
@@ -246,6 +266,14 @@ func (s *DataSourceService) UpdateDataSourceCredentials(
 	existing, err := s.dsRepo.FindByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if existing.Type == types.ConnectorTypeOutline {
+		var release func()
+		ctx, release, err = s.lockOutlineMutation(ctx, existing)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
 	}
 	parsed, err := existing.ParseConfig()
 	if err != nil {
@@ -287,6 +315,14 @@ func (s *DataSourceService) ClearDataSourceCredentials(ctx context.Context, id s
 	existing, err := s.dsRepo.FindByID(ctx, id)
 	if err != nil {
 		return err
+	}
+	if existing.Type == types.ConnectorTypeOutline {
+		var release func()
+		ctx, release, err = s.lockOutlineMutation(ctx, existing)
+		if err != nil {
+			return err
+		}
+		defer release()
 	}
 	parsed, err := existing.ParseConfig()
 	if err != nil {
@@ -353,6 +389,25 @@ func (s *DataSourceService) ValidateConnection(ctx context.Context, dsID string)
 	ds, err := s.GetDataSource(ctx, dsID)
 	if err != nil {
 		return err
+	}
+	if ds.Type == types.ConnectorTypeOutline {
+		var release func()
+		ctx, release, err = s.lockOutlineMutation(ctx, ds)
+		if err != nil {
+			return err
+		}
+		defer release()
+		// Read-only validation must not unpause a draft or overwrite its cursor.
+		config, err := ds.ParseConfig()
+		if err != nil {
+			return err
+		}
+		config.SyncDeletions = ds.SyncDeletions
+		connector, err := s.connectorRegistry.Get(ds.Type)
+		if err != nil {
+			return err
+		}
+		return connector.Validate(ctx, config)
 	}
 
 	// Get connector
@@ -454,9 +509,21 @@ func (s *DataSourceService) ResolveResourceAncestors(
 
 // ManualSync triggers an immediate sync for a data source
 func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types.SyncLog, error) {
+	return s.ManualSyncWithOptions(ctx, dsID, false)
+}
+
+func (s *DataSourceService) ManualSyncWithOptions(ctx context.Context, dsID string, forceFull bool) (*types.SyncLog, error) {
 	ds, err := s.GetDataSource(ctx, dsID)
 	if err != nil {
 		return nil, err
+	}
+	if ds.Type == types.ConnectorTypeOutline {
+		var release func()
+		ctx, release, err = s.lockOutlineMutation(ctx, ds)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
 	}
 
 	if ds.Status != types.DataSourceStatusActive &&
@@ -483,7 +550,7 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 		DataSourceID: dsID,
 		TenantID:     ds.TenantID,
 		SyncLogID:    syncLog.ID,
-		ForceFull:    false,
+		ForceFull:    forceFull,
 		Initiator:    types.TaskInitiatorFromContext(ctx),
 		Trigger:      "manual",
 	}
@@ -529,7 +596,14 @@ func (s *DataSourceService) PauseDataSource(ctx context.Context, id string) erro
 	}
 
 	ds.Status = types.DataSourceStatusPaused
-	if err := s.dsRepo.Update(ctx, ds); err != nil {
+	if repo, ok := s.dsRepo.(interface {
+		Pause(context.Context, string) error
+	}); ok && ds.Type == types.ConnectorTypeOutline {
+		err = repo.Pause(ctx, id)
+	} else {
+		err = s.dsRepo.Update(ctx, ds)
+	}
+	if err != nil {
 		logger.Errorf(ctx, "failed to pause data source: %v", err)
 		return err
 	}
@@ -551,6 +625,18 @@ func (s *DataSourceService) ResumeDataSource(ctx context.Context, id string) err
 	}
 
 	ds.Status = types.DataSourceStatusActive
+	if ds.Type == types.ConnectorTypeOutline {
+		var release func()
+		ctx, release, err = s.lockOutlineMutation(ctx, ds)
+		if err != nil {
+			return err
+		}
+		defer release()
+		ds.Status = types.DataSourceStatusActive
+		if err := s.validateDataSourceConfig(ctx, ds); err != nil {
+			return err
+		}
+	}
 	if err := s.dsRepo.Update(ctx, ds); err != nil {
 		logger.Errorf(ctx, "failed to resume data source: %v", err)
 		return err
@@ -588,6 +674,8 @@ func (s *DataSourceService) GetSyncLog(ctx context.Context, syncLogID string) (*
 
 // ProcessSync handles the actual sync operation (called by asynq task)
 func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Hour)
+	defer cancel()
 	var payload types.DataSourceSyncPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		logger.Errorf(ctx, "failed to unmarshal sync payload: %v", err)
@@ -610,6 +698,23 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			_ = s.syncLogRepo.Update(ctx, syncLog)
 		}
 		return nil
+	}
+
+	if ds.Type == types.ConnectorTypeOutline {
+		var release func()
+		ctx, release, err = datasource.DefaultSyncLocks.Acquire(ctx, ds.TenantID, ds.ID)
+		if errors.Is(err, datasource.ErrSyncRunning) {
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		defer release()
+		// Reload under the lease; a queued job must not use stale credentials.
+		ds, err = s.GetDataSource(ctx, payload.DataSourceID)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Get sync log
@@ -670,6 +775,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	// Surface the KB's multimodal/VLM state to the connector so it only extracts
 	// embedded images for OCR when the KB can actually ingest them (never persisted).
 	config.MultimodalEnabled = kb.IsMultimodalEnabled()
+	config.SyncDeletions = ds.SyncDeletions
 
 	// Streaming path: connectors that support it interleave fetch→ingest→
 	// checkpoint so a large sync bounds memory and resumes after a timeout
@@ -1004,26 +1110,58 @@ func (h *streamSyncHandler) Emit(ctx context.Context, item types.FetchedItem) er
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if err := h.checkAlive(ctx); err != nil {
+		return err
+	}
 	h.result.Total++
 	h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tagIDs, h.result)
 	return nil
+}
+
+func (h *streamSyncHandler) EmitWithResult(ctx context.Context, item types.FetchedItem) (datasource.ApplyResult, error) {
+	if item.IsDeleted && !h.ds.SyncDeletions {
+		return datasource.ApplyResult{Outcome: datasource.ApplyDeferred}, ctx.Err()
+	}
+	failed, skipped := h.result.Failed, h.result.Skipped
+	if err := h.Emit(ctx, item); err != nil {
+		return datasource.ApplyResult{}, err
+	}
+	outcome := datasource.ApplyApplied
+	if h.result.Failed > failed || (!item.IsDeleted && h.result.Skipped > skipped) {
+		outcome = datasource.ApplyFailed
+	}
+	return datasource.ApplyResult{Outcome: outcome}, nil
 }
 
 // Checkpoint persists the connector cursor onto the data source and mirrors the
 // running counts into the sync log so progress survives a crash and the UI can
 // reflect a long sync mid-flight instead of jumping from 0 to done.
 func (h *streamSyncHandler) Checkpoint(ctx context.Context, cursor *types.SyncCursor) error {
+	if err := h.checkAlive(ctx); err != nil {
+		return err
+	}
 	if cursor == nil {
 		return nil
+	}
+	if metrics, ok := cursor.ConnectorCursor["metrics"]; ok {
+		raw, err := json.Marshal(metrics)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(raw, &h.result.Metrics); err != nil {
+			return err
+		}
 	}
 	cursorJSON, err := cursor.ToJSON()
 	if err != nil {
 		return err
 	}
-	h.ds.LastSyncCursor = cursorJSON
-	if err := h.svc.dsRepo.UpdateSyncState(ctx, h.ds); err != nil {
+	snapshot := *h.ds
+	snapshot.LastSyncCursor = cursorJSON
+	if err := h.svc.dsRepo.UpdateSyncState(ctx, &snapshot); err != nil {
 		return err
 	}
+	h.ds.LastSyncCursor = cursorJSON
 
 	// Best-effort live progress; a failure here must not abort the sync.
 	h.syncLog.ItemsTotal = h.result.Total
@@ -1036,6 +1174,44 @@ func (h *streamSyncHandler) Checkpoint(ctx context.Context, cursor *types.SyncCu
 		logger.Warnf(ctx, "failed to persist sync log progress at checkpoint: %v", err)
 	}
 	return nil
+}
+
+func (h *streamSyncHandler) checkAlive(ctx context.Context) error {
+	if h.ds.Type != types.ConnectorTypeOutline {
+		return ctx.Err()
+	}
+	if err := datasource.CheckSyncLease(ctx); err != nil {
+		return err
+	}
+	if _, err := h.svc.dsRepo.FindByID(ctx, h.ds.ID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *DataSourceService) lockOutlineMutation(ctx context.Context, ds *types.DataSource) (context.Context, func(), error) {
+	locked, release, err := datasource.DefaultSyncLocks.Acquire(ctx, ds.TenantID, ds.ID)
+	if err != nil {
+		return ctx, nil, err
+	}
+	running, err := s.syncLogRepo.HasRunningSync(locked, ds.ID)
+	if err != nil || running {
+		release()
+		if err != nil {
+			return ctx, nil, err
+		}
+		return ctx, nil, datasource.ErrSyncRunning
+	}
+	fresh, err := s.dsRepo.FindByID(locked, ds.ID)
+	if err != nil || fresh == nil {
+		release()
+		if err != nil {
+			return ctx, nil, err
+		}
+		return ctx, nil, datasource.ErrDataSourceNotFound
+	}
+	*ds = *fresh
+	return locked, release, nil
 }
 
 // processSyncStreaming runs a sync through a StreamingConnector, ingesting each
@@ -1062,7 +1238,22 @@ func (s *DataSourceService) processSyncStreaming(
 
 	forceFull := payload.ForceFull || ds.SyncMode == types.SyncModeFull
 	attempt, _ := asynq.GetRetryCount(ctx)
+	if retry, _, ok := types.TaskRetryMetadataFromContext(ctx); ok {
+		attempt = retry
+	}
 	startCursor, err := streamStartCursor(ds, forceFull, attempt)
+	if preparer, ok := sc.(datasource.FullSyncCursorPreparer); ok && forceFull && attempt == 0 {
+		startCursor, err = ds.ParseSyncCursor()
+		if err == nil {
+			startCursor, err = preparer.PrepareFullSyncCursor(startCursor)
+		}
+	}
+	if preparer, ok := sc.(datasource.SyncRunCursorPreparer); ok {
+		startCursor, err = ds.ParseSyncCursor()
+		if err == nil {
+			startCursor, err = preparer.PrepareSyncRunCursor(startCursor, syncLog.ID, forceFull)
+		}
+	}
 	if err != nil {
 		logger.Errorf(ctx, "failed to parse sync cursor: %v", err)
 		s.updateSyncRunResult(ctx, ds, syncLog, &types.SyncResult{}, nil,
@@ -1074,6 +1265,12 @@ func (s *DataSourceService) processSyncStreaming(
 	handler := &streamSyncHandler{svc: s, ds: ds, tagIDs: autoTagIDs, result: result, syncLog: syncLog}
 
 	nextCursor, fetchErr := sc.FetchStream(ctx, config, startCursor, handler)
+	var partial *datasource.PartialFetchError
+	var warnings []string
+	if errors.As(fetchErr, &partial) {
+		warnings = partial.Details
+		fetchErr = nil
+	}
 	if fetchErr != nil {
 		// Progress so far is already checkpointed onto ds.LastSyncCursor; leave
 		// it in place so the Asynq retry resumes from there. Persist counts.
@@ -1108,10 +1305,18 @@ func (s *DataSourceService) processSyncStreaming(
 	// applyFetchedItem).
 	status := types.SyncLogStatusSuccess
 	errMsg := ""
+	if len(warnings) > 0 {
+		status = types.SyncLogStatusPartial
+		errMsg = strings.Join(warnings, "; ")
+		for _, warning := range warnings {
+			recordSyncError(result, types.SyncItemError{Message: warning})
+		}
+		resultJSON, _ = result.ToJSON()
+	}
 	if result.Failed > 0 {
 		status = types.SyncLogStatusPartial
 		errMsg = fmt.Sprintf("%d document(s) failed to sync", result.Failed)
-		if result.DeletionFailed > 0 {
+		if result.DeletionFailed > 0 && ds.Type != types.ConnectorTypeOutline {
 			errMsg += fmt.Sprintf("; %d deletion failure(s) will only retry on the next full sync", result.DeletionFailed)
 		}
 	}
@@ -1131,6 +1336,14 @@ func (s *DataSourceService) updateSyncRunResult(
 	errorMessage string,
 	wasPaused bool,
 ) {
+	if ds.Type == types.ConnectorTypeOutline {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := datasource.CheckSyncLease(cleanupCtx); err != nil {
+			return
+		}
+		ctx = cleanupCtx
+	}
 	syncLog.ItemsTotal = result.Total
 	syncLog.ItemsCreated = result.Created
 	syncLog.ItemsUpdated = result.Updated
@@ -1228,8 +1441,56 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 	if err != nil {
 		return datasource.ErrInvalidConfig
 	}
+	config.SyncDeletions = ds.SyncDeletions
+	if err := s.validateOutlineOptions(ds, config); err != nil {
+		return err
+	}
+	if err := connector.Validate(ctx, config); err != nil {
+		return err
+	}
+	if binder, ok := connector.(interface {
+		BindIdentity(context.Context, *types.DataSourceConfig, *types.SyncCursor) (*types.SyncCursor, error)
+	}); ok {
+		cursor, err := ds.ParseSyncCursor()
+		if err != nil {
+			return err
+		}
+		cursor, err = binder.BindIdentity(ctx, config, cursor)
+		if err != nil {
+			return err
+		}
+		ds.LastSyncCursor, err = cursor.ToJSON()
+		if err == nil && ds.Type == types.ConnectorTypeOutline {
+			ds.Config, err = config.ToJSON()
+		}
+		return err
+	}
+	return nil
+}
 
-	return connector.Validate(ctx, config)
+func (s *DataSourceService) validateOutlineOptions(ds *types.DataSource, config *types.DataSourceConfig) error {
+	if ds.Type != types.ConnectorTypeOutline {
+		return nil
+	}
+	if ds.ConflictStrategy != "" && ds.ConflictStrategy != "overwrite" {
+		return fmt.Errorf("%w: Outline requires overwrite", datasource.ErrInvalidConfig)
+	}
+	if ds.SyncMode != "" && ds.SyncMode != "incremental" && ds.SyncMode != "full" {
+		return datasource.ErrInvalidConfig
+	}
+	if ds.SyncSchedule != "" {
+		parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		if _, err := parser.Parse(ds.SyncSchedule); err != nil {
+			return fmt.Errorf("%w: invalid six-field schedule", datasource.ErrInvalidConfig)
+		}
+	}
+	if config == nil {
+		return datasource.ErrInvalidConfig
+	}
+	if len(config.ResourceIDs) == 0 && (ds.Status != types.DataSourceStatusPaused || ds.SyncSchedule != "") {
+		return fmt.Errorf("%w: select at least one Outline collection", datasource.ErrInvalidConfig)
+	}
+	return nil
 }
 
 // ingestItem writes a single FetchedItem into the knowledge base.
@@ -1241,6 +1502,7 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 //
 // Returns (isUpdate, error) — isUpdate is true when an existing item was replaced.
 func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource, item *types.FetchedItem, tagIDs []string) (bool, error) {
+	strict := ds.Type == types.ConnectorTypeOutline
 	// Channel decides the knowledge "source" label shown in the UI. Prefer the
 	// connector-supplied metadata["channel"] (e.g. Feishu Drive sets it to
 	// "feishu" so Drive docs share the wiki's "飞书" label instead of showing
@@ -1280,14 +1542,34 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		// other during updates.
 		existing, err := repo.FindByDataSourceExternalID(ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID)
 		if err != nil {
+			if strict {
+				return false, err
+			}
 			logger.Warnf(ctx, "failed to check existing knowledge for external_id=%s: %v", item.ExternalID, err)
 			// Non-fatal: proceed with creation (may produce duplicate)
 		} else if existing != nil {
+			if strict && item.Metadata["source_fingerprint"] != "" {
+				var prior map[string]string
+				_ = json.Unmarshal(existing.Metadata, &prior)
+				switch existing.ParseStatus {
+				case "pending", "processing", "finalizing", "completed":
+					if prior["source_fingerprint"] == item.Metadata["source_fingerprint"] &&
+						(item.Metadata["source_full_sync"] != "true" || prior["source_sync_run_id"] == item.Metadata["source_sync_run_id"]) {
+						return true, nil
+					}
+				}
+			}
 			logger.Infof(ctx, "found existing knowledge %s for external_id=%s, deleting for update", existing.ID, item.ExternalID)
 			if err := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); err != nil {
+				if strict {
+					return false, err
+				}
 				logger.Warnf(ctx, "failed to delete existing knowledge %s: %v", existing.ID, err)
 			} else {
 				if herr := repo.HardDeleteKnowledge(ctx, ds.TenantID, existing.ID); herr != nil {
+					if strict {
+						return false, herr
+					}
 					logger.Warnf(ctx, "failed to hard-delete replaced knowledge %s: %v", existing.ID, herr)
 				}
 				isUpdate = true
@@ -1301,7 +1583,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		if err != nil {
 			return isUpdate, fmt.Errorf("build file header: %w", err)
 		}
-		if _, err := s.knowledgeService.CreateKnowledgeFromFile(
+		created, err := s.knowledgeService.CreateKnowledgeFromFile(
 			ctx,
 			ds.KnowledgeBaseID,
 			fh,
@@ -1311,7 +1593,8 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			tagIDs,        // auto-tag from data source
 			channel,
 			nil,
-		); err != nil {
+		)
+		if err != nil {
 			var dupErr *types.DuplicateKnowledgeError
 			if errors.As(err, &dupErr) && dupIsSameNode(dupErr, item) {
 				// Identical content is already present in the KB under THIS node's
@@ -1320,6 +1603,9 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 				s.sweepStaleSubtree(ctx, ds, item)
 			}
 			return isUpdate, err
+		}
+		if strict && (created == nil || created.ParseStatus == "failed") {
+			return isUpdate, fmt.Errorf("outline document was not accepted for parsing")
 		}
 		s.sweepStaleSubtree(ctx, ds, item)
 		return isUpdate, nil

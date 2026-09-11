@@ -8,6 +8,7 @@ interface KnowledgeItem {
   title?: string;
   type?: string;
   parse_status?: string;
+  metadata?: Record<string, unknown> | string;
 }
 
 const props = defineProps<{
@@ -40,9 +41,25 @@ const isParseInFlight = computed(() =>
 );
 
 const fileName = computed(() => props.item.file_name || props.item.title || props.item.id);
+const sourceUrl = computed(() => {
+  try {
+    const metadata = typeof props.item.metadata === 'string'
+      ? JSON.parse(props.item.metadata) : props.item.metadata;
+    if (typeof metadata?.source_url !== 'string') return '';
+    const url = new URL(metadata.source_url);
+    return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : '';
+  } catch {
+    return '';
+  }
+});
 </script>
 
 <template>
+  <a v-if="sourceUrl" :href="sourceUrl" target="_blank" rel="noopener noreferrer"
+    class="doc-action-menu-item" @click.stop>
+    <t-icon class="icon" name="link" />
+    <span>{{ t('datasource.openSource') }}</span>
+  </a>
   <!-- 下载原始文档 -->
   <div
     v-if="canDownload && (item.type === 'file' || item.type === 'manual')"

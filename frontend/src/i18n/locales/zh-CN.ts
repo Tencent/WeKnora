@@ -572,6 +572,31 @@ export default {
     }
   },
   datasource: {
+    outlineError: {
+      auth: '认证失败，请替换 API Key。',
+      permission: '访问被拒绝，请检查账号及 Collection 权限。',
+      rate: '触发限流，请稍后重试。',
+      response: 'Outline 响应不兼容，请检查部署版本及 Markdown API 支持。',
+      request: '扫描未能完成，请检查网络后重试；已有副本会保留。',
+      instance: '实例或工作区已变更，请创建新的连接。',
+      size: '文档超过 32 MiB 上限。',
+      cursor: '同步检查点无效，请联系管理员，不要直接清空历史基线。',
+      pending: '部分文档将在下次同步时重试。',
+      deletion: '无法确认删除，已保留副本；请检查 documents.deleted 权限。',
+      scope: '请至少选择一个可访问且有效的 Collection。',
+      running: '同步已排队或正在运行，请完成后再操作。',
+    },
+    fullSyncNow: '重新全量同步',
+    openSource: '打开原文',
+    outlineBaseUrl: 'Outline 实例地址',
+    prereqBarText_outline: 'Outline 接入要求',
+    prereqStep1Brief_outline: '创建只读 API Key',
+    prereqStep1Desc_outline: '建议使用专用同步账号，授权访问需要同步的 Collection。',
+    prereqStep2Brief_outline: '允许必要的读取端点',
+    prereqStep2Desc_outline: '需要 auth.info、collections.list/info、documents.list/info；同步删除还需 documents.deleted。',
+    prereqStep3Brief_outline: '确认访问权限和保留策略',
+    prereqStep3Desc_outline: '导入后按目标知识库权限访问。关闭删除会保留副本，私有附件不随正文下载。建议 HTTPS，HTTP 仅限可信内网。',
+    prereqOpenConsole_outline: 'Outline API 文档',
     title: '数据源管理',
     description: '配置外部数据源，自动同步内容到知识库',
     add: '添加数据源',
@@ -728,6 +753,7 @@ export default {
       authHeadersHint: '用于访问私有订阅源，每行一个，格式为「名称: 值」，例如 Authorization: Bearer xxxx'
     },
     connectorDesc: {
+      outline: '同步 Outline Collection 中的 Markdown 文档',
       feishu: '同步飞书知识库中的文档、表格、文件',
       lark: '同步 Lark 知识库中的文档、表格、文件（飞书国际版）',
       feishu_drive: "同步飞书云盘文件夹中的文档、表格、文件",
@@ -739,6 +765,7 @@ export default {
       gitlab: '同步 GitLab 项目中的文件'
     },
     connector: {
+      outline: 'Outline',
       feishu: '飞书',
       lark: 'Lark（飞书国际版）',
       feishu_drive: "飞书云盘",

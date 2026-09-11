@@ -88,11 +88,13 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	logger.Infof(ctx, "Checking if file exists, tenant ID: %d", tenantID)
 	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
-		Type:     "file",
-		FileName: fileName,
-		FileType: getFileType(fileName),
-		FileSize: file.Size,
-		FileHash: hash,
+		DataSourceID: metadata["datasource_id"],
+		ExternalID:   metadata["external_id"],
+		Type:         "file",
+		FileName:     fileName,
+		FileType:     getFileType(fileName),
+		FileSize:     file.Size,
+		FileHash:     hash,
 	})
 	if err != nil {
 		logger.Errorf(ctx, "Failed to check knowledge existence: %v", err)

@@ -572,6 +572,31 @@ export default {
     }
   },
   datasource: {
+    outlineError: {
+      auth: '인증에 실패했습니다. API 키를 교체하세요.',
+      permission: '접근이 거부되었습니다. 계정 및 컬렉션 권한을 확인하세요.',
+      rate: '요청 제한에 도달했습니다. 나중에 다시 시도하세요.',
+      response: 'Outline 응답이 호환되지 않습니다. 버전과 Markdown API 지원을 확인하세요.',
+      request: '스캔을 완료하지 못했습니다. 연결을 확인하고 재시도하세요. 기존 사본은 보존됩니다.',
+      instance: '인스턴스 또는 작업공간이 변경되었습니다. 새 연결을 만드세요.',
+      size: '문서가 32 MiB 제한을 초과합니다.',
+      cursor: '동기화 체크포인트가 유효하지 않습니다. 기록을 지우지 말고 관리자에게 문의하세요.',
+      pending: '일부 문서는 다음 동기화에서 재시도됩니다.',
+      deletion: '삭제를 확인할 수 없어 사본을 보존합니다. documents.deleted 권한을 확인하세요.',
+      scope: '접근 가능한 활성 컬렉션을 하나 이상 선택하세요.',
+      running: '동기화가 대기 중이거나 실행 중입니다. 완료 후 다시 시도하세요.',
+    },
+    fullSyncNow: '전체 동기화 실행',
+    openSource: '원문 열기',
+    outlineBaseUrl: 'Outline 인스턴스 URL',
+    prereqBarText_outline: 'Outline 연결 요구 사항',
+    prereqStep1Brief_outline: '읽기 전용 API 키 생성',
+    prereqStep1Desc_outline: '선택한 컬렉션에 접근 가능한 전용 계정을 사용하세요.',
+    prereqStep2Brief_outline: '필요한 엔드포인트 허용',
+    prereqStep2Desc_outline: 'auth.info, collections.list/info, documents.list/info가 필요합니다. 삭제 동기화에는 documents.deleted도 필요합니다.',
+    prereqStep3Brief_outline: '권한 및 보존 정책 확인',
+    prereqStep3Desc_outline: '가져온 콘텐츠는 대상 지식베이스 권한을 따릅니다. 삭제를 끄면 사본을 보존합니다. 비공개 첨부 파일은 다운로드하지 않습니다. HTTPS를 권장하며 HTTP는 신뢰하는 내부 호스트로 제한됩니다.',
+    prereqOpenConsole_outline: 'Outline API 문서',
     title: '데이터 소스 관리',
     description: '외부 데이터 소스를 구성하여 콘텐츠를 지식베이스에 자동 동기화',
     add: '데이터 소스 추가',
@@ -726,6 +751,7 @@ export default {
       authHeadersHint: '비공개 피드 접근용. 한 줄에 하나씩 「이름: 값」 형식으로 입력하세요. 예: Authorization: Bearer xxxx'
     },
     connectorDesc: {
+      outline: 'Outline 컬렉션의 Markdown 문서 동기화',
       feishu: '페이슈 위키에서 문서, 스프레드시트, 파일 동기화',
       lark: 'Lark 위키에서 문서, 스프레드시트, 파일 동기화',
       feishu_drive: "페이슈 드라이브 폴더에서 문서, 스프레드시트, 파일 동기화",
@@ -737,6 +763,7 @@ export default {
       gitlab: 'GitLab 프로젝트의 파일 동기화'
     },
     connector: {
+      outline: 'Outline',
       feishu: '페이슈 (Feishu)',
       lark: 'Lark (Feishu 글로벌)',
       feishu_drive: "페이슈 드라이브",

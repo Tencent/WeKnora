@@ -34,8 +34,9 @@ const (
 	ChannelIM               = "im"                // Generic IM channel
 	ChannelNotion           = "notion"            // Notion
 	ChannelYuque            = "yuque"             // Yuque (语雀)
-	ChannelRSS              = "rss"               // RSS / Atom feed
-	ChannelIMA              = "ima"               // Tencent IMA (ima.qq.com)
+	ChannelOutline          = "outline"
+	ChannelRSS              = "rss" // RSS / Atom feed
+	ChannelIMA              = "ima" // Tencent IMA (ima.qq.com)
 )
 
 // Knowledge parse status constants
@@ -482,6 +483,8 @@ func (k *Knowledge) SetProcessOverrides(o *KnowledgeProcessOverrides) error {
 
 // KnowledgeCheckParams defines parameters used to check if knowledge already exists.
 type KnowledgeCheckParams struct {
+	DataSourceID string
+	ExternalID   string
 	// File parameters
 	FileName string
 	// FileType scopes file-hash deduplication; callers checking file uploads should set it.

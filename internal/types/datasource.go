@@ -28,6 +28,7 @@ const (
 	ConnectorTypeNotion      = "notion"
 	ConnectorTypeConfluence  = "confluence"
 	ConnectorTypeYuque       = "yuque"
+	ConnectorTypeOutline     = "outline"
 	ConnectorTypeGitHub      = "github"
 	ConnectorTypeGoogleDrive = "google_drive"
 	ConnectorTypeOneDrive    = "onedrive"
@@ -235,6 +236,7 @@ type DataSourceConfig struct {
 	// ingesting an image into a KB without VLM is rejected, so image extraction is
 	// skipped when this is false.
 	MultimodalEnabled bool `json:"-"`
+	SyncDeletions     bool `json:"-"`
 }
 
 // HasCredentials reports whether the credentials map carries any value at
@@ -252,6 +254,10 @@ func (d DataSourceConfig) HasConfiguredCredentials(connectorType string) bool {
 		return false
 	}
 	switch connectorType {
+	case ConnectorTypeOutline:
+		key, _ := d.Credentials["api_key"].(string)
+		base, _ := d.Credentials["base_url"].(string)
+		return strings.TrimSpace(key) != "" && strings.TrimSpace(base) != ""
 	case ConnectorTypeRSS:
 		raw, ok := d.Credentials["auth_headers"]
 		if !ok {
@@ -416,6 +422,7 @@ type SyncCursor struct {
 
 // SyncResult summarizes the outcome of a sync operation
 type SyncResult struct {
+	Metrics map[string]int64 `json:"metrics,omitempty"`
 	// Total items processed
 	Total int `json:"total"`
 

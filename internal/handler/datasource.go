@@ -2,6 +2,9 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -223,6 +226,9 @@ func (h *DataSourceHandler) UpdateDataSource(c *gin.Context) {
 	req.KnowledgeBaseID = existing.KnowledgeBaseID
 	ds, err := h.service.UpdateDataSource(ctx, &req)
 	if err != nil {
+		if respondSyncConflict(c, err) {
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -285,6 +291,9 @@ func (h *DataSourceHandler) ValidateConnection(c *gin.Context) {
 	}
 
 	if err := h.service.ValidateConnection(ctx, id); err != nil {
+		if respondSyncConflict(c, err) {
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -439,13 +448,71 @@ func (h *DataSourceHandler) ManualSync(c *gin.Context) {
 		return
 	}
 
-	syncLog, err := h.service.ManualSync(ctx, id)
+	forceFull, decodeErr := decodeForceFull(c.Request.Body)
+	if decodeErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sync options"})
+		return
+	}
+	var syncLog *types.SyncLog
+	var err error
+	if svc, ok := h.service.(interface {
+		ManualSyncWithOptions(context.Context, string, bool) (*types.SyncLog, error)
+	}); ok {
+		syncLog, err = svc.ManualSyncWithOptions(ctx, id, forceFull)
+	} else if forceFull {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "full sync is not supported"})
+		return
+	} else {
+		syncLog, err = h.service.ManualSync(ctx, id)
+	}
 	if err != nil {
+		if respondSyncConflict(c, err) {
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, syncLog)
+}
+
+func decodeForceFull(body io.Reader) (bool, error) {
+	if body == nil {
+		return false, nil
+	}
+	decoder := json.NewDecoder(body)
+	var options map[string]json.RawMessage
+	if err := decoder.Decode(&options); err != nil {
+		if errors.Is(err, io.EOF) {
+			return false, nil
+		}
+		return false, err
+	}
+	if options == nil {
+		return false, errors.New("expected an object")
+	}
+	var extra interface{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return false, errors.New("unexpected trailing JSON")
+	}
+	var forceFull bool
+	if raw, ok := options["force_full"]; ok {
+		if string(raw) == "null" {
+			return false, errors.New("force_full must be a boolean")
+		}
+		if err := json.Unmarshal(raw, &forceFull); err != nil {
+			return false, err
+		}
+	}
+	return forceFull, nil
+}
+
+func respondSyncConflict(c *gin.Context, err error) bool {
+	if !errors.Is(err, datasource.ErrSyncRunning) {
+		return false
+	}
+	c.JSON(http.StatusConflict, gin.H{"error": "datasource_sync_running", "code": "datasource_sync_running"})
+	return true
 }
 
 // PauseDataSource godoc

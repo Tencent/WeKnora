@@ -134,8 +134,8 @@ export function resolveResourceAncestors(id: string, resourceIds: string[]) {
   return post(`/api/v1/datasource/${id}/resource-ancestors`, { resource_ids: resourceIds }, { timeout: 120000 })
 }
 
-export function triggerSync(id: string) {
-  return post(`/api/v1/datasource/${id}/sync`, {})
+export function triggerSync(id: string, forceFull = false) {
+  return post(`/api/v1/datasource/${id}/sync`, { force_full: forceFull })
 }
 
 export function pauseDataSource(id: string) {

@@ -76,6 +76,9 @@ func (h *DataSourceCredentialsHandler) Put(c *gin.Context) {
 	}
 	updated, err := h.service.UpdateDataSourceCredentials(c.Request.Context(), ds.ID, req.Credentials)
 	if err != nil {
+		if respondSyncConflict(c, err) {
+			return
+		}
 		logger.ErrorWithFields(c.Request.Context(), err, map[string]interface{}{
 			"data_source_id": secutils.SanitizeForLog(ds.ID),
 		})
@@ -105,6 +108,9 @@ func (h *DataSourceCredentialsHandler) DeleteField(c *gin.Context) {
 		return
 	}
 	if err := h.service.ClearDataSourceCredentials(c.Request.Context(), ds.ID); err != nil {
+		if respondSyncConflict(c, err) {
+			return
+		}
 		logger.ErrorWithFields(c.Request.Context(), err, map[string]interface{}{
 			"data_source_id": secutils.SanitizeForLog(ds.ID),
 		})

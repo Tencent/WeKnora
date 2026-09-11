@@ -2,6 +2,7 @@
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getSyncLogs, type SyncLog, type SyncItemError } from '@/api/datasource'
+import { localizeDatasourceError } from '@/utils/datasourceError'
 
 const props = defineProps<{
   dataSourceId: string
@@ -152,6 +153,7 @@ function formatSyncError(e: SyncItemError): string {
   } else {
     reason = e.message || ''
   }
+  reason = localizeDatasourceError(reason)
   return e.title ? (reason ? `${e.title} — ${reason}` : e.title) : reason
 }
 
@@ -283,7 +285,7 @@ const groupedLogs = computed(() => {
                   {{ t('datasource.logDetail.docsFailedSummary', { n: log.items_failed }) }}
                 </div>
                 <div v-else-if="log.error_message" class="tl-error">
-                  {{ log.error_message }}
+                  {{ localizeDatasourceError(log.error_message) }}
                 </div>
 
                 <!-- Per-item failures: which documents failed and why.

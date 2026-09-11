@@ -74,6 +74,35 @@ type StreamHandler interface {
 	Checkpoint(ctx context.Context, cursor *types.SyncCursor) error
 }
 
+type ApplyOutcome string
+
+const (
+	ApplyApplied  ApplyOutcome = "applied"
+	ApplyDeferred ApplyOutcome = "deferred"
+	ApplyFailed   ApplyOutcome = "failed"
+)
+
+type ApplyResult struct {
+	Outcome     ApplyOutcome
+	KnowledgeID string
+}
+
+// AcknowledgingStreamHandler confirms durable acceptance, not eventual indexing.
+type AcknowledgingStreamHandler interface {
+	StreamHandler
+	EmitWithResult(context.Context, types.FetchedItem) (ApplyResult, error)
+}
+
+type FullSyncCursorPreparer interface {
+	PrepareFullSyncCursor(*types.SyncCursor) (*types.SyncCursor, error)
+}
+
+// SyncRunCursorPreparer distinguishes task retries from new full-sync requests,
+// including retries that occurred before the worker acquired its execution lease.
+type SyncRunCursorPreparer interface {
+	PrepareSyncRunCursor(previous *types.SyncCursor, runID string, forceFull bool) (*types.SyncCursor, error)
+}
+
 // StreamingConnector is an optional interface. Connectors that implement it let
 // the service interleave fetch→ingest→checkpoint so a large sync persists
 // incrementally and resumes after a timeout, rather than holding every item in
@@ -149,6 +178,12 @@ type ConnectorMetadata struct {
 // GetConnectorMetadata returns metadata for all available connectors
 // This is used by the frontend to display connector options
 var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
+	types.ConnectorTypeOutline: {
+		Type: types.ConnectorTypeOutline, Name: "Outline",
+		Description: "Sync Outline collections and Markdown documents",
+		Priority:    3, AuthType: "api_key",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
 	types.ConnectorTypeFeishu: {
 		Type:         types.ConnectorTypeFeishu,
 		Name:         "Feishu (飞书)",

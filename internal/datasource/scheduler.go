@@ -145,6 +145,14 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 		logger.Infof(ctx, "[Scheduler] skipping sync for ds=%s (not active or not found)", dataSourceID)
 		return
 	}
+	if ds.Type == types.ConnectorTypeOutline {
+		var release func()
+		ctx, release, err = DefaultSyncLocks.Acquire(ctx, tenantID, dataSourceID)
+		if err != nil {
+			return
+		}
+		defer release()
+	}
 
 	// Layer 1: prevent overlap with a still-running sync
 	if running, _ := s.syncLogRepo.HasRunningSync(ctx, dataSourceID); running {

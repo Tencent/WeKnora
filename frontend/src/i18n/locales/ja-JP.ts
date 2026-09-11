@@ -6172,6 +6172,31 @@ export default {
     daysAgo: '{days}日前'
   },
   datasource: {
+    outlineError: {
+      auth: '認証に失敗しました。API キーを更新してください。',
+      permission: 'アクセスが拒否されました。アカウントとコレクションの権限を確認してください。',
+      rate: 'レート制限に達しました。後で再試行してください。',
+      response: 'Outline の応答に対応していません。バージョンと Markdown API を確認してください。',
+      request: 'スキャンを完了できませんでした。接続を確認して再試行してください。コピーは保持されます。',
+      instance: 'インスタンスまたはワークスペースが変わりました。新しい接続を作成してください。',
+      size: '文書が 32 MiB の上限を超えています。',
+      cursor: '同期チェックポイントが無効です。履歴を消去せず管理者に連絡してください。',
+      pending: '一部の文書は次回の同期で再試行されます。',
+      deletion: '削除を確認できません。コピーは保持されます。documents.deleted の権限を確認してください。',
+      scope: 'アクセス可能で有効なコレクションを選択してください。',
+      running: '同期が待機中または実行中です。完了後に再試行してください。',
+    },
+    fullSyncNow: '完全同期を実行',
+    openSource: '原文を開く',
+    outlineBaseUrl: 'Outline インスタンス URL',
+    prereqBarText_outline: 'Outline 接続の要件',
+    prereqStep1Brief_outline: '読み取り専用 API キーを作成',
+    prereqStep1Desc_outline: '選択したコレクションにアクセスできる専用アカウントを使用してください。',
+    prereqStep2Brief_outline: '必要なエンドポイントを許可',
+    prereqStep2Desc_outline: 'auth.info、collections.list/info、documents.list/info が必要です。削除同期には documents.deleted も必要です。',
+    prereqStep3Brief_outline: '権限と保持設定を確認',
+    prereqStep3Desc_outline: '取り込み後は対象ナレッジベースの権限を使用します。削除を無効にするとコピーを保持します。非公開添付は取得しません。HTTPS を推奨し、HTTP は信頼済み内部ホストに限定します。',
+    prereqOpenConsole_outline: 'Outline API ドキュメント',
     title: 'データソース',
     description: 'このナレッジベースにコンテンツを同期する外部データソースを設定します',
     add: 'データソースを追加',
@@ -6281,6 +6306,7 @@ export default {
       docsFailedSummary: '{n}件のドキュメントの同期に失敗しました'
     },
     connector: {
+      outline: 'Outline',
       feishu: 'Feishu',
       lark: 'Lark',
       feishu_drive: 'Feishu Drive',
@@ -6292,6 +6318,7 @@ export default {
       gitlab: 'GitLab'
     },
     connectorDesc: {
+      outline: 'Outline コレクションの Markdown 文書を同期',
       feishu: 'Feishu Wikiからドキュメント、スプレッドシート、ファイルを同期します',
       lark: 'Lark Wiki（Feishu国際版）からドキュメント、スプレッドシート、ファイルを同期します',
       feishu_drive: 'Feishu Driveのフォルダからドキュメント、スプレッドシート、ファイルを同期します',

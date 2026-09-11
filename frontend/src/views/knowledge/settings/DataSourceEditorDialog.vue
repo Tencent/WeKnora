@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { localizeDatasourceError } from '@/utils/datasourceError'
 import { ref, computed, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -184,6 +185,7 @@ const form = ref({
 // Step 2: Resources
 const resources = ref<Resource[]>([])
 const loadingResources = ref(false)
+const resourceLoadError = ref('')
 const selectedResourceIds = ref<string[]>([])
 const expandedResourceIds = ref(new Set<string>())
 // Lazy loading: parents whose children have already been fetched, and parents
@@ -601,6 +603,18 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'outline',
+    available: true,
+    docUrl: 'https://docs.getoutline.com/s/guide/doc/api-1rEIXDfLF6',
+    permissionDocUrl: 'https://docs.getoutline.com/s/guide/doc/api-1rEIXDfLF6',
+    permissionPageUrl: '',
+    requiredPermissions: ['auth.info', 'collections.list', 'collections.info', 'documents.list', 'documents.info', 'documents.deleted'],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.outlineBaseUrl', placeholder: 'https://outline.example.com' },
+      { key: 'api_key', labelKey: 'datasource.field.apiToken', placeholder: '', secret: true },
+    ],
+  },
+  {
     // Tencent IMA (ima.qq.com). Uses the OpenAPI at /openapi/wiki/v1 with two
     // static headers (ima-openapi-clientid + ima-openapi-apikey); no OAuth.
     type: 'ima',
@@ -767,6 +781,8 @@ function selectType(def: ConnectorDef) {
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = {}
+  resourceLoadError.value = ''
+  if (def.type === 'outline') form.value.conflict_strategy = 'overwrite'
   if (isGitLabConnector(def.type)) addGitLabProject()
   rssAuthHeaders.value = []
   step.value = 1
@@ -809,7 +825,7 @@ async function testConnection() {
     MessagePlugin.success(t('datasource.testSuccess'))
   } catch (e: any) {
     testResult.value = 'error'
-    testErrorMsg.value = e?.message || e?.error || ''
+    testErrorMsg.value = localizeDatasourceError(e?.message || e?.error)
     MessagePlugin.error(t('datasource.testFailed'))
   }
   testing.value = false
@@ -818,12 +834,15 @@ async function testConnection() {
 // --- Load resources ---
 async function loadResources() {
   loadingResources.value = true
+  resourceLoadError.value = ''
   try {
     if (!tempDsId.value) {
       const res = await createDataSource({
         ...form.value,
         knowledge_base_id: props.kbId,
         status: 'paused',
+        sync_schedule: form.value.type === 'outline' ? '' : form.value.sync_schedule,
+        sync_deletions: form.value.type === 'outline' ? false : form.value.sync_deletions,
       } as any)
       const created = res?.data || res
       tempDsId.value = created.id
@@ -831,6 +850,7 @@ async function loadResources() {
       await updateDataSource(tempDsId.value, {
         ...form.value,
         knowledge_base_id: props.kbId,
+        ...(form.value.type === 'outline' ? { status: 'paused', sync_schedule: '', sync_deletions: false } : {}),
       } as any)
     }
 
@@ -862,7 +882,8 @@ async function loadResources() {
       if (hidden.length > 0) void revealExistingSelections(hidden)
     }
   } catch (e: any) {
-    MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+    resourceLoadError.value = localizeDatasourceError(e?.message || e?.error) || t('datasource.resourceLoadFailed')
+    MessagePlugin.error(resourceLoadError.value)
   }
   loadingResources.value = false
 }
@@ -1621,6 +1642,13 @@ const drawerConfirmText = computed(() => {
       </div>
 
       <div v-else-if="loadingResources" class="ds-loading-center"><t-loading /></div>
+      <div v-else-if="form.type === 'outline' && resourceLoadError" class="ds-resource-empty" role="alert">
+        <p class="ds-empty-title">{{ resourceLoadError }}</p>
+        <t-button variant="text" @click="loadResources">
+          <template #icon><t-icon name="refresh" /></template>
+          {{ t('datasource.retryLoadResources') }}
+        </t-button>
+      </div>
       <div v-else-if="resources.length > 0" class="resource-picker">
         <div class="resource-picker__toolbar">
           <span class="resource-picker__count">
@@ -1793,6 +1821,7 @@ const drawerConfirmText = computed(() => {
               {{ t('datasource.conflict.overwrite') }}
             </button>
             <button
+              v-if="form.type !== 'outline'"
               type="button"
               class="option-pill"
               :class="{ 'is-active': form.conflict_strategy === 'skip' }"

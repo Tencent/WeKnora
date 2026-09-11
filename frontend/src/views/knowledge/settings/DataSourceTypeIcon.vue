@@ -44,6 +44,7 @@ function fallbackText(type: string) {
       class="ds-type-icon__img"
       :style="variant === 'inline' ? { width: `${size}px`, height: `${size}px` } : undefined"
     >
+    <t-icon v-else-if="type === 'outline'" name="root-list" :size="size" />
     <span v-else class="ds-type-icon-fallback">{{ fallbackText(type) }}</span>
   </span>
 </template>

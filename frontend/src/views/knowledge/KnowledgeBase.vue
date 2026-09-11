@@ -601,6 +601,7 @@ const sourceOptions = computed(() => [
   { label: t('knowledgeBase.channelFeishuDrive'), value: 'feishu_drive' },
   { label: t('knowledgeBase.channelNotion'), value: 'notion' },
   { label: t('knowledgeBase.channelYuque'), value: 'yuque' },
+  { label: 'Outline', value: 'outline' },
   { label: t('knowledgeBase.channelGitLab'), value: 'gitlab' },
   { label: t('knowledgeBase.channelIma'), value: 'ima' },
   { label: t('knowledgeBase.channelWechat'), value: 'wechat' },

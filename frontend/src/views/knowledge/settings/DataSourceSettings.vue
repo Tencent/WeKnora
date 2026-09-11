@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { localizeDatasourceError } from '@/utils/datasourceError'
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -95,13 +96,13 @@ async function removeDataSource(ds: DataSource) {
   }
 }
 
-async function handleSync(ds: DataSource) {
+async function handleSync(ds: DataSource, forceFull = false) {
   try {
-    await triggerSync(ds.id)
+    await triggerSync(ds.id, forceFull)
     MessagePlugin.success(t('datasource.syncTriggered'))
     await loadList(true)
   } catch (e: any) {
-    MessagePlugin.error(e?.message || e?.error || t('datasource.syncFailed'))
+    MessagePlugin.error(localizeDatasourceError(e?.message || e?.error) || t('datasource.syncFailed'))
   }
 }
 
@@ -234,6 +235,13 @@ onBeforeUnmount(stopPolling)
                       >
                         <t-icon name="refresh" :class="{ 'ds-icon-spin': isSyncRunning(ds) }" />
                         {{ isSyncRunning(ds) ? t('datasource.logStatus.running') : t('datasource.syncNow') }}
+                      </t-dropdown-item>
+                      <t-dropdown-item
+                        v-if="canManageDataSource && ds.type === 'outline'"
+                        :disabled="isSyncRunning(ds)"
+                        @click="handleSync(ds, true)"
+                      >
+                        <t-icon name="refresh" /> {{ t('datasource.fullSyncNow') }}
                       </t-dropdown-item>
                       <t-dropdown-item @click="openLogs(ds)">
                         <t-icon name="root-list" /> {{ t('datasource.logs') }}

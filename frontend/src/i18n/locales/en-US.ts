@@ -6172,6 +6172,31 @@ export default {
     daysAgo: '{days} days ago'
   },
   datasource: {
+    outlineError: {
+      auth: 'Authentication failed. Replace the API key.',
+      permission: 'Access denied. Check the account and collection permissions.',
+      rate: 'Rate limit reached. Retry later.',
+      response: 'Unsupported Outline response. Check the deployment version and Markdown API support.',
+      request: 'The scan could not finish. Check connectivity and retry; existing copies are retained.',
+      instance: 'The instance or workspace changed. Create a new connection.',
+      size: 'The document exceeds the 32 MiB limit.',
+      cursor: 'Invalid sync checkpoint. Contact an administrator; do not clear the baseline.',
+      pending: 'Some documents are pending retry on the next sync.',
+      deletion: 'Deletion could not be confirmed. Copies are retained; check documents.deleted permissions.',
+      scope: 'Select at least one accessible, active collection.',
+      running: 'A sync is queued or running. Try again after it finishes.',
+    },
+    fullSyncNow: 'Run full sync',
+    openSource: 'Open original',
+    outlineBaseUrl: 'Outline instance URL',
+    prereqBarText_outline: 'Outline connection requirements',
+    prereqStep1Brief_outline: 'Create a read-only API key',
+    prereqStep1Desc_outline: 'Use a dedicated account with access to the selected collections.',
+    prereqStep2Brief_outline: 'Allow the required endpoints',
+    prereqStep2Desc_outline: 'Allow auth.info, collections.list/info and documents.list/info. Deletion sync also requires documents.deleted.',
+    prereqStep3Brief_outline: 'Review access and retention',
+    prereqStep3Desc_outline: 'Imported content uses target knowledge base permissions. Disabling deletion keeps copies. Private attachments are not downloaded. Use HTTPS; HTTP is limited to trusted private hosts.',
+    prereqOpenConsole_outline: 'Outline API documentation',
     title: 'Data Sources',
     description: 'Configure external data sources to sync content into this knowledge base',
     add: 'Add Data Source',
@@ -6281,6 +6306,7 @@ export default {
       docsFailedSummary: '{n} document(s) failed to sync'
     },
     connector: {
+      outline: 'Outline',
       feishu: 'Feishu',
       lark: 'Lark',
       feishu_drive: 'Feishu Drive',
@@ -6292,6 +6318,7 @@ export default {
       gitlab: 'GitLab'
     },
     connectorDesc: {
+      outline: 'Sync Markdown documents from Outline collections',
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
       lark: 'Sync documents, spreadsheets and files from Lark Wiki (Feishu international)',
       feishu_drive: 'Sync documents, spreadsheets and files from a Feishu Drive folder',
