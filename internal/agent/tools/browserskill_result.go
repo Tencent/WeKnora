@@ -29,37 +29,52 @@ func browserRecoveryHint(method string, err *browserskill.RPCError) string {
 	}
 	_ = json.Unmarshal(err.Data, &data)
 	if err.Code == "user_aborted" || err.Code == "cancelled" {
-		return "Stop browser actions. The operation was interrupted; wait for the user to resume. Do not replay it."
+		return "Stop browser actions. The operation was interrupted; wait for the user to resume. " +
+			"Do not replay it."
 	}
 	if data.Effect == "unknown" || data.Effect == "committed" {
-		return "The action may already have taken effect. Observe current state before deciding what remains; do not repeat the action blindly."
+		return "The action may already have taken effect. Observe current state before deciding " +
+			"what remains; do not repeat the action blindly."
 	}
 	switch data.Reason {
 	case "ref_not_found":
-		return "Observe the current tab and retry the intended action once using its fresh ref. Do not guess another ref."
+		return "Observe the current tab and retry the intended action once using its fresh ref. " +
+			"Do not guess another ref."
 	case "element_not_visible":
-		return "Observe the active dialog/menu and target visibility. Reveal the intended control before acting; do not click adjacent refs or hidden elements."
+		return "Observe the active dialog/menu and target visibility. Reveal the intended control " +
+			"before acting; do not click adjacent refs or hidden elements."
 	case "selector_not_found":
-		return "Observe the current page and locate the intended target. Do not guess selectors; refs can address iframe/shadow-root controls."
-	case "target_not_fillable", "fill_value_invalid", "fill_target_changed", "fill_focus_lost", "fill_value_mismatch", "fill_failed":
-		return "Observe the current editable field and its value first. The page may have changed or formatted it. Correct only the remaining difference; do not blindly repeat fill."
+		return "Observe the current page and locate the intended target. Do not guess selectors; " +
+			"refs can address iframe/shadow-root controls."
+	case "target_not_fillable", "fill_value_invalid", "fill_target_changed", "fill_focus_lost",
+		"fill_value_mismatch", "fill_failed":
+		return "Observe the current editable field and its value first. The page may have changed " +
+			"or formatted it. Correct only the remaining difference; do not blindly repeat fill."
 	case "target_not_select", "option_not_found", "single_select_value_count":
-		return "select requires a native select and its option values. Inspect current options; use click/observe for a custom dropdown."
+		return "select requires a native select and its option values. Inspect current options; " +
+			"use click/observe for a custom dropdown."
 	case "agent_window_scope", "borrow_conflict":
-		return "List actual user tabs and respect tab ownership. Borrow the intended available tab through extension confirmation; never guess its ID."
+		return "List actual user tabs and respect tab ownership. Borrow the intended available tab " +
+			"through extension confirmation; never guess its ID."
 	}
 	switch err.Code {
 	case "invalid_params":
 		if method == "press" {
-			return "press accepts a key or shortcut such as Enter or Ctrl+A. For text input use fill with a fresh ref and value."
+			return "press accepts a key or shortcut such as Enter or Ctrl+A. For text input use " +
+				"fill with a fresh ref and value."
 		}
-		return "Use the method's documented fields at the top level. Correct the reported argument instead of guessing alternative parameter names."
+		return "Use the method's documented fields at the top level. Correct the reported argument " +
+			"instead of guessing alternative parameter names."
 	case "timeout", "cdp_failed":
-		return "Inspect current page state before retrying: the action may already have occurred. Stop repeated attempts without new evidence; do not automatically reload or replay mutations."
+		return "Inspect current page state before retrying: the action may already have occurred. " +
+			"Stop repeated attempts without new evidence; do not automatically reload or replay " +
+			"mutations."
 	case "not_found":
-		return "Refresh the current tab/page state and use returned identifiers. Do not invent tab, session or element IDs."
+		return "Refresh the current tab/page state and use returned identifiers. Do not invent " +
+			"tab, session or element IDs."
 	default:
-		return "Use the error details to identify the blocker. Do not repeat an unchanged failed action or bypass browser permissions."
+		return "Use the error details to identify the blocker. Do not repeat an unchanged failed " +
+			"action or bypass browser permissions."
 	}
 }
 
@@ -79,12 +94,17 @@ func (t *BrowserSkillTool) interpretResult(method string, raw json.RawMessage) *
 		if err == nil && envelope.OK != nil && *envelope.OK {
 			return result
 		}
-		result.Error = "Browser evaluate failed or returned an invalid result. Inspect ok/error; return bounded serializable data, not DOM nodes. Observe before retrying."
+		result.Error = "Browser evaluate failed or returned an invalid result. Inspect ok/error; " +
+			"return bounded serializable data, not DOM nodes. Observe before retrying."
 	} else {
 		if err == nil && (envelope.Outcome == "continued" || envelope.Outcome == "completed") {
 			return result
 		}
-		result.Error = fmt.Sprintf("Browser human step did not complete (outcome=%q). Stop browser actions until the user resumes in a new turn.", envelope.Outcome)
+		result.Error = fmt.Sprintf(
+			"Browser human step did not complete (outcome=%q). "+
+				"Stop browser actions until the user resumes in a new turn.",
+			envelope.Outcome,
+		)
 		reason := result.Error
 		t.blocked.Store(&reason)
 	}

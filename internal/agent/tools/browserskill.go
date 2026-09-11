@@ -36,7 +36,12 @@ type BrowserSkillTool struct {
 }
 
 // NewBrowserSkillTool creates a session-bound adapter to upstream RPC.
-func NewBrowserSkillTool(manager *browserskill.Manager, scope browserskill.Scope, session string, searchInstructions ...string) *BrowserSkillTool {
+func NewBrowserSkillTool(
+	manager *browserskill.Manager,
+	scope browserskill.Scope,
+	session string,
+	searchInstructions ...string,
+) *BrowserSkillTool {
 	return &BrowserSkillTool{
 		BaseTool: NewBaseTool(
 			"local_browser",

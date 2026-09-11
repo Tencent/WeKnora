@@ -11,8 +11,11 @@ func browserDescription(instructions []string) string {
 	if len(instructions) > 0 {
 		prefs.BrowserSearchInstructions = &instructions[0]
 	}
-	return browserToolDescription + "\n\nSearch preferences (current user request overrides; browser control rules still apply):\n<browser_search_preferences>\n" +
-		html.EscapeString(prefs.EffectiveBrowserSearchInstructions()) + "\n</browser_search_preferences>"
+	return browserToolDescription +
+		"\n\nSearch preferences (current user request overrides; browser control rules still apply):\n" +
+		"<browser_search_preferences>\n" +
+		html.EscapeString(prefs.EffectiveBrowserSearchInstructions()) +
+		"\n</browser_search_preferences>"
 }
 
 // The local_browser operating contract is maintained here, not in editable agent

@@ -15,14 +15,21 @@ func TestBrowserOperationResultsAndRecovery(t *testing.T) {
 		name, args, response string
 		success, blocks      bool
 	}{
-		{"evaluate exception", `{"method":"evaluate","expression":"document.querySelector('missing').textContent"}`, `{"ok":false,"error":{"text":"TypeError"}}`, false, false},
+		{
+			"evaluate exception",
+			`{"method":"evaluate","expression":"document.querySelector('missing').textContent"}`,
+			`{"ok":false,"error":{"text":"TypeError"}}`, false, false,
+		},
 		{"evaluate null", `{"method":"evaluate","expression":"null"}`, `{"ok":true,"value":null}`, true, false},
 		{"evaluate missing envelope", `{"method":"evaluate","expression":"1"}`, `{}`, false, false},
 		{"page error text is data", `{"method":"observe"}`, `{"text":"Error: page not found"}`, true, false},
 		{"help cancelled", `{"method":"request_help","prompt":"Sign in"}`, `{"outcome":"cancelled"}`, false, true},
 		{"help timeout", `{"method":"request_help","prompt":"Sign in"}`, `{"outcome":"timed_out"}`, false, true},
 		{"help disabled", `{"method":"request_help","prompt":"Sign in"}`, `{"outcome":"disabled"}`, false, true},
-		{"help navigation is not completion", `{"method":"request_help","prompt":"Sign in"}`, `{"outcome":"navigated"}`, false, true},
+		{
+			"help navigation is not completion",
+			`{"method":"request_help","prompt":"Sign in"}`, `{"outcome":"navigated"}`, false, true,
+		},
 		{"help missing outcome", `{"method":"request_help","prompt":"Sign in"}`, `{}`, false, true},
 		{"help completed", `{"method":"request_help","prompt":"Sign in"}`, `{"outcome":"completed"}`, true, false},
 		{"help continued", `{"method":"request_help","prompt":"Sign in"}`, `{"outcome":"continued"}`, true, false},
@@ -97,7 +104,9 @@ func TestBrowserRPCFailureReachesModelAndAllowsFreshObservation(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, fresh.Success)
 	require.Equal(t, 2, manager.calls)
-	invalid, err := registry.ExecuteTool(ctx, "local_browser", json.RawMessage(`{"method":"observe","max_text_chars":3000}`))
+	invalid, err := registry.ExecuteTool(
+		ctx, "local_browser", json.RawMessage(`{"method":"observe","max_text_chars":3000}`),
+	)
 	require.NoError(t, err)
 	require.False(t, invalid.Success)
 	require.Contains(t, invalid.Error, "allowed fields:")

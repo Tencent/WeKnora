@@ -23,10 +23,16 @@ type browserPreferencesUserService struct {
 func (s *browserPreferencesUserService) GetCurrentUser(context.Context) (*types.User, error) {
 	return &types.User{ID: "current-user"}, nil
 }
-func (s *browserPreferencesUserService) BuildLoginMemberships(context.Context, *types.User, *types.Tenant) []types.Membership {
+
+func (s *browserPreferencesUserService) BuildLoginMemberships(
+	context.Context, *types.User, *types.Tenant,
+) []types.Membership {
 	return nil
 }
-func (s *browserPreferencesUserService) UpdateUserPreferences(_ context.Context, id string, patch types.UserPreferences) (types.UserPreferences, error) {
+
+func (s *browserPreferencesUserService) UpdateUserPreferences(
+	_ context.Context, id string, patch types.UserPreferences,
+) (types.UserPreferences, error) {
 	s.updatedUser, s.patch = id, patch
 	return patch, nil
 }
@@ -48,7 +54,9 @@ func TestBrowserPreferenceAPIExposesDefaultAndUpdatesCurrentUser(t *testing.T) {
 	require.Equal(t, types.DefaultBrowserSearchInstructions, payload.Data.Defaults["browser_search_instructions"])
 	w = httptest.NewRecorder()
 	c, _ = gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("PUT", "/auth/me/preferences", strings.NewReader(`{"user_id":"another-user","browser_search_instructions":"Use my engine"}`))
+	c.Request = httptest.NewRequest("PUT", "/auth/me/preferences", strings.NewReader(
+		`{"user_id":"another-user","browser_search_instructions":"Use my engine"}`,
+	))
 	c.Request.Header.Set("Content-Type", "application/json")
 	h.UpdateMyPreferences(c)
 	require.Equal(t, 200, w.Code)
@@ -57,7 +65,9 @@ func TestBrowserPreferenceAPIExposesDefaultAndUpdatesCurrentUser(t *testing.T) {
 	require.Equal(t, "Use my engine", *users.patch.BrowserSearchInstructions)
 	users.updatedUser = ""
 	c, _ = gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest("PUT", "/auth/me/preferences", strings.NewReader(`{"browser_search_instructions":"`+strings.Repeat("a", 4001)+`"}`))
+	c.Request = httptest.NewRequest("PUT", "/auth/me/preferences", strings.NewReader(
+		`{"browser_search_instructions":"`+strings.Repeat("a", 4001)+`"}`,
+	))
 	c.Request.Header.Set("Content-Type", "application/json")
 	h.UpdateMyPreferences(c)
 	require.NotEmpty(t, c.Errors)

@@ -573,10 +573,10 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 			lines = append(
 				lines,
 				fmt.Sprintf(
-					"Use discover_mcp_tools(mode=\"list_tools\", server_id=%q) for the selected MCP service "+
-						"@%s. Describe the required tools, then use the offered functions or call_mcp_tool as available before "+
-						"answering; report connection or authentication failures if the service is "+
-						"unavailable.",
+					"Use discover_mcp_tools(mode=\"list_tools\", server_id=%q) for the selected MCP "+
+						"service @%s. Describe the required tools, then use the offered functions or "+
+						"call_mcp_tool as available before answering; report connection or "+
+						"authentication failures if the service is unavailable.",
 					sanitizeMustUseField(svc.ID),
 					sanitizeMustUseField(svc.Name),
 				),
@@ -591,20 +591,29 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 		if display == "" {
 			display = sanitizeMustUseField(svc.ID)
 		}
-		lines = append(lines, fmt.Sprintf("Must use MCP tools whose names start with %s (@%s) to answer the question below.", prefix, display))
+		lines = append(lines, fmt.Sprintf(
+			"Must use MCP tools whose names start with %s (@%s) to answer the question below.",
+			prefix, display,
+		))
 	}
 	for _, skill := range skills {
 		if skill == nil || skill.Name == "" {
 			continue
 		}
 		name := sanitizeMustUseField(skill.Name)
-		lines = append(lines, fmt.Sprintf("Must call read_file(path=%q) for @Skill %q before answering.", "skill://"+name+"/SKILL.md", name))
+		lines = append(lines, fmt.Sprintf(
+			"Must call read_file(path=%q) for @Skill %q before answering.",
+			"skill://"+name+"/SKILL.md", name,
+		))
 	}
 	if len(lines) == 0 {
 		return ""
 	}
 	return "<must_use>\n" + strings.Join(lines, "\n") +
-		"\nThese selections do not replace research into the task's factual content or exclude other relevant available sources unless the user explicitly restricts them. Apply selections to the relevant parts of the task; an @mention does not authorize unrelated actions. Follow the user's current explicit restrictions if they narrow or cancel a selection.\n</must_use>"
+		"\nThese selections do not replace research into the task's factual content or exclude other " +
+		"relevant available sources unless the user explicitly restricts them. Apply selections to the " +
+		"relevant parts of the task; an @mention does not authorize unrelated actions. Follow the " +
+		"user's current explicit restrictions if they narrow or cancel a selection.\n</must_use>"
 }
 
 // sanitizeMustUseField strips newlines and angle brackets so an MCP/skill name

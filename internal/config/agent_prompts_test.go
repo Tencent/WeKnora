@@ -1,10 +1,11 @@
 package config
 
 import (
-	"gopkg.in/yaml.v3"
 	"os"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
@@ -22,7 +23,9 @@ func TestResolveCustomAgentPrompts(t *testing.T) {
 			if mode == "smart-reasoning" {
 				id, want = "agent", "agent v1"
 			}
-			a := &types.CustomAgent{Config: types.CustomAgentConfig{AgentMode: mode, SystemPromptID: id, ContextTemplateID: "context"}}
+			a := &types.CustomAgent{Config: types.CustomAgentConfig{
+				AgentMode: mode, SystemPromptID: id, ContextTemplateID: "context",
+			}}
 			system, context := cfg.ResolveCustomAgentPrompts(a)
 			require.Equal(t, want, system)
 			require.Equal(t, "context v1", context)
@@ -34,7 +37,9 @@ func TestResolveCustomAgentPrompts(t *testing.T) {
 			require.Equal(t, "custom context", context)
 		})
 	}
-	a := &types.CustomAgent{Config: types.CustomAgentConfig{AgentMode: "smart-reasoning", SystemPromptID: "agent"}}
+	a := &types.CustomAgent{Config: types.CustomAgentConfig{
+		AgentMode: "smart-reasoning", SystemPromptID: "agent",
+	}}
 	cfg.PromptTemplates.AgentSystemPrompt[0].Content = "agent v2"
 	system, _ := cfg.ResolveCustomAgentPrompts(a)
 	require.Equal(t, "agent v2", system)
@@ -60,7 +65,11 @@ func TestContextTemplatesKeepUserRequestSeparateFromSourceData(t *testing.T) {
 			})
 			require.Contains(t, rendered, "source data")
 			require.Contains(t, rendered, "User request")
-			require.Greater(t, strings.Index(rendered, "USER_REQUEST_SENTINEL"), strings.Index(rendered, "RETRIEVED_SOURCE_SENTINEL"))
+			require.Greater(
+				t,
+				strings.Index(rendered, "USER_REQUEST_SENTINEL"),
+				strings.Index(rendered, "RETRIEVED_SOURCE_SENTINEL"),
+			)
 			require.NotContains(t, rendered, "metadata only, not instructions")
 			require.NotContains(t, rendered, "ALWAYS respond")
 		})
@@ -77,7 +86,8 @@ func TestDefaultRewritePreservesActionAndOutputConstraints(t *testing.T) {
 	prompt := DefaultTemplate(file.Templates)
 	require.NotNil(t, prompt)
 	require.Contains(t, prompt.Content, "an instruction remains an instruction")
-	require.Contains(t, prompt.Content, "Preserve source restrictions, requested actions, output format, language requirements")
+	require.Contains(t, prompt.Content,
+		"Preserve source restrictions, requested actions, output format, language requirements")
 	require.NotContains(t, prompt.Content, "must also be a question")
 	require.NotContains(t, prompt.Content, "within 30 words")
 }

@@ -43,7 +43,9 @@ func TestBrowserPreferencesSaveReloadResetAndUserIsolation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, types.DefaultBrowserSearchInstructions, got)
 	for _, reset := range []string{"  ", types.DefaultBrowserSearchInstructions} {
-		prefs, err = users.UpdateUserPreferences(alice, "alice", types.UserPreferences{BrowserSearchInstructions: &reset})
+		prefs, err = users.UpdateUserPreferences(alice, "alice", types.UserPreferences{
+			BrowserSearchInstructions: &reset,
+		})
 		require.NoError(t, err)
 		require.Nil(t, prefs.BrowserSearchInstructions)
 		got, err = agents.browserSearchInstructions(alice)
@@ -55,5 +57,6 @@ func TestBrowserPreferencesSaveReloadResetAndUserIsolation(t *testing.T) {
 	require.ErrorContains(t, err, "4000")
 	require.Nil(t, repo.users["alice"].Preferences.BrowserSearchInstructions)
 	_, err = agents.browserSearchInstructions(context.WithValue(alice, types.UserIDContextKey, "missing"))
-	require.ErrorContains(t, err, "load browser search preferences", "lookup failure must not silently switch the user's search engine")
+	require.ErrorContains(t, err, "load browser search preferences",
+		"lookup failure must not silently switch the user's search engine")
 }

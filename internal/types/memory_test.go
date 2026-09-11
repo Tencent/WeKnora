@@ -246,7 +246,8 @@ func TestMemoryCannotBreakOutOfEnvelope(t *testing.T) {
 	if strings.Count(got, "</user_memory>") != 1 || strings.Contains(got, "<system>") {
 		t.Fatalf("memory escaped its data envelope: %s", got)
 	}
-	if !strings.Contains(got, "Remembered preferences can inform relevant defaults") || !strings.Contains(got, "A &amp; B") {
+	if !strings.Contains(got, "Remembered preferences can inform relevant defaults") ||
+		!strings.Contains(got, "A &amp; B") {
 		t.Fatalf("missing preference semantics or escaping: %s", got)
 	}
 }

@@ -17,5 +17,6 @@ func TestImagePolicyUsesStableSystemPrefixAndPreservesUserRequest(t *testing.T) 
 	require.Equal(t, without[0], with[0], "retrieving images must not change the system prefix")
 	require.Contains(t, with[0].Content, types.SourcedAnswerOutputPrompt)
 	require.Contains(t, with[0].Content, "requested format supports images")
-	require.Equal(t, cm.UserContent, with[1].Content, "no generated instruction may masquerade as part of the user request")
+	require.Equal(t, cm.UserContent, with[1].Content,
+		"no generated instruction may masquerade as part of the user request")
 }

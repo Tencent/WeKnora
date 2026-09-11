@@ -35,8 +35,12 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	// into user instructions during error recovery or iteration-limit synthesis.
 	messages := append([]chat.Message(nil), conversation...)
 	messages = append(messages, chat.Message{
-		Role:    "user",
-		Content: "Tool execution has ended for this run. Respond to the current task, including the latest user corrections and source restrictions in the conversation. Base claims on the evidence actually obtained; distinguish completed work from remaining work and explain any missing evidence. Use the user's requested language and format. Do not claim that an unperformed action succeeded.",
+		Role: "user",
+		Content: "Tool execution has ended for this run. Respond to the current task, including " +
+			"the latest user corrections and source restrictions in the conversation. Base claims on " +
+			"the evidence actually obtained; distinguish completed work from remaining work and explain " +
+			"any missing evidence. Use the user's requested language and format. Do not claim that an " +
+			"unperformed action succeeded.",
 	})
 
 	// Generate a single ID for this entire final answer stream

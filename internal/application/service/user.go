@@ -630,7 +630,10 @@ func (s *userService) UpdateUserPreferences(
 	if patch.BrowserSearchInstructions != nil {
 		value := strings.TrimSpace(*patch.BrowserSearchInstructions)
 		if utf8.RuneCountInString(value) > types.MaxBrowserSearchInstructionsLength {
-			return types.UserPreferences{}, fmt.Errorf("browser search instructions must not exceed %d characters", types.MaxBrowserSearchInstructionsLength)
+			return types.UserPreferences{}, fmt.Errorf(
+				"browser search instructions must not exceed %d characters",
+				types.MaxBrowserSearchInstructionsLength,
+			)
 		}
 		merged.BrowserSearchInstructions = nil
 		if value != "" && value != types.DefaultBrowserSearchInstructions {

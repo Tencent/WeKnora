@@ -1,3 +1,4 @@
+// Package config loads WeKnora runtime configuration.
 package config
 
 import "github.com/Tencent/WeKnora/internal/types"

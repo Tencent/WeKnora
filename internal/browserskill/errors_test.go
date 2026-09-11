@@ -17,7 +17,7 @@ func TestRPCPreservesRecoveryDetails(t *testing.T) {
 	home, err := os.MkdirTemp("", "bsk-rpc-")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(home) })
-	require.NoError(t, os.Mkdir(filepath.Join(home, "run"), 0700))
+	require.NoError(t, os.Mkdir(filepath.Join(home, "run"), 0o700))
 	listener, err := net.Listen("unix", filepath.Join(home, "run", "daemon.sock"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })
@@ -28,7 +28,7 @@ func TestRPCPreservesRecoveryDetails(t *testing.T) {
 			done <- err
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		var request struct {
 			ID string `json:"id"`
 		}
@@ -50,7 +50,9 @@ func TestRPCPreservesRecoveryDetails(t *testing.T) {
 }
 
 func TestRPCErrorBoundsLargeDetails(t *testing.T) {
-	data, err := json.Marshal(map[string]any{"reason": "fill_failed", "effect_state": "unknown", "page": strings.Repeat("x", 9000)})
+	data, err := json.Marshal(map[string]any{
+		"reason": "fill_failed", "effect_state": "unknown", "page": strings.Repeat("x", 9000),
+	})
 	require.NoError(t, err)
 	rpcErr := &RPCError{Code: "cdp_failed", Message: "failure", Data: data}
 	rpcErr.BoundDetails()

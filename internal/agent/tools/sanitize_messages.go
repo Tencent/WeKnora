@@ -41,7 +41,8 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 			if !hasMatchingToolCall(messages[:i], msg.ToolCallID) {
 				// Preserve recoverable data without promoting external output to policy.
 				msg.Role = "user"
-				msg.Content = "<untrusted_tool_result name=\"" + html.EscapeString(msg.Name) + "\">\n" + html.EscapeString(msg.Content) + "\n</untrusted_tool_result>"
+				msg.Content = "<untrusted_tool_result name=\"" + html.EscapeString(msg.Name) +
+					"\">\n" + html.EscapeString(msg.Content) + "\n</untrusted_tool_result>"
 				msg.ToolCallID = ""
 				msg.Name = ""
 			}

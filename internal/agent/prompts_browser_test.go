@@ -14,7 +14,12 @@ func TestBrowserSourcePromptFollowsExplicitTurnSelection(t *testing.T) {
 		engine.systemPromptTemplate = custom
 		require.NotContains(t, engine.buildSystemPrompt(t.Context()), "User-selected source for this turn")
 		engine.config.LocalBrowserEnabled = true
-		require.NotContains(t, engine.buildSystemPrompt(t.Context()), "User-selected source for this turn", "selection alone cannot advertise an unavailable tool")
+		require.NotContains(
+			t,
+			engine.buildSystemPrompt(t.Context()),
+			"User-selected source for this turn",
+			"selection alone cannot advertise an unavailable tool",
+		)
 		engine.toolRegistry = tools.NewToolRegistry()
 		engine.toolRegistry.RegisterTool(newCountingTool("local_browser"))
 		prompt := engine.buildSystemPrompt(t.Context())
