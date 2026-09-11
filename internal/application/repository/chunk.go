@@ -543,9 +543,27 @@ func (r *chunkRepository) DeleteChunks(ctx context.Context, tenantID uint64, ids
 	return nil
 }
 
-// DeleteChunksByKnowledgeID deletes all chunks for a knowledge ID
+// DeleteChunksByKnowledgeID deletes all chunks for a knowledge ID.
+//
+// Hard delete (Unscoped) on purpose. This is a whole-document teardown, used by
+// three paths that all destroy the document's retrievability in the same breath:
+// knowledge deletion, KB deletion, and the idempotent cleanup that runs at the
+// top of every (re)parse in processChunks. Every one of them also calls
+// retrieveEngine.DeleteByKnowledgeIDList, which hard-deletes the corresponding
+// vectors — so a soft-deleted chunk left behind is not recoverable in any
+// meaningful sense, it is just a dead row.
+//
+// Left as a soft delete, the rows accumulate forever: nothing purges them and
+// no read path ever passes Unscoped() to see them again. Re-parsing a single
+// document N times leaves N generations of its chunks behind.
+//
+// seq_id stays safe under a hard delete: Postgres/MySQL take it from a DB
+// sequence, which never reuses a value. Only SQLite derives it from
+// MAX(seq_id)+1 (see types.AssignChunkSeqIDs), so there the external ids of
+// deleted chunks can be handed out again — harmless for uniqueness, since the
+// rows holding them are gone.
 func (r *chunkRepository) DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error {
-	return r.db.WithContext(ctx).Where(
+	return r.db.WithContext(ctx).Unscoped().Where(
 		"tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID,
 	).Delete(&types.Chunk{}).Error
 }
@@ -564,9 +582,11 @@ func (r *chunkRepository) ListImageInfoByKnowledgeIDs(
 	return results, err
 }
 
-// DeleteByKnowledgeList deletes all chunks for a knowledge list
+// DeleteByKnowledgeList deletes all chunks for a knowledge list.
+// Hard delete for the same reason as DeleteChunksByKnowledgeID — this is the
+// batch variant of the same whole-document teardown.
 func (r *chunkRepository) DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error {
-	return r.db.WithContext(ctx).Where(
+	return r.db.WithContext(ctx).Unscoped().Where(
 		"tenant_id = ? AND knowledge_id in ?", tenantID, knowledgeIDs,
 	).Delete(&types.Chunk{}).Error
 }
