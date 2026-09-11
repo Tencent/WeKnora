@@ -285,6 +285,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "token",
 		Capabilities: []string{"incremental", "hierarchical"},
 	},
+	types.ConnectorTypeOutline: {
+		Type:         types.ConnectorTypeOutline,
+		Name:         "Outline",
+		Description:  "Sync documents from Outline collections (cloud or self-hosted)",
+		Priority:     13,
+		AuthType:     "api_key",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
 }
 
 // ListAvailableConnectors returns all available connector metadata
