@@ -112,6 +112,7 @@ func (h *Handler) BrowserSkillAccount(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
 	var input struct {
 		Action string `json:"action"`
+		Origin string `json:"origin"`
 	}
 	if c.ShouldBindJSON(&input) != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid browser action"})
@@ -119,7 +120,7 @@ func (h *Handler) BrowserSkillAccount(c *gin.Context) {
 	}
 	switch input.Action {
 	case "pair":
-		link, err := h.browserSkill.Pair(ctx, scope)
+		link, err := h.browserSkill.Pair(ctx, scope, input.Origin)
 		if err != nil {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			return

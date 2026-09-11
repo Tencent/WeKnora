@@ -44,6 +44,7 @@ func (s Scope) valid() bool { return s.Tenant != 0 && s.User != "" }
 
 // Status describes the connection and current conversation task.
 type Status struct {
+	Idle      bool   `json:"idle"`
 	NeedsHelp bool   `json:"needs_help"`
 	Enabled   bool   `json:"enabled"`
 	Selected  bool   `json:"selected"`
@@ -57,6 +58,7 @@ type task struct {
 	previewAt        time.Time
 	previewData      json.RawMessage
 	previewBusy      bool
+	idle             bool
 	id               string
 	selected, paused bool
 	starting         bool
@@ -118,7 +120,7 @@ func NewManager(stores ...*Store) *Manager {
 }
 
 // Enabled reports whether the browser integration has been configured.
-func (m *Manager) Enabled() bool { return m != nil && m.binary != "" && m.publicURL != "" }
+func (m *Manager) Enabled() bool { return m != nil && m.binary != "" }
 
 func (m *Manager) get(s Scope) *device {
 	if m == nil || !s.valid() {
@@ -142,6 +144,7 @@ func (m *Manager) Status(s Scope, session string) Status {
 	if t := d.tasks[session]; t != nil {
 		result.Selected = t.selected
 		result.Paused = t.paused
+		result.Idle = t.idle
 		result.SessionID = t.id
 		result.NeedsHelp = t.helpCalls > 0 && !t.paused
 	}
@@ -163,13 +166,37 @@ func pairingEndpoint(raw string) (string, error) {
 	return u.String(), nil
 }
 
+// pairingURL uses the explicit gateway override, or the browser's page origin.
+// The origin only builds a link returned to the caller; it is never dialed by
+// the server. Using the page origin preserves external ports behind proxies.
+func (m *Manager) pairingURL(origin string) (string, error) {
+	if m.publicURL != "" {
+		return pairingEndpoint(m.publicURL)
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" || u.User != nil || u.Path != "" ||
+		u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return "", errors.New("invalid BrowserSkill page origin")
+	}
+	switch u.Scheme {
+	case "https":
+		u.Scheme = "wss"
+	case "http":
+		u.Scheme = "ws"
+	default:
+		return "", errors.New("BrowserSkill page origin requires HTTP or HTTPS")
+	}
+	u.Path = "/api/v1/local-browser/extension"
+	return pairingEndpoint(u.String())
+}
+
 // Pair issues a five-minute, single-use activation link. Existing device
 // authorization is replaced only when the extension redeems it successfully.
-func (m *Manager) Pair(ctx context.Context, s Scope) (string, error) {
+func (m *Manager) Pair(ctx context.Context, s Scope, origin string) (string, error) {
 	if !m.Enabled() || !s.valid() || m.store == nil {
 		return "", errors.New("local browser is unavailable")
 	}
-	endpoint, err := pairingEndpoint(m.publicURL)
+	endpoint, err := m.pairingURL(origin)
 	if err != nil {
 		return "", err
 	}
@@ -663,6 +690,7 @@ func (m *Manager) Call(
 			return nil, errors.New("local browser was interrupted; ask the user to resume")
 		}
 	}
+	t.idle = false
 	id := t.id
 	callCtx, cancel := context.WithCancel(ctx)
 	t.nextCall++
@@ -689,6 +717,14 @@ func (m *Manager) Call(
 	for k, v := range params {
 		if k != "session_id" && k != "browser_instance_id" {
 			clean[k] = v
+		}
+	}
+	// Reading page content does not require every image, ad and subframe to load.
+	// Callers can explicitly request load/networkidle for a page that needs it.
+	switch method {
+	case "navigate", "navigate_back", "navigate_forward", "reload":
+		if _, supplied := clean["wait_until"]; !supplied {
+			clean["wait_until"] = "domcontentloaded"
 		}
 	}
 	clean["session_id"] = id
@@ -892,6 +928,7 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 	}
 	if t.epoch == epoch {
 		t.paused = false
+		t.idle = false
 	}
 	return nil
 }
@@ -911,10 +948,14 @@ func (m *Manager) Preview(ctx context.Context, s Scope, session string) (json.Ra
 		d.mu.Unlock()
 		return nil, errors.New("browser unavailable")
 	}
-	if len(t.previewData) > 0 && time.Since(t.previewAt) < 900*time.Millisecond {
+	if len(t.previewData) > 0 && (t.idle || time.Since(t.previewAt) < 900*time.Millisecond) {
 		cached := append(json.RawMessage(nil), t.previewData...)
 		d.mu.Unlock()
 		return cached, nil
+	}
+	if t.idle {
+		d.mu.Unlock()
+		return nil, errors.New("browser task is idle; no preview captured yet")
 	}
 	if t.previewBusy {
 		d.mu.Unlock()

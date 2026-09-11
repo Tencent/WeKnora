@@ -157,6 +157,9 @@ func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
 		e.systemPromptOptions(ctx),
 		e.systemPromptTemplate,
 	)
+	if e.config.LocalBrowserEnabled {
+		prompt += localBrowserSourcePrompt
+	}
 	// Memory has to ride in the system prompt: buildMessagesWithLLMContext
 	// drops system messages coming from history, so a separate memory message
 	// would be silently discarded from the second turn onward.

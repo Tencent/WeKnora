@@ -12,7 +12,60 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/stretchr/testify/require"
 )
+
+func TestPairInfersGatewayFromPageOrigin(t *testing.T) {
+	m := NewManager(testStore(t))
+	m.binary = "bsk"
+	m.publicURL = ""
+	require.True(t, m.Enabled())
+	require.NoError(t, m.ValidateConfiguration())
+	ctx := context.Background()
+	scope := Scope{1, "alice"}
+	for _, tt := range []struct{ origin, endpoint string }{
+		{"https://weknora.example", "wss://weknora.example/api/v1/local-browser/extension"},
+		{"https://weknora.example:8443", "wss://weknora.example:8443/api/v1/local-browser/extension"},
+		{"http://localhost:8080", "ws://localhost:8080/api/v1/local-browser/extension"},
+		{"http://127.0.0.1:5173", "ws://127.0.0.1:5173/api/v1/local-browser/extension"},
+		{"http://[::1]:8080", "ws://[::1]:8080/api/v1/local-browser/extension"},
+	} {
+		t.Run(tt.origin, func(t *testing.T) {
+			link, err := m.Pair(ctx, scope, tt.origin)
+			require.NoError(t, err)
+			parts := strings.Split(link, "#")
+			require.Len(t, parts, 2)
+			require.Equal(t, tt.endpoint, parts[0])
+			require.NotEmpty(t, parts[1])
+			// The automatically generated link still carries a redeemable pair token.
+			require.NotEmpty(t, redeemTestPair(ctx, t, m, link))
+		})
+	}
+	m.publicURL = "wss://gateway.example/custom/extension"
+	link, err := m.Pair(ctx, scope, "http://intranet.example")
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(link, m.publicURL+"#"))
+	m.binary = ""
+	require.False(t, m.Enabled(), "an empty binary path must still disable the integration")
+}
+
+func TestPairRejectsInvalidPageOrigin(t *testing.T) {
+	m := &Manager{}
+	for _, origin := range []string{
+		"", "null", "https://", "https://example.com:invalid", "https://user:pass@example.com",
+		"https://example.com/path", "https://example.com?token=x", "https://example.com?",
+		"https://example.com#token", "wss://example.com", "file:///tmp/page.html",
+		"http://public.example", "http://192.168.1.10:8080", "http://localhost.evil.example",
+	} {
+		t.Run(origin, func(t *testing.T) {
+			_, err := m.pairingURL(origin)
+			require.Error(t, err)
+		})
+	}
+	m.publicURL = "http://invalid-gateway.example"
+	_, err := m.pairingURL("https://weknora.example")
+	require.Error(t, err, "an invalid explicit override must not silently fall back")
+}
 
 func TestPairingURL(t *testing.T) {
 	for _, raw := range []string{
@@ -61,7 +114,7 @@ func TestNativeDaemonRelay(t *testing.T) {
 	m.binary = binary
 	server := httptest.NewServer(m)
 	defer server.Close()
-	m.publicURL = "ws" + strings.TrimPrefix(server.URL, "http") + "/extension"
+	m.publicURL = ""
 	t.Cleanup(m.Close)
 	scope := Scope{1, "alice"}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -72,7 +125,7 @@ func TestNativeDaemonRelay(t *testing.T) {
 	if status := m.Status(scope, "chat-a"); !status.Selected || status.SessionID != "" {
 		t.Fatal("selection should be saved before pairing without starting a window")
 	}
-	link, err := m.Pair(ctx, scope)
+	link, err := m.Pair(ctx, scope, server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}

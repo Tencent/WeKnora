@@ -58,8 +58,10 @@ func (m *Manager) ValidateConfiguration() error {
 	if m.store == nil {
 		return errors.New("BrowserSkill requires persistent authorization storage")
 	}
-	if _, err := pairingEndpoint(m.publicURL); err != nil {
-		return err
+	if m.publicURL != "" {
+		if _, err := pairingEndpoint(m.publicURL); err != nil {
+			return err
+		}
 	}
 	if m.internalURL != "" && (!validInternalURL(m.internalURL) || len(m.clusterSecret) < 32) {
 		return errors.New(
@@ -224,6 +226,8 @@ func (m *Manager) InternalHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case "preview":
 		result.Data, err = m.Preview(ctx, input.Scope, input.Session)
+	case "idle":
+		err = m.Idle(ctx, input.Scope, input.Session)
 	case "focus":
 		err = m.Focus(ctx, input.Scope, input.Session)
 	case "forget":

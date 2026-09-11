@@ -100,3 +100,51 @@ func (m *Manager) receiveUI(d *device, data []byte) bool {
 	reply <- uiReply{frame.Result, err}
 	return true
 }
+
+// Idle releases debugging without closing tabs or deselecting the conversation.
+// Serialize against automation so an earlier turn cannot detach a command midway.
+func (m *Manager) Idle(ctx context.Context, s Scope, session string) error {
+	if _, remote, err := m.route(ctx, s, session, "idle", "", nil); remote || err != nil {
+		return err
+	}
+	d := m.get(s)
+	if d == nil {
+		return nil
+	}
+	d.mu.Lock()
+	target := d.tasks[session]
+	if target == nil || target.id == "" || !d.ready || d.conn == nil {
+		d.mu.Unlock()
+		return nil
+	}
+	if target.commands == nil {
+		target.commands = make(chan struct{}, 1)
+	}
+	gate := target.commands
+	d.mu.Unlock()
+	select {
+	case gate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-gate }()
+	d.mu.Lock()
+	if d.tasks[session] != target || target.id == "" || target.stopping {
+		d.mu.Unlock()
+		return nil
+	}
+	// Stop new preview requests before waiting for an in-flight capture in Chrome.
+	target.idle = true
+	d.mu.Unlock()
+	data, err := m.callUI(ctx, s, session, "gateway.task_idle")
+	if err != nil {
+		return err
+	}
+	var result struct {
+		Released bool `json:"released"`
+	}
+	if json.Unmarshal(data, &result) != nil || !result.Released {
+		return errors.New("browser control was not released")
+	}
+	return nil
+}

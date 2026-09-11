@@ -146,7 +146,8 @@
                   <div class="action-header" @click.stop="handleActionHeaderClick(event)"
                     :class="{ 'no-results': !hasActionResult(event) }">
                     <div class="action-title">
-                      <t-icon v-if="event.tool_name" class="action-title-icon"
+                      <BrowserIcon v-if="event.tool_name === 'local_browser'" class="action-title-icon browser-tool-icon" />
+                      <t-icon v-else-if="event.tool_name" class="action-title-icon"
                         :name="getToolIconName(event.tool_name)" />
                       <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
                         :content="t('agent.updatePlan')" placement="top">
@@ -435,7 +436,8 @@
                 <div class="action-header" @click.stop="handleActionHeaderClick(event)"
                   :class="{ 'no-results': !hasActionResult(event) }">
                   <div class="action-title">
-                    <t-icon v-if="event.tool_name" class="action-title-icon" :name="getToolIconName(event.tool_name)" />
+                    <BrowserIcon v-if="event.tool_name === 'local_browser'" class="action-title-icon browser-tool-icon" />
+                    <t-icon v-else-if="event.tool_name" class="action-title-icon" :name="getToolIconName(event.tool_name)" />
                     <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
                       :content="t('agent.updatePlan')" placement="top">
                       <span class="action-name">
@@ -673,6 +675,7 @@ import { vStableHtml } from '@/directives/stableHtml';
 
 import BrowserToolDetails from './BrowserToolDetails.vue';
 import { browserToolTitle } from '@/utils/browserToolDisplay';
+import BrowserIcon from '@/components/icons/BrowserIcon.vue';
 const getToolIconName = getAgentToolIconName;
 
 const router = useRouter();
@@ -3458,6 +3461,8 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   .action-title-icon {
     flex-shrink: 0;
+
+    &.browser-tool-icon { width: 18px; height: 18px; color: var(--agent-step-icon-color); }
 
     &.t-icon {
       width: 18px;

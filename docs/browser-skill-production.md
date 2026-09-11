@@ -64,11 +64,12 @@ flowchart LR
 
 ## 配置
 
-各节点均需安装与服务器操作系统/架构匹配的官方 bsk，并配置：
+Docker app 镜像已内置匹配目标架构的官方 bsk、配套扩展和许可证，并预设两个文件路径；单实例默认无需额外环境变量，配对地址从用户当前页面的 origin 生成，保留外部域名和端口。`BROWSERSKILL_PUBLIC_URL` 仅作为独立网关域名/路径等特殊部署的优先覆盖项。原生部署各节点需自行安装产物。配置示例如下：
 
 ```dotenv
 BROWSERSKILL_BINARY=/opt/weknora/browserskill/bsk
-BROWSERSKILL_PUBLIC_URL=wss://weknora.example.com/api/v1/local-browser/extension
+# 可选覆盖；省略时从页面自动生成。
+# BROWSERSKILL_PUBLIC_URL=wss://weknora.example.com/api/v1/local-browser/extension
 BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.2.1.zip
 BROWSERSKILL_MAX_CONNECTIONS=32
 ```
@@ -84,7 +85,7 @@ BROWSERSKILL_CLUSTER_SECRET=<shared-random-secret>
 
 Kubernetes 可通过 Downward API 获取 Pod IP，再设置节点直连地址。各节点共用 PostgreSQL；不要用多个独立 SQLite 文件部署多副本。签名保护内部 RPC 的认证与完整性；内部 HTTP 仅适用于可信隔离网络，需要传输保密时配置 HTTPS 和受信任证书。
 
-入口代理开放 `/api/v1/local-browser/extension` 的 WebSocket Upgrade，以及其 `/authorize` POST。公共入口应拒绝 `/api/v1/local-browser/internal`；通过网络策略仅允许 app 节点互访此内部接口。不要记录 Authorization、Sec-WebSocket-Protocol 或授权请求正文。WSS 可以使用企业 CA，无需公网；远程明文 WS 不受支持。
+入口代理开放 `/api/v1/local-browser/extension` 的 WebSocket Upgrade，以及其 `/authorize` POST。配套 frontend Nginx 已配置这两条链路，并拒绝 `/api/v1/local-browser/internal`。外层 Ingress/代理也须支持 WebSocket；绕过 frontend 直接暴露 app 时需自行拒绝公共入口的内部接口。通过网络策略仅允许 app 节点互访此内部接口。不要记录 Authorization、Sec-WebSocket-Protocol 或授权请求正文。WSS 可以使用企业 CA，无需公网；远程明文 WS 不受支持。
 
 迁移：PostgreSQL `000093_browser_authorization`，SQLite `000014_browser_authorization`。默认自动迁移；若关闭 `AUTO_MIGRATE`，须先执行迁移。数据库只持久化授权/租约/中断标记，不存浏览器 Cookie 或截图。
 

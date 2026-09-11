@@ -54,7 +54,7 @@ func connectSharedFixture(
 	t.Helper()
 	var err error
 	if link == "" {
-		link, err = m.Pair(ctx, scope)
+		link, err = m.Pair(ctx, scope, "")
 		require.NoError(t, err)
 	}
 	link = redeemTestPair(ctx, t, m, link)
@@ -120,6 +120,8 @@ func connectSharedFixture(
 				result = map[string]any{"cancelled": true}
 			case "gateway.task_preview":
 				result = map[string]any{"image_base64": "dGVzdA==", "format": "jpeg"}
+			case "gateway.task_idle":
+				result = map[string]any{"released": true}
 			case "gateway.task_focus":
 				result = map[string]any{"focused": true}
 			case "system.ping":
@@ -235,7 +237,7 @@ func TestSharedDaemonRoutesAndIsolatesUsers(t *testing.T) {
 	_, err = m.Call(ctx, bob, "chat", "snapshot", nil)
 	require.NoError(t, err)
 	// Rotate credentials on an existing device; only its own tasks are paused.
-	link, err := m.Pair(ctx, alice)
+	link, err := m.Pair(ctx, alice, "")
 	require.NoError(t, err)
 	redeemTestPair(ctx, t, m, link)
 	status, err := m.GetStatus(ctx, alice, "chat")
@@ -284,7 +286,7 @@ func TestSharedDaemonCrashKeepsAuthorizationAndPausesTasks(t *testing.T) {
 	require.Eventually(t, func() bool { return !m.Status(scope, "chat").Connected }, 3*time.Second, 10*time.Millisecond)
 	_, err := m.Call(ctx, scope, "chat", "snapshot", nil)
 	require.Error(t, err)
-	link, err := m.Pair(ctx, scope)
+	link, err := m.Pair(ctx, scope, "")
 	require.NoError(t, err)
 	connectSharedFixture(ctx, t, m, scope, link, "old-browser")
 	require.NotSame(t, old, m.daemon)
@@ -376,5 +378,56 @@ func TestLivePreviewBypassesUnfinishedAutomation(t *testing.T) {
 		require.Error(t, err)
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
+	}
+}
+
+func TestIdleRetainsTaskAndCachedPreviewUntilNextCall(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	s := Scope{1, "idle-user"}
+	f := connectSharedFixture(ctx, t, m, s, "", "browser")
+	defer func() { _ = f.ws.Close() }()
+	require.NoError(t, m.Control(ctx, s, "chat", "start"))
+	before := m.Status(s, "chat")
+	frame, err := m.Preview(ctx, s, "chat")
+	require.NoError(t, err)
+	require.NoError(t, m.Idle(ctx, s, "chat"))
+	after := m.Status(s, "chat")
+	require.True(t, after.Idle)
+	require.Equal(t, before.SessionID, after.SessionID)
+	require.True(t, after.Selected)
+	require.False(t, after.Paused)
+	d := m.get(s)
+	d.mu.Lock()
+	d.tasks["chat"].previewAt = time.Time{}
+	d.mu.Unlock()
+	cached, err := m.Preview(ctx, s, "chat")
+	require.NoError(t, err)
+	require.Equal(t, frame, cached)
+	_, err = m.Call(ctx, s, "chat", "snapshot", nil)
+	require.NoError(t, err)
+	require.False(t, m.Status(s, "chat").Idle)
+	require.NoError(t, m.Control(ctx, s, "chat", "stop"))
+	require.NoError(t, m.Idle(ctx, s, "chat"))
+}
+
+func TestNavigationDefaultsToDocumentReadyAndPreservesExplicitWait(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	scope := Scope{1, "navigation-user"}
+	f := connectSharedFixture(ctx, t, m, scope, "", "browser")
+	defer func() { _ = f.ws.Close() }()
+	require.NoError(t, m.Control(ctx, scope, "chat", "select"))
+	for _, wait := range []string{"", "load", "networkidle"} {
+		params := map[string]any{"url": "https://example.com"}
+		if wait != "" {
+			params["wait_until"] = wait
+		}
+		_, err := m.Call(ctx, scope, "chat", "navigate", params)
+		require.NoError(t, err)
+		want := wait
+		if want == "" {
+			want = "domcontentloaded"
+			require.NotContains(t, params, "wait_until")
+		}
+		require.Equal(t, want, (<-f.calls)["wait_until"])
 	}
 }

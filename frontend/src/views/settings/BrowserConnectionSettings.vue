@@ -67,7 +67,7 @@ async function pair() {
   busy.value = true; error.value = ''; revision++
   try {
     if (!pairing.value || Date.now() >= pairExpires) {
-      const result = await post<{ data: { pairing_link: string } }>(endpoint, { action: 'pair' }, { timeout: 15000, signal: controller.signal })
+      const result = await post<{ data: { pairing_link: string } }>(endpoint, { action: 'pair', origin: window.location.origin }, { timeout: 15000, signal: controller.signal })
       if (!alive) return
       pairing.value = result.data.pairing_link; pairExpires = Date.now() + 5 * 60 * 1000
       clearTimeout(expiry); expiry = setTimeout(clearPairing, 5 * 60 * 1000)

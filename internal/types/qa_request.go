@@ -57,6 +57,7 @@ type QARequest struct {
 	ImageURLs           []string           // Image URLs for multimodal input
 	ImageDescription    string             // VLM-generated image description (fallback for non-vision models)
 	UserMessageID       string             // Created user message ID
+	LocalBrowserEnabled bool               // Explicit browser source preference for this request
 	WebSearchEnabled    bool               // Whether web search is enabled for this request
 	QuotedContext       string             // Quoted message content from IM quote-reply (appended at LLM prompt stage, not used for retrieval)
 	Attachments         MessageAttachments // File attachments (processed and ready for prompt injection)

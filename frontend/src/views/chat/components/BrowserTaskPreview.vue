@@ -1,18 +1,19 @@
 <template>
   <aside v-if="status.selected" class="browser-task-preview" :aria-label="t('localBrowser.preview')">
-    <div class="preview-heading"><img :src="browserLogo" alt="BrowserSkill" width="20" height="20" /><strong>{{ t('localBrowser.local') }}</strong><span>{{ t(!status.connected ? 'localBrowser.offline' : status.paused ? 'localBrowser.paused' : status.needs_help ? 'localBrowser.needHelp' : status.task_id ? 'localBrowser.running' : 'localBrowser.waiting') }}</span></div>
+    <div class="preview-heading"><BrowserIcon class="preview-browser-icon" width="20" height="20" /><strong>{{ t('localBrowser.local') }}</strong><span>{{ t(!status.connected ? 'localBrowser.offline' : status.paused ? 'localBrowser.paused' : status.needs_help ? 'localBrowser.needHelp' : status.task_id ? 'localBrowser.connected' : 'localBrowser.waiting') }}</span></div>
     <button class="preview-image" :disabled="!status.connected || !status.task_id || busy" :aria-label="t('localBrowser.locateWindow')" @click="act('focus')">
       <img v-if="preview" :src="preview" :alt="t('localBrowser.preview')" />
       <span v-else>{{ t(status.connected ? 'localBrowser.waiting' : 'localBrowser.reconnectShort') }}</span>
       <span v-if="status.connected && status.task_id" class="locate"><t-icon name="jump" size="13px" />{{ t('localBrowser.locateWindow') }}</span>
     </button>
-    <p class="preview-sync" role="status">{{ t(previewStale ? 'localBrowser.previewStale' : preview ? 'localBrowser.previewLive' : 'localBrowser.previewLoading') }}</p>
+    <p class="preview-sync" role="status">{{ t(!status.connected ? 'localBrowser.reconnectShort' : status.idle ? 'localBrowser.previewIdle' : previewStale ? 'localBrowser.previewStale' : preview ? 'localBrowser.previewLive' : 'localBrowser.previewLoading') }}</p>
     <p v-if="status.needs_help" class="preview-help">{{ t('localBrowser.helpHint') }}</p>
     <p v-if="error" class="preview-error" role="alert">{{ error }}</p>
+    <p class="preview-scope">{{ t('localBrowser.controlScope') }}</p>
     <div class="preview-actions">
-      <t-button v-if="status.connected" size="small" theme="default" variant="text" :disabled="busy" @click="act(status.paused ? 'resume' : 'pause')">{{ t(status.paused ? 'localBrowser.resume' : 'localBrowser.pause') }}</t-button>
+      <t-button v-if="status.connected" :title="t(status.paused ? 'localBrowser.resume' : 'localBrowser.pauseHint')" size="small" theme="default" variant="text" :disabled="busy" @click="act(status.paused ? 'resume' : 'pause')">{{ t(status.paused ? 'localBrowser.resume' : 'localBrowser.pause') }}</t-button>
       <t-button v-else size="small" theme="default" variant="text" @click="uiStore.openSettings('browserconnection')">{{ t('localBrowser.settingsTitle') }}</t-button>
-      <t-button size="small" theme="default" variant="text" :disabled="busy" @click="act('stop')">{{ t('localBrowser.stop') }}</t-button>
+      <t-button :title="t('localBrowser.stopHint')" size="small" theme="default" variant="text" :disabled="busy" @click="act('stop')">{{ t('localBrowser.stop') }}</t-button>
     </div>
   </aside>
 </template>
@@ -21,10 +22,10 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { get, post } from '@/utils/request'
 import { useUIStore } from '@/stores/ui'
-import browserLogo from '@/assets/browserskill/logo.png'
+import BrowserIcon from '@/components/icons/BrowserIcon.vue'
 const props = defineProps<{ sessionId: string }>()
 const { t } = useI18n(), uiStore = useUIStore()
-const status = ref({ enabled: false, selected: false, connected: false, paused: false, needs_help: false, task_id: '' })
+const status = ref({ enabled: false, selected: false, connected: false, paused: false, idle: false, needs_help: false, task_id: '' })
 const busy = ref(false), error = ref(''), preview = ref(''), previewStale = ref(false)
 let lastFrame = 0
 const endpoint = `/api/v1/sessions/${encodeURIComponent(props.sessionId)}/local-browser`
@@ -50,13 +51,13 @@ async function poll() {
       if (!alive || current !== revision) return
       status.value = result.data
       if (!status.value.connected || !status.value.task_id) preview.value = ''
-      if (alive && !busy.value && status.value.selected && status.value.connected && status.value.task_id) {
+      if (alive && !busy.value && status.value.selected && status.value.connected && status.value.task_id && (!status.value.idle || !preview.value)) {
         const image = await post<{ data: { image_base64: string; format: string; captured_at: string } }>(endpoint, { action: 'preview' }, { timeout: 10000, signal: controller.signal })
-        if (alive && revision === current && image.data.image_base64 && ['png', 'jpeg'].includes(image.data.format)) { preview.value = `data:image/${image.data.format};base64,${image.data.image_base64}`; lastFrame = Date.now(); previewStale.value = false }
+        if (alive && revision === current && image.data.image_base64 && ['png', 'jpeg'].includes(image.data.format)) { preview.value = `data:image/${image.data.format};base64,${image.data.image_base64}`; lastFrame = Date.parse(image.data.captured_at) || Date.now(); previewStale.value = false }
       }
     }
   } catch { /* Background polling does not replace explicit action errors. */ }
-  finally { polling = false; if (alive) { previewStale.value = !!preview.value && Date.now() - lastFrame > 5000; timer = setTimeout(poll, !status.value.enabled ? 30000 : status.value.selected ? 1000 : 5000) } }
+  finally { polling = false; if (alive) { previewStale.value = !!preview.value && Date.now() - lastFrame > 5000; timer = setTimeout(poll, !status.value.enabled ? 30000 : status.value.selected && !status.value.idle ? 1000 : 5000) } }
 }
 const onVisible = () => { if (!document.hidden) { clearTimeout(timer); void poll() } }
 onMounted(() => { document.addEventListener('visibilitychange', onVisible); void poll() })
@@ -64,10 +65,11 @@ onBeforeUnmount(() => { alive = false; document.removeEventListener('visibilityc
 </script>
 <style scoped>
 .browser-task-preview { position: absolute; right: 20px; bottom: 16px; width: 240px; max-width: calc(100% - 40px); z-index: 5; overflow: hidden; background: var(--td-bg-color-container); border: 1px solid var(--td-component-border); border-radius: 12px; box-shadow: 0 4px 20px #0000000d; }
+.preview-browser-icon { flex-shrink: 0; color: var(--td-text-color-secondary); }
 .preview-heading { display: flex; align-items: center; gap: 7px; padding: 10px 12px; }.preview-heading strong { font-size: 12px; font-weight: 500; flex: 1; }.preview-heading span { color: var(--td-text-color-secondary); font-size: 11px; }
-.preview-image { width: 100%; height: 126px; border: 0; border-block: 1px solid var(--td-component-border); background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-secondary); display: grid; place-items: center; position: relative; cursor: pointer; padding: 0; font-size: 12px; }.preview-image:disabled { cursor: default; }.preview-image img { width: 100%; height: 100%; object-fit: cover; object-position: top; }.preview-image:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: -2px; }.locate { position: absolute; display: inline-flex; align-items: center; gap: 5px; bottom: 8px; padding: 4px 8px; border-radius: 5px; background: var(--td-bg-color-container); color: var(--td-text-color-primary); box-shadow: 0 1px 5px #00000014; }.preview-image:hover .locate { color: var(--td-brand-color); }
-.preview-sync, .preview-help { font-size: 11px; line-height: 1.5; margin: 6px 12px; color: var(--td-text-color-secondary); }
+.preview-image { width: 100%; height: 126px; border: 0; border-block: 1px solid var(--td-component-border); background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-secondary); display: grid; place-items: center; position: relative; cursor: pointer; padding: 0; font-size: 12px; }.preview-image:disabled { cursor: default; }.preview-image img { width: 100%; height: 100%; object-fit: contain; object-position: top; }.preview-image:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: -2px; }.locate { position: absolute; display: inline-flex; align-items: center; gap: 5px; bottom: 8px; padding: 4px 8px; border-radius: 5px; background: var(--td-bg-color-container); color: var(--td-text-color-primary); box-shadow: 0 1px 5px #00000014; }.preview-image:hover .locate { color: var(--td-brand-color); }
+.preview-sync, .preview-help, .preview-scope { font-size: 11px; line-height: 1.5; margin: 6px 12px; color: var(--td-text-color-secondary); }
 .preview-help { color: var(--td-brand-color); }
-.preview-actions { display: flex; justify-content: space-between; padding: 5px 8px; }.preview-error { margin: 8px 12px; color: var(--td-error-color); font-size: 12px; line-height: 1.5; }
+.preview-actions { display: flex; flex-wrap: wrap; gap: 4px; justify-content: space-between; padding: 5px 8px; }.preview-error { margin: 8px 12px; color: var(--td-error-color); font-size: 12px; line-height: 1.5; }
 @media(max-width:720px){.browser-task-preview { right: 12px; bottom: 12px; width: 200px; }.preview-image { height: 100px; }}
 </style>

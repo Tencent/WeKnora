@@ -35,7 +35,7 @@ func TestReconnectAfterServerRestartKeepsAuthorizationAndPausesTasks(t *testing.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	scope := Scope{1, "alice"}
-	link, err := m.Pair(ctx, scope)
+	link, err := m.Pair(ctx, scope, "")
 	require.NoError(t, err)
 	link = redeemTestPair(ctx, t, m, link)
 	connectSharedFixture(ctx, t, m, scope, link, "chrome")
@@ -91,6 +91,8 @@ func TestRequestsRouteToBrowserOwnerAcrossReplicas(t *testing.T) {
 	require.True(t, owner.Status(scope, "chat").Paused)
 	require.NoError(t, follower.Focus(ctx, scope, "chat"))
 	require.True(t, owner.Status(scope, "chat").Paused, "locating a window must not resume automation")
+	require.NoError(t, follower.Idle(ctx, scope, "chat"))
+	require.True(t, owner.Status(scope, "chat").Idle)
 	require.NoError(t, follower.Revoke(ctx, scope))
 	_, err = owner.Call(ctx, scope, "chat", "snapshot", nil)
 	require.ErrorIs(t, err, ErrAuthorization)

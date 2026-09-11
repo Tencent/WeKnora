@@ -14,7 +14,7 @@ import (
 
 func TestBrowserAccountStatusDoesNotRequireConversation(t *testing.T) {
 	t.Setenv("BROWSERSKILL_BINARY", "/configured/bsk")
-	t.Setenv("BROWSERSKILL_PUBLIC_URL", "wss://weknora.example/api/v1/local-browser/extension")
+	t.Setenv("BROWSERSKILL_PUBLIC_URL", "")
 	h := &Handler{browserSkill: browserskill.NewManager()}
 	// No session service or conversation ID is supplied: pairing is a personal setting.
 	request := httptest.NewRequest("GET", "/api/v1/me/browser", nil)

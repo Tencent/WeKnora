@@ -6,6 +6,7 @@ import { onBeforeRouteUpdate } from 'vue-router';
 import { MessagePlugin } from "tdesign-vue-next";
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
+import BrowserIcon from '@/components/icons/BrowserIcon.vue';
 import { useMenuStore } from '@/stores/menu';
 import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
@@ -2686,6 +2687,23 @@ defineExpose({
             :currentAgentId="selectedAgentId" :agents="enabledAgents" :all-models="allModels"
             @close="closeAgentModeSelector" @select="handleSelectAgent" @not-ready="handleAgentNotReady" />
 
+          <t-tooltip v-if="settingsStore.isAgentStreamMode" placement="top" theme="light"
+            :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+            <template #content>
+              <div class="browser-source-tooltip">
+                <strong>{{ $t('localBrowser.local') }}</strong>
+                <span>{{ $t('localBrowser.sourceHint') }}</span>
+              </div>
+            </template>
+            <button type="button" class="control-btn browser-source-btn"
+              :class="{ active: settingsStore.isLocalBrowserEnabled }"
+              :aria-pressed="settingsStore.isLocalBrowserEnabled"
+              :aria-label="$t('localBrowser.local')"
+              @click.stop="settingsStore.toggleLocalBrowser(!settingsStore.isLocalBrowserEnabled)">
+              <BrowserIcon class="control-icon" />
+            </button>
+          </t-tooltip>
+
           <!-- WebSearch 开关按钮（智能体未启用时不显示） -->
           <t-tooltip v-if="showWebSearchButton" placement="top" theme="light"
             :popupProps="{ overlayClassName: 'input-field-tooltip' }">
@@ -3458,6 +3476,43 @@ const getImgSrc = (url: string) => {
     &:hover {
       background: rgba(0, 0, 0, 0.7);
     }
+  }
+}
+
+.browser-source-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+
+  &:hover {
+    color: var(--td-text-color-primary, #333);
+  }
+
+  &.active {
+    color: var(--td-brand-color);
+    background: rgba(16, 185, 129, 0.1);
+
+    &:hover {
+      background: rgba(16, 185, 129, 0.15);
+    }
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
+  }
+}
+
+.browser-source-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 240px;
+  line-height: 1.5;
+
+  strong {
+    font-weight: 500;
   }
 }
 
