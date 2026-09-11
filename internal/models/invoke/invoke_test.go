@@ -329,11 +329,9 @@ func TestListModelsOptionalFacet(t *testing.T) {
 	Default = &Registry{adapters: make(map[string]Adapter)}
 	t.Cleanup(func() { Default = old })
 	// The fake implements ChatAdapter only → List must refuse explicitly.
-	// (Whitelisted host: must clear the entry's SSRF gate to reach the facet
+	// (allowProbeHost: must clear the entry's SSRF gate to reach the facet
 	// check; the request never dials.)
-	t.Setenv("SSRF_WHITELIST", "probe.example.com")
-	secutils.ResetSSRFWhitelistForTest()
-	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+	allowProbeHost(t)
 	require.NoError(t, Default.Register(fakeChatAdapter{}))
 	_, err := List(context.Background(), "fake", &ListOptions{BaseURL: "https://probe.example.com"})
 	var pe *ProviderError

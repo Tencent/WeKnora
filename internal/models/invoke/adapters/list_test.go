@@ -9,6 +9,15 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
+// allowLoopback whitelists loopback for one test so httptest stubs are
+// reachable through the executor's unified SSRF gate (invoke 包的
+// allowLoopbackSSRF 同款，跨包不可共享 unexported helper).
+func allowLoopback(t *testing.T) {
+	t.Helper()
+	secutils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+}
+
 // TestOpenAIListURL pins the version-segment handling (v1 catalog/remote.go
 // parity): bases that already carry a version path append /models; bare bases
 // get /v1/models.
@@ -54,8 +63,7 @@ func TestAzureListRejected(t *testing.T) {
 // stub — allowlisted exactly like a private vLLM deployment, so the probe
 // inherits the deployment's SSRF policy rather than bypassing it.
 func TestListEntryLive(t *testing.T) {
-	secutils.SetSSRFWhitelistFromRaw("127.0.0.1")
-	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+	allowLoopback(t)
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
@@ -86,8 +94,7 @@ func TestListEntryLive(t *testing.T) {
 
 // TestListEntryAnthropicLive pins the anthropic-family headers end to end.
 func TestListEntryAnthropicLive(t *testing.T) {
-	secutils.SetSSRFWhitelistFromRaw("127.0.0.1")
-	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+	allowLoopback(t)
 	var gotKey, gotVersion string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotKey = r.Header.Get("x-api-key")

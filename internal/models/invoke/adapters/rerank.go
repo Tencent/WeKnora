@@ -379,11 +379,11 @@ func rerankSpecFor(name invoke.ProviderName) rerankSpec {
 }
 
 func rerankCapsFor(name invoke.ProviderName) *invoke.RerankCaps {
-	if _, ok := providerInfoFor(name); !ok {
+	info, ok := providerInfoFor(name)
+	if !ok {
 		return nil
 	}
-	caps := mustProviderInfo(name).EffectiveCapabilities()
-	return caps.Rerank
+	return info.EffectiveCapabilities().Rerank
 }
 
 // openaiRerankAdapter adds the rerank facet to the chat+embedding composite

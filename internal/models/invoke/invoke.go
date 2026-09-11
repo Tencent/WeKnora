@@ -30,7 +30,6 @@ var defaultExecutor = NewExecutor()
 
 // resolveAdapter dispatches by provider name. An empty registry or an unknown
 // provider returns an explicit error — never a panic (design §6.2/§6.4).
-
 func resolveAdapter(name string) (Adapter, error) {
 	if Default.Len() == 0 {
 		return nil, &ProviderError{Kind: ErrUnsupportedType, Message: "no model adapters registered"}

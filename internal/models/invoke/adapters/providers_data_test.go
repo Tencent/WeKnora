@@ -25,16 +25,14 @@ func TestProvidersDataTableComplete(t *testing.T) {
 
 func TestListProvidersByModelType(t *testing.T) {
 	t.Run("chat models", func(t *testing.T) {
-		chat := types.ModelTypeKnowledgeQA
-		providers := ListProviders(&chat)
+		providers := ListProvidersByModelType(types.ModelTypeKnowledgeQA)
 		assert.NotEmpty(t, providers)
 		// Multiple providers support chat
 		assert.GreaterOrEqual(t, len(providers), 9)
 	})
 
 	t.Run("rerank models", func(t *testing.T) {
-		rerank := types.ModelTypeRerank
-		providers := ListProviders(&rerank)
+		providers := ListProvidersByModelType(types.ModelTypeRerank)
 		assert.NotEmpty(t, providers)
 		foundAliyun, foundLKEAP, foundVolcengine := false, false, false
 		for _, p := range providers {
@@ -55,7 +53,7 @@ func TestListProvidersByModelType(t *testing.T) {
 	})
 
 	t.Run("unfiltered returns canonical order", func(t *testing.T) {
-		providers := ListProviders(nil)
+		providers := ListProviders()
 		assert.Len(t, providers, len(invoke.AllProviders()))
 		for i, name := range invoke.AllProviders() {
 			assert.Equal(t, name, providers[i].Name)
@@ -66,7 +64,7 @@ func TestListProvidersByModelType(t *testing.T) {
 // Capability-declaration sanity across the table (migrated from the v1
 // provider package): thinking declarations stay self-consistent.
 func TestRegisteredProvidersHaveUsableCapabilities(t *testing.T) {
-	for _, info := range ListProviders(nil) {
+	for _, info := range ListProviders() {
 		caps := info.EffectiveCapabilities()
 		if caps.Chat == nil || !caps.Chat.Thinking.Supported {
 			continue

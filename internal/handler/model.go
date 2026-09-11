@@ -807,10 +807,10 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 	var providers []invoke.ProviderInfo
 	if modelType != "" {
 		// 按模型类型过滤
-		providers = adapters.ListProviders(&backendModelType)
+		providers = adapters.ListProvidersByModelType(backendModelType)
 	} else {
 		// 返回所有 provider
-		providers = adapters.ListProviders(nil)
+		providers = adapters.ListProviders()
 	}
 
 	// 转换为 DTO

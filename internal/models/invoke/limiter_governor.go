@@ -127,8 +127,10 @@ func (l *localLimiter) Acquire(ctx context.Context, key string, limit int) (func
 	}
 	tracked.limit.Store(int64(limit))
 	if !ok {
-		// Capacity is fixed at first use for a key; the limit is a
-		// process-wide constant, so it never changes across acquires.
+		// Capacity is fixed at first use for a key and NOT resized by later
+		// SetGlobalLimit retunes — an existing key keeps its old channel
+		// (RuntimeStats then reports the new limit over the old capacity).
+		// Lite-mode inherited behavior from v1; a restart applies new limits.
 		sem = make(chan struct{}, limit)
 		l.sems[key] = sem
 	}

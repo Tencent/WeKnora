@@ -482,38 +482,43 @@ func providerInfoFor(name invoke.ProviderName) (invoke.ProviderInfo, bool) {
 	return info, ok
 }
 
-// mustProviderInfo is the init-time lookup for adapters constructing their
-// capability shards; an unknown name is a programming error.
-func mustProviderInfo(name invoke.ProviderName) invoke.ProviderInfo {
-	info, ok := providerInfos[name]
-	if !ok {
-		panic("invoke/adapters: no provider metadata for " + string(name))
-	}
-	return info
-}
-
 // ListProviders returns every provider's metadata in canonical (frontend)
-// order. When modelType is non-nil only providers serving that type return.
-func ListProviders(modelType *types.ModelType) []invoke.ProviderInfo {
+// order.
+func ListProviders() []invoke.ProviderInfo {
 	result := make([]invoke.ProviderInfo, 0, len(providerInfos))
 	for _, name := range invoke.AllProviders() {
-		info, ok := providerInfos[name]
-		if !ok {
-			continue
+		if info, ok := providerInfos[name]; ok {
+			result = append(result, info)
 		}
-		if modelType != nil {
-			serves := false
-			for _, t := range info.ModelTypes {
-				if t == *modelType {
-					serves = true
-					break
-				}
-			}
-			if !serves {
-				continue
-			}
-		}
-		result = append(result, info)
 	}
 	return result
+}
+
+// ListProvidersByModelType returns the providers serving modelType, in
+// canonical (frontend) order.
+func ListProvidersByModelType(modelType types.ModelType) []invoke.ProviderInfo {
+	result := make([]invoke.ProviderInfo, 0, len(providerInfos))
+	for _, info := range ListProviders() {
+		for _, t := range info.ModelTypes {
+			if t == modelType {
+				result = append(result, info)
+				break
+			}
+		}
+	}
+	return result
+}
+
+// init fails fast when the vocabulary and the metadata table drift apart: a
+// vendor in AllProviders without a table entry would silently vanish from the
+// frontend, and a stray table entry is dead weight.
+func init() {
+	for _, name := range invoke.AllProviders() {
+		if _, ok := providerInfos[name]; !ok {
+			panic("invoke/adapters: provider " + string(name) + " missing from the metadata table")
+		}
+	}
+	if len(providerInfos) != len(invoke.AllProviders()) {
+		panic("invoke/adapters: metadata table has entries outside AllProviders")
+	}
 }

@@ -37,10 +37,14 @@ func probeTimeout() time.Duration {
 // ListModels facet (fifth facet, §6.2): URL/auth come from the vendor wire
 // knowledge; the base URL goes through the same SSRF gate as every
 // user-supplied endpoint and the probe timeout/cap match the v1 remote-catalog
-// contract. Providers without a listing endpoint (azure deployment mode, jina,
-// weknoracloud per its adapter wiring) fail with an explicit error — the
-// handler degrades to manual entry, never blocks.
+// contract. Providers without a usable listing path fail before or at the
+// wire — azure deployment mode and unregistered names with an explicit error,
+// jina at the facet dispatch, weknoracloud by the server rejecting the
+// unsigned request — and the handler degrades to manual entry, never blocks.
 func List(ctx context.Context, providerName string, opts *ListOptions) ([]RemoteModel, error) {
+	if opts == nil {
+		opts = &ListOptions{}
+	}
 	baseURL := strings.TrimRight(strings.TrimSpace(opts.BaseURL), "/")
 	if baseURL == "" {
 		return nil, ClassifyError(fmt.Errorf("base URL is required"))

@@ -1,6 +1,6 @@
-// Package invoke hosts the distributed, per-key concurrency governor for
-// outbound model-provider calls (P4 自 models/limiter 迁入：并发闸门是执行器
-// 语义的一部分，唯一网络出口与它的限流同居一包). The shared finite resource is the model
+// limiter.go — the distributed, per-key concurrency governor for outbound
+// model-provider calls (P4 自 models/limiter 迁入：并发闸门是执行器语义的一部分，
+// 唯一网络出口与它的限流同居一包). The shared finite resource is the model
 // provider (its request/concurrency budget), so concurrency is capped at the
 // model-client layer — keyed by model ID — rather than at the asynq queue layer
 // (queue weights are scheduling priority, not throttling).
@@ -12,6 +12,7 @@
 // refreshes the lease so long calls keep their slot; a crashed holder's lease
 // simply expires and is reclaimed. Every backend error fails OPEN (the call is
 // allowed) so a limiter/Redis outage can never halt model traffic.
+
 package invoke
 
 import (

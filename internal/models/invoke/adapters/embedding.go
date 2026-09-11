@@ -525,11 +525,11 @@ func parseGeminiEmbedding(_ int, _ http.Header, body []byte) (*invoke.EmbeddingR
 // embeddingCapsFor resolves the provider-level Embedding shard from the v1
 // capability registry (nil when the catalog does not serve embedding).
 func embeddingCapsFor(name invoke.ProviderName) *invoke.EmbeddingCaps {
-	if _, ok := providerInfoFor(name); !ok {
+	info, ok := providerInfoFor(name)
+	if !ok {
 		return nil
 	}
-	caps := mustProviderInfo(name).EffectiveCapabilities()
-	return caps.Embedding
+	return info.EffectiveCapabilities().Embedding
 }
 
 // openaiEmbeddingAdapter adds the embedding facet to an openai-family chat

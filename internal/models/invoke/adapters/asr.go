@@ -112,11 +112,11 @@ func ParseASRResponse(_ int, _ http.Header, body []byte) (*invoke.ASRResponse, e
 // asrCapsFor resolves the provider-level ASR shard (nil when the catalog does
 // not serve ASR).
 func asrCapsFor(name invoke.ProviderName) *invoke.ASRCaps {
-	if _, ok := providerInfoFor(name); !ok {
+	info, ok := providerInfoFor(name)
+	if !ok {
 		return nil
 	}
-	caps := mustProviderInfo(name).EffectiveCapabilities()
-	return caps.ASR
+	return info.EffectiveCapabilities().ASR
 }
 
 // openaiASREmbeddingAdapter serves chat+embedding+ASR vendors without a

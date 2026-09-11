@@ -84,11 +84,11 @@ func (a *openaiAdapter) Capabilities() invoke.Capabilities {
 // chatCapsFor resolves the provider-level Chat shard from the v1 capability
 // registry (nil when the provider does not serve chat).
 func chatCapsFor(name invoke.ProviderName) *invoke.ChatCaps {
-	if _, ok := providerInfoFor(name); !ok {
+	info, ok := providerInfoFor(name)
+	if !ok {
 		return nil
 	}
-	caps := mustProviderInfo(name).EffectiveCapabilities()
-	return caps.Chat
+	return info.EffectiveCapabilities().Chat
 }
 
 // specFor ports the v1 providerRegistry overrides (chat/provider.go:296-312).
@@ -154,7 +154,7 @@ func (a *openaiAdapter) thinkingFor(
 	case invoke.ProviderLKEAP:
 		// lkeapProvider: { "thinking": { "type": ... } } for DeepSeek V3.x
 		// only; R1 enables chain-of-thought by default and stays untouched.
-		if strings.Contains(strings.ToLower(model), "deepseek-v3") {
+		if invoke.IsLKEAPDeepSeekV3Model(model) {
 			return thinkingTypeApply
 		}
 	}
@@ -325,7 +325,7 @@ const (
 	azureAPIVersionDefault = "2023-05-15"
 	// openAIDefaultBaseURL mirrors go-openai's default base URL for providers
 	// constructed without an explicit baseURL.
-	openAIDefaultBaseURL = "https://api.openai.com/v1"
+	openAIDefaultBaseURL = invoke.OpenAIBaseURL
 )
 
 // ParseChatResponse ports v1 parseCompletionResponse (openai_stream.go:18-51)

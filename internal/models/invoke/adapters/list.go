@@ -100,32 +100,30 @@ func parseModelListEnvelope(body []byte) ([]invoke.RemoteModel, error) {
 // those append /models directly, bare bases get /v1/models (vLLM/LiteLLM
 // convention).
 func openAIListURL(base string) string {
-	u, err := url.Parse(base)
-	if err != nil {
-		return base + "/models"
-	}
-	path := strings.TrimRight(u.Path, "/")
-	if strings.HasSuffix(path, "/v1") || strings.HasSuffix(path, "/v1beta") ||
-		strings.HasSuffix(path, "/compatible-mode/v1") {
-		u.Path = path + "/models"
-	} else {
-		u.Path = path + "/v1/models"
-	}
-	return u.String()
+	return listURLFor(base, "/models", "/v1", "/v1beta", "/compatible-mode/v1")
 }
 
 // anthropicListURL derives the Anthropic listing URL (base or /v1 base both
 // land on {base}/v1/models).
 func anthropicListURL(base string) string {
+	return listURLFor(base, "/v1/models", "/v1")
+}
+
+// listURLFor appends /models to bases already carrying one of versionedSuffixes
+// and /v1/models to bare bases; unparsable bases fall back to base+fallback.
+// The suffix sets and fallbacks are the v1 catalog/remote.go behavior verbatim.
+func listURLFor(base, fallback string, versionedSuffixes ...string) string {
 	u, err := url.Parse(base)
 	if err != nil {
-		return base + "/v1/models"
+		return base + fallback
 	}
 	path := strings.TrimRight(u.Path, "/")
-	if strings.HasSuffix(path, "/v1") {
-		u.Path = path + "/models"
-	} else {
-		u.Path = path + "/v1/models"
+	for _, suffix := range versionedSuffixes {
+		if strings.HasSuffix(path, suffix) {
+			u.Path = path + "/models"
+			return u.String()
+		}
 	}
+	u.Path = path + "/v1/models"
 	return u.String()
 }

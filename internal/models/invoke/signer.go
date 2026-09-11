@@ -3,8 +3,8 @@ package invoke
 import (
 	"bytes"
 	"crypto/md5"
+	cryptorand "crypto/rand"
 	"fmt"
-	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +19,9 @@ const (
 // Sign 按 WeKnoraCloud 参考实现生成请求头（P4 自 models/utils 迁入：签名是
 // WeKnoraCloud 端点协议知识，与 weknoracloud 适配器同居调用核心包；docparser
 // 的 docreader 转发路径也复用同一签名）。
+//
+// 协议锁定项：md5 摘要与 secret 直接参签（无盐、无 HMAC 结构）是对端参考
+// 实现的约束，单方升级 sha256/HMAC 会签名失败——改造须服务端协同。
 // appID: 上游 APPID
 // apiKey: 上游 API Key（当前沿用 AppSecret 字段承载）
 // requestID: 每次请求唯一的 UUID 字符串
@@ -71,9 +74,13 @@ func md5Hex(s string) string {
 }
 
 func generateNonce(length int) string {
+	// crypto/rand: the nonce feeds the signature input, so it must not be
+	// predictable (math/rand 遗留缺陷，审查 B-1 修正). crypto/rand.Read 在
+	// 支持平台上按契约恒成功且填满 b。
 	b := make([]byte, length)
+	_, _ = cryptorand.Read(b)
 	for i := range b {
-		b[i] = nonceChars[rand.Intn(len(nonceChars))]
+		b[i] = nonceChars[int(b[i])%len(nonceChars)]
 	}
 	return string(b)
 }

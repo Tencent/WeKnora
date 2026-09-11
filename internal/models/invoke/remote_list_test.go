@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // listProbeAdapter is a minimal ListModelsAdapter fake for entry-level probe
@@ -30,6 +32,16 @@ func (a *listProbeAdapter) BuildListRequest(ep Endpoint) (*Request, error) {
 
 func (a *listProbeAdapter) ParseListResponse(_ int, _ http.Header, _ []byte) ([]RemoteModel, error) {
 	return a.results, nil
+}
+
+// allowProbeHost whitelists a fake probe host for one test: the URL only has
+// to clear the entry's SSRF gate to reach the facet check (请求不真正拨号，
+// 且避开本环境 fake-IP DNS).
+func allowProbeHost(t *testing.T) {
+	t.Helper()
+	t.Setenv("SSRF_WHITELIST", "probe.example.com")
+	secutils.ResetSSRFWhitelistForTest()
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
 }
 
 // TestListEntrySSRF verifies the probe refuses internal targets — the
